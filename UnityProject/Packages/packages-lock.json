@@ -13,6 +13,16 @@
       "source": "embedded",
       "dependencies": {}
     },
+    "com.gladekit.mcp-bridge": {
+      "version": "https://github.com/Glade-tool/glade-mcp-unity.git?path=/unity-bridge",
+      "depth": 0,
+      "source": "git",
+      "dependencies": {
+        "com.unity.inputsystem": "1.0.0",
+        "com.unity.ai.navigation": "1.0.0"
+      },
+      "hash": "ff2312ed6563c0a294b3be09fac02e1b0c88cb8b"
+    },
     "com.tuyoogame.yooasset": {
       "version": "file:YooAsset",
       "depth": 0,
@@ -62,6 +72,15 @@
       "depth": 0,
       "source": "registry",
       "dependencies": {},
+      "url": "https://packages.unity.com"
+    },
+    "com.unity.inputsystem": {
+      "version": "1.19.0",
+      "depth": 1,
+      "source": "registry",
+      "dependencies": {
+        "com.unity.modules.uielements": "1.0.0"
+      },
       "url": "https://packages.unity.com"
     },
     "com.unity.multiplayer.center": {
