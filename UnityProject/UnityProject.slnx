@@ -1,16 +1,17 @@
 ﻿<Solution>
   <Project Path="TEngine.Runtime.csproj" />
   <Project Path="Unity.InputSystem.csproj" />
-  <Project Path="YooAsset.MiniGame.csproj" />
+  <Project Path="MCPForUnity.Runtime.csproj" />
   <Project Path="YooAsset.csproj" />
+  <Project Path="YooAsset.MiniGame.csproj" />
   <Project Path="Unity.ScriptableBuildPipeline.Editor.csproj" />
   <Project Path="HybridCLR.Editor.csproj" />
   <Project Path="TEngine.Editor.csproj" />
-  <Project Path="GladeKit.Bridge.csproj" />
   <Project Path="YooAsset.Editor.csproj" />
   <Project Path="UniTask.csproj" />
   <Project Path="Unity.AI.Navigation.Editor.csproj" />
   <Project Path="Unity.VisualStudio.Editor.csproj" />
+  <Project Path="MCPForUnity.Editor.csproj" />
   <Project Path="YooAsset.RuntimeExtension.csproj" />
   <Project Path="Unity.Rider.Editor.csproj" />
   <Project Path="Unity.AI.Navigation.Editor.ConversionSystem.csproj" />
