@@ -33,6 +33,8 @@ namespace GameLogic.Stage.CellStage
         private readonly StageOutcome _outcome = new StageOutcome();
 
         private SimBridge _sim;
+        private StatusSystem _status;
+        private AreaZoneSystem _zones;
         private AbilitySystem _abilities;
         private CardTriggerBus _cards;
         private ResourceWallet _wallet;
@@ -65,6 +67,8 @@ namespace GameLogic.Stage.CellStage
         public AbilitySystem Abilities => _abilities;
         public CellDevourSystem Devour => _devour;
         public SimBridge Sim => _sim;
+        public StatusSystem Status => _status;
+        public AreaZoneSystem Zones => _zones;
 
         public void Enter(StageOutcome inherited)
         {
@@ -132,6 +136,8 @@ namespace GameLogic.Stage.CellStage
         private void RegisterModules()
         {
             _sim = _hub.Register(new SimBridge());
+            _status = _hub.Register(new StatusSystem());
+            _zones = _hub.Register(new AreaZoneSystem());
             _abilities = _hub.Register(new AbilitySystem());
             _cards = _hub.Register(new CardTriggerBus());
             _wallet = _hub.Register(new ResourceWallet());
@@ -155,13 +161,15 @@ namespace GameLogic.Stage.CellStage
 
             // 依赖注入。模块之间不互相 new，只在这里接线。
             _abilities.Bind(_sim, _stats);
+            _status.Bind(_sim);
+            _zones.Bind(_sim, _status);
             _wallet.Bind(_stats);
             _progression.Bind(_wallet);
             _cards.Bind(_deck, _abilities, _sim, _stats);
             _director.Bind(_sim, _stats, _deck);
             _timeline.Bind(_director);
             _events.Bind(_director, _timeline, _progression, _wallet);
-            _devour.Bind(_sim, _stats, _wallet, _events, _outcome.Statistics);
+            _devour.Bind(_sim, _stats, _wallet, _events, _outcome.Statistics, _zones);
             _player.Bind(_sim, _stats, _abilities, _wallet, _camera);
         }
 

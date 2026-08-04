@@ -73,11 +73,6 @@ namespace GameLogic.Spawning
                 return;
             }
 
-            // 存活数与压力占用从快照重算，避免自己维护计数导致漂移
-            RecountFromSnapshot();
-
-            Budget = ComputeBudget();
-
             _spawnAccum += dt;
             if (_spawnAccum < SpawnInterval)
             {
@@ -85,6 +80,14 @@ namespace GameLogic.Spawning
             }
             _spawnAccum = 0f;
 
+            // 重算与采购绑在同一个节拍上。
+            //
+            // 这一点很关键：RecountFromSnapshot 是 O(容量) = O(16384)，
+            // 如果每帧跑就违反了"热更层每帧工作量与敌人数量无关"的纪律
+            // （框架文档 §2.3）。绑到 0.4 秒节拍后成本降到 1/25，
+            // 而压力预算本来就只在采购时才需要，精度毫无损失。
+            RecountFromSnapshot();
+            Budget = ComputeBudget();
             Purchase();
         }
 

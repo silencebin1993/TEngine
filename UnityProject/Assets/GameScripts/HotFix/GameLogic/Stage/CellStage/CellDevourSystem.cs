@@ -24,6 +24,7 @@ namespace GameLogic.Stage.CellStage
         private ResourceWallet _wallet;
         private EcoEventScheduler _events;
         private StageStatistics _stats2;
+        private AreaZoneSystem _zones;
 
         /// <summary>连吃层数。断连后清空（除非 ComboNeverResets 规则开启）。</summary>
         public int Combo { get; private set; }
@@ -36,13 +37,14 @@ namespace GameLogic.Stage.CellStage
         private const float VolumeGrowthRatio = 0.055f;
 
         public void Bind(SimBridge sim, StatSheet stats, ResourceWallet wallet,
-            EcoEventScheduler events, StageStatistics statistics)
+            EcoEventScheduler events, StageStatistics statistics, AreaZoneSystem zones)
         {
             _sim = sim;
             _stats = stats;
             _wallet = wallet;
             _events = events;
             _stats2 = statistics;
+            _zones = zones;
         }
 
         public override void OnEnter()
@@ -131,6 +133,15 @@ namespace GameLogic.Stage.CellStage
                             * comboMul
                             * (_events?.DevourGainMul ?? 1f);
 
+            // 菌毯加成：领地分泌卡开启后，站在自己的菌毯上吞噬收益更高。
+            // 这是菌毯路线（Spec §7.5）与吞噬路线的联动兑现点。
+            if (RuleFlags.Current.Has(Ability.RuleFlag.MyceliumBoostsDevour)
+                && _zones != null
+                && _zones.PlayerInZone(AreaZoneSystem.ZoneKind.Mycelium))
+            {
+                gainMul *= 1.35f;
+            }
+
             if (spec != null)
             {
                 _wallet?.Add(ResourceKind.EvoEnergy, spec.EvoEnergy * gainMul);
@@ -175,8 +186,9 @@ namespace GameLogic.Stage.CellStage
                 return;
             }
 
+            // 改 base 而不是加修正器：体积成长是永久的，而修正器是给卡牌/状态用的。
+            // 混用会让"卡牌 +20% 体积"在每次吞噬后被重复放大。
             float old = _stats.Get(StatId.Volume);
-            float grown = old + targetVolume * VolumeGrowthRatio;
             _stats.SetBase(StatId.Volume, _stats.GetBase(StatId.Volume)
                                           + targetVolume * VolumeGrowthRatio);
 
