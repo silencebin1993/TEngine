@@ -16,10 +16,10 @@
   <Project Path="Unity.Rider.Editor.csproj" />
   <Project Path="Unity.AI.Navigation.Editor.ConversionSystem.csproj" />
   <Project Path="YooAsset.EditorExtension.csproj" />
+  <Project Path="GameLogic.csproj" />
   <Project Path="Unity.AI.Navigation.csproj" />
   <Project Path="UniTask.Linq.csproj" />
   <Project Path="Assembly-CSharp.csproj" />
-  <Project Path="GameLogic.csproj" />
   <Project Path="Unity.VSCode.Editor.csproj" />
   <Project Path="Assembly-CSharp-Editor.csproj" />
   <Project Path="Unity.AI.Navigation.Updater.csproj" />

@@ -8,5 +8,9 @@
       "Bash(msbuild:*)",
       "Bash(openspec:*)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "UnityMCP"
+  ],
+  "enableAllProjectMcpServers": true
 }
