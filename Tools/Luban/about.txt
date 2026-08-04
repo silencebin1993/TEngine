@@ -1,1 +1,3 @@
-使用luban-next, 请前往Tools/build-luban编译或者自行导入
+使用 luban-next。请用 Tools/build-luban 编译，或自行导入预编译包。
+当前本机已用 focus-creative-games/luban 源码编译到此目录。
+若遇 Windows「应用程序控制策略已阻止」：对 *.dll 执行 Unblock-File，并禁用未用到的语言插件 dll（改名为 *.disabled）。

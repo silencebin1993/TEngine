@@ -15,7 +15,7 @@ namespace GameLogic.FirstPlayable
     ///
     /// 设计约束（与 Spec §12 的差异已确认）：
     /// - 独立场景 FirstPlayableDemo.unity 运行，不接 GameApp / Procedure 链，不改主流程。
-    /// - 全部内容运行时代码生成，不依赖 YooAsset / HybridCLR / Luban，直接 Play 即可。
+    /// - 玩法数值走 Luban（ConfigSystem 读 AssetRaw/Configs/bytes），白模仍运行时生成。
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class FPGame : MonoBehaviour
@@ -50,6 +50,7 @@ namespace GameLogic.FirstPlayable
             // 编辑器失焦时默认会冻结播放循环，导致长时间挂机验证中断。
             // 只在本 demo 运行期间打开，不改 ProjectSettings。
             Application.runInBackground = true;
+            ConfigSystem.Instance.Load();
             Run = new FPRunData();
             SetupCamera();
             SetupLight();

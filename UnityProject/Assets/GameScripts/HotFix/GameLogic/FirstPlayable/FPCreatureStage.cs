@@ -9,7 +9,7 @@ namespace GameLogic.FirstPlayable
     /// </summary>
     public sealed class FPCreatureStage : IFPStage
     {
-        private const float Half = FPTuning.CreatureArenaHalfSize;
+        private static float Half => FPTuning.CreatureArenaHalfSize;
         private const float MeleeArcDot = -0.35f;   // 约 140 度正面扇形
 
         private FPGame _game;

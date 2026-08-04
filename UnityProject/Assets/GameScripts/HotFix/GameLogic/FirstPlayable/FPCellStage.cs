@@ -29,7 +29,7 @@ namespace GameLogic.FirstPlayable
             public float DamageCd;
         }
 
-        private const float Half = FPTuning.ArenaHalfSize;
+        private static float Half => FPTuning.ArenaHalfSize;
 
         private FPGame _game;
         private FPRunData _run;

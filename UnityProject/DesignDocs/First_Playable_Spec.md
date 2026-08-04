@@ -388,14 +388,42 @@ Vt >= Vp * k   -> 目标可吞噬玩家（玩家受伤）
 
 ## 11. 数据与配置
 
-首版数据对象：玩家基础属性、敌人基础属性、构筑模块配置、阶段目标配置、资源获取配置。
+**状态（2026-08-04）**：First Playable 玩法数值已 Luban 化，禁止再往 `FPTuning` / `FPModuleTable` 写死常量。
 
-建议最小配置表：`StageConfig`、`EvolutionModuleConfig`、`EnemyConfig`、`PlayerFormConfig`
+### 表清单（命名空间 `fp`）
 
-配置优先级：
-1. 先硬编码打通流程。
-2. 再把构筑模块和敌人参数抽到配置（§7 全部数值应优先抽出，它们是主要调参面）。
-3. 最后再考虑完整 Luban 表结构。
+| 表 | 用途 |
+|---|---|
+| `TbGlobal` | 吞噬公式、进化门槛、波次间隔、放电基础 |
+| `TbCellArena` | 细胞场地密度与时间轴 |
+| `TbCreatureArena` | 生物场地与时间轴 |
+| `TbPlayerForm` | Cell / Creature 基础面板 |
+| `TbFood` | A/B 型食物 |
+| `TbEnemy` / `TbEnemySkill` | 威胁与生物敌人、精英技能 |
+| `TbWave` | 波次倍率 |
+| `TbMicroChoice` | 细胞 3 选 1 |
+| `TbModule` | 6 构筑模块（含 `unlockAbilityId` / `tags` 扩展预留） |
+
+Excel 源：`TEngine/Configs/GameConfig/Datas/fp/#*.xlsx`  
+生成：`GameProto/GameConfig/` + `AssetRaw/Configs/bytes/`  
+业务门面：`FPTuning` / `FPModuleTable` → `GameLogic.Config.FPConfig` → `ConfigSystem`
+
+### 导表命令
+
+```bat
+cd TEngine
+cmd /c "set AI_MODE=1 && Configs\GameConfig\gen_code_bin_to_project_lazyload.bat"
+```
+
+建表/填数脚本：`Configs/GameConfig/scripts/setup_fp_tables.py`、`fill_fp_rows.py`（经 `luban_helper.py`）。
+
+扩展约定：加内容优先 **加行**；机制卡 / 状态 Tag 等 Vertical Slice 再开 `TbAbility` / `TbStatusEffect`，模块与敌人已预留引用字段。
+
+### 历史优先级（已完成）
+
+1. ~~先硬编码打通流程~~ ✅
+2. ~~把构筑模块和敌人参数抽到配置~~ ✅（§7 全量 + Arena 密度）
+3. ~~完整 Luban 表结构~~ ✅（本轮落地）
 
 ## 12. 依赖与技术对接
 
@@ -412,8 +440,8 @@ Vt >= Vp * k   -> 目标可吞噬玩家（玩家受伤）
 | 代码位置 | `Assets/GameScripts/HotFix/GameLogic/FirstPlayable/`（全热更） |
 | 场景 | 首版全部在 `main.unity` 内，白模用引擎原始几何体，流程稳定后再拆场景 |
 
-FP 不依赖 Luban 导表、不依赖 HybridCLR 出包、不依赖 YooAsset 正式分包
-（Editor 模拟模式即可），因此可以立即开工。
+FP 不依赖 HybridCLR 出包、不依赖 YooAsset 正式分包（Editor 模拟 / AssetRaw 磁盘回退即可读配置），
+因此可以立即开工。玩法数值已接入 Luban。
 
 ## 13. 明确不做
 

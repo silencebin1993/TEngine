@@ -330,11 +330,14 @@ HUD 必须显示：
 
 不要先做：
 - 正式美术。
-- 完整配置表。
+- Card_Pool 机制卡 / 状态 Tag / 联动（FP 表已预留字段，VS 再扩表）。
 - 文明 RTS。
 - 多场景资源加载。
 - 复杂 AI。
 - 完整存档。
+
+配置说明：FP 数值已走 Luban（`Configs/GameConfig/Datas/fp/`）。调参改 Excel 后跑
+`gen_code_bin_to_project_lazyload.bat`；扩展优先加行，勿再往 `FPTuning` 写死常量。
 
 ---
 
