@@ -27,9 +27,12 @@ namespace GameLogic.FirstPlayable
             public float Volume;
             public Vector3 Vel;
             public float DamageCd;
+            public Nebukam.ORCA.Agent Orca;
+            public int FlankSign = 1;
         }
 
         private static float Half => FPTuning.ArenaHalfSize;
+        private static int s_threatSerial;
 
         private FPGame _game;
         private FPRunData _run;
@@ -39,9 +42,13 @@ namespace GameLogic.FirstPlayable
         private float _hp;
         private Vector3 _vel;
 
+        private FPOrcaSim _orca;
+        private Nebukam.ORCA.Agent _playerAgent;
+
         private readonly List<Food> _foods = new List<Food>();
         private readonly List<Threat> _threats = new List<Threat>();
         private readonly List<Transform> _hazards = new List<Transform>();
+        private readonly List<Vector3> _hazardCenters = new List<Vector3>();
 
         private float _time;
         private int _waveSpawned;
@@ -67,14 +74,22 @@ namespace GameLogic.FirstPlayable
 
             _volume = FPTuning.CellPlayerStartVolume;
             _hp = FPTuning.CellPlayerHp;
-            GameObject player = FPFactory.Sphere("CellPlayer", FPFactory.ColPlayer,
-                new Vector3(0f, 0.5f, 0f), _volume, _root.transform);
-            _playerT = player.transform;
 
+            _hazardCenters.Clear();
             for (int i = 0; i < FPTuning.HazardCount; i++)
             {
                 SpawnHazard();
             }
+
+            _orca = new FPOrcaSim();
+            _orca.Begin(Half, _hazardCenters, FPTuning.HazardRadius);
+
+            GameObject player = FPFactory.Sphere("CellPlayer", FPFactory.ColPlayer,
+                new Vector3(0f, 0.5f, 0f), _volume, _root.transform);
+            _playerT = player.transform;
+            _playerAgent = _orca.AddAgent(_playerT.position, PlayerRadius,
+                FPTuning.CellPlayerBaseSpeed * 1.5f);
+
             for (int i = 0; i < FPTuning.FoodConcurrent; i++)
             {
                 SpawnFood();
@@ -103,8 +118,9 @@ namespace GameLogic.FirstPlayable
             _time += dt;
             _run.CellSeconds = _time;
 
-            UpdatePlayer(dt);
-            UpdateThreats(dt);
+            UpdatePlayerDesire(dt);
+            UpdateThreatDesires(dt);
+            StepOrca(dt);
             CheckFood();
             CheckThreatContact(dt);
             CheckHazard(dt);
@@ -134,7 +150,8 @@ namespace GameLogic.FirstPlayable
 
         private float PlayerRadius => _volume * 0.5f;
 
-        private void UpdatePlayer(float dt)
+        /// <summary>只算惯性期望速度；位移交给 ORCA。</summary>
+        private void UpdatePlayerDesire(float dt)
         {
             Vector3 dir = Vector3.zero;
             if (Input.GetKey(KeyCode.W)) dir.z += 1f;
@@ -160,10 +177,79 @@ namespace GameLogic.FirstPlayable
             float rate = dir.sqrMagnitude > 0.0001f ? FPTuning.CellAccel : FPTuning.CellDrag;
             _vel = Vector3.MoveTowards(_vel, want, rate * dt);
 
-            Vector3 pos = _playerT.position + _vel * dt;
-            pos.y = PlayerRadius;
-            _playerT.position = FPFactory.ClampToArena(pos, Half, PlayerRadius);
+            if (_playerAgent != null)
+            {
+                float pr = PlayerRadius;
+                _playerAgent.radius = pr;
+                _playerAgent.radiusObst = pr * 1.05f;
+                _playerAgent.maxSpeed = Mathf.Max(0.1f, speed);
+                _orca.SetPrefVelocity(_playerAgent, _vel);
+            }
+
             _playerT.localScale = Vector3.one * _volume;
+        }
+
+        private void UpdateThreatDesires(float dt)
+        {
+            for (int i = 0; i < _threats.Count; i++)
+            {
+                Threat t = _threats[i];
+                if (t.DamageCd > 0f)
+                {
+                    t.DamageCd -= dt;
+                }
+
+                Vector3 to = _playerT.position - t.T.position;
+                to.y = 0f;
+                if (to.sqrMagnitude < 0.0001f || t.Orca == null)
+                {
+                    continue;
+                }
+
+                bool flee = _volume >= t.Volume * FPTuning.EngulfRatio;
+                Vector3 chase = to.normalized;
+                Vector3 tangent = new Vector3(-chase.z, 0f, chase.x) * t.FlankSign;
+                Vector3 dir = flee ? -chase : (chase + tangent * 0.3f).normalized;
+                Vector3 pref = dir * FPTuning.ThreatSpeed;
+                t.Orca.maxSpeed = FPTuning.ThreatSpeed;
+                t.Orca.prefVelocity = new Unity.Mathematics.float3(pref.x, 0f, pref.z);
+            }
+        }
+
+        private void StepOrca(float dt)
+        {
+            if (_orca == null || !_orca.Alive)
+            {
+                return;
+            }
+
+            _orca.Run(dt);
+
+            if (_playerAgent != null)
+            {
+                float pr = PlayerRadius;
+                Vector3 pos = _orca.GetPos(_playerAgent);
+                pos = FPFactory.ClampToArena(pos, Half, pr);
+                pos.y = pr;
+                _playerT.position = pos;
+                _orca.SetPos(_playerAgent, pos);
+                _vel = _orca.GetVelocity(_playerAgent);
+            }
+
+            for (int i = 0; i < _threats.Count; i++)
+            {
+                Threat t = _threats[i];
+                if (t.Orca == null)
+                {
+                    continue;
+                }
+                float tr = t.Volume * 0.5f;
+                Vector3 pos = _orca.GetPos(t.Orca);
+                pos = FPFactory.ClampToArena(pos, Half, tr);
+                pos.y = tr;
+                t.T.position = pos;
+                _orca.SetPos(t.Orca, pos);
+            }
         }
 
         private void CheckFood()
@@ -216,33 +302,6 @@ namespace GameLogic.FirstPlayable
                 _volume + targetVolume * FPTuning.VolumeGainRatio);
         }
 
-        private void UpdateThreats(float dt)
-        {
-            for (int i = 0; i < _threats.Count; i++)
-            {
-                Threat t = _threats[i];
-                if (t.DamageCd > 0f)
-                {
-                    t.DamageCd -= dt;
-                }
-
-                Vector3 to = _playerT.position - t.T.position;
-                to.y = 0f;
-                if (to.sqrMagnitude < 0.0001f)
-                {
-                    continue;
-                }
-
-                // 玩家已能吞噬它时改为逃离，避免后期威胁沦为免费食物
-                bool flee = _volume >= t.Volume * FPTuning.EngulfRatio;
-                Vector3 dir = (flee ? -to : to).normalized;
-
-                Vector3 pos = t.T.position + dir * (FPTuning.ThreatSpeed * dt);
-                pos.y = t.Volume * 0.5f;
-                t.T.position = FPFactory.ClampToArena(pos, Half, t.Volume * 0.5f);
-            }
-        }
-
         private void CheckThreatContact(float dt)
         {
             float pr = PlayerRadius;
@@ -264,8 +323,7 @@ namespace GameLogic.FirstPlayable
                     Eat(FPTuning.ThreatEvoPoint, FPTuning.ThreatBiomass, t.Volume);
                     _run.ThreatEaten++;
                     ShowHint($"吞噬威胁：+{FPTuning.ThreatEvoPoint} 进化点");
-                    Object.Destroy(t.Go);
-                    _threats.RemoveAt(i);
+                    RemoveThreatAt(i);
                     continue;
                 }
 
@@ -276,12 +334,22 @@ namespace GameLogic.FirstPlayable
                     ShowHint($"被威胁撞击：-{FPTuning.ThreatContactDamage:F0} 生命值");
                 }
 
-                // 中间地带与受伤后都做弹开处理
+                // 中间地带与受伤后都做弹开，并同步 ORCA 位置
                 Vector3 push = d.sqrMagnitude > 0.0001f ? d.normalized : Vector3.right;
                 _vel = push * Mathf.Max(2.5f, _vel.magnitude * 0.4f);
+                if (_playerAgent != null)
+                {
+                    _orca.SetPrefVelocity(_playerAgent, _vel);
+                }
+
                 Vector3 back = t.T.position - push * 0.35f;
+                back = FPFactory.ClampToArena(back, Half, tr);
                 back.y = tr;
-                t.T.position = FPFactory.ClampToArena(back, Half, tr);
+                t.T.position = back;
+                if (t.Orca != null)
+                {
+                    _orca.SetPos(t.Orca, back);
+                }
             }
         }
 
@@ -375,7 +443,34 @@ namespace GameLogic.FirstPlayable
 
             GameObject go = FPFactory.Primitive(PrimitiveType.Cube, "Threat",
                 FPFactory.ColThreat, pos, vol, _root.transform);
-            _threats.Add(new Threat { Go = go, T = go.transform, Volume = vol });
+            Threat t = new Threat
+            {
+                Go = go,
+                T = go.transform,
+                Volume = vol,
+                FlankSign = (s_threatSerial++ & 1) == 0 ? 1 : -1,
+            };
+            if (_orca != null && _orca.Alive)
+            {
+                float r = vol * 0.5f;
+                t.Orca = _orca.AddAgent(pos, r, FPTuning.ThreatSpeed);
+            }
+            _threats.Add(t);
+        }
+
+        private void RemoveThreatAt(int index)
+        {
+            Threat t = _threats[index];
+            if (_orca != null && t.Orca != null)
+            {
+                _orca.RemoveAgent(t.Orca);
+                t.Orca = null;
+            }
+            if (t.Go != null)
+            {
+                Object.Destroy(t.Go);
+            }
+            _threats.RemoveAt(index);
         }
 
         private void SpawnHazard()
@@ -387,6 +482,7 @@ namespace GameLogic.FirstPlayable
             go.transform.localScale = new Vector3(FPTuning.HazardRadius * 2f, 0.03f,
                 FPTuning.HazardRadius * 2f);
             _hazards.Add(go.transform);
+            _hazardCenters.Add(new Vector3(pos.x, 0f, pos.z));
         }
 
         /// <summary>Spec §4.1 胜负条件 + §9 失败规则。</summary>
@@ -538,9 +634,16 @@ namespace GameLogic.FirstPlayable
             _hud = null;
             _microView?.Destroy();
             _microView = null;
+            for (int i = _threats.Count - 1; i >= 0; i--)
+            {
+                RemoveThreatAt(i);
+            }
+            _playerAgent = null;
+            _orca?.Dispose();
+            _orca = null;
             _foods.Clear();
-            _threats.Clear();
             _hazards.Clear();
+            _hazardCenters.Clear();
             if (_root != null)
             {
                 Object.Destroy(_root);

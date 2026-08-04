@@ -29,6 +29,9 @@ namespace GameLogic.FirstPlayable
         private float _zapCd;
         private const float PlayerRadius = 0.5f;
 
+        private FPOrcaSim _orca;
+        private Nebukam.ORCA.Agent _playerAgent;
+
         private readonly List<FPEnemy> _enemies = new List<FPEnemy>();
         private readonly List<GameObject> _fx = new List<GameObject>();
         private readonly List<float> _fxLife = new List<float>();
@@ -67,6 +70,11 @@ namespace GameLogic.FirstPlayable
             nose.transform.localScale = new Vector3(0.22f, 0.22f, 0.5f);
             nose.transform.localPosition = new Vector3(0f, 0.15f, 0.62f);
 
+            _orca = new FPOrcaSim();
+            _orca.Begin(Half);
+            _playerAgent = _orca.AddAgent(_playerT.position, PlayerRadius, _stats.Speed * FPTuning.DashSpeedMultiplier);
+            _playerAgent.timeHorizon = 0.9f;
+
             for (int i = 0; i < 3; i++)
             {
                 SpawnEnemy(i % 2 == 0 ? FPEnemyKind.Herbivore : FPEnemyKind.Predator);
@@ -91,8 +99,9 @@ namespace GameLogic.FirstPlayable
             _time += dt;
 
             UpdateTimers(dt);
-            UpdatePlayer(dt);
-            UpdateEnemies(dt);
+            UpdatePlayerDesire(dt);
+            UpdateEnemyDesires(dt);
+            StepOrca(dt);
             CheckContactDamage(dt);
             UpdateSpawning(dt);
             UpdateFx(dt);
@@ -134,7 +143,8 @@ namespace GameLogic.FirstPlayable
             }
         }
 
-        private void UpdatePlayer(float dt)
+        /// <summary>只算期望速度；实际位移由 ORCA 积分后 Apply。</summary>
+        private void UpdatePlayerDesire(float dt)
         {
             Vector3 dir = Vector3.zero;
             if (Input.GetKey(KeyCode.W)) dir.z += 1f;
@@ -167,9 +177,54 @@ namespace GameLogic.FirstPlayable
                 _vel = Vector3.MoveTowards(_vel, want, 26f * dt);
             }
 
-            Vector3 pos = _playerT.position + _vel * dt;
-            pos.y = PlayerRadius + 0.15f;
-            _playerT.position = FPFactory.ClampToArena(pos, Half, PlayerRadius);
+            if (_playerAgent != null)
+            {
+                float cap = _dashTimer > 0f
+                    ? _stats.Speed * FPTuning.DashSpeedMultiplier
+                    : _stats.Speed;
+                _playerAgent.maxSpeed = Mathf.Max(0.1f, cap);
+                _playerAgent.radius = PlayerRadius;
+                _playerAgent.radiusObst = PlayerRadius * 1.05f;
+                _orca.SetPrefVelocity(_playerAgent, _vel);
+            }
+        }
+
+        private void UpdateEnemyDesires(float dt)
+        {
+            Vector3 playerPos = _playerT.position;
+            for (int i = 0; i < _enemies.Count; i++)
+            {
+                _enemies[i].TickDesire(dt, playerPos);
+            }
+        }
+
+        private void StepOrca(float dt)
+        {
+            if (_orca == null || !_orca.Alive)
+            {
+                return;
+            }
+
+            _orca.Run(dt);
+
+            if (_playerAgent != null)
+            {
+                Vector3 pos = _orca.GetPos(_playerAgent);
+                pos = FPFactory.ClampToArena(pos, Half, PlayerRadius);
+                pos.y = PlayerRadius + 0.15f;
+                _playerT.position = pos;
+                _orca.SetPos(_playerAgent, pos);
+                _vel = _orca.GetVelocity(_playerAgent);
+            }
+
+            for (int i = 0; i < _enemies.Count; i++)
+            {
+                FPEnemy e = _enemies[i];
+                e.ApplyOrcaPos();
+                Vector3 clamped = FPFactory.ClampToArena(e.T.position, Half, e.Radius);
+                e.T.position = clamped;
+                e.SyncOrcaPosFromTransform();
+            }
         }
 
         private void TryDash(Vector3 dir)
@@ -265,8 +320,7 @@ namespace GameLogic.FirstPlayable
             }
 
             bool isElite = e.Kind == FPEnemyKind.Elite;
-            e.Destroy();
-            _enemies.RemoveAt(index);
+            RemoveEnemyAt(index);
 
             if (isElite)
             {
@@ -327,14 +381,6 @@ namespace GameLogic.FirstPlayable
             }
         }
 
-        private void UpdateEnemies(float dt)
-        {
-            for (int i = 0; i < _enemies.Count; i++)
-            {
-                _enemies[i].Tick(dt, _playerT.position, Half);
-            }
-        }
-
         private void CheckContactDamage(float dt)
         {
             for (int i = 0; i < _enemies.Count; i++)
@@ -361,9 +407,13 @@ namespace GameLogic.FirstPlayable
                     ? $"被精英冲撞：-{dmg:0} 生命值"
                     : $"接触伤害：-{dmg:0} 生命值");
 
-                // 推开，避免持续重叠
+                // 推开期望速度；下一帧 ORCA 用它做 prefVelocity
                 Vector3 push = d.sqrMagnitude > 0.0001f ? d.normalized : Vector3.right;
                 _vel = push * Mathf.Max(3f, _vel.magnitude * 0.5f);
+                if (_playerAgent != null)
+                {
+                    _orca.SetPrefVelocity(_playerAgent, _vel);
+                }
             }
         }
 
@@ -407,7 +457,30 @@ namespace GameLogic.FirstPlayable
         {
             Vector3 pos = FPFactory.RandomPointAwayFrom(Half,
                 _playerT != null ? _playerT.position : Vector3.zero, 9f);
-            _enemies.Add(FPEnemy.Spawn(kind, pos, _root.transform, _stats.AggroMul));
+            FPEnemy e = FPEnemy.Spawn(kind, pos, _root.transform, _stats.AggroMul);
+            RegisterEnemy(e);
+        }
+
+        private void RegisterEnemy(FPEnemy e)
+        {
+            if (_orca != null && _orca.Alive)
+            {
+                Nebukam.ORCA.Agent agent = _orca.AddAgent(e.T.position, e.Radius,
+                    e.Speed * FPEnemy.ChargeSpeedMultiplier);
+                e.BindOrca(agent);
+            }
+            _enemies.Add(e);
+        }
+
+        private void RemoveEnemyAt(int index)
+        {
+            FPEnemy e = _enemies[index];
+            if (_orca != null && e.Orca != null)
+            {
+                _orca.RemoveAgent(e.Orca);
+            }
+            e.Destroy();
+            _enemies.RemoveAt(index);
         }
 
         /// <summary>
@@ -419,16 +492,15 @@ namespace GameLogic.FirstPlayable
             _eliteSpawned = true;
             for (int i = _enemies.Count - 1; i >= 0; i--)
             {
-                _enemies[i].Destroy();
+                RemoveEnemyAt(i);
             }
-            _enemies.Clear();
 
             _hp = _stats.MaxHp;
             _stamina = _stats.StaminaMax;
 
             Vector3 pos = FPFactory.RandomPointAwayFrom(Half, _playerT.position, 12f, 4f);
             _elite = FPEnemy.Spawn(FPEnemyKind.Elite, pos, _root.transform, _stats.AggroMul);
-            _enemies.Add(_elite);
+            RegisterEnemy(_elite);
             ShowHint("精英「顶级掠食者」出现，生命值已回满");
         }
 
@@ -561,12 +633,14 @@ namespace GameLogic.FirstPlayable
         {
             _hud?.Destroy();
             _hud = null;
-            for (int i = 0; i < _enemies.Count; i++)
+            for (int i = _enemies.Count - 1; i >= 0; i--)
             {
-                _enemies[i].Destroy();
+                RemoveEnemyAt(i);
             }
-            _enemies.Clear();
             _elite = null;
+            _playerAgent = null;
+            _orca?.Dispose();
+            _orca = null;
             _fx.Clear();
             _fxLife.Clear();
             if (_root != null)

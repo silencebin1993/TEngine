@@ -1,5 +1,7 @@
 # 文明织造 First Playable 开发任务拆解
 
+> 状态说明：本文档为旧版“三阶段 First Playable”任务拆解。当前 Demo 方向已调整为“只做细胞阶段、一小时局内 roguelite、不进入器官/组织或生物阶段”。新设计规格见 `Cell_Stage_Demo_Spec.md`。后续任务拆解应基于新规格重写。
+
 ## 1. 当前工程状态
 
 当前 Unity 项目已有：

@@ -1,25 +1,32 @@
+using Nebukam.ORCA;
 using UnityEngine;
 
 namespace GameLogic.FirstPlayable
 {
     public enum FPEnemyKind
     {
-        /// <summary>草食虫：巡逻，进入察觉范围后靠近。</summary>
+        /// <summary>草食虫：巡逻，进入察觉范围后靠近并保持停距。</summary>
         Herbivore,
-        /// <summary>掠食虫：追踪。</summary>
+        /// <summary>掠食虫：侧翼追踪。</summary>
         Predator,
         /// <summary>精英「顶级掠食者」：追踪 + 冲撞技能。</summary>
         Elite,
     }
 
     /// <summary>
-    /// 生物阶段敌人。Spec §7.2 数值 / §4.3 行为。判定同样走距离计算，不用物理。
+    /// 生物阶段敌人。Spec §7.2 数值 / §4.3 行为。
+    /// 位移由 ORCA 积分；本类只输出 prefVelocity 并写回 Transform。
     /// </summary>
     public sealed class FPEnemy
     {
         public const float TelegraphTime = 0.9f;
         public const float ChargeSpeedMultiplier = 3.4f;
         public const float ChargeDuration = 0.55f;
+        private const float PlayerRadiusApprox = 0.5f;
+        private const float HerbivoreStopPadding = 0.4f;
+        private const float FlankBlend = 0.35f;
+
+        private static int s_spawnSerial;
 
         public FPEnemyKind Kind;
         public GameObject Go;
@@ -30,10 +37,11 @@ namespace GameLogic.FirstPlayable
         public float ContactDamage;
         public float Radius;
         public float AggroRange;
+        public Agent Orca;
+        public int FlankSign = 1;
 
         public float DamageCd;
         public float HitFlash;
-        private float _baseScaleY;
         private Vector3 _baseScale;
 
         private Vector3 _wanderDir;
@@ -94,6 +102,7 @@ namespace GameLogic.FirstPlayable
                 AggroRange = FPTuning.EnemyBaseAggroRange * aggroMul,
                 _baseScale = Vector3.one * scale,
                 _wanderDir = Random.insideUnitSphere,
+                FlankSign = (s_spawnSerial++ & 1) == 0 ? 1 : -1,
             };
             e._wanderDir.y = 0f;
             e._wanderDir = e._wanderDir.sqrMagnitude < 0.01f ? Vector3.forward : e._wanderDir.normalized;
@@ -102,14 +111,31 @@ namespace GameLogic.FirstPlayable
             return e;
         }
 
-        private void PlaceY()
+        public void BindOrca(Agent agent)
         {
-            Vector3 p = T.position;
-            p.y = Kind == FPEnemyKind.Elite ? Radius : Radius + 0.15f;
-            T.position = p;
+            Orca = agent;
+            if (Orca == null)
+            {
+                return;
+            }
+            Orca.radius = Radius;
+            Orca.radiusObst = Radius * 1.05f;
+            Orca.maxSpeed = Speed;
+            SyncOrcaPosFromTransform();
         }
 
-        public void Tick(float dt, Vector3 playerPos, float arenaHalf)
+        public void SyncOrcaPosFromTransform()
+        {
+            if (Orca == null || T == null)
+            {
+                return;
+            }
+            Vector3 p = T.position;
+            Orca.pos = new Unity.Mathematics.float3(p.x, 0f, p.z);
+        }
+
+        /// <summary>更新 AI 计时与期望速度，不直接改 Transform。</summary>
+        public void TickDesire(float dt, Vector3 playerPos)
         {
             if (DamageCd > 0f)
             {
@@ -120,10 +146,29 @@ namespace GameLogic.FirstPlayable
 
             if (Kind == FPEnemyKind.Elite)
             {
-                TickElite(dt, playerPos, arenaHalf);
+                TickEliteDesire(dt, playerPos);
                 return;
             }
-            TickNormal(dt, playerPos, arenaHalf);
+            TickNormalDesire(dt, playerPos);
+        }
+
+        /// <summary>从 ORCA agent 写回地面位置。</summary>
+        public void ApplyOrcaPos()
+        {
+            if (Orca == null || T == null)
+            {
+                return;
+            }
+            Unity.Mathematics.float3 p = Orca.pos;
+            T.position = new Vector3(p.x, 0f, p.z);
+            PlaceY();
+        }
+
+        private void PlaceY()
+        {
+            Vector3 p = T.position;
+            p.y = Kind == FPEnemyKind.Elite ? Radius : Radius + 0.15f;
+            T.position = p;
         }
 
         private void UpdateHitFlash(float dt)
@@ -138,16 +183,44 @@ namespace GameLogic.FirstPlayable
             T.localScale = _baseScale * k;
         }
 
-        private void TickNormal(float dt, Vector3 playerPos, float arenaHalf)
+        private void TickNormalDesire(float dt, Vector3 playerPos)
         {
             Vector3 to = playerPos - T.position;
             to.y = 0f;
             float dist = to.magnitude;
 
-            Vector3 dir;
+            Vector3 pref;
+            float maxSpeed = Speed;
+
             if (dist <= AggroRange && dist > 0.01f)
             {
-                dir = to / dist;
+                Vector3 chase = to / dist;
+                if (Kind == FPEnemyKind.Herbivore)
+                {
+                    float stopDist = Radius + PlayerRadiusApprox + HerbivoreStopPadding;
+                    if (dist <= stopDist)
+                    {
+                        // 停距内绕行散开，避免叠在玩家身上
+                        Vector3 tangent = new Vector3(-chase.z, 0f, chase.x) * FlankSign;
+                        pref = tangent * (Speed * 0.55f);
+                    }
+                    else
+                    {
+                        Vector3 tangent = new Vector3(-chase.z, 0f, chase.x) * FlankSign;
+                        pref = (chase + tangent * 0.25f).normalized * Speed;
+                    }
+                }
+                else
+                {
+                    // 掠食：追击 + 侧翼偏置，避免全员同向
+                    Vector3 tangent = new Vector3(-chase.z, 0f, chase.x) * FlankSign;
+                    pref = (chase + tangent * FlankBlend).normalized * Speed;
+                }
+
+                if (pref.sqrMagnitude > 0.0001f)
+                {
+                    T.forward = pref.normalized;
+                }
             }
             else
             {
@@ -159,13 +232,15 @@ namespace GameLogic.FirstPlayable
                     r.y = 0f;
                     _wanderDir = r.sqrMagnitude < 0.01f ? Vector3.forward : r.normalized;
                 }
-                dir = _wanderDir;
+                pref = _wanderDir * (Speed * 0.65f);
+                maxSpeed = Speed * 0.65f;
             }
 
-            Move(dir, Speed, dt, arenaHalf);
+            WritePref(pref, maxSpeed, FPOrcaSim.DefaultNeighborDist, FPOrcaSim.DefaultMaxNeighbors,
+                FPOrcaSim.DefaultTimeHorizon);
         }
 
-        private void TickElite(float dt, Vector3 playerPos, float arenaHalf)
+        private void TickEliteDesire(float dt, Vector3 playerPos)
         {
             Vector3 to = playerPos - T.position;
             to.y = 0f;
@@ -173,7 +248,9 @@ namespace GameLogic.FirstPlayable
             if (_charging > 0f)
             {
                 _charging -= dt;
-                Move(_chargeDir, Speed * ChargeSpeedMultiplier, dt, arenaHalf);
+                // 冲撞：提高限速、缩短邻居视野，保留“硬冲”手感
+                WritePref(_chargeDir * (Speed * ChargeSpeedMultiplier),
+                    Speed * ChargeSpeedMultiplier, 3.5f, 4, 0.35f);
                 return;
             }
 
@@ -184,7 +261,6 @@ namespace GameLogic.FirstPlayable
                 {
                     T.forward = to.normalized;
                 }
-                // 蓄力期间放大，作为冲撞预警
                 T.localScale = _baseScale * 1.25f;
                 if (_telegraph <= 0f)
                 {
@@ -192,6 +268,8 @@ namespace GameLogic.FirstPlayable
                     _chargeDir = to.sqrMagnitude > 0.0001f ? to.normalized : T.forward;
                     T.localScale = _baseScale;
                 }
+                WritePref(Vector3.zero, Speed, FPOrcaSim.DefaultNeighborDist, FPOrcaSim.DefaultMaxNeighbors,
+                    FPOrcaSim.DefaultTimeHorizon);
                 return;
             }
 
@@ -200,18 +278,30 @@ namespace GameLogic.FirstPlayable
             {
                 _chargeCd = FPTuning.EliteChargeCooldown;
                 _telegraph = TelegraphTime;
+                WritePref(Vector3.zero, Speed, FPOrcaSim.DefaultNeighborDist, FPOrcaSim.DefaultMaxNeighbors,
+                    FPOrcaSim.DefaultTimeHorizon);
                 return;
             }
 
             Vector3 dir = to.sqrMagnitude > 0.0001f ? to.normalized : Vector3.forward;
-            Move(dir, Speed, dt, arenaHalf);
+            Vector3 tangent = new Vector3(-dir.z, 0f, dir.x) * FlankSign;
+            Vector3 pref = (dir + tangent * 0.2f).normalized * Speed;
+            T.forward = dir;
+            WritePref(pref, Speed, FPOrcaSim.DefaultNeighborDist, FPOrcaSim.DefaultMaxNeighbors,
+                FPOrcaSim.DefaultTimeHorizon);
         }
 
-        private void Move(Vector3 dir, float speed, float dt, float arenaHalf)
+        private void WritePref(Vector3 pref, float maxSpeed, float neighborDist, int maxNeighbors, float timeHorizon)
         {
-            Vector3 pos = T.position + dir * (speed * dt);
-            T.position = FPFactory.ClampToArena(pos, arenaHalf, Radius);
-            PlaceY();
+            if (Orca == null)
+            {
+                return;
+            }
+            Orca.maxSpeed = Mathf.Max(0.1f, maxSpeed);
+            Orca.neighborDist = neighborDist;
+            Orca.maxNeighbors = maxNeighbors;
+            Orca.timeHorizon = timeHorizon;
+            Orca.prefVelocity = new Unity.Mathematics.float3(pref.x, 0f, pref.z);
         }
 
         /// <summary>返回本次是否击杀。</summary>
@@ -228,6 +318,7 @@ namespace GameLogic.FirstPlayable
 
         public void Destroy()
         {
+            Orca = null;
             if (Go != null)
             {
                 Object.Destroy(Go);

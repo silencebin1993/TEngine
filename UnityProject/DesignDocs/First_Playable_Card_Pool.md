@@ -1,5 +1,7 @@
 # 文明织造 First Playable 卡池设计说明
 
+> 状态说明：本文档是旧版三阶段 FP 的卡池扩展草案。当前 Demo 已改为细胞阶段一小时 roguelite，新卡池方向以 `Cell_Stage_Demo_Spec.md` 为准。本文可作为部分机制灵感来源。
+
 > 创建日期：2026-08-04
 > 
 > 本文档是 `First_Playable_Spec.md` 的配套细化文档，用于说明 First Playable 阶段的卡牌/模块设计方向、首发候选卡池、每张卡的详细机制意图，以及后续筛选原则。
