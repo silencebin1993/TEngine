@@ -21,15 +21,42 @@ namespace GameLogic.Ability.Executors
             // 层数线性叠加：叠 3 层的卡就是 3 倍效果，和 EffectScaling.Value 保持一致口径
             float value = spec.Value * math.max(1, ctx.Stack);
 
-            ctx.Stats.Add(new StatModifier(spec.Stat, spec.Op, value, ctx.SourceId));
+            // 限时修正必须用**独立的来源 id**，不能直接用 ctx.SourceId。
+            //
+            // 原因：CardTriggerBus.ApplyPassive 用卡牌 id 作为永久 StatMods 的
+            // SourceId。若限时修正也用同一个 id，到期时 RemoveBySource(卡牌id)
+            // 会把这张卡的永久属性加成一起撤销——一张既有永久加成又有限时 buff
+            // 的卡，触发一次反而变弱。用负数区间隔开两者。
+            bool timed = spec.Duration > 0f;
+            int sourceId = timed ? TimedSourceId(ctx.SourceId) : ctx.SourceId;
 
-            // TODO(StatusSystem): Duration > 0 表示这是一条限时修正，理应在到期时
-            // 调用 StatSheet.RemoveBySource(ctx.SourceId) 撤销。StatusSystem 落地前
-            // 只能靠调用方自己记得手动移除，这里先不假装有计时器。
-            if (spec.Duration > 0f)
+            ctx.Stats.Add(new StatModifier(spec.Stat, spec.Op, value, sourceId));
+
+            // 限时修正交给 StatusSystem 到期撤销。它缺失时修正会永久留着——
+            // 这会让"吞噬回响"这类临时 buff 变成永久强化，所以显式告警而不静默。
+            if (timed)
             {
-                _ = EffectScaling.Duration(spec, in ctx);
+                float duration = EffectScaling.Duration(spec, in ctx);
+                var status = ctx.Hub?.Get<Battle.StatusSystem>();
+                if (status != null)
+                {
+                    status.RegisterTimedStat(ctx.Stats, sourceId, duration);
+                }
+                else
+                {
+                    TEngine.Log.Warning(
+                        $"[EffectModifyStat] 来源 {ctx.SourceId} 的限时属性修正无 StatusSystem 撤销，将永久生效。");
+                }
             }
+        }
+
+        /// <summary>
+        /// 把来源 id 映射到限时修正专用的负数区间，与永久修正隔开。
+        /// 用减法而不是取负，避免 id 为 0（无来源）时两者仍然撞在一起。
+        /// </summary>
+        private static int TimedSourceId(int sourceId)
+        {
+            return -1000000 - sourceId;
         }
     }
 }

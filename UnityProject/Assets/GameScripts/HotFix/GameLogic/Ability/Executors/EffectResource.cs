@@ -45,10 +45,10 @@ namespace GameLogic.Ability.Executors
                 case ResourceKind.EvoEnergy:
                 case ResourceKind.Pollution:
                 case ResourceKind.Stamina:
-                    // TODO(ResourceWallet): 这里只广播意图，真正的余额加减、上下限夹取
-                    // （比如污染度上限、体力上限）都应该在 ResourceWallet 订阅时完成。
-                    // 本执行器不维护任何余额状态，Current 先填 0，等 Wallet 落地后
-                    // 再由它把真实余额补进同一个信号或另起一个已结算的信号。
+                    // 这里只广播意图；余额加减与上下限夹取（污染度上限、体力上限）
+                    // 由 ResourceWallet 订阅本信号后完成，它落账后会再广播一次带
+                    // 真实 Current 的同类信号供 UI 消费（用 _applying 标志防自环）。
+                    // 所以此处 Current 填 0 是刻意的：本执行器不维护任何余额状态。
                     Signals.Publish(new ResourceChangedSignal
                     {
                         Kind = resource,

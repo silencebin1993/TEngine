@@ -27,10 +27,60 @@ namespace GameLogic.Battle
             public float TimeLeft;
         }
 
+        /// <summary>限时属性修正。到期时按来源 id 撤销。</summary>
+        private struct StatEntry
+        {
+            public Stats.StatSheet Sheet;
+            public int SourceId;
+            public float TimeLeft;
+        }
+
         private readonly List<Entry> _entries = new List<Entry>(256);
+        private readonly List<StatEntry> _statEntries = new List<StatEntry>(64);
         private SimBridge _sim;
 
         public int ActiveCount => _entries.Count;
+        public int TimedStatCount => _statEntries.Count;
+
+        /// <summary>
+        /// 登记一条限时属性修正。修正器本身由调用方先加进 StatSheet，
+        /// 本模块只负责到期时 RemoveBySource。
+        ///
+        /// 叠加语义（刻意如此，别当成 bug）：同来源重复触发会**各自往 StatSheet
+        /// 加一条修正器**，但这里只保留一个计时条目并把时间刷到最长。
+        /// 效果是"窗口期内连续触发可无上限叠加，然后一起消失"——
+        /// 这正是"吞噬回响"这类连吃 build 想要的手感，由时间窗口自然封顶。
+        /// 若某张卡需要每层独立计时或需要层数上限，得给每次触发分配唯一 id
+        /// 并在这里改成允许多条目。
+        /// </summary>
+        public void RegisterTimedStat(Stats.StatSheet sheet, int sourceId, float duration)
+        {
+            if (sheet == null || duration <= 0f)
+            {
+                return;
+            }
+
+            // 同来源重复触发时刷新时间，而不是堆多条——否则连续触发会导致
+            // 第一条到期就把后续所有层一起撤销
+            for (int i = 0; i < _statEntries.Count; i++)
+            {
+                if (_statEntries[i].SourceId != sourceId || _statEntries[i].Sheet != sheet)
+                {
+                    continue;
+                }
+                StatEntry e = _statEntries[i];
+                e.TimeLeft = math.max(e.TimeLeft, duration);
+                _statEntries[i] = e;
+                return;
+            }
+
+            _statEntries.Add(new StatEntry
+            {
+                Sheet = sheet,
+                SourceId = sourceId,
+                TimeLeft = duration,
+            });
+        }
 
         public void Bind(SimBridge sim)
         {
@@ -40,11 +90,13 @@ namespace GameLogic.Battle
         public override void OnEnter()
         {
             _entries.Clear();
+            _statEntries.Clear();
         }
 
         public override void OnExit()
         {
             _entries.Clear();
+            _statEntries.Clear();
         }
 
         /// <summary>
@@ -179,6 +231,8 @@ namespace GameLogic.Battle
 
         public override void OnUpdate(float dt)
         {
+            TickTimedStats(dt);
+
             if (_sim == null || !_sim.Running || _entries.Count == 0)
             {
                 return;
@@ -209,6 +263,22 @@ namespace GameLogic.Battle
 
                 _sim.ApplyStatusUnit(e.UnitIndex, e.Status, false);
                 _entries.RemoveAt(i);
+            }
+        }
+
+        private void TickTimedStats(float dt)
+        {
+            for (int i = _statEntries.Count - 1; i >= 0; i--)
+            {
+                StatEntry e = _statEntries[i];
+                e.TimeLeft -= dt;
+                if (e.TimeLeft > 0f)
+                {
+                    _statEntries[i] = e;
+                    continue;
+                }
+                e.Sheet?.RemoveBySource(e.SourceId);
+                _statEntries.RemoveAt(i);
             }
         }
     }

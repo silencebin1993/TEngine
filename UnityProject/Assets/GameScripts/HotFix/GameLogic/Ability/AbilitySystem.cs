@@ -125,8 +125,10 @@ namespace GameLogic.Ability
                 return false;
             }
 
-            // 体力检查交由 ResourceWallet 决定；此处只做冷却与存在性检查。
-            // TODO(ResourceWallet): 接入体力消耗校验与扣除。
+            // 此处只做冷却与存在性检查。体力校验与扣除在 CellPlayerController
+            // .PollAbilityInput 里做——因为体力属于资源系统，AbilitySystem 不该
+            // 知道账本。注意：这意味着绕过输入层直接调 TryCast 不会扣体力，
+            // 这是给卡牌触发施放（不消耗体力）留的口子。
 
             float cdr = _stats != null ? _stats.Get(StatId.CooldownReduction) : 0f;
             rt.Consume(EffectiveCooldown(rt.Spec, cdr));
