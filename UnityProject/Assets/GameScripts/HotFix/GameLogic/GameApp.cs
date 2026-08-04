@@ -35,7 +35,10 @@ public partial class GameApp
     
     private static void StartGameLogic()
     {
-        // GameEvent.Get<ILoginUI>().ShowLoginUI();
+        // 正式游戏框架启动。注册所有阶段与更新驱动。
+        // 详见 DesignDocs/Game_Framework_Design.md §8。
+        GameLogic.Stage.GameRoot.Startup();
+
         GameModule.UI.ShowUIAsync<BattleMainUI>();
     }
     

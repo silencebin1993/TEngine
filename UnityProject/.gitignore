@@ -99,3 +99,6 @@ package/
 yoo/
 [Aa]ssets/TEngine/AssetSetting/Resources/BuiltinFileManifest.asset
 [Aa]ssets/TEngine/AssetSetting/Resources/BuiltinFileManifest.asset.meta
+# dotnet 编译校验用的临时工程（tools/check-build.sh 生成）
+_Check.*.csproj
+Temp/bin/check/
