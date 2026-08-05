@@ -8,12 +8,15 @@ namespace GameLogic.Core
     /// <summary>
     /// 细胞阶段内置兜底内容。
     ///
-    /// 定位：cell.* Luban 表落地前，让框架能真正跑起来、能被测试。
-    /// 这里只放**结构完整的最小内容集**（8 原型 / 12 敌人 / 6 时期 / 8 事件 /
-    /// 8 技能 / 24 卡），不是最终内容量。
-    /// 完整的 135 卡 / 30 敌人 / 28 技能应落在 Luban 表里，见 Cell_Stage_Spec.md §8.3。
+    /// 定位：**兜底**。cell.* Luban 表已生成（135 卡 / 30 敌人 / 28 技能），
+    /// 正常情况下 DataRegistry.LoadFromLuban 会成功，根本走不到这里。
     ///
-    /// 表落地后本文件可整体删除——DataRegistry.LoadFromLuban 返回 true 即不会走到这里。
+    /// 保留它的唯一理由：配置表缺失或损坏时（例如打包漏了 bytes、
+    /// 或改表改坏了）不至于整局起不来，而是退化到一个能跑的最小内容集
+    /// （8 原型 / 16 敌人 / 8 技能 / 24 卡 / 6 时期 / 8 事件）并在日志里告警。
+    ///
+    /// 所以本文件的内容量刻意不与 Luban 表同步——它不是"另一份内容"，
+    /// 而是"出事时的降级形态"。真要改内容，改 tools/cell_tables/ 下的生成器。
     /// </summary>
     internal static class CellContentSeed
     {

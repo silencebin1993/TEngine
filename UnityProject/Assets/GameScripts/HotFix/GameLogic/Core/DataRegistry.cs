@@ -77,10 +77,7 @@ namespace GameLogic.Core
         /// </summary>
         private bool LoadFromLuban()
         {
-            // TODO(Luban): cell.Card / cell.Ability / cell.Enemy / cell.Phase / cell.EcoEvent
-            //   / cell.BehaviorArchetype 表生成后，在此把 GameConfig.cell.* 映射到本层 Spec。
-            //   映射代码集中在这一个方法里，是"配置源可替换"的关键。
-            return false;
+            return CellLubanLoader.TryLoad(this);
         }
 
         public void Clear()
