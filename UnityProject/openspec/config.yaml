@@ -1,0 +1,20 @@
+schema: spec-driven
+
+# Shown to AI when creating OpenSpec artifacts.
+context: |
+  Project: BinGames cell-stage (Unity 6000.3 + TEngine).
+  Stack: HybridCLR + YooAsset + UniTask + Luban; Built-in RP.
+  Hotfix: GameScripts/HotFix/** ; AOT: GameScripts/Main + BinGames.Sim (Burst/Jobs).
+  Specs: TEngine/UnityProject/DesignDocs/Cell_Stage_Spec.md, Game_Framework_Design.md
+  Content path: Assets/GameRes/ (Art + Raw); YooAsset packs Raw only.
+  Coding red lines: UniTask async, GameModule.XXX, LoadAssetAsync/UnloadAsset,
+    GameEvent cross-module, no sync load/Coroutine.
+  OpenSpec root lives at TEngine/UnityProject/openspec (mirrored to repo root via junction).
+
+rules:
+  proposal:
+    - Prefer Chinese for proposal/design prose when the user writes in Chinese
+    - Reference DesignDocs and tengine-dev skills; do not invent framework APIs
+  tasks:
+    - Keep hot-update vs AOT (BinGames.Sim) boundary explicit in tasks
+    - Prefer config/table changes over hardcoding gameplay values

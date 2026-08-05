@@ -22,5 +22,4 @@ Tools/GameEventSourceGenerator/GameEventAnalyzer/obj
 Tools/GameEventSourceGenerator/SourceGenerator/bin
 Tools/GameEventSourceGenerator/SourceGenerator/obj
 
-#openspec
-openspec/
+# OpenSpec 数据在 UnityProject/openspec，应入库（根 BinGames 用 junction 镜像）
