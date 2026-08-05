@@ -7,13 +7,16 @@
   <Project Path="YooAsset.MiniGame.csproj" />
   <Project Path="GameProto.csproj" />
   <Project Path="Unity.ScriptableBuildPipeline.Editor.csproj" />
+  <Project Path="Unity.Splines.Editor.csproj" />
   <Project Path="Unity.Mathematics.csproj" />
   <Project Path="HybridCLR.Editor.csproj" />
   <Project Path="TEngine.Editor.csproj" />
   <Project Path="Unity.Collections.csproj" />
+  <Project Path="Unity.Cinemachine.Editor.csproj" />
   <Project Path="Unity.Entities.UI.Editor.csproj" />
   <Project Path="BinGames.Sim.csproj" />
   <Project Path="Unity.PerformanceTesting.Editor.csproj" />
+  <Project Path="Unity.Splines.csproj" />
   <Project Path="YooAsset.Editor.csproj" />
   <Project Path="UniTask.csproj" />
   <Project Path="Unity.Burst.csproj" />
@@ -29,6 +32,7 @@
   <Project Path="Unity.Entities.CodeGen.csproj" />
   <Project Path="Unity.Rider.Editor.csproj" />
   <Project Path="Unity.InternalAPIEngineBridge.002.csproj" />
+  <Project Path="Unity.Cinemachine.csproj" />
   <Project Path="GameLogic.csproj" />
   <Project Path="Unity.AI.Navigation.Editor.ConversionSystem.csproj" />
   <Project Path="Nebukam.JobAssist.csproj" />
@@ -46,6 +50,7 @@
   <Project Path="Assembly-CSharp-Editor.csproj" />
   <Project Path="Unity.Burst.Editor.csproj" />
   <Project Path="Unity.AI.Navigation.Updater.csproj" />
+  <Project Path="Unity.Settings.Editor.csproj" />
   <Project Path="Unity.Entities.Editor.Properties.csproj" />
   <Project Path="Unity.InputSystem.DocCodeSamples.csproj" />
   <Project Path="Nebukam.Common.Editor.csproj" />

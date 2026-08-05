@@ -6,6 +6,7 @@
     "com.nebukam.job-assist": "https://github.com/Nebukam/com.nebukam.job-assist.git",
     "com.nebukam.orca": "https://github.com/Nebukam/com.nebukam.orca.git",
     "com.unity.ai.navigation": "2.0.12",
+    "com.unity.cinemachine": "3.1.7",
     "com.unity.entities": "1.4.8",
     "com.unity.ide.rider": "3.0.40",
     "com.unity.ide.visualstudio": "2.0.26",
