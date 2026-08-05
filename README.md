@@ -350,12 +350,13 @@ sequenceDiagram
 
 ```
 Assets/
-├── AssetArt/              # 美术资源目录
-│   └── Atlas/            # 自动生成图集目录
-├── AssetRaw/             # 热更资源目录
+├── AssetArt/              # 美术源（独立 git submodule / BinGames-Art，不进 YooAsset）
+│   └── Source/           # Characters / UI / VFX / Audios …
+├── AssetRaw/             # 热更资源目录（YooAsset 唯一收集根）
 │   ├── UIRaw/            # UI 图片目录
-│   │   ├── Atlas/        # 需要自动生成图集的 UI 素材目录
-│   │   └── Raw/          # 不需要自动生成图集的 UI 素材目录
+│   │   ├── Atlas/        # 需要自动生成图集的 UI 散图
+│   │   ├── Raw/          # 不进图集的 UI 散图
+│   │   └── SpriteAtlas/  # AtlasMaker 输出的 .spriteatlasv2（已收集）
 │   ├── Audios/           # 音频资源
 │   ├── Effects/          # 特效资源
 │   └── Scenes/           # 场景资源

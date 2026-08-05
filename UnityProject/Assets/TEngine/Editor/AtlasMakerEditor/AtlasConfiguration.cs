@@ -8,8 +8,8 @@
     public class AtlasConfiguration : EditorScriptableSingleton<AtlasConfiguration>
     {
         [Header("目录设置")]
-        [Tooltip("生成的图集输出目录")]
-        public string outputAtlasDir = "Assets/AssetArt/Atlas";
+        [Tooltip("生成的图集输出目录（必须在 AssetRaw 下，才能进 YooAsset 热更包）")]
+        public string outputAtlasDir = "Assets/AssetRaw/UIRaw/SpriteAtlas";
 
         [Tooltip("需要生成图集的UI根目录")]
         // public string sourceAtlasRoot = "Assets/AssetRaw/UIRaw/Atlas";

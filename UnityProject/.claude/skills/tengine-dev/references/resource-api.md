@@ -4,11 +4,14 @@
 
 ## 核心原则
 
-1. **禁止 `Resources.Load()`**：所有资源通过 YooAsset 加载，放在 `Assets/AssetRaw/` 下
-2. **Sprite 用 `SetSprite` 扩展方法**：内置缓存池管理，无需手动释放
-3. **GameObject 用 `LoadGameObjectAsync`**：自动管理引用计数，Destroy 时自动卸载
-4. **其他 Asset 加载/释放必须配对**：`LoadAssetAsync<T>` → 用完后 → `UnloadAsset`
-5. **异步优先**：禁止同步加载大资源
+1. **禁止 `Resources.Load()`**：所有**运行时/热更**资源通过 YooAsset 加载，放在 `Assets/AssetRaw/` 下
+2. **`Assets/AssetArt/` 是美术源 submodule**（BinGames-Art）：不进 YooAsset 收集，只放源文件；热更打包装的永远是 `AssetRaw`
+3. **Sprite 用 `SetSprite` 扩展方法**：内置缓存池管理，无需手动释放
+4. **GameObject 用 `LoadGameObjectAsync`**：自动管理引用计数，Destroy 时自动卸载
+5. **其他 Asset 加载/释放必须配对**：`LoadAssetAsync<T>` → 用完后 → `UnloadAsset`
+6. **异步优先**：禁止同步加载大资源
+
+图集：散图在 `AssetRaw/UIRaw/Atlas|Raw`，AtlasMaker 输出在 `AssetRaw/UIRaw/SpriteAtlas`（已收集）。详见 `DesignDocs/Art_Repo_And_HotUpdate.md`。
 
 禁止模式详见 [naming-rules.md](naming-rules.md#禁止的代码模式)。
 

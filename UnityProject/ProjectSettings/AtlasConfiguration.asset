@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f529ff1e114e8ba4cb189f4233102cd5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  outputAtlasDir: Assets/AssetArt/Atlas
+  outputAtlasDir: Assets/AssetRaw/UIRaw/SpriteAtlas
   sourceAtlasRootDir:
   - Assets/AssetRaw/UIRaw/Atlas
   rootChildAtlasDir:
