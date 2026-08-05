@@ -12,8 +12,9 @@
   <Project Path="TEngine.Editor.csproj" />
   <Project Path="Unity.Collections.csproj" />
   <Project Path="Unity.Entities.UI.Editor.csproj" />
-  <Project Path="YooAsset.Editor.csproj" />
+  <Project Path="BinGames.Sim.csproj" />
   <Project Path="Unity.PerformanceTesting.Editor.csproj" />
+  <Project Path="YooAsset.Editor.csproj" />
   <Project Path="UniTask.csproj" />
   <Project Path="Unity.Burst.csproj" />
   <Project Path="Nebukam.ORCA.csproj" />
@@ -28,11 +29,11 @@
   <Project Path="Unity.Entities.CodeGen.csproj" />
   <Project Path="Unity.Rider.Editor.csproj" />
   <Project Path="Unity.InternalAPIEngineBridge.002.csproj" />
+  <Project Path="GameLogic.csproj" />
   <Project Path="Unity.AI.Navigation.Editor.ConversionSystem.csproj" />
   <Project Path="Nebukam.JobAssist.csproj" />
   <Project Path="Unity.Burst.CodeGen.csproj" />
   <Project Path="YooAsset.EditorExtension.csproj" />
-  <Project Path="GameLogic.csproj" />
   <Project Path="Unity.PerformanceTesting.csproj" />
   <Project Path="Unity.Entities.Hybrid.csproj" />
   <Project Path="Unity.AI.Navigation.csproj" />
