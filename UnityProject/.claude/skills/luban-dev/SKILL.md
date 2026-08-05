@@ -11,7 +11,7 @@ description: Luban 游戏配置全栈工具，支持枚举/Bean/数据表的增�
 - **命名空间**：`GameConfig`（非默认 `cfg`）
 - **数据加载**：`ConfigSystem.Instance.Tables` 懒加载，底层走 YooAsset
 - **代码位置**：`GameScripts/HotFix/GameProto/GameConfig/`（热更程序集）
-- **数据位置**：`AssetRaw/Configs/bytes/`（YooAsset 管理）
+- **数据位置**：`GameRes/Raw/Configs/bytes/`（YooAsset 管理）
 - **表定义**：Excel（`__tables__.xlsx`/`__beans__.xlsx`/`__enums__.xlsx`）+ XML Schema（`Defines/`）
 - **导出数据 → 使用导出脚本，不要手动拼 dotnet 命令**
 

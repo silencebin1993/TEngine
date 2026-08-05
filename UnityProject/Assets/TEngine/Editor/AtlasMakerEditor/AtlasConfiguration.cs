@@ -1,4 +1,4 @@
-﻿namespace TEngine.Editor
+namespace TEngine.Editor
 {
 #if UNITY_EDITOR
     using UnityEngine;
@@ -8,19 +8,19 @@
     public class AtlasConfiguration : EditorScriptableSingleton<AtlasConfiguration>
     {
         [Header("目录设置")]
-        [Tooltip("生成的图集输出目录（必须在 AssetRaw 下，才能进 YooAsset 热更包）")]
-        public string outputAtlasDir = "Assets/AssetRaw/UIRaw/SpriteAtlas";
+        [Tooltip("生成的图集输出目录（必须在 GameRes/Raw 下，才能进 YooAsset 热更包）")]
+        public string outputAtlasDir = "Assets/GameRes/Raw/UIRaw/SpriteAtlas";
 
         [Tooltip("需要生成图集的UI根目录")]
-        // public string sourceAtlasRoot = "Assets/AssetRaw/UIRaw/Atlas";
-        public string[] sourceAtlasRootDir = new string[] { "Assets/AssetRaw/UIRaw/Atlas" };
+        // public string sourceAtlasRoot = "Assets/GameRes/Raw/UIRaw/Atlas";
+        public string[] sourceAtlasRootDir = new string[] { "Assets/GameRes/Raw/UIRaw/Atlas" };
         [Tooltip("以当前目录的子级生成子级图集")]
         public string[] rootChildAtlasDir = new string[] {  };
         [Tooltip("每张图都单独生成图集")]
-        public string[] singleAtlasDir = new string[] { "Assets/AssetRaw/UIRaw/Atlas/Background" };
+        public string[] singleAtlasDir = new string[] { "Assets/GameRes/Raw/UIRaw/Atlas/Background" };
         [Tooltip("不需要生成图集的UI目录")]
-        // public string excludeFolder = "Assets/AssetRaw/UIRaw/Raw";
-        public string[] excludeFolder = new string[] { "Assets/AssetRaw/UIRaw/Raw" };
+        // public string excludeFolder = "Assets/GameRes/Raw/UIRaw/Raw";
+        public string[] excludeFolder = new string[] { "Assets/GameRes/Raw/UIRaw/Raw" };
 
         [Header("平台格式设置")]
         public TextureImporterFormat androidFormat = TextureImporterFormat.ASTC_6x6;

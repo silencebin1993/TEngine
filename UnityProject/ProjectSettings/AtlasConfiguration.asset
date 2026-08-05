@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f529ff1e114e8ba4cb189f4233102cd5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  outputAtlasDir: Assets/AssetRaw/UIRaw/SpriteAtlas
+  outputAtlasDir: Assets/GameRes/Raw/UIRaw/SpriteAtlas
   sourceAtlasRootDir:
-  - Assets/AssetRaw/UIRaw/Atlas
+  - Assets/GameRes/Raw/UIRaw/Atlas
   rootChildAtlasDir:
-  - Assets/AssetRaw/UIRaw/Atlas/SingleAtlas
+  - Assets/GameRes/Raw/UIRaw/Atlas/SingleAtlas
   singleAtlasDir:
-  - Assets/AssetRaw/UIRaw/Atlas/Background
+  - Assets/GameRes/Raw/UIRaw/Atlas/Background
   excludeFolder:
-  - Assets/AssetRaw/UIRaw/Raw
+  - Assets/GameRes/Raw/UIRaw/Raw
   androidFormat: 50
   iosFormat: 49
   webglFormat: 50

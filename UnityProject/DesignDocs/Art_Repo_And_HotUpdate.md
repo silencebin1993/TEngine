@@ -1,33 +1,37 @@
-# 美术仓库与热更资源分层
+# 内容仓 GameRes 与热更分层
 
-> 实现状态：已落地（2026-08-05）。美术源仓库在 `F:/Project/BinGames-Art`，以 submodule 挂到 `Assets/AssetArt/`。
+> 2026-08-05：`Art` + `Raw` 合并为**同一个**本地 submodule `Assets/GameRes/`，不上 GitHub。
 
-## 分层
+## 结构
 
-| 路径 | 仓库 | YooAsset | 说明 |
-|------|------|----------|------|
-| `Assets/AssetArt/` | **BinGames-Art** submodule | 不收集 | 源美术、购买包、设计稿 |
-| `Assets/AssetRaw/` | TEngine | **全部收集** | 运行时 / 热更资源 |
+```
+Assets/GameRes/          ← submodule（F:/Project/BinGames-Art.git）
+  Art/                   ← 源文件（不进 YooAsset）
+  Raw/                   ← 运行时 / 热更（YooAsset 只收集这里）
+```
 
-图集输出已改为 `Assets/AssetRaw/UIRaw/SpriteAtlas/`（原 `AssetArt/Atlas`），并已加入 Collector。
+| 路径 | 上 GitHub？ | YooAsset |
+|------|-------------|----------|
+| `GameRes/Art` | ❌（内容仓本地/NAS） | 不收集 |
+| `GameRes/Raw` | ❌（同上） | **全部收集** |
+| TEngine 代码 | ✅ | — |
+
+导出到 Raw **不会**进 GitHub——和 Art 在同一仓。
 
 ## 日常
 
 ```bash
-# 拉齐美术
-cd TEngine && git submodule update --init --recursive
+cd TEngine && git -c protocol.file.allow=always submodule update --init --recursive
 
-# 改美术后提交
-cd UnityProject/Assets/AssetArt
-git add -A && git commit -m "art: ..." && git push
-cd ../../../..   # 回到 TEngine 根
-git add UnityProject/Assets/AssetArt && git commit -m "chore: bump AssetArt"
+# 改资源
+cd UnityProject/Assets/GameRes
+git add -A && git commit -m "content: ..." && git -c protocol.file.allow=always push
+cd ../../../..
+git add UnityProject/Assets/GameRes && git commit -m "chore: bump GameRes"
 ```
 
-## 迁 NAS / 云
+迁 NAS：`BinGames/tools/set-art-remote.ps1 <新url>`（会改 GameRes 的 origin + `.gitmodules`）。
 
-见 `Assets/AssetArt/README.md`（即 BinGames-Art README）。只改 art 仓 remote + `.gitmodules` url。
+## AI 工具链
 
-## 不碰的范围
-
-本方案不修改 `.claude/`、ECC、CCGS、hermes、codegraph。AI 工具链仍只认 `TEngine/UnityProject/` 的代码规范。
+不修改 ECC/CCGS/hermes/codegraph。规范仍以 `TEngine/UnityProject/` 为准；资源路径记 `GameRes/Raw`。

@@ -69,7 +69,7 @@ namespace GameLogic.EditorTools
             if (reg.UsingFallback)
             {
                 Fail("走了内置兜底内容，说明 Luban cell.* 表没读上。"
-                     + "检查 AssetRaw/Configs/bytes/cell_*.bytes 是否存在。");
+                     + "检查 GameRes/Raw/Configs/bytes/cell_*.bytes 是否存在。");
             }
             else
             {

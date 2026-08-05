@@ -1,12 +1,12 @@
 #!/bin/bash
 
 cd "$(dirname "$0")"
-echo "当前目录: $(pwd)"
+echo "褰撳墠鐩綍: $(pwd)"
 
 export WORKSPACE="$(realpath ../../)"
 export LUBAN_DLL="${WORKSPACE}/Tools/Luban/Luban.dll"
 export CONF_ROOT="$(pwd)"
-export DATA_OUTPATH="${WORKSPACE}/UnityProject/Assets/AssetRaw/Configs/bytes/"
+export DATA_OUTPATH="${WORKSPACE}/UnityProject/Assets/GameRes/Raw/Configs/bytes/"
 export CODE_OUTPATH="${WORKSPACE}/UnityProject/Assets/GameScripts/HotFix/GameProto/GameConfig/"
 
 cp -R "${CONF_ROOT}/CustomTemplate/ConfigSystem.cs" \

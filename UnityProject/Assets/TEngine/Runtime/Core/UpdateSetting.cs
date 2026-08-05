@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
@@ -87,7 +87,7 @@ namespace TEngine
         /// <summary>
         /// 程序集文本资产资源目录
         /// </summary>
-        public string AssemblyTextAssetPath = "AssetRaw/DLL";
+        public string AssemblyTextAssetPath = "GameRes/Raw/DLL";
 
         [Header("更新设置")]
         public UpdateStyle UpdateStyle = UpdateStyle.Force;

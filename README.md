@@ -350,16 +350,16 @@ sequenceDiagram
 
 ```
 Assets/
-├── AssetArt/              # 美术源（独立 git submodule / BinGames-Art，不进 YooAsset）
-│   └── Source/           # Characters / UI / VFX / Audios …
-├── AssetRaw/             # 热更资源目录（YooAsset 唯一收集根）
-│   ├── UIRaw/            # UI 图片目录
-│   │   ├── Atlas/        # 需要自动生成图集的 UI 散图
-│   │   ├── Raw/          # 不进图集的 UI 散图
-│   │   └── SpriteAtlas/  # AtlasMaker 输出的 .spriteatlasv2（已收集）
-│   ├── Audios/           # 音频资源
-│   ├── Effects/          # 特效资源
-│   └── Scenes/           # 场景资源
+├── GameRes/               # 内容 submodule（本地/NAS，不上 GitHub）
+│   ├── Art/              # 源文件：母带 / 设计稿 / 购买包
+│   └── Raw/              # 热更资源（YooAsset 唯一收集根）
+│       ├── UIRaw/        # UI 图片
+│       │   ├── Atlas/    # 进图集的散图
+│       │   ├── Raw/      # 不进图集的散图
+│       │   └── SpriteAtlas/  # AtlasMaker 输出
+│       ├── Audios/
+│       ├── Effects/
+│       └── Scenes/
 ├── Editor/               # 编辑器脚本目录
 ├── HybridCLRData/        # HybridCLR 相关目录
 ├── Scenes/               # 主场景目录

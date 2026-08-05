@@ -26,7 +26,7 @@ MonoBehaviour:
   - UnityEngine.CoreModule.dll
   LogicMainDllName: GameLogic.dll
   AssemblyTextAssetExtension: .bytes
-  AssemblyTextAssetPath: AssetRaw/DLL
+  AssemblyTextAssetPath: GameRes/Raw/DLL
   UpdateStyle: 1
   UpdateNotice: 1
   ResDownLoadPath: http://127.0.0.1:8081
