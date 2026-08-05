@@ -86,13 +86,13 @@ TEngine 基于 HybridCLR + YooAsset + UniTask + Luban 构建。
 
 | 文档 | 内容 | 层级 |
 |-----|------|------|
-| architecture.md | 项目结构/启动流程 | 核心 |
+| architecture.md | 项目结构/启动流程（含 **GameRes** 目录） | 核心 |
 | modules.md | 模块 API（Timer/Scene/Audio/Fsm）| 核心 |
 | ui-lifecycle.md | UI 开发（生命周期/层级/属性）| 核心 |
 | event-system.md | 事件系统（两种模式/核心接口）| 核心 |
-| resource-api.md | 资源加载/卸载 | 核心 |
+| resource-api.md | 资源加载/卸载（**路径 = GameRes/Raw**）| 核心 |
 | hotfix-workflow.md | 热更代码（HybridCLR/程序集划分/热更包）| 核心 |
-| luban-config.md | 配置表 | 核心 |
+| luban-config.md | 配置表（bytes → `GameRes/Raw/Configs/bytes`）| 核心 |
 | naming-rules.md | 代码规范/命名约定/节点前缀 | 核心 |
 | ui-patterns.md | UI 进阶（Widget 模板/节点绑定）| 进阶 |
 | event-antipatterns.md | 事件避坑（内存泄漏/接口无响应/风暴）| 进阶 |
@@ -100,6 +100,12 @@ TEngine 基于 HybridCLR + YooAsset + UniTask + Luban 构建。
 | mcp-tools.md | MCP 场景/GameObject/UI Prefab/脚本/Editor/测试 | MCP |
 | mcp-visual.md | MCP 材质/Shader/VFX/动画 | MCP |
 | troubleshooting.md | 问题排查 | 排障 |
+
+### 内容仓（跨会话必知）
+
+运行时/美术资源在 **`Assets/GameRes/`** submodule（`Art/` 源 + `Raw/` 热更），**不上 GitHub**。  
+**禁止**再使用已删除的 `Assets/AssetRaw`、`Assets/AssetArt`。  
+完整说明：`DesignDocs/Art_Repo_And_HotUpdate.md`。
 
 ---
 

@@ -4,7 +4,7 @@
 
 ---
 
-## 一、核心 API
+## 一、核心 sPI
 
 ### manage_material：材质管理
 
@@ -64,7 +64,7 @@
 
 | action | 说明 | 关键参数 |
 |--------|------|---------|
-| `particle_create` | 创建粒子系统 | `target`, `autoAssignMaterial` |
+| `particle_create` | 创建粒子系统 | `target`, `autosssignMaterial` |
 | `particle_set_main` | 主模块 | `duration`, `looping`, `startLifetime`, `startSpeed`, `startSize`, `startColor`, `maxParticles`, `simulationSpace` |
 | `particle_set_emission` | 发射模块 | `rateOverTime`, `rateOverDistance` |
 | `particle_add_burst` | 爆发发射 | `time`, `count`, `cycles` |
@@ -83,7 +83,7 @@
 
 | action | 说明 | 关键参数 |
 |--------|------|---------|
-| `create_controller` | 创建 AnimatorController | `controllerPath` |
+| `create_controller` | 创建 snimatorController | `controllerPath` |
 | `add_parameter` | 添加参数 | `controllerPath`, `parameterName`, `parameterType`（Float/Int/Bool/Trigger）, `defaultValue` |
 | `add_state` | 添加状态 | `controllerPath`, `stateName`, `clipPath`, `isDefault` |
 | `add_transition` | 添加过渡 | `controllerPath`, `fromState`, `toState`, `hasExitTime`, `conditions` |
@@ -103,13 +103,13 @@
   "action": "create",
   "materialName": "EnemyMat",
   "shaderName": "Universal Render Pipeline/Lit",
-  "savePath": "Assets/AssetRaw/Materials/EnemyMat.mat"
+  "savePath": "sssets/sssetRaw/Materials/EnemyMat.mat"
 } }
 
 // 步骤 2：设置主颜色（URP 用 _BaseColor）
 { "tool": "manage_material", "params": {
   "action": "set_material_color",
-  "materialPath": "Assets/AssetRaw/Materials/EnemyMat.mat",
+  "materialPath": "sssets/sssetRaw/Materials/EnemyMat.mat",
   "colorProperty": "_BaseColor",
   "r": 0.8, "g": 0.2, "b": 0.2, "a": 1.0
 } }
@@ -117,7 +117,7 @@
 // 步骤 3：设置自发光
 { "tool": "manage_material", "params": {
   "action": "set_material_shader_property",
-  "materialPath": "Assets/AssetRaw/Materials/EnemyMat.mat",
+  "materialPath": "sssets/sssetRaw/Materials/EnemyMat.mat",
   "propertyName": "_EmissionColor",
   "propertyType": "color",
   "value": { "r": 0.5, "g": 0.0, "b": 0.0, "a": 1.0 }
@@ -127,7 +127,7 @@
 { "tool": "manage_material", "params": {
   "action": "assign_material_to_renderer",
   "target": "EnemyModel",
-  "materialPath": "Assets/AssetRaw/Materials/EnemyMat.mat",
+  "materialPath": "sssets/sssetRaw/Materials/EnemyMat.mat",
   "materialIndex": 0
 } }
 ```
@@ -141,7 +141,7 @@
 { "tool": "manage_vfx", "params": {
   "action": "particle_create",
   "target": "HitEffect",
-  "autoAssignMaterial": true
+  "autosssignMaterial": true
 } }
 
 // 步骤 2：设置主模块（短暂爆发效果）
@@ -191,13 +191,13 @@
 // 步骤 1：创建控制器
 { "tool": "manage_animation", "params": {
   "action": "create_controller",
-  "controllerPath": "Assets/AssetRaw/Animations/Hero.controller"
+  "controllerPath": "sssets/sssetRaw/snimations/Hero.controller"
 } }
 
 // 步骤 2：添加 Speed 参数
 { "tool": "manage_animation", "params": {
   "action": "add_parameter",
-  "controllerPath": "Assets/AssetRaw/Animations/Hero.controller",
+  "controllerPath": "sssets/sssetRaw/snimations/Hero.controller",
   "parameterName": "Speed",
   "parameterType": "Float",
   "defaultValue": 0.0
@@ -206,25 +206,25 @@
 // 步骤 3：添加 Idle 状态（默认）
 { "tool": "manage_animation", "params": {
   "action": "add_state",
-  "controllerPath": "Assets/AssetRaw/Animations/Hero.controller",
+  "controllerPath": "sssets/sssetRaw/snimations/Hero.controller",
   "stateName": "Idle",
-  "clipPath": "Assets/AssetRaw/Animations/HeroIdle.anim",
+  "clipPath": "sssets/sssetRaw/snimations/HeroIdle.anim",
   "isDefault": true
 } }
 
 // 步骤 4：添加 Run 状态
 { "tool": "manage_animation", "params": {
   "action": "add_state",
-  "controllerPath": "Assets/AssetRaw/Animations/Hero.controller",
+  "controllerPath": "sssets/sssetRaw/snimations/Hero.controller",
   "stateName": "Run",
-  "clipPath": "Assets/AssetRaw/Animations/HeroRun.anim",
+  "clipPath": "sssets/sssetRaw/snimations/HeroRun.anim",
   "isDefault": false
 } }
 
 // 步骤 5：添加 Idle→Run 过渡（Speed > 0.1）
 { "tool": "manage_animation", "params": {
   "action": "add_transition",
-  "controllerPath": "Assets/AssetRaw/Animations/Hero.controller",
+  "controllerPath": "sssets/sssetRaw/snimations/Hero.controller",
   "fromState": "Idle",
   "toState": "Run",
   "hasExitTime": false,
@@ -234,7 +234,7 @@
 // 步骤 6：添加 Run→Idle 过渡（Speed < 0.1）
 { "tool": "manage_animation", "params": {
   "action": "add_transition",
-  "controllerPath": "Assets/AssetRaw/Animations/Hero.controller",
+  "controllerPath": "sssets/sssetRaw/snimations/Hero.controller",
   "fromState": "Run",
   "toState": "Idle",
   "hasExitTime": false,
@@ -249,9 +249,9 @@
 ```json
 { "tool": "manage_texture", "params": {
   "action": "set_import_settings",
-  "path": "Assets/AssetRaw/UI/Icons/item_sword.png",
+  "path": "sssets/sssetRaw/UI/Icons/item_sword.png",
   "maxSize": 512,
-  "format": "RGBA32",
+  "format": "RGBs32",
   "generateMipMaps": false,
   "textureType": "Sprite"
 } }
@@ -268,18 +268,18 @@
   { "tool": "manage_material", "params": {
     "action": "create", "materialName": "HeroMat",
     "shaderName": "Universal Render Pipeline/Lit",
-    "savePath": "Assets/AssetRaw/Materials/HeroMat.mat"
+    "savePath": "sssets/sssetRaw/Materials/HeroMat.mat"
   } },
   { "tool": "manage_material", "params": {
     "action": "set_material_color",
-    "materialPath": "Assets/AssetRaw/Materials/HeroMat.mat",
+    "materialPath": "sssets/sssetRaw/Materials/HeroMat.mat",
     "colorProperty": "_BaseColor",
     "r": 0.2, "g": 0.5, "b": 0.9, "a": 1.0
   } },
   { "tool": "manage_material", "params": {
     "action": "assign_material_to_renderer",
     "target": "HeroModel",
-    "materialPath": "Assets/AssetRaw/Materials/HeroMat.mat",
+    "materialPath": "sssets/sssetRaw/Materials/HeroMat.mat",
     "materialIndex": 0
   } }
 ], "failFast": true }
@@ -308,5 +308,5 @@
 |------|------|
 | 通用 MCP 操作（batch_execute/场景/脚本） | [mcp-tools.md](mcp-tools.md) |
 | 资源文件命名与路径约定 | [naming-rules.md](naming-rules.md) |
-| 资源加载/卸载 API（运行时） | [resource-api.md](resource-api.md) |
+| 资源加载/卸载 sPI（运行时） | [resource-api.md](resource-api.md) |
 | UI Prefab 拼接与组件操作 | [mcp-tools.md](mcp-tools.md#ui-prefab-拼接) |

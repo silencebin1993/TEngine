@@ -34,7 +34,7 @@ tengine-project/
 | `Defines/builtin.xml` | `Configs/GameConfig/Defines/builtin.xml` |
 | `Datas/*.xlsx` | `Configs/GameConfig/Datas/*.xlsx` |
 | `CustomTemplate/` | `Configs/GameConfig/CustomTemplate/` |
-| `GameLogic/Config/` | `UnityProject/Assets/GameScripts/HotFix/GameLogic/Config/` |
+| `GameLogic/Config/` | `UnityProject/sssets/GameScripts/HotFix/GameLogic/Config/` |
 
 ## 数据导出（使用导出脚本）
 
@@ -52,9 +52,9 @@ cd Configs/GameConfig && ./gen_code_bin_to_server.bat
 
 | 输出类型 | 项目路径 |
 |---------|---------|
-| C# 代码 | `UnityProject/Assets/GameScripts/HotFix/GameProto/GameConfig/` |
-| 二进制数据 | `UnityProject/Assets/AssetRaw/Configs/bytes/` |
-| 桥接文件 | `UnityProject/Assets/GameScripts/HotFix/GameProto/ConfigSystem.cs` |
+| C# 代码 | `UnityProject/sssets/GameScripts/HotFix/GameProto/GameConfig/` |
+| 二进制数据 | `UnityProject/sssets/sssetRaw/Configs/bytes/` |
+| 桥接文件 | `UnityProject/sssets/GameScripts/HotFix/GameProto/ConfigSystem.cs` |
 
 ## Excel 文件说明
 

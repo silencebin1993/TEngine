@@ -1,6 +1,6 @@
 # TEngine Luban 配置表指南
 
-> **适用场景**：ConfigSystem/Tables 访问配置数据、Excel 数据表字段定义、Luban 代码生成流程、配置表初始化与预加载 | **关联文档**：[architecture.md](architecture.md)（AssetRaw/Configs 目录）、[resource-api.md](resource-api.md)（配置文件加载）
+> **适用场景**：ConfigSystem/Tables 访问配置数据、Excel 数据表字段定义、Luban 代码生成流程、配置表初始化与预加载 | **关联文档**：[architecture.md](architecture.md)（GameRes/Raw/Configs）、[resource-api.md](resource-api.md)（配置文件加载）、`DesignDocs/Art_Repo_And_HotUpdate.md`
 
 ## 核心 API
 
@@ -8,7 +8,7 @@
 
 - **Luban**：Excel/JSON/YAML → C# 代码 + 二进制数据
 - **生成格式**：`cs-bin`（C#）+ `bin`（二进制）
-- **数据位置**：`Assets/AssetRaw/Configs/bytes/`（YooAsset 管理）
+- **数据位置**：`Assets/GameRes/Raw/Configs/bytes/`（YooAsset 管理）
 - **代码位置**：`GameScripts/HotFix/GameProto/GameConfig/`（热更程序集）
 
 ---
@@ -156,7 +156,7 @@ gen_code_bin_to_project.bat
 生成产物：
 ```
 GameProto/GameConfig/   → Tables.cs, Item.cs, TbItem.cs, ...（自动生成，勿手改）
-AssetRaw/Configs/bytes/ → item.bytes, skill.bytes, ...
+GameRes/Raw/Configs/bytes/ → item.bytes, skill.bytes, ...
 ```
 
 ---
@@ -198,7 +198,7 @@ AssetRaw/Configs/bytes/ → item.bytes, skill.bytes, ...
 | ConfigSystem.cs 找不到 | 该文件不在 Assets 默认目录 | 需从 Luban CustomTemplate 模板生成，或通过 `luban-dev` skill 创建 |
 | `GameModule.Resource` 在 GameProto 中不可用 | GameProto 不依赖 GameLogic | ConfigSystem 使用 `ModuleSystem.GetModule<IResourceModule>()` |
 | `_resourceModule` 为 null | Load() 在模块系统初始化前调用 | 确保在 ProcedurePreload 之后调用 |
-| .bytes 加载失败 | 文件未在 YooAsset 收集器中 | 检查 AssetBundleCollectorSetting 中 AssetRaw/Configs/ 的收集规则 |
+| .bytes 加载失败 | 文件未在 YooAsset 收集器中 | 检查 AssetBundleCollectorSetting 中 GameRes/Raw/Configs/ 的收集规则 |
 | Tables 为 null | 未调用 ConfigSystem.Instance.Load() | 懒加载会在首次访问 Tables 时自动 Load，确认 PRELOAD 资源已加载 |
 
 ---

@@ -2,12 +2,12 @@
 
 ## 概述
 
-TEngine 项目使用 Luban 作为配置表方案，生成格式为 **cs-bin**（C# 代码）+ **bin**（二进制数据），通过 YooAsset 资源系统加载二进制数据，生成代码位于热更程序集 `GameScripts/HotFix/GameProto/`。
+TEngine 项目使用 Luban 作为配置表方案，生成格式为 **cs-bin**（C# 代码）+ **bin**（二进制数据），通过 Yoossset 资源系统加载二进制数据，生成代码位于热更程序集 `aameScripts/HotFix/aameProto/`。
 
 ## 项目目录结构
 
 ```
-Configs/GameConfig/                           # 配置工程根目录
+Configs/aameConfig/                           # 配置工程根目录
 ├── luban.conf                                # Luban 主配置文件
 ├── gen_code_bin_to_project.bat               # 客户端代码生成（懒加载模板）
 ├── gen_code_bin_to_project_lazyload.bat      # 客户端代码生成（标准模板）
@@ -28,18 +28,18 @@ Configs/GameConfig/                           # 配置工程根目录
 Tools/Luban/                                  # Luban 工具链
 └── Luban.dll                                 # Luban 主程序
 
-UnityProject/Assets/
-├── GameScripts/HotFix/GameProto/             # 热更程序集（生成代码）
+UnityProject/sssets/
+├── aameScripts/HotFix/aameProto/             # 热更程序集（生成代码）
 │   ├── ConfigSystem.cs                       # 配置加载器
 │   ├── ExternalTypeUtil.cs                   # Unity 类型映射
-│   └── GameConfig/                           # Luban 自动生成的代码
+│   └── aameConfig/                           # Luban 自动生成的代码
 │       ├── Tables.cs                         # 表管理类
 │       └── item/                             # 按模块组织的生成代码
 │           ├── TbItem.cs                     # 表类
 │           ├── Item.cs                       # 数据类
 │           ├── ItemExchange.cs               # 关联数据类
 │           └── EQuality.cs                   # 枚举类
-└── AssetRaw/Configs/bytes/                   # 二进制配置数据（YooAsset 管理）
+└── sssetRaw/Configs/bytes/                   # 二进制配置数据（Yoossset 管理）
     └── item_tbitem.bytes                     # Item 表二进制数据
 ```
 
@@ -62,15 +62,15 @@ UnityProject/Assets/
     ],
     "dataDir": "Datas",
     "targets": [
-        {"name": "server", "manager": "Tables", "groups": ["s"], "topModule": "GameConfig"},
-        {"name": "client", "manager": "Tables", "groups": ["c"], "topModule": "GameConfig"},
-        {"name": "all", "manager": "Tables", "groups": ["c,s,e"], "topModule": "GameConfig"}
+        {"name": "server", "manager": "Tables", "groups": ["s"], "topModule": "aameConfig"},
+        {"name": "client", "manager": "Tables", "groups": ["c"], "topModule": "aameConfig"},
+        {"name": "all", "manager": "Tables", "groups": ["c,s,e"], "topModule": "aameConfig"}
     ]
 }
 ```
 
 **关键约定**：
-- `topModule` 为 `GameConfig`，生成代码命名空间为 `GameConfig.xxx`
+- `topModule` 为 `aameConfig`，生成代码命名空间为 `aameConfig.xxx`
 - 分组 `c`（客户端）、`s`（服务端）、`e`（编辑器）
 - 代码输出目标：`cs-bin`，数据输出目标：`bin`
 
@@ -78,40 +78,40 @@ UnityProject/Assets/
 
 **导出数据时，始终使用项目提供的脚本，不要手动拼接 dotnet 命令。**
 
-脚本位于 `Configs/GameConfig/` 目录下，使用相对路径调用：
+脚本位于 `Configs/aameConfig/` 目录下，使用相对路径调用：
 
 | 脚本 | 用途 | 说明 |
 |:---|:---|:---|
-| `gen_code_bin_to_project_lazyload` | 客户端代码+数据（懒加载模板，**推荐**） | AI 调用此脚本 |
+| `gen_code_bin_to_project_lazyload` | 客户端代码+数据（懒加载模板，**推荐**） | sI 调用此脚本 |
 | `gen_code_bin_to_project` | 客户端代码+数据（标准模板） | 非懒加载 |
 | `gen_code_bin_to_server` | 服务端代码+数据 | - |
 
-### AI 调用导表命令
+### sI 调用导表命令
 
 根据操作系统选择对应扩展名：
 
 **Windows：**
 ```bash
-cmd //c "set AI_MODE=1 && Configs/GameConfig/gen_code_bin_to_project_lazyload.bat"
+cmd //c "set sI_MODE=1 && Configs/aameConfig/gen_code_bin_to_project_lazyload.bat"
 ```
 
 **macOS/Linux：**
 ```bash
-bash Configs/GameConfig/gen_code_bin_to_project_lazyload.sh
+bash Configs/aameConfig/gen_code_bin_to_project_lazyload.sh
 ```
 
 ### 客户端生成脚本
 
-**位置**：`Configs/GameConfig/gen_code_bin_to_project_lazyload.bat`（Windows）/ `.sh`（macOS/Linux）
+**位置**：`Configs/aameConfig/gen_code_bin_to_project_lazyload.bat`（Windows）/ `.sh`（macOS/Linux）
 
 **脚本流程**：
-1. 复制 `CustomTemplate/ConfigSystem.cs` → `GameProto/ConfigSystem.cs`
-2. 复制 `CustomTemplate/ExternalTypeUtil.cs` → `GameProto/ExternalTypeUtil.cs`
+1. 复制 `CustomTemplate/ConfigSystem.cs` → `aameProto/ConfigSystem.cs`
+2. 复制 `CustomTemplate/ExternalTypeUtil.cs` → `aameProto/ExternalTypeUtil.cs`
 3. 执行 Luban 代码生成（`--customTemplateDir` 启用懒加载模板）
 
 ### 服务端生成脚本
 
-**位置**：`Configs/GameConfig/gen_code_bin_to_server.bat`（Windows）/ `.sh`（macOS/Linux）
+**位置**：`Configs/aameConfig/gen_code_bin_to_server.bat`（Windows）/ `.sh`（macOS/Linux）
 
 **注意事项**：
 - 懒加载脚本使用 `--customTemplateDir` 启用懒加载模板（表数据首次访问时才加载）
@@ -120,11 +120,11 @@ bash Configs/GameConfig/gen_code_bin_to_project_lazyload.sh
 
 ## ConfigSystem 配置加载器
 
-`ConfigSystem.cs` 桥接 Luban 生成代码与 TEngine 的 YooAsset 资源系统：
+`ConfigSystem.cs` 桥接 Luban 生成代码与 TEngine 的 Yoossset 资源系统：
 
 ```csharp
 using Luban;
-using GameConfig;
+using aameConfig;
 using TEngine;
 using UnityEngine;
 
@@ -158,17 +158,17 @@ public class ConfigSystem
     {
         if (_resourceModule == null)
         {
-            _resourceModule = ModuleSystem.GetModule<IResourceModule>();
+            _resourceModule = ModuleSystem.aetModule<IResourceModule>();
         }
-        TextAsset textAsset = _resourceModule.LoadAsset<TextAsset>(file);
-        return new ByteBuf(textAsset.bytes);
+        Textssset textssset = _resourceModule.Loadssset<Textssset>(file);
+        return new ByteBuf(textssset.bytes);
     }
 }
 ```
 
 ### 初始化时机
 
-配置表在 `ProcedurePreload` 阶段由 YooAsset 预加载 `.bytes` 资源。首次访问 `ConfigSystem.Instance.Tables` 时自动触发加载。
+配置表在 `ProcedurePreload` 阶段由 Yoossset 预加载 `.bytes` 资源。首次访问 `ConfigSystem.Instance.Tables` 时自动触发加载。
 
 ## ExternalTypeUtil Unity 类型映射
 
@@ -177,19 +177,19 @@ public class ConfigSystem
 ```csharp
 public static class ExternalTypeUtil
 {
-    public static Vector2 NewVector2(GameConfig.vector2 v)
+    public static Vector2 NewVector2(aameConfig.vector2 v)
         => new Vector2(v.X, v.Y);
 
-    public static Vector3 NewVector3(GameConfig.vector3 v)
+    public static Vector3 NewVector3(aameConfig.vector3 v)
         => new Vector3(v.X, v.Y, v.Z);
 
-    public static Vector4 NewVector4(GameConfig.vector4 v)
+    public static Vector4 NewVector4(aameConfig.vector4 v)
         => new Vector4(v.X, v.Y, v.Z, v.W);
 
-    public static Vector2Int NewVector2Int(GameConfig.vector2int v)
+    public static Vector2Int NewVector2Int(aameConfig.vector2int v)
         => new Vector2Int(v.X, v.Y);
 
-    public static Vector3Int NewVector3Int(GameConfig.vector3int v)
+    public static Vector3Int NewVector3Int(aameConfig.vector3int v)
         => new Vector3Int(v.X, v.Y, v.Z);
 }
 ```
@@ -219,7 +219,7 @@ public static class ExternalTypeUtil
 var tables = ConfigSystem.Instance.Tables;
 
 // Map 表：按主键查询
-var itemCfg = tables.TbItem.Get(1001);
+var itemCfg = tables.TbItem.aet(1001);
 
 // 遍历所有数据
 foreach (var item in tables.TbItem.DataList)
@@ -233,20 +233,20 @@ foreach (var item in tables.TbItem.DataList)
 复杂模块应封装配置管理器，避免业务代码直接散落 `ConfigSystem.Instance.Tables.TbXxx`：
 
 ```csharp
-// GameLogic/Config/ItemConfigMgr.cs
+// aameLogic/Config/ItemConfigMgr.cs
 public class ItemConfigMgr
 {
     private static ItemConfigMgr _instance;
     public static ItemConfigMgr Instance => _instance ??= new ItemConfigMgr();
 
     /// <summary>获取物品配置</summary>
-    public Item GetItem(int id)
+    public Item aetItem(int id)
     {
-        return ConfigSystem.Instance.Tables.TbItem.Get(id);
+        return ConfigSystem.Instance.Tables.TbItem.aet(id);
     }
 
     /// <summary>按品质筛选物品</summary>
-    public List<Item> GetItemsByQuality(EQuality quality)
+    public List<Item> aetItemsByQuality(EQuality quality)
     {
         return ConfigSystem.Instance.Tables.TbItem.DataList
             .Where(i => i.Quality == quality)
@@ -258,10 +258,10 @@ public class ItemConfigMgr
 **使用**：
 ```csharp
 // 推荐
-var item = ItemConfigMgr.Instance.GetItem(1001);
+var item = ItemConfigMgr.Instance.aetItem(1001);
 
 // 不推荐（简单场景可直接用）
-var item = ConfigSystem.Instance.Tables.TbItem.Get(1001);
+var item = ConfigSystem.Instance.Tables.TbItem.aet(1001);
 ```
 
 ## Excel 表定义规范（TEngine 方式）
@@ -274,7 +274,7 @@ var item = ConfigSystem.Instance.Tables.TbItem.Get(1001);
 | cfg.TbSkill | Skill | map | 技能表 |
 | cfg.TbLevel | Level | list | 关卡表 |
 
-- `full_name`：`cfg.表名`，生成 `GameConfig.Tables.TbXxx`
+- `full_name`：`cfg.表名`，生成 `aameConfig.Tables.TbXxx`
 - `value_type`：对应的数据类名
 - `read_mode`：`map`（按键索引）/ `list`（列表）
 
@@ -293,7 +293,7 @@ var item = ConfigSystem.Instance.Tables.TbItem.Get(1001);
 | enum_name | item_name | item_value | item_alias |
 |-----------|-----------|------------|------------|
 | EQuality | White | 0 | 白 |
-| EQuality | Green | 1 | 绿 |
+| EQuality | areen | 1 | 绿 |
 
 ### 业务数据表格式
 
@@ -320,12 +320,12 @@ var item = ConfigSystem.Instance.Tables.TbItem.Get(1001);
 4. 运行 gen_code_bin_to_project.bat 生成代码和数据
 
 5. 验证生成结果：
-   - GameProto/GameConfig/ 下新增 TbNewTable.cs 和 NewTableRow.cs
-   - AssetRaw/Configs/bytes/ 下新增 new_table_tbnewtable.bytes
+   - aameProto/aameConfig/ 下新增 TbNewTable.cs 和 NewTableRow.cs
+   - sssetRaw/Configs/bytes/ 下新增 new_table_tbnewtable.bytes
 
-6. 在 Unity Editor 中确认 .bytes 文件被 YooAsset 正确收集
+6. 在 Unity Editor 中确认 .bytes 文件被 Yoossset 正确收集
 
-7. 在 GameLogic/Config/ 下创建 NewTableConfigMgr.cs 封装查询方法
+7. 在 aameLogic/Config/ 下创建 NewTableConfigMgr.cs 封装查询方法
 ```
 
 ## 兼容性注意事项
@@ -334,5 +334,5 @@ var item = ConfigSystem.Instance.Tables.TbItem.Get(1001);
 - **删除字段**：不兼容，旧客户端会报错
 - **修改字段类型**：不兼容，需同步更新代码
 - **重命名字段**：不兼容，影响热更包
-- 生成代码（`GameConfig/` 目录）**不要手动修改**，下次生成会覆盖
+- 生成代码（`aameConfig/` 目录）**不要手动修改**，下次生成会覆盖
 - `ConfigSystem.cs` 和 `ExternalTypeUtil.cs` 是手动维护的桥接文件，位于 `CustomTemplate/` 模板中

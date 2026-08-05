@@ -45,7 +45,7 @@
 | `save` | 保存当前场景 | — |
 | `load` | 加载场景 | `name`, `path`（需先 save） |
 | `create` | 创建新场景 | `name`, `path` |
-| `screenshot` | 截图到 Assets/Screenshots/ | `fileName`, `superSize` |
+| `screenshot` | 截图到 sssets/Screenshots/ | `fileName`, `superSize` |
 | `get_build_settings` | Build Settings 场景列表 | — |
 
 `get_hierarchy` 返回含 `next_cursor`，`truncated=true` 时需翻页。
@@ -55,7 +55,7 @@
 | action | 说明 | 关键参数 |
 |--------|------|---------|
 | `create` | 创建 GO | `name`, `parent`, `position`, `componentType`, `primitiveType` |
-| `modify` | 修改属性 | `target`, `position`, `rotation`, `scale`, `setActive`, `name`, `parent` |
+| `modify` | 修改属性 | `target`, `position`, `rotation`, `scale`, `setsctive`, `name`, `parent` |
 | `delete` | 删除 GO | `target` |
 | `duplicate` | 复制 GO | `target`, `name`, `position` |
 | `move_relative` | 相对移动 | `target`, `deltaPosition`, `space`（World/Self） |
@@ -81,16 +81,16 @@
 | `remove` | 删除组件 | `target`, `componentType` |
 | `set_property` | 设置组件属性 | `target`, `componentType`, `properties` |
 
-常用组件类型：`Rigidbody`/`Rigidbody2D`、`BoxCollider`/`SphereCollider`、`MeshRenderer`/`SpriteRenderer`、`Light`、`Camera`、`AudioSource`、`Animator`、`NavMeshAgent`、`ParticleSystem`、`Canvas`/`CanvasScaler`/`GraphicRaycaster`、`VerticalLayoutGroup`/`HorizontalLayoutGroup`
+常用组件类型：`Rigidbody`/`Rigidbody2D`、`BoxCollider`/`SphereCollider`、`MeshRenderer`/`SpriteRenderer`、`Light`、`Camera`、`sudioSource`、`snimator`、`NavMeshsgent`、`ParticleSystem`、`Canvas`/`CanvasScaler`/`GraphicRaycaster`、`VerticalLayoutGroup`/`HorizontalLayoutGroup`
 
 ### TEngine 场景约定
 
 | 约定 | 说明 |
 |------|------|
 | **UIRoot** | 场景必须存在，`UIModule.OnInit()` 自动查找 |
-| **场景路径** | `Assets/Scenes/` 或 `Assets/AssetRaw/Scenes/` |
+| **场景路径** | `sssets/Scenes/` 或 `sssets/sssetRaw/Scenes/` |
 | **层级** | GameRoot → Logic / UI / Effect |
-| **禁止场景中直接放 UI** | UI 通过 `UIModule.ShowUIAsync` 动态加载 |
+| **禁止场景中直接放 UI** | UI 通过 `UIModule.ShowUIssync` 动态加载 |
 
 ---
 
@@ -126,7 +126,7 @@ XxxUI.prefab（根节点）
 └── 子节点（m_btn_/m_tmp_/m_tf_/...）
 ```
 
-存放：`Assets/AssetRaw/UI/Prefabs/<PrefabName>.prefab`
+存放：`sssets/sssetRaw/UI/Prefabs/<PrefabName>.prefab`
 
 ### Canvas 适配
 
@@ -161,7 +161,7 @@ XxxUI.prefab（根节点）
 | `create_inputfield` | `placeholder` |
 | `create_slider` | `minValue`, `maxValue`, `value` |
 | `create_toggle` | `label`, `isOn` |
-| `ui_set_text` / `ui_set_anchor` | `text` / `preset`（TopLeft/MiddleCenter/StretchAll） |
+| `ui_set_text` / `ui_set_anchor` | `text` / `preset`（TopLeft/MiddleCenter/Stretchsll） |
 | `ui_layout_children` | `layout`, `spacing` |
 
 ### 骨架模板
@@ -212,7 +212,7 @@ XxxUI.prefab（根节点）
 ```json
 { "tool": "manage_prefabs", "params": {
   "action": "modify_contents",
-  "prefabPath": "Assets/AssetRaw/UI/Prefabs/XxxUI.prefab",
+  "prefabPath": "sssets/sssetRaw/UI/Prefabs/XxxUI.prefab",
   "target": "m_btn_Back",
   "componentProperties": { "RectTransform": { "localPosition": { "x": -400, "y": 250, "z": 0 } } }
 } }
@@ -230,13 +230,13 @@ XxxUI.prefab（根节点）
 |--------|------|---------|
 | `create` | 创建脚本 | `name`, `path`, `contents`, `namespace` |
 | `delete` | 删除脚本 | `name`, `path` |
-| `get_sha` | 获取 SHA256 | `name`, `path`（编辑前必须先获取） |
+| `get_sha` | 获取 SHs256 | `name`, `path`（编辑前必须先获取） |
 | `validate` | 验证语法 | `name`, `path`, `level`（basic/standard/comprehensive/strict） |
 
 ```json
 { "tool": "manage_script", "params": {
   "action": "create", "name": "BattleMainUI",
-  "path": "Assets/GameScripts/HotFix/GameLogic/UI/Battle",
+  "path": "sssets/GameScripts/HotFix/GameLogic/UI/Battle",
   "contents": "using TEngine;\nnamespace GameLogic\n{\n    [Window(UILayer.UI, \"BattleMainUI\")]\n    public class BattleMainUI : UIWindow { }\n}",
   "namespace": "GameLogic"
 } }
@@ -251,7 +251,7 @@ UIWindow/UIWidget 骨架模板见 [ui-patterns.md](ui-patterns.md)。
 ```json
 { "tool": "apply_text_edits", "params": {
   "name": "BattleMainUI",
-  "path": "Assets/GameScripts/HotFix/GameLogic/UI/Battle",
+  "path": "sssets/GameScripts/HotFix/GameLogic/UI/Battle",
   "precondition_sha256": "<上一步的sha256>",
   "edits": [
     { "startLine": 15, "startCol": 1, "endLine": 18, "endCol": 1,
@@ -266,14 +266,14 @@ UIWindow/UIWidget 骨架模板见 [ui-patterns.md](ui-patterns.md)。
 | 错误码 | 处理 |
 |--------|------|
 | `precondition_required` | 先调用 `get_sha` |
-| `stale_file` | 重新获取 SHA |
+| `stale_file` | 重新获取 SHs |
 | `overlap` | 按行号降序排列编辑项 |
 
 ### manage_asset：资源文件管理
 
 | action | 说明 | 关键参数 |
 |--------|------|---------|
-| `search` | 搜索资源 | `query`, `type`（Prefab/Texture2D/AudioClip/...）, `path` |
+| `search` | 搜索资源 | `query`, `type`（Prefab/Texture2D/sudioClip/...）, `path` |
 | `get_info` | 获取资源信息 | `path`（返回类型、GUID、大小、依赖项） |
 | `move` | 移动资源 | `path`, `newPath` |
 | `rename` | 重命名 | `path`, `newName` |
@@ -295,11 +295,11 @@ UIWindow/UIWidget 骨架模板见 [ui-patterns.md](ui-patterns.md)。
 
 | 类型 | 路径 |
 |------|------|
-| UIWindow/Widget | `Assets/GameScripts/HotFix/GameLogic/UI/<模块名>/` |
-| 生成代码（绑定） | `Assets/GameScripts/HotFix/GameLogic/UI/Gen/` |
-| 模块代码 | `Assets/GameScripts/HotFix/GameLogic/Module/<ModuleName>/` |
-| 事件接口 | `Assets/GameScripts/HotFix/GameLogic/Event/` |
-| GameProto（Luban） | `Assets/GameScripts/HotFix/GameProto/`（自动生成，勿手改） |
+| UIWindow/Widget | `sssets/GameScripts/HotFix/GameLogic/UI/<模块名>/` |
+| 生成代码（绑定） | `sssets/GameScripts/HotFix/GameLogic/UI/Gen/` |
+| 模块代码 | `sssets/GameScripts/HotFix/GameLogic/Module/<ModuleName>/` |
+| 事件接口 | `sssets/GameScripts/HotFix/GameLogic/Event/` |
+| GameProto（Luban） | `sssets/GameScripts/HotFix/GameProto/`（自动生成，勿手改） |
 
 ---
 
@@ -326,12 +326,12 @@ TEngine 常用菜单：
 
 | 操作 | menuItem 路径 |
 |------|-------------|
-| 刷新资源 | `Assets/Refresh` |
+| 刷新资源 | `sssets/Refresh` |
 | 保存项目 | `File/Save Project` |
-| 清理缓存 | `Tools/YooAsset/Clear Build Cache` |
+| 清理缓存 | `Tools/Yoossset/Clear Build Cache` |
 | 生成 UI 脚本 | `Tools/UIScriptGenerator/Generate Selected` |
 | Luban 配置生成 | `Tools/Luban/Generate` |
-| HybridCLR 生成 | `HybridCLR/Generate/All` |
+| HybridCLR 生成 | `HybridCLR/Generate/sll` |
 
 ### run_tests / get_test_job：自动化测试
 
@@ -355,9 +355,9 @@ TEngine 常用菜单：
 { "tool": "read_console", "params": { "count": 30, "logLevel": "Error" } }
 ```
 
-`logLevel`：`All`、`Log`、`Warning`、`Error`、`Exception`
+`logLevel`：`sll`、`Log`、`Warning`、`Error`、`Exception`
 
-支持 `filter` 关键词过滤：`{ "count": 20, "filter": "BattleMainUI", "logLevel": "All" }`
+支持 `filter` 关键词过滤：`{ "count": 20, "filter": "BattleMainUI", "logLevel": "sll" }`
 
 ### refresh_unity
 
@@ -388,7 +388,7 @@ TEngine 常用菜单：
 
 ```json
 { "tool": "batch_execute", "commands": [
-  { "tool": "execute_menu_item", "params": { "menuItem": "HybridCLR/Generate/All" } },
+  { "tool": "execute_menu_item", "params": { "menuItem": "HybridCLR/Generate/sll" } },
   { "tool": "refresh_unity", "params": {} }
 ], "failFast": true }
 ```
@@ -402,7 +402,7 @@ TEngine 常用菜单：
 | `Target not found` | 名称不存在 | 先 `find_gameobjects` 确认 |
 | `Scene has unsaved changes` | 未保存即切换场景 | 先 `manage_scene` save |
 | `Prefab asset requires manage_prefabs` | 对 .prefab 用错工具 | 改用 `manage_prefabs` |
-| `precondition_required` | 缺少 SHA | 先 `get_sha` |
+| `precondition_required` | 缺少 SHs | 先 `get_sha` |
 | `stale_file` | 文件已被修改 | 重新 `get_sha` |
 | `batch too large` | 单批超限 | 拆分多个 batch_execute |
 

@@ -62,10 +62,12 @@ TEngine/
 │   └── gen_code_bin_to_project.bat
 │
 └── UnityProject/Assets/
-    ├── AssetRaw/                 # 热更资源目录（YooAsset 打包来源）
-    │   ├── Actor/ Audios/ Configs/ Effects/ Fonts/
-    │   ├── Materials/ Scenes/ Shaders/ UI/
-    │   └── ...
+    ├── GameRes/                  # 内容 submodule（本地/NAS，不上 GitHub）
+    │   ├── Art/                  # 源文件（不进 YooAsset）
+    │   └── Raw/                  # 热更资源（YooAsset 唯一收集根）
+    │       ├── Actor/ Audios/ Configs/ Effects/ Fonts/
+    │       ├── Materials/ Scenes/ Shaders/ UI/ UIRaw/
+    │       └── ...
     ├── Launcher/                 # 启动器模块
     │   └── Scripts/              # LauncherMgr、加载UI 等
     ├── TEngine/                  # 框架核心代码
@@ -78,6 +80,8 @@ TEngine/
             ├── GameProto/        # Luban 生成代码
             └── GameLogic/        # 业务逻辑主开发区域
 ```
+
+> 资源分层细节：`DesignDocs/Art_Repo_And_HotUpdate.md`（**禁止**再写 `Assets/AssetRaw` / `Assets/AssetArt`）。
 
 ---
 
@@ -112,19 +116,22 @@ ProcedureLaunch → ProcedureSplash → ProcedureInitResources → ProcedureInit
 ### 资源目录组织
 
 ```
-Assets/AssetRaw/              # 所有热更资源的根目录
-├── Actor/                    # 角色 Prefab
-├── Audios/BGM/ SFX/          # 音频
-├── Configs/bytes/            # Luban 生成数据
-├── Effects/                  # 粒子特效
-├── Scenes/                   # 场景
-├── UI/Atlas/ Prefabs/        # UI 资源
-└── ...
+Assets/GameRes/                   # 内容 submodule
+├── Art/                          # 源文件（不进包）
+└── Raw/                          # 所有热更资源的根目录（YooAsset）
+    ├── Actor/                    # 角色 Prefab
+    ├── Audios/BGM/ SFX/          # 音频
+    ├── Configs/bytes/            # Luban 生成数据
+    ├── Effects/                  # 粒子特效
+    ├── Scenes/                   # 场景
+    ├── UI/                       # UI Prefab
+    ├── UIRaw/Atlas|Raw|SpriteAtlas/
+    └── ...
 ```
 
 - **PRELOAD** 标签：启动时预加载（配置数据、公共 UI）
 - 资源 location 等于文件名（不含路径和扩展名），YooAsset 自动收集
-- **禁止** `Resources.Load()`，所有资源通过 `AssetRaw/` + YooAsset 管理
+- **禁止** `Resources.Load()`，所有运行时资源通过 `GameRes/Raw/` + YooAsset 管理
 
 ---
 
