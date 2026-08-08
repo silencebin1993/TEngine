@@ -1,11 +1,12 @@
 # 《文明织造》美术选型文案（细胞阶段优先）
 
-> 版本：**v1.1**  
-> 定稿日期：2026-08-05（v1.0） / 管线修订：2026-08-05（v1.1）  
+> 版本：**v1.2**  
+> 定稿日期：2026-08-05（v1.0） / 管线：2026-08-05（v1.1） / 提示词与资产清单：2026-08-06（v1.2）  
 > 定稿方式：全部采纳原文推荐项  
-> 依据：`Cell_Stage_Spec.md`、`GDD_Starter_Pack.md` §13、`Game_Framework_Design.md`  
+> 依据：`Cell_Stage_Spec.md`、`GDD_Starter_Pack.md` §13、`Game_Framework_Design.md`、`CellEnemy.visualId`  
 > 地位：细胞阶段美术基线；后续 Art Bible / 白模 / 部件表以此为准  
-> **v1.1 增量**：锁定 **Cursor 文生图 → Tripo 图生 3D → Unity 表现** 管线，并拆开「几何原画」与「半透明表现」两套约束
+> **v1.1**：锁定 **Cursor 文生图 → Tripo 图生 3D → Unity 表现**；拆开几何原画与半透明表现  
+> **v1.2**：提示词专为 **Cursor Generate Image · 仅 `auto` 模型**；补全战场可出现 mesh 清单；英雄资产强制多视图
 
 ---
 
@@ -225,7 +226,7 @@
 【孢子替代】 全部五条
 【跨阶段】   锁定造形语法
 【路线色】   接受第五节母版
-【资产管线】 Cursor 几何原画 → Tripo → Unity 半透明（v1.1）
+【资产管线】 Cursor 几何原画（仅 auto）→ Tripo → Unity 半透明（v1.2）
 ```
 
 ---
@@ -233,154 +234,284 @@
 ## 11. 下一步
 
 1. ~~升 v1.0~~ **已完成**  
-2. ~~Cursor / Tripo 管线与提示词~~ **v1.1 已写入 §12**  
+2. ~~Cursor / Tripo 管线与提示词~~ **v1.1–v1.2 已写入 §12**  
 3. 补一页 **Visual Identity Statement**（一句话视觉法则 + 3 条原则）→ 可写入正式 Art Bible  
-4. ~~用 §12 模板先出玩家基底 + 六路线签名部件~~ **已出并登记进 `Art/Cell/registry.json`**  
-5. Tripo 导出后：`manage.py link <id> --mesh Meshes/...`，再进 Unity 跑白模三关（§8.3）  
-6. 开 **部件表**（槽位 × 路线 × 稀有度），与 Luban/内容表对齐；新部件先 `manage.py add` 再画图  
+4. ~~玩家基底 + 六路线签名~~；**v1.2 扩到敌人原型 / 精英 / 首领三阶段 / 残块**（见 §12.8 与 `registry.json`）  
+5. Tripo 导出后：登记 `mesh` 路径，再进 Unity 跑白模三关（§8.3）  
+6. 开 **部件表**（槽位 × 路线 × 稀有度），与 Luban/内容表对齐  
+7. 玩家基底绑骨：按 `Blender_Cell_Rig_30min.md`（3 骨：Root / Core / MawTip；小怪不绑）  
 
 ---
 
-## 12. Cursor 文生图提示词（Tripo 专用几何原画）
+## 12. Cursor 文生图提示词（仅 `auto` · Tripo 几何原画）
 
-> 用法：整段英文复制进 Cursor「生成图片」；`aspect_ratio` 用 **1:1**。  
-> 目标不是好看插画，而是 **让 Tripo 抽准体积**。
+> **模型硬规则：只用 Cursor Generate Image 的 `auto`。禁止切 Flux / GPT Image / Ideogram 等付费档。**  
+> 用法：把下面「整段英文」一次贴进生成框；`aspect_ratio = 1:1`。  
+> 目标不是好看插画，而是 **让 Tripo 抽准闭合体积**。半透明湿润只在 Unity shader 做。
+
+### 12.0 `auto` 模型专用写法（必读）
+
+`auto` 对长否定列表与抽象词不敏感，按这六条写：
+
+1. **第一句定相机**：写死 `three-quarter view, camera slightly above eye level`——禁止只写 `orthographic` / `top-down`（顶视会压扁，Tripo 出饼）。  
+2. **材质用玩具词**：`opaque matte plasticine clay toy`，不要写 glass / jelly / wet / translucent / microscope。  
+3. **一次一物**：禁止「细胞 + 六件外挂」；部件与敌人分图。  
+4. **薄结构加粗**：鞭毛/触须/刺 `at least 8% of body width`；孢子泡必须 `fused / stuck`。  
+5. **英雄资产出多视图**：玩家基底、首领优先分四次生成 front/left/back/right；四宫格偶发被安全策略拦截。模块/小怪用单张 3/4。  
+6. **提示词禁写品牌**：不要写 `Tripo` / `image-to-3D` / `3D scanning`——`auto` 会把它们画成画面字母水印。改说 `clay toy prop` / `product photo`。
 
 ### 12.1 万能前缀 / 后缀（每次必带）
 
-**Prefix（放最前）：**
+**Prefix：**
 
 ```text
-Game-ready concept turnaround for image-to-3D, single solid creature prop centered,
-opaque matte clay material, closed manifold volume, clear readable silhouette,
-soft even studio lighting, no hard shadows, pure light-gray background (#D8D8D8),
-orthographic three-quarter front view, subject fills 70% of frame, high contrast edges,
-stylized low-poly organic game asset, toy-like smooth forms,
+Product photo of ONE solid clay toy prop.
+Three-quarter view, camera slightly above eye level, subject fills 70% of frame, fully visible not cropped.
+Opaque matte plasticine clay, closed smooth manifold volume, chunky stylized low-poly organic game asset.
+Pure seamless light-gray background (#D8D8D8), soft even studio lighting, no hard shadows, high-contrast silhouette.
 ```
 
-**Suffix（放最后，作否定约束）：**
+**Suffix：**
 
 ```text
--- avoid: transparency, glass, translucent, refraction, liquid water, fog, smoke,
-particles, floating debris, glow bloom, neon, lens flare, depth of field, motion blur,
-text, watermark, UI, frame, collage, multiple objects, cutaway, cross-section,
-photoreal microscope, blood gore, anatomy chart, tiny hair-thin filaments
+No transparency, no glass, no jelly shine, no glow, no neon, no bloom, no particles, no smoke, no fog,
+no floating debris, no text, no letters, no logo, no watermark, no UI, no frame, no collage,
+no multiple separate objects, no cutaway, no cross-section, no photoreal microscope, no blood, no hair-thin filaments.
 ```
 
 ### 12.2 玩家基底（核/体）— 开局圆泡
 
-```text
-[Prefix]
-a simple round single-cell organism, fat soft sphere body, one slightly brighter
-opaque core bump on the surface (not a hole), thick smooth membrane edge, chubby cute,
-solid coral-pink matte clay, no limbs yet, perfectly closed volume
-[Suffix]
-```
-
-### 12.3 六路线签名部件（单独生模，再挂槽位）
-
-**Devour · 大口膜（膜/口器）：**
+**单视图（先看体积）：**
 
 ```text
 [Prefix]
-a devourer mouth module for a cell creature: wide irregular circular maw attached
-to a thick rounded collar, soft folded lip ridges, one large bite opening,
-solid deep wine-red matte clay, chunky silhouette, no teeth spikes thinner than 5% of body
+A chubby round single-cell creature body: fat soft sphere like a smooth ball of clay,
+one opaque brighter coral core bump fused on the front surface (a raised dome, NOT a hole),
+thick rounded membrane rim, no limbs, solid coral-pink matte clay, cute toy proportions.
 [Suffix]
 ```
 
-**Agile · 梭形鞭（运动器）：**
+**四视图板（进 Tripo 优先用这张，裁成 front/left/back/right）：** 见 §12.4，主体描述同上。
+
+### 12.3 六路线签名部件（单独生模）
+
+**Devour · 大口膜（maw）：**
 
 ```text
 [Prefix]
-an agile propulsion module: sleek spindle body with 2–3 thick tapered flagella
-fused to the rear, sharp forward tip, teal-green matte clay with pale edge ridges,
-streamlined closed volume, flagella thick enough for game low-poly
+A devourer mouth module: thick rounded collar ring with one wide irregular bite opening in front,
+soft folded lip ridges, solid deep wine-red matte clay, chunky silhouette,
+opening is a shallow carved recess not a through-hole, no thin teeth.
 [Suffix]
 ```
 
-**Electric · 刺突冠（附属）：**
+**Agile · 梭形鞭（motility）：**
 
 ```text
 [Prefix]
-an electric crown module: short radial spikes and 4 thick tendril stubs on a ring base,
-cerulean matte clay with pale yellow ridge lines painted on (not glowing),
-chunky sci-fi organism part, all spikes thick and closed
+An agile propulsion module: sleek spindle body with exactly 3 thick tapered flagella fused to the rear,
+sharp forward tip, solid teal-green matte clay with pale painted edge ridges (not glowing),
+each flagellum at least 8% of body width, one connected closed mesh.
 [Suffix]
 ```
 
-**Spore · 多泡簇（附属/孢子位）：**
+**Electric · 刺突冠（appendage）：**
 
 ```text
 [Prefix]
-a spore-cluster module: 5–7 attached bubble buds fused onto a round base,
-lavender matte clay, bubbles stuck to the body (none floating),
-cluster reads as one connected mesh
+An organic electric crown module for a microbe: short ring base with 6 thick stubby spikes
+and 4 short tendril stubs fused outward, solid cerulean-blue matte clay,
+pale yellow ridge lines painted as matte pigment (NOT glowing, NOT neon),
+looks like a cell organ not an altar, all parts thick and closed.
 [Suffix]
 ```
 
-**Nest · 菌毯锚（领域锚）：**
+**Spore · 多泡簇（appendage）：**
 
 ```text
 [Prefix]
-a nest-anchor module: flat disc pad with short mycelium stubs and two peg anchors underneath,
-olive-brown rough matte clay, low wide silhouette, carpet-like top texture painted on,
-closed solid form
+A spore-cluster module: 6 bubble buds of mixed sizes fused onto one round mound base,
+solid lavender matte clay, every bubble stuck to the base (none floating in air),
+reads as a single connected mesh.
 [Suffix]
 ```
 
-**Corrupt · 破口棘（膜/外壳）：**
+**Nest · 菌毯锚（territory）：**
 
 ```text
 [Prefix]
-a corrupt shell module: asymmetric cracked carapace plate with a few thick black thorns,
-sickly yellow-green matte clay, broken rim but still one closed solid piece,
-menacing chunky silhouette, no dust or particles
+A nest-anchor module: low flat disc pad with short thick mycelium stubs on top
+and two peg anchors underneath, solid olive-brown rough matte clay,
+wide low silhouette, carpet texture painted on, closed solid form.
 [Suffix]
 ```
 
-### 12.4 多视图板（玩家基底 / 首领优先）
-
-在 Prefix 后追加，并明确「同一物体四视图」：
-
-```text
-same single opaque clay creature shown as a clean 2x2 turnaround sheet on one image:
-top-left front, top-right left side, bottom-left back, bottom-right right side,
-identical scale and lighting, centered in each quadrant, pure light-gray background,
-no labels, no arrows, no perspective distortion
-```
-
-> Tripo 多视图接口顺序：`front → left → back → right`。若 Cursor 一次出四宫格，需裁成四张再上传；或分四次生成（推荐：四次更稳）。
-
-### 12.5 敌人原型（换色复用）
+**Corrupt · 破口棘壳（membrane）：**
 
 ```text
 [Prefix]
-a small hostile microbe enemy, [SHAPE: round|spindle|crab-like|jellyfish-blob],
-solid [COLOR] matte clay, one signature feature: [FEATURE],
-readable from top-down game camera, chunky low-poly toy form
+A corrupt shell module: asymmetric cracked carapace plate with 3–4 thick black thorns,
+solid sickly yellow-green matte clay, broken rim but still ONE closed solid piece (no holes through),
+menacing chunky silhouette.
 [Suffix]
 ```
 
-### 12.6 Cursor 参数建议
+### 12.4 多视图板（玩家基底 / 首领强制）
+
+把 Prefix 换成下面整段（已含相机与布局），再接主体描述 + Suffix：
+
+```text
+Clean 2x2 turnaround sheet of the SAME single opaque clay toy on one image.
+Top-left: front view. Top-right: left side view. Bottom-left: back view. Bottom-right: right side view.
+Identical scale and even lighting in every quadrant, each copy centered, pure light-gray background,
+no labels, no arrows, no perspective distortion, no perspective foreshortening, orthographic-looking views.
+Absolutely no text, no letters, no logo, no watermark.
+```
+
+> 四宫格偶发被内容安全拦截时，改「分四次单视图」（front/left/back/right 各一张）更稳。  
+> Tripo 多视图顺序：`front → left → back → right`。
+
+### 12.5 敌人 / 精英 / 首领 / 残块（战场 mesh 全表）
+
+原则：**按剪影做原型，同原型换色覆盖多个 `visualId`**（对齐 §8.1「8–12 外形原型」）。完整提示词见 §12.8；下表是对照。
+
+| 资产 id | 覆盖 visualId / 用途 | 视图 |
+|---------|----------------------|------|
+| `enemy_blob_food` | 1 浮游食团 | 单 3/4 |
+| `enemy_spiky_cell` | 2 刺膜细胞 | 单 |
+| `enemy_cilia_sweeper` | 3 扫尾纤毛体；9 游隼纤毛（加长梭） | 单 |
+| `enemy_hunter` | 4 追猎原虫 | 单 |
+| `enemy_swarm_dot` | 5 噬菌群；18 电泳群体 | 单 |
+| `enemy_hardshell` | 6 硬壳核胞；17 钙化巨壳（放大换色） | 单 |
+| `enemy_jelly_conductive` | 7 导电水母体 | 单 |
+| `enemy_spore_rot` | 8 腐败孢团；12 分裂酵母 | 单 |
+| `enemy_spine_shooter` | 10 毒棘漂虫 | 单 |
+| `enemy_mycelium_pad` | 11 簇生菌丝 | 单 |
+| `enemy_sucker` | 13 虹吸口虫；19 寄生噬体 | 单 |
+| `enemy_mimic_sac` | 14 拟态囊胞 | 单 |
+| `enemy_acid_drop` | 15 游离酸滴 | 单 |
+| `enemy_cannibal` | 16 吞噬同族 | 单 |
+| `enemy_bomb_seed` | 20 灾变胚种 | 单 |
+| `enemy_corpse_chunk` | 21 组织残块 | 单 |
+| `elite_devourer` … `elite_aggregate` | 50–57 八精英各一剪影 | 单 |
+| `boss_prokaryote_p1/p2/p3` | 90 原核霸主三阶段 | **四视图板** |
+
+### 12.6 Cursor 参数（`auto`）
 
 | 参数 | 值 | 原因 |
 |------|----|------|
-| 比例 | `1:1` | Tripo 友好；主体居中 |
-| 风格词 | `matte clay / toy / low-poly organic` | 压住写实与玻璃感 |
-| 一次一物 | 强制 | 避免多物体深度竞争 |
-| 卡面/宣传图 | **另开提示词**，不要复用几何原画 | 卡面要半透明插画，会污染 Tripo |
+| 模型 | **仅 `auto`** | 费用；其它档禁用 |
+| 比例 | `1:1` | Tripo 友好 |
+| 风格词 | `plasticine clay toy` | 压写实与玻璃 |
+| 一次一物 | 强制 | 深度不打架 |
+| 卡面/宣传 | **另开提示词** | 半透明插画污染 Tripo |
 
-### 12.7 Tripo 侧参数建议（游戏实例化）
+### 12.7 Tripo 侧参数
 
 | 项 | 建议 |
 |----|------|
-| 输入 | PNG；尽量 ≥ 1024，能到 2K 更好；主体抠干净 |
-| 单图 / 多图 | 模块单图；英雄资产四视图 |
-| `smart_low_poly` | true |
-| `quad` | true |
-| `texture_alignment` | `geometry` |
-| 导出 | FBX 或 GLB → Blender 清一次 → Unity |
+| 输入 | PNG ≥1024；主体居中；四视图先裁齐 |
+| 单图 / 多图 | 模块与小怪单图；基底/首领多视图 |
+| `smart_low_poly` / `quad` | true |
+| `texture_alignment` | `geometry`（要形准） |
+| 导出 | FBX/GLB → Blender 封洞清碎件 → Unity |
+
+### 12.8 完整生图提示词目录（复制即用）
+
+下列每条 = Prefix 主体句 + 已嵌入关键形状；生成时仍须前后各贴 §12.1 Prefix/Suffix（四视图资产改用 §12.4 头）。
+
+**普通敌人原型**
+
+```text
+# enemy_blob_food (visualId 1)
+A tiny soft food blob microbe, fat irregular round lump, solid warm beige matte clay, no limbs, cute edible look.
+
+# enemy_spiky_cell (2)
+A spiky defensive cell, round body with 8 short thick spikes fused outward, solid magenta matte clay, spikes stubby.
+
+# enemy_cilia_sweeper (3/9)
+A horizontal sweeper microbe, flattened oval body with a row of 5 thick cilia paddles along one side, solid cyan matte clay.
+
+# enemy_hunter (4)
+A hunter protozoan, streamlined teardrop body with two short thick antenna stubs, solid orange-red matte clay, aggressive silhouette.
+
+# enemy_swarm_dot (5/18)
+A tiny swarm microbe, simple plump oval with one small ridge, solid electric-blue matte clay, readable as a pack unit.
+
+# enemy_hardshell (6/17)
+A hard-shell nucellus, thick armored sphere with plate seams painted on, solid slate-gray matte clay, heavy chunky volume.
+
+# enemy_jelly_conductive (7)
+A conductive jellyfish-blob, round dome body with 4 thick short tentacle stubs fused under, solid pale blue matte clay, tentacles stubby not hair-thin.
+
+# enemy_spore_rot (8/12)
+A rotting spore clump, lumpy multi-bulb mass fused together, solid purple-brown matte clay, one connected piece.
+
+# enemy_spine_shooter (10)
+A spine shooter microbe, round body with one thick forward cannon spike, solid green matte clay, chunky.
+
+# enemy_mycelium_pad (11)
+A stationary mycelium pad, low wide star-shaped mat with short stubs, solid forest-green matte clay, flat silhouette.
+
+# enemy_sucker (13/19)
+A sucker mouth parasite, chubby body with one thick funnel mouth fused in front, solid rust matte clay.
+
+# enemy_mimic_sac (14)
+A mimic food sac that looks almost like the beige food blob but with a hidden seam ridge, solid warm beige matte clay with one dark painted seam.
+
+# enemy_acid_drop (15)
+A free acid drop, smooth teardrop droplet shape standing upright, solid lime matte clay, closed volume.
+
+# enemy_cannibal (16)
+A cannibal microbe, oversized round body with a wide shallow maw recess, solid deep red matte clay, bulkier than hunter.
+
+# enemy_bomb_seed (20)
+A catastrophe seed, cracked egg-like oval with thick ridge lines, solid charcoal matte clay with sickly yellow painted cracks (not glowing).
+
+# enemy_corpse_chunk (21)
+A torn tissue chunk, irregular meaty lump with soft folds, solid dull pink-brown matte clay, single closed prop.
+```
+
+**精英（50–57）**
+
+```text
+# elite_devourer (50)
+An elite macro-devourer: huge fat sphere with oversized shallow maw and thick collar, solid dark wine matte clay, bossy silhouette.
+
+# elite_whip_king (51)
+An elite whip-king: long spindle body with 4 very thick rear flagella, solid teal matte clay, high-speed hunter look.
+
+# elite_volt_hunter (52)
+An elite volt hunter: armored dome with 6 thick spike stubs and painted yellow ridge lines (matte pigment not glow), solid cerulean clay.
+
+# elite_spore_mother (53)
+An elite spore mother: large central bulb with 8 attached smaller bulbs fused on, solid lavender matte clay, all stuck together.
+
+# elite_gatekeeper (54)
+An elite nest gatekeeper: wide fortified disc with two thick pillar stubs, solid olive-brown matte clay, immovable look.
+
+# elite_molt_hunter (55)
+An elite molt hunter: crab-like oval with a cracked outer shell plate and inner smoother core showing, solid amber matte clay, still one piece.
+
+# elite_siphon_brain (56)
+An elite siphon brain: large brainy lobe body with three thick sucker tubes fused forward, solid purple matte clay.
+
+# elite_filth_aggregate (57)
+An elite filth aggregate: cluster of 5–6 fused lumpy blobs into one mass, solid sickly yellow-green matte clay, can read as breakable cluster but still connected.
+```
+
+**首领三阶段（各出一张 §12.4 四视图板）**
+
+```text
+# boss_prokaryote_p1 增殖
+A giant prokaryote boss phase 1: massive round core with several budding child spheres fused on the surface, solid deep indigo matte clay, intimidating toy boss.
+
+# boss_prokaryote_p2 极化
+Same giant prokaryote boss phase 2: massive round core with asymmetric thick plate armor halves (one side ridged, one side smooth), solid indigo clay with pale yellow matte painted seams (not glowing).
+
+# boss_prokaryote_p3 崩坏
+Same giant prokaryote boss phase 3: massive aggressive teardrop hunter body, cracked shell ridges, forward maw recess, solid near-black indigo matte clay with sickly yellow cracks painted on.
+```
 
 ---
 
@@ -395,7 +526,8 @@ readable from top-down game camera, chunky low-poly toy form
 | Spec：万敌可读性 | 玩家识别与体积分层为硬需求 |
 | 框架：GPU 实例化 | 槽位 Archetype，禁自由组合网格 |
 | 产能：Cursor + Tripo | §0.1 / §8.4 / §12 |
+| 费用：只用 auto | §12 硬规则 |
 
 ---
 
-*本文为细胞阶段美术基线。视觉承诺不变；v1.1 只锁定生成管线。若要改已定画风/造物项，开变更说明并升版本号（v1.2+）。*
+*本文为细胞阶段美术基线。视觉承诺不变；v1.2 优化 `auto` 提示词并补全战场 mesh 生图目录。若要改已定画风/造物项，开变更说明并升版本号（v1.3+）。*
