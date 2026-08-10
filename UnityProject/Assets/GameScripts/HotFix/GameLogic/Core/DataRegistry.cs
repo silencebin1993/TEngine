@@ -27,6 +27,7 @@ namespace GameLogic.Core
         private readonly List<PhaseSpec> _phases = new List<PhaseSpec>(8);
         private readonly List<EcoEventSpec> _ecoEvents = new List<EcoEventSpec>(20);
         private readonly List<BehaviorArchetype> _archetypes = new List<BehaviorArchetype>(12);
+        private readonly Dictionary<int, List<BossPhaseSpec>> _bossPhases = new Dictionary<int, List<BossPhaseSpec>>(4);
 
         private readonly List<CardSpec> _cardList = new List<CardSpec>(160);
 
@@ -89,6 +90,7 @@ namespace GameLogic.Core
             _phases.Clear();
             _ecoEvents.Clear();
             _archetypes.Clear();
+            _bossPhases.Clear();
             Loaded = false;
             UsingFallback = false;
         }
@@ -137,6 +139,21 @@ namespace GameLogic.Core
             }
         }
 
+        /// <summary>注册首领阶段。同一首领的多个阶段按 BossEnemyId 分组。</summary>
+        public void AddBossPhase(BossPhaseSpec spec)
+        {
+            if (spec == null)
+            {
+                return;
+            }
+            if (!_bossPhases.TryGetValue(spec.BossEnemyId, out List<BossPhaseSpec> list))
+            {
+                list = new List<BossPhaseSpec>(4);
+                _bossPhases[spec.BossEnemyId] = list;
+            }
+            list.Add(spec);
+        }
+
         /// <summary>注册行为原型。返回其索引，敌人配置用这个索引引用它。</summary>
         public int AddArchetype(BehaviorArchetype arc)
         {
@@ -168,6 +185,12 @@ namespace GameLogic.Core
         }
 
         public BehaviorArchetype[] ArchetypeArray() => _archetypes.ToArray();
+
+        /// <summary>某首领的全部阶段（未按顺序排序，调用方自行按 HpThreshold 判定）。无阶段返回 null。</summary>
+        public IReadOnlyList<BossPhaseSpec> GetBossPhases(int bossEnemyId)
+        {
+            return _bossPhases.TryGetValue(bossEnemyId, out List<BossPhaseSpec> list) ? list : null;
+        }
 
         /// <summary>
         /// 数据自检。在加载期暴露断链，而不是等运行时崩。
@@ -209,6 +232,26 @@ namespace GameLogic.Core
                 {
                     TEngine.Log.Error($"[DataRegistry] 敌人 {e.Id}({e.Name}) SpawnCost <= 0，压力预算会失效");
                     problems++;
+                }
+                if (e.IsBoss && !_bossPhases.ContainsKey(e.Id))
+                {
+                    TEngine.Log.Warning($"[DataRegistry] 首领 {e.Id}({e.Name}) 未配置任何 BossPhase，三阶段切换不会生效");
+                    problems++;
+                }
+            }
+
+            foreach (var kv in _bossPhases)
+            {
+                List<BossPhaseSpec> list = kv.Value;
+                for (int i = 0; i < list.Count; i++)
+                {
+                    BossPhaseSpec p = list[i];
+                    if (p.ArchetypeIndex < 0 || p.ArchetypeIndex >= _archetypes.Count)
+                    {
+                        TEngine.Log.Error(
+                            $"[DataRegistry] 首领阶段 {p.Id}(首领{p.BossEnemyId}/阶段{p.PhaseIndex}) 行为原型索引越界: {p.ArchetypeIndex}");
+                        problems++;
+                    }
                 }
             }
 
@@ -272,6 +315,25 @@ namespace GameLogic.Core
 
         public bool IsElite;
         public bool IsBoss;
+    }
+
+    /// <summary>
+    /// 首领阶段定义（TR-cell-011）。同一首领可有多个阶段，按血量阈值切换。
+    /// 判定规则：取 (当前血量% ≤ HpThreshold) 中 HpThreshold 最小的一项——
+    /// 即"血量掉到哪一档，就用哪一档最贴近的行为"，与阈值在表里的顺序无关。
+    /// </summary>
+    public sealed class BossPhaseSpec
+    {
+        public int Id;
+        /// <summary>所属首领的敌人 id。</summary>
+        public int BossEnemyId;
+        /// <summary>阶段序号，0 起。</summary>
+        public int PhaseIndex;
+        public string Name;
+        /// <summary>进入本阶段的血量百分比上限，(0,1]。</summary>
+        public float HpThreshold;
+        /// <summary>本阶段生效的行为原型索引，覆盖敌人默认原型。</summary>
+        public int ArchetypeIndex;
     }
 
     /// <summary>生态时期定义。对应 Cell_Stage_Spec.md §3。</summary>

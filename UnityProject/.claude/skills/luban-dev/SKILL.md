@@ -29,9 +29,10 @@ description: Luban 游戏配置全栈工具，支持枚举/Bean/数据表的增�
 
 根据操作系统选择对应扩展名：
 
-**Windows：**
-```bash
-cmd //c "set AI_MODE=1 && Configs/GameConfig/gen_code_bin_to_project_lazyload.bat"
+**Windows（管理员 PowerShell，会 UAC；勿用 cmd）：**
+```powershell
+$env:AI_MODE = '1'
+powershell -NoProfile -ExecutionPolicy Bypass -File Configs/GameConfig/gen_code_bin_to_project_lazyload.ps1
 ```
 
 **macOS/Linux：**

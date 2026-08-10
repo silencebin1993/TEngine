@@ -422,6 +422,15 @@ namespace BinGames.Sim
             {
                 SpawnProjectile(cmds.Projectiles[i]);
             }
+
+            for (int i = 0; i < cmds.ArchetypeSwaps.Length; i++)
+            {
+                ArchetypeSwapRequest req = cmds.ArchetypeSwaps[i];
+                if (req.TargetIndex >= 0 && req.TargetIndex < _unitCount && _alive[req.TargetIndex] != 0)
+                {
+                    _archetypeId[req.TargetIndex] = req.ArchetypeId;
+                }
+            }
         }
 
         private void ApplyStatus(in StatusRequest req)
@@ -558,6 +567,7 @@ namespace BinGames.Sim
                     Faction = (SimFaction)_faction[idx],
                     StatusAtDeath = (SimStatus)_status[idx],
                     KillerLogicId = 0,
+                    CauseKind = DeathCauseKind.Damage,
                 };
             }
             ReleaseSlot(idx);
@@ -595,6 +605,7 @@ namespace BinGames.Sim
                     Faction = (SimFaction)_faction[idx],
                     StatusAtDeath = (SimStatus)_status[idx],
                     KillerLogicId = killerLogicId,
+                    CauseKind = DeathCauseKind.Devour,
                 };
             }
             ReleaseSlot(idx);

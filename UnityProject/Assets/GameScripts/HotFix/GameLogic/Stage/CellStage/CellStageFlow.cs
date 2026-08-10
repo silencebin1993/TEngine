@@ -44,6 +44,10 @@ namespace GameLogic.Stage.CellStage
         private PhaseTimeline _timeline;
         private CellDevourSystem _devour;
         private CellPlayerController _player;
+        private MinionRegistry _minions;
+        private BossPhaseController _bossPhase;
+        private ShopSystem _shop;
+        private CodexRegistry _codex;
 
         private SimRenderer _renderer;
         private Camera _camera;
@@ -66,6 +70,9 @@ namespace GameLogic.Stage.CellStage
         public EcoEventScheduler Events => _events;
         public AbilitySystem Abilities => _abilities;
         public CellDevourSystem Devour => _devour;
+        public BossPhaseController BossPhase => _bossPhase;
+        public ShopSystem Shop => _shop;
+        public CodexRegistry Codex => _codex;
         public SimBridge Sim => _sim;
         public StatusSystem Status => _status;
         public AreaZoneSystem Zones => _zones;
@@ -100,14 +107,53 @@ namespace GameLogic.Stage.CellStage
             _paused = false;
         }
 
+        /// <summary>来源 id，用于按来源批量移除继承带来的属性修正（当前无移除需求，仅作标记）。</summary>
+        private const int InheritedStatSourceId = -100;
+
         /// <summary>
         /// 应用上一阶段继承。当前无调用方，但结构先立住，
         /// 这样器官阶段接入时不需要改本类的其它部分。
+        ///
+        /// 按 prev.DominantRoute 给一条对应属性加成，按 prev.KeyCards 直接注入起始卡组。
         /// </summary>
         private void ApplyInherited(StageOutcome prev)
         {
-            // TODO(多阶段): 按 prev.DominantRoute / KeyCards 决定起始卡池与属性加成。
-            TEngine.Log.Info($"[CellStageFlow] 收到上一阶段产物：{prev.StageId}，主导路线 {prev.DominantRoute}");
+            StatId bonusStat = RouteBonusStat(prev.DominantRoute);
+            if (bonusStat != StatId.None)
+            {
+                _stats.Add(new StatModifier(bonusStat, ModifierOp.PctAdd, 0.1f, InheritedStatSourceId));
+            }
+
+            int injected = 0;
+            if (prev.KeyCards != null)
+            {
+                for (int i = 0; i < prev.KeyCards.Count; i++)
+                {
+                    CardSpec spec = prev.KeyCards[i];
+                    if (spec != null && _deck.Acquire(spec) > 0)
+                    {
+                        injected++;
+                    }
+                }
+            }
+
+            TEngine.Log.Info($"[CellStageFlow] 收到上一阶段产物：{prev.StageId}，"
+                + $"主导路线 {prev.DominantRoute}（加成 {bonusStat}），注入定义性卡牌 {injected} 张");
+        }
+
+        /// <summary>路线 → 继承加成属性。每条路线对应它最核心的一项数值。</summary>
+        private static StatId RouteBonusStat(CardRoute route)
+        {
+            switch (route)
+            {
+                case CardRoute.Devour: return StatId.DevourGain;
+                case CardRoute.Agile: return StatId.MoveSpeed;
+                case CardRoute.Electric: return StatId.ElectricPower;
+                case CardRoute.Spore: return StatId.EvoGain;
+                case CardRoute.Nest: return StatId.MyceliumScale;
+                case CardRoute.Corrupt: return StatId.PollutionCap;
+                default: return StatId.None;
+            }
         }
 
         private void SetupCamera()
@@ -147,6 +193,10 @@ namespace GameLogic.Stage.CellStage
             _timeline = _hub.Register(new PhaseTimeline());
             _devour = _hub.Register(new CellDevourSystem());
             _player = _hub.Register(new CellPlayerController());
+            _minions = _hub.Register(new MinionRegistry());
+            _bossPhase = _hub.Register(new BossPhaseController());
+            _shop = _hub.Register(new ShopSystem());
+            _codex = _hub.Register(new CodexRegistry());
 
             // 效果执行器注册。新增一种效果只需在此多一行。
             _abilities.RegisterExecutor(new EffectDealDamage());
@@ -169,8 +219,10 @@ namespace GameLogic.Stage.CellStage
             _director.Bind(_sim, _stats, _deck);
             _timeline.Bind(_director);
             _events.Bind(_director, _timeline, _progression, _wallet);
-            _devour.Bind(_sim, _stats, _wallet, _events, _outcome.Statistics, _zones);
+            _devour.Bind(_sim, _stats, _wallet, _events, _outcome.Statistics, _zones, _minions);
             _player.Bind(_sim, _stats, _abilities, _wallet, _camera);
+            _bossPhase.Bind(_sim);
+            _shop.Bind(_wallet, _stats, _deck, _sim);
         }
 
         private void SetupSim()

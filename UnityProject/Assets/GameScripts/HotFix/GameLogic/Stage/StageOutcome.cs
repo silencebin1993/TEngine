@@ -89,6 +89,8 @@ namespace GameLogic.Stage
     {
         public int FoodDevoured;
         public int EnemiesKilled;
+        /// <summary>EnemiesKilled 中由吞噬（而非伤害耗尽）致死的数量（DeathEvent.CauseKind）。</summary>
+        public int EnemiesKilledByDevour;
         public int ElitesKilled;
         public int PhasesReached;
         public float PeakVolume;
@@ -104,6 +106,7 @@ namespace GameLogic.Stage
         {
             FoodDevoured = 0;
             EnemiesKilled = 0;
+            EnemiesKilledByDevour = 0;
             ElitesKilled = 0;
             PhasesReached = 0;
             PeakVolume = 0f;

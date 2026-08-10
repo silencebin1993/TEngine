@@ -169,6 +169,17 @@ namespace GameLogic.Battle
             });
         }
 
+        /// <summary>切换某个存活单位的行为原型（如首领按血量分阶段）。</summary>
+        public void SwapArchetype(int unitIndex, int archetypeId)
+        {
+            if (!_running) { return; }
+            _cmds.SwapArchetype(new ArchetypeSwapRequest
+            {
+                TargetIndex = unitIndex,
+                ArchetypeId = archetypeId,
+            });
+        }
+
         public void ApplyStatusUnit(int unitIndex, SimStatus status, bool add = true)
         {
             if (!_running) { return; }

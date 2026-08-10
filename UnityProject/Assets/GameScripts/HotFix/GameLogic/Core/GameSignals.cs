@@ -21,6 +21,8 @@ namespace GameLogic.Core
         public int ComboCount;
         /// <summary>是否是尸体/残块的二次吞噬。</summary>
         public bool IsCorpse;
+        /// <summary>被吞噬目标的敌人 id（尸体/残块时为无效配置 id，消费方应结合 IsCorpse 判断）。</summary>
+        public int EnemyId;
     }
 
     /// <summary>击杀（非吞噬致死，如放电、投射物、毒区）。</summary>
@@ -108,6 +110,14 @@ namespace GameLogic.Core
     {
         public int EventId;
         public bool Started;
+    }
+
+    /// <summary>首领阶段切换（按血量阈值，数据驱动）。</summary>
+    public struct BossPhaseChangedSignal
+    {
+        public int BossEnemyId;
+        public int PhaseIndex;
+        public string PhaseName;
     }
 
     /// <summary>周期性 tick。给"每 N 秒触发"类卡牌用，避免它们各自计时。</summary>

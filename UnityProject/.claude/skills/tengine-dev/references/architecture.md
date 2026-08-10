@@ -59,7 +59,7 @@
 TEngine/
 ├── Configs/GameConfig/           # Luban 配置表工程
 │   ├── Datas/                    # Excel 数据源
-│   └── gen_code_bin_to_project.bat
+│   └── gen_code_bin_to_project.ps1
 │
 └── UnityProject/Assets/
     ├── GameRes/                  # 内容 submodule（本地/NAS，不上 GitHub）

@@ -158,7 +158,8 @@ public class MainToolbarDropdownSceneSelector
     private static List<(string sceneName, string scenePath)> m_otherScenes;
 
     private static string initScenePath = "Assets/Scenes";
-    private static string defaultScenePath = "Assets/AssetRaw/Scenes";
+    // 内容仓迁移后场景目录为 GameRes/Raw/Scenes；旧的 AssetRaw 已删除（见 CLAUDE.md 路径约束）。
+    private static string defaultScenePath = "Assets/GameRes/Raw/Scenes";
 
     static string[] scenePaths;
 

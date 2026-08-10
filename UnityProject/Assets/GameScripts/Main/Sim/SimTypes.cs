@@ -143,6 +143,16 @@ namespace BinGames.Sim
         public int SourceLogicId;
     }
 
+    /// <summary>
+    /// 行为原型切换指令。用于运行期改变某个存活单位的行为（如首领分阶段）。
+    /// 不改血量/半径等其它状态，只重定向它读取哪一套 <see cref="BehaviorArchetype"/>。
+    /// </summary>
+    public struct ArchetypeSwapRequest
+    {
+        public int TargetIndex;
+        public int ArchetypeId;
+    }
+
     /// <summary>状态施加/移除指令。</summary>
     public struct StatusRequest
     {
@@ -173,6 +183,20 @@ namespace BinGames.Sim
     }
 
     /// <summary>
+    /// 致死来源类型。内核只区分"怎么没的"（伤害耗尽 vs 被吞噬清除），
+    /// 不认识"污染"等玩法概念——那属于热更层自己的判定（见 CellStageFlow.ResolveDeathCause）。
+    /// </summary>
+    public enum DeathCauseKind : byte
+    {
+        /// <summary>未标记（保留值，理论上不应出现在实际事件中）。</summary>
+        Unknown = 0,
+        /// <summary>血量耗尽（EmitDeath 路径：放电、投射物、毒区等伤害致死）。</summary>
+        Damage = 1,
+        /// <summary>被吞噬清除（KillUnit 路径：CellDevourSystem 吞噬结算）。</summary>
+        Devour = 2,
+    }
+
+    /// <summary>
     /// 单位死亡事件。内核回写，热更层每帧读取以结算掉落、触发卡牌等。
     /// </summary>
     public struct DeathEvent
@@ -185,6 +209,8 @@ namespace BinGames.Sim
         public SimStatus StatusAtDeath;
         /// <summary>击杀来源的逻辑 id；0 表示环境或自然死亡。</summary>
         public int KillerLogicId;
+        /// <summary>致死来源类型。</summary>
+        public DeathCauseKind CauseKind;
     }
 
     /// <summary>命中事件。用于卡牌 OnHit 触发与命中反馈。</summary>

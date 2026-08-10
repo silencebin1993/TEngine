@@ -25,6 +25,7 @@ namespace GameLogic.Stage.CellStage
         private EcoEventScheduler _events;
         private StageStatistics _stats2;
         private AreaZoneSystem _zones;
+        private MinionRegistry _minions;
 
         /// <summary>连吃层数。断连后清空（除非 ComboNeverResets 规则开启）。</summary>
         public int Combo { get; private set; }
@@ -37,7 +38,8 @@ namespace GameLogic.Stage.CellStage
         private const float VolumeGrowthRatio = 0.055f;
 
         public void Bind(SimBridge sim, StatSheet stats, ResourceWallet wallet,
-            EcoEventScheduler events, StageStatistics statistics, AreaZoneSystem zones)
+            EcoEventScheduler events, StageStatistics statistics, AreaZoneSystem zones,
+            MinionRegistry minions)
         {
             _sim = sim;
             _stats = stats;
@@ -45,6 +47,7 @@ namespace GameLogic.Stage.CellStage
             _events = events;
             _stats2 = statistics;
             _zones = zones;
+            _minions = minions;
         }
 
         public override void OnEnter()
@@ -172,6 +175,7 @@ namespace GameLogic.Stage.CellStage
                 TargetFaction = faction,
                 ComboCount = Combo,
                 IsCorpse = isCorpse,
+                EnemyId = enemyId,
             });
         }
 
@@ -213,6 +217,14 @@ namespace GameLogic.Stage.CellStage
             for (int i = 0; i < n; i++)
             {
                 DeathEvent d = snap.Deaths[i];
+
+                if (d.Faction == SimFaction.PlayerMinion)
+                {
+                    // 附属体死亡（战损或自然消亡）：归还 MinionCap 配额，不结算奖励。
+                    _minions?.Release();
+                    continue;
+                }
+
                 if (d.Faction != SimFaction.Hostile)
                 {
                     continue;
@@ -248,6 +260,11 @@ namespace GameLogic.Stage.CellStage
                     if (elite)
                     {
                         _stats2.ElitesKilled++;
+                    }
+                    // 致死来源分流（DeathEvent.CauseKind）：吞噬清除 vs 伤害耗尽。
+                    if (d.CauseKind == DeathCauseKind.Devour)
+                    {
+                        _stats2.EnemiesKilledByDevour++;
                     }
                 }
 

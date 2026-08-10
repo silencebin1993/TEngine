@@ -29,6 +29,8 @@ namespace GameLogic.Core
         private const int ArcSwarm = 5;
         private const int ArcStationary = 6;
         private const int ArcOrbit = 7;
+        private const int ArcBossEnrage = 8;
+        private const int ArcBossFinal = 9;
 
         public static void Populate(DataRegistry reg)
         {
@@ -38,6 +40,7 @@ namespace GameLogic.Core
             Cards(reg);
             Phases(reg);
             EcoEvents(reg);
+            BossPhases(reg);
         }
 
         private static void Archetypes(DataRegistry reg)
@@ -112,6 +115,24 @@ namespace GameLogic.Core
                 AggroRange = 28f, AttackRange = 0.5f, AttackCooldown = 1f,
                 AttackDamage = 9f, Separation = 0.9f, PreferredRange = 7f,
                 WanderStrength = 0.4f, ChargeSpeedMul = 1f,
+            });
+
+            // 首领专属：狂暴猎杀。阶段 1 用，追猎的强化版——更快、更凶。
+            reg.AddArchetype(new BehaviorArchetype
+            {
+                Kind = BehaviorKind.Chase, Accel = 8f, TurnRate = 6f,
+                AggroRange = 30f, AttackRange = 0.45f, AttackCooldown = 0.85f,
+                AttackDamage = 14f, Separation = 1f, WanderStrength = 0.6f,
+                ChargeSpeedMul = 1f,
+            });
+
+            // 首领专属：终焉冲撞。阶段 2 用，濒死转入更具威胁的冲撞形态。
+            reg.AddArchetype(new BehaviorArchetype
+            {
+                Kind = BehaviorKind.Charge, Accel = 12f, TurnRate = 1.5f,
+                AggroRange = 26f, AttackRange = 0.65f, AttackCooldown = 1.6f,
+                AttackDamage = 20f, Separation = 0.9f,
+                ChargeTelegraph = 0.6f, ChargeSpeedMul = 3f,
             });
         }
 
@@ -804,6 +825,26 @@ namespace GameLogic.Core
                 Id = 8, Name = "原核遗响", Duration = 30f,
                 Desc = "出现一次原核遗产卡选择。",
                 GrantsDraft = true, DraftKind = DraftKind.Legacy,
+            });
+        }
+
+        /// <summary>首领三阶段（TR-cell-011）。与 tools/cell_tables/step3_enemy_ability.py 的 BOSSPHASE 同构。</summary>
+        private static void BossPhases(DataRegistry reg)
+        {
+            reg.AddBossPhase(new BossPhaseSpec
+            {
+                Id = 900, BossEnemyId = 90, PhaseIndex = 0, Name = "蛰伏",
+                HpThreshold = 1.0f, ArchetypeIndex = ArcChase,
+            });
+            reg.AddBossPhase(new BossPhaseSpec
+            {
+                Id = 901, BossEnemyId = 90, PhaseIndex = 1, Name = "狂暴",
+                HpThreshold = 0.66f, ArchetypeIndex = ArcBossEnrage,
+            });
+            reg.AddBossPhase(new BossPhaseSpec
+            {
+                Id = 902, BossEnemyId = 90, PhaseIndex = 2, Name = "终焉",
+                HpThreshold = 0.33f, ArchetypeIndex = ArcBossFinal,
             });
         }
     }

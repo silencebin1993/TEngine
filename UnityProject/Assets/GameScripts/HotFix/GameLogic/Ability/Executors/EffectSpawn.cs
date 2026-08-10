@@ -1,4 +1,5 @@
 using BinGames.Sim;
+using GameLogic.Spawning;
 using GameLogic.Stats;
 using Unity.Mathematics;
 
@@ -28,11 +29,25 @@ namespace GameLogic.Ability.Executors
                 count *= 2;
             }
 
-            // TODO(附属体注册表): MinionCap 应该限制"场上存活附属体总数"，
-            // 但目前没有任何地方登记已生成的附属体数量，这里只能读一下上限数值
-            // 留痕，真正的裁剪要等附属体注册表落地后在这里（或 Spawn 前）做。
-            float minionCap = ctx.Stats?.Get(StatId.MinionCap) ?? 0f;
-            _ = minionCap;
+            // MinionCap 限制"场上存活附属体总数"：向 MinionRegistry 申请配额，
+            // 超出上限的部分直接裁掉（含 0），不做"回收最老附属体腾位"的驱逐逻辑。
+            int minionCap = (int)(ctx.Stats?.Get(StatId.MinionCap) ?? 0f);
+            MinionRegistry minions = ctx.Hub?.Get<MinionRegistry>();
+            if (minions != null)
+            {
+                int granted = minions.Reserve(count, minionCap);
+                if (granted < count)
+                {
+                    TEngine.Log.Info(
+                        $"[EffectSpawn] MinionCap 已满，本次生成从 {count} 裁剪到 {granted}（cap={minionCap}）。");
+                }
+                count = granted;
+            }
+
+            if (count <= 0)
+            {
+                return;
+            }
 
             float health = spec.Value > 0f ? spec.Value : 1f;
             float radius = spec.Radius > 0f ? spec.Radius : 0.4f;

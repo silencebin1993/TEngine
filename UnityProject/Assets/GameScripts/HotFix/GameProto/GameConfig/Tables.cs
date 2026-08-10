@@ -31,6 +31,10 @@ public partial class Tables
     /// </summary>
     public cell.TbBehaviorArchetype TbBehaviorArchetype {get; }
     /// <summary>
+    /// 首领阶段
+    /// </summary>
+    public cell.TbBossPhase TbBossPhase {get; }
+    /// <summary>
     /// 卡牌
     /// </summary>
     public cell.TbCard TbCard {get; }
@@ -118,6 +122,7 @@ public partial class Tables
         TbAbilityEffect = new cell.TbAbilityEffect(loader("cell_tbabilityeffect"));
         TbAffix = new cell.TbAffix(loader("cell_tbaffix"));
         TbBehaviorArchetype = new cell.TbBehaviorArchetype(loader("cell_tbbehaviorarchetype"));
+        TbBossPhase = new cell.TbBossPhase(loader("cell_tbbossphase"));
         TbCard = new cell.TbCard(loader("cell_tbcard"));
         TbCardEffect = new cell.TbCardEffect(loader("cell_tbcardeffect"));
         TbCardStat = new cell.TbCardStat(loader("cell_tbcardstat"));
@@ -148,6 +153,7 @@ public partial class Tables
         TbAbilityEffect.ResolveRef(this);
         TbAffix.ResolveRef(this);
         TbBehaviorArchetype.ResolveRef(this);
+        TbBossPhase.ResolveRef(this);
         TbCard.ResolveRef(this);
         TbCardEffect.ResolveRef(this);
         TbCardStat.ResolveRef(this);

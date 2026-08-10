@@ -113,7 +113,7 @@ public class LevelConfigMgr
 ```
 TEngine/Configs/GameConfig/
 ├── luban.conf                      # Luban 主配置
-├── gen_code_bin_to_project.bat     # 生成脚本
+├── gen_code_bin_to_project.ps1     # 生成脚本（管理员 PowerShell）
 ├── Datas/                          # Excel 数据源
 │   ├── __tables__.xlsx             # 表索引（注册所有表）
 │   ├── __beans__.xlsx              # Bean 复合类型
@@ -150,7 +150,7 @@ TEngine/Configs/GameConfig/
 
 ```bat
 # 在 TEngine/Configs/GameConfig/ 目录下运行
-gen_code_bin_to_project.bat
+gen_code_bin_to_project.ps1
 ```
 
 生成产物：
@@ -182,7 +182,7 @@ GameRes/Raw/Configs/bytes/ → item.bytes, skill.bytes, ...
 1. __tables__.xlsx 注册新表：full_name=cfg.TbNewTable, value_type=NewTableRow, read_mode=map
 2. 创建 Datas/new_table.xlsx，添加列定义和数据
 3. （如需）在 __beans__.xlsx 定义 Bean
-4. 运行 gen_code_bin_to_project.bat
+4. 运行 gen_code_bin_to_project.ps1
 5. 验证：GameConfig/ 下新增文件，Configs/bytes/ 下新增 .bytes
 6. 创建 Config/NewTableConfigMgr.cs 封装查询方法
 ```

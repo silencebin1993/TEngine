@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using GameLogic.Cards;
 using GameLogic.Core;
+using GameLogic.Progression;
 using GameLogic.Stage;
 using GameLogic.Stage.CellStage;
 using GameLogic.Stats;
@@ -25,6 +26,15 @@ namespace GameLogic.UI.Battle
         private GUIStyle _big;
         private GUIStyle _cardBox;
         private bool _showDeck;
+        private bool _showShop;
+        private bool _showCodex;
+
+        /// <summary>
+        /// §12.1 常驻信息已迁移到 <see cref="GameLogic.BattleMainUI"/>（UIWindow + prefab）。
+        /// 本面板降级为开发开关，默认不绘制，F10 临时唤出用于和正式 HUD 比对数值
+        /// （Preflight battle-ui/story-001 决策 G1）。
+        /// </summary>
+        private bool _showDebugHud;
 
         private readonly string[] _routeNames =
         {
@@ -35,6 +45,11 @@ namespace GameLogic.UI.Battle
         {
             EnsureStyles();
 
+            if (Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.F10)
+            {
+                _showDebugHud = !_showDebugHud;
+            }
+
             CellStageFlow cell = GameRoot.CellStage;
             if (cell == null || !cell.IsRunning)
             {
@@ -42,7 +57,11 @@ namespace GameLogic.UI.Battle
                 return;
             }
 
-            DrawHud(cell);
+            HandleQuickPanelHotkeys();
+            if (_showDebugHud)
+            {
+                DrawHud(cell);
+            }
 
             if (cell.Paused && cell.PendingOptions != null && cell.PendingOptions.Count > 0)
             {
@@ -52,6 +71,16 @@ namespace GameLogic.UI.Battle
             if (_showDeck)
             {
                 DrawDeck(cell);
+            }
+
+            if (_showShop)
+            {
+                DrawShop(cell);
+            }
+
+            if (_showCodex)
+            {
+                DrawCodex(cell);
             }
         }
 
@@ -202,13 +231,32 @@ namespace GameLogic.UI.Battle
             }
 
             GUILayout.Space(4f);
-            GUILayout.Label("Tab 查看卡组　FPS " + (1f / Mathf.Max(0.0001f, Time.smoothDeltaTime)).ToString("F0"), _label);
+            GUILayout.Label("F10 关闭调试HUD　Tab 查看卡组　B 商店　V 图鉴　FPS " + (1f / Mathf.Max(0.0001f, Time.smoothDeltaTime)).ToString("F0"), _label);
 
             GUILayout.EndArea();
+        }
 
-            if (Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.Tab)
+        /// <summary>
+        /// Tab/B/V 面板开关。独立于 <see cref="_showDebugHud"/>——DrawHud 默认降级隐藏，
+        /// 但卡组/商店/图鉴入口不受影响（Preflight G1：这些界面本 story 不动）。
+        /// </summary>
+        private void HandleQuickPanelHotkeys()
+        {
+            if (Event.current.type != EventType.KeyDown)
+            {
+                return;
+            }
+            if (Event.current.keyCode == KeyCode.Tab)
             {
                 _showDeck = !_showDeck;
+            }
+            else if (Event.current.keyCode == KeyCode.B)
+            {
+                _showShop = !_showShop;
+            }
+            else if (Event.current.keyCode == KeyCode.V)
+            {
+                _showCodex = !_showCodex;
             }
         }
 
@@ -349,6 +397,100 @@ namespace GameLogic.UI.Battle
                 DeckEntry e = entries[i];
                 string stack = e.Stack > 1 ? $" x{e.Stack}" : "";
                 GUILayout.Label($"{RarityText(e.Spec.Rarity)} {e.Spec.Name}{stack}", _label);
+            }
+
+            GUILayout.EndArea();
+        }
+
+        /// <summary>
+        /// 临时商店面板（B 键开关，AC「可用临时 UI」）。窄口径实现（Preflight H2）：
+        /// 固定商品目录，不阻塞玩法推进——只是覆盖层，不像 <see cref="DrawDraft"/> 那样暂停局内时间。
+        /// </summary>
+        private void DrawShop(CellStageFlow cell)
+        {
+            ShopSystem shop = cell.Shop;
+            if (shop == null)
+            {
+                return;
+            }
+
+            float cardW = 220f;
+            float cardH = 170f;
+            float gap = 16f;
+            float totalW = ShopSystem.SlotCount * cardW + (ShopSystem.SlotCount - 1) * gap;
+            float x0 = (Screen.width - totalW) * 0.5f;
+            float y0 = Screen.height * 0.5f - cardH * 0.5f;
+
+            GUI.Box(new Rect(x0 - 20f, y0 - 60f, totalW + 40f, cardH + 140f), "");
+            GUI.Label(new Rect(x0, y0 - 46f, totalW, 28f),
+                $"<b>局内商店</b>　营养质 {cell.Wallet.Nutrient:F0}", _big);
+
+            for (int i = 0; i < ShopSystem.SlotCount; i++)
+            {
+                var r = new Rect(x0 + i * (cardW + gap), y0, cardW, cardH);
+                ShopItemSpec item = shop.GetSlot(i);
+                bool soldOut = shop.IsSoldOut(i);
+
+                string text = $"<b>{item.Name}</b>\n{item.Desc}\n\n价格 {item.Cost:F0}";
+                if (soldOut)
+                {
+                    text += "\n<color=#888888>已售出</color>";
+                }
+                GUI.Box(r, text, _cardBox);
+
+                GUI.enabled = !soldOut;
+                if (GUI.Button(new Rect(r.x + 10f, r.yMax - 36f, r.width - 20f, 28f),
+                        soldOut ? "已售出" : "购买"))
+                {
+                    shop.TryBuy(i);
+                }
+                GUI.enabled = true;
+            }
+
+            if (GUI.Button(new Rect(x0 + totalW * 0.5f - 70f, y0 + cardH + 16f, 140f, 30f),
+                    $"刷新（{ShopSystem.RefreshCost:F0}）"))
+            {
+                shop.TryRefresh();
+            }
+
+            if (GUI.Button(new Rect(x0 + totalW * 0.5f - 40f, y0 + cardH + 54f, 80f, 26f), "关闭"))
+            {
+                _showShop = false;
+            }
+        }
+
+        /// <summary>
+        /// 图鉴查看面板（V 键开关，AC「至少一种查看入口」）。窄口径实现（Preflight C1）：
+        /// 只读本局内存态发现记录，不做跨会话持久化，因此上一局的发现在新的一局不会保留。
+        /// </summary>
+        private void DrawCodex(CellStageFlow cell)
+        {
+            CodexRegistry codex = cell.Codex;
+            if (codex == null)
+            {
+                return;
+            }
+
+            var r = new Rect(Screen.width * 0.5f - 220f, 12f, 440f, Screen.height - 24f);
+            GUI.Box(r, "");
+            GUILayout.BeginArea(new Rect(r.x + 10f, r.y + 10f, r.width - 20f, r.height - 20f));
+
+            GUILayout.Label("<b>图鉴（本局发现，未跨局保存）</b>", _label);
+            GUILayout.Space(6f);
+
+            GUILayout.Label($"<b>敌人</b>　{codex.DiscoveredEnemyIds.Count}", _label);
+            foreach (int id in codex.DiscoveredEnemyIds)
+            {
+                EnemySpec e = DataRegistry.Instance.GetEnemy(id);
+                GUILayout.Label(e != null ? $"　{e.Name}" : $"　#{id}", _label);
+            }
+
+            GUILayout.Space(8f);
+            GUILayout.Label($"<b>卡牌</b>　{codex.DiscoveredCardIds.Count}", _label);
+            foreach (int id in codex.DiscoveredCardIds)
+            {
+                CardSpec c = DataRegistry.Instance.GetCard(id);
+                GUILayout.Label(c != null ? $"　{RarityText(c.Rarity)} {c.Name}" : $"　#{id}", _label);
             }
 
             GUILayout.EndArea();

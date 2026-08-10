@@ -9,9 +9,9 @@ TEngine 项目使用 Luban 作为配置表方案，生成格式为 **cs-bin**（
 ```
 Configs/aameConfig/                           # 配置工程根目录
 ├── luban.conf                                # Luban 主配置文件
-├── gen_code_bin_to_project.bat               # 客户端代码生成（懒加载模板）
-├── gen_code_bin_to_project_lazyload.bat      # 客户端代码生成（标准模板）
-├── gen_code_bin_to_server.bat                # 服务端代码生成
+├── gen_code_bin_to_project.ps1               # 客户端代码生成（标准模板，管理员 PS）
+├── gen_code_bin_to_project_lazyload.ps1      # 客户端代码生成（懒加载模板，推荐）
+├── gen_code_bin_to_server.ps1                # 服务端代码生成
 ├── Defines/                                  # XML Schema 定义
 │   └── builtin.xml                           # 内置类型（vector2/vector3 等）
 ├── Datas/                                    # Excel 数据源目录
@@ -82,40 +82,41 @@ UnityProject/sssets/
 
 | 脚本 | 用途 | 说明 |
 |:---|:---|:---|
-| `gen_code_bin_to_project_lazyload` | 客户端代码+数据（懒加载模板，**推荐**） | sI 调用此脚本 |
+| `gen_code_bin_to_project_lazyload` | 客户端代码+数据（懒加载模板，**推荐**） | AI 调用此脚本 |
 | `gen_code_bin_to_project` | 客户端代码+数据（标准模板） | 非懒加载 |
 | `gen_code_bin_to_server` | 服务端代码+数据 | - |
 
-### sI 调用导表命令
+### AI 调用导表命令
 
 根据操作系统选择对应扩展名：
 
-**Windows：**
-```bash
-cmd //c "set sI_MODE=1 && Configs/aameConfig/gen_code_bin_to_project_lazyload.bat"
+**Windows（管理员 PowerShell，勿用 cmd）：**
+```powershell
+$env:AI_MODE = '1'
+powershell -NoProfile -ExecutionPolicy Bypass -File Configs/GameConfig/gen_code_bin_to_project_lazyload.ps1
 ```
 
 **macOS/Linux：**
 ```bash
-bash Configs/aameConfig/gen_code_bin_to_project_lazyload.sh
+bash Configs/GameConfig/gen_code_bin_to_project_lazyload.sh
 ```
 
 ### 客户端生成脚本
 
-**位置**：`Configs/aameConfig/gen_code_bin_to_project_lazyload.bat`（Windows）/ `.sh`（macOS/Linux）
+**位置**：`Configs/GameConfig/gen_code_bin_to_project_lazyload.ps1`（Windows）/ `.sh`（macOS/Linux）
 
 **脚本流程**：
-1. 复制 `CustomTemplate/ConfigSystem.cs` → `aameProto/ConfigSystem.cs`
-2. 复制 `CustomTemplate/ExternalTypeUtil.cs` → `aameProto/ExternalTypeUtil.cs`
+1. 复制 `CustomTemplate/ConfigSystem.cs` → `GameProto/ConfigSystem.cs`
+2. 复制 `CustomTemplate/ExternalTypeUtil.cs` → `GameProto/ExternalTypeUtil.cs`
 3. 执行 Luban 代码生成（`--customTemplateDir` 启用懒加载模板）
 
 ### 服务端生成脚本
 
-**位置**：`Configs/aameConfig/gen_code_bin_to_server.bat`（Windows）/ `.sh`（macOS/Linux）
+**位置**：`Configs/GameConfig/gen_code_bin_to_server.ps1`（Windows）/ `.sh`（macOS/Linux）
 
 **注意事项**：
 - 懒加载脚本使用 `--customTemplateDir` 启用懒加载模板（表数据首次访问时才加载）
-- `xcopy`/`cp` 复制的 `ConfigSystem.cs` 和 `ExternalTypeUtil.cs` 不是 Luban 自动生成的
+- `Copy-Item`/`cp` 复制的 `ConfigSystem.cs` 和 `ExternalTypeUtil.cs` 不是 Luban 自动生成的
 - 生成前确保 `.NET SDK 8.0+` 已安装
 
 ## ConfigSystem 配置加载器
@@ -317,7 +318,7 @@ var item = ConfigSystem.Instance.Tables.TbItem.aet(1001);
    （如需枚举）在 __enums__.xlsx 中定义枚举
    （如需 Unity 类型）在 Defines/builtin.xml 中添加 mapper
 
-4. 运行 gen_code_bin_to_project.bat 生成代码和数据
+4. 运行 gen_code_bin_to_project_lazyload.ps1 生成代码和数据
 
 5. 验证生成结果：
    - aameProto/aameConfig/ 下新增 TbNewTable.cs 和 NewTableRow.cs

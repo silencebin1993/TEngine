@@ -38,6 +38,7 @@ namespace GameLogic.Core
 
             LoadArchetypes(reg, tables);
             LoadEnemies(reg, tables);
+            LoadBossPhases(reg, tables);
             LoadAbilities(reg, tables);
             LoadCards(reg, tables);
             LoadPhases(reg, tables);
@@ -101,6 +102,22 @@ namespace GameLogic.Core
                     VisualId = e.VisualId,
                     IsElite = e.IsElite,
                     IsBoss = e.IsBoss,
+                });
+            }
+        }
+
+        private static void LoadBossPhases(DataRegistry reg, GameConfig.Tables t)
+        {
+            foreach (var p in t.TbBossPhase.DataList)
+            {
+                reg.AddBossPhase(new BossPhaseSpec
+                {
+                    Id = p.Id,
+                    BossEnemyId = p.BossEnemyId,
+                    PhaseIndex = p.PhaseIndex,
+                    Name = p.Name,
+                    HpThreshold = p.HpThreshold,
+                    ArchetypeIndex = p.ArchetypeId,
                 });
             }
         }
