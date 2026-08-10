@@ -552,7 +552,11 @@ namespace BinGames.Sim
 
         private void EmitDeath(int idx)
         {
-            if (idx <= SimConst.PlayerIndex || idx >= _unitCount)
+            // _pendingDeaths（JobDamage）与 _deadQueue（JobCollectDeaths 全量血量扫描）
+            // 同一帧可能对同一 idx 各命中一次；后到者此时槽位已被前者 ReleaseSlot 回收
+            // （_alive=0、_position 已改写成越界哨兵值），必须在这里拦掉，否则会重复
+            // Publish 一次 LogicId=0 / Position 越界的 KillSignal（连带二次结算奖励与卡牌 OnKill）。
+            if (idx <= SimConst.PlayerIndex || idx >= _unitCount || _alive[idx] == 0)
             {
                 return;
             }

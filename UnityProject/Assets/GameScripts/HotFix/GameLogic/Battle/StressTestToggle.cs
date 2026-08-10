@@ -4,11 +4,11 @@ using UnityEngine;
 namespace GameLogic.Battle
 {
     /// <summary>
-    /// 让 <see cref="SimStressTest"/> 在正式局内也能用 F9 唤出，而不需要手动挂组件。
+    /// 让 <see cref="SimStressTest"/> 在正式局内也能用 F11 唤出，而不需要手动挂组件。
     ///
     /// <see cref="SimStressTest"/> 一旦激活就会常驻跑一份**独立于本局**的合成压测负载
-    /// （见其文档），所以这里只负责「首次按 F9 时懒加载它」——激活后交由它自己的
-    /// F9 分支循环切挡位，本组件不再插手，避免两边同时抢 F9 语义。
+    /// （见其文档），所以这里只负责「首次按 F11 时懒加载它」——激活后交由它自己的
+    /// F11 分支循环切挡位，本组件不再插手，避免两边同时抢 F11 语义。
     /// 激活后不提供关闭入口：这是开发自查用的一次性 devtool，需要关掉就重进游戏。
     /// </summary>
     public sealed class StressTestToggle : MonoBehaviour
@@ -17,7 +17,7 @@ namespace GameLogic.Battle
 
         private void Update()
         {
-            if (_spawned || !Input.GetKeyDown(KeyCode.F9))
+            if (_spawned || !Input.GetKeyDown(KeyCode.F11))
             {
                 return;
             }

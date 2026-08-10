@@ -13,7 +13,7 @@ namespace GameLogic.Battle
     /// 内核压力测试。验证框架文档 §9 的性能预算，而不是空口声称"能跑 10k"。
     ///
     /// 用法：把本组件挂到场景任意 GameObject 上，或在控制台调用
-    /// <see cref="RunHeadless"/>。按 F9 循环切换单位数挡位。
+    /// <see cref="RunHeadless"/>。按 F11 循环切换单位数挡位。
     ///
     /// 测的是**内核 Step 的纯耗时**（不含渲染与热更玩法），
     /// 因为那是"大范围敌人"的决定性瓶颈。
@@ -97,7 +97,7 @@ namespace GameLogic.Battle
 
         private void Update()
         {
-            if (Input.GetKeyDown(KeyCode.F9))
+            if (Input.GetKeyDown(KeyCode.F11))
             {
                 _tierIndex = (_tierIndex + 1) % Tiers.Length;
                 Begin(Tiers[_tierIndex]);
@@ -140,7 +140,7 @@ namespace GameLogic.Battle
         {
             var style = new GUIStyle(GUI.skin.label) { fontSize = 16 };
             GUILayout.BeginArea(new Rect(12f, 12f, 460f, 190f));
-            GUILayout.Label($"<b>内核压力测试</b>　F9 切换挡位", new GUIStyle(style) { richText = true });
+            GUILayout.Label($"<b>内核压力测试</b>　F11 切换挡位", new GUIStyle(style) { richText = true });
             GUILayout.Label($"单位数 {_targetCount}（容量 {_world?.UnitCount ?? 0}）", style);
             GUILayout.Label($"Step 平均 {_lastAvgMs:F2} ms　最差 {_worstMs:F2} ms", style);
             GUILayout.Label($"帧率 {1f / Mathf.Max(0.0001f, Time.smoothDeltaTime):F0} FPS", style);

@@ -30,12 +30,14 @@ namespace GameLogic.Core
         private readonly Dictionary<int, List<BossPhaseSpec>> _bossPhases = new Dictionary<int, List<BossPhaseSpec>>(4);
 
         private readonly List<CardSpec> _cardList = new List<CardSpec>(160);
+        private readonly List<AbilitySpec> _abilityList = new List<AbilitySpec>(32);
 
         public bool Loaded { get; private set; }
         /// <summary>true 表示用的是内置兜底内容，不是 Luban 表。</summary>
         public bool UsingFallback { get; private set; }
 
         public IReadOnlyList<CardSpec> AllCards => _cardList;
+        public IReadOnlyList<AbilitySpec> AllAbilities => _abilityList;
         public IReadOnlyList<PhaseSpec> Phases => _phases;
         public IReadOnlyList<EcoEventSpec> EcoEvents => _ecoEvents;
         public IReadOnlyList<BehaviorArchetype> Archetypes => _archetypes;
@@ -86,6 +88,7 @@ namespace GameLogic.Core
             _cards.Clear();
             _cardList.Clear();
             _abilities.Clear();
+            _abilityList.Clear();
             _enemies.Clear();
             _phases.Clear();
             _ecoEvents.Clear();
@@ -109,10 +112,12 @@ namespace GameLogic.Core
 
         public void AddAbility(AbilitySpec spec)
         {
-            if (spec != null && !_abilities.ContainsKey(spec.Id))
+            if (spec == null || _abilities.ContainsKey(spec.Id))
             {
-                _abilities[spec.Id] = spec;
+                return;
             }
+            _abilities[spec.Id] = spec;
+            _abilityList.Add(spec);
         }
 
         public void AddEnemy(EnemySpec spec)

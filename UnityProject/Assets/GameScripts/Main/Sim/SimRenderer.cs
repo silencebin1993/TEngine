@@ -29,9 +29,11 @@ namespace BinGames.Sim
     public sealed class SimRenderer
     {
         private const int BatchMax = 1023;
-        private const float ImpactDecay = 0.82f;
-        private const float ImpactDamageScale = 0.12f;
+        private const float ImpactDecay = 0.88f;
+        private const float ImpactDamageScale = 0.28f;
         private const float SpeedRef = 4.5f;
+        /// <summary>投射物沿飞行方向拉长的倍率——纯圆点在快速移动时几乎不可见（story-010 V1）。</summary>
+        private const float ProjectileStretch = 2.2f;
 
         private SimVisual[] _visuals;
         private Matrix4x4[][] _matrices;
@@ -182,10 +184,11 @@ namespace BinGames.Sim
 
                 float ang = math.atan2(s.Velocity.y, s.Velocity.x) * Mathf.Rad2Deg;
                 float sc = s.Radius * 2f * visual.ScaleMul;
+                // 局部 +X 经此旋转后对齐飞行方向，拉长 X 让弹体读作"射出去的东西"而不是一个点。
                 _batchMatrices[n] = Matrix4x4.TRS(
                     new Vector3(s.Position.x, _yPlane, s.Position.y),
                     Quaternion.Euler(0f, -ang, 0f),
-                    new Vector3(sc, sc, sc));
+                    new Vector3(sc * ProjectileStretch, sc, sc));
                 _batchColors[n] = new Vector4(
                     visual.BaseColor.r, visual.BaseColor.g, visual.BaseColor.b, visual.BaseColor.a);
                 _batchMotions[n] = PackMotion(s.Velocity);

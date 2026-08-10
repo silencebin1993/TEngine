@@ -80,6 +80,21 @@ namespace GameLogic.Ability
             return true;
         }
 
+        /// <summary>
+        /// GM / 调试用：忽略槽位上限强制授予。已拥有则失败。
+        /// 正式流程请用 <see cref="Grant"/>。
+        /// </summary>
+        public bool ForceGrant(AbilitySpec spec)
+        {
+            if (spec == null || HasAbility(spec.Id))
+            {
+                return false;
+            }
+
+            _slots.Add(new AbilityRuntime(spec));
+            return true;
+        }
+
         public bool HasAbility(int abilityId)
         {
             for (int i = 0; i < _slots.Count; i++)

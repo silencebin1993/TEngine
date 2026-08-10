@@ -1,7 +1,9 @@
+using System.Collections.Generic;
 using BinGames.Sim;
 using GameLogic.Ability;
 using GameLogic.Ability.Executors;
 using GameLogic.Battle;
+using GameLogic.Battle.Feedback;
 using GameLogic.Cards;
 using GameLogic.Core;
 using GameLogic.Progression;
@@ -197,6 +199,10 @@ namespace GameLogic.Stage.CellStage
             _bossPhase = _hub.Register(new BossPhaseController());
             _shop = _hub.Register(new ShopSystem());
             _codex = _hub.Register(new CodexRegistry());
+            // 战斗反馈表现层（story-002）：白模默认实现，只订阅 Signals，无需 Bind 依赖。
+            _hub.Register(new CombatFeedbackPresenter());
+            // 技能施放表现层（story-010）：与上面并列，管施放瞬间本身而非命中结算。
+            _hub.Register(new AbilityCastPresenter());
 
             // 效果执行器注册。新增一种效果只需在此多一行。
             _abilities.RegisterExecutor(new EffectDealDamage());
@@ -313,7 +319,7 @@ namespace GameLogic.Stage.CellStage
             }
             if (mat.HasProperty("_ImpactSquash"))
             {
-                mat.SetFloat("_ImpactSquash", 0.32f);
+                mat.SetFloat("_ImpactSquash", 0.48f);
             }
             if (mat.HasProperty("_BodyAlpha"))
             {
@@ -402,12 +408,13 @@ namespace GameLogic.Stage.CellStage
             _renderer?.Draw(_sim.Snapshot);
             if (_sim.World != null)
             {
+                // 加大加亮 + SimRenderer 内的方向拉长（story-010 V1）：默认半径下的弹体太小太暗。
                 _renderer?.DrawProjectiles(_sim.World.Projectiles, new SimVisual
                 {
                     Mesh = BuildQuadCached(),
                     Material = ProjectileMaterial(),
-                    ScaleMul = 1f,
-                    BaseColor = new Color(1f, 0.9f, 0.5f),
+                    ScaleMul = 1.8f,
+                    BaseColor = new Color(1f, 0.95f, 0.35f),
                 });
             }
 
@@ -579,6 +586,33 @@ namespace GameLogic.Stage.CellStage
             _wallet?.Add(ResourceKind.Mutagen, 999f);
             _wallet?.Add(ResourceKind.EvoEnergy, 999f);
             TEngine.Log.Info("[GM] +999 营养质 / 突变质 / 进化能");
+        }
+
+        /// <summary>
+        /// GM：一键解锁全部主动技能（忽略槽位上限），并灌满体力方便连放测反馈。
+        /// </summary>
+        public void DebugUnlockAllAbilities()
+        {
+            if (_abilities == null)
+            {
+                return;
+            }
+
+            int granted = 0;
+            IReadOnlyList<AbilitySpec> all = DataRegistry.Instance.AllAbilities;
+            for (int i = 0; i < all.Count; i++)
+            {
+                if (_abilities.ForceGrant(all[i]))
+                {
+                    granted++;
+                }
+            }
+
+            float staminaMax = _stats != null ? _stats.Get(StatId.StaminaMax) : 100f;
+            _wallet?.Add(ResourceKind.Stamina, staminaMax);
+
+            TEngine.Log.Info(
+                $"[GM] 解锁全部技能 +{granted}（槽位 {_abilities.SlotCount}/{all.Count}），体力已灌满");
         }
 #endif
 

@@ -4,6 +4,7 @@ using GameLogic.Core;
 using GameLogic.Progression;
 using GameLogic.Spawning;
 using GameLogic.Stats;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace GameLogic.Stage.CellStage
@@ -109,8 +110,28 @@ namespace GameLogic.Stage.CellStage
                 });
             }
 
+            // 命中事件广播（卡牌 OnHit 触发、命中反馈；story-002 修复：此前从未 Publish）
+            PumpHits(in snap);
+
             // 死亡事件结算（击杀奖励、卡牌 OnKill）
             ResolveDeaths(in snap);
+        }
+
+        /// <summary>把内核本帧命中事件广播为 <see cref="HitSignal"/>。紧邻 Resolution 层其它广播，不放 SimBridge（该类不循环）。</summary>
+        private void PumpHits(in SimSnapshot snap)
+        {
+            int n = snap.HitCount;
+            for (int i = 0; i < n; i++)
+            {
+                HitEvent h = snap.Hits[i];
+                Signals.Publish(new HitSignal
+                {
+                    TargetLogicId = h.TargetLogicId,
+                    Position = h.Position,
+                    Damage = h.Damage,
+                    Lethal = h.Lethal,
+                });
+            }
         }
 
         private void Consume(int idx, in SimSnapshot snap)
@@ -164,13 +185,18 @@ namespace GameLogic.Stage.CellStage
                 _stats2.FoodDevoured++;
             }
 
+            // 位置必须在 ConsumeUnit 之前读：snap.Position 是内核 NativeArray 的实时视图，
+            // ConsumeUnit → KillUnit → ReleaseSlot 会把该槽位坐标改写成越界哨兵值，
+            // 顺序颠倒会让 DevourSignal.Position 变成垃圾值（越界 worldAABB 的根因）。
+            float2 devourPosition = snap.Position[idx];
+
             // 从内核移除
             _sim.ConsumeUnit(idx);
 
             Signals.Publish(new DevourSignal
             {
                 UnitIndex = idx,
-                Position = snap.Position[idx],
+                Position = devourPosition,
                 TargetVolume = targetVolume,
                 TargetFaction = faction,
                 ComboCount = Combo,

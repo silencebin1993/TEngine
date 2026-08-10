@@ -26,10 +26,14 @@ namespace GameLogic.Stage.CellStage
         private ResourceWallet _wallet;
         private Camera _camera;
 
-        /// <summary>技能槽快捷键。槽 0 恒为冲刺（空格）。</summary>
+        /// <summary>
+        /// 技能槽快捷键。槽 0 恒为冲刺（空格）。
+        /// 正式玩法槽位上限 5；末尾 T/G/C 留给 GM 一键解锁后的额外技能。
+        /// </summary>
         private static readonly KeyCode[] SlotKeys =
         {
             KeyCode.Space, KeyCode.Q, KeyCode.E, KeyCode.R, KeyCode.F,
+            KeyCode.T, KeyCode.G, KeyCode.C,
         };
 
         public void Bind(SimBridge sim, StatSheet stats, AbilitySystem abilities,
