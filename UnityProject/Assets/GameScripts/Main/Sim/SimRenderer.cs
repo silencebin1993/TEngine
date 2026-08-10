@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Unity.Collections;
 using Unity.Mathematics;
 using UnityEngine;
@@ -16,27 +17,43 @@ namespace BinGames.Sim
     /// <summary>
     /// GPU 实例化渲染。
     ///
-    /// 因为本工程是 Built-in RP，官方 Entities Graphics 不可用（见框架文档 §2.1），
-    /// 所以自己按 VisualId 分批走 Graphics.RenderMeshInstanced，每批上限 1023。
-    /// 10k 单位约 10-15 个 draw call，Built-in RP 完全够用。
+    /// Built-in RP 下按 VisualId 分批 <see cref="Graphics.RenderMeshInstanced"/>（每批 ≤1023）。
+    /// 材质须支持 GPU Instancing。默认 Look：SimBioGlass；LOD/压测：SimInstancedUnlit。
+    /// 定案：DesignDocs/Material_LookDev_BioGlass.md
     ///
-    /// 材质必须支持 GPU Instancing（见 Shaders/SimInstancedUnlit.shader）。
-    /// Sprites/Default 不支持实例化，会导致「逻辑在跑、画面全空」。
+    /// 每实例额外写入：
+    /// - <c>_Motion</c>：游动方向 + 速度强度（来自 Snapshot.Velocity）
+    /// - <c>_Impact</c>：受击压缩方向 + 强度（来自本帧 Hits，带衰减）
+    /// 成本：每单位几个 float 算术 + 每批多两次 SetVectorArray；无额外 Draw Call。
     /// </summary>
     public sealed class SimRenderer
     {
         private const int BatchMax = 1023;
+        private const float ImpactDecay = 0.82f;
+        private const float ImpactDamageScale = 0.12f;
+        private const float SpeedRef = 4.5f;
 
         private SimVisual[] _visuals;
         private Matrix4x4[][] _matrices;
         private Vector4[][] _colors;
+        private Vector4[][] _motions;
+        private Vector4[][] _impacts;
         private int[] _counts;
         private MaterialPropertyBlock _props;
         private Matrix4x4[] _batchMatrices;
         private Vector4[] _batchColors;
+        private Vector4[] _batchMotions;
+        private Vector4[] _batchImpacts;
+
+        /// <summary>按内核单位索引缓存的受击冲量（跨帧衰减）。</summary>
+        private float2[] _impactDir;
+        private float[] _impactAmt;
+        private readonly Dictionary<int, int> _logicToIndex = new Dictionary<int, int>(256);
 
         private float _yPlane;
         private static readonly int ColorId = Shader.PropertyToID("_Color");
+        private static readonly int MotionId = Shader.PropertyToID("_Motion");
+        private static readonly int ImpactId = Shader.PropertyToID("_Impact");
 
         public void Initialize(SimVisual[] visuals, int capacity, float yPlane = 0f)
         {
@@ -45,15 +62,23 @@ namespace BinGames.Sim
             _props = new MaterialPropertyBlock();
             _batchMatrices = new Matrix4x4[BatchMax];
             _batchColors = new Vector4[BatchMax];
+            _batchMotions = new Vector4[BatchMax];
+            _batchImpacts = new Vector4[BatchMax];
+            _impactDir = new float2[capacity];
+            _impactAmt = new float[capacity];
 
             int n = _visuals.Length;
             _matrices = new Matrix4x4[n][];
             _colors = new Vector4[n][];
+            _motions = new Vector4[n][];
+            _impacts = new Vector4[n][];
             _counts = new int[n];
             for (int i = 0; i < n; i++)
             {
                 _matrices[i] = new Matrix4x4[capacity];
                 _colors[i] = new Vector4[capacity];
+                _motions[i] = new Vector4[capacity];
+                _impacts[i] = new Vector4[capacity];
             }
         }
 
@@ -63,6 +88,9 @@ namespace BinGames.Sim
             {
                 return;
             }
+
+            EnsureImpactCapacity(snap.Count);
+            DecayAndApplyImpacts(in snap);
 
             for (int i = 0; i < _counts.Length; i++)
             {
@@ -96,6 +124,8 @@ namespace BinGames.Sim
                     new Vector3(s, s, s));
 
                 _colors[v][c] = Tint(_visuals[v].BaseColor, snap.Status[i]);
+                _motions[v][c] = PackMotion(snap.Velocity[i]);
+                _impacts[v][c] = PackImpact(i);
                 _counts[v] = c + 1;
             }
 
@@ -112,9 +142,13 @@ namespace BinGames.Sim
                     int n = Mathf.Min(BatchMax, total - off);
                     System.Array.Copy(_matrices[v], off, _batchMatrices, 0, n);
                     System.Array.Copy(_colors[v], off, _batchColors, 0, n);
+                    System.Array.Copy(_motions[v], off, _batchMotions, 0, n);
+                    System.Array.Copy(_impacts[v], off, _batchImpacts, 0, n);
 
                     _props.Clear();
                     _props.SetVectorArray(ColorId, _batchColors);
+                    _props.SetVectorArray(MotionId, _batchMotions);
+                    _props.SetVectorArray(ImpactId, _batchImpacts);
 
                     var rp = new RenderParams(_visuals[v].Material)
                     {
@@ -154,6 +188,8 @@ namespace BinGames.Sim
                     new Vector3(sc, sc, sc));
                 _batchColors[n] = new Vector4(
                     visual.BaseColor.r, visual.BaseColor.g, visual.BaseColor.b, visual.BaseColor.a);
+                _batchMotions[n] = PackMotion(s.Velocity);
+                _batchImpacts[n] = Vector4.zero;
                 n++;
 
                 if (n == BatchMax)
@@ -173,6 +209,8 @@ namespace BinGames.Sim
         {
             _props.Clear();
             _props.SetVectorArray(ColorId, _batchColors);
+            _props.SetVectorArray(MotionId, _batchMotions);
+            _props.SetVectorArray(ImpactId, _batchImpacts);
             var rp = new RenderParams(visual.Material)
             {
                 worldBounds = new Bounds(Vector3.zero, Vector3.one * 1000f),
@@ -183,9 +221,109 @@ namespace BinGames.Sim
             Graphics.RenderMeshInstanced(rp, visual.Mesh, 0, _batchMatrices, n);
         }
 
+        private void EnsureImpactCapacity(int count)
+        {
+            if (_impactAmt != null && _impactAmt.Length >= count)
+            {
+                return;
+            }
+
+            int cap = math.max(count, 64);
+            _impactDir = new float2[cap];
+            _impactAmt = new float[cap];
+        }
+
+        private void DecayAndApplyImpacts(in SimSnapshot snap)
+        {
+            int cap = math.min(snap.Count, _impactAmt.Length);
+            for (int i = 0; i < cap; i++)
+            {
+                _impactAmt[i] *= ImpactDecay;
+                if (_impactAmt[i] < 0.01f)
+                {
+                    _impactAmt[i] = 0f;
+                    _impactDir[i] = float2.zero;
+                }
+            }
+
+            if (snap.HitCount <= 0 || !snap.Hits.IsCreated)
+            {
+                return;
+            }
+
+            _logicToIndex.Clear();
+            for (int i = 0; i < snap.Count; i++)
+            {
+                if (snap.Alive[i] == 0)
+                {
+                    continue;
+                }
+
+                _logicToIndex[snap.LogicId[i]] = i;
+            }
+
+            for (int h = 0; h < snap.HitCount; h++)
+            {
+                HitEvent hit = snap.Hits[h];
+                if (!_logicToIndex.TryGetValue(hit.TargetLogicId, out int idx) || idx >= _impactAmt.Length)
+                {
+                    continue;
+                }
+
+                float2 toCenter = snap.Position[idx] - hit.Position;
+                float2 n = math.normalizesafe(toCenter, float2.zero);
+                if (math.lengthsq(n) < 1e-6f)
+                {
+                    // 命中点几乎在中心：用速度反方向当压缩轴
+                    n = math.normalizesafe(-snap.Velocity[idx], new float2(1f, 0f));
+                }
+                else
+                {
+                    // 外侧压向中心 → 压缩方向取 -toCenter（从接触点指向外法线）
+                    n = -n;
+                }
+
+                float add = math.saturate(hit.Damage * ImpactDamageScale);
+                // 叠加同向冲量
+                float2 blended = _impactDir[idx] * _impactAmt[idx] + n * add;
+                float amt = math.min(1f, math.length(blended));
+                _impactDir[idx] = math.normalizesafe(blended, n);
+                _impactAmt[idx] = amt;
+            }
+        }
+
+        private static Vector4 PackMotion(float2 velocity)
+        {
+            float speed = math.length(velocity);
+            if (speed < 1e-4f)
+            {
+                return Vector4.zero;
+            }
+
+            float2 dir = velocity / speed;
+            float strength = math.saturate(speed / SpeedRef);
+            return new Vector4(dir.x, dir.y, strength, 0f);
+        }
+
+        private Vector4 PackImpact(int unitIndex)
+        {
+            if (_impactAmt == null || unitIndex < 0 || unitIndex >= _impactAmt.Length)
+            {
+                return Vector4.zero;
+            }
+
+            float amt = _impactAmt[unitIndex];
+            if (amt < 0.01f)
+            {
+                return Vector4.zero;
+            }
+
+            float2 d = _impactDir[unitIndex];
+            return new Vector4(d.x, d.y, amt, 0f);
+        }
+
         /// <summary>
-        /// 状态染色。这是"万敌规模下可读性"风险项的对策（Spec §16）：
-        /// 首领/精英/导电/破体/腐蚀各有明确色彩偏移，玩家能一眼分层。
+        /// 状态染色。万敌规模下可读性对策（Spec §16）。
         /// </summary>
         private static Vector4 Tint(Color baseColor, uint status)
         {
@@ -222,10 +360,17 @@ namespace BinGames.Sim
             _visuals = null;
             _matrices = null;
             _colors = null;
+            _motions = null;
+            _impacts = null;
             _counts = null;
             _props = null;
             _batchMatrices = null;
             _batchColors = null;
+            _batchMotions = null;
+            _batchImpacts = null;
+            _impactDir = null;
+            _impactAmt = null;
+            _logicToIndex.Clear();
         }
     }
 }

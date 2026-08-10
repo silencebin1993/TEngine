@@ -267,15 +267,20 @@ namespace GameLogic.Stage.CellStage
         }
 
         /// <summary>
-        /// 白模材质。必须用支持 GPU Instancing 的 Shader；
-        /// <c>Sprites/Default</c> 不支持实例化，会导致画面全空。
+        /// 阳光培养皿材质（BioGlass）。必须 GPU Instancing；
+        /// 定案见 <c>DesignDocs/Material_LookDev_BioGlass.md</c>。
         /// </summary>
         private static Material CreateSimMaterial(Color color)
         {
-            Shader shader = Shader.Find("BinGames/SimInstancedUnlit");
+            Shader shader = Shader.Find("BinGames/SimBioGlass");
             if (shader == null)
             {
-                TEngine.Log.Error("[CellStageFlow] 找不到 Shader BinGames/SimInstancedUnlit，回退 Unlit/Color（实例化仍可能失败）");
+                TEngine.Log.Warning("[CellStageFlow] 找不到 SimBioGlass，回退 SimInstancedUnlit");
+                shader = Shader.Find("BinGames/SimInstancedUnlit");
+            }
+            if (shader == null)
+            {
+                TEngine.Log.Error("[CellStageFlow] 找不到实例化 Shader，回退 Unlit/Color（画面可能全空）");
                 shader = Shader.Find("Unlit/Color");
             }
 
@@ -284,31 +289,63 @@ namespace GameLogic.Stage.CellStage
                 color = color,
                 enableInstancing = true,
             };
+
+            // 软边 + 游动/受击形变（强度由 SimRenderer 写 _Motion/_Impact）
+            if (mat.HasProperty("_RimColor"))
+            {
+                mat.SetColor("_RimColor", new Color(1f, 1f, 0.95f, 0.7f));
+            }
+            if (mat.HasProperty("_EdgeSoft"))
+            {
+                mat.SetFloat("_EdgeSoft", 0.08f);
+            }
+            if (mat.HasProperty("_OutlineWidth"))
+            {
+                mat.SetFloat("_OutlineWidth", 0.11f);
+            }
+            if (mat.HasProperty("_IdleWobble"))
+            {
+                mat.SetFloat("_IdleWobble", 0.028f);
+            }
+            if (mat.HasProperty("_SwimStretch"))
+            {
+                mat.SetFloat("_SwimStretch", 0.22f);
+            }
+            if (mat.HasProperty("_ImpactSquash"))
+            {
+                mat.SetFloat("_ImpactSquash", 0.32f);
+            }
+            if (mat.HasProperty("_BodyAlpha"))
+            {
+                mat.SetFloat("_BodyAlpha", 0.90f);
+            }
+
             return mat;
         }
 
+        /// <summary>吉卜力鲜艳生命色；污染/残块刻意降饱和。alpha 近 1，半透明交给描边环。</summary>
         private static Color ColorFor(int visualId)
         {
             switch (visualId)
             {
-                case 0: return new Color(0.45f, 0.95f, 0.75f);  // 玩家：最高对比度
-                case 1: return new Color(0.55f, 0.75f, 0.45f);  // 浮游食团
-                case 2: return new Color(0.85f, 0.55f, 0.35f);  // 刺膜细胞
-                case 3: return new Color(0.60f, 0.65f, 0.90f);  // 扫尾纤毛体
-                case 4: return new Color(0.90f, 0.40f, 0.40f);  // 追猎原虫
-                case 5: return new Color(0.75f, 0.50f, 0.85f);  // 噬菌群
-                case 6: return new Color(0.70f, 0.70f, 0.72f);  // 硬壳核胞
-                case 7: return new Color(0.40f, 0.80f, 0.95f);  // 导电水母体
-                case 8: return new Color(0.55f, 0.60f, 0.30f);  // 腐败孢团
-                case 9: return new Color(0.95f, 0.75f, 0.35f);  // 游隼纤毛
-                case 10: return new Color(0.60f, 0.85f, 0.35f); // 毒棘漂虫
-                case 11: return new Color(0.45f, 0.55f, 0.40f); // 簇生菌丝
-                case 20: return new Color(0.50f, 0.35f, 0.30f); // 尸体残块
-                case 50: return new Color(1.00f, 0.55f, 0.20f); // 精英
-                case 51: return new Color(1.00f, 0.45f, 0.55f);
-                case 52: return new Color(0.55f, 0.65f, 1.00f);
-                case 90: return new Color(1.00f, 0.25f, 0.15f); // 首领
-                default: return new Color(0.65f, 0.65f, 0.65f);
+                case 0: return new Color(0.35f, 0.98f, 0.72f, 1f);  // 玩家：薄荷绿最高对比
+                case 1: return new Color(1.00f, 0.86f, 0.42f, 1f);  // 浮游食团：蜜黄
+                case 2: return new Color(1.00f, 0.55f, 0.42f, 1f);  // 刺膜：珊瑚
+                case 3: return new Color(0.45f, 0.78f, 1.00f, 1f);  // 扫尾：天蓝
+                case 4: return new Color(1.00f, 0.42f, 0.38f, 1f);  // 追猎：鲜红
+                case 5: return new Color(0.72f, 0.48f, 1.00f, 1f);  // 噬菌：薰衣草
+                case 6: return new Color(0.62f, 0.72f, 0.78f, 1f);  // 硬壳：灰青
+                case 7: return new Color(0.35f, 0.92f, 1.00f, 1f);  // 导电：亮青
+                case 8: return new Color(0.48f, 0.52f, 0.28f, 1f);  // 腐败：脏橄榄
+                case 9: return new Color(1.00f, 0.78f, 0.28f, 1f);  // 游隼：暖金
+                case 10: return new Color(0.55f, 0.95f, 0.40f, 1f); // 毒棘：草绿
+                case 11: return new Color(0.40f, 0.62f, 0.38f, 1f); // 菌丝：苔绿
+                case 20: return new Color(0.45f, 0.32f, 0.28f, 1f); // 残块：脏褐
+                case 50: return new Color(1.00f, 0.62f, 0.18f, 1f); // 精英暖金
+                case 51: return new Color(1.00f, 0.48f, 0.62f, 1f);
+                case 52: return new Color(0.48f, 0.68f, 1.00f, 1f);
+                case 90: return new Color(0.95f, 0.28f, 0.22f, 1f); // 首领
+                default: return new Color(0.70f, 0.78f, 0.72f, 1f);
             }
         }
 

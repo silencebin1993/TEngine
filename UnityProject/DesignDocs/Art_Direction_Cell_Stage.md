@@ -1,12 +1,13 @@
 # 《文明织造》美术选型文案（细胞阶段优先）
 
-> 版本：**v1.2**  
-> 定稿日期：2026-08-05（v1.0） / 管线：2026-08-05（v1.1） / 提示词与资产清单：2026-08-06（v1.2）  
+> 版本：**v1.3**  
+> 定稿日期：2026-08-05（v1.0） / 管线：2026-08-05（v1.1） / 提示词与资产清单：2026-08-06（v1.2） / 材质 LookDev：2026-08-10（v1.3）  
 > 定稿方式：全部采纳原文推荐项  
 > 依据：`Cell_Stage_Spec.md`、`GDD_Starter_Pack.md` §13、`Game_Framework_Design.md`、`CellEnemy.visualId`  
 > 地位：细胞阶段美术基线；后续 Art Bible / 白模 / 部件表以此为准  
 > **v1.1**：锁定 **Cursor 文生图 → Tripo 图生 3D → Unity 表现**；拆开几何原画与半透明表现  
-> **v1.2**：提示词专为 **Cursor Generate Image · 仅 `auto` 模型**；补全战场可出现 mesh 清单；英雄资产强制多视图
+> **v1.2**：提示词专为 **Cursor Generate Image · 仅 `auto` 模型**；补全战场可出现 mesh 清单；英雄资产强制多视图  
+> **v1.3**：运行时材质定为 **阳光培养皿 · BioGlass + 吉卜力鲜艳生命色**（详见 `Material_LookDev_BioGlass.md`；shader `BinGames/SimBioGlass`）
 
 ---
 
@@ -71,6 +72,8 @@
 - **不做**：像素主视觉、写实显微镜风、每敌人独立高模  
 
 参考气质：孢子细胞关的半透明可爱 × 高可读剪影 × 科学染色切片 —— 不是 Vampire Survivors 霓虹弹幕。
+
+**v1.3 色彩修正**：在半透明 BioGlass 之上采用吉卜力式**高饱和生命色**（蜜黄/草绿/珊瑚/天蓝）；污染与残块**降饱和脏色**对比。膜边液体扰动仅在单 Pass shader 解析实现，禁止 GrabPass。完整契约见 `Material_LookDev_BioGlass.md`。
 
 ---
 
