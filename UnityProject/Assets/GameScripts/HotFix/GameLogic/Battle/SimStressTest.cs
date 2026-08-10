@@ -162,7 +162,7 @@ namespace GameLogic.Battle
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();
 
-            var mat = new Material(Shader.Find("Sprites/Default"));
+            var mat = new Material(Shader.Find("BinGames/SimInstancedUnlit") ?? Shader.Find("Unlit/Color"));
             mat.enableInstancing = true;
 
             var v = new SimVisual[16];

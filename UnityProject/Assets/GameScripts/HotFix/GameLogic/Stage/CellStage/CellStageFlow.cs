@@ -250,8 +250,7 @@ namespace GameLogic.Stage.CellStage
         private static SimVisual[] BuildVisuals()
         {
             Mesh quad = BuildQuad();
-            var mat = new Material(Shader.Find("Sprites/Default"));
-            mat.enableInstancing = true;
+            Material mat = CreateSimMaterial(Color.white);
 
             var visuals = new SimVisual[32];
             for (int i = 0; i < visuals.Length; i++)
@@ -265,6 +264,27 @@ namespace GameLogic.Stage.CellStage
                 };
             }
             return visuals;
+        }
+
+        /// <summary>
+        /// 白模材质。必须用支持 GPU Instancing 的 Shader；
+        /// <c>Sprites/Default</c> 不支持实例化，会导致画面全空。
+        /// </summary>
+        private static Material CreateSimMaterial(Color color)
+        {
+            Shader shader = Shader.Find("BinGames/SimInstancedUnlit");
+            if (shader == null)
+            {
+                TEngine.Log.Error("[CellStageFlow] 找不到 Shader BinGames/SimInstancedUnlit，回退 Unlit/Color（实例化仍可能失败）");
+                shader = Shader.Find("Unlit/Color");
+            }
+
+            var mat = new Material(shader)
+            {
+                color = color,
+                enableInstancing = true,
+            };
+            return mat;
         }
 
         private static Color ColorFor(int visualId)
@@ -379,8 +399,7 @@ namespace GameLogic.Stage.CellStage
         {
             if (_projMat == null)
             {
-                _projMat = new Material(Shader.Find("Sprites/Default"));
-                _projMat.enableInstancing = true;
+                _projMat = CreateSimMaterial(new Color(1f, 0.9f, 0.5f));
             }
             return _projMat;
         }

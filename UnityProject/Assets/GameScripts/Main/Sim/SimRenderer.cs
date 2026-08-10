@@ -19,6 +19,9 @@ namespace BinGames.Sim
     /// 因为本工程是 Built-in RP，官方 Entities Graphics 不可用（见框架文档 §2.1），
     /// 所以自己按 VisualId 分批走 Graphics.RenderMeshInstanced，每批上限 1023。
     /// 10k 单位约 10-15 个 draw call，Built-in RP 完全够用。
+    ///
+    /// 材质必须支持 GPU Instancing（见 Shaders/SimInstancedUnlit.shader）。
+    /// Sprites/Default 不支持实例化，会导致「逻辑在跑、画面全空」。
     /// </summary>
     public sealed class SimRenderer
     {
@@ -29,7 +32,8 @@ namespace BinGames.Sim
         private Vector4[][] _colors;
         private int[] _counts;
         private MaterialPropertyBlock _props;
-        private Matrix4x4[] _projMatrices;
+        private Matrix4x4[] _batchMatrices;
+        private Vector4[] _batchColors;
 
         private float _yPlane;
         private static readonly int ColorId = Shader.PropertyToID("_Color");
@@ -39,6 +43,8 @@ namespace BinGames.Sim
             _visuals = visuals ?? new SimVisual[0];
             _yPlane = yPlane;
             _props = new MaterialPropertyBlock();
+            _batchMatrices = new Matrix4x4[BatchMax];
+            _batchColors = new Vector4[BatchMax];
 
             int n = _visuals.Length;
             _matrices = new Matrix4x4[n][];
@@ -49,7 +55,6 @@ namespace BinGames.Sim
                 _matrices[i] = new Matrix4x4[capacity];
                 _colors[i] = new Vector4[capacity];
             }
-            _projMatrices = new Matrix4x4[BatchMax];
         }
 
         public void Draw(in SimSnapshot snap)
@@ -102,18 +107,24 @@ namespace BinGames.Sim
                     continue;
                 }
 
-                var rp = new RenderParams(_visuals[v].Material)
-                {
-                    worldBounds = new Bounds(Vector3.zero, Vector3.one * 1000f),
-                    shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off,
-                    receiveShadows = false,
-                };
-
                 for (int off = 0; off < total; off += BatchMax)
                 {
                     int n = Mathf.Min(BatchMax, total - off);
-                    System.Array.Copy(_matrices[v], off, _projMatrices, 0, n);
-                    Graphics.RenderMeshInstanced(rp, _visuals[v].Mesh, 0, _projMatrices, n);
+                    System.Array.Copy(_matrices[v], off, _batchMatrices, 0, n);
+                    System.Array.Copy(_colors[v], off, _batchColors, 0, n);
+
+                    _props.Clear();
+                    _props.SetVectorArray(ColorId, _batchColors);
+
+                    var rp = new RenderParams(_visuals[v].Material)
+                    {
+                        worldBounds = new Bounds(Vector3.zero, Vector3.one * 1000f),
+                        shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off,
+                        receiveShadows = false,
+                        matProps = _props,
+                    };
+
+                    Graphics.RenderMeshInstanced(rp, _visuals[v].Mesh, 0, _batchMatrices, n);
                 }
             }
         }
@@ -127,13 +138,6 @@ namespace BinGames.Sim
             }
 
             int n = 0;
-            var rp = new RenderParams(visual.Material)
-            {
-                worldBounds = new Bounds(Vector3.zero, Vector3.one * 1000f),
-                shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off,
-                receiveShadows = false,
-            };
-
             for (int i = 0; i < projectiles.Length; i++)
             {
                 ProjectileState s = projectiles[i];
@@ -144,22 +148,39 @@ namespace BinGames.Sim
 
                 float ang = math.atan2(s.Velocity.y, s.Velocity.x) * Mathf.Rad2Deg;
                 float sc = s.Radius * 2f * visual.ScaleMul;
-                _projMatrices[n++] = Matrix4x4.TRS(
+                _batchMatrices[n] = Matrix4x4.TRS(
                     new Vector3(s.Position.x, _yPlane, s.Position.y),
                     Quaternion.Euler(0f, -ang, 0f),
                     new Vector3(sc, sc, sc));
+                _batchColors[n] = new Vector4(
+                    visual.BaseColor.r, visual.BaseColor.g, visual.BaseColor.b, visual.BaseColor.a);
+                n++;
 
                 if (n == BatchMax)
                 {
-                    Graphics.RenderMeshInstanced(rp, visual.Mesh, 0, _projMatrices, n);
+                    FlushProjectileBatch(visual, n);
                     n = 0;
                 }
             }
 
             if (n > 0)
             {
-                Graphics.RenderMeshInstanced(rp, visual.Mesh, 0, _projMatrices, n);
+                FlushProjectileBatch(visual, n);
             }
+        }
+
+        private void FlushProjectileBatch(in SimVisual visual, int n)
+        {
+            _props.Clear();
+            _props.SetVectorArray(ColorId, _batchColors);
+            var rp = new RenderParams(visual.Material)
+            {
+                worldBounds = new Bounds(Vector3.zero, Vector3.one * 1000f),
+                shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off,
+                receiveShadows = false,
+                matProps = _props,
+            };
+            Graphics.RenderMeshInstanced(rp, visual.Mesh, 0, _batchMatrices, n);
         }
 
         /// <summary>
@@ -203,7 +224,8 @@ namespace BinGames.Sim
             _colors = null;
             _counts = null;
             _props = null;
-            _projMatrices = null;
+            _batchMatrices = null;
+            _batchColors = null;
         }
     }
 }
