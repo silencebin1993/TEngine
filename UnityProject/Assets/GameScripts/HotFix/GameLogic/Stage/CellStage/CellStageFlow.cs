@@ -467,6 +467,84 @@ namespace GameLogic.Stage.CellStage
             _paused = false;
         }
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        /// <summary>
+        /// GM：无消耗强制弹出选卡。若已在选卡暂停中，当场重掷选项。
+        /// </summary>
+        public void DebugForceDraft(DraftKind kind)
+        {
+            if (_progression == null || _draft == null)
+            {
+                return;
+            }
+
+            _progression.DebugForceDraft(kind);
+
+            float maxHp = _stats.Get(StatId.MaxHealth);
+            float pct = maxHp > 0f ? _sim.PlayerHealth / maxHp : 1f;
+
+            // 立刻开面板：从队列取出刚塞入的请求，避免等下一帧 / 被暂停挡住
+            if (_progression.TryDequeueDraft(out DraftKind dequeued))
+            {
+                kind = dequeued;
+            }
+
+            PendingOptions = _draft.Roll(kind, _timeline?.CurrentIndex ?? 0, pct);
+            PendingDraftKind = kind;
+            if (PendingOptions == null || PendingOptions.Count == 0)
+            {
+                TEngine.Log.Warning($"[GM] DebugForceDraft({kind}) 卡池为空，未弹出选卡");
+                return;
+            }
+
+            _paused = true;
+            TEngine.Log.Info($"[GM] 强制选卡 {kind}（等级 {_progression.Level}）");
+        }
+
+        /// <summary>GM：推进一个生态时期（跨时期，不花时间）。</summary>
+        public void DebugAdvancePhase()
+        {
+            if (_timeline == null || _timeline.Finished)
+            {
+                TEngine.Log.Warning("[GM] 已无下一生态时期");
+                return;
+            }
+
+            _timeline.Advance();
+            TEngine.Log.Info($"[GM] 推进生态时期 → {_timeline.CurrentIndex + 1}/6");
+        }
+
+        /// <summary>GM：跳过剩余时期，立刻通关结算。</summary>
+        public void DebugFinishTimeline()
+        {
+            if (_timeline == null)
+            {
+                return;
+            }
+
+            int guard = 0;
+            while (!_timeline.Finished && guard++ < 16)
+            {
+                _timeline.Advance();
+            }
+
+            PendingOptions = null;
+            _paused = false;
+            _outcome.Victory = true;
+            _running = false;
+            TEngine.Log.Info("[GM] 已跳过全部生态时期并通关");
+        }
+
+        /// <summary>GM：灌满测试用资源（商店等），不触发选卡。</summary>
+        public void DebugGrantResources()
+        {
+            _wallet?.Add(ResourceKind.Nutrient, 999f);
+            _wallet?.Add(ResourceKind.Mutagen, 999f);
+            _wallet?.Add(ResourceKind.EvoEnergy, 999f);
+            TEngine.Log.Info("[GM] +999 营养质 / 突变质 / 进化能");
+        }
+#endif
+
         private void CheckEnd()
         {
             if (_sim.PlayerHealth <= 0f)

@@ -154,5 +154,25 @@ namespace GameLogic.Progression
             }
             return true;
         }
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        /// <summary>
+        /// GM：不消耗进化能，直接升级并请求一次选卡。
+        /// 会清空排队中的旧选卡请求，保证立刻弹出的就是本次类型。
+        /// 仅 Editor / Development Build。
+        /// </summary>
+        public void DebugForceDraft(DraftKind kind)
+        {
+            PendingDrafts = 0;
+            PendingKind = DraftKind.Normal;
+            Level++;
+            RequestDraft(kind);
+            Signals.Publish(new LevelUpSignal
+            {
+                NewLevel = Level,
+                DraftKind = kind,
+            });
+        }
+#endif
     }
 }

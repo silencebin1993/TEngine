@@ -58,6 +58,7 @@ namespace GameLogic.UI.Battle
             }
 
             HandleQuickPanelHotkeys();
+            HandleGmHotkeys(cell);
             if (_showDebugHud)
             {
                 DrawHud(cell);
@@ -231,7 +232,11 @@ namespace GameLogic.UI.Battle
             }
 
             GUILayout.Space(4f);
-            GUILayout.Label("F10 关闭调试HUD　Tab 查看卡组　B 商店　V 图鉴　FPS " + (1f / Mathf.Max(0.0001f, Time.smoothDeltaTime)).ToString("F0"), _label);
+            GUILayout.Label(
+                "F10 调试HUD　Tab 卡组　B 商店　V 图鉴\n" +
+                "GM: F4 资源　F5 选卡　F6 精英选卡　F7 下一时期　F8 通关　FPS " +
+                (1f / Mathf.Max(0.0001f, Time.smoothDeltaTime)).ToString("F0"),
+                _label);
 
             GUILayout.EndArea();
         }
@@ -259,6 +264,46 @@ namespace GameLogic.UI.Battle
                 _showCodex = !_showCodex;
             }
         }
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        /// <summary>
+        /// GM 热键：不消耗资源测选卡 / 跨生态时期 / 通关。
+        /// 器官等后续游戏阶段尚未注册，F7/F8 只推进细胞阶段内时期与结算。
+        /// </summary>
+        private void HandleGmHotkeys(CellStageFlow cell)
+        {
+            if (Event.current.type != EventType.KeyDown)
+            {
+                return;
+            }
+
+            switch (Event.current.keyCode)
+            {
+                case KeyCode.F4:
+                    cell.DebugGrantResources();
+                    Event.current.Use();
+                    break;
+                case KeyCode.F5:
+                    cell.DebugForceDraft(DraftKind.Normal);
+                    Event.current.Use();
+                    break;
+                case KeyCode.F6:
+                    cell.DebugForceDraft(DraftKind.Elite);
+                    Event.current.Use();
+                    break;
+                case KeyCode.F7:
+                    cell.DebugAdvancePhase();
+                    Event.current.Use();
+                    break;
+                case KeyCode.F8:
+                    cell.DebugFinishTimeline();
+                    Event.current.Use();
+                    break;
+            }
+        }
+#else
+        private void HandleGmHotkeys(CellStageFlow cell) { }
+#endif
 
         private void DrawDraft(CellStageFlow cell)
         {
