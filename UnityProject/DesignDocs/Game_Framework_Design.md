@@ -410,8 +410,8 @@ public sealed class ReactionSystem : GameModuleBase
 | `cell.LevelCurve` | 升级曲线 | 40 |
 | `cell.PressureCurve` | 压力预算曲线 | 24 |
 | `cell.StatusEffect` | 状态效果 | 24 |
-| `cell.ReactionRule` | 反应矩阵规则（§17.1） | 6（首版）|
-| `cell.CatalystRule` | 催化卡词缀挂载规则（§17.2） | 6（首版）|
+| `cell.ReactionRule` | ~~反应矩阵（旧 §17.1）~~ **Paused / Superseded** | — |
+| `cell.CatalystRule` | ~~催化卡（旧 §17.2）~~ **Paused / Superseded** | — |
 | `cell.Global` | 全局常量 | 1 |
 | `cell.Text` | 文案（可本地化） | ~400 |
 
