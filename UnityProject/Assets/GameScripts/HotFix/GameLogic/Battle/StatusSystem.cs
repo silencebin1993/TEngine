@@ -38,6 +38,7 @@ namespace GameLogic.Battle
         private readonly List<Entry> _entries = new List<Entry>(256);
         private readonly List<StatEntry> _statEntries = new List<StatEntry>(64);
         private SimBridge _sim;
+        private ReactionSystem _reaction;
 
         public int ActiveCount => _entries.Count;
         public int TimedStatCount => _statEntries.Count;
@@ -82,9 +83,11 @@ namespace GameLogic.Battle
             });
         }
 
-        public void Bind(SimBridge sim)
+        /// <summary>reaction 可为 null（反应矩阵未注册时状态计时仍要能独立工作）。</summary>
+        public void Bind(SimBridge sim, ReactionSystem reaction = null)
         {
             _sim = sim;
+            _reaction = reaction;
         }
 
         public override void OnEnter()
@@ -109,6 +112,12 @@ namespace GameLogic.Battle
                 return;
             }
 
+            SimSnapshot snap = _sim.Snapshot;
+            if (_reaction != null && unitIndex >= 0 && unitIndex < snap.Count)
+            {
+                _reaction.TryReact(unitIndex, (SimStatus)snap.Status[unitIndex], status);
+            }
+
             _sim.ApplyStatusUnit(unitIndex, status, true);
 
             if (duration <= 0f)
@@ -116,7 +125,6 @@ namespace GameLogic.Battle
                 return;
             }
 
-            SimSnapshot snap = _sim.Snapshot;
             int logicId = unitIndex >= 0 && unitIndex < snap.Count ? snap.LogicId[unitIndex] : 0;
 
             // 同一单位同一状态重复施加时刷新时间（取更长的），而不是堆两条
@@ -157,19 +165,13 @@ namespace GameLogic.Battle
                 return;
             }
 
-            _sim.ApplyStatusArea(origin, radius, status, true, faction);
-
-            if (duration <= 0f)
-            {
-                return;
-            }
-
-            // 登记范围内当前命中的单位。
+            // 登记范围内当前命中的单位，并在施加前对每个单位做一次反应判定。
             // 注意：内核的施加发生在下一次 Step，而这里读的是上一帧快照，
             // 所以边缘单位可能有一帧误差。对状态效果来说这个精度完全够，
             // 换取的是不必在内核里再维护一套计时结构。
             SimSnapshot snap = _sim.Snapshot;
             float r2 = radius * radius;
+            bool register = duration > 0f;
             for (int i = 0; i < snap.Count; i++)
             {
                 if (snap.Alive[i] == 0)
@@ -184,8 +186,14 @@ namespace GameLogic.Battle
                 {
                     continue;
                 }
-                Register(i, snap.LogicId[i], status, duration);
+                _reaction?.TryReact(i, (SimStatus)snap.Status[i], status);
+                if (register)
+                {
+                    Register(i, snap.LogicId[i], status, duration);
+                }
             }
+
+            _sim.ApplyStatusArea(origin, radius, status, true, faction);
         }
 
         private void Register(int unitIndex, int logicId, SimStatus status, float duration)

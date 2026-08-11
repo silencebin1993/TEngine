@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using BinGames.Sim;
 using GameLogic.Ability;
+using GameLogic.Battle;
 using GameLogic.Cards;
 using GameLogic.Stats;
 
@@ -43,6 +44,7 @@ namespace GameLogic.Core
             LoadCards(reg, tables);
             LoadPhases(reg, tables);
             LoadEcoEvents(reg, tables);
+            LoadReactionRules(reg, tables);
             return true;
         }
 
@@ -301,6 +303,29 @@ namespace GameLogic.Core
             }
         }
 
+        /// <summary>
+        /// 反应矩阵规则（Cell_Stage_Spec.md §17.1）。StatusA/StatusB 是单值字段（无序对），
+        /// 二级效果字段与 AbilityEffect/CardEffect 同构，复用同一套转换（不新建独立 EffectSpec 表）。
+        /// </summary>
+        private static void LoadReactionRules(DataRegistry reg, GameConfig.Tables t)
+        {
+            foreach (var r in t.TbReactionRule.DataList)
+            {
+                reg.AddReactionRule(new ReactionRuleSpec
+                {
+                    Id = r.Id,
+                    Name = r.Name,
+                    Desc = r.Desc,
+                    StatusA = (SimStatus)(uint)r.StatusA,
+                    StatusB = (SimStatus)(uint)r.StatusB,
+                    ConsumeA = r.ConsumeA,
+                    ConsumeB = r.ConsumeB,
+                    Cooldown = r.Cooldown,
+                    ResultEffect = ToEffect(r),
+                });
+            }
+        }
+
         /// <summary>AbilityEffect 与 CardEffect 字段同构，各自转一次。</summary>
         private static EffectSpec ToEffect(GameConfig.cell.AbilityEffect e)
         {
@@ -326,6 +351,29 @@ namespace GameLogic.Core
         }
 
         private static EffectSpec ToEffect(GameConfig.cell.CardEffect e)
+        {
+            return new EffectSpec
+            {
+                Kind = (EffectKind)(int)e.Kind,
+                Shape = (EffectShape)(int)e.Shape,
+                Value = e.Value,
+                Radius = e.Radius,
+                Duration = e.Duration,
+                Count = e.Count,
+                Status = ToStatus(e.Status),
+                RequireStatus = ToStatus(e.RequireStatus),
+                TargetFaction = (SimFaction)(int)e.TargetFaction,
+                Stat = (StatId)(int)e.Stat,
+                Op = (ModifierOp)(int)e.Op,
+                Resource = (ResourceKind)(int)e.Resource,
+                SpawnEnemyId = e.SpawnEnemyId,
+                Rule = (RuleFlag)(int)e.Rule,
+                Affixes = ToAffixes(e.Affixes),
+                ScaleWithPower = e.ScaleWithPower,
+            };
+        }
+
+        private static EffectSpec ToEffect(GameConfig.cell.ReactionRule e)
         {
             return new EffectSpec
             {

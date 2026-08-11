@@ -4,6 +4,9 @@
 > 创建日期：2026-08-04
 > 配套文档：`Cell_Stage_Spec.md`（细胞阶段规格）
 > 适用范围：全项目八阶段。本文档定义的框架必须在不改动内核的前提下承载后续所有阶段。
+>
+> **权威补丁（2026-08-11）**：§5.8 反应/催化 **Superseded**。化学核心见 `DesignDocs/最新改动需求/`（ChemEngine 独立库，零 Unity）。  
+> 短读冲突表：`最新改动需求/AUTHORITY_AND_CONFLICTS.md`。热更边界 / AOT Sim / 模块框架等其它章仍有效。
 
 ---
 
@@ -362,6 +365,30 @@ public interface IStageFlow {
 
 `PhaseTimeline` 管理阶段内的时期推进（细胞阶段的 6 个生态时期），也是数据驱动的：时期定义在配置表里，包含时长、卡池解锁、敌人池、事件池、压力曲线。
 
+### 5.8 反应系统 / 催化系统
+
+> **Status: Superseded（2026-08-11）** — 禁止按本节实现 `ReactionSystem` / `CatalystRegistry` 路线。  
+> **新权威**：`DesignDocs/最新改动需求/化学引擎-ClaudeCode需求规格.md`（独立 `ChemEngine`，核心零 Unity）；接入游戏时另写桥接，不把判定核心写进本节所述热更模块形态。  
+> 对应旧玩法节 `Cell_Stage_Spec.md` §17（同样 Superseded）。冲突与半成品代码说明见 `最新改动需求/AUTHORITY_AND_CONFLICTS.md`。
+
+~~对应 `Cell_Stage_Spec.md` §17。目标：让 §5.4 的词缀从"单条效果的私有装饰器"升级为"状态与状态之间会互相反应"，且不新增效果 `Kind`、不碰内核。~~
+
+```csharp
+public sealed class ReactionSystem : GameModuleBase
+{
+    // 结构仿 StatusSystem：Dictionary<(SimStatus,SimStatus), ReactionRule> 表驱动。
+    // 挂载点：StatusSystem.ApplyTimed / ApplyTimedArea 施加新状态时调用一次
+    // TryReact(unitIndex, newStatus)，O(1) 查表，不逐帧扫描。
+    public void TryReact(int unitIndex, SimStatus newStatus) { /* 查目标当前状态位 & 反应表 */ }
+}
+```
+
+- **触发路径**：`StatusSystem` 施加状态后回调 `ReactionSystem.TryReact` → 命中规则则把 `ReactionRule.ResultEffect` 包成一次性 `EffectSpec`，走 `AbilitySystem` 现有的 `IEffectExecutor` 调度执行（不新增执行器接口）。
+- **冷却**：按 `(unitIndex, ReactionId)` 记录最近触发时间，复用 `StatusSystem._entries` 同款"到期清理"结构，不新增长期状态表。
+- **催化注入点**：`CatalystRegistry`（新模块，或挂在 `AbilitySystem` 内）持有玩家已获得的 `CatalystRule[]`。`AbilitySystem` 组装 `EffectContext` 前，对匹配 `FilterTrigger`/`FilterSynergyTag`/`FilterRoute` 的 `EffectSpec` 动态合并 `InjectAffix` 到其 `Affixes[]`（只读合并，不回写原 `EffectSpec` 数据，避免脏共享状态）。
+- **反应连锁**：`ReactionSystem` 触发成功后 `Signals.Publish(new ReactionEvent{...})`；`CardTriggerBus` 新增 `OnReaction` 分支，复用现有信号路由，不改总线结构。
+- **性能与边界**：全部在热更层、事件驱动、O(1)/次触发，符合 §5.6 的"热更层每帧与敌人数无关"；`Main/Sim` 只在 `SimStatus` 位不够时加纯数据位（当前 32 位用 13 个），不下沉任何反应判定逻辑。
+
 ---
 
 ## 6. 数据驱动（Luban）
@@ -383,6 +410,8 @@ public interface IStageFlow {
 | `cell.LevelCurve` | 升级曲线 | 40 |
 | `cell.PressureCurve` | 压力预算曲线 | 24 |
 | `cell.StatusEffect` | 状态效果 | 24 |
+| `cell.ReactionRule` | 反应矩阵规则（§17.1） | 6（首版）|
+| `cell.CatalystRule` | 催化卡词缀挂载规则（§17.2） | 6（首版）|
 | `cell.Global` | 全局常量 | 1 |
 | `cell.Text` | 文案（可本地化） | ~400 |
 

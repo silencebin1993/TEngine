@@ -112,6 +112,15 @@ namespace GameLogic.Core
         public bool Started;
     }
 
+    /// <summary>反应矩阵命中（Cell_Stage_Spec.md §17.1）。用于调试观测与后续 OnReaction 触发器（story-003）。</summary>
+    public struct ReactionSignal
+    {
+        public int TargetId;
+        public int ReactionId;
+        public SimStatus StatusA;
+        public SimStatus StatusB;
+    }
+
     /// <summary>首领阶段切换（按血量阈值，数据驱动）。</summary>
     public struct BossPhaseChangedSignal
     {

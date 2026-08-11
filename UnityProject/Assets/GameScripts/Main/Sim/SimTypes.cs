@@ -97,6 +97,8 @@ namespace BinGames.Sim
         Boss = 1u << 18,
         /// <summary>处于菌毯区域内。</summary>
         OnMycelium = 1u << 19,
+        /// <summary>过载：反应矩阵"殉爆"用的持久状态位，区别于 AffixKind.Overload（执行期修饰符）。</summary>
+        Overloaded = 1u << 20,
     }
 
     /// <summary>
