@@ -52,16 +52,16 @@
 - `GameLogic/Battle/ReactionRuleSpec.cs`
 - 及相关 `StatusSystem` / `EffectDealDamage` / Luban 加载挂钩
 
-**规则**：ChemEngine 实现窗 **禁止** 为「对齐」去读改这些文件。接入游戏时另开窗：审计 → 隔离或删除 → 桥接新库。
+**规则**：story-001～005 **禁止扩写**这些文件。**story-006** 负责审计删除/隔离后桥接新库。
 
 ---
 
-## 4. Claude Code 开场纪律（化学相关）
+## 4. Claude Code / 工人纪律
 
-1. 一窗只喂上表「唯一权威」中的 **一份** 文件。  
-2. 禁止整本 Read：`GDD_Starter_Pack`、FirstPlayable、Demo、`Archive/**`、整本旧 §17「对照实现」。  
-3. 独立库阶段：禁止改 `GameLogic` / 禁止读美术规范。  
-4. 深度把冻结总案写回 `Cell_Stage_Spec` 正文：等 **接入游戏** 那一轮，不在本切换完成。
+1. 优先领 `production/epics/metabolic-slice/` 当前 Ready story；总控自动串行，不问人「下一步」。  
+2. 一窗只读本 story 点名的规格文件 + AUTHORITY 短文；禁止整本 GDD_Starter / FirstPlayable / 旧 §17「对照实现」。  
+3. 代码主落点：`GameLogic/MetabolicSlice/` + 可改 `ChemEngine/`；ChemEngine 核心零 Unity。  
+4. Spec 深度回写与 OpenSpec：story-007。
 
 ---
 
@@ -69,7 +69,10 @@
 
 | 项 | 状态 |
 |---|---|
-| `combat-alchemy` 001～005 | Superseded，不派工 |
-| sprint-006 | Paused/Superseded |
-| 下一实现焦点 | **ChemEngine 独立库**（见化学引擎规格）；文案已切换，story/epic 可后续再建 |
-| sprint-005 剩余 003～009 | 仍 Paused；化学库完成前不自动插队回去，除非人改口 |
+| `combat-alchemy` 001～005 | Superseded |
+| sprint-006 | Superseded |
+| **sprint-007 / epic `metabolic-slice`** | **Ready**：001 包装→…→006 删旧 ReactionSystem→007 OpenSpec/Spec→008 |
+| ChemEngine 独立库 | Done（人窗） |
+| sprint-005 003～009 | Paused；007 整批 Done 后切回 |
+
+**006 起允许删除**旧 `ReactionSystem*`；006 之前仍禁止扩写。
