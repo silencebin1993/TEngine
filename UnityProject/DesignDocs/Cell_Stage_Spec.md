@@ -5,9 +5,9 @@
 > 取代：`Cell_Stage_Demo_Spec.md`、`First_Playable_Spec.md`（二者转入 `DesignDocs/Archive/`）
 > 配套文档：`Game_Framework_Design.md`（技术框架）、`Cell_Stage_Content_Tables.md`（内容总表）
 >
-> **权威补丁（2026-08-11）**：代谢组合 / 化学引擎 / 复玩三轴 **不以 §17 为准**。  
-> 见 `DesignDocs/最新改动需求/AUTHORITY_AND_CONFLICTS.md` 与同夹冻结总案、ChemEngine 规格。  
-> §17 正文保留作史，**禁止按 §17 实现或续做 combat-alchemy**。
+> **权威补丁（2026-08-11 更新）**：§17 已整节改写为已落地架构摘要（旧反应矩阵/催化卡设计作废，详见 §17.1）。  
+> 字段/管道/种类等**实现细节**仍以 `DesignDocs/最新改动需求/`（冻结总案、ChemEngine 规格、复玩三轴规格）为唯一权威，§17 只做产品级摘要，**禁止只读 §17 就动手实现**。  
+> 旧 epic `combat-alchemy` 已 Superseded，禁止再派 Worker。
 
 ---
 
@@ -286,7 +286,7 @@ weight = baseWeight(rarity)
 - 低血保底：生命 < 30% 时，选项池注入至少 1 张生存向卡。
 - 路线亲和让 build 能成型，但上限 1.8 倍避免锁死。
 
-> 词缀组合深度已改权威：见 `DesignDocs/最新改动需求/`（冻结总案 + ChemEngine）。~~原指向 §17~~（§17 Superseded）。
+> 词缀组合深度权威：见 `DesignDocs/最新改动需求/`（冻结总案 + ChemEngine），§17 只做摘要。
 
 ---
 
@@ -518,7 +518,7 @@ StageOutcome {
 
 **P1（正式版应有）**
 - 全部 135 张卡 + 32 词缀
-- ~~反应矩阵（§17.1）初版 6 条规则 + 催化卡（§17.2）6 张~~ → **已作废**；改 ChemEngine（见 `最新改动需求/`）
+- ~~反应矩阵初版 6 条规则 + 催化卡 6 张~~ → **已作废**；改 ChemEngine 代谢化学系统（§17，实现细节见 `最新改动需求/`），001~006 已实现并 Play 验收
 - 图鉴与跨局解锁
 - 局内商店
 - 路线专属视觉表现
@@ -546,76 +546,38 @@ StageOutcome {
 
 ---
 
-## 17. 战斗化学反应系统（反应矩阵 / 催化卡 / 反应连锁）
+## 17. 代谢化学系统（切片 / 有向管 / 双系统 / 三轴复玩）
 
-> **Status: Superseded（2026-08-11）** — 实现与派工 **禁止** 以本节为准。  
-> **新权威**：`DesignDocs/最新改动需求/AUTHORITY_AND_CONFLICTS.md` → 冻结总案 + `化学引擎-ClaudeCode需求规格.md` 等。  
-> **原因**：旧案是「Status×Status + 催化注入 Affix」挂在现有热更 StatusSystem；新案是做法 C 的独立 ChemEngine（Packet/管道/基元，零 Unity 核心）+ 代谢切片双系统。二者不可并行实现。  
-> 下文整节仅作历史对照；冲突表见 `AUTHORITY_AND_CONFLICTS.md` §2。已存在的 `ReactionSystem.cs` 半成品 **勿继续扩**，接入时另窗审计。
+> **权威叙述（2026-08-11 起生效）** — 本节已从旧「反应矩阵/催化卡」设计整节改写为已落地架构的摘要。  
+> **唯一实现细节权威**：`DesignDocs/最新改动需求/`（冻结总案 `代谢切片-冻结总案-基元与美术.md`、`化学引擎-ClaudeCode需求规格.md`、`复玩三轴-ClaudeCode需求规格.md`）。本节只做产品级摘要，字段/管道/种类定义以那三份文件为准，禁止只读本节就动手实现。  
+> **历史提案记录**：`openspec/changes/metabolic-slice-chemengine/`（追溯型 change，proposal/design/tasks 覆盖 ChemEngine + MetabolicSlice + 三轴的完整决策链）。  
+> 旧设计（Status×Status 反应矩阵 / 催化卡注入 Affix / `OnReaction` 连锁）已作废；完整历史见 git（commit `2f34343` 之前版本）。
 
-> ~~动机（旧）：§8.2 的卡牌模型…词缀之间、状态之间会互相反应。~~
+### 17.0 一句话产品
 
-### 17.1 反应矩阵 ReactionMatrix
+玩家在**二维方格培养切片**上放置器官、**自绘有向代谢管**，用**基因**改全局规则，在**战场地形与残留**上打出可组合的代谢弹；掉落进**限容储备囊**，可装卸与合成；击杀掉落进**消化泡**炼成新器官。核心爽感是「正交修饰叠乘 + tag 催化 + 每局取舍」，不是法杖搓咒，也不是无向途中糊放置（详见冻结总案 §0）。
 
-**规则**：当一个效果对某目标施加一个新状态时，若目标身上已经存在另一个（不同的）活跃状态，且这两个状态在反应表里登记了一条规则，则触发一次数据驱动的**二级效果**（复用现有 `EffectSpec` / `IEffectExecutor` 调度，不新增执行链路）。
+### 17.1 为何废弃旧反应矩阵路线
 
-```
-ReactionRule {
-  Id
-  StatusA, StatusB      // 无序对；两个状态都在目标身上时命中
-  ResultEffect          // 复用 EffectSpec：二级效果内容
-  ConsumeMask           // 触发后清除哪些状态（0 = 都不清）
-  Cooldown              // 同一目标 + 同一反应对的最短触发间隔，防止刷屏
-}
-```
+旧案把「状态×状态反应」直接挂在热更层 `StatusSystem` 上，要求逐条人工打表（首版仅 6 条规则），组合深度随内容量线性增长；这与本游戏"内容表可无限加行、代码种类冻结后只加实例"的长期目标冲突。新方向改为**做法 C**：所有战斗效果只读写通用容器（`Packet`/`HitEvent`/`RuleVector`/`TagSet`/`Residue`/`Status`），新玩法只能靠"新基元 + 新反应注册行"实现，禁止给旧基元加"若存在某某则"的特判分支（冻结总案 §1 F1/F2、§2）。
 
-初版 6 条（覆盖多路线交叉，验收基准）：
+### 17.2 双系统与三轴复玩（摘要）
 
-| 反应对 | 效果 | 呼应路线 |
-|---|---|---|
-| 导电 × 腐蚀 | "电解"：下次电伤翻倍，并把腐蚀沿电弧连锁传染给下一目标 | Electric × Devour/Nest |
-| 导电 × 过载 | "殉爆"：目标原地爆炸，过载状态被消耗 | Electric × Corrupt |
-| 晶化(3 层) × 任意物理命中 | "碎裂"：额外真实伤害 + 0.4s 硬直，晶化层数清零 | 通用 |
-| 标记 × 恐惧 | "溃逃踩踏"：逃跑中的标记目标撞击路径上的其他敌人造成小范围伤害 | Agile × Corrupt |
-| 寄生 × 破体 | "破巢"：寄生目标直接跳过吞噬体积门槛 | Devour |
-| 腐蚀(滞留区域内) × 导电 | 区域内所有腐蚀单位一起触发一次电弧连锁 | Nest × Electric |
+- **切片（战斗）**：二维方格、四邻可连；玩家自绘箭头，代谢包只沿箭头流动；空槽可中继（只跑槽被动）。
+- **储备囊（限容）**：囊内器官默认不参战，可与切片互相装卸转移；容量满时逼弃。
+- **复玩三轴**：轴 A 环境残留 + 地形 Tag（打在战场格子上的持续效果）、轴 B 背包逼弃 + 双系统合成（囊+切片跨位取材升级）、轴 C1 捕食消化（击杀掉落限时炼成新器官，C2 不可逆蜕变留二期）。
 
-**判定时机与性能**：挂在 `StatusSystem.ApplyTimed` / `ApplyTimedArea` 施加新状态的那一刻查表一次（O(1)，不是逐帧扫描），符合 `Game_Framework_Design.md` §5.6 "热更层每帧与敌人数无关"的红线。`Main/Sim` 只在状态位不够用时加纯数据位（`SimStatus` 目前 32 位用了 13 个，位空间充足），**反应判定逻辑本身不进内核**。
+字段级定义（`Packet`/`HitEvent`/`RuleVector` 冻结字段、9 种基元种类、结算顺序、有向图语义）见冻结总案 §3/§4/§7，不在本节重复摘抄。
 
-### 17.2 催化卡 Catalyst Card
+### 17.3 已落地实现（供快速定位代码）
 
-一种新卡类别：**不带自己的 `Effects`**，而是登记一条"词缀挂载规则"，运行时动态注入到其他卡/技能匹配的效果上：
+- 核心引擎：独立库 `ChemEngine/`（`ChemEngine.*` 命名空间，零 Unity 依赖，`netstandard2.1`）
+- 游戏侧包装：`Assets/GameScripts/HotFix/GameLogic/MetabolicSlice/`（Grid/Bag/Transfer/Crafting/Graph/Combat/Environment/Digestion/DebugTools）
+- 战斗桥接：`MetabolicSliceBridge`（`MetabolicSlice/Combat/`），由 `CellStageFlow.RegisterModules()` 注册，消费 ChemEngine `HitEvent` 转发到 `SimBridge.DamageArea`
+- 已删除的旧半成品：`GameLogic/Battle/ReactionSystem.cs`、`ReactionRuleSpec.cs`（story-006 整删，不留兼容层）
 
-```
-CatalystRule {
-  FilterTrigger        // 可选：只挂载到指定 Trigger（OnHit / OnDevour / ...）的效果
-  FilterSynergyTag      // 可选：只挂载到带指定 SynergyTag 的卡
-  FilterRoute            // 可选：只挂载到指定路线的效果
-  InjectAffix            // 注入的词缀（§8.4 已有词缀池，不新增词缀种类）
-}
-```
+### 17.4 与现有系统的边界（仍然有效）
 
-过滤条件**必须**至少收窄到 Trigger 或单一 SynergyTag 之一（§16 风险控制），不允许"全场所有效果都加词缀"这种无过滤规则。
-
-首批 6 张（每张都便宜、单独拿到时几乎无效，价值完全来自"和什么卡搭"）：
-
-| 卡名 | 规则 |
-|---|---|
-| 带电体液 | 所有 `OnHit` 效果获得【导电】 |
-| 溶解外壳 | 所有近战效果获得【腐蚀】 |
-| 共振腔 | 所有电化路线效果获得【共振】 |
-| 捕食反射 | 所有 `OnDevour` 触发的效果获得【回流】 |
-| 冰晶膜 | 所有持续伤害类效果获得【晶化】 |
-| 群体信息素 | 所有 `Spawn` 效果获得【共生】 |
-
-### 17.3 反应连锁 OnReaction（深度构筑，第三优先级）
-
-反应矩阵每次成功触发时广播一次 `ReactionEvent{TargetId, ReactionId, StatusA, StatusB}`。新增 `OnReaction` 触发器种类（追加进 §8.2 `Triggers[]` 枚举），卡牌可以订阅"反应本身"，例如"每次发生反应，回复 2 营养质"或"反应命中范围内额外施加一次弱化晶化"。
-
-这一层让反应结果本身变成可以被叠加/强化的资源，形成"反应触发新反应"的深层连锁——是组合出"意料之外的化学反应"的最上层，放在反应矩阵与催化卡都验证过手感之后再做。
-
-### 17.4 与现有系统的边界
-
-- 不新增词缀种类、不新增效果 `Kind`——反应矩阵和催化卡都是**已有 32 词缀 + 9 类效果**的重新组合方式，符合"内容巨大是配表工作"的原则。
-- 表现（爆炸特效、电弧连线等）复用 `story-002`/`story-010` 已建立的可插拔 Presenter，判定逻辑里不夹带任何 VFX 调用。
-- 首版范围内**不**引入元素强度衰减/槽位类系统（如"每回合反应次数上限"之外的复杂经济），避免一次性做成不可平衡的系统；这些留作 P2 按实测数据决定是否需要。
+- 不新增词缀种类之外的旧口径已废止；新基元种类冻结为 9 种（见冻结总案 §4），加内容走"加实例"而非"加种类"。
+- 表现（VFX/特效）复用既有可插拔 Presenter 模式，判定逻辑不夹带 VFX 调用。
+- 性能红线不变：热更层每帧与敌人数无关、判定不下沉 `Main/Sim`，见 `Game_Framework_Design.md` §5.8。

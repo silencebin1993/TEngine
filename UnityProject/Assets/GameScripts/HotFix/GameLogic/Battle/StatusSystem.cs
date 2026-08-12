@@ -38,7 +38,6 @@ namespace GameLogic.Battle
         private readonly List<Entry> _entries = new List<Entry>(256);
         private readonly List<StatEntry> _statEntries = new List<StatEntry>(64);
         private SimBridge _sim;
-        private ReactionSystem _reaction;
 
         public int ActiveCount => _entries.Count;
         public int TimedStatCount => _statEntries.Count;
@@ -83,11 +82,9 @@ namespace GameLogic.Battle
             });
         }
 
-        /// <summary>reaction 可为 null（反应矩阵未注册时状态计时仍要能独立工作）。</summary>
-        public void Bind(SimBridge sim, ReactionSystem reaction = null)
+        public void Bind(SimBridge sim)
         {
             _sim = sim;
-            _reaction = reaction;
         }
 
         public override void OnEnter()
@@ -113,10 +110,6 @@ namespace GameLogic.Battle
             }
 
             SimSnapshot snap = _sim.Snapshot;
-            if (_reaction != null && unitIndex >= 0 && unitIndex < snap.Count)
-            {
-                _reaction.TryReact(unitIndex, (SimStatus)snap.Status[unitIndex], status);
-            }
 
             _sim.ApplyStatusUnit(unitIndex, status, true);
 
@@ -165,7 +158,6 @@ namespace GameLogic.Battle
                 return;
             }
 
-            // 登记范围内当前命中的单位，并在施加前对每个单位做一次反应判定。
             // 注意：内核的施加发生在下一次 Step，而这里读的是上一帧快照，
             // 所以边缘单位可能有一帧误差。对状态效果来说这个精度完全够，
             // 换取的是不必在内核里再维护一套计时结构。
@@ -186,7 +178,6 @@ namespace GameLogic.Battle
                 {
                     continue;
                 }
-                _reaction?.TryReact(i, (SimStatus)snap.Status[i], status);
                 if (register)
                 {
                     Register(i, snap.LogicId[i], status, duration);

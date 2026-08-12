@@ -50,8 +50,8 @@ namespace GameLogic.Core
         public const int Spawning = 500;
         /// <summary>状态效果时间管理。</summary>
         public const int Status = 600;
-        /// <summary>反应矩阵判定（状态碰撞的化学反应）。紧跟状态施加之后。</summary>
-        public const int Reaction = 650;
+        /// <summary>代谢切片桥：把 ChemEngine 出口事件转伤害命令，须在 Status 结算之后、Simulation 提交内核之前。</summary>
+        public const int MetabolicBridge = 650;
         /// <summary>提交命令并推进内核。这之后快照才有效。</summary>
         public const int Simulation = 700;
         /// <summary>读快照做玩法结算（吞噬、掉落、击杀）。</summary>

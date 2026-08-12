@@ -29,7 +29,6 @@ namespace GameLogic.Core
         private readonly List<EcoEventSpec> _ecoEvents = new List<EcoEventSpec>(20);
         private readonly List<BehaviorArchetype> _archetypes = new List<BehaviorArchetype>(12);
         private readonly Dictionary<int, List<BossPhaseSpec>> _bossPhases = new Dictionary<int, List<BossPhaseSpec>>(4);
-        private readonly List<ReactionRuleSpec> _reactionRules = new List<ReactionRuleSpec>(8);
 
         private readonly List<CardSpec> _cardList = new List<CardSpec>(160);
         private readonly List<AbilitySpec> _abilityList = new List<AbilitySpec>(32);
@@ -43,7 +42,6 @@ namespace GameLogic.Core
         public IReadOnlyList<PhaseSpec> Phases => _phases;
         public IReadOnlyList<EcoEventSpec> EcoEvents => _ecoEvents;
         public IReadOnlyList<BehaviorArchetype> Archetypes => _archetypes;
-        public IReadOnlyList<ReactionRuleSpec> ReactionRules => _reactionRules;
 
         public void Load()
         {
@@ -97,7 +95,6 @@ namespace GameLogic.Core
             _ecoEvents.Clear();
             _archetypes.Clear();
             _bossPhases.Clear();
-            _reactionRules.Clear();
             Loaded = false;
             UsingFallback = false;
         }
@@ -168,14 +165,6 @@ namespace GameLogic.Core
         {
             _archetypes.Add(arc);
             return _archetypes.Count - 1;
-        }
-
-        public void AddReactionRule(ReactionRuleSpec spec)
-        {
-            if (spec != null)
-            {
-                _reactionRules.Add(spec);
-            }
         }
 
         // ── 查询 ──

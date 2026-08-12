@@ -365,29 +365,54 @@ public interface IStageFlow {
 
 `PhaseTimeline` 管理阶段内的时期推进（细胞阶段的 6 个生态时期），也是数据驱动的：时期定义在配置表里，包含时长、卡池解锁、敌人池、事件池、压力曲线。
 
-### 5.8 反应系统 / 催化系统
+### 5.8 ChemEngine 接入 / MetabolicSlice 战斗桥接
 
-> **Status: Superseded（2026-08-11）** — 禁止按本节实现 `ReactionSystem` / `CatalystRegistry` 路线。  
-> **新权威**：`DesignDocs/最新改动需求/化学引擎-ClaudeCode需求规格.md`（独立 `ChemEngine`，核心零 Unity）；接入游戏时另写桥接，不把判定核心写进本节所述热更模块形态。  
-> 对应旧玩法节 `Cell_Stage_Spec.md` §17（同样 Superseded）。冲突与半成品代码说明见 `最新改动需求/AUTHORITY_AND_CONFLICTS.md`。
+> **权威叙述（2026-08-11 更新）**：本节已从"计划中的 `ReactionSystem`/`CatalystRegistry`"设计态改写为**真实已落地架构**，引用真实类名，因为对应代码已存在可核实。  
+> 对应玩法节 `Cell_Stage_Spec.md` §17（同样已改写）；实现细节权威仍是 `DesignDocs/最新改动需求/化学引擎-ClaudeCode需求规格.md`，本节只描述接入方式。
 
-~~对应 `Cell_Stage_Spec.md` §17。目标：让 §5.4 的词缀从"单条效果的私有装饰器"升级为"状态与状态之间会互相反应"，且不新增效果 `Kind`、不碰内核。~~
+**核心引擎（零 Unity）**：独立库 `ChemEngine`（`ChemEngine/src/ChemEngine/`，`netstandard2.1`，命名空间 `ChemEngine.*`），承载 Packet/HitEvent/RuleVector 装配管道与求解器（`Engine`）。核心库不引用 Unity 引擎包，可脱离 Unity 独立构建与测试；游戏侧只拷贝源码或引用 DLL（`Assets/Plugins/ChemEngine/`），**不得**把游戏桥接代码编进核心 DLL。
+
+**游戏侧桥接**：
 
 ```csharp
-public sealed class ReactionSystem : GameModuleBase
+public sealed class MetabolicSliceBridge : GameModuleBase
 {
-    // 结构仿 StatusSystem：Dictionary<(SimStatus,SimStatus), ReactionRule> 表驱动。
-    // 挂载点：StatusSystem.ApplyTimed / ApplyTimedArea 施加新状态时调用一次
-    // TryReact(unitIndex, newStatus)，O(1) 查表，不逐帧扫描。
-    public void TryReact(int unitIndex, SimStatus newStatus) { /* 查目标当前状态位 & 反应表 */ }
+    public override int Priority => ModulePriority.MetabolicBridge;
+
+    private Engine _engine;
+    private SlotGrid _grid;
+    private MetabolicSliceRunner _runner;
+    private SimBridge _sim;
+
+    public override void OnEnter()
+    {
+        _engine = new Engine();
+        ReactionCatalog.RegisterDefaults(_engine);
+        _grid = new SlotGrid(SlotType.Cytoplasm);
+        _runner = new MetabolicSliceRunner(_engine);
+    }
+
+    public override void OnUpdate(float dt)
+    {
+        // 按固定间隔 Tick，产出 HitEvent[]，消费 Damage 转发到 Sim 层
+        var events = _runner.Tick(_grid, Array.Empty<IContract>(), new WorldState(), seed);
+        foreach (var evt in events)
+        {
+            if (evt.Damage > 0f)
+                _sim.DamageArea(_sim.PlayerPosition, radius, evt.Damage, SimFaction.Hostile);
+        }
+    }
 }
 ```
 
-- **触发路径**：`StatusSystem` 施加状态后回调 `ReactionSystem.TryReact` → 命中规则则把 `ReactionRule.ResultEffect` 包成一次性 `EffectSpec`，走 `AbilitySystem` 现有的 `IEffectExecutor` 调度执行（不新增执行器接口）。
-- **冷却**：按 `(unitIndex, ReactionId)` 记录最近触发时间，复用 `StatusSystem._entries` 同款"到期清理"结构，不新增长期状态表。
-- **催化注入点**：`CatalystRegistry`（新模块，或挂在 `AbilitySystem` 内）持有玩家已获得的 `CatalystRule[]`。`AbilitySystem` 组装 `EffectContext` 前，对匹配 `FilterTrigger`/`FilterSynergyTag`/`FilterRoute` 的 `EffectSpec` 动态合并 `InjectAffix` 到其 `Affixes[]`（只读合并，不回写原 `EffectSpec` 数据，避免脏共享状态）。
-- **反应连锁**：`ReactionSystem` 触发成功后 `Signals.Publish(new ReactionEvent{...})`；`CardTriggerBus` 新增 `OnReaction` 分支，复用现有信号路由，不改总线结构。
-- **性能与边界**：全部在热更层、事件驱动、O(1)/次触发，符合 §5.6 的"热更层每帧与敌人数无关"；`Main/Sim` 只在 `SimStatus` 位不够时加纯数据位（当前 32 位用 13 个），不下沉任何反应判定逻辑。
+（完整实现见 `GameLogic/MetabolicSlice/Combat/MetabolicSliceBridge.cs`；上方为接入方式摘要，非逐行照抄。）
+
+- **挂载点**：`CellStageFlow.RegisterModules()` 里 `_hub.Register(new MetabolicSliceBridge())`；`Priority = ModulePriority.MetabolicBridge`（旧 `ModulePriority.Reaction` 已随删除的 `ReactionSystem` 一并移除）。
+- **出口消费路径**：ChemEngine 求解产出 `HitEvent` 列表 → 桥接层读取 `HitEvent.Damage` → `SimBridge.DamageArea(...)`。`Heal`/`Shield`/`Displace` 等其余字段留后续 story 消费，接口已预留。
+- **游戏侧包装**：`GameLogic/MetabolicSlice/`（Grid/Bag/Transfer/Crafting/Graph/Combat/Environment/Digestion/DebugTools），承载切片、储备囊、复玩三轴（环境残留/背包合成/捕食消化）等玩法逻辑；判定核心全部在 `ChemEngine` 内，桥接层只做"读 HitEvent → 转伤害"的薄适配。
+- **已删除的旧半成品**：`GameLogic/Battle/ReactionSystem.cs`、`ReactionRuleSpec.cs`（及联动的 `CatalystRegistry` 设计态、`ReactionEvent`/`OnReaction` 信号分支）已在 story-006 整删，不留兼容层；旧机制关键词（`Status×Status`/`CatalystRegistry`/`ReactionEvent`）不应再作为实现指引出现。
+- **性能与边界不变**：全部在热更层、事件驱动/固定间隔 Tick，符合 §5.6 的"热更层每帧与敌人数无关"；判定不下沉 `Main/Sim`，`Main/Sim` 只提供纯数据位与 `DamageArea` 等既有接口。
+- **Luban 表规划变更**：曾规划过的 `cell.ReactionRule`/`cell.CatalystRule` 两张表从未生成，新架构改用代码内目录 `MetabolicSlice/ContentCatalog/` 硬编码内容，不走 Luban 这条路（§6 表格已整行删除这两张表）。
 
 ---
 
@@ -410,8 +435,6 @@ public sealed class ReactionSystem : GameModuleBase
 | `cell.LevelCurve` | 升级曲线 | 40 |
 | `cell.PressureCurve` | 压力预算曲线 | 24 |
 | `cell.StatusEffect` | 状态效果 | 24 |
-| `cell.ReactionRule` | ~~反应矩阵（旧 §17.1）~~ **Paused / Superseded** | — |
-| `cell.CatalystRule` | ~~催化卡（旧 §17.2）~~ **Paused / Superseded** | — |
 | `cell.Global` | 全局常量 | 1 |
 | `cell.Text` | 文案（可本地化） | ~400 |
 

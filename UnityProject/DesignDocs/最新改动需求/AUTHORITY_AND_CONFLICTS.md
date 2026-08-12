@@ -22,7 +22,7 @@
 |---|---|
 | `Cell_Stage_Spec.md` §17 | **Superseded**（正文保留作史，实现禁止照做） |
 | `Game_Framework_Design.md` §5.8 | **Superseded** |
-| `cell.ReactionRule` / `cell.CatalystRule` 表规划 | **Paused**；接 ChemEngine 时另定表方案 |
+| `cell.ReactionRule` / `cell.CatalystRule` 表规划 | **确认不走 Luban 表**；新架构改用代码内目录 `MetabolicSlice/ContentCatalog/` 硬编码代替，两张表规划已从 `Game_Framework_Design.md` §6 表格删除 |
 | epic `combat-alchemy` / sprint-006 | **Superseded / Paused**，禁止再派 Worker |
 
 仍有效（非化学专章）：`Cell_Stage_Spec` 其它章、`Game_Framework` 热更边界 / AOT Sim / 模块框架等——**只按节读冲突处**。
@@ -46,13 +46,13 @@
 
 ## 3. 已存在旧半成品代码（勿继续扩）
 
-仓库内已有按旧 §17 开工痕迹（至少）：
+仓库内曾有按旧 §17 开工痕迹（至少）：
 
 - `GameLogic/Battle/ReactionSystem.cs`
 - `GameLogic/Battle/ReactionRuleSpec.cs`
 - 及相关 `StatusSystem` / `EffectDealDamage` / Luban 加载挂钩
 
-**规则**：story-001～005 **禁止扩写**这些文件。**story-006** 负责审计删除/隔离后桥接新库。
+**状态：已完成删除（story-006，2026-08-11）**。上述文件与联动挂钩已整删并接入新桥接 `MetabolicSliceBridge`，代码层零残留旧类型引用（`ReactionSystem`/`ReactionRuleSpec`/`ReactionSignal`/`AddReactionRule`/`ReactionRules` 全仓 grep 零命中）。证据：`qa/evidence/metabolic-slice-006-bridge-and-purge.md`。
 
 ---
 
@@ -71,7 +71,7 @@
 |---|---|
 | `combat-alchemy` 001～005 | Superseded |
 | sprint-006 | Superseded |
-| **sprint-007 / epic `metabolic-slice`** | **Ready**：001 包装→…→006 删旧 ReactionSystem→007 OpenSpec/Spec→008 |
+| **sprint-007 / epic `metabolic-slice`** | 001～007 **Done**（001 包装→…→006 删旧 ReactionSystem→007 OpenSpec/Spec 深度回写）；**008（Play 收尾）Ready** |
 | ChemEngine 独立库 | Done（人窗） |
 | sprint-005 003～009 | Paused；007 整批 Done 后切回 |
 

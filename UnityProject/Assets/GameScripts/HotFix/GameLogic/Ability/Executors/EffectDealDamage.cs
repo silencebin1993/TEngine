@@ -82,20 +82,8 @@ namespace GameLogic.Ability.Executors
                 case EffectShape.Target:
                     if (ctx.TargetIndex >= 0)
                     {
-                        // 反应矩阵"碎裂"特例（Decision H2）：晶化层数计数只服务这一条规则，
-                        // 不走 StatusSystem 的通用挂钩，这里用已知的 TargetIndex 零查找成本直触发。
-                        // 必须读施加前（这一下伤害带来的新状态生效前）的晶化位，与"任意物理命中"语义对齐。
-                        bool wasCrystallized = ctx.Sim.Snapshot.HasStatus(ctx.TargetIndex, SimStatus.Crystallized);
-
                         ctx.Sim.DamageUnit(ctx.TargetIndex, amount, apply,
                             chain, chainRange, 0.75f, ctx.SourceId);
-
-                        if (wasCrystallized)
-                        {
-                            SimSnapshot snap = ctx.Sim.Snapshot;
-                            int logicId = ctx.TargetIndex < snap.Count ? snap.LogicId[ctx.TargetIndex] : 0;
-                            ctx.Hub?.Get<ReactionSystem>()?.OnTargetHit(ctx.TargetIndex, logicId);
-                        }
                     }
                     break;
 

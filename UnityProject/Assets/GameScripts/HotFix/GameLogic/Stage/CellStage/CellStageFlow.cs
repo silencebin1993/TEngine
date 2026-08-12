@@ -6,6 +6,7 @@ using GameLogic.Battle;
 using GameLogic.Battle.Feedback;
 using GameLogic.Cards;
 using GameLogic.Core;
+using GameLogic.MetabolicSlice.Combat;
 using GameLogic.Progression;
 using GameLogic.Spawning;
 using GameLogic.Stats;
@@ -37,7 +38,7 @@ namespace GameLogic.Stage.CellStage
         private SimBridge _sim;
         private StatusSystem _status;
         private AreaZoneSystem _zones;
-        private ReactionSystem _reaction;
+        private MetabolicSliceBridge _metabolicBridge;
         private AbilitySystem _abilities;
         private CardTriggerBus _cards;
         private ResourceWallet _wallet;
@@ -79,7 +80,6 @@ namespace GameLogic.Stage.CellStage
         public SimBridge Sim => _sim;
         public StatusSystem Status => _status;
         public AreaZoneSystem Zones => _zones;
-        public ReactionSystem Reaction => _reaction;
 
         public void Enter(StageOutcome inherited)
         {
@@ -188,7 +188,7 @@ namespace GameLogic.Stage.CellStage
             _sim = _hub.Register(new SimBridge());
             _status = _hub.Register(new StatusSystem());
             _zones = _hub.Register(new AreaZoneSystem());
-            _reaction = _hub.Register(new ReactionSystem());
+            _metabolicBridge = _hub.Register(new MetabolicSliceBridge());
             _abilities = _hub.Register(new AbilitySystem());
             _cards = _hub.Register(new CardTriggerBus());
             _wallet = _hub.Register(new ResourceWallet());
@@ -220,8 +220,8 @@ namespace GameLogic.Stage.CellStage
 
             // 依赖注入。模块之间不互相 new，只在这里接线。
             _abilities.Bind(_sim, _stats);
-            _reaction.Bind(_sim, _stats);
-            _status.Bind(_sim, _reaction);
+            _status.Bind(_sim);
+            _metabolicBridge.Bind(_sim);
             _zones.Bind(_sim, _status);
             _wallet.Bind(_stats);
             _progression.Bind(_wallet);
@@ -619,110 +619,6 @@ namespace GameLogic.Stage.CellStage
                 $"[GM] 解锁全部技能 +{granted}（槽位 {_abilities.SlotCount}/{all.Count}），体力已灌满");
         }
 
-        /// <summary>
-        /// GM：依次触发反应矩阵全部 6 条规则（story-001 Play 冒烟验收用，
-        /// 证据见 production/qa/evidence/reaction-matrix.md）。
-        ///
-        /// 每条"配对"规则用独立目标，避免前一条规则已施加的状态位干扰下一条的
-        /// oldMask 判定；两次施加之间手动推进一次内核 Step，
-        /// 因为 SimBridge 的快照要到下一次 Step 才反映刚提交的命令
-        /// （和真实对局里"两次不同时机命中"的场景等价）。
-        /// 晶化规则走真实伤害管线（AbilitySystem.RunEffect），验证 EffectDealDamage 的挂钩本身。
-        /// </summary>
-        public void DebugTriggerReactions()
-        {
-            if (_sim == null || !_sim.Running || _reaction == null || _status == null)
-            {
-                TEngine.Log.Warning("[GM] 反应矩阵未就绪，无法触发。");
-                return;
-            }
-
-            List<int> targets = FindHostileTargets(6);
-            if (targets.Count == 0)
-            {
-                TEngine.Log.Warning("[GM] 场上无存活敌人，无法触发反应矩阵。");
-                return;
-            }
-
-            int Target(int i) => targets[i % targets.Count];
-
-            // 1：电解（导电×腐蚀）
-            TriggerReactionPair(Target(0), SimStatus.Conductive, SimStatus.Corroded);
-            // 2：殉爆（导电×过载，consumeB 会清掉过载）
-            TriggerReactionPair(Target(1), SimStatus.Overloaded, SimStatus.Conductive);
-            // 4：溃逃踩踏（标记×恐惧）
-            TriggerReactionPair(Target(2), SimStatus.Marked, SimStatus.Feared);
-            // 5：破巢（寄生×破体）
-            TriggerReactionPair(Target(3), SimStatus.Parasited, SimStatus.Breached);
-
-            // 6：区域连锁（腐蚀×导电，用小范围 ApplyTimedArea 近似"滞留区域"）
-            SimSnapshot snapArea = _sim.Snapshot;
-            int areaUnit = Target(4);
-            Unity.Mathematics.float2 areaPos = areaUnit < snapArea.Count
-                ? snapArea.Position[areaUnit] : _sim.PlayerPosition;
-            _status.ApplyTimedArea(areaPos, 5f, SimStatus.Corroded, 5f, SimFaction.Hostile);
-            _sim.OnUpdate(0.02f);
-            _status.ApplyTimedArea(areaPos, 5f, SimStatus.Conductive, 5f, SimFaction.Hostile);
-
-            // 3：碎裂（晶化 3 层 + 1 次命中）
-            int crystalTarget = Target(5);
-            _status.ApplyTimed(crystalTarget, SimStatus.Crystallized, 8f);
-            _sim.OnUpdate(0.02f);
-
-            var probe = new EffectSpec
-            {
-                Kind = EffectKind.Damage,
-                Shape = EffectShape.Target,
-                Value = 1f,
-                ScaleWithPower = false,
-            };
-            SimSnapshot snapProbe = _sim.Snapshot;
-            var ctx = new EffectContext
-            {
-                Hub = _hub,
-                Sim = _sim,
-                Stats = _stats,
-                Origin = crystalTarget < snapProbe.Count
-                    ? snapProbe.Position[crystalTarget] : _sim.PlayerPosition,
-                Direction = Unity.Mathematics.float2.zero,
-                TargetIndex = crystalTarget,
-                SourceId = -901,
-                Stack = 1,
-                TriggerMagnitude = 0f,
-            };
-            for (int i = 0; i < 4; i++)
-            {
-                _abilities.RunEffect(probe, in ctx);
-            }
-
-            TEngine.Log.Info($"[GM] 已触发反应矩阵 6 条规则（目标 unit={string.Join(",", targets)}）。");
-        }
-
-        private void TriggerReactionPair(int target, SimStatus first, SimStatus second)
-        {
-            _status.ApplyTimed(target, first, 5f);
-            _sim.OnUpdate(0.02f);
-            _status.ApplyTimed(target, second, 5f);
-        }
-
-        /// <summary>GM 专用：收集最多 count 个存活敌对单位索引。一次性调试调用，不在每帧路径里。</summary>
-        private List<int> FindHostileTargets(int count)
-        {
-            var result = new List<int>(count);
-            if (_sim == null || !_sim.Running)
-            {
-                return result;
-            }
-            SimSnapshot snap = _sim.Snapshot;
-            for (int i = 1; i < snap.Count && result.Count < count; i++)
-            {
-                if (snap.Alive[i] != 0 && snap.Faction[i] == (byte)SimFaction.Hostile)
-                {
-                    result.Add(i);
-                }
-            }
-            return result;
-        }
 #endif
 
         private void CheckEnd()
