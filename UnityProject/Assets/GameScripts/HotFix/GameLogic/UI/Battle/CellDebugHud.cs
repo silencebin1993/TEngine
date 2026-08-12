@@ -237,6 +237,7 @@ namespace GameLogic.UI.Battle
                 "GM: F4 资源　F5 选卡　F6 精英选卡　F7 下一时期　F8 通关　` 全技能　FPS " +
                 (1f / Mathf.Max(0.0001f, Time.smoothDeltaTime)).ToString("F0"),
                 _label);
+            GUILayout.Label("M 代谢切片面板　装/卸　画/删有向边", _label);
 
             GUILayout.EndArea();
         }
@@ -325,9 +326,9 @@ namespace GameLogic.UI.Battle
             float x0 = (Screen.width - totalW) * 0.5f;
             float y0 = (Screen.height - cardH) * 0.5f;
 
-            GUI.Label(new Rect(0f, y0 - 96f, Screen.width, 30f), "细胞内进化", _big);
+            GUI.Label(new Rect(0f, y0 - 96f, Screen.width, 30f), "选择奖励", _big);
             GUI.Label(new Rect(Screen.width * 0.5f - 340f, y0 - 62f, 680f, 44f),
-                "进化能已充满。选择一种突变。你仍留在细胞阶段，但这次变化会改写\n接下来的吞噬、移动、战斗或生态关系。",
+                "进化能已充满，从下列奖励中选一项，为你的旅程注入新的变化。\n你仍留在细胞阶段，选择与是否吞噬无关。",
                 new GUIStyle(_label) { alignment = TextAnchor.MiddleCenter });
 
             for (int i = 0; i < opts.Count; i++)
@@ -336,7 +337,7 @@ namespace GameLogic.UI.Battle
                 var r = new Rect(x0 + i * (cardW + gap), y0, cardW, cardH);
                 GUI.Box(r, BuildCardText(c, cell), _cardBox);
 
-                if (GUI.Button(new Rect(r.x + 10f, r.yMax - 42f, r.width - 20f, 32f), "吸收突变"))
+                if (GUI.Button(new Rect(r.x + 10f, r.yMax - 42f, r.width - 20f, 32f), "领取奖励"))
                 {
                     cell.ConfirmDraft(c.Id);
                     return;
@@ -535,11 +536,19 @@ namespace GameLogic.UI.Battle
             }
 
             GUILayout.Space(8f);
-            GUILayout.Label($"<b>卡牌</b>　{codex.DiscoveredCardIds.Count}", _label);
+            GUILayout.Label($"<b>已解锁器官/基因</b>　{codex.DiscoveredCardIds.Count}", _label);
             foreach (int id in codex.DiscoveredCardIds)
             {
                 CardSpec c = DataRegistry.Instance.GetCard(id);
-                GUILayout.Label(c != null ? $"　{RarityText(c.Rarity)} {c.Name}" : $"　#{id}", _label);
+                if (c == null)
+                {
+                    GUILayout.Label($"　#{id}", _label);
+                    continue;
+                }
+                string kind = c.ContentKind == ContentKind.Organelle ? "器官"
+                    : c.ContentKind == ContentKind.Gene ? "基因" : "卡牌";
+                GUILayout.Label($"　[{kind}] {RarityText(c.Rarity)} {c.Name}", _label);
+                GUILayout.Label($"　　{c.Desc}", _label);
             }
 
             GUILayout.EndArea();

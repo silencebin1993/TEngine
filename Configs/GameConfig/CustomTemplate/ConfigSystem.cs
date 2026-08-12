@@ -7,7 +7,8 @@ using UnityEngine;
 
 /// <summary>
 /// 配置加载器。桥接 Luban 生成代码与资源系统。
-/// 优先走 YooAsset；FP Demo / Editor 直开场景时回退到 AssetRaw 磁盘文件。
+/// 优先走 YooAsset；FP Demo / Editor 直开场景时回退到 GameRes/Raw 磁盘文件
+/// （Assets/AssetRaw 已删除，见根 CLAUDE.md「禁止再用已删的 AssetRaw」）。
 /// </summary>
 public class ConfigSystem
 {
@@ -90,7 +91,7 @@ public class ConfigSystem
 
     private static byte[] TryLoadFromAssetRaw(string file)
     {
-        string path = Path.Combine(Application.dataPath, "AssetRaw", "Configs", "bytes", file + ".bytes");
+        string path = Path.Combine(Application.dataPath, "GameRes", "Raw", "Configs", "bytes", file + ".bytes");
         if (!File.Exists(path))
         {
             return null;

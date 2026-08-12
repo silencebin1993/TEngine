@@ -1,7 +1,9 @@
 using GameLogic.Battle;
 using GameLogic.Cards;
 using GameLogic.Core;
+using GameLogic.MetabolicSlice.Bag;
 using GameLogic.Stats;
+using GameLogic.UI.Battle;
 using UnityEngine;
 
 namespace GameLogic.Progression
@@ -13,6 +15,7 @@ namespace GameLogic.Progression
         RandomCard,
         ClearPollution,
         GainMutagen,
+        GrantOrganPart,
     }
 
     /// <summary>商品定义。当前写死在 <see cref="ShopSystem.Catalog"/>，配表化留给后续内容扩充 story。</summary>
@@ -58,7 +61,15 @@ namespace GameLogic.Progression
                 Name = "突变浓缩", Desc = "获得 5 点突变质",
                 Cost = 20f, Effect = ShopEffectKind.GainMutagen, Value = 5f,
             },
+            new ShopItemSpec
+            {
+                Name = "器官零件", Desc = "获得一枚随机器官零件，直接入储备囊",
+                Cost = 15f, Effect = ShopEffectKind.GrantOrganPart, Value = 0f,
+            },
         };
+
+        /// <summary>代谢商店触点（story-006）：固定 3 条常用器官，买后直接进 <see cref="MetabolicSlicePanel"/> 的囊。</summary>
+        private static readonly string[] ShopOrganelleIds = { "org_mito", "org_lens", "org_emitter" };
 
         public const int SlotCount = 3;
         public const float RefreshCost = 8f;
@@ -148,6 +159,25 @@ namespace GameLogic.Progression
                 case ShopEffectKind.GainMutagen:
                     _wallet.Add(ResourceKind.Mutagen, item.Value);
                     break;
+                case ShopEffectKind.GrantOrganPart:
+                    GrantOrganPart();
+                    break;
+            }
+        }
+
+        /// <summary>随机发一枚固定目录里的器官零件，直接进玩家囊（不经过抽卡三选一）。</summary>
+        private static void GrantOrganPart()
+        {
+            BagInventory bag = MetabolicSlicePanel.Instance?.Bag;
+            if (bag == null)
+            {
+                return;
+            }
+            string organId = ShopOrganelleIds[Random.Range(0, ShopOrganelleIds.Length)];
+            var part = new PartInstance(System.Guid.NewGuid().ToString("N"), organId, PartLocation.Bag());
+            if (bag.TryAdd(part) == AddResult.NeedDecision)
+            {
+                TEngine.Log.Warning($"[ShopSystem] 囊已满，购买的器官零件 {organId} 未能入囊");
             }
         }
 

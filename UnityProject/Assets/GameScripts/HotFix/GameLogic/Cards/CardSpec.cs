@@ -40,6 +40,17 @@ namespace GameLogic.Cards
     }
 
     /// <summary>
+    /// 卡对应的具体内容种类（story-005 代谢化迁移）。None = 旧战斗卡/未归类内容占位；
+    /// Organelle/Gene 时 ContentId 查 MetabolicSlice.ContentCatalog 的 OrganelleCatalog/GeneCatalog。
+    /// </summary>
+    public enum ContentKind
+    {
+        None = 0,
+        Organelle = 1,
+        Gene = 2,
+    }
+
+    /// <summary>
     /// 卡牌触发时机。对应 Core/GameSignals.cs 里的信号。
     /// 新增触发时机 = 加一个枚举值 + CardTriggerBus 订阅对应信号。
     /// </summary>
@@ -80,6 +91,11 @@ namespace GameLogic.Cards
 
         public CardRoute Route = CardRoute.None;
         public CardRarity Rarity = CardRarity.Common;
+
+        /// <summary>代谢化迁移（story-005）：本卡对应的具体内容种类，None=旧战斗卡/未归类。</summary>
+        public ContentKind ContentKind = ContentKind.None;
+        /// <summary>ContentKind!=None 时，OrganelleCatalog/GeneCatalog 的字符串 Id。</summary>
+        public string ContentId;
 
         /// <summary>解锁所需生态时期序号（0 起）。</summary>
         public int UnlockPhase;

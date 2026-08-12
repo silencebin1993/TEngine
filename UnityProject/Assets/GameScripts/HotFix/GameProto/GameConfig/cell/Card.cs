@@ -36,6 +36,8 @@ public sealed partial class Card : Luban.BeanBase
         PollutionCost = _buf.ReadFloat();
         DrawbackDesc = _buf.ReadString();
         IsPureStatCard = _buf.ReadBool();
+        ContentKind = (cell.EContentKind)_buf.ReadInt();
+        ContentId = _buf.ReadString();
     }
 
     public static Card DeserializeCard(ByteBuf _buf)
@@ -111,6 +113,14 @@ public sealed partial class Card : Luban.BeanBase
     /// 是否纯数值卡
     /// </summary>
     public readonly bool IsPureStatCard;
+    /// <summary>
+    /// 内容种类：器官/基因（代谢化迁移，None=旧战斗卡/未归类）
+    /// </summary>
+    public readonly cell.EContentKind ContentKind;
+    /// <summary>
+    /// 对应 OrganelleCatalog/GeneCatalog 的字符串 Id，contentKind=None 时为空
+    /// </summary>
+    public readonly string ContentId;
    
     public const int __ID__ = 1583492156;
     public override int GetTypeId() => __ID__;
@@ -139,6 +149,8 @@ public sealed partial class Card : Luban.BeanBase
         + "pollutionCost:" + PollutionCost + ","
         + "drawbackDesc:" + DrawbackDesc + ","
         + "isPureStatCard:" + IsPureStatCard + ","
+        + "contentKind:" + ContentKind + ","
+        + "contentId:" + ContentId + ","
         + "}";
     }
 }

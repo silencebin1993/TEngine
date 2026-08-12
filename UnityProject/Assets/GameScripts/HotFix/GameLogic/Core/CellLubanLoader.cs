@@ -210,6 +210,8 @@ namespace GameLogic.Core
                     PollutionCost = c.PollutionCost,
                     DrawbackDesc = c.DrawbackDesc,
                     IsPureStatCard = c.IsPureStatCard,
+                    ContentKind = (ContentKind)(int)c.ContentKind,
+                    ContentId = c.ContentId,
                 };
 
                 if (c.RuleFlags != null && c.RuleFlags.Count > 0)

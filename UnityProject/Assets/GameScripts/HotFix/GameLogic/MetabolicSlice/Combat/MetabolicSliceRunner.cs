@@ -17,7 +17,11 @@ namespace GameLogic.MetabolicSlice.Combat
 
         public MetabolicSliceRunner(Engine engine) => _engine = engine;
 
-        public List<HitEvent> Tick(SlotGrid grid, IReadOnlyList<IContract> globalGeneContracts, WorldState world, int seed)
+        /// <summary>
+        /// cellId（story-007 起可选）：设到每个原始事件的 TargetId，让 HeatSettleAndReactions 把
+        /// world.GetTags(cellId)（地形/残留）并入反应匹配集合——不传则行为与之前完全一致（TargetId 保持 null）。
+        /// </summary>
+        public List<HitEvent> Tick(SlotGrid grid, IReadOnlyList<IContract> globalGeneContracts, WorldState world, int seed, string cellId = null)
         {
             var rules = _engine.NormalizeContracts(globalGeneContracts);
             var events = new List<HitEvent>();
@@ -28,6 +32,7 @@ namespace GameLogic.MetabolicSlice.Combat
                 var raw = _engine.RunAssembly(path.Modules, ticks: 1, seed: seed);
                 foreach (var evt in raw)
                 {
+                    if (cellId != null) evt.TargetId = cellId;
                     events.Add(_engine.ApplyPipeline(evt, rules, world));
                 }
             }

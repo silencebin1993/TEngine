@@ -7,7 +7,8 @@ using UnityEngine;
 
 /// <summary>
 /// 配置加载器。桥接 Luban 生成代码与资源系统。
-/// 优先走 YooAsset；FP Demo / Editor 直开场景时回退到 GameRes/Raw 磁盘文件。
+/// 优先走 YooAsset；FP Demo / Editor 直开场景时回退到 GameRes/Raw 磁盘文件
+/// （Assets/AssetRaw 已删除，见根 CLAUDE.md「禁止再用已删的 AssetRaw」）。
 /// </summary>
 public class ConfigSystem
 {

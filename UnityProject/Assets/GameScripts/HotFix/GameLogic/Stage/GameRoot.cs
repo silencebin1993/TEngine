@@ -98,6 +98,7 @@ namespace GameLogic.Stage
             _hudHost = new GameObject("[CellDebugHud]");
             Object.DontDestroyOnLoad(_hudHost);
             _hudHost.AddComponent<UI.Battle.CellDebugHud>();
+            _hudHost.AddComponent<UI.Battle.MetabolicSlicePanel>();
             _hudHost.AddComponent<Battle.StressTestToggle>();
         }
 

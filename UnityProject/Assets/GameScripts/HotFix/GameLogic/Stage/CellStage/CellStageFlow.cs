@@ -6,10 +6,13 @@ using GameLogic.Battle;
 using GameLogic.Battle.Feedback;
 using GameLogic.Cards;
 using GameLogic.Core;
+using GameLogic.MetabolicSlice.Bag;
 using GameLogic.MetabolicSlice.Combat;
+using GameLogic.MetabolicSlice.Digestion;
 using GameLogic.Progression;
 using GameLogic.Spawning;
 using GameLogic.Stats;
+using GameLogic.UI.Battle;
 using UnityEngine;
 
 namespace GameLogic.Stage.CellStage
@@ -52,6 +55,7 @@ namespace GameLogic.Stage.CellStage
         private BossPhaseController _bossPhase;
         private ShopSystem _shop;
         private CodexRegistry _codex;
+        private MetabolicDigestionSystem _digestion;
 
         private SimRenderer _renderer;
         private Camera _camera;
@@ -80,6 +84,8 @@ namespace GameLogic.Stage.CellStage
         public SimBridge Sim => _sim;
         public StatusSystem Status => _status;
         public AreaZoneSystem Zones => _zones;
+        public MetabolicSliceBridge MetabolicBridge => _metabolicBridge;
+        public MetabolicDigestionSystem Digestion => _digestion;
 
         public void Enter(StageOutcome inherited)
         {
@@ -202,6 +208,7 @@ namespace GameLogic.Stage.CellStage
             _bossPhase = _hub.Register(new BossPhaseController());
             _shop = _hub.Register(new ShopSystem());
             _codex = _hub.Register(new CodexRegistry());
+            _digestion = _hub.Register(new MetabolicDigestionSystem());
             // 战斗反馈表现层（story-002）：白模默认实现，只订阅 Signals，无需 Bind 依赖。
             _hub.Register(new CombatFeedbackPresenter());
             // 技能施放表现层（story-010）：与上面并列，管施放瞬间本身而非命中结算。
@@ -501,11 +508,41 @@ namespace GameLogic.Stage.CellStage
                     }
                     Signals.Publish(new CardAcquiredSignal { CardId = cardId, NewStack = stack });
                     _outcome.Statistics.LevelsGained++;
+
+                    ApplyMetabolicContent(spec);
                 }
             }
 
             PendingOptions = null;
             _paused = false;
+        }
+
+        /// <summary>
+        /// 代谢化迁移（story-005）：Deck.Acquire 只管卡牌记账（叠层/去重/路线统计），
+        /// 真正的玩法效果按 ContentKind 分流到 002 的囊（器官→PartInstance）或
+        /// 003 的全局基因契约（Gene→Panel.GeneContracts），两条路都读同一个
+        /// MetabolicSlicePanel.Instance——它是唯一的玩家状态持有者。
+        /// </summary>
+        private static void ApplyMetabolicContent(CardSpec spec)
+        {
+            if (spec.ContentKind == ContentKind.Organelle)
+            {
+                BagInventory bag = MetabolicSlicePanel.Instance?.Bag;
+                if (bag != null)
+                {
+                    var part = new PartInstance(System.Guid.NewGuid().ToString("N"), spec.ContentId, PartLocation.Bag());
+                    if (bag.TryAdd(part) == AddResult.NeedDecision)
+                    {
+                        // 囊已满：v1 不打断选卡流程弹抉择 UI（那是 002 手动测试按钮的路径），
+                        // 先记日志避免玩家困惑「明明选了卡，囊里却没有」。抉择 UI 留后续 story。
+                        TEngine.Log.Warning($"[CellStageFlow] 囊已满，抽到的器官 {spec.ContentId} 未能入囊");
+                    }
+                }
+            }
+            else if (spec.ContentKind == ContentKind.Gene)
+            {
+                MetabolicSlicePanel.Instance?.AddGene(spec.ContentId);
+            }
         }
 
         /// <summary>放弃本次选卡（UI 的跳过按钮）。</summary>

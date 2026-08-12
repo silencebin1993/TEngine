@@ -313,7 +313,7 @@ EffectSpec {
 
 执行器按 `Kind` 注册到字典。**新增一种效果 = 新增一个 `IEffectExecutor` 文件 + 注册一行**，不改任何现有执行器。这是"不频繁改老代码"的主要落点。
 
-词缀（§8.4 of Spec）实现为**执行器的装饰器**：`导电` 词缀包裹 `EffectDealDamage`，在其执行后追加施加导电状态。32 个词缀 × 9 类效果 = 288 种组合，全部由数据表达。
+词缀（Spec §8.4，**已作废，历史目标**）曾实现为**执行器的装饰器**：`导电` 词缀包裹 `EffectDealDamage`，在其执行后追加施加导电状态。32 个词缀 × 9 类效果 = 288 种组合的目标随词缀战斗卡整体 Delist（story-005，2026-08-12 前）一并作废；装饰器机制本身作为通用能力保留，但当前 28 张代谢卡的 `Affixes[]` 恒为空，组合深度改由 ChemEngine 正交叠乘承担。
 
 ### 5.5 卡牌系统
 
@@ -439,6 +439,8 @@ public sealed class MetabolicSliceBridge : GameModuleBase
 | `cell.Text` | 文案（可本地化） | ~400 |
 
 原 `fp.*` 表保留但不再扩展，标记为 legacy。
+
+> **行数目标已过时（2026-08-12 更新）**：`cell.Card`（135）/ `cell.CardEffect`（~350）/ `cell.Affix`（32）三行是词缀战斗卡时代的原始 MVP 目标，随 story-005 表格全改（D3b）作废。当前 `cell.Card` 实际 28 行（17 器官 + 11 基因，来自 `OrganelleCatalog`/`GeneCatalog`），无 `CardEffect` 行（新卡效果走 `contentKind`/`contentId` 指向代谢目录，不走旧 `EffectSpec` 触发器体系），`cell.Affix` 表结构保留但无生效内容。其余表（`Enemy`/`Phase`/`EcoEvent`/…）不受影响。
 
 ---
 
