@@ -41,6 +41,8 @@ namespace GameLogic.Stage.CellStage
         private SimBridge _sim;
         private StatusSystem _status;
         private AreaZoneSystem _zones;
+        private ZoneVisualPresenter _zoneVisual;
+        private HealthBarPresenter _healthBars;
         private MetabolicSliceBridge _metabolicBridge;
         private AbilitySystem _abilities;
         private CardTriggerBus _cards;
@@ -84,6 +86,7 @@ namespace GameLogic.Stage.CellStage
         public SimBridge Sim => _sim;
         public StatusSystem Status => _status;
         public AreaZoneSystem Zones => _zones;
+        public HealthBarPresenter HealthBars => _healthBars;
         public MetabolicSliceBridge MetabolicBridge => _metabolicBridge;
         public MetabolicDigestionSystem Digestion => _digestion;
 
@@ -213,6 +216,11 @@ namespace GameLogic.Stage.CellStage
             _hub.Register(new CombatFeedbackPresenter());
             // 技能施放表现层（story-010）：与上面并列，管施放瞬间本身而非命中结算。
             _hub.Register(new AbilityCastPresenter());
+            // 区域可视化表现层（story-007）：白模圆盘，唯一需要直接 Bind(AreaZoneSystem) 的 Presenter——
+            // AreaZoneSystem 没有生成/过期信号，只有逐帧维护的 Zones 列表。
+            _zoneVisual = _hub.Register(new ZoneVisualPresenter());
+            // 血条表现层（story-008）：与 ZoneVisualPresenter 同款直接 Bind，需要连续读 Health/Position。
+            _healthBars = _hub.Register(new HealthBarPresenter());
 
             // 效果执行器注册。新增一种效果只需在此多一行。
             _abilities.RegisterExecutor(new EffectDealDamage());
@@ -228,8 +236,10 @@ namespace GameLogic.Stage.CellStage
             // 依赖注入。模块之间不互相 new，只在这里接线。
             _abilities.Bind(_sim, _stats);
             _status.Bind(_sim);
-            _metabolicBridge.Bind(_sim);
+            _metabolicBridge.Bind(_sim, _stats);
             _zones.Bind(_sim, _status);
+            _zoneVisual.Bind(_zones);
+            _healthBars.Bind(_sim, _stats);
             _wallet.Bind(_stats);
             _progression.Bind(_wallet);
             _cards.Bind(_deck, _abilities, _sim, _stats);
@@ -255,6 +265,11 @@ namespace GameLogic.Stage.CellStage
                 _stats.Get(StatId.MaxHealth),
                 _stats.Get(StatId.Volume),
                 _stats.Get(StatId.MoveSpeed));
+
+            // 轻障碍（story-009）：数据驱动随机布局，白模一次性生成。
+            ObstacleSpec[] obstacles = ObstacleGenerator.Generate(cfg.ArenaHalfExtent);
+            _sim.SetObstacles(obstacles);
+            WhiteboxObstacleVisual.Spawn(obstacles);
 
             _renderer = new SimRenderer();
             _renderer.Initialize(BuildVisuals(), cfg.UnitCapacity);
@@ -697,6 +712,7 @@ namespace GameLogic.Stage.CellStage
 
             _renderer?.Dispose();
             _renderer = null;
+            WhiteboxObstacleVisual.Dispose();
 
             Signals.Clear();
             RuleFlags.Current.ClearAll();

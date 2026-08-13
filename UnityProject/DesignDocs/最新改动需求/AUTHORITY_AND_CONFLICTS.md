@@ -10,12 +10,15 @@
 
 | 主题 | 唯一权威 | 何时读 |
 |---|---|---|
-| 冻结宪法（基元/字段/管道/禁令） | `代谢切片-冻结总案-基元与美术.md` | 接入游戏 / 定名词与种类时 |
-| ChemEngine 独立库 | `化学引擎-ClaudeCode需求规格.md` | **实现窗唯一需求文件** |
-| 卡牌/切片包装 | `细胞肉鸽-基元卡牌包装.md` | ChemEngine 绿后的下一窗 |
+| **正名 + 全阶段变化词 / 全能组合代数** | `组合引擎-正名与全阶段变化词宪法.md` | 扩词库、跨阶段皮、**默认全能混合**（非白名单 pair）；**sprint-010** |
+| 冻结宪法（细胞 v1 基元/字段/管道/禁令） | `代谢切片-冻结总案-基元与美术.md` | 接入游戏 / 定细胞 v1 名词与种类时（= 全阶段宪法的已启用子集） |
+| ComposeEngine 独立库（做法 C API） | `组合引擎-ClaudeCode需求规格.md` | 实现/改核时；与正名宪法一起守做法 C |
+| 卡牌/切片包装 | `细胞肉鸽-基元卡牌包装.md` | ComposeEngine 绿后的下一窗 |
 | 复玩三轴 | `复玩三轴-ClaudeCode需求规格.md` | 包装落地后 |
 | 玩家白话名词 | `代谢切片-白话名词说明书.md` | 写 UI/文案时；程序窗默认不读 |
 | 美术出图 | `美术AI静图出图规范.md` | 美术窗；程序窗禁止读 |
+
+**正名（2026-08-13）**：对外权威名 = **组合引擎 / ComposeEngine**（sprint-010 story-001 **已真改符号**：库目录/命名空间/DLL/Unity Plugins 路径/规格文件名均已切换）。元素反应 ⊂ Substance 轴；变大/散射/旋转/位移等是一等能力。细胞 v1 目录不因此作废。
 
 旧权威中的化学相关节：
 
@@ -32,12 +35,12 @@
 
 ## 2. 冲突摘要（旧 §17 路线 vs 冻结总案）
 
-| ID | 旧（§17 / combat-alchemy） | 新（冻结总案 / ChemEngine） | 处置 |
+| ID | 旧（§17 / combat-alchemy） | 新（冻结总案 / ComposeEngine） | 处置 |
 |---|---|---|---|
 | C1 | 状态×状态反应挂在 `StatusSystem.ApplyTimed` | 做法 C：基元改 `Packet`/`HitEvent`/`TagSet`，引擎管道叠加 | **废弃旧挂点设计**；接入时另定桥 |
 | C2 | 不新增词缀/效果 Kind，只重组 32 词缀 | 新基元种类（器官/基因等）+ 反应注册表 | 新路线为准；旧「禁止新 Kind」仅适用于旧 alchemy epic |
 | C3 | 催化卡 = 运行时给 EffectSpec 注入 Affix | 催化 = tag/状态反应表 + 正交修饰叠乘 | 勿实现旧 CatalystRule 故事 |
-| C4 | `OnReaction` 订阅 ReactionEvent | ChemEngine 事件/正规形另定；游戏侧后接 | 旧 story-003 不做 |
+| C4 | `OnReaction` 订阅 ReactionEvent | ComposeEngine 事件/正规形另定；游戏侧后接 | 旧 story-003 不做 |
 | C5 | 内容仍是「卡牌+词缀」主循环 | 代谢切片 + 有向管 + 双系统（切片/储备囊）+ 三轴 | 产品形态以冻结总案为准；**2026-08-12 更新**：D3/D3b 已定案并落地——旧 135 张词缀战斗卡整体 Delist（`cell_tables/carddata.py` 归档见 `_legacy_carddata_archive.py`，不参与生成），当前抽卡池为 28 张代谢卡（17 器官 + 11 基因），三选一**流程**骨架保留（D1/D1b），但**内容**已无词缀卡 |
 | C6 | 热更层 `ReactionSystem` 直接做判定 | 核心库 **零 Unity**，游戏只写桥 | 先独立库，再桥；禁止把引擎写进 `GameLogic` 当核心 |
 
@@ -61,8 +64,9 @@
 
 1. `epic/metabolic-slice` 001～008 已 Done；当前优先领 `production/epics/metabolic-playerization/` 当前 Ready story（sprint-008，D1~D8）；总控自动串行，不问人「下一步」。  
 2. 一窗只读本 story 点名的规格文件 + AUTHORITY 短文；禁止整本 GDD_Starter / FirstPlayable / 旧 §17「对照实现」。  
-3. 代码主落点：`GameLogic/MetabolicSlice/` + 可改 `ChemEngine/`；ChemEngine 核心零 Unity。  
-4. Spec 深度回写与 OpenSpec：story-007。
+3. 代码主落点：`GameLogic/MetabolicSlice/` + 可改 `ComposeEngine/`；ComposeEngine 核心零 Unity。  
+4. Spec 深度回写与 OpenSpec：story-007。  
+5. **组合出口无「纯表现档」（2026-08-13）**：`HitEvent` 的 `Count`/`Scale`/`Spin`/`Orbit`/`ExplodeOnHit` 等修饰轴**一律进机制**（多段、半径、轨迹、爆炸段）。禁止 Preflight/Worker 再按旧 `HostApplyContract`「可忽略纯表现」口径决策。权威 Apply 清单：`ComposeEngine/docs/HostApplyContract.md`。真·VFX（闪光/拖尾/镜头）走 Presenter，不占用这些字段装成「不结算」。
 
 ---
 
@@ -73,8 +77,10 @@
 | `combat-alchemy` 001～005 | **Retired**（D8，2026-08-12） |
 | sprint-006 | **Retired**（D8，2026-08-12） |
 | epic `metabolic-slice` 001～008 | **Done**（001 包装→…→006 删旧 ReactionSystem→007 OpenSpec/Spec 深度回写→008 Play 收尾） |
-| **epic `metabolic-playerization`（sprint-008）** | 001～007 **Done**；**008（本文档融合 story）进行中**；009～010 待续，总控自动串行 |
-| ChemEngine 独立库 | Done（人窗） |
-| sprint-005 003～009 | Paused；`metabolic-playerization` 整批（001～010）Done 后再评估是否切回 |
+| **epic `metabolic-playerization`（sprint-008）** | 001～010 **Done**（2026-08-12） |
+| **epic `metabolic-chem-coverage`（sprint-009）** | Active；做法 C 判定 + 接线冒烟；禁止 combat-alchemy |
+| **epic `chemengine-lexicon`（sprint-010）** | Ready；**Queued after 009**；正名+全阶段词库+亲和组+Bridge 全接 |
+| ComposeEngine 独立库 | Done（人窗）；正名（story-001）已完成，词库扩见 sprint-010 002~006 |
+| sprint-005 playable-loop | Done（2026-08-13） |
 
 **006 起允许删除**旧 `ReactionSystem*`；006 之前仍禁止扩写。

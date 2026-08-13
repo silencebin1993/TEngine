@@ -32,6 +32,10 @@ namespace GameLogic.Battle
         public bool Running => _running;
         public float ArenaHalfExtent => _cfg.ArenaHalfExtent;
 
+        /// <summary>当前局的静态障碍布局（story-009）。SetObstacles 时保存的同一份管理数组引用，
+        /// 供 SpawnDirector 等做生成点回避，不新增 Bind 依赖。</summary>
+        public ObstacleSpec[] Obstacles { get; private set; }
+
         /// <summary>本帧玩家意图。由输入模块与能力系统写，Update 时提交。</summary>
         public PlayerIntent Intent = PlayerIntent.Idle;
 
@@ -65,6 +69,7 @@ namespace GameLogic.Battle
             }
             _running = false;
             _snapshot = default;
+            Obstacles = null;
         }
 
         public override void OnUpdate(float dt)
@@ -238,6 +243,13 @@ namespace GameLogic.Battle
         public void HealPlayer(float amount, float maxHp)
         {
             (_backend as SimWorld)?.HealPlayer(amount, maxHp);
+        }
+
+        /// <summary>加载本局静态障碍布局（story-009）。</summary>
+        public void SetObstacles(ObstacleSpec[] obstacles)
+        {
+            Obstacles = obstacles;
+            (_backend as SimWorld)?.SetObstacles(obstacles);
         }
 
         /// <summary>吞噬结算：直接击杀并生成死亡事件。</summary>

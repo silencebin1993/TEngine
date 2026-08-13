@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using ChemEngine.Builtin.Modules;
+using ComposeEngine.Builtin.Modules;
 using GameLogic.MetabolicSlice.ContentCatalog;
 using GameLogic.MetabolicSlice.Grid;
 

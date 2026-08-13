@@ -105,7 +105,11 @@ namespace GameLogic.UI.Battle
 
         private void DrawMenu()
         {
-            var r = new Rect(Screen.width * 0.5f - 200f, Screen.height * 0.5f - 120f, 400f, 240f);
+            StageOutcome last = GameRoot.Director?.LastOutcome;
+            bool hasResult = last != null && last.StageId != StageId.None;
+            // 有结算内容时加高面板——固定 240 装不下头图+统计行，会被 BeginArea 裁掉（story-005 AC 要求可见）。
+            float h = hasResult ? 400f : 240f;
+            var r = new Rect(Screen.width * 0.5f - 200f, Screen.height * 0.5f - h * 0.5f, 400f, h);
             GUI.Box(r, "");
             GUILayout.BeginArea(new Rect(r.x + 20f, r.y + 20f, r.width - 40f, r.height - 40f));
 
@@ -119,8 +123,7 @@ namespace GameLogic.UI.Battle
                 GameRoot.StartCellStage();
             }
 
-            StageOutcome last = GameRoot.Director?.LastOutcome;
-            if (last != null && last.StageId != StageId.None)
+            if (hasResult)
             {
                 GUILayout.Space(10f);
                 GUILayout.Label(BuildResultText(last), _label);
@@ -137,8 +140,9 @@ namespace GameLogic.UI.Battle
 
             int m = (int)(o.DurationSeconds / 60f);
             int s = (int)(o.DurationSeconds % 60f);
+            int phase = Mathf.Min(o.Statistics.PhasesReached, 6);
             return $"{head}\n\n" +
-                   $"存活 {m:00}:{s:00}　等级 {o.Level}　卡牌 {o.AllCards.Count}\n" +
+                   $"存活 {m:00}:{s:00}　到达时期 {phase}/6　等级 {o.Level}　卡牌 {o.AllCards.Count}\n" +
                    $"主导路线 {RouteName(o.DominantRoute)}\n" +
                    $"吞噬 {o.Statistics.FoodDevoured}　击杀 {o.Statistics.EnemiesKilled}　" +
                    $"精英 {o.Statistics.ElitesKilled}\n" +
@@ -356,9 +360,10 @@ namespace GameLogic.UI.Battle
             string route = RouteName(c.Route);
             string synergy = SynergyHint(c, cell);
 
+            string desc = string.IsNullOrEmpty(c.Desc) ? "（无说明，检查表）" : c.Desc;
             string s = $"<b>{c.Name}</b>\n" +
                        $"{rarity}　{route}\n\n" +
-                       $"{c.Desc}\n";
+                       $"{desc}\n";
 
             if (c.MaxStack > 1)
             {
@@ -369,6 +374,9 @@ namespace GameLogic.UI.Battle
             {
                 s += $"\n\n<b>联动</b>：{synergy}";
             }
+
+            s += $"\n\n<b>触发</b>：{TriggerText(c.Trigger)}";
+
             if (!string.IsNullOrEmpty(c.DrawbackDesc))
             {
                 s += $"\n\n<b>代价</b>：{c.DrawbackDesc}";
@@ -406,6 +414,27 @@ namespace GameLogic.UI.Battle
                 }
             }
             return hits.Count == 0 ? null : string.Join("、", hits);
+        }
+
+        private static string TriggerText(CardTrigger t)
+        {
+            switch (t)
+            {
+                case CardTrigger.Passive: return "获得即生效";
+                case CardTrigger.OnDevour: return "吞噬时";
+                case CardTrigger.OnKill: return "击杀时";
+                case CardTrigger.OnHit: return "命中时";
+                case CardTrigger.OnHurt: return "受伤时";
+                case CardTrigger.OnDash: return "冲刺时";
+                case CardTrigger.OnAbilityCast: return "施放技能时";
+                case CardTrigger.OnLevelUp: return "升级时";
+                case CardTrigger.OnLowHealth: return "生命过低时";
+                case CardTrigger.OnPhaseStart: return "时期开始时";
+                case CardTrigger.OnTick: return "周期触发";
+                case CardTrigger.OnVolumeChanged: return "体积变化时";
+                case CardTrigger.OnEcoEvent: return "生态事件时";
+                default: return "获得即生效";
+            }
         }
 
         private static string RarityText(CardRarity r)

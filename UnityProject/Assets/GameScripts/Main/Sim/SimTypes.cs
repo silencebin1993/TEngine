@@ -99,6 +99,8 @@ namespace BinGames.Sim
         OnMycelium = 1u << 19,
         /// <summary>过载：反应矩阵"殉爆"用的持久状态位，区别于 AffixKind.Overload（执行期修饰符）。</summary>
         Overloaded = 1u << 20,
+        /// <summary>前摇中：Charge 蓄力（AttackTimer&gt;0）期间置位，供渲染层出脉冲预警色。</summary>
+        Telegraphing = 1u << 21,
     }
 
     /// <summary>
@@ -223,6 +225,11 @@ namespace BinGames.Sim
         public float2 Position;
         public float Damage;
         public bool Lethal;
+        /// <summary>命中时目标的单位索引。让热更层表现系统（如血条）能 O(1) 定位目标，
+        /// 不必每帧对 Snapshot 做 O(容量) 的 LogicId→index 扫描。</summary>
+        public int TargetIndex;
+        /// <summary>命中后目标的剩余血量（已钳制到 ≥0）。同一次结算里已经算出，顺带写出。</summary>
+        public float RemainingHealth;
     }
 
     /// <summary>
@@ -304,5 +311,17 @@ namespace BinGames.Sim
         public const int PlayerIndex = 0;
         /// <summary>无效索引。</summary>
         public const int InvalidIndex = -1;
+        /// <summary>静态障碍数量上限（story-009）。</summary>
+        public const int MaxObstacles = 32;
+    }
+
+    /// <summary>
+    /// 静态圆形障碍（story-009）。热更层传管理数组，内核转 NativeArray——
+    /// 镜像 <see cref="BehaviorArchetype"/>/SetArchetypes 的先例，避免热更层直接碰原生容器。
+    /// </summary>
+    public struct ObstacleSpec
+    {
+        public float2 Position;
+        public float Radius;
     }
 }

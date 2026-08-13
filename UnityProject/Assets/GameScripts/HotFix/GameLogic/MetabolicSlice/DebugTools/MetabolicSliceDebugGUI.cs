@@ -1,6 +1,6 @@
 using System.Collections.Generic;
-using ChemEngine;
-using ChemEngine.Core;
+using ComposeEngine;
+using ComposeEngine.Core;
 using GameLogic.MetabolicSlice.Bag;
 using GameLogic.MetabolicSlice.Combat;
 using GameLogic.MetabolicSlice.Crafting;
@@ -90,7 +90,7 @@ namespace GameLogic.MetabolicSlice.DebugTools
             if (GUILayout.Button("合成: organ_focus 拆解腾位")) Craft("dismantle_focus");
 
             GUILayout.Space(8);
-            if (GUILayout.Button("Tick → ChemEngine")) RunTick();
+            if (GUILayout.Button("Tick → ComposeEngine")) RunTick();
 
             GUILayout.Space(8);
             foreach (var line in _log) GUILayout.Label(line);

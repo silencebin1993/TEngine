@@ -5,7 +5,7 @@
 > 配套文档：`Cell_Stage_Spec.md`（细胞阶段规格）
 > 适用范围：全项目八阶段。本文档定义的框架必须在不改动内核的前提下承载后续所有阶段。
 >
-> **权威补丁（2026-08-11）**：§5.8 反应/催化 **Superseded**。化学核心见 `DesignDocs/最新改动需求/`（ChemEngine 独立库，零 Unity）。  
+> **权威补丁（2026-08-11）**：§5.8 反应/催化 **Superseded**。组合核心见 `DesignDocs/最新改动需求/`（ComposeEngine 独立库，零 Unity）。  
 > 短读冲突表：`最新改动需求/AUTHORITY_AND_CONFLICTS.md`。热更边界 / AOT Sim / 模块框架等其它章仍有效。
 
 ---
@@ -313,7 +313,7 @@ EffectSpec {
 
 执行器按 `Kind` 注册到字典。**新增一种效果 = 新增一个 `IEffectExecutor` 文件 + 注册一行**，不改任何现有执行器。这是"不频繁改老代码"的主要落点。
 
-词缀（Spec §8.4，**已作废，历史目标**）曾实现为**执行器的装饰器**：`导电` 词缀包裹 `EffectDealDamage`，在其执行后追加施加导电状态。32 个词缀 × 9 类效果 = 288 种组合的目标随词缀战斗卡整体 Delist（story-005，2026-08-12 前）一并作废；装饰器机制本身作为通用能力保留，但当前 28 张代谢卡的 `Affixes[]` 恒为空，组合深度改由 ChemEngine 正交叠乘承担。
+词缀（Spec §8.4，**已作废，历史目标**）曾实现为**执行器的装饰器**：`导电` 词缀包裹 `EffectDealDamage`，在其执行后追加施加导电状态。32 个词缀 × 9 类效果 = 288 种组合的目标随词缀战斗卡整体 Delist（story-005，2026-08-12 前）一并作废；装饰器机制本身作为通用能力保留，但当前 28 张代谢卡的 `Affixes[]` 恒为空，组合深度改由 ComposeEngine 正交叠乘承担。
 
 ### 5.5 卡牌系统
 
@@ -365,12 +365,12 @@ public interface IStageFlow {
 
 `PhaseTimeline` 管理阶段内的时期推进（细胞阶段的 6 个生态时期），也是数据驱动的：时期定义在配置表里，包含时长、卡池解锁、敌人池、事件池、压力曲线。
 
-### 5.8 ChemEngine 接入 / MetabolicSlice 战斗桥接
+### 5.8 ComposeEngine 接入 / MetabolicSlice 战斗桥接
 
 > **权威叙述（2026-08-11 更新）**：本节已从"计划中的 `ReactionSystem`/`CatalystRegistry`"设计态改写为**真实已落地架构**，引用真实类名，因为对应代码已存在可核实。  
-> 对应玩法节 `Cell_Stage_Spec.md` §17（同样已改写）；实现细节权威仍是 `DesignDocs/最新改动需求/化学引擎-ClaudeCode需求规格.md`，本节只描述接入方式。
+> 对应玩法节 `Cell_Stage_Spec.md` §17（同样已改写）；实现细节权威仍是 `DesignDocs/最新改动需求/组合引擎-ClaudeCode需求规格.md`，本节只描述接入方式。
 
-**核心引擎（零 Unity）**：独立库 `ChemEngine`（`ChemEngine/src/ChemEngine/`，`netstandard2.1`，命名空间 `ChemEngine.*`），承载 Packet/HitEvent/RuleVector 装配管道与求解器（`Engine`）。核心库不引用 Unity 引擎包，可脱离 Unity 独立构建与测试；游戏侧只拷贝源码或引用 DLL（`Assets/Plugins/ChemEngine/`），**不得**把游戏桥接代码编进核心 DLL。
+**核心引擎（零 Unity）**：独立库 `ComposeEngine`（`ComposeEngine/src/ComposeEngine/`，`netstandard2.1`，命名空间 `ComposeEngine.*`），承载 Packet/HitEvent/RuleVector 装配管道与求解器（`Engine`）。核心库不引用 Unity 引擎包，可脱离 Unity 独立构建与测试；游戏侧只拷贝源码或引用 DLL（`Assets/Plugins/ComposeEngine/`），**不得**把游戏桥接代码编进核心 DLL。
 
 **游戏侧桥接**：
 
@@ -408,8 +408,8 @@ public sealed class MetabolicSliceBridge : GameModuleBase
 （完整实现见 `GameLogic/MetabolicSlice/Combat/MetabolicSliceBridge.cs`；上方为接入方式摘要，非逐行照抄。）
 
 - **挂载点**：`CellStageFlow.RegisterModules()` 里 `_hub.Register(new MetabolicSliceBridge())`；`Priority = ModulePriority.MetabolicBridge`（旧 `ModulePriority.Reaction` 已随删除的 `ReactionSystem` 一并移除）。
-- **出口消费路径**：ChemEngine 求解产出 `HitEvent` 列表 → 桥接层读取 `HitEvent.Damage` → `SimBridge.DamageArea(...)`。`Heal`/`Shield`/`Displace` 等其余字段留后续 story 消费，接口已预留。
-- **游戏侧包装**：`GameLogic/MetabolicSlice/`（Grid/Bag/Transfer/Crafting/Graph/Combat/Environment/Digestion/DebugTools），承载切片、储备囊、复玩三轴（环境残留/背包合成/捕食消化）等玩法逻辑；判定核心全部在 `ChemEngine` 内，桥接层只做"读 HitEvent → 转伤害"的薄适配。
+- **出口消费路径**：ComposeEngine 求解产出 `HitEvent` 列表 → 桥接层读取 `HitEvent.Damage` → `SimBridge.DamageArea(...)`。`Heal`/`Shield`/`Displace` 等其余字段留后续 story 消费，接口已预留。
+- **游戏侧包装**：`GameLogic/MetabolicSlice/`（Grid/Bag/Transfer/Crafting/Graph/Combat/Environment/Digestion/DebugTools），承载切片、储备囊、复玩三轴（环境残留/背包合成/捕食消化）等玩法逻辑；判定核心全部在 `ComposeEngine` 内，桥接层只做"读 HitEvent → 转伤害"的薄适配。
 - **已删除的旧半成品**：`GameLogic/Battle/ReactionSystem.cs`、`ReactionRuleSpec.cs`（及联动的 `CatalystRegistry` 设计态、`ReactionEvent`/`OnReaction` 信号分支）已在 story-006 整删，不留兼容层；旧机制关键词（`Status×Status`/`CatalystRegistry`/`ReactionEvent`）不应再作为实现指引出现。
 - **性能与边界不变**：全部在热更层、事件驱动/固定间隔 Tick，符合 §5.6 的"热更层每帧与敌人数无关"；判定不下沉 `Main/Sim`，`Main/Sim` 只提供纯数据位与 `DamageArea` 等既有接口。
 - **Luban 表规划变更**：曾规划过的 `cell.ReactionRule`/`cell.CatalystRule` 两张表从未生成，新架构改用代码内目录 `MetabolicSlice/ContentCatalog/` 硬编码内容，不走 Luban 这条路（§6 表格已整行删除这两张表）。

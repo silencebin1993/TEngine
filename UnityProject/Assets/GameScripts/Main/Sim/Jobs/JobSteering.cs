@@ -21,7 +21,7 @@ namespace BinGames.Sim
         [ReadOnly] public NativeArray<byte> Faction;
         [ReadOnly] public NativeArray<byte> Alive;
         [ReadOnly] public NativeArray<int> ArchetypeId;
-        [ReadOnly] public NativeArray<uint> Status;
+        public NativeArray<uint> Status;
         [ReadOnly] public NativeArray<BehaviorArchetype> Archetypes;
 
         [NativeDisableParallelForRestriction]
@@ -106,10 +106,12 @@ namespace BinGames.Sim
                     if (t > 0f)
                     {
                         want = float2.zero;
+                        Status[i] = st | (uint)SimStatus.Telegraphing;
                     }
                     else
                     {
                         want = dirToPlayer;
+                        Status[i] = st & ~(uint)SimStatus.Telegraphing;
                     }
                     break;
                 }

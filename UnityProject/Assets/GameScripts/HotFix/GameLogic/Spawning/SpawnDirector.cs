@@ -295,6 +295,7 @@ namespace GameLogic.Spawning
 
             // 夹回场地内，并避免正好贴边生成
             pos = math.clamp(pos, -half + 1f, half - 1f);
+            pos = AvoidObstacles(pos, spec.Radius);
 
             _sim.Spawn(new SpawnRequest
             {
@@ -309,6 +310,34 @@ namespace GameLogic.Spawning
                 LogicId = EncodeLogicId(spec.Id),
                 VisualId = spec.VisualId,
             });
+        }
+
+        /// <summary>
+        /// 刷怪点回避障碍（story-009 D9）：落在障碍圆内则沿"障碍中心→生成点"方向一次性推出去，
+        /// 复用 JobIntegrate 的推出公式；不做多次重试/拒绝重投。
+        /// </summary>
+        private float2 AvoidObstacles(float2 pos, float unitRadius)
+        {
+            ObstacleSpec[] obstacles = _sim.Obstacles;
+            if (obstacles == null)
+            {
+                return pos;
+            }
+
+            for (int i = 0; i < obstacles.Length; i++)
+            {
+                float2 diff = pos - obstacles[i].Position;
+                float minDist = obstacles[i].Radius + unitRadius + 0.5f;
+                float distSq = math.lengthsq(diff);
+                if (distSq >= minDist * minDist)
+                {
+                    continue;
+                }
+                float dist = math.sqrt(distSq);
+                float2 normal = dist > 0.0001f ? diff / dist : new float2(1f, 0f);
+                pos = obstacles[i].Position + normal * minDist;
+            }
+            return pos;
         }
 
         /// <summary>
@@ -327,6 +356,7 @@ namespace GameLogic.Spawning
             float ang = Random.value * Mathf.PI * 2f;
             float2 pos = center + new float2(Mathf.Cos(ang), Mathf.Sin(ang)) * 26f;
             pos = math.clamp(pos, -half + 2f, half - 2f);
+            pos = AvoidObstacles(pos, spec.Radius);
 
             _sim.Spawn(new SpawnRequest
             {

@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using ChemEngine.Core;
+using ComposeEngine.Core;
 using GameLogic.MetabolicSlice.CardDefs;
 using GameLogic.MetabolicSlice.Grid;
 
@@ -8,7 +8,7 @@ namespace GameLogic.MetabolicSlice.Graph
     /// <summary>
     /// 把方格 + 有向箭头编译成若干条线性装配链（§4.3 选项 2：对每个 source→sink 可达路径预抽成线性
     /// 列表再 RunAssembly）。多源多汇 = 多条 source→sink 简单路径；不做真实分叉/汇合的并行拓扑——
-    /// Engine 是单 Packet 顺序流水线（见 ChemEngine/README.md「Module 装配链」一节），Splitter/Combiner
+    /// Engine 是单 Packet 顺序流水线（见 ComposeEngine/README.md「Module 装配链」一节），Splitter/Combiner
     /// 也只是同一条链内的标量近似，不是真的把 Packet 拆成两个对象。
     /// </summary>
     public static class PathCompiler

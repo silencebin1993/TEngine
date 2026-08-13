@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using ChemEngine.Core;
+using ComposeEngine.Core;
 using GameLogic.MetabolicSlice.Bag;
 using GameLogic.MetabolicSlice.CardDefs;
 using GameLogic.MetabolicSlice.ContentCatalog;
@@ -40,6 +40,9 @@ namespace GameLogic.UI.Battle
         private GUIStyle _label;
         private GUIStyle _summaryLabel;
         private bool _showPanel;
+
+        /// <summary>story-005：调试预览用阶段皮层级，F8 循环 Cell→Mech→Cosmic→Cell。不接真阶段 FSM。</summary>
+        private SkinTier _skinTier = SkinTier.Cell;
 
         private enum EdgeMode { None, Add, Remove }
 
@@ -91,6 +94,13 @@ namespace GameLogic.UI.Battle
             if (Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.M)
             {
                 _showPanel = !_showPanel;
+            }
+
+            if (Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.F8)
+            {
+                _skinTier = _skinTier == SkinTier.Cell ? SkinTier.Mech
+                    : _skinTier == SkinTier.Mech ? SkinTier.Cosmic
+                    : SkinTier.Cell;
             }
 
             DrawChainSummary();
@@ -195,7 +205,7 @@ namespace GameLogic.UI.Battle
             GUI.Box(r, "");
             GUILayout.BeginArea(new Rect(r.x + 10f, r.y + 10f, r.width - 20f, r.height - 20f));
 
-            GUILayout.Label("<b>代谢切片面板</b>", _label);
+            GUILayout.Label($"<b>代谢切片面板</b>　皮：{_skinTier}（F8 切换）", _label);
 
             if (_pendingOverflow != null)
             {
@@ -214,12 +224,12 @@ namespace GameLogic.UI.Battle
             else
             {
                 GUILayout.BeginHorizontal();
-                if (GUILayout.Button("掉落 线粒体")) AddDrop("org_mito");
-                if (GUILayout.Button("掉落 晶状聚焦")) AddDrop("org_lens");
-                if (GUILayout.Button("掉落 分泌喷射器")) AddDrop("org_emitter");
+                if (GUILayout.Button("掉落 " + DisplayName("org_mito"))) AddDrop("org_mito");
+                if (GUILayout.Button("掉落 " + DisplayName("org_lens"))) AddDrop("org_lens");
+                if (GUILayout.Button("掉落 " + DisplayName("org_emitter"))) AddDrop("org_emitter");
                 // story-007 轴A：过氧化物酶接进 Source→…→Sink 链后会给流经事件打 Fire tag，
                 // 撞上战场地形常驻的 Wet（见 MetabolicSliceBridge.OnEnter），触发环境残留反应可观察。
-                if (GUILayout.Button("掉落 过氧化物酶")) AddDrop("org_perox");
+                if (GUILayout.Button("掉落 " + DisplayName("org_perox"))) AddDrop("org_perox");
                 GUILayout.EndHorizontal();
             }
 
@@ -371,6 +381,21 @@ namespace GameLogic.UI.Battle
             }
         }
 
-        private static string DisplayName(string cardDefId) => CardCatalog.Get(cardDefId)?.DisplayName ?? cardDefId;
+        /// <summary>
+        /// story-005：org_* 卡按当前 <see cref="_skinTier"/> 走 <see cref="StageSkinCatalog"/> 换皮；
+        /// 非 org_*（如旧演示卡 organ_core/organ_focus/organ_actuator）无皮映射，保持原 CardCatalog 名。
+        /// </summary>
+        private string DisplayName(string cardDefId)
+        {
+            if (cardDefId != null && cardDefId.StartsWith("org_"))
+            {
+                string skinned = StageSkinCatalog.GetDisplayName(cardDefId, _skinTier);
+                if (skinned != null)
+                {
+                    return skinned;
+                }
+            }
+            return CardCatalog.Get(cardDefId)?.DisplayName ?? cardDefId;
+        }
     }
 }

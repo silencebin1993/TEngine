@@ -209,6 +209,8 @@ namespace BinGames.Sim
                     Position = Position[i],
                     Damage = final,
                     Lethal = lethal,
+                    TargetIndex = i,
+                    RemainingHealth = hp > 0f ? hp : 0f,
                 });
             }
 

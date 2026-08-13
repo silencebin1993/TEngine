@@ -1,10 +1,10 @@
-using ChemEngine.Core;
+using ComposeEngine.Core;
 using GameLogic.MetabolicSlice.Grid;
 
 namespace GameLogic.MetabolicSlice.Graph
 {
     /// <summary>
-    /// 槽类型被动（§5.2）；占用槽与空槽都跑，纯 Packet 层效果（tag/Energy/Heat），不碰 ChemEngine 核心——
+    /// 槽类型被动（§5.2）；占用槽与空槽都跑，纯 Packet 层效果（tag/Energy/Heat），不碰 ComposeEngine 核心——
     /// 就是 README 里"新增 Module，不改旧代码"的标准扩展点。
     ///
     /// Perinuclear(核周/基因效力+) deferred: GenePotencyBias hook 仍缺。它需要模块态(SimContext)写值、

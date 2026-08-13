@@ -1,19 +1,21 @@
 using System;
 using System.Collections.Generic;
-using ChemEngine;
-using ChemEngine.Builtin.Catalog;
-using ChemEngine.Core;
+using ComposeEngine;
+using ComposeEngine.Builtin.Catalog;
+using ComposeEngine.Core;
 using GameLogic.Battle;
 using GameLogic.Core;
 using GameLogic.MetabolicSlice.ContentCatalog;
 using GameLogic.MetabolicSlice.Environment;
 using GameLogic.MetabolicSlice.Grid;
+using GameLogic.Stats;
 using GameLogic.UI.Battle;
+using Unity.Mathematics;
 
 namespace GameLogic.MetabolicSlice.Combat
 {
     /// <summary>
-    /// story-006 起的最小可用桥，story-003 改为消费玩家真实网格：把 ChemEngine 出口事件
+    /// story-006 起的最小可用桥，story-003 改为消费玩家真实网格：把 ComposeEngine 出口事件
     /// （HitEvent）接到战斗伤害路径。
     ///
     /// 默认读 <see cref="MetabolicSlicePanel.Instance"/> 持有的那份 SlotGrid——即玩家在
@@ -21,7 +23,12 @@ namespace GameLogic.MetabolicSlice.Combat
     /// 旧演示三件套仍在（不删旧 Draft），但只能靠面板里的调试按钮手动覆盖到玩家网格上。
     /// 无输出链（<see cref="MetabolicSliceRunner.Tick"/> 编译不出 source→sink 路径）时
     /// 天然不产出 HitEvent，因此本类什么都不做——不误伤、也不用额外的空链判断。
-    /// 只消费 HitEvent.Damage，其余字段（Heal/Shield/Displace 等）留给后续 story。
+    ///
+    /// story-004 起，<see cref="ApplyEvent"/> 把 HitEvent 一等字段（Damage/Heal/Shield/Displace/
+    /// Count/Scale/Spin/Orbit/ExplodeOnHit）全部接到战场，不再只消费 Damage。Shield/Displace 无
+    /// 专门的内核系统（Sim 无护盾吸收/击退结算），按 story 要求做最小可读实现：Shield 记本地累加值
+    /// +日志，Displace 复用已有的 <see cref="BinGames.Sim.SimWorld.SetPlayerPosition"/>（与
+    /// `EffectDash` 同一模式）直接挪玩家坐标，不新增 AOT 内核结构。
     ///
     /// story-007 轴 A 接线：此前每 Tick 都传 <c>new WorldState()</c>，地形/残留从未真正落地
     /// （<see cref="EnvironmentReactionCatalog"/> 也从未注册进 <see cref="_engine"/>）。
@@ -35,6 +42,8 @@ namespace GameLogic.MetabolicSlice.Combat
 
         private const float TickInterval = 1.5f;
         private const float DamageAreaRadius = 4f;
+        private const float ExplodeRadiusMult = 1.6f;
+        private const float ExplodeDamageMult = 0.5f;
 
         /// <summary>整个战场只有这一个环境格——本 story 不建真实坐标网格（沿用 WorldEnvironment 现有约定）。</summary>
         public const string ArenaCellId = "arena";
@@ -50,16 +59,25 @@ namespace GameLogic.MetabolicSlice.Combat
         private Engine _engine;
         private MetabolicSliceRunner _runner;
         private SimBridge _sim;
+        private StatSheet _stats;
         private WorldEnvironment _environment;
         private float _timer;
         private int _seed;
+        private float _playerShield;
 
         /// <summary>轴 A 局内提示：最近一次新增的地形/残留白话描述，供 HUD 展示（不需要打开面板也能看见）。</summary>
         public string LastEnvironmentPrompt { get; private set; } = "地面：潮湿（尚无残留反应）";
 
-        public void Bind(SimBridge sim)
+        /// <summary>story-004：最近一次非 Damage 出口（Shield/Displace/Spin/Orbit）的白话摘要，供 HUD/日志读。</summary>
+        public string LastAbilityPrompt { get; private set; } = "";
+
+        /// <summary>story-004：Shield 出口的本地累加值——Sim 无护盾吸收结算，先记账做最小可读，不接伤害减免。</summary>
+        public float PlayerShield => _playerShield;
+
+        public void Bind(SimBridge sim, StatSheet stats)
         {
             _sim = sim;
+            _stats = stats;
         }
 
         public override void OnEnter()
@@ -75,6 +93,8 @@ namespace GameLogic.MetabolicSlice.Combat
                 _environment.AddTerrainTag(ArenaCellId, tag);
             }
             LastEnvironmentPrompt = "地面：潮湿（尚无残留反应）";
+            LastAbilityPrompt = "";
+            _playerShield = 0f;
             _timer = 0f;
             _seed = 0;
         }
@@ -117,16 +137,78 @@ namespace GameLogic.MetabolicSlice.Combat
             {
                 HitEvent evt = events[i];
                 DepositResidue(evt);
-                if (evt.Damage <= 0f)
+                if (ApplyEvent(evt))
                 {
-                    continue;
+                    consumed++;
                 }
-                _sim.DamageArea(_sim.PlayerPosition, DamageAreaRadius, evt.Damage, BinGames.Sim.SimFaction.Hostile);
-                consumed++;
             }
             _environment.Tick(1);
 
-            TEngine.Log.Info($"[MetabolicSliceBridge] Tick 产出 {events.Count} 个 HitEvent，已转 {consumed} 次 DamageArea");
+            TEngine.Log.Info($"[MetabolicSliceBridge] Tick 产出 {events.Count} 个 HitEvent，已应用 {consumed} 个");
+        }
+
+        /// <summary>
+        /// story-004：把一个 HitEvent 的全部一等字段应用到战场，不再只消费 Damage。
+        /// 独立于 <see cref="OnUpdate"/> 的 Tick 节奏，供 execute_code/DebugTools 直接传合成事件验证
+        /// （验收优先代码断言，见根 CLAUDE.md）。返回是否产生了任何可观察效果。
+        /// </summary>
+        public bool ApplyEvent(HitEvent evt)
+        {
+            bool applied = false;
+
+            if (evt.Damage > 0f)
+            {
+                int hits = Math.Max(1, (int)MathF.Round(evt.Count));
+                float radius = DamageAreaRadius * MathF.Max(0.1f, evt.Scale);
+                for (int h = 0; h < hits; h++)
+                {
+                    _sim.DamageArea(_sim.PlayerPosition, radius, evt.Damage, BinGames.Sim.SimFaction.Hostile);
+                }
+                applied = true;
+
+                if (evt.ExplodeOnHit)
+                {
+                    _sim.DamageArea(_sim.PlayerPosition, radius * ExplodeRadiusMult, evt.Damage * ExplodeDamageMult,
+                        BinGames.Sim.SimFaction.Hostile);
+                }
+            }
+
+            if (evt.Heal > 0f)
+            {
+                float maxHp = _stats?.Get(StatId.MaxHealth) ?? 100f;
+                _sim.HealPlayer(evt.Heal, maxHp);
+                applied = true;
+            }
+
+            if (evt.Tags.Contains("Shield") && evt.Payload.TryGetValue("ShieldAmount", out var shieldRaw)
+                && shieldRaw is float shieldAmount && shieldAmount > 0f)
+            {
+                _playerShield += shieldAmount;
+                LastAbilityPrompt = $"获得护盾 +{shieldAmount:0.#}（当前 {_playerShield:0.#}）";
+                TEngine.Log.Info($"[MetabolicSliceBridge] {LastAbilityPrompt}");
+                applied = true;
+            }
+
+            if (evt.Tags.Contains("Displace") && evt.Payload.TryGetValue("DisplaceDistance", out var dispRaw)
+                && dispRaw is float distance && distance > 0f && _sim.World != null)
+            {
+                float2 pos = _sim.PlayerPosition;
+                float2 dir = math.normalizesafe(pos, new float2(1f, 0f));
+                float half = _sim.ArenaHalfExtent;
+                float2 target = math.clamp(pos + dir * distance, new float2(-half, -half), new float2(half, half));
+                _sim.World.SetPlayerPosition(target);
+                LastAbilityPrompt = $"击退位移 {distance:0.#}";
+                TEngine.Log.Info($"[MetabolicSliceBridge] {LastAbilityPrompt}");
+                applied = true;
+            }
+
+            if (evt.Spin != 0f || evt.Orbit != 0f)
+            {
+                // Motion 轴 stub：尚无弹道/绕轨系统时先可读；禁止当成「纯表现永不进机制」。
+                LastAbilityPrompt = $"运动机制（待接弹道）：Spin={evt.Spin:0.#} Orbit={evt.Orbit:0.#}";
+            }
+
+            return applied;
         }
 
         /// <summary>

@@ -1,8 +1,8 @@
 # 复玩三轴 — Claude Code / AI 实现需求规格
 
-> 在现有 **ChemEngine（做法 C）** + **细胞切片包装（有向流、双系统）** 之上，落地三条复玩轴。  
+> 在现有 **ComposeEngine（做法 C）** + **细胞切片包装（有向流、双系统）** 之上，落地三条复玩轴。  
 > 交付：与引擎同样标准的 **独立 C#（netstandard2.1）逻辑库**，可出 DLL、可拷进 Unity，**核心零 Unity 引用**。  
-> 本文可与 `化学引擎-ClaudeCode需求规格.md`、`细胞肉鸽-基元卡牌包装.md` 一并喂给 AI。
+> 本文可与 `组合引擎-ClaudeCode需求规格.md`、`细胞肉鸽-基元卡牌包装.md` 一并喂给 AI。
 
 ---
 
@@ -10,7 +10,7 @@
 
 | 轴 | 名字 | 玩家乐点 | 依赖 |
 |----|------|----------|------|
-| **A** | 环境残留 + 地形 tag | 地图是坩埚；走位/弹道留试剂再反应 | ChemEngine 反应表 + WorldGrid |
+| **A** | 环境残留 + 地形 tag | 地图是坩埚；走位/弹道留试剂再反应 | ComposeEngine 反应表 + WorldGrid |
 | **B** | 背包逼弃 + 双系统合成 | 限容取舍；囊↔切片合成升级 | BagInventory + Craft |
 | **C** | 长线上瘾（两条子路径） | **C1 捕食消化**（推荐先做）/ **C2 不可逆蜕变**（其二期） | 掉落→消化泡 / 永久烧器官 |
 
@@ -28,7 +28,7 @@
 ### 1.1 目标
 
 战场格子带 **TerrainTag**；单位/弹体可留下 **Residue**（有寿命、可叠加、可反应）。  
-攻击、移动、停留与地形/残留相遇时走 ChemEngine 催化，而不是写死「酸弹打草地」特例表。
+攻击、移动、停留与地形/残留相遇时走 ComposeEngine 催化，而不是写死「酸弹打草地」特例表。
 
 ### 1.2 核心类型
 
@@ -53,7 +53,7 @@ WorldEnvironment {
 }
 ```
 
-### 1.3 与 ChemEngine 的接法
+### 1.3 与 ComposeEngine 的接法
 
 1. 弹体/出口 `HitEvent` 命中或掠过格子时：  
    `tags = event.Tags ∪ cell.GetTags()` → `ReactionEngine.Resolve(tags, event)`  
@@ -248,7 +248,7 @@ bool TryMetamorphose(offerId); // 成功则原 Part 销毁/替换，记入 RunHi
 ## 4. 程序集与目录建议
 
 ```text
-ChemEngine.GameplayLoops/   # 或并入 ChemEngine 下的 Loops/
+ComposeEngine.GameplayLoops/   # 或并入 ComposeEngine 下的 Loops/
   Environment/     # 轴 A
   Inventory/       # 轴 B
   Digestion/       # 轴 C1
@@ -257,7 +257,7 @@ ChemEngine.GameplayLoops/   # 或并入 ChemEngine 下的 Loops/
   Tests/
 ```
 
-依赖：`ChemEngine` 核心项目。  
+依赖：`ComposeEngine` 核心项目。  
 **仍禁止引用 UnityEngine。**
 
 ---
@@ -300,7 +300,7 @@ ChemEngine.GameplayLoops/   # 或并入 ChemEngine 下的 Loops/
 ## 8. 给 AI 的启动提示（可复制）
 
 ```text
-请根据《复玩三轴-ClaudeCode需求规格》在 ChemEngine 之上实现 GameplayLoops（C#，netstandard2.1，零 Unity 引用）。
+请根据《复玩三轴-ClaudeCode需求规格》在 ComposeEngine 之上实现 GameplayLoops（C#，netstandard2.1，零 Unity 引用）。
 
 三轴：
 A) 环境残留 + 地形 tag：格子 tags/residues，与 RegisterReaction 集成；Fire 命中格子时催化。

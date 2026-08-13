@@ -1,12 +1,12 @@
 using System.Collections.Generic;
-using ChemEngine;
-using ChemEngine.Core;
+using ComposeEngine;
+using ComposeEngine.Core;
 
 namespace GameLogic.MetabolicSlice.Environment
 {
     /// <summary>
     /// 战场格子的稀疏容器（§1）。CellId 复用 WorldState/HitEvent.TargetId 已有的 string id 惯例，
-    /// 不建真实坐标/寻路网格。Tags = 地形常驻 ∪ 存活残留，实时同步进 State 供 ChemEngine 反应解析复用
+    /// 不建真实坐标/寻路网格。Tags = 地形常驻 ∪ 存活残留，实时同步进 State 供 ComposeEngine 反应解析复用
     /// （不新建第二套反应解析器，走 MetabolicSliceRunner 已在用的 engine.ApplyPipeline(evt, rules, world.State) 路径）。
     /// </summary>
     public sealed class WorldEnvironment
@@ -68,7 +68,7 @@ namespace GameLogic.MetabolicSlice.Environment
 
         /// <summary>
         /// GDD §1.5 FireWithWorld 的落地形式：设 TargetId → ApplyPipeline → 读 Payload["LeaveResidue"] 逐条落地 → 回传最终 HitEvent。
-        /// ChemEngine 核心保持被动，不直接写格子；残留回写协议由本方法承接。
+        /// ComposeEngine 核心保持被动，不直接写格子；残留回写协议由本方法承接。
         /// </summary>
         public HitEvent ResolveHit(Engine engine, HitEvent evt, RuleVector rules, string cellId)
         {

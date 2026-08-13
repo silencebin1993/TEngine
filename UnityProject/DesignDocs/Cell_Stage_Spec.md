@@ -6,7 +6,7 @@
 > 配套文档：`Game_Framework_Design.md`（技术框架）、`Cell_Stage_Content_Tables.md`（内容总表）
 >
 > **权威补丁（2026-08-11 更新）**：§17 已整节改写为已落地架构摘要（旧反应矩阵/催化卡设计作废，详见 §17.1）。  
-> 字段/管道/种类等**实现细节**仍以 `DesignDocs/最新改动需求/`（冻结总案、ChemEngine 规格、复玩三轴规格）为唯一权威，§17 只做产品级摘要，**禁止只读 §17 就动手实现**。  
+> 字段/管道/种类等**实现细节**仍以 `DesignDocs/最新改动需求/`（冻结总案、ComposeEngine 规格、复玩三轴规格）为唯一权威，§17 只做产品级摘要，**禁止只读 §17 就动手实现**。  
 > 旧 epic `combat-alchemy` 已 Superseded，禁止再派 Worker。
 
 ---
@@ -288,7 +288,7 @@ weight = baseWeight(rarity)
 - 低血保底：生命 < 30% 时，选项池注入至少 1 张生存向卡。
 - 路线亲和让 build 能成型，但上限 1.8 倍避免锁死。
 
-> 词缀组合深度权威：见 `DesignDocs/最新改动需求/`（冻结总案 + ChemEngine），§17 只做摘要。
+> 词缀组合深度权威：见 `DesignDocs/最新改动需求/`（冻结总案 + ComposeEngine），§17 只做摘要。
 
 ---
 
@@ -520,7 +520,7 @@ StageOutcome {
 
 **P1（正式版应有）**
 - 全部 135 张卡 + 32 词缀
-- ~~反应矩阵初版 6 条规则 + 催化卡 6 张~~ → **已作废**；改 ChemEngine 代谢化学系统（§17，实现细节见 `最新改动需求/`），001~006 已实现并 Play 验收
+- ~~反应矩阵初版 6 条规则 + 催化卡 6 张~~ → **已作废**；改 ComposeEngine 代谢化学系统（§17，实现细节见 `最新改动需求/`），001~006 已实现并 Play 验收
 - 图鉴与跨局解锁
 - 局内商店
 - 路线专属视觉表现
@@ -543,14 +543,14 @@ StageOutcome {
 | 万敌规模下可读性崩坏 | 玩家看不清自己在哪 | 敌人视觉分层（体积/颜色/轮廓）；玩家单位始终最高对比度 |
 | 动态难度被滥用 | 玩家故意压制自己 build 换低难度 | 压力预算下限随时间硬性抬升，playerPowerFactor 只影响上浮部分 |
 | 阶段框架为细胞阶段特化 | 后续阶段无法复用 | 内核只认"agent + 数据"，不认"细胞"；见框架文档 |
-| ~~反应组合数爆炸导致数值失控~~（历史风险，已作废） | ~~某两个词缀叠加秒杀首领，或完全无感~~ | **已作废**：旧「反应表打表 + 催化卡过滤」路线随 §17 一并废弃；现行 ChemEngine 用正交叠乘 + 软帽（见 `最新改动需求/代谢切片-冻结总案-基元与美术.md`）控制组合爆炸，不是靠打表评审 |
+| ~~反应组合数爆炸导致数值失控~~（历史风险，已作废） | ~~某两个词缀叠加秒杀首领，或完全无感~~ | **已作废**：旧「反应表打表 + 催化卡过滤」路线随 §17 一并废弃；现行 ComposeEngine 用正交叠乘 + 软帽（见 `最新改动需求/代谢切片-冻结总案-基元与美术.md`）控制组合爆炸，不是靠打表评审 |
 
 ---
 
 ## 17. 代谢化学系统（切片 / 有向管 / 双系统 / 三轴复玩）
 
 > **权威叙述（2026-08-11 起生效）** — 本节已从旧「反应矩阵/催化卡」设计整节改写为已落地架构的摘要。  
-> **唯一实现细节权威**：`DesignDocs/最新改动需求/`（冻结总案 `代谢切片-冻结总案-基元与美术.md`、`化学引擎-ClaudeCode需求规格.md`、`复玩三轴-ClaudeCode需求规格.md`）。本节只做产品级摘要，字段/管道/种类定义以那三份文件为准，禁止只读本节就动手实现。  
+> **唯一实现细节权威**：`DesignDocs/最新改动需求/`（冻结总案 `代谢切片-冻结总案-基元与美术.md`、`组合引擎-ClaudeCode需求规格.md`、`复玩三轴-ClaudeCode需求规格.md`）。本节只做产品级摘要，字段/管道/种类定义以那三份文件为准，禁止只读本节就动手实现。  
 > **历史提案记录**：`openspec/changes/metabolic-slice-chemengine/`（追溯型 change，proposal/design/tasks 覆盖 ChemEngine + MetabolicSlice + 三轴的完整决策链）。  
 > 旧设计（Status×Status 反应矩阵 / 催化卡注入 Affix / `OnReaction` 连锁）已作废；完整历史见 git（commit `2f34343` 之前版本）。
 
@@ -572,9 +572,9 @@ StageOutcome {
 
 ### 17.3 已落地实现（供快速定位代码）
 
-- 核心引擎：独立库 `ChemEngine/`（`ChemEngine.*` 命名空间，零 Unity 依赖，`netstandard2.1`）
+- 核心引擎：独立库 `ComposeEngine/`（`ComposeEngine.*` 命名空间，零 Unity 依赖，`netstandard2.1`）
 - 游戏侧包装：`Assets/GameScripts/HotFix/GameLogic/MetabolicSlice/`（Grid/Bag/Transfer/Crafting/Graph/Combat/Environment/Digestion/DebugTools）
-- 战斗桥接：`MetabolicSliceBridge`（`MetabolicSlice/Combat/`），由 `CellStageFlow.RegisterModules()` 注册，消费 ChemEngine `HitEvent` 转发到 `SimBridge.DamageArea`
+- 战斗桥接：`MetabolicSliceBridge`（`MetabolicSlice/Combat/`），由 `CellStageFlow.RegisterModules()` 注册，消费 ComposeEngine `HitEvent` 转发到 `SimBridge.DamageArea`
 - 已删除的旧半成品：`GameLogic/Battle/ReactionSystem.cs`、`ReactionRuleSpec.cs`（story-006 整删，不留兼容层）
 
 ### 17.4 与现有系统的边界（仍然有效）

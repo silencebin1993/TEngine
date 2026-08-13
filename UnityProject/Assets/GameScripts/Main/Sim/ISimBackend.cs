@@ -19,6 +19,9 @@ namespace BinGames.Sim
         /// <summary>加载行为原型表。可在运行期重载（换阶段时）。</summary>
         void SetArchetypes(BehaviorArchetype[] archetypes);
 
+        /// <summary>加载静态障碍布局（story-009）。数量超过 <see cref="SimConst.MaxObstacles"/> 时截断。</summary>
+        void SetObstacles(ObstacleSpec[] obstacles);
+
         /// <summary>推进一帧。命令缓冲会在应用后被清空。</summary>
         void Step(float dt, ref SimCommandBuffer cmds);
 

@@ -125,7 +125,7 @@ namespace BinGames.Sim
                     Quaternion.identity,
                     new Vector3(s, s, s));
 
-                _colors[v][c] = Tint(_visuals[v].BaseColor, snap.Status[i]);
+                _colors[v][c] = Tint(_visuals[v].BaseColor, snap.Status[i], Time.time);
                 _motions[v][c] = PackMotion(snap.Velocity[i]);
                 _impacts[v][c] = PackImpact(i);
                 _counts[v] = c + 1;
@@ -328,7 +328,7 @@ namespace BinGames.Sim
         /// <summary>
         /// 状态染色。万敌规模下可读性对策（Spec §16）。
         /// </summary>
-        private static Vector4 Tint(Color baseColor, uint status)
+        private static Vector4 Tint(Color baseColor, uint status, float time)
         {
             Color c = baseColor;
             if ((status & (uint)SimStatus.Boss) != 0u)
@@ -338,6 +338,12 @@ namespace BinGames.Sim
             else if ((status & (uint)SimStatus.Elite) != 0u)
             {
                 c = Color.Lerp(c, new Color(1f, 0.8f, 0.2f), 0.45f);
+            }
+            if ((status & (uint)SimStatus.Telegraphing) != 0u)
+            {
+                // 蓄力脉冲：在原色与警示橙红间来回插值，让"即将冲刺"和"普通移动"一眼可辨
+                float pulse = Mathf.PingPong(time * 4f, 1f);
+                c = Color.Lerp(c, new Color(1f, 0.45f, 0.1f), 0.35f + 0.45f * pulse);
             }
             if ((status & (uint)SimStatus.Conductive) != 0u)
             {

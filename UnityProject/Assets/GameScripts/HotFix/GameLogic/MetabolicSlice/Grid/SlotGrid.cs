@@ -36,7 +36,7 @@ namespace GameLogic.MetabolicSlice.Grid
             return count;
         }
 
-        /// <summary>邻接校验 + SoftCap；不合法一律拒绝，不静默截断（Reject-to-Safe，同 ChemEngine 风格）。</summary>
+        /// <summary>邻接校验 + SoftCap；不合法一律拒绝，不静默截断（Reject-to-Safe，同 ComposeEngine 风格）。</summary>
         public bool TryAddEdge(int from, int to)
         {
             if (from == to) return false;

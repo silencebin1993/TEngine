@@ -37,6 +37,11 @@ namespace BinGames.Sim
         private NativeArray<BehaviorArchetype> _archetypes;
         private NativeArray<ProjectileState> _projectiles;
 
+        // ── 静态障碍（story-009）：容量固定 SimConst.MaxObstacles，生命周期同 _archetypes ──
+        private NativeArray<float2> _obstaclePos;
+        private NativeArray<float> _obstacleRadius;
+        private int _obstacleCount;
+
         // ── 槽位管理 ──
         private NativeList<int> _freeSlots;
         private int _unitCount;
@@ -59,6 +64,8 @@ namespace BinGames.Sim
         public bool IsCreated => _created;
         public int UnitCount => _unitCount;
         public float Time => _time;
+        /// <summary>当前生效的障碍数量（已按 <see cref="SimConst.MaxObstacles"/> 截断）。</summary>
+        public int ObstacleCount => _obstacleCount;
 
         public void Initialize(SimConfig cfg)
         {
@@ -98,6 +105,10 @@ namespace BinGames.Sim
             _archetypes = new NativeArray<BehaviorArchetype>(1, A);
             _archetypes[0] = BehaviorArchetype.Default;
 
+            _obstaclePos = new NativeArray<float2>(SimConst.MaxObstacles, A);
+            _obstacleRadius = new NativeArray<float>(SimConst.MaxObstacles, A);
+            _obstacleCount = 0;
+
             // 玩家恒占索引 0
             _unitCount = 1;
             _alive[SimConst.PlayerIndex] = 1;
@@ -133,6 +144,22 @@ namespace BinGames.Sim
             {
                 _archetypes[0] = BehaviorArchetype.Default;
             }
+        }
+
+        /// <summary>加载静态障碍布局（story-009）。容量固定，超出 <see cref="SimConst.MaxObstacles"/> 的部分丢弃。</summary>
+        public void SetObstacles(ObstacleSpec[] obstacles)
+        {
+            if (!_obstaclePos.IsCreated)
+            {
+                return;
+            }
+            int n = obstacles != null ? math.min(obstacles.Length, SimConst.MaxObstacles) : 0;
+            for (int i = 0; i < n; i++)
+            {
+                _obstaclePos[i] = obstacles[i].Position;
+                _obstacleRadius[i] = obstacles[i].Radius;
+            }
+            _obstacleCount = n;
         }
 
         // ── 玩家读写（热更层通过 SimBridge 调用，不直接碰数组）──
@@ -261,6 +288,10 @@ namespace BinGames.Sim
                 ArchetypeId = _archetypeId,
                 Archetypes = _archetypes,
                 AttackTimer = _attackTimer,
+                Radius = _radius,
+                ObstaclePos = _obstaclePos,
+                ObstacleRadius = _obstacleRadius,
+                ObstacleCount = _obstacleCount,
                 Position = _position,
                 Velocity = _velocity,
                 Dt = dt,
@@ -286,6 +317,9 @@ namespace BinGames.Sim
                 Faction = _faction,
                 Alive = _alive,
                 Hash = _hash.Map,
+                ObstaclePos = _obstaclePos,
+                ObstacleRadius = _obstacleRadius,
+                ObstacleCount = _obstacleCount,
                 Projectiles = _projectiles,
                 DamageOut = _projectileDamage.AsParallelWriter(),
                 Dt = dt,
@@ -660,6 +694,8 @@ namespace BinGames.Sim
             if (_alive.IsCreated) { _alive.Dispose(); }
             if (_archetypes.IsCreated) { _archetypes.Dispose(); }
             if (_projectiles.IsCreated) { _projectiles.Dispose(); }
+            if (_obstaclePos.IsCreated) { _obstaclePos.Dispose(); }
+            if (_obstacleRadius.IsCreated) { _obstacleRadius.Dispose(); }
             if (_freeSlots.IsCreated) { _freeSlots.Dispose(); }
             if (_pendingDeaths.IsCreated) { _pendingDeaths.Dispose(); }
             if (_hitEvents.IsCreated) { _hitEvents.Dispose(); }
@@ -673,6 +709,7 @@ namespace BinGames.Sim
 
             _unitCount = 0;
             _deathCount = 0;
+            _obstacleCount = 0;
             _created = false;
         }
 

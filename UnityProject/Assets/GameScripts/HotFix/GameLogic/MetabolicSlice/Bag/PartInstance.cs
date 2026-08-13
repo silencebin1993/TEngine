@@ -1,6 +1,6 @@
 namespace GameLogic.MetabolicSlice.Bag
 {
-    /// <summary>掉落/装备的实例；CardDefId 查 CardDefs.CardCatalog 拿对应 ChemEngine IModule 工厂。</summary>
+    /// <summary>掉落/装备的实例；CardDefId 查 CardDefs.CardCatalog 拿对应 ComposeEngine IModule 工厂。</summary>
     public sealed class PartInstance
     {
         public string PartId { get; }

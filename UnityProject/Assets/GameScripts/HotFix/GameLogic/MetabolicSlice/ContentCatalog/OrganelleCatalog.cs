@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
-using ChemEngine.Builtin.Modules;
-using ChemEngine.Core;
+using ComposeEngine.Builtin.Modules;
+using ComposeEngine.Core;
 using GameLogic.MetabolicSlice.Grid;
 
 namespace GameLogic.MetabolicSlice.ContentCatalog
@@ -38,9 +38,9 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
     }
 
     /// <summary>
-    /// 冻结总案 §5.2 v1 器官目录（24 条）。17 条复用既有 ChemEngine Module（构造参数不同）；
-    /// 7 条 CreateModule=null（多入合并拓扑 / 受击出口协议 / 邻格催化半径 / DirectedEdge 挂载执行管线均未开），
-    /// 理由逐条见冻结决策 N1，本文件只负责注册元数据，不额外建状态机。
+    /// 冻结总案 §5.2 v1 器官目录（24 条）。17 条复用既有 ComposeEngine Module（构造参数不同）；
+    /// 7 条（story-004 接线）用"受击/邻格=正向流水线标量近似"口径实现本职栏，不建真实事件总线 /
+    /// 空间催化 / DirectedEdge 挂载执行管线，理由逐条见 story-004 Preflight D4~D10。
     /// </summary>
     public static class OrganelleCatalog
     {
@@ -57,7 +57,7 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
             ["org_golgi"] = new OrganelleDef("org_golgi", "高尔基分流", OrganelleRole.Relay, OrganelleAttachTarget.Slot,
                 null, "org/golgi", () => new Splitter()),
             ["org_merge"] = new OrganelleDef("org_merge", "囊泡汇流", OrganelleRole.Relay, OrganelleAttachTarget.Slot,
-                null, "org/merge", null),
+                null, "org/merge", () => new MergeInlet()),
             ["org_lens"] = new OrganelleDef("org_lens", "晶状聚焦", OrganelleRole.Transform, OrganelleAttachTarget.Slot,
                 null, "org/lens", () => new FocusLens()),
             ["org_scatter"] = new OrganelleDef("org_scatter", "纺锤散射", OrganelleRole.Transform, OrganelleAttachTarget.Slot,
@@ -85,17 +85,17 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
             ["org_cilia"] = new OrganelleDef("org_cilia", "纤毛刺", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/cilia", () => new Actuator()),
             ["org_spine"] = new OrganelleDef("org_spine", "刺突", OrganelleRole.Relay, OrganelleAttachTarget.Slot,
-                MembraneOnly, "org/spine", null),
+                MembraneOnly, "org/spine", () => new Thorns()),
             ["org_slime"] = new OrganelleDef("org_slime", "粘液层", OrganelleRole.Relay, OrganelleAttachTarget.Slot,
-                MembraneOnly, "org/slime", null),
+                MembraneOnly, "org/slime", () => new TagAttach("Oil")),
             ["org_receptor"] = new OrganelleDef("org_receptor", "受体", OrganelleRole.Relay, OrganelleAttachTarget.Slot,
-                MembraneOnly, "org/receptor", null),
+                MembraneOnly, "org/receptor", () => new TagAttach("Catalyst")),
             ["org_insulate"] = new OrganelleDef("org_insulate", "绝缘管", OrganelleRole.Edge, OrganelleAttachTarget.DirectedEdge,
-                null, "org/insulate", null),
+                null, "org/insulate", () => new Insulator()),
             ["org_valve"] = new OrganelleDef("org_valve", "单向阀", OrganelleRole.Edge, OrganelleAttachTarget.DirectedEdge,
-                null, "org/valve", null),
+                null, "org/valve", () => new Valve()),
             ["org_filter"] = new OrganelleDef("org_filter", "过滤管", OrganelleRole.Edge, OrganelleAttachTarget.DirectedEdge,
-                null, "org/filter", null),
+                null, "org/filter", () => new TagFilter("Approved", 0.5f)),
         };
 
         public static OrganelleDef Get(string id) => _defs.TryGetValue(id, out var def) ? def : null;

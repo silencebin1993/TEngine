@@ -34,6 +34,10 @@ namespace BinGames.Sim
         [ReadOnly] public NativeArray<byte> Faction;
         [ReadOnly] public NativeArray<byte> Alive;
         [ReadOnly] public NativeParallelMultiHashMap<int, int> Hash;
+        /// <summary>静态障碍（story-009）。数量小，线性扫描比建哈希更简单更快。</summary>
+        [ReadOnly] public NativeArray<float2> ObstaclePos;
+        [ReadOnly] public NativeArray<float> ObstacleRadius;
+        public int ObstacleCount;
 
         public NativeArray<ProjectileState> Projectiles;
         public NativeQueue<DamageRequest>.ParallelWriter DamageOut;
@@ -67,6 +71,18 @@ namespace BinGames.Sim
                 s.Alive = 0;
                 Projectiles[p] = s;
                 return;
+            }
+
+            // 撞障销毁（story-009 D8）：不计入 PierceLeft、不产出伤害，让障碍对远程敌人也有掩体价值。
+            for (int o = 0; o < ObstacleCount; o++)
+            {
+                float reachO = s.Radius + ObstacleRadius[o];
+                if (math.distancesq(s.Position, ObstaclePos[o]) <= reachO * reachO)
+                {
+                    s.Alive = 0;
+                    Projectiles[p] = s;
+                    return;
+                }
             }
 
             int2 c = SpatialHash.ToCell(s.Position, InvCellSize);

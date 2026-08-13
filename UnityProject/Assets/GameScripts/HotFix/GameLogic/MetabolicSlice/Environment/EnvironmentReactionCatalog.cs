@@ -1,11 +1,11 @@
 using System.Collections.Generic;
-using ChemEngine;
-using ChemEngine.Core;
+using ComposeEngine;
+using ComposeEngine.Core;
 
 namespace GameLogic.MetabolicSlice.Environment
 {
     /// <summary>
-    /// 环境残留反应表（§1.6，≥2 例）。经既有 RegisterReaction 注入，不改 ChemEngine.Builtin.Catalog——
+    /// 环境残留反应表（§1.6，≥2 例）。经既有 RegisterReaction 注入，不改 ComposeEngine.Builtin.Catalog——
     /// 环境残留是玩法层语义，不进引擎内置目录。禁止 if (x is Acid && y is Grass) 式判定，只认 tag 集合。
     /// </summary>
     public static class EnvironmentReactionCatalog

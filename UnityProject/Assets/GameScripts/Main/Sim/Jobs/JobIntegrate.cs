@@ -20,6 +20,12 @@ namespace BinGames.Sim
         [ReadOnly] public NativeArray<int> ArchetypeId;
         [ReadOnly] public NativeArray<BehaviorArchetype> Archetypes;
         [ReadOnly] public NativeArray<float> AttackTimer;
+        /// <summary>单位半径（story-009 障碍碰撞用；此前本 job 不需要它）。</summary>
+        [ReadOnly] public NativeArray<float> Radius;
+        /// <summary>静态障碍（story-009）。数量小，线性扫描。</summary>
+        [ReadOnly] public NativeArray<float2> ObstaclePos;
+        [ReadOnly] public NativeArray<float> ObstacleRadius;
+        public int ObstacleCount;
 
         public NativeArray<float2> Position;
         public NativeArray<float2> Velocity;
@@ -83,6 +89,29 @@ namespace BinGames.Sim
             else if (pos.x > ArenaHalf) { pos.x = ArenaHalf; vel.x = math.min(0f, vel.x); }
             if (pos.y < -ArenaHalf) { pos.y = -ArenaHalf; vel.y = math.max(0f, vel.y); }
             else if (pos.y > ArenaHalf) { pos.y = ArenaHalf; vel.y = math.min(0f, vel.y); }
+
+            // 静态障碍：推到边界外 + 只清掉指向障碍内部的法向速度分量，
+            // 保留切向分量以形成贴边滑行绕行观感（story-009 D6）。
+            // 正对障碍中心直冲的 Chase/Charge 敌人会被夹在边缘原地——这是预期的"卡位"效果（D7），不是 bug。
+            float unitRadius = Radius[i];
+            for (int o = 0; o < ObstacleCount; o++)
+            {
+                float2 diff = pos - ObstaclePos[o];
+                float minDist = ObstacleRadius[o] + unitRadius;
+                float distSq = math.lengthsq(diff);
+                if (distSq >= minDist * minDist)
+                {
+                    continue;
+                }
+                float dist = math.sqrt(distSq);
+                float2 normal = dist > 0.0001f ? diff / dist : new float2(1f, 0f);
+                pos = ObstaclePos[o] + normal * minDist;
+                float vn = math.dot(vel, normal);
+                if (vn < 0f)
+                {
+                    vel -= normal * vn;
+                }
+            }
 
             Position[i] = pos;
             Velocity[i] = vel;

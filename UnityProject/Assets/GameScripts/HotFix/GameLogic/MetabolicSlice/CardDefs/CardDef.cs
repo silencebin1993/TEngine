@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using ChemEngine.Core;
+using ComposeEngine.Core;
 using GameLogic.MetabolicSlice.Grid;
 
 namespace GameLogic.MetabolicSlice.CardDefs
