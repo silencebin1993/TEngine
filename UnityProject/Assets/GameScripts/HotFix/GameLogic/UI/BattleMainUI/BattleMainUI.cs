@@ -71,11 +71,13 @@ namespace GameLogic
         /// <summary>
         /// 按 IsRunning 自控显隐（Preflight V1：不改 GameApp.cs 的启动展示逻辑），
         /// 进局中逐帧轮询 CellStageFlow 快照刷新文本（Preflight B1，与 CellDebugHud 同一模式）。
+        /// battle-ui-toolkit story-001 验收通过后，本 UGUI HUD 降级为按 U 键切回来的对照面板
+        /// （<see cref="BattleHudToolkit.NewHudActive"/> 为 true 时新 UI Toolkit HUD 是默认显示项）。
         /// </summary>
         protected override void OnUpdate()
         {
             CellStageFlow cell = GameRoot.CellStage;
-            bool running = cell != null && cell.IsRunning;
+            bool running = cell != null && cell.IsRunning && !BattleHudToolkit.NewHudActive;
             _tf_Hud.gameObject.SetActive(running);
             if (!running)
             {
