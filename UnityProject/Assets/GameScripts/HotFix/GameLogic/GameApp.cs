@@ -49,6 +49,10 @@ public partial class GameApp
         // UI Toolkit 版代谢切片装配面板（battle-ui-toolkit/story-002，D2）：同上不挂 [Window]，
         // M 键默认打开，旧 IMGUI MetabolicSlicePanel.DrawPanel() 改绑 L 键对照。
         new GameObject("BattleMetabolicUIToolkit").AddComponent<BattleMetabolicUIToolkit>();
+
+        // UI Toolkit 版进化选卡面板（battle-ui-toolkit/story-003，D2）：同上不挂 [Window]，
+        // 事件触发式默认弹出，旧 IMGUI CellDebugHud.DrawDraft() 改绑 K 键对照。
+        new GameObject("BattleDraftUIToolkit").AddComponent<BattleDraftUIToolkit>();
     }
     
     private static void Release()

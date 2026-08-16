@@ -36,7 +36,11 @@ namespace GameLogic.UI.Battle
         /// </summary>
         private bool _showDebugHud;
 
-        private readonly string[] _routeNames =
+        /// <summary>story-003 D10：新 UI Toolkit 选卡面板（<see cref="BattleDraftUIToolkit"/>）默认事件触发式显示，
+        /// 本旧 IMGUI 选卡面板改为按 K 键打开的对照入口，默认关闭避免与新 UI 同屏重复。</summary>
+        private bool _showLegacyDraft;
+
+        private static readonly string[] RouteNames =
         {
             "无", "吞噬扩张", "机动猎食", "电化统治", "孢子繁殖", "菌毯筑巢", "异化污染", "跨路线",
         };
@@ -64,7 +68,7 @@ namespace GameLogic.UI.Battle
                 DrawHud(cell);
             }
 
-            if (cell.Paused && cell.PendingOptions != null && cell.PendingOptions.Count > 0)
+            if (_showLegacyDraft && cell.Paused && cell.PendingOptions != null && cell.PendingOptions.Count > 0)
             {
                 DrawDraft(cell);
             }
@@ -159,10 +163,11 @@ namespace GameLogic.UI.Battle
             }
         }
 
-        private string RouteName(CardRoute r)
+        /// <summary>story-003 D7 最小暴露：新 UI Toolkit 选卡面板复用同一份路线文案，不新建平行表。</summary>
+        public static string RouteName(CardRoute r)
         {
             int i = (int)r;
-            return i >= 0 && i < _routeNames.Length ? _routeNames[i] : "无";
+            return i >= 0 && i < RouteNames.Length ? RouteNames[i] : "无";
         }
 
         private void DrawHud(CellStageFlow cell)
@@ -267,6 +272,10 @@ namespace GameLogic.UI.Battle
             else if (Event.current.keyCode == KeyCode.V)
             {
                 _showCodex = !_showCodex;
+            }
+            else if (Event.current.keyCode == KeyCode.K)
+            {
+                _showLegacyDraft = !_showLegacyDraft;
             }
         }
 
@@ -388,8 +397,8 @@ namespace GameLogic.UI.Battle
             return s;
         }
 
-        /// <summary>推荐联动：与已有卡的 SynergyTags 交集（Spec §12.2）。</summary>
-        private static string SynergyHint(CardSpec c, CellStageFlow cell)
+        /// <summary>推荐联动：与已有卡的 SynergyTags 交集（Spec §12.2）。story-003 D7 最小暴露。</summary>
+        public static string SynergyHint(CardSpec c, CellStageFlow cell)
         {
             if (c.SynergyTags == null)
             {
@@ -416,7 +425,8 @@ namespace GameLogic.UI.Battle
             return hits.Count == 0 ? null : string.Join("、", hits);
         }
 
-        private static string TriggerText(CardTrigger t)
+        /// <summary>story-003 D7 最小暴露。</summary>
+        public static string TriggerText(CardTrigger t)
         {
             switch (t)
             {
@@ -439,14 +449,34 @@ namespace GameLogic.UI.Battle
 
         private static string RarityText(CardRarity r)
         {
+            return $"<color={RarityColor(r)}>{RarityLabel(r)}</color>";
+        }
+
+        /// <summary>纯文字稀有度（无富文本标记）。story-003 D7 最小暴露：新 UI Toolkit 选卡面板
+        /// 只需要文字，配色交给 USS rarity-* class，不需要 IMGUI 富文本颜色标记。</summary>
+        public static string RarityLabel(CardRarity r)
+        {
             switch (r)
             {
-                case CardRarity.Common: return "<color=#c8c8c8>普通</color>";
-                case CardRarity.Rare: return "<color=#5599ff>稀有</color>";
-                case CardRarity.Epic: return "<color=#bb66ff>史诗</color>";
-                case CardRarity.Aberrant: return "<color=#ff7733>异化</color>";
-                case CardRarity.Legacy: return "<color=#ffcc33>原核遗产</color>";
+                case CardRarity.Common: return "普通";
+                case CardRarity.Rare: return "稀有";
+                case CardRarity.Epic: return "史诗";
+                case CardRarity.Aberrant: return "异化";
+                case CardRarity.Legacy: return "原核遗产";
                 default: return "普通";
+            }
+        }
+
+        private static string RarityColor(CardRarity r)
+        {
+            switch (r)
+            {
+                case CardRarity.Common: return "#c8c8c8";
+                case CardRarity.Rare: return "#5599ff";
+                case CardRarity.Epic: return "#bb66ff";
+                case CardRarity.Aberrant: return "#ff7733";
+                case CardRarity.Legacy: return "#ffcc33";
+                default: return "#c8c8c8";
             }
         }
 
@@ -465,7 +495,7 @@ namespace GameLogic.UI.Battle
             {
                 if (counts[i] > 0)
                 {
-                    GUILayout.Label($"{_routeNames[i]}　{counts[i]}", _label);
+                    GUILayout.Label($"{RouteNames[i]}　{counts[i]}", _label);
                 }
             }
 
