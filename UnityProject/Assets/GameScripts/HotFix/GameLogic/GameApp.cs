@@ -5,6 +5,7 @@ using GameLogic;
 using Obfuz;
 #endif
 using TEngine;
+using UnityEngine;
 #pragma warning disable CS0436
 
 
@@ -40,6 +41,10 @@ public partial class GameApp
         GameLogic.Stage.GameRoot.Startup();
 
         GameModule.UI.ShowUIAsync<BattleMainUI>();
+
+        // UI Toolkit 版 HUD（battle-ui-toolkit/story-001，D1/D2）：不挂 [Window]，
+        // 常驻单例自控显隐，与上面的旧 UGUI BattleMainUI 并存，按 U 键切换对比。
+        new GameObject("BattleHudToolkit").AddComponent<BattleHudToolkit>();
     }
     
     private static void Release()
