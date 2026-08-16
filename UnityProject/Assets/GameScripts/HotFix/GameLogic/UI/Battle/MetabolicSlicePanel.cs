@@ -32,6 +32,7 @@ namespace GameLogic.UI.Battle
         private BagInventory _bag;
         private SlotGrid _grid;
         private readonly List<IContract> _geneContracts = new List<IContract>();
+        private readonly List<string> _geneIds = new List<string>();
         private PartInstance _pendingOverflow;
         private string _selectedPartId;
         private EdgeMode _edgeMode;
@@ -54,6 +55,9 @@ namespace GameLogic.UI.Battle
         /// 直接作为全局法则传给 Bridge 的 NormalizeContracts；抽同一基因两次会叠加两份契约实例。</summary>
         public IReadOnlyList<IContract> GeneContracts => _geneContracts;
 
+        /// <summary>与 <see cref="GeneContracts"/> 一一对应的 geneId 列表（story-002 新增，供新 UI 反查显示名）。</summary>
+        public IReadOnlyList<string> GeneIds => _geneIds;
+
         /// <summary>抽卡领取基因后调用（CellStageFlow.ConfirmDraft）。geneId 查 GeneCatalog 失败时忽略。</summary>
         public void AddGene(string geneId)
         {
@@ -64,6 +68,7 @@ namespace GameLogic.UI.Battle
                 return;
             }
             _geneContracts.Add(factory());
+            _geneIds.Add(geneId);
         }
 
         private void Awake()
@@ -91,7 +96,7 @@ namespace GameLogic.UI.Battle
 
             EnsureStyles();
 
-            if (Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.M)
+            if (Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.L)
             {
                 _showPanel = !_showPanel;
             }
@@ -103,8 +108,12 @@ namespace GameLogic.UI.Battle
                     : SkinTier.Cell;
             }
 
-            DrawChainSummary();
-            DrawAxisTouchSummary(cell);
+            // story-002 D9⑩：新 HUD（BattleHudToolkit）默认显示时已接管这两块摘要，避免同屏重复。
+            if (!BattleHudToolkit.NewHudActive)
+            {
+                DrawChainSummary();
+                DrawAxisTouchSummary(cell);
+            }
 
             if (_showPanel)
             {
@@ -167,12 +176,13 @@ namespace GameLogic.UI.Battle
             var r = new Rect(Screen.width - 320f, Screen.height - 96f, 300f, 84f);
             GUI.Box(r, "");
             GUILayout.BeginArea(new Rect(r.x + 10f, r.y + 8f, r.width - 20f, r.height - 16f));
-            GUILayout.Label("<b>代谢链路</b>　M 装/卸 画边", _label);
+            GUILayout.Label("<b>代谢链路</b>　L 装/卸 画边", _label);
             GUILayout.Label(BuildChainSummary(), _summaryLabel);
             GUILayout.EndArea();
         }
 
-        private string BuildChainSummary()
+        /// <summary>source→…→sink 链路文本，供旧 IMGUI 摘要与 BattleHudToolkit（D11）共用。</summary>
+        public string BuildChainSummary()
         {
             List<PathCompiler.CompiledPath> paths = PathCompiler.Compile(_grid);
             if (paths.Count == 0)
@@ -212,13 +222,11 @@ namespace GameLogic.UI.Battle
                 GUILayout.Label($"囊已满，新元素 {DisplayName(_pendingOverflow.CardDefId)} 待抉择：", _label);
                 if (GUILayout.Button("丢弃新件"))
                 {
-                    _pendingOverflow = null;
+                    ResolveOverflowDiscardNew();
                 }
-                if (GUILayout.Button("丢弃囊内第一件后收下") && _bag.Items.Count > 0)
+                if (GUILayout.Button("丢弃囊内第一件后收下"))
                 {
-                    _bag.Remove(_bag.Items[0].PartId);
-                    _bag.TryAdd(_pendingOverflow);
-                    _pendingOverflow = null;
+                    ResolveOverflowKeepNewDiscardOld();
                 }
             }
             else
@@ -247,7 +255,7 @@ namespace GameLogic.UI.Battle
                 string text = (selected ? "▶ " : "") + DisplayName(p.CardDefId);
                 if (GUILayout.Button(text))
                 {
-                    _selectedPartId = selected ? null : p.PartId;
+                    ToggleSelectPart(p.PartId);
                 }
                 GUILayout.EndHorizontal();
             }
@@ -266,7 +274,7 @@ namespace GameLogic.UI.Battle
                                    (node.IsEmpty ? $"[{id}] 空" : $"[{id}] {DisplayName(node.Part.CardDefId)}");
                     if (GUILayout.Button(label, GUILayout.Width(118)))
                     {
-                        OnSlotClicked(id);
+                        HandleSlotClick(id);
                     }
                 }
                 GUILayout.EndHorizontal();
@@ -276,13 +284,11 @@ namespace GameLogic.UI.Battle
             GUILayout.BeginHorizontal();
             if (GUILayout.Button(_edgeMode == EdgeMode.Add ? "▶ 画边中" : "画边"))
             {
-                _edgeMode = _edgeMode == EdgeMode.Add ? EdgeMode.None : EdgeMode.Add;
-                _edgeFrom = null;
+                ToggleEdgeAddMode();
             }
             if (GUILayout.Button(_edgeMode == EdgeMode.Remove ? "▶ 删边中" : "删边"))
             {
-                _edgeMode = _edgeMode == EdgeMode.Remove ? EdgeMode.None : EdgeMode.Remove;
-                _edgeFrom = null;
+                ToggleEdgeRemoveMode();
             }
             GUILayout.EndHorizontal();
 
@@ -299,7 +305,8 @@ namespace GameLogic.UI.Battle
             GUILayout.EndArea();
         }
 
-        private void OnSlotClicked(int slotId)
+        /// <summary>唯一装/卸/画边/删边入口（story-002 D9①），IMGUI 与新 UI Toolkit 面板共用，避免影子状态机。</summary>
+        public void HandleSlotClick(int slotId)
         {
             if (_edgeMode != EdgeMode.None)
             {
@@ -344,6 +351,59 @@ namespace GameLogic.UI.Battle
             }
         }
 
+        /// <summary>当前选中的储备囊件 id（story-002 D9④，null=未选中）。</summary>
+        public string SelectedPartId => _selectedPartId;
+
+        /// <summary>点选/取消选中储备囊内一件（story-002 D9④）。</summary>
+        public void ToggleSelectPart(string partId)
+        {
+            _selectedPartId = _selectedPartId == partId ? null : partId;
+        }
+
+        /// <summary>画边模式是否激活（story-002 D9⑤）。</summary>
+        public bool IsEdgeAddMode => _edgeMode == EdgeMode.Add;
+
+        /// <summary>删边模式是否激活（story-002 D9⑤）。</summary>
+        public bool IsEdgeRemoveMode => _edgeMode == EdgeMode.Remove;
+
+        /// <summary>画边/删边模式下已选中的起点槽位，未选择时为 null（story-002 D9⑤）。</summary>
+        public int? EdgeFromSlot => _edgeFrom;
+
+        /// <summary>切换画边模式（story-002 D9②），逻辑照抄 IMGUI 按钮原分支。</summary>
+        public void ToggleEdgeAddMode()
+        {
+            _edgeMode = _edgeMode == EdgeMode.Add ? EdgeMode.None : EdgeMode.Add;
+            _edgeFrom = null;
+        }
+
+        /// <summary>切换删边模式（story-002 D9②），逻辑照抄 IMGUI 按钮原分支。</summary>
+        public void ToggleEdgeRemoveMode()
+        {
+            _edgeMode = _edgeMode == EdgeMode.Remove ? EdgeMode.None : EdgeMode.Remove;
+            _edgeFrom = null;
+        }
+
+        /// <summary>囊满溢出待抉择的新元素，null=当前无溢出（story-002 D9③）。</summary>
+        public PartInstance PendingOverflow => _pendingOverflow;
+
+        /// <summary>囊满溢出抉择：丢弃新件（story-002 D9③），逻辑照抄 IMGUI 分支。</summary>
+        public void ResolveOverflowDiscardNew()
+        {
+            _pendingOverflow = null;
+        }
+
+        /// <summary>囊满溢出抉择：丢弃囊内第一件后收下新件（story-002 D9③），逻辑照抄 IMGUI 分支（含判空）。</summary>
+        public void ResolveOverflowKeepNewDiscardOld()
+        {
+            if (_pendingOverflow == null || _bag.Items.Count == 0)
+            {
+                return;
+            }
+            _bag.Remove(_bag.Items[0].PartId);
+            _bag.TryAdd(_pendingOverflow);
+            _pendingOverflow = null;
+        }
+
         /// <summary>
         /// 调试快捷键：覆盖玩家网格为旧 Bridge 演示装配（organ_core→organ_focus→organ_actuator，
         /// 0→1→4）。不删这套旧 Draft（story 要求），但只在手动点击时生效——默认仍是玩家自己装的网格。
@@ -385,7 +445,7 @@ namespace GameLogic.UI.Battle
         /// story-005：org_* 卡按当前 <see cref="_skinTier"/> 走 <see cref="StageSkinCatalog"/> 换皮；
         /// 非 org_*（如旧演示卡 organ_core/organ_focus/organ_actuator）无皮映射，保持原 CardCatalog 名。
         /// </summary>
-        private string DisplayName(string cardDefId)
+        public string DisplayName(string cardDefId)
         {
             if (cardDefId != null && cardDefId.StartsWith("org_"))
             {

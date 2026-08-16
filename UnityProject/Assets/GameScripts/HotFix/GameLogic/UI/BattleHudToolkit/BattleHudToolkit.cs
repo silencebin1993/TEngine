@@ -1,10 +1,14 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UIElements;
 using GameLogic.Ability;
+using GameLogic.MetabolicSlice.Combat;
+using GameLogic.MetabolicSlice.Digestion;
 using GameLogic.Progression;
 using GameLogic.Stage;
 using GameLogic.Stage.CellStage;
 using GameLogic.Stats;
+using GameLogic.UI.Battle;
 
 namespace GameLogic
 {
@@ -12,15 +16,21 @@ namespace GameLogic
     /// UI Toolkit 版战斗 HUD（battle-ui-toolkit/story-001）。第一片：只做 BattleHud 静态还原，
     /// 不含拖拽交互。不继承 UIWindow/不用 [Window]（本仓 UI Toolkit 无框架先例），照抄
     /// <see cref="BattleMainUI"/> 的"常驻单例、轮询 IsRunning 自控显隐"模式。
-    /// 与旧 UGUI <see cref="BattleMainUI"/> 并存，按 U 键切换对比，默认隐藏，
-    /// 验收通过前不摘旧的（U7）。数据绑定严格对齐 BattleMainUI.RefreshHud 的 10 项。
+    /// story-001 验收通过（5 档分辨率排版核实）后改为默认显示，旧 UGUI <see cref="BattleMainUI"/>
+    /// 通过 <see cref="NewHudActive"/> 静态标记降级为按 U 键切回去的对照面板。
+    /// 数据绑定严格对齐 BattleMainUI.RefreshHud 的 10 项。
     /// </summary>
     public class BattleHudToolkit : MonoBehaviour
     {
         private const int SkillSlotCount = 5;
 
+        /// <summary>true=显示本 UI Toolkit HUD（默认）；false=按 U 键切回旧 UGUI BattleMainUI 对照。
+        /// 供 BattleMainUI 读取决定自己是否显示，避免两套 HUD 同屏重叠。</summary>
+        public static bool NewHudActive { get; private set; } = true;
+
         private UIDocument _document;
         private VisualTreeAsset _visualTree;
+        private VisualTreeAsset _tagChipTemplate;
         private PanelSettings _panelSettings;
 
         private VisualElement _root;
@@ -46,6 +56,15 @@ namespace GameLogic
         private VisualElement _ecoEventBlock;
         private Label _ecoEventText;
 
+        /// <summary>story-002 D11：story-001 遗留，右上轴A/消化泡摘要节点。</summary>
+        private VisualElement _arenaTags;
+        private Label _envPrompt;
+        private Label _chamberText;
+        private Label _digestLog;
+
+        /// <summary>story-002 D11：story-001 遗留，右下代谢链路摘要节点。</summary>
+        private Label _chainText;
+
         private readonly VisualElement[] _skillSlots = new VisualElement[SkillSlotCount];
         private readonly Label[] _skillName = new Label[SkillSlotCount];
         private readonly Label[] _skillState = new Label[SkillSlotCount];
@@ -65,6 +84,7 @@ namespace GameLogic
         private async void Start()
         {
             _visualTree = await GameModule.Resource.LoadAssetAsync<VisualTreeAsset>("BattleHud");
+            _tagChipTemplate = await GameModule.Resource.LoadAssetAsync<VisualTreeAsset>("TagChip");
             _panelSettings = await GameModule.Resource.LoadAssetAsync<PanelSettings>("BattleHudPanelSettings");
 
             if (this == null)
@@ -79,7 +99,7 @@ namespace GameLogic
 
             _root = _document.rootVisualElement;
             CacheNodes();
-            SetVisible(false);
+            SetVisible(true);
         }
 
         private void CacheNodes()
@@ -105,6 +125,12 @@ namespace GameLogic
             _threatBlock = _root.Q<Label>("ThreatBlock");
             _ecoEventBlock = _root.Q<VisualElement>("EcoEventBlock");
             _ecoEventText = _root.Q<Label>("EcoEventText");
+
+            _arenaTags = _root.Q<VisualElement>("ArenaTags");
+            _envPrompt = _root.Q<Label>("EnvPrompt");
+            _chamberText = _root.Q<Label>("ChamberText");
+            _digestLog = _root.Q<Label>("DigestLog");
+            _chainText = _root.Q<Label>("ChainText");
 
             for (int i = 0; i < SkillSlotCount; i++)
             {
@@ -144,10 +170,11 @@ namespace GameLogic
             RefreshHud(cell);
         }
 
-        /// <summary>新旧 HUD 切换开关。默认隐藏（D11），不影响任何现有玩家路径。</summary>
+        /// <summary>新旧 HUD 切换开关。story-001 验收通过后默认显示本 HUD（D11 已由人改口）。</summary>
         private void SetVisible(bool visible)
         {
             _visible = visible;
+            NewHudActive = visible;
             if (_root != null)
             {
                 _root.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
@@ -204,6 +231,55 @@ namespace GameLogic
 
             RefreshEcoEvent(cell);
             RefreshSkillSlots(cell);
+            RefreshAxisTouchAndChain(cell);
+        }
+
+        /// <summary>story-002 D11：接 story-001 遗留的 AxisTouchPanel（轴A/消化泡）+ ChainSummary（代谢链路）。</summary>
+        private void RefreshAxisTouchAndChain(CellStageFlow cell)
+        {
+            MetabolicSliceBridge bridge = cell.MetabolicBridge;
+            if (bridge != null)
+            {
+                if (_arenaTags != null && _tagChipTemplate != null)
+                {
+                    _arenaTags.Clear();
+                    foreach (string tag in bridge.ArenaTags)
+                    {
+                        TemplateContainer clone = _tagChipTemplate.CloneTree();
+                        Label label = clone.Q<Label>("TagChip");
+                        if (label != null)
+                        {
+                            label.text = MetabolicSliceBridge.DisplayTag(tag);
+                        }
+                        _arenaTags.Add(clone);
+                    }
+                }
+                if (_envPrompt != null)
+                {
+                    _envPrompt.text = bridge.LastEnvironmentPrompt;
+                }
+            }
+
+            MetabolicDigestionSystem digestion = cell.Digestion;
+            if (digestion != null)
+            {
+                if (_chamberText != null)
+                {
+                    _chamberText.text = $"{digestion.ChamberCount}/{digestion.ChamberCapacity}";
+                }
+                if (_digestLog != null)
+                {
+                    IReadOnlyList<string> log = digestion.RecentLog;
+                    _digestLog.text = log.Count > 0 ? log[log.Count - 1] : "（尚未捕食）";
+                }
+            }
+
+            if (_chainText != null)
+            {
+                _chainText.text = MetabolicSlicePanel.Instance != null
+                    ? MetabolicSlicePanel.Instance.BuildChainSummary()
+                    : "无输出链";
+            }
         }
 
         /// <summary>三选一 class：poll-hidden/poll-mid/poll-nearcap（D8），非简单布尔隐藏。</summary>
@@ -301,6 +377,11 @@ namespace GameLogic
             {
                 GameModule.Resource.UnloadAsset(_visualTree);
                 _visualTree = null;
+            }
+            if (_tagChipTemplate != null)
+            {
+                GameModule.Resource.UnloadAsset(_tagChipTemplate);
+                _tagChipTemplate = null;
             }
             if (_panelSettings != null)
             {

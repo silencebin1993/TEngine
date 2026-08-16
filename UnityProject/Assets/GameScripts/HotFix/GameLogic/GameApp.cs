@@ -45,6 +45,10 @@ public partial class GameApp
         // UI Toolkit 版 HUD（battle-ui-toolkit/story-001，D1/D2）：不挂 [Window]，
         // 常驻单例自控显隐，与上面的旧 UGUI BattleMainUI 并存，按 U 键切换对比。
         new GameObject("BattleHudToolkit").AddComponent<BattleHudToolkit>();
+
+        // UI Toolkit 版代谢切片装配面板（battle-ui-toolkit/story-002，D2）：同上不挂 [Window]，
+        // M 键默认打开，旧 IMGUI MetabolicSlicePanel.DrawPanel() 改绑 L 键对照。
+        new GameObject("BattleMetabolicUIToolkit").AddComponent<BattleMetabolicUIToolkit>();
     }
     
     private static void Release()
