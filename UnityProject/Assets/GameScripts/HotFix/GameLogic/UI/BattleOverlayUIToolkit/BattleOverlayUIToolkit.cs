@@ -12,14 +12,15 @@ using GameLogic.UI.Battle;
 namespace GameLogic
 {
     /// <summary>
-    /// UI Toolkit 版覆盖面板（battle-ui-toolkit/story-004）：卡组（Tab）/商店（B）/图鉴（V）
-    /// 三个只读/轻交互面板共享同一份 <c>BattleOverlays.uxml</c>，单一控制器管理（D1），
+    /// UI Toolkit 版覆盖面板（battle-ui-toolkit/story-004 起）：卡组（Tab）/商店（B）/图鉴（V）/
+    /// 暂停菜单（Esc，story-005）四个面板共享同一份 <c>BattleOverlays.uxml</c>，单一控制器管理（D1），
     /// 不接 [Window]/CellStageFlow._hub，照抄 <see cref="BattleHudToolkit"/>/
     /// <see cref="BattleMetabolicUIToolkit"/> 的"常驻单例、每帧轮询自控显隐"模式（D2）。
-    /// 三面板互斥（同时最多一个显示），<see cref="ShowDeck"/>/<see cref="ShowShop"/>/
-    /// <see cref="ShowCodex"/>/<see cref="CloseAll"/> 是唯一显隐入口，Tab/B/V 按键处理器与
-    /// execute_code 验收断言复用同一份实现，不重造平行状态机（D11）。
-    /// Pause/Esc（<c>BattlePauseUI</c>）本 story 完全不碰，留给 005（D13）。
+    /// 四面板互斥（同时最多一个显示），<see cref="ShowDeck"/>/<see cref="ShowShop"/>/
+    /// <see cref="ShowCodex"/>/<see cref="CloseAll"/> 与私有 <c>SetPanel</c> 是唯一显隐入口，
+    /// Tab/B/V/Esc 按键处理器与 execute_code 验收断言复用同一份实现，不重造平行状态机（D11）。
+    /// Pause 面板的 <c>CellStageFlow._paused</c> 同步收在 <c>SetPanel</c> 唯一入口按边沿处理
+    /// （story-005 D3），防止切到 Deck/Shop/Codex 时忘记复位导致游戏卡死。
     /// </summary>
     public class BattleOverlayUIToolkit : MonoBehaviour
     {
@@ -29,6 +30,7 @@ namespace GameLogic
             Deck,
             Shop,
             Codex,
+            Pause,
         }
 
         private UIDocument _document;
@@ -58,12 +60,20 @@ namespace GameLogic
         private Label _cardSectionTitle;
         private ScrollView _unlockList;
 
+        // Pause
+        private VisualElement _pauseRoot;
+        private Button _btnResume;
+        private Button _btnOpenMetabolicFromPause;
+        private Button _btnOpenDeckFromPause;
+        private Button _btnAbandon;
+
         private PanelKind _current = PanelKind.None;
 
         /// <summary>供 execute_code 验收探针只读访问。</summary>
         public bool IsDeckVisible => _current == PanelKind.Deck;
         public bool IsShopVisible => _current == PanelKind.Shop;
         public bool IsCodexVisible => _current == PanelKind.Codex;
+        public bool IsPauseVisible => _current == PanelKind.Pause;
 
         private void Awake()
         {
@@ -168,6 +178,37 @@ namespace GameLogic
             {
                 btnCloseCodex.clicked += CloseAll;
             }
+
+            _pauseRoot = _root.Q<VisualElement>("BattlePauseUI");
+            _btnResume = _pauseRoot?.Q<Button>("BtnResume");
+            _btnOpenMetabolicFromPause = _pauseRoot?.Q<Button>("BtnOpenMetabolicFromPause");
+            _btnOpenDeckFromPause = _pauseRoot?.Q<Button>("BtnOpenDeckFromPause");
+            _btnAbandon = _pauseRoot?.Q<Button>("BtnAbandon");
+
+            if (_btnResume != null)
+            {
+                _btnResume.clicked += CloseAll;
+            }
+            if (_btnOpenDeckFromPause != null)
+            {
+                _btnOpenDeckFromPause.clicked += () => SetPanel(PanelKind.Deck);
+            }
+            if (_btnOpenMetabolicFromPause != null)
+            {
+                _btnOpenMetabolicFromPause.clicked += () =>
+                {
+                    SetPanel(PanelKind.None);
+                    BattleMetabolicUIToolkit.Instance?.SetVisible(true);
+                };
+            }
+            if (_btnAbandon != null)
+            {
+                _btnAbandon.clicked += () =>
+                {
+                    GameRoot.CellStage?.MarkAbandoned();
+                    GameRoot.EndRun();
+                };
+            }
         }
 
         public void ShowDeck() => SetPanel(PanelKind.Deck);
@@ -180,9 +221,20 @@ namespace GameLogic
             SetPanel(_current == kind ? PanelKind.None : kind);
         }
 
-        /// <summary>D4：唯一显隐入口——设置目标面板并强制隐藏另外两个（互斥）。</summary>
+        /// <summary>
+        /// D4/D3：唯一显隐入口——设置目标面板并强制隐藏其余（互斥）。
+        /// 暂停同步收在这里按边沿处理，防止"从 Pause 切到 Deck/Shop/Codex 忘记复位 _paused，游戏卡死"
+        /// 的死锁 bug；四个按钮/Esc 只需要各自调 SetPanel/CloseAll，暂停状态自动跟随。
+        /// </summary>
         private void SetPanel(PanelKind kind)
         {
+            bool willPause = kind == PanelKind.Pause;
+            bool wasPause = _current == PanelKind.Pause;
+            if (willPause != wasPause)
+            {
+                GameRoot.CellStage?.SetPaused(willPause);
+            }
+
             _current = kind;
             ApplyDisplay();
         }
@@ -200,6 +252,10 @@ namespace GameLogic
             if (_codexRoot != null)
             {
                 _codexRoot.style.display = _current == PanelKind.Codex ? DisplayStyle.Flex : DisplayStyle.None;
+            }
+            if (_pauseRoot != null)
+            {
+                _pauseRoot.style.display = _current == PanelKind.Pause ? DisplayStyle.Flex : DisplayStyle.None;
             }
         }
 
@@ -222,6 +278,13 @@ namespace GameLogic
                 else if (Input.GetKeyDown(KeyCode.V))
                 {
                     TogglePanel(PanelKind.Codex);
+                }
+                // D9：Paused 是 Draft 和 Pause 共用的同一个字段——Esc 只有在"当前没有其它原因
+                // 导致的暂停"（本控制器自己置的 Pause，或压根没暂停）时才处理，避免选卡三选一
+                // 显示期间 Esc 又把 Pause 叠加到 Draft 上。
+                else if (Input.GetKeyDown(KeyCode.Escape) && (_current == PanelKind.Pause || !cell.Paused))
+                {
+                    TogglePanel(PanelKind.Pause);
                 }
             }
             else if (_current != PanelKind.None)

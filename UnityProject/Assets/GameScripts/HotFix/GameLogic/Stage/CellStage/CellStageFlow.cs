@@ -105,6 +105,23 @@ namespace GameLogic.Stage.CellStage
         public DraftKind PendingDraftKind { get; private set; }
 
         public bool Paused => _paused;
+
+        /// <summary>story-005：暂停菜单最小公开入口，复用 Draft 已验证的冻结语义（不碰 Time.timeScale）。</summary>
+        public void SetPaused(bool paused)
+        {
+            if (!_running)
+            {
+                return;
+            }
+            _paused = paused;
+        }
+
+        /// <summary>story-005：放弃本局只标记死因，不调用 GameRoot——阶段不需要知道 director，同 Exit() 既有原则。</summary>
+        public void MarkAbandoned()
+        {
+            _deathCause = "abandoned";
+        }
+
         public StatSheet Stats => _stats;
         public Deck Deck => _deck;
         public PhaseTimeline Timeline => _timeline;

@@ -189,6 +189,7 @@ namespace GameLogic.UI.Battle
             {
                 case "pollution": return "你追求的力量终于认不出宿主。";
                 case "devoured": return "更大的口器找到了你。这片水域从不记得失败者的形状。";
+                case "abandoned": return "你收起伪足，退回安全的水流——这场漂流的痕迹已经留在体内。";
                 default: return "细胞膜再也无法维持形状。";
             }
         }

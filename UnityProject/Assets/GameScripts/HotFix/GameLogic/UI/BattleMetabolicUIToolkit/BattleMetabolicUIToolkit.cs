@@ -44,8 +44,12 @@ namespace GameLogic
         /// <summary>供 execute_code 验收探针只读访问。</summary>
         public bool IsPanelVisible => _panelVisible;
 
+        /// <summary>story-005：供 BattleOverlayUIToolkit（Pause 面板"打开代谢"按钮）跨控制器调用，最小暴露，不新建平行显隐状态。</summary>
+        public static BattleMetabolicUIToolkit Instance { get; private set; }
+
         private void Awake()
         {
+            Instance = this;
             DontDestroyOnLoad(gameObject);
         }
 
@@ -140,7 +144,7 @@ namespace GameLogic
             RefreshPanel();
         }
 
-        private void SetVisible(bool visible)
+        public void SetVisible(bool visible)
         {
             _panelVisible = visible;
         }
@@ -310,6 +314,10 @@ namespace GameLogic
 
         private void OnDestroy()
         {
+            if (Instance == this)
+            {
+                Instance = null;
+            }
             if (_visualTree != null)
             {
                 GameModule.Resource.UnloadAsset(_visualTree);
