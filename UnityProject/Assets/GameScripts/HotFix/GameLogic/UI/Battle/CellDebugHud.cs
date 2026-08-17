@@ -48,6 +48,10 @@ namespace GameLogic.UI.Battle
         /// 本旧 IMGUI 选卡面板改为按 K 键打开的对照入口，默认关闭避免与新 UI 同屏重复。</summary>
         private bool _showLegacyDraft;
 
+        /// <summary>story-004 D8：新 UI Toolkit 覆盖面板（<see cref="BattleOverlayUIToolkit"/>）接管默认
+        /// Tab/B/V 三键，本旧 IMGUI 卡组/商店/图鉴面板需要额外按 J 键打开对照模式才响应同一批按键。</summary>
+        private bool _showLegacyOverlays;
+
         private static readonly string[] RouteNames =
         {
             "无", "吞噬扩张", "机动猎食", "电化统治", "孢子繁殖", "菌毯筑巢", "异化污染", "跨路线",
@@ -287,15 +291,19 @@ namespace GameLogic.UI.Battle
             {
                 return;
             }
-            if (Event.current.keyCode == KeyCode.Tab)
+            if (Event.current.keyCode == KeyCode.J)
+            {
+                _showLegacyOverlays = !_showLegacyOverlays;
+            }
+            else if (_showLegacyOverlays && Event.current.keyCode == KeyCode.Tab)
             {
                 _showDeck = !_showDeck;
             }
-            else if (Event.current.keyCode == KeyCode.B)
+            else if (_showLegacyOverlays && Event.current.keyCode == KeyCode.B)
             {
                 _showShop = !_showShop;
             }
-            else if (Event.current.keyCode == KeyCode.V)
+            else if (_showLegacyOverlays && Event.current.keyCode == KeyCode.V)
             {
                 _showCodex = !_showCodex;
             }
@@ -561,7 +569,8 @@ namespace GameLogic.UI.Battle
             }
         }
 
-        private static string RarityColor(CardRarity r)
+        /// <summary>story-004 D8 最小暴露：UI Toolkit 覆盖面板（Deck/Codex）按稀有度上色复用同一色表。</summary>
+        public static string RarityColor(CardRarity r)
         {
             switch (r)
             {

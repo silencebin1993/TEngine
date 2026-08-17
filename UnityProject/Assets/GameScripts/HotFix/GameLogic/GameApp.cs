@@ -53,6 +53,10 @@ public partial class GameApp
         // UI Toolkit 版进化选卡面板（battle-ui-toolkit/story-003，D2）：同上不挂 [Window]，
         // 事件触发式默认弹出，旧 IMGUI CellDebugHud.DrawDraft() 改绑 K 键对照。
         new GameObject("BattleDraftUIToolkit").AddComponent<BattleDraftUIToolkit>();
+
+        // UI Toolkit 版覆盖面板：卡组/商店/图鉴（battle-ui-toolkit/story-004，D2）：同上不挂 [Window]，
+        // Tab/B/V 默认打开对应面板（互斥），旧 IMGUI 三面板改绑 J 键对照。
+        new GameObject("BattleOverlayUIToolkit").AddComponent<BattleOverlayUIToolkit>();
     }
     
     private static void Release()
