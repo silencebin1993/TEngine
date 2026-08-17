@@ -38,6 +38,7 @@ namespace GameLogic
         private PanelSettings _panelSettings;
 
         private VisualElement _root;
+        private VisualElement _overlayRoot;
 
         // Deck
         private VisualElement _deckRoot;
@@ -124,6 +125,16 @@ namespace GameLogic
 
         private void CacheNodes()
         {
+            // uxml 根节点 OverlayRoot 恒为 width:100%/height:100%，四个子面板各自 display:none 时
+            // 自己没托管到隐藏——默认 pickingMode.Position 会在整局游戏里持续吞掉最上层
+            // （sortingOrder=10）全屏范围的每一次点击，Draft/Metabolic 等下层面板全部点不动。
+            // 子面板按钮各自已有 pickingMode.Position，不依赖父节点转发，Ignore 不影响它们。
+            _overlayRoot = _root.Q<VisualElement>("OverlayRoot");
+            if (_overlayRoot != null)
+            {
+                _overlayRoot.pickingMode = PickingMode.Ignore;
+            }
+
             _deckRoot = _root.Q<VisualElement>("BattleDeckUI");
             _routeDistList = _deckRoot?.Q<VisualElement>("RouteDistList");
             _ownedCardList = _deckRoot?.Q<ScrollView>("OwnedCardList");

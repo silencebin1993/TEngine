@@ -15,6 +15,10 @@ UnityProject/ProjectSettings/CommonBurstAotSettings.json
 UnityProject/ProjectSettings/BurstAotSettings_StandaloneWindows.json
 UnityProject/Assets/TextMesh Pro
 
+# 测试截图禁止进工程（证据在 BinGames/production/qa/evidence/）
+UnityProject/Assets/Screenshots/
+UnityProject/Assets/Screenshots.meta
+
 #GameEventSourceGenerator
 Tools/GameEventSourceGenerator/.idea
 Tools/GameEventSourceGenerator/GameEventAnalyzer/bin

@@ -176,7 +176,10 @@ namespace GameLogic
 
         private void Update()
         {
-            if (Input.GetKeyDown(KeyCode.M))
+            CellStageFlow cell = GameRoot.CellStage;
+            // 同 BattleOverlayUIToolkit 的 D9 门禁：面板已开着才允许 M 直接关；若当前暂停
+            // 是别的原因造成的（例如 Draft 选卡），不许 M 抢着切换，避免误动 _paused。
+            if (Input.GetKeyDown(KeyCode.M) && (_panelVisible || cell == null || !cell.Paused))
             {
                 HandleMKeyToggle();
             }
@@ -186,7 +189,6 @@ namespace GameLogic
                 return;
             }
 
-            CellStageFlow cell = GameRoot.CellStage;
             bool running = cell != null && cell.IsRunning;
             bool visible = running && _panelVisible;
             _root.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
@@ -198,8 +200,16 @@ namespace GameLogic
             RefreshPanel();
         }
 
+        /// <summary>
+        /// 独立 UI：面板显隐边沿驱动 CellStageFlow._paused（同 BattleOverlayUIToolkit.SetPanel
+        /// 对 Pause 面板的处理手法），打开即暂停、关闭即恢复，避免装配时怪物继续行动。
+        /// </summary>
         public void SetVisible(bool visible)
         {
+            if (_panelVisible != visible)
+            {
+                GameRoot.CellStage?.SetPaused(visible);
+            }
             _panelVisible = visible;
         }
 

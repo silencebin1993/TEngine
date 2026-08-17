@@ -102,3 +102,7 @@ yoo/
 # dotnet 编译校验用的临时工程（tools/check-build.sh 生成）
 _Check.*.csproj
 Temp/bin/check/
+
+# 测试 / MCP / 验收截图 — 禁止入库；证据放 BinGames 根 production/qa/evidence/
+[Aa]ssets/[Ss]creenshots/
+[Aa]ssets/[Ss]creenshots.meta
