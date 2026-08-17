@@ -279,7 +279,8 @@ namespace GameLogic
             IReadOnlyList<PartInstance> items = panel.Bag.Items;
             if (_bagTitle != null)
             {
-                _bagTitle.text = $"储备囊 {items.Count}/{panel.Bag.Cap}";
+                // 储备囊真无限（Cap=int.MaxValue），显示用 ∞ 代替数值上限。
+                _bagTitle.text = $"储备囊 {items.Count}/∞";
             }
 
             _bagList.Clear();

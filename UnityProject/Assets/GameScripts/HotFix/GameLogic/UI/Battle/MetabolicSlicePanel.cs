@@ -74,7 +74,8 @@ namespace GameLogic.UI.Battle
         private void Awake()
         {
             Instance = this;
-            _bag = new BagInventory(8);
+            // 储备囊真无限（覆盖冻结总案 §6 的 8/16 软硬上限，产品要求改为不限容）。
+            _bag = new BagInventory(int.MaxValue);
             _grid = new SlotGrid(SlotType.Cytoplasm);
         }
 
@@ -247,7 +248,7 @@ namespace GameLogic.UI.Battle
             }
 
             GUILayout.Space(6f);
-            GUILayout.Label($"储备囊 {_bag.Items.Count}/{_bag.Cap}（点选后再点空槽装入）", _label);
+            GUILayout.Label($"储备囊 {_bag.Items.Count}/∞（点选后再点空槽装入）", _label);
             foreach (PartInstance p in _bag.Items)
             {
                 GUILayout.BeginHorizontal();
