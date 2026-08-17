@@ -178,7 +178,7 @@ namespace GameLogic
         {
             if (Input.GetKeyDown(KeyCode.M))
             {
-                SetVisible(!_panelVisible);
+                HandleMKeyToggle();
             }
 
             if (_root == null)
@@ -201,6 +201,21 @@ namespace GameLogic
         public void SetVisible(bool visible)
         {
             _panelVisible = visible;
+        }
+
+        /// <summary>
+        /// story-002：M 键分支单独抽出（供 execute_code 反射直调，绕开 Input.GetKeyDown 无法在
+        /// headless UnityMCP 下模拟真实按键的限制，同时 Update() 走同一份真实实现）。即将从隐藏
+        /// 切到显示时，若 Pause 面板已开，先关 Pause（连带 CellStageFlow._paused 复位走
+        /// CloseAll() 既有边沿处理）再显代谢，避免同屏叠加。
+        /// </summary>
+        private void HandleMKeyToggle()
+        {
+            if (!_panelVisible && BattleOverlayUIToolkit.Instance != null && BattleOverlayUIToolkit.Instance.IsPauseVisible)
+            {
+                BattleOverlayUIToolkit.Instance.CloseAll();
+            }
+            SetVisible(!_panelVisible);
         }
 
         /// <summary>唯一数据源 MetabolicSlicePanel.Instance；本方法只做只读展示同步，不驱动任何状态变化（D8）。</summary>

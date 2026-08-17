@@ -75,8 +75,12 @@ namespace GameLogic
         public bool IsCodexVisible => _current == PanelKind.Codex;
         public bool IsPauseVisible => _current == PanelKind.Pause;
 
+        /// <summary>story-002：供 BattleMetabolicUIToolkit（M×Esc 互斥）跨控制器调用，最小暴露，同 BattleMetabolicUIToolkit.Instance 先例。</summary>
+        public static BattleOverlayUIToolkit Instance { get; private set; }
+
         private void Awake()
         {
+            Instance = this;
             DontDestroyOnLoad(gameObject);
         }
 
@@ -222,6 +226,20 @@ namespace GameLogic
         }
 
         /// <summary>
+        /// story-002：Esc 键分支单独抽出（供 execute_code 反射直调，理由同
+        /// BattleMetabolicUIToolkit.HandleMKeyToggle()）。即将从非 Pause 切到 Pause 时，若代谢
+        /// 面板已开，先关代谢再开 Pause，避免同屏叠加；反向（关 Pause）不联动代谢。
+        /// </summary>
+        private void HandleEscKeyToggle()
+        {
+            if (_current != PanelKind.Pause && BattleMetabolicUIToolkit.Instance != null && BattleMetabolicUIToolkit.Instance.IsPanelVisible)
+            {
+                BattleMetabolicUIToolkit.Instance.SetVisible(false);
+            }
+            TogglePanel(PanelKind.Pause);
+        }
+
+        /// <summary>
         /// D4/D3：唯一显隐入口——设置目标面板并强制隐藏其余（互斥）。
         /// 暂停同步收在这里按边沿处理，防止"从 Pause 切到 Deck/Shop/Codex 忘记复位 _paused，游戏卡死"
         /// 的死锁 bug；四个按钮/Esc 只需要各自调 SetPanel/CloseAll，暂停状态自动跟随。
@@ -284,7 +302,7 @@ namespace GameLogic
                 // 显示期间 Esc 又把 Pause 叠加到 Draft 上。
                 else if (Input.GetKeyDown(KeyCode.Escape) && (_current == PanelKind.Pause || !cell.Paused))
                 {
-                    TogglePanel(PanelKind.Pause);
+                    HandleEscKeyToggle();
                 }
             }
             else if (_current != PanelKind.None)
@@ -443,6 +461,10 @@ namespace GameLogic
 
         private void OnDestroy()
         {
+            if (Instance == this)
+            {
+                Instance = null;
+            }
             if (_visualTree != null)
             {
                 GameModule.Resource.UnloadAsset(_visualTree);
