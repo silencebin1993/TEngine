@@ -57,6 +57,10 @@ public partial class GameApp
         // UI Toolkit 版覆盖面板：卡组/商店/图鉴（battle-ui-toolkit/story-004，D2）：同上不挂 [Window]，
         // Tab/B/V 默认打开对应面板（互斥），旧 IMGUI 三面板改绑 J 键对照。
         new GameObject("BattleOverlayUIToolkit").AddComponent<BattleOverlayUIToolkit>();
+
+        // UI Toolkit 版结算回顾面板（battle-ui-polish/story-003，D2）：同上不挂 [Window]，
+        // 局外且有结算结果时默认显示，旧 IMGUI 结算块改绑 I 键对照。
+        new GameObject("BattleResultUIToolkit").AddComponent<BattleResultUIToolkit>();
     }
     
     private static void Release()

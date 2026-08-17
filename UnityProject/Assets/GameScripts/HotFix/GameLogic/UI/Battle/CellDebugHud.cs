@@ -52,6 +52,10 @@ namespace GameLogic.UI.Battle
         /// Tab/B/V 三键，本旧 IMGUI 卡组/商店/图鉴面板需要额外按 J 键打开对照模式才响应同一批按键。</summary>
         private bool _showLegacyOverlays;
 
+        /// <summary>battle-ui-polish/story-003 D7：新 UI Toolkit 结算面板（<see cref="BattleResultUIToolkit"/>）
+        /// 默认启用，本旧 IMGUI 结算块改按 I 键打开对照模式，默认关闭。</summary>
+        private bool _showLegacyResult;
+
         private static readonly string[] RouteNames =
         {
             "无", "吞噬扩张", "机动猎食", "电化统治", "孢子繁殖", "菌毯筑巢", "异化污染", "跨路线",
@@ -64,6 +68,10 @@ namespace GameLogic.UI.Battle
             if (Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.F10)
             {
                 _showDebugHud = !_showDebugHud;
+            }
+            if (Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.I)
+            {
+                _showLegacyResult = !_showLegacyResult;
             }
 
             CellStageFlow cell = GameRoot.CellStage;
@@ -130,7 +138,8 @@ namespace GameLogic.UI.Battle
             StageOutcome last = GameRoot.Director?.LastOutcome;
             bool hasResult = last != null && last.StageId != StageId.None;
             // 有结算内容时加高面板——固定 240 装不下头图+统计行，会被 BeginArea 裁掉（story-005 AC 要求可见）。
-            float h = hasResult ? 400f : 240f;
+            // battle-ui-polish/story-003 D7：新 UI Toolkit 结算面板默认接管展示，旧块仅在 _showLegacyResult 时加高。
+            float h = (hasResult && _showLegacyResult) ? 400f : 240f;
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             h += 50f; // LookDev 沙盒按钮（story-006），只在编辑器/开发构建加高，避免正式包菜单多空白
 #endif
@@ -157,7 +166,7 @@ namespace GameLogic.UI.Battle
             }
 #endif
 
-            if (hasResult)
+            if (hasResult && _showLegacyResult)
             {
                 GUILayout.Space(10f);
                 GUILayout.Label(BuildResultText(last), _label);
@@ -166,7 +175,8 @@ namespace GameLogic.UI.Battle
             GUILayout.EndArea();
         }
 
-        private string BuildResultText(StageOutcome o)
+        /// <summary>battle-ui-polish/story-003 D4 最小暴露：新 UI Toolkit 结算面板复用同一份文案，不重写拼接逻辑。</summary>
+        public static string BuildResultText(StageOutcome o)
         {
             string head = o.Victory
                 ? "水流开始绕着你走。在这一寸微观海域里，你就是选择压力本身。"
