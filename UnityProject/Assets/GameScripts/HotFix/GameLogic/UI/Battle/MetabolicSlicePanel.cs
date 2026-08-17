@@ -351,6 +351,24 @@ namespace GameLogic.UI.Battle
             }
         }
 
+        /// <summary>拖拽装入（story-004 D7）：不重复 HandleSlotClick 的分支逻辑，直达 TransferService；
+        /// 成功后清掉选中态，防止残留一个不相关的旧点选。</summary>
+        public TransferResult DragEquip(string partId, int slotId)
+        {
+            TransferResult result = TransferService.Equip(_bag, _grid, partId, slotId);
+            if (result == TransferResult.Ok)
+            {
+                _selectedPartId = null;
+            }
+            return result;
+        }
+
+        /// <summary>拖拽卸下（story-004 D7）：直达 TransferService，无额外副作用。</summary>
+        public TransferResult DragUnequip(int slotId) => TransferService.Unequip(_bag, _grid, slotId);
+
+        /// <summary>拖拽画边（story-004 D7）：直达 SlotGrid.TryAddEdge，规则语义不变。</summary>
+        public bool DragAddEdge(int from, int to) => _grid.TryAddEdge(from, to);
+
         /// <summary>当前选中的储备囊件 id（story-002 D9④，null=未选中）。</summary>
         public string SelectedPartId => _selectedPartId;
 

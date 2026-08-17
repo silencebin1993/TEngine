@@ -3,6 +3,7 @@ using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UIElements;
 using GameLogic.MetabolicSlice.Bag;
+using GameLogic.MetabolicSlice.CardDefs;
 using GameLogic.MetabolicSlice.ContentCatalog;
 using GameLogic.MetabolicSlice.Grid;
 using GameLogic.Stage;
@@ -41,6 +42,24 @@ namespace GameLogic
         private Label _edgeList;
 
         private bool _panelVisible;
+
+        // ---- story-004：真拖拽（装/卸/画边），见 preflight-decisions.md D1~D6 ----
+        private const float DragThreshold = 6f;
+
+        private enum DragSourceKind { None, Bag, Slot }
+        private enum DropState { None, Valid, Invalid }
+
+        private Label _dragGhost;
+        private DragSourceKind _dragSourceKind = DragSourceKind.None;
+        private string _dragPartId;
+        private int _dragFromSlot = -1;
+        private bool _dragOriginEmpty;
+        private bool _dragActive;
+        private bool _dragModeLocked;
+        private int _dragPointerId = -1;
+        private VisualElement _dragCaptureElement;
+        private VisualElement _lastHighlighted;
+        private Vector2 _dragStartPos;
 
         /// <summary>供 execute_code 验收探针只读访问。</summary>
         public bool IsPanelVisible => _panelVisible;
@@ -90,7 +109,19 @@ namespace GameLogic
                 return;
             }
             CacheNodes();
+            CreateDragGhost();
             SetVisible(false);
+        }
+
+        /// <summary>D4：常驻拖影 Label，PickingMode.Ignore 防止自己挡住命中测试。</summary>
+        private void CreateDragGhost()
+        {
+            _dragGhost = new Label();
+            _dragGhost.AddToClassList("drag-ghost");
+            _dragGhost.pickingMode = PickingMode.Ignore;
+            _dragGhost.style.position = Position.Absolute;
+            _dragGhost.style.display = DisplayStyle.None;
+            _root.Add(_dragGhost);
         }
 
         private void CacheNodes()
@@ -116,7 +147,12 @@ namespace GameLogic
                 _slotButtons[i] = slot;
                 if (slot != null)
                 {
-                    slot.clicked += () => MetabolicSlicePanel.Instance?.HandleSlotClick(slotId);
+                    // story-004 D1：旧 clicked 改成指针事件驱动的拖拽手势；点击语义在
+                    // PointerUp 内按阈值分支手动调用（HandleDragEnd），不再用 clicked。
+                    slot.RegisterCallback<PointerDownEvent>(evt => OnSlotPointerDown(evt, slot, slotId));
+                    slot.RegisterCallback<PointerMoveEvent>(OnPointerMove);
+                    slot.RegisterCallback<PointerUpEvent>(OnPointerUp);
+                    slot.RegisterCallback<PointerCaptureOutEvent>(OnPointerCaptureOut);
                 }
             }
 
@@ -206,6 +242,15 @@ namespace GameLogic
                 return;
             }
 
+            if (_dragSourceKind == DragSourceKind.Bag)
+            {
+                // story-004：拖拽起点是某个 BagItem 按钮本身，若本帧照常清空重建列表会销毁
+                // 正在 CapturePointer 的元素，UIElements 会把这当成意外丢失捕获触发
+                // PointerCaptureOutEvent，导致拖拽还没开始移动就被打断。装/卸/画边不会在
+                // 拖拽过程中改 Bag/Grid（只在 PointerUp 落点时一次性调用），冻结列表安全。
+                return;
+            }
+
             IReadOnlyList<PartInstance> items = panel.Bag.Items;
             if (_bagTitle != null)
             {
@@ -232,7 +277,11 @@ namespace GameLogic
                     button.AddToClassList("selected");
                 }
                 string partId = item.PartId;
-                button.clicked += () => MetabolicSlicePanel.Instance?.ToggleSelectPart(partId);
+                // story-004 D1：旧 clicked 改成指针事件驱动的拖拽手势，理由同 CacheNodes() 的 SlotCell。
+                button.RegisterCallback<PointerDownEvent>(evt => OnBagPointerDown(evt, button, partId));
+                button.RegisterCallback<PointerMoveEvent>(OnPointerMove);
+                button.RegisterCallback<PointerUpEvent>(OnPointerUp);
+                button.RegisterCallback<PointerCaptureOutEvent>(OnPointerCaptureOut);
                 _bagList.Add(clone);
             }
         }
@@ -328,6 +377,310 @@ namespace GameLogic
                 texts.Add($"{e.From}→{e.To}");
             }
             _edgeList.text = "箭头：" + string.Join("　", texts);
+        }
+
+        // ==== story-004：真拖拽手势（指针事件，见 preflight-decisions.md D1~D6） ====
+
+        private void OnSlotPointerDown(PointerDownEvent evt, Button slot, int slotId)
+        {
+            MetabolicSlicePanel panel = MetabolicSlicePanel.Instance;
+            if (panel == null)
+            {
+                return;
+            }
+            bool originEmpty = panel.Grid.Slots[slotId].IsEmpty;
+            BeginDrag(DragSourceKind.Slot, slotId, null, originEmpty, panel, slot, evt);
+        }
+
+        private void OnBagPointerDown(PointerDownEvent evt, Button button, string partId)
+        {
+            MetabolicSlicePanel panel = MetabolicSlicePanel.Instance;
+            if (panel == null)
+            {
+                return;
+            }
+            BeginDrag(DragSourceKind.Bag, -1, partId, false, panel, button, evt);
+        }
+
+        private void BeginDrag(DragSourceKind kind, int slotId, string partId, bool originEmpty, MetabolicSlicePanel panel, VisualElement element, PointerDownEvent evt)
+        {
+            _dragSourceKind = kind;
+            _dragFromSlot = slotId;
+            _dragPartId = partId;
+            _dragOriginEmpty = originEmpty;
+            _dragStartPos = evt.position;
+            _dragActive = false;
+            _dragModeLocked = panel.IsEdgeAddMode || panel.IsEdgeRemoveMode;
+            _dragPointerId = evt.pointerId;
+            _dragCaptureElement = element;
+            element.CapturePointer(evt.pointerId);
+        }
+
+        private void OnPointerMove(PointerMoveEvent evt)
+        {
+            if (_dragSourceKind == DragSourceKind.None || _dragModeLocked)
+            {
+                return;
+            }
+
+            Vector2 pos = evt.position;
+            if (!_dragActive)
+            {
+                if (Vector2.Distance(pos, _dragStartPos) <= DragThreshold)
+                {
+                    return;
+                }
+                _dragActive = true;
+            }
+
+            if (_dragSourceKind == DragSourceKind.Slot && _dragOriginEmpty)
+            {
+                // D3②：起点空槽，越过阈值也是无操作占位，不显示拖影/高亮。
+                return;
+            }
+
+            UpdateGhost(pos);
+            UpdateHighlight(pos);
+        }
+
+        private void OnPointerUp(PointerUpEvent evt)
+        {
+            if (_dragSourceKind == DragSourceKind.None)
+            {
+                return;
+            }
+            HandleDragEnd(evt.position);
+            _dragCaptureElement?.ReleasePointer(_dragPointerId);
+            ResetDragState();
+        }
+
+        private void OnPointerCaptureOut(PointerCaptureOutEvent evt)
+        {
+            if (_dragSourceKind == DragSourceKind.None)
+            {
+                return;
+            }
+            // 捕获意外丢失（非本控制器主动 ReleasePointer 触发）：只做视觉收尾，不触发任何装/卸/画边。
+            ClearGhost();
+            ClearHighlight();
+            ResetDragState();
+        }
+
+        /// <summary>PointerUp 落点判定（D2/D3）：阈值内或边模式快照命中 → 点击语义；否则按来源路由。</summary>
+        private void HandleDragEnd(Vector2 position)
+        {
+            MetabolicSlicePanel panel = MetabolicSlicePanel.Instance;
+            ClearGhost();
+            ClearHighlight();
+
+            if (panel == null)
+            {
+                return;
+            }
+
+            if (_dragModeLocked || !_dragActive)
+            {
+                if (_dragSourceKind == DragSourceKind.Bag)
+                {
+                    panel.ToggleSelectPart(_dragPartId);
+                }
+                else if (_dragSourceKind == DragSourceKind.Slot)
+                {
+                    panel.HandleSlotClick(_dragFromSlot);
+                }
+                return;
+            }
+
+            if (_dragSourceKind == DragSourceKind.Slot && _dragOriginEmpty)
+            {
+                return;
+            }
+
+            if (_dragSourceKind == DragSourceKind.Bag)
+            {
+                int? targetSlot = HitTestSlot(position);
+                if (targetSlot.HasValue)
+                {
+                    panel.DragEquip(_dragPartId, targetSlot.Value);
+                }
+                return;
+            }
+
+            if (_dragSourceKind == DragSourceKind.Slot)
+            {
+                if (HitTestBagArea(position))
+                {
+                    panel.DragUnequip(_dragFromSlot);
+                    return;
+                }
+                int? targetSlot = HitTestSlot(position);
+                if (targetSlot.HasValue && targetSlot.Value != _dragFromSlot && SlotGrid.IsAdjacent(_dragFromSlot, targetSlot.Value))
+                {
+                    panel.DragAddEdge(_dragFromSlot, targetSlot.Value);
+                }
+            }
+        }
+
+        private void ResetDragState()
+        {
+            _dragSourceKind = DragSourceKind.None;
+            _dragPartId = null;
+            _dragFromSlot = -1;
+            _dragOriginEmpty = false;
+            _dragActive = false;
+            _dragModeLocked = false;
+            _dragPointerId = -1;
+            _dragCaptureElement = null;
+        }
+
+        private int? HitTestSlot(Vector2 position)
+        {
+            for (int i = 0; i < SlotGrid.SlotCount; i++)
+            {
+                Button slot = _slotButtons[i];
+                if (slot != null && slot.worldBound.Contains(position))
+                {
+                    return i;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>D3 命中区域：Rect.MinMaxRect 合并 BagTitle 与 BagList 的 worldBound。</summary>
+        private bool HitTestBagArea(Vector2 position)
+        {
+            if (_bagTitle == null && _bagList == null)
+            {
+                return false;
+            }
+            if (_bagTitle == null)
+            {
+                return _bagList.worldBound.Contains(position);
+            }
+            if (_bagList == null)
+            {
+                return _bagTitle.worldBound.Contains(position);
+            }
+            Rect a = _bagTitle.worldBound;
+            Rect b = _bagList.worldBound;
+            Rect union = Rect.MinMaxRect(
+                Mathf.Min(a.xMin, b.xMin), Mathf.Min(a.yMin, b.yMin),
+                Mathf.Max(a.xMax, b.xMax), Mathf.Max(a.yMax, b.yMax));
+            return union.Contains(position);
+        }
+
+        /// <summary>D6 合法性预判：只用公开只读入口，不复制 SoftCap 等私有规则。</summary>
+        private DropState EvaluateSlotDrop(MetabolicSlicePanel panel, int targetSlotId)
+        {
+            if (_dragSourceKind == DragSourceKind.Bag)
+            {
+                PartInstance item = panel.Bag.Items.Find(p => p.PartId == _dragPartId);
+                SlotNode node = panel.Grid.Slots[targetSlotId];
+                bool valid = item != null && node.IsEmpty && CardCatalog.AllowsSlot(item.CardDefId, node.SlotType);
+                return valid ? DropState.Valid : DropState.Invalid;
+            }
+
+            if (_dragSourceKind == DragSourceKind.Slot)
+            {
+                int from = _dragFromSlot;
+                if (targetSlotId == from || !SlotGrid.IsAdjacent(from, targetSlotId))
+                {
+                    return DropState.None;
+                }
+                foreach (DirectedEdge e in panel.Grid.Edges)
+                {
+                    if (e.From == from && e.To == targetSlotId)
+                    {
+                        return DropState.Invalid;
+                    }
+                }
+                return DropState.Valid;
+            }
+
+            return DropState.None;
+        }
+
+        /// <summary>D4：拖影文字=来源件的显示名，跟手定位用 _root.WorldToLocal 换算。</summary>
+        private void UpdateGhost(Vector2 worldPos)
+        {
+            if (_dragGhost == null)
+            {
+                return;
+            }
+            MetabolicSlicePanel panel = MetabolicSlicePanel.Instance;
+            if (panel == null)
+            {
+                return;
+            }
+
+            string text;
+            if (_dragSourceKind == DragSourceKind.Bag)
+            {
+                PartInstance item = panel.Bag.Items.Find(p => p.PartId == _dragPartId);
+                text = item != null ? panel.DisplayName(item.CardDefId) : string.Empty;
+            }
+            else
+            {
+                SlotNode node = panel.Grid.Slots[_dragFromSlot];
+                text = node.Part != null ? panel.DisplayName(node.Part.CardDefId) : string.Empty;
+            }
+            _dragGhost.text = text;
+
+            Vector2 local = _root.WorldToLocal(worldPos);
+            _dragGhost.style.left = local.x - 40f;
+            _dragGhost.style.top = local.y - 12f;
+            _dragGhost.style.display = DisplayStyle.Flex;
+        }
+
+        private void ClearGhost()
+        {
+            if (_dragGhost != null)
+            {
+                _dragGhost.style.display = DisplayStyle.None;
+            }
+        }
+
+        /// <summary>D5：同一时刻最多一个元素带高亮 class，_lastHighlighted 追踪防止残留。</summary>
+        private void UpdateHighlight(Vector2 worldPos)
+        {
+            MetabolicSlicePanel panel = MetabolicSlicePanel.Instance;
+            if (panel == null)
+            {
+                return;
+            }
+
+            VisualElement candidate = null;
+            DropState state = DropState.None;
+
+            int? targetSlot = HitTestSlot(worldPos);
+            if (targetSlot.HasValue)
+            {
+                candidate = _slotButtons[targetSlot.Value];
+                state = EvaluateSlotDrop(panel, targetSlot.Value);
+            }
+
+            if (candidate == _lastHighlighted)
+            {
+                return;
+            }
+
+            ClearHighlight();
+
+            if (candidate != null && state != DropState.None)
+            {
+                candidate.AddToClassList(state == DropState.Valid ? "drop-valid" : "drop-invalid");
+                _lastHighlighted = candidate;
+            }
+        }
+
+        private void ClearHighlight()
+        {
+            if (_lastHighlighted != null)
+            {
+                _lastHighlighted.RemoveFromClassList("drop-valid");
+                _lastHighlighted.RemoveFromClassList("drop-invalid");
+                _lastHighlighted = null;
+            }
         }
 
         private void OnDestroy()
