@@ -1,3 +1,4 @@
+using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UIElements;
 using GameLogic.Cards;
@@ -69,8 +70,25 @@ namespace GameLogic
             _document = gameObject.AddComponent<UIDocument>();
             _document.visualTreeAsset = _visualTree;
             _document.panelSettings = _panelSettings;
+            // 多个 UIDocument 共用同一份 PanelSettings 时，兄弟节点绘制顺序取决于
+            // 各自异步加载完成的竞态顺序（非确定性）。显式给一个数值表锁定的
+            // sortingOrder，让四个控制器的叠放关系确定（story-004 已验证的手法）。
+            _document.sortingOrder = 6;
+
+            // UIDocument.rootVisualElement 在刚赋值 panelSettings 后偶发仍为 null
+            // （面板尚未在本帧完成挂载，实测复现），有限帧数轮询等它就绪，避免
+            // CacheNodes() 对 null 根节点查询直接崩溃、控制器永久半初始化。
+            for (int guard = 0; guard < 10 && _document.rootVisualElement == null; guard++)
+            {
+                await UniTask.Yield();
+            }
 
             _root = _document.rootVisualElement;
+            if (_root == null)
+            {
+                Debug.LogError("[BattleDraftUIToolkit] rootVisualElement 等待超时，选卡面板未初始化。");
+                return;
+            }
             CacheNodes();
             _root.style.display = DisplayStyle.None;
         }
