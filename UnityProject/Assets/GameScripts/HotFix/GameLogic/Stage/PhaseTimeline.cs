@@ -34,6 +34,9 @@ namespace GameLogic.Stage
         /// <summary>本时期是否已刷过期末精英。</summary>
         private bool _eliteSpawned;
 
+        /// <summary>story-006：LookDev 沙盒抑制时期推进/抽卡触发，避免选卡面板打断 A/B 对照。</summary>
+        public bool Suppressed { get; set; }
+
         public void Bind(SpawnDirector director)
         {
             _director = director;
@@ -52,6 +55,10 @@ namespace GameLogic.Stage
 
         public override void OnUpdate(float dt)
         {
+            if (Suppressed)
+            {
+                return;
+            }
             if (Finished || Current == null)
             {
                 return;

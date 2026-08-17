@@ -64,6 +64,19 @@ namespace GameLogic.Stage
             _director?.EndCurrent();
         }
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        /// <summary>
+        /// LookDev 对照沙盒入口（story-006）：进一局细胞阶段，同帧切沙盒态
+        /// （抑制刷怪/阶段推进/玩家真实网格装配 Tick，见 <see cref="CellStageFlow.DebugSetSandboxMode"/>）。
+        /// 只在编辑器/开发构建可用，正式包不出现该入口。
+        /// </summary>
+        public static void StartLookDevSandbox()
+        {
+            StartCellStage();
+            CellStage?.DebugSetSandboxMode(true);
+        }
+#endif
+
         private static void OnUpdate()
         {
             if (_director == null)

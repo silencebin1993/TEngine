@@ -1,6 +1,9 @@
 using System.Collections.Generic;
+using ComposeEngine.Core;
 using GameLogic.Cards;
 using GameLogic.Core;
+using GameLogic.MetabolicSlice.Combat;
+using GameLogic.MetabolicSlice.DebugTools;
 using GameLogic.Progression;
 using GameLogic.Stage;
 using GameLogic.Stage.CellStage;
@@ -36,6 +39,11 @@ namespace GameLogic.UI.Battle
         /// </summary>
         private bool _showDebugHud;
 
+        /// <summary>story-006：LookDev 沙盒是否激活。始终存在（不用 #if 包），正式包里永远是 false——
+        /// 真正的入口开关（菜单按钮/GameRoot.StartLookDevSandbox）才是 #if UNITY_EDITOR || DEVELOPMENT_BUILD。</summary>
+        private bool _lookDevActive;
+        private int _lookDevFixtureIndex;
+
         /// <summary>story-003 D10：新 UI Toolkit 选卡面板（<see cref="BattleDraftUIToolkit"/>）默认事件触发式显示，
         /// 本旧 IMGUI 选卡面板改为按 K 键打开的对照入口，默认关闭避免与新 UI 同屏重复。</summary>
         private bool _showLegacyDraft;
@@ -58,6 +66,12 @@ namespace GameLogic.UI.Battle
             if (cell == null || !cell.IsRunning)
             {
                 DrawMenu();
+                return;
+            }
+
+            if (_lookDevActive)
+            {
+                DrawLookDevSandbox(cell);
                 return;
             }
 
@@ -113,6 +127,9 @@ namespace GameLogic.UI.Battle
             bool hasResult = last != null && last.StageId != StageId.None;
             // 有结算内容时加高面板——固定 240 装不下头图+统计行，会被 BeginArea 裁掉（story-005 AC 要求可见）。
             float h = hasResult ? 400f : 240f;
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            h += 50f; // LookDev 沙盒按钮（story-006），只在编辑器/开发构建加高，避免正式包菜单多空白
+#endif
             var r = new Rect(Screen.width * 0.5f - 200f, Screen.height * 0.5f - h * 0.5f, 400f, h);
             GUI.Box(r, "");
             GUILayout.BeginArea(new Rect(r.x + 20f, r.y + 20f, r.width - 40f, r.height - 40f));
@@ -126,6 +143,15 @@ namespace GameLogic.UI.Battle
             {
                 GameRoot.StartCellStage();
             }
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (GUILayout.Button("LookDev 沙盒", GUILayout.Height(30f)))
+            {
+                _lookDevFixtureIndex = 0;
+                _lookDevActive = true;
+                GameRoot.StartLookDevSandbox();
+            }
+#endif
 
             if (hasResult)
             {
@@ -317,10 +343,78 @@ namespace GameLogic.UI.Battle
                     cell.DebugUnlockAllAbilities();
                     Event.current.Use();
                     break;
+                case KeyCode.F12: // 相机验证态开关（story-005）：默认俯视 ↔ 透视景深
+                    cell.DebugToggleCameraVerifyMode();
+                    Event.current.Use();
+                    break;
             }
         }
 #else
         private void HandleGmHotkeys(CellStageFlow cell) { }
+#endif
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        /// <summary>
+        /// LookDev 对照沙盒面板（story-006）：跳过正常战斗 HUD/Deck/Shop/Codex/Draft 绘制。
+        /// 渲染 100% 复用 002 信号 + 004 Presenter + 003 运动，本方法唯一的新代码是调用
+        /// <see cref="MetabolicSliceBridge.ApplyEvent"/>，不另起 Publish/Feedback 实现。
+        /// </summary>
+        private void DrawLookDevSandbox(CellStageFlow cell)
+        {
+            IReadOnlyList<LookDevFixture> fixtures = LookDevFixtures.All;
+            if (fixtures.Count == 0)
+            {
+                return;
+            }
+            _lookDevFixtureIndex = ((_lookDevFixtureIndex % fixtures.Count) + fixtures.Count) % fixtures.Count;
+            LookDevFixture fixture = fixtures[_lookDevFixtureIndex];
+
+            GUILayout.BeginArea(new Rect(12f, 12f, 480f, 250f));
+            GUI.Box(new Rect(0f, 0f, 480f, 250f), "");
+            GUILayout.Space(6f);
+            GUILayout.Label("<b>LookDev 对照沙盒</b>", _big);
+            GUILayout.Label($"[{_lookDevFixtureIndex + 1}/{fixtures.Count}] {fixture.Name}　{fixture.AxisLabel}", _label);
+            GUILayout.Space(4f);
+            GUILayout.Label($"A: {FieldSummary(fixture.A)}", _label);
+            GUILayout.Label($"B: {FieldSummary(fixture.B)}", _label);
+            GUILayout.Space(8f);
+
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("发射 A", GUILayout.Height(30f)))
+            {
+                cell.MetabolicBridge?.ApplyEvent(fixture.A);
+            }
+            if (GUILayout.Button("发射 B", GUILayout.Height(30f)))
+            {
+                cell.MetabolicBridge?.ApplyEvent(fixture.B);
+            }
+            GUILayout.EndHorizontal();
+
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("上一组", GUILayout.Height(26f)))
+            {
+                _lookDevFixtureIndex--;
+            }
+            if (GUILayout.Button("下一组", GUILayout.Height(26f)))
+            {
+                _lookDevFixtureIndex++;
+            }
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(4f);
+            if (GUILayout.Button("退出沙盒", GUILayout.Height(28f)))
+            {
+                _lookDevActive = false;
+                GameRoot.EndRun();
+            }
+
+            GUILayout.EndArea();
+        }
+
+        private static string FieldSummary(HitEvent e) =>
+            $"Shape={e.Shape}　Scale={e.Scale:0.#}　Count={e.Count:0.#}　Spin={e.Spin:0.#}　Orbit={e.Orbit:0.#}　Explode={e.ExplodeOnHit}";
+#else
+        private void DrawLookDevSandbox(CellStageFlow cell) { }
 #endif
 
         private void DrawDraft(CellStageFlow cell)

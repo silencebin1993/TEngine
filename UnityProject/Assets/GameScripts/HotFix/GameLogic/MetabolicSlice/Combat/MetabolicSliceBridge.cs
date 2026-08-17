@@ -41,9 +41,16 @@ namespace GameLogic.MetabolicSlice.Combat
         public override int Priority => ModulePriority.MetabolicBridge;
 
         private const float TickInterval = 1.5f;
-        private const float DamageAreaRadius = 4f;
-        private const float ExplodeRadiusMult = 1.6f;
+
+        /// <summary>story-004：白模弹道 Presenter 与 <see cref="ApplyEvent"/> 共用同一个半径公式，
+        /// 提升可见性避免视觉尺寸与结算半径分叉（Decision D3）。数值不变，仍是 4f。</summary>
+        public const float DamageAreaRadius = 4f;
+        /// <summary>story-007：白模爆炸环 Presenter 与 <see cref="ApplyEvent"/> 共用同一个半径系数，禁止另起系数（Decision D6）。</summary>
+        public const float ExplodeRadiusMult = 1.6f;
         private const float ExplodeDamageMult = 0.5f;
+
+        /// <summary>story-002：全仓库 SimBridge/SimSnapshot 无玩家速度/朝向字段，Direction 定为默认前向常量。</summary>
+        private static readonly float2 DefaultForward = new float2(0f, 1f);
 
         /// <summary>整个战场只有这一个环境格——本 story 不建真实坐标网格（沿用 WorldEnvironment 现有约定）。</summary>
         public const string ArenaCellId = "arena";
@@ -56,11 +63,24 @@ namespace GameLogic.MetabolicSlice.Combat
             ["StickyAcid"] = "粘酸", ["Shock"] = "电击",
         };
 
+        /// <summary>story-003：Spin/Orbit 命中延迟到期的最小 ephemeral 状态（数量与弹体数同级，非池化数组，见 Decision D7）。</summary>
+        private struct PendingMotionHit
+        {
+            public float2 Origin;
+            public float Radius;
+            public float Damage;
+            public float Phase;
+            public float Spin;
+            public float Orbit;
+            public float TimeLeft;
+        }
+
         private Engine _engine;
         private MetabolicSliceRunner _runner;
         private SimBridge _sim;
         private StatSheet _stats;
         private WorldEnvironment _environment;
+        private readonly List<PendingMotionHit> _pendingMotion = new List<PendingMotionHit>();
         private float _timer;
         private int _seed;
         private float _playerShield;
@@ -73,6 +93,13 @@ namespace GameLogic.MetabolicSlice.Combat
 
         /// <summary>story-004：Shield 出口的本地累加值——Sim 无护盾吸收结算，先记账做最小可读，不接伤害减免。</summary>
         public float PlayerShield => _playerShield;
+
+        /// <summary>story-003：当前挂起的 Spin/Orbit 延迟命中数量，供 execute_code 断言"生成即挂起、tick 完即清空"。</summary>
+        public int PendingMotionCount => _pendingMotion?.Count ?? 0;
+
+        /// <summary>story-006：LookDev 沙盒抑制玩家真实网格的常规 1.5s 装配 Tick（噪声源），不影响
+        /// <see cref="TickPendingMotion"/> 与 <see cref="ApplyEvent"/>（沙盒发射的夹具仍要正常播完延迟命中动画）。</summary>
+        public bool Suppressed { get; set; }
 
         public void Bind(SimBridge sim, StatSheet stats)
         {
@@ -107,6 +134,13 @@ namespace GameLogic.MetabolicSlice.Combat
         public override void OnUpdate(float dt)
         {
             if (_sim == null || !_sim.Running)
+            {
+                return;
+            }
+
+            TickPendingMotion(dt);
+
+            if (Suppressed)
             {
                 return;
             }
@@ -160,9 +194,32 @@ namespace GameLogic.MetabolicSlice.Combat
             {
                 int hits = Math.Max(1, (int)MathF.Round(evt.Count));
                 float radius = DamageAreaRadius * MathF.Max(0.1f, evt.Scale);
-                for (int h = 0; h < hits; h++)
+
+                if (evt.Spin != 0f || evt.Orbit != 0f)
                 {
-                    _sim.DamageArea(_sim.PlayerPosition, radius, evt.Damage, BinGames.Sim.SimFaction.Hostile);
+                    // story-003：Spin/Orbit 命中改延迟到期采样点，而不是原地瞬时突发（D2/D4）。
+                    float2 origin = _sim.PlayerPosition;
+                    for (int h = 0; h < hits; h++)
+                    {
+                        float phase = 2f * math.PI * h / hits;
+                        _pendingMotion.Add(new PendingMotionHit
+                        {
+                            Origin = origin,
+                            Radius = radius,
+                            Damage = evt.Damage,
+                            Phase = phase,
+                            Spin = evt.Spin,
+                            Orbit = evt.Orbit,
+                            TimeLeft = ComposeMotionMath.MotionFlightDuration,
+                        });
+                    }
+                }
+                else
+                {
+                    for (int h = 0; h < hits; h++)
+                    {
+                        _sim.DamageArea(_sim.PlayerPosition, radius, evt.Damage, BinGames.Sim.SimFaction.Hostile);
+                    }
                 }
                 applied = true;
 
@@ -202,13 +259,58 @@ namespace GameLogic.MetabolicSlice.Combat
                 applied = true;
             }
 
-            if (evt.Spin != 0f || evt.Orbit != 0f)
+            if (evt.Damage <= 0f && (evt.Spin != 0f || evt.Orbit != 0f))
             {
-                // Motion 轴 stub：尚无弹道/绕轨系统时先可读；禁止当成「纯表现永不进机制」。
+                // story-003：Damage>0 的 Spin/Orbit 已走上面的延迟命中状态机；
+                // 这里只保留 Heal/Shield/Displace 等非 Damage 出口叠加 Spin/Orbit 时的可读摘要 stub。
                 LastAbilityPrompt = $"运动机制（待接弹道）：Spin={evt.Spin:0.#} Orbit={evt.Orbit:0.#}";
+                applied = true;
+            }
+
+            if (applied)
+            {
+                // story-002：组合出口形态信号，给表现层一个稳定订阅点（不持有 SimWorld，不做 O(敌人数) 扫描）。
+                Signals.Publish(new ComposeCastSignal
+                {
+                    Shape = evt.Shape,
+                    Scale = evt.Scale,
+                    Count = evt.Count,
+                    Spin = evt.Spin,
+                    Orbit = evt.Orbit,
+                    ExplodeOnHit = evt.ExplodeOnHit,
+                    Tags = evt.Tags,
+                    Origin = _sim.PlayerPosition,
+                    Direction = DefaultForward,
+                    HasProjectile = evt.Damage > 0f,
+                });
             }
 
             return applied;
+        }
+
+        /// <summary>
+        /// story-003：每帧推进挂起的 Spin/Orbit 延迟命中（不受 <see cref="TickInterval"/> 节流，运动必须每帧可见）。
+        /// 到期条目按 <see cref="ComposeMotionMath.Offset"/> 算出真实采样点，回调与瞬时命中同一个
+        /// <see cref="SimBridge.DamageArea"/> API，只是位置/时机不同。
+        /// </summary>
+        private void TickPendingMotion(float dt)
+        {
+            for (int i = _pendingMotion.Count - 1; i >= 0; i--)
+            {
+                PendingMotionHit hit = _pendingMotion[i];
+                hit.TimeLeft -= dt;
+                if (hit.TimeLeft <= 0f)
+                {
+                    float elapsed = ComposeMotionMath.MotionFlightDuration - hit.TimeLeft;
+                    float2 strikePos = hit.Origin + ComposeMotionMath.Offset(hit.Phase, hit.Spin, hit.Orbit, elapsed);
+                    _sim.DamageArea(strikePos, hit.Radius, hit.Damage, BinGames.Sim.SimFaction.Hostile);
+                    _pendingMotion.RemoveAt(i);
+                }
+                else
+                {
+                    _pendingMotion[i] = hit;
+                }
+            }
         }
 
         /// <summary>
@@ -243,6 +345,7 @@ namespace GameLogic.MetabolicSlice.Combat
             _engine = null;
             _runner = null;
             _environment = null;
+            _pendingMotion?.Clear();
         }
     }
 }

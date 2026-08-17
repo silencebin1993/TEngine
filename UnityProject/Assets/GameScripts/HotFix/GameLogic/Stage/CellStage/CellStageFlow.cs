@@ -61,10 +61,44 @@ namespace GameLogic.Stage.CellStage
 
         private SimRenderer _renderer;
         private Camera _camera;
+        private bool _cameraVerifyMode;
+        private Vector3 _cameraFollowOffset = DefaultCameraOffset;
 
         private bool _running;
         private bool _paused;
         private string _deathCause;
+
+        /// <summary>story-006：LookDev 沙盒态。只读标记，实际抑制逻辑在 <see cref="DebugSetSandboxMode"/>。</summary>
+        private bool _sandboxMode;
+        public bool IsSandboxMode => _sandboxMode;
+
+        /// <summary>
+        /// 把 <see cref="_sandboxMode"/> 落到当前模块实例上（三处 Suppressed + 验证态相机）。
+        /// 不放在 <c>#if</c> 门禁里——<see cref="Enter"/> 每次都要调用它（哪怕 _sandboxMode 恒为 false 的
+        /// 正常入局也要跑一遍，保证语义一致），只有内部的相机分支才门禁到编辑器/开发构建。
+        /// </summary>
+        private void ApplySandboxState()
+        {
+            if (_director != null)
+            {
+                _director.Suppressed = _sandboxMode;
+            }
+            if (_timeline != null)
+            {
+                _timeline.Suppressed = _sandboxMode;
+            }
+            if (_metabolicBridge != null)
+            {
+                _metabolicBridge.Suppressed = _sandboxMode;
+            }
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (_sandboxMode && !_cameraVerifyMode)
+            {
+                DebugToggleCameraVerifyMode();
+            }
+#endif
+        }
 
         /// <summary>选卡暂停时的待选项。UI 读它显示进化选择界面。</summary>
         public System.Collections.Generic.List<CardSpec> PendingOptions { get; private set; }
@@ -112,6 +146,11 @@ namespace GameLogic.Stage.CellStage
 
             SetupCamera();
             RegisterModules();
+            // story-006：StageDirector.GoTo 是延迟切换（下一帧 Update 才真正调用本方法），
+            // 所以 DebugSetSandboxMode(true) 完全可能在 RegisterModules() 重建新模块实例之前就已调用过——
+            // 那次调用时 _director/_timeline/_metabolicBridge 还是旧实例甚至 null，Suppressed 白设。
+            // 这里按 _sandboxMode 重新落一次，保证不管调用时序如何，新建的模块实例总能拿到正确的抑制态。
+            ApplySandboxState();
             SetupSim();
             GrantStarterAbilities();
 
@@ -169,6 +208,14 @@ namespace GameLogic.Stage.CellStage
             }
         }
 
+        /// <summary>验证态相机（story-005）：透视俯仰角，读出 Spin/Orbit 水平圆周运动的景深。</summary>
+        private const float VerifyPitchDegrees = 50f;
+        private const float VerifyFieldOfView = 50f;
+        private const float VerifyViewDistance = 18f;
+
+        private static readonly Vector3 DefaultCameraOffset = new Vector3(0f, 40f, 0f);
+        private static readonly Quaternion DefaultCameraRotation = Quaternion.Euler(90f, 0f, 0f);
+
         private void SetupCamera()
         {
             _camera = Camera.main;
@@ -221,6 +268,8 @@ namespace GameLogic.Stage.CellStage
             _zoneVisual = _hub.Register(new ZoneVisualPresenter());
             // 血条表现层（story-008）：与 ZoneVisualPresenter 同款直接 Bind，需要连续读 Health/Position。
             _healthBars = _hub.Register(new HealthBarPresenter());
+            // 组合弹道表现层（story-004）：与 AbilityCastPresenter 同骨架，只订阅 ComposeCastSignal。
+            _hub.Register(new ComposeProjectilePresenter());
 
             // 效果执行器注册。新增一种效果只需在此多一行。
             _abilities.RegisterExecutor(new EffectDealDamage());
@@ -455,7 +504,8 @@ namespace GameLogic.Stage.CellStage
                 return;
             }
             Unity.Mathematics.float2 p = _sim.PlayerPosition;
-            var want = new Vector3(p.x, _camera.transform.position.y, p.y);
+            var want = new Vector3(
+                p.x + _cameraFollowOffset.x, _cameraFollowOffset.y, p.y + _cameraFollowOffset.z);
             _camera.transform.position = Vector3.Lerp(
                 _camera.transform.position, want, 1f - Mathf.Exp(-8f * dt));
         }
@@ -671,6 +721,60 @@ namespace GameLogic.Stage.CellStage
                 $"[GM] 解锁全部技能 +{granted}（槽位 {_abilities.SlotCount}/{all.Count}），体力已灌满");
         }
 
+        /// <summary>
+        /// GM：在默认俯视战斗态与验证态（透视，可读出 Spin/Orbit 水平圆周运动的景深）之间切换。
+        /// </summary>
+        public void DebugToggleCameraVerifyMode()
+        {
+            if (_camera == null)
+            {
+                return;
+            }
+
+            _cameraVerifyMode = !_cameraVerifyMode;
+
+            Quaternion rot;
+            if (_cameraVerifyMode)
+            {
+                _camera.orthographic = false;
+                _camera.fieldOfView = VerifyFieldOfView;
+                rot = Quaternion.Euler(VerifyPitchDegrees, 0f, 0f);
+                _cameraFollowOffset = rot * new Vector3(0f, 0f, -VerifyViewDistance);
+            }
+            else
+            {
+                _camera.orthographic = true;
+                _camera.orthographicSize = 16f;
+                rot = DefaultCameraRotation;
+                _cameraFollowOffset = DefaultCameraOffset;
+            }
+
+            _camera.transform.rotation = rot;
+
+            if (_sim != null)
+            {
+                Unity.Mathematics.float2 p = _sim.PlayerPosition;
+                _camera.transform.position = new Vector3(
+                    p.x + _cameraFollowOffset.x, _cameraFollowOffset.y, p.y + _cameraFollowOffset.z);
+            }
+
+            string mode = _cameraVerifyMode ? "验证态（透视）" : "默认态（俯视）";
+            TEngine.Log.Info($"[GM] 相机切换 → {mode}");
+        }
+
+        /// <summary>
+        /// LookDev 沙盒开关（story-006）：抑制刷怪/阶段推进/玩家真实网格常规装配 Tick 三处噪声源
+        /// （<see cref="_director"/>/<see cref="_timeline"/>/<see cref="_metabolicBridge"/> 各自的 Suppressed），
+        /// 不影响 <see cref="MetabolicSliceBridge.ApplyEvent"/>/<see cref="MetabolicSliceBridge.TickPendingMotion"/>。
+        /// 进沙盒默认切验证态相机（复用 005），给可读 3D 视角，不强制玩家再按 F12。
+        /// </summary>
+        public void DebugSetSandboxMode(bool on)
+        {
+            _sandboxMode = on;
+            ApplySandboxState();
+            TEngine.Log.Info($"[GM] LookDev 沙盒 → {(on ? "开启" : "关闭")}");
+        }
+
 #endif
 
         private void CheckEnd()
@@ -716,6 +820,12 @@ namespace GameLogic.Stage.CellStage
 
             Signals.Clear();
             RuleFlags.Current.ClearAll();
+
+            // story-006：此前只有 CheckEnd()（死亡/通关）会翻转 _running，Exit() 本身从不落这个字段。
+            // 「退出沙盒」是仓库里第一处在 IsRunning 仍为 true 时主动调 GameRoot.EndRun() 的路径——
+            // 不补上这一行，退出后 cell.IsRunning 会卡 true，CellDebugHud.OnGUI() 的
+            // "cell==null||!cell.IsRunning" 判断永远走不到 DrawMenu()，主菜单再也回不去。
+            _running = false;
 
             return _outcome;
         }

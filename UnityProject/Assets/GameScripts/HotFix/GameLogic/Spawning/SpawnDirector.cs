@@ -52,6 +52,9 @@ namespace GameLogic.Spawning
         /// <summary>本帧的压力预算。</summary>
         public float Budget { get; private set; }
 
+        /// <summary>story-006：LookDev 沙盒抑制刷怪节拍（不采购/不计压力），零怪物真正生成。</summary>
+        public bool Suppressed { get; set; }
+
         public void Bind(SimBridge sim, StatSheet stats, Deck deck)
         {
             _sim = sim;
@@ -68,6 +71,10 @@ namespace GameLogic.Spawning
 
         public override void OnUpdate(float dt)
         {
+            if (Suppressed)
+            {
+                return;
+            }
             if (_sim == null || !_sim.Running || CurrentPhase == null)
             {
                 return;

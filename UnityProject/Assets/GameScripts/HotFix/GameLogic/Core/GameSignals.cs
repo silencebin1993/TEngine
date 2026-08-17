@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using BinGames.Sim;
 using Unity.Mathematics;
 
@@ -59,6 +60,27 @@ namespace GameLogic.Core
         public int AbilityId;
         public float2 Origin;
         public float2 Direction;
+    }
+
+    /// <summary>
+    /// 组合出口形态。<see cref="MetabolicSlice.Combat.MetabolicSliceBridge.ApplyEvent"/> 每次
+    /// 把 HitEvent 应用出可观察效果时 Publish 一次，把 Shape/Scale/Count/Spin/Orbit/ExplodeOnHit
+    /// 等一等字段交给表现层（story-002）。与 <see cref="AbilityCastSignal"/> 并列，不合并。
+    /// </summary>
+    public struct ComposeCastSignal
+    {
+        public string Shape;
+        public float Scale;
+        public float Count;
+        public float Spin;
+        public float Orbit;
+        public bool ExplodeOnHit;
+        /// <summary>引用源 HitEvent 的 Tags，非拷贝。Signals.Publish 是同步分发（Signals.cs 内循环内直接
+        /// Invoke，非跨帧队列），订阅者若要跨帧持有该信号数据必须自行拷贝这个集合。</summary>
+        public HashSet<string> Tags;
+        public float2 Origin;
+        public float2 Direction;
+        public bool HasProjectile;
     }
 
     /// <summary>冲刺开始。机动路线的核心触发点。</summary>
