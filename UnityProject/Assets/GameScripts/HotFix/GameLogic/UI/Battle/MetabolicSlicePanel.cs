@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using ComposeEngine.Core;
 using GameLogic.MetabolicSlice.Bag;
 using GameLogic.MetabolicSlice.CardDefs;
+using GameLogic.MetabolicSlice.Carrier;
 using GameLogic.MetabolicSlice.ContentCatalog;
 using GameLogic.MetabolicSlice.Combat;
 using GameLogic.MetabolicSlice.Digestion;
@@ -33,6 +34,8 @@ namespace GameLogic.UI.Battle
         private SlotGrid _grid;
         private readonly List<IContract> _geneContracts = new List<IContract>();
         private readonly List<string> _geneIds = new List<string>();
+        private readonly GeneReserve _geneReserve = new GeneReserve();
+        private readonly CarrierRegistry _carrierRegistry = new CarrierRegistry();
         private PartInstance _pendingOverflow;
         private string _selectedPartId;
         private EdgeMode _edgeMode;
@@ -58,7 +61,18 @@ namespace GameLogic.UI.Battle
         /// <summary>与 <see cref="GeneContracts"/> 一一对应的 geneId 列表（story-002 新增，供新 UI 反查显示名）。</summary>
         public IReadOnlyList<string> GeneIds => _geneIds;
 
-        /// <summary>抽卡领取基因后调用（CellStageFlow.ConfirmDraft）。geneId 查 GeneCatalog 失败时忽略。</summary>
+        /// <summary>基因储备囊（story-002 D1）：未装备基因只在这里，装备后归属某 Carrier 插槽。</summary>
+        public GeneReserve GeneReserve => _geneReserve;
+
+        /// <summary>Carrier 持有容器（story-002 D8/D9），多持有单激活。</summary>
+        public CarrierRegistry CarrierRegistry => _carrierRegistry;
+
+        /// <summary>
+        /// 抽卡领取基因后调用（CellStageFlow.ConfirmDraft）。geneId 查 GeneCatalog 失败时忽略。
+        /// story-002 D5：不再当场建 IContract 塞全局法则表，改为建 GeneInstance 塞进 GeneReserve
+        /// （未装备＝只在囊里，装备后才归属某 Carrier 插槽——新数据层）。旧 _geneContracts/GeneContracts
+        /// 本 story 保留不删，003 编译层过渡期仍要靠它们，新旧两条路径并行、互不冲突。
+        /// </summary>
         public void AddGene(string geneId)
         {
             System.Func<IContract> factory = GeneCatalog.Get(geneId);
@@ -69,6 +83,23 @@ namespace GameLogic.UI.Battle
             }
             _geneContracts.Add(factory());
             _geneIds.Add(geneId);
+            _geneReserve.TryAdd(new GeneInstance(System.Guid.NewGuid().ToString("N"), geneId, GeneLocation.Reserve()));
+        }
+
+        /// <summary>
+        /// 器官入囊统一钩子（story-002 D8）：AddDrop 与 CellStageFlow.ApplyMetabolicContent
+        /// 的 Organelle 分支都改调用它，取代各自直接 bag.TryAdd，消除重复逻辑。
+        /// 若该器官是 Carrier（OrganelleCatalog.IsCarrier），入囊那一刻起自动拥有一份独立
+        /// CarrierInstance（3 空槽）——不经过旧 3×3 装备动作触发。
+        /// </summary>
+        public AddResult AddOrganPart(PartInstance part)
+        {
+            AddResult result = _bag.TryAdd(part);
+            if (result == AddResult.Added && OrganelleCatalog.Get(part.CardDefId)?.IsCarrier == true)
+            {
+                _carrierRegistry.EnsureCarrier(part.PartId);
+            }
+            return result;
         }
 
         private void Awake()
@@ -453,7 +484,7 @@ namespace GameLogic.UI.Battle
         private void AddDrop(string cardDefId)
         {
             var part = new PartInstance(System.Guid.NewGuid().ToString("N"), cardDefId, PartLocation.Bag());
-            AddResult result = _bag.TryAdd(part);
+            AddResult result = AddOrganPart(part);
             if (result == AddResult.NeedDecision)
             {
                 _pendingOverflow = part;

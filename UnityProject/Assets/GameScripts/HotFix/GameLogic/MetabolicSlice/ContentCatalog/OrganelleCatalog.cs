@@ -24,8 +24,12 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
         public string ArtId { get; }
         public Func<IModule> CreateModule { get; }
 
+        /// <summary>是否为 organ-socket-slice 的 Carrier 器官（D7：独立语义位，不用 Role==Sink 判定——
+        /// 今天两者外延重合是巧合，未来新增 Sink 器官不应默认变成 Carrier）。</summary>
+        public bool IsCarrier { get; }
+
         public OrganelleDef(string id, string displayName, OrganelleRole role, OrganelleAttachTarget attachTarget,
-            IEnumerable<SlotType> allowedSlotTypes, string artId, Func<IModule> createModule)
+            IEnumerable<SlotType> allowedSlotTypes, string artId, Func<IModule> createModule, bool isCarrier = false)
         {
             Id = id;
             DisplayName = displayName;
@@ -34,6 +38,7 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
             AllowedSlotTypes = allowedSlotTypes == null ? null : new HashSet<SlotType>(allowedSlotTypes);
             ArtId = artId;
             CreateModule = createModule;
+            IsCarrier = isCarrier;
         }
     }
 
@@ -81,9 +86,9 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
             ["org_synapse"] = new OrganelleDef("org_synapse", "突触反馈", OrganelleRole.Relay, OrganelleAttachTarget.Slot,
                 null, "org/synapse", () => new FeedbackLoop(FeedbackMode.Hit)),
             ["org_emitter"] = new OrganelleDef("org_emitter", "分泌喷射器", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
-                null, "org/emitter", () => new Actuator()),
+                null, "org/emitter", () => new Actuator(), isCarrier: true),
             ["org_cilia"] = new OrganelleDef("org_cilia", "纤毛刺", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
-                null, "org/cilia", () => new Actuator()),
+                null, "org/cilia", () => new Actuator(), isCarrier: true),
             ["org_spine"] = new OrganelleDef("org_spine", "刺突", OrganelleRole.Relay, OrganelleAttachTarget.Slot,
                 MembraneOnly, "org/spine", () => new Thorns()),
             ["org_slime"] = new OrganelleDef("org_slime", "粘液层", OrganelleRole.Relay, OrganelleAttachTarget.Slot,

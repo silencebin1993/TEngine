@@ -609,11 +609,11 @@ namespace GameLogic.Stage.CellStage
         {
             if (spec.ContentKind == ContentKind.Organelle)
             {
-                BagInventory bag = MetabolicSlicePanel.Instance?.Bag;
-                if (bag != null)
+                MetabolicSlicePanel panel = MetabolicSlicePanel.Instance;
+                if (panel != null)
                 {
                     var part = new PartInstance(System.Guid.NewGuid().ToString("N"), spec.ContentId, PartLocation.Bag());
-                    if (bag.TryAdd(part) == AddResult.NeedDecision)
+                    if (panel.AddOrganPart(part) == AddResult.NeedDecision)
                     {
                         // 囊已满：v1 不打断选卡流程弹抉择 UI（那是 002 手动测试按钮的路径），
                         // 先记日志避免玩家困惑「明明选了卡，囊里却没有」。抉择 UI 留后续 story。
