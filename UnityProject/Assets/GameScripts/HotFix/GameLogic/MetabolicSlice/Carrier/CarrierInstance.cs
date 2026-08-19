@@ -7,11 +7,17 @@ namespace GameLogic.MetabolicSlice.Carrier
         public const int SlotCount = 3;
 
         public string CarrierId { get; }
+
+        /// <summary>该 Carrier 对应的器官 def id（如 "org_cilia"），story-004 D9 新增——
+        /// 004 前 CarrierCompiler 无法反查器官，链尾恒为 Bolt；null 时下游按 Reject-to-Safe 回落 Actuator()。</summary>
+        public string OrganelleId { get; }
+
         public CarrierSlot[] Slots { get; }
 
-        public CarrierInstance(string carrierId)
+        public CarrierInstance(string carrierId, string organelleId = null)
         {
             CarrierId = carrierId;
+            OrganelleId = organelleId;
             Slots = new CarrierSlot[SlotCount];
             for (int i = 0; i < SlotCount; i++)
             {

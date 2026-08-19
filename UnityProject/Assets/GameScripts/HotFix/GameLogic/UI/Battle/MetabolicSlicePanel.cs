@@ -97,7 +97,7 @@ namespace GameLogic.UI.Battle
             AddResult result = _bag.TryAdd(part);
             if (result == AddResult.Added && OrganelleCatalog.Get(part.CardDefId)?.IsCarrier == true)
             {
-                _carrierRegistry.EnsureCarrier(part.PartId);
+                _carrierRegistry.EnsureCarrier(part.PartId, part.CardDefId);
             }
             return result;
         }

@@ -43,15 +43,27 @@ namespace GameLogic.MetabolicSlice.Carrier
                     continue;
                 }
 
-                // 004 迁徙后：在此插入 Module 分支基因目录查表 + moduleGenes.Add(...)，签名不变。
+                var createModule = GeneCatalog.GetModule(gene.GeneId);
+                if (createModule != null)
+                {
+                    moduleGenes.Add(createModule());
+                    continue;
+                }
+
                 TEngine.Log.Warning($"[CarrierCompiler] 基因 {gene.GeneId} 未在 GeneCatalog 命中（004 迁徙前占位，或拼写错误）");
             }
 
             var rules = engine.NormalizeContracts(contracts);
 
+            // D10：链尾按 Carrier 反查执行器；OrganelleId 为 null / 查不到 / CreateModule 为 null 时
+            // 回落 new Actuator()（Reject-to-Safe），保证 003 的 23 条断言里无器官 Carrier 仍出 Bolt/Damage=10。
+            // Dictionary.TryGetValue 对 null key 会抛 ArgumentNullException，OrganelleId 必须先判空再查表。
+            var tailDef = carrier.OrganelleId != null ? OrganelleCatalog.Get(carrier.OrganelleId) : null;
+            var tail = tailDef?.CreateModule() ?? new Actuator();
+
             var chain = new List<IModule> { new EnergyCore(10f) };
             chain.AddRange(moduleGenes);
-            chain.Add(new Actuator());
+            chain.Add(tail);
 
             var raw = engine.RunAssembly(chain, ticks: 1, seed: seed);
             var events = new List<HitEvent>();

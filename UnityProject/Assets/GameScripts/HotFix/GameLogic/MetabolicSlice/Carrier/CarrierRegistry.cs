@@ -19,15 +19,15 @@ namespace GameLogic.MetabolicSlice.Carrier
             ActiveCarrierId != null && _carriers.TryGetValue(ActiveCarrierId, out var c) ? c : null;
 
         /// <summary>已存在则原样返回；不存在则新建（3 空槽）。第一个建出的 Carrier 自动置为激活（D9），
-        /// 之后新增不抢占当前激活。</summary>
-        public CarrierInstance EnsureCarrier(string carrierId)
+        /// 之后新增不抢占当前激活。organelleId 透传给 CarrierInstance（story-004 D9，供 CarrierCompiler 反查 Shape）。</summary>
+        public CarrierInstance EnsureCarrier(string carrierId, string organelleId = null)
         {
             if (_carriers.TryGetValue(carrierId, out var existing))
             {
                 return existing;
             }
 
-            var carrier = new CarrierInstance(carrierId);
+            var carrier = new CarrierInstance(carrierId, organelleId);
             _carriers[carrierId] = carrier;
             if (ActiveCarrierId == null)
             {

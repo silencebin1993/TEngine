@@ -28,8 +28,13 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
         /// 今天两者外延重合是巧合，未来新增 Sink 器官不应默认变成 Carrier）。</summary>
         public bool IsCarrier { get; }
 
+        /// <summary>story-004 D16：退役标记。仅从「可装备插槽集」（GeneCatalog Module 副表）排除，
+        /// 不从 <see cref="OrganelleCatalog"/>._defs 删条目——IdSmokeReport 等既有探针按 id 遍历，删条目会静默少测。</summary>
+        public bool IsRetired { get; }
+
         public OrganelleDef(string id, string displayName, OrganelleRole role, OrganelleAttachTarget attachTarget,
-            IEnumerable<SlotType> allowedSlotTypes, string artId, Func<IModule> createModule, bool isCarrier = false)
+            IEnumerable<SlotType> allowedSlotTypes, string artId, Func<IModule> createModule, bool isCarrier = false,
+            bool isRetired = false)
         {
             Id = id;
             DisplayName = displayName;
@@ -39,6 +44,7 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
             ArtId = artId;
             CreateModule = createModule;
             IsCarrier = isCarrier;
+            IsRetired = isRetired;
         }
     }
 
@@ -88,7 +94,7 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
             ["org_emitter"] = new OrganelleDef("org_emitter", "分泌喷射器", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/emitter", () => new Actuator(), isCarrier: true),
             ["org_cilia"] = new OrganelleDef("org_cilia", "纤毛刺", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
-                null, "org/cilia", () => new Actuator(), isCarrier: true),
+                null, "org/cilia", () => new Actuator(shape: "Melee"), isCarrier: true),
             ["org_spine"] = new OrganelleDef("org_spine", "刺突", OrganelleRole.Relay, OrganelleAttachTarget.Slot,
                 MembraneOnly, "org/spine", () => new Thorns()),
             ["org_slime"] = new OrganelleDef("org_slime", "粘液层", OrganelleRole.Relay, OrganelleAttachTarget.Slot,
@@ -96,10 +102,10 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
             ["org_receptor"] = new OrganelleDef("org_receptor", "受体", OrganelleRole.Relay, OrganelleAttachTarget.Slot,
                 MembraneOnly, "org/receptor", () => new TagAttach("Catalyst")),
             ["org_insulate"] = new OrganelleDef("org_insulate", "绝缘管", OrganelleRole.Edge, OrganelleAttachTarget.DirectedEdge,
-                null, "org/insulate", () => new Insulator()),
-            ["org_valve"] = new OrganelleDef("org_valve", "单向阀", OrganelleRole.Edge, OrganelleAttachTarget.DirectedEdge,
+                null, "org/insulate", () => new Insulator(), isRetired: true),
+            ["org_valve"] = new OrganelleDef("org_valve", "单向阀", OrganelleRole.Edge, OrganelleAttachTarget.Slot,
                 null, "org/valve", () => new Valve()),
-            ["org_filter"] = new OrganelleDef("org_filter", "过滤管", OrganelleRole.Edge, OrganelleAttachTarget.DirectedEdge,
+            ["org_filter"] = new OrganelleDef("org_filter", "过滤管", OrganelleRole.Edge, OrganelleAttachTarget.Slot,
                 null, "org/filter", () => new TagFilter("Approved", 0.5f)),
         };
 
