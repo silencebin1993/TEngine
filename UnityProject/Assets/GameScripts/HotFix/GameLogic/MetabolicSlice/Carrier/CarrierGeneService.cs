@@ -6,7 +6,7 @@ namespace GameLogic.MetabolicSlice.Carrier
     /// 全路径 Reject-to-Safe，不抛异常。</summary>
     public static class CarrierGeneService
     {
-        public static CarrierGeneResult EquipGene(GeneReserve reserve, CarrierInstance carrier, string geneInstanceId, int slotIndex)
+        public static CarrierGeneResult EquipGene(GeneReserve reserve, CarrierInstance carrier, string geneInstanceId, int slotIndex, CarrierRegistry registry = null)
         {
             if (carrier == null)
             {
@@ -37,10 +37,14 @@ namespace GameLogic.MetabolicSlice.Carrier
 
             slot.GeneInstanceId = gene.GeneInstanceId;
             gene.Location = GeneLocation.CarrierSlot(carrier.CarrierId, slotIndex);
+
+            // story-010 J4：装配变更后递增版本号
+            registry?.IncrementAssemblyVersion();
+
             return CarrierGeneResult.Ok;
         }
 
-        public static CarrierGeneResult UnequipGene(GeneReserve reserve, CarrierInstance carrier, int slotIndex)
+        public static CarrierGeneResult UnequipGene(GeneReserve reserve, CarrierInstance carrier, int slotIndex, CarrierRegistry registry = null)
         {
             if (carrier == null)
             {
@@ -63,6 +67,10 @@ namespace GameLogic.MetabolicSlice.Carrier
             {
                 gene.Location = GeneLocation.Reserve();
             }
+
+            // story-010 J4：装配变更后递增版本号
+            registry?.IncrementAssemblyVersion();
+
             return CarrierGeneResult.Ok;
         }
     }

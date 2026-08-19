@@ -101,6 +101,22 @@ namespace GameLogic.MetabolicSlice.Combat
         /// <see cref="TickPendingMotion"/> 与 <see cref="ApplyEvent"/>（沙盒发射的夹具仍要正常播完延迟命中动画）。</summary>
         public bool Suppressed { get; set; }
 
+        /// <summary>story-010 J4：暴露 seed 只读属性，供 <see cref="GameLogic.Battle.Feedback.WhiteboxComposeAimIndicator"/>
+        /// 读取当前随机数状态预测下一发形状。**禁止外部自增或写回**——写了会让真实开火的随机数漂掉。</summary>
+        public int Seed => _seed;
+
+        /// <summary>story-010 J4：暴露 Engine 供指示器读取（只读，不可写）。</summary>
+        internal Engine GetEngine() => _engine;
+
+        /// <summary>story-010 J4：暴露 Environment 供指示器读取（只读，不可写）。</summary>
+        internal WorldEnvironment GetEnvironment() => _environment;
+
+        /// <summary>story-010 J4：静态半径计算辅助方法，供指示器复用伤害区域半径计算逻辑。</summary>
+        public static float DamageAreaRadiusFor(float damage, float scale)
+        {
+            return DamageAreaRadius * MathF.Max(0.1f, scale);
+        }
+
         public void Bind(SimBridge sim, StatSheet stats)
         {
             _sim = sim;

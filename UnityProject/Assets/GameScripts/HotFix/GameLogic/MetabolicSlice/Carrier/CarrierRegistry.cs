@@ -18,6 +18,10 @@ namespace GameLogic.MetabolicSlice.Carrier
         public CarrierInstance ActiveCarrier =>
             ActiveCarrierId != null && _carriers.TryGetValue(ActiveCarrierId, out var c) ? c : null;
 
+        /// <summary>story-010 J4：装配变更版本号，每次装/卸基因时递增。
+        /// 供 <see cref="GameLogic.Battle.Feedback.ComposeAimIndicatorPresenter"/> 判断是否需要刷新指示器预览。</summary>
+        public int AssemblyVersion { get; private set; }
+
         /// <summary>已存在则原样返回；不存在则新建（3 空槽）。第一个建出的 Carrier 自动置为激活（D9），
         /// 之后新增不抢占当前激活。organelleId 透传给 CarrierInstance（story-004 D9，供 CarrierCompiler 反查 Shape）。</summary>
         public CarrierInstance EnsureCarrier(string carrierId, string organelleId = null)
@@ -53,6 +57,12 @@ namespace GameLogic.MetabolicSlice.Carrier
             }
             ActiveCarrierId = carrierId;
             GameEvent.Send(CarrierActivatedEvent);
+        }
+
+        /// <summary>story-010 J4：装/卸基因后递增装配版本号。</summary>
+        internal void IncrementAssemblyVersion()
+        {
+            AssemblyVersion++;
         }
 
         public const string CarrierActivatedEvent = "MetabolicSlice.CarrierActivated";

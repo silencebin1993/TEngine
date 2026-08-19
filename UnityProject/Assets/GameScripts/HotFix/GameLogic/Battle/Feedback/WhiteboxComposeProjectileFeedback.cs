@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using GameLogic.Core;
 using GameLogic.MetabolicSlice.Combat;
+using GameLogic.MetabolicSlice.ContentCatalog;
 using Unity.Mathematics;
 using UnityEngine;
 
@@ -33,24 +34,51 @@ namespace GameLogic.Battle.Feedback
             Spore,
         }
 
-        private const int PoolSize = 32;
-        private const float MarkerY = 0.19f;
+        // story-009：全局段（G2c）改由 FxRecipeCatalog.Global 承载，这里仍以 const 别名引用——
+        // 二者都是编译期常量，取值处（EnsurePool/ApplyTransform/SpawnMarker）零改动，只换来源。
+        private const int PoolSize = FxRecipeCatalog.Global.PoolSize;
+        private const float MarkerY = FxRecipeCatalog.Global.MarkerY;
+        private const float ArcHalfAngleDeg = FxRecipeCatalog.Global.ArcHalfAngleDeg;
+        private const int ArcSegments = FxRecipeCatalog.Global.ArcSegments;
+        private const int CircleSegments = FxRecipeCatalog.Global.CircleSegments;
+        private const float RingInnerRatio = FxRecipeCatalog.Global.RingInnerRatio;
+        private const float BandInnerRatio = FxRecipeCatalog.Global.BandInnerRatio;
+        private const int BandSegments = FxRecipeCatalog.Global.BandSegments;
 
         // 生命周期常量（Decision D7）：Bolt/Arc/Wave/Spore 对齐 003 已锁死的真实命中延迟
-        // ComposeMotionMath.MotionFlightDuration=0.3f，保证白模消失时刻与真实结算命中同步；
-        // Beam/Field 是"常驻类"，按 story-001 §2 映射表描述略长，给人看清弹道方向/范围的时间。
+        // ComposeMotionMath.MotionFlightDuration=0.3f，保证白模消失时刻与真实结算命中同步——
+        // story-009 G2a：这是同步不变量，禁止进配方表，仍直接引用 ComposeMotionMath 派生。
+        // Beam/Field 是"常驻类"，PersistentLife 属纯表现量，改由 FxRecipeCatalog.Global 承载。
         private const float FlightLife = ComposeMotionMath.MotionFlightDuration;
-        private const float PersistentLife = 0.5f;
+        private const float PersistentLife = FxRecipeCatalog.Global.PersistentLife;
 
-        // 尺寸系数（Decision D3：必须是 radius 的线性函数，不能是与 Scale 无关的固定值）
-        private const float BoltDiameterCoef = 0.35f;
-        private const float SporeDiameterCoef = 0.3f;
-        private const float BeamLengthCoef = 1.5f;
-        private const float BeamWidthCoef = 0.25f;
-        private const float ArcHalfAngleDeg = 40f;
-        private const int ArcSegments = 10;
-        private const int CircleSegments = 20;
-        private const float RingInnerRatio = 0.65f;
+        // story-009：Bolt/Spore 直径系数与 Beam 长/宽系数改为逐配方（G2b），从 FxRecipeCatalog
+        // 按当前 ShapeKind 查表读取，不再是同一套固定 const（详见 ApplyTransform）。
+
+        private static readonly HashSet<string> _warnedUnknownShapes = new HashSet<string>();
+
+        /// <summary>story-009 G5 完备性检查：ShapeKind 是 key 空间，FxRecipeCatalog 是内容——
+        /// 新增枚举项忘了配表时在此处报错，而不是静默落到某个 default 分支。</summary>
+        static WhiteboxComposeProjectileFeedback()
+        {
+            foreach (ShapeKind kind in Enum.GetValues(typeof(ShapeKind)))
+            {
+                if (!FxRecipeCatalog.TryGetShapeRecipe(kind.ToString(), out _))
+                {
+                    TEngine.Log.Error($"[FxRecipeCatalog] 缺配方: {kind}（ShapeKind 与表必须一一对应）");
+                }
+            }
+
+            // story-010 Required 1：补上反向（表 → 枚举）。009 只查了「枚举 → 表」，表里多出的行
+            // 会一路走到 ParseShape 才暴露；这里提前一次性报出来，运行期再由 TryParse 兜底回落 Bolt。
+            foreach (string key in FxRecipeCatalog.ShapeKeys)
+            {
+                if (!Enum.TryParse(typeof(ShapeKind), key, out _))
+                {
+                    TEngine.Log.Error($"[FxRecipeCatalog] 表里有但 ShapeKind 没有: {key}（ComposeEngine 永远吐不出它）");
+                }
+            }
+        }
 
         private GameObject _poolRoot;
         private Transform[] _tf;
@@ -73,6 +101,9 @@ namespace GameLogic.Battle.Feedback
         private Mesh _streakMesh;
         private Mesh _wedgeMesh;
         private Mesh _ringMesh;
+        private Mesh _coneMesh;
+        private Mesh _crossMesh;
+        private Mesh _bandMesh;
         private Material _matTemplate;
 
         /// <summary>当前处于寿命内的白模标记数（story-004 验收探针，同 <see cref="MetabolicSliceBridge.PendingMotionCount"/> 惯例）。</summary>
@@ -113,16 +144,19 @@ namespace GameLogic.Battle.Feedback
             LastComputedRadius = radius;
             LastShapeKind = kind.ToString();
 
+            FxRecipeCatalog.TryGetShapeRecipe(kind.ToString(), out var recipe);
+            float shapeLife = recipe != null && recipe.Life == FxLifeKind.Persistent ? PersistentLife : FlightLife;
+
             if (kind == ShapeKind.Beam)
             {
                 // Beam 例外（Decision D4）：Count 对单段常驻弹道无意义，固定渲染 1 段，不随 segments 循环。
                 LastSegmentCount = 1;
-                SpawnMarker(kind, signal.Origin, signal.Direction, 0f, 0f, 0f, radius, PersistentLife, castColor);
+                SpawnMarker(kind, signal.Origin, signal.Direction, 0f, 0f, 0f, radius, shapeLife, castColor);
             }
             else
             {
                 LastSegmentCount = segments;
-                float life = kind == ShapeKind.Field ? PersistentLife : FlightLife;
+                float life = shapeLife;
                 for (int h = 0; h < segments; h++)
                 {
                     // 与 PendingMotionHit 生成时同一分片公式（Decision D5）。
@@ -135,7 +169,7 @@ namespace GameLogic.Battle.Feedback
             if (signal.ExplodeOnHit)
             {
                 float explodeRadius = radius * MetabolicSliceBridge.ExplodeRadiusMult;
-                Color explodeColor = elementTag.Length > 0 ? castColor : DefaultExplodeColor;
+                Color explodeColor = elementTag.Length > 0 ? castColor : FxRecipeCatalog.DefaultExplodeColor;
                 LastExplodeRadius = explodeRadius;
                 SpawnMarker(ShapeKind.Wave, signal.Origin, signal.Direction, 0f, 0f, 0f, explodeRadius, FlightLife, explodeColor);
             }
@@ -145,28 +179,8 @@ namespace GameLogic.Battle.Feedback
             }
         }
 
-        // ── 元素 Tag 染色（story-007 D1~D4，对照冻结总案 §3.4 元素词表全 10 项）──
-
-        // 数组顺序即优先级（Decision D3：战斗强调型 Fire/Shock/Acid/Ice 优先于环境覆盖型 Steam/Wet/Water/Oil，
-        // Light/Dark 零 producer 排最后），first-match-wins，不做多色混合。
-        private static readonly string[] ElementPriorityOrder =
-        {
-            "Fire", "Shock", "Acid", "Ice", "Steam", "Wet", "Water", "Oil", "Light", "Dark",
-        };
-
-        private static readonly Color FireColor = new Color(1f, 0.35f, 0.1f, 0.9f);
-        private static readonly Color ShockColor = new Color(0.75f, 0.35f, 1f, 0.9f);
-        private static readonly Color AcidColor = new Color(0.55f, 0.85f, 0.15f, 0.9f);
-        private static readonly Color IceColor = new Color(0.6f, 0.9f, 1f, 0.9f);
-        private static readonly Color SteamColor = new Color(0.85f, 0.85f, 0.9f, 0.8f);
-        private static readonly Color WetColor = new Color(0.3f, 0.55f, 1f, 0.85f);
-        private static readonly Color WaterColor = new Color(0.15f, 0.4f, 0.85f, 0.85f);
-        private static readonly Color OilColor = new Color(0.35f, 0.25f, 0.15f, 0.9f);
-        private static readonly Color LightColor = new Color(1f, 0.95f, 0.6f, 0.9f);
-        private static readonly Color DarkColor = new Color(0.25f, 0.1f, 0.35f, 0.9f);
-
-        // D8：爆炸环兜底默认色（无元素 Tag 命中时使用，不借用任何单一 Shape 的 ColorFor）。
-        private static readonly Color DefaultExplodeColor = new Color(1f, 0.55f, 0.15f, 0.6f);
+        // ── 元素 Tag 染色（story-007 D1~D4，对照冻结总案 §3.4 元素词表全 10 项；
+        // story-009 起优先级数组/颜色/爆炸兜底色改由 FxRecipeCatalog 承载，逻辑本身不变）──
 
         private static string ResolveElementTag(HashSet<string> tags)
         {
@@ -175,34 +189,19 @@ namespace GameLogic.Battle.Feedback
                 return "";
             }
 
-            for (int i = 0; i < ElementPriorityOrder.Length; i++)
+            string[] order = FxRecipeCatalog.ElementPriorityOrder;
+            for (int i = 0; i < order.Length; i++)
             {
-                if (tags.Contains(ElementPriorityOrder[i]))
+                if (tags.Contains(order[i]))
                 {
-                    return ElementPriorityOrder[i];
+                    return order[i];
                 }
             }
 
             return "";
         }
 
-        private static Color ElementColorFor(string tag)
-        {
-            switch (tag)
-            {
-                case "Fire": return FireColor;
-                case "Shock": return ShockColor;
-                case "Acid": return AcidColor;
-                case "Ice": return IceColor;
-                case "Steam": return SteamColor;
-                case "Wet": return WetColor;
-                case "Water": return WaterColor;
-                case "Oil": return OilColor;
-                case "Light": return LightColor;
-                case "Dark": return DarkColor;
-                default: return Color.white;
-            }
-        }
+        private static Color ElementColorFor(string tag) => FxRecipeCatalog.GetElementColor(tag);
 
         public void Tick(float dt)
         {
@@ -241,53 +240,52 @@ namespace GameLogic.Battle.Feedback
             ActiveMarkerCount = active;
         }
 
-        // ── Shape 路由（Decision D6，引用 story-001 §2 映射表，禁止按 org_* id 分支）──
+        // ── Shape 路由（Decision D6，引用 story-001 §2 映射表，禁止按 org_* id 分支；
+        // story-009 G3：表里查不到的 Shape 按字符串去重只警一次，回落 Bolt）──
 
         private static ShapeKind ParseShape(string shape)
         {
-            switch (shape)
+            if (FxRecipeCatalog.TryGetShapeRecipe(shape, out _))
             {
-                case "Beam": return ShapeKind.Beam;
-                case "Arc": return ShapeKind.Arc;
-                case "Field": return ShapeKind.Field;
-                case "Wave": return ShapeKind.Wave;
-                case "Spore": return ShapeKind.Spore;
-                case "Bolt":
-                default: return ShapeKind.Bolt;
+                // story-010 Required 1: 把 Enum.Parse 换成 TryParse，防止「表里有但枚举没有」抛异常
+                if (System.Enum.TryParse(typeof(ShapeKind), shape, out object parsed))
+                {
+                    return (ShapeKind)parsed;
+                }
+                // 表里有但枚举没有：同样走告警回落
+                if (_warnedUnknownShapes.Add(shape ?? "<null>"))
+                {
+                    TEngine.Log.Warning($"[FxRecipe] Shape 在表中但枚举未定义: {shape}，回落 Bolt");
+                }
+                return ShapeKind.Bolt;
             }
+
+            if (shape != "Bolt" && _warnedUnknownShapes.Add(shape ?? "<null>"))
+            {
+                TEngine.Log.Warning($"[FxRecipe] 未知 Shape: {shape}，回落 Bolt");
+            }
+            return ShapeKind.Bolt;
         }
 
-        private static readonly Color BoltColor = new Color(1f, 0.95f, 0.6f, 0.95f);
-        private static readonly Color BeamColor = new Color(0.6f, 0.95f, 1f, 0.85f);
-        private static readonly Color ArcColor = new Color(1f, 0.5f, 0.15f, 0.55f);
-        private static readonly Color FieldColor = new Color(0.25f, 0.9f, 0.65f, 0.4f);
-        private static readonly Color WaveColor = new Color(0.5f, 0.85f, 1f, 0.8f);
-        private static readonly Color SporeColor = new Color(0.78f, 0.5f, 1f, 0.9f);
-
-        private static Color ColorFor(ShapeKind kind)
-        {
-            switch (kind)
-            {
-                case ShapeKind.Beam: return BeamColor;
-                case ShapeKind.Arc: return ArcColor;
-                case ShapeKind.Field: return FieldColor;
-                case ShapeKind.Wave: return WaveColor;
-                case ShapeKind.Spore: return SporeColor;
-                case ShapeKind.Bolt:
-                default: return BoltColor;
-            }
-        }
+        private static Color ColorFor(ShapeKind kind) =>
+            FxRecipeCatalog.TryGetShapeRecipe(kind.ToString(), out var recipe) ? recipe.Color : Color.white;
 
         private Mesh MeshFor(ShapeKind kind)
         {
-            switch (kind)
+            if (!FxRecipeCatalog.TryGetShapeRecipe(kind.ToString(), out var recipe))
             {
-                case ShapeKind.Beam: return _streakMesh;
-                case ShapeKind.Arc: return _wedgeMesh;
-                case ShapeKind.Wave: return _ringMesh;
-                case ShapeKind.Field:
-                case ShapeKind.Spore:
-                case ShapeKind.Bolt:
+                return _circleMesh;
+            }
+
+            switch (recipe.Mesh)
+            {
+                case FxMeshKind.Streak: return _streakMesh;
+                case FxMeshKind.Wedge: return _wedgeMesh;
+                case FxMeshKind.Ring: return _ringMesh;
+                case FxMeshKind.Cone: return _coneMesh;
+                case FxMeshKind.Cross: return _crossMesh;
+                case FxMeshKind.Band: return _bandMesh;
+                case FxMeshKind.Circle:
                 default: return _circleMesh;
             }
         }
@@ -305,6 +303,9 @@ namespace GameLogic.Battle.Feedback
             _streakMesh = BuildStreak();
             _wedgeMesh = BuildWedge(ArcHalfAngleDeg, ArcSegments);
             _ringMesh = BuildRing(RingInnerRatio, CircleSegments);
+            _coneMesh = BuildCone(CircleSegments);
+            _crossMesh = BuildCross();
+            _bandMesh = BuildBand(BandInnerRatio, BandSegments);
 
             Shader shader = Shader.Find("Sprites/Default");
             if (shader == null)
@@ -383,14 +384,15 @@ namespace GameLogic.Battle.Feedback
             float2 origin = _origin[idx];
             float radius = _radius[idx];
             float u = _life[idx] > 0f ? 1f - (_timeLeft[idx] / _life[idx]) : 0f;
+            FxRecipeCatalog.TryGetShapeRecipe(kind.ToString(), out var recipe);
 
             switch (kind)
             {
                 case ShapeKind.Beam:
                 {
                     float2 dir = _direction[idx];
-                    float length = radius * BeamLengthCoef;
-                    float width = radius * BeamWidthCoef;
+                    float length = radius * recipe.LengthCoef;
+                    float width = radius * recipe.WidthCoef;
                     float angDeg = DirectionAngleDeg(dir);
                     _tf[idx].localPosition = new Vector3(origin.x, MarkerY, origin.y);
                     _tf[idx].localRotation = Quaternion.Euler(0f, -angDeg, 0f);
@@ -428,7 +430,7 @@ namespace GameLogic.Battle.Feedback
                 {
                     float2 offset = ComposeMotionMath.Offset(_phase[idx], _spin[idx], _orbit[idx], _elapsed[idx]);
                     float2 pos = origin + offset;
-                    float diameter = radius * SporeDiameterCoef;
+                    float diameter = radius * recipe.DiameterCoef;
                     _tf[idx].localPosition = new Vector3(pos.x, MarkerY, pos.y);
                     _tf[idx].localRotation = Quaternion.identity;
                     _tf[idx].localScale = new Vector3(diameter, 1f, diameter);
@@ -439,9 +441,12 @@ namespace GameLogic.Battle.Feedback
                 {
                     float2 offset = ComposeMotionMath.Offset(_phase[idx], _spin[idx], _orbit[idx], _elapsed[idx]);
                     float2 pos = origin + offset;
-                    float diameter = radius * BoltDiameterCoef;
+                    float diameter = radius * recipe.DiameterCoef;
+                    // story-010 J1：Bolt 换成有指向的锥形网格后必须跟着 Direction 转——
+                    // 原来是 Circle（旋转对称）才可以 identity，留着 identity 等于锥尖恒指世界 +X。
+                    float angDeg = DirectionAngleDeg(_direction[idx]);
                     _tf[idx].localPosition = new Vector3(pos.x, MarkerY, pos.y);
-                    _tf[idx].localRotation = Quaternion.identity;
+                    _tf[idx].localRotation = Quaternion.Euler(0f, -angDeg, 0f);
                     _tf[idx].localScale = new Vector3(diameter, 1f, diameter);
                     break;
                 }
@@ -455,6 +460,15 @@ namespace GameLogic.Battle.Feedback
         }
 
         // ── 几何：局部 +X 为"朝向"轴，与 SpawnMarker 的旋转约定配套 ──
+        // story-010 J3：网格构建函数改为 internal static，供 WhiteboxComposeAimIndicator 复用
+
+        internal static Mesh BuildCircleStatic(int segments) => BuildCircle(segments);
+        internal static Mesh BuildStreakStatic() => BuildStreak();
+        internal static Mesh BuildWedgeStatic(float halfAngleDeg, int segments) => BuildWedge(halfAngleDeg, segments);
+        internal static Mesh BuildRingStatic(float innerRatio, int segments) => BuildRing(innerRatio, segments);
+        internal static Mesh BuildConeStatic(int segments) => BuildCone(segments);
+        internal static Mesh BuildCrossStatic() => BuildCross();
+        internal static Mesh BuildBandStatic(float innerRatio, int segments) => BuildBand(innerRatio, segments);
 
         private static Mesh BuildCircle(int segments)
         {
@@ -557,6 +571,96 @@ namespace GameLogic.Battle.Feedback
             return m;
         }
 
+        /// <summary>story-010 J1：锥形指向网格（Bolt 专用）。与本文件其余图元同约定——落在局部 XZ 平面
+        /// （y=0、半径 0.5、局部 +X 为朝向轴）：尖端在 +X，尾部收成半圆，从上方看即一枚指向弹头。
+        /// **刻意不做立起来的三维锥**：Marker 只有 X/Z 被 <see cref="ApplyTransform"/> 缩放（Y 恒 1），
+        /// 立锥会有半个锥体沉到地面以下、且高度不随 diameter 变化。</summary>
+        private static Mesh BuildCone(int segments)
+        {
+            int arc = Mathf.Max(2, segments / 2);
+            // 0 = 中心（扇心），1 = 尖端，其后是尾部半圆弧（+Z 侧绕到 -Z 侧）。
+            var verts = new List<Vector3> { Vector3.zero, new Vector3(0.5f, 0f, 0f) };
+            for (int i = 0; i <= arc; i++)
+            {
+                float t = Mathf.PI * 0.5f + Mathf.PI * i / arc;
+                verts.Add(new Vector3(Mathf.Cos(t) * 0.5f, 0f, Mathf.Sin(t) * 0.5f));
+            }
+
+            var tris = new List<int>();
+            tris.Add(0); tris.Add(1); tris.Add(2);                       // 尖端 → 弧首
+            for (int i = 2; i < verts.Count - 1; i++)                    // 尾弧逐段
+            {
+                tris.Add(0); tris.Add(i); tris.Add(i + 1);
+            }
+            tris.Add(0); tris.Add(verts.Count - 1); tris.Add(1);         // 弧末 → 尖端
+
+            var m = new Mesh { name = "ComposeProjectileCone" };
+            m.SetVertices(verts);
+            m.SetTriangles(tris, 0);
+            m.RecalculateNormals();
+            m.RecalculateBounds();
+            return m;
+        }
+
+        /// <summary>story-010 J1：十字网格（Spore 专用，两条正交矩形条，XZ 平面，各边半径 0.5）。</summary>
+        private static Mesh BuildCross()
+        {
+            float w = 0.15f; // 条宽
+            var verts = new List<Vector3>
+            {
+                // 横条（沿 X）
+                new Vector3(-0.5f, 0f, -w), new Vector3(0.5f, 0f, -w),
+                new Vector3(0.5f, 0f, w), new Vector3(-0.5f, 0f, w),
+                // 竖条（沿 Z）
+                new Vector3(-w, 0f, -0.5f), new Vector3(w, 0f, -0.5f),
+                new Vector3(w, 0f, 0.5f), new Vector3(-w, 0f, 0.5f),
+            };
+            var tris = new List<int>
+            {
+                // 横条
+                0, 1, 2,  0, 2, 3,
+                // 竖条
+                4, 5, 6,  4, 6, 7,
+            };
+
+            var m = new Mesh { name = "ComposeProjectileCross" };
+            m.SetVertices(verts);
+            m.SetTriangles(tris, 0);
+            m.RecalculateNormals();
+            m.RecalculateBounds();
+            return m;
+        }
+
+        /// <summary>story-010 J1：环带网格（Field 专用）。结构同 Ring，但**参数必须与 Ring 不同**——
+        /// 走 <see cref="FxRecipeCatalog.Global"/>.BandInnerRatio / BandSegments（更厚、更密）。
+        /// 若沿用 Ring 的 innerRatio+segments，两者顶点逐位相同，Field 与 Wave 就成了同一个东西。</summary>
+        private static Mesh BuildBand(float innerRatio, int segments)
+        {
+            var verts = new List<Vector3>();
+            for (int i = 0; i <= segments; i++)
+            {
+                float t = 2f * Mathf.PI * i / segments;
+                float c = Mathf.Cos(t), s = Mathf.Sin(t);
+                verts.Add(new Vector3(c * innerRatio * 0.5f, 0f, s * innerRatio * 0.5f));
+                verts.Add(new Vector3(c * 0.5f, 0f, s * 0.5f));
+            }
+
+            var tris = new List<int>();
+            for (int i = 0; i < segments; i++)
+            {
+                int i0 = i * 2, i1 = i0 + 1, o0 = i0 + 2, o1 = o0 + 1;
+                tris.Add(i0); tris.Add(o0); tris.Add(i1);
+                tris.Add(o0); tris.Add(o1); tris.Add(i1);
+            }
+
+            var m = new Mesh { name = "ComposeProjectileBand" };
+            m.SetVertices(verts);
+            m.SetTriangles(tris, 0);
+            m.RecalculateNormals();
+            m.RecalculateBounds();
+            return m;
+        }
+
         public void Dispose()
         {
             if (_poolRoot != null)
@@ -612,6 +716,21 @@ namespace GameLogic.Battle.Feedback
             {
                 UnityEngine.Object.Destroy(_ringMesh);
                 _ringMesh = null;
+            }
+            if (_coneMesh != null)
+            {
+                UnityEngine.Object.Destroy(_coneMesh);
+                _coneMesh = null;
+            }
+            if (_crossMesh != null)
+            {
+                UnityEngine.Object.Destroy(_crossMesh);
+                _crossMesh = null;
+            }
+            if (_bandMesh != null)
+            {
+                UnityEngine.Object.Destroy(_bandMesh);
+                _bandMesh = null;
             }
         }
     }

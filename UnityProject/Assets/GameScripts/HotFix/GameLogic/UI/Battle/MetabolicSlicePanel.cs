@@ -251,7 +251,7 @@ namespace GameLogic.UI.Battle
             {
                 return CarrierGeneResult.CarrierNotFound;
             }
-            return CarrierGeneService.EquipGene(_geneReserve, carrier, geneInstanceId, slotIndex);
+            return CarrierGeneService.EquipGene(_geneReserve, carrier, geneInstanceId, slotIndex, _carrierRegistry);
         }
 
         /// <summary>拖拽卸下基因从 Carrier 插槽（story-005 D7）：取 ActiveCarrier 后转调 CarrierGeneService，
@@ -263,7 +263,7 @@ namespace GameLogic.UI.Battle
             {
                 return CarrierGeneResult.CarrierNotFound;
             }
-            return CarrierGeneService.UnequipGene(_geneReserve, carrier, slotIndex);
+            return CarrierGeneService.UnequipGene(_geneReserve, carrier, slotIndex, _carrierRegistry);
         }
 
         /// <summary>当前选中的储备囊件 id（story-002 D9④，null=未选中）。</summary>

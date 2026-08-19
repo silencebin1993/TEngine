@@ -287,6 +287,8 @@ namespace GameLogic.Stage.CellStage
             _healthBars = _hub.Register(new HealthBarPresenter());
             // 组合弹道表现层（story-004）：与 AbilityCastPresenter 同骨架，只订阅 ComposeCastSignal。
             _hub.Register(new ComposeProjectilePresenter());
+            // story-010 J3：组合弹道瞄准指示器（装配预览）：独立 8 位池，订阅 CarrierActivatedEvent。
+            _hub.Register(new ComposeAimIndicatorPresenter());
 
             // 效果执行器注册。新增一种效果只需在此多一行。
             _abilities.RegisterExecutor(new EffectDealDamage());
