@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using ComposeEngine;
 using ComposeEngine.Core;
+using GameLogic.MetabolicSlice.Carrier;
 using GameLogic.MetabolicSlice.Graph;
 using GameLogic.MetabolicSlice.Grid;
 
@@ -37,6 +38,18 @@ namespace GameLogic.MetabolicSlice.Combat
                 }
             }
             return events;
+        }
+
+        /// <summary>story-003：新编译入口，只走激活 Carrier（W12），不碰 SlotGrid/PathCompiler。
+        /// 零 Carrier 或激活 id 不存在时直接返回空列表，不 new 任何 Module/Contract 对象。</summary>
+        public List<HitEvent> TickCarrier(CarrierRegistry registry, GeneReserve reserve, WorldState world, int seed, string cellId = null)
+        {
+            var active = registry.ActiveCarrier;
+            if (active == null)
+            {
+                return new List<HitEvent>();
+            }
+            return CarrierCompiler.Compile(_engine, active, reserve, world, seed, cellId);
         }
     }
 }
