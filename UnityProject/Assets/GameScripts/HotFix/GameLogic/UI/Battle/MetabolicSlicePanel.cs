@@ -8,7 +8,6 @@ using GameLogic.MetabolicSlice.Combat;
 using GameLogic.MetabolicSlice.Digestion;
 using GameLogic.MetabolicSlice.Graph;
 using GameLogic.MetabolicSlice.Grid;
-using GameLogic.MetabolicSlice.Transfer;
 using GameLogic.Stage;
 using GameLogic.Stage.CellStage;
 using UnityEngine;
@@ -32,6 +31,7 @@ namespace GameLogic.UI.Battle
 
         private BagInventory _bag;
         private SlotGrid _grid;
+        // 006 后仅剩显示用途（唯一读者 CellStageFlow.cs:605 提及该路径），待独立清理 story（F3，preflight-decisions.md）。
         private readonly List<IContract> _geneContracts = new List<IContract>();
         private readonly List<string> _geneIds = new List<string>();
         private readonly GeneReserve _geneReserve = new GeneReserve();
@@ -43,7 +43,6 @@ namespace GameLogic.UI.Battle
 
         private GUIStyle _label;
         private GUIStyle _summaryLabel;
-        private bool _showPanel;
 
         /// <summary>story-005：调试预览用阶段皮层级，F8 循环 Cell→Mech→Cosmic→Cell。不接真阶段 FSM。</summary>
         private SkinTier _skinTier = SkinTier.Cell;
@@ -72,18 +71,29 @@ namespace GameLogic.UI.Battle
         /// story-002 D5：不再当场建 IContract 塞全局法则表，改为建 GeneInstance 塞进 GeneReserve
         /// （未装备＝只在囊里，装备后才归属某 Carrier 插槽——新数据层）。旧 _geneContracts/GeneContracts
         /// 本 story 保留不删，003 编译层过渡期仍要靠它们，新旧两条路径并行、互不冲突。
+        /// story-008 D1：先查 Contract 表，命中走原三行；未命中再查 Module 表（GeneCatalog.GetModule），
+        /// 命中则只塞 GeneReserve（Module 基因没有 IContract 工厂，_geneContracts 对它无意义，不写）；
+        /// 两查都未命中才是真未知 id，落 D2 的 Warning 分支。
         /// </summary>
         public void AddGene(string geneId)
         {
             System.Func<IContract> factory = GeneCatalog.Get(geneId);
-            if (factory == null)
+            if (factory != null)
             {
-                TEngine.Log.Warning($"[MetabolicSlicePanel] 未知基因 id: {geneId}");
+                _geneContracts.Add(factory());
+                _geneIds.Add(geneId);
+                _geneReserve.TryAdd(new GeneInstance(System.Guid.NewGuid().ToString("N"), geneId, GeneLocation.Reserve()));
                 return;
             }
-            _geneContracts.Add(factory());
-            _geneIds.Add(geneId);
-            _geneReserve.TryAdd(new GeneInstance(System.Guid.NewGuid().ToString("N"), geneId, GeneLocation.Reserve()));
+
+            System.Func<IModule> moduleFactory = GeneCatalog.GetModule(geneId);
+            if (moduleFactory != null)
+            {
+                _geneReserve.TryAdd(new GeneInstance(System.Guid.NewGuid().ToString("N"), geneId, GeneLocation.Reserve()));
+                return;
+            }
+
+            TEngine.Log.Warning($"[MetabolicSlicePanel] 未知基因 id: {geneId}");
         }
 
         /// <summary>
@@ -128,11 +138,6 @@ namespace GameLogic.UI.Battle
 
             EnsureStyles();
 
-            if (Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.L)
-            {
-                _showPanel = !_showPanel;
-            }
-
             if (Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.F8)
             {
                 _skinTier = _skinTier == SkinTier.Cell ? SkinTier.Mech
@@ -147,10 +152,6 @@ namespace GameLogic.UI.Battle
                 DrawAxisTouchSummary(cell);
             }
 
-            if (_showPanel)
-            {
-                DrawPanel();
-            }
         }
 
         /// <summary>
@@ -241,165 +242,29 @@ namespace GameLogic.UI.Battle
             return string.Join("\n", lines);
         }
 
-        private void DrawPanel()
+        /// <summary>拖拽装入基因到 Carrier 插槽（story-005 D7）：取 ActiveCarrier 后转调 CarrierGeneService，
+        /// ActiveCarrier 为 null 时返回 CarrierNotFound（不抛）。</summary>
+        public CarrierGeneResult DragEquipGene(string geneInstanceId, int slotIndex)
         {
-            var r = new Rect(12f, Screen.height - 420f, 380f, 408f);
-            GUI.Box(r, "");
-            GUILayout.BeginArea(new Rect(r.x + 10f, r.y + 10f, r.width - 20f, r.height - 20f));
-
-            GUILayout.Label($"<b>代谢切片面板</b>　皮：{_skinTier}（F8 切换）", _label);
-
-            if (_pendingOverflow != null)
+            CarrierInstance carrier = _carrierRegistry.ActiveCarrier;
+            if (carrier == null)
             {
-                GUILayout.Label($"囊已满，新元素 {DisplayName(_pendingOverflow.CardDefId)} 待抉择：", _label);
-                if (GUILayout.Button("丢弃新件"))
-                {
-                    ResolveOverflowDiscardNew();
-                }
-                if (GUILayout.Button("丢弃囊内第一件后收下"))
-                {
-                    ResolveOverflowKeepNewDiscardOld();
-                }
+                return CarrierGeneResult.CarrierNotFound;
             }
-            else
-            {
-                GUILayout.BeginHorizontal();
-                if (GUILayout.Button("掉落 " + DisplayName("org_mito"))) AddDrop("org_mito");
-                if (GUILayout.Button("掉落 " + DisplayName("org_lens"))) AddDrop("org_lens");
-                if (GUILayout.Button("掉落 " + DisplayName("org_emitter"))) AddDrop("org_emitter");
-                // story-007 轴A：过氧化物酶接进 Source→…→Sink 链后会给流经事件打 Fire tag，
-                // 撞上战场地形常驻的 Wet（见 MetabolicSliceBridge.OnEnter），触发环境残留反应可观察。
-                if (GUILayout.Button("掉落 " + DisplayName("org_perox"))) AddDrop("org_perox");
-                GUILayout.EndHorizontal();
-            }
-
-            if (GUILayout.Button("重置为演示三件套（调试，覆盖当前网格）"))
-            {
-                ResetDemoTriple();
-            }
-
-            GUILayout.Space(6f);
-            GUILayout.Label($"储备囊 {_bag.Items.Count}/∞（点选后再点空槽装入）", _label);
-            foreach (PartInstance p in _bag.Items)
-            {
-                GUILayout.BeginHorizontal();
-                bool selected = p.PartId == _selectedPartId;
-                string text = (selected ? "▶ " : "") + DisplayName(p.CardDefId);
-                if (GUILayout.Button(text))
-                {
-                    ToggleSelectPart(p.PartId);
-                }
-                GUILayout.EndHorizontal();
-            }
-
-            GUILayout.Space(6f);
-            GUILayout.Label("切片 3x3（空槽点=装选中件；实槽点=卸下；边模式下点两格画/删边）", _label);
-            for (int y = 0; y < SlotGrid.Height; y++)
-            {
-                GUILayout.BeginHorizontal();
-                for (int x = 0; x < SlotGrid.Width; x++)
-                {
-                    int id = y * SlotGrid.Width + x;
-                    SlotNode node = _grid.Slots[id];
-                    bool isEdgeFrom = _edgeFrom == id;
-                    string label = (isEdgeFrom ? "* " : "") +
-                                   (node.IsEmpty ? $"[{id}] 空" : $"[{id}] {DisplayName(node.Part.CardDefId)}");
-                    if (GUILayout.Button(label, GUILayout.Width(118)))
-                    {
-                        HandleSlotClick(id);
-                    }
-                }
-                GUILayout.EndHorizontal();
-            }
-
-            GUILayout.Space(6f);
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button(_edgeMode == EdgeMode.Add ? "▶ 画边中" : "画边"))
-            {
-                ToggleEdgeAddMode();
-            }
-            if (GUILayout.Button(_edgeMode == EdgeMode.Remove ? "▶ 删边中" : "删边"))
-            {
-                ToggleEdgeRemoveMode();
-            }
-            GUILayout.EndHorizontal();
-
-            if (_grid.Edges.Count > 0)
-            {
-                var edgeText = new List<string>(_grid.Edges.Count);
-                foreach (DirectedEdge e in _grid.Edges)
-                {
-                    edgeText.Add($"{e.From}→{e.To}");
-                }
-                GUILayout.Label("箭头：" + string.Join("　", edgeText), _label);
-            }
-
-            GUILayout.EndArea();
+            return CarrierGeneService.EquipGene(_geneReserve, carrier, geneInstanceId, slotIndex);
         }
 
-        /// <summary>唯一装/卸/画边/删边入口（story-002 D9①），IMGUI 与新 UI Toolkit 面板共用，避免影子状态机。</summary>
-        public void HandleSlotClick(int slotId)
+        /// <summary>拖拽卸下基因从 Carrier 插槽（story-005 D7）：取 ActiveCarrier 后转调 CarrierGeneService，
+        /// ActiveCarrier 为 null 时返回 CarrierNotFound（不抛）。</summary>
+        public CarrierGeneResult DragUnequipGene(int slotIndex)
         {
-            if (_edgeMode != EdgeMode.None)
+            CarrierInstance carrier = _carrierRegistry.ActiveCarrier;
+            if (carrier == null)
             {
-                if (_edgeFrom == null)
-                {
-                    _edgeFrom = slotId;
-                    return;
-                }
-                int from = _edgeFrom.Value;
-                _edgeFrom = null;
-                if (from == slotId)
-                {
-                    return;
-                }
-                if (_edgeMode == EdgeMode.Add)
-                {
-                    _grid.TryAddEdge(from, slotId);
-                }
-                else
-                {
-                    _grid.RemoveEdge(from, slotId);
-                }
-                return;
+                return CarrierGeneResult.CarrierNotFound;
             }
-
-            SlotNode node = _grid.Slots[slotId];
-            if (node.IsEmpty)
-            {
-                if (_selectedPartId == null)
-                {
-                    return;
-                }
-                TransferResult result = TransferService.Equip(_bag, _grid, _selectedPartId, slotId);
-                if (result == TransferResult.Ok)
-                {
-                    _selectedPartId = null;
-                }
-            }
-            else
-            {
-                TransferService.Unequip(_bag, _grid, slotId);
-            }
+            return CarrierGeneService.UnequipGene(_geneReserve, carrier, slotIndex);
         }
-
-        /// <summary>拖拽装入（story-004 D7）：不重复 HandleSlotClick 的分支逻辑，直达 TransferService；
-        /// 成功后清掉选中态，防止残留一个不相关的旧点选。</summary>
-        public TransferResult DragEquip(string partId, int slotId)
-        {
-            TransferResult result = TransferService.Equip(_bag, _grid, partId, slotId);
-            if (result == TransferResult.Ok)
-            {
-                _selectedPartId = null;
-            }
-            return result;
-        }
-
-        /// <summary>拖拽卸下（story-004 D7）：直达 TransferService，无额外副作用。</summary>
-        public TransferResult DragUnequip(int slotId) => TransferService.Unequip(_bag, _grid, slotId);
-
-        /// <summary>拖拽画边（story-004 D7）：直达 SlotGrid.TryAddEdge，规则语义不变。</summary>
-        public bool DragAddEdge(int from, int to) => _grid.TryAddEdge(from, to);
 
         /// <summary>当前选中的储备囊件 id（story-002 D9④，null=未选中）。</summary>
         public string SelectedPartId => _selectedPartId;
@@ -452,43 +317,6 @@ namespace GameLogic.UI.Battle
             _bag.Remove(_bag.Items[0].PartId);
             _bag.TryAdd(_pendingOverflow);
             _pendingOverflow = null;
-        }
-
-        /// <summary>
-        /// 调试快捷键：覆盖玩家网格为旧 Bridge 演示装配（organ_core→organ_focus→organ_actuator，
-        /// 0→1→4）。不删这套旧 Draft（story 要求），但只在手动点击时生效——默认仍是玩家自己装的网格。
-        /// </summary>
-        private void ResetDemoTriple()
-        {
-            for (int i = 0; i < SlotGrid.SlotCount; i++)
-            {
-                _grid.Slots[i].Part = null;
-            }
-            var existingEdges = new List<DirectedEdge>(_grid.Edges);
-            foreach (var e in existingEdges)
-            {
-                _grid.RemoveEdge(e.From, e.To);
-            }
-
-            _grid.Slots[0].Part = new PartInstance("demo_core", "organ_core", PartLocation.Slot(0));
-            _grid.Slots[1].Part = new PartInstance("demo_focus", "organ_focus", PartLocation.Slot(1));
-            _grid.Slots[4].Part = new PartInstance("demo_actuator", "organ_actuator", PartLocation.Slot(4));
-            _grid.TryAddEdge(0, 1);
-            _grid.TryAddEdge(1, 4);
-
-            _selectedPartId = null;
-            _edgeMode = EdgeMode.None;
-            _edgeFrom = null;
-        }
-
-        private void AddDrop(string cardDefId)
-        {
-            var part = new PartInstance(System.Guid.NewGuid().ToString("N"), cardDefId, PartLocation.Bag());
-            AddResult result = AddOrganPart(part);
-            if (result == AddResult.NeedDecision)
-            {
-                _pendingOverflow = part;
-            }
         }
 
         /// <summary>

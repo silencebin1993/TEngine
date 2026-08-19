@@ -1,0 +1,630 @@
+using System.Collections.Generic;
+using Cysharp.Threading.Tasks;
+using UnityEngine;
+using UnityEngine.UIElements;
+using GameLogic.MetabolicSlice.Carrier;
+using GameLogic.MetabolicSlice.ContentCatalog;
+using GameLogic.Stage;
+using GameLogic.Stage.CellStage;
+using GameLogic.UI.Battle;
+using TEngine;
+
+namespace GameLogic
+{
+    /// <summary>
+    /// UI Toolkit 版 Carrier 器官栏 + 插槽条（organ-socket-slice/story-005）。
+    /// 独立控制器，不并入既有 BattleMetabolicUIToolkit（后者是 006 的整体拆除对象，D1）。
+    /// 器官栏列 CarrierRegistry.All，点选切换激活；插槽条显示 ActiveCarrier.Slots（3 格），
+    /// 随激活切换刷新；基因拖放经 MetabolicSlicePanel.DragEquipGene/DragUnequipGene 转调
+    /// CarrierGeneService（D7）。本 story 只做装/卸，不做丢弃（D16）。
+    /// 照抄 BattleMetabolicUIToolkit 的 rootVisualElement 轮询保护（D3）+ 拖拽手势模式（D5/D8）。
+    /// </summary>
+    public class BattleCarrierUIToolkit : MonoBehaviour
+    {
+        private UIDocument _document;
+        private VisualTreeAsset _visualTree;
+        private PanelSettings _panelSettings;
+
+        private VisualElement _root;
+        private VisualElement _carrierList;
+        private VisualElement _slotBar;
+        private ScrollView _geneList;
+        private Label _noCarrierHint;
+
+        private readonly Button[] _slotButtons = new Button[CarrierInstance.SlotCount];
+
+        // ---- D5/D8：拖拽手势（不含边模式分支，照搬阈值与捕获生命周期） ----
+        private const float DragThreshold = 6f;
+        private enum DragSourceKind { None, GeneList, Slot }
+        private enum DropState { None, Valid, Invalid }
+
+        private Label _dragGhost;
+        private DragSourceKind _dragSourceKind = DragSourceKind.None;
+        private string _dragGeneInstanceId;
+        private int _dragFromSlot = -1;
+        private bool _dragOriginEmpty;
+        private bool _dragActive;
+        private int _dragPointerId = -1;
+        private VisualElement _dragCaptureElement;
+        private VisualElement _lastHighlighted;
+        private Vector2 _dragStartPos;
+
+        // D11：GeneReserve.Items 只在事件时读，不得每帧读（landmine #3）
+        private readonly List<GeneInstance> _reserveCache = new List<GeneInstance>();
+
+        private void Awake()
+        {
+            DontDestroyOnLoad(gameObject);
+        }
+
+        private async void Start()
+        {
+            _visualTree = await GameModule.Resource.LoadAssetAsync<VisualTreeAsset>("BattleCarrierUI");
+            _panelSettings = await GameModule.Resource.LoadAssetAsync<PanelSettings>("BattleHudPanelSettings");
+
+            if (this == null)
+            {
+                // 组件在异步加载期间被销毁（例如热更域重载）。
+                return;
+            }
+
+            _document = gameObject.AddComponent<UIDocument>();
+            _document.visualTreeAsset = _visualTree;
+            _document.panelSettings = _panelSettings;
+            // D2：sortingOrder = 4（实读现况 HUD=0/Metabolic=3/Draft=6/Overlay=10/Result=12，4 是空档）
+            _document.sortingOrder = 4;
+
+            // D3：照抄 rootVisualElement 轮询保护（10 帧 guard + 超时 LogError）
+            for (int guard = 0; guard < 10 && _document.rootVisualElement == null; guard++)
+            {
+                await UniTask.Yield();
+            }
+
+            _root = _document.rootVisualElement;
+            if (_root == null)
+            {
+                Debug.LogError("[BattleCarrierUIToolkit] rootVisualElement 等待超时，器官栏未初始化。");
+                return;
+            }
+            CacheNodes();
+            CreateDragGhost();
+            SubscribeEvents();
+            RefreshAll();
+        }
+
+        private void CreateDragGhost()
+        {
+            _dragGhost = new Label();
+            _dragGhost.AddToClassList("drag-ghost");
+            _dragGhost.pickingMode = PickingMode.Ignore;
+            _dragGhost.style.position = Position.Absolute;
+            _dragGhost.style.display = DisplayStyle.None;
+            _root.Add(_dragGhost);
+        }
+
+        private void CacheNodes()
+        {
+            _carrierList = _root.Q<VisualElement>("CarrierList");
+            _slotBar = _root.Q<VisualElement>("SlotBar");
+            _geneList = _root.Q<ScrollView>("GeneList");
+            _noCarrierHint = _root.Q<Label>("NoCarrierHint");
+
+            for (int i = 0; i < CarrierInstance.SlotCount; i++)
+            {
+                int slotIndex = i;
+                VisualElement container = _slotBar?.Q<VisualElement>("Slot" + i);
+                Button slot = container?.Q<Button>("SlotCell");
+                _slotButtons[i] = slot;
+                if (slot != null)
+                {
+                    slot.RegisterCallback<PointerDownEvent>(evt => OnSlotPointerDown(evt, slot, slotIndex));
+                    slot.RegisterCallback<PointerMoveEvent>(OnPointerMove);
+                    slot.RegisterCallback<PointerUpEvent>(OnPointerUp);
+                    slot.RegisterCallback<PointerCaptureOutEvent>(OnPointerCaptureOut);
+                }
+            }
+        }
+
+        /// <summary>D13：订阅 CarrierActivatedEvent 刷新插槽条与高亮；OnDestroy 时成对反订阅（GameEvent 纪律）。</summary>
+        private void SubscribeEvents()
+        {
+            GameEvent.AddEventListener(CarrierRegistry.CarrierActivatedEvent, OnCarrierActivated);
+        }
+
+        private void OnCarrierActivated()
+        {
+            RefreshAll();
+        }
+
+        private void Update()
+        {
+            if (_root == null)
+            {
+                return;
+            }
+
+            CellStageFlow cell = GameRoot.CellStage;
+            bool running = cell != null && cell.IsRunning;
+            _root.style.display = running ? DisplayStyle.Flex : DisplayStyle.None;
+            if (!running)
+            {
+                return;
+            }
+        }
+
+        /// <summary>D11/D13/D14：刷新器官栏、插槽条、基因列表；零 Carrier 渲染禁用态提示。</summary>
+        private void RefreshAll()
+        {
+            MetabolicSlicePanel panel = MetabolicSlicePanel.Instance;
+            if (panel == null)
+            {
+                return;
+            }
+
+            RefreshCarrierList(panel);
+            RefreshSlotBar(panel);
+            RefreshGeneList(panel);
+        }
+
+        private void RefreshCarrierList(MetabolicSlicePanel panel)
+        {
+            if (_carrierList == null)
+            {
+                return;
+            }
+
+            _carrierList.Clear();
+            CarrierRegistry registry = panel.CarrierRegistry;
+            string activeId = registry.ActiveCarrierId;
+
+            foreach (var kvp in registry.All)
+            {
+                string carrierId = kvp.Key;
+                CarrierInstance carrier = kvp.Value;
+                Button btn = new Button();
+                btn.text = GetCarrierDisplayName(carrier);
+                btn.AddToClassList("carrier-item");
+                if (carrierId == activeId)
+                {
+                    btn.AddToClassList("carrier-active");
+                }
+                btn.clicked += () => registry.SetActive(carrierId);
+                _carrierList.Add(btn);
+            }
+        }
+
+        /// <summary>D14：零 Carrier 时渲染 3 个禁用态空格 + 提示（不隐藏整条，防布局塌陷）。</summary>
+        private void RefreshSlotBar(MetabolicSlicePanel panel)
+        {
+            CarrierInstance carrier = panel.CarrierRegistry.ActiveCarrier;
+            bool hasCarrier = carrier != null;
+
+            if (_noCarrierHint != null)
+            {
+                _noCarrierHint.style.display = hasCarrier ? DisplayStyle.None : DisplayStyle.Flex;
+            }
+
+            for (int i = 0; i < CarrierInstance.SlotCount; i++)
+            {
+                Button slot = _slotButtons[i];
+                if (slot == null)
+                {
+                    continue;
+                }
+
+                if (!hasCarrier)
+                {
+                    // D14：零 Carrier 渲染禁用态空格
+                    slot.text = $"[{i}] —";
+                    slot.SetEnabled(false);
+                    slot.RemoveFromClassList("slot-filled");
+                    slot.AddToClassList("slot-empty");
+                }
+                else
+                {
+                    slot.SetEnabled(true);
+                    CarrierSlot cs = carrier.Slots[i];
+                    bool occupied = cs.GeneInstanceId != null;
+                    slot.text = occupied ? GetSlotGeneDisplayName(panel, cs.GeneInstanceId) : $"[{i}] 空";
+                    slot.RemoveFromClassList("slot-empty");
+                    slot.RemoveFromClassList("slot-filled");
+                    slot.AddToClassList(occupied ? "slot-filled" : "slot-empty");
+                }
+            }
+        }
+
+        /// <summary>D9/D10/D11：列表数据源 = GeneCatalog.AllGeneIds（30 条全集），Contract 段在前、Module 段在后并加分组标题。
+        /// GeneReserve.Items 只在此刻读一次，存入 _reserveCache（D11，landmine #3）。</summary>
+        private void RefreshGeneList(MetabolicSlicePanel panel)
+        {
+            if (_geneList == null)
+            {
+                return;
+            }
+
+            if (_dragSourceKind == DragSourceKind.GeneList)
+            {
+                // 拖拽起点是列表内某按钮，冻结列表防止意外销毁正在捕获的元素
+                return;
+            }
+
+            _geneList.Clear();
+            _reserveCache.Clear();
+            _reserveCache.AddRange(panel.GeneReserve.Items);
+
+            // D10：先 11 条 Contract 再 19 条 Module，各自保持目录声明序，两段之间插分组标题
+            AddGeneSection("契约基因", GeneCatalog.AllIds);
+            AddGeneSection("模块基因", GeneCatalog.AllModuleIds);
+        }
+
+        private void AddGeneSection(string sectionTitle, System.Collections.Generic.IEnumerable<string> geneIds)
+        {
+            Label title = new Label(sectionTitle);
+            title.AddToClassList("gene-section-title");
+            _geneList.Add(title);
+
+            foreach (string geneId in geneIds)
+            {
+                // 从 _reserveCache 里找该基因的所有实例
+                foreach (GeneInstance gi in _reserveCache)
+                {
+                    if (gi.GeneId != geneId)
+                    {
+                        continue;
+                    }
+                    Button btn = new Button();
+                    btn.text = GeneCatalog.GetDisplayName(geneId) ?? geneId;
+                    btn.AddToClassList("gene-item");
+                    string instanceId = gi.GeneInstanceId;
+                    btn.RegisterCallback<PointerDownEvent>(evt => OnGenePointerDown(evt, btn, instanceId));
+                    btn.RegisterCallback<PointerMoveEvent>(OnPointerMove);
+                    btn.RegisterCallback<PointerUpEvent>(OnPointerUp);
+                    btn.RegisterCallback<PointerCaptureOutEvent>(OnPointerCaptureOut);
+                    _geneList.Add(btn);
+                }
+            }
+        }
+
+        private string GetCarrierDisplayName(CarrierInstance carrier)
+        {
+            if (carrier.OrganelleId != null)
+            {
+                string name = OrganelleCatalog.Get(carrier.OrganelleId)?.DisplayName;
+                if (name != null)
+                {
+                    return name;
+                }
+            }
+            return carrier.CarrierId;
+        }
+
+        private string GetSlotGeneDisplayName(MetabolicSlicePanel panel, string geneInstanceId)
+        {
+            GeneInstance gi = panel.GeneReserve.Find(geneInstanceId);
+            if (gi != null)
+            {
+                return GeneCatalog.GetDisplayName(gi.GeneId) ?? gi.GeneId;
+            }
+            return geneInstanceId;
+        }
+
+        // ==== D5/D8：拖拽手势（按模式照搬，不含边模式分支） ====
+
+        private void OnSlotPointerDown(PointerDownEvent evt, Button slot, int slotIndex)
+        {
+            MetabolicSlicePanel panel = MetabolicSlicePanel.Instance;
+            if (panel == null)
+            {
+                return;
+            }
+            CarrierInstance carrier = panel.CarrierRegistry.ActiveCarrier;
+            bool originEmpty = carrier == null || carrier.Slots[slotIndex].GeneInstanceId == null;
+            BeginDrag(DragSourceKind.Slot, slotIndex, null, originEmpty, slot, evt);
+        }
+
+        private void OnGenePointerDown(PointerDownEvent evt, Button button, string geneInstanceId)
+        {
+            BeginDrag(DragSourceKind.GeneList, -1, geneInstanceId, false, button, evt);
+        }
+
+        private void BeginDrag(DragSourceKind kind, int slotIndex, string geneInstanceId, bool originEmpty, VisualElement element, PointerDownEvent evt)
+        {
+            _dragSourceKind = kind;
+            _dragFromSlot = slotIndex;
+            _dragGeneInstanceId = geneInstanceId;
+            _dragOriginEmpty = originEmpty;
+            _dragStartPos = evt.position;
+            _dragActive = false;
+            _dragPointerId = evt.pointerId;
+            _dragCaptureElement = element;
+            element.CapturePointer(evt.pointerId);
+        }
+
+        private void OnPointerMove(PointerMoveEvent evt)
+        {
+            if (_dragSourceKind == DragSourceKind.None)
+            {
+                return;
+            }
+
+            Vector2 pos = evt.position;
+            if (!_dragActive)
+            {
+                if (Vector2.Distance(pos, _dragStartPos) <= DragThreshold)
+                {
+                    return;
+                }
+                _dragActive = true;
+            }
+
+            if (_dragSourceKind == DragSourceKind.Slot && _dragOriginEmpty)
+            {
+                // 起点空槽，越过阈值也是无操作占位，不显示拖影/高亮
+                return;
+            }
+
+            UpdateGhost(pos);
+            UpdateHighlight(pos);
+        }
+
+        private void OnPointerUp(PointerUpEvent evt)
+        {
+            if (_dragSourceKind == DragSourceKind.None)
+            {
+                return;
+            }
+            HandleDragEnd(evt.position);
+            _dragCaptureElement?.ReleasePointer(_dragPointerId);
+            ResetDragState();
+        }
+
+        private void OnPointerCaptureOut(PointerCaptureOutEvent evt)
+        {
+            if (_dragSourceKind == DragSourceKind.None)
+            {
+                return;
+            }
+            // 捕获意外丢失：只做视觉收尾，不触发任何装/卸
+            ClearGhost();
+            ClearHighlight();
+            ResetDragState();
+        }
+
+        /// <summary>D15：PointerUp 落点判定；阈值内 -> 无操作；否则按来源路由。拒绝时给出可见反馈。</summary>
+        private void HandleDragEnd(Vector2 position)
+        {
+            MetabolicSlicePanel panel = MetabolicSlicePanel.Instance;
+            ClearGhost();
+            ClearHighlight();
+
+            if (panel == null)
+            {
+                return;
+            }
+
+            if (!_dragActive)
+            {
+                // 未越过阈值，无操作
+                return;
+            }
+
+            if (_dragSourceKind == DragSourceKind.Slot && _dragOriginEmpty)
+            {
+                return;
+            }
+
+            if (_dragSourceKind == DragSourceKind.GeneList)
+            {
+                int? targetSlot = HitTestSlot(position);
+                if (targetSlot.HasValue)
+                {
+                    CarrierGeneResult result = panel.DragEquipGene(_dragGeneInstanceId, targetSlot.Value);
+                    if (result != CarrierGeneResult.Ok)
+                    {
+                        ShowFeedback(result);
+                    }
+                    else
+                    {
+                        RefreshAll();
+                    }
+                }
+                return;
+            }
+
+            if (_dragSourceKind == DragSourceKind.Slot)
+            {
+                // 拖出到列表区域 = 卸下
+                if (HitTestGeneListArea(position))
+                {
+                    CarrierGeneResult result = panel.DragUnequipGene(_dragFromSlot);
+                    if (result != CarrierGeneResult.Ok)
+                    {
+                        ShowFeedback(result);
+                    }
+                    else
+                    {
+                        RefreshAll();
+                    }
+                }
+            }
+        }
+
+        /// <summary>D15：拒绝反馈必须可见，尤其 SlotOccupied 要明确「占用槽拒绝且不交换」。</summary>
+        private void ShowFeedback(CarrierGeneResult result)
+        {
+            string message = result switch
+            {
+                CarrierGeneResult.GeneNotFound => "基因未找到",
+                CarrierGeneResult.GeneAlreadyEquipped => "该基因已装备在其它槽位",
+                CarrierGeneResult.SlotOccupied => "槽位已占用（不交换）",
+                CarrierGeneResult.SlotIndexInvalid => "槽位索引无效",
+                CarrierGeneResult.CarrierNotFound => "未选中器官",
+                _ => "操作失败"
+            };
+            Debug.Log($"[BattleCarrierUIToolkit] {message}");
+        }
+
+        private void ResetDragState()
+        {
+            _dragSourceKind = DragSourceKind.None;
+            _dragGeneInstanceId = null;
+            _dragFromSlot = -1;
+            _dragOriginEmpty = false;
+            _dragActive = false;
+            _dragPointerId = -1;
+            _dragCaptureElement = null;
+        }
+
+        private int? HitTestSlot(Vector2 position)
+        {
+            for (int i = 0; i < CarrierInstance.SlotCount; i++)
+            {
+                Button slot = _slotButtons[i];
+                if (slot != null && slot.worldBound.Contains(position))
+                {
+                    return i;
+                }
+            }
+            return null;
+        }
+
+        private bool HitTestGeneListArea(Vector2 position)
+        {
+            return _geneList != null && _geneList.worldBound.Contains(position);
+        }
+
+        private void UpdateGhost(Vector2 worldPos)
+        {
+            if (_dragGhost == null)
+            {
+                return;
+            }
+            MetabolicSlicePanel panel = MetabolicSlicePanel.Instance;
+            if (panel == null)
+            {
+                return;
+            }
+
+            string text = string.Empty;
+            if (_dragSourceKind == DragSourceKind.GeneList)
+            {
+                GeneInstance gi = panel.GeneReserve.Find(_dragGeneInstanceId);
+                text = gi != null ? (GeneCatalog.GetDisplayName(gi.GeneId) ?? gi.GeneId) : string.Empty;
+            }
+            else if (_dragSourceKind == DragSourceKind.Slot)
+            {
+                CarrierInstance carrier = panel.CarrierRegistry.ActiveCarrier;
+                if (carrier != null && _dragFromSlot >= 0 && _dragFromSlot < carrier.Slots.Length)
+                {
+                    string gid = carrier.Slots[_dragFromSlot].GeneInstanceId;
+                    if (gid != null)
+                    {
+                        text = GetSlotGeneDisplayName(panel, gid);
+                    }
+                }
+            }
+            _dragGhost.text = text;
+
+            Vector2 local = _root.WorldToLocal(worldPos);
+            _dragGhost.style.left = local.x - 40f;
+            _dragGhost.style.top = local.y - 12f;
+            _dragGhost.style.display = DisplayStyle.Flex;
+        }
+
+        private void ClearGhost()
+        {
+            if (_dragGhost != null)
+            {
+                _dragGhost.style.display = DisplayStyle.None;
+            }
+        }
+
+        private void UpdateHighlight(Vector2 worldPos)
+        {
+            MetabolicSlicePanel panel = MetabolicSlicePanel.Instance;
+            if (panel == null)
+            {
+                return;
+            }
+
+            VisualElement candidate = null;
+            DropState state = DropState.None;
+
+            int? targetSlot = HitTestSlot(worldPos);
+            if (targetSlot.HasValue)
+            {
+                candidate = _slotButtons[targetSlot.Value];
+                state = EvaluateSlotDrop(panel, targetSlot.Value);
+            }
+
+            if (candidate == _lastHighlighted)
+            {
+                return;
+            }
+
+            ClearHighlight();
+
+            if (candidate != null && state != DropState.None)
+            {
+                candidate.AddToClassList(state == DropState.Valid ? "drop-valid" : "drop-invalid");
+                _lastHighlighted = candidate;
+            }
+        }
+
+        private void ClearHighlight()
+        {
+            if (_lastHighlighted != null)
+            {
+                _lastHighlighted.RemoveFromClassList("drop-valid");
+                _lastHighlighted.RemoveFromClassList("drop-invalid");
+                _lastHighlighted = null;
+            }
+        }
+
+        private DropState EvaluateSlotDrop(MetabolicSlicePanel panel, int targetSlotIndex)
+        {
+            CarrierInstance carrier = panel.CarrierRegistry.ActiveCarrier;
+            if (carrier == null)
+            {
+                return DropState.Invalid;
+            }
+
+            if (_dragSourceKind == DragSourceKind.GeneList)
+            {
+                GeneInstance gi = panel.GeneReserve.Find(_dragGeneInstanceId);
+                if (gi == null || !gi.Location.IsInReserve)
+                {
+                    return DropState.Invalid;
+                }
+                CarrierSlot slot = carrier.Slots[targetSlotIndex];
+                // D12：占用槽拒绝，不交换
+                return slot.GeneInstanceId == null ? DropState.Valid : DropState.Invalid;
+            }
+
+            if (_dragSourceKind == DragSourceKind.Slot)
+            {
+                // 槽到槽不支持（本 story 不做槽内交换）
+                return DropState.None;
+            }
+
+            return DropState.None;
+        }
+
+        private void OnDestroy()
+        {
+            // D13：成对反订阅 GameEvent
+            GameEvent.RemoveEventListener(CarrierRegistry.CarrierActivatedEvent, OnCarrierActivated);
+
+            if (_visualTree != null)
+            {
+                GameModule.Resource.UnloadAsset(_visualTree);
+                _visualTree = null;
+            }
+            if (_panelSettings != null)
+            {
+                GameModule.Resource.UnloadAsset(_panelSettings);
+                _panelSettings = null;
+            }
+        }
+    }
+}

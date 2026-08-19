@@ -46,8 +46,9 @@ public partial class GameApp
         // 常驻单例自控显隐，与上面的旧 UGUI BattleMainUI 并存，按 U 键切换对比。
         new GameObject("BattleHudToolkit").AddComponent<BattleHudToolkit>();
 
-        // UI Toolkit 版代谢切片装配面板（battle-ui-toolkit/story-002，D2）：同上不挂 [Window]，
-        // M 键默认打开，旧 IMGUI MetabolicSlicePanel.DrawPanel() 改绑 L 键对照。
+        // 006（F6b，preflight-decisions.md）摘空保壳：旧 3×3 装配渲染已下线，本类只剩
+        // Instance/SetVisible/IsPanelVisible 三个成员供 BattleOverlayUIToolkit 的 Esc 互斥逻辑用，
+        // 挂载行不删（删文件/挂载行会让暂停菜单编译失败，须独立 story 收口）。
         new GameObject("BattleMetabolicUIToolkit").AddComponent<BattleMetabolicUIToolkit>();
 
         // UI Toolkit 版进化选卡面板（battle-ui-toolkit/story-003，D2）：同上不挂 [Window]，
@@ -61,6 +62,10 @@ public partial class GameApp
         // UI Toolkit 版结算回顾面板（battle-ui-polish/story-003，D2）：同上不挂 [Window]，
         // 局外且有结算结果时默认显示，旧 IMGUI 结算块改绑 I 键对照。
         new GameObject("BattleResultUIToolkit").AddComponent<BattleResultUIToolkit>();
+
+        // UI Toolkit 版 Carrier 器官栏 + 插槽条（organ-socket-slice/story-005，D1/D2）：同上不挂 [Window]，
+        // 常驻单例自控显隐，sortingOrder=4 压在代谢面板之上、不与选卡争位。
+        new GameObject("BattleCarrierUIToolkit").AddComponent<BattleCarrierUIToolkit>();
     }
     
     private static void Release()

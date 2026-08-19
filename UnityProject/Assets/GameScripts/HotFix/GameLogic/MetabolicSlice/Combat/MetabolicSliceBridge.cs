@@ -5,9 +5,9 @@ using ComposeEngine.Builtin.Catalog;
 using ComposeEngine.Core;
 using GameLogic.Battle;
 using GameLogic.Core;
+using GameLogic.MetabolicSlice.Carrier;
 using GameLogic.MetabolicSlice.ContentCatalog;
 using GameLogic.MetabolicSlice.Environment;
-using GameLogic.MetabolicSlice.Grid;
 using GameLogic.Stats;
 using GameLogic.UI.Battle;
 using Unity.Mathematics;
@@ -18,11 +18,11 @@ namespace GameLogic.MetabolicSlice.Combat
     /// story-006 起的最小可用桥，story-003 改为消费玩家真实网格：把 ComposeEngine 出口事件
     /// （HitEvent）接到战斗伤害路径。
     ///
-    /// 默认读 <see cref="MetabolicSlicePanel.Instance"/> 持有的那份 SlotGrid——即玩家在
-    /// 002 面板里装/卸/画边的结果，不再固定 organ_core→organ_focus→organ_actuator 三件套。
-    /// 旧演示三件套仍在（不删旧 Draft），但只能靠面板里的调试按钮手动覆盖到玩家网格上。
-    /// 无输出链（<see cref="MetabolicSliceRunner.Tick"/> 编译不出 source→sink 路径）时
-    /// 天然不产出 HitEvent，因此本类什么都不做——不误伤、也不用额外的空链判断。
+    /// story-007 起改读 <see cref="MetabolicSlicePanel.Instance"/> 持有的 <see cref="CarrierRegistry"/>/
+    /// <see cref="GeneReserve"/>（新插槽装配），不再读旧的 SlotGrid/全局 GeneContracts；
+    /// 改调 <see cref="MetabolicSliceRunner.TickCarrier"/>，只跑激活 Carrier（W12）。
+    /// 零 Carrier 或激活 Carrier 三槽全空时，<see cref="MetabolicSliceRunner.TickCarrier"/>/
+    /// <see cref="Carrier.CarrierCompiler"/> 自身早退，Bridge 层不重复判空。
     ///
     /// story-004 起，<see cref="ApplyEvent"/> 把 HitEvent 一等字段（Damage/Heal/Shield/Displace/
     /// Count/Scale/Spin/Orbit/ExplodeOnHit）全部接到战场，不再只消费 Damage。Shield/Displace 无
@@ -145,8 +145,7 @@ namespace GameLogic.MetabolicSlice.Combat
                 return;
             }
 
-            SlotGrid grid = MetabolicSlicePanel.Instance != null ? MetabolicSlicePanel.Instance.Grid : null;
-            if (grid == null)
+            if (MetabolicSlicePanel.Instance == null)
             {
                 return;
             }
@@ -159,12 +158,11 @@ namespace GameLogic.MetabolicSlice.Combat
             _timer = 0f;
             _seed++;
 
-            IReadOnlyList<IContract> geneContracts = MetabolicSlicePanel.Instance != null
-                ? MetabolicSlicePanel.Instance.GeneContracts
-                : Array.Empty<IContract>();
+            CarrierRegistry registry = MetabolicSlicePanel.Instance.CarrierRegistry;
+            GeneReserve reserve = MetabolicSlicePanel.Instance.GeneReserve;
             // 传持久 _environment.State（不再是每 Tick 一份新 WorldState）+ ArenaCellId，
             // 让链路里挂了地形反应 tag（如 org_perox 的 TagAttach("Fire")）的事件能真正撞上地形（Wet）。
-            var events = _runner.Tick(grid, geneContracts, _environment.State, _seed, ArenaCellId);
+            var events = _runner.TickCarrier(registry, reserve, _environment.State, _seed, ArenaCellId);
 
             int consumed = 0;
             for (int i = 0; i < events.Count; i++)
