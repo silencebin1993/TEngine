@@ -351,17 +351,41 @@ namespace GameLogic.Stage.CellStage
         /// </summary>
         private static SimVisual[] BuildVisuals()
         {
-            Mesh quad = BuildQuad();
+            Mesh sphereMesh = BuildSphere(8, 12, 0.5f);
+            Mesh capsuleMesh = BuildCapsule(0.32f, 0.45f, 6, 10);
+            Mesh squashMesh = BuildSquashedSphere(0.5f, 0.15f, 8, 12);
             Material mat = CreateSimMaterial(Color.white);
 
             var visuals = new SimVisual[32];
             for (int i = 0; i < visuals.Length; i++)
             {
+                Mesh mesh = sphereMesh;
+                float scaleMul = 1f;
+                switch (i)
+                {
+                    case 0:
+                        mesh = capsuleMesh;
+                        break;
+                    case 20:
+                        mesh = squashMesh;
+                        break;
+                    case 50:
+                    case 51:
+                    case 52:
+                        mesh = capsuleMesh;
+                        scaleMul = 1.3f;
+                        break;
+                    case 90:
+                        mesh = capsuleMesh;
+                        scaleMul = 1.8f;
+                        break;
+                }
+
                 visuals[i] = new SimVisual
                 {
-                    Mesh = quad,
+                    Mesh = mesh,
                     Material = mat,
-                    ScaleMul = 1f,
+                    ScaleMul = scaleMul,
                     BaseColor = ColorFor(i),
                 };
             }
@@ -467,6 +491,115 @@ namespace GameLogic.Stage.CellStage
                 new Vector2(1f, 1f), new Vector2(1f, 0f),
             });
             m.SetTriangles(new[] { 0, 1, 2, 0, 2, 3 }, 0);
+            m.RecalculateNormals();
+            m.RecalculateBounds();
+            return m;
+        }
+
+        /// <summary>UV 球体（本体/一般敌人）。三轴等比缩放，形状烘焙在 local 顶点里。</summary>
+        private static Mesh BuildSphere(int lat, int lon, float radius)
+        {
+            return BuildEllipsoid(radius, radius, lat, lon, "SimSphere");
+        }
+
+        /// <summary>竖高胶囊体（玩家/精英/首领），上下半球 + 中段圆柱。</summary>
+        private static Mesh BuildCapsule(float radius, float cylHalfHeight, int lat, int lon)
+        {
+            var vertices = new List<Vector3>();
+            var uvs = new List<Vector2>();
+            var triangles = new List<int>();
+
+            int ring = lon + 1;
+            int totalRings = 2 * lat + 2;
+
+            for (int r = 0; r < totalRings; r++)
+            {
+                bool top = r <= lat;
+                int y = top ? r : r - lat - 1;
+                float phi = top
+                    ? y / (float)lat * (Mathf.PI * 0.5f)
+                    : Mathf.PI * 0.5f - y / (float)lat * (Mathf.PI * 0.5f);
+                float ringRadius = radius * Mathf.Sin(phi);
+                float ringY = top
+                    ? cylHalfHeight + radius * Mathf.Cos(phi)
+                    : -cylHalfHeight - radius * Mathf.Cos(phi);
+                float v = r / (float)(totalRings - 1);
+
+                for (int x = 0; x <= lon; x++)
+                {
+                    float u = x / (float)lon;
+                    float theta = u * Mathf.PI * 2f;
+                    vertices.Add(new Vector3(ringRadius * Mathf.Cos(theta), ringY, ringRadius * Mathf.Sin(theta)));
+                    uvs.Add(new Vector2(u, 1f - v));
+                }
+            }
+
+            for (int r = 0; r < totalRings - 1; r++)
+            {
+                for (int x = 0; x < lon; x++)
+                {
+                    int a = r * ring + x;
+                    int b = a + ring;
+                    triangles.Add(a); triangles.Add(b); triangles.Add(a + 1);
+                    triangles.Add(a + 1); triangles.Add(b); triangles.Add(b + 1);
+                }
+            }
+
+            var m = new Mesh { name = "SimCapsule" };
+            m.SetVertices(vertices);
+            m.SetUVs(0, uvs);
+            m.SetTriangles(triangles, 0);
+            m.RecalculateNormals();
+            m.RecalculateBounds();
+            return m;
+        }
+
+        /// <summary>压扁球体（残块），XZ 半径远大于 Y 半径，读作"矮但有体积"。</summary>
+        private static Mesh BuildSquashedSphere(float radiusXZ, float radiusY, int lat, int lon)
+        {
+            return BuildEllipsoid(radiusXZ, radiusY, lat, lon, "SimSquashedSphere");
+        }
+
+        private static Mesh BuildEllipsoid(float radiusXZ, float radiusY, int lat, int lon, string name)
+        {
+            var vertices = new List<Vector3>();
+            var uvs = new List<Vector2>();
+            var triangles = new List<int>();
+
+            for (int y = 0; y <= lat; y++)
+            {
+                float v = y / (float)lat;
+                float theta = v * Mathf.PI;
+                float sinTheta = Mathf.Sin(theta);
+                float cosTheta = Mathf.Cos(theta);
+
+                for (int x = 0; x <= lon; x++)
+                {
+                    float u = x / (float)lon;
+                    float phi = u * Mathf.PI * 2f;
+                    float sinPhi = Mathf.Sin(phi);
+                    float cosPhi = Mathf.Cos(phi);
+                    vertices.Add(new Vector3(radiusXZ * sinTheta * cosPhi, radiusY * cosTheta, radiusXZ * sinTheta * sinPhi));
+                    uvs.Add(new Vector2(u, 1f - v));
+                }
+            }
+
+            int ring = lon + 1;
+            for (int y = 0; y < lat; y++)
+            {
+                for (int x = 0; x < lon; x++)
+                {
+                    int a = y * ring + x;
+                    int b = a + ring;
+                    triangles.Add(a); triangles.Add(b); triangles.Add(a + 1);
+                    triangles.Add(a + 1); triangles.Add(b); triangles.Add(b + 1);
+                }
+            }
+
+            var m = new Mesh { name = name };
+            m.SetVertices(vertices);
+            m.SetUVs(0, uvs);
+            m.SetTriangles(triangles, 0);
             m.RecalculateNormals();
             m.RecalculateBounds();
             return m;
