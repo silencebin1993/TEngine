@@ -53,6 +53,10 @@ namespace GameLogic.Battle.Feedback
         private const float FlightLife = ComposeMotionMath.MotionFlightDuration;
         private const float PersistentLife = FxRecipeCatalog.Global.PersistentLife;
 
+        /// <summary>story-006：Bolt 沿 Direction 的独立线性飞行距离，不进 FxRecipeCatalog（只有 Bolt 需要直线飞行，
+        /// Melee/Arc/Wave/Spore 语义不同）。不改 <see cref="ComposeMotionMath.Offset"/>（003 D5 锁死）。</summary>
+        private const float BoltFlightDistance = 6f;
+
         // story-009：Bolt/Spore 直径系数与 Beam 长/宽系数改为逐配方（G2b），从 FxRecipeCatalog
         // 按当前 ShapeKind 查表读取，不再是同一套固定 const（详见 ApplyTransform）。
 
@@ -124,6 +128,9 @@ namespace GameLogic.Battle.Feedback
 
         /// <summary>最近一次命中的主元素 Tag（story-007 D9 校验探针，未命中任何元素词表时为 ""）。</summary>
         public string LastResolvedElementTag { get; private set; } = "";
+
+        /// <summary>story-006 验收探针：最近一次 Bolt/default 分支算出的世界坐标，供断言飞行位移随 Tick 逐帧偏离 Origin（非仅原地闪一下）。</summary>
+        public Vector3 LastBoltPosition { get; private set; }
 
         public void OnComposeCast(ComposeCastSignal signal)
         {
@@ -441,7 +448,10 @@ namespace GameLogic.Battle.Feedback
                 default:
                 {
                     float2 offset = ComposeMotionMath.Offset(_phase[idx], _spin[idx], _orbit[idx], _elapsed[idx]);
-                    float2 pos = origin + offset;
+                    // story-006：叠加沿 Direction 的独立线性飞行位移，让 Bolt 读得出「射出去」——
+                    // Spin=Orbit=0 时 offset 天然是零向量，与 offset 正交不冲突（Decision 4）。
+                    float2 linear = _direction[idx] * BoltFlightDistance * u;
+                    float2 pos = origin + offset + linear;
                     float diameter = radius * recipe.DiameterCoef;
                     // story-010 J1：Bolt 换成有指向的锥形网格后必须跟着 Direction 转——
                     // 原来是 Circle（旋转对称）才可以 identity，留着 identity 等于锥尖恒指世界 +X。
@@ -449,6 +459,7 @@ namespace GameLogic.Battle.Feedback
                     _tf[idx].localPosition = new Vector3(pos.x, MarkerY, pos.y);
                     _tf[idx].localRotation = Quaternion.Euler(0f, -angDeg, 0f);
                     _tf[idx].localScale = new Vector3(diameter, 1f, diameter);
+                    LastBoltPosition = _tf[idx].localPosition;
                     break;
                 }
             }

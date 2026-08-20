@@ -306,7 +306,7 @@ namespace GameLogic.Stage.CellStage
             // 依赖注入。模块之间不互相 new，只在这里接线。
             _abilities.Bind(_sim, _stats);
             _status.Bind(_sim);
-            _metabolicBridge.Bind(_sim, _stats);
+            _metabolicBridge.Bind(_sim, _stats, _abilities);
             _zones.Bind(_sim, _status);
             _zoneVisual.Bind(_zones);
             _healthBars.Bind(_sim, _stats);

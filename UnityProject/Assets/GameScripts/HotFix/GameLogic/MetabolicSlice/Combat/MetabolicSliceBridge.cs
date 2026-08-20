@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using ComposeEngine;
 using ComposeEngine.Builtin.Catalog;
 using ComposeEngine.Core;
+using GameLogic.Ability;
 using GameLogic.Battle;
 using GameLogic.Core;
 using GameLogic.MetabolicSlice.Carrier;
@@ -79,6 +80,7 @@ namespace GameLogic.MetabolicSlice.Combat
         private MetabolicSliceRunner _runner;
         private SimBridge _sim;
         private StatSheet _stats;
+        private AbilitySystem _abilities;
         private WorldEnvironment _environment;
         private readonly List<PendingMotionHit> _pendingMotion = new List<PendingMotionHit>();
         private float _timer;
@@ -117,10 +119,11 @@ namespace GameLogic.MetabolicSlice.Combat
             return DamageAreaRadius * MathF.Max(0.1f, scale);
         }
 
-        public void Bind(SimBridge sim, StatSheet stats)
+        public void Bind(SimBridge sim, StatSheet stats, AbilitySystem abilities = null)
         {
             _sim = sim;
             _stats = stats;
+            _abilities = abilities;
         }
 
         public override void OnEnter()
@@ -294,7 +297,7 @@ namespace GameLogic.MetabolicSlice.Combat
                     ExplodeOnHit = evt.ExplodeOnHit,
                     Tags = evt.Tags,
                     Origin = _sim.PlayerPosition,
-                    Direction = DefaultForward,
+                    Direction = _abilities != null ? _abilities.AimDirection : DefaultForward,
                     HasProjectile = evt.Damage > 0f,
                 });
             }
