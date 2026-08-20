@@ -287,7 +287,7 @@ namespace GameLogic.UI.Battle
                 "GM: F4 资源　F5 选卡　F6 精英选卡　F7 下一时期　F8 通关　` 全技能　FPS " +
                 (1f / Mathf.Max(0.0001f, Time.smoothDeltaTime)).ToString("F0"),
                 _label);
-            GUILayout.Label("M 代谢切片面板　装/卸　画/删有向边", _label);
+            GUILayout.Label("左下角：Carrier 器官栏（拖基因进插槽）", _label);
 
             GUILayout.EndArea();
         }

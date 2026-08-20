@@ -10,6 +10,7 @@ using GameLogic.MetabolicSlice.Graph;
 using GameLogic.MetabolicSlice.Grid;
 using GameLogic.Stage;
 using GameLogic.Stage.CellStage;
+using TEngine;
 using UnityEngine;
 
 namespace GameLogic.UI.Battle
@@ -83,6 +84,7 @@ namespace GameLogic.UI.Battle
                 _geneContracts.Add(factory());
                 _geneIds.Add(geneId);
                 _geneReserve.TryAdd(new GeneInstance(System.Guid.NewGuid().ToString("N"), geneId, GeneLocation.Reserve()));
+                GameEvent.Send(InventoryChangedEvent);
                 return;
             }
 
@@ -90,11 +92,15 @@ namespace GameLogic.UI.Battle
             if (moduleFactory != null)
             {
                 _geneReserve.TryAdd(new GeneInstance(System.Guid.NewGuid().ToString("N"), geneId, GeneLocation.Reserve()));
+                GameEvent.Send(InventoryChangedEvent);
                 return;
             }
 
             TEngine.Log.Warning($"[MetabolicSlicePanel] 未知基因 id: {geneId}");
         }
+
+        /// <summary>story-001 R1：入囊（基因/器官）统一通知事件，UI 只订阅不轮询；见 preflight-decisions.md。</summary>
+        public const string InventoryChangedEvent = "MetabolicSlice.InventoryChanged";
 
         /// <summary>
         /// 器官入囊统一钩子（story-002 D8）：AddDrop 与 CellStageFlow.ApplyMetabolicContent
@@ -108,6 +114,10 @@ namespace GameLogic.UI.Battle
             if (result == AddResult.Added && OrganelleCatalog.Get(part.CardDefId)?.IsCarrier == true)
             {
                 _carrierRegistry.EnsureCarrier(part.PartId, part.CardDefId);
+            }
+            if (result == AddResult.Added)
+            {
+                GameEvent.Send(InventoryChangedEvent);
             }
             return result;
         }
@@ -209,7 +219,7 @@ namespace GameLogic.UI.Battle
             var r = new Rect(Screen.width - 320f, Screen.height - 96f, 300f, 84f);
             GUI.Box(r, "");
             GUILayout.BeginArea(new Rect(r.x + 10f, r.y + 8f, r.width - 20f, r.height - 16f));
-            GUILayout.Label("<b>代谢链路</b>　L 装/卸 画边", _label);
+            GUILayout.Label("<b>代谢链路</b>", _label);
             GUILayout.Label(BuildChainSummary(), _summaryLabel);
             GUILayout.EndArea();
         }

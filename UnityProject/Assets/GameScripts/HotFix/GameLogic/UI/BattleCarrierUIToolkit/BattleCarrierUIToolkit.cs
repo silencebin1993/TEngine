@@ -125,16 +125,27 @@ namespace GameLogic
             }
         }
 
-        /// <summary>D13：订阅 CarrierActivatedEvent 刷新插槽条与高亮；OnDestroy 时成对反订阅（GameEvent 纪律）。</summary>
+        /// <summary>D13：订阅 CarrierActivatedEvent 刷新插槽条与高亮；story-001 R1 追加订阅
+        /// MetabolicSlicePanel.InventoryChangedEvent（入囊基因/器官触发）；OnDestroy 时成对反订阅（GameEvent 纪律）。</summary>
         private void SubscribeEvents()
         {
             GameEvent.AddEventListener(CarrierRegistry.CarrierActivatedEvent, OnCarrierActivated);
+            GameEvent.AddEventListener(MetabolicSlicePanel.InventoryChangedEvent, OnCarrierActivated);
         }
 
         private void OnCarrierActivated()
         {
             RefreshAll();
         }
+
+        /// <summary>story-001 R4：只读探针，供 execute_code 断言用，不新增机制。</summary>
+        public int VisibleCarrierCount => _carrierList?.childCount ?? 0;
+
+        /// <summary>基因按钮计数（排除分组标题 Label）。</summary>
+        public int VisibleGeneButtonCount => _geneList?.Query<Button>().ToList().Count ?? 0;
+
+        /// <summary>插槽条是否可交互（0 号槽 enabledSelf 作为代表，四槽同态）。</summary>
+        public bool ActiveSlotBarEnabled => _slotButtons[0] != null && _slotButtons[0].enabledSelf;
 
         private void Update()
         {
@@ -612,8 +623,9 @@ namespace GameLogic
 
         private void OnDestroy()
         {
-            // D13：成对反订阅 GameEvent
+            // D13：成对反订阅 GameEvent；story-001 R1 同步反订阅 InventoryChangedEvent
             GameEvent.RemoveEventListener(CarrierRegistry.CarrierActivatedEvent, OnCarrierActivated);
+            GameEvent.RemoveEventListener(MetabolicSlicePanel.InventoryChangedEvent, OnCarrierActivated);
 
             if (_visualTree != null)
             {
