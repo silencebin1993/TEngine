@@ -147,6 +147,12 @@ namespace GameLogic
         /// <summary>插槽条是否可交互（0 号槽 enabledSelf 作为代表，四槽同态）。</summary>
         public bool ActiveSlotBarEnabled => _slotButtons[0] != null && _slotButtons[0].enabledSelf;
 
+        /// <summary>story-003 #7：只读探针，供 execute_code 断言面板放大后的实际宽高。</summary>
+        public float PanelWidth => _root?.Q<VisualElement>("BattleCarrierUI")?.resolvedStyle.width ?? 0f;
+
+        /// <summary>story-003 #7：只读探针，供 execute_code 断言面板放大后的实际宽高。</summary>
+        public float PanelHeight => _root?.Q<VisualElement>("BattleCarrierUI")?.resolvedStyle.height ?? 0f;
+
         private void Update()
         {
             if (_root == null)
