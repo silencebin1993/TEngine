@@ -19,6 +19,7 @@ namespace GameLogic.Battle.Feedback
     {
         private const float DiscY = -0.01f;
         private const int CircleSegments = 20;
+        private const float ObstacleHeight = 0.7f;
         private static readonly Color ObstacleColor = new Color(0.32f, 0.3f, 0.28f, 1f);
 
         private static GameObject _root;
@@ -48,10 +49,10 @@ namespace GameLogic.Battle.Feedback
                 var go = new GameObject($"Obstacle_{i}");
                 go.transform.SetParent(_root.transform, false);
                 go.transform.localPosition = new Vector3(o.Position.x, DiscY, o.Position.y);
-                go.transform.localScale = Vector3.one * (o.Radius * 2f);
+                go.transform.localScale = new Vector3(o.Radius * 2f, ObstacleHeight, o.Radius * 2f);
 
                 var mf = go.AddComponent<MeshFilter>();
-                mf.sharedMesh = BuildCircle(CircleSegments);
+                mf.sharedMesh = BuildDrum(CircleSegments);
                 var mr = go.AddComponent<MeshRenderer>();
                 mr.sharedMaterial = matTemplate;
                 mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
@@ -59,27 +60,59 @@ namespace GameLogic.Battle.Feedback
             }
         }
 
-        /// <summary>俯视三角扇圆盘，半径 0.5 单位圆；实际半径靠 localScale 缩放。
-        /// 不复用 WhiteboxZoneVisual.BuildCircle：私有方法，且本类要不透明纯色，Zone 是半透明。</summary>
-        private static Mesh BuildCircle(int segments)
+        /// <summary>矮鼓体：底面圆环 y=0、顶面圆环 y=1，半径均 0.5；实际尺寸靠 localScale 缩放
+        /// （非等比：XZ=直径，Y=<see cref="ObstacleHeight"/>）。不复用 WhiteboxZoneVisual.BuildDrum：
+        /// 私有方法，且本类要不透明纯色，Zone 是半透明。</summary>
+        private static Mesh BuildDrum(int segments)
         {
-            var verts = new List<Vector3>(segments + 1) { Vector3.zero };
-            var tris = new List<int>(segments * 3);
+            var verts = new List<Vector3>(2 * segments + 4);
+            var tris = new List<int>(segments * 12);
 
+            int bottomCenter = verts.Count;
+            verts.Add(new Vector3(0f, 0f, 0f));
+            int bottomRingStart = verts.Count;
             for (int i = 0; i <= segments; i++)
             {
                 float a = (float)i / segments * Mathf.PI * 2f;
                 verts.Add(new Vector3(Mathf.Cos(a) * 0.5f, 0f, Mathf.Sin(a) * 0.5f));
             }
 
-            for (int i = 1; i <= segments; i++)
+            int topCenter = verts.Count;
+            verts.Add(new Vector3(0f, 1f, 0f));
+            int topRingStart = verts.Count;
+            for (int i = 0; i <= segments; i++)
             {
-                tris.Add(0);
-                tris.Add(i);
-                tris.Add(i + 1);
+                float a = (float)i / segments * Mathf.PI * 2f;
+                verts.Add(new Vector3(Mathf.Cos(a) * 0.5f, 1f, Mathf.Sin(a) * 0.5f));
             }
 
-            var m = new Mesh { name = "ObstacleVisualDisc" };
+            for (int i = 0; i < segments; i++)
+            {
+                int b0 = bottomRingStart + i;
+                int b1 = bottomRingStart + i + 1;
+                int t0 = topRingStart + i;
+                int t1 = topRingStart + i + 1;
+
+                // 底面圆盘：缠绕方向与顶面相反，朝下，避免背面剔除看不见。
+                tris.Add(bottomCenter);
+                tris.Add(b1);
+                tris.Add(b0);
+
+                // 顶面圆盘：朝上。
+                tris.Add(topCenter);
+                tris.Add(t0);
+                tris.Add(t1);
+
+                // 侧面：一对三角形。
+                tris.Add(b0);
+                tris.Add(t0);
+                tris.Add(b1);
+                tris.Add(b1);
+                tris.Add(t0);
+                tris.Add(t1);
+            }
+
+            var m = new Mesh { name = "ObstacleVisualDrum" };
             m.SetVertices(verts);
             m.SetTriangles(tris, 0);
             m.RecalculateNormals();

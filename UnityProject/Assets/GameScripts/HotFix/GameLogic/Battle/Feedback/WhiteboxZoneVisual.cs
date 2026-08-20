@@ -18,6 +18,7 @@ namespace GameLogic.Battle.Feedback
         private const int PoolSize = 64;
         private const float DiscY = -0.02f;
         private const int CircleSegments = 24;
+        private const float ZoneHeight = 0.18f;
 
         private GameObject _poolRoot;
         private Transform[] _discTf;
@@ -36,7 +37,7 @@ namespace GameLogic.Battle.Feedback
                 AreaZoneSystem.Zone z = zones[i];
                 Transform tf = _discTf[i];
                 tf.localPosition = new Vector3(z.Center.x, DiscY, z.Center.y);
-                tf.localScale = Vector3.one * (z.Radius * 2f);
+                tf.localScale = new Vector3(z.Radius * 2f, ZoneHeight, z.Radius * 2f);
                 _discRenderer[i].enabled = true;
                 _discRenderer[i].sharedMaterial.color = ColorFor(z.Kind);
             }
@@ -75,7 +76,7 @@ namespace GameLogic.Battle.Feedback
                 return;
             }
 
-            _circleMesh = BuildCircle(CircleSegments);
+            _circleMesh = BuildDrum(CircleSegments);
             Shader shader = Shader.Find("Sprites/Default");
             if (shader == null)
             {
@@ -105,26 +106,59 @@ namespace GameLogic.Battle.Feedback
             }
         }
 
-        /// <summary>俯视三角扇圆盘，半径 0.5 单位圆；实际半径靠 localScale 缩放。</summary>
-        private static Mesh BuildCircle(int segments)
+        /// <summary>矮鼓体：底面圆环 y=0、顶面圆环 y=1，半径均 0.5；实际尺寸靠 localScale 缩放
+        /// （非等比：XZ=直径，Y=<see cref="ZoneHeight"/>）。不与 WhiteboxObstacleVisual.BuildDrum
+        /// 共享：独立私有方法，保持既有"两份不复用"约定。</summary>
+        private static Mesh BuildDrum(int segments)
         {
-            var verts = new List<Vector3>(segments + 1) { Vector3.zero };
-            var tris = new List<int>(segments * 3);
+            var verts = new List<Vector3>(2 * segments + 4);
+            var tris = new List<int>(segments * 12);
 
+            int bottomCenter = verts.Count;
+            verts.Add(new Vector3(0f, 0f, 0f));
+            int bottomRingStart = verts.Count;
             for (int i = 0; i <= segments; i++)
             {
                 float a = (float)i / segments * Mathf.PI * 2f;
                 verts.Add(new Vector3(Mathf.Cos(a) * 0.5f, 0f, Mathf.Sin(a) * 0.5f));
             }
 
-            for (int i = 1; i <= segments; i++)
+            int topCenter = verts.Count;
+            verts.Add(new Vector3(0f, 1f, 0f));
+            int topRingStart = verts.Count;
+            for (int i = 0; i <= segments; i++)
             {
-                tris.Add(0);
-                tris.Add(i);
-                tris.Add(i + 1);
+                float a = (float)i / segments * Mathf.PI * 2f;
+                verts.Add(new Vector3(Mathf.Cos(a) * 0.5f, 1f, Mathf.Sin(a) * 0.5f));
             }
 
-            var m = new Mesh { name = "ZoneVisualDisc" };
+            for (int i = 0; i < segments; i++)
+            {
+                int b0 = bottomRingStart + i;
+                int b1 = bottomRingStart + i + 1;
+                int t0 = topRingStart + i;
+                int t1 = topRingStart + i + 1;
+
+                // 底面圆盘：缠绕方向与顶面相反，朝下，避免背面剔除看不见。
+                tris.Add(bottomCenter);
+                tris.Add(b1);
+                tris.Add(b0);
+
+                // 顶面圆盘：朝上。
+                tris.Add(topCenter);
+                tris.Add(t0);
+                tris.Add(t1);
+
+                // 侧面：一对三角形。
+                tris.Add(b0);
+                tris.Add(t0);
+                tris.Add(b1);
+                tris.Add(b1);
+                tris.Add(t0);
+                tris.Add(t1);
+            }
+
+            var m = new Mesh { name = "ZoneVisualDrum" };
             m.SetVertices(verts);
             m.SetTriangles(tris, 0);
             m.RecalculateNormals();

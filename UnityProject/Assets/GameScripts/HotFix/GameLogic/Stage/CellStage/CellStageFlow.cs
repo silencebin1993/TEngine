@@ -340,6 +340,7 @@ namespace GameLogic.Stage.CellStage
             ObstacleSpec[] obstacles = ObstacleGenerator.Generate(cfg.ArenaHalfExtent);
             _sim.SetObstacles(obstacles);
             WhiteboxObstacleVisual.Spawn(obstacles);
+            WhiteboxGroundAnchor.Spawn(cfg.ArenaHalfExtent);
 
             _renderer = new SimRenderer();
             _renderer.Initialize(BuildVisuals(), cfg.UnitCapacity);
@@ -1045,6 +1046,7 @@ namespace GameLogic.Stage.CellStage
             _renderer?.Dispose();
             _renderer = null;
             WhiteboxObstacleVisual.Dispose();
+            WhiteboxGroundAnchor.Dispose();
 
             Signals.Clear();
             RuleFlags.Current.ClearAll();
