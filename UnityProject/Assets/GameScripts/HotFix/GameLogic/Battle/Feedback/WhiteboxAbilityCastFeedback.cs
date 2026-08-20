@@ -54,6 +54,12 @@ namespace GameLogic.Battle.Feedback
         /// <summary>本次施放内已生成过的 (Kind,Shape) 组合，避免同一技能多条效果重复叠加同一模板。</summary>
         private readonly List<(EffectKind Kind, EffectShape Shape)> _dedupBuffer = new List<(EffectKind, EffectShape)>(4);
 
+        /// <summary>探针（story-008）：最近一次 <see cref="OnAbilityCast"/> 生成的标记数量。</summary>
+        public int LastAbilityCastMarkerCount { get; private set; }
+
+        /// <summary>探针（story-008）：最近一次 <see cref="SpawnForEffect"/> 路由到的模板种类。</summary>
+        public string LastAbilityCastTemplateKind { get; private set; }
+
         public void OnAbilityCast(AbilityCastSignal signal)
         {
             AbilitySpec spec = DataRegistry.Instance.GetAbility(signal.AbilityId);
@@ -63,6 +69,7 @@ namespace GameLogic.Battle.Feedback
             }
 
             _dedupBuffer.Clear();
+            LastAbilityCastMarkerCount = 0;
             for (int i = 0; i < spec.Effects.Count; i++)
             {
                 EffectSpec fx = spec.Effects[i];
@@ -119,7 +126,9 @@ namespace GameLogic.Battle.Feedback
 
         private void SpawnForEffect(EffectSpec fx, AbilitySpec spec, float2 origin, float2 dir)
         {
-            switch (SelectTemplate(fx))
+            TemplateKind kind = SelectTemplate(fx);
+            LastAbilityCastTemplateKind = kind.ToString();
+            switch (kind)
             {
                 case TemplateKind.Dash:
                     SpawnDash(origin, dir, fx);
@@ -159,7 +168,9 @@ namespace GameLogic.Battle.Feedback
         private void SpawnDash(float2 origin, float2 dir, EffectSpec fx)
         {
             float dist = fx.Value > 0f ? fx.Value : 4f;
-            SpawnStreak(origin, dir, dist, 0.7f, DashColor, 0.25f);
+            SpawnStreak(origin, dir, dist, 0.7f, DashColor, 0.3f);
+            float2 dirN = math.normalizesafe(dir, new float2(1f, 0f));
+            SpawnDisc(origin + dirN * dist, 0.6f, DashColor, 0.3f);
         }
 
         private void SpawnProjectileMuzzle(float2 origin)
@@ -286,6 +297,7 @@ namespace GameLogic.Battle.Feedback
             _timeLeft[idx] = life;
             _life[idx] = life;
             _color[idx] = color;
+            LastAbilityCastMarkerCount++;
         }
 
         private void TickMarkers(float dt)
