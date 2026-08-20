@@ -133,7 +133,9 @@ namespace GameLogic.Battle.Feedback
             float2 origin = new float2(0f, 0f); // 玩家位置，J6 简化为原点
             _tf[idx].position = new Vector3(origin.x, MarkerY, origin.y);
             _tf[idx].rotation = Quaternion.identity;
-            _tf[idx].localScale = Vector3.one * radius * 2f;
+            // story-005（scene-3d-content）：非等比缩放——网格已烘焙绝对高度（FxRecipeCatalog.Global.MarkerHeight），
+            // 等比缩放会让高度被 radius*2f 连带放大/缩小，与既定「高度是绝对量、与 XZ 半径解耦」纪律冲突。
+            _tf[idx].localScale = new Vector3(radius * 2f, 1f, radius * 2f);
         }
 
         private Mesh MeshForRecipe(FxShapeRecipe recipe)

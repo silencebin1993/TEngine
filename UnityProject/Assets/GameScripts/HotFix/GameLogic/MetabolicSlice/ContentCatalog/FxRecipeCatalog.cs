@@ -62,6 +62,11 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
             public const float PersistentLife = 0.5f;
             /// <summary>story-010 J2：指示器独立 8 位池（禁止与弹道 32 位池共用，避免被密集开火挤掉）。</summary>
             public const int IndicatorPoolSize = 8;
+            /// <summary>story-005（scene-3d-content）：Compose 弹道/瞄准指示白模的绝对挤出高度——
+            /// 参照 story-004 Zone=0.18f（薄标记不挡视线），因这是主动战斗读出的标记而略高，
+            /// 但远低于 Obstacle=0.7f。供 <see cref="GameLogic.Battle.Feedback.WhiteboxComposeProjectileFeedback"/>
+            /// 与 <see cref="GameLogic.Battle.Feedback.WhiteboxComposeAimIndicator"/> 共享。</summary>
+            public const float MarkerHeight = 0.22f;
         }
 
         // ── Shape 配方（逐 Shape 行：底色 + 网格键 + 生命类型 + per-recipe 系数）──

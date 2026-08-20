@@ -37,6 +37,10 @@ namespace GameLogic.Battle.Feedback
         private const float ConeHalfAngleDeg = 32f;
         private const int ConeSegments = 8;
 
+        /// <summary>story-005（scene-3d-content）：本类白模挤出高度，独立于 Compose 反馈
+        /// （同 FxRecipeCatalog.Global.MarkerHeight 取值，但两份反馈既有约定不共享网格/常量）。</summary>
+        private const float MarkerHeight = 0.22f;
+
         private GameObject _poolRoot;
         private Transform[] _tf;
         private MeshFilter[] _mf;
@@ -333,34 +337,28 @@ namespace GameLogic.Battle.Feedback
 
         private static Mesh BuildDisc()
         {
-            var m = new Mesh { name = "AbilityCastDisc" };
-            m.SetVertices(new List<Vector3>
+            var verts = new List<Vector3>
             {
                 new Vector3(-0.5f, 0f, -0.5f),
                 new Vector3(-0.5f, 0f, 0.5f),
                 new Vector3(0.5f, 0f, 0.5f),
                 new Vector3(0.5f, 0f, -0.5f),
-            });
-            m.SetTriangles(new[] { 0, 1, 2, 0, 2, 3 }, 0);
-            m.RecalculateNormals();
-            m.RecalculateBounds();
-            return m;
+            };
+            var tris = new List<int> { 0, 1, 2, 0, 2, 3 };
+            return ExtrudeFlat(verts, tris, MarkerHeight, "AbilityCastDisc");
         }
 
         private static Mesh BuildStreak()
         {
-            var m = new Mesh { name = "AbilityCastStreak" };
-            m.SetVertices(new List<Vector3>
+            var verts = new List<Vector3>
             {
                 new Vector3(0f, 0f, -0.5f),
                 new Vector3(0f, 0f, 0.5f),
                 new Vector3(1f, 0f, 0.5f),
                 new Vector3(1f, 0f, -0.5f),
-            });
-            m.SetTriangles(new[] { 0, 1, 2, 0, 2, 3 }, 0);
-            m.RecalculateNormals();
-            m.RecalculateBounds();
-            return m;
+            };
+            var tris = new List<int> { 0, 1, 2, 0, 2, 3 };
+            return ExtrudeFlat(verts, tris, MarkerHeight, "AbilityCastStreak");
         }
 
         private static Mesh BuildWedge(float halfAngleDeg, int segments)
@@ -381,12 +379,78 @@ namespace GameLogic.Battle.Feedback
                 tris.Add(i + 1);
             }
 
-            var m = new Mesh { name = "AbilityCastWedge" };
+            return ExtrudeFlat(verts, tris, MarkerHeight, "AbilityCastWedge");
+        }
+
+        /// <summary>story-005（scene-3d-content）：把一份纯 XZ 平面（y=0）几何挤出成有厚度的实体——
+        /// 底面（原三角形反绕，法线朝下）+ 顶面（原三角形正绕，y=height，法线朝上）+ 侧壁（沿边界有向边，
+        /// 即反向边未出现过的边，连接底/顶对应点）。与 WhiteboxComposeProjectileFeedback 同款算法，
+        /// 独立一份不共享（既有约定）。</summary>
+        private static Mesh ExtrudeFlat(List<Vector3> baseVerts, List<int> baseTris, float height, string name)
+        {
+            int n = baseVerts.Count;
+            var verts = new List<Vector3>(n * 2);
+            verts.AddRange(baseVerts);
+            for (int i = 0; i < n; i++)
+            {
+                Vector3 v = baseVerts[i];
+                verts.Add(new Vector3(v.x, height, v.z));
+            }
+
+            var tris = new List<int>(baseTris.Count * 2 + 32);
+
+            for (int i = 0; i < baseTris.Count; i += 3)
+            {
+                int a = baseTris[i];
+                int b = baseTris[i + 1];
+                int c = baseTris[i + 2];
+                tris.Add(a); tris.Add(c); tris.Add(b);
+            }
+
+            for (int i = 0; i < baseTris.Count; i += 3)
+            {
+                int a = baseTris[i] + n;
+                int b = baseTris[i + 1] + n;
+                int c = baseTris[i + 2] + n;
+                tris.Add(a); tris.Add(b); tris.Add(c);
+            }
+
+            var edgeCount = new Dictionary<(int, int), int>();
+            for (int i = 0; i < baseTris.Count; i += 3)
+            {
+                int a = baseTris[i];
+                int b = baseTris[i + 1];
+                int c = baseTris[i + 2];
+                AddEdge(edgeCount, a, b);
+                AddEdge(edgeCount, b, c);
+                AddEdge(edgeCount, c, a);
+            }
+
+            foreach (var edge in edgeCount.Keys)
+            {
+                int a = edge.Item1;
+                int b = edge.Item2;
+                if (edgeCount.ContainsKey((b, a)))
+                {
+                    continue;
+                }
+
+                tris.Add(a); tris.Add(b); tris.Add(b + n);
+                tris.Add(a); tris.Add(b + n); tris.Add(a + n);
+            }
+
+            var m = new Mesh { name = name };
             m.SetVertices(verts);
             m.SetTriangles(tris, 0);
             m.RecalculateNormals();
             m.RecalculateBounds();
             return m;
+        }
+
+        private static void AddEdge(Dictionary<(int, int), int> edgeCount, int a, int b)
+        {
+            var key = (a, b);
+            edgeCount[key] = edgeCount.TryGetValue(key, out int count) ? count + 1 : 1;
         }
 
         public void Dispose()

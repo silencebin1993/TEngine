@@ -516,28 +516,20 @@ namespace GameLogic.Battle.Feedback
                 tris.Add(i + 1);
             }
 
-            var m = new Mesh { name = "ComposeProjectileCircle" };
-            m.SetVertices(verts);
-            m.SetTriangles(tris, 0);
-            m.RecalculateNormals();
-            m.RecalculateBounds();
-            return m;
+            return ExtrudeFlat(verts, tris, FxRecipeCatalog.Global.MarkerHeight, "ComposeProjectileCircle");
         }
 
         private static Mesh BuildStreak()
         {
-            var m = new Mesh { name = "ComposeProjectileStreak" };
-            m.SetVertices(new List<Vector3>
+            var verts = new List<Vector3>
             {
                 new Vector3(0f, 0f, -0.5f),
                 new Vector3(0f, 0f, 0.5f),
                 new Vector3(1f, 0f, 0.5f),
                 new Vector3(1f, 0f, -0.5f),
-            });
-            m.SetTriangles(new[] { 0, 1, 2, 0, 2, 3 }, 0);
-            m.RecalculateNormals();
-            m.RecalculateBounds();
-            return m;
+            };
+            var tris = new List<int> { 0, 1, 2, 0, 2, 3 };
+            return ExtrudeFlat(verts, tris, FxRecipeCatalog.Global.MarkerHeight, "ComposeProjectileStreak");
         }
 
         private static Mesh BuildWedge(float halfAngleDeg, int segments)
@@ -558,12 +550,7 @@ namespace GameLogic.Battle.Feedback
                 tris.Add(i + 1);
             }
 
-            var m = new Mesh { name = "ComposeProjectileWedge" };
-            m.SetVertices(verts);
-            m.SetTriangles(tris, 0);
-            m.RecalculateNormals();
-            m.RecalculateBounds();
-            return m;
+            return ExtrudeFlat(verts, tris, FxRecipeCatalog.Global.MarkerHeight, "ComposeProjectileWedge");
         }
 
         private static Mesh BuildRing(float innerRatio, int segments)
@@ -592,12 +579,7 @@ namespace GameLogic.Battle.Feedback
                 tris.Add(o1); tris.Add(i1); tris.Add(i0);
             }
 
-            var m = new Mesh { name = "ComposeProjectileRing" };
-            m.SetVertices(verts);
-            m.SetTriangles(tris, 0);
-            m.RecalculateNormals();
-            m.RecalculateBounds();
-            return m;
+            return ExtrudeFlat(verts, tris, FxRecipeCatalog.Global.MarkerHeight, "ComposeProjectileRing");
         }
 
         /// <summary>story-010 J1：锥形指向网格（Bolt 专用）。与本文件其余图元同约定——落在局部 XZ 平面
@@ -623,12 +605,7 @@ namespace GameLogic.Battle.Feedback
             }
             tris.Add(0); tris.Add(verts.Count - 1); tris.Add(1);         // 弧末 → 尖端
 
-            var m = new Mesh { name = "ComposeProjectileCone" };
-            m.SetVertices(verts);
-            m.SetTriangles(tris, 0);
-            m.RecalculateNormals();
-            m.RecalculateBounds();
-            return m;
+            return ExtrudeFlat(verts, tris, FxRecipeCatalog.Global.MarkerHeight, "ComposeProjectileCone");
         }
 
         /// <summary>story-010 J1：十字网格（Spore 专用，两条正交矩形条，XZ 平面，各边半径 0.5）。</summary>
@@ -652,12 +629,7 @@ namespace GameLogic.Battle.Feedback
                 4, 5, 6,  4, 6, 7,
             };
 
-            var m = new Mesh { name = "ComposeProjectileCross" };
-            m.SetVertices(verts);
-            m.SetTriangles(tris, 0);
-            m.RecalculateNormals();
-            m.RecalculateBounds();
-            return m;
+            return ExtrudeFlat(verts, tris, FxRecipeCatalog.Global.MarkerHeight, "ComposeProjectileCross");
         }
 
         /// <summary>story-010 J1：环带网格（Field 专用）。结构同 Ring，但**参数必须与 Ring 不同**——
@@ -682,12 +654,80 @@ namespace GameLogic.Battle.Feedback
                 tris.Add(o0); tris.Add(o1); tris.Add(i1);
             }
 
-            var m = new Mesh { name = "ComposeProjectileBand" };
+            return ExtrudeFlat(verts, tris, FxRecipeCatalog.Global.MarkerHeight, "ComposeProjectileBand");
+        }
+
+        /// <summary>story-005（scene-3d-content）：把一份纯 XZ 平面（y=0）扇形/条带几何挤出成有厚度的实体——
+        /// 底面（原三角形反绕，法线朝下）+ 顶面（原三角形正绕，y=height，法线朝上）+ 侧壁（沿边界有向边，
+        /// 即反向边未出现过的边，连接底/顶对应点）。对扇形/条带/环带/双四边形/单四边形统一适用，
+        /// 不需要按形状特判——环带的内外两圈边界会被同一套边界边检测自然识别为两组侧壁。</summary>
+        private static Mesh ExtrudeFlat(List<Vector3> baseVerts, List<int> baseTris, float height, string name)
+        {
+            int n = baseVerts.Count;
+            var verts = new List<Vector3>(n * 2);
+            verts.AddRange(baseVerts);
+            for (int i = 0; i < n; i++)
+            {
+                Vector3 v = baseVerts[i];
+                verts.Add(new Vector3(v.x, height, v.z));
+            }
+
+            var tris = new List<int>(baseTris.Count * 2 + 32);
+
+            for (int i = 0; i < baseTris.Count; i += 3)
+            {
+                int a = baseTris[i];
+                int b = baseTris[i + 1];
+                int c = baseTris[i + 2];
+                // 底面反绕（法线朝下）
+                tris.Add(a); tris.Add(c); tris.Add(b);
+            }
+
+            for (int i = 0; i < baseTris.Count; i += 3)
+            {
+                int a = baseTris[i] + n;
+                int b = baseTris[i + 1] + n;
+                int c = baseTris[i + 2] + n;
+                // 顶面正绕（法线朝上）
+                tris.Add(a); tris.Add(b); tris.Add(c);
+            }
+
+            var edgeCount = new Dictionary<(int, int), int>();
+            for (int i = 0; i < baseTris.Count; i += 3)
+            {
+                int a = baseTris[i];
+                int b = baseTris[i + 1];
+                int c = baseTris[i + 2];
+                AddEdge(edgeCount, a, b);
+                AddEdge(edgeCount, b, c);
+                AddEdge(edgeCount, c, a);
+            }
+
+            foreach (var edge in edgeCount.Keys)
+            {
+                int a = edge.Item1;
+                int b = edge.Item2;
+                if (edgeCount.ContainsKey((b, a)))
+                {
+                    continue; // 内部共享边，不是边界
+                }
+
+                tris.Add(a); tris.Add(b); tris.Add(b + n);
+                tris.Add(a); tris.Add(b + n); tris.Add(a + n);
+            }
+
+            var m = new Mesh { name = name };
             m.SetVertices(verts);
             m.SetTriangles(tris, 0);
             m.RecalculateNormals();
             m.RecalculateBounds();
             return m;
+        }
+
+        private static void AddEdge(Dictionary<(int, int), int> edgeCount, int a, int b)
+        {
+            var key = (a, b);
+            edgeCount[key] = edgeCount.TryGetValue(key, out int count) ? count + 1 : 1;
         }
 
         public void Dispose()
