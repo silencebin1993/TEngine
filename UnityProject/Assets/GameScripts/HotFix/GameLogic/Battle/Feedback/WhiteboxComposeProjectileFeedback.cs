@@ -32,6 +32,7 @@ namespace GameLogic.Battle.Feedback
             Field,
             Wave,
             Spore,
+            Melee,
         }
 
         // story-009：全局段（G2c）改由 FxRecipeCatalog.Global 承载，这里仍以 const 别名引用——

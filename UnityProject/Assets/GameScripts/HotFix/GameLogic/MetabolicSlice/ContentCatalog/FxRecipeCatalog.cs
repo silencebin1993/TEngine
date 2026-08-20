@@ -98,6 +98,11 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
                 Shape = "Spore", Color = new Color(0.78f, 0.5f, 1f, 0.9f),
                 Mesh = FxMeshKind.Cross, Life = FxLifeKind.Flight, DiameterCoef = 0.3f,
             },
+            ["Melee"] = new FxShapeRecipe
+            {
+                Shape = "Melee", Color = new Color(0.95f, 0.25f, 0.2f, 0.9f),
+                Mesh = FxMeshKind.Circle, Life = FxLifeKind.Flight, DiameterCoef = 0.4f,
+            },
         };
 
         /// <summary>story-010 Required 1：表 key 只读枚举，供消费方做「表 → 枚举」的反向完备性检查
