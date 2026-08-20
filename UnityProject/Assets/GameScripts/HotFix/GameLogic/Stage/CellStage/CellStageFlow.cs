@@ -741,6 +741,65 @@ namespace GameLogic.Stage.CellStage
         }
 
         /// <summary>
+        /// GM：一键灌入全部代谢道具（基因储备 + Carrier 器官）并解锁全部技能（story-002，落地 001 R4）。
+        /// 幂等：基因按 geneId 判重跳过（GeneReserve.TryAdd 本身不判重）；Carrier 器官改用稳定
+        /// PartId（"gm_"+cardDefId）并在入囊前查 CarrierRegistry 是否已存在，避免重复按键堆叠出多份
+        /// 同 cardDefId 的囊内条目（preflight-decisions.md story-002 D2/D3）。
+        /// </summary>
+        public void DebugGrantAllMetabolicItems()
+        {
+            MetabolicSlicePanel panel = MetabolicSlicePanel.Instance;
+            if (panel == null)
+            {
+                return;
+            }
+
+            int genesGranted = 0;
+            foreach (string geneId in GameLogic.MetabolicSlice.ContentCatalog.GeneCatalog.AllGeneIds)
+            {
+                bool alreadyOwned = false;
+                IReadOnlyList<GameLogic.MetabolicSlice.Carrier.GeneInstance> reserveItems = panel.GeneReserve.Items;
+                for (int i = 0; i < reserveItems.Count; i++)
+                {
+                    if (reserveItems[i].GeneId == geneId)
+                    {
+                        alreadyOwned = true;
+                        break;
+                    }
+                }
+                if (alreadyOwned)
+                {
+                    continue;
+                }
+                panel.AddGene(geneId);
+                genesGranted++;
+            }
+
+            int carriersGranted = 0;
+            foreach (var kv in GameLogic.MetabolicSlice.ContentCatalog.OrganelleCatalog.All)
+            {
+                GameLogic.MetabolicSlice.ContentCatalog.OrganelleDef def = kv.Value;
+                if (!def.IsCarrier)
+                {
+                    continue;
+                }
+                string stablePartId = "gm_" + def.Id;
+                if (panel.CarrierRegistry.GetCarrier(stablePartId) != null)
+                {
+                    continue;
+                }
+                var part = new PartInstance(stablePartId, def.Id, PartLocation.Bag());
+                panel.AddOrganPart(part);
+                carriersGranted++;
+            }
+
+            DebugUnlockAllAbilities();
+
+            TEngine.Log.Info(
+                $"[GM] 灌入全道具：基因 +{genesGranted}（共 {panel.GeneReserve.Items.Count}），Carrier +{carriersGranted}");
+        }
+
+        /// <summary>
         /// GM：在默认俯视战斗态与验证态（透视，可读出 Spin/Orbit 水平圆周运动的景深）之间切换。
         /// </summary>
         public void DebugToggleCameraVerifyMode()

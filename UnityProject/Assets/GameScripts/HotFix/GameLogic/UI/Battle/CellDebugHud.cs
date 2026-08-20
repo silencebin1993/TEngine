@@ -284,7 +284,7 @@ namespace GameLogic.UI.Battle
             GUILayout.Space(4f);
             GUILayout.Label(
                 "F10 调试HUD　Tab 卡组　B 商店　V 图鉴\n" +
-                "GM: F4 资源　F5 选卡　F6 精英选卡　F7 下一时期　F8 通关　` 全技能　FPS " +
+                "GM: F4 资源　F5 选卡　F6 精英选卡　F7 下一时期　F8 通关　` 全道具+技能　FPS " +
                 (1f / Mathf.Max(0.0001f, Time.smoothDeltaTime)).ToString("F0"),
                 _label);
             GUILayout.Label("左下角：Carrier 器官栏（拖基因进插槽）", _label);
@@ -359,7 +359,7 @@ namespace GameLogic.UI.Battle
                     Event.current.Use();
                     break;
                 case KeyCode.BackQuote: // ` / ~ ：避开 Unity F9「查找资产引用」
-                    cell.DebugUnlockAllAbilities();
+                    cell.DebugGrantAllMetabolicItems();
                     Event.current.Use();
                     break;
                 case KeyCode.F12: // 相机验证态开关（story-005）：默认俯视 ↔ 透视景深
