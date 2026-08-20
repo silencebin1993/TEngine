@@ -52,8 +52,24 @@ namespace GameLogic
         // D11：GeneReserve.Items 只在事件时读，不得每帧读（landmine #3）
         private readonly List<GeneInstance> _reserveCache = new List<GeneInstance>();
 
+        // story-003（topdown-hud-projectile-fix）R3/R4：默认隐藏，O 键 toggle；不再由 cell.IsRunning 强制常驻。
+        private bool _panelOpen;
+
+        /// <summary>供 BattleOverlayUIToolkit（Esc 互斥，短路判断）与 execute_code 断言跨控制器只读访问，同 BattleOverlayUIToolkit.Instance 先例。</summary>
+        public static BattleCarrierUIToolkit Instance { get; private set; }
+
+        /// <summary>只读探针：装配面板当前是否处于打开态。</summary>
+        public bool IsPanelOpen => _panelOpen;
+
+        /// <summary>供 BattleOverlayUIToolkit Esc 分支调用：先关本面板，不在同一次按键里弹 Pause（R4）。</summary>
+        public void SetPanelOpen(bool open)
+        {
+            _panelOpen = open;
+        }
+
         private void Awake()
         {
+            Instance = this;
             DontDestroyOnLoad(gameObject);
         }
 
@@ -153,6 +169,8 @@ namespace GameLogic
         /// <summary>story-003 #7：只读探针，供 execute_code 断言面板放大后的实际宽高。</summary>
         public float PanelHeight => _root?.Q<VisualElement>("BattleCarrierUI")?.resolvedStyle.height ?? 0f;
 
+        /// <summary>story-003 R3/R4：O 键 toggle 开关；Draft 抽卡显示期间强制收起（不得与 Draft 面板并存）；
+        /// Esc 关闭改由 BattleOverlayUIToolkit 统一入口调用 <see cref="SetPanelOpen"/>（短路判断，见该类 Update）。</summary>
         private void Update()
         {
             if (_root == null)
@@ -162,7 +180,24 @@ namespace GameLogic
 
             CellStageFlow cell = GameRoot.CellStage;
             bool running = cell != null && cell.IsRunning;
-            _root.style.display = running ? DisplayStyle.Flex : DisplayStyle.None;
+
+            if (running)
+            {
+                if (cell.Paused && cell.PendingOptions != null && cell.PendingOptions.Count > 0)
+                {
+                    _panelOpen = false;
+                }
+                else if (Input.GetKeyDown(KeyCode.O))
+                {
+                    _panelOpen = !_panelOpen;
+                }
+            }
+            else
+            {
+                _panelOpen = false;
+            }
+
+            _root.style.display = (running && _panelOpen) ? DisplayStyle.Flex : DisplayStyle.None;
             if (!running)
             {
                 return;
@@ -629,6 +664,11 @@ namespace GameLogic
 
         private void OnDestroy()
         {
+            if (Instance == this)
+            {
+                Instance = null;
+            }
+
             // D13：成对反订阅 GameEvent；story-001 R1 同步反订阅 InventoryChangedEvent
             GameEvent.RemoveEventListener(CarrierRegistry.CarrierActivatedEvent, OnCarrierActivated);
             GameEvent.RemoveEventListener(MetabolicSlicePanel.InventoryChangedEvent, OnCarrierActivated);

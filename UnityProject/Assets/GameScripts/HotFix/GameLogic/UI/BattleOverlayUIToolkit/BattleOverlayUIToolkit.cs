@@ -313,7 +313,16 @@ namespace GameLogic
                 // 显示期间 Esc 又把 Pause 叠加到 Draft 上。
                 else if (Input.GetKeyDown(KeyCode.Escape) && (_current == PanelKind.Pause || !cell.Paused))
                 {
-                    HandleEscKeyToggle();
+                    // story-003（topdown-hud-projectile-fix）R4：装配面板打开时，第一次 Esc 只关它本身，
+                    // 不同帧弹 Pause（避免双层遮挡）；面板已关时才走原 HandleEscKeyToggle，第二次 Esc 才进 Pause。
+                    if (_current != PanelKind.Pause && BattleCarrierUIToolkit.Instance != null && BattleCarrierUIToolkit.Instance.IsPanelOpen)
+                    {
+                        BattleCarrierUIToolkit.Instance.SetPanelOpen(false);
+                    }
+                    else
+                    {
+                        HandleEscKeyToggle();
+                    }
                 }
             }
             else if (_current != PanelKind.None)
