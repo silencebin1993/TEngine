@@ -132,6 +132,10 @@ namespace GameLogic.Battle.Feedback
         /// <summary>story-006 验收探针：最近一次 Bolt/default 分支算出的世界坐标，供断言飞行位移随 Tick 逐帧偏离 Origin（非仅原地闪一下）。</summary>
         public Vector3 LastBoltPosition { get; private set; }
 
+        /// <summary>story-007 验收探针：最近一次 Melee 分支算出的世界坐标，供与 <see cref="LastBoltPosition"/> 对照——
+        /// Melee 应「原地生长」不随 Tick 明显位移，Bolt 应沿 Direction 明显飞出。</summary>
+        public Vector3 LastMeleePosition { get; private set; }
+
         public void OnComposeCast(ComposeCastSignal signal)
         {
             if (!signal.HasProjectile)
@@ -442,6 +446,19 @@ namespace GameLogic.Battle.Feedback
                     _tf[idx].localPosition = new Vector3(pos.x, MarkerY, pos.y);
                     _tf[idx].localRotation = Quaternion.identity;
                     _tf[idx].localScale = new Vector3(diameter, 1f, diameter);
+                    break;
+                }
+                case ShapeKind.Melee:
+                {
+                    // story-007 D1：近战「原地生长」——不复用 BoltFlightDistance 线性位移，
+                    // 只走 003 D5 的 Spin/Orbit 偏移（=0 时天然零向量），靠缩放给出冲击感。
+                    float2 offset = ComposeMotionMath.Offset(_phase[idx], _spin[idx], _orbit[idx], _elapsed[idx]);
+                    float2 pos = origin + offset;
+                    float grown = radius * recipe.DiameterCoef * (0.6f + 0.4f * Mathf.Clamp01(u));
+                    _tf[idx].localPosition = new Vector3(pos.x, MarkerY, pos.y);
+                    _tf[idx].localRotation = Quaternion.identity;
+                    _tf[idx].localScale = new Vector3(grown, 1f, grown);
+                    LastMeleePosition = _tf[idx].localPosition;
                     break;
                 }
                 case ShapeKind.Bolt:

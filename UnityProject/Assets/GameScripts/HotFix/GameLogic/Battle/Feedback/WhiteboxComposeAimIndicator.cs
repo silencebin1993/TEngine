@@ -37,6 +37,12 @@ namespace GameLogic.Battle.Feedback
         /// 供 Presenter 的脏检查逻辑做「未变则不重复调用」的断言依据。不影响任何表现/结算路径。</summary>
         public int RefreshCount { get; private set; }
 
+        /// <summary>story-007 验收探针：<see cref="ShowMarker"/> 最近一次取到的 Shape 字符串，供断言切 Carrier 后指示器分型变化。</summary>
+        public string LastIndicatorShapeKind { get; private set; } = "";
+
+        /// <summary>story-007 验收探针：<see cref="ShowMarker"/> 最近一次取到的配方网格键，供与 <see cref="LastIndicatorShapeKind"/> 联合断言。</summary>
+        public FxMeshKind LastIndicatorMeshKind { get; private set; }
+
         private Material _matTemplate;
         private Mesh _circleMesh;
         private Mesh _streakMesh;
@@ -110,6 +116,9 @@ namespace GameLogic.Battle.Feedback
                 _mr[idx].enabled = false;
                 return;
             }
+
+            LastIndicatorShapeKind = evt.Shape;
+            LastIndicatorMeshKind = recipe.Mesh;
 
             float radius = MetabolicSliceBridge.DamageAreaRadiusFor(evt.Damage, evt.Scale);
             Color baseColor = recipe.Color;
