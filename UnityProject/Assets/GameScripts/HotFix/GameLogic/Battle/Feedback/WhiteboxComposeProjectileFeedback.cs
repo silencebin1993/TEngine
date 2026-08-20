@@ -54,8 +54,14 @@ namespace GameLogic.Battle.Feedback
         private const float PersistentLife = FxRecipeCatalog.Global.PersistentLife;
 
         /// <summary>story-006：Bolt 沿 Direction 的独立线性飞行距离，不进 FxRecipeCatalog（只有 Bolt 需要直线飞行，
-        /// Melee/Arc/Wave/Spore 语义不同）。不改 <see cref="ComposeMotionMath.Offset"/>（003 D5 锁死）。</summary>
-        private const float BoltFlightDistance = 6f;
+        /// Melee/Arc/Wave/Spore 语义不同）。不改 <see cref="ComposeMotionMath.Offset"/>（003 D5 锁死）。
+        /// story-004：纯俯视下核实 6f 太短——0.3s 全程都贴在玩家附近，读不出"射出去"，调大到 9f。</summary>
+        private const float BoltFlightDistance = 9f;
+
+        /// <summary>story-004：Bolt 出生点前移量。u=0 时若仍在 Origin（=玩家所在坐标），标记会与玩家胶囊完全
+        /// 重叠，人眼读作"角色本体闪了一下"而不是"射出一发子弹"（004 截图实测复现）。加上这个固定前移量，
+        /// 标记从第 1 帧起就已经离开玩家轮廓，不叠加进 <see cref="ComposeMotionMath.Offset"/>（003 D5 锁死）。</summary>
+        private const float BoltMuzzleOffset = 1.2f;
 
         // story-009：Bolt/Spore 直径系数与 Beam 长/宽系数改为逐配方（G2b），从 FxRecipeCatalog
         // 按当前 ShapeKind 查表读取，不再是同一套固定 const（详见 ApplyTransform）。
@@ -467,7 +473,8 @@ namespace GameLogic.Battle.Feedback
                     float2 offset = ComposeMotionMath.Offset(_phase[idx], _spin[idx], _orbit[idx], _elapsed[idx]);
                     // story-006：叠加沿 Direction 的独立线性飞行位移，让 Bolt 读得出「射出去」——
                     // Spin=Orbit=0 时 offset 天然是零向量，与 offset 正交不冲突（Decision 4）。
-                    float2 linear = _direction[idx] * BoltFlightDistance * u;
+                    // story-004：加 BoltMuzzleOffset 常量前移，避免 u=0 时贴在玩家原点上。
+                    float2 linear = _direction[idx] * (BoltMuzzleOffset + BoltFlightDistance * u);
                     float2 pos = origin + offset + linear;
                     float diameter = radius * recipe.DiameterCoef;
                     // story-010 J1：Bolt 换成有指向的锥形网格后必须跟着 Direction 转——

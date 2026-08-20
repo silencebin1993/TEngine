@@ -76,7 +76,8 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
             ["Bolt"] = new FxShapeRecipe
             {
                 Shape = "Bolt", Color = new Color(1f, 0.95f, 0.6f, 0.95f),
-                Mesh = FxMeshKind.Cone, Life = FxLifeKind.Flight, DiameterCoef = 0.35f,
+                // story-004：纯俯视截图实测 0.35 系数下直径太接近玩家本体尺寸，叠加出生点重叠后几乎读不出来；调大到 0.45。
+                Mesh = FxMeshKind.Cone, Life = FxLifeKind.Flight, DiameterCoef = 0.45f,
             },
             ["Beam"] = new FxShapeRecipe
             {
