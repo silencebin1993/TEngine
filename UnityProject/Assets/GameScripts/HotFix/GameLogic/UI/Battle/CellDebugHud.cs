@@ -362,7 +362,7 @@ namespace GameLogic.UI.Battle
                     cell.DebugGrantAllMetabolicItems();
                     Event.current.Use();
                     break;
-                case KeyCode.F12: // 相机验证态开关（story-005）：默认俯视 ↔ 透视景深
+                case KeyCode.F12: // 相机验证态开关（story-004 语义对调）：默认透视 ↔ 调试正交俯视
                     cell.DebugToggleCameraVerifyMode();
                     Event.current.Use();
                     break;

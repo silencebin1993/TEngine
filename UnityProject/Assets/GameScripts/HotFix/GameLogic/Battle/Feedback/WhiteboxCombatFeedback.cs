@@ -20,12 +20,16 @@ namespace GameLogic.Battle.Feedback
         private const float HurtHold = 0.08f;
         private const float HurtPeakAlpha = 0.62f;
         private const float HurtFovPunch = 1.8f;
+        // story-004：默认相机改透视后，orthoSize 推近对透视相机无效，改按 FOV 收窄；
+        // 比例参照 orthoSize 16→推近 1.8（约 11%）换算到默认 FOV 50，非精确值，允许目测微调。
+        private const float HurtFovPunchDegrees = 6f;
         private static readonly Color HurtColor = new Color(1f, 0.05f, 0.08f, 1f);
 
         private GameObject _overlayRoot;
         private Image _overlayImage;
         private float _hurtTimeLeft;
         private float _baseOrthoSize = -1f;
+        private float _baseFov = -1f;
         private float _fovPunchLeft;
 
         // ── 命中 / 击杀 / 吞噬：池化闪光 ──
@@ -148,29 +152,39 @@ namespace GameLogic.Battle.Feedback
         private void PunchCamera()
         {
             Camera cam = Camera.main;
-            if (cam == null || !cam.orthographic)
+            if (cam == null)
             {
                 return;
             }
 
-            if (_baseOrthoSize < 0f)
-            {
-                _baseOrthoSize = cam.orthographicSize;
-            }
-
             _fovPunchLeft = HurtDuration;
-            cam.orthographicSize = Mathf.Max(4f, _baseOrthoSize - HurtFovPunch);
+            if (cam.orthographic)
+            {
+                if (_baseOrthoSize < 0f)
+                {
+                    _baseOrthoSize = cam.orthographicSize;
+                }
+                cam.orthographicSize = Mathf.Max(4f, _baseOrthoSize - HurtFovPunch);
+            }
+            else
+            {
+                if (_baseFov < 0f)
+                {
+                    _baseFov = cam.fieldOfView;
+                }
+                cam.fieldOfView = Mathf.Max(10f, _baseFov - HurtFovPunchDegrees);
+            }
         }
 
         private void TickCameraPunch(float dt)
         {
-            if (_fovPunchLeft <= 0f || _baseOrthoSize < 0f)
+            if (_fovPunchLeft <= 0f || (_baseOrthoSize < 0f && _baseFov < 0f))
             {
                 return;
             }
 
             Camera cam = Camera.main;
-            if (cam == null || !cam.orthographic)
+            if (cam == null)
             {
                 _fovPunchLeft = 0f;
                 return;
@@ -179,10 +193,29 @@ namespace GameLogic.Battle.Feedback
             _fovPunchLeft = Mathf.Max(0f, _fovPunchLeft - dt);
             float t = 1f - (_fovPunchLeft / HurtDuration);
             // 平滑回到基准视角
-            cam.orthographicSize = Mathf.Lerp(_baseOrthoSize - HurtFovPunch, _baseOrthoSize, t * t);
-            if (_fovPunchLeft <= 0f)
+            if (cam.orthographic)
             {
-                cam.orthographicSize = _baseOrthoSize;
+                if (_baseOrthoSize < 0f)
+                {
+                    return;
+                }
+                cam.orthographicSize = Mathf.Lerp(_baseOrthoSize - HurtFovPunch, _baseOrthoSize, t * t);
+                if (_fovPunchLeft <= 0f)
+                {
+                    cam.orthographicSize = _baseOrthoSize;
+                }
+            }
+            else
+            {
+                if (_baseFov < 0f)
+                {
+                    return;
+                }
+                cam.fieldOfView = Mathf.Lerp(_baseFov - HurtFovPunchDegrees, _baseFov, t * t);
+                if (_fovPunchLeft <= 0f)
+                {
+                    cam.fieldOfView = _baseFov;
+                }
             }
         }
 
@@ -303,16 +336,24 @@ namespace GameLogic.Battle.Feedback
 
         public void Dispose()
         {
-            if (_baseOrthoSize > 0f)
+            if (_baseOrthoSize > 0f || _baseFov > 0f)
             {
                 Camera cam = Camera.main;
-                if (cam != null && cam.orthographic)
+                if (cam != null)
                 {
-                    cam.orthographicSize = _baseOrthoSize;
+                    if (cam.orthographic && _baseOrthoSize > 0f)
+                    {
+                        cam.orthographicSize = _baseOrthoSize;
+                    }
+                    else if (!cam.orthographic && _baseFov > 0f)
+                    {
+                        cam.fieldOfView = _baseFov;
+                    }
                 }
             }
 
             _baseOrthoSize = -1f;
+            _baseFov = -1f;
             _fovPunchLeft = 0f;
             _hurtTimeLeft = 0f;
 

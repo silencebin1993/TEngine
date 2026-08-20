@@ -93,7 +93,7 @@ namespace GameLogic.Stage.CellStage
             }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            if (_sandboxMode && !_cameraVerifyMode)
+            if (_sandboxMode && _cameraVerifyMode)
             {
                 DebugToggleCameraVerifyMode();
             }
@@ -225,11 +225,12 @@ namespace GameLogic.Stage.CellStage
             }
         }
 
-        /// <summary>验证态相机（story-005）：透视俯仰角，读出 Spin/Orbit 水平圆周运动的景深。</summary>
+        /// <summary>透视相机参数（story-004 起为默认态；俯仰角读出 Spin/Orbit 水平圆周运动的景深）。</summary>
         private const float VerifyPitchDegrees = 50f;
         private const float VerifyFieldOfView = 50f;
         private const float VerifyViewDistance = 18f;
 
+        /// <summary>调试正交俯视态（story-004 起不再是默认，仅 F12 切换用）。</summary>
         private static readonly Vector3 DefaultCameraOffset = new Vector3(0f, 40f, 0f);
         private static readonly Quaternion DefaultCameraRotation = Quaternion.Euler(90f, 0f, 0f);
 
@@ -242,14 +243,15 @@ namespace GameLogic.Stage.CellStage
                 go.tag = "MainCamera";
                 _camera = go.GetComponent<Camera>();
             }
-            _camera.orthographic = true;
-            _camera.orthographicSize = 16f;
+            _camera.orthographic = false;
+            _camera.fieldOfView = VerifyFieldOfView;
             _camera.clearFlags = CameraClearFlags.SolidColor;
             _camera.backgroundColor = new Color(0.05f, 0.07f, 0.10f);
             _camera.nearClipPlane = 0.1f;
             _camera.farClipPlane = 200f;
-            _camera.transform.SetPositionAndRotation(
-                new Vector3(0f, 40f, 0f), Quaternion.Euler(90f, 0f, 0f));
+            Quaternion rot = Quaternion.Euler(VerifyPitchDegrees, 0f, 0f);
+            _cameraFollowOffset = rot * new Vector3(0f, 0f, -VerifyViewDistance);
+            _camera.transform.SetPositionAndRotation(_cameraFollowOffset, rot);
         }
 
         /// <summary>
@@ -800,7 +802,7 @@ namespace GameLogic.Stage.CellStage
         }
 
         /// <summary>
-        /// GM：在默认俯视战斗态与验证态（透视，可读出 Spin/Orbit 水平圆周运动的景深）之间切换。
+        /// GM：在默认透视战斗态与调试正交俯视态之间切换。
         /// </summary>
         public void DebugToggleCameraVerifyMode()
         {
@@ -814,17 +816,17 @@ namespace GameLogic.Stage.CellStage
             Quaternion rot;
             if (_cameraVerifyMode)
             {
-                _camera.orthographic = false;
-                _camera.fieldOfView = VerifyFieldOfView;
-                rot = Quaternion.Euler(VerifyPitchDegrees, 0f, 0f);
-                _cameraFollowOffset = rot * new Vector3(0f, 0f, -VerifyViewDistance);
-            }
-            else
-            {
                 _camera.orthographic = true;
                 _camera.orthographicSize = 16f;
                 rot = DefaultCameraRotation;
                 _cameraFollowOffset = DefaultCameraOffset;
+            }
+            else
+            {
+                _camera.orthographic = false;
+                _camera.fieldOfView = VerifyFieldOfView;
+                rot = Quaternion.Euler(VerifyPitchDegrees, 0f, 0f);
+                _cameraFollowOffset = rot * new Vector3(0f, 0f, -VerifyViewDistance);
             }
 
             _camera.transform.rotation = rot;
@@ -836,7 +838,7 @@ namespace GameLogic.Stage.CellStage
                     p.x + _cameraFollowOffset.x, _cameraFollowOffset.y, p.y + _cameraFollowOffset.z);
             }
 
-            string mode = _cameraVerifyMode ? "验证态（透视）" : "默认态（俯视）";
+            string mode = _cameraVerifyMode ? "调试态（俯视）" : "默认态（透视）";
             TEngine.Log.Info($"[GM] 相机切换 → {mode}");
         }
 
