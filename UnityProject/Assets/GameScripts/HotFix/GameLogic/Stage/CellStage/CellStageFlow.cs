@@ -475,22 +475,37 @@ namespace GameLogic.Stage.CellStage
             }
         }
 
-        private static Mesh BuildQuad()
+        /// <summary>弹体锥体。锥尖在局部 +X（DrawProjectiles 的旋转把 +X 转到飞行方向），底面圆环在局部 YZ 平面。</summary>
+        private static Mesh BuildCone(float radius, float halfLength, int segments)
         {
-            var m = new Mesh { name = "SimQuad" };
-            m.SetVertices(new System.Collections.Generic.List<Vector3>
+            var vertices = new List<Vector3> { new Vector3(halfLength, 0f, 0f), new Vector3(-halfLength, 0f, 0f) };
+            var uvs = new List<Vector2> { new Vector2(0.5f, 1f), new Vector2(0.5f, 0f) };
+
+            int ringStart = vertices.Count;
+            for (int i = 0; i <= segments; i++)
             {
-                new Vector3(-0.5f, 0f, -0.5f),
-                new Vector3(-0.5f, 0f, 0.5f),
-                new Vector3(0.5f, 0f, 0.5f),
-                new Vector3(0.5f, 0f, -0.5f),
-            });
-            m.SetUVs(0, new System.Collections.Generic.List<Vector2>
+                float t = i / (float)segments * Mathf.PI * 2f;
+                vertices.Add(new Vector3(-halfLength, radius * Mathf.Cos(t), radius * Mathf.Sin(t)));
+                uvs.Add(new Vector2(i / (float)segments, 0f));
+            }
+
+            var triangles = new List<int>();
+            const int tip = 0;
+            const int baseCenter = 1;
+            for (int i = 0; i < segments; i++)
             {
-                new Vector2(0f, 0f), new Vector2(0f, 1f),
-                new Vector2(1f, 1f), new Vector2(1f, 0f),
-            });
-            m.SetTriangles(new[] { 0, 1, 2, 0, 2, 3 }, 0);
+                int a = ringStart + i;
+                int b = ringStart + i + 1;
+                // 侧面：锥尖 -> 底环，外法线朝外
+                triangles.Add(tip); triangles.Add(a); triangles.Add(b);
+                // 底面：圆心 -> 底环，缠绕方向相反，外法线朝 -X
+                triangles.Add(baseCenter); triangles.Add(b); triangles.Add(a);
+            }
+
+            var m = new Mesh { name = "SimCone" };
+            m.SetVertices(vertices);
+            m.SetUVs(0, uvs);
+            m.SetTriangles(triangles, 0);
             m.RecalculateNormals();
             m.RecalculateBounds();
             return m;
@@ -640,7 +655,7 @@ namespace GameLogic.Stage.CellStage
                 // 加大加亮 + SimRenderer 内的方向拉长（story-010 V1）：默认半径下的弹体太小太暗。
                 _renderer?.DrawProjectiles(_sim.World.Projectiles, new SimVisual
                 {
-                    Mesh = BuildQuadCached(),
+                    Mesh = BuildConeCached(),
                     Material = ProjectileMaterial(),
                     ScaleMul = 1.8f,
                     BaseColor = new Color(1f, 0.95f, 0.35f),
@@ -664,10 +679,10 @@ namespace GameLogic.Stage.CellStage
                 _camera.transform.position, want, 1f - Mathf.Exp(-8f * dt));
         }
 
-        private Mesh _quadCache;
+        private Mesh _coneCache;
         private Material _projMat;
 
-        private Mesh BuildQuadCached() => _quadCache ??= BuildQuad();
+        private Mesh BuildConeCached() => _coneCache ??= BuildCone(0.5f, 0.5f, 10);
 
         private Material ProjectileMaterial()
         {
