@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.UIElements;
 using GameLogic.MetabolicSlice.Carrier;
 using GameLogic.MetabolicSlice.ContentCatalog;
+using GameLogic.Progression;
 using GameLogic.Stage;
 using GameLogic.Stage.CellStage;
 using GameLogic.UI.Battle;
@@ -32,6 +33,12 @@ namespace GameLogic
         private ScrollView _slotBar;
         private ScrollView _geneList;
         private Label _noCarrierHint;
+        private Button _organViewToggle;
+        private Button _geneViewToggle;
+
+        /// <summary>story-003（slot-unlimited-codex）R4：已拥有/全量 视图切换态，默认已拥有（行为不变）。</summary>
+        private bool _showAllOrgans;
+        private bool _showAllGenes;
 
         /// <summary>story-002 R2：槽位按钮改运行时按 carrier.Slots.Count 动态生成，不再固定数组。</summary>
         private readonly List<Button> _slotButtons = new List<Button>();
@@ -130,6 +137,18 @@ namespace GameLogic
             _slotBar = _root.Q<ScrollView>("SlotBar");
             _geneList = _root.Q<ScrollView>("GeneList");
             _noCarrierHint = _root.Q<Label>("NoCarrierHint");
+            _organViewToggle = _root.Q<Button>("OrganViewToggle");
+            _geneViewToggle = _root.Q<Button>("GeneViewToggle");
+
+            // story-003（slot-unlimited-codex）R4：已拥有/全量 Tab，纯 UI 展示态切换，不写数据。
+            if (_organViewToggle != null)
+            {
+                _organViewToggle.clicked += () => SetShowAllOrgans(!_showAllOrgans);
+            }
+            if (_geneViewToggle != null)
+            {
+                _geneViewToggle.clicked += () => SetShowAllGenes(!_showAllGenes);
+            }
 
             // 用户要求全部面板可拖拽：面板根节点已被基因/器官拖拽手势占用（本文件的 D5/D8），
             // 不能复用根节点当把手，改用新增的 CarrierTitleBar 标题栏。
@@ -170,6 +189,42 @@ namespace GameLogic
 
         /// <summary>story-002 R2：只读探针，供 execute_code 断言插槽条实际生成的节点数（应等于 carrier.Slots.Count）。</summary>
         public int VisibleSlotButtonCount => _slotButtons.Count;
+
+        /// <summary>story-003（slot-unlimited-codex）R4：只读探针 + 切换入口，供 execute_code 直调，不必模拟点击。</summary>
+        public bool ShowAllOrgans => _showAllOrgans;
+
+        /// <summary>同上，基因栏。</summary>
+        public bool ShowAllGenes => _showAllGenes;
+
+        /// <summary>切"已拥有/全量"器官视图；全量视图纯展示态，不调用 AddOrganPart/写 CarrierRegistry（D2）。</summary>
+        public void SetShowAllOrgans(bool showAll)
+        {
+            _showAllOrgans = showAll;
+            if (_organViewToggle != null)
+            {
+                _organViewToggle.text = showAll ? "已拥有" : "全量目录";
+            }
+            MetabolicSlicePanel panel = MetabolicSlicePanel.Instance;
+            if (panel != null)
+            {
+                RefreshCarrierList(panel);
+            }
+        }
+
+        /// <summary>切"已拥有/全量"基因视图；全量视图纯展示态，不调用 AddGene/写 GeneReserve（D2）。</summary>
+        public void SetShowAllGenes(bool showAll)
+        {
+            _showAllGenes = showAll;
+            if (_geneViewToggle != null)
+            {
+                _geneViewToggle.text = showAll ? "已拥有" : "全量目录";
+            }
+            MetabolicSlicePanel panel = MetabolicSlicePanel.Instance;
+            if (panel != null)
+            {
+                RefreshGeneList(panel);
+            }
+        }
 
         /// <summary>story-003 #7：只读探针，供 execute_code 断言面板放大后的实际宽高。</summary>
         public float PanelWidth => _root?.Q<VisualElement>("BattleCarrierUI")?.resolvedStyle.width ?? 0f;
@@ -234,6 +289,13 @@ namespace GameLogic
             }
 
             _carrierList.Clear();
+
+            if (_showAllOrgans)
+            {
+                RefreshCarrierListAllCatalog();
+                return;
+            }
+
             CarrierRegistry registry = panel.CarrierRegistry;
             string activeId = registry.ActiveCarrierId;
 
@@ -254,6 +316,43 @@ namespace GameLogic
                 btn.RegisterCallback<PointerEnterEvent>(evt => BattleOverlayUIToolkit.Instance?.ShowTooltip(desc, evt.position));
                 btn.RegisterCallback<PointerLeaveEvent>(evt => BattleOverlayUIToolkit.Instance?.HideTooltip());
                 _carrierList.Add(btn);
+            }
+        }
+
+        /// <summary>story-003（slot-unlimited-codex）D2：全量目录（24 器官），数据源复用 CodexRegistry.AllOrganelleEntries()
+        /// （V 键图鉴同一出口）。纯展示态：只读说明 + 点击切视觉高亮，不调用 SetActive/AddOrganPart，不写 CarrierRegistry/_bag。</summary>
+        private void RefreshCarrierListAllCatalog()
+        {
+            CodexRegistry codex = GameRoot.CellStage?.Codex;
+            if (codex == null)
+            {
+                return;
+            }
+
+            foreach (OrganelleCodexEntry e in codex.AllOrganelleEntries())
+            {
+                Button btn = new Button();
+                btn.text = e.DisplayName ?? e.Id;
+                btn.AddToClassList("carrier-item");
+                btn.AddToClassList("carrier-catalog-item");
+                string desc = e.Description;
+                btn.RegisterCallback<PointerEnterEvent>(evt => BattleOverlayUIToolkit.Instance?.ShowTooltip(desc, evt.position));
+                btn.RegisterCallback<PointerLeaveEvent>(evt => BattleOverlayUIToolkit.Instance?.HideTooltip());
+                btn.clicked += () => TogglePreviewHighlight(btn);
+                _carrierList.Add(btn);
+            }
+        }
+
+        /// <summary>全量目录条目的"试装预览"：纯视觉高亮切换，不触发任何数据写入。</summary>
+        private static void TogglePreviewHighlight(VisualElement element)
+        {
+            if (element.ClassListContains("catalog-preview-selected"))
+            {
+                element.RemoveFromClassList("catalog-preview-selected");
+            }
+            else
+            {
+                element.AddToClassList("catalog-preview-selected");
             }
         }
 
@@ -332,12 +431,43 @@ namespace GameLogic
             }
 
             _geneList.Clear();
+
+            if (_showAllGenes)
+            {
+                RefreshGeneListAllCatalog();
+                return;
+            }
+
             _reserveCache.Clear();
             _reserveCache.AddRange(panel.GeneReserve.Items);
 
             // D10：先 11 条 Contract 再 19 条 Module，各自保持目录声明序，两段之间插分组标题
             AddGeneSection("契约基因", GeneCatalog.AllIds);
             AddGeneSection("模块基因", GeneCatalog.AllModuleIds);
+        }
+
+        /// <summary>story-003（slot-unlimited-codex）D2：全量目录（30 基因），数据源复用 CodexRegistry.AllGeneEntries()
+        /// （V 键图鉴同一出口）。纯展示态：只读说明 + 点击切视觉高亮，不调用 DragEquipGene，不写 GeneReserve/_bag。</summary>
+        private void RefreshGeneListAllCatalog()
+        {
+            CodexRegistry codex = GameRoot.CellStage?.Codex;
+            if (codex == null)
+            {
+                return;
+            }
+
+            foreach (GeneCodexEntry e in codex.AllGeneEntries())
+            {
+                Button btn = new Button();
+                btn.text = e.DisplayName ?? e.Id;
+                btn.AddToClassList("gene-item");
+                btn.AddToClassList("gene-catalog-item");
+                string desc = e.Description;
+                btn.RegisterCallback<PointerEnterEvent>(evt => BattleOverlayUIToolkit.Instance?.ShowTooltip(desc, evt.position));
+                btn.RegisterCallback<PointerLeaveEvent>(evt => BattleOverlayUIToolkit.Instance?.HideTooltip());
+                btn.clicked += () => TogglePreviewHighlight(btn);
+                _geneList.Add(btn);
+            }
         }
 
         private void AddGeneSection(string sectionTitle, System.Collections.Generic.IEnumerable<string> geneIds)
