@@ -3,6 +3,7 @@ using ComposeEngine.Core;
 using GameLogic.Cards;
 using GameLogic.Core;
 using GameLogic.MetabolicSlice.Combat;
+using GameLogic.MetabolicSlice.ContentCatalog;
 using GameLogic.MetabolicSlice.DebugTools;
 using GameLogic.Progression;
 using GameLogic.Stage;
@@ -42,7 +43,15 @@ namespace GameLogic.UI.Battle
         /// <summary>story-006：LookDev 沙盒是否激活。始终存在（不用 #if 包），正式包里永远是 false——
         /// 真正的入口开关（菜单按钮/GameRoot.StartLookDevSandbox）才是 #if UNITY_EDITOR || DEVELOPMENT_BUILD。</summary>
         private bool _lookDevActive;
-        private int _lookDevFixtureIndex;
+
+        /// <summary>story-003：自由装配沙盒状态——基元池多选 + 7 维度覆盖，逻辑全在
+        /// <see cref="SandboxAssembler"/>（不依赖 UnityEngine，可被 execute_code 直接断言）。</summary>
+        private readonly List<string> _sandboxGeneIds = new List<string>();
+        private readonly List<string> _sandboxOrganelleIds = new List<string>();
+        private SandboxOverrides _sandboxOverrides;
+        private Vector2 _sandboxGeneScroll;
+        private Vector2 _sandboxOrganScroll;
+        private int _sandboxFireSeed = 1;
 
         /// <summary>story-003 D10：新 UI Toolkit 选卡面板（<see cref="BattleDraftUIToolkit"/>）默认事件触发式显示，
         /// 本旧 IMGUI 选卡面板改为按 K 键打开的对照入口，默认关闭避免与新 UI 同屏重复。</summary>
@@ -160,7 +169,7 @@ namespace GameLogic.UI.Battle
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             if (GUILayout.Button("LookDev 沙盒", GUILayout.Height(30f)))
             {
-                _lookDevFixtureIndex = 0;
+                ResetSandboxAssembler();
                 _lookDevActive = true;
                 GameRoot.StartLookDevSandbox();
             }
@@ -374,53 +383,103 @@ namespace GameLogic.UI.Battle
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
         /// <summary>
-        /// LookDev 对照沙盒面板（story-006）：跳过正常战斗 HUD/Deck/Shop/Codex/Draft 绘制。
-        /// 渲染 100% 复用 002 信号 + 004 Presenter + 003 运动，本方法唯一的新代码是调用
-        /// <see cref="MetabolicSliceBridge.ApplyEvent"/>，不另起 Publish/Feedback 实现。
+        /// story-003：自由装配沙盒面板——替换 story-006 的固定 7 组 A/B 夹具回放。左侧基因/器官多选
+        /// 基元池 + 7 维度覆盖滑杆，右侧实时（R3）展示 <see cref="SandboxAssembler.Compose"/> 产出的
+        /// HitEvent；预设模板按钮一键把原 <see cref="LookDevFixtures"/> 7 组载入覆盖值（Required 3，
+        /// 不删除 LookDevFixtures.cs）。"开火"仍复用 <see cref="MetabolicSliceBridge.ApplyEvent"/>。
         /// </summary>
         private void DrawLookDevSandbox(CellStageFlow cell)
         {
-            IReadOnlyList<LookDevFixture> fixtures = LookDevFixtures.All;
-            if (fixtures.Count == 0)
-            {
-                return;
-            }
-            _lookDevFixtureIndex = ((_lookDevFixtureIndex % fixtures.Count) + fixtures.Count) % fixtures.Count;
-            LookDevFixture fixture = fixtures[_lookDevFixtureIndex];
+            HitEvent preview = SandboxAssembler.Compose(_sandboxGeneIds, _sandboxOrganelleIds, _sandboxOverrides, seed: 1);
 
-            GUILayout.BeginArea(new Rect(12f, 12f, 480f, 250f));
-            GUI.Box(new Rect(0f, 0f, 480f, 250f), "");
+            var r = new Rect(12f, 12f, 860f, 560f);
+            GUILayout.BeginArea(r);
+            GUI.Box(new Rect(0f, 0f, r.width, r.height), "");
             GUILayout.Space(6f);
-            GUILayout.Label("<b>LookDev 对照沙盒</b>", _big);
-            GUILayout.Label($"[{_lookDevFixtureIndex + 1}/{fixtures.Count}] {fixture.Name}　{fixture.AxisLabel}", _label);
+            GUILayout.Label("<b>自由装配沙盒</b>　基因/器官多选 + 7 维度覆盖　右侧实时预览 HitEvent", _big);
             GUILayout.Space(4f);
-            GUILayout.Label($"A: {FieldSummary(fixture.A)}", _label);
-            GUILayout.Label($"B: {FieldSummary(fixture.B)}", _label);
-            GUILayout.Space(8f);
 
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button("发射 A", GUILayout.Height(30f)))
+
+            GUILayout.BeginVertical(GUILayout.Width(320f));
+            GUILayout.Label($"<b>基因</b>（已选 {_sandboxGeneIds.Count}）", _label);
+            _sandboxGeneScroll = GUILayout.BeginScrollView(_sandboxGeneScroll, GUILayout.Height(190f));
+            foreach (string id in GeneCatalog.AllGeneIds)
             {
-                cell.MetabolicBridge?.ApplyEvent(fixture.A);
+                bool sel = _sandboxGeneIds.Contains(id);
+                bool now = GUILayout.Toggle(sel, $"{GeneCatalog.GetDisplayName(id)}（{id}）", _label);
+                if (now != sel)
+                {
+                    if (now) _sandboxGeneIds.Add(id); else _sandboxGeneIds.Remove(id);
+                }
             }
-            if (GUILayout.Button("发射 B", GUILayout.Height(30f)))
+            GUILayout.EndScrollView();
+
+            GUILayout.Label($"<b>器官</b>（已选 {_sandboxOrganelleIds.Count}）", _label);
+            _sandboxOrganScroll = GUILayout.BeginScrollView(_sandboxOrganScroll, GUILayout.Height(190f));
+            foreach (KeyValuePair<string, OrganelleDef> kv in OrganelleCatalog.All)
             {
-                cell.MetabolicBridge?.ApplyEvent(fixture.B);
+                bool sel = _sandboxOrganelleIds.Contains(kv.Key);
+                bool now = GUILayout.Toggle(sel, $"{kv.Value.DisplayName}（{kv.Key}　{kv.Value.Role}）", _label);
+                if (now != sel)
+                {
+                    if (now) _sandboxOrganelleIds.Add(kv.Key); else _sandboxOrganelleIds.Remove(kv.Key);
+                }
             }
+            GUILayout.EndScrollView();
+
+            if (GUILayout.Button("清空基元选择", GUILayout.Height(24f)))
+            {
+                _sandboxGeneIds.Clear();
+                _sandboxOrganelleIds.Clear();
+            }
+            GUILayout.EndVertical();
+
+            GUILayout.BeginVertical(GUILayout.Width(260f));
+            GUILayout.Label("<b>7 维度覆盖</b>（勾选启用，未勾选走真实链）", _label);
+            DrawSandboxTextOverride("Shape", ref _sandboxOverrides.EnableShape, ref _sandboxOverrides.Shape);
+            DrawSandboxSliderOverride("Scale", ref _sandboxOverrides.EnableScale, ref _sandboxOverrides.Scale, 0.1f, 5f);
+            DrawSandboxSliderOverride("Count", ref _sandboxOverrides.EnableCount, ref _sandboxOverrides.Count, 1f, 10f);
+            DrawSandboxSliderOverride("Spin", ref _sandboxOverrides.EnableSpin, ref _sandboxOverrides.Spin, -180f, 180f);
+            DrawSandboxSliderOverride("Orbit", ref _sandboxOverrides.EnableOrbit, ref _sandboxOverrides.Orbit, -5f, 5f);
+            DrawSandboxBoolOverride("Explode", ref _sandboxOverrides.EnableExplode, ref _sandboxOverrides.ExplodeOnHit);
+            DrawSandboxTextOverride("Tag", ref _sandboxOverrides.EnableTag, ref _sandboxOverrides.Tag);
+
+            GUILayout.Space(6f);
+            GUILayout.Label("<b>预设模板</b>（一键载入原 7 组 LookDev 夹具）", _label);
+            IReadOnlyList<LookDevFixture> fixtures = LookDevFixtures.All;
+            for (int i = 0; i < fixtures.Count; i++)
+            {
+                if (GUILayout.Button(fixtures[i].Name, GUILayout.Height(20f)))
+                {
+                    _sandboxGeneIds.Clear();
+                    _sandboxOrganelleIds.Clear();
+                    _sandboxOverrides = SandboxAssembler.OverridesFromEvent(fixtures[i].A);
+                }
+            }
+            GUILayout.EndVertical();
+
+            GUILayout.BeginVertical(GUILayout.Width(240f));
+            GUILayout.Label("<b>HitEvent 预览</b>", _label);
+            GUILayout.Label($"Damage {preview.Damage:0.#}　Heal {preview.Heal:0.#}", _label);
+            GUILayout.Label($"Shape {preview.Shape}", _label);
+            GUILayout.Label($"Scale {preview.Scale:0.#}　Count {preview.Count:0.#}", _label);
+            GUILayout.Label($"Spin {preview.Spin:0.#}　Orbit {preview.Orbit:0.#}", _label);
+            GUILayout.Label($"Explode {preview.ExplodeOnHit}", _label);
+            GUILayout.Label($"Tags {string.Join(",", preview.Tags)}", _label);
+
+            GUILayout.Space(10f);
+            if (GUILayout.Button("开火（打木桩）", GUILayout.Height(36f)))
+            {
+                _sandboxFireSeed++;
+                HitEvent fireEvent = SandboxAssembler.Compose(_sandboxGeneIds, _sandboxOrganelleIds, _sandboxOverrides, _sandboxFireSeed);
+                cell.MetabolicBridge?.ApplyEvent(fireEvent);
+            }
+            GUILayout.EndVertical();
+
             GUILayout.EndHorizontal();
 
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button("上一组", GUILayout.Height(26f)))
-            {
-                _lookDevFixtureIndex--;
-            }
-            if (GUILayout.Button("下一组", GUILayout.Height(26f)))
-            {
-                _lookDevFixtureIndex++;
-            }
-            GUILayout.EndHorizontal();
-
-            GUILayout.Space(4f);
+            GUILayout.Space(6f);
             if (GUILayout.Button("退出沙盒", GUILayout.Height(28f)))
             {
                 _lookDevActive = false;
@@ -430,8 +489,39 @@ namespace GameLogic.UI.Battle
             GUILayout.EndArea();
         }
 
-        private static string FieldSummary(HitEvent e) =>
-            $"Shape={e.Shape}　Scale={e.Scale:0.#}　Count={e.Count:0.#}　Spin={e.Spin:0.#}　Orbit={e.Orbit:0.#}　Explode={e.ExplodeOnHit}";
+        private void DrawSandboxSliderOverride(string label, ref bool enable, ref float value, float min, float max)
+        {
+            GUILayout.BeginHorizontal();
+            enable = GUILayout.Toggle(enable, label, GUILayout.Width(64f));
+            value = GUILayout.HorizontalSlider(value, min, max, GUILayout.Width(110f));
+            GUILayout.Label(value.ToString("0.#"), GUILayout.Width(36f));
+            GUILayout.EndHorizontal();
+        }
+
+        private void DrawSandboxTextOverride(string label, ref bool enable, ref string value)
+        {
+            GUILayout.BeginHorizontal();
+            enable = GUILayout.Toggle(enable, label, GUILayout.Width(64f));
+            value = GUILayout.TextField(value ?? string.Empty, GUILayout.Width(150f));
+            GUILayout.EndHorizontal();
+        }
+
+        private void DrawSandboxBoolOverride(string label, ref bool enable, ref bool value)
+        {
+            GUILayout.BeginHorizontal();
+            enable = GUILayout.Toggle(enable, label, GUILayout.Width(64f));
+            value = GUILayout.Toggle(value, value ? "True" : "False", GUILayout.Width(80f));
+            GUILayout.EndHorizontal();
+        }
+
+        /// <summary>入沙盒前重置装配状态，避免带着上一局的选择/覆盖残留（story-003）。</summary>
+        private void ResetSandboxAssembler()
+        {
+            _sandboxGeneIds.Clear();
+            _sandboxOrganelleIds.Clear();
+            _sandboxOverrides = new SandboxOverrides { Scale = 1f, Count = 1f, Shape = "Bolt", Tag = string.Empty };
+            _sandboxFireSeed = 1;
+        }
 #else
         private void DrawLookDevSandbox(CellStageFlow cell) { }
 #endif
