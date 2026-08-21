@@ -361,7 +361,9 @@ namespace GameLogic
                 {
                     if (counts[i] > 0)
                     {
-                        _routeDistList.Add(new Label($"{CellDebugHud.RouteName((CardRoute)i)}　{counts[i]}"));
+                        var label = new Label($"{CellDebugHud.RouteName((CardRoute)i)}　{counts[i]}");
+                        label.AddToClassList("list-row");
+                        _routeDistList.Add(label);
                     }
                 }
             }
@@ -374,8 +376,10 @@ namespace GameLogic
                 {
                     DeckEntry e = entries[i];
                     string stack = e.Stack > 1 ? $" x{e.Stack}" : "";
-                    _ownedCardList.Add(new Label(
-                        $"<color={CellDebugHud.RarityColor(e.Spec.Rarity)}>{e.Spec.Name}</color>{stack}"));
+                    var label = new Label(
+                        $"<color={CellDebugHud.RarityColor(e.Spec.Rarity)}>{e.Spec.Name}</color>{stack}");
+                    label.AddToClassList("list-row");
+                    _ownedCardList.Add(label);
                 }
             }
         }
@@ -451,7 +455,9 @@ namespace GameLogic
                 foreach (int id in codex.DiscoveredEnemyIds)
                 {
                     EnemySpec e = DataRegistry.Instance.GetEnemy(id);
-                    _enemyList.Add(new Label(e != null ? e.Name : $"#{id}"));
+                    var label = new Label(e != null ? e.Name : $"#{id}");
+                    label.AddToClassList("list-row");
+                    _enemyList.Add(label);
                 }
             }
 
@@ -467,14 +473,18 @@ namespace GameLogic
                     CardSpec c = DataRegistry.Instance.GetCard(id);
                     if (c == null)
                     {
-                        _unlockList.Add(new Label($"#{id}"));
+                        var missing = new Label($"#{id}");
+                        missing.AddToClassList("list-row");
+                        _unlockList.Add(missing);
                         continue;
                     }
 
                     string kind = c.ContentKind == ContentKind.Organelle ? "器官"
                         : c.ContentKind == ContentKind.Gene ? "基因" : "卡牌";
-                    _unlockList.Add(new Label(
-                        $"[{kind}] <color={CellDebugHud.RarityColor(c.Rarity)}>{CellDebugHud.RarityLabel(c.Rarity)}</color> {c.Name}\n{c.Desc}"));
+                    var label = new Label(
+                        $"[{kind}] <color={CellDebugHud.RarityColor(c.Rarity)}>{CellDebugHud.RarityLabel(c.Rarity)}</color> {c.Name}\n{c.Desc}");
+                    label.AddToClassList("list-row");
+                    _unlockList.Add(label);
                 }
             }
         }
