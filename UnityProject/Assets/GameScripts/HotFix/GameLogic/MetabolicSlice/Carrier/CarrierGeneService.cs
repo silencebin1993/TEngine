@@ -12,7 +12,7 @@ namespace GameLogic.MetabolicSlice.Carrier
             {
                 return CarrierGeneResult.CarrierNotFound;
             }
-            if (slotIndex < 0 || slotIndex >= carrier.Slots.Length)
+            if (slotIndex < 0 || slotIndex >= carrier.Slots.Count)
             {
                 return CarrierGeneResult.SlotIndexInvalid;
             }
@@ -50,7 +50,7 @@ namespace GameLogic.MetabolicSlice.Carrier
             {
                 return CarrierGeneResult.CarrierNotFound;
             }
-            if (slotIndex < 0 || slotIndex >= carrier.Slots.Length)
+            if (slotIndex < 0 || slotIndex >= carrier.Slots.Count)
             {
                 return CarrierGeneResult.SlotIndexInvalid;
             }

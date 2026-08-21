@@ -21,7 +21,7 @@ namespace GameLogic.MetabolicSlice.Carrier
             var contracts = new List<IContract>();
             var moduleGenes = new List<IModule>();
 
-            for (int i = 0; i < carrier.Slots.Length; i++)
+            for (int i = 0; i < carrier.Slots.Count; i++)
             {
                 var slot = carrier.Slots[i];
                 if (slot.GeneInstanceId == null)

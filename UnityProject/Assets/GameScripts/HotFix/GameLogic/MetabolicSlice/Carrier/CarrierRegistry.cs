@@ -22,7 +22,7 @@ namespace GameLogic.MetabolicSlice.Carrier
         /// 供 <see cref="GameLogic.Battle.Feedback.ComposeAimIndicatorPresenter"/> 判断是否需要刷新指示器预览。</summary>
         public int AssemblyVersion { get; private set; }
 
-        /// <summary>已存在则原样返回；不存在则新建（3 空槽）。第一个建出的 Carrier 自动置为激活（D9），
+        /// <summary>已存在则原样返回；不存在则新建（默认 3 空槽，插槽数动态可增长）。第一个建出的 Carrier 自动置为激活（D9），
         /// 之后新增不抢占当前激活。organelleId 透传给 CarrierInstance（story-004 D9，供 CarrierCompiler 反查 Shape）。</summary>
         public CarrierInstance EnsureCarrier(string carrierId, string organelleId = null)
         {

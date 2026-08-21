@@ -15,7 +15,8 @@ namespace GameLogic
     /// <summary>
     /// UI Toolkit 版 Carrier 器官栏 + 插槽条（organ-socket-slice/story-005）。
     /// 独立控制器，不并入既有 BattleMetabolicUIToolkit（后者是 006 的整体拆除对象，D1）。
-    /// 器官栏列 CarrierRegistry.All，点选切换激活；插槽条显示 ActiveCarrier.Slots（3 格），
+    /// 器官栏列 CarrierRegistry.All，点选切换激活；插槽条显示 ActiveCarrier.Slots（slot-unlimited-codex/002
+    /// R1/R2 起动态可增长，滚动容器按 carrier.Slots.Count 运行时生成/清空节点，不再固定 3 格），
     /// 随激活切换刷新；基因拖放经 MetabolicSlicePanel.DragEquipGene/DragUnequipGene 转调
     /// CarrierGeneService（D7）。本 story 只做装/卸，不做丢弃（D16）。
     /// 照抄 BattleMetabolicUIToolkit 的 rootVisualElement 轮询保护（D3）+ 拖拽手势模式（D5/D8）。
@@ -28,11 +29,15 @@ namespace GameLogic
 
         private VisualElement _root;
         private VisualElement _carrierList;
-        private VisualElement _slotBar;
+        private ScrollView _slotBar;
         private ScrollView _geneList;
         private Label _noCarrierHint;
 
-        private readonly Button[] _slotButtons = new Button[CarrierInstance.SlotCount];
+        /// <summary>story-002 R2：槽位按钮改运行时按 carrier.Slots.Count 动态生成，不再固定数组。</summary>
+        private readonly List<Button> _slotButtons = new List<Button>();
+
+        /// <summary>零 Carrier 时渲染的禁用态空槽数（纯展示，D14 先例；与数据层 SlotSoftCap 无关）。</summary>
+        private const int NoCarrierPlaceholderSlots = 3;
 
         // ---- D5/D8：拖拽手势（不含边模式分支，照搬阈值与捕获生命周期） ----
         private const float DragThreshold = 6f;
@@ -122,7 +127,7 @@ namespace GameLogic
         private void CacheNodes()
         {
             _carrierList = _root.Q<VisualElement>("CarrierList");
-            _slotBar = _root.Q<VisualElement>("SlotBar");
+            _slotBar = _root.Q<ScrollView>("SlotBar");
             _geneList = _root.Q<ScrollView>("GeneList");
             _noCarrierHint = _root.Q<Label>("NoCarrierHint");
 
@@ -137,23 +142,8 @@ namespace GameLogic
                 drag.ApplyPersistedPosition();
             }
 
-            for (int i = 0; i < CarrierInstance.SlotCount; i++)
-            {
-                int slotIndex = i;
-                VisualElement container = _slotBar?.Q<VisualElement>("Slot" + i);
-                Button slot = container?.Q<Button>("SlotCell");
-                _slotButtons[i] = slot;
-                if (slot != null)
-                {
-                    slot.RegisterCallback<PointerDownEvent>(evt => OnSlotPointerDown(evt, slot, slotIndex));
-                    slot.RegisterCallback<PointerMoveEvent>(OnPointerMove);
-                    slot.RegisterCallback<PointerUpEvent>(OnPointerUp);
-                    slot.RegisterCallback<PointerCaptureOutEvent>(OnPointerCaptureOut);
-                    // story-005 R4：hover 已装备槽位显示基因 Description 摘要，动态查最新装备（槽位按钮本身常驻复用，不逐帧重建）。
-                    slot.RegisterCallback<PointerEnterEvent>(evt => OnSlotPointerEnter(evt, slotIndex));
-                    slot.RegisterCallback<PointerLeaveEvent>(evt => BattleOverlayUIToolkit.Instance?.HideTooltip());
-                }
-            }
+            // story-002 R2：槽位按钮不再由 UXML 预置 Slot0/1/2，改 RefreshSlotBar 运行时按
+            // carrier.Slots.Count 动态生成/清空，事件回调随节点一并挂在生成处。
         }
 
         /// <summary>D13：订阅 CarrierActivatedEvent 刷新插槽条与高亮；story-001 R1 追加订阅
@@ -175,8 +165,11 @@ namespace GameLogic
         /// <summary>基因按钮计数（排除分组标题 Label）。</summary>
         public int VisibleGeneButtonCount => _geneList?.Query<Button>().ToList().Count ?? 0;
 
-        /// <summary>插槽条是否可交互（0 号槽 enabledSelf 作为代表，四槽同态）。</summary>
-        public bool ActiveSlotBarEnabled => _slotButtons[0] != null && _slotButtons[0].enabledSelf;
+        /// <summary>插槽条是否可交互（0 号槽 enabledSelf 作为代表，同态）。</summary>
+        public bool ActiveSlotBarEnabled => _slotButtons.Count > 0 && _slotButtons[0] != null && _slotButtons[0].enabledSelf;
+
+        /// <summary>story-002 R2：只读探针，供 execute_code 断言插槽条实际生成的节点数（应等于 carrier.Slots.Count）。</summary>
+        public int VisibleSlotButtonCount => _slotButtons.Count;
 
         /// <summary>story-003 #7：只读探针，供 execute_code 断言面板放大后的实际宽高。</summary>
         public float PanelWidth => _root?.Q<VisualElement>("BattleCarrierUI")?.resolvedStyle.width ?? 0f;
@@ -264,9 +257,20 @@ namespace GameLogic
             }
         }
 
-        /// <summary>D14：零 Carrier 时渲染 3 个禁用态空格 + 提示（不隐藏整条，防布局塌陷）。</summary>
+        /// <summary>D14：零 Carrier 时渲染禁用态空格 + 提示（不隐藏整条，防布局塌陷）。
+        /// story-002 R2：插槽条改运行时动态生成，按钮数 = hasCarrier ? carrier.Slots.Count : NoCarrierPlaceholderSlots；
+        /// 拖拽起点在槽位时冻结（同 RefreshGeneList 对 GeneList 的处理），防止销毁正在捕获的元素。</summary>
         private void RefreshSlotBar(MetabolicSlicePanel panel)
         {
+            if (_slotBar == null)
+            {
+                return;
+            }
+            if (_dragSourceKind == DragSourceKind.Slot)
+            {
+                return;
+            }
+
             CarrierInstance carrier = panel.CarrierRegistry.ActiveCarrier;
             bool hasCarrier = carrier != null;
 
@@ -275,32 +279,40 @@ namespace GameLogic
                 _noCarrierHint.style.display = hasCarrier ? DisplayStyle.None : DisplayStyle.Flex;
             }
 
-            for (int i = 0; i < CarrierInstance.SlotCount; i++)
+            _slotBar.Clear();
+            _slotButtons.Clear();
+
+            int count = hasCarrier ? carrier.Slots.Count : NoCarrierPlaceholderSlots;
+            for (int i = 0; i < count; i++)
             {
-                Button slot = _slotButtons[i];
-                if (slot == null)
-                {
-                    continue;
-                }
+                int slotIndex = i;
+                Button slot = new Button();
+                slot.AddToClassList("slot-cell");
+                _slotBar.Add(slot);
+                _slotButtons.Add(slot);
 
                 if (!hasCarrier)
                 {
                     // D14：零 Carrier 渲染禁用态空格
                     slot.text = $"[{i}] —";
                     slot.SetEnabled(false);
-                    slot.RemoveFromClassList("slot-filled");
                     slot.AddToClassList("slot-empty");
+                    continue;
                 }
-                else
-                {
-                    slot.SetEnabled(true);
-                    CarrierSlot cs = carrier.Slots[i];
-                    bool occupied = cs.GeneInstanceId != null;
-                    slot.text = occupied ? GetSlotGeneDisplayName(panel, cs.GeneInstanceId) : $"[{i}] 空";
-                    slot.RemoveFromClassList("slot-empty");
-                    slot.RemoveFromClassList("slot-filled");
-                    slot.AddToClassList(occupied ? "slot-filled" : "slot-empty");
-                }
+
+                slot.SetEnabled(true);
+                CarrierSlot cs = carrier.Slots[i];
+                bool occupied = cs.GeneInstanceId != null;
+                slot.text = occupied ? GetSlotGeneDisplayName(panel, cs.GeneInstanceId) : $"[{i}] 空";
+                slot.AddToClassList(occupied ? "slot-filled" : "slot-empty");
+
+                slot.RegisterCallback<PointerDownEvent>(evt => OnSlotPointerDown(evt, slot, slotIndex));
+                slot.RegisterCallback<PointerMoveEvent>(OnPointerMove);
+                slot.RegisterCallback<PointerUpEvent>(OnPointerUp);
+                slot.RegisterCallback<PointerCaptureOutEvent>(OnPointerCaptureOut);
+                // story-005 R4：hover 已装备槽位显示基因 Description 摘要，动态查最新装备。
+                slot.RegisterCallback<PointerEnterEvent>(evt => OnSlotPointerEnter(evt, slotIndex));
+                slot.RegisterCallback<PointerLeaveEvent>(evt => BattleOverlayUIToolkit.Instance?.HideTooltip());
             }
         }
 
@@ -570,7 +582,7 @@ namespace GameLogic
 
         private int? HitTestSlot(Vector2 position)
         {
-            for (int i = 0; i < CarrierInstance.SlotCount; i++)
+            for (int i = 0; i < _slotButtons.Count; i++)
             {
                 Button slot = _slotButtons[i];
                 if (slot != null && slot.worldBound.Contains(position))
@@ -607,7 +619,7 @@ namespace GameLogic
             else if (_dragSourceKind == DragSourceKind.Slot)
             {
                 CarrierInstance carrier = panel.CarrierRegistry.ActiveCarrier;
-                if (carrier != null && _dragFromSlot >= 0 && _dragFromSlot < carrier.Slots.Length)
+                if (carrier != null && _dragFromSlot >= 0 && _dragFromSlot < carrier.Slots.Count)
                 {
                     string gid = carrier.Slots[_dragFromSlot].GeneInstanceId;
                     if (gid != null)
