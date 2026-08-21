@@ -392,7 +392,7 @@ namespace GameLogic.UI.Battle
         {
             HitEvent preview = SandboxAssembler.Compose(_sandboxGeneIds, _sandboxOrganelleIds, _sandboxOverrides, seed: 1);
 
-            var r = new Rect(12f, 12f, 860f, 560f);
+            var r = new Rect(12f, 12f, 860f, 600f);
             GUILayout.BeginArea(r);
             GUI.Box(new Rect(0f, 0f, r.width, r.height), "");
             GUILayout.Space(6f);
@@ -480,6 +480,9 @@ namespace GameLogic.UI.Battle
             GUILayout.EndHorizontal();
 
             GUILayout.Space(6f);
+            DrawSandboxCombatReadout(cell);
+
+            GUILayout.Space(6f);
             if (GUILayout.Button("退出沙盒", GUILayout.Height(28f)))
             {
                 _lookDevActive = false;
@@ -487,6 +490,26 @@ namespace GameLogic.UI.Battle
             }
 
             GUILayout.EndArea();
+        }
+
+        /// <summary>story-004：累计 DPS/击杀读数。数据全在 <see cref="MetabolicSliceBridge"/>（沙盒态本地累加，
+        /// 退出/重进即重置，Decision D3），本方法只读不持有状态。仅沙盒面板内绘制，不进正常战斗 HUD。</summary>
+        private void DrawSandboxCombatReadout(CellStageFlow cell)
+        {
+            MetabolicSliceBridge bridge = cell.MetabolicBridge;
+            if (bridge == null)
+            {
+                return;
+            }
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label(
+                $"<b>累计 DPS</b>　总伤害 {bridge.SandboxTotalDamage:0.#}　命中 {bridge.SandboxHitCount}　" +
+                $"击杀 {bridge.SandboxKillCount}　耗时 {bridge.SandboxElapsedSinceFirstHit:0.#}s", _label);
+            GUILayout.Label(
+                $"均值DPS {bridge.SandboxAverageDps:0.#}　近{MetabolicSliceBridge.SandboxRollingWindowSeconds:0}s DPS {bridge.SandboxRollingDps:0.#}",
+                _label);
+            GUILayout.EndHorizontal();
         }
 
         private void DrawSandboxSliderOverride(string label, ref bool enable, ref float value, float min, float max)

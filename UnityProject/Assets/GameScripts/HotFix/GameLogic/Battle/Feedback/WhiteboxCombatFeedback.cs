@@ -48,11 +48,111 @@ namespace GameLogic.Battle.Feedback
         private Mesh _quadMesh;
         private Material _flashMatTemplate;
 
+        // ── 伤害飘字（story-004）──
+
+        private DamageNumberGUI _damageNumbers;
+
+        private void EnsureDamageNumbers()
+        {
+            if (_damageNumbers != null)
+            {
+                return;
+            }
+
+            var go = new GameObject("CombatFeedback_DamageNumbers");
+            _damageNumbers = go.AddComponent<DamageNumberGUI>();
+        }
+
+        /// <summary>
+        /// <see cref="ICombatFeedback"/> 是纯 C# 类没有 OnGUI 入口，飘字用 IMGUI 世界坐标投影渲染
+        /// （与 <see cref="GameLogic.UI.Battle.CellDebugHud"/> 同款 IMGUI 风格，不引入 TMP/prefab 依赖）。
+        /// 数据入口仍是 <see cref="WhiteboxCombatFeedback.OnHit"/>，本类只负责池化 + 绘制。
+        /// </summary>
+        private sealed class DamageNumberGUI : MonoBehaviour
+        {
+            private const int PoolSize = 24;
+            private const float RiseDistance = 1.0f;
+            private const float Life = 0.7f;
+
+            private struct Entry
+            {
+                public Vector3 WorldPos;
+                public float Damage;
+                public float TimeLeft;
+            }
+
+            private readonly Entry[] _entries = new Entry[PoolSize];
+            private int _cursor;
+            private GUIStyle _style;
+
+            public void Spawn(Vector3 worldPos, float damage)
+            {
+                int idx = _cursor;
+                _cursor = (_cursor + 1) % PoolSize;
+                _entries[idx] = new Entry { WorldPos = worldPos, Damage = damage, TimeLeft = Life };
+            }
+
+            private void Update()
+            {
+                float dt = Time.deltaTime;
+                for (int i = 0; i < PoolSize; i++)
+                {
+                    if (_entries[i].TimeLeft > 0f)
+                    {
+                        _entries[i].TimeLeft -= dt;
+                    }
+                }
+            }
+
+            private void OnGUI()
+            {
+                Camera cam = Camera.main;
+                if (cam == null)
+                {
+                    return;
+                }
+
+                if (_style == null)
+                {
+                    _style = new GUIStyle(GUI.skin.label)
+                    {
+                        fontSize = 20, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter,
+                    };
+                }
+
+                for (int i = 0; i < PoolSize; i++)
+                {
+                    if (_entries[i].TimeLeft <= 0f)
+                    {
+                        continue;
+                    }
+
+                    float t = 1f - (_entries[i].TimeLeft / Life);
+                    Vector3 pos = _entries[i].WorldPos + Vector3.up * (RiseDistance * t);
+                    Vector3 sp = cam.WorldToScreenPoint(pos);
+                    if (sp.z <= 0f)
+                    {
+                        continue;
+                    }
+
+                    float alpha = 1f - t * t;
+                    _style.normal.textColor = new Color(1f, 0.9f, 0.3f, alpha);
+                    var rect = new Rect(sp.x - 40f, Screen.height - sp.y - 20f, 80f, 30f);
+                    GUI.Label(rect, _entries[i].Damage.ToString("0"), _style);
+                }
+            }
+        }
+
         public void OnHit(HitSignal signal)
         {
             // 命中：短促白橙闪光，比击杀小但仍一眼可见（SimRenderer 形变之外再加一笔）
             float scale = math.clamp(1.8f + signal.Damage * 0.04f, 1.8f, 3.5f);
             SpawnFlash(signal.Position, new Color(1f, 0.75f, 0.25f, 1f), scale, 0.22f);
+
+            // story-004：伤害飘字。全仓库此前无同类组件，本类即是「参考风格」的落点——
+            // 白模程序化 + 池化，与上面 SpawnFlash 同一命中点，只是多一笔可读数字。
+            EnsureDamageNumbers();
+            _damageNumbers.Spawn(new Vector3(signal.Position.x, FlashY + 0.6f, signal.Position.y), signal.Damage);
         }
 
         public void OnPlayerHurt(PlayerHurtSignal signal)
@@ -394,6 +494,12 @@ namespace GameLogic.Battle.Feedback
             {
                 Object.Destroy(_quadMesh);
                 _quadMesh = null;
+            }
+
+            if (_damageNumbers != null)
+            {
+                Object.Destroy(_damageNumbers.gameObject);
+                _damageNumbers = null;
             }
         }
     }

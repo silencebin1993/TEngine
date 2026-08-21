@@ -87,6 +87,20 @@ namespace GameLogic.MetabolicSlice.Combat
         private int _seed;
         private float _playerShield;
 
+        // ── story-004：沙盒累计 DPS/击杀（Decision D3，局内本地累加，不持久化）──
+
+        /// <summary>滚动窗口秒数：近 N 秒伤害 / N 作为「近期 DPS」，与「开火起总均值」并列展示。</summary>
+        public const float SandboxRollingWindowSeconds = 5f;
+
+        private SignalScope _sandboxCombatScope;
+        private readonly Queue<(float clock, float damage)> _sandboxRecentHits = new Queue<(float, float)>();
+        private float _sandboxClock;
+        private float _sandboxElapsedSinceFirstHit;
+        private bool _sandboxHasFired;
+        private float _sandboxTotalDamage;
+        private int _sandboxHitCount;
+        private int _sandboxKillCount;
+
         /// <summary>轴 A 局内提示：最近一次新增的地形/残留白话描述，供 HUD 展示（不需要打开面板也能看见）。</summary>
         public string LastEnvironmentPrompt { get; private set; } = "地面：潮湿（尚无残留反应）";
 
@@ -112,6 +126,38 @@ namespace GameLogic.MetabolicSlice.Combat
 
         /// <summary>story-010 J4：暴露 Environment 供指示器读取（只读，不可写）。</summary>
         internal WorldEnvironment GetEnvironment() => _environment;
+
+        /// <summary>story-004：沙盒累计伤害（自本局 <see cref="OnEnter"/> 起，只在 <see cref="Suppressed"/>
+        /// 为真——即沙盒态——时累加，真实战斗不计入）。</summary>
+        public float SandboxTotalDamage => _sandboxTotalDamage;
+
+        /// <summary>story-004：沙盒累计命中次数（HitSignal 计数，含多发/爆炸等展开后的真实命中数）。</summary>
+        public int SandboxHitCount => _sandboxHitCount;
+
+        /// <summary>story-004：沙盒累计击杀数（KillSignal 计数；木桩默认 Health=999999 近不可摧毁，正常为 0）。</summary>
+        public int SandboxKillCount => _sandboxKillCount;
+
+        /// <summary>story-004：自沙盒内第一次命中起经过的秒数，未命中过时为 0。</summary>
+        public float SandboxElapsedSinceFirstHit => _sandboxElapsedSinceFirstHit;
+
+        /// <summary>story-004：开火起总均值 DPS = 总伤害 / 自首次命中经过秒数。</summary>
+        public float SandboxAverageDps => _sandboxHasFired
+            ? _sandboxTotalDamage / MathF.Max(0.001f, _sandboxElapsedSinceFirstHit)
+            : 0f;
+
+        /// <summary>story-004：近 <see cref="SandboxRollingWindowSeconds"/> 秒滚动 DPS。</summary>
+        public float SandboxRollingDps
+        {
+            get
+            {
+                float sum = 0f;
+                foreach ((float clock, float damage) in _sandboxRecentHits)
+                {
+                    sum += damage;
+                }
+                return sum / SandboxRollingWindowSeconds;
+            }
+        }
 
         /// <summary>story-010 J4：静态半径计算辅助方法，供指示器复用伤害区域半径计算逻辑。</summary>
         public static float DamageAreaRadiusFor(float damage, float scale)
@@ -143,6 +189,16 @@ namespace GameLogic.MetabolicSlice.Combat
             _playerShield = 0f;
             _timer = 0f;
             _seed = 0;
+
+            _sandboxRecentHits.Clear();
+            _sandboxClock = 0f;
+            _sandboxElapsedSinceFirstHit = 0f;
+            _sandboxHasFired = false;
+            _sandboxTotalDamage = 0f;
+            _sandboxHitCount = 0;
+            _sandboxKillCount = 0;
+            _sandboxCombatScope = new SignalScope();
+            _sandboxCombatScope.On<HitSignal>(OnSandboxHit).On<KillSignal>(OnSandboxKill);
         }
 
         /// <summary>轴 A HUD 只读入口：当前战场格上的地形/残留 tag（含未过期残留）。</summary>
@@ -161,6 +217,7 @@ namespace GameLogic.MetabolicSlice.Combat
 
             if (Suppressed)
             {
+                TickSandboxCombat(dt);
                 return;
             }
 
@@ -357,12 +414,54 @@ namespace GameLogic.MetabolicSlice.Combat
             }
         }
 
+        /// <summary>story-004：只在沙盒态（<see cref="Suppressed"/>）推进——真实战斗不产生沙盒 DPS 数值。</summary>
+        private void TickSandboxCombat(float dt)
+        {
+            _sandboxClock += dt;
+            if (_sandboxHasFired)
+            {
+                _sandboxElapsedSinceFirstHit += dt;
+            }
+
+            float cutoff = _sandboxClock - SandboxRollingWindowSeconds;
+            while (_sandboxRecentHits.Count > 0 && _sandboxRecentHits.Peek().clock < cutoff)
+            {
+                _sandboxRecentHits.Dequeue();
+            }
+        }
+
+        private void OnSandboxHit(HitSignal s)
+        {
+            if (!Suppressed)
+            {
+                return;
+            }
+
+            _sandboxHasFired = true;
+            _sandboxHitCount++;
+            _sandboxTotalDamage += s.Damage;
+            _sandboxRecentHits.Enqueue((_sandboxClock, s.Damage));
+        }
+
+        private void OnSandboxKill(KillSignal s)
+        {
+            if (!Suppressed)
+            {
+                return;
+            }
+
+            _sandboxKillCount++;
+        }
+
         public override void OnExit()
         {
             _engine = null;
             _runner = null;
             _environment = null;
             _pendingMotion?.Clear();
+            _sandboxCombatScope?.Dispose();
+            _sandboxCombatScope = null;
+            _sandboxRecentHits.Clear();
         }
     }
 }
