@@ -137,6 +137,9 @@ namespace GameLogic
                     slot.RegisterCallback<PointerMoveEvent>(OnPointerMove);
                     slot.RegisterCallback<PointerUpEvent>(OnPointerUp);
                     slot.RegisterCallback<PointerCaptureOutEvent>(OnPointerCaptureOut);
+                    // story-005 R4：hover 已装备槽位显示基因 Description 摘要，动态查最新装备（槽位按钮本身常驻复用，不逐帧重建）。
+                    slot.RegisterCallback<PointerEnterEvent>(evt => OnSlotPointerEnter(evt, slotIndex));
+                    slot.RegisterCallback<PointerLeaveEvent>(evt => BattleOverlayUIToolkit.Instance?.HideTooltip());
                 }
             }
         }
@@ -241,6 +244,10 @@ namespace GameLogic
                     btn.AddToClassList("carrier-active");
                 }
                 btn.clicked += () => registry.SetActive(carrierId);
+                // story-005 R4：hover 器官图标显示 Description 摘要。
+                string desc = carrier.OrganelleId != null ? OrganelleCatalog.Get(carrier.OrganelleId)?.Description : null;
+                btn.RegisterCallback<PointerEnterEvent>(evt => BattleOverlayUIToolkit.Instance?.ShowTooltip(desc, evt.position));
+                btn.RegisterCallback<PointerLeaveEvent>(evt => BattleOverlayUIToolkit.Instance?.HideTooltip());
                 _carrierList.Add(btn);
             }
         }
@@ -332,6 +339,10 @@ namespace GameLogic
                     btn.RegisterCallback<PointerMoveEvent>(OnPointerMove);
                     btn.RegisterCallback<PointerUpEvent>(OnPointerUp);
                     btn.RegisterCallback<PointerCaptureOutEvent>(OnPointerCaptureOut);
+                    // story-005 R4：hover 基因图标显示 Description 摘要。
+                    string desc = GeneCatalog.GetDescription(geneId);
+                    btn.RegisterCallback<PointerEnterEvent>(evt => BattleOverlayUIToolkit.Instance?.ShowTooltip(desc, evt.position));
+                    btn.RegisterCallback<PointerLeaveEvent>(evt => BattleOverlayUIToolkit.Instance?.HideTooltip());
                     _geneList.Add(btn);
                 }
             }
@@ -361,6 +372,24 @@ namespace GameLogic
         }
 
         // ==== D5/D8：拖拽手势（按模式照搬，不含边模式分支） ====
+
+        /// <summary>story-005 R4：hover 已装备槽位 -> 查最新装备的基因，显示 Description 摘要；空槽不显示。</summary>
+        private void OnSlotPointerEnter(PointerEnterEvent evt, int slotIndex)
+        {
+            MetabolicSlicePanel panel = MetabolicSlicePanel.Instance;
+            CarrierInstance carrier = panel?.CarrierRegistry.ActiveCarrier;
+            string geneInstanceId = carrier?.Slots[slotIndex].GeneInstanceId;
+            if (geneInstanceId == null)
+            {
+                return;
+            }
+            GeneInstance gi = panel.GeneReserve.Find(geneInstanceId);
+            if (gi == null)
+            {
+                return;
+            }
+            BattleOverlayUIToolkit.Instance?.ShowTooltip(GeneCatalog.GetDescription(gi.GeneId), evt.position);
+        }
 
         private void OnSlotPointerDown(PointerDownEvent evt, Button slot, int slotIndex)
         {

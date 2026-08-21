@@ -1,9 +1,13 @@
+using System;
 using System.Collections.Generic;
+using BinGames.Sim;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UIElements;
 using GameLogic.Cards;
 using GameLogic.Core;
+using GameLogic.MetabolicSlice.ContentCatalog;
+using GameLogic.MetabolicSlice.Grid;
 using GameLogic.Progression;
 using GameLogic.Stage;
 using GameLogic.Stage.CellStage;
@@ -33,6 +37,17 @@ namespace GameLogic
             Pause,
         }
 
+        /// <summary>001 R4 锁定的图鉴六类分类维度。供 execute_code 断言直调 <see cref="SetCodexCategory"/>。</summary>
+        public enum CodexCategory
+        {
+            Organelle,
+            Gene,
+            Slot,
+            Terrain,
+            Status,
+            Enemy,
+        }
+
         private UIDocument _document;
         private VisualTreeAsset _visualTree;
         private PanelSettings _panelSettings;
@@ -54,12 +69,28 @@ namespace GameLogic
         private readonly Label[] _itemCost = new Label[ShopSystem.SlotCount];
         private readonly Button[] _btnBuy = new Button[ShopSystem.SlotCount];
 
-        // Codex
+        // Codex（story-005：搜索 + 六类分类 Tab，D4 在既有骨架上扩容）
         private VisualElement _codexRoot;
-        private Label _enemySectionTitle;
-        private ScrollView _enemyList;
-        private Label _cardSectionTitle;
-        private ScrollView _unlockList;
+        private TextField _codexSearchField;
+        private ScrollView _codexEntryList;
+        private readonly Button[] _codexTabButtons = new Button[CodexTabNodeNames.Length];
+        private CodexCategory _codexCategory = CodexCategory.Organelle;
+        private string _codexSearchText = string.Empty;
+
+        private static readonly string[] CodexTabNodeNames =
+        {
+            "TabOrganelle", "TabGene", "TabSlot", "TabTerrain", "TabStatus", "TabEnemy",
+        };
+
+        // 图鉴 tooltip（story-005 R4：hover 触发，≤3 行，供本控制器 Deck 卡牌与
+        // BattleCarrierUIToolkit 基因/器官图标复用同一份浮层，不各自重造）。
+        private Label _tooltip;
+
+        // 首局教程（story-005 R5）：进入 Running 数秒后自动弹一次图鉴，本次运行内只弹一次
+        // （无跨局存档，"首局"只能理解为"本次运行首次进入战斗"），static 抗热更域重载重弹。
+        private static bool _codexAutoTutorialShown;
+        private float _codexAutoTutorialTimer = -1f;
+        private const float CodexAutoTutorialDelay = 3f;
 
         // Pause
         private VisualElement _pauseRoot;
@@ -184,15 +215,26 @@ namespace GameLogic
             }
 
             _codexRoot = _root.Q<VisualElement>("BattleCodexUI");
-            _enemySectionTitle = _codexRoot?.Q<Label>("EnemySectionTitle");
-            _enemyList = _codexRoot?.Q<ScrollView>("EnemyList");
-            _cardSectionTitle = _codexRoot?.Q<Label>("CardSectionTitle");
-            _unlockList = _codexRoot?.Q<ScrollView>("UnlockList");
+            _codexSearchField = _codexRoot?.Q<TextField>("CodexSearchField");
+            _codexSearchField?.RegisterValueChangedCallback(evt => _codexSearchText = evt.newValue ?? string.Empty);
+            _codexEntryList = _codexRoot?.Q<ScrollView>("CodexEntryList");
+            for (int i = 0; i < CodexTabNodeNames.Length; i++)
+            {
+                Button tab = _codexRoot?.Q<Button>(CodexTabNodeNames[i]);
+                _codexTabButtons[i] = tab;
+                if (tab != null)
+                {
+                    CodexCategory category = (CodexCategory)i;
+                    tab.clicked += () => SetCodexCategory(category);
+                }
+            }
             Button btnCloseCodex = _codexRoot?.Q<Button>("BtnCloseCodex");
             if (btnCloseCodex != null)
             {
                 btnCloseCodex.clicked += CloseAll;
             }
+
+            CreateTooltip();
 
             _pauseRoot = _root.Q<VisualElement>("BattlePauseUI");
             _btnResume = _pauseRoot?.Q<Button>("BtnResume");
@@ -230,6 +272,61 @@ namespace GameLogic
         public void ShowShop() => SetPanel(PanelKind.Shop);
         public void ShowCodex() => SetPanel(PanelKind.Codex);
         public void CloseAll() => SetPanel(PanelKind.None);
+
+        /// <summary>供 execute_code 断言直调，不模拟点击。</summary>
+        public void SetCodexCategory(CodexCategory category) => _codexCategory = category;
+        public CodexCategory CurrentCodexCategory => _codexCategory;
+
+        /// <summary>供 execute_code 断言直调，不模拟输入。</summary>
+        public void SetCodexSearchText(string text) => _codexSearchText = text ?? string.Empty;
+
+        /// <summary>供 execute_code 断言只读访问，不参与显示逻辑本身。</summary>
+        public int CodexEntryCount => _codexEntryList?.childCount ?? 0;
+
+        /// <summary>供 execute_code 断言只读访问：R5 首局教程是否已自动弹出过。</summary>
+        public bool CodexAutoTutorialShown => _codexAutoTutorialShown;
+
+        private void CreateTooltip()
+        {
+            _tooltip = new Label();
+            _tooltip.AddToClassList("codex-tooltip");
+            _tooltip.pickingMode = PickingMode.Ignore;
+            _tooltip.style.position = Position.Absolute;
+            _tooltip.style.display = DisplayStyle.None;
+            _root.Add(_tooltip);
+        }
+
+        /// <summary>
+        /// story-005 R4：hover 触发的图鉴摘要浮层，≤3 行。供本控制器 Deck 列表与
+        /// <see cref="BattleCarrierUIToolkit"/> 的基因/器官图标跨控制器复用同一份浮层
+        /// （两者共用 BattleHudPanelSettings，世界坐标可直接互换，同 <c>_dragGhost</c> 先例）。
+        /// </summary>
+        public void ShowTooltip(string text, Vector2 worldPosition)
+        {
+            if (_tooltip == null || string.IsNullOrEmpty(text))
+            {
+                return;
+            }
+            _tooltip.text = TrimToLines(text, 3);
+            Vector2 local = _root.WorldToLocal(worldPosition);
+            _tooltip.style.left = local.x + 16f;
+            _tooltip.style.top = local.y + 16f;
+            _tooltip.style.display = DisplayStyle.Flex;
+        }
+
+        public void HideTooltip()
+        {
+            if (_tooltip != null)
+            {
+                _tooltip.style.display = DisplayStyle.None;
+            }
+        }
+
+        private static string TrimToLines(string text, int maxLines)
+        {
+            string[] lines = text.Split('\n');
+            return lines.Length <= maxLines ? text : string.Join("\n", lines, 0, maxLines);
+        }
 
         private void TogglePanel(PanelKind kind)
         {
@@ -295,6 +392,8 @@ namespace GameLogic
 
             if (running)
             {
+                UpdateCodexAutoTutorial();
+
                 // D3：自身轮询 Input.GetKeyDown，不依赖 CellDebugHud.OnGUI 的 Event.current。
                 if (Input.GetKeyDown(KeyCode.Tab))
                 {
@@ -325,9 +424,13 @@ namespace GameLogic
                     }
                 }
             }
-            else if (_current != PanelKind.None)
+            else
             {
-                SetPanel(PanelKind.None);
+                _codexAutoTutorialTimer = -1f;
+                if (_current != PanelKind.None)
+                {
+                    SetPanel(PanelKind.None);
+                }
             }
 
             if (_root == null || !running)
@@ -346,6 +449,33 @@ namespace GameLogic
                 case PanelKind.Codex:
                     RefreshCodex(cell);
                     break;
+            }
+        }
+
+        /// <summary>
+        /// R5：进入 Running 后计时 <see cref="CodexAutoTutorialDelay"/> 秒（避开开局出生提示遮挡），
+        /// 若此时没有其它面板占用则自动 <see cref="ShowCodex"/> 一次；本次运行内只弹一次。
+        /// </summary>
+        private void UpdateCodexAutoTutorial()
+        {
+            if (_codexAutoTutorialShown)
+            {
+                return;
+            }
+            if (_codexAutoTutorialTimer < 0f)
+            {
+                _codexAutoTutorialTimer = 0f;
+                return;
+            }
+            _codexAutoTutorialTimer += Time.deltaTime;
+            if (_codexAutoTutorialTimer < CodexAutoTutorialDelay)
+            {
+                return;
+            }
+            _codexAutoTutorialShown = true;
+            if (_current == PanelKind.None)
+            {
+                ShowCodex();
             }
         }
 
@@ -379,6 +509,10 @@ namespace GameLogic
                     var label = new Label(
                         $"<color={CellDebugHud.RarityColor(e.Spec.Rarity)}>{e.Spec.Name}</color>{stack}");
                     label.AddToClassList("list-row");
+                    // R4：hover 卡牌图标显示 Description 摘要。
+                    string desc = e.Spec.Desc;
+                    label.RegisterCallback<PointerEnterEvent>(evt => ShowTooltip(desc, evt.position));
+                    label.RegisterCallback<PointerLeaveEvent>(evt => HideTooltip());
                     _ownedCardList.Add(label);
                 }
             }
@@ -436,57 +570,190 @@ namespace GameLogic
             }
         }
 
-        /// <summary>D10：逐字段对齐 CellDebugHud.DrawCodex。</summary>
+        // D12（005）：契约基因 id 集合，只算一次，供 GeneSource 区分"契约基因/模块基因"来源文案。
+        private static readonly HashSet<string> ContractGeneIds = new HashSet<string>(GeneCatalog.AllIds);
+
+        /// <summary>
+        /// story-005：图鉴六类分类维度（001 R4）+ 搜索 + tooltip 摘要复用同一份 Description。
+        /// 六类各自数据源：器官/基因/敌人走 <see cref="CodexRegistry"/>（002 D1 出口，含发现态）；
+        /// 插槽/地形/状态是纯代码枚举/小目录，本局无发现态，直接全量列出（001 R4 决议：地形复核后
+        /// 确认 <c>TerrainCatalog</c> 存在，六类维持不降为五类）。
+        /// </summary>
         private void RefreshCodex(CellStageFlow cell)
         {
             CodexRegistry codex = cell.Codex;
-            if (codex == null)
+            if (codex == null || _codexEntryList == null)
             {
                 return;
             }
 
-            if (_enemySectionTitle != null)
+            for (int i = 0; i < _codexTabButtons.Length; i++)
             {
-                _enemySectionTitle.text = $"敌人　{codex.DiscoveredEnemyIds.Count}";
-            }
-            if (_enemyList != null)
-            {
-                _enemyList.Clear();
-                foreach (int id in codex.DiscoveredEnemyIds)
+                Button tab = _codexTabButtons[i];
+                if (tab == null)
                 {
-                    EnemySpec e = DataRegistry.Instance.GetEnemy(id);
-                    var label = new Label(e != null ? e.Name : $"#{id}");
-                    label.AddToClassList("list-row");
-                    _enemyList.Add(label);
+                    continue;
+                }
+                if ((int)_codexCategory == i)
+                {
+                    tab.AddToClassList("codex-tab-active");
+                }
+                else
+                {
+                    tab.RemoveFromClassList("codex-tab-active");
                 }
             }
 
-            if (_cardSectionTitle != null)
+            _codexEntryList.Clear();
+            string filter = _codexSearchText;
+
+            switch (_codexCategory)
             {
-                _cardSectionTitle.text = $"已解锁器官 / 基因　{codex.DiscoveredCardIds.Count}";
-            }
-            if (_unlockList != null)
-            {
-                _unlockList.Clear();
-                foreach (int id in codex.DiscoveredCardIds)
-                {
-                    CardSpec c = DataRegistry.Instance.GetCard(id);
-                    if (c == null)
+                case CodexCategory.Organelle:
+                    foreach (OrganelleCodexEntry e in codex.AllOrganelleEntries())
                     {
-                        var missing = new Label($"#{id}");
-                        missing.AddToClassList("list-row");
-                        _unlockList.Add(missing);
-                        continue;
+                        if (!MatchesFilter(e.DisplayName, e.Description, filter))
+                        {
+                            continue;
+                        }
+                        OrganelleDef def = OrganelleCatalog.Get(e.Id);
+                        AddCodexRow(e.DisplayName, e.Description, SlotSummary(def?.AllowedSlotTypes), "器官目录", true);
                     }
+                    break;
 
-                    string kind = c.ContentKind == ContentKind.Organelle ? "器官"
-                        : c.ContentKind == ContentKind.Gene ? "基因" : "卡牌";
-                    var label = new Label(
-                        $"[{kind}] <color={CellDebugHud.RarityColor(c.Rarity)}>{CellDebugHud.RarityLabel(c.Rarity)}</color> {c.Name}\n{c.Desc}");
-                    label.AddToClassList("list-row");
-                    _unlockList.Add(label);
-                }
+                case CodexCategory.Gene:
+                    foreach (GeneCodexEntry e in codex.AllGeneEntries())
+                    {
+                        if (!MatchesFilter(e.DisplayName, e.Description, filter))
+                        {
+                            continue;
+                        }
+                        string source = ContractGeneIds.Contains(e.Id) ? "契约基因" : "模块基因";
+                        AddCodexRow(e.DisplayName, e.Description, null, source, true);
+                    }
+                    break;
+
+                case CodexCategory.Slot:
+                    foreach (SlotType slot in Enum.GetValues(typeof(SlotType)))
+                    {
+                        string name = CodexTaxonomy.SlotTypeName(slot);
+                        string desc = CodexTaxonomy.SlotTypeDescription(slot);
+                        if (!MatchesFilter(name, desc, filter))
+                        {
+                            continue;
+                        }
+                        AddCodexRow(name, desc, null, "插槽类型", true);
+                    }
+                    break;
+
+                case CodexCategory.Terrain:
+                    foreach (string id in TerrainCatalog.AllIds)
+                    {
+                        string name = CodexTaxonomy.TerrainName(id);
+                        string desc = CodexTaxonomy.TerrainDescription(id);
+                        if (!MatchesFilter(name, desc, filter))
+                        {
+                            continue;
+                        }
+                        string[] tags = TerrainCatalog.GetTags(id);
+                        string extra = tags == null || tags.Length == 0 ? "无固有标记" : "标记：" + string.Join("、", tags);
+                        AddCodexRow(name, desc, extra, "地形", true);
+                    }
+                    break;
+
+                case CodexCategory.Status:
+                    foreach (SimStatus status in Enum.GetValues(typeof(SimStatus)))
+                    {
+                        if (status == SimStatus.None)
+                        {
+                            continue;
+                        }
+                        string name = CodexTaxonomy.StatusName(status);
+                        string desc = CodexTaxonomy.StatusDescription(status);
+                        if (!MatchesFilter(name, desc, filter))
+                        {
+                            continue;
+                        }
+                        AddCodexRow(name, desc, null, "状态效果", true);
+                    }
+                    break;
+
+                case CodexCategory.Enemy:
+                    foreach (EnemyCodexEntry e in codex.AllEnemyEntries())
+                    {
+                        if (!MatchesFilter(e.Name, e.Description, filter))
+                        {
+                            continue;
+                        }
+                        string extra = null;
+                        if (e.Discovered)
+                        {
+                            EnemySpec spec = DataRegistry.Instance.GetEnemy(e.Id);
+                            if (spec != null)
+                            {
+                                extra = $"生命 {spec.Health:F0}　速度 {spec.MaxSpeed:F1}";
+                            }
+                        }
+                        AddCodexRow(e.Discovered ? e.Name : "？？？", e.Discovered ? e.Description : "尚未遭遇，击杀或吞噬后解锁。",
+                            extra, "敌人", e.Discovered);
+                    }
+                    break;
             }
+        }
+
+        private static bool MatchesFilter(string name, string description, string filter)
+        {
+            if (string.IsNullOrEmpty(filter))
+            {
+                return true;
+            }
+            return (name != null && name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0)
+                || (description != null && description.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
+        private static string SlotSummary(HashSet<SlotType> allowedSlotTypes)
+        {
+            if (allowedSlotTypes == null)
+            {
+                return "不限插槽";
+            }
+            var names = new List<string>();
+            foreach (SlotType slot in allowedSlotTypes)
+            {
+                names.Add(CodexTaxonomy.SlotTypeName(slot));
+            }
+            return "限：" + string.Join("、", names);
+        }
+
+        /// <summary>
+        /// 一条图鉴条目：名称 + Description + 效果数值/允许槽位（extra，可为空）+ 来源。
+        /// 未发现条目（<paramref name="revealed"/>=false）name/description 已由调用方遮罩，不在此二次遮罩。
+        /// </summary>
+        private void AddCodexRow(string name, string description, string extra, string source, bool revealed)
+        {
+            var row = new VisualElement();
+            row.AddToClassList("codex-row");
+
+            var nameLabel = new Label(name);
+            nameLabel.AddToClassList("codex-row-name");
+            row.Add(nameLabel);
+
+            var descLabel = new Label(description);
+            descLabel.AddToClassList("list-row");
+            row.Add(descLabel);
+
+            if (revealed && !string.IsNullOrEmpty(extra))
+            {
+                var extraLabel = new Label(extra);
+                extraLabel.AddToClassList("codex-row-extra");
+                row.Add(extraLabel);
+            }
+
+            var sourceLabel = new Label($"来源：{source}");
+            sourceLabel.AddToClassList("codex-row-source");
+            row.Add(sourceLabel);
+
+            _codexEntryList.Add(row);
         }
 
         private void OnDestroy()
