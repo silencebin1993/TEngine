@@ -120,7 +120,7 @@ namespace GameLogic.Stats
                 _base[i] = 0f;
             }
 
-            _base[(int)StatId.MaxHealth] = 100f;
+            _base[(int)StatId.MaxHealth] = 160f;
             _base[(int)StatId.MoveSpeed] = 8f;
             _base[(int)StatId.Volume] = 1f;
             _base[(int)StatId.MeleeDamage] = 8f;
@@ -138,7 +138,7 @@ namespace GameLogic.Stats
             _base[(int)StatId.ChainBonus] = 0f;
             _base[(int)StatId.MinionCap] = 0f;
             _base[(int)StatId.MinionPower] = 1f;
-            _base[(int)StatId.HealthRegen] = 0f;
+            _base[(int)StatId.HealthRegen] = 0.5f;
             _base[(int)StatId.KillHeal] = 0f;
             _base[(int)StatId.DamageTaken] = 1f;
             _base[(int)StatId.AggroScale] = 1f;

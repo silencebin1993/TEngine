@@ -33,8 +33,11 @@ namespace GameLogic.Spawning
         private float _spawnAccum;
         private float _currentSpend;
 
-        /// <summary>采购间隔。不必每帧刷，0.4 秒一批足够密。</summary>
-        private const float SpawnInterval = 0.4f;
+        /// <summary>采购间隔（demo-pacing 001 R1：0.4→0.3，密度上调）。</summary>
+        private const float SpawnInterval = 0.3f;
+
+        /// <summary>单批采购上限，防止预算突然放大时一帧塞满（demo-pacing 001 R1：48→72）。</summary>
+        private const int BatchCap = 72;
 
         /// <summary>当前生态时期（由 PhaseTimeline 写入）。</summary>
         public PhaseSpec CurrentPhase { get; set; }
@@ -138,11 +141,11 @@ namespace GameLogic.Spawning
             float floor = CurrentPhase.PressureFloor;
             float baseline = CurrentPhase.PressureBase;
 
-            // 时期内的时间曲线：从 0.75 抬到 1.15，让每个时期内部也有渐强感
+            // 时期内的时间曲线：从 0.75 抬到 1.6（demo-pacing 001 R1，若 004 帧率不达标回退 1.4）
             float phaseProgress = CurrentPhase.Duration > 0f
                 ? Mathf.Clamp01(ElapsedSeconds / CurrentPhase.Duration)
                 : 0f;
-            float timeCurve = Mathf.Lerp(0.75f, 1.15f, phaseProgress);
+            float timeCurve = Mathf.Lerp(0.75f, 1.6f, phaseProgress);
 
             float powerFactor = PlayerPowerFactor();
 
@@ -168,8 +171,10 @@ namespace GameLogic.Spawning
             float power = _stats.Get(StatId.AbilityPower);
             float powerTerm = Mathf.Clamp01((power - 1f) / 1.5f);
 
+            // demo-pacing 001 R3：基准随新 MaxHealth 默认值（100→160）同步上移，
+            // 让新开局满血时 hpTerm 仍归零，而不是被新基准误判为"血多"抬高预算。
             float hp = _stats.Get(StatId.MaxHealth);
-            float hpTerm = Mathf.Clamp01((hp - 100f) / 300f);
+            float hpTerm = Mathf.Clamp01((hp - 160f) / 300f);
 
             float raw = cardTerm * 0.5f + powerTerm * 0.3f + hpTerm * 0.2f;
 
@@ -207,8 +212,6 @@ namespace GameLogic.Spawning
             int sameKind = 0;
             int lastId = -1;
             int spawnedThisBatch = 0;
-            // 单批上限，防止预算突然放大时一帧塞满
-            const int BatchCap = 48;
 
             while (room > 0f && guard++ < 200 && spawnedThisBatch < BatchCap)
             {

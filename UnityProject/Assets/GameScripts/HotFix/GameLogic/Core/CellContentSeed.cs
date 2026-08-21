@@ -707,7 +707,7 @@ namespace GameLogic.Core
             {
                 Id = 1, Name = "原生漂流期", Duration = 480f,
                 FlavorText = "你仍只是水流中的一点微光。先学会吞噬，再学会不被吞噬。",
-                PressureBase = 22f, PressureFloor = 12f,
+                PressureBase = 35f, PressureFloor = 12f,
                 EnemyPool = new[] { 1, 2, 3, 4 },
                 EcoEventPool = new[] { 1, 3 },
             });
