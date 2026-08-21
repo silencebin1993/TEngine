@@ -35,6 +35,7 @@ public sealed partial class CellEnemy : Luban.BeanBase
         VisualId = _buf.ReadInt();
         IsElite = _buf.ReadBool();
         IsBoss = _buf.ReadBool();
+        Desc = _buf.ReadString();
     }
 
     public static CellEnemy DeserializeCellEnemy(ByteBuf _buf)
@@ -106,6 +107,10 @@ public sealed partial class CellEnemy : Luban.BeanBase
     /// 是否首领
     /// </summary>
     public readonly bool IsBoss;
+    /// <summary>
+    /// 机制说明（图鉴/tooltip，story-002）
+    /// </summary>
+    public readonly string Desc;
    
     public const int __ID__ = 1044516250;
     public override int GetTypeId() => __ID__;
@@ -133,6 +138,7 @@ public sealed partial class CellEnemy : Luban.BeanBase
         + "visualId:" + VisualId + ","
         + "isElite:" + IsElite + ","
         + "isBoss:" + IsBoss + ","
+        + "desc:" + Desc + ","
         + "}";
     }
 }

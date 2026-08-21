@@ -89,6 +89,7 @@ namespace GameLogic.Core
                 {
                     Id = e.Id,
                     Name = e.Name,
+                    Description = e.Desc,
                     ArchetypeIndex = e.ArchetypeIndex,
                     Health = e.Health,
                     Radius = e.Radius,

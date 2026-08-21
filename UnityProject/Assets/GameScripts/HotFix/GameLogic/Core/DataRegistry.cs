@@ -32,6 +32,7 @@ namespace GameLogic.Core
 
         private readonly List<CardSpec> _cardList = new List<CardSpec>(160);
         private readonly List<AbilitySpec> _abilityList = new List<AbilitySpec>(32);
+        private readonly List<EnemySpec> _enemyList = new List<EnemySpec>(40);
 
         public bool Loaded { get; private set; }
         /// <summary>true 表示用的是内置兜底内容，不是 Luban 表。</summary>
@@ -39,6 +40,8 @@ namespace GameLogic.Core
 
         public IReadOnlyList<CardSpec> AllCards => _cardList;
         public IReadOnlyList<AbilitySpec> AllAbilities => _abilityList;
+        /// <summary>story-002 D1：图鉴数据源出口，全量敌人（含未采购/未出现过的）。</summary>
+        public IReadOnlyList<EnemySpec> AllEnemies => _enemyList;
         public IReadOnlyList<PhaseSpec> Phases => _phases;
         public IReadOnlyList<EcoEventSpec> EcoEvents => _ecoEvents;
         public IReadOnlyList<BehaviorArchetype> Archetypes => _archetypes;
@@ -91,6 +94,7 @@ namespace GameLogic.Core
             _abilities.Clear();
             _abilityList.Clear();
             _enemies.Clear();
+            _enemyList.Clear();
             _phases.Clear();
             _ecoEvents.Clear();
             _archetypes.Clear();
@@ -126,6 +130,7 @@ namespace GameLogic.Core
             if (spec != null && !_enemies.ContainsKey(spec.Id))
             {
                 _enemies[spec.Id] = spec;
+                _enemyList.Add(spec);
             }
         }
 
@@ -295,6 +300,8 @@ namespace GameLogic.Core
     {
         public int Id;
         public string Name;
+        /// <summary>story-002 D1：图鉴/tooltip 用的中文一句话机制说明。默认空串。</summary>
+        public string Description = "";
         /// <summary>行为原型索引，指向 DataRegistry.Archetypes。</summary>
         public int ArchetypeIndex;
 

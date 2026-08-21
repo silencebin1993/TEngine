@@ -141,7 +141,7 @@ namespace GameLogic.Core
             // 拾取物/食物：无威胁，纯资源。
             reg.AddEnemy(new EnemySpec
             {
-                Id = 1, Name = "浮游食团", ArchetypeIndex = ArcDrift,
+                Id = 1, Name = "浮游食团", Description = "无害漂浮，纯资源，不主动攻击。", ArchetypeIndex = ArcDrift,
                 Health = 4f, Radius = 0.35f, MaxSpeed = 1.2f,
                 SpawnCost = 1f, MinPhase = 0,
                 EvoEnergy = 2f, Nutrient = 1f, VisualId = 1,
@@ -149,7 +149,7 @@ namespace GameLogic.Core
 
             reg.AddEnemy(new EnemySpec
             {
-                Id = 2, Name = "刺膜细胞", ArchetypeIndex = ArcDrift,
+                Id = 2, Name = "刺膜细胞", Description = "带刺膜不可直接吞噬，需先破防才能吃。", ArchetypeIndex = ArcDrift,
                 Health = 8f, Radius = 0.5f, MaxSpeed = 1f,
                 SpawnCost = 2f, MinPhase = 0,
                 EvoEnergy = 3f, Nutrient = 2f, VisualId = 2,
@@ -159,7 +159,7 @@ namespace GameLogic.Core
 
             reg.AddEnemy(new EnemySpec
             {
-                Id = 3, Name = "扫尾纤毛体", ArchetypeIndex = ArcPatrol,
+                Id = 3, Name = "扫尾纤毛体", Description = "沿路径巡逻，靠近才会发现玩家。", ArchetypeIndex = ArcPatrol,
                 Health = 12f, Radius = 0.6f, MaxSpeed = 4.5f,
                 SpawnCost = 3f, MinPhase = 0,
                 EvoEnergy = 4f, Nutrient = 2f, VisualId = 3,
@@ -167,7 +167,7 @@ namespace GameLogic.Core
 
             reg.AddEnemy(new EnemySpec
             {
-                Id = 4, Name = "追猎原虫", ArchetypeIndex = ArcChase,
+                Id = 4, Name = "追猎原虫", Description = "直线追击玩家，基础威胁单位。", ArchetypeIndex = ArcChase,
                 Health = 16f, Radius = 0.55f, MaxSpeed = 5.2f,
                 SpawnCost = 4f, MinPhase = 0,
                 EvoEnergy = 5f, Nutrient = 3f, VisualId = 4,
@@ -175,7 +175,7 @@ namespace GameLogic.Core
 
             reg.AddEnemy(new EnemySpec
             {
-                Id = 5, Name = "噬菌群", ArchetypeIndex = ArcSwarm,
+                Id = 5, Name = "噬菌群", Description = "成群出现，单体脆弱但数量多。", ArchetypeIndex = ArcSwarm,
                 Health = 6f, Radius = 0.3f, MaxSpeed = 6f,
                 SpawnCost = 1.5f, MinPhase = 1,
                 EvoEnergy = 2f, Nutrient = 1f, VisualId = 5,
@@ -183,7 +183,7 @@ namespace GameLogic.Core
 
             reg.AddEnemy(new EnemySpec
             {
-                Id = 6, Name = "硬壳核胞", ArchetypeIndex = ArcChase,
+                Id = 6, Name = "硬壳核胞", Description = "外壳坚硬且不可直接吞噬，需先破壳。", ArchetypeIndex = ArcChase,
                 Health = 55f, Radius = 1.4f, MaxSpeed = 2.2f,
                 SpawnCost = 8f, MinPhase = 1,
                 EvoEnergy = 12f, Nutrient = 8f, VisualId = 6,
@@ -192,7 +192,7 @@ namespace GameLogic.Core
 
             reg.AddEnemy(new EnemySpec
             {
-                Id = 7, Name = "导电水母体", ArchetypeIndex = ArcDrift,
+                Id = 7, Name = "导电水母体", Description = "天生带电，电系连锁的理想引爆点。", ArchetypeIndex = ArcDrift,
                 Health = 14f, Radius = 0.7f, MaxSpeed = 1.8f,
                 SpawnCost = 3f, MinPhase = 1,
                 EvoEnergy = 5f, Nutrient = 3f, VisualId = 7,
@@ -202,7 +202,7 @@ namespace GameLogic.Core
 
             reg.AddEnemy(new EnemySpec
             {
-                Id = 8, Name = "腐败孢团", ArchetypeIndex = ArcDrift,
+                Id = 8, Name = "腐败孢团", Description = "自带污染状态，靠近易被感染。", ArchetypeIndex = ArcDrift,
                 Health = 10f, Radius = 0.5f, MaxSpeed = 1.4f,
                 SpawnCost = 2.5f, MinPhase = 1,
                 EvoEnergy = 4f, Nutrient = 3f, VisualId = 8,
@@ -211,7 +211,7 @@ namespace GameLogic.Core
 
             reg.AddEnemy(new EnemySpec
             {
-                Id = 9, Name = "游隼纤毛", ArchetypeIndex = ArcCharge,
+                Id = 9, Name = "游隼纤毛", Description = "冲撞式突进，攻击前有蓄力预警。", ArchetypeIndex = ArcCharge,
                 Health = 22f, Radius = 0.6f, MaxSpeed = 4f,
                 SpawnCost = 6f, MinPhase = 3,
                 EvoEnergy = 8f, Nutrient = 4f, VisualId = 9,
@@ -219,7 +219,7 @@ namespace GameLogic.Core
 
             reg.AddEnemy(new EnemySpec
             {
-                Id = 10, Name = "毒棘漂虫", ArchetypeIndex = ArcRanged,
+                Id = 10, Name = "毒棘漂虫", Description = "保持距离进行远程投射攻击。", ArchetypeIndex = ArcRanged,
                 Health = 18f, Radius = 0.55f, MaxSpeed = 3f,
                 SpawnCost = 6f, MinPhase = 3,
                 EvoEnergy = 8f, Nutrient = 5f, VisualId = 10,
@@ -227,7 +227,7 @@ namespace GameLogic.Core
 
             reg.AddEnemy(new EnemySpec
             {
-                Id = 11, Name = "簇生菌丝", ArchetypeIndex = ArcStationary,
+                Id = 11, Name = "簇生菌丝", Description = "固定不动，依靠原地范围输出。", ArchetypeIndex = ArcStationary,
                 Health = 40f, Radius = 1f, MaxSpeed = 0f,
                 SpawnCost = 4f, MinPhase = 2,
                 EvoEnergy = 6f, Nutrient = 4f, VisualId = 11,
@@ -236,7 +236,7 @@ namespace GameLogic.Core
             // 精英：慢速追踪，尝试吞噬玩家。检验吞噬阈值与风筝。
             reg.AddEnemy(new EnemySpec
             {
-                Id = 50, Name = "巨噬吞食者", ArchetypeIndex = ArcChase,
+                Id = 50, Name = "巨噬吞食者", Description = "精英：慢速但高血量，尝试直接追猎吞噬玩家。", ArchetypeIndex = ArcChase,
                 Health = 320f, Radius = 3.2f, MaxSpeed = 3.4f,
                 SpawnCost = 40f, MinPhase = 1,
                 EvoEnergy = 80f, Nutrient = 40f, Mutagen = 3f, VisualId = 50,
@@ -246,7 +246,7 @@ namespace GameLogic.Core
 
             reg.AddEnemy(new EnemySpec
             {
-                Id = 51, Name = "裂鞭纤毛王", ArchetypeIndex = ArcOrbit,
+                Id = 51, Name = "裂鞭纤毛王", Description = "精英：绕轨环绕攻击，移速快难以摆脱。", ArchetypeIndex = ArcOrbit,
                 Health = 260f, Radius = 2.2f, MaxSpeed = 7.5f,
                 SpawnCost = 40f, MinPhase = 2,
                 EvoEnergy = 80f, Nutrient = 40f, Mutagen = 3f, VisualId = 51,
@@ -256,7 +256,7 @@ namespace GameLogic.Core
 
             reg.AddEnemy(new EnemySpec
             {
-                Id = 52, Name = "电泳猎核", ArchetypeIndex = ArcRanged,
+                Id = 52, Name = "电泳猎核", Description = "精英：远程带电投射，配合电系连锁威胁大。", ArchetypeIndex = ArcRanged,
                 Health = 280f, Radius = 2.4f, MaxSpeed = 4f,
                 SpawnCost = 42f, MinPhase = 3,
                 EvoEnergy = 90f, Nutrient = 45f, Mutagen = 4f, VisualId = 52,
@@ -267,7 +267,7 @@ namespace GameLogic.Core
             // 首领
             reg.AddEnemy(new EnemySpec
             {
-                Id = 90, Name = "原核霸主", ArchetypeIndex = ArcChase,
+                Id = 90, Name = "原核霸主", Description = "首领：三阶段血量切换行为，终局最高威胁目标。", ArchetypeIndex = ArcChase,
                 Health = 2400f, Radius = 5f, MaxSpeed = 4.2f,
                 SpawnCost = 200f, MinPhase = 5,
                 EvoEnergy = 300f, Nutrient = 150f, Mutagen = 12f, VisualId = 90,

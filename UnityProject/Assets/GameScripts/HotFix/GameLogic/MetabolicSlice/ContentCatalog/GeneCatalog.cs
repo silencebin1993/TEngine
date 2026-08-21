@@ -13,20 +13,20 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
     /// </summary>
     public static class GeneCatalog
     {
-        private static readonly Dictionary<string, (string DisplayName, string ArtId, Func<IContract> CreateContract)> _defs =
-            new Dictionary<string, (string, string, Func<IContract>)>
+        private static readonly Dictionary<string, (string DisplayName, string ArtId, string Description, Func<IContract> CreateContract)> _defs =
+            new Dictionary<string, (string, string, string, Func<IContract>)>
             {
-                ["gene_double"] = ("双倍表达", "gene/double", () => new OverloadPermit(2.0f)),
-                ["gene_pyro"] = ("燃律", "gene/pyro", () => new BurnLaw()),
-                ["gene_tide"] = ("潮律", "gene/tide", () => new WetLaw()),
-                ["gene_volt"] = ("雷律", "gene/volt", () => new ShockLaw()),
-                ["gene_delay"] = ("延偿", "gene/delay", () => new DelayedPayment()),
-                ["gene_mirror"] = ("镜界", "gene/mirror", () => new MirrorRealm()),
-                ["gene_mute"] = ("哑火", "gene/mute", () => new Misfire()),
-                ["gene_swarm"] = ("寡兵", "gene/swarm", () => new FewButFierce()),
-                ["gene_blood"] = ("血债", "gene/blood", () => new BloodDebt()),
-                ["gene_edge"] = ("绝境", "gene/edge", () => new Desperation()),
-                ["gene_share"] = ("共相", "gene/share", () => new SharedFate()),
+                ["gene_double"] = ("双倍表达", "gene/double", "伤害倍率提升，并在结算中留痕标记过载。", () => new OverloadPermit(2.0f)),
+                ["gene_pyro"] = ("燃律", "gene/pyro", "命中附加燃烧强度。", () => new BurnLaw()),
+                ["gene_tide"] = ("潮律", "gene/tide", "命中附加潮湿强度。", () => new WetLaw()),
+                ["gene_volt"] = ("雷律", "gene/volt", "命中附加感电强度。", () => new ShockLaw()),
+                ["gene_delay"] = ("延偿", "gene/delay", "伤害结算延后；多个延偿叠加取最大延迟而非累加。", () => new DelayedPayment()),
+                ["gene_mirror"] = ("镜界", "gene/mirror", "开启完全反射。", () => new MirrorRealm()),
+                ["gene_mute"] = ("哑火", "gene/mute", "禁用远程攻击，并强制关闭反射。", () => new Misfire()),
+                ["gene_swarm"] = ("寡兵", "gene/swarm", "单位越少输出曲线越陡（群体强度乘子）。", () => new FewButFierce()),
+                ["gene_blood"] = ("血债", "gene/blood", "造成伤害的一部分转化为治疗。", () => new BloodDebt()),
+                ["gene_edge"] = ("绝境", "gene/edge", "残血时承受伤害打折。", () => new Desperation()),
+                ["gene_share"] = ("共相", "gene/share", "队伍共享承伤状态。", () => new SharedFate()),
             };
 
         /// <summary>story-004 D4/D15：Module 分支基因总数 = 19 条（A 组 8 + B 组 11），沿用现有器官 id 原文
@@ -40,18 +40,18 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
             "org_scatter", "org_swell", "org_flagella", "org_lyso", "org_perox", "org_aqua", "org_ion", "org_lens", "org_slime", "org_receptor", "org_spine",
         };
 
-        /// <summary>D11 方案 (a)：同表加副表。DisplayName/ArtId/CreateModule 直接委派 OrganelleCatalog——
-        /// 基因目录不重复存这三份数据，避免与器官定义漂移。</summary>
-        private static readonly Dictionary<string, (string DisplayName, string ArtId, Func<IModule> CreateModule)> _moduleDefs =
+        /// <summary>D11 方案 (a)：同表加副表。DisplayName/ArtId/Description/CreateModule 直接委派 OrganelleCatalog——
+        /// 基因目录不重复存这四份数据，避免与器官定义漂移。</summary>
+        private static readonly Dictionary<string, (string DisplayName, string ArtId, string Description, Func<IModule> CreateModule)> _moduleDefs =
             BuildModuleDefs();
 
-        private static Dictionary<string, (string, string, Func<IModule>)> BuildModuleDefs()
+        private static Dictionary<string, (string, string, string, Func<IModule>)> BuildModuleDefs()
         {
-            var dict = new Dictionary<string, (string, string, Func<IModule>)>();
+            var dict = new Dictionary<string, (string, string, string, Func<IModule>)>();
             foreach (var id in _moduleGeneIds)
             {
                 var def = OrganelleCatalog.Get(id);
-                dict[id] = (def.DisplayName, def.ArtId, def.CreateModule);
+                dict[id] = (def.DisplayName, def.ArtId, def.Description, def.CreateModule);
             }
             return dict;
         }
@@ -70,6 +70,11 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
         public static string GetArtId(string id) =>
             _defs.TryGetValue(id, out var d) ? d.ArtId :
             _moduleDefs.TryGetValue(id, out var m) ? m.ArtId : null;
+
+        /// <summary>story-002 D1：图鉴/tooltip 用的中文一句话机制说明。同 GetDisplayName 双表回退写法。</summary>
+        public static string GetDescription(string id) =>
+            _defs.TryGetValue(id, out var d) ? d.Description :
+            _moduleDefs.TryGetValue(id, out var m) ? m.Description : null;
 
         /// <summary>D13：保持只列 Contract 基因不变，语义不扩容——现有调用点可能依赖这条不含 Module 分支基因。</summary>
         public static IEnumerable<string> AllIds => _defs.Keys;

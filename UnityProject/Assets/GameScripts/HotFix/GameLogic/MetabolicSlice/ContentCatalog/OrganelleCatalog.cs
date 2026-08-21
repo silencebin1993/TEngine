@@ -15,6 +15,8 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
     {
         public string Id { get; }
         public string DisplayName { get; }
+        /// <summary>story-002 D1：图鉴/tooltip 用的中文一句话机制说明。</summary>
+        public string Description { get; }
         public OrganelleRole Role { get; }
         public OrganelleAttachTarget AttachTarget { get; }
 
@@ -34,7 +36,7 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
 
         public OrganelleDef(string id, string displayName, OrganelleRole role, OrganelleAttachTarget attachTarget,
             IEnumerable<SlotType> allowedSlotTypes, string artId, Func<IModule> createModule, bool isCarrier = false,
-            bool isRetired = false)
+            bool isRetired = false, string description = "")
         {
             Id = id;
             DisplayName = displayName;
@@ -45,6 +47,7 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
             CreateModule = createModule;
             IsCarrier = isCarrier;
             IsRetired = isRetired;
+            Description = description;
         }
     }
 
@@ -60,53 +63,77 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
         private static readonly Dictionary<string, OrganelleDef> _defs = new Dictionary<string, OrganelleDef>
         {
             ["org_mito"] = new OrganelleDef("org_mito", "线粒体", OrganelleRole.Source, OrganelleAttachTarget.Slot,
-                null, "org/mito", () => new EnergyCore()),
+                null, "org/mito", () => new EnergyCore(),
+                description: "装配链的能量起点，持续输出基础能量。"),
             ["org_chloro"] = new OrganelleDef("org_chloro", "叶绿体", OrganelleRole.Source, OrganelleAttachTarget.Slot,
-                null, "org/chloro", () => new EnergyCore()),
+                null, "org/chloro", () => new EnergyCore(),
+                description: "装配链的能量起点，以光合方式持续输出基础能量。"),
             ["org_vacuole"] = new OrganelleDef("org_vacuole", "液泡电容", OrganelleRole.Relay, OrganelleAttachTarget.Slot,
-                null, "org/vacuole", () => new Capacitor()),
+                null, "org/vacuole", () => new Capacitor(),
+                description: "按倍率放大流经的能量。"),
             ["org_golgi"] = new OrganelleDef("org_golgi", "高尔基分流", OrganelleRole.Relay, OrganelleAttachTarget.Slot,
-                null, "org/golgi", () => new Splitter()),
+                null, "org/golgi", () => new Splitter(),
+                description: "把能量按支路数均分，供后续模块或多路执行器使用。"),
             ["org_merge"] = new OrganelleDef("org_merge", "囊泡汇流", OrganelleRole.Relay, OrganelleAttachTarget.Slot,
-                null, "org/merge", () => new MergeInlet()),
+                null, "org/merge", () => new MergeInlet(),
+                description: "把入流能量夹到带宽上限，超出部分折半转为热量。"),
             ["org_lens"] = new OrganelleDef("org_lens", "晶状聚焦", OrganelleRole.Transform, OrganelleAttachTarget.Slot,
-                null, "org/lens", () => new FocusLens()),
+                null, "org/lens", () => new FocusLens(),
+                description: "提升伤害的同时必定增加热量。"),
             ["org_scatter"] = new OrganelleDef("org_scatter", "纺锤散射", OrganelleRole.Transform, OrganelleAttachTarget.Slot,
-                null, "org/scatter", () => new Scatterer()),
+                null, "org/scatter", () => new Scatterer(),
+                description: "按强度倍率增加命中次数（分裂/多段）。"),
             ["org_swell"] = new OrganelleDef("org_swell", "膨胀泡", OrganelleRole.Transform, OrganelleAttachTarget.Slot,
-                null, "org/swell", () => new Grow()),
+                null, "org/swell", () => new Grow(),
+                description: "弹体尺度随强度倍率变大，命中范围同步放大。"),
             ["org_flagella"] = new OrganelleDef("org_flagella", "鞭毛环", OrganelleRole.Transform, OrganelleAttachTarget.Slot,
-                null, "org/flagella", () => new OrbitSpin()),
+                null, "org/flagella", () => new OrbitSpin(),
+                description: "赋予弹体自旋角速度，改变弹道/绕轨轨迹。"),
             ["org_lyso"] = new OrganelleDef("org_lyso", "溶酶爆", OrganelleRole.Transform, OrganelleAttachTarget.Slot,
-                null, "org/lyso", () => new ExplodeOnHit()),
+                null, "org/lyso", () => new ExplodeOnHit(),
+                description: "命中后触发爆炸效果。"),
             ["org_perox"] = new OrganelleDef("org_perox", "过氧化物酶", OrganelleRole.Transform, OrganelleAttachTarget.Slot,
-                null, "org/perox", () => new TagAttach("Fire")),
+                null, "org/perox", () => new TagAttach("Fire"),
+                description: "命中附加火焰标记。"),
             ["org_aqua"] = new OrganelleDef("org_aqua", "水合泡", OrganelleRole.Transform, OrganelleAttachTarget.Slot,
-                null, "org/aqua", () => new TagAttach("Wet")),
+                null, "org/aqua", () => new TagAttach("Wet"),
+                description: "命中附加潮湿标记。"),
             ["org_ion"] = new OrganelleDef("org_ion", "离子泵", OrganelleRole.Transform, OrganelleAttachTarget.Slot,
-                null, "org/ion", () => new TagAttach("Shock")),
+                null, "org/ion", () => new TagAttach("Shock"),
+                description: "命中附加感电标记。"),
             ["org_radiator"] = new OrganelleDef("org_radiator", "散热褶", OrganelleRole.Relay, OrganelleAttachTarget.Slot,
-                null, "org/radiator", () => new HeatSink()),
+                null, "org/radiator", () => new HeatSink(),
+                description: "持续压低当前热量，不低于 0。"),
             ["org_breaker"] = new OrganelleDef("org_breaker", "热休克闸", OrganelleRole.Relay, OrganelleAttachTarget.Slot,
-                null, "org/breaker", () => new Fuse()),
+                null, "org/breaker", () => new Fuse(),
+                description: "能量超过安全上限时跳闸夹住，防止后续模块继续放大溢出。"),
             ["org_synapse"] = new OrganelleDef("org_synapse", "突触反馈", OrganelleRole.Relay, OrganelleAttachTarget.Slot,
-                null, "org/synapse", () => new FeedbackLoop(FeedbackMode.Hit)),
+                null, "org/synapse", () => new FeedbackLoop(FeedbackMode.Hit),
+                description: "把命中能量的一部分回灌自身，按预算封顶防止无限自激。"),
             ["org_emitter"] = new OrganelleDef("org_emitter", "分泌喷射器", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
-                null, "org/emitter", () => new Actuator(), isCarrier: true),
+                null, "org/emitter", () => new Actuator(), isCarrier: true,
+                description: "装配链出口，把能量折算为一次远程攻击事件。"),
             ["org_cilia"] = new OrganelleDef("org_cilia", "纤毛刺", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
-                null, "org/cilia", () => new Actuator(shape: "Melee"), isCarrier: true),
+                null, "org/cilia", () => new Actuator(shape: "Melee"), isCarrier: true,
+                description: "装配链出口，把能量折算为一次近战攻击事件。"),
             ["org_spine"] = new OrganelleDef("org_spine", "刺突", OrganelleRole.Relay, OrganelleAttachTarget.Slot,
-                MembraneOnly, "org/spine", () => new Thorns()),
+                MembraneOnly, "org/spine", () => new Thorns(),
+                description: "受击时反弹固定伤害。"),
             ["org_slime"] = new OrganelleDef("org_slime", "粘液层", OrganelleRole.Relay, OrganelleAttachTarget.Slot,
-                MembraneOnly, "org/slime", () => new TagAttach("Oil")),
+                MembraneOnly, "org/slime", () => new TagAttach("Oil"),
+                description: "命中附加油污标记。"),
             ["org_receptor"] = new OrganelleDef("org_receptor", "受体", OrganelleRole.Relay, OrganelleAttachTarget.Slot,
-                MembraneOnly, "org/receptor", () => new TagAttach("Catalyst")),
+                MembraneOnly, "org/receptor", () => new TagAttach("Catalyst"),
+                description: "命中附加催化标记。"),
             ["org_insulate"] = new OrganelleDef("org_insulate", "绝缘管", OrganelleRole.Edge, OrganelleAttachTarget.DirectedEdge,
-                null, "org/insulate", () => new Insulator(), isRetired: true),
+                null, "org/insulate", () => new Insulator(), isRetired: true,
+                description: "按比例阻尼热量（已退役，不进可装备插槽）。"),
             ["org_valve"] = new OrganelleDef("org_valve", "单向阀", OrganelleRole.Edge, OrganelleAttachTarget.Slot,
-                null, "org/valve", () => new Valve()),
+                null, "org/valve", () => new Valve(),
+                description: "强化沿链方向流动的能量。"),
             ["org_filter"] = new OrganelleDef("org_filter", "过滤管", OrganelleRole.Edge, OrganelleAttachTarget.Slot,
-                null, "org/filter", () => new TagFilter("Approved", 0.5f)),
+                null, "org/filter", () => new TagFilter("Approved", 0.5f),
+                description: "只放行带指定标记的能量，未命中的按比例折损。"),
         };
 
         public static OrganelleDef Get(string id) => _defs.TryGetValue(id, out var def) ? def : null;

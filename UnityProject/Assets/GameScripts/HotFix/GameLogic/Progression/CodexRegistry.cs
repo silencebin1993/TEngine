@@ -1,9 +1,77 @@
 using System.Collections.Generic;
+using GameLogic.Cards;
 using GameLogic.Core;
+using GameLogic.MetabolicSlice.ContentCatalog;
 using GameLogic.Spawning;
 
 namespace GameLogic.Progression
 {
+    /// <summary>敌人图鉴条目（story-002 D1）：全量敌人 + 本局是否已发现。</summary>
+    public readonly struct EnemyCodexEntry
+    {
+        public readonly int Id;
+        public readonly string Name;
+        public readonly string Description;
+        public readonly bool Discovered;
+
+        public EnemyCodexEntry(int id, string name, string description, bool discovered)
+        {
+            Id = id;
+            Name = name;
+            Description = description;
+            Discovered = discovered;
+        }
+    }
+
+    /// <summary>卡牌图鉴条目（story-002 D1）：全量卡牌 + 本局是否已发现。</summary>
+    public readonly struct CardCodexEntry
+    {
+        public readonly int Id;
+        public readonly string Name;
+        public readonly string Description;
+        public readonly bool Discovered;
+
+        public CardCodexEntry(int id, string name, string description, bool discovered)
+        {
+            Id = id;
+            Name = name;
+            Description = description;
+            Discovered = discovered;
+        }
+    }
+
+    /// <summary>基因图鉴条目（story-002 D1）。GeneCatalog 无本局发现态跟踪，只出全量目录。</summary>
+    public readonly struct GeneCodexEntry
+    {
+        public readonly string Id;
+        public readonly string DisplayName;
+        public readonly string Description;
+
+        public GeneCodexEntry(string id, string displayName, string description)
+        {
+            Id = id;
+            DisplayName = displayName;
+            Description = description;
+        }
+    }
+
+    /// <summary>器官图鉴条目（story-002 D1）。OrganelleCatalog 无本局发现态跟踪，只出全量目录。</summary>
+    public readonly struct OrganelleCodexEntry
+    {
+        public readonly string Id;
+        public readonly string DisplayName;
+        public readonly string Description;
+        public readonly OrganelleRole Role;
+
+        public OrganelleCodexEntry(string id, string displayName, string description, OrganelleRole role)
+        {
+            Id = id;
+            DisplayName = displayName;
+            Description = description;
+            Role = role;
+        }
+    }
+
     /// <summary>
     /// 图鉴发现记录（TR-cell-013）。窄口径实现（Preflight C1）：本局内存态，
     /// 未做跨会话持久化——图鉴系统真正的设计意图是跨局解锁（GDD §12.3），
@@ -65,6 +133,44 @@ namespace GameLogic.Progression
             if (enemyId > 0)
             {
                 _enemies.Add(enemyId);
+            }
+        }
+
+        // ── 图鉴数据源出口（story-002 D1，供 005 图鉴 UI / 003/004 tooltip 共用）──
+
+        /// <summary>全量敌人 + 本局是否已发现。</summary>
+        public IEnumerable<EnemyCodexEntry> AllEnemyEntries()
+        {
+            foreach (EnemySpec e in DataRegistry.Instance.AllEnemies)
+            {
+                yield return new EnemyCodexEntry(e.Id, e.Name, e.Description, _enemies.Contains(e.Id));
+            }
+        }
+
+        /// <summary>全量卡牌 + 本局是否已发现。Description 复用既有 CardSpec.Desc（不新增字段）。</summary>
+        public IEnumerable<CardCodexEntry> AllCardEntries()
+        {
+            foreach (CardSpec c in DataRegistry.Instance.AllCards)
+            {
+                yield return new CardCodexEntry(c.Id, c.Name, c.Desc, _cards.Contains(c.Id));
+            }
+        }
+
+        /// <summary>全量基因（Contract 11 + Module 19）。GeneCatalog 无发现态跟踪，不臆造。</summary>
+        public IEnumerable<GeneCodexEntry> AllGeneEntries()
+        {
+            foreach (string id in GeneCatalog.AllGeneIds)
+            {
+                yield return new GeneCodexEntry(id, GeneCatalog.GetDisplayName(id), GeneCatalog.GetDescription(id));
+            }
+        }
+
+        /// <summary>全量器官（24）。OrganelleCatalog 无发现态跟踪，不臆造。</summary>
+        public IEnumerable<OrganelleCodexEntry> AllOrganelleEntries()
+        {
+            foreach (OrganelleDef def in OrganelleCatalog.All.Values)
+            {
+                yield return new OrganelleCodexEntry(def.Id, def.DisplayName, def.Description, def.Role);
             }
         }
     }
