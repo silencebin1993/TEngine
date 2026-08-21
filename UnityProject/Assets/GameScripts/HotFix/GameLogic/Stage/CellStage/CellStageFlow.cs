@@ -171,6 +171,13 @@ namespace GameLogic.Stage.CellStage
             SetupSim();
             GrantStarterAbilities();
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (_sandboxMode)
+            {
+                SpawnSandboxDummy();
+            }
+#endif
+
             _hub.Enter();
             _running = true;
             _paused = false;
@@ -1001,6 +1008,32 @@ namespace GameLogic.Stage.CellStage
             _sandboxMode = on;
             ApplySandboxState();
             TEngine.Log.Info($"[GM] LookDev 沙盒 → {(on ? "开启" : "关闭")}");
+        }
+
+        /// <summary>沙盒木桩用的行为原型 id，对应 Luban 表 cell.BehaviorArchetype 新增第 12 行
+        /// （kind=Stationary、attackDamage=0，见 sandbox-skill-editor/002 D1）。不进任何正常刷怪池
+        /// （<see cref="SpawnDirector"/> 按内容表自身刷怪池选 id，不会引用该 id）。</summary>
+        private const int SandboxDummyArchetypeId = 12;
+
+        /// <summary>
+        /// story-002：LookDev 沙盒进局一次性放置木桩。木桩只是一个 <see cref="SimFaction.Hostile"/>
+        /// 静态单位，天然被现有 <see cref="MetabolicSliceBridge.ApplyEvent"/>→
+        /// <see cref="SimBridge.DamageArea"/> 命中路径命中（该路径固定以 Hostile 为目标阵营、
+        /// 发射原点固定 <see cref="SimBridge.PlayerPosition"/>），不新增伤害计算路径、不新增
+        /// SimWorld 方法/字段。固定生成在玩家出生点附近（偏移量小于默认命中半径 4），不强求可拖拽。
+        /// </summary>
+        private void SpawnSandboxDummy()
+        {
+            Unity.Mathematics.float2 pos = _sim.PlayerPosition + new Unity.Mathematics.float2(0f, 2.5f);
+            _sim.Spawn(new SpawnRequest
+            {
+                Position = pos,
+                Health = 999999f,
+                Radius = 1f,
+                MaxSpeed = 0f,
+                ArchetypeId = SandboxDummyArchetypeId,
+                Faction = SimFaction.Hostile,
+            });
         }
 
 #endif
