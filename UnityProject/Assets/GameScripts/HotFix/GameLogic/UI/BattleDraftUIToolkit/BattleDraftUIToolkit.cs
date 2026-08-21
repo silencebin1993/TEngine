@@ -5,6 +5,7 @@ using GameLogic.Cards;
 using GameLogic.Stage;
 using GameLogic.Stage.CellStage;
 using GameLogic.UI.Battle;
+using GameLogic.UI.Common;
 
 namespace GameLogic
 {
@@ -99,6 +100,16 @@ namespace GameLogic
             if (_btnSkip != null)
             {
                 _btnSkip.clicked += () => GameRoot.CellStage?.SkipDraft();
+            }
+
+            // 用户要求全部面板可拖拽（DraftTitle 作把手，DraftPanel 是实际移动的内容容器）。
+            VisualElement draftPanel = _root.Q<VisualElement>("DraftPanel");
+            Label draftTitle = _root.Q<Label>("DraftTitle");
+            if (draftPanel != null && draftTitle != null)
+            {
+                var drag = new PanelDragManipulator(draftTitle, draftPanel, "draft");
+                draftTitle.AddManipulator(drag);
+                drag.ApplyPersistedPosition();
             }
 
             for (int i = 0; i < CardCount; i++)

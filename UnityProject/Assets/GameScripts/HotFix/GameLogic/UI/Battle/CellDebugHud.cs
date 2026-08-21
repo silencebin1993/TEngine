@@ -9,6 +9,7 @@ using GameLogic.Progression;
 using GameLogic.Stage;
 using GameLogic.Stage.CellStage;
 using GameLogic.Stats;
+using GameLogic.UI.Common;
 using UnityEngine;
 
 namespace GameLogic.UI.Battle
@@ -52,6 +53,11 @@ namespace GameLogic.UI.Battle
         private Vector2 _sandboxGeneScroll;
         private Vector2 _sandboxOrganScroll;
         private int _sandboxFireSeed = 1;
+        /// <summary>沙盒"自动连发"——用户要求正式战斗与沙盒都自动攻击，沙盒侧保留手动开火按钮做精确单次测试，
+        /// 额外加这个开关按间隔自动重复开火，复用同一条 Compose+ApplyEvent，不改 DPS 统计管线。</summary>
+        private bool _sandboxAutoFire;
+        private float _sandboxAutoFireInterval = 1f;
+        private float _sandboxAutoFireTimer;
 
         /// <summary>story-003 D10：新 UI Toolkit 选卡面板（<see cref="BattleDraftUIToolkit"/>）默认事件触发式显示，
         /// 本旧 IMGUI 选卡面板改为按 K 键打开的对照入口，默认关闭避免与新 UI 同屏重复。</summary>
@@ -69,6 +75,37 @@ namespace GameLogic.UI.Battle
         {
             "无", "吞噬扩张", "机动猎食", "电化统治", "孢子繁殖", "菌毯筑巢", "异化污染", "跨路线",
         };
+
+        /// <summary>全部面板可拖拽（用户要求）：位置持久化到 PlayerPrefs，windowId 100-106+110 互不冲突。
+        /// 用 width&lt;=0 判断"尚未初始化"，首次绘制时才用 Screen 尺寸算默认居中位置。</summary>
+        private Rect _menuRect;
+        private Rect _hudRect;
+        private Rect _lookDevRect;
+        private Rect _draftRect;
+        private Rect _deckRect;
+        private Rect _shopRect;
+        private Rect _codexRect;
+
+        /// <summary>沙盒"自动连发"计时器——OnGUI 每帧可能因 Layout/Repaint 事件触发多次，计时放 Update 更可靠。</summary>
+        private void Update()
+        {
+            if (!_lookDevActive || !_sandboxAutoFire)
+            {
+                return;
+            }
+            CellStageFlow cell = GameRoot.CellStage;
+            if (cell == null || !cell.IsRunning)
+            {
+                return;
+            }
+            _sandboxAutoFireTimer -= Time.deltaTime;
+            if (_sandboxAutoFireTimer > 0f)
+            {
+                return;
+            }
+            _sandboxAutoFireTimer = Mathf.Max(0.05f, _sandboxAutoFireInterval);
+            FireSandbox(cell);
+        }
 
         private void OnGUI()
         {
@@ -146,42 +183,48 @@ namespace GameLogic.UI.Battle
         {
             StageOutcome last = GameRoot.Director?.LastOutcome;
             bool hasResult = last != null && last.StageId != StageId.None;
-            // 有结算内容时加高面板——固定 240 装不下头图+统计行，会被 BeginArea 裁掉（story-005 AC 要求可见）。
+            // 有结算内容时加高面板——固定 240 装不下头图+统计行，会被裁掉（story-005 AC 要求可见）。
             // battle-ui-polish/story-003 D7：新 UI Toolkit 结算面板默认接管展示，旧块仅在 _showLegacyResult 时加高。
             float h = (hasResult && _showLegacyResult) ? 400f : 240f;
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             h += 50f; // LookDev 沙盒按钮（story-006），只在编辑器/开发构建加高，避免正式包菜单多空白
 #endif
-            var r = new Rect(Screen.width * 0.5f - 200f, Screen.height * 0.5f - h * 0.5f, 400f, h);
-            GUI.Box(r, "");
-            GUILayout.BeginArea(new Rect(r.x + 20f, r.y + 20f, r.width - 40f, r.height - 40f));
-
-            GUILayout.Label("细胞纪元", _big);
-            GUILayout.Space(6f);
-            GUILayout.Label("从一个漂流细胞开始，在一小时内吞噬、突变、筑巢，\n成为这片微观海域的原核霸主。", _label);
-            GUILayout.Space(14f);
-
-            if (GUILayout.Button("开始漂流", GUILayout.Height(38f)))
+            if (_menuRect.width <= 0f)
             {
-                GameRoot.StartCellStage();
+                _menuRect = new Rect(Screen.width * 0.5f - 200f, Screen.height * 0.5f - h * 0.5f, 400f, h);
             }
+            else
+            {
+                _menuRect.height = h;
+            }
+
+            ImguiDragUtil.DrawDraggable(100, ref _menuRect, "细胞纪元", "gm_menu", id =>
+            {
+                GUILayout.Label("细胞纪元", _big);
+                GUILayout.Space(6f);
+                GUILayout.Label("从一个漂流细胞开始，在一小时内吞噬、突变、筑巢，\n成为这片微观海域的原核霸主。", _label);
+                GUILayout.Space(14f);
+
+                if (GUILayout.Button("开始漂流", GUILayout.Height(38f)))
+                {
+                    GameRoot.StartCellStage();
+                }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            if (GUILayout.Button("LookDev 沙盒", GUILayout.Height(30f)))
-            {
-                ResetSandboxAssembler();
-                _lookDevActive = true;
-                GameRoot.StartLookDevSandbox();
-            }
+                if (GUILayout.Button("LookDev 沙盒", GUILayout.Height(30f)))
+                {
+                    ResetSandboxAssembler();
+                    _lookDevActive = true;
+                    GameRoot.StartLookDevSandbox();
+                }
 #endif
 
-            if (hasResult && _showLegacyResult)
-            {
-                GUILayout.Space(10f);
-                GUILayout.Label(BuildResultText(last), _label);
-            }
-
-            GUILayout.EndArea();
+                if (hasResult && _showLegacyResult)
+                {
+                    GUILayout.Space(10f);
+                    GUILayout.Label(BuildResultText(last), _label);
+                }
+            });
         }
 
         /// <summary>battle-ui-polish/story-003 D4 最小暴露：新 UI Toolkit 结算面板复用同一份文案，不重写拼接逻辑。</summary>
@@ -225,8 +268,15 @@ namespace GameLogic.UI.Battle
             StatSheet st = cell.Stats;
             PhaseTimeline tl = cell.Timeline;
 
-            GUILayout.BeginArea(new Rect(12f, 12f, 340f, 320f));
+            if (_hudRect.width <= 0f)
+            {
+                _hudRect = new Rect(12f, 12f, 340f, 320f);
+            }
+            ImguiDragUtil.DrawDraggable(101, ref _hudRect, "调试HUD", "debug_hud", id => DrawHudContent(cell, st, tl));
+        }
 
+        private void DrawHudContent(CellStageFlow cell, StatSheet st, PhaseTimeline tl)
+        {
             // 生态时期与进度
             if (tl?.Current != null)
             {
@@ -297,8 +347,6 @@ namespace GameLogic.UI.Battle
                 (1f / Mathf.Max(0.0001f, Time.smoothDeltaTime)).ToString("F0"),
                 _label);
             GUILayout.Label("左下角：Carrier 器官栏（拖基因进插槽）", _label);
-
-            GUILayout.EndArea();
         }
 
         /// <summary>
@@ -390,13 +438,19 @@ namespace GameLogic.UI.Battle
         /// </summary>
         private void DrawLookDevSandbox(CellStageFlow cell)
         {
+            if (_lookDevRect.width <= 0f)
+            {
+                _lookDevRect = new Rect(12f, 12f, 860f, 600f);
+            }
+            ImguiDragUtil.DrawDraggable(102, ref _lookDevRect, "自由装配沙盒", "sandbox", id => DrawLookDevSandboxContent(cell));
+        }
+
+        private void DrawLookDevSandboxContent(CellStageFlow cell)
+        {
             HitEvent preview = SandboxAssembler.Compose(_sandboxGeneIds, _sandboxOrganelleIds, _sandboxOverrides, seed: 1);
 
-            var r = new Rect(12f, 12f, 860f, 600f);
-            GUILayout.BeginArea(r);
-            GUI.Box(new Rect(0f, 0f, r.width, r.height), "");
             GUILayout.Space(6f);
-            GUILayout.Label("<b>自由装配沙盒</b>　基因/器官多选 + 7 维度覆盖　右侧实时预览 HitEvent", _big);
+            GUILayout.Label("基因/器官多选 + 7 维度覆盖　右侧实时预览 HitEvent", _label);
             GUILayout.Space(4f);
 
             GUILayout.BeginHorizontal();
@@ -471,10 +525,14 @@ namespace GameLogic.UI.Battle
             GUILayout.Space(10f);
             if (GUILayout.Button("开火（打木桩）", GUILayout.Height(36f)))
             {
-                _sandboxFireSeed++;
-                HitEvent fireEvent = SandboxAssembler.Compose(_sandboxGeneIds, _sandboxOrganelleIds, _sandboxOverrides, _sandboxFireSeed);
-                cell.MetabolicBridge?.ApplyEvent(fireEvent);
+                FireSandbox(cell);
             }
+            GUILayout.BeginHorizontal();
+            _sandboxAutoFire = GUILayout.Toggle(_sandboxAutoFire, "自动连发", GUILayout.Width(70f));
+            GUILayout.Label("间隔(s)", GUILayout.Width(48f));
+            _sandboxAutoFireInterval = GUILayout.HorizontalSlider(_sandboxAutoFireInterval, 0.1f, 3f, GUILayout.Width(90f));
+            GUILayout.Label(_sandboxAutoFireInterval.ToString("0.0"), GUILayout.Width(30f));
+            GUILayout.EndHorizontal();
             GUILayout.EndVertical();
 
             GUILayout.EndHorizontal();
@@ -488,8 +546,6 @@ namespace GameLogic.UI.Battle
                 _lookDevActive = false;
                 GameRoot.EndRun();
             }
-
-            GUILayout.EndArea();
         }
 
         /// <summary>story-004：累计 DPS/击杀读数。数据全在 <see cref="MetabolicSliceBridge"/>（沙盒态本地累加，
@@ -537,6 +593,14 @@ namespace GameLogic.UI.Battle
             GUILayout.EndHorizontal();
         }
 
+        /// <summary>单次开火，手动按钮与自动连发计时器共用同一条 Compose+ApplyEvent。</summary>
+        private void FireSandbox(CellStageFlow cell)
+        {
+            _sandboxFireSeed++;
+            HitEvent fireEvent = SandboxAssembler.Compose(_sandboxGeneIds, _sandboxOrganelleIds, _sandboxOverrides, _sandboxFireSeed);
+            cell.MetabolicBridge?.ApplyEvent(fireEvent);
+        }
+
         /// <summary>入沙盒前重置装配状态，避免带着上一局的选择/覆盖残留（story-003）。</summary>
         private void ResetSandboxAssembler()
         {
@@ -544,16 +608,19 @@ namespace GameLogic.UI.Battle
             _sandboxOrganelleIds.Clear();
             _sandboxOverrides = new SandboxOverrides { Scale = 1f, Count = 1f, Shape = "Bolt", Tag = string.Empty };
             _sandboxFireSeed = 1;
+            _sandboxAutoFire = false;
+            _sandboxAutoFireTimer = 0f;
         }
 #else
         private void DrawLookDevSandbox(CellStageFlow cell) { }
+        private void FireSandbox(CellStageFlow cell) { }
 #endif
 
         private void DrawDraft(CellStageFlow cell)
         {
             List<CardSpec> opts = cell.PendingOptions;
 
-            // 半透明遮罩，强调这是暂停态
+            // 半透明遮罩，强调这是暂停态——遮罩本身铺满全屏、不参与拖拽，只有下面的卡牌选择区可拖。
             GUI.color = new Color(0f, 0f, 0f, 0.75f);
             GUI.DrawTexture(new Rect(0f, 0f, Screen.width, Screen.height), Texture2D.whiteTexture);
             GUI.color = Color.white;
@@ -561,15 +628,32 @@ namespace GameLogic.UI.Battle
             float cardW = 300f;
             float cardH = 250f;
             float gap = 16f;
-            float totalW = opts.Count * cardW + (opts.Count - 1) * gap;
-            float x0 = (Screen.width - totalW) * 0.5f;
-            float y0 = (Screen.height - cardH) * 0.5f;
+            float totalW = opts.Count * cardW + Mathf.Max(0, opts.Count - 1) * gap;
+            float panelW = totalW + 40f;
+            float panelH = cardH + 150f;
 
-            GUI.Label(new Rect(0f, y0 - 96f, Screen.width, 30f), "选择奖励", _big);
-            GUI.Label(new Rect(Screen.width * 0.5f - 340f, y0 - 62f, 680f, 44f),
+            if (_draftRect.width <= 0f)
+            {
+                _draftRect = new Rect((Screen.width - panelW) * 0.5f, (Screen.height - panelH) * 0.5f, panelW, panelH);
+            }
+            else
+            {
+                _draftRect.width = panelW;
+                _draftRect.height = panelH;
+            }
+
+            ImguiDragUtil.DrawDraggable(103, ref _draftRect, "选择奖励", "draft",
+                id => DrawDraftContent(cell, opts, cardW, cardH, gap, totalW, panelW));
+        }
+
+        private void DrawDraftContent(CellStageFlow cell, List<CardSpec> opts, float cardW, float cardH, float gap, float totalW, float panelW)
+        {
+            GUI.Label(new Rect(0f, 4f, panelW, 44f),
                 "进化能已充满，从下列奖励中选一项，为你的旅程注入新的变化。\n你仍留在细胞阶段，选择与是否吞噬无关。",
                 new GUIStyle(_label) { alignment = TextAnchor.MiddleCenter });
 
+            float x0 = Mathf.Max(0f, (panelW - totalW) * 0.5f);
+            float y0 = 52f;
             for (int i = 0; i < opts.Count; i++)
             {
                 CardSpec c = opts[i];
@@ -583,7 +667,7 @@ namespace GameLogic.UI.Battle
                 }
             }
 
-            if (GUI.Button(new Rect(Screen.width * 0.5f - 60f, y0 + cardH + 20f, 120f, 28f), "跳过"))
+            if (GUI.Button(new Rect(panelW * 0.5f - 60f, y0 + cardH + 14f, 120f, 28f), "跳过"))
             {
                 cell.SkipDraft();
             }
@@ -709,12 +793,15 @@ namespace GameLogic.UI.Battle
 
         private void DrawDeck(CellStageFlow cell)
         {
-            var r = new Rect(Screen.width - 380f, 12f, 368f, Screen.height - 24f);
-            GUI.Box(r, "");
-            GUILayout.BeginArea(new Rect(r.x + 10f, r.y + 10f, r.width - 20f, r.height - 20f));
+            if (_deckRect.width <= 0f)
+            {
+                _deckRect = new Rect(Screen.width - 380f, 12f, 368f, Screen.height - 24f);
+            }
+            ImguiDragUtil.DrawDraggable(104, ref _deckRect, "已获得卡牌", "deck", id => DrawDeckContent(cell));
+        }
 
-            GUILayout.Label("<b>已获得卡牌</b>", _label);
-
+        private void DrawDeckContent(CellStageFlow cell)
+        {
             // 路线分布，让玩家看清自己在走哪条路（Spec §16 可读性对策）
             var counts = new int[8];
             cell.Deck.CopyRouteCounts(counts);
@@ -734,8 +821,6 @@ namespace GameLogic.UI.Battle
                 string stack = e.Stack > 1 ? $" x{e.Stack}" : "";
                 GUILayout.Label($"{RarityText(e.Spec.Rarity)} {e.Spec.Name}{stack}", _label);
             }
-
-            GUILayout.EndArea();
         }
 
         /// <summary>
@@ -754,12 +839,23 @@ namespace GameLogic.UI.Battle
             float cardH = 170f;
             float gap = 16f;
             float totalW = ShopSystem.SlotCount * cardW + (ShopSystem.SlotCount - 1) * gap;
-            float x0 = (Screen.width - totalW) * 0.5f;
-            float y0 = Screen.height * 0.5f - cardH * 0.5f;
+            float panelW = totalW + 40f;
+            float panelH = cardH + 150f;
 
-            GUI.Box(new Rect(x0 - 20f, y0 - 60f, totalW + 40f, cardH + 140f), "");
-            GUI.Label(new Rect(x0, y0 - 46f, totalW, 28f),
-                $"<b>局内商店</b>　营养质 {cell.Wallet.Nutrient:F0}", _big);
+            if (_shopRect.width <= 0f)
+            {
+                _shopRect = new Rect((Screen.width - panelW) * 0.5f, (Screen.height - panelH) * 0.5f, panelW, panelH);
+            }
+            ImguiDragUtil.DrawDraggable(105, ref _shopRect, "局内商店", "shop",
+                id => DrawShopContent(cell, shop, cardW, cardH, gap, totalW, panelW));
+        }
+
+        private void DrawShopContent(CellStageFlow cell, ShopSystem shop, float cardW, float cardH, float gap, float totalW, float panelW)
+        {
+            float x0 = (panelW - totalW) * 0.5f;
+            float y0 = 30f;
+
+            GUI.Label(new Rect(x0, 0f, totalW, 24f), $"营养质 {cell.Wallet.Nutrient:F0}", _label);
 
             for (int i = 0; i < ShopSystem.SlotCount; i++)
             {
@@ -783,13 +879,13 @@ namespace GameLogic.UI.Battle
                 GUI.enabled = true;
             }
 
-            if (GUI.Button(new Rect(x0 + totalW * 0.5f - 70f, y0 + cardH + 16f, 140f, 30f),
+            if (GUI.Button(new Rect(panelW * 0.5f - 70f, y0 + cardH + 16f, 140f, 30f),
                     $"刷新（{ShopSystem.RefreshCost:F0}）"))
             {
                 shop.TryRefresh();
             }
 
-            if (GUI.Button(new Rect(x0 + totalW * 0.5f - 40f, y0 + cardH + 54f, 80f, 26f), "关闭"))
+            if (GUI.Button(new Rect(panelW * 0.5f - 40f, y0 + cardH + 54f, 80f, 26f), "关闭"))
             {
                 _showShop = false;
             }
@@ -807,11 +903,15 @@ namespace GameLogic.UI.Battle
                 return;
             }
 
-            var r = new Rect(Screen.width * 0.5f - 220f, 12f, 440f, Screen.height - 24f);
-            GUI.Box(r, "");
-            GUILayout.BeginArea(new Rect(r.x + 10f, r.y + 10f, r.width - 20f, r.height - 20f));
+            if (_codexRect.width <= 0f)
+            {
+                _codexRect = new Rect(Screen.width * 0.5f - 220f, 12f, 440f, Screen.height - 24f);
+            }
+            ImguiDragUtil.DrawDraggable(106, ref _codexRect, "图鉴（本局发现，未跨局保存）", "codex", id => DrawCodexContent(cell, codex));
+        }
 
-            GUILayout.Label("<b>图鉴（本局发现，未跨局保存）</b>", _label);
+        private void DrawCodexContent(CellStageFlow cell, CodexRegistry codex)
+        {
             GUILayout.Space(6f);
 
             GUILayout.Label($"<b>敌人</b>　{codex.DiscoveredEnemyIds.Count}", _label);
@@ -836,8 +936,6 @@ namespace GameLogic.UI.Battle
                 GUILayout.Label($"　[{kind}] {RarityText(c.Rarity)} {c.Name}", _label);
                 GUILayout.Label($"　　{c.Desc}", _label);
             }
-
-            GUILayout.EndArea();
         }
     }
 }

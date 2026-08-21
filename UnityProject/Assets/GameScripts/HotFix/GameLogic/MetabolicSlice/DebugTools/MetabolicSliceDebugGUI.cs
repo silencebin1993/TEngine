@@ -6,6 +6,7 @@ using GameLogic.MetabolicSlice.Combat;
 using GameLogic.MetabolicSlice.Crafting;
 using GameLogic.MetabolicSlice.Grid;
 using GameLogic.MetabolicSlice.Transfer;
+using GameLogic.UI.Common;
 using UnityEngine;
 
 namespace GameLogic.MetabolicSlice.DebugTools
@@ -21,6 +22,7 @@ namespace GameLogic.MetabolicSlice.DebugTools
         private Engine _engine;
         private readonly List<string> _log = new List<string>();
         private PartInstance _pendingOverflow;
+        private Rect _windowRect;
 
         private void Awake()
         {
@@ -31,8 +33,15 @@ namespace GameLogic.MetabolicSlice.DebugTools
 
         private void OnGUI()
         {
-            GUILayout.BeginArea(new Rect(10, 10, 420, 680));
-            GUILayout.Label("MetabolicSlice Debug (§9)");
+            if (_windowRect.width <= 0f)
+            {
+                _windowRect = new Rect(10, 10, 420, 680);
+            }
+            ImguiDragUtil.DrawDraggable(110, ref _windowRect, "MetabolicSlice Debug (§9)", "metabolic_debug", DrawContent);
+        }
+
+        private void DrawContent(int windowId)
+        {
 
             if (_pendingOverflow != null)
             {
@@ -94,8 +103,6 @@ namespace GameLogic.MetabolicSlice.DebugTools
 
             GUILayout.Space(8);
             foreach (var line in _log) GUILayout.Label(line);
-
-            GUILayout.EndArea();
         }
 
         private void AddDrop(string cardDefId)

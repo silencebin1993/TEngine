@@ -132,7 +132,18 @@ namespace GameLogic.Ability
         }
 
         /// <summary>尝试施放槽位技能。返回是否成功。</summary>
-        public bool TryCast(int slotIndex)
+        public bool TryCast(int slotIndex) => TryCastInternal(slotIndex, autoAimCursor: false);
+
+        /// <summary>
+        /// 供自动攻击触发路径调用（<see cref="GameLogic.Stage.CellStage.CellPlayerController"/>
+        /// 的 PollAbilityInput 在槽位 Ready 时直接调用，不再依赖按键）。
+        /// TargetMode.Cursor 的技能在自动施放时按 NearestEnemy 解析方向/目标——没有手动瞄准输入了，
+        /// 复用同一次 ResolveTarget 调用，仍只在施放瞬间执行一次 O(N) 扫描，不新增每帧扫描。
+        /// Self/MoveDirection/NearestEnemy/MarkedEnemy 不受影响。
+        /// </summary>
+        public bool TryCastAuto(int slotIndex) => TryCastInternal(slotIndex, autoAimCursor: true);
+
+        private bool TryCastInternal(int slotIndex, bool autoAimCursor)
         {
             AbilityRuntime rt = GetSlot(slotIndex);
             if (rt == null || rt.Spec == null || !rt.Ready || _sim == null || !_sim.Running)
@@ -148,9 +159,13 @@ namespace GameLogic.Ability
             float cdr = _stats != null ? _stats.Get(StatId.CooldownReduction) : 0f;
             rt.Consume(EffectiveCooldown(rt.Spec, cdr));
 
+            TargetMode resolveMode = (autoAimCursor && rt.Spec.TargetMode == TargetMode.Cursor)
+                ? TargetMode.NearestEnemy
+                : rt.Spec.TargetMode;
+
             float2 origin = _sim.PlayerPosition;
-            float2 dir = ResolveDirection(rt.Spec.TargetMode);
-            int target = ResolveTarget(rt.Spec.TargetMode, origin, rt.Spec.CastRange);
+            float2 dir = ResolveDirection(resolveMode);
+            int target = ResolveTarget(resolveMode, origin, rt.Spec.CastRange);
 
             var ctx = new EffectContext
             {

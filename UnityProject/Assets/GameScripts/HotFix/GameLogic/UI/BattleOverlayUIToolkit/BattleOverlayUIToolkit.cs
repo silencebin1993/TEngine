@@ -12,6 +12,7 @@ using GameLogic.Progression;
 using GameLogic.Stage;
 using GameLogic.Stage.CellStage;
 using GameLogic.UI.Battle;
+using GameLogic.UI.Common;
 
 namespace GameLogic
 {
@@ -266,6 +267,25 @@ namespace GameLogic
                     GameRoot.EndRun();
                 };
             }
+
+            // 用户要求全部面板可拖拽：四个子面板各用自己已有的 title Label 当把手。
+            // Pause 的可拖对象是内层 PauseDialog（真正的对话框），不是铺满全屏的 BattlePauseUI（含遮罩+居中）。
+            AttachDrag(_deckRoot, _deckRoot?.Q<Label>("DeckTitle"), "deck");
+            AttachDrag(_shopRoot, _shopTitle, "shop");
+            AttachDrag(_codexRoot, _codexRoot?.Q<Label>("CodexTitle"), "codex");
+            VisualElement pauseDialog = _pauseRoot?.Q<VisualElement>("PauseDialog");
+            AttachDrag(pauseDialog, pauseDialog?.Q<Label>("PauseTitle"), "pause");
+        }
+
+        private static void AttachDrag(VisualElement panel, Label handle, string prefsKey)
+        {
+            if (panel == null || handle == null)
+            {
+                return;
+            }
+            var drag = new PanelDragManipulator(handle, panel, prefsKey);
+            handle.AddManipulator(drag);
+            drag.ApplyPersistedPosition();
         }
 
         public void ShowDeck() => SetPanel(PanelKind.Deck);

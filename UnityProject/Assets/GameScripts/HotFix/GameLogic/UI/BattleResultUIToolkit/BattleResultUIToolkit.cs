@@ -4,6 +4,7 @@ using UnityEngine.UIElements;
 using GameLogic.Stage;
 using GameLogic.Stage.CellStage;
 using GameLogic.UI.Battle;
+using GameLogic.UI.Common;
 
 namespace GameLogic
 {
@@ -72,6 +73,16 @@ namespace GameLogic
         private void CacheNodes()
         {
             _resultBody = _root.Q<Label>("ResultBody");
+
+            // 用户要求全部面板可拖拽：无遮挡关键操作区，标题栏作把手直接拖面板本身。
+            VisualElement panel = _root.Q<VisualElement>("BattleResultUI");
+            Label title = _root.Q<Label>("ResultTitle");
+            if (panel != null && title != null)
+            {
+                var drag = new PanelDragManipulator(title, panel, "result");
+                title.AddManipulator(drag);
+                drag.ApplyPersistedPosition();
+            }
         }
 
         private void Update()

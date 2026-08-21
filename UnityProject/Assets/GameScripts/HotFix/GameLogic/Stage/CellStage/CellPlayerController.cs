@@ -127,6 +127,11 @@ namespace GameLogic.Stage.CellStage
                 : new float2(1f, 0f));
         }
 
+        /// <summary>
+        /// 槽 0（冲刺/闪避）继续手动 Space 触发——它是位移/闪避，不是攻击，自动触发的
+        /// 时机难以判断"何时该躲"。槽 1..N-1（攻击/技能）Ready 即自动施放，不再依赖按键，
+        /// 方向由 AbilitySystem.TryCastAuto 自动锁最近敌人（见该方法注释）。
+        /// </summary>
         private void PollAbilityInput()
         {
             if (_abilities == null)
@@ -135,28 +140,46 @@ namespace GameLogic.Stage.CellStage
             }
 
             int slots = Mathf.Min(_abilities.SlotCount, SlotKeys.Length);
-            for (int i = 0; i < slots; i++)
+
+            if (slots > 0 && Input.GetKeyDown(SlotKeys[0]))
             {
-                if (!Input.GetKeyDown(SlotKeys[i]))
-                {
-                    continue;
-                }
+                TryCastSlot(0, autoAim: false);
+            }
 
+            for (int i = 1; i < slots; i++)
+            {
                 AbilityRuntime rt = _abilities.GetSlot(i);
-                if (rt?.Spec == null)
+                if (rt?.Spec == null || !rt.Ready) // O(1) 每帧检查，非 O(敌人数)
                 {
                     continue;
                 }
+                TryCastSlot(i, autoAim: true);
+            }
+        }
 
-                // 体力校验在这里做，而不是 AbilitySystem 里——
-                // 因为体力属于资源系统，AbilitySystem 不该知道账本
-                if (rt.Spec.StaminaCost > 0f && _wallet != null
-                    && !_wallet.TrySpend(ResourceKind.Stamina, rt.Spec.StaminaCost))
-                {
-                    continue;
-                }
+        private void TryCastSlot(int slotIndex, bool autoAim)
+        {
+            AbilityRuntime rt = _abilities.GetSlot(slotIndex);
+            if (rt?.Spec == null)
+            {
+                return;
+            }
 
-                _abilities.TryCast(i);
+            // 体力校验在这里做，而不是 AbilitySystem 里——
+            // 因为体力属于资源系统，AbilitySystem 不该知道账本
+            if (rt.Spec.StaminaCost > 0f && _wallet != null
+                && !_wallet.TrySpend(ResourceKind.Stamina, rt.Spec.StaminaCost))
+            {
+                return;
+            }
+
+            if (autoAim)
+            {
+                _abilities.TryCastAuto(slotIndex);
+            }
+            else
+            {
+                _abilities.TryCast(slotIndex);
             }
         }
 

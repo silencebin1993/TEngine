@@ -7,6 +7,7 @@ using GameLogic.MetabolicSlice.ContentCatalog;
 using GameLogic.Stage;
 using GameLogic.Stage.CellStage;
 using GameLogic.UI.Battle;
+using GameLogic.UI.Common;
 using TEngine;
 
 namespace GameLogic
@@ -124,6 +125,17 @@ namespace GameLogic
             _slotBar = _root.Q<VisualElement>("SlotBar");
             _geneList = _root.Q<ScrollView>("GeneList");
             _noCarrierHint = _root.Q<Label>("NoCarrierHint");
+
+            // 用户要求全部面板可拖拽：面板根节点已被基因/器官拖拽手势占用（本文件的 D5/D8），
+            // 不能复用根节点当把手，改用新增的 CarrierTitleBar 标题栏。
+            VisualElement carrierPanel = _root.Q<VisualElement>("BattleCarrierUI");
+            Label titleBar = _root.Q<Label>("CarrierTitleBar");
+            if (carrierPanel != null && titleBar != null)
+            {
+                var drag = new PanelDragManipulator(titleBar, carrierPanel, "carrier");
+                titleBar.AddManipulator(drag);
+                drag.ApplyPersistedPosition();
+            }
 
             for (int i = 0; i < CarrierInstance.SlotCount; i++)
             {
