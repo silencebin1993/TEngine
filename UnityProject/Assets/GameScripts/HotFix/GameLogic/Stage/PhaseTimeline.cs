@@ -34,6 +34,9 @@ namespace GameLogic.Stage
         /// <summary>本时期是否已刷过期末精英。</summary>
         private bool _eliteSpawned;
 
+        /// <summary>本时期已到期、可由玩家手动推进（story-003：推进权交给玩家，不再自动 Advance）。</summary>
+        public bool CanAdvance => Current != null && !Finished && PhaseElapsed >= Current.Duration;
+
         /// <summary>story-006：LookDev 沙盒抑制时期推进/抽卡触发，避免选卡面板打断 A/B 对照。</summary>
         public bool Suppressed { get; set; }
 
@@ -80,11 +83,16 @@ namespace GameLogic.Stage
                 _eliteSpawned = true;
                 _director?.SpawnElite(Current.EliteEnemyId);
             }
+        }
 
-            if (PhaseElapsed >= Current.Duration)
+        /// <summary>玩家手动请求推进（HUD 按钮 / N 键）。未到期（<see cref="CanAdvance"/> 为假）时 no-op，防误触/提前推。</summary>
+        public void RequestAdvance()
+        {
+            if (!CanAdvance)
             {
-                Advance();
+                return;
             }
+            Advance();
         }
 
         /// <summary>推进到下一时期。走完则标记 Finished。</summary>

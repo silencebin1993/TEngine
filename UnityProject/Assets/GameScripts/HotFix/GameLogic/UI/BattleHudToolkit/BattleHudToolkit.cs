@@ -38,6 +38,7 @@ namespace GameLogic
         private Label _phaseName;
         private Label _phaseIndex;
         private ProgressBar _phaseProgress;
+        private Button _advanceButton;
         private Label _runTimer;
         private VisualElement _vitalBlock;
         private Label _hpText;
@@ -125,6 +126,11 @@ namespace GameLogic
             _phaseName = _root.Q<Label>("PhaseName");
             _phaseIndex = _root.Q<Label>("PhaseIndex");
             _phaseProgress = _root.Q<ProgressBar>("PhaseProgress");
+            _advanceButton = _root.Q<Button>("AdvanceButton");
+            if (_advanceButton != null)
+            {
+                _advanceButton.clicked += OnAdvanceButtonClicked;
+            }
             _runTimer = _root.Q<Label>("RunTimer");
             _vitalBlock = _root.Q<VisualElement>("VitalBlock");
             _hpText = _root.Q<Label>("HpText");
@@ -185,7 +191,23 @@ namespace GameLogic
                 return;
             }
 
+            if (!cell.Paused && Input.GetKeyDown(KeyCode.N))
+            {
+                cell.Timeline.RequestAdvance();
+            }
+
             RefreshHud(cell);
+        }
+
+        /// <summary>推进按钮点击入口，与 N 键共用同一目标方法（R4）。</summary>
+        private void OnAdvanceButtonClicked()
+        {
+            CellStageFlow cell = GameRoot.CellStage;
+            if (cell == null || !cell.IsRunning || cell.Paused)
+            {
+                return;
+            }
+            cell.Timeline.RequestAdvance();
         }
 
         /// <summary>新旧 HUD 切换开关。story-001 验收通过后默认显示本 HUD（D11 已由人改口）。</summary>
@@ -210,6 +232,15 @@ namespace GameLogic
                 _phaseName.text = tl.Current.Name;
                 _phaseIndex.text = $"{tl.CurrentIndex + 1}/6";
                 _phaseProgress.value = tl.PhaseProgress * 100f;
+
+                if (_advanceButton != null)
+                {
+                    _advanceButton.RemoveFromClassList("phase-can-advance");
+                    if (tl.CanAdvance)
+                    {
+                        _advanceButton.AddToClassList("phase-can-advance");
+                    }
+                }
 
                 int rm = (int)(tl.RunElapsed / 60f);
                 int rs = (int)(tl.RunElapsed % 60f);
@@ -391,6 +422,10 @@ namespace GameLogic
 
         private void OnDestroy()
         {
+            if (_advanceButton != null)
+            {
+                _advanceButton.clicked -= OnAdvanceButtonClicked;
+            }
             if (_visualTree != null)
             {
                 GameModule.Resource.UnloadAsset(_visualTree);
