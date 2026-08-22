@@ -107,6 +107,9 @@ namespace GameLogic.Battle.Feedback
         private Transform[] _tf;
         private MeshFilter[] _mf;
         private MeshRenderer[] _mr;
+        /// <summary>story-008 R7①：Spin/Orbit 残影轨迹，复用同一个 Marker GameObject（不新建独立对象池，
+        /// 遵守 R9），只在 spin/orbit 非零的标记上启用 emitting。</summary>
+        private TrailRenderer[] _trail;
         private ShapeKind[] _kind;
         private float2[] _origin;
         private float2[] _direction;
@@ -147,6 +150,17 @@ namespace GameLogic.Battle.Feedback
         /// <summary>最近一次命中的主元素 Tag（story-007 D9 校验探针，未命中任何元素词表时为 ""）。</summary>
         public string LastResolvedElementTag { get; private set; } = "";
 
+        /// <summary>story-008：最近一次命中的非元素 Tag（未命中 ElementPriorityOrder，但 Tags 非空时取其一），
+        /// 供断言"非元素 Tag 也参与染色"，无 Tag 或命中元素词表时为 ""。</summary>
+        public string LastResolvedNonElementTag { get; private set; } = "";
+
+        /// <summary>story-008：最近一次实际使用的弹体主色（元素色/中性色/Shape 底色三选一后的结果），
+        /// 供断言"非元素 Tag 命中非白色"，比反查配色表更直接。</summary>
+        public Color LastCastColor { get; private set; } = Color.white;
+
+        /// <summary>story-008 R7①校验探针：当前寿命内、Spin/Orbit 非零因而正在画残影轨迹的标记数量。</summary>
+        public int ActiveTrailCount { get; private set; }
+
         /// <summary>story-006 验收探针：最近一次 Bolt/default 分支算出的世界坐标，供断言飞行位移随 Tick 逐帧偏离 Origin（非仅原地闪一下）。</summary>
         public Vector3 LastBoltPosition { get; private set; }
 
@@ -167,10 +181,26 @@ namespace GameLogic.Battle.Feedback
             int segments = Math.Max(1, (int)MathF.Round(signal.Count));
             ShapeKind kind = ParseShape(signal.Shape);
 
-            // story-007 D1：元素 Tag 优先，无则退回 Shape 底色；无元素 Tag 命中时 castColor 与旧行为逐位一致。
+            // story-007 D1：元素 Tag 优先；story-008 R7③：无元素 Tag 但仍带其它 Tag（Physical/Catalyst 等）
+            // 时不再直接退化成 Shape 底色，改用中性配色，避免所有非元素 Tag 弹道读起来跟无 Tag 弹道一样。
             string elementTag = ResolveElementTag(signal.Tags);
-            Color castColor = elementTag.Length > 0 ? ElementColorFor(elementTag) : ColorFor(kind);
+            string nonElementTag = elementTag.Length == 0 ? ResolveAnyTag(signal.Tags) : "";
+            Color castColor;
+            if (elementTag.Length > 0)
+            {
+                castColor = ElementColorFor(elementTag);
+            }
+            else if (nonElementTag.Length > 0)
+            {
+                castColor = FxRecipeCatalog.GetNeutralTagColor(nonElementTag);
+            }
+            else
+            {
+                castColor = ColorFor(kind);
+            }
             LastResolvedElementTag = elementTag;
+            LastResolvedNonElementTag = nonElementTag;
+            LastCastColor = castColor;
             LastComputedRadius = radius;
             LastShapeKind = kind.ToString();
 
@@ -252,6 +282,24 @@ namespace GameLogic.Battle.Feedback
 
         private static Color ElementColorFor(string tag) => FxRecipeCatalog.GetElementColor(tag);
 
+        /// <summary>story-008：ElementPriorityOrder 未收录时的兜底——取 Tags 里任意一个非空字符串，
+        /// 只用于挑一个稳定 key 去查 <see cref="FxRecipeCatalog.GetNeutralTagColor"/>，不代表优先级语义。</summary>
+        private static string ResolveAnyTag(HashSet<string> tags)
+        {
+            if (tags == null)
+            {
+                return "";
+            }
+            foreach (string tag in tags)
+            {
+                if (!string.IsNullOrEmpty(tag))
+                {
+                    return tag;
+                }
+            }
+            return "";
+        }
+
         public void Tick(float dt)
         {
             if (_timeLeft == null)
@@ -260,6 +308,7 @@ namespace GameLogic.Battle.Feedback
             }
 
             int active = 0;
+            int trailActive = 0;
             for (int i = 0; i < PoolSize; i++)
             {
                 if (_timeLeft[i] <= 0f)
@@ -274,6 +323,7 @@ namespace GameLogic.Battle.Feedback
                     // 到点即回收，不循环重放（Decision D5）。
                     _timeLeft[i] = 0f;
                     _mr[i].enabled = false;
+                    _trail[i].emitting = false;
                     continue;
                 }
 
@@ -284,9 +334,15 @@ namespace GameLogic.Battle.Feedback
                 Color c = _color[i];
                 c.a *= (1f - u) * (1f - u);
                 _mr[i].sharedMaterial.color = c;
+
+                if (_trail[i].emitting)
+                {
+                    trailActive++;
+                }
             }
 
             ActiveMarkerCount = active;
+            ActiveTrailCount = trailActive;
         }
 
         // ── Shape 路由（Decision D6，引用 story-001 §2 映射表，禁止按 org_* id 分支；
@@ -367,6 +423,7 @@ namespace GameLogic.Battle.Feedback
             _tf = new Transform[PoolSize];
             _mf = new MeshFilter[PoolSize];
             _mr = new MeshRenderer[PoolSize];
+            _trail = new TrailRenderer[PoolSize];
             _kind = new ShapeKind[PoolSize];
             _origin = new float2[PoolSize];
             _direction = new float2[PoolSize];
@@ -390,9 +447,24 @@ namespace GameLogic.Battle.Feedback
                 mr.receiveShadows = false;
                 mr.enabled = false;
 
+                // story-008 R7①：残影轨迹组件，随 Marker 一起创建/复用，默认关闭（SpawnMarker 按
+                // spin/orbit 是否非零决定是否 emitting，不额外分配 GameObject/池）。
+                var trail = go.AddComponent<TrailRenderer>();
+                trail.sharedMaterial = mr.sharedMaterial;
+                trail.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                trail.receiveShadows = false;
+                trail.widthMultiplier = 1f;
+                trail.startWidth = 0.3f;
+                trail.endWidth = 0.05f;
+                trail.numCapVertices = 2;
+                trail.minVertexDistance = 0.05f;
+                trail.emitting = false;
+                trail.time = FlightLife;
+
                 _tf[i] = go.transform;
                 _mf[i] = mf;
                 _mr[i] = mr;
+                _trail[i] = trail;
                 _timeLeft[i] = 0f;
                 _life[i] = 0.2f;
                 _color[i] = Color.white;
@@ -422,6 +494,23 @@ namespace GameLogic.Battle.Feedback
             _mf[idx].sharedMesh = MeshFor(kind);
             _mr[idx].enabled = true;
             _mr[idx].sharedMaterial.color = _color[idx];
+
+            // story-008 R7①：spin/orbit 非零才画残影，避免 Bolt/Melee 等直线运动多出一条无意义的拖尾。
+            // 每次复用槽位都先 Clear，防止上一次别的 Shape 留下的轨迹点残留到本次标记上。
+            TrailRenderer trail = _trail[idx];
+            trail.Clear();
+            bool wantsTrail = spin != 0f || orbit != 0f;
+            if (wantsTrail)
+            {
+                trail.time = life;
+                Color trailColor = color;
+                trailColor.a *= 0.35f;
+                Color trailEndColor = trailColor;
+                trailEndColor.a = 0f;
+                trail.startColor = trailColor;
+                trail.endColor = trailEndColor;
+            }
+            trail.emitting = wantsTrail;
 
             ApplyTransform(idx);
         }
@@ -777,6 +866,26 @@ namespace GameLogic.Battle.Feedback
             edgeCount[key] = edgeCount.TryGetValue(key, out int count) ? count + 1 : 1;
         }
 
+        /// <summary>story-008：<see cref="UnityEngine.Object.Destroy"/> 在编辑器非 Play 态下会报
+        /// "Destroy may not be called from edit mode" 错误——本类此前只在 Play 期间随场景卸载触发 Dispose，
+        /// 从未暴露过；<see cref="MechanismReadoutSmokeReport"/> 新增了 Edit 模式下的直接 Dispose 调用（验收
+        /// 优先代码断言，不进 Play），按 <see cref="Application.isPlaying"/> 分流即可，语义不变。</summary>
+        private static void SafeDestroy(UnityEngine.Object obj)
+        {
+            if (obj == null)
+            {
+                return;
+            }
+            if (Application.isPlaying)
+            {
+                UnityEngine.Object.Destroy(obj);
+            }
+            else
+            {
+                UnityEngine.Object.DestroyImmediate(obj);
+            }
+        }
+
         public void Dispose()
         {
             if (_poolRoot != null)
@@ -785,15 +894,16 @@ namespace GameLogic.Battle.Feedback
                 {
                     if (_mr[i] != null)
                     {
-                        UnityEngine.Object.Destroy(_mr[i].sharedMaterial);
+                        SafeDestroy(_mr[i].sharedMaterial);
                     }
                 }
 
-                UnityEngine.Object.Destroy(_poolRoot);
+                SafeDestroy(_poolRoot);
                 _poolRoot = null;
                 _tf = null;
                 _mf = null;
                 _mr = null;
+                _trail = null;
                 _kind = null;
                 _origin = null;
                 _direction = null;
@@ -809,43 +919,43 @@ namespace GameLogic.Battle.Feedback
 
             if (_matTemplate != null)
             {
-                UnityEngine.Object.Destroy(_matTemplate);
+                SafeDestroy(_matTemplate);
                 _matTemplate = null;
             }
 
             if (_circleMesh != null)
             {
-                UnityEngine.Object.Destroy(_circleMesh);
+                SafeDestroy(_circleMesh);
                 _circleMesh = null;
             }
             if (_streakMesh != null)
             {
-                UnityEngine.Object.Destroy(_streakMesh);
+                SafeDestroy(_streakMesh);
                 _streakMesh = null;
             }
             if (_wedgeMesh != null)
             {
-                UnityEngine.Object.Destroy(_wedgeMesh);
+                SafeDestroy(_wedgeMesh);
                 _wedgeMesh = null;
             }
             if (_ringMesh != null)
             {
-                UnityEngine.Object.Destroy(_ringMesh);
+                SafeDestroy(_ringMesh);
                 _ringMesh = null;
             }
             if (_coneMesh != null)
             {
-                UnityEngine.Object.Destroy(_coneMesh);
+                SafeDestroy(_coneMesh);
                 _coneMesh = null;
             }
             if (_crossMesh != null)
             {
-                UnityEngine.Object.Destroy(_crossMesh);
+                SafeDestroy(_crossMesh);
                 _crossMesh = null;
             }
             if (_bandMesh != null)
             {
-                UnityEngine.Object.Destroy(_bandMesh);
+                SafeDestroy(_bandMesh);
                 _bandMesh = null;
             }
         }

@@ -55,6 +55,9 @@ namespace GameLogic
         private ProgressBar _pollutionBar;
         private Label _metaStats;
         private Label _threatBlock;
+        /// <summary>story-008 R7②：Spin/Orbit 挂起命中数（<see cref="MetabolicSliceBridge.PendingMotionCount"/>）
+        /// 直接绑定的只读文本，零新增字段，只做 UI 绑定。</summary>
+        private Label _mechanismCount;
         private VisualElement _ecoEventBlock;
         private Label _ecoEventText;
 
@@ -147,6 +150,7 @@ namespace GameLogic
             _pollutionBar = _root.Q<ProgressBar>("PollutionBar");
             _metaStats = _root.Q<Label>("MetaStats");
             _threatBlock = _root.Q<Label>("ThreatBlock");
+            _mechanismCount = _root.Q<Label>("MechanismCount");
             _ecoEventBlock = _root.Q<VisualElement>("EcoEventBlock");
             _ecoEventText = _root.Q<Label>("EcoEventText");
 
@@ -306,6 +310,10 @@ namespace GameLogic
                 if (_envPrompt != null)
                 {
                     _envPrompt.text = bridge.LastEnvironmentPrompt;
+                }
+                if (_mechanismCount != null)
+                {
+                    _mechanismCount.text = $"轨迹 ×{bridge.PendingMotionCount}";
                 }
             }
 

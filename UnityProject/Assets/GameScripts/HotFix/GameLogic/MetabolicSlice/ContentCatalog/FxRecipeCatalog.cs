@@ -155,5 +155,31 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
 
         /// <summary>爆炸环兜底默认色（无元素 Tag 命中时使用，不借用任何单一 Shape 的底色，story-007 D8）。</summary>
         public static readonly Color DefaultExplodeColor = new Color(1f, 0.55f, 0.15f, 0.6f);
+
+        // ── 非元素 Tag 中性配色（story-008 R7 ③：Physical/Catalyst 等未进 ElementPriorityOrder
+        // 的标记，之前一律退化成 Shape 底色，读不出"这发带 Tag"。不追求语义匹配，只求"不再是纯白板/
+        // 与无 Tag 弹道无差别"，稳定按字符串哈希取表内固定色，表长与顺序不构成契约）──
+
+        private static readonly Color[] _neutralTagColors =
+        {
+            new Color(0.75f, 0.75f, 0.8f, 0.9f),
+            new Color(0.6f, 0.7f, 0.65f, 0.9f),
+            new Color(0.7f, 0.6f, 0.5f, 0.9f),
+            new Color(0.55f, 0.6f, 0.7f, 0.9f),
+            new Color(0.7f, 0.55f, 0.6f, 0.9f),
+            new Color(0.6f, 0.65f, 0.55f, 0.9f),
+        };
+
+        /// <summary>tag 为空返回 <see cref="Color.white"/>（无 Tag 情形，交由调用方回落 Shape 底色）；
+        /// 非空 tag 一律返回表内某个非白中性色，不判断是否已收录进 <see cref="_elementColors"/>。</summary>
+        public static Color GetNeutralTagColor(string tag)
+        {
+            if (string.IsNullOrEmpty(tag))
+            {
+                return Color.white;
+            }
+            int idx = (tag.GetHashCode() & int.MaxValue) % _neutralTagColors.Length;
+            return _neutralTagColors[idx];
+        }
     }
 }
