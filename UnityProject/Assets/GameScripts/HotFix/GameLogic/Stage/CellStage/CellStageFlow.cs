@@ -871,13 +871,14 @@ namespace GameLogic.Stage.CellStage
         }
 
         /// <summary>
-        /// GM：一键解锁全部主动技能（忽略槽位上限），并灌满体力方便连放测反馈。
+        /// GM：一键解锁全部主动技能（忽略槽位上限），并灌满体力方便连放测反馈。返回本次实际授予数
+        /// （story-002：供 <see cref="DebugGrantAllMetabolicItems"/> 汇总日志用，幂等下重复调用返回 0）。
         /// </summary>
-        public void DebugUnlockAllAbilities()
+        public int DebugUnlockAllAbilities()
         {
             if (_abilities == null)
             {
-                return;
+                return 0;
             }
 
             int granted = 0;
@@ -895,6 +896,7 @@ namespace GameLogic.Stage.CellStage
 
             TEngine.Log.Info(
                 $"[GM] 解锁全部技能 +{granted}（槽位 {_abilities.SlotCount}/{all.Count}），体力已灌满");
+            return granted;
         }
 
         /// <summary>
@@ -950,10 +952,37 @@ namespace GameLogic.Stage.CellStage
                 carriersGranted++;
             }
 
-            DebugUnlockAllAbilities();
+            // R1③：把玩家当前拥有的每个 Carrier 插槽数补齐到能一次性装下全部 Module 基因，
+            // 复用已有 AddSlot/软上限，不新增字段；while 循环 + AddSlot 达软上限 no-op 天然幂等。
+            int moduleGeneCount = 0;
+            foreach (string _ in GameLogic.MetabolicSlice.ContentCatalog.GeneCatalog.AllModuleIds)
+            {
+                moduleGeneCount++;
+            }
+            int slotTarget = System.Math.Min(moduleGeneCount, GameLogic.MetabolicSlice.Carrier.CarrierInstance.SlotSoftCap);
+            foreach (var kv in panel.CarrierRegistry.All)
+            {
+                GameLogic.MetabolicSlice.Carrier.CarrierInstance carrier = kv.Value;
+                while (carrier.Slots.Count < slotTarget)
+                {
+                    if (!carrier.AddSlot())
+                    {
+                        break;
+                    }
+                }
+            }
+
+            int abilitiesGranted = DebugUnlockAllAbilities();
+            int totalCarrierCount = 0;
+            foreach (var _ in panel.CarrierRegistry.All)
+            {
+                totalCarrierCount++;
+            }
 
             TEngine.Log.Info(
-                $"[GM] 灌入全道具：基因 +{genesGranted}（共 {panel.GeneReserve.Items.Count}），Carrier +{carriersGranted}");
+                $"[GM] 基因 {panel.GeneReserve.Items.Count}/30（含 {moduleGeneCount} 个器官模块，本次 +{genesGranted}）"
+                + $" ＋Carrier {totalCarrierCount}/2（本次 +{carriersGranted}，插槽已补至 {slotTarget}）"
+                + $" ＋技能 +{abilitiesGranted}");
         }
 
         /// <summary>

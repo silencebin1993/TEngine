@@ -317,6 +317,30 @@ namespace GameLogic
                 btn.RegisterCallback<PointerLeaveEvent>(evt => BattleOverlayUIToolkit.Instance?.HideTooltip());
                 _carrierList.Add(btn);
             }
+
+            // story-002（combat-visualization）R1：GM 全量授予后，"已拥有"口径扩展为
+            // CarrierRegistry.All ∪ GeneReserve 中的 Module 基因子集（不是 Carrier，只读展示 + tooltip，
+            // 不可 SetActive），否则人只能在这个入口看到 2 个 Carrier，误以为授予失败。
+            var moduleIds = new HashSet<string>();
+            foreach (string id in GeneCatalog.AllModuleIds)
+            {
+                moduleIds.Add(id);
+            }
+            foreach (GeneInstance gi in panel.GeneReserve.Items)
+            {
+                if (!moduleIds.Contains(gi.GeneId))
+                {
+                    continue;
+                }
+                Button btn = new Button();
+                btn.text = GeneCatalog.GetDisplayName(gi.GeneId) ?? gi.GeneId;
+                btn.AddToClassList("carrier-item");
+                btn.AddToClassList("carrier-module-gene");
+                string desc = GeneCatalog.GetDescription(gi.GeneId);
+                btn.RegisterCallback<PointerEnterEvent>(evt => BattleOverlayUIToolkit.Instance?.ShowTooltip(desc, evt.position));
+                btn.RegisterCallback<PointerLeaveEvent>(evt => BattleOverlayUIToolkit.Instance?.HideTooltip());
+                _carrierList.Add(btn);
+            }
         }
 
         /// <summary>story-003（slot-unlimited-codex）D2：全量目录（24 器官），数据源复用 CodexRegistry.AllOrganelleEntries()
