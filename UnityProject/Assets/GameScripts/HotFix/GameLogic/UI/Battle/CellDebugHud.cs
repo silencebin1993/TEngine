@@ -30,6 +30,9 @@ namespace GameLogic.UI.Battle
         private GUIStyle _label;
         private GUIStyle _big;
         private GUIStyle _cardBox;
+        /// <summary>story-003（UI 重设计）：沙盒 7 维度覆盖的灰字二级说明样式，字号小于 <see cref="_label"/>，
+        /// 不抢主控件的视觉优先级。</summary>
+        private GUIStyle _hint;
         private bool _showDeck;
         private bool _showShop;
         private bool _showCodex;
@@ -176,6 +179,11 @@ namespace GameLogic.UI.Battle
             {
                 fontSize = 13, alignment = TextAnchor.UpperLeft, wordWrap = true,
                 padding = new RectOffset(10, 10, 10, 10), richText = true,
+            };
+            _hint = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 11, wordWrap = true, richText = true,
+                normal = { textColor = new Color(0.65f, 0.65f, 0.65f) },
             };
         }
 
@@ -440,7 +448,8 @@ namespace GameLogic.UI.Battle
         {
             if (_lookDevRect.width <= 0f)
             {
-                _lookDevRect = new Rect(12f, 12f, 860f, 600f);
+                // 900x680（原 860x600）：加宽/加高以容纳每基元的灰字说明行（Preflight R2）。
+                _lookDevRect = new Rect(12f, 12f, 900f, 680f);
             }
             ImguiDragUtil.DrawDraggable(102, ref _lookDevRect, "自由装配沙盒", "sandbox", id => DrawLookDevSandboxContent(cell));
         }
@@ -489,15 +498,39 @@ namespace GameLogic.UI.Battle
             }
             GUILayout.EndVertical();
 
-            GUILayout.BeginVertical(GUILayout.Width(260f));
+            GUILayout.BeginVertical(GUILayout.Width(300f));
             GUILayout.Label("<b>7 维度覆盖</b>（勾选启用，未勾选走真实链）", _label);
+
+            GUILayout.Space(4f);
+            GUILayout.Label("<b>形态区</b>", _label);
             DrawSandboxTextOverride("Shape", ref _sandboxOverrides.EnableShape, ref _sandboxOverrides.Shape);
-            DrawSandboxSliderOverride("Scale", ref _sandboxOverrides.EnableScale, ref _sandboxOverrides.Scale, 0.1f, 5f);
+            DrawSandboxDimensionHint(
+                "弹体基础形态（远程 Bolt / 近战 Melee），由 Carrier 出口器官决定" +
+                $"（{OrganExampleLabel("org_emitter")}→Bolt，{OrganExampleLabel("org_cilia")}→Melee）；" +
+                "当前全仓库无中间器官/基因可产出，仅本面板覆盖可预览。");
+
+            GUILayout.Space(4f);
+            GUILayout.Label("<b>数量区</b>", _label);
             DrawSandboxSliderOverride("Count", ref _sandboxOverrides.EnableCount, ref _sandboxOverrides.Count, 1f, 10f);
+            DrawSandboxDimensionHint($"命中次数（分裂/多段），典型产出：{OrganExampleLabel("org_scatter")}。");
+            DrawSandboxSliderOverride("Scale", ref _sandboxOverrides.EnableScale, ref _sandboxOverrides.Scale, 0.1f, 5f);
+            DrawSandboxDimensionHint($"弹体尺度/命中范围倍率，典型产出：{OrganExampleLabel("org_swell")}。");
+
+            GUILayout.Space(4f);
+            GUILayout.Label("<b>轨迹区</b>", _label);
             DrawSandboxSliderOverride("Spin", ref _sandboxOverrides.EnableSpin, ref _sandboxOverrides.Spin, -180f, 180f);
+            DrawSandboxDimensionHint($"弹体自旋角速度，改变弹道/绕轨轨迹，典型产出：{OrganExampleLabel("org_flagella")}。");
             DrawSandboxSliderOverride("Orbit", ref _sandboxOverrides.EnableOrbit, ref _sandboxOverrides.Orbit, -5f, 5f);
-            DrawSandboxBoolOverride("Explode", ref _sandboxOverrides.EnableExplode, ref _sandboxOverrides.ExplodeOnHit);
+            DrawSandboxDimensionHint("绕轨半径；当前全仓库无器官/基因真实产出，仅本面板覆盖可预览。");
+
+            GUILayout.Space(4f);
+            GUILayout.Label("<b>属性区</b>", _label);
             DrawSandboxTextOverride("Tag", ref _sandboxOverrides.EnableTag, ref _sandboxOverrides.Tag);
+            DrawSandboxDimensionHint(
+                "命中附加的属性标记，典型产出：" +
+                $"{OrganExampleLabel("org_perox")}/{OrganExampleLabel("org_aqua")}/{OrganExampleLabel("org_ion")}。");
+            DrawSandboxBoolOverride("Explode", ref _sandboxOverrides.EnableExplode, ref _sandboxOverrides.ExplodeOnHit);
+            DrawSandboxDimensionHint($"命中后是否触发爆炸效果，典型产出：{OrganExampleLabel("org_lyso")}。");
 
             GUILayout.Space(6f);
             GUILayout.Label("<b>预设模板</b>（一键载入原 7 组 LookDev 夹具）", _label);
@@ -566,6 +599,21 @@ namespace GameLogic.UI.Battle
                 $"均值DPS {bridge.SandboxAverageDps:0.#}　近{MetabolicSliceBridge.SandboxRollingWindowSeconds:0}s DPS {bridge.SandboxRollingDps:0.#}",
                 _label);
             GUILayout.EndHorizontal();
+        }
+
+        /// <summary>story-003（UI 重设计）Preflight R2：每维度旁的灰字二级说明，靠 <see cref="_hint"/> 样式压低
+        /// 视觉优先级，不与滑杆/开关抢注意力。</summary>
+        private void DrawSandboxDimensionHint(string text)
+        {
+            GUILayout.Label(text, _hint);
+        }
+
+        /// <summary>把器官 id 转成"中文名（id）"展示文案，说明文字里引用真实产出者时用此复用
+        /// <see cref="OrganelleCatalog"/> 的 DisplayName，避免手写文案与目录漂移。</summary>
+        private static string OrganExampleLabel(string organelleId)
+        {
+            OrganelleDef def = OrganelleCatalog.Get(organelleId);
+            return def != null ? $"{def.DisplayName}（{organelleId}）" : organelleId;
         }
 
         private void DrawSandboxSliderOverride(string label, ref bool enable, ref float value, float min, float max)

@@ -53,10 +53,12 @@ namespace GameLogic.Battle.Feedback
         private const float FlightLife = ComposeMotionMath.MotionFlightDuration;
         private const float PersistentLife = FxRecipeCatalog.Global.PersistentLife;
 
-        /// <summary>story-006：Bolt 沿 Direction 的独立线性飞行距离，不进 FxRecipeCatalog（只有 Bolt 需要直线飞行，
-        /// Melee/Arc/Wave/Spore 语义不同）。不改 <see cref="ComposeMotionMath.Offset"/>（003 D5 锁死）。
-        /// story-004：纯俯视下核实 6f 太短——0.3s 全程都贴在玩家附近，读不出"射出去"，调大到 9f。</summary>
-        private const float BoltFlightDistance = 9f;
+        /// <summary>Bolt 沿 Direction 的独立线性飞行距离，不进 FxRecipeCatalog（只有 Bolt/Spore 需要直线飞行，
+        /// Melee/Arc/Wave 语义不同）。不改 <see cref="ComposeMotionMath.Offset"/>（003 D5 锁死）。
+        /// story-004：纯俯视下核实 6f 太短——0.3s 全程都贴在玩家附近，读不出"射出去"，调大到 9f。
+        /// story-006：与 <see cref="MetabolicSliceBridge.ApplyEvent"/> 的落点结算共用同一飞行距离
+        /// （<see cref="MetabolicSliceBridge.ImpactFlightDistance"/>，禁止另起系数分叉，比照 D3/D6 先例）。</summary>
+        private const float BoltFlightDistance = MetabolicSliceBridge.ImpactFlightDistance;
 
         /// <summary>story-004：Bolt 出生点前移量。u=0 时若仍在 Origin（=玩家所在坐标），标记会与玩家胶囊完全
         /// 重叠，人眼读作"角色本体闪了一下"而不是"射出一发子弹"（004 截图实测复现）。加上这个固定前移量，
@@ -179,7 +181,10 @@ namespace GameLogic.Battle.Feedback
                 {
                     // 与 PendingMotionHit 生成时同一分片公式（Decision D5）。
                     float phase = 2f * MathF.PI * h / segments;
-                    SpawnMarker(kind, signal.Origin, signal.Direction, phase, signal.Spin, signal.Orbit, radius, life, castColor);
+                    // story-006：Count 多发方向扇形展开，与 MetabolicSliceBridge.ApplyEvent 落点结算用同一公式
+                    // （R5）。segments==1 时 FanDirection 原样返回 signal.Direction，不影响单发既有观感。
+                    float2 dir = MetabolicSliceBridge.FanDirection(signal.Direction, h, segments);
+                    SpawnMarker(kind, signal.Origin, dir, phase, signal.Spin, signal.Orbit, radius, life, castColor);
                 }
             }
 
@@ -189,7 +194,18 @@ namespace GameLogic.Battle.Feedback
                 float explodeRadius = radius * MetabolicSliceBridge.ExplodeRadiusMult;
                 Color explodeColor = elementTag.Length > 0 ? castColor : FxRecipeCatalog.DefaultExplodeColor;
                 LastExplodeRadius = explodeRadius;
-                SpawnMarker(ShapeKind.Wave, signal.Origin, signal.Direction, 0f, 0f, 0f, explodeRadius, FlightLife, explodeColor);
+                // story-006：落地爆炸环坐标从玩家位置改成落点，与 MetabolicSliceBridge.ApplyEvent 的延迟命中
+                // 落点用同一飞行距离（R5）。Wave 的 ApplyTransform 在 Spin=Orbit=0 时 offset 恒为零向量，
+                // 传入落点作为 origin 即可让环"就地在落点炸开"，不需要改 Wave 自身的位移公式（避免影响
+                // Spin/Orbit 主形态那条 Wave 分支，见 ComposeShapePresentation）。Melee-tail 的判定仍原地
+                // 瞬时结算（近战方向留给 007），环坐标同步保持 signal.Origin，避免视觉与判定落点错位。
+                float2 explodeOrigin = signal.Origin;
+                if (kind != ShapeKind.Melee)
+                {
+                    float2 explodeDir = math.normalizesafe(signal.Direction, new float2(0f, 1f));
+                    explodeOrigin = signal.Origin + explodeDir * MetabolicSliceBridge.ImpactFlightDistance;
+                }
+                SpawnMarker(ShapeKind.Wave, explodeOrigin, signal.Direction, 0f, 0f, 0f, explodeRadius, FlightLife, explodeColor);
             }
             else
             {
@@ -446,8 +462,12 @@ namespace GameLogic.Battle.Feedback
                 }
                 case ShapeKind.Spore:
                 {
+                    // story-006：Spore 专用于 ExplodeOnHit 主形态（ComposeShapePresentation.Resolve），
+                    // 叠加沿 Direction 的独立线性飞行，与 Bolt 同款手法，让"扔出去"读得出来，与
+                    // MetabolicSliceBridge 的延迟落点结算同步到达（同一 ImpactFlightDistance/生命周期）。
                     float2 offset = ComposeMotionMath.Offset(_phase[idx], _spin[idx], _orbit[idx], _elapsed[idx]);
-                    float2 pos = origin + offset;
+                    float2 linear = _direction[idx] * (MetabolicSliceBridge.ImpactFlightDistance * u);
+                    float2 pos = origin + offset + linear;
                     float diameter = radius * recipe.DiameterCoef;
                     _tf[idx].localPosition = new Vector3(pos.x, MarkerY, pos.y);
                     _tf[idx].localRotation = Quaternion.identity;

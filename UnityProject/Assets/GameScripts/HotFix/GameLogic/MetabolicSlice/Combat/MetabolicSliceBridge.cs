@@ -5,6 +5,7 @@ using ComposeEngine.Builtin.Catalog;
 using ComposeEngine.Core;
 using GameLogic.Ability;
 using GameLogic.Battle;
+using GameLogic.Battle.Feedback;
 using GameLogic.Core;
 using GameLogic.MetabolicSlice.Carrier;
 using GameLogic.MetabolicSlice.ContentCatalog;
@@ -50,6 +51,10 @@ namespace GameLogic.MetabolicSlice.Combat
         public const float ExplodeRadiusMult = 1.6f;
         private const float ExplodeDamageMult = 0.5f;
 
+        /// <summary>story-006：Count 多发/Explode 落点结算的飞行距离，白模视觉飞行终点与判定落点必须用同一个数，
+        /// 禁止另起系数（比照 D3/D6 先例）。取值对齐既有 Bolt 视觉的 BoltFlightDistance=9f，不改变已调好的观感尺度。</summary>
+        public const float ImpactFlightDistance = 9f;
+
         /// <summary>story-002：全仓库 SimBridge/SimSnapshot 无玩家速度/朝向字段，Direction 定为默认前向常量。</summary>
         private static readonly float2 DefaultForward = new float2(0f, 1f);
 
@@ -76,6 +81,16 @@ namespace GameLogic.MetabolicSlice.Combat
             public float TimeLeft;
         }
 
+        /// <summary>story-006：Count 多发/Explode 延迟落点结算的最小 ephemeral 状态（复用 PendingMotionHit
+        /// 同一形状扩展——Origin+TimeLeft 语义换成"沿方向飞行的落点"，见 R5）。</summary>
+        private struct PendingImpact
+        {
+            public float2 ImpactPos;
+            public float Radius;
+            public float Damage;
+            public float TimeLeft;
+        }
+
         private Engine _engine;
         private MetabolicSliceRunner _runner;
         private SimBridge _sim;
@@ -83,6 +98,7 @@ namespace GameLogic.MetabolicSlice.Combat
         private AbilitySystem _abilities;
         private WorldEnvironment _environment;
         private readonly List<PendingMotionHit> _pendingMotion = new List<PendingMotionHit>();
+        private readonly List<PendingImpact> _pendingImpact = new List<PendingImpact>();
         private float _timer;
         private int _seed;
         private float _playerShield;
@@ -112,6 +128,12 @@ namespace GameLogic.MetabolicSlice.Combat
 
         /// <summary>story-003：当前挂起的 Spin/Orbit 延迟命中数量，供 execute_code 断言"生成即挂起、tick 完即清空"。</summary>
         public int PendingMotionCount => _pendingMotion?.Count ?? 0;
+
+        /// <summary>story-006：当前挂起的 Count 多发/Explode 延迟落点数量，供 execute_code 断言"生成即挂起、tick 完即清空"。</summary>
+        public int PendingImpactCount => _pendingImpact?.Count ?? 0;
+
+        /// <summary>story-006 验收探针：最近一次延迟落点结算的世界坐标，供断言 impactPos != PlayerPosition。</summary>
+        public float2 LastImpactPos { get; private set; }
 
         /// <summary>story-006：LookDev 沙盒抑制玩家真实网格的常规 1.5s 装配 Tick（噪声源），不影响
         /// <see cref="TickPendingMotion"/> 与 <see cref="ApplyEvent"/>（沙盒发射的夹具仍要正常播完延迟命中动画）。</summary>
@@ -214,6 +236,7 @@ namespace GameLogic.MetabolicSlice.Combat
             }
 
             TickPendingMotion(dt);
+            TickPendingImpact(dt);
 
             if (Suppressed)
             {
@@ -268,10 +291,14 @@ namespace GameLogic.MetabolicSlice.Combat
             {
                 int hits = Math.Max(1, (int)MathF.Round(evt.Count));
                 float radius = DamageAreaRadius * MathF.Max(0.1f, evt.Scale);
+                float2 baseDir = _abilities != null ? _abilities.AimDirection : DefaultForward;
+                // story-006：落点结算只重构 Bolt-tail（远程/AOE）链路；Melee-tail 的近战方向留给 007
+                // （EPIC Out of scope 明确排除"近战方向"），Melee 的 Count/Explode 组合维持旧行为不变。
+                bool useImpactSettlement = evt.Shape == "Bolt";
 
                 if (evt.Spin != 0f || evt.Orbit != 0f)
                 {
-                    // story-003：Spin/Orbit 命中改延迟到期采样点，而不是原地瞬时突发（D2/D4）。
+                    // story-003：Spin/Orbit 命中改延迟到期采样点，而不是原地瞬时突发（D2/D4），不在本 story 改动范围。
                     float2 origin = _sim.PlayerPosition;
                     for (int h = 0; h < hits; h++)
                     {
@@ -287,21 +314,60 @@ namespace GameLogic.MetabolicSlice.Combat
                             TimeLeft = ComposeMotionMath.MotionFlightDuration,
                         });
                     }
+
+                    if (evt.ExplodeOnHit)
+                    {
+                        // 与 Spin/Orbit 组合的罕见情形：沿用原「瞬时二次扩圈」，不纳入本 story 落点重构范围。
+                        _sim.DamageArea(origin, radius * ExplodeRadiusMult, evt.Damage * ExplodeDamageMult,
+                            BinGames.Sim.SimFaction.Hostile);
+                    }
+                }
+                else if (useImpactSettlement && (hits > 1 || evt.ExplodeOnHit))
+                {
+                    // story-006 R5/Required 1,2,3：Count 多发 / Explode 改「发射→落点结算」，不再原地瞬时打
+                    // 玩家自己所在坐标；每发落点仍是 evt.Damage，Explode 附加量沿用原 0.5x/1.6x 系数，
+                    // 只挪到延迟到期后的落点，判定数值不变（不额外增减）。
+                    float2 origin = _sim.PlayerPosition;
+                    for (int h = 0; h < hits; h++)
+                    {
+                        float2 dir = FanDirection(baseDir, h, hits);
+                        _pendingImpact.Add(new PendingImpact
+                        {
+                            ImpactPos = origin + dir * ImpactFlightDistance,
+                            Radius = radius,
+                            Damage = evt.Damage,
+                            TimeLeft = ComposeMotionMath.MotionFlightDuration,
+                        });
+                    }
+
+                    if (evt.ExplodeOnHit)
+                    {
+                        _pendingImpact.Add(new PendingImpact
+                        {
+                            ImpactPos = origin + baseDir * ImpactFlightDistance,
+                            Radius = radius * ExplodeRadiusMult,
+                            Damage = evt.Damage * ExplodeDamageMult,
+                            TimeLeft = ComposeMotionMath.MotionFlightDuration,
+                        });
+                    }
                 }
                 else
                 {
+                    // Melee-tail（或 Bolt 单发无 Explode）：维持原地瞬时结算，含 Melee 的 Count/Explode
+                    // 组合旧行为（近战方向留给 007，见 Out of scope）。
+                    float2 origin = _sim.PlayerPosition;
                     for (int h = 0; h < hits; h++)
                     {
-                        _sim.DamageArea(_sim.PlayerPosition, radius, evt.Damage, BinGames.Sim.SimFaction.Hostile);
+                        _sim.DamageArea(origin, radius, evt.Damage, BinGames.Sim.SimFaction.Hostile);
+                    }
+
+                    if (evt.ExplodeOnHit)
+                    {
+                        _sim.DamageArea(origin, radius * ExplodeRadiusMult, evt.Damage * ExplodeDamageMult,
+                            BinGames.Sim.SimFaction.Hostile);
                     }
                 }
                 applied = true;
-
-                if (evt.ExplodeOnHit)
-                {
-                    _sim.DamageArea(_sim.PlayerPosition, radius * ExplodeRadiusMult, evt.Damage * ExplodeDamageMult,
-                        BinGames.Sim.SimFaction.Hostile);
-                }
             }
 
             if (evt.Heal > 0f)
@@ -344,9 +410,12 @@ namespace GameLogic.MetabolicSlice.Combat
             if (applied)
             {
                 // story-002：组合出口形态信号，给表现层一个稳定订阅点（不持有 SimWorld，不做 O(敌人数) 扫描）。
+                // story-005：Shape 改经 ComposeShapePresentation 二次映射——CarrierCompiler 链尾判定值仍恒为
+                // Bolt/Melee 两种（不改判定），这里只把表现 Shape 按 Spin/Orbit/ExplodeOnHit/Count 细分，
+                // 让装了不同 Module 基因的弹道读得出差异（R4，见该类注释）。
                 Signals.Publish(new ComposeCastSignal
                 {
-                    Shape = evt.Shape,
+                    Shape = ComposeShapePresentation.Resolve(evt),
                     Scale = evt.Scale,
                     Count = evt.Count,
                     Spin = evt.Spin,
@@ -385,6 +454,46 @@ namespace GameLogic.MetabolicSlice.Combat
                     _pendingMotion[i] = hit;
                 }
             }
+        }
+
+        /// <summary>
+        /// story-006：每帧推进挂起的 Count 多发/Explode 延迟落点（不受 TickInterval 节流，与
+        /// <see cref="TickPendingMotion"/> 同一节奏）。到期即在落点调用 DamageArea，语义上是
+        /// "扔出去→落地爆炸"，不再是原地瞬时突发。
+        /// </summary>
+        private void TickPendingImpact(float dt)
+        {
+            for (int i = _pendingImpact.Count - 1; i >= 0; i--)
+            {
+                PendingImpact hit = _pendingImpact[i];
+                hit.TimeLeft -= dt;
+                if (hit.TimeLeft <= 0f)
+                {
+                    LastImpactPos = hit.ImpactPos;
+                    _sim.DamageArea(hit.ImpactPos, hit.Radius, hit.Damage, BinGames.Sim.SimFaction.Hostile);
+                    _pendingImpact.RemoveAt(i);
+                }
+                else
+                {
+                    _pendingImpact[i] = hit;
+                }
+            }
+        }
+
+        /// <summary>story-006：Count 多发/Explode 落点方向扇形展开，与
+        /// <see cref="GameLogic.Battle.Feedback.WhiteboxComposeProjectileFeedback"/> 视觉飞行用同一公式
+        /// （禁止另起系数分叉，比照 D3/D6 先例）。count&lt;=1 时原样返回归一化后的 baseDir。</summary>
+        public static float2 FanDirection(float2 baseDir, int index, int count)
+        {
+            float2 n = math.normalizesafe(baseDir, DefaultForward);
+            if (count <= 1)
+            {
+                return n;
+            }
+            float angle = 2f * math.PI * index / count;
+            float cos = math.cos(angle);
+            float sin = math.sin(angle);
+            return new float2(n.x * cos - n.y * sin, n.x * sin + n.y * cos);
         }
 
         /// <summary>
@@ -459,6 +568,7 @@ namespace GameLogic.MetabolicSlice.Combat
             _runner = null;
             _environment = null;
             _pendingMotion?.Clear();
+            _pendingImpact?.Clear();
             _sandboxCombatScope?.Dispose();
             _sandboxCombatScope = null;
             _sandboxRecentHits.Clear();
