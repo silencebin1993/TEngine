@@ -13,571 +13,168 @@ namespace GameConfig
 {
 public partial class Tables
 {
-    #region The Tables
-
-    private item.TbItem m_TbItem;
-    public item.TbItem TbItem 
-    {
-        get
-        {
-            if (m_TbItem == null)
-            {
-                m_TbItem = new item.TbItem(defaultLoader("item_tbitem"));
-                m_TbItem.ResolveRef(this);
-            }
-            return m_TbItem;
-        }
-        set
-        {
-            m_TbItem = value;
-            m_TbItem.ResolveRef(this);
-        }
-    }
+    public item.TbItem TbItem {get; }
     /// <summary>
     /// 主动技能
     /// </summary>
-    private cell.TbAbility m_TbAbility;
-    public cell.TbAbility TbAbility 
-    {
-        get
-        {
-            if (m_TbAbility == null)
-            {
-                m_TbAbility = new cell.TbAbility(defaultLoader("cell_tbability"));
-                m_TbAbility.ResolveRef(this);
-            }
-            return m_TbAbility;
-        }
-        set
-        {
-            m_TbAbility = value;
-            m_TbAbility.ResolveRef(this);
-        }
-    }
+    public cell.TbAbility TbAbility {get; }
     /// <summary>
     /// 技能效果
     /// </summary>
-    private cell.TbAbilityEffect m_TbAbilityEffect;
-    public cell.TbAbilityEffect TbAbilityEffect 
-    {
-        get
-        {
-            if (m_TbAbilityEffect == null)
-            {
-                m_TbAbilityEffect = new cell.TbAbilityEffect(defaultLoader("cell_tbabilityeffect"));
-                m_TbAbilityEffect.ResolveRef(this);
-            }
-            return m_TbAbilityEffect;
-        }
-        set
-        {
-            m_TbAbilityEffect = value;
-            m_TbAbilityEffect.ResolveRef(this);
-        }
-    }
+    public cell.TbAbilityEffect TbAbilityEffect {get; }
     /// <summary>
     /// 词缀
     /// </summary>
-    private cell.TbAffix m_TbAffix;
-    public cell.TbAffix TbAffix 
-    {
-        get
-        {
-            if (m_TbAffix == null)
-            {
-                m_TbAffix = new cell.TbAffix(defaultLoader("cell_tbaffix"));
-                m_TbAffix.ResolveRef(this);
-            }
-            return m_TbAffix;
-        }
-        set
-        {
-            m_TbAffix = value;
-            m_TbAffix.ResolveRef(this);
-        }
-    }
+    public cell.TbAffix TbAffix {get; }
     /// <summary>
     /// 行为原型
     /// </summary>
-    private cell.TbBehaviorArchetype m_TbBehaviorArchetype;
-    public cell.TbBehaviorArchetype TbBehaviorArchetype 
-    {
-        get
-        {
-            if (m_TbBehaviorArchetype == null)
-            {
-                m_TbBehaviorArchetype = new cell.TbBehaviorArchetype(defaultLoader("cell_tbbehaviorarchetype"));
-                m_TbBehaviorArchetype.ResolveRef(this);
-            }
-            return m_TbBehaviorArchetype;
-        }
-        set
-        {
-            m_TbBehaviorArchetype = value;
-            m_TbBehaviorArchetype.ResolveRef(this);
-        }
-    }
+    public cell.TbBehaviorArchetype TbBehaviorArchetype {get; }
     /// <summary>
     /// 首领阶段
     /// </summary>
-    private cell.TbBossPhase m_TbBossPhase;
-    public cell.TbBossPhase TbBossPhase 
-    {
-        get
-        {
-            if (m_TbBossPhase == null)
-            {
-                m_TbBossPhase = new cell.TbBossPhase(defaultLoader("cell_tbbossphase"));
-                m_TbBossPhase.ResolveRef(this);
-            }
-            return m_TbBossPhase;
-        }
-        set
-        {
-            m_TbBossPhase = value;
-            m_TbBossPhase.ResolveRef(this);
-        }
-    }
+    public cell.TbBossPhase TbBossPhase {get; }
     /// <summary>
     /// 卡牌
     /// </summary>
-    private cell.TbCard m_TbCard;
-    public cell.TbCard TbCard 
-    {
-        get
-        {
-            if (m_TbCard == null)
-            {
-                m_TbCard = new cell.TbCard(defaultLoader("cell_tbcard"));
-                m_TbCard.ResolveRef(this);
-            }
-            return m_TbCard;
-        }
-        set
-        {
-            m_TbCard = value;
-            m_TbCard.ResolveRef(this);
-        }
-    }
+    public cell.TbCard TbCard {get; }
     /// <summary>
     /// 卡牌效果
     /// </summary>
-    private cell.TbCardEffect m_TbCardEffect;
-    public cell.TbCardEffect TbCardEffect 
-    {
-        get
-        {
-            if (m_TbCardEffect == null)
-            {
-                m_TbCardEffect = new cell.TbCardEffect(defaultLoader("cell_tbcardeffect"));
-                m_TbCardEffect.ResolveRef(this);
-            }
-            return m_TbCardEffect;
-        }
-        set
-        {
-            m_TbCardEffect = value;
-            m_TbCardEffect.ResolveRef(this);
-        }
-    }
+    public cell.TbCardEffect TbCardEffect {get; }
     /// <summary>
     /// 卡牌属性修正
     /// </summary>
-    private cell.TbCardStat m_TbCardStat;
-    public cell.TbCardStat TbCardStat 
-    {
-        get
-        {
-            if (m_TbCardStat == null)
-            {
-                m_TbCardStat = new cell.TbCardStat(defaultLoader("cell_tbcardstat"));
-                m_TbCardStat.ResolveRef(this);
-            }
-            return m_TbCardStat;
-        }
-        set
-        {
-            m_TbCardStat = value;
-            m_TbCardStat.ResolveRef(this);
-        }
-    }
+    public cell.TbCardStat TbCardStat {get; }
     /// <summary>
     /// 敌人配置
     /// </summary>
-    private cell.TbCellEnemy m_TbCellEnemy;
-    public cell.TbCellEnemy TbCellEnemy 
-    {
-        get
-        {
-            if (m_TbCellEnemy == null)
-            {
-                m_TbCellEnemy = new cell.TbCellEnemy(defaultLoader("cell_tbcellenemy"));
-                m_TbCellEnemy.ResolveRef(this);
-            }
-            return m_TbCellEnemy;
-        }
-        set
-        {
-            m_TbCellEnemy = value;
-            m_TbCellEnemy.ResolveRef(this);
-        }
-    }
+    public cell.TbCellEnemy TbCellEnemy {get; }
     /// <summary>
     /// 全局常量
     /// </summary>
-    private cell.TbCellGlobal m_TbCellGlobal;
-    public cell.TbCellGlobal TbCellGlobal 
-    {
-        get
-        {
-            if (m_TbCellGlobal == null)
-            {
-                m_TbCellGlobal = new cell.TbCellGlobal(defaultLoader("cell_tbcellglobal"));
-                m_TbCellGlobal.ResolveRef(this);
-            }
-            return m_TbCellGlobal;
-        }
-        set
-        {
-            m_TbCellGlobal = value;
-            m_TbCellGlobal.ResolveRef(this);
-        }
-    }
+    public cell.TbCellGlobal TbCellGlobal {get; }
     /// <summary>
     /// 生态事件
     /// </summary>
-    private cell.TbEcoEvent m_TbEcoEvent;
-    public cell.TbEcoEvent TbEcoEvent 
-    {
-        get
-        {
-            if (m_TbEcoEvent == null)
-            {
-                m_TbEcoEvent = new cell.TbEcoEvent(defaultLoader("cell_tbecoevent"));
-                m_TbEcoEvent.ResolveRef(this);
-            }
-            return m_TbEcoEvent;
-        }
-        set
-        {
-            m_TbEcoEvent = value;
-            m_TbEcoEvent.ResolveRef(this);
-        }
-    }
+    public cell.TbEcoEvent TbEcoEvent {get; }
     /// <summary>
     /// 升级曲线
     /// </summary>
-    private cell.TbLevelCurve m_TbLevelCurve;
-    public cell.TbLevelCurve TbLevelCurve 
-    {
-        get
-        {
-            if (m_TbLevelCurve == null)
-            {
-                m_TbLevelCurve = new cell.TbLevelCurve(defaultLoader("cell_tblevelcurve"));
-                m_TbLevelCurve.ResolveRef(this);
-            }
-            return m_TbLevelCurve;
-        }
-        set
-        {
-            m_TbLevelCurve = value;
-            m_TbLevelCurve.ResolveRef(this);
-        }
-    }
+    public cell.TbLevelCurve TbLevelCurve {get; }
     /// <summary>
     /// 生态时期
     /// </summary>
-    private cell.TbPhase m_TbPhase;
-    public cell.TbPhase TbPhase 
-    {
-        get
-        {
-            if (m_TbPhase == null)
-            {
-                m_TbPhase = new cell.TbPhase(defaultLoader("cell_tbphase"));
-                m_TbPhase.ResolveRef(this);
-            }
-            return m_TbPhase;
-        }
-        set
-        {
-            m_TbPhase = value;
-            m_TbPhase.ResolveRef(this);
-        }
-    }
+    public cell.TbPhase TbPhase {get; }
     /// <summary>
     /// 压力曲线
     /// </summary>
-    private cell.TbPressureCurve m_TbPressureCurve;
-    public cell.TbPressureCurve TbPressureCurve 
-    {
-        get
-        {
-            if (m_TbPressureCurve == null)
-            {
-                m_TbPressureCurve = new cell.TbPressureCurve(defaultLoader("cell_tbpressurecurve"));
-                m_TbPressureCurve.ResolveRef(this);
-            }
-            return m_TbPressureCurve;
-        }
-        set
-        {
-            m_TbPressureCurve = value;
-            m_TbPressureCurve.ResolveRef(this);
-        }
-    }
+    public cell.TbPressureCurve TbPressureCurve {get; }
     /// <summary>
     /// 状态效果
     /// </summary>
-    private cell.TbStatusEffect m_TbStatusEffect;
-    public cell.TbStatusEffect TbStatusEffect 
-    {
-        get
-        {
-            if (m_TbStatusEffect == null)
-            {
-                m_TbStatusEffect = new cell.TbStatusEffect(defaultLoader("cell_tbstatuseffect"));
-                m_TbStatusEffect.ResolveRef(this);
-            }
-            return m_TbStatusEffect;
-        }
-        set
-        {
-            m_TbStatusEffect = value;
-            m_TbStatusEffect.ResolveRef(this);
-        }
-    }
+    public cell.TbStatusEffect TbStatusEffect {get; }
     /// <summary>
     /// 细胞阶段场地与时间轴
     /// </summary>
-    private fp.TbCellArena m_TbCellArena;
-    public fp.TbCellArena TbCellArena 
-    {
-        get
-        {
-            if (m_TbCellArena == null)
-            {
-                m_TbCellArena = new fp.TbCellArena(defaultLoader("fp_tbcellarena"));
-                m_TbCellArena.ResolveRef(this);
-            }
-            return m_TbCellArena;
-        }
-        set
-        {
-            m_TbCellArena = value;
-            m_TbCellArena.ResolveRef(this);
-        }
-    }
+    public fp.TbCellArena TbCellArena {get; }
     /// <summary>
     /// 生物阶段场地与时间轴
     /// </summary>
-    private fp.TbCreatureArena m_TbCreatureArena;
-    public fp.TbCreatureArena TbCreatureArena 
-    {
-        get
-        {
-            if (m_TbCreatureArena == null)
-            {
-                m_TbCreatureArena = new fp.TbCreatureArena(defaultLoader("fp_tbcreaturearena"));
-                m_TbCreatureArena.ResolveRef(this);
-            }
-            return m_TbCreatureArena;
-        }
-        set
-        {
-            m_TbCreatureArena = value;
-            m_TbCreatureArena.ResolveRef(this);
-        }
-    }
+    public fp.TbCreatureArena TbCreatureArena {get; }
     /// <summary>
     /// 敌人配置
     /// </summary>
-    private fp.TbEnemy m_TbEnemy;
-    public fp.TbEnemy TbEnemy 
-    {
-        get
-        {
-            if (m_TbEnemy == null)
-            {
-                m_TbEnemy = new fp.TbEnemy(defaultLoader("fp_tbenemy"));
-                m_TbEnemy.ResolveRef(this);
-            }
-            return m_TbEnemy;
-        }
-        set
-        {
-            m_TbEnemy = value;
-            m_TbEnemy.ResolveRef(this);
-        }
-    }
+    public fp.TbEnemy TbEnemy {get; }
     /// <summary>
     /// 敌人技能
     /// </summary>
-    private fp.TbEnemySkill m_TbEnemySkill;
-    public fp.TbEnemySkill TbEnemySkill 
-    {
-        get
-        {
-            if (m_TbEnemySkill == null)
-            {
-                m_TbEnemySkill = new fp.TbEnemySkill(defaultLoader("fp_tbenemyskill"));
-                m_TbEnemySkill.ResolveRef(this);
-            }
-            return m_TbEnemySkill;
-        }
-        set
-        {
-            m_TbEnemySkill = value;
-            m_TbEnemySkill.ResolveRef(this);
-        }
-    }
+    public fp.TbEnemySkill TbEnemySkill {get; }
     /// <summary>
     /// 食物配置
     /// </summary>
-    private fp.TbFood m_TbFood;
-    public fp.TbFood TbFood 
-    {
-        get
-        {
-            if (m_TbFood == null)
-            {
-                m_TbFood = new fp.TbFood(defaultLoader("fp_tbfood"));
-                m_TbFood.ResolveRef(this);
-            }
-            return m_TbFood;
-        }
-        set
-        {
-            m_TbFood = value;
-            m_TbFood.ResolveRef(this);
-        }
-    }
+    public fp.TbFood TbFood {get; }
     /// <summary>
     /// FP全局公式与门槛
     /// </summary>
-    private fp.TbGlobal m_TbGlobal;
-    public fp.TbGlobal TbGlobal 
-    {
-        get
-        {
-            if (m_TbGlobal == null)
-            {
-                m_TbGlobal = new fp.TbGlobal(defaultLoader("fp_tbglobal"));
-                m_TbGlobal.ResolveRef(this);
-            }
-            return m_TbGlobal;
-        }
-        set
-        {
-            m_TbGlobal = value;
-            m_TbGlobal.ResolveRef(this);
-        }
-    }
+    public fp.TbGlobal TbGlobal {get; }
     /// <summary>
     /// 细胞微选择
     /// </summary>
-    private fp.TbMicroChoice m_TbMicroChoice;
-    public fp.TbMicroChoice TbMicroChoice 
-    {
-        get
-        {
-            if (m_TbMicroChoice == null)
-            {
-                m_TbMicroChoice = new fp.TbMicroChoice(defaultLoader("fp_tbmicrochoice"));
-                m_TbMicroChoice.ResolveRef(this);
-            }
-            return m_TbMicroChoice;
-        }
-        set
-        {
-            m_TbMicroChoice = value;
-            m_TbMicroChoice.ResolveRef(this);
-        }
-    }
+    public fp.TbMicroChoice TbMicroChoice {get; }
     /// <summary>
     /// 构筑模块
     /// </summary>
-    private fp.TbModule m_TbModule;
-    public fp.TbModule TbModule 
-    {
-        get
-        {
-            if (m_TbModule == null)
-            {
-                m_TbModule = new fp.TbModule(defaultLoader("fp_tbmodule"));
-                m_TbModule.ResolveRef(this);
-            }
-            return m_TbModule;
-        }
-        set
-        {
-            m_TbModule = value;
-            m_TbModule.ResolveRef(this);
-        }
-    }
+    public fp.TbModule TbModule {get; }
     /// <summary>
     /// 玩家形态基础面板
     /// </summary>
-    private fp.TbPlayerForm m_TbPlayerForm;
-    public fp.TbPlayerForm TbPlayerForm 
-    {
-        get
-        {
-            if (m_TbPlayerForm == null)
-            {
-                m_TbPlayerForm = new fp.TbPlayerForm(defaultLoader("fp_tbplayerform"));
-                m_TbPlayerForm.ResolveRef(this);
-            }
-            return m_TbPlayerForm;
-        }
-        set
-        {
-            m_TbPlayerForm = value;
-            m_TbPlayerForm.ResolveRef(this);
-        }
-    }
+    public fp.TbPlayerForm TbPlayerForm {get; }
     /// <summary>
     /// 细胞波次
     /// </summary>
-    private fp.TbWave m_TbWave;
-    public fp.TbWave TbWave 
-    {
-        get
-        {
-            if (m_TbWave == null)
-            {
-                m_TbWave = new fp.TbWave(defaultLoader("fp_tbwave"));
-                m_TbWave.ResolveRef(this);
-            }
-            return m_TbWave;
-        }
-        set
-        {
-            m_TbWave = value;
-            m_TbWave.ResolveRef(this);
-        }
-    }
-
-    #endregion
-
-    System.Func<string, ByteBuf> defaultLoader;
+    public fp.TbWave TbWave {get; }
 
     public Tables(System.Func<string, ByteBuf> loader)
     {
-        SetDefaultLoader(loader);
-        Init();
+        TbItem = new item.TbItem(loader("item_tbitem"));
+        TbAbility = new cell.TbAbility(loader("cell_tbability"));
+        TbAbilityEffect = new cell.TbAbilityEffect(loader("cell_tbabilityeffect"));
+        TbAffix = new cell.TbAffix(loader("cell_tbaffix"));
+        TbBehaviorArchetype = new cell.TbBehaviorArchetype(loader("cell_tbbehaviorarchetype"));
+        TbBossPhase = new cell.TbBossPhase(loader("cell_tbbossphase"));
+        TbCard = new cell.TbCard(loader("cell_tbcard"));
+        TbCardEffect = new cell.TbCardEffect(loader("cell_tbcardeffect"));
+        TbCardStat = new cell.TbCardStat(loader("cell_tbcardstat"));
+        TbCellEnemy = new cell.TbCellEnemy(loader("cell_tbcellenemy"));
+        TbCellGlobal = new cell.TbCellGlobal(loader("cell_tbcellglobal"));
+        TbEcoEvent = new cell.TbEcoEvent(loader("cell_tbecoevent"));
+        TbLevelCurve = new cell.TbLevelCurve(loader("cell_tblevelcurve"));
+        TbPhase = new cell.TbPhase(loader("cell_tbphase"));
+        TbPressureCurve = new cell.TbPressureCurve(loader("cell_tbpressurecurve"));
+        TbStatusEffect = new cell.TbStatusEffect(loader("cell_tbstatuseffect"));
+        TbCellArena = new fp.TbCellArena(loader("fp_tbcellarena"));
+        TbCreatureArena = new fp.TbCreatureArena(loader("fp_tbcreaturearena"));
+        TbEnemy = new fp.TbEnemy(loader("fp_tbenemy"));
+        TbEnemySkill = new fp.TbEnemySkill(loader("fp_tbenemyskill"));
+        TbFood = new fp.TbFood(loader("fp_tbfood"));
+        TbGlobal = new fp.TbGlobal(loader("fp_tbglobal"));
+        TbMicroChoice = new fp.TbMicroChoice(loader("fp_tbmicrochoice"));
+        TbModule = new fp.TbModule(loader("fp_tbmodule"));
+        TbPlayerForm = new fp.TbPlayerForm(loader("fp_tbplayerform"));
+        TbWave = new fp.TbWave(loader("fp_tbwave"));
+        ResolveRef();
     }
     
-    public void SetDefaultLoader(System.Func<string, ByteBuf> loader)
+    private void ResolveRef()
     {
-        defaultLoader = null;
-        defaultLoader = loader;
+        TbItem.ResolveRef(this);
+        TbAbility.ResolveRef(this);
+        TbAbilityEffect.ResolveRef(this);
+        TbAffix.ResolveRef(this);
+        TbBehaviorArchetype.ResolveRef(this);
+        TbBossPhase.ResolveRef(this);
+        TbCard.ResolveRef(this);
+        TbCardEffect.ResolveRef(this);
+        TbCardStat.ResolveRef(this);
+        TbCellEnemy.ResolveRef(this);
+        TbCellGlobal.ResolveRef(this);
+        TbEcoEvent.ResolveRef(this);
+        TbLevelCurve.ResolveRef(this);
+        TbPhase.ResolveRef(this);
+        TbPressureCurve.ResolveRef(this);
+        TbStatusEffect.ResolveRef(this);
+        TbCellArena.ResolveRef(this);
+        TbCreatureArena.ResolveRef(this);
+        TbEnemy.ResolveRef(this);
+        TbEnemySkill.ResolveRef(this);
+        TbFood.ResolveRef(this);
+        TbGlobal.ResolveRef(this);
+        TbMicroChoice.ResolveRef(this);
+        TbModule.ResolveRef(this);
+        TbPlayerForm.ResolveRef(this);
+        TbWave.ResolveRef(this);
     }
-
-    //public partial void Init();
-
-    public void Init(){}
 }
 
 }
