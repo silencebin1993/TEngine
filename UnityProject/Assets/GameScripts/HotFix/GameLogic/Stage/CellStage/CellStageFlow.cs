@@ -871,8 +871,12 @@ namespace GameLogic.Stage.CellStage
         }
 
         /// <summary>
-        /// GM：一键解锁全部主动技能（忽略槽位上限），并灌满体力方便连放测反馈。返回本次实际授予数
-        /// （story-002：供 <see cref="DebugGrantAllMetabolicItems"/> 汇总日志用，幂等下重复调用返回 0）。
+        /// GM：灌满体力方便连放测反馈。story-004（combat-visualization R3）收口：
+        /// `DataRegistry.AllAbilities` 里 id=2~28（27 条）是敌人 AI 风格技能（骨刺投射/孢子爆发等），
+        /// 从未进入正常掉落/选卡池，与 ComposeEngine 基元机制无关，不再强制授予进玩家战斗槽位；
+        /// 唯一的 id=1（冲刺）与基元机制无关但保留，且已在 <see cref="GrantStarterAbilities"/>
+        /// （<see cref="Enter"/> 时无条件调用）默认授予，这里不需要重复。返回值恒为 0，保留 int
+        /// 签名是为了不改 <see cref="DebugGrantAllMetabolicItems"/> 调用处。
         /// </summary>
         public int DebugUnlockAllAbilities()
         {
@@ -881,22 +885,12 @@ namespace GameLogic.Stage.CellStage
                 return 0;
             }
 
-            int granted = 0;
-            IReadOnlyList<AbilitySpec> all = DataRegistry.Instance.AllAbilities;
-            for (int i = 0; i < all.Count; i++)
-            {
-                if (_abilities.ForceGrant(all[i]))
-                {
-                    granted++;
-                }
-            }
-
             float staminaMax = _stats != null ? _stats.Get(StatId.StaminaMax) : 100f;
             _wallet?.Add(ResourceKind.Stamina, staminaMax);
 
             TEngine.Log.Info(
-                $"[GM] 解锁全部技能 +{granted}（槽位 {_abilities.SlotCount}/{all.Count}），体力已灌满");
-            return granted;
+                $"[GM] 体力已灌满（技能槽仅保留冲刺，机制无关技能已按 R3 移除，槽位 {_abilities.SlotCount}/1）");
+            return 0;
         }
 
         /// <summary>
@@ -972,7 +966,7 @@ namespace GameLogic.Stage.CellStage
                 }
             }
 
-            int abilitiesGranted = DebugUnlockAllAbilities();
+            DebugUnlockAllAbilities();
             int totalCarrierCount = 0;
             foreach (var _ in panel.CarrierRegistry.All)
             {
@@ -982,7 +976,7 @@ namespace GameLogic.Stage.CellStage
             TEngine.Log.Info(
                 $"[GM] 基因 {panel.GeneReserve.Items.Count}/30（含 {moduleGeneCount} 个器官模块，本次 +{genesGranted}）"
                 + $" ＋Carrier {totalCarrierCount}/2（本次 +{carriersGranted}，插槽已补至 {slotTarget}）"
-                + $" ＋技能 +{abilitiesGranted}");
+                + " ＋技能：仅冲刺（机制无关技能已按 R3 移除，体力已灌满）");
         }
 
         /// <summary>
