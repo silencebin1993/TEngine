@@ -55,6 +55,12 @@ namespace GameLogic.MetabolicSlice.Combat
         /// 禁止另起系数（比照 D3/D6 先例）。取值对齐既有 Bolt 视觉的 BoltFlightDistance=9f，不改变已调好的观感尺度。</summary>
         public const float ImpactFlightDistance = 9f;
 
+        /// <summary>story-007 R6：近战前方扇形结算的前移距离，判定与白模视觉共用同一个数
+        /// （<see cref="GameLogic.Battle.Feedback.WhiteboxComposeProjectileFeedback"/> 的 MeleeMuzzleOffset
+        /// 直接引用本常量，禁止另起系数，比照 D3/D6/BoltMuzzleOffset 先例）。小于 DamageAreaRadius，
+        /// hits=1（多数近战器官的常见配置）时仍与玩家本体明显重叠，只是圆心整体前移出方向感。</summary>
+        public const float MeleeFrontOffset = 2f;
+
         /// <summary>story-002：全仓库 SimBridge/SimSnapshot 无玩家速度/朝向字段，Direction 定为默认前向常量。</summary>
         private static readonly float2 DefaultForward = new float2(0f, 1f);
 
@@ -134,6 +140,16 @@ namespace GameLogic.MetabolicSlice.Combat
 
         /// <summary>story-006 验收探针：最近一次延迟落点结算的世界坐标，供断言 impactPos != PlayerPosition。</summary>
         public float2 LastImpactPos { get; private set; }
+
+        /// <summary>story-007 验收探针：最近一次 Melee 前方扇形展开产出的全部命中圆心世界坐标（含 hits&gt;1 的
+        /// 全部圆），供 execute_code 断言"前方判定生效"（圆心随 AimDirection 偏移，不再恒等于 PlayerPosition）与
+        /// "非目标不受击"（给定点到每个圆心的距离 &gt; 半径即不受本次事件影响）。每次 Melee-tail 结算整体替换。</summary>
+        public IReadOnlyList<float2> LastMeleeStrikeOrigins => _lastMeleeStrikeOrigins;
+
+        /// <summary>与 <see cref="LastMeleeStrikeOrigins"/> 同批命中圆的公共半径（已按 evt.Scale 缩放）。</summary>
+        public float LastMeleeStrikeRadius { get; private set; }
+
+        private readonly List<float2> _lastMeleeStrikeOrigins = new List<float2>();
 
         /// <summary>story-006：LookDev 沙盒抑制玩家真实网格的常规 1.5s 装配 Tick（噪声源），不影响
         /// <see cref="TickPendingMotion"/> 与 <see cref="ApplyEvent"/>（沙盒发射的夹具仍要正常播完延迟命中动画）。</summary>
@@ -353,16 +369,34 @@ namespace GameLogic.MetabolicSlice.Combat
                 }
                 else
                 {
-                    // Melee-tail（或 Bolt 单发无 Explode）：维持原地瞬时结算，含 Melee 的 Count/Explode
-                    // 组合旧行为（近战方向留给 007，见 Out of scope）。
+                    // Melee-tail：story-007 R6 前方扇形多圆逼近，不再 hits 次同一坐标画圆——
+                    // 每个圆沿 baseDir 前方 ±ArcHalfAngleDeg 内展开，前移 MeleeFrontOffset（判定/视觉共用同一数）。
+                    // Bolt 单发无 Explode（同落到这个 else 分支）维持原地瞬时结算，不受影响。
                     float2 origin = _sim.PlayerPosition;
-                    for (int h = 0; h < hits; h++)
+                    if (evt.Shape == "Melee")
                     {
-                        _sim.DamageArea(origin, radius, evt.Damage, BinGames.Sim.SimFaction.Hostile);
+                        _lastMeleeStrikeOrigins.Clear();
+                        LastMeleeStrikeRadius = radius;
+                        for (int h = 0; h < hits; h++)
+                        {
+                            float2 dir = MeleeFanDirection(baseDir, h, hits);
+                            float2 strikeOrigin = origin + dir * MeleeFrontOffset;
+                            _lastMeleeStrikeOrigins.Add(strikeOrigin);
+                            _sim.DamageArea(strikeOrigin, radius, evt.Damage, BinGames.Sim.SimFaction.Hostile);
+                        }
+                    }
+                    else
+                    {
+                        for (int h = 0; h < hits; h++)
+                        {
+                            _sim.DamageArea(origin, radius, evt.Damage, BinGames.Sim.SimFaction.Hostile);
+                        }
                     }
 
                     if (evt.ExplodeOnHit)
                     {
+                        // Melee-tail 的爆炸叠加仍原地结算（signal.Origin 同步不偏移，见 Presenter 侧注释），
+                        // 不纳入本 story 的前方偏移改动范围。
                         _sim.DamageArea(origin, radius * ExplodeRadiusMult, evt.Damage * ExplodeDamageMult,
                             BinGames.Sim.SimFaction.Hostile);
                     }
@@ -491,6 +525,24 @@ namespace GameLogic.MetabolicSlice.Combat
                 return n;
             }
             float angle = 2f * math.PI * index / count;
+            float cos = math.cos(angle);
+            float sin = math.sin(angle);
+            return new float2(n.x * cos - n.y * sin, n.x * sin + n.y * cos);
+        }
+
+        /// <summary>story-007 R6：近战前方扇形展开——只在 ±<see cref="FxRecipeCatalog.Global"/>.ArcHalfAngleDeg
+        /// 范围内分布（复用该已有全局系数，不新增系数），与 <see cref="FanDirection"/>（全向散射，Bolt/AOE 多发用）
+        /// 不同。count&lt;=1 时原样返回归一化后的 baseDir（居中不偏转，对应"多数近战器官 hits=1"的常见情形）。</summary>
+        public static float2 MeleeFanDirection(float2 baseDir, int index, int count)
+        {
+            float2 n = math.normalizesafe(baseDir, DefaultForward);
+            if (count <= 1)
+            {
+                return n;
+            }
+            float halfRad = FxRecipeCatalog.Global.ArcHalfAngleDeg * math.PI / 180f;
+            float t = (float)index / (count - 1);
+            float angle = math.lerp(-halfRad, halfRad, t);
             float cos = math.cos(angle);
             float sin = math.sin(angle);
             return new float2(n.x * cos - n.y * sin, n.x * sin + n.y * cos);

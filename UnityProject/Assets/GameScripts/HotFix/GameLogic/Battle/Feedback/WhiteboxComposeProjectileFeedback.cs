@@ -65,6 +65,16 @@ namespace GameLogic.Battle.Feedback
         /// 标记从第 1 帧起就已经离开玩家轮廓，不叠加进 <see cref="ComposeMotionMath.Offset"/>（003 D5 锁死）。</summary>
         private const float BoltMuzzleOffset = 1.2f;
 
+        /// <summary>story-007：近战挥击前移量，与 <see cref="MetabolicSliceBridge.MeleeFrontOffset"/> 共用
+        /// 同一个数（禁止另起系数，比照 D3/D6/BoltMuzzleOffset 先例）——白模贴着真实命中圆心生长，不产生
+        /// 视觉/判定错位。</summary>
+        private const float MeleeMuzzleOffset = MetabolicSliceBridge.MeleeFrontOffset;
+
+        /// <summary>story-007：近战挥击方向性拉伸系数——局部 +X（朝向轴，随 <see cref="DirectionAngleDeg"/>
+        /// 旋转）比侧向更长，读出"劈砍"而非圆点原地放大。</summary>
+        private const float MeleeForwardStretch = 1.4f;
+        private const float MeleeSideStretch = 0.75f;
+
         // story-009：Bolt/Spore 直径系数与 Beam 长/宽系数改为逐配方（G2b），从 FxRecipeCatalog
         // 按当前 ShapeKind 查表读取，不再是同一套固定 const（详见 ApplyTransform）。
 
@@ -183,7 +193,12 @@ namespace GameLogic.Battle.Feedback
                     float phase = 2f * MathF.PI * h / segments;
                     // story-006：Count 多发方向扇形展开，与 MetabolicSliceBridge.ApplyEvent 落点结算用同一公式
                     // （R5）。segments==1 时 FanDirection 原样返回 signal.Direction，不影响单发既有观感。
-                    float2 dir = MetabolicSliceBridge.FanDirection(signal.Direction, h, segments);
+                    // story-007：Melee 改用前方扇形（MeleeFanDirection，±ArcHalfAngleDeg），其余 Shape 仍走
+                    // 全向 FanDirection——判定层 ApplyEvent 对二者做了同样区分，这里必须对齐，否则白模方向
+                    // 与真实命中圆心错位。
+                    float2 dir = kind == ShapeKind.Melee
+                        ? MetabolicSliceBridge.MeleeFanDirection(signal.Direction, h, segments)
+                        : MetabolicSliceBridge.FanDirection(signal.Direction, h, segments);
                     SpawnMarker(kind, signal.Origin, dir, phase, signal.Spin, signal.Orbit, radius, life, castColor);
                 }
             }
@@ -476,14 +491,19 @@ namespace GameLogic.Battle.Feedback
                 }
                 case ShapeKind.Melee:
                 {
-                    // story-007 D1：近战「原地生长」——不复用 BoltFlightDistance 线性位移，
-                    // 只走 003 D5 的 Spin/Orbit 偏移（=0 时天然零向量），靠缩放给出冲击感。
+                    // story-007 R6：近战「朝向旋转 + 前移 + 方向性拉伸」——不再原地放大/identity 旋转。
+                    // 前移量与 MetabolicSliceBridge 的判定圆心共用同一个数（MeleeMuzzleOffset），
+                    // 不随 u 增长（非线性飞行，仍是"原地生长"，只是生长的原点前移了），
+                    // Spin/Orbit 偏移沿用 003 D5（=0 时天然零向量）。
                     float2 offset = ComposeMotionMath.Offset(_phase[idx], _spin[idx], _orbit[idx], _elapsed[idx]);
-                    float2 pos = origin + offset;
+                    float2 dir = _direction[idx];
+                    float2 muzzle = dir * MeleeMuzzleOffset;
+                    float2 pos = origin + offset + muzzle;
                     float grown = radius * recipe.DiameterCoef * (0.6f + 0.4f * Mathf.Clamp01(u));
+                    float angDeg = DirectionAngleDeg(dir);
                     _tf[idx].localPosition = new Vector3(pos.x, MarkerY, pos.y);
-                    _tf[idx].localRotation = Quaternion.identity;
-                    _tf[idx].localScale = new Vector3(grown, 1f, grown);
+                    _tf[idx].localRotation = Quaternion.Euler(0f, -angDeg, 0f);
+                    _tf[idx].localScale = new Vector3(grown * MeleeForwardStretch, 1f, grown * MeleeSideStretch);
                     LastMeleePosition = _tf[idx].localPosition;
                     break;
                 }
