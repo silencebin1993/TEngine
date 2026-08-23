@@ -173,5 +173,29 @@ namespace GameLogic.Progression
                 yield return new OrganelleCodexEntry(def.Id, def.DisplayName, def.Description, def.Role);
             }
         }
+
+        /// <summary>载体器官（IsCarrier==true，玩家可选的 Carrier 出口器官，如分泌喷射器/纤毛刺）。</summary>
+        public IEnumerable<OrganelleCodexEntry> AllCarrierOrganelleEntries()
+        {
+            foreach (OrganelleDef def in OrganelleCatalog.All.Values)
+            {
+                if (def.IsCarrier)
+                {
+                    yield return new OrganelleCodexEntry(def.Id, def.DisplayName, def.Description, def.Role);
+                }
+            }
+        }
+
+        /// <summary>代谢模块（IsCarrier==false，走基因插槽的模块器官，不在 Carrier 器官栏展示）。</summary>
+        public IEnumerable<OrganelleCodexEntry> AllMetabolicModuleEntries()
+        {
+            foreach (OrganelleDef def in OrganelleCatalog.All.Values)
+            {
+                if (!def.IsCarrier)
+                {
+                    yield return new OrganelleCodexEntry(def.Id, def.DisplayName, def.Description, def.Role);
+                }
+            }
+        }
     }
 }

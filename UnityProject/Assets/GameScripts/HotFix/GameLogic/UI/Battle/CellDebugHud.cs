@@ -44,8 +44,9 @@ namespace GameLogic.UI.Battle
         /// </summary>
         private bool _showDebugHud;
 
-        /// <summary>story-006：LookDev 沙盒是否激活。始终存在（不用 #if 包），正式包里永远是 false——
-        /// 真正的入口开关（菜单按钮/GameRoot.StartLookDevSandbox）才是 #if UNITY_EDITOR || DEVELOPMENT_BUILD。</summary>
+        /// <summary>story-006：旧 IMGUI LookDev 沙盒是否激活。任务四（UI 重设计）后正式入口改为
+        /// <see cref="BattleSandboxUIToolkit"/>，本字段降级为"对照模式"——运行中按 L 键手动切换，
+        /// 菜单按钮不再置位它。始终存在（不用 #if 包），正式包里永远是 false。</summary>
         private bool _lookDevActive;
 
         /// <summary>story-003：自由装配沙盒状态——基元池多选 + 7 维度覆盖，逻辑全在
@@ -221,9 +222,11 @@ namespace GameLogic.UI.Battle
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 if (GUILayout.Button("LookDev 沙盒", GUILayout.Height(30f)))
                 {
+                    // 任务四（UI 重设计）：正式入口改唤起 UI Toolkit 面板；旧 IMGUI 面板
+                    // 保留为对照，默认关闭，运行中按 L 键切换（见 HandleQuickPanelHotkeys）。
                     ResetSandboxAssembler();
-                    _lookDevActive = true;
                     GameRoot.StartLookDevSandbox();
+                    BattleSandboxUIToolkit.Instance?.Show();
                 }
 #endif
 
@@ -387,6 +390,14 @@ namespace GameLogic.UI.Battle
             {
                 _showLegacyDraft = !_showLegacyDraft;
             }
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            else if (Event.current.keyCode == KeyCode.L)
+            {
+                // 任务四：旧 IMGUI LookDev 沙盒对照模式，默认关闭；正式入口见 DrawMenu 的
+                // "LookDev 沙盒" 按钮（唤起 BattleSandboxUIToolkit）。
+                _lookDevActive = !_lookDevActive;
+            }
+#endif
         }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD

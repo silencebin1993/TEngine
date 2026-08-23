@@ -172,6 +172,13 @@ namespace BinGames.Sim
             _maxSpeed[SimConst.PlayerIndex] = math.max(0.1f, maxSpeed);
         }
 
+        /// <summary>任务二（3D 表现差异化）：Carrier 装配变化时切换玩家渲染造型。</summary>
+        public void SetPlayerVisualId(int visualId)
+        {
+            if (!_created) { return; }
+            _visualId[SimConst.PlayerIndex] = visualId;
+        }
+
         public float PlayerHealth => _created ? _health[SimConst.PlayerIndex] : 0f;
         public float2 PlayerPosition => _created ? _position[SimConst.PlayerIndex] : float2.zero;
         public float PlayerRadius => _created ? _radius[SimConst.PlayerIndex] : 1f;
@@ -259,6 +266,8 @@ namespace BinGames.Sim
                 Dt = dt,
                 Count = _unitCount,
                 ArenaHalf = _cfg.ArenaHalfExtent,
+                Hash = _hash.Map,
+                InvCellSize = _hash.InvCellSize,
             };
             h = steering.Schedule(_unitCount, 64, h);
 
@@ -305,6 +314,8 @@ namespace BinGames.Sim
             // 位置变了，重建哈希供后续查询使用
             _hash.Rebuild(_position, _alive, _unitCount, default).Complete();
             _maxSpeed[SimConst.PlayerIndex] = playerBaseSpeed;
+
+            ResolveMinionCombat(dt);
 
             float2 playerPos = _position[SimConst.PlayerIndex];
             float playerRad = _radius[SimConst.PlayerIndex];
@@ -423,6 +434,91 @@ namespace BinGames.Sim
             }
 
             cmds.Clear();
+        }
+
+        /// <summary>
+        /// 玩家召唤物（PlayerMinion）攻击结算。数量恒被 MinionCap 卡在个位数，
+        /// 主线程线性扫描即可，不需要额外 Burst job（召唤机制 story）。
+        /// 只把伤害/自毁写进 <see cref="_damageScratch"/>，复用下面 JobDamage 的统一结算，
+        /// 不新开一条死亡/命中事件路径。
+        /// </summary>
+        private void ResolveMinionCombat(float dt)
+        {
+            for (int i = SimConst.PlayerIndex + 1; i < _unitCount; i++)
+            {
+                if (_alive[i] == 0 || (SimFaction)_faction[i] != SimFaction.PlayerMinion)
+                {
+                    continue;
+                }
+
+                int aid = _archetypeId[i];
+                if (aid < 0 || aid >= _archetypes.Length)
+                {
+                    continue;
+                }
+
+                BehaviorArchetype arc = _archetypes[aid];
+                if (arc.Kind != BehaviorKind.MinionSeekAttack && arc.Kind != BehaviorKind.MinionSeekExplode)
+                {
+                    continue;
+                }
+
+                if (_attackTimer[i] > 0f)
+                {
+                    _attackTimer[i] -= dt;
+                }
+
+                var hashMap = _hash.Map;
+                bool found = MinionTargetingUtil.TryFindNearestHostile(
+                    in hashMap, _hash.InvCellSize, _position, _alive, _faction, _unitCount,
+                    _position[i], arc.AggroRange, i, out int targetIdx, out float2 targetPos);
+                if (!found)
+                {
+                    continue;
+                }
+
+                float engageRange = arc.AttackRange + _radius[i] + _radius[targetIdx];
+                if (math.distance(_position[i], targetPos) > engageRange)
+                {
+                    continue;
+                }
+
+                if (arc.Kind == BehaviorKind.MinionSeekExplode)
+                {
+                    // 爆炸半径复用 PreferredRange（省一个专属字段），命中后自毁走标准伤害管线。
+                    _damageScratch.Add(new DamageRequest
+                    {
+                        Origin = _position[i],
+                        Radius = math.max(0.5f, arc.PreferredRange),
+                        TargetIndex = -1,
+                        Amount = arc.AttackDamage,
+                        TargetFaction = SimFaction.Hostile,
+                        SourceLogicId = _logicId[i],
+                    });
+                    _damageScratch.Add(new DamageRequest
+                    {
+                        Origin = _position[i],
+                        Radius = -1f,
+                        TargetIndex = i,
+                        Amount = _health[i] + 999f,
+                        TargetFaction = SimFaction.PlayerMinion,
+                        SourceLogicId = _logicId[i],
+                    });
+                }
+                else if (_attackTimer[i] <= 0f)
+                {
+                    _damageScratch.Add(new DamageRequest
+                    {
+                        Origin = _position[i],
+                        Radius = -1f,
+                        TargetIndex = targetIdx,
+                        Amount = arc.AttackDamage,
+                        TargetFaction = SimFaction.Hostile,
+                        SourceLogicId = _logicId[i],
+                    });
+                    _attackTimer[i] = arc.AttackCooldown;
+                }
+            }
         }
 
         private void ApplyCommands(ref SimCommandBuffer cmds)

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using BinGames.Sim;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
@@ -42,6 +43,7 @@ namespace GameLogic
         public enum CodexCategory
         {
             Organelle,
+            MetabolicModule,
             Gene,
             Slot,
             Terrain,
@@ -80,7 +82,7 @@ namespace GameLogic
 
         private static readonly string[] CodexTabNodeNames =
         {
-            "TabOrganelle", "TabGene", "TabSlot", "TabTerrain", "TabStatus", "TabEnemy",
+            "TabOrganelle", "TabModule", "TabGene", "TabSlot", "TabTerrain", "TabStatus", "TabEnemy",
         };
 
         // 图鉴 tooltip（story-005 R4：hover 触发，≤3 行，供本控制器 Deck 卡牌与
@@ -630,14 +632,26 @@ namespace GameLogic
             switch (_codexCategory)
             {
                 case CodexCategory.Organelle:
-                    foreach (OrganelleCodexEntry e in codex.AllOrganelleEntries())
+                    foreach (OrganelleCodexEntry e in codex.AllCarrierOrganelleEntries())
                     {
                         if (!MatchesFilter(e.DisplayName, e.Description, filter))
                         {
                             continue;
                         }
                         OrganelleDef def = OrganelleCatalog.Get(e.Id);
-                        AddCodexRow(e.DisplayName, e.Description, SlotSummary(def?.AllowedSlotTypes), "器官目录", true);
+                        AddCodexRow(e.DisplayName, e.Description, SlotSummary(def?.AllowedSlotTypes), "载体器官", true);
+                    }
+                    break;
+
+                case CodexCategory.MetabolicModule:
+                    foreach (OrganelleCodexEntry e in codex.AllMetabolicModuleEntries())
+                    {
+                        if (!MatchesFilter(e.DisplayName, e.Description, filter))
+                        {
+                            continue;
+                        }
+                        OrganelleDef def = OrganelleCatalog.Get(e.Id);
+                        AddCodexRow(e.DisplayName, e.Description, SlotSummary(def?.AllowedSlotTypes), "代谢模块", true);
                     }
                     break;
 
@@ -773,7 +787,29 @@ namespace GameLogic
             sourceLabel.AddToClassList("codex-row-source");
             row.Add(sourceLabel);
 
+            string tooltipText = BuildCodexTooltip(name, description, extra, source);
+            row.RegisterCallback<PointerEnterEvent>(evt => ShowTooltip(tooltipText, evt.position));
+            row.RegisterCallback<PointerLeaveEvent>(evt => HideTooltip());
+
             _codexEntryList.Add(row);
+        }
+
+        /// <summary>任务五：图鉴条目 hover 简介文案 = 名称 + 描述 +（extra 非空时）extra + 来源。
+        /// 未揭示条目的 name/description 已由调用方遮罩（如敌人"？？？"/"尚未遭遇…"），此处不二次判断 revealed。</summary>
+        private static string BuildCodexTooltip(string name, string description, string extra, string source)
+        {
+            var sb = new StringBuilder();
+            sb.Append(name);
+            if (!string.IsNullOrEmpty(description))
+            {
+                sb.Append('\n').Append(description);
+            }
+            if (!string.IsNullOrEmpty(extra))
+            {
+                sb.Append('\n').Append(extra);
+            }
+            sb.Append('\n').Append("来源：").Append(source);
+            return sb.ToString();
         }
 
         private void OnDestroy()

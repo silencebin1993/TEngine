@@ -343,8 +343,9 @@ namespace GameLogic
             }
         }
 
-        /// <summary>story-003（slot-unlimited-codex）D2：全量目录（24 器官），数据源复用 CodexRegistry.AllOrganelleEntries()
-        /// （V 键图鉴同一出口）。纯展示态：只读说明 + 点击切视觉高亮，不调用 SetActive/AddOrganPart，不写 CarrierRegistry/_bag。</summary>
+        /// <summary>story-003（slot-unlimited-codex）D2：全量目录，数据源复用 CodexRegistry
+        /// （V 键图鉴同一出口）。纯展示态：只读说明 + 点击切视觉高亮，不调用 SetActive/AddOrganPart，不写 CarrierRegistry/_bag。
+        /// 任务一（器官重新分类）：拆两组渲染——先"载体器官"（AllCarrierOrganelleEntries），再"代谢模块"（AllMetabolicModuleEntries）。</summary>
         private void RefreshCarrierListAllCatalog()
         {
             CodexRegistry codex = GameRoot.CellStage?.Codex;
@@ -353,7 +354,17 @@ namespace GameLogic
                 return;
             }
 
-            foreach (OrganelleCodexEntry e in codex.AllOrganelleEntries())
+            AddCarrierCatalogSection("载体器官", codex.AllCarrierOrganelleEntries());
+            AddCarrierCatalogSection("代谢模块", codex.AllMetabolicModuleEntries());
+        }
+
+        private void AddCarrierCatalogSection(string sectionTitle, System.Collections.Generic.IEnumerable<OrganelleCodexEntry> entries)
+        {
+            Label title = new Label(sectionTitle);
+            title.AddToClassList("gene-section-title");
+            _carrierList.Add(title);
+
+            foreach (OrganelleCodexEntry e in entries)
             {
                 Button btn = new Button();
                 btn.text = e.DisplayName ?? e.Id;

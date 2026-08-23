@@ -136,7 +136,11 @@ namespace GameLogic.Stats
             _base[(int)StatId.AbilityPower] = 1f;
             _base[(int)StatId.ElectricPower] = 1f;
             _base[(int)StatId.ChainBonus] = 0f;
-            _base[(int)StatId.MinionCap] = 0f;
+            // 任务三（召唤机制）：原基线 0，唯一能加到 3 的旧卡"神经副脑"（4002）随旧战斗卡池
+            // 整体 Delist（carddata.py 头注释）后已不可达——MinionCap 曾经永久卡 0，任何
+            // Spawn 效果（molt 的诱饵、孢子爆发等）都静默生不出单位。改基线为 3，同时修好
+            // 这个既有死代码路径，并让新召唤技能的"场上限 3"落地。
+            _base[(int)StatId.MinionCap] = 3f;
             _base[(int)StatId.MinionPower] = 1f;
             _base[(int)StatId.HealthRegen] = 0.5f;
             _base[(int)StatId.KillHeal] = 0f;

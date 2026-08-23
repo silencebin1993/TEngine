@@ -66,6 +66,10 @@ public partial class GameApp
         // UI Toolkit 版 Carrier 器官栏 + 插槽条（organ-socket-slice/story-005，D1/D2）：同上不挂 [Window]，
         // 常驻单例自控显隐，sortingOrder=4 压在代谢面板之上、不与选卡争位。
         new GameObject("BattleCarrierUIToolkit").AddComponent<BattleCarrierUIToolkit>();
+
+        // UI Toolkit 版 LookDev 自由装配沙盒（任务四：UI 重设计）：同上不挂 [Window]，
+        // 常驻单例默认隐藏，CellDebugHud「LookDev 沙盒」菜单按钮唤起，sortingOrder=5。
+        new GameObject("BattleSandboxUIToolkit").AddComponent<BattleSandboxUIToolkit>();
     }
     
     private static void Release()

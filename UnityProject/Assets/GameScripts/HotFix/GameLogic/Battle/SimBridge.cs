@@ -235,6 +235,12 @@ namespace GameLogic.Battle
             (_backend as SimWorld)?.SetPlayerStats(maxHp, currentHp, radius, speed);
         }
 
+        /// <summary>任务二（3D 表现差异化）：Carrier 装配变化时切换玩家渲染造型。</summary>
+        public void SetPlayerVisualId(int visualId)
+        {
+            (_backend as SimWorld)?.SetPlayerVisualId(visualId);
+        }
+
         public void DamagePlayer(float amount)
         {
             (_backend as SimWorld)?.DamagePlayer(amount);

@@ -23,6 +23,9 @@ namespace BinGames.Sim
         [ReadOnly] public NativeArray<int> ArchetypeId;
         public NativeArray<uint> Status;
         [ReadOnly] public NativeArray<BehaviorArchetype> Archetypes;
+        /// <summary>MinionSeekAttack/MinionSeekExplode 索敌用；其余原型不读它。</summary>
+        [ReadOnly] public NativeParallelMultiHashMap<int, int> Hash;
+        public float InvCellSize;
 
         [NativeDisableParallelForRestriction]
         public NativeArray<float2> DesiredDir;
@@ -158,6 +161,19 @@ namespace BinGames.Sim
                     // 附着：贴住玩家不放
                     want = dist > Radius[i] + 0.4f ? dirToPlayer : float2.zero;
                     break;
+
+                case BehaviorKind.MinionSeekAttack:
+                case BehaviorKind.MinionSeekExplode:
+                {
+                    // 玩家召唤物：索敌最近 Hostile，找不到则漂浮待命（不追玩家）
+                    bool found = MinionTargetingUtil.TryFindNearestHostile(
+                        in Hash, InvCellSize, Position, Alive, Faction, Count,
+                        pos, arc.AggroRange, i, out _, out float2 targetPos);
+                    want = found
+                        ? math.normalizesafe(targetPos - pos)
+                        : Wander(i, Time) * arc.WanderStrength;
+                    break;
+                }
             }
 
             // 转向速率限制：让重型单位转向迟钝，形成可被风筝的手感

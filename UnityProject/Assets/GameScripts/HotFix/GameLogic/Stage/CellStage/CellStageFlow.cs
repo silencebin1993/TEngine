@@ -58,6 +58,7 @@ namespace GameLogic.Stage.CellStage
         private ShopSystem _shop;
         private CodexRegistry _codex;
         private MetabolicDigestionSystem _digestion;
+        private CarrierBodyVisualPresenter _carrierBodyVisual;
 
         private SimRenderer _renderer;
         private Camera _camera;
@@ -297,6 +298,8 @@ namespace GameLogic.Stage.CellStage
             _hub.Register(new ComposeProjectilePresenter());
             // story-010 J3：组合弹道瞄准指示器（装配预览）：独立 8 位池，订阅 CarrierActivatedEvent。
             _hub.Register(new ComposeAimIndicatorPresenter());
+            // 任务二：玩家 Carrier 本体随装配变化，同款轮询 AssemblyVersion。
+            _carrierBodyVisual = _hub.Register(new CarrierBodyVisualPresenter());
 
             // 效果执行器注册。新增一种效果只需在此多一行。
             _abilities.RegisterExecutor(new EffectDealDamage());
@@ -314,6 +317,7 @@ namespace GameLogic.Stage.CellStage
             _status.Bind(_sim);
             _metabolicBridge.Bind(_sim, _stats, _abilities);
             _zones.Bind(_sim, _status);
+            _carrierBodyVisual.Bind(_sim);
             _zoneVisual.Bind(_zones);
             _healthBars.Bind(_sim, _stats);
             _wallet.Bind(_stats);
@@ -356,6 +360,19 @@ namespace GameLogic.Stage.CellStage
         /// 白模视觉。正式美术接入前用颜色分层保证可读性
         /// （Spec §16"万敌规模下可读性"风险项的第一道对策）。
         /// </summary>
+        /// <summary>任务二（3D 表现差异化）：器官/代谢模块/基元/Carrier 装配挂件的 VisualId 起点。
+        /// 0-99 段是既有敌人/玩家/残块/精英/首领占位，保持不动；召唤物（13/14/15）复用行为原型 id
+        /// 本身（EffectSpawn 用 SpawnEnemyId 同时当 ArchetypeId 与 VisualId），也落在这一段内。</summary>
+        public const int ArtVisualIdBase = 100;
+
+        /// <summary>按 <see cref="SimVisualLibrary.AllArtIds"/> 顺序查 VisualId；未注册的 ArtId 回退 -1
+        /// （渲染层 <see cref="BinGames.Sim.SimRenderer.Draw"/> 对越界 VisualId 会自动回落到槽位 0）。</summary>
+        public static int VisualIdForArtId(string artId)
+        {
+            int idx = System.Array.IndexOf(SimVisualLibrary.AllArtIds, artId);
+            return idx < 0 ? -1 : ArtVisualIdBase + idx;
+        }
+
         private static SimVisual[] BuildVisuals()
         {
             Mesh sphereMesh = BuildSphere(8, 12, 0.5f);
@@ -363,8 +380,8 @@ namespace GameLogic.Stage.CellStage
             Mesh squashMesh = BuildSquashedSphere(0.5f, 0.15f, 8, 12);
             Material mat = CreateSimMaterial(Color.white);
 
-            var visuals = new SimVisual[32];
-            for (int i = 0; i < visuals.Length; i++)
+            var visuals = new SimVisual[ArtVisualIdBase + SimVisualLibrary.AllArtIds.Length];
+            for (int i = 0; i < ArtVisualIdBase; i++)
             {
                 Mesh mesh = sphereMesh;
                 float scaleMul = 1f;
@@ -372,6 +389,16 @@ namespace GameLogic.Stage.CellStage
                 {
                     case 0:
                         mesh = capsuleMesh;
+                        break;
+                    // 召唤机制（任务三）：孢子仆从/噬菌体/菌丝体，行为原型 id 13/14/15 直接复用为 VisualId。
+                    case 13:
+                        mesh = SimVisualLibrary.BuildForArtId("summon/spore");
+                        break;
+                    case 14:
+                        mesh = SimVisualLibrary.BuildForArtId("summon/phage");
+                        break;
+                    case 15:
+                        mesh = SimVisualLibrary.BuildForArtId("summon/mycelium");
                         break;
                     case 20:
                         mesh = squashMesh;
@@ -396,7 +423,35 @@ namespace GameLogic.Stage.CellStage
                     BaseColor = ColorFor(i),
                 };
             }
+
+            // 100+：24 器官/代谢模块 + 4 基元 + 3 召唤物（冗余登记，供沙盒对比台按 VisualId 直查）
+            // + 5 Carrier 装配挂件，按 SimVisualLibrary.AllArtIds 声明序铺开。
+            for (int j = 0; j < SimVisualLibrary.AllArtIds.Length; j++)
+            {
+                string artId = SimVisualLibrary.AllArtIds[j];
+                visuals[ArtVisualIdBase + j] = new SimVisual
+                {
+                    Mesh = SimVisualLibrary.BuildForArtId(artId),
+                    Material = mat,
+                    ScaleMul = 1f,
+                    BaseColor = ArtVisualColor(artId),
+                };
+            }
             return visuals;
+        }
+
+        /// <summary>造型库条目的基线着色——形状是主要区分手段（任务二要求"形状可辨"），
+        /// 颜色只按大类粗分，避免 24 种器官强行凑 24 种独立配色反而互相干扰。</summary>
+        private static Color ArtVisualColor(string artId)
+        {
+            if (artId.StartsWith("org/")) { return new Color(0.55f, 0.92f, 0.68f, 1f); }
+            if (artId.StartsWith("prim/energy")) { return new Color(1.00f, 0.92f, 0.35f, 1f); }
+            if (artId.StartsWith("prim/mass")) { return new Color(0.72f, 0.72f, 0.78f, 1f); }
+            if (artId.StartsWith("prim/light")) { return new Color(0.95f, 0.98f, 1.00f, 1f); }
+            if (artId.StartsWith("prim/heat")) { return new Color(1.00f, 0.48f, 0.22f, 1f); }
+            if (artId.StartsWith("summon/")) { return new Color(0.78f, 0.62f, 1.00f, 1f); }
+            if (artId.StartsWith("carrier/")) { return new Color(0.35f, 0.98f, 0.72f, 1f); }
+            return new Color(0.70f, 0.78f, 0.72f, 1f);
         }
 
         /// <summary>
@@ -634,6 +689,16 @@ namespace GameLogic.Stage.CellStage
             if (dash != null)
             {
                 _abilities.Grant(dash);
+            }
+
+            // 召唤共生体（任务三：召唤机制）：旧的 Route/Card→grantAbility 抽卡池已被
+            // metabolic-playerization-004 整体 Delist（carddata.py 头注释），28 个旧
+            // AbilitySpec 里只有 dash 还能通过正常流程拿到。新技能没有可用的抽卡入口，
+            // 照 dash 的先例直接常驻发放，保证"看得到/验得出"可在任意一局立即验收。
+            AbilitySpec summon = DataRegistry.Instance.GetAbility(29);
+            if (summon != null)
+            {
+                _abilities.Grant(summon);
             }
         }
 

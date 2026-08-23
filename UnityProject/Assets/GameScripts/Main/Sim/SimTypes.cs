@@ -47,6 +47,12 @@ namespace BinGames.Sim
         Orbit = 8,
         /// <summary>附着到目标身上跟随。寄生噬体。</summary>
         Latch = 9,
+        /// <summary>索敌最近敌对目标，进入 AttackRange 后按 AttackCooldown 周期造成 AttackDamage。
+        /// 玩家召唤物专用（PlayerMinion 阵营），如孢子仆从。</summary>
+        MinionSeekAttack = 10,
+        /// <summary>索敌最近敌对目标，进入 AttackRange 后以 PreferredRange 为半径造成一次 AttackDamage
+        /// AOE 并自毁。玩家召唤物专用（PlayerMinion 阵营），如噬菌体。</summary>
+        MinionSeekExplode = 11,
     }
 
     /// <summary>

@@ -53,6 +53,14 @@ namespace GameConfig.cell
         /// 附着
         /// </summary>
         Latch = 9,
+        /// <summary>
+        /// 玩家召唤物专用：索敌最近敌对目标，进入 attackRange 后周期造成 attackDamage
+        /// </summary>
+        MinionSeekAttack = 10,
+        /// <summary>
+        /// 玩家召唤物专用：索敌最近敌对目标，进入 attackRange 后以 preferredRange 为半径 AOE 自爆并消亡
+        /// </summary>
+        MinionSeekExplode = 11,
     }
 
 } 
