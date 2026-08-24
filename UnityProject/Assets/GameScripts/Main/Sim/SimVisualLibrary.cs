@@ -501,9 +501,39 @@ namespace BinGames.Sim
             }
             var m = new Mesh { name = "Sim_" + name };
             m.CombineMeshes(combines, true, true);
+            ApplyTopDownUV(m);
             m.RecalculateNormals();
             m.RecalculateBounds();
             return m;
+        }
+
+        /// <summary>SimBioGlass 按 UV 当作局部圆盘坐标画软边发光轮廓（<c>p=uv*2-1</c>），不认顶点位置。
+        /// <see cref="Combine"/>/<see cref="CombineParts"/> 拼合出的复合体本身不带 UV（合并前各分块也
+        /// 没设），会被 shader 当作越界坐标整体裁掉/走样。这里按俯视 XZ 投影补一份：顶点在 XZ 平面上
+        /// 距中心越远，UV 越靠近圆盘边缘，配合 shader 的软边/描边逻辑，任意组合体都能画出合理轮廓。</summary>
+        private static void ApplyTopDownUV(Mesh m)
+        {
+            Vector3[] verts = m.vertices;
+            float maxR = 0f;
+            for (int i = 0; i < verts.Length; i++)
+            {
+                float r = new Vector2(verts[i].x, verts[i].z).magnitude;
+                if (r > maxR)
+                {
+                    maxR = r;
+                }
+            }
+            if (maxR < 1e-5f)
+            {
+                maxR = 1f;
+            }
+
+            var uvs = new Vector2[verts.Length];
+            for (int i = 0; i < verts.Length; i++)
+            {
+                uvs[i] = new Vector2(0.5f + 0.5f * verts[i].x / maxR, 0.5f + 0.5f * verts[i].z / maxR);
+            }
+            m.SetUVs(0, uvs);
         }
 
         private static Mesh BuildEllipsoid(float radiusXZ, float radiusY, int lat, int lon, string name)
@@ -545,6 +575,7 @@ namespace BinGames.Sim
             var m = new Mesh { name = "Sim_" + name };
             m.SetVertices(vertices);
             m.SetTriangles(triangles, 0);
+            ApplyTopDownUV(m);
             m.RecalculateNormals();
             m.RecalculateBounds();
             return m;
