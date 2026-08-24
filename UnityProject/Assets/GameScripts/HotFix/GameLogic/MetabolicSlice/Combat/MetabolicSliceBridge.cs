@@ -10,6 +10,7 @@ using GameLogic.Core;
 using GameLogic.MetabolicSlice.Carrier;
 using GameLogic.MetabolicSlice.ContentCatalog;
 using GameLogic.MetabolicSlice.Environment;
+using GameLogic.Spawning;
 using GameLogic.Stats;
 using GameLogic.UI.Battle;
 using Unity.Mathematics;
@@ -61,6 +62,13 @@ namespace GameLogic.MetabolicSlice.Combat
         /// hits=1（多数近战器官的常见配置）时仍与玩家本体明显重叠，只是圆心整体前移出方向感。</summary>
         public const float MeleeFrontOffset = 2f;
 
+        /// <summary>story-002：Pierce/Bounce 追加命中点沿方向前进的步长，复用命中半径量级，不另起系数分叉。</summary>
+        public const float PrimitiveStepDistance = DamageAreaRadius * 1.5f;
+        /// <summary>story-002：Pierce/Bounce/Split 追加命中的近似瞬时结算时长（非 0，避免同帧内对同一 List 重入修改）。</summary>
+        private const float SecondaryImpactDelay = 0.05f;
+        /// <summary>story-002：Linger 未指定 TickRate 时的默认跳伤间隔秒数。</summary>
+        private const float DefaultLingerTickInterval = 0.5f;
+
         /// <summary>story-002：全仓库 SimBridge/SimSnapshot 无玩家速度/朝向字段，Direction 定为默认前向常量。</summary>
         private static readonly float2 DefaultForward = new float2(0f, 1f);
 
@@ -75,7 +83,8 @@ namespace GameLogic.MetabolicSlice.Combat
             ["StickyAcid"] = "粘酸", ["Shock"] = "电击",
         };
 
-        /// <summary>story-003：Spin/Orbit 命中延迟到期的最小 ephemeral 状态（数量与弹体数同级，非池化数组，见 Decision D7）。</summary>
+        /// <summary>story-003：Spin/Orbit 命中延迟到期的最小 ephemeral 状态（数量与弹体数同级，非池化数组，见 Decision D7）。
+        /// story-002：追加 Chain/Pull——这两个字段对任何命中都生效（经 <see cref="DamageAreaPrimitive"/> 统一消费），不局限于 Bolt 落点结算。</summary>
         private struct PendingMotionHit
         {
             public float2 Origin;
@@ -85,16 +94,49 @@ namespace GameLogic.MetabolicSlice.Combat
             public float Spin;
             public float Orbit;
             public float TimeLeft;
+            public float Chain;
+            public float Pull;
         }
 
         /// <summary>story-006：Count 多发/Explode 延迟落点结算的最小 ephemeral 状态（复用 PendingMotionHit
-        /// 同一形状扩展——Origin+TimeLeft 语义换成"沿方向飞行的落点"，见 R5）。</summary>
+        /// 同一形状扩展——Origin+TimeLeft 语义换成"沿方向飞行的落点"，见 R5）。
+        /// story-002：追加 Homing/Pierce/Bounce/Chain/Return/Linger/Pull/SplitOnHit/Trail/TickRate——
+        /// 只在 Bolt-tail 落点结算路径生效（与既有 Count/Explode 同一先例：Melee-tail 方向留给 007），
+        /// 二级命中（Pierce/Bounce/Split 追加的落点）不再携带 Pierce/Bounce/Split/Trail/Return/Linger，
+        /// 避免同一发子弹递归放大出无界的追加命中。</summary>
         private struct PendingImpact
         {
             public float2 ImpactPos;
             public float Radius;
             public float Damage;
             public float TimeLeft;
+            public float Duration;
+            public float2 Origin;
+            public float2 Direction;
+            public float Chain;
+            public float Pull;
+            public int PierceLeft;
+            public int BounceLeft;
+            public float Trail;
+            public bool TrailFired;
+            public int SplitOnHit;
+            public bool ReturnPending;
+            public float Linger;
+            public float TickRate;
+        }
+
+        /// <summary>story-002：Linger 留坑的最小 ephemeral 状态——命中点持续按 TickRate（或默认间隔）
+        /// 周期性结算范围伤害，直到秒数耗尽，不受 <see cref="TickInterval"/> 节流。</summary>
+        private struct PendingLinger
+        {
+            public float2 Position;
+            public float Radius;
+            public float DamagePerTick;
+            public float Interval;
+            public float NextTick;
+            public float TimeLeft;
+            public float Chain;
+            public float Pull;
         }
 
         private Engine _engine;
@@ -105,6 +147,7 @@ namespace GameLogic.MetabolicSlice.Combat
         private WorldEnvironment _environment;
         private readonly List<PendingMotionHit> _pendingMotion = new List<PendingMotionHit>();
         private readonly List<PendingImpact> _pendingImpact = new List<PendingImpact>();
+        private readonly List<PendingLinger> _pendingLinger = new List<PendingLinger>();
         private float _timer;
         private int _seed;
         private float _playerShield;
@@ -137,6 +180,9 @@ namespace GameLogic.MetabolicSlice.Combat
 
         /// <summary>story-006：当前挂起的 Count 多发/Explode 延迟落点数量，供 execute_code 断言"生成即挂起、tick 完即清空"。</summary>
         public int PendingImpactCount => _pendingImpact?.Count ?? 0;
+
+        /// <summary>story-002：当前挂起的 Linger 留坑数量，供 execute_code 断言。</summary>
+        public int PendingLingerCount => _pendingLinger?.Count ?? 0;
 
         /// <summary>story-006 验收探针：最近一次延迟落点结算的世界坐标，供断言 impactPos != PlayerPosition。</summary>
         public float2 LastImpactPos { get; private set; }
@@ -253,6 +299,7 @@ namespace GameLogic.MetabolicSlice.Combat
 
             TickPendingMotion(dt);
             TickPendingImpact(dt);
+            TickPendingLinger(dt);
 
             if (Suppressed)
             {
@@ -303,7 +350,17 @@ namespace GameLogic.MetabolicSlice.Combat
         {
             bool applied = false;
 
-            if (evt.Damage > 0f)
+            if (evt.Damage > 0f && evt.AuraRadius > 0f)
+            {
+                // story-002：AuraRadius 是独立的伤害投放模式（持续圈罩玩家周围），与下方 Bolt/Melee
+                // 落点结算二选一——Aura 直接在玩家当前位置结算一次，下一次 Carrier tick（TickInterval）
+                // 再来一次，等效于"持续"（不新增每帧状态机，与既有 1.5s tick 节奏一致）。
+                float2 origin = _sim.PlayerPosition;
+                float auraRadius = evt.AuraRadius * MathF.Max(0.1f, evt.Scale);
+                DamageAreaPrimitive(origin, auraRadius, evt.Damage, evt);
+                applied = true;
+            }
+            else if (evt.Damage > 0f)
             {
                 int hits = Math.Max(1, (int)MathF.Round(evt.Count));
                 float radius = DamageAreaRadius * MathF.Max(0.1f, evt.Scale);
@@ -328,31 +385,74 @@ namespace GameLogic.MetabolicSlice.Combat
                             Spin = evt.Spin,
                             Orbit = evt.Orbit,
                             TimeLeft = ComposeMotionMath.MotionFlightDuration,
+                            Chain = evt.Chain,
+                            Pull = evt.Pull,
                         });
                     }
 
                     if (evt.ExplodeOnHit)
                     {
                         // 与 Spin/Orbit 组合的罕见情形：沿用原「瞬时二次扩圈」，不纳入本 story 落点重构范围。
-                        _sim.DamageArea(origin, radius * ExplodeRadiusMult, evt.Damage * ExplodeDamageMult,
-                            BinGames.Sim.SimFaction.Hostile);
+                        DamageAreaPrimitive(origin, radius * ExplodeRadiusMult, evt.Damage * ExplodeDamageMult, evt);
                     }
                 }
-                else if (useImpactSettlement && (hits > 1 || evt.ExplodeOnHit))
+                else if (useImpactSettlement && (hits > 1 || evt.ExplodeOnHit || HasBallisticPrimitives(evt)))
                 {
                     // story-006 R5/Required 1,2,3：Count 多发 / Explode 改「发射→落点结算」，不再原地瞬时打
                     // 玩家自己所在坐标；每发落点仍是 evt.Damage，Explode 附加量沿用原 0.5x/1.6x 系数，
                     // 只挪到延迟到期后的落点，判定数值不变（不额外增减）。
+                    // story-002：单发但带 Homing/Pierce/Bounce/Return/Trail/SplitOnHit/Speed/Lifetime/Gravity
+                    // 的 Bolt 也必须走落点结算（这些字段只有落点结算路径消费），否则会退回下面的原地瞬时分支
+                    // 而让字段变成死数据（HasBallisticPrimitives 把这类单发也纳入本分支）。
                     float2 origin = _sim.PlayerPosition;
+                    float duration = evt.Speed > 0f
+                        ? ComposeMotionMath.MotionFlightDuration / MathF.Max(0.1f, evt.Speed)
+                        : ComposeMotionMath.MotionFlightDuration;
+                    float flightDistance = ImpactFlightDistance;
+                    if (evt.Gravity > 0f)
+                    {
+                        // 弹道下坠：重力越大，落点越近（模拟提前坠地），不新增竖直维度。
+                        flightDistance /= 1f + evt.Gravity;
+                    }
+                    if (evt.Lifetime > 0f && evt.Lifetime < duration)
+                    {
+                        // 寿命封顶：飞行时间被砍短，落点距离按同一比例缩短，保持"提前失效"的观感一致。
+                        flightDistance *= evt.Lifetime / duration;
+                        duration = evt.Lifetime;
+                    }
+
                     for (int h = 0; h < hits; h++)
                     {
-                        float2 dir = FanDirection(baseDir, h, hits);
+                        float2 dir = evt.SpreadAngle > 0f
+                            ? ConeFanDirection(baseDir, h, hits, evt.SpreadAngle)
+                            : FanDirection(baseDir, h, hits);
+                        float2 impactPos = origin + dir * flightDistance;
+                        if (evt.Homing > 0f)
+                        {
+                            float2? nearest = FindNearestHostile(origin);
+                            if (nearest.HasValue)
+                            {
+                                impactPos = math.lerp(impactPos, nearest.Value, evt.Homing);
+                            }
+                        }
                         _pendingImpact.Add(new PendingImpact
                         {
-                            ImpactPos = origin + dir * ImpactFlightDistance,
+                            ImpactPos = impactPos,
                             Radius = radius,
                             Damage = evt.Damage,
-                            TimeLeft = ComposeMotionMath.MotionFlightDuration,
+                            TimeLeft = duration,
+                            Duration = duration,
+                            Origin = origin,
+                            Direction = dir,
+                            Chain = evt.Chain,
+                            Pull = evt.Pull,
+                            PierceLeft = evt.Pierce > 0f ? Math.Max(0, (int)MathF.Round(evt.Pierce)) : 0,
+                            BounceLeft = evt.Bounce > 0f ? Math.Max(0, (int)MathF.Round(evt.Bounce)) : 0,
+                            Trail = evt.Trail,
+                            SplitOnHit = evt.SplitOnHit > 0f ? Math.Max(0, (int)MathF.Round(evt.SplitOnHit)) : 0,
+                            ReturnPending = evt.Return,
+                            Linger = evt.Linger,
+                            TickRate = evt.TickRate,
                         });
                     }
 
@@ -360,10 +460,15 @@ namespace GameLogic.MetabolicSlice.Combat
                     {
                         _pendingImpact.Add(new PendingImpact
                         {
-                            ImpactPos = origin + baseDir * ImpactFlightDistance,
+                            ImpactPos = origin + baseDir * flightDistance,
                             Radius = radius * ExplodeRadiusMult,
                             Damage = evt.Damage * ExplodeDamageMult,
-                            TimeLeft = ComposeMotionMath.MotionFlightDuration,
+                            TimeLeft = duration,
+                            Duration = duration,
+                            Origin = origin,
+                            Direction = baseDir,
+                            Chain = evt.Chain,
+                            Pull = evt.Pull,
                         });
                     }
                 }
@@ -371,7 +476,7 @@ namespace GameLogic.MetabolicSlice.Combat
                 {
                     // Melee-tail：story-007 R6 前方扇形多圆逼近，不再 hits 次同一坐标画圆——
                     // 每个圆沿 baseDir 前方 ±ArcHalfAngleDeg 内展开，前移 MeleeFrontOffset（判定/视觉共用同一数）。
-                    // Bolt 单发无 Explode（同落到这个 else 分支）维持原地瞬时结算，不受影响。
+                    // Bolt 单发无 Explode/无新基元字段（同落到这个 else 分支）维持原地瞬时结算，不受影响。
                     float2 origin = _sim.PlayerPosition;
                     if (evt.Shape == "Melee")
                     {
@@ -382,14 +487,14 @@ namespace GameLogic.MetabolicSlice.Combat
                             float2 dir = MeleeFanDirection(baseDir, h, hits);
                             float2 strikeOrigin = origin + dir * MeleeFrontOffset;
                             _lastMeleeStrikeOrigins.Add(strikeOrigin);
-                            _sim.DamageArea(strikeOrigin, radius, evt.Damage, BinGames.Sim.SimFaction.Hostile);
+                            DamageAreaPrimitive(strikeOrigin, radius, evt.Damage, evt);
                         }
                     }
                     else
                     {
                         for (int h = 0; h < hits; h++)
                         {
-                            _sim.DamageArea(origin, radius, evt.Damage, BinGames.Sim.SimFaction.Hostile);
+                            DamageAreaPrimitive(origin, radius, evt.Damage, evt);
                         }
                     }
 
@@ -397,10 +502,28 @@ namespace GameLogic.MetabolicSlice.Combat
                     {
                         // Melee-tail 的爆炸叠加仍原地结算（signal.Origin 同步不偏移，见 Presenter 侧注释），
                         // 不纳入本 story 的前方偏移改动范围。
-                        _sim.DamageArea(origin, radius * ExplodeRadiusMult, evt.Damage * ExplodeDamageMult,
-                            BinGames.Sim.SimFaction.Hostile);
+                        DamageAreaPrimitive(origin, radius * ExplodeRadiusMult, evt.Damage * ExplodeDamageMult, evt);
                     }
                 }
+                applied = true;
+            }
+
+            if (evt.SummonId > 0 && evt.SummonCount > 0f)
+            {
+                // story-002 Required 4：走现有 Minion 管线（MinionRegistry 配额 + SimBridge.Spawn），
+                // 不新增 Sim 公共方法，与 EffectSpawn 的生成方式一致。
+                if (ApplySummon(evt))
+                {
+                    applied = true;
+                }
+            }
+
+            if (evt.Knockback > 0f)
+            {
+                // 击退的是命中目标而非玩家自身；Sim 无"位移单位"公共 API（只有 SetPlayerPosition 位移玩家），
+                // 不新增 Sim 签名，先记可读摘要（与下方 Damage<=0 时 Spin/Orbit 的 stub 同一先例）。
+                LastAbilityPrompt = $"击退（宿主暂无单位位移 API，仅记录）：Knockback={evt.Knockback:0.#}";
+                TEngine.Log.Info($"[MetabolicSliceBridge] {LastAbilityPrompt}");
                 applied = true;
             }
 
@@ -480,7 +603,7 @@ namespace GameLogic.MetabolicSlice.Combat
                 {
                     float elapsed = ComposeMotionMath.MotionFlightDuration - hit.TimeLeft;
                     float2 strikePos = hit.Origin + ComposeMotionMath.Offset(hit.Phase, hit.Spin, hit.Orbit, elapsed);
-                    _sim.DamageArea(strikePos, hit.Radius, hit.Damage, BinGames.Sim.SimFaction.Hostile);
+                    DamageAreaPrimitive(strikePos, hit.Radius, hit.Damage, hit.Chain, hit.Pull);
                     _pendingMotion.RemoveAt(i);
                 }
                 else
@@ -501,10 +624,115 @@ namespace GameLogic.MetabolicSlice.Combat
             {
                 PendingImpact hit = _pendingImpact[i];
                 hit.TimeLeft -= dt;
+
+                // story-002：Trail 拖尾伤害——飞行过半时在沿途插值点补一次小额结算，让弹道本身也造成伤害，
+                // 不是只有终点算数。只补一次（避免无界追加），半径减半、不携带 Chain/Pull（保持轻量）。
+                if (hit.Trail > 0f && !hit.TrailFired && hit.Duration > 0f && hit.TimeLeft <= hit.Duration * 0.5f)
+                {
+                    float t = math.clamp(1f - hit.TimeLeft / hit.Duration, 0f, 1f);
+                    float2 trailPos = math.lerp(hit.Origin, hit.ImpactPos, t);
+                    DamageAreaPrimitive(trailPos, hit.Radius * 0.5f, hit.Trail, 0f, 0f);
+                    hit.TrailFired = true;
+                }
+
                 if (hit.TimeLeft <= 0f)
                 {
                     LastImpactPos = hit.ImpactPos;
-                    _sim.DamageArea(hit.ImpactPos, hit.Radius, hit.Damage, BinGames.Sim.SimFaction.Hostile);
+                    DamageAreaPrimitive(hit.ImpactPos, hit.Radius, hit.Damage, hit.Chain, hit.Pull);
+
+                    // story-002 Required 3：Pierce/Bounce/SplitOnHit/Return 必须真的多打/改路径几处，
+                    // 不是只改一个数字——追加的二级命中不再携带 Pierce/Bounce/Split/Trail/Return/Linger，
+                    // 防止同一发子弹递归放大出无界的追加命中。
+                    if (hit.PierceLeft > 0)
+                    {
+                        float2 pierceTarget = hit.ImpactPos + hit.Direction * PrimitiveStepDistance;
+                        _pendingImpact.Add(new PendingImpact
+                        {
+                            ImpactPos = pierceTarget,
+                            Radius = hit.Radius,
+                            Damage = hit.Damage,
+                            TimeLeft = SecondaryImpactDelay,
+                            Duration = SecondaryImpactDelay,
+                            Origin = hit.ImpactPos,
+                            Direction = hit.Direction,
+                            Chain = hit.Chain,
+                            Pull = hit.Pull,
+                            PierceLeft = hit.PierceLeft - 1,
+                        });
+                    }
+
+                    if (hit.BounceLeft > 0)
+                    {
+                        float2 reflected = ReflectDirection(hit.Direction, hit.BounceLeft);
+                        _pendingImpact.Add(new PendingImpact
+                        {
+                            ImpactPos = hit.ImpactPos + reflected * PrimitiveStepDistance,
+                            Radius = hit.Radius,
+                            Damage = hit.Damage,
+                            TimeLeft = SecondaryImpactDelay,
+                            Duration = SecondaryImpactDelay,
+                            Origin = hit.ImpactPos,
+                            Direction = reflected,
+                            Chain = hit.Chain,
+                            Pull = hit.Pull,
+                            BounceLeft = hit.BounceLeft - 1,
+                        });
+                    }
+
+                    if (hit.SplitOnHit > 0)
+                    {
+                        for (int s = 0; s < hit.SplitOnHit; s++)
+                        {
+                            float angle = 2f * math.PI * s / hit.SplitOnHit;
+                            float2 dir = new float2(math.cos(angle), math.sin(angle));
+                            _pendingImpact.Add(new PendingImpact
+                            {
+                                ImpactPos = hit.ImpactPos + dir * (hit.Radius * 1.5f),
+                                Radius = hit.Radius * 0.6f,
+                                Damage = hit.Damage * 0.5f,
+                                TimeLeft = SecondaryImpactDelay,
+                                Duration = SecondaryImpactDelay,
+                                Origin = hit.ImpactPos,
+                                Direction = dir,
+                                Chain = hit.Chain,
+                                Pull = hit.Pull,
+                            });
+                        }
+                    }
+
+                    if (hit.ReturnPending && _sim != null)
+                    {
+                        // 飞回发射者「当前」位置（不是发射时的原点）——玩家这段时间可能已经移动。
+                        float2 target = _sim.PlayerPosition;
+                        _pendingImpact.Add(new PendingImpact
+                        {
+                            ImpactPos = target,
+                            Radius = hit.Radius,
+                            Damage = hit.Damage,
+                            TimeLeft = hit.Duration > 0f ? hit.Duration : ComposeMotionMath.MotionFlightDuration,
+                            Duration = hit.Duration,
+                            Origin = hit.ImpactPos,
+                            Direction = math.normalizesafe(target - hit.ImpactPos, DefaultForward),
+                            Chain = hit.Chain,
+                            Pull = hit.Pull,
+                        });
+                    }
+
+                    if (hit.Linger > 0f)
+                    {
+                        _pendingLinger.Add(new PendingLinger
+                        {
+                            Position = hit.ImpactPos,
+                            Radius = hit.Radius,
+                            DamagePerTick = hit.Damage * 0.5f,
+                            Interval = hit.TickRate > 0f ? 1f / hit.TickRate : DefaultLingerTickInterval,
+                            NextTick = 0f,
+                            TimeLeft = hit.Linger,
+                            Chain = hit.Chain,
+                            Pull = hit.Pull,
+                        });
+                    }
+
                     _pendingImpact.RemoveAt(i);
                 }
                 else
@@ -512,6 +740,154 @@ namespace GameLogic.MetabolicSlice.Combat
                     _pendingImpact[i] = hit;
                 }
             }
+        }
+
+        /// <summary>story-002：Linger 留坑周期结算，独立于 <see cref="TickInterval"/>（DoT 不该被 1.5s 节流卡住）。</summary>
+        private void TickPendingLinger(float dt)
+        {
+            for (int i = _pendingLinger.Count - 1; i >= 0; i--)
+            {
+                PendingLinger p = _pendingLinger[i];
+                p.TimeLeft -= dt;
+                p.NextTick -= dt;
+                if (p.NextTick <= 0f)
+                {
+                    DamageAreaPrimitive(p.Position, p.Radius, p.DamagePerTick, p.Chain, p.Pull);
+                    p.NextTick = p.Interval;
+                }
+
+                if (p.TimeLeft <= 0f)
+                {
+                    _pendingLinger.RemoveAt(i);
+                }
+                else
+                {
+                    _pendingLinger[i] = p;
+                }
+            }
+        }
+
+        /// <summary>story-002：召唤——经现有 Minion 管线（<see cref="MinionRegistry"/> 配额 + <see cref="SimBridge.Spawn"/>），
+        /// 与 <see cref="GameLogic.Ability.Executors.EffectSpawn"/> 同一生成方式，不新增 Sim 公共方法签名。</summary>
+        private bool ApplySummon(HitEvent evt)
+        {
+            if (_sim?.World == null)
+            {
+                return false;
+            }
+
+            int requested = Math.Max(1, (int)MathF.Round(evt.SummonCount));
+            MinionRegistry minions = Hub?.Get<MinionRegistry>();
+            int cap = (int)(_stats?.Get(StatId.MinionCap) ?? requested);
+            int granted = minions != null ? minions.Reserve(requested, cap) : requested;
+            if (granted <= 0)
+            {
+                return false;
+            }
+
+            float2 origin = _sim.PlayerPosition;
+            for (int s = 0; s < granted; s++)
+            {
+                float angle = 2f * math.PI * s / granted;
+                float2 offset = new float2(math.cos(angle), math.sin(angle)) * 1.2f;
+                _sim.Spawn(new BinGames.Sim.SpawnRequest
+                {
+                    Position = origin + offset,
+                    Velocity = float2.zero,
+                    Health = 1f,
+                    Radius = 0.4f,
+                    MaxSpeed = 4f,
+                    ArchetypeId = evt.SummonId,
+                    Faction = BinGames.Sim.SimFaction.PlayerMinion,
+                    LogicId = _sim.NextLogicId(),
+                    VisualId = evt.SummonId,
+                });
+            }
+
+            LastAbilityPrompt = $"召唤 {granted} 个随行单位（ArchetypeId={evt.SummonId}）";
+            TEngine.Log.Info($"[MetabolicSliceBridge] {LastAbilityPrompt}");
+            return true;
+        }
+
+        /// <summary>story-002：任意命中的统一出口——Chain 原样传给内核已实现的连锁命中（JobDamage.Chain），
+        /// Pull 用内核已实现的 Slowed 减速（JobIntegrate 的 SlowMul）模拟"被拖拽锚定"，都不是新起模拟，
+        /// 只是把此前恒 0/未接线的参数真正传下去。</summary>
+        private void DamageAreaPrimitive(float2 pos, float radius, float amount, float chain, float pull)
+        {
+            int chainCount = chain > 0f ? Math.Max(0, (int)MathF.Round(chain)) : 0;
+            _sim.DamageArea(pos, radius, amount, BinGames.Sim.SimFaction.Hostile, chainCount: chainCount);
+            if (pull > 0f)
+            {
+                _sim.ApplyStatusArea(pos, radius, BinGames.Sim.SimStatus.Slowed | BinGames.Sim.SimStatus.Pulled,
+                    true, BinGames.Sim.SimFaction.Hostile);
+            }
+        }
+
+        private void DamageAreaPrimitive(float2 pos, float radius, float amount, HitEvent evt) =>
+            DamageAreaPrimitive(pos, radius, amount, evt.Chain, evt.Pull);
+
+        private static bool HasBallisticPrimitives(HitEvent evt) =>
+            evt.Homing > 0f || evt.Pierce > 0f || evt.Bounce > 0f || evt.Return ||
+            evt.Trail > 0f || evt.SplitOnHit > 0f || evt.Linger > 0f ||
+            evt.Speed > 0f || evt.Lifetime > 0f || evt.Gravity > 0f;
+
+        /// <summary>story-002：最近敌对单位查找，供 Homing 一次性偏移落点用。只在生成 PendingImpact 时调用
+        /// 一次（每次开火，不在 Tick 的每帧循环内），不违反热更层"每帧不得 O(敌人数)"红线（与既有
+        /// <see cref="BinGames.Sim.SimSnapshot.CountHostiles"/> 同类用法先例一致）。</summary>
+        private float2? FindNearestHostile(float2 from)
+        {
+            if (_sim == null || !_sim.Running)
+            {
+                return null;
+            }
+
+            BinGames.Sim.SimSnapshot snap = _sim.Snapshot;
+            float bestSq = float.MaxValue;
+            float2 best = default;
+            bool found = false;
+            for (int i = 0; i < snap.Count; i++)
+            {
+                if (snap.Alive[i] == 0 || snap.Faction[i] != (byte)BinGames.Sim.SimFaction.Hostile)
+                {
+                    continue;
+                }
+                float d = math.distancesq(snap.Position[i], from);
+                if (d < bestSq)
+                {
+                    bestSq = d;
+                    best = snap.Position[i];
+                    found = true;
+                }
+            }
+            return found ? (float2?)best : null;
+        }
+
+        /// <summary>story-002：反弹方向——沿入射方向镜像 180°，按 bounceIndex 奇偶各抖 ±30° 制造轨迹变化，
+        /// 与 Pierce 的直线延续区分开，不引入 RNG 依赖（保持确定性）。</summary>
+        private static float2 ReflectDirection(float2 dir, int bounceIndex)
+        {
+            float jitter = (bounceIndex % 2 == 0 ? 1f : -1f) * (math.PI / 6f);
+            float angle = math.PI + jitter;
+            float cos = math.cos(angle);
+            float sin = math.sin(angle);
+            return new float2(dir.x * cos - dir.y * sin, dir.x * sin + dir.y * cos);
+        }
+
+        /// <summary>story-002：SpreadAngle 收窄的锥形扇散——与 <see cref="MeleeFanDirection"/> 同一公式，
+        /// 参数化成通用角度供 Bolt-tail 多发复用，不新起一套系数。</summary>
+        public static float2 ConeFanDirection(float2 baseDir, int index, int count, float angleDegrees)
+        {
+            float2 n = math.normalizesafe(baseDir, DefaultForward);
+            if (count <= 1)
+            {
+                return n;
+            }
+            float halfRad = angleDegrees * math.PI / 180f * 0.5f;
+            float t = (float)index / (count - 1);
+            float angle = math.lerp(-halfRad, halfRad, t);
+            float cos = math.cos(angle);
+            float sin = math.sin(angle);
+            return new float2(n.x * cos - n.y * sin, n.x * sin + n.y * cos);
         }
 
         /// <summary>story-006：Count 多发/Explode 落点方向扇形展开，与
@@ -621,6 +997,7 @@ namespace GameLogic.MetabolicSlice.Combat
             _environment = null;
             _pendingMotion?.Clear();
             _pendingImpact?.Clear();
+            _pendingLinger?.Clear();
             _sandboxCombatScope?.Dispose();
             _sandboxCombatScope = null;
             _sandboxRecentHits.Clear();
