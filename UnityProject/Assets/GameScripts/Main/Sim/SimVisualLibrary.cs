@@ -513,7 +513,29 @@ namespace BinGames.Sim
                 float ang = i / (float)count * 360f;
                 parts.Add((blade, Matrix4x4.TRS(Vector3.zero, Quaternion.Euler(0, ang, 20f), Vector3.one)));
             }
+            parts.AddRange(MyceliumRoots());
             return CombineParts("summon_mycelium", parts);
+        }
+
+        /// <summary>carrier-visual-feedback story-003：一圈贴地放射状根须（复用 <see cref="Cone"/>），
+        /// 径向朝外略朝下、y 接近 0，与顶部扇叶形成"钉在地上"的组合造型，一眼区别于会移动的
+        /// <c>summon/spore</c>/<c>summon/phage</c>（球形/双球形，无贴地根须）。不引入新 ArtId/新渲染路径，
+        /// 烘焙进同一个 Mesh，随召唤物 spawn/despawn 免费获得显示/消失。</summary>
+        private static List<(Mesh, Matrix4x4)> MyceliumRoots()
+        {
+            var parts = new List<(Mesh, Matrix4x4)>();
+            Mesh root = Cone(0.025f, 0.16f);
+            const int count = 8;
+            const float radius = 0.3f;
+            for (int i = 0; i < count; i++)
+            {
+                float t = (i + 0.5f) / count * Mathf.PI * 2f;
+                Vector3 outDir = new Vector3(Mathf.Cos(t), 0, Mathf.Sin(t));
+                Vector3 tipDir = (outDir + Vector3.down * 0.4f).normalized;
+                Vector3 pos = outDir * radius + Vector3.down * 0.02f;
+                parts.Add((root, Matrix4x4.TRS(pos, FromTo(tipDir), Vector3.one)));
+            }
+            return parts;
         }
 
         // ══════════════════════════ 拼合工具 ══════════════════════════
