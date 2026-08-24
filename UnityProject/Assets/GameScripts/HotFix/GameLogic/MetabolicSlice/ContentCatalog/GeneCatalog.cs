@@ -29,15 +29,17 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
                 ["gene_share"] = ("共相", "gene/share", "队伍共享承伤状态。", () => new SharedFate()),
             };
 
-        /// <summary>story-004 D4/D15：Module 分支基因总数 = 19 条（A 组 8 + B 组 11），沿用现有器官 id 原文
+        /// <summary>story-004 D4/D15：Module 分支基因总数曾为 19 条（A 组 8 + B 组 11），沿用现有器官 id 原文
         /// （不改名成 gene_*，理由见 preflight D15）。org_insulate（D16 退役）与 org_mito/org_chloro
-        /// （D18 并入 Carrier 内建）刻意不在此列，即不进入可装备插槽的 Module 副表。</summary>
+        /// （D18 并入 Carrier 内建）刻意不在此列，即不进入可装备插槽的 Module 副表。
+        /// combat-identity-rework story-003：org_spine 已升格为 A1 攻击方式（AttackMethod=true），
+        /// DESIGN §2.2 禁止同一 id 既是器官又是基因，故从本列表移除，总数收为 18 条。</summary>
         private static readonly string[] _moduleGeneIds =
         {
             // A 组（R5 已定案 8 条）
             "org_vacuole", "org_golgi", "org_merge", "org_radiator", "org_breaker", "org_synapse", "org_valve", "org_filter",
-            // B 组（W9 修饰器官 11 条）
-            "org_scatter", "org_swell", "org_flagella", "org_lyso", "org_perox", "org_aqua", "org_ion", "org_lens", "org_slime", "org_receptor", "org_spine",
+            // B 组（W9 修饰器官 10 条，org_spine 已移出见上）
+            "org_scatter", "org_swell", "org_flagella", "org_lyso", "org_perox", "org_aqua", "org_ion", "org_lens", "org_slime", "org_receptor",
         };
 
         /// <summary>D11 方案 (a)：同表加副表。DisplayName/ArtId/Description/CreateModule 直接委派 OrganelleCatalog——
