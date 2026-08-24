@@ -506,6 +506,14 @@ namespace GameLogic.MetabolicSlice.Combat
                     }
                 }
                 applied = true;
+
+                if (evt.Tags.Contains("InheritPattern"))
+                {
+                    // story-006 Required 3（gene_swarm 最小实现）：宿主器官命中时，让每个存活玩家召唤物
+                    // 也在自己坐标补一次同 Damage/同 Chain/Pull 的命中，即"学会这件器官的打法"——不新起
+                    // 召唤物专属模式系统，复用 DamageAreaPrimitive 同一出口。
+                    ApplySwarmInherit(evt);
+                }
             }
 
             if (evt.SummonId > 0 && evt.SummonCount > 0f)
@@ -807,6 +815,30 @@ namespace GameLogic.MetabolicSlice.Combat
             LastAbilityPrompt = $"召唤 {granted} 个随行单位（ArchetypeId={evt.SummonId}）";
             TEngine.Log.Info($"[MetabolicSliceBridge] {LastAbilityPrompt}");
             return true;
+        }
+
+        /// <summary>story-006 Required 3（gene_swarm 最小实现）：让每个存活玩家召唤物在自己坐标补一次
+        /// 宿主器官这次命中的同 Damage/Chain/Pull 结算——"召唤物学会这件器官的打法"的最小可读版本，
+        /// 复用 <see cref="DamageAreaPrimitive"/> 同一出口，不新起召唤物专属的攻击模式系统。只在
+        /// <see cref="ApplyEvent"/> 的 Tick 节奏（或 execute_code 直调）触发，不是每帧扫描（同
+        /// <see cref="FindNearestHostile"/> 先例，召唤物数量恒被 MinionCap 卡在个位数）。</summary>
+        private void ApplySwarmInherit(HitEvent evt)
+        {
+            if (_sim == null || !_sim.Running)
+            {
+                return;
+            }
+
+            float radius = DamageAreaRadius * MathF.Max(0.1f, evt.Scale);
+            BinGames.Sim.SimSnapshot snap = _sim.Snapshot;
+            for (int i = 0; i < snap.Count; i++)
+            {
+                if (snap.Alive[i] == 0 || snap.Faction[i] != (byte)BinGames.Sim.SimFaction.PlayerMinion)
+                {
+                    continue;
+                }
+                DamageAreaPrimitive(snap.Position[i], radius, evt.Damage, evt);
+            }
         }
 
         /// <summary>story-002：任意命中的统一出口——Chain 原样传给内核已实现的连锁命中（JobDamage.Chain），
