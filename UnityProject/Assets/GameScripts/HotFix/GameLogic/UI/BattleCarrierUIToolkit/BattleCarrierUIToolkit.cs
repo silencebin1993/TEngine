@@ -135,6 +135,9 @@ namespace GameLogic
         {
             _carrierList = _root.Q<VisualElement>("CarrierList");
             _slotBar = _root.Q<ScrollView>("SlotBar");
+            // story-003（carrier-organ-expansion）R4：contentContainer 加换行网格 class，SlotBar 从横向单行滚动
+            // 改纵向换行网格，避免槽位数涨到 19 后横向挤压塌陷。
+            _slotBar?.contentContainer.AddToClassList("slot-bar-content");
             _geneList = _root.Q<ScrollView>("GeneList");
             _noCarrierHint = _root.Q<Label>("NoCarrierHint");
             _organViewToggle = _root.Q<Button>("OrganViewToggle");
@@ -397,7 +400,7 @@ namespace GameLogic
             {
                 int slotIndex = i;
                 Button slot = new Button();
-                slot.AddToClassList("slot-cell");
+                slot.AddToClassList("slot-cell-fixed");
                 _slotBar.Add(slot);
                 _slotButtons.Add(slot);
 
