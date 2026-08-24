@@ -84,5 +84,21 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
 
         /// <summary>D13：Contract + Module 两类基因全集串接，供 005 UI / 008 冒烟册用。</summary>
         public static IEnumerable<string> AllGeneIds => _defs.Keys.Concat(_moduleDefs.Keys);
+
+        /// <summary>carrier-visual-feedback story-002：本体视觉分组查询。Contract 基因（无 Role）归并为
+        /// "Contract" 兜底组；Module 基因直接复用 <see cref="OrganelleCatalog.OrganelleDef.Role"/>
+        /// （"Relay"/"Transform"/"Edge"），零新增分类表。查不到返回 null（None 态）。</summary>
+        public static string GetVisualGroup(string geneId)
+        {
+            if (_defs.ContainsKey(geneId))
+            {
+                return "Contract";
+            }
+            if (_moduleDefs.ContainsKey(geneId))
+            {
+                return OrganelleCatalog.Get(geneId)?.Role.ToString();
+            }
+            return null;
+        }
     }
 }

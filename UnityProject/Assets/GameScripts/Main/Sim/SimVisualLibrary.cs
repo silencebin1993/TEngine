@@ -109,31 +109,86 @@ namespace BinGames.Sim
                 case "carrier/cilia": return Combine("carrier_cilia",
                     Capsule(0.32f, 0.45f),
                     At(Capsule(0.06f, 0.32f), new Vector3(0.5f, 0, 0), Vector3.one, Quaternion.Euler(0, 0, 90)));
-                case "carrier/emitter_gene": return Combine("carrier_emitter_gene",
-                    Capsule(0.32f, 0.45f),
-                    At(Cone(0.16f, 0.3f), new Vector3(-0.42f, 0, 0), Vector3.one, FromTo(Vector3.left)),
-                    At(SpikedSphere("gene_stud_src", 0.12f, 5, 0.06f, 0.02f), new Vector3(0, 0.5f, 0.2f), Vector3.one));
-                case "carrier/cilia_gene": return Combine("carrier_cilia_gene",
-                    Capsule(0.32f, 0.45f),
-                    At(Capsule(0.06f, 0.32f), new Vector3(0.5f, 0, 0), Vector3.one, Quaternion.Euler(0, 0, 90)),
-                    At(SpikedSphere("gene_stud_src2", 0.12f, 5, 0.06f, 0.02f), new Vector3(0, 0.5f, 0.2f), Vector3.one));
 
                 default:
+                    if (TryComposeGeneMarker(artId, out Mesh geneMarkerMesh))
+                    {
+                        return geneMarkerMesh;
+                    }
                     return SphereUnit();
             }
         }
 
-        /// <summary>所有已定义 ArtId，供沙盒对比台一键铺开（任务二验收）。</summary>
-        public static readonly string[] AllArtIds =
+        /// <summary>carrier-visual-feedback story-002：装了槽位基因时在 base mesh 上追加一个按"显性组"
+        /// 区分的小 marker（沿用 <c>carrier/emitter_gene</c> 已验证的挂件手法），artId 形如
+        /// <c>{baseArtId}::relay|transform|edge|contract</c>。未命中任何已知后缀返回 false，交给调用方回退。</summary>
+        private static bool TryComposeGeneMarker(string artId, out Mesh mesh)
         {
-            "org/mito", "org/chloro", "org/vacuole", "org/golgi", "org/merge", "org/lens",
-            "org/scatter", "org/swell", "org/flagella", "org/lyso", "org/perox", "org/aqua",
-            "org/ion", "org/radiator", "org/breaker", "org/synapse", "org/emitter", "org/cilia",
-            "org/spine", "org/slime", "org/receptor", "org/insulate", "org/valve", "org/filter",
-            "prim/energy", "prim/mass", "prim/light", "prim/heat",
-            "summon/spore", "summon/phage", "summon/mycelium",
-            "carrier/base", "carrier/emitter", "carrier/cilia", "carrier/emitter_gene", "carrier/cilia_gene",
+            int sep = artId.LastIndexOf("::", StringComparison.Ordinal);
+            if (sep < 0)
+            {
+                mesh = null;
+                return false;
+            }
+            string baseId = artId.Substring(0, sep);
+            string suffix = artId.Substring(sep + 2);
+            Mesh marker = suffix switch
+            {
+                "transform" => SpikedSphere("gene_marker_transform", 0.12f, 5, 0.07f, 0.025f),
+                "relay" => Ring(0.14f, 0.03f, Quaternion.identity),
+                "edge" => Box(new Vector3(0.09f, 0.09f, 0.09f)),
+                "contract" => Sphere(0.09f),
+                _ => null,
+            };
+            if (marker == null)
+            {
+                mesh = null;
+                return false;
+            }
+            string name = (baseId + "_" + suffix).Replace('/', '_');
+            mesh = Combine(name, BuildForArtId(baseId), At(marker, new Vector3(0, 0.5f, 0.2f), Vector3.one));
+            return true;
+        }
+
+        /// <summary>可作为 active Carrier 的 21 个器官的 base ArtId（Epic G IsCarrier 全集）。
+        /// 硬编码而非查 <c>OrganelleCatalog</c>：本类在 AOT 程序集 <c>BinGames.Sim</c>，
+        /// 不能引用热更层 <c>GameLogic</c> 组装的目录（ADR-0001 分层约束），
+        /// emitter/cilia 用玩家本体专属的 <c>carrier/</c> 前缀，其余 19 个用 <c>org/</c> 前缀。</summary>
+        private static readonly string[] CarrierBaseArtIds =
+        {
+            "carrier/emitter", "carrier/cilia",
+            "org/vacuole", "org/golgi", "org/merge", "org/lens", "org/scatter", "org/swell",
+            "org/flagella", "org/lyso", "org/perox", "org/aqua", "org/ion", "org/radiator",
+            "org/breaker", "org/synapse", "org/spine", "org/slime", "org/receptor", "org/valve", "org/filter",
         };
+
+        private static readonly string[] GeneMarkerSuffixes = { "relay", "transform", "edge", "contract" };
+
+        /// <summary>所有已定义 ArtId，供沙盒对比台一键铺开（任务二验收）+ story-002 槽位基因组合 marker
+        /// （21 个 Carrier base × 4 组后缀 = 84 项）。</summary>
+        public static readonly string[] AllArtIds = BuildAllArtIds();
+
+        private static string[] BuildAllArtIds()
+        {
+            var ids = new List<string>
+            {
+                "org/mito", "org/chloro", "org/vacuole", "org/golgi", "org/merge", "org/lens",
+                "org/scatter", "org/swell", "org/flagella", "org/lyso", "org/perox", "org/aqua",
+                "org/ion", "org/radiator", "org/breaker", "org/synapse", "org/emitter", "org/cilia",
+                "org/spine", "org/slime", "org/receptor", "org/insulate", "org/valve", "org/filter",
+                "prim/energy", "prim/mass", "prim/light", "prim/heat",
+                "summon/spore", "summon/phage", "summon/mycelium",
+                "carrier/base", "carrier/emitter", "carrier/cilia",
+            };
+            foreach (string baseId in CarrierBaseArtIds)
+            {
+                foreach (string suffix in GeneMarkerSuffixes)
+                {
+                    ids.Add(baseId + "::" + suffix);
+                }
+            }
+            return ids.ToArray();
+        }
 
         // ══════════════════════════ 基础几何 ══════════════════════════
 
