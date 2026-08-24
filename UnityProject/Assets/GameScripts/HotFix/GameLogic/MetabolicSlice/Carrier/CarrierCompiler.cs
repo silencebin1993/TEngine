@@ -58,11 +58,20 @@ namespace GameLogic.MetabolicSlice.Carrier
             // D10：链尾按 Carrier 反查执行器；OrganelleId 为 null / 查不到 / CreateModule 为 null 时
             // 回落 new Actuator()（Reject-to-Safe），保证 003 的 23 条断言里无器官 Carrier 仍出 Bolt/Damage=10。
             // Dictionary.TryGetValue 对 null key 会抛 ArgumentNullException，OrganelleId 必须先判空再查表。
+            // R0（carrier-organ-expansion 001 Preflight）：非 Sink 器官（19 个升格 Module 基因，Role
+            // 全部是 Relay/Transform/Edge）自身机制不是链的"出口"，若直接顶替 Actuator 当链尾会导致
+            // 这些新 Carrier 零 HitEvent。修复：非 Sink 器官先把自己的机制接入链，链尾恒为 Actuator；
+            // Sink 器官（org_emitter/org_cilia）行为不变，仍是 CreateModule() 本身当链尾。
             var tailDef = carrier.OrganelleId != null ? OrganelleCatalog.Get(carrier.OrganelleId) : null;
-            var tail = tailDef?.CreateModule() ?? new Actuator();
 
             var chain = new List<IModule> { new EnergyCore(10f) };
             chain.AddRange(moduleGenes);
+            if (tailDef != null && tailDef.Role != OrganelleRole.Sink)
+            {
+                chain.Add(tailDef.CreateModule());
+            }
+            IModule tail = (tailDef != null && tailDef.Role == OrganelleRole.Sink)
+                ? tailDef.CreateModule() : new Actuator();
             chain.Add(tail);
 
             var raw = engine.RunAssembly(chain, ticks: 1, seed: seed);

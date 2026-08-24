@@ -1037,10 +1037,18 @@ namespace GameLogic.Stage.CellStage
             {
                 totalCarrierCount++;
             }
+            int carrierOrganCount = 0;
+            foreach (var kv in GameLogic.MetabolicSlice.ContentCatalog.OrganelleCatalog.All)
+            {
+                if (kv.Value.IsCarrier)
+                {
+                    carrierOrganCount++;
+                }
+            }
 
             TEngine.Log.Info(
                 $"[GM] 基因 {panel.GeneReserve.Items.Count}/30（含 {moduleGeneCount} 个器官模块，本次 +{genesGranted}）"
-                + $" ＋Carrier {totalCarrierCount}/2（本次 +{carriersGranted}，插槽已补至 {slotTarget}）"
+                + $" ＋Carrier {totalCarrierCount}/{carrierOrganCount}（本次 +{carriersGranted}，插槽已补至 {slotTarget}）"
                 + " ＋技能：仅冲刺（机制无关技能已按 R3 移除，体力已灌满）");
         }
 

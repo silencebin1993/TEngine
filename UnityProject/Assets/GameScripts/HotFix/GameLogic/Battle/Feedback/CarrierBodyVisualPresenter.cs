@@ -81,7 +81,8 @@ namespace GameLogic.Battle.Feedback
                 case "org_cilia":
                     return hasGene ? "carrier/cilia_gene" : "carrier/cilia";
                 default:
-                    return "carrier/base";
+                    string artId = GameLogic.MetabolicSlice.ContentCatalog.OrganelleCatalog.Get(active.OrganelleId)?.ArtId;
+                    return artId ?? "carrier/base";
             }
         }
 
