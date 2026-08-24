@@ -141,12 +141,15 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
             ["org_insulate"] = new OrganelleDef("org_insulate", "绝缘管", OrganelleRole.Edge, OrganelleAttachTarget.DirectedEdge,
                 null, "org/insulate", () => new Insulator(), isRetired: true,
                 description: "按比例阻尼热量（已退役，不进可装备插槽）。"),
+            // combat-identity-rework story-004 Required 7 + CATALOG §C：删除（非迁移，不进 gene_*），
+            // 收敛 isCarrier=false 并 isRetired=true——同 org_insulate 先例，仅从"可装备插槽集"排除，
+            // 不删 _defs 条目（IdSmokeReport 等既有探针按 id 遍历，删条目会静默少测）。
             ["org_valve"] = new OrganelleDef("org_valve", "单向阀", OrganelleRole.Edge, OrganelleAttachTarget.Slot,
-                null, "org/valve", () => new Valve(), isCarrier: true,
-                description: "强化沿链方向流动的能量。"),
+                null, "org/valve", () => new Valve(), isRetired: true,
+                description: "强化沿链方向流动的能量（已退役，不进可装备插槽）。"),
             ["org_filter"] = new OrganelleDef("org_filter", "过滤管", OrganelleRole.Edge, OrganelleAttachTarget.Slot,
-                null, "org/filter", () => new TagFilter("Approved", 0.5f), isCarrier: true,
-                description: "只放行带指定标记的能量，未命中的按比例折损。"),
+                null, "org/filter", () => new TagFilter("Approved", 0.5f), isRetired: true,
+                description: "只放行带指定标记的能量，未命中的按比例折损（已退役，不进可装备插槽）。"),
 
             // ── combat-identity-rework story-003：CATALOG §A1 第一波 9 个新攻击方式 ──
             // 不新增美术：ArtId 未登记进 SimVisualLibrary，落 SphereUnit() 兜底，靠 Shape+Pattern+颜色区分（R6）。
