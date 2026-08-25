@@ -174,24 +174,26 @@ namespace GameLogic.Progression
             }
         }
 
-        /// <summary>载体器官（IsCarrier==true，玩家可选的 Carrier 出口器官，如分泌喷射器/纤毛刺）。</summary>
+        /// <summary>combat-identity-rework story-007（R1/Required 1）：器官栏改按 AttackMethod==true
+        /// 过滤（24 个独立开火测试通过的攻击方式），不再用已收敛但语义次要的 IsCarrier。</summary>
         public IEnumerable<OrganelleCodexEntry> AllCarrierOrganelleEntries()
         {
             foreach (OrganelleDef def in OrganelleCatalog.All.Values)
             {
-                if (def.IsCarrier)
+                if (def.AttackMethod)
                 {
                     yield return new OrganelleCodexEntry(def.Id, def.DisplayName, def.Description, def.Role);
                 }
             }
         }
 
-        /// <summary>代谢模块（IsCarrier==false，走基因插槽的模块器官，不在 Carrier 器官栏展示）。</summary>
+        /// <summary>代谢模块（AttackMethod==false，非攻击方式的器官条目，不在 Carrier 器官栏展示；
+        /// 含能量核心与已退役旧修饰，仅供图鉴归档查阅）。</summary>
         public IEnumerable<OrganelleCodexEntry> AllMetabolicModuleEntries()
         {
             foreach (OrganelleDef def in OrganelleCatalog.All.Values)
             {
-                if (!def.IsCarrier)
+                if (!def.AttackMethod)
                 {
                     yield return new OrganelleCodexEntry(def.Id, def.DisplayName, def.Description, def.Role);
                 }

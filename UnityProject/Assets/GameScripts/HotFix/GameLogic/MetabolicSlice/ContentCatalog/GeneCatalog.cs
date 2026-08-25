@@ -124,10 +124,5 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
 
         /// <summary>Contract + Module 全集，本 story 起等价于 <see cref="AllModuleIds"/>（24 条）。</summary>
         public static IEnumerable<string> AllGeneIds => _defs.Keys.Concat(_moduleDefs.Keys);
-
-        /// <summary>story-004：24 条基因全部 Module 类型，不再对应任何 OrganelleCatalog 条目（它们
-        /// 不是器官），旧的"借 Role 分组"语义已失效。007（copy-ui-retire）会改成 AttackFamily 分组；
-        /// 本 story 只保证不 NPE，恒返回 null（None 态，调用方 switch/?? 均已 null-safe）。</summary>
-        public static string GetVisualGroup(string geneId) => null;
     }
 }

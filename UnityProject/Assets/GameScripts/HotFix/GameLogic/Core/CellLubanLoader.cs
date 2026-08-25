@@ -3,6 +3,7 @@ using BinGames.Sim;
 using GameLogic.Ability;
 using GameLogic.Battle;
 using GameLogic.Cards;
+using GameLogic.MetabolicSlice.ContentCatalog;
 using GameLogic.Stats;
 
 namespace GameLogic.Core
@@ -193,6 +194,15 @@ namespace GameLogic.Core
 
             foreach (var c in t.TbCard.DataList)
             {
+                // combat-identity-rework story-007（Required 4）：卡表（Luban，tools/cell_tables/）
+                // 仍在引用已迁 gene_*/已退役的旧 id（本机 Smart App Control 拦截 Luban codegen，
+                // 表内容改不动，见 qa/evidence 006），在这唯一的 cell.* → CardSpec 翻译口子上过滤，
+                // 使旧 id 不产出 CardSpec，天然不进抽卡池/图鉴，不依赖表重生。
+                if (IsRetiredOrUnknownContent((ContentKind)(int)c.ContentKind, c.ContentId))
+                {
+                    continue;
+                }
+
                 var spec = new CardSpec
                 {
                     Id = c.Id,
@@ -256,6 +266,23 @@ namespace GameLogic.Core
                 }
 
                 reg.AddCard(spec);
+            }
+        }
+
+        /// <summary>combat-identity-rework story-007（Required 4）：Organelle 内容缺目录条目或
+        /// <see cref="OrganelleDef.IsRetired"/> 时不可抽/不可授予；Gene 内容不在 Contract/Module
+        /// 两张子表任一（例如已删除的 gene_double/mute/edge/share）同样视为退役。</summary>
+        private static bool IsRetiredOrUnknownContent(ContentKind kind, string contentId)
+        {
+            switch (kind)
+            {
+                case ContentKind.Organelle:
+                    OrganelleDef organelle = OrganelleCatalog.Get(contentId);
+                    return organelle == null || organelle.IsRetired;
+                case ContentKind.Gene:
+                    return GeneCatalog.Get(contentId) == null && GeneCatalog.GetModule(contentId) == null;
+                default:
+                    return false;
             }
         }
 

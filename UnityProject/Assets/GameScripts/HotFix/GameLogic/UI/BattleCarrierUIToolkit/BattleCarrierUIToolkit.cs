@@ -324,7 +324,8 @@ namespace GameLogic
 
         /// <summary>story-003（slot-unlimited-codex）D2：全量目录，数据源复用 CodexRegistry
         /// （V 键图鉴同一出口）。纯展示态：只读说明 + 点击切视觉高亮，不调用 SetActive/AddOrganPart，不写 CarrierRegistry/_bag。
-        /// 任务一（器官重新分类）：拆两组渲染——先"载体器官"（AllCarrierOrganelleEntries），再"代谢模块"（AllMetabolicModuleEntries）。</summary>
+        /// combat-identity-rework story-007（Required 1）：器官栏只出 AttackMethod==true 的攻击方式，
+        /// 不再渲染"代谢模块"（旧修饰已迁 gene_* 或退役，不该再出现在器官栏）。</summary>
         private void RefreshCarrierListAllCatalog()
         {
             CodexRegistry codex = GameRoot.CellStage?.Codex;
@@ -334,7 +335,6 @@ namespace GameLogic
             }
 
             AddCarrierCatalogSection("载体器官", codex.AllCarrierOrganelleEntries());
-            AddCarrierCatalogSection("代谢模块", codex.AllMetabolicModuleEntries());
         }
 
         private void AddCarrierCatalogSection(string sectionTitle, System.Collections.Generic.IEnumerable<OrganelleCodexEntry> entries)

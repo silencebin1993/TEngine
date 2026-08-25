@@ -997,7 +997,9 @@ namespace GameLogic.Stage.CellStage
             foreach (var kv in GameLogic.MetabolicSlice.ContentCatalog.OrganelleCatalog.All)
             {
                 GameLogic.MetabolicSlice.ContentCatalog.OrganelleDef def = kv.Value;
-                if (!def.IsCarrier)
+                // combat-identity-rework story-007（Required 3）：GM 全量授予改按 AttackMethod==true
+                // 过滤（24 个攻击方式），旧修饰已收敛 IsCarrier=false 但显式改判据更贴合意图。
+                if (!def.AttackMethod)
                 {
                     continue;
                 }
@@ -1040,15 +1042,15 @@ namespace GameLogic.Stage.CellStage
             int carrierOrganCount = 0;
             foreach (var kv in GameLogic.MetabolicSlice.ContentCatalog.OrganelleCatalog.All)
             {
-                if (kv.Value.IsCarrier)
+                if (kv.Value.AttackMethod)
                 {
                     carrierOrganCount++;
                 }
             }
 
             TEngine.Log.Info(
-                $"[GM] 基因 {panel.GeneReserve.Items.Count}/30（含 {moduleGeneCount} 个器官模块，本次 +{genesGranted}）"
-                + $" ＋Carrier {totalCarrierCount}/{carrierOrganCount}（本次 +{carriersGranted}，插槽已补至 {slotTarget}）"
+                $"[GM] 基因 {panel.GeneReserve.Items.Count}/{moduleGeneCount}（本次 +{genesGranted}）"
+                + $" ＋攻击器官 {totalCarrierCount}/{carrierOrganCount}（本次 +{carriersGranted}，插槽已补至 {slotTarget}）"
                 + " ＋技能：仅冲刺（机制无关技能已按 R3 移除，体力已灌满）");
         }
 
