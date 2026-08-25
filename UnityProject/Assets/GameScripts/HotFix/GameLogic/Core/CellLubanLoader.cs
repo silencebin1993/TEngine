@@ -194,10 +194,11 @@ namespace GameLogic.Core
 
             foreach (var c in t.TbCard.DataList)
             {
-                // combat-identity-rework story-007（Required 4）：卡表（Luban，tools/cell_tables/）
-                // 仍在引用已迁 gene_*/已退役的旧 id（本机 Smart App Control 拦截 Luban codegen，
-                // 表内容改不动，见 qa/evidence 006），在这唯一的 cell.* → CardSpec 翻译口子上过滤，
-                // 使旧 id 不产出 CardSpec，天然不进抽卡池/图鉴，不依赖表重生。
+                // combat-identity-rework story-007（Required 4）新增的过滤，当时本机 Smart App
+                // Control 拦截 Luban codegen，carddata.py 改不动，只能在这唯一的 cell.* → CardSpec
+                // 翻译口子上把旧 id 挡在外面。2026-08-25 Luban 解封后 carddata.py 已按 CATALOG.md
+                // §C 改到位、表已重生，旧 id 目前不该再出现——这道过滤转成兜底安全网（未来再有
+                // 内容退役而漏改表时不会静默产出坏卡），不再是唯一防线。
                 if (IsRetiredOrUnknownContent((ContentKind)(int)c.ContentKind, c.ContentId))
                 {
                     continue;

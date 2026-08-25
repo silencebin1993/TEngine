@@ -393,6 +393,13 @@ namespace GameLogic.UI.Battle
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             else if (Event.current.keyCode == KeyCode.L)
             {
+                // sandbox-panel-dismiss R6：沙盒局内 L 由 BattleSandboxUIToolkit toggle UITK，
+                // 不再打开 IMGUI 全屏对照（避免双遮罩）。
+                CellStageFlow cell = GameRoot.CellStage;
+                if (cell != null && cell.IsSandboxMode)
+                {
+                    return;
+                }
                 // 任务四：旧 IMGUI LookDev 沙盒对照模式，默认关闭；正式入口见 DrawMenu 的
                 // "LookDev 沙盒" 按钮（唤起 BattleSandboxUIToolkit）。
                 _lookDevActive = !_lookDevActive;
@@ -493,6 +500,12 @@ namespace GameLogic.UI.Battle
             _sandboxOrganScroll = GUILayout.BeginScrollView(_sandboxOrganScroll, GUILayout.Height(190f));
             foreach (KeyValuePair<string, OrganelleDef> kv in OrganelleCatalog.All)
             {
+                // combat-identity-rework story-007（同 CodexRegistry.AllCarrierOrganelleEntries）：
+                // 器官栏只出 AttackMethod==true 的攻击方式，已退役修饰/能量核心不应再出现在沙盒选择里。
+                if (!kv.Value.AttackMethod)
+                {
+                    continue;
+                }
                 bool sel = _sandboxOrganelleIds.Contains(kv.Key);
                 bool now = GUILayout.Toggle(sel, $"{kv.Value.DisplayName}（{kv.Key}　{kv.Value.Role}）", _label);
                 if (now != sel)

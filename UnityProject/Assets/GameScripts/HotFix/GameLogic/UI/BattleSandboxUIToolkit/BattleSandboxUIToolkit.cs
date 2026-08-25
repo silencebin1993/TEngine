@@ -45,6 +45,8 @@ namespace GameLogic
         private Button _compareStandClearButton;
         private Button _exitButton;
         private Button _clearSelectionButton;
+        private Button _dismissButton;
+        private Button _reopenChip;
 
         private readonly List<string> _geneIds = new List<string>();
         private readonly List<string> _organelleIds = new List<string>();
@@ -58,6 +60,12 @@ namespace GameLogic
         public static BattleSandboxUIToolkit Instance { get; private set; }
 
         public bool IsVisible => _visible;
+
+        /// <summary>execute_code 探针：当前选中的基因数（收起再开不得清零）。</summary>
+        public int SelectedGeneCount => _geneIds.Count;
+
+        /// <summary>execute_code 探针：当前选中的器官数（收起再开不得清零）。</summary>
+        public int SelectedOrganelleCount => _organelleIds.Count;
 
         private void Awake()
         {
@@ -115,12 +123,16 @@ namespace GameLogic
             _compareStandClearButton = _root.Q<Button>("SandboxCompareStandClearButton");
             _exitButton = _root.Q<Button>("SandboxExitButton");
             _clearSelectionButton = _root.Q<Button>("SandboxClearSelection");
+            _dismissButton = _root.Q<Button>("SandboxDismissButton");
+            _reopenChip = _root.Q<Button>("SandboxReopenChip");
 
             if (_fireButton != null) { _fireButton.clicked += OnFireClicked; }
             if (_exitButton != null) { _exitButton.clicked += OnExitClicked; }
             if (_clearSelectionButton != null) { _clearSelectionButton.clicked += OnClearSelectionClicked; }
             if (_compareStandButton != null) { _compareStandButton.clicked += OnCompareStandClicked; }
             if (_compareStandClearButton != null) { _compareStandClearButton.clicked += OnCompareStandClearClicked; }
+            if (_dismissButton != null) { _dismissButton.clicked += OnDismissClicked; }
+            if (_reopenChip != null) { _reopenChip.clicked += OnReopenClicked; }
 
             if (_autoFireToggle != null)
             {
@@ -161,6 +173,12 @@ namespace GameLogic
                 _organList.Clear();
                 foreach (KeyValuePair<string, OrganelleDef> kv in OrganelleCatalog.All)
                 {
+                    // combat-identity-rework story-007（同 CodexRegistry.AllCarrierOrganelleEntries）：
+                    // 器官栏只出 AttackMethod==true 的攻击方式，已退役修饰/能量核心不应再出现在沙盒选择里。
+                    if (!kv.Value.AttackMethod)
+                    {
+                        continue;
+                    }
                     var btn = new Button { text = $"{kv.Value.DisplayName}（{kv.Key}　{kv.Value.Role}）" };
                     btn.AddToClassList("carrier-item");
                     btn.AddToClassList("list-row");
@@ -377,6 +395,24 @@ namespace GameLogic
             GameRoot.EndRun();
         }
 
+        /// <summary>sandbox-panel-dismiss R1：只收起 UITK，不 EndRun；装配选择保留。</summary>
+        private void OnDismissClicked()
+        {
+            SetVisible(false);
+        }
+
+        /// <summary>sandbox-panel-dismiss R3：角标再开只 SetVisible(true)，禁止走 Show() 的 ResetAssembler。</summary>
+        private void OnReopenClicked()
+        {
+            SetVisible(true);
+        }
+
+        /// <summary>公开收起入口，供 execute_code / 热键调用。</summary>
+        public void Dismiss()
+        {
+            SetVisible(false);
+        }
+
         private void OnCompareStandClicked()
         {
             int count = VisualCompareStand.Spawn(new Vector3(-30f, 0f, -30f));
@@ -422,27 +458,56 @@ namespace GameLogic
             {
                 _panelRoot.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
             }
+            RefreshReopenChip();
         }
 
-        private void Update()
+        /// <summary>面板隐藏且仍在沙盒局内时显示「沙盒」角标；面板显示或已退出沙盒时隐藏。</summary>
+        private void RefreshReopenChip()
         {
-            if (!_visible)
+            if (_reopenChip == null)
             {
                 return;
             }
             CellStageFlow cell = GameRoot.CellStage;
-            if (cell == null || !cell.IsRunning)
+            bool showChip = !_visible
+                && cell != null
+                && cell.IsRunning
+                && cell.IsSandboxMode;
+            _reopenChip.style.display = showChip ? DisplayStyle.Flex : DisplayStyle.None;
+        }
+
+        private void Update()
+        {
+            CellStageFlow cell = GameRoot.CellStage;
+            bool sandboxRunning = cell != null && cell.IsRunning && cell.IsSandboxMode;
+
+            // 局已结束 / 非沙盒：确保角标收起（EndRun 后 Refresh 一次即可）。
+            if (!sandboxRunning)
             {
+                if (_reopenChip != null && _reopenChip.style.display != DisplayStyle.None)
+                {
+                    _reopenChip.style.display = DisplayStyle.None;
+                }
                 return;
             }
 
-            MetabolicSliceBridge bridge = cell.MetabolicBridge;
-            if (bridge != null && _combatReadout != null)
+            // R2：沙盒局内 L toggle UITK（与 Carrier O 同级）；非沙盒不抢键（上面已 return）。
+            if (Input.GetKeyDown(KeyCode.L))
             {
-                _combatReadout.text =
-                    $"累计 DPS　总伤害 {bridge.SandboxTotalDamage:0.#}　命中 {bridge.SandboxHitCount}　" +
-                    $"击杀 {bridge.SandboxKillCount}　耗时 {bridge.SandboxElapsedSinceFirstHit:0.#}s\n" +
-                    $"均值DPS {bridge.SandboxAverageDps:0.#}　近{MetabolicSliceBridge.SandboxRollingWindowSeconds:0}s DPS {bridge.SandboxRollingDps:0.#}";
+                SetVisible(!_visible);
+            }
+
+            // 读数只在面板可见时刷新；自动连发与显隐解耦（R4）。
+            if (_visible)
+            {
+                MetabolicSliceBridge bridge = cell.MetabolicBridge;
+                if (bridge != null && _combatReadout != null)
+                {
+                    _combatReadout.text =
+                        $"累计 DPS　总伤害 {bridge.SandboxTotalDamage:0.#}　命中 {bridge.SandboxHitCount}　" +
+                        $"击杀 {bridge.SandboxKillCount}　耗时 {bridge.SandboxElapsedSinceFirstHit:0.#}s\n" +
+                        $"均值DPS {bridge.SandboxAverageDps:0.#}　近{MetabolicSliceBridge.SandboxRollingWindowSeconds:0}s DPS {bridge.SandboxRollingDps:0.#}";
+                }
             }
 
             if (!_autoFire)
