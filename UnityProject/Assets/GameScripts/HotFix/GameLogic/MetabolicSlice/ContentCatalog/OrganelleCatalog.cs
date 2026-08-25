@@ -283,6 +283,14 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
                     new AuraModule(2f), new TickModule(0.5f), new Actuator(shape: "Wave", pattern: AttackPattern.Pulse)),
                 isCarrier: true, attackMethod: true, attackFamily: "Pulse",
                 description: "攻击方式：按节拍从身体放一圈脉冲。"),
+
+            // ── 人直接指示追加（2026-08-25，非 sprint-027 范围）：吞噬（接触消灭小于自身体积的目标）
+            // 从"全局无条件行为"改为需要装备并激活的器官——见 CellDevourSystem.OnUpdate 的门控。
+            ["org_phago"] = new OrganelleDef("org_phago", "吞噬体", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
+                MembraneOnly, "org/phago", () => new CompositeModule("phago_attack", "吞噬体接触",
+                    new Actuator(shape: "Melee", pattern: AttackPattern.Thorns)),
+                isCarrier: true, attackMethod: true, attackFamily: "Thorns",
+                description: "攻击方式：接触到体积小于自己的目标时直接吞噬消灭；不主动开火。"),
         };
 
         public static OrganelleDef Get(string id) => _defs.TryGetValue(id, out var def) ? def : null;

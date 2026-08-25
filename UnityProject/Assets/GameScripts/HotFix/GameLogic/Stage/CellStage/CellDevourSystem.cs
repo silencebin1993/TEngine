@@ -38,6 +38,10 @@ namespace GameLogic.Stage.CellStage
         /// <summary>体积成长系数：吞噬目标体积的多少比例转为自身体积。</summary>
         private const float VolumeGrowthRatio = 0.055f;
 
+        /// <summary>吞噬现在门控于该器官（人直接指示，2026-08-25，非 sprint-027 范围）：
+        /// 未装备并激活时，接触到的候选不结算，敌人不受影响。</summary>
+        private const string DevourOrganId = "org_phago";
+
         public void Bind(SimBridge sim, StatSheet stats, ResourceWallet wallet,
             EcoEventScheduler events, StageStatistics statistics, AreaZoneSystem zones,
             MinionRegistry minions)
@@ -76,16 +80,22 @@ namespace GameLogic.Stage.CellStage
 
             SimSnapshot snap = _sim.Snapshot;
 
-            // 处理本帧吞噬候选。内核已按体积门槛筛过，这里直接结算。
-            int n = snap.DevourCandidateCount;
-            for (int i = 0; i < n; i++)
+            // 处理本帧吞噬候选。内核已按体积门槛筛过，这里直接结算——
+            // 但只有当前激活器官是吞噬体时才生效，否则候选照常产出但不消费。
+            bool devourActive = GameLogic.UI.Battle.MetabolicSlicePanel.Instance
+                ?.CarrierRegistry?.ActiveCarrier?.OrganelleId == DevourOrganId;
+            if (devourActive)
             {
-                int idx = snap.DevourCandidates[i];
-                if (idx < 0 || idx >= snap.Count || snap.Alive[idx] == 0)
+                int n = snap.DevourCandidateCount;
+                for (int i = 0; i < n; i++)
                 {
-                    continue;
+                    int idx = snap.DevourCandidates[i];
+                    if (idx < 0 || idx >= snap.Count || snap.Alive[idx] == 0)
+                    {
+                        continue;
+                    }
+                    Consume(idx, in snap);
                 }
-                Consume(idx, in snap);
             }
 
             // 玩家受到的接触伤害结算
