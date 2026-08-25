@@ -75,6 +75,18 @@ namespace GameLogic.Battle.Feedback
         private const float MeleeForwardStretch = 1.4f;
         private const float MeleeSideStretch = 0.75f;
 
+        /// <summary>Beam 抻出耗时——0 到 PersistentLife（0.5s）内前 0.15s 从 0 长度快速抻满，
+        /// 让光束读出"从身上打出去"而不是贴身凭空出现的静态色块（Bolt 已有 MuzzleOffset 解决同类问题，
+        /// Beam 用「起点固定在身上 + 长度动画」的等价手法，因为它是有向长条不是圆形，没有居中重叠问题，
+        /// 缺的是"发生"这个动作本身）。</summary>
+        private const float BeamIgniteDuration = 0.15f;
+
+        /// <summary>Field 抛掷飞行耗时，复用 Bolt 同款 <see cref="FlightLife"/>（0.3s）作为"甩出去"的时间窗，
+        /// 落地后再用 <see cref="FieldSettleDuration"/>（0.2s）从小长到满径——二者相加正好等于
+        /// <see cref="PersistentLife"/>（0.5s），落点用与 Bolt/Spore 同一个 <see cref="MetabolicSliceBridge.ImpactFlightDistance"/>，
+        /// 呼应 CATALOG「把酶雾扔到落点」的设计描述（此前 Field 无任何位移，原地贴身出现）。</summary>
+        private const float FieldSettleDuration = 0.2f;
+
         // story-009：Bolt/Spore 直径系数与 Beam 长/宽系数改为逐配方（G2b），从 FxRecipeCatalog
         // 按当前 ShapeKind 查表读取，不再是同一套固定 const（详见 ApplyTransform）。
 
@@ -532,9 +544,12 @@ namespace GameLogic.Battle.Feedback
                     float length = radius * recipe.LengthCoef;
                     float width = radius * recipe.WidthCoef;
                     float angDeg = DirectionAngleDeg(dir);
+                    // 接上角色：起点固定钉在施法坐标（=玩家胶囊）上，前 BeamIgniteDuration 秒长度从 0
+                    // 抻到满——读出"从身上打出一道光束"，而不是凭空出现的静态色块（原地贴身瞬间满长）。
+                    float grownLength = length * Mathf.Clamp01(_elapsed[idx] / BeamIgniteDuration);
                     _tf[idx].localPosition = new Vector3(origin.x, MarkerY, origin.y);
                     _tf[idx].localRotation = Quaternion.Euler(0f, -angDeg, 0f);
-                    _tf[idx].localScale = new Vector3(length, 1f, width);
+                    _tf[idx].localScale = new Vector3(grownLength, 1f, width);
                     break;
                 }
                 case ShapeKind.Arc:
@@ -548,10 +563,22 @@ namespace GameLogic.Battle.Feedback
                 }
                 case ShapeKind.Field:
                 {
-                    // D3 强同步：白模半径直接等于 radius，无额外系数。
-                    _tf[idx].localPosition = new Vector3(origin.x, MarkerY, origin.y);
+                    // D3 强同步：白模半径直接等于 radius，无额外系数（落地后满径不变）。
+                    // 接上角色：落地前 FlightLife 秒沿 Direction 从施法点（玩家胶囊）线性飞到落点
+                    // （与 Bolt/Spore 同一个 ImpactFlightDistance），呼应 CATALOG「把酶雾扔到落点」的设计——
+                    // 此前 Field 无任何位移，原地贴身瞬间满径出现，读不出"甩出去"。落地后再用
+                    // FieldSettleDuration 秒从小长到满径，两段时长相加=PersistentLife，不会在满径前提前回收。
+                    float2 throwDir = math.normalizesafe(_direction[idx], new float2(0f, 1f));
+                    float2 landing = origin + throwDir * MetabolicSliceBridge.ImpactFlightDistance;
+                    float flightT = FlightLife > 0f ? Mathf.Clamp01(_elapsed[idx] / FlightLife) : 1f;
+                    float2 pos = math.lerp(origin, landing, flightT);
+                    float settleT = FieldSettleDuration > 0f
+                        ? Mathf.Clamp01((_elapsed[idx] - FlightLife) / FieldSettleDuration)
+                        : 1f;
+                    float diameterScale = flightT >= 1f ? Mathf.Lerp(0.3f, 1f, settleT) : 0.3f;
+                    _tf[idx].localPosition = new Vector3(pos.x, MarkerY, pos.y);
                     _tf[idx].localRotation = Quaternion.identity;
-                    _tf[idx].localScale = new Vector3(radius * 2f, 1f, radius * 2f);
+                    _tf[idx].localScale = new Vector3(radius * 2f * diameterScale, 1f, radius * 2f * diameterScale);
                     break;
                 }
                 case ShapeKind.Wave:

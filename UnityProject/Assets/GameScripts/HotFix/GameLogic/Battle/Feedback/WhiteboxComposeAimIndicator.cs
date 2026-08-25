@@ -33,6 +33,11 @@ namespace GameLogic.Battle.Feedback
         private MeshRenderer[] _mr;
         private bool[] _active;
 
+        /// <summary>接上角色：缓存最近一次 <see cref="ShowPlayerIndicator"/> 用到的 bridge，供 <see cref="Tick"/>
+        /// 逐帧回读玩家当前坐标——指示器不是"射出去"的东西，是"预览你现在站这儿会怎么打"，理应跟着角色走，
+        /// 而不是换装那一刻画一次就钉死在原地（原先钉在硬编码的世界 (0,0)，玩家一走就跟丢，见 ShowMarker 改动）。</summary>
+        private MetabolicSliceBridge _bridge;
+
         /// <summary>验收探针（story-010b Acceptance 2）：<see cref="ShowPlayerIndicator"/> 实际重算次数，
         /// 供 Presenter 的脏检查逻辑做「未变则不重复调用」的断言依据。不影响任何表现/结算路径。</summary>
         public int RefreshCount { get; private set; }
@@ -98,17 +103,21 @@ namespace GameLogic.Battle.Feedback
                 return;
             }
 
+            // 接上角色：缓存 bridge 供 Tick 逐帧回读玩家坐标（见 _bridge 字段注释）。
+            _bridge = bridge;
+
             var events = CarrierCompiler.Compile(engine, active, reserve, env.State, seed, cellId: null);
 
+            float2 playerPos = bridge.GetPlayerPosition();
             int count = Mathf.Min(events.Count, IndicatorPoolSize);
             for (int i = 0; i < count; i++)
             {
                 var evt = events[i];
-                ShowMarker(i, evt);
+                ShowMarker(i, evt, playerPos);
             }
         }
 
-        private void ShowMarker(int idx, HitEvent evt)
+        private void ShowMarker(int idx, HitEvent evt, float2 playerPos)
         {
             if (!FxRecipeCatalog.TryGetShapeRecipe(evt.Shape, out var recipe))
             {
@@ -129,9 +138,9 @@ namespace GameLogic.Battle.Feedback
             _mr[idx].sharedMaterial.color = indicatorColor;
             _mf[idx].sharedMesh = MeshForRecipe(recipe);
 
-            // J6：静态标记（不飞行），只显示发射原点形状
-            float2 origin = new float2(0f, 0f); // 玩家位置，J6 简化为原点
-            _tf[idx].position = new Vector3(origin.x, MarkerY, origin.y);
+            // J6：静态标记（不飞行），只显示发射原点形状——发射原点＝玩家当前坐标（接上角色，
+            // 不再硬编码世界 (0,0)；Tick 里还会逐帧跟着玩家挪，见字段注释）。
+            _tf[idx].position = new Vector3(playerPos.x, MarkerY, playerPos.y);
             _tf[idx].rotation = Quaternion.identity;
             // story-005（scene-3d-content）：非等比缩放——网格已烘焙绝对高度（FxRecipeCatalog.Global.MarkerHeight），
             // 等比缩放会让高度被 radius*2f 连带放大/缩小，与既定「高度是绝对量、与 XZ 半径解耦」纪律冲突。
@@ -165,7 +174,25 @@ namespace GameLogic.Battle.Feedback
 
         public void Tick(float dt)
         {
-            // J6：静态指示器，无动画
+            // J6：形状/朝向仍是静态（不飞行、不重算），但接上角色——逐帧把已显示的标记重新钉到玩家
+            // 当前坐标，换装那一刻之后玩家只要一走，预览就不会被落在原地（旧行为等价于"钉死不动"）。
+            if (_bridge == null || _tf == null)
+            {
+                return;
+            }
+
+            float2 pos = _bridge.GetPlayerPosition();
+            for (int i = 0; i < _tf.Length; i++)
+            {
+                if (!_active[i])
+                {
+                    continue;
+                }
+                Vector3 p = _tf[i].position;
+                p.x = pos.x;
+                p.z = pos.y;
+                _tf[i].position = p;
+            }
         }
 
         private void EnsurePool()
@@ -246,6 +273,7 @@ namespace GameLogic.Battle.Feedback
             _mf = null;
             _mr = null;
             _active = null;
+            _bridge = null;
         }
     }
 }

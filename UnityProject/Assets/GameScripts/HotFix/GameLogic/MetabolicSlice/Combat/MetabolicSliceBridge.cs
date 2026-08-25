@@ -211,6 +211,12 @@ namespace GameLogic.MetabolicSlice.Combat
         /// <summary>story-010 J4：暴露 Environment 供指示器读取（只读，不可写）。</summary>
         internal WorldEnvironment GetEnvironment() => _environment;
 
+        /// <summary>供 <see cref="GameLogic.Battle.Feedback.WhiteboxComposeAimIndicator"/> 读取玩家实时世界坐标——
+        /// 该指示器 story-010b(J6) 曾把预览标记的落点硬编码成世界 (0,0) 简化实现，玩家不在原点时预览就飘在
+        /// 别处，跟角色完全脱节；改用真实 <see cref="SimBridge.PlayerPosition"/>（未绑定/未运行时退化为原点，
+        /// 与旧行为兼容，不会新增空引用风险）。</summary>
+        internal float2 GetPlayerPosition() => _sim != null ? _sim.PlayerPosition : float2.zero;
+
         /// <summary>story-004：沙盒累计伤害（自本局 <see cref="OnEnter"/> 起，只在 <see cref="Suppressed"/>
         /// 为真——即沙盒态——时累加，真实战斗不计入）。</summary>
         public float SandboxTotalDamage => _sandboxTotalDamage;
