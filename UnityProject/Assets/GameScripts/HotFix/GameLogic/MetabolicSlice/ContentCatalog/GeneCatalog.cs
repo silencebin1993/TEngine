@@ -25,9 +25,9 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
         private static readonly Dictionary<string, (string DisplayName, string ArtId, string Description, Func<IContract> CreateContract)> _defs =
             new Dictionary<string, (string, string, string, Func<IContract>)>();
 
-        /// <summary>CATALOG §B 24 条，id/显示名/文案逐字取自设计表；CreateModule 用
-        /// ComposeEngine.Builtin.Modules 的一等字段模块组合（多步用 CompositeModule 打包），
-        /// 不新增美术（R6，ArtId 未登记进 SimVisualLibrary，落兜底表现）。</summary>
+        /// <summary>CATALOG-v3 §B1+§B2，24 条保留 + 12 条 story-004 新增 = 36 条，id/显示名/文案逐字取自
+        /// 设计表；CreateModule 用 ComposeEngine.Builtin.Modules 的一等字段模块组合（多步用 CompositeModule
+        /// 打包），不新增美术（R6，ArtId 未登记进 SimVisualLibrary，落兜底表现）。</summary>
         private static readonly Dictionary<string, (string DisplayName, string ArtId, string Description, Func<IModule> CreateModule)> _moduleDefs =
             new Dictionary<string, (string, string, string, Func<IModule>)>
             {
@@ -98,6 +98,53 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
                 // Required：低血爆炸，禁即死冻结（R4）。只贴 ExplodeOnHit+Tag，是否"残血"由宿主结算时判定。
                 ["gene_apoptosis"] = ("凋亡信号", "gene/apoptosis", "需要器官。改装：残血敌人被打中会爆开，不是冻死。",
                     () => new CompositeModule("gene_apoptosis_mod", "凋亡信号", new ExplodeOnHit(), new TagAttach("Apoptosis"))),
+
+                // organ-gene-rebalance-v3 story-004：CATALOG-v3 §B2 新增 18 条中本 story 落地的 12 条，
+                // 全部限定为"仅 Composite 现有 Module"（preflight R9 已把 Ripple/Rhythm/Drift/Capillary/
+                // Catalyst/Weave 6 个新 Module 类 + gene_drift/gene_capillary 排除到本 story 之外，
+                // 留给 005+ 落地新 Module 后再接线）。不新建任何 IModule 实现类。
+                ["gene_fan"] = ("扇形", "gene/fan", "需要器官。改装：让扇面变宽或变窄。",
+                    () => new SpreadModule(60f)),
+                // 涡旋＝Pull（既有 gene_pull 同款字段）+ OrbitSpin（既有 gene_flagella 同款字段）叠加，
+                // "边转边吸"不新增字段。
+                ["gene_vortex"] = ("涡旋", "gene/vortex", "需要器官。改装：边转边把敌人往里吸。",
+                    () => new CompositeModule("gene_vortex_mod", "涡旋", new PullModule(0.6f), new OrbitSpin(90f))),
+                // 油/糖/酸/霜四条膜基因同款 Linger+TagAttach 骨架（同 gene_tide 的 Linger+Wet），Tag 名对齐
+                // EnvironmentReactionCatalog 已注册的 "Oil"（env_oil_fire_burn），糖/酸/霜三个反应规则留给
+                // 后续化学 story 接线，本 story 只扩 Tag 入口（CATALOG §E）。
+                ["gene_oilfilm"] = ("油膜", "gene/oilfilm", "需要器官。改装：命中处留下油膜，遇火会烧起来。",
+                    () => new CompositeModule("gene_oilfilm_mod", "油膜", new LingerModule(3f), new TagAttach("Oil"))),
+                ["gene_sugarfilm"] = ("糖膜", "gene/sugarfilm", "需要器官。改装：命中处留下糖膜，遇酸会变粘滞。",
+                    () => new CompositeModule("gene_sugarfilm_mod", "糖膜", new LingerModule(3f), new TagAttach("SugarFilm"))),
+                ["gene_acidfilm"] = ("酸蚀膜", "gene/acidfilm", "需要器官。改装：落点变成酸坑，持续腐蚀。",
+                    () => new CompositeModule("gene_acidfilm_mod", "酸蚀膜", new LingerModule(3f), new TagAttach("Acid"))),
+                // R4 禁冻死：Tag 只叫 "Frozen" 做后续"碎裂加伤"化学反应的入口，霜膜本身不写任何减速/致死字段。
+                ["gene_frostfilm"] = ("霜膜", "gene/frostfilm", "需要器官。改装：命中处结一层霜（不致死），配合物理命中更脆。",
+                    () => new CompositeModule("gene_frostfilm_mod", "霜膜", new LingerModule(3f), new TagAttach("Frozen"))),
+                // 谐振＝Echo（残影再打一次）+ Scatterer（多打几份，随 Mult 走高）叠加，"残影次数随 Count 增"
+                // 用既有 Count 字段近似表达，不新建"按 Count 缩放 Echo 次数"的专用字段。
+                ["gene_harmonic"] = ("谐振", "gene/harmonic", "需要器官。改装：命中点按节奏多打几次，打得越散回响越多。",
+                    () => new CompositeModule("gene_harmonic_mod", "谐振", new EchoModule(0.4f), new Scatterer(3))),
+                // 膜反弹＝Bounce（同 gene_mirror 的反弹字段）+ 贴 Tag 标出"撞墙"这一具体来源，与 gene_mirror
+                // 的 Tag "Mirror" 区分开，供宿主结算时判定是否额外记一次撞墙伤害。
+                ["gene_membrane"] = ("膜反弹", "gene/membrane", "需要器官。改装：撞墙会弹回来，还带一下伤。",
+                    () => new CompositeModule("gene_membrane_mod", "膜反弹", new BounceModule(2), new TagAttach("WallImpact"))),
+                // 迟绽＝Echo（Delay 落点二次结算）+ Split（命中分裂），"延迟后再分裂"用这两个既有字段直接拼。
+                ["gene_bloomlate"] = ("迟绽", "gene/bloomlate", "需要器官。改装：先飞一会儿，稍后才裂开。",
+                    () => new CompositeModule("gene_bloomlate_mod", "迟绽", new EchoModule(0.6f), new SplitModule(3))),
+                // 抛投：Preflight R9 判定"Composite 或 ArcModule"，本 story 明确不建新 ArcModule，改用既有
+                // BallisticsModule 的 Gravity 旋钮走抛物线弹道，不新增字段/类。
+                ["gene_arc"] = ("抛投", "gene/arc", "需要器官。改装：攻击像抛物线一样落下。",
+                    () => new CompositeModule("gene_arc_mod", "抛投", new BallisticsModule(speed: 1f, lifetime: 1.2f, gravity: 4f))),
+                // 磁聚：真正的"多段弹道向一点收敛"是 005+ 新 MagnetModule 的范围，本 story 按 Required 只做
+                // 弱化占位——复用既有 PullModule 给一个比 gene_vortex 更弱的单向牵引，贴 Tag "Magnet" 方便
+                // 后续替换成专用 Module 时定位。
+                ["gene_magnet"] = ("磁聚", "gene/magnet", "需要器官。改装：弹道边飞边被拉向一点（弱化占位，等专用磁聚机制）。",
+                    () => new CompositeModule("gene_magnet_mod", "磁聚", new PullModule(0.3f), new TagAttach("Magnet"))),
+                // 散播：preflight R9 已定案，复用 gene_lyso 的 ExplodeOnHit 触发时机 + gene_tide 的 Linger
+                // 落点留坑，不新建 Seed 类。
+                ["gene_scatterseed"] = ("散播", "gene/scatterseed", "需要器官。改装：命中会在旁边炸出小坑。",
+                    () => new CompositeModule("gene_scatterseed_mod", "散播", new ExplodeOnHit(), new LingerModule(2f))),
             };
 
         public static Func<IContract> Get(string id) => _defs.TryGetValue(id, out var d) ? d.CreateContract : null;
@@ -121,10 +168,10 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
         /// <summary>Contract 基因全集，本 story 起恒为空集合（保留 API 形状供调用方兼容）。</summary>
         public static IEnumerable<string> AllIds => _defs.Keys;
 
-        /// <summary>Module 基因全集，CATALOG §B 24 条。</summary>
+        /// <summary>Module 基因全集，CATALOG-v3 §B1+§B2 36 条（24 保留 + story-004 新增 12）。</summary>
         public static IEnumerable<string> AllModuleIds => _moduleDefs.Keys;
 
-        /// <summary>Contract + Module 全集，本 story 起等价于 <see cref="AllModuleIds"/>（24 条）。</summary>
+        /// <summary>Contract + Module 全集，本 story 起等价于 <see cref="AllModuleIds"/>（36 条）。</summary>
         public static IEnumerable<string> AllGeneIds => _defs.Keys.Concat(_moduleDefs.Keys);
     }
 }

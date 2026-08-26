@@ -36,9 +36,11 @@ namespace GameLogic.MetabolicSlice.DebugTools
 
         public static (bool Pass, string Reason) Run()
         {
-            if (GeneCatalog.AllModuleIds.Count() != 24)
+            // story-004 起总数涨到 36（24 保留 + 12 新增，见 GeneWave1SmokeReport），本报告只关心
+            // KeptGeneIds 这 24 条本身没丢/没被顶替，不再断言字典总条数恒为 24。
+            if (GeneCatalog.AllModuleIds.Count() < KeptGeneIds.Length)
             {
-                return (false, $"GeneCatalog 应为 24 条 Module 基因，实际 {GeneCatalog.AllModuleIds.Count()}");
+                return (false, $"GeneCatalog 应至少含 {KeptGeneIds.Length} 条保留 Module 基因，实际 {GeneCatalog.AllModuleIds.Count()}");
             }
 
             var engine = new Engine();
