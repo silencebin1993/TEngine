@@ -1,0 +1,67 @@
+# 一次性全任务指令（给 Claude Code 的完整对话底稿）
+
+先读 production/qa/cell-demo-optimization-plan.md（设计规格书）和 CLAUDE.md，然后按本文一次性完成任务一~六，全部实现完再统一验收，中途不要停下来问我问题。任务二/三的设计决策已在本文件兜底，遇到与代码实际不符处按最贴近方案执行并记录到证据目录。
+
+## 任务一：器官重新分类（方案②）
+按规格书「三、任务一」执行 4 个文件改动点：
+- CodexRegistry.cs：新增 AllCarrierOrganelleEntries()（IsCarrier==true）与 AllMetabolicModuleEntries()（IsCarrier==false），保留 AllOrganelleEntries() 不动。
+- BattleOverlayUIToolkit.cs：CodexCategory 枚举在 Organelle 后加 MetabolicModule；CodexTabNodeNames 在 "TabOrganelle" 后加 "TabModule"；RefreshCodex 里 Organelle 分支改用 AllCarrierOrganelleEntries()，新增 MetabolicModule 分支。
+- 两份 BattleOverlays.uxml（Art 与 Raw 目录）：CodexTabBar 内 TabOrganelle 后插入 `<ui:Button name="TabModule" text="代谢模块" class="codex-tab" />`。
+- BattleCarrierUIToolkit.cs：RefreshCarrierListAllCatalog 拆两组渲染，先"载体器官"+AllCarrierOrganelleEntries()，再"代谢模块"+AllMetabolicModuleEntries()。
+
+## 任务二：3D 表现差异化
+在 SimRenderer.cs 扩展 VisualId→SimVisual 注册、CellContentSeed.cs 分配 VisualId。默认造型映射表（程序化 Mesh 组合体，零美术依赖，保证两两可区分）：
+
+| ArtId | 造型 |
+|---|---|
+| org/mito | 胶囊体 + 表面短嵴棒（线粒体内嵴） |
+| org/chloro | 压扁圆盘 + 边缘凸点 |
+| org/vacuole | 大球套小核球 |
+| org/golgi | 3 层弧形薄盘堆叠 |
+| org/merge | 双球相接 |
+| org/lens | 双凸透镜（两半球拼合） |
+| org/scatter | 十字交叉双胶囊 |
+| org/swell | 球 + 外圈放大环 |
+| org/flagella | 球 + 赤道环绕鞭毛（细长胶囊） |
+| org/lyso | 短刺多刺球 |
+| org/perox | 球 + 顶部火苗锥 |
+| org/aqua | 球 + 水滴形挂件 |
+| org/ion | 球 + 锯齿环（闪电符号） |
+| org/radiator | 扇形薄片组 |
+| org/breaker | 环 + 中心闸板 |
+| org/synapse | 球 + 小球簇（突触泡） |
+| org/emitter | 锥形喷口 + 底座 |
+| org/cilia | 球 + 顶部长鞭毛 |
+| org/spine | 长刺多刺球 |
+| org/slime | 球 + 半透明外壳 |
+| org/receptor | 球 + Y 形触手 |
+| org/insulate | 横置管道 |
+| org/valve | 圆环 + 中心瓣 |
+| org/filter | 管道 + 筛网格 |
+
+基元（能量/质/光/热）用基础形状区分：球/立方/菱形/四面体。玩家 Carrier 随装配变化：装备 emitter 时背部锥形喷口，装备 cilia 时前端鞭毛；挂载基因时附加对应挂件（刺/泡/触手等）。验收：沙盒一键生成全部原型对比台，同屏截图两两可辨。
+
+## 任务三：召唤机制
+做成技能卡/基因模块（不进 carrier 器官集，避免破坏任务一的分类）：
+- 3 种召唤物：孢子仆从 / 噬菌体 / 菌丝体。
+- 触发：新增召唤技能卡。CD 12s、耗能 25、场上限 3。
+- 孢子仆从：自动索敌最近敌人，索敌半径 8m，攻速 6/s，伤害 3，血量 20。
+- 噬菌体：追踪并吸附目标后爆炸，伤害 15，范围 2m。
+- 菌丝体：原地生长，范围减速 20% + 持续伤害 2/s。
+- 生成：作为独立 Sim 单元（复用 SimRenderer VisualId 体系，新增召唤物 visual id）。3D：孢子=球+短芽、噬菌体=蝌蚪形、菌丝体=扇形丝网。
+
+## 任务四：UI 重设计
+按规格书「六、任务四」：新建 BattleSandboxUIToolkit.cs + BattleSandboxUI.uxml，三列 flex 自适应不写死宽度，文字 white-space:normal 允许换行；数据/逻辑全部复用 SandboxAssembler.Compose、SandboxAssembler.OverridesFromEvent、LookDevFixtures.All、FireSandbox 的 ApplyEvent、Update 自动连发计时（迁到新控制器）；CellDebugHud 沙盒入口改为唤起新面板；旧 IMGUI 沙盒代码保留为对照（默认关闭）。
+
+## 任务五：Tooltip
+按规格书「七、任务五」：只改 BattleOverlayUIToolkit.AddCodexRow（约 :752）给 row 注册 PointerEnterEvent/PointerLeaveEvent，新增私有静态 BuildCodexTooltip 拼接 名称/描述/extra/来源，复用 ShowTooltip/HideTooltip。未揭示条目也允许出"尚未遭遇"提示。
+
+## 任务六：整体验收
+以上全部完成且零编译错误后：manage_editor play + read_console 确认零 Error；逐项 manage_scene screenshot；回归原功能（移动/吞噬/技能/卡牌/商店/图鉴/暂停）无回退。截图分别存 production/qa/evidence/task1-organelle-reclassify/、task2-3d-differentiation/、task3-summon/、task4-ui-redesign/、task5-tooltip/、task6-final/。
+
+## 统一约束
+1. 遵守 CLAUDE.md（任务分级、tengine-dev skill、证据留证）。
+2. 每改完一个文件 read 确认编译无错误，行号以实际为准。
+3. 任一项"看得到/验得出/不破坏"不达标就修到达标，不进入下一项。
+4. 截图严禁写入 Assets/Screenshots/。
+5. 全流程在同一个会话里连续完成，不要中途停下等我答复。

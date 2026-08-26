@@ -1,0 +1,9 @@
+先读 production/qa/cell-demo-optimization-plan.md 这份设计规格书，然后严格按规格书一次性完成任务一（器官重新分类，方案②）、任务四（沙盒/木桩迁 UI Toolkit）、任务五（图鉴 Tooltip），全部改完再统一验收，中途不要停下来问我。
+
+约束：
+1) 严格遵守 CLAUDE.md（任务分级、tengine-dev skill、证据留证）；
+2) 每改完一个文件先确认编译无错误；
+3) 全部改完后用 Unity MCP manage_editor play + read_console 确认零 Error，再逐项 manage_scene screenshot 验收；
+4) 截图存 production/qa/evidence/ 对应任务目录；
+5) 任一项"看得到/验得出/不破坏"不达标就修到达标为止；
+6) 任务四里"旧 IMGUI 沙盒代码保留还是删除"——按 CLAUDE.md 惯例保留为对照入口（默认关闭）。
