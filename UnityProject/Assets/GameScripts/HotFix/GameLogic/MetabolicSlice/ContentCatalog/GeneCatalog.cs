@@ -31,8 +31,10 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
         private static readonly Dictionary<string, (string DisplayName, string ArtId, string Description, Func<IModule> CreateModule)> _moduleDefs =
             new Dictionary<string, (string, string, string, Func<IModule>)>
             {
+                // organ-gene-rebalance-v3 story-003：org_taxis 退役（preflight R8），其 Homing 强度
+                // 0.9f 上调本基因至 0.85f 承接（非满值 0.9，Preflight 定的折中，见 story-003 Required 2）。
                 ["gene_taxis"] = ("趋化导引", "gene/taxis", "需要器官。改装：攻击会拐向敌人。",
-                    () => new HomingModule(0.6f)),
+                    () => new HomingModule(0.85f)),
                 ["gene_spindle"] = ("纺锤分裂", "gene/spindle", "需要器官。改装：一次打出更多、更散。",
                     () => new CompositeModule("gene_spindle_mod", "纺锤分裂", new Scatterer(2), new SpreadModule(30f))),
                 ["gene_elastic"] = ("弹性壁", "gene/elastic", "需要器官。改装：撞边或撞敌会弹。",
