@@ -192,7 +192,10 @@ namespace GameLogic
             if (_presetList != null)
             {
                 _presetList.Clear();
-                IReadOnlyList<LookDevFixture> fixtures = LookDevFixtures.All;
+                // organ-gene-rebalance-v3 story-008 Required 4：原 7 组 LookDev 保留 + 追加 10 组 v3
+                // 预设模板（V3PresetFixtures），自由装配多选面板逻辑不受影响，同一份按钮生成代码。
+                var fixtures = new List<LookDevFixture>(LookDevFixtures.All);
+                fixtures.AddRange(V3PresetFixtures.All);
                 for (int i = 0; i < fixtures.Count; i++)
                 {
                     LookDevFixture fixture = fixtures[i];

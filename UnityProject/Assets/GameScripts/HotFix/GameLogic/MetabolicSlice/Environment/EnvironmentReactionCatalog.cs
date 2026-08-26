@@ -43,6 +43,14 @@ namespace GameLogic.MetabolicSlice.Environment
                     return next;
                 },
                 "先铺油再点火 -> 燃烧区：evt.Burn 增加、打上 Burning，留 BurningGround 残留（GDD §1.6 例2）"));
+
+            // organ-gene-rebalance-v3 story-008 踩坑记录：曾尝试在此追加 Shock+Wet/Frozen+Physical/
+            // Acid+SugarFilm 3 条，经 execute_code 实测发现 ComposeEngine.Builtin.Catalog.ReactionCatalog.
+            // RegisterDefaults 已注册等价的 8 条内置反应（rx_shock_wet/frozen_physical_to_shatter/
+            // rx_acid_sugar 等，MetabolicSliceBridge 构造时两个 Register 都调用），Pipeline.HeatSettleAndReactions
+            // 按"初始 tag 集合一次性匹配全部规则"执行——追加同 tag 组合的新规则会与内置规则同批触发，
+            // 造成 Damage 二次叠乘等重复结算 bug，故不重复注册，8 条 Tag 涌现断言直接跑内置表（见
+            // EmergenceSmoke.cs 注释）。
         }
     }
 }
