@@ -12,7 +12,7 @@ namespace BinGames.EditorTools.FeatureArt
     {
         static readonly string[] SummonKeys = { "spore", "phage", "mycelium" };
         static readonly string[] ShapeRoles = { "projectile", "muzzle", "hit", "explode" };
-        static readonly HashSet<string> SyncedDomains = new HashSet<string> { "organ", "shape", "summon", "player" };
+        static readonly HashSet<string> SyncedDomains = new HashSet<string> { "organ", "shape", "summon", "player", "enemy" };
 
         /// <summary>返回新增槽数量；已存在槽的 retired 标记就地更新。</summary>
         public static int Sync(FeatureArtCatalogData data)
@@ -59,6 +59,7 @@ namespace BinGames.EditorTools.FeatureArt
             AddShapeSlots(list);
             AddSummonSlots(list);
             AddPlayerSlots(list);
+            AddEnemySlots(list);
             return list;
         }
 
@@ -183,6 +184,33 @@ namespace BinGames.EditorTools.FeatureArt
                 package = "",
                 retired = false,
             });
+        }
+
+        /// <summary>story-005 R10：enemy 域，16 条敌人 VisualId 族——复用
+        /// <see cref="FeatureArtVisualBinder.EnemyVisualFamilies"/> 同一份数据源，不在 Editor 侧另抄一份表。
+        /// 多个 Luban TbCellEnemy 行共享同一个 VisualId，槽位按这 16 个建，不按 Luban EnemyId 建。</summary>
+        static void AddEnemySlots(List<FeatureArtSlot> list)
+        {
+            foreach (var family in FeatureArtVisualBinder.EnemyVisualFamilies)
+            {
+                list.Add(new FeatureArtSlot
+                {
+                    id = $"enemy.{family.Key}.mesh",
+                    domain = "enemy",
+                    key = family.Key,
+                    role = "",
+                    bindKind = "InstancedMesh",
+                    titleZh = $"敌人 · {family.TitleZh}",
+                    purpose = "该 VisualId 族敌人的外形；多个具体敌人共享同一视觉族，不必每个敌人单独建模。",
+                    howTo = $"Prefab 放到 Raw/Actor/Enemy/，文件名 enemy_{family.Key}；单 MeshFilter；可换色/缩放复用，精英/首领已有独立 ScaleMul，不必再做超大模型。",
+                    expected = "该族任意敌人生成后外形换为该网格；空槽维持现有白模（球体+颜色区分）。",
+                    constraints = "面数按万敌实例化预算控制；禁止逐敌人 Instantiate。",
+                    folderHint = "Assets/GameRes/Raw/Actor/Enemy",
+                    location = "",
+                    package = "",
+                    retired = false,
+                });
+            }
         }
 
         static string RoleZh(string role)

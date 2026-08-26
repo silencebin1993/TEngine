@@ -63,6 +63,11 @@ namespace GameLogic.Stage.CellStage
         private CarrierBodyVisualPresenter _carrierBodyVisual;
 
         private SimRenderer _renderer;
+        /// <summary>story-005：持有 BuildVisuals() 返回的同一个数组引用，供 ApplyFeatureArtVisualsAsync
+        /// 原地覆盖 Mesh/Material（SimRenderer.Initialize 只存引用不复制，见 preflight-decisions R3）。</summary>
+        private SimVisual[] _visuals;
+        /// <summary>story-005：追踪本次 Enter 期间加载的功能美术 Prefab/Material 资源，Exit 时配对释放。</summary>
+        private readonly List<UnityEngine.Object> _loadedArtAssets = new();
         private Camera _camera;
         private bool _cameraVerifyMode;
         private Vector3 _cameraFollowOffset = DefaultCameraOffset;
@@ -171,8 +176,8 @@ namespace GameLogic.Stage.CellStage
             // 那次调用时 _director/_timeline/_metabolicBridge 还是旧实例甚至 null，Suppressed 白设。
             // 这里按 _sandboxMode 重新落一次，保证不管调用时序如何，新建的模块实例总能拿到正确的抑制态。
             ApplySandboxState();
-            FeatureArtResolver.LoadAsync().Forget();
             SetupSim();
+            ApplyFeatureArtVisualsAsync().Forget();
             GrantStarterAbilities();
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -356,7 +361,195 @@ namespace GameLogic.Stage.CellStage
             WhiteboxGroundAnchor.Spawn(cfg.ArenaHalfExtent);
 
             _renderer = new SimRenderer();
-            _renderer.Initialize(BuildVisuals(), cfg.UnitCapacity);
+            _visuals = BuildVisuals();
+            _renderer.Initialize(_visuals, cfg.UnitCapacity);
+        }
+
+        /// <summary>
+        /// 功能美术运行时覆盖（story-005）：加载完 catalog 后依次处理 player/organ/summon/enemy
+        /// 四类槽位，原地改写 <see cref="_visuals"/> 数组元素——<c>SimVisual</c> 是 struct 但
+        /// <c>SimVisual[]</c> 是引用类型数组，<see cref="SimRenderer"/> 只存了这个数组的引用（不复制），
+        /// 所以这里 <c>arr[i].Mesh = x</c> 原地写完，下一帧 <see cref="SimRenderer.Draw"/> 自动读到新值，
+        /// 不需要任何新增 SimRenderer/AOT 公共方法。<see cref="_visuals"/> 判空贯穿每一步 await 之后——
+        /// Exit() 可能在任意一次 await 期间把它置 null（阶段切出竞态防护，见 Exit()）。
+        /// </summary>
+        private async UniTaskVoid ApplyFeatureArtVisualsAsync()
+        {
+            await FeatureArtResolver.LoadAsync();
+            if (_visuals == null)
+            {
+                return;
+            }
+
+            await ApplyPlayerChassisSlots();
+            if (_visuals == null)
+            {
+                return;
+            }
+
+            await ApplyOrganSlots();
+            if (_visuals == null)
+            {
+                return;
+            }
+
+            await ApplySummonSlot("summon.spore.mesh", ArtBinding.FeatureArtVisualBinder.SummonSporeVisualId);
+            if (_visuals == null)
+            {
+                return;
+            }
+            await ApplySummonSlot("summon.phage.mesh", ArtBinding.FeatureArtVisualBinder.SummonPhageVisualId);
+            if (_visuals == null)
+            {
+                return;
+            }
+            await ApplySummonSlot("summon.mycelium.mesh", ArtBinding.FeatureArtVisualBinder.SummonMyceliumVisualId);
+            if (_visuals == null)
+            {
+                return;
+            }
+
+            await ApplyEnemySlots();
+        }
+
+        /// <summary>(a) player：player.chassis.mesh 覆盖 <c>VisualIdForArtId("carrier/base")</c> 下标
+        /// （不是数组下标 0——那只是敌人占位段的玩家占位，会被 CarrierBodyVisualPresenter 每帧轮询覆盖回去，
+        /// 见 preflight-decisions 已核实事实）；player.chassis.material 要求支持 GPU Instancing 才覆盖。</summary>
+        private async UniTask ApplyPlayerChassisSlots()
+        {
+            if (FeatureArtResolver.TryGetSlot("player.chassis.mesh", out ArtBinding.FeatureArtSlot meshSlot)
+                && !string.IsNullOrEmpty(meshSlot.location))
+            {
+                ArtBinding.FeatureArtVisualBinder.MeshLoadResult result =
+                    await ArtBinding.FeatureArtVisualBinder.TryLoadInstancedMesh(meshSlot.location, _loadedArtAssets);
+                if (_visuals == null)
+                {
+                    return;
+                }
+                if (result.Ok)
+                {
+                    int vid = VisualIdForArtId("carrier/base");
+                    if (vid >= 0)
+                    {
+                        _visuals[vid].Mesh = result.Mesh;
+                        if (result.Material != null)
+                        {
+                            _visuals[vid].Material = result.Material;
+                        }
+                    }
+                }
+            }
+
+            if (FeatureArtResolver.TryGetSlot("player.chassis.material", out ArtBinding.FeatureArtSlot matSlot)
+                && !string.IsNullOrEmpty(matSlot.location))
+            {
+                ArtBinding.FeatureArtVisualBinder.MaterialLoadResult result =
+                    await ArtBinding.FeatureArtVisualBinder.TryLoadMaterialOverride(matSlot.location, _loadedArtAssets);
+                if (_visuals == null)
+                {
+                    return;
+                }
+                if (result.Ok)
+                {
+                    int vid = VisualIdForArtId("carrier/base");
+                    if (vid >= 0)
+                    {
+                        _visuals[vid].Material = result.Material;
+                    }
+                }
+            }
+        }
+
+        /// <summary>(b) organ：遍历 OrganelleCatalog.All，跳过退役/无 ArtId，查 organ.{id}.mesh 槽覆盖。</summary>
+        private async UniTask ApplyOrganSlots()
+        {
+            foreach (var kv in GameLogic.MetabolicSlice.ContentCatalog.OrganelleCatalog.All)
+            {
+                var def = kv.Value;
+                if (def.IsRetired || def.ArtId == null)
+                {
+                    continue;
+                }
+                if (!FeatureArtResolver.TryGetSlot($"organ.{def.Id}.mesh", out ArtBinding.FeatureArtSlot slot)
+                    || string.IsNullOrEmpty(slot.location))
+                {
+                    continue;
+                }
+
+                ArtBinding.FeatureArtVisualBinder.MeshLoadResult result =
+                    await ArtBinding.FeatureArtVisualBinder.TryLoadInstancedMesh(slot.location, _loadedArtAssets);
+                if (_visuals == null)
+                {
+                    return;
+                }
+                if (!result.Ok)
+                {
+                    continue;
+                }
+                int vid = VisualIdForArtId(def.ArtId);
+                if (vid < 0)
+                {
+                    continue;
+                }
+                _visuals[vid].Mesh = result.Mesh;
+                if (result.Material != null)
+                {
+                    _visuals[vid].Material = result.Material;
+                }
+            }
+        }
+
+        /// <summary>(c) summon：三个固定 VisualId（13/14/15），不走 VisualIdForArtId——那是沙盒对比台的
+        /// 冗余 100+ 段登记，不是运行时真正生成的召唤物用的下标（见 preflight-decisions 已核实事实）。</summary>
+        private async UniTask ApplySummonSlot(string slotId, int visualId)
+        {
+            if (!FeatureArtResolver.TryGetSlot(slotId, out ArtBinding.FeatureArtSlot slot)
+                || string.IsNullOrEmpty(slot.location))
+            {
+                return;
+            }
+
+            ArtBinding.FeatureArtVisualBinder.MeshLoadResult result =
+                await ArtBinding.FeatureArtVisualBinder.TryLoadInstancedMesh(slot.location, _loadedArtAssets);
+            if (_visuals == null || !result.Ok)
+            {
+                return;
+            }
+            _visuals[visualId].Mesh = result.Mesh;
+            if (result.Material != null)
+            {
+                _visuals[visualId].Material = result.Material;
+            }
+        }
+
+        /// <summary>(d) enemy：遍历 FeatureArtVisualBinder.EnemyVisualFamilies（16 条），查
+        /// enemy.{key}.mesh，VisualId 直接用表里的值。</summary>
+        private async UniTask ApplyEnemySlots()
+        {
+            foreach (var family in ArtBinding.FeatureArtVisualBinder.EnemyVisualFamilies)
+            {
+                if (!FeatureArtResolver.TryGetSlot($"enemy.{family.Key}.mesh", out ArtBinding.FeatureArtSlot slot)
+                    || string.IsNullOrEmpty(slot.location))
+                {
+                    continue;
+                }
+
+                ArtBinding.FeatureArtVisualBinder.MeshLoadResult result =
+                    await ArtBinding.FeatureArtVisualBinder.TryLoadInstancedMesh(slot.location, _loadedArtAssets);
+                if (_visuals == null)
+                {
+                    return;
+                }
+                if (!result.Ok)
+                {
+                    continue;
+                }
+                _visuals[family.VisualId].Mesh = result.Mesh;
+                if (result.Material != null)
+                {
+                    _visuals[family.VisualId].Material = result.Material;
+                }
+            }
         }
 
         /// <summary>
@@ -1179,6 +1372,12 @@ namespace GameLogic.Stage.CellStage
             _renderer?.Dispose();
             _renderer = null;
             FeatureArtResolver.Unload();
+            foreach (UnityEngine.Object asset in _loadedArtAssets)
+            {
+                GameModule.Resource.UnloadAsset(asset);
+            }
+            _loadedArtAssets.Clear();
+            _visuals = null;
             WhiteboxObstacleVisual.Dispose();
             WhiteboxGroundAnchor.Dispose();
 

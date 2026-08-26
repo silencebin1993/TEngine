@@ -176,6 +176,10 @@ namespace BinGames.Sim
                 "org/scatter", "org/swell", "org/flagella", "org/lyso", "org/perox", "org/aqua",
                 "org/ion", "org/radiator", "org/breaker", "org/synapse", "org/emitter", "org/cilia",
                 "org/spine", "org/slime", "org/receptor", "org/insulate", "org/valve", "org/filter",
+                // combat-identity-rework 新增的攻击器官：未登记美术前落 default: SphereUnit() 兜底
+                // （story-005 R2，只追加字符串，不改 Compose() 的 switch 本体，零几何回归）。
+                "org/lensbeam", "org/enzyme", "org/osmotic", "org/orbitcilia", "org/bud", "org/mycelium",
+                "org/pseudopod", "org/drill", "org/wave", "org/phago",
                 "prim/energy", "prim/mass", "prim/light", "prim/heat",
                 "summon/spore", "summon/phage", "summon/mycelium",
                 "carrier/base", "carrier/emitter", "carrier/cilia",
