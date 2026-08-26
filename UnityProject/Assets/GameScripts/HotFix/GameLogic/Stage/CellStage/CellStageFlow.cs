@@ -1,7 +1,9 @@
 using System.Collections.Generic;
 using BinGames.Sim;
+using Cysharp.Threading.Tasks;
 using GameLogic.Ability;
 using GameLogic.Ability.Executors;
+using GameLogic.ArtBinding;
 using GameLogic.Battle;
 using GameLogic.Battle.Feedback;
 using GameLogic.Cards;
@@ -169,6 +171,7 @@ namespace GameLogic.Stage.CellStage
             // 那次调用时 _director/_timeline/_metabolicBridge 还是旧实例甚至 null，Suppressed 白设。
             // 这里按 _sandboxMode 重新落一次，保证不管调用时序如何，新建的模块实例总能拿到正确的抑制态。
             ApplySandboxState();
+            FeatureArtResolver.LoadAsync().Forget();
             SetupSim();
             GrantStarterAbilities();
 
@@ -1175,6 +1178,7 @@ namespace GameLogic.Stage.CellStage
 
             _renderer?.Dispose();
             _renderer = null;
+            FeatureArtResolver.Unload();
             WhiteboxObstacleVisual.Dispose();
             WhiteboxGroundAnchor.Dispose();
 
