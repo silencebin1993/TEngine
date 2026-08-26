@@ -12,6 +12,10 @@ namespace GameLogic.MetabolicSlice.DebugTools
     /// _sim.PlayerPosition（未 Begin 时恒为 float2.zero）与 _abilities.AimDirection，DamageArea 在
     /// 未 Running 时是 no-op——不影响探针捕获的圆心坐标本身，那是纯几何计算，不需要真正跑 SimWorld。
     /// 手法同 <see cref="ComposeCastSignalSmokeReport"/>：纯 C#，execute_code 直接调 Run()，不进 Play。
+    ///
+    /// story-006：底盘分类改读 <see cref="HitEvent.AttackPattern"/>（真实 Actuator 产出的事件里 Shape 与
+    /// Pattern 恒配套），故手搭的合成事件必须同时给 AttackPattern，否则默认值 Projectile 会让 Bridge
+    /// 误判成 Projectile 底盘而不是这里想测的 Melee。
     /// </summary>
     public static class MeleeDirectionSmokeReport
     {
@@ -25,7 +29,7 @@ namespace GameLogic.MetabolicSlice.DebugTools
 
             // ① 前方判定生效：朝 +X 挥一次，圆心应在 PlayerPosition(0,0) 前方 MeleeFrontOffset 处，不再恒等于原点。
             abilities.AimDirection = new float2(1f, 0f);
-            if (!bridge.ApplyEvent(new HitEvent { Damage = 10f, Scale = 1f, Count = 1f, Shape = "Melee" }))
+            if (!bridge.ApplyEvent(new HitEvent { Damage = 10f, Scale = 1f, Count = 1f, Shape = "Melee", AttackPattern = AttackPattern.Melee }))
             {
                 return (false, "① Melee 单发 ApplyEvent 返回 false");
             }
@@ -46,7 +50,7 @@ namespace GameLogic.MetabolicSlice.DebugTools
 
             // ② 换方向后圆心应随之变化（不是只读一次缓存）。
             abilities.AimDirection = new float2(0f, 1f);
-            if (!bridge.ApplyEvent(new HitEvent { Damage = 10f, Scale = 1f, Count = 1f, Shape = "Melee" }))
+            if (!bridge.ApplyEvent(new HitEvent { Damage = 10f, Scale = 1f, Count = 1f, Shape = "Melee", AttackPattern = AttackPattern.Melee }))
             {
                 return (false, "② 换方向后 Melee 单发 ApplyEvent 返回 false");
             }
@@ -60,7 +64,7 @@ namespace GameLogic.MetabolicSlice.DebugTools
             // ③ 多发（hits=3）应展开在 baseDir 前方 ±ArcHalfAngleDeg（40°）锥形内——这是"非目标不受击"的
             // 几何基础：锥外/正后方的点到任意圆心的距离都应大于半径，不会被本次事件覆盖。
             abilities.AimDirection = new float2(1f, 0f);
-            if (!bridge.ApplyEvent(new HitEvent { Damage = 10f, Scale = 1f, Count = 3f, Shape = "Melee" }))
+            if (!bridge.ApplyEvent(new HitEvent { Damage = 10f, Scale = 1f, Count = 3f, Shape = "Melee", AttackPattern = AttackPattern.Melee }))
             {
                 return (false, "③ Melee 三发 ApplyEvent 返回 false");
             }

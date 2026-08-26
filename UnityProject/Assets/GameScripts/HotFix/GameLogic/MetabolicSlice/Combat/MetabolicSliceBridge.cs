@@ -347,6 +347,237 @@ namespace GameLogic.MetabolicSlice.Combat
             TEngine.Log.Info($"[MetabolicSliceBridge] Tick 产出 {events.Count} 个 HitEvent，已应用 {consumed} 个");
         }
 
+        /// <summary>story-006（EMERGENCE §2）：5 类底盘的最小分类，只读 <see cref="HitEvent.AttackPattern"/>
+        /// （链尾攻击模块写死、基因禁止改写，见 DESIGN §3/§4）与 <see cref="HitEvent.AuraRadius"/>，
+        /// 禁止按 organId 分支。<see cref="Legacy"/> 承接 Beam/Orbit/Wave/Chain/Boomerang 等不在
+        /// EMERGENCE §2 五类代表底盘范围内的既有 Pattern——原样保留迁移前行为，不纳入本 story 的
+        /// 落点重构范围，避免波及未要求变动的现役器官（org_lensbeam/org_orbitcilia/org_wave）。</summary>
+        private enum ChassisClass { Projectile, Melee, Field, Aura, Summon, Legacy }
+
+        private static ChassisClass ClassifyChassis(HitEvent evt)
+        {
+            if (evt.AuraRadius > 0f)
+            {
+                return ChassisClass.Aura;
+            }
+            switch (evt.AttackPattern)
+            {
+                case AttackPattern.Projectile:
+                    return ChassisClass.Projectile;
+                case AttackPattern.Melee:
+                case AttackPattern.Cone:
+                case AttackPattern.Dash:
+                case AttackPattern.Thorns:
+                    return ChassisClass.Melee;
+                case AttackPattern.Pool:
+                case AttackPattern.Rain:
+                    return ChassisClass.Field;
+                case AttackPattern.SummonFollow:
+                case AttackPattern.SummonAnchor:
+                    return ChassisClass.Summon;
+                default:
+                    return ChassisClass.Legacy;
+            }
+        }
+
+        /// <summary>
+        /// story-006：EMERGENCE §2 Fallback 矩阵落地——Homing/Pierce/Bounce/Return/Trail/SplitOnHit/Linger
+        /// 这组"延迟落点"字段在 Projectile/Melee/Field/Aura 四类底盘上语义一致（弹道弯 vs 近战扑 vs 坑
+        /// drift vs 持续圈偏移，皆是"落点朝最近敌人挪一截再结算"的同一套数学），差异只在"初始落点怎么摆"
+        /// （飞多远、朝几个方向散、半径来源哪个字段）——因此统一走 <see cref="_pendingImpact"/> 复用
+        /// <see cref="TickPendingImpact"/> 已有的 Pierce/Bounce/SplitOnHit/Return/Trail/Linger 结算，不按
+        /// 底盘各写一份重复实现（也是 EMERGENCE §5"禁止 is/as 具体类型""禁止组合技分支"的同一精神：这里
+        /// 禁止的是"每个底盘重复分支硬编码"，判据仍只读 Pattern + 字段）。没有任何这些字段时
+        /// （<see cref="HasBallisticPrimitives"/> 为假）各底盘退回各自原有的即时结算，不改变已验证过的
+        /// 基线手感——这也是 org_enzyme（Field）之前从不落地 Linger 坑、org_osmotic（Aura）叠加基因字段
+        /// 全部失效的根因（Shape 只有 "Bolt"/"Melee" 两条分支能进落点结算）。Summon 底盘不参与本几何重构，
+        /// 按 EMERGENCE §2「Summon 无关基因」行维持原地命中，其 Homing/Trail 专属反馈见
+        /// <see cref="ApplySummon"/>/<see cref="ApplySummonTrail"/>。
+        /// </summary>
+        private void ApplyChassisDamage(HitEvent evt, ChassisClass chassis, int hits, float radius, float2 baseDir)
+        {
+            float2 origin = _sim.PlayerPosition;
+
+            if (chassis == ChassisClass.Summon)
+            {
+                for (int h = 0; h < hits; h++)
+                {
+                    DamageAreaPrimitive(origin, radius, evt.Damage, evt);
+                }
+                if (evt.ExplodeOnHit)
+                {
+                    DamageAreaPrimitive(origin, radius * ExplodeRadiusMult, evt.Damage * ExplodeDamageMult, evt);
+                }
+                return;
+            }
+
+            if (chassis == ChassisClass.Legacy)
+            {
+                if (evt.Shape == "Melee")
+                {
+                    _lastMeleeStrikeOrigins.Clear();
+                    LastMeleeStrikeRadius = radius;
+                    for (int h = 0; h < hits; h++)
+                    {
+                        float2 dir = MeleeFanDirection(baseDir, h, hits);
+                        float2 strikeOrigin = origin + dir * MeleeFrontOffset;
+                        _lastMeleeStrikeOrigins.Add(strikeOrigin);
+                        DamageAreaPrimitive(strikeOrigin, radius, evt.Damage, evt);
+                    }
+                }
+                else
+                {
+                    for (int h = 0; h < hits; h++)
+                    {
+                        DamageAreaPrimitive(origin, radius, evt.Damage, evt);
+                    }
+                }
+                if (evt.ExplodeOnHit)
+                {
+                    DamageAreaPrimitive(origin, radius * ExplodeRadiusMult, evt.Damage * ExplodeDamageMult, evt);
+                }
+                return;
+            }
+
+            bool ballistic = HasBallisticPrimitives(evt);
+
+            if (chassis == ChassisClass.Melee && !ballistic)
+            {
+                _lastMeleeStrikeOrigins.Clear();
+                LastMeleeStrikeRadius = radius;
+                for (int h = 0; h < hits; h++)
+                {
+                    float2 dir = MeleeFanDirection(baseDir, h, hits);
+                    float2 strikeOrigin = origin + dir * MeleeFrontOffset;
+                    _lastMeleeStrikeOrigins.Add(strikeOrigin);
+                    DamageAreaPrimitive(strikeOrigin, radius, evt.Damage, evt);
+                }
+                if (evt.ExplodeOnHit)
+                {
+                    DamageAreaPrimitive(origin, radius * ExplodeRadiusMult, evt.Damage * ExplodeDamageMult, evt);
+                }
+                return;
+            }
+
+            if (chassis == ChassisClass.Projectile && !ballistic)
+            {
+                // 真实 org_emitter 自带 BallisticsModule（Speed>0）恒为 ballistic=true，不会走这条分支；
+                // 这里只是给"没有任何弹道基元字段的合成 Projectile 事件"（如手搭的 execute_code 探针）
+                // 保留原有即时结算，避免平白多一帧延迟。
+                for (int h = 0; h < hits; h++)
+                {
+                    DamageAreaPrimitive(origin, radius, evt.Damage, evt);
+                }
+                if (evt.ExplodeOnHit)
+                {
+                    DamageAreaPrimitive(origin, radius * ExplodeRadiusMult, evt.Damage * ExplodeDamageMult, evt);
+                }
+                return;
+            }
+
+            if (chassis == ChassisClass.Aura && !ballistic)
+            {
+                DamageAreaPrimitive(origin, radius, evt.Damage, evt);
+                return;
+            }
+
+            if (chassis == ChassisClass.Field && !ballistic)
+            {
+                for (int h = 0; h < hits; h++)
+                {
+                    DamageAreaPrimitive(origin, radius, evt.Damage, evt);
+                }
+                if (evt.ExplodeOnHit)
+                {
+                    DamageAreaPrimitive(origin, radius * ExplodeRadiusMult, evt.Damage * ExplodeDamageMult, evt);
+                }
+                return;
+            }
+
+            // ── Projectile 恒走这条路（org_emitter 自带 Speed>0）；Melee/Field/Aura 只在叠了
+            // Homing/Pierce/Bounce/Return/Trail/SplitOnHit/Linger/Speed/Lifetime/Gravity 任一字段时才走 ──
+            float flightDistance = chassis switch
+            {
+                ChassisClass.Melee => MeleeFrontOffset,
+                ChassisClass.Aura => 0f,
+                _ => ImpactFlightDistance,
+            };
+            float duration = evt.Speed > 0f
+                ? ComposeMotionMath.MotionFlightDuration / MathF.Max(0.1f, evt.Speed)
+                : ComposeMotionMath.MotionFlightDuration;
+            if (evt.Gravity > 0f)
+            {
+                flightDistance /= 1f + evt.Gravity;
+            }
+            if (evt.Lifetime > 0f && evt.Lifetime < duration)
+            {
+                flightDistance *= evt.Lifetime / duration;
+                duration = evt.Lifetime;
+            }
+            duration = MathF.Max(duration, SecondaryImpactDelay);
+
+            if (chassis == ChassisClass.Melee)
+            {
+                _lastMeleeStrikeOrigins.Clear();
+                LastMeleeStrikeRadius = radius;
+            }
+
+            for (int h = 0; h < hits; h++)
+            {
+                float2 dir = chassis == ChassisClass.Melee
+                    ? MeleeFanDirection(baseDir, h, hits)
+                    : (evt.SpreadAngle > 0f ? ConeFanDirection(baseDir, h, hits, evt.SpreadAngle) : FanDirection(baseDir, h, hits));
+                float2 impactPos = origin + dir * flightDistance;
+                if (evt.Homing > 0f)
+                {
+                    float2? nearest = FindNearestHostile(origin);
+                    if (nearest.HasValue)
+                    {
+                        impactPos = math.lerp(impactPos, nearest.Value, evt.Homing);
+                    }
+                }
+                if (chassis == ChassisClass.Melee)
+                {
+                    _lastMeleeStrikeOrigins.Add(impactPos);
+                }
+                _pendingImpact.Add(new PendingImpact
+                {
+                    ImpactPos = impactPos,
+                    Radius = radius,
+                    Damage = evt.Damage,
+                    TimeLeft = duration,
+                    Duration = duration,
+                    Origin = origin,
+                    Direction = dir,
+                    Chain = evt.Chain,
+                    Pull = evt.Pull,
+                    PierceLeft = evt.Pierce > 0f ? Math.Max(0, (int)MathF.Round(evt.Pierce)) : 0,
+                    BounceLeft = evt.Bounce > 0f ? Math.Max(0, (int)MathF.Round(evt.Bounce)) : 0,
+                    Trail = evt.Trail,
+                    SplitOnHit = evt.SplitOnHit > 0f ? Math.Max(0, (int)MathF.Round(evt.SplitOnHit)) : 0,
+                    ReturnPending = evt.Return,
+                    Linger = evt.Linger,
+                    TickRate = evt.TickRate,
+                });
+            }
+
+            if (evt.ExplodeOnHit)
+            {
+                _pendingImpact.Add(new PendingImpact
+                {
+                    ImpactPos = origin + baseDir * flightDistance,
+                    Radius = radius * ExplodeRadiusMult,
+                    Damage = evt.Damage * ExplodeDamageMult,
+                    TimeLeft = duration,
+                    Duration = duration,
+                    Origin = origin,
+                    Direction = baseDir,
+                    Chain = evt.Chain,
+                    Pull = evt.Pull,
+                });
+            }
+        }
+
         /// <summary>
         /// story-004：把一个 HitEvent 的全部一等字段应用到战场，不再只消费 Damage。
         /// 独立于 <see cref="OnUpdate"/> 的 Tick 节奏，供 execute_code/DebugTools 直接传合成事件验证
@@ -356,28 +587,21 @@ namespace GameLogic.MetabolicSlice.Combat
         {
             bool applied = false;
 
-            if (evt.Damage > 0f && evt.AuraRadius > 0f)
-            {
-                // story-002：AuraRadius 是独立的伤害投放模式（持续圈罩玩家周围），与下方 Bolt/Melee
-                // 落点结算二选一——Aura 直接在玩家当前位置结算一次，下一次 Carrier tick（TickInterval）
-                // 再来一次，等效于"持续"（不新增每帧状态机，与既有 1.5s tick 节奏一致）。
-                float2 origin = _sim.PlayerPosition;
-                float auraRadius = evt.AuraRadius * MathF.Max(0.1f, evt.Scale);
-                DamageAreaPrimitive(origin, auraRadius, evt.Damage, evt);
-                applied = true;
-            }
-            else if (evt.Damage > 0f)
+            if (evt.Damage > 0f)
             {
                 int hits = Math.Max(1, (int)MathF.Round(evt.Count));
-                float radius = DamageAreaRadius * MathF.Max(0.1f, evt.Scale);
+                // organ-gene-rebalance-v3 story-006：底盘分类只读 evt.AttackPattern（链尾攻击模块写死，
+                // 基因禁止改写）+ evt.AuraRadius，禁止 organId 分支（见 ChassisClass 注释）。
+                ChassisClass chassis = ClassifyChassis(evt);
+                float radius = chassis == ChassisClass.Aura
+                    ? evt.AuraRadius * MathF.Max(0.1f, evt.Scale)
+                    : DamageAreaRadius * MathF.Max(0.1f, evt.Scale);
                 float2 baseDir = _abilities != null ? _abilities.AimDirection : DefaultForward;
-                // story-006：落点结算只重构 Bolt-tail（远程/AOE）链路；Melee-tail 的近战方向留给 007
-                // （EPIC Out of scope 明确排除"近战方向"），Melee 的 Count/Explode 组合维持旧行为不变。
-                bool useImpactSettlement = evt.Shape == "Bolt";
 
                 if (evt.Spin != 0f || evt.Orbit != 0f)
                 {
-                    // story-003：Spin/Orbit 命中改延迟到期采样点，而不是原地瞬时突发（D2/D4），不在本 story 改动范围。
+                    // story-003：Spin/Orbit 命中改延迟到期采样点，而不是原地瞬时突发（D2/D4）——底盘无关，
+                    // EMERGENCE §2「Orbit/鞭毛绕」行对 5 类底盘都定义了反馈，运动机制处处生效。
                     float2 origin = _sim.PlayerPosition;
                     for (int h = 0; h < hits; h++)
                     {
@@ -402,114 +626,11 @@ namespace GameLogic.MetabolicSlice.Combat
                         DamageAreaPrimitive(origin, radius * ExplodeRadiusMult, evt.Damage * ExplodeDamageMult, evt);
                     }
                 }
-                else if (useImpactSettlement && (hits > 1 || evt.ExplodeOnHit || HasBallisticPrimitives(evt)))
-                {
-                    // story-006 R5/Required 1,2,3：Count 多发 / Explode 改「发射→落点结算」，不再原地瞬时打
-                    // 玩家自己所在坐标；每发落点仍是 evt.Damage，Explode 附加量沿用原 0.5x/1.6x 系数，
-                    // 只挪到延迟到期后的落点，判定数值不变（不额外增减）。
-                    // story-002：单发但带 Homing/Pierce/Bounce/Return/Trail/SplitOnHit/Speed/Lifetime/Gravity
-                    // 的 Bolt 也必须走落点结算（这些字段只有落点结算路径消费），否则会退回下面的原地瞬时分支
-                    // 而让字段变成死数据（HasBallisticPrimitives 把这类单发也纳入本分支）。
-                    float2 origin = _sim.PlayerPosition;
-                    float duration = evt.Speed > 0f
-                        ? ComposeMotionMath.MotionFlightDuration / MathF.Max(0.1f, evt.Speed)
-                        : ComposeMotionMath.MotionFlightDuration;
-                    float flightDistance = ImpactFlightDistance;
-                    if (evt.Gravity > 0f)
-                    {
-                        // 弹道下坠：重力越大，落点越近（模拟提前坠地），不新增竖直维度。
-                        flightDistance /= 1f + evt.Gravity;
-                    }
-                    if (evt.Lifetime > 0f && evt.Lifetime < duration)
-                    {
-                        // 寿命封顶：飞行时间被砍短，落点距离按同一比例缩短，保持"提前失效"的观感一致。
-                        flightDistance *= evt.Lifetime / duration;
-                        duration = evt.Lifetime;
-                    }
-
-                    for (int h = 0; h < hits; h++)
-                    {
-                        float2 dir = evt.SpreadAngle > 0f
-                            ? ConeFanDirection(baseDir, h, hits, evt.SpreadAngle)
-                            : FanDirection(baseDir, h, hits);
-                        float2 impactPos = origin + dir * flightDistance;
-                        if (evt.Homing > 0f)
-                        {
-                            float2? nearest = FindNearestHostile(origin);
-                            if (nearest.HasValue)
-                            {
-                                impactPos = math.lerp(impactPos, nearest.Value, evt.Homing);
-                            }
-                        }
-                        _pendingImpact.Add(new PendingImpact
-                        {
-                            ImpactPos = impactPos,
-                            Radius = radius,
-                            Damage = evt.Damage,
-                            TimeLeft = duration,
-                            Duration = duration,
-                            Origin = origin,
-                            Direction = dir,
-                            Chain = evt.Chain,
-                            Pull = evt.Pull,
-                            PierceLeft = evt.Pierce > 0f ? Math.Max(0, (int)MathF.Round(evt.Pierce)) : 0,
-                            BounceLeft = evt.Bounce > 0f ? Math.Max(0, (int)MathF.Round(evt.Bounce)) : 0,
-                            Trail = evt.Trail,
-                            SplitOnHit = evt.SplitOnHit > 0f ? Math.Max(0, (int)MathF.Round(evt.SplitOnHit)) : 0,
-                            ReturnPending = evt.Return,
-                            Linger = evt.Linger,
-                            TickRate = evt.TickRate,
-                        });
-                    }
-
-                    if (evt.ExplodeOnHit)
-                    {
-                        _pendingImpact.Add(new PendingImpact
-                        {
-                            ImpactPos = origin + baseDir * flightDistance,
-                            Radius = radius * ExplodeRadiusMult,
-                            Damage = evt.Damage * ExplodeDamageMult,
-                            TimeLeft = duration,
-                            Duration = duration,
-                            Origin = origin,
-                            Direction = baseDir,
-                            Chain = evt.Chain,
-                            Pull = evt.Pull,
-                        });
-                    }
-                }
                 else
                 {
-                    // Melee-tail：story-007 R6 前方扇形多圆逼近，不再 hits 次同一坐标画圆——
-                    // 每个圆沿 baseDir 前方 ±ArcHalfAngleDeg 内展开，前移 MeleeFrontOffset（判定/视觉共用同一数）。
-                    // Bolt 单发无 Explode/无新基元字段（同落到这个 else 分支）维持原地瞬时结算，不受影响。
-                    float2 origin = _sim.PlayerPosition;
-                    if (evt.Shape == "Melee")
-                    {
-                        _lastMeleeStrikeOrigins.Clear();
-                        LastMeleeStrikeRadius = radius;
-                        for (int h = 0; h < hits; h++)
-                        {
-                            float2 dir = MeleeFanDirection(baseDir, h, hits);
-                            float2 strikeOrigin = origin + dir * MeleeFrontOffset;
-                            _lastMeleeStrikeOrigins.Add(strikeOrigin);
-                            DamageAreaPrimitive(strikeOrigin, radius, evt.Damage, evt);
-                        }
-                    }
-                    else
-                    {
-                        for (int h = 0; h < hits; h++)
-                        {
-                            DamageAreaPrimitive(origin, radius, evt.Damage, evt);
-                        }
-                    }
-
-                    if (evt.ExplodeOnHit)
-                    {
-                        // Melee-tail 的爆炸叠加仍原地结算（signal.Origin 同步不偏移，见 Presenter 侧注释），
-                        // 不纳入本 story 的前方偏移改动范围。
-                        DamageAreaPrimitive(origin, radius * ExplodeRadiusMult, evt.Damage * ExplodeDamageMult, evt);
-                    }
+                    // organ-gene-rebalance-v3 story-006（Required 1/2）：EMERGENCE §2 矩阵在此落地，
+                    // 详见 ApplyChassisDamage 注释。
+                    ApplyChassisDamage(evt, chassis, hits, radius, baseDir);
                 }
                 applied = true;
 
@@ -517,7 +638,7 @@ namespace GameLogic.MetabolicSlice.Combat
                 {
                     // story-006 Required 3（gene_swarm 最小实现）：宿主器官命中时，让每个存活玩家召唤物
                     // 也在自己坐标补一次同 Damage/同 Chain/Pull 的命中，即"学会这件器官的打法"——不新起
-                    // 召唤物专属模式系统，复用 DamageAreaPrimitive 同一出口。
+                    // 召唤物专属模式系统，复用 DamageAreaPrimitive 同一出口。底盘无关，处处检查。
                     ApplySwarmInherit(evt);
                 }
             }
@@ -528,6 +649,15 @@ namespace GameLogic.MetabolicSlice.Combat
                 // 不新增 Sim 公共方法，与 EffectSpawn 的生成方式一致。
                 if (ApplySummon(evt))
                 {
+                    applied = true;
+                }
+
+                if (evt.Trail > 0f)
+                {
+                    // story-006（EMERGENCE §2 Summon 列「迹跟随」）：只要这条链路带 SummonId，就按 Trail
+                    // 字段生效，与本次是否新召唤成功（MinionCap 已满时 ApplySummon 可能返回 false）无关——
+                    // 已存活的召唤物同样应该"跟随留迹"。
+                    ApplySummonTrail(evt);
                     applied = true;
                 }
             }
@@ -800,13 +930,23 @@ namespace GameLogic.MetabolicSlice.Combat
             }
 
             float2 origin = _sim.PlayerPosition;
+            // organ-gene-rebalance-v3 story-006（EMERGENCE §2 Summon 列「Homing/趋化：小弟追敌」）：
+            // Sim 没有暴露"改召唤物追击强度"的公共 API（改会碰 BinGames.Sim 契约，本 story 未 AOT-allowed），
+            // 最小可读实现——出生点先偏向最近敌人，后续追击交给 MinionSeekAttack 行为原型自身完成，
+            // Bridge 不新增按帧扫描。只读 evt.Homing 字段，禁止按 organId 分支。
+            float2? homingTarget = evt.Homing > 0f ? FindNearestHostile(origin) : null;
             for (int s = 0; s < granted; s++)
             {
                 float angle = 2f * math.PI * s / granted;
                 float2 offset = new float2(math.cos(angle), math.sin(angle)) * 1.2f;
+                float2 spawnPos = origin + offset;
+                if (homingTarget.HasValue)
+                {
+                    spawnPos = math.lerp(spawnPos, homingTarget.Value, evt.Homing * 0.5f);
+                }
                 _sim.Spawn(new BinGames.Sim.SpawnRequest
                 {
-                    Position = origin + offset,
+                    Position = spawnPos,
                     Velocity = float2.zero,
                     Health = 1f,
                     Radius = 0.4f,
@@ -821,6 +961,38 @@ namespace GameLogic.MetabolicSlice.Combat
             LastAbilityPrompt = $"召唤 {granted} 个随行单位（ArchetypeId={evt.SummonId}）";
             TEngine.Log.Info($"[MetabolicSliceBridge] {LastAbilityPrompt}");
             return true;
+        }
+
+        /// <summary>organ-gene-rebalance-v3 story-006（EMERGENCE §2 Summon 列「Trail/燃径/粘液：迹跟随」）：
+        /// 只读 evt.SummonId&gt;0（"这是一条召唤链路"的字段判据，非 organId）+ evt.Trail 字段——任意存活
+        /// 玩家召唤物脚下补一个短时小额跳伤区，复用 <see cref="_pendingLinger"/> 同一出口，不新增专属状态机。</summary>
+        private void ApplySummonTrail(HitEvent evt)
+        {
+            if (_sim == null || !_sim.Running)
+            {
+                return;
+            }
+
+            float radius = DamageAreaRadius * 0.5f * MathF.Max(0.1f, evt.Scale);
+            BinGames.Sim.SimSnapshot snap = _sim.Snapshot;
+            for (int i = 0; i < snap.Count; i++)
+            {
+                if (snap.Alive[i] == 0 || snap.Faction[i] != (byte)BinGames.Sim.SimFaction.PlayerMinion)
+                {
+                    continue;
+                }
+                _pendingLinger.Add(new PendingLinger
+                {
+                    Position = snap.Position[i],
+                    Radius = radius,
+                    DamagePerTick = evt.Trail,
+                    Interval = DefaultLingerTickInterval,
+                    NextTick = 0f,
+                    TimeLeft = TickInterval,
+                    Chain = 0f,
+                    Pull = 0f,
+                });
+            }
         }
 
         /// <summary>story-006 Required 3（gene_swarm 最小实现）：让每个存活玩家召唤物在自己坐标补一次
