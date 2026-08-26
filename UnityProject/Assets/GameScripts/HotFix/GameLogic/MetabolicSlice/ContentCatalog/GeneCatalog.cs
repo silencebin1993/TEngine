@@ -25,9 +25,9 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
         private static readonly Dictionary<string, (string DisplayName, string ArtId, string Description, Func<IContract> CreateContract)> _defs =
             new Dictionary<string, (string, string, string, Func<IContract>)>();
 
-        /// <summary>CATALOG-v3 §B1+§B2，24 条保留 + 12 条 story-004 新增 = 36 条，id/显示名/文案逐字取自
-        /// 设计表；CreateModule 用 ComposeEngine.Builtin.Modules 的一等字段模块组合（多步用 CompositeModule
-        /// 打包），不新增美术（R6，ArtId 未登记进 SimVisualLibrary，落兜底表现）。</summary>
+        /// <summary>CATALOG-v3 §B1+§B2，24 条保留 + 12 条 story-004 新增 + 6 条 story-005 新增 = 42 条，
+        /// id/显示名/文案逐字取自设计表；CreateModule 用 ComposeEngine.Builtin.Modules 的一等字段模块组合
+        /// （多步用 CompositeModule 打包），不新增美术（R6，ArtId 未登记进 SimVisualLibrary，落兜底表现）。</summary>
         private static readonly Dictionary<string, (string DisplayName, string ArtId, string Description, Func<IModule> CreateModule)> _moduleDefs =
             new Dictionary<string, (string, string, string, Func<IModule>)>
             {
@@ -145,6 +145,26 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
                 // 落点留坑，不新建 Seed 类。
                 ["gene_scatterseed"] = ("散播", "gene/scatterseed", "需要器官。改装：命中会在旁边炸出小坑。",
                     () => new CompositeModule("gene_scatterseed_mod", "散播", new ExplodeOnHit(), new LingerModule(2f))),
+
+                // organ-gene-rebalance-v3 story-005：CATALOG-v3 §B2 剩余 6 条，落地 preflight R9 锁定的
+                // 4 个新 Module 类（Ripple/Rhythm/Catalyst/Weave）+ 2 条降级 Composite（drift/capillary，
+                // R9 判定"用现有 Spread/Linger+Grow 组合，不建独立类"）。至此 36+6=42（24 保留 + 18 新增）。
+                ["gene_ripple"] = ("扩散波", "gene/ripple", "需要器官。改装：波/圈会随时间越扩越大，不是一下子变大。",
+                    () => new RippleModule(1f)),
+                ["gene_rhythm"] = ("节律", "gene/rhythm", "需要器官。改装：按固定节拍自己再打一圈。",
+                    () => new RhythmModule(2f)),
+                ["gene_catalyst"] = ("催化", "gene/catalyst", "需要器官。改装：命中触发的 Tag 反应会被放大。",
+                    () => new CatalystModule(0.5f)),
+                ["gene_weave"] = ("编织", "gene/weave", "需要器官。改装：把留下的坑/迹跟附近的连起来。",
+                    () => new WeaveModule(2f)),
+                // 乱流：R9 判定复用既有 Spread（侧偏角）+ TickModule（按节奏重算侧偏，非坑/圈跳伤语义），
+                // 不新建轨迹噪声类；Tag "Drifting" 供宿主区分"这是随 tick 重算的侧偏，不是静态扇角"。
+                ["gene_drift"] = ("乱流", "gene/drift", "需要器官。改装：弹道会随机侧偏，飘忽不定。",
+                    () => new CompositeModule("gene_drift_mod", "乱流", new SpreadModule(20f), new TickModule(3f), new TagAttach("Drifting"))),
+                // 毛细扩散：R9 判定 Linger（留坑）+ Grow（静态变大，宿主结合 Linger 秒数解释为半径随时间外扩）
+                // 组合即可表达"向旁蔓延"，不新建独立扩散类；Tag "Capillary" 与 gene_swell 的纯体积变大区分开。
+                ["gene_capillary"] = ("毛细扩散", "gene/capillary", "需要器官。改装：坑/洼会向旁边持续蔓延。",
+                    () => new CompositeModule("gene_capillary_mod", "毛细扩散", new LingerModule(3f), new Grow(1.2f), new TagAttach("Capillary"))),
             };
 
         public static Func<IContract> Get(string id) => _defs.TryGetValue(id, out var d) ? d.CreateContract : null;
@@ -168,10 +188,10 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
         /// <summary>Contract 基因全集，本 story 起恒为空集合（保留 API 形状供调用方兼容）。</summary>
         public static IEnumerable<string> AllIds => _defs.Keys;
 
-        /// <summary>Module 基因全集，CATALOG-v3 §B1+§B2 36 条（24 保留 + story-004 新增 12）。</summary>
+        /// <summary>Module 基因全集，CATALOG-v3 §B1+§B2 42 条（24 保留 + story-004 新增 12 + story-005 新增 6）。</summary>
         public static IEnumerable<string> AllModuleIds => _moduleDefs.Keys;
 
-        /// <summary>Contract + Module 全集，本 story 起等价于 <see cref="AllModuleIds"/>（36 条）。</summary>
+        /// <summary>Contract + Module 全集，本 story 起等价于 <see cref="AllModuleIds"/>（42 条）。</summary>
         public static IEnumerable<string> AllGeneIds => _defs.Keys.Concat(_moduleDefs.Keys);
     }
 }
