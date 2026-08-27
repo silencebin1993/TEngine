@@ -107,11 +107,12 @@ TEngine 基于 HybridCLR + YooAsset + UniTask + Luban 构建。
 **禁止**再使用已删除的 `Assets/AssetRaw`、`Assets/AssetArt`。 
 完整说明：`DesignDocs/Art_Repo_And_HotUpdate.md`。
 
-### 测试截图（硬禁止）
+### 验收落点 / 仓库污染（硬禁止）
 
-- **禁止**把 Play / UnityMCP / 验收截图写入或提交到 `Assets/Screenshots/`（已 gitignore）。
 - 留证只写到仓库根 **`production/qa/evidence/`**（短 md + 必要 png）；证据里勿引用 `Assets/Screenshots/`。
-- 本地若已生成该目录，可整夹删除；勿打进 YooAsset / 热更包。
+- **禁止**把 Play / UnityMCP / 验收截图写入或提交到 `Assets/Screenshots/`（已 gitignore，勿 `git add -f`）。
+- **禁止**再建仓库根 `qa/`；禁止把测试图打进 `Assets/`、`GameRes/`、热更包、仓库根。
+- 本地若已生成 `Assets/Screenshots/`，可整夹删除；勿打进 YooAsset / 热更包。
 
 ---
 
