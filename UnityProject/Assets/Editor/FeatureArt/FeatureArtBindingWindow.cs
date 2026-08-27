@@ -754,7 +754,7 @@ namespace BinGames.EditorTools.FeatureArt
                 var slot = MeshSlot;
                 if (slot != null && !string.IsNullOrEmpty(slot.look))
                 {
-                    EditorGUILayout.LabelField(slot.look, EditorStyles.wordWrappedLabel);
+                    EditorGUILayout.LabelField(slot.look, EditorStyles.wordWrappedLabel, GUILayout.ExpandWidth(true));
                 }
 
                 EditorGUILayout.Space(4);
@@ -778,7 +778,7 @@ namespace BinGames.EditorTools.FeatureArt
                         var mat = MaterialSlot;
                         if (mat != null && !string.IsNullOrEmpty(mat.look))
                         {
-                            EditorGUILayout.LabelField(mat.look, EditorStyles.wordWrappedMiniLabel);
+                            EditorGUILayout.LabelField(mat.look, EditorStyles.wordWrappedMiniLabel, GUILayout.ExpandWidth(true));
                         }
 
                         _window.DrawBindField(mat);
@@ -852,7 +852,7 @@ namespace BinGames.EditorTools.FeatureArt
 
                 if (slot != null && !string.IsNullOrEmpty(slot.look))
                 {
-                    EditorGUILayout.LabelField(slot.look, EditorStyles.wordWrappedLabel);
+                    EditorGUILayout.LabelField(slot.look, EditorStyles.wordWrappedLabel, GUILayout.ExpandWidth(true));
                 }
 
                 EditorGUILayout.Space(4);
@@ -1013,6 +1013,14 @@ namespace BinGames.EditorTools.FeatureArt
                 }
 
                 EditorGUILayout.Space(4);
+
+                // 不定长提示词独立成行，禁止与上方定宽绑定列挤在同一个 HorizontalScope 里（PANEL-UX §11.1）。
+                DrawRolePrompt("枪口", "muzzle");
+                DrawRolePrompt("弹体", "projectile");
+                DrawRolePrompt("命中", "hit");
+                DrawRolePrompt("爆炸", "explode");
+
+                EditorGUILayout.Space(4);
             }
 
             [OnInspectorGUI, PropertyOrder(10)]
@@ -1040,16 +1048,26 @@ namespace BinGames.EditorTools.FeatureArt
                 {
                     EditorGUILayout.LabelField(labelZh, EditorStyles.miniBoldLabel);
                     _window.DrawBindField(slot);
-                    if (slot != null && !string.IsNullOrEmpty(slot.prompt))
-                    {
-                        SirenixEditorGUI.MessageBox(slot.prompt, MessageType.None);
-                        if (GUILayout.Button("复制", GUILayout.Width(48)))
-                        {
-                            EditorGUIUtility.systemCopyBuffer = slot.prompt;
-                            _window.Log($"{slot.id} 提示词已复制。");
-                        }
-                    }
                 }
+            }
+
+            void DrawRolePrompt(string labelZh, string role)
+            {
+                var slot = _window.FindSlot($"shape.{_shapeKey}.{role}");
+                if (slot == null || string.IsNullOrEmpty(slot.prompt))
+                {
+                    return;
+                }
+
+                EditorGUILayout.LabelField($"{labelZh} 提示词", EditorStyles.miniBoldLabel, GUILayout.ExpandWidth(true));
+                SirenixEditorGUI.MessageBox(slot.prompt, MessageType.None);
+                if (GUILayout.Button("复制", GUILayout.Width(48)))
+                {
+                    EditorGUIUtility.systemCopyBuffer = slot.prompt;
+                    _window.Log($"{slot.id} 提示词已复制。");
+                }
+
+                EditorGUILayout.Space(2);
             }
         }
 
@@ -1089,7 +1107,7 @@ namespace BinGames.EditorTools.FeatureArt
 
                 if (slot != null && !string.IsNullOrEmpty(slot.look))
                 {
-                    EditorGUILayout.LabelField(slot.look, EditorStyles.wordWrappedLabel);
+                    EditorGUILayout.LabelField(slot.look, EditorStyles.wordWrappedLabel, GUILayout.ExpandWidth(true));
                 }
 
                 EditorGUILayout.Space(4);
