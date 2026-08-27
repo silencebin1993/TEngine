@@ -1,20 +1,31 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
 using System.Linq;
+using BinGames.EditorTools.CellArt;
+using Sirenix.OdinInspector;
 using UnityEditor;
 using UnityEngine;
-using Debug = UnityEngine.Debug;
 
-namespace BinGames.EditorTools.CellArt
+namespace BinGames.EditorTools.FeatureArt
 {
-    /// <summary>
-    /// 细胞阶段美术资源板：概念图 / 模型 / 动画 / 特效对照与扫盘入列。
-    /// 菜单：BinGames → 美术资源板；Unity 6 工具栏也有 Cell Art 按钮。
-    /// </summary>
-    public sealed class CellArtBoardWindow : EditorWindow
+    /// <summary>源文件库页 UI 状态（挂在绑定窗上，避免左树重建丢筛选/选中）。</summary>
+    public sealed class FeatureArtSourceLibraryState
     {
+        public string Search = "";
+        public string FilterStatus = "all";
+        public string FilterKind = "all";
+        public string FilterRoute = "all";
+        public string SelectedId;
+        public Vector2 ListScroll;
+        public Vector2 DetailScroll;
+    }
+
+    /// <summary>左树顶级叶子「源文件库」：列表/过滤/详情/扫盘/图板，
+    /// 读写同一份 <see cref="FeatureArtBindingWindow.Registry"/>，扫盘/图板只调 CellArtRegistryService。</summary>
+    public sealed class FeatureArtSourceLibraryPage
+    {
+        public const string MenuPath = "源文件库";
+
         static readonly string[] StatusOptions =
             { "todo", "concept", "tripo", "blender", "unity", "done" };
 
@@ -27,74 +38,41 @@ namespace BinGames.EditorTools.CellArt
         static readonly string[] RouteOptions =
             { "none", "Devour", "Agile", "Electric", "Spore", "Nest", "Corrupt" };
 
-        CellArtRegistry _data;
-        Vector2 _listScroll;
-        Vector2 _detailScroll;
-        string _search = "";
-        string _filterStatus = "all";
-        string _filterKind = "all";
-        string _filterRoute = "all";
-        int _selected;
-        string _lastLog = "";
-        bool _dirty;
+        readonly FeatureArtBindingWindow _window;
 
-        public static void Open()
+        public FeatureArtSourceLibraryPage(FeatureArtBindingWindow window) => _window = window;
+
+        [OnInspectorGUI]
+        void Draw()
         {
-            var w = GetWindow<CellArtBoardWindow>("Cell Art");
-            w.minSize = new Vector2(880, 520);
-            w.Show();
-            w.Reload();
-        }
-
-        void OnEnable() => Reload();
-
-        void OnGUI()
-        {
-            DrawToolbar();
-            if (_data == null)
+            var data = _window.Registry;
+            using (new EditorGUILayout.VerticalScope(GUILayout.MaxWidth(_window.ContentMaxWidth()), GUILayout.ExpandWidth(true)))
             {
-                EditorGUILayout.HelpBox("登记表未加载。确认 Assets/GameRes/Art/Cell/registry.json 存在。", MessageType.Error);
-                return;
-            }
+                if (data == null)
+                {
+                    EditorGUILayout.HelpBox("登记表未加载。确认 Assets/GameRes/Art/Cell/registry.json 存在。", MessageType.Error);
+                    return;
+                }
 
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                DrawList(GUILayout.Width(position.width * 0.42f));
-                DrawDetail();
-            }
+                DrawPageToolbar(data);
+                DrawFilters();
 
-            if (!string.IsNullOrEmpty(_lastLog))
-            {
-                EditorGUILayout.Space(4);
-                EditorGUILayout.HelpBox(_lastLog, MessageType.None);
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    var listW = Mathf.Clamp(_window.ContentMaxWidth() * 0.42f, 260f, 420f);
+                    DrawList(data, GUILayout.Width(listW), GUILayout.MinHeight(360f), GUILayout.ExpandHeight(true));
+                    DrawDetail(data);
+                }
             }
         }
 
-        void DrawToolbar()
+        void DrawPageToolbar(CellArtRegistry data)
         {
             using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
             {
-                if (GUILayout.Button("刷新", EditorStyles.toolbarButton, GUILayout.Width(48)))
-                {
-                    if (_dirty && !EditorUtility.DisplayDialog("未保存", "有未保存修改，丢弃并刷新？", "丢弃", "取消"))
-                    {
-                        return;
-                    }
-
-                    Reload();
-                }
-
-                GUI.enabled = _dirty;
-                if (GUILayout.Button("保存", EditorStyles.toolbarButton, GUILayout.Width(48)))
-                {
-                    Save();
-                }
-
-                GUI.enabled = true;
-
                 if (GUILayout.Button("扫盘预览", EditorStyles.toolbarButton, GUILayout.Width(72)))
                 {
-                    RunScan(false);
+                    _window.RunRegistryScan(false);
                 }
 
                 if (GUILayout.Button("扫盘入列", EditorStyles.toolbarButton, GUILayout.Width(72)))
@@ -103,26 +81,18 @@ namespace BinGames.EditorTools.CellArt
                             "将按命名约定扫描 Concepts/Meshes/Animations/VFX/Previews，\n自动登记新文件并绑定到已有 id。继续？",
                             "入列", "取消"))
                     {
-                        RunScan(true);
+                        _window.RunRegistryScan(true);
                     }
                 }
 
                 if (GUILayout.Button("生成图板", EditorStyles.toolbarButton, GUILayout.Width(72)))
                 {
-                    try
-                    {
-                        CellArtRegistryService.WriteBoardHtml(_data);
-                        _lastLog = $"已生成 {CellArtRegistryService.BoardAbs}";
-                    }
-                    catch (Exception e)
-                    {
-                        _lastLog = e.Message;
-                    }
+                    _window.WriteRegistryBoard();
                 }
 
                 if (GUILayout.Button("打开图板", EditorStyles.toolbarButton, GUILayout.Width(72)))
                 {
-                    OpenBoard();
+                    _window.OpenRegistryBoard();
                 }
 
                 if (GUILayout.Button("资源目录", EditorStyles.toolbarButton, GUILayout.Width(72)))
@@ -131,19 +101,22 @@ namespace BinGames.EditorTools.CellArt
                 }
 
                 GUILayout.FlexibleSpace();
-                var review = _data?.assets?.Count(a => a.needs_review) ?? 0;
-                var label = _data == null
-                    ? ""
-                    : $"{_data.assets.Count} 项 · 待审 {review}" + (_dirty ? " · 未保存" : "");
+                var review = data.assets?.Count(a => a.needs_review) ?? 0;
+                var count = data.assets?.Count ?? 0;
+                var label = $"{count} 项 · 待审 {review}" + (_window.IsRegistryDirty ? " · 未保存" : "");
                 GUILayout.Label(label, EditorStyles.miniLabel);
             }
+        }
 
+        void DrawFilters()
+        {
+            var s = _window.SourceLib;
             using (new EditorGUILayout.HorizontalScope())
             {
-                _search = EditorGUILayout.TextField("搜索", _search);
-                _filterStatus = FilterPopup("状态", _filterStatus, StatusOptions);
-                _filterKind = FilterPopup("种类", _filterKind, KindOptions);
-                _filterRoute = FilterPopup("路线", _filterRoute, RouteOptions);
+                s.Search = EditorGUILayout.TextField("搜索", s.Search);
+                s.FilterStatus = FilterPopup("状态", s.FilterStatus, StatusOptions);
+                s.FilterKind = FilterPopup("种类", s.FilterKind, KindOptions);
+                s.FilterRoute = FilterPopup("路线", s.FilterRoute, RouteOptions);
             }
         }
 
@@ -156,18 +129,18 @@ namespace BinGames.EditorTools.CellArt
             return list[idx];
         }
 
-        void DrawList(params GUILayoutOption[] opts)
+        void DrawList(CellArtRegistry data, params GUILayoutOption[] opts)
         {
+            var s = _window.SourceLib;
             using (new EditorGUILayout.VerticalScope(opts))
             {
                 EditorGUILayout.LabelField("资源列表", EditorStyles.boldLabel);
-                _listScroll = EditorGUILayout.BeginScrollView(_listScroll);
-                var filtered = Filtered().ToList();
+                s.ListScroll = EditorGUILayout.BeginScrollView(s.ListScroll);
+                var filtered = Filtered(data).ToList();
                 for (var i = 0; i < filtered.Count; i++)
                 {
                     var a = filtered[i];
-                    var realIndex = _data.assets.IndexOf(a);
-                    var selected = realIndex == _selected;
+                    var selected = a.id == s.SelectedId;
                     var title = $"{(a.needs_review ? "* " : "")}{a.name_zh}";
                     var sub = $"{a.id}  ·  {a.kind}/{a.slot}/{a.route}  ·  {a.status}";
 
@@ -199,10 +172,10 @@ namespace BinGames.EditorTools.CellArt
 
                     if (Event.current.type == EventType.MouseDown && rect.Contains(Event.current.mousePosition))
                     {
-                        _selected = realIndex;
+                        s.SelectedId = a.id;
                         GUI.FocusControl(null);
                         Event.current.Use();
-                        Repaint();
+                        _window.Repaint();
                     }
                 }
 
@@ -210,19 +183,20 @@ namespace BinGames.EditorTools.CellArt
             }
         }
 
-        void DrawDetail()
+        void DrawDetail(CellArtRegistry data)
         {
+            var s = _window.SourceLib;
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
-                if (_selected < 0 || _selected >= _data.assets.Count)
+                var a = data.assets?.FirstOrDefault(x => x.id == s.SelectedId);
+                if (a == null)
                 {
                     EditorGUILayout.LabelField("选中左侧条目查看详情");
                     return;
                 }
 
-                var a = _data.assets[_selected];
                 EditorGUILayout.LabelField("详情", EditorStyles.boldLabel);
-                _detailScroll = EditorGUILayout.BeginScrollView(_detailScroll);
+                s.DetailScroll = EditorGUILayout.BeginScrollView(s.DetailScroll);
 
                 EditorGUI.BeginChangeCheck();
 
@@ -263,7 +237,7 @@ namespace BinGames.EditorTools.CellArt
 
                 if (EditorGUI.EndChangeCheck())
                 {
-                    _dirty = true;
+                    _window.MarkRegistryDirty();
                 }
 
                 EditorGUILayout.Space(8);
@@ -272,13 +246,13 @@ namespace BinGames.EditorTools.CellArt
                     if (GUILayout.Button("按文件自动推状态"))
                     {
                         a.status = CellArtRegistryService.GuessStatus(a);
-                        _dirty = true;
+                        _window.MarkRegistryDirty();
                     }
 
                     if (GUILayout.Button("清除待审"))
                     {
                         a.needs_review = false;
-                        _dirty = true;
+                        _window.MarkRegistryDirty();
                     }
 
                     if (GUILayout.Button("在 Project 中定位概念图") && !string.IsNullOrEmpty(a.concept))
@@ -303,7 +277,7 @@ namespace BinGames.EditorTools.CellArt
                 var next = EditorGUILayout.TextField(label, value ?? "");
                 if (GUILayout.Button("选", GUILayout.Width(32)))
                 {
-                    var start = Path.Combine(CellArtRegistryService.CellAbs, folderHint);
+                    var start = System.IO.Path.Combine(CellArtRegistryService.CellAbs, folderHint);
                     var picked = EditorUtility.OpenFilePanel($"选择 {label}", start, "");
                     if (!string.IsNullOrEmpty(picked))
                     {
@@ -316,7 +290,7 @@ namespace BinGames.EditorTools.CellArt
                         else
                         {
                             next = rel;
-                            _dirty = true;
+                            _window.MarkRegistryDirty();
                         }
                     }
                 }
@@ -339,121 +313,34 @@ namespace BinGames.EditorTools.CellArt
             return options[idx];
         }
 
-        IEnumerable<CellArtAsset> Filtered()
+        IEnumerable<CellArtAsset> Filtered(CellArtRegistry data)
         {
-            IEnumerable<CellArtAsset> q = _data.assets;
-            if (!string.IsNullOrWhiteSpace(_search))
+            IEnumerable<CellArtAsset> q = data.assets ?? Enumerable.Empty<CellArtAsset>();
+            var s = _window.SourceLib;
+            if (!string.IsNullOrWhiteSpace(s.Search))
             {
-                var s = _search.Trim();
+                var term = s.Search.Trim();
                 q = q.Where(a =>
-                    (a.id?.IndexOf(s, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0
-                    || (a.name_zh?.IndexOf(s, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0);
+                    (a.id?.IndexOf(term, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0
+                    || (a.name_zh?.IndexOf(term, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0);
             }
 
-            if (_filterStatus != "all")
+            if (s.FilterStatus != "all")
             {
-                q = q.Where(a => a.status == _filterStatus);
+                q = q.Where(a => a.status == s.FilterStatus);
             }
 
-            if (_filterKind != "all")
+            if (s.FilterKind != "all")
             {
-                q = q.Where(a => a.kind == _filterKind);
+                q = q.Where(a => a.kind == s.FilterKind);
             }
 
-            if (_filterRoute != "all")
+            if (s.FilterRoute != "all")
             {
-                q = q.Where(a => a.route == _filterRoute);
+                q = q.Where(a => a.route == s.FilterRoute);
             }
 
             return q;
-        }
-
-        void Reload()
-        {
-            try
-            {
-                _data = CellArtRegistryService.Load();
-                CellArtRegistryService.EnsureFolders(_data);
-                _dirty = false;
-                _lastLog = $"已加载 {_data.assets.Count} 项 · {_data.updated}";
-                if (_selected >= _data.assets.Count)
-                {
-                    _selected = 0;
-                }
-            }
-            catch (Exception e)
-            {
-                _data = null;
-                _lastLog = e.Message;
-                Debug.LogError(e);
-            }
-
-            Repaint();
-        }
-
-        void Save()
-        {
-            try
-            {
-                CellArtRegistryService.Save(_data);
-                _dirty = false;
-                _lastLog = $"已保存 {CellArtRegistryService.RegistryAbs}";
-            }
-            catch (Exception e)
-            {
-                _lastLog = e.Message;
-                Debug.LogError(e);
-            }
-        }
-
-        void RunScan(bool apply)
-        {
-            try
-            {
-                if (_dirty)
-                {
-                    Save();
-                }
-
-                var actions = CellArtRegistryService.Scan(_data, apply);
-                if (apply)
-                {
-                    CellArtRegistryService.Save(_data);
-                    _dirty = false;
-                    Reload();
-                }
-
-                _lastLog = actions.Count == 0
-                    ? "扫盘：没有新文件"
-                    : $"{(apply ? "已入列" : "预览")} {actions.Count} 项：\n" + string.Join("\n", actions.Take(30))
-                      + (actions.Count > 30 ? $"\n…共 {actions.Count}" : "");
-            }
-            catch (Exception e)
-            {
-                _lastLog = e.Message;
-                Debug.LogError(e);
-            }
-        }
-
-        void OpenBoard()
-        {
-            try
-            {
-                if (!File.Exists(CellArtRegistryService.BoardAbs))
-                {
-                    CellArtRegistryService.WriteBoardHtml(_data);
-                }
-
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = CellArtRegistryService.BoardAbs,
-                    UseShellExecute = true,
-                });
-            }
-            catch (Exception e)
-            {
-                _lastLog = e.Message;
-            }
         }
     }
 }

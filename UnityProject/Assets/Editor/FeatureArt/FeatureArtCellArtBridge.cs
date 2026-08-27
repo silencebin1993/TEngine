@@ -160,6 +160,11 @@ namespace BinGames.EditorTools.FeatureArt
                 {
                     TryAddView(window, asset, cellArtId, pending);
                 }
+
+                if (GUILayout.Button("在源文件库打开", GUILayout.Width(110)))
+                {
+                    window.JumpToSourceLibrary(cellArtId);
+                }
             }
         }
 

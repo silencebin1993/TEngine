@@ -169,7 +169,7 @@
 - 共用 shader + MPB / 实例 buffer  
 - 资源：`GameRes/Art/` 源文件 → `GameRes/Raw/` 运行时  
 - 源文件建议目录：`GameRes/Art/Cell/Concepts/`（Cursor）→ `GameRes/Art/Cell/Meshes/`（Tripo 导出）→ 烘焙进 `Raw/`  
-- **资产对照表**：Unity 菜单 `BinGames → 美术资源板`（工具栏 `Cell Art`）；数据在 `GameRes/Art/Cell/registry.json`
+- **资产对照表**：Unity 菜单 `BinGames → 功能美术绑定` → 左树「源文件库」；数据在 `GameRes/Art/Cell/registry.json`
 ### 8.3 白模验收三关（画完精模前必须过）
 
 1. 10 米外剪影：六路线可区分  

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using BinGames.EditorTools.CellArt;
@@ -186,9 +187,12 @@ namespace BinGames.EditorTools.FeatureArt
         readonly Dictionary<string, OrganPage> _organPages = new Dictionary<string, OrganPage>();
         readonly Dictionary<string, ShapePage> _shapePages = new Dictionary<string, ShapePage>();
         readonly Dictionary<string, SimpleMeshPage> _summonPages = new Dictionary<string, SimpleMeshPage>();
+        FeatureArtSourceLibraryPage _sourceLibraryPage;
+        public readonly FeatureArtSourceLibraryState SourceLib = new FeatureArtSourceLibraryState();
 
         public FeatureArtCatalogData Data => _data;
         public List<HealthIssue> HealthIssues => _healthIssues;
+        public bool IsRegistryDirty => _registryDirty;
 
         public static void Open()
         {
@@ -217,6 +221,8 @@ namespace BinGames.EditorTools.FeatureArt
 
             tree.Add("使用说明", new GuidePage());
             tree.Add("健康检查", new HealthCheckPage(this));
+            _sourceLibraryPage = new FeatureArtSourceLibraryPage(this);
+            tree.Add(FeatureArtSourceLibraryPage.MenuPath, _sourceLibraryPage);
             tree.Add("玩家/本体", new PlayerPage(this), StatusIcon(FindSlot("player.chassis.mesh")));
 
             foreach (var entry in AttackMethodEntries)
@@ -325,7 +331,7 @@ namespace BinGames.EditorTools.FeatureArt
 
                 if (GUILayout.Button("打开源文件板", EditorStyles.toolbarButton, GUILayout.Width(90)))
                 {
-                    BinGames.EditorTools.CellArt.CellArtBoardWindow.Open();
+                    JumpToSourceLibrary();
                 }
 
                 GUILayout.FlexibleSpace();
@@ -430,6 +436,112 @@ namespace BinGames.EditorTools.FeatureArt
         }
 
         public void MarkRegistryDirty() => _registryDirty = true;
+
+        public void JumpToSourceLibrary(string cellArtId = null)
+        {
+            if (!string.IsNullOrEmpty(cellArtId))
+            {
+                if (_workingAssets.TryGetValue(cellArtId, out var draft))
+                {
+                    CommitWorkingAsset(draft);
+                    _registryDirty = true;
+                }
+
+                SourceLib.SelectedId = cellArtId;
+            }
+
+            if (_sourceLibraryPage == null)
+            {
+                ForceMenuTreeRebuild();
+            }
+
+            SelectPageObject(_sourceLibraryPage);
+        }
+
+        public void RunRegistryScan(bool apply)
+        {
+            try
+            {
+                var data = Registry;
+                if (data == null)
+                {
+                    _lastLog = "登记表未加载。";
+                    return;
+                }
+
+                if (_registryDirty)
+                {
+                    CellArtRegistryService.Save(data);
+                    _registryDirty = false;
+                }
+
+                var actions = CellArtRegistryService.Scan(data, apply);
+                if (apply)
+                {
+                    CellArtRegistryService.Save(data);
+                    _registryDirty = false;
+                    _workingAssets.Clear();
+                }
+
+                _lastLog = actions.Count == 0
+                    ? "扫盘：没有新文件"
+                    : $"{(apply ? "已入列" : "预览")} {actions.Count} 项：\n" + string.Join("\n", actions.Take(30))
+                      + (actions.Count > 30 ? $"\n…共 {actions.Count}" : "");
+            }
+            catch (Exception e)
+            {
+                _lastLog = e.Message;
+                Debug.LogError(e);
+            }
+        }
+
+        public void WriteRegistryBoard()
+        {
+            try
+            {
+                var data = Registry;
+                if (data == null)
+                {
+                    _lastLog = "登记表未加载。";
+                    return;
+                }
+
+                CellArtRegistryService.WriteBoardHtml(data);
+                _lastLog = $"已生成 {CellArtRegistryService.BoardAbs}";
+            }
+            catch (Exception e)
+            {
+                _lastLog = e.Message;
+            }
+        }
+
+        public void OpenRegistryBoard()
+        {
+            try
+            {
+                var data = Registry;
+                if (data == null)
+                {
+                    _lastLog = "登记表未加载。";
+                    return;
+                }
+
+                if (!File.Exists(CellArtRegistryService.BoardAbs))
+                {
+                    CellArtRegistryService.WriteBoardHtml(data);
+                }
+
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = CellArtRegistryService.BoardAbs,
+                    UseShellExecute = true,
+                });
+            }
+            catch (Exception e)
+            {
+                _lastLog = e.Message;
+            }
+        }
 
         /// <summary>Odin 右栏 Layout 时 currentViewWidth 可能是 Infinity，MessageBox 会按无限宽量高，
         /// Layout/Repaint 来回跳就闪。用窗口实际右栏宽夹住。</summary>
@@ -785,6 +897,7 @@ namespace BinGames.EditorTools.FeatureArt
             try
             {
                 _registry = CellArtRegistryService.Load();
+                CellArtRegistryService.EnsureFolders(_registry);
                 _registryDirty = false;
             }
             catch (Exception e)
@@ -841,7 +954,8 @@ namespace BinGames.EditorTools.FeatureArt
                     "2. 选中左树『攻击方式』下的器官，同一页拖外形网格、复制开火四段提示词；\n" +
                     "3. 做好的资源放进建议目录（Raw 下），拖进对应槽的对象框即可写入 location；\n" +
                     "4. 点工具栏『保存』；\n" +
-                    "5. Play 模式或『健康检查』核对。",
+                    "5. Play 模式或『健康检查』核对。\n\n" +
+                    "源文件登记（概念图 / fbx / 扫盘 / 图板）在左树『源文件库』，与成品换皮同一扇窗。工具栏『打开源文件板』会跳到该页。各功能页也可直接改概念图/三视图，都写 registry.json，不是 catalog。",
                     MessageType.Info);
                 SirenixEditorGUI.MessageBox(
                     "空槽 = 白模，游戏照常能跑；拖 Assets/GameRes/Art/ 下资源会被拒绝——Art 是源文件，不进 YooAsset 热更包。\n" +

@@ -2,8 +2,7 @@ using UnityEditor;
 
 namespace BinGames.EditorTools.FeatureArt
 {
-    /// <summary>单独挂菜单，避免 EditorWindow 子类上的 MenuItem 偶发不被 TypeCache 收录
-    /// （同 <see cref="BinGames.EditorTools.CellArt.CellArtMenu"/> 先例）。</summary>
+    /// <summary>单独挂菜单，避免 EditorWindow 子类上的 MenuItem 偶发不被 TypeCache 收录。</summary>
     public static class FeatureArtBindingMenu
     {
         [MenuItem("BinGames/功能美术绑定", false, 52)]
