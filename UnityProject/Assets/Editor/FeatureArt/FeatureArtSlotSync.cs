@@ -7,14 +7,93 @@ namespace BinGames.EditorTools.FeatureArt
 {
     /// <summary>story-003 R8/R9：从代码扫 organ/shape/summon/player 四域生成期望槽位，
     /// 与已有 catalog 合并——按 id 匹配，只增槽、标 retired，绝不清空/覆盖已有 location，
-    /// Brief 字段也不覆盖已存在的槽（防止吞掉人工修订）。enemy 域本批不做（R8，避免臆造槽位）。</summary>
+    /// Brief 字段也不覆盖已存在的槽（防止吞掉人工修订）。enemy 域本批不做（R8，避免臆造槽位）。
+    /// story-010 D6：look/prompt 是唯一例外——每次同步无条件覆盖已存在槽的这两个字段
+    /// （LOOK-PROMPTS.md 是唯一权威文案来源，不是人工可改的 Brief，不参与"防止吞掉人工修订"规则）。</summary>
     public static class FeatureArtSlotSync
     {
         static readonly string[] SummonKeys = { "spore", "phage", "mycelium" };
         static readonly string[] ShapeRoles = { "projectile", "muzzle", "hit", "explode" };
         static readonly HashSet<string> SyncedDomains = new HashSet<string> { "organ", "shape", "summon", "player", "enemy" };
 
-        /// <summary>返回新增槽数量；已存在槽的 retired 标记就地更新。</summary>
+        // ---- story-010 D6：LOOK-PROMPTS.md 原文抄录（look/prompt 唯一权威来源）----
+
+        const string GeoLockHead = "显微镜下的风格化细胞器官，不透明哑光粘土玩具，实心单色，均匀棚灯，强剪影，低面数，闭合体积，无破洞。纯色背景，主体居中约占画面 65%。";
+        const string GeoLockTail = "不要玻璃、透明、半透明、液体折射、粒子、烟雾、文字、UI、水印、景深、漂浮碎件。不要画整只细胞全身，只要这一件。功能端指向画面右侧。轴心在体积中心。";
+        const string FxLockHead = "俯视培养皿战斗特效，鲜艳但短促，一眼能从白模挤出片里认出来。不要过曝白闪，不要铺满全屏。";
+        const string FxLockTail = "短生命周期；+X 为飞行/挥击前方；不要自带相机、不要 AudioListener。";
+
+        static string GeoPrompt(string body) => GeoLockHead + body + GeoLockTail;
+        static string FxPrompt(string body) => FxLockHead + body + FxLockTail;
+
+        const string PlayerChassisLook = "胖梭形胶囊，前端略尖";
+        const string PlayerChassisBody = "玩家细胞本体：胖梭形胶囊，前端略尖像蝌蚪头，没有四肢，表面光滑有浅槽，体积像一颗大葡萄。";
+        const string PlayerChassisMaterialLook = "用 SimBioGlass，勾 GPU Instancing";
+
+        static readonly Dictionary<string, (string Look, string Body)> OrganArt = new Dictionary<string, (string, string)>
+        {
+            ["org_emitter"] = ("圆泡右侧一根喷嘴", "代谢喷射器官：浑圆母泡右侧伸出一根粗短喷嘴，口朝右，像细胞版水枪，单件闭合。"),
+            ["org_cilia"] = ("梭体前方一丛硬毛", "近战纤毛：梭形主体，右端密生一丛粗硬纤毛（≤8 根、要粗），像刷子戳出去，毛必须连在体上。"),
+            ["org_spine"] = ("圆球插满短棘", "反刺外壳：圆球周身均匀短锥棘（11 根左右），像微型蒺藜，棘与球一体，无漂浮刺。"),
+            ["org_phago"] = ("厚唇裂口的大圆", "吞噬口器：偏大圆体，右侧一张厚唇裂口，口缘不规则，像变形虫的大口，闭合体积无牙床细节堆砌。"),
+            ["org_lensbeam"] = ("扁晶+朝右细管", "聚焦光束器官：扁椭圆晶状体，右侧伸出一根细直导管，像镜头接激光管，实心不透明。"),
+            ["org_enzyme"] = ("葡萄串腺、底有滴口", "酶腺：几颗粘在一起的圆泡（3～5），底部一个朝下的滴口，像葡萄串腺体，全部粘连。"),
+            ["org_osmotic"] = ("扁环膜包核", "渗透场核：中心小球，外一圈扁环膜像游泳圈，环与核相连，不要离散粒子环。"),
+            ["org_orbitcilia"] = ("赤道一圈短纤毛", "环带纤毛：中球，赤道一圈粗短纤毛（6 根），像行星环但必须长在球上。"),
+            ["org_wave"] = ("朝右张开的新月瓣", "波形瓣：一个朝右张开的新月/扇壳，厚实，像细胞膜被推出去的一波，单片闭合。"),
+            ["org_pseudopod"] = ("宽掌伪足朝右", "伪足：从圆体向右摊开的宽掌状肉瓣，像拍击的手掌，边缘圆钝，连在母体上。"),
+            ["org_drill"] = ("螺旋锥头朝右", "钻头器官：右端螺旋锥，左端圆柄，像细胞钻头，螺纹要粗、圈数少（3 圈）。"),
+            ["org_bud"] = ("母体侧粘着小芽", "芽殖：较大圆体右侧粘着 1～2 颗小圆芽，芽必须贴住母体，禁止拆开的双胞胎。"),
+            ["org_mycelium"] = ("扁锚+贴地根须", "菌丝锚：扁平垫状主体，向下放射 6～8 根粗短根须贴地，不要立起来的树。"),
+        };
+
+        static readonly Dictionary<string, (string Look, string Body)> SummonArt = new Dictionary<string, (string, string)>
+        {
+            ["spore"] = ("带小尖帽的小球", "跟随芽：比玩家小很多的圆球，顶上一个短锥尖帽，像孢子幼体，单件。"),
+            ["phage"] = ("头球+尾柄", "噬菌体简化形：右端圆头，左端一根粗柄，像微型注射器，两段必须连体。"),
+            ["mycelium"] = ("扁垫+贴地根", "定点菌毯炮台：比玩家扁，贴地垫 + 一圈短根须，不要细丝网。"),
+        };
+
+        static readonly Dictionary<string, (string Look, string Body)> EnemyArt = new Dictionary<string, (string, string)>
+        {
+            ["vis_1"] = ("软圆、无口", "最弱浮游团：光滑圆球，略扁，无刺无口，像食物颗粒。"),
+            ["vis_2"] = ("扁盘带短刺边", "刺膜虫：扁圆盘，边缘一圈短刺，像微型海胆饼。"),
+            ["vis_3"] = ("椭圆+一条粗尾", "扫尾虫：椭圆身体右侧一条粗尾，整体像逗号。"),
+            ["vis_4"] = ("细梭、头尖", "追猎者：细长梭，右端尖，像小鱼，无鳍碎件。"),
+            ["vis_5"] = ("头大尾柄", "噬菌形敌：圆头+短柄，比玩家的噬菌召唤更粗笨。"),
+            ["vis_6"] = ("厚甲半球", "硬壳：半球甲，表面几块凸起板块，像甲虫背，闭合。"),
+            ["vis_7"] = ("少根粗触须", "导电体：球上 ≤4 根粗触须，禁止发丝。"),
+            ["vis_8"] = ("破口不对称", "腐败团：圆体缺一块不规则破口，边缘加厚，仍是单 mesh。"),
+            ["vis_9"] = ("更尖的梭", "游隼：比追猎更细更尖的梭，棱更利。"),
+            ["vis_10"] = ("长棘球", "毒棘：球上少量（7）更长的棘，棘要粗。"),
+            ["vis_11"] = ("扁垫小敌", "小菌毯：扁平贴地小垫，短根须。"),
+            ["vis_20"] = ("碎块多面体", "残块：不规则凸多面体，像咬剩的壳，闭合。"),
+            ["vis_50"] = ("同族放大+脊", "精英一级：在硬壳半球上加一条中脊，体量明显更大。"),
+            ["vis_51"] = ("双脊甲", "精英二级：双脊甲壳，比一级更张扬。"),
+            ["vis_52"] = ("冠刺甲", "精英三级：甲壳顶一圈短冠刺。"),
+            ["vis_90"] = ("巨体+张口", "首领：明显最大的厚唇裂口体，张口朝右，剪影必须碾压小兵。"),
+        };
+
+        static readonly Dictionary<string, string> ShapeLanguage = new Dictionary<string, string>
+        {
+            ["Bolt"] = "代谢弹：蜜黄小锥滴，尖朝飞行方向。",
+            ["Beam"] = "青白细束：一根实心棒，不要电弧碎丝。",
+            ["Arc"] = "橙红扇瓣：厚实楔块，不要线框。",
+            ["Field"] = "青绿厚环带：扁环，内孔大。",
+            ["Wave"] = "水色扩散环：细环，像水面一圈。",
+            ["Spore"] = "紫十字孢：小十字或小星，实体。",
+            ["Melee"] = "猩红短弧：身前一截厚月牙，不要剑模型。",
+        };
+
+        static readonly Dictionary<string, string> ShapeRoleBody = new Dictionary<string, string>
+        {
+            ["projectile"] = "这是飞行/持续中的本体，体积小、俯视能认。",
+            ["muzzle"] = "这是开火瞬间贴在细胞右前方的一小朵爆，只一帧到三帧。",
+            ["hit"] = "这是打在目标身上的短促溅开，不要画在玩家脚下。",
+            ["explode"] = "这是落点炸开的一圈，环形可读，不要火球蘑菇云。",
+        };
+
+        /// <summary>返回新增槽数量；已存在槽的 retired 标记就地更新，look/prompt 无条件覆盖。</summary>
         public static int Sync(FeatureArtCatalogData data)
         {
             var expected = BuildExpectedSlots();
@@ -42,6 +121,8 @@ namespace BinGames.EditorTools.FeatureArt
                 if (existingById.TryGetValue(exp.id, out var existing))
                 {
                     existing.retired = false;
+                    existing.look = exp.look;
+                    existing.prompt = exp.prompt;
                     continue;
                 }
 
@@ -73,6 +154,8 @@ namespace BinGames.EditorTools.FeatureArt
                     continue;
                 }
 
+                OrganArt.TryGetValue(def.Id, out var art);
+
                 list.Add(new FeatureArtSlot
                 {
                     id = $"organ.{def.Id}.mesh",
@@ -85,6 +168,8 @@ namespace BinGames.EditorTools.FeatureArt
                     howTo = $"Prefab 放到 Raw/Actor/Organ/，文件名 organ_{def.Id}（保证 location 唯一）；一个 MeshFilter；不要粒子、不要相机、不要 AudioListener。",
                     expected = "沙盒激活该器官后，本体剪影与其它器官可辨；没拖资源时仍是现在的白模，游戏能跑。",
                     constraints = "禁粒子/相机；材质须 GPU Instancing。",
+                    look = art.Look ?? "",
+                    prompt = art.Body != null ? GeoPrompt(art.Body) : "",
                     folderHint = "Assets/GameRes/Raw/Actor/Organ",
                     location = "",
                     package = "",
@@ -97,8 +182,12 @@ namespace BinGames.EditorTools.FeatureArt
         {
             foreach (var shape in FxRecipeCatalog.ShapeKeys)
             {
+                ShapeLanguage.TryGetValue(shape, out var language);
                 foreach (var role in ShapeRoles)
                 {
+                    ShapeRoleBody.TryGetValue(role, out var roleBody);
+                    var body = (language ?? "") + (roleBody ?? "");
+
                     list.Add(new FeatureArtSlot
                     {
                         id = $"shape.{shape}.{role}",
@@ -111,6 +200,8 @@ namespace BinGames.EditorTools.FeatureArt
                         howTo = HowToFor(shape, role),
                         expected = "绑定后现网对应 Shape 攻击改用该 Prefab（池化）；空槽维持现有白模挤出表现。",
                         constraints = "固定容量对象池，禁止每发裸 Instantiate 不回收；Prefab 不得自行 Destroy 破坏池。",
+                        look = language ?? "",
+                        prompt = language != null && roleBody != null ? FxPrompt(body) : "",
                         folderHint = $"Assets/GameRes/Raw/Effects/{FolderFor(role)}",
                         location = "",
                         package = "",
@@ -128,6 +219,8 @@ namespace BinGames.EditorTools.FeatureArt
                     ? "菌丝体贴地，网格应贴 XZ，不要悬空根。"
                     : "轴心居中。";
 
+                SummonArt.TryGetValue(key, out var art);
+
                 list.Add(new FeatureArtSlot
                 {
                     id = $"summon.{key}.mesh",
@@ -140,6 +233,8 @@ namespace BinGames.EditorTools.FeatureArt
                     howTo = $"Prefab 放到 Raw/Actor/Summon/，文件名 summon_{key}；单 MeshFilter；{anchorNote}",
                     expected = "触发该召唤后场上实体换为该网格；空槽则维持现有白模。",
                     constraints = "面数按实例化预算控制，走 InstancedMesh，不得逐实例 Instantiate。",
+                    look = art.Look ?? "",
+                    prompt = art.Body != null ? GeoPrompt(art.Body) : "",
                     folderHint = "Assets/GameRes/Raw/Actor/Summon",
                     location = "",
                     package = "",
@@ -162,6 +257,8 @@ namespace BinGames.EditorTools.FeatureArt
                 howTo = "Prefab 放到 Raw/Actor/Player/，文件名 player_chassis；单 MeshFilter；轴心在体积中心；朝向 +X 为口器/瞄准前方（与现网弹道 +X 锥一致）。",
                 expected = "沙盒进关后玩家本体换为该网格；空槽则维持现有白模胶囊。",
                 constraints = "面数按实例化预算控制，禁复杂骨骼作为万敌路径。",
+                look = PlayerChassisLook,
+                prompt = GeoPrompt(PlayerChassisBody),
                 folderHint = "Assets/GameRes/Raw/Actor/Player",
                 location = "",
                 package = "",
@@ -179,6 +276,8 @@ namespace BinGames.EditorTools.FeatureArt
                 howTo = "Material 资源放 Raw/Actor/Player/ 或复用现有材质；必须勾选 GPU Instancing，建议继续 BinGames/SimBioGlass 着色器。",
                 expected = "换材质后玩家外观 Look 改变，网格不变；空槽维持现有材质。",
                 constraints = "必须支持 GPU Instancing，否则批处理失败。",
+                look = PlayerChassisMaterialLook,
+                prompt = "",
                 folderHint = "Assets/GameRes/Raw/Actor/Player",
                 location = "",
                 package = "",
@@ -193,6 +292,8 @@ namespace BinGames.EditorTools.FeatureArt
         {
             foreach (var family in FeatureArtVisualBinder.EnemyVisualFamilies)
             {
+                EnemyArt.TryGetValue(family.Key, out var art);
+
                 list.Add(new FeatureArtSlot
                 {
                     id = $"enemy.{family.Key}.mesh",
@@ -205,6 +306,8 @@ namespace BinGames.EditorTools.FeatureArt
                     howTo = $"Prefab 放到 Raw/Actor/Enemy/，文件名 enemy_{family.Key}；单 MeshFilter；可换色/缩放复用，精英/首领已有独立 ScaleMul，不必再做超大模型。",
                     expected = "该族任意敌人生成后外形换为该网格；空槽维持现有白模（球体+颜色区分）。",
                     constraints = "面数按万敌实例化预算控制；禁止逐敌人 Instantiate。",
+                    look = art.Look ?? "",
+                    prompt = art.Body != null ? GeoPrompt(art.Body) : "",
                     folderHint = "Assets/GameRes/Raw/Actor/Enemy",
                     location = "",
                     package = "",

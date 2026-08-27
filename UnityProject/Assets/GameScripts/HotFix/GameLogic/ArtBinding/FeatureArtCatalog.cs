@@ -19,6 +19,8 @@ namespace GameLogic.ArtBinding
         public string howTo;
         public string expected;
         public string constraints;
+        public string look;
+        public string prompt;
         public string folderHint;
         public string location;
         public string package;
