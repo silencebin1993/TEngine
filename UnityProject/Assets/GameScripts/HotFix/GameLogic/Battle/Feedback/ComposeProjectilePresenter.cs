@@ -1,3 +1,4 @@
+using Cysharp.Threading.Tasks;
 using GameLogic.Core;
 
 namespace GameLogic.Battle.Feedback
@@ -20,6 +21,11 @@ namespace GameLogic.Battle.Feedback
         {
             _impl = impl ?? new WhiteboxComposeProjectileFeedback();
         }
+
+        /// <summary>story-006：加载 VFX Prefab 池绑定。<see cref="IComposeProjectileFeedback"/> 接口不改——
+        /// 只有 <see cref="WhiteboxComposeProjectileFeedback"/> 才有池，非白模实现类型检查桥接后走空操作。</summary>
+        public UniTask LoadArtBindingsAsync() =>
+            (_impl as WhiteboxComposeProjectileFeedback)?.LoadVfxBindingsAsync() ?? UniTask.CompletedTask;
 
         public override void OnEnter()
         {

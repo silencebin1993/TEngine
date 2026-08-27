@@ -61,6 +61,7 @@ namespace GameLogic.Stage.CellStage
         private CodexRegistry _codex;
         private MetabolicDigestionSystem _digestion;
         private CarrierBodyVisualPresenter _carrierBodyVisual;
+        private ComposeProjectilePresenter _composeProjectilePresenter;
 
         private SimRenderer _renderer;
         /// <summary>story-005：持有 BuildVisuals() 返回的同一个数组引用，供 ApplyFeatureArtVisualsAsync
@@ -303,7 +304,7 @@ namespace GameLogic.Stage.CellStage
             // 血条表现层（story-008）：与 ZoneVisualPresenter 同款直接 Bind，需要连续读 Health/Position。
             _healthBars = _hub.Register(new HealthBarPresenter());
             // 组合弹道表现层（story-004）：与 AbilityCastPresenter 同骨架，只订阅 ComposeCastSignal。
-            _hub.Register(new ComposeProjectilePresenter());
+            _composeProjectilePresenter = _hub.Register(new ComposeProjectilePresenter());
             // story-010 J3：组合弹道瞄准指示器（装配预览）：独立 8 位池，订阅 CarrierActivatedEvent。
             _hub.Register(new ComposeAimIndicatorPresenter());
             // 任务二：玩家 Carrier 本体随装配变化，同款轮询 AssemblyVersion。
@@ -410,6 +411,14 @@ namespace GameLogic.Stage.CellStage
             }
 
             await ApplyEnemySlots();
+            if (_visuals == null)
+            {
+                return;
+            }
+
+            // story-006：VFX Prefab 池加载——沿用 _visuals==null 作为"阶段是否已 Exit"哨兵（借用同一判空
+            // 信号，不新增字段），加载完成后由 WhiteboxComposeProjectileFeedback.Dispose() 经 OnExit() 自行清理。
+            await _composeProjectilePresenter.LoadArtBindingsAsync();
         }
 
         /// <summary>(a) player：player.chassis.mesh 覆盖 <c>VisualIdForArtId("carrier/base")</c> 下标

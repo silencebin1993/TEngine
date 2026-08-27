@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using Cysharp.Threading.Tasks;
+using GameLogic.ArtBinding;
 using GameLogic.Core;
 using GameLogic.MetabolicSlice.Combat;
 using GameLogic.MetabolicSlice.ContentCatalog;
@@ -81,6 +83,13 @@ namespace GameLogic.Battle.Feedback
         /// 缺的是"发生"这个动作本身）。</summary>
         private const float BeamIgniteDuration = 0.15f;
 
+        /// <summary>story-006：枪口 VFX 生命周期——短促一次性闪现，仿 <see cref="BeamIgniteDuration"/> 量级。</summary>
+        private const float MuzzleLife = 0.15f;
+
+        /// <summary>story-006：VFX 池按 <c>shape.{Shape}.{role}</c> 覆盖的四个角色，与 Editor 侧
+        /// FeatureArtSlotSync.AddShapeSlots 生成的槽 id 一一对应。</summary>
+        private static readonly string[] VfxRoles = { "projectile", "muzzle", "hit", "explode" };
+
         /// <summary>Field 抛掷飞行耗时，复用 Bolt 同款 <see cref="FlightLife"/>（0.3s）作为"甩出去"的时间窗，
         /// 落地后再用 <see cref="FieldSettleDuration"/>（0.2s）从小长到满径——二者相加正好等于
         /// <see cref="PersistentLife"/>（0.5s），落点用与 Bolt/Spore 同一个 <see cref="MetabolicSliceBridge.ImpactFlightDistance"/>，
@@ -135,6 +144,10 @@ namespace GameLogic.Battle.Feedback
         private Color[] _color;
         private int _cursor;
 
+        /// <summary>story-006：已激活的 VFX Prefab 池实例（未绑定/未命中时对应槽为 null，走程序化白模）。</summary>
+        private GameObject[] _prefabGo;
+        private FeatureArtVfxPool _vfxPool;
+
         private Mesh _circleMesh;
         private Mesh _streakMesh;
         private Mesh _wedgeMesh;
@@ -180,6 +193,28 @@ namespace GameLogic.Battle.Feedback
         /// Melee 应「原地生长」不随 Tick 明显位移，Bolt 应沿 Direction 明显飞出。</summary>
         public Vector3 LastMeleePosition { get; private set; }
 
+        /// <summary>story-006 验收探针：最近一次从 VFX 池取到并实际使用的 Prefab 实例名；未命中池
+        /// （槽未绑定/绑定为空）时不更新，初值 ""——可用来断言"绑定后取到 Prefab / 解绑后回落白模"。</summary>
+        public string LastVfxPrefabName { get; private set; } = "";
+
+        /// <summary>story-006：加载 7 Shape × 4 role 共 28 个 VFX 槽的 Prefab 池。由
+        /// <see cref="GameLogic.Battle.Feedback.ComposeProjectilePresenter"/> 在阶段进入后调用一次。</summary>
+        public async UniTask LoadVfxBindingsAsync()
+        {
+            _vfxPool ??= new FeatureArtVfxPool();
+
+            var ids = new List<string>(28);
+            foreach (ShapeKind kind in Enum.GetValues(typeof(ShapeKind)))
+            {
+                foreach (string role in VfxRoles)
+                {
+                    ids.Add($"shape.{kind}.{role}");
+                }
+            }
+
+            await _vfxPool.LoadAsync(ids);
+        }
+
         public void OnComposeCast(ComposeCastSignal signal)
         {
             if (!signal.HasProjectile)
@@ -215,6 +250,14 @@ namespace GameLogic.Battle.Feedback
             LastCastColor = castColor;
             LastComputedRadius = radius;
             LastShapeKind = kind.ToString();
+
+            // story-006：枪口 VFX——只有 shape.{kind}.muzzle 绑定时才生成，未绑定=零新增视觉，与今天行为一致。
+            // 每次施法只生成一次（不随 segments 循环），复用 Direction 作为朝向。
+            if (_vfxPool != null && _vfxPool.IsBound($"shape.{kind}.muzzle"))
+            {
+                float2 muzzleDir = math.normalizesafe(signal.Direction, new float2(0f, 1f));
+                SpawnMarker(kind, signal.Origin, muzzleDir, 0f, 0f, 0f, radius, MuzzleLife, castColor, "muzzle");
+            }
 
             FxRecipeCatalog.TryGetShapeRecipe(kind.ToString(), out var recipe);
             float shapeLife = recipe != null && recipe.Life == FxLifeKind.Persistent ? PersistentLife : FlightLife;
@@ -267,6 +310,19 @@ namespace GameLogic.Battle.Feedback
             else
             {
                 LastExplodeRadius = 0f;
+            }
+
+            // story-006：命中 VFX——与 ExplodeOnHit 相互独立，只要 shape.{kind}.hit 绑定就生成，
+            // 落点公式与上面的 explodeOrigin 一致（Melee 用 Origin，其余沿 Direction 飞 ImpactFlightDistance）。
+            if (_vfxPool != null && _vfxPool.IsBound($"shape.{kind}.hit"))
+            {
+                float2 hitOrigin = signal.Origin;
+                if (kind != ShapeKind.Melee)
+                {
+                    float2 hitDir = math.normalizesafe(signal.Direction, new float2(0f, 1f));
+                    hitOrigin = signal.Origin + hitDir * MetabolicSliceBridge.ImpactFlightDistance;
+                }
+                SpawnMarker(kind, hitOrigin, signal.Direction, 0f, 0f, 0f, radius * 0.3f, FlightLife, castColor, "hit");
             }
         }
 
@@ -336,6 +392,11 @@ namespace GameLogic.Battle.Feedback
                     _timeLeft[i] = 0f;
                     _mr[i].enabled = false;
                     _trail[i].emitting = false;
+                    if (_prefabGo[i] != null)
+                    {
+                        _vfxPool.Release(_prefabGo[i]);
+                        _prefabGo[i] = null;
+                    }
                     continue;
                 }
 
@@ -447,6 +508,7 @@ namespace GameLogic.Battle.Feedback
             _timeLeft = new float[PoolSize];
             _life = new float[PoolSize];
             _color = new Color[PoolSize];
+            _prefabGo = new GameObject[PoolSize];
 
             for (int i = 0; i < PoolSize; i++)
             {
@@ -484,7 +546,7 @@ namespace GameLogic.Battle.Feedback
         }
 
         private void SpawnMarker(ShapeKind kind, float2 origin, float2 direction, float phase, float spin, float orbit,
-            float radius, float life, Color color)
+            float radius, float life, Color color, string role = "projectile")
         {
             EnsurePool();
 
@@ -503,15 +565,27 @@ namespace GameLogic.Battle.Feedback
             _life[idx] = life;
             _color[idx] = color;
 
+            // story-006：槽位被复用时，先归还上一占用者的 VFX Prefab 实例（若有），再按当前 role 重新取用——
+            // 池 Prefab 的激活态跨调用持续，不像 MeshRenderer 每次都被覆盖写，必须显式 Release 防止悬空激活实例。
+            if (_prefabGo[idx] != null)
+            {
+                _vfxPool.Release(_prefabGo[idx]);
+            }
+            string slotId = $"shape.{kind}.{role}";
+            GameObject prefabGo = _vfxPool?.TryAcquire(slotId);
+            _prefabGo[idx] = prefabGo;
+            LastVfxPrefabName = prefabGo != null ? prefabGo.name : LastVfxPrefabName;
+
             _mf[idx].sharedMesh = MeshFor(kind);
-            _mr[idx].enabled = true;
+            _mr[idx].enabled = prefabGo == null;
             _mr[idx].sharedMaterial.color = _color[idx];
 
             // story-008 R7①：spin/orbit 非零才画残影，避免 Bolt/Melee 等直线运动多出一条无意义的拖尾。
             // 每次复用槽位都先 Clear，防止上一次别的 Shape 留下的轨迹点残留到本次标记上。
+            // story-006：有 Prefab 覆盖时不叠加程序化残影，避免视觉冲突。
             TrailRenderer trail = _trail[idx];
             trail.Clear();
-            bool wantsTrail = spin != 0f || orbit != 0f;
+            bool wantsTrail = (spin != 0f || orbit != 0f) && prefabGo == null;
             if (wantsTrail)
             {
                 trail.time = life;
@@ -642,6 +716,13 @@ namespace GameLogic.Battle.Feedback
                     LastBoltPosition = _tf[idx].localPosition;
                     break;
                 }
+            }
+
+            // story-006：有 Prefab 覆盖时，只同步位置/朝向——缩放由资源自身决定，运行时不缩放。
+            if (_prefabGo[idx] != null)
+            {
+                _prefabGo[idx].transform.position = _tf[idx].localPosition;
+                _prefabGo[idx].transform.rotation = _tf[idx].localRotation;
             }
         }
 
@@ -942,7 +1023,11 @@ namespace GameLogic.Battle.Feedback
                 _timeLeft = null;
                 _life = null;
                 _color = null;
+                _prefabGo = null;
             }
+
+            _vfxPool?.Dispose();
+            _vfxPool = null;
 
             if (_matTemplate != null)
             {

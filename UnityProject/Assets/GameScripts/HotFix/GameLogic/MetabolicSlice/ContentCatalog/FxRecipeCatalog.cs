@@ -67,6 +67,10 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
             /// 但远低于 Obstacle=0.7f。供 <see cref="GameLogic.Battle.Feedback.WhiteboxComposeProjectileFeedback"/>
             /// 与 <see cref="GameLogic.Battle.Feedback.WhiteboxComposeAimIndicator"/> 共享。</summary>
             public const float MarkerHeight = 0.22f;
+            /// <summary>story-006：VFX Prefab 池，每个 <c>shape.{Shape}.{role}</c> 槽独立固定容量
+            /// （不是全局共享池），供 <see cref="GameLogic.ArtBinding.FeatureArtVfxPool"/> 使用。
+            /// 7 Shape × 4 role 全绑定时总实例数上限 = 28 × 4 = 112，静态硬上限，不随调用次数增长。</summary>
+            public const int VfxPrefabPoolCapacityPerSlot = 4;
         }
 
         // ── Shape 配方（逐 Shape 行：底色 + 网格键 + 生命类型 + per-recipe 系数）──
