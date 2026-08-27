@@ -5,14 +5,16 @@ using System.Linq;
 using GameLogic.ArtBinding;
 using Sirenix.OdinInspector;
 using Sirenix.OdinInspector.Editor;
+using Sirenix.Utilities.Editor;
 using UnityEditor;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
 namespace BinGames.EditorTools.FeatureArt
 {
-    /// <summary>story-010：Odin 左树 + 右栏功能美术绑定窗。树按「构筑 → 共享弹道语言 → 场上其它单位」
-    /// 组织（PANEL-UX §3），不再是 003 的 domain 平铺。运行时 location 键、collector、JSON 存储不变。
+    /// <summary>story-010 左树 + 010→011 右栏重画：右栏默认单行绑定框、prompt 整段可见、CellArt 概念图只读
+    /// 反显、页尾死说明（抄 OBJECT-NOTES）、左树默认全展开 + 点文件夹行进第一个叶子、Odin 上色（PANEL-UX §7～§10）。
+    /// 运行时 location 键、catalog JSON 字段、collector、Resolver/Binder/VfxPool 零改动。
     /// 菜单：BinGames → 功能美术绑定（<see cref="FeatureArtBindingMenu"/> 转调 <see cref="Open"/>，未改）。</summary>
     public sealed class FeatureArtBindingWindow : OdinMenuEditorWindow
     {
@@ -44,6 +46,131 @@ namespace BinGames.EditorTools.FeatureArt
             ("spore", "跟随芽体"),
             ("phage", "追击噬菌"),
             ("mycelium", "固着炮台"),
+        };
+
+        // ---- PANEL-UX §8 配色 ----
+
+        static readonly Color ColorSelected = HexColor("#3D7EFF");
+        static readonly Color ColorEmpty = new Color(0.55f, 0.55f, 0.55f);
+        static readonly Color ColorBound = HexColor("#3D9B5C");
+        static readonly Color ColorBad = HexColor("#C23B3B");
+
+        static readonly Dictionary<string, Color> FamilyColor = new Dictionary<string, Color>
+        {
+            ["远程"] = HexColor("#E8A317"),
+            ["近战"] = HexColor("#C23B3B"),
+            ["场"] = HexColor("#3D9B5C"),
+            ["波"] = HexColor("#2AA8C4"),
+            ["召唤类"] = HexColor("#8B5CF6"),
+        };
+
+        static readonly Dictionary<string, Color> ShapeColor = new Dictionary<string, Color>
+        {
+            ["Bolt"] = HexColor("#D4A017"),
+            ["Beam"] = HexColor("#A8D4E6"),
+            ["Melee"] = HexColor("#C23B3B"),
+            ["Field"] = HexColor("#3D9B5C"),
+            ["Wave"] = HexColor("#4EC5D4"),
+            ["Spore"] = HexColor("#9B59B6"),
+            ["Arc"] = HexColor("#E07A3D"),
+        };
+
+        static readonly Texture2D DotEmpty = MakeDot(ColorEmpty);
+        static readonly Texture2D DotBound = MakeDot(ColorBound);
+        static readonly Texture2D DotBad = MakeDot(ColorBad);
+
+        // ---- OBJECT-NOTES.md 逐字抄的页尾死说明（只读；不进 JSON、不走 SlotSync）----
+
+        const string PlayerNote =
+            "目的：开局就能认出的「你」。器官换皮叠在这颗底盘上，不是每装一个器官换一具全身。\n\n" +
+            "注意：单 MeshFilter；胖梭、前端略尖；不要四肢、不要半透明玻璃当几何（半透明留给 SimBioGlass 材质）。材质必须勾 GPU Instancing。面数按实例化预算，不要上复杂骨骼当万敌路径。\n\n" +
+            "动画：底盘本身不做循环变形动画。Idle 用材质/轻微呼吸即可；攻击演出走「开火时间轴」那四段特效，不要在底盘 Mesh 上播整套骨骼攻击。\n\n" +
+            "源文件：Cell Art player_base_core（已有概念图 + 四向三视图）。三视图只供 Tripo/对形，不要把正交图当成品 Mesh 拖进 Raw。";
+
+        static readonly Dictionary<string, string> OrganNotes = new Dictionary<string, string>
+        {
+            ["org_emitter"] =
+                "远程主炮。外形必须一眼看到右侧喷嘴。弹体是蜜黄小锥滴，和纤毛环带共用 Bolt——改弹道两边一起变。喷嘴口朝 +X。不要做整只细胞+手臂持枪。\n\n" +
+                "动画：没有「举枪」骨骼。开火看枪口一小朵，飞行看弹体，打中看命中，炸圈看爆炸。",
+            ["org_lensbeam"] =
+                "聚焦器官：扁晶 + 朝右细管。弹道语言是 Beam（青白实心细棒），不要电弧碎丝、不要做成探照灯体积光。管子是几何的一部分，不要拆成粒子。\n\n" +
+                "动画：Beam 是持续体，Prefab 寿命跟现网 Persistent，不要自己 Destroy。",
+            ["org_orbitcilia"] =
+                "赤道一圈短纤毛，像长在球上的行星环。攻击语言与喷射器同为 Bolt，只换外形不换弹种。纤毛必须连在体上，禁止漂浮环。",
+            ["org_cilia"] =
+                "身前一丛硬毛戳出去。Melee 特效是身前一段猩红厚月牙，不要做剑模型。毛 ≤8 根、要粗。和刺突/吞噬/伪足/钻共用 Melee 语言。\n\n" +
+                "动画：近战没有飞行弹；枪口=挥击起手，弹体=挥击体，命中打在目标上。不要把月牙挂在玩家脚下。",
+            ["org_spine"] =
+                "周身短棘的反刺壳，像微型蒺藜。棘与球一体。近战语言同上。不要做成会掉刺的发射器（那是远程）。",
+            ["org_phago"] =
+                "厚唇裂口，口朝右。这是近战口器外形，不是首领那颗更大的裂口体。不要堆牙床细节。吞噬玩法门控在器官激活，美术只负责「看得出是一张嘴」。",
+            ["org_pseudopod"] =
+                "宽掌肉瓣朝右拍。边缘圆钝，必须连在母体。不要做成独立手套。挥击仍走 Melee 月牙，掌是身体不是武器 Mesh。",
+            ["org_drill"] =
+                "螺旋锥头朝右，螺纹粗、约 3 圈。是冲刺/钻入的外形，不要做成电钻工具或独立钻头道具。",
+            ["org_enzyme"] =
+                "葡萄串腺，底有朝下滴口。场语言是青绿扁环（Field），内孔要大。腺体几何不要做成喷雾粒子罐——雾是特效槽的事。\n\n" +
+                "动画：场是持续环，贴地或绕身由现网 Field 逻辑管，Prefab 不要自带旋转脚本抢控制。",
+            ["org_osmotic"] =
+                "中心核 + 外圈扁环膜，环必须连着核。与酶雾共用 Field。不要离散粒子环当网格。",
+            ["org_wave"] =
+                "朝右张开的新月/扇壳，单片闭合。波语言是水色细扩散环，像水面一圈，不要做海啸墙。",
+            ["org_bud"] =
+                "母体侧粘 1～2 颗小芽，禁止拆开的双胞胎。本页第三块是跳到召唤实体，不是再做一套远程弹。命中/爆炸仍可绑 Spore 语言（紫十字孢）。\n\n" +
+                "动画：器官本身不「生孩子动画」；实体出场看召唤物 Mesh。不要在器官 Prefab 里 Instantiate 芽体。",
+            ["org_mycelium"] =
+                "扁锚 + 向下 6～8 根粗短根须贴地，不要立起来的树。网格应贴 XZ。同样链到召唤实体页。",
+        };
+
+        const string ShapeCommon =
+            "这是共享皮肤。改这里，所有使用该 Shape 的攻击方式一起变。四格都是池化 Prefab；+X 为前方；短生命周期；不要相机、不要 AudioListener、不要自己 Destroy 断池。";
+
+        const string ShapeRoles =
+            "四角色补一句：弹体=飞行/持续中本体；枪口=开火瞬间贴在细胞右前方 1～3 帧；命中=打在目标身上；爆炸=落点一圈，不要火球蘑菇云。";
+
+        static readonly Dictionary<string, string> ShapeNotes = new Dictionary<string, string>
+        {
+            ["Bolt"] = ShapeCommon + "\n\n蜜黄小锥滴，尖朝飞行方向。喷射器与环带共用。体积小，俯视能认。\n\n" + ShapeRoles,
+            ["Beam"] = ShapeCommon + "\n\n青白实心细棒。是「一根管子」不是电弧。持续体，勿自毁。\n\n" + ShapeRoles,
+            ["Arc"] = ShapeCommon + "\n\n预留橙红厚扇瓣。暂无底盘器官时仍留卡，不要删。\n\n" + ShapeRoles,
+            ["Field"] = ShapeCommon + "\n\n青绿扁环，内孔大。酶雾/渗透共用。不要做成贴地水渍贴图一张。\n\n" + ShapeRoles,
+            ["Wave"] = ShapeCommon + "\n\n水色细环扩散。波形器专用。环形可读，不要实心圆盘。\n\n" + ShapeRoles,
+            ["Spore"] = ShapeCommon + "\n\n紫十字/小星。芽殖与菌丝的召唤物命中语言。实体 Mesh 在「召唤实体」，不要把实体做成这颗孢。\n\n" + ShapeRoles,
+            ["Melee"] = ShapeCommon + "\n\n猩红短厚月牙，身前一截。五件近战器官共用。禁止剑、斧、爪独立武器。\n\n" + ShapeRoles,
+        };
+
+        const string SummonCommon = "这是器官「生出来的单位」，InstancedMesh，和玩家一样只抽网格。不要做成技能特效。";
+
+        static readonly Dictionary<string, string> SummonNotes = new Dictionary<string, string>
+        {
+            ["spore"] = SummonCommon + "\n\n比玩家小很多，顶上短锥尖帽。跟在玩家附近，不要做成第二玩家。源文件可对 minion_spore_bud。无独立攻击骨架；命中语言走 Spore。",
+            ["phage"] = SummonCommon + "\n\n圆头+粗柄，像微型注射器，两段连体。比敌人里「噬菌形」更利落。目前源文件板没有一对一概念图，空着即可。",
+            ["mycelium"] = SummonCommon + "\n\n比玩家扁，贴地垫 + 一圈短根须。必须贴地，不要细丝网、不要悬空。和菌丝锚器官是「锚 / 炮台」两件东西，网格可以像，但不要共用同一个 Raw 文件名（location 会撞）。",
+        };
+
+        const string EnemyCommon = "一族共用一份网格，换色/缩放区分个体。精英/首领先放大剪影，不必另做复杂零件。不要为每个 EnemyId 做精模。";
+
+        const string EnemyAnim =
+            "动画：杂兵不要走路循环骨骼；位移由模拟层带。需要蠕动就用极简 1～2 骨或顶点，不要人形骨骼。攻击演出优先复用 Shape 特效，不要每族一套 Animator。";
+
+        static readonly Dictionary<string, string> EnemyNotes = new Dictionary<string, string>
+        {
+            ["vis_1"] = EnemyCommon + "\n\n最弱食物剪影，软圆无口。概念图有 enemy_blob_food。\n\n" + EnemyAnim,
+            ["vis_2"] = EnemyCommon + "\n\n扁盘短刺边，刺要粗。\n\n" + EnemyAnim,
+            ["vis_3"] = EnemyCommon + "\n\n椭圆+一条粗尾，整体像逗号。\n\n" + EnemyAnim,
+            ["vis_4"] = EnemyCommon + "\n\n细梭头尖，像小鱼，无鳍碎件。\n\n" + EnemyAnim,
+            ["vis_5"] = EnemyCommon + "\n\n圆头短柄，比玩家噬菌召唤更粗笨。源文件板可能无一对一图。\n\n" + EnemyAnim,
+            ["vis_6"] = EnemyCommon + "\n\n半球甲，板块闭合。\n\n" + EnemyAnim,
+            ["vis_7"] = EnemyCommon + "\n\n≤4 根粗触须，禁止发丝。\n\n" + EnemyAnim,
+            ["vis_8"] = EnemyCommon + "\n\n缺一块破口，仍是单 mesh。\n\n" + EnemyAnim,
+            ["vis_9"] = EnemyCommon + "\n\n比追猎更尖的梭。无一对一图就空着。\n\n" + EnemyAnim,
+            ["vis_10"] = EnemyCommon + "\n\n少量更长的粗棘。\n\n" + EnemyAnim,
+            ["vis_11"] = EnemyCommon + "\n\n扁垫小敌，贴地。\n\n" + EnemyAnim,
+            ["vis_20"] = EnemyCommon + "\n\n咬剩的凸多面体。\n\n" + EnemyAnim,
+            ["vis_50"] = EnemyCommon + "\n\n在硬壳思路上加脊/冠，体量明显更大。概念图可对 devourer / whip_king / volt_hunter，只作形参考，不必抄名字。\n\n" + EnemyAnim,
+            ["vis_51"] = EnemyCommon + "\n\n在硬壳思路上加脊/冠，体量明显更大。概念图可对 devourer / whip_king / volt_hunter，只作形参考，不必抄名字。\n\n" + EnemyAnim,
+            ["vis_52"] = EnemyCommon + "\n\n在硬壳思路上加脊/冠，体量明显更大。概念图可对 devourer / whip_king / volt_hunter，只作形参考，不必抄名字。\n\n" + EnemyAnim,
+            ["vis_90"] = EnemyCommon + "\n\n最大的厚唇裂口体，剪影碾压小兵。可对 boss_prokaryote_p1。不要和玩家吞噬体做成同一个 Raw 文件。\n\n" + EnemyAnim,
         };
 
         FeatureArtCatalogData _data;
@@ -79,10 +206,13 @@ namespace BinGames.EditorTools.FeatureArt
 
             var tree = new OdinMenuTree(false);
             tree.Config.DrawSearchToolbar = true;
+            tree.Config.UseCachedExpandedStates = false;
+            tree.DefaultMenuStyle.SelectedColorDarkSkin = ColorSelected;
+            tree.DefaultMenuStyle.SelectedColorLightSkin = ColorSelected;
 
             tree.Add("使用说明", new GuidePage());
             tree.Add("健康检查", new HealthCheckPage(this));
-            tree.Add("玩家/本体", new PlayerPage(this));
+            tree.Add("玩家/本体", new PlayerPage(this), StatusIcon(FindSlot("player.chassis.mesh")));
 
             foreach (var entry in AttackMethodEntries)
             {
@@ -91,7 +221,7 @@ namespace BinGames.EditorTools.FeatureArt
                 _organPages[entry.OrganId] = page;
                 var slot = FindSlot($"organ.{entry.OrganId}.mesh");
                 var titleZh = slot?.titleZh?.Replace(" · 本体网格", "") ?? entry.OrganId;
-                tree.Add($"攻击方式/{entry.GroupZh}/{titleZh} {StatusGlyph(slot)}", page);
+                tree.Add($"攻击方式/{entry.GroupZh}/{titleZh}", page, StatusIcon(slot));
             }
 
             foreach (var shape in ShapeOrder)
@@ -104,9 +234,11 @@ namespace BinGames.EditorTools.FeatureArt
             foreach (var s in SummonEntries)
             {
                 var slot = FindSlot($"summon.{s.Key}.mesh");
-                var page = new SimpleMeshPage(this, $"summon.{s.Key}.mesh", s.TitleZh, null);
+                SummonNotes.TryGetValue(s.Key, out var note);
+                var page = new SimpleMeshPage(this, $"summon.{s.Key}.mesh", s.TitleZh, "召唤类",
+                    FamilyColor["召唤类"], FeatureArtCellArtBridge.SummonCellArtId(s.Key), note);
                 _summonPages[s.Key] = page;
-                tree.Add($"召唤实体/{s.TitleZh} {StatusGlyph(slot)}", page);
+                tree.Add($"召唤实体/{s.TitleZh}", page, StatusIcon(slot));
             }
 
             var families = GameLogic.ArtBinding.FeatureArtVisualBinder.EnemyVisualFamilies;
@@ -115,9 +247,43 @@ namespace BinGames.EditorTools.FeatureArt
                 var fam = families[i];
                 var group = i < 12 ? "杂兵" : i < 15 ? "精英" : "首领";
                 var slot = FindSlot($"enemy.{fam.Key}.mesh");
-                var page = new SimpleMeshPage(this, $"enemy.{fam.Key}.mesh", fam.TitleZh, "一族共用，换色/缩放，不要每敌一模。");
-                tree.Add($"敌人/{group}/{fam.TitleZh} {StatusGlyph(slot)}", page);
+                EnemyNotes.TryGetValue(fam.Key, out var note);
+                var page = new SimpleMeshPage(this, $"enemy.{fam.Key}.mesh", fam.TitleZh, null,
+                    default, FeatureArtCellArtBridge.EnemyCellArtId(fam.Key), note);
+                tree.Add($"敌人/{group}/{fam.TitleZh}", page, StatusIcon(slot));
             }
+
+            foreach (var item in tree.EnumerateTree(false))
+            {
+                if (item.ChildMenuItems.Count > 0)
+                {
+                    item.Toggled = true;
+                }
+            }
+
+            tree.Selection.SelectionChanged += changeType =>
+            {
+                if (changeType != SelectionChangedType.ItemAdded)
+                {
+                    return;
+                }
+
+                var selected = tree.Selection.FirstOrDefault();
+                if (selected == null || selected.Value != null || selected.ChildMenuItems.Count == 0)
+                {
+                    return;
+                }
+
+                selected.Toggled = true;
+                foreach (var child in selected.GetChildMenuItemsRecursive(false))
+                {
+                    if (child.Value != null)
+                    {
+                        child.Select(false);
+                        break;
+                    }
+                }
+            };
 
             return tree;
         }
@@ -164,7 +330,7 @@ namespace BinGames.EditorTools.FeatureArt
 
             if (!string.IsNullOrEmpty(_lastLog))
             {
-                EditorGUILayout.HelpBox(_lastLog, MessageType.None);
+                SirenixEditorGUI.MessageBox(_lastLog, MessageType.None);
             }
         }
 
@@ -276,19 +442,20 @@ namespace BinGames.EditorTools.FeatureArt
             }
         }
 
-        /// <summary>拖拽/清空/复制共用的字段绘制（story-003「保存/清空」逻辑原样复用，Required 7）。</summary>
-        public void DrawBindField(FeatureArtSlot slot, float previewHeight = 56)
+        /// <summary>拖拽/清空/复制共用的字段绘制（story-003「保存/清空」逻辑原样复用）。
+        /// story-011 D2：成品槽默认单行 ObjectField，禁止再传自定义 Height。</summary>
+        public void DrawBindField(FeatureArtSlot slot)
         {
             if (slot == null)
             {
-                EditorGUILayout.HelpBox("未同步", MessageType.None);
+                SirenixEditorGUI.MessageBox("未同步", MessageType.None);
                 return;
             }
 
             var type = ObjectFieldType(slot.bindKind);
             var current = ResolveCurrentAsset(slot, type);
             EditorGUI.BeginChangeCheck();
-            var picked = EditorGUILayout.ObjectField(current, type, false, GUILayout.Height(previewHeight));
+            var picked = EditorGUILayout.ObjectField(current, type, false);
             if (EditorGUI.EndChangeCheck() && picked != null)
             {
                 TryBind(slot, picked);
@@ -411,19 +578,60 @@ namespace BinGames.EditorTools.FeatureArt
             return count > 1;
         }
 
-        static string StatusGlyph(FeatureArtSlot slot)
+        /// <summary>PANEL-UX §8：空槽灰点 / 已绑绿点 / 撞名坏点，画成左树 Icon（非文字后缀，才能真正上色）。</summary>
+        static Texture2D StatusIcon(FeatureArtSlot slot)
         {
             if (slot == null || slot.retired)
             {
-                return "";
+                return null;
             }
 
             if (string.IsNullOrEmpty(slot.location))
             {
-                return "○";
+                return DotEmpty;
             }
 
-            return HasFilenameConflict(slot.location) ? "✕" : "●";
+            return HasFilenameConflict(slot.location) ? DotBad : DotBound;
+        }
+
+        static Texture2D MakeDot(Color color)
+        {
+            var tex = new Texture2D(8, 8, TextureFormat.RGBA32, false) { hideFlags = HideFlags.HideAndDontSave };
+            var pixels = new Color[64];
+            for (var i = 0; i < pixels.Length; i++)
+            {
+                pixels[i] = color;
+            }
+
+            tex.SetPixels(pixels);
+            tex.Apply();
+            return tex;
+        }
+
+        static Color HexColor(string hex)
+        {
+            ColorUtility.TryParseHtmlString(hex, out var c);
+            return c;
+        }
+
+        /// <summary>PANEL-UX §8 身份色芯片（Family · Shape），禁止灰字 miniLabel 冒充芯片。</summary>
+        static void DrawChip(string text, Color color)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return;
+            }
+
+            var style = new GUIStyle(EditorStyles.boldLabel)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                padding = new RectOffset(6, 6, 2, 2),
+            };
+            style.normal.textColor = Color.white;
+            var size = style.CalcSize(new GUIContent(text));
+            var rect = GUILayoutUtility.GetRect(size.x, size.y, GUILayout.ExpandWidth(false));
+            EditorGUI.DrawRect(rect, color);
+            GUI.Label(rect, text, style);
         }
 
         void RunSync()
@@ -480,16 +688,16 @@ namespace BinGames.EditorTools.FeatureArt
             [OnInspectorGUI]
             void Draw()
             {
-                EditorGUILayout.LabelField("使用说明", EditorStyles.boldLabel);
-                EditorGUILayout.HelpBox(
-                    "选攻击方式 → 复制外形提示词做模型 → 复制开火提示词做特效 → 拖进同一页。\n\n" +
+                SirenixEditorGUI.Title("使用说明", null, TextAlignment.Left, true);
+                SirenixEditorGUI.MessageBox(
+                    "选攻击方式 → 看/复制外形提示词做模型（对照概念图）→ 看/复制开火提示词做特效 → 拖进同一页。\n\n" +
                     "1. 工具栏『从代码同步槽位』补齐新功能的空槽（look/prompt 每次都会按 LOOK-PROMPTS 覆盖，location 不动）；\n" +
                     "2. 选中左树『攻击方式』下的器官，同一页拖外形网格、复制开火四段提示词；\n" +
                     "3. 做好的资源放进建议目录（Raw 下），拖进对应槽的对象框即可写入 location；\n" +
                     "4. 点工具栏『保存』；\n" +
                     "5. Play 模式或『健康检查』核对。",
                     MessageType.Info);
-                EditorGUILayout.HelpBox(
+                SirenixEditorGUI.MessageBox(
                     "空槽 = 白模，游戏照常能跑；拖 Assets/GameRes/Art/ 下资源会被拒绝——Art 是源文件，不进 YooAsset 热更包。\n" +
                     "location = 拖入资源文件名（去扩展名），Raw 全树文件名须全局唯一，撞名会被『健康检查』标红。",
                     MessageType.None);
@@ -508,23 +716,24 @@ namespace BinGames.EditorTools.FeatureArt
             [OnInspectorGUI]
             void Draw()
             {
+                SirenixEditorGUI.Title("健康检查", null, TextAlignment.Left, true);
                 var issues = _window.HealthIssues;
                 if (issues == null)
                 {
-                    EditorGUILayout.HelpBox("尚未运行。", MessageType.Info);
+                    SirenixEditorGUI.MessageBox("尚未运行。", MessageType.Info);
                     return;
                 }
 
                 if (issues.Count == 0)
                 {
                     var boundCount = _window.Data?.slots?.Count(s => !s.retired && !string.IsNullOrEmpty(s.location)) ?? 0;
-                    EditorGUILayout.HelpBox($"全部通过，{boundCount} 个已绑定槽零异常", MessageType.Info);
+                    SirenixEditorGUI.MessageBox($"全部通过，{boundCount} 个已绑定槽零异常", MessageType.Info);
                     return;
                 }
 
                 foreach (var issue in issues)
                 {
-                    EditorGUILayout.HelpBox($"{issue.SlotId}: {issue.Message}", MessageType.Error);
+                    SirenixEditorGUI.MessageBox($"{issue.SlotId}: {issue.Message}", MessageType.Error);
                 }
             }
         }
@@ -538,37 +747,73 @@ namespace BinGames.EditorTools.FeatureArt
             FeatureArtSlot MeshSlot => _window.FindSlot("player.chassis.mesh");
             FeatureArtSlot MaterialSlot => _window.FindSlot("player.chassis.material");
 
-            [OnInspectorGUI]
-            void Draw()
+            [OnInspectorGUI, PropertyOrder(-50)]
+            void DrawIdentity()
             {
-                var meshSlot = MeshSlot;
-                EditorGUILayout.LabelField("玩家本体", EditorStyles.boldLabel);
-                if (meshSlot != null && !string.IsNullOrEmpty(meshSlot.look))
+                SirenixEditorGUI.Title("玩家 / 本体", null, TextAlignment.Left, true);
+                var slot = MeshSlot;
+                if (slot != null && !string.IsNullOrEmpty(slot.look))
                 {
-                    EditorGUILayout.LabelField(meshSlot.look, EditorStyles.wordWrappedLabel);
+                    EditorGUILayout.LabelField(slot.look, EditorStyles.wordWrappedLabel);
                 }
 
                 EditorGUILayout.Space(4);
+            }
+
+            [OnInspectorGUI, PropertyOrder(-40)]
+            void DrawBind()
+            {
+                EditorGUILayout.LabelField("外形绑定", EditorStyles.boldLabel);
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    using (new EditorGUILayout.VerticalScope(GUILayout.Width(240)))
+                    using (new EditorGUILayout.VerticalScope())
                     {
                         EditorGUILayout.LabelField("网格", EditorStyles.miniBoldLabel);
-                        _window.DrawBindField(meshSlot, 64);
+                        _window.DrawBindField(MeshSlot);
                     }
 
-                    using (new EditorGUILayout.VerticalScope(GUILayout.Width(240)))
+                    using (new EditorGUILayout.VerticalScope())
                     {
                         EditorGUILayout.LabelField("材质", EditorStyles.miniBoldLabel);
                         var mat = MaterialSlot;
                         if (mat != null && !string.IsNullOrEmpty(mat.look))
                         {
-                            EditorGUILayout.HelpBox(mat.look, MessageType.None);
+                            EditorGUILayout.LabelField(mat.look, EditorStyles.wordWrappedMiniLabel);
                         }
 
-                        _window.DrawBindField(mat, 64);
+                        _window.DrawBindField(mat);
                     }
                 }
+
+                EditorGUILayout.Space(2);
+                var prompt = MeshSlot?.prompt;
+                if (!string.IsNullOrEmpty(prompt))
+                {
+                    SirenixEditorGUI.MessageBox(prompt, MessageType.Info);
+                }
+
+                if (GUILayout.Button("复制生模提示词", GUILayout.Width(110)))
+                {
+                    EditorGUIUtility.systemCopyBuffer = prompt ?? "";
+                    _window.Log("player.chassis 生模提示词已复制。");
+                }
+
+                EditorGUILayout.Space(4);
+            }
+
+            [OnInspectorGUI, PropertyOrder(-30)]
+            void DrawConcept()
+            {
+                EditorGUILayout.LabelField("概念图 / 三视图", EditorStyles.boldLabel);
+                FeatureArtCellArtBridge.DrawViews(FeatureArtCellArtBridge.PlayerCellArtId);
+                EditorGUILayout.Space(4);
+            }
+
+            [OnInspectorGUI, PropertyOrder(50)]
+            void DrawNotes()
+            {
+                EditorGUILayout.LabelField("给制作的说明", EditorStyles.boldLabel);
+                SirenixEditorGUI.MessageBox(PlayerNote, MessageType.None);
             }
         }
 
@@ -592,13 +837,19 @@ namespace BinGames.EditorTools.FeatureArt
             FeatureArtSlot MeshSlot => _window.FindSlot($"organ.{_organId}.mesh");
             FeatureArtSlot ShapeSlot(string role) => _window.FindSlot($"shape.{_shapeKey}.{role}");
 
-            [OnInspectorGUI, PropertyOrder(-30)]
+            [OnInspectorGUI, PropertyOrder(-50)]
             void DrawIdentity()
             {
                 var slot = MeshSlot;
                 var title = slot?.titleZh?.Replace(" · 本体网格", "") ?? _organId;
-                EditorGUILayout.LabelField(title, EditorStyles.boldLabel);
-                EditorGUILayout.LabelField($"{_groupZh} · {_shapeKey}", EditorStyles.miniLabel);
+                SirenixEditorGUI.Title(title, null, TextAlignment.Left, true);
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    DrawChip(_groupZh, FamilyColor.TryGetValue(_groupZh, out var fc) ? fc : Color.gray);
+                    GUILayout.Space(4);
+                    DrawChip(_shapeKey, ShapeColor.TryGetValue(_shapeKey, out var sc) ? sc : Color.gray);
+                }
+
                 if (slot != null && !string.IsNullOrEmpty(slot.look))
                 {
                     EditorGUILayout.LabelField(slot.look, EditorStyles.wordWrappedLabel);
@@ -607,39 +858,43 @@ namespace BinGames.EditorTools.FeatureArt
                 EditorGUILayout.Space(4);
             }
 
-            [BoxGroup("外形"), PreviewField(70), HideLabel, ShowInInspector, PropertyOrder(-20)]
-            public UnityEngine.Object Mesh
+            [OnInspectorGUI, PropertyOrder(-40)]
+            void DrawShapeBind()
             {
-                get
+                EditorGUILayout.LabelField("外形绑定", EditorStyles.boldLabel);
+                _window.DrawBindField(MeshSlot);
+
+                EditorGUILayout.Space(2);
+                var prompt = MeshSlot?.prompt;
+                if (!string.IsNullOrEmpty(prompt))
                 {
-                    var slot = MeshSlot;
-                    return slot == null ? null : FeatureArtBindingWindow.ResolveCurrentAsset(slot, FeatureArtBindingWindow.ObjectFieldType(slot.bindKind));
+                    SirenixEditorGUI.MessageBox(prompt, MessageType.Info);
                 }
-                set
+
+                if (GUILayout.Button("复制生模提示词", GUILayout.Width(110)))
                 {
-                    if (value != null)
-                    {
-                        _window.TryBind(MeshSlot, value);
-                    }
+                    EditorGUIUtility.systemCopyBuffer = prompt ?? "";
+                    _window.Log($"{_organId} 生模提示词已复制。");
                 }
+
+                EditorGUILayout.Space(4);
             }
 
-            [BoxGroup("外形"), Button("复制生模提示词"), PropertyOrder(-19)]
-            void CopyPrompt()
+            [OnInspectorGUI, PropertyOrder(-30)]
+            void DrawConcept()
             {
-                EditorGUIUtility.systemCopyBuffer = MeshSlot?.prompt ?? "";
-                _window.Log($"{_organId} 生模提示词已复制。");
+                EditorGUILayout.LabelField("概念图 / 三视图", EditorStyles.boldLabel);
+                FeatureArtCellArtBridge.DrawViews(FeatureArtCellArtBridge.OrganCellArtId(_organId));
+                EditorGUILayout.Space(4);
             }
 
             [OnInspectorGUI, PropertyOrder(0)]
             void DrawFireTimeline()
             {
-                EditorGUILayout.Space(4);
-
                 if (_summonKey != null)
                 {
                     EditorGUILayout.LabelField("召唤链接", EditorStyles.boldLabel);
-                    EditorGUILayout.HelpBox($"链到召唤实体 / {_summonKey}", MessageType.None);
+                    SirenixEditorGUI.MessageBox($"链到召唤实体 / {_summonKey}", MessageType.None);
                     if (GUILayout.Button($"跳到召唤实体 / {_summonKey}"))
                     {
                         _window.JumpToSummon(_summonKey);
@@ -653,6 +908,7 @@ namespace BinGames.EditorTools.FeatureArt
                         DrawRoleColumn("爆炸", "explode");
                     }
 
+                    EditorGUILayout.Space(4);
                     return;
                 }
 
@@ -673,11 +929,23 @@ namespace BinGames.EditorTools.FeatureArt
                 var info = sharedWith.Count > 0
                     ? $"{_shapeKey} 语言与 {string.Join("、", sharedWith)} 共用；改这里两边一起变。"
                     : $"{_shapeKey} 语言当前仅本器官使用。";
-                EditorGUILayout.HelpBox(info, MessageType.Info);
+                SirenixEditorGUI.MessageBox(info, MessageType.Info);
 
                 if (GUILayout.Button($"跳到弹道语言 / {_shapeKey}"))
                 {
                     _window.JumpToShape(_shapeKey);
+                }
+
+                EditorGUILayout.Space(4);
+            }
+
+            [OnInspectorGUI, PropertyOrder(50)]
+            void DrawNotes()
+            {
+                EditorGUILayout.LabelField("给制作的说明", EditorStyles.boldLabel);
+                if (OrganNotes.TryGetValue(_organId, out var note))
+                {
+                    SirenixEditorGUI.MessageBox(note, MessageType.None);
                 }
             }
 
@@ -705,11 +973,11 @@ namespace BinGames.EditorTools.FeatureArt
             [OnInspectorGUI, PropertyOrder(-10)]
             void DrawHeader()
             {
-                EditorGUILayout.LabelField($"弹道语言 · {_shapeKey}", EditorStyles.boldLabel);
+                SirenixEditorGUI.Title($"弹道语言 · {_shapeKey}", null, TextAlignment.Left, true);
                 var usedBy = _window.OrgansUsingShape(_shapeKey);
                 if (usedBy.Count == 0)
                 {
-                    EditorGUILayout.HelpBox("暂无器官使用该 Shape（预留）。", MessageType.None);
+                    SirenixEditorGUI.MessageBox("暂无器官使用该 Shape（预留）。", MessageType.None);
                 }
                 else
                 {
@@ -743,6 +1011,26 @@ namespace BinGames.EditorTools.FeatureArt
                     DrawRole("命中", "hit");
                     DrawRole("爆炸", "explode");
                 }
+
+                EditorGUILayout.Space(4);
+            }
+
+            [OnInspectorGUI, PropertyOrder(10)]
+            void DrawConcept()
+            {
+                EditorGUILayout.LabelField("概念图 / 三视图", EditorStyles.boldLabel);
+                FeatureArtCellArtBridge.DrawViews(FeatureArtCellArtBridge.ShapeCellArtId(_shapeKey));
+                EditorGUILayout.Space(4);
+            }
+
+            [OnInspectorGUI, PropertyOrder(50)]
+            void DrawNotes()
+            {
+                EditorGUILayout.LabelField("给制作的说明", EditorStyles.boldLabel);
+                if (ShapeNotes.TryGetValue(_shapeKey, out var note))
+                {
+                    SirenixEditorGUI.MessageBox(note, MessageType.None);
+                }
             }
 
             void DrawRole(string labelZh, string role)
@@ -752,6 +1040,15 @@ namespace BinGames.EditorTools.FeatureArt
                 {
                     EditorGUILayout.LabelField(labelZh, EditorStyles.miniBoldLabel);
                     _window.DrawBindField(slot);
+                    if (slot != null && !string.IsNullOrEmpty(slot.prompt))
+                    {
+                        SirenixEditorGUI.MessageBox(slot.prompt, MessageType.None);
+                        if (GUILayout.Button("复制", GUILayout.Width(48)))
+                        {
+                            EditorGUIUtility.systemCopyBuffer = slot.prompt;
+                            _window.Log($"{slot.id} 提示词已复制。");
+                        }
+                    }
                 }
             }
         }
@@ -760,36 +1057,85 @@ namespace BinGames.EditorTools.FeatureArt
         {
             readonly FeatureArtBindingWindow _window;
             readonly string _slotId;
-            readonly string _fallbackTitle;
-            readonly string _note;
+            readonly string _titleZh;
+            readonly string _groupZh;
+            readonly Color _groupColor;
+            readonly string _cellArtId;
+            readonly string _tailNote;
 
-            public SimpleMeshPage(FeatureArtBindingWindow window, string slotId, string fallbackTitle, string note)
+            public SimpleMeshPage(FeatureArtBindingWindow window, string slotId, string titleZh, string groupZh,
+                Color groupColor, string cellArtId, string tailNote)
             {
                 _window = window;
                 _slotId = slotId;
-                _fallbackTitle = fallbackTitle;
-                _note = note;
+                _titleZh = titleZh;
+                _groupZh = groupZh;
+                _groupColor = groupColor;
+                _cellArtId = cellArtId;
+                _tailNote = tailNote;
             }
 
             FeatureArtSlot Slot => _window.FindSlot(_slotId);
 
-            [OnInspectorGUI]
-            void Draw()
+            [OnInspectorGUI, PropertyOrder(-50)]
+            void DrawIdentity()
             {
                 var slot = Slot;
-                EditorGUILayout.LabelField(_fallbackTitle, EditorStyles.boldLabel);
+                SirenixEditorGUI.Title(_titleZh, null, TextAlignment.Left, true);
+                if (!string.IsNullOrEmpty(_groupZh))
+                {
+                    DrawChip(_groupZh, _groupColor);
+                }
+
                 if (slot != null && !string.IsNullOrEmpty(slot.look))
                 {
                     EditorGUILayout.LabelField(slot.look, EditorStyles.wordWrappedLabel);
                 }
 
-                if (!string.IsNullOrEmpty(_note))
+                EditorGUILayout.Space(4);
+            }
+
+            [OnInspectorGUI, PropertyOrder(-40)]
+            void DrawBind()
+            {
+                EditorGUILayout.LabelField("外形绑定", EditorStyles.boldLabel);
+                var slot = Slot;
+                _window.DrawBindField(slot);
+
+                EditorGUILayout.Space(2);
+                var prompt = slot?.prompt;
+                if (!string.IsNullOrEmpty(prompt))
                 {
-                    EditorGUILayout.HelpBox(_note, MessageType.None);
+                    SirenixEditorGUI.MessageBox(prompt, MessageType.Info);
+                }
+
+                if (GUILayout.Button("复制生模提示词", GUILayout.Width(110)))
+                {
+                    EditorGUIUtility.systemCopyBuffer = prompt ?? "";
+                    _window.Log($"{_slotId} 生模提示词已复制。");
                 }
 
                 EditorGUILayout.Space(4);
-                _window.DrawBindField(slot, 64);
+            }
+
+            [OnInspectorGUI, PropertyOrder(-30)]
+            void DrawConcept()
+            {
+                EditorGUILayout.LabelField("概念图 / 三视图", EditorStyles.boldLabel);
+                FeatureArtCellArtBridge.DrawViews(_cellArtId);
+                EditorGUILayout.Space(4);
+            }
+
+            [OnInspectorGUI, PropertyOrder(50)]
+            void DrawNotes()
+            {
+                if (string.IsNullOrEmpty(_tailNote))
+                {
+                    return;
+                }
+
+                EditorGUILayout.LabelField("给制作的说明", EditorStyles.boldLabel);
+                SirenixEditorGUI.MessageBox(_tailNote, MessageType.None);
             }
         }
     }
