@@ -25,6 +25,7 @@ namespace BinGames.EditorTools.FeatureArt
         Vector2 _scroll;
         string _lastLog = "";
         bool _dirty;
+        List<HealthIssue> _healthIssues;
 
         public static void Open()
         {
@@ -159,10 +160,34 @@ namespace BinGames.EditorTools.FeatureArt
         void DrawHealthCheck()
         {
             EditorGUILayout.LabelField("健康检查", EditorStyles.boldLabel);
-            GUI.enabled = false;
-            GUILayout.Button("运行健康检查（占位，未接线）");
-            GUI.enabled = true;
-            EditorGUILayout.HelpBox("等 004 runtime-resolver 落地后接线——真实 YooAsset 模拟加载校验是 007 的活，003 不实现。", MessageType.Info);
+            if (GUILayout.Button("运行健康检查"))
+            {
+                _healthIssues = FeatureArtHealthCheck.Run(_data);
+            }
+
+            if (_healthIssues == null)
+            {
+                EditorGUILayout.HelpBox("尚未运行。", MessageType.Info);
+                return;
+            }
+
+            if (_healthIssues.Count == 0)
+            {
+                var boundCount = _data.slots.Count(s => !s.retired && !string.IsNullOrEmpty(s.location));
+                var c = GUI.color;
+                GUI.color = Color.green;
+                EditorGUILayout.HelpBox($"全部通过，{boundCount} 个已绑定槽零异常", MessageType.Info);
+                GUI.color = c;
+                return;
+            }
+
+            foreach (var issue in _healthIssues)
+            {
+                var c = GUI.color;
+                GUI.color = Color.red;
+                EditorGUILayout.HelpBox($"{issue.SlotId}: {issue.Message}", MessageType.Error);
+                GUI.color = c;
+            }
         }
 
         void DrawDomain(string domain, string titleZh)
