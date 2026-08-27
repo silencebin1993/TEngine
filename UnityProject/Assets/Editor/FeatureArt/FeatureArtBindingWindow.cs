@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using BinGames.EditorTools.CellArt;
 using GameLogic.ArtBinding;
 using Sirenix.OdinInspector;
 using Sirenix.OdinInspector.Editor;
@@ -75,9 +76,9 @@ namespace BinGames.EditorTools.FeatureArt
             ["Arc"] = HexColor("#E07A3D"),
         };
 
-        static readonly Texture2D DotEmpty = MakeDot(ColorEmpty);
-        static readonly Texture2D DotBound = MakeDot(ColorBound);
-        static readonly Texture2D DotBad = MakeDot(ColorBad);
+        static Texture2D _dotEmpty;
+        static Texture2D _dotBound;
+        static Texture2D _dotBad;
 
         // ---- OBJECT-NOTES.md 逐字抄的页尾死说明（只读；不进 JSON、不走 SlotSync）----
 
@@ -175,8 +176,12 @@ namespace BinGames.EditorTools.FeatureArt
 
         FeatureArtCatalogData _data;
         bool _dirty;
+        CellArtRegistry _registry;
+        bool _registryDirty;
         string _lastLog = "";
         List<HealthIssue> _healthIssues;
+        readonly Dictionary<string, string> _addViewKeys = new Dictionary<string, string>();
+        readonly Dictionary<string, CellArtAsset> _workingAssets = new Dictionary<string, CellArtAsset>();
 
         readonly Dictionary<string, OrganPage> _organPages = new Dictionary<string, OrganPage>();
         readonly Dictionary<string, ShapePage> _shapePages = new Dictionary<string, ShapePage>();
@@ -294,7 +299,7 @@ namespace BinGames.EditorTools.FeatureArt
             {
                 if (GUILayout.Button("刷新", EditorStyles.toolbarButton, GUILayout.Width(48)))
                 {
-                    if (_dirty && !EditorUtility.DisplayDialog("未保存", "有未保存修改，丢弃并刷新？", "丢弃", "取消"))
+                    if ((_dirty || _registryDirty) && !EditorUtility.DisplayDialog("未保存", "有未保存修改，丢弃并刷新？", "丢弃", "取消"))
                     {
                         // keep unsaved
                     }
@@ -305,7 +310,7 @@ namespace BinGames.EditorTools.FeatureArt
                     }
                 }
 
-                GUI.enabled = _dirty;
+                GUI.enabled = _dirty || _registryDirty;
                 if (GUILayout.Button("保存", EditorStyles.toolbarButton, GUILayout.Width(48)))
                 {
                     Save();
@@ -324,7 +329,7 @@ namespace BinGames.EditorTools.FeatureArt
                 }
 
                 GUILayout.FlexibleSpace();
-                var label = $"{_data?.slots?.Count ?? 0} 槽" + (_dirty ? " · 未保存" : "");
+                var label = $"{_data?.slots?.Count ?? 0} 槽" + (_dirty || _registryDirty ? " · 未保存" : "");
                 GUILayout.Label(label, EditorStyles.miniLabel);
             }
 
@@ -335,6 +340,111 @@ namespace BinGames.EditorTools.FeatureArt
         }
 
         public FeatureArtSlot FindSlot(string id) => _data?.slots?.FirstOrDefault(s => s.id == id);
+
+        public CellArtRegistry Registry
+        {
+            get
+            {
+                if (_registry == null)
+                {
+                    LoadRegistry();
+                }
+
+                return _registry;
+            }
+        }
+
+        public float ContentMaxWidth()
+        {
+            var max = position.width - MenuWidth - 36f;
+            if (float.IsNaN(max) || float.IsInfinity(max) || max < 200f)
+            {
+                return 480f;
+            }
+
+            return max > 1600f ? 1600f : max;
+        }
+
+        public string GetAddViewKey(string cellArtId) =>
+            !string.IsNullOrEmpty(cellArtId) && _addViewKeys.TryGetValue(cellArtId, out var key) ? key : "";
+
+        public void SetAddViewKey(string cellArtId, string key)
+        {
+            if (!string.IsNullOrEmpty(cellArtId))
+            {
+                _addViewKeys[cellArtId] = key ?? "";
+            }
+        }
+
+        public CellArtAsset GetWorkingAsset(string cellArtId, string titleZh)
+        {
+            var registry = Registry;
+            registry.assets ??= new List<CellArtAsset>();
+            var existing = registry.assets.FirstOrDefault(a => a.id == cellArtId);
+            if (existing != null)
+            {
+                existing.views ??= new Dictionary<string, string>();
+                return existing;
+            }
+
+            if (_workingAssets.TryGetValue(cellArtId, out var draft))
+            {
+                return draft;
+            }
+
+            draft = new CellArtAsset
+            {
+                id = cellArtId,
+                name_zh = string.IsNullOrEmpty(titleZh) ? cellArtId : titleZh,
+                kind = "module",
+                slot = "none",
+                route = "none",
+                rarity = "common",
+                concept = "",
+                views = new Dictionary<string, string>(),
+                anim_clips = new List<CellArtAnimClip>(),
+                status = "todo",
+                notes = "FeatureArt 页内建档",
+                needs_review = true,
+            };
+            _workingAssets[cellArtId] = draft;
+            return draft;
+        }
+
+        public void CommitWorkingAsset(CellArtAsset asset)
+        {
+            if (asset == null)
+            {
+                return;
+            }
+
+            var registry = Registry;
+            registry.assets ??= new List<CellArtAsset>();
+            if (registry.assets.Any(a => ReferenceEquals(a, asset) || a.id == asset.id))
+            {
+                return;
+            }
+
+            registry.assets.Add(asset);
+            _workingAssets.Remove(asset.id);
+        }
+
+        public void MarkRegistryDirty() => _registryDirty = true;
+
+        /// <summary>Odin 右栏 Layout 时 currentViewWidth 可能是 Infinity，MessageBox 会按无限宽量高，
+        /// Layout/Repaint 来回跳就闪。用窗口实际右栏宽夹住。</summary>
+        public void DrawWrappedBox(string text, MessageType type)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return;
+            }
+
+            using (new EditorGUILayout.VerticalScope(GUILayout.MaxWidth(ContentMaxWidth()), GUILayout.ExpandWidth(true)))
+            {
+                SirenixEditorGUI.MessageBox(text, type);
+            }
+        }
 
         public void Log(string message) => _lastLog = message;
 
@@ -588,10 +698,10 @@ namespace BinGames.EditorTools.FeatureArt
 
             if (string.IsNullOrEmpty(slot.location))
             {
-                return DotEmpty;
+                return _dotEmpty ??= MakeDot(ColorEmpty);
             }
 
-            return HasFilenameConflict(slot.location) ? DotBad : DotBound;
+            return HasFilenameConflict(slot.location) ? (_dotBad ??= MakeDot(ColorBad)) : (_dotBound ??= MakeDot(ColorBound));
         }
 
         static Texture2D MakeDot(Color color)
@@ -664,15 +774,51 @@ namespace BinGames.EditorTools.FeatureArt
                 _lastLog = e.Message;
                 Debug.LogError(e);
             }
+
+            LoadRegistry();
+        }
+
+        void LoadRegistry()
+        {
+            _workingAssets.Clear();
+            _addViewKeys.Clear();
+            try
+            {
+                _registry = CellArtRegistryService.Load();
+                _registryDirty = false;
+            }
+            catch (Exception e)
+            {
+                _registry = new CellArtRegistry
+                {
+                    assets = new List<CellArtAsset>(),
+                    dirs = new CellArtDirs(),
+                };
+                _registryDirty = false;
+                Debug.LogError(e);
+            }
         }
 
         void Save()
         {
             try
             {
-                FeatureArtCatalogIO.Save(_data);
+                var parts = new List<string>();
+                if (_dirty && _data != null)
+                {
+                    FeatureArtCatalogIO.Save(_data);
+                    parts.Add(FeatureArtCatalogIO.AbsolutePath);
+                }
+
+                if (_registryDirty && _registry != null)
+                {
+                    CellArtRegistryService.Save(_registry);
+                    parts.Add("Art/Cell/registry.json");
+                }
+
                 _dirty = false;
-                _lastLog = $"已保存 {FeatureArtCatalogIO.AbsolutePath}";
+                _registryDirty = false;
+                _lastLog = parts.Count == 0 ? "没有要保存的修改。" : "已保存 " + string.Join("；", parts);
             }
             catch (Exception e)
             {
@@ -789,7 +935,7 @@ namespace BinGames.EditorTools.FeatureArt
                 var prompt = MeshSlot?.prompt;
                 if (!string.IsNullOrEmpty(prompt))
                 {
-                    SirenixEditorGUI.MessageBox(prompt, MessageType.Info);
+                    _window.DrawWrappedBox(prompt, MessageType.Info);
                 }
 
                 if (GUILayout.Button("复制生模提示词", GUILayout.Width(110)))
@@ -805,7 +951,7 @@ namespace BinGames.EditorTools.FeatureArt
             void DrawConcept()
             {
                 EditorGUILayout.LabelField("概念图 / 三视图", EditorStyles.boldLabel);
-                FeatureArtCellArtBridge.DrawViews(FeatureArtCellArtBridge.PlayerCellArtId);
+                FeatureArtCellArtBridge.DrawViews(_window, FeatureArtCellArtBridge.PlayerCellArtId, "玩家 / 本体");
                 EditorGUILayout.Space(4);
             }
 
@@ -813,7 +959,7 @@ namespace BinGames.EditorTools.FeatureArt
             void DrawNotes()
             {
                 EditorGUILayout.LabelField("给制作的说明", EditorStyles.boldLabel);
-                SirenixEditorGUI.MessageBox(PlayerNote, MessageType.None);
+                _window.DrawWrappedBox(PlayerNote, MessageType.None);
             }
         }
 
@@ -868,7 +1014,7 @@ namespace BinGames.EditorTools.FeatureArt
                 var prompt = MeshSlot?.prompt;
                 if (!string.IsNullOrEmpty(prompt))
                 {
-                    SirenixEditorGUI.MessageBox(prompt, MessageType.Info);
+                    _window.DrawWrappedBox(prompt, MessageType.Info);
                 }
 
                 if (GUILayout.Button("复制生模提示词", GUILayout.Width(110)))
@@ -884,7 +1030,8 @@ namespace BinGames.EditorTools.FeatureArt
             void DrawConcept()
             {
                 EditorGUILayout.LabelField("概念图 / 三视图", EditorStyles.boldLabel);
-                FeatureArtCellArtBridge.DrawViews(FeatureArtCellArtBridge.OrganCellArtId(_organId));
+                FeatureArtCellArtBridge.DrawViews(_window, FeatureArtCellArtBridge.OrganCellArtId(_organId),
+                    MeshSlot?.titleZh?.Replace(" · 本体网格", "") ?? _organId);
                 EditorGUILayout.Space(4);
             }
 
@@ -894,7 +1041,7 @@ namespace BinGames.EditorTools.FeatureArt
                 if (_summonKey != null)
                 {
                     EditorGUILayout.LabelField("召唤链接", EditorStyles.boldLabel);
-                    SirenixEditorGUI.MessageBox($"链到召唤实体 / {_summonKey}", MessageType.None);
+                    _window.DrawWrappedBox($"链到召唤实体 / {_summonKey}", MessageType.None);
                     if (GUILayout.Button($"跳到召唤实体 / {_summonKey}"))
                     {
                         _window.JumpToSummon(_summonKey);
@@ -929,7 +1076,7 @@ namespace BinGames.EditorTools.FeatureArt
                 var info = sharedWith.Count > 0
                     ? $"{_shapeKey} 语言与 {string.Join("、", sharedWith)} 共用；改这里两边一起变。"
                     : $"{_shapeKey} 语言当前仅本器官使用。";
-                SirenixEditorGUI.MessageBox(info, MessageType.Info);
+                _window.DrawWrappedBox(info, MessageType.Info);
 
                 if (GUILayout.Button($"跳到弹道语言 / {_shapeKey}"))
                 {
@@ -945,7 +1092,7 @@ namespace BinGames.EditorTools.FeatureArt
                 EditorGUILayout.LabelField("给制作的说明", EditorStyles.boldLabel);
                 if (OrganNotes.TryGetValue(_organId, out var note))
                 {
-                    SirenixEditorGUI.MessageBox(note, MessageType.None);
+                    _window.DrawWrappedBox(note, MessageType.None);
                 }
             }
 
@@ -1027,7 +1174,7 @@ namespace BinGames.EditorTools.FeatureArt
             void DrawConcept()
             {
                 EditorGUILayout.LabelField("概念图 / 三视图", EditorStyles.boldLabel);
-                FeatureArtCellArtBridge.DrawViews(FeatureArtCellArtBridge.ShapeCellArtId(_shapeKey));
+                FeatureArtCellArtBridge.DrawViews(_window, FeatureArtCellArtBridge.ShapeCellArtId(_shapeKey), _shapeKey);
                 EditorGUILayout.Space(4);
             }
 
@@ -1037,7 +1184,7 @@ namespace BinGames.EditorTools.FeatureArt
                 EditorGUILayout.LabelField("给制作的说明", EditorStyles.boldLabel);
                 if (ShapeNotes.TryGetValue(_shapeKey, out var note))
                 {
-                    SirenixEditorGUI.MessageBox(note, MessageType.None);
+                    _window.DrawWrappedBox(note, MessageType.None);
                 }
             }
 
@@ -1060,7 +1207,7 @@ namespace BinGames.EditorTools.FeatureArt
                 }
 
                 EditorGUILayout.LabelField($"{labelZh} 提示词", EditorStyles.miniBoldLabel, GUILayout.ExpandWidth(true));
-                SirenixEditorGUI.MessageBox(slot.prompt, MessageType.None);
+                _window.DrawWrappedBox(slot.prompt, MessageType.None);
                 if (GUILayout.Button("复制", GUILayout.Width(48)))
                 {
                     EditorGUIUtility.systemCopyBuffer = slot.prompt;
@@ -1124,7 +1271,7 @@ namespace BinGames.EditorTools.FeatureArt
                 var prompt = slot?.prompt;
                 if (!string.IsNullOrEmpty(prompt))
                 {
-                    SirenixEditorGUI.MessageBox(prompt, MessageType.Info);
+                    _window.DrawWrappedBox(prompt, MessageType.Info);
                 }
 
                 if (GUILayout.Button("复制生模提示词", GUILayout.Width(110)))
@@ -1140,7 +1287,7 @@ namespace BinGames.EditorTools.FeatureArt
             void DrawConcept()
             {
                 EditorGUILayout.LabelField("概念图 / 三视图", EditorStyles.boldLabel);
-                FeatureArtCellArtBridge.DrawViews(_cellArtId);
+                FeatureArtCellArtBridge.DrawViews(_window, _cellArtId, _titleZh);
                 EditorGUILayout.Space(4);
             }
 
@@ -1153,7 +1300,7 @@ namespace BinGames.EditorTools.FeatureArt
                 }
 
                 EditorGUILayout.LabelField("给制作的说明", EditorStyles.boldLabel);
-                SirenixEditorGUI.MessageBox(_tailNote, MessageType.None);
+                _window.DrawWrappedBox(_tailNote, MessageType.None);
             }
         }
     }
