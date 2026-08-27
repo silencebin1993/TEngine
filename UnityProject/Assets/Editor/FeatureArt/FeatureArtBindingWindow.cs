@@ -148,12 +148,22 @@ namespace BinGames.EditorTools.FeatureArt
         {
             EditorGUILayout.LabelField("使用说明", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
+                "工作流（六步）：\n" +
+                "1. 工具栏『从代码同步槽位』补齐新功能的空槽；\n" +
+                "2. 左侧选 domain，展开某槽看用途/做法/预期/约束（Brief）；\n" +
+                "3. 按『做法』做 Prefab/Mesh/Material，放进该槽的建议目录（Raw 下）；\n" +
+                "4. 把做好的资源拖进该槽 ObjectField；\n" +
+                "5. 点工具栏『保存』；\n" +
+                "6. Play 模式进沙盒/关卡看对应功能是否换成新资源（对照『预期』）。",
+                MessageType.Info);
+            EditorGUILayout.HelpBox(
                 "本面板给人用：左侧按 domain 分类（玩家/器官/召唤/弹道与特效），每个槽位是一个功能美术占位。\n" +
                 "把 Assets/GameRes/Raw/ 下的 Prefab/Mesh/Material 拖进对应槽的对象框即可写入 location；\n" +
                 "空槽 = 白模，游戏照常能跑，不拖资源不会报错。\n" +
                 "拖 Assets/GameRes/Art/ 下的资源会被拒绝——Art 是源文件，不进 YooAsset 热更包。\n" +
                 "「从代码同步槽位」按当前代码内容增槽/标记已废弃（retired），绝不清空/覆盖你已经填好的 location 或 Brief。\n" +
-                "「保存」写回 feature-art-catalog.json；「清空绑定」只清该槽 location，Brief 文案不动。",
+                "「保存」写回 feature-art-catalog.json；「清空绑定」只清该槽 location，Brief 文案不动。\n" +
+                "YooAsset location = 拖入资源的文件名（去扩展名）；Raw 全树下文件名必须全局唯一，撞名会被『健康检查』页标红——发现撞名改文件名，不要去改 Address 规则。",
                 MessageType.None);
         }
 
