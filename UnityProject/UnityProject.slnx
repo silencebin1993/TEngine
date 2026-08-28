@@ -71,6 +71,7 @@
   <Project Path="Unity.Serialization.Editor.csproj" />
   <Project Path="Unity.InputSystem.DocCodeSamples.csproj" />
   <Project Path="Unity.Jobs.CodeGen.csproj" />
+  <Project Path="Sirenix.OdinInspector.Modules.UnityMathematics.csproj" />
   <Project Path="Nebukam.Common.Editor.csproj" />
   <Project Path="UniTask.YooAsset.csproj" />
   <Project Path="Unity.Deformations.csproj" />
