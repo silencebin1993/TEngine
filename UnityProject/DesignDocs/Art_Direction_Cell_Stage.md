@@ -1,13 +1,14 @@
 # 《文明织造》美术选型文案（细胞阶段优先）
 
-> 版本：**v1.3**  
-> 定稿日期：2026-08-05（v1.0） / 管线：2026-08-05（v1.1） / 提示词与资产清单：2026-08-06（v1.2） / 材质 LookDev：2026-08-10（v1.3）  
+> 版本：**v1.4**  
+> 定稿日期：2026-08-05（v1.0） / 管线：2026-08-05（v1.1） / 提示词与资产清单：2026-08-06（v1.2） / 材质 LookDev：2026-08-10（v1.3） / 运行时密度：2026-08-29（v1.4）  
 > 定稿方式：全部采纳原文推荐项  
 > 依据：`Cell_Stage_Spec.md`、`GDD_Starter_Pack.md` §13、`Game_Framework_Design.md`、`CellEnemy.visualId`  
 > 地位：细胞阶段美术基线；后续 Art Bible / 白模 / 部件表以此为准  
 > **v1.1**：锁定 **Cursor 文生图 → Tripo 图生 3D → Unity 表现**；拆开几何原画与半透明表现  
 > **v1.2**：提示词专为 **Cursor Generate Image · 仅 `auto` 模型**；补全战场可出现 mesh 清单；英雄资产强制多视图  
-> **v1.3**：运行时材质定为 **阳光培养皿 · BioGlass + 吉卜力鲜艳生命色**（详见 `Material_LookDev_BioGlass.md`；shader `BinGames/SimBioGlass`）
+> **v1.3**：运行时材质定为 **阳光培养皿 · BioGlass + 吉卜力鲜艳生命色**（详见 `Material_LookDev_BioGlass.md`；shader `BinGames/SimBioGlass`）  
+> **v1.4**：运行时三角/贴图/骨骼硬顶见仓库 `production/design/feature-art-binding/ART-PERF-BUDGET.md`（生模与 AI 改模都照此；禁止官方 10 万面当默认）
 
 ---
 
@@ -192,9 +193,11 @@
    - 玩家基底 / 首领 / 关键部件：尽量 front+left+back+right 多视图
    - 开启 smart_low_poly + quad（游戏向）
    - texture_alignment 优先 geometry（要形准，不要贴图炫）
-4. Blender 轻修：合并碎件、封洞、统一朝向、目标面数落到实例化预算
+4. Blender 轻修：合并碎件、封洞、统一朝向、目标面数落到 `ART-PERF-BUDGET`（弹体 ≤800，杂兵 ≤2000，器官/玩家 ≤4000；禁止加面）
 5. Unity：上半透明湿润 shader + 路线色 MPB；卡面另走 2D 插画，不复用几何原画当卡面
 ```
+
+> **密度权威**：`production/design/feature-art-binding/ART-PERF-BUDGET.md`。混元/Tripo/Meshy 的官方高模默认作废；后续 AI 改模只许减面。
 
 ---
 
