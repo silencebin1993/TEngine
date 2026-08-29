@@ -19,6 +19,18 @@ namespace BinGames.EditorTools.FeatureArt
         public const string LastFolderKey = "BinGames.Hunyuan.LastFolder";
         public const string LastNameKey = "BinGames.Hunyuan.LastName";
         public const string LastFileUrlKey = "BinGames.Hunyuan.LastFileUrl";
+        public const string ModelKey = "BinGames.Hunyuan.Model";
+        public const string LastModelKey = "BinGames.Hunyuan.LastModel";
+        public const string Model30 = "hy-3d-3.0";
+        public const string Model31 = "hy-3d-3.1";
+        public const string ModelExpress = "hy-3d-express";
+        public static readonly string[] ModelIds = { Model30, Model31, ModelExpress };
+        public static readonly string[] ModelLabels =
+        {
+            "混元 3.0 专业（默认）",
+            "混元 3.1 专业",
+            "混元极速 Express",
+        };
         const string HistoryKey = "BinGames.Hunyuan.JobHistory";
         const int HistoryCap = 20;
 
@@ -42,6 +54,72 @@ namespace BinGames.EditorTools.FeatureArt
             !string.IsNullOrEmpty(LastFileUrl) &&
             (LastFileUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
              LastFileUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
+
+        public static string SelectedModel => NormalizeModel(EditorPrefs.GetString(ModelKey, Model30));
+
+        public static string LastModel =>
+            NormalizeModel(EditorPrefs.GetString(LastModelKey, SelectedModel));
+
+        public static int SelectedModelIndex
+        {
+            get
+            {
+                var id = SelectedModel;
+                for (var i = 0; i < ModelIds.Length; i++)
+                {
+                    if (ModelIds[i] == id)
+                    {
+                        return i;
+                    }
+                }
+
+                return 0;
+            }
+        }
+
+        public static bool IsExpress(string model) =>
+            string.Equals(NormalizeModel(model), ModelExpress, StringComparison.Ordinal);
+
+        public static string NormalizeModel(string model)
+        {
+            if (string.Equals(model, Model31, StringComparison.OrdinalIgnoreCase))
+            {
+                return Model31;
+            }
+
+            if (string.Equals(model, ModelExpress, StringComparison.OrdinalIgnoreCase))
+            {
+                return ModelExpress;
+            }
+
+            return Model30;
+        }
+
+        public static void SetSelectedModel(string model) =>
+            EditorPrefs.SetString(ModelKey, NormalizeModel(model));
+
+        public static void DrawModelPopup(int width = 200)
+        {
+            var idx = SelectedModelIndex;
+            var next = EditorGUILayout.Popup(idx, ModelLabels, GUILayout.Width(width));
+            if (next != idx && next >= 0 && next < ModelIds.Length)
+            {
+                SetSelectedModel(ModelIds[next]);
+            }
+        }
+
+        public static string CreditHint(bool sendMultiView)
+        {
+            if (IsExpress(SelectedModel))
+            {
+                return "估 25 积分（极速 + PBR，只发主图）";
+            }
+
+            var n = 20 + 10 + 5 + (sendMultiView ? 10 : 0);
+            return sendMultiView
+                ? $"估 {n} 积分（Normal+PBR+FBX，含多视图 +10）"
+                : $"估 {n} 积分（Normal+PBR+FBX）";
+        }
 
         public static void RememberLast(string jobId, string slotId, string folder, string fileName,
             string status = "进行中")
@@ -86,6 +164,7 @@ namespace BinGames.EditorTools.FeatureArt
             EditorPrefs.DeleteKey(LastFolderKey);
             EditorPrefs.DeleteKey(LastNameKey);
             EditorPrefs.DeleteKey(LastFileUrlKey);
+            EditorPrefs.DeleteKey(LastModelKey);
         }
 
         public static string GetApiKey() => EditorPrefs.GetString(PrefsKey, "") ?? "";
@@ -230,11 +309,21 @@ namespace BinGames.EditorTools.FeatureArt
         {
             SirenixEditorGUI.Title("混元生3D", null, TextAlignment.Left, true);
             SirenixEditorGUI.MessageBox(
-                "TokenHub 专业版 LowPoly + FBX。各页概念图/三视图下勾「发给混元」，只发勾中的图。\n" +
-                "默认只发概念图；front / left / right / back 要勾了才发，图越多积分越多。\n" +
+                "默认 Normal + PBR + FBX（网格+贴图，方便拷去 Blender）。各页勾「发给混元」，只发勾中的图。\n" +
+                "默认只发概念图；front / left / right / back 要勾了才发（极速版仍只发主图）。\n" +
+                "混元常把贴图嵌在 FBX 里；对象框全白时点「补抽贴图」，不要再生成。\n" +
                 "API Key 必须是 TokenHub（tokenhub.tencentmaas.com）的 sk- Key，保存后请求带 Bearer。\n" +
                 "不要填混元对话 Key 或 CAM SecretId/SecretKey。Key 只留本机，不会入库。",
                 MessageType.Info);
+
+            EditorGUILayout.LabelField("出模模型", EditorStyles.miniBoldLabel);
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                FeatureArtHunyuanSettings.DrawModelPopup(240);
+                EditorGUILayout.LabelField(
+                    FeatureArtHunyuanSettings.CreditHint(false),
+                    EditorStyles.miniLabel);
+            }
 
             if (FeatureArtHunyuanSettings.HasApiKey)
             {
@@ -266,6 +355,17 @@ namespace BinGames.EditorTools.FeatureArt
                     GUI.FocusControl(null);
                 }
             }
+
+            EditorGUILayout.Space();
+            if (GUILayout.Button("给 Raw 下白模 FBX 补抽贴图（不重新生成、不扣积分）", GUILayout.Width(360)))
+            {
+                var n = FeatureArtHunyuanGenerate.TryRepairRawEmbeddedMaps(out var log);
+                EditorUtility.DisplayDialog("混元生3D", log ?? (n > 0 ? "已补抽。" : "没有可补的。"), "好");
+            }
+
+            EditorGUILayout.LabelField(
+                "混元常把 PBR 嵌在单个 FBX 里。对象框全白时点上面，不必再烧积分。",
+                EditorStyles.miniLabel);
 
             EditorGUILayout.Space();
             SirenixEditorGUI.Title("运行历史", null, TextAlignment.Left, false);

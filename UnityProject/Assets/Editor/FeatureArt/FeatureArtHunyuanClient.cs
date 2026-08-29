@@ -17,7 +17,7 @@ namespace BinGames.EditorTools.FeatureArt
     {
         public const string SubmitUrl = "https://tokenhub.tencentmaas.com/v1/api/3d/submit";
         public const string QueryUrl = "https://tokenhub.tencentmaas.com/v1/api/3d/query";
-        public const string ModelName = "hy-3d-3.0";
+        public const string ModelName = FeatureArtHunyuanSettings.Model30;
 
         public sealed class File3D
         {
@@ -25,13 +25,21 @@ namespace BinGames.EditorTools.FeatureArt
             public string Url;
         }
 
-        public static string BuildSubmitJson(string mainBase64, IReadOnlyList<(string ViewType, string Base64)> views)
+        public static string BuildSubmitJson(string mainBase64, IReadOnlyList<(string ViewType, string Base64)> views,
+            string model = null)
         {
+            model = FeatureArtHunyuanSettings.NormalizeModel(model);
+            var express = FeatureArtHunyuanSettings.IsExpress(model);
             var sb = new StringBuilder(256);
-            sb.Append("{\"model\":\"").Append(ModelName)
-                .Append("\",\"GenerateType\":\"LowPoly\",\"EnablePBR\":false,\"ResultFormat\":\"FBX\",");
+            sb.Append("{\"model\":\"").Append(model).Append('"');
+            if (!express)
+            {
+                sb.Append(",\"GenerateType\":\"Normal\"");
+            }
+
+            sb.Append(",\"EnablePBR\":true,\"ResultFormat\":\"FBX\",");
             sb.Append("\"ImageBase64\":\"").Append(StripDataUri(mainBase64)).Append('"');
-            if (views != null && views.Count > 0)
+            if (!express && views != null && views.Count > 0)
             {
                 sb.Append(",\"MultiViewImages\":[");
                 for (var i = 0; i < views.Count; i++)
@@ -53,8 +61,260 @@ namespace BinGames.EditorTools.FeatureArt
             return sb.ToString();
         }
 
-        public static string BuildQueryJson(string jobId) =>
-            "{\"model\":\"" + ModelName + "\",\"id\":\"" + (jobId ?? "") + "\"}";
+        public static string BuildQueryJson(string jobId, string model = null)
+        {
+            model = FeatureArtHunyuanSettings.NormalizeModel(
+                string.IsNullOrEmpty(model) ? FeatureArtHunyuanSettings.LastModel : model);
+            return "{\"model\":\"" + model + "\",\"id\":\"" + (jobId ?? "") + "\"}";
+        }
+
+        public static readonly string[] SidecarExts =
+            { ".png", ".jpg", ".jpeg", ".tga", ".exr", ".mtl" };
+
+        public static bool IsSidecarExt(string ext)
+        {
+            ext = (ext ?? "").ToLowerInvariant();
+            for (var i = 0; i < SidecarExts.Length; i++)
+            {
+                if (SidecarExts[i] == ext)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        public static List<string> ListSidecarFiles(string extractDir, string skipModelPath)
+        {
+            var list = new List<string>();
+            if (string.IsNullOrEmpty(extractDir) || !Directory.Exists(extractDir))
+            {
+                return list;
+            }
+
+            foreach (var path in Directory.GetFiles(extractDir, "*", SearchOption.AllDirectories))
+            {
+                if (!string.IsNullOrEmpty(skipModelPath) &&
+                    string.Equals(path, skipModelPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (!IsSidecarExt(Path.GetExtension(path)))
+                {
+                    continue;
+                }
+
+                var name = Path.GetFileName(path) ?? "";
+                if (name.IndexOf("preview", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    continue;
+                }
+
+                list.Add(path);
+            }
+
+            return list;
+        }
+
+        /// <summary>混元 PBR 常嵌在单文件 FBX 里，引用 <c>output.fbm/*.png</c>。
+        /// 抽出到 destDir，文件名尽量用 FBX 里的原名。</summary>
+        public static int ExtractEmbeddedPngs(string fbxPath, string destDir, bool overwrite)
+        {
+            if (string.IsNullOrEmpty(fbxPath) || !File.Exists(fbxPath) || string.IsNullOrEmpty(destDir))
+            {
+                return 0;
+            }
+
+            Directory.CreateDirectory(destDir);
+            byte[] data;
+            try
+            {
+                data = File.ReadAllBytes(fbxPath);
+            }
+            catch
+            {
+                return 0;
+            }
+
+            var sig = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
+            var iend = Encoding.ASCII.GetBytes("IEND");
+            var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var count = 0;
+            var i = 0;
+            var idx = 0;
+            while (true)
+            {
+                i = IndexOfBytes(data, sig, i);
+                if (i < 0)
+                {
+                    break;
+                }
+
+                var j = IndexOfBytes(data, iend, i + sig.Length);
+                if (j < 0)
+                {
+                    break;
+                }
+
+                var end = j + 8;
+                if (end > data.Length)
+                {
+                    break;
+                }
+
+                var fileName = NameNearPng(data, i) ?? ("embedded_" + idx + ".png");
+                fileName = Path.GetFileName(fileName.Replace('\\', '/'));
+                if (string.IsNullOrEmpty(fileName) || used.Contains(fileName))
+                {
+                    fileName = "embedded_" + idx + ".png";
+                }
+
+                used.Add(fileName);
+                var dest = Path.Combine(destDir, fileName);
+                if (overwrite || !File.Exists(dest))
+                {
+                    var blob = new byte[end - i];
+                    Buffer.BlockCopy(data, i, blob, 0, blob.Length);
+                    File.WriteAllBytes(dest, blob);
+                    count++;
+                }
+
+                idx++;
+                i = end;
+            }
+
+            return count;
+        }
+
+        public static bool HasEmbeddedPng(string fbxPath)
+        {
+            if (string.IsNullOrEmpty(fbxPath) || !File.Exists(fbxPath))
+            {
+                return false;
+            }
+
+            try
+            {
+                using (var fs = File.OpenRead(fbxPath))
+                {
+                    var buf = new byte[1024 * 64];
+                    var sig = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
+                    var prev = 0;
+                    int n;
+                    while ((n = fs.Read(buf, prev, buf.Length - prev)) > 0)
+                    {
+                        var len = n + prev;
+                        if (IndexOfBytes(buf, sig, 0, len) >= 0)
+                        {
+                            return true;
+                        }
+
+                        prev = Math.Min(7, len);
+                        Buffer.BlockCopy(buf, len - prev, buf, 0, prev);
+                    }
+                }
+            }
+            catch
+            {
+                return false;
+            }
+
+            return false;
+        }
+
+        static string NameNearPng(byte[] data, int blobStart)
+        {
+            var from = Math.Max(0, blobStart - 2048);
+            var needle = Encoding.ASCII.GetBytes(".png");
+            var last = -1;
+            var p = from;
+            while (p < blobStart)
+            {
+                var at = IndexOfBytes(data, needle, p, blobStart);
+                if (at < 0)
+                {
+                    break;
+                }
+
+                last = at;
+                p = at + 4;
+            }
+
+            if (last < 0)
+            {
+                return null;
+            }
+
+            var start = last;
+            while (start > from)
+            {
+                var c = data[start - 1];
+                if (c < 33 || c > 126 || c == '"' || c == '\'' || c == '<' || c == '>')
+                {
+                    break;
+                }
+
+                start--;
+                if (last + 4 - start > 180)
+                {
+                    break;
+                }
+            }
+
+            var raw = Encoding.ASCII.GetString(data, start, last + 4 - start).Replace('\\', '/');
+            var file = Path.GetFileName(raw);
+            if (string.IsNullOrEmpty(file) || !file.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            for (var k = 0; k < file.Length; k++)
+            {
+                var c = file[k];
+                if (!(c >= 'A' && c <= 'Z') && !(c >= 'a' && c <= 'z') &&
+                    !(c >= '0' && c <= '9') && c != '_' && c != '-' && c != '.')
+                {
+                    return null;
+                }
+            }
+
+            return file;
+        }
+
+        static int IndexOfBytes(byte[] data, byte[] needle, int start) =>
+            IndexOfBytes(data, needle, start, data != null ? data.Length : 0);
+
+        static int IndexOfBytes(byte[] data, byte[] needle, int start, int end)
+        {
+            if (data == null || needle == null || needle.Length == 0)
+            {
+                return -1;
+            }
+
+            end = Math.Min(end, data.Length);
+            var last = end - needle.Length;
+            for (var i = start; i <= last; i++)
+            {
+                var ok = true;
+                for (var k = 0; k < needle.Length; k++)
+                {
+                    if (data[i + k] != needle[k])
+                    {
+                        ok = false;
+                        break;
+                    }
+                }
+
+                if (ok)
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
 
         public static UnityWebRequest PostJson(string url, string json, string apiKey)
         {

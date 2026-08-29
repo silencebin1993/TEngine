@@ -46,6 +46,7 @@ namespace BinGames.EditorTools.FeatureArt
         static float _lastUiAt;
         static int _queryFails;
         static string _resumeDraft = "";
+        static int _sidecarCount;
 
         public static bool IsBusy => _phase != Phase.Idle;
 
@@ -54,11 +55,26 @@ namespace BinGames.EditorTools.FeatureArt
                 ? (string.IsNullOrEmpty(_jobId) ? "生成中…" : $"生成中… JobId={_jobId}")
                 : "";
 
+        static bool _autoAttachTried;
+
         [InitializeOnLoadMethod]
         static void Hook()
         {
             EditorApplication.update -= Tick;
             EditorApplication.update += Tick;
+            EditorApplication.delayCall -= AutoAttachOnce;
+            EditorApplication.delayCall += AutoAttachOnce;
+        }
+
+        static void AutoAttachOnce()
+        {
+            if (_autoAttachTried || EditorApplication.isPlayingOrWillChangePlaymode)
+            {
+                return;
+            }
+
+            _autoAttachTried = true;
+            TryRepairRawEmbeddedMaps(out _);
         }
 
         public static bool CanSendKey(string key) =>
@@ -160,6 +176,25 @@ namespace BinGames.EditorTools.FeatureArt
             return parts.Count == 0 ? "未勾有效图" : string.Join(" + ", parts);
         }
 
+        public static bool WillSendMultiView(CellArtAsset asset)
+        {
+            if (FeatureArtHunyuanSettings.IsExpress(FeatureArtHunyuanSettings.SelectedModel))
+            {
+                return false;
+            }
+
+            var set = GetSendSet(asset);
+            foreach (var key in MultiViewKeys)
+            {
+                if (set.Contains(key) && HasViewFile(asset, key))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         public static string DisableReason(FeatureArtSlot slot, CellArtAsset asset)
         {
             if (slot == null || slot.retired)
@@ -209,9 +244,10 @@ namespace BinGames.EditorTools.FeatureArt
 
             var reason = DisableReason(target, asset);
             var label = IsBusy ? "生成中…" : "用三视图生成模型并绑定";
+            var multi = WillSendMultiView(asset);
             EditorGUILayout.HelpBox(
                 "各图下方勾「发给混元」。默认只发概念图；正视和左右后要勾了才发（图越多积分越多）。本次：" +
-                SendSummary(asset),
+                SendSummary(asset) + "。模型=" + FeatureArtHunyuanSettings.SelectedModel + "。",
                 MessageType.None);
             using (new EditorGUILayout.HorizontalScope(GUILayout.ExpandWidth(false)))
             {
@@ -222,9 +258,27 @@ namespace BinGames.EditorTools.FeatureArt
                 }
 
                 EditorGUI.EndDisabledGroup();
+                EditorGUI.BeginDisabledGroup(IsBusy);
+                FeatureArtHunyuanSettings.DrawModelPopup(200);
+                EditorGUI.EndDisabledGroup();
+                EditorGUILayout.LabelField(
+                    FeatureArtHunyuanSettings.CreditHint(multi),
+                    EditorStyles.miniLabel,
+                    GUILayout.MinWidth(160));
                 if (reason != null)
                 {
                     EditorGUILayout.LabelField(reason, EditorStyles.miniLabel);
+                }
+            }
+
+            if (!IsBusy && TryCanonical(target, out var folder, out var name, out _) &&
+                File.Exists(AbsFromAsset(folder + "/" + name + ".fbx")))
+            {
+                if (GUILayout.Button("补抽贴图（不重新生成、不扣积分）", GUILayout.Width(220)))
+                {
+                    var n = TryRepairImportedMaps(folder, name, out var log);
+                    window.Log(n > 0 ? log : (log ?? "没有抽出贴图。"));
+                    window.Repaint();
                 }
             }
 
@@ -241,7 +295,7 @@ namespace BinGames.EditorTools.FeatureArt
                 EditorGUI.ProgressBar(rect, Mathf.Clamp01(elapsed / TimeoutSeconds),
                     PhaseLabel() + $"  {elapsed:0}s / 剩余 {remain:0}s  id={_jobId}");
                 EditorGUILayout.HelpBox(
-                    "云端 LowPoly + 三视图常要 3～15 分钟。积分是腾讯出模成功后扣的；本地超时不会退款。",
+                    "云端 Normal + PBR 常要 3～15 分钟。积分是腾讯出模成功后扣的；本地超时不会退款。",
                     MessageType.Info);
                 if (GUILayout.Button("取消等待（云端任务不停、不退积分）", GUILayout.Width(260)))
                 {
@@ -314,7 +368,8 @@ namespace BinGames.EditorTools.FeatureArt
                 return false;
             }
 
-            json = FeatureArtHunyuanClient.BuildSubmitJson(mainUri, views);
+            json = FeatureArtHunyuanClient.BuildSubmitJson(
+                mainUri, views, FeatureArtHunyuanSettings.SelectedModel);
             return true;
         }
 
@@ -392,7 +447,9 @@ namespace BinGames.EditorTools.FeatureArt
                 return;
             }
 
-            window.Log("发给混元：" + SendSummary(asset));
+            window.Log("发给混元：" + SendSummary(asset) + " 模型=" +
+                       FeatureArtHunyuanSettings.SelectedModel + " " +
+                       FeatureArtHunyuanSettings.CreditHint(WillSendMultiView(asset)));
 
             var key = FeatureArtHunyuanSettings.GetApiKey();
             if (string.IsNullOrEmpty(key))
@@ -412,6 +469,8 @@ namespace BinGames.EditorTools.FeatureArt
             _tempWork = Path.Combine(Path.GetTempPath(), "bingames-hy3d-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(_tempWork);
             _tempDownload = Path.Combine(_tempWork, "download.bin");
+            EditorPrefs.SetString(FeatureArtHunyuanSettings.LastModelKey,
+                FeatureArtHunyuanSettings.SelectedModel);
             StartSubmit(key);
             window.Log("已提交混元任务。");
         }
@@ -423,7 +482,8 @@ namespace BinGames.EditorTools.FeatureArt
             var destPrefab = folder + "/" + name + ".prefab";
             var destSrc = folder + "/" + name + "_src.fbx";
             var exists = File.Exists(AbsFromAsset(destFbx)) || File.Exists(AbsFromAsset(destObj)) ||
-                         File.Exists(AbsFromAsset(destPrefab)) || File.Exists(AbsFromAsset(destSrc));
+                         File.Exists(AbsFromAsset(destPrefab)) || File.Exists(AbsFromAsset(destSrc)) ||
+                         HasSidecarFiles(folder, name);
             var rebound = !string.IsNullOrEmpty(slot.location) &&
                           !string.Equals(slot.location, name, StringComparison.Ordinal);
             if (!exists && !rebound)
@@ -432,8 +492,8 @@ namespace BinGames.EditorTools.FeatureArt
             }
 
             var msg = rebound
-                ? $"将覆盖 Raw 下 {name} 并把 {slot.id} 从 {slot.location} 改绑为 {name}，继续？"
-                : $"将覆盖 Raw 下 {name} 并重绑，继续？";
+                ? $"将覆盖 Raw 下 {name}（含贴图）并把 {slot.id} 从 {slot.location} 改绑为 {name}，继续？"
+                : $"将覆盖 Raw 下 {name}（含贴图）并重绑，继续？";
             return EditorUtility.DisplayDialog("混元出模", msg, "继续", "取消");
         }
 
@@ -533,7 +593,7 @@ namespace BinGames.EditorTools.FeatureArt
             DisposeReq();
             _req = FeatureArtHunyuanClient.PostJson(
                 FeatureArtHunyuanClient.QueryUrl,
-                FeatureArtHunyuanClient.BuildQueryJson(_jobId),
+                FeatureArtHunyuanClient.BuildQueryJson(_jobId, FeatureArtHunyuanSettings.LastModel),
                 key);
             _req.SendWebRequest();
             _phase = Phase.Query;
@@ -675,13 +735,21 @@ namespace BinGames.EditorTools.FeatureArt
 
             var destAbs = AbsFromAsset(modelAssetPath);
             Directory.CreateDirectory(Path.GetDirectoryName(destAbs) ?? _tempWork);
+            ClearOldSidecars(_folderHint, _canonicalName);
             File.Copy(srcModel, destAbs, true);
+            _sidecarCount = MaterializeMaps(srcModel, destAbs, _folderHint, _canonicalName);
+            ImportMapAssets(_folderHint, _canonicalName);
             AssetDatabase.ImportAsset(modelAssetPath, ImportAssetOptions.ForceUpdate);
             if (AssetImporter.GetAtPath(modelAssetPath) is ModelImporter importer)
             {
                 importer.meshCompression = ModelImporterMeshCompression.Off;
+                importer.materialImportMode = ModelImporterMaterialImportMode.ImportStandard;
+                importer.materialLocation = ModelImporterMaterialLocation.InPrefab;
+                importer.materialSearch = ModelImporterMaterialSearch.RecursiveUp;
                 importer.SaveAndReimport();
             }
+
+            RemapAndPaintMaps(modelAssetPath, _folderHint, _canonicalName);
 
             UnityEngine.Object bindTarget;
             if (isPrefab)
@@ -734,7 +802,14 @@ namespace BinGames.EditorTools.FeatureArt
             try
             {
                 go.AddComponent<MeshFilter>().sharedMesh = mesh;
-                go.AddComponent<MeshRenderer>();
+                var mr = go.AddComponent<MeshRenderer>();
+                var srcGo = AssetDatabase.LoadAssetAtPath<GameObject>(modelAssetPath);
+                var srcMr = srcGo != null ? srcGo.GetComponentInChildren<MeshRenderer>(true) : null;
+                if (srcMr != null && srcMr.sharedMaterial != null)
+                {
+                    mr.sharedMaterial = srcMr.sharedMaterial;
+                }
+
                 return PrefabUtility.SaveAsPrefabAsset(go, prefabPath);
             }
             finally
@@ -763,6 +838,553 @@ namespace BinGames.EditorTools.FeatureArt
             return null;
         }
 
+        static bool HasSidecarFiles(string folder, string name)
+        {
+            var dir = AbsFromAsset(folder);
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir) || string.IsNullOrEmpty(name))
+            {
+                return false;
+            }
+
+            foreach (var path in Directory.GetFiles(dir, name + "_*"))
+            {
+                if (FeatureArtHunyuanClient.IsSidecarExt(Path.GetExtension(path)))
+                {
+                    return true;
+                }
+            }
+
+            return Directory.Exists(Path.Combine(dir, name + ".fbm")) ||
+                   Directory.Exists(Path.Combine(dir, "output.fbm"));
+        }
+
+        static void ClearOldSidecars(string folder, string name)
+        {
+            var dir = AbsFromAsset(folder);
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir) || string.IsNullOrEmpty(name))
+            {
+                return;
+            }
+
+            foreach (var path in Directory.GetFiles(dir, name + "_*"))
+            {
+                var ext = Path.GetExtension(path);
+                if (!FeatureArtHunyuanClient.IsSidecarExt(ext) &&
+                    !string.Equals(ext, ".mat", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var asset = folder + "/" + Path.GetFileName(path);
+                if (!AssetDatabase.DeleteAsset(asset))
+                {
+                    try
+                    {
+                        File.Delete(path);
+                    }
+                    catch
+                    {
+                        // best-effort
+                    }
+                }
+            }
+
+            DeleteAssetOrDir(folder + "/" + name + ".fbm");
+        }
+
+        /// <summary>zip 散图 + FBX 内嵌 PNG → 规范名前缀（Address 不撞）+ 临时 output.fbm（给 FBX 对路径）。</summary>
+        static int MaterializeMaps(string srcModel, string destFbxAbs, string folder, string name)
+        {
+            var count = 0;
+            var extractDir = Path.GetDirectoryName(srcModel);
+            foreach (var path in FeatureArtHunyuanClient.ListSidecarFiles(extractDir, srcModel))
+            {
+                if (WriteUniqueAndFbm(path, folder, name, Path.GetFileName(path)))
+                {
+                    count++;
+                }
+            }
+
+            var tmp = Path.Combine(Path.GetTempPath(), "bingames-hy-fbm-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var fromSrc = FeatureArtHunyuanClient.ExtractEmbeddedPngs(srcModel, tmp, true);
+                if (fromSrc == 0 && !string.IsNullOrEmpty(destFbxAbs))
+                {
+                    FeatureArtHunyuanClient.ExtractEmbeddedPngs(destFbxAbs, tmp, true);
+                }
+
+                if (Directory.Exists(tmp))
+                {
+                    foreach (var path in Directory.GetFiles(tmp, "*.png"))
+                    {
+                        if (WriteUniqueAndFbm(path, folder, name, Path.GetFileName(path)))
+                        {
+                            count++;
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                TryDeleteDir(tmp);
+            }
+
+            return count;
+        }
+
+        static bool WriteUniqueAndFbm(string srcAbs, string folder, string name, string originalName)
+        {
+            originalName = SanitizeFileName(originalName);
+            if (string.IsNullOrEmpty(originalName))
+            {
+                return false;
+            }
+
+            var uniqueAsset = folder + "/" + name + "_" + originalName;
+            var fbmAsset = folder + "/output.fbm/" + originalName;
+            if (!uniqueAsset.StartsWith(RawPrefix, StringComparison.OrdinalIgnoreCase) ||
+                !fbmAsset.StartsWith(RawPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            WriteAbsCopy(srcAbs, AbsFromAsset(uniqueAsset));
+            WriteAbsCopy(srcAbs, AbsFromAsset(fbmAsset));
+            return true;
+        }
+
+        static void WriteAbsCopy(string srcAbs, string destAbs)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(destAbs) ?? "");
+            File.Copy(srcAbs, destAbs, true);
+        }
+
+        static void ImportMapAssets(string folder, string name)
+        {
+            var dir = AbsFromAsset(folder);
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
+            {
+                return;
+            }
+
+            foreach (var path in Directory.GetFiles(dir, name + "_*"))
+            {
+                ImportOneMap(folder + "/" + Path.GetFileName(path));
+            }
+
+            var fbm = Path.Combine(dir, "output.fbm");
+            if (!Directory.Exists(fbm))
+            {
+                return;
+            }
+
+            foreach (var path in Directory.GetFiles(fbm, "*.*"))
+            {
+                if (FeatureArtHunyuanClient.IsSidecarExt(Path.GetExtension(path)))
+                {
+                    ImportOneMap(folder + "/output.fbm/" + Path.GetFileName(path));
+                }
+            }
+        }
+
+        static void ImportOneMap(string assetPath)
+        {
+            if (string.IsNullOrEmpty(assetPath) ||
+                !assetPath.StartsWith(RawPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate);
+            if (!(AssetImporter.GetAtPath(assetPath) is TextureImporter tex))
+            {
+                return;
+            }
+
+            var file = Path.GetFileName(assetPath) ?? "";
+            if (file.IndexOf("_normal", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                tex.textureType = TextureImporterType.NormalMap;
+                tex.SaveAndReimport();
+            }
+        }
+
+        static void RemapAndPaintMaps(string modelAssetPath, string folder, string name)
+        {
+            if (AssetImporter.GetAtPath(modelAssetPath) is ModelImporter importer)
+            {
+                try
+                {
+                    importer.SearchAndRemapMaterials(
+                        ModelImporterMaterialName.BasedOnMaterialName,
+                        ModelImporterMaterialSearch.RecursiveUp);
+                    importer.SaveAndReimport();
+                }
+                catch
+                {
+                    // SearchAndRemap 在部分 FBX 上会抛，仍走下面手绑
+                }
+            }
+
+            ApplyPbrToImportedModel(modelAssetPath, folder, name);
+            DeleteTempFbm(folder, name);
+        }
+
+        static int ApplyPbrToImportedModel(string modelAssetPath, string folder, string name)
+        {
+            var albedo = FindMap(folder, name, isAlbedo: true, "texture_pbr", "albedo", "diffuse", "basecolor", "base_color");
+            var normal = FindMap(folder, name, isAlbedo: false, "normal", "nor");
+            var metallic = FindMap(folder, name, isAlbedo: false, "metallic", "metalness");
+            var painted = 0;
+            var assets = AssetDatabase.LoadAllAssetsAtPath(modelAssetPath);
+            foreach (var a in assets)
+            {
+                if (!(a is Material mat))
+                {
+                    continue;
+                }
+
+                PaintStandard(mat, albedo, normal, metallic);
+                EditorUtility.SetDirty(mat);
+                painted++;
+            }
+
+            var go = AssetDatabase.LoadAssetAtPath<GameObject>(modelAssetPath);
+            if (go != null)
+            {
+                foreach (var mr in go.GetComponentsInChildren<MeshRenderer>(true))
+                {
+                    if (mr.sharedMaterial == null && albedo != null)
+                    {
+                        mr.sharedMaterial = NewHyMaterial(folder, name, albedo, normal, metallic);
+                        EditorUtility.SetDirty(mr);
+                        painted++;
+                    }
+                    else if (mr.sharedMaterial != null)
+                    {
+                        PaintStandard(mr.sharedMaterial, albedo, normal, metallic);
+                        EditorUtility.SetDirty(mr.sharedMaterial);
+                    }
+                }
+            }
+
+            if (painted == 0 && albedo != null)
+            {
+                NewHyMaterial(folder, name, albedo, normal, metallic);
+                painted = 1;
+            }
+
+            AssetDatabase.SaveAssets();
+            return painted;
+        }
+
+        static Material NewHyMaterial(string folder, string name, Texture albedo, Texture normal, Texture metallic)
+        {
+            var matPath = folder + "/" + name + "_hy.mat";
+            var mat = AssetDatabase.LoadAssetAtPath<Material>(matPath);
+            if (mat == null)
+            {
+                var shader = Shader.Find("Standard");
+                if (shader == null)
+                {
+                    return null;
+                }
+
+                mat = new Material(shader) { name = name + "_hy", enableInstancing = true };
+                AssetDatabase.CreateAsset(mat, matPath);
+            }
+
+            PaintStandard(mat, albedo, normal, metallic);
+            EditorUtility.SetDirty(mat);
+            return mat;
+        }
+
+        static void PaintStandard(Material mat, Texture albedo, Texture normal, Texture metallic)
+        {
+            if (mat == null)
+            {
+                return;
+            }
+
+            if (albedo != null && mat.HasProperty("_MainTex"))
+            {
+                mat.SetTexture("_MainTex", albedo);
+            }
+
+            if (albedo != null && mat.HasProperty("_BaseMap"))
+            {
+                mat.SetTexture("_BaseMap", albedo);
+            }
+
+            if (albedo != null && mat.HasProperty("_ColorMap"))
+            {
+                mat.SetTexture("_ColorMap", albedo);
+            }
+
+            if (normal != null && mat.HasProperty("_BumpMap"))
+            {
+                mat.SetTexture("_BumpMap", normal);
+                mat.EnableKeyword("_NORMALMAP");
+            }
+
+            if (normal != null && mat.HasProperty("_NormalMap"))
+            {
+                mat.SetTexture("_NormalMap", normal);
+            }
+
+            if (metallic != null && mat.HasProperty("_MetallicGlossMap"))
+            {
+                mat.SetTexture("_MetallicGlossMap", metallic);
+                mat.EnableKeyword("_METALLICGLOSSMAP");
+            }
+
+            mat.enableInstancing = true;
+        }
+
+        static Texture2D FindMap(string folder, string name, bool isAlbedo, params string[] hints)
+        {
+            Texture2D fallback = null;
+            var dir = AbsFromAsset(folder);
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
+            {
+                return null;
+            }
+
+            foreach (var path in Directory.GetFiles(dir, name + "_*.png"))
+            {
+                var file = Path.GetFileNameWithoutExtension(path) ?? "";
+                var lower = file.ToLowerInvariant();
+                var asset = folder + "/" + Path.GetFileName(path);
+                var tex = AssetDatabase.LoadAssetAtPath<Texture2D>(asset);
+                if (tex == null)
+                {
+                    continue;
+                }
+
+                if (isAlbedo)
+                {
+                    if (lower.Contains("_normal") || lower.Contains("_roughness") ||
+                        lower.Contains("_metallic") || lower.Contains("_metalness"))
+                    {
+                        continue;
+                    }
+
+                    foreach (var h in hints)
+                    {
+                        if (lower.Contains(h))
+                        {
+                            return tex;
+                        }
+                    }
+
+                    if (fallback == null)
+                    {
+                        fallback = tex;
+                    }
+                }
+                else
+                {
+                    foreach (var h in hints)
+                    {
+                        if (lower.Contains(h))
+                        {
+                            return tex;
+                        }
+                    }
+                }
+            }
+
+            return fallback;
+        }
+
+        static void DeleteTempFbm(string folder, string name)
+        {
+            // 保留 output.fbm：FBX 引用的是这个相对路径，删了会再导成白模。
+            // 多器官同目录时以 {canonical}_* 为准（ApplyPbr 绑的是规范名）。
+            if (!string.IsNullOrEmpty(name))
+            {
+                DeleteAssetOrDir(folder + "/" + name + ".fbm");
+            }
+        }
+
+        static void DeleteAssetOrDir(string assetFolder)
+        {
+            if (string.IsNullOrEmpty(assetFolder))
+            {
+                return;
+            }
+
+            if (AssetDatabase.IsValidFolder(assetFolder))
+            {
+                AssetDatabase.DeleteAsset(assetFolder);
+                return;
+            }
+
+            var abs = AbsFromAsset(assetFolder);
+            if (Directory.Exists(abs))
+            {
+                TryDeleteDir(abs);
+            }
+        }
+
+        public static int TryRepairRawEmbeddedMaps(out string log)
+        {
+            var total = 0;
+            var parts = new List<string>();
+            var guids = AssetDatabase.FindAssets("t:Model", new[] { "Assets/GameRes/Raw" });
+            foreach (var guid in guids)
+            {
+                var path = AssetDatabase.GUIDToAssetPath(guid);
+                if (string.IsNullOrEmpty(path) ||
+                    !path.EndsWith(".fbx", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (!NeedsMapRepair(path))
+                {
+                    continue;
+                }
+
+                var folder = Path.GetDirectoryName(path)?.Replace('\\', '/');
+                var name = Path.GetFileNameWithoutExtension(path);
+                var n = TryRepairImportedMaps(folder, name, out var one);
+                if (n > 0)
+                {
+                    total += n;
+                    parts.Add(name + "×" + n);
+                }
+                else if (!string.IsNullOrEmpty(one))
+                {
+                    parts.Add(name + "：" + one);
+                }
+            }
+
+            log = total > 0
+                ? "已补抽并绑贴图：" + string.Join("；", parts)
+                : (parts.Count > 0 ? string.Join("；", parts) : "没有需要补抽的白模 FBX。");
+            return total;
+        }
+
+        public static int TryRepairImportedMaps(string folder, string name, out string log)
+        {
+            log = null;
+            if (string.IsNullOrEmpty(folder) || string.IsNullOrEmpty(name) ||
+                !folder.StartsWith(RawPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                log = "路径不在 Raw 下。";
+                return 0;
+            }
+
+            var modelAssetPath = folder + "/" + name + ".fbx";
+            var destAbs = AbsFromAsset(modelAssetPath);
+            if (!File.Exists(destAbs))
+            {
+                log = "没有 " + name + ".fbx";
+                return 0;
+            }
+
+            var maps = FindMap(folder, name, isAlbedo: true, "texture_pbr", "albedo", "diffuse") != null
+                ? CountUniqueMaps(folder, name)
+                : MaterializeMaps(destAbs, destAbs, folder, name);
+            if (maps == 0)
+            {
+                maps = MaterializeMaps(destAbs, destAbs, folder, name);
+            }
+
+            ImportMapAssets(folder, name);
+            AssetDatabase.ImportAsset(modelAssetPath, ImportAssetOptions.ForceUpdate);
+            if (AssetImporter.GetAtPath(modelAssetPath) is ModelImporter importer)
+            {
+                importer.materialImportMode = ModelImporterMaterialImportMode.ImportStandard;
+                importer.materialLocation = ModelImporterMaterialLocation.InPrefab;
+                importer.materialSearch = ModelImporterMaterialSearch.RecursiveUp;
+                importer.SaveAndReimport();
+            }
+
+            RemapAndPaintMaps(modelAssetPath, folder, name);
+            log = maps > 0
+                ? name + " 抽出 " + maps + " 张贴图并绑到材质（对象框应不再全白）"
+                : name + " 没有内嵌/旁路贴图";
+            return maps;
+        }
+
+        static int CountUniqueMaps(string folder, string name)
+        {
+            var dir = AbsFromAsset(folder);
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
+            {
+                return 0;
+            }
+
+            var n = 0;
+            foreach (var path in Directory.GetFiles(dir, name + "_*"))
+            {
+                if (FeatureArtHunyuanClient.IsSidecarExt(Path.GetExtension(path)))
+                {
+                    n++;
+                }
+            }
+
+            return n;
+        }
+
+        static bool NeedsMapRepair(string modelAssetPath)
+        {
+            var abs = AbsFromAsset(modelAssetPath);
+            if (!File.Exists(abs))
+            {
+                return false;
+            }
+
+            var hasAlbedo = false;
+            foreach (var a in AssetDatabase.LoadAllAssetsAtPath(modelAssetPath))
+            {
+                if (a is Material mat && mat.HasProperty("_MainTex") && mat.GetTexture("_MainTex") != null)
+                {
+                    hasAlbedo = true;
+                    break;
+                }
+            }
+
+            if (hasAlbedo)
+            {
+                return false;
+            }
+
+            var folder = Path.GetDirectoryName(modelAssetPath)?.Replace('\\', '/');
+            var name = Path.GetFileNameWithoutExtension(modelAssetPath);
+            return FeatureArtHunyuanClient.HasEmbeddedPng(abs) || HasSidecarFiles(folder, name);
+        }
+
+        static string SanitizeFileName(string name)
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+                return "map.png";
+            }
+
+            var invalid = Path.GetInvalidFileNameChars();
+            var sb = new StringBuilder(name.Length);
+            foreach (var c in name)
+            {
+                var bad = false;
+                for (var i = 0; i < invalid.Length; i++)
+                {
+                    if (c == invalid[i])
+                    {
+                        bad = true;
+                        break;
+                    }
+                }
+
+                sb.Append(bad ? '_' : c);
+            }
+
+            return sb.ToString();
+        }
+
         static Mesh FindFirstMesh(GameObject go)
         {
             if (go == null)
@@ -785,8 +1407,12 @@ namespace BinGames.EditorTools.FeatureArt
             }
 
             FeatureArtHunyuanSettings.ClearLastJob();
+            var maps = _sidecarCount;
             Cleanup();
-            Log($"{id} → location={loc}");
+            Log($"{id} → location={loc}" +
+                (maps > 0
+                    ? $"  贴图 {maps} 张（已绑到材质，规范名 {loc}_*）"
+                    : "  （包内无贴图文件，也未从 FBX 抽出）"));
             if (_window != null)
             {
                 _window.Repaint();
@@ -966,6 +1592,7 @@ namespace BinGames.EditorTools.FeatureArt
             _folderHint = null;
             _canonicalName = null;
             _submitJson = null;
+            _sidecarCount = 0;
             TryDeleteDir(_tempWork);
             _tempWork = null;
             _tempDownload = null;
