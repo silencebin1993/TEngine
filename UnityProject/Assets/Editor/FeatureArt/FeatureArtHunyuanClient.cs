@@ -30,15 +30,43 @@ namespace BinGames.EditorTools.FeatureArt
         {
             model = FeatureArtHunyuanSettings.NormalizeModel(model);
             var express = FeatureArtHunyuanSettings.IsExpress(model);
+            var gen = FeatureArtHunyuanSettings.GenerateType;
+            if (string.Equals(model, FeatureArtHunyuanSettings.Model31, StringComparison.Ordinal) &&
+                gen == FeatureArtHunyuanSettings.GenLowPoly)
+            {
+                gen = FeatureArtHunyuanSettings.GenNormal;
+            }
+
+            var enablePbr = FeatureArtHunyuanSettings.EnablePBR;
+            if (gen == FeatureArtHunyuanSettings.GenGeometry)
+            {
+                enablePbr = false;
+            }
+
+            var format = FeatureArtHunyuanSettings.ResultFormat;
             var sb = new StringBuilder(256);
             sb.Append("{\"model\":\"").Append(model).Append('"');
             if (!express)
             {
-                sb.Append(",\"GenerateType\":\"Normal\"");
+                sb.Append(",\"GenerateType\":\"").Append(gen).Append('"');
             }
 
-            sb.Append(",\"EnablePBR\":true,\"ResultFormat\":\"FBX\",");
-            sb.Append("\"ImageBase64\":\"").Append(StripDataUri(mainBase64)).Append('"');
+            sb.Append(",\"EnablePBR\":").Append(enablePbr ? "true" : "false");
+            sb.Append(",\"ResultFormat\":\"").Append(format).Append('"');
+            if (FeatureArtHunyuanSettings.ShouldSendFaceCount &&
+                gen != FeatureArtHunyuanSettings.GenLowPoly)
+            {
+                sb.Append(",\"FaceCount\":")
+                    .Append(FeatureArtHunyuanSettings.FaceCount.ToString(CultureInfo.InvariantCulture));
+            }
+
+            if (!express && FeatureArtHunyuanSettings.ShouldSendPolygonType)
+            {
+                sb.Append(",\"PolygonType\":\"")
+                    .Append(FeatureArtHunyuanSettings.PolygonType).Append('"');
+            }
+
+            sb.Append(",\"ImageBase64\":\"").Append(StripDataUri(mainBase64)).Append('"');
             if (!express && views != null && views.Count > 0)
             {
                 sb.Append(",\"MultiViewImages\":[");

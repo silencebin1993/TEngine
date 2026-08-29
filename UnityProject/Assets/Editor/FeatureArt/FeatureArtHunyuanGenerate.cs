@@ -68,12 +68,12 @@ namespace BinGames.EditorTools.FeatureArt
 
         static void AutoAttachOnce()
         {
-            if (_autoAttachTried || EditorApplication.isPlayingOrWillChangePlaymode)
+            if (EditorApplication.isPlayingOrWillChangePlaymode)
             {
                 return;
             }
 
-            _autoAttachTried = true;
+            // 每次域重载都扫：白模补绑；有规范名贴图却残留 .fbm 则绑完再删旁车
             TryRepairRawEmbeddedMaps(out _);
         }
 
@@ -247,7 +247,8 @@ namespace BinGames.EditorTools.FeatureArt
             var multi = WillSendMultiView(asset);
             EditorGUILayout.HelpBox(
                 "各图下方勾「发给混元」。默认只发概念图；正视和左右后要勾了才发（图越多积分越多）。本次：" +
-                SendSummary(asset) + "。模型=" + FeatureArtHunyuanSettings.SelectedModel + "。",
+                SendSummary(asset) + "。模型=" + FeatureArtHunyuanSettings.SelectedModel +
+                " · " + FeatureArtHunyuanSettings.GenerateType + "。",
                 MessageType.None);
             using (new EditorGUILayout.HorizontalScope(GUILayout.ExpandWidth(false)))
             {
@@ -271,12 +272,14 @@ namespace BinGames.EditorTools.FeatureArt
                 }
             }
 
+            FeatureArtHunyuanSettings.DrawGenerateParamsFoldout(IsBusy);
+
             if (!IsBusy && TryCanonical(target, out var folder, out var name, out _) &&
-                File.Exists(AbsFromAsset(folder + "/" + name + ".fbx")))
+                File.Exists(AbsFromAsset(PackageDir(folder, name) + "/" + name + ".fbx")))
             {
                 if (GUILayout.Button("补抽贴图（不重新生成、不扣积分）", GUILayout.Width(220)))
                 {
-                    var n = TryRepairImportedMaps(folder, name, out var log);
+                    var n = TryRepairImportedMaps(PackageDir(folder, name), name, out var log);
                     window.Log(n > 0 ? log : (log ?? "没有抽出贴图。"));
                     window.Repaint();
                 }
@@ -293,9 +296,10 @@ namespace BinGames.EditorTools.FeatureArt
                 var remain = Mathf.Max(0f, TimeoutSeconds - elapsed);
                 var rect = GUILayoutUtility.GetRect(4, 18, GUILayout.ExpandWidth(true));
                 EditorGUI.ProgressBar(rect, Mathf.Clamp01(elapsed / TimeoutSeconds),
-                    PhaseLabel() + $"  {elapsed:0}s / 剩余 {remain:0}s  id={_jobId}");
+                    PhaseLabel() + $"  {elapsed:0}s / 剩余 {remain:0}s  id={_jobId}  " +
+                    FeatureArtHunyuanSettings.LastModel + "+" + FeatureArtHunyuanSettings.GenerateType);
                 EditorGUILayout.HelpBox(
-                    "云端 Normal + PBR 常要 3～15 分钟。积分是腾讯出模成功后扣的；本地超时不会退款。",
+                    "云端出模常要 3～15 分钟。积分是腾讯出模成功后扣的；本地超时不会退款。",
                     MessageType.Info);
                 if (GUILayout.Button("取消等待（云端任务不停、不退积分）", GUILayout.Width(260)))
                 {
@@ -421,6 +425,10 @@ namespace BinGames.EditorTools.FeatureArt
             }
         }
 
+        /// <summary>整包目录：{folderHint}/{canonical}/ —— 网格+贴图同夹，可整夹拷/删。</summary>
+        public static string PackageDir(string folderHint, string canonical) =>
+            ((folderHint ?? "").Replace('\\', '/').TrimEnd('/') + "/" + (canonical ?? "")).TrimEnd('/');
+
         static void Begin(FeatureArtBindingWindow window, FeatureArtSlot slot, CellArtAsset asset)
         {
             if (IsBusy)
@@ -477,13 +485,16 @@ namespace BinGames.EditorTools.FeatureArt
 
         static bool ConfirmOverwrite(FeatureArtSlot slot, string folder, string name)
         {
-            var destFbx = folder + "/" + name + ".fbx";
-            var destObj = folder + "/" + name + ".obj";
-            var destPrefab = folder + "/" + name + ".prefab";
-            var destSrc = folder + "/" + name + "_src.fbx";
+            var package = PackageDir(folder, name);
+            var destFbx = package + "/" + name + ".fbx";
+            var destObj = package + "/" + name + ".obj";
+            var destPrefab = package + "/" + name + ".prefab";
+            var destSrc = package + "/" + name + "_src.fbx";
+            var legacyFbx = folder + "/" + name + ".fbx";
             var exists = File.Exists(AbsFromAsset(destFbx)) || File.Exists(AbsFromAsset(destObj)) ||
                          File.Exists(AbsFromAsset(destPrefab)) || File.Exists(AbsFromAsset(destSrc)) ||
-                         HasSidecarFiles(folder, name);
+                         File.Exists(AbsFromAsset(legacyFbx)) ||
+                         HasSidecarFiles(package, name) || HasSidecarFiles(folder, name);
             var rebound = !string.IsNullOrEmpty(slot.location) &&
                           !string.Equals(slot.location, name, StringComparison.Ordinal);
             if (!exists && !rebound)
@@ -492,8 +503,8 @@ namespace BinGames.EditorTools.FeatureArt
             }
 
             var msg = rebound
-                ? $"将覆盖 Raw 下 {name}（含贴图）并把 {slot.id} 从 {slot.location} 改绑为 {name}，继续？"
-                : $"将覆盖 Raw 下 {name}（含贴图）并重绑，继续？";
+                ? $"将覆盖 Raw 下整包 {name}/（含网格+贴图）并把 {slot.id} 从 {slot.location} 改绑为 {name}，继续？"
+                : $"将覆盖 Raw 下整包 {name}/（含网格+贴图）并重绑，继续？";
             return EditorUtility.DisplayDialog("混元出模", msg, "继续", "取消");
         }
 
@@ -722,11 +733,12 @@ namespace BinGames.EditorTools.FeatureArt
 
         static bool ImportAndBind(string srcModel, string ext)
         {
-            EnsureAssetFolder(_folderHint);
+            var packageDir = PackageDir(_folderHint, _canonicalName);
+            EnsureAssetFolder(packageDir);
             var isPrefab = string.Equals(_slot.bindKind, "PooledPrefab", StringComparison.Ordinal);
             var modelAssetPath = isPrefab
-                ? $"{_folderHint}/{_canonicalName}_src{ext}"
-                : $"{_folderHint}/{_canonicalName}{ext}";
+                ? $"{packageDir}/{_canonicalName}_src{ext}"
+                : $"{packageDir}/{_canonicalName}{ext}";
             if (!modelAssetPath.StartsWith(RawPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 Fail("拒绝写入 Art/ 或 Raw 以外。");
@@ -735,26 +747,28 @@ namespace BinGames.EditorTools.FeatureArt
 
             var destAbs = AbsFromAsset(modelAssetPath);
             Directory.CreateDirectory(Path.GetDirectoryName(destAbs) ?? _tempWork);
-            ClearOldSidecars(_folderHint, _canonicalName);
+            // 清掉本包旧文件 + 旧布局（folderHint 根下散落）
+            ClearOldSidecars(packageDir, _canonicalName);
+            ClearLegacyRootFiles(_folderHint, _canonicalName);
             File.Copy(srcModel, destAbs, true);
-            _sidecarCount = MaterializeMaps(srcModel, destAbs, _folderHint, _canonicalName);
-            ImportMapAssets(_folderHint, _canonicalName);
+            _sidecarCount = MaterializeMaps(srcModel, destAbs, packageDir, _canonicalName);
+            ImportMapAssets(packageDir, _canonicalName);
             AssetDatabase.ImportAsset(modelAssetPath, ImportAssetOptions.ForceUpdate);
             if (AssetImporter.GetAtPath(modelAssetPath) is ModelImporter importer)
             {
                 importer.meshCompression = ModelImporterMeshCompression.Off;
                 importer.materialImportMode = ModelImporterMaterialImportMode.ImportStandard;
                 importer.materialLocation = ModelImporterMaterialLocation.InPrefab;
-                importer.materialSearch = ModelImporterMaterialSearch.RecursiveUp;
+                importer.materialSearch = ModelImporterMaterialSearch.Local;
                 importer.SaveAndReimport();
             }
 
-            RemapAndPaintMaps(modelAssetPath, _folderHint, _canonicalName);
+            RemapAndPaintMaps(modelAssetPath, packageDir, _canonicalName);
 
             UnityEngine.Object bindTarget;
             if (isPrefab)
             {
-                bindTarget = WriteProjectilePrefab(modelAssetPath);
+                bindTarget = WriteProjectilePrefab(modelAssetPath, packageDir);
                 if (bindTarget == null)
                 {
                     Fail("无法从模型抽出 Mesh 做成弹体 Prefab。");
@@ -788,7 +802,7 @@ namespace BinGames.EditorTools.FeatureArt
             return true;
         }
 
-        static UnityEngine.Object WriteProjectilePrefab(string modelAssetPath)
+        static UnityEngine.Object WriteProjectilePrefab(string modelAssetPath, string packageDir)
         {
             var model = AssetDatabase.LoadAssetAtPath<GameObject>(modelAssetPath);
             var mesh = FindFirstMesh(model);
@@ -797,7 +811,7 @@ namespace BinGames.EditorTools.FeatureArt
                 return null;
             }
 
-            var prefabPath = $"{_folderHint}/{_canonicalName}.prefab";
+            var prefabPath = $"{packageDir}/{_canonicalName}.prefab";
             var go = new GameObject(_canonicalName);
             try
             {
@@ -890,16 +904,89 @@ namespace BinGames.EditorTools.FeatureArt
             }
 
             DeleteAssetOrDir(folder + "/" + name + ".fbm");
+            DeleteAssetOrDir(folder + "/output.fbm");
+            foreach (var ext in new[] { ".fbx", ".obj", ".prefab", ".mat" })
+            {
+                var asset = folder + "/" + name + ext;
+                if (File.Exists(AbsFromAsset(asset)))
+                {
+                    AssetDatabase.DeleteAsset(asset);
+                }
+
+                var src = folder + "/" + name + "_src" + ext;
+                if (File.Exists(AbsFromAsset(src)))
+                {
+                    AssetDatabase.DeleteAsset(src);
+                }
+            }
         }
 
-        /// <summary>zip 散图 + FBX 内嵌 PNG → 规范名前缀（Address 不撞）+ 临时 output.fbm（给 FBX 对路径）。</summary>
+        /// <summary>清掉 015 旧布局：folderHint 根下的 {canonical}.fbx / 散图 / 共享 output.fbm。</summary>
+        static void ClearLegacyRootFiles(string folderHint, string name)
+        {
+            if (string.IsNullOrEmpty(folderHint) || string.IsNullOrEmpty(name))
+            {
+                return;
+            }
+
+            foreach (var ext in new[] { ".fbx", ".obj", ".prefab", ".mat" })
+            {
+                var asset = folderHint + "/" + name + ext;
+                if (File.Exists(AbsFromAsset(asset)))
+                {
+                    AssetDatabase.DeleteAsset(asset);
+                }
+
+                var src = folderHint + "/" + name + "_src" + ext;
+                if (File.Exists(AbsFromAsset(src)))
+                {
+                    AssetDatabase.DeleteAsset(src);
+                }
+            }
+
+            var dir = AbsFromAsset(folderHint);
+            if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+            {
+                foreach (var path in Directory.GetFiles(dir, name + "_*"))
+                {
+                    var ext = Path.GetExtension(path);
+                    if (!FeatureArtHunyuanClient.IsSidecarExt(ext) &&
+                        !string.Equals(ext, ".mat", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var asset = folderHint + "/" + Path.GetFileName(path);
+                    AssetDatabase.DeleteAsset(asset);
+                }
+            }
+
+            DeleteAssetOrDir(folderHint + "/" + name + ".fbm");
+            // 共享 output.fbm：仅当目录里只剩本槽相关或已空时删；迁移函数负责彻底清
+            TryDeleteSharedRootFbm(folderHint);
+        }
+
+        static void TryDeleteSharedRootFbm(string folderHint)
+        {
+            var fbm = folderHint + "/output.fbm";
+            var abs = AbsFromAsset(fbm);
+            if (!Directory.Exists(abs))
+            {
+                return;
+            }
+
+            // 有任何其它整包仍可能依赖时保留；生成后新布局不依赖根 fbm，直接删
+            DeleteAssetOrDir(fbm);
+        }
+
+        /// <summary>zip 散图 + FBX 内嵌 PNG → 只写规范名前缀贴图（不再故意复制进 .fbm）。</summary>
         static int MaterializeMaps(string srcModel, string destFbxAbs, string folder, string name)
         {
             var count = 0;
             var extractDir = Path.GetDirectoryName(srcModel);
             foreach (var path in FeatureArtHunyuanClient.ListSidecarFiles(extractDir, srcModel))
             {
-                if (WriteUniqueAndFbm(path, folder, name, Path.GetFileName(path)))
+                if (WriteUniqueMap(path, folder, name, Path.GetFileName(path)))
                 {
                     count++;
                 }
@@ -918,7 +1005,7 @@ namespace BinGames.EditorTools.FeatureArt
                 {
                     foreach (var path in Directory.GetFiles(tmp, "*.png"))
                     {
-                        if (WriteUniqueAndFbm(path, folder, name, Path.GetFileName(path)))
+                        if (WriteUniqueMap(path, folder, name, Path.GetFileName(path)))
                         {
                             count++;
                         }
@@ -933,7 +1020,7 @@ namespace BinGames.EditorTools.FeatureArt
             return count;
         }
 
-        static bool WriteUniqueAndFbm(string srcAbs, string folder, string name, string originalName)
+        static bool WriteUniqueMap(string srcAbs, string folder, string name, string originalName)
         {
             originalName = SanitizeFileName(originalName);
             if (string.IsNullOrEmpty(originalName))
@@ -942,15 +1029,12 @@ namespace BinGames.EditorTools.FeatureArt
             }
 
             var uniqueAsset = folder + "/" + name + "_" + originalName;
-            var fbmAsset = folder + "/output.fbm/" + originalName;
-            if (!uniqueAsset.StartsWith(RawPrefix, StringComparison.OrdinalIgnoreCase) ||
-                !fbmAsset.StartsWith(RawPrefix, StringComparison.OrdinalIgnoreCase))
+            if (!uniqueAsset.StartsWith(RawPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }
 
             WriteAbsCopy(srcAbs, AbsFromAsset(uniqueAsset));
-            WriteAbsCopy(srcAbs, AbsFromAsset(fbmAsset));
             return true;
         }
 
@@ -971,20 +1055,6 @@ namespace BinGames.EditorTools.FeatureArt
             foreach (var path in Directory.GetFiles(dir, name + "_*"))
             {
                 ImportOneMap(folder + "/" + Path.GetFileName(path));
-            }
-
-            var fbm = Path.Combine(dir, "output.fbm");
-            if (!Directory.Exists(fbm))
-            {
-                return;
-            }
-
-            foreach (var path in Directory.GetFiles(fbm, "*.*"))
-            {
-                if (FeatureArtHunyuanClient.IsSidecarExt(Path.GetExtension(path)))
-                {
-                    ImportOneMap(folder + "/output.fbm/" + Path.GetFileName(path));
-                }
             }
         }
 
@@ -1018,7 +1088,7 @@ namespace BinGames.EditorTools.FeatureArt
                 {
                     importer.SearchAndRemapMaterials(
                         ModelImporterMaterialName.BasedOnMaterialName,
-                        ModelImporterMaterialSearch.RecursiveUp);
+                        ModelImporterMaterialSearch.Local);
                     importer.SaveAndReimport();
                 }
                 catch
@@ -1028,7 +1098,69 @@ namespace BinGames.EditorTools.FeatureArt
             }
 
             ApplyPbrToImportedModel(modelAssetPath, folder, name);
-            DeleteTempFbm(folder, name);
+            // 只有材质已指向规范名贴图才删 .fbm；否则留旁车，避免再变白模
+            if (ModelUsesPrefixedAlbedo(modelAssetPath, name))
+            {
+                DeleteTempFbm(folder, name);
+                // Unity 偶发在删旁车后又吐 .fbm，再清；若误伤白模则立刻重绑
+                if (!ModelUsesPrefixedAlbedo(modelAssetPath, name))
+                {
+                    ApplyPbrToImportedModel(modelAssetPath, folder, name);
+                }
+                else
+                {
+                    DeleteTempFbm(folder, name);
+                }
+            }
+        }
+
+        /// <summary>材质 _MainTex 已是本包 {canonical}_* 规范名贴图。</summary>
+        static bool ModelUsesPrefixedAlbedo(string modelAssetPath, string name)
+        {
+            if (string.IsNullOrEmpty(modelAssetPath) || string.IsNullOrEmpty(name))
+            {
+                return false;
+            }
+
+            var prefix = name + "_";
+            foreach (var a in AssetDatabase.LoadAllAssetsAtPath(modelAssetPath))
+            {
+                if (!(a is Material mat) || !mat.HasProperty("_MainTex"))
+                {
+                    continue;
+                }
+
+                var tex = mat.GetTexture("_MainTex");
+                if (tex != null && tex.name != null &&
+                    tex.name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            var go = AssetDatabase.LoadAssetAtPath<GameObject>(modelAssetPath);
+            if (go == null)
+            {
+                return false;
+            }
+
+            foreach (var mr in go.GetComponentsInChildren<MeshRenderer>(true))
+            {
+                var mat = mr.sharedMaterial;
+                if (mat == null || !mat.HasProperty("_MainTex"))
+                {
+                    continue;
+                }
+
+                var tex = mat.GetTexture("_MainTex");
+                if (tex != null && tex.name != null &&
+                    tex.name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         static int ApplyPbrToImportedModel(string modelAssetPath, string folder, string name)
@@ -1200,11 +1332,37 @@ namespace BinGames.EditorTools.FeatureArt
 
         static void DeleteTempFbm(string folder, string name)
         {
-            // 保留 output.fbm：FBX 引用的是这个相对路径，删了会再导成白模。
-            // 多器官同目录时以 {canonical}_* 为准（ApplyPbr 绑的是规范名）。
+            // 材质已绑到 {canonical}_*；清掉工具/Unity 产生的一切 .fbm 旁车（只留一套规范名贴图）
+            if (string.IsNullOrEmpty(folder))
+            {
+                return;
+            }
+
+            DeleteAssetOrDir(folder + "/output.fbm");
             if (!string.IsNullOrEmpty(name))
             {
                 DeleteAssetOrDir(folder + "/" + name + ".fbm");
+            }
+
+            var abs = AbsFromAsset(folder);
+            if (Directory.Exists(abs))
+            {
+                foreach (var d in Directory.GetDirectories(abs, "*.fbm"))
+                {
+                    DeleteAssetOrDir(folder + "/" + Path.GetFileName(d));
+                }
+            }
+
+            // 旧布局：父目录（如 Organ/）根上的共享 fbm
+            var parent = Path.GetDirectoryName(folder.Replace('\\', '/'))?.Replace('\\', '/');
+            if (!string.IsNullOrEmpty(parent) &&
+                parent.StartsWith(RawPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                DeleteAssetOrDir(parent + "/output.fbm");
+                if (!string.IsNullOrEmpty(name))
+                {
+                    DeleteAssetOrDir(parent + "/" + name + ".fbm");
+                }
             }
         }
 
@@ -1277,6 +1435,34 @@ namespace BinGames.EditorTools.FeatureArt
                 return 0;
             }
 
+            // 兼容旧根布局：若 FBX 还在 folderHint 根，先迁进整包再修
+            var package = folder.EndsWith("/" + name, StringComparison.OrdinalIgnoreCase)
+                ? folder
+                : PackageDir(folder, name);
+            var rootHint = package.EndsWith("/" + name, StringComparison.OrdinalIgnoreCase)
+                ? package.Substring(0, package.Length - name.Length - 1)
+                : folder;
+            var legacyFbx = rootHint + "/" + name + ".fbx";
+            var packageFbx = package + "/" + name + ".fbx";
+            if (!File.Exists(AbsFromAsset(packageFbx)) && File.Exists(AbsFromAsset(legacyFbx)))
+            {
+                EnsureAssetFolder(package);
+                MoveLegacyFile(rootHint, package, name + ".fbx");
+                MoveLegacyFile(rootHint, package, name + "_hy.mat");
+                var rootAbs = AbsFromAsset(rootHint);
+                if (Directory.Exists(rootAbs))
+                {
+                    foreach (var path in Directory.GetFiles(rootAbs, name + "_*"))
+                    {
+                        MoveLegacyFile(rootHint, package, Path.GetFileName(path));
+                    }
+                }
+
+                CopyFbmIntoPackage(rootHint + "/output.fbm", package, name);
+                CopyFbmIntoPackage(rootHint + "/" + name + ".fbm", package, name);
+            }
+
+            folder = package;
             var modelAssetPath = folder + "/" + name + ".fbx";
             var destAbs = AbsFromAsset(modelAssetPath);
             if (!File.Exists(destAbs))
@@ -1299,15 +1485,236 @@ namespace BinGames.EditorTools.FeatureArt
             {
                 importer.materialImportMode = ModelImporterMaterialImportMode.ImportStandard;
                 importer.materialLocation = ModelImporterMaterialLocation.InPrefab;
-                importer.materialSearch = ModelImporterMaterialSearch.RecursiveUp;
+                importer.materialSearch = ModelImporterMaterialSearch.Local;
                 importer.SaveAndReimport();
             }
 
             RemapAndPaintMaps(modelAssetPath, folder, name);
             log = maps > 0
-                ? name + " 抽出 " + maps + " 张贴图并绑到材质（对象框应不再全白）"
+                ? name + " 抽出 " + maps + " 张贴图并绑到材质（整包 " + folder + "）"
                 : name + " 没有内嵌/旁路贴图";
             return maps;
+        }
+
+        /// <summary>015 旧布局 → 整包子目录。不扣积分。</summary>
+        public static int TryMigrateLegacyPackages(out string log)
+        {
+            var moved = 0;
+            var parts = new List<string>();
+            var roots = new[]
+            {
+                "Assets/GameRes/Raw/Actor/Player",
+                "Assets/GameRes/Raw/Actor/Organ",
+                "Assets/GameRes/Raw/Actor/Summon",
+                "Assets/GameRes/Raw/Actor/Enemy",
+                "Assets/GameRes/Raw/Effects/Projectile",
+            };
+
+            foreach (var root in roots)
+            {
+                var abs = AbsFromAsset(root);
+                if (!Directory.Exists(abs))
+                {
+                    continue;
+                }
+
+                var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var fbx in Directory.GetFiles(abs, "*.fbx"))
+                {
+                    var file = Path.GetFileNameWithoutExtension(fbx) ?? "";
+                    if (file.EndsWith("_src", StringComparison.OrdinalIgnoreCase))
+                    {
+                        file = file.Substring(0, file.Length - 4);
+                    }
+
+                    if (LooksLikeCanonical(file))
+                    {
+                        names.Add(file);
+                    }
+                }
+
+                foreach (var map in Directory.GetFiles(abs, "*_*"))
+                {
+                    var file = Path.GetFileName(map) ?? "";
+                    if (!FeatureArtHunyuanClient.IsSidecarExt(Path.GetExtension(file)))
+                    {
+                        continue;
+                    }
+
+                    var canon = CanonicalFromPrefixedMap(file);
+                    if (!string.IsNullOrEmpty(canon))
+                    {
+                        names.Add(canon);
+                    }
+                }
+
+                foreach (var name in names)
+                {
+                    var package = PackageDir(root, name);
+                    var packageAbs = AbsFromAsset(package);
+                    var legacyFbx = Path.Combine(abs, name + ".fbx");
+                    var legacyObj = Path.Combine(abs, name + ".obj");
+                    var legacySrc = Path.Combine(abs, name + "_src.fbx");
+                    var alreadyPackaged = File.Exists(Path.Combine(packageAbs, name + ".fbx")) ||
+                                          File.Exists(Path.Combine(packageAbs, name + ".obj"));
+                    var hasLegacy = File.Exists(legacyFbx) || File.Exists(legacyObj) ||
+                                    File.Exists(legacySrc) || HasSidecarFiles(root, name);
+                    if (!hasLegacy && alreadyPackaged)
+                    {
+                        continue;
+                    }
+
+                    if (!hasLegacy)
+                    {
+                        continue;
+                    }
+
+                    EnsureAssetFolder(package);
+                    MoveLegacyFile(root, package, name + ".fbx");
+                    MoveLegacyFile(root, package, name + ".obj");
+                    MoveLegacyFile(root, package, name + ".prefab");
+                    MoveLegacyFile(root, package, name + "_src.fbx");
+                    MoveLegacyFile(root, package, name + "_hy.mat");
+                    foreach (var path in Directory.GetFiles(abs, name + "_*"))
+                    {
+                        var file = Path.GetFileName(path);
+                        MoveLegacyFile(root, package, file);
+                    }
+
+                    // 把共享 output.fbm / {name}.fbm 里的贴图拷进包（规范名前缀）
+                    CopyFbmIntoPackage(root + "/output.fbm", package, name);
+                    CopyFbmIntoPackage(root + "/" + name + ".fbm", package, name);
+                    DeleteAssetOrDir(root + "/" + name + ".fbm");
+
+                    var modelPath = package + "/" + name + ".fbx";
+                    if (!File.Exists(AbsFromAsset(modelPath)))
+                    {
+                        modelPath = package + "/" + name + "_src.fbx";
+                    }
+
+                    if (File.Exists(AbsFromAsset(modelPath)))
+                    {
+                        ImportMapAssets(package, name);
+                        AssetDatabase.ImportAsset(modelPath, ImportAssetOptions.ForceUpdate);
+                        RemapAndPaintMaps(modelPath, package, name);
+                    }
+
+                    moved++;
+                    parts.Add(name);
+                }
+
+                TryDeleteSharedRootFbm(root);
+            }
+
+            AssetDatabase.Refresh();
+            log = moved > 0
+                ? "已整理进整包：" + string.Join("、", parts) + "（根级共享 output.fbm 已尽量删除）"
+                : "没有发现可迁移的旧布局散落文件。";
+            return moved;
+        }
+
+        static bool LooksLikeCanonical(string name)
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+                return false;
+            }
+
+            return name.StartsWith("organ_", StringComparison.OrdinalIgnoreCase) ||
+                   name.StartsWith("player_", StringComparison.OrdinalIgnoreCase) ||
+                   name.StartsWith("summon_", StringComparison.OrdinalIgnoreCase) ||
+                   name.StartsWith("enemy_", StringComparison.OrdinalIgnoreCase) ||
+                   name.StartsWith("shape_", StringComparison.OrdinalIgnoreCase);
+        }
+
+        static string CanonicalFromPrefixedMap(string fileName)
+        {
+            var bare = Path.GetFileNameWithoutExtension(fileName) ?? "";
+            foreach (var prefix in new[] { "organ_", "player_", "summon_", "enemy_", "shape_" })
+            {
+                if (!bare.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                // organ_org_emitter_texture_pbr_v128 → organ_org_emitter
+                var rest = bare.Substring(prefix.Length);
+                var cut = rest.IndexOf("_texture", StringComparison.OrdinalIgnoreCase);
+                if (cut < 0)
+                {
+                    cut = rest.IndexOf("_embedded", StringComparison.OrdinalIgnoreCase);
+                }
+
+                if (cut < 0)
+                {
+                    // organ_x_hy already handled as mat; skip unknown
+                    return null;
+                }
+
+                return prefix + rest.Substring(0, cut);
+            }
+
+            return null;
+        }
+
+        static void MoveLegacyFile(string fromFolder, string toFolder, string fileName)
+        {
+            if (string.IsNullOrEmpty(fileName))
+            {
+                return;
+            }
+
+            var from = fromFolder + "/" + fileName;
+            var to = toFolder + "/" + fileName;
+            if (!File.Exists(AbsFromAsset(from)))
+            {
+                return;
+            }
+
+            if (File.Exists(AbsFromAsset(to)))
+            {
+                AssetDatabase.DeleteAsset(from);
+                return;
+            }
+
+            var err = AssetDatabase.MoveAsset(from, to);
+            if (!string.IsNullOrEmpty(err))
+            {
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(AbsFromAsset(to)) ?? "");
+                    File.Move(AbsFromAsset(from), AbsFromAsset(to));
+                    var meta = AbsFromAsset(from) + ".meta";
+                    if (File.Exists(meta))
+                    {
+                        File.Delete(meta);
+                    }
+                }
+                catch
+                {
+                    // best-effort
+                }
+            }
+        }
+
+        static void CopyFbmIntoPackage(string fbmFolder, string package, string name)
+        {
+            var abs = AbsFromAsset(fbmFolder);
+            if (!Directory.Exists(abs))
+            {
+                return;
+            }
+
+            foreach (var path in Directory.GetFiles(abs, "*.*"))
+            {
+                if (!FeatureArtHunyuanClient.IsSidecarExt(Path.GetExtension(path)))
+                {
+                    continue;
+                }
+
+                var original = Path.GetFileName(path);
+                WriteUniqueMap(path, package, name, original);
+            }
         }
 
         static int CountUniqueMaps(string folder, string name)
@@ -1338,6 +1745,20 @@ namespace BinGames.EditorTools.FeatureArt
                 return false;
             }
 
+            var folder = Path.GetDirectoryName(modelAssetPath)?.Replace('\\', '/');
+            var name = Path.GetFileNameWithoutExtension(modelAssetPath);
+            var hasPrefixed = CountUniqueMaps(folder, name) > 0;
+            var hasFbm = !string.IsNullOrEmpty(folder) &&
+                         (Directory.Exists(Path.Combine(AbsFromAsset(folder), "output.fbm")) ||
+                          (!string.IsNullOrEmpty(name) &&
+                           Directory.Exists(Path.Combine(AbsFromAsset(folder), name + ".fbm"))));
+
+            // 规范名贴图已在、却还挂着 .fbm → 绑到规范名后删旁车（避免两套）
+            if (hasPrefixed && hasFbm)
+            {
+                return true;
+            }
+
             var hasAlbedo = false;
             foreach (var a in AssetDatabase.LoadAllAssetsAtPath(modelAssetPath))
             {
@@ -1353,8 +1774,6 @@ namespace BinGames.EditorTools.FeatureArt
                 return false;
             }
 
-            var folder = Path.GetDirectoryName(modelAssetPath)?.Replace('\\', '/');
-            var name = Path.GetFileNameWithoutExtension(modelAssetPath);
             return FeatureArtHunyuanClient.HasEmbeddedPng(abs) || HasSidecarFiles(folder, name);
         }
 
@@ -1400,6 +1819,7 @@ namespace BinGames.EditorTools.FeatureArt
         {
             var id = _slot != null ? _slot.id : "";
             var loc = _slot != null ? _slot.location : "";
+            var folder = _folderHint;
             if (!string.IsNullOrEmpty(_jobId))
             {
                 FeatureArtHunyuanSettings.RememberLast(
@@ -1409,10 +1829,11 @@ namespace BinGames.EditorTools.FeatureArt
             FeatureArtHunyuanSettings.ClearLastJob();
             var maps = _sidecarCount;
             Cleanup();
+            var pkg = PackageDir(folder, loc);
             Log($"{id} → location={loc}" +
                 (maps > 0
-                    ? $"  贴图 {maps} 张（已绑到材质，规范名 {loc}_*）"
-                    : "  （包内无贴图文件，也未从 FBX 抽出）"));
+                    ? $"  贴图 {maps} 张（整包 {pkg} ，规范名 {loc}_*）"
+                    : $"  （整包 {pkg} ，包内无贴图文件）"));
             if (_window != null)
             {
                 _window.Repaint();
