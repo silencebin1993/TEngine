@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using BinGames.EditorTools.CellArt;
+using GameLogic.ArtBinding;
 using UnityEditor;
 using UnityEngine;
 
@@ -77,7 +78,11 @@ namespace BinGames.EditorTools.FeatureArt
         public static string SummonCellArtId(string key) => SummonMap.TryGetValue(key, out var id) ? id : null;
         public static string EnemyCellArtId(string visKey) => EnemyMap.TryGetValue(visKey, out var id) ? id : null;
 
-        public static void DrawViews(FeatureArtBindingWindow window, string cellArtId, string titleZh = null)
+        public static void DrawViews(
+            FeatureArtBindingWindow window,
+            string cellArtId,
+            string titleZh = null,
+            FeatureArtSlot generateTarget = null)
         {
             if (window == null)
             {
@@ -166,6 +171,8 @@ namespace BinGames.EditorTools.FeatureArt
                     window.JumpToSourceLibrary(cellArtId);
                 }
             }
+
+            FeatureArtHunyuanGenerate.DrawButton(window, asset, generateTarget);
         }
 
         static void TryAddView(FeatureArtBindingWindow window, CellArtAsset asset, string cellArtId, string pending)

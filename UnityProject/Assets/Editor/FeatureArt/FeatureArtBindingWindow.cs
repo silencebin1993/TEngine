@@ -180,6 +180,7 @@ namespace BinGames.EditorTools.FeatureArt
         CellArtRegistry _registry;
         bool _registryDirty;
         string _lastLog = "";
+        bool _lastLogError;
         List<HealthIssue> _healthIssues;
         readonly Dictionary<string, string> _addViewKeys = new Dictionary<string, string>();
         readonly Dictionary<string, CellArtAsset> _workingAssets = new Dictionary<string, CellArtAsset>();
@@ -220,6 +221,7 @@ namespace BinGames.EditorTools.FeatureArt
             tree.DefaultMenuStyle.SelectedColorLightSkin = ColorSelected;
 
             tree.Add("使用说明", new GuidePage());
+            tree.Add("混元生3D", new FeatureArtHunyuanSettingsPage());
             tree.Add("健康检查", new HealthCheckPage(this));
             _sourceLibraryPage = new FeatureArtSourceLibraryPage(this);
             tree.Add(FeatureArtSourceLibraryPage.MenuPath, _sourceLibraryPage);
@@ -341,7 +343,7 @@ namespace BinGames.EditorTools.FeatureArt
 
             if (!string.IsNullOrEmpty(_lastLog))
             {
-                SirenixEditorGUI.MessageBox(_lastLog, MessageType.None);
+                SirenixEditorGUI.MessageBox(_lastLog, _lastLogError ? MessageType.Error : MessageType.None);
             }
         }
 
@@ -558,7 +560,17 @@ namespace BinGames.EditorTools.FeatureArt
             }
         }
 
-        public void Log(string message) => _lastLog = message;
+        public void Log(string message)
+        {
+            _lastLog = message ?? "";
+            _lastLogError = false;
+        }
+
+        public void LogError(string message)
+        {
+            _lastLog = message ?? "";
+            _lastLogError = true;
+        }
 
         public void MarkDirty() => _dirty = true;
 
@@ -912,6 +924,17 @@ namespace BinGames.EditorTools.FeatureArt
             }
         }
 
+        public void SaveCatalogNow()
+        {
+            if (_data == null)
+            {
+                return;
+            }
+
+            FeatureArtCatalogIO.Save(_data);
+            _dirty = false;
+        }
+
         void Save()
         {
             try
@@ -952,7 +975,7 @@ namespace BinGames.EditorTools.FeatureArt
                     "选攻击方式 → 看/复制外形提示词做模型（对照概念图）→ 看/复制开火提示词做特效 → 拖进同一页。\n\n" +
                     "1. 工具栏『从代码同步槽位』补齐新功能的空槽（look/prompt 每次都会按 LOOK-PROMPTS 覆盖，location 不动）；\n" +
                     "2. 选中左树『攻击方式』下的器官，同一页拖外形网格、复制开火四段提示词；\n" +
-                    "3. 做好的资源放进建议目录（Raw 下），拖进对应槽的对象框即可写入 location；\n" +
+                    "3. 三视图下可「用三视图生成模型并绑定」（先在左树「混元生3D」填 Key）；也可把做好的资源放进 Raw 再拖进对象框；\n" +
                     "4. 点工具栏『保存』；\n" +
                     "5. Play 模式或『健康检查』核对。\n\n" +
                     "源文件登记（概念图 / fbx / 扫盘 / 图板）在左树『源文件库』，与成品换皮同一扇窗。工具栏『打开源文件板』会跳到该页。各功能页也可直接改概念图/三视图，都写 registry.json，不是 catalog。",
@@ -1065,7 +1088,7 @@ namespace BinGames.EditorTools.FeatureArt
             void DrawConcept()
             {
                 EditorGUILayout.LabelField("概念图 / 三视图", EditorStyles.boldLabel);
-                FeatureArtCellArtBridge.DrawViews(_window, FeatureArtCellArtBridge.PlayerCellArtId, "玩家 / 本体");
+                FeatureArtCellArtBridge.DrawViews(_window, FeatureArtCellArtBridge.PlayerCellArtId, "玩家 / 本体", MeshSlot);
                 EditorGUILayout.Space(4);
             }
 
@@ -1145,7 +1168,7 @@ namespace BinGames.EditorTools.FeatureArt
             {
                 EditorGUILayout.LabelField("概念图 / 三视图", EditorStyles.boldLabel);
                 FeatureArtCellArtBridge.DrawViews(_window, FeatureArtCellArtBridge.OrganCellArtId(_organId),
-                    MeshSlot?.titleZh?.Replace(" · 本体网格", "") ?? _organId);
+                    MeshSlot?.titleZh?.Replace(" · 本体网格", "") ?? _organId, MeshSlot);
                 EditorGUILayout.Space(4);
             }
 
@@ -1288,7 +1311,8 @@ namespace BinGames.EditorTools.FeatureArt
             void DrawConcept()
             {
                 EditorGUILayout.LabelField("概念图 / 三视图", EditorStyles.boldLabel);
-                FeatureArtCellArtBridge.DrawViews(_window, FeatureArtCellArtBridge.ShapeCellArtId(_shapeKey), _shapeKey);
+                FeatureArtCellArtBridge.DrawViews(_window, FeatureArtCellArtBridge.ShapeCellArtId(_shapeKey), _shapeKey,
+                    _window.FindSlot($"shape.{_shapeKey}.projectile"));
                 EditorGUILayout.Space(4);
             }
 
@@ -1401,7 +1425,7 @@ namespace BinGames.EditorTools.FeatureArt
             void DrawConcept()
             {
                 EditorGUILayout.LabelField("概念图 / 三视图", EditorStyles.boldLabel);
-                FeatureArtCellArtBridge.DrawViews(_window, _cellArtId, _titleZh);
+                FeatureArtCellArtBridge.DrawViews(_window, _cellArtId, _titleZh, Slot);
                 EditorGUILayout.Space(4);
             }
 
