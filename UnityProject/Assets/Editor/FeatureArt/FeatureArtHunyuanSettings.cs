@@ -18,6 +18,7 @@ namespace BinGames.EditorTools.FeatureArt
         public const string LastSlotKey = "BinGames.Hunyuan.LastSlotId";
         public const string LastFolderKey = "BinGames.Hunyuan.LastFolder";
         public const string LastNameKey = "BinGames.Hunyuan.LastName";
+        public const string LastFileUrlKey = "BinGames.Hunyuan.LastFileUrl";
         const string HistoryKey = "BinGames.Hunyuan.JobHistory";
         const int HistoryCap = 20;
 
@@ -36,6 +37,11 @@ namespace BinGames.EditorTools.FeatureArt
         public static string LastSlotId => EditorPrefs.GetString(LastSlotKey, "") ?? "";
         public static string LastFolder => EditorPrefs.GetString(LastFolderKey, "") ?? "";
         public static string LastName => EditorPrefs.GetString(LastNameKey, "") ?? "";
+        public static string LastFileUrl => EditorPrefs.GetString(LastFileUrlKey, "") ?? "";
+        public static bool HasLastFileUrl =>
+            !string.IsNullOrEmpty(LastFileUrl) &&
+            (LastFileUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+             LastFileUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
 
         public static void RememberLast(string jobId, string slotId, string folder, string fileName,
             string status = "进行中")
@@ -50,6 +56,17 @@ namespace BinGames.EditorTools.FeatureArt
             EditorPrefs.SetString(LastFolderKey, folder ?? "");
             EditorPrefs.SetString(LastNameKey, fileName ?? "");
             UpsertHistory(jobId, slotId, fileName, status);
+        }
+
+        public static void RememberFileUrl(string url)
+        {
+            url = (url ?? "").Trim();
+            if (string.IsNullOrEmpty(url))
+            {
+                return;
+            }
+
+            EditorPrefs.SetString(LastFileUrlKey, url);
         }
 
         public static void MarkHistory(string jobId, string status)
@@ -68,6 +85,7 @@ namespace BinGames.EditorTools.FeatureArt
             EditorPrefs.DeleteKey(LastSlotKey);
             EditorPrefs.DeleteKey(LastFolderKey);
             EditorPrefs.DeleteKey(LastNameKey);
+            EditorPrefs.DeleteKey(LastFileUrlKey);
         }
 
         public static string GetApiKey() => EditorPrefs.GetString(PrefsKey, "") ?? "";

@@ -267,6 +267,19 @@ namespace BinGames.EditorTools.FeatureArt
                     {
                         FeatureArtHunyuanSettings.ClearLastJob();
                     }
+
+                    if (FeatureArtHunyuanSettings.HasLastFileUrl &&
+                        GUILayout.Button("再下上次链接", GUILayout.Width(100)))
+                    {
+                        ResumeSavedUrl(window, target);
+                    }
+
+                    if (FeatureArtHunyuanSettings.HasLastFileUrl &&
+                        GUILayout.Button("复制模型链接", GUILayout.Width(100)))
+                    {
+                        GUIUtility.systemCopyBuffer = FeatureArtHunyuanSettings.LastFileUrl;
+                        window.Log("已复制模型链接，可用浏览器下载。不要发到聊天。");
+                    }
                 }
             }
 
@@ -478,7 +491,6 @@ namespace BinGames.EditorTools.FeatureArt
                     OnQueryDone();
                     break;
                 case Phase.Download:
-                    OnDownloadDone();
                     break;
             }
         }
@@ -567,59 +579,85 @@ namespace BinGames.EditorTools.FeatureArt
                 return;
             }
 
-            var url = FeatureArtHunyuanClient.PickBestFile(files);
-            if (string.IsNullOrEmpty(url))
+            var urls = FeatureArtHunyuanClient.OrderedFileUrls(files);
+            if (urls.Count == 0)
             {
                 Fail("任务完成但没有模型文件。");
                 return;
             }
 
-            DisposeReq();
-            _req = FeatureArtHunyuanClient.GetFile(url, _tempDownload);
-            _req.SendWebRequest();
+            FeatureArtHunyuanSettings.RememberFileUrl(urls[0]);
             _phase = Phase.Download;
-            Log($"下载模型 id={_jobId}");
+            ImportFromUrls(urls);
         }
 
-        static void OnDownloadDone()
+        static void ImportDownloadedFile()
         {
-            var transport = FeatureArtHunyuanClient.TransportError(_req);
-            DisposeReq();
-            if (transport != null || !File.Exists(_tempDownload))
+            var url = FeatureArtHunyuanSettings.LastFileUrl;
+            ImportFromUrls(string.IsNullOrEmpty(url)
+                ? new List<string>()
+                : new List<string> { url });
+        }
+
+        static void ImportFromUrls(List<string> urls)
+        {
+            if (urls == null || urls.Count == 0)
             {
-                Fail(transport ?? "下载失败。");
+                Fail("没有可下载的模型地址。");
                 return;
             }
 
-            try
+            string lastErr = null;
+            string glbOnly = null;
+            for (var i = 0; i < urls.Count; i++)
             {
-                var extractDir = Path.Combine(_tempWork, "extract");
-                FeatureArtHunyuanClient.ExtractToFolder(_tempDownload, extractDir);
-                var modelPath = FeatureArtHunyuanClient.FindPreferredModel(extractDir);
-                if (string.IsNullOrEmpty(modelPath))
+                var url = urls[i];
+                FeatureArtHunyuanSettings.RememberFileUrl(url);
+                Log($"下载 {i + 1}/{urls.Count} 主机={FeatureArtHunyuanClient.HostOf(url)}");
+                var dest = Path.Combine(_tempWork, "download-" + i + ".bin");
+                if (!FeatureArtHunyuanClient.TryDownload(url, dest, out var dlErr))
                 {
-                    Fail("压缩包里没有 FBX/OBJ/GLB。");
-                    return;
+                    lastErr = dlErr;
+                    Log(dlErr);
+                    continue;
+                }
+
+                var extractDir = Path.Combine(_tempWork, "extract-" + i);
+                if (!FeatureArtHunyuanClient.TryMaterializeModel(dest, extractDir, out var modelPath, out var matErr))
+                {
+                    lastErr = matErr;
+                    Log(matErr);
+                    continue;
                 }
 
                 var ext = Path.GetExtension(modelPath).ToLowerInvariant();
                 if (ext == ".glb")
                 {
-                    Fail("本次只给了 GLB，工程没有 GLB 导入器。请重试或换 FBX/OBJ。");
-                    return;
+                    glbOnly = modelPath;
+                    lastErr = "本次只给了 GLB，工程没有 GLB 导入器。";
+                    continue;
                 }
 
-                if (!ImportAndBind(modelPath, ext))
+                try
                 {
+                    if (!ImportAndBind(modelPath, ext))
+                    {
+                        return;
+                    }
+
+                    FinishOk();
                     return;
                 }
+                catch (Exception e)
+                {
+                    Fail(e.Message);
+                    return;
+                }
+            }
 
-                FinishOk();
-            }
-            catch (Exception e)
-            {
-                Fail(e.Message);
-            }
+            Fail(lastErr ?? (glbOnly != null
+                ? "本次只给了 GLB，工程没有 GLB 导入器。请重试或换 FBX/OBJ。"
+                : "没有可用的 FBX/OBJ。"));
         }
 
         static bool ImportAndBind(string srcModel, string ext)
@@ -820,12 +858,13 @@ namespace BinGames.EditorTools.FeatureArt
             }
         }
 
-        static void ResumeLast(FeatureArtBindingWindow window, FeatureArtSlot fallback)
+        static bool TryBeginResume(FeatureArtBindingWindow window, FeatureArtSlot fallback, out string error)
         {
+            error = null;
             if (IsBusy)
             {
-                window.Log("已有生成任务在跑。");
-                return;
+                error = "已有生成任务在跑。";
+                return false;
             }
 
             var job = FeatureArtHunyuanSettings.LastJobId;
@@ -836,8 +875,8 @@ namespace BinGames.EditorTools.FeatureArt
 
             if (string.IsNullOrEmpty(job))
             {
-                window.LogError("没有可拉取的任务 id。");
-                return;
+                error = "没有可拉取的任务 id。";
+                return false;
             }
 
             var slot = window != null ? window.FindSlot(FeatureArtHunyuanSettings.LastSlotId) : null;
@@ -848,26 +887,18 @@ namespace BinGames.EditorTools.FeatureArt
 
             if (slot == null)
             {
-                window.LogError("找不到当时的成品槽。");
-                return;
+                error = "找不到当时的成品槽。";
+                return false;
             }
 
             var folder = FeatureArtHunyuanSettings.LastFolder;
             var name = FeatureArtHunyuanSettings.LastName;
             if (string.IsNullOrEmpty(folder) || string.IsNullOrEmpty(name))
             {
-                if (!TryCanonical(slot, out folder, out name, out var err))
+                if (!TryCanonical(slot, out folder, out name, out error))
                 {
-                    window.LogError(err);
-                    return;
+                    return false;
                 }
-            }
-
-            var key = FeatureArtHunyuanSettings.GetApiKey();
-            if (string.IsNullOrEmpty(key))
-            {
-                window.LogError("先去左树「混元生3D」填 API Key。");
-                return;
             }
 
             _window = window;
@@ -882,8 +913,46 @@ namespace BinGames.EditorTools.FeatureArt
             Directory.CreateDirectory(_tempWork);
             _tempDownload = Path.Combine(_tempWork, "download.bin");
             FeatureArtHunyuanSettings.RememberLast(job, slot.id, folder, name);
-            Log($"继续拉取 id={job}");
+            return true;
+        }
+
+        static void ResumeLast(FeatureArtBindingWindow window, FeatureArtSlot fallback)
+        {
+            if (!TryBeginResume(window, fallback, out var err))
+            {
+                window.LogError(err);
+                return;
+            }
+
+            if (string.IsNullOrEmpty(FeatureArtHunyuanSettings.GetApiKey()))
+            {
+                Cleanup();
+                window.LogError("先去左树「混元生3D」填 API Key。");
+                return;
+            }
+
+            Log($"继续拉取 id={_jobId}");
             StartQuery();
+        }
+
+        static void ResumeSavedUrl(FeatureArtBindingWindow window, FeatureArtSlot fallback)
+        {
+            var url = FeatureArtHunyuanSettings.LastFileUrl;
+            if (!FeatureArtHunyuanSettings.HasLastFileUrl)
+            {
+                window.LogError("没有记下的模型链接，请点「继续拉取上次任务」。");
+                return;
+            }
+
+            if (!TryBeginResume(window, fallback, out var err))
+            {
+                window.LogError(err);
+                return;
+            }
+
+            Log($"再下上次链接 主机={FeatureArtHunyuanClient.HostOf(url)}");
+            _phase = Phase.Download;
+            ImportFromUrls(new List<string> { url });
         }
 
         static float Now() => (float)EditorApplication.timeSinceStartup;
