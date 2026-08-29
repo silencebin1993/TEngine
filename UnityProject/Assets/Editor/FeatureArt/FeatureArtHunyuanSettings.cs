@@ -212,7 +212,8 @@ namespace BinGames.EditorTools.FeatureArt
         {
             SirenixEditorGUI.Title("混元生3D", null, TextAlignment.Left, true);
             SirenixEditorGUI.MessageBox(
-                "TokenHub 专业版 LowPoly + FBX。主图用 front（没有则 concept），有则附上 left / right / back。\n" +
+                "TokenHub 专业版 LowPoly + FBX。各页概念图/三视图下勾「发给混元」，只发勾中的图。\n" +
+                "默认只发概念图；front / left / right / back 要勾了才发，图越多积分越多。\n" +
                 "API Key 必须是 TokenHub（tokenhub.tencentmaas.com）的 sk- Key，保存后请求带 Bearer。\n" +
                 "不要填混元对话 Key 或 CAM SecretId/SecretKey。Key 只留本机，不会入库。",
                 MessageType.Info);

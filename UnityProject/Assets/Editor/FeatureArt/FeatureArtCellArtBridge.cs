@@ -140,7 +140,9 @@ namespace BinGames.EditorTools.FeatureArt
                     for (var c = 0; c < n; c++)
                     {
                         var item = items[i + c];
-                        DrawPathCard(window, asset, item.label, item.rel, item.setRel, item.canDelete, item.onDelete, CardW);
+                        DrawPathCard(
+                            window, asset, item.label, item.rel, item.setRel, item.canDelete, item.onDelete,
+                            CardW, generateTarget != null);
                         if (c < n - 1)
                         {
                             GUILayout.Space(Gap);
@@ -205,7 +207,8 @@ namespace BinGames.EditorTools.FeatureArt
             Action<string> setRel,
             bool canDelete,
             Action onDelete,
-            float cardW)
+            float cardW,
+            bool offerSend)
         {
             const float Thumb = 72f;
             using (new EditorGUILayout.VerticalScope(GUILayout.Width(cardW), GUILayout.MaxWidth(cardW), GUILayout.ExpandWidth(false)))
@@ -250,6 +253,20 @@ namespace BinGames.EditorTools.FeatureArt
                     {
                         onDelete?.Invoke();
                     }
+                }
+
+                if (offerSend && FeatureArtHunyuanGenerate.CanSendKey(label))
+                {
+                    var hasFile = FeatureArtHunyuanGenerate.HasViewFile(asset, label);
+                    EditorGUI.BeginDisabledGroup(!hasFile || FeatureArtHunyuanGenerate.IsBusy);
+                    var on = hasFile && FeatureArtHunyuanGenerate.IsSendChecked(asset, label);
+                    var next = EditorGUILayout.ToggleLeft("发给混元", on, GUILayout.Width(cardW));
+                    if (hasFile && next != on)
+                    {
+                        FeatureArtHunyuanGenerate.SetSendChecked(asset, label, next);
+                    }
+
+                    EditorGUI.EndDisabledGroup();
                 }
             }
         }

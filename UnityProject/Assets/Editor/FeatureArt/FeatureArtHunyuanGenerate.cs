@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using BinGames.EditorTools.CellArt;
 using GameLogic.ArtBinding;
 using UnityEditor;
@@ -16,7 +17,9 @@ namespace BinGames.EditorTools.FeatureArt
         const float PollSeconds = 5f;
         const float TimeoutSeconds = 20f * 60f;
         const string RawPrefix = "Assets/GameRes/Raw/";
+        const string SendPrefsPrefix = "BinGames.Hunyuan.SendViews.";
 
+        public static readonly string[] SendableKeys = { "concept", "front", "left", "right", "back" };
         static readonly string[] MultiViewKeys = { "left", "right", "back" };
 
         enum Phase
@@ -58,8 +61,104 @@ namespace BinGames.EditorTools.FeatureArt
             EditorApplication.update += Tick;
         }
 
+        public static bool CanSendKey(string key) =>
+            key == "concept" || key == "front" || key == "left" || key == "right" || key == "back";
+
+        public static bool HasViewFile(CellArtAsset asset, string key) =>
+            TryResolveAbs(asset, RelOf(asset, key), out _, out _);
+
         public static bool HasMainImage(CellArtAsset asset) =>
             TryResolveAbs(asset, MainRel(asset), out _, out _);
+
+        public static HashSet<string> GetSendSet(CellArtAsset asset)
+        {
+            var set = new HashSet<string>(StringComparer.Ordinal);
+            var prefs = SendPrefsKey(asset);
+            if (!EditorPrefs.HasKey(prefs))
+            {
+                if (HasViewFile(asset, "concept"))
+                {
+                    set.Add("concept");
+                }
+
+                return set;
+            }
+
+            var raw = EditorPrefs.GetString(prefs, "") ?? "";
+            foreach (var part in raw.Split(','))
+            {
+                var key = part.Trim();
+                if (CanSendKey(key))
+                {
+                    set.Add(key);
+                }
+            }
+
+            return set;
+        }
+
+        public static bool IsSendChecked(CellArtAsset asset, string key) =>
+            CanSendKey(key) && GetSendSet(asset).Contains(key);
+
+        public static void SetSendChecked(CellArtAsset asset, string key, bool on)
+        {
+            if (!CanSendKey(key) || asset == null)
+            {
+                return;
+            }
+
+            var set = GetSendSet(asset);
+            if (on)
+            {
+                set.Add(key);
+            }
+            else
+            {
+                set.Remove(key);
+            }
+
+            var sb = new StringBuilder();
+            foreach (var k in SendableKeys)
+            {
+                if (!set.Contains(k))
+                {
+                    continue;
+                }
+
+                if (sb.Length > 0)
+                {
+                    sb.Append(',');
+                }
+
+                sb.Append(k);
+            }
+
+            EditorPrefs.SetString(SendPrefsKey(asset), sb.ToString());
+        }
+
+        public static string SendSummary(CellArtAsset asset)
+        {
+            var set = GetSendSet(asset);
+            var parts = new List<string>();
+            if (set.Contains("front") && HasViewFile(asset, "front"))
+            {
+                parts.Add("front");
+            }
+            else if (set.Contains("concept") && HasViewFile(asset, "concept"))
+            {
+                parts.Add("concept");
+            }
+
+            foreach (var key in MultiViewKeys)
+            {
+                if (set.Contains(key) && HasViewFile(asset, key))
+                {
+                    parts.Add(key);
+                }
+            }
+
+            return parts.Count == 0 ? "未勾有效图" : string.Join(" + ", parts);
+        }
 
         public static string DisableReason(FeatureArtSlot slot, CellArtAsset asset)
         {
@@ -85,6 +184,11 @@ namespace BinGames.EditorTools.FeatureArt
 
             if (!HasMainImage(asset))
             {
+                if (HasViewFile(asset, "front") || HasViewFile(asset, "concept"))
+                {
+                    return "至少勾一张主图（front 或 concept）。";
+                }
+
                 return "至少需要 front 或 concept 一张图。";
             }
 
@@ -105,6 +209,10 @@ namespace BinGames.EditorTools.FeatureArt
 
             var reason = DisableReason(target, asset);
             var label = IsBusy ? "生成中…" : "用三视图生成模型并绑定";
+            EditorGUILayout.HelpBox(
+                "各图下方勾「发给混元」。默认只发概念图；正视和左右后要勾了才发（图越多积分越多）。本次：" +
+                SendSummary(asset),
+                MessageType.None);
             using (new EditorGUILayout.HorizontalScope(GUILayout.ExpandWidth(false)))
             {
                 EditorGUI.BeginDisabledGroup(reason != null);
@@ -178,10 +286,17 @@ namespace BinGames.EditorTools.FeatureArt
             }
         }
 
-        public static bool TryBuildSubmitJson(CellArtAsset asset, out string json, out string error)
+        public static bool TryBuildSubmitJson(CellArtAsset asset, out string json, out string error) =>
+            TryBuildSubmitJson(asset, GetSendSet(asset), out json, out error);
+
+        public static bool TryBuildSubmitJson(
+            CellArtAsset asset,
+            ISet<string> sendKeys,
+            out string json,
+            out string error)
         {
             json = null;
-            if (!TryEncodeImages(asset, out var mainUri, out var views, out error))
+            if (!TryEncodeImages(asset, sendKeys, out var mainUri, out var views, out error))
             {
                 return false;
             }
@@ -263,6 +378,8 @@ namespace BinGames.EditorTools.FeatureArt
                 window.Log(err);
                 return;
             }
+
+            window.Log("发给混元：" + SendSummary(asset));
 
             var key = FeatureArtHunyuanSettings.GetApiKey();
             if (string.IsNullOrEmpty(key))
@@ -818,20 +935,48 @@ namespace BinGames.EditorTools.FeatureArt
             }
         }
 
-        static string MainRel(CellArtAsset asset)
+        static string SendPrefsKey(CellArtAsset asset)
         {
-            if (asset == null)
+            var id = asset != null && !string.IsNullOrEmpty(asset.id) ? asset.id : "_";
+            return SendPrefsPrefix + id;
+        }
+
+        static string RelOf(CellArtAsset asset, string key)
+        {
+            if (asset == null || string.IsNullOrEmpty(key))
             {
                 return null;
             }
 
-            if (asset.views != null && asset.views.TryGetValue("front", out var front) &&
-                !string.IsNullOrEmpty(front))
+            if (key == "concept")
             {
-                return front;
+                return string.IsNullOrEmpty(asset.concept) ? null : asset.concept;
             }
 
-            return string.IsNullOrEmpty(asset.concept) ? null : asset.concept;
+            if (asset.views != null && asset.views.TryGetValue(key, out var rel) &&
+                !string.IsNullOrEmpty(rel))
+            {
+                return rel;
+            }
+
+            return null;
+        }
+
+        static string MainRel(CellArtAsset asset) => MainRelFromSet(asset, GetSendSet(asset));
+
+        static string MainRelFromSet(CellArtAsset asset, ISet<string> send)
+        {
+            if (send != null && send.Contains("front") && HasViewFile(asset, "front"))
+            {
+                return RelOf(asset, "front");
+            }
+
+            if (send != null && send.Contains("concept") && HasViewFile(asset, "concept"))
+            {
+                return RelOf(asset, "concept");
+            }
+
+            return null;
         }
 
         static bool TryResolveAbs(CellArtAsset asset, string rel, out string abs, out string error)
@@ -857,6 +1002,7 @@ namespace BinGames.EditorTools.FeatureArt
 
         static bool TryEncodeImages(
             CellArtAsset asset,
+            ISet<string> sendKeys,
             out string mainUri,
             out List<(string ViewType, string DataUri)> views,
             out string error)
@@ -864,11 +1010,13 @@ namespace BinGames.EditorTools.FeatureArt
             mainUri = null;
             views = new List<(string, string)>();
             error = null;
+            var send = sendKeys ?? GetSendSet(asset);
             var maxSide = 2048;
             while (maxSide >= 512)
             {
                 views.Clear();
-                if (!TryResolveAbs(asset, MainRel(asset), out var mainAbs, out error))
+                var mainRel = MainRelFromSet(asset, send);
+                if (!TryResolveAbs(asset, mainRel, out var mainAbs, out error))
                 {
                     return false;
                 }
@@ -878,28 +1026,26 @@ namespace BinGames.EditorTools.FeatureArt
                     return false;
                 }
 
-                if (asset.views != null)
+                foreach (var key in MultiViewKeys)
                 {
-                    foreach (var key in MultiViewKeys)
+                    if (!send.Contains(key))
                     {
-                        if (!asset.views.TryGetValue(key, out var rel) || string.IsNullOrEmpty(rel))
-                        {
-                            continue;
-                        }
-
-                        if (!TryResolveAbs(asset, rel, out var abs, out _))
-                        {
-                            continue;
-                        }
-
-                        if (!TryEncodeFile(abs, maxSide, out var uri, out var len, out error))
-                        {
-                            return false;
-                        }
-
-                        total += len;
-                        views.Add((key, uri));
+                        continue;
                     }
+
+                    var rel = RelOf(asset, key);
+                    if (!TryResolveAbs(asset, rel, out var abs, out _))
+                    {
+                        continue;
+                    }
+
+                    if (!TryEncodeFile(abs, maxSide, out var uri, out var len, out error))
+                    {
+                        return false;
+                    }
+
+                    total += len;
+                    views.Add((key, uri));
                 }
 
                 if (total <= MaxEncodedBytes)
