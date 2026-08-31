@@ -47,12 +47,17 @@ namespace GameLogic.ArtBinding
             public readonly bool Ok;
             public readonly Mesh Mesh;
             public readonly Material Material;
+            /// <summary>相对白模单位球（半径 0.5）的缩放倍率。混元 FBX 网格数据常为 ~0.01
+            /// 而 FileScale 的 ×100 只在 Transform 上、不会进 <see cref="Mesh.bounds"/>；
+            /// Instanced 绘制只取 sharedMesh，必须用 ScaleMul 把可见尺寸拉回白模量级。</summary>
+            public readonly float ScaleMul;
 
-            public MeshLoadResult(bool ok, Mesh mesh, Material material)
+            public MeshLoadResult(bool ok, Mesh mesh, Material material, float scaleMul = 1f)
             {
                 Ok = ok;
                 Mesh = mesh;
                 Material = material;
+                ScaleMul = scaleMul;
             }
         }
 
@@ -68,10 +73,14 @@ namespace GameLogic.ArtBinding
             }
         }
 
-        /// <summary>加载 location 指向的 Prefab，抽取 MeshFilter.sharedMesh（+ 若自带且支持 Instancing 的
-        /// sharedMaterial，否则 Material 为 null 交调用方保留原材质）。异常/null/无 MeshFilter 一律
-        /// Log.Error 一次并返回 Ok=false，不抛出、不中断调用方的其它槽处理（Required：错误 location 单槽白模，
-        /// 关卡不卡死）。成功时把 Prefab 对象本身 append 进 track，由调用方在 Exit 时统一 UnloadAsset。</summary>
+        /// <summary>白模单位球半径（<see cref="BinGames.Sim.SimVisualLibrary"/> SphereUnit / BuildSphere），
+        /// 用作绑定网格的目标半宽，使 <c>Radius * 2 * ScaleMul</c> 与现网体量一致。</summary>
+        public const float UnitMeshRadius = 0.5f;
+
+        /// <summary>加载 location 指向的 Prefab/FBX，抽取 MeshFilter.sharedMesh。
+        /// 材质：仅当 sharedMaterial 是本项目 Instanced 着色器（SimBioGlass / SimInstancedUnlit）才带回，
+        /// 混元导入的 Standard+PBR 不自动覆盖——否则会丢掉局内 BioGlass 调色，且贴图依赖易在热更路径丢引用。
+        /// 异常/null/无 MeshFilter 一律 Log.Error 一次并返回 Ok=false。成功时 prefab 进 track。</summary>
         public static async UniTask<MeshLoadResult> TryLoadInstancedMesh(string location, List<UnityEngine.Object> track)
         {
             if (string.IsNullOrEmpty(location))
@@ -108,12 +117,45 @@ namespace GameLogic.ArtBinding
 
             Material material = null;
             MeshRenderer renderer = prefab.GetComponentInChildren<MeshRenderer>(true);
-            if (renderer != null && renderer.sharedMaterial != null && renderer.sharedMaterial.enableInstancing)
+            if (renderer != null && renderer.sharedMaterial != null
+                && renderer.sharedMaterial.enableInstancing
+                && IsSimInstancedShader(renderer.sharedMaterial.shader))
             {
                 material = renderer.sharedMaterial;
             }
 
-            return new MeshLoadResult(true, filter.sharedMesh, material);
+            float scaleMul = ComputeUnitScaleMul(filter.sharedMesh);
+            return new MeshLoadResult(true, filter.sharedMesh, material, scaleMul);
+        }
+
+        /// <summary>按网格 bounds 最大半轴换算到 <see cref="UnitMeshRadius"/>；退化网格回退 1。</summary>
+        public static float ComputeUnitScaleMul(Mesh mesh)
+        {
+            if (mesh == null)
+            {
+                return 1f;
+            }
+
+            Vector3 extents = mesh.bounds.extents;
+            float maxExtent = Mathf.Max(extents.x, Mathf.Max(extents.y, extents.z));
+            if (maxExtent < 1e-5f)
+            {
+                Log.Warning($"[FeatureArtVisualBinder] 网格 bounds 近零（{mesh.name}），ScaleMul 回退 1");
+                return 1f;
+            }
+
+            return UnitMeshRadius / maxExtent;
+        }
+
+        private static bool IsSimInstancedShader(Shader shader)
+        {
+            if (shader == null)
+            {
+                return false;
+            }
+
+            string name = shader.name;
+            return name == "BinGames/SimBioGlass" || name == "BinGames/SimInstancedUnlit";
         }
 
         /// <summary>加载独立材质覆盖槽。要求 <see cref="Material.enableInstancing"/> 为真，否则视为失败

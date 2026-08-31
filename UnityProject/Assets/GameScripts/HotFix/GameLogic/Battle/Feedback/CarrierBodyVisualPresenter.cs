@@ -55,32 +55,43 @@ namespace GameLogic.Battle.Feedback
             CarrierInstance active = registry.ActiveCarrier;
             string artId = ResolveArtId(active);
             int visualId = CellStageFlow.VisualIdForArtId(artId);
+            // AttackFamily 后缀（如 ::projectile）尚未进 AllArtIds 时 VisualId=-1，
+            // 回退到无后缀 base，避免玩家卡在默认槽 0 / 看不见已绑定的 carrier mesh。
+            if (visualId < 0)
+            {
+                visualId = CellStageFlow.VisualIdForArtId(ResolveBaseArtId(active));
+            }
             if (visualId >= 0)
             {
                 _sim.SetPlayerVisualId(visualId);
             }
         }
 
-        private static string ResolveArtId(CarrierInstance active)
+        private static string ResolveBaseArtId(CarrierInstance active)
         {
             if (active == null)
             {
                 return "carrier/base";
             }
 
-            string baseArtId;
             switch (active.OrganelleId)
             {
                 case "org_emitter":
-                    baseArtId = "carrier/emitter";
-                    break;
+                    return "carrier/emitter";
                 case "org_cilia":
-                    baseArtId = "carrier/cilia";
-                    break;
+                    return "carrier/cilia";
                 default:
-                    baseArtId = GameLogic.MetabolicSlice.ContentCatalog.OrganelleCatalog.Get(active.OrganelleId)?.ArtId
+                    return GameLogic.MetabolicSlice.ContentCatalog.OrganelleCatalog.Get(active.OrganelleId)?.ArtId
                         ?? "carrier/base";
-                    break;
+            }
+        }
+
+        private static string ResolveArtId(CarrierInstance active)
+        {
+            string baseArtId = ResolveBaseArtId(active);
+            if (active == null)
+            {
+                return baseArtId;
             }
 
             string group = GameLogic.MetabolicSlice.ContentCatalog.OrganelleCatalog.Get(active.OrganelleId)?.AttackFamily;

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using BinGames.Sim;
 using Cysharp.Threading.Tasks;
@@ -62,6 +63,7 @@ namespace GameLogic.Stage.CellStage
         private MetabolicDigestionSystem _digestion;
         private CarrierBodyVisualPresenter _carrierBodyVisual;
         private ComposeProjectilePresenter _composeProjectilePresenter;
+        private Battle.Feedback.DevUnitGoMirror _devUnitGoMirror;
 
         private SimRenderer _renderer;
         /// <summary>story-005：持有 BuildVisuals() 返回的同一个数组引用，供 ApplyFeatureArtVisualsAsync
@@ -309,6 +311,8 @@ namespace GameLogic.Stage.CellStage
             _hub.Register(new ComposeAimIndicatorPresenter());
             // 任务二：玩家 Carrier 本体随装配变化，同款轮询 AssemblyVersion。
             _carrierBodyVisual = _hub.Register(new CarrierBodyVisualPresenter());
+            // Dev：Snapshot → 可点选 GO；默认关，菜单 BinGames/功能美术/Dev 单位 GO 镜像。
+            _devUnitGoMirror = _hub.Register(new Battle.Feedback.DevUnitGoMirror());
 
             // 效果执行器注册。新增一种效果只需在此多一行。
             _abilities.RegisterExecutor(new EffectDealDamage());
@@ -364,6 +368,12 @@ namespace GameLogic.Stage.CellStage
             _renderer = new SimRenderer();
             _visuals = BuildVisuals();
             _renderer.Initialize(_visuals, cfg.UnitCapacity);
+            _devUnitGoMirror?.Bind(_sim, _visuals);
+            _devUnitGoMirror?.BindProjectileVisual(
+                BuildConeCached(),
+                ProjectileMaterial(),
+                1.8f,
+                new Color(1f, 0.95f, 0.35f, 1f));
         }
 
         /// <summary>
@@ -437,15 +447,7 @@ namespace GameLogic.Stage.CellStage
                 }
                 if (result.Ok)
                 {
-                    int vid = VisualIdForArtId("carrier/base");
-                    if (vid >= 0)
-                    {
-                        _visuals[vid].Mesh = result.Mesh;
-                        if (result.Material != null)
-                        {
-                            _visuals[vid].Material = result.Material;
-                        }
-                    }
+                    ApplyLoadedMeshToArtId("carrier/base", result);
                 }
             }
 
@@ -495,17 +497,73 @@ namespace GameLogic.Stage.CellStage
                 {
                     continue;
                 }
-                int vid = VisualIdForArtId(def.ArtId);
-                if (vid < 0)
+
+                // 沙盒对比台 / 非 Carrier 路径：按 OrganelleDef.ArtId 覆盖。
+                ApplyLoadedMeshToArtId(def.ArtId, result);
+
+                // 局内玩家外形走 CarrierBodyVisualPresenter：org_emitter/cilia 用 carrier/*，
+                // 其余 Carrier 用 org/*，并可能带 ::suffix。必须同步覆盖这些 VisualId，
+                // 否则只换了沙盒架上的器官白模，正常对局里玩家仍是白模。
+                foreach (string carrierArtId in CarrierVisualArtIdsForOrgan(def.Id, def.ArtId))
                 {
-                    continue;
-                }
-                _visuals[vid].Mesh = result.Mesh;
-                if (result.Material != null)
-                {
-                    _visuals[vid].Material = result.Material;
+                    ApplyLoadedMeshToArtId(carrierArtId, result);
                 }
             }
+        }
+
+        /// <summary>把已加载的 mesh/材质/ScaleMul 写进 <see cref="_visuals"/> 对应 ArtId 槽。</summary>
+        private void ApplyLoadedMeshToArtId(string artId, ArtBinding.FeatureArtVisualBinder.MeshLoadResult result)
+        {
+            if (_visuals == null || string.IsNullOrEmpty(artId) || !result.Ok)
+            {
+                return;
+            }
+
+            int vid = VisualIdForArtId(artId);
+            if (vid < 0)
+            {
+                return;
+            }
+
+            _visuals[vid].Mesh = result.Mesh;
+            _visuals[vid].ScaleMul = result.ScaleMul;
+            if (result.Material != null)
+            {
+                _visuals[vid].Material = result.Material;
+            }
+        }
+
+        /// <summary>Carrier 局内实际会切到的 ArtId 列表（含 gene marker 后缀变体）。
+        /// 与 <see cref="GameLogic.Battle.Feedback.CarrierBodyVisualPresenter"/> /
+        /// <see cref="SimVisualLibrary.AllArtIds"/> 对齐：emitter/cilia 用 carrier/ 前缀，其余用 org ArtId。</summary>
+        private static List<string> CarrierVisualArtIdsForOrgan(string organelleId, string artId)
+        {
+            var ids = new List<string>(5);
+            string carrierBase = organelleId switch
+            {
+                "org_emitter" => "carrier/emitter",
+                "org_cilia" => "carrier/cilia",
+                _ => artId,
+            };
+
+            if (string.IsNullOrEmpty(carrierBase))
+            {
+                return ids;
+            }
+
+            // 自身已在 ApplyLoadedMeshToArtId(def.ArtId) 写过时勿重复也无妨（同 mesh 引用）。
+            if (!string.Equals(carrierBase, artId, StringComparison.Ordinal))
+            {
+                ids.Add(carrierBase);
+            }
+
+            string[] suffixes = { "relay", "transform", "edge", "contract" };
+            for (int i = 0; i < suffixes.Length; i++)
+            {
+                ids.Add(carrierBase + "::" + suffixes[i]);
+            }
+
+            return ids;
         }
 
         /// <summary>(c) summon：三个固定 VisualId（13/14/15），不走 VisualIdForArtId——那是沙盒对比台的
@@ -525,6 +583,7 @@ namespace GameLogic.Stage.CellStage
                 return;
             }
             _visuals[visualId].Mesh = result.Mesh;
+            _visuals[visualId].ScaleMul = result.ScaleMul;
             if (result.Material != null)
             {
                 _visuals[visualId].Material = result.Material;
@@ -554,6 +613,7 @@ namespace GameLogic.Stage.CellStage
                     continue;
                 }
                 _visuals[family.VisualId].Mesh = result.Mesh;
+                _visuals[family.VisualId].ScaleMul = result.ScaleMul;
                 if (result.Material != null)
                 {
                     _visuals[family.VisualId].Material = result.Material;
@@ -926,17 +986,21 @@ namespace GameLogic.Stage.CellStage
             CheckDraft();
             CheckEnd();
 
-            _renderer?.Draw(_sim.Snapshot);
-            if (_sim.World != null)
+            // Dev GO 镜像开启时抑制单位+内核弹道 Instanced，避免双影（区/障碍等本已是 GO）。
+            if (!Battle.Feedback.DevUnitGoMirror.SuppressInstancedDraw)
             {
-                // 加大加亮 + SimRenderer 内的方向拉长（story-010 V1）：默认半径下的弹体太小太暗。
-                _renderer?.DrawProjectiles(_sim.World.Projectiles, new SimVisual
+                _renderer?.Draw(_sim.Snapshot);
+                if (_sim.World != null)
                 {
-                    Mesh = BuildConeCached(),
-                    Material = ProjectileMaterial(),
-                    ScaleMul = 1.8f,
-                    BaseColor = new Color(1f, 0.95f, 0.35f),
-                });
+                    // 加大加亮 + SimRenderer 内的方向拉长（story-010 V1）：默认半径下的弹体太小太暗。
+                    _renderer?.DrawProjectiles(_sim.World.Projectiles, new SimVisual
+                    {
+                        Mesh = BuildConeCached(),
+                        Material = ProjectileMaterial(),
+                        ScaleMul = 1.8f,
+                        BaseColor = new Color(1f, 0.95f, 0.35f),
+                    });
+                }
             }
 
             FollowCamera(dt);
