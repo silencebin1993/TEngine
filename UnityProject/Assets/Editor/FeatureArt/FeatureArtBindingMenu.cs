@@ -12,6 +12,13 @@ namespace BinGames.EditorTools.FeatureArt
             FeatureArtBindingWindow.Open();
         }
 
+        [MenuItem("BinGames/功能美术/从整包重烘全部游戏 Prefab", false, 53)]
+        public static void BakeAllGamePrefabs()
+        {
+            var n = FeatureArtGamePrefabBaker.FixAddressCollisionsAndBake(out var log);
+            EditorUtility.DisplayDialog("功能美术", log ?? (n > 0 ? "已重烘。" : "没有可烘的。"), "好");
+        }
+
         [InitializeOnLoadMethod]
         static void Warmup()
         {

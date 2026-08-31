@@ -77,10 +77,13 @@ namespace GameLogic.ArtBinding
         /// 用作绑定网格的目标半宽，使 <c>Radius * 2 * ScaleMul</c> 与现网体量一致。</summary>
         public const float UnitMeshRadius = 0.5f;
 
-        /// <summary>加载 location 指向的 Prefab/FBX，抽取 MeshFilter.sharedMesh。
-        /// 材质：仅当 sharedMaterial 是本项目 Instanced 着色器（SimBioGlass / SimInstancedUnlit）才带回，
-        /// 混元导入的 Standard+PBR 不自动覆盖——否则会丢掉局内 BioGlass 调色，且贴图依赖易在热更路径丢引用。
-        /// 异常/null/无 MeshFilter 一律 Log.Error 一次并返回 Ok=false。成功时 prefab 进 track。</summary>
+        /// <summary>加载 location 指向的资源，抽取可用于 Instanced 绘制的 Mesh。story-017：外形槽现在可绑
+        /// Mesh / Prefab / FBX·OBJ Model 三种资产，location 本身不带类型标记，所以运行时仍按「先当
+        /// GameObject 抽 MeshFilter.sharedMesh，失败或无 MeshFilter 再直接当 Mesh 加载」的顺序尝试，
+        /// 两条路都失败才算绑定失效。材质：仅当 sharedMaterial 是本项目 Instanced 着色器
+        /// （SimBioGlass / SimInstancedUnlit）才带回，混元导入的 Standard+PBR 不自动覆盖——否则会丢掉局内
+        /// BioGlass 调色，且贴图依赖易在热更路径丢引用。异常/两路皆空一律 Log.Error 一次并返回 Ok=false。
+        /// 成功时加载到的资源进 track。</summary>
         public static async UniTask<MeshLoadResult> TryLoadInstancedMesh(string location, List<UnityEngine.Object> track)
         {
             if (string.IsNullOrEmpty(location))
@@ -88,44 +91,64 @@ namespace GameLogic.ArtBinding
                 return new MeshLoadResult(false, null, null);
             }
 
-            GameObject prefab;
+            GameObject prefab = null;
             try
             {
                 prefab = await GameModule.Resource.LoadAssetAsync<GameObject>(location);
             }
             catch (Exception e)
             {
-                Log.Error($"[FeatureArtVisualBinder] 槽绑定资源加载失败（{location}）：{e.Message}，回退白模");
-                return new MeshLoadResult(false, null, null);
+                Log.Error($"[FeatureArtVisualBinder] 槽绑定资源（GameObject）加载失败（{location}）：{e.Message}，尝试按 Mesh 直载");
             }
 
-            if (prefab == null)
+            if (prefab != null)
             {
-                Log.Error($"[FeatureArtVisualBinder] 槽绑定资源加载失败（{location}）：返回 null，回退白模");
-                return new MeshLoadResult(false, null, null);
-            }
+                MeshFilter filter = prefab.GetComponentInChildren<MeshFilter>(true);
+                if (filter != null && filter.sharedMesh != null)
+                {
+                    track.Add(prefab);
+                    Material material = ExtractInstancedMaterial(prefab);
+                    float scaleMul = ComputeUnitScaleMul(filter.sharedMesh);
+                    return new MeshLoadResult(true, filter.sharedMesh, material, scaleMul);
+                }
 
-            MeshFilter filter = prefab.GetComponentInChildren<MeshFilter>(true);
-            if (filter == null || filter.sharedMesh == null)
-            {
-                Log.Error($"[FeatureArtVisualBinder] 槽绑定资源无 MeshFilter（{location}），回退白模");
                 GameModule.Resource.UnloadAsset(prefab);
+            }
+
+            Mesh mesh;
+            try
+            {
+                mesh = await GameModule.Resource.LoadAssetAsync<Mesh>(location);
+            }
+            catch (Exception e)
+            {
+                Log.Error($"[FeatureArtVisualBinder] 槽绑定资源（Mesh）加载失败（{location}）：{e.Message}，回退白模");
                 return new MeshLoadResult(false, null, null);
             }
 
-            track.Add(prefab);
+            if (mesh == null)
+            {
+                Log.Error($"[FeatureArtVisualBinder] 槽绑定资源加载失败（{location}）：GameObject/Mesh 均取不到，回退白模");
+                return new MeshLoadResult(false, null, null);
+            }
 
-            Material material = null;
+            track.Add(mesh);
+            return new MeshLoadResult(true, mesh, null, ComputeUnitScaleMul(mesh));
+        }
+
+        /// <summary>从抽出 MeshFilter 的 Prefab/Model 上找同挂 MeshRenderer 的 Instanced 材质，规则见
+        /// <see cref="TryLoadInstancedMesh"/> 顶部注释；纯 Mesh 直载路径没有材质来源，回 null。</summary>
+        private static Material ExtractInstancedMaterial(GameObject prefab)
+        {
             MeshRenderer renderer = prefab.GetComponentInChildren<MeshRenderer>(true);
             if (renderer != null && renderer.sharedMaterial != null
                 && renderer.sharedMaterial.enableInstancing
                 && IsSimInstancedShader(renderer.sharedMaterial.shader))
             {
-                material = renderer.sharedMaterial;
+                return renderer.sharedMaterial;
             }
 
-            float scaleMul = ComputeUnitScaleMul(filter.sharedMesh);
-            return new MeshLoadResult(true, filter.sharedMesh, material, scaleMul);
+            return null;
         }
 
         /// <summary>按网格 bounds 最大半轴换算到 <see cref="UnitMeshRadius"/>；退化网格回退 1。</summary>

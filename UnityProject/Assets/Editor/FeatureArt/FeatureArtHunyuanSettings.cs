@@ -692,7 +692,18 @@ namespace BinGames.EditorTools.FeatureArt
             }
 
             EditorGUILayout.LabelField(
-                "把 Organ/ 等根下旧的 FBX、散落贴图、共享 output.fbm 收进 {canonical}/ 整包子目录。",
+                "把 Organ/ 等根下旧的 FBX、散落贴图、共享 output.fbm 收进 {canonical}/ 整包子目录，并尽量重烘 Prefab。",
+                EditorStyles.miniLabel);
+
+            EditorGUILayout.Space();
+            if (GUILayout.Button("从整包重烘全部游戏 Prefab（不扣积分）", GUILayout.Width(320)))
+            {
+                var n = FeatureArtGamePrefabBaker.FixAddressCollisionsAndBake(out var log);
+                EditorUtility.DisplayDialog("混元生3D", log ?? (n > 0 ? "已重烘。" : "没有可烘的。"), "好");
+            }
+
+            EditorGUILayout.LabelField(
+                "母带改名为 {canonical}_src.fbx（避免与 Prefab 撞 YooAsset Address），再烘 {canonical}.prefab + _runtime.mat。",
                 EditorStyles.miniLabel);
 
             EditorGUILayout.Space();

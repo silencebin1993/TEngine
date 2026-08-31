@@ -735,10 +735,8 @@ namespace BinGames.EditorTools.FeatureArt
         {
             var packageDir = PackageDir(_folderHint, _canonicalName);
             EnsureAssetFolder(packageDir);
-            var isPrefab = string.Equals(_slot.bindKind, "PooledPrefab", StringComparison.Ordinal);
-            var modelAssetPath = isPrefab
-                ? $"{packageDir}/{_canonicalName}_src{ext}"
-                : $"{packageDir}/{_canonicalName}{ext}";
+            // 母带一律 {canonical}_src.*：成品 Prefab 独占 AddressByFileName={canonical}，避免与 FBX 撞名。
+            var modelAssetPath = $"{packageDir}/{_canonicalName}_src{ext}";
             if (!modelAssetPath.StartsWith(RawPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 Fail("拒绝写入 Art/ 或 Raw 以外。");
@@ -750,6 +748,8 @@ namespace BinGames.EditorTools.FeatureArt
             // 清掉本包旧文件 + 旧布局（folderHint 根下散落）
             ClearOldSidecars(packageDir, _canonicalName);
             ClearLegacyRootFiles(_folderHint, _canonicalName);
+            // 再清一次可能残留的裸名母带（与 Prefab 同 Address）
+            FeatureArtGamePrefabBaker.EnsureMotherUsesSrcSuffix(packageDir, _canonicalName);
             File.Copy(srcModel, destAbs, true);
             _sidecarCount = MaterializeMaps(srcModel, destAbs, packageDir, _canonicalName);
             ImportMapAssets(packageDir, _canonicalName);
@@ -765,24 +765,12 @@ namespace BinGames.EditorTools.FeatureArt
 
             RemapAndPaintMaps(modelAssetPath, packageDir, _canonicalName);
 
-            UnityEngine.Object bindTarget;
-            if (isPrefab)
+            // 成品一律烘焙游戏 Prefab（SimBioGlass runtime 材质可换）；FBX 留作母带。
+            if (!FeatureArtGamePrefabBaker.TryBakePackage(packageDir, _canonicalName, out var bindTarget, out var bakeErr)
+                || bindTarget == null)
             {
-                bindTarget = WriteProjectilePrefab(modelAssetPath, packageDir);
-                if (bindTarget == null)
-                {
-                    Fail("无法从模型抽出 Mesh 做成弹体 Prefab。");
-                    return false;
-                }
-            }
-            else
-            {
-                bindTarget = LoadBindableMesh(modelAssetPath);
-                if (bindTarget == null)
-                {
-                    Fail("导入后没有 MeshFilter。");
-                    return false;
-                }
+                Fail(bakeErr ?? "无法烘焙游戏 Prefab（检查母带 MeshFilter / {canonical}_src）。");
+                return false;
             }
 
             var before = _slot.location;
@@ -800,56 +788,6 @@ namespace BinGames.EditorTools.FeatureArt
 
             _window.SaveCatalogNow();
             return true;
-        }
-
-        static UnityEngine.Object WriteProjectilePrefab(string modelAssetPath, string packageDir)
-        {
-            var model = AssetDatabase.LoadAssetAtPath<GameObject>(modelAssetPath);
-            var mesh = FindFirstMesh(model);
-            if (mesh == null)
-            {
-                return null;
-            }
-
-            var prefabPath = $"{packageDir}/{_canonicalName}.prefab";
-            var go = new GameObject(_canonicalName);
-            try
-            {
-                go.AddComponent<MeshFilter>().sharedMesh = mesh;
-                var mr = go.AddComponent<MeshRenderer>();
-                var srcGo = AssetDatabase.LoadAssetAtPath<GameObject>(modelAssetPath);
-                var srcMr = srcGo != null ? srcGo.GetComponentInChildren<MeshRenderer>(true) : null;
-                if (srcMr != null && srcMr.sharedMaterial != null)
-                {
-                    mr.sharedMaterial = srcMr.sharedMaterial;
-                }
-
-                return PrefabUtility.SaveAsPrefabAsset(go, prefabPath);
-            }
-            finally
-            {
-                UnityEngine.Object.DestroyImmediate(go);
-            }
-        }
-
-        static UnityEngine.Object LoadBindableMesh(string modelAssetPath)
-        {
-            var go = AssetDatabase.LoadAssetAtPath<GameObject>(modelAssetPath);
-            if (go != null && go.GetComponentInChildren<MeshFilter>(true) != null)
-            {
-                return go;
-            }
-
-            var assets = AssetDatabase.LoadAllAssetsAtPath(modelAssetPath);
-            foreach (var a in assets)
-            {
-                if (a is Mesh)
-                {
-                    return a;
-                }
-            }
-
-            return null;
         }
 
         static bool HasSidecarFiles(string folder, string name)
@@ -882,6 +820,14 @@ namespace BinGames.EditorTools.FeatureArt
 
             foreach (var path in Directory.GetFiles(dir, name + "_*"))
             {
+                var fileName = Path.GetFileNameWithoutExtension(path) ?? "";
+                // 保留人改过的局内材质球；重烘 Prefab 会复用它
+                if (string.Equals(fileName, name + FeatureArtGamePrefabBaker.RuntimeMatSuffix,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 var ext = Path.GetExtension(path);
                 if (!FeatureArtHunyuanClient.IsSidecarExt(ext) &&
                     !string.Equals(ext, ".mat", StringComparison.OrdinalIgnoreCase))
@@ -1463,13 +1409,30 @@ namespace BinGames.EditorTools.FeatureArt
             }
 
             folder = package;
-            var modelAssetPath = folder + "/" + name + ".fbx";
+            FeatureArtGamePrefabBaker.EnsureMotherUsesSrcSuffix(folder, name);
+            var modelAssetPath = folder + "/" + name + "_src.fbx";
             var destAbs = AbsFromAsset(modelAssetPath);
             if (!File.Exists(destAbs))
             {
-                log = "没有 " + name + ".fbx";
+                // 兼容尚未改名的旧包
+                modelAssetPath = folder + "/" + name + ".fbx";
+                destAbs = AbsFromAsset(modelAssetPath);
+            }
+
+            if (!File.Exists(destAbs))
+            {
+                log = "没有 " + name + "_src.fbx / " + name + ".fbx";
                 return 0;
             }
+
+            FeatureArtGamePrefabBaker.EnsureMotherUsesSrcSuffix(folder, name);
+            modelAssetPath = folder + "/" + name + "_src.fbx";
+            if (!File.Exists(AbsFromAsset(modelAssetPath)))
+            {
+                modelAssetPath = folder + "/" + name + ".fbx";
+            }
+
+            destAbs = AbsFromAsset(modelAssetPath);
 
             var maps = FindMap(folder, name, isAlbedo: true, "texture_pbr", "albedo", "diffuse") != null
                 ? CountUniqueMaps(folder, name)
@@ -1490,9 +1453,10 @@ namespace BinGames.EditorTools.FeatureArt
             }
 
             RemapAndPaintMaps(modelAssetPath, folder, name);
+            FeatureArtGamePrefabBaker.TryBakePackage(folder, name, out _, out _);
             log = maps > 0
-                ? name + " 抽出 " + maps + " 张贴图并绑到材质（整包 " + folder + "）"
-                : name + " 没有内嵌/旁路贴图";
+                ? name + " 抽出 " + maps + " 张贴图并绑到材质（整包 " + folder + "）；已重烘游戏 Prefab"
+                : name + " 没有内嵌/旁路贴图；已尝试重烘游戏 Prefab";
             return maps;
         }
 
@@ -1597,6 +1561,7 @@ namespace BinGames.EditorTools.FeatureArt
                         ImportMapAssets(package, name);
                         AssetDatabase.ImportAsset(modelPath, ImportAssetOptions.ForceUpdate);
                         RemapAndPaintMaps(modelPath, package, name);
+                        FeatureArtGamePrefabBaker.TryBakePackage(package, name, out _, out _);
                     }
 
                     moved++;
@@ -1804,17 +1769,6 @@ namespace BinGames.EditorTools.FeatureArt
             return sb.ToString();
         }
 
-        static Mesh FindFirstMesh(GameObject go)
-        {
-            if (go == null)
-            {
-                return null;
-            }
-
-            var mf = go.GetComponentInChildren<MeshFilter>(true);
-            return mf != null ? mf.sharedMesh : null;
-        }
-
         static void FinishOk()
         {
             var id = _slot != null ? _slot.id : "";
@@ -1832,8 +1786,8 @@ namespace BinGames.EditorTools.FeatureArt
             var pkg = PackageDir(folder, loc);
             Log($"{id} → location={loc}" +
                 (maps > 0
-                    ? $"  贴图 {maps} 张（整包 {pkg} ，规范名 {loc}_*）"
-                    : $"  （整包 {pkg} ，包内无贴图文件）"));
+                    ? $"  贴图 {maps} 张（整包 {pkg} ，成品 Prefab + 母带 FBX，规范名 {loc}_*）"
+                    : $"  （整包 {pkg} ，成品 Prefab + 母带；包内无贴图文件）"));
             if (_window != null)
             {
                 _window.Repaint();

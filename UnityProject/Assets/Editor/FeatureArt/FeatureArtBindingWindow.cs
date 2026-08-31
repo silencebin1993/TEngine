@@ -22,6 +22,12 @@ namespace BinGames.EditorTools.FeatureArt
     {
         const string RawPrefix = "Assets/GameRes/Raw/";
 
+        // ---- story-017：InstancedMesh 槽「网格/预制体/模型」下拉 ----
+        const int MeshKindMesh = 0;
+        const int MeshKindPrefab = 1;
+        const int MeshKindModel = 2;
+        static readonly string[] MeshKindLabels = { "网格", "预制体", "模型" };
+
         /// <summary>PANEL-UX §3 器官→Family/Shape 映射（UI 呈现用，禁止从 OrganelleDef.AttackFamily 派生——
         /// 那是战斗侧枚举，与本表分组不是一回事，见 preflight-decisions.md「关键陷阱」）。</summary>
         static readonly (string OrganId, string GroupZh, string ShapeKey)[] AttackMethodEntries =
@@ -184,6 +190,11 @@ namespace BinGames.EditorTools.FeatureArt
         List<HealthIssue> _healthIssues;
         readonly Dictionary<string, string> _addViewKeys = new Dictionary<string, string>();
         readonly Dictionary<string, CellArtAsset> _workingAssets = new Dictionary<string, CellArtAsset>();
+
+        /// <summary>story-017：InstancedMesh 槽「网格/预制体/模型」下拉的显示态。空槽时按用户上次选择
+        /// 记忆（默认模型）；已绑时每帧被 <see cref="ResolveMeshAssetKind"/> 覆盖为磁盘实测结果，
+        /// 不持久化进 catalog（零改动 schema）。</summary>
+        readonly Dictionary<string, int> _instancedMeshKindOverride = new Dictionary<string, int>();
 
         readonly Dictionary<string, OrganPage> _organPages = new Dictionary<string, OrganPage>();
         readonly Dictionary<string, ShapePage> _shapePages = new Dictionary<string, ShapePage>();
@@ -677,12 +688,20 @@ namespace BinGames.EditorTools.FeatureArt
         }
 
         /// <summary>拖拽/清空/复制共用的字段绘制（story-003「保存/清空」逻辑原样复用）。
-        /// story-011 D2：成品槽默认单行 ObjectField，禁止再传自定义 Height。</summary>
+        /// story-011 D2：成品槽默认单行 ObjectField，禁止再传自定义 Height。
+        /// story-017：InstancedMesh 槽改走 <see cref="DrawInstancedMeshBindField"/>（类型下拉 + ObjectField），
+        /// 其它 bindKind（MaterialOverride / PooledPrefab）保持本方法原逻辑不变。</summary>
         public void DrawBindField(FeatureArtSlot slot)
         {
             if (slot == null)
             {
                 SirenixEditorGUI.MessageBox("未同步", MessageType.None);
+                return;
+            }
+
+            if (slot.bindKind == "InstancedMesh")
+            {
+                DrawInstancedMeshBindField(slot);
                 return;
             }
 
@@ -695,6 +714,100 @@ namespace BinGames.EditorTools.FeatureArt
                 TryBind(slot, picked);
             }
 
+            DrawClearAndCopyRow(slot);
+        }
+
+        /// <summary>story-017：外形槽（InstancedMesh）同一行画「网格/预制体/模型」下拉 + 对应类型的
+        /// ObjectField。已绑定按 <see cref="DetectInstancedMeshKind"/> 自动切档（下拉锁定，反映磁盘现状，
+        /// 不得手改；要换类型先清空）；空槽用 <c>_instancedMeshKindOverride</c> 记住上次手选，默认预制体。
+        /// 禁止在此对该槽用 <c>typeof(UnityEngine.Object)</c>——那会把文件夹送进拾取器。</summary>
+        void DrawInstancedMeshBindField(FeatureArtSlot slot)
+        {
+            int kind;
+            UnityEngine.Object current;
+            bool locked = !string.IsNullOrEmpty(slot.location);
+            if (locked)
+            {
+                kind = DetectInstancedMeshKind(slot, out current);
+                _instancedMeshKindOverride[slot.id] = kind;
+            }
+            else
+            {
+                current = null;
+                if (!_instancedMeshKindOverride.TryGetValue(slot.id, out kind))
+                {
+                    kind = MeshKindPrefab;
+                }
+            }
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                using (new EditorGUI.DisabledScope(locked))
+                {
+                    EditorGUI.BeginChangeCheck();
+                    var newKind = EditorGUILayout.Popup(kind, MeshKindLabels, GUILayout.Width(56));
+                    if (!locked && EditorGUI.EndChangeCheck())
+                    {
+                        _instancedMeshKindOverride[slot.id] = newKind;
+                        kind = newKind;
+                    }
+                }
+
+                var type = InstancedMeshObjectFieldType(kind);
+                EditorGUI.BeginChangeCheck();
+                var picked = EditorGUILayout.ObjectField(current, type, false);
+                if (EditorGUI.EndChangeCheck() && picked != null)
+                {
+                    TryBind(slot, picked);
+                }
+            }
+
+            DrawClearAndCopyRow(slot);
+            DrawRebakeRow(slot);
+        }
+
+        void DrawRebakeRow(FeatureArtSlot slot)
+        {
+            if (slot == null || string.IsNullOrEmpty(slot.folderHint) || string.IsNullOrEmpty(slot.location))
+            {
+                return;
+            }
+
+            if (!FeatureArtHunyuanGenerate.TryCanonical(slot, out var folder, out var name, out _))
+            {
+                return;
+            }
+
+            var package = FeatureArtHunyuanGenerate.PackageDir(folder, name);
+            var prefabPath = FeatureArtGamePrefabBaker.PrefabAssetPath(package, name);
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                if (GUILayout.Button("从整包重烘 Prefab", GUILayout.Width(140)))
+                {
+                    if (FeatureArtGamePrefabBaker.TryBakeOne(package, name, out var log))
+                    {
+                        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+                        if (prefab != null)
+                        {
+                            TryBind(slot, prefab);
+                            SaveCatalogNow();
+                        }
+
+                        _lastLog = log;
+                    }
+                    else
+                    {
+                        _lastLog = log;
+                    }
+                }
+
+                EditorGUILayout.LabelField("母带 FBX 改完后点；材质球 organ_*_runtime 会保留。",
+                    EditorStyles.miniLabel);
+            }
+        }
+
+        void DrawClearAndCopyRow(FeatureArtSlot slot)
+        {
             using (new EditorGUILayout.HorizontalScope())
             {
                 if (GUILayout.Button("清空", GUILayout.Width(48)))
@@ -712,8 +825,36 @@ namespace BinGames.EditorTools.FeatureArt
             }
         }
 
+        static Type InstancedMeshObjectFieldType(int kind) => kind == MeshKindMesh ? typeof(Mesh) : typeof(GameObject);
+
+        /// <summary>已绑定槽按 <see cref="ResolveCurrentAsset"/> 的解析结果反推下拉档位：
+        /// 先按 GameObject 类型解析（内部已按 .prefab &gt; .fbx/.obj 优先级挑同名资源），命中就按扩展名分
+        /// 预制体/模型；GameObject 解析落空再按 Mesh 类型解析，命中即网格；两路都空（坏 location）时
+        /// 回退预制体档，<paramref name="asset"/> 为 null，故 ObjectField 显示为空、不崩关。</summary>
+        static int DetectInstancedMeshKind(FeatureArtSlot slot, out UnityEngine.Object asset)
+        {
+            asset = ResolveCurrentAsset(slot, typeof(GameObject));
+            if (asset != null)
+            {
+                var path = AssetDatabase.GetAssetPath(asset);
+                var ext = Path.GetExtension(path).ToLowerInvariant();
+                return ext == ".prefab" ? MeshKindPrefab : MeshKindModel;
+            }
+
+            asset = ResolveCurrentAsset(slot, typeof(Mesh));
+            return asset != null ? MeshKindMesh : MeshKindPrefab;
+        }
+
+        /// <summary>story-017：文件夹（<see cref="DefaultAsset"/>）在任何 bindKind 下都不是合法绑定目标——
+        /// 混元整包 <c>{canonical}/</c> 只是磁盘布局，不是可绑资产。放在 switch 前统一挡，不必每个 case 各写一遍。</summary>
         static bool ValidateKind(string bindKind, UnityEngine.Object obj, out string reason)
         {
+            if (obj is DefaultAsset || AssetDatabase.IsValidFolder(AssetDatabase.GetAssetPath(obj)))
+            {
+                reason = "拒绝文件夹：绑定的是包内模型/资源，不是整包目录。";
+                return false;
+            }
+
             switch (bindKind)
             {
                 case "InstancedMesh":
@@ -765,6 +906,8 @@ namespace BinGames.EditorTools.FeatureArt
             }
         }
 
+        /// <summary>story-017 + Prefab 烘焙管线：同名候选优先 <c>.prefab</c>（游戏成品），
+        /// 再 <c>.fbx/.obj</c>（母带），再其它（Mesh 资源）。禁止返回文件夹。</summary>
         public static UnityEngine.Object ResolveCurrentAsset(FeatureArtSlot slot, Type type)
         {
             if (slot == null || string.IsNullOrEmpty(slot.location))
@@ -773,22 +916,45 @@ namespace BinGames.EditorTools.FeatureArt
             }
 
             var guids = AssetDatabase.FindAssets(slot.location, new[] { "Assets/GameRes/Raw" });
+            UnityEngine.Object best = null;
+            var bestRank = int.MaxValue;
             foreach (var guid in guids)
             {
                 var path = AssetDatabase.GUIDToAssetPath(guid);
-                if (Path.GetFileNameWithoutExtension(path) != slot.location)
+                if (Path.GetFileNameWithoutExtension(path) != slot.location || AssetDatabase.IsValidFolder(path))
                 {
                     continue;
                 }
 
                 var asset = AssetDatabase.LoadAssetAtPath(path, type);
-                if (asset != null)
+                if (asset == null)
                 {
-                    return asset;
+                    continue;
+                }
+
+                var rank = RawAssetPriorityRank(path);
+                if (rank < bestRank)
+                {
+                    best = asset;
+                    bestRank = rank;
                 }
             }
 
-            return null;
+            return best;
+        }
+
+        static int RawAssetPriorityRank(string path)
+        {
+            switch (Path.GetExtension(path).ToLowerInvariant())
+            {
+                case ".prefab":
+                    return 0;
+                case ".fbx":
+                case ".obj":
+                    return 1;
+                default:
+                    return 2;
+            }
         }
 
         static bool HasFilenameConflict(string location)
@@ -974,15 +1140,16 @@ namespace BinGames.EditorTools.FeatureArt
                 SirenixEditorGUI.MessageBox(
                     "选攻击方式 → 看/复制外形提示词做模型（对照概念图）→ 看/复制开火提示词做特效 → 拖进同一页。\n\n" +
                     "1. 工具栏『从代码同步槽位』补齐新功能的空槽（look/prompt 每次都会按 LOOK-PROMPTS 覆盖，location 不动）；\n" +
-                    "2. 选中左树『攻击方式』下的器官，同一页拖外形网格、复制开火四段提示词；\n" +
-                    "3. 三视图下勾要发给混元的图（默认只发概念图），选模型后「用三视图生成模型并绑定」（先在左树「混元生3D」填 Key）；成品是网格+贴图，可拷去 Blender。对象框仍是白模：点「补抽贴图」，不要再点生成；\n" +
+                    "2. 选中左树『攻击方式』下的器官，同一页拖外形预制体、复制开火四段提示词；\n" +
+                    "3. 三视图下勾要发给混元的图（默认只发概念图），选模型后「用三视图生成模型并绑定」（先在左树「混元生3D」填 Key）；会落整包并自动烘焙游戏 Prefab（SimBioGlass 材质可换）。FBX+PBR 是母带，可拷去 Blender；对象框应显示 Prefab；\n" +
                     "4. 点工具栏『保存』；\n" +
                     "5. Play 模式或『健康检查』核对。\n\n" +
                     "源文件登记（概念图 / fbx / 扫盘 / 图板）在左树『源文件库』，与成品换皮同一扇窗。工具栏『打开源文件板』会跳到该页。各功能页也可直接改概念图/三视图，都写 registry.json，不是 catalog。",
                     MessageType.Info);
                 SirenixEditorGUI.MessageBox(
                     "空槽 = 白模，游戏照常能跑；拖 Assets/GameRes/Art/ 下资源会被拒绝——Art 是源文件，不进 YooAsset 热更包。\n" +
-                    "location = 拖入资源文件名（去扩展名），Raw 全树文件名须全局唯一，撞名会被『健康检查』标红。",
+                    "location = 拖入资源文件名（去扩展名），Raw 全树文件名须全局唯一，撞名会被『健康检查』标红。\n" +
+                    "成品默认绑 Prefab；FBX/OBJ 是母带。外形槽也可手拖 Mesh / Prefab / FBX；不要拖文件夹。混元整包是磁盘布局。",
                     MessageType.None);
             }
         }
