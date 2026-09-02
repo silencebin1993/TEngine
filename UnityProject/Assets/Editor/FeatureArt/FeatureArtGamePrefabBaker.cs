@@ -9,17 +9,18 @@ namespace BinGames.EditorTools.FeatureArt
 {
     /// <summary>
     /// 混元整包母带（FBX/OBJ）→ 游戏可用 Prefab。
-    /// Prefab：单 MeshFilter + MeshRenderer，材质为可换的 <c>{canonical}_runtime.mat</c>（默认 SimBioGlass + GPU Instancing）。
-    /// FBX/PBR 留在整包当源；catalog.location 绑 Prefab（文件名去扩展名仍 = canonical）。
+    /// Prefab：单 MeshFilter + MeshRenderer，材质为可换的 <c>{canonical}_runtime.mat</c>
+    /// （Unity Built-in Standard + 整包贴图 + GPU Instancing）。禁止改成 SimBioGlass。
+    /// 母带 FBX/OBJ 仍留在整包；catalog.location 绑 Prefab（文件名去扩展名仍 = canonical）。
     /// </summary>
     public static class FeatureArtGamePrefabBaker
     {
         public const string RuntimeMatSuffix = "_runtime";
-        const string BioGlassShader = "BinGames/SimBioGlass";
-        const string UnlitFallbackShader = "BinGames/SimInstancedUnlit";
+        const string DefaultRuntimeShader = "Standard";
         const string RawPrefix = "Assets/GameRes/Raw/";
 
-        static readonly string[] PackageRoots =
+        /// <summary>story-018：改 internal 供 <see cref="FeatureArtPackageIngest"/> 判定选中目录是否为合法整包根的直接子文件夹。</summary>
+        internal static readonly string[] PackageRoots =
         {
             "Assets/GameRes/Raw/Actor/Player",
             "Assets/GameRes/Raw/Actor/Organ",
@@ -280,6 +281,48 @@ namespace BinGames.EditorTools.FeatureArt
             return false;
         }
 
+        /// <summary>story-018 S5③：整包内找“唯一”一个既非 <c>{canonical}.*</c> 也非 <c>{canonical}_src.*</c>
+        /// 的 .fbx/.obj（例如人手拖入的哈希文件名，如 180cf87f….obj）。0 个或多于 1 个都返回 false，
+        /// 交给调用方判 FAIL，禁止瞎猜改名。</summary>
+        public static bool TryFindSoleUnknownModel(string packageDir, string canonical, out string modelAssetPath, out string error)
+        {
+            modelAssetPath = null;
+            error = null;
+            packageDir = (packageDir ?? "").Replace('\\', '/').TrimEnd('/');
+            canonical = (canonical ?? "").Trim();
+            var dir = AbsFromAsset(packageDir);
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
+            {
+                error = "整包目录不存在。";
+                return false;
+            }
+
+            var candidates = new List<string>();
+            foreach (var pattern in new[] { "*.fbx", "*.obj" })
+            {
+                foreach (var path in Directory.GetFiles(dir, pattern))
+                {
+                    var name = Path.GetFileNameWithoutExtension(path) ?? "";
+                    if (string.Equals(name, canonical, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(name, canonical + "_src", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    candidates.Add(path);
+                }
+            }
+
+            if (candidates.Count != 1)
+            {
+                error = candidates.Count == 0 ? "找不到母带模型。" : "多个未归类模型，无法判定唯一母带，不猜。";
+                return false;
+            }
+
+            modelAssetPath = packageDir + "/" + Path.GetFileName(candidates[0]);
+            return true;
+        }
+
         static Material EnsureRuntimeMaterial(string packageDir, string canonical, out string error)
         {
             error = null;
@@ -287,35 +330,41 @@ namespace BinGames.EditorTools.FeatureArt
             var existing = AssetDatabase.LoadAssetAtPath<Material>(matPath);
             if (existing != null)
             {
-                EnsureInstancing(existing);
+                ApplyDefaultRuntimeLook(existing, packageDir, canonical);
                 return existing;
             }
 
-            var shader = Shader.Find(BioGlassShader) ?? Shader.Find(UnlitFallbackShader);
+            var shader = Shader.Find(DefaultRuntimeShader);
             if (shader == null)
             {
-                error = $"找不到着色器 {BioGlassShader} / {UnlitFallbackShader}。";
+                error = $"找不到着色器 {DefaultRuntimeShader}。";
                 return null;
             }
 
             var mat = new Material(shader) { name = canonical + RuntimeMatSuffix };
-            mat.enableInstancing = true;
             AssetDatabase.CreateAsset(mat, matPath);
-            return AssetDatabase.LoadAssetAtPath<Material>(matPath);
+            mat = AssetDatabase.LoadAssetAtPath<Material>(matPath);
+            ApplyDefaultRuntimeLook(mat, packageDir, canonical);
+            return mat;
         }
 
-        static void EnsureInstancing(Material mat)
+        static void ApplyDefaultRuntimeLook(Material mat, string packageDir, string canonical)
         {
             if (mat == null)
             {
                 return;
             }
 
-            if (!mat.enableInstancing)
+            var shader = Shader.Find(DefaultRuntimeShader);
+            if (shader != null && mat.shader != shader)
             {
-                mat.enableInstancing = true;
-                EditorUtility.SetDirty(mat);
+                mat.shader = shader;
             }
+
+            mat.color = Color.white;
+            mat.enableInstancing = true;
+            FeatureArtHunyuanGenerate.PaintPackageStandardMaps(mat, packageDir, canonical);
+            EditorUtility.SetDirty(mat);
         }
 
         static Mesh FindFirstMesh(GameObject go)

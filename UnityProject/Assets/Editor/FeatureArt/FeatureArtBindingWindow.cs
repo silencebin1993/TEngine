@@ -652,7 +652,8 @@ namespace BinGames.EditorTools.FeatureArt
             return result;
         }
 
-        /// <summary>拖拽绑定：Raw 前缀校验 + bindKind 校验，写 location（story-003 原逻辑，未改）。</summary>
+        /// <summary>拖拽绑定：Raw 前缀校验 + bindKind 校验，写 location（story-003 原逻辑，未改，
+        /// 核心校验/写入逻辑下沉到 <see cref="TryBindCore"/>）。</summary>
         public void TryBind(FeatureArtSlot slot, UnityEngine.Object picked)
         {
             if (slot == null || picked == null)
@@ -660,30 +661,53 @@ namespace BinGames.EditorTools.FeatureArt
                 return;
             }
 
+            if (TryBindCore(slot, picked, out var reason))
+            {
+                _dirty = true;
+                _lastLog = $"{slot.id} → location={slot.location}";
+            }
+            else
+            {
+                _lastLog = reason;
+            }
+        }
+
+        /// <summary>story-018 静态桥：不依赖窗口实例状态的纯校验+写入逻辑，供
+        /// <see cref="FeatureArtPackageIngest"/> 复用同一套 Raw 前缀 / bindKind 校验，
+        /// 禁止第二套校验逻辑或复制粘贴本方法。</summary>
+        public static bool TryBindCore(FeatureArtSlot slot, UnityEngine.Object picked, out string reason)
+        {
+            reason = null;
+            if (slot == null || picked == null)
+            {
+                reason = "槽位或资源为空。";
+                return false;
+            }
+
             try
             {
                 var path = AssetDatabase.GetAssetPath(picked);
                 if (string.IsNullOrEmpty(path) || !path.StartsWith(RawPrefix, StringComparison.Ordinal))
                 {
-                    _lastLog = $"拒绝：{slot.id} 所选资源不在 {RawPrefix} 下（{path}）。";
-                    return;
+                    reason = $"拒绝：{slot.id} 所选资源不在 {RawPrefix} 下（{path}）。";
+                    return false;
                 }
 
-                if (!ValidateKind(slot.bindKind, picked, out var reason))
+                if (!ValidateKind(slot.bindKind, picked, out var vReason))
                 {
-                    _lastLog = $"拒绝：{slot.id} {reason}";
-                    return;
+                    reason = $"拒绝：{slot.id} {vReason}";
+                    return false;
                 }
 
                 slot.location = Path.GetFileNameWithoutExtension(path);
                 slot.package = "";
-                _dirty = true;
-                _lastLog = $"{slot.id} → location={slot.location}";
+                return true;
             }
             catch (Exception e)
             {
-                _lastLog = e.Message;
+                reason = e.Message;
                 Debug.LogError(e);
+                return false;
             }
         }
 
@@ -1141,7 +1165,7 @@ namespace BinGames.EditorTools.FeatureArt
                     "选攻击方式 → 看/复制外形提示词做模型（对照概念图）→ 看/复制开火提示词做特效 → 拖进同一页。\n\n" +
                     "1. 工具栏『从代码同步槽位』补齐新功能的空槽（look/prompt 每次都会按 LOOK-PROMPTS 覆盖，location 不动）；\n" +
                     "2. 选中左树『攻击方式』下的器官，同一页拖外形预制体、复制开火四段提示词；\n" +
-                    "3. 三视图下勾要发给混元的图（默认只发概念图），选模型后「用三视图生成模型并绑定」（先在左树「混元生3D」填 Key）；会落整包并自动烘焙游戏 Prefab（SimBioGlass 材质可换）。FBX+PBR 是母带，可拷去 Blender；对象框应显示 Prefab；\n" +
+                    "3. 三视图下勾要发给混元的图（默认只发概念图），选模型后「用三视图生成模型并绑定」（先在左树「混元生3D」填 Key）；会落整包并自动烘焙游戏 Prefab（Unity Standard + 整包贴图，不要自定义 shader）。对象框应显示 Prefab；\n" +
                     "4. 点工具栏『保存』；\n" +
                     "5. Play 模式或『健康检查』核对。\n\n" +
                     "源文件登记（概念图 / fbx / 扫盘 / 图板）在左树『源文件库』，与成品换皮同一扇窗。工具栏『打开源文件板』会跳到该页。各功能页也可直接改概念图/三视图，都写 registry.json，不是 catalog。",
