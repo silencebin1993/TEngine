@@ -18,34 +18,34 @@ MonoBehaviour:
         serializedData:
         - key: 0
           value:
-            rid: 7612910362989691403
+            rid: 4756161898937057472
         - key: 1
           value:
-            rid: 7612910362989691404
+            rid: 4756161898937057473
         - key: 2
           value:
-            rid: 7612910362989691405
+            rid: 4756161898937057474
         - key: 3
           value:
-            rid: 7612910362989691406
+            rid: 4756161898937057475
       previewSettings:
         sizeFactor: 1
   references:
     version: 2
     RefIds:
-    - rid: 7612910362989691403
+    - rid: 4756161898937057472
       type: {class: ModelSelection, ns: Unity.AI.Mesh.Services.Stores.States, asm: Unity.AI.Mesh}
       data:
         modelID: 
-    - rid: 7612910362989691404
+    - rid: 4756161898937057473
       type: {class: ModelSelection, ns: Unity.AI.Mesh.Services.Stores.States, asm: Unity.AI.Mesh}
       data:
         modelID: 
-    - rid: 7612910362989691405
+    - rid: 4756161898937057474
       type: {class: ModelSelection, ns: Unity.AI.Mesh.Services.Stores.States, asm: Unity.AI.Mesh}
       data:
         modelID: 
-    - rid: 7612910362989691406
+    - rid: 4756161898937057475
       type: {class: ModelSelection, ns: Unity.AI.Mesh.Services.Stores.States, asm: Unity.AI.Mesh}
       data:
         modelID: 
