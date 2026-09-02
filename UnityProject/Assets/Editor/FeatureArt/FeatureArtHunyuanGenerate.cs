@@ -765,7 +765,7 @@ namespace BinGames.EditorTools.FeatureArt
 
             RemapAndPaintMaps(modelAssetPath, packageDir, _canonicalName);
 
-            // 成品一律烘焙游戏 Prefab（SimBioGlass runtime 材质可换）；FBX 留作母带。
+            // 成品一律烘焙游戏 Prefab（Unity Standard + 整包贴图）；FBX 留作母带。
             if (!FeatureArtGamePrefabBaker.TryBakePackage(packageDir, _canonicalName, out var bindTarget, out var bakeErr)
                 || bindTarget == null)
             {
@@ -1012,16 +1012,74 @@ namespace BinGames.EditorTools.FeatureArt
                 return;
             }
 
+            var ext = Path.GetExtension(assetPath);
+            if (!ext.Equals(".png", StringComparison.OrdinalIgnoreCase) &&
+                !ext.Equals(".jpg", StringComparison.OrdinalIgnoreCase) &&
+                !ext.Equals(".jpeg", StringComparison.OrdinalIgnoreCase) &&
+                !ext.Equals(".tga", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
             AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate);
             if (!(AssetImporter.GetAtPath(assetPath) is TextureImporter tex))
             {
                 return;
             }
 
-            var file = Path.GetFileName(assetPath) ?? "";
-            if (file.IndexOf("_normal", StringComparison.OrdinalIgnoreCase) >= 0)
+            var file = (Path.GetFileName(assetPath) ?? "").ToLowerInvariant();
+            var changed = false;
+            if (file.Contains("_normal") || file.Contains("_nor."))
             {
-                tex.textureType = TextureImporterType.NormalMap;
+                if (tex.textureType != TextureImporterType.NormalMap)
+                {
+                    tex.textureType = TextureImporterType.NormalMap;
+                    changed = true;
+                }
+            }
+            else if (file.Contains("_metallic") || file.Contains("_metalness") || file.Contains("_roughness"))
+            {
+                if (tex.textureType != TextureImporterType.Default)
+                {
+                    tex.textureType = TextureImporterType.Default;
+                    changed = true;
+                }
+
+                if (tex.sRGBTexture)
+                {
+                    tex.sRGBTexture = false;
+                    changed = true;
+                }
+            }
+            else
+            {
+                if (tex.textureType != TextureImporterType.Default)
+                {
+                    tex.textureType = TextureImporterType.Default;
+                    changed = true;
+                }
+
+                if (!tex.sRGBTexture)
+                {
+                    tex.sRGBTexture = true;
+                    changed = true;
+                }
+            }
+
+            if (!tex.mipmapEnabled)
+            {
+                tex.mipmapEnabled = true;
+                changed = true;
+            }
+
+            if (tex.wrapMode != TextureWrapMode.Repeat)
+            {
+                tex.wrapMode = TextureWrapMode.Repeat;
+                changed = true;
+            }
+
+            if (changed)
+            {
                 tex.SaveAndReimport();
             }
         }
@@ -1218,6 +1276,37 @@ namespace BinGames.EditorTools.FeatureArt
             }
 
             mat.enableInstancing = true;
+        }
+
+        /// <summary>把整包 {canonical}_* 贴图画到 Standard 材质上（绑定 Prefab 用）。不清贴图。
+        /// 混元 metallic/roughness 是分图，不能直接塞进 Standard 的 MetallicGlossMap（alpha 会被当成 smoothness=1，看起来像白模）。
+        /// 磁盘分图保留；局内只接 albedo+normal，金属度 0。</summary>
+        internal static void PaintPackageStandardMaps(Material mat, string folder, string name)
+        {
+            if (mat == null || string.IsNullOrEmpty(folder) || string.IsNullOrEmpty(name))
+            {
+                return;
+            }
+
+            ImportMapAssets(folder, name);
+            var albedo = FindMap(folder, name, isAlbedo: true, "texture_pbr", "albedo", "diffuse", "basecolor", "base_color", "texture");
+            var normal = FindMap(folder, name, isAlbedo: false, "normal", "nor");
+            PaintStandard(mat, albedo, normal, metallic: null);
+            if (mat.HasProperty("_MetallicGlossMap"))
+            {
+                mat.SetTexture("_MetallicGlossMap", null);
+            }
+
+            mat.DisableKeyword("_METALLICGLOSSMAP");
+            if (mat.HasProperty("_Metallic"))
+            {
+                mat.SetFloat("_Metallic", 0f);
+            }
+
+            if (mat.HasProperty("_Glossiness"))
+            {
+                mat.SetFloat("_Glossiness", 0.35f);
+            }
         }
 
         static Texture2D FindMap(string folder, string name, bool isAlbedo, params string[] hints)
