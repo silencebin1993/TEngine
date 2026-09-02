@@ -80,10 +80,11 @@ namespace GameLogic.ArtBinding
         /// <summary>加载 location 指向的资源，抽取可用于 Instanced 绘制的 Mesh。story-017：外形槽现在可绑
         /// Mesh / Prefab / FBX·OBJ Model 三种资产，location 本身不带类型标记，所以运行时仍按「先当
         /// GameObject 抽 MeshFilter.sharedMesh，失败或无 MeshFilter 再直接当 Mesh 加载」的顺序尝试，
-        /// 两条路都失败才算绑定失效。材质：仅当 sharedMaterial 是本项目 Instanced 着色器
-        /// （SimBioGlass / SimInstancedUnlit）才带回，混元导入的 Standard+PBR 不自动覆盖——否则会丢掉局内
-        /// BioGlass 调色，且贴图依赖易在热更路径丢引用。异常/两路皆空一律 Log.Error 一次并返回 Ok=false。
-        /// 成功时加载到的资源进 track。</summary>
+        /// 两条路都失败才算绑定失效。材质：sharedMaterial 启用了 GPU Instancing 且着色器在白名单
+        /// （内置 Standard / SimBioGlass / SimInstancedUnlit，见 <see cref="IsSimInstancedShader"/>）才带回。
+        /// 本阶段绑定 Prefab 的 <c>_runtime.mat</c> 就是 Unity Standard + 整包 albedo/normal（权威
+        /// HUNYUAN-3D §4.2），不带回就会丢掉整包贴图变纯色；未绑定槽仍走白模 BioGlass。
+        /// 异常/两路皆空一律 Log.Error 一次并返回 Ok=false。成功时加载到的资源进 track。</summary>
         public static async UniTask<MeshLoadResult> TryLoadInstancedMesh(string location, List<UnityEngine.Object> track)
         {
             if (string.IsNullOrEmpty(location))
@@ -170,6 +171,9 @@ namespace GameLogic.ArtBinding
             return UnitMeshRadius / maxExtent;
         }
 
+        /// <summary>Instanced 绘制可接受的着色器白名单。内置 <c>Standard</c> 在列：绑定 Prefab 的
+        /// <c>_runtime.mat</c> 由 Baker 按材质阶段锁写成 Standard + 整包贴图（<c>Shader.Find("Standard")</c>
+        /// + <c>enableInstancing</c>），不认它整包贴图就白丢。</summary>
         private static bool IsSimInstancedShader(Shader shader)
         {
             if (shader == null)
@@ -178,7 +182,9 @@ namespace GameLogic.ArtBinding
             }
 
             string name = shader.name;
-            return name == "BinGames/SimBioGlass" || name == "BinGames/SimInstancedUnlit";
+            return name == "Standard"
+                || name == "BinGames/SimBioGlass"
+                || name == "BinGames/SimInstancedUnlit";
         }
 
         /// <summary>加载独立材质覆盖槽。要求 <see cref="Material.enableInstancing"/> 为真，否则视为失败
