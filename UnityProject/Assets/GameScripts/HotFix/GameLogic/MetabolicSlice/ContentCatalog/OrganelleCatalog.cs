@@ -3,12 +3,16 @@ using System.Collections.Generic;
 using ComposeEngine.Builtin.Modules;
 using ComposeEngine.Core;
 using GameLogic.MetabolicSlice.Grid;
+using GameLogic.Stats;
 
 namespace GameLogic.MetabolicSlice.ContentCatalog
 {
     public enum OrganelleRole { Source, Relay, Transform, Sink, Edge }
 
     public enum OrganelleAttachTarget { Slot, DirectedEdge }
+
+    /// <summary>organelle-structural-tier story-001 Required 1：分类字段，独立于既有攻击/基因链路。</summary>
+    public enum OrganelleCategory { Attack, Structural, EnergySource }
 
     /// <summary>冻结总案 §5.2 器官定义。CreateModule=null 代表暂不可执行，仅注册元数据可查询/可装备占位（见 N1）。</summary>
     public sealed class OrganelleDef
@@ -45,9 +49,17 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
         /// 非攻击器官（能量核心/已退役旧修饰）恒 null。</summary>
         public string AttackFamily { get; }
 
+        /// <summary>story-001 Required 1：新分类字段，默认 Attack——不强制回填既有 48 条。</summary>
+        public OrganelleCategory Category { get; }
+
+        /// <summary>story-001 Required 2：结构器官的常驻被动加成，复用 GameLogic.Stats.StatModifier，
+        /// 不新造加成结构。非 Structural 分类恒为 null。</summary>
+        public StatModifier[] StructuralEffects { get; }
+
         public OrganelleDef(string id, string displayName, OrganelleRole role, OrganelleAttachTarget attachTarget,
             IEnumerable<SlotType> allowedSlotTypes, string artId, Func<IModule> createModule, bool isCarrier = false,
-            bool isRetired = false, string description = "", bool attackMethod = false, string attackFamily = null)
+            bool isRetired = false, string description = "", bool attackMethod = false, string attackFamily = null,
+            OrganelleCategory category = OrganelleCategory.Attack, StatModifier[] structuralEffects = null)
         {
             Id = id;
             DisplayName = displayName;
@@ -61,6 +73,8 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
             Description = description;
             AttackMethod = attackMethod;
             AttackFamily = attackFamily;
+            Category = category;
+            StructuralEffects = structuralEffects;
         }
     }
 
@@ -300,6 +314,46 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
                     new Actuator(shape: "Melee", pattern: AttackPattern.Thorns)),
                 isCarrier: true, attackMethod: true, attackFamily: "Thorns",
                 description: "攻击方式：接触到体积小于自己的目标时直接吞噬消灭；不主动开火。"),
+
+            // ── organelle-structural-tier story-001（DESIGN §2/§3、CATALOG §A）：首批 8 条结构器官，
+            // 常驻被动叠加，不进攻击链（IsCarrier=false/AttackMethod=false/AllowedSlotTypes=null），
+            // v1 不分配 CarrierInstance/Slots，不开基因槽。
+            ["org_carapace"] = new OrganelleDef("org_carapace", "甲壳", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
+                null, "org/carapace", null, category: OrganelleCategory.Structural,
+                structuralEffects: new[] { new StatModifier(StatId.DamageTaken, ModifierOp.PctAdd, -0.12f) },
+                description: "常驻被动：降低受到伤害。"),
+            ["org_flagellum_boost"] = new OrganelleDef("org_flagellum_boost", "鞭毛强化", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
+                null, "org/flagellum_boost", null, category: OrganelleCategory.Structural,
+                structuralEffects: new[] { new StatModifier(StatId.MoveSpeed, ModifierOp.PctAdd, 0.12f) },
+                description: "常驻被动：提升移动速度。"),
+            ["org_thick_membrane"] = new OrganelleDef("org_thick_membrane", "厚膜", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
+                null, "org/thick_membrane", null, category: OrganelleCategory.Structural,
+                structuralEffects: new[] { new StatModifier(StatId.MaxHealth, ModifierOp.Flat, 32f) },
+                description: "常驻被动：提升生命上限。"),
+            ["org_regen_gland"] = new OrganelleDef("org_regen_gland", "再生腺", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
+                null, "org/regen_gland", null, category: OrganelleCategory.Structural,
+                structuralEffects: new[] { new StatModifier(StatId.HealthRegen, ModifierOp.Flat, 0.8f) },
+                description: "常驻被动：提升生命回复。"),
+            ["org_chemoreceptor"] = new OrganelleDef("org_chemoreceptor", "化学受体", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
+                null, "org/chemoreceptor", null, category: OrganelleCategory.Structural,
+                structuralEffects: new[] { new StatModifier(StatId.PickupRadius, ModifierOp.PctAdd, 0.30f) },
+                description: "常驻被动：扩大拾取半径。"),
+            ["org_efficient_gut"] = new OrganelleDef("org_efficient_gut", "高效消化道", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
+                null, "org/efficient_gut", null, category: OrganelleCategory.Structural,
+                structuralEffects: new[] { new StatModifier(StatId.NutrientGain, ModifierOp.PctAdd, 0.18f) },
+                description: "常驻被动：提升营养质获取。"),
+            ["org_calm_membrane"] = new OrganelleDef("org_calm_membrane", "镇静膜", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
+                null, "org/calm_membrane", null, category: OrganelleCategory.Structural,
+                structuralEffects: new[] { new StatModifier(StatId.AggroScale, ModifierOp.PctAdd, -0.20f) },
+                description: "常驻被动：降低敌人仇恨。"),
+            ["org_stamina_sac"] = new OrganelleDef("org_stamina_sac", "耐力囊", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
+                null, "org/stamina_sac", null, category: OrganelleCategory.Structural,
+                structuralEffects: new[]
+                {
+                    new StatModifier(StatId.StaminaMax, ModifierOp.Flat, 25f),
+                    new StatModifier(StatId.StaminaRegen, ModifierOp.PctAdd, 0.15f),
+                },
+                description: "常驻被动：提升耐力上限与回复。"),
         };
 
         public static OrganelleDef Get(string id) => _defs.TryGetValue(id, out var def) ? def : null;
