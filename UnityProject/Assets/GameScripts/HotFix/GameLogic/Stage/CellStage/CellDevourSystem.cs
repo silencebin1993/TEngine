@@ -1,9 +1,14 @@
 using BinGames.Sim;
 using GameLogic.Battle;
 using GameLogic.Core;
+using GameLogic.MetabolicSlice.Bag;
+using GameLogic.MetabolicSlice.ContentCatalog;
+using GameLogic.MetabolicSlice.Structural;
 using GameLogic.Progression;
 using GameLogic.Spawning;
 using GameLogic.Stats;
+using GameLogic.UI.Battle;
+using TEngine;
 using Unity.Mathematics;
 using UnityEngine;
 
@@ -283,6 +288,10 @@ namespace GameLogic.Stage.CellStage
                     }
                 }
 
+                // 结构器官掉落（organelle-structural-tier story-002 Required 1）：任意 Hostile 死亡
+                // 均判定一次，紧跟资源结算之后、KillSignal 广播之前（preflight-decisions.md #1）。
+                TryDropStructuralOrgan();
+
                 // 击杀回复
                 float killHeal = _stats?.Get(StatId.KillHeal) ?? 0f;
                 if (killHeal > 0f)
@@ -321,6 +330,73 @@ namespace GameLogic.Stage.CellStage
                 });
             }
         }
+
+        /// <summary>结构器官掉落触发概率（preflight-decisions.md #2：8%，非平衡终值）。</summary>
+        private const float StructuralDropChance = 0.08f;
+
+        /// <summary>结构器官掉落表：8 条等权重（CATALOG.md §B 的 id→槽标签映射，非平衡终值）。</summary>
+        private static readonly (string Id, VisualSlotTag Tag)[] StructuralDropTable =
+        {
+            ("org_carapace", VisualSlotTag.Armor),
+            ("org_flagellum_boost", VisualSlotTag.Motility),
+            ("org_thick_membrane", VisualSlotTag.Armor),
+            ("org_regen_gland", VisualSlotTag.Vital),
+            ("org_chemoreceptor", VisualSlotTag.Appendage),
+            ("org_efficient_gut", VisualSlotTag.Vital),
+            ("org_calm_membrane", VisualSlotTag.Armor),
+            ("org_stamina_sac", VisualSlotTag.Motility),
+        };
+
+        /// <summary>拾取即装备，不进抽卡池/消化泡（DESIGN §7）。8% 概率、等权重取一条，直接调用
+        /// <see cref="StructuralOrganService.Equip"/>；同标签有旧件按替换语义处理并推送提示（preflight #6）。</summary>
+        private void TryDropStructuralOrgan()
+        {
+            if (UnityEngine.Random.Range(0f, 1f) > StructuralDropChance)
+            {
+                return;
+            }
+
+            MetabolicSlicePanel panel = MetabolicSlicePanel.Instance;
+            if (panel == null)
+            {
+                // 非战斗中不掉落（防御性判空，preflight #1）。
+                return;
+            }
+
+            (string organId, VisualSlotTag tag) = StructuralDropTable[UnityEngine.Random.Range(0, StructuralDropTable.Length)];
+
+            PartInstance old = panel.Structural.Get(tag);
+            var part = new PartInstance(System.Guid.NewGuid().ToString("N"), organId, PartLocation.Bag());
+            if (panel.Bag.TryAdd(part) != AddResult.Added)
+            {
+                return;
+            }
+
+            StructuralOrganResult result = StructuralOrganService.Equip(panel.Bag, panel.Structural, _stats, part.PartId, tag);
+            if (result != StructuralOrganResult.Ok)
+            {
+                return;
+            }
+
+            if (old != null)
+            {
+                string oldName = OrganelleCatalog.Get(old.CardDefId)?.DisplayName ?? old.CardDefId;
+                string newName = OrganelleCatalog.Get(organId)?.DisplayName ?? organId;
+                panel.PendingStructuralReplaceHint = $"{StructuralTagDisplayName(tag)}槽已替换：{oldName} → {newName}";
+            }
+
+            GameEvent.Send(MetabolicSlicePanel.InventoryChangedEvent);
+        }
+
+        /// <summary>4 槽中文短名（preflight #7），仅本掉落提示用，不改枚举本身。</summary>
+        private static string StructuralTagDisplayName(VisualSlotTag tag) => tag switch
+        {
+            VisualSlotTag.Armor => "护甲",
+            VisualSlotTag.Motility => "运动",
+            VisualSlotTag.Vital => "生机",
+            VisualSlotTag.Appendage => "附肢",
+            _ => tag.ToString(),
+        };
 
         /// <summary>生成可二次吞噬的组织残块。吞噬路线与尸体联动的基础。</summary>
         private void SpawnCorpse(in DeathEvent d)

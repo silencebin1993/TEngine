@@ -8,6 +8,7 @@ using GameLogic.MetabolicSlice.Combat;
 using GameLogic.MetabolicSlice.Digestion;
 using GameLogic.MetabolicSlice.Graph;
 using GameLogic.MetabolicSlice.Grid;
+using GameLogic.MetabolicSlice.Structural;
 using GameLogic.Stage;
 using GameLogic.Stage.CellStage;
 using TEngine;
@@ -38,6 +39,12 @@ namespace GameLogic.UI.Battle
         private readonly GeneReserve _geneReserve = new GeneReserve();
         private readonly CarrierRegistry _carrierRegistry = new CarrierRegistry();
         private PartInstance _pendingOverflow;
+
+        /// <summary>结构器官装配状态（story-002 D3）：全局单例宿主，贯穿 Carrier 切换，与 <see cref="Bag"/> 同级并列。</summary>
+        public StructuralSlots Structural { get; } = new StructuralSlots();
+
+        /// <summary>结构器官替换提示透传字段（story-002 D6）：非空时供 UI 读取展示后清空，不新建 GameEvent payload 机制。</summary>
+        public string PendingStructuralReplaceHint;
         private string _selectedPartId;
         private EdgeMode _edgeMode;
         private int? _edgeFrom;

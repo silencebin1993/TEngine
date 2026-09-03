@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UIElements;
+using GameLogic.MetabolicSlice.Bag;
 using GameLogic.MetabolicSlice.Carrier;
 using GameLogic.MetabolicSlice.ContentCatalog;
 using GameLogic.Progression;
@@ -35,6 +36,14 @@ namespace GameLogic
         private Label _noCarrierHint;
         private Button _organViewToggle;
         private Button _geneViewToggle;
+
+        /// <summary>story-002（equip-flow）D5：结构槽展示区 4 格固定顺序 Armor/Motility/Vital/Appendage。</summary>
+        private Label _structuralSlotArmor;
+        private Label _structuralSlotMotility;
+        private Label _structuralSlotVital;
+        private Label _structuralSlotAppendage;
+        private Label _structuralReplaceHint;
+        private float _structuralHintTimer;
 
         /// <summary>story-003（slot-unlimited-codex）R4：已拥有/全量 视图切换态，默认已拥有（行为不变）。</summary>
         private bool _showAllOrgans;
@@ -143,6 +152,12 @@ namespace GameLogic
             _organViewToggle = _root.Q<Button>("OrganViewToggle");
             _geneViewToggle = _root.Q<Button>("GeneViewToggle");
 
+            _structuralSlotArmor = _root.Q<Label>("StructuralSlot_Armor");
+            _structuralSlotMotility = _root.Q<Label>("StructuralSlot_Motility");
+            _structuralSlotVital = _root.Q<Label>("StructuralSlot_Vital");
+            _structuralSlotAppendage = _root.Q<Label>("StructuralSlot_Appendage");
+            _structuralReplaceHint = _root.Q<Label>("StructuralReplaceHint");
+
             // story-003（slot-unlimited-codex）R4：已拥有/全量 Tab，纯 UI 展示态切换，不写数据。
             if (_organViewToggle != null)
             {
@@ -179,6 +194,21 @@ namespace GameLogic
         private void OnCarrierActivated()
         {
             RefreshAll();
+            ShowStructuralReplaceHintIfPending();
+        }
+
+        /// <summary>story-002（equip-flow）D6：读到非空提示则显示并计时；首次装备空槽不设置该字段，不会误触发。</summary>
+        private void ShowStructuralReplaceHintIfPending()
+        {
+            MetabolicSlicePanel panel = MetabolicSlicePanel.Instance;
+            if (panel == null || string.IsNullOrEmpty(panel.PendingStructuralReplaceHint) || _structuralReplaceHint == null)
+            {
+                return;
+            }
+            _structuralReplaceHint.text = panel.PendingStructuralReplaceHint;
+            _structuralReplaceHint.style.display = DisplayStyle.Flex;
+            _structuralHintTimer = 1.5f;
+            panel.PendingStructuralReplaceHint = null;
         }
 
         /// <summary>story-001 R4：只读探针，供 execute_code 断言用，不新增机制。</summary>
@@ -244,6 +274,15 @@ namespace GameLogic
                 return;
             }
 
+            if (_structuralHintTimer > 0f)
+            {
+                _structuralHintTimer -= Time.deltaTime;
+                if (_structuralHintTimer <= 0f && _structuralReplaceHint != null)
+                {
+                    _structuralReplaceHint.style.display = DisplayStyle.None;
+                }
+            }
+
             CellStageFlow cell = GameRoot.CellStage;
             bool running = cell != null && cell.IsRunning;
 
@@ -282,6 +321,27 @@ namespace GameLogic
             RefreshCarrierList(panel);
             RefreshSlotBar(panel);
             RefreshGeneList(panel);
+            RefreshStructuralSlotBar(panel);
+        }
+
+        /// <summary>story-002（equip-flow）D5：4 格固定顺序展示，空槽显示明确的「未装备」占位。</summary>
+        private void RefreshStructuralSlotBar(MetabolicSlicePanel panel)
+        {
+            SetStructuralSlotLabel(_structuralSlotArmor, "护甲", panel.Structural.Get(VisualSlotTag.Armor));
+            SetStructuralSlotLabel(_structuralSlotMotility, "运动", panel.Structural.Get(VisualSlotTag.Motility));
+            SetStructuralSlotLabel(_structuralSlotVital, "生机", panel.Structural.Get(VisualSlotTag.Vital));
+            SetStructuralSlotLabel(_structuralSlotAppendage, "附肢", panel.Structural.Get(VisualSlotTag.Appendage));
+        }
+
+        private static void SetStructuralSlotLabel(Label label, string tagCN, PartInstance equipped)
+        {
+            if (label == null)
+            {
+                return;
+            }
+            label.text = equipped != null
+                ? $"{tagCN}：{OrganelleCatalog.Get(equipped.CardDefId)?.DisplayName ?? equipped.CardDefId}"
+                : $"{tagCN}：未装备";
         }
 
         private void RefreshCarrierList(MetabolicSlicePanel panel)
