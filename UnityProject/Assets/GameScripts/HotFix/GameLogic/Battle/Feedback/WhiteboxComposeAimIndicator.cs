@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using ComposeEngine.Core;
+using Cysharp.Threading.Tasks;
+using GameLogic.ArtBinding;
 using GameLogic.MetabolicSlice.Carrier;
 using GameLogic.MetabolicSlice.Combat;
 using GameLogic.MetabolicSlice.ContentCatalog;
@@ -33,6 +35,11 @@ namespace GameLogic.Battle.Feedback
         private MeshRenderer[] _mr;
         private bool[] _active;
 
+        /// <summary>indicator 槽 VFX Prefab 池——与 <see cref="WhiteboxComposeProjectileFeedback"/> 的
+        /// muzzle/hit 同手法：绑定了 shape.{Shape}.indicator 就用真实 Prefab，未绑定回退白模网格。</summary>
+        private FeatureArtVfxPool _vfxPool;
+        private GameObject[] _prefabGo;
+
         /// <summary>接上角色：缓存最近一次 <see cref="ShowPlayerIndicator"/> 用到的 bridge，供 <see cref="Tick"/>
         /// 逐帧回读玩家当前坐标——指示器不是"射出去"的东西，是"预览你现在站这儿会怎么打"，理应跟着角色走，
         /// 而不是换装那一刻画一次就钉死在原地（原先钉在硬编码的世界 (0,0)，玩家一走就跟丢，见 ShowMarker 改动）。</summary>
@@ -56,6 +63,22 @@ namespace GameLogic.Battle.Feedback
         private Mesh _coneMesh;
         private Mesh _crossMesh;
         private Mesh _bandMesh;
+
+        /// <summary>加载 7 Shape × indicator 共 7 个 VFX 槽的 Prefab 池。由
+        /// <see cref="GameLogic.Battle.Feedback.ComposeAimIndicatorPresenter"/> 在阶段进入后调用一次，
+        /// 与 <see cref="WhiteboxComposeProjectileFeedback.LoadVfxBindingsAsync"/> 同手法。</summary>
+        public async UniTask LoadVfxBindingsAsync()
+        {
+            _vfxPool ??= new FeatureArtVfxPool();
+
+            var ids = new List<string>();
+            foreach (string shape in FxRecipeCatalog.ShapeKeys)
+            {
+                ids.Add($"shape.{shape}.indicator");
+            }
+
+            await _vfxPool.LoadAsync(ids);
+        }
 
         public void ShowPlayerIndicator(int seed)
         {
@@ -123,6 +146,7 @@ namespace GameLogic.Battle.Feedback
             {
                 _active[idx] = false;
                 _mr[idx].enabled = false;
+                ReleasePrefab(idx);
                 return;
             }
 
@@ -134,7 +158,14 @@ namespace GameLogic.Battle.Feedback
             Color indicatorColor = new Color(baseColor.r, baseColor.g, baseColor.b, IndicatorAlpha);
 
             _active[idx] = true;
-            _mr[idx].enabled = true;
+
+            // indicator 槽绑定了就用真实 Prefab（只同步位置/朝向，缩放由资源自身决定——同
+            // WhiteboxComposeProjectileFeedback.SpawnMarker 对 muzzle/hit 的手法），未绑定回退白模网格。
+            ReleasePrefab(idx);
+            GameObject prefabGo = _vfxPool?.TryAcquire($"shape.{evt.Shape}.indicator");
+            _prefabGo[idx] = prefabGo;
+
+            _mr[idx].enabled = prefabGo == null;
             _mr[idx].sharedMaterial.color = indicatorColor;
             _mf[idx].sharedMesh = MeshForRecipe(recipe);
 
@@ -145,6 +176,21 @@ namespace GameLogic.Battle.Feedback
             // story-005（scene-3d-content）：非等比缩放——网格已烘焙绝对高度（FxRecipeCatalog.Global.MarkerHeight），
             // 等比缩放会让高度被 radius*2f 连带放大/缩小，与既定「高度是绝对量、与 XZ 半径解耦」纪律冲突。
             _tf[idx].localScale = new Vector3(radius * 2f, 1f, radius * 2f);
+
+            if (prefabGo != null)
+            {
+                prefabGo.transform.position = _tf[idx].position;
+                prefabGo.transform.rotation = _tf[idx].rotation;
+            }
+        }
+
+        private void ReleasePrefab(int idx)
+        {
+            if (_prefabGo[idx] != null)
+            {
+                _vfxPool.Release(_prefabGo[idx]);
+                _prefabGo[idx] = null;
+            }
         }
 
         private Mesh MeshForRecipe(FxShapeRecipe recipe)
@@ -169,6 +215,7 @@ namespace GameLogic.Battle.Feedback
             {
                 _active[i] = false;
                 _mr[i].enabled = false;
+                ReleasePrefab(i);
             }
         }
 
@@ -192,6 +239,10 @@ namespace GameLogic.Battle.Feedback
                 p.x = pos.x;
                 p.z = pos.y;
                 _tf[i].position = p;
+                if (_prefabGo[i] != null)
+                {
+                    _prefabGo[i].transform.position = p;
+                }
             }
         }
 
@@ -225,6 +276,7 @@ namespace GameLogic.Battle.Feedback
             _mf = new MeshFilter[IndicatorPoolSize];
             _mr = new MeshRenderer[IndicatorPoolSize];
             _active = new bool[IndicatorPoolSize];
+            _prefabGo = new GameObject[IndicatorPoolSize];
 
             for (int i = 0; i < IndicatorPoolSize; i++)
             {
@@ -254,6 +306,9 @@ namespace GameLogic.Battle.Feedback
                 _poolRoot = null;
             }
 
+            _vfxPool?.Dispose();
+            _vfxPool = null;
+
             if (_matTemplate != null)
             {
                 UnityEngine.Object.Destroy(_matTemplate);
@@ -273,6 +328,7 @@ namespace GameLogic.Battle.Feedback
             _mf = null;
             _mr = null;
             _active = null;
+            _prefabGo = null;
             _bridge = null;
         }
     }

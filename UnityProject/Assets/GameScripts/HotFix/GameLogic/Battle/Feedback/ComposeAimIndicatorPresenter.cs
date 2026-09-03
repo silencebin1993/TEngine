@@ -1,3 +1,4 @@
+using Cysharp.Threading.Tasks;
 using GameLogic.Core;
 
 namespace GameLogic.Battle.Feedback
@@ -22,6 +23,11 @@ namespace GameLogic.Battle.Feedback
         {
             _impl = impl ?? new WhiteboxComposeAimIndicator();
         }
+
+        /// <summary>加载 indicator 槽 VFX Prefab 池绑定，与 <see cref="ComposeProjectilePresenter.LoadArtBindingsAsync"/>
+        /// 同手法——接口不改，只有 <see cref="WhiteboxComposeAimIndicator"/> 才有池，非白模实现类型检查桥接后走空操作。</summary>
+        public UniTask LoadArtBindingsAsync() =>
+            (_impl as WhiteboxComposeAimIndicator)?.LoadVfxBindingsAsync() ?? UniTask.CompletedTask;
 
         public override void OnEnter()
         {

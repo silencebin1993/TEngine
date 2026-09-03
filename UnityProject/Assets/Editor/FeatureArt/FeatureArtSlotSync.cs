@@ -13,8 +13,25 @@ namespace BinGames.EditorTools.FeatureArt
     public static class FeatureArtSlotSync
     {
         static readonly string[] SummonKeys = { "spore", "phage", "mycelium" };
-        static readonly string[] ShapeRoles = { "projectile", "muzzle", "hit", "explode" };
+        static readonly string[] ShapeRoles = { "projectile", "muzzle", "hit", "explode", "indicator" };
         static readonly HashSet<string> SyncedDomains = new HashSet<string> { "organ", "shape", "summon", "player", "enemy" };
+
+        // 中文名权威来源：DesignDocs/最新改动需求/组合引擎-正名与全阶段变化词宪法.md §3.2；
+        // Melee 不在该表（Delivery 只列 6 个），沿用 FeatureArtBindingWindow 既有的"近战"分组名。
+        // 只改 titleZh 显示文案，不改 key/id——槽 id、文件名、文件夹名仍用英文 shape 名。
+        static readonly Dictionary<string, string> ShapeZhMap = new Dictionary<string, string>
+        {
+            ["Bolt"] = "弹丸",
+            ["Beam"] = "束",
+            ["Melee"] = "近战",
+            ["Field"] = "场",
+            ["Wave"] = "波",
+            ["Spore"] = "孢子云",
+            ["Arc"] = "弧链",
+        };
+
+        static string ShapeZh(string shapeKey) =>
+            ShapeZhMap.TryGetValue(shapeKey, out var zh) ? zh : shapeKey;
 
         // ---- story-010 D6：LOOK-PROMPTS.md 原文抄录（look/prompt 唯一权威来源）----
 
@@ -91,6 +108,7 @@ namespace BinGames.EditorTools.FeatureArt
             ["muzzle"] = "这是开火瞬间贴在细胞右前方的一小朵爆，只一帧到三帧。",
             ["hit"] = "这是打在目标身上的短促溅开，不要画在玩家脚下。",
             ["explode"] = "这是落点炸开的一圈，环形可读，不要火球蘑菇云。",
+            ["indicator"] = "这是未开火时的装配预览标记，半透明贴在玩家脚下，静态不飞行，不要做成和实弹一样的高饱和实心表现。",
         };
 
         /// <summary>返回新增槽数量；已存在槽的 retired 标记就地更新，look/prompt 无条件覆盖。</summary>
@@ -195,7 +213,7 @@ namespace BinGames.EditorTools.FeatureArt
                         key = shape,
                         role = role,
                         bindKind = "PooledPrefab",
-                        titleZh = $"{shape} · {RoleZh(role)}",
+                        titleZh = $"{ShapeZh(shape)} · {RoleZh(role)}",
                         purpose = PurposeFor(shape, role),
                         howTo = HowToFor(shape, role),
                         expected = "绑定后现网对应 Shape 攻击改用该 Prefab（池化）；空槽维持现有白模挤出表现。",
@@ -324,6 +342,7 @@ namespace BinGames.EditorTools.FeatureArt
                 case "muzzle": return "开火瞬间";
                 case "hit": return "命中";
                 case "explode": return "爆炸/落点";
+                case "indicator": return "瞄准预览";
                 default: return role;
             }
         }
@@ -336,6 +355,7 @@ namespace BinGames.EditorTools.FeatureArt
                 case "muzzle": return "Muzzle";
                 case "hit": return "Hit";
                 case "explode": return "Explode";
+                case "indicator": return "Indicator";
                 default: return role;
             }
         }
@@ -348,6 +368,7 @@ namespace BinGames.EditorTools.FeatureArt
                 case "muzzle": return $"{shape} 开火瞬间（枪口/挥击起手）表现。";
                 case "hit": return $"{shape} 命中目标时的表现。";
                 case "explode": return $"{shape} 落点/爆炸圈表现。";
+                case "indicator": return $"{shape} 未开火时的装配预览（瞄准指示器）表现。";
                 default: return "";
             }
         }
@@ -364,6 +385,8 @@ namespace BinGames.EditorTools.FeatureArt
                     return $"Prefab 放到 Raw/Effects/Hit/，文件名 shape_{shape}_hit；打在结算点，不是玩家脚下。";
                 case "explode":
                     return $"Prefab 放到 Raw/Effects/Explode/，文件名 shape_{shape}_explode；可与 hit 共用美术，但槽位分开方便换。";
+                case "indicator":
+                    return $"Prefab 放到 Raw/Effects/Indicator/，文件名 shape_{shape}_indicator；半透明材质，静态展示，只同步位置/朝向不同步缩放；未绑定回退白模半透明片。";
                 default:
                     return "";
             }

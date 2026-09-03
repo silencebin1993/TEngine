@@ -83,6 +83,23 @@ namespace BinGames.EditorTools.FeatureArt
             ["Arc"] = HexColor("#E07A3D"),
         };
 
+        // 中文名权威来源：DesignDocs/最新改动需求/组合引擎-正名与全阶段变化词宪法.md §3.2；
+        // Melee 不在该表（Delivery 只列 6 个），沿用本文件既有的"近战"分组名（见 AttackMethodEntries）。
+        // 只改显示文案，不改 shape 这个内部 key——槽 id / 文件名 / 文件夹名仍是英文，勿在此表之外改动它们。
+        static readonly Dictionary<string, string> ShapeZhMap = new Dictionary<string, string>
+        {
+            ["Bolt"] = "弹丸",
+            ["Beam"] = "束",
+            ["Melee"] = "近战",
+            ["Field"] = "场",
+            ["Wave"] = "波",
+            ["Spore"] = "孢子云",
+            ["Arc"] = "弧链",
+        };
+
+        static string ShapeZh(string shapeKey) =>
+            ShapeZhMap.TryGetValue(shapeKey, out var zh) ? zh : shapeKey;
+
         static Texture2D _dotEmpty;
         static Texture2D _dotBound;
         static Texture2D _dotBad;
@@ -131,10 +148,10 @@ namespace BinGames.EditorTools.FeatureArt
         };
 
         const string ShapeCommon =
-            "这是共享皮肤。改这里，所有使用该 Shape 的攻击方式一起变。四格都是池化 Prefab；+X 为前方；短生命周期；不要相机、不要 AudioListener、不要自己 Destroy 断池。";
+            "这是共享皮肤。改这里，所有使用该 Shape 的攻击方式一起变。五格都是池化 Prefab；+X 为前方；短生命周期；不要相机、不要 AudioListener、不要自己 Destroy 断池。";
 
         const string ShapeRoles =
-            "四角色补一句：弹体=飞行/持续中本体；枪口=开火瞬间贴在细胞右前方 1～3 帧；命中=打在目标身上；爆炸=落点一圈，不要火球蘑菇云。";
+            "五角色补一句：弹体=飞行/持续中本体；枪口=开火瞬间贴在细胞右前方 1～3 帧；命中=打在目标身上；爆炸=落点一圈，不要火球蘑菇云；瞄准预览=未开火时半透明贴玩家脚下的装配预览，静态不飞行，别做得跟实弹一样浓。";
 
         static readonly Dictionary<string, string> ShapeNotes = new Dictionary<string, string>
         {
@@ -252,7 +269,7 @@ namespace BinGames.EditorTools.FeatureArt
             {
                 var page = new ShapePage(this, shape);
                 _shapePages[shape] = page;
-                tree.Add($"弹道语言/{shape}", page);
+                tree.Add($"弹道语言/{ShapeZh(shape)}", page);
             }
 
             foreach (var s in SummonEntries)
@@ -1321,7 +1338,7 @@ namespace BinGames.EditorTools.FeatureArt
                 {
                     DrawChip(_groupZh, FamilyColor.TryGetValue(_groupZh, out var fc) ? fc : Color.gray);
                     GUILayout.Space(4);
-                    DrawChip(_shapeKey, ShapeColor.TryGetValue(_shapeKey, out var sc) ? sc : Color.gray);
+                    DrawChip(ShapeZh(_shapeKey), ShapeColor.TryGetValue(_shapeKey, out var sc) ? sc : Color.gray);
                 }
 
                 if (slot != null && !string.IsNullOrEmpty(slot.look))
@@ -1402,11 +1419,11 @@ namespace BinGames.EditorTools.FeatureArt
 
                 var sharedWith = _window.OrgansSharingShape(_shapeKey, _organId);
                 var info = sharedWith.Count > 0
-                    ? $"{_shapeKey} 语言与 {string.Join("、", sharedWith)} 共用；改这里两边一起变。"
-                    : $"{_shapeKey} 语言当前仅本器官使用。";
+                    ? $"{ShapeZh(_shapeKey)} 语言与 {string.Join("、", sharedWith)} 共用；改这里两边一起变。"
+                    : $"{ShapeZh(_shapeKey)} 语言当前仅本器官使用。";
                 _window.DrawWrappedBox(info, MessageType.Info);
 
-                if (GUILayout.Button($"跳到弹道语言 / {_shapeKey}"))
+                if (GUILayout.Button($"跳到弹道语言 / {ShapeZh(_shapeKey)}"))
                 {
                     _window.JumpToShape(_shapeKey);
                 }
@@ -1448,7 +1465,7 @@ namespace BinGames.EditorTools.FeatureArt
             [OnInspectorGUI, PropertyOrder(-10)]
             void DrawHeader()
             {
-                SirenixEditorGUI.Title($"弹道语言 · {_shapeKey}", null, TextAlignment.Left, true);
+                SirenixEditorGUI.Title($"弹道语言 · {ShapeZh(_shapeKey)}（{_shapeKey}）", null, TextAlignment.Left, true);
                 var usedBy = _window.OrgansUsingShape(_shapeKey);
                 if (usedBy.Count == 0)
                 {
@@ -1487,6 +1504,11 @@ namespace BinGames.EditorTools.FeatureArt
                     DrawRole("爆炸", "explode");
                 }
 
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    DrawRole("瞄准预览", "indicator");
+                }
+
                 EditorGUILayout.Space(4);
 
                 // 不定长提示词独立成行，禁止与上方定宽绑定列挤在同一个 HorizontalScope 里（PANEL-UX §11.1）。
@@ -1494,6 +1516,7 @@ namespace BinGames.EditorTools.FeatureArt
                 DrawRolePrompt("弹体", "projectile");
                 DrawRolePrompt("命中", "hit");
                 DrawRolePrompt("爆炸", "explode");
+                DrawRolePrompt("瞄准预览", "indicator");
 
                 EditorGUILayout.Space(4);
             }

@@ -11,6 +11,7 @@
 | 主题 | 唯一权威 | 何时读 |
 |---|---|---|
 | **器官 vs 基因（攻击方式 / 改装）** | `production/design/combat-identity-rework/DESIGN.md` + `CATALOG.md` | 改目录、装配栏、编译器、战斗文案；**sprint-027**。冻结总案 §5.2/§5.3/§7 **不得**当施工清单 |
+| **结构器官（第三类，常驻被动全体生效）** | `production/design/organelle-structural-tier/DESIGN.md` + `CATALOG.md` | Draft，2026-09-03 方向+获取方式（直接掉落）+槽位规则（一 Tag 一槽互斥）已定案；清单数值/复合渲染路径待估；不改攻击器官/基因分类法 |
 | **正名 + 全阶段变化词 / 全能组合代数** | `组合引擎-正名与全阶段变化词宪法.md` | 扩词库、跨阶段皮、**默认全能混合**（非白名单 pair）；**sprint-010** |
 | 冻结宪法（细胞 v1 基元/字段/管道/禁令） | `代谢切片-冻结总案-基元与美术.md` | 仅管道序/正交字段/禁 `is` 组合；**目录与分类以 combat-identity-rework 为准** |
 | ComposeEngine 独立库（做法 C API） | `组合引擎-ClaudeCode需求规格.md` | 实现/改核时；与正名宪法一起守做法 C |
