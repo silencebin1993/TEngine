@@ -81,6 +81,11 @@ namespace BinGames.EditorTools.FeatureArt
             foreach (var guid in guids)
             {
                 var path = AssetDatabase.GUIDToAssetPath(guid);
+                if (AssetDatabase.IsValidFolder(path))
+                {
+                    continue;
+                }
+
                 if (Path.GetFileNameWithoutExtension(path) == location)
                 {
                     return path;
@@ -97,6 +102,11 @@ namespace BinGames.EditorTools.FeatureArt
             foreach (var guid in guids)
             {
                 var path = AssetDatabase.GUIDToAssetPath(guid);
+                if (AssetDatabase.IsValidFolder(path))
+                {
+                    continue;
+                }
+
                 if (Path.GetFileNameWithoutExtension(path) == location)
                 {
                     count++;

@@ -410,6 +410,9 @@ namespace BinGames.EditorTools.FeatureArt
                 case "enemy":
                     fileName = "enemy_" + slot.key;
                     return true;
+                case "structural":
+                    fileName = "structural_" + slot.key;
+                    return true;
                 case "shape":
                     if (slot.role != "projectile")
                     {

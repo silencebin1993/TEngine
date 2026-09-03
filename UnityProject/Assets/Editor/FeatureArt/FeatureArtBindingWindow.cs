@@ -294,6 +294,22 @@ namespace BinGames.EditorTools.FeatureArt
                 tree.Add($"敌人/{group}/{fam.TitleZh}", page, StatusIcon(slot));
             }
 
+            var structuralSlots = new (string Key, string TitleZh)[]
+            {
+                ("armor", "装甲"),
+                ("motility", "运动"),
+                ("vital", "生命"),
+                ("appendage", "附肢"),
+            };
+            foreach (var s in structuralSlots)
+            {
+                var slotId = $"structural.{s.Key}.mesh";
+                var slot = FindSlot(slotId);
+                var titleZh = slot?.titleZh ?? s.TitleZh;
+                var page = new SimpleMeshPage(this, slotId, titleZh, null, default, null, null);
+                tree.Add($"结构器官/{titleZh}", page, StatusIcon(slot));
+            }
+
             foreach (var item in tree.EnumerateTree(false))
             {
                 if (item.ChildMenuItems.Count > 0)
