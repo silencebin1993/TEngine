@@ -40,7 +40,8 @@ namespace BinGames.EditorTools.FeatureArt
         public const string PolyQuad = "quadrilateral";
         public const int FaceCountMin = 3000;
         public const int FaceCountMax = 1500000;
-        public const int FaceCountDefault = 100000;
+        public const int FaceCountDefault = 5000;
+        public const int FaceCountBudgetMax = 12000;
         public static readonly string[] ModelIds = { Model30, Model31, ModelExpress };
         public static readonly string[] ModelLabels =
         {
@@ -54,8 +55,8 @@ namespace BinGames.EditorTools.FeatureArt
         public static readonly string[] ResultFormatLabels = { "FBX（推荐）", "OBJ" };
         public static readonly string[] PolygonTypeIds = { PolyTriangle, PolyQuad };
         public static readonly string[] PolygonTypeLabels = { "三角面", "四边面" };
-        public static readonly int[] FaceCountPresets = { 10000, 50000, 100000, 500000 };
-        public static readonly string[] FaceCountPresetLabels = { "1万", "5万", "10万", "50万" };
+        public static readonly int[] FaceCountPresets = { 3000, 5000, 8000, 12000 };
+        public static readonly string[] FaceCountPresetLabels = { "3000", "5000", "8000", "12000" };
         const string HistoryKey = "BinGames.Hunyuan.JobHistory";
         const int HistoryCap = 20;
 
@@ -197,7 +198,7 @@ namespace BinGames.EditorTools.FeatureArt
 
         public static bool UseFaceCount
         {
-            get => EditorPrefs.GetBool(UseFaceCountKey, false) && GenerateType != GenLowPoly;
+            get => EditorPrefs.GetBool(UseFaceCountKey, true) && GenerateType != GenLowPoly;
             set => EditorPrefs.SetBool(UseFaceCountKey, value && GenerateType != GenLowPoly);
         }
 
@@ -322,11 +323,10 @@ namespace BinGames.EditorTools.FeatureArt
             }
             else
             {
-                var useFace = EditorGUILayout.Toggle("自定义面数",
-                    EditorPrefs.GetBool(UseFaceCountKey, false));
-                if (useFace != EditorPrefs.GetBool(UseFaceCountKey, false))
+                var useFace = EditorGUILayout.Toggle("自定义面数", UseFaceCount);
+                if (useFace != UseFaceCount)
                 {
-                    EditorPrefs.SetBool(UseFaceCountKey, useFace);
+                    UseFaceCount = useFace;
                 }
 
                 if (useFace)
@@ -337,11 +337,19 @@ namespace BinGames.EditorTools.FeatureArt
                         EditorGUILayout.PrefixLabel("快捷");
                         for (var i = 0; i < FaceCountPresets.Length; i++)
                         {
-                            if (GUILayout.Button(FaceCountPresetLabels[i], GUILayout.Width(48)))
+                            if (GUILayout.Button(FaceCountPresetLabels[i], GUILayout.Width(56)))
                             {
                                 FaceCount = FaceCountPresets[i];
                             }
                         }
+                    }
+
+                    if (FaceCount > FaceCountBudgetMax)
+                    {
+                        var prevColor = GUI.color;
+                        GUI.color = Color.yellow;
+                        EditorGUILayout.LabelField("超出游戏预算，不可绑定，只可当母带", EditorStyles.miniLabel);
+                        GUI.color = prevColor;
                     }
                 }
             }
