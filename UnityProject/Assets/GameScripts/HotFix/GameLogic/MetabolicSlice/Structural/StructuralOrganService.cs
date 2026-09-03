@@ -13,10 +13,15 @@ namespace GameLogic.MetabolicSlice.Structural
     {
         private readonly Dictionary<VisualSlotTag, PartInstance> _equipped = new Dictionary<VisualSlotTag, PartInstance>();
 
+        /// <summary>装/卸变化脏计数，供 <see cref="GameLogic.Battle.Feedback.StructuralVisualPresenter"/>
+        /// 轮询（story-003，照抄 CarrierRegistry.AssemblyVersion 手法）。</summary>
+        public int Version { get; private set; }
+
         public PartInstance Get(VisualSlotTag tag) => _equipped.TryGetValue(tag, out var part) ? part : null;
 
         internal void Set(VisualSlotTag tag, PartInstance part) => _equipped[tag] = part;
         internal void Clear(VisualSlotTag tag) => _equipped.Remove(tag);
+        internal void IncrementVersion() => Version++;
     }
 
     /// <summary>装/卸结构器官：储备囊 ↔ 结构槽（Required 5）。风格照抄 CarrierGeneService：静态类，
@@ -61,6 +66,7 @@ namespace GameLogic.MetabolicSlice.Structural
                 }
             }
 
+            slots.IncrementVersion();
             return StructuralOrganResult.Ok;
         }
 
@@ -77,6 +83,7 @@ namespace GameLogic.MetabolicSlice.Structural
             part.Location = PartLocation.Bag();
             bag.Items.Add(part);
 
+            slots.IncrementVersion();
             return StructuralOrganResult.Ok;
         }
     }
