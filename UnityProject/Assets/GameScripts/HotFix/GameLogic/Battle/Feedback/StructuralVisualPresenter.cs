@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
+using GameLogic.ArtBinding;
 using GameLogic.Core;
 using GameLogic.MetabolicSlice.Bag;
 using TEngine;
@@ -111,7 +112,14 @@ namespace GameLogic.Battle.Feedback
                 return;
             }
 
-            GameObject go = await GameModule.Resource.LoadGameObjectAsync(PlaceholderAddress, anchor);
+            string catalogId = "structural." + tag.ToString().ToLowerInvariant() + ".mesh";
+            string address = PlaceholderAddress;
+            if (FeatureArtResolver.TryGetSlot(catalogId, out FeatureArtSlot slot) && !string.IsNullOrEmpty(slot.location))
+            {
+                address = slot.location;
+            }
+
+            GameObject go = await GameModule.Resource.LoadGameObjectAsync(address, anchor);
 
             // 加载期间该槽可能又变了（快速替换/卸下）：只在仍是这次请求对应的最新 partId 时才落地，
             // 否则丢弃，避免叠加成脏实例。
