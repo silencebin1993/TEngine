@@ -46,6 +46,8 @@ namespace GameLogic.Core
         public const int Ability = 300;
         /// <summary>卡牌触发派发。</summary>
         public const int Cards = 400;
+        /// <summary>结构器官触发钩子（story-010）：与 Cards 相邻的独立轨道，不进攻击器官链。</summary>
+        public const int Structural = 410;
         /// <summary>刷怪导演决策。</summary>
         public const int Spawning = 500;
         /// <summary>状态效果时间管理。</summary>

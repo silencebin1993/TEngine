@@ -32,6 +32,7 @@ namespace GameLogic.Stage.CellStage
         private StageStatistics _stats2;
         private AreaZoneSystem _zones;
         private MinionRegistry _minions;
+        private StructuralHookRunner _structuralHooks;
 
         /// <summary>连吃层数。断连后清空（除非 ComboNeverResets 规则开启）。</summary>
         public int Combo { get; private set; }
@@ -49,7 +50,7 @@ namespace GameLogic.Stage.CellStage
 
         public void Bind(SimBridge sim, StatSheet stats, ResourceWallet wallet,
             EcoEventScheduler events, StageStatistics statistics, AreaZoneSystem zones,
-            MinionRegistry minions)
+            MinionRegistry minions, StructuralHookRunner structuralHooks)
         {
             _sim = sim;
             _stats = stats;
@@ -58,6 +59,7 @@ namespace GameLogic.Stage.CellStage
             _stats2 = statistics;
             _zones = zones;
             _minions = minions;
+            _structuralHooks = structuralHooks;
         }
 
         public override void OnEnter()
@@ -372,7 +374,7 @@ namespace GameLogic.Stage.CellStage
                 return;
             }
 
-            StructuralOrganResult result = StructuralOrganService.Equip(panel.Bag, panel.Structural, _stats, part.PartId, tag);
+            StructuralOrganResult result = StructuralOrganService.Equip(panel.Bag, panel.Structural, _stats, part.PartId, tag, _structuralHooks);
             if (result != StructuralOrganResult.Ok)
             {
                 return;

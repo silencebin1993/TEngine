@@ -29,7 +29,8 @@ namespace GameLogic.MetabolicSlice.Structural
     /// （Required 6），本服务不依赖、也不修改 Carrier 目录下的任何类型。</summary>
     public static class StructuralOrganService
     {
-        public static StructuralOrganResult Equip(BagInventory bag, StructuralSlots slots, StatSheet sheet, string partId, VisualSlotTag tag)
+        public static StructuralOrganResult Equip(BagInventory bag, StructuralSlots slots, StatSheet sheet, string partId, VisualSlotTag tag,
+            StructuralHookRunner hookRunner = null)
         {
             var part = bag.Items.Find(p => p.PartId == partId);
             if (part == null)
@@ -47,6 +48,7 @@ namespace GameLogic.MetabolicSlice.Structural
             if (old != null)
             {
                 sheet.RemoveBySource(old.RuntimeSourceId);
+                hookRunner?.UnregisterHook(old.RuntimeSourceId);
                 old.Location = PartLocation.Bag();
                 bag.Items.Add(old);
             }
@@ -65,12 +67,18 @@ namespace GameLogic.MetabolicSlice.Structural
                     sheet.Add(mod);
                 }
             }
+            // story-010：触发钩子随装备生效启停，照抄 StructuralEffects 紧邻装/卸位置的写法。
+            if (def.TriggerHook.HasValue)
+            {
+                hookRunner?.RegisterHook(part.RuntimeSourceId, def.TriggerHook.Value);
+            }
 
             slots.IncrementVersion();
             return StructuralOrganResult.Ok;
         }
 
-        public static StructuralOrganResult Unequip(BagInventory bag, StructuralSlots slots, StatSheet sheet, VisualSlotTag tag)
+        public static StructuralOrganResult Unequip(BagInventory bag, StructuralSlots slots, StatSheet sheet, VisualSlotTag tag,
+            StructuralHookRunner hookRunner = null)
         {
             var part = slots.Get(tag);
             if (part == null)
@@ -79,6 +87,7 @@ namespace GameLogic.MetabolicSlice.Structural
             }
 
             sheet.RemoveBySource(part.RuntimeSourceId);
+            hookRunner?.UnregisterHook(part.RuntimeSourceId);
             slots.Clear(tag);
             part.Location = PartLocation.Bag();
             bag.Items.Add(part);

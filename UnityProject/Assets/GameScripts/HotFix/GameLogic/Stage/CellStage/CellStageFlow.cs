@@ -12,6 +12,7 @@ using GameLogic.Core;
 using GameLogic.MetabolicSlice.Bag;
 using GameLogic.MetabolicSlice.Combat;
 using GameLogic.MetabolicSlice.Digestion;
+using GameLogic.MetabolicSlice.Structural;
 using GameLogic.Progression;
 using GameLogic.Spawning;
 using GameLogic.Stats;
@@ -49,6 +50,7 @@ namespace GameLogic.Stage.CellStage
         private MetabolicSliceBridge _metabolicBridge;
         private AbilitySystem _abilities;
         private CardTriggerBus _cards;
+        private StructuralHookRunner _structuralHooks;
         private ResourceWallet _wallet;
         private ProgressionModule _progression;
         private SpawnDirector _director;
@@ -285,6 +287,8 @@ namespace GameLogic.Stage.CellStage
             _metabolicBridge = _hub.Register(new MetabolicSliceBridge());
             _abilities = _hub.Register(new AbilitySystem());
             _cards = _hub.Register(new CardTriggerBus());
+            // story-010：结构器官触发钩子，与 Cards 相邻的独立轨道（不进攻击器官链）。
+            _structuralHooks = _hub.Register(new StructuralHookRunner());
             _wallet = _hub.Register(new ResourceWallet());
             _progression = _hub.Register(new ProgressionModule());
             _director = _hub.Register(new SpawnDirector());
@@ -340,10 +344,11 @@ namespace GameLogic.Stage.CellStage
             _wallet.Bind(_stats);
             _progression.Bind(_wallet);
             _cards.Bind(_deck, _abilities, _sim, _stats);
+            _structuralHooks.Bind(_sim, _stats, _status);
             _director.Bind(_sim, _stats, _deck);
             _timeline.Bind(_director);
             _events.Bind(_director, _timeline, _progression, _wallet);
-            _devour.Bind(_sim, _stats, _wallet, _events, _outcome.Statistics, _zones, _minions);
+            _devour.Bind(_sim, _stats, _wallet, _events, _outcome.Statistics, _zones, _minions, _structuralHooks);
             _player.Bind(_sim, _stats, _abilities, _wallet, _camera);
             _bossPhase.Bind(_sim);
             _shop.Bind(_wallet, _stats, _deck, _sim);
