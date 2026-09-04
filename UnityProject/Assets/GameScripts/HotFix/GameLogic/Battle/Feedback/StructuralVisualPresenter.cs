@@ -100,19 +100,19 @@ namespace GameLogic.Battle.Feedback
 
                 if (newPartId != null)
                 {
-                    LoadSlotAsync(tag, newPartId).Forget();
+                    LoadSlotAsync(tag, newPartId, part.CardDefId).Forget();
                 }
             }
         }
 
-        private async UniTaskVoid LoadSlotAsync(VisualSlotTag tag, string partId)
+        private async UniTaskVoid LoadSlotAsync(VisualSlotTag tag, string partId, string organelleId)
         {
             if (!_anchors.TryGetValue(tag, out Transform anchor) || anchor == null)
             {
                 return;
             }
 
-            string catalogId = "structural." + tag.ToString().ToLowerInvariant() + ".mesh";
+            string catalogId = "structural." + organelleId + ".mesh";
             string address = PlaceholderAddress;
             if (FeatureArtResolver.TryGetSlot(catalogId, out FeatureArtSlot slot) && !string.IsNullOrEmpty(slot.location))
             {

@@ -319,16 +319,12 @@ namespace BinGames.EditorTools.FeatureArt
             };
             foreach (var s in structuralSlots)
             {
-                var slotId = $"structural.{s.Key}.mesh";
-                var slot = FindSlot(slotId);
-                var titleZh = slot?.titleZh ?? s.TitleZh;
-                var page = new SimpleMeshPage(this, slotId, titleZh, null, default, null, null);
-                tree.Add($"结构器官/{titleZh}", page, StatusIcon(slot));
-
                 foreach (var organ in s.Organs)
                 {
-                    var organPage = new StructuralOrganInfoPage(organ.TitleZh, titleZh, organ.Note);
-                    tree.Add($"结构器官/{titleZh}/{organ.TitleZh}", organPage);
+                    var slotId = $"structural.{organ.Id}.mesh";
+                    var slot = FindSlot(slotId);
+                    var page = new SimpleMeshPage(this, slotId, organ.TitleZh, null, default, null, organ.Note);
+                    tree.Add($"结构器官/{s.TitleZh}/{organ.TitleZh}", page, StatusIcon(slot));
                 }
             }
 
@@ -1694,32 +1690,5 @@ namespace BinGames.EditorTools.FeatureArt
             }
         }
 
-        /// <summary>story-007：结构槽下的具体器官子节点。只读信息页——这些器官没有独立外形绑定，
-        /// 外形跟随所在槽位（同标签共用外观，<c>DESIGN.md</c> §3/§7 已定案），不要复用/改动
-        /// <see cref="SimpleMeshPage"/> 的绑定逻辑。</summary>
-        sealed class StructuralOrganInfoPage
-        {
-            readonly string _titleZh;
-            readonly string _slotTitleZh;
-            readonly string _note;
-
-            public StructuralOrganInfoPage(string titleZh, string slotTitleZh, string note)
-            {
-                _titleZh = titleZh;
-                _slotTitleZh = slotTitleZh;
-                _note = note;
-            }
-
-            [OnInspectorGUI]
-            void Draw()
-            {
-                SirenixEditorGUI.Title(_titleZh, null, TextAlignment.Left, true);
-                SirenixEditorGUI.MessageBox(_note, MessageType.None);
-                EditorGUILayout.Space(4);
-                EditorGUILayout.LabelField(
-                    $"外形与同标签其它器官共用（见上一级槽位「{_slotTitleZh}」），抽到本器官会替换当前装备的同标签器官。",
-                    EditorStyles.wordWrappedMiniLabel);
-            }
-        }
     }
 }
