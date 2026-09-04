@@ -11,7 +11,9 @@ namespace GameLogic.MetabolicSlice.Structural
     /// <summary>
     /// story-010（DESIGN §9.6）：五种结构器官触发钩子的运行时执行者。完全独立于
     /// CarrierCompiler/TickCarrier/CarrierRegistry 遍历路径（Required 5）——结构器官
-    /// 走自己的订阅+计时轨道，不进攻击器官链，不产出 HitEvent。
+    /// 走自己的订阅+计时轨道，不进攻击器官链。反伤（<see cref="ThornsSourceLogicId"/>）
+    /// story-013 起会产出真实 HitEvent 扣血，但 CellDevourSystem.PumpHits 按哨兵值过滤，
+    /// 不广播 HitSignal，因此仍不进 CardTriggerBus.OnHit 攻击器官链。
     ///
     /// preflight-decisions.md #1：五种钩子零新增事件——OnDamageTaken/OnKill 订阅既有
     /// PlayerHurtSignal/KillSignal；PeriodicPulse 订阅既有 TickSignal（CardTriggerBus 每
@@ -158,7 +160,7 @@ namespace GameLogic.MetabolicSlice.Structural
                 {
                     if (state.CooldownLeft <= 0f && RollProbability(state.Spec.Probability))
                     {
-                        FireDamageTaken(in state.Spec, pos);
+                        FireDamageTaken(in state.Spec, pos, s.Amount);
                         if (state.Spec.Cooldown > 0f)
                         {
                             state.CooldownLeft = state.Spec.Cooldown;
@@ -249,18 +251,29 @@ namespace GameLogic.MetabolicSlice.Structural
 
         // ── 效果执行 ──
         //
-        // 实证纠偏（偏离 preflight-decisions.md #4 字面表述，目标不变——不产出 HitEvent）：
-        // 决策 #4 原文让反伤/周期脉冲走 SimBridge.DamageArea，理由是"天然不产出 HitEvent"。
-        // 但 Main/Sim/Jobs/JobDamage.cs:203-215 显示 DamageArea/DamageUnit 提交的 DamageRequest
-        // 与投射物命中共用同一个 JobDamage.TryDamage，命中即无条件 Add 进 HitEvents（无来源判
-        // 别）——DamageArea 实际上**会**产出 HitEvent，直接命中 CardTriggerBus.OnHit，违反
-        // Required 5 与 Acceptance #3。本 story 不改内核加"静默伤害"通道（那是更大的架构改动），
-        // 改用只经 StatusRequest 管线（ApplyTimedArea，全程不碰 JobDamage/HitEvents）的易伤标记
-        // 近似"反伤"效果；真实掉血数值留给内核补通道后再由后续 story 接。
+        // story-013：010 曾因 DamageArea/DamageUnit 提交的 DamageRequest 与投射物命中共用
+        // JobDamage.TryDamage、无条件 Add 进 HitEvents，改用 Vulnerable 易伤标记近似"反伤"，
+        // 没有真的扣血。本 story 改用 HitEvent/DamageRequest 自带的 SourceLogicId 字段
+        // （preflight-decisions.md #3/#8）：反伤调用 DamageArea 时传哨兵值
+        // ThornsSourceLogicId（-1，真实生成单位的 LogicId 恒 >=0，不冲突），CellDevourSystem.
+        // PumpHits 按该哨兵值过滤，跳过 Signals.Publish(HitSignal)，命中依旧真实写入
+        // Health（JobDamage.TryDamage 正常执行），但不再进 CardTriggerBus.OnHit 攻击链。
 
-        private void FireDamageTaken(in TriggerHookSpec spec, float2 pos)
+        /// <summary>反伤命中的 SourceLogicId 哨兵值——真实生成单位（玩家 0 / 敌方 SpawnDirector 分配）
+        /// LogicId 恒 &gt;=0，取负数不会冲突（preflight-decisions.md #3）。</summary>
+        internal const int ThornsSourceLogicId = -1;
+
+        private void FireDamageTaken(in TriggerHookSpec spec, float2 pos, float incomingDamage)
         {
-            ApplyAreaMarks(in spec, pos, includeThornsMark: true);
+            if (spec.ThornsRatio > 0f && _sim != null)
+            {
+                float radius = spec.LingerRadius > 0f ? spec.LingerRadius : DefaultAreaRadius;
+                _sim.DamageArea(pos, radius, incomingDamage * spec.ThornsRatio, SimFaction.Hostile,
+                    sourceLogicId: ThornsSourceLogicId);
+            }
+            // Tag 标记（非反伤器官）仍走既有易伤/异常状态管线；Vulnerable 已按 CATALOG §A 文案
+            // 移除，不与真实扣血叠加（preflight-decisions.md #5）。
+            ApplyAreaMarks(in spec, pos, includeThornsMark: false);
         }
 
         private void FireMove(in TriggerHookSpec spec, float2 pos)

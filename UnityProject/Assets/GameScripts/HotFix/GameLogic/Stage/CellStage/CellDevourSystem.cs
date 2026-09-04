@@ -141,6 +141,13 @@ namespace GameLogic.Stage.CellStage
             for (int i = 0; i < n; i++)
             {
                 HitEvent h = snap.Hits[i];
+                // story-013：结构器官反伤命中（SourceLogicId 哨兵，见 StructuralHookRunner.
+                // ThornsSourceLogicId）不广播 HitSignal——不让它进 CardTriggerBus.OnHit 攻击链，
+                // 但仍已在内核真实扣血（Health 已下降，走的是同一条 JobDamage.TryDamage）。
+                if (h.SourceLogicId == StructuralHookRunner.ThornsSourceLogicId)
+                {
+                    continue;
+                }
                 Signals.Publish(new HitSignal
                 {
                     TargetLogicId = h.TargetLogicId,
