@@ -336,9 +336,12 @@ namespace GameLogic.Stage.CellStage
         /// <summary>结构器官掉落触发概率（preflight-decisions.md #2：8%，非平衡终值）。</summary>
         private const float StructuralDropChance = 0.08f;
 
-        /// <summary>结构器官掉落表：8 条等权重（CATALOG.md §B 的 id→槽标签映射，非平衡终值）。</summary>
+        /// <summary>结构器官掉落表：32 条等权重（CATALOG.md §A1/§A2 的 id→槽标签映射，非平衡终值；
+        /// story-011（preflight-decisions.md #7）从原 8 条扩容至 32 条，概率仍等权重 1/32，
+        /// <see cref="StructuralDropChance"/> 不变）。</summary>
         private static readonly (string Id, VisualSlotTag Tag)[] StructuralDropTable =
         {
+            // A1（8，原有）
             ("org_carapace", VisualSlotTag.Armor),
             ("org_flagellum_boost", VisualSlotTag.Motility),
             ("org_thick_membrane", VisualSlotTag.Armor),
@@ -347,6 +350,34 @@ namespace GameLogic.Stage.CellStage
             ("org_efficient_gut", VisualSlotTag.Vital),
             ("org_calm_membrane", VisualSlotTag.Armor),
             ("org_stamina_sac", VisualSlotTag.Motility),
+            // A2 Armor +5
+            ("org_thorn_shell", VisualSlotTag.Armor),
+            ("org_mucus_barrier", VisualSlotTag.Armor),
+            ("org_scab_plate", VisualSlotTag.Armor),
+            ("org_oil_gland", VisualSlotTag.Armor),
+            ("org_static_hide", VisualSlotTag.Armor),
+            // A2 Motility +6
+            ("org_slime_trail", VisualSlotTag.Motility),
+            ("org_dash_spore", VisualSlotTag.Motility),
+            ("org_echo_step", VisualSlotTag.Motility),
+            ("org_pull_wake", VisualSlotTag.Motility),
+            ("org_haste_spurt", VisualSlotTag.Motility),
+            ("org_charged_cilia", VisualSlotTag.Motility),
+            // A2 Vital +6
+            ("org_blood_vacuole", VisualSlotTag.Vital),
+            ("org_lyso_core", VisualSlotTag.Vital),
+            ("org_spore_womb", VisualSlotTag.Vital),
+            ("org_absorbent_gel", VisualSlotTag.Vital),
+            ("org_toxin_sac", VisualSlotTag.Vital),
+            ("org_ichor_gland", VisualSlotTag.Vital),
+            // A2 Appendage +7
+            ("org_light_organ", VisualSlotTag.Appendage),
+            ("org_dark_gill", VisualSlotTag.Appendage),
+            ("org_confusion_spore", VisualSlotTag.Appendage),
+            ("org_pheromone_gland", VisualSlotTag.Appendage),
+            ("org_barrier_node", VisualSlotTag.Appendage),
+            ("org_frost_tendril", VisualSlotTag.Appendage),
+            ("org_gravity_node", VisualSlotTag.Appendage),
         };
 
         /// <summary>拾取即装备，不进抽卡池/消化泡（DESIGN §7）。8% 概率、等权重取一条，直接调用
