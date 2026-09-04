@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using ComposeEngine.Builtin.Modules;
 using ComposeEngine.Core;
 using GameLogic.MetabolicSlice.Grid;
+using GameLogic.MetabolicSlice.Structural;
 using GameLogic.Stats;
 
 namespace GameLogic.MetabolicSlice.ContentCatalog
@@ -56,10 +57,16 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
         /// 不新造加成结构。非 Structural 分类恒为 null。</summary>
         public StatModifier[] StructuralEffects { get; }
 
+        /// <summary>story-009（R4/Preflight D7）：受击/移动/击杀/血量阈值/周期触发的一次性或周期性效果
+        /// （DESIGN §9.6 五种钩子），与 <see cref="StructuralEffects"/> 并存、可同非空。默认 null——
+        /// 本 story 只声明字段，不注册任何 §A2 条目实际赋值（010/011 消费）。</summary>
+        public TriggerHookSpec? TriggerHook { get; }
+
         public OrganelleDef(string id, string displayName, OrganelleRole role, OrganelleAttachTarget attachTarget,
             IEnumerable<SlotType> allowedSlotTypes, string artId, Func<IModule> createModule, bool isCarrier = false,
             bool isRetired = false, string description = "", bool attackMethod = false, string attackFamily = null,
-            OrganelleCategory category = OrganelleCategory.Attack, StatModifier[] structuralEffects = null)
+            OrganelleCategory category = OrganelleCategory.Attack, StatModifier[] structuralEffects = null,
+            TriggerHookSpec? triggerHook = null)
         {
             Id = id;
             DisplayName = displayName;
@@ -75,6 +82,7 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
             AttackFamily = attackFamily;
             Category = category;
             StructuralEffects = structuralEffects;
+            TriggerHook = triggerHook;
         }
     }
 

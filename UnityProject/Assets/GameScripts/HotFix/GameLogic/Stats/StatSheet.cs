@@ -62,8 +62,12 @@ namespace GameLogic.Stats
         ProjectileCount = 29,
         /// <summary>状态持续时间倍率。</summary>
         StatusDuration = 30,
+        /// <summary>屏障上限（结构器官 org_barrier_node 用）。</summary>
+        ShieldMax = 31,
+        /// <summary>屏障回复（每秒）。</summary>
+        ShieldRegen = 32,
 
-        Count = 31,
+        Count = 33,
     }
 
     /// <summary>修正器叠加层级。顺序固定，避免乘法爆炸。</summary>
@@ -154,6 +158,8 @@ namespace GameLogic.Stats
             _base[(int)StatId.MyceliumScale] = 1f;
             _base[(int)StatId.ProjectileCount] = 0f;
             _base[(int)StatId.StatusDuration] = 1f;
+            _base[(int)StatId.ShieldMax] = 0f;
+            _base[(int)StatId.ShieldRegen] = 0f;
 
             _mods.Clear();
             _dirty = true;
@@ -284,6 +290,8 @@ namespace GameLogic.Stats
                 Mathf.Clamp(_final[(int)StatId.AbilitySlots], 1f, 5f);
             _final[(int)StatId.StatusDuration] =
                 Mathf.Max(0.1f, _final[(int)StatId.StatusDuration]);
+            _final[(int)StatId.ShieldMax] = Mathf.Max(0f, _final[(int)StatId.ShieldMax]);
+            _final[(int)StatId.ShieldRegen] = Mathf.Max(0f, _final[(int)StatId.ShieldRegen]);
 
             _dirty = false;
         }
