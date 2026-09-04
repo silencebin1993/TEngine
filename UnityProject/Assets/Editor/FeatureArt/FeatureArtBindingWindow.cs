@@ -262,7 +262,7 @@ namespace BinGames.EditorTools.FeatureArt
                 _organPages[entry.OrganId] = page;
                 var slot = FindSlot($"organ.{entry.OrganId}.mesh");
                 var titleZh = slot?.titleZh?.Replace(" · 本体网格", "") ?? entry.OrganId;
-                tree.Add($"攻击方式/{entry.GroupZh}/{titleZh}", page, StatusIcon(slot));
+                tree.Add($"结构器官/攻击方式/{entry.GroupZh}/{titleZh}", page, StatusIcon(slot));
             }
 
             foreach (var shape in ShapeOrder)
@@ -294,19 +294,35 @@ namespace BinGames.EditorTools.FeatureArt
                 tree.Add($"敌人/{group}/{fam.TitleZh}", page, StatusIcon(slot));
             }
 
-            var structuralSlots = new (string Key, string TitleZh)[]
+            var structuralSlots = new (string Key, string TitleZh, string[] Organs)[]
             {
-                ("armor", "装甲"),
-                ("motility", "运动"),
-                ("vital", "生命"),
-                ("appendage", "附肢"),
+                ("armor", "装甲", new[]
+                {
+                    "硬化甲层：受到伤害 −12%",
+                    "增厚膜：最大生命 +32",
+                    "静默膜：仇恨倍率 −20%",
+                }),
+                ("motility", "运动", new[]
+                {
+                    "加速鞭毛：移动速度 +12%",
+                    "体力囊：体力上限 +25，体力回复 +15%",
+                }),
+                ("vital", "生命", new[]
+                {
+                    "再生腺：生命回复 +0.8/秒",
+                    "高效消化道：营养质获取 +18%",
+                }),
+                ("appendage", "附肢", new[]
+                {
+                    "化学感受器：拾取半径 +30%",
+                }),
             };
             foreach (var s in structuralSlots)
             {
                 var slotId = $"structural.{s.Key}.mesh";
                 var slot = FindSlot(slotId);
                 var titleZh = slot?.titleZh ?? s.TitleZh;
-                var page = new SimpleMeshPage(this, slotId, titleZh, null, default, null, null);
+                var page = new SimpleMeshPage(this, slotId, titleZh, null, default, null, null, s.Organs);
                 tree.Add($"结构器官/{titleZh}", page, StatusIcon(slot));
             }
 
@@ -1595,9 +1611,10 @@ namespace BinGames.EditorTools.FeatureArt
             readonly Color _groupColor;
             readonly string _cellArtId;
             readonly string _tailNote;
+            readonly string[] _extraInfoLines;
 
             public SimpleMeshPage(FeatureArtBindingWindow window, string slotId, string titleZh, string groupZh,
-                Color groupColor, string cellArtId, string tailNote)
+                Color groupColor, string cellArtId, string tailNote, string[] extraInfoLines = null)
             {
                 _window = window;
                 _slotId = slotId;
@@ -1606,6 +1623,7 @@ namespace BinGames.EditorTools.FeatureArt
                 _groupColor = groupColor;
                 _cellArtId = cellArtId;
                 _tailNote = tailNote;
+                _extraInfoLines = extraInfoLines;
             }
 
             FeatureArtSlot Slot => _window.FindSlot(_slotId);
@@ -1656,6 +1674,19 @@ namespace BinGames.EditorTools.FeatureArt
             {
                 EditorGUILayout.LabelField("概念图 / 三视图", EditorStyles.boldLabel);
                 FeatureArtCellArtBridge.DrawViews(_window, _cellArtId, _titleZh, Slot);
+                EditorGUILayout.Space(4);
+            }
+
+            [OnInspectorGUI, PropertyOrder(40)]
+            void DrawExtraInfo()
+            {
+                if (_extraInfoLines == null || _extraInfoLines.Length == 0)
+                {
+                    return;
+                }
+
+                EditorGUILayout.LabelField("关联结构器官（同标签互斥，抽到新的会替换当前装备）", EditorStyles.boldLabel);
+                _window.DrawWrappedBox(string.Join("\n", _extraInfoLines), MessageType.None);
                 EditorGUILayout.Space(4);
             }
 
