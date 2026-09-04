@@ -490,7 +490,8 @@ namespace GameLogic.Stage.CellStage
             foreach (var kv in GameLogic.MetabolicSlice.ContentCatalog.OrganelleCatalog.All)
             {
                 var def = kv.Value;
-                if (def.IsRetired || def.ArtId == null)
+                if (def.IsRetired || def.ArtId == null
+                    || def.Category == GameLogic.MetabolicSlice.ContentCatalog.OrganelleCategory.Structural)
                 {
                     continue;
                 }

@@ -167,7 +167,7 @@ namespace BinGames.EditorTools.FeatureArt
             foreach (var kv in OrganelleCatalog.All)
             {
                 var def = kv.Value;
-                if (def.IsRetired || def.ArtId == null)
+                if (def.IsRetired || def.ArtId == null || def.Category == OrganelleCategory.Structural)
                 {
                     continue;
                 }
