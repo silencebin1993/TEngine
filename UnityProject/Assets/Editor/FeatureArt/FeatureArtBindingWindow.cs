@@ -148,7 +148,7 @@ namespace BinGames.EditorTools.FeatureArt
         };
 
         const string ShapeCommon =
-            "这是共享皮肤。改这里，所有使用该 Shape 的攻击方式一起变。五格都是池化 Prefab；+X 为前方；短生命周期；不要相机、不要 AudioListener、不要自己 Destroy 断池。";
+            "这是共享皮肤。改这里，所有使用该 Shape 的攻击器官一起变。五格都是池化 Prefab；+X 为前方；短生命周期；不要相机、不要 AudioListener、不要自己 Destroy 断池。";
 
         const string ShapeRoles =
             "五角色补一句：弹体=飞行/持续中本体；枪口=开火瞬间贴在细胞右前方 1～3 帧；命中=打在目标身上；爆炸=落点一圈，不要火球蘑菇云；瞄准预览=未开火时半透明贴玩家脚下的装配预览，静态不飞行，别做得跟实弹一样浓。";
@@ -262,7 +262,7 @@ namespace BinGames.EditorTools.FeatureArt
                 _organPages[entry.OrganId] = page;
                 var slot = FindSlot($"organ.{entry.OrganId}.mesh");
                 var titleZh = slot?.titleZh?.Replace(" · 本体网格", "") ?? entry.OrganId;
-                tree.Add($"结构器官/攻击方式/{entry.GroupZh}/{titleZh}", page, StatusIcon(slot));
+                tree.Add($"结构器官/攻击器官/{entry.GroupZh}/{titleZh}", page, StatusIcon(slot));
             }
 
             foreach (var shape in ShapeOrder)
@@ -294,27 +294,27 @@ namespace BinGames.EditorTools.FeatureArt
                 tree.Add($"敌人/{group}/{fam.TitleZh}", page, StatusIcon(slot));
             }
 
-            var structuralSlots = new (string Key, string TitleZh, string[] Organs)[]
+            var structuralSlots = new (string Key, string TitleZh, (string Id, string TitleZh, string Note)[] Organs)[]
             {
                 ("armor", "装甲", new[]
                 {
-                    "硬化甲层：受到伤害 −12%",
-                    "增厚膜：最大生命 +32",
-                    "静默膜：仇恨倍率 −20%",
+                    ("org_carapace", "硬化甲层", "常驻：体表增生一层硬甲，减少受到的伤害 12%。"),
+                    ("org_thick_membrane", "增厚膜", "常驻：细胞膜增厚，最大生命 +32。"),
+                    ("org_calm_membrane", "静默膜", "常驻：体表分泌物让敌人不容易注意到你，仇恨倍率 −20%。"),
                 }),
                 ("motility", "运动", new[]
                 {
-                    "加速鞭毛：移动速度 +12%",
-                    "体力囊：体力上限 +25，体力回复 +15%",
+                    ("org_flagellum_boost", "加速鞭毛", "常驻：额外长出一对鞭毛，移动速度 +12%。"),
+                    ("org_stamina_sac", "体力囊", "常驻：储存更多体力，体力上限 +25，回复速度 +15%。"),
                 }),
                 ("vital", "生命", new[]
                 {
-                    "再生腺：生命回复 +0.8/秒",
-                    "高效消化道：营养质获取 +18%",
+                    ("org_regen_gland", "再生腺", "常驻：持续修复受损的细胞结构，生命回复 +0.8/秒。"),
+                    ("org_efficient_gut", "高效消化道", "常驻：吸收营养的效率更高，营养质获取 +18%。"),
                 }),
                 ("appendage", "附肢", new[]
                 {
-                    "化学感受器：拾取半径 +30%",
+                    ("org_chemoreceptor", "化学感受器", "常驻：更容易嗅到周围的营养物质，拾取半径 +30%。"),
                 }),
             };
             foreach (var s in structuralSlots)
@@ -322,8 +322,14 @@ namespace BinGames.EditorTools.FeatureArt
                 var slotId = $"structural.{s.Key}.mesh";
                 var slot = FindSlot(slotId);
                 var titleZh = slot?.titleZh ?? s.TitleZh;
-                var page = new SimpleMeshPage(this, slotId, titleZh, null, default, null, null, s.Organs);
+                var page = new SimpleMeshPage(this, slotId, titleZh, null, default, null, null);
                 tree.Add($"结构器官/{titleZh}", page, StatusIcon(slot));
+
+                foreach (var organ in s.Organs)
+                {
+                    var organPage = new StructuralOrganInfoPage(organ.TitleZh, titleZh, organ.Note);
+                    tree.Add($"结构器官/{titleZh}/{organ.TitleZh}", organPage);
+                }
             }
 
             foreach (var item in tree.EnumerateTree(false))
@@ -1211,9 +1217,9 @@ namespace BinGames.EditorTools.FeatureArt
             {
                 SirenixEditorGUI.Title("使用说明", null, TextAlignment.Left, true);
                 SirenixEditorGUI.MessageBox(
-                    "选攻击方式 → 看/复制外形提示词做模型（对照概念图）→ 看/复制开火提示词做特效 → 拖进同一页。\n\n" +
+                    "选攻击器官 → 看/复制外形提示词做模型（对照概念图）→ 看/复制开火提示词做特效 → 拖进同一页。\n\n" +
                     "1. 工具栏『从代码同步槽位』补齐新功能的空槽（look/prompt 每次都会按 LOOK-PROMPTS 覆盖，location 不动）；\n" +
-                    "2. 选中左树『攻击方式』下的器官，同一页拖外形预制体、复制开火四段提示词；\n" +
+                    "2. 选中左树『攻击器官』下的器官，同一页拖外形预制体、复制开火四段提示词；\n" +
                     "3. 三视图下勾要发给混元的图（默认只发概念图），选模型后「用三视图生成模型并绑定」（先在左树「混元生3D」填 Key）；会落整包并自动烘焙游戏 Prefab（Unity Standard + 整包贴图，不要自定义 shader）。对象框应显示 Prefab；\n" +
                     "4. 点工具栏『保存』；\n" +
                     "5. Play 模式或『健康检查』核对。\n\n" +
@@ -1611,10 +1617,9 @@ namespace BinGames.EditorTools.FeatureArt
             readonly Color _groupColor;
             readonly string _cellArtId;
             readonly string _tailNote;
-            readonly string[] _extraInfoLines;
 
             public SimpleMeshPage(FeatureArtBindingWindow window, string slotId, string titleZh, string groupZh,
-                Color groupColor, string cellArtId, string tailNote, string[] extraInfoLines = null)
+                Color groupColor, string cellArtId, string tailNote)
             {
                 _window = window;
                 _slotId = slotId;
@@ -1623,7 +1628,6 @@ namespace BinGames.EditorTools.FeatureArt
                 _groupColor = groupColor;
                 _cellArtId = cellArtId;
                 _tailNote = tailNote;
-                _extraInfoLines = extraInfoLines;
             }
 
             FeatureArtSlot Slot => _window.FindSlot(_slotId);
@@ -1677,19 +1681,6 @@ namespace BinGames.EditorTools.FeatureArt
                 EditorGUILayout.Space(4);
             }
 
-            [OnInspectorGUI, PropertyOrder(40)]
-            void DrawExtraInfo()
-            {
-                if (_extraInfoLines == null || _extraInfoLines.Length == 0)
-                {
-                    return;
-                }
-
-                EditorGUILayout.LabelField("关联结构器官（同标签互斥，抽到新的会替换当前装备）", EditorStyles.boldLabel);
-                _window.DrawWrappedBox(string.Join("\n", _extraInfoLines), MessageType.None);
-                EditorGUILayout.Space(4);
-            }
-
             [OnInspectorGUI, PropertyOrder(50)]
             void DrawNotes()
             {
@@ -1700,6 +1691,34 @@ namespace BinGames.EditorTools.FeatureArt
 
                 EditorGUILayout.LabelField("给制作的说明", EditorStyles.boldLabel);
                 _window.DrawWrappedBox(_tailNote, MessageType.None);
+            }
+        }
+
+        /// <summary>story-007：结构槽下的具体器官子节点。只读信息页——这些器官没有独立外形绑定，
+        /// 外形跟随所在槽位（同标签共用外观，<c>DESIGN.md</c> §3/§7 已定案），不要复用/改动
+        /// <see cref="SimpleMeshPage"/> 的绑定逻辑。</summary>
+        sealed class StructuralOrganInfoPage
+        {
+            readonly string _titleZh;
+            readonly string _slotTitleZh;
+            readonly string _note;
+
+            public StructuralOrganInfoPage(string titleZh, string slotTitleZh, string note)
+            {
+                _titleZh = titleZh;
+                _slotTitleZh = slotTitleZh;
+                _note = note;
+            }
+
+            [OnInspectorGUI]
+            void Draw()
+            {
+                SirenixEditorGUI.Title(_titleZh, null, TextAlignment.Left, true);
+                SirenixEditorGUI.MessageBox(_note, MessageType.None);
+                EditorGUILayout.Space(4);
+                EditorGUILayout.LabelField(
+                    $"外形与同标签其它器官共用（见上一级槽位「{_slotTitleZh}」），抽到本器官会替换当前装备的同标签器官。",
+                    EditorStyles.wordWrappedMiniLabel);
             }
         }
     }
