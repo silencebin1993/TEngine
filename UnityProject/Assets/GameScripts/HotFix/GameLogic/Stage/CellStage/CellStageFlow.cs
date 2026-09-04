@@ -65,6 +65,7 @@ namespace GameLogic.Stage.CellStage
         private MetabolicDigestionSystem _digestion;
         private CarrierBodyVisualPresenter _carrierBodyVisual;
         private StructuralVisualPresenter _structuralVisual;
+        private EnvFluidBackground _envFluid;
         private ComposeProjectilePresenter _composeProjectilePresenter;
         private Battle.Feedback.DevUnitGoMirror _devUnitGoMirror;
 
@@ -318,6 +319,8 @@ namespace GameLogic.Stage.CellStage
             _carrierBodyVisual = _hub.Register(new CarrierBodyVisualPresenter());
             // 结构器官复合渲染路径（story-003）：chassis + 最多 4 个独立挂件子物体，同款轮询脏版本号。
             _structuralVisual = _hub.Register(new StructuralVisualPresenter());
+            // 培养皿液体地面：涟漪跟随玩家；质量档 EnvFluidBackground.CurrentQuality。
+            _envFluid = _hub.Register(new EnvFluidBackground());
             // Dev：Snapshot → 可点选 GO；默认关，菜单 BinGames/功能美术/Dev 单位 GO 镜像。
             _devUnitGoMirror = _hub.Register(new Battle.Feedback.DevUnitGoMirror());
 
@@ -339,6 +342,7 @@ namespace GameLogic.Stage.CellStage
             _zones.Bind(_sim, _status);
             _carrierBodyVisual.Bind(_sim);
             _structuralVisual.Bind(_sim);
+            _envFluid.Bind(_sim);
             _zoneVisual.Bind(_zones);
             _healthBars.Bind(_sim, _stats);
             _wallet.Bind(_stats);
@@ -372,7 +376,7 @@ namespace GameLogic.Stage.CellStage
             ObstacleSpec[] obstacles = ObstacleGenerator.Generate(cfg.ArenaHalfExtent);
             _sim.SetObstacles(obstacles);
             WhiteboxObstacleVisual.Spawn(obstacles);
-            WhiteboxGroundAnchor.Spawn(cfg.ArenaHalfExtent);
+            _envFluid.Spawn(cfg.ArenaHalfExtent);
 
             _renderer = new SimRenderer();
             _visuals = BuildVisuals();
@@ -1461,6 +1465,7 @@ namespace GameLogic.Stage.CellStage
             _loadedArtAssets.Clear();
             _visuals = null;
             WhiteboxObstacleVisual.Dispose();
+            // EnvFluidBackground.OnExit 已清液体面；此处兜底清回退路径的白模地面。
             WhiteboxGroundAnchor.Dispose();
 
             Signals.Clear();
