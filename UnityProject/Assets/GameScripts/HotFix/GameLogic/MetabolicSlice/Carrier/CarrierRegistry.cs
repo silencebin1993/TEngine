@@ -23,8 +23,10 @@ namespace GameLogic.MetabolicSlice.Carrier
         public int AssemblyVersion { get; private set; }
 
         /// <summary>已存在则原样返回；不存在则新建（默认 3 空槽，插槽数动态可增长）。第一个建出的 Carrier 自动置为激活（D9），
-        /// 之后新增不抢占当前激活。organelleId 透传给 CarrierInstance（story-004 D9，供 CarrierCompiler 反查 Shape）。</summary>
-        public CarrierInstance EnsureCarrier(string carrierId, string organelleId = null)
+        /// 之后新增不抢占当前激活。organelleId 透传给 CarrierInstance（story-004 D9，供 CarrierCompiler 反查 Shape）。
+        /// autoActivate=false 时跳过"零 Carrier 时自动置为激活"逻辑（story-002：结构器官不参与攻击结算，
+        /// 不能抢占 ActiveCarrierId，否则 TickCarrier 会对着一个 AttackMethod=false 的 Carrier 产出空 HitEvent）。</summary>
+        public CarrierInstance EnsureCarrier(string carrierId, string organelleId = null, bool autoActivate = true)
         {
             if (_carriers.TryGetValue(carrierId, out var existing))
             {
@@ -33,7 +35,7 @@ namespace GameLogic.MetabolicSlice.Carrier
 
             var carrier = new CarrierInstance(carrierId, organelleId);
             _carriers[carrierId] = carrier;
-            if (ActiveCarrierId == null)
+            if (autoActivate && ActiveCarrierId == null)
             {
                 ActiveCarrierId = carrierId;
             }

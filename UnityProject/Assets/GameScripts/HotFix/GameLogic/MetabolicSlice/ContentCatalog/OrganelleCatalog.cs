@@ -324,8 +324,9 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
                 description: "攻击方式：接触到体积小于自己的目标时直接吞噬消灭；不主动开火。"),
 
             // ── organelle-structural-tier story-001（DESIGN §2/§3、CATALOG §A）：首批 8 条结构器官，
-            // 常驻被动叠加，不进攻击链（IsCarrier=false/AttackMethod=false/AllowedSlotTypes=null），
-            // v1 不分配 CarrierInstance/Slots，不开基因槽。
+            // 常驻被动叠加，不进攻击链（IsCarrier=false/AttackMethod=false/AllowedSlotTypes=null）。
+            // 基因槽（CarrierInstance）自 gene-organ-universal-reaction story-002 起由
+            // StructuralOrganService.Equip 另行开出，见该类型注释；不影响这里的攻击链判据。
             ["org_carapace"] = new OrganelleDef("org_carapace", "甲壳", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/carapace", null, category: OrganelleCategory.Structural,
                 structuralEffects: new[] { new StatModifier(StatId.DamageTaken, ModifierOp.PctAdd, -0.12f) },

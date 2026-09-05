@@ -412,7 +412,7 @@ namespace GameLogic.Stage.CellStage
                 return;
             }
 
-            StructuralOrganResult result = StructuralOrganService.Equip(panel.Bag, panel.Structural, _stats, part.PartId, tag, _structuralHooks);
+            StructuralOrganResult result = StructuralOrganService.Equip(panel.Bag, panel.Structural, _stats, part.PartId, tag, _structuralHooks, panel.CarrierRegistry);
             if (result != StructuralOrganResult.Ok)
             {
                 return;

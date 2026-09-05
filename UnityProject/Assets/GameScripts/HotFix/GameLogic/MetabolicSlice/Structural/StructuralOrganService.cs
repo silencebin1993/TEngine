@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using GameLogic.MetabolicSlice.Bag;
+using GameLogic.MetabolicSlice.Carrier;
 using GameLogic.MetabolicSlice.ContentCatalog;
 using GameLogic.Stats;
 
@@ -8,7 +9,9 @@ namespace GameLogic.MetabolicSlice.Structural
     public enum StructuralOrganResult { Ok, PartNotFound, NotStructuralCategory, SlotEmpty }
 
     /// <summary>结构器官装配状态：每个 VisualSlotTag 至多一件常驻被动器官（story-001 Required 4/5）。
-    /// 独立于 CarrierInstance.Slots——v1 不给结构器官分配 CarrierInstance/Slots（Required 2/6）。</summary>
+    /// 本类自身的槽位存储独立于 CarrierInstance.Slots；结构器官的基因槽（CarrierInstance）由
+    /// <see cref="StructuralOrganService.Equip"/> 另外在 CarrierRegistry 里开（story-002），
+    /// 两者是并存关系，不是互斥关系。</summary>
     public sealed class StructuralSlots
     {
         private readonly Dictionary<VisualSlotTag, PartInstance> _equipped = new Dictionary<VisualSlotTag, PartInstance>();
@@ -26,11 +29,12 @@ namespace GameLogic.MetabolicSlice.Structural
 
     /// <summary>装/卸结构器官：储备囊 ↔ 结构槽（Required 5）。风格照抄 CarrierGeneService：静态类，
     /// Reject-to-Safe，不抛异常，返回结果枚举。结构器官完全不进 CarrierCompiler/TickCarrier 遍历判据
-    /// （Required 6），本服务不依赖、也不修改 Carrier 目录下的任何类型。</summary>
+    /// （Required 6）——Equip 会通过 CarrierRegistry.EnsureCarrier(autoActivate: false) 为结构器官开一份
+    /// 基因槽（story-002），但不会让它抢占 ActiveCarrierId，也不改 CarrierCompiler/TickCarrier 本身。</summary>
     public static class StructuralOrganService
     {
         public static StructuralOrganResult Equip(BagInventory bag, StructuralSlots slots, StatSheet sheet, string partId, VisualSlotTag tag,
-            StructuralHookRunner hookRunner = null)
+            StructuralHookRunner hookRunner = null, CarrierRegistry carrierRegistry = null)
         {
             var part = bag.Items.Find(p => p.PartId == partId);
             if (part == null)
@@ -56,6 +60,9 @@ namespace GameLogic.MetabolicSlice.Structural
             bag.Items.Remove(part);
             part.Location = PartLocation.Structural(tag);
             slots.Set(tag, part);
+            // story-002：结构器官也开一份基因槽（CarrierInstance），但不能抢占 ActiveCarrierId
+            // ——结构器官 AttackMethod=false，抢占会让 TickCarrier 打出空 HitEvent（preflight #3）。
+            carrierRegistry?.EnsureCarrier(part.PartId, part.CardDefId, autoActivate: false);
             if (def.StructuralEffects != null)
             {
                 // 目录里的 StatModifier 是静态共享数据，SourceId 恒为默认值 0——必须逐条盖成
