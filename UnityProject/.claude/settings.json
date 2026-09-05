@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Read(//f/Project/BinGames/.claude/skills/**)",
-      "Read(//f/Project/BinGames/**)"
+      "Read(//f/Project/BinGames/**)",
+      "Skill(update-config)",
+      "Skill(update-config:*)"
     ]
   }
 }

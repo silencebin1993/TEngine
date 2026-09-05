@@ -9,7 +9,8 @@
       "Bash(openspec:*)",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "Bash(git *)"
+      "Bash(git *)",
+      "Bash(echo \"exit:$?\")"
     ]
   },
   "enableAllProjectMcpServers": true,
