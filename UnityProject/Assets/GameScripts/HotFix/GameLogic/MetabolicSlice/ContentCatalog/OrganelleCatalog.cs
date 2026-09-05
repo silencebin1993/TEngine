@@ -95,6 +95,15 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
     {
         private static readonly SlotType[] MembraneOnly = { SlotType.Membrane };
 
+        /// <summary>
+        /// gene-organ-universal-reaction story-006：攻击器官 CreateModule 的构造参数取自
+        /// Luban 表 cell.OrganModuleParams（经 DataRegistry 门面），代码里只保留"接哪个模块类型/组合顺序"。
+        /// CreateModule 是延迟求值的 lambda，所以这里读表发生在实际组链时，不在静态构造期。
+        /// 改数值请改 tools/cell_tables/step2_small.py 的 ORGAN_MODULE_PARAM_ROWS 并重跑导表，不要改回字面量。
+        /// </summary>
+        private static GameLogic.Core.OrganModuleParamsSpec P(string organelleId)
+            => GameLogic.Core.DataRegistry.Instance.GetOrganModuleParams(organelleId);
+
         private static readonly Dictionary<string, OrganelleDef> _defs = new Dictionary<string, OrganelleDef>
         {
             ["org_mito"] = new OrganelleDef("org_mito", "线粒体", OrganelleRole.Source, OrganelleAttachTarget.Slot,
@@ -150,17 +159,20 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
                 description: "把命中能量的一部分回灌自身，按预算封顶防止无限自激（已退役，效果迁 gene_synapse）。"),
             ["org_emitter"] = new OrganelleDef("org_emitter", "分泌喷射器", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/emitter", () => new CompositeModule("emitter_attack", "分泌喷射器攻击",
-                    new BallisticsModule(speed: 1.3f), new Actuator(pattern: AttackPattern.Projectile)),
+                    new BallisticsModule(speed: P("org_emitter").BallisticsSpeed),
+                    new Actuator(pattern: AttackPattern.Projectile)),
                 isCarrier: true, attackMethod: true, attackFamily: "Projectile",
                 description: "攻击方式：朝瞄准方向射出代谢弹。"),
             ["org_cilia"] = new OrganelleDef("org_cilia", "纤毛刺", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/cilia", () => new CompositeModule("cilia_attack", "纤毛刺攻击",
-                    new SpreadModule(40f), new Actuator(shape: "Melee", pattern: AttackPattern.Melee)),
+                    new SpreadModule(P("org_cilia").SpreadAngle),
+                    new Actuator(shape: "Melee", pattern: AttackPattern.Melee)),
                 isCarrier: true, attackMethod: true, attackFamily: "Melee",
                 description: "攻击方式：身前短锥挥刺。"),
             ["org_spine"] = new OrganelleDef("org_spine", "刺突", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 MembraneOnly, "org/spine", () => new CompositeModule("spine_attack", "刺突反击",
-                    new Thorns(reflectDamage: 6f), new Actuator(shape: "Melee", pattern: AttackPattern.Thorns)),
+                    new Thorns(reflectDamage: P("org_spine").ReflectDamage),
+                    new Actuator(shape: "Melee", pattern: AttackPattern.Thorns)),
                 isCarrier: true, attackMethod: true, attackFamily: "Thorns",
                 description: "攻击方式：被碰到或挨打时反刺，不靠主动开火。"),
             ["org_slime"] = new OrganelleDef("org_slime", "粘液层", OrganelleRole.Relay, OrganelleAttachTarget.Slot,
@@ -186,37 +198,43 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
             // 不新增美术：ArtId 未登记进 SimVisualLibrary，落 SphereUnit() 兜底，靠 Shape+Pattern+颜色区分（R6）。
             ["org_lensbeam"] = new OrganelleDef("org_lensbeam", "晶状束", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/lensbeam", () => new CompositeModule("lensbeam_attack", "晶状束攻击",
-                    new BallisticsModule(speed: 1f, lifetime: 0.35f), new TickModule(10f),
+                    new BallisticsModule(speed: P("org_lensbeam").BallisticsSpeed,
+                        lifetime: P("org_lensbeam").BallisticsLifetime),
+                    new TickModule(P("org_lensbeam").TickRate),
                     new Actuator(shape: "Beam", pattern: AttackPattern.Beam)),
                 isCarrier: true, attackMethod: true, attackFamily: "Beam",
                 description: "攻击方式：一条持续细束，扫过伤害。"),
             ["org_enzyme"] = new OrganelleDef("org_enzyme", "酶雾腺", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/enzyme", () => new CompositeModule("enzyme_attack", "酶雾腺攻击",
-                    new LingerModule(4f), new TickModule(1f),
+                    new LingerModule(P("org_enzyme").LingerSeconds), new TickModule(P("org_enzyme").TickRate),
                     new Actuator(shape: "Field", pattern: AttackPattern.Pool)),
                 isCarrier: true, attackMethod: true, attackFamily: "Pool",
                 description: "攻击方式：把酶雾扔到落点，地面持续腐蚀。"),
             ["org_osmotic"] = new OrganelleDef("org_osmotic", "渗透压场", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/osmotic", () => new CompositeModule("osmotic_attack", "渗透压场攻击",
-                    new AuraModule(3f), new Actuator(shape: "Field", pattern: AttackPattern.Aura)),
+                    new AuraModule(P("org_osmotic").AuraRadius),
+                    new Actuator(shape: "Field", pattern: AttackPattern.Aura)),
                 isCarrier: true, attackMethod: true, attackFamily: "Aura",
                 description: "攻击方式：身体周围一圈压差，进圈就伤。"),
             ["org_orbitcilia"] = new OrganelleDef("org_orbitcilia", "纤毛环带", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/orbitcilia", () => new CompositeModule("orbitcilia_attack", "纤毛环带攻击",
-                    new OrbitSpin(180f), new Scatterer(2), new Actuator(pattern: AttackPattern.Orbit)),
+                    new OrbitSpin(P("org_orbitcilia").OrbitSpeed), new Scatterer(P("org_orbitcilia").ScattererCount),
+                    new Actuator(pattern: AttackPattern.Orbit)),
                 isCarrier: true, attackMethod: true, attackFamily: "Orbit",
                 description: "攻击方式：两枚体绕身旋转打人（圣经感）。"),
             // SummonId 复用现有 Luban BehaviorArchetype 行，避免新加内容表：13=孢子仆从索敌（跟随+近战，
             // 最接近"跟随近战"）；15=菌丝体固着（R6 锁定，供 org_mycelium 沿用）。
             ["org_bud"] = new OrganelleDef("org_bud", "芽殖体", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/bud", () => new CompositeModule("bud_attack", "芽殖体攻击",
-                    new SummonModule(summonId: 13, count: 1), new Actuator(shape: "Spore", pattern: AttackPattern.SummonFollow)),
+                    new SummonModule(summonId: 13, count: P("org_bud").SummonCount),
+                    new Actuator(shape: "Spore", pattern: AttackPattern.SummonFollow)),
                 isCarrier: true, attackMethod: true, attackFamily: "SummonFollow",
                 description: "攻击方式：长出一个跟随的芽体帮你撞/咬（CATALOG-v3 §A 吸收旧孢子云/噬菌体召唤语义，" +
                     "游荡/追爆差异改由基因表达，Summon archetype 仍可用）。"),
             ["org_mycelium"] = new OrganelleDef("org_mycelium", "菌丝锚", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/mycelium", () => new CompositeModule("mycelium_attack", "菌丝锚攻击",
-                    new SummonModule(summonId: 15, count: 1), new Actuator(shape: "Spore", pattern: AttackPattern.SummonAnchor)),
+                    new SummonModule(summonId: 15, count: P("org_mycelium").SummonCount),
+                    new Actuator(shape: "Spore", pattern: AttackPattern.SummonAnchor)),
                 isCarrier: true, attackMethod: true, attackFamily: "SummonAnchor",
                 description: "攻击方式：钉一根菌丝炮台，定点打附近。"),
             // ── organ-gene-rebalance-v3 story-002（CATALOG-v3 §C）：以下 12 条退役，特性迁 gene_*，
@@ -260,7 +278,9 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
                 description: "已退役，效果迁 org_emitter + gene_spindle + gene_fan（CATALOG-v3 §C）。"),
             ["org_pseudopod"] = new OrganelleDef("org_pseudopod", "伪足拍", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/pseudopod", () => new CompositeModule("pseudopod_attack", "伪足拍攻击",
-                    new SpreadModule(70f), new KnockbackModule(4f), new Actuator(shape: "Melee", pattern: AttackPattern.Cone)),
+                    new SpreadModule(P("org_pseudopod").SpreadAngle),
+                    new KnockbackModule(P("org_pseudopod").KnockbackForce),
+                    new Actuator(shape: "Melee", pattern: AttackPattern.Cone)),
                 isCarrier: true, attackMethod: true, attackFamily: "Cone",
                 description: "攻击方式：身前宽拍并击退。"),
             ["org_hook"] = new OrganelleDef("org_hook", "钩足", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
@@ -291,7 +311,9 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
                 description: "已退役，召唤语义并入 org_bud；效果迁 org_bud + gene_apoptosis + gene_taxis（CATALOG-v3 §C）。"),
             ["org_drill"] = new OrganelleDef("org_drill", "纤毛钻", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/drill", () => new CompositeModule("drill_attack", "纤毛钻攻击",
-                    new BallisticsModule(speed: 2.2f, lifetime: 0.25f), new PierceModule(2),
+                    new BallisticsModule(speed: P("org_drill").BallisticsSpeed,
+                        lifetime: P("org_drill").BallisticsLifetime),
+                    new PierceModule(P("org_drill").PierceCount),
                     new Actuator(shape: "Melee", pattern: AttackPattern.Dash)),
                 isCarrier: true, attackMethod: true, attackFamily: "Dash",
                 description: "攻击方式：短冲刺，路径上穿刺。"),
@@ -300,7 +322,8 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
             // 180° 弧默认可被基因改（gene_ripple/gene_fan 等，005/006 接线）。
             ["org_wave"] = new OrganelleDef("org_wave", "波形器", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/wave", () => new CompositeModule("wave_attack", "波形器攻击",
-                    new SpreadModule(180f), new Grow(1.5f), new Actuator(shape: "Wave", pattern: AttackPattern.Wave)),
+                    new SpreadModule(P("org_wave").SpreadAngle), new Grow(P("org_wave").GrowScale),
+                    new Actuator(shape: "Wave", pattern: AttackPattern.Wave)),
                 isCarrier: true, attackMethod: true, attackFamily: "Wave",
                 description: "攻击方式：朝面向打出可扩散的新月波（合并旧钙波环+胞质浪几何身份，180° 弧默认可被基因改）。"),
             ["org_trail"] = new OrganelleDef("org_trail", "粘液腺", OrganelleRole.Sink, OrganelleAttachTarget.Slot,

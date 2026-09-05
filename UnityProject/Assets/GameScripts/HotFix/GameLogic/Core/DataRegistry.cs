@@ -29,6 +29,11 @@ namespace GameLogic.Core
         private readonly List<EcoEventSpec> _ecoEvents = new List<EcoEventSpec>(20);
         private readonly List<BehaviorArchetype> _archetypes = new List<BehaviorArchetype>(12);
         private readonly Dictionary<int, List<BossPhaseSpec>> _bossPhases = new Dictionary<int, List<BossPhaseSpec>>(4);
+        private readonly Dictionary<string, OrganModuleParamsSpec> _organModuleParams =
+            new Dictionary<string, OrganModuleParamsSpec>(16);
+
+        /// <summary>查无此行时返回的空参数（全 0 = ComposeEngine 各模块的构造默认值）。</summary>
+        private static readonly OrganModuleParamsSpec EmptyOrganModuleParams = new OrganModuleParamsSpec();
 
         private readonly List<CardSpec> _cardList = new List<CardSpec>(160);
         private readonly List<AbilitySpec> _abilityList = new List<AbilitySpec>(32);
@@ -46,6 +51,8 @@ namespace GameLogic.Core
         public IReadOnlyList<EcoEventSpec> EcoEvents => _ecoEvents;
         public IReadOnlyList<BehaviorArchetype> Archetypes => _archetypes;
         public GlobalSpec Global { get; private set; } = new GlobalSpec();
+        /// <summary>gene-organ-universal-reaction story-006：攻击器官 CreateModule 的构造参数表出口。</summary>
+        public IReadOnlyDictionary<string, OrganModuleParamsSpec> OrganModuleParams => _organModuleParams;
 
         public void Load()
         {
@@ -75,6 +82,14 @@ namespace GameLogic.Core
                 TEngine.Log.Warning("[DataRegistry] 使用内置兜底内容（cell.* 配置表未就绪）。");
             }
 
+            // story-006：器官模块参数缺表会让弹速/角度等静默变 0（攻击直接失效），
+            // 所以不管走哪条路径，空了就补内置兜底，不允许带着空表继续。
+            if (_organModuleParams.Count == 0)
+            {
+                CellContentSeed.SeedOrganModuleParams(this);
+                TEngine.Log.Warning("[DataRegistry] OrganModuleParams 表为空，已回落内置器官模块参数。");
+            }
+
             Validate();
             Loaded = true;
         }
@@ -100,6 +115,7 @@ namespace GameLogic.Core
             _ecoEvents.Clear();
             _archetypes.Clear();
             _bossPhases.Clear();
+            _organModuleParams.Clear();
             Global = new GlobalSpec();
             Loaded = false;
             UsingFallback = false;
@@ -160,6 +176,15 @@ namespace GameLogic.Core
             }
         }
 
+        /// <summary>注册器官模块构造参数（story-006）。同 id 先到先得。</summary>
+        public void AddOrganModuleParams(OrganModuleParamsSpec spec)
+        {
+            if (spec != null && !string.IsNullOrEmpty(spec.Id) && !_organModuleParams.ContainsKey(spec.Id))
+            {
+                _organModuleParams[spec.Id] = spec;
+            }
+        }
+
         /// <summary>注册首领阶段。同一首领的多个阶段按 BossEnemyId 分组。</summary>
         public void AddBossPhase(BossPhaseSpec spec)
         {
@@ -187,6 +212,22 @@ namespace GameLogic.Core
         public CardSpec GetCard(int id) => _cards.TryGetValue(id, out CardSpec c) ? c : null;
         public AbilitySpec GetAbility(int id) => _abilities.TryGetValue(id, out AbilitySpec a) ? a : null;
         public EnemySpec GetEnemy(int id) => _enemies.TryGetValue(id, out EnemySpec e) ? e : null;
+
+        /// <summary>
+        /// 取器官的模块构造参数（story-006）。器官目录的 CreateModule 是延迟求值的 lambda，
+        /// 可能早于显式 <see cref="Load"/> 被调用（DebugTools 探针/编辑器），故这里兜一次懒加载——
+        /// 否则会拿到全 0 参数，弹速/角度归零而不报错。
+        /// </summary>
+        public OrganModuleParamsSpec GetOrganModuleParams(string id)
+        {
+            if (!Loaded)
+            {
+                Load();
+            }
+            return id != null && _organModuleParams.TryGetValue(id, out OrganModuleParamsSpec s)
+                ? s
+                : EmptyOrganModuleParams;
+        }
 
         public PhaseSpec GetPhase(int index)
         {
@@ -415,5 +456,44 @@ namespace GameLogic.Core
     public sealed class GlobalSpec
     {
         public int ObstacleCount = 14;
+    }
+
+    /// <summary>
+    /// 攻击器官 CreateModule 的构造参数，对应 cell.OrganModuleParams 表
+    /// （gene-organ-universal-reaction story-006）。
+    ///
+    /// 一行覆盖一个器官用到的全部模块参数，用不到的列恒 0（= ComposeEngine 各模块的构造默认值）。
+    /// "接哪个模块类型 / 组合顺序"仍留在 <see cref="MetabolicSlice.ContentCatalog.OrganelleCatalog"/>
+    /// 代码里，只有数字搬到表；SummonModule.summonId 是指向 BehaviorArchetype 的内容引用，不进本表。
+    /// </summary>
+    public sealed class OrganModuleParamsSpec
+    {
+        public string Id;
+        /// <summary>BallisticsModule.speed。</summary>
+        public float BallisticsSpeed;
+        /// <summary>BallisticsModule.lifetime（秒）。</summary>
+        public float BallisticsLifetime;
+        /// <summary>SpreadModule.angleDegrees。</summary>
+        public float SpreadAngle;
+        /// <summary>Thorns.reflectDamage。</summary>
+        public float ReflectDamage;
+        /// <summary>TickModule.ratePerSecond。</summary>
+        public float TickRate;
+        /// <summary>LingerModule.seconds。</summary>
+        public float LingerSeconds;
+        /// <summary>AuraModule.radius。</summary>
+        public float AuraRadius;
+        /// <summary>OrbitSpin.angularSpeed。</summary>
+        public float OrbitSpeed;
+        /// <summary>Scatterer.baseCount。</summary>
+        public int ScattererCount;
+        /// <summary>KnockbackModule.amount。</summary>
+        public float KnockbackForce;
+        /// <summary>PierceModule.count。</summary>
+        public int PierceCount;
+        /// <summary>Grow.baseGrowRate。</summary>
+        public float GrowScale;
+        /// <summary>SummonModule.count。</summary>
+        public int SummonCount;
     }
 }

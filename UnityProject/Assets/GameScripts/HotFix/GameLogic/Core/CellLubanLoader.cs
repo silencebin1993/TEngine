@@ -46,6 +46,7 @@ namespace GameLogic.Core
             LoadPhases(reg, tables);
             LoadEcoEvents(reg, tables);
             LoadGlobal(reg, tables);
+            LoadOrganModuleParams(reg, tables);
             return true;
         }
 
@@ -348,6 +349,33 @@ namespace GameLogic.Core
             {
                 ObstacleCount = g.ObstacleCount,
             });
+        }
+
+        /// <summary>story-006：攻击器官 CreateModule 的构造参数。表为空时由 DataRegistry.Load 回落内置兜底。</summary>
+        private static void LoadOrganModuleParams(DataRegistry reg, GameConfig.Tables t)
+        {
+            var list = t.TbOrganModuleParams.DataList;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var p = list[i];
+                reg.AddOrganModuleParams(new OrganModuleParamsSpec
+                {
+                    Id = p.Id,
+                    BallisticsSpeed = p.BallisticsSpeed,
+                    BallisticsLifetime = p.BallisticsLifetime,
+                    SpreadAngle = p.SpreadAngle,
+                    ReflectDamage = p.ReflectDamage,
+                    TickRate = p.TickRate,
+                    LingerSeconds = p.LingerSeconds,
+                    AuraRadius = p.AuraRadius,
+                    OrbitSpeed = p.OrbitSpeed,
+                    ScattererCount = p.ScattererCount,
+                    KnockbackForce = p.KnockbackForce,
+                    PierceCount = p.PierceCount,
+                    GrowScale = p.GrowScale,
+                    SummonCount = p.SummonCount,
+                });
+            }
         }
 
         /// <summary>AbilityEffect 与 CardEffect 字段同构，各自转一次。</summary>

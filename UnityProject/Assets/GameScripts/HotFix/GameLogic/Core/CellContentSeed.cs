@@ -42,9 +42,37 @@ namespace GameLogic.Core
             EcoEvents(reg);
             BossPhases(reg);
             Global(reg);
+            SeedOrganModuleParams(reg);
         }
 
         private static void Global(DataRegistry reg) => reg.SetGlobal(new GlobalSpec { ObstacleCount = 14 });
+
+        /// <summary>
+        /// story-006：cell.OrganModuleParams 表的内置兜底副本，逐值与表一致
+        /// （表是唯一权威，改数值请改 tools/cell_tables/step2_small.py 的 ORGAN_MODULE_PARAM_ROWS 并重跑导表）。
+        /// 用不到的参数留 0 = ComposeEngine 各模块的构造默认值。
+        /// </summary>
+        internal static void SeedOrganModuleParams(DataRegistry reg)
+        {
+            reg.AddOrganModuleParams(new OrganModuleParamsSpec { Id = "org_emitter", BallisticsSpeed = 1.3f });
+            reg.AddOrganModuleParams(new OrganModuleParamsSpec { Id = "org_cilia", SpreadAngle = 40f });
+            reg.AddOrganModuleParams(new OrganModuleParamsSpec { Id = "org_spine", ReflectDamage = 6f });
+            reg.AddOrganModuleParams(new OrganModuleParamsSpec
+                { Id = "org_lensbeam", BallisticsSpeed = 1f, BallisticsLifetime = 0.35f, TickRate = 10f });
+            reg.AddOrganModuleParams(new OrganModuleParamsSpec
+                { Id = "org_enzyme", LingerSeconds = 4f, TickRate = 1f });
+            reg.AddOrganModuleParams(new OrganModuleParamsSpec { Id = "org_osmotic", AuraRadius = 3f });
+            reg.AddOrganModuleParams(new OrganModuleParamsSpec
+                { Id = "org_orbitcilia", OrbitSpeed = 180f, ScattererCount = 2 });
+            reg.AddOrganModuleParams(new OrganModuleParamsSpec { Id = "org_bud", SummonCount = 1 });
+            reg.AddOrganModuleParams(new OrganModuleParamsSpec { Id = "org_mycelium", SummonCount = 1 });
+            reg.AddOrganModuleParams(new OrganModuleParamsSpec
+                { Id = "org_pseudopod", SpreadAngle = 70f, KnockbackForce = 4f });
+            reg.AddOrganModuleParams(new OrganModuleParamsSpec
+                { Id = "org_drill", BallisticsSpeed = 2.2f, BallisticsLifetime = 0.25f, PierceCount = 2 });
+            reg.AddOrganModuleParams(new OrganModuleParamsSpec
+                { Id = "org_wave", SpreadAngle = 180f, GrowScale = 1.5f });
+        }
 
         private static void Archetypes(DataRegistry reg)
         {

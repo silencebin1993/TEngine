@@ -63,6 +63,10 @@ public partial class Tables
     /// </summary>
     public cell.TbLevelCurve TbLevelCurve {get; }
     /// <summary>
+    /// 器官模块参数
+    /// </summary>
+    public cell.TbOrganModuleParams TbOrganModuleParams {get; }
+    /// <summary>
     /// 生态时期
     /// </summary>
     public cell.TbPhase TbPhase {get; }
@@ -130,6 +134,7 @@ public partial class Tables
         TbCellGlobal = new cell.TbCellGlobal(loader("cell_tbcellglobal"));
         TbEcoEvent = new cell.TbEcoEvent(loader("cell_tbecoevent"));
         TbLevelCurve = new cell.TbLevelCurve(loader("cell_tblevelcurve"));
+        TbOrganModuleParams = new cell.TbOrganModuleParams(loader("cell_tborganmoduleparams"));
         TbPhase = new cell.TbPhase(loader("cell_tbphase"));
         TbPressureCurve = new cell.TbPressureCurve(loader("cell_tbpressurecurve"));
         TbStatusEffect = new cell.TbStatusEffect(loader("cell_tbstatuseffect"));
@@ -161,6 +166,7 @@ public partial class Tables
         TbCellGlobal.ResolveRef(this);
         TbEcoEvent.ResolveRef(this);
         TbLevelCurve.ResolveRef(this);
+        TbOrganModuleParams.ResolveRef(this);
         TbPhase.ResolveRef(this);
         TbPressureCurve.ResolveRef(this);
         TbStatusEffect.ResolveRef(this);
