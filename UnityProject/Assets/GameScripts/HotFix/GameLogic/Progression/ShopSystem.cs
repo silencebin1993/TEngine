@@ -71,7 +71,18 @@ namespace GameLogic.Progression
         /// <summary>代谢商店触点（story-006）：固定几条常用攻击器官，买后直接进 <see cref="MetabolicSlicePanel"/> 的囊。
         /// combat-identity-rework story-007 之后 org_mito（能量核心，硬禁进容器）/org_lens（已退役，武器身份拆为
         /// org_lensbeam）不再是合法可装备器官，此处随之换成 org_cilia/org_lensbeam，避免商店发出废件。</summary>
-        private static readonly string[] ShopOrganelleIds = { "org_cilia", "org_lensbeam", "org_emitter", "org_phago" };
+        private static readonly string[] ShopOrganelleIds =
+        {
+            "org_cilia", "org_lensbeam", "org_emitter", "org_phago",
+            "org_carapace", "org_flagellum_boost", "org_thick_membrane", "org_regen_gland",
+            "org_chemoreceptor", "org_efficient_gut", "org_calm_membrane", "org_stamina_sac",
+            "org_thorn_shell", "org_mucus_barrier", "org_scab_plate", "org_oil_gland",
+            "org_static_hide", "org_slime_trail", "org_dash_spore", "org_echo_step",
+            "org_pull_wake", "org_haste_spurt", "org_charged_cilia", "org_blood_vacuole",
+            "org_lyso_core", "org_spore_womb", "org_absorbent_gel", "org_toxin_sac",
+            "org_ichor_gland", "org_light_organ", "org_dark_gill", "org_confusion_spore",
+            "org_pheromone_gland", "org_barrier_node", "org_frost_tendril", "org_gravity_node",
+        };
 
         public const int SlotCount = 3;
         public const float RefreshCost = 8f;
