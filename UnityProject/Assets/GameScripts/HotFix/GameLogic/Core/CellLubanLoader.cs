@@ -45,6 +45,7 @@ namespace GameLogic.Core
             LoadCards(reg, tables);
             LoadPhases(reg, tables);
             LoadEcoEvents(reg, tables);
+            LoadGlobal(reg, tables);
             return true;
         }
 
@@ -331,6 +332,19 @@ namespace GameLogic.Core
                     DraftKind = (DraftKind)(int)ev.DraftKind,
                 });
             }
+        }
+
+        private static void LoadGlobal(DataRegistry reg, GameConfig.Tables t)
+        {
+            var g = t.TbCellGlobal.GetOrDefault(1);
+            if (g == null)
+            {
+                return;
+            }
+            reg.SetGlobal(new GlobalSpec
+            {
+                ObstacleCount = g.ObstacleCount,
+            });
         }
 
         /// <summary>AbilityEffect 与 CardEffect 字段同构，各自转一次。</summary>

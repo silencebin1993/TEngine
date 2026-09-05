@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using BinGames.Sim;
+using GameLogic.Core;
 using Unity.Mathematics;
 // Unity.Mathematics 也有 Random，与 UnityEngine.Random 冲突。本文件要的是后者（同 SpawnDirector 惯例）。
 using Random = UnityEngine.Random;
@@ -9,14 +10,12 @@ namespace GameLogic.Spawning
     /// <summary>
     /// 局内静态障碍布局生成（story-009）。
     ///
-    /// 参数用具名 const 而非表：<c>CellGlobal</c> Luban 表已生成但从未被 DataRegistry 接线（死表），
-    /// 接线是与本 story 无关的独立工作量。布局本身用参数驱动的随机采样生成（非写死坐标数组），
-    /// 满足 AC"禁止写死唯一一张不可调布局"。
+    /// 障碍数量从 <see cref="DataRegistry.Global"/>（CellGlobal.obstacleCount）读取；
+    /// 其余布局参数（半径/间隙/留空/重试次数）仍是具名 const，未迁移到表。
+    /// 布局本身用参数驱动的随机采样生成（非写死坐标数组），满足 AC"禁止写死唯一一张不可调布局"。
     /// </summary>
     public static class ObstacleGenerator
     {
-        // TODO(story-009): 迁到 CellGlobal 表（见 production/session-state/preflight-decisions.md D2）
-        private const int Count = 14;
         private const float MinRadius = 2f;
         private const float MaxRadius = 5f;
         /// <summary>两个障碍边缘之间的最小间隙。</summary>
@@ -28,14 +27,15 @@ namespace GameLogic.Spawning
 
         /// <summary>
         /// 生成布局。候选点落在留空半径内或与已放置障碍重叠（含间隙）则重试；
-        /// 多次失败则放弃该个，允许实际数量 &lt; <see cref="Count"/>。
+        /// 多次失败则放弃该个，允许实际数量 &lt; 目标数量。
         /// </summary>
         public static ObstacleSpec[] Generate(float arenaHalf)
         {
-            var list = new List<ObstacleSpec>(Count);
+            int count = DataRegistry.Instance.Global.ObstacleCount;
+            var list = new List<ObstacleSpec>(count);
             float half = math.max(1f, arenaHalf - EdgeMargin);
 
-            for (int i = 0; i < Count; i++)
+            for (int i = 0; i < count; i++)
             {
                 for (int attempt = 0; attempt < MaxAttemptsPerObstacle; attempt++)
                 {

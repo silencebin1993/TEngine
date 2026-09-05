@@ -44,6 +44,7 @@ public sealed partial class CellGlobal : Luban.BeanBase
         RouteAffinityCap = _buf.ReadFloat();
         SynergyBonusPerMatch = _buf.ReadFloat();
         SynergyBonusCap = _buf.ReadFloat();
+        ObstacleCount = _buf.ReadInt();
     }
 
     public static CellGlobal DeserializeCellGlobal(ByteBuf _buf)
@@ -151,6 +152,10 @@ public sealed partial class CellGlobal : Luban.BeanBase
     /// 联动加成上限
     /// </summary>
     public readonly float SynergyBonusCap;
+    /// <summary>
+    /// 局内静态障碍数量
+    /// </summary>
+    public readonly int ObstacleCount;
    
     public const int __ID__ = -1924036655;
     public override int GetTypeId() => __ID__;
@@ -187,6 +192,7 @@ public sealed partial class CellGlobal : Luban.BeanBase
         + "routeAffinityCap:" + RouteAffinityCap + ","
         + "synergyBonusPerMatch:" + SynergyBonusPerMatch + ","
         + "synergyBonusCap:" + SynergyBonusCap + ","
+        + "obstacleCount:" + ObstacleCount + ","
         + "}";
     }
 }

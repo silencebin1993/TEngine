@@ -41,7 +41,10 @@ namespace GameLogic.Core
             Phases(reg);
             EcoEvents(reg);
             BossPhases(reg);
+            Global(reg);
         }
+
+        private static void Global(DataRegistry reg) => reg.SetGlobal(new GlobalSpec { ObstacleCount = 14 });
 
         private static void Archetypes(DataRegistry reg)
         {

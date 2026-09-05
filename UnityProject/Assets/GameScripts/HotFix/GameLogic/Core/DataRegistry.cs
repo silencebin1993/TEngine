@@ -45,6 +45,7 @@ namespace GameLogic.Core
         public IReadOnlyList<PhaseSpec> Phases => _phases;
         public IReadOnlyList<EcoEventSpec> EcoEvents => _ecoEvents;
         public IReadOnlyList<BehaviorArchetype> Archetypes => _archetypes;
+        public GlobalSpec Global { get; private set; } = new GlobalSpec();
 
         public void Load()
         {
@@ -99,6 +100,7 @@ namespace GameLogic.Core
             _ecoEvents.Clear();
             _archetypes.Clear();
             _bossPhases.Clear();
+            Global = new GlobalSpec();
             Loaded = false;
             UsingFallback = false;
         }
@@ -147,6 +149,14 @@ namespace GameLogic.Core
             if (spec != null)
             {
                 _ecoEvents.Add(spec);
+            }
+        }
+
+        public void SetGlobal(GlobalSpec spec)
+        {
+            if (spec != null)
+            {
+                Global = spec;
             }
         }
 
@@ -399,5 +409,11 @@ namespace GameLogic.Core
         /// <summary>是否直接给一次选卡。</summary>
         public bool GrantsDraft;
         public DraftKind DraftKind = DraftKind.Normal;
+    }
+
+    /// <summary>全局常量定义，对应 CellGlobal 表。</summary>
+    public sealed class GlobalSpec
+    {
+        public int ObstacleCount = 14;
     }
 }
