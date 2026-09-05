@@ -32,8 +32,14 @@ namespace GameLogic.Core
         private readonly Dictionary<string, OrganModuleParamsSpec> _organModuleParams =
             new Dictionary<string, OrganModuleParamsSpec>(16);
 
+        private readonly Dictionary<string, GeneModuleParamsSpec> _geneModuleParams =
+            new Dictionary<string, GeneModuleParamsSpec>(48);
+
         /// <summary>查无此行时返回的空参数（全 0 = ComposeEngine 各模块的构造默认值）。</summary>
         private static readonly OrganModuleParamsSpec EmptyOrganModuleParams = new OrganModuleParamsSpec();
+
+        /// <summary>同上，基因侧的空参数（story-007）。</summary>
+        private static readonly GeneModuleParamsSpec EmptyGeneModuleParams = new GeneModuleParamsSpec();
 
         private readonly List<CardSpec> _cardList = new List<CardSpec>(160);
         private readonly List<AbilitySpec> _abilityList = new List<AbilitySpec>(32);
@@ -53,6 +59,8 @@ namespace GameLogic.Core
         public GlobalSpec Global { get; private set; } = new GlobalSpec();
         /// <summary>gene-organ-universal-reaction story-006：攻击器官 CreateModule 的构造参数表出口。</summary>
         public IReadOnlyDictionary<string, OrganModuleParamsSpec> OrganModuleParams => _organModuleParams;
+        /// <summary>gene-organ-universal-reaction story-007：基因 CreateModule 的构造参数表出口。</summary>
+        public IReadOnlyDictionary<string, GeneModuleParamsSpec> GeneModuleParams => _geneModuleParams;
 
         public void Load()
         {
@@ -90,6 +98,13 @@ namespace GameLogic.Core
                 TEngine.Log.Warning("[DataRegistry] OrganModuleParams 表为空，已回落内置器官模块参数。");
             }
 
+            // story-007：同理，基因模块参数缺表会让追踪强度/留坑秒数等静默变 0（改装静默失效）。
+            if (_geneModuleParams.Count == 0)
+            {
+                CellContentSeed.SeedGeneModuleParams(this);
+                TEngine.Log.Warning("[DataRegistry] GeneModuleParams 表为空，已回落内置基因模块参数。");
+            }
+
             Validate();
             Loaded = true;
         }
@@ -116,6 +131,7 @@ namespace GameLogic.Core
             _archetypes.Clear();
             _bossPhases.Clear();
             _organModuleParams.Clear();
+            _geneModuleParams.Clear();
             Global = new GlobalSpec();
             Loaded = false;
             UsingFallback = false;
@@ -185,6 +201,15 @@ namespace GameLogic.Core
             }
         }
 
+        /// <summary>注册基因模块构造参数（story-007）。同 id 先到先得。</summary>
+        public void AddGeneModuleParams(GeneModuleParamsSpec spec)
+        {
+            if (spec != null && !string.IsNullOrEmpty(spec.Id) && !_geneModuleParams.ContainsKey(spec.Id))
+            {
+                _geneModuleParams[spec.Id] = spec;
+            }
+        }
+
         /// <summary>注册首领阶段。同一首领的多个阶段按 BossEnemyId 分组。</summary>
         public void AddBossPhase(BossPhaseSpec spec)
         {
@@ -227,6 +252,22 @@ namespace GameLogic.Core
             return id != null && _organModuleParams.TryGetValue(id, out OrganModuleParamsSpec s)
                 ? s
                 : EmptyOrganModuleParams;
+        }
+
+        /// <summary>
+        /// 取基因的模块构造参数（story-007）。与 <see cref="GetOrganModuleParams"/> 同款懒加载守卫：
+        /// 基因目录的 CreateModule 也是延迟求值 lambda，可能早于显式 <see cref="Load"/> 被调用，
+        /// 不兜底会静默拿到全 0 参数（追踪强度/留坑秒数归零而不报错）。
+        /// </summary>
+        public GeneModuleParamsSpec GetGeneModuleParams(string id)
+        {
+            if (!Loaded)
+            {
+                Load();
+            }
+            return id != null && _geneModuleParams.TryGetValue(id, out GeneModuleParamsSpec s)
+                ? s
+                : EmptyGeneModuleParams;
         }
 
         public PhaseSpec GetPhase(int index)
@@ -495,5 +536,65 @@ namespace GameLogic.Core
         public float GrowScale;
         /// <summary>SummonModule.count。</summary>
         public int SummonCount;
+    }
+
+    /// <summary>
+    /// 基因 CreateModule 的构造参数，对应 cell.GeneModuleParams 表
+    /// （gene-organ-universal-reaction story-007）。
+    ///
+    /// 一行覆盖一条基因用到的全部模块参数，用不到的列恒 0（= ComposeEngine 各模块的构造默认值）。
+    /// "接哪个模块类型 / 组合顺序"仍留在 <see cref="MetabolicSlice.ContentCatalog.GeneCatalog"/>
+    /// 代码里，只有数字搬到表；TagAttach 的字符串标签是内容/规则选择，不进本表。
+    /// 同语义字段与 <see cref="OrganModuleParamsSpec"/> 共用列名（story-007 Required 1）。
+    /// </summary>
+    public sealed class GeneModuleParamsSpec
+    {
+        public string Id;
+        /// <summary>HomingModule.strength。</summary>
+        public float HomingStrength;
+        /// <summary>SpreadModule.angleDegrees。</summary>
+        public float SpreadAngle;
+        /// <summary>Scatterer.baseCount。</summary>
+        public int ScattererCount;
+        /// <summary>BounceModule.count。</summary>
+        public int BounceCount;
+        /// <summary>PierceModule.count。</summary>
+        public int PierceCount;
+        /// <summary>Grow.baseGrowRate。</summary>
+        public float GrowScale;
+        /// <summary>OrbitSpin.angularSpeed。</summary>
+        public float OrbitSpeed;
+        /// <summary>OrbitRadiusModule.radius。</summary>
+        public float OrbitRadius;
+        /// <summary>EchoModule.delaySeconds。</summary>
+        public float EchoDelay;
+        /// <summary>TrailModule.damage。</summary>
+        public float TrailDamage;
+        /// <summary>LingerModule.seconds。</summary>
+        public float LingerSeconds;
+        /// <summary>ChainModule.targetCount。</summary>
+        public int ChainCount;
+        /// <summary>Capacitor.chargeMult。</summary>
+        public float CapacitorRatio;
+        /// <summary>SplitModule.count。</summary>
+        public int SplitCount;
+        /// <summary>PullModule.strength。</summary>
+        public float PullStrength;
+        /// <summary>BallisticsModule.speed。</summary>
+        public float BallisticsSpeed;
+        /// <summary>BallisticsModule.lifetime（秒）。</summary>
+        public float BallisticsLifetime;
+        /// <summary>BallisticsModule.gravity。</summary>
+        public float BallisticsGravity;
+        /// <summary>TickModule.ratePerSecond。</summary>
+        public float TickRate;
+        /// <summary>RippleModule.ratePerSecond。</summary>
+        public float RippleRate;
+        /// <summary>RhythmModule.ratePerSecond。</summary>
+        public float RhythmRate;
+        /// <summary>CatalystModule.amplifier。</summary>
+        public float CatalystAmplifier;
+        /// <summary>WeaveModule.linkRadius。</summary>
+        public float WeaveRadius;
     }
 }

@@ -59,6 +59,10 @@ public partial class Tables
     /// </summary>
     public cell.TbEcoEvent TbEcoEvent {get; }
     /// <summary>
+    /// 基因模块参数
+    /// </summary>
+    public cell.TbGeneModuleParams TbGeneModuleParams {get; }
+    /// <summary>
     /// 升级曲线
     /// </summary>
     public cell.TbLevelCurve TbLevelCurve {get; }
@@ -133,6 +137,7 @@ public partial class Tables
         TbCellEnemy = new cell.TbCellEnemy(loader("cell_tbcellenemy"));
         TbCellGlobal = new cell.TbCellGlobal(loader("cell_tbcellglobal"));
         TbEcoEvent = new cell.TbEcoEvent(loader("cell_tbecoevent"));
+        TbGeneModuleParams = new cell.TbGeneModuleParams(loader("cell_tbgenemoduleparams"));
         TbLevelCurve = new cell.TbLevelCurve(loader("cell_tblevelcurve"));
         TbOrganModuleParams = new cell.TbOrganModuleParams(loader("cell_tborganmoduleparams"));
         TbPhase = new cell.TbPhase(loader("cell_tbphase"));
@@ -165,6 +170,7 @@ public partial class Tables
         TbCellEnemy.ResolveRef(this);
         TbCellGlobal.ResolveRef(this);
         TbEcoEvent.ResolveRef(this);
+        TbGeneModuleParams.ResolveRef(this);
         TbLevelCurve.ResolveRef(this);
         TbOrganModuleParams.ResolveRef(this);
         TbPhase.ResolveRef(this);

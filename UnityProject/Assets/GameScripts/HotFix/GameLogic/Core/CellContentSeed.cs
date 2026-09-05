@@ -43,6 +43,7 @@ namespace GameLogic.Core
             BossPhases(reg);
             Global(reg);
             SeedOrganModuleParams(reg);
+            SeedGeneModuleParams(reg);
         }
 
         private static void Global(DataRegistry reg) => reg.SetGlobal(new GlobalSpec { ObstacleCount = 14 });
@@ -72,6 +73,59 @@ namespace GameLogic.Core
                 { Id = "org_drill", BallisticsSpeed = 2.2f, BallisticsLifetime = 0.25f, PierceCount = 2 });
             reg.AddOrganModuleParams(new OrganModuleParamsSpec
                 { Id = "org_wave", SpreadAngle = 180f, GrowScale = 1.5f });
+        }
+
+        /// <summary>
+        /// story-007：cell.GeneModuleParams 表的内置兜底副本，逐值与表一致
+        /// （表是唯一权威，改数值请改 tools/cell_tables/step2_small.py 的 GENE_MODULE_PARAM_SPECS 并重跑导表）。
+        /// 用不到的参数留 0 = ComposeEngine 各模块的构造默认值；7 条无数值参数的基因不建行。
+        /// </summary>
+        internal static void SeedGeneModuleParams(DataRegistry reg)
+        {
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_taxis", HomingStrength = 0.85f });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec
+                { Id = "gene_spindle", ScattererCount = 2, SpreadAngle = 30f });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_elastic", BounceCount = 1 });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_tubule", PierceCount = 1 });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_swell", GrowScale = 1.5f });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec
+                { Id = "gene_flagella", OrbitSpeed = 120f, OrbitRadius = 1.5f });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_echo", EchoDelay = 0.4f });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_pyro", TrailDamage = 2f });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_tide", LingerSeconds = 3f });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_volt", ChainCount = 2 });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec
+                { Id = "gene_vacuole", CapacitorRatio = 1.6f, GrowScale = 1.3f });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_golgi", SplitCount = 2 });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_slime", TrailDamage = 1f });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_pull", PullStrength = 0.5f });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_split", SplitCount = 3 });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_mirror", BounceCount = 2 });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_receptor", HomingStrength = 0.5f });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_fan", SpreadAngle = 60f });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec
+                { Id = "gene_vortex", PullStrength = 0.6f, OrbitSpeed = 90f });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_oilfilm", LingerSeconds = 3f });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_sugarfilm", LingerSeconds = 3f });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_acidfilm", LingerSeconds = 3f });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_frostfilm", LingerSeconds = 3f });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec
+                { Id = "gene_harmonic", EchoDelay = 0.4f, ScattererCount = 3 });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_membrane", BounceCount = 2 });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec
+                { Id = "gene_bloomlate", EchoDelay = 0.6f, SplitCount = 3 });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec
+                { Id = "gene_arc", BallisticsSpeed = 1f, BallisticsLifetime = 1.2f, BallisticsGravity = 4f });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_magnet", PullStrength = 0.3f });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_scatterseed", LingerSeconds = 2f });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_ripple", RippleRate = 1f });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_rhythm", RhythmRate = 2f });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_catalyst", CatalystAmplifier = 0.5f });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec { Id = "gene_weave", WeaveRadius = 2f });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec
+                { Id = "gene_drift", SpreadAngle = 20f, TickRate = 3f });
+            reg.AddGeneModuleParams(new GeneModuleParamsSpec
+                { Id = "gene_capillary", LingerSeconds = 3f, GrowScale = 1.2f });
         }
 
         private static void Archetypes(DataRegistry reg)

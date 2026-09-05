@@ -47,6 +47,7 @@ namespace GameLogic.Core
             LoadEcoEvents(reg, tables);
             LoadGlobal(reg, tables);
             LoadOrganModuleParams(reg, tables);
+            LoadGeneModuleParams(reg, tables);
             return true;
         }
 
@@ -374,6 +375,43 @@ namespace GameLogic.Core
                     PierceCount = p.PierceCount,
                     GrowScale = p.GrowScale,
                     SummonCount = p.SummonCount,
+                });
+            }
+        }
+
+        /// <summary>story-007：基因 CreateModule 的构造参数。表为空时由 DataRegistry.Load 回落内置兜底。</summary>
+        private static void LoadGeneModuleParams(DataRegistry reg, GameConfig.Tables t)
+        {
+            var list = t.TbGeneModuleParams.DataList;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var p = list[i];
+                reg.AddGeneModuleParams(new GeneModuleParamsSpec
+                {
+                    Id = p.Id,
+                    HomingStrength = p.HomingStrength,
+                    SpreadAngle = p.SpreadAngle,
+                    ScattererCount = p.ScattererCount,
+                    BounceCount = p.BounceCount,
+                    PierceCount = p.PierceCount,
+                    GrowScale = p.GrowScale,
+                    OrbitSpeed = p.OrbitSpeed,
+                    OrbitRadius = p.OrbitRadius,
+                    EchoDelay = p.EchoDelay,
+                    TrailDamage = p.TrailDamage,
+                    LingerSeconds = p.LingerSeconds,
+                    ChainCount = p.ChainCount,
+                    CapacitorRatio = p.CapacitorRatio,
+                    SplitCount = p.SplitCount,
+                    PullStrength = p.PullStrength,
+                    BallisticsSpeed = p.BallisticsSpeed,
+                    BallisticsLifetime = p.BallisticsLifetime,
+                    BallisticsGravity = p.BallisticsGravity,
+                    TickRate = p.TickRate,
+                    RippleRate = p.RippleRate,
+                    RhythmRate = p.RhythmRate,
+                    CatalystAmplifier = p.CatalystAmplifier,
+                    WeaveRadius = p.WeaveRadius,
                 });
             }
         }
