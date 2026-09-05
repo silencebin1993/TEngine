@@ -1128,6 +1128,18 @@ namespace GameLogic.Stage.CellStage
                     }
                 }
             }
+            else if (spec.ContentKind == ContentKind.Structural)
+            {
+                MetabolicSlicePanel panel = MetabolicSlicePanel.Instance;
+                if (panel != null)
+                {
+                    var part = new PartInstance(System.Guid.NewGuid().ToString("N"), spec.ContentId, PartLocation.Bag());
+                    if (panel.AddOrganPart(part) == AddResult.NeedDecision)
+                    {
+                        TEngine.Log.Warning($"[CellStageFlow] 囊已满，抽到的结构器官 {spec.ContentId} 未能入囊");
+                    }
+                }
+            }
             else if (spec.ContentKind == ContentKind.Gene)
             {
                 MetabolicSlicePanel.Instance?.AddGene(spec.ContentId);

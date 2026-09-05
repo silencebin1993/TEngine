@@ -48,6 +48,8 @@ namespace GameLogic.Cards
         None = 0,
         Organelle = 1,
         Gene = 2,
+        /// <summary>structural-organ-draft-integration story-001：结构器官壳卡，ContentId 查 OrganelleCatalog（Category=Structural）。</summary>
+        Structural = 3,
     }
 
     /// <summary>

@@ -25,6 +25,10 @@ namespace GameConfig.cell
         /// 基因
         /// </summary>
         Gene = 2,
+        /// <summary>
+        /// 结构器官
+        /// </summary>
+        Structural = 3,
     }
 
 } 

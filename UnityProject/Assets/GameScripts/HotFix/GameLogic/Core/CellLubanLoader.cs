@@ -283,6 +283,9 @@ namespace GameLogic.Core
                     return organelle == null || organelle.IsRetired;
                 case ContentKind.Gene:
                     return GeneCatalog.Get(contentId) == null && GeneCatalog.GetModule(contentId) == null;
+                case ContentKind.Structural:
+                    OrganelleDef structural = OrganelleCatalog.Get(contentId);
+                    return structural == null || structural.Category != OrganelleCategory.Structural || structural.IsRetired;
                 default:
                     return false;
             }
