@@ -47,5 +47,9 @@ namespace GameLogic.MetabolicSlice.Structural
 
         /// <summary>OnMove 的累计位移阈值。</summary>
         public float MoveDistanceThreshold;
+
+        /// <summary>OnKill 基础回血量（血液泡 8）。story-009：改由本字段承载该器官槽位自己的基础值，
+        /// 不再挂全局 StatSheet.KillHeal（避免多件叠加 + 重复结算）。</summary>
+        public float KillHealAmount;
     }
 }

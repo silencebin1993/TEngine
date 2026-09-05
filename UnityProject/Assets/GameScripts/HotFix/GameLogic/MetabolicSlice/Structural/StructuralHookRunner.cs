@@ -213,7 +213,7 @@ namespace GameLogic.MetabolicSlice.Structural
                 if (state.Spec.Kind == TriggerHookKind.OnKill && state.CooldownLeft <= 0f
                     && RollProbability(state.Spec.Probability))
                 {
-                    FireKill(in state.Spec);
+                    FireKill(in state.Spec, state.PartId);
                     if (state.Spec.Cooldown > 0f)
                     {
                         state.CooldownLeft = state.Spec.Cooldown;
@@ -373,18 +373,65 @@ namespace GameLogic.MetabolicSlice.Structural
             ApplyAreaMarks(in spec, pos, includeThornsMark: false, partId);
         }
 
-        private void FireKill(in TriggerHookSpec spec)
+        /// <summary>story-009：基础回血量改读该器官自己的 <see cref="TriggerHookSpec.KillHealAmount"/>
+        /// （不再读全局 StatSheet.KillHeal——那条路径会与 CellDevourSystem 重复结算，已一并删除），
+        /// 再过该槽位的基因链得到最终值，与 003/004/005 同构。</summary>
+        private void FireKill(in TriggerHookSpec spec, string partId)
         {
-            // 复用既有 KillHeal StatId（preflight-decisions.md #4），不新造回复数值口径
             if (_sim == null || _stats == null)
             {
                 return;
             }
-            float heal = _stats.Get(StatId.KillHeal);
+            float baseHeal = spec.KillHealAmount;
+            if (baseHeal <= 0f)
+            {
+                return;
+            }
+            float heal = ResolveKillHeal(baseHeal, partId);
             if (heal > 0f)
             {
                 _sim.HealPlayer(heal, _stats.Get(StatId.MaxHealth));
             }
+        }
+
+        /// <summary>story-009：与 <see cref="ResolveThornsRatio"/> 完全同构——把基础回血量当种子
+        /// <see cref="EnergyCore"/>（003 已验证 EnergyCore 对 Packet.Energy 是从 0 起步的累加，
+        /// 等价赋值种子），组一条「EnergyCore(baseHeal) + 该结构器官槽位里的基因模块链」跑
+        /// <see cref="Engine.NormalizeAssembly"/>，用 FinalPacket.Energy 当最终回血量。
+        /// 拿不到 CarrierRegistry/GeneReserve/Engine/该 partId 对应 CarrierInstance 任一环节时，
+        /// Reject-to-Safe 直接回落 baseHeal。</summary>
+        private float ResolveKillHeal(float baseHeal, string partId)
+        {
+            CarrierRegistry registry = MetabolicSlicePanel.Instance?.CarrierRegistry;
+            GeneReserve reserve = MetabolicSlicePanel.Instance?.GeneReserve;
+            Engine engine = _metabolicBridge?.GetEngine();
+            CarrierInstance carrier = registry?.GetCarrier(partId);
+            if (registry == null || reserve == null || engine == null || carrier == null)
+            {
+                return baseHeal;
+            }
+
+            var chain = new List<IModule> { new EnergyCore(baseHeal) };
+            foreach (CarrierSlot slot in carrier.Slots)
+            {
+                if (string.IsNullOrEmpty(slot.GeneInstanceId))
+                {
+                    continue;
+                }
+                GeneInstance gene = reserve.Find(slot.GeneInstanceId);
+                if (gene == null)
+                {
+                    continue;
+                }
+                System.Func<IModule> createModule = GeneCatalog.GetModule(gene.GeneId);
+                if (createModule == null)
+                {
+                    continue;
+                }
+                chain.Add(createModule());
+            }
+
+            return engine.NormalizeAssembly(chain).FinalPacket.Energy;
         }
 
         private void FireLowHealth(in TriggerHookSpec spec, string partId)

@@ -301,12 +301,9 @@ namespace GameLogic.Stage.CellStage
                 // 均判定一次，紧跟资源结算之后、KillSignal 广播之前（preflight-decisions.md #1）。
                 TryDropStructuralOrgan();
 
-                // 击杀回复
-                float killHeal = _stats?.Get(StatId.KillHeal) ?? 0f;
-                if (killHeal > 0f)
-                {
-                    _sim.HealPlayer(killHeal, _stats.Get(StatId.MaxHealth));
-                }
+                // 击杀回复：gene-organ-universal-reaction story-009 起完全交给 StructuralHookRunner
+                // 的 OnKill 钩子（每件器官读自己的 TriggerHookSpec.KillHealAmount 并过自己的基因链）。
+                // 此处原先直接读全局 StatId.KillHeal 再结算一次，与钩子路径重复结算，已删除。
 
                 if (_stats2 != null)
                 {

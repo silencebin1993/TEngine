@@ -416,11 +416,11 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
                 description: "常驻：移动累计一定距离后自身叠一层电荷，叠满自动对周围放电。"),
 
             // Vital +6
-            // 复用既有 KillHeal StatId（此前无结构器官使用）：StructuralEffects 挂基础回血量，TriggerHook.OnKill 触发实际结算。
+            // gene-organ-universal-reaction story-009：基础回血量改由 TriggerHookSpec.KillHealAmount 承载，
+            // 不再挂全局 StatSheet.KillHeal（旧写法会被 CellDevourSystem + StructuralHookRunner 各结算一次）。
             ["org_blood_vacuole"] = new OrganelleDef("org_blood_vacuole", "血液泡", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/blood_vacuole", null, category: OrganelleCategory.Structural,
-                structuralEffects: new[] { new StatModifier(StatId.KillHeal, ModifierOp.Flat, 8f) },
-                triggerHook: new TriggerHookSpec { Kind = TriggerHookKind.OnKill, Probability = 1f },
+                triggerHook: new TriggerHookSpec { Kind = TriggerHookKind.OnKill, Probability = 1f, KillHealAmount = 8f },
                 description: "常驻：击杀敌人时回复一部分生命。"),
             ["org_lyso_core"] = new OrganelleDef("org_lyso_core", "溶酶核", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/lyso_core", null, category: OrganelleCategory.Structural,
