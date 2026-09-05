@@ -139,7 +139,7 @@ namespace GameLogic.MetabolicSlice.Structural
                     if (state.MoveAccum >= state.Spec.MoveDistanceThreshold)
                     {
                         state.MoveAccum = 0f;
-                        FireMove(in state.Spec, pos);
+                        FireMove(in state.Spec, pos, state.PartId);
                     }
                 }
 
@@ -254,7 +254,7 @@ namespace GameLogic.MetabolicSlice.Structural
                 if (state.TickAccum >= state.Spec.TickRate)
                 {
                     state.TickAccum -= state.Spec.TickRate;
-                    FirePulse(in state.Spec, pos);
+                    FirePulse(in state.Spec, pos, state.PartId);
                 }
 
                 _hooks[sourceId] = state;
@@ -286,7 +286,7 @@ namespace GameLogic.MetabolicSlice.Structural
             }
             // Tag 标记（非反伤器官）仍走既有易伤/异常状态管线；Vulnerable 已按 CATALOG §A 文案
             // 移除，不与真实扣血叠加（preflight-decisions.md #5）。
-            ApplyAreaMarks(in spec, pos, includeThornsMark: false);
+            ApplyAreaMarks(in spec, pos, includeThornsMark: false, partId);
         }
 
         /// <summary>story-003：把 ThornsRatio 当种子 Energy，组一条「EnergyCore(baseRatio) + 该结构器官
@@ -368,9 +368,9 @@ namespace GameLogic.MetabolicSlice.Structural
             return engine.NormalizeAssembly(chain).FinalPacket.Linger;
         }
 
-        private void FireMove(in TriggerHookSpec spec, float2 pos)
+        private void FireMove(in TriggerHookSpec spec, float2 pos, string partId)
         {
-            ApplyAreaMarks(in spec, pos, includeThornsMark: false);
+            ApplyAreaMarks(in spec, pos, includeThornsMark: false, partId);
         }
 
         private void FireKill(in TriggerHookSpec spec)
@@ -398,22 +398,25 @@ namespace GameLogic.MetabolicSlice.Structural
             _status.ApplyTimed(0, SimStatus.Invulnerable, ResolveLingerSeconds(seconds, partId));
         }
 
-        private void FirePulse(in TriggerHookSpec spec, float2 pos)
+        private void FirePulse(in TriggerHookSpec spec, float2 pos, string partId)
         {
-            ApplyAreaMarks(in spec, pos, includeThornsMark: true);
+            ApplyAreaMarks(in spec, pos, includeThornsMark: true, partId);
         }
 
         /// <summary>共用的范围标记落点：ThornsRatio&gt;0 时挂易伤（Thorns/反伤的近似替身，见上方
         /// 实证纠偏说明），Tag 非空时另挂 TagAttach 等价标记。全程只调用 StatusSystem.ApplyTimedArea，
-        /// 不碰 SimBridge.DamageArea/DamageUnit，天然不产出 HitEvent。</summary>
-        private void ApplyAreaMarks(in TriggerHookSpec spec, float2 pos, bool includeThornsMark)
+        /// 不碰 SimBridge.DamageArea/DamageUnit，天然不产出 HitEvent。story-005：标记秒数改走
+        /// <see cref="ResolveLingerSeconds"/>，让 OnMove/PeriodicPulse/OnDamageTaken 三处调用都读该
+        /// 结构器官槽位的基因链结果（preflight-decisions.md #2/#3），半径不模拟。</summary>
+        private void ApplyAreaMarks(in TriggerHookSpec spec, float2 pos, bool includeThornsMark, string partId)
         {
             if (_status == null)
             {
                 return;
             }
             float radius = spec.LingerRadius > 0f ? spec.LingerRadius : DefaultAreaRadius;
-            float seconds = spec.LingerSeconds > 0f ? spec.LingerSeconds : DefaultMarkSeconds;
+            float baseSeconds = spec.LingerSeconds > 0f ? spec.LingerSeconds : DefaultMarkSeconds;
+            float seconds = ResolveLingerSeconds(baseSeconds, partId);
 
             if (includeThornsMark && spec.ThornsRatio > 0f)
             {
