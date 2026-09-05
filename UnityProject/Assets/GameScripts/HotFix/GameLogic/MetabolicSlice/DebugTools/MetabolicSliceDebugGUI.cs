@@ -3,7 +3,6 @@ using ComposeEngine;
 using ComposeEngine.Core;
 using GameLogic.MetabolicSlice.Bag;
 using GameLogic.MetabolicSlice.Combat;
-using GameLogic.MetabolicSlice.Crafting;
 using GameLogic.MetabolicSlice.Grid;
 using GameLogic.MetabolicSlice.Transfer;
 using GameLogic.UI.Common;
@@ -95,10 +94,6 @@ namespace GameLogic.MetabolicSlice.DebugTools
             if (GUILayout.Button("拆边 1→4")) _grid.RemoveEdge(1, 4);
 
             GUILayout.Space(8);
-            if (GUILayout.Button("合成: organ_focus x2 → 升级")) Craft("upgrade_focus");
-            if (GUILayout.Button("合成: organ_focus 拆解腾位")) Craft("dismantle_focus");
-
-            GUILayout.Space(8);
             if (GUILayout.Button("Tick → ComposeEngine")) RunTick();
 
             GUILayout.Space(8);
@@ -120,9 +115,6 @@ namespace GameLogic.MetabolicSlice.DebugTools
 
         private void TryEdge(int from, int to) =>
             Log(_grid.TryAddEdge(from, to) ? $"箭头 {from}->{to} 已画" : $"箭头 {from}->{to} 被拒");
-
-        private void Craft(string recipeId) =>
-            Log(CraftService.Craft(recipeId, _bag).ToString());
 
         private void RunTick()
         {
