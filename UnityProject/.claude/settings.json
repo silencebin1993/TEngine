@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//f/Project/BinGames/.claude/skills/**)",
+      "Read(//f/Project/BinGames/**)"
+    ]
+  }
+}

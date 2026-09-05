@@ -6,11 +6,12 @@
       "Bash(openspec status:*)",
       "Bash(openspec instructions:*)",
       "Bash(msbuild:*)",
-      "Bash(openspec:*)"
+      "Bash(openspec:*)",
+      "Bash(git add *)"
     ]
   },
+  "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "UnityMCP"
-  ],
-  "enableAllProjectMcpServers": true
+  ]
 }
