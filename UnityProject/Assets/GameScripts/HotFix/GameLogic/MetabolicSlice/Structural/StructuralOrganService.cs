@@ -77,7 +77,7 @@ namespace GameLogic.MetabolicSlice.Structural
             // story-010：触发钩子随装备生效启停，照抄 StructuralEffects 紧邻装/卸位置的写法。
             if (def.TriggerHook.HasValue)
             {
-                hookRunner?.RegisterHook(part.RuntimeSourceId, def.TriggerHook.Value);
+                hookRunner?.RegisterHook(part.RuntimeSourceId, part.PartId, def.TriggerHook.Value);
             }
 
             slots.IncrementVersion();

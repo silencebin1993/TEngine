@@ -348,7 +348,7 @@ namespace GameLogic.Stage.CellStage
             _wallet.Bind(_stats);
             _progression.Bind(_wallet);
             _cards.Bind(_deck, _abilities, _sim, _stats);
-            _structuralHooks.Bind(_sim, _stats, _status);
+            _structuralHooks.Bind(_sim, _stats, _status, _metabolicBridge);
             _director.Bind(_sim, _stats, _deck);
             _timeline.Bind(_director);
             _events.Bind(_director, _timeline, _progression, _wallet);

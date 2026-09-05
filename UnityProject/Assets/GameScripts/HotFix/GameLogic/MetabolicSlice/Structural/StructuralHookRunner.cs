@@ -1,8 +1,15 @@
 using System.Collections.Generic;
 using BinGames.Sim;
+using ComposeEngine;
+using ComposeEngine.Builtin.Modules;
+using ComposeEngine.Core;
 using GameLogic.Battle;
 using GameLogic.Core;
+using GameLogic.MetabolicSlice.Carrier;
+using GameLogic.MetabolicSlice.Combat;
+using GameLogic.MetabolicSlice.ContentCatalog;
 using GameLogic.Stats;
+using GameLogic.UI.Battle;
 using Unity.Mathematics;
 using UnityEngine;
 
@@ -27,6 +34,7 @@ namespace GameLogic.MetabolicSlice.Structural
         private struct HookState
         {
             public TriggerHookSpec Spec;
+            public string PartId;
             public float MoveAccum;
             public float TickAccum;
             public float CooldownLeft;
@@ -46,6 +54,7 @@ namespace GameLogic.MetabolicSlice.Structural
         private SimBridge _sim;
         private StatSheet _stats;
         private StatusSystem _status;
+        private MetabolicSliceBridge _metabolicBridge;
         private SignalScope _scope;
 
         private float2 _lastPlayerPos;
@@ -54,11 +63,12 @@ namespace GameLogic.MetabolicSlice.Structural
         /// <summary>当前生效钩子数，供 execute_code 验收断言用。</summary>
         public int ActiveCount => _hooks.Count;
 
-        public void Bind(SimBridge sim, StatSheet stats, StatusSystem status)
+        public void Bind(SimBridge sim, StatSheet stats, StatusSystem status, MetabolicSliceBridge metabolicBridge)
         {
             _sim = sim;
             _stats = stats;
             _status = status;
+            _metabolicBridge = metabolicBridge;
         }
 
         public override void OnEnter()
@@ -79,10 +89,12 @@ namespace GameLogic.MetabolicSlice.Structural
             _hooks.Clear();
         }
 
-        /// <summary>装备生效时调用一次（StructuralOrganService.Equip）。同 sourceId 重复注册直接覆盖。</summary>
-        public void RegisterHook(int sourceId, TriggerHookSpec spec)
+        /// <summary>装备生效时调用一次（StructuralOrganService.Equip）。同 sourceId 重复注册直接覆盖。
+        /// story-003：追加 partId（= PartInstance.PartId），供 <see cref="FireDamageTaken"/> 反查
+        /// CarrierRegistry.GetCarrier 时用（sourceId 是 RuntimeSourceId，键类型对不上）。</summary>
+        public void RegisterHook(int sourceId, string partId, TriggerHookSpec spec)
         {
-            _hooks[sourceId] = new HookState { Spec = spec, MoveAccum = 0f, TickAccum = 0f, CooldownLeft = 0f };
+            _hooks[sourceId] = new HookState { Spec = spec, PartId = partId, MoveAccum = 0f, TickAccum = 0f, CooldownLeft = 0f };
         }
 
         /// <summary>卸下时调用一次（StructuralOrganService.Unequip，或 Equip 替换同槽旧件时）。
@@ -160,7 +172,7 @@ namespace GameLogic.MetabolicSlice.Structural
                 {
                     if (state.CooldownLeft <= 0f && RollProbability(state.Spec.Probability))
                     {
-                        FireDamageTaken(in state.Spec, pos, s.Amount);
+                        FireDamageTaken(in state.Spec, pos, s.Amount, state.PartId);
                         if (state.Spec.Cooldown > 0f)
                         {
                             state.CooldownLeft = state.Spec.Cooldown;
@@ -263,17 +275,57 @@ namespace GameLogic.MetabolicSlice.Structural
         /// LogicId 恒 &gt;=0，取负数不会冲突（preflight-decisions.md #3）。</summary>
         internal const int ThornsSourceLogicId = -1;
 
-        private void FireDamageTaken(in TriggerHookSpec spec, float2 pos, float incomingDamage)
+        private void FireDamageTaken(in TriggerHookSpec spec, float2 pos, float incomingDamage, string partId)
         {
             if (spec.ThornsRatio > 0f && _sim != null)
             {
                 float radius = spec.LingerRadius > 0f ? spec.LingerRadius : DefaultAreaRadius;
-                _sim.DamageArea(pos, radius, incomingDamage * spec.ThornsRatio, SimFaction.Hostile,
+                float ratio = ResolveThornsRatio(spec.ThornsRatio, partId);
+                _sim.DamageArea(pos, radius, incomingDamage * ratio, SimFaction.Hostile,
                     sourceLogicId: ThornsSourceLogicId);
             }
             // Tag 标记（非反伤器官）仍走既有易伤/异常状态管线；Vulnerable 已按 CATALOG §A 文案
             // 移除，不与真实扣血叠加（preflight-decisions.md #5）。
             ApplyAreaMarks(in spec, pos, includeThornsMark: false);
+        }
+
+        /// <summary>story-003：把 ThornsRatio 当种子 Energy，组一条「EnergyCore(baseRatio) + 该结构器官
+        /// 槽位里的基因模块链」跑 <see cref="Engine.NormalizeAssembly"/>，用运行完的 FinalPacket.Energy
+        /// 重算反伤倍率——让荆棘壳的反伤真的读结构器官槽位里装的基因（preflight-decisions.md #7）。
+        /// 拿不到 CarrierRegistry/GeneReserve/Engine/该 partId 对应 CarrierInstance 任一环节时，
+        /// Reject-to-Safe 直接回落 baseRatio，行为等价 story-002 之前（Required 5）。</summary>
+        private float ResolveThornsRatio(float baseRatio, string partId)
+        {
+            CarrierRegistry registry = MetabolicSlicePanel.Instance?.CarrierRegistry;
+            GeneReserve reserve = MetabolicSlicePanel.Instance?.GeneReserve;
+            Engine engine = _metabolicBridge?.GetEngine();
+            CarrierInstance carrier = registry?.GetCarrier(partId);
+            if (registry == null || reserve == null || engine == null || carrier == null)
+            {
+                return baseRatio;
+            }
+
+            var chain = new List<IModule> { new EnergyCore(baseRatio) };
+            foreach (CarrierSlot slot in carrier.Slots)
+            {
+                if (string.IsNullOrEmpty(slot.GeneInstanceId))
+                {
+                    continue;
+                }
+                GeneInstance gene = reserve.Find(slot.GeneInstanceId);
+                if (gene == null)
+                {
+                    continue;
+                }
+                System.Func<IModule> createModule = GeneCatalog.GetModule(gene.GeneId);
+                if (createModule == null)
+                {
+                    continue;
+                }
+                chain.Add(createModule());
+            }
+
+            return engine.NormalizeAssembly(chain).FinalPacket.Energy;
         }
 
         private void FireMove(in TriggerHookSpec spec, float2 pos)
