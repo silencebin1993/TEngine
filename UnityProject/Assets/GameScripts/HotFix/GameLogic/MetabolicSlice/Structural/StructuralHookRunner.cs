@@ -183,7 +183,7 @@ namespace GameLogic.MetabolicSlice.Structural
                 {
                     if (s.HealthPercent <= state.Spec.LowHealthThreshold && state.CooldownLeft <= 0f)
                     {
-                        FireLowHealth(in state.Spec);
+                        FireLowHealth(in state.Spec, state.PartId);
                         state.CooldownLeft = state.Spec.Cooldown > 0f ? state.Spec.Cooldown : DefaultLowHealthCooldown;
                     }
                 }
@@ -328,6 +328,46 @@ namespace GameLogic.MetabolicSlice.Structural
             return engine.NormalizeAssembly(chain).FinalPacket.Energy;
         }
 
+        /// <summary>story-004：与 <see cref="ResolveThornsRatio"/> 同构——把低血量无敌秒数当种子
+        /// LingerModule（LingerModule.Step 是整段赋值，不是累加，见 preflight-decisions.md #3），
+        /// 组一条「LingerModule(baseSeconds) + 该结构器官槽位里的基因模块链」跑
+        /// <see cref="Engine.NormalizeAssembly"/>，用运行完的 FinalPacket.Linger 重算无敌秒数。
+        /// 拿不到 CarrierRegistry/GeneReserve/Engine/该 partId 对应 CarrierInstance 任一环节时，
+        /// Reject-to-Safe 直接回落 baseSeconds（Required 3）。</summary>
+        private float ResolveLingerSeconds(float baseSeconds, string partId)
+        {
+            CarrierRegistry registry = MetabolicSlicePanel.Instance?.CarrierRegistry;
+            GeneReserve reserve = MetabolicSlicePanel.Instance?.GeneReserve;
+            Engine engine = _metabolicBridge?.GetEngine();
+            CarrierInstance carrier = registry?.GetCarrier(partId);
+            if (registry == null || reserve == null || engine == null || carrier == null)
+            {
+                return baseSeconds;
+            }
+
+            var chain = new List<IModule> { new LingerModule(baseSeconds) };
+            foreach (CarrierSlot slot in carrier.Slots)
+            {
+                if (string.IsNullOrEmpty(slot.GeneInstanceId))
+                {
+                    continue;
+                }
+                GeneInstance gene = reserve.Find(slot.GeneInstanceId);
+                if (gene == null)
+                {
+                    continue;
+                }
+                System.Func<IModule> createModule = GeneCatalog.GetModule(gene.GeneId);
+                if (createModule == null)
+                {
+                    continue;
+                }
+                chain.Add(createModule());
+            }
+
+            return engine.NormalizeAssembly(chain).FinalPacket.Linger;
+        }
+
         private void FireMove(in TriggerHookSpec spec, float2 pos)
         {
             ApplyAreaMarks(in spec, pos, includeThornsMark: false);
@@ -347,7 +387,7 @@ namespace GameLogic.MetabolicSlice.Structural
             }
         }
 
-        private void FireLowHealth(in TriggerHookSpec spec)
+        private void FireLowHealth(in TriggerHookSpec spec, string partId)
         {
             if (_status == null)
             {
@@ -355,7 +395,7 @@ namespace GameLogic.MetabolicSlice.Structural
             }
             // 玩家在内核中恒占索引 0（BinGames.Sim.SimFaction.Player 文档注释）
             float seconds = spec.LingerSeconds > 0f ? spec.LingerSeconds : DefaultLowHealthInvulnSeconds;
-            _status.ApplyTimed(0, SimStatus.Invulnerable, seconds);
+            _status.ApplyTimed(0, SimStatus.Invulnerable, ResolveLingerSeconds(seconds, partId));
         }
 
         private void FirePulse(in TriggerHookSpec spec, float2 pos)
