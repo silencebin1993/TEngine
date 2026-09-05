@@ -41,6 +41,19 @@ namespace GameLogic.Core
         /// <summary>同上，基因侧的空参数（story-007）。</summary>
         private static readonly GeneModuleParamsSpec EmptyGeneModuleParams = new GeneModuleParamsSpec();
 
+        private readonly Dictionary<string, StructuralEffectParamsSpec> _structuralEffectParams =
+            new Dictionary<string, StructuralEffectParamsSpec>(16);
+
+        private readonly Dictionary<string, StructuralTriggerHookParamsSpec> _structuralTriggerHookParams =
+            new Dictionary<string, StructuralTriggerHookParamsSpec>(32);
+
+        /// <summary>同上，结构器官常驻被动侧的空参数（story-008，全 0 = 不挂任何 StatModifier）。</summary>
+        private static readonly StructuralEffectParamsSpec EmptyStructuralEffectParams = new StructuralEffectParamsSpec();
+
+        /// <summary>同上，结构器官触发钩子侧的空参数（story-008，全 0 = TriggerHookSpec 各字段默认值）。</summary>
+        private static readonly StructuralTriggerHookParamsSpec EmptyStructuralTriggerHookParams =
+            new StructuralTriggerHookParamsSpec();
+
         private readonly List<CardSpec> _cardList = new List<CardSpec>(160);
         private readonly List<AbilitySpec> _abilityList = new List<AbilitySpec>(32);
         private readonly List<EnemySpec> _enemyList = new List<EnemySpec>(40);
@@ -61,6 +74,11 @@ namespace GameLogic.Core
         public IReadOnlyDictionary<string, OrganModuleParamsSpec> OrganModuleParams => _organModuleParams;
         /// <summary>gene-organ-universal-reaction story-007：基因 CreateModule 的构造参数表出口。</summary>
         public IReadOnlyDictionary<string, GeneModuleParamsSpec> GeneModuleParams => _geneModuleParams;
+        /// <summary>gene-organ-universal-reaction story-008：结构器官常驻被动（StatModifier 数值）表出口。</summary>
+        public IReadOnlyDictionary<string, StructuralEffectParamsSpec> StructuralEffectParams => _structuralEffectParams;
+        /// <summary>gene-organ-universal-reaction story-008：结构器官触发钩子数值表出口。</summary>
+        public IReadOnlyDictionary<string, StructuralTriggerHookParamsSpec> StructuralTriggerHookParams
+            => _structuralTriggerHookParams;
 
         public void Load()
         {
@@ -105,6 +123,19 @@ namespace GameLogic.Core
                 TEngine.Log.Warning("[DataRegistry] GeneModuleParams 表为空，已回落内置基因模块参数。");
             }
 
+            // story-008：同理，结构器官参数缺表会让减伤/反伤/残留秒数等静默变 0（装了没效果）。
+            if (_structuralEffectParams.Count == 0)
+            {
+                CellContentSeed.SeedStructuralEffectParams(this);
+                TEngine.Log.Warning("[DataRegistry] StructuralEffectParams 表为空，已回落内置结构器官被动参数。");
+            }
+
+            if (_structuralTriggerHookParams.Count == 0)
+            {
+                CellContentSeed.SeedStructuralTriggerHookParams(this);
+                TEngine.Log.Warning("[DataRegistry] StructuralTriggerHookParams 表为空，已回落内置结构器官触发参数。");
+            }
+
             Validate();
             Loaded = true;
         }
@@ -132,6 +163,8 @@ namespace GameLogic.Core
             _bossPhases.Clear();
             _organModuleParams.Clear();
             _geneModuleParams.Clear();
+            _structuralEffectParams.Clear();
+            _structuralTriggerHookParams.Clear();
             Global = new GlobalSpec();
             Loaded = false;
             UsingFallback = false;
@@ -210,6 +243,24 @@ namespace GameLogic.Core
             }
         }
 
+        /// <summary>注册结构器官常驻被动参数（story-008）。同 id 先到先得。</summary>
+        public void AddStructuralEffectParams(StructuralEffectParamsSpec spec)
+        {
+            if (spec != null && !string.IsNullOrEmpty(spec.Id) && !_structuralEffectParams.ContainsKey(spec.Id))
+            {
+                _structuralEffectParams[spec.Id] = spec;
+            }
+        }
+
+        /// <summary>注册结构器官触发钩子参数（story-008）。同 id 先到先得。</summary>
+        public void AddStructuralTriggerHookParams(StructuralTriggerHookParamsSpec spec)
+        {
+            if (spec != null && !string.IsNullOrEmpty(spec.Id) && !_structuralTriggerHookParams.ContainsKey(spec.Id))
+            {
+                _structuralTriggerHookParams[spec.Id] = spec;
+            }
+        }
+
         /// <summary>注册首领阶段。同一首领的多个阶段按 BossEnemyId 分组。</summary>
         public void AddBossPhase(BossPhaseSpec spec)
         {
@@ -268,6 +319,38 @@ namespace GameLogic.Core
             return id != null && _geneModuleParams.TryGetValue(id, out GeneModuleParamsSpec s)
                 ? s
                 : EmptyGeneModuleParams;
+        }
+
+        /// <summary>
+        /// 取结构器官的常驻被动数值（story-008）。与 <see cref="GetOrganModuleParams"/> 同款懒加载守卫：
+        /// <see cref="MetabolicSlice.ContentCatalog.OrganelleDef.StructuralEffects"/> 是延迟求值的工厂，
+        /// 可能早于显式 <see cref="Load"/> 被调用（DebugTools 探针/编辑器），不兜底会静默拿到全 0
+        /// （减伤/生命上限归零而不报错）。查无此行返回全 0 的共享空实例。
+        /// </summary>
+        public StructuralEffectParamsSpec GetStructuralEffectParams(string id)
+        {
+            if (!Loaded)
+            {
+                Load();
+            }
+            return id != null && _structuralEffectParams.TryGetValue(id, out StructuralEffectParamsSpec s)
+                ? s
+                : EmptyStructuralEffectParams;
+        }
+
+        /// <summary>
+        /// 取结构器官的触发钩子数值（story-008）。守卫理由同 <see cref="GetStructuralEffectParams"/>：
+        /// 不兜底会让反伤比例/残留秒数/冷却全 0——冷却为 0 的低血量钩子还会退化成每帧触发。
+        /// </summary>
+        public StructuralTriggerHookParamsSpec GetStructuralTriggerHookParams(string id)
+        {
+            if (!Loaded)
+            {
+                Load();
+            }
+            return id != null && _structuralTriggerHookParams.TryGetValue(id, out StructuralTriggerHookParamsSpec s)
+                ? s
+                : EmptyStructuralTriggerHookParams;
         }
 
         public PhaseSpec GetPhase(int index)
@@ -596,5 +679,76 @@ namespace GameLogic.Core
         public float CatalystAmplifier;
         /// <summary>WeaveModule.linkRadius。</summary>
         public float WeaveRadius;
+    }
+
+    /// <summary>
+    /// 结构器官常驻被动（<see cref="Stats.StatModifier"/> 数值），对应 cell.StructuralEffectParams 表
+    /// （gene-organ-universal-reaction story-008）。
+    ///
+    /// 每个用到的 <see cref="Stats.StatId"/> 各一列，列名后缀标出叠加口径（Pct=PctAdd / Flat=Flat）——
+    /// "改哪条属性 / 怎么叠"是类型选择，仍写在
+    /// <see cref="MetabolicSlice.ContentCatalog.OrganelleCatalog"/> 代码里，只有 Value 搬到表。
+    /// 某列为 0 = 该器官不挂这条修正（目录里按 0 就不生成该 StatModifier）。
+    /// 减伤 / 降仇恨天然是负值，原样搬家不取绝对值。
+    /// </summary>
+    public sealed class StructuralEffectParamsSpec
+    {
+        public string Id;
+        /// <summary>StatId.DamageTaken / ModifierOp.PctAdd。</summary>
+        public float DamageTakenPct;
+        /// <summary>StatId.MoveSpeed / ModifierOp.PctAdd。</summary>
+        public float MoveSpeedPct;
+        /// <summary>StatId.MaxHealth / ModifierOp.Flat。</summary>
+        public float MaxHealthFlat;
+        /// <summary>StatId.HealthRegen / ModifierOp.Flat。</summary>
+        public float HealthRegenFlat;
+        /// <summary>StatId.PickupRadius / ModifierOp.PctAdd。</summary>
+        public float PickupRadiusPct;
+        /// <summary>StatId.NutrientGain / ModifierOp.PctAdd。</summary>
+        public float NutrientGainPct;
+        /// <summary>StatId.AggroScale / ModifierOp.PctAdd。</summary>
+        public float AggroScalePct;
+        /// <summary>StatId.StaminaMax / ModifierOp.Flat。</summary>
+        public float StaminaMaxFlat;
+        /// <summary>StatId.StaminaRegen / ModifierOp.PctAdd。</summary>
+        public float StaminaRegenPct;
+        /// <summary>StatId.ShieldMax / ModifierOp.Flat。</summary>
+        public float ShieldMaxFlat;
+        /// <summary>StatId.ShieldRegen / ModifierOp.Flat。</summary>
+        public float ShieldRegenFlat;
+    }
+
+    /// <summary>
+    /// 结构器官触发钩子的数值字段，对应 cell.StructuralTriggerHookParams 表
+    /// （gene-organ-universal-reaction story-008），逐字段对应
+    /// <see cref="MetabolicSlice.Structural.TriggerHookSpec"/> 的 float 成员。
+    ///
+    /// <c>Kind</c>（触发时机）与 <c>Tag</c>（挂哪种 Substance 标记）是行为/内容选择不是数值，
+    /// 不进本表，仍写在 <see cref="MetabolicSlice.ContentCatalog.OrganelleCatalog"/> 代码里。
+    /// 用不到的列恒 0 = TriggerHookSpec 的 struct 默认值。
+    /// </summary>
+    public sealed class StructuralTriggerHookParamsSpec
+    {
+        public string Id;
+        /// <summary>TriggerHookSpec.Probability。</summary>
+        public float Probability;
+        /// <summary>TriggerHookSpec.ThornsRatio。</summary>
+        public float ThornsRatio;
+        /// <summary>TriggerHookSpec.AbsorbRatio。</summary>
+        public float AbsorbRatio;
+        /// <summary>TriggerHookSpec.LingerRadius。</summary>
+        public float LingerRadius;
+        /// <summary>TriggerHookSpec.LingerSeconds。</summary>
+        public float LingerSeconds;
+        /// <summary>TriggerHookSpec.LowHealthThreshold。</summary>
+        public float LowHealthThreshold;
+        /// <summary>TriggerHookSpec.Cooldown。</summary>
+        public float Cooldown;
+        /// <summary>TriggerHookSpec.TickRate。</summary>
+        public float TickRate;
+        /// <summary>TriggerHookSpec.MoveDistanceThreshold。</summary>
+        public float MoveDistanceThreshold;
+        /// <summary>TriggerHookSpec.KillHealAmount（story-009 新增，org_blood_vacuole 用）。</summary>
+        public float KillHealAmount;
     }
 }

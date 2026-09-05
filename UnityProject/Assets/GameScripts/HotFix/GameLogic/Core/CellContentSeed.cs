@@ -44,6 +44,8 @@ namespace GameLogic.Core
             Global(reg);
             SeedOrganModuleParams(reg);
             SeedGeneModuleParams(reg);
+            SeedStructuralEffectParams(reg);
+            SeedStructuralTriggerHookParams(reg);
         }
 
         private static void Global(DataRegistry reg) => reg.SetGlobal(new GlobalSpec { ObstacleCount = 14 });
@@ -126,6 +128,89 @@ namespace GameLogic.Core
                 { Id = "gene_drift", SpreadAngle = 20f, TickRate = 3f });
             reg.AddGeneModuleParams(new GeneModuleParamsSpec
                 { Id = "gene_capillary", LingerSeconds = 3f, GrowScale = 1.2f });
+        }
+
+        /// <summary>
+        /// story-008：cell.StructuralEffectParams 表的内置兜底副本，逐值与表一致
+        /// （表是唯一权威，改数值请改 tools/cell_tables/step2_small.py 的 STRUCTURAL_EFFECT_SPECS 并重跑导表）。
+        /// 用不到的列留 0 = 该器官不挂这条 StatModifier。
+        /// </summary>
+        internal static void SeedStructuralEffectParams(DataRegistry reg)
+        {
+            reg.AddStructuralEffectParams(new StructuralEffectParamsSpec
+                { Id = "org_carapace", DamageTakenPct = -0.12f });
+            reg.AddStructuralEffectParams(new StructuralEffectParamsSpec
+                { Id = "org_flagellum_boost", MoveSpeedPct = 0.12f });
+            reg.AddStructuralEffectParams(new StructuralEffectParamsSpec
+                { Id = "org_thick_membrane", MaxHealthFlat = 32f });
+            reg.AddStructuralEffectParams(new StructuralEffectParamsSpec
+                { Id = "org_regen_gland", HealthRegenFlat = 0.8f });
+            reg.AddStructuralEffectParams(new StructuralEffectParamsSpec
+                { Id = "org_chemoreceptor", PickupRadiusPct = 0.30f });
+            reg.AddStructuralEffectParams(new StructuralEffectParamsSpec
+                { Id = "org_efficient_gut", NutrientGainPct = 0.18f });
+            reg.AddStructuralEffectParams(new StructuralEffectParamsSpec
+                { Id = "org_calm_membrane", AggroScalePct = -0.20f });
+            reg.AddStructuralEffectParams(new StructuralEffectParamsSpec
+                { Id = "org_stamina_sac", StaminaMaxFlat = 25f, StaminaRegenPct = 0.15f });
+            reg.AddStructuralEffectParams(new StructuralEffectParamsSpec
+                { Id = "org_barrier_node", ShieldMaxFlat = 40f, ShieldRegenFlat = 2f });
+        }
+
+        /// <summary>
+        /// story-008：cell.StructuralTriggerHookParams 表的内置兜底副本，逐值与表一致
+        /// （表是唯一权威，改数值请改 tools/cell_tables/step2_small.py 的
+        /// STRUCTURAL_TRIGGER_HOOK_SPECS 并重跑导表）。
+        /// 用不到的列留 0 = TriggerHookSpec 的 struct 默认值；Kind/Tag 不在本表，见 OrganelleCatalog。
+        /// </summary>
+        internal static void SeedStructuralTriggerHookParams(DataRegistry reg)
+        {
+            reg.AddStructuralTriggerHookParams(new StructuralTriggerHookParamsSpec
+                { Id = "org_thorn_shell", Probability = 1f, ThornsRatio = 0.18f });
+            reg.AddStructuralTriggerHookParams(new StructuralTriggerHookParamsSpec
+                { Id = "org_mucus_barrier", Probability = 1f, LingerRadius = 1.5f, LingerSeconds = 3f });
+            reg.AddStructuralTriggerHookParams(new StructuralTriggerHookParamsSpec
+                { Id = "org_scab_plate", Probability = 1f, AbsorbRatio = 0.30f, LingerSeconds = 2f });
+            reg.AddStructuralTriggerHookParams(new StructuralTriggerHookParamsSpec
+                { Id = "org_oil_gland", TickRate = 3f, LingerRadius = 2f, LingerSeconds = 4f });
+            reg.AddStructuralTriggerHookParams(new StructuralTriggerHookParamsSpec
+                { Id = "org_static_hide", Probability = 0.5f, LingerRadius = 2f, LingerSeconds = 2f });
+            reg.AddStructuralTriggerHookParams(new StructuralTriggerHookParamsSpec
+                { Id = "org_slime_trail", MoveDistanceThreshold = 3f, LingerRadius = 1.5f, LingerSeconds = 3f });
+            reg.AddStructuralTriggerHookParams(new StructuralTriggerHookParamsSpec
+                { Id = "org_dash_spore", MoveDistanceThreshold = 4f, LingerRadius = 1.5f, LingerSeconds = 2f });
+            reg.AddStructuralTriggerHookParams(new StructuralTriggerHookParamsSpec
+                { Id = "org_echo_step", MoveDistanceThreshold = 5f, LingerRadius = 1.5f, LingerSeconds = 2f });
+            reg.AddStructuralTriggerHookParams(new StructuralTriggerHookParamsSpec
+                { Id = "org_pull_wake", MoveDistanceThreshold = 3f, LingerRadius = 2f, LingerSeconds = 2f });
+            reg.AddStructuralTriggerHookParams(new StructuralTriggerHookParamsSpec
+                { Id = "org_haste_spurt", LowHealthThreshold = 0.3f, Cooldown = 30f });
+            reg.AddStructuralTriggerHookParams(new StructuralTriggerHookParamsSpec
+                { Id = "org_charged_cilia", TickRate = 4f, LingerRadius = 2.5f, LingerSeconds = 2f });
+            reg.AddStructuralTriggerHookParams(new StructuralTriggerHookParamsSpec
+                { Id = "org_blood_vacuole", Probability = 1f, KillHealAmount = 8f });
+            reg.AddStructuralTriggerHookParams(new StructuralTriggerHookParamsSpec
+                { Id = "org_lyso_core", LowHealthThreshold = 0.3f, Cooldown = 25f });
+            reg.AddStructuralTriggerHookParams(new StructuralTriggerHookParamsSpec
+                { Id = "org_spore_womb", LowHealthThreshold = 0.3f, Cooldown = 999999f, LingerSeconds = 1.5f });
+            reg.AddStructuralTriggerHookParams(new StructuralTriggerHookParamsSpec
+                { Id = "org_absorbent_gel", TickRate = 3f });
+            reg.AddStructuralTriggerHookParams(new StructuralTriggerHookParamsSpec
+                { Id = "org_toxin_sac", Probability = 1f, LingerRadius = 2f, LingerSeconds = 4f });
+            reg.AddStructuralTriggerHookParams(new StructuralTriggerHookParamsSpec
+                { Id = "org_ichor_gland", Probability = 0.25f, LingerRadius = 1.5f, LingerSeconds = 3f });
+            reg.AddStructuralTriggerHookParams(new StructuralTriggerHookParamsSpec
+                { Id = "org_light_organ", TickRate = 3f, LingerRadius = 3f, LingerSeconds = 3f });
+            reg.AddStructuralTriggerHookParams(new StructuralTriggerHookParamsSpec
+                { Id = "org_dark_gill", TickRate = 3f, LingerRadius = 3f, LingerSeconds = 3f });
+            reg.AddStructuralTriggerHookParams(new StructuralTriggerHookParamsSpec
+                { Id = "org_confusion_spore", TickRate = 3f, LingerRadius = 2.5f, LingerSeconds = 3f, ThornsRatio = 0f });
+            reg.AddStructuralTriggerHookParams(new StructuralTriggerHookParamsSpec
+                { Id = "org_pheromone_gland", TickRate = 4f });
+            reg.AddStructuralTriggerHookParams(new StructuralTriggerHookParamsSpec
+                { Id = "org_frost_tendril", Probability = 1f, LingerRadius = 2f, LingerSeconds = 2.5f });
+            reg.AddStructuralTriggerHookParams(new StructuralTriggerHookParamsSpec
+                { Id = "org_gravity_node", TickRate = 3f, LingerRadius = 3f, LingerSeconds = 2f });
         }
 
         private static void Archetypes(DataRegistry reg)

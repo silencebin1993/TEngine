@@ -83,6 +83,14 @@ public partial class Tables
     /// </summary>
     public cell.TbStatusEffect TbStatusEffect {get; }
     /// <summary>
+    /// 结构器官常驻被动
+    /// </summary>
+    public cell.TbStructuralEffectParams TbStructuralEffectParams {get; }
+    /// <summary>
+    /// 结构器官触发钩子
+    /// </summary>
+    public cell.TbStructuralTriggerHookParams TbStructuralTriggerHookParams {get; }
+    /// <summary>
     /// 细胞阶段场地与时间轴
     /// </summary>
     public fp.TbCellArena TbCellArena {get; }
@@ -143,6 +151,8 @@ public partial class Tables
         TbPhase = new cell.TbPhase(loader("cell_tbphase"));
         TbPressureCurve = new cell.TbPressureCurve(loader("cell_tbpressurecurve"));
         TbStatusEffect = new cell.TbStatusEffect(loader("cell_tbstatuseffect"));
+        TbStructuralEffectParams = new cell.TbStructuralEffectParams(loader("cell_tbstructuraleffectparams"));
+        TbStructuralTriggerHookParams = new cell.TbStructuralTriggerHookParams(loader("cell_tbstructuraltriggerhookparams"));
         TbCellArena = new fp.TbCellArena(loader("fp_tbcellarena"));
         TbCreatureArena = new fp.TbCreatureArena(loader("fp_tbcreaturearena"));
         TbEnemy = new fp.TbEnemy(loader("fp_tbenemy"));
@@ -176,6 +186,8 @@ public partial class Tables
         TbPhase.ResolveRef(this);
         TbPressureCurve.ResolveRef(this);
         TbStatusEffect.ResolveRef(this);
+        TbStructuralEffectParams.ResolveRef(this);
+        TbStructuralTriggerHookParams.ResolveRef(this);
         TbCellArena.ResolveRef(this);
         TbCreatureArena.ResolveRef(this);
         TbEnemy.ResolveRef(this);

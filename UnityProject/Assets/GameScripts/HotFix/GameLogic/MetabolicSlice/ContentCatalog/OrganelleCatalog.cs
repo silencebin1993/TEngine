@@ -53,20 +53,57 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
         /// <summary>story-001 Required 1：新分类字段，默认 Attack——不强制回填既有 48 条。</summary>
         public OrganelleCategory Category { get; }
 
+        // gene-organ-universal-reaction story-008：数值来源改成 Luban 表后，这两项**必须**延迟求值。
+        // _defs 是静态字段初始化器，如果在这里就去读 DataRegistry，会撞出
+        // OrganelleCatalog 静态构造 → DataRegistry.Load → CellLubanLoader.LoadCards →
+        // IsRetiredOrUnknownContent → OrganelleCatalog.Get（_defs 仍为 null）的静态初始化环，
+        // 表现是整份 Luban 内容被 catch 掉并静默回落 CellContentSeed。用工厂 + 一次性缓存打断这个环，
+        // 对外的属性类型与语义保持不变（同 CreateModule 的延迟 lambda 口径）。
+        private readonly Func<StatModifier[]> _structuralEffectsFactory;
+        private readonly Func<TriggerHookSpec?> _triggerHookFactory;
+        private StatModifier[] _structuralEffects;
+        private TriggerHookSpec? _triggerHook;
+        private bool _structuralEffectsResolved;
+        private bool _triggerHookResolved;
+
         /// <summary>story-001 Required 2：结构器官的常驻被动加成，复用 GameLogic.Stats.StatModifier，
-        /// 不新造加成结构。非 Structural 分类恒为 null。</summary>
-        public StatModifier[] StructuralEffects { get; }
+        /// 不新造加成结构。非 Structural 分类恒为 null。数值取自 cell.StructuralEffectParams 表
+        /// （story-008），首次读取时求值并缓存。</summary>
+        public StatModifier[] StructuralEffects
+        {
+            get
+            {
+                if (!_structuralEffectsResolved)
+                {
+                    _structuralEffectsResolved = true;
+                    _structuralEffects = _structuralEffectsFactory?.Invoke();
+                }
+                return _structuralEffects;
+            }
+        }
 
         /// <summary>story-009（R4/Preflight D7）：受击/移动/击杀/血量阈值/周期触发的一次性或周期性效果
-        /// （DESIGN §9.6 五种钩子），与 <see cref="StructuralEffects"/> 并存、可同非空。默认 null——
-        /// 本 story 只声明字段，不注册任何 §A2 条目实际赋值（010/011 消费）。</summary>
-        public TriggerHookSpec? TriggerHook { get; }
+        /// （DESIGN §9.6 五种钩子），与 <see cref="StructuralEffects"/> 并存、可同非空。默认 null。
+        /// 数值取自 cell.StructuralTriggerHookParams 表（story-008），Kind/Tag 仍在目录代码里，
+        /// 首次读取时求值并缓存。</summary>
+        public TriggerHookSpec? TriggerHook
+        {
+            get
+            {
+                if (!_triggerHookResolved)
+                {
+                    _triggerHookResolved = true;
+                    _triggerHook = _triggerHookFactory?.Invoke();
+                }
+                return _triggerHook;
+            }
+        }
 
         public OrganelleDef(string id, string displayName, OrganelleRole role, OrganelleAttachTarget attachTarget,
             IEnumerable<SlotType> allowedSlotTypes, string artId, Func<IModule> createModule, bool isCarrier = false,
             bool isRetired = false, string description = "", bool attackMethod = false, string attackFamily = null,
-            OrganelleCategory category = OrganelleCategory.Attack, StatModifier[] structuralEffects = null,
-            TriggerHookSpec? triggerHook = null)
+            OrganelleCategory category = OrganelleCategory.Attack, Func<StatModifier[]> structuralEffects = null,
+            Func<TriggerHookSpec?> triggerHook = null)
         {
             Id = id;
             DisplayName = displayName;
@@ -81,8 +118,8 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
             AttackMethod = attackMethod;
             AttackFamily = attackFamily;
             Category = category;
-            StructuralEffects = structuralEffects;
-            TriggerHook = triggerHook;
+            _structuralEffectsFactory = structuralEffects;
+            _triggerHookFactory = triggerHook;
         }
     }
 
@@ -103,6 +140,45 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
         /// </summary>
         private static GameLogic.Core.OrganModuleParamsSpec P(string organelleId)
             => GameLogic.Core.DataRegistry.Instance.GetOrganModuleParams(organelleId);
+
+        /// <summary>
+        /// gene-organ-universal-reaction story-008：结构器官 <see cref="OrganelleDef.StructuralEffects"/>
+        /// 的数值取自 Luban 表 cell.StructuralEffectParams（经 DataRegistry 门面），
+        /// StatId/ModifierOp（改哪条属性、怎么叠）仍写在下面每条目录条目里。
+        /// 改数值请改 tools/cell_tables/step2_small.py 的 STRUCTURAL_EFFECT_SPECS 并重跑导表。
+        /// </summary>
+        private static GameLogic.Core.StructuralEffectParamsSpec SE(string organelleId)
+            => GameLogic.Core.DataRegistry.Instance.GetStructuralEffectParams(organelleId);
+
+        /// <summary>
+        /// story-008：结构器官 <see cref="OrganelleDef.TriggerHook"/> 的全部 float 字段取自 Luban 表
+        /// cell.StructuralTriggerHookParams，<paramref name="kind"/>（触发时机）与 <paramref name="tag"/>
+        /// （挂哪种 Substance 标记）是行为/内容选择，留在代码里逐条写死。
+        /// 表里查无此行时各字段为 0，与改动前 struct 默认值一致。
+        /// 改数值请改 tools/cell_tables/step2_small.py 的 STRUCTURAL_TRIGGER_HOOK_SPECS 并重跑导表。
+        /// </summary>
+        private static Func<TriggerHookSpec?> Hook(string organelleId, TriggerHookKind kind, string tag = null)
+        {
+            return () =>
+            {
+                var h = GameLogic.Core.DataRegistry.Instance.GetStructuralTriggerHookParams(organelleId);
+                return new TriggerHookSpec
+                {
+                    Kind = kind,
+                    Tag = tag,
+                    Probability = h.Probability,
+                    ThornsRatio = h.ThornsRatio,
+                    AbsorbRatio = h.AbsorbRatio,
+                    LingerRadius = h.LingerRadius,
+                    LingerSeconds = h.LingerSeconds,
+                    LowHealthThreshold = h.LowHealthThreshold,
+                    Cooldown = h.Cooldown,
+                    TickRate = h.TickRate,
+                    MoveDistanceThreshold = h.MoveDistanceThreshold,
+                    KillHealAmount = h.KillHealAmount,
+                };
+            };
+        }
 
         private static readonly Dictionary<string, OrganelleDef> _defs = new Dictionary<string, OrganelleDef>
         {
@@ -352,38 +428,49 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
             // StructuralOrganService.Equip 另行开出，见该类型注释；不影响这里的攻击链判据。
             ["org_carapace"] = new OrganelleDef("org_carapace", "甲壳", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/carapace", null, category: OrganelleCategory.Structural,
-                structuralEffects: new[] { new StatModifier(StatId.DamageTaken, ModifierOp.PctAdd, -0.12f) },
+                structuralEffects: () => new[]
+                    { new StatModifier(StatId.DamageTaken, ModifierOp.PctAdd, SE("org_carapace").DamageTakenPct) },
                 description: "常驻被动：降低受到伤害。"),
             ["org_flagellum_boost"] = new OrganelleDef("org_flagellum_boost", "鞭毛强化", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/flagellum_boost", null, category: OrganelleCategory.Structural,
-                structuralEffects: new[] { new StatModifier(StatId.MoveSpeed, ModifierOp.PctAdd, 0.12f) },
+                structuralEffects: () => new[]
+                    { new StatModifier(StatId.MoveSpeed, ModifierOp.PctAdd, SE("org_flagellum_boost").MoveSpeedPct) },
                 description: "常驻被动：提升移动速度。"),
             ["org_thick_membrane"] = new OrganelleDef("org_thick_membrane", "厚膜", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/thick_membrane", null, category: OrganelleCategory.Structural,
-                structuralEffects: new[] { new StatModifier(StatId.MaxHealth, ModifierOp.Flat, 32f) },
+                structuralEffects: () => new[]
+                    { new StatModifier(StatId.MaxHealth, ModifierOp.Flat, SE("org_thick_membrane").MaxHealthFlat) },
                 description: "常驻被动：提升生命上限。"),
             ["org_regen_gland"] = new OrganelleDef("org_regen_gland", "再生腺", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/regen_gland", null, category: OrganelleCategory.Structural,
-                structuralEffects: new[] { new StatModifier(StatId.HealthRegen, ModifierOp.Flat, 0.8f) },
+                structuralEffects: () => new[]
+                    { new StatModifier(StatId.HealthRegen, ModifierOp.Flat, SE("org_regen_gland").HealthRegenFlat) },
                 description: "常驻被动：提升生命回复。"),
             ["org_chemoreceptor"] = new OrganelleDef("org_chemoreceptor", "化学受体", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/chemoreceptor", null, category: OrganelleCategory.Structural,
-                structuralEffects: new[] { new StatModifier(StatId.PickupRadius, ModifierOp.PctAdd, 0.30f) },
+                structuralEffects: () => new[]
+                    { new StatModifier(StatId.PickupRadius, ModifierOp.PctAdd, SE("org_chemoreceptor").PickupRadiusPct) },
                 description: "常驻被动：扩大拾取半径。"),
             ["org_efficient_gut"] = new OrganelleDef("org_efficient_gut", "高效消化道", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/efficient_gut", null, category: OrganelleCategory.Structural,
-                structuralEffects: new[] { new StatModifier(StatId.NutrientGain, ModifierOp.PctAdd, 0.18f) },
+                structuralEffects: () => new[]
+                    { new StatModifier(StatId.NutrientGain, ModifierOp.PctAdd, SE("org_efficient_gut").NutrientGainPct) },
                 description: "常驻被动：提升营养质获取。"),
             ["org_calm_membrane"] = new OrganelleDef("org_calm_membrane", "镇静膜", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/calm_membrane", null, category: OrganelleCategory.Structural,
-                structuralEffects: new[] { new StatModifier(StatId.AggroScale, ModifierOp.PctAdd, -0.20f) },
+                structuralEffects: () => new[]
+                    { new StatModifier(StatId.AggroScale, ModifierOp.PctAdd, SE("org_calm_membrane").AggroScalePct) },
                 description: "常驻被动：降低敌人仇恨。"),
             ["org_stamina_sac"] = new OrganelleDef("org_stamina_sac", "耐力囊", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/stamina_sac", null, category: OrganelleCategory.Structural,
-                structuralEffects: new[]
+                structuralEffects: () =>
                 {
-                    new StatModifier(StatId.StaminaMax, ModifierOp.Flat, 25f),
-                    new StatModifier(StatId.StaminaRegen, ModifierOp.PctAdd, 0.15f),
+                    var e = SE("org_stamina_sac");
+                    return new[]
+                    {
+                        new StatModifier(StatId.StaminaMax, ModifierOp.Flat, e.StaminaMaxFlat),
+                        new StatModifier(StatId.StaminaRegen, ModifierOp.PctAdd, e.StaminaRegenPct),
+                    };
                 },
                 description: "常驻被动：提升耐力上限与回复。"),
 
@@ -392,50 +479,50 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
             // Armor +5
             ["org_thorn_shell"] = new OrganelleDef("org_thorn_shell", "荆棘壳", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/thorn_shell", null, category: OrganelleCategory.Structural,
-                triggerHook: new TriggerHookSpec { Kind = TriggerHookKind.OnDamageTaken, Probability = 1f, ThornsRatio = 0.18f },
+                triggerHook: Hook("org_thorn_shell", TriggerHookKind.OnDamageTaken),
                 description: "常驻：体表长满倒刺，受到近战接触伤害时反弹 18% 伤害给攻击者。"),
             ["org_mucus_barrier"] = new OrganelleDef("org_mucus_barrier", "粘液壁垒", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/mucus_barrier", null, category: OrganelleCategory.Structural,
-                triggerHook: new TriggerHookSpec { Kind = TriggerHookKind.OnDamageTaken, Probability = 1f, Tag = "Wet", LingerRadius = 1.5f, LingerSeconds = 3f },
+                triggerHook: Hook("org_mucus_barrier", TriggerHookKind.OnDamageTaken, "Wet"),
                 description: "常驻：受伤时从伤口渗出粘液，在脚下铺一圈潮湿地面（半径 1.5，持续 3 秒）。"),
             ["org_scab_plate"] = new OrganelleDef("org_scab_plate", "结痂甲", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/scab_plate", null, category: OrganelleCategory.Structural,
-                triggerHook: new TriggerHookSpec { Kind = TriggerHookKind.OnDamageTaken, Probability = 1f, AbsorbRatio = 0.30f, LingerSeconds = 2f },
+                triggerHook: Hook("org_scab_plate", TriggerHookKind.OnDamageTaken),
                 description: "常驻：受伤后伤口迅速结痂，30% 的伤害转为 2 秒内逐步回复而非立即扣除。"),
             ["org_oil_gland"] = new OrganelleDef("org_oil_gland", "油腺", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/oil_gland", null, category: OrganelleCategory.Structural,
-                triggerHook: new TriggerHookSpec { Kind = TriggerHookKind.PeriodicPulse, TickRate = 3f, Tag = "Oil", LingerRadius = 2f, LingerSeconds = 4f },
+                triggerHook: Hook("org_oil_gland", TriggerHookKind.PeriodicPulse, "Oil"),
                 description: "常驻：体表持续分泌油脂，自身周围地面沾染油污。"),
             ["org_static_hide"] = new OrganelleDef("org_static_hide", "静电皮", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/static_hide", null, category: OrganelleCategory.Structural,
-                triggerHook: new TriggerHookSpec { Kind = TriggerHookKind.OnDamageTaken, Probability = 0.5f, Tag = "Shock", LingerRadius = 2f, LingerSeconds = 2f },
+                triggerHook: Hook("org_static_hide", TriggerHookKind.OnDamageTaken, "Shock"),
                 description: "常驻：受到近战伤害时对攻击者释放静电，附带小范围连锁。"),
 
             // Motility +6
             ["org_slime_trail"] = new OrganelleDef("org_slime_trail", "粘液尾", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/slime_trail", null, category: OrganelleCategory.Structural,
-                triggerHook: new TriggerHookSpec { Kind = TriggerHookKind.OnMove, MoveDistanceThreshold = 3f, Tag = "Slime", LingerRadius = 1.5f, LingerSeconds = 3f },
+                triggerHook: Hook("org_slime_trail", TriggerHookKind.OnMove, "Slime"),
                 description: "常驻：移动时在身后留下黏液场，敌人踩到减速。"),
             // preflight-decisions.md #2：Dash 触发降级为普通 OnMove + MoveDistanceThreshold 近似，不新增 DashSignal。
             ["org_dash_spore"] = new OrganelleDef("org_dash_spore", "冲刺孢子", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/dash_spore", null, category: OrganelleCategory.Structural,
-                triggerHook: new TriggerHookSpec { Kind = TriggerHookKind.OnMove, MoveDistanceThreshold = 4f, Tag = "Spore", LingerRadius = 1.5f, LingerSeconds = 2f },
+                triggerHook: Hook("org_dash_spore", TriggerHookKind.OnMove, "Spore"),
                 description: "常驻：冲刺的起点和终点各留下一朵碰伤孢子云（近似：移动累计触发一次）。"),
             ["org_echo_step"] = new OrganelleDef("org_echo_step", "回声步", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/echo_step", null, category: OrganelleCategory.Structural,
-                triggerHook: new TriggerHookSpec { Kind = TriggerHookKind.OnMove, MoveDistanceThreshold = 5f, Tag = "Echo", LingerRadius = 1.5f, LingerSeconds = 2f },
+                triggerHook: Hook("org_echo_step", TriggerHookKind.OnMove, "Echo"),
                 description: "常驻：冲刺结束后残留动能自动再触发一次短距离标记（近似：移动累计触发一次）。"),
             ["org_pull_wake"] = new OrganelleDef("org_pull_wake", "引力尾流", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/pull_wake", null, category: OrganelleCategory.Structural,
-                triggerHook: new TriggerHookSpec { Kind = TriggerHookKind.OnMove, MoveDistanceThreshold = 3f, Tag = "Pull", LingerRadius = 2f, LingerSeconds = 2f },
+                triggerHook: Hook("org_pull_wake", TriggerHookKind.OnMove, "Pull"),
                 description: "常驻：移动路径后方产生短暂牵引场，把小型敌人往你走过的路径吸。"),
             ["org_haste_spurt"] = new OrganelleDef("org_haste_spurt", "迅捷突发", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/haste_spurt", null, category: OrganelleCategory.Structural,
-                triggerHook: new TriggerHookSpec { Kind = TriggerHookKind.OnLowHealth, LowHealthThreshold = 0.3f, Cooldown = 30f, Tag = "Haste" },
+                triggerHook: Hook("org_haste_spurt", TriggerHookKind.OnLowHealth, "Haste"),
                 description: "常驻：生命低于 30% 时触发一次瞬间提速（长冷却，一次性）。"),
             ["org_charged_cilia"] = new OrganelleDef("org_charged_cilia", "充能纤毛", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/charged_cilia", null, category: OrganelleCategory.Structural,
-                triggerHook: new TriggerHookSpec { Kind = TriggerHookKind.PeriodicPulse, TickRate = 4f, Tag = "Charged", LingerRadius = 2.5f, LingerSeconds = 2f },
+                triggerHook: Hook("org_charged_cilia", TriggerHookKind.PeriodicPulse, "Charged"),
                 description: "常驻：移动累计一定距离后自身叠一层电荷，叠满自动对周围放电。"),
 
             // Vital +6
@@ -443,62 +530,66 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
             // 不再挂全局 StatSheet.KillHeal（旧写法会被 CellDevourSystem + StructuralHookRunner 各结算一次）。
             ["org_blood_vacuole"] = new OrganelleDef("org_blood_vacuole", "血液泡", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/blood_vacuole", null, category: OrganelleCategory.Structural,
-                triggerHook: new TriggerHookSpec { Kind = TriggerHookKind.OnKill, Probability = 1f, KillHealAmount = 8f },
+                triggerHook: Hook("org_blood_vacuole", TriggerHookKind.OnKill),
                 description: "常驻：击杀敌人时回复一部分生命。"),
             ["org_lyso_core"] = new OrganelleDef("org_lyso_core", "溶酶核", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/lyso_core", null, category: OrganelleCategory.Structural,
-                triggerHook: new TriggerHookSpec { Kind = TriggerHookKind.OnLowHealth, LowHealthThreshold = 0.3f, Cooldown = 25f },
+                triggerHook: Hook("org_lyso_core", TriggerHookKind.OnLowHealth),
                 description: "常驻：生命低于 30% 时触发一次小范围净化脉冲，清除自身负面标记（长冷却，一次性）。"),
             ["org_spore_womb"] = new OrganelleDef("org_spore_womb", "孢子胎", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/spore_womb", null, category: OrganelleCategory.Structural,
-                triggerHook: new TriggerHookSpec { Kind = TriggerHookKind.OnLowHealth, LowHealthThreshold = 0.3f, Cooldown = 999999f, LingerSeconds = 1.5f },
+                triggerHook: Hook("org_spore_womb", TriggerHookKind.OnLowHealth),
                 description: "常驻：承受致命伤害时不死一次，转化为 1.5 秒护盾（长冷却，每局限一次）。"),
             ["org_absorbent_gel"] = new OrganelleDef("org_absorbent_gel", "吸收凝胶", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/absorbent_gel", null, category: OrganelleCategory.Structural,
-                triggerHook: new TriggerHookSpec { Kind = TriggerHookKind.PeriodicPulse, TickRate = 3f, Tag = "NutrientGain" },
+                triggerHook: Hook("org_absorbent_gel", TriggerHookKind.PeriodicPulse, "NutrientGain"),
                 description: "常驻：拾取营养质时按比例瞬间回复少量生命。"),
             ["org_toxin_sac"] = new OrganelleDef("org_toxin_sac", "毒囊", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/toxin_sac", null, category: OrganelleCategory.Structural,
-                triggerHook: new TriggerHookSpec { Kind = TriggerHookKind.OnDamageTaken, Probability = 1f, Tag = "Poison", LingerRadius = 2f, LingerSeconds = 4f },
+                triggerHook: Hook("org_toxin_sac", TriggerHookKind.OnDamageTaken, "Poison"),
                 description: "常驻：近战攻击你的敌人会中毒，持续掉血。"),
             ["org_ichor_gland"] = new OrganelleDef("org_ichor_gland", "脓液腺", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/ichor_gland", null, category: OrganelleCategory.Structural,
-                triggerHook: new TriggerHookSpec { Kind = TriggerHookKind.OnDamageTaken, Probability = 0.25f, Tag = "Ichor", LingerRadius = 1.5f, LingerSeconds = 3f },
+                triggerHook: Hook("org_ichor_gland", TriggerHookKind.OnDamageTaken, "Ichor"),
                 description: "常驻：受击时小概率给攻击者附加降防标记。"),
 
             // Appendage +7
             ["org_light_organ"] = new OrganelleDef("org_light_organ", "发光器", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/light_organ", null, category: OrganelleCategory.Structural,
-                triggerHook: new TriggerHookSpec { Kind = TriggerHookKind.PeriodicPulse, TickRate = 3f, Tag = "Light", LingerRadius = 3f, LingerSeconds = 3f },
+                triggerHook: Hook("org_light_organ", TriggerHookKind.PeriodicPulse, "Light"),
                 description: "常驻：自身周围持续发光，光环内敌人仇恨略微降低。"),
             ["org_dark_gill"] = new OrganelleDef("org_dark_gill", "暗鳃", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/dark_gill", null, category: OrganelleCategory.Structural,
-                triggerHook: new TriggerHookSpec { Kind = TriggerHookKind.PeriodicPulse, TickRate = 3f, Tag = "Dark", LingerRadius = 3f, LingerSeconds = 3f },
+                triggerHook: Hook("org_dark_gill", TriggerHookKind.PeriodicPulse, "Dark"),
                 description: "常驻：分泌暗色黏液，光环外不易被远处敌人发现。"),
             // DESIGN §9.6 分类边界红线：只挂 Confused 标记，ThornsRatio 恒 0，不经 SimBridge.Damage*，不产出 HitEvent。
             ["org_confusion_spore"] = new OrganelleDef("org_confusion_spore", "迷乱孢子器", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/confusion_spore", null, category: OrganelleCategory.Structural,
-                triggerHook: new TriggerHookSpec { Kind = TriggerHookKind.PeriodicPulse, TickRate = 3f, Tag = "Confused", LingerRadius = 2.5f, LingerSeconds = 3f, ThornsRatio = 0f },
+                triggerHook: Hook("org_confusion_spore", TriggerHookKind.PeriodicPulse, "Confused"),
                 description: "常驻：周期性向周围释放孢子，给附近敌人打混乱标记（不造成伤害）。"),
             ["org_pheromone_gland"] = new OrganelleDef("org_pheromone_gland", "信息素腺", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/pheromone_gland", null, category: OrganelleCategory.Structural,
-                triggerHook: new TriggerHookSpec { Kind = TriggerHookKind.PeriodicPulse, TickRate = 4f, Tag = "MinionPower" },
+                triggerHook: Hook("org_pheromone_gland", TriggerHookKind.PeriodicPulse, "MinionPower"),
                 description: "常驻：周期性向自己的召唤物释放信息素，提升召唤物强度。"),
             ["org_barrier_node"] = new OrganelleDef("org_barrier_node", "屏障结节", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/barrier_node", null, category: OrganelleCategory.Structural,
-                structuralEffects: new[]
+                structuralEffects: () =>
                 {
-                    new StatModifier(StatId.ShieldMax, ModifierOp.Flat, 40f),
-                    new StatModifier(StatId.ShieldRegen, ModifierOp.Flat, 2f),
+                    var e = SE("org_barrier_node");
+                    return new[]
+                    {
+                        new StatModifier(StatId.ShieldMax, ModifierOp.Flat, e.ShieldMaxFlat),
+                        new StatModifier(StatId.ShieldRegen, ModifierOp.Flat, e.ShieldRegenFlat),
+                    };
                 },
                 description: "常驻：体表结出一层可回复的屏障值，先扣屏障再扣血。"),
             ["org_frost_tendril"] = new OrganelleDef("org_frost_tendril", "霜蔓", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/frost_tendril", null, category: OrganelleCategory.Structural,
-                triggerHook: new TriggerHookSpec { Kind = TriggerHookKind.OnDamageTaken, Probability = 1f, Tag = "Frostbite", LingerRadius = 2f, LingerSeconds = 2.5f },
+                triggerHook: Hook("org_frost_tendril", TriggerHookKind.OnDamageTaken, "Frostbite"),
                 description: "常驻：受击时给攻击者附加减速（只减速，不冻死）。"),
             ["org_gravity_node"] = new OrganelleDef("org_gravity_node", "引力结节", OrganelleRole.Sink, OrganelleAttachTarget.Slot,
                 null, "org/gravity_node", null, category: OrganelleCategory.Structural,
-                triggerHook: new TriggerHookSpec { Kind = TriggerHookKind.PeriodicPulse, TickRate = 3f, Tag = "Pull", LingerRadius = 3f, LingerSeconds = 2f },
+                triggerHook: Hook("org_gravity_node", TriggerHookKind.PeriodicPulse, "Pull"),
                 description: "常驻：对场上掉落物产生持续牵引，自动吸附到身边。"),
         };
 

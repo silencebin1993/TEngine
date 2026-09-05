@@ -48,6 +48,8 @@ namespace GameLogic.Core
             LoadGlobal(reg, tables);
             LoadOrganModuleParams(reg, tables);
             LoadGeneModuleParams(reg, tables);
+            LoadStructuralEffectParams(reg, tables);
+            LoadStructuralTriggerHookParams(reg, tables);
             return true;
         }
 
@@ -412,6 +414,55 @@ namespace GameLogic.Core
                     RhythmRate = p.RhythmRate,
                     CatalystAmplifier = p.CatalystAmplifier,
                     WeaveRadius = p.WeaveRadius,
+                });
+            }
+        }
+
+        /// <summary>story-008：结构器官常驻被动数值。表为空时由 DataRegistry.Load 回落内置兜底。</summary>
+        private static void LoadStructuralEffectParams(DataRegistry reg, GameConfig.Tables t)
+        {
+            var list = t.TbStructuralEffectParams.DataList;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var p = list[i];
+                reg.AddStructuralEffectParams(new StructuralEffectParamsSpec
+                {
+                    Id = p.Id,
+                    DamageTakenPct = p.DamageTakenPct,
+                    MoveSpeedPct = p.MoveSpeedPct,
+                    MaxHealthFlat = p.MaxHealthFlat,
+                    HealthRegenFlat = p.HealthRegenFlat,
+                    PickupRadiusPct = p.PickupRadiusPct,
+                    NutrientGainPct = p.NutrientGainPct,
+                    AggroScalePct = p.AggroScalePct,
+                    StaminaMaxFlat = p.StaminaMaxFlat,
+                    StaminaRegenPct = p.StaminaRegenPct,
+                    ShieldMaxFlat = p.ShieldMaxFlat,
+                    ShieldRegenFlat = p.ShieldRegenFlat,
+                });
+            }
+        }
+
+        /// <summary>story-008：结构器官触发钩子数值。表为空时由 DataRegistry.Load 回落内置兜底。</summary>
+        private static void LoadStructuralTriggerHookParams(DataRegistry reg, GameConfig.Tables t)
+        {
+            var list = t.TbStructuralTriggerHookParams.DataList;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var p = list[i];
+                reg.AddStructuralTriggerHookParams(new StructuralTriggerHookParamsSpec
+                {
+                    Id = p.Id,
+                    Probability = p.Probability,
+                    ThornsRatio = p.ThornsRatio,
+                    AbsorbRatio = p.AbsorbRatio,
+                    LingerRadius = p.LingerRadius,
+                    LingerSeconds = p.LingerSeconds,
+                    LowHealthThreshold = p.LowHealthThreshold,
+                    Cooldown = p.Cooldown,
+                    TickRate = p.TickRate,
+                    MoveDistanceThreshold = p.MoveDistanceThreshold,
+                    KillHealAmount = p.KillHealAmount,
                 });
             }
         }
