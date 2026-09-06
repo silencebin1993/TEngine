@@ -86,6 +86,9 @@ namespace GameLogic.Battle.Feedback
         /// <summary>story-006：枪口 VFX 生命周期——短促一次性闪现，仿 <see cref="BeamIgniteDuration"/> 量级。</summary>
         private const float MuzzleLife = 0.15f;
 
+        /// <summary>combat-primitive-presentation P1：带 "Charged" Tag 的施法枪口停留时长倍数。</summary>
+        private const float ChargedMuzzleLifeMult = 2.5f;
+
         /// <summary>story-006：VFX 池按 <c>shape.{Shape}.{role}</c> 覆盖的四个角色，与 Editor 侧
         /// FeatureArtSlotSync.AddShapeSlots 生成的槽 id 一一对应。</summary>
         private static readonly string[] VfxRoles = { "projectile", "muzzle", "hit", "explode" };
@@ -101,6 +104,17 @@ namespace GameLogic.Battle.Feedback
         // 一眼可见的信号。5 种 Kind 目前统一配色（真实美术阶段可按 Kind 分色，见 story-003 Deferred）。
         private const float StructuralHookLife = 0.35f;
         private static readonly Color StructuralHookColor = new Color(0.4f, 0.9f, 0.85f, 1f);
+
+        // ── combat-primitive-presentation P1：Pierce/Bounce/Split/Return/Linger 命中后延续，此前
+        // TickPendingImpact/TickPendingLinger 只结算数值从不广播，玩家完全看不出这些基元在发生。
+        // 与 StructuralHookColor 同一先例——不追溯原始 Shape，先给每个 Kind 一个固定几何体+专属配色，
+        // 让玩家至少能分辨"这是哪种延续效果"，真实美术阶段再细化。──
+        private const float ChainMarkerLife = 0.22f;
+        private static readonly Color PierceColor = new Color(0.85f, 0.9f, 1f, 1f);      // 淡银蓝，"穿透光"
+        private static readonly Color BounceColor = new Color(1f, 0.75f, 0.15f, 1f);     // 橙黄，"弹开"
+        private static readonly Color SplitColor = new Color(0.95f, 0.35f, 0.85f, 1f);   // 品红，"分裂"
+        private static readonly Color ReturnColor = new Color(0.2f, 0.8f, 0.75f, 1f);    // 深青，"飞镖回旋"
+        private static readonly Color LingerColor = new Color(0.55f, 0.85f, 0.25f, 1f);  // 病态绿，"残留毒场"
 
         /// <summary>Field 抛掷飞行耗时，复用 Bolt 同款 <see cref="FlightLife"/>（0.3s）作为"甩出去"的时间窗，
         /// 落地后再用 <see cref="FieldSettleDuration"/>（0.2s）从小长到满径——二者相加正好等于
@@ -377,7 +391,12 @@ namespace GameLogic.Battle.Feedback
             if (_vfxPool != null && _vfxPool.IsBound($"shape.{kind}.muzzle"))
             {
                 float2 muzzleDir = math.normalizesafe(signal.Direction, new float2(0f, 1f));
-                SpawnMarker(kind, signal.Origin, muzzleDir, 0f, 0f, 0f, radius, MuzzleLife, castColor, "muzzle");
+                // combat-primitive-presentation P1：COMBAT-PRESENTATION.md §5"Charged/Focused 蓄力"行——
+                // 蓄力基因贴的真实 Tag 是 "Charged"（GeneCatalog gene_capacitor/gene_magnet），枪口停留
+                // 时长拉长，读出"这发是蓄力过的"。矩阵级呼吸挤压预警属于 §3.2①，跟随 Q弹形变一起接入。
+                float muzzleLife = signal.Tags != null && signal.Tags.Contains("Charged")
+                    ? MuzzleLife * ChargedMuzzleLifeMult : MuzzleLife;
+                SpawnMarker(kind, signal.Origin, muzzleDir, 0f, 0f, 0f, radius, muzzleLife, castColor, "muzzle");
             }
 
             FxRecipeCatalog.TryGetShapeRecipe(kind.ToString(), out var recipe);
@@ -487,6 +506,40 @@ namespace GameLogic.Battle.Feedback
             float radius = MathF.Max(1.2f, signal.Radius);
             SpawnMarker(ShapeKind.Wave, signal.Position, new float2(0f, 1f), 0f, 0f, 0f,
                 radius, StructuralHookLife, StructuralHookColor);
+        }
+
+        /// <summary>combat-primitive-presentation P1：Pierce（穿透续飞）/Bounce（弹开）/Split（分裂）/
+        /// Return（飞回）/Linger（残留毒场）此前完全没有对应视觉。Kind 固定几何体+配色，供玩家分辨
+        /// "命中之后又发生了什么"，不追溯原始 Shape（同 <see cref="OnStructuralHookFired"/> 简化先例）。</summary>
+        public void OnComposeChain(ComposeChainSignal signal)
+        {
+            float radius = MathF.Max(0.6f, signal.Radius);
+            switch (signal.Kind)
+            {
+                case "Pierce":
+                    // 复用 Bolt 的直线飞行几何，让它读出"穿过去继续飞"，forceTrail 补一条淡出拖尾。
+                    SpawnMarker(ShapeKind.Bolt, signal.Position, signal.Direction, 0f, 0f, 0f,
+                        radius * 0.6f, ChainMarkerLife, PierceColor, forceTrail: true);
+                    break;
+                case "Bounce":
+                    SpawnMarker(ShapeKind.Wave, signal.Position, signal.Direction, 0f, 0f, 0f,
+                        radius * 0.8f, ChainMarkerLife, BounceColor);
+                    break;
+                case "Split":
+                    SpawnMarker(ShapeKind.Bolt, signal.Position, signal.Direction, 0f, 0f, 0f,
+                        radius, ChainMarkerLife, SplitColor);
+                    break;
+                case "Return":
+                    SpawnMarker(ShapeKind.Bolt, signal.Position, signal.Direction, 0f, 0f, 0f,
+                        radius * 0.7f, ChainMarkerLife, ReturnColor, forceTrail: true);
+                    break;
+                case "Linger":
+                    // Field 语言的贴地环，寿命=真实 Linger 秒数（不是固定短促时长），到期正好和结算窗口对齐。
+                    float lingerLife = signal.Duration > 0f ? signal.Duration : ChainMarkerLife;
+                    SpawnMarker(ShapeKind.Field, signal.Position, signal.Direction, 0f, 0f, 0f,
+                        radius, lingerLife, LingerColor);
+                    break;
+            }
         }
 
         // ── 元素 Tag 染色（story-007 D1~D4，对照冻结总案 §3.4 元素词表全 10 项；
@@ -711,7 +764,8 @@ namespace GameLogic.Battle.Feedback
         }
 
         private void SpawnMarker(ShapeKind kind, float2 origin, float2 direction, float phase, float spin, float orbit,
-            float radius, float life, Color color, string role = "projectile", float homing = 0f, float2 homingDirection = default)
+            float radius, float life, Color color, string role = "projectile", float homing = 0f, float2 homingDirection = default,
+            bool forceTrail = false)
         {
             EnsurePool();
 
@@ -754,7 +808,9 @@ namespace GameLogic.Battle.Feedback
             // story-006：有 Prefab 覆盖时不叠加程序化残影，避免视觉冲突。
             TrailRenderer trail = _trail[idx];
             trail.Clear();
-            bool wantsTrail = (spin != 0f || orbit != 0f) && prefabGo == null;
+            // combat-primitive-presentation P1：Pierce 续飞标记额外要求拖尾（forceTrail），
+            // 与 Spin/Orbit 触发拖尾的既有条件是"或"关系，互不影响。
+            bool wantsTrail = (spin != 0f || orbit != 0f || forceTrail) && prefabGo == null;
             if (wantsTrail)
             {
                 trail.time = life;

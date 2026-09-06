@@ -93,6 +93,21 @@ namespace GameLogic.Core
         public string ReactionName;
     }
 
+    /// <summary>combat-primitive-presentation P1：Pierce/Bounce/Split/Return/Linger 这组"命中后延续"基元
+    /// 此前完全没有对应视觉——<see cref="MetabolicSlice.Combat.MetabolicSliceBridge.TickPendingImpact"/>/
+    /// TickPendingLinger 只结算数值、从不广播。与 <see cref="StructuralHookFiredSignal"/> 同一简化先例：
+    /// 不追溯原始 Shape，Kind 目前按下方固定几何体/配色分流，真实美术阶段再按 Kind 精细化。</summary>
+    public struct ComposeChainSignal
+    {
+        /// <summary>"Pierce" | "Bounce" | "Split" | "Return" | "Linger" 之一。</summary>
+        public string Kind;
+        public float2 Position;
+        public float2 Direction;
+        public float Radius;
+        /// <summary>视觉停留时长；Kind=="Linger" 时传入真实 Linger 秒数，其它 Kind 传 0 走各自默认短促时长。</summary>
+        public float Duration;
+    }
+
     /// <summary>reaction-depth-and-combat-feel story-003：结构器官被动触发（反伤/移动/击杀/低血量/
     /// 周期脉冲）时 Publish 一次，供表现层给这些此前"纯数字、看不见"的效果补一个可见标记。
     /// 与 <see cref="ComposeCastSignal"/> 并列但正交——结构器官钩子不产出弹道 Shape，只是一个定点脉冲。</summary>

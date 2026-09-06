@@ -830,6 +830,12 @@ namespace GameLogic.MetabolicSlice.Combat
                             Pull = hit.Pull,
                             PierceLeft = hit.PierceLeft - 1,
                         });
+                        // combat-primitive-presentation P1：此前 Pierce 是纯数值续算，表现层完全看不出
+                        // "没死透、继续飞"——补一次性表现信号，不改上面的结算数值。
+                        Signals.Publish(new ComposeChainSignal
+                        {
+                            Kind = "Pierce", Position = hit.ImpactPos, Direction = hit.Direction, Radius = hit.Radius,
+                        });
                     }
 
                     if (hit.BounceLeft > 0)
@@ -847,6 +853,10 @@ namespace GameLogic.MetabolicSlice.Combat
                             Chain = hit.Chain,
                             Pull = hit.Pull,
                             BounceLeft = hit.BounceLeft - 1,
+                        });
+                        Signals.Publish(new ComposeChainSignal
+                        {
+                            Kind = "Bounce", Position = hit.ImpactPos, Direction = reflected, Radius = hit.Radius,
                         });
                     }
 
@@ -868,6 +878,11 @@ namespace GameLogic.MetabolicSlice.Combat
                                 Chain = hit.Chain,
                                 Pull = hit.Pull,
                             });
+                            // 逐个分身各发一次，天然复现"N 份同 Shape 往各自方向散开"，不需要额外传 count。
+                            Signals.Publish(new ComposeChainSignal
+                            {
+                                Kind = "Split", Position = hit.ImpactPos, Direction = dir, Radius = hit.Radius * 0.6f,
+                            });
                         }
                     }
 
@@ -875,6 +890,7 @@ namespace GameLogic.MetabolicSlice.Combat
                     {
                         // 飞回发射者「当前」位置（不是发射时的原点）——玩家这段时间可能已经移动。
                         float2 target = _sim.PlayerPosition;
+                        float2 returnDir = math.normalizesafe(target - hit.ImpactPos, DefaultForward);
                         _pendingImpact.Add(new PendingImpact
                         {
                             ImpactPos = target,
@@ -883,9 +899,13 @@ namespace GameLogic.MetabolicSlice.Combat
                             TimeLeft = hit.Duration > 0f ? hit.Duration : ComposeMotionMath.MotionFlightDuration,
                             Duration = hit.Duration,
                             Origin = hit.ImpactPos,
-                            Direction = math.normalizesafe(target - hit.ImpactPos, DefaultForward),
+                            Direction = returnDir,
                             Chain = hit.Chain,
                             Pull = hit.Pull,
+                        });
+                        Signals.Publish(new ComposeChainSignal
+                        {
+                            Kind = "Return", Position = hit.ImpactPos, Direction = returnDir, Radius = hit.Radius,
                         });
                     }
 
@@ -901,6 +921,13 @@ namespace GameLogic.MetabolicSlice.Combat
                             TimeLeft = hit.Linger,
                             Chain = hit.Chain,
                             Pull = hit.Pull,
+                        });
+                        // combat-primitive-presentation P1：Linger 留坑此前是纯数值 DoT，玩家完全看不到
+                        // "这块地有毒"——按真实 Linger 秒数发一次性视觉，寿命与实际结算窗口一致。
+                        Signals.Publish(new ComposeChainSignal
+                        {
+                            Kind = "Linger", Position = hit.ImpactPos, Direction = new float2(0f, 1f),
+                            Radius = hit.Radius, Duration = hit.Linger,
                         });
                     }
 

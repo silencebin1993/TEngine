@@ -32,6 +32,7 @@ namespace GameLogic.Battle.Feedback
             _scope = new SignalScope();
             _scope.On<ComposeCastSignal>(_impl.OnComposeCast);
             _scope.On<StructuralHookFiredSignal>(_impl.OnStructuralHookFired);
+            _scope.On<ComposeChainSignal>(_impl.OnComposeChain);
         }
 
         public override void OnUpdate(float dt)

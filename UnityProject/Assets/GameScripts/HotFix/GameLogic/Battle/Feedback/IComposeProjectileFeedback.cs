@@ -21,6 +21,10 @@ namespace GameLogic.Battle.Feedback
         /// 结构器官钩子没有 Delivery 形态，只是一个定点标记。</summary>
         void OnStructuralHookFired(StructuralHookFiredSignal signal);
 
+        /// <summary>combat-primitive-presentation P1：Pierce/Bounce/Split/Return/Linger 命中后延续
+        /// 完成。与 <see cref="OnStructuralHookFired"/> 同级别的定点标记，不复用 Shape 路由。</summary>
+        void OnComposeChain(ComposeChainSignal signal);
+
         /// <summary>每帧推进（弹道位移/衰减，不读 Sim）。</summary>
         void Tick(float dt);
     }
