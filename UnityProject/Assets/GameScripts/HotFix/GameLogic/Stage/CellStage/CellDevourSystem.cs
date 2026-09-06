@@ -38,11 +38,8 @@ namespace GameLogic.Stage.CellStage
         public int Combo { get; private set; }
         private float _comboTimer;
 
-        /// <summary>连吃断连时间。</summary>
-        private const float ComboWindow = 2.5f;
-
-        /// <summary>体积成长系数：吞噬目标体积的多少比例转为自身体积。</summary>
-        private const float VolumeGrowthRatio = 0.055f;
+        // cell-global-stat-defaults-to-table：ComboWindow/VolumeGrowthRatio/连吃收益系数
+        // 已改读 DataRegistry.Instance.Global.*（见下方两处使用点），不再是本地常量。
 
         /// <summary>吞噬现在门控于该器官（人直接指示，2026-08-25，非 sprint-027 范围）：
         /// 未装备并激活时，接触到的候选不结算，敌人不受影响。</summary>
@@ -169,14 +166,14 @@ namespace GameLogic.Stage.CellStage
 
             // 连吃层数
             Combo++;
-            _comboTimer = ComboWindow;
+            _comboTimer = DataRegistry.Instance.Global.ComboWindow;
             if (_stats2 != null && Combo > _stats2.MaxDevourCombo)
             {
                 _stats2.MaxDevourCombo = Combo;
             }
 
             // 收益。连吃层数给递增加成（吞噬路线的资源引擎）
-            float comboMul = 1f + Mathf.Min(Combo - 1, 10) * 0.06f;
+            float comboMul = 1f + Mathf.Min(Combo - 1, 10) * DataRegistry.Instance.Global.ComboGainPerStack;
             float gainMul = (_stats?.Get(StatId.DevourGain) ?? 1f)
                             * comboMul
                             * (_events?.DevourGainMul ?? 1f);
@@ -244,7 +241,7 @@ namespace GameLogic.Stage.CellStage
             // 混用会让"卡牌 +20% 体积"在每次吞噬后被重复放大。
             float old = _stats.Get(StatId.Volume);
             _stats.SetBase(StatId.Volume, _stats.GetBase(StatId.Volume)
-                                          + targetVolume * VolumeGrowthRatio);
+                                          + targetVolume * DataRegistry.Instance.Global.VolumeGrowthRatio);
 
             float now = _stats.Get(StatId.Volume);
             if (_stats2 != null && now > _stats2.PeakVolume)

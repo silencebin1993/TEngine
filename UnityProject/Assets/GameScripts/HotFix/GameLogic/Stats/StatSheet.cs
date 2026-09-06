@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using GameLogic.Core;
 using UnityEngine;
 
 namespace GameLogic.Stats
@@ -124,14 +125,17 @@ namespace GameLogic.Stats
                 _base[i] = 0f;
             }
 
+            // cell-global-stat-defaults-to-table：MaxHealth 故意保留字面量 160f 不接表——
+            // CellGlobal.BaseMaxHealth=100 与这里的现网真实值冲突，待人拍板，不在本批范围。
             _base[(int)StatId.MaxHealth] = 160f;
-            _base[(int)StatId.MoveSpeed] = 8f;
-            _base[(int)StatId.Volume] = 1f;
-            _base[(int)StatId.MeleeDamage] = 8f;
-            _base[(int)StatId.DevourRatio] = 1.05f;
+            GlobalSpec g = DataRegistry.Instance.Global;
+            _base[(int)StatId.MoveSpeed] = g.BaseMoveSpeed;
+            _base[(int)StatId.Volume] = g.BaseVolume;
+            _base[(int)StatId.MeleeDamage] = g.BaseMeleeDamage;
+            _base[(int)StatId.DevourRatio] = g.DevourRatio;
             _base[(int)StatId.DevourGain] = 1f;
-            _base[(int)StatId.StaminaMax] = 100f;
-            _base[(int)StatId.StaminaRegen] = 18f;
+            _base[(int)StatId.StaminaMax] = g.StaminaMax;
+            _base[(int)StatId.StaminaRegen] = g.StaminaRegen;
             _base[(int)StatId.DashCost] = 25f;
             _base[(int)StatId.DashDistance] = 4.5f;
             _base[(int)StatId.DashInvulnTime] = 0.15f;
@@ -153,8 +157,8 @@ namespace GameLogic.Stats
             _base[(int)StatId.PickupRadius] = 2.5f;
             _base[(int)StatId.EvoGain] = 1f;
             _base[(int)StatId.NutrientGain] = 1f;
-            _base[(int)StatId.AbilitySlots] = 2f;
-            _base[(int)StatId.PollutionCap] = 100f;
+            _base[(int)StatId.AbilitySlots] = g.StartAbilitySlots;
+            _base[(int)StatId.PollutionCap] = g.PollutionCap;
             _base[(int)StatId.MyceliumScale] = 1f;
             _base[(int)StatId.ProjectileCount] = 0f;
             _base[(int)StatId.StatusDuration] = 1f;
@@ -287,7 +291,7 @@ namespace GameLogic.Stats
             _final[(int)StatId.DamageTaken] = Mathf.Max(0.05f, _final[(int)StatId.DamageTaken]);
             _final[(int)StatId.AggroScale] = Mathf.Max(0.1f, _final[(int)StatId.AggroScale]);
             _final[(int)StatId.AbilitySlots] =
-                Mathf.Clamp(_final[(int)StatId.AbilitySlots], 1f, 5f);
+                Mathf.Clamp(_final[(int)StatId.AbilitySlots], 1f, DataRegistry.Instance.Global.MaxAbilitySlots);
             _final[(int)StatId.StatusDuration] =
                 Mathf.Max(0.1f, _final[(int)StatId.StatusDuration]);
             _final[(int)StatId.ShieldMax] = Mathf.Max(0f, _final[(int)StatId.ShieldMax]);

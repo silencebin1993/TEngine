@@ -589,6 +589,21 @@ namespace GameLogic.Core
         public float RouteAffinityCap = 1.8f;
         public float SynergyBonusPerMatch = 0.07f;
         public float SynergyBonusCap = 1.5f;
+        // cell-global-stat-defaults-to-table：baseMaxHealth 与 breachedDiscount/corrodedDiscount
+        // 故意不在这里——前者与现网 StatSheet 实际值(160)冲突待人定，后两者在 Main/Sim/ 内使用，
+        // 需要走 SimConfig 传递而非 DataRegistry 直读，非本批范围。
+        public float BaseMoveSpeed = 8f;
+        public float BaseVolume = 1f;
+        public float BaseMeleeDamage = 8f;
+        public float DevourRatio = 1.05f;
+        public float StaminaMax = 100f;
+        public float StaminaRegen = 18f;
+        public float PollutionCap = 100f;
+        public int StartAbilitySlots = 2;
+        public int MaxAbilitySlots = 5;
+        public float VolumeGrowthRatio = 0.055f;
+        public float ComboWindow = 2.5f;
+        public float ComboGainPerStack = 0.06f;
     }
 
     /// <summary>

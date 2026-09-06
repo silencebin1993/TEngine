@@ -70,7 +70,7 @@ namespace GameLogic.Ability
                 return false;
             }
 
-            int cap = _stats != null ? _stats.GetInt(StatId.AbilitySlots) : 2;
+            int cap = _stats != null ? _stats.GetInt(StatId.AbilitySlots) : DataRegistry.Instance.Global.StartAbilitySlots;
             if (_slots.Count >= cap)
             {
                 return false;

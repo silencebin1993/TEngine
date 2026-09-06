@@ -360,6 +360,18 @@ namespace GameLogic.Core
                 RouteAffinityCap = g.RouteAffinityCap,
                 SynergyBonusPerMatch = g.SynergyBonusPerMatch,
                 SynergyBonusCap = g.SynergyBonusCap,
+                BaseMoveSpeed = g.BaseMoveSpeed,
+                BaseVolume = g.BaseVolume,
+                BaseMeleeDamage = g.BaseMeleeDamage,
+                DevourRatio = g.DevourRatio,
+                StaminaMax = g.StaminaMax,
+                StaminaRegen = g.StaminaRegen,
+                PollutionCap = g.PollutionCap,
+                StartAbilitySlots = g.StartAbilitySlots,
+                MaxAbilitySlots = g.MaxAbilitySlots,
+                VolumeGrowthRatio = g.VolumeGrowthRatio,
+                ComboWindow = g.ComboWindow,
+                ComboGainPerStack = g.ComboGainPerStack,
             });
         }
 
