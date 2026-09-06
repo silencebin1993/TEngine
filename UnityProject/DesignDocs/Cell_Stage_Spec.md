@@ -498,8 +498,8 @@ StageOutcome {
   KeyCards[]         // 定义性卡牌（史诗/异化/遗产）
   FinalStats         // 最终属性快照
   PollutionLevel     // 污染度终值
-  Achievements[]     // 局内达成
-  Statistics         // 统计数据
+  Statistics         // 统计数据（局内）
+  Lifetime           // 跨局生涯统计快照（累计击杀/吞噬、历史最长存活、历史最高等级）
 }
 ```
 
