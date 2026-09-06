@@ -73,9 +73,11 @@ namespace GameLogic.Progression
     }
 
     /// <summary>
-    /// 图鉴发现记录（TR-cell-013）。窄口径实现（Preflight C1）：本局内存态，
-    /// 未做跨会话持久化——图鉴系统真正的设计意图是跨局解锁（GDD §12.3），
-    /// 但这是本仓库第一次涉及玩法存档，留给专门 story/ADR 讨论存档格式时再做。
+    /// 图鉴发现记录（TR-cell-013）。已做跨局持久化（codex-cross-run-persistence story-001）：
+    /// <see cref="_enemies"/>/<see cref="_cards"/> 在 <see cref="OnEnter"/> 里从独立 JSON 存档
+    /// （<see cref="CodexPersistence"/>，<c>persistentDataPath/codex_discovered.json</c>）载入历史累计值，
+    /// 在 <see cref="OnExit"/> 时把"历史 ∪ 本局新发现"整份覆盖写回——仅退出细胞阶段时批量落盘一次，
+    /// 局内不写盘。本期只持久化"发现过"状态，不含元进度经济（货币/永久解锁），也不做存档版本迁移。
     ///
     /// 监听现有信号登记发现，不新开一套平行的事件系统：
     ///   - <see cref="KillSignal"/>/<see cref="DevourSignal"/> → 敌人发现
@@ -96,6 +98,12 @@ namespace GameLogic.Progression
         {
             _enemies.Clear();
             _cards.Clear();
+
+            // 跨局持久化（story-001）：本局起点 = 历史累计。Load 永不 throw，缺档/坏档回落空集合。
+            CodexHistory history = CodexPersistence.Load();
+            _enemies.UnionWith(history.EnemyIds);
+            _cards.UnionWith(history.CardIds);
+
             _scope = new SignalScope()
                 .On<KillSignal>(OnKill)
                 .On<DevourSignal>(OnDevour)
@@ -106,6 +114,9 @@ namespace GameLogic.Progression
         {
             _scope?.Dispose();
             _scope = null;
+
+            // 跨局持久化（story-001）：退出时批量落盘一次，整份覆盖（历史 ∪ 本局新发现）。
+            CodexPersistence.Save(_enemies, _cards);
         }
 
         private void OnKill(KillSignal s)
