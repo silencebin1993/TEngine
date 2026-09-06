@@ -361,9 +361,9 @@ namespace GameLogic.Stage.CellStage
         private void SetupSim()
         {
             SimConfig cfg = SimConfig.Default;
-            cfg.UnitCapacity = 16384;
-            cfg.ArenaHalfExtent = 90f;
-            cfg.HashCellSize = 4f;
+            cfg.UnitCapacity = DataRegistry.Instance.Global.UnitCapacity;
+            cfg.ArenaHalfExtent = DataRegistry.Instance.Global.ArenaHalfExtent;
+            cfg.HashCellSize = DataRegistry.Instance.Global.HashCellSize;
 
             _sim.Begin(cfg, DataRegistry.Instance.ArchetypeArray());
             _sim.SetPlayerStats(

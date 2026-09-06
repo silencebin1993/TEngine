@@ -351,6 +351,9 @@ namespace GameLogic.Core
             reg.SetGlobal(new GlobalSpec
             {
                 ObstacleCount = g.ObstacleCount,
+                ArenaHalfExtent = g.ArenaHalfExtent,
+                UnitCapacity = g.UnitCapacity,
+                HashCellSize = g.HashCellSize,
             });
         }
 

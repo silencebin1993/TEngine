@@ -580,6 +580,9 @@ namespace GameLogic.Core
     public sealed class GlobalSpec
     {
         public int ObstacleCount = 14;
+        public float ArenaHalfExtent = 90f;
+        public int UnitCapacity = 16384;
+        public float HashCellSize = 4f;
     }
 
     /// <summary>

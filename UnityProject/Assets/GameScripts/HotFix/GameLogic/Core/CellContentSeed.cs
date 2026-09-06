@@ -48,7 +48,8 @@ namespace GameLogic.Core
             SeedStructuralTriggerHookParams(reg);
         }
 
-        private static void Global(DataRegistry reg) => reg.SetGlobal(new GlobalSpec { ObstacleCount = 14 });
+        private static void Global(DataRegistry reg) => reg.SetGlobal(new GlobalSpec
+            { ObstacleCount = 14, ArenaHalfExtent = 90f, UnitCapacity = 16384, HashCellSize = 4f });
 
         /// <summary>
         /// story-006：cell.OrganModuleParams 表的内置兜底副本，逐值与表一致
