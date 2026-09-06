@@ -1515,6 +1515,16 @@ namespace GameLogic.Stage.CellStage
             {
                 _outcome.FinalStats[i] = _stats.Get((StatId)i);
             }
+
+            // stage-outcome-lifetime-stats story-001：本局唯一一次生涯统计落盘。
+            // RecordRun 内部 Load 历史值 → 击杀/吞噬求和、存活时长/等级取最大 → Save 整份覆盖，
+            // 返回含本局的最终快照回填到 outcome，结算文案直接读它不再碰磁盘。
+            // Reject-to-Safe：RecordRun 永不 throw，存档异常不阻塞退出流程。
+            _outcome.Lifetime = LifetimeStatsPersistence.RecordRun(
+                _outcome.Statistics.EnemiesKilled,
+                _outcome.Statistics.FoodDevoured,
+                _outcome.DurationSeconds,
+                _outcome.Level);
         }
     }
 }

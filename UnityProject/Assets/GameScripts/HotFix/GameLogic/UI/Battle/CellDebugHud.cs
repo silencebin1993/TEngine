@@ -248,12 +248,18 @@ namespace GameLogic.UI.Battle
             int m = (int)(o.DurationSeconds / 60f);
             int s = (int)(o.DurationSeconds % 60f);
             int phase = Mathf.Min(o.Statistics.PhasesReached, 6);
+            // stage-outcome-lifetime-stats story-001：生涯统计只读展示。
+            // o.Lifetime 是值类型，未产出快照（首次运行/未走退出结算）时为全零，照常显示 0 与 00:00。
+            int bm = (int)(o.Lifetime.BestDurationSeconds / 60f);
+            int bs = (int)(o.Lifetime.BestDurationSeconds % 60f);
             return $"{head}\n\n" +
                    $"存活 {m:00}:{s:00}　到达时期 {phase}/6　等级 {o.Level}　卡牌 {o.AllCards.Count}\n" +
                    $"主导路线 {RouteName(o.DominantRoute)}\n" +
                    $"吞噬 {o.Statistics.FoodDevoured}　击杀 {o.Statistics.EnemiesKilled}　" +
                    $"精英 {o.Statistics.ElitesKilled}\n" +
-                   $"峰值体积 {o.Statistics.PeakVolume:F1}　峰值敌人 {o.Statistics.PeakEnemyCount}";
+                   $"峰值体积 {o.Statistics.PeakVolume:F1}　峰值敌人 {o.Statistics.PeakEnemyCount}\n" +
+                   $"生涯记录：累计击杀 {o.Lifetime.TotalKills}　累计吞噬 {o.Lifetime.TotalDevoured}　" +
+                   $"最长存活 {bm:00}:{bs:00}　最高等级 {o.Lifetime.BestLevel}";
         }
 
         private static string DeathText(string cause)

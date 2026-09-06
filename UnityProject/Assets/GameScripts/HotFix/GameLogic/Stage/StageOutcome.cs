@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using GameLogic.Cards;
+using GameLogic.Progression;
 
 namespace GameLogic.Stage
 {
@@ -60,8 +61,10 @@ namespace GameLogic.Stage
         /// <summary>局内统计。</summary>
         public StageStatistics Statistics = new StageStatistics();
 
-        /// <summary>局内达成。跨局解锁用。</summary>
-        public List<string> Achievements = new List<string>(4);
+        /// <summary>stage-outcome-lifetime-stats story-001：跨局生涯统计快照（**含本局**），
+        /// 由细胞阶段 <c>BuildOutcome()</c> 落盘后回填，结算文案直接读它，不再自己触发文件 IO。
+        /// 值类型，默认全零 —— 未产出快照时文案照样显示 0/00:00。</summary>
+        public LifetimeStats Lifetime;
 
         public void Reset()
         {
@@ -80,7 +83,7 @@ namespace GameLogic.Stage
             PollutionLevel = 0f;
             Level = 0;
             Statistics.Reset();
-            Achievements.Clear();
+            Lifetime = LifetimeStats.Empty();
         }
     }
 
