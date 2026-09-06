@@ -188,12 +188,27 @@ namespace GameLogic.Progression
         }
 
         /// <summary>代谢模块（AttackMethod==false，非攻击方式的器官条目，不在 Carrier 器官栏展示；
-        /// 含能量核心与已退役旧修饰，仅供图鉴归档查阅）。</summary>
+        /// 含能量核心与已退役旧修饰，仅供图鉴归档查阅）。
+        /// structural-organ-codex-tab story-001：结构器官已拆到 <see cref="AllStructuralOrganelleEntries"/>
+        /// 独立分类，这里排除，避免"代谢模块"标签下混入一等结构器官内容。</summary>
         public IEnumerable<OrganelleCodexEntry> AllMetabolicModuleEntries()
         {
             foreach (OrganelleDef def in OrganelleCatalog.All.Values)
             {
-                if (!def.AttackMethod)
+                if (!def.AttackMethod && def.Category != OrganelleCategory.Structural)
+                {
+                    yield return new OrganelleCodexEntry(def.Id, def.DisplayName, def.Description, def.Role);
+                }
+            }
+        }
+
+        /// <summary>结构器官（structural-organ-codex-tab story-001）：<c>Category == Structural</c> 的
+        /// 一等内容，有专属装备槽与掉落/商店/抽卡三条获取路径，图鉴里独立成类。</summary>
+        public IEnumerable<OrganelleCodexEntry> AllStructuralOrganelleEntries()
+        {
+            foreach (OrganelleDef def in OrganelleCatalog.All.Values)
+            {
+                if (def.Category == OrganelleCategory.Structural)
                 {
                     yield return new OrganelleCodexEntry(def.Id, def.DisplayName, def.Description, def.Role);
                 }

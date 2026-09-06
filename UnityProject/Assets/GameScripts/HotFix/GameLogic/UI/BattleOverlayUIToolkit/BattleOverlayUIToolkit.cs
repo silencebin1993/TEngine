@@ -39,11 +39,14 @@ namespace GameLogic
             Pause,
         }
 
-        /// <summary>001 R4 锁定的图鉴六类分类维度。供 execute_code 断言直调 <see cref="SetCodexCategory"/>。</summary>
+        /// <summary>001 R4 锁定的图鉴分类维度（structural-organ-codex-tab story-001 起扩为七类）。
+        /// 供 execute_code 断言直调 <see cref="SetCodexCategory"/>。
+        /// **枚举顺序必须与 <see cref="CodexTabNodeNames"/> 数组下标严格一一对应**（绑定处用 <c>(CodexCategory)i</c>）。</summary>
         public enum CodexCategory
         {
             Organelle,
             MetabolicModule,
+            Structural,
             Gene,
             Slot,
             Terrain,
@@ -82,7 +85,8 @@ namespace GameLogic
 
         private static readonly string[] CodexTabNodeNames =
         {
-            "TabOrganelle", "TabModule", "TabGene", "TabSlot", "TabTerrain", "TabStatus", "TabEnemy",
+            // 下标与 CodexCategory 枚举值严格一一对应，插入/删除必须两边同步改。
+            "TabOrganelle", "TabModule", "TabStructural", "TabGene", "TabSlot", "TabTerrain", "TabStatus", "TabEnemy",
         };
 
         // 图鉴 tooltip（story-005 R4：hover 触发，≤3 行，供本控制器 Deck 卡牌与
@@ -652,6 +656,18 @@ namespace GameLogic
                         }
                         OrganelleDef def = OrganelleCatalog.Get(e.Id);
                         AddCodexRow(e.DisplayName, e.Description, SlotSummary(def?.AllowedSlotTypes), "代谢模块", true);
+                    }
+                    break;
+
+                case CodexCategory.Structural:
+                    foreach (OrganelleCodexEntry e in codex.AllStructuralOrganelleEntries())
+                    {
+                        if (!MatchesFilter(e.DisplayName, e.Description, filter))
+                        {
+                            continue;
+                        }
+                        OrganelleDef def = OrganelleCatalog.Get(e.Id);
+                        AddCodexRow(e.DisplayName, e.Description, SlotSummary(def?.AllowedSlotTypes), "结构器官", true);
                     }
                     break;
 
