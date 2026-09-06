@@ -80,6 +80,13 @@ namespace GameLogic.Core
         public HashSet<string> Tags;
         public float2 Origin;
         public float2 Direction;
+        /// <summary>追踪强度 0-1（HitEvent.Homing 原样转发）。0 时表现层必须忽略 HomingDirection，
+        /// 与 Direction 保持完全一致的直线飞行——避免无 Homing 基因的既有弹道被误改动。</summary>
+        public float Homing;
+        /// <summary>Homing&gt;0 时的目标朝向，由 MetabolicSliceBridge 与伤害结算
+        /// （ApplyChassisDamage 的 FindNearestHostile+lerp）同一次查询算出。HomingModule.cs 注释明确
+        /// "禁止只当特效"——表现层必须真的让弹道朝这个方向弯，不能只挂数值不消费。Homing&lt;=0 时等于 Direction。</summary>
+        public float2 HomingDirection;
         public bool HasProjectile;
         /// <summary>reaction-depth-and-combat-feel story-002：命中触发的具名反应 id（如 "Steam"，
         /// 取自 HitEvent.Payload["Reaction"]），未触发任何具名反应时为 null。</summary>

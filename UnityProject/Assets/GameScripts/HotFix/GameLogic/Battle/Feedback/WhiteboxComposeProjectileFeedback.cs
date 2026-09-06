@@ -146,6 +146,11 @@ namespace GameLogic.Battle.Feedback
         private ShapeKind[] _kind;
         private float2[] _origin;
         private float2[] _direction;
+        /// <summary>正确性修复：Homing&gt;0 时的目标朝向（信号 HomingDirection 原样存储，逐帧与 _direction
+        /// 插值），让 Bolt/Spore 的白模飞行路径真的随时间转向命中判定点，不再对 Homing 视而不见。</summary>
+        private float2[] _homingDir;
+        /// <summary>同上，追踪强度 0-1；0 时 ApplyTransform 不插值，等价于原有纯直线飞行（零回归）。</summary>
+        private float[] _homingStrength;
         private float[] _phase;
         private float[] _spin;
         private float[] _orbit;
@@ -400,7 +405,11 @@ namespace GameLogic.Battle.Feedback
                     float2 dir = kind == ShapeKind.Melee
                         ? MetabolicSliceBridge.MeleeFanDirection(signal.Direction, h, segments)
                         : MetabolicSliceBridge.FanDirection(signal.Direction, h, segments);
-                    SpawnMarker(kind, signal.Origin, dir, phase, signal.Spin, signal.Orbit, radius, life, castColor);
+                    // 正确性修复：signal.Homing/HomingDirection 是"整次施法"的单一代表值（同 Direction 的既有
+                    // 简化，不按发分别再查一次最近敌人），Count>1 时每个扇形分身共享同一个目标朝向插值——
+                    // 比此前"完全不弯"更接近真实命中点，单发（segments==1，homing 场景绝大多数情形）完全精确。
+                    SpawnMarker(kind, signal.Origin, dir, phase, signal.Spin, signal.Orbit, radius, life, castColor,
+                        homing: signal.Homing, homingDirection: signal.HomingDirection);
                 }
             }
 
@@ -654,6 +663,8 @@ namespace GameLogic.Battle.Feedback
             _kind = new ShapeKind[PoolSize];
             _origin = new float2[PoolSize];
             _direction = new float2[PoolSize];
+            _homingDir = new float2[PoolSize];
+            _homingStrength = new float[PoolSize];
             _phase = new float[PoolSize];
             _spin = new float[PoolSize];
             _orbit = new float[PoolSize];
@@ -700,7 +711,7 @@ namespace GameLogic.Battle.Feedback
         }
 
         private void SpawnMarker(ShapeKind kind, float2 origin, float2 direction, float phase, float spin, float orbit,
-            float radius, float life, Color color, string role = "projectile")
+            float radius, float life, Color color, string role = "projectile", float homing = 0f, float2 homingDirection = default)
         {
             EnsurePool();
 
@@ -710,6 +721,10 @@ namespace GameLogic.Battle.Feedback
             _kind[idx] = kind;
             _origin[idx] = origin;
             _direction[idx] = math.normalizesafe(direction, new float2(0f, 1f));
+            // 正确性修复：homing<=0（绝大多数弹道）时 _homingDir 直接等于 _direction，ApplyTransform 的
+            // 插值在该情形下退化为原朝向，零回归；homing>0 时才真的存一个不同的目标朝向供逐帧插值。
+            _homingStrength[idx] = homing;
+            _homingDir[idx] = homing > 0f ? math.normalizesafe(homingDirection, _direction[idx]) : _direction[idx];
             _phase[idx] = phase;
             _spin[idx] = spin;
             _orbit[idx] = orbit;
@@ -855,15 +870,22 @@ namespace GameLogic.Battle.Feedback
                 default:
                 {
                     float2 offset = ComposeMotionMath.Offset(_phase[idx], _spin[idx], _orbit[idx], _elapsed[idx]);
+                    // 正确性修复：_homingStrength[idx]<=0（绝大多数 Bolt）时 curDir 恒等于 _direction[idx]，
+                    // 下面这段与改动前逐字节一致，零回归。>0 时随飞行进度 u（0→1）从初始瞄准方向朝
+                    // _homingDir[idx] 插值弯过去，插值终值按 homingStrength 加权——与 MetabolicSliceBridge.
+                    // ApplyChassisDamage 用同一个 evt.Homing 对命中判定点做 lerp 是同一权重语义，不是另起系数。
+                    float2 curDir = _homingStrength[idx] > 0f
+                        ? math.normalizesafe(math.lerp(_direction[idx], _homingDir[idx], _homingStrength[idx] * u), _direction[idx])
+                        : _direction[idx];
                     // story-006：叠加沿 Direction 的独立线性飞行位移，让 Bolt 读得出「射出去」——
                     // Spin=Orbit=0 时 offset 天然是零向量，与 offset 正交不冲突（Decision 4）。
                     // story-004：加 BoltMuzzleOffset 常量前移，避免 u=0 时贴在玩家原点上。
-                    float2 linear = _direction[idx] * (BoltMuzzleOffset + BoltFlightDistance * u);
+                    float2 linear = curDir * (BoltMuzzleOffset + BoltFlightDistance * u);
                     float2 pos = origin + offset + linear;
                     float diameter = radius * recipe.DiameterCoef;
                     // story-010 J1：Bolt 换成有指向的锥形网格后必须跟着 Direction 转——
                     // 原来是 Circle（旋转对称）才可以 identity，留着 identity 等于锥尖恒指世界 +X。
-                    float angDeg = DirectionAngleDeg(_direction[idx]);
+                    float angDeg = DirectionAngleDeg(curDir);
                     _tf[idx].localPosition = new Vector3(pos.x, MarkerY, pos.y);
                     _tf[idx].localRotation = Quaternion.Euler(0f, -angDeg, 0f);
                     _tf[idx].localScale = new Vector3(diameter, 1f, diameter);

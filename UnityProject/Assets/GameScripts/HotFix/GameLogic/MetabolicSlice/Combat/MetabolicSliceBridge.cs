@@ -710,6 +710,28 @@ namespace GameLogic.MetabolicSlice.Combat
 
             if (applied)
             {
+                // 正确性修复（同 gene-organ-universal-reaction/HomingModule.cs 注释"禁止只当特效"）：
+                // ApplyChassisDamage 内部已经用 FindNearestHostile+lerp 把命中判定点朝最近敌人偏移
+                // （story-002 弹道弯字段），但那段计算完全局部于该方法，从未传回这里——此前信号的
+                // Direction 恒是原始瞄准方向，导致白模弹道即使真的命中了偏移后的目标，视觉上仍然
+                // 笔直飞向原瞄准方向（伤害结算对、表现层没接住）。这里独立于 ApplyChassisDamage 再查一次
+                // 同一个 FindNearestHostile（每次开火一次，不在 Tick 循环内，与该方法内部调用同一性能量级，
+                // 不违反"热更层每帧不得 O(敌人数)"红线），只为算出一个供表现层参考的代表朝向；不改
+                // ApplyChassisDamage 自身的按发结算逻辑。
+                float2 aimDir = _abilities != null ? _abilities.AimDirection : DefaultForward;
+                float2 homingDir = aimDir;
+                if (evt.Homing > 0f)
+                {
+                    float2 origin = _sim.PlayerPosition;
+                    float2? nearest = FindNearestHostile(origin);
+                    if (nearest.HasValue)
+                    {
+                        float2 impactPos = origin + aimDir * ImpactFlightDistance;
+                        impactPos = math.lerp(impactPos, nearest.Value, evt.Homing);
+                        homingDir = math.normalizesafe(impactPos - origin, aimDir);
+                    }
+                }
+
                 // story-002：组合出口形态信号，给表现层一个稳定订阅点（不持有 SimWorld，不做 O(敌人数) 扫描）。
                 // story-005：Shape 改经 ComposeShapePresentation 二次映射——CarrierCompiler 链尾判定值仍恒为
                 // Bolt/Melee 两种（不改判定），这里只把表现 Shape 按 Spin/Orbit/ExplodeOnHit/Count 细分，
@@ -724,7 +746,9 @@ namespace GameLogic.MetabolicSlice.Combat
                     ExplodeOnHit = evt.ExplodeOnHit,
                     Tags = evt.Tags,
                     Origin = _sim.PlayerPosition,
-                    Direction = _abilities != null ? _abilities.AimDirection : DefaultForward,
+                    Direction = aimDir,
+                    Homing = evt.Homing,
+                    HomingDirection = homingDir,
                     HasProjectile = evt.Damage > 0f,
                     // reaction-depth-and-combat-feel story-002：具名反应（ReactionCatalog.RegisterDefaults/
                     // EnvironmentReactionCatalog）命中时都会写 evt.Payload["Reaction"]，转发给表现层播报。
