@@ -18,6 +18,12 @@ Shader "BinGames/SimBioGlass"
         _SwimStretch ("Swim Stretch", Range(0, 0.45)) = 0.22
         _SwimCompress ("Swim Side Compress", Range(0, 0.35)) = 0.14
         _ImpactSquash ("Impact Squash", Range(0, 0.55)) = 0.32
+        // combat-primitive-presentation story-004（COMBAT-PRESENTATION §2）：水彩画风叠加层——不改上面
+        // 任何既有游动/受击形变系数，只在算好的软边半径上再叠加一层非周期噪声扰动，读出"边缘微微
+        // 晕开"而不是规整的正弦描边，比现有 _IdleWobble（纯正弦，规律感强）更接近水彩笔触。
+        _WatercolorNoiseAmt ("Watercolor Edge Noise", Range(0, 0.15)) = 0.05
+        _WatercolorNoiseFreq ("Watercolor Noise Freq", Range(1, 10)) = 4.0
+        _WatercolorNoiseSpeed ("Watercolor Noise Speed", Range(0, 2)) = 0.5
     }
 
     SubShader
@@ -60,6 +66,27 @@ Shader "BinGames/SimBioGlass"
             float _SwimStretch;
             float _SwimCompress;
             float _ImpactSquash;
+            float _WatercolorNoiseAmt;
+            float _WatercolorNoiseFreq;
+            float _WatercolorNoiseSpeed;
+
+            // combat-primitive-presentation story-004：廉价 hash 值噪声，不用纹理采样（GPU Instancing
+            // 批次已经在传三个 per-instance 向量，不额外加贴图依赖）。
+            float Hash21(float2 p)
+            {
+                p = frac(p * float2(123.34, 456.21));
+                p += dot(p, p + 45.32);
+                return frac(p.x * p.y);
+            }
+
+            float ValueNoise1D(float x)
+            {
+                float i = floor(x);
+                float f = frac(x);
+                float a = Hash21(float2(i, 0.0));
+                float b = Hash21(float2(i + 1.0, 0.0));
+                return lerp(a, b, smoothstep(0.0, 1.0, f));
+            }
 
             struct appdata
             {
@@ -139,7 +166,12 @@ Shader "BinGames/SimBioGlass"
                     sin(ang * 3.0 + t) * 0.55 +
                     sin(ang * 5.0 - t * 1.1) * 0.30 +
                     sin(ang * 8.0 + t * 0.6) * 0.15;
-                float outlineR = _BodyRadius + idle * _IdleWobble * idleMul;
+                // combat-primitive-presentation story-004：水彩边缘噪声——比 idle 慢、比 idle 不规律，
+                // 叠加而非替换，全程受 idleMul 同一套"游动/受击时收敛"闸门约束，不会和形变互相打架。
+                float watercolorT = _Time.y * _WatercolorNoiseSpeed;
+                float watercolorNoise = ValueNoise1D(ang * _WatercolorNoiseFreq + watercolorT) - 0.5;
+                float outlineR = _BodyRadius + idle * _IdleWobble * idleMul
+                    + watercolorNoise * _WatercolorNoiseAmt * idleMul;
                 float innerR = outlineR - _OutlineWidth;
 
                 // 软外缘（比硬描边环柔和）

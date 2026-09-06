@@ -27,6 +27,18 @@ namespace GameLogic.Battle.Feedback
         public UniTask LoadArtBindingsAsync() =>
             (_impl as WhiteboxComposeProjectileFeedback)?.LoadVfxBindingsAsync() ?? UniTask.CompletedTask;
 
+        /// <summary>combat-primitive-presentation story-004：近战前冲方向+强度，供 CellStageFlow 每帧
+        /// 转发给 SimRenderer.SetPlayerLunge。同 <see cref="LoadArtBindingsAsync"/> 先例——非白模实现
+        /// 类型检查后走空操作（方向 zero/强度 0，SimRenderer 端天然不产生位移）。</summary>
+        public (Unity.Mathematics.float2 Direction, float Progress) GetMeleeLunge()
+        {
+            if (_impl is WhiteboxComposeProjectileFeedback wb)
+            {
+                return (wb.MeleeLungeDirection, wb.MeleeLungeProgress);
+            }
+            return (Unity.Mathematics.float2.zero, 0f);
+        }
+
         public override void OnEnter()
         {
             _scope = new SignalScope();

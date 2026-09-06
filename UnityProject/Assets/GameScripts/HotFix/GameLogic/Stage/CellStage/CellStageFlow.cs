@@ -1003,6 +1003,14 @@ namespace GameLogic.Stage.CellStage
             // Dev GO 镜像开启时抑制单位+内核弹道 Instanced，避免双影（区/障碍等本已是 GO）。
             if (!Battle.Feedback.DevUnitGoMirror.SuppressInstancedDraw)
             {
+                // combat-primitive-presentation story-004（COMBAT-PRESENTATION §4）：近战整体前冲-回弹，
+                // 纯渲染位移写进 SimRenderer，不改 Position/碰撞。零近战攻击历史时 Progress 恒为 0，
+                // Draw() 内直接跳过位移分支，零回归。
+                if (_composeProjectilePresenter != null && _renderer != null)
+                {
+                    var (lungeDir, lungeProgress) = _composeProjectilePresenter.GetMeleeLunge();
+                    _renderer.SetPlayerLunge(lungeDir, lungeProgress);
+                }
                 _renderer?.Draw(_sim.Snapshot);
                 if (_sim.World != null)
                 {

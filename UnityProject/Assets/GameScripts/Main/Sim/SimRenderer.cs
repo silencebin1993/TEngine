@@ -35,6 +35,10 @@ namespace BinGames.Sim
         /// <summary>投射物沿飞行方向拉长的倍率——纯圆点在快速移动时几乎不可见（story-010 V1）。</summary>
         private const float ProjectileStretch = 2.2f;
 
+        /// <summary>combat-primitive-presentation story-004（COMBAT-PRESENTATION §4）：近战整体前冲的
+        /// 最大位移距离（世界单位）。纯表现位移，不改 <see cref="SimSnapshot.PlayerPosition"/>/碰撞判定。</summary>
+        private const float PlayerLungeDistance = 0.6f;
+
         private SimVisual[] _visuals;
         private Matrix4x4[][] _matrices;
         private Vector4[][] _colors;
@@ -51,6 +55,12 @@ namespace BinGames.Sim
         private float2[] _impactDir;
         private float[] _impactAmt;
         private readonly Dictionary<int, int> _logicToIndex = new Dictionary<int, int>(256);
+
+        /// <summary>combat-primitive-presentation story-004：近战整体前冲的方向+当前强度（0-1，由
+        /// HotFix 层 <see cref="SetPlayerLunge"/> 每帧写入，随近战判定的时间窗自然归零，本类不自己
+        /// 计时——避免这里长出一份独立于施法逻辑的计时状态）。</summary>
+        private float2 _playerLungeDir;
+        private float _playerLungeAmount;
 
         private float _yPlane;
         private static readonly int ColorId = Shader.PropertyToID("_Color");
@@ -119,6 +129,11 @@ namespace BinGames.Sim
                 }
 
                 float2 p = snap.Position[i];
+                if (i == BinGames.Sim.SimConst.PlayerIndex && _playerLungeAmount > 0f)
+                {
+                    // combat-primitive-presentation story-004：纯渲染位移，不写回 Position，不影响碰撞/寻路。
+                    p += _playerLungeDir * (PlayerLungeDistance * _playerLungeAmount);
+                }
                 float s = snap.Radius[i] * 2f * _visuals[v].ScaleMul;
                 _matrices[v][c] = Matrix4x4.TRS(
                     new Vector3(p.x, _yPlane, p.y),
@@ -163,6 +178,16 @@ namespace BinGames.Sim
                     Graphics.RenderMeshInstanced(rp, _visuals[v].Mesh, 0, _batchMatrices, n);
                 }
             }
+        }
+
+        /// <summary>combat-primitive-presentation story-004（COMBAT-PRESENTATION §4）：近战攻击触发时，
+        /// HotFix 层每帧调用本方法写入当前前冲方向+强度（0=无位移，1=位移满 <see cref="PlayerLungeDistance"/>）。
+        /// 只在下一次 <see cref="Draw"/> 时对玩家（<see cref="BinGames.Sim.SimConst.PlayerIndex"/>）这一个实例
+        /// 的渲染矩阵生效，不进模拟状态、不碰其它单位，成本恒为 O(1)。</summary>
+        public void SetPlayerLunge(float2 direction, float amount)
+        {
+            _playerLungeDir = direction;
+            _playerLungeAmount = math.saturate(amount);
         }
 
         /// <summary>投射物渲染。数量少，用一个固定视觉。</summary>

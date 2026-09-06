@@ -77,6 +77,13 @@ namespace GameLogic.Battle.Feedback
         private const float MeleeForwardStretch = 1.4f;
         private const float MeleeSideStretch = 0.75f;
 
+        /// <summary>combat-primitive-presentation story-004：Bolt/Spore 绑定真实 Prefab 时的飞行中拉伸倍率。</summary>
+        private const float ProjectileFlightStretch = 1.25f;
+        /// <summary>命中前最终压扁倍率（&lt;1 沿飞行轴收短，体现"砸中"瞬间）。</summary>
+        private const float ProjectileImpactSquash = 0.75f;
+        /// <summary>飞行进度 u 超过这个比例后开始从拉伸过渡到压扁，只占最后一小段生命周期。</summary>
+        private const float ProjectileImpactSquashStart = 0.82f;
+
         /// <summary>Beam 抻出耗时——0 到 PersistentLife（0.5s）内前 0.15s 从 0 长度快速抻满，
         /// 让光束读出"从身上打出去"而不是贴身凭空出现的静态色块（Bolt 已有 MuzzleOffset 解决同类问题，
         /// Beam 用「起点固定在身上 + 长度动画」的等价手法，因为它是有向长条不是圆形，没有居中重叠问题，
@@ -178,6 +185,12 @@ namespace GameLogic.Battle.Feedback
         /// <summary>story-006：已激活的 VFX Prefab 池实例（未绑定/未命中时对应槽为 null，走程序化白模）。</summary>
         private GameObject[] _prefabGo;
         private FeatureArtVfxPool _vfxPool;
+
+        /// <summary>combat-primitive-presentation story-004（COMBAT-PRESENTATION §3.2②）：缓存每个池
+        /// 实例首次出现时的原始 localScale，后续每帧用"原始缩放 × 拉伸系数"重算，不能在原有 localScale
+        /// 上连乘——池化实例会反复复用，连乘会跨帧越缩越夸张。只在 Bolt/Spore（有直线飞行位移的两个
+        /// Shape）生效，其余 Shape 的 Prefab 缩放保持 story-006 原状不变（资源自身决定）。</summary>
+        private readonly Dictionary<GameObject, Vector3> _prefabBaseScale = new Dictionary<GameObject, Vector3>();
 
         private Mesh _circleMesh;
         private Mesh _streakMesh;
@@ -350,6 +363,32 @@ namespace GameLogic.Battle.Feedback
             await _vfxPool.LoadAsync(ids);
         }
 
+        // ── combat-primitive-presentation story-004（COMBAT-PRESENTATION §4）：近战整体前冲-回弹。
+        // 只记方向+经过时间，位移曲线在 MeleeLungeProgress 里算，供 ComposeProjectilePresenter/
+        // CellStageFlow 每帧读取后写进 SimRenderer.SetPlayerLunge——本类不直接碰 SimRenderer，保持
+        // "表现层只产出信号供渲染层消费"的既有分层。──
+        private const float MeleeLungeDuration = 0.22f;
+        private float2 _meleeLungeDir;
+        private float _meleeLungeElapsed = MeleeLungeDuration;
+
+        /// <summary>最近一次近战攻击的方向；无进行中的前冲时其值不重要（<see cref="MeleeLungeProgress"/> 已是 0）。</summary>
+        public float2 MeleeLungeDirection => _meleeLungeDir;
+
+        /// <summary>0-1，前冲位移的当前强度——起手快速冲出、随后回弹到 0（单个 sin 半波，不分两段判断），
+        /// <see cref="MeleeLungeDuration"/> 之后恒为 0。</summary>
+        public float MeleeLungeProgress
+        {
+            get
+            {
+                if (_meleeLungeElapsed >= MeleeLungeDuration)
+                {
+                    return 0f;
+                }
+                float u = _meleeLungeElapsed / MeleeLungeDuration;
+                return MathF.Sin(MathF.PI * u);
+            }
+        }
+
         public void OnComposeCast(ComposeCastSignal signal)
         {
             if (!signal.HasProjectile)
@@ -362,6 +401,12 @@ namespace GameLogic.Battle.Feedback
             float radius = MetabolicSliceBridge.DamageAreaRadius * MathF.Max(0.1f, signal.Scale);
             int segments = Math.Max(1, (int)MathF.Round(signal.Count));
             ShapeKind kind = ParseShape(signal.Shape);
+
+            if (kind == ShapeKind.Melee)
+            {
+                _meleeLungeDir = math.normalizesafe(signal.Direction, new float2(0f, 1f));
+                _meleeLungeElapsed = 0f;
+            }
 
             // story-007 D1：元素 Tag 优先；story-008 R7③：无元素 Tag 但仍带其它 Tag（Physical/Catalyst 等）
             // 时不再直接退化成 Shape 底色，改用中性配色，避免所有非元素 Tag 弹道读起来跟无 Tag 弹道一样。
@@ -586,6 +631,11 @@ namespace GameLogic.Battle.Feedback
 
         public void Tick(float dt)
         {
+            if (_meleeLungeElapsed < MeleeLungeDuration)
+            {
+                _meleeLungeElapsed += dt;
+            }
+
             if (_timeLeft == null)
             {
                 return;
@@ -950,11 +1000,31 @@ namespace GameLogic.Battle.Feedback
                 }
             }
 
-            // story-006：有 Prefab 覆盖时，只同步位置/朝向——缩放由资源自身决定，运行时不缩放。
+            // story-006：有 Prefab 覆盖时，只同步位置/朝向——缩放默认由资源自身决定，运行时不缩放。
             if (_prefabGo[idx] != null)
             {
                 _prefabGo[idx].transform.position = _tf[idx].localPosition;
                 _prefabGo[idx].transform.rotation = _tf[idx].localRotation;
+
+                // combat-primitive-presentation story-004：仅 Bolt/Spore 这两个有真实直线飞行位移的
+                // Shape 叠加方向性拉伸——飞行中沿局部 +X（已随 Direction 旋转）拉长，命中前最后一段
+                // 时间压扁，读出"飞出去/砸下去"而不是刚体平移。其余 Shape（Beam/Arc/Field/Wave/Melee）
+                // 是原地生长/常驻语义，保持资源原始缩放不动，避免和它们各自的几何语义冲突。
+                if (kind == ShapeKind.Bolt || kind == ShapeKind.Spore)
+                {
+                    if (!_prefabBaseScale.TryGetValue(_prefabGo[idx], out Vector3 baseScale))
+                    {
+                        baseScale = _prefabGo[idx].transform.localScale;
+                        _prefabBaseScale[_prefabGo[idx]] = baseScale;
+                    }
+                    float stretch = u < ProjectileImpactSquashStart
+                        ? ProjectileFlightStretch
+                        : Mathf.Lerp(ProjectileFlightStretch, ProjectileImpactSquash,
+                            (u - ProjectileImpactSquashStart) / (1f - ProjectileImpactSquashStart));
+                    float across = 2f - stretch; // 体积感守恒：拉长的同时略微收窄，不是单轴无脑放大。
+                    _prefabGo[idx].transform.localScale = new Vector3(
+                        baseScale.x * stretch, baseScale.y * across, baseScale.z * across);
+                }
             }
         }
 
@@ -1260,6 +1330,7 @@ namespace GameLogic.Battle.Feedback
 
             _vfxPool?.Dispose();
             _vfxPool = null;
+            _prefabBaseScale.Clear();
 
             if (_reactionLabels != null)
             {
