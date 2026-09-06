@@ -583,6 +583,12 @@ namespace GameLogic.Core
         public float ArenaHalfExtent = 90f;
         public int UnitCapacity = 16384;
         public float HashCellSize = 4f;
+        public int PityThreshold = 4;
+        public float LowHealthPercent = 0.3f;
+        public float RouteAffinityPerCard = 0.13f;
+        public float RouteAffinityCap = 1.8f;
+        public float SynergyBonusPerMatch = 0.07f;
+        public float SynergyBonusCap = 1.5f;
     }
 
     /// <summary>

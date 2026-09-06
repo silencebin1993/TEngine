@@ -26,9 +26,6 @@ namespace GameLogic.Cards
         /// <summary>连续未出稀有及以上的次数。</summary>
         private int _pityCounter;
 
-        /// <summary>连续 4 次未出稀有，第 5 次强制稀有。</summary>
-        private const int PityThreshold = 4;
-
         public void Bind(Deck deck, StatSheet stats)
         {
             _deck = deck;
@@ -62,8 +59,8 @@ namespace GameLogic.Cards
             _result.Clear();
             int want = OptionCount(kind);
 
-            bool forceRare = _pityCounter >= PityThreshold || kind == DraftKind.Elite;
-            bool needSurvival = healthPercent <= 0.3f;
+            bool forceRare = _pityCounter >= DataRegistry.Instance.Global.PityThreshold || kind == DraftKind.Elite;
+            bool needSurvival = healthPercent <= DataRegistry.Instance.Global.LowHealthPercent;
 
             // 低血保底：先塞一张生存向卡（Spec §8.5）
             if (needSurvival && kind != DraftKind.Legacy)
@@ -204,7 +201,8 @@ namespace GameLogic.Cards
             if (_deck != null && c.Route != CardRoute.None)
             {
                 int owned = _deck.RouteCount(c.Route);
-                w *= Mathf.Min(1.8f, 1f + owned * 0.13f);
+                w *= Mathf.Min(DataRegistry.Instance.Global.RouteAffinityCap,
+                    1f + owned * DataRegistry.Instance.Global.RouteAffinityPerCard);
             }
 
             // 联动加成：与已有卡的 SynergyTags 有交集则加权（上限 1.5）
@@ -259,7 +257,8 @@ namespace GameLogic.Cards
                 }
             }
 
-            return Mathf.Min(1.5f, 1f + matches * 0.07f);
+            return Mathf.Min(DataRegistry.Instance.Global.SynergyBonusCap,
+                1f + matches * DataRegistry.Instance.Global.SynergyBonusPerMatch);
         }
 
         /// <summary>

@@ -354,6 +354,12 @@ namespace GameLogic.Core
                 ArenaHalfExtent = g.ArenaHalfExtent,
                 UnitCapacity = g.UnitCapacity,
                 HashCellSize = g.HashCellSize,
+                PityThreshold = g.PityThreshold,
+                LowHealthPercent = g.LowHealthPercent,
+                RouteAffinityPerCard = g.RouteAffinityPerCard,
+                RouteAffinityCap = g.RouteAffinityCap,
+                SynergyBonusPerMatch = g.SynergyBonusPerMatch,
+                SynergyBonusCap = g.SynergyBonusCap,
             });
         }
 

@@ -49,7 +49,11 @@ namespace GameLogic.Core
         }
 
         private static void Global(DataRegistry reg) => reg.SetGlobal(new GlobalSpec
-            { ObstacleCount = 14, ArenaHalfExtent = 90f, UnitCapacity = 16384, HashCellSize = 4f });
+            {
+                ObstacleCount = 14, ArenaHalfExtent = 90f, UnitCapacity = 16384, HashCellSize = 4f,
+                PityThreshold = 4, LowHealthPercent = 0.3f, RouteAffinityPerCard = 0.13f,
+                RouteAffinityCap = 1.8f, SynergyBonusPerMatch = 0.07f, SynergyBonusCap = 1.5f,
+            });
 
         /// <summary>
         /// story-006：cell.OrganModuleParams 表的内置兜底副本，逐值与表一致
