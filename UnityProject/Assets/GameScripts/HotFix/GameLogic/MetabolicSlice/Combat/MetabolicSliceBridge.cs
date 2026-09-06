@@ -726,6 +726,9 @@ namespace GameLogic.MetabolicSlice.Combat
                     Origin = _sim.PlayerPosition,
                     Direction = _abilities != null ? _abilities.AimDirection : DefaultForward,
                     HasProjectile = evt.Damage > 0f,
+                    // reaction-depth-and-combat-feel story-002：具名反应（ReactionCatalog.RegisterDefaults/
+                    // EnvironmentReactionCatalog）命中时都会写 evt.Payload["Reaction"]，转发给表现层播报。
+                    ReactionName = evt.Payload.TryGetValue("Reaction", out var reactionObj) ? reactionObj as string : null,
                 });
             }
 

@@ -16,6 +16,11 @@ namespace GameLogic.Battle.Feedback
         /// <summary>组合出口结算完成。实现按 <see cref="ComposeCastSignal.Shape"/> 选几何模板。</summary>
         void OnComposeCast(ComposeCastSignal signal);
 
+        /// <summary>story-003（reaction-depth-and-combat-feel）：结构器官被动触发（反伤/移动/击杀/
+        /// 低血量/周期脉冲）完成。与 <see cref="OnComposeCast"/> 并列，不复用其 Shape 路由——
+        /// 结构器官钩子没有 Delivery 形态，只是一个定点标记。</summary>
+        void OnStructuralHookFired(StructuralHookFiredSignal signal);
+
         /// <summary>每帧推进（弹道位移/衰减，不读 Sim）。</summary>
         void Tick(float dt);
     }

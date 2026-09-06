@@ -23,6 +23,7 @@
   <Project Path="Unity.InferenceEngine.Editor.Visualizer.csproj" />
   <Project Path="Unity.AI.Generators.Redux.csproj" />
   <Project Path="TEngine.Editor.csproj" />
+  <Project Path="GameProto.csproj" />
   <Project Path="Unity.VisualStudio.Editor.csproj" />
   <Project Path="Unity.InputSystem.csproj" />
   <Project Path="Unity.Entities.csproj" />
@@ -39,7 +40,6 @@
   <Project Path="Unity.InferenceEngine.Tokenization.csproj" />
   <Project Path="YooAsset.MiniGame.csproj" />
   <Project Path="Unity.InferenceEngine.Editor.csproj" />
-  <Project Path="GameProto.csproj" />
   <Project Path="Unity.AI.Navigation.Editor.ConversionSystem.csproj" />
   <Project Path="Unity.AI.Pbr.csproj" />
   <Project Path="Unity.AI.Generators.Sdk.csproj" />

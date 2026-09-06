@@ -52,6 +52,10 @@ namespace GameLogic
             Terrain,
             Status,
             Enemy,
+            // reaction-depth-and-combat-feel story-004：追加在枚举最末尾（不插入中间），
+            // 现有 8 个分类的底层 int 值不受影响，规避 structural-organ-codex-tab story-001
+            // 记录过的"(CodexCategory)i 下标错位"风险类别。
+            Reaction,
         }
 
         private UIDocument _document;
@@ -87,6 +91,7 @@ namespace GameLogic
         {
             // 下标与 CodexCategory 枚举值严格一一对应，插入/删除必须两边同步改。
             "TabOrganelle", "TabModule", "TabStructural", "TabGene", "TabSlot", "TabTerrain", "TabStatus", "TabEnemy",
+            "TabReaction",
         };
 
         // 图鉴 tooltip（story-005 R4：hover 触发，≤3 行，供本控制器 Deck 卡牌与
@@ -746,6 +751,21 @@ namespace GameLogic
                         }
                         AddCodexRow(e.Discovered ? e.Name : "？？？", e.Discovered ? e.Description : "尚未遭遇，击杀或吞噬后解锁。",
                             extra, "敌人", e.Discovered);
+                    }
+                    break;
+
+                // reaction-depth-and-combat-feel story-004：具名反应图鉴——ReactionRule 早就写好的
+                // 中文说明字符串首次展示给玩家看（此前只在代码注释里）。未发现时按敌人分类同款遮罩。
+                case CodexCategory.Reaction:
+                    foreach (ReactionCodexEntry e in codex.AllReactionEntries())
+                    {
+                        string name = ReactionFeedbackCatalog.GetLabel(e.Id);
+                        if (!MatchesFilter(name, e.Description, filter))
+                        {
+                            continue;
+                        }
+                        AddCodexRow(e.Discovered ? name : "？？？", e.Discovered ? e.Description : "尚未触发过，命中对应标签组合后解锁。",
+                            null, "组合反应", e.Discovered);
                     }
                     break;
             }

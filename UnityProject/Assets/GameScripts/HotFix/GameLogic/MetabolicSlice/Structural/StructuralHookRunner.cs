@@ -277,24 +277,48 @@ namespace GameLogic.MetabolicSlice.Structural
 
         private void FireDamageTaken(in TriggerHookSpec spec, float2 pos, float incomingDamage, string partId)
         {
+            float radius = spec.LingerRadius > 0f ? spec.LingerRadius : DefaultAreaRadius;
             if (spec.ThornsRatio > 0f && _sim != null)
             {
-                float radius = spec.LingerRadius > 0f ? spec.LingerRadius : DefaultAreaRadius;
-                float ratio = ResolveThornsRatio(spec.ThornsRatio, partId);
+                float ratio = ResolveThornsRatio(spec.ThornsRatio, partId, spec.Tag);
                 _sim.DamageArea(pos, radius, incomingDamage * ratio, SimFaction.Hostile,
                     sourceLogicId: ThornsSourceLogicId);
             }
             // Tag 标记（非反伤器官）仍走既有易伤/异常状态管线；Vulnerable 已按 CATALOG §A 文案
             // 移除，不与真实扣血叠加（preflight-decisions.md #5）。
             ApplyAreaMarks(in spec, pos, includeThornsMark: false, partId);
+            // reaction-depth-and-combat-feel story-003：钩子触发的最小可见反馈，不区分是否命中了
+            // ThornsRatio>0 分支——只要 OnDamageTaken 钩子被调用就给个信号，让玩家知道"这件器官响应了"。
+            Signals.Publish(new StructuralHookFiredSignal { Position = pos, Radius = radius, Kind = "Thorns" });
         }
 
-        /// <summary>story-003：把 ThornsRatio 当种子 Energy，组一条「EnergyCore(baseRatio) + 该结构器官
-        /// 槽位里的基因模块链」跑 <see cref="Engine.NormalizeAssembly"/>，用运行完的 FinalPacket.Energy
-        /// 重算反伤倍率——让荆棘壳的反伤真的读结构器官槽位里装的基因（preflight-decisions.md #7）。
-        /// 拿不到 CarrierRegistry/GeneReserve/Engine/该 partId 对应 CarrierInstance 任一环节时，
-        /// Reject-to-Safe 直接回落 baseRatio，行为等价 story-002 之前（Required 5）。</summary>
-        private float ResolveThornsRatio(float baseRatio, string partId)
+        /// <summary>story-003（gene-organ-universal-reaction）：把 ThornsRatio 当种子 Energy，组一条
+        /// 「EnergyCore(baseRatio) + 该结构器官槽位里的基因模块链」重算反伤倍率——让荆棘壳的反伤真的
+        /// 读结构器官槽位里装的基因（preflight-decisions.md #7）。
+        /// story-003（reaction-depth-and-combat-feel，2026-09-06）：改走
+        /// <see cref="ResolveThroughReactionPipeline"/>，链尾加 Actuator 后过一遍 ApplyPipeline——
+        /// 不只是基因数值叠乘，<paramref name="tag"/>（=spec.Tag）与装备基因的 tag 现在会一起参与
+        /// Substance 混合/Phase 1 新增的命名反应，荆棘壳配一个带 Fire 标签的基因，反伤这一下也可能
+        /// 命中"苛性灼烧"之类的反应。无标签/无匹配反应时数值与升级前完全一致（Actuator 只是把
+        /// Energy 折算成 Damage，不改变数值本身）。拿不到任一环节时 Reject-to-Safe 直接回落
+        /// baseRatio，行为等价 story-002 之前（Required 5）。</summary>
+        private float ResolveThornsRatio(float baseRatio, string partId, string tag)
+        {
+            ComposeEngine.Core.HitEvent evt = ResolveThroughReactionPipeline(new EnergyCore(baseRatio), tag, partId);
+            return evt?.Damage ?? baseRatio;
+        }
+
+        /// <summary>reaction-depth-and-combat-feel story-003：四个 Resolve* 共用的执行核心——种子模块
+        /// （<see cref="EnergyCore"/> 读 Energy 或 <see cref="LingerModule"/> 读 Linger）+ 该结构器官
+        /// 自身的 <paramref name="tag"/>（TagAttach，空字符串则不挂）+ 槽位里装的基因模块链，链尾加
+        /// <see cref="Actuator"/> 折算成 HitEvent 后过一遍 <see cref="Engine.ApplyPipeline"/>——Substance
+        /// 混合（<c>SubstanceMixSettle</c>）对每个 HitEvent 都自动跑，命名反应表按合并后的 tag 集合匹配，
+        /// 结构器官由此真正加入"默认全能组合"而不再是与基因反应系统平行的独立小系统。
+        /// 不传 <see cref="RuleVector"/>/<see cref="WorldState"/> 契约（结构器官钩子没有装备契约的概念，
+        /// 与 <see cref="Carrier.CarrierCompiler"/> 处理攻击器官的路径不同，那边契约来自基因槽位）。
+        /// 拿不到 CarrierRegistry/GeneReserve/Engine/该 partId 对应 CarrierInstance 任一环节，或装配链
+        /// 未产出事件（理论上不会，Actuator 恒产出）时返回 null，调用方各自 Reject-to-Safe 回落基础值。</summary>
+        private ComposeEngine.Core.HitEvent ResolveThroughReactionPipeline(IModule seedModule, string tag, string partId)
         {
             CarrierRegistry registry = MetabolicSlicePanel.Instance?.CarrierRegistry;
             GeneReserve reserve = MetabolicSlicePanel.Instance?.GeneReserve;
@@ -302,10 +326,14 @@ namespace GameLogic.MetabolicSlice.Structural
             CarrierInstance carrier = registry?.GetCarrier(partId);
             if (registry == null || reserve == null || engine == null || carrier == null)
             {
-                return baseRatio;
+                return null;
             }
 
-            var chain = new List<IModule> { new EnergyCore(baseRatio) };
+            var chain = new List<IModule> { seedModule };
+            if (!string.IsNullOrEmpty(tag))
+            {
+                chain.Add(new TagAttach(tag));
+            }
             foreach (CarrierSlot slot in carrier.Slots)
             {
                 if (string.IsNullOrEmpty(slot.GeneInstanceId))
@@ -324,53 +352,32 @@ namespace GameLogic.MetabolicSlice.Structural
                 }
                 chain.Add(createModule());
             }
+            chain.Add(new Actuator(ActuatorMode.Attack));
 
-            return engine.NormalizeAssembly(chain).FinalPacket.Energy;
+            System.Collections.Generic.IReadOnlyList<ComposeEngine.Core.HitEvent> raw =
+                engine.RunAssembly(chain, ticks: 1, seed: 0);
+            if (raw.Count == 0)
+            {
+                return null;
+            }
+            return engine.ApplyPipeline(raw[0], new RuleVector(), null);
         }
 
         /// <summary>story-004：与 <see cref="ResolveThornsRatio"/> 同构——把低血量无敌秒数当种子
-        /// LingerModule（LingerModule.Step 是整段赋值，不是累加，见 preflight-decisions.md #3），
-        /// 组一条「LingerModule(baseSeconds) + 该结构器官槽位里的基因模块链」跑
-        /// <see cref="Engine.NormalizeAssembly"/>，用运行完的 FinalPacket.Linger 重算无敌秒数。
-        /// 拿不到 CarrierRegistry/GeneReserve/Engine/该 partId 对应 CarrierInstance 任一环节时，
-        /// Reject-to-Safe 直接回落 baseSeconds（Required 3）。</summary>
-        private float ResolveLingerSeconds(float baseSeconds, string partId)
+        /// LingerModule（LingerModule.Step 是整段赋值，不是累加，见 preflight-decisions.md #3）。
+        /// story-003（reaction-depth-and-combat-feel）：改走 <see cref="ResolveThroughReactionPipeline"/>，
+        /// 读回 <c>HitEvent.Linger</c>（Actuator 原样透传 Packet.Linger，数值语义不变）。</summary>
+        private float ResolveLingerSeconds(float baseSeconds, string partId, string tag)
         {
-            CarrierRegistry registry = MetabolicSlicePanel.Instance?.CarrierRegistry;
-            GeneReserve reserve = MetabolicSlicePanel.Instance?.GeneReserve;
-            Engine engine = _metabolicBridge?.GetEngine();
-            CarrierInstance carrier = registry?.GetCarrier(partId);
-            if (registry == null || reserve == null || engine == null || carrier == null)
-            {
-                return baseSeconds;
-            }
-
-            var chain = new List<IModule> { new LingerModule(baseSeconds) };
-            foreach (CarrierSlot slot in carrier.Slots)
-            {
-                if (string.IsNullOrEmpty(slot.GeneInstanceId))
-                {
-                    continue;
-                }
-                GeneInstance gene = reserve.Find(slot.GeneInstanceId);
-                if (gene == null)
-                {
-                    continue;
-                }
-                System.Func<IModule> createModule = GeneCatalog.GetModule(gene.GeneId);
-                if (createModule == null)
-                {
-                    continue;
-                }
-                chain.Add(createModule());
-            }
-
-            return engine.NormalizeAssembly(chain).FinalPacket.Linger;
+            ComposeEngine.Core.HitEvent evt = ResolveThroughReactionPipeline(new LingerModule(baseSeconds), tag, partId);
+            return evt?.Linger ?? baseSeconds;
         }
 
         private void FireMove(in TriggerHookSpec spec, float2 pos, string partId)
         {
             ApplyAreaMarks(in spec, pos, includeThornsMark: false, partId);
+            float radius = spec.LingerRadius > 0f ? spec.LingerRadius : DefaultAreaRadius;
+            Signals.Publish(new StructuralHookFiredSignal { Position = pos, Radius = radius, Kind = "Move" });
         }
 
         /// <summary>story-009：基础回血量改读该器官自己的 <see cref="TriggerHookSpec.KillHealAmount"/>
@@ -387,51 +394,24 @@ namespace GameLogic.MetabolicSlice.Structural
             {
                 return;
             }
-            float heal = ResolveKillHeal(baseHeal, partId);
+            float heal = ResolveKillHeal(baseHeal, partId, spec.Tag);
             if (heal > 0f)
             {
                 _sim.HealPlayer(heal, _stats.Get(StatId.MaxHealth));
+                float2 pos = _sim.PlayerPosition;
+                Signals.Publish(new StructuralHookFiredSignal { Position = pos, Radius = 1.5f, Kind = "Kill" });
             }
         }
 
         /// <summary>story-009：与 <see cref="ResolveThornsRatio"/> 完全同构——把基础回血量当种子
         /// <see cref="EnergyCore"/>（003 已验证 EnergyCore 对 Packet.Energy 是从 0 起步的累加，
-        /// 等价赋值种子），组一条「EnergyCore(baseHeal) + 该结构器官槽位里的基因模块链」跑
-        /// <see cref="Engine.NormalizeAssembly"/>，用 FinalPacket.Energy 当最终回血量。
-        /// 拿不到 CarrierRegistry/GeneReserve/Engine/该 partId 对应 CarrierInstance 任一环节时，
-        /// Reject-to-Safe 直接回落 baseHeal。</summary>
-        private float ResolveKillHeal(float baseHeal, string partId)
+        /// 等价赋值种子）。story-003（reaction-depth-and-combat-feel）：改走
+        /// <see cref="ResolveThroughReactionPipeline"/>，读回 <c>HitEvent.Damage</c>（Actuator 默认分支
+        /// 把 Energy 折算成 Damage，数值语义不变）。</summary>
+        private float ResolveKillHeal(float baseHeal, string partId, string tag)
         {
-            CarrierRegistry registry = MetabolicSlicePanel.Instance?.CarrierRegistry;
-            GeneReserve reserve = MetabolicSlicePanel.Instance?.GeneReserve;
-            Engine engine = _metabolicBridge?.GetEngine();
-            CarrierInstance carrier = registry?.GetCarrier(partId);
-            if (registry == null || reserve == null || engine == null || carrier == null)
-            {
-                return baseHeal;
-            }
-
-            var chain = new List<IModule> { new EnergyCore(baseHeal) };
-            foreach (CarrierSlot slot in carrier.Slots)
-            {
-                if (string.IsNullOrEmpty(slot.GeneInstanceId))
-                {
-                    continue;
-                }
-                GeneInstance gene = reserve.Find(slot.GeneInstanceId);
-                if (gene == null)
-                {
-                    continue;
-                }
-                System.Func<IModule> createModule = GeneCatalog.GetModule(gene.GeneId);
-                if (createModule == null)
-                {
-                    continue;
-                }
-                chain.Add(createModule());
-            }
-
-            return engine.NormalizeAssembly(chain).FinalPacket.Energy;
+            ComposeEngine.Core.HitEvent evt = ResolveThroughReactionPipeline(new EnergyCore(baseHeal), tag, partId);
+            return evt?.Damage ?? baseHeal;
         }
 
         private void FireLowHealth(in TriggerHookSpec spec, string partId)
@@ -442,12 +422,18 @@ namespace GameLogic.MetabolicSlice.Structural
             }
             // 玩家在内核中恒占索引 0（BinGames.Sim.SimFaction.Player 文档注释）
             float seconds = spec.LingerSeconds > 0f ? spec.LingerSeconds : DefaultLowHealthInvulnSeconds;
-            _status.ApplyTimed(0, SimStatus.Invulnerable, ResolveLingerSeconds(seconds, partId));
+            _status.ApplyTimed(0, SimStatus.Invulnerable, ResolveLingerSeconds(seconds, partId, spec.Tag));
+            if (_sim != null)
+            {
+                Signals.Publish(new StructuralHookFiredSignal { Position = _sim.PlayerPosition, Radius = 1.5f, Kind = "LowHealth" });
+            }
         }
 
         private void FirePulse(in TriggerHookSpec spec, float2 pos, string partId)
         {
             ApplyAreaMarks(in spec, pos, includeThornsMark: true, partId);
+            float radius = spec.LingerRadius > 0f ? spec.LingerRadius : DefaultAreaRadius;
+            Signals.Publish(new StructuralHookFiredSignal { Position = pos, Radius = radius, Kind = "Pulse" });
         }
 
         /// <summary>共用的范围标记落点：ThornsRatio&gt;0 时挂易伤（Thorns/反伤的近似替身，见上方
@@ -463,7 +449,7 @@ namespace GameLogic.MetabolicSlice.Structural
             }
             float radius = spec.LingerRadius > 0f ? spec.LingerRadius : DefaultAreaRadius;
             float baseSeconds = spec.LingerSeconds > 0f ? spec.LingerSeconds : DefaultMarkSeconds;
-            float seconds = ResolveLingerSeconds(baseSeconds, partId);
+            float seconds = ResolveLingerSeconds(baseSeconds, partId, spec.Tag);
 
             if (includeThornsMark && spec.ThornsRatio > 0f)
             {

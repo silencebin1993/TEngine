@@ -55,6 +55,22 @@ namespace GameLogic.Progression
         }
     }
 
+    /// <summary>反应图鉴条目（reaction-depth-and-combat-feel story-004）：全量已知具名反应 + 是否
+    /// 已发现（本局曾触发过或历史累计触发过）。</summary>
+    public readonly struct ReactionCodexEntry
+    {
+        public readonly string Id;
+        public readonly string Description;
+        public readonly bool Discovered;
+
+        public ReactionCodexEntry(string id, string description, bool discovered)
+        {
+            Id = id;
+            Description = description;
+            Discovered = discovered;
+        }
+    }
+
     /// <summary>器官图鉴条目（story-002 D1）。OrganelleCatalog 无本局发现态跟踪，只出全量目录。</summary>
     public readonly struct OrganelleCodexEntry
     {
@@ -89,25 +105,32 @@ namespace GameLogic.Progression
 
         private readonly HashSet<int> _enemies = new HashSet<int>();
         private readonly HashSet<int> _cards = new HashSet<int>();
+        private readonly HashSet<string> _reactions = new HashSet<string>();
         private SignalScope _scope;
 
         public IReadOnlyCollection<int> DiscoveredEnemyIds => _enemies;
         public IReadOnlyCollection<int> DiscoveredCardIds => _cards;
+        public IReadOnlyCollection<string> DiscoveredReactionIds => _reactions;
 
         public override void OnEnter()
         {
             _enemies.Clear();
             _cards.Clear();
+            _reactions.Clear();
 
             // 跨局持久化（story-001）：本局起点 = 历史累计。Load 永不 throw，缺档/坏档回落空集合。
             CodexHistory history = CodexPersistence.Load();
             _enemies.UnionWith(history.EnemyIds);
             _cards.UnionWith(history.CardIds);
+            _reactions.UnionWith(history.ReactionIds);
 
             _scope = new SignalScope()
                 .On<KillSignal>(OnKill)
                 .On<DevourSignal>(OnDevour)
-                .On<CardAcquiredSignal>(OnCardAcquired);
+                .On<CardAcquiredSignal>(OnCardAcquired)
+                // reaction-depth-and-combat-feel story-004：ComposeCastSignal.ReactionName 是 story-002
+                // 已经在广播的既有信号，这里只是多订阅一次登记发现，不新开事件源。
+                .On<ComposeCastSignal>(OnComposeCast);
         }
 
         public override void OnExit()
@@ -116,7 +139,15 @@ namespace GameLogic.Progression
             _scope = null;
 
             // 跨局持久化（story-001）：退出时批量落盘一次，整份覆盖（历史 ∪ 本局新发现）。
-            CodexPersistence.Save(_enemies, _cards);
+            CodexPersistence.Save(_enemies, _cards, _reactions);
+        }
+
+        private void OnComposeCast(ComposeCastSignal s)
+        {
+            if (!string.IsNullOrEmpty(s.ReactionName))
+            {
+                _reactions.Add(s.ReactionName);
+            }
         }
 
         private void OnKill(KillSignal s)
@@ -223,6 +254,19 @@ namespace GameLogic.Progression
                 {
                     yield return new OrganelleCodexEntry(def.Id, def.DisplayName, def.Description, def.Role);
                 }
+            }
+        }
+
+        /// <summary>全量已知具名反应（reaction-depth-and-combat-feel story-004）+ 本局/历史是否已发现。
+        /// 目录来源是 <see cref="ReactionFeedbackCatalog"/> 的 key 空间（player 可读的短名，如
+        /// "CausticBurn"），不是 ComposeEngine 内部 <c>ReactionRule.Id</c>（如 "rx_fire_acid_
+        /// causticburn"）——同一个玩家可感知效果在引擎里可能有新旧 tag 命名两条规则注册（如 Steam
+        /// 同时对应 "fire_wet_to_steam" 与 "rx_fire_wet_steam"），按短名去重才是玩家视角的"一种反应"。</summary>
+        public IEnumerable<ReactionCodexEntry> AllReactionEntries()
+        {
+            foreach (string id in ReactionFeedbackCatalog.AllReactionIds)
+            {
+                yield return new ReactionCodexEntry(id, ReactionFeedbackCatalog.GetDescription(id), _reactions.Contains(id));
             }
         }
     }

@@ -14,6 +14,10 @@ namespace GameLogic.Progression
         public int Version = CodexPersistence.CurrentVersion;
         public int[] EnemyIds;
         public int[] CardIds;
+        /// <summary>reaction-depth-and-combat-feel story-004：已发现的具名反应短名（如 "CausticBurn"，
+        /// 与 <see cref="GameLogic.MetabolicSlice.ContentCatalog.ReactionFeedbackCatalog"/> 的 key 一致）。
+        /// 旧存档没有这个字段时 JsonUtility 反序列化为 null，<see cref="CodexPersistence.Load"/> 按空集合处理。</summary>
+        public string[] ReactionIds;
     }
 
     /// <summary>codex-cross-run-persistence story-001：图鉴发现状态的历史集合（一次 Load 的结果）。</summary>
@@ -21,16 +25,18 @@ namespace GameLogic.Progression
     {
         public readonly HashSet<int> EnemyIds;
         public readonly HashSet<int> CardIds;
+        public readonly HashSet<string> ReactionIds;
 
-        public CodexHistory(HashSet<int> enemyIds, HashSet<int> cardIds)
+        public CodexHistory(HashSet<int> enemyIds, HashSet<int> cardIds, HashSet<string> reactionIds)
         {
             EnemyIds = enemyIds;
             CardIds = cardIds;
+            ReactionIds = reactionIds;
         }
 
         public static CodexHistory Empty()
         {
-            return new CodexHistory(new HashSet<int>(), new HashSet<int>());
+            return new CodexHistory(new HashSet<int>(), new HashSet<int>(), new HashSet<string>());
         }
     }
 
@@ -104,11 +110,11 @@ namespace GameLogic.Progression
                 return CodexHistory.Empty();
             }
 
-            return new CodexHistory(ToSet(data.EnemyIds), ToSet(data.CardIds));
+            return new CodexHistory(ToSet(data.EnemyIds), ToSet(data.CardIds), ToSet(data.ReactionIds));
         }
 
         /// <summary>整份覆盖写入（不是追加）。磁盘异常只记日志，不抛出。</summary>
-        public static void Save(IReadOnlyCollection<int> enemyIds, IReadOnlyCollection<int> cardIds)
+        public static void Save(IReadOnlyCollection<int> enemyIds, IReadOnlyCollection<int> cardIds, IReadOnlyCollection<string> reactionIds)
         {
             try
             {
@@ -117,6 +123,7 @@ namespace GameLogic.Progression
                     Version = CurrentVersion,
                     EnemyIds = ToArray(enemyIds),
                     CardIds = ToArray(cardIds),
+                    ReactionIds = ToArray(reactionIds),
                 };
                 File.WriteAllText(FilePath, JsonUtility.ToJson(data));
             }
@@ -142,6 +149,25 @@ namespace GameLogic.Progression
             return set;
         }
 
+        private static HashSet<string> ToSet(string[] ids)
+        {
+            HashSet<string> set = new HashSet<string>();
+            if (ids == null)
+            {
+                return set;
+            }
+
+            for (int i = 0; i < ids.Length; i++)
+            {
+                if (!string.IsNullOrEmpty(ids[i]))
+                {
+                    set.Add(ids[i]);
+                }
+            }
+
+            return set;
+        }
+
         private static int[] ToArray(IReadOnlyCollection<int> ids)
         {
             if (ids == null || ids.Count == 0)
@@ -152,6 +178,23 @@ namespace GameLogic.Progression
             int[] arr = new int[ids.Count];
             int i = 0;
             foreach (int id in ids)
+            {
+                arr[i++] = id;
+            }
+
+            return arr;
+        }
+
+        private static string[] ToArray(IReadOnlyCollection<string> ids)
+        {
+            if (ids == null || ids.Count == 0)
+            {
+                return Array.Empty<string>();
+            }
+
+            string[] arr = new string[ids.Count];
+            int i = 0;
+            foreach (string id in ids)
             {
                 arr[i++] = id;
             }

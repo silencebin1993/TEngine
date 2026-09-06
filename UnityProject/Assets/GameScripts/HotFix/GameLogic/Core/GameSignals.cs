@@ -81,6 +81,21 @@ namespace GameLogic.Core
         public float2 Origin;
         public float2 Direction;
         public bool HasProjectile;
+        /// <summary>reaction-depth-and-combat-feel story-002：命中触发的具名反应 id（如 "Steam"，
+        /// 取自 HitEvent.Payload["Reaction"]），未触发任何具名反应时为 null。</summary>
+        public string ReactionName;
+    }
+
+    /// <summary>reaction-depth-and-combat-feel story-003：结构器官被动触发（反伤/移动/击杀/低血量/
+    /// 周期脉冲）时 Publish 一次，供表现层给这些此前"纯数字、看不见"的效果补一个可见标记。
+    /// 与 <see cref="ComposeCastSignal"/> 并列但正交——结构器官钩子不产出弹道 Shape，只是一个定点脉冲。</summary>
+    public struct StructuralHookFiredSignal
+    {
+        public float2 Position;
+        public float Radius;
+        /// <summary>"Thorns"/"Move"/"Kill"/"LowHealth"/"Pulse" 之一，供表现层按需区分（当前默认实现
+        /// 统一配色，未区分，留给未来真实美术按 Kind 选特效）。</summary>
+        public string Kind;
     }
 
     /// <summary>冲刺开始。机动路线的核心触发点。</summary>

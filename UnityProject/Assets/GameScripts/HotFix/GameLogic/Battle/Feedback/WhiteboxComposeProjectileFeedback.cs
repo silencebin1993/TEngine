@@ -90,6 +90,18 @@ namespace GameLogic.Battle.Feedback
         /// FeatureArtSlotSync.AddShapeSlots 生成的槽 id 一一对应。</summary>
         private static readonly string[] VfxRoles = { "projectile", "muzzle", "hit", "explode" };
 
+        // ── reaction-depth-and-combat-feel story-002：具名反应命中时的额外播报，与元素色弹道本身
+        // 区分开——白金色大环 + 飘字，让玩家一眼看出"这发触发了反应"而不是误以为只是普通弹道换了色。──
+        private const float ReactionRingMult = 1.6f;
+        private const float ReactionLifeMult = 1.8f;
+        private static readonly Color ReactionRingColor = new Color(1f, 0.95f, 0.65f, 1f);
+
+        // ── reaction-depth-and-combat-feel story-003：结构器官被动触发标记——青色小环，与元素色
+        // 弹道/金色反应环区分开，让荆棘壳反伤/护盾/击杀回血/周期波动这些此前"纯数字"的效果也有
+        // 一眼可见的信号。5 种 Kind 目前统一配色（真实美术阶段可按 Kind 分色，见 story-003 Deferred）。
+        private const float StructuralHookLife = 0.35f;
+        private static readonly Color StructuralHookColor = new Color(0.4f, 0.9f, 0.85f, 1f);
+
         /// <summary>Field 抛掷飞行耗时，复用 Bolt 同款 <see cref="FlightLife"/>（0.3s）作为"甩出去"的时间窗，
         /// 落地后再用 <see cref="FieldSettleDuration"/>（0.2s）从小长到满径——二者相加正好等于
         /// <see cref="PersistentLife"/>（0.5s），落点用与 Bolt/Spore 同一个 <see cref="MetabolicSliceBridge.ImpactFlightDistance"/>，
@@ -196,6 +208,110 @@ namespace GameLogic.Battle.Feedback
         /// <summary>story-006 验收探针：最近一次从 VFX 池取到并实际使用的 Prefab 实例名；未命中池
         /// （槽未绑定/绑定为空）时不更新，初值 ""——可用来断言"绑定后取到 Prefab / 解绑后回落白模"。</summary>
         public string LastVfxPrefabName { get; private set; } = "";
+
+        /// <summary>story-002（reaction-depth-and-combat-feel）：最近一次命中触发的具名反应 id
+        /// （如 "Steam"），未触发时为 ""。供 execute_code 断言反应播报是否真的收到了信号。</summary>
+        public string LastReactionName { get; private set; } = "";
+
+        /// <summary>同上，已转换成中文播报文案（<see cref="ReactionFeedbackCatalog.GetLabel"/>）。</summary>
+        public string LastReactionLabel { get; private set; } = "";
+
+        private ReactionLabelGUI _reactionLabels;
+
+        private void EnsureReactionLabels()
+        {
+            if (_reactionLabels != null)
+            {
+                return;
+            }
+            var go = new GameObject("ComposeProjectileFeedback_ReactionLabels");
+            _reactionLabels = go.AddComponent<ReactionLabelGUI>();
+        }
+
+        private void SpawnReactionLabel(Vector3 worldPos, string label)
+        {
+            EnsureReactionLabels();
+            _reactionLabels.Spawn(worldPos, label);
+        }
+
+        /// <summary>story-002：具名反应命中时的飘字播报。IMGUI 世界坐标投影，手法照抄
+        /// <see cref="GameLogic.Battle.Feedback.WhiteboxCombatFeedback"/> 里伤害飘字用的 DamageNumberGUI，
+        /// 只是数字换成反应文案 + 更大字号/更醒目配色，与普通伤害数字区分开，池很小（反应本来就该是
+        /// 稀疏的高光时刻，不需要 24 格那么大的池）。</summary>
+        private sealed class ReactionLabelGUI : MonoBehaviour
+        {
+            private const int PoolSize = 8;
+            private const float RiseDistance = 1.3f;
+            private const float Life = 0.9f;
+
+            private struct Entry
+            {
+                public Vector3 WorldPos;
+                public string Label;
+                public float TimeLeft;
+            }
+
+            private readonly Entry[] _entries = new Entry[PoolSize];
+            private int _cursor;
+            private GUIStyle _style;
+
+            public void Spawn(Vector3 worldPos, string label)
+            {
+                int idx = _cursor;
+                _cursor = (_cursor + 1) % PoolSize;
+                _entries[idx] = new Entry { WorldPos = worldPos, Label = label, TimeLeft = Life };
+            }
+
+            private void Update()
+            {
+                float dt = Time.deltaTime;
+                for (int i = 0; i < PoolSize; i++)
+                {
+                    if (_entries[i].TimeLeft > 0f)
+                    {
+                        _entries[i].TimeLeft -= dt;
+                    }
+                }
+            }
+
+            private void OnGUI()
+            {
+                Camera cam = Camera.main;
+                if (cam == null)
+                {
+                    return;
+                }
+
+                if (_style == null)
+                {
+                    _style = new GUIStyle(GUI.skin.label)
+                    {
+                        fontSize = 26, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter,
+                    };
+                }
+
+                for (int i = 0; i < PoolSize; i++)
+                {
+                    if (_entries[i].TimeLeft <= 0f || string.IsNullOrEmpty(_entries[i].Label))
+                    {
+                        continue;
+                    }
+
+                    float t = 1f - (_entries[i].TimeLeft / Life);
+                    Vector3 pos = _entries[i].WorldPos + Vector3.up * (RiseDistance * t);
+                    Vector3 sp = cam.WorldToScreenPoint(pos);
+                    if (sp.z <= 0f)
+                    {
+                        continue;
+                    }
+
+                    float alpha = 1f - t * t;
+                    _style.normal.textColor = new Color(1f, 0.92f, 0.5f, alpha);
+                    var rect = new Rect(sp.x - 90f, Screen.height - sp.y - 20f, 180f, 36f);
+                    GUI.Label(rect, _entries[i].Label, _style);
+                }
+            }
+        }
 
         /// <summary>story-006：加载 7 Shape × 4 role 共 28 个 VFX 槽的 Prefab 池。由
         /// <see cref="GameLogic.Battle.Feedback.ComposeProjectilePresenter"/> 在阶段进入后调用一次。</summary>
@@ -324,6 +440,44 @@ namespace GameLogic.Battle.Feedback
                 }
                 SpawnMarker(kind, hitOrigin, signal.Direction, 0f, 0f, 0f, radius * 0.3f, FlightLife, castColor, "hit");
             }
+
+            // reaction-depth-and-combat-feel story-002：具名反应（rx_*/env_* 等，MetabolicSliceBridge.
+            // ApplyEvent 已从 evt.Payload["Reaction"] 转发）命中时额外播报，与上面的普通命中/爆炸标记
+            // 正交叠加（不是二选一分支）——落点公式复用"命中 VFX"同一套（Melee 用 Origin，其余沿
+            // Direction 飞 ImpactFlightDistance），保持与真实命中圆心一致。
+            if (!string.IsNullOrEmpty(signal.ReactionName))
+            {
+                string label = ReactionFeedbackCatalog.GetLabel(signal.ReactionName);
+                LastReactionName = signal.ReactionName;
+                LastReactionLabel = label;
+
+                float2 reactionPos = signal.Origin;
+                if (kind != ShapeKind.Melee)
+                {
+                    float2 reactionDir = math.normalizesafe(signal.Direction, new float2(0f, 1f));
+                    reactionPos = signal.Origin + reactionDir * MetabolicSliceBridge.ImpactFlightDistance;
+                }
+
+                SpawnMarker(ShapeKind.Wave, reactionPos, signal.Direction, 0f, 0f, 0f,
+                    radius * ReactionRingMult, FlightLife * ReactionLifeMult, ReactionRingColor);
+                SpawnReactionLabel(new Vector3(reactionPos.x, MarkerY + 0.8f, reactionPos.y), label);
+            }
+            else
+            {
+                LastReactionName = "";
+                LastReactionLabel = "";
+            }
+        }
+
+        /// <summary>story-003（reaction-depth-and-combat-feel）：结构器官被动触发的最小可见反馈——
+        /// 一个短促的青色小环，不区分 Kind（5 种钩子目前共用同一视觉，先解决"完全看不见"，
+        /// 按 Kind 分色留给真实美术阶段）。半径取信号值与最小可视半径的较大者，避免 Kill/LowHealth
+        /// 这类无天然区域概念的钩子传入 0 半径时环小到看不见。</summary>
+        public void OnStructuralHookFired(StructuralHookFiredSignal signal)
+        {
+            float radius = MathF.Max(1.2f, signal.Radius);
+            SpawnMarker(ShapeKind.Wave, signal.Position, new float2(0f, 1f), 0f, 0f, 0f,
+                radius, StructuralHookLife, StructuralHookColor);
         }
 
         // ── 元素 Tag 染色（story-007 D1~D4，对照冻结总案 §3.4 元素词表全 10 项；
@@ -1028,6 +1182,12 @@ namespace GameLogic.Battle.Feedback
 
             _vfxPool?.Dispose();
             _vfxPool = null;
+
+            if (_reactionLabels != null)
+            {
+                SafeDestroy(_reactionLabels.gameObject);
+                _reactionLabels = null;
+            }
 
             if (_matTemplate != null)
             {

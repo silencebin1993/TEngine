@@ -5,6 +5,10 @@
       "Read(//f/Project/BinGames/**)",
       "Skill(update-config)",
       "Skill(update-config:*)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\wb143\\.claude",
+      "F:\\Project\\BinGames\\.claude"
     ]
   }
 }

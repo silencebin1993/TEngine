@@ -57,8 +57,10 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
                     () => new ReturnModule()),
                 ["gene_swell"] = ("膨胀泡", "gene/swell", "需要器官。改装：体变大、圈变大、坑变大。",
                     () => new Grow(P("gene_swell").GrowScale)),
+                // reaction-depth-and-combat-feel story-005（覆盖面扩容）：溶酶体本身含消化酶，
+                // 贴 "Acid" 让这条基因也进入反应系统，不改变原有 ExplodeOnHit 机制本身。
                 ["gene_lyso"] = ("溶酶壳", "gene/lyso", "需要器官。改装：命中再爆一圈。",
-                    () => new ExplodeOnHit()),
+                    () => new CompositeModule("gene_lyso_mod", "溶酶壳", new ExplodeOnHit(), new TagAttach("Acid"))),
                 // Spin（自转）+ Orbit（绕轨半径）是同一个"绕圈"设定的两个旋钮，OrbitRadiusModule
                 // 是本 story 新增的 Orbit 字段写手（此前 002 只声明了字段，无人写）。
                 ["gene_flagella"] = ("鞭毛绕", "gene/flagella", "需要器官。改装：攻击绕圈飞/绕着你转。",
@@ -84,17 +86,21 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
                 ["gene_volt"] = ("雷桥", "gene/volt", "需要器官。改装：优先沿湿面/水洼跳。",
                     () => new CompositeModule("gene_volt_mod", "雷桥",
                         new ChainModule(P("gene_volt").ChainCount), new TagAttach("Shock"))),
+                // reaction-depth-and-combat-feel story-005（覆盖面扩容）：蓄能=储存电荷，贴 "Charged"。
                 ["gene_vacuole"] = ("蓄能液泡", "gene/vacuole", "需要器官。改装：少打几下，下一发更肥。",
                     () => new CompositeModule("gene_vacuole_mod", "蓄能液泡",
-                        new Capacitor(P("gene_vacuole").CapacitorRatio), new Grow(P("gene_vacuole").GrowScale))),
+                        new Capacitor(P("gene_vacuole").CapacitorRatio), new Grow(P("gene_vacuole").GrowScale),
+                        new TagAttach("Charged"))),
                 ["gene_golgi"] = ("分流芽", "gene/golgi", "需要器官。改装：半路或出手时分叉。",
                     () => new SplitModule(P("gene_golgi").SplitCount)),
                 // Required 4 同理：过热不再默默降温，而是清空热量并转成一圈瞬时脉冲，替代旧
                 // org_radiator（HeatSink）/org_breaker（Fuse）静默效果，见 HeatShockModule。
+                // reaction-depth-and-combat-feel story-005（覆盖面扩容）：过热爆圈=热能释放，贴 "Fire"。
                 ["gene_heatshock"] = ("热激褶", "gene/heatshock", "需要器官。改装：过热时爆一圈，而不是「默默降温」。",
-                    () => new HeatShockModule()),
+                    () => new CompositeModule("gene_heatshock_mod", "热激褶", new HeatShockModule(), new TagAttach("Fire"))),
+                // 突触=神经电信号，贴 "Shock"。
                 ["gene_synapse"] = ("突触连发", "gene/synapse", "需要器官。改装：命中立刻再挤一发。",
-                    () => new FeedbackLoop(FeedbackMode.Hit)),
+                    () => new CompositeModule("gene_synapse_mod", "突触连发", new FeedbackLoop(FeedbackMode.Hit), new TagAttach("Shock"))),
                 // Required：血珠不是"暗改吸血百分比"（旧 BloodDebt 契约）。复用 Return 字段表达"打出的
                 // 伤害溅出血珠飞回"这一具体可见的运动轨迹，宿主结算时按 Tag "Blood" 把回程结算成治疗
                 // 而非二次伤害。
@@ -106,19 +112,26 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
                 ["gene_slime"] = ("粘液拖尾", "gene/slime", "需要器官。改装：路径减速并伤。",
                     () => new CompositeModule("gene_slime_mod", "粘液拖尾",
                         new TrailModule(P("gene_slime").TrailDamage), new TagAttach("Slow"))),
+                // reaction-depth-and-combat-feel story-005（覆盖面扩容）：吸引=质量/引力场，贴 "Earth"
+                // （目前唯二给 Mass 维供 tag 的基因之一，另一个是 gene_arc）。
                 ["gene_pull"] = ("吸引素", "gene/pull", "需要器官。改装：把敌人往弹/圈/坑里吸。",
-                    () => new PullModule(P("gene_pull").PullStrength)),
+                    () => new CompositeModule("gene_pull_mod", "吸引素", new PullModule(P("gene_pull").PullStrength), new TagAttach("Earth"))),
                 ["gene_split"] = ("绽放", "gene/split", "需要器官。改装：命中裂成小弹。",
                     () => new SplitModule(P("gene_split").SplitCount)),
+                // reaction-depth-and-combat-feel story-005（覆盖面扩容）：镜面反射光，追加 "Light"
+                // （与既有 "Mirror" 内容标签并存，Light 是本次唯二给 Phase 维供 tag 的基因之一，
+                // 另一个是 gene_apoptosis 的 "Dark"）。
                 ["gene_mirror"] = ("镜面", "gene/mirror", "需要器官。改装：弹会反弹；近战则弹开敌人的弹。",
                     () => new CompositeModule("gene_mirror_mod", "镜面",
-                        new BounceModule(P("gene_mirror").BounceCount), new TagAttach("Mirror"))),
+                        new BounceModule(P("gene_mirror").BounceCount), new TagAttach("Mirror"), new TagAttach("Light"))),
                 ["gene_receptor"] = ("受体记忆", "gene/receptor", "需要器官。改装：打过的敌人会被记住，后续更会追它。",
                     () => new CompositeModule("gene_receptor_mod", "受体记忆",
                         new HomingModule(P("gene_receptor").HomingStrength), new TagAttach("ReceptorMemory"))),
                 // Required：低血爆炸，禁即死冻结（R4）。只贴 ExplodeOnHit+Tag，是否"残血"由宿主结算时判定。
+                // reaction-depth-and-combat-feel story-005（覆盖面扩容）：凋亡=细胞死亡，追加 "Dark"
+                // （与既有 "Apoptosis" 内容标签并存）。
                 ["gene_apoptosis"] = ("凋亡信号", "gene/apoptosis", "需要器官。改装：残血敌人被打中会爆开，不是冻死。",
-                    () => new CompositeModule("gene_apoptosis_mod", "凋亡信号", new ExplodeOnHit(), new TagAttach("Apoptosis"))),
+                    () => new CompositeModule("gene_apoptosis_mod", "凋亡信号", new ExplodeOnHit(), new TagAttach("Apoptosis"), new TagAttach("Dark"))),
 
                 // organ-gene-rebalance-v3 story-004：CATALOG-v3 §B2 新增 18 条中本 story 落地的 12 条，
                 // 全部限定为"仅 Composite 现有 Module"（preflight R9 已把 Ripple/Rhythm/Drift/Capillary/
@@ -163,46 +176,59 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
                         new EchoModule(P("gene_bloomlate").EchoDelay), new SplitModule(P("gene_bloomlate").SplitCount))),
                 // 抛投：Preflight R9 判定"Composite 或 ArcModule"，本 story 明确不建新 ArcModule，改用既有
                 // BallisticsModule 的 Gravity 旋钮走抛物线弹道，不新增字段/类。
+                // reaction-depth-and-combat-feel story-005（覆盖面扩容）：抛物线弹道受重力牵引，贴 "Earth"。
                 ["gene_arc"] = ("抛投", "gene/arc", "需要器官。改装：攻击像抛物线一样落下。",
                     () => new CompositeModule("gene_arc_mod", "抛投",
                         new BallisticsModule(speed: P("gene_arc").BallisticsSpeed,
                             lifetime: P("gene_arc").BallisticsLifetime,
-                            gravity: P("gene_arc").BallisticsGravity))),
+                            gravity: P("gene_arc").BallisticsGravity),
+                        new TagAttach("Earth"))),
                 // 磁聚：真正的"多段弹道向一点收敛"是 005+ 新 MagnetModule 的范围，本 story 按 Required 只做
                 // 弱化占位——复用既有 PullModule 给一个比 gene_vortex 更弱的单向牵引，贴 Tag "Magnet" 方便
                 // 后续替换成专用 Module 时定位。
+                // reaction-depth-and-combat-feel story-005（覆盖面扩容）：磁=电磁现象，追加 "Charged"
+                // （与既有 "Magnet" 内容标签并存）。
                 ["gene_magnet"] = ("磁聚", "gene/magnet", "需要器官。改装：弹道边飞边被拉向一点（弱化占位，等专用磁聚机制）。",
                     () => new CompositeModule("gene_magnet_mod", "磁聚",
-                        new PullModule(P("gene_magnet").PullStrength), new TagAttach("Magnet"))),
+                        new PullModule(P("gene_magnet").PullStrength), new TagAttach("Magnet"), new TagAttach("Charged"))),
                 // 散播：preflight R9 已定案，复用 gene_lyso 的 ExplodeOnHit 触发时机 + gene_tide 的 Linger
                 // 落点留坑，不新建 Seed 类。
+                // reaction-depth-and-combat-feel story-005（覆盖面扩容）：散播孢子=毒素扩散，贴 "Poison"
+                // （目前唯一给 Bio 维 Poison 分量供 tag 的基因，Blood 分量另见 gene_blood/gene_rhythm）。
                 ["gene_scatterseed"] = ("散播", "gene/scatterseed", "需要器官。改装：命中会在旁边炸出小坑。",
                     () => new CompositeModule("gene_scatterseed_mod", "散播",
-                        new ExplodeOnHit(), new LingerModule(P("gene_scatterseed").LingerSeconds))),
+                        new ExplodeOnHit(), new LingerModule(P("gene_scatterseed").LingerSeconds), new TagAttach("Poison"))),
 
                 // organ-gene-rebalance-v3 story-005：CATALOG-v3 §B2 剩余 6 条，落地 preflight R9 锁定的
                 // 4 个新 Module 类（Ripple/Rhythm/Catalyst/Weave）+ 2 条降级 Composite（drift/capillary，
                 // R9 判定"用现有 Spread/Linger+Grow 组合，不建独立类"）。至此 36+6=42（24 保留 + 18 新增）。
+                // reaction-depth-and-combat-feel story-005（覆盖面扩容）：波纹扩散=水波，贴 "Wet"。
                 ["gene_ripple"] = ("扩散波", "gene/ripple", "需要器官。改装：波/圈会随时间越扩越大，不是一下子变大。",
-                    () => new RippleModule(P("gene_ripple").RippleRate)),
+                    () => new CompositeModule("gene_ripple_mod", "扩散波", new RippleModule(P("gene_ripple").RippleRate), new TagAttach("Wet"))),
+                // 节律=生物循环节拍（心跳/血流），贴 "Blood"。
                 ["gene_rhythm"] = ("节律", "gene/rhythm", "需要器官。改装：按固定节拍自己再打一圈。",
-                    () => new RhythmModule(P("gene_rhythm").RhythmRate)),
+                    () => new CompositeModule("gene_rhythm_mod", "节律", new RhythmModule(P("gene_rhythm").RhythmRate), new TagAttach("Blood"))),
                 ["gene_catalyst"] = ("催化", "gene/catalyst", "需要器官。改装：命中触发的 Tag 反应会被放大。",
                     () => new CatalystModule(P("gene_catalyst").CatalystAmplifier)),
                 ["gene_weave"] = ("编织", "gene/weave", "需要器官。改装：把留下的坑/迹跟附近的连起来。",
                     () => new WeaveModule(P("gene_weave").WeaveRadius)),
                 // 乱流：R9 判定复用既有 Spread（侧偏角）+ TickModule（按节奏重算侧偏，非坑/圈跳伤语义），
                 // 不新建轨迹噪声类；Tag "Drifting" 供宿主区分"这是随 tick 重算的侧偏，不是静态扇角"。
+                // reaction-depth-and-combat-feel story-005（覆盖面扩容）：飘忽不定=急促节奏，追加 "Haste"
+                // （与既有 "Drifting" 内容标签并存，是目前唯一给 Tempo 维 Haste 分量供 tag 的基因，
+                // Slow 分量另见 gene_slime）。
                 ["gene_drift"] = ("乱流", "gene/drift", "需要器官。改装：弹道会随机侧偏，飘忽不定。",
                     () => new CompositeModule("gene_drift_mod", "乱流",
                         new SpreadModule(P("gene_drift").SpreadAngle), new TickModule(P("gene_drift").TickRate),
-                        new TagAttach("Drifting"))),
+                        new TagAttach("Drifting"), new TagAttach("Haste"))),
                 // 毛细扩散：R9 判定 Linger（留坑）+ Grow（静态变大，宿主结合 Linger 秒数解释为半径随时间外扩）
                 // 组合即可表达"向旁蔓延"，不新建独立扩散类；Tag "Capillary" 与 gene_swell 的纯体积变大区分开。
+                // reaction-depth-and-combat-feel story-005（覆盖面扩容）：毛细现象本身就是液体物理，
+                // 追加 "Wet"（与既有 "Capillary" 内容标签并存）。
                 ["gene_capillary"] = ("毛细扩散", "gene/capillary", "需要器官。改装：坑/洼会向旁边持续蔓延。",
                     () => new CompositeModule("gene_capillary_mod", "毛细扩散",
                         new LingerModule(P("gene_capillary").LingerSeconds), new Grow(P("gene_capillary").GrowScale),
-                        new TagAttach("Capillary"))),
+                        new TagAttach("Capillary"), new TagAttach("Wet"))),
             };
 
         public static Func<IContract> Get(string id) => _defs.TryGetValue(id, out var d) ? d.CreateContract : null;
@@ -218,10 +244,39 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
             _defs.TryGetValue(id, out var d) ? d.ArtId :
             _moduleDefs.TryGetValue(id, out var m) ? m.ArtId : null;
 
-        /// <summary>图鉴/tooltip 用的中文一句话机制说明，第一句固定「需要器官。改装：…」（CATALOG §B）。</summary>
-        public static string GetDescription(string id) =>
-            _defs.TryGetValue(id, out var d) ? d.Description :
-            _moduleDefs.TryGetValue(id, out var m) ? m.Description : null;
+        /// <summary>图鉴/tooltip 用的中文一句话机制说明，第一句固定「需要器官。改装：…」（CATALOG §B）。
+        /// reaction-depth-and-combat-feel story-004：末尾自动追加一行「标签：」——从 <see cref="GetModule"/>
+        /// 产出的实例反射式读出真实挂了哪些 <c>TagAttach</c>（<see cref="GeneTagIntrospection"/>），
+        /// 不是手写文案，永远和实际生效的 Tag 同步，也不需要每加一条基因就记得补文案。零 Tag 的基因
+        /// （纯数值/几何轴，如"趋化导引"/"纺锤分裂"）不追加这一行，文案与升级前完全一致。</summary>
+        public static string GetDescription(string id)
+        {
+            string baseDesc = _defs.TryGetValue(id, out var d) ? d.Description :
+                _moduleDefs.TryGetValue(id, out var m) ? m.Description : null;
+            if (baseDesc == null)
+            {
+                return null;
+            }
+
+            Func<IModule> createModule = GetModule(id);
+            if (createModule == null)
+            {
+                return baseDesc;
+            }
+
+            List<string> tags = GeneTagIntrospection.FindAttachedTags(createModule());
+            if (tags.Count == 0)
+            {
+                return baseDesc;
+            }
+
+            var labels = new List<string>(tags.Count);
+            foreach (string tag in tags)
+            {
+                labels.Add(TagLabelCatalog.GetLabel(tag));
+            }
+            return baseDesc + "\n标签：" + string.Join("、", labels);
+        }
 
         /// <summary>Contract 基因全集，本 story 起恒为空集合（保留 API 形状供调用方兼容）。</summary>
         public static IEnumerable<string> AllIds => _defs.Keys;
