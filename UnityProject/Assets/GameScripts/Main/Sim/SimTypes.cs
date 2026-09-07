@@ -297,6 +297,10 @@ namespace BinGames.Sim
         public int MaxDeathEventsPerFrame;
         public int MaxHitEventsPerFrame;
         public uint RandomSeed;
+        /// <summary>破体状态下吞噬门槛折扣。</summary>
+        public float BreachedDiscount;
+        /// <summary>腐蚀状态下吞噬门槛折扣。</summary>
+        public float CorrodedDiscount;
 
         public static SimConfig Default => new SimConfig
         {
@@ -307,6 +311,8 @@ namespace BinGames.Sim
             MaxDeathEventsPerFrame = 2048,
             MaxHitEventsPerFrame = 2048,
             RandomSeed = 0x5F3759DFu,
+            BreachedDiscount = 0.7f,
+            CorrodedDiscount = 0.85f,
         };
     }
 

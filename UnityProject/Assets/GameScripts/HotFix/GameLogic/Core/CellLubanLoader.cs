@@ -360,6 +360,8 @@ namespace GameLogic.Core
                 RouteAffinityCap = g.RouteAffinityCap,
                 SynergyBonusPerMatch = g.SynergyBonusPerMatch,
                 SynergyBonusCap = g.SynergyBonusCap,
+                BreachedDiscount = g.BreachedDiscount,
+                CorrodedDiscount = g.CorrodedDiscount,
                 BaseMoveSpeed = g.BaseMoveSpeed,
                 BaseVolume = g.BaseVolume,
                 BaseMeleeDamage = g.BaseMeleeDamage,

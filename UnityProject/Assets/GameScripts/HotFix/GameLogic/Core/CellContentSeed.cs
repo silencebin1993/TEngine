@@ -53,6 +53,7 @@ namespace GameLogic.Core
                 ObstacleCount = 14, ArenaHalfExtent = 90f, UnitCapacity = 16384, HashCellSize = 4f,
                 PityThreshold = 4, LowHealthPercent = 0.3f, RouteAffinityPerCard = 0.13f,
                 RouteAffinityCap = 1.8f, SynergyBonusPerMatch = 0.07f, SynergyBonusCap = 1.5f,
+                BreachedDiscount = 0.7f, CorrodedDiscount = 0.85f,
                 BaseMoveSpeed = 8f, BaseVolume = 1f, BaseMeleeDamage = 8f, DevourRatio = 1.05f,
                 StaminaMax = 100f, StaminaRegen = 18f, PollutionCap = 100f, StartAbilitySlots = 2,
                 MaxAbilitySlots = 5, VolumeGrowthRatio = 0.055f, ComboWindow = 2.5f, ComboGainPerStack = 0.06f,

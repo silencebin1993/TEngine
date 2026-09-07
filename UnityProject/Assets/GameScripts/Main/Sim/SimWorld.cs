@@ -408,8 +408,8 @@ namespace BinGames.Sim
                 InvCellSize = _hash.InvCellSize,
                 Count = _unitCount,
                 DevourRatio = 1.05f,
-                BreachedDiscount = 0.7f,
-                CorrodedDiscount = 0.85f,
+                BreachedDiscount = _cfg.BreachedDiscount,
+                CorrodedDiscount = _cfg.CorrodedDiscount,
                 ContactSlack = 0.35f,
             };
             devour.Schedule().Complete();

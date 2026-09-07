@@ -589,9 +589,11 @@ namespace GameLogic.Core
         public float RouteAffinityCap = 1.8f;
         public float SynergyBonusPerMatch = 0.07f;
         public float SynergyBonusCap = 1.5f;
-        // cell-global-stat-defaults-to-table：baseMaxHealth 与 breachedDiscount/corrodedDiscount
-        // 故意不在这里——前者与现网 StatSheet 实际值(160)冲突待人定，后两者在 Main/Sim/ 内使用，
-        // 需要走 SimConfig 传递而非 DataRegistry 直读，非本批范围。
+        // cell-global-stat-defaults-to-table：baseMaxHealth 故意不在这里——与现网 StatSheet
+        // 实际值(160)冲突待人定。breachedDiscount/corrodedDiscount 在 Main/Sim/ 内使用，走
+        // SetupSim() → SimConfig 传递（见 CellStageFlow.SetupSim），不直接被 Sim 读取本类。
+        public float BreachedDiscount = 0.7f;
+        public float CorrodedDiscount = 0.85f;
         public float BaseMoveSpeed = 8f;
         public float BaseVolume = 1f;
         public float BaseMeleeDamage = 8f;

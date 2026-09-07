@@ -364,6 +364,8 @@ namespace GameLogic.Stage.CellStage
             cfg.UnitCapacity = DataRegistry.Instance.Global.UnitCapacity;
             cfg.ArenaHalfExtent = DataRegistry.Instance.Global.ArenaHalfExtent;
             cfg.HashCellSize = DataRegistry.Instance.Global.HashCellSize;
+            cfg.BreachedDiscount = DataRegistry.Instance.Global.BreachedDiscount;
+            cfg.CorrodedDiscount = DataRegistry.Instance.Global.CorrodedDiscount;
 
             _sim.Begin(cfg, DataRegistry.Instance.ArchetypeArray());
             _sim.SetPlayerStats(
