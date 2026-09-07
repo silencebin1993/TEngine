@@ -125,10 +125,8 @@ namespace GameLogic.Stats
                 _base[i] = 0f;
             }
 
-            // cell-global-stat-defaults-to-table：MaxHealth 故意保留字面量 160f 不接表——
-            // CellGlobal.BaseMaxHealth=100 与这里的现网真实值冲突，待人拍板，不在本批范围。
-            _base[(int)StatId.MaxHealth] = 160f;
             GlobalSpec g = DataRegistry.Instance.Global;
+            _base[(int)StatId.MaxHealth] = g.BaseMaxHealth;
             _base[(int)StatId.MoveSpeed] = g.BaseMoveSpeed;
             _base[(int)StatId.Volume] = g.BaseVolume;
             _base[(int)StatId.MeleeDamage] = g.BaseMeleeDamage;

@@ -362,6 +362,7 @@ namespace GameLogic.Core
                 SynergyBonusCap = g.SynergyBonusCap,
                 BreachedDiscount = g.BreachedDiscount,
                 CorrodedDiscount = g.CorrodedDiscount,
+                BaseMaxHealth = g.BaseMaxHealth,
                 BaseMoveSpeed = g.BaseMoveSpeed,
                 BaseVolume = g.BaseVolume,
                 BaseMeleeDamage = g.BaseMeleeDamage,
