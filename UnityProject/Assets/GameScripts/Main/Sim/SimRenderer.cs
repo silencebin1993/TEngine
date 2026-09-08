@@ -214,8 +214,16 @@ namespace BinGames.Sim
                     new Vector3(s.Position.x, _yPlane, s.Position.y),
                     Quaternion.Euler(0f, -ang, 0f),
                     new Vector3(sc * ProjectileStretch, sc, sc));
-                _batchColors[n] = new Vector4(
-                    visual.BaseColor.r, visual.BaseColor.g, visual.BaseColor.b, visual.BaseColor.a);
+                // combat-primitive-overhaul：逐弹体色。热更层把元素/反应配色打包进 Tint 带下来，
+                // 真弹体因此保留了此前只有白模才有的染色，不会因为"弹道改走内核"就退回全场一律亮黄。
+                _batchColors[n] = s.Tint != 0u
+                    ? new Vector4(
+                        ((s.Tint >> 24) & 0xFFu) / 255f,
+                        ((s.Tint >> 16) & 0xFFu) / 255f,
+                        ((s.Tint >> 8) & 0xFFu) / 255f,
+                        (s.Tint & 0xFFu) / 255f)
+                    : new Vector4(
+                        visual.BaseColor.r, visual.BaseColor.g, visual.BaseColor.b, visual.BaseColor.a);
                 _batchMotions[n] = PackMotion(s.Velocity);
                 _batchImpacts[n] = Vector4.zero;
                 n++;

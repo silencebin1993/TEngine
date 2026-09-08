@@ -27,13 +27,34 @@ namespace GameLogic.MetabolicSlice.DebugTools
             var bridge = new MetabolicSliceBridge();
             bridge.Bind(sim, stats);
 
-            if (!bridge.ApplyEvent(new HitEvent { Damage = 10f, Scale = 1f, Count = 2f, Spin = 90f, Shape = "Bolt" }))
+            // combat-primitive-overhaul：Spin/Orbit 现在分底盘。弹道底盘（Projectile）上它的含义是
+            // "打出去的弹自己绕着飞"，落在内核弹体的蛇行参数上；只有**非弹道**底盘才是"绕着你转"，
+            // 走 _pendingMotion 环绕采样。文案「攻击绕圈飞/绕着你转」两种读法各归各位。
+            // 这里测的是后者，故必须显式给一个非 Projectile 的 AttackPattern。
+            if (!bridge.ApplyEvent(new HitEvent
+            {
+                Damage = 10f, Scale = 1f, Count = 2f, Spin = 90f, Shape = "Melee",
+                AttackPattern = AttackPattern.Melee,
+            }))
             {
                 return (false, "① Spin 装配 ApplyEvent 返回 false");
             }
             if (bridge.PendingMotionCount != 2)
             {
-                return (false, $"① PendingMotionCount 应为 2（Count=2），实际 {bridge.PendingMotionCount}");
+                return (false, $"① 非弹道底盘 Spin 应挂 2 个环绕采样（Count=2），实际 {bridge.PendingMotionCount}");
+            }
+
+            // 对照：同一套 Spin 挂在弹道底盘上不进环绕采样（它变成会绕着飞的真弹体）。
+            var spinBridge = new MetabolicSliceBridge();
+            spinBridge.Bind(new SimBridge(), new StatSheet());
+            spinBridge.ApplyEvent(new HitEvent
+            {
+                Damage = 10f, Scale = 1f, Count = 1f, Spin = 90f, Speed = 1.3f, Shape = "Bolt",
+                AttackPattern = AttackPattern.Projectile,
+            });
+            if (spinBridge.PendingMotionCount != 0)
+            {
+                return (false, $"①对照 弹道底盘的 Spin 不应走环绕采样，实际 PendingMotionCount={spinBridge.PendingMotionCount}");
             }
 
             var feedback = new WhiteboxComposeProjectileFeedback();

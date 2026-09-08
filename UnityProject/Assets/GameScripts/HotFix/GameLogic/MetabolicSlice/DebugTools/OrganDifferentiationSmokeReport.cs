@@ -28,9 +28,12 @@ namespace GameLogic.MetabolicSlice.DebugTools
 
             var reserve = new GeneReserve();
             CarrierInstance bare = MakeCarrier(reserve, "carrier_bare", "org_emitter");
-            CarrierInstance wave = MakeCarrier(reserve, "carrier_wave", "org_emitter", "org_flagella");
-            CarrierInstance spore = MakeCarrier(reserve, "carrier_spore", "org_emitter", "org_lyso");
-            CarrierInstance arc = MakeCarrier(reserve, "carrier_arc", "org_emitter", "org_scatter");
+            // combat-primitive-overhaul：原来这三行挂的是 org_flagella/org_lyso/org_scatter——
+            // 它们在 CATALOG-v3 就已经退役（效果迁到同名 gene_*），退役后不产出任何模块，
+            // 于是 Spin/Explode/Count 全为 0，本用例其实一直在测一组空装配。改挂现役基因。
+            CarrierInstance wave = MakeCarrier(reserve, "carrier_wave", "org_emitter", "gene_flagella");
+            CarrierInstance spore = MakeCarrier(reserve, "carrier_spore", "org_emitter", "gene_lyso");
+            CarrierInstance arc = MakeCarrier(reserve, "carrier_arc", "org_emitter", "gene_fan");
             CarrierInstance melee = MakeCarrier(reserve, "carrier_melee", "org_cilia");
 
             var world = new WorldState();
@@ -49,9 +52,9 @@ namespace GameLogic.MetabolicSlice.DebugTools
                 var cases = new (string Label, CarrierInstance Carrier, string ExpectedRawShape, string ExpectedPresentShape)[]
                 {
                     ("空槽", bare, "Bolt", "Bolt"),
-                    ("org_flagella", wave, "Bolt", "Wave"),
-                    ("org_lyso", spore, "Bolt", "Spore"),
-                    ("org_scatter", arc, "Bolt", "Arc"),
+                    ("gene_flagella", wave, "Bolt", "Wave"),
+                    ("gene_lyso", spore, "Bolt", "Spore"),
+                    ("gene_fan", arc, "Bolt", "Arc"),
                     ("org_cilia", melee, "Melee", "Melee"),
                 };
 

@@ -151,6 +151,16 @@ namespace BinGames.Sim
         public float ChainFalloff;
         /// <summary>用于伤害来源归属与事件回传。</summary>
         public int SourceLogicId;
+
+        // ── combat-primitive-overhaul：扇形判定（近战底盘）──
+        // 圆形分支恒存在；ConeDir 非零向量时在圆内再叠一道"必须落在锥内"的判据。
+        // 这样近战不再是"前方放个大圆"（背后的敌人照样被打），而是真的只打面朝方向。
+        /// <summary>扇形中轴（单位向量）。(0,0) 表示不做扇形筛选，退化为整圆（旧行为，零回归）。</summary>
+        public float2 ConeDir;
+        /// <summary>扇形半角的余弦。仅当 <see cref="ConeDir"/> 非零时生效。</summary>
+        public float ConeCosHalf;
+        /// <summary>不受扇形筛选的贴身豁免半径——圆心附近方向向量不稳定，且"贴脸"本就该被打到。</summary>
+        public float ConeNearRadius;
     }
 
     /// <summary>
@@ -175,6 +185,26 @@ namespace BinGames.Sim
         public bool Add;
     }
 
+    /// <summary>
+    /// 弹体行为开关位。combat-primitive-overhaul：布尔型基元集中成一个 byte，
+    /// 避免 <see cref="ProjectileState"/> 为每个开关多一个 4 字节字段。
+    /// </summary>
+    [System.Flags]
+    public enum SimProjectileFlags : byte
+    {
+        None = 0,
+        /// <summary>抛投（gene_arc）：飞行途中不与单位碰撞，只在落点炸开。俯视视角下"越过前排砸后排"的唯一表达方式。</summary>
+        Lob = 1 << 0,
+        /// <summary>终结时在落点做一次范围结算（Explode/抛投落地）。</summary>
+        BurstOnEnd = 1 << 1,
+        /// <summary>终结时朝发射者当前位置回飞一发（gene_return / gene_blood）。</summary>
+        ReturnToOwner = 1 << 2,
+        /// <summary>这是回程弹体——命中结算按治疗而非伤害交给热更层（gene_blood 的 Tag "Blood"）；内核只负责标记。</summary>
+        Returning = 1 << 3,
+        /// <summary>撞墙/撞障时反弹而不是销毁（gene_elastic / gene_mirror / gene_membrane）。</summary>
+        BounceWalls = 1 << 4,
+    }
+
     /// <summary>投射物生成指令。</summary>
     public struct ProjectileRequest
     {
@@ -190,6 +220,76 @@ namespace BinGames.Sim
         public SimStatus ApplyStatus;
         public int SourceLogicId;
         public int VisualId;
+
+        // ── combat-primitive-overhaul：弹道基元。全部留 0 时行为与旧版逐字一致（零回归）。──
+
+        /// <summary>追踪权重 0-1。每帧朝 <see cref="HomingRange"/> 内最近目标转向，权重越高转得越狠。</summary>
+        public float Homing;
+        /// <summary>追踪搜敌半径。0 表示不追踪——**没有"全屏锁敌"这个选项**，射程外的敌人弹体看不见。</summary>
+        public float HomingRange;
+        /// <summary>最大转向角速度（度/秒）。限制"瞬间掉头"，让追踪读起来像导弹而不是瞬移。</summary>
+        public float TurnRateDeg;
+        /// <summary>每秒速度衰减比例（0-1）。抛投/重力弹靠它自然缩短射程。</summary>
+        public float Drag;
+        /// <summary>命中/终结时的溅射半径。0 表示纯单体命中。</summary>
+        public float AreaRadius;
+        /// <summary>撞墙/撞障剩余反弹次数（需 <see cref="SimProjectileFlags.BounceWalls"/>）。</summary>
+        public int BounceCount;
+        /// <summary>终结时分裂出的子弹体数量。方向以**入射方向**为中轴左右展开，不是世界系固定角。</summary>
+        public int SplitCount;
+        /// <summary>分裂扇角（度，总张角）。</summary>
+        public float SplitAngleDeg;
+        /// <summary>沿途拖尾每跳伤害。0 表示无拖尾。</summary>
+        public float TrailDamage;
+        /// <summary>沿途拖尾跳伤间隔（秒）。</summary>
+        public float TrailInterval;
+        /// <summary>终结时在落点留下的持续区域秒数（交给热更 AreaZoneSystem 落地）。</summary>
+        public float LingerSeconds;
+        /// <summary>留坑半径。</summary>
+        public float LingerRadius;
+        /// <summary>命中时的连锁跳数。</summary>
+        public int ChainCount;
+        /// <summary>横向蛇行角速度（度/秒）。配合 <see cref="WeaveAmp"/> 表达鞭毛绕/乱流的轨迹噪声。</summary>
+        public float WeaveRateDeg;
+        /// <summary>横向蛇行幅度（世界单位/秒的侧向速度峰值）。</summary>
+        public float WeaveAmp;
+        /// <summary>子代计数。二级弹体（分裂/回旋产物）只允许再生一代，防止无界递归。</summary>
+        public byte Generation;
+        public SimProjectileFlags Flags;
+        /// <summary>RGBA8 打包的实例色（0 = 渲染器默认色）。见 <see cref="ProjectileState.Tint"/>。</summary>
+        public uint Tint;
+    }
+
+    /// <summary>
+    /// 弹体终结事件。combat-primitive-overhaul：热更层此前靠"开火时预测一个落点"来放留坑/命中特效，
+    /// 只要弹体真的会拐弯/反弹/被障碍挡住，预测点就和真实落点分叉（这正是"表现层看到命中了但没伤害"的根因）。
+    /// 改由内核回传**真实终结点**，热更层据此放 Linger 区域与命中表现，二者从此不可能不一致。
+    /// </summary>
+    public struct ProjectileEndEvent
+    {
+        public float2 Position;
+        /// <summary>终结瞬间的飞行方向（已归一化）。</summary>
+        public float2 Direction;
+        public float Damage;
+        public float AreaRadius;
+        public float LingerSeconds;
+        public float LingerRadius;
+        public int SourceLogicId;
+        public int VisualId;
+        public ProjectileEndReason Reason;
+    }
+
+    /// <summary>弹体为什么没的。热更层据此区分"打中了"和"飞没了"的表现。</summary>
+    public enum ProjectileEndReason : byte
+    {
+        /// <summary>穿透次数耗尽（真的打到人了）。</summary>
+        HitTarget = 0,
+        /// <summary>寿命到期/射程耗尽。</summary>
+        Expired = 1,
+        /// <summary>飞出场地边界。</summary>
+        OutOfBounds = 2,
+        /// <summary>撞上静态障碍。</summary>
+        Obstacle = 3,
     }
 
     /// <summary>

@@ -41,7 +41,16 @@ namespace GameLogic.Battle.Feedback
             {
                 return "Spore";
             }
-            if (evt.Count > 1f)
+            // combat-primitive-overhaul：删掉旧的「Count>1 → Arc」规则。
+            //
+            // Arc 是一个**静态扇形**（ApplyTransform 的 Arc 分支不做任何位移，钉在施法坐标上），
+            // 而 Count>1 的 Bolt-tail 是"一次打出好几发会飞的弹"。把后者映射成前者，直接后果是：
+            // 玩家一装「纺锤分裂」（Scatterer 2 + Spread 30）弹道就整个消失，身上闪一个橘色扇形，
+            // 9 米外冒一个命中小白点——这正是"上了这个基因就看不到弹道了"的原因。
+            // 多发依然是弹，Shape 保持 Bolt；"更多、更散"由弹体数量与扇角本身表达。
+            // 真正需要静态扇形语义的是宽角扇散（≥60°，读起来是一次"横扫"而不是几发子弹）：
+            // gene_fan(60)/org_wave(180) 到 Arc；gene_spindle(30)/gene_drift(20) 仍是几发会飞的弹。
+            if (evt.SpreadAngle >= 60f)
             {
                 return "Arc";
             }

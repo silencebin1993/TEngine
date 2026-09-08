@@ -40,6 +40,27 @@ namespace BinGames.Sim
         /// <summary>硬化状态的伤害倍率。</summary>
         public float HardenedMul;
 
+        /// <summary>
+        /// combat-primitive-overhaul：扇形筛选。<c>ConeDir</c> 为零向量时恒返回 true（整圆，旧行为逐字不变）。
+        ///
+        /// 近战此前是"在身前 2 米放一个半径 4 的圆"——圆是前移量的两倍大，等于背后的敌人照样挨打，
+        /// 玩家读不到任何"我朝哪打"的反馈。加上这道判据后近战才真的有面朝方向。
+        /// <c>ConeNearRadius</c> 内不筛：贴脸时方向向量数值不稳定，而且贴脸本来就该打得到。
+        /// </summary>
+        private static bool InCone(in DamageRequest req, float2 delta, float distSq)
+        {
+            if (math.lengthsq(req.ConeDir) < 1e-6f)
+            {
+                return true;
+            }
+            if (distSq <= req.ConeNearRadius * req.ConeNearRadius)
+            {
+                return true;
+            }
+            float2 dir = delta * math.rsqrt(math.max(distSq, 1e-8f));
+            return math.dot(dir, math.normalizesafe(req.ConeDir, new float2(0f, 1f))) >= req.ConeCosHalf;
+        }
+
         public void Execute()
         {
             for (int r = 0; r < Requests.Length; r++)
@@ -74,8 +95,14 @@ namespace BinGames.Sim
                         do
                         {
                             // 把目标自身半径算进去，边缘的大体积单位也应被命中
+                            float2 delta = Position[j] - req.Origin;
                             float reach = req.Radius + Radius[j];
-                            if (math.distancesq(Position[j], req.Origin) > reach * reach)
+                            float distSq = math.lengthsq(delta);
+                            if (distSq > reach * reach)
+                            {
+                                continue;
+                            }
+                            if (!InCone(req, delta, distSq))
                             {
                                 continue;
                             }

@@ -91,6 +91,32 @@ namespace GameLogic.Core
         /// <summary>reaction-depth-and-combat-feel story-002：命中触发的具名反应 id（如 "Steam"，
         /// 取自 HitEvent.Payload["Reaction"]），未触发任何具名反应时为 null。</summary>
         public string ReactionName;
+
+        // ── combat-primitive-overhaul ──
+
+        /// <summary>
+        /// 这一发是否已经交给内核真弹体（<see cref="BinGames.Sim.ProjectileState"/>）。
+        ///
+        /// true 时表现层**禁止**再自己模拟一条飞行轨迹——弹体由 SimRenderer 按内核真实位置绘制，
+        /// 表现层只负责枪口闪光这类"发生在原点的一次性事件"。这是"看得见的就是打得到的"的分工点：
+        /// 只要表现层还在自己算飞行，就一定会和判定分叉（追踪转向、反弹、撞障都会让两条曲线不同）。
+        /// false 时（近战/光环/场地/合成探针事件）表现层照旧自己出几何体。
+        /// </summary>
+        public bool KernelProjectile;
+
+        /// <summary>扇散总张角（度，<see cref="ComposeEngine.Core.HitEvent.SpreadAngle"/> 原样转发）。
+        /// 多发必须以 Direction 为中轴在 ±半角内展开——旧实现表现层用的是 360° 环形均分，
+        /// Count=2 时第二发直接朝正后方，与判定的前向锥完全对不上。</summary>
+        public float SpreadAngle;
+
+        /// <summary>近战扇形触及距离（仅 Melee 底盘有效，0 表示非近战）。表现层据此画出真实打击范围。</summary>
+        public float MeleeReach;
+        /// <summary>近战扇形半角（度，仅 Melee 底盘有效）。</summary>
+        public float MeleeHalfAngleDeg;
+
+        /// <summary>非弹道效果的**实际**结算坐标（Field 布场点 / Aura 贴身点），由判定侧算好后原样下发。
+        /// 表现层直接用它定位，禁止自己再乘一遍偏移系数——那正是旧实现"白模飞到 9 米外、伤害打在原地"的成因。</summary>
+        public float2 ImpactOrigin;
     }
 
     /// <summary>combat-primitive-presentation P1：Pierce/Bounce/Split/Return/Linger 这组"命中后延续"基元
@@ -99,7 +125,9 @@ namespace GameLogic.Core
     /// 不追溯原始 Shape，Kind 目前按下方固定几何体/配色分流，真实美术阶段再按 Kind 精细化。</summary>
     public struct ComposeChainSignal
     {
-        /// <summary>"Pierce" | "Bounce" | "Split" | "Return" | "Linger" 之一。</summary>
+        /// <summary>"Pierce" | "Bounce" | "Split" | "Return" | "Linger" | "Impact" | "Fizzle" 之一。
+        /// combat-primitive-overhaul 新增后两个：<c>Impact</c>=弹体在这里真的打中了、
+        /// <c>Fizzle</c>=飞完/出界/撞障没打中。位置全部由内核回传，不是热更层预测的。</summary>
         public string Kind;
         public float2 Position;
         public float2 Direction;

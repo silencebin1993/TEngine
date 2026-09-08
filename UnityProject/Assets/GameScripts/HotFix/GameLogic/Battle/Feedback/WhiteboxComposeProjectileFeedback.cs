@@ -122,6 +122,8 @@ namespace GameLogic.Battle.Feedback
         private static readonly Color SplitColor = new Color(0.95f, 0.35f, 0.85f, 1f);   // 品红，"分裂"
         private static readonly Color ReturnColor = new Color(0.2f, 0.8f, 0.75f, 1f);    // 深青，"飞镖回旋"
         private static readonly Color LingerColor = new Color(0.55f, 0.85f, 0.25f, 1f);  // 病态绿，"残留毒场"
+        private static readonly Color ImpactColor = new Color(1f, 0.9f, 0.7f, 1f);       // 暖白，"结结实实打中了"
+        private static readonly Color FizzleColor = new Color(0.55f, 0.6f, 0.7f, 0.7f);  // 冷灰，"这发空了"
 
         /// <summary>Field 抛掷飞行耗时，复用 Bolt 同款 <see cref="FlightLife"/>（0.3s）作为"甩出去"的时间窗，
         /// 落地后再用 <see cref="FieldSettleDuration"/>（0.2s）从小长到满径——二者相加正好等于
@@ -447,93 +449,100 @@ namespace GameLogic.Battle.Feedback
             FxRecipeCatalog.TryGetShapeRecipe(kind.ToString(), out var recipe);
             float shapeLife = recipe != null && recipe.Life == FxLifeKind.Persistent ? PersistentLife : FlightLife;
 
+            // ── combat-primitive-overhaul：弹道已交给内核真弹体，表现层**不再**自己模拟飞行 ──
+            //
+            // 旧实现在这里为每一发生成一个白模标记，然后在 ApplyTransform 里按
+            // `origin + dir * (1.2 + 9 * u)` 独立算一条飞行曲线。它和判定那边的落点公式不是同一条曲线：
+            //   · 追踪时判定落点是 lerp(origin+aim*9, 最近敌人, 强度)（绝对坐标、无射程上限），
+            //     而白模只是"方向插值 + 固定飞 9 米"——敌人远了白模半路就散（看不到弹道，只看到敌人死），
+            //     敌人近了白模又飞过头（看着命中了却没伤害）。
+            //   · Count>1 时 ComposeShapePresentation 会把 Shape 改写成 Arc，而 Arc 分支根本不位移
+            //     （钉在玩家身上），所以一装"纺锤分裂"弹道就整个消失，只剩 9 米外一个命中小白点。
+            //   · 多发方向白模用的是 FanDirection（360° 环形均分），判定用的是 ConeFanDirection（前向锥），
+            //     Count=2 时白模第二发直接朝正后方——这就是"永远沿一根轴裂开"的观感来源。
+            //
+            // 现在弹体由 SimRenderer.DrawProjectiles 按内核真实位置逐帧绘制（元素色经 Tint 带下去），
+            // 表现层只保留"发生在原点的一次性事件"：枪口闪光。命中/爆炸/留坑改由内核回传的
+            // 弹体终结事件驱动（OnComposeChain 的 Impact/Fizzle/Linger），落点必然与判定一致。
+            if (signal.KernelProjectile)
+            {
+                LastSegmentCount = segments;
+                LastExplodeRadius = signal.ExplodeOnHit
+                    ? radius * MetabolicSliceBridge.ExplodeRadiusMult : 0f;
+                LastReactionName = signal.ReactionName ?? "";
+                LastReactionLabel = string.IsNullOrEmpty(signal.ReactionName)
+                    ? "" : ReactionFeedbackCatalog.GetLabel(signal.ReactionName);
+                if (!string.IsNullOrEmpty(signal.ReactionName))
+                {
+                    // 反应播报仍然要有，但钉在**枪口**——真正的命中点这一刻还不知道（弹体还没飞）。
+                    SpawnReactionLabel(new Vector3(signal.Origin.x, MarkerY + 0.8f, signal.Origin.y),
+                        LastReactionLabel);
+                }
+                return;
+            }
+
             if (kind == ShapeKind.Beam)
             {
                 // Beam 例外（Decision D4）：Count 对单段常驻弹道无意义，固定渲染 1 段，不随 segments 循环。
                 LastSegmentCount = 1;
                 SpawnMarker(kind, signal.Origin, signal.Direction, 0f, 0f, 0f, radius, shapeLife, castColor);
             }
+            else if (kind == ShapeKind.Melee)
+            {
+                // 近战：一次挥击 = 一个扇形，不再拆成 N 个互不相连的小圆。
+                // 白模半径/张角直接取信号里判定用的那两个数（MeleeReach/MeleeHalfAngleDeg），
+                // 所以"看到的扇形"就是"打得到的扇形"。
+                LastSegmentCount = 1;
+                float meleeRadius = signal.MeleeReach > 0f ? signal.MeleeReach : radius;
+                LastComputedRadius = meleeRadius;
+                SpawnMarker(kind, signal.Origin, signal.Direction, 0f, signal.Spin, signal.Orbit,
+                    meleeRadius, shapeLife, castColor);
+            }
             else
             {
                 LastSegmentCount = segments;
                 float life = shapeLife;
+                // Field 的白模钉在**判定侧算好的**布场点上（signal.ImpactOrigin），不自己再乘一遍偏移。
+                float2 fxOrigin = kind == ShapeKind.Field ? signal.ImpactOrigin : signal.Origin;
                 for (int h = 0; h < segments; h++)
                 {
-                    // 与 PendingMotionHit 生成时同一分片公式（Decision D5）。
                     float phase = 2f * MathF.PI * h / segments;
-                    // story-006：Count 多发方向扇形展开，与 MetabolicSliceBridge.ApplyEvent 落点结算用同一公式
-                    // （R5）。segments==1 时 FanDirection 原样返回 signal.Direction，不影响单发既有观感。
-                    // story-007：Melee 改用前方扇形（MeleeFanDirection，±ArcHalfAngleDeg），其余 Shape 仍走
-                    // 全向 FanDirection——判定层 ApplyEvent 对二者做了同样区分，这里必须对齐，否则白模方向
-                    // 与真实命中圆心错位。
-                    float2 dir = kind == ShapeKind.Melee
-                        ? MetabolicSliceBridge.MeleeFanDirection(signal.Direction, h, segments)
-                        : MetabolicSliceBridge.FanDirection(signal.Direction, h, segments);
-                    // 正确性修复：signal.Homing/HomingDirection 是"整次施法"的单一代表值（同 Direction 的既有
-                    // 简化，不按发分别再查一次最近敌人），Count>1 时每个扇形分身共享同一个目标朝向插值——
-                    // 比此前"完全不弯"更接近真实命中点，单发（segments==1，homing 场景绝大多数情形）完全精确。
-                    SpawnMarker(kind, signal.Origin, dir, phase, signal.Spin, signal.Orbit, radius, life, castColor,
-                        homing: signal.Homing, homingDirection: signal.HomingDirection);
+                    // 与判定层 CombatBallistics.FanDirection 同一个函数——不是"同一个系数"，是同一份代码，
+                    // 因此不存在再次分叉的可能。SpreadAngle=0 时退化为环形均分（原地爆开式多发）。
+                    float2 dir = CombatBallistics.FanDirection(signal.Direction, h, segments,
+                        signal.SpreadAngle, (uint)h);
+                    SpawnMarker(kind, fxOrigin, dir, phase, signal.Spin, signal.Orbit, radius, life, castColor);
                 }
             }
 
             // story-007 D5/D6/D7/D8：Explode 是独立叠加标记，与 Shape 正交，禁止并入上面的分支判断。
+            // 非内核弹道路径（近战/光环/场地）都是原地结算，环就画在原地，不再沿方向推 9 米。
             if (signal.ExplodeOnHit)
             {
                 float explodeRadius = radius * MetabolicSliceBridge.ExplodeRadiusMult;
                 Color explodeColor = elementTag.Length > 0 ? castColor : FxRecipeCatalog.DefaultExplodeColor;
                 LastExplodeRadius = explodeRadius;
-                // story-006：落地爆炸环坐标从玩家位置改成落点，与 MetabolicSliceBridge.ApplyEvent 的延迟命中
-                // 落点用同一飞行距离（R5）。Wave 的 ApplyTransform 在 Spin=Orbit=0 时 offset 恒为零向量，
-                // 传入落点作为 origin 即可让环"就地在落点炸开"，不需要改 Wave 自身的位移公式（避免影响
-                // Spin/Orbit 主形态那条 Wave 分支，见 ComposeShapePresentation）。Melee-tail 的判定仍原地
-                // 瞬时结算（近战方向留给 007），环坐标同步保持 signal.Origin，避免视觉与判定落点错位。
-                float2 explodeOrigin = signal.Origin;
-                if (kind != ShapeKind.Melee)
-                {
-                    float2 explodeDir = math.normalizesafe(signal.Direction, new float2(0f, 1f));
-                    explodeOrigin = signal.Origin + explodeDir * MetabolicSliceBridge.ImpactFlightDistance;
-                }
-                SpawnMarker(ShapeKind.Wave, explodeOrigin, signal.Direction, 0f, 0f, 0f, explodeRadius, FlightLife, explodeColor);
+                SpawnMarker(ShapeKind.Wave, signal.Origin, signal.Direction, 0f, 0f, 0f,
+                    explodeRadius, FlightLife, explodeColor);
             }
             else
             {
                 LastExplodeRadius = 0f;
             }
 
-            // story-006：命中 VFX——与 ExplodeOnHit 相互独立，只要 shape.{kind}.hit 绑定就生成，
-            // 落点公式与上面的 explodeOrigin 一致（Melee 用 Origin，其余沿 Direction 飞 ImpactFlightDistance）。
             if (_vfxPool != null && _vfxPool.IsBound($"shape.{kind}.hit"))
             {
-                float2 hitOrigin = signal.Origin;
-                if (kind != ShapeKind.Melee)
-                {
-                    float2 hitDir = math.normalizesafe(signal.Direction, new float2(0f, 1f));
-                    hitOrigin = signal.Origin + hitDir * MetabolicSliceBridge.ImpactFlightDistance;
-                }
-                SpawnMarker(kind, hitOrigin, signal.Direction, 0f, 0f, 0f, radius * 0.3f, FlightLife, castColor, "hit");
+                SpawnMarker(kind, signal.Origin, signal.Direction, 0f, 0f, 0f, radius * 0.3f, FlightLife, castColor, "hit");
             }
 
-            // reaction-depth-and-combat-feel story-002：具名反应（rx_*/env_* 等，MetabolicSliceBridge.
-            // ApplyEvent 已从 evt.Payload["Reaction"] 转发）命中时额外播报，与上面的普通命中/爆炸标记
-            // 正交叠加（不是二选一分支）——落点公式复用"命中 VFX"同一套（Melee 用 Origin，其余沿
-            // Direction 飞 ImpactFlightDistance），保持与真实命中圆心一致。
             if (!string.IsNullOrEmpty(signal.ReactionName))
             {
                 string label = ReactionFeedbackCatalog.GetLabel(signal.ReactionName);
                 LastReactionName = signal.ReactionName;
                 LastReactionLabel = label;
-
-                float2 reactionPos = signal.Origin;
-                if (kind != ShapeKind.Melee)
-                {
-                    float2 reactionDir = math.normalizesafe(signal.Direction, new float2(0f, 1f));
-                    reactionPos = signal.Origin + reactionDir * MetabolicSliceBridge.ImpactFlightDistance;
-                }
-
-                SpawnMarker(ShapeKind.Wave, reactionPos, signal.Direction, 0f, 0f, 0f,
+                SpawnMarker(ShapeKind.Wave, signal.Origin, signal.Direction, 0f, 0f, 0f,
                     radius * ReactionRingMult, FlightLife * ReactionLifeMult, ReactionRingColor);
-                SpawnReactionLabel(new Vector3(reactionPos.x, MarkerY + 0.8f, reactionPos.y), label);
+                SpawnReactionLabel(new Vector3(signal.Origin.x, MarkerY + 0.8f, signal.Origin.y), label);
             }
             else
             {
@@ -583,6 +592,19 @@ namespace GameLogic.Battle.Feedback
                     float lingerLife = signal.Duration > 0f ? signal.Duration : ChainMarkerLife;
                     SpawnMarker(ShapeKind.Field, signal.Position, signal.Direction, 0f, 0f, 0f,
                         radius, lingerLife, LingerColor);
+                    break;
+                case "Impact":
+                    // combat-primitive-overhaul：弹体**真的**在这里打中了（坐标由内核回传，不是预测的）。
+                    // 这一环取代了旧实现"沿瞄准方向推 9 米画个命中点"的做法——那个点只在弹道恰好
+                    // 笔直飞满 9 米时才碰巧正确。
+                    SpawnMarker(ShapeKind.Wave, signal.Position, signal.Direction, 0f, 0f, 0f,
+                        radius, ChainMarkerLife * 1.5f, ImpactColor);
+                    break;
+                case "Fizzle":
+                    // 飞完/出界/撞障但没打中。给一个更暗更小的收尾，让玩家读得出"这发空了"——
+                    // 打空和打中长得一样，玩家就永远学不会自己的射程有多远。
+                    SpawnMarker(ShapeKind.Wave, signal.Position, signal.Direction, 0f, 0f, 0f,
+                        radius * 0.5f, ChainMarkerLife * 0.7f, FizzleColor);
                     break;
             }
         }
@@ -903,29 +925,31 @@ namespace GameLogic.Battle.Feedback
                 }
                 case ShapeKind.Arc:
                 {
+                    // Arc = 一次性横扫扇形（宽角扇散专用，见 ComposeShapePresentation）。
+                    // 它是**原地展开**的，这一点本身没错——错的是旧规则把"多发会飞的弹"也映射成 Arc，
+                    // 于是弹道整个不见了（已在 ComposeShapePresentation 修掉）。
+                    // 这里补上随 u 张开的生长，让它读起来是"扫出去"而不是凭空出现的一块色板。
                     float2 dir = _direction[idx];
                     float angDeg = DirectionAngleDeg(dir);
+                    float grown = radius * (0.55f + 0.45f * Mathf.Clamp01(u));
                     _tf[idx].localPosition = new Vector3(origin.x, MarkerY, origin.y);
                     _tf[idx].localRotation = Quaternion.Euler(0f, -angDeg, 0f);
-                    _tf[idx].localScale = new Vector3(radius, 1f, radius);
+                    _tf[idx].localScale = new Vector3(grown, 1f, grown);
                     break;
                 }
                 case ShapeKind.Field:
                 {
-                    // D3 强同步：白模半径直接等于 radius，无额外系数（落地后满径不变）。
-                    // 接上角色：落地前 FlightLife 秒沿 Direction 从施法点（玩家胶囊）线性飞到落点
-                    // （与 Bolt/Spore 同一个 ImpactFlightDistance），呼应 CATALOG「把酶雾扔到落点」的设计——
-                    // 此前 Field 无任何位移，原地贴身瞬间满径出现，读不出"甩出去"。落地后再用
-                    // FieldSettleDuration 秒从小长到满径，两段时长相加=PersistentLife，不会在满径前提前回收。
-                    float2 throwDir = math.normalizesafe(_direction[idx], new float2(0f, 1f));
-                    float2 landing = origin + throwDir * MetabolicSliceBridge.ImpactFlightDistance;
-                    float flightT = FlightLife > 0f ? Mathf.Clamp01(_elapsed[idx] / FlightLife) : 1f;
-                    float2 pos = math.lerp(origin, landing, flightT);
+                    // combat-primitive-overhaul：Field 白模不再"沿方向飞 9 米落地"。
+                    //
+                    // 真正会被扔出去的 Field（叠了任何弹道基元的，如 org_enzyme + gene_tide）现在走内核
+                    // 真弹体，根本不进这个分支；剩下进来的是**原地铺场**的 Field，判定就在玩家脚下结算。
+                    // 旧代码让白模飞到 9 米外，而伤害打在原地——是又一处"看到的地方没伤害"。
+                    // 留坑的位置改由内核弹体终结事件驱动（OnComposeChain 的 "Linger"），落点必然正确。
                     float settleT = FieldSettleDuration > 0f
-                        ? Mathf.Clamp01((_elapsed[idx] - FlightLife) / FieldSettleDuration)
+                        ? Mathf.Clamp01(_elapsed[idx] / FieldSettleDuration)
                         : 1f;
-                    float diameterScale = flightT >= 1f ? Mathf.Lerp(0.3f, 1f, settleT) : 0.3f;
-                    _tf[idx].localPosition = new Vector3(pos.x, MarkerY, pos.y);
+                    float diameterScale = Mathf.Lerp(0.35f, 1f, settleT);
+                    _tf[idx].localPosition = new Vector3(origin.x, MarkerY, origin.y);
                     _tf[idx].localRotation = Quaternion.identity;
                     _tf[idx].localScale = new Vector3(radius * 2f * diameterScale, 1f, radius * 2f * diameterScale);
                     break;
@@ -956,15 +980,16 @@ namespace GameLogic.Battle.Feedback
                 }
                 case ShapeKind.Melee:
                 {
-                    // story-007 R6：近战「朝向旋转 + 前移 + 方向性拉伸」——不再原地放大/identity 旋转。
-                    // 前移量与 MetabolicSliceBridge 的判定圆心共用同一个数（MeleeMuzzleOffset），
-                    // 不随 u 增长（非线性飞行，仍是"原地生长"，只是生长的原点前移了），
-                    // Spin/Orbit 偏移沿用 003 D5（=0 时天然零向量）。
+                    // combat-primitive-overhaul：白模半径直接就是判定的触及距离（radius 现在传的是
+                    // signal.MeleeReach），前移量与判定扇心同一个常量——所见即所打。
+                    // 0.6→1.0 的生长只是挥出去的动作感，不改变最终覆盖范围。
+                    // （旧实现的 radius 是 DamageAreaRadius=4 的"命中圆半径"，而判定是 N 个半径 4 的圆
+                    //   摆在身前 2 米处，白模画一个、判定打好几个，两者从来就不是一回事。）
                     float2 offset = ComposeMotionMath.Offset(_phase[idx], _spin[idx], _orbit[idx], _elapsed[idx]);
                     float2 dir = _direction[idx];
                     float2 muzzle = dir * MeleeMuzzleOffset;
                     float2 pos = origin + offset + muzzle;
-                    float grown = radius * recipe.DiameterCoef * (0.6f + 0.4f * Mathf.Clamp01(u));
+                    float grown = radius * (0.6f + 0.4f * Mathf.Clamp01(u));
                     float angDeg = DirectionAngleDeg(dir);
                     _tf[idx].localPosition = new Vector3(pos.x, MarkerY, pos.y);
                     _tf[idx].localRotation = Quaternion.Euler(0f, -angDeg, 0f);

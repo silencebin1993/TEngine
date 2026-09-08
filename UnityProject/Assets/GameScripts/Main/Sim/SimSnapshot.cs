@@ -38,6 +38,13 @@ namespace BinGames.Sim
         [ReadOnly] public NativeArray<int> DevourCandidates;
         public int DevourCandidateCount;
 
+        /// <summary>
+        /// combat-primitive-overhaul：本帧弹体终结事件（真实落点 + 为什么没的）。
+        /// 热更层据此放留坑/命中表现——**不要再自己预测落点**，那是"看到命中了却没伤害"的根因。
+        /// </summary>
+        [ReadOnly] public NativeArray<ProjectileEndEvent> ProjectileEnds;
+        public int ProjectileEndCount;
+
         /// <summary>本帧玩家受到的接触伤害总量。</summary>
         public float PlayerContactDamage;
 

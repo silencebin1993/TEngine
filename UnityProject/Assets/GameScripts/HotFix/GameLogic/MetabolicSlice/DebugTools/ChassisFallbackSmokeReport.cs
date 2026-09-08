@@ -153,8 +153,11 @@ namespace GameLogic.MetabolicSlice.DebugTools
                 return (false, $"以下基因未达「至少 3 底盘有可观察差异」下限：{string.Join(", ", underSampled)}");
             }
 
-            // ── 前后对照：证明本 story 修复的核心 bug——Linger 这类"延迟落点"字段此前只有
-            // Shape=="Bolt" 能触发落点结算，Melee/Field/Aura 底盘全部死字段 ──
+            // ── 前后对照：Linger 这类**载荷**基元必须在任何底盘上都落地成一块持续区域。
+            // combat-primitive-overhaul：断言口径从 PendingImpactCount（伪落点条数，已删）
+            // 改为 PendingLingerCount（真的铺了几块持续区域）。同时 Linger/Trail 不再被算作
+            // "轨迹基元"——它们决定"留下什么"，不决定"怎么飞"，所以 org_enzyme（只有 Linger 的酶雾）
+            // 现在正确地留在 Field 底盘布场，而不是被误判成弹道飞到 9 米外。──
 
             // ① org_enzyme（Field）自带 LingerModule(4f)，空载基线本身就该落地成坑（PendingImpactCount>0），
             // 不需要额外挂基因——此前恒为 0，是本 story 修的根因 bug。
@@ -166,9 +169,9 @@ namespace GameLogic.MetabolicSlice.DebugTools
                 var bridge = new MetabolicSliceBridge();
                 bridge.Bind(sim, new StatSheet(), new AbilitySystem());
                 bridge.ApplyEvent(events[0]);
-                if (bridge.PendingImpactCount <= 0)
+                if (bridge.PendingLingerCount <= 0)
                 {
-                    return (false, "①org_enzyme 空载基线自带 Linger，应触发落点结算（PendingImpactCount>0），实际 0——Field 底盘 Fallback 未生效");
+                    return (false, "①org_enzyme 空载基线自带 Linger，应铺出持续区域（PendingLingerCount>0），实际 0——Field 底盘载荷未生效");
                 }
             }
 
@@ -184,9 +187,9 @@ namespace GameLogic.MetabolicSlice.DebugTools
                 var bridge = new MetabolicSliceBridge();
                 bridge.Bind(sim, new StatSheet(), new AbilitySystem());
                 bridge.ApplyEvent(events[0]);
-                if (bridge.PendingImpactCount <= 0)
+                if (bridge.PendingLingerCount <= 0)
                 {
-                    return (false, "②org_cilia+gene_tide 应触发落点结算（PendingImpactCount>0），实际 0——Melee 底盘 Fallback 未生效");
+                    return (false, "②org_cilia+gene_tide 应铺出持续区域（PendingLingerCount>0），实际 0——Melee 底盘载荷未生效");
                 }
             }
 
@@ -202,9 +205,9 @@ namespace GameLogic.MetabolicSlice.DebugTools
                 var bridge = new MetabolicSliceBridge();
                 bridge.Bind(sim, new StatSheet(), new AbilitySystem());
                 bridge.ApplyEvent(events[0]);
-                if (bridge.PendingImpactCount <= 0)
+                if (bridge.PendingLingerCount <= 0)
                 {
-                    return (false, "③org_osmotic+gene_tide 应触发落点结算（PendingImpactCount>0），实际 0——Aura 底盘 Fallback 未生效");
+                    return (false, "③org_osmotic+gene_tide 应铺出持续区域（PendingLingerCount>0），实际 0——Aura 底盘载荷未生效");
                 }
             }
 
@@ -243,7 +246,7 @@ namespace GameLogic.MetabolicSlice.DebugTools
             return (true,
                 $"{combosPassed}/{combosTotal} (gene,organ) 组合 Pattern 保持不变 + ApplyEvent 不抛异常；" +
                 $"{totalDiffs}/{combosTotal} 组合有可观察字段差异，全部 {diffCountByGene.Count} 条基因均 ≥3 底盘达标；" +
-                "①org_enzyme 基线/②org_cilia+gene_tide/③org_osmotic+gene_tide 均已触发落点结算（PendingImpactCount>0）；" +
+                "①org_enzyme 基线/②org_cilia+gene_tide/③org_osmotic+gene_tide 均已铺出持续区域（PendingLingerCount>0）；" +
                 "④org_bud+gene_swarm 结构性满足 InheritPattern 触发条件。");
         }
 

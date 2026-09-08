@@ -1,5 +1,6 @@
 using BinGames.Sim;
 using GameLogic.Core;
+using Unity.Collections;
 using Unity.Mathematics;
 using UnityEngine;
 
@@ -220,6 +221,83 @@ namespace GameLogic.Battle
                 SourceLogicId = sourceLogicId,
                 VisualId = visualId,
             });
+        }
+
+        /// <summary>
+        /// combat-primitive-overhaul：带全部弹道基元的发射入口。调用方自己填好
+        /// <see cref="ProjectileRequest"/>（字段语义见该结构注释），Bridge 只负责入队。
+        ///
+        /// 器官/基因的攻击**必须**走这条路，不许再在热更层用"预测落点 + 倒计时"伪造弹道——
+        /// 那套做法让判定与表现各算各的，且弹体飞行途中的敌人永远打不到。
+        /// </summary>
+        public void FireProjectile(in ProjectileRequest req)
+        {
+            if (!_running) { return; }
+            _cmds.Projectile(req);
+        }
+
+        /// <summary>
+        /// combat-primitive-overhaul：扇形范围伤害。近战底盘专用——圆形范围叠一道"必须落在面朝锥内"的判据，
+        /// 不再是"身前放个大圆连背后一起打"。<paramref name="halfAngleDeg"/> &gt;= 180 时退化为整圆。
+        /// </summary>
+        public void DamageCone(float2 origin, float radius, float2 coneDir, float halfAngleDeg, float amount,
+            SimFaction targetFaction = SimFaction.Hostile,
+            SimStatus applyStatus = SimStatus.None,
+            int chainCount = 0, float nearRadius = 0f, int sourceLogicId = 0)
+        {
+            if (!_running) { return; }
+            bool full = halfAngleDeg >= 180f || math.lengthsq(coneDir) < 1e-6f;
+            _cmds.Damage(new DamageRequest
+            {
+                Origin = origin,
+                Radius = radius,
+                TargetIndex = SimConst.InvalidIndex,
+                Amount = amount,
+                TargetFaction = targetFaction,
+                ApplyStatus = applyStatus,
+                RequireStatus = SimStatus.None,
+                ChainCount = chainCount,
+                ChainRange = 4f,
+                ChainFalloff = 0.75f,
+                SourceLogicId = sourceLogicId,
+                ConeDir = full ? float2.zero : math.normalizesafe(coneDir),
+                ConeCosHalf = full ? -1f : math.cos(math.radians(halfAngleDeg)),
+                ConeNearRadius = nearRadius,
+            });
+        }
+
+        /// <summary>combat-primitive-overhaul：本帧弹体终结事件条数（真实落点）。热更层放留坑/命中表现用。</summary>
+        public int ProjectileEndCount => _running && _snapshot.ProjectileEnds.IsCreated ? _snapshot.ProjectileEndCount : 0;
+
+        /// <summary>按下标取本帧第 i 条弹体终结事件。与 <see cref="ProjectileEndCount"/> 配套，
+        /// 只在本帧有效（下一次 Step 即失效，同快照约定）。</summary>
+        public ProjectileEndEvent GetProjectileEnd(int i) => _snapshot.ProjectileEnds[i];
+
+        /// <summary>
+        /// 当前场上还在飞的弹体数。验收探针用（"开火后真的有弹体存在"），
+        /// 不要在每帧逻辑里调——它是 O(弹体容量) 的线性扫描。
+        /// </summary>
+        public int LiveProjectileCount
+        {
+            get
+            {
+                SimWorld w = World;
+                if (w == null || !_running)
+                {
+                    return 0;
+                }
+                NativeArray<ProjectileState> arr = w.Projectiles;
+                if (!arr.IsCreated)
+                {
+                    return 0;
+                }
+                int n = 0;
+                for (int i = 0; i < arr.Length; i++)
+                {
+                    if (arr[i].Alive != 0) { n++; }
+                }
+                return n;
+            }
         }
 
         // ── 玩家读写 ──

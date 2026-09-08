@@ -54,6 +54,12 @@ namespace BinGames.Sim
         private int _deathCount;
         private NativeList<int> _devourCandidates;
         private NativeQueue<DamageRequest> _projectileDamage;
+        /// <summary>combat-primitive-overhaul：分裂/回旋产生的二级弹体。并行 Job 不能直接抢 _projectiles 槽位。</summary>
+        private NativeQueue<ProjectileRequest> _projectileSpawns;
+        /// <summary>同上，弹体终结事件；主线程搬进 _projectileEndEvents 供快照读。</summary>
+        private NativeQueue<ProjectileEndEvent> _projectileEndQueue;
+        private NativeArray<ProjectileEndEvent> _projectileEndEvents;
+        private int _projectileEndCount;
         private NativeQueue<int> _deadQueue;
         private NativeList<DamageRequest> _damageScratch;
         private NativeArray<float> _playerDamage;
@@ -97,6 +103,11 @@ namespace BinGames.Sim
             _deathEvents = new NativeArray<DeathEvent>(math.max(64, cfg.MaxDeathEventsPerFrame), A);
             _devourCandidates = new NativeList<int>(64, A);
             _projectileDamage = new NativeQueue<DamageRequest>(A);
+            _projectileSpawns = new NativeQueue<ProjectileRequest>(A);
+            _projectileEndQueue = new NativeQueue<ProjectileEndEvent>(A);
+            _projectileEndEvents = new NativeArray<ProjectileEndEvent>(
+                math.max(64, cfg.MaxHitEventsPerFrame), A);
+            _projectileEndCount = 0;
             _deadQueue = new NativeQueue<int>(A);
             _damageScratch = new NativeList<DamageRequest>(256, A);
             _playerDamage = new NativeArray<float>(1, A);
@@ -333,12 +344,32 @@ namespace BinGames.Sim
                 ObstacleCount = _obstacleCount,
                 Projectiles = _projectiles,
                 DamageOut = _projectileDamage.AsParallelWriter(),
+                SpawnOut = _projectileSpawns.AsParallelWriter(),
+                EndOut = _projectileEndQueue.AsParallelWriter(),
                 Dt = dt,
                 InvCellSize = _hash.InvCellSize,
                 UnitCount = _unitCount,
                 ArenaHalf = _cfg.ArenaHalfExtent,
+                OwnerPos = playerPos,
             };
             proj.Schedule(_projectiles.Length, 32, default).Complete();
+
+            // combat-primitive-overhaul：Job 产出的二级弹体（分裂/回旋）在主线程落槽。
+            // 本帧生成、下一帧才推进——与命令缓冲里的弹体同一时序，不需要额外补偿。
+            while (_projectileSpawns.TryDequeue(out ProjectileRequest pr))
+            {
+                SpawnProjectile(pr);
+            }
+
+            // 弹体终结事件搬进快照数组，热更层在**真实**落点放留坑/命中表现。
+            _projectileEndCount = 0;
+            while (_projectileEndQueue.TryDequeue(out ProjectileEndEvent pe))
+            {
+                if (_projectileEndCount < _projectileEndEvents.Length)
+                {
+                    _projectileEndEvents[_projectileEndCount++] = pe;
+                }
+            }
 
             // 汇总伤害请求：命令缓冲里的 + 投射物产生的
             for (int i = 0; i < cmds.Damages.Length; i++)
@@ -674,6 +705,32 @@ namespace BinGames.Sim
                     SourceLogicId = req.SourceLogicId,
                     VisualId = req.VisualId,
                     Alive = 1,
+
+                    // combat-primitive-overhaul：弹道基元原样搬进运行时状态。
+                    // 调用方全部留默认 0 时，JobProjectile 每一段都被首行条件跳过（零回归）。
+                    Homing = math.saturate(req.Homing),
+                    HomingRange = math.max(0f, req.HomingRange),
+                    TurnRateDeg = math.max(0f, req.TurnRateDeg),
+                    Drag = math.max(0f, req.Drag),
+                    AreaRadius = math.max(0f, req.AreaRadius),
+                    BounceLeft = math.max(0, req.BounceCount),
+                    SplitCount = math.max(0, req.SplitCount),
+                    SplitAngleDeg = req.SplitAngleDeg,
+                    TrailDamage = math.max(0f, req.TrailDamage),
+                    TrailInterval = req.TrailInterval,
+                    // 第一跳立刻出，否则短射程弹体飞完全程一次拖尾都不掉。
+                    TrailTimer = 0f,
+                    LingerSeconds = math.max(0f, req.LingerSeconds),
+                    LingerRadius = math.max(0f, req.LingerRadius),
+                    ChainCount = math.max(0, req.ChainCount),
+                    WeaveRateDeg = req.WeaveRateDeg,
+                    WeaveAmp = math.max(0f, req.WeaveAmp),
+                    WeavePhase = 0f,
+                    LastHitIndex = SimConst.InvalidIndex,
+                    HitCooldown = 0f,
+                    Generation = req.Generation,
+                    Flags = req.Flags,
+                    Tint = req.Tint,
                 };
                 _projectileCursor = (p + 1) % n;
                 return;
@@ -766,6 +823,8 @@ namespace BinGames.Sim
                 HitCount = _hitEvents.IsCreated ? _hitEvents.Length : 0,
                 DevourCandidates = _devourCandidates.IsCreated ? _devourCandidates.AsArray() : default,
                 DevourCandidateCount = _devourCandidates.IsCreated ? _devourCandidates.Length : 0,
+                ProjectileEnds = _projectileEndEvents,
+                ProjectileEndCount = _projectileEndCount,
                 PlayerContactDamage = _playerDamage.IsCreated ? _playerDamage[0] : 0f,
                 PlayerPosition = _position[SimConst.PlayerIndex],
                 PlayerHealth = _health[SimConst.PlayerIndex],
@@ -798,6 +857,9 @@ namespace BinGames.Sim
             if (_deathEvents.IsCreated) { _deathEvents.Dispose(); }
             if (_devourCandidates.IsCreated) { _devourCandidates.Dispose(); }
             if (_projectileDamage.IsCreated) { _projectileDamage.Dispose(); }
+            if (_projectileSpawns.IsCreated) { _projectileSpawns.Dispose(); }
+            if (_projectileEndQueue.IsCreated) { _projectileEndQueue.Dispose(); }
+            if (_projectileEndEvents.IsCreated) { _projectileEndEvents.Dispose(); }
             if (_deadQueue.IsCreated) { _deadQueue.Dispose(); }
             if (_damageScratch.IsCreated) { _damageScratch.Dispose(); }
             if (_playerDamage.IsCreated) { _playerDamage.Dispose(); }
