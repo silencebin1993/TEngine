@@ -985,7 +985,7 @@ namespace GameLogic.UI.Battle
             {
                 _codexRect = new Rect(Screen.width * 0.5f - 220f, 12f, 440f, Screen.height - 24f);
             }
-            ImguiDragUtil.DrawDraggable(106, ref _codexRect, "图鉴（本局发现，未跨局保存）", "codex", id => DrawCodexContent(cell, codex));
+            ImguiDragUtil.DrawDraggable(106, ref _codexRect, "图鉴（发现进度跨局保存）", "codex", id => DrawCodexContent(cell, codex));
         }
 
         private void DrawCodexContent(CellStageFlow cell, CodexRegistry codex)
