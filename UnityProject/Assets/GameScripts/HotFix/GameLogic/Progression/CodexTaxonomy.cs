@@ -72,7 +72,37 @@ namespace GameLogic.Progression
             [SimStatus.Telegraphing] = "前摇中：蓄力预警。",
         };
 
-        public static string StatusName(SimStatus status) => status.ToString();
+        /// <summary>
+        /// 描述里没有「短名：说明」前缀的少数几条，在此显式给短名。
+        /// 只补这几条而不另建全量映射，是为了避免两份中文数据日后漂移。
+        /// </summary>
+        private static readonly Dictionary<SimStatus, string> ShortNameOverrides = new()
+        {
+            [SimStatus.Pulled] = "牵引",
+            [SimStatus.Unedible] = "不可吞噬",
+            [SimStatus.Elite] = "精英",
+            [SimStatus.Boss] = "首领",
+            [SimStatus.OnMycelium] = "菌毯",
+        };
+
+        /// <summary>
+        /// 玩家可见的中文短名。
+        ///
+        /// 此前实现是 <c>status.ToString()</c>，图鉴状态页因此一直显示英文枚举名
+        /// （Conductive / Slowed …）。绝大多数描述本身已是「短名：说明。」格式，
+        /// 取「：」前一段即可复用现成中文，无需新增数据。
+        /// </summary>
+        public static string StatusName(SimStatus status)
+        {
+            if (ShortNameOverrides.TryGetValue(status, out string s))
+            {
+                return s;
+            }
+
+            string desc = StatusDescription(status);
+            int i = desc.IndexOf('：');
+            return i > 0 ? desc.Substring(0, i) : status.ToString();
+        }
 
         public static string StatusDescription(SimStatus status) =>
             StatusDescriptions.TryGetValue(status, out var d) ? d : string.Empty;

@@ -42,6 +42,29 @@ namespace GameLogic.Battle
         public int ActiveCount => _entries.Count;
         public int TimedStatCount => _statEntries.Count;
 
+        /// <summary>玩家身上某个状态的剩余秒数（HUD 用）。</summary>
+        public struct PlayerStatusTimer
+        {
+            public SimStatus Status;
+            public float TimeLeft;
+        }
+
+        private readonly List<PlayerStatusTimer> _playerTimers = new List<PlayerStatusTimer>(8);
+
+        /// <summary>
+        /// 玩家身上限时状态的剩余时间，供 HUD 读取。
+        ///
+        /// 刻意不提供「查某单位状态」的通用接口：<c>_entries</c> 会随
+        /// <see cref="ApplyTimedArea"/> 增长到敌人数量级，HUD 每帧遍历它就违反了
+        /// 「热更层每帧与敌人数无关」的架构红线。这里改为在 <see cref="OnUpdate"/>
+        /// 既有的那一趟遍历里顺带筛出玩家条目，读取侧 O(玩家状态数)、零额外遍历。
+        ///
+        /// 注意本表**只有限时状态**。像冲刺无敌那样直接 <c>ApplyStatusUnit</c> 的
+        /// 永久状态不进 <c>_entries</c>，HUD 要显示全量得读快照掩码
+        /// <c>SimSnapshot.Status[SimConst.PlayerIndex]</c>，本表只用来补剩余时间。
+        /// </summary>
+        public IReadOnlyList<PlayerStatusTimer> PlayerTimers => _playerTimers;
+
         /// <summary>
         /// 登记一条限时属性修正。修正器本身由调用方先加进 StatSheet，
         /// 本模块只负责到期时 RemoveBySource。
@@ -232,6 +255,10 @@ namespace GameLogic.Battle
         {
             TickTimedStats(dt);
 
+            // 放在 early return 之前：没有条目时 HUD 也必须读到空表，否则上一帧的
+            // 状态会残留在界面上。
+            _playerTimers.Clear();
+
             if (_sim == null || !_sim.Running || _entries.Count == 0)
             {
                 return;
@@ -257,6 +284,15 @@ namespace GameLogic.Battle
                 if (e.TimeLeft > 0f)
                 {
                     _entries[i] = e;
+                    // 顺带筛出玩家条目给 HUD，复用这趟遍历，不另开循环
+                    if (e.UnitIndex == SimConst.PlayerIndex)
+                    {
+                        _playerTimers.Add(new PlayerStatusTimer
+                        {
+                            Status = e.Status,
+                            TimeLeft = e.TimeLeft,
+                        });
+                    }
                     continue;
                 }
 

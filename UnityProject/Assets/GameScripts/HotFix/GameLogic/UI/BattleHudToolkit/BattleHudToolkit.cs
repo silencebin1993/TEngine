@@ -2,7 +2,9 @@ using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UIElements;
+using BinGames.Sim;
 using GameLogic.Ability;
+using GameLogic.Battle;
 using GameLogic.MetabolicSlice.Combat;
 using GameLogic.MetabolicSlice.Digestion;
 using GameLogic.Progression;
@@ -41,6 +43,11 @@ namespace GameLogic
         private Button _advanceButton;
         private Label _runTimer;
         private VisualElement _vitalBlock;
+        private VisualElement _statusBlock;
+        /// <summary>状态 chip 池：每帧复用，避免 new Label 的 GC。</summary>
+        private readonly List<Label> _statusChips = new List<Label>(8);
+        /// <summary>SimStatus 各位缓存，避免每帧 Enum.GetValues 装箱。</summary>
+        private static readonly SimStatus[] AllStatuses = BuildAllStatuses();
         private Label _hpText;
         private Label _volumeText;
         private VisualElement _hpFill;
@@ -154,6 +161,7 @@ namespace GameLogic
             _ecoEventBlock = _root.Q<VisualElement>("EcoEventBlock");
             _ecoEventText = _root.Q<Label>("EcoEventText");
 
+            _statusBlock = _root.Q<VisualElement>("StatusBlock");
             _arenaTags = _root.Q<VisualElement>("ArenaTags");
             _envPrompt = _root.Q<Label>("EnvPrompt");
             _chamberText = _root.Q<Label>("ChamberText");
@@ -283,8 +291,124 @@ namespace GameLogic
                 $"敌人 {cell.Director.LiveHostiles}　压力 {cell.Director.CurrentPressure:F0}/{cell.Director.Budget:F0}";
 
             RefreshEcoEvent(cell);
+            RefreshStatuses(cell);
             RefreshSkillSlots(cell);
             RefreshAxisTouchAndChain(cell);
+        }
+
+        /// <summary>
+        /// 玩家状态上屏（ui-visual-overhaul story-005）。此前 <see cref="StatusSystem"/>
+        /// 全仓零 UI 消费方，玩家完全看不到自己中了什么 buff/debuff。
+        ///
+        /// 数据刻意取自两处：
+        /// **有哪些状态** → 内核快照掩码 <c>Status[PlayerIndex]</c>，O(1)，且能覆盖
+        /// 冲刺无敌那种直接 <c>ApplyStatusUnit</c>、不进 StatusSystem 计时表的永久状态；
+        /// **剩余秒数** → <see cref="StatusSystem.PlayerTimers"/>，只有限时状态才有。
+        ///
+        /// 不遍历 <c>StatusSystem</c> 的内部条目表：它会随 <c>ApplyTimedArea</c> 涨到
+        /// 敌人数量级，每帧遍历就违反了「热更层每帧与敌人数无关」的红线。本方法
+        /// 外层 O(状态种类数)、内层 O(玩家状态数)，均为常数。
+        /// </summary>
+        private void RefreshStatuses(CellStageFlow cell)
+        {
+            if (_statusBlock == null)
+            {
+                return;
+            }
+
+            uint mask = 0u;
+            SimBridge sim = cell.Sim;
+            if (sim != null && sim.Running)
+            {
+                SimSnapshot snap = sim.Snapshot;
+                if (SimConst.PlayerIndex < snap.Count && snap.Alive[SimConst.PlayerIndex] != 0)
+                {
+                    mask = snap.Status[SimConst.PlayerIndex];
+                }
+            }
+
+            if (mask == 0u)
+            {
+                _statusBlock.style.display = DisplayStyle.None;
+                return;
+            }
+            _statusBlock.style.display = DisplayStyle.Flex;
+
+            IReadOnlyList<StatusSystem.PlayerStatusTimer> timers =
+                cell.Status != null ? cell.Status.PlayerTimers : null;
+
+            int used = 0;
+            for (int i = 0; i < AllStatuses.Length; i++)
+            {
+                SimStatus s = AllStatuses[i];
+                if ((mask & (uint)s) == 0u)
+                {
+                    continue;
+                }
+
+                float timeLeft = -1f;
+                if (timers != null)
+                {
+                    for (int t = 0; t < timers.Count; t++)
+                    {
+                        if (timers[t].Status != s)
+                        {
+                            continue;
+                        }
+                        timeLeft = timers[t].TimeLeft;
+                        break;
+                    }
+                }
+
+                Label chip = GetStatusChip(used);
+                string name = CodexTaxonomy.StatusName(s);
+                chip.text = timeLeft > 0f ? $"{name} {timeLeft:F0}s" : name;
+                chip.EnableInClassList("status-buff", IsBuff(s));
+                used++;
+            }
+
+            for (int i = used; i < _statusChips.Count; i++)
+            {
+                _statusChips[i].style.display = DisplayStyle.None;
+            }
+        }
+
+        private Label GetStatusChip(int index)
+        {
+            while (_statusChips.Count <= index)
+            {
+                Label made = new Label();
+                made.AddToClassList("status-chip");
+                _statusBlock.Add(made);
+                _statusChips.Add(made);
+            }
+
+            Label chip = _statusChips[index];
+            chip.style.display = DisplayStyle.Flex;
+            return chip;
+        }
+
+        /// <summary>
+        /// 增益判定，只影响 chip 配色（绿=好事 / 琥珀=坏事），不参与任何数值逻辑。
+        /// 名单按 <see cref="CodexTaxonomy"/> 里的中文描述语义定：
+        /// 无敌=免疫伤害、硬化=受击阈值提高、不可吞噬=护壳完整，均对玩家有利。
+        /// 其余（含 OnMycelium/Overloaded/Telegraphing 这类中性标记）一律按默认样式，
+        /// 宁可把中性显示成警示色，也不要把 debuff 误染成绿色让玩家以为是好事。
+        /// </summary>
+        private static bool IsBuff(SimStatus s) =>
+            s == SimStatus.Invulnerable || s == SimStatus.Hardened || s == SimStatus.Unedible;
+
+        private static SimStatus[] BuildAllStatuses()
+        {
+            List<SimStatus> list = new List<SimStatus>(24);
+            foreach (SimStatus s in System.Enum.GetValues(typeof(SimStatus)))
+            {
+                if (s != SimStatus.None)
+                {
+                    list.Add(s);
+                }
+            }
+            return list.ToArray();
         }
 
         /// <summary>story-002 D11：接 story-001 遗留的 AxisTouchPanel（轴A/消化泡）+ ChainSummary（代谢链路）。</summary>
