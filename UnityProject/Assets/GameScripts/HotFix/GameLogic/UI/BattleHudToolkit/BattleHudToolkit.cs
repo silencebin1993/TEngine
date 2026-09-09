@@ -87,6 +87,13 @@ namespace GameLogic
         /// <summary>ComposeCastSignal 订阅作用域，Start 建、OnDestroy 释放（D2）。</summary>
         private SignalScope _scope;
 
+        /// <summary>ui-visual-overhaul story-007：生效中的规则开关一行。</summary>
+        private VisualElement _ruleFlagsBlock;
+        private Label _ruleFlagsText;
+        /// <summary>上次据以拼串的 <see cref="RuleFlags.Version"/>；-1 = 尚未拼过。
+        /// 只在版本变化时重建文案，逐帧遍历 12 个 flag 拼字符串是白烧 GC。</summary>
+        private int _ruleFlagsVersion = -1;
+
         /// <summary>story-002 D11：story-001 遗留，右上轴A/消化泡摘要节点。</summary>
         private VisualElement _arenaTags;
         private Label _envPrompt;
@@ -191,6 +198,9 @@ namespace GameLogic
                 // 初始态即隐藏（D3）：没打出反应前不该有一条空行占位。
                 _reactionFeedbackBlock.style.display = DisplayStyle.None;
             }
+
+            _ruleFlagsBlock = _root.Q<VisualElement>("RuleFlagsBlock");
+            _ruleFlagsText = _root.Q<Label>("RuleFlagsText");
 
             _statusBlock = _root.Q<VisualElement>("StatusBlock");
             _arenaTags = _root.Q<VisualElement>("ArenaTags");
@@ -323,6 +333,7 @@ namespace GameLogic
 
             RefreshEcoEvent(cell);
             RefreshReactionFeedback();
+            RefreshRuleFlags();
             RefreshStatuses(cell);
             RefreshSkillSlots(cell);
             RefreshAxisTouchAndChain(cell);
@@ -569,6 +580,60 @@ namespace GameLogic
                 }
                 _reactionFeedbackBlock.style.display = DisplayStyle.Flex;
             }
+        }
+
+        /// <summary>
+        /// 生效中的规则开关一行（ui-visual-overhaul story-007）。
+        ///
+        /// 在此之前全仓没有任何 UI/HUD/图鉴读过 <see cref="RuleFlags.Current"/>：玩家装到
+        /// `ComboNeverResets`/`CorpseEdible` 这类卡之后规则**真的变了**，却没有任何地方告诉他。
+        ///
+        /// 每帧只比一个 int（<see cref="RuleFlags.Version"/>），版本没动就直接返回——
+        /// 逐帧遍历 flag 集合拼字符串是纯 GC 浪费，且热更层每帧只允许 O(1)。
+        /// </summary>
+        private void RefreshRuleFlags()
+        {
+            if (_ruleFlagsBlock == null)
+            {
+                return;
+            }
+
+            RuleFlags rules = RuleFlags.Current;
+            if (rules == null)
+            {
+                return;
+            }
+
+            if (rules.Version == _ruleFlagsVersion)
+            {
+                return;
+            }
+            _ruleFlagsVersion = rules.Version;
+
+            if (rules.Active.Count == 0)
+            {
+                // 一条规则都没生效时不留空行占位——大多数局的大多数时间都是这个状态。
+                _ruleFlagsBlock.style.display = DisplayStyle.None;
+                return;
+            }
+
+            var sb = new System.Text.StringBuilder("规则：");
+            bool first = true;
+            foreach (RuleFlag flag in rules.Active)
+            {
+                if (!first)
+                {
+                    sb.Append(' ').Append('/').Append(' ');
+                }
+                sb.Append(RuleFlagNames.Get(flag));
+                first = false;
+            }
+
+            if (_ruleFlagsText != null)
+            {
+                _ruleFlagsText.text = sb.ToString();
+            }
+            _ruleFlagsBlock.style.display = DisplayStyle.Flex;
         }
 
         /// <summary>

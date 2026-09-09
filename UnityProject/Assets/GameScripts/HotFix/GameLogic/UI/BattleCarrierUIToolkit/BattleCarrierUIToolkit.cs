@@ -34,6 +34,10 @@ namespace GameLogic
         private ScrollView _slotBar;
         private ScrollView _geneList;
         private Label _noCarrierHint;
+        /// <summary>ui-visual-overhaul story-007：器官栏/基因列的空状态提示。
+        /// `SlotColumn` 早就有 <see cref="_noCarrierHint"/>，另外两列一直是无提示空白。</summary>
+        private Label _noOrganHint;
+        private Label _noGeneHint;
         private Button _organViewToggle;
         private Button _geneViewToggle;
 
@@ -149,6 +153,8 @@ namespace GameLogic
             _slotBar?.contentContainer.AddToClassList("slot-bar-content");
             _geneList = _root.Q<ScrollView>("GeneList");
             _noCarrierHint = _root.Q<Label>("NoCarrierHint");
+            _noOrganHint = _root.Q<Label>("NoOrganHint");
+            _noGeneHint = _root.Q<Label>("NoGeneHint");
             _organViewToggle = _root.Q<Button>("OrganViewToggle");
             _geneViewToggle = _root.Q<Button>("GeneViewToggle");
 
@@ -344,6 +350,17 @@ namespace GameLogic
                 : $"{tagCN}：未装备";
         }
 
+        /// <summary>ui-visual-overhaul story-007：空状态提示的统一开关，口径对齐既有
+        /// <see cref="_noCarrierHint"/>（display 切换而非 visibility——不留占位空行）。</summary>
+        private static void SetHintVisible(Label hint, bool visible)
+        {
+            if (hint == null)
+            {
+                return;
+            }
+            hint.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
+        }
+
         private void RefreshCarrierList(MetabolicSlicePanel panel)
         {
             if (_carrierList == null)
@@ -355,12 +372,16 @@ namespace GameLogic
 
             if (_showAllOrgans)
             {
+                // 全量目录模式的数据源是 Catalog，常驻非空，显示"尚未获得"会是误报（story-007）。
+                SetHintVisible(_noOrganHint, false);
                 RefreshCarrierListAllCatalog();
                 return;
             }
 
             CarrierRegistry registry = panel.CarrierRegistry;
             string activeId = registry.ActiveCarrierId;
+
+            SetHintVisible(_noOrganHint, registry.All.Count == 0);
 
             foreach (var kvp in registry.All)
             {
@@ -508,12 +529,24 @@ namespace GameLogic
 
             if (_showAllGenes)
             {
+                // 同 RefreshCarrierList：全量目录数据源常驻非空，空状态提示在这里是误报（story-007）。
+                SetHintVisible(_noGeneHint, false);
                 RefreshGeneListAllCatalog();
                 return;
             }
 
             _reserveCache.Clear();
             _reserveCache.AddRange(panel.GeneReserve.Items);
+
+            // story-007：AddGeneSection 是"先无条件铺分组标题、再按 _reserveCache 过滤条目"，
+            // 所以储备为空时铺出来的是两个底下空无一物的悬空标题——比整块空白更像坏了。
+            // 空态改为不铺标题、只留一行提示。
+            bool hasGene = _reserveCache.Count > 0;
+            SetHintVisible(_noGeneHint, !hasGene);
+            if (!hasGene)
+            {
+                return;
+            }
 
             // D10：先 11 条 Contract 再 19 条 Module，各自保持目录声明序，两段之间插分组标题
             AddGeneSection("契约基因", GeneCatalog.AllIds);

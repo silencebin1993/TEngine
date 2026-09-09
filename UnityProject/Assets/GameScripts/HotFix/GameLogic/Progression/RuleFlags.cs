@@ -20,18 +20,33 @@ namespace GameLogic.Progression
 
         private readonly HashSet<Ability.RuleFlag> _flags = new HashSet<Ability.RuleFlag>();
 
+        /// <summary>当前生效的规则开关集合，供 UI 展示（ui-visual-overhaul story-007）。
+        /// 只读视图，判定路径仍走 <see cref="Has"/>。</summary>
+        public IReadOnlyCollection<Ability.RuleFlag> Active => _flags;
+
+        /// <summary>集合变更次数。UI 靠它判断"要不要重建那行文案"，
+        /// 避免每帧拼串产生 GC——热更层每帧只允许 O(1)，逐帧遍历 12 个 flag 拼字符串是白烧。
+        /// 只在真正发生增删时自增，不参与任何判定。</summary>
+        public int Version { get; private set; }
+
         public void Set(Ability.RuleFlag flag)
         {
             if (flag == Ability.RuleFlag.None)
             {
                 return;
             }
-            _flags.Add(flag);
+            if (_flags.Add(flag))
+            {
+                Version++;
+            }
         }
 
         public void Clear(Ability.RuleFlag flag)
         {
-            _flags.Remove(flag);
+            if (_flags.Remove(flag))
+            {
+                Version++;
+            }
         }
 
         public bool Has(Ability.RuleFlag flag)
@@ -41,7 +56,11 @@ namespace GameLogic.Progression
 
         public void ClearAll()
         {
-            _flags.Clear();
+            if (_flags.Count > 0)
+            {
+                _flags.Clear();
+                Version++;
+            }
         }
     }
 }
