@@ -48,6 +48,7 @@ public sealed partial class BehaviorArchetype : Luban.BeanBase
         SummonCount = _buf.ReadFloat();
         SummonCooldown = _buf.ReadFloat();
         SummonHealth = _buf.ReadFloat();
+        SummonMaxGeneration = _buf.ReadFloat();
     }
 
     public static BehaviorArchetype DeserializeBehaviorArchetype(ByteBuf _buf)
@@ -171,6 +172,10 @@ public sealed partial class BehaviorArchetype : Luban.BeanBase
     /// 召唤物生命,0=取宿主生命的1成
     /// </summary>
     public readonly float SummonHealth;
+    /// <summary>
+    /// 这支血统最多召到第几代,1=只有原生能召
+    /// </summary>
+    public readonly float SummonMaxGeneration;
    
     public const int __ID__ = 822037163;
     public override int GetTypeId() => __ID__;
@@ -211,6 +216,7 @@ public sealed partial class BehaviorArchetype : Luban.BeanBase
         + "summonCount:" + SummonCount + ","
         + "summonCooldown:" + SummonCooldown + ","
         + "summonHealth:" + SummonHealth + ","
+        + "summonMaxGeneration:" + SummonMaxGeneration + ","
         + "}";
     }
 }

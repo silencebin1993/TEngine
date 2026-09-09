@@ -84,6 +84,10 @@ namespace BinGames.Sim
         /// 与热更层 <c>SimBridge.NextLogicId</c> 的正数段互不冲突。</summary>
         private int _kernelLogicId;
 
+        /// <summary>每个槽位的召唤血统代数（见 <see cref="SpawnRequest.Generation"/>）。
+        /// 用来给"召唤物自己也会召唤"封顶——没有它就是跨帧指数增殖。</summary>
+        private NativeArray<byte> _generation;
+
         private SpatialHash _hash;
         private float _time;
 
@@ -138,6 +142,7 @@ namespace BinGames.Sim
             _frameIndex = 0;
             _zoneTimer = new NativeArray<float>(cap, A);
             _summonTimer = new NativeArray<float>(cap, A);
+            _generation = new NativeArray<byte>(cap, A);
             _kernelLogicId = 0;
 
             _hash.Initialize(cap, cfg.HashCellSize, A);
@@ -867,6 +872,10 @@ namespace BinGames.Sim
         /// <summary>敌方区域（毒坑/毒环）染色，与敌人弹体同一套暖红。</summary>
         private const uint HostileZoneTint = 0xC8324BE6u;
 
+        /// <summary>敌人召唤的占用上限（占单位容量的比例）。超过就停孵，
+        /// 把剩下的 25% 留给导演的正常刷怪——否则一次配表失误就能让关卡停止推进。</summary>
+        private const float SummonPressureCeiling = 0.75f;
+
         /// <summary>
         /// enemy-mechanics-parity：敌人的**区域攻击**（放毒坑 / 贴身毒环）与**召唤**。
         ///
@@ -943,14 +952,34 @@ namespace BinGames.Sim
                 // ── 召唤 ──
                 int summonArc = (int)math.round(arc.SummonArchetypeId);
                 int summonCount = (int)math.round(arc.SummonCount);
-                if (summonArc >= 0 && summonArc < _archetypes.Length && summonCount > 0)
+
+                // 代数封顶。召唤原型完全可以指向另一个同样带召唤字段的原型——
+                // 那就是**跨帧指数增殖**，一分钟内能把单位容量吃干净，而且崩起来
+                // 看着像"莫名其妙卡死"很难查。所以两道闸：原型自己配的深度，
+                // 加一条无论怎么配都越不过的内核硬顶。
+                int maxGen = arc.SummonMaxGeneration > 0f
+                    ? (int)math.round(arc.SummonMaxGeneration)
+                    : 1;
+                maxGen = math.min(maxGen, SimConst.MaxSpawnGeneration);
+                bool generationAllows = _generation[i] < maxGen;
+
+                if (summonArc >= 0 && summonArc < _archetypes.Length && summonCount > 0
+                    && generationAllows)
                 {
                     if (_summonTimer[i] > 0f)
                     {
                         _summonTimer[i] -= dt;
                     }
-                    // 容量兜底：留出余量，别让孵化巢把槽位吃光导致别的生成全失败。
-                    else if (_unitCount + summonCount < _position.Length - 8)
+                    // 容量兜底 + **压力上限**。
+                    //
+                    // 光有代数封顶不够：实测把封顶配到 2、且召唤原型指向自己时，
+                    // 场上仍会在 20 秒内涨到容量上限（245/256）——代数是收敛了，
+                    // 但"浅而快"的循环照样能把槽位吃光，然后**导演的正常刷怪全部失败**，
+                    // 表现是关卡莫名其妙停止推进，很难查。
+                    // 所以再留一道：占用超过容量的 SummonPressureCeiling 就不再孵，
+                    // 给导演留出余量。这不是平衡旋钮，是防止一次配表失误毁掉整局。
+                    else if (_unitCount + summonCount < _position.Length - 8
+                        && _unitCount < _position.Length * SummonPressureCeiling)
                     {
                         float childHp = arc.SummonHealth > 0f
                             ? arc.SummonHealth
@@ -970,6 +999,8 @@ namespace BinGames.Sim
                                 Faction = SimFaction.Hostile,
                                 LogicId = 0,
                                 VisualId = _visualId[i],
+                                // 孩子比自己深一代。这一笔就是封顶生效的地方。
+                                Generation = (byte)(_generation[i] + 1),
                             });
                         }
                         _summonTimer[i] = arc.SummonCooldown > 0f ? arc.SummonCooldown : 6f;
@@ -1103,9 +1134,10 @@ namespace BinGames.Sim
             _radius[idx] = math.max(0.05f, req.Radius);
             _maxSpeed[idx] = math.max(0f, req.MaxSpeed);
             _attackTimer[idx] = 0f;
-            // 槽位是回收复用的，能力冷却必须清——否则新生成的单位会继承上一任的计时。
+            // 槽位是回收复用的，能力冷却与血统代数都必须清——否则新生成的单位会继承上一任的。
             _zoneTimer[idx] = 0f;
             _summonTimer[idx] = 0f;
+            _generation[idx] = (byte)math.min(req.Generation, SimConst.MaxSpawnGeneration);
             _archetypeId[idx] = req.ArchetypeId;
             _status[idx] = (uint)req.InitialStatus;
             _faction[idx] = (byte)req.Faction;
@@ -1319,6 +1351,7 @@ namespace BinGames.Sim
                 DevourCandidateCount = _devourCandidates.IsCreated ? _devourCandidates.Length : 0,
                 ProjectileEnds = _projectileEndEvents,
                 ProjectileEndCount = _projectileEndCount,
+                Generation = _generation,
                 PlayerDamageTaken = _playerDamage.IsCreated ? _playerDamage[0] : 0f,
                 PlayerPosition = _position[SimConst.PlayerIndex],
                 PlayerHealth = _health[SimConst.PlayerIndex],
@@ -1361,6 +1394,7 @@ namespace BinGames.Sim
             if (_status.IsCreated) { _status.Dispose(); }
             if (_faction.IsCreated) { _faction.Dispose(); }
             if (_alive.IsCreated) { _alive.Dispose(); }
+            if (_generation.IsCreated) { _generation.Dispose(); }
             if (_archetypes.IsCreated) { _archetypes.Dispose(); }
             if (_projectiles.IsCreated) { _projectiles.Dispose(); }
             if (_zones.IsCreated) { _zones.Dispose(); }

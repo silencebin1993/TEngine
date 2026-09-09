@@ -373,6 +373,8 @@ namespace GameLogic.Core
                 Kind = BehaviorKind.Stationary, Accel = 1f, AggroRange = 14f, AttackRange = 2f,
                 AttackCooldown = 1.6f, AttackDamage = 6f, ChargeSpeedMul = 1f,
                 SummonArchetypeId = 5f, SummonCount = 2f, SummonCooldown = 7f, SummonHealth = 8f,
+                // 允许孵出的小巢再孵一层就到顶（内核另有 MaxSpawnGeneration 硬顶兜底）。
+                SummonMaxGeneration = 1f,
             });
         }
 

@@ -399,6 +399,10 @@ namespace GameLogic.MetabolicSlice.Combat
         {
             /// <summary>还能再裂几代。归 0 后这一支到此为止。</summary>
             public int Generations;
+            /// <summary>这一只自己是第几代。原样传给内核 <see cref="BinGames.Sim.SpawnRequest.Generation"/>——
+            /// 内核那边有一条无论怎么配都越不过的硬顶（<c>SimConst.MaxSpawnGeneration</c>），
+            /// 热更层这份预算算错也不至于把单位容量吃干净。</summary>
+            public int Generation;
             /// <summary>每次裂成几只。</summary>
             public int Fanout;
             public int ArchetypeId;
@@ -2300,6 +2304,10 @@ namespace GameLogic.MetabolicSlice.Combat
                         Faction = BinGames.Sim.SimFaction.PlayerMinion,
                         LogicId = childLogicId,
                         VisualId = budget.ArchetypeId,
+                        // 与内核同一套血统计数：热更层的分裂预算算错时，
+                        // 内核的 MaxSpawnGeneration 硬顶仍然兜得住。
+                        Generation = (byte)Math.Min(budget.Generation + 1,
+                            BinGames.Sim.SimConst.MaxSpawnGeneration),
                     });
                     MinionSplitSpawned++;
 
@@ -2308,6 +2316,7 @@ namespace GameLogic.MetabolicSlice.Combat
                         _minionSplitBudget[childLogicId] = new MinionSplitBudget
                         {
                             Generations = budget.Generations - 1,
+                            Generation = budget.Generation + 1,
                             Fanout = budget.Fanout,
                             ArchetypeId = budget.ArchetypeId,
                             Speed = childSpeed,
@@ -2437,6 +2446,7 @@ namespace GameLogic.MetabolicSlice.Combat
                     Faction = BinGames.Sim.SimFaction.PlayerMinion,
                     LogicId = logicId,
                     VisualId = evt.SummonId,
+                    Generation = 0,
                 });
 
                 // SplitOnHit 分裂 → **死了会裂开**。登记这一只的分裂预算，
@@ -2447,6 +2457,7 @@ namespace GameLogic.MetabolicSlice.Combat
                     {
                         Generations = Math.Min(MinionSplitMaxGenerations,
                             Math.Max(1, (int)MathF.Round(evt.SplitOnHit))),
+                        Generation = 0,
                         Fanout = MinionSplitFanout,
                         ArchetypeId = evt.SummonId,
                         Speed = minionSpeed,

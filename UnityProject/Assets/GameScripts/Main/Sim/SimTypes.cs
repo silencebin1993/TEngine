@@ -126,6 +126,15 @@ namespace BinGames.Sim
         public int LogicId;
         /// <summary>视觉表现 id，渲染层用它选 mesh/material/颜色。</summary>
         public int VisualId;
+        /// <summary>
+        /// 血统代数。0 = 场上原生（导演/热更层生成），被谁召唤出来就是「那一位 + 1」。
+        ///
+        /// 存在意义只有一个：**给"召唤物自己也会召唤"封顶**。
+        /// 召唤原型完全可以指向另一个同样带召唤字段的原型，那就是跨帧指数增殖——
+        /// 一分钟之内能把单位容量吃干净。见 <see cref="BehaviorArchetype.SummonMaxGeneration"/>
+        /// 与 <see cref="SimConst.MaxSpawnGeneration"/>（后者是无论怎么配都越不过的硬顶）。
+        /// </summary>
+        public byte Generation;
     }
 
     /// <summary>
@@ -471,6 +480,17 @@ namespace BinGames.Sim
         public float SummonCooldown;
         /// <summary>召唤物生命。0 时用宿主生命的一小部分。</summary>
         public float SummonHealth;
+        /// <summary>
+        /// 这一支血统最多召到第几代。判据是「本单位的 <see cref="SpawnRequest.Generation"/>
+        /// 小于它才允许召唤」，所以：
+        /// <list type="bullet">
+        /// <item>1 = 只有原生单位能召（召出来的孙子辈不再召，最常用）</item>
+        /// <item>2 = 允许再往下一层（孵化巢孵出小巢）</item>
+        /// <item>0 或负数 = 按 1 处理，不给"意外配成 0 就永远召不出来"留坑</item>
+        /// </list>
+        /// 无论配多少都越不过 <see cref="SimConst.MaxSpawnGeneration"/>。
+        /// </summary>
+        public float SummonMaxGeneration;
 
         public static BehaviorArchetype Default => new BehaviorArchetype
         {
@@ -534,6 +554,15 @@ namespace BinGames.Sim
         public const int InvalidIndex = -1;
         /// <summary>静态障碍数量上限（story-009）。</summary>
         public const int MaxObstacles = 32;
+
+        /// <summary>
+        /// 召唤血统的**硬顶**：<see cref="SpawnRequest.Generation"/> 到这个数就再也召不出下一代，
+        /// 无论 <see cref="BehaviorArchetype.SummonMaxGeneration"/> 配了多少。
+        ///
+        /// 这是一条兜底红线，不是平衡旋钮——配表写错一个数就能让指数增殖吃光单位容量，
+        /// 而那种崩法在运行时看起来像"莫名其妙卡死"，很难查。
+        /// </summary>
+        public const int MaxSpawnGeneration = 3;
     }
 
     /// <summary>

@@ -338,6 +338,60 @@ namespace GameLogic.MetabolicSlice.DebugTools
                 finally { sim.End(); sim.OnDispose(); }
             }
 
+            // ── ⑦ 召唤代数封顶：最恶劣配置（原型召唤**它自己**）也必须收敛 ──
+            //    没有封顶就是跨帧指数增殖，一分钟能把单位容量吃干净；
+            //    而且崩起来看着像"关卡莫名其妙停止推进"（导演的正常刷怪全部失败），很难查。
+            {
+                var results = new List<string>();
+                foreach (float cap in new[] { 1f, 9f })
+                {
+                    var sim = new SimBridge();
+                    try
+                    {
+                        var selfSummon = new BehaviorArchetype
+                        {
+                            Kind = BehaviorKind.Stationary, Accel = 1f, AggroRange = 14f,
+                            AttackRange = 2f, AttackCooldown = 1.6f, AttackDamage = 0f,
+                            ChargeSpeedMul = 1f,
+                            SummonArchetypeId = 0f, SummonCount = 2f, SummonCooldown = 0.5f,
+                            SummonHealth = 50f, SummonMaxGeneration = cap,
+                        };
+                        var cfg = Cfg;
+                        cfg.UnitCapacity = 256;
+                        sim.Begin(cfg, new[] { selfSummon });
+                        Spawn(sim, new float2(20f, 0f), 0, 500f, 1f);
+                        sim.OnUpdate(0.02f);
+                        for (int f = 0; f < 400; f++) { sim.OnUpdate(0.05f); }
+
+                        int total = 0, deepest = 0;
+                        SimSnapshot snap = sim.Snapshot;
+                        for (int i = 0; i < snap.Count; i++)
+                        {
+                            if (snap.Alive[i] == 0 || snap.Faction[i] != (byte)SimFaction.Hostile) { continue; }
+                            total++;
+                            if (snap.Generation[i] > deepest) { deepest = snap.Generation[i]; }
+                        }
+
+                        // 代数：配多深都越不过内核硬顶。
+                        int expected = (int)math.min(cap, SimConst.MaxSpawnGeneration);
+                        if (deepest > expected)
+                        {
+                            return (false, $"⑦ 封顶={cap} 时最深应为第 {expected} 代，实际第 {deepest} 代");
+                        }
+                        // 占用：必须给导演留出余量，不能把槽位吃光。
+                        if (total >= 256 - 8)
+                        {
+                            return (false, $"⑦ 封顶={cap} 时召唤把单位容量吃光了（{total}/256）"
+                                + "——导演的正常刷怪会全部失败，关卡会莫名其妙停止推进");
+                        }
+                        results.Add($"封顶{cap}→{total}个/最深第{deepest}代");
+                    }
+                    finally { sim.End(); sim.OnDispose(); }
+                }
+                notes.Add($"⑦召唤代数封顶（原型召唤它自己的最恶劣配置）：{string.Join("、", results)}"
+                    + $"，内核硬顶 {SimConst.MaxSpawnGeneration} 代 + 占用上限留出导演余量");
+            }
+
             return (true, string.Join("；", notes));
         }
 

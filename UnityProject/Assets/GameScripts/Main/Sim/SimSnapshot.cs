@@ -25,6 +25,9 @@ namespace BinGames.Sim
         [ReadOnly] public NativeArray<int> ArchetypeId;
         [ReadOnly] public NativeArray<int> LogicId;
         [ReadOnly] public NativeArray<int> VisualId;
+        /// <summary>召唤血统代数（见 <see cref="SpawnRequest.Generation"/>）。
+        /// 验收要能看出"第几代"，否则封顶到底生没生效只能靠数数量猜。</summary>
+        [ReadOnly] public NativeArray<byte> Generation;
 
         /// <summary>本帧死亡事件。热更层据此结算掉落、进化能、卡牌 OnKill。</summary>
         [ReadOnly] public NativeArray<DeathEvent> Deaths;

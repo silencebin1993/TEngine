@@ -100,6 +100,7 @@ namespace GameLogic.Core
                     SummonCount = a.SummonCount,
                     SummonCooldown = a.SummonCooldown,
                     SummonHealth = a.SummonHealth,
+                    SummonMaxGeneration = a.SummonMaxGeneration,
                 });
             }
         }
