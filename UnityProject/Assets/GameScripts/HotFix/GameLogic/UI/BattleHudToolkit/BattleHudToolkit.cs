@@ -5,7 +5,9 @@ using UnityEngine.UIElements;
 using BinGames.Sim;
 using GameLogic.Ability;
 using GameLogic.Battle;
+using GameLogic.Core;
 using GameLogic.MetabolicSlice.Combat;
+using GameLogic.MetabolicSlice.ContentCatalog;
 using GameLogic.MetabolicSlice.Digestion;
 using GameLogic.Progression;
 using GameLogic.Stage;
@@ -26,6 +28,10 @@ namespace GameLogic
     public class BattleHudToolkit : MonoBehaviour
     {
         private const int SkillSlotCount = 5;
+
+        /// <summary>组合反应播报行的驻留时长（ui-visual-overhaul story-006 D3）。到期后整块
+        /// display:none，不常驻脏文本。用 unscaled 时间：暂停/慢放不该把播报永久钉在屏幕上。</summary>
+        private const float ReactionFeedbackHoldSeconds = 2.5f;
 
         /// <summary>true=显示本 UI Toolkit HUD（默认）；false=按 U 键切回旧 UGUI BattleMainUI 对照。
         /// 供 BattleMainUI 读取决定自己是否显示，避免两套 HUD 同屏重叠。</summary>
@@ -68,6 +74,19 @@ namespace GameLogic
         private VisualElement _ecoEventBlock;
         private Label _ecoEventText;
 
+        /// <summary>ui-visual-overhaul story-006：最近一次具名组合反应的 HUD 播报行。</summary>
+        private VisualElement _reactionFeedbackBlock;
+        private Label _reactionFeedbackText;
+        /// <summary>已排版好的播报文案；null = 当前无待显示反应。信号回调里就拼好，
+        /// 避免 <see cref="RefreshReactionFeedback"/> 每帧重新拼串产生 GC。</summary>
+        private string _pendingReactionText;
+        /// <summary>播报过期时刻（<see cref="Time.unscaledTime"/> 口径）。</summary>
+        private float _reactionExpireTime;
+        /// <summary>文案有更新、待写进 Label。只在真正变化的那一帧写 UI。</summary>
+        private bool _reactionTextDirty;
+        /// <summary>ComposeCastSignal 订阅作用域，Start 建、OnDestroy 释放（D2）。</summary>
+        private SignalScope _scope;
+
         /// <summary>story-002 D11：story-001 遗留，右上轴A/消化泡摘要节点。</summary>
         private VisualElement _arenaTags;
         private Label _envPrompt;
@@ -95,6 +114,10 @@ namespace GameLogic
 
         private async void Start()
         {
+            // 订阅放在 await 之前：HUD 三份资源要异步加载若干帧，期间打出去的反应不该被吞掉。
+            // 回调只写字段（不碰 VisualElement），节点尚未 Q 出来也安全。
+            _scope = new SignalScope().On<ComposeCastSignal>(OnComposeCast);
+
             _visualTree = await GameModule.Resource.LoadAssetAsync<VisualTreeAsset>("BattleHud");
             _tagChipTemplate = await GameModule.Resource.LoadAssetAsync<VisualTreeAsset>("TagChip");
             _panelSettings = await GameModule.Resource.LoadAssetAsync<PanelSettings>("BattleHudPanelSettings");
@@ -160,6 +183,14 @@ namespace GameLogic
             _mechanismCount = _root.Q<Label>("MechanismCount");
             _ecoEventBlock = _root.Q<VisualElement>("EcoEventBlock");
             _ecoEventText = _root.Q<Label>("EcoEventText");
+
+            _reactionFeedbackBlock = _root.Q<VisualElement>("ReactionFeedbackBlock");
+            _reactionFeedbackText = _root.Q<Label>("ReactionFeedbackText");
+            if (_reactionFeedbackBlock != null)
+            {
+                // 初始态即隐藏（D3）：没打出反应前不该有一条空行占位。
+                _reactionFeedbackBlock.style.display = DisplayStyle.None;
+            }
 
             _statusBlock = _root.Q<VisualElement>("StatusBlock");
             _arenaTags = _root.Q<VisualElement>("ArenaTags");
@@ -291,6 +322,7 @@ namespace GameLogic
                 $"敌人 {cell.Director.LiveHostiles}　压力 {cell.Director.CurrentPressure:F0}/{cell.Director.Budget:F0}";
 
             RefreshEcoEvent(cell);
+            RefreshReactionFeedback();
             RefreshStatuses(cell);
             RefreshSkillSlots(cell);
             RefreshAxisTouchAndChain(cell);
@@ -497,6 +529,68 @@ namespace GameLogic
         }
 
         /// <summary>
+        /// 组合反应 HUD 播报（ui-visual-overhaul story-006）。事件驱动写入、这里只做 O(1) 的
+        /// 上屏与过期回收——挂在既有 <see cref="RefreshHud"/> 链上，不新开协程/不新开 Update，
+        /// 也不在这里向判定层反查反应（那等于新造一个事件源）。
+        ///
+        /// 与 <c>WhiteboxComposeProjectileFeedback</c> 的世界空间飘字并存：飘字钉在施法点、
+        /// 会飞出视野也会被连续触发挤掉，这条 HUD 行是固定屏幕位的"最新一条"兜底。
+        /// </summary>
+        private void RefreshReactionFeedback()
+        {
+            if (_reactionFeedbackBlock == null)
+            {
+                return;
+            }
+
+            if (_pendingReactionText == null)
+            {
+                return;
+            }
+
+            if (Time.unscaledTime >= _reactionExpireTime)
+            {
+                _pendingReactionText = null;
+                _reactionTextDirty = false;
+                if (_reactionFeedbackText != null)
+                {
+                    _reactionFeedbackText.text = string.Empty;
+                }
+                _reactionFeedbackBlock.style.display = DisplayStyle.None;
+                return;
+            }
+
+            if (_reactionTextDirty)
+            {
+                _reactionTextDirty = false;
+                if (_reactionFeedbackText != null)
+                {
+                    _reactionFeedbackText.text = _pendingReactionText;
+                }
+                _reactionFeedbackBlock.style.display = DisplayStyle.Flex;
+            }
+        }
+
+        /// <summary>
+        /// 已在广播的 <see cref="ComposeCastSignal"/> 订阅端（不改判定层、不改信号字段）。
+        /// D4 节流：只保留最新一条，后到的覆盖先到的并重置计时，不做队列/历史。
+        /// D5：未收录 id 走 <see cref="ReactionFeedbackCatalog.GetLabel"/> 现有回落（原样显示 raw id），
+        /// 与世界飘字同源同行为，这里不额外加隐藏分支。
+        /// </summary>
+        private void OnComposeCast(ComposeCastSignal s)
+        {
+            if (string.IsNullOrEmpty(s.ReactionName))
+            {
+                // 绝大多数组合出口没有具名反应，此时保持上一条播报的既有计时，不清空也不刷新。
+                return;
+            }
+
+            _pendingReactionText = "反应：" + ReactionFeedbackCatalog.GetLabel(s.ReactionName);
+            _reactionExpireTime = Time.unscaledTime + ReactionFeedbackHoldSeconds;
+            _reactionTextDirty = true;
+        }
+
+        /// <summary>
         /// 冷却环高度用 AbilitySystem.EffectiveCooldown 的同款公式重算（该方法私有，
         /// 无法直接复用），而非 D9 允许的近似口径——CooldownReduction 可从 cell.Stats 读到，
         /// 精确值总是够用。skill-cast 施放脉冲本 story 不接（D9，需订阅施放事件，超出静态还原范围）。
@@ -554,6 +648,9 @@ namespace GameLogic
 
         private void OnDestroy()
         {
+            _scope?.Dispose();
+            _scope = null;
+
             if (_advanceButton != null)
             {
                 _advanceButton.clicked -= OnAdvanceButtonClicked;
