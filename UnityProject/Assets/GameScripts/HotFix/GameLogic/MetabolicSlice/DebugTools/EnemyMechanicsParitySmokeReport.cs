@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using BinGames.Sim;
+using Unity.Collections;
 using GameLogic.Ability;
 using GameLogic.Battle;
 using GameLogic.MetabolicSlice.Combat;
@@ -278,6 +279,63 @@ namespace GameLogic.MetabolicSlice.DebugTools
                 }
                 notes.Add($"⑤受体记忆：命中挂 Marked + 选靶偏好 PreferMarked（已标记目标距离 ×{JobProjectile.MarkedTargetBias}，"
                     + "等效搜敌距离翻倍），对照组两者皆无");
+            }
+
+            // ── ⑥ 区域可见性：玩家坑与敌人坑必须带**不同**的 Tint，阵营/跟随也要对 ──
+            //    没有 Tint 就等于"看不见的伤害区"——玩家站进去掉血却不知道为什么，
+            //    正是这条线一路在修的那类问题（SimRenderer.DrawZones 逐帧按内核真实半径画）。
+            {
+                var sim = new SimBridge();
+                try
+                {
+                    sim.Begin(Cfg, Archetypes());
+                    Spawn(sim, new float2(20f, 0f), 0, 1000f);   // 敌人：贴身毒环
+                    sim.OnUpdate(0.02f);
+
+                    var bridge = new MetabolicSliceBridge();
+                    bridge.Bind(sim, new StatSheet(), new AbilitySystem());
+                    bridge.OnEnter();
+                    var fireAura = new HitEvent
+                    {
+                        Damage = 10f, Scale = 1f, Count = 1f, Linger = 3f, AuraRadius = 4f,
+                        Shape = "Field", AttackPattern = ComposeEngine.Core.AttackPattern.Aura,
+                    };
+                    fireAura.Tags.Add("Fire");
+                    bridge.ApplyEvent(fireAura);
+                    for (int f = 0; f < 12; f++) { sim.OnUpdate(0.05f); bridge.OnUpdate(0.05f); }
+
+                    NativeArray<ZoneState> zones = sim.World.Zones;
+                    uint playerTint = 0u, hostileTint = 0u;
+                    bool hostileFollows = false;
+                    for (int i = 0; i < zones.Length; i++)
+                    {
+                        if (zones[i].Alive == 0) { continue; }
+                        if ((SimFaction)zones[i].TargetFaction == SimFaction.Hostile)
+                        {
+                            playerTint = zones[i].Tint;   // 玩家放的：打敌人
+                        }
+                        else
+                        {
+                            hostileTint = zones[i].Tint;  // 敌人放的：打玩家
+                            hostileFollows = zones[i].FollowUnitIndex >= 0;
+                        }
+                    }
+                    if (playerTint == 0u || hostileTint == 0u)
+                    {
+                        return (false, $"⑥ 区域必须带 Tint 才画得出来，实际 玩家坑=0x{playerTint:X8} 敌人坑=0x{hostileTint:X8}");
+                    }
+                    if (playerTint == hostileTint)
+                    {
+                        return (false, "⑥ 玩家坑与敌人坑颜色相同——玩家分不出哪块地能站");
+                    }
+                    if (!hostileFollows)
+                    {
+                        return (false, "⑥ 敌人的贴身毒环应跟随宿主（FollowUnitIndex>=0）");
+                    }
+                    notes.Add($"⑥区域可见性：玩家火系坑 0x{playerTint:X8}（打 Hostile）"
+                        + $" vs 敌人毒环 0x{hostileTint:X8}（打 Player 且跟随宿主）");
+                }
+                finally { sim.End(); sim.OnDispose(); }
             }
 
             return (true, string.Join("；", notes));

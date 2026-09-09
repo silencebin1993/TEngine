@@ -1024,6 +1024,17 @@ namespace GameLogic.Stage.CellStage
                         ScaleMul = 1.8f,
                         BaseColor = new Color(1f, 0.95f, 0.35f),
                     });
+
+                    // enemy-mechanics-parity：持续区域（毒坑/酸洼/敌人的贴身毒环）。
+                    // 没有这一段的话敌人的毒圈就是"看不见的伤害区"——玩家站进去掉血却不知道为什么，
+                    // 正是这条线一路在修的那类问题。半径直接取内核的实时值，区域涨多大画多大。
+                    _renderer?.DrawZones(_sim.World.Zones, new SimVisual
+                    {
+                        Mesh = BuildZoneDiscCached(),
+                        Material = ProjectileMaterial(),
+                        ScaleMul = 1f,
+                        BaseColor = new Color(0.45f, 0.9f, 0.5f, 0.55f),
+                    });
                 }
             }
 
@@ -1048,6 +1059,12 @@ namespace GameLogic.Stage.CellStage
         private Material _projMat;
 
         private Mesh BuildConeCached() => _coneCache ??= BuildCone(0.5f, 0.5f, 10);
+
+        /// <summary>持续区域用的圆盘。直接复用球体网格——<see cref="SimRenderer.DrawZones"/>
+        /// 会把 Y 压扁成一片，所以不需要为它单独造一个平面网格。</summary>
+        private Mesh BuildZoneDiscCached() => _zoneDiscCache ??= BuildSphere(6, 14, 0.5f);
+
+        private Mesh _zoneDiscCache;
 
         private Material ProjectileMaterial()
         {

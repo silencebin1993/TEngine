@@ -258,6 +258,8 @@ namespace GameLogic.MetabolicSlice.Combat
             public float GrowthRate;
             /// <summary>留坑连网半径（<see cref="HitEvent.Weave"/>）。</summary>
             public float WeaveRadius;
+            /// <summary>元素配色。落点留坑要和打出它的那一发同色，玩家才认得出是谁留下的。</summary>
+            public uint Tint;
         }
 
         /// <summary>story-002：Linger 留坑的最小 ephemeral 状态——命中点持续按 TickRate（或默认间隔）
@@ -967,7 +969,8 @@ namespace GameLogic.MetabolicSlice.Combat
                     {
                         SpawnLingerZone(spot, MathF.Max(spotRadius, CombatBallistics.LingerMinRadius * 0.6f),
                             evt.Linger, evt.Damage * 0.5f / spots, evt.TickRate, evt.Chain, evt.Pull,
-                            growthRate: evt.GrowthRate, weaveRadius: evt.Weave);
+                            growthRate: evt.GrowthRate, weaveRadius: evt.Weave,
+                            tint: ResolveProjectileTint(evt));
                     }
                 }
                 if (evt.ExplodeOnHit)
@@ -992,7 +995,8 @@ namespace GameLogic.MetabolicSlice.Combat
                 // 一路写到 HitEvent，宿主却一行没读，于是"放毒流"从来没有过自己的轴。
                 SpawnLingerZone(deployPos, MathF.Max(radius, CombatBallistics.LingerMinRadius), evt.Linger,
                     evt.Damage * 0.5f, evt.TickRate, evt.Chain, evt.Pull,
-                    growthRate: evt.GrowthRate, weaveRadius: evt.Weave);
+                    growthRate: evt.GrowthRate, weaveRadius: evt.Weave,
+                    tint: ResolveProjectileTint(evt));
             }
 
             // Trail 拖尾 → **滴落**：从你到落点这一路上等距留几摊。
@@ -1006,7 +1010,7 @@ namespace GameLogic.MetabolicSlice.Combat
                     SpawnLingerZone(math.lerp(origin, deployPos, u),
                         MathF.Max(radius * 0.4f, CombatBallistics.LingerMinRadius * 0.6f),
                         _attackInterval, evt.Trail, evt.TickRate, 0f, 0f,
-                        growthRate: evt.GrowthRate);
+                        growthRate: evt.GrowthRate, tint: ResolveProjectileTint(evt));
                 }
             }
         }
@@ -1206,7 +1210,8 @@ namespace GameLogic.MetabolicSlice.Combat
                 float perTick = evt.Linger > 0f ? evt.Damage * 0.5f : evt.Trail;
                 SpawnLingerZone(center, MathF.Max(radius, CombatBallistics.LingerMinRadius), seconds,
                     perTick, evt.TickRate, evt.Chain, evt.Pull,
-                    growthRate: evt.GrowthRate, weaveRadius: evt.Weave);
+                    growthRate: evt.GrowthRate, weaveRadius: evt.Weave,
+                    tint: ResolveProjectileTint(evt));
             }
         }
 
@@ -1363,7 +1368,8 @@ namespace GameLogic.MetabolicSlice.Combat
                 float perTick = evt.Linger > 0f ? evt.Damage * 0.5f : evt.Trail;
                 SpawnLingerZone(coneOrigin, MathF.Max(reach * 0.6f, CombatBallistics.LingerMinRadius),
                     seconds, perTick, evt.TickRate, evt.Chain, evt.Pull,
-                    growthRate: evt.GrowthRate, weaveRadius: evt.Weave);
+                    growthRate: evt.GrowthRate, weaveRadius: evt.Weave,
+                    tint: ResolveProjectileTint(evt));
             }
         }
 
@@ -1790,7 +1796,8 @@ namespace GameLogic.MetabolicSlice.Combat
                         hasMeta ? meta.Chain : 0f,
                         hasMeta ? meta.Pull : 0f,
                         growthRate: hasMeta ? meta.GrowthRate : 0f,
-                        weaveRadius: hasMeta ? meta.WeaveRadius : 0f);
+                        weaveRadius: hasMeta ? meta.WeaveRadius : 0f,
+                        tint: hasMeta ? meta.Tint : 0u);
 
                     if (hasMeta && !string.IsNullOrEmpty(meta.ResidueTag))
                     {
@@ -1897,6 +1904,7 @@ namespace GameLogic.MetabolicSlice.Combat
                 EchoDelay = evt.Delay,
                 GrowthRate = evt.GrowthRate,
                 WeaveRadius = evt.Weave,
+                Tint = ResolveProjectileTint(evt),
             };
             return id;
         }
@@ -1937,13 +1945,14 @@ namespace GameLogic.MetabolicSlice.Combat
         /// （"这块地在一段时间内持续结算"），此前却分散在三套各写一遍的实现里。
         /// </summary>
         private void SpawnLingerZone(float2 pos, float radius, float seconds, float damagePerTick,
-            float tickRate, float chain, float pull, float growthRate = 0f, float weaveRadius = 0f)
+            float tickRate, float chain, float pull, float growthRate = 0f, float weaveRadius = 0f,
+            uint tint = 0u)
         {
             // chassis-native-primitives：Weave「编织」——新坑落地时，与半径内已有的坑之间架桥。
             // 必须**先连后加**，否则新坑会跟自己连一条零长度的桥。
             if (weaveRadius > 0f)
             {
-                WeaveLink(pos, radius, seconds, damagePerTick, tickRate, chain, pull, weaveRadius);
+                WeaveLink(pos, radius, seconds, damagePerTick, tickRate, chain, pull, weaveRadius, tint);
             }
 
             _pendingLinger.Add(new PendingLinger
@@ -1972,7 +1981,8 @@ namespace GameLogic.MetabolicSlice.Combat
                 applyStatus: pull > 0f
                     ? BinGames.Sim.SimStatus.Slowed | BinGames.Sim.SimStatus.Pulled
                     : BinGames.Sim.SimStatus.None,
-                chainCount: chain > 0f ? Math.Max(0, (int)MathF.Round(chain)) : 0);
+                chainCount: chain > 0f ? Math.Max(0, (int)MathF.Round(chain)) : 0,
+                tint: tint);
 
             Signals.Publish(new ComposeChainSignal
             {
@@ -1992,7 +2002,7 @@ namespace GameLogic.MetabolicSlice.Combat
         /// 且桥接坑本身 weaveRadius=0，不会再触发下一轮连接（无递归爆炸）。
         /// </summary>
         private void WeaveLink(float2 pos, float radius, float seconds, float damagePerTick,
-            float tickRate, float chain, float pull, float weaveRadius)
+            float tickRate, float chain, float pull, float weaveRadius, uint tint)
         {
             int links = 0;
             float w2 = weaveRadius * weaveRadius;
@@ -2018,6 +2028,12 @@ namespace GameLogic.MetabolicSlice.Combat
                     Pull = pull,
                     GrowthRate = 0f,
                 });
+                _sim.SpawnZone((pos + other.Position) * 0.5f, bridgeRadius,
+                    MathF.Min(seconds, other.TimeLeft), damagePerTick,
+                    tickRate > 0f ? 1f / tickRate : DefaultLingerTickInterval,
+                    BinGames.Sim.SimFaction.Hostile,
+                    chainCount: chain > 0f ? Math.Max(0, (int)MathF.Round(chain)) : 0,
+                    tint: tint);
                 links++;
                 WeaveBridgesSpawned++;
             }
@@ -2471,7 +2487,8 @@ namespace GameLogic.MetabolicSlice.Combat
                         MathF.Max(summonRadius * 2f, CombatBallistics.LingerMinRadius),
                         zoneSeconds, zonePerTick, evt.TickRate,
                         hasLinger ? evt.Chain : 0f, hasLinger ? evt.Pull : 0f,
-                        growthRate: evt.GrowthRate, weaveRadius: evt.Weave);
+                        growthRate: evt.GrowthRate, weaveRadius: evt.Weave,
+                        tint: ResolveProjectileTint(evt));
                 }
             }
 

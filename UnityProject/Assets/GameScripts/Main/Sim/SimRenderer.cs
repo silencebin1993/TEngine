@@ -241,6 +241,68 @@ namespace BinGames.Sim
             }
         }
 
+        /// <summary>
+        /// 持续区域（毒坑 / 酸洼 / 贴身毒环）。
+        ///
+        /// enemy-mechanics-parity：区域下沉进内核之后，敌人也会放毒了——
+        /// 但**没有渲染通道的伤害区就是"看不见的伤害"**，正是这条线一路在修的那类问题
+        /// （"打得到的看不见"）。这里按内核的真实半径逐帧画，区域涨多大画多大，
+        /// 与 <see cref="DrawProjectiles"/> 同一套实例化批次，不另起渲染路径。
+        ///
+        /// 贴地：Y 压到 <c>_yPlane</c> 略下方，避免与单位 z-fighting；
+        /// 高度压扁成一片，读作"地上的一摊"而不是一个球。
+        /// </summary>
+        public void DrawZones(NativeArray<ZoneState> zones, in SimVisual visual)
+        {
+            if (visual.Mesh == null || visual.Material == null || !zones.IsCreated)
+            {
+                return;
+            }
+
+            int n = 0;
+            for (int i = 0; i < zones.Length; i++)
+            {
+                ZoneState z = zones[i];
+                if (z.Alive == 0)
+                {
+                    continue;
+                }
+
+                float d = z.Radius * 2f * visual.ScaleMul;
+                _batchMatrices[n] = Matrix4x4.TRS(
+                    new Vector3(z.Position.x, _yPlane - ZoneYOffset, z.Position.y),
+                    Quaternion.identity,
+                    new Vector3(d, d * ZoneFlatten, d));
+                _batchColors[n] = z.Tint != 0u
+                    ? new Vector4(
+                        ((z.Tint >> 24) & 0xFFu) / 255f,
+                        ((z.Tint >> 16) & 0xFFu) / 255f,
+                        ((z.Tint >> 8) & 0xFFu) / 255f,
+                        (z.Tint & 0xFFu) / 255f)
+                    : new Vector4(
+                        visual.BaseColor.r, visual.BaseColor.g, visual.BaseColor.b, visual.BaseColor.a);
+                _batchMotions[n] = Vector4.zero;
+                _batchImpacts[n] = Vector4.zero;
+                n++;
+
+                if (n == BatchMax)
+                {
+                    FlushProjectileBatch(visual, n);
+                    n = 0;
+                }
+            }
+
+            if (n > 0)
+            {
+                FlushProjectileBatch(visual, n);
+            }
+        }
+
+        /// <summary>区域压到地面下方一点，避免与单位/弹体 z-fighting。</summary>
+        private const float ZoneYOffset = 0.12f;
+        /// <summary>区域高度压扁系数——读作"地上的一摊"，不是一个球。</summary>
+        private const float ZoneFlatten = 0.08f;
+
         private void FlushProjectileBatch(in SimVisual visual, int n)
         {
             _props.Clear();
