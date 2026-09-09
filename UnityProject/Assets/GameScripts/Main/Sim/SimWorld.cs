@@ -37,6 +37,11 @@ namespace BinGames.Sim
         private NativeArray<BehaviorArchetype> _archetypes;
         private NativeArray<ProjectileState> _projectiles;
 
+        /// <summary>enemy-mechanics-parity：持续区域（毒坑/光环）。玩家与敌人共用。</summary>
+        private NativeArray<ZoneState> _zones;
+        private int _zoneCursor;
+        private NativeQueue<DamageRequest> _zoneDamage;
+
         // ── 静态障碍（story-009）：容量固定 SimConst.MaxObstacles，生命周期同 _archetypes ──
         private NativeArray<float2> _obstaclePos;
         private NativeArray<float> _obstacleRadius;
@@ -70,6 +75,15 @@ namespace BinGames.Sim
         private NativeArray<int> _deathEmitFrame;
         private int _frameIndex;
 
+        /// <summary>敌人区域攻击 / 召唤各自的冷却计时。不与 <c>_attackTimer</c> 共用——
+        /// 那个已经被接触伤害与远程开火占着，一个单位同时会两三种手段时会互相踩。</summary>
+        private NativeArray<float> _zoneTimer;
+        private NativeArray<float> _summonTimer;
+
+        /// <summary>内核自己生成的单位（敌人召唤物）的 LogicId 分配器，走负数段，
+        /// 与热更层 <c>SimBridge.NextLogicId</c> 的正数段互不冲突。</summary>
+        private int _kernelLogicId;
+
         private SpatialHash _hash;
         private float _time;
 
@@ -102,6 +116,9 @@ namespace BinGames.Sim
             _visualId = new NativeArray<int>(cap, A);
 
             _projectiles = new NativeArray<ProjectileState>(math.max(16, cfg.ProjectileCapacity), A);
+            _zones = new NativeArray<ZoneState>(math.max(16, cfg.ZoneCapacity), A);
+            _zoneDamage = new NativeQueue<DamageRequest>(A);
+            _zoneCursor = 0;
 
             _freeSlots = new NativeList<int>(cap, A);
             _pendingDeaths = new NativeList<int>(256, A);
@@ -119,6 +136,9 @@ namespace BinGames.Sim
             _playerDamage = new NativeArray<float>(1, A);
             _deathEmitFrame = new NativeArray<int>(cap, A);
             _frameIndex = 0;
+            _zoneTimer = new NativeArray<float>(cap, A);
+            _summonTimer = new NativeArray<float>(cap, A);
+            _kernelLogicId = 0;
 
             _hash.Initialize(cap, cfg.HashCellSize, A);
             _archetypes = new NativeArray<BehaviorArchetype>(1, A);
@@ -182,6 +202,22 @@ namespace BinGames.Sim
         }
 
         // ── 玩家读写（热更层通过 SimBridge 调用，不直接碰数组）──
+
+        /// <summary>
+        /// 玩家受伤倍率（护甲/减伤）。热更层的 <c>StatId.DamageTaken</c> 推下来。
+        ///
+        /// 为什么要推下来：本帧打到玩家身上的伤害现在由**内核自己**结算进 <c>_health[0]</c>
+        /// （见 <see cref="Step"/> 末尾）。此前是内核只累加、等热更层某个系统读走再回头调
+        /// <c>DamagePlayer</c>——那意味着少一个消费者，敌人的伤害就静默消失。
+        /// 减伤是玩法数值、结算是内核职责，把数值推下去比把结算提上来安全。
+        /// </summary>
+        public float PlayerDamageTakenMul
+        {
+            get { return _playerDamageTakenMul; }
+            set { _playerDamageTakenMul = math.max(0f, value); }
+        }
+
+        private float _playerDamageTakenMul = 1f;
 
         public void SetPlayerStats(float maxHp, float currentHp, float radius, float maxSpeed)
         {
@@ -448,6 +484,7 @@ namespace BinGames.Sim
             // 敌人开火要在 JobProjectile 之前：本帧生成的弹体本帧就开始飞，
             // 与命令缓冲里玩家发的弹同一时序。
             ResolveHostileRangedCombat(dt);
+            ResolveHostileAbilities(dt);
 
             float2 playerPos = _position[SimConst.PlayerIndex];
             float playerRad = _radius[SimConst.PlayerIndex];
@@ -458,6 +495,7 @@ namespace BinGames.Sim
                 Position = _position,
                 Radius = _radius,
                 Faction = _faction,
+                Status = _status,
                 Alive = _alive,
                 Hash = _hash.Map,
                 ObstaclePos = _obstaclePos,
@@ -492,7 +530,20 @@ namespace BinGames.Sim
                 }
             }
 
-            // 汇总伤害请求：命令缓冲里的 + 投射物产生的
+            // 持续区域：跟随宿主 / 外扩 / 到点跳伤。产出的伤害与弹体伤害并入同一批
+            // DamageRequest，走既有 JobDamage 结算——区域杀敌同样会走击杀奖励与卡牌 OnKill。
+            var zone = new JobZone
+            {
+                Zones = _zones,
+                Position = _position,
+                Alive = _alive,
+                UnitCount = _unitCount,
+                DamageOut = _zoneDamage.AsParallelWriter(),
+                Dt = dt,
+            };
+            zone.Schedule(_zones.Length, 32, default).Complete();
+
+            // 汇总伤害请求：命令缓冲里的 + 投射物产生的 + 持续区域产生的
             for (int i = 0; i < cmds.Damages.Length; i++)
             {
                 _damageScratch.Add(cmds.Damages[i]);
@@ -500,6 +551,10 @@ namespace BinGames.Sim
             while (_projectileDamage.TryDequeue(out DamageRequest dr))
             {
                 _damageScratch.Add(dr);
+            }
+            while (_zoneDamage.TryDequeue(out DamageRequest zr))
+            {
+                _damageScratch.Add(zr);
             }
 
             if (_damageScratch.Length > 0)
@@ -546,6 +601,26 @@ namespace BinGames.Sim
                 Dt = dt,
             };
             contact.Schedule().Complete();
+
+            // ── 玩家受伤：**内核自己结算** ────────────────────────────────────
+            // 本帧所有打到玩家身上的东西（接触伤害 + 敌人弹体 + 未来的敌方毒圈/光环）
+            // 都已累加进 _playerDamage[0]。此前这里什么都不做，等热更层某个系统读走快照再
+            // 回头调 DamagePlayer——那意味着**少一个消费者，敌人的伤害就静默消失**。
+            // 现在内核直接扣血，热更层只负责推减伤倍率（PlayerDamageTakenMul）与播受伤反馈。
+            // 快照里回报的是**已减伤后的最终值**，热更层照它记账即可，不要再扣一次。
+            if (_playerDamage[0] > 0f)
+            {
+                float taken = _playerDamage[0] * _playerDamageTakenMul;
+                if ((_status[SimConst.PlayerIndex] & (uint)SimStatus.Invulnerable) != 0u)
+                {
+                    taken = 0f;
+                }
+                _playerDamage[0] = taken;
+                if (taken > 0f)
+                {
+                    _health[SimConst.PlayerIndex] -= taken;
+                }
+            }
 
             var devour = new JobDevourScan
             {
@@ -789,6 +864,120 @@ namespace BinGames.Sim
             return new float2(v.x * cs - v.y * sn, v.x * sn + v.y * cs);
         }
 
+        /// <summary>敌方区域（毒坑/毒环）染色，与敌人弹体同一套暖红。</summary>
+        private const uint HostileZoneTint = 0xC8324BE6u;
+
+        /// <summary>
+        /// enemy-mechanics-parity：敌人的**区域攻击**（放毒坑 / 贴身毒环）与**召唤**。
+        ///
+        /// 这两样此前敌人完全没有——不是设计上不给，是内核里根本没有"持续区域"这个概念
+        /// （它只活在热更层的玩家专属结构里），敌人也不跑热更层逻辑。区域下沉之后就顺理成章了。
+        ///
+        /// 与 <see cref="ResolveHostileRangedCombat"/> 同样主线程一趟 O(UnitCount)。
+        /// 冷却各用各的计时器：一个单位可以同时会撞、会射、会放毒、会孵。
+        /// </summary>
+        private void ResolveHostileAbilities(float dt)
+        {
+            if (_alive[SimConst.PlayerIndex] == 0)
+            {
+                return;
+            }
+
+            float2 playerPos = _position[SimConst.PlayerIndex];
+            // 先把上限固定住：召唤会当场追加单位，否则新生成的小怪本帧就会被遍历到，
+            // 甚至自己再召唤一批（无限套娃）。
+            int scanCount = _unitCount;
+
+            for (int i = SimConst.PlayerIndex + 1; i < scanCount; i++)
+            {
+                if (_alive[i] == 0 || (SimFaction)_faction[i] != SimFaction.Hostile)
+                {
+                    continue;
+                }
+
+                int aid = _archetypeId[i];
+                if (aid < 0 || aid >= _archetypes.Length)
+                {
+                    continue;
+                }
+                BehaviorArchetype arc = _archetypes[aid];
+
+                // ── 区域攻击 ──
+                int mode = (int)math.round(arc.ZoneMode);
+                if (mode > 0 && arc.ZoneRadius > 0f && arc.ZoneSeconds > 0f)
+                {
+                    if (_zoneTimer[i] > 0f)
+                    {
+                        _zoneTimer[i] -= dt;
+                    }
+                    else
+                    {
+                        // 模式 1（丢到玩家脚下）要够得着才丢；模式 2/3 是自己身上的东西，不看距离。
+                        bool inRange = mode != 1
+                            || math.distance(playerPos, _position[i])
+                                <= (arc.AggroRange > 0f ? arc.AggroRange : arc.AttackRange);
+                        if (inRange)
+                        {
+                            SpawnZone(new ZoneRequest
+                            {
+                                Position = mode == 1 ? playerPos : _position[i],
+                                Radius = arc.ZoneRadius,
+                                GrowthRate = 0f,
+                                MaxRadius = arc.ZoneRadius,
+                                DamagePerTick = arc.ZoneDamagePerTick,
+                                Interval = arc.ZoneTickInterval > 0f ? arc.ZoneTickInterval : 0.5f,
+                                Seconds = arc.ZoneSeconds,
+                                TargetFaction = SimFaction.Player,
+                                ApplyStatus = SimStatus.None,
+                                ChainCount = 0,
+                                SourceLogicId = _logicId[i],
+                                // 模式 3 = 跟着自己走的贴身毒环
+                                FollowUnitIndex = mode == 3 ? i : SimConst.InvalidIndex,
+                                Tint = HostileZoneTint,
+                            });
+                            _zoneTimer[i] = arc.ZoneCooldown > 0f ? arc.ZoneCooldown : arc.ZoneSeconds;
+                        }
+                    }
+                }
+
+                // ── 召唤 ──
+                int summonArc = (int)math.round(arc.SummonArchetypeId);
+                int summonCount = (int)math.round(arc.SummonCount);
+                if (summonArc >= 0 && summonArc < _archetypes.Length && summonCount > 0)
+                {
+                    if (_summonTimer[i] > 0f)
+                    {
+                        _summonTimer[i] -= dt;
+                    }
+                    // 容量兜底：留出余量，别让孵化巢把槽位吃光导致别的生成全失败。
+                    else if (_unitCount + summonCount < _position.Length - 8)
+                    {
+                        float childHp = arc.SummonHealth > 0f
+                            ? arc.SummonHealth
+                            : math.max(1f, _health[i] * 0.1f);
+                        for (int s = 0; s < summonCount; s++)
+                        {
+                            float ang = 2f * math.PI * s / summonCount;
+                            SpawnUnit(new SpawnRequest
+                            {
+                                Position = _position[i]
+                                    + new float2(math.cos(ang), math.sin(ang)) * (_radius[i] + 0.8f),
+                                Velocity = float2.zero,
+                                Health = childHp,
+                                Radius = math.max(0.2f, _radius[i] * 0.4f),
+                                MaxSpeed = math.max(1f, _maxSpeed[i] * 1.2f),
+                                ArchetypeId = summonArc,
+                                Faction = SimFaction.Hostile,
+                                LogicId = 0,
+                                VisualId = _visualId[i],
+                            });
+                        }
+                        _summonTimer[i] = arc.SummonCooldown > 0f ? arc.SummonCooldown : 6f;
+                    }
+                }
+            }
+        }
+
         private void ApplyCommands(ref SimCommandBuffer cmds)
         {
             if (!cmds.IsCreated)
@@ -799,6 +988,11 @@ namespace BinGames.Sim
             for (int i = 0; i < cmds.Spawns.Length; i++)
             {
                 SpawnUnit(cmds.Spawns[i]);
+            }
+
+            for (int i = 0; i < cmds.Zones.Length; i++)
+            {
+                SpawnZone(cmds.Zones[i]);
             }
 
             for (int i = 0; i < cmds.Despawns.Length; i++)
@@ -909,13 +1103,64 @@ namespace BinGames.Sim
             _radius[idx] = math.max(0.05f, req.Radius);
             _maxSpeed[idx] = math.max(0f, req.MaxSpeed);
             _attackTimer[idx] = 0f;
+            // 槽位是回收复用的，能力冷却必须清——否则新生成的单位会继承上一任的计时。
+            _zoneTimer[idx] = 0f;
+            _summonTimer[idx] = 0f;
             _archetypeId[idx] = req.ArchetypeId;
             _status[idx] = (uint)req.InitialStatus;
             _faction[idx] = (byte)req.Faction;
             _alive[idx] = 1;
-            _logicId[idx] = req.LogicId;
+            // LogicId 0 是玩家/环境的保留值。内核自己生成的单位（敌人召唤物）拿不到热更层的
+            // 分配器，用**负数**自成一段——与 SimBridge 的正数序列天然不冲突，
+            // 而且死亡事件里一眼看得出"这是内核生成的"。
+            _logicId[idx] = req.LogicId != 0 ? req.LogicId : --_kernelLogicId;
             _visualId[idx] = req.VisualId;
             return idx;
+        }
+
+        /// <summary>
+        /// enemy-mechanics-parity：铺一块持续区域。玩家的毒坑与敌人的毒云走同一个入口，
+        /// 区别只在 <see cref="ZoneRequest.TargetFaction"/>。
+        /// 环形游标找空位，容量满时**丢弃最老的做法会让光环闪断**，所以直接放弃这一次生成
+        /// （区域是持续物，少一块比抢掉别人的更不容易被察觉）。
+        /// </summary>
+        private void SpawnZone(in ZoneRequest req)
+        {
+            if (!_zones.IsCreated || req.Seconds <= 0f || req.Radius <= 0f)
+            {
+                return;
+            }
+
+            int n = _zones.Length;
+            for (int k = 0; k < n; k++)
+            {
+                int z = (_zoneCursor + k) % n;
+                if (_zones[z].Alive != 0)
+                {
+                    continue;
+                }
+                _zones[z] = new ZoneState
+                {
+                    Position = req.Position,
+                    Radius = math.max(0.1f, req.Radius),
+                    GrowthRate = math.max(0f, req.GrowthRate),
+                    MaxRadius = req.MaxRadius,
+                    DamagePerTick = req.DamagePerTick,
+                    Interval = math.max(0.02f, req.Interval),
+                    // 首跳不等待：踩进毒坑的瞬间就该有反馈，而不是先站半秒。
+                    TickTimer = 0f,
+                    TimeLeft = req.Seconds,
+                    TargetFaction = (byte)req.TargetFaction,
+                    ApplyStatus = (uint)req.ApplyStatus,
+                    ChainCount = req.ChainCount,
+                    SourceLogicId = req.SourceLogicId,
+                    FollowUnitIndex = req.FollowUnitIndex,
+                    Tint = req.Tint,
+                    Alive = 1,
+                };
+                _zoneCursor = (z + 1) % n;
+                return;
+            }
         }
 
         private void SpawnProjectile(in ProjectileRequest req)
@@ -1083,6 +1328,24 @@ namespace BinGames.Sim
 
         public NativeArray<ProjectileState> Projectiles => _projectiles;
 
+        /// <summary>enemy-mechanics-parity：持续区域数组（渲染与验收探针读，写入走命令缓冲）。</summary>
+        public NativeArray<ZoneState> Zones => _zones;
+
+        /// <summary>当前存活的持续区域数。</summary>
+        public int LiveZoneCount
+        {
+            get
+            {
+                if (!_created || !_zones.IsCreated) { return 0; }
+                int n = 0;
+                for (int i = 0; i < _zones.Length; i++)
+                {
+                    if (_zones[i].Alive != 0) { n++; }
+                }
+                return n;
+            }
+        }
+
         public void Dispose()
         {
             if (!_created)
@@ -1094,11 +1357,14 @@ namespace BinGames.Sim
             SafeF(ref _health); SafeF(ref _radius); SafeF(ref _maxSpeed); SafeF(ref _attackTimer);
             SafeI(ref _archetypeId); SafeI(ref _logicId); SafeI(ref _visualId);
             SafeI(ref _deathEmitFrame);
+            SafeF(ref _zoneTimer); SafeF(ref _summonTimer);
             if (_status.IsCreated) { _status.Dispose(); }
             if (_faction.IsCreated) { _faction.Dispose(); }
             if (_alive.IsCreated) { _alive.Dispose(); }
             if (_archetypes.IsCreated) { _archetypes.Dispose(); }
             if (_projectiles.IsCreated) { _projectiles.Dispose(); }
+            if (_zones.IsCreated) { _zones.Dispose(); }
+            if (_zoneDamage.IsCreated) { _zoneDamage.Dispose(); }
             if (_obstaclePos.IsCreated) { _obstaclePos.Dispose(); }
             if (_obstacleRadius.IsCreated) { _obstacleRadius.Dispose(); }
             if (_freeSlots.IsCreated) { _freeSlots.Dispose(); }

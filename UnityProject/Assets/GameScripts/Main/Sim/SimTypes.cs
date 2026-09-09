@@ -203,6 +203,16 @@ namespace BinGames.Sim
         Returning = 1 << 3,
         /// <summary>撞墙/撞障时反弹而不是销毁（gene_elastic / gene_mirror / gene_membrane）。</summary>
         BounceWalls = 1 << 4,
+        /// <summary>
+        /// 追踪时**优先锁定带 <see cref="SimStatus.Marked"/> 的目标**（gene_receptor「受体记忆」）。
+        ///
+        /// 文案是「打过的敌人会被记住，后续更会追它」。此前这条基因只是把 Homing 强度调高一点，
+        /// 与 gene_taxis 除了数值以外毫无区别——"记忆"根本不存在。
+        /// 现在真的成立：命中时给目标挂 Marked（经 <see cref="ProjectileRequest.ApplyStatus"/>），
+        /// 之后的弹体在选目标时把已标记者的距离按
+        /// <see cref="JobProjectile.MarkedTargetBias"/> 打折，于是它们会越过更近的新目标去追老目标。
+        /// </summary>
+        PreferMarked = 1 << 5,
     }
 
     /// <summary>投射物生成指令。</summary>
@@ -257,6 +267,60 @@ namespace BinGames.Sim
         public byte Generation;
         public SimProjectileFlags Flags;
         /// <summary>RGBA8 打包的实例色（0 = 渲染器默认色）。见 <see cref="ProjectileState.Tint"/>。</summary>
+        public uint Tint;
+    }
+
+    /// <summary>
+    /// 持续区域（毒坑 / 酸洼 / 贴身光环 / 敌方毒云）——内核一等实体。
+    ///
+    /// enemy-mechanics-parity：区域此前是**热更层的玩家专属结构**（<c>MetabolicSliceBridge._pendingLinger</c>），
+    /// 于是"敌人也会放毒"在实现层面根本无从谈起——内核里没有这个概念，敌人也不在热更层里跑。
+    /// 现在下沉成内核实体，玩家与敌人共用一套：谁放的由 <see cref="TargetFaction"/> 决定。
+    ///
+    /// 跟随（<see cref="FollowUnitIndex"/>）是光环所必需的：贴身圈得跟着人走，
+    /// 而"跟着谁走"只有内核知道（热更层拿不到敌人的逐帧坐标而不违反性能红线）。
+    /// </summary>
+    public struct ZoneState
+    {
+        public float2 Position;
+        public float Radius;
+        /// <summary>半径每秒外扩多少（gene_ripple「扩散波」）。0 = 不扩。</summary>
+        public float GrowthRate;
+        /// <summary>半径上限，防止一个坑吃掉整张图。</summary>
+        public float MaxRadius;
+        /// <summary>每跳伤害。</summary>
+        public float DamagePerTick;
+        /// <summary>跳伤间隔（秒）。</summary>
+        public float Interval;
+        public float TickTimer;
+        public float TimeLeft;
+        /// <summary>只伤害这个阵营。玩家的毒坑填 Hostile，敌人的填 Player。</summary>
+        public byte TargetFaction;
+        public uint ApplyStatus;
+        public int ChainCount;
+        public int SourceLogicId;
+        /// <summary>跟随某个单位（光环）。<see cref="SimConst.InvalidIndex"/> = 钉在原地。</summary>
+        public int FollowUnitIndex;
+        /// <summary>RGBA8 实例色（0 = 渲染器默认）。</summary>
+        public uint Tint;
+        public byte Alive;
+    }
+
+    /// <summary>区域生成指令。</summary>
+    public struct ZoneRequest
+    {
+        public float2 Position;
+        public float Radius;
+        public float GrowthRate;
+        public float MaxRadius;
+        public float DamagePerTick;
+        public float Interval;
+        public float Seconds;
+        public SimFaction TargetFaction;
+        public SimStatus ApplyStatus;
+        public int ChainCount;
+        public int SourceLogicId;
+        public int FollowUnitIndex;
         public uint Tint;
     }
 
@@ -385,6 +449,29 @@ namespace BinGames.Sim
         /// <summary>弹体追踪强度 0-1。给敌人的追踪要克制——玩家得躲得掉。</summary>
         public float RangedHoming;
 
+        // ── enemy-mechanics-parity：敌人的区域攻击（放毒 / 贴身光环）──────────
+        //
+        // 毒坑和光环在内核里是同一个东西（<see cref="ZoneState"/>），
+        // 差别只在**放在哪 / 跟不跟着走**，所以共用一组字段，由 ZoneMode 区分。
+
+        /// <summary>区域攻击模式：0=无、1=丢到玩家脚下、2=钉在自己脚下、3=跟随自己（贴身光环）。</summary>
+        public float ZoneMode;
+        public float ZoneRadius;
+        public float ZoneSeconds;
+        public float ZoneDamagePerTick;
+        public float ZoneTickInterval;
+        /// <summary>两次布场的间隔（秒）。光环把它设得略短于 <see cref="ZoneSeconds"/> 即为常驻。</summary>
+        public float ZoneCooldown;
+
+        // ── enemy-mechanics-parity：敌人的召唤 ────────────────────────────────
+
+        /// <summary>召唤出来的单位用哪个行为原型。&lt;0 表示不召唤。</summary>
+        public float SummonArchetypeId;
+        public float SummonCount;
+        public float SummonCooldown;
+        /// <summary>召唤物生命。0 时用宿主生命的一小部分。</summary>
+        public float SummonHealth;
+
         public static BehaviorArchetype Default => new BehaviorArchetype
         {
             Kind = BehaviorKind.Drift,
@@ -408,6 +495,8 @@ namespace BinGames.Sim
         /// <summary>单位容量上限，运行期不扩容。</summary>
         public int UnitCapacity;
         public int ProjectileCapacity;
+        /// <summary>持续区域（毒坑/光环）容量上限，运行期不扩容。</summary>
+        public int ZoneCapacity;
         /// <summary>场地半边长（正方形，中心在原点）。</summary>
         public float ArenaHalfExtent;
         /// <summary>空间哈希 cell 边长。应 ≥ 最大交互半径。</summary>
@@ -425,6 +514,7 @@ namespace BinGames.Sim
         {
             UnitCapacity = 16384,
             ProjectileCapacity = 4096,
+            ZoneCapacity = 256,
             ArenaHalfExtent = 90f,
             HashCellSize = 4f,
             MaxDeathEventsPerFrame = 2048,

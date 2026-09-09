@@ -20,6 +20,7 @@ namespace BinGames.Sim
         private NativeList<StatusRequest> _statuses;
         private NativeList<ProjectileRequest> _projectiles;
         private NativeList<ArchetypeSwapRequest> _archetypeSwaps;
+        private NativeList<ZoneRequest> _zones;
 
         private PlayerIntent _intent;
         private bool _hasIntent;
@@ -36,6 +37,7 @@ namespace BinGames.Sim
             _statuses = new NativeList<StatusRequest>(initialCapacity, allocator);
             _projectiles = new NativeList<ProjectileRequest>(initialCapacity, allocator);
             _archetypeSwaps = new NativeList<ArchetypeSwapRequest>(initialCapacity, allocator);
+            _zones = new NativeList<ZoneRequest>(initialCapacity, allocator);
             _intent = default;
             _hasIntent = false;
             _created = true;
@@ -47,6 +49,8 @@ namespace BinGames.Sim
         public NativeList<StatusRequest> Statuses => _statuses;
         public NativeList<ProjectileRequest> Projectiles => _projectiles;
         public NativeList<ArchetypeSwapRequest> ArchetypeSwaps => _archetypeSwaps;
+        /// <summary>enemy-mechanics-parity：持续区域（毒坑/光环）生成请求。</summary>
+        public NativeList<ZoneRequest> Zones => _zones;
 
         public bool TryGetIntent(out PlayerIntent intent)
         {
@@ -90,6 +94,11 @@ namespace BinGames.Sim
             if (_created) { _archetypeSwaps.Add(req); }
         }
 
+        public void Zone(in ZoneRequest req)
+        {
+            if (_created) { _zones.Add(req); }
+        }
+
         /// <summary>内核应用完命令后调用。玩家意图保留上一帧值，避免输入抖动。</summary>
         public void Clear()
         {
@@ -103,6 +112,7 @@ namespace BinGames.Sim
             _statuses.Clear();
             _projectiles.Clear();
             _archetypeSwaps.Clear();
+            _zones.Clear();
             _hasIntent = false;
         }
 
@@ -118,6 +128,7 @@ namespace BinGames.Sim
             if (_statuses.IsCreated) { _statuses.Dispose(); }
             if (_projectiles.IsCreated) { _projectiles.Dispose(); }
             if (_archetypeSwaps.IsCreated) { _archetypeSwaps.Dispose(); }
+            if (_zones.IsCreated) { _zones.Dispose(); }
             _created = false;
             _hasIntent = false;
         }

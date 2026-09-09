@@ -24,12 +24,19 @@ namespace GameLogic.MetabolicSlice.DebugTools
             .Where(p => p.PropertyType != typeof(Dictionary<string, object>) && p.PropertyType != typeof(HashSet<string>))
             .ToArray();
 
+        /// <summary>story-004 那批基因的条数下限。后续 story 只会加不会减。</summary>
+        private const int MinGeneIds = 24;
+
         public static (bool Pass, string Reason) Run()
         {
             var idList = GeneCatalog.AllGeneIds.OrderBy(x => x).ToList();
-            if (idList.Count != 24)
+            // enemy-mechanics-parity 修：原来写死 24。基因目录后来扩到 36 再到 42，
+            // 这条断言从 organ-gene-rebalance-v3 起就一直红着——它守的是"总数别变"，
+            // 而本报告真正要守的是"这 24 条 story-004 基因都还在、且退役的那批确实没了"。
+            // 改成下限 + 逐条存在性（下方 RetiredIds / 各字段断言原样保留）。
+            if (idList.Count < MinGeneIds)
             {
-                return (false, $"gene_* 总数应为 24，实际 {idList.Count}：{string.Join(",", idList)}");
+                return (false, $"gene_* 总数不应少于 {MinGeneIds}，实际 {idList.Count}：{string.Join(",", idList)}");
             }
 
             foreach (var id in RetiredIds)

@@ -36,11 +36,18 @@ namespace GameLogic.MetabolicSlice.DebugTools
             .Where(p => p.PropertyType != typeof(Dictionary<string, object>) && p.PropertyType != typeof(HashSet<string>))
             .ToArray();
 
+        /// <summary>本波要求的基因数下限。写死一个精确值只会在每次加基因时把报告变红，
+        /// 测的是"数字有没有变"而不是"内容对不对"——真正该守的是下面逐条 id 的存在性。</summary>
+        private const int MinModuleGenes = 36;
+
         public static (bool Pass, string Reason) Run()
         {
-            if (GeneCatalog.AllModuleIds.Count() != 36)
+            if (GeneCatalog.AllModuleIds.Count() < MinModuleGenes)
             {
-                return (false, $"GeneCatalog 应为 36 条 Module 基因（24 保留 + 12 新增），实际 {GeneCatalog.AllModuleIds.Count()}");
+                // enemy-mechanics-parity 修：原来写死 36，而 organ-gene-rebalance-v3 story-005
+                // 之后是 42——每加一批基因这条断言就红一次，测的是"数字有没有变"而不是"内容对不对"。
+                // 改成下限：本波要求的那些基因必须都在，总数只要不倒退即可。
+                return (false, $"GeneCatalog Module 基因不应少于 {MinModuleGenes} 条，实际 {GeneCatalog.AllModuleIds.Count()}");
             }
 
             var engine = new Engine();

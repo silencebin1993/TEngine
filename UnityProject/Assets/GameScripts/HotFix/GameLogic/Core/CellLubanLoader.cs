@@ -89,6 +89,17 @@ namespace GameLogic.Core
                     RangedSpreadDeg = a.RangedSpreadDeg,
                     RangedRadius = a.RangedRadius,
                     RangedHoming = a.RangedHoming,
+                    // enemy-mechanics-parity：敌人的区域攻击与召唤
+                    ZoneMode = a.ZoneMode,
+                    ZoneRadius = a.ZoneRadius,
+                    ZoneSeconds = a.ZoneSeconds,
+                    ZoneDamagePerTick = a.ZoneDamagePerTick,
+                    ZoneTickInterval = a.ZoneTickInterval,
+                    ZoneCooldown = a.ZoneCooldown,
+                    SummonArchetypeId = a.SummonArchetypeId,
+                    SummonCount = a.SummonCount,
+                    SummonCooldown = a.SummonCooldown,
+                    SummonHealth = a.SummonHealth,
                 });
             }
         }

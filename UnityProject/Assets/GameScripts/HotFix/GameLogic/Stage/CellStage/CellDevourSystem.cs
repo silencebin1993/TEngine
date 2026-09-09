@@ -102,13 +102,17 @@ namespace GameLogic.Stage.CellStage
                 }
             }
 
-            // 玩家受到的接触伤害结算
-            float contact = snap.PlayerDamageTaken;
-            if (contact > 0f)
-            {
-                float taken = contact * (_stats?.Get(StatId.DamageTaken) ?? 1f);
-                _sim.DamagePlayer(taken);
+            // ── 玩家受伤：只记账 + 播反馈，**不再自己扣血** ──────────────────────
+            // enemy-mechanics-parity：扣血已下沉到内核（SimWorld.Step 末尾），
+            // 快照里的 PlayerDamageTaken 是**已过减伤倍率的最终值**。
+            // 之所以搬下去：此前"内核累加 → 热更层某个系统读走再回头调 DamagePlayer"
+            // 意味着少一个消费者敌人的伤害就静默消失；而且接触伤害之外又多了敌人弹体、
+            // 敌方毒圈这些来源，靠一个系统兜底越来越不稳。减伤倍率改由每帧推给内核。
+            _sim.SetPlayerDamageTakenMul(_stats?.Get(StatId.DamageTaken) ?? 1f);
 
+            float taken = snap.PlayerDamageTaken;
+            if (taken > 0f)
+            {
                 if (_stats2 != null)
                 {
                     _stats2.TotalDamageTaken += taken;

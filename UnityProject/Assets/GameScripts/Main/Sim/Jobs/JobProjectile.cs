@@ -76,6 +76,8 @@ namespace BinGames.Sim
         [ReadOnly] public NativeArray<float2> Position;
         [ReadOnly] public NativeArray<float> Radius;
         [ReadOnly] public NativeArray<byte> Faction;
+        /// <summary>gene_receptor 选靶偏好要读目标的状态位（<see cref="SimStatus.Marked"/>）。</summary>
+        [ReadOnly] public NativeArray<uint> Status;
         [ReadOnly] public NativeArray<byte> Alive;
         [ReadOnly] public NativeParallelMultiHashMap<int, int> Hash;
         /// <summary>静态障碍（story-009）。数量小，线性扫描比建哈希更简单更快。</summary>
@@ -109,6 +111,13 @@ namespace BinGames.Sim
         public const byte MaxGeneration = 2;
         /// <summary>两次命中之间的最小间隔（秒）。见 <see cref="ProjectileState.HitCooldown"/>。</summary>
         public const float HitCooldownSeconds = 0.08f;
+
+        /// <summary>
+        /// gene_receptor：已标记目标在选靶时的距离平方折扣。
+        /// 0.25 = 有效搜敌距离翻倍——一个 10 米外的老目标会赢过 4 米外的新目标，
+        /// 玩家能明确读出"我的弹在追那个被我打过的家伙"。
+        /// </summary>
+        public const float MarkedTargetBias = 0.25f;
 
         public void Execute(int p)
         {
@@ -283,6 +292,14 @@ namespace BinGames.Sim
                             continue;
                         }
                         float dsq = math.distancesq(Position[j], s.Position);
+                        // gene_receptor「受体记忆」：已被标记（= 之前被这套武器打过）的目标
+                        // 在选靶时距离打折，于是弹体会越过更近的新目标去追老目标。
+                        // 这是"记住打过的敌人"唯一能被玩家看出来的形式——不是把 Homing 调高一点。
+                        if ((s.Flags & SimProjectileFlags.PreferMarked) != 0
+                            && (Status[j] & (uint)SimStatus.Marked) != 0u)
+                        {
+                            dsq *= MarkedTargetBias;
+                        }
                         if (dsq < bestSq)
                         {
                             bestSq = dsq;

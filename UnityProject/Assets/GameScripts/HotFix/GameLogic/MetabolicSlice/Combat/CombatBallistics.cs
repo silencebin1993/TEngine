@@ -157,6 +157,16 @@ namespace GameLogic.MetabolicSlice.Combat
                 applyStatus |= SimStatus.Slowed | SimStatus.Pulled;
             }
 
+            // gene_receptor「受体记忆」：命中即给目标挂 Marked，后续的弹优先追它。
+            // 文案是「打过的敌人会被记住，后续更会追它」——此前这条基因只是 Homing 数值高一点，
+            // 与 gene_taxis 除了强度以外毫无区别，"记忆"根本不存在。
+            // 两半缺一不可：**留下记号**（这里）+ **认得记号**（内核 PreferMarked 选靶偏好）。
+            if (evt.Tags.Contains("ReceptorMemory"))
+            {
+                applyStatus |= SimStatus.Marked;
+                flags |= SimProjectileFlags.PreferMarked;
+            }
+
             float areaRadius = 0f;
             if (evt.ExplodeOnHit || evt.Gravity > 0f)
             {

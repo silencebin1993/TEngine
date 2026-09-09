@@ -177,6 +177,11 @@ namespace GameLogic.MetabolicSlice.Combat
         /// <summary>Return 回旋 → 呼吸回弹的半径系数与延迟。</summary>
         public const float AuraReboundRadiusMul = 1.5f;
         public const float AuraReboundDelay = 0.35f;
+        /// <summary>光环弹反只覆盖圈内层——整圈站桩就能挡的话弹幕机制会直接失效。</summary>
+        public const float AuraDeflectRadiusMul = 0.55f;
+        /// <summary>光环弹反的伤害倍率。低于近战的 <see cref="MeleeDeflectDamageMul"/>：
+        /// 近战格挡是"朝弹飞来的方向主动挥一刀"，光环是被动的，回报理应更小。</summary>
+        public const float AuraDeflectDamageMul = 1.1f;
 
         // ── 场地/毒：三个"为场地设计但从没接线"的字段 ──
 
@@ -1148,6 +1153,25 @@ namespace GameLogic.MetabolicSlice.Combat
                 LastKnockbackUnitsMoved = _sim.Knockback(center, radius, knock);
                 LastMeleeKnockbackDistance = knock;
                 _knockbackHandledThisCast = true;
+
+                // enemy-mechanics-parity：Bounce 在光环上的第二重读法同样是**弹反**，
+                // 但代价与近战不同——近战的格挡面是你主动挥出去的扇形，光环是**整圈**，
+                // 站着不动就能挡。所以这里刻意做得比近战弱：
+                //   · 只覆盖圈内层（AuraDeflectRadiusMul），不是整个光环半径；
+                //   · 弹回去的伤害倍率更低（不给近战那份 1.5）。
+                // 否则"光环流免疫弹幕"——玩家会发现最优解是站桩开圈，弹幕机制直接失效。
+                int n = _sim.DeflectProjectiles(center, radius * AuraDeflectRadiusMul,
+                    float2.zero, 180f, shotId, AuraDeflectDamageMul);
+                if (n > 0)
+                {
+                    DeflectedProjectiles += n;
+                    LastDeflectedCount = n;
+                    Signals.Publish(new ComposeChainSignal
+                    {
+                        Kind = "Parry", Position = center, Direction = facing,
+                        Radius = radius * AuraDeflectRadiusMul, Duration = 0f,
+                    });
+                }
             }
 
             // ⑥ SplitOnHit 分裂 → 从光环外缘环形甩出小弹。
@@ -1935,6 +1959,21 @@ namespace GameLogic.MetabolicSlice.Combat
                 GrowthRate = growthRate,
             });
 
+            // enemy-mechanics-parity：真正的持续结算已经下沉到内核区域实体
+            // （玩家与敌人共用一套，见 SimBridge.SpawnZone）。
+            // 上面那份 _pendingLinger 只留作**热更层账本**：Weave 要知道场上有哪些坑才能连桥，
+            // 验收探针也要读得到坑的时长/半径/扩张率——内核不认识"编织"这种玩法概念。
+            // 跳伤本身不再由 TickPendingLinger 发（那会打两遍），见该方法注释。
+            _sim.SpawnZone(pos, radius, seconds, damagePerTick,
+                tickRate > 0f ? 1f / tickRate : DefaultLingerTickInterval,
+                BinGames.Sim.SimFaction.Hostile,
+                growthRate: growthRate,
+                maxRadius: LingerMaxGrowthRadius,
+                applyStatus: pull > 0f
+                    ? BinGames.Sim.SimStatus.Slowed | BinGames.Sim.SimStatus.Pulled
+                    : BinGames.Sim.SimStatus.None,
+                chainCount: chain > 0f ? Math.Max(0, (int)MathF.Round(chain)) : 0);
+
             Signals.Publish(new ComposeChainSignal
             {
                 Kind = "Linger", Position = pos, Direction = new float2(0f, 1f),
@@ -1993,17 +2032,15 @@ namespace GameLogic.MetabolicSlice.Combat
             {
                 PendingLinger p = _pendingLinger[i];
                 p.TimeLeft -= dt;
-                p.NextTick -= dt;
                 if (p.GrowthRate > 0f)
                 {
                     p.Radius = MathF.Min(LingerMaxGrowthRadius, p.Radius + p.GrowthRate * dt);
                 }
-                if (p.NextTick <= 0f)
-                {
-                    DamageAreaPrimitive(p.Position, p.Radius, p.DamagePerTick, p.Chain, p.Pull);
-                    p.NextTick = p.Interval;
-                }
 
+                // enemy-mechanics-parity：**这里不再发跳伤**。
+                // 跳伤由内核区域实体负责（SpawnLingerZone 里已同步下发），
+                // 热更层这份只是账本——留着是因为 Weave 要知道"场上有哪些坑"才能连桥，
+                // 而"编织"是玩法概念、内核不认识。两边同时打就是打两遍。
                 if (p.TimeLeft <= 0f)
                 {
                     _pendingLinger.RemoveAt(i);

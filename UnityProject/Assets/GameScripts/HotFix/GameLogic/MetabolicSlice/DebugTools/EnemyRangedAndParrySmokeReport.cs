@@ -106,13 +106,43 @@ namespace GameLogic.MetabolicSlice.DebugTools
                     {
                         return (false, "① 敌弹应打到玩家（PlayerDamageTaken>0），实际 0");
                     }
-                    if (sim.PlayerHealth < 100f)
+                    // enemy-mechanics-parity：扣血已下沉到内核，所以血量**就该**掉。
+                    // （本条断言此前是反过来的——那时扣血还等着热更层某个系统去消费快照，
+                    //   少一个消费者伤害就静默消失，正是这次改掉的东西。）
+                    if (sim.PlayerHealth >= 100f)
                     {
-                        return (false, $"① 敌弹**不应**直接扣 Health[0]（那会绕过护甲与受伤反馈），实际 {sim.PlayerHealth:0.#}");
+                        return (false, "① 敌弹应真的扣掉玩家血量（内核直接结算），实际血量没变");
                     }
-                    notes.Add($"①敌人远程：最多同时 {maxLive} 发敌弹，累计打到玩家 {dealt:0.#} 点且走玩家伤害管线");
+                    notes.Add($"①敌人远程：最多同时 {maxLive} 发敌弹，累计打到玩家 {dealt:0.#} 点"
+                        + $"（血量 100→{sim.PlayerHealth:0.#}）");
                 }
                 finally { sim.End(); sim.OnDispose(); }
+            }
+
+            // ── ①b 减伤倍率仍然生效：伤害是过了 PlayerDamageTakenMul 才落到血量上的 ──
+            {
+                var armored = new SimBridge();
+                try
+                {
+                    armored.Begin(Cfg, Archetypes());
+                    armored.SetPlayerDamageTakenMul(0.5f);
+                    SpawnHostile(armored, new float2(8f, 0f), 0, 1000f);
+                    armored.OnUpdate(0.02f);
+                    float dealt = 0f;
+                    for (int f = 0; f < 60; f++)
+                    {
+                        armored.OnUpdate(0.05f);
+                        dealt += armored.PlayerDamageTaken;
+                    }
+                    // 同样 3 发 ×7 = 21 的原始伤害，减伤 0.5 后应该是 10.5。
+                    if (dealt <= 0f || dealt > 12f)
+                    {
+                        return (false, $"①b 减伤倍率 0.5 下累计受伤应约 10.5（原始 21），实际 {dealt:0.#}"
+                            + "——若等于原始值说明护甲被绕过了");
+                    }
+                    notes.Add($"①b 减伤 0.5 → 累计受伤 {dealt:0.#}（原始 21），护甲没被绕过");
+                }
+                finally { armored.End(); armored.OnDispose(); }
             }
 
             // ── ② 三连扇射：以朝向玩家的方向为中轴左右均分 ──

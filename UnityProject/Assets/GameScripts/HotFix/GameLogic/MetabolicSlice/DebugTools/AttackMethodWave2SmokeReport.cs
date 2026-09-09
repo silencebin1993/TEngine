@@ -13,11 +13,25 @@ namespace GameLogic.MetabolicSlice.DebugTools
     /// 结构照抄 <see cref="AttackMethodWave1SmokeReport"/>，不另起一套判据。</summary>
     public static class AttackMethodWave2SmokeReport
     {
-        /// <summary>CATALOG §A2 顺序。</summary>
+        /// <summary>
+        /// CATALOG §A2 顺序里**仍在役**的攻击方式。
+        ///
+        /// enemy-mechanics-parity 修：原列表 12 条里有 9 条已在 organ-gene-rebalance-v3 story-002
+        /// 退役并把特性迁进 gene_*（org_needle→gene_tubule、org_shotgun→gene_spindle+gene_fan、
+        /// org_hook→gene_return、org_synapsearc→gene_volt、org_spore/org_phage→org_bud+基因、
+        /// org_acidgland→org_enzyme+gene_arc+gene_acidfilm、org_trail→gene_slime、org_pulse→gene_rhythm）。
+        /// 断言没跟着改，这个报告从那时起就一直是红的。退役的挪进下面的 RetiredIds 继续守着。
+        /// </summary>
         private static readonly string[] Wave2Ids =
         {
-            "org_needle", "org_acidgland", "org_shotgun", "org_pseudopod", "org_hook", "org_synapsearc",
-            "org_spore", "org_phage", "org_drill", "org_wave", "org_trail", "org_pulse",
+            "org_pseudopod", "org_drill", "org_wave",
+        };
+
+        /// <summary>已退役：必须仍注册在目录里（探针按 id 遍历），但 AttackMethod=false。</summary>
+        private static readonly string[] RetiredIds =
+        {
+            "org_needle", "org_acidgland", "org_shotgun", "org_hook", "org_synapsearc",
+            "org_spore", "org_phage", "org_trail", "org_pulse",
         };
 
         public static (bool Pass, string Reason) Run()
@@ -65,8 +79,22 @@ namespace GameLogic.MetabolicSlice.DebugTools
                 return (false, $"Pattern 不可两两区分，重复签名: {string.Join(" | ", dupGroups)}");
             }
 
-            return (true, $"12/12 Solo Fire 通过，Pattern 全部两两可区分：" +
-                string.Join("; ", Wave2Ids.Select(id => $"{id}={signatures[id]}")));
+            foreach (var id in RetiredIds)
+            {
+                var def = OrganelleCatalog.Get(id);
+                if (def == null)
+                {
+                    return (false, $"{id} 未在 OrganelleCatalog 注册（退役器官只应 AttackMethod=false，不应删条目）");
+                }
+                if (def.AttackMethod)
+                {
+                    return (false, $"{id} 已退役，AttackMethod 应为 false，实际 true");
+                }
+            }
+
+            return (true, $"{Wave2Ids.Length}/{Wave2Ids.Length} Solo Fire 通过，Pattern 全部两两可区分：" +
+                string.Join("; ", Wave2Ids.Select(id => $"{id}={signatures[id]}")) +
+                $"；{RetiredIds.Length} 个已退役器官 AttackMethod 均为 false");
         }
 
         /// <summary>把决定"这是哪种打法"的字段拼成签名串，用于两两去重比较（含 003 之后新增的

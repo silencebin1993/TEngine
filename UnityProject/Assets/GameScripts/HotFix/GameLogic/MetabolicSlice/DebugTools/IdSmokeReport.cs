@@ -16,6 +16,13 @@ namespace GameLogic.MetabolicSlice.DebugTools
     /// </summary>
     public static class IdSmokeReport
     {
+        /// <summary>HitEvent 的一等标量字段（排除集合类）。<see cref="DiffEvents"/> 用它做逐字段比对。</summary>
+        private static readonly PropertyInfo[] HitEventScalarProps = typeof(HitEvent)
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(p => p.PropertyType != typeof(Dictionary<string, object>)
+                     && p.PropertyType != typeof(HashSet<string>))
+            .ToArray();
+
         private static readonly PropertyInfo[] RuleVectorScalarProps = typeof(RuleVector)
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(p => p.Name != nameof(RuleVector.StackCount) && p.PropertyType != typeof(Dictionary<string, object>))
@@ -105,6 +112,21 @@ namespace GameLogic.MetabolicSlice.DebugTools
             var tagDiff = new HashSet<string>(t.Tags);
             tagDiff.SymmetricExceptWith(b.Tags);
             if (tagDiff.Count > 0) return (true, $"Tags 差异 [{string.Join(",", tagDiff)}]");
+
+            // enemy-mechanics-parity 修：这里原本**只**看 Payload["Count"/"GrowScale"/...]。
+            // 那是 story-002 之前的存放位置——Count/Scale/Spin/ExplodeOnHit 等早已升成
+            // HitEvent 的一等字段，Payload 里不再有它们，于是 org_scatter 这种"只改 Count"的
+            // 模块被判成"无可观察差异"，这个报告因此一直是 45/46。
+            // 改成先逐个比一等字段（与仓内其它报告同一套反射手法），Payload 只作兜底。
+            foreach (var prop in HitEventScalarProps)
+            {
+                object tv2 = prop.GetValue(t);
+                object bv2 = prop.GetValue(b);
+                if (!Equals(tv2, bv2))
+                {
+                    return (true, $"{prop.Name} {bv2}->{tv2}");
+                }
+            }
 
             foreach (var key in new[] { "Count", "GrowScale", "OrbitSpeed", "ExplodeOnHit" })
             {

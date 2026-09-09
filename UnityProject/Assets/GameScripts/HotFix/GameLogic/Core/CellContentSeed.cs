@@ -319,6 +319,61 @@ namespace GameLogic.Core
                 AttackDamage = 20f, Separation = 0.9f,
                 ChargeTelegraph = 0.6f, ChargeSpeedMul = 3f,
             });
+
+            // ── 回落 seed 补齐到与 Luban 表同序（12~19）──
+            // seed 只在 Luban 加载失败时生效，但 archetypeIndex 是按序引用的，
+            // 索引对不上会让敌人拿到错误行为，所以必须一一对应补满。
+            // 12 木桩
+            reg.AddArchetype(new BehaviorArchetype { Kind = BehaviorKind.Stationary, ChargeSpeedMul = 1f });
+            // 13 孢子仆从索敌
+            reg.AddArchetype(new BehaviorArchetype
+            {
+                Kind = BehaviorKind.MinionSeekAttack, Accel = 8f, TurnRate = 5f, AggroRange = 8f,
+                AttackRange = 1.2f, AttackCooldown = 0.1667f, AttackDamage = 3f,
+                Separation = 0.6f, WanderStrength = 0.5f, ChargeSpeedMul = 1f,
+            });
+            // 14 噬菌体追爆
+            reg.AddArchetype(new BehaviorArchetype
+            {
+                Kind = BehaviorKind.MinionSeekExplode, Accel = 10f, TurnRate = 6f, AggroRange = 10f,
+                AttackRange = 1f, AttackDamage = 15f, Separation = 0.5f, PreferredRange = 2f,
+                WanderStrength = 0.4f, ChargeSpeedMul = 1f,
+            });
+            // 15 菌丝体固着
+            reg.AddArchetype(new BehaviorArchetype { Kind = BehaviorKind.Stationary, ChargeSpeedMul = 1f });
+            // 16 追踪投射：弹速更慢但会拐弯；角速度由内核夹在 110°/s，必须躲得掉。
+            reg.AddArchetype(new BehaviorArchetype
+            {
+                Kind = BehaviorKind.Ranged, Accel = 5f, TurnRate = 3f, AggroRange = 24f,
+                AttackRange = 13f, AttackCooldown = 2.4f, AttackDamage = 8f, Separation = 1.1f,
+                PreferredRange = 11f, WanderStrength = 0.5f, ChargeSpeedMul = 1f,
+                RangedSpeed = 11f, RangedCount = 1f, RangedRadius = 0.4f, RangedHoming = 0.55f,
+            });
+            // 17 污染孢团：贴身毒环（跟随自己）。"靠近易被感染"终于是真的。
+            reg.AddArchetype(new BehaviorArchetype
+            {
+                Kind = BehaviorKind.Drift, Accel = 3f, AttackRange = 0.3f, AttackCooldown = 1.5f,
+                Separation = 0.6f, WanderStrength = 1f, ChargeSpeedMul = 1f,
+                ZoneMode = 3f, ZoneRadius = 3.2f, ZoneSeconds = 2f,
+                ZoneDamagePerTick = 2f, ZoneTickInterval = 0.5f, ZoneCooldown = 1.8f,
+            });
+            // 18 酸沼投手：远程 + 在玩家脚下留酸沼，逼走位。
+            reg.AddArchetype(new BehaviorArchetype
+            {
+                Kind = BehaviorKind.Ranged, Accel = 5f, TurnRate = 3f, AggroRange = 24f,
+                AttackRange = 13f, AttackCooldown = 3f, AttackDamage = 5f, Separation = 1.1f,
+                PreferredRange = 11f, WanderStrength = 0.5f, ChargeSpeedMul = 1f,
+                RangedSpeed = 12f, RangedCount = 1f, RangedRadius = 0.35f,
+                ZoneMode = 1f, ZoneRadius = 3f, ZoneSeconds = 4f,
+                ZoneDamagePerTick = 3f, ZoneTickInterval = 0.6f, ZoneCooldown = 3f,
+            });
+            // 19 孵化巢：固守 + 周期孵小怪（召唤 5 号「群体」）。
+            reg.AddArchetype(new BehaviorArchetype
+            {
+                Kind = BehaviorKind.Stationary, Accel = 1f, AggroRange = 14f, AttackRange = 2f,
+                AttackCooldown = 1.6f, AttackDamage = 6f, ChargeSpeedMul = 1f,
+                SummonArchetypeId = 5f, SummonCount = 2f, SummonCooldown = 7f, SummonHealth = 8f,
+            });
         }
 
         private static void Enemies(DataRegistry reg)

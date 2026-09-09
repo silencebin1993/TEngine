@@ -12,11 +12,19 @@ namespace GameLogic.MetabolicSlice.DebugTools
     /// （R1 判据：只装这一件、基因槽全空）。execute_code 直调，不进 Play（验收优先代码断言，见根 CLAUDE.md）。</summary>
     public static class AttackMethodWave1SmokeReport
     {
-        /// <summary>CATALOG §A1 顺序，含刺突（反伤特例，仍走同一 Solo Fire 断言：均产出 HitEvent）。</summary>
+        /// <summary>
+        /// CATALOG §A1 顺序里**仍在役**的攻击方式，含刺突（反伤特例，仍走同一 Solo Fire 断言）。
+        ///
+        /// enemy-mechanics-parity 修：原列表还带着 org_taxis / org_boomer / org_calcium 三条，
+        /// 它们早在 organ-gene-rebalance-v3 story-002 就退役并把特性迁进了 gene_*
+        /// （见 OrganelleCatalog 各条 isRetired 注释）。断言没跟着改，于是这个报告
+        /// **从那时起就一直是红的**——它测的是一份已经不存在的目录。
+        /// 三条退役器官挪进下面的"必须 AttackMethod=false"清单继续守着。
+        /// </summary>
         private static readonly string[] Wave1Ids =
         {
             "org_emitter", "org_cilia", "org_spine", "org_lensbeam", "org_enzyme", "org_osmotic",
-            "org_orbitcilia", "org_bud", "org_mycelium", "org_taxis", "org_boomer", "org_calcium",
+            "org_orbitcilia", "org_bud", "org_mycelium",
         };
 
         /// <summary>Required 4：003 之前就已存在于 OrganelleCatalog 的旧修饰器官，本波必须 AttackMethod=false。</summary>
@@ -25,6 +33,9 @@ namespace GameLogic.MetabolicSlice.DebugTools
             "org_vacuole", "org_golgi", "org_merge", "org_lens", "org_scatter", "org_swell",
             "org_flagella", "org_lyso", "org_perox", "org_aqua", "org_ion", "org_radiator",
             "org_breaker", "org_synapse", "org_slime", "org_receptor", "org_valve", "org_filter",
+            // organ-gene-rebalance-v3 story-002 退役，特性迁 gene_taxis / gene_return /
+            // gene_ripple+gene_swell（几何身份并入 org_wave）。
+            "org_taxis", "org_boomer", "org_calcium",
         };
 
         public static (bool Pass, string Reason) Run()
@@ -85,7 +96,7 @@ namespace GameLogic.MetabolicSlice.DebugTools
                 }
             }
 
-            return (true, $"12/12 Solo Fire 通过，Pattern 全部两两可区分：" +
+            return (true, $"{Wave1Ids.Length}/{Wave1Ids.Length} Solo Fire 通过，Pattern 全部两两可区分：" +
                 string.Join("; ", Wave1Ids.Select(id => $"{id}={signatures[id]}")) +
                 $"；{LegacyModifierIds.Length} 个旧修饰 AttackMethod 均为 false");
         }

@@ -38,6 +38,16 @@ public sealed partial class BehaviorArchetype : Luban.BeanBase
         RangedSpreadDeg = _buf.ReadFloat();
         RangedRadius = _buf.ReadFloat();
         RangedHoming = _buf.ReadFloat();
+        ZoneMode = _buf.ReadFloat();
+        ZoneRadius = _buf.ReadFloat();
+        ZoneSeconds = _buf.ReadFloat();
+        ZoneDamagePerTick = _buf.ReadFloat();
+        ZoneTickInterval = _buf.ReadFloat();
+        ZoneCooldown = _buf.ReadFloat();
+        SummonArchetypeId = _buf.ReadFloat();
+        SummonCount = _buf.ReadFloat();
+        SummonCooldown = _buf.ReadFloat();
+        SummonHealth = _buf.ReadFloat();
     }
 
     public static BehaviorArchetype DeserializeBehaviorArchetype(ByteBuf _buf)
@@ -121,6 +131,46 @@ public sealed partial class BehaviorArchetype : Luban.BeanBase
     /// 弹体追踪强度0-1
     /// </summary>
     public readonly float RangedHoming;
+    /// <summary>
+    /// 区域模式 0=无 1=丢玩家脚下 2=钉自己脚下 3=跟随自己(光环)
+    /// </summary>
+    public readonly float ZoneMode;
+    /// <summary>
+    /// 区域半径
+    /// </summary>
+    public readonly float ZoneRadius;
+    /// <summary>
+    /// 区域持续秒数
+    /// </summary>
+    public readonly float ZoneSeconds;
+    /// <summary>
+    /// 区域每跳伤害
+    /// </summary>
+    public readonly float ZoneDamagePerTick;
+    /// <summary>
+    /// 区域跳伤间隔(秒)
+    /// </summary>
+    public readonly float ZoneTickInterval;
+    /// <summary>
+    /// 两次布场间隔(秒),光环设得略短于持续即常驻
+    /// </summary>
+    public readonly float ZoneCooldown;
+    /// <summary>
+    /// 召唤物行为原型id,&lt;0=不召唤
+    /// </summary>
+    public readonly float SummonArchetypeId;
+    /// <summary>
+    /// 每次召唤数量
+    /// </summary>
+    public readonly float SummonCount;
+    /// <summary>
+    /// 召唤间隔(秒)
+    /// </summary>
+    public readonly float SummonCooldown;
+    /// <summary>
+    /// 召唤物生命,0=取宿主生命的1成
+    /// </summary>
+    public readonly float SummonHealth;
    
     public const int __ID__ = 822037163;
     public override int GetTypeId() => __ID__;
@@ -151,6 +201,16 @@ public sealed partial class BehaviorArchetype : Luban.BeanBase
         + "rangedSpreadDeg:" + RangedSpreadDeg + ","
         + "rangedRadius:" + RangedRadius + ","
         + "rangedHoming:" + RangedHoming + ","
+        + "zoneMode:" + ZoneMode + ","
+        + "zoneRadius:" + ZoneRadius + ","
+        + "zoneSeconds:" + ZoneSeconds + ","
+        + "zoneDamagePerTick:" + ZoneDamagePerTick + ","
+        + "zoneTickInterval:" + ZoneTickInterval + ","
+        + "zoneCooldown:" + ZoneCooldown + ","
+        + "summonArchetypeId:" + SummonArchetypeId + ","
+        + "summonCount:" + SummonCount + ","
+        + "summonCooldown:" + SummonCooldown + ","
+        + "summonHealth:" + SummonHealth + ","
         + "}";
     }
 }

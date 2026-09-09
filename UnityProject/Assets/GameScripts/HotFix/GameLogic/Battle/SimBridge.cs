@@ -282,6 +282,42 @@ namespace GameLogic.Battle
         }
 
         /// <summary>
+        /// enemy-mechanics-parity：铺一块持续区域（毒坑 / 酸洼 / 贴身光环）。
+        ///
+        /// 区域已经是**内核一等实体**：玩家的坑与敌人的毒云共用一套，
+        /// 区别只在 <paramref name="targetFaction"/>。此前它只存在于热更层的
+        /// <c>MetabolicSliceBridge._pendingLinger</c> 里，所以敌人根本没法放。
+        /// </summary>
+        /// <param name="followUnitIndex">跟随某个单位（光环）；<see cref="SimConst.InvalidIndex"/> = 钉在原地。</param>
+        public void SpawnZone(float2 position, float radius, float seconds, float damagePerTick,
+            float interval, SimFaction targetFaction = SimFaction.Hostile,
+            float growthRate = 0f, float maxRadius = 0f, SimStatus applyStatus = SimStatus.None,
+            int chainCount = 0, int sourceLogicId = 0,
+            int followUnitIndex = SimConst.InvalidIndex, uint tint = 0u)
+        {
+            if (!_running) { return; }
+            _cmds.Zone(new ZoneRequest
+            {
+                Position = position,
+                Radius = radius,
+                GrowthRate = growthRate,
+                MaxRadius = maxRadius,
+                DamagePerTick = damagePerTick,
+                Interval = interval,
+                Seconds = seconds,
+                TargetFaction = targetFaction,
+                ApplyStatus = applyStatus,
+                ChainCount = chainCount,
+                SourceLogicId = sourceLogicId,
+                FollowUnitIndex = followUnitIndex,
+                Tint = tint,
+            });
+        }
+
+        /// <summary>当前场上存活的持续区域数。</summary>
+        public int LiveZoneCount => _running && World != null ? World.LiveZoneCount : 0;
+
+        /// <summary>
         /// enemy-ranged-and-parry：弹反。把扇形内朝玩家飞来的敌方弹体打回去（调头 + 换阵营 + 归属玩家 + 加伤）。
         ///
         /// <paramref name="halfAngleDeg"/> &gt;= 180 或方向为零时退化为整圆，与
@@ -340,6 +376,14 @@ namespace GameLogic.Battle
         public float PlayerRadius => _running ? _snapshot.PlayerRadius : 1f;
         /// <summary>本帧玩家受到的接触伤害。由 Resolution 阶段消费。</summary>
         public float PlayerDamageTaken => _running ? _snapshot.PlayerDamageTaken : 0f;
+
+        /// <summary>把玩家受伤倍率（<c>StatId.DamageTaken</c>）推给内核——扣血在内核里做，
+        /// 减伤是玩法数值。见 <see cref="SimWorld.PlayerDamageTakenMul"/>。</summary>
+        public void SetPlayerDamageTakenMul(float mul)
+        {
+            SimWorld w = World;
+            if (w != null) { w.PlayerDamageTakenMul = mul; }
+        }
 
         public void SetPlayerStats(float maxHp, float currentHp, float radius, float speed)
         {
