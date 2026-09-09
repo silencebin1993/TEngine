@@ -261,12 +261,14 @@ namespace GameLogic.Core
             });
 
             // 远程：保持距离投射。远程压力。
+            // enemy-ranged-and-parry：真的发弹了。弹速 14 明显慢于玩家弹（26），走位躲得掉。
             reg.AddArchetype(new BehaviorArchetype
             {
                 Kind = BehaviorKind.Ranged, Accel = 5f, TurnRate = 3f,
                 AggroRange = 24f, AttackRange = 12f, AttackCooldown = 2f,
                 AttackDamage = 7f, Separation = 1.1f, PreferredRange = 10f,
                 WanderStrength = 0.6f, ChargeSpeedMul = 1f,
+                RangedSpeed = 14f, RangedCount = 1f, RangedRadius = 0.35f,
             });
 
             // 群体：松散推进而非直线列队。AOE 与连锁的测试目标。
@@ -279,12 +281,16 @@ namespace GameLogic.Core
             });
 
             // 固守：不动，占据空间。
+            // enemy-ranged-and-parry：改成原地炮台，三连扇射。文案本就是"依靠原地范围输出"——
+            // 现在它对"站远处不过去"的玩家也有威胁，而不是只能干等你走近。
+            // AttackRange 2→11 是**射程**（rangedSpeed>0 的原型已被接触伤害判据跳过）。
             reg.AddArchetype(new BehaviorArchetype
             {
                 Kind = BehaviorKind.Stationary, Accel = 1f, TurnRate = 0f,
-                AggroRange = 0f, AttackRange = 2f, AttackCooldown = 1.6f,
-                AttackDamage = 8f, Separation = 0f, WanderStrength = 0f,
+                AggroRange = 13f, AttackRange = 11f, AttackCooldown = 2.6f,
+                AttackDamage = 6f, Separation = 0f, WanderStrength = 0f,
                 ChargeSpeedMul = 1f,
+                RangedSpeed = 10f, RangedCount = 3f, RangedSpreadDeg = 36f, RangedRadius = 0.4f,
             });
 
             // 环绕：保持半径绕圈，逼迫玩家处理机动目标。

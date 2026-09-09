@@ -83,6 +83,12 @@ namespace GameLogic.Core
                     ChargeTelegraph = a.ChargeTelegraph,
                     ChargeSpeedMul = a.ChargeSpeedMul,
                     WanderStrength = a.WanderStrength,
+                    // enemy-ranged-and-parry：敌人远程弹体参数
+                    RangedSpeed = a.RangedSpeed,
+                    RangedCount = a.RangedCount,
+                    RangedSpreadDeg = a.RangedSpreadDeg,
+                    RangedRadius = a.RangedRadius,
+                    RangedHoming = a.RangedHoming,
                 });
             }
         }

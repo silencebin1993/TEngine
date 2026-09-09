@@ -45,8 +45,14 @@ namespace BinGames.Sim
         [ReadOnly] public NativeArray<ProjectileEndEvent> ProjectileEnds;
         public int ProjectileEndCount;
 
-        /// <summary>本帧玩家受到的接触伤害总量。</summary>
-        public float PlayerContactDamage;
+        /// <summary>
+        /// 本帧玩家受到的伤害总量。
+        ///
+        /// enemy-ranged-and-parry 起**不只是接触伤害**：敌人弹体命中玩家也累加到这里
+        /// （见 <see cref="JobDamage.PlayerDamageOut"/>），这样所有打到玩家身上的东西
+        /// 都统一经过同一条结算路径——过 DamageTaken 减伤、记账、发 PlayerHurtSignal。
+        /// </summary>
+        public float PlayerDamageTaken;
 
         public float2 PlayerPosition;
         public float PlayerHealth;

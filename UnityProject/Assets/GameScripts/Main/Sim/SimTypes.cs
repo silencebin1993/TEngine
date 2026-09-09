@@ -366,6 +366,25 @@ namespace BinGames.Sim
         /// <summary>Drift 的随机游走强度。</summary>
         public float WanderStrength;
 
+        // ── enemy-ranged-and-parry：敌人的远程攻击 ──────────────────────────
+        //
+        // 在此之前**敌人只有接触伤害**：`BehaviorKind.Ranged` 只影响转向（保持距离），
+        // 从来不发射任何东西——所谓"远程"其实是「站在 AttackRange=12 米外隐形地扣血」，
+        // 玩家看不见、也躲不掉。填了 <see cref="RangedSpeed"/> 的原型改走真弹体
+        // （<see cref="SimWorld.ResolveHostileRangedCombat"/>），并且**不再吃接触伤害**
+        // （<see cref="JobContactDamage"/> 会跳过它们），否则同一个 AttackRange 会结算两遍。
+
+        /// <summary>远程弹体速度（世界单位/秒）。<b>0 = 这个原型不发射弹体</b>，行为逐字不变。</summary>
+        public float RangedSpeed;
+        /// <summary>一次齐射的弹数。0/1 = 单发。</summary>
+        public float RangedCount;
+        /// <summary>齐射张角（度），以朝向玩家的方向为中轴。0 = 全部同向。</summary>
+        public float RangedSpreadDeg;
+        /// <summary>弹体碰撞半径。0 时用内核默认值。</summary>
+        public float RangedRadius;
+        /// <summary>弹体追踪强度 0-1。给敌人的追踪要克制——玩家得躲得掉。</summary>
+        public float RangedHoming;
+
         public static BehaviorArchetype Default => new BehaviorArchetype
         {
             Kind = BehaviorKind.Drift,

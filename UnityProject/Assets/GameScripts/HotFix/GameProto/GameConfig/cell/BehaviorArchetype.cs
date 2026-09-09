@@ -33,6 +33,11 @@ public sealed partial class BehaviorArchetype : Luban.BeanBase
         ChargeTelegraph = _buf.ReadFloat();
         ChargeSpeedMul = _buf.ReadFloat();
         WanderStrength = _buf.ReadFloat();
+        RangedSpeed = _buf.ReadFloat();
+        RangedCount = _buf.ReadFloat();
+        RangedSpreadDeg = _buf.ReadFloat();
+        RangedRadius = _buf.ReadFloat();
+        RangedHoming = _buf.ReadFloat();
     }
 
     public static BehaviorArchetype DeserializeBehaviorArchetype(ByteBuf _buf)
@@ -96,6 +101,26 @@ public sealed partial class BehaviorArchetype : Luban.BeanBase
     /// 游走强度
     /// </summary>
     public readonly float WanderStrength;
+    /// <summary>
+    /// 远程弹体速度(u/s),0=不发射弹体
+    /// </summary>
+    public readonly float RangedSpeed;
+    /// <summary>
+    /// 一次齐射弹数,0/1=单发
+    /// </summary>
+    public readonly float RangedCount;
+    /// <summary>
+    /// 齐射张角(度),0=同向
+    /// </summary>
+    public readonly float RangedSpreadDeg;
+    /// <summary>
+    /// 弹体碰撞半径,0=用内核默认
+    /// </summary>
+    public readonly float RangedRadius;
+    /// <summary>
+    /// 弹体追踪强度0-1
+    /// </summary>
+    public readonly float RangedHoming;
    
     public const int __ID__ = 822037163;
     public override int GetTypeId() => __ID__;
@@ -121,6 +146,11 @@ public sealed partial class BehaviorArchetype : Luban.BeanBase
         + "chargeTelegraph:" + ChargeTelegraph + ","
         + "chargeSpeedMul:" + ChargeSpeedMul + ","
         + "wanderStrength:" + WanderStrength + ","
+        + "rangedSpeed:" + RangedSpeed + ","
+        + "rangedCount:" + RangedCount + ","
+        + "rangedSpreadDeg:" + RangedSpreadDeg + ","
+        + "rangedRadius:" + RangedRadius + ","
+        + "rangedHoming:" + RangedHoming + ","
         + "}";
     }
 }

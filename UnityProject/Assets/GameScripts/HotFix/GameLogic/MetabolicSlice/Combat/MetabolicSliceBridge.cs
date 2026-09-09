@@ -43,7 +43,34 @@ namespace GameLogic.MetabolicSlice.Combat
     {
         public override int Priority => ModulePriority.MetabolicBridge;
 
-        private const float TickInterval = 1.5f;
+        // ══════════════════════════════════════════════════════════════════════
+        //  攻击节奏
+        //
+        //  改动前是写死的 1.5 秒一拍。在敌人只会贴上来撞你的时候还能忍；
+        //  enemy-ranged-and-parry 之后场上开始有**弹幕**，1.5 秒一拍就彻底不成立了——
+        //  你需要边走位边输出、需要在弹飞过来的那一瞬挥刀格挡，而不是每 1.5 秒被动放一次技能。
+        //
+        //  改法刻意**不动 DPS**：间隔缩短多少，每拍伤害就等比例削多少
+        //  （`LegacyAttackInterval` 是归一化基准）。所以这纯粹是手感改动，
+        //  整条数值曲线一个数都不用重调——想调强度是另一件事，别混在一起。
+        // ══════════════════════════════════════════════════════════════════════
+
+        /// <summary>基准开火间隔（秒）。0.6s 是动作游戏里"连续输出"读得出来的下限附近；
+        /// 再快就变成噪声，再慢就回到"放技能"而不是"打架"。</summary>
+        public const float AttackIntervalBase = 0.6f;
+        /// <summary>间隔下限——再快玩家分辨不出单次攻击。</summary>
+        public const float AttackIntervalMin = 0.22f;
+        /// <summary>间隔上限——沿用旧节奏作为最慢值（重武器可以慢，但不能比以前更慢）。</summary>
+        public const float AttackIntervalMax = 1.5f;
+        /// <summary>DPS 归一化基准 = 旧的固定节奏。每拍伤害 × (实际间隔 / 它)。</summary>
+        public const float LegacyAttackInterval = 1.5f;
+
+        /// <summary>本次要等多久才打下一拍。由**上一拍**产出的 <see cref="HitEvent.Speed"/> 决定——
+        /// 快武器打得密而轻，重武器打得疏而重，两者 DPS 相同。</summary>
+        private float _attackInterval = AttackIntervalBase;
+
+        /// <summary>当前生效的开火间隔（秒）。持续区域"留到下次攻击为止"这类默认时长也读它。</summary>
+        public float CurrentAttackInterval => _attackInterval;
 
         /// <summary>story-004：白模弹道 Presenter 与 <see cref="ApplyEvent"/> 共用同一个半径公式，
         /// 提升可见性避免视觉尺寸与结算半径分叉（Decision D3）。数值不变，仍是 4f。</summary>
@@ -92,6 +119,9 @@ namespace GameLogic.MetabolicSlice.Combat
         public const float MeleeKnockbackPerBounce = 1.8f;
         /// <summary><see cref="HitEvent.Knockback"/> 字段本身 → 击退距离（org_pseudopod 的击退终于生效）。</summary>
         public const float MeleeKnockbackPerForce = 0.6f;
+        /// <summary>弹反后弹体的伤害倍率。挡下来还打不疼的话没人会去挡；
+        /// 1.5 让"顶着弹幕挥一刀"成为一个有回报的主动选择，而不是纯防御动作。</summary>
+        public const float MeleeDeflectDamageMul = 1.5f;
         /// <summary>只配了 Orbit 没配 Spin 时的默认旋风角速度（度/秒）。</summary>
         public const float MeleeSweepRateFromOrbit = 240f;
         /// <summary>连击/旋风的默认挥击窗口秒数。单刀无旋风时根本不建窗口，逐字退化成改动前的瞬时挥击。</summary>
@@ -129,6 +159,12 @@ namespace GameLogic.MetabolicSlice.Combat
         public const float SummonMusterRingRadius = 1.2f;
         /// <summary>Return（护卫型）时收紧的集结环半径——贴着你结阵，不往前压。</summary>
         public const float SummonGuardRingRadius = 2.2f;
+        /// <summary>召唤物死亡分裂：每次裂成几只。</summary>
+        public const int MinionSplitFanout = 2;
+        /// <summary>召唤物死亡分裂：代数硬上限。没有这个封顶，"死了就裂"会指数爆炸。</summary>
+        public const int MinionSplitMaxGenerations = 2;
+        /// <summary>下一代的体型/生命缩放系数（速度反向按 2−该值 放大：小的跑得快）。</summary>
+        public const float MinionSplitScale = 0.6f;
 
         // ── 光环：贴身圈此前吃不下 Count/Explode/Pierce/Bounce/Split ──
 
@@ -220,7 +256,7 @@ namespace GameLogic.MetabolicSlice.Combat
         }
 
         /// <summary>story-002：Linger 留坑的最小 ephemeral 状态——命中点持续按 TickRate（或默认间隔）
-        /// 周期性结算范围伤害，直到秒数耗尽，不受 <see cref="TickInterval"/> 节流。</summary>
+        /// 周期性结算范围伤害，直到秒数耗尽，不受开火节奏（<see cref="CurrentAttackInterval"/>）节流。</summary>
         private struct PendingLinger
         {
             public float2 Position;
@@ -308,6 +344,8 @@ namespace GameLogic.MetabolicSlice.Combat
             public bool FinalReverse;
             /// <summary>GrowthRate 在近战上的读法：刀风随挥击越扫越大（触及每秒 +N）。</summary>
             public float ReachGrowth;
+            /// <summary>这一刀是否同时格挡（Bounce → 弹反）。旋风期间等于持续格挡面。</summary>
+            public bool Deflect;
         }
 
         /// <summary>
@@ -337,6 +375,30 @@ namespace GameLogic.MetabolicSlice.Combat
         private readonly List<PendingRhythm> _pendingRhythm = new List<PendingRhythm>();
         private readonly List<PendingSwing> _pendingSwing = new List<PendingSwing>();
         private readonly List<LifestealClaim> _lifestealClaims = new List<LifestealClaim>();
+
+        /// <summary>
+        /// enemy-ranged-and-parry：召唤物的分裂预算，按小弟的 LogicId 索引。
+        ///
+        /// <c>SplitOnHit</c> 在召唤底盘的读法是「**死了会裂开**」——弹道上"命中裂成小弹"，
+        /// 召唤上就是"这只小弟死的时候分成两只更小的"。要落地就必须知道
+        /// "哪只小弟带着分裂"以及"还能裂几代"，所以需要这张表：内核只回报 DeathEvent，
+        /// 它不认识"分裂预算"这种玩法概念。
+        /// 数量恒被 MinionCap 卡在个位数，Dictionary 开销可忽略。
+        /// </summary>
+        private readonly Dictionary<int, MinionSplitBudget> _minionSplitBudget =
+            new Dictionary<int, MinionSplitBudget>();
+
+        private struct MinionSplitBudget
+        {
+            /// <summary>还能再裂几代。归 0 后这一支到此为止。</summary>
+            public int Generations;
+            /// <summary>每次裂成几只。</summary>
+            public int Fanout;
+            public int ArchetypeId;
+            public float Speed;
+            public float Health;
+            public float Radius;
+        }
         private float _timer;
         private int _seed;
         private float _playerShield;
@@ -416,6 +478,13 @@ namespace GameLogic.MetabolicSlice.Combat
         /// <summary>本局累计因 Weave 连出的桥接小坑数。</summary>
         public int WeaveBridgesSpawned { get; private set; }
 
+        /// <summary>本局累计弹反回去的敌方弹体数。</summary>
+        public int DeflectedProjectiles { get; private set; }
+        /// <summary>最近一次挥击弹反了几发。</summary>
+        public int LastDeflectedCount { get; private set; }
+        /// <summary>本局累计因召唤物死亡而裂出的下一代数量。</summary>
+        public int MinionSplitSpawned { get; private set; }
+
         /// <summary>最近一次开火首发的**完整**弹体发射参数。逐字段验收用——
         /// 单挑几个字段做探针会漏掉（Radius/Weave/Pierce/Flags 这些同样是基因改出来的差异）。</summary>
         public BinGames.Sim.ProjectileRequest LastFiredRequest { get; private set; }
@@ -473,6 +542,9 @@ namespace GameLogic.MetabolicSlice.Combat
             }
             sb.Append("|M:").Append(_pendingMotion.Count);
             sb.Append("|C:").Append(_lifestealClaims.Count);
+            // 已登记分裂预算的小弟数。死亡分裂要等小弟真死了才看得见效果，
+            // 但"这批小弟带着分裂"本身就是一次真实的状态变化，必须计入指纹。
+            sb.Append("|B:").Append(_minionSplitBudget.Count);
 
             BinGames.Sim.ProjectileRequest q = LastFiredRequest;
             sb.Append("|P:").Append(LastFiredProjectileCount).Append(',')
@@ -501,7 +573,8 @@ namespace GameLogic.MetabolicSlice.Combat
               .Append(D(LastSummonRadius)).Append(',')
               .Append(D(LastDeployPos.x)).Append(',').Append(D(LastDeployPos.y)).Append(',')
               .Append(D(LifestealHealed)).Append(',')
-              .Append(LastKnockbackUnitsMoved).Append(',').Append(WeaveBridgesSpawned);
+              .Append(LastKnockbackUnitsMoved).Append(',').Append(WeaveBridgesSpawned).Append(',')
+              .Append(DeflectedProjectiles).Append(',').Append(MinionSplitSpawned);
             return sb.ToString();
         }
 
@@ -632,6 +705,10 @@ namespace GameLogic.MetabolicSlice.Combat
             LifestealHealed = 0f;
             WeaveBridgesSpawned = 0;
             LastKnockbackUnitsMoved = 0;
+            DeflectedProjectiles = 0;
+            LastDeflectedCount = 0;
+            MinionSplitSpawned = 0;
+            _minionSplitBudget.Clear();
 
             _sandboxRecentHits.Clear();
             _sandboxClock = 0f;
@@ -666,6 +743,7 @@ namespace GameLogic.MetabolicSlice.Combat
             TickPendingEcho(dt);
             TickPendingRhythm(dt);
             TickLifesteal(dt);
+            TickMinionSplit();
 
             if (Suppressed)
             {
@@ -679,7 +757,7 @@ namespace GameLogic.MetabolicSlice.Combat
             }
 
             _timer += dt;
-            if (_timer < TickInterval)
+            if (_timer < _attackInterval)
             {
                 return;
             }
@@ -692,10 +770,19 @@ namespace GameLogic.MetabolicSlice.Combat
             // 让链路里挂了地形反应 tag（如 org_perox 的 TagAttach("Fire")）的事件能真正撞上地形（Wet）。
             var events = _runner.TickCarrier(registry, reserve, _environment.State, _seed, ArenaCellId);
 
+            // 下一拍等多久，由**这一拍**装出来的武器决定：Speed 是倍率，快武器打得更密。
+            _attackInterval = ResolveAttackInterval(events);
+            // DPS 归一化：间隔缩短多少，每拍就削多少伤害。
+            // 只在这条真实开火路径上做——execute_code / smoke 直调 ApplyEvent 时数字保持原样，
+            // 否则所有既有断言的期望值都会莫名其妙地漂。
+            float cadenceMul = _attackInterval / LegacyAttackInterval;
+
             int consumed = 0;
             for (int i = 0; i < events.Count; i++)
             {
                 HitEvent evt = events[i];
+                evt.Damage *= cadenceMul;
+                evt.Trail *= cadenceMul;
                 DepositResidue(evt);
                 if (ApplyEvent(evt))
                 {
@@ -704,7 +791,32 @@ namespace GameLogic.MetabolicSlice.Combat
             }
             _environment.Tick(1);
 
-            TEngine.Log.Info($"[MetabolicSliceBridge] Tick 产出 {events.Count} 个 HitEvent，已应用 {consumed} 个");
+            TEngine.Log.Info($"[MetabolicSliceBridge] Tick 产出 {events.Count} 个 HitEvent，已应用 {consumed} 个"
+                + $"（间隔 {_attackInterval:0.00}s，伤害 ×{cadenceMul:0.00} 保持 DPS 中性）");
+        }
+
+        /// <summary>
+        /// 这一套装配该多久打一拍。
+        ///
+        /// <see cref="HitEvent.Speed"/> 是倍率（org_emitter=1.3 / org_drill=2.2 / gene_arc 更慢），
+        /// 在弹道上它是弹速，在这里同一个数也决定**出手频率**——快武器打得密而轻、
+        /// 重武器打得疏而重，两者 DPS 相同（伤害按间隔归一化，见调用处）。
+        /// 一次装配产出多条 HitEvent 时取最快的那条：手里有一件快武器，整体节奏就跟着它走。
+        /// </summary>
+        private static float ResolveAttackInterval(List<HitEvent> events)
+        {
+            float fastest = AttackIntervalMax;
+            for (int i = 0; i < events.Count; i++)
+            {
+                float speedMul = events[i].Speed > 0f ? math.clamp(events[i].Speed, 0.25f, 4f) : 1f;
+                float interval = math.clamp(AttackIntervalBase / speedMul,
+                    AttackIntervalMin, AttackIntervalMax);
+                if (interval < fastest)
+                {
+                    fastest = interval;
+                }
+            }
+            return events.Count > 0 ? fastest : AttackIntervalBase;
         }
 
         /// <summary>story-006（EMERGENCE §2）：5 类底盘的最小分类，只读 <see cref="HitEvent.AttackPattern"/>
@@ -888,7 +1000,7 @@ namespace GameLogic.MetabolicSlice.Combat
                     float u = (float)t / (FieldTrailDrops + 1);
                     SpawnLingerZone(math.lerp(origin, deployPos, u),
                         MathF.Max(radius * 0.4f, CombatBallistics.LingerMinRadius * 0.6f),
-                        TickInterval, evt.Trail, evt.TickRate, 0f, 0f,
+                        _attackInterval, evt.Trail, evt.TickRate, 0f, 0f,
                         growthRate: evt.GrowthRate);
                 }
             }
@@ -978,8 +1090,8 @@ namespace GameLogic.MetabolicSlice.Combat
             if (evt.Speed > 0f || evt.Lifetime > 0f || evt.GrowthRate > 0f)
             {
                 float sustain = evt.Lifetime > 0f
-                    ? math.clamp(evt.Lifetime, 0.2f, TickInterval)
-                    : TickInterval * 0.5f;
+                    ? math.clamp(evt.Lifetime, 0.2f, _attackInterval)
+                    : _attackInterval * 0.5f;
                 float beat = DefaultLingerTickInterval
                     / (evt.Speed > 0f ? math.clamp(evt.Speed, 0.25f, 4f) : 1f);
                 _pendingRhythm.Add(new PendingRhythm
@@ -1066,7 +1178,7 @@ namespace GameLogic.MetabolicSlice.Combat
             //    （同近战的处理），此前 Aura 分支只看 Linger，gene_pyro/gene_slime 挂上去全废。
             if (evt.Trail > 0f || evt.Linger > 0f)
             {
-                float seconds = evt.Linger > 0f ? evt.Linger : TickInterval;
+                float seconds = evt.Linger > 0f ? evt.Linger : _attackInterval;
                 float perTick = evt.Linger > 0f ? evt.Damage * 0.5f : evt.Trail;
                 SpawnLingerZone(center, MathF.Max(radius, CombatBallistics.LingerMinRadius), seconds,
                     perTick, evt.TickRate, evt.Chain, evt.Pull,
@@ -1153,9 +1265,14 @@ namespace GameLogic.MetabolicSlice.Combat
             _lastMeleeStrikeOrigins.Clear();
             _lastMeleeStrikeOrigins.Add(coneOrigin);
 
+            // Bounce 的第二重读法：**弹反**（gene_mirror 文案「近战则弹开敌人的弹」）。
+            // 与击退共用 Bounce 字段——同一个"把冲你来的东西打回去"的直觉，
+            // 对单位是推开，对弹体是打回去。
+            bool deflect = evt.Bounce > 0f;
+
             // 第一刀恒在本帧打完——探针与"单刀无旋风时逐字等于改动前"都依赖这一点。
             MeleeStrike(origin, dir, reach, halfAngle, evt.Damage,
-                evt.Chain, evt.Pull, knock, shotId);
+                evt.Chain, evt.Pull, knock, shotId, deflect);
 
             // ⑦ 连击 / 回砍 / 旋风摊开进挥击窗口。
             //    Count>1 = 同一次挥击打多下（满伤）；Return = 末刀反向补一刀；
@@ -1198,6 +1315,7 @@ namespace GameLogic.MetabolicSlice.Combat
                     ShotId = shotId,
                     FinalReverse = evt.Return,
                     ReachGrowth = evt.GrowthRate,
+                    Deflect = deflect,
                 });
             }
 
@@ -1217,7 +1335,7 @@ namespace GameLogic.MetabolicSlice.Combat
             if (evt.Trail > 0f || evt.Linger > 0f)
             {
                 // 近战没有飞行路径，Trail 与 Linger 在语义上合流成"挥完在脚下留一片"。
-                float seconds = evt.Linger > 0f ? evt.Linger : TickInterval;
+                float seconds = evt.Linger > 0f ? evt.Linger : _attackInterval;
                 float perTick = evt.Linger > 0f ? evt.Damage * 0.5f : evt.Trail;
                 SpawnLingerZone(coneOrigin, MathF.Max(reach * 0.6f, CombatBallistics.LingerMinRadius),
                     seconds, perTick, evt.TickRate, evt.Chain, evt.Pull,
@@ -1230,7 +1348,7 @@ namespace GameLogic.MetabolicSlice.Combat
         /// 挥击窗口里玩家还在移动，刀必须跟着人走，不能钉在开火那一帧的坐标上。
         /// </summary>
         private void MeleeStrike(float2 origin, float2 dir, float reach, float halfAngleDeg,
-            float damage, float chain, float pull, float knockback, int shotId)
+            float damage, float chain, float pull, float knockback, int shotId, bool deflect = false)
         {
             float2 coneOrigin = origin + dir * MeleeFrontOffset;
             int chainCount = chain > 0f ? Math.Max(0, (int)MathF.Round(chain)) : 0;
@@ -1238,6 +1356,26 @@ namespace GameLogic.MetabolicSlice.Combat
             _sim.DamageCone(coneOrigin, reach, dir, halfAngleDeg, damage,
                 BinGames.Sim.SimFaction.Hostile, chainCount: chainCount,
                 nearRadius: CombatBallistics.MeleeNearRadius, sourceLogicId: shotId);
+
+            if (deflect)
+            {
+                // enemy-ranged-and-parry：Bounce 在近战上的**第二重**读法——弹反。
+                // gene_mirror 的文案是「弹会反弹；**近战则弹开敌人的弹**」，一直只实现了前半句
+                // （而且此前根本没有敌方弹体可弹，见 DESIGN §前提）。挥击的扇形同时就是格挡面：
+                // 你得朝着弹飞来的方向挥，不是站着自动挡。
+                int n = _sim.DeflectProjectiles(coneOrigin, reach, dir, halfAngleDeg,
+                    shotId, MeleeDeflectDamageMul);
+                if (n > 0)
+                {
+                    DeflectedProjectiles += n;
+                    LastDeflectedCount = n;
+                    Signals.Publish(new ComposeChainSignal
+                    {
+                        Kind = "Parry", Position = coneOrigin, Direction = dir,
+                        Radius = reach, Duration = 0f,
+                    });
+                }
+            }
 
             if (pull > 0f)
             {
@@ -1412,7 +1550,7 @@ namespace GameLogic.MetabolicSlice.Combat
                         Damage = evt.Damage * RhythmDamageMul,
                         Interval = 1f / MathF.Max(0.05f, evt.RhythmRate),
                         NextBeat = 1f / MathF.Max(0.05f, evt.RhythmRate),
-                        TimeLeft = TickInterval,
+                        TimeLeft = _attackInterval,
                         Chain = evt.Chain,
                         Pull = evt.Pull,
                         FollowPlayer = true,
@@ -1552,7 +1690,7 @@ namespace GameLogic.MetabolicSlice.Combat
         }
 
         /// <summary>
-        /// story-003：每帧推进挂起的 Spin/Orbit 延迟命中（不受 <see cref="TickInterval"/> 节流，运动必须每帧可见）。
+        /// story-003：每帧推进挂起的 Spin/Orbit 延迟命中（不受开火节奏（<see cref="CurrentAttackInterval"/>）节流，运动必须每帧可见）。
         /// 到期条目按 <see cref="ComposeMotionMath.Offset"/> 算出真实采样点，回调与瞬时命中同一个
         /// <see cref="SimBridge.DamageArea"/> API，只是位置/时机不同。
         /// </summary>
@@ -1846,7 +1984,7 @@ namespace GameLogic.MetabolicSlice.Combat
             }
         }
 
-        /// <summary>story-002：Linger 留坑周期结算，独立于 <see cref="TickInterval"/>（DoT 不该被 1.5s 节流卡住）。
+        /// <summary>story-002：Linger 留坑周期结算，独立于开火节奏（<see cref="CurrentAttackInterval"/>）——DoT 不该被出手间隔卡住。
         /// chassis-native-primitives：追加 <see cref="PendingLinger.GrowthRate"/> —— 坑随时间外扩
         /// （gene_ripple「扩散波」文案「波/圈会随时间越扩越大，不是一下子变大」的字面实现）。</summary>
         private void TickPendingLinger(float dt)
@@ -1985,7 +2123,7 @@ namespace GameLogic.MetabolicSlice.Combat
                     float damage = reverse ? s.Damage * MeleeReturnDamageMul
                         : (full ? s.Damage : s.SweepDamage);
                     MeleeStrike(origin, dir, s.Reach, s.HalfAngleDeg, damage,
-                        s.Chain, s.Pull, s.Knockback, s.ShotId);
+                        s.Chain, s.Pull, s.Knockback, s.ShotId, s.Deflect);
                     s.NextStrike = s.Interval;
                 }
 
@@ -2053,6 +2191,87 @@ namespace GameLogic.MetabolicSlice.Combat
             return new float2(v.x * cs - v.y * sn, v.x * sn + v.y * cs);
         }
 
+        /// <summary>
+        /// enemy-ranged-and-parry：召唤物死亡分裂。
+        ///
+        /// 从内核回传的死亡事件里认领**自己登记过分裂预算**的小弟，就地裂出更小的下一代。
+        /// 下一代按 <see cref="MinionSplitScale"/> 缩小/减弱，代数由预算封顶——
+        /// 没有这个封顶，"死了就裂"是会指数爆炸的。
+        ///
+        /// 预算表为空时整个方法第一行返回，静默期零成本。
+        /// </summary>
+        private void TickMinionSplit()
+        {
+            if (_minionSplitBudget.Count == 0 || _sim == null || !_sim.Running || _sim.World == null)
+            {
+                return;
+            }
+
+            BinGames.Sim.SimSnapshot snap = _sim.Snapshot;
+            int n = snap.Deaths.IsCreated ? snap.DeathCount : 0;
+            for (int i = 0; i < n; i++)
+            {
+                BinGames.Sim.DeathEvent d = snap.Deaths[i];
+                if (d.Faction != BinGames.Sim.SimFaction.PlayerMinion)
+                {
+                    continue;
+                }
+                if (!_minionSplitBudget.TryGetValue(d.LogicId, out MinionSplitBudget budget))
+                {
+                    continue;
+                }
+                _minionSplitBudget.Remove(d.LogicId);
+                if (budget.Generations <= 0)
+                {
+                    continue;
+                }
+
+                float childHealth = MathF.Max(1f, budget.Health * MinionSplitScale);
+                float childRadius = MathF.Max(0.15f, budget.Radius * MinionSplitScale);
+                // 更小的孩子跑得更快——读起来像"炸成一群小的散开"，而不是"原地复制两份"。
+                float childSpeed = budget.Speed * (2f - MinionSplitScale);
+
+                for (int c = 0; c < budget.Fanout; c++)
+                {
+                    float angle = 2f * math.PI * c / budget.Fanout;
+                    int childLogicId = _sim.NextLogicId();
+                    _sim.Spawn(new BinGames.Sim.SpawnRequest
+                    {
+                        Position = d.Position + new float2(math.cos(angle), math.sin(angle))
+                            * (childRadius + 0.3f),
+                        Velocity = float2.zero,
+                        Health = childHealth,
+                        Radius = childRadius,
+                        MaxSpeed = childSpeed,
+                        ArchetypeId = budget.ArchetypeId,
+                        Faction = BinGames.Sim.SimFaction.PlayerMinion,
+                        LogicId = childLogicId,
+                        VisualId = budget.ArchetypeId,
+                    });
+                    MinionSplitSpawned++;
+
+                    if (budget.Generations > 1)
+                    {
+                        _minionSplitBudget[childLogicId] = new MinionSplitBudget
+                        {
+                            Generations = budget.Generations - 1,
+                            Fanout = budget.Fanout,
+                            ArchetypeId = budget.ArchetypeId,
+                            Speed = childSpeed,
+                            Health = childHealth,
+                            Radius = childRadius,
+                        };
+                    }
+                }
+
+                Signals.Publish(new ComposeChainSignal
+                {
+                    Kind = "MinionSplit", Position = d.Position, Direction = new float2(0f, 1f),
+                    Radius = childRadius * 2f, Duration = 0f,
+                });
+            }
+        }
+
         /// <summary>story-002：召唤——经现有 Minion 管线（<see cref="MinionRegistry"/> 配额 + <see cref="SimBridge.Spawn"/>），
         /// 与 <see cref="GameLogic.Ability.Executors.EffectSpawn"/> 同一生成方式，不新增 Sim 公共方法签名。</summary>
         private bool ApplySummon(HitEvent evt)
@@ -2066,10 +2285,7 @@ namespace GameLogic.MetabolicSlice.Combat
             // 这是召唤流此前完全缺失的入口——42 条基因里没有任何一条能写 SummonCount，
             // 所以"多召唤一个"在整个游戏里做不到。Count 默认值是 1，故减掉那一份基数。
             int extra = Math.Max(0, (int)MathF.Round(evt.Count) - 1);
-            // SplitOnHit 分裂 → **增殖**：会分裂的孢子直接多长几个。
-            // 「命中裂成小弹」在召唤底盘的同直觉读法就是「一窝多几只」。
-            int splitExtra = evt.SplitOnHit > 0f ? Math.Max(0, (int)MathF.Round(evt.SplitOnHit)) : 0;
-            int requested = Math.Max(1, (int)MathF.Round(evt.SummonCount) + extra + splitExtra);
+            int requested = Math.Max(1, (int)MathF.Round(evt.SummonCount) + extra);
             MinionRegistry minions = Hub?.Get<MinionRegistry>();
             int cap = (int)(_stats?.Get(StatId.MinionCap) ?? requested);
             int granted = minions != null ? minions.Reserve(requested, cap) : requested;
@@ -2154,6 +2370,8 @@ namespace GameLogic.MetabolicSlice.Combat
                     spawnPos = math.lerp(spawnPos, homingTarget.Value, evt.Homing * 0.5f);
                 }
                 spawned.Add(spawnPos);
+                int logicId = _sim.NextLogicId();
+                float minionSpeed = summonSpeed * (1f + math.saturate(evt.Homing) * 0.5f);
                 _sim.Spawn(new BinGames.Sim.SpawnRequest
                 {
                     Position = spawnPos,
@@ -2161,12 +2379,28 @@ namespace GameLogic.MetabolicSlice.Combat
                     Health = summonHealth,
                     Radius = summonRadius,
                     // Homing 在召唤底盘的另一半读法：追踪强度 → 小弟更主动（跑得更急）。
-                    MaxSpeed = summonSpeed * (1f + math.saturate(evt.Homing) * 0.5f),
+                    MaxSpeed = minionSpeed,
                     ArchetypeId = evt.SummonId,
                     Faction = BinGames.Sim.SimFaction.PlayerMinion,
-                    LogicId = _sim.NextLogicId(),
+                    LogicId = logicId,
                     VisualId = evt.SummonId,
                 });
+
+                // SplitOnHit 分裂 → **死了会裂开**。登记这一只的分裂预算，
+                // 死亡事件回来时凭 LogicId 认领（见 TickMinionSplit）。
+                if (evt.SplitOnHit > 0f)
+                {
+                    _minionSplitBudget[logicId] = new MinionSplitBudget
+                    {
+                        Generations = Math.Min(MinionSplitMaxGenerations,
+                            Math.Max(1, (int)MathF.Round(evt.SplitOnHit))),
+                        Fanout = MinionSplitFanout,
+                        ArchetypeId = evt.SummonId,
+                        Speed = minionSpeed,
+                        Health = summonHealth,
+                        Radius = summonRadius,
+                    };
+                }
             }
 
             // Bounce 反弹 → **落地冲击**：小弟出场时把周围的敌人弹开，给它们腾出站位。
@@ -2192,7 +2426,7 @@ namespace GameLogic.MetabolicSlice.Combat
             if (evt.Linger > 0f || evt.Trail > 0f)
             {
                 bool hasLinger = evt.Linger > 0f;
-                float zoneSeconds = hasLinger ? evt.Linger : TickInterval;
+                float zoneSeconds = hasLinger ? evt.Linger : _attackInterval;
                 float zonePerTick = hasLinger ? evt.Damage * 0.5f : evt.Trail;
                 for (int s = 0; s < spawned.Count; s++)
                 {
@@ -2226,7 +2460,7 @@ namespace GameLogic.MetabolicSlice.Combat
             // 此前 Summon 分支根本不看 Linger，于是 gene_tide / 四条膜基因挂在 org_bud 上
             // 全部静默失效——毒系召唤这条 build 在实现层面根本不存在。
             bool hasLinger = evt.Linger > 0f;
-            float seconds = hasLinger ? evt.Linger : TickInterval;
+            float seconds = hasLinger ? evt.Linger : _attackInterval;
             float perTick = hasLinger ? evt.Damage * 0.5f : evt.Trail;
             float interval = evt.TickRate > 0f ? 1f / evt.TickRate : DefaultLingerTickInterval;
 

@@ -64,6 +64,12 @@ namespace BinGames.Sim
         private NativeList<DamageRequest> _damageScratch;
         private NativeArray<float> _playerDamage;
 
+        /// <summary>每个槽位最近一次发出死亡事件的帧号。用来做**同帧**去重，
+        /// 而不是拿 <c>_alive</c> 当判据——两个死亡生产者在入队前就已经把 Alive 置 0 了。
+        /// 帧号从 1 起，0 表示"从未发过"，因此不需要每帧清零。</summary>
+        private NativeArray<int> _deathEmitFrame;
+        private int _frameIndex;
+
         private SpatialHash _hash;
         private float _time;
 
@@ -111,6 +117,8 @@ namespace BinGames.Sim
             _deadQueue = new NativeQueue<int>(A);
             _damageScratch = new NativeList<DamageRequest>(256, A);
             _playerDamage = new NativeArray<float>(1, A);
+            _deathEmitFrame = new NativeArray<int>(cap, A);
+            _frameIndex = 0;
 
             _hash.Initialize(cap, cfg.HashCellSize, A);
             _archetypes = new NativeArray<BehaviorArchetype>(1, A);
@@ -251,6 +259,76 @@ namespace BinGames.Sim
             return moved;
         }
 
+        /// <summary>
+        /// enemy-ranged-and-parry：把范围（可选扇形）内**朝你飞来的**弹体打回去。
+        ///
+        /// 弹反做三件事：调头、换阵营、改归属。改归属是关键——
+        /// <see cref="ProjectileState.SourceLogicId"/> 换成 <paramref name="newSourceLogicId"/> 之后，
+        /// 弹回去打死人算**你**的击杀，热更层的 shot 元数据（留坑/吸血认领）也认得出这一发。
+        /// 顺带把伤害放大 <paramref name="damageMul"/> 倍——挡下来还打不疼的话没人会去挡。
+        ///
+        /// 只弹 <c>TargetFaction != 施法者阵营</c> 的弹体，也就是"冲我来的"那些；
+        /// 自己打出去的弹不会被自己的挥击弹回来。
+        ///
+        /// O(弹体容量) 单趟。调用方是"一次挥击"不是每帧。
+        /// </summary>
+        /// <param name="coneDir">扇形中轴；零向量表示整圆。</param>
+        /// <param name="coneCosHalf">扇形半角余弦，仅 <paramref name="coneDir"/> 非零时生效。</param>
+        /// <returns>实际弹回的弹体数。</returns>
+        public int DeflectProjectiles(float2 origin, float radius, float2 coneDir, float coneCosHalf,
+            SimFaction ownFaction, int newSourceLogicId, SimFaction newTargetFaction, float damageMul)
+        {
+            if (!_created || !_projectiles.IsCreated || radius <= 0f)
+            {
+                return 0;
+            }
+
+            bool useCone = math.lengthsq(coneDir) > 1e-6f;
+            float2 axis = useCone ? math.normalize(coneDir) : default;
+            float r2 = radius * radius;
+            int deflected = 0;
+
+            for (int p = 0; p < _projectiles.Length; p++)
+            {
+                ProjectileState s = _projectiles[p];
+                if (s.Alive == 0)
+                {
+                    continue;
+                }
+                // 只弹"冲我来的"：目标阵营是我自己的那些。
+                if ((SimFaction)s.TargetFaction != ownFaction)
+                {
+                    continue;
+                }
+
+                float2 delta = s.Position - origin;
+                float d2 = math.lengthsq(delta);
+                if (d2 > r2)
+                {
+                    continue;
+                }
+                if (useCone && d2 > 1e-6f
+                    && math.dot(delta * math.rsqrt(d2), axis) < coneCosHalf)
+                {
+                    continue;
+                }
+
+                s.Velocity = -s.Velocity;
+                s.TargetFaction = (byte)newTargetFaction;
+                s.SourceLogicId = newSourceLogicId;
+                s.Damage *= damageMul;
+                s.LastHitIndex = SimConst.InvalidIndex;
+                s.HitCooldown = 0f;
+                // 弹回去的弹重新获得一次命中机会，否则刚被打空穿透的弹弹回来也打不着人。
+                s.PierceLeft = math.max(1, s.PierceLeft);
+                // 追踪要重新校准到新阵营；原来的追踪参数照留（弹回去的毒刺依然会拐弯）。
+                _projectiles[p] = s;
+                deflected++;
+            }
+
+            return deflected;
+        }
+
         // ── 帧推进 ──
 
         public void Step(float dt, ref SimCommandBuffer cmds)
@@ -263,6 +341,7 @@ namespace BinGames.Sim
             // 夹住 dt：卡帧时不让单位瞬移穿过玩家
             dt = math.clamp(dt, 0f, 0.05f);
             _time += dt;
+            _frameIndex++;
 
             _pendingDeaths.Clear();
             _hitEvents.Clear();
@@ -366,6 +445,9 @@ namespace BinGames.Sim
             _maxSpeed[SimConst.PlayerIndex] = playerBaseSpeed;
 
             ResolveMinionCombat(dt);
+            // 敌人开火要在 JobProjectile 之前：本帧生成的弹体本帧就开始飞，
+            // 与命令缓冲里玩家发的弹同一时序。
+            ResolveHostileRangedCombat(dt);
 
             float2 playerPos = _position[SimConst.PlayerIndex];
             float playerRad = _radius[SimConst.PlayerIndex];
@@ -436,6 +518,7 @@ namespace BinGames.Sim
                     Alive = _alive,
                     PendingDeaths = _pendingDeaths,
                     HitEvents = _hitEvents,
+                    PlayerDamageOut = _playerDamage,
                     InvCellSize = _hash.InvCellSize,
                     Count = _unitCount,
                     MaxHitEvents = _cfg.MaxHitEventsPerFrame,
@@ -589,6 +672,121 @@ namespace BinGames.Sim
                     _attackTimer[i] = arc.AttackCooldown;
                 }
             }
+        }
+
+        /// <summary>敌人弹体的默认碰撞半径（原型未配 RangedRadius 时）。</summary>
+        private const float HostileProjectileRadius = 0.35f;
+        /// <summary>敌人弹体寿命 = 射程 / 速度 再留一点余量，让"擦着边缘飞过去"也成立。</summary>
+        private const float HostileProjectileLifetimeSlack = 1.25f;
+        /// <summary>敌人弹体的追踪角速度上限（度/秒）。刻意远低于玩家的 90+270×强度——
+        /// 敌人的弹必须躲得掉，否则"远程压力"就变成了"必中的税"。</summary>
+        private const float HostileHomingTurnRateDeg = 110f;
+        /// <summary>敌人弹体染色（RGBA8）。统一暖红，与玩家弹体的元素配色区分开——
+        /// 玩家必须一眼看出"这发是冲我来的"。</summary>
+        private const uint HostileProjectileTint = 0xFF5A3CFFu;
+
+        /// <summary>
+        /// enemy-ranged-and-parry：敌人的远程攻击结算。
+        ///
+        /// 在此之前敌人**只有接触伤害**——`BehaviorKind.Ranged` 只让它保持距离，从不发射任何东西，
+        /// 所谓"远程"是站在 AttackRange 外隐形扣血。现在填了 <see cref="BehaviorArchetype.RangedSpeed"/>
+        /// 的原型改发真弹体：看得见、躲得掉、能被打断、**能被弹反**。
+        ///
+        /// 与 <see cref="ResolveMinionCombat"/> 同样放主线程线性扫描：一帧一趟 O(UnitCount)，
+        /// 和已有的 <see cref="JobContactDamage"/> 同数量级，不值得为它单开一个 Burst job。
+        /// </summary>
+        private void ResolveHostileRangedCombat(float dt)
+        {
+            if (_alive[SimConst.PlayerIndex] == 0)
+            {
+                return;
+            }
+
+            float2 playerPos = _position[SimConst.PlayerIndex];
+
+            for (int i = SimConst.PlayerIndex + 1; i < _unitCount; i++)
+            {
+                if (_alive[i] == 0 || (SimFaction)_faction[i] != SimFaction.Hostile)
+                {
+                    continue;
+                }
+
+                int aid = _archetypeId[i];
+                if (aid < 0 || aid >= _archetypes.Length)
+                {
+                    continue;
+                }
+
+                BehaviorArchetype arc = _archetypes[aid];
+                if (arc.RangedSpeed <= 0f || arc.AttackDamage <= 0f)
+                {
+                    continue;
+                }
+
+                // 注意：这个计时器与 JobContactDamage 共用。但会发射弹体的原型已被那边跳过，
+                // 所以这里独占它，不存在"摸到你就把射击 CD 也重置了"的串扰。
+                if (_attackTimer[i] > 0f)
+                {
+                    _attackTimer[i] -= dt;
+                    continue;
+                }
+
+                float range = arc.AttackRange > 0f ? arc.AttackRange : arc.AggroRange;
+                if (range <= 0f)
+                {
+                    continue;
+                }
+
+                float2 to = playerPos - _position[i];
+                float dist = math.length(to);
+                if (dist > range || dist < 1e-4f)
+                {
+                    continue;
+                }
+
+                float2 aim = to / dist;
+                int shots = math.max(1, (int)math.round(arc.RangedCount));
+                float radius = arc.RangedRadius > 0f ? arc.RangedRadius : HostileProjectileRadius;
+                float lifetime = math.clamp(range / arc.RangedSpeed * HostileProjectileLifetimeSlack, 0.2f, 6f);
+                float homing = math.saturate(arc.RangedHoming);
+                float halfSpread = math.radians(arc.RangedSpreadDeg) * 0.5f;
+
+                for (int s = 0; s < shots; s++)
+                {
+                    // 以朝向玩家的方向为中轴左右均分；单发时就是正对着打。
+                    float t = shots > 1 ? (float)s / (shots - 1) : 0.5f;
+                    float2 dir = shots > 1 && halfSpread > 0f
+                        ? RotateRad(aim, math.lerp(-halfSpread, halfSpread, t))
+                        : aim;
+
+                    SpawnProjectile(new ProjectileRequest
+                    {
+                        Position = _position[i] + dir * (_radius[i] + radius + 0.1f),
+                        Direction = dir,
+                        Speed = arc.RangedSpeed,
+                        Damage = arc.AttackDamage,
+                        Radius = radius,
+                        Lifetime = lifetime,
+                        Pierce = 1,
+                        TargetFaction = SimFaction.Player,
+                        ApplyStatus = SimStatus.None,
+                        SourceLogicId = _logicId[i],
+                        VisualId = 0,
+                        Homing = homing,
+                        HomingRange = homing > 0f ? range : 0f,
+                        TurnRateDeg = homing > 0f ? HostileHomingTurnRateDeg : 0f,
+                        Tint = HostileProjectileTint,
+                    });
+                }
+
+                _attackTimer[i] = arc.AttackCooldown;
+            }
+        }
+
+        private static float2 RotateRad(float2 v, float rad)
+        {
+            math.sincos(rad, out float sn, out float cs);
+            return new float2(v.x * cs - v.y * sn, v.x * sn + v.y * cs);
         }
 
         private void ApplyCommands(ref SimCommandBuffer cmds)
@@ -780,12 +978,24 @@ namespace BinGames.Sim
         {
             // _pendingDeaths（JobDamage）与 _deadQueue（JobCollectDeaths 全量血量扫描）
             // 同一帧可能对同一 idx 各命中一次；后到者此时槽位已被前者 ReleaseSlot 回收
-            // （_alive=0、_position 已改写成越界哨兵值），必须在这里拦掉，否则会重复
-            // Publish 一次 LogicId=0 / Position 越界的 KillSignal（连带二次结算奖励与卡牌 OnKill）。
-            if (idx <= SimConst.PlayerIndex || idx >= _unitCount || _alive[idx] == 0)
+            // （_position 已改写成越界哨兵值），必须拦掉，否则会重复 Publish 一次
+            // LogicId=0 / Position 越界的 KillSignal（连带二次结算奖励与卡牌 OnKill）。
+            //
+            // enemy-ranged-and-parry 修：**这个去重判据原本写的是 `_alive[idx] == 0`，
+            // 而两个生产者在入队之前就已经把 `Alive[i]` 置 0 了**（见 JobDamage.TryDamage
+            // 与 JobCollectDeaths.Execute），于是它对每一次死亡都成立——
+            // 结果是 `DeathCount` 恒为 0，**整个游戏从来没有发出过一次死亡事件**：
+            // 击杀奖励、进化能、卡牌 OnKill、KillSignal 全都静默失效。
+            // 改用一个"本帧是否已发过"的时间戳，与 Alive 解耦。
+            if (idx <= SimConst.PlayerIndex || idx >= _unitCount)
             {
                 return;
             }
+            if (_deathEmitFrame[idx] == _frameIndex)
+            {
+                return;
+            }
+            _deathEmitFrame[idx] = _frameIndex;
             if (_deathCount < _deathEvents.Length)
             {
                 _deathEvents[_deathCount++] = new DeathEvent
@@ -864,7 +1074,7 @@ namespace BinGames.Sim
                 DevourCandidateCount = _devourCandidates.IsCreated ? _devourCandidates.Length : 0,
                 ProjectileEnds = _projectileEndEvents,
                 ProjectileEndCount = _projectileEndCount,
-                PlayerContactDamage = _playerDamage.IsCreated ? _playerDamage[0] : 0f,
+                PlayerDamageTaken = _playerDamage.IsCreated ? _playerDamage[0] : 0f,
                 PlayerPosition = _position[SimConst.PlayerIndex],
                 PlayerHealth = _health[SimConst.PlayerIndex],
                 PlayerRadius = _radius[SimConst.PlayerIndex],
@@ -883,6 +1093,7 @@ namespace BinGames.Sim
             Safe(ref _position); Safe(ref _velocity); Safe(ref _desiredDir); Safe(ref _separation);
             SafeF(ref _health); SafeF(ref _radius); SafeF(ref _maxSpeed); SafeF(ref _attackTimer);
             SafeI(ref _archetypeId); SafeI(ref _logicId); SafeI(ref _visualId);
+            SafeI(ref _deathEmitFrame);
             if (_status.IsCreated) { _status.Dispose(); }
             if (_faction.IsCreated) { _faction.Dispose(); }
             if (_alive.IsCreated) { _alive.Dispose(); }

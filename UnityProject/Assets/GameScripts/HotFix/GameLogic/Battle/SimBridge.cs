@@ -281,6 +281,24 @@ namespace GameLogic.Battle
             return _running && w != null ? w.ApplyKnockback(origin, radius, distance, targetFaction) : 0;
         }
 
+        /// <summary>
+        /// enemy-ranged-and-parry：弹反。把扇形内朝玩家飞来的敌方弹体打回去（调头 + 换阵营 + 归属玩家 + 加伤）。
+        ///
+        /// <paramref name="halfAngleDeg"/> &gt;= 180 或方向为零时退化为整圆，与
+        /// <see cref="DamageCone"/> 同一约定。返回实际弹回的弹体数。
+        /// </summary>
+        public int DeflectProjectiles(float2 origin, float radius, float2 coneDir, float halfAngleDeg,
+            int newSourceLogicId, float damageMul = 1.5f)
+        {
+            SimWorld w = World;
+            if (!_running || w == null) { return 0; }
+            bool full = halfAngleDeg >= 180f || math.lengthsq(coneDir) < 1e-6f;
+            return w.DeflectProjectiles(origin, radius,
+                full ? float2.zero : math.normalizesafe(coneDir),
+                full ? -1f : math.cos(math.radians(halfAngleDeg)),
+                SimFaction.Player, newSourceLogicId, SimFaction.Hostile, damageMul);
+        }
+
         /// <summary>combat-primitive-overhaul：本帧弹体终结事件条数（真实落点）。热更层放留坑/命中表现用。</summary>
         public int ProjectileEndCount => _running && _snapshot.ProjectileEnds.IsCreated ? _snapshot.ProjectileEndCount : 0;
 
@@ -321,7 +339,7 @@ namespace GameLogic.Battle
         public float PlayerHealth => _running ? _snapshot.PlayerHealth : 0f;
         public float PlayerRadius => _running ? _snapshot.PlayerRadius : 1f;
         /// <summary>本帧玩家受到的接触伤害。由 Resolution 阶段消费。</summary>
-        public float PlayerContactDamage => _running ? _snapshot.PlayerContactDamage : 0f;
+        public float PlayerDamageTaken => _running ? _snapshot.PlayerDamageTaken : 0f;
 
         public void SetPlayerStats(float maxHp, float currentHp, float radius, float speed)
         {

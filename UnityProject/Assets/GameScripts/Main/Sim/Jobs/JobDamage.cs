@@ -31,6 +31,17 @@ namespace BinGames.Sim
         public NativeList<int> PendingDeaths;
         public NativeList<HitEvent> HitEvents;
 
+        /// <summary>
+        /// enemy-ranged-and-parry：命中**玩家**的伤害累加到这里，而不是直接扣 <see cref="Health"/>[0]。
+        ///
+        /// 玩家掉血是有一整条自己的管线的（<c>CellDevourSystem</c> 里过 <c>DamageTaken</c> 减伤、
+        /// 记 <c>TotalDamageTaken</c>、发 <c>PlayerHurtSignal</c>）。如果在这里直接写 Health[0]，
+        /// 敌人的弹体伤害就会**绕过护甲、不发受伤反馈**，而且血量归零时会被
+        /// <c>JobCollectDeaths</c> 当成普通单位走死亡/回收槽位——玩家不该从那条路"死"。
+        /// 与 <see cref="JobContactDamage"/> 共用同一个累加槽位，两边都用 += 累加。
+        /// </summary>
+        public NativeArray<float> PlayerDamageOut;
+
         public float InvCellSize;
         public int Count;
         public int MaxHitEvents;
@@ -212,13 +223,34 @@ namespace BinGames.Sim
             if ((st & (uint)SimStatus.Vulnerable) != 0u) { final *= VulnerableMul; }
             if ((st & (uint)SimStatus.Hardened) != 0u) { final *= HardenedMul; }
 
-            float hp = Health[i] - final;
-            Health[i] = hp;
-
             if (req.ApplyStatus != SimStatus.None)
             {
                 Status[i] = st | (uint)req.ApplyStatus;
             }
+
+            // 玩家：只累加，不碰 Health/Alive/PendingDeaths（见 PlayerDamageOut 注释）。
+            if (i == SimConst.PlayerIndex)
+            {
+                PlayerDamageOut[0] = PlayerDamageOut[0] + final;
+                if (HitEvents.Length < MaxHitEvents)
+                {
+                    HitEvents.Add(new HitEvent
+                    {
+                        TargetLogicId = LogicId[i],
+                        SourceLogicId = req.SourceLogicId,
+                        Position = Position[i],
+                        Damage = final,
+                        Lethal = false,
+                        TargetIndex = i,
+                        RemainingHealth = Health[i] > 0f ? Health[i] : 0f,
+                    });
+                }
+                // 连锁不从玩家身上继续跳。
+                return -1;
+            }
+
+            float hp = Health[i] - final;
+            Health[i] = hp;
 
             bool lethal = hp <= 0f;
             if (lethal)
@@ -307,6 +339,13 @@ namespace BinGames.Sim
                         {
                             continue;
                         }
+                        if (arc.RangedSpeed > 0f)
+                        {
+                            // enemy-ranged-and-parry：会发射弹体的原型不再吃接触伤害。
+                            // 它们的 AttackRange 是**射程**（毒棘漂虫是 12 米），
+                            // 留着这条会变成"站在 12 米外隐形扣血"——那正是改成真弹体要修掉的东西。
+                            continue;
+                        }
                         if (AttackTimer[j] > 0f)
                         {
                             continue;
@@ -324,7 +363,8 @@ namespace BinGames.Sim
                 }
             }
 
-            PlayerDamageOut[0] = total;
+            // 累加而不是覆盖：同一帧里 JobDamage 已经可能写过（敌人弹体命中玩家）。
+            PlayerDamageOut[0] = PlayerDamageOut[0] + total;
         }
     }
 }

@@ -103,7 +103,7 @@ namespace GameLogic.Stage.CellStage
             }
 
             // 玩家受到的接触伤害结算
-            float contact = snap.PlayerContactDamage;
+            float contact = snap.PlayerDamageTaken;
             if (contact > 0f)
             {
                 float taken = contact * (_stats?.Get(StatId.DamageTaken) ?? 1f);
