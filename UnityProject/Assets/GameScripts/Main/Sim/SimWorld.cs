@@ -212,6 +212,45 @@ namespace BinGames.Sim
             if (_created) { _position[SimConst.PlayerIndex] = pos; }
         }
 
+        /// <summary>
+        /// chassis-native-primitives：把 <paramref name="origin"/> 半径内的目标沿背离方向推开。
+        ///
+        /// 在此之前 <c>HitEvent.Knockback</c> 只写日志——内核没有任何"位移某个单位"的公共入口，
+        /// 于是击退在整个游戏里不存在，近战被围住时没有任何解法。这里补的就是那个入口。
+        ///
+        /// 直接改 <c>_position</c> 而不是给速度加冲量：单位每帧由 <c>JobIntegrate</c> 按
+        /// desiredDir 重算速度，冲量会在下一帧被完全覆盖掉，只有位移是留得住的。
+        /// 结果夹回场地边界，避免把敌人推到墙外。
+        ///
+        /// 主线程 O(UnitCount) 单趟：调用方是"一次挥击"而不是"每帧"，且按仓库红线逐单位 O(N)
+        /// 本就只允许发生在 AOT 侧（热更层只发一次调用，不自己遍历敌人）。
+        /// </summary>
+        /// <returns>实际被推动的单位数。</returns>
+        public int ApplyKnockback(float2 origin, float radius, float distance, SimFaction target)
+        {
+            if (!_created || radius <= 0f || distance <= 0f) { return 0; }
+
+            float half = _cfg.ArenaHalfExtent;
+            float r2 = radius * radius;
+            int moved = 0;
+            for (int i = 0; i < _unitCount; i++)
+            {
+                if (i == SimConst.PlayerIndex || _alive[i] == 0) { continue; }
+                if (target != SimFaction.None && (SimFaction)_faction[i] != target) { continue; }
+
+                float2 delta = _position[i] - origin;
+                float d2 = math.lengthsq(delta);
+                if (d2 > r2) { continue; }
+
+                // 圆心处方向无定义，退化成"沿 +Y 推开"而不是产生 NaN。
+                float2 dir = d2 > 1e-6f ? delta * math.rsqrt(d2) : new float2(0f, 1f);
+                _position[i] = math.clamp(_position[i] + dir * distance,
+                    new float2(-half, -half), new float2(half, half));
+                moved++;
+            }
+            return moved;
+        }
+
         // ── 帧推进 ──
 
         public void Step(float dt, ref SimCommandBuffer cmds)

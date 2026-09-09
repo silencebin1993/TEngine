@@ -27,21 +27,22 @@ namespace GameLogic.MetabolicSlice.DebugTools
             var bridge = new MetabolicSliceBridge();
             bridge.Bind(sim, stats);
 
-            // combat-primitive-overhaul：Spin/Orbit 现在分底盘。弹道底盘（Projectile）上它的含义是
-            // "打出去的弹自己绕着飞"，落在内核弹体的蛇行参数上；只有**非弹道**底盘才是"绕着你转"，
+            // combat-primitive-overhaul：Spin/Orbit 分底盘。弹道底盘（Projectile）上它的含义是
+            // "打出去的弹自己绕着飞"，落在内核弹体的蛇行参数上；非弹道底盘才是"绕着你转"，
             // 走 _pendingMotion 环绕采样。文案「攻击绕圈飞/绕着你转」两种读法各归各位。
-            // 这里测的是后者，故必须显式给一个非 Projectile 的 AttackPattern。
+            // chassis-native-primitives：**近战**又从"绕着你转"里单独拆了出去（= 旋风横扫，
+            // 见 MotionAxesSmokeReport ⑤），所以这里改用场地底盘（Pool）测环绕采样这一支。
             if (!bridge.ApplyEvent(new HitEvent
             {
-                Damage = 10f, Scale = 1f, Count = 2f, Spin = 90f, Shape = "Melee",
-                AttackPattern = AttackPattern.Melee,
+                Damage = 10f, Scale = 1f, Count = 2f, Spin = 90f, Shape = "Field",
+                AttackPattern = AttackPattern.Pool,
             }))
             {
                 return (false, "① Spin 装配 ApplyEvent 返回 false");
             }
             if (bridge.PendingMotionCount != 2)
             {
-                return (false, $"① 非弹道底盘 Spin 应挂 2 个环绕采样（Count=2），实际 {bridge.PendingMotionCount}");
+                return (false, $"① 场地底盘 Spin 应挂 2 个环绕采样（Count=2），实际 {bridge.PendingMotionCount}");
             }
 
             // 对照：同一套 Spin 挂在弹道底盘上不进环绕采样（它变成会绕着飞的真弹体）。

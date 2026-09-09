@@ -266,6 +266,21 @@ namespace GameLogic.Battle
             });
         }
 
+        /// <summary>
+        /// chassis-native-primitives：把范围内的目标推开（击退）。
+        ///
+        /// 走内核 <see cref="SimWorld.ApplyKnockback"/> 立即结算，不经命令缓冲——位移不是伤害，
+        /// 没有"本帧结算顺序"的语义要求，而且调用方（一次挥击/一次命中）需要**当场**知道推动了几个。
+        /// 逐单位遍历发生在 AOT 侧，热更层这里只发一次调用，不违反"热更层每帧不得 O(敌人数)"。
+        /// </summary>
+        /// <returns>实际被推动的单位数（未运行时为 0）。</returns>
+        public int Knockback(float2 origin, float radius, float distance,
+            SimFaction targetFaction = SimFaction.Hostile)
+        {
+            SimWorld w = World;
+            return _running && w != null ? w.ApplyKnockback(origin, radius, distance, targetFaction) : 0;
+        }
+
         /// <summary>combat-primitive-overhaul：本帧弹体终结事件条数（真实落点）。热更层放留坑/命中表现用。</summary>
         public int ProjectileEndCount => _running && _snapshot.ProjectileEnds.IsCreated ? _snapshot.ProjectileEndCount : 0;
 
