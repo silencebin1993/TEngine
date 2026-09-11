@@ -1,5 +1,8 @@
 # 权威切换与冲突表（2026-08-11，2026-08-12 补丁：D7/D8 文案融合）
 
+> [!IMPORTANT]
+> **2026-09-11 产品权威边界补丁：** 本文件继续作为代谢化学、器官/基因内部组合语义和 ComposeEngine 的专项权威；游戏的产品循环、对象层级、获取与装配传播、RTS/意识传递、敌方进化、首领和胜负，以上级目录 [`Civilization_Weaving_GDD.md`](../Civilization_Weaving_GDD.md) 为准。下文指向的 `production/design` 文件仅在这些专项内部规则上可复用，不得覆盖新 GDD 的产品语义。实施迁移按 [`Civilization_Weaving_Milestones.md`](../Civilization_Weaving_Milestones.md) 执行。
+
 > **用途**：给总控 / Claude Code 短读。禁止为「对账」整本通读旧 §17 与本夹全部文件。  
 > **决策**：人要求先消双源，再实现新需求。  
 > **补丁（2026-08-12）**：`epic/metabolic-slice` 001～008 已 Done，产品化/玩家化后续工作转入 `epic/metabolic-playerization`（Decision 表 D1~D8，见 `production/epics/metabolic-playerization/EPIC.md`）。本文件的化学/代谢权威结论不变，仅补充：D3（新设计进池，旧词缀卡默认出池）+ D3b（`cell_tables` 已全表改代谢口径，story-005 完成）+ D8（老化学需求正式 Retired，非仅 Paused）。
