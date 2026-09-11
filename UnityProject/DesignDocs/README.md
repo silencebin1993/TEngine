@@ -4,9 +4,9 @@
 
 ## 当前产品权威
 
-1. [`Civilization_Weaving_GDD.md`](Civilization_Weaving_GDD.md)  
+1. [`ProjectA_GDD.md`](ProjectA_GDD.md)
    完整产品设计：核心循环、器官/基因/谱系、RTS、意识传递、敌方进化、首领、PCG、胜负、表现和范围。
-2. [`Civilization_Weaving_Milestones.md`](Civilization_Weaving_Milestones.md)  
+2. [`ProjectA_Milestones.md`](ProjectA_Milestones.md)
    AI 实施顺序、任务边界、依赖和验收。当前开发不得跳过里程碑门禁。
 
 ## 专项权威
@@ -35,5 +35,4 @@
 
 ## 当前开发入口
 
-完成文档迁移后，唯一下一项为 `Civilization_Weaving_Milestones.md` 的 **M1-01 玩家索引依赖审计**。在固定竖切片证明核心循环前，不继续扩充器官、敌人、随机地图或美术数量。
-
+完成文档迁移后，唯一下一项为 `ProjectA_Milestones.md` 的 **M1-01 玩家索引依赖审计**。在固定竖切片证明核心循环前，不继续扩充器官、敌人、随机地图或美术数量。

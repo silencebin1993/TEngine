@@ -1,7 +1,7 @@
 # 权威切换与冲突表（2026-08-11，2026-08-12 补丁：D7/D8 文案融合）
 
 > [!IMPORTANT]
-> **2026-09-11 产品权威边界补丁：** 本文件继续作为代谢化学、器官/基因内部组合语义和 ComposeEngine 的专项权威；游戏的产品循环、对象层级、获取与装配传播、RTS/意识传递、敌方进化、首领和胜负，以上级目录 [`Civilization_Weaving_GDD.md`](../Civilization_Weaving_GDD.md) 为准。下文指向的 `production/design` 文件仅在这些专项内部规则上可复用，不得覆盖新 GDD 的产品语义。实施迁移按 [`Civilization_Weaving_Milestones.md`](../Civilization_Weaving_Milestones.md) 执行。
+> **2026-09-11 产品权威边界补丁：** 本文件继续作为代谢化学、器官/基因内部组合语义和 ComposeEngine 的专项权威；游戏的产品循环、对象层级、获取与装配传播、RTS/意识传递、敌方进化、首领和胜负，以上级目录 [`ProjectA_GDD.md`](../ProjectA_GDD.md) 为准。下文指向的 `production/design` 文件仅在这些专项内部规则上可复用，不得覆盖新 GDD 的产品语义。实施迁移按 [`ProjectA_Milestones.md`](../ProjectA_Milestones.md) 执行。
 
 > **用途**：给总控 / Claude Code 短读。禁止为「对账」整本通读旧 §17 与本夹全部文件。  
 > **决策**：人要求先消双源，再实现新需求。  

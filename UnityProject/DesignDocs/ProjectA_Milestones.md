@@ -1,6 +1,6 @@
-# 《文明织造》AI 实施里程碑
+# 《ProjectA》AI 实施里程碑
 
-> 对应产品权威：`Civilization_Weaving_GDD.md`  
+> 对应产品权威：`ProjectA_GDD.md`  
 > 用途：供 AI 工作者逐项领取、实施、测试和交接  
 > 原则：先证明闭环，再扩内容；一项任务只解决一个可验收问题
 
@@ -15,7 +15,7 @@
 3. `production/PROGRESS.md` 的当前焦点；
 4. `DesignDocs/README.md`；
 5. 本文对应里程碑；
-6. `Civilization_Weaving_GDD.md` 中对应系统章节；
+6. `ProjectA_GDD.md` 中对应系统章节；
 7. 涉及代谢/ComposeEngine 时，再读 `最新改动需求/AUTHORITY_AND_CONFLICTS.md`。
 
 不得把 `production/design` 中旧 Epic 的产品假设自动带入当前任务。

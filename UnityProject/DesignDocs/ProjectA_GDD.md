@@ -1,4 +1,4 @@
-# 《文明织造》完整游戏设计案
+# 《ProjectA》完整游戏设计案
 
 > 版本：2.0（阶段一完成后的产品重构版）  
 > 状态：**当前产品设计最高权威**  
@@ -28,7 +28,7 @@
 发生冲突时按以下顺序执行：
 
 1. 本文：产品规则、玩法循环、内容范围与体验目标；
-2. `Civilization_Weaving_Milestones.md`：实施顺序、任务边界与验收；
+2. `ProjectA_Milestones.md`：实施顺序、任务边界与验收；
 3. `最新改动需求/AUTHORITY_AND_CONFLICTS.md`：代谢化学与 ComposeEngine 的局部规则；
 4. `Game_Framework_Design.md`：仍被保留的技术架构和性能边界；
 5. 其他 `DesignDocs` 与 `production/design`：仅作实现历史、素材库或迁移参考。

@@ -1,4 +1,4 @@
-# 文明织造 First Playable 开发规格
+# ProjectA First Playable 开发规格
 
 > 状态说明：本文档为旧版“三阶段 First Playable”历史规格。当前 Demo 方向已调整为“只做细胞阶段、一小时局内 roguelite、不进入器官/组织或生物阶段”。新规格见 `Cell_Stage_Demo_Spec.md`。
 

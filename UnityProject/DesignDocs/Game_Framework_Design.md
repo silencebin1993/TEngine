@@ -1,7 +1,7 @@
-# 《文明织造》正式游戏框架设计
+# 《ProjectA》正式游戏框架设计
 
 > [!WARNING]
-> **本文仅保留技术架构权威。** AOT SoA 模拟、Burst + Jobs、Built-in RP、HotFix 边界、模块与资源规范继续有效；旧六阶段产品流程、累计时间压力、固定玩家索引和面向“八阶段”的产品承诺，已由 [`Civilization_Weaving_GDD.md`](Civilization_Weaving_GDD.md) 与 [`Civilization_Weaving_Milestones.md`](Civilization_Weaving_Milestones.md) 取代。若技术章节隐含的产品假设与新 GDD 冲突，以新 GDD 为准并通过里程碑迁移，不得自行折中。
+> **本文仅保留技术架构权威。** AOT SoA 模拟、Burst + Jobs、Built-in RP、HotFix 边界、模块与资源规范继续有效；旧六阶段产品流程、累计时间压力、固定玩家索引和面向“八阶段”的产品承诺，已由 [`ProjectA_GDD.md`](ProjectA_GDD.md) 与 [`ProjectA_Milestones.md`](ProjectA_Milestones.md) 取代。若技术章节隐含的产品假设与新 GDD 冲突，以新 GDD 为准并通过里程碑迁移，不得自行折中。
 
 > 版本：v1.0
 > 创建日期：2026-08-04

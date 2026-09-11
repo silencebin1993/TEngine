@@ -1,7 +1,7 @@
-# 《文明织造》细胞阶段 正式设计规格
+# 《ProjectA》细胞阶段 正式设计规格
 
 > [!CAUTION]
-> **产品规格已于 2026-09-11 被取代。** 当前产品循环、对象模型、节奏、胜负和范围以 [`Civilization_Weaving_GDD.md`](Civilization_Weaving_GDD.md) 为准，实施顺序以 [`Civilization_Weaving_Milestones.md`](Civilization_Weaving_Milestones.md) 为准。本文保留作历史与迁移参考；其中“约 60 分钟六阶段、按时间施压、固定卡牌成长、旧原核霸主终局”等内容禁止继续作为当前需求。已实现资产和技术事实须在迁移任务中逐项判定保留、包装、迁移或退役。
+> **产品规格已于 2026-09-11 被取代。** 当前产品循环、对象模型、节奏、胜负和范围以 [`ProjectA_GDD.md`](ProjectA_GDD.md) 为准，实施顺序以 [`ProjectA_Milestones.md`](ProjectA_Milestones.md) 为准。本文保留作历史与迁移参考；其中“约 60 分钟六阶段、按时间施压、固定卡牌成长、旧原核霸主终局”等内容禁止继续作为当前需求。已实现资产和技术事实须在迁移任务中逐项判定保留、包装、迁移或退役。
 
 > 版本：v1.0（正式生产版，非 Demo）
 > 创建日期：2026-08-04

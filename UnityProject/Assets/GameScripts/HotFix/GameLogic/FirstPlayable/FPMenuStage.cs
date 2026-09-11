@@ -31,7 +31,7 @@ namespace GameLogic.FirstPlayable
             FPUIKit.Panel(_canvas.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
                 Vector2.zero, new Vector2(1920f, 1080f), new Color(0.05f, 0.06f, 0.08f, 1f));
 
-            FPUIKit.Label(_canvas.transform, "文明织造", 92, new Color(0.55f, 0.9f, 1f),
+            FPUIKit.Label(_canvas.transform, "ProjectA", 92, new Color(0.55f, 0.9f, 1f),
                 new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -110f),
                 new Vector2(1200f, 120f), TextAnchor.MiddleCenter);
 
