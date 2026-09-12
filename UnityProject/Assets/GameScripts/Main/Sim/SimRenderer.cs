@@ -38,6 +38,7 @@ namespace BinGames.Sim
         /// <summary>combat-primitive-presentation story-004（COMBAT-PRESENTATION §4）：近战整体前冲的
         /// 最大位移距离（世界单位）。纯表现位移，不改 <see cref="SimSnapshot.PlayerPosition"/>/碰撞判定。</summary>
         private const float PlayerLungeDistance = 0.6f;
+        private const float ControlledScalePulse = 0.08f;
 
         private SimVisual[] _visuals;
         private Matrix4x4[][] _matrices;
@@ -150,13 +151,26 @@ namespace BinGames.Sim
                     // combat-primitive-presentation story-004：纯渲染位移，不写回 Position，不影响碰撞/寻路。
                     p += _playerLungeDir * (PlayerLungeDistance * _playerLungeAmount);
                 }
+                bool isControlled = i == controlledIndex;
+                float controlPulse = isControlled
+                    ? 0.5f + 0.5f * Mathf.Sin(Time.time * 5f)
+                    : 0f;
                 float s = snap.Radius[i] * 2f * _visuals[v].ScaleMul;
+                if (isControlled)
+                {
+                    s *= 1f + ControlledScalePulse * controlPulse;
+                }
                 _matrices[v][c] = Matrix4x4.TRS(
                     new Vector3(p.x, _yPlane, p.y),
                     Quaternion.identity,
                     new Vector3(s, s, s));
 
-                _colors[v][c] = Tint(_visuals[v].BaseColor, snap.Status[i], Time.time);
+                Color tint = Tint(_visuals[v].BaseColor, snap.Status[i], Time.time);
+                if (isControlled)
+                {
+                    tint = Color.Lerp(tint, new Color(0.35f, 1f, 1f, 1f), 0.35f + controlPulse * 0.2f);
+                }
+                _colors[v][c] = tint;
                 _motions[v][c] = PackMotion(snap.Velocity[i]);
                 _impacts[v][c] = PackImpact(i);
                 _counts[v] = c + 1;

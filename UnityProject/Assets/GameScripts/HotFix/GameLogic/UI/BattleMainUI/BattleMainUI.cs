@@ -106,7 +106,14 @@ namespace GameLogic
             bool hasControlled = cell.Sim != null &&
                 cell.Sim.TryGetControlledPresentation(out controlled);
             string healthText = hasControlled ? $"{controlled.Health:F0}/{maxHp:F0}" : "--（无控制目标）";
-            _text_HpVolume.text = $"生命 {healthText}　体积 {st.Get(StatId.Volume):F2}";
+            // Suspended（记录还在、目标暂时解析不到）不是丢失：重进场景后单位还没生成完的
+            // 那几帧就是这个状态，直接报"丢失"会闪一次假警报。
+            string controlText = hasControlled
+                ? $"控制 #{controlled.EntityId.Value}（Tab 切换）"
+                : cell.Sim != null && cell.Sim.Availability == ControlAvailability.Suspended
+                    ? "信号重连中…"
+                    : "控制目标丢失";
+            _text_HpVolume.text = $"生命 {healthText}　体积 {st.Get(StatId.Volume):F2}　{controlText}";
 
             ProgressionModule prog = cell.Progression;
             _text_LevelEvo.text =

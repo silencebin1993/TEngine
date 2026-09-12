@@ -330,7 +330,18 @@ namespace GameLogic
 
             RefreshPollution(cell, st);
 
-            _metaStats.text = $"卡牌 {cell.Deck.TotalCards}　连吃 {cell.Devour.Combo}";
+            string controlText = hasControlled
+                ? $"控制 #{controlled.EntityId.Value} · Tab 切换"
+                : DescribeNoControl(cell.Sim);
+            CellPlayerController player = cell.PlayerController;
+            if (player != null && player.ControlSwitchFeedbackRemaining > 0f)
+            {
+                controlText = player.LastControlChangeReason == ControlChangeReason.PlayerRequest
+                    ? DescribeControlSwitch(player.LastControlSwitchResult,
+                        player.LastControlCandidateCount, controlled.EntityId)
+                    : DescribeControlChange(player.LastControlChangeReason, player.LastControlChangeUnitId);
+            }
+            _metaStats.text = $"卡牌 {cell.Deck.TotalCards}　连吃 {cell.Devour.Combo}　{controlText}";
             _threatBlock.text =
                 $"敌人 {cell.Director.LiveHostiles}　压力 {cell.Director.CurrentPressure:F0}/{cell.Director.Budget:F0}";
 
@@ -340,6 +351,58 @@ namespace GameLogic
             RefreshStatuses(cell);
             RefreshSkillSlots(cell);
             RefreshAxisTouchAndChain(cell);
+        }
+
+        private static string DescribeControlSwitch(ControlRequestResult result, int candidateCount,
+            SimEntityId current)
+        {
+            switch (result)
+            {
+                case ControlRequestResult.Success:
+                    return $"已切换至 #{current.Value} · 可选 {candidateCount}";
+                case ControlRequestResult.CooldownActive:
+                    return "切换冷却中";
+                case ControlRequestResult.OutOfSignalRange:
+                    return "目标超出信号范围";
+                case ControlRequestResult.TargetDead:
+                    return "目标已死亡";
+                case ControlRequestResult.TargetNotFriendly:
+                    return "只能控制友军";
+                case ControlRequestResult.CurrentUnitUnavailable:
+                    return "当前控制目标不可用";
+                default:
+                    return "范围内没有可切换友军";
+            }
+        }
+
+        /// <summary>
+        /// M1-06：非玩家发起的控制权变更播报。死亡回弹和主动换人在玩家感受上完全不是一回事，
+        /// 共用一套"已切换至"的文案会让人以为是自己按错了键。
+        /// </summary>
+        private static string DescribeControlChange(ControlChangeReason reason, SimEntityId current)
+        {
+            switch (reason)
+            {
+                case ControlChangeReason.ControlledDeath:
+                    return current.IsValid ? $"意识回弹至 #{current.Value}" : "意识无处可去";
+                case ControlChangeReason.ControlledRemoved:
+                    return current.IsValid ? $"载体消失 · 转入 #{current.Value}" : "载体消失 · 失去载体";
+                case ControlChangeReason.Restored:
+                    return current.IsValid ? $"意识已恢复 · #{current.Value}" : "意识恢复失败";
+                default:
+                    return current.IsValid ? $"控制 #{current.Value} · Tab 切换" : "控制目标丢失";
+            }
+        }
+
+        /// <summary>
+        /// 没有受控实体时的状态文案。Suspended（记录还在、目标暂时解析不到）不是丢失——
+        /// 重进场景后单位还没生成完的那几帧就是这个状态，报"丢失"会闪一次假警报。
+        /// </summary>
+        private static string DescribeNoControl(SimBridge sim)
+        {
+            return sim != null && sim.Availability == ControlAvailability.Suspended
+                ? "信号重连中…"
+                : "控制目标丢失";
         }
 
         /// <summary>

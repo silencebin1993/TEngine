@@ -43,6 +43,18 @@ namespace BinGames.Sim
         /// <summary>把玩家控制权切到一个存活友军。失败不改变当前状态。</summary>
         ControlSwitchResult TrySwitchControlledUnit(SimEntityId entityId);
 
+        /// <summary>读档 / 重进场景后的控制权恢复。校验同切换，但不受桥接层的冷却与范围约束。</summary>
+        ControlSwitchResult TryRestoreControlledUnit(SimEntityId entityId);
+
+        /// <summary>意识回弹的最大距离。桥接层用信号范围写入，非正值表示不限距离。</summary>
+        float ControlFallbackRange { get; set; }
+
+        /// <summary>最后一个有效受控实体的位置；无控制实体时表现层的战略回退视角取这里。</summary>
+        bool TryGetControlFallbackAnchor(out Unity.Mathematics.float2 anchor);
+
+        /// <summary>取出一条待处理的控制权变更（FIFO）。消费即出队，同一条只会被发布一次。</summary>
+        bool TryConsumeControlChange(out ControlChangeEvent change);
+
         void Dispose();
     }
 }

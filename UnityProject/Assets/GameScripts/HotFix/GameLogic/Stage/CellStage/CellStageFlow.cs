@@ -147,6 +147,7 @@ namespace GameLogic.Stage.CellStage
         public EcoEventScheduler Events => _events;
         public AbilitySystem Abilities => _abilities;
         public CellDevourSystem Devour => _devour;
+        public CellPlayerController PlayerController => _player;
         public BossPhaseController BossPhase => _bossPhase;
         public ShopSystem Shop => _shop;
         public CodexRegistry Codex => _codex;
@@ -379,6 +380,14 @@ namespace GameLogic.Stage.CellStage
                 _stats.Get(StatId.MaxHealth),
                 _stats.Get(StatId.Volume),
                 _stats.Get(StatId.MoveSpeed));
+            SpawnControlAllies();
+
+            // M1-06：重进场景 / 读档后把意识放回上次那具躯体。
+            // 目标单位要等下一次 Step 才真正落地，所以这不是一次性成败——
+            // RequestControlRestore 会在宽限期内每帧重试，期间控制状态是 Suspended 而不是丢失。
+            // 存档里没有记录（首次游玩、旧版本存档、读盘失败）时它直接返回 false，
+            // 世界保留自带的默认受控实体，不需要额外分支。
+            _sim.RequestControlRestore(ControlPersistence.Load());
 
             // 轻障碍（story-009）：数据驱动随机布局，白模一次性生成。
             ObstacleSpec[] obstacles = ObstacleGenerator.Generate(cfg.ArenaHalfExtent);
@@ -398,6 +407,40 @@ namespace GameLogic.Stage.CellStage
                 ProjectileMaterial(),
                 1.8f,
                 new Color(1f, 0.95f, 0.35f, 1f));
+        }
+
+        /// <summary>
+        /// M1 固定房间的两名真实友军。复用现有孢子/菌丝体召唤原型，未受控时继续执行
+        /// PlayerMinion AI；与默认本体合计三名可控单位，出生点均在临时信号范围内。
+        /// </summary>
+        private void SpawnControlAllies()
+        {
+            float health = _stats.Get(StatId.MaxHealth);
+            float speed = _stats.Get(StatId.MoveSpeed);
+            _sim.Spawn(new SpawnRequest
+            {
+                Position = new Unity.Mathematics.float2(-4f, 2f),
+                Health = health,
+                Radius = 0.8f,
+                MaxSpeed = speed,
+                ArchetypeId = 13,
+                Faction = SimFaction.PlayerMinion,
+                IntentSource = IntentSource.AI,
+                LogicId = _sim.NextLogicId(),
+                VisualId = 13,
+            });
+            _sim.Spawn(new SpawnRequest
+            {
+                Position = new Unity.Mathematics.float2(4f, 2f),
+                Health = health,
+                Radius = 0.8f,
+                MaxSpeed = speed,
+                ArchetypeId = 15,
+                Faction = SimFaction.PlayerMinion,
+                IntentSource = IntentSource.AI,
+                LogicId = _sim.NextLogicId(),
+                VisualId = 15,
+            });
         }
 
         /// <summary>
@@ -1476,6 +1519,17 @@ namespace GameLogic.Stage.CellStage
 
         private void CheckEnd()
         {
+            // M1-06：PlayerHealth 读的是**当前受控实体**的血量，没有受控实体时恒为 0。
+            // 死亡回弹成功时它会变成新载体的血量，本局照常继续；回弹失败（意识无处可去）
+            // 才落到 0 判死——这正是想要的语义，不需要额外分支。
+            //
+            // 唯一要挡的是 Suspended：恢复请求还挂着、目标尚未 Spawn 完的那几帧同样读到 0，
+            // 那不是死亡，是还没接上。不挡这一条，任何一次读档恢复都会立刻误判成本局结束。
+            if (_sim.Availability == ControlAvailability.Suspended)
+            {
+                return;
+            }
+
             if (_sim.PlayerHealth <= 0f)
             {
                 _deathCause = ResolveDeathCause();
@@ -1510,6 +1564,11 @@ namespace GameLogic.Stage.CellStage
 
             _hub.Exit();
             _hub.Dispose();
+
+            // M1-06：本局唯一一次控制记忆落盘。必须在 _hub.Exit() 之后——
+            // SimBridge.End() 会在内核 Dispose 前把控制状态抄进托管侧，这里读到的才是完整的那一份。
+            // 与生涯统计同一条 Reject-to-Safe 纪律：Save 永不 throw，存档异常不阻塞退出流程。
+            ControlPersistence.Save(_sim.CurrentHandoff);
 
             _controlPresentationScope?.Dispose();
             _controlPresentationScope = null;

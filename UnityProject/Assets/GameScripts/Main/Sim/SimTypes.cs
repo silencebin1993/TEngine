@@ -67,6 +67,54 @@ namespace BinGames.Sim
         CurrentUnitUnavailable = 9,
     }
 
+    /// <summary>
+    /// 控制权为什么变了。热更层据此区分"玩家按键换人"和"死亡后意识自动回弹"，
+    /// 两者的提示文案、镜头行为与音效都不一样，不能混成一条事件。
+    /// </summary>
+    public enum ControlChangeReason : byte
+    {
+        None = 0,
+        /// <summary>玩家显式请求（M1-04 的 RequestControlSwitch 路径）。</summary>
+        PlayerRequest = 1,
+        /// <summary>受控实体死亡触发的自动回弹。Current 可能为 None（无可回弹目标）。</summary>
+        ControlledDeath = 2,
+        /// <summary>受控实体被卸载 / 主动移除（非战斗死亡）。</summary>
+        ControlledRemoved = 3,
+        /// <summary>读档或重进场景后的控制权恢复。</summary>
+        Restored = 4,
+    }
+
+    /// <summary>
+    /// 内核产生的一次控制权变更记录。
+    ///
+    /// 内核不能直接发热更层事件（AOT 不认识 <c>Signals</c>），所以把变更挂在快照上，
+    /// 由 <c>SimBridge</c> 每帧消费一次再转成信号。这样"死亡回弹"也只会发布一次事件，
+    /// 与 M1-04「合法切换只产生一次事件」的验收保持同一条路径。
+    /// </summary>
+    public struct ControlChangeEvent
+    {
+        public SimEntityId PreviousUnitId;
+        public SimEntityId CurrentUnitId;
+        public ControlChangeReason Reason;
+        /// <summary>变更瞬间的战略回退锚点——旧受控实体最后的有效位置。
+        /// 回弹失败（Current = None）时，表现层靠它保持视角不丢。</summary>
+        public float2 FallbackAnchor;
+    }
+
+    /// <summary>
+    /// 桥接层对外的控制可用性。区分"确实没有"和"暂时解析不到"——
+    /// 场景刚重进、单位尚未生成完的那几帧不能当成控制丢失，否则 UI 会闪一次假报警。
+    /// </summary>
+    public enum ControlAvailability : byte
+    {
+        /// <summary>无控制实体，且没有待恢复的记录。</summary>
+        None = 0,
+        /// <summary>有存活且可解析的受控实体。</summary>
+        Controlled = 1,
+        /// <summary>持有稳定 ID 但当前解析不到，仍在宽限期内等待其重新可用。</summary>
+        Suspended = 2,
+    }
+
     /// <summary>稳定身份的只读控制视图。数组索引只在当前世界状态中瞬时有效。</summary>
     public struct SimUnitControlState
     {
@@ -658,6 +706,14 @@ namespace BinGames.Sim
         public const int InvalidIndex = -1;
         /// <summary>静态障碍数量上限（story-009）。</summary>
         public const int MaxObstacles = 32;
+
+        /// <summary>一帧内最多缓存多少条控制权变更（M1-06）。链式回弹再密也用不满，
+        /// 溢出时丢最旧的那条——最终控制状态永远以最后一条为准。</summary>
+        public const int MaxControlChangesPerFrame = 8;
+
+        /// <summary>意识回弹的默认最大距离。桥接层会用当前信号范围覆盖它，
+        /// 这里的值只保证"内核被单独实例化（回归测试）时也有确定行为"。</summary>
+        public const float DefaultControlFallbackRange = 18f;
 
         /// <summary>
         /// 召唤血统的**硬顶**：<see cref="SpawnRequest.Generation"/> 到这个数就再也召不出下一代，

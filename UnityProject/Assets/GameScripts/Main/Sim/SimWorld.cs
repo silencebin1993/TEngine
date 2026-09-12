@@ -59,6 +59,26 @@ namespace BinGames.Sim
         private ulong _nextEntityId;
         private SimEntityId _controlledUnitId;
 
+        // ── 控制权变更（M1-06）──
+        /// <summary>待热更层消费的控制权变更，FIFO。一帧内可能连续回弹（刚接手的单位又被同一波伤害打死），
+        /// 所以不能只留一条覆盖式记录。非 Burst 路径、容量极小，用托管数组即可，
+        /// 与 <see cref="GetControlCandidates"/> 同一约定。</summary>
+        private readonly ControlChangeEvent[] _controlChanges = new ControlChangeEvent[SimConst.MaxControlChangesPerFrame];
+        private int _controlChangeCount;
+
+        /// <summary>最后一个有效受控实体的位置。受控实体没了以后，表现层靠它保持视角不丢，
+        /// 存档也存这一份——它是"意识上次在哪"的唯一权威。</summary>
+        private float2 _controlFallbackAnchor;
+        private bool _hasControlFallbackAnchor;
+
+        /// <summary>意识回弹的最大距离。由桥接层用信号范围配置，保证自动回弹与手动切换用同一把尺子；
+        /// 非正值表示不限距离。</summary>
+        private float _controlFallbackRange = SimConst.DefaultControlFallbackRange;
+
+        /// <summary>是否启用意识回弹。关掉之后受控实体一死就确定地落到"无控制"，
+        /// 供硬核死亡规则与"回弹失败后表现层行为"的回归用例构造确定场景。</summary>
+        private bool _controlFallbackEnabled = true;
+
         // ── 事件与中间缓冲 ──
         private NativeList<int> _pendingDeaths;
         private NativeList<HitEvent> _hitEvents;
@@ -182,6 +202,12 @@ namespace BinGames.Sim
                 _entityId[SimConst.PlayerIndex], IntentSource.Player);
             _controlledUnitId = _entityId[SimConst.PlayerIndex];
 
+            // M1-06：控制权变更与回退锚点随世界一起重建。重进场景走的是新实例，
+            // 但 Dispose 后再 Initialize 的路径也必须是干净状态，否则会把上一局的回弹事件漏给新局。
+            _controlChangeCount = 0;
+            _controlFallbackAnchor = _position[SimConst.PlayerIndex];
+            _hasControlFallbackAnchor = true;
+
             _time = 0f;
             _projectileCursor = 0;
             _created = true;
@@ -234,13 +260,30 @@ namespace BinGames.Sim
 
         public SimControlCandidate[] GetControlCandidates(float maxDistance)
         {
-            if (!_created || maxDistance < 0f ||
-                !TryResolveUnit(_controlledUnitId, out int controlledIndex))
+            if (!_created || maxDistance < 0f)
             {
                 return Array.Empty<SimControlCandidate>();
             }
 
-            float2 origin = _position[controlledIndex];
+            float2 origin;
+            int controlledIndex;
+            if (TryResolveUnit(_controlledUnitId, out int resolvedIndex))
+            {
+                controlledIndex = resolvedIndex;
+                origin = _position[resolvedIndex];
+            }
+            else if (_hasControlFallbackAnchor)
+            {
+                // M1-06：没有受控实体时以回退锚点为原点继续给候选。
+                // 否则"回弹失败 → 候选恒为空 → 再也切不回去"，玩家会永久失去控制权。
+                controlledIndex = SimConst.InvalidIndex;
+                origin = _controlFallbackAnchor;
+            }
+            else
+            {
+                return Array.Empty<SimControlCandidate>();
+            }
+
             float maxDistanceSq = maxDistance * maxDistance;
             int count = 0;
             for (int i = 0; i < _unitCount; i++)
@@ -292,6 +335,24 @@ namespace BinGames.Sim
 
         public ControlSwitchResult TrySwitchControlledUnit(SimEntityId entityId)
         {
+            return SwitchControlledUnitInternal(entityId, ControlChangeReason.PlayerRequest);
+        }
+
+        /// <summary>
+        /// M1-06：读档 / 重进场景后的控制权恢复。
+        ///
+        /// 与 <see cref="TrySwitchControlledUnit"/> 只差**语义**：恢复不是一次玩家操作，
+        /// 因此不参与桥接层的冷却与信号范围约束；身份、存活、阵营三道校验一条不少。
+        /// 恢复到当前已受控的实体时返回 AlreadyControlled 且不产生变更事件——
+        /// 重复读档不该刷出一串意识转场。
+        /// </summary>
+        public ControlSwitchResult TryRestoreControlledUnit(SimEntityId entityId)
+        {
+            return SwitchControlledUnitInternal(entityId, ControlChangeReason.Restored);
+        }
+
+        private ControlSwitchResult SwitchControlledUnitInternal(SimEntityId entityId, ControlChangeReason reason)
+        {
             if (!_created) { return ControlSwitchResult.WorldNotInitialized; }
             if (!entityId.IsValid) { return ControlSwitchResult.InvalidTarget; }
             if (!TryFindUnit(entityId, out int targetIndex)) { return ControlSwitchResult.TargetNotFound; }
@@ -302,9 +363,12 @@ namespace BinGames.Sim
             }
             if (_controlledUnitId == entityId) { return ControlSwitchResult.AlreadyControlled; }
 
+            SimEntityId previousId = _controlledUnitId;
+            float2 anchor = _position[targetIndex];
             if (TryFindUnit(_controlledUnitId, out int previousIndex) && _alive[previousIndex] != 0)
             {
                 _intentSource[previousIndex] = _intentSourceBeforePlayer[previousIndex];
+                anchor = _position[previousIndex];
             }
 
             _intentSourceBeforePlayer[targetIndex] = _intentSource[targetIndex] == (byte)IntentSource.Player
@@ -312,7 +376,92 @@ namespace BinGames.Sim
                 : _intentSource[targetIndex];
             _intentSource[targetIndex] = (byte)IntentSource.Player;
             _controlledUnitId = entityId;
+            _controlFallbackAnchor = _position[targetIndex];
+            _hasControlFallbackAnchor = true;
+            RecordControlChange(previousId, entityId, reason, anchor);
             return ControlSwitchResult.Success;
+        }
+
+        // ── 控制权变更出口（M1-06）──
+
+        /// <summary>
+        /// 意识回弹的最大距离。桥接层应当用当前信号范围写入，使自动回弹与手动切换共用同一把尺子；
+        /// 非正值 = 不限距离（回归测试里构造"必定能回弹"的场景时用）。
+        /// </summary>
+        public float ControlFallbackRange
+        {
+            get => _controlFallbackRange;
+            set => _controlFallbackRange = value;
+        }
+
+        /// <summary>
+        /// 是否启用意识回弹。默认开启。关掉后受控实体一死就确定地落到"无控制"，
+        /// 变更事件照发（<see cref="ControlChangeEvent.CurrentUnitId"/> 为 None），
+        /// 表现层据此切到回退视角。
+        /// </summary>
+        public bool ControlFallbackEnabled
+        {
+            get => _controlFallbackEnabled;
+            set => _controlFallbackEnabled = value;
+        }
+
+        /// <summary>最后一个有效受控实体的位置。无控制实体时表现层的战略回退视角就取这里。</summary>
+        public bool TryGetControlFallbackAnchor(out float2 anchor)
+        {
+            anchor = _controlFallbackAnchor;
+            return _created && _hasControlFallbackAnchor;
+        }
+
+        /// <summary>
+        /// 取出一条待处理的控制权变更（FIFO），没有则返回 false。
+        ///
+        /// 内核不认识热更层的信号系统，所以变更在这里排队、由 <c>SimBridge</c> 消费后转成一次事件。
+        /// **消费即出队**：同一条变更只会被发布一次，这正是 M1-04「合法切换只产生一次事件」
+        /// 在自动回弹路径上的延续。
+        /// </summary>
+        public bool TryConsumeControlChange(out ControlChangeEvent change)
+        {
+            if (_created && _controlChangeCount > 0)
+            {
+                change = _controlChanges[0];
+                _controlChangeCount--;
+                for (int i = 0; i < _controlChangeCount; i++)
+                {
+                    _controlChanges[i] = _controlChanges[i + 1];
+                }
+                return true;
+            }
+
+            change = default;
+            return false;
+        }
+
+        private void RecordControlChange(SimEntityId previousId, SimEntityId currentId,
+            ControlChangeReason reason, float2 fallbackAnchor)
+        {
+            if (previousId == currentId)
+            {
+                return;
+            }
+
+            if (_controlChangeCount >= _controlChanges.Length)
+            {
+                // 队列满：丢最旧的一条。控制状态的最终真相永远是最后一条，
+                // 丢掉中间过程比丢掉"现在归谁"要安全得多。
+                for (int i = 1; i < _controlChangeCount; i++)
+                {
+                    _controlChanges[i - 1] = _controlChanges[i];
+                }
+                _controlChangeCount = _controlChanges.Length - 1;
+            }
+
+            _controlChanges[_controlChangeCount++] = new ControlChangeEvent
+            {
+                PreviousUnitId = previousId,
+                CurrentUnitId = currentId,
+                Reason = reason,
+                FallbackAnchor = fallbackAnchor,
+            };
         }
 
         private SimEntityId AllocateEntityId()
@@ -1256,7 +1405,8 @@ namespace BinGames.Sim
                 if (idx >= 0 && idx < _unitCount && _alive[idx] != 0)
                 {
                     _alive[idx] = 0;
-                    ReleaseSlot(idx);
+                    // 显式卸载不是战斗死亡：不该走死亡表现，但控制权照样要确定性移交。
+                    ReleaseSlot(idx, ControlChangeReason.ControlledRemoved);
                 }
             }
 
@@ -1521,12 +1671,20 @@ namespace BinGames.Sim
             ReleaseSlot(idx);
         }
 
-        private void ReleaseSlot(int idx)
+        /// <param name="controlLossReason">这个槽位恰好是受控实体时，控制权变更记什么原因。
+        /// 死亡与主动卸载在 UI 与镜头上不是一回事，不能混成一种。</param>
+        private void ReleaseSlot(int idx, ControlChangeReason controlLossReason = ControlChangeReason.ControlledDeath)
         {
-            if (_entityId[idx] == _controlledUnitId)
+            bool wasControlled = _controlledUnitId.IsValid && _entityId[idx] == _controlledUnitId;
+            SimEntityId previousId = _controlledUnitId;
+            float2 lastKnownPos = _position[idx];
+            if (wasControlled)
             {
                 _intentSource[idx] = _intentSourceBeforePlayer[idx];
                 _controlledUnitId = SimEntityId.None;
+                // 锚点必须在清位置之前抓——下面会把坐标推到场外防止空间哈希误命中。
+                _controlFallbackAnchor = lastKnownPos;
+                _hasControlFallbackAnchor = true;
             }
             _alive[idx] = 0;
             _status[idx] = 0u;
@@ -1538,6 +1696,75 @@ namespace BinGames.Sim
             // 移出场地，避免残留位置被空间哈希误命中
             _position[idx] = new float2(float.MaxValue * 0.5f, float.MaxValue * 0.5f);
             _freeSlots.Add(idx);
+
+            if (wasControlled)
+            {
+                // 回弹放在槽位彻底释放之后：否则刚死的躯体还挂着 Alive 语义，
+                // 会被自己选成回弹目标，变成"控制了一具尸体"。
+                FallbackControlAfterLoss(lastKnownPos, previousId, controlLossReason);
+            }
+        }
+
+        /// <summary>
+        /// M1-06 意识回弹：受控实体没了以后，把控制权交给一个**确定性选出的**存活友军。
+        ///
+        /// 选择规则固定为「距离失控点最近，距离并列时稳定实体 ID 小者优先」，与
+        /// <see cref="GetControlCandidates"/> 的排序同一把尺子——所以同种子、同输入下回弹结果可复现，
+        /// 这是 M1-06「固定种子自动回归」成立的前提。找不到目标时控制权明确为 None，
+        /// 而不是留一个悬空 ID，保证"要么恰好一个受控实体，要么明确为无"。
+        /// </summary>
+        private void FallbackControlAfterLoss(float2 origin, SimEntityId previousId, ControlChangeReason reason)
+        {
+            if (!_controlFallbackEnabled)
+            {
+                // 回弹关闭：控制权确定地为无。仍要发一条变更事件，否则表现层不知道该切到回退视角。
+                RecordControlChange(previousId, SimEntityId.None, reason, origin);
+                return;
+            }
+
+            SimEntityId fallbackId = SimEntityId.None;
+            float bestDistanceSq = float.MaxValue;
+            bool limited = _controlFallbackRange > 0f;
+            float rangeSq = _controlFallbackRange * _controlFallbackRange;
+
+            for (int i = 0; i < _unitCount; i++)
+            {
+                if (_alive[i] == 0 || !IsFriendlyFaction((SimFaction)_faction[i]))
+                {
+                    continue;
+                }
+
+                float distanceSq = math.distancesq(origin, _position[i]);
+                if (limited && distanceSq > rangeSq)
+                {
+                    continue;
+                }
+
+                ulong candidateId = _entityId[i].Value;
+                if (candidateId == 0UL)
+                {
+                    continue;
+                }
+                if (distanceSq < bestDistanceSq ||
+                    (distanceSq == bestDistanceSq && candidateId < fallbackId.Value))
+                {
+                    bestDistanceSq = distanceSq;
+                    fallbackId = _entityId[i];
+                }
+            }
+
+            if (fallbackId.IsValid && TryFindUnit(fallbackId, out int fallbackIndex))
+            {
+                _intentSourceBeforePlayer[fallbackIndex] = _intentSource[fallbackIndex] == (byte)IntentSource.Player
+                    ? (byte)IntentSource.AI
+                    : _intentSource[fallbackIndex];
+                _intentSource[fallbackIndex] = (byte)IntentSource.Player;
+                _controlledUnitId = fallbackId;
+                _controlFallbackAnchor = _position[fallbackIndex];
+                _hasControlFallbackAnchor = true;
+            }
+
+            RecordControlChange(previousId, _controlledUnitId, reason, origin);
         }
 
         /// <summary>直接击杀（吞噬结算用）。</summary>
@@ -1569,6 +1796,12 @@ namespace BinGames.Sim
             int controlledIndex = TryResolveUnit(_controlledUnitId, out int resolvedControlledIndex)
                 ? resolvedControlledIndex
                 : SimConst.InvalidIndex;
+            if (controlledIndex != SimConst.InvalidIndex)
+            {
+                // 受控实体还在时持续刷新回退锚点：它死掉的那一刻已经来不及现算了。
+                _controlFallbackAnchor = _position[controlledIndex];
+                _hasControlFallbackAnchor = true;
+            }
             return new SimSnapshot
             {
                 Count = _unitCount,
@@ -1667,6 +1900,11 @@ namespace BinGames.Sim
             _deathCount = 0;
             _obstacleCount = 0;
             _controlledUnitId = SimEntityId.None;
+            // M1-06：世界卸载后控制状态必须明确为"无"，未消费的变更一并作废——
+            // 否则重进场景时会把上一局的回弹事件补发给新世界。
+            _controlChangeCount = 0;
+            _hasControlFallbackAnchor = false;
+            _controlFallbackAnchor = float2.zero;
             _created = false;
         }
 

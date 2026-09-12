@@ -27,11 +27,21 @@ namespace GameLogic.Battle
         private SimConfig _cfg;
         private bool _running;
         private float _controlSwitchCooldownRemaining;
-        private float2 _strategicAnchor;
-        private bool _hasStrategicAnchor;
+
+        /// <summary>本局最后一次已知的控制状态。<see cref="End"/> 时从内核抓取一份留在托管侧，
+        /// 因为内核 Dispose 之后就什么都问不到了——重进场景的恢复和存档写入都靠它。</summary>
+        private ControlHandoffState _handoff;
+
+        /// <summary>待兑现的恢复请求。目标单位可能要等几帧才 Spawn 完，
+        /// 这期间控制状态是 Suspended 而不是 None，UI 不该闪一次假报警。</summary>
+        private ControlHandoffState _pendingRestore;
+        private float _restoreGraceRemaining;
+        private ControlAvailability _availability = ControlAvailability.None;
 
         private const float DefaultControlSignalRange = 18f;
         private const float DefaultControlSwitchCooldown = 0.75f;
+        /// <summary>恢复请求的宽限秒数。超时即放弃恢复并落到确定性的兜底状态，不无限期挂着。</summary>
+        private const float DefaultControlRestoreGrace = 1.5f;
 
         /// <summary>逻辑 id 分配器。0 保留给玩家/环境。</summary>
         private int _nextLogicId = 1;
@@ -70,15 +80,20 @@ namespace GameLogic.Battle
             _controlSwitchCooldownRemaining = 0f;
             Intent = PlayerIntent.Idle;
             _running = true;
+            // 回弹与手动切换必须用同一把尺子，否则"够得着切过去"和"死后回弹得到"会对不上。
+            _backend.ControlFallbackRange = ControlSignalRange;
             _snapshot = _backend.GetSnapshot();
-            _hasStrategicAnchor = false;
-            CaptureStrategicAnchor();
+            _pendingRestore = default;
+            _restoreGraceRemaining = 0f;
+            RefreshAvailability(0f);
         }
 
         public void End()
         {
             if (_backend != null)
             {
+                // 内核 Dispose 之后控制状态就问不到了；先把它抄进托管侧的控制记忆。
+                _handoff = CaptureHandoff();
                 _backend.Dispose();
                 _backend = null;
             }
@@ -90,8 +105,10 @@ namespace GameLogic.Battle
             _controlSwitchCooldownRemaining = 0f;
             Intent = PlayerIntent.Idle;
             _snapshot = default;
-            _strategicAnchor = float2.zero;
-            _hasStrategicAnchor = false;
+            _pendingRestore = default;
+            _restoreGraceRemaining = 0f;
+            // 世界没了就没有受控实体，但控制记忆（_handoff）要留着——那是重进场景恢复的依据。
+            _availability = ControlAvailability.None;
             Obstacles = null;
         }
 
@@ -107,7 +124,11 @@ namespace GameLogic.Battle
             _cmds.SetPlayerIntent(Intent);
             _backend.Step(dt, ref _cmds);
             _snapshot = _backend.GetSnapshot();
-            CaptureStrategicAnchor();
+
+            TryFulfillPendingRestore(dt);
+            // 内核在 Step 里可能已经做过死亡回弹；事件统一在这里出，与手动切换同一条路径。
+            PublishControlChanges();
+            RefreshAvailability(dt);
 
             // 意图每帧重置，避免上一帧的冲刺倍率粘住
             Intent = PlayerIntent.Idle;
@@ -127,6 +148,10 @@ namespace GameLogic.Battle
         {
             ControlSignalRange = math.max(0f, signalRange);
             ControlSwitchCooldown = math.max(0f, cooldownSeconds);
+            if (_backend != null)
+            {
+                _backend.ControlFallbackRange = ControlSignalRange;
+            }
         }
 
         public bool TryGetControlledUnit(out SimUnitControlState state)
@@ -175,9 +200,16 @@ namespace GameLogic.Battle
                 hasControlled = true;
                 return true;
             }
-            position = _strategicAnchor;
+
             hasControlled = false;
-            return _hasStrategicAnchor;
+            // 回退锚点的唯一真相在内核（它才知道受控实体死在哪一刻的哪个位置）；
+            // 世界已卸载时才退到托管侧的控制记忆，避免本层再维护第二份会漂移的锚点。
+            if (_running && _backend != null && _backend.TryGetControlFallbackAnchor(out position))
+            {
+                return true;
+            }
+            position = _handoff.FallbackAnchor;
+            return _handoff.HasAnchor;
         }
 
         public SimControlCandidate[] GetControlCandidates()
@@ -202,11 +234,20 @@ namespace GameLogic.Battle
             if (!target.IsAlive) { return ControlRequestResult.TargetDead; }
             if (!IsFriendlyFaction(target.Faction)) { return ControlRequestResult.TargetNotFriendly; }
             if (_backend.ControlledUnitId == targetId) { return ControlRequestResult.AlreadyControlled; }
-            if (!TryGetControlledUnit(out SimUnitControlState previous))
+
+            // 信号范围的原点：有受控实体时是它自己；没有时退到战略回退锚点（意识最后所在处）。
+            // M1-06 之前这里直接返回 CurrentUnitUnavailable——意味着一旦死亡回弹失败，
+            // 哪怕场上还站着活生生的友军，玩家也再也夺不回控制权。那不是"明确为无"，是卡死。
+            float2 origin;
+            if (TryGetControlledUnit(out SimUnitControlState previous))
+            {
+                origin = previous.Position;
+            }
+            else if (!TryGetPresentationAnchor(out origin, out _))
             {
                 return ControlRequestResult.CurrentUnitUnavailable;
             }
-            if (math.distance(previous.Position, target.Position) > ControlSignalRange)
+            if (math.distance(origin, target.Position) > ControlSignalRange)
             {
                 return ControlRequestResult.OutOfSignalRange;
             }
@@ -223,14 +264,172 @@ namespace GameLogic.Battle
 
             _controlSwitchCooldownRemaining = ControlSwitchCooldown;
             _snapshot = _backend.GetSnapshot();
-            CaptureStrategicAnchor();
-            Signals.Publish(new ControlledUnitChangedSignal
-            {
-                PreviousUnitId = previous.EntityId,
-                CurrentUnitId = targetId,
-                Result = ControlRequestResult.Success,
-            });
+            // 手动切换与死亡回弹共用内核的变更队列，所以这里不自己 Publish：
+            // 事件只从 PublishControlChanges 一个出口发，"一次切换一次事件"才不依赖调用方自觉。
+            PublishControlChanges();
+            RefreshAvailability(0f);
             return ControlRequestResult.Success;
+        }
+
+        /// <summary>
+        /// M1-06：请求把控制权恢复到一段控制记忆（读档 / 重进场景）。
+        ///
+        /// 目标单位常常还没 Spawn 完（Spawn 要等下一次 Step 才落地），所以这里不是一次性成败：
+        /// 解析得到就立刻恢复，解析不到就挂起，在宽限期内每帧重试，控制状态显示为
+        /// <see cref="ControlAvailability.Suspended"/>。宽限期用完仍找不到就放弃，
+        /// 保留世界自带的默认受控实体——任何时刻都只会是"恰好一个"或"明确为无"。
+        /// </summary>
+        public bool RequestControlRestore(in ControlHandoffState handoff,
+            float graceSeconds = DefaultControlRestoreGrace)
+        {
+            if (!handoff.HasRecord)
+            {
+                return false;
+            }
+
+            _handoff = handoff;
+            if (!_running || _backend == null)
+            {
+                return false;
+            }
+
+            _pendingRestore = handoff;
+            _restoreGraceRemaining = math.max(0f, graceSeconds);
+            TryFulfillPendingRestore(0f);
+            PublishControlChanges();
+            RefreshAvailability(0f);
+            return _pendingRestore.HasRecord == false;
+        }
+
+        /// <summary>本局最后一次已知的控制状态。运行中取实时值，已结束时取 <see cref="End"/> 留下的记忆。</summary>
+        public ControlHandoffState CurrentHandoff => _running && _backend != null ? CaptureHandoff() : _handoff;
+
+        /// <summary>当前控制可用性。Suspended 表示"记录还在、目标暂时解析不到"，不是丢失。</summary>
+        public ControlAvailability Availability => _availability;
+
+        private ControlHandoffState CaptureHandoff()
+        {
+            var state = new ControlHandoffState();
+            if (_backend == null)
+            {
+                return state;
+            }
+
+            if (_backend.TryGetControlFallbackAnchor(out float2 anchor))
+            {
+                state.FallbackAnchor = anchor;
+                state.HasAnchor = true;
+                state.HasRecord = true;
+            }
+
+            if (TryGetControlledPresentation(out SimControlledUnitView controlled))
+            {
+                state.ControlledUnitId = controlled.EntityId;
+                // LogicId 是热更层分配的、跨世界重建仍能对上的弱标识；
+                // SimEntityId 只在同一个 SimWorld 实例内有意义，落盘后必须靠它兜底。
+                state.ControlledLogicId = _snapshot.LogicId[controlled.UnitIndex];
+                state.HasRecord = true;
+            }
+
+            return state;
+        }
+
+        /// <summary>把挂起的恢复请求兑现掉。解析不到就递减宽限，超时放弃。</summary>
+        private void TryFulfillPendingRestore(float dt)
+        {
+            if (!_pendingRestore.HasRecord || _backend == null)
+            {
+                return;
+            }
+
+            if (TryResolveHandoffTarget(_pendingRestore, out SimEntityId targetId))
+            {
+                ControlSwitchResult result = _backend.TryRestoreControlledUnit(targetId);
+                if (result == ControlSwitchResult.Success || result == ControlSwitchResult.AlreadyControlled)
+                {
+                    _pendingRestore = default;
+                    _restoreGraceRemaining = 0f;
+                    _snapshot = _backend.GetSnapshot();
+                    return;
+                }
+            }
+
+            _restoreGraceRemaining -= math.max(0f, dt);
+            if (_restoreGraceRemaining <= 0f)
+            {
+                // 放弃恢复。不清空 _handoff：锚点仍然是"意识上次在哪"的唯一记录。
+                _pendingRestore = default;
+            }
+        }
+
+        /// <summary>先认稳定实体 ID，对不上再退到 LogicId。跨进程读档时前者必然失效，后者才是桥。</summary>
+        private bool TryResolveHandoffTarget(in ControlHandoffState handoff, out SimEntityId targetId)
+        {
+            if (handoff.ControlledUnitId.IsValid &&
+                _backend.TryGetUnitControlState(handoff.ControlledUnitId, out SimUnitControlState byId) &&
+                byId.IsAlive)
+            {
+                targetId = handoff.ControlledUnitId;
+                return true;
+            }
+
+            if (handoff.ControlledLogicId != 0 && _snapshot.Count > 0)
+            {
+                for (int i = 0; i < _snapshot.Count; i++)
+                {
+                    if (_snapshot.Alive[i] != 0 && _snapshot.LogicId[i] == handoff.ControlledLogicId)
+                    {
+                        targetId = _snapshot.EntityId[i];
+                        return targetId.IsValid;
+                    }
+                }
+            }
+
+            targetId = SimEntityId.None;
+            return false;
+        }
+
+        /// <summary>把内核排队的控制权变更全部转成信号。消费即出队，所以一条变更只会发布一次。</summary>
+        private void PublishControlChanges()
+        {
+            if (_backend == null)
+            {
+                return;
+            }
+
+            while (_backend.TryConsumeControlChange(out ControlChangeEvent change))
+            {
+                _handoff.FallbackAnchor = change.FallbackAnchor;
+                _handoff.HasAnchor = true;
+                _handoff.HasRecord = true;
+                Signals.Publish(new ControlledUnitChangedSignal
+                {
+                    PreviousUnitId = change.PreviousUnitId,
+                    CurrentUnitId = change.CurrentUnitId,
+                    Reason = change.Reason,
+                    FallbackAnchor = change.FallbackAnchor,
+                    Result = ControlRequestResult.Success,
+                });
+            }
+        }
+
+        private void RefreshAvailability(float dt)
+        {
+            if (!_running || _backend == null)
+            {
+                _availability = ControlAvailability.None;
+                return;
+            }
+
+            if (TryGetControlledPresentation(out _))
+            {
+                _availability = ControlAvailability.Controlled;
+                return;
+            }
+
+            _availability = _pendingRestore.HasRecord && _restoreGraceRemaining > 0f
+                ? ControlAvailability.Suspended
+                : ControlAvailability.None;
         }
 
         public void SetControlledIntent(in PlayerIntent intent)
@@ -243,7 +442,6 @@ namespace GameLogic.Battle
             if (!_running || !TryGetControlledUnit(out _)) { return false; }
             (_backend as SimWorld)?.SetPlayerPosition(position);
             _snapshot = _backend.GetSnapshot();
-            CaptureStrategicAnchor();
             return true;
         }
 
@@ -271,15 +469,6 @@ namespace GameLogic.Battle
                 case ControlSwitchResult.TargetDead: return ControlRequestResult.TargetDead;
                 case ControlSwitchResult.TargetNotFriendly: return ControlRequestResult.TargetNotFriendly;
                 default: return ControlRequestResult.TargetNotFound;
-            }
-        }
-
-        private void CaptureStrategicAnchor()
-        {
-            if (TryGetControlledPresentation(out SimControlledUnitView controlled))
-            {
-                _strategicAnchor = controlled.Position;
-                _hasStrategicAnchor = true;
             }
         }
 
@@ -631,7 +820,10 @@ namespace GameLogic.Battle
             if (_backend != null)
             {
                 _snapshot = _backend.GetSnapshot();
-                CaptureStrategicAnchor();
+                // 吞噬掉的可能正是受控实体（被更大的东西吃了），内核已在 KillUnit 里回弹过，
+                // 这里必须立刻把变更发出去，不能拖到下一帧 OnUpdate——中间隔着本帧的结算与 UI 刷新。
+                PublishControlChanges();
+                RefreshAvailability(0f);
             }
         }
 

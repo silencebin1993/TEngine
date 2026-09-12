@@ -20,11 +20,27 @@ namespace GameLogic.Stage.CellStage
     {
         public override int Priority => ModulePriority.Input;
 
+        private const float ControlSwitchFeedbackDuration = 1.5f;
+
         private SimBridge _sim;
         private StatSheet _stats;
         private AbilitySystem _abilities;
         private ResourceWallet _wallet;
         private Camera _camera;
+
+        private SignalScope _controlScope;
+
+        public ControlRequestResult LastControlSwitchResult { get; private set; } =
+            ControlRequestResult.AlreadyControlled;
+        public float ControlSwitchFeedbackRemaining { get; private set; }
+        public int LastControlCandidateCount { get; private set; }
+
+        /// <summary>最近一次控制权变更的来源。M1-06：玩家按 Tab 换人和死亡后被迫回弹
+        /// 要给完全不同的提示，UI 不能只看 <see cref="LastControlSwitchResult"/>。</summary>
+        public ControlChangeReason LastControlChangeReason { get; private set; } = ControlChangeReason.None;
+
+        /// <summary>最近一次变更后的受控实体。为 None 表示意识无处可去，控制权明确为无。</summary>
+        public SimEntityId LastControlChangeUnitId { get; private set; } = SimEntityId.None;
 
         /// <summary>
         /// 技能槽快捷键。槽 0 恒为冲刺（空格）。
@@ -44,6 +60,34 @@ namespace GameLogic.Stage.CellStage
             _abilities = abilities;
             _wallet = wallet;
             _camera = cam;
+
+            // M1-06：非玩家发起的控制权变更（死亡回弹、卸载、读档恢复）也要进同一个反馈窗口，
+            // 否则玩家被弹到另一具躯体上时屏幕上什么都不说。
+            _controlScope?.Dispose();
+            _controlScope = new SignalScope()
+                .On<ControlledUnitChangedSignal>(OnControlledUnitChanged);
+        }
+
+        public override void OnExit()
+        {
+            _controlScope?.Dispose();
+            _controlScope = null;
+        }
+
+        private void OnControlledUnitChanged(ControlledUnitChangedSignal signal)
+        {
+            LastControlChangeUnitId = signal.CurrentUnitId;
+            LastControlChangeReason = signal.Reason;
+            if (signal.Reason == ControlChangeReason.PlayerRequest)
+            {
+                // 玩家主动切换的反馈已经由 RequestNextControlCandidate 写过了，
+                // 这里再写一次会把"可选 N 个"的候选数抹掉。
+                return;
+            }
+
+            LastControlSwitchResult = ControlRequestResult.Success;
+            LastControlCandidateCount = 0;
+            ControlSwitchFeedbackRemaining = ControlSwitchFeedbackDuration;
         }
 
         public override void OnUpdate(float dt)
@@ -51,6 +95,12 @@ namespace GameLogic.Stage.CellStage
             if (_sim == null || !_sim.Running || _stats == null)
             {
                 return;
+            }
+
+            ControlSwitchFeedbackRemaining = Mathf.Max(0f, ControlSwitchFeedbackRemaining - dt);
+            if (Input.GetKeyDown(KeyCode.Tab))
+            {
+                RequestNextControlCandidate();
             }
 
             float2 move = ReadMoveInput();
@@ -86,6 +136,55 @@ namespace GameLogic.Stage.CellStage
                 speed);
 
             ApplyRegen(dt);
+        }
+
+        /// <summary>
+        /// 按稳定实体 ID 循环到下一个可控友军。候选查询仅发生在显式按键时，
+        /// 避免逐帧分配；不按距离直接取第一个，防止两个最近单位之间来回跳。
+        /// </summary>
+        public ControlRequestResult RequestNextControlCandidate()
+        {
+            if (_sim == null || !_sim.Running)
+            {
+                return SetControlSwitchFeedback(ControlRequestResult.SimulationNotRunning, 0);
+            }
+
+            SimControlCandidate[] candidates = _sim.GetControlCandidates();
+            if (candidates.Length == 0)
+            {
+                return SetControlSwitchFeedback(ControlRequestResult.TargetNotFound, 0);
+            }
+
+            ulong current = _sim.ControlledUnitId.Value;
+            SimEntityId next = SimEntityId.None;
+            SimEntityId first = candidates[0].EntityId;
+            for (int i = 0; i < candidates.Length; i++)
+            {
+                SimEntityId id = candidates[i].EntityId;
+                if (id.Value < first.Value)
+                {
+                    first = id;
+                }
+                if (id.Value > current && (!next.IsValid || id.Value < next.Value))
+                {
+                    next = id;
+                }
+            }
+
+            if (!next.IsValid)
+            {
+                next = first;
+            }
+            return SetControlSwitchFeedback(_sim.RequestControlSwitch(next), candidates.Length);
+        }
+
+        private ControlRequestResult SetControlSwitchFeedback(ControlRequestResult result, int candidateCount)
+        {
+            LastControlSwitchResult = result;
+            LastControlCandidateCount = candidateCount;
+            LastControlChangeReason = ControlChangeReason.PlayerRequest;
+            ControlSwitchFeedbackRemaining = ControlSwitchFeedbackDuration;
+            return result;
         }
 
         private static float2 ReadMoveInput()

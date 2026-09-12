@@ -155,12 +155,23 @@ namespace GameLogic.Core
         public float Distance;
     }
 
-    /// <summary>M1-04：一次成功的受控实体切换。失败请求不发布事件。</summary>
+    /// <summary>
+    /// M1-04：一次成功的受控实体切换。失败请求不发布事件。
+    ///
+    /// M1-06 起它也承载**非玩家发起**的变更（死亡回弹、卸载、读档恢复），
+    /// 靠 <see cref="Reason"/> 区分——玩家主动换人和被迫弹出去的提示、镜头、音效都不一样。
+    /// <see cref="CurrentUnitId"/> 可能为 <see cref="SimEntityId.None"/>：那表示
+    /// 回弹找不到任何合法目标，控制权**明确为无**，此时只有 <see cref="FallbackAnchor"/> 可用。
+    /// </summary>
     public struct ControlledUnitChangedSignal
     {
         public SimEntityId PreviousUnitId;
         public SimEntityId CurrentUnitId;
         public ControlRequestResult Result;
+        /// <summary>这次变更是怎么来的。默认 <see cref="ControlChangeReason.None"/>。</summary>
+        public ControlChangeReason Reason;
+        /// <summary>变更瞬间的战略回退锚点。CurrentUnitId 为 None 时，表现层只能靠它。</summary>
+        public float2 FallbackAnchor;
     }
 
     /// <summary>升级（进化能达阈值）。</summary>
