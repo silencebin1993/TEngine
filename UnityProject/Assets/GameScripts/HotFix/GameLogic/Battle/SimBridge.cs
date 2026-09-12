@@ -154,6 +154,29 @@ namespace GameLogic.Battle
             }
         }
 
+        /// <summary>
+        /// M2-03a：解析**存活**实体的瞬时槽位；死亡或不存在返回 false。
+        ///
+        /// 两条使用纪律：
+        /// 1. <b>返回的索引不得跨帧缓存后直接使用</b>——槽位会被复用。若要缓存，必须像
+        ///    <c>Control/UnitLoadoutRegistry</c> 那样"每次用之前先拿快照核对该槽位上的
+        ///    <see cref="SimEntityId"/> 还是不是同一个"，验证在先、使用在后。
+        /// 2. 内核内部是线性扫描（O(单位数)，整段发生在 AOT）。因此本方法**不可**放进
+        ///    热更层的逐帧路径当常规查询用，调用方必须先走快照 O(1) 快路。
+        /// </summary>
+        public bool TryResolveUnitIndex(SimEntityId entityId, out int unitIndex)
+        {
+            if (_running && _backend != null &&
+                _backend.TryGetUnitControlState(entityId, out SimUnitControlState state) && state.IsAlive)
+            {
+                unitIndex = state.UnitIndex;
+                return true;
+            }
+
+            unitIndex = SimConst.InvalidIndex;
+            return false;
+        }
+
         public bool TryGetControlledUnit(out SimUnitControlState state)
         {
             if (_running && _backend != null &&

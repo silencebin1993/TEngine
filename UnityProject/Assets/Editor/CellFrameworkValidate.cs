@@ -6,6 +6,7 @@ using BinGames.Sim;
 using GameLogic.Battle;
 using GameLogic.Cards;
 using GameLogic.Command;
+using GameLogic.Control;
 using GameLogic.Core;
 using GameLogic.Progression;
 using GameLogic.Spawning;
@@ -62,6 +63,7 @@ namespace GameLogic.EditorTools
                 ValidateControlLifecycle();
                 ValidateCameraDirector();
                 ValidateSquadCommands();
+                ValidateUnitLoadouts();
             }
             catch (Exception e)
             {
@@ -2299,6 +2301,181 @@ namespace GameLogic.EditorTools
                 squad.Unbind();
                 sim.End();
                 UnityEngine.Object.DestroyImmediate(cameraGo);
+            }
+        }
+
+        // ── 装配按实体归属（M2-03a）──────────────────────────
+
+        /// <summary>
+        /// ProjectA M2-03a：装配不再是"玩家全局单例"，而是按 <see cref="SimEntityId"/> 归属到个体。
+        /// 覆盖：未登记实体的空装配语义、玩家本体的**实时投影**（而非生成时快照）、
+        /// 失能位置位与跨刷新保留、两个不同行为原型派生出的动作集确实不同、死实体条目回收。
+        ///
+        /// 刻意全部走 <see cref="UnitLoadoutRegistry"/> 的公开入口 + 一个可注入的假投影源：
+        /// 玩家真实装配挂在 <c>MetabolicSlicePanel</c>（MonoBehaviour）上，Edit 模式起不来，
+        /// 投影源不可注入的话这一段就只能靠进 Play 手点验收。
+        /// </summary>
+        private static void ValidateUnitLoadouts()
+        {
+            Line("\n[15] 装配按实体归属（M2-03a）");
+
+            var sim = new SimBridge();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 32;
+            cfg.ArenaHalfExtent = 60f;
+            cfg.RandomSeed = 0xC0FFEE03u;
+            sim.Begin(cfg, Array.Empty<BehaviorArchetype>());
+
+            var registry = new UnitLoadoutRegistry();
+            var fakeSource = new FakePlayerLoadoutSource();
+
+            try
+            {
+                registry.Bind(sim, fakeSource);
+
+                SimEntityId body = sim.ControlledUnitId;
+                Expect(body.IsValid, "玩家本体应有有效稳定实体 ID");
+                registry.RegisterPlayerBody(body);
+
+                // ── A. 未登记实体 = 明确的空装配，不是 null、不抛 ──
+                UnitLoadout unknown = registry.Get(new SimEntityId(0xDEADBEEFUL));
+                Expect(unknown != null && unknown.Origin == UnitLoadoutOrigin.Unregistered &&
+                       unknown.OrganCount == 0 && unknown.HasAction(LoadoutAction.Move) &&
+                       !unknown.HasAction(LoadoutAction.Primary),
+                    "未登记实体应返回只有移动的空装配（非 null、不抛）");
+                Expect(registry.Get(SimEntityId.None) == UnitLoadout.Empty,
+                    "无效实体 ID 应返回共享的 UnitLoadout.Empty");
+                Expect(!registry.SetOrganDisabled(new SimEntityId(0xDEADBEEFUL), "org_cilia", true),
+                    "对未登记实体置失能位应安全失败而不是抛异常");
+
+                // ── B. 玩家本体是实时投影，不是生成时快照 ──
+                fakeSource.Organs.Clear();
+                UnitLoadout empty = registry.Get(body);
+                Expect(empty.Origin == UnitLoadoutOrigin.PlayerProjection &&
+                       empty.ActionMask == UnitLoadout.MoveActionMask && empty.OrganCount == 0,
+                    $"注入源为空时玩家本体应只有移动动作（实际掩码 {empty.ActionMask}，器官 {empty.OrganCount}）");
+
+                fakeSource.Organs.Add(new UnitLoadoutOrgan("org_lyso", LoadoutAction.Primary));
+                fakeSource.Organs.Add(new UnitLoadoutOrgan("org_cilia", LoadoutAction.Utility));
+                UnitLoadout equipped = registry.Get(body);
+                bool primaryIsLyso = equipped.TryGetOrgan(LoadoutAction.Primary, out UnitLoadoutOrgan primary) &&
+                                     primary.OrganId == "org_lyso";
+                Expect(equipped.ActionMask != UnitLoadout.MoveActionMask &&
+                       equipped.HasAction(LoadoutAction.Primary) && equipped.HasAction(LoadoutAction.Utility) &&
+                       primaryIsLyso && equipped.OrganCount == 2,
+                    $"改注入源后再查，玩家本体装配应跟着变（实时投影而非快照；实际掩码 {equipped.ActionMask}，器官 {equipped.OrganCount}）");
+
+                // ── C. 失能位：置位、跨投影刷新保留、解除 ──
+                Expect(registry.SetOrganDisabled(body, "org_lyso", true),
+                    "失能置位应命中玩家本体的 org_lyso");
+                UnitLoadout disabled = registry.Get(body);
+                Expect(!disabled.HasAction(LoadoutAction.Primary) && disabled.HasAction(LoadoutAction.Utility) &&
+                       disabled.OrganCount == 2 && disabled.ContainsOrgan("org_lyso"),
+                    "主器官失能后主动作应消失，功能动作不受影响，且失能器官仍留在装配里可见");
+
+                fakeSource.Organs.Add(new UnitLoadoutOrgan("org_hook", LoadoutAction.Interact));
+                UnitLoadout afterRefresh = registry.Get(body);
+                Expect(!afterRefresh.HasAction(LoadoutAction.Primary) &&
+                       afterRefresh.HasAction(LoadoutAction.Interact) && afterRefresh.OrganCount == 3,
+                    "投影刷新（装上新器官）不应把已置的失能位冲掉");
+
+                Expect(registry.SetOrganDisabled(body, "org_lyso", false) &&
+                       registry.Get(body).HasAction(LoadoutAction.Primary),
+                    "解除失能后主动作应恢复");
+
+                // ── D. 两个不同原型 → 动作集不同（M2-03 的验收项）──
+                // 内核只拿到 ArchetypeId=0（本用例不加载原型表，传 13/15 会越界）；
+                // 被测对象是热更层的"原型 → 装配"映射，它的入参来自生成请求而不是内核回读。
+                int sporeLogicId = 9301;
+                int myceliumLogicId = 9302;
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(-4f, 2f), Health = 20f, Radius = 0.8f,
+                    MaxSpeed = 5f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = sporeLogicId,
+                });
+                registry.RegisterArchetypePending(sporeLogicId, ArchetypeLoadoutTable.SporeArchetypeId);
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(4f, 2f), Health = 20f, Radius = 0.8f,
+                    MaxSpeed = 5f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = myceliumLogicId,
+                });
+                registry.RegisterArchetypePending(myceliumLogicId, ArchetypeLoadoutTable.MyceliumArchetypeId);
+
+                Expect(registry.PendingCount == 2 && registry.ResolvePending(sim.Snapshot) == 0,
+                    "生成尚未落地时挂起项应解析不到（Spawn 只是入队）");
+
+                sim.OnUpdate(1f / 60f);
+                int resolved = registry.ResolvePending(sim.Snapshot);
+                Expect(resolved == 2 && registry.PendingCount == 0,
+                    $"实体落地后挂起项应全部补登记（实际解析 {resolved}，剩余 {registry.PendingCount}）");
+                Expect(registry.ResolvePending(sim.Snapshot) == 0,
+                    "挂起表清空后 ResolvePending 应立即返回 0（稳态下不做逐单位扫描）");
+
+                SimSnapshot snap = sim.Snapshot;
+                SimEntityId spore = FindEntityId(snap, sporeLogicId, out _);
+                SimEntityId mycelium = FindEntityId(snap, myceliumLogicId, out _);
+                Expect(spore.IsValid && mycelium.IsValid, "两名友军应都拥有有效稳定实体 ID");
+
+                UnitLoadout sporeLoadout = registry.Get(spore);
+                UnitLoadout myceliumLoadout = registry.Get(mycelium);
+                Expect(sporeLoadout.OrganCount > 0 && myceliumLoadout.OrganCount > 0 &&
+                       sporeLoadout.Origin == UnitLoadoutOrigin.ArchetypeDerived &&
+                       myceliumLoadout.Origin == UnitLoadoutOrigin.ArchetypeDerived,
+                    "两名友军都应派生出非空的原型装配");
+                Expect(sporeLoadout.ActionMask != myceliumLoadout.ActionMask,
+                    $"原型 {ArchetypeLoadoutTable.SporeArchetypeId} 与 {ArchetypeLoadoutTable.MyceliumArchetypeId} 的动作集应不同" +
+                    $"（掩码 {sporeLoadout.ActionMask} vs {myceliumLoadout.ActionMask}）");
+                Expect(sporeLoadout.HasAction(LoadoutAction.Utility) && !sporeLoadout.HasAction(LoadoutAction.Interact) &&
+                       myceliumLoadout.HasAction(LoadoutAction.Interact) && !myceliumLoadout.HasAction(LoadoutAction.Utility),
+                    "孢子应有功能位无交互位，菌丝体应有交互位无功能位");
+                Expect(sporeLoadout.HasAction(LoadoutAction.Move) && myceliumLoadout.HasAction(LoadoutAction.Move),
+                    "移动动作不由器官提供，任何装配都应恒有");
+
+                // 友军装配是原型派生的一次性结果，不该被玩家投影源污染
+                fakeSource.Organs.Clear();
+                fakeSource.Organs.Add(new UnitLoadoutOrgan("org_needle", LoadoutAction.Primary));
+                Expect(registry.Get(spore).TryGetOrgan(LoadoutAction.Primary, out UnitLoadoutOrgan sporePrimary) &&
+                       sporePrimary.OrganId != "org_needle",
+                    "友军装配不应跟着玩家投影源变（它是原型派生，不是玩家本体）");
+
+                // ── E. 死实体条目回收 ──
+                Expect(registry.IsRegistered(spore), "孢子友军此刻应在册");
+                int registeredBefore = registry.Count;
+                Expect(sim.TryResolveUnitIndex(spore, out int sporeIndex),
+                    "存活友军应能解析出瞬时槽位");
+                sim.ConsumeUnit(sporeIndex);
+                UnitLoadout deadLoadout = registry.Get(spore);
+                Expect(deadLoadout == UnitLoadout.Empty && !registry.IsRegistered(spore) &&
+                       registry.Count == registeredBefore - 1,
+                    $"死实体查询一次后条目应被回收（回收前 {registeredBefore}，现 {registry.Count}）");
+                Expect(registry.IsRegistered(mycelium) && registry.Get(mycelium).OrganCount > 0,
+                    "回收死者不应误伤仍然存活的友军条目");
+
+                // ── F. 解绑清空，跨局不粘 ──
+                registry.Unbind();
+                Expect(registry.Count == 0 && registry.PendingCount == 0 &&
+                       registry.Get(mycelium) == UnitLoadout.Empty,
+                    "Unbind 后注册表应清空——实体 ID 只在生成它的那个 SimWorld 内有效");
+            }
+            finally
+            {
+                registry.Unbind();
+                sim.End();
+            }
+        }
+
+        /// <summary>可注入的假玩家装配投影源。改 <see cref="Organs"/> 即等于"玩家当场换了装配"，
+        /// 用来证明注册表读的是**当下**而不是登记那一刻的快照。</summary>
+        private sealed class FakePlayerLoadoutSource : IPlayerLoadoutSource
+        {
+            public readonly System.Collections.Generic.List<UnitLoadoutOrgan> Organs =
+                new System.Collections.Generic.List<UnitLoadoutOrgan>();
+
+            public void CollectOrgans(System.Collections.Generic.List<UnitLoadoutOrgan> buffer)
+            {
+                buffer.AddRange(Organs);
             }
         }
 
