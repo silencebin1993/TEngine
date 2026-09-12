@@ -79,6 +79,12 @@ namespace BinGames.Sim
         /// 供硬核死亡规则与"回弹失败后表现层行为"的回归用例构造确定场景。</summary>
         private bool _controlFallbackEnabled = true;
 
+        // ── RTS 命令（M2-02）──
+        /// <summary>每槽位当前生效的命令。命令是**持久状态**——意图每帧被重置，命令不会。</summary>
+        private NativeArray<UnitCommand> _unitCommands;
+        /// <summary>撤退时的威胁感知半径。</summary>
+        private float _retreatThreatRange = SimConst.DefaultRetreatThreatRange;
+
         // ── 事件与中间缓冲 ──
         private NativeList<int> _pendingDeaths;
         private NativeList<HitEvent> _hitEvents;
@@ -150,6 +156,7 @@ namespace BinGames.Sim
             _intentSource = new NativeArray<byte>(cap, A);
             _intentSourceBeforePlayer = new NativeArray<byte>(cap, A);
             _unitIntents = new NativeArray<UnitIntent>(cap, A);
+            _unitCommands = new NativeArray<UnitCommand>(cap, A);
 
             _projectiles = new NativeArray<ProjectileState>(math.max(16, cfg.ProjectileCapacity), A);
             _zones = new NativeArray<ZoneState>(math.max(16, cfg.ZoneCapacity), A);
@@ -464,6 +471,154 @@ namespace BinGames.Sim
             };
         }
 
+        // ── RTS 命令与选择（M2-02）──
+
+        /// <summary>撤退命令的威胁感知半径。非正值表示撤退时不躲避敌人，直线奔向目标点。</summary>
+        public float RetreatThreatRange
+        {
+            get => _retreatThreatRange;
+            set => _retreatThreatRange = value;
+        }
+
+        /// <summary>
+        /// 给一批单位下达命令。**一次性写入**，不是每帧派发——
+        /// 编队再大也只在下令那一刻付出 O(选中数)，逐帧代价由内核的并行作业承担。
+        /// </summary>
+        /// <returns>实际接受命令的单位数。</returns>
+        public int IssueCommand(SimEntityId[] targets, in UnitCommand command)
+        {
+            if (!_created || targets == null || targets.Length == 0)
+            {
+                return 0;
+            }
+
+            int accepted = 0;
+            for (int t = 0; t < targets.Length; t++)
+            {
+                if (!TryResolveUnit(targets[t], out int idx))
+                {
+                    continue;
+                }
+                // 只指挥友军，且**绝不夺走玩家直控的那一个**——那会让受控实体在玩家手里
+                // 突然自己跑起来，也会破坏"恰好一个 Player 意图来源"的不变量。
+                if (!IsFriendlyFaction((SimFaction)_faction[idx]) ||
+                    _intentSource[idx] == (byte)IntentSource.Player)
+                {
+                    continue;
+                }
+
+                _unitCommands[idx] = command;
+                _intentSource[idx] = command.Kind == UnitCommandKind.None
+                    ? (byte)IntentSource.AI
+                    : (byte)IntentSource.Commanded;
+                accepted++;
+            }
+
+            return accepted;
+        }
+
+        /// <summary>撤销命令，把单位交还 AI。</summary>
+        public bool ClearCommand(SimEntityId entityId)
+        {
+            if (!_created || !TryResolveUnit(entityId, out int idx) ||
+                _intentSource[idx] != (byte)IntentSource.Commanded)
+            {
+                return false;
+            }
+
+            _unitCommands[idx] = UnitCommand.None;
+            _intentSource[idx] = (byte)IntentSource.AI;
+            return true;
+        }
+
+        /// <summary>查询某个单位当前的命令。没有命令时返回 <see cref="UnitCommandKind.None"/>。</summary>
+        public bool TryGetCommand(SimEntityId entityId, out UnitCommand command)
+        {
+            if (_created && TryResolveUnit(entityId, out int idx))
+            {
+                command = _unitCommands[idx];
+                return command.Kind != UnitCommandKind.None;
+            }
+
+            command = UnitCommand.None;
+            return false;
+        }
+
+        /// <summary>
+        /// 矩形框选（M2-02）。世界 XZ 平面的轴对齐矩形。
+        ///
+        /// 逐单位线性扫描发生在 AOT 侧、且只在鼠标松开时触发一次（非逐帧），
+        /// 与 <see cref="GetControlCandidates"/> 同一约定，不违反"热更层每帧不得 O(N)"。
+        /// 结果按稳定实体 ID 升序，保证同样的框选得到同样的顺序。
+        /// </summary>
+        /// <param name="commandableOnly">只要可指挥单位：友军、存活、且不是玩家正在直控的那一个。</param>
+        public SimUnitPick[] QueryUnitsInRect(float2 min, float2 max, bool commandableOnly = true)
+        {
+            if (!_created)
+            {
+                return Array.Empty<SimUnitPick>();
+            }
+
+            float2 lo = math.min(min, max);
+            float2 hi = math.max(min, max);
+
+            int count = 0;
+            for (int i = 0; i < _unitCount && count < SimConst.MaxSelectionSize; i++)
+            {
+                if (MatchesPick(i, lo, hi, commandableOnly)) { count++; }
+            }
+
+            if (count == 0)
+            {
+                return Array.Empty<SimUnitPick>();
+            }
+
+            var result = new SimUnitPick[count];
+            int write = 0;
+            for (int i = 0; i < _unitCount && write < count; i++)
+            {
+                if (!MatchesPick(i, lo, hi, commandableOnly))
+                {
+                    continue;
+                }
+                result[write++] = new SimUnitPick
+                {
+                    EntityId = _entityId[i],
+                    UnitIndex = i,
+                    Position = _position[i],
+                    Faction = (SimFaction)_faction[i],
+                    IntentSource = (IntentSource)_intentSource[i],
+                };
+            }
+
+            Array.Sort(result, (a, b) => a.EntityId.Value.CompareTo(b.EntityId.Value));
+            return result;
+        }
+
+        private bool MatchesPick(int i, float2 lo, float2 hi, bool commandableOnly)
+        {
+            if (_alive[i] == 0)
+            {
+                return false;
+            }
+
+            float2 p = _position[i];
+            if (p.x < lo.x || p.x > hi.x || p.y < lo.y || p.y > hi.y)
+            {
+                return false;
+            }
+
+            if (!commandableOnly)
+            {
+                return true;
+            }
+
+            // 玩家直控的那一个不进选择集：它已经归玩家的手直接操作，
+            // 再被编队命令拖走就是两套输入抢同一个单位。
+            return IsFriendlyFaction((SimFaction)_faction[i]) &&
+                   _intentSource[i] != (byte)IntentSource.Player;
+        }
+
         private SimEntityId AllocateEntityId()
         {
             _nextEntityId++;
@@ -766,6 +921,26 @@ namespace BinGames.Sim
             };
             h = aiIntent.Schedule(_unitCount, 64, h);
 
+            // M2-02：命令 → 意图。必须排在 JobAIIntent 之后、JobSteering 之前：
+            // 前者只认 AI 槽位、本作业只认 Commanded 槽位，两者不相交；而命令完成时
+            // 本作业会把槽位就地交还 AI，那一帧的意图由它自己写成 Idle（见 ReleaseToAi）。
+            var commandIntent = new JobCommandIntent
+            {
+                Position = _position,
+                Faction = _faction,
+                Alive = _alive,
+                EntityId = _entityId,
+                Status = _status,
+                Hash = _hash.Map,
+                InvCellSize = _hash.InvCellSize,
+                Commands = _unitCommands,
+                IntentSource = _intentSource,
+                Intents = _unitIntents,
+                Count = _unitCount,
+                RetreatThreatRange = _retreatThreatRange,
+            };
+            h = commandIntent.Schedule(_unitCount, 64, h);
+
             var steering = new JobSteering
             {
                 Intents = _unitIntents,
@@ -1049,7 +1224,11 @@ namespace BinGames.Sim
         {
             for (int i = 0; i < _unitCount; i++)
             {
-                if (_alive[i] == 0 || _intentSource[i] != (byte)IntentSource.AI
+                // M2-02：判据是"不是玩家直控"，不是"是 AI"。
+                // 原先写死 != AI，导致一旦给召唤物下了 RTS 命令（IntentSource 变成 Commanded），
+                // 它就**彻底停止攻击**——下了"攻击"命令的单位反而不打人，正是这条过滤造成的。
+                // 玩家直控的单位自己走技能系统开火，所以只排除它。
+                if (_alive[i] == 0 || _intentSource[i] == (byte)IntentSource.Player
                     || (SimFaction)_faction[i] != SimFaction.PlayerMinion)
                 {
                     continue;
@@ -1523,6 +1702,8 @@ namespace BinGames.Sim
             _intentSource[idx] = (byte)initialIntentSource;
             _intentSourceBeforePlayer[idx] = (byte)initialIntentSource;
             _unitIntents[idx] = UnitIntent.Idle(_entityId[idx], initialIntentSource);
+            // 双保险：ReleaseSlot 已经清过一次，但首次占用的槽位没走过 ReleaseSlot。
+            _unitCommands[idx] = UnitCommand.None;
             // LogicId 0 是玩家/环境的保留值。内核自己生成的单位（敌人召唤物）拿不到热更层的
             // 分配器，用**负数**自成一段——与 SimBridge 的正数序列天然不冲突，
             // 而且死亡事件里一眼看得出"这是内核生成的"。
@@ -1687,6 +1868,9 @@ namespace BinGames.Sim
                 _hasControlFallbackAnchor = true;
             }
             _alive[idx] = 0;
+            // M2-02：槽位会被复用，命令必须一起清掉——否则新生成的单位会继承
+            // 上一个占用者的未完成命令，表现为"刚出生就自己往某处跑"。
+            _unitCommands[idx] = UnitCommand.None;
             _status[idx] = 0u;
             _health[idx] = 0f;
             _velocity[idx] = float2.zero;
@@ -1870,6 +2054,7 @@ namespace BinGames.Sim
             if (_intentSource.IsCreated) { _intentSource.Dispose(); }
             if (_intentSourceBeforePlayer.IsCreated) { _intentSourceBeforePlayer.Dispose(); }
             if (_unitIntents.IsCreated) { _unitIntents.Dispose(); }
+            if (_unitCommands.IsCreated) { _unitCommands.Dispose(); }
             SafeI(ref _deathEmitFrame);
             SafeF(ref _zoneTimer); SafeF(ref _summonTimer);
             if (_status.IsCreated) { _status.Dispose(); }

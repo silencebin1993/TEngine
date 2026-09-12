@@ -34,7 +34,63 @@ namespace BinGames.Sim
     {
         AI = 0,
         Player = 1,
+        /// <summary>生成时指定的确定性脚本行为（战役编排用）。不是 RTS 命令。</summary>
         Scripted = 2,
+        /// <summary>
+        /// 受 RTS 命令驱动（M2-02）。
+        ///
+        /// **刻意不复用 <see cref="Player"/>**：M1-06 建立的核心不变量是
+        /// 「存活单位里 IntentSource == Player 的恰好一个，或明确为无」。
+        /// 编队命令一次能驱动几十个单位，复用 Player 会当场打破那条不变量，
+        /// 让"谁是受控实体"重新变得说不清——那正是整个 M1 在修的问题。
+        ///
+        /// 也不复用 <see cref="Scripted"/>：那是"生成时就定好的脚本单位"，
+        /// 与"玩家临时下达、完成后要交还 AI"的命令生命周期完全不同。
+        /// </summary>
+        Commanded = 3,
+    }
+
+    /// <summary>RTS 基础命令类型（M2-02）。非目标：不做复杂阵型与共享寻路。</summary>
+    public enum UnitCommandKind : byte
+    {
+        None = 0,
+        /// <summary>移动到点。到达后交还 AI。</summary>
+        Move = 1,
+        /// <summary>攻击指定实体。目标死亡或消失后交还 AI。</summary>
+        Attack = 2,
+        /// <summary>守备一点：留在该点附近，不主动追击远处目标。</summary>
+        Guard = 3,
+        /// <summary>撤退到点：优先远离最近的敌人，同时向目标点靠拢。</summary>
+        Retreat = 4,
+    }
+
+    /// <summary>
+    /// 一条下达给单位的命令（M2-02）。
+    ///
+    /// 命令是**持久状态**，不是一次性意图——<see cref="SimWorld"/> 每帧都会把全体
+    /// <see cref="UnitIntent"/> 重置成 Idle，所以"下令时写一次意图"下一帧就没了。
+    /// 因此命令存在内核的逐槽位数组里，每帧由 <c>JobCommandIntent</c> 重新编译成意图。
+    /// </summary>
+    public struct UnitCommand
+    {
+        public UnitCommandKind Kind;
+        public float2 TargetPosition;
+        /// <summary>攻击目标的稳定身份。仅 <see cref="UnitCommandKind.Attack"/> 使用。</summary>
+        public SimEntityId TargetEntity;
+        /// <summary>到达判定半径。Move 用它判完成，Guard 用它当留守范围。</summary>
+        public float ArriveRadius;
+
+        public static UnitCommand None => default;
+    }
+
+    /// <summary>框选查询返回的单位条目（M2-02）。不向热更层暴露任何原生容器。</summary>
+    public struct SimUnitPick
+    {
+        public SimEntityId EntityId;
+        public int UnitIndex;
+        public float2 Position;
+        public SimFaction Faction;
+        public IntentSource IntentSource;
     }
 
     /// <summary>控制权切换的确定性结果。失败不会改变当前控制实体。</summary>
@@ -714,6 +770,12 @@ namespace BinGames.Sim
         /// <summary>意识回弹的默认最大距离。桥接层会用当前信号范围覆盖它，
         /// 这里的值只保证"内核被单独实例化（回归测试）时也有确定行为"。</summary>
         public const float DefaultControlFallbackRange = 18f;
+
+        /// <summary>撤退命令的默认威胁感知半径（M2-02）。超出此距离的敌人不影响撤离方向。</summary>
+        public const float DefaultRetreatThreatRange = 12f;
+
+        /// <summary>一次框选最多返回多少单位（M2-02）。防止误框全场时给热更层甩回一个巨型数组。</summary>
+        public const int MaxSelectionSize = 64;
 
         /// <summary>
         /// 召唤血统的**硬顶**：<see cref="SpawnRequest.Generation"/> 到这个数就再也召不出下一代，

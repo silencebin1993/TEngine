@@ -5,6 +5,7 @@ using System.Text;
 using BinGames.Sim;
 using GameLogic.Battle;
 using GameLogic.Cards;
+using GameLogic.Command;
 using GameLogic.Core;
 using GameLogic.Progression;
 using GameLogic.Spawning;
@@ -60,6 +61,7 @@ namespace GameLogic.EditorTools
                 ValidateCodex();
                 ValidateControlLifecycle();
                 ValidateCameraDirector();
+                ValidateSquadCommands();
             }
             catch (Exception e)
             {
@@ -1973,6 +1975,330 @@ namespace GameLogic.EditorTools
                 {
                     sim.World.KillUnit(i, 0);
                 }
+            }
+        }
+
+        // ── RTS 选择与基础命令（M2-02）──────────────────────
+
+        /// <summary>
+        /// ProjectA M2-02：RTS 选择与基础命令。矩形框选（含 commandableOnly 语义）、
+        /// 命令下达/清除/到达自动交还 AI、玩家直控实体免疫编队指挥、槽位复用不继承旧命令，
+        /// 以及不破坏 M1-06「至多一个 Player 意图来源」不变量；再验 <see cref="SquadCommandSystem"/>
+        /// 的暂停排队语义——尤其是"排队存的是选择集快照而不是引用"这条最容易踩的坑。
+        /// </summary>
+        private static void ValidateSquadCommands()
+        {
+            Line("\n[14] RTS 选择与基础命令（M2-02）");
+
+            ValidateSquadCommandsKernel();
+            ValidateSquadCommandSystemQueueing();
+        }
+
+        /// <summary>直接对 <see cref="SimWorld"/> 下手，覆盖框选查询与命令生命周期。</summary>
+        private static void ValidateSquadCommandsKernel()
+        {
+            var world = new SimWorld();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 64;
+            cfg.ArenaHalfExtent = 100f;
+            cfg.RandomSeed = 0xC0FFEE02u;
+            world.Initialize(cfg);
+            // 本组断言不关心死亡回弹，关掉距离限制避免它意外把结果搅浑。
+            world.ControlFallbackRange = 0f;
+
+            SimCommandBuffer cmds = default;
+            cmds.Initialize(Unity.Collections.Allocator.Persistent, 32);
+
+            try
+            {
+                SimEntityId playerControlled = world.ControlledUnitId;
+                Expect(playerControlled.IsValid, "初始默认受控实体应有效");
+
+                world.SpawnUnit(new SpawnRequest
+                {
+                    Position = new float2(0f, 5f), Health = 20f, Radius = 0.5f,
+                    MaxSpeed = 5f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = 9001,
+                });
+                world.SpawnUnit(new SpawnRequest
+                {
+                    Position = new float2(2f, 5f), Health = 20f, Radius = 0.5f,
+                    MaxSpeed = 5f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = 9002,
+                });
+                world.SpawnUnit(new SpawnRequest
+                {
+                    Position = new float2(4f, 5f), Health = 20f, Radius = 0.5f,
+                    MaxSpeed = 0f, ArchetypeId = 0, Faction = SimFaction.Hostile,
+                    IntentSource = IntentSource.AI, LogicId = 9003,
+                });
+
+                cmds.SetPlayerIntent(PlayerIntent.Idle);
+                world.Step(1f / 60f, ref cmds); // 让 spawn 落地一帧
+
+                SimSnapshot snap0 = world.GetSnapshot();
+                SimEntityId unitA = FindEntityId(snap0, 9001, out _);
+                SimEntityId unitB = FindEntityId(snap0, 9002, out _);
+                SimEntityId hostile = FindEntityId(snap0, 9003, out _);
+                Expect(unitA.IsValid && unitB.IsValid && hostile.IsValid,
+                    "M2-02 测试单位应全部拥有有效稳定 ID");
+
+                // ── A. 框选查询 ──
+                var bigMin = new float2(-100f, -100f);
+                var bigMax = new float2(100f, 100f);
+
+                SimUnitPick[] commandable = world.QueryUnitsInRect(bigMin, bigMax, commandableOnly: true);
+                bool commandableHasHostile = false;
+                bool commandableAllFriendly = true;
+                for (int i = 0; i < commandable.Length; i++)
+                {
+                    if (commandable[i].EntityId == hostile) { commandableHasHostile = true; }
+                    if (commandable[i].Faction != SimFaction.PlayerMinion &&
+                        commandable[i].Faction != SimFaction.Player)
+                    {
+                        commandableAllFriendly = false;
+                    }
+                }
+                Expect(!commandableHasHostile && commandableAllFriendly,
+                    $"commandableOnly=true 大矩形框选应只含友军、不含 Hostile（实际 {commandable.Length} 个，含敌 {commandableHasHostile}）");
+
+                SimUnitPick[] everyone = world.QueryUnitsInRect(bigMin, bigMax, commandableOnly: false);
+                bool everyoneHasHostile = false;
+                for (int i = 0; i < everyone.Length; i++)
+                {
+                    if (everyone[i].EntityId == hostile) { everyoneHasHostile = true; break; }
+                }
+                Expect(everyoneHasHostile, "commandableOnly=false 框选应包含 Hostile");
+
+                bool sortedAscending = true;
+                for (int i = 1; i < everyone.Length; i++)
+                {
+                    if (everyone[i - 1].EntityId.Value >= everyone[i].EntityId.Value)
+                    {
+                        sortedAscending = false;
+                        break;
+                    }
+                }
+                Expect(sortedAscending, "框选结果应按 EntityId 升序排列");
+
+                SimUnitPick[] farAway = world.QueryUnitsInRect(new float2(1000f, 1000f), new float2(1010f, 1010f));
+                Expect(farAway.Length == 0, "不覆盖任何单位的远处矩形应返回空数组");
+
+                bool commandableHasPlayer = false;
+                for (int i = 0; i < commandable.Length; i++)
+                {
+                    if (commandable[i].EntityId == playerControlled) { commandableHasPlayer = true; break; }
+                }
+                Expect(!commandableHasPlayer, "commandableOnly=true 不应返回当前玩家直控实体");
+
+                // ── B. 命令生命周期 ──
+
+                var farTarget = new float2(60f, 5f);
+                var moveCmd = new UnitCommand
+                {
+                    Kind = UnitCommandKind.Move, TargetPosition = farTarget, ArriveRadius = 0.5f,
+                };
+                int accepted = world.IssueCommand(new[] { unitA, unitB, playerControlled }, moveCmd);
+                Expect(accepted == 2,
+                    $"对两个友军 + 一个玩家直控实体下 Move 命令应只接受两个友军（实际 {accepted}）");
+                Expect(world.TryGetCommand(unitA, out UnitCommand gotA) && gotA.Kind == UnitCommandKind.Move,
+                    "下令后应能取回 Kind=Move");
+
+                world.TryResolveUnit(unitA, out int idxA1);
+                world.TryResolveUnit(unitB, out int idxB1);
+                world.TryResolveUnit(playerControlled, out int idxPlayer);
+                SimSnapshot snapIssued = world.GetSnapshot();
+                Expect(snapIssued.IntentSourceOf(idxA1) == IntentSource.Commanded &&
+                       snapIssued.IntentSourceOf(idxB1) == IntentSource.Commanded,
+                    "接受命令的两个友军 IntentSource 都应变成 Commanded");
+                Expect(snapIssued.IntentSourceOf(idxPlayer) == IntentSource.Player,
+                    "玩家直控实体的 IntentSource 不应被 IssueCommand 夺走");
+                Expect(!world.TryGetCommand(playerControlled, out _),
+                    "玩家直控实体不应被写入任何命令");
+
+                // 命令驱动真实移动：行为断言而非字段断言。
+                float2 posABefore = snapIssued.Position[idxA1];
+                float distBefore = math.distance(posABefore, farTarget);
+                for (int f = 0; f < 30; f++)
+                {
+                    cmds.SetPlayerIntent(PlayerIntent.Idle);
+                    world.Step(1f / 60f, ref cmds);
+                }
+                world.TryResolveUnit(unitA, out int idxA2);
+                SimSnapshot snapMoved = world.GetSnapshot();
+                float distAfter = math.distance(snapMoved.Position[idxA2], farTarget);
+                Expect(distAfter < distBefore,
+                    $"命令驱动的单位 30 帧后应更靠近目标点（前 {distBefore:F2} → 后 {distAfter:F2}）");
+
+                // 到达目标点（ArriveRadius 内）应立刻交还 AI。
+                world.TryResolveUnit(unitB, out int idxB2);
+                float2 posBNow = world.GetSnapshot().Position[idxB2];
+                var arriveCmd = new UnitCommand
+                {
+                    Kind = UnitCommandKind.Move, TargetPosition = posBNow, ArriveRadius = 1f,
+                };
+                world.IssueCommand(new[] { unitB }, arriveCmd);
+                cmds.SetPlayerIntent(PlayerIntent.Idle);
+                world.Step(1f / 60f, ref cmds);
+                world.TryResolveUnit(unitB, out int idxB3);
+                Expect(world.GetSnapshot().IntentSourceOf(idxB3) == IntentSource.AI &&
+                       !world.TryGetCommand(unitB, out _),
+                    "Move 命令到达目标点后应交还 AI，且不再能查到命令");
+
+                // ClearCommand 应立即交还 AI。
+                bool cleared = world.ClearCommand(unitA);
+                world.TryResolveUnit(unitA, out int idxA3);
+                Expect(cleared && world.GetSnapshot().IntentSourceOf(idxA3) == IntentSource.AI &&
+                       !world.TryGetCommand(unitA, out _),
+                    "ClearCommand 应成功并把单位交还 AI");
+
+                // Attack 命令的目标死亡后应交还 AI。
+                var attackCmd = new UnitCommand
+                {
+                    Kind = UnitCommandKind.Attack, TargetEntity = hostile, ArriveRadius = 0.5f,
+                };
+                int acceptedAttack = world.IssueCommand(new[] { unitA }, attackCmd);
+                Expect(acceptedAttack == 1, $"对存活友军下 Attack 命令应被接受（实际 {acceptedAttack}）");
+                world.TryResolveUnit(hostile, out int hostileIdx);
+                world.KillUnit(hostileIdx, 0);
+                cmds.SetPlayerIntent(PlayerIntent.Idle);
+                world.Step(1f / 60f, ref cmds);
+                world.TryResolveUnit(unitA, out int idxA4);
+                Expect(world.GetSnapshot().IntentSourceOf(idxA4) == IntentSource.AI,
+                    "Attack 命令的目标死亡后，下令单位应交还 AI");
+
+                // 槽位复用不应继承旧占用者的命令。
+                var reissueCmd = new UnitCommand
+                {
+                    Kind = UnitCommandKind.Guard, TargetPosition = posBNow, ArriveRadius = 1f,
+                };
+                world.IssueCommand(new[] { unitB }, reissueCmd);
+                world.TryResolveUnit(unitB, out int idxB4);
+                world.KillUnit(idxB4, 0);
+                int newIdx = world.SpawnUnit(new SpawnRequest
+                {
+                    Position = posBNow, Health = 20f, Radius = 0.5f,
+                    MaxSpeed = 5f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = 9004,
+                });
+                SimSnapshot snapReused = world.GetSnapshot();
+                world.TryGetEntityId(newIdx, out SimEntityId newUnitId);
+                Expect(newUnitId.IsValid && !world.TryGetCommand(newUnitId, out _) &&
+                       snapReused.IntentSourceOf(newIdx) != IntentSource.Commanded,
+                    "复用槽位生成的新单位不应继承旧占用者的命令");
+
+                // ── C. M1-06 不变量不应被破坏 ──
+                int playerIntentCount = CountPlayerIntentUnits(world.GetSnapshot());
+                Expect(playerIntentCount <= 1,
+                    $"大量命令下达之后，存活单位里 IntentSource==Player 的数量仍应 ≤1（实际 {playerIntentCount}）");
+            }
+            finally
+            {
+                cmds.Dispose();
+                world.Dispose();
+            }
+        }
+
+        /// <summary>经 <see cref="SimBridge"/> + <see cref="SquadCommandSystem"/> 走一遍选择、
+        /// 编组与暂停排队；不驱动 <see cref="SquadCommandSystem.Tick"/> 的鼠标输入路径，
+        /// 只调用可以直接断言的公开入口。</summary>
+        private static void ValidateSquadCommandSystemQueueing()
+        {
+            var sim = new SimBridge();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 32;
+            cfg.ArenaHalfExtent = 60f;
+            sim.Begin(cfg, Array.Empty<BehaviorArchetype>());
+
+            var cameraGo = new GameObject("ValidateSquadCommands_TempCamera");
+            Camera camera = cameraGo.AddComponent<Camera>();
+            var squad = new SquadCommandSystem();
+
+            try
+            {
+                squad.Bind(sim, camera);
+
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(0f, -10f), Health = 20f, Radius = 0.5f,
+                    MaxSpeed = 5f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = 9101,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(2f, -10f), Health = 20f, Radius = 0.5f,
+                    MaxSpeed = 5f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = 9102,
+                });
+                sim.OnUpdate(0.01f);
+
+                SimSnapshot snap = sim.Snapshot;
+                SimEntityId f1 = FindEntityId(snap, 9101, out _);
+                SimEntityId f2 = FindEntityId(snap, 9102, out _);
+                Expect(f1.IsValid && f2.IsValid, "SquadCommandSystem 测试单位应全部拥有有效稳定 ID");
+
+                // 14：显式选择
+                squad.SelectExplicit(new[] { f1, f2 });
+                Expect(squad.Selection.Count == 2,
+                    $"SelectExplicit 后选择集应有 2 个单位（实际 {squad.Selection.Count}）");
+
+                // 15：暂停下达 → 排队，内核尚未收到命令
+                var pointA = new float2(20f, -10f);
+                int queuedTargets1 = squad.Issue(UnitCommandKind.Move, pointA, SimEntityId.None, paused: true);
+                Expect(queuedTargets1 == 2 && squad.QueuedCommandCount == 1,
+                    $"暂停下达应排队而不立即执行（返回 {queuedTargets1}，队列 {squad.QueuedCommandCount}）");
+                Expect(!sim.TryGetCommand(f1, out _) && !sim.TryGetCommand(f2, out _),
+                    "排队中的命令不应提前写入内核");
+
+                // 16：再排一条
+                var pointB = new float2(-20f, -10f);
+                int queuedTargets2 = squad.Issue(UnitCommandKind.Guard, pointB, SimEntityId.None, paused: true);
+                Expect(queuedTargets2 == 2 && squad.QueuedCommandCount == 2,
+                    $"第二条排队命令应追加到队列（队列 {squad.QueuedCommandCount}）");
+
+                // 17：兑现 → 顺序稳定，后来者覆盖先前者
+                int flushed = squad.FlushQueuedCommands();
+                Expect(flushed == 2 && squad.QueuedCommandCount == 0,
+                    $"FlushQueuedCommands 应兑现全部排队命令并清空队列（实际兑现 {flushed}）");
+                Expect(sim.TryGetCommand(f1, out UnitCommand cmdF1) && cmdF1.Kind == UnitCommandKind.Guard &&
+                       sim.TryGetCommand(f2, out UnitCommand cmdF2) && cmdF2.Kind == UnitCommandKind.Guard,
+                    "兑现顺序应稳定：后下达的 Guard 应覆盖先下达的 Move");
+
+                // 18：排队存的是选择集快照，不是引用
+                sim.ClearCommand(f1);
+                sim.ClearCommand(f2);
+                squad.SelectExplicit(new[] { f1, f2 });
+                var pointC = new float2(15f, -5f);
+                squad.Issue(UnitCommandKind.Move, pointC, SimEntityId.None, paused: true);
+                squad.ClearSelection();
+                Expect(squad.Selection.Count == 0, "排队后清空选择集，Selection 应立即为空");
+                int flushedAfterClear = squad.FlushQueuedCommands();
+                Expect(flushedAfterClear == 1 &&
+                       sim.TryGetCommand(f1, out UnitCommand snapshotF1) && snapshotF1.Kind == UnitCommandKind.Move &&
+                       sim.TryGetCommand(f2, out UnitCommand snapshotF2) && snapshotF2.Kind == UnitCommandKind.Move,
+                    "排队命令应下达给排队时的选择集快照，即便之后清空了当前选择");
+
+                // 19：编组分配 / 召回
+                squad.SelectExplicit(new[] { f1, f2 });
+                squad.AssignGroup(1);
+                squad.ClearSelection();
+                squad.RecallGroup(1);
+                Expect(squad.Selection.Count == 2,
+                    $"RecallGroup 应恢复编组成员（实际 {squad.Selection.Count}）");
+
+                // 20：编组成员死亡后 RecallGroup 不应把死人放回选择集
+                sim.World.TryResolveUnit(f2, out int f2Idx);
+                sim.ConsumeUnit(f2Idx);
+                squad.ClearSelection();
+                squad.RecallGroup(1);
+                Expect(squad.Selection.Count == 1 && squad.Selection[0] == f1,
+                    $"编组成员死亡后 RecallGroup 不应复活死者进选择集（实际 {squad.Selection.Count}）");
+            }
+            finally
+            {
+                squad.Unbind();
+                sim.End();
+                UnityEngine.Object.DestroyImmediate(cameraGo);
             }
         }
 

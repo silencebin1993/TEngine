@@ -51,6 +51,7 @@ namespace GameLogic.Core
 
         private static bool _modalUi;
         private static bool _gameplayPaused;
+        private static bool _strategicPause;
         private static int _frame = -1;
         private static readonly HashSet<KeyCode> ConsumedKeys = new HashSet<KeyCode>();
 
@@ -68,14 +69,20 @@ namespace GameLogic.Core
         /// <summary>
         /// 玩法是否处于暂停。由阶段**每帧**同步——<c>_paused</c> 有选卡/商店/暂停菜单/GM 调试
         /// 多个写入点，逐个去接线必然漏一个，漏掉的那个会让输入永久卡在让位状态。
-        ///
-        /// M2-02 引入"战略暂停下达命令"后，这里要按暂停原因区分：那条路径必须**保留**
-        /// 战略域输入，否则暂停下根本没法选单位。
         /// </summary>
-        public static void SetGameplayPaused(bool paused)
+        /// <param name="strategic">
+        /// M2-02 战略暂停：玩法冻结，但**保留战略域输入**。
+        /// 「暂停下选择单位、排队下令」正是战略暂停存在的理由，一刀切夺走输入等于取消这个功能。
+        /// 普通暂停（选卡、商店、暂停菜单）传 false，它们都伴随模态面板，本来就该全部让位。
+        /// </param>
+        public static void SetGameplayPaused(bool paused, bool strategic = false)
         {
             _gameplayPaused = paused;
+            _strategicPause = paused && strategic;
         }
+
+        /// <summary>当前是否处于战略暂停（玩法冻结但可以继续选人下令）。</summary>
+        public static bool StrategicPause => _strategicPause;
 
         /// <summary>离开本局时复位，避免上一局的模态状态粘到下一局。</summary>
         public static void Reset()
@@ -83,6 +90,7 @@ namespace GameLogic.Core
             Scope = InputScope.Direct;
             _modalUi = false;
             _gameplayPaused = false;
+            _strategicPause = false;
             _frame = -1;
             ConsumedKeys.Clear();
         }
@@ -90,7 +98,18 @@ namespace GameLogic.Core
         /// <summary>指定域这一帧是否持有输入所有权。</summary>
         public static bool Owns(InputScope scope)
         {
-            return !ModalUiOpen && Scope == scope;
+            // 模态面板压倒一切：面板开着时连战略暂停也得让位，否则 WASD 会一边翻卡组一边推镜头。
+            if (_modalUi)
+            {
+                return false;
+            }
+            // 玩法暂停默认夺走全部输入；战略暂停是唯一例外，且只放行战略域——
+            // 直控输入在冻结的世界里没有意义，放行它只会让玩家以为操作生效了。
+            if (_gameplayPaused && !(_strategicPause && scope == InputScope.Strategy))
+            {
+                return false;
+            }
+            return Scope == scope;
         }
 
         /// <summary>

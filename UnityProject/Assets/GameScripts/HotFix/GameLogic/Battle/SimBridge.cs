@@ -472,6 +472,51 @@ namespace GameLogic.Battle
             }
         }
 
+        // ── RTS 命令与选择（M2-02）──
+
+        /// <summary>
+        /// 给一批单位下达命令。**一次性写入内核**，不是每帧派发——
+        /// 编队再大也只在下令那一刻付出 O(选中数)，逐帧代价由内核的并行作业承担，
+        /// 热更层这里一个循环都没有，不触碰"每帧不得 O(N)"红线。
+        /// </summary>
+        /// <returns>实际接受命令的单位数。</returns>
+        public int IssueCommand(SimEntityId[] targets, in UnitCommand command)
+        {
+            SimWorld w = World;
+            return _running && w != null ? w.IssueCommand(targets, command) : 0;
+        }
+
+        /// <summary>撤销某个单位的命令，交还 AI。</summary>
+        public bool ClearCommand(SimEntityId entityId)
+        {
+            SimWorld w = World;
+            return _running && w != null && w.ClearCommand(entityId);
+        }
+
+        /// <summary>查询单位当前命令。直控时用它把已有编队命令画出来（M2-02 实施第 5 条）。</summary>
+        public bool TryGetCommand(SimEntityId entityId, out UnitCommand command)
+        {
+            SimWorld w = World;
+            if (_running && w != null)
+            {
+                return w.TryGetCommand(entityId, out command);
+            }
+            command = UnitCommand.None;
+            return false;
+        }
+
+        /// <summary>
+        /// 世界 XZ 平面的轴对齐矩形框选。逐单位筛选在 AOT 内核完成，
+        /// 且只在鼠标松开时触发一次（非逐帧），与 <see cref="GetControlCandidates"/> 同一约定。
+        /// </summary>
+        public SimUnitPick[] QueryUnitsInRect(float2 min, float2 max, bool commandableOnly = true)
+        {
+            SimWorld w = World;
+            return _running && w != null
+                ? w.QueryUnitsInRect(min, max, commandableOnly)
+                : Array.Empty<SimUnitPick>();
+        }
+
         // ── 写入接口（全部只是入队，实际生效在内核 Step）──
 
         public int Spawn(in SpawnRequest req)

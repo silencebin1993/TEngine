@@ -8,6 +8,7 @@ using GameLogic.ArtBinding;
 using GameLogic.Battle;
 using GameLogic.Battle.Feedback;
 using GameLogic.Cards;
+using GameLogic.Command;
 using GameLogic.Core;
 using GameLogic.MetabolicSlice.Bag;
 using GameLogic.MetabolicSlice.Combat;
@@ -82,6 +83,12 @@ namespace GameLogic.Stage.CellStage
         private Vector3 _cameraFollowOffset = DefaultCameraOffset;
         /// <summary>M2-01 镜头状态机。刻意不进 _hub——暂停时它仍要跑（见 Update 里的注释）。</summary>
         private CameraDirector _cameraDirector;
+        /// <summary>M2-02 选择/编组/命令。与镜头同理，不进 _hub：战略暂停下要能继续选人下令。</summary>
+        private SquadCommandSystem _squadCommands;
+        /// <summary>M2-02 白模叠加层（选择框 / 选中环 / 命令线）。</summary>
+        private Battle.Feedback.WhiteboxSquadOverlay _squadOverlay;
+        /// <summary>M2-02：本次暂停是不是"战略暂停"（玩法冻结但仍可选人下令）。</summary>
+        private bool _strategicPause;
 
         private bool _running;
         private bool _paused;
@@ -128,14 +135,25 @@ namespace GameLogic.Stage.CellStage
         /// <summary>M2-01：镜头状态机。验收与调试读它，玩法层不应绕过 InputRouter 直接问镜头状态。</summary>
         public CameraDirector CameraDirector => _cameraDirector;
 
+        /// <summary>M2-02：选择、编组与命令下达。</summary>
+        public SquadCommandSystem SquadCommands => _squadCommands;
+
+        /// <summary>M2-02：当前是否为战略暂停（玩法冻结，但战略域输入保留）。</summary>
+        public bool StrategicPause => _paused && _strategicPause;
+
         /// <summary>story-005：暂停菜单最小公开入口，复用 Draft 已验证的冻结语义（不碰 Time.timeScale）。</summary>
-        public void SetPaused(bool paused)
+        /// <param name="strategic">
+        /// M2-02 战略暂停：玩法照常冻结，但保留战略域输入，用于暂停下选人与排队下令。
+        /// 选卡、商店、暂停菜单一律传 false——它们都伴随模态面板，本来就该全部让位。
+        /// </param>
+        public void SetPaused(bool paused, bool strategic = false)
         {
             if (!_running)
             {
                 return;
             }
             _paused = paused;
+            _strategicPause = paused && strategic;
         }
 
         /// <summary>story-005：放弃本局只标记死因，不调用 GameRoot——阶段不需要知道 director，同 Exit() 既有原则。</summary>
@@ -291,11 +309,45 @@ namespace GameLogic.Stage.CellStage
             _camera.transform.SetPositionAndRotation(_cameraFollowOffset, DefaultCameraRotation);
         }
 
+        /// <summary>
+        /// M2-02 战略暂停开关（战略视角下按空格）。
+        ///
+        /// 只从战略视角进入：直控下冻结世界再操作没有意义，而且 Space 在直控域是冲刺。
+        /// 同一个键在两个域里各有含义，靠 <see cref="InputScope"/> 互斥，不靠这里判断镜头状态。
+        ///
+        /// 解除只允许解除**自己开的那次**暂停：选卡/商店/暂停菜单也走 `_paused`，
+        /// 不加这道判断的话一个空格就能把三选一面板背后的世界解冻。
+        /// </summary>
+        private void HandleStrategicPauseInput()
+        {
+            if (!InputRouter.ConsumeKeyDown(KeyCode.Space, InputScope.Strategy))
+            {
+                return;
+            }
+
+            if (!_paused)
+            {
+                SetPaused(true, strategic: true);
+            }
+            else if (_strategicPause)
+            {
+                SetPaused(false);
+            }
+        }
+
         /// <summary>M2-01：镜头状态机。<see cref="SetupSim"/> 之后绑定——它要读场地半径做边界。</summary>
         private void SetupCameraDirector()
         {
             _cameraDirector = new CameraDirector();
             _cameraDirector.Bind(_camera, _sim, _cameraFollowOffset, _sim.ArenaHalfExtent);
+            _squadCommands = new SquadCommandSystem();
+            _squadCommands.Bind(_sim, _camera);
+
+            // M2-02 白模叠加层：选择框 / 选中环 / 命令指示线。
+            // 刻意不挂 DontDestroyOnLoad——那在 Edit 模式必抛，而回归测试会直接 Enter() 本阶段。
+            var overlayGo = new GameObject("__SquadOverlay");
+            _squadOverlay = overlayGo.AddComponent<WhiteboxSquadOverlay>();
+            _squadOverlay.Bind(_sim, _squadCommands);
         }
 
         /// <summary>
@@ -1063,8 +1115,12 @@ namespace GameLogic.Stage.CellStage
             //
             // 每帧同步暂停态而不是在 6 个 `_paused` 写入点逐个接线：漏掉任何一个（选卡跳过、
             // GM 调试、放弃本局）都会让输入永久卡在让位状态，而那种 bug 只在特定路径下才复现。
-            InputRouter.SetGameplayPaused(_paused);
+            HandleStrategicPauseInput();
+            InputRouter.SetGameplayPaused(_paused, _strategicPause);
             _cameraDirector?.Tick(_paused);
+            // M2-02：选择与命令同样要在暂停早退之前——"暂停下令后恢复顺序稳定"是它的验收项，
+            // 而下令这件事本身必须在冻结期间还能发生。
+            _squadCommands?.Tick(_paused);
 
             // 选卡时暂停玩法推进，但不暂停 UI
             if (_paused)
@@ -1576,9 +1632,28 @@ namespace GameLogic.Stage.CellStage
             // 与生涯统计同一条 Reject-to-Safe 纪律：Save 永不 throw，存档异常不阻塞退出流程。
             ControlPersistence.Save(_sim.CurrentHandoff);
 
-            // M2-01：解绑镜头并复位输入所有权，否则上一局的 Scope/模态状态会粘到下一局。
+            // M2-01/M2-02：解绑镜头与指挥层并复位输入所有权，
+            // 否则上一局的 Scope/模态状态、选择集与编组会粘到下一局。
+            if (_squadOverlay != null)
+            {
+                // Edit 模式下 Destroy 会抛「may not be called from edit mode」，
+                // 而回归测试就是直接 Enter()/Exit() 本阶段的——必须分路。
+                GameObject overlayGo = _squadOverlay.gameObject;
+                if (Application.isPlaying)
+                {
+                    UnityEngine.Object.Destroy(overlayGo);
+                }
+                else
+                {
+                    UnityEngine.Object.DestroyImmediate(overlayGo);
+                }
+                _squadOverlay = null;
+            }
+            _squadCommands?.Unbind();
+            _squadCommands = null;
             _cameraDirector?.Unbind();
             _cameraDirector = null;
+            _strategicPause = false;
 
             _controlPresentationScope?.Dispose();
             _controlPresentationScope = null;
