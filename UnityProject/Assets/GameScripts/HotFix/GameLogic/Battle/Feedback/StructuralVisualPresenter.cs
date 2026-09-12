@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using BinGames.Sim;
 using Cysharp.Threading.Tasks;
 using GameLogic.ArtBinding;
 using GameLogic.Core;
@@ -34,6 +35,7 @@ namespace GameLogic.Battle.Feedback
 
         private SimBridge _sim;
         private int _lastVersion = -1;
+        private SignalScope _scope;
 
         private GameObject _root;
         private readonly Dictionary<VisualSlotTag, Transform> _anchors = new Dictionary<VisualSlotTag, Transform>();
@@ -49,6 +51,9 @@ namespace GameLogic.Battle.Feedback
             CreateAnchor(VisualSlotTag.Motility, new Vector3(0f, 0.2f, -0.6f));
             CreateAnchor(VisualSlotTag.Vital, new Vector3(0f, 0.5f, 0f));
             CreateAnchor(VisualSlotTag.Appendage, new Vector3(0.6f, 0.2f, 0f));
+            _root.SetActive(false);
+            _scope = new SignalScope();
+            _scope.On<ControlledUnitChangedSignal>(_ => ClearControlledPresentation());
         }
 
         private void CreateAnchor(VisualSlotTag tag, Vector3 localOffset)
@@ -66,7 +71,14 @@ namespace GameLogic.Battle.Feedback
                 return;
             }
 
-            float2 p = _sim.PlayerPosition;
+            if (!_sim.TryGetControlledPresentation(out SimControlledUnitView controlled))
+            {
+                ClearControlledPresentation();
+                return;
+            }
+
+            _root.SetActive(true);
+            float2 p = controlled.Position;
             _root.transform.position = new Vector3(p.x, 0f, p.y);
 
             var slots = GameLogic.UI.Battle.MetabolicSlicePanel.Instance?.Structural;
@@ -93,7 +105,7 @@ namespace GameLogic.Battle.Feedback
 
                 if (_slotGo.TryGetValue(tag, out GameObject oldGo) && oldGo != null)
                 {
-                    UnityEngine.Object.Destroy(oldGo);
+                    PresentationObjectLifetime.Destroy(oldGo);
                 }
                 _slotGo.Remove(tag);
                 _cachedPartId[tag] = newPartId;
@@ -129,7 +141,7 @@ namespace GameLogic.Battle.Feedback
             }
             if (!_cachedPartId.TryGetValue(tag, out string currentExpected) || currentExpected != partId)
             {
-                UnityEngine.Object.Destroy(go);
+                PresentationObjectLifetime.Destroy(go);
                 return;
             }
 
@@ -151,11 +163,21 @@ namespace GameLogic.Battle.Feedback
             return count;
         }
 
-        public override void OnExit()
+        private void ClearControlledPresentation()
         {
             if (_root != null)
             {
-                UnityEngine.Object.Destroy(_root);
+                _root.SetActive(false);
+            }
+        }
+
+        public override void OnExit()
+        {
+            _scope?.Dispose();
+            _scope = null;
+            if (_root != null)
+            {
+                PresentationObjectLifetime.Destroy(_root);
                 _root = null;
             }
 

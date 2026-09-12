@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Text;
 using BinGames.Sim;
+using GameLogic.Battle;
 using GameLogic.Cards;
 using GameLogic.Core;
 using GameLogic.Progression;
@@ -42,6 +43,10 @@ namespace GameLogic.EditorTools
             {
                 ValidateData();
                 ValidateSimKernel();
+                ValidateControlledUnitIdentity();
+                ValidateUnifiedEntityIntents();
+                ValidateControlBridge();
+                ValidateControlledPresentation();
                 ValidateSpatialHash();
                 ValidateDevourThreshold();
                 ValidateStatusExpiry();
@@ -278,6 +283,567 @@ namespace GameLogic.EditorTools
                 n++;
             }
             return n == 0 ? 0f : sum / n;
+        }
+
+        // ── 控制身份 ────────────────────────────────────────
+
+        /// <summary>
+        /// ProjectA M1-02：稳定实体 ID、唯一玩家意图来源、受控切换、槽位复用与世界重置。
+        /// 这里只验证身份状态机，不提前把玩家/AI 意图统一接进作业（那属于 M1-03）。
+        /// </summary>
+        private static void ValidateControlledUnitIdentity()
+        {
+            Line("\n[2.1] 控制身份数据模型（M1-02）");
+
+            var world = new SimWorld();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 64;
+            world.Initialize(cfg);
+
+            try
+            {
+                SimEntityId unitA = world.ControlledUnitId;
+                int indexB = world.SpawnUnit(new SpawnRequest
+                {
+                    Position = new float2(2f, 0f), Health = 10f, Radius = 0.5f,
+                    MaxSpeed = 1f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.Scripted, LogicId = 101,
+                });
+                int indexC = world.SpawnUnit(new SpawnRequest
+                {
+                    Position = new float2(4f, 0f), Health = 10f, Radius = 0.5f,
+                    MaxSpeed = 1f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = 102,
+                });
+                int enemyIndex = world.SpawnUnit(new SpawnRequest
+                {
+                    Position = new float2(6f, 0f), Health = 10f, Radius = 0.5f,
+                    MaxSpeed = 1f, ArchetypeId = 0, Faction = SimFaction.Hostile,
+                    IntentSource = IntentSource.AI, LogicId = 103,
+                });
+
+                world.TryGetEntityId(indexB, out SimEntityId unitB);
+                world.TryGetEntityId(indexC, out SimEntityId unitC);
+                world.TryGetEntityId(enemyIndex, out SimEntityId enemy);
+                Expect(unitA.IsValid && unitB.IsValid && unitC.IsValid &&
+                       unitA != unitB && unitA != unitC && unitB != unitC,
+                    "三个友军应拥有互不重复的稳定实体 ID");
+
+                world.TryGetUnitControlState(unitB, out SimUnitControlState scriptedBeforeControl);
+                Expect(scriptedBeforeControl.IntentSource == IntentSource.Scripted,
+                    "生成单位应保存 Scripted 意图来源");
+
+                ControlSwitchResult switchResult = world.TrySwitchControlledUnit(unitB);
+                world.TryGetUnitControlState(unitA, out SimUnitControlState stateA);
+                world.TryGetUnitControlState(unitB, out SimUnitControlState stateB);
+                Expect(switchResult == ControlSwitchResult.Success && world.ControlledUnitId == unitB,
+                    "控制权应从实体 A 切换到实体 B");
+                Expect(stateA.IntentSource == IntentSource.AI && stateB.IntentSource == IntentSource.Player,
+                    "切换后 A 恢复 AI，B 成为唯一 Player 意图来源");
+
+                SimEntityId controlledBeforeRejects = world.ControlledUnitId;
+                Expect(world.TrySwitchControlledUnit(enemy) == ControlSwitchResult.TargetNotFriendly &&
+                       world.ControlledUnitId == controlledBeforeRejects,
+                    "敌军控制请求应被拒绝且不改变当前控制实体");
+                Expect(world.TrySwitchControlledUnit(new SimEntityId(ulong.MaxValue)) ==
+                       ControlSwitchResult.TargetNotFound && world.ControlledUnitId == controlledBeforeRejects,
+                    "不存在目标的控制请求应被拒绝且不改变当前控制实体");
+
+                world.KillUnit(indexB, 0);
+                world.TryGetUnitControlState(unitB, out SimUnitControlState deadStateB);
+                Expect(world.ControlledUnitId == SimEntityId.None,
+                    "当前控制实体死亡时世界应明确进入无控制状态");
+                Expect(deadStateB.IntentSource == IntentSource.Scripted &&
+                       world.TrySwitchControlledUnit(unitB) == ControlSwitchResult.TargetDead,
+                    "死亡目标应恢复原意图来源，控制请求返回 TargetDead");
+
+                int reusedIndex = world.SpawnUnit(new SpawnRequest
+                {
+                    Position = new float2(8f, 0f), Health = 10f, Radius = 0.5f,
+                    MaxSpeed = 1f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    LogicId = 104,
+                });
+                world.TryGetEntityId(reusedIndex, out SimEntityId replacement);
+                Expect(reusedIndex == indexB && replacement != unitB &&
+                       !world.TryResolveUnit(unitB, out _) && world.TryResolveUnit(replacement, out int resolved) &&
+                       resolved == reusedIndex,
+                    "槽位复用必须分配新 ID，旧 ID 不得误解析到新单位");
+
+                Expect(world.TrySwitchControlledUnit(unitC) == ControlSwitchResult.Success,
+                    "重置前应可控制另一个存活友军");
+                SimEntityId controlledBeforeReset = world.ControlledUnitId;
+                world.Initialize(cfg);
+                SimSnapshot resetSnapshot = world.GetSnapshot();
+                Expect(resetSnapshot.Count == 1 && world.ControlledUnitId.IsValid &&
+                       world.ControlledUnitId != controlledBeforeReset &&
+                       resetSnapshot.ControlledUnitId == world.ControlledUnitId &&
+                       resetSnapshot.IntentSourceOf(SimConst.PlayerIndex) == IntentSource.Player,
+                    "世界重置后应确定地创建一个新的默认控制实体");
+                Expect(!world.TryResolveUnit(controlledBeforeReset, out _),
+                    "世界重置前的控制 ID 不得解析到重置后的实体");
+            }
+            finally
+            {
+                world.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// ProjectA M1-03：Player、AI、Scripted 共用 UnitIntent；切换控制后旧实体恢复 AI，
+        /// 伤害、接触伤害与吞噬查询跟随当前受控实体而非槽位 0。
+        /// </summary>
+        private static void ValidateUnifiedEntityIntents()
+        {
+            Line("\n[2.2] 统一实体意图与作业去玩家特判（M1-03）");
+
+            var world = new SimWorld();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 64;
+            cfg.ArenaHalfExtent = 40f;
+            world.Initialize(cfg);
+
+            BehaviorArchetype chase = BehaviorArchetype.Default;
+            chase.Kind = BehaviorKind.Chase;
+            chase.Accel = 100f;
+            chase.AggroRange = 100f;
+            chase.WanderStrength = 0f;
+            chase.AttackDamage = 0f;
+            chase.AttackRange = 0f;
+            chase.RangedSpeed = 0f;
+            chase.TurnRate = 0f;
+            world.SetArchetypes(new[] { chase });
+
+            SimCommandBuffer cmds = default;
+            cmds.Initialize(Unity.Collections.Allocator.Persistent, 32);
+
+            try
+            {
+                int unitBIndex = world.SpawnUnit(new SpawnRequest
+                {
+                    Position = new float2(-8f, 0f), Health = 100f, Radius = 1f,
+                    MaxSpeed = 6f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = 201,
+                });
+                int unitCIndex = world.SpawnUnit(new SpawnRequest
+                {
+                    Position = new float2(8f, 0f), Health = 100f, Radius = 1f,
+                    MaxSpeed = 6f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = 202,
+                });
+                int scriptedIndex = world.SpawnUnit(new SpawnRequest
+                {
+                    Position = new float2(0f, 8f), Health = 100f, Radius = 1f,
+                    MaxSpeed = 6f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.Scripted, LogicId = 203,
+                });
+                int hostileIndex = world.SpawnUnit(new SpawnRequest
+                {
+                    Position = new float2(8f, 8f), Health = 100f, Radius = 0.5f,
+                    MaxSpeed = 5f, ArchetypeId = 0, Faction = SimFaction.Hostile,
+                    IntentSource = IntentSource.AI, LogicId = 204,
+                });
+
+                world.TryGetEntityId(unitBIndex, out SimEntityId unitB);
+                world.TryGetEntityId(unitCIndex, out SimEntityId unitC);
+                world.TryGetEntityId(scriptedIndex, out SimEntityId scripted);
+                world.TryGetEntityId(hostileIndex, out SimEntityId hostile);
+
+                Expect(world.TrySwitchControlledUnit(unitB) == ControlSwitchResult.Success,
+                    "M1-03 初始控制目标应可切到友军 B");
+
+                PlayerIntent playerMove = PlayerIntent.Idle;
+                playerMove.MoveDir = new float2(0f, 1f);
+                cmds.SetPlayerIntent(playerMove);
+                UnitIntent scriptedMove = UnitIntent.Idle(scripted, IntentSource.Scripted);
+                scriptedMove.MoveDir = new float2(-1f, 0f);
+                cmds.SetUnitIntent(scriptedMove);
+                world.Step(0.05f, ref cmds);
+
+                SimSnapshot first = world.GetSnapshot();
+                Expect(first.FinalIntent[unitBIndex].Source == IntentSource.Player &&
+                       first.Position[unitBIndex].y > 0f,
+                    "受控友军 B 应从统一 UnitIntent 接收玩家移动");
+                Expect(first.FinalIntent[scriptedIndex].Source == IntentSource.Scripted &&
+                       first.Position[scriptedIndex].x < 0f,
+                    "Scripted 单位应从同一 UnitIntent 形状接收移动");
+                Expect(first.FinalIntent[unitCIndex].Source == IntentSource.AI &&
+                       first.Position[unitCIndex].x < 8f,
+                    "未受控友军 C 应继续由 AI 朝当前控制目标行动");
+
+                float unitBXBeforeSwitch = first.Position[unitBIndex].x;
+                float2 hostilePositionBefore = first.Position[hostileIndex];
+                float2 controlledPositionBefore = first.Position[unitCIndex];
+                float2 legacySlotPositionBefore = first.Position[SimConst.PlayerIndex];
+                Expect(world.TrySwitchControlledUnit(unitC) == ControlSwitchResult.Success,
+                    "控制权应可从友军 B 切到友军 C");
+
+                PlayerIntent secondPlayerMove = PlayerIntent.Idle;
+                secondPlayerMove.MoveDir = new float2(0f, -1f);
+                cmds.SetPlayerIntent(secondPlayerMove);
+                UnitIntent stalePlayerIntent = UnitIntent.Idle(unitB, IntentSource.Player);
+                stalePlayerIntent.MoveDir = new float2(-1f, 0f);
+                cmds.SetUnitIntent(stalePlayerIntent);
+                world.Step(0.05f, ref cmds);
+
+                SimSnapshot second = world.GetSnapshot();
+                Expect(second.FinalIntent[unitCIndex].Source == IntentSource.Player &&
+                       second.Position[unitCIndex].y < 0f,
+                    "切换后友军 C 应接收玩家意图");
+                Expect(second.FinalIntent[unitBIndex].Source == IntentSource.AI &&
+                       second.Position[unitBIndex].x > unitBXBeforeSwitch,
+                    "离开的友军 B 应恢复 AI，过期 Player 命令不得覆盖它");
+                UnitIntent hostileIntent = second.FinalIntent[hostileIndex];
+                float2 hostileIntentDirection = math.normalizesafe(hostileIntent.MoveDir);
+                float2 directionToControlled = math.normalizesafe(controlledPositionBefore - hostilePositionBefore);
+                float2 directionToLegacySlot = math.normalizesafe(legacySlotPositionBefore - hostilePositionBefore);
+                float controlledTrackingDot = math.dot(hostileIntentDirection, directionToControlled);
+                float legacySlotTrackingDot = math.dot(hostileIntentDirection, directionToLegacySlot);
+                Expect(hostileIntent.Source == IntentSource.AI &&
+                       controlledTrackingDot > 0.999f && controlledTrackingDot > legacySlotTrackingDot + 0.1f,
+                    $"敌军 AI 应追踪当前控制实体 C，而不是固定槽位 0；" +
+                    $"Hostile {hostilePositionBefore}→{second.Position[hostileIndex]}，" +
+                    $"C {controlledPositionBefore}→{second.Position[unitCIndex]}，" +
+                    $"FinalIntent Source={hostileIntent.Source} MoveDir={hostileIntent.MoveDir}，" +
+                    $"dot(C)={controlledTrackingDot:F4} dot(slot0)={legacySlotTrackingDot:F4}");
+                Expect(world.TrySwitchControlledUnit(hostile) == ControlSwitchResult.TargetNotFriendly,
+                    "统一意图迁移后敌军仍不可被玩家控制");
+
+                float controlledHealthBefore = world.PlayerHealth;
+                cmds.Damage(new DamageRequest
+                {
+                    Origin = world.PlayerPosition,
+                    Radius = -1f,
+                    TargetIndex = unitCIndex,
+                    Amount = 7f,
+                    TargetFaction = SimFaction.PlayerMinion,
+                    SourceLogicId = 204,
+                });
+                cmds.SetPlayerIntent(PlayerIntent.Idle);
+                world.Step(0.05f, ref cmds);
+                SimSnapshot damaged = world.GetSnapshot();
+                Expect(math.abs(world.PlayerHealth - (controlledHealthBefore - 7f)) < 0.001f &&
+                       math.abs(damaged.PlayerDamageTaken - 7f) < 0.001f,
+                    "JobDamage 应把受控友军 C 作为兼容伤害反馈目标");
+
+                chase.AttackDamage = 3f;
+                chase.AttackRange = 1f;
+                chase.AttackCooldown = 1f;
+                world.SetArchetypes(new[] { chase });
+                int contactHostile = world.SpawnUnit(new SpawnRequest
+                {
+                    Position = world.PlayerPosition + new float2(0.5f, 0f),
+                    Health = 100f, Radius = 0.5f, MaxSpeed = 0f,
+                    ArchetypeId = 0, Faction = SimFaction.Hostile, LogicId = 205,
+                });
+                float beforeContact = world.PlayerHealth;
+                cmds.SetPlayerIntent(PlayerIntent.Idle);
+                world.Step(0.05f, ref cmds);
+                Expect(contactHostile >= 0 && math.abs(world.PlayerHealth - (beforeContact - 3f)) < 0.001f,
+                    "JobContactDamage 应围绕当前受控友军 C 结算");
+
+                world.SetPlayerStats(world.PlayerHealth, world.PlayerHealth, 2f, 6f);
+                int pickupIndex = world.SpawnUnit(new SpawnRequest
+                {
+                    Position = world.PlayerPosition, Health = 1f, Radius = 0.25f,
+                    MaxSpeed = 0f, ArchetypeId = 0, Faction = SimFaction.Pickup, LogicId = 206,
+                });
+                cmds.SetPlayerIntent(PlayerIntent.Idle);
+                world.Step(0.05f, ref cmds);
+                SimSnapshot devour = world.GetSnapshot();
+                bool foundPickup = false;
+                for (int i = 0; i < devour.DevourCandidateCount; i++)
+                {
+                    if (devour.DevourCandidates[i] == pickupIndex)
+                    {
+                        foundPickup = true;
+                        break;
+                    }
+                }
+                Expect(foundPickup, "JobDevourScan 应以当前受控友军 C 为吞噬查询中心");
+            }
+            finally
+            {
+                cmds.Dispose();
+                world.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// ProjectA M1-04：HotFix 只经 SimBridge 查询/切换控制；候选规则、失败码、
+        /// 状态不变、冷却与单次事件都在这一层验收。
+        /// </summary>
+        private static void ValidateControlBridge()
+        {
+            Line("\n[2.3] HotFix/模拟控制桥接（M1-04）");
+
+            var sim = new SimBridge();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 64;
+            cfg.ArenaHalfExtent = 40f;
+            sim.Begin(cfg, Array.Empty<BehaviorArchetype>());
+            sim.ConfigureControlSwitch(5f, 0.5f);
+
+            int eventCount = 0;
+            ControlledUnitChangedSignal lastEvent = default;
+            Action<ControlledUnitChangedSignal> handler = signal =>
+            {
+                eventCount++;
+                lastEvent = signal;
+            };
+            Signals.Subscribe(handler);
+
+            try
+            {
+                SimEntityId initial = sim.ControlledUnitId;
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(2f, 0f), Health = 20f, Radius = 0.5f,
+                    MaxSpeed = 0f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.Scripted, LogicId = 301,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(4f, 0f), Health = 20f, Radius = 0.5f,
+                    MaxSpeed = 0f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.Scripted, LogicId = 302,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(9f, 0f), Health = 20f, Radius = 0.5f,
+                    MaxSpeed = 0f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.Scripted, LogicId = 303,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(1f, 0f), Health = 20f, Radius = 0.5f,
+                    MaxSpeed = 0f, ArchetypeId = 0, Faction = SimFaction.Hostile,
+                    IntentSource = IntentSource.Scripted, LogicId = 304,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(3f, 0f), Health = 20f, Radius = 0.5f,
+                    MaxSpeed = 0f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.Scripted, LogicId = 305,
+                });
+                sim.OnUpdate(0.01f);
+
+                SimSnapshot snap = sim.Snapshot;
+                SimEntityId unitB = FindEntityId(snap, 301, out int unitBIndex);
+                SimEntityId unitC = FindEntityId(snap, 302, out _);
+                SimEntityId farUnit = FindEntityId(snap, 303, out _);
+                SimEntityId enemy = FindEntityId(snap, 304, out _);
+                SimEntityId deadUnit = FindEntityId(snap, 305, out int deadIndex);
+                sim.ConsumeUnit(deadIndex);
+
+                SimControlCandidate[] candidates = sim.GetControlCandidates();
+                Expect(candidates.Length == 2 && candidates[0].EntityId == unitB &&
+                       candidates[1].EntityId == unitC,
+                    "候选应只含范围内存活友军，并按距离稳定排序");
+                Expect(sim.TryGetControlledUnit(out SimUnitControlState current) &&
+                       current.EntityId == initial,
+                    "桥接层应能只读查询当前受控稳定实体");
+
+                Expect(sim.RequestControlSwitch(unitB) == ControlRequestResult.Success &&
+                       sim.ControlledUnitId == unitB && eventCount == 1 &&
+                       lastEvent.PreviousUnitId == initial && lastEvent.CurrentUnitId == unitB &&
+                       lastEvent.Result == ControlRequestResult.Success,
+                    "合法切换 A→B 应成功且只发布一次包含前后稳定 ID 的事件");
+
+                SimEntityId beforeRejects = sim.ControlledUnitId;
+                Expect(sim.RequestControlSwitch(unitB) == ControlRequestResult.AlreadyControlled,
+                    "重复请求当前实体应返回 AlreadyControlled");
+                Expect(sim.RequestControlSwitch(enemy) == ControlRequestResult.TargetNotFriendly,
+                    "敌军请求应返回 TargetNotFriendly");
+                Expect(sim.RequestControlSwitch(deadUnit) == ControlRequestResult.TargetDead,
+                    "死亡目标请求应返回 TargetDead");
+                Expect(sim.RequestControlSwitch(farUnit) == ControlRequestResult.OutOfSignalRange,
+                    "越距友军请求应返回 OutOfSignalRange");
+                Expect(sim.RequestControlSwitch(new SimEntityId(ulong.MaxValue)) ==
+                       ControlRequestResult.TargetNotFound,
+                    "不存在稳定 ID 应返回 TargetNotFound");
+                Expect(sim.RequestControlSwitch(unitC) == ControlRequestResult.CooldownActive &&
+                       sim.ControlledUnitId == beforeRejects && eventCount == 1,
+                    "冷却中合法目标应被拒绝，所有非法请求均不得改变状态或发布事件");
+
+                sim.OnUpdate(0.5f);
+                Expect(sim.RequestControlSwitch(unitC) == ControlRequestResult.Success &&
+                       sim.ControlledUnitId == unitC && eventCount == 2 &&
+                       lastEvent.PreviousUnitId == unitB && lastEvent.CurrentUnitId == unitC,
+                    "冷却结束后 B→C 应成功，且该次切换仍只发布一次事件");
+
+                // 确保测试确实取得了有效实体，避免索引查找失败时出现误通过。
+                Expect(unitB.IsValid && unitC.IsValid && farUnit.IsValid && enemy.IsValid &&
+                       deadUnit.IsValid && unitBIndex >= 0,
+                    "M1-04 测试单位应全部拥有有效稳定 ID");
+            }
+            finally
+            {
+                Signals.Unsubscribe(handler);
+                sim.End();
+            }
+        }
+
+        private static SimEntityId FindEntityId(SimSnapshot snapshot, int logicId, out int unitIndex)
+        {
+            for (int i = 0; i < snapshot.Count; i++)
+            {
+                if (snapshot.LogicId[i] == logicId)
+                {
+                    unitIndex = i;
+                    return snapshot.EntityId[i];
+                }
+            }
+            unitIndex = SimConst.InvalidIndex;
+            return SimEntityId.None;
+        }
+
+        /// <summary>
+        /// ProjectA M1-05：连续 20 次切换期间，HUD/状态视图、相机锚点、渲染控制索引
+        /// 与旧目标玩家专属缓存始终跟随稳定控制 ID；失去目标后保留显式战略锚点。
+        /// </summary>
+        private static void ValidateControlledPresentation()
+        {
+            Line("\n[2.4] 表现与 UI 受控实体查找（M1-05）");
+
+            var sim = new SimBridge();
+            Expect(!sim.TryGetControlledPresentation(out _) &&
+                   !sim.TryGetPresentationAnchor(out _, out _),
+                "模拟生成前 UI/表现查询应安全失败，不抛异常或伪造索引 0");
+
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 64;
+            cfg.ArenaHalfExtent = 100f;
+            sim.Begin(cfg, Array.Empty<BehaviorArchetype>());
+            sim.ConfigureControlSwitch(100f, 0f);
+
+            var renderer = new SimRenderer();
+            renderer.Initialize(Array.Empty<SimVisual>(), cfg.UnitCapacity);
+
+            int eventCount = 0;
+            SimEntityId[] ids = null;
+            int[] indexes = null;
+            int[] baseVisuals = { 0, 11, 12 };
+            Action<ControlledUnitChangedSignal> handler = signal =>
+            {
+                eventCount++;
+                renderer.ClearControlledPresentation();
+                if (ids == null) { return; }
+                for (int i = 0; i < ids.Length; i++)
+                {
+                    if (ids[i] == signal.PreviousUnitId)
+                    {
+                        sim.SetUnitVisualId(ids[i], baseVisuals[i]);
+                        break;
+                    }
+                }
+            };
+            Signals.Subscribe(handler);
+
+            try
+            {
+                SimEntityId initial = sim.ControlledUnitId;
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(10f, 3f), Health = 61f, Radius = 0.7f,
+                    MaxSpeed = 0f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.Scripted, InitialStatus = SimStatus.Conductive,
+                    LogicId = 401, VisualId = 11,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(-7f, 5f), Health = 37f, Radius = 1.1f,
+                    MaxSpeed = 0f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.Scripted, InitialStatus = SimStatus.Marked,
+                    LogicId = 402, VisualId = 12,
+                });
+                sim.OnUpdate(0f);
+
+                SimSnapshot spawned = sim.Snapshot;
+                SimEntityId unitB = FindEntityId(spawned, 401, out int unitBIndex);
+                SimEntityId unitC = FindEntityId(spawned, 402, out int unitCIndex);
+                ids = new[] { initial, unitB, unitC };
+                indexes = new[] { spawned.ControlledUnitIndex, unitBIndex, unitCIndex };
+
+                bool requestsOk = true;
+                bool hudAndStatusOk = true;
+                bool cameraAnchorOk = true;
+                bool rendererLookupOk = true;
+                bool oldTargetCleanupOk = true;
+                SimEntityId current = initial;
+
+                renderer.Draw(in spawned);
+                for (int iteration = 0; iteration < 20; iteration++)
+                {
+                    int targetSlot = (iteration + 1) % ids.Length;
+                    SimEntityId target = ids[targetSlot];
+                    SimEntityId previous = current;
+                    int previousSlot = Array.IndexOf(ids, previous);
+
+                    sim.SetUnitVisualId(previous, 99);
+                    renderer.SetControlledLunge(new float2(1f, 0f), 1f);
+                    requestsOk &= sim.RequestControlSwitch(target) == ControlRequestResult.Success;
+                    current = target;
+
+                    SimSnapshot snap = sim.Snapshot;
+                    hudAndStatusOk &= sim.TryGetControlledPresentation(out SimControlledUnitView view) &&
+                        view.EntityId == target && view.UnitIndex == indexes[targetSlot] &&
+                        math.abs(view.Health - snap.Health[indexes[targetSlot]]) < 0.001f &&
+                        view.Status == (SimStatus)snap.Status[indexes[targetSlot]];
+
+                    cameraAnchorOk &= sim.TryGetPresentationAnchor(out float2 cameraAnchor, out bool hasControlled) &&
+                        hasControlled && math.distancesq(cameraAnchor, snap.Position[indexes[targetSlot]]) < 0.0001f;
+
+                    renderer.Draw(in snap);
+                    rendererLookupOk &= renderer.LastControlledUnitId == target &&
+                        renderer.LastControlledUnitIndex == indexes[targetSlot];
+                    oldTargetCleanupOk &= !renderer.HasControlledLunge && previousSlot >= 0 &&
+                        snap.VisualId[indexes[previousSlot]] == baseVisuals[previousSlot];
+                }
+
+                Expect(requestsOk && eventCount == 20,
+                    "连续 20 次切换应全部成功且每次恰好发布一个事件");
+                Expect(hudAndStatusOk,
+                    "连续切换期间 HUD 生命与状态视图应始终解析当前 ControlledUnitId");
+                Expect(cameraAnchorOk,
+                    "连续切换期间相机战术锚点应始终等于当前受控实体位置");
+                Expect(rendererLookupOk,
+                    "SimRenderer 应在每次切换后解析到当前受控稳定 ID 与槽位");
+                Expect(oldTargetCleanupOk,
+                    "切换事件应清理旧目标前冲缓存并恢复旧目标基础视觉");
+
+                sim.TryGetControlledPresentation(out SimControlledUnitView beforeLoss);
+                float2 lastTacticalPosition = beforeLoss.Position;
+                sim.ConsumeUnit(beforeLoss.UnitIndex);
+                renderer.SetControlledLunge(new float2(1f, 0f), 1f);
+                SimSnapshot withoutControl = sim.Snapshot;
+                renderer.Draw(in withoutControl);
+                float2 strategicAnchor = float2.zero;
+                bool stillControlled = true;
+                Expect(!sim.TryGetControlledPresentation(out _) &&
+                       sim.TryGetPresentationAnchor(out strategicAnchor, out stillControlled) &&
+                       !stillControlled && math.distancesq(strategicAnchor, lastTacticalPosition) < 0.0001f,
+                    "无控制实体时应回退到显式保存的最后有效战术位置，而不是偷偷回原点");
+                Expect(math.lengthsq(sim.PlayerPosition) < 0.0001f &&
+                       math.distancesq(sim.PlayerPosition, strategicAnchor) > 0.0001f,
+                    "失去控制后 gameplay PlayerPosition 应返回明确零值，不得泄漏相机的旧战略锚点");
+                Expect(renderer.LastControlledUnitIndex == SimConst.InvalidIndex &&
+                       !renderer.HasControlledLunge,
+                    "失去控制实体时 SimRenderer 应清空控制索引和玩家专属前冲");
+
+                Expect(sim.World.TrySwitchControlledUnit(unitB) == ControlSwitchResult.Success,
+                    "测试恢复路径应能重新建立有效控制实体");
+                sim.OnUpdate(0f);
+                Expect(sim.TryGetControlledPresentation(out SimControlledUnitView recovered) &&
+                       recovered.EntityId == unitB &&
+                       math.distancesq(sim.PlayerPosition, recovered.Position) < 0.0001f,
+                    "重新获得控制后 gameplay PlayerPosition 应恢复为当前受控实体位置");
+            }
+            finally
+            {
+                Signals.Unsubscribe(handler);
+                renderer.Dispose();
+                sim.End();
+            }
         }
 
         // ── 空间哈希 ────────────────────────────────────────

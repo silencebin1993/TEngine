@@ -14,6 +14,9 @@ namespace BinGames.Sim
     {
         bool IsCreated { get; }
 
+        /// <summary>当前由玩家控制的稳定实体身份；无控制实体时为 <see cref="SimEntityId.None"/>。</summary>
+        SimEntityId ControlledUnitId { get; }
+
         void Initialize(SimConfig cfg);
 
         /// <summary>加载行为原型表。可在运行期重载（换阶段时）。</summary>
@@ -27,6 +30,18 @@ namespace BinGames.Sim
 
         /// <summary>取本帧只读快照。只在 Step 之后有效。</summary>
         SimSnapshot GetSnapshot();
+
+        /// <summary>查询实体的控制状态；死亡实体在槽位复用前仍可查询，但 IsAlive 为 false。</summary>
+        bool TryGetUnitControlState(SimEntityId entityId, out SimUnitControlState state);
+
+        /// <summary>
+        /// 查询当前受控实体信号范围内的其它存活友军。逐单位筛选在 AOT 内核完成，
+        /// 返回值按距离、稳定实体 ID 排序，不向热更层暴露 NativeArray。
+        /// </summary>
+        SimControlCandidate[] GetControlCandidates(float maxDistance);
+
+        /// <summary>把玩家控制权切到一个存活友军。失败不改变当前状态。</summary>
+        ControlSwitchResult TrySwitchControlledUnit(SimEntityId entityId);
 
         void Dispose();
     }

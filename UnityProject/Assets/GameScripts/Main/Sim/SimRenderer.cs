@@ -61,6 +61,12 @@ namespace BinGames.Sim
         /// 计时——避免这里长出一份独立于施法逻辑的计时状态）。</summary>
         private float2 _playerLungeDir;
         private float _playerLungeAmount;
+        private SimEntityId _lastControlledUnitId;
+
+        /// <summary>最近一次 Draw 解析到的受控槽位，仅供表现诊断与自动回归。</summary>
+        public int LastControlledUnitIndex { get; private set; } = SimConst.InvalidIndex;
+        public SimEntityId LastControlledUnitId => _lastControlledUnitId;
+        public bool HasControlledLunge => _playerLungeAmount > 0f;
 
         private float _yPlane;
         private static readonly int ColorId = Shader.PropertyToID("_Color");
@@ -96,6 +102,16 @@ namespace BinGames.Sim
 
         public void Draw(in SimSnapshot snap)
         {
+            int controlledIndex = snap.TryResolveControlledUnit(out int resolvedControlledIndex)
+                ? resolvedControlledIndex
+                : SimConst.InvalidIndex;
+            if (_lastControlledUnitId != snap.ControlledUnitId)
+            {
+                ClearControlledPresentation();
+                _lastControlledUnitId = snap.ControlledUnitId;
+            }
+            LastControlledUnitIndex = controlledIndex;
+
             if (_visuals == null || _visuals.Length == 0)
             {
                 return;
@@ -129,7 +145,7 @@ namespace BinGames.Sim
                 }
 
                 float2 p = snap.Position[i];
-                if (i == BinGames.Sim.SimConst.PlayerIndex && _playerLungeAmount > 0f)
+                if (i == controlledIndex && _playerLungeAmount > 0f)
                 {
                     // combat-primitive-presentation story-004：纯渲染位移，不写回 Position，不影响碰撞/寻路。
                     p += _playerLungeDir * (PlayerLungeDistance * _playerLungeAmount);
@@ -182,12 +198,22 @@ namespace BinGames.Sim
 
         /// <summary>combat-primitive-presentation story-004（COMBAT-PRESENTATION §4）：近战攻击触发时，
         /// HotFix 层每帧调用本方法写入当前前冲方向+强度（0=无位移，1=位移满 <see cref="PlayerLungeDistance"/>）。
-        /// 只在下一次 <see cref="Draw"/> 时对玩家（<see cref="BinGames.Sim.SimConst.PlayerIndex"/>）这一个实例
+        /// 只在下一次 <see cref="Draw"/> 时对快照中 <see cref="SimSnapshot.ControlledUnitId"/> 对应实例
         /// 的渲染矩阵生效，不进模拟状态、不碰其它单位，成本恒为 O(1)。</summary>
-        public void SetPlayerLunge(float2 direction, float amount)
+        public void SetControlledLunge(float2 direction, float amount)
         {
             _playerLungeDir = direction;
             _playerLungeAmount = math.saturate(amount);
+        }
+
+        /// <summary>兼容旧入口；语义已经改为当前受控实体。</summary>
+        public void SetPlayerLunge(float2 direction, float amount) => SetControlledLunge(direction, amount);
+
+        /// <summary>切换或失去控制目标时立即清理玩家专属前冲缓存。</summary>
+        public void ClearControlledPresentation()
+        {
+            _playerLungeDir = float2.zero;
+            _playerLungeAmount = 0f;
         }
 
         /// <summary>投射物渲染。数量少，用一个固定视觉。</summary>
@@ -475,6 +501,9 @@ namespace BinGames.Sim
             _impactDir = null;
             _impactAmt = null;
             _logicToIndex.Clear();
+            ClearControlledPresentation();
+            _lastControlledUnitId = SimEntityId.None;
+            LastControlledUnitIndex = SimConst.InvalidIndex;
         }
     }
 }

@@ -45,6 +45,8 @@ namespace GameLogic.Battle.Feedback
             _scope.On<ComposeCastSignal>(_impl.OnComposeCast);
             _scope.On<StructuralHookFiredSignal>(_impl.OnStructuralHookFired);
             _scope.On<ComposeChainSignal>(_impl.OnComposeChain);
+            _scope.On<ControlledUnitChangedSignal>(_ =>
+                (_impl as WhiteboxComposeProjectileFeedback)?.ClearControlledPresentation());
         }
 
         public override void OnUpdate(float dt)

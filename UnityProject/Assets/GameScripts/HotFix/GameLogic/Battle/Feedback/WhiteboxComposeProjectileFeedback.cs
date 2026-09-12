@@ -391,6 +391,13 @@ namespace GameLogic.Battle.Feedback
             }
         }
 
+        /// <summary>控制目标切换时终止旧身体发起的玩家专属前冲曲线。</summary>
+        public void ClearControlledPresentation()
+        {
+            _meleeLungeDir = float2.zero;
+            _meleeLungeElapsed = MeleeLungeDuration;
+        }
+
         public void OnComposeCast(ComposeCastSignal signal)
         {
             if (!signal.HasProjectile)

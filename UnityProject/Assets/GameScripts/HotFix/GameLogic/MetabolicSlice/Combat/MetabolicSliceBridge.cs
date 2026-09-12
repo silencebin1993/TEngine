@@ -30,8 +30,8 @@ namespace GameLogic.MetabolicSlice.Combat
     /// story-004 起，<see cref="ApplyEvent"/> 把 HitEvent 一等字段（Damage/Heal/Shield/Displace/
     /// Count/Scale/Spin/Orbit/ExplodeOnHit）全部接到战场，不再只消费 Damage。Shield/Displace 无
     /// 专门的内核系统（Sim 无护盾吸收/击退结算），按 story 要求做最小可读实现：Shield 记本地累加值
-    /// +日志，Displace 复用已有的 <see cref="BinGames.Sim.SimWorld.SetPlayerPosition"/>（与
-    /// `EffectDash` 同一模式）直接挪玩家坐标，不新增 AOT 内核结构。
+    /// +日志，Displace 与 `EffectDash` 都通过 <see cref="SimBridge.SetControlledPosition"/>
+    /// 挪动当前受控实体，不新增 AOT 内核结构。
     ///
     /// story-007 轴 A 接线：此前每 Tick 都传 <c>new WorldState()</c>，地形/残留从未真正落地
     /// （<see cref="EnvironmentReactionCatalog"/> 也从未注册进 <see cref="_engine"/>）。
@@ -1254,7 +1254,7 @@ namespace GameLogic.MetabolicSlice.Combat
                 float half = _sim.ArenaHalfExtent;
                 origin = math.clamp(origin + dir * lunge,
                     new float2(-half, -half), new float2(half, half));
-                _sim.World.SetPlayerPosition(origin);
+                _sim.SetControlledPosition(origin);
             }
 
             // ③ Pierce 穿透 → **触及 +**。"穿过一个继续飞" 在近战上就是 "这一刀够得更远"。
@@ -1659,7 +1659,7 @@ namespace GameLogic.MetabolicSlice.Combat
                 float2 dir = math.normalizesafe(pos, new float2(1f, 0f));
                 float half = _sim.ArenaHalfExtent;
                 float2 target = math.clamp(pos + dir * distance, new float2(-half, -half), new float2(half, half));
-                _sim.World.SetPlayerPosition(target);
+                _sim.SetControlledPosition(target);
                 LastAbilityPrompt = $"击退位移 {distance:0.#}";
                 TEngine.Log.Info($"[MetabolicSliceBridge] {LastAbilityPrompt}");
                 applied = true;

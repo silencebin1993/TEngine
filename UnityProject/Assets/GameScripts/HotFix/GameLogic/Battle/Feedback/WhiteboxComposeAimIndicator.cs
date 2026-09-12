@@ -210,6 +210,7 @@ namespace GameLogic.Battle.Feedback
 
         public void Hide()
         {
+            _bridge = null;
             if (_mr == null) return;
             for (int i = 0; i < _mr.Length; i++)
             {

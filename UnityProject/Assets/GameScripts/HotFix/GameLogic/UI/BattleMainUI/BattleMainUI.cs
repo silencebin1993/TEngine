@@ -1,3 +1,4 @@
+using BinGames.Sim;
 using UnityEngine;
 using UnityEngine.UI;
 using TEngine;
@@ -101,8 +102,11 @@ namespace GameLogic
             }
 
             float maxHp = st.Get(StatId.MaxHealth);
-            float hp = cell.Sim.PlayerHealth;
-            _text_HpVolume.text = $"生命 {hp:F0}/{maxHp:F0}　体积 {st.Get(StatId.Volume):F2}";
+            SimControlledUnitView controlled = default;
+            bool hasControlled = cell.Sim != null &&
+                cell.Sim.TryGetControlledPresentation(out controlled);
+            string healthText = hasControlled ? $"{controlled.Health:F0}/{maxHp:F0}" : "--（无控制目标）";
+            _text_HpVolume.text = $"生命 {healthText}　体积 {st.Get(StatId.Volume):F2}";
 
             ProgressionModule prog = cell.Progression;
             _text_LevelEvo.text =

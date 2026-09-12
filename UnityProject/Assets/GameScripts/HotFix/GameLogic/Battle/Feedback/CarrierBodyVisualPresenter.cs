@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using BinGames.Sim;
 using GameLogic.Core;
 using GameLogic.MetabolicSlice.Carrier;
 using GameLogic.Stage.CellStage;
@@ -23,12 +25,18 @@ namespace GameLogic.Battle.Feedback
 
         private SimBridge _sim;
         private int _lastAssemblyVersion = -1;
+        private SimEntityId _lastControlledUnitId;
+        private SignalScope _scope;
+        private readonly Dictionary<SimEntityId, int> _baseVisualByEntity =
+            new Dictionary<SimEntityId, int>();
 
         public void Bind(SimBridge sim) => _sim = sim;
 
         public override void OnEnter()
         {
             TEngine.GameEvent.AddEventListener(CarrierRegistry.CarrierActivatedEvent, OnCarrierChanged);
+            _scope = new SignalScope();
+            _scope.On<ControlledUnitChangedSignal>(OnControlledUnitChanged);
         }
 
         private void OnCarrierChanged() => Refresh();
@@ -36,21 +44,47 @@ namespace GameLogic.Battle.Feedback
         public override void OnUpdate(float dt)
         {
             var registry = GameLogic.UI.Battle.MetabolicSlicePanel.Instance?.CarrierRegistry;
-            if (registry != null && registry.AssemblyVersion != _lastAssemblyVersion)
+            SimEntityId controlledId = _sim != null ? _sim.ControlledUnitId : SimEntityId.None;
+            if (!controlledId.IsValid)
+            {
+                RestoreBaseVisual(_lastControlledUnitId);
+                _lastControlledUnitId = SimEntityId.None;
+                return;
+            }
+            if (controlledId != _lastControlledUnitId ||
+                (registry != null && registry.AssemblyVersion != _lastAssemblyVersion))
             {
                 Refresh();
             }
+        }
+
+        private void OnControlledUnitChanged(ControlledUnitChangedSignal signal)
+        {
+            RestoreBaseVisual(signal.PreviousUnitId);
+            _lastControlledUnitId = SimEntityId.None;
+            Refresh();
         }
 
         private void Refresh()
         {
             var panel = GameLogic.UI.Battle.MetabolicSlicePanel.Instance;
             var registry = panel?.CarrierRegistry;
-            if (registry == null || _sim == null)
+            if (_sim == null || !_sim.TryGetControlledPresentation(out SimControlledUnitView controlled))
+            {
+                _lastControlledUnitId = SimEntityId.None;
+                return;
+            }
+            _lastControlledUnitId = controlled.EntityId;
+            if (registry == null)
             {
                 return;
             }
             _lastAssemblyVersion = registry.AssemblyVersion;
+
+            if (!_baseVisualByEntity.ContainsKey(controlled.EntityId))
+            {
+                _baseVisualByEntity[controlled.EntityId] = controlled.VisualId;
+            }
 
             CarrierInstance active = registry.ActiveCarrier;
             string artId = ResolveArtId(active);
@@ -63,8 +97,18 @@ namespace GameLogic.Battle.Feedback
             }
             if (visualId >= 0)
             {
-                _sim.SetPlayerVisualId(visualId);
+                _sim.SetUnitVisualId(controlled.EntityId, visualId);
             }
+        }
+
+        private void RestoreBaseVisual(SimEntityId entityId)
+        {
+            if (!entityId.IsValid || !_baseVisualByEntity.TryGetValue(entityId, out int visualId))
+            {
+                return;
+            }
+            _sim?.SetUnitVisualId(entityId, visualId);
+            _baseVisualByEntity.Remove(entityId);
         }
 
         private static string ResolveBaseArtId(CarrierInstance active)
@@ -104,6 +148,12 @@ namespace GameLogic.Battle.Feedback
 
         public override void OnExit()
         {
+            RestoreBaseVisual(_lastControlledUnitId);
+            _scope?.Dispose();
+            _scope = null;
+            _baseVisualByEntity.Clear();
+            _lastControlledUnitId = SimEntityId.None;
+            _lastAssemblyVersion = -1;
             TEngine.GameEvent.RemoveEventListener(
                 CarrierRegistry.CarrierActivatedEvent, (System.Action)OnCarrierChanged);
         }

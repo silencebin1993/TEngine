@@ -27,7 +27,7 @@ namespace GameLogic.Ability.Executors
             float half = ctx.Sim.ArenaHalfExtent;
             target = math.clamp(target, new float2(-half, -half), new float2(half, half));
 
-            ctx.Sim.World?.SetPlayerPosition(target);
+            ctx.Sim.SetControlledPosition(target);
 
             Signals.Publish(new DashSignal
             {
@@ -40,7 +40,7 @@ namespace GameLogic.Ability.Executors
             // 这里没有计时器，如果 StatusSystem 一直不落地，这个无敌会一直挂着。
             if (EffectDealDamage.HasAffix(spec, AffixKind.Pierce))
             {
-                ctx.Sim.ApplyStatusUnit(SimConst.PlayerIndex, SimStatus.Invulnerable, true);
+                ctx.Sim.ApplyStatusToControlled(SimStatus.Invulnerable, true);
             }
         }
     }

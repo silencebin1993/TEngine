@@ -21,8 +21,8 @@ namespace GameLogic.Battle
         private struct Entry
         {
             public int UnitIndex;
-            /// <summary>内核会复用槽位，所以要记住施加时的 LogicId 做校验。</summary>
-            public int LogicId;
+            /// <summary>槽位会复用；稳定实体 ID 是条目归属与当前控制身份的唯一依据。</summary>
+            public SimEntityId EntityId;
             public SimStatus Status;
             public float TimeLeft;
         }
@@ -38,6 +38,7 @@ namespace GameLogic.Battle
         private readonly List<Entry> _entries = new List<Entry>(256);
         private readonly List<StatEntry> _statEntries = new List<StatEntry>(64);
         private SimBridge _sim;
+        private SignalScope _controlScope;
 
         public int ActiveCount => _entries.Count;
         public int TimedStatCount => _statEntries.Count;
@@ -52,7 +53,7 @@ namespace GameLogic.Battle
         private readonly List<PlayerStatusTimer> _playerTimers = new List<PlayerStatusTimer>(8);
 
         /// <summary>
-        /// 玩家身上限时状态的剩余时间，供 HUD 读取。
+        /// 当前受控实体身上限时状态的剩余时间，供 HUD 读取。
         ///
         /// 刻意不提供「查某单位状态」的通用接口：<c>_entries</c> 会随
         /// <see cref="ApplyTimedArea"/> 增长到敌人数量级，HUD 每帧遍历它就违反了
@@ -61,7 +62,7 @@ namespace GameLogic.Battle
         ///
         /// 注意本表**只有限时状态**。像冲刺无敌那样直接 <c>ApplyStatusUnit</c> 的
         /// 永久状态不进 <c>_entries</c>，HUD 要显示全量得读快照掩码
-        /// <c>SimSnapshot.Status[SimConst.PlayerIndex]</c>，本表只用来补剩余时间。
+        /// <c>SimSnapshot.Status[受控实体槽位]</c>，本表只用来补剩余时间。
         /// </summary>
         public IReadOnlyList<PlayerStatusTimer> PlayerTimers => _playerTimers;
 
@@ -114,12 +115,18 @@ namespace GameLogic.Battle
         {
             _entries.Clear();
             _statEntries.Clear();
+            _playerTimers.Clear();
+            _controlScope = new SignalScope();
+            _controlScope.On<ControlledUnitChangedSignal>(_ => _playerTimers.Clear());
         }
 
         public override void OnExit()
         {
+            _controlScope?.Dispose();
+            _controlScope = null;
             _entries.Clear();
             _statEntries.Clear();
+            _playerTimers.Clear();
         }
 
         /// <summary>
@@ -141,12 +148,14 @@ namespace GameLogic.Battle
                 return;
             }
 
-            int logicId = unitIndex >= 0 && unitIndex < snap.Count ? snap.LogicId[unitIndex] : 0;
+            SimEntityId entityId = unitIndex >= 0 && unitIndex < snap.Count
+                ? snap.EntityId[unitIndex]
+                : SimEntityId.None;
 
             // 同一单位同一状态重复施加时刷新时间（取更长的），而不是堆两条
             for (int i = 0; i < _entries.Count; i++)
             {
-                if (_entries[i].UnitIndex != unitIndex || _entries[i].Status != status)
+                if (_entries[i].EntityId != entityId || _entries[i].Status != status)
                 {
                     continue;
                 }
@@ -154,7 +163,8 @@ namespace GameLogic.Battle
                 {
                     Entry e = _entries[i];
                     e.TimeLeft = duration;
-                    e.LogicId = logicId;
+                    e.UnitIndex = unitIndex;
+                    e.EntityId = entityId;
                     _entries[i] = e;
                 }
                 return;
@@ -163,7 +173,7 @@ namespace GameLogic.Battle
             _entries.Add(new Entry
             {
                 UnitIndex = unitIndex,
-                LogicId = logicId,
+                EntityId = entityId,
                 Status = status,
                 TimeLeft = duration,
             });
@@ -203,18 +213,18 @@ namespace GameLogic.Battle
                 }
                 if (register)
                 {
-                    Register(i, snap.LogicId[i], status, duration);
+                    Register(i, snap.EntityId[i], status, duration);
                 }
             }
 
             _sim.ApplyStatusArea(origin, radius, status, true, faction);
         }
 
-        private void Register(int unitIndex, int logicId, SimStatus status, float duration)
+        private void Register(int unitIndex, SimEntityId entityId, SimStatus status, float duration)
         {
             for (int i = 0; i < _entries.Count; i++)
             {
-                if (_entries[i].UnitIndex != unitIndex || _entries[i].Status != status)
+                if (_entries[i].EntityId != entityId || _entries[i].Status != status)
                 {
                     continue;
                 }
@@ -222,7 +232,8 @@ namespace GameLogic.Battle
                 {
                     Entry e = _entries[i];
                     e.TimeLeft = duration;
-                    e.LogicId = logicId;
+                    e.UnitIndex = unitIndex;
+                    e.EntityId = entityId;
                     _entries[i] = e;
                 }
                 return;
@@ -231,7 +242,7 @@ namespace GameLogic.Battle
             _entries.Add(new Entry
             {
                 UnitIndex = unitIndex,
-                LogicId = logicId,
+                EntityId = entityId,
                 Status = status,
                 TimeLeft = duration,
             });
@@ -240,9 +251,13 @@ namespace GameLogic.Battle
         /// <summary>清除某单位的所有限时状态（蜕皮类效果用）。</summary>
         public void ClearTimed(int unitIndex)
         {
+            SimSnapshot snap = _sim != null ? _sim.Snapshot : default;
+            SimEntityId entityId = unitIndex >= 0 && unitIndex < snap.Count
+                ? snap.EntityId[unitIndex]
+                : SimEntityId.None;
             for (int i = _entries.Count - 1; i >= 0; i--)
             {
-                if (_entries[i].UnitIndex != unitIndex)
+                if (_entries[i].EntityId != entityId)
                 {
                     continue;
                 }
@@ -265,16 +280,17 @@ namespace GameLogic.Battle
             }
 
             SimSnapshot snap = _sim.Snapshot;
+            SimEntityId controlledId = _sim.ControlledUnitId;
 
             for (int i = _entries.Count - 1; i >= 0; i--)
             {
                 Entry e = _entries[i];
 
-                // 单位已死或槽位被复用（LogicId 变了）→ 直接丢弃条目。
+                // 单位已死或槽位被复用（稳定实体 ID 变了）→ 直接丢弃条目。
                 // 少了这个校验，状态会被错误地从新生成的单位身上移除。
                 if (e.UnitIndex < 0 || e.UnitIndex >= snap.Count
                     || snap.Alive[e.UnitIndex] == 0
-                    || snap.LogicId[e.UnitIndex] != e.LogicId)
+                    || snap.EntityId[e.UnitIndex] != e.EntityId)
                 {
                     _entries.RemoveAt(i);
                     continue;
@@ -284,8 +300,8 @@ namespace GameLogic.Battle
                 if (e.TimeLeft > 0f)
                 {
                     _entries[i] = e;
-                    // 顺带筛出玩家条目给 HUD，复用这趟遍历，不另开循环
-                    if (e.UnitIndex == SimConst.PlayerIndex)
+                    // 顺带筛出当前受控实体条目给 HUD，复用这趟遍历，不另开循环
+                    if (e.EntityId == controlledId)
                     {
                         _playerTimers.Add(new PlayerStatusTimer
                         {

@@ -155,6 +155,14 @@ namespace GameLogic.Core
         public float Distance;
     }
 
+    /// <summary>M1-04：一次成功的受控实体切换。失败请求不发布事件。</summary>
+    public struct ControlledUnitChangedSignal
+    {
+        public SimEntityId PreviousUnitId;
+        public SimEntityId CurrentUnitId;
+        public ControlRequestResult Result;
+    }
+
     /// <summary>升级（进化能达阈值）。</summary>
     public struct LevelUpSignal
     {

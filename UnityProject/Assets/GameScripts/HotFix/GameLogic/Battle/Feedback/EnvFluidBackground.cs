@@ -61,8 +61,16 @@ namespace GameLogic.Battle.Feedback
         private Material _mat;
         private Quality _appliedQuality = (Quality)(-1);
         private Style _appliedStyle = (Style)(-1);
+        private SignalScope _scope;
 
         public void Bind(SimBridge sim) => _sim = sim;
+
+        public override void OnEnter()
+        {
+            _scope = new SignalScope();
+            _scope.On<ControlledUnitChangedSignal>(_ => UpdateControlledPosition());
+            UpdateControlledPosition();
+        }
 
         /// <summary>在 SetupSim 里调用：按竞技场半宽生成地面。同局重复会先清理。</summary>
         public void Spawn(float arenaHalfExtent)
@@ -81,7 +89,7 @@ namespace GameLogic.Battle.Feedback
 
             _root = GameObject.CreatePrimitive(PrimitiveType.Cube);
             _root.name = "EnvFluidBackground";
-            Object.Destroy(_root.GetComponent<Collider>());
+            PresentationObjectLifetime.Destroy(_root.GetComponent<Collider>());
 
             _root.transform.localScale = new Vector3(size, 1f, size);
             _root.transform.localPosition = new Vector3(0f, -0.5f, 0f);
@@ -123,12 +131,28 @@ namespace GameLogic.Battle.Feedback
                 _appliedQuality = CurrentQuality;
             }
 
-            Unity.Mathematics.float2 p = _sim.PlayerPosition;
-            _mat.SetVector("_PlayerWorldXZ", new Vector4(p.x, p.y, 0f, 0f));
+            UpdateControlledPosition();
+        }
+
+        private void UpdateControlledPosition()
+        {
+            if (_mat == null) { return; }
+            if (_sim != null && _sim.TryGetControlledPresentation(out BinGames.Sim.SimControlledUnitView controlled))
+            {
+                Unity.Mathematics.float2 p = controlled.Position;
+                _mat.SetVector("_PlayerWorldXZ", new Vector4(p.x, p.y, 0f, 0f));
+                return;
+            }
+
+            // 无控制目标时把玩家专属涟漪锚移出竞技场，避免残留在旧身体位置。
+            float outside = _arenaHalf * 4f;
+            _mat.SetVector("_PlayerWorldXZ", new Vector4(outside, outside, 0f, 0f));
         }
 
         public override void OnExit()
         {
+            _scope?.Dispose();
+            _scope = null;
             DisposeVisual();
             WhiteboxGroundAnchor.Dispose();
         }
@@ -147,7 +171,7 @@ namespace GameLogic.Battle.Feedback
 
             if (_mat != null)
             {
-                Object.Destroy(_mat);
+                PresentationObjectLifetime.Destroy(_mat);
             }
 
             _mat = next;
@@ -194,13 +218,13 @@ namespace GameLogic.Battle.Feedback
         {
             if (_mat != null)
             {
-                Object.Destroy(_mat);
+                PresentationObjectLifetime.Destroy(_mat);
                 _mat = null;
             }
 
             if (_root != null)
             {
-                Object.Destroy(_root);
+                PresentationObjectLifetime.Destroy(_root);
                 _root = null;
             }
 

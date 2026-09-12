@@ -70,6 +70,7 @@ namespace GameLogic.Stage.CellStage
         private Battle.Feedback.DevUnitGoMirror _devUnitGoMirror;
 
         private SimRenderer _renderer;
+        private SignalScope _controlPresentationScope;
         /// <summary>story-005：持有 BuildVisuals() 返回的同一个数组引用，供 ApplyFeatureArtVisualsAsync
         /// 原地覆盖 Mesh/Material（SimRenderer.Initialize 只存引用不复制，见 preflight-decisions R3）。</summary>
         private SimVisual[] _visuals;
@@ -184,7 +185,12 @@ namespace GameLogic.Stage.CellStage
             // 这里按 _sandboxMode 重新落一次，保证不管调用时序如何，新建的模块实例总能拿到正确的抑制态。
             ApplySandboxState();
             SetupSim();
-            ApplyFeatureArtVisualsAsync().Forget();
+            // Edit Mode 验收只建立模拟并验证纯逻辑，不具备运行时资源模块生命周期。
+            // Editor Play 与 Player 中 Application.isPlaying 均为 true，功能美术加载路径保持不变。
+            if (Application.isPlaying)
+            {
+                ApplyFeatureArtVisualsAsync().Forget();
+            }
             GrantStarterAbilities();
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -383,6 +389,9 @@ namespace GameLogic.Stage.CellStage
             _renderer = new SimRenderer();
             _visuals = BuildVisuals();
             _renderer.Initialize(_visuals, cfg.UnitCapacity);
+            _controlPresentationScope?.Dispose();
+            _controlPresentationScope = new SignalScope()
+                .On<ControlledUnitChangedSignal>(OnControlledUnitChanged);
             _devUnitGoMirror?.Bind(_sim, _visuals);
             _devUnitGoMirror?.BindProjectileVisual(
                 BuildConeCached(),
@@ -1011,7 +1020,7 @@ namespace GameLogic.Stage.CellStage
                 if (_composeProjectilePresenter != null && _renderer != null)
                 {
                     var (lungeDir, lungeProgress) = _composeProjectilePresenter.GetMeleeLunge();
-                    _renderer.SetPlayerLunge(lungeDir, lungeProgress);
+                    _renderer.SetControlledLunge(lungeDir, lungeProgress);
                 }
                 _renderer?.Draw(_sim.Snapshot);
                 if (_sim.World != null)
@@ -1048,11 +1057,19 @@ namespace GameLogic.Stage.CellStage
             {
                 return;
             }
-            Unity.Mathematics.float2 p = _sim.PlayerPosition;
+            if (!_sim.TryGetPresentationAnchor(out Unity.Mathematics.float2 p, out _))
+            {
+                return;
+            }
             var want = new Vector3(
                 p.x + _cameraFollowOffset.x, _cameraFollowOffset.y, p.y + _cameraFollowOffset.z);
             _camera.transform.position = Vector3.Lerp(
                 _camera.transform.position, want, 1f - Mathf.Exp(-8f * dt));
+        }
+
+        private void OnControlledUnitChanged(ControlledUnitChangedSignal signal)
+        {
+            _renderer?.ClearControlledPresentation();
         }
 
         private Mesh _coneCache;
@@ -1406,9 +1423,8 @@ namespace GameLogic.Stage.CellStage
 
             _camera.transform.rotation = rot;
 
-            if (_sim != null)
+            if (_sim != null && _sim.TryGetPresentationAnchor(out Unity.Mathematics.float2 p, out _))
             {
-                Unity.Mathematics.float2 p = _sim.PlayerPosition;
                 _camera.transform.position = new Vector3(
                     p.x + _cameraFollowOffset.x, _cameraFollowOffset.y, p.y + _cameraFollowOffset.z);
             }
@@ -1495,6 +1511,8 @@ namespace GameLogic.Stage.CellStage
             _hub.Exit();
             _hub.Dispose();
 
+            _controlPresentationScope?.Dispose();
+            _controlPresentationScope = null;
             _renderer?.Dispose();
             _renderer = null;
             FeatureArtResolver.Unload();

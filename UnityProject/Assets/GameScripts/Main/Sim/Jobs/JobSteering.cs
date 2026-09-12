@@ -13,7 +13,7 @@ namespace BinGames.Sim
     /// 详见 DesignDocs/Game_Framework_Design.md §4.3。
     /// </summary>
     [BurstCompile]
-    public struct JobSteering : IJobParallelFor
+    public struct JobAIIntent : IJobParallelFor
     {
         [ReadOnly] public NativeArray<float2> Position;
         [ReadOnly] public NativeArray<float2> Velocity;
@@ -21,6 +21,8 @@ namespace BinGames.Sim
         [ReadOnly] public NativeArray<byte> Faction;
         [ReadOnly] public NativeArray<byte> Alive;
         [ReadOnly] public NativeArray<int> ArchetypeId;
+        [ReadOnly] public NativeArray<byte> IntentSource;
+        [ReadOnly] public NativeArray<SimEntityId> EntityId;
         public NativeArray<uint> Status;
         [ReadOnly] public NativeArray<BehaviorArchetype> Archetypes;
         /// <summary>MinionSeekAttack/MinionSeekExplode 索敌用；其余原型不读它。</summary>
@@ -28,11 +30,12 @@ namespace BinGames.Sim
         public float InvCellSize;
 
         [NativeDisableParallelForRestriction]
-        public NativeArray<float2> DesiredDir;
+        public NativeArray<UnitIntent> Intents;
         [NativeDisableParallelForRestriction]
         public NativeArray<float> AttackTimer;
 
-        public float2 PlayerPos;
+        public float2 TargetPos;
+        public bool HasTarget;
         public float Time;
         public float Dt;
         public int Count;
@@ -40,7 +43,7 @@ namespace BinGames.Sim
 
         public void Execute(int i)
         {
-            if (i >= Count || Alive[i] == 0 || i == SimConst.PlayerIndex)
+            if (i >= Count || Alive[i] == 0 || IntentSource[i] != (byte)BinGames.Sim.IntentSource.AI)
             {
                 return;
             }
@@ -49,7 +52,7 @@ namespace BinGames.Sim
             // 麻痹：完全不动
             if ((st & (uint)SimStatus.Stunned) != 0u)
             {
-                DesiredDir[i] = float2.zero;
+                Intents[i] = UnitIntent.Idle(EntityId[i], BinGames.Sim.IntentSource.AI);
                 return;
             }
 
@@ -59,7 +62,7 @@ namespace BinGames.Sim
                 : BehaviorArchetype.Default;
 
             float2 pos = Position[i];
-            float2 toPlayer = PlayerPos - pos;
+            float2 toPlayer = TargetPos - pos;
             float distSq = math.lengthsq(toPlayer);
             float dist = math.sqrt(distSq);
             float2 dirToPlayer = dist > 0.0001f ? toPlayer / dist : float2.zero;
@@ -86,7 +89,7 @@ namespace BinGames.Sim
 
                 case BehaviorKind.Chase:
                     // 超出索敌范围则漂浮，制造"没发现你"的观感
-                    want = (arc.AggroRange <= 0f || dist <= arc.AggroRange)
+                    want = HasTarget && (arc.AggroRange <= 0f || dist <= arc.AggroRange)
                         ? dirToPlayer
                         : Wander(i, Time) * arc.WanderStrength;
                     break;
@@ -113,7 +116,7 @@ namespace BinGames.Sim
                     }
                     else
                     {
-                        want = dirToPlayer;
+                        want = HasTarget ? dirToPlayer : float2.zero;
                         Status[i] = st & ~(uint)SimStatus.Telegraphing;
                     }
                     break;
@@ -124,7 +127,11 @@ namespace BinGames.Sim
                     // 保持 PreferredRange：太近后退，太远前进，合适则侧移
                     float pref = arc.PreferredRange > 0f ? arc.PreferredRange : arc.AttackRange;
                     float band = pref * 0.2f;
-                    if (dist < pref - band)
+                    if (!HasTarget)
+                    {
+                        want = Wander(i, Time) * arc.WanderStrength;
+                    }
+                    else if (dist < pref - band)
                     {
                         want = -dirToPlayer;
                     }
@@ -141,15 +148,22 @@ namespace BinGames.Sim
 
                 case BehaviorKind.Swarm:
                     // 群体：朝玩家但混入游走，形成松散推进而非直线列队
-                    want = math.normalizesafe(dirToPlayer + Wander(i, Time) * 0.6f);
+                    want = HasTarget
+                        ? math.normalizesafe(dirToPlayer + Wander(i, Time) * 0.6f)
+                        : Wander(i, Time) * arc.WanderStrength;
                     break;
 
                 case BehaviorKind.Flee:
-                    want = -dirToPlayer;
+                    want = HasTarget ? -dirToPlayer : Wander(i, Time) * arc.WanderStrength;
                     break;
 
                 case BehaviorKind.Orbit:
                 {
+                    if (!HasTarget)
+                    {
+                        want = Wander(i, Time) * arc.WanderStrength;
+                        break;
+                    }
                     float pref = arc.PreferredRange > 0f ? arc.PreferredRange : 6f;
                     float2 tangent = new float2(-dirToPlayer.y, dirToPlayer.x);
                     float radialErr = dist - pref;
@@ -159,7 +173,7 @@ namespace BinGames.Sim
 
                 case BehaviorKind.Latch:
                     // 附着：贴住玩家不放
-                    want = dist > Radius[i] + 0.4f ? dirToPlayer : float2.zero;
+                    want = HasTarget && dist > Radius[i] + 0.4f ? dirToPlayer : float2.zero;
                     break;
 
                 case BehaviorKind.MinionSeekAttack:
@@ -187,7 +201,9 @@ namespace BinGames.Sim
                 }
             }
 
-            DesiredDir[i] = math.normalizesafe(want);
+            UnitIntent intent = UnitIntent.Idle(EntityId[i], BinGames.Sim.IntentSource.AI);
+            intent.MoveDir = math.normalizesafe(want);
+            Intents[i] = intent;
 
             float timer = AttackTimer[i] - Dt;
             AttackTimer[i] = timer;
@@ -228,5 +244,37 @@ namespace BinGames.Sim
         }
 
         private static float Hash01(int i) => Hash01((uint)i * 2654435761u);
+    }
+
+    /// <summary>来源无关的最终意图应用。这里只读统一意图，不识别玩家或固定槽位。</summary>
+    [BurstCompile]
+    public struct JobSteering : IJobParallelFor
+    {
+        [ReadOnly] public NativeArray<UnitIntent> Intents;
+        [ReadOnly] public NativeArray<byte> Alive;
+        public NativeArray<float2> DesiredDir;
+        public NativeArray<uint> Status;
+        public NativeArray<float> Radius;
+        public int Count;
+
+        public void Execute(int i)
+        {
+            if (i >= Count || Alive[i] == 0)
+            {
+                return;
+            }
+
+            UnitIntent intent = Intents[i];
+            DesiredDir[i] = math.normalizesafe(intent.MoveDir);
+            if (intent.RadiusOverride > 0f)
+            {
+                Radius[i] = math.max(0.05f, intent.RadiusOverride);
+            }
+
+            uint status = Status[i];
+            status |= (uint)intent.AddStatus;
+            status &= ~(uint)intent.RemoveStatus;
+            Status[i] = status;
+        }
     }
 }

@@ -4,12 +4,111 @@ using Unity.Mathematics;
 namespace BinGames.Sim
 {
     /// <summary>
+    /// 模拟世界中的稳定实体身份。值只由 <see cref="SimWorld"/> 分配；0 永远表示无实体。
+    /// 身份不编码数组槽位，因此槽位释放、复用或内部重排都不会让旧身份指向另一单位。
+    /// </summary>
+    public readonly struct SimEntityId : IEquatable<SimEntityId>
+    {
+        public static readonly SimEntityId None = default;
+
+        public readonly ulong Value;
+
+        public SimEntityId(ulong value)
+        {
+            Value = value;
+        }
+
+        public bool IsValid => Value != 0UL;
+
+        public bool Equals(SimEntityId other) => Value == other.Value;
+        public override bool Equals(object obj) => obj is SimEntityId other && Equals(other);
+        public override int GetHashCode() => Value.GetHashCode();
+        public override string ToString() => IsValid ? Value.ToString() : "None";
+
+        public static bool operator ==(SimEntityId left, SimEntityId right) => left.Equals(right);
+        public static bool operator !=(SimEntityId left, SimEntityId right) => !left.Equals(right);
+    }
+
+    /// <summary>单位当前消费哪一类意图。控制身份与阵营彼此独立。</summary>
+    public enum IntentSource : byte
+    {
+        AI = 0,
+        Player = 1,
+        Scripted = 2,
+    }
+
+    /// <summary>控制权切换的确定性结果。失败不会改变当前控制实体。</summary>
+    public enum ControlSwitchResult : byte
+    {
+        Success = 0,
+        AlreadyControlled = 1,
+        WorldNotInitialized = 2,
+        InvalidTarget = 3,
+        TargetNotFound = 4,
+        TargetDead = 5,
+        TargetNotFriendly = 6,
+    }
+
+    /// <summary>
+    /// 热更桥接层控制请求的稳定结果码。基础身份校验由模拟世界负责；临时信号范围与冷却
+    /// 属于桥接策略，因此只在请求入口补充对应失败原因。
+    /// </summary>
+    public enum ControlRequestResult : byte
+    {
+        Success = 0,
+        AlreadyControlled = 1,
+        SimulationNotRunning = 2,
+        InvalidTarget = 3,
+        TargetNotFound = 4,
+        TargetDead = 5,
+        TargetNotFriendly = 6,
+        OutOfSignalRange = 7,
+        CooldownActive = 8,
+        CurrentUnitUnavailable = 9,
+    }
+
+    /// <summary>稳定身份的只读控制视图。数组索引只在当前世界状态中瞬时有效。</summary>
+    public struct SimUnitControlState
+    {
+        public SimEntityId EntityId;
+        public int UnitIndex;
+        public SimFaction Faction;
+        public IntentSource IntentSource;
+        public bool IsAlive;
+        public float2 Position;
+    }
+
+    /// <summary>桥接层可安全消费的控制候选；不暴露任何原生容器。</summary>
+    public struct SimControlCandidate
+    {
+        public SimEntityId EntityId;
+        public SimFaction Faction;
+        public IntentSource IntentSource;
+        public float2 Position;
+        public float Distance;
+    }
+
+    /// <summary>表现与 UI 使用的当前受控实体只读视图。UnitIndex 只对生成它的当前快照有效。</summary>
+    public struct SimControlledUnitView
+    {
+        public SimEntityId EntityId;
+        public int UnitIndex;
+        public float2 Position;
+        public float Health;
+        public float Radius;
+        public SimStatus Status;
+        public SimFaction Faction;
+        public IntentSource IntentSource;
+        public int VisualId;
+    }
+
+    /// <summary>
     /// 单位所属阵营。内核只做阵营间敌对判定，不认识具体玩法概念。
     /// </summary>
     public enum SimFaction : byte
     {
         None = 0,
-        /// <summary>玩家本体。内核中始终占用索引 0。</summary>
+        /// <summary>启动时的主友军阵营。只表达敌我关系，不表示当前由玩家控制。</summary>
         Player = 1,
         /// <summary>玩家的附属体（孢子、分身、幼体）。</summary>
         PlayerMinion = 2,
@@ -121,6 +220,11 @@ namespace BinGames.Sim
         public float MaxSpeed;
         public int ArchetypeId;
         public SimFaction Faction;
+        /// <summary>
+        /// 初始意图来源。生成路径只接受 AI 或 Scripted；Player 必须由世界的受控切换命令授予，
+        /// 从而保证任意时刻最多只有一个玩家控制实体。
+        /// </summary>
+        public IntentSource IntentSource;
         public SimStatus InitialStatus;
         /// <summary>热更层的逻辑 id，内核原样保存并在死亡事件中回传。</summary>
         public int LogicId;
@@ -548,7 +652,7 @@ namespace BinGames.Sim
     /// <summary>内核索引常量。</summary>
     public static class SimConst
     {
-        /// <summary>玩家固定占用的单位索引。</summary>
+        /// <summary>启动时默认友军的兼容索引；只用于世界初始化，不得作为控制身份。</summary>
         public const int PlayerIndex = 0;
         /// <summary>无效索引。</summary>
         public const int InvalidIndex = -1;

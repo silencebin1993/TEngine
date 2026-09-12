@@ -53,14 +53,18 @@ namespace GameLogic.Ability.Executors
                     break;
 
                 case EffectShape.Self:
-                    // 作用于玩家自己：内核用固定的 PlayerIndex
+                    // Self 始终跟随当前受控实体，不缓存会被复用的槽位。
+                    if (!ctx.Sim.TryGetControlledUnit(out SimUnitControlState controlled))
+                    {
+                        break;
+                    }
                     if (timed)
                     {
-                        status.ApplyTimed(SimConst.PlayerIndex, spec.Status, duration);
+                        status.ApplyTimed(controlled.UnitIndex, spec.Status, duration);
                     }
                     else
                     {
-                        ctx.Sim.ApplyStatusUnit(SimConst.PlayerIndex, spec.Status, add);
+                        ctx.Sim.ApplyStatusToControlled(spec.Status, add);
                     }
                     break;
 

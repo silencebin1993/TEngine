@@ -27,8 +27,9 @@ namespace BinGames.Sim
 
         public NativeList<int> Candidates;
 
-        public float2 PlayerPos;
-        public float PlayerRadius;
+        public int ActorIndex;
+        public float2 ActorPos;
+        public float ActorRadius;
         public float InvCellSize;
         public int Count;
 
@@ -43,9 +44,14 @@ namespace BinGames.Sim
 
         public void Execute()
         {
-            float scan = PlayerRadius + 3f;
+            if (ActorIndex < 0 || ActorIndex >= Count || Alive[ActorIndex] == 0)
+            {
+                return;
+            }
+
+            float scan = ActorRadius + 3f;
             int ring = SpatialHash.RingFor(scan, InvCellSize);
-            int2 c = SpatialHash.ToCell(PlayerPos, InvCellSize);
+            int2 c = SpatialHash.ToCell(ActorPos, InvCellSize);
 
             for (int dy = -ring; dy <= ring; dy++)
             {
@@ -58,7 +64,7 @@ namespace BinGames.Sim
                     }
                     do
                     {
-                        if (j == SimConst.PlayerIndex || j >= Count || Alive[j] == 0)
+                        if (j == ActorIndex || j >= Count || Alive[j] == 0)
                         {
                             continue;
                         }
@@ -79,8 +85,8 @@ namespace BinGames.Sim
                         }
 
                         // 接触判定
-                        float reach = PlayerRadius + Radius[j] + ContactSlack;
-                        if (math.distancesq(Position[j], PlayerPos) > reach * reach)
+                        float reach = ActorRadius + Radius[j] + ContactSlack;
+                        if (math.distancesq(Position[j], ActorPos) > reach * reach)
                         {
                             continue;
                         }
@@ -91,7 +97,7 @@ namespace BinGames.Sim
                         if ((st & (uint)SimStatus.Corroded) != 0u) { ratio *= CorrodedDiscount; }
 
                         // 拾取物无条件可吞
-                        if (f != (byte)SimFaction.Pickup && PlayerRadius < Radius[j] * ratio)
+                        if (f != (byte)SimFaction.Pickup && ActorRadius < Radius[j] * ratio)
                         {
                             continue;
                         }

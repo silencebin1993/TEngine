@@ -1,3 +1,4 @@
+using System;
 using BinGames.Sim;
 using GameLogic.Core;
 using Unity.Collections;
@@ -25,6 +26,12 @@ namespace GameLogic.Battle
         private SimSnapshot _snapshot;
         private SimConfig _cfg;
         private bool _running;
+        private float _controlSwitchCooldownRemaining;
+        private float2 _strategicAnchor;
+        private bool _hasStrategicAnchor;
+
+        private const float DefaultControlSignalRange = 18f;
+        private const float DefaultControlSwitchCooldown = 0.75f;
 
         /// <summary>逻辑 id 分配器。0 保留给玩家/环境。</summary>
         private int _nextLogicId = 1;
@@ -37,8 +44,15 @@ namespace GameLogic.Battle
         /// 供 SpawnDirector 等做生成点回避，不新增 Bind 依赖。</summary>
         public ObstacleSpec[] Obstacles { get; private set; }
 
-        /// <summary>本帧玩家意图。由输入模块与能力系统写，Update 时提交。</summary>
-        public PlayerIntent Intent = PlayerIntent.Idle;
+        /// <summary>本帧受控实体意图。兼容旧 PlayerIntent 形状，提交时按 ControlledUnitId 解析。</summary>
+        public PlayerIntent Intent { get; private set; } = PlayerIntent.Idle;
+
+        public float ControlSignalRange { get; private set; } = DefaultControlSignalRange;
+        public float ControlSwitchCooldown { get; private set; } = DefaultControlSwitchCooldown;
+        public float ControlSwitchCooldownRemaining => _controlSwitchCooldownRemaining;
+        public SimEntityId ControlledUnitId => _running && _backend != null
+            ? _backend.ControlledUnitId
+            : SimEntityId.None;
 
         public void Begin(SimConfig cfg, BehaviorArchetype[] archetypes)
         {
@@ -53,8 +67,12 @@ namespace GameLogic.Battle
             _cmds = default;
             _cmds.Initialize(Unity.Collections.Allocator.Persistent);
             _nextLogicId = 1;
+            _controlSwitchCooldownRemaining = 0f;
+            Intent = PlayerIntent.Idle;
             _running = true;
             _snapshot = _backend.GetSnapshot();
+            _hasStrategicAnchor = false;
+            CaptureStrategicAnchor();
         }
 
         public void End()
@@ -69,7 +87,11 @@ namespace GameLogic.Battle
                 _cmds.Dispose();
             }
             _running = false;
+            _controlSwitchCooldownRemaining = 0f;
+            Intent = PlayerIntent.Idle;
             _snapshot = default;
+            _strategicAnchor = float2.zero;
+            _hasStrategicAnchor = false;
             Obstacles = null;
         }
 
@@ -80,9 +102,12 @@ namespace GameLogic.Battle
                 return;
             }
 
+            _controlSwitchCooldownRemaining = math.max(0f, _controlSwitchCooldownRemaining - math.max(0f, dt));
+
             _cmds.SetPlayerIntent(Intent);
             _backend.Step(dt, ref _cmds);
             _snapshot = _backend.GetSnapshot();
+            CaptureStrategicAnchor();
 
             // 意图每帧重置，避免上一帧的冲刺倍率粘住
             Intent = PlayerIntent.Idle;
@@ -94,6 +119,169 @@ namespace GameLogic.Battle
         }
 
         public int NextLogicId() => _nextLogicId++;
+
+        // ── 控制服务（HotFix 控制相关代码的唯一入口）──
+
+        /// <summary>配置临时信号规则。M1-04 不建立正式信号网络，只保留可调距离与冷却。</summary>
+        public void ConfigureControlSwitch(float signalRange, float cooldownSeconds)
+        {
+            ControlSignalRange = math.max(0f, signalRange);
+            ControlSwitchCooldown = math.max(0f, cooldownSeconds);
+        }
+
+        public bool TryGetControlledUnit(out SimUnitControlState state)
+        {
+            if (_running && _backend != null &&
+                _backend.TryGetUnitControlState(_backend.ControlledUnitId, out state) && state.IsAlive)
+            {
+                return true;
+            }
+            state = default;
+            return false;
+        }
+
+        /// <summary>供 HUD、相机与表现层统一读取的 O(1) 当前受控实体视图。</summary>
+        public bool TryGetControlledPresentation(out SimControlledUnitView view)
+        {
+            if (_running && _snapshot.TryResolveControlledUnit(out int index))
+            {
+                view = new SimControlledUnitView
+                {
+                    EntityId = _snapshot.EntityId[index],
+                    UnitIndex = index,
+                    Position = _snapshot.Position[index],
+                    Health = _snapshot.Health[index],
+                    Radius = _snapshot.Radius[index],
+                    Status = (SimStatus)_snapshot.Status[index],
+                    Faction = (SimFaction)_snapshot.Faction[index],
+                    IntentSource = (IntentSource)_snapshot.IntentSource[index],
+                    VisualId = _snapshot.VisualId[index],
+                };
+                return true;
+            }
+            view = default;
+            return false;
+        }
+
+        /// <summary>
+        /// 相机锚点：有控制实体时返回其实时位置；否则返回本局最后一个有效战术位置。
+        /// bool 返回是否存在可用锚点，hasControlled 区分战术跟随和临时战略回退。
+        /// </summary>
+        public bool TryGetPresentationAnchor(out float2 position, out bool hasControlled)
+        {
+            if (TryGetControlledPresentation(out SimControlledUnitView controlled))
+            {
+                position = controlled.Position;
+                hasControlled = true;
+                return true;
+            }
+            position = _strategicAnchor;
+            hasControlled = false;
+            return _hasStrategicAnchor;
+        }
+
+        public SimControlCandidate[] GetControlCandidates()
+        {
+            return _running && _backend != null
+                ? _backend.GetControlCandidates(ControlSignalRange)
+                : Array.Empty<SimControlCandidate>();
+        }
+
+        /// <summary>
+        /// 请求切换到稳定实体 ID。所有失败路径均在修改控制状态前返回；成功后只发布一次事件。
+        /// 校验顺序固定为身份、存活、阵营、范围、冷却，保证调用方得到稳定失败原因。
+        /// </summary>
+        public ControlRequestResult RequestControlSwitch(SimEntityId targetId)
+        {
+            if (!_running || _backend == null) { return ControlRequestResult.SimulationNotRunning; }
+            if (!targetId.IsValid) { return ControlRequestResult.InvalidTarget; }
+            if (!_backend.TryGetUnitControlState(targetId, out SimUnitControlState target))
+            {
+                return ControlRequestResult.TargetNotFound;
+            }
+            if (!target.IsAlive) { return ControlRequestResult.TargetDead; }
+            if (!IsFriendlyFaction(target.Faction)) { return ControlRequestResult.TargetNotFriendly; }
+            if (_backend.ControlledUnitId == targetId) { return ControlRequestResult.AlreadyControlled; }
+            if (!TryGetControlledUnit(out SimUnitControlState previous))
+            {
+                return ControlRequestResult.CurrentUnitUnavailable;
+            }
+            if (math.distance(previous.Position, target.Position) > ControlSignalRange)
+            {
+                return ControlRequestResult.OutOfSignalRange;
+            }
+            if (_controlSwitchCooldownRemaining > 0f)
+            {
+                return ControlRequestResult.CooldownActive;
+            }
+
+            ControlRequestResult mapped = MapControlResult(_backend.TrySwitchControlledUnit(targetId));
+            if (mapped != ControlRequestResult.Success)
+            {
+                return mapped;
+            }
+
+            _controlSwitchCooldownRemaining = ControlSwitchCooldown;
+            _snapshot = _backend.GetSnapshot();
+            CaptureStrategicAnchor();
+            Signals.Publish(new ControlledUnitChangedSignal
+            {
+                PreviousUnitId = previous.EntityId,
+                CurrentUnitId = targetId,
+                Result = ControlRequestResult.Success,
+            });
+            return ControlRequestResult.Success;
+        }
+
+        public void SetControlledIntent(in PlayerIntent intent)
+        {
+            Intent = intent;
+        }
+
+        public bool SetControlledPosition(float2 position)
+        {
+            if (!_running || !TryGetControlledUnit(out _)) { return false; }
+            (_backend as SimWorld)?.SetPlayerPosition(position);
+            _snapshot = _backend.GetSnapshot();
+            CaptureStrategicAnchor();
+            return true;
+        }
+
+        public bool ApplyStatusToControlled(SimStatus status, bool add = true)
+        {
+            if (!TryGetControlledUnit(out SimUnitControlState controlled)) { return false; }
+            ApplyStatusUnit(controlled.UnitIndex, status, add);
+            return true;
+        }
+
+        private static bool IsFriendlyFaction(SimFaction faction)
+        {
+            return faction == SimFaction.Player || faction == SimFaction.PlayerMinion;
+        }
+
+        private static ControlRequestResult MapControlResult(ControlSwitchResult result)
+        {
+            switch (result)
+            {
+                case ControlSwitchResult.Success: return ControlRequestResult.Success;
+                case ControlSwitchResult.AlreadyControlled: return ControlRequestResult.AlreadyControlled;
+                case ControlSwitchResult.WorldNotInitialized: return ControlRequestResult.SimulationNotRunning;
+                case ControlSwitchResult.InvalidTarget: return ControlRequestResult.InvalidTarget;
+                case ControlSwitchResult.TargetNotFound: return ControlRequestResult.TargetNotFound;
+                case ControlSwitchResult.TargetDead: return ControlRequestResult.TargetDead;
+                case ControlSwitchResult.TargetNotFriendly: return ControlRequestResult.TargetNotFriendly;
+                default: return ControlRequestResult.TargetNotFound;
+            }
+        }
+
+        private void CaptureStrategicAnchor()
+        {
+            if (TryGetControlledPresentation(out SimControlledUnitView controlled))
+            {
+                _strategicAnchor = controlled.Position;
+                _hasStrategicAnchor = true;
+            }
+        }
 
         // ── 写入接口（全部只是入队，实际生效在内核 Step）──
 
@@ -329,10 +517,13 @@ namespace GameLogic.Battle
             SimWorld w = World;
             if (!_running || w == null) { return 0; }
             bool full = halfAngleDeg >= 180f || math.lengthsq(coneDir) < 1e-6f;
+            SimFaction sourceFaction = TryGetControlledUnit(out SimUnitControlState controlled)
+                ? controlled.Faction
+                : SimFaction.Player;
             return w.DeflectProjectiles(origin, radius,
                 full ? float2.zero : math.normalizesafe(coneDir),
                 full ? -1f : math.cos(math.radians(halfAngleDeg)),
-                SimFaction.Player, newSourceLogicId, SimFaction.Hostile, damageMul);
+                sourceFaction, newSourceLogicId, SimFaction.Hostile, damageMul);
         }
 
         /// <summary>combat-primitive-overhaul：本帧弹体终结事件条数（真实落点）。热更层放留坑/命中表现用。</summary>
@@ -369,10 +560,18 @@ namespace GameLogic.Battle
             }
         }
 
-        // ── 玩家读写 ──
+        // ── 受控实体兼容读写 ──
 
-        public float2 PlayerPosition => _running ? _snapshot.PlayerPosition : float2.zero;
+        /// <summary>
+        /// 兼容旧调用名：始终跟随当前受控实体，是战术跟随锚点，不是跨控制切换保持不变的战略锚点。
+        /// 需要战略锚点的系统必须自行持有明确状态。
+        /// </summary>
+        public float2 PlayerPosition => TryGetControlledPresentation(out SimControlledUnitView controlled)
+            ? controlled.Position
+            : float2.zero;
+        /// <summary>兼容旧调用名：当前受控实体生命。</summary>
         public float PlayerHealth => _running ? _snapshot.PlayerHealth : 0f;
+        /// <summary>兼容旧调用名：当前受控实体半径。</summary>
         public float PlayerRadius => _running ? _snapshot.PlayerRadius : 1f;
         /// <summary>本帧玩家受到的接触伤害。由 Resolution 阶段消费。</summary>
         public float PlayerDamageTaken => _running ? _snapshot.PlayerDamageTaken : 0f;
@@ -396,6 +595,18 @@ namespace GameLogic.Battle
             (_backend as SimWorld)?.SetPlayerVisualId(visualId);
         }
 
+        /// <summary>稳定 ID 定位的视觉恢复入口；仅供控制专属表现清理旧目标。</summary>
+        public bool SetUnitVisualId(SimEntityId entityId, int visualId)
+        {
+            SimWorld world = _backend as SimWorld;
+            if (!_running || world == null || !world.SetUnitVisualId(entityId, visualId))
+            {
+                return false;
+            }
+            _snapshot = _backend.GetSnapshot();
+            return true;
+        }
+
         public void DamagePlayer(float amount)
         {
             (_backend as SimWorld)?.DamagePlayer(amount);
@@ -417,6 +628,11 @@ namespace GameLogic.Battle
         public void ConsumeUnit(int unitIndex)
         {
             (_backend as SimWorld)?.KillUnit(unitIndex, 0);
+            if (_backend != null)
+            {
+                _snapshot = _backend.GetSnapshot();
+                CaptureStrategicAnchor();
+            }
         }
 
         public SimWorld World => _backend as SimWorld;

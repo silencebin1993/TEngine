@@ -9,7 +9,7 @@ namespace BinGames.Sim
     /// 只在 <see cref="SimWorld.Step"/> 完成后有效，下一次 Step 即失效。
     /// 热更层只读不写；写入一律走 <see cref="SimCommandBuffer"/>。
     ///
-    /// 数组按索引对齐，长度都是 Count。索引 0 恒为玩家（<see cref="SimConst.PlayerIndex"/>）。
+    /// 数组按索引对齐，长度都是 Count。索引只作瞬时地址；跨帧身份必须使用 <see cref="EntityId"/>。
     /// </summary>
     public struct SimSnapshot
     {
@@ -25,6 +25,9 @@ namespace BinGames.Sim
         [ReadOnly] public NativeArray<int> ArchetypeId;
         [ReadOnly] public NativeArray<int> LogicId;
         [ReadOnly] public NativeArray<int> VisualId;
+        [ReadOnly] public NativeArray<SimEntityId> EntityId;
+        [ReadOnly] public NativeArray<byte> IntentSource;
+        [ReadOnly] public NativeArray<UnitIntent> FinalIntent;
         /// <summary>召唤血统代数（见 <see cref="SpawnRequest.Generation"/>）。
         /// 验收要能看出"第几代"，否则封顶到底生没生效只能靠数数量猜。</summary>
         [ReadOnly] public NativeArray<byte> Generation;
@@ -52,7 +55,7 @@ namespace BinGames.Sim
         /// 本帧玩家受到的伤害总量。
         ///
         /// enemy-ranged-and-parry 起**不只是接触伤害**：敌人弹体命中玩家也累加到这里
-        /// （见 <see cref="JobDamage.PlayerDamageOut"/>），这样所有打到玩家身上的东西
+        /// （见 <see cref="JobDamage.ControlledDamageOut"/>），这样所有打到受控实体的东西
         /// 都统一经过同一条结算路径——过 DamageTaken 减伤、记账、发 PlayerHurtSignal。
         /// </summary>
         public float PlayerDamageTaken;
@@ -60,6 +63,11 @@ namespace BinGames.Sim
         public float2 PlayerPosition;
         public float PlayerHealth;
         public float PlayerRadius;
+
+        /// <summary>当前玩家控制实体的稳定身份；不保证它位于固定槽位。</summary>
+        public SimEntityId ControlledUnitId;
+        /// <summary>构建快照时解析出的瞬时槽位；无有效控制实体时为 InvalidIndex。</summary>
+        public int ControlledUnitIndex;
 
         public bool IsAlive(int i) => i >= 0 && i < Count && Alive[i] != 0;
 
@@ -71,6 +79,45 @@ namespace BinGames.Sim
         public SimFaction FactionOf(int i)
         {
             return i >= 0 && i < Count ? (SimFaction)Faction[i] : SimFaction.None;
+        }
+
+        public IntentSource IntentSourceOf(int i)
+        {
+            return i >= 0 && i < Count
+                ? (BinGames.Sim.IntentSource)IntentSource[i]
+                : BinGames.Sim.IntentSource.AI;
+        }
+
+        public bool TryResolve(SimEntityId entityId, out int unitIndex)
+        {
+            if (entityId.IsValid)
+            {
+                for (int i = 0; i < Count; i++)
+                {
+                    if (Alive[i] != 0 && EntityId[i] == entityId)
+                    {
+                        unitIndex = i;
+                        return true;
+                    }
+                }
+            }
+
+            unitIndex = SimConst.InvalidIndex;
+            return false;
+        }
+
+        /// <summary>O(1) 解析本快照的受控实体，并再次校验稳定 ID，防止默认值或过期槽位串体。</summary>
+        public bool TryResolveControlledUnit(out int unitIndex)
+        {
+            int index = ControlledUnitIndex;
+            if (index >= 0 && index < Count && Alive[index] != 0 &&
+                ControlledUnitId.IsValid && EntityId[index] == ControlledUnitId)
+            {
+                unitIndex = index;
+                return true;
+            }
+            unitIndex = SimConst.InvalidIndex;
+            return false;
         }
 
         /// <summary>存活的敌对单位数量。UI 显示"当前敌人规模"用。</summary>

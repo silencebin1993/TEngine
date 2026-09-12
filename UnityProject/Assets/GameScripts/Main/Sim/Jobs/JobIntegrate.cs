@@ -15,6 +15,7 @@ namespace BinGames.Sim
         [ReadOnly] public NativeArray<float2> DesiredDir;
         [ReadOnly] public NativeArray<float2> SeparationForce;
         [ReadOnly] public NativeArray<float> MaxSpeed;
+        [ReadOnly] public NativeArray<UnitIntent> Intents;
         [ReadOnly] public NativeArray<byte> Alive;
         [ReadOnly] public NativeArray<uint> Status;
         [ReadOnly] public NativeArray<int> ArchetypeId;
@@ -44,7 +45,7 @@ namespace BinGames.Sim
             }
 
             uint st = Status[i];
-            float speed = MaxSpeed[i];
+            float speed = MaxSpeed[i] * math.max(0f, Intents[i].SpeedMul);
 
             if ((st & (uint)SimStatus.Stunned) != 0u)
             {

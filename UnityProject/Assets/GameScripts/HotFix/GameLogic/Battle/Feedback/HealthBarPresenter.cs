@@ -18,6 +18,7 @@ namespace GameLogic.Battle.Feedback
         private readonly IHealthBarFeedback _impl;
         private SimBridge _sim;
         private StatSheet _stats;
+        private SignalScope _scope;
 
         public HealthBarPresenter(IHealthBarFeedback impl = null)
         {
@@ -28,6 +29,12 @@ namespace GameLogic.Battle.Feedback
         {
             _sim = sim;
             _stats = stats;
+        }
+
+        public override void OnEnter()
+        {
+            _scope = new SignalScope();
+            _scope.On<ControlledUnitChangedSignal>(_ => _impl.ClearControlledPresentation());
         }
 
         public override void OnUpdate(float dt)
@@ -41,6 +48,8 @@ namespace GameLogic.Battle.Feedback
 
         public override void OnExit()
         {
+            _scope?.Dispose();
+            _scope = null;
             (_impl as System.IDisposable)?.Dispose();
         }
 

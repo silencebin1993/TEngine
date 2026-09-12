@@ -1,3 +1,4 @@
+using BinGames.Sim;
 using Cysharp.Threading.Tasks;
 using GameLogic.Core;
 
@@ -15,6 +16,9 @@ namespace GameLogic.Battle.Feedback
         public override int Priority => ModulePriority.Presentation;
 
         private readonly IComposeAimIndicatorFeedback _impl;
+        private SimBridge _sim;
+        private SignalScope _scope;
+        private SimEntityId _lastControlledUnitId;
 
         /// <summary>J4：脏则重编译的缓存版本号，-1 保证首帧必刷新一次。</summary>
         private int _lastAssemblyVersion = -1;
@@ -31,6 +35,9 @@ namespace GameLogic.Battle.Feedback
 
         public override void OnEnter()
         {
+            _sim = Hub.Get<SimBridge>();
+            _scope = new SignalScope();
+            _scope.On<ControlledUnitChangedSignal>(OnControlledUnitChanged);
             // J3 决策：订阅 CarrierActivatedEvent，装配切换后刷新指示器
             // （T3：SetActive 只发事件、不动 AssemblyVersion，故仍需要这条信号）
             TEngine.GameEvent.AddEventListener(
@@ -43,8 +50,22 @@ namespace GameLogic.Battle.Feedback
             Refresh();
         }
 
+        private void OnControlledUnitChanged(ControlledUnitChangedSignal signal)
+        {
+            _impl.Hide();
+            _lastControlledUnitId = SimEntityId.None;
+            Refresh();
+        }
+
         public override void OnUpdate(float dt)
         {
+            SimEntityId controlledId = _sim != null ? _sim.ControlledUnitId : SimEntityId.None;
+            if (controlledId != _lastControlledUnitId)
+            {
+                _impl.Hide();
+                Refresh();
+            }
+
             // J4：每帧只做一次 int 版本号比较（O(1)）；版本变了才重算——EquipGene/UnequipGene
             // 会 ++AssemblyVersion 但不发 CarrierActivatedEvent，这是版本号信号存在的唯一理由
             var registry = GameLogic.UI.Battle.MetabolicSlicePanel.Instance?.CarrierRegistry;
@@ -58,6 +79,14 @@ namespace GameLogic.Battle.Feedback
 
         private void Refresh()
         {
+            if (_sim == null || !_sim.TryGetControlledPresentation(out SimControlledUnitView controlled))
+            {
+                _lastControlledUnitId = SimEntityId.None;
+                _impl.Hide();
+                return;
+            }
+            _lastControlledUnitId = controlled.EntityId;
+
             var registry = GameLogic.UI.Battle.MetabolicSlicePanel.Instance?.CarrierRegistry;
             if (registry != null)
             {
@@ -74,10 +103,14 @@ namespace GameLogic.Battle.Feedback
 
         public override void OnExit()
         {
+            _scope?.Dispose();
+            _scope = null;
             TEngine.GameEvent.RemoveEventListener(
                 MetabolicSlice.Carrier.CarrierRegistry.CarrierActivatedEvent,
                 (System.Action)OnCarrierChanged);
             (_impl as System.IDisposable)?.Dispose();
+            _sim = null;
+            _lastControlledUnitId = SimEntityId.None;
         }
     }
 }

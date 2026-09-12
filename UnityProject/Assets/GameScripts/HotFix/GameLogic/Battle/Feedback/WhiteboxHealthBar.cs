@@ -29,7 +29,7 @@ namespace GameLogic.Battle.Feedback
     {
         private const int EliteBossCap = 32;
         private const int HitTrackCap = 48;
-        /// <summary>玩家 1 + EliteBossCap 32 + HitTrackCap 48，留余量。</summary>
+        /// <summary>受控实体 1 + EliteBossCap 32 + HitTrackCap 48，留余量。</summary>
         private const int PoolSize = 96;
 
         private const float BarY = 0.02f;
@@ -38,8 +38,15 @@ namespace GameLogic.Battle.Feedback
         private const float EliteBossScanInterval = 0.5f;
         private const float HitDisplaySeconds = 2.5f;
 
+        private struct TrackedUnit
+        {
+            public SimEntityId EntityId;
+            public int UnitIndex;
+        }
+
         private struct HitTrackEntry
         {
+            public SimEntityId EntityId;
             public int UnitIndex;
             public float ExpireAt;
         }
@@ -54,7 +61,7 @@ namespace GameLogic.Battle.Feedback
         private Material _fillMatTemplate;
         private int _lastActiveSlots;
 
-        private readonly List<int> _eliteBossCache = new List<int>(EliteBossCap);
+        private readonly List<TrackedUnit> _eliteBossCache = new List<TrackedUnit>(EliteBossCap);
         private float _nextScanTime;
 
         private readonly List<HitTrackEntry> _hitTrack = new List<HitTrackEntry>(HitTrackCap);
@@ -72,19 +79,28 @@ namespace GameLogic.Battle.Feedback
             RefreshHitTrack(in snap, now);
 
             int slot = 0;
-            slot = WriteBar(slot, snap.PlayerPosition, snap.PlayerRadius, snap.PlayerHealth,
-                Mathf.Max(1f, playerMaxHealth));
+            SimEntityId controlledId = SimEntityId.None;
+            if (snap.TryResolveControlledUnit(out int controlledIndex))
+            {
+                controlledId = snap.ControlledUnitId;
+                slot = WriteBar(slot, snap.Position[controlledIndex], snap.Radius[controlledIndex],
+                    snap.Health[controlledIndex], Mathf.Max(1f, playerMaxHealth));
+            }
 
             for (int i = 0; i < _eliteBossCache.Count; i++)
             {
-                int idx = _eliteBossCache[i];
+                TrackedUnit tracked = _eliteBossCache[i];
+                if (tracked.EntityId == controlledId) { continue; }
+                int idx = tracked.UnitIndex;
                 slot = WriteBar(slot, snap.Position[idx], snap.Radius[idx], snap.Health[idx],
                     MaxHealthOf(in snap, idx));
             }
 
             for (int i = 0; i < _hitTrack.Count; i++)
             {
-                int idx = _hitTrack[i].UnitIndex;
+                HitTrackEntry tracked = _hitTrack[i];
+                if (tracked.EntityId == controlledId) { continue; }
+                int idx = tracked.UnitIndex;
                 slot = WriteBar(slot, snap.Position[idx], snap.Radius[idx], snap.Health[idx],
                     MaxHealthOf(in snap, idx));
             }
@@ -100,8 +116,10 @@ namespace GameLogic.Battle.Feedback
         {
             for (int i = _eliteBossCache.Count - 1; i >= 0; i--)
             {
-                int idx = _eliteBossCache[i];
-                if (!snap.IsAlive(idx) || !snap.HasStatus(idx, SimStatus.Elite | SimStatus.Boss))
+                TrackedUnit tracked = _eliteBossCache[i];
+                int idx = tracked.UnitIndex;
+                if (!IsSameAlive(in snap, tracked.EntityId, idx) ||
+                    !snap.HasStatus(idx, SimStatus.Elite | SimStatus.Boss))
                 {
                     _eliteBossCache.RemoveAt(i);
                 }
@@ -124,11 +142,12 @@ namespace GameLogic.Battle.Feedback
                 {
                     continue;
                 }
-                if (_eliteBossCache.Contains(i))
+                SimEntityId entityId = snap.EntityId[i];
+                if (FindEliteBossIndex(entityId) >= 0)
                 {
                     continue;
                 }
-                _eliteBossCache.Add(i);
+                _eliteBossCache.Add(new TrackedUnit { EntityId = entityId, UnitIndex = i });
             }
         }
 
@@ -141,7 +160,7 @@ namespace GameLogic.Battle.Feedback
             for (int i = _hitTrack.Count - 1; i >= 0; i--)
             {
                 HitTrackEntry e = _hitTrack[i];
-                if (e.ExpireAt <= now || !snap.IsAlive(e.UnitIndex))
+                if (e.ExpireAt <= now || !IsSameAlive(in snap, e.EntityId, e.UnitIndex))
                 {
                     _hitTrack.RemoveAt(i);
                 }
@@ -168,7 +187,8 @@ namespace GameLogic.Battle.Feedback
                 }
 
                 float expireAt = now + HitDisplaySeconds;
-                int existing = FindHitTrackIndex(idx);
+                SimEntityId entityId = snap.EntityId[idx];
+                int existing = FindHitTrackIndex(entityId);
                 if (existing >= 0)
                 {
                     HitTrackEntry e = _hitTrack[existing];
@@ -177,21 +197,49 @@ namespace GameLogic.Battle.Feedback
                 }
                 else if (_hitTrack.Count < HitTrackCap)
                 {
-                    _hitTrack.Add(new HitTrackEntry { UnitIndex = idx, ExpireAt = expireAt });
+                    _hitTrack.Add(new HitTrackEntry
+                    {
+                        EntityId = entityId,
+                        UnitIndex = idx,
+                        ExpireAt = expireAt,
+                    });
                 }
             }
         }
 
-        private int FindHitTrackIndex(int unitIndex)
+        private int FindHitTrackIndex(SimEntityId entityId)
         {
             for (int i = 0; i < _hitTrack.Count; i++)
             {
-                if (_hitTrack[i].UnitIndex == unitIndex)
+                if (_hitTrack[i].EntityId == entityId)
                 {
                     return i;
                 }
             }
             return -1;
+        }
+
+        private int FindEliteBossIndex(SimEntityId entityId)
+        {
+            for (int i = 0; i < _eliteBossCache.Count; i++)
+            {
+                if (_eliteBossCache[i].EntityId == entityId) { return i; }
+            }
+            return -1;
+        }
+
+        private static bool IsSameAlive(in SimSnapshot snap, SimEntityId entityId, int unitIndex)
+        {
+            return snap.IsAlive(unitIndex) && snap.EntityId[unitIndex] == entityId;
+        }
+
+        /// <summary>控制切换事件到达时立即隐藏旧受控血条，下一次 Sync 再按新 ID 重建。</summary>
+        public void ClearControlledPresentation()
+        {
+            if (_bgRenderer != null)
+            {
+                HideFrom(0);
+            }
         }
 
         private static float MaxHealthOf(in SimSnapshot snap, int idx)

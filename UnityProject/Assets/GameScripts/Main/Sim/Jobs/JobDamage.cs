@@ -32,15 +32,14 @@ namespace BinGames.Sim
         public NativeList<HitEvent> HitEvents;
 
         /// <summary>
-        /// enemy-ranged-and-parry：命中**玩家**的伤害累加到这里，而不是直接扣 <see cref="Health"/>[0]。
+        /// 命中当前受控实体的伤害累加到这里，由世界统一应用减伤和反馈记账。
         ///
-        /// 玩家掉血是有一整条自己的管线的（<c>CellDevourSystem</c> 里过 <c>DamageTaken</c> 减伤、
-        /// 记 <c>TotalDamageTaken</c>、发 <c>PlayerHurtSignal</c>）。如果在这里直接写 Health[0]，
-        /// 敌人的弹体伤害就会**绕过护甲、不发受伤反馈**，而且血量归零时会被
-        /// <c>JobCollectDeaths</c> 当成普通单位走死亡/回收槽位——玩家不该从那条路"死"。
+        /// 兼容层仍把该值作为 PlayerDamageTaken 暴露，但目标由 ControlledUnitId 每帧解析，
+        /// 作业本身不认识固定玩家槽位。
         /// 与 <see cref="JobContactDamage"/> 共用同一个累加槽位，两边都用 += 累加。
         /// </summary>
-        public NativeArray<float> PlayerDamageOut;
+        public NativeArray<float> ControlledDamageOut;
+        public int ControlledUnitIndex;
 
         public float InvCellSize;
         public int Count;
@@ -228,10 +227,10 @@ namespace BinGames.Sim
                 Status[i] = st | (uint)req.ApplyStatus;
             }
 
-            // 玩家：只累加，不碰 Health/Alive/PendingDeaths（见 PlayerDamageOut 注释）。
-            if (i == SimConst.PlayerIndex)
+            // 当前受控实体：先累加，世界主线程统一应用减伤，再由通用死亡收集处理生命周期。
+            if (i == ControlledUnitIndex)
             {
-                PlayerDamageOut[0] = PlayerDamageOut[0] + final;
+                ControlledDamageOut[0] = ControlledDamageOut[0] + final;
                 if (HitEvents.Length < MaxHitEvents)
                 {
                     HitEvents.Add(new HitEvent
@@ -278,7 +277,7 @@ namespace BinGames.Sim
     }
 
     /// <summary>
-    /// 敌人对玩家的接触伤害。单独一个 job，因为只写玩家一个槽位，无并行冲突。
+    /// 敌人对当前受控实体的接触伤害。目标由世界以稳定 ID 解析后作为瞬时索引传入。
     /// </summary>
     [BurstCompile]
     public struct JobContactDamage : IJob
@@ -292,22 +291,28 @@ namespace BinGames.Sim
         [ReadOnly] public NativeParallelMultiHashMap<int, int> Hash;
 
         public NativeArray<float> AttackTimer;
-        /// <summary>长度 1 的输出数组，累加本帧对玩家的总伤害。</summary>
-        public NativeArray<float> PlayerDamageOut;
+        /// <summary>长度 1 的输出数组，累加本帧对当前受控实体的总伤害。</summary>
+        public NativeArray<float> ControlledDamageOut;
 
-        public float2 PlayerPos;
-        public float PlayerRadius;
+        public int TargetIndex;
+        public float2 TargetPos;
+        public float TargetRadius;
         public float InvCellSize;
         public int Count;
         public float Dt;
 
         public void Execute()
         {
+            if (TargetIndex < 0 || TargetIndex >= Count || Alive[TargetIndex] == 0)
+            {
+                return;
+            }
+
             float total = 0f;
-            // 接触判定范围取玩家半径 + 合理的最大攻击距离
-            float scan = PlayerRadius + 6f;
+            // 接触判定范围取受控实体半径 + 合理的最大攻击距离
+            float scan = TargetRadius + 6f;
             int ring = SpatialHash.RingFor(scan, InvCellSize);
-            int2 c = SpatialHash.ToCell(PlayerPos, InvCellSize);
+            int2 c = SpatialHash.ToCell(TargetPos, InvCellSize);
 
             for (int dy = -ring; dy <= ring; dy++)
             {
@@ -320,7 +325,7 @@ namespace BinGames.Sim
                     }
                     do
                     {
-                        if (j == SimConst.PlayerIndex || j >= Count || Alive[j] == 0)
+                        if (j == TargetIndex || j >= Count || Alive[j] == 0)
                         {
                             continue;
                         }
@@ -351,8 +356,8 @@ namespace BinGames.Sim
                             continue;
                         }
 
-                        float reach = PlayerRadius + Radius[j] + arc.AttackRange;
-                        if (math.distancesq(Position[j], PlayerPos) > reach * reach)
+                        float reach = TargetRadius + Radius[j] + arc.AttackRange;
+                        if (math.distancesq(Position[j], TargetPos) > reach * reach)
                         {
                             continue;
                         }
@@ -364,7 +369,7 @@ namespace BinGames.Sim
             }
 
             // 累加而不是覆盖：同一帧里 JobDamage 已经可能写过（敌人弹体命中玩家）。
-            PlayerDamageOut[0] = PlayerDamageOut[0] + total;
+            ControlledDamageOut[0] = ControlledDamageOut[0] + total;
         }
     }
 }

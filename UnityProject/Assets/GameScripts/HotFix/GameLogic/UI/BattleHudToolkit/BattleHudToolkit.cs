@@ -301,8 +301,11 @@ namespace GameLogic
             }
 
             float maxHp = st.Get(StatId.MaxHealth);
-            float hp = cell.Sim.PlayerHealth;
-            _hpText.text = $"生命 {hp:F0}/{maxHp:F0}";
+            SimControlledUnitView controlled = default;
+            bool hasControlled = cell.Sim != null &&
+                cell.Sim.TryGetControlledPresentation(out controlled);
+            float hp = hasControlled ? controlled.Health : 0f;
+            _hpText.text = hasControlled ? $"生命 {hp:F0}/{maxHp:F0}" : "生命 --（无控制目标）";
             _volumeText.text = $"体积 {st.Get(StatId.Volume):F2}";
 
             float hpPct = maxHp > 0f ? Mathf.Clamp01(hp / maxHp) : 0f;
@@ -344,7 +347,7 @@ namespace GameLogic
         /// 全仓零 UI 消费方，玩家完全看不到自己中了什么 buff/debuff。
         ///
         /// 数据刻意取自两处：
-        /// **有哪些状态** → 内核快照掩码 <c>Status[PlayerIndex]</c>，O(1)，且能覆盖
+        /// **有哪些状态** → 桥接层按 ControlledUnitId 解析的受控只读视图，O(1)，且能覆盖
         /// 冲刺无敌那种直接 <c>ApplyStatusUnit</c>、不进 StatusSystem 计时表的永久状态；
         /// **剩余秒数** → <see cref="StatusSystem.PlayerTimers"/>，只有限时状态才有。
         ///
@@ -361,13 +364,9 @@ namespace GameLogic
 
             uint mask = 0u;
             SimBridge sim = cell.Sim;
-            if (sim != null && sim.Running)
+            if (sim != null && sim.TryGetControlledPresentation(out SimControlledUnitView controlled))
             {
-                SimSnapshot snap = sim.Snapshot;
-                if (SimConst.PlayerIndex < snap.Count && snap.Alive[SimConst.PlayerIndex] != 0)
-                {
-                    mask = snap.Status[SimConst.PlayerIndex];
-                }
+                mask = (uint)controlled.Status;
             }
 
             if (mask == 0u)

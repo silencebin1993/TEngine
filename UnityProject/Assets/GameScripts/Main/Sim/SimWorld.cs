@@ -1,3 +1,4 @@
+using System;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
@@ -33,6 +34,10 @@ namespace BinGames.Sim
         private NativeArray<byte> _alive;
         private NativeArray<int> _logicId;
         private NativeArray<int> _visualId;
+        private NativeArray<SimEntityId> _entityId;
+        private NativeArray<byte> _intentSource;
+        private NativeArray<byte> _intentSourceBeforePlayer;
+        private NativeArray<UnitIntent> _unitIntents;
 
         private NativeArray<BehaviorArchetype> _archetypes;
         private NativeArray<ProjectileState> _projectiles;
@@ -51,6 +56,8 @@ namespace BinGames.Sim
         private NativeList<int> _freeSlots;
         private int _unitCount;
         private int _projectileCursor;
+        private ulong _nextEntityId;
+        private SimEntityId _controlledUnitId;
 
         // ── 事件与中间缓冲 ──
         private NativeList<int> _pendingDeaths;
@@ -67,7 +74,7 @@ namespace BinGames.Sim
         private int _projectileEndCount;
         private NativeQueue<int> _deadQueue;
         private NativeList<DamageRequest> _damageScratch;
-        private NativeArray<float> _playerDamage;
+        private NativeArray<float> _controlledDamage;
 
         /// <summary>每个槽位最近一次发出死亡事件的帧号。用来做**同帧**去重，
         /// 而不是拿 <c>_alive</c> 当判据——两个死亡生产者在入队前就已经把 Alive 置 0 了。
@@ -92,6 +99,7 @@ namespace BinGames.Sim
         private float _time;
 
         public bool IsCreated => _created;
+        public SimEntityId ControlledUnitId => _created ? _controlledUnitId : SimEntityId.None;
         public int UnitCount => _unitCount;
         public float Time => _time;
         /// <summary>当前生效的障碍数量（已按 <see cref="SimConst.MaxObstacles"/> 截断）。</summary>
@@ -118,6 +126,10 @@ namespace BinGames.Sim
             _alive = new NativeArray<byte>(cap, A);
             _logicId = new NativeArray<int>(cap, A);
             _visualId = new NativeArray<int>(cap, A);
+            _entityId = new NativeArray<SimEntityId>(cap, A);
+            _intentSource = new NativeArray<byte>(cap, A);
+            _intentSourceBeforePlayer = new NativeArray<byte>(cap, A);
+            _unitIntents = new NativeArray<UnitIntent>(cap, A);
 
             _projectiles = new NativeArray<ProjectileState>(math.max(16, cfg.ProjectileCapacity), A);
             _zones = new NativeArray<ZoneState>(math.max(16, cfg.ZoneCapacity), A);
@@ -137,7 +149,7 @@ namespace BinGames.Sim
             _projectileEndCount = 0;
             _deadQueue = new NativeQueue<int>(A);
             _damageScratch = new NativeList<DamageRequest>(256, A);
-            _playerDamage = new NativeArray<float>(1, A);
+            _controlledDamage = new NativeArray<float>(1, A);
             _deathEmitFrame = new NativeArray<int>(cap, A);
             _frameIndex = 0;
             _zoneTimer = new NativeArray<float>(cap, A);
@@ -153,7 +165,7 @@ namespace BinGames.Sim
             _obstacleRadius = new NativeArray<float>(SimConst.MaxObstacles, A);
             _obstacleCount = 0;
 
-            // 玩家恒占索引 0
+            // 兼容启动流程：默认友军从槽位 0 创建；后续控制与生命周期不依赖该槽位。
             _unitCount = 1;
             _alive[SimConst.PlayerIndex] = 1;
             _faction[SimConst.PlayerIndex] = (byte)SimFaction.Player;
@@ -163,10 +175,177 @@ namespace BinGames.Sim
             _archetypeId[SimConst.PlayerIndex] = -1;
             _logicId[SimConst.PlayerIndex] = 0;
             _visualId[SimConst.PlayerIndex] = 0;
+            _entityId[SimConst.PlayerIndex] = AllocateEntityId();
+            _intentSource[SimConst.PlayerIndex] = (byte)IntentSource.Player;
+            _intentSourceBeforePlayer[SimConst.PlayerIndex] = (byte)IntentSource.AI;
+            _unitIntents[SimConst.PlayerIndex] = UnitIntent.Idle(
+                _entityId[SimConst.PlayerIndex], IntentSource.Player);
+            _controlledUnitId = _entityId[SimConst.PlayerIndex];
 
             _time = 0f;
             _projectileCursor = 0;
             _created = true;
+        }
+
+        /// <summary>返回当前槽位中的稳定实体身份；无效或已释放槽位返回 false。</summary>
+        public bool TryGetEntityId(int unitIndex, out SimEntityId entityId)
+        {
+            if (_created && unitIndex >= 0 && unitIndex < _unitCount && _alive[unitIndex] != 0)
+            {
+                entityId = _entityId[unitIndex];
+                return entityId.IsValid;
+            }
+
+            entityId = SimEntityId.None;
+            return false;
+        }
+
+        /// <summary>只解析存活实体。跨帧调用方不得缓存返回的槽位索引。</summary>
+        public bool TryResolveUnit(SimEntityId entityId, out int unitIndex)
+        {
+            if (TryFindUnit(entityId, out unitIndex))
+            {
+                return _alive[unitIndex] != 0;
+            }
+
+            unitIndex = SimConst.InvalidIndex;
+            return false;
+        }
+
+        public bool TryGetUnitControlState(SimEntityId entityId, out SimUnitControlState state)
+        {
+            if (TryFindUnit(entityId, out int unitIndex))
+            {
+                state = new SimUnitControlState
+                {
+                    EntityId = entityId,
+                    UnitIndex = unitIndex,
+                    Faction = (SimFaction)_faction[unitIndex],
+                    IntentSource = (IntentSource)_intentSource[unitIndex],
+                    IsAlive = _alive[unitIndex] != 0,
+                    Position = _position[unitIndex],
+                };
+                return true;
+            }
+
+            state = default;
+            return false;
+        }
+
+        public SimControlCandidate[] GetControlCandidates(float maxDistance)
+        {
+            if (!_created || maxDistance < 0f ||
+                !TryResolveUnit(_controlledUnitId, out int controlledIndex))
+            {
+                return Array.Empty<SimControlCandidate>();
+            }
+
+            float2 origin = _position[controlledIndex];
+            float maxDistanceSq = maxDistance * maxDistance;
+            int count = 0;
+            for (int i = 0; i < _unitCount; i++)
+            {
+                if (i == controlledIndex || _alive[i] == 0 ||
+                    !IsFriendlyFaction((SimFaction)_faction[i]) ||
+                    math.distancesq(origin, _position[i]) > maxDistanceSq)
+                {
+                    continue;
+                }
+                count++;
+            }
+
+            if (count == 0)
+            {
+                return Array.Empty<SimControlCandidate>();
+            }
+
+            var result = new SimControlCandidate[count];
+            int write = 0;
+            for (int i = 0; i < _unitCount; i++)
+            {
+                float distanceSq = math.distancesq(origin, _position[i]);
+                if (i == controlledIndex || _alive[i] == 0 ||
+                    !IsFriendlyFaction((SimFaction)_faction[i]) || distanceSq > maxDistanceSq)
+                {
+                    continue;
+                }
+                result[write++] = new SimControlCandidate
+                {
+                    EntityId = _entityId[i],
+                    Faction = (SimFaction)_faction[i],
+                    IntentSource = (IntentSource)_intentSource[i],
+                    Position = _position[i],
+                    Distance = math.sqrt(distanceSq),
+                };
+            }
+
+            // 候选查询发生在显式切换操作，不在逐帧模拟热路径；稳定排序便于 UI 与测试复现。
+            Array.Sort(result, (left, right) =>
+            {
+                int distanceOrder = left.Distance.CompareTo(right.Distance);
+                return distanceOrder != 0
+                    ? distanceOrder
+                    : left.EntityId.Value.CompareTo(right.EntityId.Value);
+            });
+            return result;
+        }
+
+        public ControlSwitchResult TrySwitchControlledUnit(SimEntityId entityId)
+        {
+            if (!_created) { return ControlSwitchResult.WorldNotInitialized; }
+            if (!entityId.IsValid) { return ControlSwitchResult.InvalidTarget; }
+            if (!TryFindUnit(entityId, out int targetIndex)) { return ControlSwitchResult.TargetNotFound; }
+            if (_alive[targetIndex] == 0) { return ControlSwitchResult.TargetDead; }
+            if (!IsFriendlyFaction((SimFaction)_faction[targetIndex]))
+            {
+                return ControlSwitchResult.TargetNotFriendly;
+            }
+            if (_controlledUnitId == entityId) { return ControlSwitchResult.AlreadyControlled; }
+
+            if (TryFindUnit(_controlledUnitId, out int previousIndex) && _alive[previousIndex] != 0)
+            {
+                _intentSource[previousIndex] = _intentSourceBeforePlayer[previousIndex];
+            }
+
+            _intentSourceBeforePlayer[targetIndex] = _intentSource[targetIndex] == (byte)IntentSource.Player
+                ? (byte)IntentSource.AI
+                : _intentSource[targetIndex];
+            _intentSource[targetIndex] = (byte)IntentSource.Player;
+            _controlledUnitId = entityId;
+            return ControlSwitchResult.Success;
+        }
+
+        private SimEntityId AllocateEntityId()
+        {
+            _nextEntityId++;
+            if (_nextEntityId == 0UL)
+            {
+                _nextEntityId++;
+            }
+            return new SimEntityId(_nextEntityId);
+        }
+
+        private bool TryFindUnit(SimEntityId entityId, out int unitIndex)
+        {
+            if (_created && entityId.IsValid)
+            {
+                for (int i = 0; i < _unitCount; i++)
+                {
+                    if (_entityId[i] == entityId)
+                    {
+                        unitIndex = i;
+                        return true;
+                    }
+                }
+            }
+
+            unitIndex = SimConst.InvalidIndex;
+            return false;
+        }
+
+        private static bool IsFriendlyFaction(SimFaction faction)
+        {
+            return faction == SimFaction.Player || faction == SimFaction.PlayerMinion;
         }
 
         public void SetArchetypes(BehaviorArchetype[] archetypes)
@@ -206,12 +385,12 @@ namespace BinGames.Sim
             _obstacleCount = n;
         }
 
-        // ── 玩家读写（热更层通过 SimBridge 调用，不直接碰数组）──
+        // ── 当前受控实体兼容读写（热更层通过 SimBridge 调用，不直接碰数组）──
 
         /// <summary>
         /// 玩家受伤倍率（护甲/减伤）。热更层的 <c>StatId.DamageTaken</c> 推下来。
         ///
-        /// 为什么要推下来：本帧打到玩家身上的伤害现在由**内核自己**结算进 <c>_health[0]</c>
+        /// 为什么要推下来：本帧打到当前受控实体的伤害由内核统一结算。
         /// （见 <see cref="Step"/> 末尾）。此前是内核只累加、等热更层某个系统读走再回头调
         /// <c>DamagePlayer</c>——那意味着少一个消费者，敌人的伤害就静默消失。
         /// 减伤是玩法数值、结算是内核职责，把数值推下去比把结算提上来安全。
@@ -226,39 +405,51 @@ namespace BinGames.Sim
 
         public void SetPlayerStats(float maxHp, float currentHp, float radius, float maxSpeed)
         {
-            if (!_created) { return; }
-            _health[SimConst.PlayerIndex] = math.min(currentHp, maxHp);
-            _radius[SimConst.PlayerIndex] = math.max(0.1f, radius);
-            _maxSpeed[SimConst.PlayerIndex] = math.max(0.1f, maxSpeed);
+            if (!TryResolveUnit(_controlledUnitId, out int controlledIndex)) { return; }
+            _health[controlledIndex] = math.min(currentHp, maxHp);
+            _radius[controlledIndex] = math.max(0.1f, radius);
+            _maxSpeed[controlledIndex] = math.max(0.1f, maxSpeed);
         }
 
         /// <summary>任务二（3D 表现差异化）：Carrier 装配变化时切换玩家渲染造型。</summary>
         public void SetPlayerVisualId(int visualId)
         {
-            if (!_created) { return; }
-            _visualId[SimConst.PlayerIndex] = visualId;
+            if (TryResolveUnit(_controlledUnitId, out int controlledIndex))
+            {
+                _visualId[controlledIndex] = visualId;
+            }
         }
 
-        public float PlayerHealth => _created ? _health[SimConst.PlayerIndex] : 0f;
-        public float2 PlayerPosition => _created ? _position[SimConst.PlayerIndex] : float2.zero;
-        public float PlayerRadius => _created ? _radius[SimConst.PlayerIndex] : 1f;
+        public bool SetUnitVisualId(SimEntityId entityId, int visualId)
+        {
+            if (!TryResolveUnit(entityId, out int unitIndex)) { return false; }
+            _visualId[unitIndex] = visualId;
+            return true;
+        }
+
+        public float PlayerHealth => TryResolveUnit(_controlledUnitId, out int index) ? _health[index] : 0f;
+        public float2 PlayerPosition => TryResolveUnit(_controlledUnitId, out int index) ? _position[index] : float2.zero;
+        public float PlayerRadius => TryResolveUnit(_controlledUnitId, out int index) ? _radius[index] : 1f;
 
         public void DamagePlayer(float amount)
         {
-            if (!_created || amount <= 0f) { return; }
-            if ((_status[SimConst.PlayerIndex] & (uint)SimStatus.Invulnerable) != 0u) { return; }
-            _health[SimConst.PlayerIndex] -= amount;
+            if (amount <= 0f || !TryResolveUnit(_controlledUnitId, out int controlledIndex)) { return; }
+            if ((_status[controlledIndex] & (uint)SimStatus.Invulnerable) != 0u) { return; }
+            _health[controlledIndex] -= amount;
         }
 
         public void HealPlayer(float amount, float maxHp)
         {
-            if (!_created || amount <= 0f) { return; }
-            _health[SimConst.PlayerIndex] = math.min(_health[SimConst.PlayerIndex] + amount, maxHp);
+            if (amount <= 0f || !TryResolveUnit(_controlledUnitId, out int controlledIndex)) { return; }
+            _health[controlledIndex] = math.min(_health[controlledIndex] + amount, maxHp);
         }
 
         public void SetPlayerPosition(float2 pos)
         {
-            if (_created) { _position[SimConst.PlayerIndex] = pos; }
+            if (TryResolveUnit(_controlledUnitId, out int controlledIndex))
+            {
+                _position[controlledIndex] = pos;
+            }
         }
 
         /// <summary>
@@ -282,9 +473,10 @@ namespace BinGames.Sim
             float half = _cfg.ArenaHalfExtent;
             float r2 = radius * radius;
             int moved = 0;
+            TryResolveUnit(_controlledUnitId, out int controlledIndex);
             for (int i = 0; i < _unitCount; i++)
             {
-                if (i == SimConst.PlayerIndex || _alive[i] == 0) { continue; }
+                if (i == controlledIndex || _alive[i] == 0) { continue; }
                 if (target != SimFaction.None && (SimFaction)_faction[i] != target) { continue; }
 
                 float2 delta = _position[i] - origin;
@@ -389,37 +581,18 @@ namespace BinGames.Sim
             _devourCandidates.Clear();
             _damageScratch.Clear();
             _deathCount = 0;
-            _playerDamage[0] = 0f;
+            _controlledDamage[0] = 0f;
 
             ApplyCommands(ref cmds);
-
-            // 玩家意图 → 玩家的 DesiredDir 与速度倍率
-            float playerSpeedMul = 1f;
-            if (cmds.TryGetIntent(out PlayerIntent intent))
-            {
-                _desiredDir[SimConst.PlayerIndex] = math.normalizesafe(intent.MoveDir);
-                playerSpeedMul = math.max(0f, intent.SpeedMul);
-                if (intent.RadiusOverride > 0f)
-                {
-                    _radius[SimConst.PlayerIndex] = intent.RadiusOverride;
-                }
-                uint ps = _status[SimConst.PlayerIndex];
-                ps |= (uint)intent.AddStatus;
-                ps &= ~(uint)intent.RemoveStatus;
-                _status[SimConst.PlayerIndex] = ps;
-            }
-            else
-            {
-                _desiredDir[SimConst.PlayerIndex] = float2.zero;
-            }
-
-            float playerBaseSpeed = _maxSpeed[SimConst.PlayerIndex];
-            _maxSpeed[SimConst.PlayerIndex] = playerBaseSpeed * playerSpeedMul;
+            PrepareUnitIntents(ref cmds);
+            bool hasControlledUnit = TryResolveUnit(_controlledUnitId, out int controlledIndex);
+            float2 controlledPos = hasControlledUnit ? _position[controlledIndex] : float2.zero;
+            float controlledRadius = hasControlledUnit ? _radius[controlledIndex] : 0f;
 
             // ── job 链 ──
             JobHandle h = _hash.Rebuild(_position, _alive, _unitCount, default);
 
-            var steering = new JobSteering
+            var aiIntent = new JobAIIntent
             {
                 Position = _position,
                 Velocity = _velocity,
@@ -427,17 +600,31 @@ namespace BinGames.Sim
                 Faction = _faction,
                 Alive = _alive,
                 ArchetypeId = _archetypeId,
+                IntentSource = _intentSource,
+                EntityId = _entityId,
                 Status = _status,
                 Archetypes = _archetypes,
-                DesiredDir = _desiredDir,
+                Intents = _unitIntents,
                 AttackTimer = _attackTimer,
-                PlayerPos = _position[SimConst.PlayerIndex],
+                TargetPos = controlledPos,
+                HasTarget = hasControlledUnit,
                 Time = _time,
                 Dt = dt,
                 Count = _unitCount,
                 ArenaHalf = _cfg.ArenaHalfExtent,
                 Hash = _hash.Map,
                 InvCellSize = _hash.InvCellSize,
+            };
+            h = aiIntent.Schedule(_unitCount, 64, h);
+
+            var steering = new JobSteering
+            {
+                Intents = _unitIntents,
+                Alive = _alive,
+                DesiredDir = _desiredDir,
+                Status = _status,
+                Radius = _radius,
+                Count = _unitCount,
             };
             h = steering.Schedule(_unitCount, 64, h);
 
@@ -462,6 +649,7 @@ namespace BinGames.Sim
                 DesiredDir = _desiredDir,
                 SeparationForce = _separation,
                 MaxSpeed = _maxSpeed,
+                Intents = _unitIntents,
                 Alive = _alive,
                 Status = _status,
                 ArchetypeId = _archetypeId,
@@ -483,16 +671,18 @@ namespace BinGames.Sim
 
             // 位置变了，重建哈希供后续查询使用
             _hash.Rebuild(_position, _alive, _unitCount, default).Complete();
-            _maxSpeed[SimConst.PlayerIndex] = playerBaseSpeed;
 
             ResolveMinionCombat(dt);
             // 敌人开火要在 JobProjectile 之前：本帧生成的弹体本帧就开始飞，
             // 与命令缓冲里玩家发的弹同一时序。
-            ResolveHostileRangedCombat(dt);
-            ResolveHostileAbilities(dt);
+            ResolveHostileRangedCombat(dt, controlledIndex);
+            ResolveHostileAbilities(dt, controlledIndex);
 
-            float2 playerPos = _position[SimConst.PlayerIndex];
-            float playerRad = _radius[SimConst.PlayerIndex];
+            if (hasControlledUnit && _alive[controlledIndex] != 0)
+            {
+                controlledPos = _position[controlledIndex];
+                controlledRadius = _radius[controlledIndex];
+            }
 
             // 投射物：命中转为 DamageRequest
             var proj = new JobProjectile
@@ -514,7 +704,7 @@ namespace BinGames.Sim
                 InvCellSize = _hash.InvCellSize,
                 UnitCount = _unitCount,
                 ArenaHalf = _cfg.ArenaHalfExtent,
-                OwnerPos = playerPos,
+                OwnerPos = controlledPos,
             };
             proj.Schedule(_projectiles.Length, 32, default).Complete();
 
@@ -578,7 +768,8 @@ namespace BinGames.Sim
                     Alive = _alive,
                     PendingDeaths = _pendingDeaths,
                     HitEvents = _hitEvents,
-                    PlayerDamageOut = _playerDamage,
+                    ControlledDamageOut = _controlledDamage,
+                    ControlledUnitIndex = hasControlledUnit ? controlledIndex : SimConst.InvalidIndex,
                     InvCellSize = _hash.InvCellSize,
                     Count = _unitCount,
                     MaxHitEvents = _cfg.MaxHitEventsPerFrame,
@@ -598,32 +789,31 @@ namespace BinGames.Sim
                 Archetypes = _archetypes,
                 Hash = _hash.Map,
                 AttackTimer = _attackTimer,
-                PlayerDamageOut = _playerDamage,
-                PlayerPos = playerPos,
-                PlayerRadius = playerRad,
+                ControlledDamageOut = _controlledDamage,
+                TargetIndex = hasControlledUnit ? controlledIndex : SimConst.InvalidIndex,
+                TargetPos = controlledPos,
+                TargetRadius = controlledRadius,
                 InvCellSize = _hash.InvCellSize,
                 Count = _unitCount,
                 Dt = dt,
             };
             contact.Schedule().Complete();
 
-            // ── 玩家受伤：**内核自己结算** ────────────────────────────────────
-            // 本帧所有打到玩家身上的东西（接触伤害 + 敌人弹体 + 未来的敌方毒圈/光环）
-            // 都已累加进 _playerDamage[0]。此前这里什么都不做，等热更层某个系统读走快照再
-            // 回头调 DamagePlayer——那意味着**少一个消费者，敌人的伤害就静默消失**。
-            // 现在内核直接扣血，热更层只负责推减伤倍率（PlayerDamageTakenMul）与播受伤反馈。
+            // ── 受控实体受伤：内核统一结算 ────────────────────────────────────
+            // 本帧所有打到当前受控实体的伤害都累加进 _controlledDamage[0]。
+            // 内核直接扣血，热更层只负责推减伤倍率（PlayerDamageTakenMul）与播受伤反馈。
             // 快照里回报的是**已减伤后的最终值**，热更层照它记账即可，不要再扣一次。
-            if (_playerDamage[0] > 0f)
+            if (hasControlledUnit && _alive[controlledIndex] != 0 && _controlledDamage[0] > 0f)
             {
-                float taken = _playerDamage[0] * _playerDamageTakenMul;
-                if ((_status[SimConst.PlayerIndex] & (uint)SimStatus.Invulnerable) != 0u)
+                float taken = _controlledDamage[0] * _playerDamageTakenMul;
+                if ((_status[controlledIndex] & (uint)SimStatus.Invulnerable) != 0u)
                 {
                     taken = 0f;
                 }
-                _playerDamage[0] = taken;
+                _controlledDamage[0] = taken;
                 if (taken > 0f)
                 {
-                    _health[SimConst.PlayerIndex] -= taken;
+                    _health[controlledIndex] -= taken;
                 }
             }
 
@@ -636,8 +826,9 @@ namespace BinGames.Sim
                 Status = _status,
                 Hash = _hash.Map,
                 Candidates = _devourCandidates,
-                PlayerPos = playerPos,
-                PlayerRadius = playerRad,
+                ActorIndex = hasControlledUnit ? controlledIndex : SimConst.InvalidIndex,
+                ActorPos = controlledPos,
+                ActorRadius = controlledRadius,
                 InvCellSize = _hash.InvCellSize,
                 Count = _unitCount,
                 DevourRatio = 1.05f,
@@ -670,6 +861,36 @@ namespace BinGames.Sim
         }
 
         /// <summary>
+        /// 把 Player/Scripted 命令编译到按槽位对齐的最终意图缓冲。AI 槽位随后由
+        /// <see cref="JobAIIntent"/> 写入同一结构；来源不匹配或身份失效的命令被确定性忽略。
+        /// </summary>
+        private void PrepareUnitIntents(ref SimCommandBuffer cmds)
+        {
+            for (int i = 0; i < _unitCount; i++)
+            {
+                if (_alive[i] == 0) { continue; }
+                _unitIntents[i] = UnitIntent.Idle(_entityId[i], (IntentSource)_intentSource[i]);
+            }
+
+            if (!cmds.IsCreated) { return; }
+            for (int i = 0; i < cmds.Intents.Length; i++)
+            {
+                UnitIntent intent = cmds.Intents[i];
+                SimEntityId targetId = intent.EntityId;
+                if (!targetId.IsValid && intent.Source == IntentSource.Player)
+                {
+                    targetId = _controlledUnitId;
+                }
+                if (!TryResolveUnit(targetId, out int targetIndex)) { continue; }
+                if (_intentSource[targetIndex] != (byte)intent.Source) { continue; }
+                if (intent.Source == IntentSource.Player && targetId != _controlledUnitId) { continue; }
+
+                intent.EntityId = targetId;
+                _unitIntents[targetIndex] = intent;
+            }
+        }
+
+        /// <summary>
         /// 玩家召唤物（PlayerMinion）攻击结算。数量恒被 MinionCap 卡在个位数，
         /// 主线程线性扫描即可，不需要额外 Burst job（召唤机制 story）。
         /// 只把伤害/自毁写进 <see cref="_damageScratch"/>，复用下面 JobDamage 的统一结算，
@@ -677,9 +898,10 @@ namespace BinGames.Sim
         /// </summary>
         private void ResolveMinionCombat(float dt)
         {
-            for (int i = SimConst.PlayerIndex + 1; i < _unitCount; i++)
+            for (int i = 0; i < _unitCount; i++)
             {
-                if (_alive[i] == 0 || (SimFaction)_faction[i] != SimFaction.PlayerMinion)
+                if (_alive[i] == 0 || _intentSource[i] != (byte)IntentSource.AI
+                    || (SimFaction)_faction[i] != SimFaction.PlayerMinion)
                 {
                     continue;
                 }
@@ -775,16 +997,17 @@ namespace BinGames.Sim
         /// 与 <see cref="ResolveMinionCombat"/> 同样放主线程线性扫描：一帧一趟 O(UnitCount)，
         /// 和已有的 <see cref="JobContactDamage"/> 同数量级，不值得为它单开一个 Burst job。
         /// </summary>
-        private void ResolveHostileRangedCombat(float dt)
+        private void ResolveHostileRangedCombat(float dt, int controlledIndex)
         {
-            if (_alive[SimConst.PlayerIndex] == 0)
+            if (controlledIndex < 0 || controlledIndex >= _unitCount || _alive[controlledIndex] == 0)
             {
                 return;
             }
 
-            float2 playerPos = _position[SimConst.PlayerIndex];
+            float2 controlledPos = _position[controlledIndex];
+            SimFaction controlledFaction = (SimFaction)_faction[controlledIndex];
 
-            for (int i = SimConst.PlayerIndex + 1; i < _unitCount; i++)
+            for (int i = 0; i < _unitCount; i++)
             {
                 if (_alive[i] == 0 || (SimFaction)_faction[i] != SimFaction.Hostile)
                 {
@@ -817,7 +1040,7 @@ namespace BinGames.Sim
                     continue;
                 }
 
-                float2 to = playerPos - _position[i];
+                float2 to = controlledPos - _position[i];
                 float dist = math.length(to);
                 if (dist > range || dist < 1e-4f)
                 {
@@ -848,7 +1071,7 @@ namespace BinGames.Sim
                         Radius = radius,
                         Lifetime = lifetime,
                         Pierce = 1,
-                        TargetFaction = SimFaction.Player,
+                        TargetFaction = controlledFaction,
                         ApplyStatus = SimStatus.None,
                         SourceLogicId = _logicId[i],
                         VisualId = 0,
@@ -885,19 +1108,20 @@ namespace BinGames.Sim
         /// 与 <see cref="ResolveHostileRangedCombat"/> 同样主线程一趟 O(UnitCount)。
         /// 冷却各用各的计时器：一个单位可以同时会撞、会射、会放毒、会孵。
         /// </summary>
-        private void ResolveHostileAbilities(float dt)
+        private void ResolveHostileAbilities(float dt, int controlledIndex)
         {
-            if (_alive[SimConst.PlayerIndex] == 0)
+            if (controlledIndex < 0 || controlledIndex >= _unitCount || _alive[controlledIndex] == 0)
             {
                 return;
             }
 
-            float2 playerPos = _position[SimConst.PlayerIndex];
+            float2 controlledPos = _position[controlledIndex];
+            SimFaction controlledFaction = (SimFaction)_faction[controlledIndex];
             // 先把上限固定住：召唤会当场追加单位，否则新生成的小怪本帧就会被遍历到，
             // 甚至自己再召唤一批（无限套娃）。
             int scanCount = _unitCount;
 
-            for (int i = SimConst.PlayerIndex + 1; i < scanCount; i++)
+            for (int i = 0; i < scanCount; i++)
             {
                 if (_alive[i] == 0 || (SimFaction)_faction[i] != SimFaction.Hostile)
                 {
@@ -923,20 +1147,20 @@ namespace BinGames.Sim
                     {
                         // 模式 1（丢到玩家脚下）要够得着才丢；模式 2/3 是自己身上的东西，不看距离。
                         bool inRange = mode != 1
-                            || math.distance(playerPos, _position[i])
+                            || math.distance(controlledPos, _position[i])
                                 <= (arc.AggroRange > 0f ? arc.AggroRange : arc.AttackRange);
                         if (inRange)
                         {
                             SpawnZone(new ZoneRequest
                             {
-                                Position = mode == 1 ? playerPos : _position[i],
+                                Position = mode == 1 ? controlledPos : _position[i],
                                 Radius = arc.ZoneRadius,
                                 GrowthRate = 0f,
                                 MaxRadius = arc.ZoneRadius,
                                 DamagePerTick = arc.ZoneDamagePerTick,
                                 Interval = arc.ZoneTickInterval > 0f ? arc.ZoneTickInterval : 0.5f,
                                 Seconds = arc.ZoneSeconds,
-                                TargetFaction = SimFaction.Player,
+                                TargetFaction = controlledFaction,
                                 ApplyStatus = SimStatus.None,
                                 ChainCount = 0,
                                 SourceLogicId = _logicId[i],
@@ -1029,7 +1253,7 @@ namespace BinGames.Sim
             for (int i = 0; i < cmds.Despawns.Length; i++)
             {
                 int idx = cmds.Despawns[i];
-                if (idx > SimConst.PlayerIndex && idx < _unitCount && _alive[idx] != 0)
+                if (idx >= 0 && idx < _unitCount && _alive[idx] != 0)
                 {
                     _alive[idx] = 0;
                     ReleaseSlot(idx);
@@ -1142,6 +1366,13 @@ namespace BinGames.Sim
             _status[idx] = (uint)req.InitialStatus;
             _faction[idx] = (byte)req.Faction;
             _alive[idx] = 1;
+            _entityId[idx] = AllocateEntityId();
+            IntentSource initialIntentSource = req.IntentSource == IntentSource.Scripted
+                ? IntentSource.Scripted
+                : IntentSource.AI;
+            _intentSource[idx] = (byte)initialIntentSource;
+            _intentSourceBeforePlayer[idx] = (byte)initialIntentSource;
+            _unitIntents[idx] = UnitIntent.Idle(_entityId[idx], initialIntentSource);
             // LogicId 0 是玩家/环境的保留值。内核自己生成的单位（敌人召唤物）拿不到热更层的
             // 分配器，用**负数**自成一段——与 SimBridge 的正数序列天然不冲突，
             // 而且死亡事件里一眼看得出"这是内核生成的"。
@@ -1264,7 +1495,7 @@ namespace BinGames.Sim
             // 结果是 `DeathCount` 恒为 0，**整个游戏从来没有发出过一次死亡事件**：
             // 击杀奖励、进化能、卡牌 OnKill、KillSignal 全都静默失效。
             // 改用一个"本帧是否已发过"的时间戳，与 Alive 解耦。
-            if (idx <= SimConst.PlayerIndex || idx >= _unitCount)
+            if (idx < 0 || idx >= _unitCount)
             {
                 return;
             }
@@ -1292,6 +1523,11 @@ namespace BinGames.Sim
 
         private void ReleaseSlot(int idx)
         {
+            if (_entityId[idx] == _controlledUnitId)
+            {
+                _intentSource[idx] = _intentSourceBeforePlayer[idx];
+                _controlledUnitId = SimEntityId.None;
+            }
             _alive[idx] = 0;
             _status[idx] = 0u;
             _health[idx] = 0f;
@@ -1307,7 +1543,7 @@ namespace BinGames.Sim
         /// <summary>直接击杀（吞噬结算用）。</summary>
         public void KillUnit(int idx, int killerLogicId)
         {
-            if (!_created || idx <= SimConst.PlayerIndex || idx >= _unitCount || _alive[idx] == 0)
+            if (!_created || idx < 0 || idx >= _unitCount || _alive[idx] == 0)
             {
                 return;
             }
@@ -1330,6 +1566,9 @@ namespace BinGames.Sim
 
         public SimSnapshot GetSnapshot()
         {
+            int controlledIndex = TryResolveUnit(_controlledUnitId, out int resolvedControlledIndex)
+                ? resolvedControlledIndex
+                : SimConst.InvalidIndex;
             return new SimSnapshot
             {
                 Count = _unitCount,
@@ -1343,6 +1582,9 @@ namespace BinGames.Sim
                 ArchetypeId = _archetypeId,
                 LogicId = _logicId,
                 VisualId = _visualId,
+                EntityId = _entityId,
+                IntentSource = _intentSource,
+                FinalIntent = _unitIntents,
                 Deaths = _deathEvents,
                 DeathCount = _deathCount,
                 Hits = _hitEvents.IsCreated ? _hitEvents.AsArray() : default,
@@ -1352,10 +1594,12 @@ namespace BinGames.Sim
                 ProjectileEnds = _projectileEndEvents,
                 ProjectileEndCount = _projectileEndCount,
                 Generation = _generation,
-                PlayerDamageTaken = _playerDamage.IsCreated ? _playerDamage[0] : 0f,
-                PlayerPosition = _position[SimConst.PlayerIndex],
-                PlayerHealth = _health[SimConst.PlayerIndex],
-                PlayerRadius = _radius[SimConst.PlayerIndex],
+                PlayerDamageTaken = _controlledDamage.IsCreated ? _controlledDamage[0] : 0f,
+                PlayerPosition = PlayerPosition,
+                PlayerHealth = PlayerHealth,
+                PlayerRadius = PlayerRadius,
+                ControlledUnitId = _controlledUnitId,
+                ControlledUnitIndex = controlledIndex,
             };
         }
 
@@ -1389,6 +1633,10 @@ namespace BinGames.Sim
             Safe(ref _position); Safe(ref _velocity); Safe(ref _desiredDir); Safe(ref _separation);
             SafeF(ref _health); SafeF(ref _radius); SafeF(ref _maxSpeed); SafeF(ref _attackTimer);
             SafeI(ref _archetypeId); SafeI(ref _logicId); SafeI(ref _visualId);
+            if (_entityId.IsCreated) { _entityId.Dispose(); }
+            if (_intentSource.IsCreated) { _intentSource.Dispose(); }
+            if (_intentSourceBeforePlayer.IsCreated) { _intentSourceBeforePlayer.Dispose(); }
+            if (_unitIntents.IsCreated) { _unitIntents.Dispose(); }
             SafeI(ref _deathEmitFrame);
             SafeF(ref _zoneTimer); SafeF(ref _summonTimer);
             if (_status.IsCreated) { _status.Dispose(); }
@@ -1412,12 +1660,13 @@ namespace BinGames.Sim
             if (_projectileEndEvents.IsCreated) { _projectileEndEvents.Dispose(); }
             if (_deadQueue.IsCreated) { _deadQueue.Dispose(); }
             if (_damageScratch.IsCreated) { _damageScratch.Dispose(); }
-            if (_playerDamage.IsCreated) { _playerDamage.Dispose(); }
+            if (_controlledDamage.IsCreated) { _controlledDamage.Dispose(); }
             _hash.Dispose();
 
             _unitCount = 0;
             _deathCount = 0;
             _obstacleCount = 0;
+            _controlledUnitId = SimEntityId.None;
             _created = false;
         }
 

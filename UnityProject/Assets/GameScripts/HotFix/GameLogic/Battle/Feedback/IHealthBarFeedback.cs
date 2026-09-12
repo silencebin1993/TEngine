@@ -15,5 +15,8 @@ namespace GameLogic.Battle.Feedback
         /// 不写 Sim，纯只读展示。
         /// </summary>
         void Sync(in SimSnapshot snap, float playerMaxHealth);
+
+        /// <summary>切换控制目标时立即清除旧目标专属血条缓存。</summary>
+        void ClearControlledPresentation();
     }
 }

@@ -5,6 +5,30 @@ using UnityEngine;
 namespace GameLogic.Battle.Feedback
 {
     /// <summary>
+    /// 表现层临时对象的统一销毁入口：运行时延迟销毁，Edit Mode 验收立即销毁。
+    /// 不依赖 UnityEditor，Player 构建可直接复用。
+    /// </summary>
+    internal static class PresentationObjectLifetime
+    {
+        public static void Destroy(Object obj)
+        {
+            if (obj == null)
+            {
+                return;
+            }
+
+            if (Application.isPlaying)
+            {
+                Object.Destroy(obj);
+            }
+            else
+            {
+                Object.DestroyImmediate(obj);
+            }
+        }
+    }
+
+    /// <summary>
     /// 白模障碍可视化（story-009）。
     ///
     /// 障碍是纯静态的——生成后永不移动、永不消失，直到本局结束。不套用
@@ -130,18 +154,18 @@ namespace GameLogic.Battle.Feedback
             var renderers = _root.GetComponentsInChildren<MeshRenderer>();
             if (renderers.Length > 0 && renderers[0].sharedMaterial != null)
             {
-                Object.Destroy(renderers[0].sharedMaterial);
+                PresentationObjectLifetime.Destroy(renderers[0].sharedMaterial);
             }
             var filters = _root.GetComponentsInChildren<MeshFilter>();
             for (int i = 0; i < filters.Length; i++)
             {
                 if (filters[i].sharedMesh != null)
                 {
-                    Object.Destroy(filters[i].sharedMesh);
+                    PresentationObjectLifetime.Destroy(filters[i].sharedMesh);
                 }
             }
 
-            Object.Destroy(_root);
+            PresentationObjectLifetime.Destroy(_root);
             _root = null;
         }
     }

@@ -69,14 +69,14 @@ namespace GameLogic.Stage.CellStage
             float volumePenalty = 1f / (1f + Mathf.Max(0f, volume - 1f) * 0.09f);
             float speed = _stats.Get(StatId.MoveSpeed) * volumePenalty;
 
-            _sim.Intent = new PlayerIntent
+            _sim.SetControlledIntent(new PlayerIntent
             {
                 MoveDir = move,
                 SpeedMul = 1f,
                 RadiusOverride = volume,
                 AddStatus = SimStatus.None,
                 RemoveStatus = SimStatus.None,
-            };
+            });
 
             // 属性同步。每帧同步是为了让卡牌的即时属性变化立刻生效。
             _sim.SetPlayerStats(
