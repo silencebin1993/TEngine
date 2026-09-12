@@ -212,6 +212,20 @@ namespace GameLogic.Battle
         }
 
         /// <summary>
+        /// M2-03b：当前受控的是不是玩家本体（而不是被接管的友军）。
+        ///
+        /// 判据是阵营：世界初始化时槽位 0 恒为 <see cref="SimFaction.Player"/>，
+        /// 可接管的友军一律 <see cref="SimFaction.PlayerMinion"/>（见 <c>CellStageFlow.SpawnControlAllies</c>）。
+        /// 不另存一个"玩家本体 id"字段——那是第二个会漂移的真相源。
+        ///
+        /// 玩家专属的输出路径（<c>AbilitySystem</c> 槽位、<c>MetabolicSliceRunner</c> 的 Carrier 自动开火）
+        /// 靠它判断"现在该不该跑"：接管友军时它们继续开火的话，不管接管谁打出来的都是玩家那套装配，
+        /// M2-03 的"动作集与实体一致"就不成立了。O(1)。
+        /// </summary>
+        public bool ControllingPlayerBody =>
+            TryGetControlledPresentation(out SimControlledUnitView view) && view.Faction == SimFaction.Player;
+
+        /// <summary>
         /// 相机锚点：有控制实体时返回其实时位置；否则返回本局最后一个有效战术位置。
         /// bool 返回是否存在可用锚点，hasControlled 区分战术跟随和临时战略回退。
         /// </summary>

@@ -64,6 +64,7 @@ namespace GameLogic.EditorTools
                 ValidateCameraDirector();
                 ValidateSquadCommands();
                 ValidateUnitLoadouts();
+                ValidateDirectControlActions();
             }
             catch (Exception e)
             {
@@ -2462,6 +2463,270 @@ namespace GameLogic.EditorTools
             finally
             {
                 registry.Unbind();
+                sim.End();
+            }
+        }
+
+        // ── [16] 直控动作集与释放（M2-03b）────────────────────
+
+        /// <summary>
+        /// M2-03b 的验收核心是里程碑那句"两个不同装配单位被接管时动作集**不同且与实体一致**"。
+        ///
+        /// 所以这里刻意不只比掩码——只比数据不同，行为却一模一样，是不算过的。
+        /// 每个单位释放之后都去内核里看真的落下了什么：菌丝体应该多出一块持续区域，
+        /// 孢子应该给身边的敌人挂上状态位且**不**产生区域。两者互相是对方的反证。
+        /// </summary>
+        private static void ValidateDirectControlActions()
+        {
+            Line("\n[16] 直控动作集与释放（M2-03b）");
+
+            var sim = new SimBridge();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 32;
+            cfg.ArenaHalfExtent = 60f;
+            cfg.RandomSeed = 0xC0FFEE04u;
+            sim.Begin(cfg, Array.Empty<BehaviorArchetype>());
+            // 切换范围/冷却在本用例里不是被测对象，放开以免干扰（同 [12]/[13] 的做法）。
+            sim.ConfigureControlSwitch(100f, 0f);
+
+            var registry = new UnitLoadoutRegistry();
+            var fakeSource = new FakePlayerLoadoutSource();
+            var actions = new DirectControlActions();
+            var stats = new StatSheet();
+            stats.ResetToDefaults();
+            var playerController = new CellPlayerController();
+
+            InputRouter.Reset();
+
+            try
+            {
+                registry.Bind(sim, fakeSource);
+                SimEntityId body = sim.ControlledUnitId;
+                registry.RegisterPlayerBody(body);
+                // abilities / status 都不给：Edit 模式起不了整套 ModuleHub。
+                // 可注入正是为了让这条路径能写真断言，而不是只能进 Play 手点（同 M2-03a §4 的理由）。
+                actions.Bind(sim, registry, abilities: null, status: null);
+                playerController.Bind(sim, stats, null, null, null, actions);
+
+                // 两名友军 + 一个站在孢子身边的敌人（用来观察"到底有没有东西落到它身上"）。
+                // MaxSpeed=0：本用例不验移动，让位置在整段里保持确定。
+                const int SporeLogicId = 9401;
+                const int MyceliumLogicId = 9402;
+                const int HostileLogicId = 9403;
+                var sporePos = new float2(-4f, 2f);
+                var myceliumPos = new float2(4f, 2f);
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = sporePos, Health = 40f, Radius = 0.8f, MaxSpeed = 0f,
+                    ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = SporeLogicId,
+                });
+                registry.RegisterArchetypePending(SporeLogicId, ArchetypeLoadoutTable.SporeArchetypeId);
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = myceliumPos, Health = 40f, Radius = 0.8f, MaxSpeed = 0f,
+                    ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = MyceliumLogicId,
+                });
+                registry.RegisterArchetypePending(MyceliumLogicId, ArchetypeLoadoutTable.MyceliumArchetypeId);
+                sim.Spawn(new SpawnRequest
+                {
+                    // 贴着孢子放：挂标记型器官的半径来自 Luban 表，取值可能很小，
+                    // 放远了会把"表里数字偏小"误判成"机制没生效"。
+                    Position = sporePos + new float2(0.5f, 0f), Health = 500f, Radius = 0.6f, MaxSpeed = 0f,
+                    ArchetypeId = 0, Faction = SimFaction.Hostile,
+                    IntentSource = IntentSource.AI, LogicId = HostileLogicId,
+                });
+
+                sim.OnUpdate(1f / 60f);
+                registry.ResolvePending(sim.Snapshot);
+                SimSnapshot snap = sim.Snapshot;
+                SimEntityId spore = FindEntityId(snap, SporeLogicId, out _);
+                SimEntityId mycelium = FindEntityId(snap, MyceliumLogicId, out _);
+                SimEntityId hostile = FindEntityId(snap, HostileLogicId, out int hostileIndex);
+                Expect(spore.IsValid && mycelium.IsValid && hostile.IsValid,
+                    "两名友军与一个敌人应都已落地并拥有有效稳定实体 ID");
+
+                // ── A. 开局动作集就绪；移动不走释放入口 ──
+                Expect(actions.ActionSet.EntityId == body &&
+                       actions.ActionSet.Origin == UnitLoadoutOrigin.PlayerProjection,
+                    "Bind 时就该按当前受控实体编译一次动作集，不必等到第一次切换控制权");
+                Expect(!actions.TryRelease(LoadoutAction.Move, new float2(1f, 0f)) &&
+                       actions.LastReleaseResult == DirectActionAvailability.NotAReleaseAction,
+                    "移动不走释放入口——它是每帧意图，不是一次性动作（M2-03a 契约 §6）");
+
+                // ── B. 接管孢子：动作集与它的实际装配一致 ──
+                int buildBeforeSwitch = actions.ActionSet.BuildVersion;
+                Expect(sim.RequestControlSwitch(spore) == ControlRequestResult.Success, "应能接管孢子友军");
+                Expect(actions.ActionSet.BuildVersion > buildBeforeSwitch &&
+                       actions.ActionSet.EntityId == spore,
+                    $"控制权变更后动作集应被重建并指向新身体（版本 {buildBeforeSwitch} → {actions.ActionSet.BuildVersion}）");
+
+                UnitLoadout sporeLoadout = registry.Get(spore);
+                bool sporeBound = sporeLoadout.TryGetOrgan(LoadoutAction.Primary, out UnitLoadoutOrgan sporeOrgan);
+                Expect(sporeBound && actions.ActionSet.OrganIdOf(LoadoutAction.Primary) == sporeOrgan.OrganId,
+                    "孢子动作集里主动作绑定的器官 id 必须与它 loadout 里的那件一致");
+                int sporeMask = actions.ActionSet.ActionMask;
+
+                // 孢子没有交互器官 → 交互槽必须明确是"没长"，不是"坏了"也不是"能按"。
+                Expect(!actions.ActionSet.CanRelease(LoadoutAction.Interact) &&
+                       actions.ActionSet.AvailabilityOf(LoadoutAction.Interact) == DirectActionAvailability.NoOrgan,
+                    "孢子没有交互器官，交互槽应判为 NoOrgan");
+
+                // 真释放一次，去内核里看落下了什么。
+                int zonesBeforeSpore = sim.LiveZoneCount;
+                Expect(actions.TryRelease(LoadoutAction.Primary, new float2(1f, 0f)),
+                    "孢子的主器官应能释放");
+                OrganKernelActionKind sporeKind = actions.LastReleasedKernelAction.Kind;
+                Expect(actions.LastReleasedOrganId == sporeOrgan.OrganId,
+                    "成功释放记录的器官 id 应就是装配里那件");
+                sim.OnUpdate(1f / 60f);
+                uint hostileStatus = sim.Snapshot.Status[hostileIndex];
+                Expect(hostileStatus != 0u,
+                    $"孢子的主器官是挂标记型的，释放后身边敌人应被挂上状态位（实际 {hostileStatus}）");
+                Expect(sim.LiveZoneCount == zonesBeforeSpore,
+                    "挂标记型器官不该产生持续区域——那是另一件器官的形态");
+
+                // ── C. 接管菌丝体：动作集不同，且行为也不同 ──
+                Expect(sim.RequestControlSwitch(mycelium) == ControlRequestResult.Success,
+                    "应能从孢子切换到菌丝体");
+                Expect(actions.ActionSet.EntityId == mycelium,
+                    "切换后动作集应指向菌丝体");
+
+                UnitLoadout myceliumLoadout = registry.Get(mycelium);
+                bool myceliumBound = myceliumLoadout.TryGetOrgan(LoadoutAction.Primary,
+                    out UnitLoadoutOrgan myceliumOrgan);
+                Expect(myceliumBound && actions.ActionSet.OrganIdOf(LoadoutAction.Primary) == myceliumOrgan.OrganId,
+                    "菌丝体动作集里主动作绑定的器官 id 必须与它 loadout 里的那件一致");
+                Expect(myceliumOrgan.OrganId != sporeOrgan.OrganId,
+                    "两名友军的主器官本就不同——否则后面比什么都没意义");
+                Expect(actions.ActionSet.ActionMask != sporeMask,
+                    $"两个不同装配单位的可释放动作集应不同（孢子 {sporeMask} vs 菌丝体 {actions.ActionSet.ActionMask}）");
+
+                int zonesBeforeMycelium = sim.LiveZoneCount;
+                Expect(actions.TryRelease(LoadoutAction.Primary, new float2(1f, 0f)),
+                    "菌丝体的主器官应能释放");
+                sim.OnUpdate(1f / 60f);
+                Expect(actions.LastReleasedKernelAction.Kind != sporeKind,
+                    $"两个单位打出来的**内核请求形状**应不同（孢子 {sporeKind} vs 菌丝体 {actions.LastReleasedKernelAction.Kind}）" +
+                    "——只有数据不同、行为一样是不算过的");
+                Expect(sim.LiveZoneCount > zonesBeforeMycelium,
+                    $"菌丝体的主器官是钉区域型的，释放后场上应真的多出持续区域（{zonesBeforeMycelium} → {sim.LiveZoneCount}）");
+
+                // ── D. 失能主器官 → 释放入口真的拒绝（不只是标记变了）──
+                Expect(registry.SetOrganDisabled(mycelium, myceliumOrgan.OrganId, true),
+                    "应能把菌丝体的主器官置为失能");
+                int zonesBeforeDisabled = sim.LiveZoneCount;
+                int releasesBeforeDisabled = actions.ReleaseCount;
+                bool rejected = !actions.TryRelease(LoadoutAction.Primary, new float2(1f, 0f));
+                sim.OnUpdate(1f / 60f);
+                Expect(rejected && actions.LastReleaseResult == DirectActionAvailability.OrganDisabled,
+                    "主器官失能后释放入口应拒绝，且原因是 OrganDisabled（区别于'没长这东西'）");
+                Expect(actions.ReleaseCount == releasesBeforeDisabled && sim.LiveZoneCount <= zonesBeforeDisabled,
+                    "被拒绝的释放不得在内核里留下任何东西——只灰不拦等于'显示禁用、实际可用'");
+                // 注意：这里**没有**重建动作集就直接释放，正是为了证明拦截发生在释放入口，
+                // 而不是靠上一次重建时算出来的那份缓存。
+                Expect(registry.SetOrganDisabled(mycelium, myceliumOrgan.OrganId, false) &&
+                       actions.TryRelease(LoadoutAction.Primary, new float2(1f, 0f)),
+                    "解除失能后同一个入口应立刻重新放行");
+
+                // ── E. 切回去动作集跟着变（重建不是一次性的）──
+                Expect(sim.RequestControlSwitch(spore) == ControlRequestResult.Success &&
+                       actions.ActionSet.EntityId == spore &&
+                       actions.ActionSet.ActionMask == sporeMask,
+                    "切回孢子后动作集应回到孢子那一份（切过去再切回来都要重建）");
+
+                // ── F. 退出直控后原单位恢复 AI（复用 M1-06 链路，验证不回归）──
+                Expect(sim.World != null &&
+                       sim.World.TryGetUnitControlState(mycelium, out SimUnitControlState released) &&
+                       released.IsAlive && released.IntentSource == IntentSource.AI,
+                    "被放开的菌丝体应恢复 AI 意图，而不是留在 Player 上站桩");
+
+                // ── G. Direct 域不拥有输入时，直控键不生效 ──
+                // 三种让位来源各测一次：战略视角 / 模态面板 / 玩法暂停。
+                // Edit 模式敲不出真实按键，所以这里测的是**让位那一侧**：跑完整的输入帧之后，
+                // 既不能有释放尝试，也必须真的把上一帧的移动意图清掉
+                // （只早退不清意图的话，松手前的方向会一直粘在内核里继续推着单位走）。
+                int releasesBeforeInput = actions.ReleaseCount;
+                LoadoutAction attemptedBefore = actions.LastAttemptedAction;
+                bool yieldOk = true;
+                bool intentClearedOk = true;
+
+                var yieldCases = new (string Name, Action Enter, Action Leave)[]
+                {
+                    ("战略视角", () => InputRouter.SetScope(InputScope.Strategy),
+                        () => InputRouter.SetScope(InputScope.Direct)),
+                    ("模态面板", () => InputRouter.SetModalUi(true), () => InputRouter.SetModalUi(false)),
+                    ("玩法暂停", () => InputRouter.SetGameplayPaused(true), () => InputRouter.SetGameplayPaused(false)),
+                };
+
+                foreach ((string name, Action enter, Action leave) in yieldCases)
+                {
+                    enter();
+                    // 先塞一个非零意图，再跑输入帧——这样"意图被清空"才是被观察到的行为，
+                    // 而不是因为它本来就是零。
+                    sim.SetControlledIntent(new PlayerIntent
+                    {
+                        MoveDir = new float2(1f, 0f), SpeedMul = 1f, RadiusOverride = 1f,
+                        AddStatus = SimStatus.None, RemoveStatus = SimStatus.None,
+                    });
+                    yieldOk &= !InputRouter.Owns(InputScope.Direct) &&
+                               !InputRouter.ConsumeKeyDown(KeyCode.Mouse0, InputScope.Direct);
+                    playerController.OnUpdate(1f / 60f);
+                    intentClearedOk &= math.lengthsq(sim.Intent.MoveDir) < 1e-6f;
+                    leave();
+                }
+
+                Expect(yieldOk, "战略视角 / 模态面板 / 玩法暂停下，Direct 域都不该拥有输入");
+                Expect(intentClearedOk, "让位那一帧必须把移动意图清空，否则松手前的方向会粘在内核里");
+                Expect(actions.ReleaseCount == releasesBeforeInput &&
+                       actions.LastAttemptedAction == attemptedBefore,
+                    "让位期间跑完整的输入帧，不得发生任何释放尝试");
+                Expect(InputRouter.Owns(InputScope.Direct),
+                    "让位状态解除后 Direct 域应重新拿回输入（不能永久卡在让位）");
+
+                // ── H. 没有任何可控实体时：动作集为空装配，释放安全拒绝，不崩 ──
+                foreach (SimEntityId victim in new[] { spore, mycelium, body })
+                {
+                    if (sim.TryResolveUnitIndex(victim, out int victimIndex))
+                    {
+                        sim.ConsumeUnit(victimIndex);
+                    }
+                }
+                sim.OnUpdate(1f / 60f);
+                actions.Rebuild();
+                Expect(actions.ActionSet.EntityId == SimEntityId.None &&
+                       actions.ActionSet.ActionMask == UnitLoadout.MoveActionMask &&
+                       actions.ActionSet.IsEmptyLoadout,
+                    "意识无处可去时动作集应当场空掉，而不是留着上一具身体的按钮");
+                Expect(!actions.TryRelease(LoadoutAction.Primary, new float2(1f, 0f)) &&
+                       actions.LastReleaseResult == DirectActionAvailability.NoControlledUnit,
+                    "没有受控实体时释放应安全拒绝（不抛、不误打）");
+
+                // ── I. 解绑后不再响应控制权变更（跨局不粘）──
+                int buildBeforeUnbind = actions.ActionSet.BuildVersion;
+                actions.Unbind();
+                // 直接往信号总线上打一条控制权变更：订阅还在的话动作集版本会再涨一次。
+                Signals.Publish(new ControlledUnitChangedSignal
+                {
+                    PreviousUnitId = SimEntityId.None,
+                    CurrentUnitId = spore,
+                    Reason = ControlChangeReason.PlayerRequest,
+                    Result = ControlRequestResult.Success,
+                });
+                Expect(actions.ActionSet.BuildVersion == buildBeforeUnbind + 1 &&
+                       actions.ActionSet.EntityId == SimEntityId.None,
+                    "Unbind 会把动作集清空一次，之后的控制权变更信号不应再让它重建（跨局不粘）");
+                Expect(!actions.TryRelease(LoadoutAction.Primary, new float2(1f, 0f)) &&
+                       actions.LastReleaseResult == DirectActionAvailability.NoControlledUnit,
+                    "解绑后释放入口应安全拒绝而不是抛异常");
+            }
+            finally
+            {
+                InputRouter.Reset();
+                actions.Unbind();
+                registry.Unbind();
+                playerController.OnExit();
                 sim.End();
             }
         }

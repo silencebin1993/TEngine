@@ -92,6 +92,9 @@ namespace GameLogic.Stage.CellStage
         /// <summary>M2-03a：装配按实体归属。与镜头/指挥同理不进 _hub——它要在暂停下也能被查询
         /// （战略暂停里查看某个单位装着什么，正是接管前的决策依据）。</summary>
         private Control.UnitLoadoutRegistry _unitLoadouts;
+        /// <summary>M2-03b：受控实体的动作集与释放入口。同样不进 _hub——它订阅控制权变更信号，
+        /// 而控制权在暂停下也可能变（死亡回弹、读档恢复），冻住它会让恢复后的动作集停在旧身体上。</summary>
+        private Control.DirectControlActions _directActions;
 
         private bool _running;
         private bool _paused;
@@ -143,6 +146,9 @@ namespace GameLogic.Stage.CellStage
 
         /// <summary>M2-03a：按实体归属的装配。直控动作集从这里读，没有第二张英雄技能表。</summary>
         public Control.UnitLoadoutRegistry UnitLoadouts => _unitLoadouts;
+
+        /// <summary>M2-03b：受控实体的动作集。UI/验收读它取"现在能按出什么"。</summary>
+        public Control.DirectControlActions DirectActions => _directActions;
 
         /// <summary>M2-02：当前是否为战略暂停（玩法冻结，但战略域输入保留）。</summary>
         public bool StrategicPause => _paused && _strategicPause;
@@ -433,7 +439,10 @@ namespace GameLogic.Stage.CellStage
             _timeline.Bind(_director);
             _events.Bind(_director, _timeline, _progression, _wallet);
             _devour.Bind(_sim, _stats, _wallet, _events, _outcome.Statistics, _zones, _minions, _structuralHooks);
-            _player.Bind(_sim, _stats, _abilities, _wallet, _camera);
+            // M2-03b：动作集在这里 new、在 SetupUnitLoadouts 里 Bind——注册表要等 SetupSim 才存在，
+            // 而输入层的引用必须在这一轮接线里就交出去（_player 之后不会再被重绑）。
+            _directActions = new Control.DirectControlActions();
+            _player.Bind(_sim, _stats, _abilities, _wallet, _camera, _directActions);
             _bossPhase.Bind(_sim);
             _shop.Bind(_wallet, _stats, _deck, _sim);
         }
@@ -538,6 +547,10 @@ namespace GameLogic.Stage.CellStage
             _unitLoadouts = new Control.UnitLoadoutRegistry();
             _unitLoadouts.Bind(_sim, new Control.MetabolicSlicePlayerLoadoutSource());
             _unitLoadouts.RegisterPlayerBody(_sim.ControlledUnitId);
+
+            // M2-03b：动作集绑在注册表之后，且此刻就编译一次——玩家本体已经登记，
+            // 开局第一帧按键就该有反应，不必等到第一次切换控制权才有动作集。
+            _directActions?.Bind(_sim, _unitLoadouts, _abilities, _status);
         }
 
         /// <summary>
@@ -1153,7 +1166,12 @@ namespace GameLogic.Stage.CellStage
             _squadCommands?.Tick(_paused);
             // M2-03a：把"生成时还拿不到实体 id"的装配登记补上。挂起表空时它一行都不扫，
             // 稳态代价是一次 Count == 0 判断——不违反"热更层每帧与敌人数无关"。
-            _unitLoadouts?.ResolvePending(_sim.Snapshot);
+            // M2-03b：延迟登记刚落地的那一帧，受控实体的动作集可能还是按"未登记"编译出来的
+            // （接管发生在登记落地之前）。只在真的补登记了条目时重建一次，不是每帧重建。
+            if (_unitLoadouts != null && _unitLoadouts.ResolvePending(_sim.Snapshot) > 0)
+            {
+                _directActions?.Rebuild();
+            }
 
             // 选卡时暂停玩法推进，但不暂停 UI
             if (_paused)
@@ -1684,6 +1702,10 @@ namespace GameLogic.Stage.CellStage
             }
             _squadCommands?.Unbind();
             _squadCommands = null;
+            // M2-03b：先解绑动作集再解绑注册表——它订阅着控制权变更信号，
+            // 留着会在下一局用上一局的注册表引用重建动作集。
+            _directActions?.Unbind();
+            _directActions = null;
             // M2-03a：装配条目里的键是上一局那个 SimWorld 发的实体 id，跨局一律作废。
             _unitLoadouts?.Unbind();
             _unitLoadouts = null;

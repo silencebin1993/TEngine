@@ -119,6 +119,26 @@ namespace GameLogic.Control
             return false;
         }
 
+        /// <summary>
+        /// 该动作槽上**有没有器官**——失能的也算（M2-03b 新增）。
+        ///
+        /// 与 <see cref="HasAction"/> 的区别正是本方法存在的理由：<c>HasAction</c> 回答"现在能不能按"，
+        /// 这里回答"这具身体长没长这东西"。两者合起来才能把"没长"和"长了但坏了"分开，
+        /// 而这两种情况在 UI 上必须给出完全不同的说法。
+        /// </summary>
+        public bool HasOrganInSlot(LoadoutAction action)
+        {
+            for (int i = 0; i < _organs.Count; i++)
+            {
+                if (_organs[i].Action == action)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         /// <summary>该 id 的器官是否在装配里（无论是否失能）。</summary>
         public bool ContainsOrgan(string organId)
         {

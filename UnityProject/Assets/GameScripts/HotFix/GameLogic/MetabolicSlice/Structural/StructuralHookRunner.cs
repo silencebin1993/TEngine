@@ -464,8 +464,11 @@ namespace GameLogic.MetabolicSlice.Structural
         private static bool RollProbability(float p) => p >= 1f || UnityEngine.Random.value <= p;
 
         /// <summary>TriggerHookSpec.Tag 的物质名 → SimStatus 占位映射（本 story 只搭机制，§A2 24 条
-        /// 正式取值由 011 定稿，届时如与此表冲突以 011 为准）。</summary>
-        private static SimStatus ParseTag(string tag)
+        /// 正式取值由 011 定稿，届时如与此表冲突以 011 为准）。
+        ///
+        /// M2-03b 起对外可见：<c>Control/OrganKernelActionTable</c> 把结构器官编译成直控动作时
+        /// 要用同一张表。复制一份的话，同一件器官在"常驻触发"和"直控释放"两条路上会挂出不同的状态位。</summary>
+        public static SimStatus ParseTag(string tag)
         {
             switch (tag)
             {

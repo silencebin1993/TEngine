@@ -767,6 +767,18 @@ namespace GameLogic.MetabolicSlice.Combat
                 return;
             }
 
+            // M2-03b：这条自动开火路径从头到尾是**玩家本体**的东西——装配取自
+            // MetabolicSlicePanel.Instance（玩家的 Carrier 注册表），落点取自 _sim.PlayerPosition。
+            // 接管友军期间继续跑它，等于不管接管谁，打出来的都是玩家那套装配，
+            // 里程碑 M2-03 的"动作集与实体一致"当场不成立。
+            // 被接管的友军改由 Control/DirectControlActions 按它自己的装配释放（两条路刻意不统一，
+            // 理由见 DesignDocs/migration/Direct_Control_Contract.md §5）。
+            // 玩家控制自己本体时这个判断恒为 true，原有行为一行未变。
+            if (!_sim.ControllingPlayerBody)
+            {
+                return;
+            }
+
             _timer += dt;
             if (_timer < _attackInterval)
             {

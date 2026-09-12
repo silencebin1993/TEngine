@@ -28,6 +28,9 @@ namespace GameLogic.Stage.CellStage
         private ResourceWallet _wallet;
         private Camera _camera;
 
+        /// <summary>M2-03b：当前受控实体的动作集。可为 null（回归用例只验控制切换时不给）。</summary>
+        private GameLogic.Control.DirectControlActions _actions;
+
         private SignalScope _controlScope;
 
         public ControlRequestResult LastControlSwitchResult { get; private set; } =
@@ -53,13 +56,15 @@ namespace GameLogic.Stage.CellStage
         };
 
         public void Bind(SimBridge sim, StatSheet stats, AbilitySystem abilities,
-            ResourceWallet wallet, Camera cam)
+            ResourceWallet wallet, Camera cam,
+            GameLogic.Control.DirectControlActions actions = null)
         {
             _sim = sim;
             _stats = stats;
             _abilities = abilities;
             _wallet = wallet;
             _camera = cam;
+            _actions = actions;
 
             // M1-06：非玩家发起的控制权变更（死亡回弹、卸载、读档恢复）也要进同一个反馈窗口，
             // 否则玩家被弹到另一具躯体上时屏幕上什么都不说。
@@ -126,7 +131,15 @@ namespace GameLogic.Stage.CellStage
                 _abilities.AimDirection = aim;
             }
 
-            PollAbilityInput();
+            // M2-03b：玩家的技能槽是**玩家本体**的东西。接管友军期间继续从别人的身体里
+            // 打出玩家那套技能，会让"不管接管谁，打出来的都一样"——那正是里程碑验收
+            // "动作集与实体一致"要排除的情况。玩家本体这一侧一行都没动。
+            if (_sim.ControllingPlayerBody)
+            {
+                PollAbilityInput();
+            }
+
+            PollDirectActionInput(aim);
 
             // 体积影响移速：变大让你能吃更多，但也更慢（Spec §5 的核心张力）
             float volume = _stats.Get(StatId.Volume);
@@ -278,6 +291,40 @@ namespace GameLogic.Stage.CellStage
                     continue;
                 }
                 TryCastSlot(i, autoAim: true);
+            }
+        }
+
+        /// <summary>
+        /// M2-03b：装配动作键。三个键全部走 <see cref="InputRouter"/> 的 <see cref="InputScope.Direct"/> 域——
+        /// 与战略域的左/右键（框选 / 智能命令）是同一组物理键，靠 <see cref="InputScope"/> 互斥，
+        /// 不靠这里判断镜头状态（同 WASD 的既定模式）。
+        ///
+        /// 鼠标键用 <c>KeyCode.Mouse0/1</c> 而不是 <c>Input.GetMouseButtonDown</c>：
+        /// 后者绕开了 <see cref="InputRouter"/> 的同帧唯一性，"不产生双重输入"就又变成靠自觉了。
+        ///
+        /// 这里**只发起释放**，能不能释放由 <c>DirectControlActions.TryRelease</c> 判——
+        /// 失能拦截必须在释放入口，不能靠输入层自己先查一遍（两处判断必然漂移）。
+        /// </summary>
+        private void PollDirectActionInput(float2 aim)
+        {
+            if (_actions == null)
+            {
+                return;
+            }
+
+            if (InputRouter.ConsumeKeyDown(KeyCode.Mouse0, InputScope.Direct))
+            {
+                _actions.TryRelease(Control.LoadoutAction.Primary, aim);
+            }
+
+            if (InputRouter.ConsumeKeyDown(KeyCode.Mouse1, InputScope.Direct))
+            {
+                _actions.TryRelease(Control.LoadoutAction.Utility, aim);
+            }
+
+            if (InputRouter.ConsumeKeyDown(KeyCode.E, InputScope.Direct))
+            {
+                _actions.TryRelease(Control.LoadoutAction.Interact, aim);
             }
         }
 
