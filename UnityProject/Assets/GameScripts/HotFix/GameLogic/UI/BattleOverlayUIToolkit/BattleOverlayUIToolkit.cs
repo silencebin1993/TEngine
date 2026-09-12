@@ -393,6 +393,10 @@ namespace GameLogic
             }
 
             _current = kind;
+            // M2-01：面板打开时全局夺走输入。此前只靠 CellStageFlow._paused 冻结玩法模块，
+            // 但镜头状态机刻意绕过了那个早退（暂停下要能选目标），所以模态状态必须显式告诉
+            // InputRouter——否则卡组面板开着的时候 WASD 还在推镜头。
+            InputRouter.SetModalUi(kind != PanelKind.None);
             ApplyDisplay();
         }
 
@@ -425,23 +429,34 @@ namespace GameLogic
             {
                 UpdateCodexAutoTutorial();
 
-                // D3：自身轮询 Input.GetKeyDown，不依赖 CellDebugHud.OnGUI 的 Event.current。
-                if (Input.GetKeyDown(KeyCode.Tab))
+                // D3：自身轮询按键，不依赖 CellDebugHud.OnGUI 的 Event.current。
+                //
+                // M2-01：卡组面板从 Tab 改到 Z。此前 Tab 被本控制器（开卡组面板）和
+                // CellPlayerController（切换控制目标，M1 核心机制）**同时**监听，两个消费者互不知情，
+                // 一次按键触发两件事——这正是 M2-01「不产生双重输入」要消灭的东西。
+                // Tab 归切换控制目标（里程碑出口标准写明"玩家能在三个真实友军间切换"），
+                // 面板类按键让位；Z 在当前键位表里未被占用。
+                //
+                // 这些面板键走 ConsumeGlobalKeyDown：任何镜头状态下都该能开面板，
+                // 但仍受模态 UI 与"同帧一个键只被消费一次"约束。
+                if (InputRouter.ConsumeGlobalKeyDown(KeyCode.Z))
                 {
                     TogglePanel(PanelKind.Deck);
                 }
-                else if (Input.GetKeyDown(KeyCode.B))
+                else if (InputRouter.ConsumeGlobalKeyDown(KeyCode.B))
                 {
                     TogglePanel(PanelKind.Shop);
                 }
-                else if (Input.GetKeyDown(KeyCode.V))
+                else if (InputRouter.ConsumeGlobalKeyDown(KeyCode.V))
                 {
                     TogglePanel(PanelKind.Codex);
                 }
                 // D9：Paused 是 Draft 和 Pause 共用的同一个字段——Esc 只有在"当前没有其它原因
                 // 导致的暂停"（本控制器自己置的 Pause，或压根没暂停）时才处理，避免选卡三选一
                 // 显示期间 Esc 又把 Pause 叠加到 Draft 上。
-                else if (Input.GetKeyDown(KeyCode.Escape) && (_current == PanelKind.Pause || !cell.Paused))
+                // Esc 必须在模态面板打开时也响应——它正是用来关面板的，所以 allowDuringModal。
+                else if ((_current == PanelKind.Pause || !cell.Paused) &&
+                         InputRouter.ConsumeGlobalKeyDown(KeyCode.Escape, allowDuringModal: true))
                 {
                     // story-003（topdown-hud-projectile-fix）R4：装配面板打开时，第一次 Esc 只关它本身，
                     // 不同帧弹 Pause（避免双层遮挡）；面板已关时才走原 HandleEscKeyToggle，第二次 Esc 才进 Pause。

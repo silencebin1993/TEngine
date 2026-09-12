@@ -69,26 +69,29 @@ namespace BinGames.Sim
         /// <summary>构建快照时解析出的瞬时槽位；无有效控制实体时为 InvalidIndex。</summary>
         public int ControlledUnitIndex;
 
-        public bool IsAlive(int i) => i >= 0 && i < Count && Alive[i] != 0;
+        // 这些查询方法一律标 readonly：快照常常是通过属性（如 SimBridge.Snapshot）取到的，
+        // 而对属性返回值调用非 readonly 的结构体方法会报 CS1612，逼调用方先抄一份局部变量。
+        // 它们本来就不改状态，标上之后这类绕路整类消失。
+        public readonly bool IsAlive(int i) => i >= 0 && i < Count && Alive[i] != 0;
 
-        public bool HasStatus(int i, SimStatus s)
+        public readonly bool HasStatus(int i, SimStatus s)
         {
             return i >= 0 && i < Count && (Status[i] & (uint)s) != 0u;
         }
 
-        public SimFaction FactionOf(int i)
+        public readonly SimFaction FactionOf(int i)
         {
             return i >= 0 && i < Count ? (SimFaction)Faction[i] : SimFaction.None;
         }
 
-        public IntentSource IntentSourceOf(int i)
+        public readonly IntentSource IntentSourceOf(int i)
         {
             return i >= 0 && i < Count
                 ? (BinGames.Sim.IntentSource)IntentSource[i]
                 : BinGames.Sim.IntentSource.AI;
         }
 
-        public bool TryResolve(SimEntityId entityId, out int unitIndex)
+        public readonly bool TryResolve(SimEntityId entityId, out int unitIndex)
         {
             if (entityId.IsValid)
             {
@@ -107,7 +110,7 @@ namespace BinGames.Sim
         }
 
         /// <summary>O(1) 解析本快照的受控实体，并再次校验稳定 ID，防止默认值或过期槽位串体。</summary>
-        public bool TryResolveControlledUnit(out int unitIndex)
+        public readonly bool TryResolveControlledUnit(out int unitIndex)
         {
             int index = ControlledUnitIndex;
             if (index >= 0 && index < Count && Alive[index] != 0 &&
@@ -121,7 +124,7 @@ namespace BinGames.Sim
         }
 
         /// <summary>存活的敌对单位数量。UI 显示"当前敌人规模"用。</summary>
-        public int CountHostiles()
+        public readonly int CountHostiles()
         {
             int n = 0;
             for (int i = 0; i < Count; i++)

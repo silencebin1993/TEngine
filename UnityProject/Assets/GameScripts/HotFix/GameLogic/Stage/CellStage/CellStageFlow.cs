@@ -17,6 +17,7 @@ using GameLogic.Progression;
 using GameLogic.Spawning;
 using GameLogic.Stats;
 using GameLogic.UI.Battle;
+using GameLogic.View;
 using UnityEngine;
 
 namespace GameLogic.Stage.CellStage
@@ -79,6 +80,8 @@ namespace GameLogic.Stage.CellStage
         private Camera _camera;
         private bool _cameraVerifyMode;
         private Vector3 _cameraFollowOffset = DefaultCameraOffset;
+        /// <summary>M2-01 镜头状态机。刻意不进 _hub——暂停时它仍要跑（见 Update 里的注释）。</summary>
+        private CameraDirector _cameraDirector;
 
         private bool _running;
         private bool _paused;
@@ -121,6 +124,9 @@ namespace GameLogic.Stage.CellStage
         public DraftKind PendingDraftKind { get; private set; }
 
         public bool Paused => _paused;
+
+        /// <summary>M2-01：镜头状态机。验收与调试读它，玩法层不应绕过 InputRouter 直接问镜头状态。</summary>
+        public CameraDirector CameraDirector => _cameraDirector;
 
         /// <summary>story-005：暂停菜单最小公开入口，复用 Draft 已验证的冻结语义（不碰 Time.timeScale）。</summary>
         public void SetPaused(bool paused)
@@ -186,6 +192,8 @@ namespace GameLogic.Stage.CellStage
             // 这里按 _sandboxMode 重新落一次，保证不管调用时序如何，新建的模块实例总能拿到正确的抑制态。
             ApplySandboxState();
             SetupSim();
+            // M2-01：镜头状态机要读场地半径做平移边界，所以必须在 SetupSim 之后绑定。
+            SetupCameraDirector();
             // Edit Mode 验收只建立模拟并验证纯逻辑，不具备运行时资源模块生命周期。
             // Editor Play 与 Player 中 Application.isPlaying 均为 true，功能美术加载路径保持不变。
             if (Application.isPlaying)
@@ -281,6 +289,13 @@ namespace GameLogic.Stage.CellStage
             _camera.farClipPlane = 200f;
             _cameraFollowOffset = DefaultCameraOffset;
             _camera.transform.SetPositionAndRotation(_cameraFollowOffset, DefaultCameraRotation);
+        }
+
+        /// <summary>M2-01：镜头状态机。<see cref="SetupSim"/> 之后绑定——它要读场地半径做边界。</summary>
+        private void SetupCameraDirector()
+        {
+            _cameraDirector = new CameraDirector();
+            _cameraDirector.Bind(_camera, _sim, _cameraFollowOffset, _sim.ArenaHalfExtent);
         }
 
         /// <summary>
@@ -1042,6 +1057,15 @@ namespace GameLogic.Stage.CellStage
                 return;
             }
 
+            // M2-01：镜头必须在暂停早退**之前**驱动。战略视角存在的意义之一就是暂停下选择目标，
+            // 而下面的 `_paused` 早退会把整个 _hub 连同原来内联的 FollowCamera 一起冻住。
+            // CameraDirector 因此刻意不是 GameModule——它要在玩法冻结时继续工作。
+            //
+            // 每帧同步暂停态而不是在 6 个 `_paused` 写入点逐个接线：漏掉任何一个（选卡跳过、
+            // GM 调试、放弃本局）都会让输入永久卡在让位状态，而那种 bug 只在特定路径下才复现。
+            InputRouter.SetGameplayPaused(_paused);
+            _cameraDirector?.Tick(_paused);
+
             // 选卡时暂停玩法推进，但不暂停 UI
             if (_paused)
             {
@@ -1090,24 +1114,6 @@ namespace GameLogic.Stage.CellStage
                 }
             }
 
-            FollowCamera(dt);
-        }
-
-        /// <summary>镜头跟随。用非缩放时间，调试加速时跟随手感不变。</summary>
-        private void FollowCamera(float dt)
-        {
-            if (_camera == null || _sim == null || !_sim.Running)
-            {
-                return;
-            }
-            if (!_sim.TryGetPresentationAnchor(out Unity.Mathematics.float2 p, out _))
-            {
-                return;
-            }
-            var want = new Vector3(
-                p.x + _cameraFollowOffset.x, _cameraFollowOffset.y, p.y + _cameraFollowOffset.z);
-            _camera.transform.position = Vector3.Lerp(
-                _camera.transform.position, want, 1f - Mathf.Exp(-8f * dt));
         }
 
         private void OnControlledUnitChanged(ControlledUnitChangedSignal signal)
@@ -1569,6 +1575,10 @@ namespace GameLogic.Stage.CellStage
             // SimBridge.End() 会在内核 Dispose 前把控制状态抄进托管侧，这里读到的才是完整的那一份。
             // 与生涯统计同一条 Reject-to-Safe 纪律：Save 永不 throw，存档异常不阻塞退出流程。
             ControlPersistence.Save(_sim.CurrentHandoff);
+
+            // M2-01：解绑镜头并复位输入所有权，否则上一局的 Scope/模态状态会粘到下一局。
+            _cameraDirector?.Unbind();
+            _cameraDirector = null;
 
             _controlPresentationScope?.Dispose();
             _controlPresentationScope = null;

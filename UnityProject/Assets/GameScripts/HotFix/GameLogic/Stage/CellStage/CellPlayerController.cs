@@ -98,7 +98,21 @@ namespace GameLogic.Stage.CellStage
             }
 
             ControlSwitchFeedbackRemaining = Mathf.Max(0f, ControlSwitchFeedbackRemaining - dt);
-            if (Input.GetKeyDown(KeyCode.Tab))
+
+            // M2-01：直控输入一律走 InputRouter。战略视角与过渡期间本模块读不到任何输入，
+            // "过渡中冻结冲突输入"因此是结构性的，不靠这里自己判断镜头状态。
+            if (!InputRouter.Owns(InputScope.Direct))
+            {
+                // 让位时把意图清空，否则松手前的最后一帧移动方向会一直粘在内核里。
+                _sim.SetControlledIntent(PlayerIntent.Idle);
+                if (_abilities != null)
+                {
+                    _abilities.MoveDirection = float2.zero;
+                }
+                return;
+            }
+
+            if (InputRouter.ConsumeKeyDown(KeyCode.Tab, InputScope.Direct))
             {
                 RequestNextControlCandidate();
             }
@@ -189,12 +203,18 @@ namespace GameLogic.Stage.CellStage
 
         private static float2 ReadMoveInput()
         {
+            // WASD 在战略视角下是镜头平移，在直控下是移动——同一组键两种含义，
+            // 靠 InputScope 互斥，不靠两边各自判断。
             float x = 0f;
             float y = 0f;
-            if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow)) { x -= 1f; }
-            if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) { x += 1f; }
-            if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow)) { y -= 1f; }
-            if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow)) { y += 1f; }
+            if (InputRouter.GetKey(KeyCode.A, InputScope.Direct) ||
+                InputRouter.GetKey(KeyCode.LeftArrow, InputScope.Direct)) { x -= 1f; }
+            if (InputRouter.GetKey(KeyCode.D, InputScope.Direct) ||
+                InputRouter.GetKey(KeyCode.RightArrow, InputScope.Direct)) { x += 1f; }
+            if (InputRouter.GetKey(KeyCode.S, InputScope.Direct) ||
+                InputRouter.GetKey(KeyCode.DownArrow, InputScope.Direct)) { y -= 1f; }
+            if (InputRouter.GetKey(KeyCode.W, InputScope.Direct) ||
+                InputRouter.GetKey(KeyCode.UpArrow, InputScope.Direct)) { y += 1f; }
 
             var v = new float2(x, y);
             return math.lengthsq(v) > 0.0001f ? math.normalize(v) : float2.zero;
@@ -211,8 +231,13 @@ namespace GameLogic.Stage.CellStage
                 return math.lengthsq(fallback) > 0.0001f ? fallback : new float2(1f, 0f);
             }
 
+            if (!InputRouter.TryGetPointer(InputScope.Direct, out Vector3 pointer))
+            {
+                return math.lengthsq(fallback) > 0.0001f ? fallback : new float2(1f, 0f);
+            }
+
             var plane = new Plane(Vector3.up, Vector3.zero);
-            Ray ray = _camera.ScreenPointToRay(Input.mousePosition);
+            Ray ray = _camera.ScreenPointToRay(pointer);
             if (!plane.Raycast(ray, out float enter))
             {
                 return math.lengthsq(fallback) > 0.0001f ? fallback : new float2(1f, 0f);
@@ -240,7 +265,7 @@ namespace GameLogic.Stage.CellStage
 
             int slots = Mathf.Min(_abilities.SlotCount, SlotKeys.Length);
 
-            if (slots > 0 && Input.GetKeyDown(SlotKeys[0]))
+            if (slots > 0 && InputRouter.ConsumeKeyDown(SlotKeys[0], InputScope.Direct))
             {
                 TryCastSlot(0, autoAim: false);
             }

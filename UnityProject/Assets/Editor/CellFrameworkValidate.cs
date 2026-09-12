@@ -11,6 +11,7 @@ using GameLogic.Spawning;
 using GameLogic.Stage;
 using GameLogic.Stage.CellStage;
 using GameLogic.Stats;
+using GameLogic.View;
 using Unity.Mathematics;
 using UnityEditor;
 using UnityEngine;
@@ -58,6 +59,7 @@ namespace GameLogic.EditorTools
                 ValidateShop();
                 ValidateCodex();
                 ValidateControlLifecycle();
+                ValidateCameraDirector();
             }
             catch (Exception e)
             {
@@ -1666,6 +1668,310 @@ namespace GameLogic.EditorTools
                 else
                 {
                     ControlPersistence.Clear();
+                }
+            }
+        }
+
+        // ── 战略相机状态机 ──────────────────────────────────
+
+        /// <summary>
+        /// ProjectA M2-01：<see cref="InputRouter"/> 输入所有权真相 +
+        /// <see cref="CameraDirector"/> 三态状态机（Direct/Transition/Strategy）。
+        /// 核心验收点：镜头切换绝不传送实体、过渡期立即冻结输入、无效目标不能切回直控、
+        /// 暂停下过渡仍会推进。
+        ///
+        /// Editor 非 Play 下 <c>Input.GetKeyDown</c> 恒为 false，所以本方法不测试
+        /// ConsumeKeyDown/ConsumeGlobalKeyDown 的按键消费路径，只测 InputRouter 的
+        /// 所有权真值表（Owns/ModalUiOpen）与 CameraDirector 的状态迁移。
+        ///
+        /// 实测（execute_code 现场验证过）：同一次 -executeMethod 调用内，
+        /// <c>Time.unscaledDeltaTime</c> 是一个非零常量（编辑器在这次调用期间不会真正
+        /// 推帧，所以值不会变），因此下面的过渡会在极少数次 Tick 内收敛；200 次上限
+        /// 只是防止极端环境（dt 恰好为 0）下死循环，命中时会 Fail 而不是卡住——
+        /// 实测中从未命中过。
+        /// </summary>
+        private static void ValidateCameraDirector()
+        {
+            Line("\n[13] 战略相机状态机（M2-01）");
+
+            // ---- A. InputRouter 输入所有权真值表（不依赖真实按键） ----
+            InputRouter.Reset();
+            Expect(InputRouter.Scope == InputScope.Direct && !InputRouter.ModalUiOpen,
+                "Reset 后应回到 Direct 域，且无任何模态遮罩");
+
+            InputRouter.SetScope(InputScope.Strategy);
+            Expect(InputRouter.Owns(InputScope.Strategy) && !InputRouter.Owns(InputScope.Direct),
+                "SetScope(Strategy) 后 Strategy 应拥有输入，Direct 与 Strategy 互斥");
+
+            InputRouter.SetScope(InputScope.None);
+            Expect(!InputRouter.Owns(InputScope.Direct) && !InputRouter.Owns(InputScope.Strategy),
+                "SetScope(None) 后任何域都不应拥有输入所有权（过渡期谁都拿不到）");
+
+            InputRouter.SetScope(InputScope.Direct);
+            InputRouter.SetModalUi(true);
+            InputRouter.SetGameplayPaused(false);
+            Expect(InputRouter.ModalUiOpen,
+                "SetModalUi(true) 应使 ModalUiOpen 为真（UI 来源）");
+            InputRouter.SetModalUi(false);
+            InputRouter.SetGameplayPaused(true);
+            Expect(InputRouter.ModalUiOpen,
+                "两个模态来源互不覆盖：关闭 UI 来源后，暂停来源仍应维持 ModalUiOpen 为真");
+            Expect(!InputRouter.Owns(InputScope.Direct) && !InputRouter.Owns(InputScope.Strategy),
+                "ModalUiOpen 为真时，任何域都不应拥有输入所有权");
+            InputRouter.SetGameplayPaused(false);
+            Expect(!InputRouter.ModalUiOpen,
+                "两个模态来源都关闭后，ModalUiOpen 才应回到假");
+
+            InputRouter.Reset();
+
+            // ---- B. CameraDirector 状态机：Direct → Transition → Strategy → Transition → Direct ----
+            GameObject cameraBefore = Camera.main != null ? Camera.main.gameObject : null;
+            GameObject cameraGo = null;
+            var sim = new SimBridge();
+            CameraDirector director = null;
+
+            try
+            {
+                cameraGo = new GameObject("__CameraDirectorValidate_Camera");
+                Camera camera = cameraGo.AddComponent<Camera>();
+                camera.orthographic = true;
+                camera.orthographicSize = 16f;
+
+                SimConfig cfg = SimConfig.Default;
+                cfg.UnitCapacity = 32;
+                cfg.ArenaHalfExtent = 40f;
+                sim.Begin(cfg, Array.Empty<BehaviorArchetype>());
+                sim.ConfigureControlSwitch(100f, 0f);
+
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(3f, 0f), Health = 20f, Radius = 0.5f,
+                    MaxSpeed = 0f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.Scripted, LogicId = 9001,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(6f, 0f), Health = 20f, Radius = 0.5f,
+                    MaxSpeed = 0f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.Scripted, LogicId = 9002,
+                });
+                sim.OnUpdate(0f);
+
+                director = new CameraDirector();
+                director.Bind(camera, sim, new Vector3(0f, 20f, -10f), cfg.ArenaHalfExtent);
+
+                // 7
+                Expect(director.Mode == ViewMode.Direct && InputRouter.Scope == InputScope.Direct,
+                    "Bind 后应处于 Direct，且 InputRouter.Scope 同步为 Direct");
+
+                // 8：请求进入战略视角应立刻冻结输入，不等下一帧。
+                bool requestedStrategy = director.RequestStrategy();
+                Expect(requestedStrategy && director.Mode == ViewMode.Transition && director.InTransition &&
+                       InputRouter.Scope == InputScope.None,
+                    "RequestStrategy 应立即进入 Transition 并把输入域冻结为 None（不等下一帧）");
+
+                // 9：过渡期间的重复请求一律不叠加。
+                Expect(!director.RequestStrategy() && !director.RequestDirect(),
+                    "过渡期间重复请求 RequestStrategy/RequestDirect 都应返回 false，不叠加");
+
+                // 14 的取样起点：整段切换（8~11）开始前，所有存活单位的位置。
+                GetAlivePositions(sim.Snapshot, out int[] idxBeforeCycle, out float2[] posBeforeCycle);
+
+                // 10：过渡应在有限帧数内收敛到 Strategy。
+                bool reachedStrategy =
+                    TickCameraDirectorUntil(director, () => director.Mode == ViewMode.Strategy, false);
+                Expect(reachedStrategy, "过渡未在预期帧数内结束（200 次 Tick 内应到达 Strategy）");
+                Expect(director.Mode == ViewMode.Strategy && InputRouter.Scope == InputScope.Strategy &&
+                       director.ModeChangeCount == 1,
+                    "过渡结束后应落在 Strategy，InputRouter 同步切域，且只记一次模式切换");
+
+                // 15：战略平移越界请求应被钳制在 arenaHalfExtent+6 内。
+                director.FocusStrategyOn(new float2(99999f, -99999f));
+                float boundsLimit = cfg.ArenaHalfExtent + 6f + 0.001f;
+                Expect(math.abs(director.StrategyFocus.x) <= boundsLimit &&
+                       math.abs(director.StrategyFocus.y) <= boundsLimit,
+                    $"战略注视点越界请求应被钳制在 arenaHalfExtent+6 内（实际 {director.StrategyFocus}）");
+
+                // 11：存在有效受控实体时，战略视角应能切回直控。
+                bool requestedDirect = director.RequestDirect();
+                Expect(requestedDirect, "存在有效受控实体时，战略视角应能请求切回直控");
+                bool backToDirect =
+                    TickCameraDirectorUntil(director, () => director.Mode == ViewMode.Direct, false);
+                Expect(backToDirect && director.ModeChangeCount == 2,
+                    "第二次过渡应落在 Direct，且模式切换计数应累加到 2");
+
+                // 14：整段切换过程（8~11）前后，所有存活单位位置必须逐个保持不变。
+                GetAlivePositions(sim.Snapshot, out int[] idxAfterCycle, out float2[] posAfterCycle);
+                Expect(PositionsUnchanged(idxBeforeCycle, posBeforeCycle, idxAfterCycle, posAfterCycle),
+                    "整段视角切换前后，所有存活单位位置必须逐个保持不变（镜头绝不传送实体）");
+
+                // 16：处于 Transition 时连续 Tick(true)（暂停）也应能走完过渡——
+                // 这是"暂停时可选择目标"的结构前提。
+                Expect(director.RequestStrategy(),
+                    "应能再次请求进入战略视角，用于验证暂停下过渡是否仍会推进");
+                bool reachedStrategyPaused =
+                    TickCameraDirectorUntil(director, () => director.Mode == ViewMode.Strategy, true);
+                Expect(reachedStrategyPaused,
+                    "处于 Transition 时连续 Tick(true)（暂停）也应能走完过渡到达 Strategy");
+
+                // 12：无有效受控实体时，不许切回一个不存在的目标。
+                sim.World.ControlFallbackEnabled = false;
+                KillAllFriendlies(sim);
+                Expect(!director.RequestDirect() && director.Mode == ViewMode.Strategy,
+                    "没有有效受控实体时 RequestDirect 应返回 false，且不得切回一个不存在的目标");
+                sim.World.ControlFallbackEnabled = true;
+
+                // 17：Unbind 应交还输入所有权。
+                director.Unbind();
+                Expect(InputRouter.Scope == InputScope.Direct && !InputRouter.ModalUiOpen,
+                    "Unbind 后 InputRouter 应回到 Direct 且无模态遮罩");
+            }
+            finally
+            {
+                director?.Unbind();
+                sim.End();
+                if (cameraGo != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(cameraGo);
+                }
+                // Bind/Unbind 本身不新建摄像机，但防御性地照 ValidateInheritance 的写法清理一次。
+                GameObject cameraAfter = Camera.main != null ? Camera.main.gameObject : null;
+                if (cameraAfter != null && cameraAfter != cameraBefore)
+                {
+                    UnityEngine.Object.DestroyImmediate(cameraAfter);
+                }
+                InputRouter.Reset();
+            }
+
+            // ---- C. 13：直控目标丢失后应自动退回战略视角（独立场景，避免与上面已经
+            // 切换多次的状态交叉）----
+            GameObject camera2Before = Camera.main != null ? Camera.main.gameObject : null;
+            GameObject camera2Go = null;
+            var sim2 = new SimBridge();
+            CameraDirector director2 = null;
+
+            try
+            {
+                camera2Go = new GameObject("__CameraDirectorValidate_Camera2");
+                Camera camera2 = camera2Go.AddComponent<Camera>();
+                camera2.orthographic = true;
+                camera2.orthographicSize = 16f;
+
+                SimConfig cfg2 = SimConfig.Default;
+                cfg2.UnitCapacity = 32;
+                cfg2.ArenaHalfExtent = 40f;
+                sim2.Begin(cfg2, Array.Empty<BehaviorArchetype>());
+                // 关掉回弹：只有一个默认受控实体，杀掉后必须确定性地"无控制"，
+                // 而不是让 M1-06 的回弹机制悄悄换一个目标，从而测不到镜头的自动退回。
+                sim2.World.ControlFallbackEnabled = false;
+                sim2.OnUpdate(0f);
+
+                SimSnapshot initialSnap2 = sim2.Snapshot;
+                bool hasInitialControlled = initialSnap2.TryResolveControlledUnit(out int controlledIndex);
+                Expect(hasInitialControlled,
+                    "本场景初始应有一个默认受控实体，供'直控目标丢失自动退回'测试使用");
+
+                director2 = new CameraDirector();
+                director2.Bind(camera2, sim2, new Vector3(0f, 20f, -10f), cfg2.ArenaHalfExtent);
+                Expect(director2.Mode == ViewMode.Direct, "第二个场景 Bind 后也应处于 Direct");
+
+                if (hasInitialControlled)
+                {
+                    sim2.World.KillUnit(controlledIndex, 0);
+                }
+
+                director2.Tick(false);
+                Expect(director2.Mode == ViewMode.Transition,
+                    "直控目标丢失后，下一次 Tick 应立即自动进入 Transition，不需要显式请求");
+
+                bool reachedStrategyAfterLoss =
+                    TickCameraDirectorUntil(director2, () => director2.Mode == ViewMode.Strategy, false);
+                Expect(reachedStrategyAfterLoss,
+                    "直控目标丢失触发的自动过渡也应能在 200 次 Tick 内收敛");
+                Expect(director2.Mode == ViewMode.Strategy,
+                    "直控目标丢失后应最终自动落回 Strategy 视角");
+            }
+            finally
+            {
+                director2?.Unbind();
+                sim2.End();
+                if (camera2Go != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(camera2Go);
+                }
+                GameObject camera2After = Camera.main != null ? Camera.main.gameObject : null;
+                if (camera2After != null && camera2After != camera2Before)
+                {
+                    UnityEngine.Object.DestroyImmediate(camera2After);
+                }
+                InputRouter.Reset();
+            }
+        }
+
+        /// <summary>反复 Tick 直到 <paramref name="done"/> 成立或达到 200 次上限——
+        /// 上限只是防止极端环境（dt 恰好为 0）下死循环，不是设计上的正常路径。</summary>
+        private static bool TickCameraDirectorUntil(CameraDirector director, Func<bool> done, bool paused)
+        {
+            const int maxIterations = 200;
+            if (done())
+            {
+                return true;
+            }
+            for (int i = 0; i < maxIterations; i++)
+            {
+                director.Tick(paused);
+                if (done())
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>取出快照里所有存活单位的槽位与位置，用于前后比对"镜头没有传送实体"。</summary>
+        private static void GetAlivePositions(in SimSnapshot snap, out int[] aliveIndex, out float2[] positions)
+        {
+            var idx = new System.Collections.Generic.List<int>();
+            var pos = new System.Collections.Generic.List<float2>();
+            for (int i = 0; i < snap.Count; i++)
+            {
+                if (snap.Alive[i] != 0)
+                {
+                    idx.Add(i);
+                    pos.Add(snap.Position[i]);
+                }
+            }
+            aliveIndex = idx.ToArray();
+            positions = pos.ToArray();
+        }
+
+        private static bool PositionsUnchanged(int[] idxBefore, float2[] posBefore, int[] idxAfter, float2[] posAfter)
+        {
+            if (idxBefore.Length != idxAfter.Length)
+            {
+                return false;
+            }
+            for (int i = 0; i < idxBefore.Length; i++)
+            {
+                if (idxBefore[i] != idxAfter[i] || math.distance(posBefore[i], posAfter[i]) > 1e-4f)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        /// <summary>杀光场上所有友军（Player + PlayerMinion），用于构造"确定性地无有效
+        /// 受控实体"的场景。复用 <see cref="IsFriendlyFactionForTest"/>，与 M1-06 那组
+        /// 测试对"友军"的定义保持一致。</summary>
+        private static void KillAllFriendlies(SimBridge sim)
+        {
+            SimSnapshot snap = sim.Snapshot;
+            for (int i = 0; i < snap.Count; i++)
+            {
+                if (snap.Alive[i] != 0 && IsFriendlyFactionForTest(snap.FactionOf(i)))
+                {
+                    sim.World.KillUnit(i, 0);
                 }
             }
         }
