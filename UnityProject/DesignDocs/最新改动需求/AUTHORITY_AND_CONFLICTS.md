@@ -74,6 +74,13 @@ ProjectA M2-03c 要给直控释放做「过载」时发现，仓里 `Heat` 同�
 ①② 保留原名不动。改名后 Unity 自检 290/290 逐条与改名前一致（纯重命名，零行为改动）。
 理由与「不要改回去」的完整论证写在 `GameLogic/Control/UnitVitals.cs` 的 `UnitVitalsRegistry` 类注释里。
 
+**用词已全仓对齐**：`ProjectA_GDD.md`（4 处：L355 / L420 / L462 / L1013）与
+`ProjectA_Milestones.md`（2 处：M2-03 实施第 4 条、M3 §335）里原先的「热债」**全部指 ③**，
+已一并改为「过载债」。核实依据：GDD 说的「蓄力/过载」在内核是 `Charge` 原型的冲刺前摇
+（`JobSteering.cs:110`，`AttackTimer` 复用为蓄力计时），与 ComposeEngine 的 `Packet.Heat` 无关；
+ComposeEngine 的 `Capacitor` 放大的是 `Energy` 不是 `Heat`，`Charge` 在 `SubstanceVector` 里是「电」维。
+于是「热」这个词在本仓只剩 ①② 两个 ComposeEngine 内部含义，grep 不再断链。
+
 **未决（将来复活 ① 时才需要拍板）**：若复活 `org_lens` 等产热器官，要不要把 `Packet.Heat`
 结算完回灌进 `Strain`（两者尺度差 12.5 倍，需定换算）。当前**刻意不接**。
 
