@@ -108,17 +108,24 @@ ComposeEngine 的 `Capacitor` 放大的是 `Energy` 不是 `Heat`，`Charge` 在
 
 ---
 
-## 5. 制作队列
+## 5. 制作队列（历史存档，2026-09-13 起 Superseded）
 
-| 项 | 状态 |
+> [!IMPORTANT]
+> **本表整体已 Superseded**：epic/sprint 排期体系已被 ProjectA 里程碑体系取代（见文件顶部
+> 2026-09-11 补丁）。**当前排期唯一权威 = `production/session-state/DIGEST.md` +
+> `ProjectA_Milestones.md`**，本表下方内容只作历史存档，禁止照它派工或判断「下一步」。
+> 核实依据：2026-09-13 复核，当前账本（DIGEST/PROGRESS/active.md）全仓 grep
+> `sprint-009`/`sprint-010`/`chemengine-lexicon`/`metabolic-chem-coverage` **零命中**。
+
+| 项 | 状态（历史，截至 2026-08-13） |
 |---|---|
 | `combat-alchemy` 001～005 | **Retired**（D8，2026-08-12） |
 | sprint-006 | **Retired**（D8，2026-08-12） |
 | epic `metabolic-slice` 001～008 | **Done**（001 包装→…→006 删旧 ReactionSystem→007 OpenSpec/Spec 深度回写→008 Play 收尾） |
 | **epic `metabolic-playerization`（sprint-008）** | 001～010 **Done**（2026-08-12） |
-| **epic `metabolic-chem-coverage`（sprint-009）** | Active；做法 C 判定 + 接线冒烟；禁止 combat-alchemy |
-| **epic `chemengine-lexicon`（sprint-010）** | Ready；**Queued after 009**；正名+全阶段词库+亲和组+Bridge 全接 |
-| ComposeEngine 独立库 | Done（人窗）；正名（story-001）已完成，词库扩见 sprint-010 002~006 |
+| **epic `metabolic-chem-coverage`（sprint-009）** | **Superseded**（未见于当前账本，按 ProjectA 里程碑体系已被取代，非仍 Active） |
+| **epic `chemengine-lexicon`（sprint-010）** | **Superseded**（同上，非仍 Ready/Queued） |
+| ComposeEngine 独立库 | Done（人窗）；正名（story-001）已完成 |
 | sprint-005 playable-loop | Done（2026-08-13） |
 
-**006 起允许删除**旧 `ReactionSystem*`；006 之前仍禁止扩写。
+**006 起允许删除**旧 `ReactionSystem*`；006 之前仍禁止扩写（历史约束，已满足）。
