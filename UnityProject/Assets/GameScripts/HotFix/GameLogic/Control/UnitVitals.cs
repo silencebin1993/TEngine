@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using BinGames.Sim;
 using UnityEngine;
@@ -106,6 +107,25 @@ namespace GameLogic.Control
     /// 两个 Heat 会在同一段代码里以 8 和 100 两种尺度共存，那时候再分是纯返工。
     /// 冻结总案 §5.2 的器官表把 6 个器官写成"读 Heat"，看文档很容易以为这套已经在跑——
     /// 名字分开之后，那份文档说的是哪一个就不再需要猜。
+    ///
+    /// ── M2-04b：为什么"进/出过载态"要对外播报（<see cref="OverloadChanged"/>）──
+    /// M2-03c 的过载债只挡得住**玩家直控**那一条释放入口（<see cref="Evaluate"/>）。
+    /// 同一具身体交给 AI 之后走的是内核 <c>SimWorld.ResolveMinionCombat</c>，那里只认原型的
+    /// <c>AttackCooldown</c>，根本不知道有这本账——于是"把身体打到过载 → 退出直控换一具接着打"
+    /// 就能**完全规避过载惩罚**，"过载债按身体归属"这条立论只兑现了一半。
+    /// 修法是把过载态镜像成内核的 <c>SimStatus.Overloaded</c> 位（见 <c>OverloadSuppressionMirror</c>）。
+    /// 本类因此要在"过载态真正发生变化的那一刻"播报一次——**只在变化时，不是每帧**。
+    ///
+    /// ── 惰性结算与"没人读就永远不解除"的冲突，以及巡守表 ──
+    /// 惰性结算的前提是"没人读 = 结果无所谓"。镜像到内核之后这条前提破了：
+    /// 一具交给 AI 的身体没有任何读者，<see cref="Sync"/> 永远不跑，
+    /// 过载位就会**永久**挂在它身上——单位被无声地钉死，这是本段最危险的失败模式。
+    /// 所以额外维护一张**只装当前处于过载态的实体**的巡守表 <c>_overloadWatch</c>，
+    /// 在 <see cref="Advance"/> 里逐条补齐。它的长度与场上单位数**无关**：
+    /// 过载债只可能由玩家的释放（<see cref="Commit"/>）产生，玩家一次只操一具身体，
+    /// 稳态长度是个位数，硬上限 <see cref="MaxOverloadWatch"/>。
+    /// 清除判据仍然只有 <see cref="Sync"/> 里那一套（衰减 + 滞回）——
+    /// **不给内核第二套过期逻辑**，两套过期必然漂移。
     /// </summary>
     public sealed class UnitVitalsRegistry
     {
@@ -141,8 +161,21 @@ namespace GameLogic.Control
         /// 一条记录与"从没存在过"在行为上完全等价，删掉它不改变任何结果。</summary>
         public const float StaleSeconds = 30f;
 
+        /// <summary>
+        /// 同时处于过载态的身体数上限（M2-04b 巡守表长度上限）。
+        ///
+        /// 它同时是本类每帧开销的上界。取 16 已经远超实际：过载债只由玩家的释放产生
+        /// （<see cref="Commit"/>），玩家一次只操一具身体，而一具身体从 100 衰减到清除线 60
+        /// 只要 1.6 秒。溢出时按"最早进入过载的那一条先解除"处理（见 <see cref="SetOverloaded"/>）——
+        /// **宁可让一具身体提前脱离过载，也绝不能让它的内核压制位悬空**，
+        /// 后者等于把那个单位无声地永久钉死。
+        /// </summary>
+        public const int MaxOverloadWatch = 16;
+
         private sealed class Entry
         {
+            /// <summary>自己的键。<see cref="Sync"/> 里要播报过载态变化，得知道是谁。</summary>
+            public SimEntityId Id;
             public float Metabolism = MetabolismMax;
             public float Strain;
             public bool Overloaded;
@@ -154,16 +187,37 @@ namespace GameLogic.Control
         private readonly Dictionary<SimEntityId, Entry> _entries = new Dictionary<SimEntityId, Entry>(8);
         private readonly List<SimEntityId> _sweepScratch = new List<SimEntityId>(8);
 
+        /// <summary>当前处于过载态的实体。长度与场上单位数无关，见类注释。</summary>
+        private readonly List<SimEntityId> _overloadWatch = new List<SimEntityId>(MaxOverloadWatch);
+
         private float _clock;
 
         /// <summary>在册条目数。验收/调试用。</summary>
         public int Count => _entries.Count;
 
+        /// <summary>当前处于过载态的身体数。验收/调试用。</summary>
+        public int OverloadedCount => _overloadWatch.Count;
+
         /// <summary>本地单调时钟（秒）。只在非暂停帧前进。</summary>
         public float Clock => _clock;
 
         /// <summary>
-        /// 推进本地时钟。**这是本类唯一的每帧开销，纯 O(1)**：不遍历任何条目。
+        /// 某具身体**进入或离开**过载态时播报一次（M2-04b）。
+        /// 参数二 true = 刚进入过载，false = 刚解除。
+        ///
+        /// **只在变化那一刻发一次**，不是每帧状态广播——订阅方（<c>OverloadSuppressionMirror</c>）
+        /// 要把它写进内核，而"写内核"是需要解析实体槽位的 O(单位数) 操作，
+        /// 每帧做就撞上热更层架构红线。
+        /// </summary>
+        public event Action<SimEntityId, bool> OverloadChanged;
+
+        /// <summary>
+        /// 推进本地时钟并补齐巡守表。
+        ///
+        /// **每帧开销与场上单位数无关**：一次 float 加法 + 巡守表逐条补齐，
+        /// 后者长度 ≤ <see cref="MaxOverloadWatch"/>，而且稳态下是 0（没人过载时整段是空循环）。
+        /// 仍然**不**遍历 <c>_entries</c>——代谢回复、冷却推进照旧惰性结算。
+        /// 只有过载态例外，理由见类注释（它被镜像到了内核，没人读也必须按时解除）。
         /// </summary>
         /// <param name="paused">玩法暂停时不推进——暂停下刷冷却/回代谢是白送的。</param>
         public void Advance(float dt, bool paused = false)
@@ -174,14 +228,41 @@ namespace GameLogic.Control
             }
 
             _clock += dt;
+
+            // 倒序遍历：Sync 可能在里面把当前这条从表里摘掉。
+            for (int i = _overloadWatch.Count - 1; i >= 0; i--)
+            {
+                if (i >= _overloadWatch.Count)
+                {
+                    continue;
+                }
+
+                if (_entries.TryGetValue(_overloadWatch[i], out Entry e))
+                {
+                    Sync(e);
+                }
+                else
+                {
+                    // 条目没了却还在巡守表里：不可能发生（SweepStale 只扫非过载条目），
+                    // 但真发生时必须把压制位放掉，否则那个单位永久打不出东西。
+                    SimEntityId orphan = _overloadWatch[i];
+                    _overloadWatch.RemoveAt(i);
+                    OverloadChanged?.Invoke(orphan, false);
+                }
+            }
         }
 
         /// <summary>跨局清空。实体 id 只在生成它的那个 <c>SimWorld</c> 内有效，跨局一律作废
-        /// （同 M2-03a 契约 §11 的理由）。</summary>
+        /// （同 M2-03a 契约 §11 的理由）。
+        ///
+        /// **刻意不为巡守表里的条目播报"解除"**：Reset 只发生在换局（<c>Bind</c>）与拆台
+        /// （<c>Unbind</c>），那一刻旧世界里的实体 id 已经没有意义，播报出去也解析不到槽位。
+        /// 内核那一侧由镜像自己在 <c>Unbind</c> 时收尾。</summary>
         public void Reset()
         {
             _entries.Clear();
             _sweepScratch.Clear();
+            _overloadWatch.Clear();
             _clock = 0f;
         }
 
@@ -273,7 +354,7 @@ namespace GameLogic.Control
             e.Strain += act.StrainCost;
             if (e.Strain >= StrainOverloadThreshold)
             {
-                e.Overloaded = true;
+                SetOverloaded(e, true);
             }
 
             int slot = (int)action;
@@ -314,14 +395,59 @@ namespace GameLogic.Control
             e.Strain = Mathf.Max(0f, e.Strain + amount);
             if (e.Strain >= StrainOverloadThreshold)
             {
-                e.Overloaded = true;
+                SetOverloaded(e, true);
             }
             else if (e.Overloaded && e.Strain <= StrainClearThreshold)
             {
-                e.Overloaded = false;
+                SetOverloaded(e, false);
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// 过载态的**唯一**写入口（M2-04b）。只有在真的发生变化时才动巡守表、才播报。
+        ///
+        /// 数值口径一行未改：谁能把它置真（越过 <see cref="StrainOverloadThreshold"/>）、
+        /// 谁能把它置假（跌到 <see cref="StrainClearThreshold"/> 以下）全部照旧在调用方判定，
+        /// 这里只负责"记账 + 播报"。
+        /// </summary>
+        private void SetOverloaded(Entry e, bool value)
+        {
+            if (e.Overloaded == value)
+            {
+                return;
+            }
+
+            e.Overloaded = value;
+
+            if (value)
+            {
+                if (_overloadWatch.Count >= MaxOverloadWatch)
+                {
+                    // 溢出兜底：先把最早进入过载的那条放掉，腾出位置。
+                    // 让它提前脱离过载，好过让它的内核压制位永远悬着。
+                    SimEntityId oldest = _overloadWatch[0];
+                    if (_entries.TryGetValue(oldest, out Entry victim))
+                    {
+                        victim.Strain = Mathf.Min(victim.Strain, StrainClearThreshold);
+                        SetOverloaded(victim, false);
+                    }
+                    else
+                    {
+                        _overloadWatch.RemoveAt(0);
+                        OverloadChanged?.Invoke(oldest, false);
+                    }
+                }
+
+                _overloadWatch.Add(e.Id);
+            }
+            else
+            {
+                _overloadWatch.Remove(e.Id);
+            }
+
+            OverloadChanged?.Invoke(e.Id, value);
         }
 
         private float RemainingCooldown(Entry e, int slot)
@@ -347,7 +473,7 @@ namespace GameLogic.Control
             }
 
             // 新身体一律满代谢、零过载债、无冷却："刚接管一具没打过的身体"就该是这个状态。
-            var made = new Entry { LastSync = _clock };
+            var made = new Entry { Id = id, LastSync = _clock };
             _entries[id] = made;
             return made;
         }
@@ -409,7 +535,7 @@ namespace GameLogic.Control
 
             if (e.Overloaded && e.Strain <= StrainClearThreshold)
             {
-                e.Overloaded = false;
+                SetOverloaded(e, false);
             }
         }
     }

@@ -38,6 +38,16 @@ namespace GameLogic.Control
         private readonly UnitVitalsRegistry _vitals = new UnitVitalsRegistry();
 
         /// <summary>
+        /// M2-04b：把过载态镜像到内核，让**交给 AI 的身体也吃过载惩罚**。
+        ///
+        /// 它挂在本类而不是 <c>CellStageFlow</c> 上，理由只有一个：
+        /// 账本 <see cref="_vitals"/> 就在这里，而"谁有资格把过载态写进内核"必须只有一个答案。
+        /// 放到外面就要多一条 Bind/Unbind 生命周期，而它和账本的生死必须严格一致
+        /// ——账本 Reset 了、镜像还留着位，就是把单位永久钉死。
+        /// </summary>
+        private readonly OverloadSuppressionMirror _overloadMirror = new OverloadSuppressionMirror();
+
+        /// <summary>
         /// 玩家本体上 <see cref="LoadoutAction.Primary"/> / <see cref="LoadoutAction.Utility"/>
         /// 委托到的技能槽下标。
         ///
@@ -90,6 +100,9 @@ namespace GameLogic.Control
         /// <summary>三个量的账本（M2-03c）。UI 只读快照走 <see cref="ControlledVitals"/>。</summary>
         public UnitVitalsRegistry Vitals => _vitals;
 
+        /// <summary>过载态到内核的镜像（M2-04b）。验收读它确认压制真的推下去了。</summary>
+        public OverloadSuppressionMirror OverloadMirror => _overloadMirror;
+
         /// <summary>
         /// **当前受控实体**的代谢 / 过载债 / 冷却快照（M2-03c）。O(1)：一次受控视图解析 + 一次字典查。
         /// 没有受控实体时 <c>Valid = false</c>，UI 据此整块隐藏。
@@ -109,9 +122,11 @@ namespace GameLogic.Control
         }
 
         /// <summary>
-        /// 每帧推进三个量的本地时钟（M2-03c）。**纯 O(1)**：不遍历任何实体，
-        /// 代谢回复 / 过载债衰减 / 冷却推进全部在读写那一刻惰性补齐
-        /// （见 <see cref="UnitVitalsRegistry"/> 类注释）。
+        /// 每帧推进三个量的本地时钟（M2-03c）。**与场上单位数无关**：代谢回复 / 冷却推进
+        /// 全部在读写那一刻惰性补齐（见 <see cref="UnitVitalsRegistry"/> 类注释）。
+        /// 唯一的例外是过载态巡守表（M2-04b），长度 ≤ <see cref="UnitVitalsRegistry.MaxOverloadWatch"/>，
+        /// 没人过载时是空循环——它必须逐帧补齐，因为过载态被镜像进了内核，
+        /// 没有读者也得按时解除，否则那具身体被无声地永久钉死。
         ///
         /// 暂停下不推进：暂停刷冷却是白送的，口径与 <c>_hub</c> 被暂停冻住一致。
         /// </summary>
@@ -135,7 +150,11 @@ namespace GameLogic.Control
             _status = status;
             InteractTargetsAvailable = false;
             // 跨局必须清：条目里的键是上一局那个 SimWorld 发的实体 id。
+            // 镜像先解绑（它会把上一副内核里压下去的过载位收回来），再清账本、再重新绑。
+            // 顺序反了就会拿新账本的空表去给旧内核收尾，旧世界里那些位就此悬空。
+            _overloadMirror.Unbind();
             _vitals.Reset();
+            _overloadMirror.Bind(sim, _vitals);
             RebuildCount = 0;
             ReleaseCount = 0;
             LastReleasedOrganId = null;
@@ -160,6 +179,8 @@ namespace GameLogic.Control
             _abilities = null;
             _status = null;
             _set.Clear();
+            // 镜像先于账本收尾：它要用账本里那份"谁还被压着"去放掉内核的位。
+            _overloadMirror.Unbind();
             _vitals.Reset();
         }
 

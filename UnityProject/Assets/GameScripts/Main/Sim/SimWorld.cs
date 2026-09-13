@@ -1251,6 +1251,24 @@ namespace BinGames.Sim
                     _attackTimer[i] -= dt;
                 }
 
+                // M2-04b：过载的身体打不出东西——**换谁开都一样**。
+                //
+                // 过载债本身是热更层的账（Control/UnitVitalsRegistry），内核不认识"器官"、
+                // 更不认识由器官推导出来的债，本行也不打算认识：它只读一个**被通知的状态位**，
+                // 没有自己的阈值、没有自己的计时、不会自己解除（口径与 Stunned/Feared 一致，
+                // 由 OverloadSuppressionMirror 在过载态翻转那一刻推下来）。
+                //
+                // 没有这一行的后果是一条可利用的漏洞：玩家把一具身体打到过载、退出直控换一具接着打，
+                // 那具身体交给 AI 后照常全速攻击——过载的惩罚被完全规避，
+                // "过载债按身体归属"（M2-03c 的立论）在行为上只兑现一半。
+                //
+                // 位置在冷却递减**之后**：被压制的身体不该顺带把攻击冷却也攒成一笔债，
+                // 解除那一刻应当是"就绪"而不是"再等一个 CD"。
+                if ((_status[i] & (uint)SimStatus.Overloaded) != 0u)
+                {
+                    continue;
+                }
+
                 var hashMap = _hash.Map;
                 bool found = MinionTargetingUtil.TryFindNearestHostile(
                     in hashMap, _hash.InvCellSize, _position, _alive, _faction, _unitCount,

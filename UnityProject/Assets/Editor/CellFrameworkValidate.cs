@@ -69,6 +69,7 @@ namespace GameLogic.EditorTools
                 ValidateDirectControlActions();
                 ValidateDirectVitals();
                 ValidateAiHandoff();
+                ValidateAiOverloadSuppression();
             }
             catch (Exception e)
             {
@@ -3495,6 +3496,291 @@ namespace GameLogic.EditorTools
             {
                 handoff.Unbind();
                 squad.Unbind();
+                sim.End();
+            }
+        }
+
+        // ── [19] AI 禁止高风险过载（M2-04b）──────────────────────
+
+        /// <summary>
+        /// M2-04 实施第 3 条。GDD §7.3 那张表里"蓄力/过载"这一行，AI 侧写的是
+        /// 「**只在安全阈值内使用**」，玩家侧才是「可承担过载债换关键爆发」。
+        /// 拆成两条可验的产品含义：
+        ///
+        /// 1. **AI 继承过载后果**：一具处于过载态的身体交给 AI，同样打不出东西。
+        ///    在 M2-04b 之前这条是假的——过载债只挡玩家直控入口，AI 走的是内核
+        ///    <c>ResolveMinionCombat</c>，那里只认原型的 <c>AttackCooldown</c>。
+        ///    于是"把身体打到过载 → 退出直控换一具接着打"能完全规避惩罚。**本段的全部意义就是这个漏洞。**
+        /// 2. **AI 自己不会主动过载**：AI 的攻击根本不走 <c>Commit</c>，一分债都不产生。
+        ///    这条是**构造上成立**的，本段没有为它新造任何"AI 的账"——下面直接断言
+        ///    挨了整段打的 AI 单位在账本里**连条目都没有**。
+        ///
+        /// 断言口径照 [16]/[17]/[18]：**只比字段不算过**。真起 <see cref="SimBridge"/>、
+        /// 真让 AI 单位打真敌人、真比掉血量。每一条"打不出东西"都配一个同原型、同参数、
+        /// 从没被接管过的**对照单位**在同一批帧里照常掉血——否则"没打出来"完全可能只是
+        /// 因为整副内核被我测停了，什么都没证明。
+        /// </summary>
+        private static void ValidateAiOverloadSuppression()
+        {
+            Line("\n[19] AI 禁止高风险过载（M2-04b）");
+
+            const float Dt = 1f / 60f;
+
+            var sim = new SimBridge();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 32;
+            cfg.ArenaHalfExtent = 60f;
+            cfg.RandomSeed = 0xC0FFEE05u;
+
+            // 自造原型表而不是读 Luban：召唤物必须**真的会攻击**（本段的被测行为就是它），
+            // 敌人必须完全不还手、也不动（这样掉血只可能来自被测单位）。
+            var archetypes = new[]
+            {
+                new BehaviorArchetype
+                {
+                    Kind = BehaviorKind.MinionSeekAttack, Accel = 12f, TurnRate = 0f, AggroRange = 12f,
+                    AttackRange = 6f, AttackCooldown = 0.25f, AttackDamage = 5f,
+                    Separation = 0f, ChargeSpeedMul = 1f,
+                },
+                new BehaviorArchetype
+                {
+                    Kind = BehaviorKind.Stationary, Accel = 0f, TurnRate = 0f, AggroRange = 0f,
+                    AttackRange = 0.5f, AttackCooldown = 99f, AttackDamage = 0f,
+                    Separation = 0f, ChargeSpeedMul = 1f,
+                },
+            };
+
+            sim.Begin(cfg, archetypes);
+            // 切换范围/冷却不是本段被测对象，放开以免干扰（同 [16]/[17]/[18] 的做法）。
+            sim.ConfigureControlSwitch(200f, 0f);
+
+            var registry = new UnitLoadoutRegistry();
+            var fakeSource = new FakePlayerLoadoutSource();
+            var actions = new DirectControlActions();
+            // 刻意背对敌人释放：本段要测的是"AI 打不打得出东西"，
+            // 玩家那一发落到同一个敌人身上只会把掉血量的来源搅浑。
+            var awayAim = new float2(0f, 1f);
+
+            InputRouter.Reset();
+
+            try
+            {
+                registry.Bind(sim, fakeSource);
+                SimEntityId body = sim.ControlledUnitId;
+                registry.RegisterPlayerBody(body);
+                actions.Bind(sim, registry, abilities: null, status: null);
+
+                // 两组"召唤物 + 假人"隔开 40 米以上摆，索敌半径 12——保证各打各的，
+                // 对照组的掉血不可能来自被测组。
+                const int MinionALogicId = 9601;
+                const int DummyALogicId = 9602;
+                const int MinionBLogicId = 9603;
+                const int DummyBLogicId = 9604;
+
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(-26f, 0f), Health = 5000f, Radius = 0.5f, MaxSpeed = 3f,
+                    ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = MinionALogicId,
+                });
+                registry.RegisterArchetypePending(MinionALogicId, ArchetypeLoadoutTable.SporeArchetypeId);
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(-18f, 0f), Health = 100000f, Radius = 0.6f, MaxSpeed = 0f,
+                    ArchetypeId = 1, Faction = SimFaction.Hostile,
+                    IntentSource = IntentSource.AI, LogicId = DummyALogicId,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(18f, 0f), Health = 5000f, Radius = 0.5f, MaxSpeed = 3f,
+                    ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = MinionBLogicId,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(26f, 0f), Health = 100000f, Radius = 0.6f, MaxSpeed = 0f,
+                    ArchetypeId = 1, Faction = SimFaction.Hostile,
+                    IntentSource = IntentSource.AI, LogicId = DummyBLogicId,
+                });
+
+                sim.OnUpdate(Dt);
+                registry.ResolvePending(sim.Snapshot);
+                SimSnapshot snap0 = sim.Snapshot;
+                SimEntityId minionA = FindEntityId(snap0, MinionALogicId, out _);
+                SimEntityId dummyA = FindEntityId(snap0, DummyALogicId, out _);
+                SimEntityId minionB = FindEntityId(snap0, MinionBLogicId, out _);
+                SimEntityId dummyB = FindEntityId(snap0, DummyBLogicId, out _);
+                Expect(body.IsValid && minionA.IsValid && dummyA.IsValid &&
+                       minionB.IsValid && dummyB.IsValid,
+                    "本段的玩家本体、两名召唤物与两个假人应都已落地并拥有有效稳定实体 ID");
+
+                float HealthOf(SimEntityId id) =>
+                    sim.TryResolveUnitIndex(id, out int i) && i < sim.Snapshot.Count
+                        ? sim.Snapshot.Health[i]
+                        : float.NaN;
+
+                float2 PosOf(SimEntityId id) =>
+                    sim.TryResolveUnitIndex(id, out int i) && i < sim.Snapshot.Count
+                        ? sim.Snapshot.Position[i]
+                        : float2.zero;
+
+                bool KernelOverloaded(SimEntityId id) =>
+                    sim.TryResolveUnitIndex(id, out int i) && i < sim.Snapshot.Count &&
+                    sim.Snapshot.HasStatus(i, SimStatus.Overloaded);
+
+                IntentSource SourceOf(SimEntityId id) =>
+                    sim.World != null && sim.World.TryGetUnitControlState(id, out SimUnitControlState s)
+                        ? s.IntentSource
+                        : IntentSource.Scripted;
+
+                // 内核与账本用同一条时间轴推进：账本的衰减是按它自己的本地时钟算的，
+                // 两条时间轴脱节的话"衰减到清除线"发生在哪一帧就说不清了。
+                void Step(int frames)
+                {
+                    for (int f = 0; f < frames; f++)
+                    {
+                        sim.OnUpdate(Dt);
+                        actions.Tick(Dt, paused: false);
+                    }
+                }
+
+                // ── A. 基线：AI 召唤物本来就在打人（没有它，后面所有"打不出东西"都不成立）──
+                float baseA = HealthOf(dummyA);
+                float baseB = HealthOf(dummyB);
+                Step(60);
+                float hitA = baseA - HealthOf(dummyA);
+                float hitB = baseB - HealthOf(dummyB);
+                Expect(hitA > 0f && hitB > 0f,
+                    $"两名 AI 召唤物在 60 帧内都应真的打出伤害（A 打掉 {hitA:F1} / B 打掉 {hitB:F1}）——" +
+                    "这是本段一切反证的前提");
+                Expect(SourceOf(minionA) == IntentSource.AI && SourceOf(minionB) == IntentSource.AI,
+                    "此刻两名召唤物都由 AI 驱动，走的是内核 ResolveMinionCombat 而不是直控释放入口");
+
+                // ── B. AI 自己不会主动过载：构造上成立，不是靠新造一本账 ──
+                Expect(!actions.Vitals.IsTracked(minionA) && !actions.Vitals.IsTracked(minionB),
+                    "挨了整整 60 帧攻击之后，AI 单位在过载债账本里**连条目都没有**——" +
+                    "AI 的攻击不经过 Commit，一分债都不产生（本段没有为 AI 新造账）");
+                Expect(actions.Vitals.OverloadedCount == 0 &&
+                       actions.OverloadMirror.SuppressedCount == 0 &&
+                       actions.OverloadMirror.PushCount == 0,
+                    "没有任何身体过载时，镜像不该往内核推过任何东西");
+                Expect(!KernelOverloaded(minionA) && !KernelOverloaded(minionB),
+                    "内核侧两名召唤物都不带过载位");
+
+                // ── C. 玩家把这具身体推到过载（M2-03c 的既有路径，一行没改）──
+                Expect(sim.RequestControlSwitch(minionA) == ControlRequestResult.Success,
+                    "应能接管召唤物 A");
+                Expect(actions.TryRelease(LoadoutAction.Primary, awayAim),
+                    "接管后玩家应能用它的主器官释放一次");
+                OrganKernelAction releasedAct = actions.LastReleasedKernelAction;
+                Expect(actions.ControlledVitals.Strain > 0f,
+                    $"玩家的这一次释放应真的记上过载债（{actions.ControlledVitals.Strain:F1}）——" +
+                    "债是玩家自己按出来的，不是凭空塞进去的");
+
+                // 等玩家那一发彻底消失（弹体飞完 / 区域烧完）再开始量掉血，
+                // 否则"AI 打不出东西"会被玩家残留的输出污染。
+                Step(Mathf.CeilToInt((releasedAct.Seconds + releasedAct.Lifetime + 0.5f) * 60f) + 30);
+
+                Expect(actions.Vitals.AddStrain(minionA, UnitVitalsRegistry.StrainOverloadThreshold + 5f),
+                    "把这具身体推过过载阈值（口径与 [17]-C 同一条路径，确定性地跨线）");
+                UnitVitalsView over = actions.ControlledVitals;
+                Expect(over.Overloaded && over.EntityId == minionA,
+                    $"这具身体应进入过载态（过载债 {over.Strain:F1} / 阈值 {over.StrainThreshold:F0}）");
+                int releasesBefore = actions.ReleaseCount;
+                Expect(!actions.TryRelease(LoadoutAction.Primary, awayAim) &&
+                       actions.LastReleaseResult == DirectActionAvailability.Overloaded &&
+                       actions.ReleaseCount == releasesBefore,
+                    "玩家侧照旧被拒（M2-03c 的行为一行没变）");
+                Expect(actions.OverloadMirror.SuppressedCount == 1 &&
+                       actions.OverloadMirror.IsSuppressed(minionA) &&
+                       actions.OverloadMirror.PushCount >= 1,
+                    "过载态应在**翻转那一刻**被推给内核一次（不是每帧广播）");
+
+                // ── D. 核心：交还给 AI 之后，它同样打不出东西 ──
+                //
+                // 这正是 M2-04b 要堵的漏洞：在此之前，玩家只要退出直控换一具身体，
+                // 这具过载的身体交给 AI 就照常全速攻击，惩罚被完全规避。
+                Expect(sim.RequestControlSwitch(body) == ControlRequestResult.Success,
+                    "玩家退出直控，把这具过载的身体交还给 AI");
+                Step(2);
+                Expect(SourceOf(minionA) == IntentSource.AI,
+                    "交还后它应真的回到 AI 驱动（否则下面测的根本不是 AI 路径）");
+                Expect(KernelOverloaded(minionA) && !KernelOverloaded(minionB),
+                    "内核侧应只有这具身体带过载位，对照单位不受影响");
+
+                UnitVitalsView still = actions.Vitals.Get(minionA);
+                float secondsToClear =
+                    (still.Strain - UnitVitalsRegistry.StrainClearThreshold) /
+                    UnitVitalsRegistry.StrainDecayPerSecond;
+                Expect(secondsToClear > 0.5f,
+                    $"此刻离清除线还有 {secondsToClear:F2}s，足够量一段完整的压制窗口");
+
+                int suppressedFrames = Mathf.Max(30, Mathf.FloorToInt(secondsToClear * 0.5f * 60f));
+                float preA = HealthOf(dummyA);
+                float preB = HealthOf(dummyB);
+                float2 prePos = PosOf(minionA);
+                Step(suppressedFrames);
+                float suppressedDamageA = preA - HealthOf(dummyA);
+                float controlDamageB = preB - HealthOf(dummyB);
+
+                Expect(suppressedDamageA <= 0.001f,
+                    $"**过载的身体交给 AI 之后同样打不出东西**（{suppressedFrames} 帧内掉血 {suppressedDamageA:F3}）");
+                Expect(controlDamageB > 0f,
+                    $"同一批帧里，从没被接管过的对照单位照常输出（打掉 {controlDamageB:F1}）——" +
+                    "否则上一条只能说明整副内核被测停了");
+                Expect(actions.Vitals.Get(minionA).Overloaded && KernelOverloaded(minionA),
+                    "整个窗口里它都还在过载态");
+                Expect(math.distance(PosOf(minionA), prePos) > 0.5f,
+                    $"过载**不是麻痹**：它照样在朝目标移动（位移 {math.distance(PosOf(minionA), prePos):F2}），" +
+                    "只是打不出东西");
+
+                // ── E. 债衰减到清除线 → AI 恢复攻击（压制必须自己解除）──
+                //
+                // 最危险的失败模式不是"没压住"，而是"压住了再也放不开"：
+                // 账本是惰性结算的，一具交给 AI 的身体没有任何读者，
+                // 若不巡守就永远等不到那次 Sync，单位被无声地永久钉死。
+                Step(Mathf.CeilToInt(secondsToClear * 0.6f * 60f) + 30);
+                Expect(!actions.Vitals.Get(minionA).Overloaded,
+                    $"过载债衰减到清除线以下应退出过载态（实测 {actions.Vitals.Get(minionA).Strain:F1}）——" +
+                    "没人去读它，靠的是巡守表补齐");
+                Expect(!KernelOverloaded(minionA) && actions.OverloadMirror.SuppressedCount == 0,
+                    "内核侧的压制位应被同步放掉，镜像清单清空");
+
+                float recoverBase = HealthOf(dummyA);
+                Step(60);
+                float recovered = recoverBase - HealthOf(dummyA);
+                Expect(recovered > 0f,
+                    $"解除之后 AI 应重新打出伤害（60 帧打掉 {recovered:F1}）——压制是一段窗口，不是永久失能");
+
+                // ── F. 拆台不留悬挂压制（跨局最致命的一种泄漏）──
+                Expect(actions.Vitals.AddStrain(minionA, UnitVitalsRegistry.StrainOverloadThreshold + 5f),
+                    "再把它推进过载态一次");
+                Step(2);
+                Expect(KernelOverloaded(minionA) && actions.OverloadMirror.SuppressedCount == 1,
+                    "内核侧重新被压住");
+
+                Expect(!actions.Vitals.IsTracked(minionB),
+                    "整段跑完，全程由 AI 驱动的对照单位在账本里仍然连条目都没有——" +
+                    "「AI 不会主动过载」是构造上成立的，不靠任何额外机制");
+
+                actions.Unbind();
+                sim.OnUpdate(Dt);
+                Expect(!KernelOverloaded(minionA) && actions.OverloadMirror.SuppressedCount == 0,
+                    "Unbind 应把已压下去的过载位全部放掉——留着就是把那个槽位永久钉死");
+
+                float afterUnbindBase = HealthOf(dummyA);
+                for (int f = 0; f < 60; f++)
+                {
+                    sim.OnUpdate(Dt);
+                }
+                Expect(afterUnbindBase - HealthOf(dummyA) > 0f,
+                    $"拆台之后那具身体应照常攻击（打掉 {afterUnbindBase - HealthOf(dummyA):F1}），不留悬挂压制");
+            }
+            finally
+            {
+                InputRouter.Reset();
+                actions.Unbind();
+                registry.Unbind();
                 sim.End();
             }
         }

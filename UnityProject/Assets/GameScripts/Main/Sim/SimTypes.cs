@@ -306,7 +306,16 @@ namespace BinGames.Sim
         Boss = 1u << 18,
         /// <summary>处于菌毯区域内。</summary>
         OnMycelium = 1u << 19,
-        /// <summary>过载：反应矩阵"殉爆"用的持久状态位，区别于 AffixKind.Overload（执行期修饰符）。</summary>
+        /// <summary>
+        /// 过载：这具身体被自己的过载债压住了，**打不出东西**。
+        /// 区别于 AffixKind.Overload（执行期修饰符）。
+        ///
+        /// M2-04b 起本位有唯一写者：热更层的 <c>Control/OverloadSuppressionMirror</c>，
+        /// 它照搬 <c>UnitVitalsRegistry</c> 的过载态（阈值 100 / 滞回清除线 60 / 衰减 25/s）。
+        /// **不要给它登记 StatusSystem 限时条目，也不要在内核里给它加过期逻辑**——
+        /// 解除的唯一来源是那本账衰减到清除线，第二套过期必然与它漂移。
+        /// 内核侧只有 <c>SimWorld.ResolveMinionCombat</c> 读它一次。
+        /// </summary>
         Overloaded = 1u << 20,
         /// <summary>前摇中：Charge 蓄力（AttackTimer&gt;0）期间置位，供渲染层出脉冲预警色。</summary>
         Telegraphing = 1u << 21,

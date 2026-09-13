@@ -68,7 +68,7 @@ namespace GameLogic.Progression
             [SimStatus.Elite] = "精英单位标记，用于视觉与掉落区分。",
             [SimStatus.Boss] = "首领单位标记。",
             [SimStatus.OnMycelium] = "处于菌毯区域内。",
-            [SimStatus.Overloaded] = "过载：反应矩阵持久状态。",
+            [SimStatus.Overloaded] = "过载：过载债越过阈值，这具身体打不出东西，直到债衰减下去。",
             [SimStatus.Telegraphing] = "前摇中：蓄力预警。",
         };
 
