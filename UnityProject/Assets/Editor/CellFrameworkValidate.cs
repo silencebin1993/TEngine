@@ -68,6 +68,7 @@ namespace GameLogic.EditorTools
                 ValidateUnitLoadouts();
                 ValidateDirectControlActions();
                 ValidateDirectVitals();
+                ValidateAiHandoff();
             }
             catch (Exception e)
             {
@@ -3121,6 +3122,381 @@ namespace GameLogic.EditorTools
                 System.Reflection.BindingFlags.Public |
                 System.Reflection.BindingFlags.NonPublic);
             m?.Invoke(panel, null);
+        }
+
+        // ── [18] 接管交还可靠性（M2-04a）──────────────────────
+
+        /// <summary>
+        /// M2-04 的验收原话是「在交战、搬运、撤退三种状态退出，单位均能继续合理行动」。
+        ///
+        /// **如实记录一条口径替换**：代码里不存在"搬运"（全仓 Carry/Haul 零命中），
+        /// 它属于后续里程碑的回收/搬运玩法。这里用「移动中退出」替代第二态，没有假装做了搬运。
+        ///
+        /// 断言口径照 [16]/[17]：**只比字段不算过**。每条延续都真起 <see cref="SimBridge"/>、
+        /// 真切控制权、真推进帧，去看单位到底往哪走了；"交战中退出不乱跑"还配了一个
+        /// 同原型、同参数但从没被接管过的对照单位当反证——否则"没乱跑"完全可能只是
+        /// 因为这个原型本来就不动。
+        /// </summary>
+        private static void ValidateAiHandoff()
+        {
+            Line("\n[18] 接管交还可靠性（M2-04a）");
+
+            const float Dt = 1f / 60f;
+
+            var sim = new SimBridge();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 32;
+            cfg.ArenaHalfExtent = 60f;
+            cfg.RandomSeed = 0xC0FFEE05u;
+
+            // 自造原型表而不是读 Luban：Drift 必须真的游走（给"缓冲期内不乱跑"提供反证单位），
+            // 敌人必须真的不动（这样距离变化只可能来自被测单位）。攻击力一律 0——
+            // 本段测的是"交还后往哪走"，掉血把单位打死只会把结果搅浑。
+            var archetypes = new[]
+            {
+                new BehaviorArchetype
+                {
+                    Kind = BehaviorKind.Drift, Accel = 12f, WanderStrength = 1f,
+                    AttackRange = 0.5f, AttackCooldown = 99f, AttackDamage = 0f,
+                    Separation = 0f, ChargeSpeedMul = 1f,
+                },
+                new BehaviorArchetype
+                {
+                    Kind = BehaviorKind.Stationary, Accel = 12f, WanderStrength = 0f,
+                    AttackRange = 0.5f, AttackCooldown = 99f, AttackDamage = 0f,
+                    Separation = 0f, ChargeSpeedMul = 1f,
+                },
+            };
+
+            sim.Begin(cfg, archetypes);
+            // 切换范围/冷却在本用例里不是被测对象，放开以免干扰（同 [16] 的做法）。
+            sim.ConfigureControlSwitch(200f, 0f);
+
+            var squad = new SquadCommandSystem();
+            squad.Bind(sim, null);
+            var handoff = new AiHandoffSystem();
+            handoff.Bind(sim, squad, archetypes);
+
+            try
+            {
+                SimEntityId body = sim.ControlledUnitId;
+
+                const int AllyLogicId = 9501;
+                const int TwinLogicId = 9502;
+                const int CourierLogicId = 9503;
+                const int HostileLogicId = 9504;
+                var hostilePos = new float2(-14f, 0f);
+
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(-20f, 0f), Health = 500f, Radius = 0.5f, MaxSpeed = 6f,
+                    ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = AllyLogicId,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(-20f, 6f), Health = 500f, Radius = 0.5f, MaxSpeed = 6f,
+                    ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = TwinLogicId,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(20f, -20f), Health = 500f, Radius = 0.5f, MaxSpeed = 6f,
+                    ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = CourierLogicId,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = hostilePos, Health = 5000f, Radius = 0.6f, MaxSpeed = 0f,
+                    ArchetypeId = 1, Faction = SimFaction.Hostile,
+                    IntentSource = IntentSource.AI, LogicId = HostileLogicId,
+                });
+
+                sim.OnUpdate(Dt);
+                SimSnapshot snap0 = sim.Snapshot;
+                SimEntityId ally = FindEntityId(snap0, AllyLogicId, out _);
+                SimEntityId twin = FindEntityId(snap0, TwinLogicId, out _);
+                SimEntityId courier = FindEntityId(snap0, CourierLogicId, out _);
+                SimEntityId hostile = FindEntityId(snap0, HostileLogicId, out _);
+                Expect(body.IsValid && ally.IsValid && twin.IsValid && courier.IsValid && hostile.IsValid,
+                    "本段的玩家本体、三名友军与一个敌人应都已落地并拥有有效稳定实体 ID");
+
+                float2 PosOf(SimEntityId id) =>
+                    sim.TryResolveUnitIndex(id, out int i) && i < sim.Snapshot.Count
+                        ? sim.Snapshot.Position[i]
+                        : float2.zero;
+
+                float2 VelOf(SimEntityId id) =>
+                    sim.TryResolveUnitIndex(id, out int i) && i < sim.Snapshot.Count
+                        ? sim.Snapshot.Velocity[i]
+                        : float2.zero;
+
+                IntentSource SourceOf(SimEntityId id) =>
+                    sim.World != null && sim.World.TryGetUnitControlState(id, out SimUnitControlState s)
+                        ? s.IntentSource
+                        : IntentSource.Scripted;
+
+                void Step(int frames, float2 moveDir = default)
+                {
+                    bool driving = math.lengthsq(moveDir) > 1e-6f;
+                    float2 dir = driving ? math.normalizesafe(moveDir) : float2.zero;
+                    for (int f = 0; f < frames; f++)
+                    {
+                        if (driving)
+                        {
+                            sim.SetControlledIntent(new PlayerIntent
+                            {
+                                MoveDir = dir, SpeedMul = 1f, RadiusOverride = -1f,
+                                AddStatus = SimStatus.None, RemoveStatus = SimStatus.None,
+                            });
+                        }
+                        sim.OnUpdate(Dt);
+                        handoff.Tick(Dt, paused: false);
+                    }
+                }
+
+                // ── A. 编队归属与 RTS 命令的延续（本来就成立，这里补真断言）──
+                //
+                // 编队归属存在热更层字典里、内核不认识编队；命令在直控期间原样留在内核里被冻结，
+                // 交还时 IntentSource 恢复成 Commanded 就自动复活。本系统在这条路上**一行都不插手**——
+                // 插手就等于把玩家的明确命令盖掉，正好是 GDD §7.3 的反面。
+                squad.SelectExplicit(new[] { courier });
+                squad.AssignGroup(3);
+                Expect(squad.GroupSize(3) == 1 && squad.GroupMembers(3)[0] == courier,
+                    "编组 3 应记下这名友军（编队归属只存在热更层，内核不认识编队）");
+
+                var retreatPoint = new float2(45f, -45f);
+                Expect(squad.Issue(UnitCommandKind.Retreat, retreatPoint, SimEntityId.None, paused: false) == 1,
+                    "应能给它下一条撤退命令");
+                Step(30);
+                Expect(SourceOf(courier) == IntentSource.Commanded,
+                    "执行命令中的单位意图来源应是 Commanded");
+
+                Expect(sim.RequestControlSwitch(courier) == ControlRequestResult.Success,
+                    "应能在它撤退途中接管它");
+                Expect(sim.TryGetCommand(courier, out UnitCommand frozen) &&
+                       frozen.Kind == UnitCommandKind.Retreat &&
+                       SourceOf(courier) == IntentSource.Player,
+                    "直控期间原命令应原样留在内核里（被冻结而不是被清掉）");
+                // 玩家开着它往反方向乱走一段，证明后面的"继续撤退"不是惯性使然。
+                Step(25, new float2(-1f, 1f));
+
+                float distRetreatBefore = math.distance(PosOf(courier), retreatPoint);
+                Expect(sim.RequestControlSwitch(body) == ControlRequestResult.Success, "应能退出直控切回本体");
+                Expect(handoff.LastContinuation == HandoffContinuation.ResumeCommand,
+                    $"带命令的单位交还后应直接复活原命令、不进缓冲（实际 {handoff.LastContinuation}）");
+                Expect(!handoff.IsInHandoffBuffer(courier),
+                    "带命令的交还不得进缓冲——缓冲命令会把玩家的明确命令覆盖掉");
+                Expect(sim.TryGetCommand(courier, out UnitCommand resumed) &&
+                       resumed.Kind == UnitCommandKind.Retreat &&
+                       SourceOf(courier) == IntentSource.Commanded,
+                    "交还后命令应自动复活，意图来源回到 Commanded");
+
+                Step(60);
+                float distRetreatAfter = math.distance(PosOf(courier), retreatPoint);
+                Expect(distRetreatAfter < distRetreatBefore - 1f,
+                    $"交还后它应真的继续执行撤退命令而不是掉头（离撤退点 {distRetreatBefore:F2} → {distRetreatAfter:F2}）");
+
+                Expect(squad.GroupMembers(3).Count == 1 && squad.GroupMembers(3)[0] == courier,
+                    "接管 + 退出全程不得改变编队归属");
+                squad.ClearSelection();
+                squad.RecallGroup(3);
+                Expect(squad.Selection.Count == 1 && squad.Selection[0] == courier,
+                    "退出直控后按编组 3 仍能唤回同一个单位");
+
+                // ── B. 交战中退出 → 原地守住，且真的没乱跑（带反证单位）──
+                Expect(sim.RequestControlSwitch(ally) == ControlRequestResult.Success, "应能接管站在敌人旁边的友军");
+                Expect(sim.SetControlledPosition(hostilePos + new float2(4f, 0f)),
+                    "把受控单位摆到敌人旁边（让'交战中'这个前提是确定的，而不是碰运气）");
+                Step(20);
+                float2 exitPos = PosOf(ally);
+                float2 twinStart = PosOf(twin);
+                Expect(math.length(VelOf(ally)) < 0.35f &&
+                       math.distance(exitPos, hostilePos) < AiHandoffSystem.EngageThreatRange,
+                    "退出前的前提：单位静止、且敌人在威胁半径内");
+
+                Expect(sim.RequestControlSwitch(body) == ControlRequestResult.Success, "应能在交战中退出直控");
+                Expect(handoff.LastContinuation == HandoffContinuation.HoldGround,
+                    $"身边有敌人且退出时静止 → 应判为交战中退出、原地守住（实际 {handoff.LastContinuation}）");
+                Expect(sim.TryGetCommand(ally, out UnitCommand hold) &&
+                       hold.Kind == UnitCommandKind.Guard && !hold.TargetEntity.IsValid,
+                    "缓冲命令必须是守备而不是攻击——「不主动开新战线」就是接管缓冲的定义");
+                Expect(SourceOf(ally) == IntentSource.Commanded &&
+                       handoff.IsInHandoffBuffer(ally) &&
+                       handoff.BufferRemaining(ally) > 0f,
+                    "交还的单位应进入接管缓冲期");
+
+                Step(60); // 1 秒，仍在 1.5 秒缓冲窗口内
+                float heldDrift = math.distance(PosOf(ally), exitPos);
+                float twinDrift = math.distance(PosOf(twin), twinStart);
+                Expect(heldDrift < AiHandoffSystem.BufferArriveRadius + 0.5f,
+                    $"缓冲期内被交还的单位应守在交还点附近（实际漂移 {heldDrift:F2}）");
+                Expect(twinDrift > heldDrift + 1f,
+                    $"同原型同参数、但从没被接管过的对照单位应已经在游走（对照 {twinDrift:F2} vs 被测 {heldDrift:F2}）" +
+                    "——否则'没乱跑'只是因为这个原型本来就不动，什么都没证明");
+
+                handoff.DebugAdvanceClock(AiHandoffSystem.HandoffBufferSeconds);
+                Expect(!sim.TryGetCommand(ally, out _) && SourceOf(ally) == IntentSource.AI,
+                    "缓冲到期必须撤掉守备命令并交还 AI——守备是持久命令，不撤就等于把单位永久钉在地上");
+                float2 afterExpire = PosOf(ally);
+                Step(60);
+                Expect(math.distance(PosOf(ally), afterExpire) > 1f,
+                    "到期之后它应真的重新按行为原型活动，而不是停在守备点上（证明确实回到了 AI）");
+
+                // ── C. 移动中退出 → 沿原方向再走一段（替代里程碑原文的"搬运"，见本方法注释）──
+                Expect(sim.ClearCommand(courier) || SourceOf(courier) == IntentSource.AI,
+                    "先把信使交还 AI，构造'无命令 + 移动中退出'的场景");
+                Expect(sim.RequestControlSwitch(courier) == ControlRequestResult.Success, "应能接管信使");
+                Expect(sim.SetControlledPosition(new float2(20f, -20f)),
+                    "把它摆回远离敌人的空地（确保这一段测的是'没有威胁时'的分支）");
+                Step(30, new float2(1f, 0f));
+                float2 exitPosC = PosOf(courier);
+                float2 headingC = math.normalizesafe(VelOf(courier));
+                Expect(math.length(VelOf(courier)) > 0.35f &&
+                       math.distance(exitPosC, hostilePos) > AiHandoffSystem.EngageThreatRange,
+                    "退出前的前提：单位在移动、且附近没有威胁");
+
+                Expect(sim.RequestControlSwitch(body) == ControlRequestResult.Success, "应能在移动中退出直控");
+                Expect(handoff.LastContinuation == HandoffContinuation.Advance,
+                    $"无威胁 + 退出时在移动 → 应判为移动中退出（实际 {handoff.LastContinuation}）");
+                Expect(sim.TryGetCommand(courier, out UnitCommand advance) &&
+                       math.dot(math.normalizesafe(advance.TargetPosition - exitPosC), headingC) > 0.9f,
+                    "延续点应落在退出瞬间的朝向上，而不是随便找一个点");
+
+                Step(45);
+                float2 movedC = PosOf(courier) - exitPosC;
+                Expect(math.length(movedC) > 1.5f && math.dot(math.normalizesafe(movedC), headingC) > 0.7f,
+                    $"缓冲期内它应真的沿原方向继续前进（位移 {math.length(movedC):F2}，方向一致度 " +
+                    $"{math.dot(math.normalizesafe(movedC), headingC):F2}），而不是原地发呆一拍");
+                handoff.DebugAdvanceClock(AiHandoffSystem.HandoffBufferSeconds);
+
+                // ── D. 撤退中退出 → 继续拉开距离 ──
+                Expect(sim.RequestControlSwitch(ally) == ControlRequestResult.Success, "应能再次接管友军");
+                Expect(sim.SetControlledPosition(hostilePos + new float2(5f, 0f)),
+                    "把它摆回敌人旁边，构造'交战中开始撤退'的场景");
+                Step(25, new float2(1f, 0f)); // 背着敌人跑
+                float2 exitPosR = PosOf(ally);
+                float distHostileBefore = math.distance(exitPosR, hostilePos);
+                Expect(math.length(VelOf(ally)) > 0.35f &&
+                       distHostileBefore < AiHandoffSystem.EngageThreatRange,
+                    "退出前的前提：敌人仍在威胁半径内，而单位正在背离它");
+
+                Expect(sim.RequestControlSwitch(body) == ControlRequestResult.Success, "应能在撤退中退出直控");
+                Expect(handoff.LastContinuation == HandoffContinuation.Disengage,
+                    $"有威胁 + 正在背离 → 应判为撤退中退出（实际 {handoff.LastContinuation}）");
+                Step(45);
+                float distHostileAfter = math.distance(PosOf(ally), hostilePos);
+                Expect(distHostileAfter > distHostileBefore + 1f,
+                    $"缓冲期内它应真的继续拉开距离而不是掉头回去（{distHostileBefore:F2} → {distHostileAfter:F2}）");
+
+                // ── E. 缓冲不得吞掉玩家在缓冲期内下的新命令 ──
+                squad.SelectExplicit(new[] { ally });
+                var newOrder = new float2(0f, 40f);
+                Expect(squad.Issue(UnitCommandKind.Move, newOrder, SimEntityId.None, paused: false) == 1,
+                    "缓冲期内玩家仍应能给它下新命令");
+                handoff.DebugAdvanceClock(AiHandoffSystem.HandoffBufferSeconds);
+                Expect(sim.TryGetCommand(ally, out UnitCommand kept) && kept.Kind == UnitCommandKind.Move,
+                    "缓冲到期只该撤掉自己下的那条守备命令——把玩家的新命令一起清掉就是'RTS 命令莫名被吞'");
+
+                // ── F. 缓冲不该在玩家手里跑完（再接管则冻结倒计时）──
+                Expect(sim.ClearCommand(ally), "先撤掉上面那条 Move，回到无命令状态");
+                Expect(sim.RequestControlSwitch(ally) == ControlRequestResult.Success, "再接管一次");
+                Step(15);
+                Expect(sim.RequestControlSwitch(body) == ControlRequestResult.Success &&
+                       handoff.IsInHandoffBuffer(ally),
+                    "再次退出应重新进入缓冲");
+                Expect(sim.RequestControlSwitch(ally) == ControlRequestResult.Success,
+                    "缓冲期内玩家又把它接管回去");
+                handoff.DebugAdvanceClock(AiHandoffSystem.HandoffBufferSeconds * 3f);
+                Expect(handoff.IsInHandoffBuffer(ally),
+                    "缓冲不该在玩家手里跑完——否则'切过去看一眼再切回来'会让缓冲形同虚设");
+                Expect(sim.RequestControlSwitch(body) == ControlRequestResult.Success &&
+                       handoff.BufferRemaining(ally) > AiHandoffSystem.HandoffBufferSeconds - 0.01f,
+                    "重新放开应重新武装一个完整的缓冲窗口");
+                handoff.DebugAdvanceClock(AiHandoffSystem.HandoffBufferSeconds);
+                Expect(!sim.TryGetCommand(ally, out _) && SourceOf(ally) == IntentSource.AI,
+                    "重新武装的缓冲同样必须到期撤销，不得留下悬挂的守备命令");
+
+                // ── G. 安全位置兜底（实施第 4 条）：先证不误伤，再证真能救 ──
+                var obstacles = new[]
+                {
+                    new ObstacleSpec { Position = new float2(20f, 20f), Radius = 4f },
+                };
+                sim.SetObstacles(obstacles);
+                Expect(sim.RequestControlSwitch(ally) == ControlRequestResult.Success ||
+                       sim.ControlledUnitId == ally, "把受控权交给友军以便测位置兜底");
+                int rescuesBefore = handoff.SafePositionRescueCount;
+                Step(60);
+                Expect(handoff.SafePositionRescueCount == rescuesBefore,
+                    "正常行进中不得触发位置抢救——贴边 / 贴障碍是合法状态，误判会让单位每帧被瞬移");
+
+                Expect(sim.SetControlledPosition(obstacles[0].Position), "把受控单位塞进障碍体内部");
+                handoff.Tick(Dt, paused: false);
+                Expect(sim.TryGetControlledPresentation(out SimControlledUnitView rescued) &&
+                       math.distance(rescued.Position, obstacles[0].Position) >=
+                       obstacles[0].Radius + rescued.Radius - 0.05f,
+                    "留在障碍体内的受控单位应被拉到障碍之外（全仓没有寻路，本段也不新建）");
+                Expect(handoff.SafePositionRescueCount == rescuesBefore + 1,
+                    "抢救应被计数一次，而不是每帧反复搬运");
+
+                Expect(sim.SetControlledPosition(new float2(500f, -500f)), "把受控单位丢到场地外");
+                handoff.Tick(Dt, paused: false);
+                Expect(sim.TryGetControlledPresentation(out SimControlledUnitView clamped) &&
+                       math.abs(clamped.Position.x) <= cfg.ArenaHalfExtent + 0.05f &&
+                       math.abs(clamped.Position.y) <= cfg.ArenaHalfExtent + 0.05f,
+                    "落在场地外的受控单位应被拉回场地内");
+
+                Expect(sim.SetControlledPosition(new float2(float.NaN, float.NaN)), "把受控单位的位置弄成 NaN");
+                handoff.Tick(Dt, paused: false);
+                Expect(sim.TryGetControlledPresentation(out SimControlledUnitView fixedUp) &&
+                       math.all(math.isfinite(fixedUp.Position)) &&
+                       handoff.IsPositionValid(fixedUp.Position, fixedUp.Radius),
+                    "NaN 位置应被救回一个有效位置（NaN 留在内核里会顺着空间哈希污染整局）");
+                Step(10);
+                Expect(sim.TryGetControlledPresentation(out SimControlledUnitView stillFine) &&
+                       math.all(math.isfinite(stillFine.Position)),
+                    "抢救之后世界应能继续正常推进");
+
+                // ── H. 调试显示（实施第 5 条）：读的是实时状态，不是快照 ──
+                UnitAiDebugInfo info = handoff.Describe(twin);
+                Expect(info.Valid && info.Behavior == BehaviorKind.Drift &&
+                       info.IntentSource == IntentSource.AI &&
+                       info.Command == UnitCommandKind.None,
+                    "调试显示应读到单位级**行为原型** + 意图来源 + 当前命令（不是编队教义，见契约 §6）");
+
+                squad.SelectExplicit(new[] { twin });
+                Expect(squad.Issue(UnitCommandKind.Attack, hostilePos, hostile, paused: false) == 1,
+                    "给对照单位下一条攻击命令，用来验证调试显示是实时读的");
+                info = handoff.Describe(twin);
+                Expect(info.Command == UnitCommandKind.Attack && info.CommandTarget == hostile &&
+                       info.IntentSource == IntentSource.Commanded,
+                    "下令之后调试显示应立刻反映新的命令与目标");
+                sim.ClearCommand(twin);
+
+                UnitAiDebugInfo courierInfo = handoff.Describe(courier);
+                Expect((courierInfo.GroupMask & (1 << 3)) != 0,
+                    "调试显示应能看出它属于编组 3");
+
+                Expect(sim.RequestControlSwitch(twin) == ControlRequestResult.Success, "接管对照单位");
+                Step(10);
+                Expect(sim.RequestControlSwitch(body) == ControlRequestResult.Success, "再放开它");
+                info = handoff.Describe(twin);
+                Expect(info.InHandoffBuffer && info.BufferRemaining > 0f &&
+                       info.Continuation != HandoffContinuation.None,
+                    "调试显示应标出「正处于接管缓冲期」以及这一次的延续判定");
+
+                // ── I. M1-06 的不变量在整段之后仍成立 ──
+                Expect(CountPlayerIntentUnits(sim.Snapshot) <= 1,
+                    "反复接管 / 交还 / 下令之后，存活单位里 IntentSource==Player 的数量仍应 ≤1");
+                Expect(handoff.HandoffCount >= 6 && handoff.BufferedHandoffCount >= 4,
+                    $"本段应真的发生过多次交还（交还 {handoff.HandoffCount} 次 / 其中缓冲 {handoff.BufferedHandoffCount} 次）");
+            }
+            finally
+            {
+                handoff.Unbind();
+                squad.Unbind();
+                sim.End();
+            }
         }
 
         /// <summary>可注入的假玩家装配投影源。改 <see cref="Organs"/> 即等于"玩家当场换了装配"，

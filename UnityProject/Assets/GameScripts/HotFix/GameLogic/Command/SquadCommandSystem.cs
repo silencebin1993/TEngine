@@ -250,6 +250,19 @@ namespace GameLogic.Command
             return _groups.TryGetValue(slot, out List<SimEntityId> members) ? members.Count : 0;
         }
 
+        /// <summary>
+        /// 某个编组的成员（只读，不含存活过滤）。M2-04a 的交还延续要在交还那一刻记下
+        /// "这个单位属于哪些编队"，而编队归属只存在这里——内核不认识编队。
+        /// 返回内部列表本身而不是拷贝：调用方（<c>AiHandoffSystem</c>）只读一次就丢，
+        /// 每次交还拷一份 64 项的数组是白付的代价。
+        /// </summary>
+        public IReadOnlyList<SimEntityId> GroupMembers(int slot)
+        {
+            return _groups.TryGetValue(slot, out List<SimEntityId> members)
+                ? members
+                : System.Array.Empty<SimEntityId>();
+        }
+
         // ── 命令 ──
 
         private void HandleCommandInput(bool paused)

@@ -87,6 +87,9 @@ namespace GameLogic.Stage.CellStage
         private SquadCommandSystem _squadCommands;
         /// <summary>M2-02 白模叠加层（选择框 / 选中环 / 命令线）。</summary>
         private Battle.Feedback.WhiteboxSquadOverlay _squadOverlay;
+        /// <summary>M2-04a：接管交还的延续、缓冲与安全位置。</summary>
+        private Control.AiHandoffSystem _aiHandoff;
+        private Battle.Feedback.WhiteboxAiHandoffOverlay _handoffOverlay;
         /// <summary>M2-02：本次暂停是不是"战略暂停"（玩法冻结但仍可选人下令）。</summary>
         private bool _strategicPause;
         /// <summary>M2-03a：装配按实体归属。与镜头/指挥同理不进 _hub——它要在暂停下也能被查询
@@ -143,6 +146,9 @@ namespace GameLogic.Stage.CellStage
 
         /// <summary>M2-02：选择、编组与命令下达。</summary>
         public SquadCommandSystem SquadCommands => _squadCommands;
+
+        /// <summary>M2-04a：接管交还可靠性。</summary>
+        public Control.AiHandoffSystem AiHandoff => _aiHandoff;
 
         /// <summary>M2-03a：按实体归属的装配。直控动作集从这里读，没有第二张英雄技能表。</summary>
         public Control.UnitLoadoutRegistry UnitLoadouts => _unitLoadouts;
@@ -355,11 +361,20 @@ namespace GameLogic.Stage.CellStage
             _squadCommands = new SquadCommandSystem();
             _squadCommands.Bind(_sim, _camera);
 
+            // M2-04a：接管交还可靠性。必须排在 _squadCommands 之后——它要在交还那一刻
+            // 读编队归属；也必须与 CameraDirector / SquadCommandSystem 同样**不进 _hub**：
+            // 控制权在暂停下也可能变（死亡回弹、读档恢复），_hub 会被暂停早退整个冻住。
+            _aiHandoff = new Control.AiHandoffSystem();
+            _aiHandoff.Bind(_sim, _squadCommands, DataRegistry.Instance.ArchetypeArray());
+
             // M2-02 白模叠加层：选择框 / 选中环 / 命令指示线。
             // 刻意不挂 DontDestroyOnLoad——那在 Edit 模式必抛，而回归测试会直接 Enter() 本阶段。
             var overlayGo = new GameObject("__SquadOverlay");
             _squadOverlay = overlayGo.AddComponent<WhiteboxSquadOverlay>();
             _squadOverlay.Bind(_sim, _squadCommands);
+            // M2-04a 调试显示挂在同一个 GO 上：Exit 整个销毁它，不多一条要单独清理的路径。
+            _handoffOverlay = overlayGo.AddComponent<Battle.Feedback.WhiteboxAiHandoffOverlay>();
+            _handoffOverlay.Bind(_sim, _aiHandoff);
         }
 
         /// <summary>
@@ -1179,6 +1194,11 @@ namespace GameLogic.Stage.CellStage
             // 暂停语义集中在被调用方，不在这里堆第二个早退分支。
             _directActions?.Tick(dt, _paused);
 
+            // M2-04a：接管缓冲的本地时钟 + 受控单位的安全位置兜底。
+            // 与上面几行同一种写法（暂停语义在被调用方），且同样与场上单位数无关：
+            // 缓冲计时是"记录时刻 + 惰性判断"（记录数 ≤ 8），安全位置只校验**当前受控的那一个**单位。
+            _aiHandoff?.Tick(dt, _paused);
+
             // 选卡时暂停玩法推进，但不暂停 UI
             if (_paused)
             {
@@ -1705,7 +1725,12 @@ namespace GameLogic.Stage.CellStage
                     UnityEngine.Object.DestroyImmediate(overlayGo);
                 }
                 _squadOverlay = null;
+                _handoffOverlay = null;
             }
+            // M2-04a：先解绑交还系统再解绑指挥层——它订阅着控制权变更信号，
+            // 留着会在下一局用上一局的编队字典去记录编队归属。
+            _aiHandoff?.Unbind();
+            _aiHandoff = null;
             _squadCommands?.Unbind();
             _squadCommands = null;
             // M2-03b：先解绑动作集再解绑注册表——它订阅着控制权变更信号，
