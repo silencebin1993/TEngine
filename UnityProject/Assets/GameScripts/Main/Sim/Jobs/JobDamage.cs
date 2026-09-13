@@ -22,11 +22,18 @@ namespace BinGames.Sim
         [ReadOnly] public NativeArray<byte> Faction;
         [ReadOnly] public NativeArray<int> LogicId;
         [ReadOnly] public NativeArray<int> ArchetypeId;
+        [ReadOnly] public NativeArray<SimEntityId> EntityId;
         [ReadOnly] public NativeParallelMultiHashMap<int, int> Hash;
 
         public NativeArray<float> Health;
         public NativeArray<uint> Status;
         public NativeArray<byte> Alive;
+
+        /// <summary>
+        /// surgical-window（M2-05a）：稀疏登记的身体接点表。未登记的实体不受影响——
+        /// 这是本 job 唯一新增的可写状态，其余字段与死亡判定路径逐字不变。
+        /// </summary>
+        public NativeParallelHashMap<SimEntityId, SimUnitBody> Bodies;
 
         public NativeList<int> PendingDeaths;
         public NativeList<HitEvent> HitEvents;
@@ -209,6 +216,55 @@ namespace BinGames.Sim
             return true;
         }
 
+        /// <summary>
+        /// surgical-window（M2-05a）：把伤害路由到指定身体接点。
+        ///
+        /// 返回 true = 已处理（无论是否真的扣到血——接点不存在/已摧毁时也算处理过，
+        /// 不外溢到整体 Health，见 <see cref="SimUnitBody"/> 的口径说明）；
+        /// 返回 false = 目标没有登记身体，调用方应回退到整体 Health 路径。
+        /// </summary>
+        private bool TryApplyPartDamage(SimEntityId entityId, in DamageRequest req, float amount)
+        {
+            if (!Bodies.TryGetValue(entityId, out SimUnitBody body))
+            {
+                return false;
+            }
+
+            bool isPrimary = req.TargetPart == SimBodyPartSlot.Primary;
+            bool isSecondary = req.TargetPart == SimBodyPartSlot.Secondary;
+            if (!isPrimary && !isSecondary)
+            {
+                return false;
+            }
+
+            SimBodyPart part = isPrimary ? body.Primary : body.Secondary;
+            if (!part.IsConfigured)
+            {
+                // 该实体登记了身体，但这个接点没配（比如只给了一个接点的测试体）——
+                // 回退让调用方走整体 Health，而不是让这次伤害凭空消失。
+                return false;
+            }
+
+            if (part.Destroyed != 0)
+            {
+                // 接点已经没了：这次针对它的伤害视为无目标可打，直接吃掉，不外溢到整体血量。
+                return true;
+            }
+
+            float remaining = part.Health - amount;
+            part.Health = math.max(0f, remaining);
+            if (remaining <= 0f)
+            {
+                part.Destroyed = 1;
+                part.DestroyedBySingleTargetHit = (byte)(req.Radius < 0f ? 1 : 0);
+                part.LastHitAmount = amount;
+            }
+
+            if (isPrimary) { body.Primary = part; } else { body.Secondary = part; }
+            Bodies[entityId] = body;
+            return true;
+        }
+
         /// <summary>施加伤害。返回被命中的索引，未命中返回 -1。</summary>
         private int TryDamage(int i, in DamageRequest req, float amount)
         {
@@ -225,6 +281,31 @@ namespace BinGames.Sim
             if (req.ApplyStatus != SimStatus.None)
             {
                 Status[i] = st | (uint)req.ApplyStatus;
+            }
+
+            // surgical-window（M2-05a）：定向到某个身体接点的单体伤害，走独立于整体 Health 的分支。
+            // 只吃单体请求（Radius < 0）——范围/连锁请求忽略 TargetPart，见 DamageRequest.TargetPart 的注释。
+            if (req.TargetPart != SimBodyPartSlot.None && req.Radius < 0f && Bodies.IsCreated
+                && TryApplyPartDamage(EntityId[i], req, final))
+            {
+                if (HitEvents.Length < MaxHitEvents)
+                {
+                    HitEvents.Add(new HitEvent
+                    {
+                        TargetLogicId = LogicId[i],
+                        SourceLogicId = req.SourceLogicId,
+                        Position = Position[i],
+                        Damage = final,
+                        // 接点伤害从不直接致死——死亡判定只看整体 Health，见 SimUnitBody 的口径说明。
+                        Lethal = false,
+                        TargetIndex = i,
+                        RemainingHealth = Health[i] > 0f ? Health[i] : 0f,
+                    });
+                }
+                // 视为命中：允许后续连锁从这具身体继续跳（连锁跳到的下一跳不再携带 TargetPart 语义，
+                // Chain() 用的是同一个 req 副本，但 Chain 只在 ChainCount > 0 时触发，
+                // surgical 定向请求当前不产 ChainCount，这里保持通用不额外收窄）。
+                return i;
             }
 
             // 当前受控实体：先累加，世界主线程统一应用减伤，再由通用死亡收集处理生命周期。

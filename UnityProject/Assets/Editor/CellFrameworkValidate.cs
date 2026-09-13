@@ -70,6 +70,7 @@ namespace GameLogic.EditorTools
                 ValidateDirectVitals();
                 ValidateAiHandoff();
                 ValidateAiOverloadSuppression();
+                ValidateSurgicalWindowBody();
             }
             catch (Exception e)
             {
@@ -3782,6 +3783,186 @@ namespace GameLogic.EditorTools
                 actions.Unbind();
                 registry.Unbind();
                 sim.End();
+            }
+        }
+
+        // ── [20] 外科窗口身体接点基元（M2-05a）──────────────────
+
+        /// <summary>
+        /// M2-05a 实施第 1 条 + 为第 4/5 条预留信号位。GDD 的产品目标是"证明直控能提供独特高价值，
+        /// 而非只提高 DPS"，本段只验证内核基础是否成立，不涉及 RTS 接点指定 / 直控瞄准 /
+        /// 器官掉落奖励（分别是 M2-05b、M2-05c 的事）。
+        ///
+        /// 断言覆盖 Surgical_Window_Contract.md 写定的三条口径：
+        /// 1. 两个接点可分别造成伤害且互不干扰（A/B）；
+        /// 2. 接点摧毁 ≠ 整体死亡，只有整体 Health 归零才死亡（C/D/G）；
+        /// 3. TargetPart 只对单体请求生效，范围伤害与"没登记身体的普通单位"都必须
+        ///    确定性回退到原有整体 Health 路径——这是向后兼容的核心断言（E/F）。
+        /// </summary>
+        private static void ValidateSurgicalWindowBody()
+        {
+            Line("\n[20] 外科窗口身体接点基元（M2-05a）");
+
+            var world = new SimWorld();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 64;
+            cfg.ArenaHalfExtent = 60f;
+            world.Initialize(cfg);
+
+            SimCommandBuffer cmds = default;
+            cmds.Initialize(Unity.Collections.Allocator.Persistent, 64);
+
+            try
+            {
+                const int TestLogicId = 9701;
+                const int PlainLogicId = 9702;
+
+                int testIdx = world.SpawnSurgicalTestEnemy(
+                    position: new float2(10f, 0f), logicId: TestLogicId,
+                    coreHealth: 200f, primaryPartHealth: 60f, secondaryPartHealth: 60f);
+                Expect(testIdx != SimConst.InvalidIndex, "测试敌人应生成成功");
+                Expect(world.TryGetEntityId(testIdx, out SimEntityId testId) && testId.IsValid,
+                    "测试敌人应拥有有效稳定实体 ID");
+
+                Expect(world.HasBody(testId), "测试敌人应登记了身体（配了接点血量）");
+                Expect(world.TryGetBodyPart(testId, SimBodyPartSlot.Primary, out SimBodyPart p0)
+                       && p0.Health == 60f && p0.MaxHealth == 60f && p0.Destroyed == 0,
+                    $"接点 1（占位 PrimaryOrgan）初始应满血未摧毁（实际 {p0.Health}/{p0.MaxHealth}）");
+                Expect(world.TryGetBodyPart(testId, SimBodyPartSlot.Secondary, out SimBodyPart s0)
+                       && s0.Health == 60f && s0.Destroyed == 0,
+                    $"接点 2（占位 SecondaryOrgan）初始应满血未摧毁（实际 {s0.Health}/{s0.MaxHealth}）");
+
+                // ── A. 定向命中接点 1：只影响它自己 ──────────────────────
+                cmds.Damage(new DamageRequest
+                {
+                    TargetIndex = testIdx,
+                    Radius = -1f,
+                    Amount = 20f,
+                    TargetPart = SimBodyPartSlot.Primary,
+                });
+                world.Step(1f / 60f, ref cmds);
+
+                world.TryGetBodyPart(testId, SimBodyPartSlot.Primary, out SimBodyPart p1);
+                world.TryGetBodyPart(testId, SimBodyPartSlot.Secondary, out SimBodyPart s1);
+                SimSnapshot snapA = world.GetSnapshot();
+                Expect(p1.Health == 40f && p1.Destroyed == 0,
+                    $"接点 1 应扣掉这次定向伤害（实际 {p1.Health}/60）");
+                Expect(s1.Health == 60f,
+                    "接点 2 不应被打到接点 1 的伤害影响——两个接点必须互相独立");
+                Expect(snapA.Health[testIdx] == 200f,
+                    $"定向到接点的伤害不应外溢到整体 Health（实际 {snapA.Health[testIdx]}/200）");
+
+                // ── B. 定向命中接点 2：同样独立 ──────────────────────────
+                cmds.Damage(new DamageRequest
+                {
+                    TargetIndex = testIdx,
+                    Radius = -1f,
+                    Amount = 15f,
+                    TargetPart = SimBodyPartSlot.Secondary,
+                });
+                world.Step(1f / 60f, ref cmds);
+                world.TryGetBodyPart(testId, SimBodyPartSlot.Primary, out SimBodyPart p2);
+                world.TryGetBodyPart(testId, SimBodyPartSlot.Secondary, out SimBodyPart s2);
+                Expect(s2.Health == 45f, $"接点 2 应扣掉这次定向伤害（实际 {s2.Health}/60）");
+                Expect(p2.Health == 40f, "接点 1 不应被打到接点 2 的伤害影响");
+
+                // ── C. 低伤精准切离：把接点 1 正好打到 0——摧毁但不致死 ──────
+                cmds.Damage(new DamageRequest
+                {
+                    TargetIndex = testIdx,
+                    Radius = -1f,
+                    Amount = 40f,
+                    TargetPart = SimBodyPartSlot.Primary,
+                });
+                world.Step(1f / 60f, ref cmds);
+                world.TryGetBodyPart(testId, SimBodyPartSlot.Primary, out SimBodyPart p3);
+                SimSnapshot snapC = world.GetSnapshot();
+                Expect(p3.Destroyed == 1, "接点 1 应被摧毁（切离）");
+                Expect(p3.DestroyedBySingleTargetHit == 1,
+                    "摧毁这一击是单体定向命中，精准信号位应为真"
+                    + "（M2-05a 只记事实，'多低算精准'的阈值留给 M2-05c）");
+                Expect(p3.LastHitAmount == 40f,
+                    $"信号位应记下摧毁这一击的伤害量（实际 {p3.LastHitAmount}）");
+                Expect(snapC.Alive[testIdx] != 0 && snapC.Health[testIdx] == 200f,
+                    "接点摧毁不等于整体死亡——整体 Health 一分未少、实体仍然存活"
+                    + "（本段选定并写进契约的死亡判定口径）");
+
+                // ── D. 已摧毁的接点继续挨打：伤害被吃掉，不外溢到整体 Health ──
+                cmds.Damage(new DamageRequest
+                {
+                    TargetIndex = testIdx,
+                    Radius = -1f,
+                    Amount = 999f,
+                    TargetPart = SimBodyPartSlot.Primary,
+                });
+                world.Step(1f / 60f, ref cmds);
+                SimSnapshot snapD = world.GetSnapshot();
+                Expect(snapD.Alive[testIdx] != 0 && snapD.Health[testIdx] == 200f,
+                    "继续打一个已摧毁的接点不应外溢到整体 Health、也不应致死");
+
+                // ── E. TargetPart 只对单体请求生效：范围伤害忽略它，回退整体 Health ──
+                float healthBeforeAoe = world.GetSnapshot().Health[testIdx];
+                float2 enemyPos = world.GetSnapshot().Position[testIdx];
+                cmds.Damage(new DamageRequest
+                {
+                    Origin = enemyPos,
+                    TargetIndex = SimConst.InvalidIndex,
+                    Radius = 5f,
+                    Amount = 15f,
+                    TargetFaction = SimFaction.Hostile,
+                    TargetPart = SimBodyPartSlot.Secondary,
+                });
+                world.Step(1f / 60f, ref cmds);
+                world.TryGetBodyPart(testId, SimBodyPartSlot.Secondary, out SimBodyPart sAfterAoe);
+                SimSnapshot snapE = world.GetSnapshot();
+                Expect(sAfterAoe.Health == 45f,
+                    "范围伤害即便带了 TargetPart 也不该定向到接点——这个字段只对单体请求生效");
+                Expect(snapE.Health[testIdx] == healthBeforeAoe - 15f,
+                    $"范围伤害应回退到整体 Health 路径（{healthBeforeAoe} → {snapE.Health[testIdx]}）");
+
+                // ── F. 向后兼容：没登记身体的普通单位，TargetPart 误设也不会吞掉伤害 ──
+                int plainIdx = world.SpawnUnit(new SpawnRequest
+                {
+                    Position = new float2(-10f, 0f),
+                    Health = 50f,
+                    Radius = 0.5f,
+                    Faction = SimFaction.Hostile,
+                    LogicId = PlainLogicId,
+                });
+                Expect(world.TryGetEntityId(plainIdx, out SimEntityId plainId),
+                    "普通单位应有有效稳定 ID");
+                Expect(!world.HasBody(plainId),
+                    "普通单位不应登记身体——绝大多数单位没有接点是默认状态");
+
+                cmds.Damage(new DamageRequest
+                {
+                    TargetIndex = plainIdx,
+                    Radius = -1f,
+                    Amount = 20f,
+                    TargetPart = SimBodyPartSlot.Primary,
+                });
+                world.Step(1f / 60f, ref cmds);
+                SimSnapshot snapF = world.GetSnapshot();
+                Expect(snapF.Health[plainIdx] == 30f,
+                    "没有身体的单位收到误设的 TargetPart 时应确定性回退到整体 Health"
+                    + $"（实际 {snapF.Health[plainIdx]}/50，应为 30）");
+
+                // ── G. 粗暴整体击杀：打光整体 Health 才是真正的死亡，与接点是否完好无关 ──
+                cmds.Damage(new DamageRequest
+                {
+                    TargetIndex = testIdx,
+                    Radius = -1f,
+                    Amount = 500f,
+                });
+                world.Step(1f / 60f, ref cmds);
+                SimSnapshot snapG = world.GetSnapshot();
+                Expect(snapG.DeathCount > 0,
+                    "整体 Health 归零应产生死亡事件（粗暴击杀），不管此刻接点是否被切离过");
+            }
+            finally
+            {
+                cmds.Dispose();
+                world.Dispose();
             }
         }
 

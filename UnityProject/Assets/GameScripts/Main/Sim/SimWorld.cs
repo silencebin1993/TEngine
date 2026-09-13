@@ -124,6 +124,14 @@ namespace BinGames.Sim
         private SpatialHash _hash;
         private float _time;
 
+        /// <summary>
+        /// surgical-window（M2-05a）：可独立受伤身体接点的稀疏登记表，只有显式配置了接点的实体
+        /// （见 <see cref="SpawnRequest.PrimaryPartMaxHealth"/>/<see cref="SpawnRequest.SecondaryPartMaxHealth"/>）
+        /// 才会出现在这里。未登记的实体不占用这张表的任何空间，也不参与其遍历——
+        /// 现有单位的内存与每帧成本一行未变。
+        /// </summary>
+        private NativeParallelHashMap<SimEntityId, SimUnitBody> _bodies;
+
         public bool IsCreated => _created;
         public SimEntityId ControlledUnitId => _created ? _controlledUnitId : SimEntityId.None;
         public int UnitCount => _unitCount;
@@ -183,6 +191,8 @@ namespace BinGames.Sim
             _summonTimer = new NativeArray<float>(cap, A);
             _generation = new NativeArray<byte>(cap, A);
             _kernelLogicId = 0;
+
+            _bodies = new NativeParallelHashMap<SimEntityId, SimUnitBody>(64, A);
 
             _hash.Initialize(cap, cfg.HashCellSize, A);
             _archetypes = new NativeArray<BehaviorArchetype>(1, A);
@@ -1086,10 +1096,12 @@ namespace BinGames.Sim
                     Faction = _faction,
                     LogicId = _logicId,
                     ArchetypeId = _archetypeId,
+                    EntityId = _entityId,
                     Hash = _hash.Map,
                     Health = _health,
                     Status = _status,
                     Alive = _alive,
+                    Bodies = _bodies,
                     PendingDeaths = _pendingDeaths,
                     HitEvents = _hitEvents,
                     ControlledDamageOut = _controlledDamage,
@@ -1727,7 +1739,41 @@ namespace BinGames.Sim
             // 而且死亡事件里一眼看得出"这是内核生成的"。
             _logicId[idx] = req.LogicId != 0 ? req.LogicId : --_kernelLogicId;
             _visualId[idx] = req.VisualId;
+
+            // surgical-window（M2-05a）：只有显式配了接点血量的生成请求才登记身体。
+            // 绝大多数单位两个字段都是默认值 0，这里直接跳过，零额外开销。
+            if (req.PrimaryPartMaxHealth > 0f || req.SecondaryPartMaxHealth > 0f)
+            {
+                RegisterBody(_entityId[idx], new SimUnitBody
+                {
+                    Primary = new SimBodyPart
+                    {
+                        Health = math.max(0f, req.PrimaryPartMaxHealth),
+                        MaxHealth = math.max(0f, req.PrimaryPartMaxHealth),
+                    },
+                    Secondary = new SimBodyPart
+                    {
+                        Health = math.max(0f, req.SecondaryPartMaxHealth),
+                        MaxHealth = math.max(0f, req.SecondaryPartMaxHealth),
+                    },
+                });
+            }
             return idx;
+        }
+
+        /// <summary>
+        /// surgical-window（M2-05a）：登记一具身体。新分配的 <see cref="SimEntityId"/> 全局唯一
+        /// （见其类型注释），不会与旧条目撞键，因此直接 TryAdd；容量不足时扩容重试一次——
+        /// 稀疏表按设计只应装极少数配了身体的实体，正常路径不会走到扩容分支。
+        /// </summary>
+        private void RegisterBody(SimEntityId entityId, in SimUnitBody body)
+        {
+            if (_bodies.TryAdd(entityId, body))
+            {
+                return;
+            }
+            _bodies.Capacity = math.max(_bodies.Capacity * 2, _bodies.Capacity + 64);
+            _bodies.TryAdd(entityId, body);
         }
 
         /// <summary>
@@ -1886,6 +1932,11 @@ namespace BinGames.Sim
                 _hasControlFallbackAnchor = true;
             }
             _alive[idx] = 0;
+            // surgical-window（M2-05a）：槽位复用前先把旧实体的身体登记摘掉，
+            // 否则稀疏表会随槽位周转无限堆积陈旧条目（新占用者的 EntityId 是全新分配的，
+            // 不会命中这条旧记录，但旧记录本身永远没人再删）。多数单位没登记过身体，
+            // Remove 是 O(1) 的 no-op，不构成额外热点。
+            if (_bodies.IsCreated) { _bodies.Remove(_entityId[idx]); }
             // M2-02：槽位会被复用，命令必须一起清掉——否则新生成的单位会继承
             // 上一个占用者的未完成命令，表现为"刚出生就自己往某处跑"。
             _unitCommands[idx] = UnitCommand.None;
@@ -1967,6 +2018,60 @@ namespace BinGames.Sim
             }
 
             RecordControlChange(previousId, _controlledUnitId, reason, origin);
+        }
+
+        /// <summary>
+        /// surgical-window（M2-05a）：查询某实体某个接点的当前状态。
+        /// 实体没登记身体、或这个接点没配置时返回 false——调用方不应假设"没身体"是异常，
+        /// 绝大多数单位本来就没有（见 <see cref="SpawnRequest.PrimaryPartMaxHealth"/> 的说明）。
+        /// </summary>
+        public bool TryGetBodyPart(SimEntityId entityId, SimBodyPartSlot slot, out SimBodyPart part)
+        {
+            part = default;
+            if (!_bodies.IsCreated || !_bodies.TryGetValue(entityId, out SimUnitBody body))
+            {
+                return false;
+            }
+            part = slot switch
+            {
+                SimBodyPartSlot.Primary => body.Primary,
+                SimBodyPartSlot.Secondary => body.Secondary,
+                _ => default,
+            };
+            return part.IsConfigured;
+        }
+
+        /// <summary>某实体是否登记了身体（至少一个接点被配置）。</summary>
+        public bool HasBody(SimEntityId entityId) => _bodies.IsCreated && _bodies.ContainsKey(entityId);
+
+        /// <summary>
+        /// surgical-window（M2-05a）调试直调入口：生成一个带 2 个可独立受伤接点的测试敌人，
+        /// 用于自检 / 手动验证外科窗口基元，**不接入正式随机生成池**（那是 <c>SpawnDirector</c> 的事）。
+        /// 接点分类是占位——GDD 没给出具体器官类别，命名与数值都待产品拍板，
+        /// 见 DesignDocs/migration/Surgical_Window_Contract.md。
+        /// </summary>
+        public int SpawnSurgicalTestEnemy(
+            float2 position,
+            int logicId,
+            int archetypeId = 0,
+            SimFaction faction = SimFaction.Hostile,
+            float coreHealth = 200f,
+            float primaryPartHealth = 60f,
+            float secondaryPartHealth = 60f,
+            float radius = 0.6f)
+        {
+            return SpawnUnit(new SpawnRequest
+            {
+                Position = position,
+                Health = coreHealth,
+                Radius = radius,
+                ArchetypeId = archetypeId,
+                Faction = faction,
+                IntentSource = IntentSource.AI,
+                LogicId = logicId,
+                PrimaryPartMaxHealth = primaryPartHealth,
+                SecondaryPartMaxHealth = secondaryPartHealth,
+            });
         }
 
         /// <summary>直接击杀（吞噬结算用）。</summary>
@@ -2097,6 +2202,7 @@ namespace BinGames.Sim
             if (_deadQueue.IsCreated) { _deadQueue.Dispose(); }
             if (_damageScratch.IsCreated) { _damageScratch.Dispose(); }
             if (_controlledDamage.IsCreated) { _controlledDamage.Dispose(); }
+            if (_bodies.IsCreated) { _bodies.Dispose(); }
             _hash.Dispose();
 
             _unitCount = 0;

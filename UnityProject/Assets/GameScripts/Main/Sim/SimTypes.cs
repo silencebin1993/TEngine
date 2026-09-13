@@ -352,6 +352,18 @@ namespace BinGames.Sim
         /// 与 <see cref="SimConst.MaxSpawnGeneration"/>（后者是无论怎么配都越不过的硬顶）。
         /// </summary>
         public byte Generation;
+
+        // ── surgical-window：可独立受伤的身体接点（M2-05a）──────────────────
+        //
+        // 两者都 &lt;= 0（默认值）时这个实体不登记身体，完全走原来的单一 Health 路径，
+        // 零内存/零遍历回归。只有显式配了正数的实体才会在 SimWorld 的稀疏表里占一条。
+        // 接点分类是内核自己的通用占位概念（Primary/Secondary），不认识"器官"；
+        // 具体产品语义见 DesignDocs/migration/Surgical_Window_Contract.md。
+
+        /// <summary>接点 1（占位标签 "PrimaryOrgan"）满血量。&lt;= 0 = 不配置该接点。</summary>
+        public float PrimaryPartMaxHealth;
+        /// <summary>接点 2（占位标签 "SecondaryOrgan"）满血量。&lt;= 0 = 不配置该接点。</summary>
+        public float SecondaryPartMaxHealth;
     }
 
     /// <summary>
@@ -378,6 +390,17 @@ namespace BinGames.Sim
         /// <summary>用于伤害来源归属与事件回传。</summary>
         public int SourceLogicId;
 
+        /// <summary>
+        /// surgical-window（M2-05a）：把这次伤害定向到目标身上的某个身体接点，而不是整体 Health。
+        /// 默认值 <see cref="SimBodyPartSlot.None"/> = 不定向，走原有整体 Health 路径（零回归）。
+        ///
+        /// **只对单体请求生效**（<see cref="Radius"/> &lt; 0）：范围/连锁请求会忽略这个字段、
+        /// 回退到整体伤害——"炸一整片只炸中某个接点"没有物理意义，也没必要为它定义语义。
+        /// 目标没有登记身体，或该接点未配置（<see cref="SpawnRequest.PrimaryPartMaxHealth"/> 等
+        /// &lt;= 0）时同样回退到整体 Health，不会把伤害凭空丢掉。
+        /// </summary>
+        public SimBodyPartSlot TargetPart;
+
         // ── combat-primitive-overhaul：扇形判定（近战底盘）──
         // 圆形分支恒存在；ConeDir 非零向量时在圆内再叠一道"必须落在锥内"的判据。
         // 这样近战不再是"前方放个大圆"（背后的敌人照样被打），而是真的只打面朝方向。
@@ -387,6 +410,65 @@ namespace BinGames.Sim
         public float ConeCosHalf;
         /// <summary>不受扇形筛选的贴身豁免半径——圆心附近方向向量不稳定，且"贴脸"本就该被打到。</summary>
         public float ConeNearRadius;
+    }
+
+    /// <summary>
+    /// 外科窗口基元（M2-05a）：一个实体身上可独立受伤的接点是哪一个。
+    ///
+    /// 内核只认识"接点 1 / 接点 2"这种通用槽位，不认识"器官"——具体分类
+    /// （比如占位标签 "PrimaryOrgan"/"SecondaryOrgan"）是热更层的产品概念，
+    /// 见 DesignDocs/migration/Surgical_Window_Contract.md。本段固定 2 个接点，
+    /// 扩到 N 个接点属于后续里程碑的事，不在本段范围内。
+    /// </summary>
+    public enum SimBodyPartSlot : byte
+    {
+        /// <summary>不定向到任何接点，走整体 Health（默认值，向后兼容）。</summary>
+        None = 0,
+        Primary = 1,
+        Secondary = 2,
+    }
+
+    /// <summary>
+    /// 单个身体接点的运行时状态。
+    /// </summary>
+    public struct SimBodyPart
+    {
+        public float Health;
+        /// <summary>&lt;= 0 表示这个接点未配置（该实体实际只有 0 或 1 个接点）。</summary>
+        public float MaxHealth;
+        /// <summary>0 = 完好，1 = 已被摧毁（切离）。摧毁只影响这个接点自身，不触发整体死亡判定
+        /// ——见 <see cref="SimUnitBody"/> 上的口径说明。</summary>
+        public byte Destroyed;
+        /// <summary>
+        /// 精准/粗暴判据的预留信号位（M2-05a 只记事实，不做阈值判定，见 M2-05c）：
+        /// 摧毁这个接点的最后一击，是否为「单体定向命中该接点」
+        /// （<see cref="DamageRequest.TargetPart"/> 显式指定该接点 且 <see cref="DamageRequest.Radius"/> &lt; 0，
+        /// 排除范围/连锁误伤这种不该算"精准"的命中方式）。
+        /// </summary>
+        public byte DestroyedBySingleTargetHit;
+        /// <summary>摧毁这一击的最终伤害量（已过易伤/硬化倍率）。配合上面的信号位，
+        /// "伤害量低于多少算精准"这条阈值留给 M2-05c 按自己的平衡数值决定，本段不写死。</summary>
+        public float LastHitAmount;
+
+        public readonly bool IsConfigured => MaxHealth > 0f;
+    }
+
+    /// <summary>
+    /// 一个实体的可独立受伤接点集合（M2-05a）。本段固定 2 个接点，稀疏登记在
+    /// <c>SimWorld</c> 的 <c>NativeParallelHashMap&lt;SimEntityId, SimUnitBody&gt;</c> 里——
+    /// 只有显式配置了接点的实体才会出现，未登记的实体继续走原来的单一 Health 路径，
+    /// 不给 <see cref="SimEntityId"/> 之外的核心 SoA 数组增加任何固定字段。
+    ///
+    /// **死亡判定口径（本段选定，写进契约供 b/c 段与产品验收依赖）**：
+    /// 接点摧毁 **不等于** 整体死亡。无论哪个接点、哪怕两个接点都被摧毁，实体是否存活
+    /// 仍然只看整体 <c>Health</c>（原有路径，一行未改）。这样"精准切离"才有意义——
+    /// 玩家能在不杀死目标的前提下切掉一个接点；粗暴打光整体 Health 才会真正杀死目标，
+    /// 那时接点是否完好由 M2-05c 决定要不要连带处理。
+    /// </summary>
+    public struct SimUnitBody
+    {
+        public SimBodyPart Primary;
+        public SimBodyPart Secondary;
     }
 
     /// <summary>
