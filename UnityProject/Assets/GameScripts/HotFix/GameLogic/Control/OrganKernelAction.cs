@@ -2,6 +2,7 @@ using BinGames.Sim;
 using GameLogic.Core;
 using GameLogic.MetabolicSlice.ContentCatalog;
 using GameLogic.MetabolicSlice.Structural;
+using UnityEngine;
 
 namespace GameLogic.Control
 {
@@ -45,6 +46,16 @@ namespace GameLogic.Control
         /// <summary>区域是否跟随释放者（光环 / 跟随召唤）。false = 钉在瞄准点。</summary>
         public bool FollowSelf;
         public SimStatus ApplyStatus;
+
+        /// <summary>本动作槽释放后的冷却秒数（M2-03c）。由本动作的形态推导，见
+        /// <see cref="OrganKernelActionTable"/> 的代价一节。</summary>
+        public float Cooldown;
+
+        /// <summary>一次释放的代谢消耗（M2-03c）。</summary>
+        public float MetabolicCost;
+
+        /// <summary>一次释放累积的热债（M2-03c）。</summary>
+        public float HeatCost;
 
         public bool IsValid => Kind != OrganKernelActionKind.None;
 
@@ -111,9 +122,93 @@ namespace GameLogic.Control
                 return OrganKernelAction.None;
             }
 
-            return def.Category == OrganelleCategory.Structural
+            OrganKernelAction action = def.Category == OrganelleCategory.Structural
                 ? ResolveStructural(organId, def)
                 : ResolveAttack(organId, def);
+
+            ApplyReleaseCosts(ref action);
+            return action;
+        }
+
+        // ── 释放代价（M2-03c）─────────────────────────────────
+        //
+        // 三个量的数值**全部由上面已经解析出来的形态推导**，与形态本身同一个来源
+        // （器官目录条目 + Luban OrganModuleParams 行）。这里同样没有任何一条按 organId
+        // 写死的特例——"这件器官为什么冷却这么长 / 这么费代谢"永远追得到来源。
+        //
+        // 三个量刻意表达三件不同的事，否则它们会退化成同一个量的三种写法：
+        //   * 冷却 = 这一击**多久能再来一次**（节奏）；
+        //   * 代谢 = 这一击**造出了多大的东西**（材料：伤害 + 覆盖 + 持续）；
+        //   * 热债 = 这一击的**功率**（= 代谢 / 冷却）。同样的功，冷却越短的器官越容易过载，
+        //     这正是"连点左键刷弹体"会被热债自然掐住、而慢速大招不会的原因。
+
+        /// <summary>弹体的基础冷却。</summary>
+        public const float ProjectileBaseCooldown = 0.35f;
+
+        /// <summary>穿透每多一层给冷却加的比例（穿透是"这一发更强"的直接体现）。</summary>
+        public const float ProjectilePierceCooldownStep = 0.2f;
+
+        /// <summary>扇形的基础冷却，按实际扇角相对 <see cref="DefaultConeHalfAngle"/> 缩放。</summary>
+        public const float ConeBaseCooldown = 0.7f;
+
+        /// <summary>区域类的冷却下限。实际取它与区域自身持续秒数的较大者。</summary>
+        public const float ZoneBaseCooldown = 1.5f;
+
+        /// <summary>范围状态的冷却下限。同上，取它与状态持续秒数的较大者。</summary>
+        public const float StatusBaseCooldown = 1f;
+
+        public const float MetabolicCostPerDamage = 1.2f;
+        public const float MetabolicCostPerRadius = 1.5f;
+        public const float MetabolicCostPerSecond = 2f;
+
+        /// <summary>代谢消耗下限：零伤害的纯标记类动作也不该是"完全免费按到死"。</summary>
+        public const float MinMetabolicCost = 4f;
+
+        /// <summary>热债 = 代谢 / 冷却 × 本系数。系数本身只是把量纲拉到与阈值可比的尺度。</summary>
+        public const float HeatPerPowerUnit = 0.5f;
+
+        /// <summary>算功率时冷却的下限，防止 0 冷却把热债算成无穷。</summary>
+        public const float MinCooldownForHeat = 0.2f;
+
+        private static void ApplyReleaseCosts(ref OrganKernelAction a)
+        {
+            if (!a.IsValid)
+            {
+                a.Cooldown = 0f;
+                a.MetabolicCost = 0f;
+                a.HeatCost = 0f;
+                return;
+            }
+
+            switch (a.Kind)
+            {
+                case OrganKernelActionKind.Projectile:
+                    a.Cooldown = ProjectileBaseCooldown *
+                        (1f + ProjectilePierceCooldownStep * Mathf.Max(0, a.Pierce - 1));
+                    break;
+
+                case OrganKernelActionKind.Cone:
+                    a.Cooldown = ConeBaseCooldown *
+                        Mathf.Max(0.25f, a.HalfAngleDeg / DefaultConeHalfAngle);
+                    break;
+
+                case OrganKernelActionKind.Zone:
+                    // 一块要持续 N 秒的区域，冷却至少 N 秒。否则同一块地上能叠出任意多层，
+                    // "持续区域"这个形态本身就失去意义了。
+                    a.Cooldown = Mathf.Max(ZoneBaseCooldown, a.Seconds);
+                    break;
+
+                default:
+                    a.Cooldown = Mathf.Max(StatusBaseCooldown, a.Seconds);
+                    break;
+            }
+
+            a.MetabolicCost = Mathf.Max(MinMetabolicCost,
+                MetabolicCostPerDamage * Mathf.Max(0f, a.Damage) +
+                MetabolicCostPerRadius * Mathf.Max(0f, a.Radius) +
+                MetabolicCostPerSecond * Mathf.Max(0f, a.Seconds));
+
+            a.HeatCost = a.MetabolicCost / Mathf.Max(MinCooldownForHeat, a.Cooldown) * HeatPerPowerUnit;
         }
 
         /// <summary>

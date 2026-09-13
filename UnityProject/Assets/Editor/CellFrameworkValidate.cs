@@ -13,10 +13,12 @@ using GameLogic.Spawning;
 using GameLogic.Stage;
 using GameLogic.Stage.CellStage;
 using GameLogic.Stats;
+using GameLogic.UI.Battle;
 using GameLogic.View;
 using Unity.Mathematics;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.UIElements;
 
 namespace GameLogic.EditorTools
 {
@@ -65,6 +67,7 @@ namespace GameLogic.EditorTools
                 ValidateSquadCommands();
                 ValidateUnitLoadouts();
                 ValidateDirectControlActions();
+                ValidateDirectVitals();
             }
             catch (Exception e)
             {
@@ -2374,7 +2377,9 @@ namespace GameLogic.EditorTools
                        disabled.OrganCount == 2 && disabled.ContainsOrgan("org_lyso"),
                     "主器官失能后主动作应消失，功能动作不受影响，且失能器官仍留在装配里可见");
 
-                fakeSource.Organs.Add(new UnitLoadoutOrgan("org_hook", LoadoutAction.Interact));
+                // 用现役 id：M2-03c 第 0 步已把仓里最后一处对已退役 org_hook 的引用清掉，
+                // 测试里再留一个会让"还有谁在引用退役内容"这类排查白跑一趟。
+                fakeSource.Organs.Add(new UnitLoadoutOrgan("org_spine", LoadoutAction.Interact));
                 UnitLoadout afterRefresh = registry.Get(body);
                 Expect(!afterRefresh.HasAction(LoadoutAction.Primary) &&
                        afterRefresh.HasAction(LoadoutAction.Interact) && afterRefresh.OrganCount == 3,
@@ -2474,7 +2479,12 @@ namespace GameLogic.EditorTools
         ///
         /// 所以这里刻意不只比掩码——只比数据不同，行为却一模一样，是不算过的。
         /// 每个单位释放之后都去内核里看真的落下了什么：菌丝体应该多出一块持续区域，
-        /// 孢子应该给身边的敌人挂上状态位且**不**产生区域。两者互相是对方的反证。
+        /// 孢子应该用真弹体把身边的敌人打掉血且**不**产生区域。两者互相是对方的反证。
+        ///
+        /// M2-03c 第 0 步改动：孢子的主器官由 <c>org_confusion_spore</c>（Structural / 零伤害挂标记）
+        /// 换成现役攻击器官 <c>org_emitter</c>，菌丝体的交互器官由已退役的 <c>org_hook</c>
+        /// 换成目录指定的继任者 <c>org_cilia</c>。本段期望值已同步更新到新的真实行为，
+        /// **不是**为了让断言变绿而回退器官选择。
         /// </summary>
         private static void ValidateDirectControlActions()
         {
@@ -2574,18 +2584,27 @@ namespace GameLogic.EditorTools
                     "孢子没有交互器官，交互槽应判为 NoOrgan");
 
                 // 真释放一次，去内核里看落下了什么。
+                // M2-03c 第 0 步把孢子的主器官从 org_confusion_spore（Structural，零伤害挂标记）
+                // 换成了现役攻击器官 org_emitter（Projectile），所以这里的期望值跟着改成
+                // "真弹体打掉了敌人的血"，而不是"挂上了状态位"。
                 int zonesBeforeSpore = sim.LiveZoneCount;
+                float hostileHpBeforeSpore = sim.Snapshot.Health[hostileIndex];
                 Expect(actions.TryRelease(LoadoutAction.Primary, new float2(1f, 0f)),
                     "孢子的主器官应能释放");
                 OrganKernelActionKind sporeKind = actions.LastReleasedKernelAction.Kind;
+                Expect(sporeKind == OrganKernelActionKind.Projectile,
+                    $"孢子的主器官应落成内核真弹体（实际 {sporeKind}）——换掉 Structural 器官正是第 0 步要修的");
                 Expect(actions.LastReleasedOrganId == sporeOrgan.OrganId,
                     "成功释放记录的器官 id 应就是装配里那件");
-                sim.OnUpdate(1f / 60f);
-                uint hostileStatus = sim.Snapshot.Status[hostileIndex];
-                Expect(hostileStatus != 0u,
-                    $"孢子的主器官是挂标记型的，释放后身边敌人应被挂上状态位（实际 {hostileStatus}）");
+                for (int step = 0; step < 12; step++)
+                {
+                    sim.OnUpdate(1f / 60f);
+                }
+                float hostileHpAfterSpore = sim.Snapshot.Health[hostileIndex];
+                Expect(hostileHpAfterSpore < hostileHpBeforeSpore,
+                    $"孢子的主器官是真弹体，释放后身边敌人应真的掉血（{hostileHpBeforeSpore:F1} → {hostileHpAfterSpore:F1}）");
                 Expect(sim.LiveZoneCount == zonesBeforeSpore,
-                    "挂标记型器官不该产生持续区域——那是另一件器官的形态");
+                    "弹体型器官不该产生持续区域——那是另一件器官的形态");
 
                 // ── C. 接管菌丝体：动作集不同，且行为也不同 ──
                 Expect(sim.RequestControlSwitch(mycelium) == ControlRequestResult.Success,
@@ -2626,6 +2645,10 @@ namespace GameLogic.EditorTools
                     "被拒绝的释放不得在内核里留下任何东西——只灰不拦等于'显示禁用、实际可用'");
                 // 注意：这里**没有**重建动作集就直接释放，正是为了证明拦截发生在释放入口，
                 // 而不是靠上一次重建时算出来的那份缓存。
+                // M2-03c：菌丝体刚在 C 段释放过，它的区域型动作冷却 ≥ 区域持续秒数。
+                // 把三个量的本地时钟快进一段，否则这里会被 Cooling 挡下——那是 [17] 段的被测项，
+                // 不该让它在这里把"失能解除"的断言污染成假红。
+                actions.Tick(10f, paused: false);
                 Expect(registry.SetOrganDisabled(mycelium, myceliumOrgan.OrganId, false) &&
                        actions.TryRelease(LoadoutAction.Primary, new float2(1f, 0f)),
                     "解除失能后同一个入口应立刻重新放行");
@@ -2729,6 +2752,375 @@ namespace GameLogic.EditorTools
                 playerController.OnExit();
                 sim.End();
             }
+        }
+
+        // ── [17] 代谢 / 热债 / 冷却（M2-03c）─────────────────────
+
+        /// <summary>
+        /// ProjectA M2-03c：直控释放的三个量。
+        ///
+        /// 断言口径与 [16] 一致——**只比字段不算过**：每一条拒绝都要同时验
+        /// "拒绝原因对得上" + "ReleaseCount 没涨"（= 真的什么都没打出来），
+        /// 每一条放行都要验它在同一个入口上真的成功。
+        ///
+        /// 时间用 <c>DirectControlActions.Tick</c> 快进，不等真实秒数：三个量的回复/衰减都是线性的，
+        /// 惰性结算与逐帧结算等价（见 <see cref="UnitVitalsRegistry"/> 类注释），所以快进是等价而不是近似。
+        /// <c>Tick(30f)</c> 足以让任何一具身体回到"满代谢 / 零热债 / 无冷却"的静息态，
+        /// 本段用它在各小节之间归位。
+        /// </summary>
+        private static void ValidateDirectVitals()
+        {
+            Line("\n[17] 代谢 / 热债 / 冷却（M2-03c）");
+
+            var sim = new SimBridge();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 32;
+            cfg.ArenaHalfExtent = 60f;
+            cfg.RandomSeed = 0xC0FFEE05u;
+            sim.Begin(cfg, Array.Empty<BehaviorArchetype>());
+            sim.ConfigureControlSwitch(100f, 0f);
+
+            var registry = new UnitLoadoutRegistry();
+            var fakeSource = new FakePlayerLoadoutSource();
+            var actions = new DirectControlActions();
+            var aim = new float2(1f, 0f);
+
+            InputRouter.Reset();
+
+            try
+            {
+                registry.Bind(sim, fakeSource);
+                SimEntityId body = sim.ControlledUnitId;
+                registry.RegisterPlayerBody(body);
+                actions.Bind(sim, registry, abilities: null, status: null);
+
+                const int SporeLogicId = 9501;
+                const int MyceliumLogicId = 9502;
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(-6f, 2f), Health = 40f, Radius = 0.8f, MaxSpeed = 0f,
+                    ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = SporeLogicId,
+                });
+                registry.RegisterArchetypePending(SporeLogicId, ArchetypeLoadoutTable.SporeArchetypeId);
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(6f, 2f), Health = 40f, Radius = 0.8f, MaxSpeed = 0f,
+                    ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = MyceliumLogicId,
+                });
+                registry.RegisterArchetypePending(MyceliumLogicId, ArchetypeLoadoutTable.MyceliumArchetypeId);
+
+                sim.OnUpdate(1f / 60f);
+                registry.ResolvePending(sim.Snapshot);
+                SimSnapshot snap = sim.Snapshot;
+                SimEntityId spore = FindEntityId(snap, SporeLogicId, out _);
+                SimEntityId mycelium = FindEntityId(snap, MyceliumLogicId, out _);
+                Expect(spore.IsValid && mycelium.IsValid, "两名友军应都已落地并拥有有效稳定实体 ID");
+
+                // ── 0. 第 0 步：原型表不再指向退役 / 非攻击器官 ──
+                UnitLoadout sporeLoadout = registry.Get(spore);
+                UnitLoadout myceliumLoadout = registry.Get(mycelium);
+                bool sporeHas = sporeLoadout.TryGetOrgan(LoadoutAction.Primary, out UnitLoadoutOrgan sporeOrgan);
+                bool myceliumHas = myceliumLoadout.TryGetOrgan(LoadoutAction.Primary, out UnitLoadoutOrgan myceliumOrgan);
+                Expect(sporeHas && myceliumHas, "两名友军都应有主器官");
+
+                OrganKernelAction sporeAct = OrganKernelActionTable.Resolve(sporeOrgan.OrganId);
+                OrganKernelAction myceliumAct = OrganKernelActionTable.Resolve(myceliumOrgan.OrganId);
+                Expect(sporeAct.IsValid && sporeAct.Damage > 0f,
+                    $"孢子的主器官 {sporeOrgan.OrganId} 应是一次真攻击（有内核形态且有伤害），不是零伤害挂标记");
+                Expect(myceliumAct.IsValid && myceliumAct.Damage > 0f,
+                    $"菌丝体的主器官 {myceliumOrgan.OrganId} 应是一次真攻击（有内核形态且有伤害）");
+                Expect(sporeAct.Kind != myceliumAct.Kind,
+                    $"两者打出来的形态应不同（{sporeAct.Kind} vs {myceliumAct.Kind}）");
+
+                bool interactHas = myceliumLoadout.TryGetOrgan(LoadoutAction.Interact,
+                    out UnitLoadoutOrgan interactOrgan);
+                Expect(interactHas && OrganKernelActionTable.Resolve(interactOrgan.OrganId).IsValid,
+                    $"菌丝体的交互器官 {(interactHas ? interactOrgan.OrganId : "(无)")} 应是现役器官——" +
+                    "退役 id 永远只会落到 NoKernelAction，引用它本身就是 bug");
+
+                // 三个量必须由器官推导出来。若它们是常数，"代价与器官对应"这条就是空话。
+                Expect(sporeAct.Cooldown > 0f && sporeAct.MetabolicCost > 0f && sporeAct.HeatCost > 0f,
+                    $"每件器官都应推导出非零的冷却/代谢/热债（孢子 cd={sporeAct.Cooldown:F2} " +
+                    $"代谢={sporeAct.MetabolicCost:F1} 热债={sporeAct.HeatCost:F1}）");
+                Expect(Mathf.Abs(sporeAct.Cooldown - myceliumAct.Cooldown) > 0.01f &&
+                       Mathf.Abs(sporeAct.MetabolicCost - myceliumAct.MetabolicCost) > 0.01f,
+                    $"形态不同的两件器官应推导出不同的代价（cd {sporeAct.Cooldown:F2} vs {myceliumAct.Cooldown:F2}；" +
+                    $"代谢 {sporeAct.MetabolicCost:F1} vs {myceliumAct.MetabolicCost:F1}）");
+
+                // ── A. 冷却：期内重复释放被拒，冷却走完后可再释放 ──
+                Expect(sim.RequestControlSwitch(spore) == ControlRequestResult.Success, "应能接管孢子友军");
+                Expect(actions.TryRelease(LoadoutAction.Primary, aim), "首次释放应成功");
+                int releasesAfterFirst = actions.ReleaseCount;
+
+                Expect(!actions.TryRelease(LoadoutAction.Primary, aim) &&
+                       actions.LastReleaseResult == DirectActionAvailability.Cooling &&
+                       actions.ReleaseCount == releasesAfterFirst,
+                    "冷却期内重复释放应在入口被拒（原因 Cooling），且不得有任何输出");
+
+                actions.Tick(sporeAct.Cooldown * 0.5f, paused: false);
+                Expect(!actions.TryRelease(LoadoutAction.Primary, aim) &&
+                       actions.LastReleaseResult == DirectActionAvailability.Cooling,
+                    "冷却只过了一半时仍应被拒");
+
+                actions.Tick(sporeAct.Cooldown, paused: false);
+                Expect(actions.TryRelease(LoadoutAction.Primary, aim) &&
+                       actions.ReleaseCount == releasesAfterFirst + 1,
+                    "冷却走完后同一个入口应放行");
+
+                actions.Tick(100f, paused: true);
+                Expect(!actions.TryRelease(LoadoutAction.Primary, aim) &&
+                       actions.LastReleaseResult == DirectActionAvailability.Cooling,
+                    "暂停下本地时钟不推进——暂停刷冷却是白送的");
+
+                // ── B. 代谢：按器官的代价真的扣，不足被拒，回复后放行 ──
+                actions.Tick(30f, paused: false);
+                UnitVitalsView idle = actions.ControlledVitals;
+                Expect(idle.Valid && idle.EntityId == spore &&
+                       idle.Metabolism >= UnitVitalsRegistry.MetabolismMax - 0.01f &&
+                       idle.Heat <= 0.01f && idle.PrimaryCooldown <= 0f,
+                    $"静息足够久之后应回到满代谢 / 零热债 / 无冷却（实际 代谢{idle.Metabolism:F1} " +
+                    $"热债{idle.Heat:F1} 冷却{idle.PrimaryCooldown:F2}）");
+
+                Expect(actions.TryRelease(LoadoutAction.Primary, aim), "静息态下释放应成功");
+                UnitVitalsView spent = actions.ControlledVitals;
+                Expect(Mathf.Abs((idle.Metabolism - spent.Metabolism) - sporeAct.MetabolicCost) < 0.01f,
+                    $"一次释放应精确扣掉该器官的代谢代价（扣了 {idle.Metabolism - spent.Metabolism:F2}，" +
+                    $"应为 {sporeAct.MetabolicCost:F2}）");
+                Expect(spent.Heat > idle.Heat && spent.PrimaryCooldown > 0f,
+                    $"同一次释放应同时累积热债并起冷却（热债 {idle.Heat:F1} → {spent.Heat:F1}）");
+
+                actions.Tick(sporeAct.Cooldown + 0.1f, paused: false);
+                // 先让冷却走完再压低代谢：顺序反过来的话，Tick 会把代谢又回满，
+                // 这一条就永远测不到"代谢不足"那个分支。
+                Expect(actions.Vitals.SetMetabolism(spore, sporeAct.MetabolicCost - 0.5f),
+                    "应能直接写代谢余量（本段只提供入口，不定义额外抽走代谢的规则）");
+                int releasesBeforeStarve = actions.ReleaseCount;
+                Expect(!actions.TryRelease(LoadoutAction.Primary, aim) &&
+                       actions.LastReleaseResult == DirectActionAvailability.NotEnoughMetabolism &&
+                       actions.ReleaseCount == releasesBeforeStarve,
+                    "代谢不足时释放应在入口被拒（原因 NotEnoughMetabolism），且不得有任何输出");
+
+                actions.Tick(1f, paused: false);
+                Expect(actions.TryRelease(LoadoutAction.Primary, aim) &&
+                       actions.ReleaseCount == releasesBeforeStarve + 1,
+                    "代谢回复到够付代价后，同一个入口应放行");
+
+                // ── C. 热债：累积 → 越阈值 → 拒绝 → 衰减 → 恢复 ──
+                actions.Tick(sporeAct.Cooldown + 0.1f, paused: false);
+                Expect(actions.Vitals.AddHeat(spore, UnitVitalsRegistry.HeatOverloadThreshold + 5f),
+                    "应能直接叠加热债");
+                UnitVitalsView over = actions.ControlledVitals;
+                Expect(over.Overloaded && over.Heat >= UnitVitalsRegistry.HeatOverloadThreshold,
+                    $"热债越过阈值应进入过载态（热债 {over.Heat:F1} / 阈值 {over.HeatThreshold:F0}）");
+
+                int releasesBeforeOverload = actions.ReleaseCount;
+                Expect(!actions.TryRelease(LoadoutAction.Primary, aim) &&
+                       actions.LastReleaseResult == DirectActionAvailability.Overloaded &&
+                       actions.ReleaseCount == releasesBeforeOverload,
+                    "过载态下释放应在入口被拒（原因 Overloaded），且不得有任何输出");
+
+                float secondsToClear =
+                    (over.Heat - UnitVitalsRegistry.HeatClearThreshold) / UnitVitalsRegistry.HeatDecayPerSecond;
+                actions.Tick(secondsToClear * 0.5f, paused: false);
+                UnitVitalsView halfCooled = actions.ControlledVitals;
+                Expect(halfCooled.Heat < UnitVitalsRegistry.HeatOverloadThreshold && halfCooled.Overloaded &&
+                       !actions.TryRelease(LoadoutAction.Primary, aim) &&
+                       actions.LastReleaseResult == DirectActionAvailability.Overloaded,
+                    $"热债跌回阈值以下但未到清除线时应仍然拒绝（滞回；实测热债 {halfCooled.Heat:F1}）——" +
+                    "同阈值进出会让按钮在一两帧之间反复横跳");
+
+                actions.Tick(secondsToClear * 0.6f + 0.1f, paused: false);
+                UnitVitalsView cooled = actions.ControlledVitals;
+                Expect(!cooled.Overloaded && cooled.Heat <= UnitVitalsRegistry.HeatClearThreshold,
+                    $"热债衰减到清除线以下应退出过载态（实测热债 {cooled.Heat:F1}）");
+                Expect(actions.TryRelease(LoadoutAction.Primary, aim),
+                    "退出过载后同一个入口应放行");
+
+                // ── D. 三个量跟着控制权走（不是全局单例）──
+                UnitVitalsView sporeSpent = actions.Vitals.Get(spore);
+                Expect(sporeSpent.Metabolism < UnitVitalsRegistry.MetabolismMax && sporeSpent.Heat > 0f,
+                    "孢子此刻应留有实打实的消耗痕迹（后面切回来要读回这一份）");
+
+                Expect(sim.RequestControlSwitch(mycelium) == ControlRequestResult.Success,
+                    "应能从孢子切换到菌丝体");
+                UnitVitalsView fresh = actions.ControlledVitals;
+                Expect(fresh.Valid && fresh.EntityId == mycelium,
+                    "切换控制权后读到的应是新身体那一份");
+                Expect(fresh.Metabolism >= UnitVitalsRegistry.MetabolismMax - 0.01f &&
+                       fresh.Heat <= 0.01f && fresh.PrimaryCooldown <= 0f,
+                    $"没被接管过的身体应是满代谢 / 零热债 / 无冷却，而不是继承上一具身体的账" +
+                    $"（实际 代谢{fresh.Metabolism:F1} 热债{fresh.Heat:F1} 冷却{fresh.PrimaryCooldown:F2}）");
+
+                Expect(actions.TryRelease(LoadoutAction.Primary, aim), "菌丝体的主器官应能释放");
+                UnitVitalsView myceliumSpent = actions.ControlledVitals;
+                UnitVitalsView sporeNow = actions.Vitals.Get(spore);
+                Expect(myceliumSpent.PrimaryCooldown > sporeNow.PrimaryCooldown + 1f,
+                    $"两具身体各按自己器官的参数计冷却（菌丝体 {myceliumSpent.PrimaryCooldown:F2}s vs " +
+                    $"孢子 {sporeNow.PrimaryCooldown:F2}s），不是同一条冷却线");
+
+                Expect(sim.RequestControlSwitch(spore) == ControlRequestResult.Success, "应能切回孢子");
+                UnitVitalsView sporeBack = actions.ControlledVitals;
+                Expect(sporeBack.EntityId == spore &&
+                       Mathf.Abs(sporeBack.Metabolism - sporeNow.Metabolism) < 0.01f &&
+                       Mathf.Abs(sporeBack.Heat - sporeNow.Heat) < 0.01f,
+                    $"切回去应读回孢子自己那一份（代谢 {sporeBack.Metabolism:F1} / 热债 {sporeBack.Heat:F1}）");
+
+                // ── E. 玩家本体不叠第二层冷却 ──
+                OrganKernelAction bodyAct = OrganKernelActionTable.Resolve(sporeOrgan.OrganId);
+                actions.Vitals.Commit(body, LoadoutAction.Primary, bodyAct, applyCooldown: true);
+                Expect(actions.Vitals.Get(body).PrimaryCooldown > 0f,
+                    "先把玩家本体的主槽人为打进冷却");
+                Expect(actions.Vitals.Evaluate(body, LoadoutAction.Primary, bodyAct, checkCooldown: true) ==
+                       DirectVitalsGate.Cooling,
+                    "内核释放路会看冷却");
+                Expect(actions.Vitals.Evaluate(body, LoadoutAction.Primary, bodyAct, checkCooldown: false) ==
+                       DirectVitalsGate.Allowed,
+                    "玩家本体的委托路不看这一层冷却——它的冷却归既有 AbilitySystem，" +
+                    "叠第二层会让同一个键出现两条互不知情的冷却线");
+
+                fakeSource.Organs.Clear();
+                fakeSource.Organs.Add(new UnitLoadoutOrgan(sporeOrgan.OrganId, LoadoutAction.Primary));
+                Expect(sim.RequestControlSwitch(body) == ControlRequestResult.Success, "应能切回玩家本体");
+                UnitVitalsView bodyBefore = actions.ControlledVitals;
+                Expect(!actions.TryRelease(LoadoutAction.Primary, aim) &&
+                       actions.LastReleaseResult == DirectActionAvailability.NotReady,
+                    "玩家本体走委托路：AbilitySystem 缺席时判 NotReady（Edit 模式起不了整套 ModuleHub）");
+                UnitVitalsView bodyAfter = actions.ControlledVitals;
+                Expect(Mathf.Abs(bodyAfter.Metabolism - bodyBefore.Metabolism) < 0.01f &&
+                       Mathf.Abs(bodyAfter.Heat - bodyBefore.Heat) < 0.01f,
+                    "释放被下游拒掉时不得扣代谢、不得累热债——代价只在释放真的发生之后才付");
+
+                // ── F. HUD：真实 UXML 实例 + 生产绑定代码 ──
+                Expect(sim.RequestControlSwitch(spore) == ControlRequestResult.Success, "HUD 断言前切回孢子");
+                ValidateDirectVitalsHud(actions, spore);
+
+                // ── G. 解绑后账本清空（跨局不粘）──
+                actions.Unbind();
+                Expect(actions.Vitals.Count == 0 && !actions.Vitals.IsTracked(spore),
+                    "Unbind 后账本应清空——实体 id 只在生成它的那个 SimWorld 内有效");
+                Expect(!actions.ControlledVitals.Valid,
+                    "解绑后没有受控身体，三个量应判为无效（UI 据此整块隐藏）");
+            }
+            finally
+            {
+                InputRouter.Reset();
+                actions.Unbind();
+                registry.Unbind();
+                sim.End();
+            }
+        }
+
+        private const string HudUxmlPath = "Assets/GameRes/Raw/UI/BattleUI/BattleHud.uxml";
+        private const string HudPanelSettingsPath = "Assets/GameRes/Raw/UI/BattleUI/BattleHudPanelSettings.asset";
+
+        /// <summary>
+        /// 三个量的 HUD 上屏断言。**用真实的 BattleHud.uxml 实例 + 生产绑定代码**
+        /// （<see cref="DirectVitalsHudBinding"/>），不是反射探针——反射探针只能证明字段被写了，
+        /// 证明不了节点真的显示/隐藏。
+        ///
+        /// 资源走 <see cref="AssetDatabase"/> 而不是 YooAsset：本方法在同步的自检流程里跑，
+        /// 而 Edit 模式的资源模块要靠 <c>EditorApplication.update</c> 泵若干帧才就绪
+        /// （见 <c>EditorResourceBootstrap</c>），同步流程里等不到它。AssetDatabase 拿到的是
+        /// **同一个** uxml 资产，对"节点在不在、显不显示"这条断言来说没有任何区别。
+        /// </summary>
+        private static void ValidateDirectVitalsHud(DirectControlActions actions, SimEntityId spore)
+        {
+            var tree = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(HudUxmlPath);
+            var panelSettings = AssetDatabase.LoadAssetAtPath<PanelSettings>(HudPanelSettingsPath);
+            if (tree == null || panelSettings == null)
+            {
+                Fail($"应能从 AssetDatabase 取到 {HudUxmlPath} 与 {HudPanelSettingsPath}");
+                return;
+            }
+            Ok("HUD 探针取到了真实的 BattleHud.uxml + PanelSettings");
+
+            var probeGo = new GameObject("[M2-03c HUD Probe]") { hideFlags = HideFlags.HideAndDontSave };
+            try
+            {
+                UIDocument doc = probeGo.AddComponent<UIDocument>();
+                doc.panelSettings = panelSettings;
+                doc.visualTreeAsset = tree;
+
+                VisualElement root = doc.rootVisualElement;
+                if (root == null)
+                {
+                    Fail("探针 UIDocument 应能建出根节点");
+                    return;
+                }
+
+                VisualElement block = root.Q<VisualElement>(DirectVitalsHudBinding.BlockName);
+                Label text = root.Q<Label>(DirectVitalsHudBinding.TextName);
+                if (block == null || text == null)
+                {
+                    Fail($"BattleHud.uxml 里应有 {DirectVitalsHudBinding.BlockName} / " +
+                         $"{DirectVitalsHudBinding.TextName} 节点");
+                    return;
+                }
+                Ok("BattleHud.uxml 里有三个量的节点，且能被生产代码同名 Q 到");
+
+                ForceLayout(root);
+                Expect(block.resolvedStyle.display == DisplayStyle.None,
+                    $"初始隐藏必须由 UXML 权威化（resolvedStyle 实测 {block.resolvedStyle.display}）——" +
+                    ".hud-sub 空块仍占约 26px 并画出边框，只靠 C# 隐藏会在资源异步加载期间闪一格空边框");
+
+                // 直控视角 + 真实数值 → 上屏
+                InputRouter.SetScope(InputScope.Direct);
+                UnitVitalsView shown = actions.ControlledVitals;
+                DirectVitalsHudBinding.Apply(block, text, shown);
+                string expectMetabolism = $"代谢 {shown.Metabolism:F0}/{shown.MetabolismMax:F0}";
+                Expect(shown.Valid && block.style.display.value == DisplayStyle.Flex &&
+                       text.text.Contains(expectMetabolism),
+                    $"直控视角下三个量应按真实数值上屏（实际「{text.text}」，应含「{expectMetabolism}」）");
+                Expect(text.text.Contains("热债") && text.text.Contains("主 "),
+                    $"文案应同时给出热债与按槽冷却，而不是只报代谢（实际「{text.text}」）");
+
+                // 过载态在 HUD 上必须看得出来
+                actions.Vitals.AddHeat(spore, UnitVitalsRegistry.HeatOverloadThreshold + 5f);
+                DirectVitalsHudBinding.Apply(block, text, actions.ControlledVitals);
+                Expect(block.ClassListContains(DirectVitalsHudBinding.OverloadedClass) &&
+                       text.text.Contains("过载"),
+                    $"过载态应在 HUD 上明确标示（实际「{text.text}」）");
+                actions.Vitals.AddHeat(spore, -(UnitVitalsRegistry.HeatOverloadThreshold * 10f));
+
+                // 战略视角 → 整块隐藏
+                InputRouter.SetScope(InputScope.Strategy);
+                DirectVitalsHudBinding.Apply(block, text, actions.ControlledVitals);
+                Expect(block.style.display.value == DisplayStyle.None &&
+                       !block.ClassListContains(DirectVitalsHudBinding.OverloadedClass),
+                    "战略视角下整块应隐藏——战略视角看不到具体身体的代谢没有意义");
+
+                InputRouter.SetScope(InputScope.Direct);
+                DirectVitalsHudBinding.Apply(block, text, actions.ControlledVitals);
+                Expect(block.style.display.value == DisplayStyle.Flex,
+                    "切回直控视角应重新显示（不能永久卡在隐藏）");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(probeGo);
+            }
+        }
+
+        /// <summary>
+        /// 逼面板跑一次样式 + 布局解析。<c>resolvedStyle</c> 在此之前读到的是尚未解析的值，
+        /// 而 <c>style.display.value</c> 对"从没被 C# 写过"的属性只会回落到关键字默认值 Flex
+        /// （实测坑），所以"UXML 里写的 display:none 生效了没有"只能从 resolvedStyle 读。
+        /// <c>ValidateLayout</c> 在 <c>BaseVisualElementPanel</c> 上是 internal，走反射。
+        /// </summary>
+        private static void ForceLayout(VisualElement element)
+        {
+            IPanel panel = element?.panel;
+            if (panel == null)
+            {
+                return;
+            }
+
+            System.Reflection.MethodInfo m = panel.GetType().GetMethod("ValidateLayout",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.NonPublic);
+            m?.Invoke(panel, null);
         }
 
         /// <summary>可注入的假玩家装配投影源。改 <see cref="Organs"/> 即等于"玩家当场换了装配"，

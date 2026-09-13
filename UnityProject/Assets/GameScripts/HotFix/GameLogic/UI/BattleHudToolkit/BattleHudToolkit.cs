@@ -87,6 +87,10 @@ namespace GameLogic
         /// <summary>ComposeCastSignal 订阅作用域，Start 建、OnDestroy 释放（D2）。</summary>
         private SignalScope _scope;
 
+        /// <summary>M2-03c：直控三个量（代谢 / 热债 / 冷却）一行。只在直控视角下显示。</summary>
+        private VisualElement _directVitalsBlock;
+        private Label _directVitalsText;
+
         /// <summary>ui-visual-overhaul story-007：生效中的规则开关一行。</summary>
         private VisualElement _ruleFlagsBlock;
         private Label _ruleFlagsText;
@@ -198,6 +202,12 @@ namespace GameLogic
                 // 初始态即隐藏（D3）：没打出反应前不该有一条空行占位。
                 _reactionFeedbackBlock.style.display = DisplayStyle.None;
             }
+
+            // M2-03c：初始隐藏态由 UXML 权威化（style="display: none;"），这里**不**再补一次
+            // C# 隐藏。`.hud-sub` 带 margin+padding+border，空块仍占约 26px 并画出边框，
+            // 只靠 C# 隐藏会在 HUD 三份资源异步加载完成之前闪一格空边框。
+            _directVitalsBlock = _root.Q<VisualElement>(DirectVitalsHudBinding.BlockName);
+            _directVitalsText = _root.Q<Label>(DirectVitalsHudBinding.TextName);
 
             _ruleFlagsBlock = _root.Q<VisualElement>("RuleFlagsBlock");
             _ruleFlagsText = _root.Q<Label>("RuleFlagsText");
@@ -346,6 +356,7 @@ namespace GameLogic
                 $"敌人 {cell.Director.LiveHostiles}　压力 {cell.Director.CurrentPressure:F0}/{cell.Director.Budget:F0}";
 
             RefreshEcoEvent(cell);
+            RefreshDirectVitals(cell);
             RefreshReactionFeedback();
             RefreshRuleFlags();
             RefreshStatuses(cell);
@@ -642,6 +653,27 @@ namespace GameLogic
                 }
                 _reactionFeedbackBlock.style.display = DisplayStyle.Flex;
             }
+        }
+
+        /// <summary>
+        /// 直控三个量上屏（M2-03c）。
+        ///
+        /// 挂在**既有**的 <see cref="RefreshHud"/> 链上做 O(1) 上屏：不新开协程、不新开 Update，
+        /// 也不逐帧向判定层反查（那等于新造一个事件源）。整段开销是一次受控视图解析 + 一次字典查，
+        /// 与场上单位数无关。
+        ///
+        /// 显示条件与文案全部委托给 <see cref="DirectVitalsHudBinding"/>——自检跑的是同一段代码。
+        /// </summary>
+        private void RefreshDirectVitals(CellStageFlow cell)
+        {
+            if (_directVitalsBlock == null)
+            {
+                return;
+            }
+
+            GameLogic.Control.DirectControlActions actions = cell.DirectActions;
+            DirectVitalsHudBinding.Apply(_directVitalsBlock, _directVitalsText,
+                actions != null ? actions.ControlledVitals : default);
         }
 
         /// <summary>

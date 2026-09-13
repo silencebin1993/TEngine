@@ -32,6 +32,12 @@ namespace GameLogic.Control
         private readonly DirectActionSet _set = new DirectActionSet();
 
         /// <summary>
+        /// M2-03c：代谢 / 热债 / 按槽冷却的账本。**按实体归属**，跟着控制权走。
+        /// 它属于本类而不是一个全局单例，理由见 <see cref="UnitVitalsRegistry"/> 类注释。
+        /// </summary>
+        private readonly UnitVitalsRegistry _vitals = new UnitVitalsRegistry();
+
+        /// <summary>
         /// 玩家本体上 <see cref="LoadoutAction.Primary"/> / <see cref="LoadoutAction.Utility"/>
         /// 委托到的技能槽下标。
         ///
@@ -81,6 +87,39 @@ namespace GameLogic.Control
         /// <summary>最近一次成功释放落到内核的请求形状。验收/调试读它确认"打出来的东西和器官对得上"。</summary>
         public OrganKernelAction LastReleasedKernelAction { get; private set; }
 
+        /// <summary>三个量的账本（M2-03c）。UI 只读快照走 <see cref="ControlledVitals"/>。</summary>
+        public UnitVitalsRegistry Vitals => _vitals;
+
+        /// <summary>
+        /// **当前受控实体**的代谢 / 热债 / 冷却快照（M2-03c）。O(1)：一次受控视图解析 + 一次字典查。
+        /// 没有受控实体时 <c>Valid = false</c>，UI 据此整块隐藏。
+        /// </summary>
+        public UnitVitalsView ControlledVitals
+        {
+            get
+            {
+                if (_sim == null || !_sim.Running ||
+                    !_sim.TryGetControlledPresentation(out SimControlledUnitView view))
+                {
+                    return default;
+                }
+
+                return _vitals.Get(view.EntityId);
+            }
+        }
+
+        /// <summary>
+        /// 每帧推进三个量的本地时钟（M2-03c）。**纯 O(1)**：不遍历任何实体，
+        /// 代谢回复 / 热债衰减 / 冷却推进全部在读写那一刻惰性补齐
+        /// （见 <see cref="UnitVitalsRegistry"/> 类注释）。
+        ///
+        /// 暂停下不推进：暂停刷冷却是白送的，口径与 <c>_hub</c> 被暂停冻住一致。
+        /// </summary>
+        public void Tick(float dt, bool paused)
+        {
+            _vitals.Advance(dt, paused);
+        }
+
         /// <summary>
         /// 绑定。<paramref name="abilities"/> / <paramref name="status"/> 可为 null：
         /// 前者缺席时玩家本体的委托释放直接判失败（不抛），后者缺席时范围状态退回
@@ -95,6 +134,8 @@ namespace GameLogic.Control
             _abilities = abilities;
             _status = status;
             InteractTargetsAvailable = false;
+            // 跨局必须清：条目里的键是上一局那个 SimWorld 发的实体 id。
+            _vitals.Reset();
             RebuildCount = 0;
             ReleaseCount = 0;
             LastReleasedOrganId = null;
@@ -119,6 +160,7 @@ namespace GameLogic.Control
             _abilities = null;
             _status = null;
             _set.Clear();
+            _vitals.Reset();
         }
 
         private void OnControlledUnitChanged(ControlledUnitChangedSignal signal)
@@ -203,9 +245,26 @@ namespace GameLogic.Control
 
             bool onPlayerBody = view.Faction == SimFaction.Player &&
                                 loadout.Origin == UnitLoadoutOrigin.PlayerProjection;
+
+            // 形态与代价同一个来源：这件器官自己的目录条目。两条释放路都在这里解析一次，
+            // 于是"能不能按"与"按了要付多少"永远说的是同一件器官。
+            OrganKernelAction act = OrganKernelActionTable.Resolve(organ.OrganId);
+
+            // ── M2-03c：三道闸门，与失能同样**在释放入口**拦 ──
+            // 只在 UI 上把按钮灰掉、不在入口拦的话，按键照样生效，那是"显示禁用、实际可用"。
+            //
+            // 冷却只管内核路：玩家本体走的是委托，它的冷却归既有 AbilitySystem 的技能槽管，
+            // 在这里再叠一层就是第二层冷却——同一个键两条互不知情的冷却线，
+            // 玩家读不出自己到底在等谁。
+            DirectVitalsGate gate = _vitals.Evaluate(view.EntityId, action, act, checkCooldown: !onPlayerBody);
+            if (gate != DirectVitalsGate.Allowed)
+            {
+                return Reject(ToAvailability(gate));
+            }
+
             bool released = onPlayerBody
                 ? ReleaseOnPlayerBody(action)
-                : ReleaseOnKernel(view, organ, aim);
+                : ReleaseOnKernel(view, act, aim);
 
             if (!released)
             {
@@ -216,10 +275,25 @@ namespace GameLogic.Control
                     : DirectActionAvailability.NoKernelAction);
             }
 
+            // 扣账在释放**之后**：判到一半就扣，会出现"代谢付了但什么都没打出来"
+            // （委托路的技能槽没就绪、器官没有内核形态都会走到上面那个 return）。
+            _vitals.Commit(view.EntityId, action, act, applyCooldown: !onPlayerBody);
+
             ReleaseCount++;
             LastReleasedOrganId = organ.OrganId;
             LastReleaseResult = DirectActionAvailability.Available;
             return true;
+        }
+
+        private static DirectActionAvailability ToAvailability(DirectVitalsGate gate)
+        {
+            switch (gate)
+            {
+                case DirectVitalsGate.Cooling: return DirectActionAvailability.Cooling;
+                case DirectVitalsGate.Overloaded: return DirectActionAvailability.Overloaded;
+                case DirectVitalsGate.NotEnoughMetabolism: return DirectActionAvailability.NotEnoughMetabolism;
+                default: return DirectActionAvailability.Available;
+            }
         }
 
         /// <summary>
@@ -249,9 +323,8 @@ namespace GameLogic.Control
         /// 四条分支全部走 <see cref="SimBridge"/> 上的既有入口，本段**没有给内核加任何能力**；
         /// 每次释放只发一次调用，逐单位的事全归 AOT 作业，热更层这里一个循环都没有。
         /// </summary>
-        private bool ReleaseOnKernel(in SimControlledUnitView view, in UnitLoadoutOrgan organ, float2 aim)
+        private bool ReleaseOnKernel(in SimControlledUnitView view, in OrganKernelAction act, float2 aim)
         {
-            OrganKernelAction act = OrganKernelActionTable.Resolve(organ.OrganId);
             if (!act.IsValid)
             {
                 // 这件器官没有可释放形态。**不许退回一发通用弹**——那会让所有单位打出同一种东西，

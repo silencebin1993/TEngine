@@ -1173,6 +1173,12 @@ namespace GameLogic.Stage.CellStage
                 _directActions?.Rebuild();
             }
 
+            // M2-03c：代谢 / 热债 / 冷却的本地时钟。纯 O(1)（只加一个 float，不遍历实体），
+            // 且带着暂停标志——暂停下刷冷却、回代谢是白送的。
+            // 放在暂停早退**之前**、由 Tick 内部判暂停，是为了与上面几行保持同一种写法：
+            // 暂停语义集中在被调用方，不在这里堆第二个早退分支。
+            _directActions?.Tick(dt, _paused);
+
             // 选卡时暂停玩法推进，但不暂停 UI
             if (_paused)
             {

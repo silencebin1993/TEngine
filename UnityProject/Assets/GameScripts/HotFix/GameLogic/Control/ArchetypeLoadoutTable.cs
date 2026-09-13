@@ -38,17 +38,30 @@ namespace GameLogic.Control
             switch (archetypeId)
             {
                 case SporeArchetypeId:
-                    // 孢子：喷孢子当主手，冲刺孢子当功能位。没有交互位。
-                    buffer.Add(new UnitLoadoutOrgan("org_confusion_spore", LoadoutAction.Primary));
+                    // 孢子：分泌喷射器（"朝瞄准方向射出代谢弹"）当主手，冲刺孢子当功能位。没有交互位。
+                    //
+                    // M2-03c 第 0 步换掉了原来的 org_confusion_spore：那是一件 Structural 器官，
+                    // 没有 CreateModule、没有 AttackFamily，TriggerHook 的 ThornsRatio 恒 0
+                    // （目录里写死"只挂 Confused 标记，不造成伤害"）。它在 OrganKernelActionTable
+                    // 里必然落成零伤害的 Status，于是"主器官"按下去只挂个标记——那不是一次攻击。
+                    // org_emitter 是现役攻击器官（AttackMethod=true / IsRetired=false / Family=Projectile），
+                    // 打出的是内核真弹体，与菌丝体的区域形态互为反证。
+                    buffer.Add(new UnitLoadoutOrgan("org_emitter", LoadoutAction.Primary));
                     buffer.Add(new UnitLoadoutOrgan("org_dash_spore", LoadoutAction.Utility));
                     break;
 
                 case MyceliumArchetypeId:
-                    // 菌丝体：菌丝当主手，钩取当交互位（搬运/拉拽）。没有功能位。
+                    // 菌丝体：菌丝锚当主手（SummonAnchor → 钉在瞄准点的持续区域），纤毛刺当交互位。
                     // 与孢子刻意取不同的槽位组合 —— M2-03 的验收项就是
                     // "两个不同装配单位被接管时动作集不同"，同槽换个 id 是看不出来的。
+                    //
+                    // M2-03c 第 0 步换掉了原来的 org_hook：它在目录里 IsRetired=true，
+                    // 效果已迁到 `org_cilia + gene_return`（CATALOG-v3 §C）。引用一个退役 id
+                    // 本身就是 bug——它永远只会落到 NoKernelAction，等交互内容进来时必然要返工。
+                    // 这里换成目录自己指定的那个继任者 org_cilia（现役、Melee → 扇形），
+                    // 只换 id，不新增器官。
                     buffer.Add(new UnitLoadoutOrgan("org_mycelium", LoadoutAction.Primary));
-                    buffer.Add(new UnitLoadoutOrgan("org_hook", LoadoutAction.Interact));
+                    buffer.Add(new UnitLoadoutOrgan("org_cilia", LoadoutAction.Interact));
                     break;
 
                 default:
