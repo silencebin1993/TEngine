@@ -51,6 +51,32 @@
 
 未冲突、仍守：热更 O(1)/事件驱动、判定不下沉 `Main/Sim`、Built-in RP / 无 Entities、资源 `GameRes/Raw`。
 
+### C7 「Heat」一词的三重含义（2026-09-12 登记，已按改名划界处置）
+
+ProjectA M2-03c 要给直控释放做「过载」时发现，仓里 `Heat` 同名不同义共三处：
+
+| # | 标识 | 语义 | 生命周期 | 尺度 | 现状 |
+|---|---|---|---|---|---|
+| 1 | `ComposeEngine.Core.Packet.Heat` | 装配链路**过路**热负荷 | 每次组合 `new Packet()`，一趟链走完就丢 | 过热阈值 **8** | **当前恒为 0**，见下 |
+| 2 | `ComposeEngine.Core.SubstanceVector.Heat` | 九维物质代数的**温度**维，**有正负**（Fire +2 / Ice −1.5，负=冷） | 随 Tag 袋混合 | 权重级 | 现役 |
+| 3 | `GameLogic.Control.UnitVitalsRegistry.Strain` | **身体过载债**，按 `SimEntityId` 跨释放累积 | 跟着一具身体，25/s 衰减 | 阈值 **100**，滞回 60 | 现役（M2-03c） |
+
+**①当前是死链路**：写 `Packet.Heat` 的四个器官 `org_lens` / `org_merge` / `org_radiator` /
+`org_insulate` 在 `OrganelleCatalog` 里**全部 `isRetired: true`**；现役的 `gene_heatshock`
+（`HeatShockModule`）**只读不写**，故恒走「未过热则散热」分支，`Heat 0→0` 无可观察差异
+（`MetabolicSlice/DebugTools/EmergenceSmoke.cs` 早有同结论注释）。
+
+**⚠️ 本表 §5.2 的器官表把 6 个器官写成「读 Heat」，那是设计意图不是运行现状**——照它判断
+「热这套已经在跑」会出错。
+
+**处置（2026-09-12 人拍板 A：改名划界，不做统一）**：③ 已全量改名 `Heat`→`Strain`、
+中文「热债」→「过载债」（含 HUD 文案与 `BattleHud.uxml` / `BattleUI.uss` 注释），
+①② 保留原名不动。改名后 Unity 自检 290/290 逐条与改名前一致（纯重命名，零行为改动）。
+理由与「不要改回去」的完整论证写在 `GameLogic/Control/UnitVitals.cs` 的 `UnitVitalsRegistry` 类注释里。
+
+**未决（将来复活 ① 时才需要拍板）**：若复活 `org_lens` 等产热器官，要不要把 `Packet.Heat`
+结算完回灌进 `Strain`（两者尺度差 12.5 倍，需定换算）。当前**刻意不接**。
+
 ---
 
 ## 3. 已存在旧半成品代码（勿继续扩）

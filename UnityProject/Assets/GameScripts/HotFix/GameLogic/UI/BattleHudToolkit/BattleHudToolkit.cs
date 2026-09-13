@@ -87,7 +87,7 @@ namespace GameLogic
         /// <summary>ComposeCastSignal 订阅作用域，Start 建、OnDestroy 释放（D2）。</summary>
         private SignalScope _scope;
 
-        /// <summary>M2-03c：直控三个量（代谢 / 热债 / 冷却）一行。只在直控视角下显示。</summary>
+        /// <summary>M2-03c：直控三个量（代谢 / 过载债 / 冷却）一行。只在直控视角下显示。</summary>
         private VisualElement _directVitalsBlock;
         private Label _directVitalsText;
 

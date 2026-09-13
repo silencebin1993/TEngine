@@ -32,7 +32,7 @@ namespace GameLogic.Control
         private readonly DirectActionSet _set = new DirectActionSet();
 
         /// <summary>
-        /// M2-03c：代谢 / 热债 / 按槽冷却的账本。**按实体归属**，跟着控制权走。
+        /// M2-03c：代谢 / 过载债 / 按槽冷却的账本。**按实体归属**，跟着控制权走。
         /// 它属于本类而不是一个全局单例，理由见 <see cref="UnitVitalsRegistry"/> 类注释。
         /// </summary>
         private readonly UnitVitalsRegistry _vitals = new UnitVitalsRegistry();
@@ -91,7 +91,7 @@ namespace GameLogic.Control
         public UnitVitalsRegistry Vitals => _vitals;
 
         /// <summary>
-        /// **当前受控实体**的代谢 / 热债 / 冷却快照（M2-03c）。O(1)：一次受控视图解析 + 一次字典查。
+        /// **当前受控实体**的代谢 / 过载债 / 冷却快照（M2-03c）。O(1)：一次受控视图解析 + 一次字典查。
         /// 没有受控实体时 <c>Valid = false</c>，UI 据此整块隐藏。
         /// </summary>
         public UnitVitalsView ControlledVitals
@@ -110,7 +110,7 @@ namespace GameLogic.Control
 
         /// <summary>
         /// 每帧推进三个量的本地时钟（M2-03c）。**纯 O(1)**：不遍历任何实体，
-        /// 代谢回复 / 热债衰减 / 冷却推进全部在读写那一刻惰性补齐
+        /// 代谢回复 / 过载债衰减 / 冷却推进全部在读写那一刻惰性补齐
         /// （见 <see cref="UnitVitalsRegistry"/> 类注释）。
         ///
         /// 暂停下不推进：暂停刷冷却是白送的，口径与 <c>_hub</c> 被暂停冻住一致。

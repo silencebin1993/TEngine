@@ -29,7 +29,7 @@ namespace GameLogic.Control
         /// <summary>M2-03c：这个动作槽在这具身体上还在冷却。</summary>
         Cooling = 8,
 
-        /// <summary>M2-03c：这具身体热债越过阈值，处于过载态，一切释放暂停。</summary>
+        /// <summary>M2-03c：这具身体过载债越过阈值，处于过载态，一切释放暂停。</summary>
         Overloaded = 9,
 
         /// <summary>M2-03c：这具身体的代谢资源不够付这一次释放。</summary>
@@ -118,7 +118,7 @@ namespace GameLogic.Control
         /// <summary>
         /// 缓存视角下该动作是否可释放。**不是**释放判据，见类注释。
         ///
-        /// M2-03c 补充：冷却 / 代谢 / 热债**刻意不进这份缓存**。它们是逐秒变化的实时量，
+        /// M2-03c 补充：冷却 / 代谢 / 过载债**刻意不进这份缓存**。它们是逐秒变化的实时量，
         /// 塞进来就意味着这份"只在控制权变更时重建一次"的缓存必须改成每帧重建——
         /// 那正是类注释里写明不能做的事。要显示这三个量，直接读
         /// <c>DirectControlActions.ControlledVitals</c>（O(1) 快照）。

@@ -11,14 +11,14 @@ namespace GameLogic.Control
         Allowed = 0,
         /// <summary>这个动作槽还在冷却。</summary>
         Cooling = 1,
-        /// <summary>热债越过阈值，这具身体处于过载态。</summary>
+        /// <summary>过载债越过阈值，这具身体处于过载态。</summary>
         Overloaded = 2,
         /// <summary>代谢资源不够付这一次释放的代价。</summary>
         NotEnoughMetabolism = 3,
     }
 
     /// <summary>
-    /// 一具身体当下的代谢 / 热债 / 冷却（M2-03c）。只读快照，给 UI 与验收读。
+    /// 一具身体当下的代谢 / 过载债 / 冷却（M2-03c）。只读快照，给 UI 与验收读。
     ///
     /// **是快照不是引用**：读的那一刻已经把时间推进补齐了（见 <see cref="UnitVitalsRegistry"/> 的惰性结算），
     /// 所以调用方拿到的是"此刻"的值；但它不会自己跟着时间变，需要最新值就再取一次。
@@ -33,11 +33,11 @@ namespace GameLogic.Control
         public float Metabolism;
         public float MetabolismMax;
 
-        public float Heat;
+        public float Strain;
         /// <summary>越过它进入过载态。</summary>
-        public float HeatThreshold;
+        public float StrainThreshold;
 
-        /// <summary>过载中：释放入口会一律拒绝，直到热债衰减回 <see cref="HeatThreshold"/> 的清除比例以下。</summary>
+        /// <summary>过载中：释放入口会一律拒绝，直到过载债衰减回 <see cref="StrainThreshold"/> 的清除比例以下。</summary>
         public bool Overloaded;
 
         /// <summary>各动作槽的剩余冷却秒数（下标 = <see cref="LoadoutAction"/>）。0 = 就绪。</summary>
@@ -49,8 +49,8 @@ namespace GameLogic.Control
         public float MetabolismRatio =>
             MetabolismMax > 0f ? Mathf.Clamp01(Metabolism / MetabolismMax) : 0f;
 
-        public float HeatRatio =>
-            HeatThreshold > 0f ? Mathf.Clamp01(Heat / HeatThreshold) : 0f;
+        public float StrainRatio =>
+            StrainThreshold > 0f ? Mathf.Clamp01(Strain / StrainThreshold) : 0f;
 
         public float CooldownOf(LoadoutAction action)
         {
@@ -65,7 +65,7 @@ namespace GameLogic.Control
     }
 
     /// <summary>
-    /// 代谢 / 热债 / 按槽冷却的账本（M2-03c）。
+    /// 代谢 / 过载债 / 按槽冷却的账本（M2-03c）。
     ///
     /// ── 为什么按 <see cref="SimEntityId"/> 归属，而不是一套全局单例 ──
     /// 这正是 M2-03a 在纠正的那个错误。装配已经挂到实体上了（"这具身体长着什么"），
@@ -76,7 +76,7 @@ namespace GameLogic.Control
     /// LogicId 没有失效语义，只有稳定实体 id 在槽位复用时会重新分配。
     ///
     /// ── 为什么是惰性结算，而不是每帧遍历所有登记单位 ──
-    /// 逐帧给每个登记实体回代谢、衰减热债、推进冷却，是一个 O(登记单位数) 的每帧循环，
+    /// 逐帧给每个登记实体回代谢、衰减过载债、推进冷却，是一个 O(登记单位数) 的每帧循环，
     /// 直接撞上仓规架构红线第 4 条（热更层每帧必须与场上单位数无关）。
     /// 这里改成：每帧只把一个**本地单调时钟**推进一格（<see cref="Advance"/>，纯 O(1)），
     /// 每条记录自己记住"上次结算到哪一刻"；任何一次读/写之前先按时间差把它补齐
@@ -84,10 +84,28 @@ namespace GameLogic.Control
     /// 都是 O(1)。结果与逐帧结算等价，因为回复/衰减都是线性的。
     ///
     /// ── 时钟为什么不用 <see cref="Time"/> ──
-    /// 暂停下冷却不该走、代谢不该回、热债不该衰减，否则"暂停刷冷却"是白送的。
+    /// 暂停下冷却不该走、代谢不该回、过载债不该衰减，否则"暂停刷冷却"是白送的。
     /// 时钟由 <c>CellStageFlow.Update</c> 带着暂停标志喂进来（见 <see cref="Advance"/>），
     /// 与 <c>_hub</c> 被暂停冻住的口径一致。Edit 模式回归也因此能直接把时间快进，
     /// 不必真的等真实秒数过去。
+    ///
+    /// ── ⚠️ 为什么叫 Strain（过载债）而不是 Heat（热债）：**不要改回去** ──
+    /// 仓里已经有两个语义完全不同的 <c>Heat</c>，都在 ComposeEngine，都不是这个东西：
+    ///   1. <c>ComposeEngine.Core.Packet.Heat</c> —— 装配链路上的**过路**热负荷。
+    ///      每次组合 <c>new Packet()</c>，一趟链走完就丢，**不跨释放**；过热阈值是 <b>8</b>，
+    ///      过热后果是清零 + 转一圈瞬时脉冲（<c>HeatShockModule</c>）。
+    ///   2. <c>ComposeEngine.Core.SubstanceVector.Heat</c> —— 九维物质代数里的**温度**维，
+    ///      **有正负**（Fire +2 / Ice −1.5 / Frozen −2，负 = 冷），是元素属性，与过载无关。
+    /// 本类这个量是**跨释放累积、按身体归属、阈值 100 带滞回**的第三种东西——
+    /// 与 1 尺度差 12.5 倍、生命周期完全不同，与 2 连量纲都不是一回事。
+    ///
+    /// 当前不会真的打架：写 <c>Packet.Heat</c> 的四个器官（<c>org_lens</c> / <c>org_merge</c> /
+    /// <c>org_radiator</c> / <c>org_insulate</c>）在 <c>OrganelleCatalog</c> 里**全部 isRetired**，
+    /// 现役的 <c>gene_heatshock</c> 只读不写，所以那条链路目前恒为 0（见 <c>EmergenceSmoke.cs</c> 的同名说明）。
+    /// 但**"现在不冲突"正是现在改名最便宜的理由**：等哪天复活 <c>org_lens</c>（"这件器官产热"），
+    /// 两个 Heat 会在同一段代码里以 8 和 100 两种尺度共存，那时候再分是纯返工。
+    /// 冻结总案 §5.2 的器官表把 6 个器官写成"读 Heat"，看文档很容易以为这套已经在跑——
+    /// 名字分开之后，那份文档说的是哪一个就不再需要猜。
     /// </summary>
     public sealed class UnitVitalsRegistry
     {
@@ -98,35 +116,35 @@ namespace GameLogic.Control
         /// <summary>代谢每秒回复量。</summary>
         public const float MetabolismRegenPerSecond = 20f;
 
-        /// <summary>热债阈值：越过即过载。</summary>
-        public const float HeatOverloadThreshold = 100f;
+        /// <summary>过载债阈值：越过即过载。</summary>
+        public const float StrainOverloadThreshold = 100f;
 
-        /// <summary>热债每秒衰减量。</summary>
-        public const float HeatDecayPerSecond = 25f;
+        /// <summary>过载债每秒衰减量。</summary>
+        public const float StrainDecayPerSecond = 25f;
 
         /// <summary>
-        /// 过载解除比例（相对 <see cref="HeatOverloadThreshold"/>）。
+        /// 过载解除比例（相对 <see cref="StrainOverloadThreshold"/>）。
         ///
         /// **刻意做成滞回而不是同一个阈值**：同阈值的话，刚跌到 99.9 就解除，下一次释放立刻加回去，
         /// 玩家会看到"能按 / 不能按"在一两帧之间反复横跳——那是最难向玩家解释的一种手感。
         /// 滞回把"过载"变成一段要实打实等过去的窗口。
         /// </summary>
-        public const float HeatClearRatio = 0.6f;
+        public const float StrainClearRatio = 0.6f;
 
-        /// <summary>过载解除的绝对热债值。</summary>
-        public const float HeatClearThreshold = HeatOverloadThreshold * HeatClearRatio;
+        /// <summary>过载解除的绝对过载债值。</summary>
+        public const float StrainClearThreshold = StrainOverloadThreshold * StrainClearRatio;
 
         /// <summary>条目数超过它才做一次全表清扫。同 M2-03a 契约 §2 的口径：刻意不逐帧清扫。</summary>
         public const int SweepThreshold = 64;
 
-        /// <summary>多久没被碰过的条目算陈旧（本地时钟秒）。满代谢、零热债、冷却走完之后，
+        /// <summary>多久没被碰过的条目算陈旧（本地时钟秒）。满代谢、零过载债、冷却走完之后，
         /// 一条记录与"从没存在过"在行为上完全等价，删掉它不改变任何结果。</summary>
         public const float StaleSeconds = 30f;
 
         private sealed class Entry
         {
             public float Metabolism = MetabolismMax;
-            public float Heat;
+            public float Strain;
             public bool Overloaded;
             /// <summary>各槽的"就绪时刻"（本地时钟）。下标 = <see cref="LoadoutAction"/>。</summary>
             public readonly float[] ReadyAt = new float[DirectActionSet.SlotCount];
@@ -184,8 +202,8 @@ namespace GameLogic.Control
                 EntityId = id,
                 Metabolism = e.Metabolism,
                 MetabolismMax = MetabolismMax,
-                Heat = e.Heat,
-                HeatThreshold = HeatOverloadThreshold,
+                Strain = e.Strain,
+                StrainThreshold = StrainOverloadThreshold,
                 Overloaded = e.Overloaded,
                 MoveCooldown = RemainingCooldown(e, (int)LoadoutAction.Move),
                 PrimaryCooldown = RemainingCooldown(e, (int)LoadoutAction.Primary),
@@ -239,7 +257,7 @@ namespace GameLogic.Control
         }
 
         /// <summary>
-        /// 扣账：付代谢、累热债、起冷却。**只在释放真的发生之后调用。**
+        /// 扣账：付代谢、累过载债、起冷却。**只在释放真的发生之后调用。**
         /// </summary>
         public void Commit(SimEntityId id, LoadoutAction action, in OrganKernelAction act, bool applyCooldown)
         {
@@ -252,8 +270,8 @@ namespace GameLogic.Control
             Sync(e);
 
             e.Metabolism = Mathf.Max(0f, e.Metabolism - act.MetabolicCost);
-            e.Heat += act.HeatCost;
-            if (e.Heat >= HeatOverloadThreshold)
+            e.Strain += act.StrainCost;
+            if (e.Strain >= StrainOverloadThreshold)
             {
                 e.Overloaded = true;
             }
@@ -283,8 +301,8 @@ namespace GameLogic.Control
             return true;
         }
 
-        /// <summary>叠加热债（可为负）。越过阈值同样会进过载态，口径与 <see cref="Commit"/> 完全一致。</summary>
-        public bool AddHeat(SimEntityId id, float amount)
+        /// <summary>叠加过载债（可为负）。越过阈值同样会进过载态，口径与 <see cref="Commit"/> 完全一致。</summary>
+        public bool AddStrain(SimEntityId id, float amount)
         {
             if (!id.IsValid)
             {
@@ -293,12 +311,12 @@ namespace GameLogic.Control
 
             Entry e = Resolve(id);
             Sync(e);
-            e.Heat = Mathf.Max(0f, e.Heat + amount);
-            if (e.Heat >= HeatOverloadThreshold)
+            e.Strain = Mathf.Max(0f, e.Strain + amount);
+            if (e.Strain >= StrainOverloadThreshold)
             {
                 e.Overloaded = true;
             }
-            else if (e.Overloaded && e.Heat <= HeatClearThreshold)
+            else if (e.Overloaded && e.Strain <= StrainClearThreshold)
             {
                 e.Overloaded = false;
             }
@@ -328,7 +346,7 @@ namespace GameLogic.Control
                 SweepStale();
             }
 
-            // 新身体一律满代谢、零热债、无冷却："刚接管一具没打过的身体"就该是这个状态。
+            // 新身体一律满代谢、零过载债、无冷却："刚接管一具没打过的身体"就该是这个状态。
             var made = new Entry { LastSync = _clock };
             _entries[id] = made;
             return made;
@@ -337,7 +355,7 @@ namespace GameLogic.Control
         /// <summary>
         /// 把"回到初始态且很久没被碰过"的条目删掉。**不做存活验证**：
         /// 那需要回内核解析槽位（<c>SimWorld.TryFindUnit</c> 是线性扫描，见 M2-03a 契约 §10），
-        /// 而这里根本不需要知道谁死了——一条满代谢/零热债/冷却走完的记录，
+        /// 而这里根本不需要知道谁死了——一条满代谢/零过载债/冷却走完的记录，
         /// 与"从来没有过这条记录"在行为上完全等价，删错了也只是下次重建一条一模一样的。
         /// </summary>
         private void SweepStale()
@@ -353,7 +371,7 @@ namespace GameLogic.Control
 
                 // 先补齐再判断：没补齐的话，一条其实早就回满的记录会被当成"还欠着账"留下来。
                 Sync(e);
-                if (e.Metabolism >= MetabolismMax && e.Heat <= 0f && !e.Overloaded)
+                if (e.Metabolism >= MetabolismMax && e.Strain <= 0f && !e.Overloaded)
                 {
                     _sweepScratch.Add(kv.Key);
                 }
@@ -384,12 +402,12 @@ namespace GameLogic.Control
                 e.Metabolism = Mathf.Min(MetabolismMax, e.Metabolism + MetabolismRegenPerSecond * dt);
             }
 
-            if (e.Heat > 0f)
+            if (e.Strain > 0f)
             {
-                e.Heat = Mathf.Max(0f, e.Heat - HeatDecayPerSecond * dt);
+                e.Strain = Mathf.Max(0f, e.Strain - StrainDecayPerSecond * dt);
             }
 
-            if (e.Overloaded && e.Heat <= HeatClearThreshold)
+            if (e.Overloaded && e.Strain <= StrainClearThreshold)
             {
                 e.Overloaded = false;
             }

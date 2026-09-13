@@ -2754,7 +2754,7 @@ namespace GameLogic.EditorTools
             }
         }
 
-        // ── [17] 代谢 / 热债 / 冷却（M2-03c）─────────────────────
+        // ── [17] 代谢 / 过载债 / 冷却（M2-03c）─────────────────────
 
         /// <summary>
         /// ProjectA M2-03c：直控释放的三个量。
@@ -2765,12 +2765,12 @@ namespace GameLogic.EditorTools
         ///
         /// 时间用 <c>DirectControlActions.Tick</c> 快进，不等真实秒数：三个量的回复/衰减都是线性的，
         /// 惰性结算与逐帧结算等价（见 <see cref="UnitVitalsRegistry"/> 类注释），所以快进是等价而不是近似。
-        /// <c>Tick(30f)</c> 足以让任何一具身体回到"满代谢 / 零热债 / 无冷却"的静息态，
+        /// <c>Tick(30f)</c> 足以让任何一具身体回到"满代谢 / 零过载债 / 无冷却"的静息态，
         /// 本段用它在各小节之间归位。
         /// </summary>
         private static void ValidateDirectVitals()
         {
-            Line("\n[17] 代谢 / 热债 / 冷却（M2-03c）");
+            Line("\n[17] 代谢 / 过载债 / 冷却（M2-03c）");
 
             var sim = new SimBridge();
             SimConfig cfg = SimConfig.Default;
@@ -2841,9 +2841,9 @@ namespace GameLogic.EditorTools
                     "退役 id 永远只会落到 NoKernelAction，引用它本身就是 bug");
 
                 // 三个量必须由器官推导出来。若它们是常数，"代价与器官对应"这条就是空话。
-                Expect(sporeAct.Cooldown > 0f && sporeAct.MetabolicCost > 0f && sporeAct.HeatCost > 0f,
-                    $"每件器官都应推导出非零的冷却/代谢/热债（孢子 cd={sporeAct.Cooldown:F2} " +
-                    $"代谢={sporeAct.MetabolicCost:F1} 热债={sporeAct.HeatCost:F1}）");
+                Expect(sporeAct.Cooldown > 0f && sporeAct.MetabolicCost > 0f && sporeAct.StrainCost > 0f,
+                    $"每件器官都应推导出非零的冷却/代谢/过载债（孢子 cd={sporeAct.Cooldown:F2} " +
+                    $"代谢={sporeAct.MetabolicCost:F1} 过载债={sporeAct.StrainCost:F1}）");
                 Expect(Mathf.Abs(sporeAct.Cooldown - myceliumAct.Cooldown) > 0.01f &&
                        Mathf.Abs(sporeAct.MetabolicCost - myceliumAct.MetabolicCost) > 0.01f,
                     $"形态不同的两件器官应推导出不同的代价（cd {sporeAct.Cooldown:F2} vs {myceliumAct.Cooldown:F2}；" +
@@ -2879,17 +2879,17 @@ namespace GameLogic.EditorTools
                 UnitVitalsView idle = actions.ControlledVitals;
                 Expect(idle.Valid && idle.EntityId == spore &&
                        idle.Metabolism >= UnitVitalsRegistry.MetabolismMax - 0.01f &&
-                       idle.Heat <= 0.01f && idle.PrimaryCooldown <= 0f,
-                    $"静息足够久之后应回到满代谢 / 零热债 / 无冷却（实际 代谢{idle.Metabolism:F1} " +
-                    $"热债{idle.Heat:F1} 冷却{idle.PrimaryCooldown:F2}）");
+                       idle.Strain <= 0.01f && idle.PrimaryCooldown <= 0f,
+                    $"静息足够久之后应回到满代谢 / 零过载债 / 无冷却（实际 代谢{idle.Metabolism:F1} " +
+                    $"过载债{idle.Strain:F1} 冷却{idle.PrimaryCooldown:F2}）");
 
                 Expect(actions.TryRelease(LoadoutAction.Primary, aim), "静息态下释放应成功");
                 UnitVitalsView spent = actions.ControlledVitals;
                 Expect(Mathf.Abs((idle.Metabolism - spent.Metabolism) - sporeAct.MetabolicCost) < 0.01f,
                     $"一次释放应精确扣掉该器官的代谢代价（扣了 {idle.Metabolism - spent.Metabolism:F2}，" +
                     $"应为 {sporeAct.MetabolicCost:F2}）");
-                Expect(spent.Heat > idle.Heat && spent.PrimaryCooldown > 0f,
-                    $"同一次释放应同时累积热债并起冷却（热债 {idle.Heat:F1} → {spent.Heat:F1}）");
+                Expect(spent.Strain > idle.Strain && spent.PrimaryCooldown > 0f,
+                    $"同一次释放应同时累积过载债并起冷却（过载债 {idle.Strain:F1} → {spent.Strain:F1}）");
 
                 actions.Tick(sporeAct.Cooldown + 0.1f, paused: false);
                 // 先让冷却走完再压低代谢：顺序反过来的话，Tick 会把代谢又回满，
@@ -2907,13 +2907,13 @@ namespace GameLogic.EditorTools
                        actions.ReleaseCount == releasesBeforeStarve + 1,
                     "代谢回复到够付代价后，同一个入口应放行");
 
-                // ── C. 热债：累积 → 越阈值 → 拒绝 → 衰减 → 恢复 ──
+                // ── C. 过载债：累积 → 越阈值 → 拒绝 → 衰减 → 恢复 ──
                 actions.Tick(sporeAct.Cooldown + 0.1f, paused: false);
-                Expect(actions.Vitals.AddHeat(spore, UnitVitalsRegistry.HeatOverloadThreshold + 5f),
-                    "应能直接叠加热债");
+                Expect(actions.Vitals.AddStrain(spore, UnitVitalsRegistry.StrainOverloadThreshold + 5f),
+                    "应能直接叠加过载债");
                 UnitVitalsView over = actions.ControlledVitals;
-                Expect(over.Overloaded && over.Heat >= UnitVitalsRegistry.HeatOverloadThreshold,
-                    $"热债越过阈值应进入过载态（热债 {over.Heat:F1} / 阈值 {over.HeatThreshold:F0}）");
+                Expect(over.Overloaded && over.Strain >= UnitVitalsRegistry.StrainOverloadThreshold,
+                    $"过载债越过阈值应进入过载态（过载债 {over.Strain:F1} / 阈值 {over.StrainThreshold:F0}）");
 
                 int releasesBeforeOverload = actions.ReleaseCount;
                 Expect(!actions.TryRelease(LoadoutAction.Primary, aim) &&
@@ -2922,25 +2922,25 @@ namespace GameLogic.EditorTools
                     "过载态下释放应在入口被拒（原因 Overloaded），且不得有任何输出");
 
                 float secondsToClear =
-                    (over.Heat - UnitVitalsRegistry.HeatClearThreshold) / UnitVitalsRegistry.HeatDecayPerSecond;
+                    (over.Strain - UnitVitalsRegistry.StrainClearThreshold) / UnitVitalsRegistry.StrainDecayPerSecond;
                 actions.Tick(secondsToClear * 0.5f, paused: false);
                 UnitVitalsView halfCooled = actions.ControlledVitals;
-                Expect(halfCooled.Heat < UnitVitalsRegistry.HeatOverloadThreshold && halfCooled.Overloaded &&
+                Expect(halfCooled.Strain < UnitVitalsRegistry.StrainOverloadThreshold && halfCooled.Overloaded &&
                        !actions.TryRelease(LoadoutAction.Primary, aim) &&
                        actions.LastReleaseResult == DirectActionAvailability.Overloaded,
-                    $"热债跌回阈值以下但未到清除线时应仍然拒绝（滞回；实测热债 {halfCooled.Heat:F1}）——" +
+                    $"过载债跌回阈值以下但未到清除线时应仍然拒绝（滞回；实测过载债 {halfCooled.Strain:F1}）——" +
                     "同阈值进出会让按钮在一两帧之间反复横跳");
 
                 actions.Tick(secondsToClear * 0.6f + 0.1f, paused: false);
                 UnitVitalsView cooled = actions.ControlledVitals;
-                Expect(!cooled.Overloaded && cooled.Heat <= UnitVitalsRegistry.HeatClearThreshold,
-                    $"热债衰减到清除线以下应退出过载态（实测热债 {cooled.Heat:F1}）");
+                Expect(!cooled.Overloaded && cooled.Strain <= UnitVitalsRegistry.StrainClearThreshold,
+                    $"过载债衰减到清除线以下应退出过载态（实测过载债 {cooled.Strain:F1}）");
                 Expect(actions.TryRelease(LoadoutAction.Primary, aim),
                     "退出过载后同一个入口应放行");
 
                 // ── D. 三个量跟着控制权走（不是全局单例）──
                 UnitVitalsView sporeSpent = actions.Vitals.Get(spore);
-                Expect(sporeSpent.Metabolism < UnitVitalsRegistry.MetabolismMax && sporeSpent.Heat > 0f,
+                Expect(sporeSpent.Metabolism < UnitVitalsRegistry.MetabolismMax && sporeSpent.Strain > 0f,
                     "孢子此刻应留有实打实的消耗痕迹（后面切回来要读回这一份）");
 
                 Expect(sim.RequestControlSwitch(mycelium) == ControlRequestResult.Success,
@@ -2949,9 +2949,9 @@ namespace GameLogic.EditorTools
                 Expect(fresh.Valid && fresh.EntityId == mycelium,
                     "切换控制权后读到的应是新身体那一份");
                 Expect(fresh.Metabolism >= UnitVitalsRegistry.MetabolismMax - 0.01f &&
-                       fresh.Heat <= 0.01f && fresh.PrimaryCooldown <= 0f,
-                    $"没被接管过的身体应是满代谢 / 零热债 / 无冷却，而不是继承上一具身体的账" +
-                    $"（实际 代谢{fresh.Metabolism:F1} 热债{fresh.Heat:F1} 冷却{fresh.PrimaryCooldown:F2}）");
+                       fresh.Strain <= 0.01f && fresh.PrimaryCooldown <= 0f,
+                    $"没被接管过的身体应是满代谢 / 零过载债 / 无冷却，而不是继承上一具身体的账" +
+                    $"（实际 代谢{fresh.Metabolism:F1} 过载债{fresh.Strain:F1} 冷却{fresh.PrimaryCooldown:F2}）");
 
                 Expect(actions.TryRelease(LoadoutAction.Primary, aim), "菌丝体的主器官应能释放");
                 UnitVitalsView myceliumSpent = actions.ControlledVitals;
@@ -2964,8 +2964,8 @@ namespace GameLogic.EditorTools
                 UnitVitalsView sporeBack = actions.ControlledVitals;
                 Expect(sporeBack.EntityId == spore &&
                        Mathf.Abs(sporeBack.Metabolism - sporeNow.Metabolism) < 0.01f &&
-                       Mathf.Abs(sporeBack.Heat - sporeNow.Heat) < 0.01f,
-                    $"切回去应读回孢子自己那一份（代谢 {sporeBack.Metabolism:F1} / 热债 {sporeBack.Heat:F1}）");
+                       Mathf.Abs(sporeBack.Strain - sporeNow.Strain) < 0.01f,
+                    $"切回去应读回孢子自己那一份（代谢 {sporeBack.Metabolism:F1} / 过载债 {sporeBack.Strain:F1}）");
 
                 // ── E. 玩家本体不叠第二层冷却 ──
                 OrganKernelAction bodyAct = OrganKernelActionTable.Resolve(sporeOrgan.OrganId);
@@ -2989,8 +2989,8 @@ namespace GameLogic.EditorTools
                     "玩家本体走委托路：AbilitySystem 缺席时判 NotReady（Edit 模式起不了整套 ModuleHub）");
                 UnitVitalsView bodyAfter = actions.ControlledVitals;
                 Expect(Mathf.Abs(bodyAfter.Metabolism - bodyBefore.Metabolism) < 0.01f &&
-                       Mathf.Abs(bodyAfter.Heat - bodyBefore.Heat) < 0.01f,
-                    "释放被下游拒掉时不得扣代谢、不得累热债——代价只在释放真的发生之后才付");
+                       Mathf.Abs(bodyAfter.Strain - bodyBefore.Strain) < 0.01f,
+                    "释放被下游拒掉时不得扣代谢、不得累过载债——代价只在释放真的发生之后才付");
 
                 // ── F. HUD：真实 UXML 实例 + 生产绑定代码 ──
                 Expect(sim.RequestControlSwitch(spore) == ControlRequestResult.Success, "HUD 断言前切回孢子");
@@ -3073,16 +3073,16 @@ namespace GameLogic.EditorTools
                 Expect(shown.Valid && block.style.display.value == DisplayStyle.Flex &&
                        text.text.Contains(expectMetabolism),
                     $"直控视角下三个量应按真实数值上屏（实际「{text.text}」，应含「{expectMetabolism}」）");
-                Expect(text.text.Contains("热债") && text.text.Contains("主 "),
-                    $"文案应同时给出热债与按槽冷却，而不是只报代谢（实际「{text.text}」）");
+                Expect(text.text.Contains("过载债") && text.text.Contains("主 "),
+                    $"文案应同时给出过载债与按槽冷却，而不是只报代谢（实际「{text.text}」）");
 
                 // 过载态在 HUD 上必须看得出来
-                actions.Vitals.AddHeat(spore, UnitVitalsRegistry.HeatOverloadThreshold + 5f);
+                actions.Vitals.AddStrain(spore, UnitVitalsRegistry.StrainOverloadThreshold + 5f);
                 DirectVitalsHudBinding.Apply(block, text, actions.ControlledVitals);
                 Expect(block.ClassListContains(DirectVitalsHudBinding.OverloadedClass) &&
                        text.text.Contains("过载"),
                     $"过载态应在 HUD 上明确标示（实际「{text.text}」）");
-                actions.Vitals.AddHeat(spore, -(UnitVitalsRegistry.HeatOverloadThreshold * 10f));
+                actions.Vitals.AddStrain(spore, -(UnitVitalsRegistry.StrainOverloadThreshold * 10f));
 
                 // 战略视角 → 整块隐藏
                 InputRouter.SetScope(InputScope.Strategy);

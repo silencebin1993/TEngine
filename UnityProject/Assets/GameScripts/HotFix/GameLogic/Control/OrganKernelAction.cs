@@ -54,8 +54,8 @@ namespace GameLogic.Control
         /// <summary>一次释放的代谢消耗（M2-03c）。</summary>
         public float MetabolicCost;
 
-        /// <summary>一次释放累积的热债（M2-03c）。</summary>
-        public float HeatCost;
+        /// <summary>一次释放累积的过载债（M2-03c）。</summary>
+        public float StrainCost;
 
         public bool IsValid => Kind != OrganKernelActionKind.None;
 
@@ -139,8 +139,8 @@ namespace GameLogic.Control
         // 三个量刻意表达三件不同的事，否则它们会退化成同一个量的三种写法：
         //   * 冷却 = 这一击**多久能再来一次**（节奏）；
         //   * 代谢 = 这一击**造出了多大的东西**（材料：伤害 + 覆盖 + 持续）；
-        //   * 热债 = 这一击的**功率**（= 代谢 / 冷却）。同样的功，冷却越短的器官越容易过载，
-        //     这正是"连点左键刷弹体"会被热债自然掐住、而慢速大招不会的原因。
+        //   * 过载债 = 这一击的**功率**（= 代谢 / 冷却）。同样的功，冷却越短的器官越容易过载，
+        //     这正是"连点左键刷弹体"会被过载债自然掐住、而慢速大招不会的原因。
 
         /// <summary>弹体的基础冷却。</summary>
         public const float ProjectileBaseCooldown = 0.35f;
@@ -164,11 +164,11 @@ namespace GameLogic.Control
         /// <summary>代谢消耗下限：零伤害的纯标记类动作也不该是"完全免费按到死"。</summary>
         public const float MinMetabolicCost = 4f;
 
-        /// <summary>热债 = 代谢 / 冷却 × 本系数。系数本身只是把量纲拉到与阈值可比的尺度。</summary>
-        public const float HeatPerPowerUnit = 0.5f;
+        /// <summary>过载债 = 代谢 / 冷却 × 本系数。系数本身只是把量纲拉到与阈值可比的尺度。</summary>
+        public const float StrainPerPowerUnit = 0.5f;
 
-        /// <summary>算功率时冷却的下限，防止 0 冷却把热债算成无穷。</summary>
-        public const float MinCooldownForHeat = 0.2f;
+        /// <summary>算功率时冷却的下限，防止 0 冷却把过载债算成无穷。</summary>
+        public const float MinCooldownForStrain = 0.2f;
 
         private static void ApplyReleaseCosts(ref OrganKernelAction a)
         {
@@ -176,7 +176,7 @@ namespace GameLogic.Control
             {
                 a.Cooldown = 0f;
                 a.MetabolicCost = 0f;
-                a.HeatCost = 0f;
+                a.StrainCost = 0f;
                 return;
             }
 
@@ -208,7 +208,7 @@ namespace GameLogic.Control
                 MetabolicCostPerRadius * Mathf.Max(0f, a.Radius) +
                 MetabolicCostPerSecond * Mathf.Max(0f, a.Seconds));
 
-            a.HeatCost = a.MetabolicCost / Mathf.Max(MinCooldownForHeat, a.Cooldown) * HeatPerPowerUnit;
+            a.StrainCost = a.MetabolicCost / Mathf.Max(MinCooldownForStrain, a.Cooldown) * StrainPerPowerUnit;
         }
 
         /// <summary>

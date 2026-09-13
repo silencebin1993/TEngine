@@ -5,7 +5,7 @@ using UnityEngine.UIElements;
 namespace GameLogic.UI.Battle
 {
     /// <summary>
-    /// 直控三个量（代谢 / 热债 / 冷却）的 HUD 绑定（M2-03c）。
+    /// 直控三个量（代谢 / 过载债 / 冷却）的 HUD 绑定（M2-03c）。
     ///
     /// ── 为什么单独一个静态类，而不是写进 <c>BattleHudToolkit</c> ──
     /// <c>BattleHudToolkit</c> 是 <c>MonoBehaviour</c>，Edit 模式起不来，写在它里面的绑定逻辑
@@ -49,11 +49,13 @@ namespace GameLogic.UI.Battle
                 return "代谢 --";
             }
 
-            string heat = vitals.Overloaded
-                ? $"热债 {vitals.Heat:F0}/{vitals.HeatThreshold:F0} 过载"
-                : $"热债 {vitals.Heat:F0}/{vitals.HeatThreshold:F0}";
+            // 「过载债」是累积量，「已过载」是状态——两个词分开，玩家才读得出
+            // "债还在涨" 和 "已经按不动了" 是两回事。
+            string strain = vitals.Overloaded
+                ? $"过载债 {vitals.Strain:F0}/{vitals.StrainThreshold:F0} 已过载"
+                : $"过载债 {vitals.Strain:F0}/{vitals.StrainThreshold:F0}";
 
-            return $"代谢 {vitals.Metabolism:F0}/{vitals.MetabolismMax:F0}　{heat}" +
+            return $"代谢 {vitals.Metabolism:F0}/{vitals.MetabolismMax:F0}　{strain}" +
                    $"　主 {FormatCooldown(vitals.PrimaryCooldown)}" +
                    $"　功 {FormatCooldown(vitals.UtilityCooldown)}";
         }
