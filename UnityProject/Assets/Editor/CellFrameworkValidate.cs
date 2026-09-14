@@ -11,6 +11,7 @@ using GameLogic.Control;
 using GameLogic.Core;
 using GameLogic.MetabolicSlice.Blueprint;
 using GameLogic.MetabolicSlice.ContentCatalog;
+using GameLogic.MetabolicSlice.Lineage;
 using GameLogic.Progression;
 using GameLogic.Spawning;
 using GameLogic.Stage;
@@ -80,6 +81,7 @@ namespace GameLogic.EditorTools
                 ValidateAllyParityAndControlCycle();
                 ValidateCombatTruthSourceUnified();
                 ValidateBlueprintLibrary();
+                ValidateLineagePhenotypeTemplate();
             }
             catch (Exception e)
             {
@@ -1694,6 +1696,83 @@ namespace GameLogic.EditorTools
                 "旧存档默认迁移应包含现有 Organelle 目录且已解锁");
             Expect(legacy.Entries.Any(e => e.SourceId == geneId && e.Unlocked),
                 "旧存档默认迁移应包含现有 Gene 目录且已解锁");
+        }
+
+        /// <summary>
+        /// M3-03：谱系与表型模板模型。只测纯内存逻辑（本期无落盘），覆盖里程碑验收两条：
+        /// 「修改模板不会回写旧版本」「相同配方生成相同签名」。
+        /// </summary>
+        private static void ValidateLineagePhenotypeTemplate()
+        {
+            Line("\n[27] 谱系与表型模板模型（M3-03）");
+
+            OrganelleDef organelle = OrganelleCatalog.All.Values.FirstOrDefault(o => o.AttackMethod && !o.IsRetired);
+            List<string> geneIds = GeneCatalog.AllGeneIds.Take(2).ToList();
+            Expect(organelle != null, "OrganelleCatalog 应至少有一条 AttackMethod 未退役器官用于本项自检");
+            Expect(geneIds.Count == 2, "GeneCatalog 应至少有两条基因用于本项自检");
+            if (organelle == null || geneIds.Count < 2)
+            {
+                return;
+            }
+
+            var blueprints = new BlueprintRegistry();
+            blueprints.Resolve(organelle.Id, BlueprintSourceKind.Organelle, 1f, 0f);
+            foreach (string g in geneIds)
+            {
+                blueprints.Resolve(g, BlueprintSourceKind.Gene, 1f, 0f);
+            }
+
+            var lineages = new LineageRegistry();
+            lineages.Bind(blueprints);
+
+            // 校验蓝图所有权：未解锁的蓝图不能进模板。
+            var unlocked = new LineageRegistry();
+            unlocked.Bind(new BlueprintRegistry());
+            PhenotypeTemplateVersion rejected = unlocked.CommitTemplate("lineage-a", "assault", organelle.Id, geneIds, "keep_distance", out string ownershipError);
+            Expect(rejected == null && ownershipError != null, "未解锁蓝图提交模板应被 Reject-to-Safe 拒绝");
+
+            // 槎位/兼容性校验：主器官槎位塞一个基因 id 应被拒绝（不是 AttackMethod 器官）。
+            PhenotypeTemplateVersion badSlot = lineages.CommitTemplate("lineage-a", "assault", geneIds[0], geneIds, "keep_distance", out string slotError);
+            Expect(badSlot == null && slotError != null, "主器官槎位放非 AttackMethod id 应被拒绝");
+
+            // 正式提交 v1。
+            PhenotypeTemplateVersion v1 = lineages.CommitTemplate("lineage-a", "assault", organelle.Id, geneIds, "keep_distance", out string errV1);
+            Expect(v1 != null && errV1 == null, "合法配方提交应成功产生版本 1");
+            Expect(v1 != null && v1.Version == 1, "首次提交应是版本 1");
+
+            // 验收 A：修改模板不会回写旧版本——同名模板再提交一次（哪怕配方不变）产生新的版本对象，
+            // 旧对象引用不变、字段不变。
+            PhenotypeTemplateVersion v1Ref = v1;
+            float v1BiomassBefore = v1Ref.BiomassCost;
+            PhenotypeTemplateVersion v2 = lineages.CommitTemplate("lineage-a", "assault", organelle.Id, geneIds, "escort", out string errV2);
+            Expect(v2 != null && errV2 == null, "第二次提交应成功产生版本 2");
+            Expect(v2 != null && v2.Version == 2, "第二次提交应是版本 2，不覆盖版本 1");
+            Expect(ReferenceEquals(v1, v1Ref) && v1Ref.DoctrineTag == "keep_distance",
+                "旧版本对象引用与字段不应被后续提交改写");
+            Expect(v1Ref.BiomassCost == v1BiomassBefore, "旧版本的生物质成本不应被后续提交改写");
+            Expect(lineages.GetLineage("lineage-a").GetHistory("assault").Count == 2,
+                "模板历史应只追加，两次提交后应有 2 条版本记录");
+            Expect(lineages.GetLineage("lineage-a").GetLatest("assault").Version == 2,
+                "GetLatest 应返回最新版本（2），不是版本 1");
+
+            // 验收 B：相同配方生成相同签名（同一批 geneIds 实例，两次独立 CommitTemplate 应得同一签名）。
+            PhenotypeTemplateVersion v3SameRecipe = lineages.CommitTemplate("lineage-b", "escort", organelle.Id, geneIds, "keep_distance", out string errV3);
+            Expect(v3SameRecipe != null && errV3 == null, "不同谱系下同配方提交应独立成功");
+            Expect(v3SameRecipe != null && v3SameRecipe.Signature == v1.Signature,
+                "相同 OrganelleId+有序 GeneIds 应生成相同签名，即便谱系/模板名不同");
+
+            // 签名对顺序敏感：调换基因顺序应产生不同签名（基因是有序节点）。
+            List<string> reversedGenes = new List<string>(geneIds);
+            reversedGenes.Reverse();
+            if (reversedGenes.Count == geneIds.Count && !reversedGenes.SequenceEqual(geneIds))
+            {
+                string reversedSignature = PhenotypeTemplateSignature.Compute(organelle.Id, reversedGenes);
+                Expect(reversedSignature != v1.Signature, "调换基因顺序应产生不同签名（基因节点有序）");
+            }
+
+            // 签名跨进程/跨实例稳定：不依赖 GetHashCode 的进程内加盐随机性。
+            string recomputed = PhenotypeTemplateSignature.Compute(organelle.Id, geneIds);
+            Expect(recomputed == v1.Signature, "同一函数对同一输入重复计算应得到完全一致的签名字符串");
         }
 
         /// <summary>
