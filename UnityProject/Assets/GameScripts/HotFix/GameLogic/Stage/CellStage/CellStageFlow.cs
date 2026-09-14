@@ -1838,7 +1838,12 @@ namespace GameLogic.Stage.CellStage
             //
             // 唯一要挡的是 Suspended：恢复请求还挂着、目标尚未 Spawn 完的那几帧同样读到 0，
             // 那不是死亡，是还没接上。不挡这一条，任何一次读档恢复都会立刻误判成本局结束。
-            if (_sim.Availability == ControlAvailability.Suspended)
+            // Suspended：恢复请求还挂着、目标尚未 Spawn 完的那几帧同样读到 0，那不是死亡是还没接上。
+            // Released（2026-09-14）：玩家主动放下意识进战略视角，场上仍有可回去的身体。
+            //   不挡这一条的后果实测过——**按 M 进战略视角当场判死、直接弹回主菜单**。
+            //   一具可接管的身体都没有时 SimBridge 会把状态落回 None，那才是真正的意识无处可去。
+            if (_sim.Availability == ControlAvailability.Suspended ||
+                _sim.Availability == ControlAvailability.Released)
             {
                 return;
             }

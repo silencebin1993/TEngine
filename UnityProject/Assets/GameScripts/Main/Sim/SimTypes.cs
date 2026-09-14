@@ -182,6 +182,14 @@ namespace BinGames.Sim
         Controlled = 1,
         /// <summary>持有稳定 ID 但当前解析不到，仍在宽限期内等待其重新可用。</summary>
         Suspended = 2,
+        /// <summary>
+        /// 玩家**主动放下**了意识（进战略视角），场上仍有可以回去的身体（2026-09-14）。
+        ///
+        /// 必须与 <see cref="None"/> 分开：None 的含义是"意识无处可去"，阶段据此判定本局结束
+        /// （<c>PlayerHealth</c> 读当前受控实体，没有受控实体时恒为 0）。
+        /// 不分开的后果实测过——按 M 进战略视角当场被判死、直接弹回主菜单。
+        /// </summary>
+        Released = 3,
     }
 
     /// <summary>稳定身份的只读控制视图。数组索引只在当前世界状态中瞬时有效。</summary>

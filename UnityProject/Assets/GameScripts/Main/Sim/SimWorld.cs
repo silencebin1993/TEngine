@@ -288,6 +288,49 @@ namespace BinGames.Sim
             return false;
         }
 
+        /// <summary>
+        /// 是否还存在至少一个可接管的友军。与 <see cref="GetControlCandidates"/> 同一套判据，
+        /// 但**命中即返回、不分配数组**——放下意识期间要按帧判"意识还有没有去处"，
+        /// 不能每帧 new 一个数组出来。
+        /// </summary>
+        public bool HasControlCandidate(float maxDistance)
+        {
+            if (!_created || maxDistance < 0f)
+            {
+                return false;
+            }
+
+            float2 origin;
+            int controlledIndex;
+            if (TryResolveUnit(_controlledUnitId, out int resolvedIndex))
+            {
+                controlledIndex = resolvedIndex;
+                origin = _position[resolvedIndex];
+            }
+            else if (_hasControlFallbackAnchor)
+            {
+                controlledIndex = SimConst.InvalidIndex;
+                origin = _controlFallbackAnchor;
+            }
+            else
+            {
+                return false;
+            }
+
+            float maxDistanceSq = maxDistance * maxDistance;
+            for (int i = 0; i < _unitCount; i++)
+            {
+                if (i == controlledIndex || _alive[i] == 0 || _excludeFromControl[i] != 0 ||
+                    !IsFriendlyFaction((SimFaction)_faction[i]) ||
+                    math.distancesq(origin, _position[i]) > maxDistanceSq)
+                {
+                    continue;
+                }
+                return true;
+            }
+            return false;
+        }
+
         public SimControlCandidate[] GetControlCandidates(float maxDistance)
         {
             if (!_created || maxDistance < 0f)

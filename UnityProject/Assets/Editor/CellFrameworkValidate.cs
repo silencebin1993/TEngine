@@ -1564,6 +1564,13 @@ namespace GameLogic.EditorTools
                 Expect(!flow.Sim.ControlledUnitId.IsValid,
                     "放下意识后不应再有受控实体");
                 flow.Sim.OnUpdate(1f / 60f);
+                // ⚠ 这条守的是一个实测过的严重回归：放下意识后可用性若落成 None，
+                // CellStageFlow.CheckEnd 会按 PlayerHealth<=0 判死（它读的是当前受控实体），
+                // 于是**按 M 进战略视角当场弹回主菜单**。Released 与 None 必须分开。
+                Expect(flow.Sim.Availability == ControlAvailability.Released,
+                    $"主动放下意识且场上仍有可接管身体时，可用性应是 Released 而不是 " +
+                    $"{flow.Sim.Availability}——落成 None 会被阶段判死");
+                flow.Sim.OnUpdate(1f / 60f);
 
                 float half = flow.Sim.ArenaHalfExtent + 10f;
                 SimUnitPick[] picks = flow.Sim.QueryUnitsInRect(
@@ -1628,6 +1635,26 @@ namespace GameLogic.EditorTools
                 float drivenSpeed = math.length(VelOfId(flow.Sim.Snapshot, driven));
                 Expect(drivenSpeed > 3f,
                     $"玩家直控 0.75 秒后应当接近全速，而不是被原型的低加速度拖住（实测 {drivenSpeed:F2} u/s）");
+
+                // ── G. 放下意识后所有身体都没了 → 才是真正的"意识无处可去" ──
+                flow.DebugParkControlForStrategy();
+                SimSnapshot before = flow.Sim.Snapshot;
+                for (int i = before.Count - 1; i >= 0; i--)
+                {
+                    if (!before.IsAlive(i))
+                    {
+                        continue;
+                    }
+                    SimFaction f = before.FactionOf(i);
+                    if (f == SimFaction.Player || f == SimFaction.PlayerMinion)
+                    {
+                        flow.Sim.World.KillUnit(i, 0);
+                    }
+                }
+                flow.Sim.OnUpdate(1f / 60f);
+                Expect(flow.Sim.Availability == ControlAvailability.None,
+                    $"一具可接管的身体都没有时才落回 None（实际 {flow.Sim.Availability}）——" +
+                    "否则玩家会永远不判死，卡在战略视角里");
             }
             finally
             {

@@ -324,7 +324,23 @@ namespace GameLogic.Battle
         public bool ReleaseControl()
         {
             SimWorld w = World;
-            return _running && w != null && w.ReleaseControlledUnit() == ControlSwitchResult.Success;
+            if (!_running || w == null || w.ReleaseControlledUnit() != ControlSwitchResult.Success)
+            {
+                return false;
+            }
+            _controlReleased = true;
+            return true;
+        }
+
+        /// <summary>意识是否处于"主动放下"状态。由 <see cref="ReleaseControl"/> 置位，
+        /// 重新接管到任何一具身体时自动清除（见 <see cref="RefreshAvailability"/>）。</summary>
+        private bool _controlReleased;
+
+        /// <summary>还有没有可接管的身体。无分配，命中即返回；放下意识期间按帧判"意识还有没有去处"。</summary>
+        public bool HasControlCandidate()
+        {
+            SimWorld w = World;
+            return _running && w != null && w.HasControlCandidate(ControlSignalRange);
         }
 
         public ControlRequestResult RequestControlSwitch(SimEntityId targetId)
@@ -528,11 +544,22 @@ namespace GameLogic.Battle
             if (TryGetControlledPresentation(out _))
             {
                 _availability = ControlAvailability.Controlled;
+                // 重新拿到身体就不再是"放下"状态。放在这里而不是各个接管入口逐个清：
+                // 接管有 RequestControlSwitch / RestoreControlTo / 内核死亡回弹三条路，
+                // 逐个接线必然漏一条，而漏掉的那条会让阶段永远不判死。
+                _controlReleased = false;
                 return;
             }
 
-            _availability = _pendingRestore.HasRecord && _restoreGraceRemaining > 0f
-                ? ControlAvailability.Suspended
+            if (_pendingRestore.HasRecord && _restoreGraceRemaining > 0f)
+            {
+                _availability = ControlAvailability.Suspended;
+                return;
+            }
+
+            // 主动放下且还有身体可回 → Released（不判死）；一具都没有了才是真正的"意识无处可去"。
+            _availability = _controlReleased && HasControlCandidate()
+                ? ControlAvailability.Released
                 : ControlAvailability.None;
         }
 
