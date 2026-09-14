@@ -258,7 +258,7 @@ namespace GameLogic.UI.Battle
             {
                 // 230 而不是 184：多了「当前受控 / 候选数 / 上次 Tab 失败原因」两三行，
                 // 按 184 画会把「结束试玩」按钮挤出面板，主持人收不了尾。
-                _playtestRect = new Rect(Screen.width - 450f, 12f, 438f, 230f);
+                _playtestRect = new Rect(Screen.width - 450f, 12f, 438f, 296f);
             }
             ImguiDragUtil.DrawDraggable(106, ref _playtestRect, "M2-06 固定试玩", "m2_06_playtest", id =>
             {
@@ -269,6 +269,20 @@ namespace GameLogic.UI.Battle
                 GUILayout.Label("4. 退出接管并回到战略层继续下令", _label);
                 GUILayout.Label("应急键位卡：M 视角　Tab 接管　鼠标左/右键 操作　P 接点类别", _hint);
                 DrawControlSwitchDiagnostics(cell);
+
+                // 2026-09-14 调试需求：屏幕上每个单位头顶标 UID，Scene 里的 GameObject 也用同一个号，
+                // 这样玩家可以直接说「#7 那只移速不对」，不必再描述"左边那个"。
+                bool mirror = GameLogic.Battle.Feedback.DevUnitGoMirror.Enabled;
+                if (GUILayout.Button(mirror
+                        ? "Scene 真身镜像：开（点此关闭）"
+                        : "Scene 真身镜像：关（点此开启，Hierarchy 里能选中单位）",
+                    GUILayout.Height(24f)))
+                {
+                    GameLogic.Battle.Feedback.DevUnitGoMirror.Enabled = !mirror;
+                }
+                GUILayout.Label(mirror
+                    ? "Hierarchy → __DevUnitGoMirror/Units 下每个单位名字以 #UID 开头"
+                    : "默认用 GPU 实例化绘制，不建 GameObject，所以 Scene 视图里选不中单位", _hint);
                 if (GUILayout.Button("结束试玩并返回菜单", GUILayout.Height(26f)))
                 {
                     cell.MarkAbandoned();
@@ -277,6 +291,66 @@ namespace GameLogic.UI.Battle
             });
 
             DrawConsciousnessTargetMarkers(cell);
+            DrawUnitIdTags(cell);
+        }
+
+        /// <summary>
+        /// 2026-09-14：给每个友方单位头顶标 `#UID`，并附当前速度 / 速度上限与正在执行的命令。
+        ///
+        /// 目的有两个：①玩家能直接点名「#7 移速不对」，我不用再猜是哪一只；
+        /// ②"移速慢"这件事已经报了三轮，每轮根因都不同（accel 0 / wander 半速 / 属性外溢），
+        /// 光凭描述判不出来——把**实测速度与上限**摆在屏幕上，一眼能看出是"上限被改小了"
+        /// 还是"根本没在全速跑"。
+        ///
+        /// 只在 M2-06 固定试玩里画：该模式冻结刷怪，场上就几个单位，O(单位数) 的遍历不会撞
+        /// 热更层每帧的性能红线；正常对局不画。
+        /// </summary>
+        private void DrawUnitIdTags(CellStageFlow cell)
+        {
+            Camera cam = Camera.main;
+            if (cam == null || cell.Sim == null || !cell.Sim.Running)
+            {
+                return;
+            }
+
+            BinGames.Sim.SimSnapshot snapshot = cell.Sim.Snapshot;
+            BinGames.Sim.SimEntityId controlled = cell.Sim.ControlledUnitId;
+            for (int i = 0; i < snapshot.Count; i++)
+            {
+                if (!snapshot.IsAlive(i))
+                {
+                    continue;
+                }
+                BinGames.Sim.SimFaction faction = snapshot.FactionOf(i);
+                if (faction != BinGames.Sim.SimFaction.Player &&
+                    faction != BinGames.Sim.SimFaction.PlayerMinion)
+                {
+                    continue;
+                }
+
+                BinGames.Sim.SimEntityId id = snapshot.EntityId[i];
+                Unity.Mathematics.float2 p = snapshot.Position[i];
+                Vector3 screen = cam.WorldToScreenPoint(new Vector3(p.x, 1.6f, p.y));
+                if (screen.z <= 0f)
+                {
+                    continue;
+                }
+
+                float speed = Unity.Mathematics.math.length(snapshot.Velocity[i]);
+                string command = cell.Sim.TryGetCommand(id, out BinGames.Sim.UnitCommand cmd) &&
+                                 cmd.Kind != BinGames.Sim.UnitCommandKind.None
+                    ? cmd.Kind.ToString()
+                    : ((BinGames.Sim.IntentSource)snapshot.IntentSource[i]).ToString();
+
+                string text = $"#{id.Value}  {speed:F1} u/s  {command}";
+                var rect = new Rect(screen.x - 72f, Screen.height - screen.y - 12f, 144f, 24f);
+                Color before = GUI.color;
+                GUI.color = id == controlled
+                    ? new Color(1f, 0.85f, 0.3f, 0.95f)
+                    : new Color(0.75f, 0.9f, 1f, 0.9f);
+                GUI.Box(rect, text);
+                GUI.color = before;
+            }
         }
 
         /// <summary>

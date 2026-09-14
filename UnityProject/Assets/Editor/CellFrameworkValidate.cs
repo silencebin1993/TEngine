@@ -2493,7 +2493,9 @@ namespace GameLogic.EditorTools
                 Expect(distAfter < distBefore,
                     $"命令驱动的单位 30 帧后应更靠近目标点（前 {distBefore:F2} → 后 {distAfter:F2}）");
 
-                // 到达目标点（ArriveRadius 内）应立刻交还 AI。
+                // 2026-09-14 产品决策反转：到达目标点后**停在终点原地待命**，不再交还自由 AI。
+                // 玩家报「右键移动，角色不在终点停下，而是沿着方向继续走」——根因就在这里：
+                // 交还 AI 后仆从原型找不到敌人就走 Wander 半速漫游，于是"到站"接上"自己晃走"。
                 world.TryResolveUnit(unitB, out int idxB2);
                 float2 posBNow = world.GetSnapshot().Position[idxB2];
                 var arriveCmd = new UnitCommand
@@ -2504,9 +2506,19 @@ namespace GameLogic.EditorTools
                 cmds.SetPlayerIntent(PlayerIntent.Idle);
                 world.Step(1f / 60f, ref cmds);
                 world.TryResolveUnit(unitB, out int idxB3);
-                Expect(world.GetSnapshot().IntentSourceOf(idxB3) == IntentSource.AI &&
-                       !world.TryGetCommand(unitB, out _),
-                    "Move 命令到达目标点后应交还 AI，且不再能查到命令");
+                Expect(world.GetSnapshot().IntentSourceOf(idxB3) == IntentSource.Commanded &&
+                       world.TryGetCommand(unitB, out UnitCommand heldAfterMove) &&
+                       heldAfterMove.Kind == UnitCommandKind.Guard,
+                    "Move 到达终点后应转成原地守备并保持 Commanded——停在玩家指定的那个点，不再自己走开");
+                float2 posAtArrival = world.GetSnapshot().Position[idxB3];
+                for (int f = 0; f < 120; f++)
+                {
+                    world.Step(1f / 60f, ref cmds);
+                }
+                world.TryResolveUnit(unitB, out int idxBHeld);
+                float arrivalDrift = math.distance(world.GetSnapshot().Position[idxBHeld], posAtArrival);
+                Expect(arrivalDrift < 2f,
+                    $"到站后 120 帧内不该自己飘走（漂移 {arrivalDrift:F2}）");
 
                 // ClearCommand 应立即交还 AI。
                 bool cleared = world.ClearCommand(unitA);
@@ -2527,8 +2539,10 @@ namespace GameLogic.EditorTools
                 cmds.SetPlayerIntent(PlayerIntent.Idle);
                 world.Step(1f / 60f, ref cmds);
                 world.TryResolveUnit(unitA, out int idxA4);
-                Expect(world.GetSnapshot().IntentSourceOf(idxA4) == IntentSource.AI,
-                    "Attack 命令的目标死亡后，下令单位应交还 AI");
+                Expect(world.GetSnapshot().IntentSourceOf(idxA4) == IntentSource.Commanded &&
+                       world.TryGetCommand(unitA, out UnitCommand heldAfterKill) &&
+                       heldAfterKill.Kind == UnitCommandKind.Guard,
+                    "Attack 目标死亡后，下令单位应停在原地待命而不是交还自由 AI 自己漫游");
 
                 // 槽位复用不应继承旧占用者的命令。
                 var reissueCmd = new UnitCommand

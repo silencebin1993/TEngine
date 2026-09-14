@@ -168,9 +168,13 @@ namespace GameLogic.Battle.Feedback
                 }
 
                 int logicId = snap.LogicId[i];
+                // 2026-09-14：名字里带上**稳定实体 ID（UID）**。槽位下标 i 会随槽位复用指向别的单位，
+                // 而玩家在 Hierarchy 里点中一个东西要能直接报给我"#7 这只不对"——那必须是稳定的那个号。
+                // UID 与屏幕上的 `#7` 标签、以及 SquadCommandSystem 的选择集用的是同一个值。
+                ulong uid = snap.EntityId[i].Value;
                 string label = i == 0
-                    ? $"player_L{logicId}_V{visualId}"
-                    : $"unit{i}_L{logicId}_V{visualId}";
+                    ? $"#{uid}_player_L{logicId}_V{visualId}"
+                    : $"#{uid}_unit_L{logicId}_V{visualId}";
                 if (e.Go.name != label)
                 {
                     e.Go.name = label;

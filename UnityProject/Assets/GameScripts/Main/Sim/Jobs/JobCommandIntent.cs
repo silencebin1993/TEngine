@@ -74,8 +74,8 @@ namespace BinGames.Sim
                     float2 delta = cmd.TargetPosition - pos;
                     if (math.lengthsq(delta) <= arrive * arrive)
                     {
-                        // 到达即完成。交还 AI 而不是站在原地——站桩是 M2-04 明确要消灭的行为。
-                        ReleaseToAi(i);
+                        // 到达即停在终点待命，见 HoldPosition 的说明。
+                        HoldPosition(i, pos, arrive);
                         return;
                     }
                     moveDir = math.normalizesafe(delta);
@@ -86,8 +86,9 @@ namespace BinGames.Sim
                 {
                     if (!TryResolveTarget(cmd.TargetEntity, out int targetIndex))
                     {
-                        // 目标没了（打死了或消失了）：命令完成，交还 AI 自行找新目标。
-                        ReleaseToAi(i);
+                        // 目标没了（打死了或消失了）：命令完成，停在当前位置待命。
+                        // 交还自由 AI 会让它接着漫游走开——玩家下的是"打那个"，不是"打完随便晃"。
+                        HoldPosition(i, pos, arrive);
                         return;
                     }
                     float2 delta = Position[targetIndex] - pos;
@@ -113,7 +114,8 @@ namespace BinGames.Sim
                     float2 delta = cmd.TargetPosition - pos;
                     if (math.lengthsq(delta) <= arrive * arrive)
                     {
-                        ReleaseToAi(i);
+                        // 撤到点了就守在那儿，同 Move 的理由。
+                        HoldPosition(i, pos, arrive);
                         return;
                     }
 
@@ -152,6 +154,34 @@ namespace BinGames.Sim
             // 本帧就写成 AI 的 Idle：JobAIIntent 已经跑过（只认当时还是 AI 的槽位），
             // 这一帧没人再给它写意图，留着 Commanded 的旧意图会让它多冲一帧。
             Intents[i] = UnitIntent.Idle(EntityId[i], BinGames.Sim.IntentSource.AI);
+        }
+
+        /// <summary>
+        /// 命令完成后**留在原地待命**，而不是交还自由 AI（2026-09-14 产品决策，可推翻）。
+        ///
+        /// 玩家报的是「战术右键移动，角色不在终点停下，而是沿着方向继续走」。
+        /// 根因不在到达判定——那一段是对的——而在到达之后：<see cref="ReleaseToAi"/> 把它还给
+        /// <c>JobAIIntent</c>，而仆从原型在索敌半径内找不到敌人时走 <c>Wander * WanderStrength</c>
+        /// （半速随机漫游），于是「走到终点」之后立刻接上「自己晃走」。
+        ///
+        /// 原注释写"站桩是 M2-04 明确要消灭的行为"——那条结论针对的是**被接管后放手的单位**
+        /// 一动不动没有交代，不是"玩家明确点了一个终点"。玩家指定终点时，停在终点才是它该做的。
+        ///
+        /// 换成原地守备而不是 <c>UnitCommand.None</c> + AI：守备不接管战斗（攻击结算走既有距离判定），
+        /// 而且单位保持 <c>Commanded</c>，仍然留在 RTS 选择集里可以被重新下令。
+        /// 这与热更层 <c>AiHandoffSystem.HoldGroundAfterHandoff</c> 是同一条规矩：
+        /// **没有正在执行的命令时就待在原地**。
+        /// </summary>
+        private void HoldPosition(int i, float2 pos, float arriveRadius)
+        {
+            Commands[i] = new UnitCommand
+            {
+                Kind = UnitCommandKind.Guard,
+                TargetPosition = pos,
+                TargetEntity = SimEntityId.None,
+                ArriveRadius = arriveRadius,
+            };
+            Intents[i] = UnitIntent.Idle(EntityId[i], BinGames.Sim.IntentSource.Commanded);
         }
 
         private bool TryResolveTarget(SimEntityId targetId, out int targetIndex)
