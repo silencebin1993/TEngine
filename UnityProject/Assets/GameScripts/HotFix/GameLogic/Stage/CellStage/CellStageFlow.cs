@@ -547,6 +547,9 @@ namespace GameLogic.Stage.CellStage
         /// </summary>
         public const int ControlAllyArchetypeId = Control.ArchetypeLoadoutTable.SporeArchetypeId;
 
+        /// <summary>可控友军共用的造型 id（2026-09-14）。见 <see cref="SpawnControlAllies"/> 里的说明。</summary>
+        public const int ControlAllyVisualId = Control.ArchetypeLoadoutTable.SporeArchetypeId;
+
         private void SpawnControlAllies()
         {
             float health = _stats.Get(StatId.MaxHealth);
@@ -566,7 +569,7 @@ namespace GameLogic.Stage.CellStage
                 Faction = SimFaction.PlayerMinion,
                 IntentSource = IntentSource.AI,
                 LogicId = sporeLogicId,
-                VisualId = Control.ArchetypeLoadoutTable.SporeArchetypeId,
+                VisualId = ControlAllyVisualId,
             });
             _unitLoadouts?.RegisterArchetypePending(sporeLogicId, Control.ArchetypeLoadoutTable.SporeArchetypeId);
 
@@ -590,7 +593,11 @@ namespace GameLogic.Stage.CellStage
                 Faction = SimFaction.PlayerMinion,
                 IntentSource = IntentSource.AI,
                 LogicId = myceliumLogicId,
-                VisualId = Control.ArchetypeLoadoutTable.MyceliumArchetypeId,
+                // 2026-09-14：**两名友军用同一个模型**。玩家问「怎么模型不一样，装了不一样的
+                // 器官基因？」——按产品口径（GDD §6.5/6.6）单位差异只应来自装配的器官，
+                // 造型是表型层的事，现在这个阶段让它参与区分只会误导人以为"这两个是不同兵种"。
+                // 需要分辨谁是谁走 Hierarchy 的 #UID（DevUnitGoMirror），不靠外形。
+                VisualId = ControlAllyVisualId,
             });
             _unitLoadouts?.RegisterArchetypePending(myceliumLogicId, Control.ArchetypeLoadoutTable.MyceliumArchetypeId);
 

@@ -28,7 +28,11 @@ namespace GameLogic.Battle.Feedback
             get
             {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-                return PlayerPrefs.GetInt(PrefsKey, 0) != 0;
+                // 2026-09-14：开发期**默认开**（默认值 1）。玩家的原话是「我现在是开发阶段，
+                // 不要再给我走 gpu 实例化，我要的是在 hierarchy 能看到是谁、UID 是多少」。
+                // GPU 实例化不建 GameObject，Hierarchy 里没有东西可点，整个开发期都没法定位单位。
+                // 正式包不受影响：外层 #else 恒 false。仍可用菜单/试玩面板按钮临时关掉比对性能。
+                return PlayerPrefs.GetInt(PrefsKey, 1) != 0;
 #else
                 return false;
 #endif
@@ -69,6 +73,8 @@ namespace GameLogic.Battle.Feedback
             public MeshFilter Filter;
             public MeshRenderer Renderer;
             public int LastKey;
+            /// <summary>2026-09-14：单位镜像才挂，弹体镜像为 null。</summary>
+            public DevUnitProbe Probe;
         }
 
         public void Bind(SimBridge sim, SimVisual[] visuals)
@@ -142,7 +148,8 @@ namespace GameLogic.Battle.Feedback
                     continue;
                 }
 
-                Entry e = EnsureEntry(ref _unitPool, ref _unitPoolCount, _unitActive, _unitsRoot, "unit");
+                Entry e = EnsureEntry(ref _unitPool, ref _unitPoolCount, _unitActive, _unitsRoot, "unit",
+                    withProbe: true);
                 float2 p = snap.Position[i];
                 float radius = snap.Radius[i];
                 int visualId = snap.VisualId[i];
@@ -183,6 +190,26 @@ namespace GameLogic.Battle.Feedback
                 if (!e.Go.activeSelf)
                 {
                     e.Go.SetActive(true);
+                }
+
+                // 2026-09-14：把这一帧的模拟事实摊进 Inspector。玩家在 Hierarchy 里点中它就能读全，
+                // 不必在 game 窗口糊测试 UI。纯只读快照，不回写模拟。
+                if (e.Probe != null)
+                {
+                    e.Probe.UID = $"#{uid}";
+                    e.Probe.LogicId = logicId;
+                    e.Probe.VisualId = visualId;
+                    e.Probe.ArchetypeId = snap.ArchetypeId[i];
+                    e.Probe.Faction = snap.FactionOf(i).ToString();
+                    e.Probe.IntentSource = ((IntentSource)snap.IntentSource[i]).ToString();
+                    e.Probe.Command = _sim.TryGetCommand(snap.EntityId[i], out UnitCommand cmd) &&
+                                      cmd.Kind != UnitCommandKind.None
+                        ? cmd.Kind.ToString()
+                        : "None";
+                    e.Probe.MaxSpeed = _sim.World != null ? _sim.World.MaxSpeedOf(i) : 0f;
+                    e.Probe.Speed = math.length(snap.Velocity[i]);
+                    e.Probe.Health = snap.Health[i];
+                    e.Probe.Radius = radius;
                 }
 
                 _unitActive++;
@@ -256,7 +283,8 @@ namespace GameLogic.Battle.Feedback
         }
 
         static Entry EnsureEntry(
-            ref Entry[] pool, ref int poolCount, int index, Transform parent, string defaultName)
+            ref Entry[] pool, ref int poolCount, int index, Transform parent, string defaultName,
+            bool withProbe = false)
         {
             if (pool == null)
             {
@@ -282,6 +310,7 @@ namespace GameLogic.Battle.Feedback
                 Filter = filter,
                 Renderer = renderer,
                 LastKey = int.MinValue,
+                Probe = withProbe ? go.AddComponent<DevUnitProbe>() : null,
             };
 
             if (index >= pool.Length)

@@ -230,6 +230,16 @@ namespace BinGames.Sim
             _created = true;
         }
 
+        /// <summary>
+        /// 槽位的速度上限。<see cref="SimSnapshot"/> 不带这个字段（它是输入不是输出），
+        /// 但开发期探针要同时显示"上限"与"实测速度"才能分清慢的原因——
+        /// 只读查询，不参与模拟。越界返回 0。
+        /// </summary>
+        public float MaxSpeedOf(int unitIndex)
+        {
+            return _created && unitIndex >= 0 && unitIndex < _unitCount ? _maxSpeed[unitIndex] : 0f;
+        }
+
         /// <summary>返回当前槽位中的稳定实体身份；无效或已释放槽位返回 false。</summary>
         public bool TryGetEntityId(int unitIndex, out SimEntityId entityId)
         {
