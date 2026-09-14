@@ -37,6 +37,8 @@ namespace BinGames.Sim
         private NativeArray<SimEntityId> _entityId;
         private NativeArray<byte> _intentSource;
         private NativeArray<byte> _intentSourceBeforePlayer;
+        /// <summary>逐槽位的"不可接管"标记。见 <see cref="SpawnRequest.ExcludeFromControl"/>。</summary>
+        private NativeArray<byte> _excludeFromControl;
         private NativeArray<UnitIntent> _unitIntents;
 
         private NativeArray<BehaviorArchetype> _archetypes;
@@ -163,6 +165,7 @@ namespace BinGames.Sim
             _entityId = new NativeArray<SimEntityId>(cap, A);
             _intentSource = new NativeArray<byte>(cap, A);
             _intentSourceBeforePlayer = new NativeArray<byte>(cap, A);
+            _excludeFromControl = new NativeArray<byte>(cap, A);
             _unitIntents = new NativeArray<UnitIntent>(cap, A);
             _unitCommands = new NativeArray<UnitCommand>(cap, A);
 
@@ -315,7 +318,9 @@ namespace BinGames.Sim
             int count = 0;
             for (int i = 0; i < _unitCount; i++)
             {
-                if (i == controlledIndex || _alive[i] == 0 ||
+                // 召唤物不是可以转移意识进去的身体，不进候选——否则 Tab 会把玩家送进一个
+                // Stationary+Accel 0 的炮台里（实测推方向只有 0.097 u/s）。
+                if (i == controlledIndex || _alive[i] == 0 || _excludeFromControl[i] != 0 ||
                     !IsFriendlyFaction((SimFaction)_faction[i]) ||
                     math.distancesq(origin, _position[i]) > maxDistanceSq)
                 {
@@ -334,7 +339,7 @@ namespace BinGames.Sim
             for (int i = 0; i < _unitCount; i++)
             {
                 float distanceSq = math.distancesq(origin, _position[i]);
-                if (i == controlledIndex || _alive[i] == 0 ||
+                if (i == controlledIndex || _alive[i] == 0 || _excludeFromControl[i] != 0 ||
                     !IsFriendlyFaction((SimFaction)_faction[i]) || distanceSq > maxDistanceSq)
                 {
                     continue;
@@ -422,6 +427,9 @@ namespace BinGames.Sim
             {
                 return ControlSwitchResult.TargetNotFriendly;
             }
+            // 候选查询已经把召唤物滤掉了，这里再挡一次：RestoreControlTo 可能拿着一个陈旧 id 进来，
+            // 而那个槽位完全可能已经被复用成一个召唤物。判据只有一条，不会漂移。
+            if (_excludeFromControl[targetIndex] != 0) { return ControlSwitchResult.TargetNotFriendly; }
             if (_controlledUnitId == entityId) { return ControlSwitchResult.AlreadyControlled; }
 
             SimEntityId previousId = _controlledUnitId;
@@ -1809,6 +1817,7 @@ namespace BinGames.Sim
             _faction[idx] = (byte)req.Faction;
             _alive[idx] = 1;
             _entityId[idx] = AllocateEntityId();
+            _excludeFromControl[idx] = (byte)(req.ExcludeFromControl ? 1 : 0);
             IntentSource initialIntentSource = req.IntentSource == IntentSource.Scripted
                 ? IntentSource.Scripted
                 : IntentSource.AI;
@@ -2272,6 +2281,7 @@ namespace BinGames.Sim
             if (_entityId.IsCreated) { _entityId.Dispose(); }
             if (_intentSource.IsCreated) { _intentSource.Dispose(); }
             if (_intentSourceBeforePlayer.IsCreated) { _intentSourceBeforePlayer.Dispose(); }
+            if (_excludeFromControl.IsCreated) { _excludeFromControl.Dispose(); }
             if (_unitIntents.IsCreated) { _unitIntents.Dispose(); }
             if (_unitCommands.IsCreated) { _unitCommands.Dispose(); }
             SafeI(ref _deathEmitFrame);

@@ -37,6 +37,10 @@ namespace BinGames.Sim
         /// <summary>减速状态的速度倍率。</summary>
         public float SlowMul;
 
+        /// <summary>玩家直控时的加速度下限。与 <c>BehaviorArchetype.Default.Accel</c> 同值，
+        /// 保证任何身体在玩家手里的跟手程度一致。见 <see cref="Execute"/> 里的说明。</summary>
+        public const float PlayerControlMinAccel = 8f;
+
         public void Execute(int i)
         {
             if (i >= Count || Alive[i] == 0)
@@ -70,8 +74,20 @@ namespace BinGames.Sim
             float2 desired = DesiredDir[i] * speed;
             float2 vel = Velocity[i];
 
-            // 指数平滑趋近目标速度，Accel 越大越跟手
-            float k = 1f - math.exp(-math.max(0.01f, arc.Accel) * Dt);
+            // 指数平滑趋近目标速度，Accel 越大越跟手。
+            //
+            // 2026-09-14：**玩家直控的单位不吃行为原型的加速度**，取一个统一下限。
+            // 行为原型描述的是"这个 AI 怎么动"，不该决定"玩家开它跟不跟手"——
+            // 玩家接管一个 Accel=0 的固着原型时，夹到 0.01 的平滑系数让它每帧只逼近目标速度的
+            // 万分之 1.7，按住方向两秒多才爬到 0.097 u/s（实测值），读起来就是"这个角色移速巨慢"。
+            // 下限取 8，与玩家本体用的 BehaviorArchetype.Default.Accel 同值，
+            // 于是"任何身体在玩家手里的手感一致"——单位差异只应来自装配的器官。
+            // 用 Intents[i].Source 而不是另传一份 IntentSource 数组：这个 job 本来就读 Intents，
+            // 多一个输入就多一处要在 SimWorld 里接线、也多一处会漏接的地方。
+            float accel = Intents[i].Source == BinGames.Sim.IntentSource.Player
+                ? math.max(arc.Accel, PlayerControlMinAccel)
+                : arc.Accel;
+            float k = 1f - math.exp(-math.max(0.01f, accel) * Dt);
             vel = math.lerp(vel, desired, k);
 
             // 分离力直接叠加到速度上，但不让它突破速度上限太多

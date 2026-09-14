@@ -1581,6 +1581,53 @@ namespace GameLogic.EditorTools
                 Expect(flow.CameraDirector.EnsureDirectTarget() &&
                        flow.Sim.ControlledUnitId == parked,
                     "回直控应把意识接管回放下前那一具");
+
+                // ── E. 召唤物不是可接管的身体 ──
+                // bin 实测接管到一个 ArchetypeId=15 / MaxSpeed=4 / Speed=0.097 的菌丝锚炮台。
+                // 根因是 09-14 把接管信号范围放开成全场之后，每个召唤物都成了 Tab 候选，
+                // 而它们随开火不断生灭——这也是「友方角色每每都不一样」的来源。
+                const int SummonLogicId = 9415;
+                flow.Sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(6f, 6f), Health = 30f, Radius = 0.4f, MaxSpeed = 4f,
+                    ArchetypeId = ArchetypeLoadoutTable.MyceliumArchetypeId,
+                    Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = SummonLogicId,
+                    ExcludeFromControl = true,
+                });
+                flow.Sim.OnUpdate(1f / 60f);
+                SimEntityId summon = FindEntityId(flow.Sim.Snapshot, SummonLogicId, out _);
+                Expect(summon.IsValid, "召唤物应已落地");
+
+                SimControlCandidate[] afterSummon = flow.Sim.GetControlCandidates();
+                bool summonListed = false;
+                for (int i = 0; i < afterSummon.Length; i++)
+                {
+                    summonListed |= afterSummon[i].EntityId == summon;
+                }
+                Expect(!summonListed, "召唤物不得进入接管候选——它是装配打出来的产物，不是可转移意识的身体");
+                Expect(flow.Sim.RestoreControlTo(summon) == false &&
+                       flow.Sim.ControlledUnitId != summon,
+                    "即便拿着召唤物的 id 直接请求接管也必须被拒（槽位复用后可能拿到陈旧 id）");
+
+                // ── F. 玩家直控的加速度不看行为原型 ──
+                // 菌丝体固着原型 Accel=0，被夹到 0.01 后每帧只逼近目标速度的万分之 1.7，
+                // 按住方向两秒多才到 0.097 u/s。玩家手里的身体必须一律跟手。
+                Expect(flow.Sim.RestoreControlTo(allies[1]), "接管第二名友军用于验证直控加速度");
+                SimEntityId driven = flow.Sim.ControlledUnitId;
+                for (int i = 0; i < 45; i++)
+                {
+                    flow.Sim.SetControlledIntent(new PlayerIntent
+                    {
+                        MoveDir = new float2(1f, 0f),
+                        SpeedMul = 1f,
+                        RadiusOverride = -1f,
+                    });
+                    flow.Sim.OnUpdate(1f / 60f);
+                }
+                float drivenSpeed = math.length(VelOfId(flow.Sim.Snapshot, driven));
+                Expect(drivenSpeed > 3f,
+                    $"玩家直控 0.75 秒后应当接近全速，而不是被原型的低加速度拖住（实测 {drivenSpeed:F2} u/s）");
             }
             finally
             {
@@ -1601,6 +1648,15 @@ namespace GameLogic.EditorTools
             for (int i = 0; i < snap.Count; i++)
             {
                 if (snap.EntityId[i] == id) { return snap.Position[i]; }
+            }
+            return float2.zero;
+        }
+
+        private static float2 VelOfId(in SimSnapshot snap, SimEntityId id)
+        {
+            for (int i = 0; i < snap.Count; i++)
+            {
+                if (snap.EntityId[i] == id) { return snap.Velocity[i]; }
             }
             return float2.zero;
         }

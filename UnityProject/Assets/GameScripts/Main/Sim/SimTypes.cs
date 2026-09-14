@@ -374,6 +374,17 @@ namespace BinGames.Sim
         // 具体产品语义见 DesignDocs/migration/Surgical_Window_Contract.md。
 
         /// <summary>接点 1（占位标签 "PrimaryOrgan"）满血量。&lt;= 0 = 不配置该接点。</summary>
+        /// <summary>
+        /// 这个单位**不能被玩家接管**（2026-09-14）。默认 false = 可接管，所以既有生成点一行不改。
+        ///
+        /// 只给"召唤出来的小弟/炮台"置位。它们是装配打出来的产物，不是可以转移意识进去的身体；
+        /// 而 2026-09-14 把接管信号范围放开成全场之后，每一个召唤物都成了 Tab 候选——
+        /// 玩家因此接管到一个 <c>Stationary</c>+<c>Accel 0</c> 的菌丝锚，推方向只有 0.097 u/s，
+        /// 看起来像"移速巨慢的角色"。这些召唤物还随开火不断生灭，
+        /// 于是 Tab 循环的集合每次都不一样（玩家原话「友方角色每每都不一样」）。
+        /// </summary>
+        public bool ExcludeFromControl;
+
         public float PrimaryPartMaxHealth;
         /// <summary>M2-05b：接点 1 相对单位中心的世界 XZ 偏移。只用于直控弹体的几何瞄准。</summary>
         public float2 PrimaryPartAimOffset;

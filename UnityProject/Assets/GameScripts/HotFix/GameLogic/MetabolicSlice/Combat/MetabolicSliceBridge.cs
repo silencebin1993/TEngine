@@ -2316,6 +2316,9 @@ namespace GameLogic.MetabolicSlice.Combat
                         Faction = BinGames.Sim.SimFaction.PlayerMinion,
                         LogicId = childLogicId,
                         VisualId = budget.ArchetypeId,
+                        // 分裂出来的小块是装配打出来的产物，不是可以转移意识进去的身体。
+                        // 见 SpawnRequest.ExcludeFromControl。
+                        ExcludeFromControl = true,
                         // 与内核同一套血统计数：热更层的分裂预算算错时，
                         // 内核的 MaxSpawnGeneration 硬顶仍然兜得住。
                         Generation = (byte)Math.Min(budget.Generation + 1,
@@ -2459,6 +2462,9 @@ namespace GameLogic.MetabolicSlice.Combat
                     LogicId = logicId,
                     VisualId = evt.SummonId,
                     Generation = 0,
+                    // 召唤物（含菌丝锚炮台）不进接管候选：它们是装配的产物、随开火不断生灭，
+                    // 混进 Tab 循环会让玩家接管到一个 Stationary+Accel 0 的炮台里。
+                    ExcludeFromControl = true,
                 });
 
                 // SplitOnHit 分裂 → **死了会裂开**。登记这一只的分裂预算，
