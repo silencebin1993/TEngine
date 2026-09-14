@@ -7,7 +7,15 @@
 
 ## 1. 固定场景
 
-在编辑器或 Development Build 主菜单点击 **“M2-06 固定意识传递试玩”**。
+入口**不在 Unity 编辑器的菜单栏里**（菜单栏上只有 `BinGames/自检：细胞阶段框架` 那条自检）。
+它是**游戏自己的主菜单按钮**，要进 Play 模式才看得到：
+
+1. 打开启动场景 `Assets/Scenes/main.unity`，点 Play（`GameApp.Entrance` → `GameRoot.Startup`，
+   `GameScripts/HotFix/GameLogic/GameApp.cs:41`）；
+2. 屏幕中央出现 IMGUI 面板 **“细胞纪元”**（可拖动），从上到下三个按钮：
+   「开始漂流」/「LookDev 沙盒」/ **「M2-06 固定意识传递试玩」**；
+3. 后两个按钮包在 `#if UNITY_EDITOR || DEVELOPMENT_BUILD` 里，**正式包不会出现**
+   （`UI/Battle/CellDebugHud.cs:DrawMenu`）。
 
 - 进入方式是独立的 `CellStageEntryMode.ConsciousnessPlaytest`，不读取上一局控制记录。
 - 玩家本体出生在原点；两名现有真实友军仍固定出生在 `(-4, 2)` 与 `(4, 2)`。
