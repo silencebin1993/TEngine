@@ -21,6 +21,10 @@ namespace GameLogic.MetabolicSlice.Lineage
             DisplayName = displayName;
         }
 
+        /// <summary>M3-08：UI 只读查询——枚举该谱系下已经提交过至少一个版本的模板名，
+        /// 用于"展示模板预览"面板列出可选模板，不影响提交语义。</summary>
+        public IReadOnlyCollection<string> TemplateNames => _templateHistory.Keys;
+
         public IReadOnlyList<PhenotypeTemplateVersion> GetHistory(string templateName)
         {
             return templateName != null && _templateHistory.TryGetValue(templateName, out List<PhenotypeTemplateVersion> list)

@@ -84,6 +84,14 @@ namespace GameLogic.MetabolicSlice.Lineage
             return version;
         }
 
+        /// <summary>M3-08：预览用只读校验——跟 <see cref="CommitTemplate"/> 走同一套判据（蓝图所有权/
+        /// 槎位/基因数量），但不产生任何版本、不追加历史，给 UI 在玩家真正提交前展示冲突原因。
+        /// 返回 null 表示"现在提交会成功"，否则返回具体拒绝原因。</summary>
+        public string PreviewCommit(string organelleId, IReadOnlyList<string> geneIds)
+        {
+            return ValidateCommit(organelleId, geneIds);
+        }
+
         private string ValidateCommit(string organelleId, IReadOnlyList<string> geneIds)
         {
             if (string.IsNullOrEmpty(organelleId))

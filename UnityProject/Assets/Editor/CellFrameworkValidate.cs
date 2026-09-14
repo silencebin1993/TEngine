@@ -88,6 +88,7 @@ namespace GameLogic.EditorTools
                 ValidateGerminationChamber();
                 ValidateHomecomingRetrofit();
                 ValidateWildOrganLoot();
+                ValidateTemplateUiQueries();
             }
             catch (Exception e)
             {
@@ -2347,6 +2348,115 @@ namespace GameLogic.EditorTools
             Expect(wildOrgans.GetInstance(idBeforeDeath) == null, "身体死亡后临时器官应彻底消失，不进入任何终态");
             Expect(!unitLoadouts.Get(bodyA).HasOrganInSlot(LoadoutAction.Primary), "身体死亡后该身体不应再有临时器官占用的动作槽");
             Expect(!wildOrgans.TryGetInstalled(bodyA, out _), "身体死亡后该身体不应再登记有已安装的临时器官");
+        }
+
+        /// <summary>
+        /// M3-08：模板编辑与传播 UI 背后的只读查询面。本 story 是纯信息展示层（IMGUI 面板见
+        /// <c>CellDebugHud.DrawLineage*</c>），面板本身不适合在这里做渲染断言——这里测的是它依赖的
+        /// 三个新增只读查询（<see cref="Lineage.TemplateNames"/>/<see cref="LineageRegistry.PreviewCommit"/>/
+        /// <see cref="GerminationChamberRegistry.Bindings"/>）返回数据是否正确，以及验收核心
+        /// 「提交模板前后旧版本个体数不变」：提交新版本不应联动改写任何已绑定个体的引用。
+        /// </summary>
+        private static void ValidateTemplateUiQueries()
+        {
+            Line("\n[32] 模板编辑与传播 UI 只读查询（M3-08）");
+
+            OrganelleDef organelle = OrganelleCatalog.All.Values.FirstOrDefault(o => o.AttackMethod && !o.IsRetired);
+            List<string> geneIds = GeneCatalog.AllGeneIds.Take(2).ToList();
+            Expect(organelle != null, "OrganelleCatalog 应至少有一条 AttackMethod 未退役器官用于本项自检");
+            Expect(geneIds.Count == 2, "GeneCatalog 应至少有两条基因用于本项自检");
+            if (organelle == null || geneIds.Count < 2)
+            {
+                return;
+            }
+
+            var blueprints = new BlueprintRegistry();
+            blueprints.Resolve(organelle.Id, BlueprintSourceKind.Organelle, 1f, 0f);
+            foreach (string g in geneIds)
+            {
+                blueprints.Resolve(g, BlueprintSourceKind.Gene, 1f, 0f);
+            }
+
+            var lineages = new LineageRegistry();
+            lineages.Bind(blueprints);
+
+            // PreviewCommit 不应产生任何历史条目（预览与提交不能共用副作用）。
+            Expect(lineages.PreviewCommit(organelle.Id, geneIds) == null, "合法配方的预览应返回 null（无冲突）");
+            Lineage freshLineage = lineages.GetOrCreateLineage("lineage-ui-preview");
+            Expect(freshLineage.TemplateNames.Count == 0, "PreviewCommit 不应产生任何模板历史（预览不是提交）");
+            Expect(lineages.PreviewCommit(null, geneIds) != null, "空主器官 id 的预览应返回冲突原因");
+            Expect(lineages.PreviewCommit(organelle.Id, new List<string>()) != null, "基因数不足的预览应返回冲突原因");
+
+            PhenotypeTemplateVersion v1 = lineages.CommitTemplate("lineage-ui", "assault", organelle.Id, geneIds, "keep_distance", out string commitErr);
+            Expect(v1 != null && commitErr == null, "本项前置：合法配方提交应成功产生版本 1");
+
+            Lineage lineage = lineages.GetLineage("lineage-ui");
+            Expect(lineage.TemplateNames.Count == 1 && lineage.TemplateNames.Contains("assault"),
+                "TemplateNames 应枚举出刚提交的模板名");
+
+            // 真实 SimBridge 起一具个体，手工绑定到 V1（模拟萌生腔已生成过的旧个体，
+            // 这里只测查询面，不重复 [29] 的完整 Enqueue/OnUpdate 流程）。
+            var sim = new SimBridge();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 8;
+            cfg.ArenaHalfExtent = 60f;
+            cfg.RandomSeed = 0xC0FFEE32u;
+            var archetypes = new[]
+            {
+                new BehaviorArchetype
+                {
+                    Kind = BehaviorKind.Stationary, Accel = 0f, TurnRate = 0f, AggroRange = 0f,
+                    AttackRange = 0.5f, AttackCooldown = 99f, AttackDamage = 0f,
+                    Separation = 0f, ChargeSpeedMul = 1f,
+                },
+            };
+            sim.Begin(cfg, archetypes);
+
+            const int BoundLogicId = 9910;
+            sim.Spawn(new SpawnRequest
+            {
+                Position = sim.PlayerPosition, Health = 40f, Radius = 0.8f, MaxSpeed = 0f,
+                ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                IntentSource = IntentSource.AI, LogicId = BoundLogicId, ExcludeFromControl = true,
+            });
+            sim.OnUpdate(1f / 60f);
+            SimEntityId bound = FindEntityId(sim.Snapshot, BoundLogicId, out _);
+            Expect(bound.IsValid, "本项前置：测试个体应成功落地");
+            if (!bound.IsValid)
+            {
+                return;
+            }
+
+            var chamberLedger = new BiomassLedger();
+            chamberLedger.OnEnter();
+            var chamber = new GerminationChamberRegistry();
+            chamber.OnEnter();
+            chamber.Bind(sim, lineages, chamberLedger, null);
+            chamber.UpdateBinding(bound, "lineage-ui", "assault", v1);
+
+            Expect(chamber.Bindings.Count == 1 && chamber.Bindings.ContainsKey(bound), "Bindings 只读枚举应包含手工绑定的这一条");
+            Expect(ReferenceEquals(chamber.Bindings[bound].Version, v1), "Bindings 里的版本引用应与绑定时一致");
+
+            // 验收核心：提交模板前后，旧版本个体的绑定引用不应被联动改写。
+            GerminationChamberRegistry.UnitBinding beforeCommit = chamber.Bindings[bound];
+            PhenotypeTemplateVersion v2 = lineages.CommitTemplate("lineage-ui", "assault", organelle.Id, geneIds, "escort", out string commitErr2);
+            Expect(v2 != null && v2.Version == 2, "本项前置：第二次提交应产生版本 2");
+            GerminationChamberRegistry.UnitBinding afterCommit = chamber.Bindings[bound];
+            Expect(ReferenceEquals(beforeCommit.Version, afterCommit.Version) && ReferenceEquals(afterCommit.Version, v1),
+                "提交新版本不应联动改写任何已绑定个体——UI 展示的「旧版本个体」在提交前后必须如实不变（验收核心）");
+
+            // UI 用来判断"待回巢"的口径：绑定版本 != 谱系当前最新版本。
+            PhenotypeTemplateVersion latestAfter = lineage.GetLatest("assault");
+            Expect(ReferenceEquals(latestAfter, v2), "本项前置：谱系当前最新版本应为 V2");
+            Expect(!ReferenceEquals(chamber.Bindings[bound].Version, latestAfter),
+                "提交 V2 后，绑定 V1 的旧个体应能被 UI 正确识别为「待回巢」（版本引用不相等）");
+
+            // 其他谱系的绑定表应彼此独立，不因 lineage-ui 提交而改变。
+            lineages.CommitTemplate("lineage-ui-other", "escort", organelle.Id, geneIds, "guard", out _);
+            var otherChamber = new GerminationChamberRegistry();
+            otherChamber.OnEnter();
+            otherChamber.Bind(sim, lineages, chamberLedger, null);
+            Expect(otherChamber.Bindings.Count == 0, "不同萌生腔实例的绑定表应彼此独立，互不污染");
         }
 
         /// <summary>

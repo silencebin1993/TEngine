@@ -217,6 +217,10 @@ namespace GameLogic.MetabolicSlice.Lineage
             return _bindings.TryGetValue(entityId, out binding);
         }
 
+        /// <summary>M3-08：UI 只读查询——枚举全部已知绑定，供"筛选旧版个体"面板遍历判断
+        /// 每具个体绑定的版本是否等于该谱系表型的当前最新版本。不提供写入口，调用方只能读。</summary>
+        public IReadOnlyDictionary<SimEntityId, UnitBinding> Bindings => _bindings;
+
         /// <summary>M3-06：回巢改造完成后，把已存在个体的绑定原地替换成新锁定的版本——同一个
         /// <see cref="SimEntityId"/>，不产出第二条记录、不复制器官/基因。查无此实体（不是本腔萌生的）
         /// 时不做任何事，由调用方（<see cref="HomecomingRetrofitService"/>）自行决定如何处理。</summary>

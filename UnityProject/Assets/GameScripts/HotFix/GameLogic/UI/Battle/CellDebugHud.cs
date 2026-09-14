@@ -2,9 +2,11 @@ using System.Collections.Generic;
 using ComposeEngine.Core;
 using GameLogic.Cards;
 using GameLogic.Core;
+using GameLogic.MetabolicSlice.Blueprint;
 using GameLogic.MetabolicSlice.Combat;
 using GameLogic.MetabolicSlice.ContentCatalog;
 using GameLogic.MetabolicSlice.DebugTools;
+using GameLogic.MetabolicSlice.Lineage;
 using GameLogic.Progression;
 using GameLogic.Stage;
 using GameLogic.Stage.CellStage;
@@ -36,6 +38,17 @@ namespace GameLogic.UI.Battle
         private bool _showDeck;
         private bool _showShop;
         private bool _showCodex;
+
+        /// <summary>M3-08：谱系/表型模板面板（Y 键开关）。原型期信息面板，走同款 IMGUI 调试风格，
+        /// 不做正式美术——玩家用它看清"改了什么/影响谁/花多少/谁仍是旧版"（Milestones.md M3-08）。
+        /// 单谱系 MVP：本面板固定操作 <see cref="PlayerLineageId"/> 这一条谱系，多谱系 UI 留给后续故事。</summary>
+        private bool _showLineage;
+        private string _lineageTemplateNameInput = "assault";
+        private string _lineageDoctrineInput = "keep_distance";
+        private string _lineageSelectedOrganelle;
+        private readonly List<string> _lineageSelectedGenes = new List<string>();
+        private string _lineageCommitFeedback;
+        private Vector2 _lineageScroll;
 
         /// <summary>
         /// §12.1 常驻信息已迁移到 <see cref="GameLogic.BattleMainUI"/>（UIWindow + prefab）。
@@ -90,6 +103,11 @@ namespace GameLogic.UI.Battle
         private Rect _shopRect;
         private Rect _codexRect;
         private Rect _playtestRect;
+        private Rect _lineageRect;
+
+        /// <summary>M3-08：单谱系 MVP 固定用这个 id——本仓尚无"创建/选择谱系"的玩法流程，
+        /// 真实多谱系归属留给后续故事接线，不在本面板范围内。</summary>
+        private const string PlayerLineageId = "player";
 
         /// <summary>沙盒"自动连发"计时器——OnGUI 每帧可能因 Layout/Repaint 事件触发多次，计时放 Update 更可靠。</summary>
         private void Update()
@@ -172,6 +190,11 @@ namespace GameLogic.UI.Battle
             if (_showCodex)
             {
                 DrawCodex(cell);
+            }
+
+            if (_showLineage)
+            {
+                DrawLineage(cell);
             }
         }
 
@@ -555,6 +578,10 @@ namespace GameLogic.UI.Battle
             else if (Event.current.keyCode == KeyCode.K)
             {
                 _showLegacyDraft = !_showLegacyDraft;
+            }
+            else if (Event.current.keyCode == KeyCode.Y)
+            {
+                _showLineage = !_showLineage;
             }
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             else if (Event.current.keyCode == KeyCode.L)
@@ -1173,6 +1200,290 @@ namespace GameLogic.UI.Battle
                     : c.ContentKind == ContentKind.Gene ? "基因" : "卡牌";
                 GUILayout.Label($"　[{kind}] {RarityText(c.Rarity)} {c.Name}", _label);
                 GUILayout.Label($"　　{c.Desc}", _label);
+            }
+        }
+
+        /// <summary>
+        /// M3-08 模板编辑与传播 UI（Y 键开关）。纯信息展示+转发操作，不重新实现任何后端校验——
+        /// 提交/萌生/回巢一律调用 <see cref="LineageRegistry"/>/<see cref="GerminationChamberRegistry"/>/
+        /// <see cref="HomecomingRetrofitService"/> 的既有真实入口。验收核心「新玩家不会误以为一次提交
+        /// 瞬间改变整队」：文案明写"旧版本个体不会自动更新"，且"已提交模板"区块只读 <c>lineage.GetLatest</c>
+        /// 与既有绑定表，从不遍历触发批量改造——提交动作与个体是否换装配物理上是两条互不联动的路径
+        /// （这条边界从 M3-05/M3-06 起就是结构性的，本面板只是如实展示，不新增任何联动）。
+        /// </summary>
+        private void DrawLineage(CellStageFlow cell)
+        {
+            if (_lineageRect.width <= 0f)
+            {
+                _lineageRect = new Rect(12f, 12f, 480f, Screen.height - 24f);
+            }
+            ImguiDragUtil.DrawDraggable(108, ref _lineageRect, "谱系与表型模板（M3-08）", "lineage",
+                id => DrawLineageContent(cell));
+        }
+
+        private void DrawLineageContent(CellStageFlow cell)
+        {
+            if (cell.Lineages == null || cell.Blueprints == null)
+            {
+                GUILayout.Label("谱系/蓝图模块未就绪", _label);
+                return;
+            }
+
+            Lineage lineage = cell.Lineages.GetOrCreateLineage(PlayerLineageId, "玩家谱系");
+            float balance = cell.BiomassLedger?.GetBalance(PlayerLineageId) ?? 0f;
+
+            _lineageScroll = GUILayout.BeginScrollView(_lineageScroll);
+
+            GUILayout.Label($"<b>{lineage.DisplayName}</b>　生物质 {balance:F0}", _label);
+            GUILayout.Space(6f);
+
+            DrawLineageBlueprintSection(cell);
+            GUILayout.Space(10f);
+            DrawLineageEditSection(cell);
+            GUILayout.Space(10f);
+            DrawLineageTemplateSection(cell, lineage);
+            GUILayout.Space(10f);
+            DrawLineageUnitsSection(cell);
+
+            GUILayout.EndScrollView();
+        }
+
+        /// <summary>实施第 1 条：器官/基因来源与用途——读 <see cref="BlueprintRegistry.AllEntries"/>，
+        /// 名称/说明查现有 Catalog（不复制目录内容）。</summary>
+        private void DrawLineageBlueprintSection(CellStageFlow cell)
+        {
+            GUILayout.Label("<b>蓝图库（来源 / 用途）</b>", _label);
+            int count = 0;
+            foreach (BlueprintEntry entry in cell.Blueprints.AllEntries)
+            {
+                count++;
+                bool isOrganelle = entry.Kind == BlueprintSourceKind.Organelle;
+                string name = isOrganelle ? OrganelleCatalog.Get(entry.SourceId)?.DisplayName : GeneCatalog.GetDisplayName(entry.SourceId);
+                string desc = isOrganelle ? OrganelleCatalog.Get(entry.SourceId)?.Description : GeneCatalog.GetDescription(entry.SourceId);
+                string kindText = isOrganelle ? "器官" : "基因";
+                string state = entry.Unlocked ? "已解锁" : $"解析中 {entry.Completeness:P0}";
+                GUILayout.Label($"　[{kindText}] {name ?? entry.SourceId}　{state}　污染 {entry.Contamination:P0}", _label);
+                if (!string.IsNullOrEmpty(desc))
+                {
+                    GUILayout.Label($"　　{desc}", _hint);
+                }
+            }
+            if (count == 0)
+            {
+                GUILayout.Label("　（还没有解析过任何器官/基因，先在场上解析一件野生器官）", _hint);
+            }
+        }
+
+        /// <summary>实施第 2 条：模板预览和冲突——选择已解锁主器官（单选）+ 2-4 个已解锁基因，
+        /// 用 <see cref="LineageRegistry.PreviewCommit"/> 只读校验展示冲突原因，不产生任何版本；
+        /// 提交按钮才真正调用 <see cref="LineageRegistry.CommitTemplate"/>。</summary>
+        private void DrawLineageEditSection(CellStageFlow cell)
+        {
+            GUILayout.Label("<b>编辑表型模板</b>", _label);
+            GUILayout.Label("模板名", _hint);
+            _lineageTemplateNameInput = GUILayout.TextField(_lineageTemplateNameInput, GUILayout.Width(180f));
+            GUILayout.Label("AI 教义（占位标签，行为决策树留给后续故事）", _hint);
+            _lineageDoctrineInput = GUILayout.TextField(_lineageDoctrineInput, GUILayout.Width(180f));
+
+            GUILayout.Label("主器官（已解锁，单选）", _hint);
+            foreach (BlueprintEntry entry in cell.Blueprints.AllEntries)
+            {
+                if (entry.Kind != BlueprintSourceKind.Organelle || !entry.Unlocked)
+                {
+                    continue;
+                }
+                OrganelleDef def = OrganelleCatalog.Get(entry.SourceId);
+                if (def == null || !def.AttackMethod || def.IsRetired)
+                {
+                    continue;
+                }
+                bool selected = _lineageSelectedOrganelle == entry.SourceId;
+                if (GUILayout.Toggle(selected, def.DisplayName ?? entry.SourceId) != selected)
+                {
+                    _lineageSelectedOrganelle = selected ? null : entry.SourceId;
+                }
+            }
+
+            GUILayout.Label("基因节点（已解锁，2-4 个，按点选顺序排列）", _hint);
+            foreach (BlueprintEntry entry in cell.Blueprints.AllEntries)
+            {
+                if (entry.Kind != BlueprintSourceKind.Gene || !entry.Unlocked)
+                {
+                    continue;
+                }
+                int idx = _lineageSelectedGenes.IndexOf(entry.SourceId);
+                bool selected = idx >= 0;
+                string label = selected ? $"{idx + 1}. {GeneCatalog.GetDisplayName(entry.SourceId)}" : GeneCatalog.GetDisplayName(entry.SourceId);
+                if (GUILayout.Toggle(selected, label) != selected)
+                {
+                    if (selected)
+                    {
+                        _lineageSelectedGenes.RemoveAt(idx);
+                    }
+                    else if (_lineageSelectedGenes.Count < LineageRegistry.MaxGeneSlots)
+                    {
+                        _lineageSelectedGenes.Add(entry.SourceId);
+                    }
+                }
+            }
+
+            string previewError = cell.Lineages.PreviewCommit(_lineageSelectedOrganelle, _lineageSelectedGenes);
+            GUILayout.Label(previewError != null
+                ? $"<color=#FFB060>冲突：{previewError}</color>"
+                : "<color=#80FF80>预览：现在提交会成功</color>", _hint);
+
+            GUI.enabled = previewError == null && !string.IsNullOrEmpty(_lineageTemplateNameInput);
+            if (GUILayout.Button("提交新版本（旧版本个体不会自动更新）", GUILayout.Height(26f)))
+            {
+                PhenotypeTemplateVersion committed = cell.Lineages.CommitTemplate(
+                    PlayerLineageId, _lineageTemplateNameInput, _lineageSelectedOrganelle,
+                    _lineageSelectedGenes, _lineageDoctrineInput, out string commitError);
+                _lineageCommitFeedback = committed != null
+                    ? $"已提交「{_lineageTemplateNameInput}」V{committed.Version}——只有之后新生/完成回巢的个体会表达它"
+                    : $"提交失败：{commitError}";
+            }
+            GUI.enabled = true;
+            if (!string.IsNullOrEmpty(_lineageCommitFeedback))
+            {
+                GUILayout.Label(_lineageCommitFeedback, _hint);
+            }
+        }
+
+        /// <summary>实施第 3 条：新生数量、可改造数量与总成本——按模板名读最新版本 + 统计绑定表里
+        /// 版本落后于最新的个体数，成本直接用 <see cref="PhenotypeTemplateVersion.BiomassCost"/>。</summary>
+        private void DrawLineageTemplateSection(CellStageFlow cell, Lineage lineage)
+        {
+            GUILayout.Label("<b>已提交模板</b>", _label);
+            int templateCount = 0;
+            foreach (string templateName in lineage.TemplateNames)
+            {
+                PhenotypeTemplateVersion latest = lineage.GetLatest(templateName);
+                if (latest == null)
+                {
+                    continue;
+                }
+                templateCount++;
+
+                int outdatedCount = CountOutdatedBindings(cell, PlayerLineageId, templateName, latest);
+                int pending = cell.GerminationChambers?.PendingCount(PlayerLineageId) ?? 0;
+
+                GUILayout.Label($"　{templateName}　最新 V{latest.Version}　主器官 {latest.OrganelleId}　基因 x{latest.GeneIds.Count}", _label);
+                GUILayout.Label(
+                    $"　　签名 {latest.Signature}　萌生成本 {latest.BiomassCost:F0}　" +
+                    $"待回巢 {outdatedCount} 个（合计成本 {latest.BiomassCost * outdatedCount:F0}）　队列中 {pending}",
+                    _hint);
+
+                if (cell.GerminationChambers != null &&
+                    GUILayout.Button($"萌生一个「{templateName}」（{latest.BiomassCost:F0} 生物质）", GUILayout.Height(22f)))
+                {
+                    int ticket = cell.GerminationChambers.Enqueue(PlayerLineageId, templateName, out _, out string enqueueError);
+                    _lineageCommitFeedback = ticket != 0
+                        ? $"已排入萌生腔（票据 {ticket}）"
+                        : $"萌生失败：{enqueueError}";
+                }
+            }
+            if (templateCount == 0)
+            {
+                GUILayout.Label("　（还没有提交过任何模板，先在上面编辑并提交）", _hint);
+            }
+        }
+
+        /// <summary>实施第 4/5 条：个体面板显示谱系/表型/版本 + 筛选旧版个体并下达回巢命令——
+        /// 只转发到 <see cref="HomecomingRetrofitService"/> 的既有入口，不自己判断能不能改造。</summary>
+        private void DrawLineageUnitsSection(CellStageFlow cell)
+        {
+            GUILayout.Label("<b>已绑定个体（谱系 / 表型 / 版本）</b>", _label);
+
+            if (cell.Sim == null || !cell.Sim.Running || cell.GerminationChambers == null)
+            {
+                GUILayout.Label("　（模拟未运行）", _hint);
+                return;
+            }
+
+            BinGames.Sim.SimSnapshot snap = cell.Sim.Snapshot;
+            int shown = 0;
+            foreach (KeyValuePair<BinGames.Sim.SimEntityId, GerminationChamberRegistry.UnitBinding> pair in cell.GerminationChambers.Bindings)
+            {
+                BinGames.Sim.SimEntityId entityId = pair.Key;
+                GerminationChamberRegistry.UnitBinding binding = pair.Value;
+                if (!snap.TryResolve(entityId, out int index) || !snap.IsAlive(index))
+                {
+                    continue;
+                }
+                shown++;
+
+                Lineage boundLineage = cell.Lineages.GetLineage(binding.LineageId);
+                PhenotypeTemplateVersion latestForBinding = boundLineage?.GetLatest(binding.TemplateName);
+                bool outdated = latestForBinding != null && !ReferenceEquals(latestForBinding, binding.Version);
+
+                string tag = outdated ? "<color=#FFB060>待回巢（不会自动更新）</color>" : "最新版本";
+                GUILayout.Label($"　#{entityId.Value}　{binding.LineageId}/{binding.TemplateName} V{binding.Version.Version}　{tag}", _label);
+
+                if (!outdated)
+                {
+                    continue;
+                }
+
+                if (cell.HomecomingRetrofit.IsRetrofitting(entityId))
+                {
+                    GUILayout.Label("　　改造中…", _hint);
+                    continue;
+                }
+
+                if (GUILayout.Button($"　回巢改造到 V{latestForBinding.Version}", GUILayout.Height(20f)))
+                {
+                    HomecomingRetrofitService.RetrofitRejectReason reason = cell.HomecomingRetrofit.TryBeginRetrofit(entityId);
+                    if (reason == HomecomingRetrofitService.RetrofitRejectReason.None)
+                    {
+                        // 本服务没有建模"改造耗时"（M3-06 未做定时器，见其类型注释），
+                        // 对玩家呈现为一次原子的"回巢改造"操作，不额外发明进度条。
+                        cell.HomecomingRetrofit.CompleteRetrofit(entityId);
+                        _lineageCommitFeedback = $"#{entityId.Value} 回巢改造完成";
+                    }
+                    else
+                    {
+                        _lineageCommitFeedback = $"#{entityId.Value} 回巢改造被拒绝：{RetrofitReasonLabel(reason)}";
+                    }
+                }
+            }
+
+            if (shown == 0)
+            {
+                GUILayout.Label("　（还没有任何萌生腔生成的个体存活在场上）", _hint);
+            }
+        }
+
+        private static int CountOutdatedBindings(CellStageFlow cell, string lineageId, string templateName, PhenotypeTemplateVersion latest)
+        {
+            if (cell.GerminationChambers == null)
+            {
+                return 0;
+            }
+            int count = 0;
+            foreach (KeyValuePair<BinGames.Sim.SimEntityId, GerminationChamberRegistry.UnitBinding> pair in cell.GerminationChambers.Bindings)
+            {
+                GerminationChamberRegistry.UnitBinding binding = pair.Value;
+                if (binding.LineageId == lineageId && binding.TemplateName == templateName && !ReferenceEquals(binding.Version, latest))
+                {
+                    count++;
+                }
+            }
+            return count;
+        }
+
+        private static string RetrofitReasonLabel(HomecomingRetrofitService.RetrofitRejectReason reason)
+        {
+            switch (reason)
+            {
+                case HomecomingRetrofitService.RetrofitRejectReason.AlreadyInProgress: return "已经在改造中";
+                case HomecomingRetrofitService.RetrofitRejectReason.NotBound: return "该个体没有绑定记录";
+                case HomecomingRetrofitService.RetrofitRejectReason.NoNewerVersion: return "已经是最新版本";
+                case HomecomingRetrofitService.RetrofitRejectReason.NotNetworked: return "萌生腔未联网";
+                case HomecomingRetrofitService.RetrofitRejectReason.Engaged: return "正在交战";
+                case HomecomingRetrofitService.RetrofitRejectReason.CarryingKeyItem: return "携带关键物";
+                case HomecomingRetrofitService.RetrofitRejectReason.TooFarFromChamber: return "距萌生腔太远";
+                case HomecomingRetrofitService.RetrofitRejectReason.InsufficientBiomass: return "生物质不足";
+                default: return reason.ToString();
             }
         }
     }
