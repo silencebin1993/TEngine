@@ -109,9 +109,36 @@ namespace GameLogic.UI.Battle
         /// 真实多谱系归属留给后续故事接线，不在本面板范围内。</summary>
         private const string PlayerLineageId = "player";
 
+        /// <summary>fix(perf)：<see cref="DrawLineageUnitsSection"/>/<see cref="DrawLineageTemplateSection"/>
+        /// 共用的一次遍历结果。原实现对 <c>GerminationChambers.Bindings</c> 循环两遍，且每条绑定都调
+        /// <c>SimSnapshot.TryResolve</c>（对全体 Sim 实体线性扫描，见其源码），两者相乘 = O(绑定数×战场实体数)，
+        /// 而这套计算原先直接摆在 OnGUI 里——IMGUI 的 Layout/Repaint/输入事件会让 OnGUI 每帧触发好几次，
+        /// 于是这套 O(n) 又被乘了一遍。现在只在 <see cref="Update"/>（每帧恰好一次）里重算一次，OnGUI 只读缓存。</summary>
+        private readonly List<LineageBindingRow> _lineageBindingRows = new List<LineageBindingRow>();
+
+        /// <summary>模板名 → 该模板在玩家谱系下过期（非最新版本）的绑定数，随 <see cref="_lineageBindingRows"/> 同一趟算出。</summary>
+        private readonly Dictionary<string, int> _lineageOutdatedCounts = new Dictionary<string, int>();
+
+        private struct LineageBindingRow
+        {
+            public BinGames.Sim.SimEntityId EntityId;
+            public GerminationChamberRegistry.UnitBinding Binding;
+            public PhenotypeTemplateVersion LatestForBinding;
+            public bool Outdated;
+        }
+
         /// <summary>沙盒"自动连发"计时器——OnGUI 每帧可能因 Layout/Repaint 事件触发多次，计时放 Update 更可靠。</summary>
         private void Update()
         {
+            if (_showLineage)
+            {
+                CellStageFlow lineageCell = GameRoot.CellStage;
+                if (lineageCell != null && lineageCell.IsRunning)
+                {
+                    RefreshLineageBindingCache(lineageCell);
+                }
+            }
+
             if (!_lookDevActive || !_sandboxAutoFire)
             {
                 return;
@@ -1221,6 +1248,50 @@ namespace GameLogic.UI.Battle
                 id => DrawLineageContent(cell));
         }
 
+        /// <summary>fix(perf)：见 <see cref="_lineageBindingRows"/> 类型注释——每帧恰好算一次，
+        /// 不放 OnGUI。只过滤存活实体（<c>TryResolve</c>+<c>IsAlive</c>），不改变原有展示口径：
+        /// 个体列表不按谱系过滤（保持原 <see cref="DrawLineageUnitsSection"/> 行为），
+        /// 过期计数只统计 <see cref="PlayerLineageId"/> 谱系下的绑定（保持原 <c>CountOutdatedBindings</c> 口径）。</summary>
+        private void RefreshLineageBindingCache(CellStageFlow cell)
+        {
+            _lineageBindingRows.Clear();
+            _lineageOutdatedCounts.Clear();
+
+            if (cell.Sim == null || !cell.Sim.Running || cell.GerminationChambers == null)
+            {
+                return;
+            }
+
+            BinGames.Sim.SimSnapshot snap = cell.Sim.Snapshot;
+            foreach (KeyValuePair<BinGames.Sim.SimEntityId, GerminationChamberRegistry.UnitBinding> pair in cell.GerminationChambers.Bindings)
+            {
+                BinGames.Sim.SimEntityId entityId = pair.Key;
+                GerminationChamberRegistry.UnitBinding binding = pair.Value;
+                if (!snap.TryResolve(entityId, out int index) || !snap.IsAlive(index))
+                {
+                    continue;
+                }
+
+                Lineage boundLineage = cell.Lineages.GetLineage(binding.LineageId);
+                PhenotypeTemplateVersion latestForBinding = boundLineage?.GetLatest(binding.TemplateName);
+                bool outdated = latestForBinding != null && !ReferenceEquals(latestForBinding, binding.Version);
+
+                _lineageBindingRows.Add(new LineageBindingRow
+                {
+                    EntityId = entityId,
+                    Binding = binding,
+                    LatestForBinding = latestForBinding,
+                    Outdated = outdated,
+                });
+
+                if (outdated && binding.LineageId == PlayerLineageId)
+                {
+                    _lineageOutdatedCounts.TryGetValue(binding.TemplateName, out int count);
+                    _lineageOutdatedCounts[binding.TemplateName] = count + 1;
+                }
+            }
+        }
+
         private void DrawLineageContent(CellStageFlow cell)
         {
             if (cell.Lineages == null || cell.Blueprints == null)
@@ -1364,7 +1435,7 @@ namespace GameLogic.UI.Battle
                 }
                 templateCount++;
 
-                int outdatedCount = CountOutdatedBindings(cell, PlayerLineageId, templateName, latest);
+                int outdatedCount = _lineageOutdatedCounts.TryGetValue(templateName, out int cachedOutdated) ? cachedOutdated : 0;
                 int pending = cell.GerminationChambers?.PendingCount(PlayerLineageId) ?? 0;
 
                 GUILayout.Label($"　{templateName}　最新 V{latest.Version}　主器官 {latest.OrganelleId}　基因 x{latest.GeneIds.Count}", _label);
@@ -1400,49 +1471,38 @@ namespace GameLogic.UI.Battle
                 return;
             }
 
-            BinGames.Sim.SimSnapshot snap = cell.Sim.Snapshot;
             int shown = 0;
-            foreach (KeyValuePair<BinGames.Sim.SimEntityId, GerminationChamberRegistry.UnitBinding> pair in cell.GerminationChambers.Bindings)
+            foreach (LineageBindingRow row in _lineageBindingRows)
             {
-                BinGames.Sim.SimEntityId entityId = pair.Key;
-                GerminationChamberRegistry.UnitBinding binding = pair.Value;
-                if (!snap.TryResolve(entityId, out int index) || !snap.IsAlive(index))
-                {
-                    continue;
-                }
                 shown++;
 
-                Lineage boundLineage = cell.Lineages.GetLineage(binding.LineageId);
-                PhenotypeTemplateVersion latestForBinding = boundLineage?.GetLatest(binding.TemplateName);
-                bool outdated = latestForBinding != null && !ReferenceEquals(latestForBinding, binding.Version);
+                string tag = row.Outdated ? "<color=#FFB060>待回巢（不会自动更新）</color>" : "最新版本";
+                GUILayout.Label($"　#{row.EntityId.Value}　{row.Binding.LineageId}/{row.Binding.TemplateName} V{row.Binding.Version.Version}　{tag}", _label);
 
-                string tag = outdated ? "<color=#FFB060>待回巢（不会自动更新）</color>" : "最新版本";
-                GUILayout.Label($"　#{entityId.Value}　{binding.LineageId}/{binding.TemplateName} V{binding.Version.Version}　{tag}", _label);
-
-                if (!outdated)
+                if (!row.Outdated)
                 {
                     continue;
                 }
 
-                if (cell.HomecomingRetrofit.IsRetrofitting(entityId))
+                if (cell.HomecomingRetrofit.IsRetrofitting(row.EntityId))
                 {
                     GUILayout.Label("　　改造中…", _hint);
                     continue;
                 }
 
-                if (GUILayout.Button($"　回巢改造到 V{latestForBinding.Version}", GUILayout.Height(20f)))
+                if (GUILayout.Button($"　回巢改造到 V{row.LatestForBinding.Version}", GUILayout.Height(20f)))
                 {
-                    HomecomingRetrofitService.RetrofitRejectReason reason = cell.HomecomingRetrofit.TryBeginRetrofit(entityId);
+                    HomecomingRetrofitService.RetrofitRejectReason reason = cell.HomecomingRetrofit.TryBeginRetrofit(row.EntityId);
                     if (reason == HomecomingRetrofitService.RetrofitRejectReason.None)
                     {
                         // 本服务没有建模"改造耗时"（M3-06 未做定时器，见其类型注释），
                         // 对玩家呈现为一次原子的"回巢改造"操作，不额外发明进度条。
-                        cell.HomecomingRetrofit.CompleteRetrofit(entityId);
-                        _lineageCommitFeedback = $"#{entityId.Value} 回巢改造完成";
+                        cell.HomecomingRetrofit.CompleteRetrofit(row.EntityId);
+                        _lineageCommitFeedback = $"#{row.EntityId.Value} 回巢改造完成";
                     }
                     else
                     {
-                        _lineageCommitFeedback = $"#{entityId.Value} 回巢改造被拒绝：{RetrofitReasonLabel(reason)}";
+                        _lineageCommitFeedback = $"#{row.EntityId.Value} 回巢改造被拒绝：{RetrofitReasonLabel(reason)}";
                     }
                 }
             }
@@ -1451,24 +1511,6 @@ namespace GameLogic.UI.Battle
             {
                 GUILayout.Label("　（还没有任何萌生腔生成的个体存活在场上）", _hint);
             }
-        }
-
-        private static int CountOutdatedBindings(CellStageFlow cell, string lineageId, string templateName, PhenotypeTemplateVersion latest)
-        {
-            if (cell.GerminationChambers == null)
-            {
-                return 0;
-            }
-            int count = 0;
-            foreach (KeyValuePair<BinGames.Sim.SimEntityId, GerminationChamberRegistry.UnitBinding> pair in cell.GerminationChambers.Bindings)
-            {
-                GerminationChamberRegistry.UnitBinding binding = pair.Value;
-                if (binding.LineageId == lineageId && binding.TemplateName == templateName && !ReferenceEquals(binding.Version, latest))
-                {
-                    count++;
-                }
-            }
-            return count;
         }
 
         private static string RetrofitReasonLabel(HomecomingRetrofitService.RetrofitRejectReason reason)
