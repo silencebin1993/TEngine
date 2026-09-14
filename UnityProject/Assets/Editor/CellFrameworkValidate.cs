@@ -1442,8 +1442,13 @@ namespace GameLogic.EditorTools
             cfg.ArenaHalfExtent = 60f;
             cfg.RandomSeed = 0xC0FFEE07u;
 
-            // 与 [19] 同一种构造：召唤物会攻击，假人完全不还手也不动，
+            // 与 [19] 同一种构造：可接管友军会攻击，假人完全不还手也不动，
             // 这样掉血与弹体只可能来自被测单位。
+            //
+            // ⚠ 用词：本段被测的是**可接管友军**（`SpawnControlAllies` 那种，不设 ExcludeFromControl），
+            // **不是召唤物**。真·召唤物只由 `MetabolicSliceBridge` 生成、一律 `ExcludeFromControl = true`、
+            // 至今不可接管（守在 [24]-E 的两条断言里）。两者都是 `SimFaction.PlayerMinion`，
+            // 在内核里长得很像，但"能不能把意识转进去"是相反的——别把这两个词混着用。
             var archetypes = new[]
             {
                 new BehaviorArchetype
@@ -1576,8 +1581,9 @@ namespace GameLogic.EditorTools
                 Step(120);
                 float bareHit = bareBase - HealthOf(bareDummy);
                 Expect(bareHit > 0f,
-                    $"没登记装配的召唤物必须照常用原型数值打人（打掉 {bareHit:F1}）——" +
-                    "让它跟着走器官路会彻底哑火，那比原问题更严重");
+                    $"没登记装配的身体必须照常用原型数值打人（打掉 {bareHit:F1}）——" +
+                    "真·召唤物（ExcludeFromControl=true 那种）正是这一类，" +
+                    "让它们跟着走器官路会彻底哑火，那比原问题更严重");
 
                 // ── 4. 核心：玩家接管同一具身体，打出来的是同一种东西 ──────
                 Expect(sim.RequestControlSwitch(armed) == ControlRequestResult.Success,
@@ -4326,7 +4332,7 @@ namespace GameLogic.EditorTools
             cfg.ArenaHalfExtent = 60f;
             cfg.RandomSeed = 0xC0FFEE05u;
 
-            // 自造原型表而不是读 Luban：召唤物必须**真的会攻击**（本段的被测行为就是它），
+            // 自造原型表而不是读 Luban：可接管友军必须**真的会攻击**（本段的被测行为就是它），
             // 敌人必须完全不还手、也不动（这样掉血只可能来自被测单位）。
             var archetypes = new[]
             {
@@ -4364,7 +4370,7 @@ namespace GameLogic.EditorTools
                 registry.RegisterPlayerBody(body);
                 actions.Bind(sim, registry, abilities: null, status: null);
 
-                // 两组"召唤物 + 假人"隔开 40 米以上摆，索敌半径 12——保证各打各的，
+                // 两组"可接管友军 + 假人"隔开 40 米以上摆，索敌半径 12——保证各打各的，
                 // 对照组的掉血不可能来自被测组。
                 const int MinionALogicId = 9601;
                 const int DummyALogicId = 9602;
@@ -4406,7 +4412,7 @@ namespace GameLogic.EditorTools
                 SimEntityId dummyB = FindEntityId(snap0, DummyBLogicId, out _);
                 Expect(body.IsValid && minionA.IsValid && dummyA.IsValid &&
                        minionB.IsValid && dummyB.IsValid,
-                    "本段的玩家本体、两名召唤物与两个假人应都已落地并拥有有效稳定实体 ID");
+                    "本段的玩家本体、两名可接管友军与两个假人应都已落地并拥有有效稳定实体 ID");
 
                 float HealthOf(SimEntityId id) =>
                     sim.TryResolveUnitIndex(id, out int i) && i < sim.Snapshot.Count
@@ -4438,17 +4444,17 @@ namespace GameLogic.EditorTools
                     }
                 }
 
-                // ── A. 基线：AI 召唤物本来就在打人（没有它，后面所有"打不出东西"都不成立）──
+                // ── A. 基线：AI 可接管友军本来就在打人（没有它，后面所有"打不出东西"都不成立）──
                 float baseA = HealthOf(dummyA);
                 float baseB = HealthOf(dummyB);
                 Step(60);
                 float hitA = baseA - HealthOf(dummyA);
                 float hitB = baseB - HealthOf(dummyB);
                 Expect(hitA > 0f && hitB > 0f,
-                    $"两名 AI 召唤物在 60 帧内都应真的打出伤害（A 打掉 {hitA:F1} / B 打掉 {hitB:F1}）——" +
+                    $"两名 AI 可接管友军在 60 帧内都应真的打出伤害（A 打掉 {hitA:F1} / B 打掉 {hitB:F1}）——" +
                     "这是本段一切反证的前提");
                 Expect(SourceOf(minionA) == IntentSource.AI && SourceOf(minionB) == IntentSource.AI,
-                    "此刻两名召唤物都由 AI 驱动，走的是内核 ResolveMinionCombat 而不是直控释放入口");
+                    "此刻两名可接管友军都由 AI 驱动，走的是内核 ResolveMinionCombat 而不是直控释放入口");
 
                 // ── B. AI 自己不会主动过载 ──
                 //
@@ -4463,7 +4469,7 @@ namespace GameLogic.EditorTools
                     "A 登记了装配，走器官开火 → 它必须在账本里有条目（AI 和玩家用同一本账，这是本段的立论）");
                 Expect(!actions.Vitals.IsTracked(minionB),
                     "B 没登记装配，仍走行为原型数值的降级路 → 不碰账本。" +
-                    "这条降级是有意保留的：没器官的召唤物若被迫走器官路会彻底哑火");
+                    "这条降级是有意保留的：真·召唤物这类没登记装配的身体若被迫走器官路会彻底哑火");
                 Expect(actions.Vitals.Get(minionA).Strain > 0f,
                     $"A 的过载债应真的在涨（{actions.Vitals.Get(minionA).Strain:F1}）——" +
                     "AI 开火不再是免费的，这是「换谁开都一样」的直接体现");
@@ -4477,11 +4483,11 @@ namespace GameLogic.EditorTools
                        actions.OverloadMirror.PushCount == 0,
                     "没有任何身体过载时，镜像不该往内核推过任何东西");
                 Expect(!KernelOverloaded(minionA) && !KernelOverloaded(minionB),
-                    "内核侧两名召唤物都不带过载位");
+                    "内核侧两名可接管友军都不带过载位");
 
                 // ── C. 玩家把这具身体推到过载（M2-03c 的既有路径，一行没改）──
                 Expect(sim.RequestControlSwitch(minionA) == ControlRequestResult.Success,
-                    "应能接管召唤物 A");
+                    "应能接管友军 A");
 
                 // M2-07：接管的那一刻这把枪**可能正在冷却**——刚才 AI 就是拿它开火的。
                 // 这不是回归，恰恰是统一后必然成立的事：同一具身体上的同一件器官只有一条冷却线，
