@@ -550,6 +550,28 @@ namespace GameLogic.Stage.CellStage
         /// <summary>可控友军共用的造型 id（2026-09-14）。见 <see cref="SpawnControlAllies"/> 里的说明。</summary>
         public const int ControlAllyVisualId = Control.ArchetypeLoadoutTable.SporeArchetypeId;
 
+        /// <summary>
+        /// 第 <paramref name="index"/> 名可控友军的**装配**取哪个原型（2026-09-14）。
+        ///
+        /// **M2-06 固定试玩里两名友军装配相同**：bin 的原话是「测试不是应该每个友方都一样的
+        /// 器官和基因嘛」——这是对的，固定场景就该把变量控死，两具身体只要有任何可观察差异
+        /// 就一定是 bug，不必再区分"这是设计还是故障"。移速、造型已经统一，装配是最后一项。
+        ///
+        /// **正常对局仍然一人一套**：M2-03 的验收点「接管不同单位打出不同的东西」是真能力，
+        /// 由 <see cref="Control.ArchetypeLoadoutTable"/> 与自检 [15]/[16] 段守着，不因试玩场景统一而丢。
+        /// 想在固定场景里验差异化时，把这里改回按 index 分派即可。
+        /// </summary>
+        private int AllyLoadoutArchetypeId(int index)
+        {
+            if (_entryMode == CellStageEntryMode.ConsciousnessPlaytest)
+            {
+                return Control.ArchetypeLoadoutTable.SporeArchetypeId;
+            }
+            return index == 0
+                ? Control.ArchetypeLoadoutTable.SporeArchetypeId
+                : Control.ArchetypeLoadoutTable.MyceliumArchetypeId;
+        }
+
         private void SpawnControlAllies()
         {
             float health = _stats.Get(StatId.MaxHealth);
@@ -571,7 +593,7 @@ namespace GameLogic.Stage.CellStage
                 LogicId = sporeLogicId,
                 VisualId = ControlAllyVisualId,
             });
-            _unitLoadouts?.RegisterArchetypePending(sporeLogicId, Control.ArchetypeLoadoutTable.SporeArchetypeId);
+            _unitLoadouts?.RegisterArchetypePending(sporeLogicId, AllyLoadoutArchetypeId(0));
 
             int myceliumLogicId = _sim.NextLogicId();
             _sim.Spawn(new SpawnRequest
@@ -599,7 +621,7 @@ namespace GameLogic.Stage.CellStage
                 // 需要分辨谁是谁走 Hierarchy 的 #UID（DevUnitGoMirror），不靠外形。
                 VisualId = ControlAllyVisualId,
             });
-            _unitLoadouts?.RegisterArchetypePending(myceliumLogicId, Control.ArchetypeLoadoutTable.MyceliumArchetypeId);
+            _unitLoadouts?.RegisterArchetypePending(myceliumLogicId, AllyLoadoutArchetypeId(1));
 
             // 2026-09-14 试玩反馈：「存在友方一直移动的角色，我并未下令他自己移动干嘛」。
             // 友军出生是 IntentSource.AI，原型 13 的 MinionSeekAttack 在索敌半径(8)内找不到
