@@ -247,6 +247,7 @@ namespace GameLogic.Stage.CellStage
             // CellStageFlow 实例跨局复用（GameRoot 只注册一个），视角沿检测的上一帧值必须跟着
             // Bind 一起回到 Direct，否则上一局停在战略视角会让这一局第一次切视角漏掉交还。
             _lastViewMode = ViewMode.Direct;
+            _parkedControlUnit = SimEntityId.None;
             // Edit Mode 验收只建立模拟并验证纯逻辑，不具备运行时资源模块生命周期。
             // Editor Play 与 Player 中 Application.isPlaying 均为 true，功能美术加载路径保持不变。
             if (Application.isPlaying)
@@ -379,6 +380,8 @@ namespace GameLogic.Stage.CellStage
         {
             _cameraDirector = new CameraDirector();
             _cameraDirector.Bind(_camera, _sim, _cameraFollowOffset, _sim.ArenaHalfExtent);
+            // 战略视角会放下意识，所以回直控前必须先重新接管一具，见 ReacquireDirectTarget。
+            _cameraDirector.EnsureDirectTarget = ReacquireDirectTarget;
             _squadCommands = new SquadCommandSystem();
             _squadCommands.Bind(_sim, _camera);
 
@@ -1326,7 +1329,7 @@ namespace GameLogic.Stage.CellStage
             HandleStrategicPauseInput();
             InputRouter.SetGameplayPaused(_paused, _strategicPause);
             _cameraDirector?.Tick(_paused);
-            ReturnControlOnStrategyView();
+            ParkControlOnStrategyView();
             ResolvePendingAllyHolds();
             // M2-02：选择与命令同样要在暂停早退之前——"暂停下令后恢复顺序稳定"是它的验收项，
             // 而下令这件事本身必须在冻结期间还能发生。
@@ -1869,22 +1872,27 @@ namespace GameLogic.Stage.CellStage
         /// <summary>上一帧的镜头状态，用来识别"刚进入战略视角"这一次沿。</summary>
         private ViewMode _lastViewMode = ViewMode.Direct;
 
+        /// <summary>放下意识之前控制的那一具。按 M 回直控时优先把它接管回来。</summary>
+        private SimEntityId _parkedControlUnit = SimEntityId.None;
+
         /// <summary>
-        /// 2026-09-13 试玩反馈（产品决策，可推翻）：**进入战略视角时把意识收回玩家本体**。
+        /// 2026-09-14（产品决策，bin 拍板）：**进入战略视角 = 放下意识**。
         ///
-        /// 玩家报的是「直控的角色切换到战术视图不能再选择和下令了」。根因是内核与热更层两处
-        /// 都把 <c>IntentSource == Player</c> 的那一个排除在选择集之外（`SimWorld.MatchesPick`、
-        /// `SquadCommandSystem.IsSelectable`，M2-02 立的规矩，理由是"两套输入抢同一个单位"）。
-        /// 那条规矩本身是对的，问题在于**玩家人在战略视角时根本没有第二套输入**——
-        /// 直控域这时不持有输入所有权，那一个单位却还挂着"玩家正在开"的牌子。
+        /// 玩家报「战术我选不了 #1」。#1 是玩家本体，而内核 <c>MatchesPick</c> 与热更
+        /// <c>SquadCommandSystem.IsSelectable</c> 都排除 <c>IntentSource == Player</c> 的那一个
+        /// （M2-02 立的规矩，防两套输入抢同一个单位）。那条规矩本身没错，错在**人在战略视角时
+        /// 根本没有第二套输入**，却还有一具身体挂着"玩家正在开"的牌子。
         ///
-        /// 所以不去松动选择集的判据（松动它就真的会出现两套输入抢一个单位），
-        /// 而是让"进战略视角"这件事本身把友军交还：交还后它走
-        /// <see cref="AiHandoffSystem"/> 的既有交还路径 → 原地守备 → 自然回到选择集、可被下令。
-        /// 玩家本体不受影响（它就是玩家的化身，RTS 指挥自己没有意义，
-        /// 而且 M2-03b 的 Carrier 自动开火闸门要靠 `ControllingPlayerBody` 保持为真）。
+        /// 所以不去松动选择集判据，而是让"进战略视角"这件事把意识彻底放下：
+        /// 场上不再有任何 Player 单位 → 连玩家本体都能被框选、被下令。
+        /// 放下的那一具走既有交还路径（<see cref="AiHandoffSystem"/> 收到控制变更 → 缓冲 → 原地守备），
+        /// 与"没收到命令就不动"这条全局规矩一致。
+        ///
+        /// 代价（如实记）：战略视角下 <c>SimBridge.ControllingPlayerBody</c> 为 false，
+        /// 于是 M2-03b 那道闸门会停掉玩家本体的 Carrier 自动开火——本体改为按行为原型攻击。
+        /// 这正是 #5「AI 与直控是两套战斗真相源」的又一次显形，等那条统一后自然消失。
         /// </summary>
-        private void ReturnControlOnStrategyView()
+        private void ParkControlOnStrategyView()
         {
             if (_cameraDirector == null)
             {
@@ -1896,17 +1904,73 @@ namespace GameLogic.Stage.CellStage
             _lastViewMode = mode;
 
             // 只在"刚切进战略视角"那一帧做一次。放在过渡结束后而不是按下 M 的那一刻：
-            // 过渡期间输入本来就全部冻结，提前交还只会让镜头还在飞的时候单位就开始自己动。
+            // 过渡期间输入本来就全部冻结，提前放手只会让镜头还在飞的时候单位就开始自己动。
             if (mode != ViewMode.Strategy || previous == ViewMode.Strategy)
             {
                 return;
             }
-            if (_sim == null || !_sim.Running || _sim.ControllingPlayerBody)
+            if (_sim == null || !_sim.Running || !_sim.ControlledUnitId.IsValid)
             {
                 return;
             }
 
-            _sim.ReturnControlToPlayerBody();
+            ParkControlNow();
+        }
+
+        /// <summary>
+        /// 真正放下意识的那一步：**先记住是谁，再释放**。
+        ///
+        /// 记录与释放必须绑在一起——我第一版把记录留在调用点、释放放在这里，结果任何
+        /// 不走那个调用点的释放（死亡回弹失败、调试直调）都会让 <see cref="_parkedControlUnit"/>
+        /// 停在陈旧值上，按 M 回直控时接管回**上上次**那具身体。自检当场抓到了这条。
+        /// </summary>
+        private void ParkControlNow()
+        {
+            if (_sim == null || !_sim.Running || !_sim.ControlledUnitId.IsValid)
+            {
+                return;
+            }
+            _parkedControlUnit = _sim.ControlledUnitId;
+            _sim.ReleaseControl();
+        }
+
+        /// <summary>回归测试直调入口：Edit 模式驱动不了镜头过渡（unscaledDeltaTime 一次 Tick 就收敛），
+        /// 但"放下意识 → 回直控接管回原来那具"必须有断言守着。</summary>
+        public void DebugParkControlForStrategy() => ParkControlNow();
+
+        /// <summary>
+        /// 按 M 回直控时重新拿一具身体（<see cref="CameraDirector.EnsureDirectTarget"/> 的实现）。
+        /// 优先回到放下前那一具；它死了/没了就取候选表里的第一个，都没有就如实返回 false，
+        /// 镜头会停在战略视角——这比把镜头切进一个空目标诚实。
+        /// </summary>
+        private bool ReacquireDirectTarget()
+        {
+            if (_sim == null || !_sim.Running)
+            {
+                return false;
+            }
+            if (_sim.ControlledUnitId.IsValid)
+            {
+                return true;
+            }
+
+            // 走 Restore 语义而不是 RequestControlSwitch：**回到自己刚放下的身体不是一次战术接管**，
+            // 不该受 0.15 秒接管冷却与信号范围约束。否则在战略/直控之间来回按 M 会随机"没反应"，
+            // 而玩家完全不知道自己撞的是一条接管冷却。
+            if (_sim.RestoreControlTo(_parkedControlUnit))
+            {
+                return true;
+            }
+
+            SimControlCandidate[] candidates = _sim.GetControlCandidates();
+            for (int i = 0; i < candidates.Length; i++)
+            {
+                if (_sim.RestoreControlTo(candidates[i].EntityId))
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         public bool IsRunning => _running;

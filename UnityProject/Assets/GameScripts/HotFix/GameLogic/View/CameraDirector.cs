@@ -206,6 +206,19 @@ namespace GameLogic.View
         /// 请求回到直控视角。没有有效受控实体时**拒绝**并停在战略视角——
         /// 这正是"无效目标回退战略视角"的另一半：不只是自动退出，也不许手动切回一个不存在的目标。
         /// </summary>
+        /// <summary>
+        /// 回直控前的"重新拿一具身体"钩子（2026-09-14）。由 <c>CellStageFlow</c> 注入。
+        ///
+        /// 战略视角下玩家是**放下意识**的（场上没有任何 <c>IntentSource.Player</c> 单位，
+        /// 这样本体也能被框选和下令）。于是按 M 回直控时必须先重新接管一具，
+        /// 否则 <see cref="TryGetDirectAnchor"/> 找不到锚点，直接被拒。
+        ///
+        /// 钩子放在这里而不是让镜头自己去碰模拟：本类的既定纪律是"一个字都不碰模拟状态"
+        /// （M2-01 设计要点第 1 条）。它只负责问一句"能给我一个目标吗"，怎么拿是玩法层的事。
+        /// 返回 false = 真的没有可接管的身体，照常拒绝并停在战略视角。
+        /// </summary>
+        public System.Func<bool> EnsureDirectTarget;
+
         public bool RequestDirect()
         {
             if (_camera == null || _mode == ViewMode.Direct || _mode == ViewMode.Transition)
@@ -214,7 +227,12 @@ namespace GameLogic.View
             }
             if (!TryGetDirectAnchor(out float2 anchor))
             {
-                return false;
+                // 放下意识之后没有受控实体是**正常状态**，不是异常——先请玩法层接管一具再试。
+                if (EnsureDirectTarget == null || !EnsureDirectTarget() ||
+                    !TryGetDirectAnchor(out anchor))
+                {
+                    return false;
+                }
             }
 
             BeginTransition(ViewMode.Direct, CameraPositionFor(anchor), _directOrthographicSize);

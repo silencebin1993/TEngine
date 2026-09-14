@@ -293,35 +293,38 @@ namespace GameLogic.Battle
         /// 校验顺序固定为身份、存活、阵营、范围、冷却，保证调用方得到稳定失败原因。
         /// </summary>
         /// <summary>
-        /// 把意识收回玩家本体（槽位 0）。2026-09-13 试玩反馈引入：切回战略视角时调用。
+        /// 把意识放回指定的那一具（2026-09-14）。**不过信号范围、不过接管冷却**。
         ///
-        /// **刻意不走 <see cref="RequestControlSwitch"/>**：那条路要过信号范围与切换冷却，
-        /// 而"回到自己身上"不是一次战术性接管——玩家把友军开到 30 米外再按 M，
-        /// 不该因为超出 18 米信号范围而卡在别人身体里。走内核的 Restore 语义（同读档恢复）。
+        /// 与 <see cref="RequestControlSwitch"/> 的区别是语义而非实现细节：那条路是"玩家主动挑一具
+        /// 别的身体接管"，理应受节奏与距离约束；这条路是"回到自己刚刚放下的那一具"——
+        /// 按 M 在战略/直控之间来回切，被 0.15 秒冷却挡住会表现成"按了 M 没反应"，
+        /// 而玩家根本不知道自己触发了一条接管冷却（自检当场抓到过这条）。
         ///
-        /// 返回 false 表示本来就在本体里、或本体不可用（死亡/未生成），调用方不需要分支——
-        /// 保持现状就是安全默认值。
+        /// 走内核的 Restore 语义（与读档恢复同一条），身份/存活/阵营三道校验一条不少。
         /// </summary>
-        public bool ReturnControlToPlayerBody()
+        public bool RestoreControlTo(SimEntityId targetId)
         {
             SimWorld w = World;
-            if (!_running || w == null || _backend == null)
+            if (!_running || w == null || !targetId.IsValid)
             {
                 return false;
             }
-            if (!w.TryGetEntityId(SimConst.PlayerIndex, out SimEntityId playerBody) || !playerBody.IsValid)
+            if (ControlledUnitId == targetId)
             {
-                return false;
+                return true;
             }
-            if (_backend.ControlledUnitId == playerBody)
-            {
-                return false;
-            }
-            if (!_backend.TryGetUnitControlState(playerBody, out SimUnitControlState state) || !state.IsAlive)
-            {
-                return false;
-            }
-            return w.TryRestoreControlledUnit(playerBody) == ControlSwitchResult.Success;
+            return w.TryRestoreControlledUnit(targetId) == ControlSwitchResult.Success;
+        }
+
+        /// <summary>
+        /// 放下意识（2026-09-14）：解除直控，场上不再有任何 <c>IntentSource.Player</c> 单位。
+        /// 进战略视角时调用——那时玩家本来就没有直控输入，却让一具身体挂着"玩家正在开"的牌子，
+        /// 它就会被选择集与编队指挥永久排除。返回 false = 本来就没在控谁。
+        /// </summary>
+        public bool ReleaseControl()
+        {
+            SimWorld w = World;
+            return _running && w != null && w.ReleaseControlledUnit() == ControlSwitchResult.Success;
         }
 
         public ControlRequestResult RequestControlSwitch(SimEntityId targetId)

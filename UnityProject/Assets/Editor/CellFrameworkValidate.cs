@@ -1543,6 +1543,44 @@ namespace GameLogic.EditorTools
                 }
                 Expect(visited.Count >= 4,
                     $"连续切换应覆盖全部可控身体（本体 + 两名友军 + 远处那名，实际走到 {visited.Count} 具）");
+
+                // ── D. 放下意识：战略视角下连玩家本体都能被框选、被下令 ──
+                // bin 报「战术我选不了 #1」。#1 是玩家本体，而选择集两处判据都排除
+                // IntentSource == Player 的那一个。修法不是松动判据（那会让两套输入抢同一个单位），
+                // 而是让"进战略视角"把意识彻底放下：场上不再有任何 Player 单位。
+                //
+                // 这里直调 ReleaseControl / EnsureDirectTarget 两个生产入口，不驱动镜头状态机——
+                // Edit 模式下 CameraDirector 的过渡靠 unscaledDeltaTime，一次 Tick 就收敛，
+                // 测不出真实时序（同 [18] 段对 F9 叠加层的既有说明）。
+                Expect(flow.Sim.RequestControlSwitch(allies[0]) == ControlRequestResult.Success ||
+                       flow.Sim.ControlledUnitId == allies[0],
+                    "先接管一具友军，构造'带着身体进战略视角'的场景");
+                SimEntityId parked = flow.Sim.ControlledUnitId;
+                Expect(parked.IsValid, "进战略视角前应当确实控制着某一具身体");
+
+                // 走生产入口（记住是谁 + 释放绑在一起），不是直调 ReleaseControl——
+                // 前者才是按 M 进战略视角时真正执行的那一段。
+                flow.DebugParkControlForStrategy();
+                Expect(!flow.Sim.ControlledUnitId.IsValid,
+                    "放下意识后不应再有受控实体");
+                flow.Sim.OnUpdate(1f / 60f);
+
+                float half = flow.Sim.ArenaHalfExtent + 10f;
+                SimUnitPick[] picks = flow.Sim.QueryUnitsInRect(
+                    new float2(-half, -half), new float2(half, half));
+                bool playerBodyPickable = false;
+                for (int i = 0; i < picks.Length; i++)
+                {
+                    playerBodyPickable |= picks[i].Faction == SimFaction.Player;
+                }
+                Expect(playerBodyPickable,
+                    $"放下意识后玩家本体也应进入可指挥选择集（框到 {picks.Length} 个单位）");
+
+                Expect(flow.CameraDirector != null && flow.CameraDirector.EnsureDirectTarget != null,
+                    "镜头应当拿到'回直控前重新接管'的钩子，否则按 M 会被无锚点直接拒绝");
+                Expect(flow.CameraDirector.EnsureDirectTarget() &&
+                       flow.Sim.ControlledUnitId == parked,
+                    "回直控应把意识接管回放下前那一具");
             }
             finally
             {

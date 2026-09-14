@@ -145,6 +145,12 @@ namespace BinGames.Sim
         ControlledRemoved = 3,
         /// <summary>读档或重进场景后的控制权恢复。</summary>
         Restored = 4,
+        /// <summary>
+        /// 玩家主动放下意识，之后没有任何受控实体（2026-09-14）。
+        /// 与 <see cref="ControlledRemoved"/> 的区别：那一具身体**还好好地站在场上**，
+        /// 只是不再归玩家直接操作——所以 UI 不该提示"失去目标"，镜头也不该当成异常回退。
+        /// </summary>
+        Released = 5,
     }
 
     /// <summary>

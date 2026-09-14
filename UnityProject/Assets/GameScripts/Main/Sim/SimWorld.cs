@@ -378,6 +378,40 @@ namespace BinGames.Sim
             return SwitchControlledUnitInternal(entityId, ControlChangeReason.Restored);
         }
 
+        /// <summary>
+        /// 放下意识：解除当前受控实体，之后**没有任何单位处于直控状态**（2026-09-14）。
+        ///
+        /// 内核此前只有"切换到另一具"，没有"谁都不控"。缺这个入口的直接后果是：玩家人在战略
+        /// 视角、根本没有直控输入，却总有一具身体挂着 <see cref="IntentSource.Player"/> 的牌子，
+        /// 于是它被选择集（<c>MatchesPick</c>）和编队指挥永久排除在外——玩家报的
+        /// 「战术我选不了 #1」就是这个。
+        ///
+        /// 那具身体本身**不受影响**：存活、位置、装配、身体接点全部原样，
+        /// <c>IntentSource</c> 回到它被接管前的值，随后由热更层的交还逻辑接管
+        /// （<c>AiHandoffSystem</c> 收到控制变更信号 → 缓冲 → 原地守备）。
+        /// 回退锚点保留在它的位置上，这样 <c>GetControlCandidates</c> 仍以"意识最后所在处"为原点，
+        /// 回直控时找得到人。
+        /// </summary>
+        public ControlSwitchResult ReleaseControlledUnit()
+        {
+            if (!_created) { return ControlSwitchResult.WorldNotInitialized; }
+            if (!_controlledUnitId.IsValid) { return ControlSwitchResult.InvalidTarget; }
+
+            SimEntityId previousId = _controlledUnitId;
+            float2 anchor = _controlFallbackAnchor;
+            if (TryFindUnit(previousId, out int previousIndex) && _alive[previousIndex] != 0)
+            {
+                _intentSource[previousIndex] = _intentSourceBeforePlayer[previousIndex];
+                anchor = _position[previousIndex];
+            }
+
+            _controlledUnitId = SimEntityId.None;
+            _controlFallbackAnchor = anchor;
+            _hasControlFallbackAnchor = true;
+            RecordControlChange(previousId, SimEntityId.None, ControlChangeReason.Released, anchor);
+            return ControlSwitchResult.Success;
+        }
+
         private ControlSwitchResult SwitchControlledUnitInternal(SimEntityId entityId, ControlChangeReason reason)
         {
             if (!_created) { return ControlSwitchResult.WorldNotInitialized; }
