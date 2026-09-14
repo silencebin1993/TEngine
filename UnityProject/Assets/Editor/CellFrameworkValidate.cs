@@ -13,6 +13,7 @@ using GameLogic.MetabolicSlice.Blueprint;
 using GameLogic.MetabolicSlice.Carrier;
 using GameLogic.MetabolicSlice.ContentCatalog;
 using GameLogic.MetabolicSlice.Lineage;
+using GameLogic.MetabolicSlice.WildOrgan;
 using GameLogic.Progression;
 using GameLogic.Spawning;
 using GameLogic.Stage;
@@ -86,6 +87,7 @@ namespace GameLogic.EditorTools
                 ValidateCompiledRecipeCache();
                 ValidateGerminationChamber();
                 ValidateHomecomingRetrofit();
+                ValidateWildOrganLoot();
             }
             catch (Exception e)
             {
@@ -2139,6 +2141,212 @@ namespace GameLogic.EditorTools
             lineages.CommitTemplate("lineage-s", "guard", organelle.Id, geneIds, "guard", out _);
             Expect(lineages.GetLineage("lineage-s").GetLatest("guard").Version == 1,
                 "其他谱系的模板历史不应被 lineage-r 的回巢改造流程波及");
+        }
+
+        /// <summary>
+        /// M3-07：野生器官与单体临时移植——拾取不解锁蓝图、解析/拆解/保留三种处理、
+        /// 临时移植不改模板、同一实物不能同时解析+装备、槽位冲突/非器官拒绝装入、
+        /// 携带容量、身体死亡丢失临时器官。用真实 SimBridge 起若干测试个体。
+        /// </summary>
+        private static void ValidateWildOrganLoot()
+        {
+            Line("\n[31] 野生器官与单体临时移植（M3-07）");
+
+            OrganelleDef organelle = OrganelleCatalog.All.Values.FirstOrDefault(o => o.AttackMethod && !o.IsRetired);
+            string gene = GeneCatalog.AllGeneIds.FirstOrDefault();
+            Expect(organelle != null, "OrganelleCatalog 应至少有一条 AttackMethod 未退役器官用于本项自检");
+            Expect(gene != null, "GeneCatalog 应至少有一条基因用于本项自检");
+            if (organelle == null || gene == null)
+            {
+                return;
+            }
+
+            var blueprints = new BlueprintRegistry();
+            var biomass = new BiomassLedger();
+            biomass.OnEnter();
+
+            var sim = new SimBridge();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 32;
+            cfg.ArenaHalfExtent = 60f;
+            cfg.RandomSeed = 0xC0FFEE31u;
+            var archetypes = new[]
+            {
+                new BehaviorArchetype
+                {
+                    Kind = BehaviorKind.Stationary, Accel = 0f, TurnRate = 0f, AggroRange = 0f,
+                    AttackRange = 0.5f, AttackCooldown = 99f, AttackDamage = 0f,
+                    Separation = 0f, ChargeSpeedMul = 1f,
+                },
+            };
+            sim.Begin(cfg, archetypes);
+
+            var unitLoadouts = new UnitLoadoutRegistry();
+            var fakeSource = new FakePlayerLoadoutSource();
+            unitLoadouts.Bind(sim, fakeSource);
+            unitLoadouts.RegisterPlayerBody(sim.ControlledUnitId);
+
+            var wildOrgans = new WildOrganRegistry();
+            wildOrgans.OnEnter();
+            wildOrgans.Bind(sim, unitLoadouts);
+
+            float2 playerPos = sim.PlayerPosition;
+            const int BodyALogicId = 9901;
+            const int BodyCLogicId = 9902; // 已带模板 Primary 器官的个体，用来测槽位冲突。
+            const int FarLogicId = 9903;
+
+            sim.Spawn(new SpawnRequest
+            {
+                Position = playerPos, Health = 40f, Radius = 0.8f, MaxSpeed = 0f,
+                ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                IntentSource = IntentSource.AI, LogicId = BodyALogicId, ExcludeFromControl = true,
+            });
+            sim.Spawn(new SpawnRequest
+            {
+                Position = playerPos, Health = 40f, Radius = 0.8f, MaxSpeed = 0f,
+                ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                IntentSource = IntentSource.AI, LogicId = BodyCLogicId, ExcludeFromControl = true,
+            });
+            sim.Spawn(new SpawnRequest
+            {
+                Position = playerPos + new float2(40f, 0f), Health = 40f, Radius = 0.8f, MaxSpeed = 0f,
+                ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                IntentSource = IntentSource.AI, LogicId = FarLogicId, ExcludeFromControl = true,
+            });
+
+            sim.OnUpdate(1f / 60f);
+            SimSnapshot snap = sim.Snapshot;
+            SimEntityId bodyA = FindEntityId(snap, BodyALogicId, out _);
+            SimEntityId bodyC = FindEntityId(snap, BodyCLogicId, out _);
+            SimEntityId bodyFar = FindEntityId(snap, FarLogicId, out _);
+            Expect(bodyA.IsValid && bodyC.IsValid && bodyFar.IsValid, "本项前置：三具测试个体应成功落地");
+            if (!bodyA.IsValid || !bodyC.IsValid || !bodyFar.IsValid)
+            {
+                return;
+            }
+
+            unitLoadouts.RegisterExplicit(bodyA, new List<UnitLoadoutOrgan>());
+            // bodyC 模拟"已经表达模板"的个体：Primary 槽已经被一件常规器官占用，用来测临时槽冲突。
+            unitLoadouts.RegisterExplicit(bodyC, new List<UnitLoadoutOrgan> { new UnitLoadoutOrgan(organelle.Id, LoadoutAction.Primary) });
+
+            // 建立物理战利品实体：非法 id 拒绝。
+            string badDrop = wildOrgans.DropInField("no_such_organelle", BlueprintSourceKind.Organelle, playerPos);
+            Expect(badDrop == null, "查无 id 的战利品实体应拒绝建立");
+
+            string idA = wildOrgans.DropInField(organelle.Id, BlueprintSourceKind.Organelle, playerPos);
+            Expect(idA != null, "合法器官 id 应成功建立物理战利品实体");
+
+            // 拾取：太远拒绝。
+            WildOrganPickupResult farPickup = wildOrgans.TryPickup(bodyFar, idA);
+            Expect(farPickup == WildOrganPickupResult.TooFar, "拾取者距战利品实体太远时应拒绝");
+
+            // 拾取成功：状态转 Carried，不解锁蓝图（验收 1）。
+            WildOrganPickupResult pickupA = wildOrgans.TryPickup(bodyA, idA);
+            Expect(pickupA == WildOrganPickupResult.Ok, "近距离拾取应成功");
+            Expect(wildOrgans.GetInstance(idA).State == WildOrganState.Carried, "拾取后实物状态应为 Carried");
+            Expect(wildOrgans.CarriedCount(bodyA) == 1, "拾取后携带计数应为 1");
+            Expect(!blueprints.IsUnlocked(organelle.Id), "拾取绝不应自动解锁蓝图（验收 1）");
+
+            // 重复拾取同一件已不在 InField 的实物：拒绝。
+            Expect(wildOrgans.TryPickup(bodyC, idA) == WildOrganPickupResult.NotInField, "已被拾取的实物不应再被第二个人拾取");
+
+            // 临时移植：非器官（基因）拒绝。
+            string geneId = wildOrgans.DropInField(gene, BlueprintSourceKind.Gene, playerPos);
+            wildOrgans.TryPickup(bodyA, geneId);
+            Expect(wildOrgans.TryInstallTemporary(bodyA, geneId) == WildOrganInstallResult.NotAnOrganelle,
+                "基因实物不应被允许接入体细胞临时槽（GDD §6.7 只接器官）");
+
+            // 临时移植：正常安装成功，不修改任何模板（验收 1 的另一半——本类型从未碰 LineageRegistry）。
+            WildOrganInstallResult install = wildOrgans.TryInstallTemporary(bodyA, idA);
+            Expect(install == WildOrganInstallResult.Ok, "满足条件时临时移植应成功");
+            Expect(wildOrgans.GetInstance(idA).State == WildOrganState.Installed, "移植成功后实物状态应为 Installed");
+            UnitLoadout loadoutA = unitLoadouts.Get(bodyA);
+            Expect(loadoutA.TryGetOrgan(LoadoutAction.Primary, out UnitLoadoutOrgan installedOrgan) && installedOrgan.OrganId == organelle.Id,
+                "临时移植应让身体的 Primary 动作槽出现该器官");
+
+            // 同一实物不能同时被解析和装备（验收 2）：Installed 状态下解析/拆解应拒绝。
+            Expect(wildOrgans.TryResolveAtChamber(bodyA, idA, blueprints) == WildOrganChamberActionResult.NotCarried,
+                "已临时移植（Installed）的实物不应允许同时解析");
+            Expect(wildOrgans.TryDismantleAtChamber(bodyA, idA, biomass, "lineage-w") == WildOrganChamberActionResult.NotCarried,
+                "已临时移植（Installed）的实物不应允许同时拆解");
+
+            // 重复安装：该身体已有临时器官，第二次安装应拒绝。
+            string idExtra = wildOrgans.DropInField(organelle.Id, BlueprintSourceKind.Organelle, playerPos);
+            wildOrgans.TryPickup(bodyA, idExtra);
+            Expect(wildOrgans.TryInstallTemporary(bodyA, idExtra) == WildOrganInstallResult.AlreadyHasTemporary,
+                "一具身体同一时刻只应有一个临时槽（非目标：不做多临时槽）");
+
+            // 卸下临时器官：回到 Carried，身体上的器官消失，不影响其他槽位。
+            bool uninstalled = wildOrgans.UninstallTemporary(bodyA);
+            Expect(uninstalled, "卸下临时器官应成功");
+            Expect(wildOrgans.GetInstance(idA).State == WildOrganState.Carried, "卸下后实物状态应回到 Carried");
+            Expect(!unitLoadouts.Get(bodyA).HasOrganInSlot(LoadoutAction.Primary), "卸下临时器官后身体不应再有 Primary 槽器官");
+
+            // 槽位冲突：bodyC 的 Primary 槽已被模板器官占用，临时移植应拒绝并给出明确原因。
+            string idForC = wildOrgans.DropInField(organelle.Id, BlueprintSourceKind.Organelle, playerPos);
+            wildOrgans.TryPickup(bodyC, idForC);
+            Expect(wildOrgans.TryInstallTemporary(bodyC, idForC) == WildOrganInstallResult.SlotConflict,
+                "临时器官与模板器官冲突时不允许装入，且应给出具体原因（GDD §6.9）");
+            Expect(wildOrgans.GetInstance(idForC).State == WildOrganState.Carried, "被拒绝的临时移植不应改变实物状态");
+
+            // 三种处理之「解析」：推进蓝图，实物进入终态，不修改其他单位。
+            WildOrganChamberActionResult resolveResult = wildOrgans.TryResolveAtChamber(bodyA, idA, blueprints);
+            Expect(resolveResult == WildOrganChamberActionResult.Ok, "在腔体范围内解析 Carried 实物应成功");
+            Expect(blueprints.IsUnlocked(organelle.Id), "解析后应解锁对应蓝图");
+            Expect(wildOrgans.GetInstance(idA).State == WildOrganState.Resolved, "解析后实物应进入 Resolved 终态");
+            Expect(wildOrgans.CarriedCount(bodyA) == 2, "解析后该实物应从携带列表移除（此刻 bodyA 仍携带 geneId 与 idExtra，计数应为 2）");
+
+            // 双花防护：终态实物不能再次解析/拆解。
+            Expect(wildOrgans.TryResolveAtChamber(bodyA, idA, blueprints) == WildOrganChamberActionResult.NotCarried,
+                "已 Resolved 的实物不应允许再次解析");
+            Expect(wildOrgans.TryDismantleAtChamber(bodyA, idA, biomass, "lineage-w") == WildOrganChamberActionResult.NotCarried,
+                "已 Resolved 的实物不应允许改为拆解");
+
+            // 三种处理之「拆解」：只产出生物质，不解锁蓝图，与 idExtra 使用同一 sourceId 但各自独立。
+            float balanceBeforeDismantle = biomass.GetBalance("lineage-w");
+            bool wasUnlockedBeforeDismantle = blueprints.IsUnlocked(organelle.Id);
+            WildOrganChamberActionResult dismantleResult = wildOrgans.TryDismantleAtChamber(bodyA, idExtra, biomass, "lineage-w");
+            Expect(dismantleResult == WildOrganChamberActionResult.Ok, "在腔体范围内拆解 Carried 实物应成功");
+            Expect(biomass.GetBalance("lineage-w") == balanceBeforeDismantle + WildOrganRegistry.DismantleBiomassYield,
+                "拆解应产出对应生物质");
+            Expect(blueprints.IsUnlocked(organelle.Id) == wasUnlockedBeforeDismantle,
+                "拆解不应影响蓝图解锁状态（拆解与解析各自独立结算，验收 2 的另一半）");
+            Expect(wildOrgans.GetInstance(idExtra).State == WildOrganState.Dismantled, "拆解后实物应进入 Dismantled 终态");
+
+            // 三种处理之「保留」：不作为，实物应一直停在 Carried，直到被显式处理。
+            string idRetain = wildOrgans.DropInField(organelle.Id, BlueprintSourceKind.Organelle, playerPos);
+            wildOrgans.TryPickup(bodyA, idRetain);
+            Expect(wildOrgans.GetInstance(idRetain).State == WildOrganState.Carried, "「保留」不做任何处理，实物应停留在 Carried");
+
+            // 距腔体太远：即便实物处于 Carried，也不能在腔体范围外解析/拆解。
+            string idFar = wildOrgans.DropInField(organelle.Id, BlueprintSourceKind.Organelle, playerPos + new float2(40f, 0f));
+            WildOrganPickupResult farOwnPickup = wildOrgans.TryPickup(bodyFar, idFar);
+            Expect(farOwnPickup == WildOrganPickupResult.Ok, "本项前置：远处个体拾取自己脚下的战利品应成功");
+            Expect(wildOrgans.TryResolveAtChamber(bodyFar, idFar, blueprints) == WildOrganChamberActionResult.TooFarFromChamber,
+                "距萌生腔太远时不应允许解析");
+
+            // 携带容量：满了应拒绝，不影响已携带的条目。复用 bodyC，此刻它携带 idForC（1 件）。
+            Expect(wildOrgans.CarriedCount(bodyC) == 1, "本项前置：bodyC 当前应携带 1 件（idForC）");
+            for (int i = 0; i < WildOrganRegistry.CarryCapacity - 1; i++)
+            {
+                string extraId = wildOrgans.DropInField(organelle.Id, BlueprintSourceKind.Organelle, playerPos);
+                WildOrganPickupResult r = wildOrgans.TryPickup(bodyC, extraId);
+                Expect(r == WildOrganPickupResult.Ok, $"携带容量未满前第 {i + 2} 件拾取应成功");
+            }
+            Expect(wildOrgans.CarriedCount(bodyC) == WildOrganRegistry.CarryCapacity, "携带容量应恰好达到上限");
+            string overflowId = wildOrgans.DropInField(organelle.Id, BlueprintSourceKind.Organelle, playerPos);
+            Expect(wildOrgans.TryPickup(bodyC, overflowId) == WildOrganPickupResult.CarryFull, "超过携带容量应拒绝拾取");
+
+            // 身体死亡：临时器官通常丢失——不回到 Carried，直接从记录里彻底消失。
+            string idBeforeDeath = wildOrgans.DropInField(organelle.Id, BlueprintSourceKind.Organelle, playerPos);
+            wildOrgans.TryPickup(bodyA, idBeforeDeath);
+            Expect(wildOrgans.TryInstallTemporary(bodyA, idBeforeDeath) == WildOrganInstallResult.Ok,
+                "本项前置：bodyA 此刻应已无临时器官（idA 已被解析），可以再次安装");
+            bool died = wildOrgans.HandleBodyDeath(bodyA);
+            Expect(died, "身体死亡应成功处理已安装的临时器官");
+            Expect(wildOrgans.GetInstance(idBeforeDeath) == null, "身体死亡后临时器官应彻底消失，不进入任何终态");
+            Expect(!unitLoadouts.Get(bodyA).HasOrganInSlot(LoadoutAction.Primary), "身体死亡后该身体不应再有临时器官占用的动作槽");
+            Expect(!wildOrgans.TryGetInstalled(bodyA, out _), "身体死亡后该身体不应再登记有已安装的临时器官");
         }
 
         /// <summary>

@@ -82,6 +82,7 @@ namespace GameLogic.Stage.CellStage
         private MetabolicSlice.Lineage.BiomassLedger _biomassLedger;
         private MetabolicSlice.Lineage.GerminationChamberRegistry _germinationChambers;
         private MetabolicSlice.Lineage.HomecomingRetrofitService _homecomingRetrofit;
+        private MetabolicSlice.WildOrgan.WildOrganRegistry _wildOrgans;
         private MetabolicDigestionSystem _digestion;
         private CarrierBodyVisualPresenter _carrierBodyVisual;
         private StructuralVisualPresenter _structuralVisual;
@@ -218,6 +219,7 @@ namespace GameLogic.Stage.CellStage
         public MetabolicSlice.Lineage.BiomassLedger BiomassLedger => _biomassLedger;
         public MetabolicSlice.Lineage.GerminationChamberRegistry GerminationChambers => _germinationChambers;
         public MetabolicSlice.Lineage.HomecomingRetrofitService HomecomingRetrofit => _homecomingRetrofit;
+        public MetabolicSlice.WildOrgan.WildOrganRegistry WildOrgans => _wildOrgans;
         public SimBridge Sim => _sim;
         public StatusSystem Status => _status;
         public AreaZoneSystem Zones => _zones;
@@ -447,6 +449,9 @@ namespace GameLogic.Stage.CellStage
             // M3-06：回巢改造——架在萌生腔绑定表之上，同一批 Bind 依赖，注册顺序不影响正确性
             // （Bind 才是真正接线的时机，见 SetupUnitLoadouts）。
             _homecomingRetrofit = _hub.Register(new MetabolicSlice.Lineage.HomecomingRetrofitService());
+            // M3-07：野生器官与单体临时移植——实物轨，消费蓝图库（解析）/生物质账本（拆解），
+            // 装/卸临时器官经 UnitLoadoutRegistry 新增的 SetTemporaryOrgan/ClearTemporaryOrgan。
+            _wildOrgans = _hub.Register(new MetabolicSlice.WildOrgan.WildOrganRegistry());
             _digestion = _hub.Register(new MetabolicDigestionSystem());
             // 战斗反馈表现层（story-002）：白模默认实现，只订阅 Signals，无需 Bind 依赖。
             _hub.Register(new CombatFeedbackPresenter());
@@ -753,6 +758,8 @@ namespace GameLogic.Stage.CellStage
             _germinationChambers?.Bind(_sim, _lineages, _biomassLedger, _unitLoadouts);
             // M3-06：回巢改造完成后要重挂 _unitLoadouts 装配、读萌生腔绑定表，同样排在两者之后。
             _homecomingRetrofit?.Bind(_sim, _lineages, _biomassLedger, _unitLoadouts, _germinationChambers);
+            // M3-07：临时移植要读/写 _unitLoadouts 的临时器官槽，同样排在它创建之后。
+            _wildOrgans?.Bind(_sim, _unitLoadouts);
         }
 
         /// <summary>

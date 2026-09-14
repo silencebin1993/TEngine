@@ -82,6 +82,16 @@ namespace GameLogic.Control
         /// <summary><see cref="Empty"/> 是全局共享的只读实例，所有写入路径对它一律 no-op。</summary>
         private readonly bool _frozen;
 
+        /// <summary>M3-07：单体临时移植的那一件野生器官（GDD §6.7"体细胞临时槽"，全局至多一个——
+        /// 非目标"不做多临时槽"）。独立于 <see cref="_organs"/> 的常规重建流程：<see cref="Rebuild"/>
+        /// 每次清空重建时会把它重新追加回去，这样玩家投影每帧重投影、萌生腔/回巢改造重挂装配
+        /// （均调用 Rebuild）都不会把它冲掉——临时移植不应该因为模板侧的任何操作而消失，
+        /// 只应该被显式卸下或身体死亡清掉（见 <see cref="ClearTemporaryOrgan"/> 调用方）。</summary>
+        private UnitLoadoutOrgan? _temporaryOrgan;
+
+        /// <summary>当前是否装着一件临时移植器官。</summary>
+        public bool HasTemporaryOrgan => _temporaryOrgan != null;
+
         public SimEntityId EntityId { get; private set; }
         public UnitLoadoutOrigin Origin { get; private set; }
 
@@ -227,9 +237,69 @@ namespace GameLogic.Control
                 }
             }
 
+            if (_temporaryOrgan != null)
+            {
+                _organs.Add(_temporaryOrgan.Value);
+            }
+
             RecomputeActionMask();
         }
 
+        /// <summary>M3-07：装/卸临时移植器官。装入时若该动作槽已被（模板/常规）器官占用，
+        /// 调用方（<see cref="GameLogic.MetabolicSlice.WildOrgan.WildOrganRegistry"/>）应先用
+        /// <see cref="HasOrganInSlot"/> 判过冲突再调用本方法——本方法自身不做冲突判断，
+        /// 只负责"装/卸"这一步的账目正确（Reject-to-Safe 的策略判断留在上层，这里只保证机制不出错）。</summary>
+        internal bool SetTemporaryOrgan(UnitLoadoutOrgan organ)
+        {
+            if (_frozen || organ.Action == LoadoutAction.Move || string.IsNullOrEmpty(organ.OrganId))
+            {
+                return false;
+            }
+
+            RemoveTemporaryOrganFromList();
+            _temporaryOrgan = organ;
+            _organs.Add(organ);
+            RecomputeActionMask();
+            return true;
+        }
+
+        /// <summary>卸下临时移植器官（显式卸下，或身体死亡时的清理）。查无临时器官时 no-op 返回 false。</summary>
+        internal bool ClearTemporaryOrgan()
+        {
+            if (_frozen || _temporaryOrgan == null)
+            {
+                return false;
+            }
+
+            RemoveTemporaryOrganFromList();
+            _temporaryOrgan = null;
+            RecomputeActionMask();
+            return true;
+        }
+
+        private void RemoveTemporaryOrganFromList()
+        {
+            if (_temporaryOrgan == null)
+            {
+                return;
+            }
+
+            string id = _temporaryOrgan.Value.OrganId;
+            for (int i = _organs.Count - 1; i >= 0; i--)
+            {
+                if (_organs[i].OrganId == id)
+                {
+                    _organs.RemoveAt(i);
+                    break;
+                }
+            }
+        }
+
+        /// <summary>**刻意不清 <see cref="_temporaryOrgan"/>**：Reset 只在同一个已注册实体上重复调用
+        /// （见 <see cref="UnitLoadoutRegistry"/> 对 SimEntityId 不复用的说明），例如回巢改造完成后
+        /// 重挂装配（<c>RegisterExplicit</c>）。临时移植是挂在身体上而非模板上的状态（GDD
+        /// §6.7"仅当前身体生效"），不应该因为模板换版本就被顺带冲掉——它只应被显式卸下
+        /// 或身体死亡清掉。</summary>
         internal void Reset(SimEntityId entityId, UnitLoadoutOrigin origin)
         {
             if (_frozen)

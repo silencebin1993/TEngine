@@ -271,6 +271,29 @@ namespace GameLogic.Control
             return entry.Loadout;
         }
 
+        /// <summary>M3-07：装临时移植器官（<see cref="GameLogic.MetabolicSlice.WildOrgan.WildOrganRegistry"/>
+        /// 的消费入口）。未登记实体 no-op 返回 false——Reject-to-Safe，调用方不应该给一个查不到装配的
+        /// 实体装临时器官。冲突判断（动作槽是否已被占用）由调用方在此之前用 <see cref="Get"/> +
+        /// <see cref="UnitLoadout.HasOrganInSlot"/> 做完，本方法只负责机制上的装配写入。</summary>
+        public bool SetTemporaryOrgan(SimEntityId entityId, UnitLoadoutOrgan organ)
+        {
+            if (!entityId.IsValid || !_entries.TryGetValue(entityId, out Entry entry))
+            {
+                return false;
+            }
+            return entry.Loadout.SetTemporaryOrgan(organ);
+        }
+
+        /// <summary>M3-07：卸下临时移植器官（显式卸下或身体死亡清理）。</summary>
+        public bool ClearTemporaryOrgan(SimEntityId entityId)
+        {
+            if (!entityId.IsValid || !_entries.TryGetValue(entityId, out Entry entry))
+            {
+                return false;
+            }
+            return entry.Loadout.ClearTemporaryOrgan();
+        }
+
         /// <summary>置/清某件器官的失能位。返回是否真的发生了改变。
         /// 本段只提供这一个入口 —— "什么情况下器官会失能"由后续里程碑（伤害定位 / 手术提取）定义。</summary>
         public bool SetOrganDisabled(SimEntityId entityId, string organId, bool disabled)
