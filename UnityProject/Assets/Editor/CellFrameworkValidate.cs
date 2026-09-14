@@ -4188,7 +4188,16 @@ namespace GameLogic.EditorTools
                 Expect(twinDrift > 1f,
                     "对照：同原型、从没被接管过的单位仍在游走——证明'没乱跑'是守备造成的，不是这个原型本来就不动");
 
-                // ── C. 移动中退出 → 沿原方向再走一段（替代里程碑原文的"搬运"，见本方法注释）──
+                // ── C. **带着速度松手也不许自己再走一段**（2026-09-14 实测反馈）──
+                //
+                // 这一段原先断言的是相反的行为：「无威胁 + 退出时在移动 → 沿原朝向再走 6 米」
+                // （HandoffContinuation.Advance，M2-04 的"延续合理意图，而不是站桩"）。
+                // 玩家连着两轮报同一件事——「上一个角色老是会位移一段」——产品决策已反转，
+                // 理由见 AiHandoffSystem.ArmBuffer 的注释：那段"意图"根本不是这具身体的意图，
+                // 是玩家最后一次按键的残速。
+                //
+                // 本段刻意**在满速状态下松手**，因为原先的 [B] 段先等速度掉到 0.35 以下才释放，
+                // 正好绕开了出问题的那条分支——那就是这个 bug 能活到试玩的原因。
                 Expect(sim.ClearCommand(courier) || SourceOf(courier) == IntentSource.AI,
                     "先把信使交还 AI，构造'无命令 + 移动中退出'的场景");
                 Expect(sim.RequestControlSwitch(courier) == ControlRequestResult.Success, "应能接管信使");
@@ -4196,26 +4205,41 @@ namespace GameLogic.EditorTools
                     "把它摆回远离敌人的空地（确保这一段测的是'没有威胁时'的分支）");
                 Step(30, new float2(1f, 0f));
                 float2 exitPosC = PosOf(courier);
-                float2 headingC = math.normalizesafe(VelOf(courier));
-                Expect(math.length(VelOf(courier)) > 0.35f &&
+                float speedC = math.length(VelOf(courier));
+                Expect(speedC > 0.35f &&
                        math.distance(exitPosC, hostilePos) > AiHandoffSystem.EngageThreatRange,
-                    "退出前的前提：单位在移动、且附近没有威胁");
+                    $"退出前的前提：单位**真的在动**（{speedC:F2} u/s）、且附近没有威胁——" +
+                    "静止时松手不动是白测的，这个 bug 只在带速度松手时才出现");
 
                 Expect(sim.RequestControlSwitch(body) == ControlRequestResult.Success, "应能在移动中退出直控");
-                Expect(handoff.LastContinuation == HandoffContinuation.Advance,
-                    $"无威胁 + 退出时在移动 → 应判为移动中退出（实际 {handoff.LastContinuation}）");
-                Expect(sim.TryGetCommand(courier, out UnitCommand advance) &&
-                       math.dot(math.normalizesafe(advance.TargetPosition - exitPosC), headingC) > 0.9f,
-                    "延续点应落在退出瞬间的朝向上，而不是随便找一个点");
+                Expect(handoff.LastContinuation == HandoffContinuation.HoldGround,
+                    $"带着速度松手也必须判为原地守住（实际 {handoff.LastContinuation}）——" +
+                    "不许再有'沿原朝向续走'那一档");
+                Expect(sim.TryGetCommand(courier, out UnitCommand parked) &&
+                       math.distance(parked.TargetPosition, exitPosC) < AiHandoffSystem.BufferArriveRadius,
+                    $"缓冲命令的锚点必须就是松手那一点（偏离 " +
+                    $"{(sim.TryGetCommand(courier, out UnitCommand p2) ? math.distance(p2.TargetPosition, exitPosC) : -1f):F2}）——" +
+                    "锚点挪开多远，它就会自己走多远");
 
+                // 量真实位移：这是玩家实际看到的那个量，也是他报的那个"位移一段"。
+                // 阈值取到达半径：守备在到达半径内就不再产生移动意图，所以这是"停住"的定义边界。
+                // 允许的只有残速衰减出来的那点滑行，绝不该是一次 6 米的行军。
                 Step(45);
-                float2 movedC = PosOf(courier) - exitPosC;
-                Expect(math.length(movedC) > 1.5f && math.dot(math.normalizesafe(movedC), headingC) > 0.7f,
-                    $"缓冲期内它应真的沿原方向继续前进（位移 {math.length(movedC):F2}，方向一致度 " +
-                    $"{math.dot(math.normalizesafe(movedC), headingC):F2}），而不是原地发呆一拍");
+                float driftC = math.distance(PosOf(courier), exitPosC);
+                Expect(driftC < AiHandoffSystem.BufferArriveRadius,
+                    $"松手后它应当就停在松手的地方（实测位移 {driftC:F2}，上限 " +
+                    $"{AiHandoffSystem.BufferArriveRadius:F2}）——反转前这里是 6 米的主动行军");
                 handoff.DebugAdvanceClock(AiHandoffSystem.HandoffBufferSeconds);
+                Step(60);
+                Expect(math.distance(PosOf(courier), exitPosC) < AiHandoffSystem.BufferArriveRadius,
+                    $"缓冲到期之后同样不许再挪（累计位移 {math.distance(PosOf(courier), exitPosC):F2}）");
 
-                // ── D. 撤退中退出 → 继续拉开距离 ──
+                // ── D. 背对敌人松手同样原地停住（撤退续走档一并去掉）──
+                //
+                // 原先这里断言"有威胁 + 正在背离 → 继续拉开距离"。去掉它的理由不是玩家点名了这一档，
+                // 而是它与**已经上线且没人反对**的"交战中退出 → 守在原地继续打"自相矛盾：
+                // 既然站在敌人旁边不许跑，背对敌人时也没有理由替玩家多跑 6 米。
+                // 留着它，同一个抱怨在交战场景下照样能复现。
                 Expect(sim.RequestControlSwitch(ally) == ControlRequestResult.Success, "应能再次接管友军");
                 Expect(sim.SetControlledPosition(hostilePos + new float2(5f, 0f)),
                     "把它摆回敌人旁边，构造'交战中开始撤退'的场景");
@@ -4227,12 +4251,13 @@ namespace GameLogic.EditorTools
                     "退出前的前提：敌人仍在威胁半径内，而单位正在背离它");
 
                 Expect(sim.RequestControlSwitch(body) == ControlRequestResult.Success, "应能在撤退中退出直控");
-                Expect(handoff.LastContinuation == HandoffContinuation.Disengage,
-                    $"有威胁 + 正在背离 → 应判为撤退中退出（实际 {handoff.LastContinuation}）");
+                Expect(handoff.LastContinuation == HandoffContinuation.HoldGround,
+                    $"背对敌人松手也判原地守住（实际 {handoff.LastContinuation}）");
                 Step(45);
-                float distHostileAfter = math.distance(PosOf(ally), hostilePos);
-                Expect(distHostileAfter > distHostileBefore + 1f,
-                    $"缓冲期内它应真的继续拉开距离而不是掉头回去（{distHostileBefore:F2} → {distHostileAfter:F2}）");
+                float driftR = math.distance(PosOf(ally), exitPosR);
+                Expect(driftR < AiHandoffSystem.BufferArriveRadius,
+                    $"背对敌人松手同样停在原地（实测位移 {driftR:F2}）——" +
+                    "守备不接管战斗，原地不动**不等于**不还手");
 
                 // ── E. 缓冲不得吞掉玩家在缓冲期内下的新命令 ──
                 squad.SelectExplicit(new[] { ally });

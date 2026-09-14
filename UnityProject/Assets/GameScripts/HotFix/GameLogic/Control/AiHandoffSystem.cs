@@ -15,11 +15,18 @@ namespace GameLogic.Control
         None = 0,
         /// <summary>接管前就带着 RTS 命令，命令在内核里原样复活，本系统不干预。</summary>
         ResumeCommand = 1,
-        /// <summary>原地守住：交战中退出，或退出那一刻本来就没在移动。</summary>
+        /// <summary>
+        /// 原地守住。2026-09-14 起这是**唯一**会被产出的延续方式：松手就停在松手的地方。
+        /// </summary>
         HoldGround = 2,
-        /// <summary>沿退出瞬间的速度方向再走一段：移动中退出。</summary>
+
+        /// <summary>
+        /// 已退役（2026-09-14）：沿退出瞬间的速度方向再走一段。理由见 <see cref="AiHandoffSystem.ArmBuffer"/>。
+        /// 枚举值保留不复用，避免与历史存档/日志里的数字对不上。
+        /// </summary>
         Advance = 3,
-        /// <summary>背离最近威胁再走一段：撤退中退出。</summary>
+
+        /// <summary>已退役（2026-09-14）：背离最近威胁再走一段。同 <see cref="Advance"/>。</summary>
         Disengage = 4,
     }
 
@@ -85,31 +92,24 @@ namespace GameLogic.Control
         /// = 0.75s，这里取它的 2 倍）长，否则"切过去看一眼再切回来"的来回操作会让缓冲每次都在半路被打断，
         /// 缓冲等于不存在；
         /// 又必须短到玩家不会把它误读成"这个单位不听 AI 了"——超过两秒的静默期在俯视战斗里
-        /// 看起来就是卡住。1.5s 同时也够单位按常规移速走完 <see cref="ContinuationDistance"/>。
+        /// 看起来就是卡住。
+        ///
+        /// 2026-09-14 之后这段窗口里执行的**一律是原地守备**（见 <see cref="ArmBuffer"/>），
+        /// 所以它现在的作用只剩"缓冲到期前不交还给自由 AI"，不再是"走完一段延续指令"。
         /// </summary>
         public const float HandoffBufferSeconds = 1.5f;
-
-        /// <summary>
-        /// 延续距离（世界单位）。"再往前走一段"的那一段。
-        /// 取 6：常规移速约 4~6/s，乘上缓冲窗口正好一口气走完，不会出现"命令还没到就过期"的半截观感。
-        /// </summary>
-        public const float ContinuationDistance = 6f;
 
         /// <summary>
         /// 判定"退出那一刻是不是在交战"的威胁感知半径。
         /// 与内核撤退命令的 <c>SimWorld.RetreatThreatRange</c> 同量级，
         /// 不复用那一个是因为它是**内核撤退行为**的参数，改它会顺带改掉所有撤退命令的手感。
+        ///
+        /// 2026-09-14 起它只用来填 <see cref="HandoffRecord.Threat"/> 供诊断，不再参与落点判定。
         /// </summary>
         public const float EngageThreatRange = 12f;
 
         /// <summary>缓冲守备命令的到达半径。比单位半径宽，避免在守备点上反复微调。</summary>
         public const float BufferArriveRadius = 1.5f;
-
-        /// <summary>速度低于这个值就当作"退出时没在移动"。</summary>
-        private const float MovingSpeedEpsilon = 0.35f;
-
-        /// <summary>背离威胁的判据：速度方向与"背离威胁方向"的点积超过它才算在撤退，而不是在绕。</summary>
-        private const float DisengageDot = 0.35f;
 
         /// <summary>同时在缓冲期里的记录上限。超出时最旧的一条立刻收尾，不留悬挂的守备命令。</summary>
         private const int MaxPendingHandoffs = 8;
@@ -329,44 +329,32 @@ namespace GameLogic.Control
                 radius = _sim.Snapshot.Radius[index];
             }
 
-            HandoffContinuation continuation;
+            // ── 2026-09-14 产品决策反转：**松手就停在松手的地方，一条分支，没有例外** ──
+            //
+            // 在此之前这里按退出瞬间的速度分三档：无威胁且在移动 → 沿原朝向再走
+            // 沿原朝向再走 6 米；有威胁且正在背离 → 继续拉开同样距离；
+            // 其余原地守住。立论是 M2-04 的"退出后延续合理意图，而不是站桩"。
+            //
+            // 玩家连着两轮报同一件事（#6「放下的身体应原地不动」、09-14「上一个角色老是会位移一段」），
+            // 根因是这个立论有一处站不住：**那段"意图"根本不是这具身体的意图**。
+            // 直控期间它是被提线操着的，速度来自玩家最后一次按键，不是任何正在进行的行军。
+            // 拿残速当"未竟的意图"续上 6 米，等于凭一个从不存在的计划推翻玩家选定的落点——
+            // 玩家把它开到这儿松手，这儿就是他要它待的地方。
+            //
+            // 09-13 已经为同一个理由把"缓冲到期回自由 AI"翻成了原地守备
+            // （<see cref="HoldGroundAfterHandoff"/>），这两条分支是那次漏下的最后一块。
+            //
+            // 撤退档一并去掉：留着它，同一个抱怨在交战时照样能复现，而且它与
+            // "交战中退出 → 守在原地继续打"这条**已经上线且没人反对**的规则自相矛盾——
+            // 既然站在敌人旁边不许跑，那背对敌人时也没有理由替玩家多跑 6 米。
+            //
+            // 保留威胁探测：它只用来填 <see cref="HandoffRecord.Threat"/> 供诊断，不再参与判定。
+            // 守备只产出移动意图、**不接管战斗**，所以"原地不动"从来不等于"不还手"。
+            SimEntityId threat = TryFindNearestThreat(pos, out SimEntityId hostile, out _)
+                ? hostile
+                : SimEntityId.None;
+            HandoffContinuation continuation = HandoffContinuation.HoldGround;
             float2 anchor = pos;
-            SimEntityId threat = SimEntityId.None;
-            float speed = math.length(velocity);
-            float2 heading = speed > MovingSpeedEpsilon ? velocity / speed : float2.zero;
-
-            if (TryFindNearestThreat(pos, out SimEntityId hostile, out float2 hostilePos))
-            {
-                threat = hostile;
-                float2 away = math.normalizesafe(pos - hostilePos);
-                bool retreating = speed > MovingSpeedEpsilon &&
-                                  math.dot(heading, away) > DisengageDot;
-                if (retreating)
-                {
-                    // 撤退中退出：继续背离威胁。直接照抄"退出瞬间的速度方向"而不是纯 away，
-                    // 否则玩家绕着敌人跑开的那一下会被拉直成"正对背面直线撤"，看起来像换了个人在操作。
-                    continuation = HandoffContinuation.Disengage;
-                    anchor = pos + math.normalizesafe(heading + away, away) * ContinuationDistance;
-                }
-                else
-                {
-                    // 交战中退出：守在原地继续打。命令只产出移动意图、不接管战斗，
-                    // 所以"守在原地"不等于"不还手"——攻击结算仍走既有的距离判定路径。
-                    continuation = HandoffContinuation.HoldGround;
-                    anchor = pos;
-                }
-            }
-            else if (speed > MovingSpeedEpsilon)
-            {
-                // 移动中退出：把当前朝向再走完一段，而不是当场发呆一拍等 AI 重新决策。
-                continuation = HandoffContinuation.Advance;
-                anchor = pos + heading * ContinuationDistance;
-            }
-            else
-            {
-                continuation = HandoffContinuation.HoldGround;
-                anchor = pos;
-            }
 
             if (TryFindSafePosition(anchor, radius, out float2 safeAnchor))
             {
