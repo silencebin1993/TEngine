@@ -84,6 +84,7 @@ namespace GameLogic.EditorTools
                 ValidateBlueprintLibrary();
                 ValidateLineagePhenotypeTemplate();
                 ValidateCompiledRecipeCache();
+                ValidateGerminationChamber();
             }
             catch (Exception e)
             {
@@ -1841,6 +1842,118 @@ namespace GameLogic.EditorTools
             Expect(Mathf.Approximately(vitals.Get(entityB).Strain, 0f),
                 "个体 A 增加过载债不应污染个体 B 的过载债");
             Expect(vitals.Get(entityA).Strain > 0f, "个体 A 自身的过载债应确实增加");
+        }
+
+        /// <summary>
+        /// M3-05 验收：萌生队列/生物质账本/版本隔离/取消退款/腔体被毁。本项只测不需要真实 Sim 的部分
+        /// （队列记账、版本捕获、取消/摧毁退款）——生成真实地图实体那一步需要一个运行中的 SimWorld，
+        /// 留给运行期人测/execute_code 断言，见 DIGEST。
+        /// </summary>
+        private static void ValidateGerminationChamber()
+        {
+            Line("\n[29] 萌生腔与新生传播（M3-05）");
+
+            // 生物质账本：Reject-to-Safe，扣不动就不扣，不产生负余额。
+            var ledger = new BiomassLedger();
+            ledger.OnEnter();
+            float initial = ledger.GetBalance("lineage-x");
+            Expect(initial == BiomassLedger.DefaultStartingBalance, "未记过账的谱系应按占位起始余额读取（纯读取，不因查询而改变状态）");
+            bool overdraft = ledger.TryDeduct("lineage-x", BiomassLedger.DefaultStartingBalance + 1f);
+            Expect(!overdraft, "超过起始余额的扣款应被拒绝");
+            Expect(ledger.GetBalance("lineage-x") == BiomassLedger.DefaultStartingBalance, "被拒绝的扣款不应产生任何副作用，余额应保持不变");
+            bool ok = ledger.TryDeduct("lineage-x", 40f);
+            Expect(ok, "余额充足时扣款应成功");
+            Expect(ledger.GetBalance("lineage-x") == BiomassLedger.DefaultStartingBalance - 40f,
+                "扣款后余额应为 起始余额-40");
+            ledger.Refund("lineage-x", 10f);
+            Expect(ledger.GetBalance("lineage-x") == BiomassLedger.DefaultStartingBalance - 30f,
+                "退款应原样加回余额");
+
+            // 萌生队列：架在蓝图库 + 谱系之上，同 [27] 的搭建方式。
+            OrganelleDef organelle = OrganelleCatalog.All.Values.FirstOrDefault(o => o.AttackMethod && !o.IsRetired);
+            List<string> geneIds = GeneCatalog.AllGeneIds.Take(2).ToList();
+            Expect(organelle != null, "OrganelleCatalog 应至少有一条 AttackMethod 未退役器官用于本项自检");
+            Expect(geneIds.Count == 2, "GeneCatalog 应至少有两条基因用于本项自检");
+            if (organelle == null || geneIds.Count < 2)
+            {
+                return;
+            }
+
+            var blueprints = new BlueprintRegistry();
+            blueprints.Resolve(organelle.Id, BlueprintSourceKind.Organelle, 1f, 0f);
+            foreach (string g in geneIds)
+            {
+                blueprints.Resolve(g, BlueprintSourceKind.Gene, 1f, 0f);
+            }
+
+            var lineages = new LineageRegistry();
+            lineages.Bind(blueprints);
+            PhenotypeTemplateVersion v1 = lineages.CommitTemplate("lineage-y", "assault", organelle.Id, geneIds, "keep_distance", out string commitErr);
+            Expect(v1 != null && commitErr == null, "本项前置：合法配方提交应成功产生版本 1");
+
+            var chamberLedger = new BiomassLedger();
+            chamberLedger.OnEnter();
+            var chamber = new GerminationChamberRegistry();
+            chamber.OnEnter();
+            chamber.Bind(null, lineages, chamberLedger, null); // 只测不需要 SimBridge 的队列/账本逻辑。
+
+            // 未知谱系/模板：Reject-to-Safe，不入队不扣费。
+            int badTicket = chamber.Enqueue("lineage-y", "no_such_template", out PhenotypeTemplateVersion badVersion, out string badErr);
+            Expect(badTicket == 0 && badVersion == null && badErr != null, "查无模板版本时应拒绝入队");
+            Expect(chamberLedger.GetBalance("lineage-y") == BiomassLedger.DefaultStartingBalance,
+                "被拒绝的入队不应扣费");
+
+            // 正常入队：捕获当时的版本引用，扣费。
+            int ticketA = chamber.Enqueue("lineage-y", "assault", out PhenotypeTemplateVersion capturedA, out string errA);
+            Expect(ticketA != 0 && errA == null, "合法入队应成功");
+            Expect(capturedA != null && capturedA.Version == 1, "入队应捕获当前最新版本（1）");
+            Expect(chamberLedger.GetBalance("lineage-y") == BiomassLedger.DefaultStartingBalance - v1.BiomassCost,
+                "入队应按该版本的生物质成本扣费");
+            Expect(chamber.PendingCount("lineage-y") == 1, "入队后队列应有 1 项待处理");
+
+            // 版本隔离核心：谱系提交 V2 之后，ticketA 已经捕获的版本对象引用不应受影响——
+            // 这就是"已经排队/已经生成的旧个体保持 V1"的机制来源（生成时用的是这份捕获引用，不是
+            // 事后再查一次"最新版本"）。
+            PhenotypeTemplateVersion v2 = lineages.CommitTemplate("lineage-y", "assault", organelle.Id, geneIds, "escort", out string commitErr2);
+            Expect(v2 != null && v2.Version == 2, "本项前置：第二次提交应产生版本 2");
+            Expect(ReferenceEquals(capturedA, v1) && capturedA.Version == 1,
+                "已入队票据捕获的版本对象不应被后续的谱系提交改变");
+
+            // 新入队应表达 V2——版本隔离的另一半："之后新萌生的同表型个体自动使用新版模板"（GDD §6.6）。
+            int ticketB = chamber.Enqueue("lineage-y", "assault", out PhenotypeTemplateVersion capturedB, out string errB);
+            Expect(ticketB != 0 && errB == null, "第二次入队应成功");
+            Expect(capturedB != null && capturedB.Version == 2, "谱系提交新版本之后的入队应捕获最新版本（2）");
+            Expect(chamber.PendingCount("lineage-y") == 2, "两次入队后队列应有 2 项待处理");
+
+            // 取消：全额退款，移出队列，幂等（重复取消同一票据第二次应失败）。
+            float balanceBeforeCancel = chamberLedger.GetBalance("lineage-y");
+            bool cancelled = chamber.Cancel(ticketA);
+            Expect(cancelled, "取消一个未完成票据应成功");
+            Expect(chamberLedger.GetBalance("lineage-y") == balanceBeforeCancel + capturedA.BiomassCost,
+                "取消应全额退还该票据的生物质成本");
+            Expect(chamber.PendingCount("lineage-y") == 1, "取消后队列应减少 1 项");
+            bool cancelledAgain = chamber.Cancel(ticketA);
+            Expect(!cancelledAgain, "重复取消同一票据应失败（幂等，不重复退款）");
+
+            // 腔体被毁：剩余队列项整体失败退款，之后拒绝新入队；已发生的事（前面的取消）不受影响。
+            float balanceBeforeDestroy = chamberLedger.GetBalance("lineage-y");
+            chamber.DestroyPod("lineage-y");
+            Expect(chamberLedger.GetBalance("lineage-y") == balanceBeforeDestroy + capturedB.BiomassCost,
+                "腔体被毁应退还队列里剩余票据的全部生物质成本");
+            Expect(chamber.PendingCount("lineage-y") == 0, "腔体被毁后队列应清空");
+            int ticketAfterDestroy = chamber.Enqueue("lineage-y", "assault", out PhenotypeTemplateVersion _, out string errAfterDestroy);
+            Expect(ticketAfterDestroy == 0 && errAfterDestroy != null, "腔体被毁后应拒绝新的入队请求");
+
+            // 其他表型不受影响：另一个谱系/模板的队列与账本应完全独立。
+            var otherLedger = new BiomassLedger();
+            otherLedger.OnEnter();
+            var otherChamber = new GerminationChamberRegistry();
+            otherChamber.OnEnter();
+            otherChamber.Bind(null, lineages, otherLedger, null);
+            lineages.CommitTemplate("lineage-z", "escort", organelle.Id, geneIds, "guard", out _);
+            int otherTicket = otherChamber.Enqueue("lineage-z", "escort", out PhenotypeTemplateVersion _, out string otherErr);
+            Expect(otherTicket != 0 && otherErr == null, "其他谱系的入队不应被 lineage-y 的腔体摧毁状态波及");
+            Expect(otherChamber.PendingCount("lineage-z") == 1, "其他谱系的队列应独立计数");
         }
 
         /// <summary>

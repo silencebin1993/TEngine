@@ -54,6 +54,10 @@ namespace GameLogic.Control
         {
             public int LogicId;
             public int ArchetypeId;
+            /// <summary>M3-05：非 null 时走 <see cref="UnitLoadoutOrigin.TemplateDerived"/> 路径，
+            /// <see cref="ArchetypeId"/> 字段本次不使用。两条延迟登记路径共用同一张挂起表/同一套
+            /// 解析节流（<see cref="MaxResolveAttempts"/>），不再新开一张平行表。</summary>
+            public List<UnitLoadoutOrgan> ExplicitOrgans;
             public int Attempts;
         }
 
@@ -129,7 +133,33 @@ namespace GameLogic.Control
                 }
             }
 
-            _pending.Add(new PendingSpawn { LogicId = logicId, ArchetypeId = archetypeId, Attempts = 0 });
+            _pending.Add(new PendingSpawn { LogicId = logicId, ArchetypeId = archetypeId, ExplicitOrgans = null, Attempts = 0 });
+        }
+
+        /// <summary>M3-05：萌生腔新生个体的延迟登记——装配是显式的一份器官列表（来自表型模板版本），
+        /// 不是按 archetypeId 查表派生。</summary>
+        public void RegisterExplicitPending(int logicId, IReadOnlyList<UnitLoadoutOrgan> organs)
+        {
+            if (logicId == 0)
+            {
+                return;
+            }
+
+            for (int i = 0; i < _pending.Count; i++)
+            {
+                if (_pending[i].LogicId == logicId)
+                {
+                    return;
+                }
+            }
+
+            _pending.Add(new PendingSpawn { LogicId = logicId, ArchetypeId = 0, ExplicitOrgans = new List<UnitLoadoutOrgan>(organs), Attempts = 0 });
+        }
+
+        /// <summary>把一份显式器官列表登记为某实体的装配（M3-05：萌生腔新生个体）。</summary>
+        public UnitLoadout RegisterExplicit(SimEntityId entityId, IReadOnlyList<UnitLoadoutOrgan> organs)
+        {
+            return Register(entityId, UnitLoadoutOrigin.TemplateDerived, 0, organs);
         }
 
         /// <summary>
@@ -167,7 +197,14 @@ namespace GameLogic.Control
 
                 if (found.IsValid)
                 {
-                    RegisterArchetype(found, pending.ArchetypeId);
+                    if (pending.ExplicitOrgans != null)
+                    {
+                        RegisterExplicit(found, pending.ExplicitOrgans);
+                    }
+                    else
+                    {
+                        RegisterArchetype(found, pending.ArchetypeId);
+                    }
                     _pending.RemoveAt(p);
                     resolved++;
                     continue;
@@ -282,7 +319,7 @@ namespace GameLogic.Control
 
         // ── 内部 ────────────────────────────────────────────
 
-        private UnitLoadout Register(SimEntityId entityId, UnitLoadoutOrigin origin, int archetypeId)
+        private UnitLoadout Register(SimEntityId entityId, UnitLoadoutOrigin origin, int archetypeId, IReadOnlyList<UnitLoadoutOrgan> explicitOrgans = null)
         {
             if (!entityId.IsValid)
             {
@@ -310,6 +347,15 @@ namespace GameLogic.Control
             {
                 _collectScratch.Clear();
                 ArchetypeLoadoutTable.Collect(archetypeId, _collectScratch);
+                entry.Loadout.Rebuild(_collectScratch);
+            }
+            else if (origin == UnitLoadoutOrigin.TemplateDerived)
+            {
+                _collectScratch.Clear();
+                if (explicitOrgans != null)
+                {
+                    _collectScratch.AddRange(explicitOrgans);
+                }
                 entry.Loadout.Rebuild(_collectScratch);
             }
             else

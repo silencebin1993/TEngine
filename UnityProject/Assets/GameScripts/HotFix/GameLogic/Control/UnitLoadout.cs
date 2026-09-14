@@ -33,6 +33,9 @@ namespace GameLogic.Control
         PlayerProjection = 1,
         /// <summary>其它友军：生成时按行为原型派生一次，之后只会被失能位改写。</summary>
         ArchetypeDerived = 2,
+        /// <summary>M3-05：萌生腔新生个体——装配来自其绑定的表型模板版本（主器官 + 有序基因），
+        /// 不经 <see cref="ArchetypeLoadoutTable"/> 的 archetypeId 表。生成时派生一次，之后同样只会被失能位改写。</summary>
+        TemplateDerived = 3,
     }
 
     /// <summary>装配里的一件器官。<see cref="Disabled"/> 是**热更层状态**，

@@ -79,6 +79,8 @@ namespace GameLogic.Stage.CellStage
         private CodexRegistry _codex;
         private MetabolicSlice.Blueprint.BlueprintRegistry _blueprints;
         private MetabolicSlice.Lineage.LineageRegistry _lineages;
+        private MetabolicSlice.Lineage.BiomassLedger _biomassLedger;
+        private MetabolicSlice.Lineage.GerminationChamberRegistry _germinationChambers;
         private MetabolicDigestionSystem _digestion;
         private CarrierBodyVisualPresenter _carrierBodyVisual;
         private StructuralVisualPresenter _structuralVisual;
@@ -212,6 +214,8 @@ namespace GameLogic.Stage.CellStage
         public CodexRegistry Codex => _codex;
         public MetabolicSlice.Blueprint.BlueprintRegistry Blueprints => _blueprints;
         public MetabolicSlice.Lineage.LineageRegistry Lineages => _lineages;
+        public MetabolicSlice.Lineage.BiomassLedger BiomassLedger => _biomassLedger;
+        public MetabolicSlice.Lineage.GerminationChamberRegistry GerminationChambers => _germinationChambers;
         public SimBridge Sim => _sim;
         public StatusSystem Status => _status;
         public AreaZoneSystem Zones => _zones;
@@ -435,6 +439,9 @@ namespace GameLogic.Stage.CellStage
             _blueprints = _hub.Register(new MetabolicSlice.Blueprint.BlueprintRegistry());
             // M3-03：谱系/表型模板，架在蓝图库之上（纯内存，本期不落盘，见类型注释）。
             _lineages = _hub.Register(new MetabolicSlice.Lineage.LineageRegistry());
+            // M3-05：萌生腔与新生传播——生物质账本 + 萌生队列，架在谱系/表型之上。
+            _biomassLedger = _hub.Register(new MetabolicSlice.Lineage.BiomassLedger());
+            _germinationChambers = _hub.Register(new MetabolicSlice.Lineage.GerminationChamberRegistry());
             _digestion = _hub.Register(new MetabolicDigestionSystem());
             // 战斗反馈表现层（story-002）：白模默认实现，只订阅 Signals，无需 Bind 依赖。
             _hub.Register(new CombatFeedbackPresenter());
@@ -736,6 +743,9 @@ namespace GameLogic.Stage.CellStage
             // M2-03b：动作集绑在注册表之后，且此刻就编译一次——玩家本体已经登记，
             // 开局第一帧按键就该有反应，不必等到第一次切换控制权才有动作集。
             _directActions?.Bind(_sim, _unitLoadouts, _abilities, _status);
+
+            // M3-05：萌生腔要往 _unitLoadouts 挂延迟登记项，必须排在它创建之后。
+            _germinationChambers?.Bind(_sim, _lineages, _biomassLedger, _unitLoadouts);
         }
 
         /// <summary>
