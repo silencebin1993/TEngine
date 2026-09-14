@@ -71,6 +71,9 @@ namespace GameLogic.EditorTools
                 ValidateAiHandoff();
                 ValidateAiOverloadSuppression();
                 ValidateSurgicalWindowBody();
+                ValidateSurgicalWindowCommandAndAim();
+                ValidateSurgicalWindowRewards();
+                ValidateConsciousnessPlaytestGate();
             }
             catch (Exception e)
             {
@@ -1180,6 +1183,33 @@ namespace GameLogic.EditorTools
             Line("\n[8] 多阶段继承应用（ApplyInherited）");
 
             GameObject cameraBefore = Camera.main != null ? Camera.main.gameObject : null;
+            string controlPath = ControlPersistence.FilePath;
+            bool hadControlBackup = File.Exists(controlPath);
+            string controlBackup = hadControlBackup ? File.ReadAllText(controlPath) : null;
+            MetabolicSlicePanel panelBefore = MetabolicSlicePanel.Instance;
+            GameObject tempPanelHost = null;
+
+            if (panelBefore == null)
+            {
+                tempPanelHost = new GameObject("Validate8_MetabolicSlicePanel");
+                panelBefore = tempPanelHost.AddComponent<MetabolicSlicePanel>();
+                // 普通 MonoBehaviour 在 Edit 模式 AddComponent 时不会自动走 Awake；显式调用同一生产初始化，
+                // 让 Bridge 读取到真实的 Instance/CarrierRegistry，而不是在测试里另造替身。
+                typeof(MetabolicSlicePanel)
+                    .GetMethod("Awake", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                    ?.Invoke(panelBefore, null);
+            }
+
+            // 回归夹具：磁盘上故意留一条“上一局控制友军”的记录。
+            // Fresh Enter 必须忽略它；只有 GameRoot.ResumeCellStage 才允许恢复。
+            ControlPersistence.Save(new ControlHandoffState
+            {
+                HasRecord = true,
+                ControlledUnitId = SimEntityId.None,
+                ControlledLogicId = 2,
+                FallbackAnchor = new float2(12f, -6f),
+                HasAnchor = true,
+            });
 
             // 同上：不写死卡 ID。这条验的是"上一局的定义性卡牌会注入下一局起始卡组"，
             // 任意一张真实存在的卡都能验证这条规则，取 Id 最小的那张保证可复现。
@@ -1205,6 +1235,25 @@ namespace GameLogic.EditorTools
             {
                 flow.Enter(prev);
 
+                Expect(flow.Sim.ControllingPlayerBody,
+                    "正常新局必须控制玩家本体，不得把上一局友军 LogicId 恢复到新生成的友军");
+
+                // 用真实玩家 Carrier + org_emitter 跑 OnUpdate，而不是只测底层 FireProjectile。
+                // 这条正是本次漏掉的正常肉鸽实链回归。
+                const string EmitterCarrierId = "validate8_emitter_carrier";
+                panelBefore.CarrierRegistry.EnsureCarrier(EmitterCarrierId, "org_emitter", autoActivate: true);
+                panelBefore.CarrierRegistry.SetActive(EmitterCarrierId);
+                for (int i = 0; i < 45; i++)
+                {
+                    // 只推进被测的两层真实模块：Bridge 产出请求，Sim 下一拍消费。
+                    // 不推进相机/表现/选卡 UI，避免 Edit 模式的 Destroy 延迟语义污染结果。
+                    flow.MetabolicBridge.OnUpdate(1f / 60f);
+                    flow.Sim.OnUpdate(1f / 60f);
+                }
+                Expect(flow.MetabolicBridge.LastFiredProjectileCount > 0 && flow.Sim.LiveProjectileCount > 0,
+                    $"玩家本体激活 org_emitter 后应经真实肉鸽 Tick 生成弹体" +
+                    $"（LastFired={flow.MetabolicBridge.LastFiredProjectileCount}, Live={flow.Sim.LiveProjectileCount}）");
+
                 Expect(flow.Stats.Get(StatId.DevourGain) > 1f,
                     $"继承主导路线 Devour 应提升 DevourGain（实际 {flow.Stats.Get(StatId.DevourGain)}）");
 
@@ -1227,6 +1276,134 @@ namespace GameLogic.EditorTools
                 if (cameraAfter != null && cameraAfter != cameraBefore)
                 {
                     UnityEngine.Object.DestroyImmediate(cameraAfter);
+                }
+                if (tempPanelHost != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(tempPanelHost);
+                }
+                if (hadControlBackup)
+                {
+                    File.WriteAllText(controlPath, controlBackup);
+                }
+                else
+                {
+                    ControlPersistence.Clear();
+                }
+            }
+        }
+
+        // ── M2-06 意识传递试玩门 ─────────────────────────────
+
+        private static void ValidateConsciousnessPlaytestGate()
+        {
+            Line("\n[23] M2-06 固定意识传递试玩门与入口隔离");
+
+            GameObject cameraBefore = Camera.main != null ? Camera.main.gameObject : null;
+            string controlPath = ControlPersistence.FilePath;
+            bool hadControlBackup = File.Exists(controlPath);
+            string controlBackup = hadControlBackup ? File.ReadAllText(controlPath) : null;
+            var flow = new CellStageFlow();
+
+            try
+            {
+                // A. 先跑 LookDev，再直接 Enter：下一局必须自动回到完整正常肉鸽。
+                flow.PrepareNextEnter(CellStageEntryMode.LookDevSandbox);
+                flow.Enter(null);
+                Expect(flow.IsSandboxMode && flow.Director.Suppressed && flow.Timeline.Suppressed &&
+                       flow.MetabolicBridge.Suppressed,
+                    "LookDev 入口应同时抑制刷怪、时间线和玩家常规装配 Tick");
+                flow.Exit();
+
+                flow.Enter(null);
+                Expect(!flow.IsSandboxMode && !flow.IsConsciousnessPlaytest &&
+                       !flow.Director.Suppressed && !flow.Timeline.Suppressed &&
+                       !flow.MetabolicBridge.Suppressed,
+                    "LookDev 退出后的普通新局必须恢复完整肉鸽，不得继承任何抑制态");
+                Expect(flow.Sim.ControllingPlayerBody,
+                    "入口隔离后的普通新局仍应控制玩家本体");
+                flow.Exit();
+
+                // B. 固定试玩只冻结随机内容；真实装配、控制与外科身体全部保留。
+                flow.PrepareNextEnter(CellStageEntryMode.ConsciousnessPlaytest);
+                flow.Enter(null);
+                flow.Sim.OnUpdate(1f / 60f);
+
+                Expect(flow.IsConsciousnessPlaytest && !flow.IsSandboxMode,
+                    "M2-06 应是独立进入方式，不能冒充 LookDev 沙盒");
+                Expect(flow.Director.Suppressed && flow.Timeline.Suppressed &&
+                       !flow.MetabolicBridge.Suppressed,
+                    "M2-06 只冻结随机刷怪/时间线，必须保留真实玩家装配 Tick");
+                Expect(flow.Sim.ControllingPlayerBody,
+                    "M2-06 是固定新局，不得读取上一局的接管记录");
+
+                SimSnapshot snapshot = flow.Sim.Snapshot;
+                int targetIndex = SimConst.InvalidIndex;
+                for (int i = 0; i < snapshot.Count; i++)
+                {
+                    if (snapshot.IsAlive(i) &&
+                        snapshot.LogicId[i] == CellStageFlow.ConsciousnessPlaytestTargetLogicId)
+                    {
+                        targetIndex = i;
+                        break;
+                    }
+                }
+
+                bool hasFixedTarget = targetIndex != SimConst.InvalidIndex;
+                Expect(hasFixedTarget,
+                    "M2-06 应在固定 LogicId 与固定坐标生成唯一手术目标");
+                if (hasFixedTarget)
+                {
+                    float2 pos = snapshot.Position[targetIndex];
+                    Expect(math.distance(pos, new float2(
+                               CellStageFlow.ConsciousnessPlaytestTargetX,
+                               CellStageFlow.ConsciousnessPlaytestTargetY)) < 0.01f,
+                        $"固定目标坐标应稳定（实际 {pos.x:F2},{pos.y:F2}）");
+
+                    SimEntityId targetId = snapshot.EntityId[targetIndex];
+                    bool hasPrimary = flow.Sim.World.TryGetBodyPart(
+                        targetId, SimBodyPartSlot.Primary, out SimBodyPart primary);
+                    bool hasSecondary = flow.Sim.World.TryGetBodyPart(
+                        targetId, SimBodyPartSlot.Secondary, out SimBodyPart secondary);
+                    Expect(hasPrimary && hasSecondary &&
+                           primary.AimRadius > 0f && secondary.AimRadius > 0f,
+                        "固定目标必须带两个可被直控弹体几何命中的真实接点");
+                }
+                flow.Exit();
+
+                // C. M2-06 同样是一枪一发的进入配置；下一局不能残留固定目标或抑制态。
+                flow.Enter(null);
+                flow.Sim.OnUpdate(1f / 60f);
+                SimSnapshot fresh = flow.Sim.Snapshot;
+                bool leakedTarget = false;
+                for (int i = 0; i < fresh.Count; i++)
+                {
+                    leakedTarget |= fresh.IsAlive(i) &&
+                        fresh.LogicId[i] == CellStageFlow.ConsciousnessPlaytestTargetLogicId;
+                }
+                Expect(!flow.IsConsciousnessPlaytest && !leakedTarget &&
+                       !flow.Director.Suppressed && !flow.Timeline.Suppressed &&
+                       !flow.MetabolicBridge.Suppressed,
+                    "M2-06 退出后的普通新局不得残留固定目标或任何抑制态");
+            }
+            finally
+            {
+                if (flow.IsRunning)
+                {
+                    flow.Exit();
+                }
+
+                GameObject cameraAfter = Camera.main != null ? Camera.main.gameObject : null;
+                if (cameraAfter != null && cameraAfter != cameraBefore)
+                {
+                    UnityEngine.Object.DestroyImmediate(cameraAfter);
+                }
+                if (hadControlBackup)
+                {
+                    File.WriteAllText(controlPath, controlBackup);
+                }
+                else
+                {
+                    ControlPersistence.Clear();
                 }
             }
         }
@@ -3963,6 +4140,584 @@ namespace GameLogic.EditorTools
             {
                 cmds.Dispose();
                 world.Dispose();
+            }
+        }
+
+        // ── [21] RTS 指定接点 + 直控瞄准接点（M2-05b）──────────
+
+        /// <summary>
+        /// 里程碑实施第 2/3 条：RTS 可指定器官类别、直控可瞄准具体接点。
+        /// M2-05a 只交付了内核基元（<see cref="DamageRequest.TargetPart"/> 怎么扣血），
+        /// 本段第一次让"谁来设置这个字段"落地——<see cref="UnitCommand.TargetPart"/> +
+        /// <see cref="SquadCommandSystem.Issue"/>（RTS）与 <see cref="SimProjectileFlags.SurgicalAim"/>
+        /// （直控弹体在实际命中帧解析具体接点）。
+        ///
+        /// 同时修了一个真实缺口：改动前 <c>SimWorld.ResolveMinionCombat</c> 完全不读
+        /// <c>cmd.TargetEntity</c>，靠 <c>MinionTargetingUtil.TryFindNearestHostile</c> 重新找目标，
+        /// 混战中"攻击指定实体"命令可能打偏。断言组 1/2 覆盖修复后的锁定；组 3/4 覆盖
+        /// "自主 AI"与"非 Attack 的 Commanded 单位（如 Guard）"两条**必须保持原样**的路径——
+        /// 这两条合起来才是"零回归"的完整证据，只测新增分支不够。
+        /// </summary>
+        private static void ValidateSurgicalWindowCommandAndAim()
+        {
+            Line("\n[21] RTS 指定接点 + 直控瞄准接点（M2-05b）");
+
+            ValidateCommandedAttackLocksTargetPart();
+            ValidateDirectControlAimResolvesPart();
+        }
+
+        // ── [22] 精准切离奖励 + 粗暴击杀生物质（M2-05c）────────
+
+        /// <summary>
+        /// 里程碑实施第 4/5 条。用同一套真实 JobDamage 事件验证奖励层只解释事实、不反向污染内核：
+        /// 直控低伤末击保留完整器官；RTS 类别指定与直控高伤末击都不保留；
+        /// 带接点敌人被整体伤害击杀只给生物质，普通敌人与吞噬清除不进入这条新奖励轨道。
+        /// </summary>
+        private static void ValidateSurgicalWindowRewards()
+        {
+            Line("\n[22] 精准切离奖励 + 粗暴击杀生物质（M2-05c）");
+            Expect(!SimBridge.IsSurgicalAimSource(-1) &&
+                   !SimBridge.IsSurgicalAimSource(-2) &&
+                   !SimBridge.IsSurgicalAimSource(-123456),
+                "反伤与内核自动分配的普通负数 LogicId 不得被误判成直控精准来源");
+
+            var world = new SimWorld();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 64;
+            cfg.ArenaHalfExtent = 80f;
+            world.Initialize(cfg);
+
+            SimCommandBuffer cmds = default;
+            cmds.Initialize(Unity.Collections.Allocator.Persistent, 64);
+            var rewards = new SurgicalRewardLedger();
+            rewards.OnEnter();
+
+            try
+            {
+                // A. 直控低伤：4 次 10/40 的几何归因命中，最后一次恰好切离。
+                int preciseIdx = world.SpawnSurgicalTestEnemy(new float2(-30f, 0f), 9901,
+                    coreHealth: 100f, primaryPartHealth: 40f, secondaryPartHealth: 0f);
+                for (int i = 0; i < 4; i++)
+                {
+                    cmds.Damage(new DamageRequest
+                    {
+                        TargetIndex = preciseIdx,
+                        Radius = -1f,
+                        Amount = 10f,
+                        TargetPart = SimBodyPartSlot.Primary,
+                        SourceLogicId = SimBridge.EncodeSurgicalAimSource(100),
+                    });
+                    world.Step(1f / 60f, ref cmds);
+                    SimSnapshot frame = world.GetSnapshot();
+                    rewards.ResolveFrame(world, in frame);
+                }
+
+                SimSnapshot preciseSnap = world.GetSnapshot();
+                HitEvent preciseHit = preciseSnap.Hits[preciseSnap.HitCount - 1];
+                world.TryGetEntityId(preciseIdx, out SimEntityId preciseId);
+                world.TryGetBodyPart(preciseId, SimBodyPartSlot.Primary, out SimBodyPart precisePart);
+                Expect(SimBridge.IsSurgicalAimSource(preciseHit.SourceLogicId) &&
+                       SimBridge.DecodeSurgicalAimSource(preciseHit.SourceLogicId) == 100 &&
+                       precisePart.Destroyed != 0 && precisePart.LastHitAmount == 10f,
+                    "精准切离应沿既有命中来源透传直控标记，并在身体接点记下摧毁末击事实");
+                Expect(rewards.IntactOrganCount == 1 && rewards.Biomass == 0,
+                    $"10/40 的直控末击应保留 1 个完整器官且不产生生物质（实际 organ={rewards.IntactOrganCount}, biomass={rewards.Biomass}）");
+                bool hasExpectedStub = rewards.IntactOrganCount > 0 &&
+                    rewards.IntactOrgans[0].SourceLogicId == 9901 &&
+                    rewards.IntactOrgans[0].Slot == SimBodyPartSlot.Primary;
+                Expect(hasExpectedStub,
+                    "完整器官存根应保留来源逻辑 ID 与接点槽位，正式掉落属性留给 M3");
+
+                // B. 同样低伤但来自 RTS 类别指定：能摧毁接点，不能获得直控专属完整器官。
+                int categoryIdx = world.SpawnSurgicalTestEnemy(new float2(-10f, 0f), 9902,
+                    coreHealth: 100f, primaryPartHealth: 40f, secondaryPartHealth: 0f);
+                for (int i = 0; i < 4; i++)
+                {
+                    cmds.Damage(new DamageRequest
+                    {
+                        TargetIndex = categoryIdx,
+                        Radius = -1f,
+                        Amount = 10f,
+                        TargetPart = SimBodyPartSlot.Primary,
+                        SourceLogicId = 101,
+                    });
+                    world.Step(1f / 60f, ref cmds);
+                    SimSnapshot frame = world.GetSnapshot();
+                    rewards.ResolveFrame(world, in frame);
+                }
+                HitEvent categoryHit = world.GetSnapshot().Hits[world.GetSnapshot().HitCount - 1];
+                world.TryGetEntityId(categoryIdx, out SimEntityId categoryId);
+                world.TryGetBodyPart(categoryId, SimBodyPartSlot.Primary, out SimBodyPart categoryPart);
+                Expect(categoryPart.Destroyed != 0 && !SimBridge.IsSurgicalAimSource(categoryHit.SourceLogicId),
+                    "RTS 类别指定应正常摧毁接点，但来源不得带直控几何瞄准标记");
+                Expect(rewards.IntactOrganCount == 1,
+                    "RTS 类别指定即便以低伤切离，也不应增加直控专属完整器官奖励");
+
+                // C. 直控高伤：归因正确但末击超过 25% 阈值，不保留完整器官。
+                int roughPartIdx = world.SpawnSurgicalTestEnemy(new float2(10f, 0f), 9903,
+                    coreHealth: 100f, primaryPartHealth: 40f, secondaryPartHealth: 0f);
+                cmds.Damage(new DamageRequest
+                {
+                    TargetIndex = roughPartIdx,
+                    Radius = -1f,
+                    Amount = 40f,
+                    TargetPart = SimBodyPartSlot.Primary,
+                    SourceLogicId = SimBridge.EncodeSurgicalAimSource(102),
+                });
+                world.Step(1f / 60f, ref cmds);
+                SimSnapshot roughPartFrame = world.GetSnapshot();
+                rewards.ResolveFrame(world, in roughPartFrame);
+                Expect(rewards.IntactOrganCount == 1,
+                    "40/40 的直控高伤末击超过 25% 阈值，不应保留完整器官");
+
+                // D. 带接点身体被打光整体 Health：死亡事件记住身体事实，只给 1 生物质。
+                int bodyKillIdx = world.SpawnSurgicalTestEnemy(new float2(30f, 0f), 9904,
+                    coreHealth: 20f, primaryPartHealth: 40f, secondaryPartHealth: 40f);
+                cmds.Damage(new DamageRequest { TargetIndex = bodyKillIdx, Radius = -1f, Amount = 20f });
+                world.Step(1f / 60f, ref cmds);
+                SimSnapshot bodyDeathFrame = world.GetSnapshot();
+                rewards.ResolveFrame(world, in bodyDeathFrame);
+                DeathEvent bodyDeath = bodyDeathFrame.Deaths[0];
+                Expect(bodyDeath.HadSurgicalBody != 0 && bodyDeath.CauseKind == DeathCauseKind.Damage,
+                    "整体伤害击杀应在槽位释放前把‘带接点身体’事实写入死亡事件");
+                Expect(rewards.Biomass == 1 && rewards.IntactOrganCount == 1,
+                    $"粗暴整体击杀应只增加 1 生物质、不增加完整器官（实际 biomass={rewards.Biomass}, organ={rewards.IntactOrganCount}）");
+
+                // E. 普通敌人与 Devour 不属于这条“粗暴手术”奖励。
+                int plainIdx = world.SpawnUnit(new SpawnRequest
+                {
+                    Position = new float2(45f, 0f), Health = 10f, Radius = 0.5f,
+                    Faction = SimFaction.Hostile, LogicId = 9905,
+                });
+                cmds.Damage(new DamageRequest { TargetIndex = plainIdx, Radius = -1f, Amount = 10f });
+                world.Step(1f / 60f, ref cmds);
+                SimSnapshot plainDeathFrame = world.GetSnapshot();
+                rewards.ResolveFrame(world, in plainDeathFrame);
+                Expect(rewards.Biomass == 1,
+                    "没有身体接点的普通敌人死亡不应凭空产生手术窗口生物质");
+
+                int devourIdx = world.SpawnSurgicalTestEnemy(new float2(60f, 0f), 9906,
+                    coreHealth: 20f, primaryPartHealth: 40f, secondaryPartHealth: 40f);
+                world.Step(1f / 60f, ref cmds); // 清掉上一帧事件，避免测试重复消费同一快照。
+                world.KillUnit(devourIdx, 0);
+                SimSnapshot devourFrame = world.GetSnapshot();
+                rewards.ResolveFrame(world, in devourFrame);
+                Expect(devourFrame.DeathCount == 1 && devourFrame.Deaths[0].HadSurgicalBody != 0 &&
+                       devourFrame.Deaths[0].CauseKind == DeathCauseKind.Devour,
+                    "吞噬清除仍应携带身体事实，但致死来源必须保持 Devour");
+                Expect(rewards.Biomass == 1 && rewards.IntactOrganCount == 1,
+                    "吞噬清除沿用既有吞噬奖励，不应重复进入手术窗口生物质/完整器官轨道");
+            }
+            finally
+            {
+                cmds.Dispose();
+                world.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// RTS 侧：Attack 命令锁定命令指定的实体（而不是重找最近敌人），并把
+        /// <see cref="UnitCommand.TargetPart"/> 透传进这次攻击的 <see cref="DamageRequest"/>。
+        /// 四组单位两两隔开 40 米以上（同 [19] 的做法），避免索敌半径互相污染。
+        /// </summary>
+        private static void ValidateCommandedAttackLocksTargetPart()
+        {
+            var sim = new SimBridge();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 64;
+            cfg.ArenaHalfExtent = 200f;
+            cfg.RandomSeed = 0xC0FFEE06u;
+
+            var archetypes = new[]
+            {
+                new BehaviorArchetype
+                {
+                    Kind = BehaviorKind.MinionSeekAttack, Accel = 12f, TurnRate = 0f, AggroRange = 12f,
+                    AttackRange = 8f, AttackCooldown = 0.25f, AttackDamage = 6f,
+                    Separation = 0f, ChargeSpeedMul = 1f,
+                },
+                new BehaviorArchetype
+                {
+                    Kind = BehaviorKind.Stationary, Accel = 0f, TurnRate = 0f, AggroRange = 0f,
+                    AttackRange = 0.5f, AttackCooldown = 99f, AttackDamage = 0f,
+                    Separation = 0f, ChargeSpeedMul = 1f,
+                },
+            };
+            sim.Begin(cfg, archetypes);
+
+            try
+            {
+                // ── 组 1：显式 Attack 命令带 TargetPart——应锁定命令指定的（更远的）实体，
+                //          并且打在它的接点上，旁边更近的敌人完全不该被误伤 ──
+                const int AttackerALogicId = 9801;
+                const int NearHostileALogicId = 9802;
+                const int FarHostileALogicId = 9803;
+                var originA = new float2(-90f, 0f);
+
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = originA, Health = 999f, Radius = 0.5f, MaxSpeed = 3f,
+                    ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = AttackerALogicId,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = originA + new float2(2f, 0f), Health = 999f, Radius = 0.5f, MaxSpeed = 0f,
+                    ArchetypeId = 1, Faction = SimFaction.Hostile,
+                    IntentSource = IntentSource.AI, LogicId = NearHostileALogicId,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = originA + new float2(5f, 0f), Health = 999f, Radius = 0.5f, MaxSpeed = 0f,
+                    ArchetypeId = 1, Faction = SimFaction.Hostile,
+                    IntentSource = IntentSource.AI, LogicId = FarHostileALogicId,
+                    PrimaryPartMaxHealth = 100f, SecondaryPartMaxHealth = 100f,
+                });
+
+                sim.OnUpdate(1f / 60f);
+                SimSnapshot snapA0 = sim.Snapshot;
+                SimEntityId attackerA = FindEntityId(snapA0, AttackerALogicId, out _);
+                SimEntityId nearHostileA = FindEntityId(snapA0, NearHostileALogicId, out int nearAIdx0);
+                SimEntityId farHostileA = FindEntityId(snapA0, FarHostileALogicId, out int farAIdx0);
+                Expect(attackerA.IsValid && nearHostileA.IsValid && farHostileA.IsValid,
+                    "组 1 的攻击者与两个敌人应都已落地并拥有有效稳定实体 ID");
+
+                int acceptedA = sim.IssueCommand(new[] { attackerA }, new UnitCommand
+                {
+                    Kind = UnitCommandKind.Attack, TargetEntity = farHostileA,
+                    TargetPart = SimBodyPartSlot.Primary, ArriveRadius = 0.5f,
+                });
+                Expect(acceptedA == 1, $"组 1 的 Attack 命令应被接受（实际 {acceptedA}）");
+                Expect(sim.TryGetCommand(attackerA, out UnitCommand gotA) &&
+                       gotA.TargetPart == SimBodyPartSlot.Primary,
+                    "下达的命令应能原样取回 TargetPart=Primary");
+
+                float nearAHealthBefore = sim.Snapshot.Health[nearAIdx0];
+                float farAHealthBefore = sim.Snapshot.Health[farAIdx0];
+                for (int f = 0; f < 30; f++) { sim.OnUpdate(1f / 60f); }
+
+                sim.World.TryGetBodyPart(farHostileA, SimBodyPartSlot.Primary, out SimBodyPart farAPrimary);
+                sim.TryResolveUnitIndex(farHostileA, out int farAIdx1);
+                sim.TryResolveUnitIndex(nearHostileA, out int nearAIdx1);
+                sim.World.TryResolveUnit(attackerA, out int attackerAIdx1);
+                Expect(farAPrimary.Health < 100f,
+                    $"组 1：命令指定目标的 Primary 接点应挨打（实际 {farAPrimary.Health}/100）");
+                Expect(sim.Snapshot.Health[farAIdx1] == farAHealthBefore,
+                    "组 1：接点命中不应外溢到命令指定目标的整体 Health");
+                Expect(sim.Snapshot.Health[nearAIdx1] == nearAHealthBefore,
+                    "组 1：更近的旁观敌人不应被误伤——必须真的锁定命令指定的那个实体，而不是重找最近的");
+                Expect(sim.Snapshot.IntentSourceOf(attackerAIdx1) == IntentSource.Commanded,
+                    "组 1：目标仍存活，命令不应被提前交还 AI");
+
+                // ── 组 2：显式 Attack 命令不带 TargetPart——应仍锁定命令指定实体（修复本身），
+                //          但伤害路由行为不变：整体 Health 照常掉血，不涉及任何接点 ──
+                const int AttackerBLogicId = 9811;
+                const int NearHostileBLogicId = 9812;
+                const int FarHostileBLogicId = 9813;
+                var originB = new float2(-50f, 0f);
+
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = originB, Health = 999f, Radius = 0.5f, MaxSpeed = 3f,
+                    ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = AttackerBLogicId,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = originB + new float2(2f, 0f), Health = 999f, Radius = 0.5f, MaxSpeed = 0f,
+                    ArchetypeId = 1, Faction = SimFaction.Hostile,
+                    IntentSource = IntentSource.AI, LogicId = NearHostileBLogicId,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = originB + new float2(5f, 0f), Health = 999f, Radius = 0.5f, MaxSpeed = 0f,
+                    ArchetypeId = 1, Faction = SimFaction.Hostile,
+                    IntentSource = IntentSource.AI, LogicId = FarHostileBLogicId,
+                });
+
+                sim.OnUpdate(1f / 60f);
+                SimSnapshot snapB0 = sim.Snapshot;
+                SimEntityId attackerB = FindEntityId(snapB0, AttackerBLogicId, out _);
+                SimEntityId nearHostileB = FindEntityId(snapB0, NearHostileBLogicId, out int nearBIdx0);
+                SimEntityId farHostileB = FindEntityId(snapB0, FarHostileBLogicId, out int farBIdx0);
+                Expect(attackerB.IsValid && nearHostileB.IsValid && farHostileB.IsValid,
+                    "组 2 的攻击者与两个敌人应都已落地并拥有有效稳定实体 ID");
+
+                int acceptedB = sim.IssueCommand(new[] { attackerB },
+                    new UnitCommand { Kind = UnitCommandKind.Attack, TargetEntity = farHostileB, ArriveRadius = 0.5f });
+                Expect(acceptedB == 1, $"组 2 的 Attack 命令应被接受（实际 {acceptedB}）");
+                Expect(sim.TryGetCommand(attackerB, out UnitCommand gotB) &&
+                       gotB.TargetPart == SimBodyPartSlot.None,
+                    "不显式设置 TargetPart 时应保持默认 None（向后兼容）");
+
+                float nearBHealthBefore = sim.Snapshot.Health[nearBIdx0];
+                float farBHealthBefore = sim.Snapshot.Health[farBIdx0];
+                for (int f = 0; f < 30; f++) { sim.OnUpdate(1f / 60f); }
+                sim.TryResolveUnitIndex(farHostileB, out int farBIdx1);
+                sim.TryResolveUnitIndex(nearHostileB, out int nearBIdx1);
+                Expect(sim.Snapshot.Health[farBIdx1] == farBHealthBefore - 6f,
+                    $"组 2：TargetPart=None 时应正常整体扣血（{farBHealthBefore} → {sim.Snapshot.Health[farBIdx1]}，应为 -6）");
+                Expect(sim.Snapshot.Health[nearBIdx1] == nearBHealthBefore,
+                    "组 2：即便不带 TargetPart，命令修复本身也该生效——更近的旁观者依旧不该被误伤");
+
+                // ── 组 3：纯自主 AI（非 Commanded）——必须保持"打最近敌人"的原有行为不变 ──
+                const int AiMinionLogicId = 9831;
+                const int AiNearHostileLogicId = 9832;
+                const int AiFarHostileLogicId = 9833;
+                var originC = new float2(-10f, 0f);
+
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = originC, Health = 999f, Radius = 0.5f, MaxSpeed = 3f,
+                    ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = AiMinionLogicId,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = originC + new float2(2f, 0f), Health = 999f, Radius = 0.5f, MaxSpeed = 0f,
+                    ArchetypeId = 1, Faction = SimFaction.Hostile,
+                    IntentSource = IntentSource.AI, LogicId = AiNearHostileLogicId,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = originC + new float2(5f, 0f), Health = 999f, Radius = 0.5f, MaxSpeed = 0f,
+                    ArchetypeId = 1, Faction = SimFaction.Hostile,
+                    IntentSource = IntentSource.AI, LogicId = AiFarHostileLogicId,
+                });
+
+                sim.OnUpdate(1f / 60f);
+                SimSnapshot snapC0 = sim.Snapshot;
+                SimEntityId aiNear = FindEntityId(snapC0, AiNearHostileLogicId, out int aiNearIdx0);
+                SimEntityId aiFar = FindEntityId(snapC0, AiFarHostileLogicId, out int aiFarIdx0);
+                Expect(aiNear.IsValid && aiFar.IsValid, "组 3 的两个敌人应都已落地");
+                // 全程不下任何命令——这具身体自始至终是纯 AI，走的是完全没被本段碰过的分支。
+
+                float aiNearHealthBefore = sim.Snapshot.Health[aiNearIdx0];
+                float aiFarHealthBefore = sim.Snapshot.Health[aiFarIdx0];
+                for (int f = 0; f < 30; f++) { sim.OnUpdate(1f / 60f); }
+                sim.TryResolveUnitIndex(aiNear, out int aiNearIdx1);
+                sim.TryResolveUnitIndex(aiFar, out int aiFarIdx1);
+                Expect(sim.Snapshot.Health[aiNearIdx1] < aiNearHealthBefore,
+                    "组 3：纯自主 AI 应照旧打最近的敌人（本段完全没有改动这条分支）");
+                Expect(sim.Snapshot.Health[aiFarIdx1] == aiFarHealthBefore,
+                    "组 3：更远的敌人不该被打——纯 AI 的选靶行为必须与改动前逐字一致");
+
+                // ── 组 4：Commanded 但不是 Attack（Guard）——同样必须落回"打最近敌人"，
+                //          证明新分支只在 Kind==Attack 且带合法目标时才生效 ──
+                const int GuardMinionLogicId = 9841;
+                const int GuardNearHostileLogicId = 9842;
+                const int GuardFarHostileLogicId = 9843;
+                var originD = new float2(30f, 0f);
+
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = originD, Health = 999f, Radius = 0.5f, MaxSpeed = 3f,
+                    ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = GuardMinionLogicId,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = originD + new float2(2f, 0f), Health = 999f, Radius = 0.5f, MaxSpeed = 0f,
+                    ArchetypeId = 1, Faction = SimFaction.Hostile,
+                    IntentSource = IntentSource.AI, LogicId = GuardNearHostileLogicId,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = originD + new float2(5f, 0f), Health = 999f, Radius = 0.5f, MaxSpeed = 0f,
+                    ArchetypeId = 1, Faction = SimFaction.Hostile,
+                    IntentSource = IntentSource.AI, LogicId = GuardFarHostileLogicId,
+                });
+
+                sim.OnUpdate(1f / 60f);
+                SimSnapshot snapD0 = sim.Snapshot;
+                SimEntityId guardMinion = FindEntityId(snapD0, GuardMinionLogicId, out _);
+                SimEntityId guardNear = FindEntityId(snapD0, GuardNearHostileLogicId, out int guardNearIdx0);
+                SimEntityId guardFar = FindEntityId(snapD0, GuardFarHostileLogicId, out int guardFarIdx0);
+                Expect(guardMinion.IsValid && guardNear.IsValid && guardFar.IsValid,
+                    "组 4 的守备单位与两个敌人应都已落地");
+
+                // 把 Guard 的留守点钉在自己原地，连带把 TargetPart 也设成 Primary——
+                // 这里就是要证明：即便带了 TargetPart，Kind!=Attack 也不该消费它。
+                int acceptedD = sim.IssueCommand(new[] { guardMinion }, new UnitCommand
+                {
+                    Kind = UnitCommandKind.Guard, TargetPosition = originD,
+                    TargetPart = SimBodyPartSlot.Primary, ArriveRadius = 4f,
+                });
+                Expect(acceptedD == 1, $"组 4 的 Guard 命令应被接受（实际 {acceptedD}）");
+
+                float guardNearHealthBefore = sim.Snapshot.Health[guardNearIdx0];
+                for (int f = 0; f < 30; f++) { sim.OnUpdate(1f / 60f); }
+                sim.TryResolveUnitIndex(guardNear, out int guardNearIdx1);
+                sim.World.TryGetBodyPart(guardFar, SimBodyPartSlot.Primary, out SimBodyPart guardFarPrimary);
+                Expect(sim.Snapshot.Health[guardNearIdx1] < guardNearHealthBefore,
+                    "组 4：Guard 命令下应照旧打最近的敌人——命令只影响移动，不接管战斗（既有口径）");
+                Expect(guardFarPrimary.MaxHealth <= 0f,
+                    "组 4：更远的敌人本就没配接点，用来确认它完全没被单独针对");
+                sim.World.TryResolveUnit(guardMinion, out int guardMinionIdxAfter);
+                Expect(sim.Snapshot.IntentSourceOf(guardMinionIdxAfter) == IntentSource.Commanded,
+                    "组 4：留守点就在原地，Guard 是持久命令，不应被提前交还 AI");
+
+                // ── 组 5：SquadCommandSystem.Issue 的 targetPart 参数应原样透传进最终命令 ──
+                // 复用组 1 的攻击者/近敌：这一步不再关心伤害，只验证热更层入口的接线正确。
+                var cameraGo = new GameObject("Validate21_SquadWiring_TempCamera");
+                Camera camera = cameraGo.AddComponent<Camera>();
+                var squad = new SquadCommandSystem();
+                try
+                {
+                    squad.Bind(sim, camera);
+                    squad.SelectExplicit(new[] { attackerA });
+                    int accepted = squad.Issue(UnitCommandKind.Attack,
+                        sim.Snapshot.Position[nearAIdx1], nearHostileA, paused: false, SimBodyPartSlot.Secondary);
+                    Expect(accepted == 1 &&
+                           sim.TryGetCommand(attackerA, out UnitCommand wiredCmd) &&
+                           wiredCmd.TargetPart == SimBodyPartSlot.Secondary,
+                        "SquadCommandSystem.Issue 的 targetPart 参数应原样写进最终下达的 UnitCommand");
+                }
+                finally
+                {
+                    squad.Unbind();
+                    UnityEngine.Object.DestroyImmediate(cameraGo);
+                }
+            }
+            finally
+            {
+                sim.End();
+            }
+        }
+
+        /// <summary>
+        /// 直控侧：Projectile 分支把 <see cref="SimProjectileFlags.SurgicalAim"/> 带进内核，
+        /// <see cref="JobProjectile"/> 在实际命中帧按弹体位置分别解析同一目标的两个接点。
+        /// 目标没有登记身体时回退普通单位碰撞与整体伤害，既有单位不受影响。
+        /// </summary>
+        private static void ValidateDirectControlAimResolvesPart()
+        {
+            var sim = new SimBridge();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 32;
+            cfg.ArenaHalfExtent = 80f;
+            cfg.RandomSeed = 0xC0FFEE07u;
+            sim.Begin(cfg, Array.Empty<BehaviorArchetype>());
+            sim.ConfigureControlSwitch(200f, 0f);
+
+            var registry = new UnitLoadoutRegistry();
+            var fakeSource = new FakePlayerLoadoutSource();
+            var actions = new DirectControlActions();
+
+            InputRouter.Reset();
+
+            try
+            {
+                registry.Bind(sim, fakeSource);
+                SimEntityId body = sim.ControlledUnitId;
+                registry.RegisterPlayerBody(body);
+                actions.Bind(sim, registry, abilities: null, status: null);
+
+                const int CasterLogicId = 9821;
+                const int DualPartTargetLogicId = 9822;
+                const int PlainTargetLogicId = 9824;
+                var casterPos = new float2(0f, 0f);
+                var dirPlain = new float2(0f, -1f);
+                var dualPartCenter = new float2(6f, 0f);
+                var primaryOffset = new float2(0f, 0.55f);
+                var secondaryOffset = new float2(0f, -0.55f);
+                float2 dirPrimary = math.normalizesafe(dualPartCenter + primaryOffset - casterPos);
+                float2 dirSecondary = math.normalizesafe(dualPartCenter + secondaryOffset - casterPos);
+
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = casterPos, Health = 999f, Radius = 0.5f, MaxSpeed = 0f,
+                    ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = CasterLogicId,
+                });
+                registry.RegisterArchetypePending(CasterLogicId, ArchetypeLoadoutTable.SporeArchetypeId);
+
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = dualPartCenter, Health = 999f, Radius = 1.2f, MaxSpeed = 0f,
+                    ArchetypeId = 0, Faction = SimFaction.Hostile,
+                    IntentSource = IntentSource.AI, LogicId = DualPartTargetLogicId,
+                    PrimaryPartMaxHealth = 100f,
+                    PrimaryPartAimOffset = primaryOffset,
+                    PrimaryPartAimRadius = 0.25f,
+                    SecondaryPartMaxHealth = 100f,
+                    SecondaryPartAimOffset = secondaryOffset,
+                    SecondaryPartAimRadius = 0.25f,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = casterPos + dirPlain * 6f, Health = 100f, Radius = 0.6f, MaxSpeed = 0f,
+                    ArchetypeId = 0, Faction = SimFaction.Hostile,
+                    IntentSource = IntentSource.AI, LogicId = PlainTargetLogicId,
+                });
+
+                sim.OnUpdate(1f / 60f);
+                registry.ResolvePending(sim.Snapshot);
+                SimSnapshot snap0 = sim.Snapshot;
+                SimEntityId caster = FindEntityId(snap0, CasterLogicId, out _);
+                SimEntityId dualPartTarget = FindEntityId(snap0, DualPartTargetLogicId, out _);
+                SimEntityId plainTarget = FindEntityId(snap0, PlainTargetLogicId, out int plainIdx0);
+                Expect(caster.IsValid && dualPartTarget.IsValid && plainTarget.IsValid,
+                    "直控释放者、双接点目标与普通目标应都已落地并拥有有效稳定实体 ID");
+                Expect(sim.RequestControlSwitch(caster) == ControlRequestResult.Success, "应能接管释放者");
+
+                // ── ① 同一具身体有两个接点：朝上方连接点开火，只能命中 Primary ──
+                Expect(actions.TryRelease(LoadoutAction.Primary, dirPrimary), "对准双接点目标的 Primary 连接点应能释放");
+                Expect(actions.LastReleasedKernelAction.Kind == OrganKernelActionKind.Projectile,
+                    $"直控释放者的主器官应落成真弹体才能验证瞄准（实际 {actions.LastReleasedKernelAction.Kind}）");
+                bool sawSurgicalSource = false;
+                for (int f = 0; f < 90; f++)
+                {
+                    sim.OnUpdate(1f / 60f);
+                    SimSnapshot frame = sim.Snapshot;
+                    for (int h = 0; h < frame.HitCount; h++)
+                    {
+                        HitEvent hit = frame.Hits[h];
+                        if (hit.TargetLogicId == DualPartTargetLogicId &&
+                            SimBridge.IsSurgicalAimSource(hit.SourceLogicId) &&
+                            SimBridge.DecodeSurgicalAimSource(hit.SourceLogicId) == CasterLogicId)
+                        {
+                            sawSurgicalSource = true;
+                        }
+                    }
+                }
+                sim.World.TryGetBodyPart(dualPartTarget, SimBodyPartSlot.Primary, out SimBodyPart primaryAfterFirst);
+                sim.World.TryGetBodyPart(dualPartTarget, SimBodyPartSlot.Secondary, out SimBodyPart secondaryAfterFirst);
+                sim.TryResolveUnitIndex(dualPartTarget, out int dualPartIdx1);
+                Expect(primaryAfterFirst.Health < 100f && secondaryAfterFirst.Health == 100f,
+                    $"瞄准 Primary 应只命中 Primary（P={primaryAfterFirst.Health}/100，S={secondaryAfterFirst.Health}/100）");
+                Expect(sim.Snapshot.Health[dualPartIdx1] == 999f,
+                    "Primary 接点命中不应外溢到目标整体 Health");
+                Expect(sawSurgicalSource,
+                    "直控 FireProjectile(surgicalAim:true) 的真实命中事件应携带可解码的释放者来源标记");
+
+                actions.Tick(10f, paused: false); // 越过冷却/代谢闸门，同 [16]/[19] 的做法
+
+                // ── ② 仍是同一具身体：改朝下方连接点开火，只能命中 Secondary ──
+                Expect(actions.TryRelease(LoadoutAction.Primary, dirSecondary), "对准双接点目标的 Secondary 连接点应能释放");
+                for (int f = 0; f < 90; f++) { sim.OnUpdate(1f / 60f); }
+                sim.World.TryGetBodyPart(dualPartTarget, SimBodyPartSlot.Primary, out SimBodyPart primaryAfterSecond);
+                sim.World.TryGetBodyPart(dualPartTarget, SimBodyPartSlot.Secondary, out SimBodyPart secondaryAfterSecond);
+                sim.TryResolveUnitIndex(dualPartTarget, out int dualPartIdx2);
+                Expect(primaryAfterSecond.Health == primaryAfterFirst.Health && secondaryAfterSecond.Health < 100f,
+                    $"瞄准 Secondary 应只命中 Secondary（P={primaryAfterSecond.Health}/100，S={secondaryAfterSecond.Health}/100）");
+                Expect(sim.Snapshot.Health[dualPartIdx2] == 999f,
+                    "Secondary 接点命中不应外溢到目标整体 Health");
+
+                actions.Tick(10f, paused: false);
+
+                // ── ③ 没有登记身体的目标：SurgicalAim 应回退普通碰撞，正常打整体伤害 ──
+                float plainHealthBefore = sim.Snapshot.Health[plainIdx0];
+                Expect(actions.TryRelease(LoadoutAction.Primary, dirPlain), "对准无身体目标方向的释放应成功");
+                for (int f = 0; f < 90; f++) { sim.OnUpdate(1f / 60f); }
+                sim.TryResolveUnitIndex(plainTarget, out int plainIdx1);
+                Expect(sim.Snapshot.Health[plainIdx1] < plainHealthBefore,
+                    $"没有登记身体的目标应正常掉整体 Health（{plainHealthBefore} → {sim.Snapshot.Health[plainIdx1]}）"
+                    + "——TargetPart 回退 None 不应吞掉伤害");
+            }
+            finally
+            {
+                sim.End();
             }
         }
 

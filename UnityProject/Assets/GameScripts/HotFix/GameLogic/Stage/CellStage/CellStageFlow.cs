@@ -24,6 +24,18 @@ using UnityEngine;
 namespace GameLogic.Stage.CellStage
 {
     /// <summary>
+    /// 细胞阶段的一次性进入方式。每次 <see cref="CellStageFlow.Enter"/> 都消费一项，随后自动回到
+    /// <see cref="NewRun"/>；这样续局、LookDev 与试玩门不会靠上一次留下的布尔字段串进正常肉鸽。
+    /// </summary>
+    public enum CellStageEntryMode : byte
+    {
+        NewRun = 0,
+        Resume = 1,
+        LookDevSandbox = 2,
+        ConsciousnessPlaytest = 3,
+    }
+
+    /// <summary>
     /// 细胞阶段流程。第一个 <see cref="IStageFlow"/> 实现，也是后续阶段的样板。
     ///
     /// 本类的职责只有三件：
@@ -54,6 +66,7 @@ namespace GameLogic.Stage.CellStage
         private CardTriggerBus _cards;
         private StructuralHookRunner _structuralHooks;
         private ResourceWallet _wallet;
+        private SurgicalRewardLedger _surgicalRewards;
         private ProgressionModule _progression;
         private SpawnDirector _director;
         private EcoEventScheduler _events;
@@ -103,32 +116,33 @@ namespace GameLogic.Stage.CellStage
         private bool _paused;
         private string _deathCause;
 
-        /// <summary>story-006：LookDev 沙盒态。只读标记，实际抑制逻辑在 <see cref="DebugSetSandboxMode"/>。</summary>
-        private bool _sandboxMode;
-        public bool IsSandboxMode => _sandboxMode;
+        private CellStageEntryMode _entryMode = CellStageEntryMode.NewRun;
+        private CellStageEntryMode _nextEntryMode = CellStageEntryMode.NewRun;
+        public bool IsSandboxMode => _entryMode == CellStageEntryMode.LookDevSandbox;
+        public bool IsConsciousnessPlaytest => _entryMode == CellStageEntryMode.ConsciousnessPlaytest;
 
         /// <summary>
-        /// 把 <see cref="_sandboxMode"/> 落到当前模块实例上（三处 Suppressed + 验证态相机）。
-        /// 不放在 <c>#if</c> 门禁里——<see cref="Enter"/> 每次都要调用它（哪怕 _sandboxMode 恒为 false 的
-        /// 正常入局也要跑一遍，保证语义一致），只有内部的相机分支才门禁到编辑器/开发构建。
+        /// 把当前进入方式落到模块实例上。LookDev 关闭所有真实战斗噪声；M2-06 只冻结随机刷怪与
+        /// 时间线，保留玩家装配 Tick、RTS、接管和手术的生产链。
         /// </summary>
-        private void ApplySandboxState()
+        private void ApplyEntryModeState()
         {
+            bool fixedScenario = IsSandboxMode || IsConsciousnessPlaytest;
             if (_director != null)
             {
-                _director.Suppressed = _sandboxMode;
+                _director.Suppressed = fixedScenario;
             }
             if (_timeline != null)
             {
-                _timeline.Suppressed = _sandboxMode;
+                _timeline.Suppressed = fixedScenario;
             }
             if (_metabolicBridge != null)
             {
-                _metabolicBridge.Suppressed = _sandboxMode;
+                _metabolicBridge.Suppressed = IsSandboxMode;
             }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            if (_sandboxMode && _cameraVerifyMode)
+            if (IsSandboxMode && _cameraVerifyMode)
             {
                 DebugToggleCameraVerifyMode();
             }
@@ -184,6 +198,7 @@ namespace GameLogic.Stage.CellStage
         public Deck Deck => _deck;
         public PhaseTimeline Timeline => _timeline;
         public ResourceWallet Wallet => _wallet;
+        public SurgicalRewardLedger SurgicalRewards => _surgicalRewards;
         public ProgressionModule Progression => _progression;
         public SpawnDirector Director => _director;
         public EcoEventScheduler Events => _events;
@@ -202,6 +217,9 @@ namespace GameLogic.Stage.CellStage
 
         public void Enter(StageOutcome inherited)
         {
+            _entryMode = _nextEntryMode;
+            _nextEntryMode = CellStageEntryMode.NewRun;
+
             DataRegistry.Instance.Load();
             RuleFlags.Current.ClearAll();
             Signals.Clear();
@@ -222,11 +240,7 @@ namespace GameLogic.Stage.CellStage
 
             SetupCamera();
             RegisterModules();
-            // story-006：StageDirector.GoTo 是延迟切换（下一帧 Update 才真正调用本方法），
-            // 所以 DebugSetSandboxMode(true) 完全可能在 RegisterModules() 重建新模块实例之前就已调用过——
-            // 那次调用时 _director/_timeline/_metabolicBridge 还是旧实例甚至 null，Suppressed 白设。
-            // 这里按 _sandboxMode 重新落一次，保证不管调用时序如何，新建的模块实例总能拿到正确的抑制态。
-            ApplySandboxState();
+            ApplyEntryModeState();
             SetupSim();
             // M2-01：镜头状态机要读场地半径做平移边界，所以必须在 SetupSim 之后绑定。
             SetupCameraDirector();
@@ -239,9 +253,13 @@ namespace GameLogic.Stage.CellStage
             GrantStarterAbilities();
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            if (_sandboxMode)
+            if (IsSandboxMode)
             {
                 SpawnSandboxDummy();
+            }
+            else if (IsConsciousnessPlaytest)
+            {
+                SpawnConsciousnessPlaytestTarget();
             }
 #endif
 
@@ -392,6 +410,7 @@ namespace GameLogic.Stage.CellStage
             // story-010：结构器官触发钩子，与 Cards 相邻的独立轨道（不进攻击器官链）。
             _structuralHooks = _hub.Register(new StructuralHookRunner());
             _wallet = _hub.Register(new ResourceWallet());
+            _surgicalRewards = _hub.Register(new SurgicalRewardLedger());
             _progression = _hub.Register(new ProgressionModule());
             _director = _hub.Register(new SpawnDirector());
             _events = _hub.Register(new EcoEventScheduler());
@@ -480,12 +499,17 @@ namespace GameLogic.Stage.CellStage
             SetupUnitLoadouts();
             SpawnControlAllies();
 
-            // M1-06：重进场景 / 读档后把意识放回上次那具躯体。
+            // M1-06：只有显式“恢复旧局”才把意识放回上次那具躯体。
+            // 正常 StartCellStage 是一局全新的肉鸽：旧 LogicId 可能恰好命中新生成的友军，
+            // 若无条件恢复就会跨局串体，并让玩家本体的 MetabolicSlice 自动开火被关闭。
             // 目标单位要等下一次 Step 才真正落地，所以这不是一次性成败——
             // RequestControlRestore 会在宽限期内每帧重试，期间控制状态是 Suspended 而不是丢失。
             // 存档里没有记录（首次游玩、旧版本存档、读盘失败）时它直接返回 false，
             // 世界保留自带的默认受控实体，不需要额外分支。
-            _sim.RequestControlRestore(ControlPersistence.Load());
+            if (_entryMode == CellStageEntryMode.Resume)
+            {
+                _sim.RequestControlRestore(ControlPersistence.Load());
+            }
 
             // 轻障碍（story-009）：数据驱动随机布局，白模一次性生成。
             ObstacleSpec[] obstacles = ObstacleGenerator.Generate(cfg.ArenaHalfExtent);
@@ -1615,19 +1639,6 @@ namespace GameLogic.Stage.CellStage
             TEngine.Log.Info($"[GM] 相机切换 → {mode}");
         }
 
-        /// <summary>
-        /// LookDev 沙盒开关（story-006）：抑制刷怪/阶段推进/玩家真实网格常规装配 Tick 三处噪声源
-        /// （<see cref="_director"/>/<see cref="_timeline"/>/<see cref="_metabolicBridge"/> 各自的 Suppressed），
-        /// 不影响 <see cref="MetabolicSliceBridge.ApplyEvent"/>/<see cref="MetabolicSliceBridge.TickPendingMotion"/>。
-        /// 进沙盒默认切验证态相机（复用 005），给可读 3D 视角，不强制玩家再按 F12。
-        /// </summary>
-        public void DebugSetSandboxMode(bool on)
-        {
-            _sandboxMode = on;
-            ApplySandboxState();
-            TEngine.Log.Info($"[GM] LookDev 沙盒 → {(on ? "开启" : "关闭")}");
-        }
-
         /// <summary>沙盒木桩用的行为原型 id，对应 Luban 表 cell.BehaviorArchetype 新增第 12 行
         /// （kind=Stationary、attackDamage=0，见 sandbox-skill-editor/002 D1）。不进任何正常刷怪池
         /// （<see cref="SpawnDirector"/> 按内容表自身刷怪池选 id，不会引用该 id）。</summary>
@@ -1652,6 +1663,38 @@ namespace GameLogic.Stage.CellStage
                 ArchetypeId = SandboxDummyArchetypeId,
                 Faction = SimFaction.Hostile,
             });
+        }
+
+        public const int ConsciousnessPlaytestTargetLogicId = 20601;
+        public const float ConsciousnessPlaytestTargetX = 11f;
+        public const float ConsciousnessPlaytestTargetY = -2f;
+
+        /// <summary>
+        /// M2-06 固定试玩门的唯一敌对目标。它用真实身体接点与静止行为原型：高核心血量避免友军 AI
+        /// 在观察结束前把目标击杀，两个低血量接点则保留真实直控精准切离路径。
+        /// </summary>
+        private void SpawnConsciousnessPlaytestTarget()
+        {
+            _sim.Spawn(new SpawnRequest
+            {
+                Position = new Unity.Mathematics.float2(
+                    ConsciousnessPlaytestTargetX, ConsciousnessPlaytestTargetY),
+                Health = 9999f,
+                Radius = 2.2f,
+                MaxSpeed = 0f,
+                ArchetypeId = SandboxDummyArchetypeId,
+                Faction = SimFaction.Hostile,
+                IntentSource = IntentSource.AI,
+                LogicId = ConsciousnessPlaytestTargetLogicId,
+                VisualId = SandboxDummyArchetypeId,
+                PrimaryPartMaxHealth = 40f,
+                PrimaryPartAimOffset = new Unity.Mathematics.float2(0f, 1.2f),
+                PrimaryPartAimRadius = 0.7f,
+                SecondaryPartMaxHealth = 40f,
+                SecondaryPartAimOffset = new Unity.Mathematics.float2(0f, -1.2f),
+                SecondaryPartAimRadius = 0.7f,
+            });
+            TEngine.Log.Info("[M2-06] 固定意识传递试玩已载入：RTS / 接管 / 双接点手术 / 退出");
         }
 
 #endif
@@ -1696,6 +1739,12 @@ namespace GameLogic.Stage.CellStage
         }
 
         public bool IsRunning => _running;
+
+        /// <summary>由阶段入口在 Enter 前声明本次进入方式；该配置只消费一次。</summary>
+        public void PrepareNextEnter(CellStageEntryMode mode)
+        {
+            _nextEntryMode = mode;
+        }
 
         public StageOutcome Exit()
         {

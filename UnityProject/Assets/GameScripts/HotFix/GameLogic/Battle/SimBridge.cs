@@ -19,6 +19,16 @@ namespace GameLogic.Battle
     /// </summary>
     public sealed class SimBridge : GameModuleBase
     {
+        /// <summary>
+        /// M2-05c：直控几何瞄准来源标记。只保留最低负数四分之一作为封套，
+        /// 避开内核从 -1 向下分配的普通负数 LogicId 与反伤 -1。
+        /// </summary>
+        public const int SurgicalAimSourceMask = SimSurgicalAimSource.Prefix;
+
+        public static int EncodeSurgicalAimSource(int sourceLogicId) => SimSurgicalAimSource.Encode(sourceLogicId);
+        public static bool IsSurgicalAimSource(int sourceLogicId) => SimSurgicalAimSource.IsEncoded(sourceLogicId);
+        public static int DecodeSurgicalAimSource(int sourceLogicId) => SimSurgicalAimSource.Decode(sourceLogicId);
+
         public override int Priority => ModulePriority.Simulation;
 
         private ISimBackend _backend;
@@ -663,7 +673,9 @@ namespace GameLogic.Battle
             float radius = 0.25f, float lifetime = 2.5f, int pierce = 1,
             SimFaction targetFaction = SimFaction.Hostile,
             SimStatus applyStatus = SimStatus.None,
-            int sourceLogicId = 0, int visualId = 0)
+            int sourceLogicId = 0, int visualId = 0,
+            SimBodyPartSlot targetPart = SimBodyPartSlot.None,
+            bool surgicalAim = false)
         {
             if (!_running) { return; }
             _cmds.Projectile(new ProjectileRequest
@@ -677,8 +689,12 @@ namespace GameLogic.Battle
                 Pierce = pierce,
                 TargetFaction = targetFaction,
                 ApplyStatus = applyStatus,
+                // 来源在弹体飞行期间必须保持真实 LogicId；只有 JobProjectile 确认命中具体接点时
+                // 才给那一条 DamageRequest 编码，避免正常弹体终结/表现/归因链收到负数来源。
                 SourceLogicId = sourceLogicId,
                 VisualId = visualId,
+                TargetPart = targetPart,
+                Flags = surgicalAim ? SimProjectileFlags.SurgicalAim : SimProjectileFlags.None,
             });
         }
 

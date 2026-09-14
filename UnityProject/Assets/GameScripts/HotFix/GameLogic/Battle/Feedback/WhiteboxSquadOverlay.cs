@@ -1,6 +1,7 @@
 using BinGames.Sim;
 using GameLogic.Battle;
 using GameLogic.Command;
+using GameLogic.Core;
 using UnityEngine;
 
 namespace GameLogic.Battle.Feedback
@@ -32,6 +33,7 @@ namespace GameLogic.Battle.Feedback
         private SimBridge _sim;
         private SquadCommandSystem _squad;
         private Material _lineMaterial;
+        private GUIStyle _partLabelStyle;
 
         public void Bind(SimBridge sim, SquadCommandSystem squad)
         {
@@ -101,6 +103,37 @@ namespace GameLogic.Battle.Feedback
 
             GL.End();
             GL.PopMatrix();
+        }
+
+        /// <summary>
+        /// M2-05b 白模反馈：RTS 的 P 键会循环攻击接点类别，必须把当前值显示出来，
+        /// 否则输入虽然生效，玩家却无法知道下一条 Attack 会打哪里。
+        /// 只在战略输入域显示，不创建任何 UI 资源。
+        /// </summary>
+        private void OnGUI()
+        {
+            if (_sim == null || !_sim.Running || _squad == null || !InputRouter.Owns(InputScope.Strategy))
+            {
+                return;
+            }
+
+            _partLabelStyle ??= new GUIStyle(GUI.skin.box)
+            {
+                fontSize = 14,
+                alignment = TextAnchor.MiddleLeft,
+            };
+            GUI.Box(new Rect(12f, 164f, 330f, 28f),
+                $"[P] RTS 攻击接点：{PartLabel(_squad.PendingAttackPart)}", _partLabelStyle);
+        }
+
+        private static string PartLabel(SimBodyPartSlot slot)
+        {
+            return slot switch
+            {
+                SimBodyPartSlot.Primary => "Primary（主接点类别）",
+                SimBodyPartSlot.Secondary => "Secondary（次接点类别）",
+                _ => "整体（不指定）",
+            };
         }
 
         private void DrawSelectionBox()

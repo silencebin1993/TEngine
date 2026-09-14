@@ -31,6 +31,16 @@ namespace GameLogic.Command
         private SimBridge _sim;
         private Camera _camera;
 
+        /// <summary>
+        /// surgical-window（M2-05b 实施第 2 条）：右键下达 Attack 命令时要顺带指定的接点类别。
+        /// 调试级输入——按 P 键在 None → Primary → Secondary → None 之间循环，没有正式 UI/美术，
+        /// 标签沿用 M2-05a 的占位（"PrimaryOrgan"/"SecondaryOrgan"，只在注释与契约文档里出现）。
+        /// 只影响之后新下达的 Attack 命令；Move/Guard/Retreat 与它无关，恒定 None。
+        /// **刻意不用 O**：<c>BattleCarrierUIToolkit</c> 已经把 O 键钉死给了运载器面板开关
+        /// （直接读 <see cref="UnityEngine.Input"/>，不经 <c>InputRouter</c>），撞键会让两个系统
+        /// 同一次按键都触发，P 键在全仓键位里未被占用。</summary>
+        private SimBodyPartSlot _pendingAttackPart = SimBodyPartSlot.None;
+
         private readonly List<SimEntityId> _selection = new List<SimEntityId>(SimConst.MaxSelectionSize);
         /// <summary>编组 1~9。值是稳定实体 ID——存索引会在槽位复用后指向别的单位。</summary>
         private readonly Dictionary<int, List<SimEntityId>> _groups = new Dictionary<int, List<SimEntityId>>(9);
@@ -51,6 +61,9 @@ namespace GameLogic.Command
 
         public IReadOnlyList<SimEntityId> Selection => _selection;
         public int QueuedCommandCount => _queued.Count;
+
+        /// <summary>当前待用的接点类别（M2-05b 调试输入）。验收/调试可读，不是正式 UI 状态。</summary>
+        public SimBodyPartSlot PendingAttackPart => _pendingAttackPart;
         public bool IsDragging => _dragging;
         public float2 DragStartWorld => _dragStartWorld;
         public float2 DragCurrentWorld => _dragCurrentWorld;
@@ -66,6 +79,7 @@ namespace GameLogic.Command
             _groups.Clear();
             _queued.Clear();
             _dragging = false;
+            _pendingAttackPart = SimBodyPartSlot.None;
             IssuedCommandCount = 0;
         }
 
@@ -267,6 +281,13 @@ namespace GameLogic.Command
 
         private void HandleCommandInput(bool paused)
         {
+            // P 键循环接点类别，不依赖选择集——即便这一刻没选中任何单位，也该能提前定好
+            // "下一次 Attack 打哪个接点"，与右键命令解耦，避免手抖顺序把状态搞乱。
+            if (InputRouter.ConsumeKeyDown(KeyCode.P, InputScope.Strategy))
+            {
+                _pendingAttackPart = NextAttackPart(_pendingAttackPart);
+            }
+
             if (_selection.Count == 0)
             {
                 return;
@@ -277,7 +298,7 @@ namespace GameLogic.Command
             {
                 if (TryPickHostile(world, out SimEntityId hostile))
                 {
-                    Issue(UnitCommandKind.Attack, world, hostile, paused);
+                    Issue(UnitCommandKind.Attack, world, hostile, paused, _pendingAttackPart);
                 }
                 else
                 {
@@ -300,8 +321,13 @@ namespace GameLogic.Command
             }
         }
 
-        /// <summary>下达命令。暂停期间不立即执行而是排队，恢复后按下达顺序兑现。</summary>
-        public int Issue(UnitCommandKind kind, float2 targetPosition, SimEntityId targetEntity, bool paused)
+        /// <summary>
+        /// 下达命令。暂停期间不立即执行而是排队，恢复后按下达顺序兑现。
+        /// </summary>
+        /// <param name="targetPart">M2-05b：只有 <see cref="UnitCommandKind.Attack"/> 会消费它，
+        /// 其它命令类型传了也没有意义（内核侧 <c>ResolveMinionCombat</c> 只在 Attack 分支读它）。</param>
+        public int Issue(UnitCommandKind kind, float2 targetPosition, SimEntityId targetEntity, bool paused,
+            SimBodyPartSlot targetPart = SimBodyPartSlot.None)
         {
             if (_sim == null || !_sim.Running || _selection.Count == 0)
             {
@@ -314,6 +340,7 @@ namespace GameLogic.Command
                 TargetPosition = targetPosition,
                 TargetEntity = targetEntity,
                 ArriveRadius = kind == UnitCommandKind.Guard ? GuardRadius : DefaultArriveRadius,
+                TargetPart = targetPart,
             };
 
             if (paused)
@@ -377,6 +404,17 @@ namespace GameLogic.Command
             for (int i = 0; i < ids.Count; i++)
             {
                 AddToSelection(ids[i]);
+            }
+        }
+
+        /// <summary>M2-05b 调试输入：None → Primary → Secondary → None 循环。</summary>
+        private static SimBodyPartSlot NextAttackPart(SimBodyPartSlot current)
+        {
+            switch (current)
+            {
+                case SimBodyPartSlot.None: return SimBodyPartSlot.Primary;
+                case SimBodyPartSlot.Primary: return SimBodyPartSlot.Secondary;
+                default: return SimBodyPartSlot.None;
             }
         }
 

@@ -51,11 +51,13 @@ namespace GameLogic.Stage
         /// <summary>开始一局细胞阶段。</summary>
         public static void StartCellStage()
         {
-            if (!_started)
-            {
-                Startup();
-            }
-            _director.GoTo(StageId.Cell);
+            StartCellStage(CellStageEntryMode.NewRun);
+        }
+
+        /// <summary>从已有局面恢复细胞阶段；与 <see cref="StartCellStage"/> 的新局语义分开。</summary>
+        public static void ResumeCellStage()
+        {
+            StartCellStage(CellStageEntryMode.Resume);
         }
 
         /// <summary>结束当前局，回到无阶段状态。</summary>
@@ -66,16 +68,30 @@ namespace GameLogic.Stage
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
         /// <summary>
-        /// LookDev 对照沙盒入口（story-006）：进一局细胞阶段，同帧切沙盒态
-        /// （抑制刷怪/阶段推进/玩家真实网格装配 Tick，见 <see cref="CellStageFlow.DebugSetSandboxMode"/>）。
+        /// LookDev 对照沙盒入口（story-006）：抑制刷怪/阶段推进/玩家真实网格装配 Tick。
         /// 只在编辑器/开发构建可用，正式包不出现该入口。
         /// </summary>
         public static void StartLookDevSandbox()
         {
-            StartCellStage();
-            CellStage?.DebugSetSandboxMode(true);
+            StartCellStage(CellStageEntryMode.LookDevSandbox);
+        }
+
+        /// <summary>M2-06：进入独立固定试玩门，不读取续局控制状态，也不继承 LookDev 抑制态。</summary>
+        public static void StartConsciousnessPlaytest()
+        {
+            StartCellStage(CellStageEntryMode.ConsciousnessPlaytest);
         }
 #endif
+
+        private static void StartCellStage(CellStageEntryMode mode)
+        {
+            if (!_started)
+            {
+                Startup();
+            }
+            CellStage?.PrepareNextEnter(mode);
+            _director.GoTo(StageId.Cell);
+        }
 
         private static void OnUpdate()
         {

@@ -363,7 +363,7 @@ namespace GameLogic.Control
                     _sim.FireProjectile(
                         origin + dir * (view.Radius + MuzzleClearance),
                         dir, act.Speed, act.Damage, act.Radius, act.Lifetime, act.Pierce,
-                        SimFaction.Hostile, act.ApplyStatus, sourceLogicId);
+                        SimFaction.Hostile, act.ApplyStatus, sourceLogicId, surgicalAim: true);
                     break;
 
                 case OrganKernelActionKind.Cone:

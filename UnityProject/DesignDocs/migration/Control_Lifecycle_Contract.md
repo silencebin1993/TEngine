@@ -111,6 +111,20 @@ UI 必须区分 `Suspended`（「信号重连中…」）与 `None`（「控制�
 3. 都对不上则在宽限期内每帧重试（目标可能还没 Spawn 完）；
 4. 宽限期用完仍失败：放弃恢复，保留世界自带的默认受控实体，锚点仍保留。
 
+阶段入口必须显式声明一次性 `CellStageEntryMode`，不能看到磁盘记录就一律恢复，也不能让调试态
+靠上一次留下的布尔值延续：
+
+- `NewRun`：`GameRoot.StartCellStage()`，忽略上一局控制记录，世界默认控制玩家本体；
+- `Resume`：`GameRoot.ResumeCellStage()`，只有这一项允许调用 `ControlPersistence.Load()`；
+- `LookDevSandbox`：三项沙盒抑制，只用于开发入口；
+- `ConsciousnessPlaytest`：M2-06 固定场景，只抑制随机刷怪/时间线，保留真实装配与控制链。
+
+`Enter()` 开头消费 `_nextEntryMode` 后立即把它复位为 `NewRun`。因此 LookDev 或 M2-06 退出后，
+即使调用方没有再手动“关闭”调试态，下一次普通进入也不会继承抑制状态；自检 `[23]` 覆盖这两条串态回归。
+
+原因是当前存档只保存控制记忆，并没有保存整局实体快照。若在新局无条件按 `ControlledLogicId`
+恢复，它会命中这一局重新生成的另一个友军，形成跨局串体，并错误关闭玩家本体专属的自动武器链。
+
 **旧存档 / 损坏存档一律落到 `ControlHandoffState.None`**（`HasRecord == false`），
 调用方不需要额外分支——世界自带的默认受控实体就是安全默认值。
 `ControlPersistence` 遵循与生涯统计相同的 Reject-to-Safe 纪律：`Load`/`Save` 永不 throw。

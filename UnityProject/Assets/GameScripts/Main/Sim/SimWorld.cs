@@ -1026,6 +1026,8 @@ namespace BinGames.Sim
                 Faction = _faction,
                 Status = _status,
                 Alive = _alive,
+                EntityId = _entityId,
+                Bodies = _bodies,
                 Hash = _hash.Map,
                 ObstaclePos = _obstaclePos,
                 ObstacleRadius = _obstacleRadius,
@@ -1282,9 +1284,42 @@ namespace BinGames.Sim
                 }
 
                 var hashMap = _hash.Map;
-                bool found = MinionTargetingUtil.TryFindNearestHostile(
-                    in hashMap, _hash.InvCellSize, _position, _alive, _faction, _unitCount,
-                    _position[i], arc.AggroRange, i, out int targetIdx, out float2 targetPos);
+                int targetIdx;
+                float2 targetPos;
+                bool found;
+                // surgical-window（M2-05b）：这具身体是否有一条"锁定到具体实体"的 Attack 命令。
+                // 只有 Commanded 且命令里带了一个还活着的 Hostile 目标时才锁定它开火；
+                // 任何其它情况（非 Attack 命令、目标已死/无效、根本不是 Commanded）都落回
+                // 原有的"混战中打最近敌人"路径——自主 AI 的行为一行没变，改动只在锁定成立那一分支。
+                SimBodyPartSlot lockedPart = SimBodyPartSlot.None;
+                bool lockedByCommand = false;
+                if (_intentSource[i] == (byte)IntentSource.Commanded)
+                {
+                    UnitCommand cmd = _unitCommands[i];
+                    if (cmd.Kind == UnitCommandKind.Attack && cmd.TargetEntity.IsValid &&
+                        TryResolveUnit(cmd.TargetEntity, out int commandedIdx) &&
+                        (SimFaction)_faction[commandedIdx] == SimFaction.Hostile)
+                    {
+                        targetIdx = commandedIdx;
+                        targetPos = _position[commandedIdx];
+                        found = true;
+                        lockedByCommand = true;
+                        lockedPart = cmd.TargetPart;
+                    }
+                    else
+                    {
+                        found = MinionTargetingUtil.TryFindNearestHostile(
+                            in hashMap, _hash.InvCellSize, _position, _alive, _faction, _unitCount,
+                            _position[i], arc.AggroRange, i, out targetIdx, out targetPos);
+                    }
+                }
+                else
+                {
+                    found = MinionTargetingUtil.TryFindNearestHostile(
+                        in hashMap, _hash.InvCellSize, _position, _alive, _faction, _unitCount,
+                        _position[i], arc.AggroRange, i, out targetIdx, out targetPos);
+                }
+
                 if (!found)
                 {
                     continue;
@@ -1328,6 +1363,10 @@ namespace BinGames.Sim
                         Amount = arc.AttackDamage,
                         TargetFaction = SimFaction.Hostile,
                         SourceLogicId = _logicId[i],
+                        // 只有真正锁定到命令指定实体时才透传接点：打到临时找来的替代目标身上
+                        // 套用玩家原本瞄准另一个实体的接点没有意义（那具身体八成根本没配这个接点，
+                        // 会被 JobDamage 的既有回退语义悄悄吞成整体伤害，看似"能跑"实则文不对题）。
+                        TargetPart = lockedByCommand ? lockedPart : SimBodyPartSlot.None,
                     });
                     _attackTimer[i] = arc.AttackCooldown;
                 }
@@ -1750,11 +1789,15 @@ namespace BinGames.Sim
                     {
                         Health = math.max(0f, req.PrimaryPartMaxHealth),
                         MaxHealth = math.max(0f, req.PrimaryPartMaxHealth),
+                        AimOffset = req.PrimaryPartAimOffset,
+                        AimRadius = math.max(0f, req.PrimaryPartAimRadius),
                     },
                     Secondary = new SimBodyPart
                     {
                         Health = math.max(0f, req.SecondaryPartMaxHealth),
                         MaxHealth = math.max(0f, req.SecondaryPartMaxHealth),
+                        AimOffset = req.SecondaryPartAimOffset,
+                        AimRadius = math.max(0f, req.SecondaryPartAimRadius),
                     },
                 });
             }
@@ -1871,6 +1914,7 @@ namespace BinGames.Sim
                     Generation = req.Generation,
                     Flags = req.Flags,
                     Tint = req.Tint,
+                    TargetPart = req.TargetPart,
                 };
                 _projectileCursor = (p + 1) % n;
                 return;
@@ -1911,6 +1955,7 @@ namespace BinGames.Sim
                     StatusAtDeath = (SimStatus)_status[idx],
                     KillerLogicId = 0,
                     CauseKind = DeathCauseKind.Damage,
+                    HadSurgicalBody = (byte)(_bodies.IsCreated && _bodies.ContainsKey(_entityId[idx]) ? 1 : 0),
                 };
             }
             ReleaseSlot(idx);
@@ -2060,6 +2105,8 @@ namespace BinGames.Sim
             float secondaryPartHealth = 60f,
             float radius = 0.6f)
         {
+            float aimOffset = math.max(0.1f, radius * 0.55f);
+            float aimRadius = math.max(0.12f, radius * 0.3f);
             return SpawnUnit(new SpawnRequest
             {
                 Position = position,
@@ -2070,7 +2117,11 @@ namespace BinGames.Sim
                 IntentSource = IntentSource.AI,
                 LogicId = logicId,
                 PrimaryPartMaxHealth = primaryPartHealth,
+                PrimaryPartAimOffset = new float2(0f, aimOffset),
+                PrimaryPartAimRadius = aimRadius,
                 SecondaryPartMaxHealth = secondaryPartHealth,
+                SecondaryPartAimOffset = new float2(0f, -aimOffset),
+                SecondaryPartAimRadius = aimRadius,
             });
         }
 
@@ -2093,6 +2144,7 @@ namespace BinGames.Sim
                     StatusAtDeath = (SimStatus)_status[idx],
                     KillerLogicId = killerLogicId,
                     CauseKind = DeathCauseKind.Devour,
+                    HadSurgicalBody = (byte)(_bodies.IsCreated && _bodies.ContainsKey(_entityId[idx]) ? 1 : 0),
                 };
             }
             ReleaseSlot(idx);

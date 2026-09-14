@@ -80,6 +80,13 @@ namespace BinGames.Sim
         /// <summary>到达判定半径。Move 用它判完成，Guard 用它当留守范围。</summary>
         public float ArriveRadius;
 
+        /// <summary>
+        /// surgical-window（M2-05b）：这条 Attack 命令要定向到目标身上的哪个接点。
+        /// 默认值 <see cref="SimBodyPartSlot.None"/> = 不定向，行为与本字段加入前逐字一致（零回归）。
+        /// 只有 <see cref="UnitCommandKind.Attack"/> 会消费它——见 <c>SimWorld.ResolveMinionCombat</c>。
+        /// </summary>
+        public SimBodyPartSlot TargetPart;
+
         public static UnitCommand None => default;
     }
 
@@ -362,8 +369,16 @@ namespace BinGames.Sim
 
         /// <summary>接点 1（占位标签 "PrimaryOrgan"）满血量。&lt;= 0 = 不配置该接点。</summary>
         public float PrimaryPartMaxHealth;
+        /// <summary>M2-05b：接点 1 相对单位中心的世界 XZ 偏移。只用于直控弹体的几何瞄准。</summary>
+        public float2 PrimaryPartAimOffset;
+        /// <summary>M2-05b：接点 1 的可瞄准半径。&lt;= 0 = 没有空间命中形状，仍可被 RTS 类别攻击。</summary>
+        public float PrimaryPartAimRadius;
         /// <summary>接点 2（占位标签 "SecondaryOrgan"）满血量。&lt;= 0 = 不配置该接点。</summary>
         public float SecondaryPartMaxHealth;
+        /// <summary>M2-05b：接点 2 相对单位中心的世界 XZ 偏移。只用于直控弹体的几何瞄准。</summary>
+        public float2 SecondaryPartAimOffset;
+        /// <summary>M2-05b：接点 2 的可瞄准半径。&lt;= 0 = 没有空间命中形状，仍可被 RTS 类别攻击。</summary>
+        public float SecondaryPartAimRadius;
     }
 
     /// <summary>
@@ -436,6 +451,13 @@ namespace BinGames.Sim
         public float Health;
         /// <summary>&lt;= 0 表示这个接点未配置（该实体实际只有 0 或 1 个接点）。</summary>
         public float MaxHealth;
+        /// <summary>
+        /// M2-05b：接点相对单位中心的世界 XZ 偏移。原型阶段没有单位朝向数据，
+        /// 所以偏移随单位平移但暂不旋转；正式骨骼/挂点映射属于后续表现里程碑。
+        /// </summary>
+        public float2 AimOffset;
+        /// <summary>直控弹体可命中这个具体接点的半径。&lt;= 0 表示只支持 RTS 类别指定。</summary>
+        public float AimRadius;
         /// <summary>0 = 完好，1 = 已被摧毁（切离）。摧毁只影响这个接点自身，不触发整体死亡判定
         /// ——见 <see cref="SimUnitBody"/> 上的口径说明。</summary>
         public byte Destroyed;
@@ -521,6 +543,30 @@ namespace BinGames.Sim
         /// <see cref="JobProjectile.MarkedTargetBias"/> 打折，于是它们会越过更近的新目标去追老目标。
         /// </summary>
         PreferMarked = 1 << 5,
+        /// <summary>
+        /// surgical-window（M2-05b）：单体弹体不在单位外轮廓处立即结算，
+        /// 而是在实际飞行位置与该单位的具体接点圆相交时才命中。
+        /// 目标没有可瞄准接点时退回普通单位碰撞，保证无身体单位行为不变。
+        /// </summary>
+        SurgicalAim = 1 << 6,
+    }
+
+    /// <summary>
+    /// surgical-window（M2-05c）：只给“实际命中身体接点”的伤害来源加标记。
+    /// 不能在弹体生成时提前编码，否则负数来源会污染弹体终结、表现和其它按 LogicId 归因的系统。
+    /// </summary>
+    public static class SimSurgicalAimSource
+    {
+        // 10xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx：保留最低负数四分之一作为精准命中封套。
+        // 内核自动 LogicId 从 -1 向下分配，位于 11xx... 区间；两者不会因“都是负数”而混淆。
+        public const int PrefixMask = unchecked((int)0xC0000000);
+        public const int Prefix = unchecked((int)0x80000000);
+        public const int PayloadMask = 0x3FFFFFFF;
+
+        public static int Encode(int sourceLogicId) => Prefix | (sourceLogicId & PayloadMask);
+        public static bool IsEncoded(int sourceLogicId) =>
+            (sourceLogicId & PrefixMask) == Prefix;
+        public static int Decode(int sourceLogicId) => sourceLogicId & PayloadMask;
     }
 
     /// <summary>投射物生成指令。</summary>
@@ -576,6 +622,16 @@ namespace BinGames.Sim
         public SimProjectileFlags Flags;
         /// <summary>RGBA8 打包的实例色（0 = 渲染器默认色）。见 <see cref="ProjectileState.Tint"/>。</summary>
         public uint Tint;
+
+        /// <summary>
+        /// surgical-window（M2-05b）：这发弹体命中单体目标时要定向到它身上的哪个接点。
+        /// 默认 <see cref="SimBodyPartSlot.None"/> = 不定向，走原有整体 Health 路径（零回归）。
+        /// <see cref="SimProjectileFlags.SurgicalAim"/> 开启时，本字段会在实际命中帧被几何解析结果覆盖。
+        /// 只在 <c>JobProjectile.ScanUnits</c> 的**单体命中分支**（<see cref="AreaRadius"/> &lt;= 0）
+        /// 透传进最终 <see cref="DamageRequest"/>；溅射/拖尾/终结爆等 Radius&gt;=0 的分支忽略它
+        /// ——与 <see cref="DamageRequest.TargetPart"/> 本身"只对单体请求生效"的口径一致。
+        /// </summary>
+        public SimBodyPartSlot TargetPart;
     }
 
     /// <summary>
@@ -693,6 +749,8 @@ namespace BinGames.Sim
         public int KillerLogicId;
         /// <summary>致死来源类型。</summary>
         public DeathCauseKind CauseKind;
+        /// <summary>M2-05c：死亡前是否登记过至少一个身体接点。只记录模拟事实，奖励由热更层解释。</summary>
+        public byte HadSurgicalBody;
     }
 
     /// <summary>命中事件。用于卡牌 OnHit 触发与命中反馈。</summary>

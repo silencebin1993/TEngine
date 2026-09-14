@@ -50,6 +50,8 @@ namespace BinGames.Sim
         /// <summary>RGBA8 打包的实例色（0 = 用渲染器默认色）。元素/反应配色由热更层算好后原样带下来，
         /// 让"真弹体"也能保留此前只有白模才有的元素染色，而不是全场一律亮黄。</summary>
         public uint Tint;
+        /// <summary>surgical-window（M2-05b）：见 <see cref="ProjectileRequest.TargetPart"/>。</summary>
+        public SimBodyPartSlot TargetPart;
     }
 
     /// <summary>
@@ -79,6 +81,8 @@ namespace BinGames.Sim
         /// <summary>gene_receptor 选靶偏好要读目标的状态位（<see cref="SimStatus.Marked"/>）。</summary>
         [ReadOnly] public NativeArray<uint> Status;
         [ReadOnly] public NativeArray<byte> Alive;
+        [ReadOnly] public NativeArray<SimEntityId> EntityId;
+        [ReadOnly] public NativeParallelHashMap<SimEntityId, SimUnitBody> Bodies;
         [ReadOnly] public NativeParallelMultiHashMap<int, int> Hash;
         /// <summary>静态障碍（story-009）。数量小，线性扫描比建哈希更简单更快。</summary>
         [ReadOnly] public NativeArray<float2> ObstaclePos;
@@ -368,7 +372,20 @@ namespace BinGames.Sim
                         }
 
                         float reach = s.Radius + Radius[j];
-                        if (math.distancesq(Position[j], s.Position) > reach * reach)
+                        SimBodyPartSlot hitPart = s.TargetPart;
+                        bool surgicalAim = s.AreaRadius <= 0f &&
+                            (s.Flags & SimProjectileFlags.SurgicalAim) != 0;
+                        if (surgicalAim && Bodies.TryGetValue(EntityId[j], out SimUnitBody body) &&
+                            HasAimablePart(in body))
+                        {
+                            if (!TryResolveAimedPart(in body, Position[j], s.Position, s.Radius, out hitPart))
+                            {
+                                // 这发直控弹进入了身体外轮廓，但没有穿过任何具体接点：继续飞。
+                                // 在单位边缘先结算会让两个内部接点永远没有机会被分别瞄准。
+                                continue;
+                            }
+                        }
+                        else if (math.distancesq(Position[j], s.Position) > reach * reach)
                         {
                             continue;
                         }
@@ -393,6 +410,13 @@ namespace BinGames.Sim
                         }
                         else
                         {
+                            // surgical-window（M2-05b）：只有纯单体命中（无溅射）才透传 TargetPart——
+                            // 上面 AreaRadius>0 的溅射分支是范围请求，DamageRequest.TargetPart 的口径本就
+                            // 对它无效，不传等于零回归；这里传了才第一次让"指哪打哪的接点"落地。
+                            int damageSourceLogicId = surgicalAim && hitPart != SimBodyPartSlot.None &&
+                                                      s.SourceLogicId >= 0
+                                ? SimSurgicalAimSource.Encode(s.SourceLogicId)
+                                : s.SourceLogicId;
                             DamageOut.Enqueue(new DamageRequest
                             {
                                 Origin = s.Position,
@@ -405,7 +429,8 @@ namespace BinGames.Sim
                                 ChainCount = s.ChainCount,
                                 ChainRange = 4f,
                                 ChainFalloff = 0.75f,
-                                SourceLogicId = s.SourceLogicId,
+                                SourceLogicId = damageSourceLogicId,
+                                TargetPart = hitPart,
                             });
                         }
 
@@ -435,6 +460,55 @@ namespace BinGames.Sim
                         break;
                     } while (Hash.TryGetNextValue(out j, ref it));
                 }
+            }
+        }
+
+        private static bool HasAimablePart(in SimUnitBody body)
+        {
+            return (body.Primary.IsConfigured && body.Primary.AimRadius > 0f) ||
+                   (body.Secondary.IsConfigured && body.Secondary.AimRadius > 0f);
+        }
+
+        /// <summary>
+        /// 在实际命中帧选择与弹体相交且最近的具体接点。接点几何只存在于稀疏身体表，
+        /// 普通单位不会进入本方法；两个接点都命中时取距离更近者，平局稳定取 Primary。
+        /// </summary>
+        private static bool TryResolveAimedPart(
+            in SimUnitBody body,
+            float2 unitPosition,
+            float2 projectilePosition,
+            float projectileRadius,
+            out SimBodyPartSlot slot)
+        {
+            slot = SimBodyPartSlot.None;
+            float bestDistanceSq = float.MaxValue;
+            TryAimPart(in body.Primary, SimBodyPartSlot.Primary, unitPosition, projectilePosition,
+                projectileRadius, ref slot, ref bestDistanceSq);
+            TryAimPart(in body.Secondary, SimBodyPartSlot.Secondary, unitPosition, projectilePosition,
+                projectileRadius, ref slot, ref bestDistanceSq);
+            return slot != SimBodyPartSlot.None;
+        }
+
+        private static void TryAimPart(
+            in SimBodyPart part,
+            SimBodyPartSlot candidate,
+            float2 unitPosition,
+            float2 projectilePosition,
+            float projectileRadius,
+            ref SimBodyPartSlot slot,
+            ref float bestDistanceSq)
+        {
+            if (!part.IsConfigured || part.AimRadius <= 0f)
+            {
+                return;
+            }
+
+            float distanceSq = math.distancesq(unitPosition + part.AimOffset, projectilePosition);
+            float reach = projectileRadius + part.AimRadius;
+            if (distanceSq <= reach * reach && distanceSq < bestDistanceSq)
+            {
+                bestDistanceSq = distanceSq;
+                slot = candidate;
             }
         }
 

@@ -1,14 +1,15 @@
-# 外科窗口契约（M2-05a 交付物）
+# 外科窗口契约（M2-05a/b/c 交付物）
 
-**状态：** 已实现并验收。自检 `[20]` 段 21 条，FAIL=0；`[1]`–`[19]` 段（385 条）逐条按断言标题
-比对零退化（详见 §7）。
-**适用范围：** "一个实体身上可以有多个可独立受伤的接点"这个内核基元本身——
-不覆盖 RTS 指定接点类别、直控瞄准具体接点、精准/粗暴的掉落结算（分别是 M2-05b、M2-05c 的事）。
+**状态：** M2-05a/b/c 已实现并验收。a 段见 `[20]`；b 段见 `[21]`；c 段见 `[22]`；
+全量 450 条、FAIL=0。
+**适用范围：** 手术窗口原型的身体接点、RTS/直控命中方式与最小奖励结算；不覆盖正式器官掉落池、
+背包物品、品质或持久化（里程碑明确非目标，后续由 M3 定义）。
 **单一规则真相：** 本文件 + `Main/Sim/SimTypes.cs`（`SimBodyPartSlot` / `SimBodyPart` /
 `SimUnitBody` / `DamageRequest.TargetPart` / `SpawnRequest.PrimaryPartMaxHealth` /
 `SecondaryPartMaxHealth`）+ `Main/Sim/Jobs/JobDamage.cs`（`TryApplyPartDamage`）+
 `Main/Sim/SimWorld.cs`（`_bodies` 登记表、`SpawnSurgicalTestEnemy`、`TryGetBodyPart`、
-`HasBody`）。任何其它地方对"接点怎么扣血、摧毁算不算死"的推断都是复制品，冲突以这里为准。
+`HasBody`）+ `HotFix/GameLogic/Progression/SurgicalRewardLedger.cs`（精准/粗暴奖励口径）。
+任何其它地方对"接点怎么扣血、摧毁算不算死、产出什么"的推断都是复制品，冲突以这里为准。
 
 前置：伤害结算见既有 `JobDamage`（本段之前只认单一 `Health`）；测试敌人生成见
 `Spawning/SpawnDirector.cs`（热更层正式随机生成池，本段**不接入**，见 §6）。
@@ -115,7 +116,8 @@ public struct SimUnitBody { public SimBodyPart Primary; public SimBodyPart Secon
 
 ## 5. "精准 vs 粗暴"信号位：加了什么、为什么只加这些
 
-里程碑实施第 4/5 条（保留完整器官 / 只给生物质）是 M2-05c 的结算逻辑，本段不做。
+里程碑实施第 4/5 条（保留完整器官 / 只给生物质）在 M2-05a 交付时仅预留事实字段；
+M2-05c 现已按 §11 完成结算。
 但契约要求为它预留信号位，取舍如下：
 
 **加了：** `SimBodyPart.DestroyedBySingleTargetHit`（byte）+ `LastHitAmount`（float）。
@@ -124,12 +126,10 @@ public struct SimUnitBody { public SimBodyPart Primary; public SimBodyPart Secon
 只记录"发生了什么"，不做任何阈值判断。
 
 **没加：**
-- **"伤害量低于多少算精准"的阈值判定。** 这是纯粹的平衡数值，M2-05a 没有依据能定这个数
-  （GDD 没给出具体器官的血量/伤害基线），写死一个阈值只会在 M2-05c 真正设计奖励曲线时
-  被推翻重写。信号位只给事实（`LastHitAmount` + `MaxHealth` 已经够 M2-05c 自己算比例）。
-- **"这次死亡整体上算不算粗暴"的复合判定/事件队列。** 死亡时刻整体 `Health` 归零，
-  与接点是否被切离过是两件独立发生的事（§4）；要不要在死亡事件里回溯"死前有没有接点
-  被精准切过"，属于 M2-05c 决定怎么发奖励时才需要回答的问题，本段不预判。
+- **"伤害量低于多少算精准"的阈值判定。** M2-05a 当时只给事实；M2-05c 现采用 25% 原型阈值，
+  见 §11。它仍不是平衡终值。
+- **"这次死亡整体上算不算粗暴"的复合判定/事件队列。** M2-05c 没有新开队列，只在
+  `DeathEvent.HadSurgicalBody` 记录死亡前是否登记身体；热更层结合 `CauseKind=Damage` 解释为粗暴击杀。
 - **`HitEvent.TargetPart` 这种逐次命中广播字段。** 信号位落在 `SimBodyPart` 本身、
   随查随算（`TryGetBodyPart`），足够 M2-05b/c 在需要时查询；没有已知消费者的情况下
   再给一个高频结构体（`HitEvent` 每帧可能有几十条）加字段，只是"为了预留而预留"。
@@ -176,13 +176,11 @@ primaryPartHealth, secondaryPartHealth, radius)` 是新增的公开方法，内�
 
 ### 没覆盖到的部分
 
-- **只测了 Edit 模式下直接构造 `SimWorld` + `SimCommandBuffer` 的路径**，没有经过
-  `SimBridge`/热更层。`TargetPart` 目前没有任何热更层入口会去设置它——本段只交付内核
-  基元，"谁来设置 `TargetPart`"是 M2-05b 的事，所以也没有 `SimBridge` 层面的断言。
+- `[20]` 仍只测 Edit 模式下的内核基元；`[21]` 已补 `SimBridge`/热更层的 RTS 与直控真弹体路径，
+  `[22]` 已补热更奖励账本。
 - **单体起手 + 连锁（`ChainCount > 0`）叠加 `TargetPart` 的组合没有断言**（见 §3 第 1 点），
   只在文档里说明了当前实现下的行为，没有构造用例验证。
-- **`DestroyedBySingleTargetHit` 之外的"粗暴/精准"判据完全没有实现**（阈值、复合判定、
-  死亡事件回溯），这些留给 M2-05c，见 §5。
+- 25% 精准阈值与粗暴死亡判据已由 `[22]` 覆盖；正式平衡与完整掉落仍未实现。
 - **接点的视觉/表现层反馈完全没有做**（染色、独立血条、命中特效），本段只有数据与
   查询入口，`HitEvent` 也没有加 `TargetPart` 字段广播出去。
 - **调试直调入口没有 `SimBridge`/热更层封装**，`SpawnSurgicalTestEnemy` 目前只能从
@@ -190,22 +188,76 @@ primaryPartHealth, secondaryPartHealth, radius)` 是新增的公开方法，内�
 
 ---
 
-## 8. 已知遗留（交给 M2-05b/c）
+## 8. 已知遗留（M2-05 收口后）
 
 - **接点分类是占位**（§6），具体器官类别、数量是否固定为 2 都待产品拍板。
-- **RTS 指定器官类别、直控瞄准具体接点**（里程碑实施第 2/3 条）完全没有实现——
-  `UnitCommand`/`OrganKernelAction` 都还不认识 `SimBodyPartSlot`。
-- **精准/粗暴的完整结算与奖励**（第 4/5 条）完全没有实现，见 §5。
+- **25% 精准末击阈值与每次粗暴击杀 1 生物质都是原型数值**，不是平衡终值。
+- **完整器官目前只是 `PreservedOrganStub`**（来源 LogicId + 接点槽），不含正式掉落 id、品质、背包与持久化。
 - **单体 + 连锁组合下 `TargetPart` 的语义**只在文档里说明，未经断言验证（§7）。
 - **接点数量固定为 2**（`Primary`/`Secondary`），扩到 N 个接点、或按原型配置不同接点数量，
   都不在本段范围——`SimUnitBody` 目前是两个具名字段而不是数组，改动会牵动
   `JobDamage.TryApplyPartDamage` 的分支结构。
 
-## 9. 非目标（M2-05a 明确不做）
+## 9. 非目标（M2-05 整体）
 
-- 不做 RTS 指定器官类别、直控瞄准接点（M2-05b）。
-- 不做精准/粗暴的完整结算、掉落、生物质奖励（M2-05c）。
 - 不做完整器官掉落池（里程碑原文明确的非目标）。
 - 不把接点接入正式随机生成池 `SpawnDirector`；不新增可通过热更层触发的公开入口。
 - 不给内核加"器官"概念——`SimBodyPartSlot` 是通用槽位，不是器官系统。
 - 不改变任何既有单位（无接点）的行为与内存占用。
+
+---
+
+## 10. M2-05b：RTS 类别指定与直控具体接点
+
+### 10.1 RTS
+
+- `UnitCommand.TargetPart` 持久保存 Attack 命令指定的类别；默认 `None` 保持整体伤害。
+- `SquadCommandSystem` 用 P 在 None / Primary / Secondary 间循环，只影响之后的新 Attack 命令。
+- `WhiteboxSquadOverlay` 在战略输入域显示当前类别；Move / Guard / Retreat 不消费该字段。
+- `ResolveMinionCombat` 对合法 Attack 命令锁定 `TargetEntity`，不再在混战中错误改打最近敌人。
+- 目标失效、非 Attack 或自主 AI 仍走原最近敌人路径；`[21]` 组 1–5 覆盖两条正向与两条回归分支。
+
+### 10.2 直控
+
+- 接点只在稀疏 `SimUnitBody` 中增加 `AimOffset` / `AimRadius`，未登记单位没有额外常驻成本。
+- 直控单体弹体带 `SimProjectileFlags.SurgicalAim`；普通弹体默认关闭，行为不变。
+- `JobProjectile` 在实际命中帧按弹体位置选择具体接点，不在热更层预猜目标或逐帧扫描单位。
+- 同一双接点敌人可分别命中 Primary / Secondary；漏过接点时继续飞，不在身体外轮廓提前结算。
+- 无可瞄准接点的单位回退普通碰撞和整体伤害；范围伤害仍不定向接点。
+
+### 10.3 原型边界
+
+- 接点偏移随单位平移，但当前没有单位朝向数据，暂不旋转；正式骨骼挂点映射不在 M2-05b。
+- 只有 Projectile 动作验证了具体接点瞄准；Cone / Zone / Status 没有单体连接点语义。
+- 两个接点仍是占位类别，不接正式敌人生成池，不做完整器官掉落池。
+- 精准阈值、完整器官存根与粗暴击杀生物质见 §11；正式经济与掉落仍不在本里程碑。
+
+---
+
+## 11. M2-05c：精准切离与粗暴击杀奖励
+
+### 11.1 归因与阈值
+
+- `SimBridge.FireProjectile(..., surgicalAim: true)` 只给弹体写 `SurgicalAim` 标志；飞行期间
+  `SourceLogicId` 保持真实值。`JobProjectile` 确认实际命中具体接点后，才给该条单体伤害来源加封套。
+- 封套使用 `10xx...`（最低负数四分之一区间），与内核从 `-1` 向下分配的普通负数 LogicId
+  所在 `11xx...` 区间明确分离；RTS 来源和结构器官反伤 `-1` 都不会被误判。
+- 只有直控几何命中切离接点，且 `LastHitAmount <= MaxHealth * 0.25`，才保留完整器官。
+  25% 是可替换的原型常量 `PreciseLastHitMaxFraction`，不是平衡终值。
+
+### 11.2 最小奖励账本
+
+- `SurgicalRewardLedger` 位于热更层，模拟内核不认识“器官”或“生物质”。
+- 账本只遍历本帧 `HitEvent` / `DeathEvent`；每条命中最多查询 Primary / Secondary 两个稀疏接点，
+  用 `(SimEntityId, Slot)` 去重，不扫描 `UnitCapacity`，也不扩展高频 `HitEvent` 布局。
+- 完整器官只记录 `PreservedOrganStub(SourceLogicId, Slot)`；不接正式掉落池、背包或存档。
+- 带接点 Hostile 因整体伤害死亡（`HadSurgicalBody=1 && CauseKind=Damage`）时增加 1 生物质，
+  不增加完整器官。普通敌人或 `Devour` 清除不进入这条奖励轨道。
+
+### 11.3 验证
+
+- `[21]` 新增生产集成断言：直控真弹体的命中事件携带可解码来源标记。
+- `[22]` 11 条覆盖：低伤直控成功、RTS 低伤不保留、直控高伤不保留、粗暴整体击杀只给生物质、
+  普通敌人与吞噬不重复结算。
+- 2026-09-13 最终结果：快速构建 `BinGames.Sim` / `GameLogic` 双绿；Unity Console 0 error；
+  Burst 开启状态全量 `PASS=450, FAIL=0`。

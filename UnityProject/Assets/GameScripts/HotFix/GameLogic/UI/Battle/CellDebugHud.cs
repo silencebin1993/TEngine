@@ -89,6 +89,7 @@ namespace GameLogic.UI.Battle
         private Rect _deckRect;
         private Rect _shopRect;
         private Rect _codexRect;
+        private Rect _playtestRect;
 
         /// <summary>沙盒"自动连发"计时器——OnGUI 每帧可能因 Layout/Repaint 事件触发多次，计时放 Update 更可靠。</summary>
         private void Update()
@@ -135,6 +136,15 @@ namespace GameLogic.UI.Battle
             {
                 DrawLookDevSandbox(cell);
                 return;
+            }
+
+            if (cell.IsConsciousnessPlaytest)
+            {
+                DrawConsciousnessPlaytestGuide(cell);
+                if (!cell.IsRunning)
+                {
+                    return;
+                }
             }
 
             HandleQuickPanelHotkeys();
@@ -196,7 +206,7 @@ namespace GameLogic.UI.Battle
             // battle-ui-polish/story-003 D7：新 UI Toolkit 结算面板默认接管展示，旧块仅在 _showLegacyResult 时加高。
             float h = (hasResult && _showLegacyResult) ? 400f : 240f;
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            h += 50f; // LookDev 沙盒按钮（story-006），只在编辑器/开发构建加高，避免正式包菜单多空白
+            h += 86f; // 两个开发入口，只在编辑器/开发构建加高，避免正式包菜单多空白
 #endif
             if (_menuRect.width <= 0f)
             {
@@ -228,6 +238,10 @@ namespace GameLogic.UI.Battle
                     GameRoot.StartLookDevSandbox();
                     BattleSandboxUIToolkit.Instance?.Show();
                 }
+                if (GUILayout.Button("M2-06 固定意识传递试玩", GUILayout.Height(30f)))
+                {
+                    GameRoot.StartConsciousnessPlaytest();
+                }
 #endif
 
                 if (hasResult && _showLegacyResult)
@@ -236,6 +250,82 @@ namespace GameLogic.UI.Battle
                     GUILayout.Label(BuildResultText(last), _label);
                 }
             });
+        }
+
+        private void DrawConsciousnessPlaytestGuide(CellStageFlow cell)
+        {
+            if (_playtestRect.width <= 0f)
+            {
+                _playtestRect = new Rect(Screen.width - 450f, 12f, 438f, 184f);
+            }
+            ImguiDragUtil.DrawDraggable(106, ref _playtestRect, "M2-06 固定试玩", "m2_06_playtest", id =>
+            {
+                GUILayout.Label("目标：在 8–12 分钟内自然完成四步（主持人不要提示键位）", _label);
+                GUILayout.Label("1. 切到战略视角，选择友军并下达命令", _label);
+                GUILayout.Label("2. 接管一名友军，使用它自身的动作", _label);
+                GUILayout.Label("3. 对固定大目标的 P / S 接点完成一次精准切离", _label);
+                GUILayout.Label("4. 退出接管并回到战略层继续下令", _label);
+                GUILayout.Label("应急键位卡：M 视角　Tab 接管　鼠标左/右键 操作　P 接点类别", _hint);
+                if (GUILayout.Button("结束试玩并返回菜单", GUILayout.Height(26f)))
+                {
+                    cell.MarkAbandoned();
+                    GameRoot.EndRun();
+                }
+            });
+
+            DrawConsciousnessTargetMarkers(cell);
+        }
+
+        private void DrawConsciousnessTargetMarkers(CellStageFlow cell)
+        {
+            Camera cam = Camera.main;
+            if (cam == null || cell.Sim == null || cell.Sim.World == null)
+            {
+                return;
+            }
+
+            BinGames.Sim.SimSnapshot snapshot = cell.Sim.Snapshot;
+            for (int i = 0; i < snapshot.Count; i++)
+            {
+                if (!snapshot.IsAlive(i) ||
+                    snapshot.LogicId[i] != CellStageFlow.ConsciousnessPlaytestTargetLogicId)
+                {
+                    continue;
+                }
+
+                BinGames.Sim.SimEntityId id = snapshot.EntityId[i];
+                DrawConsciousnessPartMarker(cam, snapshot.Position[i], id,
+                    BinGames.Sim.SimBodyPartSlot.Primary, "P", cell);
+                DrawConsciousnessPartMarker(cam, snapshot.Position[i], id,
+                    BinGames.Sim.SimBodyPartSlot.Secondary, "S", cell);
+                return;
+            }
+        }
+
+        private static void DrawConsciousnessPartMarker(Camera cam, Unity.Mathematics.float2 bodyPosition,
+            BinGames.Sim.SimEntityId entityId, BinGames.Sim.SimBodyPartSlot slot,
+            string label, CellStageFlow cell)
+        {
+            if (!cell.Sim.World.TryGetBodyPart(entityId, slot, out BinGames.Sim.SimBodyPart part))
+            {
+                return;
+            }
+
+            Unity.Mathematics.float2 point = bodyPosition + part.AimOffset;
+            Vector3 screen = cam.WorldToScreenPoint(new Vector3(point.x, 0.4f, point.y));
+            if (screen.z <= 0f)
+            {
+                return;
+            }
+
+            string state = part.Destroyed != 0 ? "已切离" : $"{part.Health:F0}/{part.MaxHealth:F0}";
+            Rect rect = new Rect(screen.x - 42f, Screen.height - screen.y - 15f, 84f, 30f);
+            Color before = GUI.color;
+            GUI.color = part.Destroyed != 0
+                ? new Color(0.45f, 0.45f, 0.45f, 0.9f)
+                : new Color(0.3f, 1f, 0.9f, 0.95f);
+            GUI.Box(rect, $"{label}  {state}");
+            GUI.color = before;
         }
 
         /// <summary>battle-ui-polish/story-003 D4 最小暴露：新 UI Toolkit 结算面板复用同一份文案，不重写拼接逻辑。</summary>
