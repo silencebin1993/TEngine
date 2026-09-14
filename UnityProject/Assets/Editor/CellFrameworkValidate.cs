@@ -9,6 +9,8 @@ using GameLogic.Cards;
 using GameLogic.Command;
 using GameLogic.Control;
 using GameLogic.Core;
+using GameLogic.MetabolicSlice.Blueprint;
+using GameLogic.MetabolicSlice.ContentCatalog;
 using GameLogic.Progression;
 using GameLogic.Spawning;
 using GameLogic.Stage;
@@ -77,6 +79,7 @@ namespace GameLogic.EditorTools
                 ValidateConsciousnessPlaytestGate();
                 ValidateAllyParityAndControlCycle();
                 ValidateCombatTruthSourceUnified();
+                ValidateBlueprintLibrary();
             }
             catch (Exception e)
             {
@@ -1633,6 +1636,64 @@ namespace GameLogic.EditorTools
                 sim.End();
                 InputRouter.Reset();
             }
+        }
+
+        /// <summary>
+        /// M3-02：蓝图库领域模型。只测纯内存逻辑（不落盘），与 ValidateCodex 对
+        /// CodexPersistence 的处理口径一致——文件 IO 层不进这个自检。
+        /// </summary>
+        private static void ValidateBlueprintLibrary()
+        {
+            Line("\n[26] 蓝图库领域模型（M3-02）");
+
+            string organId = OrganelleCatalog.All.Keys.FirstOrDefault();
+            string geneId = GeneCatalog.AllGeneIds.FirstOrDefault();
+            Expect(organId != null, "OrganelleCatalog 应至少有一条目录用于本项自检");
+            Expect(geneId != null, "GeneCatalog 应至少有一条目录用于本项自检");
+            if (organId == null || geneId == null)
+            {
+                return;
+            }
+
+            var registry = new BlueprintRegistry();
+
+            // 验收 1：拾到器官不会自动解锁蓝图——registry 从不订阅任何拾取/掉落信号，
+            // 新建实例对任何 catalog id 都默认未解锁。
+            Expect(!registry.IsUnlocked(organId), "新建蓝图库对未解析的器官应为未解锁");
+            Expect(!registry.IsUnlocked(geneId), "新建蓝图库对未解析的基因应为未解锁");
+
+            BlueprintEntry bogus = registry.Resolve("org_does_not_exist_xyz", BlueprintSourceKind.Organelle, 1f, 0f);
+            Expect(bogus == null, "Catalog 查无此 id 时 Resolve 应 no-op 返回 null，不应凭空造出蓝图");
+
+            // 验收 2：解析后能稳定复制——完整度攒到 1 才算解锁，之后多次查询不改变状态。
+            registry.Resolve(organId, BlueprintSourceKind.Organelle, 0.5f, 0.1f);
+            Expect(!registry.IsUnlocked(organId), "完整度未满 1 时不应算解锁");
+            BlueprintEntry organEntry = registry.Resolve(organId, BlueprintSourceKind.Organelle, 0.5f, 0.1f);
+            Expect(organEntry != null && organEntry.Unlocked, "两次解析累满完整度后应解锁");
+            Expect(organEntry.RepeatResolveCount == 2, "重复解析进度应计入两次调用");
+
+            for (int i = 0; i < 5; i++)
+            {
+                Expect(registry.IsUnlocked(organId), "重复查询已解锁蓝图不应改变其解锁状态（稳定复制）");
+            }
+
+            // 验收 3：拆解后不能复制——完整度只增不减，污染变化不能反向撤销解锁。
+            float completenessBefore = organEntry.Completeness;
+            registry.Resolve(organId, BlueprintSourceKind.Organelle, 0f, 0.9f);
+            Expect(organEntry.Completeness >= completenessBefore,
+                "污染变化不应反向降低完整度（蓝图一旦解锁不能被撤销）");
+            Expect(organEntry.Unlocked, "污染增加后蓝图仍应保持已解锁");
+
+            // 基因轨同一套逻辑（防止只测了 Organelle 分支）。
+            BlueprintEntry geneEntry = registry.Resolve(geneId, BlueprintSourceKind.Gene, 1f, 0f);
+            Expect(geneEntry != null && geneEntry.Unlocked, "基因蓝图一次性给满完整度应立即解锁");
+
+            // 实施第 5 条：旧存档默认迁移应让老玩家维持"全目录可用"，而不是清空。
+            BlueprintHistory legacy = BlueprintMigration.BuildLegacyDefaults();
+            Expect(legacy.Entries.Any(e => e.SourceId == organId && e.Unlocked),
+                "旧存档默认迁移应包含现有 Organelle 目录且已解锁");
+            Expect(legacy.Entries.Any(e => e.SourceId == geneId && e.Unlocked),
+                "旧存档默认迁移应包含现有 Gene 目录且已解锁");
         }
 
         /// <summary>

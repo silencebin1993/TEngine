@@ -77,6 +77,7 @@ namespace GameLogic.Stage.CellStage
         private BossPhaseController _bossPhase;
         private ShopSystem _shop;
         private CodexRegistry _codex;
+        private MetabolicSlice.Blueprint.BlueprintRegistry _blueprints;
         private MetabolicDigestionSystem _digestion;
         private CarrierBodyVisualPresenter _carrierBodyVisual;
         private StructuralVisualPresenter _structuralVisual;
@@ -208,6 +209,7 @@ namespace GameLogic.Stage.CellStage
         public BossPhaseController BossPhase => _bossPhase;
         public ShopSystem Shop => _shop;
         public CodexRegistry Codex => _codex;
+        public MetabolicSlice.Blueprint.BlueprintRegistry Blueprints => _blueprints;
         public SimBridge Sim => _sim;
         public StatusSystem Status => _status;
         public AreaZoneSystem Zones => _zones;
@@ -427,6 +429,8 @@ namespace GameLogic.Stage.CellStage
             _bossPhase = _hub.Register(new BossPhaseController());
             _shop = _hub.Register(new ShopSystem());
             _codex = _hub.Register(new CodexRegistry());
+            // M3-02：蓝图库领域模型，与图鉴同一节奏（OnEnter 载入/迁移，OnExit 整份覆盖落盘）。
+            _blueprints = _hub.Register(new MetabolicSlice.Blueprint.BlueprintRegistry());
             _digestion = _hub.Register(new MetabolicDigestionSystem());
             // 战斗反馈表现层（story-002）：白模默认实现，只订阅 Signals，无需 Bind 依赖。
             _hub.Register(new CombatFeedbackPresenter());
