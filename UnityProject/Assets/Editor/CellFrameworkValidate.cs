@@ -1846,6 +1846,60 @@ namespace GameLogic.EditorTools
                        flow.Sim.ControlledUnitId != summon,
                     "即便拿着召唤物的 id 直接请求接管也必须被拒（槽位复用后可能拿到陈旧 id）");
 
+                // ── E2. 每一条召唤路径都必须自己带上这个标记 ──
+                //
+                // 上面两条测的是**内核的筛选**（拿一个已标记的单位，它进不了候选）。
+                // 那守不住真正出问题的那一类：**某条生成路径忘了标**。
+                // 09-14 第一次修只堵了 ComposeEngine 那两条（MetabolicSliceBridge 的分裂与召唤），
+                // 漏掉了技能/卡牌的 Spawn 效果，玩家随后实测接管到 `#5_unit_L3_V141`。
+                //
+                // 所以这里**真的跑一遍 EffectSpawn**，而不是自己造一个 SpawnRequest——
+                // 自己造就等于把被测代码抄了一遍，那条路忘没忘标记永远测不出来。
+                var spawnExec = new GameLogic.Ability.Executors.EffectSpawn();
+                var spawnCtx = new GameLogic.Ability.EffectContext
+                {
+                    Sim = flow.Sim,
+                    Origin = new float2(-6f, -6f),
+                    Direction = new float2(1f, 0f),
+                };
+                int beforeSpawnCount = flow.Sim.Snapshot.Count;
+                spawnExec.Execute(new GameLogic.Ability.EffectSpec
+                {
+                    Kind = GameLogic.Ability.EffectKind.Spawn,
+                    Count = 2,
+                    Value = 20f,
+                    Radius = 0.4f,
+                    SpawnEnemyId = ArchetypeLoadoutTable.SporeArchetypeId,
+                }, spawnCtx);
+                flow.Sim.OnUpdate(1f / 60f);
+
+                SimSnapshot afterEffect = flow.Sim.Snapshot;
+                Expect(afterEffect.Count > beforeSpawnCount,
+                    $"EffectSpawn 应真的生成了附属体（{beforeSpawnCount} → {afterEffect.Count}）——" +
+                    "没生成的话下面那条断言是空过的");
+
+                SimControlCandidate[] afterEffectCandidates = flow.Sim.GetControlCandidates();
+                int effectSpawnedListed = 0;
+                for (int i = beforeSpawnCount; i < afterEffect.Count; i++)
+                {
+                    if (afterEffect.Alive[i] == 0 ||
+                        (SimFaction)afterEffect.Faction[i] != SimFaction.PlayerMinion)
+                    {
+                        continue;
+                    }
+
+                    for (int c = 0; c < afterEffectCandidates.Length; c++)
+                    {
+                        if (afterEffectCandidates[c].EntityId == afterEffect.EntityId[i])
+                        {
+                            effectSpawnedListed++;
+                        }
+                    }
+                }
+                Expect(effectSpawnedListed == 0,
+                    $"技能/卡牌 Spawn 效果造出来的附属体不得进入接管候选（实测混进去 {effectSpawnedListed} 个）——" +
+                    "它与孢子/分身/卵鞘同类，是装配打出来的产物，不是可转移意识的身体");
+
                 // ── F. 玩家直控的加速度不看行为原型 ──
                 // 菌丝体固着原型 Accel=0，被夹到 0.01 后每帧只逼近目标速度的万分之 1.7，
                 // 按住方向两秒多才到 0.097 u/s。玩家手里的身体必须一律跟手。

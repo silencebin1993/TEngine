@@ -70,6 +70,15 @@ namespace GameLogic.Ability.Executors
                     InitialStatus = spec.Status,
                     LogicId = ctx.Sim.NextLogicId(),
                     VisualId = spec.SpawnEnemyId,
+                    // 孢子/分身/卵鞘是**装配打出来的产物，不是可以转移意识进去的身体**。
+                    // 见 SpawnRequest.ExcludeFromControl 与自检 [24]-E。
+                    //
+                    // 09-14 第一次修这条时只堵了 ComposeEngine 那两条路
+                    // （MetabolicSliceBridge 的分裂与召唤），**漏了这里**——于是带 Spawn 效果的
+                    // 卡一打出来，那批附属体就全成了 Tab 候选。玩家实测接管到 `#5_unit_L3_V141`
+                    // （L3 = 两名友军之后紧接着的那个，V141 = spec.SpawnEnemyId），
+                    // 而它们随开火不断生灭，这也是"友方角色每每都不一样"的第二个来源。
+                    ExcludeFromControl = true,
                 });
             }
         }
