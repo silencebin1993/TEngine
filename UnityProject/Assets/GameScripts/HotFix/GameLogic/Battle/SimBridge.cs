@@ -48,8 +48,30 @@ namespace GameLogic.Battle
         private float _restoreGraceRemaining;
         private ControlAvailability _availability = ControlAvailability.None;
 
-        private const float DefaultControlSignalRange = 18f;
-        private const float DefaultControlSwitchCooldown = 0.75f;
+        /// <summary>
+        /// 接管信号范围。**2026-09-14 暂时放开成全场**（玩家指令：「暂时改成全部友方循环选择」）。
+        ///
+        /// 原值 18：Tab 只在这个半径内找候选，于是「下令友军去打远处的目标 → 自己走开 → 按 Tab」
+        /// 候选就是空集，静默失败。玩家要的是**按 Tab 在全部友军之间循环**，不受距离限制。
+        /// 1e6 远大于场地半边（约 40），等价于不限距离，但保留有限值避免 inf 参与距离平方比较。
+        ///
+        /// 想恢复"信号范围"作为产品机制时改回这里一处即可：它同时是候选查询半径、
+        /// 手动切换的距离校验、以及死亡回弹的 `ControlFallbackRange`。
+        /// </summary>
+        private const float DefaultControlSignalRange = 1_000_000f;
+        /// <summary>
+        /// 两次接管之间的冷却。**2026-09-14 从 0.75 降到 0.15**（与信号范围放开是同一条玩家指令
+        /// 「暂时改成全部友方循环选择」的另一半）。
+        ///
+        /// 0.75 秒的问题不在数值本身，而在它让"连按 Tab 循环选人"这件事不成立：
+        /// 走遍 4 具身体要按住 2.25 秒，中间每次多按都被静默吞掉——玩家读到的就是
+        /// 「Tab 偶尔没反应，连续按也没用」。0.15 仍然挡得住一次按键被重复触发，
+        /// 但循环一圈只要半秒出头。
+        ///
+        /// 冷却本身不该删：它是"意识转移"的节奏约束，正式数值等 M2-06 试玩门跑完再定。
+        /// 被冷却拒绝时 HUD 会显示"接管冷却中"，不再是静默失败。
+        /// </summary>
+        private const float DefaultControlSwitchCooldown = 0.15f;
         /// <summary>恢复请求的宽限秒数。超时即放弃恢复并落到确定性的兜底状态，不无限期挂着。</summary>
         private const float DefaultControlRestoreGrace = 1.5f;
 

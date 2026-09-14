@@ -146,21 +146,35 @@ namespace GameLogic.Stage.CellStage
             float volumePenalty = 1f / (1f + Mathf.Max(0f, volume - 1f) * 0.09f);
             float speed = _stats.Get(StatId.MoveSpeed) * volumePenalty;
 
+            // 2026-09-14 试玩反馈修正：接管友军时**不要**把玩家本体的体积套到它身上。
+            // RadiusOverride 会改受控实体的碰撞半径，而"体积"是玩家本体吞噬机制的量
+            // （Spec §5），友军根本没有这条成长线。
+            bool onPlayerBody = _sim.ControllingPlayerBody;
             _sim.SetControlledIntent(new PlayerIntent
             {
                 MoveDir = move,
                 SpeedMul = 1f,
-                RadiusOverride = volume,
+                RadiusOverride = onPlayerBody ? volume : 0f,
                 AddStatus = SimStatus.None,
                 RemoveStatus = SimStatus.None,
             });
 
             // 属性同步。每帧同步是为了让卡牌的即时属性变化立刻生效。
-            _sim.SetPlayerStats(
-                _stats.Get(StatId.MaxHealth),
-                _sim.PlayerHealth,
-                volume,
-                speed);
+            //
+            // 2026-09-14：**只同步给玩家本体**。`SimWorld.SetPlayerStats` 写的是
+            // `_controlledUnitId` 那一具，所以接管友军期间它会把玩家的血量/体积/移速
+            // 逐帧盖到友军身上——而且**放手之后这些值留在它身上不会还原**。
+            // 症状正是玩家报的「友方角色还不一样」：被接管过的那具从此顶着玩家的半径与血量。
+            // 移速还额外吃了体积惩罚（`volumePenalty`），于是同样是友军，摸过的比没摸过的慢。
+            // 这与 M2-03b 立的规矩是同一条：**玩家本体的东西不许套到别人身上**。
+            if (onPlayerBody)
+            {
+                _sim.SetPlayerStats(
+                    _stats.Get(StatId.MaxHealth),
+                    _sim.PlayerHealth,
+                    volume,
+                    speed);
+            }
 
             ApplyRegen(dt);
         }

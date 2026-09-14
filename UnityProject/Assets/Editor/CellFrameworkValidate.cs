@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -74,6 +75,7 @@ namespace GameLogic.EditorTools
                 ValidateSurgicalWindowCommandAndAim();
                 ValidateSurgicalWindowRewards();
                 ValidateConsciousnessPlaytestGate();
+                ValidateAllyParityAndControlCycle();
             }
             catch (Exception e)
             {
@@ -1406,6 +1408,181 @@ namespace GameLogic.EditorTools
                     ControlPersistence.Clear();
                 }
             }
+        }
+
+        // ── 可控友军的一致性与接管循环（2026-09-14 试玩反馈）────
+
+        /// <summary>
+        /// 守三件玩家连着两轮报上来的事，每一件都曾经"看起来能跑"却在手里明显不对：
+        ///
+        /// 1. **友军没收到命令就不许自己动**。原型 13 的 MinionSeekAttack 找不到索敌目标时走
+        ///    <c>Wander * 0.5</c>，于是半速乱晃——玩家读到的是"又慢又自己动"。
+        /// 2. **玩家属性不许写到接管的友军身上**。<c>SimWorld.SetPlayerStats</c> 写的是
+        ///    当前受控那一具，接管期间会把玩家的血量/体积逐帧盖上去，**放手后还留在它身上**，
+        ///    于是"摸过的友军"和"没摸过的"从此不一样。
+        /// 3. **接管候选是全场友军、按稳定 id 循环**，不是"最近的那个"。
+        /// </summary>
+        private static void ValidateAllyParityAndControlCycle()
+        {
+            Line("\n[24] 可控友军一致性与全场接管循环");
+
+            GameObject cameraBefore = Camera.main != null ? Camera.main.gameObject : null;
+            var flow = new CellStageFlow();
+            // 输入所有权是静态的，前面的段落可能把它留在别的状态；本段要走直控路径，显式摆正。
+            InputRouter.SetModalUi(false);
+            InputRouter.SetGameplayPaused(false);
+            InputRouter.SetScope(InputScope.Direct);
+
+            try
+            {
+                flow.PrepareNextEnter(CellStageEntryMode.ConsciousnessPlaytest);
+                flow.Enter(null);
+
+                // 让两名友军真正落地并拿到实体 id，再把"出生即原地待命"落下去。
+                for (int i = 0; i < 8; i++)
+                {
+                    flow.Sim.OnUpdate(1f / 60f);
+                    flow.DebugResolveAllyHolds();
+                }
+
+                SimSnapshot snap = flow.Sim.Snapshot;
+                var allies = new List<SimEntityId>();
+                var allyIndex = new List<int>();
+                for (int i = 0; i < snap.Count; i++)
+                {
+                    if (snap.IsAlive(i) && snap.FactionOf(i) == SimFaction.PlayerMinion)
+                    {
+                        allies.Add(snap.EntityId[i]);
+                        allyIndex.Add(i);
+                    }
+                }
+                Expect(allies.Count == 2, $"固定场景应有两名可控友军（实际 {allies.Count}）");
+                if (allies.Count != 2)
+                {
+                    return;
+                }
+
+                // ── A. 出生即原地待命：有命令、且真的不动 ──
+                bool bothHeld = true;
+                for (int i = 0; i < allies.Count; i++)
+                {
+                    bothHeld &= flow.Sim.TryGetCommand(allies[i], out UnitCommand c) &&
+                                c.Kind == UnitCommandKind.Guard;
+                }
+                Expect(bothHeld, "两名友军出生后都应拿到原地守备命令——没下令就不该自己动");
+
+                float2 sporeStart = snap.Position[allyIndex[0]];
+                float2 myceliumStart = snap.Position[allyIndex[1]];
+                float allyRadiusStart = snap.Radius[allyIndex[0]];
+                float allyHealthStart = snap.Health[allyIndex[0]];
+
+                for (int i = 0; i < 120; i++)
+                {
+                    flow.Sim.OnUpdate(1f / 60f);
+                }
+                SimSnapshot afterIdle = flow.Sim.Snapshot;
+                float sporeDrift = math.distance(PosOfId(afterIdle, allies[0]), sporeStart);
+                float myceliumDrift = math.distance(PosOfId(afterIdle, allies[1]), myceliumStart);
+                Expect(sporeDrift < 2f && myceliumDrift < 2f,
+                    $"没下令的友军不该自己漫游（孢子漂移 {sporeDrift:F2}，菌丝体 {myceliumDrift:F2}）");
+                Expect(math.abs(sporeDrift - myceliumDrift) < 2f,
+                    $"两名友军的移动表现应一致，差异只应来自装配（{sporeDrift:F2} vs {myceliumDrift:F2}）");
+
+                // ── B. 接管友军期间，玩家属性不得写到它身上 ──
+                Expect(flow.Sim.RequestControlSwitch(allies[0]) == ControlRequestResult.Success,
+                    "应能接管第一名友军");
+                for (int i = 0; i < 30; i++)
+                {
+                    flow.PlayerController.OnUpdate(1f / 60f);
+                    flow.Sim.OnUpdate(1f / 60f);
+                }
+                SimSnapshot afterDrive = flow.Sim.Snapshot;
+                float radiusNow = RadiusOfId(afterDrive, allies[0]);
+                float healthNow = HealthOfId(afterDrive, allies[0]);
+                Expect(math.abs(radiusNow - allyRadiusStart) < 0.01f,
+                    $"接管期间玩家体积不得盖到友军半径上（{allyRadiusStart:F2} → {radiusNow:F2}）");
+                Expect(math.abs(healthNow - allyHealthStart) < 0.01f,
+                    $"接管期间玩家血量不得盖到友军血量上（{allyHealthStart:F1} → {healthNow:F1}）");
+
+                // ── C. 接管候选是全场友军，且按稳定 id 循环 ──
+                // 在远处再放一名友军：旧的 18 米信号范围会让它根本不出现在候选里。
+                const int FarAllyLogicId = 9414;
+                flow.Sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(35f, 35f), Health = 100f, Radius = 0.8f, MaxSpeed = 8f,
+                    ArchetypeId = CellStageFlow.ControlAllyArchetypeId,
+                    Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = FarAllyLogicId,
+                });
+                flow.Sim.OnUpdate(1f / 60f);
+                SimEntityId farAlly = FindEntityId(flow.Sim.Snapshot, FarAllyLogicId, out _);
+                Expect(farAlly.IsValid, "远处友军应已落地");
+
+                SimControlCandidate[] candidates = flow.Sim.GetControlCandidates();
+                bool farAllyListed = false;
+                for (int i = 0; i < candidates.Length; i++)
+                {
+                    farAllyListed |= candidates[i].EntityId == farAlly;
+                }
+                Expect(farAllyListed,
+                    $"远处友军（约 49 米外）仍应在接管候选里——信号范围已放开成全场" +
+                    $"（当前 {flow.Sim.ControlSignalRange:F0}，候选 {candidates.Length} 个）");
+
+                // 连按 Tab 应该走遍全部可控身体再回到起点，而不是在最近的两具之间跳。
+                // 每次切换之间推够冷却：接管冷却是真实约束（被它拒绝时 HUD 会显示"接管冷却中"），
+                // 不推时间的话这里测到的是冷却而不是"能不能循环遍全部身体"。
+                var visited = new HashSet<ulong>();
+                for (int i = 0; i < 6; i++)
+                {
+                    flow.PlayerController.RequestNextControlCandidate();
+                    visited.Add(flow.Sim.ControlledUnitId.Value);
+                    for (int f = 0; f < 20; f++)
+                    {
+                        flow.Sim.OnUpdate(1f / 60f);
+                    }
+                }
+                Expect(visited.Count >= 4,
+                    $"连续切换应覆盖全部可控身体（本体 + 两名友军 + 远处那名，实际走到 {visited.Count} 具）");
+            }
+            finally
+            {
+                if (flow.IsRunning)
+                {
+                    flow.Exit();
+                }
+                GameObject cameraAfter = Camera.main != null ? Camera.main.gameObject : null;
+                if (cameraAfter != null && cameraAfter != cameraBefore)
+                {
+                    UnityEngine.Object.DestroyImmediate(cameraAfter);
+                }
+            }
+        }
+
+        private static float2 PosOfId(in SimSnapshot snap, SimEntityId id)
+        {
+            for (int i = 0; i < snap.Count; i++)
+            {
+                if (snap.EntityId[i] == id) { return snap.Position[i]; }
+            }
+            return float2.zero;
+        }
+
+        private static float RadiusOfId(in SimSnapshot snap, SimEntityId id)
+        {
+            for (int i = 0; i < snap.Count; i++)
+            {
+                if (snap.EntityId[i] == id) { return snap.Radius[i]; }
+            }
+            return -1f;
+        }
+
+        private static float HealthOfId(in SimSnapshot snap, SimEntityId id)
+        {
+            for (int i = 0; i < snap.Count; i++)
+            {
+                if (snap.EntityId[i] == id) { return snap.Health[i]; }
+            }
+            return -1f;
         }
 
         // ── 首领三阶段 ──────────────────────────────────────

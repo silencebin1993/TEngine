@@ -294,8 +294,11 @@ namespace GameLogic.UI.Battle
             }
 
             string body = cell.Sim.ControllingPlayerBody ? "玩家本体" : "友军（已接管）";
-            GUILayout.Label($"当前受控：{body}　可接管候选：{player.LastControlCandidateCount} 个" +
-                            $"（仅统计 {cell.Sim.ControlSignalRange:F0} 米内的存活友军）", _hint);
+            // 信号范围 2026-09-14 暂时放开成全场，就别再显示那个米数了（会写成"1000000 米内"）。
+            string scope = cell.Sim.ControlSignalRange > 9999f
+                ? "全场友军循环"
+                : $"{cell.Sim.ControlSignalRange:F0} 米内";
+            GUILayout.Label($"当前受控：{body}　可接管候选：{player.LastControlCandidateCount} 个（{scope}）", _hint);
 
             if (player.LastControlSwitchResult != BinGames.Sim.ControlRequestResult.Success)
             {

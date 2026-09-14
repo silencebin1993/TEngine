@@ -593,6 +593,81 @@ namespace GameLogic.Stage.CellStage
                 VisualId = Control.ArchetypeLoadoutTable.MyceliumArchetypeId,
             });
             _unitLoadouts?.RegisterArchetypePending(myceliumLogicId, Control.ArchetypeLoadoutTable.MyceliumArchetypeId);
+
+            // 2026-09-14 试玩反馈：「存在友方一直移动的角色，我并未下令他自己移动干嘛」。
+            // 友军出生是 IntentSource.AI，原型 13 的 MinionSeekAttack 在索敌半径(8)内找不到
+            // Hostile 时会走 `Wander(i, Time) * arc.WanderStrength`（JobSteering.cs:186-188），
+            // wander 强度 0.5 —— 于是它**半速随机漫游**。这同时解释了"一直自己动"和"看着很慢"
+            // （半速 + 方向乱晃，观感比直控慢得多，但 MaxSpeed 其实一样）。
+            // M2-06 固定靶在 (11,-2)，离两名友军都超过 8，所以它们永远进不了索敌、只会一直晃。
+            //
+            // 口径统一成：**友军没收到命令就待在原地**（和放手后的原地守备同一条规矩）。
+            // 守备不接管战斗，进入 AggroRange 的敌人照打。
+            _pendingAllyHolds.Add(sporeLogicId);
+            _pendingAllyHolds.Add(myceliumLogicId);
+            _pendingAllyHoldFrames = 0;
+        }
+
+        /// <summary>
+        /// 回归测试直调入口：Edit 模式跑不了完整 <see cref="Update"/>（相机/UI/Destroy 语义都不成立），
+        /// 但"出生即原地待命"必须有断言守着——它是玩家两轮都报到的问题。
+        /// 返回还没解析到实体 id 的友军条数。
+        /// </summary>
+        public int DebugResolveAllyHolds()
+        {
+            ResolvePendingAllyHolds();
+            return _pendingAllyHolds.Count;
+        }
+
+        /// <summary>出生即原地待命的待解析友军 LogicId。Spawn 只是入队，实体 id 要下一次 Step 才存在。</summary>
+        private readonly List<int> _pendingAllyHolds = new List<int>(2);
+        private int _pendingAllyHoldFrames;
+        private readonly SimEntityId[] _allyHoldTarget = new SimEntityId[1];
+
+        /// <summary>出生即待命的解析上限帧数。同 <c>UnitLoadoutRegistry.MaxResolveAttempts</c> 的理由：
+        /// 出生即死的项不该被无限扫下去。</summary>
+        private const int MaxAllyHoldResolveFrames = 120;
+
+        /// <summary>
+        /// 把"出生即原地待命"落到刚解析出实体 id 的友军身上。
+        /// 只在待解析表非空时扫一遍快照（正常只有开局那几帧、最多 2 条），
+        /// 稳态代价是一次 Count == 0 判断——与 <c>UnitLoadoutRegistry.ResolvePending</c> 同一约定。
+        /// </summary>
+        private void ResolvePendingAllyHolds()
+        {
+            if (_pendingAllyHolds.Count == 0 || _sim == null || !_sim.Running)
+            {
+                return;
+            }
+            if (++_pendingAllyHoldFrames > MaxAllyHoldResolveFrames)
+            {
+                _pendingAllyHolds.Clear();
+                return;
+            }
+
+            BinGames.Sim.SimSnapshot snapshot = _sim.Snapshot;
+            for (int i = 0; i < snapshot.Count && _pendingAllyHolds.Count > 0; i++)
+            {
+                if (!snapshot.IsAlive(i))
+                {
+                    continue;
+                }
+                int slot = _pendingAllyHolds.IndexOf(snapshot.LogicId[i]);
+                if (slot < 0)
+                {
+                    continue;
+                }
+
+                _allyHoldTarget[0] = snapshot.EntityId[i];
+                _sim.IssueCommand(_allyHoldTarget, new UnitCommand
+                {
+                    Kind = UnitCommandKind.Guard,
+                    TargetPosition = snapshot.Position[i],
+                    TargetEntity = SimEntityId.None,
+                    ArriveRadius = Control.AiHandoffSystem.BufferArriveRadius,
+                });
+                _pendingAllyHolds.RemoveAt(slot);
+            }
         }
 
         /// <summary>
@@ -1223,6 +1298,7 @@ namespace GameLogic.Stage.CellStage
             InputRouter.SetGameplayPaused(_paused, _strategicPause);
             _cameraDirector?.Tick(_paused);
             ReturnControlOnStrategyView();
+            ResolvePendingAllyHolds();
             // M2-02：选择与命令同样要在暂停早退之前——"暂停下令后恢复顺序稳定"是它的验收项，
             // 而下令这件事本身必须在冻结期间还能发生。
             _squadCommands?.Tick(_paused);
