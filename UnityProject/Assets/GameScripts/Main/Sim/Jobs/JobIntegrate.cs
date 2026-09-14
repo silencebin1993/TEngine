@@ -41,6 +41,14 @@ namespace BinGames.Sim
         /// 保证任何身体在玩家手里的跟手程度一致。见 <see cref="Execute"/> 里的说明。</summary>
         public const float PlayerControlMinAccel = 8f;
 
+        /// <summary>
+        /// 行为原型没填加速度（<c>Accel &lt;= 0</c>）时的默认值。
+        /// **0 的含义是"这一格没填"，不是"极慢"**——固着类原型靠 <c>BehaviorKind.Stationary</c>
+        /// 让 AI 不产生移动意图，从来不靠把加速度写成 0；一旦它收到命令或被接管，
+        /// 0 就会变成每帧万分之 1.7 的蠕动。与 <see cref="PlayerControlMinAccel"/> 同值。
+        /// </summary>
+        public const float DefaultAccel = 8f;
+
         public void Execute(int i)
         {
             if (i >= Count || Alive[i] == 0)
@@ -76,17 +84,25 @@ namespace BinGames.Sim
 
             // 指数平滑趋近目标速度，Accel 越大越跟手。
             //
-            // 2026-09-14：**玩家直控的单位不吃行为原型的加速度**，取一个统一下限。
-            // 行为原型描述的是"这个 AI 怎么动"，不该决定"玩家开它跟不跟手"——
-            // 玩家接管一个 Accel=0 的固着原型时，夹到 0.01 的平滑系数让它每帧只逼近目标速度的
-            // 万分之 1.7，按住方向两秒多才爬到 0.097 u/s（实测值），读起来就是"这个角色移速巨慢"。
-            // 下限取 8，与玩家本体用的 BehaviorArchetype.Default.Accel 同值，
-            // 于是"任何身体在玩家手里的手感一致"——单位差异只应来自装配的器官。
-            // 用 Intents[i].Source 而不是另传一份 IntentSource 数组：这个 job 本来就读 Intents，
-            // 多一个输入就多一处要在 SimWorld 里接线、也多一处会漏接的地方。
-            float accel = Intents[i].Source == BinGames.Sim.IntentSource.Player
-                ? math.max(arc.Accel, PlayerControlMinAccel)
-                : arc.Accel;
+            // 2026-09-14（第二次改，这次修根）：**`Accel <= 0` 一律当"没填"，落到默认值**。
+            //
+            // 原来那句 `math.max(0.01f, accel)` 本意只是防除零，实际效果是把"没填"悄悄变成
+            // "极慢"：0 → 0.01 → 每帧只逼近目标速度的万分之 1.7，按住方向两秒多才爬到
+            // 0.097 u/s（实测）。玩家读到的是"这个角色移速巨慢"，而表里那一格根本是空的。
+            //
+            // 上一版只给**玩家直控**路径加了下限，于是同一个单位在 RTS 命令下照旧蠕动——
+            // 玩家当场又报了一次「战术视角下这个角色还是速度不对（直控是对的）」。
+            // 按路径打补丁是错的：移动意图可以来自玩家、命令、AI 三处，补一处漏两处。
+            // 判据只留一条：**这个原型有没有填加速度**。
+            //
+            // 不去抬高"填了但很小"的原型（Drift 3.0 的飘忽感是故意的），只接管 0 这一种。
+            float accel = arc.Accel > 0f ? arc.Accel : DefaultAccel;
+            // 玩家直控再额外保证跟手：行为原型描述的是"这个 AI 怎么动"，
+            // 不该决定"玩家开它跟不跟手"——单位差异只应来自装配的器官。
+            if (Intents[i].Source == BinGames.Sim.IntentSource.Player)
+            {
+                accel = math.max(accel, PlayerControlMinAccel);
+            }
             float k = 1f - math.exp(-math.max(0.01f, accel) * Dt);
             vel = math.lerp(vel, desired, k);
 

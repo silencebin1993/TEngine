@@ -1642,6 +1642,39 @@ namespace GameLogic.EditorTools
                 Expect(drivenSpeed > 3f,
                     $"玩家直控 0.75 秒后应当接近全速，而不是被原型的低加速度拖住（实测 {drivenSpeed:F2} u/s）");
 
+                // ── F2. RTS 命令下同样不能蠕动 ──
+                // 上一版只给玩家直控路径加了加速度下限，于是同一个单位在 RTS 命令下照旧蠕动，
+                // 玩家当场又报一次「战术视角下这个角色还是速度不对（直控是对的）」。
+                // 移动意图来自玩家/命令/AI 三处，按路径打补丁必然补一处漏两处；
+                // 现在判据只有一条：原型的 Accel<=0 一律当"没填"，落默认值。
+                // 这里直接用一个 Accel=0 的原型（15 菌丝体固着）下 Move 命令验证。
+                const int CrawlLogicId = 9416;
+                flow.Sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(-20f, -20f), Health = 50f, Radius = 0.5f, MaxSpeed = 8f,
+                    ArchetypeId = ArchetypeLoadoutTable.MyceliumArchetypeId,
+                    Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = CrawlLogicId,
+                });
+                flow.Sim.OnUpdate(1f / 60f);
+                SimEntityId crawler = FindEntityId(flow.Sim.Snapshot, CrawlLogicId, out _);
+                Expect(crawler.IsValid, "验证蠕动用的单位应已落地");
+                flow.Sim.IssueCommand(new[] { crawler }, new UnitCommand
+                {
+                    Kind = UnitCommandKind.Move,
+                    TargetPosition = new float2(20f, -20f),
+                    TargetEntity = SimEntityId.None,
+                    ArriveRadius = 1f,
+                });
+                for (int i = 0; i < 45; i++)
+                {
+                    flow.Sim.OnUpdate(1f / 60f);
+                }
+                float commandedSpeed = math.length(VelOfId(flow.Sim.Snapshot, crawler));
+                Expect(commandedSpeed > 3f,
+                    $"Accel 没填（0）的原型收到 RTS 命令后也应正常加速，而不是每帧蠕动" +
+                    $"（实测 {commandedSpeed:F2} u/s）");
+
                 // ── G. 放下意识后所有身体都没了 → 才是真正的"意识无处可去" ──
                 flow.DebugParkControlForStrategy();
                 SimSnapshot before = flow.Sim.Snapshot;
