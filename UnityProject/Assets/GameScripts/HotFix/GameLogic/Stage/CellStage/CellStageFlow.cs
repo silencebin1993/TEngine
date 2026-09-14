@@ -538,6 +538,15 @@ namespace GameLogic.Stage.CellStage
         /// M1 固定房间的两名真实友军。复用现有孢子/菌丝体召唤原型，未受控时继续执行
         /// PlayerMinion AI；与默认本体合计三名可控单位，出生点均在临时信号范围内。
         /// </summary>
+        /// <summary>
+        /// 可控友军共用的移动原型（2026-09-13 试玩反馈）。取 13「孢子仆从索敌」：accel 8，
+        /// 与玩家本体的 <c>BehaviorArchetype.Default</c> 同值，所以三具可控身体的移动手感一致。
+        ///
+        /// **不去改内容表里 15 号原型的 accel**：那一行是给真·菌丝召唤物用的，
+        /// 「固着」正是它的设计意图，为试玩需要去动共享内容会顺带改掉正常召唤物的行为。
+        /// </summary>
+        public const int ControlAllyArchetypeId = Control.ArchetypeLoadoutTable.SporeArchetypeId;
+
         private void SpawnControlAllies()
         {
             float health = _stats.Get(StatId.MaxHealth);
@@ -552,7 +561,8 @@ namespace GameLogic.Stage.CellStage
                 Health = health,
                 Radius = 0.8f,
                 MaxSpeed = speed,
-                ArchetypeId = Control.ArchetypeLoadoutTable.SporeArchetypeId,
+                // 与菌丝体那一具共用同一个移动原型，见 <see cref="ControlAllyArchetypeId"/>。
+                ArchetypeId = ControlAllyArchetypeId,
                 Faction = SimFaction.PlayerMinion,
                 IntentSource = IntentSource.AI,
                 LogicId = sporeLogicId,
@@ -567,7 +577,16 @@ namespace GameLogic.Stage.CellStage
                 Health = health,
                 Radius = 0.8f,
                 MaxSpeed = speed,
-                ArchetypeId = Control.ArchetypeLoadoutTable.MyceliumArchetypeId,
+                // 2026-09-13 试玩反馈：**行为原型只管"怎么动"，不该顺带决定这具身体是谁**。
+                // 菌丝体的原型 15「菌丝体固着」是 Stationary + accel 0（内容表里给真·菌丝召唤物用的，
+                // 它本来就该是钉在地上的锚），而 JobIntegrate 会把 accel 夹到 0.01 —— 于是接管它时
+                // 推方向几乎不产生速度，就是玩家报的「移动奇慢无比」。
+                //
+                // 可控友军之间的差异按产品口径**只应来自装配的器官**（GDD §6.5/6.6），移动是共有能力
+                // （M2-03a 已经立过同一条规矩：Move 不由器官提供）。所以这里两名友军统一用同一个
+                // 会动的原型，**只有 VisualId 与装配登记保持各自不同**：外形用来分辨谁是谁，
+                // 器官决定能打出什么，移动不再是区分项。
+                ArchetypeId = ControlAllyArchetypeId,
                 Faction = SimFaction.PlayerMinion,
                 IntentSource = IntentSource.AI,
                 LogicId = myceliumLogicId,
