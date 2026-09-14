@@ -483,6 +483,27 @@ namespace BinGames.Sim
                 anchor = _position[previousIndex];
             }
 
+            // 2026-09-14（产品决策反转，bin 拍板）：**接管即取消这具身体上的战术命令**。
+            //
+            // M2-04a 原本刻意保留命令（"离开后单位仍能可靠完成明确命令"，GDD §7.3），靠的是
+            // JobCommandIntent 不处理非 Commanded 槽位、交还时 IntentSource 一恢复命令就复活。
+            // 实测下来这条在玩家手里读不通：你亲手把它开到别处，松手后它却溜回去走一条旧路线。
+            // 玩家的原话是「直控就不要再执行战术命令了」。
+            //
+            // 清除必须放在**这里**——所有接管路径（主动切换 / Restore / 死亡回弹）都收口于本方法，
+            // 而且必须在 IntentSource 变成 Player **之前**：之后再调 ClearCommand 会被内核
+            // "绝不夺走玩家直控实体"的保护正确地拒掉（M2-04a 的注释里记过这条）。
+            //
+            // 恢复成 Commanded 的那一半语义仍然成立：交还时若身上有命令（玩家在战略视角新下的）
+            // 照常复活，只是"被接管前那条"不再跨接管存活。
+            _unitCommands[targetIndex] = UnitCommand.None;
+            if (_intentSource[targetIndex] == (byte)IntentSource.Commanded)
+            {
+                // 命令没了就不该再记着"它本来是 Commanded"——否则交还时会落回一个没有命令的
+                // Commanded 状态，JobCommandIntent 当场把它 ReleaseToAi，多绕一帧。
+                _intentSource[targetIndex] = (byte)IntentSource.AI;
+            }
+
             _intentSourceBeforePlayer[targetIndex] = _intentSource[targetIndex] == (byte)IntentSource.Player
                 ? (byte)IntentSource.AI
                 : _intentSource[targetIndex];

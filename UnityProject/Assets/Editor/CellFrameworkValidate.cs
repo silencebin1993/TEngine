@@ -3782,28 +3782,41 @@ namespace GameLogic.EditorTools
 
                 Expect(sim.RequestControlSwitch(courier) == ControlRequestResult.Success,
                     "应能在它撤退途中接管它");
-                Expect(sim.TryGetCommand(courier, out UnitCommand frozen) &&
-                       frozen.Kind == UnitCommandKind.Retreat &&
-                       SourceOf(courier) == IntentSource.Player,
-                    "直控期间原命令应原样留在内核里（被冻结而不是被清掉）");
-                // 玩家开着它往反方向乱走一段，证明后面的"继续撤退"不是惯性使然。
+                // 2026-09-14 产品决策反转（bin 拍板）：**接管即取消这具身体上的战术命令**。
+                // 原语义是"命令跨接管存活、交还即复活"（M2-04a 按 GDD §7.3 做的）。实测读不通：
+                // 玩家亲手把它开到别处，松手后它却溜回去走一条旧路线——bin 的原话是
+                // 「直控就不要再执行战术命令了」。清除点在内核 SwitchControlledUnitInternal，
+                // 且必须在 IntentSource 变成 Player 之前（之后 ClearCommand 会被"绝不夺走玩家
+                // 直控实体"的保护正确拒掉）。
+                Expect(!sim.TryGetCommand(courier, out _) && SourceOf(courier) == IntentSource.Player,
+                    "接管的那一刻就该把原命令清掉，而不是冻结着等交还时复活");
+                // 玩家开着它往反方向走一段，交还后它应当停在这里，而不是回去接着撤退。
                 Step(25, new float2(-1f, 1f));
 
                 float distRetreatBefore = math.distance(PosOf(courier), retreatPoint);
+                float2 handoffPos = PosOf(courier);
                 Expect(sim.RequestControlSwitch(body) == ControlRequestResult.Success, "应能退出直控切回本体");
-                Expect(handoff.LastContinuation == HandoffContinuation.ResumeCommand,
-                    $"带命令的单位交还后应直接复活原命令、不进缓冲（实际 {handoff.LastContinuation}）");
-                Expect(!handoff.IsInHandoffBuffer(courier),
-                    "带命令的交还不得进缓冲——缓冲命令会把玩家的明确命令覆盖掉");
-                Expect(sim.TryGetCommand(courier, out UnitCommand resumed) &&
-                       resumed.Kind == UnitCommandKind.Retreat &&
-                       SourceOf(courier) == IntentSource.Commanded,
-                    "交还后命令应自动复活，意图来源回到 Commanded");
+                Expect(handoff.LastContinuation != HandoffContinuation.ResumeCommand,
+                    $"命令已在接管时清掉，交还不该再走'延续命令'分支（实际 {handoff.LastContinuation}）");
 
+                handoff.DebugAdvanceClock(AiHandoffSystem.HandoffBufferSeconds);
                 Step(60);
                 float distRetreatAfter = math.distance(PosOf(courier), retreatPoint);
-                Expect(distRetreatAfter < distRetreatBefore - 1f,
-                    $"交还后它应真的继续执行撤退命令而不是掉头（离撤退点 {distRetreatBefore:F2} → {distRetreatAfter:F2}）");
+                Expect(distRetreatAfter > distRetreatBefore - 1f,
+                    $"交还后不得自己回去执行那条被取消的撤退命令" +
+                    $"（离撤退点 {distRetreatBefore:F2} → {distRetreatAfter:F2}，不该变近）");
+                Expect(math.distance(PosOf(courier), handoffPos) < 8f,
+                    $"松手后它应当留在玩家放下它的地方附近（漂移 {math.distance(PosOf(courier), handoffPos):F2}）");
+
+                // 没被推翻的那一半：**在战略视角新下的命令照常执行**。变的只是"接管前那条不跨接管存活"。
+                squad.ClearSelection();
+                squad.SelectExplicit(new[] { courier });
+                Expect(squad.Issue(UnitCommandKind.Move, retreatPoint, SimEntityId.None, paused: false) == 1,
+                    "交还之后重新下令应照常被接受");
+                float distNewCmdBefore = math.distance(PosOf(courier), retreatPoint);
+                Step(60);
+                Expect(math.distance(PosOf(courier), retreatPoint) < distNewCmdBefore - 1f,
+                    "新下的命令必须真的执行——被取消的只是接管前那一条");
 
                 Expect(squad.GroupMembers(3).Count == 1 && squad.GroupMembers(3)[0] == courier,
                     "接管 + 退出全程不得改变编队归属");
