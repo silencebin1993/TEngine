@@ -518,7 +518,15 @@ namespace GameLogic.Stage.CellStage
             }
 
             // 轻障碍（story-009）：数据驱动随机布局，白模一次性生成。
-            ObstacleSpec[] obstacles = ObstacleGenerator.Generate(cfg.ArenaHalfExtent);
+            //
+            // 2026-09-14：**M2-06 固定试玩不生成障碍**。布局是随机的，偶尔会压在固定靶
+            // (11,-2) 身上，JobIntegrate 把它推出障碍边界——实测偏成 (10.97,-2.04)，
+            // 自检里"固定目标坐标应稳定"那条因此会偶发失败（按构造就会，不是谁改坏的）。
+            // 更要紧的是它会挡住 RTS 下令与手术路线，让每次试玩的场景都不一样；
+            // 而这个场景存在的意义就是把变量控死。
+            ObstacleSpec[] obstacles = _entryMode == CellStageEntryMode.ConsciousnessPlaytest
+                ? System.Array.Empty<ObstacleSpec>()
+                : ObstacleGenerator.Generate(cfg.ArenaHalfExtent);
             _sim.SetObstacles(obstacles);
             WhiteboxObstacleVisual.Spawn(obstacles);
             _envFluid.Spawn(cfg.ArenaHalfExtent);

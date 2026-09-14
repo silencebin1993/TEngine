@@ -313,7 +313,34 @@ namespace GameLogic.Battle
             {
                 return true;
             }
-            return w.TryRestoreControlledUnit(targetId) == ControlSwitchResult.Success;
+            if (w.TryRestoreControlledUnit(targetId) != ControlSwitchResult.Success)
+            {
+                return false;
+            }
+            RefreshAfterControlChange();
+            return true;
+        }
+
+        /// <summary>
+        /// 控制权在**帧中**变更后，立刻把快照与可用性重新抓一遍（2026-09-14）。
+        ///
+        /// 为什么必须有这一步：控制权是内核实时改的，但 <see cref="TryGetControlledPresentation"/>
+        /// 读的是 <see cref="_snapshot"/>，而快照只在 <see cref="OnUpdate"/> 里 Step 之后刷新。
+        /// 于是同一帧内"已经接管成功"却"读不到受控实体"——实测症状是
+        /// **按 M 回直控要按两次**：第一次接管其实成了，但镜头拿不到锚点被拒，
+        /// 下一帧快照更新后第二次才生效。
+        ///
+        /// <c>GetSnapshot</c> 只是重新取一遍原生数组视图与几个计数，不推进模拟、不分配，
+        /// 所以帧中调用是安全的；事件队列不会因此被清空（清空发生在 Step 里）。
+        /// </summary>
+        private void RefreshAfterControlChange()
+        {
+            if (!_running || _backend == null)
+            {
+                return;
+            }
+            _snapshot = _backend.GetSnapshot();
+            RefreshAvailability(0f);
         }
 
         /// <summary>
@@ -329,6 +356,7 @@ namespace GameLogic.Battle
                 return false;
             }
             _controlReleased = true;
+            RefreshAfterControlChange();
             return true;
         }
 

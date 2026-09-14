@@ -1588,6 +1588,12 @@ namespace GameLogic.EditorTools
                 Expect(flow.CameraDirector.EnsureDirectTarget() &&
                        flow.Sim.ControlledUnitId == parked,
                     "回直控应把意识接管回放下前那一具");
+                // ⚠ 不推帧！这条守的是实测过的「按 M 要按两次」：
+                // 控制权是内核实时改的，但镜头的锚点读的是快照，而快照只在 SimBridge.OnUpdate
+                // 里 Step 之后刷新。接管成功却同帧读不到受控实体 → RequestDirect 当场被拒，
+                // 下一帧才生效。所以帧中改控制权之后必须立刻重抓快照。
+                Expect(flow.Sim.TryGetPresentationAnchor(out _, out bool hasControlledNow) && hasControlledNow,
+                    "接管成功后**同一帧**就该读得到受控实体锚点，否则镜头这一帧会拒绝回直控");
 
                 // ── E. 召唤物不是可接管的身体 ──
                 // bin 实测接管到一个 ArchetypeId=15 / MaxSpeed=4 / Speed=0.097 的菌丝锚炮台。
