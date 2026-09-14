@@ -10,6 +10,7 @@ using GameLogic.Command;
 using GameLogic.Control;
 using GameLogic.Core;
 using GameLogic.MetabolicSlice.Blueprint;
+using GameLogic.MetabolicSlice.Carrier;
 using GameLogic.MetabolicSlice.ContentCatalog;
 using GameLogic.MetabolicSlice.Lineage;
 using GameLogic.Progression;
@@ -82,6 +83,7 @@ namespace GameLogic.EditorTools
                 ValidateCombatTruthSourceUnified();
                 ValidateBlueprintLibrary();
                 ValidateLineagePhenotypeTemplate();
+                ValidateCompiledRecipeCache();
             }
             catch (Exception e)
             {
@@ -1773,6 +1775,72 @@ namespace GameLogic.EditorTools
             // 签名跨进程/跨实例稳定：不依赖 GetHashCode 的进程内加盐随机性。
             string recomputed = PhenotypeTemplateSignature.Compute(organelle.Id, geneIds);
             Expect(recomputed == v1.Signature, "同一函数对同一输入重复计算应得到完全一致的签名字符串");
+        }
+
+        /// <summary>M3-04 验收：100 个同模板单位只编译一次静态组合；改变一个个体的伤势不污染其他单位。
+        /// 用 <see cref="CompiledRecipeCache.BuildCount"/> 埋点直接断言静态相位真实构建次数——
+        /// 不是从"结果看起来一样"反推缓存生效，是直接读命中/未命中计数。</summary>
+        private static void ValidateCompiledRecipeCache()
+        {
+            Line("\n[28] 装配签名编译与缓存（M3-04）");
+
+            OrganelleDef organelle = OrganelleCatalog.All.Values.FirstOrDefault(o => o.AttackMethod && !o.IsRetired);
+            List<string> geneIds = GeneCatalog.AllGeneIds.Take(2).ToList();
+            Expect(organelle != null, "OrganelleCatalog 应至少有一条 AttackMethod 未退役器官用于本项自检");
+            Expect(geneIds.Count == 2, "GeneCatalog 应至少有两条基因用于本项自检");
+            if (organelle == null || geneIds.Count < 2)
+            {
+                return;
+            }
+
+            CompiledRecipeCache.ResetForTest();
+            var engine = new ComposeEngine.Engine();
+            var world = new ComposeEngine.Core.WorldState();
+
+            // 验收 A：100 个"同模板单位"（同 OrganelleId + 同有序 GeneIds，不同 seed/cellId 模拟不同个体）
+            // 只应触发一次静态相位构建。
+            int totalEvents = 0;
+            for (int i = 0; i < 100; i++)
+            {
+                List<ComposeEngine.Core.HitEvent> events = CarrierCompiler.CompileFromRecipe(engine, organelle.Id, geneIds, world, seed: i, cellId: $"unit_{i}");
+                totalEvents += events.Count;
+            }
+            Expect(CompiledRecipeCache.BuildCount == 1,
+                $"100 个同模板单位应只构建 1 次静态编译，实际 BuildCount={CompiledRecipeCache.BuildCount}");
+            Expect(totalEvents == 100, $"100 次调用每次应各自产出 1 条 HitEvent，实际累计 {totalEvents}");
+
+            // 换一套配方（基因顺序反过来）应该是不同签名、独立构建一次——证明缓存按内容区分，
+            // 不是"永远命中同一份"的假缓存。
+            List<string> reversedGenes = new List<string>(geneIds);
+            reversedGenes.Reverse();
+            CarrierCompiler.CompileFromRecipe(engine, organelle.Id, reversedGenes, world, seed: 999, cellId: "unit_reversed");
+            Expect(CompiledRecipeCache.BuildCount == 2,
+                $"基因顺序不同应视为不同配方、独立构建，实际 BuildCount={CompiledRecipeCache.BuildCount}");
+
+            // 验收：实物轨（Compile）与配方轨（CompileFromRecipe）对同一 OrganelleId+有序 GeneIds
+            // 应命中同一份缓存——两条轨共用同一条化学链路，不是各编各的。
+            var reserve = new GeneReserve();
+            var carrier = new CarrierInstance("carrier_cache_check", organelle.Id);
+            for (int i = 0; i < geneIds.Count; i++)
+            {
+                var geneInstance = new GeneInstance($"inst_cache_{i}", geneIds[i], GeneLocation.Reserve());
+                reserve.TryAdd(geneInstance);
+                carrier.Slots[i].GeneInstanceId = geneInstance.GeneInstanceId;
+            }
+            CarrierCompiler.Compile(engine, carrier, reserve, world, seed: 1);
+            Expect(CompiledRecipeCache.BuildCount == 2,
+                $"实物轨对同一配方应命中配方轨已建好的缓存，不应新增构建，实际 BuildCount={CompiledRecipeCache.BuildCount}");
+
+            // 验收 B：改变一个个体的伤势（Strain）不污染其他单位——本次改动只加了内容地址式静态缓存，
+            // 不触碰 UnitVitalsRegistry 的按 SimEntityId 归属，这里守住这条回归线。
+            var vitals = new UnitVitalsRegistry();
+            var entityA = new SimEntityId(1UL);
+            var entityB = new SimEntityId(2UL);
+            vitals.Reset();
+            vitals.AddStrain(entityA, 50f);
+            Expect(Mathf.Approximately(vitals.Get(entityB).Strain, 0f),
+                "个体 A 增加过载债不应污染个体 B 的过载债");
+            Expect(vitals.Get(entityA).Strain > 0f, "个体 A 自身的过载债应确实增加");
         }
 
         /// <summary>
