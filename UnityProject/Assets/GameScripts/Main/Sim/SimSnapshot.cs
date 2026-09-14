@@ -52,6 +52,17 @@ namespace BinGames.Sim
         public int ProjectileEndCount;
 
         /// <summary>
+        /// M2-07：本帧"某具身体到了该开火的时刻"。内核只给时机与目标，**不给打什么**——
+        /// 打什么由那具身体的器官决定，见 <see cref="MinionFireOpportunity"/> 与
+        /// 热更层 <c>Control/MinionOrganCombatDriver</c>。
+        ///
+        /// 只有被热更层标过"这具身体的战斗由器官驱动"（<c>SimWorld.SetOrganCombat</c>）的单位
+        /// 才会出现在这里；没有可释放攻击器官的单位仍走原型数值的老路，不会静默哑火。
+        /// </summary>
+        [ReadOnly] public NativeArray<MinionFireOpportunity> MinionFires;
+        public int MinionFireCount;
+
+        /// <summary>
         /// 本帧玩家受到的伤害总量。
         ///
         /// enemy-ranged-and-parry 起**不只是接触伤害**：敌人弹体命中玩家也累加到这里

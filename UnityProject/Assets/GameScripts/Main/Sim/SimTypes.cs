@@ -794,6 +794,46 @@ namespace BinGames.Sim
     }
 
     /// <summary>
+    /// M2-07：一具**由器官驱动战斗**的友军进入了可开火状态。
+    ///
+    /// ── 这个事件存在的理由 ──
+    /// 在它之前，同一具身体有两套战斗真相源：玩家直控时走器官（<c>OrganKernelActionTable</c>
+    /// → 真弹体 / 扇形 / 区域），交给 AI 时走 <see cref="BehaviorArchetype.AttackDamage"/>
+    /// 的**瞬时扣血**。于是"我刚才用这具身体打出来的东西"和"它自己打出来的东西"根本不是一回事，
+    /// 接管的意义被这条分叉直接吃掉。
+    ///
+    /// 统一的方式**不是**把器官下沉到内核（内核刻意不认识器官，那是 M3-04 的活），
+    /// 而是分清两件事各归谁：
+    /// <list type="bullet">
+    /// <item><b>什么时候、朝谁开</b>——内核的活。只有它有空间哈希、射程和阵营。</item>
+    /// <item><b>打出什么</b>——那具身体的器官说了算，归热更层。</item>
+    /// </list>
+    /// 所以内核把前半段的结论作为本事件抛出，热更层 <c>MinionOrganCombatDriver</c> 接住，
+    /// 调用**与玩家直控逐字相同的那个释放函数**（<c>OrganReleaseRunner.Release</c>）。
+    /// 弹体最终仍由内核生成（<c>SimWorld.SpawnProjectile</c>），"弹道唯一真相在内核"不变。
+    ///
+    /// 本事件**不带任何伤害/速度/半径数值**——带了就等于内核又有了一份攻击参数，
+    /// 分叉会从这里原地长回来。
+    /// </summary>
+    public struct MinionFireOpportunity
+    {
+        /// <summary>开火者的稳定身份。热更层据此查装配，不得用索引跨帧。</summary>
+        public SimEntityId EntityId;
+        /// <summary>开火者的瞬时槽位（同帧有效）。供热更层 O(1) 取位置/半径，免去再扫一遍快照。</summary>
+        public int UnitIndex;
+        /// <summary>朝向目标的单位方向。已归一化；内核算完顺手给出，热更层不再自己算一遍。</summary>
+        public float2 AimDirection;
+        /// <summary>目标当前位置。区域类器官要用它决定落点。</summary>
+        public float2 TargetPosition;
+        /// <summary>
+        /// 命令锁定的身体接点；<see cref="SimBodyPartSlot.None"/> 表示不是锁定射击。
+        /// 语义与 <c>ResolveMinionCombat</c> 原先透传给 <see cref="DamageRequest.TargetPart"/> 的完全一致：
+        /// 只有真正打在命令指定实体身上时才有值。
+        /// </summary>
+        public SimBodyPartSlot TargetPart;
+    }
+
+    /// <summary>
     /// 行为原型参数。全部来自 Luban 配置，内核只消费。
     /// </summary>
     public struct BehaviorArchetype

@@ -168,6 +168,13 @@ namespace BinGames.Sim
                 }
             }
 
+            // M2-07：这一帧的起点要留着——命中判定是对**整条位移线段**做的，不是对终点那一个点。
+            // 只判终点会漏掉两类真实命中：
+            //   * 贴脸射击：出膛点已经在目标的命中圈内，但第一次判定发生在位移之后，
+            //     那时弹体已经飞出圈外——判定窗口整帧被跳过，弹体直接穿过去；
+            //   * 高速弹打小目标：一帧位移大于目标直径时同理（经典的隧穿）。
+            // 这两类在"AI 只做瞬时扣血"的年代都不会暴露，因为那条路根本没有几何。
+            float2 sweepFrom = s.Position;
             s.Position += s.Velocity * Dt;
 
             // ④ 出界：BounceWalls 时镜面反射并消耗一次反弹，否则消失。
@@ -250,7 +257,7 @@ namespace BinGames.Sim
             }
             if ((s.Flags & SimProjectileFlags.Lob) == 0 && s.HitCooldown <= 0f)
             {
-                ScanUnits(ref s);
+                ScanUnits(ref s, sweepFrom);
             }
 
             if (s.Alive == 0)
@@ -341,10 +348,30 @@ namespace BinGames.Sim
         }
 
         /// <summary>邻域内的单位命中判定。命中即产出 DamageRequest（AreaRadius&gt;0 时是溅射圆，否则单体）。</summary>
-        private void ScanUnits(ref ProjectileState s)
+        /// <summary>
+        /// 点到线段的距离平方。线段退化成一点时自然落回点到点距离，不需要特判。
+        /// </summary>
+        private static float DistanceSqToSegment(float2 point, float2 a, float2 b)
         {
+            float2 ab = b - a;
+            float lenSq = math.lengthsq(ab);
+            if (lenSq < 1e-8f)
+            {
+                return math.distancesq(point, a);
+            }
+
+            float t = math.saturate(math.dot(point - a, ab) / lenSq);
+            return math.distancesq(point, a + ab * t);
+        }
+
+        /// <param name="sweepFrom">这一帧位移的起点。判定对 [sweepFrom, s.Position] 整条线段做。</param>
+        private void ScanUnits(ref ProjectileState s, float2 sweepFrom)
+        {
+            // 邻域要覆盖整条线段，不只是终点所在的格：否则一帧跨格的弹体会在中途"消失"，
+            // 扫掠判定形同虚设。步长通常远小于格宽，稳态下 ring 与原先一样。
+            float sweepLength = math.distance(sweepFrom, s.Position);
             int2 c = SpatialHash.ToCell(s.Position, InvCellSize);
-            int ring = SpatialHash.RingFor(s.Radius + 1.5f, InvCellSize);
+            int ring = SpatialHash.RingFor(s.Radius + 1.5f + sweepLength, InvCellSize);
 
             for (int dy = -ring; dy <= ring && s.PierceLeft > 0; dy++)
             {
@@ -385,7 +412,7 @@ namespace BinGames.Sim
                                 continue;
                             }
                         }
-                        else if (math.distancesq(Position[j], s.Position) > reach * reach)
+                        else if (DistanceSqToSegment(Position[j], sweepFrom, s.Position) > reach * reach)
                         {
                             continue;
                         }

@@ -48,6 +48,15 @@ namespace GameLogic.Control
         private readonly OverloadSuppressionMirror _overloadMirror = new OverloadSuppressionMirror();
 
         /// <summary>
+        /// M2-07：这具身体交给 AI 之后，用**同一套器官**开火的那条路。
+        ///
+        /// 放在这里而不是另起一个系统，是因为它需要的四样东西（内核桥、装配表、体征账本、状态系统）
+        /// 恰好全在本类手上，而其中 <see cref="_vitals"/> **必须是同一个实例**——
+        /// 冷却与过载债分成两本，就等于"被开"和"自己打"各攒各的，本段要合的分叉会原地长回来。
+        /// </summary>
+        private readonly MinionOrganCombatDriver _minionCombat = new MinionOrganCombatDriver();
+
+        /// <summary>
         /// 玩家本体上 <see cref="LoadoutAction.Primary"/> / <see cref="LoadoutAction.Utility"/>
         /// 委托到的技能槽下标。
         ///
@@ -59,12 +68,6 @@ namespace GameLogic.Control
         /// </summary>
         private const int PlayerPrimaryAbilitySlot = 1;
         private const int PlayerUtilityAbilitySlot = 2;
-
-        /// <summary>弹体出膛点相对释放者体表再外推一点，避免刚生成就撞到自己。</summary>
-        private const float MuzzleClearance = 0.2f;
-
-        /// <summary>区域类动作钉在瞄准方向上多远（按区域半径成比例，不写死世界距离）。</summary>
-        private const float ZoneThrowDistanceMul = 1.5f;
 
         public DirectActionSet ActionSet => _set;
 
@@ -133,7 +136,14 @@ namespace GameLogic.Control
         public void Tick(float dt, bool paused)
         {
             _vitals.Advance(dt, paused);
+            // M2-07：AI 控制下的友军用自己的器官开火。必须在 Advance **之后**——
+            // 冷却是惰性补齐的，先推时钟再判闸门，否则每一发都会拿上一帧的时钟去问"好了没"，
+            // 稳定地慢半拍。开销 O(本帧开火机会数)，与敌人数无关。
+            _minionCombat.Tick(paused);
         }
+
+        /// <summary>M2-07：AI 侧器官开火的诊断入口（试玩面板与验收读）。</summary>
+        public MinionOrganCombatDriver MinionCombat => _minionCombat;
 
         /// <summary>
         /// 绑定。<paramref name="abilities"/> / <paramref name="status"/> 可为 null：
@@ -155,6 +165,7 @@ namespace GameLogic.Control
             _overloadMirror.Unbind();
             _vitals.Reset();
             _overloadMirror.Bind(sim, _vitals);
+            _minionCombat.Bind(sim, loadouts, _vitals, status);
             RebuildCount = 0;
             ReleaseCount = 0;
             LastReleasedOrganId = null;
@@ -181,6 +192,7 @@ namespace GameLogic.Control
             _set.Clear();
             // 镜像先于账本收尾：它要用账本里那份"谁还被压着"去放掉内核的位。
             _overloadMirror.Unbind();
+            _minionCombat.Unbind();
             _vitals.Reset();
         }
 
@@ -341,70 +353,24 @@ namespace GameLogic.Control
         /// <summary>
         /// 非玩家友军：按那件器官自己的参数一次性向内核下请求。
         ///
-        /// 四条分支全部走 <see cref="SimBridge"/> 上的既有入口，本段**没有给内核加任何能力**；
-        /// 每次释放只发一次调用，逐单位的事全归 AOT 作业，热更层这里一个循环都没有。
+        /// M2-07 起真正的释放动作在 <see cref="OrganReleaseRunner"/>，**这具身体交给 AI 之后
+        /// 走的是同一个函数**——那正是"同一具身体，谁开都打出同样的东西"的兑现点。
+        /// 本方法只剩下"把受控视图拆成参数 + 记一次诊断"。
         /// </summary>
         private bool ReleaseOnKernel(in SimControlledUnitView view, in OrganKernelAction act, float2 aim)
         {
-            if (!act.IsValid)
+            // surgicalAim: true 是直控特有的——手术窗口（M2-05）本来就是"人手瞄准接点"的产物。
+            // AI 那条路按内核给的锁定接点来，不共用这个开关。
+            bool released = OrganReleaseRunner.Release(
+                _sim, _status, view.UnitIndex, view.Position, view.Radius,
+                act, aim, SimFaction.Hostile, surgicalAim: true);
+
+            if (released)
             {
-                // 这件器官没有可释放形态。**不许退回一发通用弹**——那会让所有单位打出同一种东西，
-                // "动作与实体一致"当场失效，而且"这一发是哪来的"再也追不到源头。
-                return false;
+                LastReleasedKernelAction = act;
             }
 
-            float2 origin = view.Position;
-            float2 dir = math.normalizesafe(aim, new float2(1f, 0f));
-            int sourceLogicId = ResolveLogicId(view.UnitIndex);
-
-            switch (act.Kind)
-            {
-                case OrganKernelActionKind.Projectile:
-                    _sim.FireProjectile(
-                        origin + dir * (view.Radius + MuzzleClearance),
-                        dir, act.Speed, act.Damage, act.Radius, act.Lifetime, act.Pierce,
-                        SimFaction.Hostile, act.ApplyStatus, sourceLogicId, surgicalAim: true);
-                    break;
-
-                case OrganKernelActionKind.Cone:
-                    _sim.DamageCone(origin, act.Radius, dir, act.HalfAngleDeg, act.Damage,
-                        SimFaction.Hostile, act.ApplyStatus, sourceLogicId: sourceLogicId);
-                    break;
-
-                case OrganKernelActionKind.Zone:
-                    _sim.SpawnZone(
-                        act.FollowSelf ? origin : origin + dir * (act.Radius * ZoneThrowDistanceMul),
-                        act.Radius, act.Seconds, act.Damage, act.Interval,
-                        SimFaction.Hostile, applyStatus: act.ApplyStatus, sourceLogicId: sourceLogicId,
-                        followUnitIndex: act.FollowSelf ? view.UnitIndex : SimConst.InvalidIndex);
-                    break;
-
-                case OrganKernelActionKind.Status:
-                    if (_status != null)
-                    {
-                        _status.ApplyTimedArea(origin, act.Radius, act.ApplyStatus, act.Seconds);
-                    }
-                    else
-                    {
-                        _sim.ApplyStatusArea(origin, act.Radius, act.ApplyStatus);
-                    }
-                    break;
-
-                default:
-                    return false;
-            }
-
-            LastReleasedKernelAction = act;
-            return true;
-        }
-
-        /// <summary>取释放者的 LogicId，供内核把伤害归属回来源。解析不到时用 0（= 无归属）。</summary>
-        private int ResolveLogicId(int unitIndex)
-        {
-            SimSnapshot snapshot = _sim.Snapshot;
-            return unitIndex >= 0 && unitIndex < snapshot.Count && snapshot.LogicId.IsCreated
-                ? snapshot.LogicId[unitIndex]
-                : 0;
+            return released;
         }
 
         private bool Reject(DirectActionAvailability reason)

@@ -1006,6 +1006,35 @@ namespace GameLogic.Battle
             return true;
         }
 
+        /// <summary>
+        /// M2-07：通知内核"这具身体的战斗由器官驱动"。
+        ///
+        /// 置位之后内核不再拿 <c>BehaviorArchetype.AttackDamage</c> 给它结算瞬时伤害，
+        /// 改为逐帧抛出开火机会（<see cref="MinionFireOpportunity"/>），
+        /// 由 <c>Control/MinionOrganCombatDriver</c> 用那具身体的器官作答。
+        ///
+        /// 不刷快照：这是一个只被内核自己读的判定位，没有表现层消费者，
+        /// 而 <see cref="SetUnitVisualId"/> 那样顺手重建快照是有代价的（每次装配变更都来一发）。
+        /// </summary>
+        public bool SetOrganCombat(SimEntityId entityId, bool driven)
+        {
+            SimWorld world = _backend as SimWorld;
+            return _running && world != null && world.SetOrganCombat(entityId, driven);
+        }
+
+        /// <summary>验收用：这具身体现在是不是器官驱动。不改状态。</summary>
+        public bool IsOrganCombatDriven(SimEntityId entityId)
+        {
+            SimWorld world = _backend as SimWorld;
+            return _running && world != null && world.IsOrganCombatDriven(entityId);
+        }
+
+        /// <summary>M2-07：驱动器下线时把全场器官驱动位放掉，见 <c>SimWorld.ClearAllOrganCombat</c>。</summary>
+        public void ClearAllOrganCombat()
+        {
+            (_backend as SimWorld)?.ClearAllOrganCombat();
+        }
+
         public void DamagePlayer(float amount)
         {
             (_backend as SimWorld)?.DamagePlayer(amount);

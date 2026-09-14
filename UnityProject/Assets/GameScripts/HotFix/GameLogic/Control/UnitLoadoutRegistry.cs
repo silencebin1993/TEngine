@@ -317,7 +317,34 @@ namespace GameLogic.Control
                 RefreshPlayerProjection(entry);
             }
 
+            PushOrganCombatFlag(entityId, entry.Loadout);
             return entry.Loadout;
+        }
+
+        /// <summary>
+        /// M2-07：把"这具身体的战斗由器官驱动"推给内核。
+        ///
+        /// 判据只有一条——**主武器槽上有一件解析得出内核动作的器官**。没有的话内核照旧用
+        /// 行为原型数值结算，这是有意保留的降级：召唤物、自爆虫这类身上根本没装配的单位
+        /// 若被迫走器官路就会彻底哑火，那比原问题更严重。
+        ///
+        /// 注意它只在**装配变更**时推，不逐帧同步：器官被打坏是逐帧会变的量，
+        /// 但那一档不需要动这个位——内核照常抛开火机会，
+        /// <c>MinionOrganCombatDriver</c> 在取器官那一步就会拿不到（<c>TryGetOrgan</c> 只返回未失能的），
+        /// 于是不开火。与玩家按键时被拦下的口径一字不差，多推一个位反而是第二个会漂移的真相源。
+        /// </summary>
+        private void PushOrganCombatFlag(SimEntityId entityId, UnitLoadout loadout)
+        {
+            if (_sim == null || !entityId.IsValid)
+            {
+                return;
+            }
+
+            bool driven = loadout.HasOrganInSlot(MinionOrganCombatDriver.AiFireSlot) &&
+                          loadout.TryGetOrgan(MinionOrganCombatDriver.AiFireSlot, out UnitLoadoutOrgan organ) &&
+                          OrganKernelActionTable.Resolve(organ.OrganId).IsValid;
+
+            _sim.SetOrganCombat(entityId, driven);
         }
 
         private void RefreshPlayerProjection(Entry entry)

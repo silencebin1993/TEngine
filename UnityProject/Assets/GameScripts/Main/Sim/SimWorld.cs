@@ -115,6 +115,24 @@ namespace BinGames.Sim
         private NativeArray<float> _zoneTimer;
         private NativeArray<float> _summonTimer;
 
+        /// <summary>
+        /// M2-07：这具身体的战斗由**器官**驱动（1）还是由行为原型数值驱动（0）。
+        ///
+        /// 内核不认识器官，也不打算认识——它只读一个被热更层通知的状态位，口径与
+        /// <see cref="SimStatus.Overloaded"/> 一致（见 <see cref="ResolveMinionCombat"/> 里那段注释）。
+        /// 置位的唯一来源是 <see cref="SetOrganCombat"/>，由 <c>Control/UnitLoadoutRegistry</c>
+        /// 在装配落地/变更时推下来，判据是"这具身体有没有可释放的攻击器官"。
+        ///
+        /// 为什么要留 0 这一档：召唤物、自爆虫这类身上根本没登记装配的单位若也被迫走器官路，
+        /// 就会**彻底哑火**——那是比原问题更严重的回归。没有器官就照旧用原型数值，
+        /// 且这个降级是可断言、可在诊断里看见的，不是静默分叉。
+        /// </summary>
+        private NativeArray<byte> _organCombat;
+
+        /// <summary>M2-07：本帧的开火机会。容量按单位容量给——最坏情况是每个单位一帧一次。</summary>
+        private NativeArray<MinionFireOpportunity> _minionFires;
+        private int _minionFireCount;
+
         /// <summary>内核自己生成的单位（敌人召唤物）的 LogicId 分配器，走负数段，
         /// 与热更层 <c>SimBridge.NextLogicId</c> 的正数段互不冲突。</summary>
         private int _kernelLogicId;
@@ -193,6 +211,9 @@ namespace BinGames.Sim
             _zoneTimer = new NativeArray<float>(cap, A);
             _summonTimer = new NativeArray<float>(cap, A);
             _generation = new NativeArray<byte>(cap, A);
+            _organCombat = new NativeArray<byte>(cap, A);
+            _minionFires = new NativeArray<MinionFireOpportunity>(cap, A);
+            _minionFireCount = 0;
             _kernelLogicId = 0;
 
             _bodies = new NativeParallelHashMap<SimEntityId, SimUnitBody>(64, A);
@@ -857,6 +878,47 @@ namespace BinGames.Sim
             return true;
         }
 
+        /// <summary>
+        /// M2-07：通知内核"这具身体的战斗由器官驱动"。见 <see cref="_organCombat"/>。
+        ///
+        /// 唯一调用方是热更层 <c>Control/UnitLoadoutRegistry</c>，判据是那具身体有没有
+        /// **可释放的攻击器官**。内核在这里既不验证也不解释器官——它只记一个位。
+        /// </summary>
+        public bool SetOrganCombat(SimEntityId entityId, bool driven)
+        {
+            if (!TryResolveUnit(entityId, out int unitIndex)) { return false; }
+            _organCombat[unitIndex] = (byte)(driven ? 1 : 0);
+            return true;
+        }
+
+        /// <summary>验收用：这具身体现在是不是器官驱动。不建记录、不改状态。</summary>
+        public bool IsOrganCombatDriven(SimEntityId entityId)
+        {
+            return TryResolveUnit(entityId, out int unitIndex) && _organCombat[unitIndex] != 0;
+        }
+
+        /// <summary>
+        /// M2-07：把所有器官驱动位一次放掉，全场退回行为原型数值的降级路。
+        ///
+        /// 唯一调用方是热更层驱动器的拆台路径。理由与 <c>OverloadSuppressionMirror.Unbind</c>
+        /// 必须放掉已推下去的过载位完全一样：这个位的含义是「**有人**会用器官替这具身体作答」，
+        /// 答题的那一方一旦下线，位还留着就等于把这些身体永久钉成哑巴——
+        /// 它们既不走器官路（没人驱动了），也不走原型路（位还标着），一发都打不出来。
+        /// 内核不许出现"等一个不会再来的回答"的状态。
+        /// </summary>
+        public void ClearAllOrganCombat()
+        {
+            if (!_organCombat.IsCreated)
+            {
+                return;
+            }
+
+            for (int i = 0; i < _organCombat.Length; i++)
+            {
+                _organCombat[i] = 0;
+            }
+        }
+
         public float PlayerHealth => TryResolveUnit(_controlledUnitId, out int index) ? _health[index] : 0f;
         public float2 PlayerPosition => TryResolveUnit(_controlledUnitId, out int index) ? _position[index] : float2.zero;
         public float PlayerRadius => TryResolveUnit(_controlledUnitId, out int index) ? _radius[index] : 1f;
@@ -1352,6 +1414,9 @@ namespace BinGames.Sim
         /// </summary>
         private void ResolveMinionCombat(float dt)
         {
+            // M2-07：开火机会是逐帧事件，先清。它与 _damageScratch 一样只在本帧内有意义。
+            _minionFireCount = 0;
+
             for (int i = 0; i < _unitCount; i++)
             {
                 // M2-02：判据是"不是玩家直控"，不是"是 AI"。
@@ -1444,6 +1509,40 @@ namespace BinGames.Sim
                 float engageRange = arc.AttackRange + _radius[i] + _radius[targetIdx];
                 if (math.distance(_position[i], targetPos) > engageRange)
                 {
+                    continue;
+                }
+
+                // ── M2-07：器官驱动的身体在这里分流 ──────────────────────────────
+                //
+                // 走到这一行说明"该打了、打谁也定了"。剩下的问题是**打出什么**，
+                // 而那个问题内核答不了也不该答：它手上只有 arc.AttackDamage 这个
+                // 与器官毫无关系的数，用它就是在制造第二套战斗真相源。
+                //
+                // 所以这里抛一条开火机会给热更层，由那具身体的器官作答
+                // （<c>Control/MinionOrganCombatDriver</c> → <c>OrganReleaseRunner.Release</c>，
+                // 与玩家直控开火**逐字是同一个函数**）。
+                //
+                // 冷却**故意不在这里起**：器官的冷却由 <c>UnitVitalsRegistry</c> 管，
+                // 在内核再压一条 arc.AttackCooldown 就是两条互不知情的冷却线，
+                // 表现为"明明该好了却不打"。内核每帧抛机会，热更层的那一条冷却说了算。
+                //
+                // 自爆（MinionSeekExplode）**不走这条路**，这是一处有意保留的边界：
+                // "把自己炸了"不是任何一件器官的形态（OrganKernelActionKind 里没有它），
+                // 硬塞进去只能靠发明内容。自爆虫本来也不可接管，不存在"两种打法"的对比。
+                if (_organCombat[i] != 0 && arc.Kind != BehaviorKind.MinionSeekExplode)
+                {
+                    if (_minionFireCount < _minionFires.Length)
+                    {
+                        float2 toTarget = targetPos - _position[i];
+                        _minionFires[_minionFireCount++] = new MinionFireOpportunity
+                        {
+                            EntityId = _entityId[i],
+                            UnitIndex = i,
+                            AimDirection = math.normalizesafe(toTarget, new float2(1f, 0f)),
+                            TargetPosition = targetPos,
+                            TargetPart = lockedByCommand ? lockedPart : SimBodyPartSlot.None,
+                        };
+                    }
                     continue;
                 }
 
@@ -1875,6 +1974,9 @@ namespace BinGames.Sim
             // 槽位是回收复用的，能力冷却与血统代数都必须清——否则新生成的单位会继承上一任的。
             _zoneTimer[idx] = 0f;
             _summonTimer[idx] = 0f;
+            // M2-07：器官战斗位同理，而且漏清的后果更隐蔽——新单位会顶着上一任的"由器官驱动"
+            // 标记出生，而它自己根本没登记装配，于是**一发都打不出来**却看不出原因。
+            _organCombat[idx] = 0;
             _generation[idx] = (byte)math.min(req.Generation, SimConst.MaxSpawnGeneration);
             _archetypeId[idx] = req.ArchetypeId;
             _status[idx] = (uint)req.InitialStatus;
@@ -2102,6 +2204,9 @@ namespace BinGames.Sim
             // M2-02：槽位会被复用，命令必须一起清掉——否则新生成的单位会继承
             // 上一个占用者的未完成命令，表现为"刚出生就自己往某处跑"。
             _unitCommands[idx] = UnitCommand.None;
+            // M2-07：器官战斗位随槽位一起退场。热更层是按 EntityId 记装配的，
+            // 旧 EntityId 的注销不会顺手清到这个按索引存的位。
+            _organCombat[idx] = 0;
             _status[idx] = 0u;
             _health[idx] = 0f;
             _velocity[idx] = float2.zero;
@@ -2302,6 +2407,8 @@ namespace BinGames.Sim
                 DevourCandidateCount = _devourCandidates.IsCreated ? _devourCandidates.Length : 0,
                 ProjectileEnds = _projectileEndEvents,
                 ProjectileEndCount = _projectileEndCount,
+                MinionFires = _minionFires,
+                MinionFireCount = _minionFireCount,
                 Generation = _generation,
                 PlayerDamageTaken = _controlledDamage.IsCreated ? _controlledDamage[0] : 0f,
                 PlayerPosition = PlayerPosition,
@@ -2369,6 +2476,8 @@ namespace BinGames.Sim
             if (_projectileSpawns.IsCreated) { _projectileSpawns.Dispose(); }
             if (_projectileEndQueue.IsCreated) { _projectileEndQueue.Dispose(); }
             if (_projectileEndEvents.IsCreated) { _projectileEndEvents.Dispose(); }
+            if (_organCombat.IsCreated) { _organCombat.Dispose(); }
+            if (_minionFires.IsCreated) { _minionFires.Dispose(); }
             if (_deadQueue.IsCreated) { _deadQueue.Dispose(); }
             if (_damageScratch.IsCreated) { _damageScratch.Dispose(); }
             if (_controlledDamage.IsCreated) { _controlledDamage.Dispose(); }

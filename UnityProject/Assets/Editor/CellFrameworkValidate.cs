@@ -76,6 +76,7 @@ namespace GameLogic.EditorTools
                 ValidateSurgicalWindowRewards();
                 ValidateConsciousnessPlaytestGate();
                 ValidateAllyParityAndControlCycle();
+                ValidateCombatTruthSourceUnified();
             }
             catch (Exception e)
             {
@@ -1411,6 +1412,222 @@ namespace GameLogic.EditorTools
         }
 
         // ── 可控友军的一致性与接管循环（2026-09-14 试玩反馈）────
+
+        /// <summary>
+        /// [25] 战斗真相源统一（M2-07）：**同一具身体，谁开都打出同一种东西**。
+        ///
+        /// 试玩反馈 #5 说的是「AI 与直控打法完全不同」。根因不是数值没调好，是同一具身体
+        /// 挂着两套战斗真相源：玩家开它时走器官（<c>OrganKernelActionTable</c> → 真弹体），
+        /// 松手之后走 <c>BehaviorArchetype.AttackDamage</c> 的瞬时扣血。于是"接管"没有可比较的基准。
+        ///
+        /// 本段守的是统一之后**必须成立**的四件事，每一件都对应一种曾经可能悄悄退化的方式：
+        /// <list type="number">
+        /// <item>装配落地后，内核确实知道这具身体由器官驱动（位真的推下去了，不是热更层自嗨）；</item>
+        /// <item>AI 打出来的形态与玩家用同一具身体打出来的形态**逐字段相同**
+        ///       ——只比"都有伤害"是不够的，那用旧路径也成立；</item>
+        /// <item>AI 开火真的产出了内核弹体（而不是退回瞬时伤害），即弹体数真的涨了；</item>
+        /// <item>没登记装配的身体仍走原型数值的降级路，**不会哑火**——
+        ///       这是本次刻意保留的边界，退化成"全场没器官就都不打"比原问题更严重。</item>
+        /// </list>
+        /// </summary>
+        private static void ValidateCombatTruthSourceUnified()
+        {
+            Line("\n[25] 战斗真相源统一：同一具身体谁开都一样（M2-07）");
+
+            const float Dt = 1f / 60f;
+
+            var sim = new SimBridge();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 32;
+            cfg.ArenaHalfExtent = 60f;
+            cfg.RandomSeed = 0xC0FFEE07u;
+
+            // 与 [19] 同一种构造：召唤物会攻击，假人完全不还手也不动，
+            // 这样掉血与弹体只可能来自被测单位。
+            var archetypes = new[]
+            {
+                new BehaviorArchetype
+                {
+                    Kind = BehaviorKind.MinionSeekAttack, Accel = 12f, TurnRate = 0f, AggroRange = 12f,
+                    AttackRange = 6f, AttackCooldown = 0.25f, AttackDamage = 5f,
+                    Separation = 0f, ChargeSpeedMul = 1f,
+                },
+                new BehaviorArchetype
+                {
+                    Kind = BehaviorKind.Stationary, Accel = 0f, TurnRate = 0f, AggroRange = 0f,
+                    AttackRange = 0.5f, AttackCooldown = 99f, AttackDamage = 0f,
+                    Separation = 0f, ChargeSpeedMul = 1f,
+                },
+            };
+
+            sim.Begin(cfg, archetypes);
+            sim.ConfigureControlSwitch(200f, 0f);
+
+            var registry = new UnitLoadoutRegistry();
+            var fakeSource = new FakePlayerLoadoutSource();
+            var actions = new DirectControlActions();
+            var aim = new float2(1f, 0f);
+
+            InputRouter.Reset();
+
+            try
+            {
+                registry.Bind(sim, fakeSource);
+                SimEntityId body = sim.ControlledUnitId;
+                registry.RegisterPlayerBody(body);
+                actions.Bind(sim, registry, abilities: null, status: null);
+
+                const int ArmedLogicId = 9701;   // 登记装配 → 器官驱动
+                const int DummyLogicId = 9702;
+                const int BareLogicId = 9703;    // 不登记装配 → 降级走原型数值
+                const int BareDummyLogicId = 9704;
+
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(-26f, 0f), Health = 5000f, Radius = 0.5f, MaxSpeed = 3f,
+                    ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = ArmedLogicId,
+                });
+                registry.RegisterArchetypePending(ArmedLogicId, ArchetypeLoadoutTable.SporeArchetypeId);
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(-20f, 0f), Health = 100000f, Radius = 0.6f, MaxSpeed = 0f,
+                    ArchetypeId = 1, Faction = SimFaction.Hostile,
+                    IntentSource = IntentSource.AI, LogicId = DummyLogicId,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(24f, 0f), Health = 5000f, Radius = 0.5f, MaxSpeed = 3f,
+                    ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = BareLogicId,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(30f, 0f), Health = 100000f, Radius = 0.6f, MaxSpeed = 0f,
+                    ArchetypeId = 1, Faction = SimFaction.Hostile,
+                    IntentSource = IntentSource.AI, LogicId = BareDummyLogicId,
+                });
+
+                sim.OnUpdate(Dt);
+                registry.ResolvePending(sim.Snapshot);
+                SimSnapshot snap0 = sim.Snapshot;
+                SimEntityId armed = FindEntityId(snap0, ArmedLogicId, out _);
+                SimEntityId dummy = FindEntityId(snap0, DummyLogicId, out _);
+                SimEntityId bare = FindEntityId(snap0, BareLogicId, out _);
+                SimEntityId bareDummy = FindEntityId(snap0, BareDummyLogicId, out _);
+                Expect(armed.IsValid && dummy.IsValid && bare.IsValid && bareDummy.IsValid,
+                    "本段四个单位都应落地并拥有有效稳定实体 ID");
+
+                float HealthOf(SimEntityId id) =>
+                    sim.TryResolveUnitIndex(id, out int i) && i < sim.Snapshot.Count
+                        ? sim.Snapshot.Health[i]
+                        : float.NaN;
+
+                int AliveProjectiles()
+                {
+                    var arr = sim.World != null ? sim.World.Projectiles : default;
+                    if (!arr.IsCreated) { return 0; }
+                    int n = 0;
+                    for (int i = 0; i < arr.Length; i++)
+                    {
+                        if (arr[i].Alive != 0) { n++; }
+                    }
+                    return n;
+                }
+
+                void Step(int frames)
+                {
+                    for (int f = 0; f < frames; f++)
+                    {
+                        sim.OnUpdate(Dt);
+                        actions.Tick(Dt, paused: false);
+                    }
+                }
+
+                // ── 1. 位真的推到了内核 ────────────────────────────────────
+                Expect(sim.IsOrganCombatDriven(armed),
+                    "登记了装配的身体，内核侧应真的带上器官驱动位——" +
+                    "只在热更层记一笔的话，内核照旧用原型数值结算，分叉原地不动");
+                Expect(!sim.IsOrganCombatDriven(bare),
+                    "没登记装配的身体不该被标成器官驱动（它得留在降级路上）");
+
+                // ── 2. AI 开火真的产出了内核弹体 ──────────────────────────
+                int releasesBefore = actions.MinionCombat.ReleaseCount;
+                int projectilePeak = 0;
+                for (int f = 0; f < 180; f++)
+                {
+                    sim.OnUpdate(Dt);
+                    actions.Tick(Dt, paused: false);
+                    projectilePeak = Mathf.Max(projectilePeak, AliveProjectiles());
+                }
+                Expect(actions.MinionCombat.ReleaseCount > releasesBefore,
+                    $"AI 应通过器官释放路径真的开过火（累计 {actions.MinionCombat.ReleaseCount} 次）");
+                Expect(projectilePeak > 0,
+                    $"AI 的攻击应真的在内核里生成弹体（峰值 {projectilePeak} 发）——" +
+                    "这是与旧路径最硬的区别：旧路径直接写 DamageRequest，场上一发弹体都不会有");
+
+                OrganKernelAction aiAct = actions.MinionCombat.LastReleasedKernelAction;
+                string aiOrganId = actions.MinionCombat.LastReleasedOrganId;
+                Expect(aiAct.IsValid && !string.IsNullOrEmpty(aiOrganId),
+                    $"AI 这几发应能追到具体器官（{aiOrganId} / {aiAct.Kind}）");
+
+                // ── 3. 降级路没哑火（这条比上面几条更容易被改坏）──────────
+                float bareBase = HealthOf(bareDummy);
+                Step(120);
+                float bareHit = bareBase - HealthOf(bareDummy);
+                Expect(bareHit > 0f,
+                    $"没登记装配的召唤物必须照常用原型数值打人（打掉 {bareHit:F1}）——" +
+                    "让它跟着走器官路会彻底哑火，那比原问题更严重");
+
+                // ── 4. 核心：玩家接管同一具身体，打出来的是同一种东西 ──────
+                Expect(sim.RequestControlSwitch(armed) == ControlRequestResult.Success,
+                    "应能接管那具器官驱动的身体");
+
+                // 等冷却：这把枪刚被 AI 用过，而统一之后它只有一条冷却线（见 [19]-C 的注释）。
+                bool playerReleased = false;
+                for (int f = 0; f < 120 && !playerReleased; f++)
+                {
+                    playerReleased = actions.TryRelease(LoadoutAction.Primary, aim);
+                    if (!playerReleased) { Step(1); }
+                }
+                Expect(playerReleased,
+                    $"玩家应能用这具身体的主器官开火（最后一次被拒原因 {actions.LastReleaseResult}）");
+
+                OrganKernelAction playerAct = actions.LastReleasedKernelAction;
+                Expect(actions.LastReleasedOrganId == aiOrganId,
+                    $"玩家按出来的应是**同一件器官**（玩家 {actions.LastReleasedOrganId} / AI {aiOrganId}）");
+                Expect(playerAct.Kind == aiAct.Kind &&
+                       Mathf.Approximately(playerAct.Damage, aiAct.Damage) &&
+                       Mathf.Approximately(playerAct.Speed, aiAct.Speed) &&
+                       Mathf.Approximately(playerAct.Radius, aiAct.Radius) &&
+                       Mathf.Approximately(playerAct.Lifetime, aiAct.Lifetime) &&
+                       playerAct.Pierce == aiAct.Pierce &&
+                       Mathf.Approximately(playerAct.Cooldown, aiAct.Cooldown),
+                    $"**同一具身体，谁开都打出同一种东西**：玩家 {playerAct.Kind}/伤害 {playerAct.Damage:F1}/" +
+                    $"速度 {playerAct.Speed:F1}/半径 {playerAct.Radius:F2}/寿命 {playerAct.Lifetime:F2}/" +
+                    $"穿透 {playerAct.Pierce}/冷却 {playerAct.Cooldown:F2}　vs　" +
+                    $"AI {aiAct.Kind}/伤害 {aiAct.Damage:F1}/速度 {aiAct.Speed:F1}/半径 {aiAct.Radius:F2}/" +
+                    $"寿命 {aiAct.Lifetime:F2}/穿透 {aiAct.Pierce}/冷却 {aiAct.Cooldown:F2}" +
+                    "——这是 M2-07 的全部立论，只比「都能打出伤害」是不够的（那用旧路径也成立）");
+
+                // ── 5. 拆台不留悬挂：位放掉之后退回降级路，不是变哑巴 ──────
+                actions.Unbind();
+                Expect(!sim.IsOrganCombatDriven(armed),
+                    "驱动器下线后，内核里的器官驱动位必须放掉——" +
+                    "留着就是让这些身体等一个不会再来的回答，无声的永久失能");
+                float afterBase = HealthOf(dummy);
+                for (int f = 0; f < 120; f++) { sim.OnUpdate(Dt); }
+                Expect(afterBase - HealthOf(dummy) > 0f,
+                    $"拆台之后它应退回原型数值照常攻击（打掉 {afterBase - HealthOf(dummy):F1}）");
+            }
+            finally
+            {
+                actions.Unbind();
+                registry.Unbind();
+                sim.End();
+                InputRouter.Reset();
+            }
+        }
 
         /// <summary>
         /// 守三件玩家连着两轮报上来的事，每一件都曾经"看起来能跑"却在手里明显不对：
@@ -4233,10 +4450,28 @@ namespace GameLogic.EditorTools
                 Expect(SourceOf(minionA) == IntentSource.AI && SourceOf(minionB) == IntentSource.AI,
                     "此刻两名召唤物都由 AI 驱动，走的是内核 ResolveMinionCombat 而不是直控释放入口");
 
-                // ── B. AI 自己不会主动过载：构造上成立，不是靠新造一本账 ──
-                Expect(!actions.Vitals.IsTracked(minionA) && !actions.Vitals.IsTracked(minionB),
-                    "挨了整整 60 帧攻击之后，AI 单位在过载债账本里**连条目都没有**——" +
-                    "AI 的攻击不经过 Commit，一分债都不产生（本段没有为 AI 新造账）");
+                // ── B. AI 自己不会主动过载 ──
+                //
+                // M2-07 之前这一条是"构造上成立"：AI 的攻击根本不经过 Commit，一分债都不产生，
+                // 所以它当然不会过载。现在 AI 用的是**和玩家同一套器官、同一本账**，
+                // 债是真的在涨的——"不会主动过载"因此从一个副作用变成了一条真正被守住的约束
+                // （<see cref="MinionOrganCombatDriver.AiStrainCeilingRatio"/> 那道安全线）。
+                //
+                // A 登记了装配走器官路，B 没登记仍走原型数值路，两者的账本形态因此**必然不同**，
+                // 这正好把"器官驱动与否"这件事在账本上照出来。
+                Expect(actions.Vitals.IsTracked(minionA),
+                    "A 登记了装配，走器官开火 → 它必须在账本里有条目（AI 和玩家用同一本账，这是本段的立论）");
+                Expect(!actions.Vitals.IsTracked(minionB),
+                    "B 没登记装配，仍走行为原型数值的降级路 → 不碰账本。" +
+                    "这条降级是有意保留的：没器官的召唤物若被迫走器官路会彻底哑火");
+                Expect(actions.Vitals.Get(minionA).Strain > 0f,
+                    $"A 的过载债应真的在涨（{actions.Vitals.Get(minionA).Strain:F1}）——" +
+                    "AI 开火不再是免费的，这是「换谁开都一样」的直接体现");
+                Expect(actions.Vitals.Get(minionA).Strain <=
+                       UnitVitalsRegistry.StrainOverloadThreshold * MinionOrganCombatDriver.AiStrainCeilingRatio,
+                    $"但它必须守住安全线（实测 {actions.Vitals.Get(minionA).Strain:F1} ≤ " +
+                    $"{UnitVitalsRegistry.StrainOverloadThreshold * MinionOrganCombatDriver.AiStrainCeilingRatio:F0}）——" +
+                    "没有这道闸门，全速开火的 AI 必然把自己烧进永久过载循环");
                 Expect(actions.Vitals.OverloadedCount == 0 &&
                        actions.OverloadMirror.SuppressedCount == 0 &&
                        actions.OverloadMirror.PushCount == 0,
@@ -4247,8 +4482,23 @@ namespace GameLogic.EditorTools
                 // ── C. 玩家把这具身体推到过载（M2-03c 的既有路径，一行没改）──
                 Expect(sim.RequestControlSwitch(minionA) == ControlRequestResult.Success,
                     "应能接管召唤物 A");
-                Expect(actions.TryRelease(LoadoutAction.Primary, awayAim),
-                    "接管后玩家应能用它的主器官释放一次");
+
+                // M2-07：接管的那一刻这把枪**可能正在冷却**——刚才 AI 就是拿它开火的。
+                // 这不是回归，恰恰是统一后必然成立的事：同一具身体上的同一件器官只有一条冷却线，
+                // 不因为"换了谁在开"而重置。接管送一次免费爆发的话，
+                // 这本账就又回到了"被开"和"自己打"各记各的老样子。
+                // 所以这里等它就绪，而不是要求它必须当帧可用；上限 2 秒，远超任何器官的冷却。
+                bool playerReleased = false;
+                for (int f = 0; f < 120 && !playerReleased; f++)
+                {
+                    playerReleased = actions.TryRelease(LoadoutAction.Primary, awayAim);
+                    if (!playerReleased)
+                    {
+                        Step(1);
+                    }
+                }
+                Expect(playerReleased,
+                    $"接管后玩家应能用它的主器官释放一次（等冷却，最后一次被拒原因 {actions.LastReleaseResult}）");
                 OrganKernelAction releasedAct = actions.LastReleasedKernelAction;
                 Expect(actions.ControlledVitals.Strain > 0f,
                     $"玩家的这一次释放应真的记上过载债（{actions.ControlledVitals.Strain:F1}）——" +
@@ -4327,7 +4577,12 @@ namespace GameLogic.EditorTools
                 Step(60);
                 float recovered = recoverBase - HealthOf(dummyA);
                 Expect(recovered > 0f,
-                    $"解除之后 AI 应重新打出伤害（60 帧打掉 {recovered:F1}）——压制是一段窗口，不是永久失能");
+                    $"解除之后 AI 应重新打出伤害（60 帧打掉 {recovered:F1}）——压制是一段窗口，不是永久失能" +
+                    // M2-07：这条红过一次，而"打掉 0.0"有五种完全不同的原因，在画面上长得一模一样。
+                    // 留着这几个计数，下次红的时候一眼能分清是没器官、被闸门拦了，还是守安全线。
+                    $"｜驱动器：释放 {actions.MinionCombat.ReleaseCount} / 守线 {actions.MinionCombat.StrainHoldCount}" +
+                    $" / 无器官 {actions.MinionCombat.NoOrganCount} / 上次被拒 {actions.MinionCombat.LastBlockedGate}" +
+                    $"｜过载债 {actions.Vitals.Get(minionA).Strain:F1}");
 
                 // ── F. 拆台不留悬挂压制（跨局最致命的一种泄漏）──
                 Expect(actions.Vitals.AddStrain(minionA, UnitVitalsRegistry.StrainOverloadThreshold + 5f),
@@ -4337,8 +4592,9 @@ namespace GameLogic.EditorTools
                     "内核侧重新被压住");
 
                 Expect(!actions.Vitals.IsTracked(minionB),
-                    "整段跑完，全程由 AI 驱动的对照单位在账本里仍然连条目都没有——" +
-                    "「AI 不会主动过载」是构造上成立的，不靠任何额外机制");
+                    "整段跑完，**没登记装配**的对照单位在账本里仍然连条目都没有——" +
+                    "降级路（原型数值）确实一点都没碰这本账。M2-07 之后「AI 不会主动过载」" +
+                    "对器官驱动的身体靠的是 AiStrainCeilingRatio 那道闸门，不再是构造上白得的");
 
                 actions.Unbind();
                 sim.OnUpdate(Dt);
