@@ -85,6 +85,7 @@ namespace GameLogic.EditorTools
                 ValidateLineagePhenotypeTemplate();
                 ValidateCompiledRecipeCache();
                 ValidateGerminationChamber();
+                ValidateHomecomingRetrofit();
             }
             catch (Exception e)
             {
@@ -1954,6 +1955,190 @@ namespace GameLogic.EditorTools
             int otherTicket = otherChamber.Enqueue("lineage-z", "escort", out PhenotypeTemplateVersion _, out string otherErr);
             Expect(otherTicket != 0 && otherErr == null, "其他谱系的入队不应被 lineage-y 的腔体摧毁状态波及");
             Expect(otherChamber.PendingCount("lineage-z") == 1, "其他谱系的队列应独立计数");
+        }
+
+        /// <summary>
+        /// M3-06：回巢改造——断网/交战/携带物/资源不足四项拒绝，正常改造的版本锁定与状态保留，
+        /// 中断不产出重复实体/器官。用真实 SimBridge 起两具个体（一具在腔体范围内、一具太远），
+        /// 手工把它们绑到 V1（模拟"之前几局遗留的旧个体"，不经 [29] 的 Enqueue 流程）。
+        /// </summary>
+        private static void ValidateHomecomingRetrofit()
+        {
+            Line("\n[30] 回巢改造（M3-06）");
+
+            OrganelleDef organelle = OrganelleCatalog.All.Values.FirstOrDefault(o => o.AttackMethod && !o.IsRetired);
+            List<string> geneIds = GeneCatalog.AllGeneIds.Take(2).ToList();
+            Expect(organelle != null, "OrganelleCatalog 应至少有一条 AttackMethod 未退役器官用于本项自检");
+            Expect(geneIds.Count == 2, "GeneCatalog 应至少有两条基因用于本项自检");
+            if (organelle == null || geneIds.Count < 2)
+            {
+                return;
+            }
+
+            var blueprints = new BlueprintRegistry();
+            blueprints.Resolve(organelle.Id, BlueprintSourceKind.Organelle, 1f, 0f);
+            foreach (string g in geneIds)
+            {
+                blueprints.Resolve(g, BlueprintSourceKind.Gene, 1f, 0f);
+            }
+
+            var lineages = new LineageRegistry();
+            lineages.Bind(blueprints);
+            PhenotypeTemplateVersion v1 = lineages.CommitTemplate("lineage-r", "assault", organelle.Id, geneIds, "keep_distance", out string commitErr);
+            Expect(v1 != null && commitErr == null, "本项前置：合法配方提交应成功产生版本 1");
+
+            var ledger = new BiomassLedger();
+            ledger.OnEnter();
+            var chamber = new GerminationChamberRegistry();
+            chamber.OnEnter();
+
+            var sim = new SimBridge();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 32;
+            cfg.ArenaHalfExtent = 60f;
+            cfg.RandomSeed = 0xC0FFEE30u;
+            var archetypes = new[]
+            {
+                new BehaviorArchetype
+                {
+                    Kind = BehaviorKind.Stationary, Accel = 0f, TurnRate = 0f, AggroRange = 0f,
+                    AttackRange = 0.5f, AttackCooldown = 99f, AttackDamage = 0f,
+                    Separation = 0f, ChargeSpeedMul = 1f,
+                },
+            };
+            sim.Begin(cfg, archetypes);
+
+            var unitLoadouts = new UnitLoadoutRegistry();
+            var fakeSource = new FakePlayerLoadoutSource();
+            unitLoadouts.Bind(sim, fakeSource);
+            unitLoadouts.RegisterPlayerBody(sim.ControlledUnitId);
+
+            chamber.Bind(sim, lineages, ledger, unitLoadouts);
+
+            var retrofit = new HomecomingRetrofitService();
+            retrofit.OnEnter();
+            retrofit.Bind(sim, lineages, ledger, unitLoadouts, chamber);
+
+            const int NearLogicId = 9801;
+            const int FarLogicId = 9802;
+            float2 playerPos = sim.PlayerPosition;
+
+            sim.Spawn(new SpawnRequest
+            {
+                Position = playerPos + new float2(2f, 0f), Health = 40f, Radius = 0.8f, MaxSpeed = 0f,
+                ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                IntentSource = IntentSource.AI, LogicId = NearLogicId, ExcludeFromControl = true,
+            });
+            sim.Spawn(new SpawnRequest
+            {
+                Position = playerPos + new float2(40f, 0f), Health = 40f, Radius = 0.8f, MaxSpeed = 0f,
+                ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                IntentSource = IntentSource.AI, LogicId = FarLogicId, ExcludeFromControl = true,
+            });
+
+            sim.OnUpdate(1f / 60f);
+            SimSnapshot snap = sim.Snapshot;
+            SimEntityId near = FindEntityId(snap, NearLogicId, out _);
+            SimEntityId far = FindEntityId(snap, FarLogicId, out _);
+            Expect(near.IsValid && far.IsValid, "本项前置：两具测试个体应成功落地");
+            if (!near.IsValid || !far.IsValid)
+            {
+                return;
+            }
+
+            // 未绑定：查无绑定应拒绝。
+            HomecomingRetrofitService.RetrofitRejectReason reason = retrofit.TryBeginRetrofit(near);
+            Expect(reason == HomecomingRetrofitService.RetrofitRejectReason.NotBound, "未绑定谱系/模板的个体应拒绝回巢改造");
+
+            // 手工把两具个体绑到 V1（模拟"之前几局遗留/萌生腔生成"的旧个体，不经 [29] 的 Enqueue）。
+            chamber.UpdateBinding(near, "lineage-r", "assault", v1);
+            chamber.UpdateBinding(far, "lineage-r", "assault", v1);
+            unitLoadouts.RegisterExplicit(near, new List<UnitLoadoutOrgan> { new UnitLoadoutOrgan(v1.OrganelleId, LoadoutAction.Primary) });
+            unitLoadouts.RegisterExplicit(far, new List<UnitLoadoutOrgan> { new UnitLoadoutOrgan(v1.OrganelleId, LoadoutAction.Primary) });
+
+            // 已绑定但谱系没有更新版本：拒绝。
+            reason = retrofit.TryBeginRetrofit(near);
+            Expect(reason == HomecomingRetrofitService.RetrofitRejectReason.NoNewerVersion, "谱系没有比当前绑定更新的版本时应拒绝改造");
+
+            PhenotypeTemplateVersion v2 = lineages.CommitTemplate("lineage-r", "assault", organelle.Id, geneIds, "escort", out string commitErr2);
+            Expect(v2 != null && v2.Version == 2, "本项前置：第二次提交应产生版本 2");
+
+            // 断网：拒绝，不扣费。
+            chamber.SetNetworked("lineage-r", false);
+            float balanceBeforeNetworkReject = ledger.GetBalance("lineage-r");
+            reason = retrofit.TryBeginRetrofit(near);
+            Expect(reason == HomecomingRetrofitService.RetrofitRejectReason.NotNetworked, "萌生腔未联网时应拒绝改造");
+            Expect(ledger.GetBalance("lineage-r") == balanceBeforeNetworkReject, "被拒绝的改造不应扣费");
+            chamber.SetNetworked("lineage-r", true);
+
+            // 交战：拒绝，不扣费。
+            retrofit.SetEngaged(near, true);
+            reason = retrofit.TryBeginRetrofit(near);
+            Expect(reason == HomecomingRetrofitService.RetrofitRejectReason.Engaged, "交战中的个体应拒绝改造");
+            retrofit.SetEngaged(near, false);
+
+            // 携带关键物：拒绝，不扣费。
+            retrofit.SetCarryingKeyItem(near, true);
+            reason = retrofit.TryBeginRetrofit(near);
+            Expect(reason == HomecomingRetrofitService.RetrofitRejectReason.CarryingKeyItem, "携带关键物的个体应拒绝改造");
+            retrofit.SetCarryingKeyItem(near, false);
+
+            // 位置太远：拒绝，不扣费。
+            reason = retrofit.TryBeginRetrofit(far);
+            Expect(reason == HomecomingRetrofitService.RetrofitRejectReason.TooFarFromChamber, "距萌生腔太远的个体应拒绝改造");
+
+            // 资源不足：拒绝，不扣费（先把余额抽干）。
+            ledger.TryDeduct("lineage-r", ledger.GetBalance("lineage-r"));
+            Expect(ledger.GetBalance("lineage-r") == 0f, "本项前置：余额应已被抽干");
+            reason = retrofit.TryBeginRetrofit(near);
+            Expect(reason == HomecomingRetrofitService.RetrofitRejectReason.InsufficientBiomass, "生物质不足时应拒绝改造");
+            ledger.Deposit("lineage-r", 999f); // 补回余额，供后续正常路径使用。
+
+            // 中断（取消）：全额退款，绑定/装配原样保留——「中断不复制资源或器官」的核心验收点。
+            float balanceBeforeCancelFlow = ledger.GetBalance("lineage-r");
+            reason = retrofit.TryBeginRetrofit(near);
+            Expect(reason == HomecomingRetrofitService.RetrofitRejectReason.None, "满足全部条件时应成功开票");
+            Expect(ledger.GetBalance("lineage-r") == balanceBeforeCancelFlow - v2.BiomassCost, "开票应按锁定版本的生物质成本扣费");
+            Expect(retrofit.IsRetrofitting(near), "开票后该个体应处于改造中状态");
+            HomecomingRetrofitService.RetrofitRejectReason reasonWhileInProgress = retrofit.TryBeginRetrofit(near);
+            Expect(reasonWhileInProgress == HomecomingRetrofitService.RetrofitRejectReason.AlreadyInProgress, "改造进行中不应允许重复开票");
+            bool cancelled = retrofit.CancelRetrofit(near);
+            Expect(cancelled, "取消进行中的改造应成功");
+            Expect(ledger.GetBalance("lineage-r") == balanceBeforeCancelFlow, "取消应全额退还生物质成本");
+            Expect(!retrofit.IsRetrofitting(near), "取消后该个体不应再处于改造中状态");
+            chamber.TryGetBinding(near, out GerminationChamberRegistry.UnitBinding bindingAfterCancel);
+            Expect(bindingAfterCancel.Version == v1, "取消不应改变该个体的绑定版本");
+            UnitLoadout loadoutAfterCancel = unitLoadouts.Get(near);
+            Expect(loadoutAfterCancel.TryGetOrgan(LoadoutAction.Primary, out UnitLoadoutOrgan organAfterCancel) && organAfterCancel.OrganId == v1.OrganelleId,
+                "取消不应改变该个体的装配");
+
+            // 个体运行期状态（伤势/过载债）与改造流程完全独立——本类从未触碰 UnitVitalsRegistry。
+            var vitals = new UnitVitalsRegistry();
+            vitals.AddStrain(near, 37f);
+            float strainBefore = vitals.Get(near).Strain;
+
+            // 正常改造 + 版本锁定：开票时锁定 V2，之后即便谱系又提交 V3，完成时仍应换到 V2（不是 V3）。
+            reason = retrofit.TryBeginRetrofit(near);
+            Expect(reason == HomecomingRetrofitService.RetrofitRejectReason.None, "重新开票应再次成功");
+            PhenotypeTemplateVersion v3 = lineages.CommitTemplate("lineage-r", "assault", organelle.Id, geneIds, "aggressive", out string commitErr3);
+            Expect(v3 != null && v3.Version == 3, "本项前置：第三次提交应产生版本 3");
+
+            bool completed = retrofit.CompleteRetrofit(near);
+            Expect(completed, "完成改造应成功");
+            Expect(!retrofit.IsRetrofitting(near), "完成后该个体不应再处于改造中状态");
+            chamber.TryGetBinding(near, out GerminationChamberRegistry.UnitBinding bindingAfterComplete);
+            Expect(ReferenceEquals(bindingAfterComplete.Version, v2),
+                "完成改造应换到开票那一刻锁定的版本（V2），即便过程中谱系又提交了更新版本（V3）——锁定语义");
+            UnitLoadout loadoutAfterComplete = unitLoadouts.Get(near);
+            Expect(loadoutAfterComplete.TryGetOrgan(LoadoutAction.Primary, out UnitLoadoutOrgan organAfterComplete) && organAfterComplete.OrganId == v2.OrganelleId,
+                "完成改造应替换装配签名——UnitLoadoutRegistry 里的主器官应变为锁定版本的 OrganelleId");
+            Expect(vitals.Get(near).Strain == strainBefore,
+                "回巢改造流程不应触碰个体的运行期状态（生命/伤势/过载债应原样保留）");
+
+            // 另一个谱系完全不受影响。
+            lineages.CommitTemplate("lineage-s", "guard", organelle.Id, geneIds, "guard", out _);
+            Expect(lineages.GetLineage("lineage-s").GetLatest("guard").Version == 1,
+                "其他谱系的模板历史不应被 lineage-r 的回巢改造流程波及");
         }
 
         /// <summary>

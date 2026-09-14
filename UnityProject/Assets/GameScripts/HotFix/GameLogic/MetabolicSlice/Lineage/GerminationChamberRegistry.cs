@@ -81,6 +81,7 @@ namespace GameLogic.MetabolicSlice.Lineage
 
         private readonly Dictionary<string, List<GerminationTicket>> _queues = new Dictionary<string, List<GerminationTicket>>();
         private readonly HashSet<string> _destroyedLineages = new HashSet<string>();
+        private readonly HashSet<string> _disconnectedLineages = new HashSet<string>();
         private readonly Dictionary<SimEntityId, UnitBinding> _bindings = new Dictionary<SimEntityId, UnitBinding>();
         private readonly List<PendingBind> _pendingBinds = new List<PendingBind>(4);
         private readonly List<UnitLoadoutOrgan> _organScratch = new List<UnitLoadoutOrgan>(1);
@@ -104,6 +105,7 @@ namespace GameLogic.MetabolicSlice.Lineage
         {
             _queues.Clear();
             _destroyedLineages.Clear();
+            _disconnectedLineages.Clear();
             _bindings.Clear();
             _pendingBinds.Clear();
             _nextTicketId = 1;
@@ -213,6 +215,44 @@ namespace GameLogic.MetabolicSlice.Lineage
         public bool TryGetBinding(SimEntityId entityId, out UnitBinding binding)
         {
             return _bindings.TryGetValue(entityId, out binding);
+        }
+
+        /// <summary>M3-06：回巢改造完成后，把已存在个体的绑定原地替换成新锁定的版本——同一个
+        /// <see cref="SimEntityId"/>，不产出第二条记录、不复制器官/基因。查无此实体（不是本腔萌生的）
+        /// 时不做任何事，由调用方（<see cref="HomecomingRetrofitService"/>）自行决定如何处理。</summary>
+        public void UpdateBinding(SimEntityId entityId, string lineageId, string templateName, PhenotypeTemplateVersion version)
+        {
+            if (!entityId.IsValid || version == null)
+            {
+                return;
+            }
+
+            _bindings[entityId] = new UnitBinding(lineageId, templateName, version);
+        }
+
+        /// <summary>占位"锚点网络"判据（GDD §6.6"正式改造只发生在已联网的萌生腔"）——本仓尚未
+        /// 实现锚点/网络连通系统（那是更后期里程碑），默认所有谱系都联网；
+        /// <see cref="SetNetworked"/> 留给锚点系统落地后真正接线，回巢改造的校验流程不需要改写。</summary>
+        public bool IsNetworked(string lineageId)
+        {
+            return lineageId == null || !_disconnectedLineages.Contains(lineageId);
+        }
+
+        public void SetNetworked(string lineageId, bool networked)
+        {
+            if (string.IsNullOrEmpty(lineageId))
+            {
+                return;
+            }
+
+            if (networked)
+            {
+                _disconnectedLineages.Remove(lineageId);
+            }
+            else
+            {
+                _disconnectedLineages.Add(lineageId);
+            }
         }
 
         public override void OnUpdate(float dt)
