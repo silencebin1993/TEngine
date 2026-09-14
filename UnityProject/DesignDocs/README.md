@@ -13,7 +13,7 @@
 
 | 任务 | 读取文档 | 权威边界 |
 |---|---|---|
-| 代谢、基因组合、ComposeEngine | `最新改动需求/AUTHORITY_AND_CONFLICTS.md` 及其指向文件 | 保留化学/编译语义；若与完整 GDD 的产品对象、获取、传播或节奏冲突，以完整 GDD 为准 |
+| 代谢、基因组合、ComposeEngine | `最新改动需求/组合引擎-正名与全阶段变化词宪法.md`（唯一真权威；`AUTHORITY_AND_CONFLICTS.md` 只是导航，同目录其余多为 Superseded/stub） | 保留化学/编译语义；若与完整 GDD 的产品对象、获取、传播或节奏冲突，以完整 GDD 为准 |
 | AOT Sim、HotFix 边界、Jobs、资源和模块框架 | `Game_Framework_Design.md` 相关章节 | 技术架构保留；旧六阶段产品流程和时间压力失效 |
 | 内容仓与热更新 | `Art_Repo_And_HotUpdate.md` | 仅资源管线 |
 
