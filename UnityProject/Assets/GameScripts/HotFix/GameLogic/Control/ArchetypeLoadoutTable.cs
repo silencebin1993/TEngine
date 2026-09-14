@@ -61,7 +61,12 @@ namespace GameLogic.Control
                     // 这里换成目录自己指定的那个继任者 org_cilia（现役、Melee → 扇形），
                     // 只换 id，不新增器官。
                     buffer.Add(new UnitLoadoutOrgan("org_mycelium", LoadoutAction.Primary));
-                    buffer.Add(new UnitLoadoutOrgan("org_cilia", LoadoutAction.Interact));
+                    // 2026-09-13 试玩反馈修正：org_cilia 原本放在 Interact 槽，而 Interact 至今恒判
+                    // NoInteractTarget（M2-03b 任务书要求「只做结构、不发明可交互内容」）——
+                    // 等于把菌丝体唯一的第二个动作放进了一个永远按不响的槽，接管它只有 1 个可用动作。
+                    // 改到 Utility（右键）后两名友军的动作集仍然不同（孢子=弹体+冲刺，菌丝=区域+近战扇形），
+                    // M2-03 那条「不同装配被接管时动作集不同」的验收不受影响。
+                    buffer.Add(new UnitLoadoutOrgan("org_cilia", LoadoutAction.Utility));
                     break;
 
                 default:

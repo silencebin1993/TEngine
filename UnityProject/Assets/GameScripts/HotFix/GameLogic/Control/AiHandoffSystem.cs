@@ -126,6 +126,18 @@ namespace GameLogic.Control
 
         // ── 状态 ────────────────────────────────────────────
 
+        /// <summary>被钉成永久原地守备的单位上限。见 <see cref="RememberParkedHold"/>。</summary>
+        private const int MaxParkedHolds = 16;
+
+        /// <summary>一条"我们钉的"原地守备。记命令本体是为了与玩家后来下的命令区分开。</summary>
+        private struct ParkedHold
+        {
+            public SimEntityId Unit;
+            public UnitCommand Command;
+        }
+
+        private readonly List<ParkedHold> _parkedHolds = new List<ParkedHold>(MaxParkedHolds);
+
         private struct HandoffRecord
         {
             public SimEntityId Unit;
@@ -187,6 +199,8 @@ namespace GameLogic.Control
             HandoffCount = 0;
             BufferedHandoffCount = 0;
             BufferExpiredCount = 0;
+            HoldGroundHandoffCount = 0;
+            _parkedHolds.Clear();
             SafePositionRescueCount = 0;
             LastContinuation = HandoffContinuation.None;
             LastHandoffUnit = SimEntityId.None;
@@ -261,10 +275,23 @@ namespace GameLogic.Control
             bool ourGuardStillOn = recordIndex >= 0 && _records[recordIndex].GuardIssued &&
                                    CommandMatches(previous, _records[recordIndex].IssuedCommand);
 
+            // 2026-09-13：区分「玩家的编队命令」和「上一次交还我们自己钉下的原地守备」。
+            // 两者在内核里长得一模一样（都是 Commanded + Guard），但含义相反：
+            // 前者是玩家的明确意图，必须原样复活；后者只是上一次放手的落点，
+            // 这一次玩家已经把它开到别处了，再"延续"回去等于把单位拉回旧守备点。
+            // 不在接管那一刻清掉它，是因为此刻它的 IntentSource 已是 Player，
+            // ClearCommand 会被内核拒绝（那条拒绝正是"绝不夺走玩家直控实体"的保护）。
+            bool parkedByUs = TryGetParkedHold(previous, out UnitCommand parkedHold) &&
+                              CommandMatches(previous, parkedHold);
+            if (parkedByUs)
+            {
+                DropParkedHold(previous);
+            }
+
             // 接管前带着真命令 → 内核已经把 IntentSource 恢复成 Commanded，命令原样复活。
             // 这一条**本来就成立**，本系统只登记不干预：在这里再下一条缓冲命令会把玩家的编队命令覆盖掉，
             // 那正好是 GDD §7.3「离开后单位仍能可靠完成明确命令」的反面。
-            if (state.IntentSource == IntentSource.Commanded && !ourGuardStillOn)
+            if (state.IntentSource == IntentSource.Commanded && !ourGuardStillOn && !parkedByUs)
             {
                 DropRecord(previous, clearCommand: false);
                 LastContinuation = HandoffContinuation.ResumeCommand;
@@ -418,9 +445,27 @@ namespace GameLogic.Control
         }
 
         /// <summary>
-        /// 撤掉一条缓冲并把单位交还 AI。
-        /// **只撤自己下的那一条**：缓冲期间玩家完全可能给它下了新的编队命令，
-        /// 把那条一起清掉就是"RTS 命令莫名其妙被吞"，而且只在接管刚结束的那 1.5 秒里复现。
+        /// 2026-09-13 试玩反馈（产品决策，可推翻）：**缓冲结束后不再放回自由 AI，改为永久原地守备**。
+        ///
+        /// 玩家的原话是「切换角色或者战术视角，先暂时用简单的 AI 逻辑（原地不动但是持续攻击）」。
+        /// 原先缓冲一过就 <c>ClearCommand</c> → 落回 <c>JobAIIntent</c>，单位按行为原型自己去追人，
+        /// 于是「我刚放下的那具身体跑哪去了」成了试玩里最常见的失控感来源。
+        ///
+        /// 守备命令**不接管战斗**——<c>SimWorld.ResolveMinionCombat</c> 对 Commanded 单位照常结算攻击
+        /// （M2-02 已把那里的判据从「是 AI」改成「不是玩家直控」），所以"原地不动"不等于"不还手"。
+        /// 副作用是它保持 <c>IntentSource.Commanded</c>，因此**继续留在 RTS 选择集里、可被重新下令**，
+        /// 这正好也是玩家报的另一条问题（放下的身体在战术视角选不中）想要的结果。
+        ///
+        /// 保留 1.5s 缓冲的延续语义不变（走完 Advance/Disengage 那一段再停），只改"之后去哪"。
+        /// </summary>
+        public const bool HoldGroundAfterHandoff = true;
+
+        /// <summary>
+        /// 结束一条缓冲。<see cref="HoldGroundAfterHandoff"/> 为真时把它换成一条**原地**守备，
+        /// 否则撤掉命令、交还自由 AI（原 M2-04a 行为）。
+        ///
+        /// **只动自己下的那一条**：缓冲期间玩家完全可能给它下了新的编队命令，
+        /// 把那条一起覆盖就是"RTS 命令莫名其妙被吞"，而且只在接管刚结束的那 1.5 秒里复现。
         /// </summary>
         private void FinishRecord(int index)
         {
@@ -432,9 +477,95 @@ namespace GameLogic.Control
                 return;
             }
 
-            if (CommandMatches(record.Unit, record.IssuedCommand) && _sim.ClearCommand(record.Unit))
+            if (!CommandMatches(record.Unit, record.IssuedCommand))
+            {
+                return;
+            }
+
+            if (!HoldGroundAfterHandoff)
+            {
+                if (_sim.ClearCommand(record.Unit))
+                {
+                    BufferExpiredCount++;
+                }
+                return;
+            }
+
+            // 锚点取**此刻**的位置而不是缓冲开始时那个：Advance/Disengage 的延续正是要它往前走一段，
+            // 用旧锚点会让它走完之后再倒回去，看起来像被拉了一把。
+            if (_sim.World == null ||
+                !_sim.World.TryGetUnitControlState(record.Unit, out SimUnitControlState state) || !state.IsAlive)
+            {
+                return;
+            }
+
+            var hold = new UnitCommand
+            {
+                Kind = UnitCommandKind.Guard,
+                TargetPosition = state.Position,
+                TargetEntity = SimEntityId.None,
+                ArriveRadius = BufferArriveRadius,
+            };
+            _oneTarget[0] = record.Unit;
+            if (_sim.IssueCommand(_oneTarget, hold) > 0)
             {
                 BufferExpiredCount++;
+                HoldGroundHandoffCount++;
+                RememberParkedHold(record.Unit, hold);
+            }
+        }
+
+        /// <summary>缓冲结束后被钉成永久原地守备的次数。验收用。</summary>
+        public int HoldGroundHandoffCount { get; private set; }
+
+        /// <summary>当前被钉成原地守备的单位数。验收用。</summary>
+        public int ParkedHoldCount => _parkedHolds.Count;
+
+        /// <summary>
+        /// 记住"这条 Guard 是我们钉的"。上限与 <see cref="MaxPendingHandoffs"/> 同量级：
+        /// 同时被放下的身体不可能多——溢出时丢最早的一条，代价只是那一具下次交还被当成
+        /// 「延续玩家命令」（行为仍是原地守备，不会乱跑），是安全方向的失效。
+        /// </summary>
+        private void RememberParkedHold(SimEntityId unit, in UnitCommand hold)
+        {
+            for (int i = 0; i < _parkedHolds.Count; i++)
+            {
+                if (_parkedHolds[i].Unit == unit)
+                {
+                    _parkedHolds[i] = new ParkedHold { Unit = unit, Command = hold };
+                    return;
+                }
+            }
+            if (_parkedHolds.Count >= MaxParkedHolds)
+            {
+                _parkedHolds.RemoveAt(0);
+            }
+            _parkedHolds.Add(new ParkedHold { Unit = unit, Command = hold });
+        }
+
+        private bool TryGetParkedHold(SimEntityId unit, out UnitCommand hold)
+        {
+            for (int i = 0; i < _parkedHolds.Count; i++)
+            {
+                if (_parkedHolds[i].Unit == unit)
+                {
+                    hold = _parkedHolds[i].Command;
+                    return true;
+                }
+            }
+            hold = default;
+            return false;
+        }
+
+        private void DropParkedHold(SimEntityId unit)
+        {
+            for (int i = 0; i < _parkedHolds.Count; i++)
+            {
+                if (_parkedHolds[i].Unit == unit)
+                {
+                    _parkedHolds.RemoveAt(i);
+                    return;
+                }
             }
         }
 

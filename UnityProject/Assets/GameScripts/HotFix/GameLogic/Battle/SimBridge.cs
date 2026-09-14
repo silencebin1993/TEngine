@@ -270,6 +270,38 @@ namespace GameLogic.Battle
         /// 请求切换到稳定实体 ID。所有失败路径均在修改控制状态前返回；成功后只发布一次事件。
         /// 校验顺序固定为身份、存活、阵营、范围、冷却，保证调用方得到稳定失败原因。
         /// </summary>
+        /// <summary>
+        /// 把意识收回玩家本体（槽位 0）。2026-09-13 试玩反馈引入：切回战略视角时调用。
+        ///
+        /// **刻意不走 <see cref="RequestControlSwitch"/>**：那条路要过信号范围与切换冷却，
+        /// 而"回到自己身上"不是一次战术性接管——玩家把友军开到 30 米外再按 M，
+        /// 不该因为超出 18 米信号范围而卡在别人身体里。走内核的 Restore 语义（同读档恢复）。
+        ///
+        /// 返回 false 表示本来就在本体里、或本体不可用（死亡/未生成），调用方不需要分支——
+        /// 保持现状就是安全默认值。
+        /// </summary>
+        public bool ReturnControlToPlayerBody()
+        {
+            SimWorld w = World;
+            if (!_running || w == null || _backend == null)
+            {
+                return false;
+            }
+            if (!w.TryGetEntityId(SimConst.PlayerIndex, out SimEntityId playerBody) || !playerBody.IsValid)
+            {
+                return false;
+            }
+            if (_backend.ControlledUnitId == playerBody)
+            {
+                return false;
+            }
+            if (!_backend.TryGetUnitControlState(playerBody, out SimUnitControlState state) || !state.IsAlive)
+            {
+                return false;
+            }
+            return w.TryRestoreControlledUnit(playerBody) == ControlSwitchResult.Success;
+        }
+
         public ControlRequestResult RequestControlSwitch(SimEntityId targetId)
         {
             if (!_running || _backend == null) { return ControlRequestResult.SimulationNotRunning; }

@@ -2610,12 +2610,18 @@ namespace GameLogic.EditorTools
                        sporeLoadout.Origin == UnitLoadoutOrigin.ArchetypeDerived &&
                        myceliumLoadout.Origin == UnitLoadoutOrigin.ArchetypeDerived,
                     "两名友军都应派生出非空的原型装配");
-                Expect(sporeLoadout.ActionMask != myceliumLoadout.ActionMask,
-                    $"原型 {ArchetypeLoadoutTable.SporeArchetypeId} 与 {ArchetypeLoadoutTable.MyceliumArchetypeId} 的动作集应不同" +
-                    $"（掩码 {sporeLoadout.ActionMask} vs {myceliumLoadout.ActionMask}）");
-                Expect(sporeLoadout.HasAction(LoadoutAction.Utility) && !sporeLoadout.HasAction(LoadoutAction.Interact) &&
-                       myceliumLoadout.HasAction(LoadoutAction.Interact) && !myceliumLoadout.HasAction(LoadoutAction.Utility),
-                    "孢子应有功能位无交互位，菌丝体应有交互位无功能位");
+                // 2026-09-13 试玩反馈修正：两名友军的差异**不再用槽位掩码表达**。
+                // 原先菌丝体的第二件器官放在 Interact 槽，只是为了让掩码不同，可 Interact 至今恒判
+                // NoInteractTarget——玩家接管菌丝体时那个动作永远按不响，"动作集不同"在行为层是假的。
+                // 现在两者都用 Primary+Utility，真正的差异由器官 id 与内核形态承担（见 [16] 段的 Kind 断言）。
+                bool sporeHasPrimaryOrgan = sporeLoadout.TryGetOrgan(LoadoutAction.Primary, out UnitLoadoutOrgan sporeP);
+                bool myceliumHasPrimaryOrgan = myceliumLoadout.TryGetOrgan(LoadoutAction.Primary, out UnitLoadoutOrgan myceliumP);
+                Expect(sporeHasPrimaryOrgan && myceliumHasPrimaryOrgan && sporeP.OrganId != myceliumP.OrganId,
+                    $"原型 {ArchetypeLoadoutTable.SporeArchetypeId} 与 {ArchetypeLoadoutTable.MyceliumArchetypeId} 的主器官应不同" +
+                    $"（{(sporeHasPrimaryOrgan ? sporeP.OrganId : "(无)")} vs {(myceliumHasPrimaryOrgan ? myceliumP.OrganId : "(无)")}）");
+                Expect(sporeLoadout.HasAction(LoadoutAction.Utility) && myceliumLoadout.HasAction(LoadoutAction.Utility) &&
+                       !sporeLoadout.HasAction(LoadoutAction.Interact) && !myceliumLoadout.HasAction(LoadoutAction.Interact),
+                    "两名友军的第二个动作都应落在功能位；Interact 恒无目标，禁止把唯一的第二动作放进去");
                 Expect(sporeLoadout.HasAction(LoadoutAction.Move) && myceliumLoadout.HasAction(LoadoutAction.Move),
                     "移动动作不由器官提供，任何装配都应恒有");
 
@@ -2757,6 +2763,8 @@ namespace GameLogic.EditorTools
                 Expect(sporeBound && actions.ActionSet.OrganIdOf(LoadoutAction.Primary) == sporeOrgan.OrganId,
                     "孢子动作集里主动作绑定的器官 id 必须与它 loadout 里的那件一致");
                 int sporeMask = actions.ActionSet.ActionMask;
+                // 切到菌丝体之前先抓一份孢子的功能位器官，供下面比"同槽绑的器官不同"。
+                string sporeUtilityOrganId = actions.ActionSet.OrganIdOf(LoadoutAction.Utility);
 
                 // 孢子没有交互器官 → 交互槽必须明确是"没长"，不是"坏了"也不是"能按"。
                 Expect(!actions.ActionSet.CanRelease(LoadoutAction.Interact) &&
@@ -2799,8 +2807,15 @@ namespace GameLogic.EditorTools
                     "菌丝体动作集里主动作绑定的器官 id 必须与它 loadout 里的那件一致");
                 Expect(myceliumOrgan.OrganId != sporeOrgan.OrganId,
                     "两名友军的主器官本就不同——否则后面比什么都没意义");
-                Expect(actions.ActionSet.ActionMask != sporeMask,
-                    $"两个不同装配单位的可释放动作集应不同（孢子 {sporeMask} vs 菌丝体 {actions.ActionSet.ActionMask}）");
+                // 2026-09-13：org_cilia 从 Interact 挪到 Utility 后两者掩码同为 7，
+                // 但"接管不同单位打出不同的东西"这条验收的实质从来不是掩码不同，而是
+                // **同一个槽位绑的器官不同**。掩码只是当时最省事的代理指标，它会在
+                // 两个单位恰好占同样槽位时给出假阴性——现在就是这种情况。
+                string sporeUtility = sporeUtilityOrganId;
+                string myceliumUtility = actions.ActionSet.OrganIdOf(LoadoutAction.Utility);
+                Expect(!string.IsNullOrEmpty(sporeUtility) && !string.IsNullOrEmpty(myceliumUtility) &&
+                       sporeUtility != myceliumUtility,
+                    $"两名友军的功能位应绑不同器官（孢子 {sporeUtility ?? "(无)"} vs 菌丝体 {myceliumUtility ?? "(无)"}）");
 
                 int zonesBeforeMycelium = sim.LiveZoneCount;
                 Expect(actions.TryRelease(LoadoutAction.Primary, new float2(1f, 0f)),
@@ -3014,10 +3029,12 @@ namespace GameLogic.EditorTools
                 Expect(sporeAct.Kind != myceliumAct.Kind,
                     $"两者打出来的形态应不同（{sporeAct.Kind} vs {myceliumAct.Kind}）");
 
-                bool interactHas = myceliumLoadout.TryGetOrgan(LoadoutAction.Interact,
-                    out UnitLoadoutOrgan interactOrgan);
-                Expect(interactHas && OrganKernelActionTable.Resolve(interactOrgan.OrganId).IsValid,
-                    $"菌丝体的交互器官 {(interactHas ? interactOrgan.OrganId : "(无)")} 应是现役器官——" +
+                // 2026-09-13：org_cilia 从 Interact 槽移到 Utility（Interact 恒 NoInteractTarget，
+                // 放在那里等于给菌丝体一个永远按不响的动作）。断言随之改看功能位。
+                bool utilityHas = myceliumLoadout.TryGetOrgan(LoadoutAction.Utility,
+                    out UnitLoadoutOrgan utilityOrgan);
+                Expect(utilityHas && OrganKernelActionTable.Resolve(utilityOrgan.OrganId).IsValid,
+                    $"菌丝体的功能器官 {(utilityHas ? utilityOrgan.OrganId : "(无)")} 应是现役器官——" +
                     "退役 id 永远只会落到 NoKernelAction，引用它本身就是 bug");
 
                 // 三个量必须由器官推导出来。若它们是常数，"代价与器官对应"这条就是空话。
@@ -3514,13 +3531,21 @@ namespace GameLogic.EditorTools
                     $"同原型同参数、但从没被接管过的对照单位应已经在游走（对照 {twinDrift:F2} vs 被测 {heldDrift:F2}）" +
                     "——否则'没乱跑'只是因为这个原型本来就不动，什么都没证明");
 
+                // 2026-09-13 产品决策反转（AiHandoffSystem.HoldGroundAfterHandoff）：
+                // 缓冲到期不再撤命令交还自由 AI，而是**原地钉一条永久守备**。
+                // 玩家的原话是「切换角色或者战术视角，先暂时用简单的 AI 逻辑（原地不动但是持续攻击）」，
+                // 原行为（放回 JobAIIntent 自己去追人）在试玩里是最主要的失控感来源。
                 handoff.DebugAdvanceClock(AiHandoffSystem.HandoffBufferSeconds);
-                Expect(!sim.TryGetCommand(ally, out _) && SourceOf(ally) == IntentSource.AI,
-                    "缓冲到期必须撤掉守备命令并交还 AI——守备是持久命令，不撤就等于把单位永久钉在地上");
+                Expect(sim.TryGetCommand(ally, out UnitCommand parkedHold) &&
+                       parkedHold.Kind == UnitCommandKind.Guard &&
+                       SourceOf(ally) == IntentSource.Commanded,
+                    "缓冲到期应转成原地守备并保持 Commanded（这样它既不乱跑，又留在 RTS 选择集里可被重新下令）");
                 float2 afterExpire = PosOf(ally);
                 Step(60);
-                Expect(math.distance(PosOf(ally), afterExpire) > 1f,
-                    "到期之后它应真的重新按行为原型活动，而不是停在守备点上（证明确实回到了 AI）");
+                Expect(math.distance(PosOf(ally), afterExpire) < AiHandoffSystem.BufferArriveRadius + 0.5f,
+                    $"到期之后它应停在原地而不是重新游走（实际漂移 {math.distance(PosOf(ally), afterExpire):F2}）");
+                Expect(twinDrift > 1f,
+                    "对照：同原型、从没被接管过的单位仍在游走——证明'没乱跑'是守备造成的，不是这个原型本来就不动");
 
                 // ── C. 移动中退出 → 沿原方向再走一段（替代里程碑原文的"搬运"，见本方法注释）──
                 Expect(sim.ClearCommand(courier) || SourceOf(courier) == IntentSource.AI,
@@ -3593,8 +3618,18 @@ namespace GameLogic.EditorTools
                        handoff.BufferRemaining(ally) > AiHandoffSystem.HandoffBufferSeconds - 0.01f,
                     "重新放开应重新武装一个完整的缓冲窗口");
                 handoff.DebugAdvanceClock(AiHandoffSystem.HandoffBufferSeconds);
-                Expect(!sim.TryGetCommand(ally, out _) && SourceOf(ally) == IntentSource.AI,
-                    "重新武装的缓冲同样必须到期撤销，不得留下悬挂的守备命令");
+                Expect(sim.TryGetCommand(ally, out UnitCommand rearmedHold) &&
+                       rearmedHold.Kind == UnitCommandKind.Guard &&
+                       SourceOf(ally) == IntentSource.Commanded,
+                    "重新武装的缓冲到期后同样转成原地守备，不留悬挂的半截状态");
+                // 再接管一次并放开：钉下的守备**不得**被当成"玩家的编队命令"而走 ResumeCommand——
+                // 那会让它交还后被拉回上一次的守备点，而不是按这一次的退出情境判断。
+                Expect(sim.RequestControlSwitch(ally) == ControlRequestResult.Success,
+                    "应能再次接管这具已被钉住的身体");
+                Expect(sim.RequestControlSwitch(body) == ControlRequestResult.Success,
+                    "应能再次放开它");
+                Expect(handoff.LastContinuation != HandoffContinuation.ResumeCommand,
+                    $"我们自己钉的原地守备不是玩家命令，交还判定不该退化成延续命令（实际 {handoff.LastContinuation}）");
 
                 // ── G. 安全位置兜底（实施第 4 条）：先证不误伤，再证真能救 ──
                 var obstacles = new[]

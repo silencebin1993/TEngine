@@ -256,7 +256,9 @@ namespace GameLogic.UI.Battle
         {
             if (_playtestRect.width <= 0f)
             {
-                _playtestRect = new Rect(Screen.width - 450f, 12f, 438f, 184f);
+                // 230 而不是 184：多了「当前受控 / 候选数 / 上次 Tab 失败原因」两三行，
+                // 按 184 画会把「结束试玩」按钮挤出面板，主持人收不了尾。
+                _playtestRect = new Rect(Screen.width - 450f, 12f, 438f, 230f);
             }
             ImguiDragUtil.DrawDraggable(106, ref _playtestRect, "M2-06 固定试玩", "m2_06_playtest", id =>
             {
@@ -266,6 +268,7 @@ namespace GameLogic.UI.Battle
                 GUILayout.Label("3. 对固定大目标的 P / S 接点完成一次精准切离", _label);
                 GUILayout.Label("4. 退出接管并回到战略层继续下令", _label);
                 GUILayout.Label("应急键位卡：M 视角　Tab 接管　鼠标左/右键 操作　P 接点类别", _hint);
+                DrawControlSwitchDiagnostics(cell);
                 if (GUILayout.Button("结束试玩并返回菜单", GUILayout.Height(26f)))
                 {
                     cell.MarkAbandoned();
@@ -274,6 +277,53 @@ namespace GameLogic.UI.Battle
             });
 
             DrawConsciousnessTargetMarkers(cell);
+        }
+
+        /// <summary>
+        /// 2026-09-13 试玩反馈：Tab 按下去没反应时**玩家得不到任何信息**——
+        /// 接管候选只取「距当前受控单位 `SimBridge.ControlSignalRange`(18) 以内的存活友军」
+        /// （`SimWorld.GetControlCandidates`），跑远了候选就是空集，`RequestNextControlCandidate`
+        /// 返回 TargetNotFound 后静默收场。试玩门面板不画常规调试 HUD，所以这条反馈必须自带。
+        /// </summary>
+        private void DrawControlSwitchDiagnostics(CellStageFlow cell)
+        {
+            CellPlayerController player = cell.PlayerController;
+            if (player == null || cell.Sim == null)
+            {
+                return;
+            }
+
+            string body = cell.Sim.ControllingPlayerBody ? "玩家本体" : "友军（已接管）";
+            GUILayout.Label($"当前受控：{body}　可接管候选：{player.LastControlCandidateCount} 个" +
+                            $"（仅统计 {cell.Sim.ControlSignalRange:F0} 米内的存活友军）", _hint);
+
+            if (player.LastControlSwitchResult != BinGames.Sim.ControlRequestResult.Success)
+            {
+                GUILayout.Label($"<color=#FFB060>上次 Tab 未生效：{ControlResultLabel(player.LastControlSwitchResult)}</color>", _hint);
+            }
+        }
+
+        private static string ControlResultLabel(BinGames.Sim.ControlRequestResult result)
+        {
+            switch (result)
+            {
+                case BinGames.Sim.ControlRequestResult.TargetNotFound:
+                    return "信号范围内没有可接管的友军——走近一点再按";
+                case BinGames.Sim.ControlRequestResult.OutOfSignalRange:
+                    return "目标超出接管信号范围";
+                case BinGames.Sim.ControlRequestResult.TargetDead:
+                    return "目标已死亡";
+                case BinGames.Sim.ControlRequestResult.TargetNotFriendly:
+                    return "目标不是友军";
+                case BinGames.Sim.ControlRequestResult.CooldownActive:
+                    return "接管冷却中";
+                case BinGames.Sim.ControlRequestResult.CurrentUnitUnavailable:
+                    return "当前受控单位已失效";
+                case BinGames.Sim.ControlRequestResult.SimulationNotRunning:
+                    return "模拟未运行";
+                default:
+                    return result.ToString();
+            }
         }
 
         private void DrawConsciousnessTargetMarkers(CellStageFlow cell)

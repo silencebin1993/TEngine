@@ -244,6 +244,9 @@ namespace GameLogic.Stage.CellStage
             SetupSim();
             // M2-01：镜头状态机要读场地半径做平移边界，所以必须在 SetupSim 之后绑定。
             SetupCameraDirector();
+            // CellStageFlow 实例跨局复用（GameRoot 只注册一个），视角沿检测的上一帧值必须跟着
+            // Bind 一起回到 Direct，否则上一局停在战略视角会让这一局第一次切视角漏掉交还。
+            _lastViewMode = ViewMode.Direct;
             // Edit Mode 验收只建立模拟并验证纯逻辑，不具备运行时资源模块生命周期。
             // Editor Play 与 Player 中 Application.isPlaying 均为 true，功能美术加载路径保持不变。
             if (Application.isPlaying)
@@ -1200,6 +1203,7 @@ namespace GameLogic.Stage.CellStage
             HandleStrategicPauseInput();
             InputRouter.SetGameplayPaused(_paused, _strategicPause);
             _cameraDirector?.Tick(_paused);
+            ReturnControlOnStrategyView();
             // M2-02：选择与命令同样要在暂停早退之前——"暂停下令后恢复顺序稳定"是它的验收项，
             // 而下令这件事本身必须在冻结期间还能发生。
             _squadCommands?.Tick(_paused);
@@ -1736,6 +1740,49 @@ namespace GameLogic.Stage.CellStage
             // 被大型目标吞噬 vs 生命耗尽，目前无法从内核区分，
             // 统一走"生命耗尽"。TODO(内核): DeathEvent 里带上致死来源类型。
             return "health";
+        }
+
+        /// <summary>上一帧的镜头状态，用来识别"刚进入战略视角"这一次沿。</summary>
+        private ViewMode _lastViewMode = ViewMode.Direct;
+
+        /// <summary>
+        /// 2026-09-13 试玩反馈（产品决策，可推翻）：**进入战略视角时把意识收回玩家本体**。
+        ///
+        /// 玩家报的是「直控的角色切换到战术视图不能再选择和下令了」。根因是内核与热更层两处
+        /// 都把 <c>IntentSource == Player</c> 的那一个排除在选择集之外（`SimWorld.MatchesPick`、
+        /// `SquadCommandSystem.IsSelectable`，M2-02 立的规矩，理由是"两套输入抢同一个单位"）。
+        /// 那条规矩本身是对的，问题在于**玩家人在战略视角时根本没有第二套输入**——
+        /// 直控域这时不持有输入所有权，那一个单位却还挂着"玩家正在开"的牌子。
+        ///
+        /// 所以不去松动选择集的判据（松动它就真的会出现两套输入抢一个单位），
+        /// 而是让"进战略视角"这件事本身把友军交还：交还后它走
+        /// <see cref="AiHandoffSystem"/> 的既有交还路径 → 原地守备 → 自然回到选择集、可被下令。
+        /// 玩家本体不受影响（它就是玩家的化身，RTS 指挥自己没有意义，
+        /// 而且 M2-03b 的 Carrier 自动开火闸门要靠 `ControllingPlayerBody` 保持为真）。
+        /// </summary>
+        private void ReturnControlOnStrategyView()
+        {
+            if (_cameraDirector == null)
+            {
+                return;
+            }
+
+            ViewMode mode = _cameraDirector.Mode;
+            ViewMode previous = _lastViewMode;
+            _lastViewMode = mode;
+
+            // 只在"刚切进战略视角"那一帧做一次。放在过渡结束后而不是按下 M 的那一刻：
+            // 过渡期间输入本来就全部冻结，提前交还只会让镜头还在飞的时候单位就开始自己动。
+            if (mode != ViewMode.Strategy || previous == ViewMode.Strategy)
+            {
+                return;
+            }
+            if (_sim == null || !_sim.Running || _sim.ControllingPlayerBody)
+            {
+                return;
+            }
+
+            _sim.ReturnControlToPlayerBody();
         }
 
         public bool IsRunning => _running;
