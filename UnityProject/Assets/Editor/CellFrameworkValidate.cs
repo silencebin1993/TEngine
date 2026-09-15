@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using BinGames.Sim;
 using GameLogic.Battle;
+using GameLogic.Battle.Feedback;
 using GameLogic.Cards;
 using GameLogic.Command;
 using GameLogic.Command.Formation;
@@ -91,6 +92,7 @@ namespace GameLogic.EditorTools
                 ValidateWildOrganLoot();
                 ValidateTemplateUiQueries();
                 ValidateFormationDomainModel();
+                ValidateFormationCommandQueue();
             }
             catch (Exception e)
             {
@@ -2568,6 +2570,156 @@ namespace GameLogic.EditorTools
             Expect(queueFormation.Doctrine == FormationDoctrine.None, "新编队教义默认应为 None");
             queueFormation.Doctrine = FormationDoctrine.Vanguard;
             Expect(queueFormation.Doctrine == FormationDoctrine.Vanguard, "Doctrine 应可读写");
+        }
+
+        /// <summary>
+        /// M4-02：命令队列与优先级。在 M4-01 的等待队列占位（[33] 验收 5）基础上补齐
+        /// 排队/覆盖/中断/完成/失败原因五个概念的真实状态机，以及 Attack/OrganCategory 死亡自动失败
+        /// 与视觉反馈颜色覆盖面。详见 production/session-state/preflight-decisions.md「M4-02」的
+        /// D1~D7 与验收映射——本方法逐条对应验收映射 2~7（验收 1 是回归，靠 [33] 不变红验证，
+        /// 这里只做一次独立复检）。
+        /// </summary>
+        private static void ValidateFormationCommandQueue()
+        {
+            Line("\n[34] 命令队列与优先级（M4-02）");
+
+            var registry = new FormationRegistry();
+            var entityA = new SimEntityId(5001);
+            var entityDeath = new SimEntityId(5002);
+
+            // 验收 1（回归复检）：EnqueueCommand/PeekCommand/PendingCommandCount 三个 API 对外行为
+            // 必须与 [33] 验收 5 完全一致——底层换成按 Priority 排序的 List 不改变这三者的语义。
+            Formation regression = registry.CreateFormation();
+            Expect(regression.PendingCommandCount == 0, "回归：新编队命令队列应为空");
+            regression.EnqueueCommand(new FormationCommand(FormationCommand.CommandKind.Move, targetPosition: new float2(1f, 2f)));
+            regression.EnqueueCommand(new FormationCommand(FormationCommand.CommandKind.Attack, targetEntity: entityA));
+            Expect(regression.PendingCommandCount == 2, "回归：EnqueueCommand 两次后计数应为 2");
+            bool regressionPeeked = regression.PeekCommand(out FormationCommand regressionHead);
+            Expect(regressionPeeked && regressionHead.Kind == FormationCommand.CommandKind.Move,
+                "回归：PeekCommand 应返回队首（先入的 Move）");
+            Expect(regression.PendingCommandCount == 2, "回归：PeekCommand 不应出队，计数应保持不变");
+            Expect(regression.ActiveCommand == null, "回归：EnqueueCommand 绝不能自动激活 ActiveCommand");
+
+            // 验收 2：覆盖（IssueCommand）。先排一条待验证覆盖会清空等待队列，
+            // 再 Issue 两次验证旧 entry 被标记 Interrupted/PreemptedByOverride、新命令直接 Active。
+            Formation issueFormation = registry.CreateFormation();
+            issueFormation.EnqueueCommand(new FormationCommand(FormationCommand.CommandKind.Guard, targetPosition: new float2(0f, 0f)));
+            issueFormation.IssueCommand(new FormationCommand(FormationCommand.CommandKind.Move, targetPosition: new float2(1f, 1f)));
+            Expect(issueFormation.ActiveCommand != null
+                && issueFormation.ActiveCommand.Command.Kind == FormationCommand.CommandKind.Move
+                && issueFormation.ActiveCommand.State == FormationCommandState.Active,
+                "IssueCommand(Move) 后 ActiveCommand 应是 Move 且状态 Active");
+            Expect(issueFormation.PendingCommandCount == 0, "IssueCommand 应清空等待队列（覆盖不是追加）");
+
+            FormationCommandEntry issuePrevious = issueFormation.ActiveCommand;
+            issueFormation.IssueCommand(new FormationCommand(FormationCommand.CommandKind.Attack, targetEntity: entityA));
+            Expect(issuePrevious.State == FormationCommandState.Interrupted
+                && issuePrevious.FailReason == FormationCommandFailReason.PreemptedByOverride,
+                "被覆盖的旧 entry 应标记 Interrupted 且 FailReason=PreemptedByOverride");
+            Expect(issueFormation.ActiveCommand.Command.Kind == FormationCommand.CommandKind.Attack
+                && issueFormation.ActiveCommand.State == FormationCommandState.Active,
+                "覆盖后新命令应直接设为 ActiveCommand");
+
+            // 验收 3：优先级排序。三条不同 Priority 乱序入队，激活顺序应是 5→3→1 而不是入队顺序。
+            Formation priorityFormation = registry.CreateFormation();
+            priorityFormation.EnqueueCommand(new FormationCommand(FormationCommand.CommandKind.Move, targetPosition: new float2(0f, 0f), priority: 1));
+            priorityFormation.EnqueueCommand(new FormationCommand(FormationCommand.CommandKind.Attack, targetEntity: entityA, priority: 5));
+            priorityFormation.EnqueueCommand(new FormationCommand(FormationCommand.CommandKind.Guard, targetPosition: new float2(0f, 0f), priority: 3));
+
+            var activationOrder = new List<FormationCommand.CommandKind>();
+            for (int i = 0; i < 3; i++)
+            {
+                priorityFormation.TryActivateNextPending();
+                Expect(priorityFormation.ActiveCommand != null, $"第 {i + 1} 轮应有 ActiveCommand 可记录");
+                if (priorityFormation.ActiveCommand != null)
+                {
+                    activationOrder.Add(priorityFormation.ActiveCommand.Command.Kind);
+                }
+                priorityFormation.CompleteActiveCommand();
+            }
+            Expect(activationOrder.Count == 3
+                && activationOrder[0] == FormationCommand.CommandKind.Attack
+                && activationOrder[1] == FormationCommand.CommandKind.Guard
+                && activationOrder[2] == FormationCommand.CommandKind.Move,
+                "激活顺序应按 Priority 降序（5→3→1），而不是入队顺序");
+
+            // 验收 4：完成/失败/中断三态各触发一次，且每次终结后若队列非空应自动提升下一条为 Active。
+            Formation completeFormation = registry.CreateFormation();
+            completeFormation.EnqueueCommand(new FormationCommand(FormationCommand.CommandKind.Move, targetPosition: new float2(0f, 0f)));
+            completeFormation.EnqueueCommand(new FormationCommand(FormationCommand.CommandKind.Guard, targetPosition: new float2(0f, 0f)));
+            completeFormation.TryActivateNextPending();
+            FormationCommandEntry completeFirst = completeFormation.ActiveCommand;
+            Expect(completeFirst != null && completeFirst.Command.Kind == FormationCommand.CommandKind.Move,
+                "本项前置：同优先级应按入队顺序（FIFO）先激活 Move");
+            completeFormation.CompleteActiveCommand();
+            Expect(completeFirst.State == FormationCommandState.Completed, "CompleteActiveCommand 应把旧 entry 状态改为 Completed");
+            Expect(completeFormation.ActiveCommand != null
+                && completeFormation.ActiveCommand.Command.Kind == FormationCommand.CommandKind.Guard
+                && completeFormation.ActiveCommand.State == FormationCommandState.Active,
+                "Complete 后应自动提升下一条排队命令为 Active（TryActivateNextPending 联动）");
+
+            Formation failFormation = registry.CreateFormation();
+            failFormation.EnqueueCommand(new FormationCommand(FormationCommand.CommandKind.Move, targetPosition: new float2(0f, 0f)));
+            failFormation.EnqueueCommand(new FormationCommand(FormationCommand.CommandKind.Retreat, targetPosition: new float2(0f, 0f)));
+            failFormation.TryActivateNextPending();
+            FormationCommandEntry failFirst = failFormation.ActiveCommand;
+            failFormation.FailActiveCommand(FormationCommandFailReason.Cancelled);
+            Expect(failFirst.State == FormationCommandState.Failed && failFirst.FailReason == FormationCommandFailReason.Cancelled,
+                "FailActiveCommand 应把旧 entry 标记 Failed 且写入对应 FailReason");
+            Expect(failFormation.ActiveCommand != null
+                && failFormation.ActiveCommand.Command.Kind == FormationCommand.CommandKind.Retreat
+                && failFormation.ActiveCommand.State == FormationCommandState.Active,
+                "Fail 后应自动提升下一条排队命令为 Active");
+
+            Formation interruptFormation = registry.CreateFormation();
+            interruptFormation.EnqueueCommand(new FormationCommand(FormationCommand.CommandKind.Guard, targetPosition: new float2(0f, 0f)));
+            interruptFormation.EnqueueCommand(new FormationCommand(FormationCommand.CommandKind.Occupy, targetPosition: new float2(0f, 0f)));
+            interruptFormation.TryActivateNextPending();
+            FormationCommandEntry interruptFirst = interruptFormation.ActiveCommand;
+            interruptFormation.InterruptActiveCommand();
+            Expect(interruptFirst.State == FormationCommandState.Interrupted && interruptFirst.FailReason == FormationCommandFailReason.Cancelled,
+                "InterruptActiveCommand 默认 reason 应为 Cancelled");
+            Expect(interruptFormation.ActiveCommand != null
+                && interruptFormation.ActiveCommand.Command.Kind == FormationCommand.CommandKind.Occupy
+                && interruptFormation.ActiveCommand.State == FormationCommandState.Active,
+                "Interrupt 后应自动提升下一条排队命令为 Active");
+
+            // 验收 5：Attack/OrganCategory 死亡自动失败。编队 A 有成员 X，编队 B 的 Active 命令瞄着 X，
+            // HandleMemberDeath(X) 后编队 A 不再含 X，且编队 B 自动 Failed(InvalidTarget)。
+            Formation formationA = registry.CreateFormation();
+            Formation formationB = registry.CreateFormation();
+            formationA.AddMember(entityDeath);
+            formationB.IssueCommand(new FormationCommand(FormationCommand.CommandKind.OrganCategory, targetEntity: entityDeath));
+            Expect(formationB.ActiveCommand != null && formationB.ActiveCommand.State == FormationCommandState.Active,
+                "本项前置：formationB 应有一条 Active 的 OrganCategory 命令瞄着 entityDeath");
+
+            registry.HandleMemberDeath(entityDeath);
+            Expect(!formationA.IsMember(entityDeath), "死亡成员应从 formationA 移除（M4-01 既有行为不回归）");
+            Expect(formationB.ActiveCommand != null
+                && formationB.ActiveCommand.State == FormationCommandState.Failed
+                && formationB.ActiveCommand.FailReason == FormationCommandFailReason.InvalidTarget,
+                "Attack/OrganCategory 命令的目标死亡应自动 Failed(InvalidTarget)");
+
+            // 验收 6：站桩命令（Guard/Occupy/Ambush）永不自动终结，只能被显式 Interrupt/Fail/Complete/覆盖终止。
+            Formation guardFormation = registry.CreateFormation();
+            guardFormation.IssueCommand(new FormationCommand(FormationCommand.CommandKind.Guard, targetPosition: new float2(5f, 5f)));
+            Expect(guardFormation.ActiveCommand != null && guardFormation.ActiveCommand.State == FormationCommandState.Active,
+                "本项前置：Guard 命令应处于 Active");
+            registry.HandleMemberDeath(new SimEntityId(9999));
+            registry.HandleMemberDeath(SimEntityId.None);
+            Expect(guardFormation.ActiveCommand != null && guardFormation.ActiveCommand.State == FormationCommandState.Active,
+                "站桩命令应永不自动终结（无关死亡信号、纯查询都不应改变其状态）");
+
+            // 验收 7：视觉反馈覆盖面。8 种 CommandKind 都应有对应颜色条目，且互不重复，不走真实 OnGUI 渲染。
+            var allKinds = (FormationCommand.CommandKind[])Enum.GetValues(typeof(FormationCommand.CommandKind));
+            Expect(allKinds.Length == 8, "本项前置：CommandKind 应恰好 8 种");
+            foreach (FormationCommand.CommandKind kind in allKinds)
+            {
+                Expect(FormationCommandOverlay.KindColors.ContainsKey(kind), $"视觉反馈颜色查表应覆盖 CommandKind.{kind}");
+            }
+            Expect(FormationCommandOverlay.KindColors.Count == 8, "颜色查表应恰好覆盖全部 8 种 CommandKind，不多不少");
+            var distinctColors = new HashSet<Color>(FormationCommandOverlay.KindColors.Values);
+            Expect(distinctColors.Count == 8, "8 种 CommandKind 对应的颜色应互不重复");
         }
 
         /// <summary>

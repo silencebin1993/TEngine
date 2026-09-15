@@ -36,13 +36,33 @@ namespace GameLogic.Command.Formation
             return id != null && _formations.TryGetValue(id, out Formation formation) ? formation : null;
         }
 
-        /// <summary>真实入口：遍历所有编队，把这个已死亡的成员从成员集与脱队集里彻底清掉。
+        /// <summary>真实入口：遍历所有编队，把这个已死亡的成员从成员集与脱队集里彻底清掉；随后（M4-02）
+        /// 再检查是否有编队正带着 Attack/OrganCategory 命令瞄着这个刚死的目标——有则自动
+        /// <see cref="FormationCommandFailReason.InvalidTarget"/> 失败（见 D4/D5，
+        /// <see cref="FormationCommand.CommandKind"/> 文档）。
         /// 接线时机见类型注释——查无此成员的编队直接跳过，对不存在的 id 整体调用是安全的 no-op。</summary>
         public void HandleMemberDeath(SimEntityId entity)
         {
             foreach (Formation formation in _formations.Values)
             {
                 formation.RemoveMember(entity);
+            }
+
+            foreach (Formation formation in _formations.Values)
+            {
+                FormationCommandEntry active = formation.ActiveCommand;
+                if (active == null || active.State != FormationCommandState.Active)
+                {
+                    continue;
+                }
+
+                FormationCommand.CommandKind kind = active.Command.Kind;
+                bool isTargetedAttack = kind == FormationCommand.CommandKind.Attack
+                    || kind == FormationCommand.CommandKind.OrganCategory;
+                if (isTargetedAttack && active.Command.TargetEntity == entity)
+                {
+                    formation.FailActiveCommand(FormationCommandFailReason.InvalidTarget);
+                }
             }
         }
     }

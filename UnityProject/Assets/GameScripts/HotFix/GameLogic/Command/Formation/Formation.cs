@@ -21,10 +21,18 @@ namespace GameLogic.Command.Formation
 
         private readonly HashSet<SimEntityId> _members = new HashSet<SimEntityId>();
         private readonly HashSet<SimEntityId> _detachedMembers = new HashSet<SimEntityId>();
-        private readonly Queue<FormationCommand> _commands = new Queue<FormationCommand>();
+
+        /// <summary>M4-02：等待队列，按 Priority 降序排列（同优先级按入队顺序，稳定排序），
+        /// 只含尚未激活的命令——<see cref="ActiveCommand"/> 不在这个列表里。这是 M4-01
+        /// "EnqueueCommand 绝不自动激活"这条回归约束（见 CellFrameworkValidate [33] 验收 5）
+        /// 成立的根本原因：底层换成 List 只是为了排序，Enqueue/Peek/Count 三个公开方法对外行为不变。</summary>
+        private readonly List<FormationCommandEntry> _pendingCommands = new List<FormationCommandEntry>();
 
         public IReadOnlyCollection<SimEntityId> Members => _members;
         public IReadOnlyCollection<SimEntityId> DetachedMembers => _detachedMembers;
+
+        /// <summary>M4-02：当前正在执行的命令，空闲时为 null。</summary>
+        public FormationCommandEntry ActiveCommand { get; private set; }
 
         public Formation(string id)
         {
@@ -75,24 +83,120 @@ namespace GameLogic.Command.Formation
             return _detachedMembers.Contains(entity);
         }
 
-        /// <summary>命令队列占位：只提供 Enqueue/Peek/Count，不做去重/覆盖/中断/失败原因（M4-02 的事）。</summary>
+        /// <summary>排队：按 Priority 降序插入等待队列（同优先级按入队顺序，稳定排序），
+        /// 绝不碰 <see cref="ActiveCommand"/>——不自动激活是 [33] 验收 5 的硬约束。</summary>
         public void EnqueueCommand(FormationCommand command)
         {
-            _commands.Enqueue(command);
+            var entry = new FormationCommandEntry(command);
+            int insertIndex = _pendingCommands.Count;
+            for (int i = 0; i < _pendingCommands.Count; i++)
+            {
+                if (_pendingCommands[i].Command.Priority < command.Priority)
+                {
+                    insertIndex = i;
+                    break;
+                }
+            }
+
+            _pendingCommands.Insert(insertIndex, entry);
         }
 
+        /// <summary>等待队首（不出队）。只看等待队列，不含 <see cref="ActiveCommand"/>——M4-01 语义不变。</summary>
         public bool PeekCommand(out FormationCommand command)
         {
-            if (_commands.Count == 0)
+            if (_pendingCommands.Count == 0)
             {
                 command = default;
                 return false;
             }
 
-            command = _commands.Peek();
+            command = _pendingCommands[0].Command;
             return true;
         }
 
-        public int PendingCommandCount => _commands.Count;
+        public int PendingCommandCount => _pendingCommands.Count;
+
+        /// <summary>覆盖：若已有 Active 命令，先标记 <see cref="FormationCommandState.Interrupted"/>/
+        /// <see cref="FormationCommandFailReason.PreemptedByOverride"/> 并清空等待队列（对齐
+        /// SquadCommandSystem 现有 UX——新下令替换旧排队，不是追加），再把新命令直接设为 Active。
+        /// 无 Active 命令时直接激活，不需要"中断"动作。</summary>
+        public void IssueCommand(FormationCommand command)
+        {
+            if (ActiveCommand != null && ActiveCommand.State == FormationCommandState.Active)
+            {
+                ActiveCommand.State = FormationCommandState.Interrupted;
+                ActiveCommand.FailReason = FormationCommandFailReason.PreemptedByOverride;
+            }
+
+            _pendingCommands.Clear();
+
+            var entry = new FormationCommandEntry(command)
+            {
+                State = FormationCommandState.Active,
+            };
+            ActiveCommand = entry;
+        }
+
+        /// <summary>中断：仅在存在 Active 命令时生效（否则安全 no-op），随后尝试提升等待队列队首。</summary>
+        public void InterruptActiveCommand(FormationCommandFailReason reason = FormationCommandFailReason.Cancelled)
+        {
+            if (ActiveCommand == null || ActiveCommand.State != FormationCommandState.Active)
+            {
+                return;
+            }
+
+            ActiveCommand.State = FormationCommandState.Interrupted;
+            ActiveCommand.FailReason = reason;
+            TryActivateNextPending();
+        }
+
+        /// <summary>完成：仅在存在 Active 命令时生效（否则安全 no-op），随后尝试提升等待队列队首。</summary>
+        public void CompleteActiveCommand()
+        {
+            if (ActiveCommand == null || ActiveCommand.State != FormationCommandState.Active)
+            {
+                return;
+            }
+
+            ActiveCommand.State = FormationCommandState.Completed;
+            TryActivateNextPending();
+        }
+
+        /// <summary>失败：仅在存在 Active 命令时生效（否则安全 no-op），随后尝试提升等待队列队首。
+        /// Attack/OrganCategory 目标死亡的自动失败通过这个方法接线，见
+        /// <see cref="FormationRegistry.HandleMemberDeath"/>。</summary>
+        public void FailActiveCommand(FormationCommandFailReason reason)
+        {
+            if (ActiveCommand == null || ActiveCommand.State != FormationCommandState.Active)
+            {
+                return;
+            }
+
+            ActiveCommand.State = FormationCommandState.Failed;
+            ActiveCommand.FailReason = reason;
+            TryActivateNextPending();
+        }
+
+        /// <summary>把等待队列队首提升为 Active 并从队列移除；仅在当前没有处于 Active 状态的命令时生效
+        /// （已有 Active 命令时返回 false，不会静默覆盖）。Interrupt/Complete/Fail 内部都会调用它；
+        /// 外部也可以在编队原本空闲、想把已排队的第一条命令激活时主动调用。</summary>
+        public bool TryActivateNextPending()
+        {
+            if (ActiveCommand != null && ActiveCommand.State == FormationCommandState.Active)
+            {
+                return false;
+            }
+
+            if (_pendingCommands.Count == 0)
+            {
+                return false;
+            }
+
+            FormationCommandEntry next = _pendingCommands[0];
+            _pendingCommands.RemoveAt(0);
+            next.State = FormationCommandState.Active;
+            ActiveCommand = next;
+            return true;
+        }
     }
 }

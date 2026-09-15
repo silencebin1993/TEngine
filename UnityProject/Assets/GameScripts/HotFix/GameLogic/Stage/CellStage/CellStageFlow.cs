@@ -107,6 +107,8 @@ namespace GameLogic.Stage.CellStage
         private SquadCommandSystem _squadCommands;
         /// <summary>M2-02 白模叠加层（选择框 / 选中环 / 命令线）。</summary>
         private Battle.Feedback.WhiteboxSquadOverlay _squadOverlay;
+        /// <summary>M4-02：编队命令状态的纯 IMGUI 反馈层，挂在同一个 __SquadOverlay GO 上。</summary>
+        private Battle.Feedback.FormationCommandOverlay _formationCommandOverlay;
         /// <summary>M2-04a：接管交还的延续、缓冲与安全位置。</summary>
         private Control.AiHandoffSystem _aiHandoff;
         private Battle.Feedback.WhiteboxAiHandoffOverlay _handoffOverlay;
@@ -413,6 +415,9 @@ namespace GameLogic.Stage.CellStage
             // M2-04a 调试显示挂在同一个 GO 上：Exit 整个销毁它，不多一条要单独清理的路径。
             _handoffOverlay = overlayGo.AddComponent<Battle.Feedback.WhiteboxAiHandoffOverlay>();
             _handoffOverlay.Bind(_sim, _aiHandoff);
+            // M4-02：编队命令视觉反馈，纯只读展示，数据源是 RegisterModules 里已注册好的 _formations。
+            _formationCommandOverlay = overlayGo.AddComponent<Battle.Feedback.FormationCommandOverlay>();
+            _formationCommandOverlay.Bind(_formations);
         }
 
         /// <summary>
@@ -2060,6 +2065,7 @@ namespace GameLogic.Stage.CellStage
                 }
                 _squadOverlay = null;
                 _handoffOverlay = null;
+                _formationCommandOverlay = null;
             }
             // M2-04a：先解绑交还系统再解绑指挥层——它订阅着控制权变更信号，
             // 留着会在下一局用上一局的编队字典去记录编队归属。
