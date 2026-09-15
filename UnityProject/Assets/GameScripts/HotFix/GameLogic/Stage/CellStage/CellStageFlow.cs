@@ -84,6 +84,7 @@ namespace GameLogic.Stage.CellStage
         private MetabolicSlice.Lineage.HomecomingRetrofitService _homecomingRetrofit;
         private MetabolicSlice.WildOrgan.WildOrganRegistry _wildOrgans;
         private MetabolicDigestionSystem _digestion;
+        private Command.Formation.FormationRegistry _formations;
         private CarrierBodyVisualPresenter _carrierBodyVisual;
         private StructuralVisualPresenter _structuralVisual;
         private EnvFluidBackground _envFluid;
@@ -220,6 +221,7 @@ namespace GameLogic.Stage.CellStage
         public MetabolicSlice.Lineage.GerminationChamberRegistry GerminationChambers => _germinationChambers;
         public MetabolicSlice.Lineage.HomecomingRetrofitService HomecomingRetrofit => _homecomingRetrofit;
         public MetabolicSlice.WildOrgan.WildOrganRegistry WildOrgans => _wildOrgans;
+        public Command.Formation.FormationRegistry Formations => _formations;
         public SimBridge Sim => _sim;
         public StatusSystem Status => _status;
         public AreaZoneSystem Zones => _zones;
@@ -453,6 +455,8 @@ namespace GameLogic.Stage.CellStage
             // 装/卸临时器官经 UnitLoadoutRegistry 新增的 SetTemporaryOrgan/ClearTemporaryOrgan。
             _wildOrgans = _hub.Register(new MetabolicSlice.WildOrgan.WildOrganRegistry());
             _digestion = _hub.Register(new MetabolicDigestionSystem());
+            // M4-01：编队领域模型——纯内存，与模板/谱系系统完全解耦（只存 SimEntityId，见类型注释）。
+            _formations = _hub.Register(new Command.Formation.FormationRegistry());
             // 战斗反馈表现层（story-002）：白模默认实现，只订阅 Signals，无需 Bind 依赖。
             _hub.Register(new CombatFeedbackPresenter());
             // 技能施放表现层（story-010）：与上面并列，管施放瞬间本身而非命中结算。

@@ -7,6 +7,7 @@ using BinGames.Sim;
 using GameLogic.Battle;
 using GameLogic.Cards;
 using GameLogic.Command;
+using GameLogic.Command.Formation;
 using GameLogic.Control;
 using GameLogic.Core;
 using GameLogic.MetabolicSlice.Blueprint;
@@ -89,6 +90,7 @@ namespace GameLogic.EditorTools
                 ValidateHomecomingRetrofit();
                 ValidateWildOrganLoot();
                 ValidateTemplateUiQueries();
+                ValidateFormationDomainModel();
             }
             catch (Exception e)
             {
@@ -2457,6 +2459,115 @@ namespace GameLogic.EditorTools
             otherChamber.OnEnter();
             otherChamber.Bind(sim, lineages, chamberLedger, null);
             Expect(otherChamber.Bindings.Count == 0, "不同萌生腔实例的绑定表应彼此独立，互不污染");
+        }
+
+        /// <summary>
+        /// M4-01：编队领域模型。<see cref="Formation"/>/<see cref="FormationRegistry"/> 只存
+        /// <see cref="SimEntityId"/>，绝不引用任何 <c>MetabolicSlice.*</c> 类型——这里用真实
+        /// <see cref="LineageRegistry.CommitTemplate"/> 提交一次新模板版本，证明编队身份对模板层的
+        /// 变化完全无感（压根没有引用关系可被波及），而不是只靠"没写字段"这一件事自证。
+        /// </summary>
+        private static void ValidateFormationDomainModel()
+        {
+            Line("\n[33] 编队领域模型（M4-01）");
+
+            var registry = new FormationRegistry();
+            Formation formation = registry.CreateFormation();
+            Expect(formation != null && !string.IsNullOrEmpty(formation.Id), "CreateFormation 应返回带 id 的新编队");
+            Expect(registry.GetFormation(formation.Id) == formation, "GetFormation 应能按 id 查回同一实例");
+            Expect(registry.AllFormations.Contains(formation), "AllFormations 应枚举出刚创建的编队");
+
+            // 验收 1：混编单位可加入同一队。两个任意来源的 SimEntityId 都能进同一个 Formation。
+            var entityA = new SimEntityId(1001);
+            var entityB = new SimEntityId(1002);
+            Expect(formation.AddMember(entityA), "entityA 首次加入应成功");
+            Expect(formation.AddMember(entityB), "entityB（不同来源）首次加入同一队应成功——混编");
+            Expect(formation.IsMember(entityA) && formation.IsMember(entityB), "两名混编成员都应能在 Members 里查到");
+            Expect(!formation.AddMember(entityA), "重复加入同一成员应返回 false（HashSet 去重语义）");
+
+            // 验收 2：模板变化不改变编队身份。真实提交一次新模板版本，Formation.Id/Members 应完全不变
+            // ——因为 Formation 从未持有任何模板/谱系引用（D2 的核心约束）。
+            OrganelleDef organelle = OrganelleCatalog.All.Values.FirstOrDefault(o => o.AttackMethod && !o.IsRetired);
+            List<string> geneIds = GeneCatalog.AllGeneIds.Take(2).ToList();
+            Expect(organelle != null, "本项前置：OrganelleCatalog 应至少有一条 AttackMethod 未退役器官");
+            Expect(geneIds.Count == 2, "本项前置：GeneCatalog 应至少有两条基因");
+            if (organelle != null && geneIds.Count == 2)
+            {
+                var blueprints = new BlueprintRegistry();
+                blueprints.Resolve(organelle.Id, BlueprintSourceKind.Organelle, 1f, 0f);
+                foreach (string g in geneIds)
+                {
+                    blueprints.Resolve(g, BlueprintSourceKind.Gene, 1f, 0f);
+                }
+
+                var lineages = new LineageRegistry();
+                lineages.Bind(blueprints);
+                lineages.CommitTemplate("lineage-formation", "assault", organelle.Id, geneIds, "keep_distance", out string commitErr);
+                Expect(commitErr == null, "本项前置：首次提交模板应成功");
+
+                string formationIdBefore = formation.Id;
+                var membersBefore = new HashSet<SimEntityId>(formation.Members);
+
+                lineages.CommitTemplate("lineage-formation", "assault", organelle.Id, geneIds, "escort", out string commitErr2);
+                Expect(commitErr2 == null, "本项前置：第二次提交（模板版本变化）应成功");
+
+                Expect(formation.Id == formationIdBefore, "模板版本变化后，编队 id 应完全不变（验收核心）");
+                Expect(formation.Members.Count == membersBefore.Count && membersBefore.All(formation.IsMember),
+                    "模板版本变化后，编队成员集合应完全不变（Formation 从未引用模板/谱系类型）");
+            }
+
+            // 验收 4：临时脱队状态。非成员调用应 no-op；成员脱队后仍在 Members 里；
+            // 移除成员后 IsDetached 应归假，防止 stale 状态残留。
+            var strayEntity = new SimEntityId(2001);
+            formation.SetDetached(strayEntity, true);
+            Expect(!formation.IsDetached(strayEntity) && !formation.IsMember(strayEntity),
+                "非成员调用 SetDetached 应 no-op，不允许把非成员标记为脱队");
+
+            formation.SetDetached(entityB, true);
+            Expect(formation.IsDetached(entityB) && formation.IsMember(entityB),
+                "成员脱队后应仍在 Members 里（脱队不等于移除）");
+
+            formation.SetDetached(entityB, false);
+            Expect(!formation.IsDetached(entityB) && formation.IsMember(entityB), "取消脱队应清掉标记但不影响成员身份");
+
+            // 验收 3：死亡成员被安全移除（含清 DetachedMembers），且跨编队生效；对不存在的 id 调用不抛异常。
+            Formation formationOther = registry.CreateFormation();
+            formationOther.AddMember(entityB);
+            formation.SetDetached(entityB, true);
+            Expect(formation.IsDetached(entityB), "本项前置：entityB 死亡前应处于脱队状态");
+
+            registry.HandleMemberDeath(entityB);
+            Expect(!formation.IsMember(entityB) && !formationOther.IsMember(entityB),
+                "死亡成员应从所有编队的 Members 里被移除（跨编队生效）");
+            Expect(!formation.IsDetached(entityB), "死亡成员移除后，DetachedMembers 也应一并清掉");
+            Expect(formation.IsMember(entityA), "死亡移除只影响目标成员，其余成员不受影响");
+
+            bool threw = false;
+            try
+            {
+                registry.HandleMemberDeath(new SimEntityId(9999));
+                registry.HandleMemberDeath(SimEntityId.None);
+            }
+            catch
+            {
+                threw = true;
+            }
+            Expect(!threw, "对不存在/无效的 id 调用 HandleMemberDeath 应是安全的 no-op，不抛异常");
+
+            // 验收 5：命令队列占位。EnqueueCommand 后计数递增，PeekCommand 不出队。
+            var queueFormation = registry.CreateFormation();
+            Expect(queueFormation.PendingCommandCount == 0, "新编队命令队列应为空");
+            queueFormation.EnqueueCommand(new FormationCommand(FormationCommand.CommandKind.Move, targetPosition: new float2(1f, 2f)));
+            queueFormation.EnqueueCommand(new FormationCommand(FormationCommand.CommandKind.Attack, targetEntity: entityA));
+            Expect(queueFormation.PendingCommandCount == 2, "EnqueueCommand 两次后计数应为 2");
+            bool peeked = queueFormation.PeekCommand(out FormationCommand head);
+            Expect(peeked && head.Kind == FormationCommand.CommandKind.Move, "PeekCommand 应返回队首（先入的 Move）");
+            Expect(queueFormation.PendingCommandCount == 2, "PeekCommand 不应出队，计数应保持不变");
+
+            // 教义字段：只是可读写字段，不实现任何行为差异。
+            Expect(queueFormation.Doctrine == FormationDoctrine.None, "新编队教义默认应为 None");
+            queueFormation.Doctrine = FormationDoctrine.Vanguard;
+            Expect(queueFormation.Doctrine == FormationDoctrine.Vanguard, "Doctrine 应可读写");
         }
 
         /// <summary>
