@@ -45,6 +45,10 @@ namespace GameLogic.Command.Formation
         private FormationRegistry _formations;
         private SimBridge _sim;
 
+        /// <summary>M4-05：直控接管/退出信号订阅。用 <see cref="SignalScope"/> 统一退订，
+        /// 写法照抄 <see cref="Cards.CardTriggerBus"/> 的 <c>GameModuleBase</c> 信号绑定范式。</summary>
+        private SignalScope _scope;
+
         private sealed class MemberRuntimeState
         {
             public int WaypointIndex;
@@ -71,6 +75,47 @@ namespace GameLogic.Command.Formation
             base.OnInit(hub);
             _formations = hub.Require<FormationRegistry>();
             _sim = hub.Require<SimBridge>();
+        }
+
+        /// <summary>M4-05：真订阅 <see cref="ControlledUnitChangedSignal"/>——这条线的核心价值就是
+        /// 真的接上，不允许绕过成"自检里手动调用模拟信号处理函数"。</summary>
+        public override void OnEnter()
+        {
+            base.OnEnter();
+            _scope = new SignalScope();
+            _scope.On<ControlledUnitChangedSignal>(OnControlledUnitChanged);
+        }
+
+        public override void OnExit()
+        {
+            base.OnExit();
+            _scope?.Dispose();
+            _scope = null;
+        }
+
+        /// <summary>M4-05 唯一的信号处理逻辑：接管方脱队、退出方回归。**只允许调用
+        /// <see cref="Formation.SetDetached"/>**，不得调用任何其它 <see cref="Formation"/>/
+        /// <see cref="FormationRegistry"/> 写方法——这是守住"不清空命令/不破坏搬运所有权"验收的唯一方式
+        /// （见 preflight-decisions.md D1）。找不到所属编队时（<see cref="FormationRegistry.FindFormationContaining"/>
+        /// 返回 null）两步都自然 no-op。</summary>
+        private void OnControlledUnitChanged(ControlledUnitChangedSignal signal)
+        {
+            if (_formations == null)
+            {
+                return;
+            }
+
+            if (signal.PreviousUnitId.IsValid)
+            {
+                Formation previousFormation = _formations.FindFormationContaining(signal.PreviousUnitId);
+                previousFormation?.SetDetached(signal.PreviousUnitId, false);
+            }
+
+            if (signal.CurrentUnitId.IsValid)
+            {
+                Formation currentFormation = _formations.FindFormationContaining(signal.CurrentUnitId);
+                currentFormation?.SetDetached(signal.CurrentUnitId, true);
+            }
         }
 
         public override void OnUpdate(float dt)
@@ -142,6 +187,15 @@ namespace GameLogic.Command.Formation
 
             foreach (SimEntityId member in formation.Members)
             {
+                // M4-05 D2：直控临时脱队的成员整段跳过（含卡死计时器/StuckTracker 状态），
+                // 防止玩家直控走远时被误判"卡住"进而触发重规划；取消脱队后下一帧自然重新进入
+                // 本遍历，纯状态机按当前实际位置重算目标，"回到合理队形"因此自然发生，不需要额外的
+                // "传送归队"逻辑。
+                if (formation.IsDetached(member))
+                {
+                    continue;
+                }
+
                 if (!_sim.TryGetPosition(member, out float2 pos))
                 {
                     continue;

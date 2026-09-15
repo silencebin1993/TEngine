@@ -95,6 +95,7 @@ namespace GameLogic.EditorTools
                 ValidateFormationCommandQueue();
                 ValidateFormationDoctrineProfiles();
                 ValidateFormationSharedPathing();
+                ValidateDirectControlDetachment();
             }
             catch (Exception e)
             {
@@ -3016,6 +3017,212 @@ namespace GameLogic.EditorTools
             // 验收 8：回归 [33]/[34]/[35]。本方法不改动它们的任何断言，靠 RunAll() 里三者继续跑、
             // 继续绿灯来验证，这里不重复断言内容。
             Line("  · [33]/[34]/[35] 回归由 RunAll() 统一跑，见对应方法本身，未在此处重复断言");
+        }
+
+        /// <summary>
+        /// M4-05：直控脱队与回归。详见 production/session-state/preflight-decisions.md「M4-05」的
+        /// D1~D4 与验收映射。核心边界：新代码只允许调用 <see cref="Formation.SetDetached"/>，不碰任何
+        /// 命令状态——验收 3 专门验这个。全部走真实链路：真实 <see cref="SimBridge.RequestControlSwitch"/>
+        /// 触发真实 <see cref="ControlledUnitChangedSignal"/> 发布，被真实注册在 <see cref="ModuleHub"/>
+        /// 上、真实订阅了信号的 <see cref="FormationMovementDriver"/> 接住——不是自检里手动调用模拟信号
+        /// 处理函数那种绕过真实接线的做法。
+        /// </summary>
+        private static void ValidateDirectControlDetachment()
+        {
+            Line("\n[37] 直控脱队与回归（M4-05）");
+
+            var hub = new ModuleHub();
+            var registry = hub.Register(new FormationRegistry());
+            var sim = hub.Register(new SimBridge());
+            hub.Register(new FormationMovementDriver());
+            hub.Enter();
+
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 64;
+            cfg.ArenaHalfExtent = 100f;
+            sim.Begin(cfg, Array.Empty<BehaviorArchetype>());
+            // 不受信号范围/冷却干扰——本组断言只关心脱队/回归标记，不关心 Tab 循环节奏。
+            sim.ConfigureControlSwitch(1_000_000f, 0f);
+
+            try
+            {
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(0f, 0f), Health = 20f, Radius = 0.5f,
+                    MaxSpeed = 5f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.Scripted, LogicId = 9101,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(2f, 0f), Health = 20f, Radius = 0.5f,
+                    MaxSpeed = 5f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.Scripted, LogicId = 9102,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(4f, 0f), Health = 20f, Radius = 0.5f,
+                    MaxSpeed = 5f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.Scripted, LogicId = 9103,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(6f, 0f), Health = 20f, Radius = 0.5f,
+                    MaxSpeed = 5f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.Scripted, LogicId = 9104,
+                });
+                sim.OnUpdate(0.01f); // 让 spawn 落地一帧（直接调用，不经过 hub，此时还没有编队）
+
+                SimSnapshot snap = sim.Snapshot;
+                SimEntityId unitX = FindEntityId(snap, 9101, out _);
+                SimEntityId unitY = FindEntityId(snap, 9102, out _);
+                SimEntityId unitZ = FindEntityId(snap, 9103, out _); // 非编队成员，用于验收 4
+                SimEntityId unitW = FindEntityId(snap, 9104, out _); // 另一个非编队成员，凑纯粹的"非成员→非成员"切换
+                Expect(unitX.IsValid && unitY.IsValid && unitZ.IsValid && unitW.IsValid,
+                    "本项前置：四个测试单位应拥有有效稳定 ID");
+
+                Formation formation = registry.CreateFormation();
+                formation.AddMember(unitX);
+                formation.AddMember(unitY);
+
+                // 前置：给编队一个 Active Move 命令，供验收 3 核对信号处理前后完全不变。
+                formation.IssueCommand(new FormationCommand(FormationCommand.CommandKind.Move,
+                    targetPosition: new float2(50f, 0f)));
+                FormationCommandEntry activeBefore = formation.ActiveCommand;
+                FormationCommand.CommandKind activeKindBefore = activeBefore.Command.Kind;
+                FormationCommandState activeStateBefore = activeBefore.State;
+                FormationCommandFailReason activeFailBefore = activeBefore.FailReason;
+
+                // 验收 1：接管即脱队。previous=玩家本体（非编队成员，no-op），current=unitX（编队成员，应脱队）。
+                Expect(sim.RequestControlSwitch(unitX) == ControlRequestResult.Success,
+                    "本项前置：真实接管 unitX 应成功（走 SimBridge.RequestControlSwitch，真实发布信号）");
+                Expect(formation.IsDetached(unitX),
+                    "验收 1：接管 unitX 后，FormationMovementDriver 收到真实信号应把它标记为脱队");
+                Expect(formation.IsMember(unitX) && formation.Members.Count == 2,
+                    "验收 1：脱队不是移除，成员集合应保持不变（不复制/不删除成员）");
+
+                // 验收 2：退出即回归。previous=unitX（应回归），current=unitY（编队成员，应脱队）。
+                Expect(sim.RequestControlSwitch(unitY) == ControlRequestResult.Success,
+                    "本项前置：真实切换到 unitY 应成功");
+                Expect(!formation.IsDetached(unitX), "验收 2：unitX 退出直控后应回归（IsDetached 归假）");
+                Expect(formation.IsDetached(unitY), "验收 2：unitY 被接管后应脱队");
+                Expect(formation.Members.Count == 2 && formation.IsMember(unitX) && formation.IsMember(unitY),
+                    "验收 2：两次信号处理后，成员集合应始终不变");
+
+                // 验收 3：命令不受影响。信号处理前后 ActiveCommand 的 Kind/State/FailReason 应完全没变。
+                FormationCommandEntry activeAfter = formation.ActiveCommand;
+                Expect(activeAfter != null && activeAfter.Command.Kind == activeKindBefore &&
+                       activeAfter.State == activeStateBefore && activeAfter.FailReason == activeFailBefore,
+                    "验收 3：接管/退出信号处理前后，编队 ActiveCommand 的 Kind/State/FailReason 都不应改变");
+
+                // 验收 4：非成员 no-op。先切到 unitZ——此时 previous=unitY 仍是编队成员，会合法回归
+                // （这是验收 2 逻辑的自然延伸，不是本项要测的东西）；真正的"非成员触发信号"场景要
+                // previous/current 都不是编队成员，所以再切一次到 unitW（unitZ→unitW，两者都不是成员）。
+                Expect(sim.RequestControlSwitch(unitZ) == ControlRequestResult.Success,
+                    "本项前置：真实切换到编队外的 unitZ 应成功（顺带验证 unitY 会合法回归）");
+                Expect(!formation.IsDetached(unitY), "本项前置：切出编队后 unitY 应回归（IsDetached 归假）");
+
+                bool threw = false;
+                int membersBeforeNonMember = formation.Members.Count;
+                bool unitXDetachedBefore = formation.IsDetached(unitX);
+                bool unitYDetachedBefore = formation.IsDetached(unitY);
+                try
+                {
+                    sim.RequestControlSwitch(unitW); // previous=unitZ、current=unitW，两者都不是编队成员
+                }
+                catch
+                {
+                    threw = true;
+                }
+                Expect(!threw, "验收 4：对非编队成员触发接管信号不应抛异常");
+                Expect(registry.FindFormationContaining(unitW) == null,
+                    "验收 4：FindFormationContaining 对非编队成员应返回 null");
+                Expect(formation.Members.Count == membersBeforeNonMember &&
+                       formation.IsDetached(unitX) == unitXDetachedBefore &&
+                       formation.IsDetached(unitY) == unitYDetachedBefore,
+                    "验收 4：previous/current 均非编队成员时，触发信号不应改动任何已有编队状态");
+            }
+            finally
+            {
+                hub.Exit(); // 真实走 OnExit：driver 真退订信号，sim.End() 收尾，避免污染后续自检。
+            }
+
+            // 验收 5：路径驱动跳过脱队成员——独立小场景，行为探针：真实推进 SimWorld 若干帧，
+            // 看两个成员的实际位置差异，而不是读驱动器的私有运行时字段。
+            ValidateDetachedMemberSkippedByPathing();
+
+            // 验收 6：回归 [33]/[34]/[35]/[36]。本方法不改动它们的任何断言，靠 RunAll() 里四者继续跑、
+            // 继续绿灯来验证，这里不重复断言内容。
+            Line("  · [33]/[34]/[35]/[36] 回归由 RunAll() 统一跑，见对应方法本身，未在此处重复断言");
+        }
+
+        /// <summary>[37] 验收 5 的独立场景：一个编队两名成员，一名标记脱队，另一名正常推进 Move 命令，
+        /// 真跑 60 帧后比较两者位置——未脱队成员应明显前移，脱队成员应原地不动（驱动器整段跳过它，
+        /// 不下发任何 <see cref="UnitCommand"/>）。</summary>
+        private static void ValidateDetachedMemberSkippedByPathing()
+        {
+            var hub = new ModuleHub();
+            var registry = hub.Register(new FormationRegistry());
+            var sim = hub.Register(new SimBridge());
+            hub.Register(new FormationMovementDriver());
+            hub.Enter();
+
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 64;
+            cfg.ArenaHalfExtent = 200f;
+            sim.Begin(cfg, Array.Empty<BehaviorArchetype>());
+
+            try
+            {
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(0f, 0f), Health = 20f, Radius = 0.5f,
+                    MaxSpeed = 5f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.Scripted, LogicId = 9201,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    // y 分量刻意远离 moving 成员的直线路径（约 (0,0)→(60,0)），避免两者物理接触/
+                    // 碰撞分离力把"没有收到任何命令"的脱队成员意外推动，产生假阳性位移。
+                    Position = new float2(2f, 30f), Health = 20f, Radius = 0.5f,
+                    MaxSpeed = 5f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.Scripted, LogicId = 9202,
+                });
+                sim.OnUpdate(0.01f); // 让 spawn 落地一帧
+
+                SimSnapshot snap0 = sim.Snapshot;
+                SimEntityId moving = FindEntityId(snap0, 9201, out _);
+                SimEntityId detached = FindEntityId(snap0, 9202, out _);
+                Expect(moving.IsValid && detached.IsValid, "本项前置：两个测试单位应拥有有效稳定 ID");
+
+                Formation formation = registry.CreateFormation();
+                formation.AddMember(moving);
+                formation.AddMember(detached);
+                formation.SetDetached(detached, true);
+
+                sim.TryGetPosition(detached, out float2 detachedBefore);
+
+                formation.IssueCommand(new FormationCommand(FormationCommand.CommandKind.Move,
+                    targetPosition: new float2(60f, 0f)));
+
+                for (int f = 0; f < 60; f++)
+                {
+                    hub.Update(1f / 60f);
+                }
+
+                sim.TryGetPosition(moving, out float2 movingAfter);
+                sim.TryGetPosition(detached, out float2 detachedAfter);
+
+                float movedDistance = math.distance(new float2(0f, 0f), movingAfter);
+                Expect(movedDistance > 1f,
+                    $"验收 5：未脱队成员应被路径驱动持续下发 Move 命令并真实前进（实际位移 {movedDistance:F2}）");
+                float detachedDrift = math.distance(detachedAfter, detachedBefore);
+                Expect(detachedDrift < 0.01f,
+                    $"验收 5：脱队成员不应被路径驱动器下发任何命令，位置应保持不动（实际位移 {detachedDrift:F4}）");
+            }
+            finally
+            {
+                hub.Exit();
+            }
         }
 
         private static bool PathClearsAllObstacles(List<float2> path, List<ObstacleSpec> obstacles, float clearance)

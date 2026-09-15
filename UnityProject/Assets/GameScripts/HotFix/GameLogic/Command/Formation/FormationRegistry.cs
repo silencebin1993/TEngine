@@ -36,6 +36,23 @@ namespace GameLogic.Command.Formation
             return id != null && _formations.TryGetValue(id, out Formation formation) ? formation : null;
         }
 
+        /// <summary>M4-05：按成员反查所属编队——直控接管/退出信号处理只知道
+        /// <see cref="SimEntityId"/>，不知道它属于哪个编队，需要这个反查入口。遍历所有编队找
+        /// <see cref="Formation.IsMember"/> 为真的第一个；查询频率是人类操作级（信号触发），
+        /// 不是逐帧调用，不需要建反向索引。找不到返回 null——调用方（<see cref="FormationMovementDriver"/>）
+        /// 据此 no-op，不属于任何编队的实体（玩家本体、非编队敌人）不受影响。</summary>
+        public Formation FindFormationContaining(SimEntityId entity)
+        {
+            foreach (Formation formation in _formations.Values)
+            {
+                if (formation.IsMember(entity))
+                {
+                    return formation;
+                }
+            }
+            return null;
+        }
+
         /// <summary>真实入口：遍历所有编队，把这个已死亡的成员从成员集与脱队集里彻底清掉；随后（M4-02）
         /// 再检查是否有编队正带着 Attack/OrganCategory 命令瞄着这个刚死的目标——有则自动
         /// <see cref="FormationCommandFailReason.InvalidTarget"/> 失败（见 D4/D5，
