@@ -93,6 +93,7 @@ namespace GameLogic.EditorTools
                 ValidateTemplateUiQueries();
                 ValidateFormationDomainModel();
                 ValidateFormationCommandQueue();
+                ValidateFormationDoctrineProfiles();
             }
             catch (Exception e)
             {
@@ -2720,6 +2721,84 @@ namespace GameLogic.EditorTools
             Expect(FormationCommandOverlay.KindColors.Count == 8, "颜色查表应恰好覆盖全部 8 种 CommandKind，不多不少");
             var distinctColors = new HashSet<Color>(FormationCommandOverlay.KindColors.Values);
             Expect(distinctColors.Count == 8, "8 种 CommandKind 对应的颜色应互不重复");
+        }
+
+        /// <summary>
+        /// M4-03：六种教义。<see cref="FormationDoctrineProfile"/> 是"教义 → 参数"的定义 + 只读
+        /// 查询层，不接任何真实 AI 决策（见 D1 边界）。详见
+        /// production/session-state/preflight-decisions.md「M4-03 六种教义」验收映射 1~5。
+        /// </summary>
+        private static void ValidateFormationDoctrineProfiles()
+        {
+            Line("\n[35] 六种教义（M4-03）");
+
+            // 验收 1：全部 7 个 FormationDoctrine 枚举值（含 None）都有对应条目，
+            // EngagementRange > 0 且 0 < RetreatHealthThreshold <= 1。
+            var allDoctrines = (FormationDoctrine[])Enum.GetValues(typeof(FormationDoctrine));
+            Expect(allDoctrines.Length == 7, "本项前置：FormationDoctrine 应恰好 7 个枚举值（含 None）");
+            foreach (FormationDoctrine doctrine in allDoctrines)
+            {
+                FormationDoctrineProfile profile = FormationDoctrineProfile.For(doctrine);
+                Expect(profile.EngagementRange > 0f, $"{doctrine} 的 EngagementRange 应 > 0");
+                Expect(profile.RetreatHealthThreshold > 0f && profile.RetreatHealthThreshold <= 1f,
+                    $"{doctrine} 的 RetreatHealthThreshold 应落在 (0, 1] 区间");
+            }
+
+            // 验收 2：六个具名教义（不含 None）的三元组两两互不相同。
+            var namedDoctrines = allDoctrines.Where(d => d != FormationDoctrine.None).ToArray();
+            Expect(namedDoctrines.Length == 6, "本项前置：具名教义应恰好 6 个（不含 None）");
+            for (int i = 0; i < namedDoctrines.Length; i++)
+            {
+                FormationDoctrineProfile pi = FormationDoctrineProfile.For(namedDoctrines[i]);
+                for (int j = i + 1; j < namedDoctrines.Length; j++)
+                {
+                    FormationDoctrineProfile pj = FormationDoctrineProfile.For(namedDoctrines[j]);
+                    bool same = pi.TargetPreference == pj.TargetPreference
+                        && Mathf.Approximately(pi.EngagementRange, pj.EngagementRange)
+                        && Mathf.Approximately(pi.RetreatHealthThreshold, pj.RetreatHealthThreshold);
+                    Expect(!same, $"{namedDoctrines[i]} 与 {namedDoctrines[j]} 的教义参数三元组不应完全相同");
+                }
+            }
+
+            // 验收 3：两条设计意图顺序断言。
+            FormationDoctrineProfile vanguard = FormationDoctrineProfile.For(FormationDoctrine.Vanguard);
+            FormationDoctrineProfile stealth = FormationDoctrineProfile.For(FormationDoctrine.Stealth);
+            FormationDoctrineProfile escort = FormationDoctrineProfile.For(FormationDoctrine.Escort);
+            Expect(vanguard.RetreatHealthThreshold < stealth.RetreatHealthThreshold,
+                "先锋应比潜行更能扛（Vanguard.RetreatHealthThreshold < Stealth.RetreatHealthThreshold）");
+            Expect(escort.EngagementRange < vanguard.EngagementRange,
+                "护送应比先锋更收敛（Escort.EngagementRange < Vanguard.EngagementRange）");
+
+            // 验收 4：同一编队切换教义后 CurrentDoctrineProfile 立即变化（计算属性，不是构造时缓存）。
+            var registry = new FormationRegistry();
+            Formation doctrineFormation = registry.CreateFormation();
+            doctrineFormation.Doctrine = FormationDoctrine.Vanguard;
+            FormationDoctrineProfile beforeSwitch = doctrineFormation.CurrentDoctrineProfile;
+            Expect(beforeSwitch.TargetPreference == vanguard.TargetPreference
+                && Mathf.Approximately(beforeSwitch.EngagementRange, vanguard.EngagementRange)
+                && Mathf.Approximately(beforeSwitch.RetreatHealthThreshold, vanguard.RetreatHealthThreshold),
+                "Doctrine=Vanguard 时 CurrentDoctrineProfile 应等于 For(Vanguard)");
+
+            doctrineFormation.Doctrine = FormationDoctrine.Stealth;
+            FormationDoctrineProfile afterSwitch = doctrineFormation.CurrentDoctrineProfile;
+            Expect(afterSwitch.TargetPreference == stealth.TargetPreference
+                && Mathf.Approximately(afterSwitch.EngagementRange, stealth.EngagementRange)
+                && Mathf.Approximately(afterSwitch.RetreatHealthThreshold, stealth.RetreatHealthThreshold),
+                "改 Doctrine=Stealth 后 CurrentDoctrineProfile 应立即变为 For(Stealth)");
+            Expect(afterSwitch.TargetPreference != beforeSwitch.TargetPreference
+                || !Mathf.Approximately(afterSwitch.EngagementRange, beforeSwitch.EngagementRange)
+                || !Mathf.Approximately(afterSwitch.RetreatHealthThreshold, beforeSwitch.RetreatHealthThreshold),
+                "切换教义前后 CurrentDoctrineProfile 应不同，证明是计算属性而非构造时缓存");
+
+            // 验收 5：新编队默认 Doctrine == None 时 CurrentDoctrineProfile 等于 For(None)。
+            Formation freshFormation = registry.CreateFormation();
+            Expect(freshFormation.Doctrine == FormationDoctrine.None, "新编队教义默认应为 None（回归 [33] 语义）");
+            FormationDoctrineProfile none = FormationDoctrineProfile.For(FormationDoctrine.None);
+            FormationDoctrineProfile freshProfile = freshFormation.CurrentDoctrineProfile;
+            Expect(freshProfile.TargetPreference == none.TargetPreference
+                && Mathf.Approximately(freshProfile.EngagementRange, none.EngagementRange)
+                && Mathf.Approximately(freshProfile.RetreatHealthThreshold, none.RetreatHealthThreshold),
+                "新编队默认 Doctrine==None 时 CurrentDoctrineProfile 应等于 For(None)");
         }
 
         /// <summary>

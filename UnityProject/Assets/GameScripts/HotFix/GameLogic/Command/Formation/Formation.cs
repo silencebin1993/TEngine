@@ -16,8 +16,14 @@ namespace GameLogic.Command.Formation
     {
         public string Id { get; }
 
-        /// <summary>编队教义占位，只是字段，不实现任何行为差异（见 <see cref="FormationDoctrine"/>）。</summary>
+        /// <summary>编队教义字段（见 <see cref="FormationDoctrine"/>）。</summary>
         public FormationDoctrine Doctrine { get; set; } = FormationDoctrine.None;
+
+        /// <summary>M4-03：当前教义对应的参数三元组（目标选择/交战距离/撤退阈值）。
+        /// **只读计算属性，不缓存**——<see cref="Doctrine"/> 变化后立即反映最新值，这是
+        /// "相同编队切换教义后目标选择/距离/撤退阈值按定义变化"这条验收成立的关键，
+        /// 不允许改成构造时缓存的字段。</summary>
+        public FormationDoctrineProfile CurrentDoctrineProfile => FormationDoctrineProfile.For(Doctrine);
 
         private readonly HashSet<SimEntityId> _members = new HashSet<SimEntityId>();
         private readonly HashSet<SimEntityId> _detachedMembers = new HashSet<SimEntityId>();
