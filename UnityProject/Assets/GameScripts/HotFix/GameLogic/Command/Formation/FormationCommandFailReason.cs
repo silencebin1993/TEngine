@@ -11,5 +11,10 @@ namespace GameLogic.Command.Formation
         InvalidTarget,
         Cancelled,
         PreemptedByOverride,
+
+        /// <summary>M4-04：共享路径重规划仍无法脱困——见
+        /// <see cref="FormationMovementDriver"/> 的卡死检测（连续一段时间位移低于阈值），
+        /// 重规划次数超过上限后落这个原因，不再无限重试。</summary>
+        Stuck,
     }
 }

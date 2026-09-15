@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using BinGames.Sim;
+using GameLogic.Battle;
+using Unity.Mathematics;
 
 namespace GameLogic.Command.Formation
 {
@@ -63,6 +65,39 @@ namespace GameLogic.Command.Formation
         public bool IsMember(SimEntityId entity)
         {
             return _members.Contains(entity);
+        }
+
+        /// <summary>M4-04：编队锚点——成员当前位置的算术平均（D3）。O(成员数) 次
+        /// <see cref="SimBridge.TryGetPosition"/> 查询，调用方按需传入 <paramref name="sim"/>；
+        /// Formation 本身不持有内核引用（同类型注释开头的解耦边界——只存 <see cref="SimEntityId"/>，
+        /// SimBridge 只是"按需借用一次"，不缓存）。全部成员都查不到位置（比如都已死亡/未加入
+        /// 战场）时返回 false。</summary>
+        public bool TryComputeAnchor(SimBridge sim, out float2 anchor)
+        {
+            anchor = float2.zero;
+            if (sim == null || _members.Count == 0)
+            {
+                return false;
+            }
+
+            float2 sum = float2.zero;
+            int counted = 0;
+            foreach (SimEntityId member in _members)
+            {
+                if (sim.TryGetPosition(member, out float2 pos))
+                {
+                    sum += pos;
+                    counted++;
+                }
+            }
+
+            if (counted == 0)
+            {
+                return false;
+            }
+
+            anchor = sum / counted;
+            return true;
         }
 
         /// <summary>临时脱队：脱队者仍在 <see cref="Members"/> 里（脱队不等于移除）。

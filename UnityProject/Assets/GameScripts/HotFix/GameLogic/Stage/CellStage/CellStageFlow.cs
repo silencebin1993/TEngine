@@ -462,6 +462,9 @@ namespace GameLogic.Stage.CellStage
             _digestion = _hub.Register(new MetabolicDigestionSystem());
             // M4-01：编队领域模型——纯内存，与模板/谱系系统完全解耦（只存 SimEntityId，见类型注释）。
             _formations = _hub.Register(new Command.Formation.FormationRegistry());
+            // M4-04：共享路径移动驱动器。依赖 SimBridge + FormationRegistry 都已注册，靠
+            // ModuleHub.Require<T> 在 OnInit 里自行解析，不需要额外 Bind 接线。
+            _hub.Register(new Command.Formation.FormationMovementDriver());
             // 战斗反馈表现层（story-002）：白模默认实现，只订阅 Signals，无需 Bind 依赖。
             _hub.Register(new CombatFeedbackPresenter());
             // 技能施放表现层（story-010）：与上面并列，管施放瞬间本身而非命中结算。

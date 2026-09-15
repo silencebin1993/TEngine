@@ -209,6 +209,30 @@ namespace GameLogic.Battle
             return false;
         }
 
+        /// <summary>
+        /// M4-04：按稳定 id 查询任意存活单位的当前坐标（不限于受控实体）。共享路径规划要给
+        /// 编队成员算锚点/判到达，需要这个通用只读查询——复用
+        /// <see cref="TryGetUnitControlState"/> 已经带回来的 <see cref="SimUnitControlState.Position"/>，
+        /// 不再多解析一次索引、多读一次数组。
+        ///
+        /// 使用纪律与 <see cref="TryResolveUnitIndex"/> 相同：内核内部是线性扫描
+        /// （O(单位数)，整段发生在 AOT）。调用方必须像 <c>SquadCommandSystem.PruneDeadSelection</c>
+        /// 已经在做的那样，把调用次数卡在一个与敌人规模无关的有界集合上（编队/选择集成员数，
+        /// 见 <see cref="SimConst.MaxSelectionSize"/> 量级），不得在热更层按敌人数展开循环调用。
+        /// </summary>
+        public bool TryGetPosition(SimEntityId entity, out float2 position)
+        {
+            if (_running && _backend != null &&
+                _backend.TryGetUnitControlState(entity, out SimUnitControlState state) && state.IsAlive)
+            {
+                position = state.Position;
+                return true;
+            }
+
+            position = default;
+            return false;
+        }
+
         public bool TryGetControlledUnit(out SimUnitControlState state)
         {
             if (_running && _backend != null &&

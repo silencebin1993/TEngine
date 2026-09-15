@@ -94,6 +94,7 @@ namespace GameLogic.EditorTools
                 ValidateFormationDomainModel();
                 ValidateFormationCommandQueue();
                 ValidateFormationDoctrineProfiles();
+                ValidateFormationSharedPathing();
             }
             catch (Exception e)
             {
@@ -2800,6 +2801,257 @@ namespace GameLogic.EditorTools
                 && Mathf.Approximately(freshProfile.RetreatHealthThreshold, none.RetreatHealthThreshold),
                 "新编队默认 Doctrine==None 时 CurrentDoctrineProfile 应等于 For(None)");
         }
+
+        /// <summary>
+        /// M4-04：共享路径与局部分离。详见 production/session-state/preflight-decisions.md
+        /// 「M4-04 共享路径与局部分离」验收映射 1~8。
+        ///
+        /// D4/D5 的移动驱动状态机与卡死重规划边界按关键提醒第 2 条只测纯逻辑层
+        /// （<see cref="FormationMemberMotion"/>/<see cref="FormationStuckTracker"/>），不起真实
+        /// SimWorld——<see cref="FormationMovementDriver"/> 本体需要 ModuleHub + SimBridge + SimWorld
+        /// 才能跑，与 [33]~[35] 对编队领域模型"不起真实内核"的处理方式一致。
+        /// </summary>
+        private static void ValidateFormationSharedPathing()
+        {
+            Line("\n[36] 共享路径与局部分离（M4-04）");
+
+            // 验收 1：单障碍绕行。1 个障碍物直接挡在 start→goal 连线中点，路径每一段都不应与该
+            // 障碍圆（含 clearance）相交，且路点数 <= 8。
+            {
+                float2 start = new float2(0f, 0f);
+                float2 goal = new float2(20f, 0f);
+                float clearance = 0.5f;
+                var obstacles = new List<ObstacleSpec>
+                {
+                    new ObstacleSpec { Position = new float2(10f, 0f), Radius = 1.5f },
+                };
+
+                List<float2> path = FormationPathPlanner.Plan(start, goal, obstacles, clearance);
+                Expect(path.Count <= FormationPathPlanner.MaxWaypoints,
+                    $"单障碍绕行：路点数应 <= {FormationPathPlanner.MaxWaypoints}（实际 {path.Count}）");
+                Expect(path.Count >= 3, "单障碍绕行：直线中点有障碍挡路时，规划结果应至少插入一个绕行路点");
+                Expect(PathClearsAllObstacles(path, obstacles, clearance),
+                    "单障碍绕行：路径每一段都不应与障碍圆（含 clearance）相交");
+            }
+
+            // 验收 2：无障碍直通。start→goal 连线不经过任何障碍物时，应原样返回 [start, goal]，
+            // 不画蛇添足插点。
+            {
+                float2 start = new float2(0f, 0f);
+                float2 goal = new float2(20f, 0f);
+                var farObstacles = new List<ObstacleSpec>
+                {
+                    new ObstacleSpec { Position = new float2(100f, 100f), Radius = 1f },
+                };
+
+                List<float2> direct = FormationPathPlanner.Plan(start, goal, farObstacles, 0.5f);
+                Expect(direct.Count == 2 && FloatsEqual(direct[0], start) && FloatsEqual(direct[1], goal),
+                    "无障碍直通：应原样返回 [start, goal]，不插点");
+            }
+
+            // 验收 3："狭窄通道"合成场景。两个障碍物一上一下夹出一条通道，start 在通道一侧、
+            // goal 在通道另一侧且直线会先擦到近侧障碍——断言规划出的路径确实从两个障碍圆之间的
+            // 空档穿过，而不是绕整个障碍群一大圈（用路径总长度上界断言防止绕远路）。
+            {
+                var bottom = new ObstacleSpec { Position = new float2(10f, -3f), Radius = 1f };
+                var top = new ObstacleSpec { Position = new float2(10f, 3f), Radius = 1f };
+                float clearance = 0.3f;
+                var gateObstacles = new List<ObstacleSpec> { bottom, top };
+
+                float2 start = new float2(0f, -2.5f);
+                float2 goal = new float2(20f, -2.5f);
+                List<float2> path = FormationPathPlanner.Plan(start, goal, gateObstacles, clearance);
+
+                Expect(path.Count >= 3, "狭窄通道：直线会擦到近侧障碍，应至少插入一个绕行路点");
+                Expect(PathClearsAllObstacles(path, gateObstacles, clearance),
+                    "狭窄通道：路径每一段都不应与任一障碍圆（含 clearance）相交");
+
+                float gapLow = bottom.Position.y + (bottom.Radius + clearance);
+                float gapHigh = top.Position.y - (top.Radius + clearance);
+                bool hasWaypointInGap = false;
+                for (int i = 1; i < path.Count - 1; i++)
+                {
+                    if (path[i].y > gapLow && path[i].y < gapHigh)
+                    {
+                        hasWaypointInGap = true;
+                        break;
+                    }
+                }
+                Expect(hasWaypointInGap,
+                    $"狭窄通道：应有绕行路点落在两障碍之间的空档 y∈({gapLow:F2},{gapHigh:F2})");
+
+                float directDist = math.distance(start, goal);
+                float totalLen = PathLength(path);
+                Expect(totalLen <= directDist * 2f,
+                    $"狭窄通道：路径总长度不应远超直线距离（直线 {directDist:F2}，实际 {totalLen:F2}），防止绕整个障碍群一大圈");
+            }
+
+            // 验收 4：跟随槽公式。偶数/奇数索引分布在路径轴两侧，偏移量以 spacing 为步长线性增长。
+            {
+                float spacing = FormationFollowSlots.DefaultSpacing;
+                float2 o0 = FormationFollowSlots.ComputeOffset(0, 5, spacing);
+                float2 o1 = FormationFollowSlots.ComputeOffset(1, 5, spacing);
+                float2 o2 = FormationFollowSlots.ComputeOffset(2, 5, spacing);
+                float2 o3 = FormationFollowSlots.ComputeOffset(3, 5, spacing);
+                float2 o4 = FormationFollowSlots.ComputeOffset(4, 5, spacing);
+
+                Expect(FloatsEqual(o0, float2.zero), "跟随槽：索引 0 偏移应为 0（锚点本体）");
+                Expect(o1.y > 0f && Mathf.Approximately(o1.y, spacing),
+                    $"跟随槽：索引 1 偏移应是 +1 倍 spacing（实际 {o1.y}）");
+                Expect(o2.y < 0f && Mathf.Approximately(o2.y, -spacing),
+                    $"跟随槽：索引 2 偏移应是 -1 倍 spacing，且与索引 1 异侧（实际 {o2.y}）");
+                Expect(o3.y > 0f && Mathf.Approximately(o3.y, 2f * spacing),
+                    $"跟随槽：索引 3 偏移应是 +2 倍 spacing（实际 {o3.y}）");
+                Expect(o4.y < 0f && Mathf.Approximately(o4.y, -2f * spacing),
+                    $"跟随槽：索引 4 偏移应是 -2 倍 spacing（实际 {o4.y}）");
+                Expect(Mathf.Approximately(o0.x, 0f) && Mathf.Approximately(o1.x, 0f),
+                    "跟随槽：局部坐标沿路径分量（x）恒为 0，只做左右阵位调整");
+            }
+
+            // 验收 5：移动驱动状态机（纯逻辑层 FormationMemberMotion，见关键提醒 2）。
+            // 距首个路点很远时不应前移；到达后应前移到下一个路点；到达最后一个路点后应标记 Arrived；
+            // 相同输入重复调用应得到相同结果（纯函数，"重复 Tick 不重算路径"这条约束落在
+            // FormationMovementDriver 的运行时字典命中判断上，不属于这层纯状态机的职责）。
+            {
+                // 路点索引：0=(0,0)，1=(10,0)，2=(20,0)（最后一个）。
+                var path = new List<float2> { new float2(0f, 0f), new float2(10f, 0f), new float2(20f, 0f) };
+                float arriveRadius = 1.2f;
+
+                // 成员还在路点 0 后方很远处，尚未进入到达半径。
+                FormationMemberMotion.StepResult farFromFirst = FormationMemberMotion.Step(
+                    path, 0, new float2(-5f, 0f), float2.zero, arriveRadius);
+                Expect(farFromFirst.NextWaypointIndex == 0 && !farFromFirst.Arrived,
+                    "移动驱动：距首个路点很远时不应前移路点索引");
+
+                // 成员正好在路点 0 上：应前移到路点 1（还不是最后一个，不算 Arrived）。
+                FormationMemberMotion.StepResult reachedFirst = FormationMemberMotion.Step(
+                    path, 0, new float2(0f, 0f), float2.zero, arriveRadius);
+                Expect(reachedFirst.NextWaypointIndex == 1 && !reachedFirst.Arrived,
+                    "移动驱动：到达路点 0 后应前移到路点 1（还不是最后一个，不算 Arrived）");
+
+                // 成员正好在最后一个路点（索引 2）上：应标记 Arrived。
+                FormationMemberMotion.StepResult reachedLast = FormationMemberMotion.Step(
+                    path, 2, new float2(20f, 0f), float2.zero, arriveRadius);
+                Expect(reachedLast.Arrived && reachedLast.NextWaypointIndex == 2,
+                    "移动驱动：到达最后一个路点后应标记 Arrived，且路点索引保持在最后一个");
+
+                // 相同输入重复调用应得到相同结果（纯函数，无隐藏状态）。
+                FormationMemberMotion.StepResult repeat = FormationMemberMotion.Step(
+                    path, 0, new float2(-5f, 0f), float2.zero, arriveRadius);
+                Expect(repeat.NextWaypointIndex == farFromFirst.NextWaypointIndex && repeat.Arrived == farFromFirst.Arrived,
+                    "移动驱动：相同输入重复调用 Step 应得到相同结果（纯函数，无隐藏状态）");
+            }
+
+            // 验收 6：卡死重规划边界（纯逻辑层 FormationStuckTracker）。连续多个 tick 位移低于阈值：
+            // 先触发一次 Replan；同一条命令再次卡住触发第 2 次 Replan；超过重规划上限（2 次）
+            // 仍卡住应判定 Fail；正常位移不应触发 Replan/Fail。
+            {
+                float stuckTimer = 0f;
+                int replanCount = 0;
+                const float distThreshold = 0.2f;
+                const float timeThreshold = 2f;
+                const int maxReplans = 2;
+                const float dt = 0.5f;
+                const float tinyMove = 0.01f; // 远低于 distThreshold，视为"没怎么动"
+
+                FormationStuckTracker.Outcome last = FormationStuckTracker.Outcome.Ok;
+                for (int tick = 0; tick < 4; tick++) // 4 * 0.5s = 2s，正好到阈值
+                {
+                    last = FormationStuckTracker.Evaluate(ref stuckTimer, ref replanCount, tinyMove, dt,
+                        distThreshold, timeThreshold, maxReplans);
+                }
+                Expect(last == FormationStuckTracker.Outcome.Replan && replanCount == 1,
+                    $"卡死检测：连续 2 秒位移低于阈值应触发第 1 次 Replan（实际 {last}，replanCount={replanCount}）");
+
+                for (int tick = 0; tick < 4; tick++)
+                {
+                    last = FormationStuckTracker.Evaluate(ref stuckTimer, ref replanCount, tinyMove, dt,
+                        distThreshold, timeThreshold, maxReplans);
+                }
+                Expect(last == FormationStuckTracker.Outcome.Replan && replanCount == 2,
+                    $"卡死检测：第 2 次仍卡住应再触发一次 Replan（实际 {last}，replanCount={replanCount}）");
+
+                for (int tick = 0; tick < 4; tick++)
+                {
+                    last = FormationStuckTracker.Evaluate(ref stuckTimer, ref replanCount, tinyMove, dt,
+                        distThreshold, timeThreshold, maxReplans);
+                }
+                Expect(last == FormationStuckTracker.Outcome.Fail && replanCount == 3,
+                    $"卡死检测：重规划次数超过上限（{maxReplans}）仍卡住应判定 Fail（实际 {last}，replanCount={replanCount}）");
+
+                float movingTimer = 0f;
+                int movingReplanCount = 0;
+                FormationStuckTracker.Outcome movingOutcome = FormationStuckTracker.Evaluate(
+                    ref movingTimer, ref movingReplanCount, 1.0f, dt, distThreshold, timeThreshold, maxReplans);
+                Expect(movingOutcome == FormationStuckTracker.Outcome.Ok && movingReplanCount == 0,
+                    "卡死检测：正常位移（>= 阈值）不应触发 Replan/Fail");
+            }
+
+            // 验收 7：CPU 预算（D7）。32 个障碍物（SimConst.MaxObstacles 上限）+ 起止点跨越多个
+            // 障碍的最坏构造输入，连续跑 100 次，断言均摊每次 < 1ms。这是本 story 自定的合成基准，
+            // 不是真实 profiler 采样。
+            {
+                var worstCaseObstacles = new List<ObstacleSpec>(SimConst.MaxObstacles);
+                for (int i = 0; i < SimConst.MaxObstacles; i++)
+                {
+                    float x = 1f + i * 0.6f;
+                    float y = (i % 2 == 0) ? 0.3f : -0.3f;
+                    worstCaseObstacles.Add(new ObstacleSpec { Position = new float2(x, y), Radius = 0.4f });
+                }
+                float2 start = new float2(0f, 0f);
+                float2 goal = new float2(1f + SimConst.MaxObstacles * 0.6f + 5f, 0f);
+
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                const int iterations = 100;
+                for (int i = 0; i < iterations; i++)
+                {
+                    FormationPathPlanner.Plan(start, goal, worstCaseObstacles, 0.3f);
+                }
+                sw.Stop();
+                double perCallMs = sw.Elapsed.TotalMilliseconds / iterations;
+                Expect(perCallMs < 1.0,
+                    $"CPU 预算：{SimConst.MaxObstacles} 障碍物最坏输入下，均摊每次 Plan 应 < 1ms（实际 {perCallMs:F4}ms）");
+            }
+
+            // 验收 8：回归 [33]/[34]/[35]。本方法不改动它们的任何断言，靠 RunAll() 里三者继续跑、
+            // 继续绿灯来验证，这里不重复断言内容。
+            Line("  · [33]/[34]/[35] 回归由 RunAll() 统一跑，见对应方法本身，未在此处重复断言");
+        }
+
+        private static bool PathClearsAllObstacles(List<float2> path, List<ObstacleSpec> obstacles, float clearance)
+        {
+            const float epsilon = 1e-3f;
+            for (int i = 0; i < path.Count - 1; i++)
+            {
+                float2 a = path[i];
+                float2 b = path[i + 1];
+                float2 ab = b - a;
+                float abLenSq = math.lengthsq(ab);
+                foreach (ObstacleSpec obstacle in obstacles)
+                {
+                    float effRadius = obstacle.Radius + clearance;
+                    float t = abLenSq > 1e-8f ? math.clamp(math.dot(obstacle.Position - a, ab) / abLenSq, 0f, 1f) : 0f;
+                    float2 closest = a + ab * t;
+                    if (math.distance(closest, obstacle.Position) < effRadius - epsilon)
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        private static float PathLength(List<float2> path)
+        {
+            float total = 0f;
+            for (int i = 0; i < path.Count - 1; i++)
+            {
+                total += math.distance(path[i], path[i + 1]);
+            }
+            return total;
+        }
+
+        private static bool FloatsEqual(float2 a, float2 b) => math.distance(a, b) < 1e-4f;
 
         /// <summary>
         /// 守三件玩家连着两轮报上来的事，每一件都曾经"看起来能跑"却在手里明显不对：
