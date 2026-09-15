@@ -63,6 +63,14 @@ TEngine 基于 HybridCLR + YooAsset + UniTask + Luban 构建。
 
 基于 tengine-dev skill 返回的规范编写实现。
 
+若任务涉及 ProjectA 玩法、AI、模拟、UI 或验收，在写代码前还必须：
+
+1. 从 `DesignDocs/README.md` 找到任务对应的 `DesignDocs/detailed/` 详细规格；
+2. 先在 `DesignDocs/detailed/07_M0_M10_Story_Coverage_Matrix.md` 找到该任务的覆盖 ID，再读取 `00_Implementation_Completeness_Contract.md` 与任务卡点名的需求 ID；
+3. 任务卡补齐正常旅程、负向矩阵、正式入口 E2E 和需求覆盖矩阵；
+4. 不把里程碑标题、示例、占位、深层直调或“非目标”当作省略正常玩家功能的依据；
+5. 已完成 M1–M4 的返工与复验按 `DesignDocs/detailed/05_M1_M4_Backfill_And_Acceptance.md`。
+
 **当 references 规范与代码实际 API 冲突时**：
 1. 使用 Grep 搜索实际方法签名验证（例：`Grep "ForceUnloadUnusedAssets"` 确认参数名）
 2. 优先信任代码中的实际实现
