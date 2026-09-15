@@ -96,6 +96,7 @@ namespace GameLogic.EditorTools
                 ValidateFormationDoctrineProfiles();
                 ValidateFormationSharedPathing();
                 ValidateDirectControlDetachment();
+                ValidateFormationEncounter();
             }
             catch (Exception e)
             {
@@ -3223,6 +3224,86 @@ namespace GameLogic.EditorTools
             {
                 hub.Exit();
             }
+        }
+
+        /// <summary>
+        /// M4-06：多线固定遭遇。权威规格是仓库根 <c>production/session-state/preflight-decisions.md</c>
+        /// "M4-06 多线固定遭遇"节的 D1~D6 与验收映射——按旧版 <c>ProjectA_Milestones.md</c> M4-06 字面
+        /// 验收交付，不套用 <c>DesignDocs/detailed/</c> 更严格的需求（那套契约仍在起草中，不属于本
+        /// story 范围）。实际编排逻辑在 <see cref="FormationEncounterScenario"/>，本方法只做断言。
+        /// </summary>
+        private static void ValidateFormationEncounter()
+        {
+            Line("\n[38] 多线固定遭遇（M4-06）");
+
+            // maxTicks 只是本项自检的超时保护（防止真出 bug 时测试卡死），不是玩法倒计时——
+            // "遭遇完成"判定成立的那一刻 FormationEncounterScenario 就退出循环，不会跑满这个数。
+            const int maxTicks = 6000;
+
+            // 验收 1：分线策略可行。
+            FormationEncounterScenario.RunResult split = FormationEncounterScenario.RunSplitStrategy(maxTicks);
+            Expect(split.NestCleared, "验收 1：分线策略应能把巢清空");
+            Expect(split.LineHeld, "验收 1：分线策略的守护编队应全程守住检查点、未减员");
+            Expect(split.EncounterComplete && split.CompletionTick >= 0,
+                $"验收 1：分线策略应在 {maxTicks} tick 内达成遭遇完成（实际 {split.CompletionTick}）");
+
+            // 验收 2：万能队策略可行但明显更慢（顺序执行两阶段，理论上限接近两倍，取 1.5 倍留余量）。
+            FormationEncounterScenario.RunResult generalist = FormationEncounterScenario.RunGeneralistStrategy(maxTicks);
+            Expect(generalist.EncounterComplete && generalist.CompletionTick >= 0,
+                $"验收 2：万能队策略也应能在 {maxTicks} tick 内达成遭遇完成（实际 {generalist.CompletionTick}）——" +
+                "两种方案都可行，只是效率不同");
+            if (split.CompletionTick >= 0 && generalist.CompletionTick >= 0)
+            {
+                Expect(generalist.CompletionTick >= split.CompletionTick * 1.5,
+                    $"验收 2：万能队顺序执行两阶段应明显更慢——分线 {split.CompletionTick} tick，" +
+                    $"万能队 {generalist.CompletionTick} tick，应 ≥ 分线的 1.5 倍");
+            }
+
+            // 验收 3：无倒计时——两种策略的真实完成时刻都应远早于自检超时保护上限，
+            // 证明 maxTicks 只是保护，不是驱动"遭遇完成"的倒计时机制。
+            if (split.CompletionTick >= 0)
+            {
+                Expect(split.CompletionTick < maxTicks * 0.8,
+                    "验收 3：分线策略完成时刻应远早于自检超时保护（不是倒计时失败）");
+            }
+            if (generalist.CompletionTick >= 0)
+            {
+                Expect(generalist.CompletionTick < maxTicks * 0.8,
+                    "验收 3：万能队策略完成时刻也应远早于自检超时保护（不是倒计时失败）");
+            }
+
+            // 验收 4（D5）：分线策略推进到一半（巢死一半）时，对巢攻坚编队一名成员触发真实接管信号，
+            // 断言不打断整体进度、释放后归队，最终"遭遇完成"依然成立。复用 M4-05 已验证的
+            // RequestControlSwitch → ControlledUnitChangedSignal → Formation.SetDetached 链路
+            // （见 [37]），不是新写的接管逻辑，本项只做接口层面验证，不做真实输入。
+            SimEntityId switchedMember = SimEntityId.None;
+            Formation capturedAttackFormation = null;
+            bool detachedDuringHook = false;
+            FormationEncounterScenario.RunResult interrupted = FormationEncounterScenario.RunSplitStrategy(maxTicks,
+                (sim, formations, attackFormation, attackMembers) =>
+                {
+                    capturedAttackFormation = attackFormation;
+                    if (attackMembers.Length > 0)
+                    {
+                        switchedMember = attackMembers[0];
+                        bool switched = sim.RequestControlSwitch(switchedMember) == ControlRequestResult.Success;
+                        detachedDuringHook = switched && attackFormation.IsDetached(switchedMember);
+                        sim.ReleaseControl();
+                    }
+                });
+            Expect(switchedMember.IsValid,
+                "验收 4 前置：分线策略巢死一半时应能取到巢攻坚编队一名成员用于接管测试");
+            Expect(detachedDuringHook,
+                "验收 4：真实接管巢攻坚编队一名成员后，该成员应立即被标记为脱队");
+            Expect(interrupted.EncounterComplete && interrupted.CompletionTick >= 0,
+                "验收 4：中途接管又释放不应打断整体进度，最终仍应达成遭遇完成");
+            Expect(capturedAttackFormation != null && switchedMember.IsValid &&
+                   !capturedAttackFormation.IsDetached(switchedMember),
+                "验收 4：释放控制后（且后续帧继续推进），该成员应归队（IsDetached 归假）");
+
+            // 验收 5：回归 [33]~[37]。本方法不改动它们的任何断言，靠 RunAll() 里五者继续跑、
+            // 继续绿灯来验证，这里不重复断言内容。
+            Line("  · [33]~[37] 回归由 RunAll() 统一跑，见对应方法本身，未在此处重复断言");
         }
 
         private static bool PathClearsAllObstacles(List<float2> path, List<ObstacleSpec> obstacles, float clearance)
