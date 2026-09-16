@@ -42,6 +42,12 @@ namespace GameLogic.Command.Formation
         /// <summary>D5：同一条 Active 命令允许的重规划次数上限，超过仍卡住则判定失败。</summary>
         private const int MaxReplans = 2;
 
+        /// <summary>M4-R00-02 队列③-11（FC-REQ-003）：连续算不出有效锚点的最大重试帧数——
+        /// 给成员刚落地那一两帧的正常延迟留缓冲，超过则判定命令失败并清理所有权，不再无限重试。
+        /// 0.5s@60fps，与 D5 的 <see cref="StuckTimeThreshold"/> 不同量级（那是"移动中卡住"，
+        /// 这是"起手就没有可用锚点"，理应更快判失败）。</summary>
+        private const int MaxAnchorAttempts = 30;
+
         private FormationRegistry _formations;
         private SimBridge _sim;
 
@@ -69,6 +75,9 @@ namespace GameLogic.Command.Formation
         }
 
         private readonly Dictionary<string, FormationRuntimeState> _runtime = new Dictionary<string, FormationRuntimeState>();
+        /// <summary>M4-R00-02 队列③-11：连续算不出锚点的帧数，按 formation id 记。首次规划成功
+        /// 或命令不再活跃时清掉——不是跨命令累计的“黑历史”。</summary>
+        private readonly Dictionary<string, int> _anchorFailStreak = new Dictionary<string, int>();
 
         public override void OnInit(ModuleHub hub)
         {
@@ -137,6 +146,7 @@ namespace GameLogic.Command.Formation
             if (active == null || active.State != FormationCommandState.Active)
             {
                 _runtime.Remove(formation.Id);
+                _anchorFailStreak.Remove(formation.Id);
                 return;
             }
 
@@ -148,6 +158,7 @@ namespace GameLogic.Command.Formation
                 // 非移动类命令（Guard/Attack/…）不归本驱动器管；若之前是移动类而现在被覆盖成
                 // 别的命令，清掉残留的运行时状态，避免下次同 id 复用时读到旧路径。
                 _runtime.Remove(formation.Id);
+                _anchorFailStreak.Remove(formation.Id);
                 return;
             }
 
@@ -156,8 +167,20 @@ namespace GameLogic.Command.Formation
                 state = new FormationRuntimeState();
                 if (!TryPlanInitialPath(formation, command.TargetPosition.Value, state))
                 {
-                    return; // 锚点算不出来（没有可查询到位置的成员）：本帧先跳过，下一帧再试。
+                    // M4-R00-02 队列③-11（FC-REQ-003）："锚点无有效成员时命令失败并清理所有权"——
+                    // 但成员刚落地那一两帧本来就查不到位置是正常瞬时情形，先给 MaxAnchorAttempts
+                    // 帧的缓冲，仍然算不出来才真的判失败（FailActiveCommand 会顺带清空等待队列首、
+                    // 尝试提升下一条排队命令，就是"清理所有权"的落地动作）。
+                    int attempts = _anchorFailStreak.TryGetValue(formation.Id, out int a) ? a + 1 : 1;
+                    _anchorFailStreak[formation.Id] = attempts;
+                    if (attempts >= MaxAnchorAttempts)
+                    {
+                        _anchorFailStreak.Remove(formation.Id);
+                        formation.FailActiveCommand(FormationCommandFailReason.NoValidAnchor);
+                    }
+                    return;
                 }
+                _anchorFailStreak.Remove(formation.Id);
                 _runtime[formation.Id] = state;
             }
 
@@ -233,7 +256,7 @@ namespace GameLogic.Command.Formation
                     });
                 }
 
-                UpdateStuckTracking(formation, command, state, memberState, pos, dt);
+                UpdateStuckTracking(formation, command, state, memberState, member, pos, dt);
             }
 
             if (anyResolved && allArrived)
@@ -267,12 +290,22 @@ namespace GameLogic.Command.Formation
 
         /// <summary>D5：卡死检测与重规划边界。判定本身（要不要重规划/要不要判失败）走纯逻辑
         /// <see cref="FormationStuckTracker"/>，这里只负责"判定为 Replan 时真的去重新规划路径、
-        /// 判定为 Fail 时真的调用 FailActiveCommand"这两个需要碰 SimBridge/Formation 的落地动作。</summary>
+        /// 判定为 Fail 时真的调用 FailActiveCommand"这两个需要碰 SimBridge/Formation 的落地动作。
+        ///
+        /// M4-R00-02 队列③-11（FC-REQ-003）：同时把结果写进 <see cref="Formation.SetStuck"/>——
+        /// <see cref="FormationStuckTracker"/> 判定为 Replan/Fail 那一刻会把自己的计时器清零重新计
+        /// （见该类注释），所以"这个成员现在算不算卡住"这个**持久到恢复移动前都成立**的事实，
+        /// 不能从瞬时计时器读出来，必须单独存一份（同 <see cref="Formation.SetDetached"/> 的理由）。</summary>
         private void UpdateStuckTracking(Formation formation, FormationCommand command, FormationRuntimeState state,
-            MemberRuntimeState memberState, float2 pos, float dt)
+            MemberRuntimeState memberState, SimEntityId member, float2 pos, float dt)
         {
             float moved = math.distance(pos, memberState.LastPosition);
             memberState.LastPosition = pos;
+
+            if (moved >= StuckDistanceThreshold)
+            {
+                formation.SetStuck(member, false);
+            }
 
             FormationStuckTracker.Outcome outcome = FormationStuckTracker.Evaluate(
                 ref memberState.StuckTimer, ref state.ReplanCount, moved, dt,
@@ -282,6 +315,8 @@ namespace GameLogic.Command.Formation
             {
                 return;
             }
+
+            formation.SetStuck(member, true);
 
             if (outcome == FormationStuckTracker.Outcome.Fail)
             {

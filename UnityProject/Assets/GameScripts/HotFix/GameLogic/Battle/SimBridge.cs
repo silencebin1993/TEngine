@@ -254,6 +254,7 @@ namespace GameLogic.Battle
                     EntityId = _snapshot.EntityId[index],
                     UnitIndex = index,
                     Position = _snapshot.Position[index],
+                    BodyForward = _snapshot.BodyForward[index],
                     Health = _snapshot.Health[index],
                     Radius = _snapshot.Radius[index],
                     Status = (SimStatus)_snapshot.Status[index],

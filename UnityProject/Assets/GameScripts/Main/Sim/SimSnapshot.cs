@@ -17,6 +17,10 @@ namespace BinGames.Sim
 
         [ReadOnly] public NativeArray<float2> Position;
         [ReadOnly] public NativeArray<float2> Velocity;
+        /// <summary>M4-R00-02 队列③-10（CP-REQ-004）：最后有效身体朝向，与瞄准方向（热更层
+        /// <c>AbilitySystem.AimDirection</c>）是两个不同概念。速度接近零时保留上一帧的值，
+        /// 不会被重置为世界坐标轴——见 <see cref="JobIntegrate"/> 的写入处。</summary>
+        [ReadOnly] public NativeArray<float2> BodyForward;
         [ReadOnly] public NativeArray<float> Health;
         [ReadOnly] public NativeArray<float> Radius;
         [ReadOnly] public NativeArray<uint> Status;

@@ -103,6 +103,8 @@ namespace GameLogic.EditorTools
                 ValidateAbilityResourceLayerBoundary();
                 ValidateFriendlyGeneProjection();
                 ValidateFanDirectionUnified();
+                ValidateEmissionGeometryAndBodyForward();
+                ValidateFormationAnchorLeaderPriority();
             }
             catch (Exception e)
             {
@@ -3813,6 +3815,275 @@ namespace GameLogic.EditorTools
                     Expect(harmonicEvt.RadialRequested,
                         $"gene_harmonic 挂在 {organelle.Id} 上（未配 SpreadModule）时，编译结果同样必须携带 " +
                         "RadialRequested=true");
+                }
+            }
+        }
+
+        /// <summary>
+        /// M4-R00-02 队列③-10：CP-REQ-003 第③级（发射点身体中心前推+越界/障碍推出+EmitterBlocked）
+        /// 与 CP-REQ-004（内核持久身体朝向字段）。真实器官/底盘挂点（①②级）未实现，登记为债务，
+        /// 见 `production/design/m4-r00-02-item3-10-emission-point-and-body-forward/DESIGN.md`。
+        /// </summary>
+        private static void ValidateEmissionGeometryAndBodyForward()
+        {
+            Line("\n[42] 发射点前推/越界推出/EmitterBlocked + 内核身体朝向持久字段（M4-R00-02 队列③-10）");
+
+            // ── 1. 无障碍/无越界：公式=bodyRadius+projectileRadius+Clearance ──
+            float2 body = new float2(10f, 0f);
+            float2 dir = new float2(0f, 1f);
+            Expect(CombatBallistics.TryResolveEmitterPosition(body, 1f, dir, 0.5f, null, 0f, out float2 basic),
+                "无障碍/无越界配置应恒成功");
+            float2 expected = body + dir * (1f + 0.5f + CombatBallistics.MuzzleClearance);
+            Expect(FloatsEqual(basic, expected),
+                $"公式应是 bodyRadius+projectileRadius+Clearance，实得 {basic} 期望 {expected}");
+
+            // ── 2. 越界推出：沿 +X 越界应被夹回场地边界内 ──
+            Expect(CombatBallistics.TryResolveEmitterPosition(
+                    new float2(59.8f, 0f), 1f, new float2(1f, 0f), 0.5f, null, 60f, out float2 clampedX),
+                "越界配置应仍然成功（夹到边界，不是拒绝）");
+            Expect(clampedX.x <= 60f + 1e-3f,
+                $"沿 +X 越界的发射点应被夹到场地边界内，实得 x={clampedX.x:F2}");
+
+            // ── 3. 撞障碍但有安全推出方向：推到障碍边界外 ──
+            var obstacle = new ObstacleSpec { Position = new float2(10f, 2f), Radius = 1f };
+            Expect(CombatBallistics.TryResolveEmitterPosition(
+                    body, 1f, dir, 0.5f, new[] { obstacle }, 0f, out float2 pushed),
+                "撞到障碍但有安全推出方向时应仍然成功");
+            float distToObstacle = math.distance(pushed, obstacle.Position);
+            Expect(distToObstacle >= obstacle.Radius + 0.5f - 1e-3f,
+                $"推出后发射点到障碍中心的距离应至少是 障碍半径+弹体半径，实得 {distToObstacle:F2}");
+
+            // ── 4. 完全挡死（发射点恰好落在障碍正中心，无安全推出方向）：EmitterBlocked ──
+            var deadCenterObstacle = new ObstacleSpec { Position = expected, Radius = 1f };
+            Expect(!CombatBallistics.TryResolveEmitterPosition(
+                    body, 1f, dir, 0.5f, new[] { deadCenterObstacle }, 0f, out _),
+                "发射点恰好落在障碍正中心时应返回 false（EmitterBlocked），不能瞬移到别处顶替");
+
+            // ── 5+6. CP-REQ-004：出生立即赋值 + 静止后不被清零 ──
+            var sim = new SimBridge();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 16;
+            cfg.ArenaHalfExtent = 60f;
+            var archetypes = new[]
+            {
+                new BehaviorArchetype
+                {
+                    Kind = BehaviorKind.Stationary, Accel = 0f, TurnRate = 0f, AggroRange = 0f,
+                    AttackRange = 0.5f, AttackCooldown = 99f, AttackDamage = 0f,
+                    Separation = 0f, ChargeSpeedMul = 1f,
+                },
+            };
+            sim.Begin(cfg, archetypes);
+            try
+            {
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(5f, 5f), Velocity = new float2(3f, 4f), Health = 10f, Radius = 0.5f,
+                    MaxSpeed = 0f, ArchetypeId = 0, Faction = SimFaction.Neutral,
+                    IntentSource = IntentSource.AI, LogicId = 9920,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(-5f, -5f), Velocity = float2.zero, Health = 10f, Radius = 0.5f,
+                    MaxSpeed = 0f, ArchetypeId = 0, Faction = SimFaction.Neutral,
+                    IntentSource = IntentSource.AI, LogicId = 9921,
+                });
+                sim.OnUpdate(1f / 60f);
+                SimSnapshot snap = sim.Snapshot;
+                SimEntityId moving = FindEntityId(snap, 9920, out int movingIdx);
+                SimEntityId still = FindEntityId(snap, 9921, out int stillIdx);
+                Expect(moving.IsValid && still.IsValid, "两具测试个体都应落地");
+                if (moving.IsValid && still.IsValid)
+                {
+                    float2 expectedForward = math.normalize(new float2(3f, 4f));
+                    Expect(FloatsEqual(snap.BodyForward[movingIdx], expectedForward),
+                        $"出生带初速度时 BodyForward 应立即等于归一化速度方向，实得 {snap.BodyForward[movingIdx]} " +
+                        $"期望 {expectedForward}");
+                    Expect(!FloatsEqual(snap.BodyForward[stillIdx], float2.zero),
+                        $"出生零速度不能把朝向留成零向量（规格明令禁止），实得 {snap.BodyForward[stillIdx]}");
+
+                    // MaxSpeed=0 会让速度在积分里被限速夹到 0（Stationary 原型没有期望方向），
+                    // 但 BodyForward 只在速度真的非零时才更新——冻结在最后一次非零值上，
+                    // 不会跟着速度一起被清零。
+                    for (int f = 0; f < 10; f++) { sim.OnUpdate(1f / 60f); }
+                    snap = sim.Snapshot;
+                    Expect(math.lengthsq(snap.Velocity[movingIdx]) < 1e-6f,
+                        $"Stationary 原型 + MaxSpeed=0 应该让速度限速到 0，实得 {snap.Velocity[movingIdx]}（本项前置）");
+                    Expect(FloatsEqual(snap.BodyForward[movingIdx], expectedForward),
+                        $"速度归零之后 BodyForward 不应该被清零或改变，实得 {snap.BodyForward[movingIdx]} " +
+                        $"期望仍是 {expectedForward}——这正是 CP-REQ-004 明令禁止的\"零向量重置朝向\"");
+                }
+            }
+            finally
+            {
+                sim.End();
+            }
+        }
+
+        /// <summary>
+        /// M4-R00-02 队列③号项第11条（最后一条）：编队锚点算法改领队优先，排除脱队/卡死成员
+        /// （FC-REQ-003 冲突）。旧实现对**全体**成员做算术平均，一个卡在障碍里的成员会把整队
+        /// 锚点拽偏；`TryComputeAnchor` 此前也没有任何自动化测试覆盖。
+        /// </summary>
+        private static void ValidateFormationAnchorLeaderPriority()
+        {
+            Line("\n[43] 编队锚点改领队优先+排除脱队/卡死成员（M4-R00-02 队列③-11，FC-REQ-003）");
+
+            var registry = new FormationRegistry();
+            Formation formation = registry.CreateFormation();
+
+            // ── 1. 领队自动指定：加入的第一名成员成为领队，之后新成员不顶替 ──
+            var entityA = new SimEntityId(3001);
+            var entityB = new SimEntityId(3002);
+            var entityC = new SimEntityId(3003);
+            Expect(formation.LeaderId == SimEntityId.None, "空编队没有领队");
+            formation.AddMember(entityA);
+            Expect(formation.LeaderId == entityA, "第一名加入的成员应自动成为领队");
+            formation.AddMember(entityB);
+            Expect(formation.LeaderId == entityA, "已有领队时新成员加入不应顶替领队");
+            formation.AddMember(entityC);
+
+            // ── 2. 领队离队后顺位给剩余成员中的一名，不留空领队 ──
+            formation.RemoveMember(entityA);
+            Expect(formation.LeaderId == entityB || formation.LeaderId == entityC,
+                $"领队被移除后应顺位给剩余成员中的一名，实得 {formation.LeaderId.Value}");
+            Expect(formation.IsMember(formation.LeaderId), "顺位领队必须仍是编队成员");
+            formation.RemoveMember(entityB);
+            formation.RemoveMember(entityC);
+            Expect(formation.LeaderId == SimEntityId.None, "全员移除后领队应清空");
+
+            // ── 3~6：真实 SimBridge 场景，验证 TryComputeAnchor 的领队优先/排除逻辑 ──
+            Formation realFormation = registry.CreateFormation();
+            var sim = new SimBridge();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 32;
+            cfg.ArenaHalfExtent = 60f;
+            var archetypes = new[]
+            {
+                new BehaviorArchetype
+                {
+                    Kind = BehaviorKind.Stationary, Accel = 0f, TurnRate = 0f, AggroRange = 0f,
+                    AttackRange = 0.5f, AttackCooldown = 99f, AttackDamage = 0f,
+                    Separation = 0f, ChargeSpeedMul = 1f,
+                },
+            };
+            sim.Begin(cfg, archetypes);
+            try
+            {
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(0f, 0f), Health = 10f, Radius = 0.5f, MaxSpeed = 0f,
+                    ArchetypeId = 0, Faction = SimFaction.PlayerMinion, IntentSource = IntentSource.AI, LogicId = 9930,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(30f, 0f), Health = 10f, Radius = 0.5f, MaxSpeed = 0f,
+                    ArchetypeId = 0, Faction = SimFaction.PlayerMinion, IntentSource = IntentSource.AI, LogicId = 9931,
+                });
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(-30f, 0f), Health = 10f, Radius = 0.5f, MaxSpeed = 0f,
+                    ArchetypeId = 0, Faction = SimFaction.PlayerMinion, IntentSource = IntentSource.AI, LogicId = 9932,
+                });
+                sim.OnUpdate(1f / 60f);
+                SimSnapshot snap = sim.Snapshot;
+                SimEntityId leaderId = FindEntityId(snap, 9930, out _);
+                SimEntityId f1Id = FindEntityId(snap, 9931, out _);
+                SimEntityId f2Id = FindEntityId(snap, 9932, out _);
+                Expect(leaderId.IsValid && f1Id.IsValid && f2Id.IsValid, "本项前置：三具测试个体都应落地");
+                if (leaderId.IsValid && f1Id.IsValid && f2Id.IsValid)
+                {
+                    realFormation.AddMember(leaderId);
+                    realFormation.AddMember(f1Id);
+                    realFormation.AddMember(f2Id);
+                    Expect(realFormation.LeaderId == leaderId, "本项前置：leaderId 应是第一个加入的成员");
+                    bool leaderResolved = sim.TryResolveUnitIndex(leaderId, out int leaderIdx);
+                    bool f1Resolved = sim.TryResolveUnitIndex(f1Id, out int f1Idx);
+                    bool f2Resolved = sim.TryResolveUnitIndex(f2Id, out int f2Idx);
+                    Expect(leaderResolved && f1Resolved && f2Resolved, "本项前置：三具个体的索引都应能解析");
+
+                    // ── 3. 有效领队时：锚点=领队位置，不是全员平均 ──
+                    Expect(realFormation.TryComputeAnchor(sim, out float2 anchor1), "三名都存活可查询时应能算出锚点");
+                    Expect(FloatsEqual(anchor1, snap.Position[leaderIdx]),
+                        $"有有效领队时锚点应直接取领队位置，实得 {anchor1} 期望 {snap.Position[leaderIdx]}" +
+                        "（旧实现是全员算术平均，会算出接近原点的错误锚点）");
+
+                    // ── 4. 领队脱队后：退化为未脱队/未卡住成员的稳健中心（不含领队）──
+                    realFormation.SetDetached(leaderId, true);
+                    Expect(realFormation.TryComputeAnchor(sim, out float2 anchor2), "领队脱队后仍应能用其余成员算出锚点");
+                    float2 expectedMean = (snap.Position[f1Idx] + snap.Position[f2Idx]) / 2f;
+                    Expect(FloatsEqual(anchor2, expectedMean),
+                        $"领队脱队后锚点应是未脱队成员的算术平均（不含领队），实得 {anchor2} 期望 {expectedMean}");
+                    realFormation.SetDetached(leaderId, false);
+
+                    // ── 5. 领队仍有效时，跟随者卡住与否不改变锚点；领队失效后卡住的跟随者被排除 ──
+                    realFormation.SetStuck(f1Id, true);
+                    Expect(realFormation.TryComputeAnchor(sim, out float2 anchor3) &&
+                           FloatsEqual(anchor3, snap.Position[leaderIdx]),
+                        "领队仍有效时，跟随者卡住与否不改变锚点（还是取领队）");
+                    realFormation.SetDetached(leaderId, true); // 逼退化到"稳健中心"分支
+                    Expect(realFormation.TryComputeAnchor(sim, out float2 anchor4) &&
+                           FloatsEqual(anchor4, snap.Position[f2Idx]),
+                        $"卡住的跟随者应被排除在稳健中心之外，实得 {anchor4} 期望仅 f2 的位置 {snap.Position[f2Idx]}" +
+                        "——这正是 FC-REQ-003 点名的症状（卡住的成员不该把整队锚点拽偏）");
+                    realFormation.SetStuck(f1Id, false);
+                    realFormation.SetDetached(leaderId, false);
+
+                    // ── 6. 全员脱队/卡住：无有效候选，返回 false，不能静默用旧值糊弄过去 ──
+                    realFormation.SetDetached(leaderId, true);
+                    realFormation.SetDetached(f1Id, true);
+                    realFormation.SetStuck(f2Id, true);
+                    Expect(!realFormation.TryComputeAnchor(sim, out _),
+                        "全部成员都脱队或卡住时应返回 false（无有效成员，调用方按命令失败处理）");
+                    realFormation.SetDetached(leaderId, false);
+                    realFormation.SetDetached(f1Id, false);
+                    realFormation.SetStuck(f2Id, false);
+                }
+            }
+            finally
+            {
+                sim.End();
+            }
+
+            // ── 7. 生产入口 E2E：FormationMovementDriver 在锚点持续算不出来时判命令失败并清理
+            //    所有权（NoValidAnchor），不是无限重试挂起——用全员都是"从未落地"的假 id 制造这个场景。
+            {
+                var hub = new ModuleHub();
+                var e2eRegistry = hub.Register(new FormationRegistry());
+                var e2eSim = hub.Register(new SimBridge());
+                hub.Register(new FormationMovementDriver());
+                hub.Enter();
+
+                SimConfig e2eCfg = SimConfig.Default;
+                e2eCfg.UnitCapacity = 16;
+                e2eCfg.ArenaHalfExtent = 60f;
+                e2eSim.Begin(e2eCfg, Array.Empty<BehaviorArchetype>());
+
+                try
+                {
+                    Formation ghostFormation = e2eRegistry.CreateFormation();
+                    // 两个从未在这局 sim 里落地过的实体 id：TryGetPosition 恒失败，模拟"编队成员
+                    // 全部脱离/查不到位置"的极端情形。
+                    ghostFormation.AddMember(new SimEntityId(424242));
+                    ghostFormation.AddMember(new SimEntityId(424243));
+                    ghostFormation.IssueCommand(new FormationCommand(
+                        FormationCommand.CommandKind.Move, targetPosition: new float2(10f, 10f)));
+
+                    for (int f = 0; f < 40; f++)
+                    {
+                        hub.Update(1f / 60f);
+                    }
+
+                    Expect(ghostFormation.ActiveCommand != null &&
+                           ghostFormation.ActiveCommand.State == FormationCommandState.Failed &&
+                           ghostFormation.ActiveCommand.FailReason == FormationCommandFailReason.NoValidAnchor,
+                        $"锚点持续算不出来应在重试上限后判命令失败并清理所有权，实得状态 " +
+                        $"{ghostFormation.ActiveCommand?.State} / 原因 {ghostFormation.ActiveCommand?.FailReason}" +
+                        "——不能无限重试把命令永远悬在 Active");
+                }
+                finally
+                {
+                    hub.Exit();
                 }
             }
         }

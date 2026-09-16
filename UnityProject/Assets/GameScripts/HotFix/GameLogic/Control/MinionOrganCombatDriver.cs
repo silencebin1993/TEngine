@@ -1,6 +1,8 @@
 using System;
 using BinGames.Sim;
 using GameLogic.Battle;
+using GameLogic.MetabolicSlice.Combat;
+using Unity.Mathematics;
 
 namespace GameLogic.Control
 {
@@ -85,6 +87,10 @@ namespace GameLogic.Control
         /// <summary>累计因为"这具身体没有可释放的主武器器官"而落空的机会数。</summary>
         public int NoOrganCount { get; private set; }
 
+        /// <summary>M4-R00-02 队列③-10（CP-REQ-003 第③级）：累计因为发射点被障碍完全挡死
+        /// 而落空的机会数。与 <see cref="NoOrganCount"/> 分开计——原因不同，排查方向也不同。</summary>
+        public int EmitterBlockedCount { get; private set; }
+
         /// <summary>累计因为守 <see cref="AiStrainCeilingRatio"/> 而主动不开的次数。
         /// 它持续上涨说明这具身体的器官对 AI 来说功率偏高，是调数值的信号，不是 bug。</summary>
         public int StrainHoldCount { get; private set; }
@@ -105,6 +111,7 @@ namespace GameLogic.Control
             _status = status;
             ReleaseCount = 0;
             NoOrganCount = 0;
+            EmitterBlockedCount = 0;
             StrainHoldCount = 0;
             LastOpportunityCount = 0;
             LastReleasedOrganId = null;
@@ -201,10 +208,17 @@ namespace GameLogic.Control
                     continue;
                 }
 
+                // M4-R00-02 队列③-10（CP-REQ-003 第③级）：诊断用途的发射点解析，与 Release
+                // 内部对 Projectile 形态做的是同一个纯函数、同一份输入（含"不叠加
+                // projectileRadius"这条口径，见 OrganReleaseRunner.Release 的注释）。
+                CombatBallistics.TryResolveEmitterPosition(
+                    snapshot.Position[idx], snapshot.Radius[idx], fire.AimDirection, 0f,
+                    _sim.Obstacles, _sim.ArenaHalfExtent, out float2 emitterPos);
+
                 LastEmissionContext = new EmissionContext(
                     fire.EntityId, SimFaction.PlayerMinion, ControllerKind.AiFriendly, organ.OrganId,
-                    snapshot.Position[idx], snapshot.Radius[idx], fire.AimDirection, fire.TargetPart,
-                    _releaseSeed);
+                    snapshot.Position[idx], snapshot.Radius[idx], snapshot.BodyForward[idx],
+                    fire.AimDirection, emitterPos, fire.TargetPart, _releaseSeed);
 
                 bool released = OrganReleaseRunner.Release(
                     _sim, _status, idx, snapshot.Position[idx], snapshot.Radius[idx],
@@ -212,11 +226,19 @@ namespace GameLogic.Control
                     // 锁定到具体接点的那一发才算精准射击——语义与 M2-05b 原先透传接点的判据一致，
                     // 没锁定时打的是"混战里最近的那个"，套用接点没有意义。
                     surgicalAim: fire.TargetPart != SimBodyPartSlot.None,
+                    out bool emitterBlocked,
                     targetPart: fire.TargetPart);
 
                 if (!released)
                 {
-                    NoOrganCount++;
+                    if (emitterBlocked)
+                    {
+                        EmitterBlockedCount++;
+                    }
+                    else
+                    {
+                        NoOrganCount++;
+                    }
                     continue;
                 }
 

@@ -1480,7 +1480,8 @@ namespace GameLogic.MetabolicSlice.Combat
             for (int h = 0; h < hits; h++)
             {
                 BinGames.Sim.ProjectileRequest req = CombatBallistics.Build(
-                    evt, origin, baseDir, h, hits, scale, shotId);
+                    evt, origin, baseDir, h, hits, scale, shotId,
+                    bodyRadius: _sim.PlayerRadius, obstacles: _sim.Obstacles, arenaHalfExtent: _sim.ArenaHalfExtent);
                 req.Tint = tint;
                 _sim.FireProjectile(req);
                 LastFiredProjectileCount++;

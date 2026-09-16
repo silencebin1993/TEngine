@@ -34,6 +34,10 @@ namespace GameLogic.Control
 
         /// <summary>M2-03c：这具身体的代谢资源不够付这一次释放。</summary>
         NotEnoughMetabolism = 10,
+
+        /// <summary>M4-R00-02 队列③-10（CP-REQ-003 第③级）：发射点被静态障碍完全挡死，
+        /// 连最短安全推出都做不到。不会瞬移到别处顶替——规格明令禁止。</summary>
+        EmitterBlocked = 11,
     }
 
     /// <summary>动作集里的一个槽。</summary>

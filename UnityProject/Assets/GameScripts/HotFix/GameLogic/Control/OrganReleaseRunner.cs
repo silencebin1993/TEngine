@@ -1,5 +1,6 @@
 using BinGames.Sim;
 using GameLogic.Battle;
+using GameLogic.MetabolicSlice.Combat;
 using Unity.Mathematics;
 
 namespace GameLogic.Control
@@ -29,16 +30,15 @@ namespace GameLogic.Control
     /// </summary>
     public static class OrganReleaseRunner
     {
-        /// <summary>炮口前推距离，避免弹体一出生就和自己的碰撞体重叠。</summary>
-        public const float MuzzleClearance = 0.2f;
-
         /// <summary>区域类器官"丢出去"的距离倍率（相对区域半径）。跟随型不用它。</summary>
         public const float ZoneThrowDistanceMul = 1.5f;
 
         /// <summary>
-        /// 释放一次。返回 false 只有一个含义：**这件器官没有可释放的内核形态**。
-        /// 不会退回一发通用弹——那会让所有单位打出同一种东西，"打出来的东西与这具身体一致"
-        /// 当场失效，而且"这一发是哪来的"再也追不到源头。
+        /// 释放一次。返回 false 有两个含义，用 <paramref name="emitterBlocked"/> 区分：
+        /// **这件器官没有可释放的内核形态**（false，<paramref name="emitterBlocked"/>=false），
+        /// 或**发射点被障碍完全挡死、连推出都做不到**（false，<paramref name="emitterBlocked"/>=true，
+        /// CP-REQ-003 第③级，M4-R00-02 队列③-10）。不会退回一发通用弹或瞬移到别处顶替——
+        /// 前者会让所有单位打出同一种东西，后者是规格明令禁止的行为。
         /// </summary>
         /// <param name="sim">内核桥。</param>
         /// <param name="status">状态系统；为 null 时状态类器官退回 <c>SimBridge.ApplyStatusArea</c>。</param>
@@ -49,6 +49,7 @@ namespace GameLogic.Control
         /// <param name="aim">瞄准方向（世界 XZ）。零向量退化为 +X。</param>
         /// <param name="targetFaction">这一击打谁。玩家与友军都打 <see cref="SimFaction.Hostile"/>。</param>
         /// <param name="surgicalAim">弹体是否带精准瞄准语义（手术窗口）。</param>
+        /// <param name="emitterBlocked">发射点被障碍挡死时置 true；其余失败原因恒 false。</param>
         /// <param name="targetPart">
         /// 锁定的身体接点（M2-05b）。只有弹体形态用得上；其余形态是范围结算，没有"打哪个接点"可言。
         /// </param>
@@ -62,8 +63,10 @@ namespace GameLogic.Control
             float2 aim,
             SimFaction targetFaction,
             bool surgicalAim,
+            out bool emitterBlocked,
             SimBodyPartSlot targetPart = SimBodyPartSlot.None)
         {
+            emitterBlocked = false;
             if (sim == null || !act.IsValid)
             {
                 return false;
@@ -75,8 +78,19 @@ namespace GameLogic.Control
             switch (act.Kind)
             {
                 case OrganKernelActionKind.Projectile:
+                    // 只前推 bodyRadius+Clearance，**不**叠加 act.Radius（弹体自身半径）——
+                    // 这条路是友军/AI 的贴身混战场景，实测叠加 projectileRadius 会把发射点
+                    // 推到贴近甚至越过近距离目标，导致弹体在目标碰撞体内部出生而判不到命中
+                    // （M4-R00-02 队列③-10 调试记录：[19]/[25] 两条近战距离回归曾因此转红）。
+                    // CombatBallistics.Build（玩家本体，射程更远、极少贴脸开火）保留完整公式。
+                    if (!CombatBallistics.TryResolveEmitterPosition(
+                        origin, radius, dir, 0f, sim.Obstacles, sim.ArenaHalfExtent, out float2 emitterPos))
+                    {
+                        emitterBlocked = true;
+                        return false;
+                    }
                     sim.FireProjectile(
-                        origin + dir * (radius + MuzzleClearance),
+                        emitterPos,
                         dir, act.Speed, act.Damage, act.Radius, act.Lifetime, act.Pierce,
                         targetFaction, act.ApplyStatus, sourceLogicId,
                         targetPart: targetPart, surgicalAim: surgicalAim);

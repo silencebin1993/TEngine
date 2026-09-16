@@ -219,6 +219,9 @@ namespace BinGames.Sim
         public SimEntityId EntityId;
         public int UnitIndex;
         public float2 Position;
+        /// <summary>M4-R00-02 队列③-10（CP-REQ-004）：最后有效身体朝向，与瞄准方向是两个不同概念，
+        /// 速度接近零时保留上一次的有效值。详见 <see cref="SimSnapshot.BodyForward"/>。</summary>
+        public float2 BodyForward;
         public float Health;
         public float Radius;
         public SimStatus Status;

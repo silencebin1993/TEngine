@@ -93,6 +93,70 @@ namespace GameLogic.MetabolicSlice.Combat
         /// 旧实现用 2π·s/n 的世界系绝对角，n=2 时恒为正负 X 轴——这就是"纺锤/绽放永远横着裂开"的根因。</summary>
         public const float SplitSpreadDeg = 100f;
 
+        /// <summary>炮口前推距离（CP-REQ-003 第③级公式的最后一项）。与
+        /// <see cref="Control.OrganReleaseRunner"/> 此前各自维护的 0.2f 同一常量，
+        /// M4-R00-02 队列③-10 起统一到这里，避免两条释放路的"炮口离身体多远"各算各的。</summary>
+        public const float MuzzleClearance = 0.2f;
+
+        /// <summary>
+        /// CP-REQ-003 第③级发射点兜底：身体中心沿 <paramref name="direction"/> 前推
+        /// <paramref name="bodyRadius"/>+<paramref name="projectileRadius"/>+<see cref="MuzzleClearance"/>，
+        /// 越界/撞静态障碍物时沿同一方向做最短安全推出（公式与 <c>JobIntegrate</c> 的障碍推出
+        /// 一致，纯几何，不碰内核状态）。真实器官挂点/底盘标准挂点（CP-REQ-003 第①②级）本次
+        /// 未实现，登记为债务——本函数是"没有真实挂点时"唯一允许的兜底，调用方不得各自再拍一套
+        /// 前推公式（那正是审计点名"炮口VFX/弹体碰撞/声音/后坐力必须读同一发射点"要防的事）。
+        ///
+        /// 恰好落在某个障碍正中心（无安全推出方向）时返回 false——调用方必须按 EmitterBlocked
+        /// 处理，禁止瞬移到别处顶替（规格明令禁止）。<paramref name="obstacles"/> 为 null 时跳过
+        /// 障碍检测，恒返回 true（给不掌握真实场景数据的调用方，如离线自检工具）。
+        /// </summary>
+        public static bool TryResolveEmitterPosition(
+            float2 bodyPosition, float bodyRadius, float2 direction, float projectileRadius,
+            ObstacleSpec[] obstacles, float arenaHalfExtent, out float2 emitterPosition)
+        {
+            float2 dir = math.normalizesafe(direction, new float2(0f, 1f));
+            float2 pos = bodyPosition + dir * (bodyRadius + projectileRadius + MuzzleClearance);
+
+            if (arenaHalfExtent > 0f)
+            {
+                pos.x = math.clamp(pos.x, -arenaHalfExtent, arenaHalfExtent);
+                pos.y = math.clamp(pos.y, -arenaHalfExtent, arenaHalfExtent);
+            }
+
+            if (obstacles != null)
+            {
+                for (int i = 0; i < obstacles.Length; i++)
+                {
+                    float2 diff = pos - obstacles[i].Position;
+                    float minDist = obstacles[i].Radius + projectileRadius;
+                    float distSq = math.lengthsq(diff);
+                    if (distSq >= minDist * minDist)
+                    {
+                        continue;
+                    }
+                    float dist = math.sqrt(distSq);
+                    if (dist < 1e-4f)
+                    {
+                        // 中心重合：没有安全推出方向可算，交给调用方按 EmitterBlocked 拒绝，
+                        // 不瞎猜一个方向瞬移过去。
+                        emitterPosition = default;
+                        return false;
+                    }
+                    pos = obstacles[i].Position + diff / dist * minDist;
+                }
+
+                // 推完之后可能又跑出场地边界（贴着场边的障碍）——再夹一次。
+                if (arenaHalfExtent > 0f)
+                {
+                    pos.x = math.clamp(pos.x, -arenaHalfExtent, arenaHalfExtent);
+                    pos.y = math.clamp(pos.y, -arenaHalfExtent, arenaHalfExtent);
+                }
+            }
+
+            emitterPosition = pos;
+            return true;
+        }
+
         /// <summary>
         /// 把一个 <see cref="HitEvent"/> 的第 <paramref name="index"/> 发翻译成内核弹体发射参数。
         ///
@@ -100,8 +164,14 @@ namespace GameLogic.MetabolicSlice.Combat
         /// 多发按 <see cref="HitEvent.SpreadAngle"/> 以**它**为中轴左右展开——所以"纺锤分裂"
         /// 是绕鼠标方向左右裂，不是绕世界坐标轴裂。
         /// </summary>
+        /// <param name="bodyRadius">发射者的身体半径（CP-REQ-003 第③级前推公式用）。默认 0——
+        /// 非"身体中心为原点"的调用方（如从环形落点再分裂的二次弹）不需要这一项。</param>
+        /// <param name="obstacles">当前场上的静态障碍，越界/撞障碍推出用。默认 null 时跳过推出
+        /// 检测（调试/自检工具没有真实场景数据）。</param>
+        /// <param name="arenaHalfExtent">场地半边长，配合 <paramref name="obstacles"/> 一起判越界。</param>
         public static ProjectileRequest Build(HitEvent evt, float2 origin, float2 baseDir,
-            int index, int count, float scale, int shotId)
+            int index, int count, float scale, int shotId,
+            float bodyRadius = 0f, ObstacleSpec[] obstacles = null, float arenaHalfExtent = 0f)
         {
             float speedMul = evt.Speed > 0f ? evt.Speed : 1f;
             float speed = BaseSpeed * math.clamp(speedMul, 0.25f, 6f);
@@ -173,9 +243,18 @@ namespace GameLogic.MetabolicSlice.Combat
                 areaRadius = radius * ExplodeRadiusMul;
             }
 
+            // CP-REQ-003 第③级：身体中心前推+越界/障碍推出。恰好卡在障碍正中心（无安全推出
+            // 方向）这种极端情形，这条自动开火路径没有"拒绝并提示玩家"的既有反馈通道（不同于
+            // 直控/AI 的 DirectActionAvailability 闸门），退回不做推出检测的裸公式而不是整次
+            // 攻击哑火——见 DESIGN.md 里这处不对称的说明。
+            if (!TryResolveEmitterPosition(origin, bodyRadius, dir, radius, obstacles, arenaHalfExtent, out float2 emitterPos))
+            {
+                TryResolveEmitterPosition(origin, bodyRadius, dir, radius, null, 0f, out emitterPos);
+            }
+
             return new ProjectileRequest
             {
-                Position = origin + dir * (radius + 0.6f),
+                Position = emitterPos,
                 Direction = dir,
                 Speed = speed,
                 Damage = evt.Damage,

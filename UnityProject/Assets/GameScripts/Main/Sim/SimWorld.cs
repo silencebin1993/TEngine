@@ -22,6 +22,10 @@ namespace BinGames.Sim
         // ── SoA 单位数据 ──
         private NativeArray<float2> _position;
         private NativeArray<float2> _velocity;
+        /// <summary>M4-R00-02 队列③-10（CP-REQ-004）：最后有效身体朝向，与瞄准方向是两个不同概念
+        /// （见 CP-REQ-010）。只在 <see cref="JobIntegrate"/> 里速度不接近零时更新，静止/停顿时
+        /// 保留旧值——规格明确禁止零向量把朝向重置为世界轴，见该 Job 的写入处。</summary>
+        private NativeArray<float2> _bodyForward;
         private NativeArray<float2> _desiredDir;
         private NativeArray<float2> _separation;
         private NativeArray<float> _health;
@@ -168,6 +172,7 @@ namespace BinGames.Sim
 
             _position = new NativeArray<float2>(cap, A);
             _velocity = new NativeArray<float2>(cap, A);
+            _bodyForward = new NativeArray<float2>(cap, A);
             _desiredDir = new NativeArray<float2>(cap, A);
             _separation = new NativeArray<float2>(cap, A);
             _health = new NativeArray<float>(cap, A);
@@ -1173,6 +1178,7 @@ namespace BinGames.Sim
                 ObstacleCount = _obstacleCount,
                 Position = _position,
                 Velocity = _velocity,
+                BodyForward = _bodyForward,
                 Dt = dt,
                 Count = _unitCount,
                 ArenaHalf = _cfg.ArenaHalfExtent,
@@ -1965,6 +1971,12 @@ namespace BinGames.Sim
 
             _position[idx] = req.Position;
             _velocity[idx] = req.Velocity;
+            // CP-REQ-004："首次生成由底盘/出生点声明"——SpawnRequest 没有专门的朝向字段，
+            // 唯一可用的信号源是初速度；静止生成（Velocity=zero，绝大多数召唤/萌生场景）时
+            // 给一个固定默认朝向，不能留 zero（那正是规格明令禁止的"重置成世界轴"的反面情形）。
+            _bodyForward[idx] = math.lengthsq(req.Velocity) > 1e-6f
+                ? math.normalize(req.Velocity)
+                : new float2(0f, 1f);
             _desiredDir[idx] = float2.zero;
             _separation[idx] = float2.zero;
             _health[idx] = math.max(1f, req.Health);
@@ -2210,6 +2222,7 @@ namespace BinGames.Sim
             _status[idx] = 0u;
             _health[idx] = 0f;
             _velocity[idx] = float2.zero;
+            _bodyForward[idx] = float2.zero;
             _desiredDir[idx] = float2.zero;
             _separation[idx] = float2.zero;
             _logicId[idx] = 0;
@@ -2388,6 +2401,7 @@ namespace BinGames.Sim
                 Count = _unitCount,
                 Position = _position,
                 Velocity = _velocity,
+                BodyForward = _bodyForward,
                 Health = _health,
                 Radius = _radius,
                 Status = _status,
@@ -2446,7 +2460,7 @@ namespace BinGames.Sim
                 return;
             }
 
-            Safe(ref _position); Safe(ref _velocity); Safe(ref _desiredDir); Safe(ref _separation);
+            Safe(ref _position); Safe(ref _velocity); Safe(ref _bodyForward); Safe(ref _desiredDir); Safe(ref _separation);
             SafeF(ref _health); SafeF(ref _radius); SafeF(ref _maxSpeed); SafeF(ref _attackTimer);
             SafeI(ref _archetypeId); SafeI(ref _logicId); SafeI(ref _visualId);
             if (_entityId.IsCreated) { _entityId.Dispose(); }

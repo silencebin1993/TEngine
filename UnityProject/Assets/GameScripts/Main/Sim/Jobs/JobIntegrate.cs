@@ -30,6 +30,9 @@ namespace BinGames.Sim
 
         public NativeArray<float2> Position;
         public NativeArray<float2> Velocity;
+        /// <summary>M4-R00-02 队列③-10（CP-REQ-004）：最后有效身体朝向。见 <see cref="Execute"/>
+        /// 末尾的写入条件——速度接近零时不写，规格明令禁止零向量重置朝向。</summary>
+        public NativeArray<float2> BodyForward;
 
         public float Dt;
         public int Count;
@@ -148,6 +151,15 @@ namespace BinGames.Sim
 
             Position[i] = pos;
             Velocity[i] = vel;
+
+            // CP-REQ-004：只在速度真的非零时更新朝向，静止/停顿帧保留上一次的有效值——
+            // 这正是规格要求的"零向量不能把朝向重置为世界轴"，写在这里（而不是"用 desired
+            // 而非实际 vel"）是因为 vel 才是这具身体这一刻真正在动的方向，desired 只是意图，
+            // 撞墙/被推开时两者可能不一致，朝向应该跟着"真的在往哪走"。
+            if (math.lengthsq(vel) > 1e-6f)
+            {
+                BodyForward[i] = math.normalize(vel);
+            }
         }
     }
 }

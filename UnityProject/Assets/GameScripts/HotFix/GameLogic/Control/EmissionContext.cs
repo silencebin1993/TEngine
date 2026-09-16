@@ -30,7 +30,16 @@ namespace GameLogic.Control
         public readonly string OrganId;
         public readonly float2 BodyPosition;
         public readonly float BodyRadius;
+        /// <summary>M4-R00-02 队列③-10（CP-REQ-004）：本次释放时该身体的最后有效朝向
+        /// （<see cref="BinGames.Sim.SimSnapshot.BodyForward"/> 原样转发），与 <see cref="AimDirection"/>
+        /// 是两个不同概念——瞄准可以临时偏转，朝向是"这具身体面朝哪"的持久状态。</summary>
+        public readonly float2 BodyForward;
         public readonly float2 AimDirection;
+        /// <summary>M4-R00-02 队列③-10（CP-REQ-003 第③级）：本次释放实际解析出的发射点
+        /// （身体中心沿发射方向前推+越界/障碍推出之后的结果）。炮口 VFX/弹体起点应读这个字段，
+        /// 不应该自己再算一遍——这正是 CP-REQ-003"必须读同一发射点"的落点。真实器官/底盘挂点
+        /// （①②级）未实现，本字段今天恒等于③级兜底公式的结果。</summary>
+        public readonly float2 EmitterPosition;
         public readonly SimBodyPartSlot TargetPart;
         public readonly int AttackSequence;
 
@@ -41,7 +50,9 @@ namespace GameLogic.Control
             string organId,
             float2 bodyPosition,
             float bodyRadius,
+            float2 bodyForward,
             float2 aimDirection,
+            float2 emitterPosition,
             SimBodyPartSlot targetPart,
             int attackSequence)
         {
@@ -51,7 +62,9 @@ namespace GameLogic.Control
             OrganId = organId;
             BodyPosition = bodyPosition;
             BodyRadius = bodyRadius;
+            BodyForward = bodyForward;
             AimDirection = aimDirection;
+            EmitterPosition = emitterPosition;
             TargetPart = targetPart;
             AttackSequence = attackSequence;
         }

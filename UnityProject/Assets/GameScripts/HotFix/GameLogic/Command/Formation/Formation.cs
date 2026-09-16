@@ -29,6 +29,17 @@ namespace GameLogic.Command.Formation
 
         private readonly HashSet<SimEntityId> _members = new HashSet<SimEntityId>();
         private readonly HashSet<SimEntityId> _detachedMembers = new HashSet<SimEntityId>();
+        /// <summary>M4-R00-02 队列③-11（FC-REQ-003）：当前被判定为"持续卡住"的成员（由
+        /// <see cref="FormationMovementDriver"/> 的卡死检测写入，见 <see cref="SetStuck"/>）。
+        /// 只用于 <see cref="TryComputeAnchor"/> 排除——不是"卡住"本身的判定逻辑，判定逻辑在
+        /// <see cref="FormationStuckTracker"/>，这里只存持久到"恢复移动前"都成立的结果。</summary>
+        private readonly HashSet<SimEntityId> _stuckMembers = new HashSet<SimEntityId>();
+
+        /// <summary>M4-R00-02 队列③-11（FC-REQ-003）：编队领队——加入的第一名成员自动成为领队，
+        /// 领队离队/被移除时自动顺位给剩余成员中的任意一名（规格未要求指定继任规则，只要求
+        /// "锚点优先取有效领队"这件事成立）。没有公开的 SetLeader：今天没有任何生产入口需要显式
+        /// 指定领队，加一个没人调用的公开写口子是负债，不是能力——需要时再开。</summary>
+        public SimEntityId LeaderId { get; private set; } = SimEntityId.None;
 
         /// <summary>M4-02：等待队列，按 Priority 降序排列（同优先级按入队顺序，稳定排序），
         /// 只含尚未激活的命令——<see cref="ActiveCommand"/> 不在这个列表里。这是 M4-01
@@ -51,14 +62,43 @@ namespace GameLogic.Command.Formation
         /// 因为这里只认 <see cref="SimEntityId"/>，与来源无关。</summary>
         public bool AddMember(SimEntityId entity)
         {
-            return entity.IsValid && _members.Add(entity);
+            if (!entity.IsValid)
+            {
+                return false;
+            }
+
+            bool wasEmpty = _members.Count == 0;
+            if (!_members.Add(entity))
+            {
+                return false;
+            }
+
+            if (wasEmpty)
+            {
+                LeaderId = entity;
+            }
+
+            return true;
         }
 
-        /// <summary>移除成员时联动清掉脱队标记，防止 stale 状态残留（同 D6 语义）。</summary>
+        /// <summary>移除成员时联动清掉脱队/卡住标记，防止 stale 状态残留（同 D6 语义）。
+        /// 移除的是当前领队时顺位给剩余成员中的任意一名，全体移空则清空领队。</summary>
         public bool RemoveMember(SimEntityId entity)
         {
             bool removed = _members.Remove(entity);
             _detachedMembers.Remove(entity);
+            _stuckMembers.Remove(entity);
+
+            if (removed && entity == LeaderId)
+            {
+                LeaderId = SimEntityId.None;
+                foreach (SimEntityId remaining in _members)
+                {
+                    LeaderId = remaining;
+                    break;
+                }
+            }
+
             return removed;
         }
 
@@ -67,11 +107,20 @@ namespace GameLogic.Command.Formation
             return _members.Contains(entity);
         }
 
-        /// <summary>M4-04：编队锚点——成员当前位置的算术平均（D3）。O(成员数) 次
-        /// <see cref="SimBridge.TryGetPosition"/> 查询，调用方按需传入 <paramref name="sim"/>；
-        /// Formation 本身不持有内核引用（同类型注释开头的解耦边界——只存 <see cref="SimEntityId"/>，
-        /// SimBridge 只是"按需借用一次"，不缓存）。全部成员都查不到位置（比如都已死亡/未加入
-        /// 战场）时返回 false。</summary>
+        /// <summary>
+        /// M4-04 + M4-R00-02 队列③-11（FC-REQ-003）：编队锚点。
+        ///
+        /// 优先级：①有效领队（<see cref="LeaderId"/> 仍是成员、未脱队、未卡住、查得到位置）
+        /// 直接取它的位置；②否则取未脱队且未卡住存活成员的稳健中心——"稳健"体现在排除脱队/卡死
+        /// 这两类会把锚点拽偏的成员，不是对全员坐标做统计学离群值剔除（规格原文的"排除极端失散
+        /// 成员"就是"脱队"的同义表述，不是要求另一套算法）。
+        ///
+        /// 旧实现对**全体**成员（含脱队/卡死）做算术平均——一个卡在障碍里的成员会把整队锚点
+        /// 拽偏，进而拽偏整队重规划路径的起点，这正是 FC-REQ-003 冲突判定点名的症状。
+        ///
+        /// 全部候选都查不到位置（比如都已死亡/未加入战场）时返回 false，调用方按"命令失败并
+        /// 清理所有权"处理（见 <see cref="FormationMovementDriver"/>），不能无限重试。
+        /// </summary>
         public bool TryComputeAnchor(SimBridge sim, out float2 anchor)
         {
             anchor = float2.zero;
@@ -80,10 +129,22 @@ namespace GameLogic.Command.Formation
                 return false;
             }
 
+            if (LeaderId.IsValid && _members.Contains(LeaderId) &&
+                !_detachedMembers.Contains(LeaderId) && !_stuckMembers.Contains(LeaderId) &&
+                sim.TryGetPosition(LeaderId, out float2 leaderPos))
+            {
+                anchor = leaderPos;
+                return true;
+            }
+
             float2 sum = float2.zero;
             int counted = 0;
             foreach (SimEntityId member in _members)
             {
+                if (_detachedMembers.Contains(member) || _stuckMembers.Contains(member))
+                {
+                    continue;
+                }
                 if (sim.TryGetPosition(member, out float2 pos))
                 {
                     sum += pos;
@@ -122,6 +183,31 @@ namespace GameLogic.Command.Formation
         public bool IsDetached(SimEntityId entity)
         {
             return _detachedMembers.Contains(entity);
+        }
+
+        /// <summary>M4-R00-02 队列③-11（FC-REQ-003）：持续卡住标记，供 <see cref="TryComputeAnchor"/>
+        /// 排除。由 <see cref="FormationMovementDriver"/> 的卡死检测写入——判定为 Replan/Fail 时
+        /// 置 true，成员重新有实质位移时置 false。非成员调用一律 no-op（同 <see cref="SetDetached"/>）。</summary>
+        public void SetStuck(SimEntityId entity, bool stuck)
+        {
+            if (!_members.Contains(entity))
+            {
+                return;
+            }
+
+            if (stuck)
+            {
+                _stuckMembers.Add(entity);
+            }
+            else
+            {
+                _stuckMembers.Remove(entity);
+            }
+        }
+
+        public bool IsStuck(SimEntityId entity)
+        {
+            return _stuckMembers.Contains(entity);
         }
 
         /// <summary>排队：按 Priority 降序插入等待队列（同优先级按入队顺序，稳定排序），

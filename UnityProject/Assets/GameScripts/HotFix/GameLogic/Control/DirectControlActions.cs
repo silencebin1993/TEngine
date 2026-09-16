@@ -3,6 +3,7 @@ using BinGames.Sim;
 using GameLogic.Ability;
 using GameLogic.Battle;
 using GameLogic.Core;
+using GameLogic.MetabolicSlice.Combat;
 using Unity.Mathematics;
 
 namespace GameLogic.Control
@@ -313,17 +314,21 @@ namespace GameLogic.Control
                 return Reject(ToAvailability(gate));
             }
 
+            bool emitterBlocked = false;
             bool released = onPlayerBody
                 ? ReleaseOnPlayerBody(action)
-                : ReleaseOnKernel(view, act, aim);
+                : ReleaseOnKernel(view, act, aim, out emitterBlocked);
 
             if (!released)
             {
-                // 两条路的失败含义不同：委托路失败=被委托的技能槽没就绪；
-                // 内核路失败=这件器官没有可释放形态。混成一个原因会让排查从"看一眼"变成"猜"。
+                // 三条路的失败含义不同：委托路失败=被委托的技能槽没就绪；内核路失败分两种——
+                // 器官没有可释放形态，或发射点被障碍挡死（CP-REQ-003 第③级，队列③-10）。
+                // 混成一个原因会让排查从"看一眼"变成"猜"。
                 return Reject(onPlayerBody
                     ? DirectActionAvailability.NotReady
-                    : DirectActionAvailability.NoKernelAction);
+                    : emitterBlocked
+                        ? DirectActionAvailability.EmitterBlocked
+                        : DirectActionAvailability.NoKernelAction);
             }
 
             // 扣账在释放**之后**：判到一半就扣，会出现"代谢付了但什么都没打出来"
@@ -375,20 +380,28 @@ namespace GameLogic.Control
         /// 走的是同一个函数**——那正是"同一具身体，谁开都打出同样的东西"的兑现点。
         /// 本方法只剩下"把受控视图拆成参数 + 记一次诊断"。
         /// </summary>
-        private bool ReleaseOnKernel(in SimControlledUnitView view, in OrganKernelAction act, float2 aim)
+        private bool ReleaseOnKernel(in SimControlledUnitView view, in OrganKernelAction act, float2 aim, out bool emitterBlocked)
         {
             _kernelReleaseSeed++;
+
+            float2 dir = math.normalizesafe(aim, new float2(1f, 0f));
+            // M4-R00-02 队列③-10（CP-REQ-003 第③级）：诊断用途的发射点解析，与 Release 内部对
+            // Projectile 形态做的是同一个纯函数、同一份输入（含"不叠加 projectileRadius"这条口径，
+            // 见 OrganReleaseRunner.Release 的注释）——EmissionContext 记的就是这次释放实际会用到
+            // 的发射点，不是另算一份可能对不上的近似值。
+            CombatBallistics.TryResolveEmitterPosition(
+                view.Position, view.Radius, dir, 0f, _sim.Obstacles, _sim.ArenaHalfExtent, out float2 emitterPos);
 
             // M4-R00-02 队列①-1：记录本次释放的发射上下文（诊断/回归锚点，见 EmissionContext 类注释）。
             LastEmissionContext = new EmissionContext(
                 view.EntityId, view.Faction, ControllerKind.DirectFriendly, act.OrganId,
-                view.Position, view.Radius, aim, SimBodyPartSlot.None, _kernelReleaseSeed);
+                view.Position, view.Radius, view.BodyForward, aim, emitterPos, SimBodyPartSlot.None, _kernelReleaseSeed);
 
             // surgicalAim: true 是直控特有的——手术窗口（M2-05）本来就是"人手瞄准接点"的产物。
             // AI 那条路按内核给的锁定接点来，不共用这个开关。
             bool released = OrganReleaseRunner.Release(
                 _sim, _status, view.UnitIndex, view.Position, view.Radius,
-                act, aim, SimFaction.Hostile, surgicalAim: true);
+                act, aim, SimFaction.Hostile, surgicalAim: true, out emitterBlocked);
 
             if (released)
             {
