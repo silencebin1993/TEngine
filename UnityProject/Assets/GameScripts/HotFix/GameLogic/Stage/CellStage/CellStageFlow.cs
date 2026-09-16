@@ -399,7 +399,8 @@ namespace GameLogic.Stage.CellStage
             // 战略视角会放下意识，所以回直控前必须先重新接管一具，见 ReacquireDirectTarget。
             _cameraDirector.EnsureDirectTarget = ReacquireDirectTarget;
             _squadCommands = new SquadCommandSystem();
-            _squadCommands.Bind(_sim, _camera);
+            // M4-R02 最小桥接：_formations 已在 RegisterModules（先于本方法执行）里注册完毕。
+            _squadCommands.Bind(_sim, _camera, _formations);
 
             // M2-04a：接管交还可靠性。必须排在 _squadCommands 之后——它要在交还那一刻
             // 读编队归属；也必须与 CameraDirector / SquadCommandSystem 同样**不进 _hub**：

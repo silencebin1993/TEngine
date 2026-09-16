@@ -102,6 +102,45 @@
 37. **1/2/8/64与4×64+512压力矩阵**（`FC-REQ-070`缺失，依赖③③先修复）。
 38. **食源剩余四类型落地**（`FS-REQ-021`接口阻塞的骨架层面已解决，内容扩展可延后到此优先级）。
 
+## Ⓐ 架构专项（独立任务，禁止被单项队列故事顺手吞并）
+
+2026-09-16 在④/⑤队列实施过程中发现的两条底层架构缺口，均横跨多个队列项，任何单一队列故事
+解决时都只能"顺带绕过"而不是"真正解决"——一旦被某个具体故事顺手实现一半，后来者会误以为
+问题已解决，实际只是那个故事自己用得到的窄路径。因此正式独立登记，不挂靠任何队列编号。
+
+### ARCH-TASK-ENTITY-IDENTITY-01：单位跨局身份不稳定
+
+**现象**：`SimEntityId` 只在生成它的那个 `SimWorld` 实例内有效，进程重开/换场景后旧值作废
+（`ControlPersistence.cs` 类型注释已有此结论）。本仓目前唯一的"稳定 id ↔ SimEntityId"重建
+机制只覆盖"当前受控单位"一个特例（靠 `ControlledLogicId` 方案）。
+
+**阻塞**：
+- ④-20（编队/命令/教义接入存读档，`FS-REQ-064`）——已折入 `M4-R01`。
+- ⑤-20（同一条，⑤节队列文本重复引用同一需求）。
+- `WildOrganRegistry._carried`/`_installed`（本次⑤-21已明确排除出存读档范围，
+  见 `DEBT-WILDORGAN-OWNED-PERSIST-01`）。
+- `GerminationChamberRegistry._bindings`（个体的谱系/表型/版本绑定）。
+- 未来任何"按实体记账且要求跨局存活"的系统，一律先撞到这堵墙。
+
+**不应该被吞并的理由**：④-20/⑤-20 的既有措辞（"折入 M4-R01"）容易让人误以为只是 Formation
+一个系统的存档问题；实际上是通用基础设施缺口，Formation 只是最先撞上它的消费者之一。
+
+### ARCH-TASK-LINEAGE-PERSISTENCE-01：谱系数据（LineageRegistry）完全没有持久化
+
+**现象**：全仓无 `LineagePersistence.cs`，`LineageRegistry`（M3-03 谱系/表型模板）没有任何
+`OnEnter`/`OnExit` 读写——2026-09-16 核实⑤-21时新发现，此前任何审计文档都未登记过。
+
+**阻塞**：
+- 萌生腔队列（`GerminationChamberRegistry._queues`）即使解决了 ARCH-TASK-ENTITY-IDENTITY-01
+  也无法安全存读档——`GerminationTicket.Version` 引用的 `PhenotypeTemplateVersion` 对象在
+  读档后无法解析，因为 `LineageRegistry` 本身是空的。
+- 回巢改造（`HomecomingRetrofitService`）相关的任何存读档需求。
+- 任何依赖"谱系模板提交历史跨局存活"的功能。
+
+**不应该被吞并的理由**：表面看像是"萌生腔存读档"故事的一个子任务，实际是更底层、影响面更广
+的独立缺口；需要独立设计谱系提交历史的序列化与版本对象引用链重建（多处引用同一版本对象时，
+读档后必须指向同一个重建实例，不能各自反序列化出不同副本）。
+
 ## 已确认无需现在处理（真正可延后，仅登记去处）
 
 `FS-REQ-004`→M8+；`FS-REQ-042`→M5-04；`FS-REQ-051`→M6-04；`FS-REQ-052`→M5-04/M6-03；

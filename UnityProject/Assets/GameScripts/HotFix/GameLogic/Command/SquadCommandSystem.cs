@@ -4,6 +4,14 @@ using GameLogic.Battle;
 using GameLogic.Core;
 using Unity.Mathematics;
 using UnityEngine;
+// 命名空间 GameLogic.Command.Formation 与其中的类 Formation 同名，且 SquadCommandSystem
+// 本身就在 GameLogic.Command 下——嵌套命名空间对裸标识符 "Formation" 的解析优先级高于
+// using 别名，起别名也压不掉，所以本文件内一律用 SquadFormation 这个别名，不裸写 Formation。
+using SquadFormation = GameLogic.Command.Formation.Formation;
+using FormationRegistry = GameLogic.Command.Formation.FormationRegistry;
+using FormationCommand = GameLogic.Command.Formation.FormationCommand;
+using FormationCommandPriority = GameLogic.Command.Formation.FormationCommandPriority;
+using FormationCommandIssueResult = GameLogic.Command.Formation.FormationCommandIssueResult;
 
 namespace GameLogic.Command
 {
@@ -31,6 +39,10 @@ namespace GameLogic.Command
         private SimBridge _sim;
         private Camera _camera;
 
+        /// <summary>M4-R02 最小桥接：编队注册表。为 null 时本类完全不接触 Formation，
+        /// 行为与桥接前逐字相同（部分测试关心的是与 Formation 无关的机制，传 null 保持隔离）。</summary>
+        private FormationRegistry _formations;
+
         /// <summary>
         /// surgical-window（M2-05b 实施第 2 条）：右键下达 Attack 命令时要顺带指定的接点类别。
         /// 调试级输入——按 P 键在 None → Primary → Secondary → None 之间循环，没有正式 UI/美术，
@@ -44,8 +56,19 @@ namespace GameLogic.Command
         private readonly List<SimEntityId> _selection = new List<SimEntityId>(SimConst.MaxSelectionSize);
         /// <summary>编组 1~9。值是稳定实体 ID——存索引会在槽位复用后指向别的单位。</summary>
         private readonly Dictionary<int, List<SimEntityId>> _groups = new Dictionary<int, List<SimEntityId>>(9);
+        /// <summary>M4-R02 最小桥接：编组槽位 → 对应 Formation 的 Id。数字编组=编队槽位，
+        /// 1~9 号槽位与 1~9 支 Formation 一一对应（见 DESIGN.md 2.1/2.9）。</summary>
+        private readonly Dictionary<int, string> _groupFormationIds = new Dictionary<int, string>(9);
+        /// <summary>M4-R02 最小桥接：当前是否正在操作一支刚被 <see cref="RecallGroup"/> 出来、
+        /// 且未被后续任何选择/编组动作弄脏的编队。null 表示当前按裸选择集处理。</summary>
+        private string _activeFormationId;
         /// <summary>暂停期间排队的命令，恢复时按下达顺序依次兑现。</summary>
         private readonly List<PendingCommand> _queued = new List<PendingCommand>(8);
+
+        /// <summary>M4-R02 最小桥接：最近一次真正执行命令分流（立即下达或 flush 处理某条排队
+        /// 命令）的结果。只读，纯数据层，见 <see cref="SquadFormationDispatchOutcome"/>。</summary>
+        public SquadFormationDispatchOutcome LastFormationDispatchOutcome { get; private set; }
+            = SquadFormationDispatchOutcome.NotFormationRouted;
 
         private bool _dragging;
         private float2 _dragStartWorld;
@@ -57,6 +80,9 @@ namespace GameLogic.Command
         {
             public SimEntityId[] Targets;
             public UnitCommand Command;
+            /// <summary>M4-R02 最小桥接：入队那一刻是否走编队路径，null=否。只在入队时打标签，
+            /// 不在入队时执行分流——分流只在真正执行命令的时刻（flush）发生。</summary>
+            public string FormationId;
         }
 
         public IReadOnlyList<SimEntityId> Selection => _selection;
@@ -71,12 +97,16 @@ namespace GameLogic.Command
         /// <summary>本局累计成功下达的命令数（含排队后兑现的）。验收用。</summary>
         public int IssuedCommandCount { get; private set; }
 
-        public void Bind(SimBridge sim, Camera camera)
+        public void Bind(SimBridge sim, Camera camera, FormationRegistry formations)
         {
             _sim = sim;
             _camera = camera;
+            _formations = formations;
             _selection.Clear();
             _groups.Clear();
+            _groupFormationIds.Clear();
+            _activeFormationId = null;
+            LastFormationDispatchOutcome = SquadFormationDispatchOutcome.NotFormationRouted;
             _queued.Clear();
             _dragging = false;
             _pendingAttackPart = SimBodyPartSlot.None;
@@ -87,8 +117,12 @@ namespace GameLogic.Command
         {
             _sim = null;
             _camera = null;
+            _formations = null;
             _selection.Clear();
             _groups.Clear();
+            _groupFormationIds.Clear();
+            _activeFormationId = null;
+            LastFormationDispatchOutcome = SquadFormationDispatchOutcome.NotFormationRouted;
             _queued.Clear();
             _dragging = false;
         }
@@ -146,6 +180,9 @@ namespace GameLogic.Command
             }
 
             _dragging = false;
+            // M4-R02 最小桥接：任何拖框/点选都结束"正在操作某支已召回编队"的状态——不尝试
+            // 判断这次选中的人是不是恰好等于某支编队的成员，简单规则、没有歧义（见 DESIGN.md 2.3）。
+            _activeFormationId = null;
             bool additive = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
             float2 lo = math.min(_dragStartWorld, _dragCurrentWorld);
             float2 hi = math.max(_dragStartWorld, _dragCurrentWorld);
@@ -232,6 +269,14 @@ namespace GameLogic.Command
             }
         }
 
+        /// <summary>
+        /// M4-R02 最小桥接：数字编组=编队槽位。除既有的 <c>_groups</c> 快照外，同步创建/更新
+        /// 一支对应的 <see cref="SquadFormation"/>（DESIGN.md 2.2）：
+        /// ① 结束"正在操作已召回编队"状态；② 空选择不为从未用过的槽位新建空编队；
+        /// ③ 槽位互斥——新成员如果属于别的槽位，先从那边摘除（Formation 成员 + 对应 `_groups`
+        /// 列表同步），保证任意时刻一个单位最多属于一支编队；④ 同一槽位复用同一个 FormationId，
+        /// 不是每次都开新的；⑤ 与新选择集做差集同步（移除多余成员、加入新成员）。
+        /// </summary>
         public void AssignGroup(int slot)
         {
             if (slot < 1 || slot > 9)
@@ -239,12 +284,72 @@ namespace GameLogic.Command
                 return;
             }
             _groups[slot] = new List<SimEntityId>(_selection);
+            _activeFormationId = null;
+
+            if (_formations == null)
+            {
+                return;
+            }
+            if (_selection.Count == 0 && !_groupFormationIds.ContainsKey(slot))
+            {
+                return;
+            }
+
+            foreach (SimEntityId member in _selection)
+            {
+                foreach (KeyValuePair<int, string> other in _groupFormationIds)
+                {
+                    if (other.Key == slot)
+                    {
+                        continue;
+                    }
+                    SquadFormation otherFormation = _formations.GetFormation(other.Value);
+                    if (otherFormation != null && otherFormation.IsMember(member))
+                    {
+                        otherFormation.RemoveMember(member);
+                        if (_groups.TryGetValue(other.Key, out List<SimEntityId> otherGroupList))
+                        {
+                            otherGroupList.Remove(member);
+                        }
+                    }
+                }
+            }
+
+            if (!_groupFormationIds.TryGetValue(slot, out string formationId))
+            {
+                formationId = _formations.CreateFormation().Id;
+                _groupFormationIds[slot] = formationId;
+            }
+
+            SquadFormation formation = _formations.GetFormation(formationId);
+            if (formation == null)
+            {
+                return;
+            }
+
+            var toRemove = new List<SimEntityId>();
+            foreach (SimEntityId existing in formation.Members)
+            {
+                if (!_selection.Contains(existing))
+                {
+                    toRemove.Add(existing);
+                }
+            }
+            foreach (SimEntityId remove in toRemove)
+            {
+                formation.RemoveMember(remove);
+            }
+            foreach (SimEntityId add in _selection)
+            {
+                formation.AddMember(add);
+            }
         }
 
         public void RecallGroup(int slot)
         {
             if (!_groups.TryGetValue(slot, out List<SimEntityId> members))
             {
+                // 槽位不存在：完全 no-op，不 touch 任何既有状态（含 _activeFormationId）。
                 return;
             }
 
@@ -257,6 +362,11 @@ namespace GameLogic.Command
                     AddToSelection(members[i]);
                 }
             }
+
+            // M4-R02 最小桥接：标记"当前操作的是哪支编队"，供 Issue 判断要不要走编队路径。
+            _activeFormationId = _formations != null && _groupFormationIds.TryGetValue(slot, out string fid)
+                ? fid
+                : null;
         }
 
         public int GroupSize(int slot)
@@ -323,6 +433,11 @@ namespace GameLogic.Command
 
         /// <summary>
         /// 下达命令。暂停期间不立即执行而是排队，恢复后按下达顺序兑现。
+        ///
+        /// M4-R02 最小桥接：若当前选择集恰好等于一支刚被 <see cref="RecallGroup"/> 出来、
+        /// 未被弄脏的编队，Move/Retreat 只交给 <see cref="SquadFormation.IssueCommand"/>（内核下发
+        /// 交给 <c>FormationMovementDriver</c> 走共享路径）；Attack/Guard 两条腿并存（既记录
+        /// 编队状态也照旧直接下内核）。裸选择集/未编组时行为与桥接前逐字相同。见 DESIGN.md 2.4/2.5。
         /// </summary>
         /// <param name="targetPart">M2-05b：只有 <see cref="UnitCommandKind.Attack"/> 会消费它，
         /// 其它命令类型传了也没有意义（内核侧 <c>ResolveMinionCombat</c> 只在 Attack 分支读它）。</param>
@@ -343,24 +458,116 @@ namespace GameLogic.Command
                 TargetPart = targetPart,
             };
 
+            SquadFormation formation = ResolveActiveFormationForCurrentSelection();
+
             if (paused)
             {
-                // 存选择集的**快照**而不是引用：暂停期间玩家还会继续改选择，
-                // 恢复时照引用下发就会把命令下给另一批单位。
+                // 存选择集的**快照**而不是引用：暂停期间玩家还会继续改选择/重新编组，
+                // 恢复时照引用下发就会把命令下给另一批单位——只打标签，不在这里执行分流
+                // （见 DESIGN.md 2.7/2.10：分流只在真正执行命令的时刻发生）。
                 _queued.Add(new PendingCommand
                 {
                     Targets = _selection.ToArray(),
                     Command = command,
+                    FormationId = formation?.Id,
                 });
                 return _selection.Count;
             }
 
+            if (formation != null)
+            {
+                return IssueToFormation(formation, kind, command, _selection);
+            }
+
+            LastFormationDispatchOutcome = SquadFormationDispatchOutcome.NotFormationRouted;
             int accepted = _sim.IssueCommand(_selection.ToArray(), command);
             if (accepted > 0)
             {
                 IssuedCommandCount++;
             }
             return accepted;
+        }
+
+        /// <summary>只有"选择集恰好等于当前活跃编队的现存成员"才返回非空——任何拖框/点选/
+        /// 重新编组都会让 <see cref="_activeFormationId"/> 提前清空或这里的匹配失败，回退到
+        /// 既有的裸选择集直发路径，不做模糊匹配（见 DESIGN.md 2.3/2.4）。</summary>
+        private SquadFormation ResolveActiveFormationForCurrentSelection()
+        {
+            if (_formations == null || _activeFormationId == null)
+            {
+                return null;
+            }
+            SquadFormation formation = _formations.GetFormation(_activeFormationId);
+            return formation != null && MembersMatch(formation, _selection) ? formation : null;
+        }
+
+        private static bool MembersMatch(SquadFormation formation, IReadOnlyList<SimEntityId> targets)
+        {
+            if (formation.Members.Count != targets.Count)
+            {
+                return false;
+            }
+            for (int i = 0; i < targets.Count; i++)
+            {
+                if (!formation.IsMember(targets[i]))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private static FormationCommand.CommandKind MapKind(UnitCommandKind kind)
+        {
+            switch (kind)
+            {
+                case UnitCommandKind.Attack: return FormationCommand.CommandKind.Attack;
+                case UnitCommandKind.Guard: return FormationCommand.CommandKind.Guard;
+                case UnitCommandKind.Retreat: return FormationCommand.CommandKind.Retreat;
+                // Move 与「不会发生」的 None 共用兜底：SquadCommandSystem 现有输入只产生
+                // Move/Attack/Guard/Retreat 四种，None 从不会走到这里。
+                default: return FormationCommand.CommandKind.Move;
+            }
+        }
+
+        /// <summary>把命令交给编队领域模型 + （视命令类型）内核。见 DESIGN.md 2.5 的分工表：
+        /// Move/Retreat 只记编队状态、不重复下内核（交给 FormationMovementDriver）；
+        /// Attack/Guard 两条腿并存。<paramref name="targets"/> 是本次真正要下发的目标集合——
+        /// 立即下达时是 <see cref="_selection"/>，flush 排队命令时是过滤过死亡成员的快照。</summary>
+        private int IssueToFormation(SquadFormation formation, UnitCommandKind kind, UnitCommand rawCommand,
+            IReadOnlyList<SimEntityId> targets)
+        {
+            var formationCommand = new FormationCommand(MapKind(kind), rawCommand.TargetEntity,
+                rawCommand.TargetPosition, priority: FormationCommandPriority.NormalPlayerCommand);
+            FormationCommandIssueResult result = formation.IssueCommand(formationCommand);
+            LastFormationDispatchOutcome = result == FormationCommandIssueResult.Activated
+                ? SquadFormationDispatchOutcome.Activated
+                : SquadFormationDispatchOutcome.QueuedBehindHigherPriority;
+
+            if (result != FormationCommandIssueResult.Activated)
+            {
+                // 排队等待中：不重复下内核命令，避免"内核已经在执行/移动，编队层却说排队中"的
+                // 不一致。今天在本设计范围内不可达——见 DESIGN.md 2.5"已知限制"。
+                return 0;
+            }
+
+            if (kind == UnitCommandKind.Attack || kind == UnitCommandKind.Guard)
+            {
+                var targetArray = new SimEntityId[targets.Count];
+                for (int i = 0; i < targets.Count; i++)
+                {
+                    targetArray[i] = targets[i];
+                }
+                int accepted = _sim.IssueCommand(targetArray, rawCommand);
+                if (accepted > 0)
+                {
+                    IssuedCommandCount++;
+                }
+                return accepted;
+            }
+
+            IssuedCommandCount++;
+            return targets.Count;
         }
 
         /// <summary>把排队的命令按下达顺序兑现。顺序稳定是 M2-02 的验收项。</summary>
@@ -375,9 +582,18 @@ namespace GameLogic.Command
             for (int i = 0; i < _queued.Count; i++)
             {
                 PendingCommand pending = _queued[i];
-                if (_sim.IssueCommand(pending.Targets, pending.Command) > 0)
+                if (pending.FormationId == null)
                 {
-                    IssuedCommandCount++;
+                    if (_sim.IssueCommand(pending.Targets, pending.Command) > 0)
+                    {
+                        IssuedCommandCount++;
+                        flushed++;
+                    }
+                    continue;
+                }
+
+                if (FlushFormationPendingCommand(pending))
+                {
                     flushed++;
                 }
             }
@@ -385,14 +601,42 @@ namespace GameLogic.Command
             return flushed;
         }
 
+        /// <summary>M4-R02 最小桥接（DESIGN.md 2.10）：编队路径的排队命令在兑现前必须核对
+        /// 编队成员是否与排队时的快照一致（死亡属于正常损耗、已被过滤，不算数）。不一致
+        /// （多半是暂停期间玩家重新编组）就整条取消，不下发任何命令、不静默退化为普通移动。</summary>
+        private bool FlushFormationPendingCommand(PendingCommand pending)
+        {
+            var aliveTargets = new List<SimEntityId>(pending.Targets.Length);
+            foreach (SimEntityId id in pending.Targets)
+            {
+                if (IsSelectable(id))
+                {
+                    aliveTargets.Add(id);
+                }
+            }
+
+            SquadFormation formation = _formations?.GetFormation(pending.FormationId);
+            if (formation == null || !MembersMatch(formation, aliveTargets))
+            {
+                LastFormationDispatchOutcome = SquadFormationDispatchOutcome.CancelledStaleMembership;
+                return false;
+            }
+
+            return IssueToFormation(formation, pending.Command.Kind, pending.Command, aliveTargets) > 0;
+        }
+
         public void ClearSelection()
         {
             _selection.Clear();
+            _activeFormationId = null;
         }
 
-        /// <summary>把外部选中的单位塞进选择集（验收与调试入口）。</summary>
+        /// <summary>把外部选中的单位塞进选择集（验收与调试入口）。同 <see cref="HandleSelectionInput"/>
+        /// 一样无条件清空 <see cref="_activeFormationId"/>——这也是一次"改变选择集"的动作，
+        /// 不能因为它走的是调试入口就绕过 DESIGN.md 2.3 的规则。</summary>
         public void SelectExplicit(IReadOnlyList<SimEntityId> ids, bool additive = false)
         {
+            _activeFormationId = null;
             if (!additive)
             {
                 _selection.Clear();

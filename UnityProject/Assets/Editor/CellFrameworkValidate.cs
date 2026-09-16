@@ -110,6 +110,7 @@ namespace GameLogic.EditorTools
                 ValidateAllyDeathSignal();
                 ValidateHomecomingRealCombatExit();
                 ValidateWildOrganFieldPersistence();
+                ValidateSquadFormationBridge();
             }
             catch (Exception e)
             {
@@ -4605,6 +4606,248 @@ namespace GameLogic.EditorTools
             }
         }
 
+        /// <summary>
+        /// M4-R02 最小桥接（`production/design/m4-r02-formation-command-entry-minimal-bridge/
+        /// DESIGN.md`）：`SquadCommandSystem` 首次真正引用 `Formation`——编组=编队槽位、
+        /// 槽位互斥、Move/Retreat 交给 `FormationMovementDriver`、Attack/Guard 两条腿并存、
+        /// 暂停期重编组的排队命令必须核对并按需取消、生命周期边界（空选择不建空编队/
+        /// Bind-Unbind清空映射）。全部用真实 `SimBridge`+`ModuleHub` 驱动，不直连内部字段。
+        /// </summary>
+        private static void ValidateSquadFormationBridge()
+        {
+            Line("\n[49] 编队接入真实玩家命令入口（M4-R02 最小桥接）");
+
+            var hub = new ModuleHub();
+            var formations = hub.Register(new FormationRegistry());
+            var sim = hub.Register(new SimBridge());
+            hub.Register(new FormationMovementDriver());
+            hub.Enter();
+
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 32;
+            cfg.ArenaHalfExtent = 80f;
+            var archetypes = new[]
+            {
+                new BehaviorArchetype
+                {
+                    Kind = BehaviorKind.Stationary, Accel = 0f, TurnRate = 0f, AggroRange = 0f,
+                    AttackRange = 0.5f, AttackCooldown = 99f, AttackDamage = 0f,
+                    Separation = 0f, ChargeSpeedMul = 1f,
+                },
+            };
+            sim.Begin(cfg, archetypes);
+
+            var squad = new SquadCommandSystem();
+            squad.Bind(sim, null, formations);
+
+            try
+            {
+                SimEntityId SpawnAndResolve(int logicId, float2 pos)
+                {
+                    sim.Spawn(new SpawnRequest
+                    {
+                        Position = pos, Health = 20f, Radius = 0.5f, MaxSpeed = 4f,
+                        ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                        IntentSource = IntentSource.AI, LogicId = logicId,
+                    });
+                    sim.OnUpdate(1f / 60f);
+                    return FindEntityId(sim.Snapshot, logicId, out _);
+                }
+
+                // ── 1. AssignGroup 创建/同步 Formation；同槽位复用同一个 FormationId ──
+                SimEntityId a1 = SpawnAndResolve(96001, new float2(0f, 0f));
+                SimEntityId a2 = SpawnAndResolve(96002, new float2(1f, 0f));
+                Expect(a1.IsValid && a2.IsValid, "本项前置：测试个体 a1/a2 应成功落地");
+
+                squad.SelectExplicit(new[] { a1, a2 });
+                squad.AssignGroup(1);
+                Expect(formations.AllFormations.Count == 1, $"AssignGroup 首次调用应恰好创建 1 支编队（实际 {formations.AllFormations.Count}）");
+                Formation slot1Formation = formations.FindFormationContaining(a1);
+                Expect(slot1Formation != null && slot1Formation.IsMember(a2),
+                    "槽位1的编队应同时包含 a1/a2");
+
+                squad.SelectExplicit(new[] { a1 });
+                squad.AssignGroup(1);
+                Expect(formations.AllFormations.Count == 1,
+                    $"同一槽位重新编组应复用同一个 Formation，而不是新建第二个（实际总数 {formations.AllFormations.Count}）");
+                Expect(slot1Formation.IsMember(a1) && !slot1Formation.IsMember(a2),
+                    "槽位1重新编组为只含 a1 后，a2 应被差集同步摘除");
+
+                // ── 生命周期：空选择不为从未用过的槽位创建空编队 ──
+                squad.SelectExplicit(System.Array.Empty<SimEntityId>());
+                squad.AssignGroup(2);
+                Expect(formations.AllFormations.Count == 1,
+                    $"对从未用过的槽位用空选择集 AssignGroup 不应创建空编队（实际总数 {formations.AllFormations.Count}）");
+
+                // ── 2. 槽位互斥：单位改编到新槽位应从旧槽位的编队+_groups 里摘除 ──
+                SimEntityId x = SpawnAndResolve(96003, new float2(2f, 0f));
+                SimEntityId y = SpawnAndResolve(96004, new float2(3f, 0f));
+                SimEntityId z = SpawnAndResolve(96005, new float2(4f, 0f));
+                Expect(x.IsValid && y.IsValid && z.IsValid, "本项前置：测试个体 x/y/z 应成功落地");
+
+                squad.SelectExplicit(new[] { x, y });
+                squad.AssignGroup(3);
+                Formation slot3Formation = formations.FindFormationContaining(x);
+                Expect(slot3Formation != null && slot3Formation.IsMember(y), "本项前置：槽位3应同时包含 x/y");
+
+                squad.SelectExplicit(new[] { x, z });
+                squad.AssignGroup(4);
+                Expect(!slot3Formation.IsMember(x) && slot3Formation.IsMember(y),
+                    "x 被改编到槽位4后应从槽位3的编队摘除，y 应不受影响地留在槽位3");
+                Expect(!squad.GroupMembers(3).Contains(x) && squad.GroupMembers(3).Contains(y),
+                    "槽位3的 _groups 列表应同步反映 x 已被摘除（AiHandoffSystem 依赖的一致性）");
+                Formation slot4Formation = formations.FindFormationContaining(x);
+                Expect(slot4Formation != null && slot4Formation != slot3Formation && slot4Formation.IsMember(z),
+                    "x 现在应属于槽位4的编队（与槽位3不是同一个对象），且槽位4同时包含 z");
+
+                // ── 3. Move 命令：Issue 本身不下内核命令，交给 FormationMovementDriver 下一帧下发 ──
+                SimEntityId m1 = SpawnAndResolve(96006, new float2(10f, 10f));
+                SimEntityId m2 = SpawnAndResolve(96007, new float2(11f, 10f));
+                Expect(m1.IsValid && m2.IsValid, "本项前置：测试个体 m1/m2 应成功落地");
+
+                squad.SelectExplicit(new[] { m1, m2 });
+                squad.AssignGroup(5);
+                squad.ClearSelection();
+                squad.RecallGroup(5);
+                Expect(squad.Selection.Count == 2, "本项前置：RecallGroup(5) 后选择集应恢复为 m1/m2");
+
+                int moveAccepted = squad.Issue(UnitCommandKind.Move, new float2(30f, 10f), SimEntityId.None, paused: false);
+                Expect(moveAccepted == 2, $"编队路径 Move 应报告 2 个目标（实际 {moveAccepted}）");
+                Expect(squad.LastFormationDispatchOutcome == SquadFormationDispatchOutcome.Activated,
+                    $"编队路径 Move 应 Activated（实际 {squad.LastFormationDispatchOutcome}）");
+                Formation slot5Formation = formations.FindFormationContaining(m1);
+                Expect(slot5Formation != null && slot5Formation.ActiveCommand != null &&
+                       slot5Formation.ActiveCommand.Command.Kind == FormationCommand.CommandKind.Move,
+                    "Formation.ActiveCommand 应变为 Move");
+                Expect(!sim.TryGetCommand(m1, out _) && !sim.TryGetCommand(m2, out _),
+                    "Issue 本身不应直接下发内核 Move 命令——这是留给 FormationMovementDriver 的活");
+
+                for (int f = 0; f < 5 && !sim.TryGetCommand(m1, out _); f++)
+                {
+                    hub.Update(1f / 60f);
+                }
+                Expect(sim.TryGetCommand(m1, out UnitCommand m1Cmd) && m1Cmd.Kind == UnitCommandKind.Move &&
+                       sim.TryGetCommand(m2, out UnitCommand m2Cmd) && m2Cmd.Kind == UnitCommandKind.Move,
+                    "FormationMovementDriver 应在随后几帧内真的把 Move 命令下发给编队成员");
+
+                // ── 4. Attack/Guard：两条腿并存，Issue 立即下内核命令 ──
+                SimEntityId g1 = SpawnAndResolve(96008, new float2(-10f, 0f));
+                SimEntityId g2 = SpawnAndResolve(96009, new float2(-11f, 0f));
+                Expect(g1.IsValid && g2.IsValid, "本项前置：测试个体 g1/g2 应成功落地");
+
+                squad.SelectExplicit(new[] { g1, g2 });
+                squad.AssignGroup(6);
+                squad.ClearSelection();
+                squad.RecallGroup(6);
+
+                int guardAccepted = squad.Issue(UnitCommandKind.Guard, new float2(-10f, 0f), SimEntityId.None, paused: false);
+                Expect(guardAccepted == 2, $"编队路径 Guard 应立即接受 2 个目标（实际 {guardAccepted}）");
+                Expect(squad.LastFormationDispatchOutcome == SquadFormationDispatchOutcome.Activated,
+                    "编队路径 Guard 应 Activated");
+                Formation slot6Formation = formations.FindFormationContaining(g1);
+                Expect(slot6Formation != null && slot6Formation.ActiveCommand != null &&
+                       slot6Formation.ActiveCommand.Command.Kind == FormationCommand.CommandKind.Guard,
+                    "Formation.ActiveCommand 应变为 Guard");
+                Expect(sim.TryGetCommand(g1, out UnitCommand g1Cmd) && g1Cmd.Kind == UnitCommandKind.Guard &&
+                       sim.TryGetCommand(g2, out UnitCommand g2Cmd) && g2Cmd.Kind == UnitCommandKind.Guard,
+                    "Attack/Guard 应由 Issue 立即下发内核命令（没有 driver 消费 ActiveCommand）");
+
+                // ── 5. 改变选择集会清空 active formation：随后 Issue 走非编队路径 ──
+                squad.SelectExplicit(new[] { g1 }); // 选择集变化，不再等于槽位6的完整成员
+                squad.Issue(UnitCommandKind.Guard, new float2(0f, 5f), SimEntityId.None, paused: false);
+                Expect(squad.LastFormationDispatchOutcome == SquadFormationDispatchOutcome.NotFormationRouted,
+                    $"选择集被改变后应回退到非编队路径（实际 {squad.LastFormationDispatchOutcome}）");
+
+                // ── 6. 优先级覆盖：编队连续两次下令，同优先级仍应覆盖 ──
+                squad.SelectExplicit(new[] { g1, g2 });
+                squad.RecallGroup(6);
+                squad.Issue(UnitCommandKind.Guard, new float2(1f, 1f), SimEntityId.None, paused: false);
+                FormationCommandEntry guardFirstEntry = slot6Formation.ActiveCommand;
+                squad.Issue(UnitCommandKind.Retreat, new float2(2f, 2f), SimEntityId.None, paused: false);
+                Expect(guardFirstEntry.State == FormationCommandState.Interrupted &&
+                       guardFirstEntry.FailReason == FormationCommandFailReason.PreemptedByOverride,
+                    "同优先级的第二条命令应覆盖第一条（旧 entry 标记 Interrupted/PreemptedByOverride）");
+                Expect(squad.LastFormationDispatchOutcome == SquadFormationDispatchOutcome.Activated,
+                    "覆盖后的新命令应 Activated");
+
+                // ── 7. 暂停排队（正常路径）：入队不分流，flush 时才真正调用 Formation.IssueCommand ──
+                SimEntityId q1 = SpawnAndResolve(96010, new float2(20f, -20f));
+                SimEntityId q2 = SpawnAndResolve(96011, new float2(21f, -20f));
+                Expect(q1.IsValid && q2.IsValid, "本项前置：测试个体 q1/q2 应成功落地");
+
+                squad.SelectExplicit(new[] { q1, q2 });
+                squad.AssignGroup(7);
+                squad.ClearSelection();
+                squad.RecallGroup(7);
+                int queuedCount = squad.Issue(UnitCommandKind.Guard, new float2(20f, -20f), SimEntityId.None, paused: true);
+                Expect(queuedCount == 2 && squad.QueuedCommandCount == 1,
+                    $"暂停下达应排队而不立即执行（返回 {queuedCount}，队列 {squad.QueuedCommandCount}）");
+                Formation slot7Formation = formations.FindFormationContaining(q1);
+                Expect(slot7Formation != null && slot7Formation.ActiveCommand == null,
+                    "排队阶段不应提前调用 Formation.IssueCommand");
+
+                int flushedNormal = squad.FlushQueuedCommands();
+                Expect(flushedNormal == 1, $"正常兑现应成功 1 条（实际 {flushedNormal}）");
+                Expect(slot7Formation.ActiveCommand != null &&
+                       slot7Formation.ActiveCommand.Command.Kind == FormationCommand.CommandKind.Guard,
+                    "恢复后 flush 应真正调用 Formation.IssueCommand");
+                Expect(sim.TryGetCommand(q1, out UnitCommand q1Cmd) && q1Cmd.Kind == UnitCommandKind.Guard,
+                    "正常 flush 的 Attack/Guard 应下发内核命令");
+
+                // ── 8. 暂停期重编组：排队命令的编队被改动后，flush 应取消而不是发给错的人 ──
+                SimEntityId r1 = SpawnAndResolve(96012, new float2(-20f, -20f));
+                SimEntityId r2 = SpawnAndResolve(96013, new float2(-21f, -20f));
+                SimEntityId r3 = SpawnAndResolve(96014, new float2(-22f, -20f));
+                Expect(r1.IsValid && r2.IsValid && r3.IsValid, "本项前置：测试个体 r1/r2/r3 应成功落地");
+
+                squad.SelectExplicit(new[] { r1, r2 });
+                squad.AssignGroup(8);
+                squad.ClearSelection();
+                squad.RecallGroup(8);
+                int staleQueuedCount = squad.Issue(UnitCommandKind.Guard, new float2(-20f, -20f), SimEntityId.None, paused: true);
+                Expect(staleQueuedCount == 2, "本项前置：暂停期对槽位8下令应成功排队 2 个目标");
+
+                // 暂停仍未结束，重新编组把槽位8的一部分成员挪去槽位9（Tick(paused) 下
+                // HandleGroupInput 仍会执行，这里直接调 API 模拟同等效果）。
+                squad.SelectExplicit(new[] { r1, r3 });
+                squad.AssignGroup(9);
+
+                Formation slot8Formation = formations.FindFormationContaining(r2);
+                FormationCommandEntry slot8ActiveBefore = slot8Formation?.ActiveCommand;
+                Formation slot9Formation = formations.FindFormationContaining(r1);
+
+                int flushedAfterReassign = squad.FlushQueuedCommands();
+                Expect(flushedAfterReassign == 0,
+                    $"排队命令的编队已被重新编组，flush 不应算作成功执行（实际 flushed {flushedAfterReassign}）");
+                Expect(squad.LastFormationDispatchOutcome == SquadFormationDispatchOutcome.CancelledStaleMembership,
+                    $"应记录为 CancelledStaleMembership（实际 {squad.LastFormationDispatchOutcome}）");
+                Expect(slot8Formation.ActiveCommand == slot8ActiveBefore,
+                    "被取消的排队命令不应改变槽位8编队的 ActiveCommand");
+                Expect(slot9Formation == null || slot9Formation.ActiveCommand == null,
+                    "被取消的排队命令更不应该发给槽位9这个完全不相关的新编队");
+                Expect(!sim.TryGetCommand(r2, out _),
+                    "取消的排队命令不应给 r2 下发任何内核命令，也不应静默退化为普通移动");
+
+                // ── 9. 生命周期：Bind/Unbind 不让旧局的编队映射串到新局 ──
+                squad.Unbind();
+                var freshFormations = new FormationRegistry();
+                freshFormations.OnEnter();
+                squad.Bind(sim, null, freshFormations);
+                squad.SelectExplicit(new[] { r1 });
+                squad.AssignGroup(1); // 复用旧局用过的槽位号
+                Expect(freshFormations.AllFormations.Count == 1,
+                    "Unbind 后换一个新的 FormationRegistry 重新 Bind，旧局的编组映射不应残留");
+                Expect(formations.AllFormations.Count >= 1,
+                    "旧的 FormationRegistry 实例本身不应被新局的 Bind 动作影响（对照组）");
+            }
+            finally
+            {
+                squad.Unbind();
+                sim.End();
+                hub.Exit();
+            }
+        }
+
         private static bool PathClearsAllObstacles(List<float2> path, List<ObstacleSpec> obstacles, float clearance)
         {
             const float epsilon = 1e-3f;
@@ -6035,7 +6278,7 @@ namespace GameLogic.EditorTools
 
             try
             {
-                squad.Bind(sim, camera);
+                squad.Bind(sim, camera, null);
 
                 sim.Spawn(new SpawnRequest
                 {
@@ -7007,7 +7250,7 @@ namespace GameLogic.EditorTools
             sim.ConfigureControlSwitch(200f, 0f);
 
             var squad = new SquadCommandSystem();
-            squad.Bind(sim, null);
+            squad.Bind(sim, null, null);
             var handoff = new AiHandoffSystem();
             handoff.Bind(sim, squad, archetypes);
 
@@ -8314,7 +8557,7 @@ namespace GameLogic.EditorTools
                 var squad = new SquadCommandSystem();
                 try
                 {
-                    squad.Bind(sim, camera);
+                    squad.Bind(sim, camera, null);
                     squad.SelectExplicit(new[] { attackerA });
                     int accepted = squad.Issue(UnitCommandKind.Attack,
                         sim.Snapshot.Position[nearAIdx1], nearHostileA, paused: false, SimBodyPartSlot.Secondary);
