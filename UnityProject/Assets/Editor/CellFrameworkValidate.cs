@@ -106,6 +106,7 @@ namespace GameLogic.EditorTools
                 ValidateEmissionGeometryAndBodyForward();
                 ValidateFormationAnchorLeaderPriority();
                 ValidateFormationCommandPriorityGuard();
+                ValidateSharedCapabilityCatalog();
             }
             catch (Exception e)
             {
@@ -4166,6 +4167,59 @@ namespace GameLogic.EditorTools
             Expect(equalResult == FormationCommandIssueResult.Activated,
                 $"同优先级应仍可覆盖，返回 Activated（实际 {equalResult}）");
             Expect(equalPriorityFirst.State == FormationCommandState.Interrupted, "同优先级覆盖时旧命令仍应被标记 Interrupted");
+        }
+
+        /// <summary>
+        /// M4-R00-02 队列④-17（FS-REQ-030）：共享能力13项清单显式化。只校验清单本身的完整性/
+        /// 一致性（不重复登记、覆盖全部枚举值、每项都有证据说明），以及 2026-09-16 独立核实的状态
+        /// 分布——任何人以后改动某项能力的实现程度时，必须同步改 <see cref="SharedCapabilityCatalog"/>
+        /// 的条目，这条断言才会跟着变，否则会在这里假红提醒清单和代码脱节了。
+        /// </summary>
+        private static void ValidateSharedCapabilityCatalog()
+        {
+            Line("\n[45] 共享能力13项清单显式化（M4-R00-02 队列④-17，FS-REQ-030）");
+
+            var allCapabilities = (SharedCapability[])Enum.GetValues(typeof(SharedCapability));
+            Expect(allCapabilities.Length == 13, $"FS-REQ-030 要求封闭13项能力（实际 {allCapabilities.Length}）");
+            Expect(SharedCapabilityCatalog.Entries.Count == 13,
+                $"能力清单条目数应恰好13（实际 {SharedCapabilityCatalog.Entries.Count}）");
+
+            var seen = new HashSet<SharedCapability>();
+            foreach (SharedCapabilityEntry entry in SharedCapabilityCatalog.Entries)
+            {
+                Expect(seen.Add(entry.Capability), $"能力清单不应重复登记 {entry.Capability}");
+                Expect(!string.IsNullOrEmpty(entry.Evidence), $"{entry.Capability} 必须附带证据说明，不能空着");
+            }
+            foreach (SharedCapability capability in allCapabilities)
+            {
+                Expect(seen.Contains(capability), $"能力清单必须覆盖枚举值 {capability}，不能漏登记");
+            }
+
+            int implementedCount = 0, partialCount = 0, placeholderCount = 0, notImplementedCount = 0;
+            foreach (SharedCapabilityEntry entry in SharedCapabilityCatalog.Entries)
+            {
+                switch (entry.Status)
+                {
+                    case SharedCapabilityStatus.Implemented: implementedCount++; break;
+                    case SharedCapabilityStatus.Partial: partialCount++; break;
+                    case SharedCapabilityStatus.Placeholder: placeholderCount++; break;
+                    case SharedCapabilityStatus.NotImplemented: notImplementedCount++; break;
+                }
+            }
+
+            // 2026-09-16 独立核实快照：已实现4项(攻击/繁殖孕育/撤退/采样解析)、部分实现5项
+            // (感知/移动寻路/采集/存储/守护护送)、占位空壳2项(搬运/信号)、不存在2项(进食供养/修复)。
+            // 这四个数字任一变化都意味着有能力的实现程度真的变了，必须同步改上面的 Entries 条目
+            // （含证据文案），不能只改这里的期望值。
+            Expect(implementedCount == 4, $"已实现应为4项（实际 {implementedCount}）：攻击/繁殖孕育/撤退/采样解析");
+            Expect(partialCount == 5, $"部分实现应为5项（实际 {partialCount}）：感知/移动寻路/采集/存储/守护护送");
+            Expect(placeholderCount == 2, $"占位空壳应为2项（实际 {placeholderCount}）：搬运/信号");
+            Expect(notImplementedCount == 2, $"不存在应为2项（实际 {notImplementedCount}）：进食供养/修复");
+
+            Expect(SharedCapabilityCatalog.StatusOf(SharedCapability.Attack) == SharedCapabilityStatus.Implemented,
+                "抽查：攻击应为已实现");
+            Expect(SharedCapabilityCatalog.StatusOf(SharedCapability.Repair) == SharedCapabilityStatus.NotImplemented,
+                "抽查：修复应为不存在（2026-09-16 推翻旧审计'已落地5项'里的判断）");
         }
 
         private static bool PathClearsAllObstacles(List<float2> path, List<ObstacleSpec> obstacles, float clearance)
