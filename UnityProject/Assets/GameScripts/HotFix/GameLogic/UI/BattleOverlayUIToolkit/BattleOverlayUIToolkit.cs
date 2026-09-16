@@ -87,6 +87,14 @@ namespace GameLogic
         private CodexCategory _codexCategory = CodexCategory.Organelle;
         private string _codexSearchText = string.Empty;
 
+        // perf：RefreshCodex 此前在 Codex 面板打开期间每帧无条件 Clear()+全量重建，图鉴还会
+        // R5 自动弹出且不自动关，等于常驻每帧重建开销。分类/搜索词不变时没有重建的必要——
+        // 发现态只可能因玩家操作（击杀/组合反应）变化，用短间隔节流兜底，而不是逐帧重建。
+        private CodexCategory _codexRefreshedCategory = (CodexCategory)(-1);
+        private string _codexRefreshedSearchText;
+        private float _codexRefreshTimer;
+        private const float CodexRefreshInterval = 0.5f;
+
         private static readonly string[] CodexTabNodeNames =
         {
             // 下标与 CodexCategory 枚举值严格一一对应，插入/删除必须两边同步改。
@@ -392,6 +400,12 @@ namespace GameLogic
                 GameRoot.CellStage?.SetPaused(willPause);
             }
 
+            if (kind == PanelKind.Codex && _current != PanelKind.Codex)
+            {
+                // 每次打开都强制重建一次：面板关闭期间可能有新发现，不能沿用上次缓存。
+                _codexRefreshedCategory = (CodexCategory)(-1);
+                _codexRefreshTimer = 0f;
+            }
             _current = kind;
             // M2-01：面板打开时全局夺走输入。此前只靠 CellStageFlow._paused 冻结玩法模块，
             // 但镜头状态机刻意绕过了那个早退（暂停下要能选目标），所以模态状态必须显式告诉
@@ -493,7 +507,16 @@ namespace GameLogic
                     RefreshShop(cell);
                     break;
                 case PanelKind.Codex:
-                    RefreshCodex(cell);
+                    _codexRefreshTimer -= Time.deltaTime;
+                    bool codexParamsChanged = _codexCategory != _codexRefreshedCategory
+                        || _codexSearchText != _codexRefreshedSearchText;
+                    if (codexParamsChanged || _codexRefreshTimer <= 0f)
+                    {
+                        RefreshCodex(cell);
+                        _codexRefreshedCategory = _codexCategory;
+                        _codexRefreshedSearchText = _codexSearchText;
+                        _codexRefreshTimer = CodexRefreshInterval;
+                    }
                     break;
             }
         }

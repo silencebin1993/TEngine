@@ -29,6 +29,13 @@ namespace GameLogic.UI.Common
                 }
             }
 
+            // fix：存档坐标可能来自更宽的分辨率/别的显示器，不钳制的话窗口能整个飘到当前
+            // Screen 尺寸外——表现为"按键切换开关正常、OnGUI 也不报错，但菜单彻底看不见"。
+            // 钳制到至少留 MinVisibleMargin 像素在屏幕内，保证标题栏总能被拖回来。
+            const float MinVisibleMargin = 40f;
+            rect.x = Mathf.Clamp(rect.x, MinVisibleMargin - rect.width, Screen.width - MinVisibleMargin);
+            rect.y = Mathf.Clamp(rect.y, 0f, Screen.height - MinVisibleMargin);
+
             Rect before = rect;
             rect = GUILayout.Window(windowId, rect, id =>
             {

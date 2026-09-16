@@ -1461,6 +1461,11 @@ namespace GameLogic.UI.Battle
 
         /// <summary>实施第 4/5 条：个体面板显示谱系/表型/版本 + 筛选旧版个体并下达回巢命令——
         /// 只转发到 <see cref="HomecomingRetrofitService"/> 的既有入口，不自己判断能不能改造。</summary>
+        /// <summary>fix(perf)：IMGUI 对 ScrollView 内的每一行都照样逐帧布局/算文本哈希，不做视口裁剪——
+        /// 行数越多（战场实体越多）OnGUI 每帧开销越线性增长。本面板是原型期调试 HUD，没必要无限渲染，
+        /// 封顶只画最新一批，超出部分只提示数量，不吞数据（<see cref="_lineageBindingRows"/> 本身不裁剪）。</summary>
+        private const int MaxLineageUnitsShown = 40;
+
         private void DrawLineageUnitsSection(CellStageFlow cell)
         {
             GUILayout.Label("<b>已绑定个体（谱系 / 表型 / 版本）</b>", _label);
@@ -1471,9 +1476,17 @@ namespace GameLogic.UI.Battle
                 return;
             }
 
-            int shown = 0;
-            foreach (LineageBindingRow row in _lineageBindingRows)
+            if (_lineageBindingRows.Count > MaxLineageUnitsShown)
             {
+                GUILayout.Label(
+                    $"　（共 {_lineageBindingRows.Count} 个，仅显示最新 {MaxLineageUnitsShown} 个）", _hint);
+            }
+
+            int shown = 0;
+            int skip = Mathf.Max(0, _lineageBindingRows.Count - MaxLineageUnitsShown);
+            for (int i = skip; i < _lineageBindingRows.Count; i++)
+            {
+                LineageBindingRow row = _lineageBindingRows[i];
                 shown++;
 
                 string tag = row.Outdated ? "<color=#FFB060>待回巢（不会自动更新）</color>" : "最新版本";
