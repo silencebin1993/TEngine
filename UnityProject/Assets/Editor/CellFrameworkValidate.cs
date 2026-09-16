@@ -105,6 +105,7 @@ namespace GameLogic.EditorTools
                 ValidateFanDirectionUnified();
                 ValidateEmissionGeometryAndBodyForward();
                 ValidateFormationAnchorLeaderPriority();
+                ValidateFormationCommandPriorityGuard();
             }
             catch (Exception e)
             {
@@ -2676,9 +2677,9 @@ namespace GameLogic.EditorTools
 
             // 验收 3：优先级排序。三条不同 Priority 乱序入队，激活顺序应是 5→3→1 而不是入队顺序。
             Formation priorityFormation = registry.CreateFormation();
-            priorityFormation.EnqueueCommand(new FormationCommand(FormationCommand.CommandKind.Move, targetPosition: new float2(0f, 0f), priority: 1));
-            priorityFormation.EnqueueCommand(new FormationCommand(FormationCommand.CommandKind.Attack, targetEntity: entityA, priority: 5));
-            priorityFormation.EnqueueCommand(new FormationCommand(FormationCommand.CommandKind.Guard, targetPosition: new float2(0f, 0f), priority: 3));
+            priorityFormation.EnqueueCommand(new FormationCommand(FormationCommand.CommandKind.Move, targetPosition: new float2(0f, 0f), priority: FormationCommandPriority.DoctrineResponse));
+            priorityFormation.EnqueueCommand(new FormationCommand(FormationCommand.CommandKind.Attack, targetEntity: entityA, priority: FormationCommandPriority.DirectControlIntent));
+            priorityFormation.EnqueueCommand(new FormationCommand(FormationCommand.CommandKind.Guard, targetPosition: new float2(0f, 0f), priority: FormationCommandPriority.UninterruptibleFinishing));
 
             var activationOrder = new List<FormationCommand.CommandKind>();
             for (int i = 0; i < 3; i++)
@@ -4086,6 +4087,85 @@ namespace GameLogic.EditorTools
                     hub.Exit();
                 }
             }
+        }
+
+        /// <summary>
+        /// M4-R00-02 队列④-14（FC-REQ-011）：命令优先级从裸 int 换成封闭 7 级枚举
+        /// <see cref="FormationCommandPriority"/>，并给 <see cref="Formation.IssueCommand"/> 补上
+        /// 原文「低优先级不能删除高优先级命令；只能排队或返回冲突原因」这条此前完全没做的守卫——
+        /// 旧实现无条件覆盖，任何后来的命令（哪怕是自主待机）都能打断玩家的紧急撤退。
+        /// </summary>
+        private static void ValidateFormationCommandPriorityGuard()
+        {
+            Line("\n[44] 命令优先级枚举化 + 覆盖守卫（M4-R00-02 队列④-14，FC-REQ-011）");
+
+            var allPriorities = (FormationCommandPriority[])Enum.GetValues(typeof(FormationCommandPriority));
+            Expect(allPriorities.Length == 7, $"FC-REQ-011 要求封闭 7 级优先级（实际 {allPriorities.Length}）");
+
+            var registry = new FormationRegistry();
+            var entityA = new SimEntityId(6001);
+
+            // 验收 1：未显式指定优先级时默认取最低档（自主生存/待机），既有调用点行为不回归。
+            var defaultCommand = new FormationCommand(FormationCommand.CommandKind.Move, targetPosition: new float2(0f, 0f));
+            Expect(defaultCommand.Priority == FormationCommandPriority.AutonomousSurvival,
+                $"未显式指定优先级时应默认 AutonomousSurvival（实际 {defaultCommand.Priority}）");
+
+            // 验收 2：无 Active 命令时 IssueCommand 直接激活，返回 Activated。
+            Formation freshFormation = registry.CreateFormation();
+            FormationCommandIssueResult freshResult = freshFormation.IssueCommand(
+                new FormationCommand(FormationCommand.CommandKind.Guard, targetPosition: new float2(0f, 0f),
+                    priority: FormationCommandPriority.NormalPlayerCommand));
+            Expect(freshResult == FormationCommandIssueResult.Activated, "无 Active 命令时应直接 Activated");
+            Expect(freshFormation.ActiveCommand != null && freshFormation.ActiveCommand.State == FormationCommandState.Active,
+                "本项前置：freshFormation 应有一条 Active 命令");
+
+            // 验收 3：低优先级命令不能覆盖更高优先级的 Active 命令，只能排队，且返回冲突结果。
+            Formation guardedFormation = registry.CreateFormation();
+            guardedFormation.IssueCommand(new FormationCommand(FormationCommand.CommandKind.Retreat,
+                targetPosition: new float2(0f, 0f), priority: FormationCommandPriority.PlayerEmergency));
+            FormationCommandEntry protectedActive = guardedFormation.ActiveCommand;
+            FormationCommandIssueResult blockedResult = guardedFormation.IssueCommand(
+                new FormationCommand(FormationCommand.CommandKind.Move, targetPosition: new float2(1f, 1f),
+                    priority: FormationCommandPriority.NormalPlayerCommand));
+            Expect(blockedResult == FormationCommandIssueResult.QueuedBehindHigherPriority,
+                $"低优先级命令应被拒绝覆盖并返回 QueuedBehindHigherPriority（实际 {blockedResult}）");
+            Expect(ReferenceEquals(guardedFormation.ActiveCommand, protectedActive)
+                && guardedFormation.ActiveCommand.State == FormationCommandState.Active
+                && guardedFormation.ActiveCommand.Command.Kind == FormationCommand.CommandKind.Retreat,
+                "高优先级 Active 命令不应被低优先级命令打断或替换");
+            Expect(guardedFormation.PendingCommandCount == 1, "被拒绝覆盖的低优先级命令应改为进入等待队列");
+            bool queuedPeeked = guardedFormation.PeekCommand(out FormationCommand queuedHead);
+            Expect(queuedPeeked && queuedHead.Kind == FormationCommand.CommandKind.Move,
+                "等待队列队首应是刚才被拒绝覆盖的 Move 命令");
+
+            // 验收 4：高优先级命令可以正常覆盖更低优先级的 Active 命令（既有覆盖语义不回归）。
+            Formation overridableFormation = registry.CreateFormation();
+            overridableFormation.IssueCommand(new FormationCommand(FormationCommand.CommandKind.Guard,
+                targetPosition: new float2(0f, 0f), priority: FormationCommandPriority.NormalPlayerCommand));
+            FormationCommandEntry lowPriorityActive = overridableFormation.ActiveCommand;
+            FormationCommandIssueResult overrideResult = overridableFormation.IssueCommand(
+                new FormationCommand(FormationCommand.CommandKind.Retreat, targetPosition: new float2(2f, 2f),
+                    priority: FormationCommandPriority.PlayerEmergency));
+            Expect(overrideResult == FormationCommandIssueResult.Activated,
+                $"高优先级命令覆盖低优先级 Active 命令应返回 Activated（实际 {overrideResult}）");
+            Expect(lowPriorityActive.State == FormationCommandState.Interrupted
+                && lowPriorityActive.FailReason == FormationCommandFailReason.PreemptedByOverride,
+                "被高优先级命令覆盖的旧 Active 命令应标记 Interrupted/PreemptedByOverride");
+            Expect(overridableFormation.ActiveCommand != null
+                && overridableFormation.ActiveCommand.Command.Kind == FormationCommand.CommandKind.Retreat
+                && overridableFormation.ActiveCommand.State == FormationCommandState.Active,
+                "覆盖后新命令应直接成为 ActiveCommand");
+
+            // 验收 5：优先级相等仍视为可覆盖（不引入"同级也排队"的新语义，维持默认优先级调用点不回归）。
+            Formation equalPriorityFormation = registry.CreateFormation();
+            equalPriorityFormation.IssueCommand(new FormationCommand(FormationCommand.CommandKind.OrganCategory,
+                targetEntity: entityA));
+            FormationCommandEntry equalPriorityFirst = equalPriorityFormation.ActiveCommand;
+            FormationCommandIssueResult equalResult = equalPriorityFormation.IssueCommand(
+                new FormationCommand(FormationCommand.CommandKind.Attack, targetEntity: entityA));
+            Expect(equalResult == FormationCommandIssueResult.Activated,
+                $"同优先级应仍可覆盖，返回 Activated（实际 {equalResult}）");
+            Expect(equalPriorityFirst.State == FormationCommandState.Interrupted, "同优先级覆盖时旧命令仍应被标记 Interrupted");
         }
 
         private static bool PathClearsAllObstacles(List<float2> path, List<ObstacleSpec> obstacles, float clearance)

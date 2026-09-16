@@ -45,10 +45,13 @@ namespace GameLogic.Command.Formation
         public readonly float2? TargetPosition;
 
         /// <summary>M4-02：等待队列排序权重，数值越大越优先激活（<see cref="Formation.TryActivateNextPending"/>）。
-        /// 追加在构造函数末位、默认值 0，不破坏既有具名参数调用写法。</summary>
-        public readonly int Priority;
+        /// M4-R00-02 队列④-14（FC-REQ-011）起改为封闭 7 级枚举 <see cref="FormationCommandPriority"/>，
+        /// 不再是裸 int；默认值 <see cref="FormationCommandPriority.AutonomousSurvival"/>
+        /// 数值仍为 0，未显式指定优先级的既有调用点行为不变。</summary>
+        public readonly FormationCommandPriority Priority;
 
-        public FormationCommand(CommandKind kind, SimEntityId? targetEntity = null, float2? targetPosition = null, int priority = 0)
+        public FormationCommand(CommandKind kind, SimEntityId? targetEntity = null, float2? targetPosition = null,
+            FormationCommandPriority priority = FormationCommandPriority.AutonomousSurvival)
         {
             Kind = kind;
             TargetEntity = targetEntity;

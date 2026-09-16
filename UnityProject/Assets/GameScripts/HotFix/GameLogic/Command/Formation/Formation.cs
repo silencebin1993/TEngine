@@ -246,9 +246,23 @@ namespace GameLogic.Command.Formation
         /// <summary>覆盖：若已有 Active 命令，先标记 <see cref="FormationCommandState.Interrupted"/>/
         /// <see cref="FormationCommandFailReason.PreemptedByOverride"/> 并清空等待队列（对齐
         /// SquadCommandSystem 现有 UX——新下令替换旧排队，不是追加），再把新命令直接设为 Active。
-        /// 无 Active 命令时直接激活，不需要"中断"动作。</summary>
-        public void IssueCommand(FormationCommand command)
+        /// 无 Active 命令时直接激活，不需要"中断"动作。
+        ///
+        /// M4-R00-02 队列④-14（FC-REQ-011）：新增优先级守卫——当前 Active 命令的
+        /// <see cref="FormationCommand.Priority"/> 严格高于新命令时，新命令不能覆盖它，改为按
+        /// <see cref="EnqueueCommand"/> 排序规则插入等待队列，返回
+        /// <see cref="FormationCommandIssueResult.QueuedBehindHigherPriority"/>；这种情况下不清空
+        /// 既有等待队列、不触碰 <see cref="ActiveCommand"/>。优先级相等或更高时维持原有的覆盖语义
+        /// （相等仍可覆盖，保持既有默认优先级调用点的行为不回归）。</summary>
+        public FormationCommandIssueResult IssueCommand(FormationCommand command)
         {
+            if (ActiveCommand != null && ActiveCommand.State == FormationCommandState.Active
+                && ActiveCommand.Command.Priority > command.Priority)
+            {
+                EnqueueCommand(command);
+                return FormationCommandIssueResult.QueuedBehindHigherPriority;
+            }
+
             if (ActiveCommand != null && ActiveCommand.State == FormationCommandState.Active)
             {
                 ActiveCommand.State = FormationCommandState.Interrupted;
@@ -262,6 +276,7 @@ namespace GameLogic.Command.Formation
                 State = FormationCommandState.Active,
             };
             ActiveCommand = entry;
+            return FormationCommandIssueResult.Activated;
         }
 
         /// <summary>中断：仅在存在 Active 命令时生效（否则安全 no-op），随后尝试提升等待队列队首。</summary>
