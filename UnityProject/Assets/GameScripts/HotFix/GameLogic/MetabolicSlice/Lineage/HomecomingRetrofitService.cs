@@ -208,10 +208,10 @@ namespace GameLogic.MetabolicSlice.Lineage
             return true;
         }
 
-        /// <summary>完成：把绑定原地替换成锁定版本，并用新版本的主器官重挂 <see cref="UnitLoadoutRegistry"/>
-        /// 装配（这就是"替换装配签名"的实际含义——AI 自动开火路径读的正是这份显式装配，见
-        /// <see cref="GerminationChamberRegistry"/> 类注释；基因对装配的影响仍是直控接管时
-        /// <c>CompileFromRecipe</c> 的事，本期不做，同 M3-05 边界）。个体的 <see cref="UnitVitalsRegistry"/>
+        /// <summary>完成：把绑定原地替换成锁定版本，并用新版本的主器官+有序基因重挂
+        /// <see cref="UnitLoadoutRegistry"/> 装配（这就是"替换装配签名"的实际含义——AI 自动开火与
+        /// 直控释放路径读的正是这份显式装配，见 <see cref="GerminationChamberRegistry"/> 类注释；
+        /// 基因随新版本一起换新，M4-R00-02 队列②号项）。个体的 <see cref="UnitVitalsRegistry"/>
         /// 运行期状态（生命/伤势/过载债）不在本类职责范围内——那本账按 <see cref="SimEntityId"/> 归属，
         /// 本方法从未触碰它，整个流程操作的都是同一个 id，状态天然原样保留。</summary>
         public bool CompleteRetrofit(SimEntityId entityId)
@@ -227,7 +227,7 @@ namespace GameLogic.MetabolicSlice.Lineage
 
             var organs = new List<UnitLoadoutOrgan>(1)
             {
-                new UnitLoadoutOrgan(ticket.LockedVersion.OrganelleId, LoadoutAction.Primary),
+                new UnitLoadoutOrgan(ticket.LockedVersion.OrganelleId, LoadoutAction.Primary, geneIds: ticket.LockedVersion.GeneIds),
             };
             _unitLoadouts?.RegisterExplicit(entityId, organs);
 

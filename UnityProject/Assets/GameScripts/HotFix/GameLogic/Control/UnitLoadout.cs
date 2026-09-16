@@ -53,11 +53,20 @@ namespace GameLogic.Control
         /// **本段不定义"什么情况下会失能"**——那属于后续的伤害定位与手术提取。</summary>
         public bool Disabled;
 
-        public UnitLoadoutOrgan(string organId, LoadoutAction action, bool disabled = false)
+        /// <summary>该身体当下装的有序基因 id 列表（M4-R00-02 队列②号项）。只有
+        /// <see cref="UnitLoadoutOrigin.TemplateDerived"/>（萌生腔新生个体/回巢改造）才可能非空——
+        /// 它来自 <c>PhenotypeTemplateVersion.GeneIds</c>，是模板提交时就确定的配方。
+        /// <see cref="UnitLoadoutOrigin.ArchetypeDerived"/>（固定初始队友）与野生器官临时移植
+        /// 结构上没有基因概念，恒为 <c>null</c>——消费方一律用 <c>GeneIds ?? Array.Empty&lt;string&gt;()</c>
+        /// 兜底，<c>null</c> 与空列表语义相同。</summary>
+        public IReadOnlyList<string> GeneIds;
+
+        public UnitLoadoutOrgan(string organId, LoadoutAction action, bool disabled = false, IReadOnlyList<string> geneIds = null)
         {
             OrganId = organId;
             Action = action;
             Disabled = disabled;
+            GeneIds = geneIds;
         }
     }
 

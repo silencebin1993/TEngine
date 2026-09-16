@@ -1,5 +1,10 @@
+using System;
+using System.Collections.Generic;
 using BinGames.Sim;
+using ComposeEngine;
+using ComposeEngine.Core;
 using GameLogic.Core;
+using GameLogic.MetabolicSlice.Carrier;
 using GameLogic.MetabolicSlice.ContentCatalog;
 using GameLogic.MetabolicSlice.Structural;
 using UnityEngine;
@@ -126,6 +131,71 @@ namespace GameLogic.Control
                 ? ResolveStructural(organId, def)
                 : ResolveAttack(organId, def);
 
+            ApplyReleaseCosts(ref action);
+            return action;
+        }
+
+        /// <summary>本类专用的编译引擎实例，仅用于把器官解析成真实伤害数值——不做地形/残留登记，
+        /// 因为友军释放这一段本次不接环境反应（见 M4-R00-02 队列①-1 设计文档 §8 已登记债务）。
+        /// 是纯计算工具而非游戏状态，与 <see cref="OrganReleaseRunner"/> 的"必须无状态"约束不冲突。</summary>
+        private static readonly Engine s_compileEngine = new Engine();
+        private static readonly WorldState s_emptyWorld = new WorldState();
+
+        /// <summary>
+        /// M4-R00-02 队列①-1：在 <see cref="Resolve"/> 的基础上，把伤害数值换成
+        /// <see cref="CarrierCompiler.CompileFromRecipe"/> 编译出的**真实**装配结果（与玩家本体
+        /// 自动开火——<see cref="GameLogic.MetabolicSlice.Combat.MetabolicSliceRunner.TickCarrier"/>
+        /// ——走同一条化学链路），不再是本类自己维护的 <see cref="DefaultDamage"/> 常量。
+        ///
+        /// ── 为什么只换 Damage，不换 Speed/Radius/Pierce 等弹道参数 ──
+        /// 那些参数在玩家路径上由 <see cref="GameLogic.MetabolicSlice.Combat.CombatBallistics.Build"/>
+        /// 用另一套基准（<c>BaseSpeed=26</c> 等）转换，与本类的 <see cref="DefaultProjectileSpeed"/>=14
+        /// 基准本就不同——这属于弹道基准统一，是 M4-R00-02 队列③号项（CP-REQ-002/003/004）的范围，
+        /// 本次不顺手做，避免把"伤害对不对"和"弹道基准统不统一"两件事混在一次改动里。
+        ///
+        /// ── 为什么查不到编译结果时保留原判定，不是判失败 ──
+        /// 已退役 / 非攻击器官在 <see cref="Resolve"/> 那一步已经返回 <see cref="OrganKernelAction.None"/>，
+        /// 这里只会在"器官形态有效但化学链路编译不出东西"（理论上不应发生）时早退，
+        /// 早退即保留 <see cref="Resolve"/> 的常数结果——**不倒退到比现状更差**，宁可继续用常数，
+        /// 也不能让一次编译失败变成"这件器官突然打不出东西了"。
+        /// </summary>
+        /// <param name="geneIds">该身体当前登记的有序基因 id 列表。<see cref="UnitLoadoutOrigin.TemplateDerived"/>
+        /// 友军（萌生腔新生个体/回巢改造，M4-R00-02 队列②号项）现在会传真实基因；
+        /// <see cref="UnitLoadoutOrigin.ArchetypeDerived"/> 固定队友与敌方结构上没有基因概念，
+        /// 调用方传空列表——本方法在空基因下依然生效：它换掉的是"这件器官自己攻击模块产出的真实
+        /// 伤害"，不是"基因加成"。</param>
+        public static OrganKernelAction ResolveCompiled(string organId, IReadOnlyList<string> geneIds, int seed, string cellId = null)
+        {
+            OrganKernelAction action = Resolve(organId);
+            if (!action.IsValid)
+            {
+                return action;
+            }
+
+            List<ComposeEngine.Core.HitEvent> events;
+            try
+            {
+                events = CarrierCompiler.CompileFromRecipe(
+                    s_compileEngine, organId, geneIds ?? Array.Empty<string>(), s_emptyWorld, seed, cellId);
+            }
+            catch (Exception e)
+            {
+                // 编译链路的异常不应该让这具身体打不出东西——保留常数判定，如实记录。
+                TEngine.Log.Error($"[OrganKernelActionTable] {organId} 编译失败，保留常数伤害：{e}");
+                return action;
+            }
+
+            if (events == null || events.Count == 0)
+            {
+                return action;
+            }
+
+            // 一件器官对应一条链尾攻击模块，只产出一条基础 HitEvent；多条只在组合了 Split/Chain
+            // 等子事件继承字段时出现，那属于队列①/③的更深处，本次只取首条的基础伤害。
+            action.Damage = events[0].Damage;
+
+            // 代价必须跟着真实伤害重算，否则会出现"编译后伤害涨了，冷却/代谢/过载债还停在
+            // 常数伤害的旧值"——那是比不换更糟的新回归：真实强度和真实代价第一次对不上。
             ApplyReleaseCosts(ref action);
             return action;
         }

@@ -1,3 +1,4 @@
+using System;
 using BinGames.Sim;
 using GameLogic.Battle;
 
@@ -88,6 +89,11 @@ namespace GameLogic.Control
         /// 它持续上涨说明这具身体的器官对 AI 来说功率偏高，是调数值的信号，不是 bug。</summary>
         public int StrainHoldCount { get; private set; }
 
+        /// <summary>M4-R00-02 队列①-1：最近一次释放的发射上下文（诊断/回归锚点）。</summary>
+        public EmissionContext LastEmissionContext { get; private set; }
+
+        private int _releaseSeed;
+
         public void Bind(SimBridge sim, UnitLoadoutRegistry loadouts,
             UnitVitalsRegistry vitals, StatusSystem status)
         {
@@ -104,6 +110,8 @@ namespace GameLogic.Control
             LastReleasedOrganId = null;
             LastReleasedKernelAction = OrganKernelAction.None;
             LastBlockedGate = DirectVitalsGate.Allowed;
+            LastEmissionContext = default;
+            _releaseSeed = 0;
         }
 
         public void Unbind()
@@ -164,7 +172,13 @@ namespace GameLogic.Control
                     continue;
                 }
 
-                OrganKernelAction act = OrganKernelActionTable.Resolve(organ.OrganId);
+                _releaseSeed++;
+                // M4-R00-02 队列①-1：伤害数值换成真实编译结果，与玩家/直控友军同一条化学链路
+                // （见 OrganKernelActionTable.ResolveCompiled 注释）。geneIds 直接取自装配
+                // （队列②号项）：TemplateDerived 友军现在真的带基因，ArchetypeDerived 固定队友
+                // 恒为 null，兜底传空列表——与直控友军路径同一口径。
+                OrganKernelAction act = OrganKernelActionTable.ResolveCompiled(
+                    organ.OrganId, organ.GeneIds ?? Array.Empty<string>(), _releaseSeed);
                 if (!act.IsValid)
                 {
                     NoOrganCount++;
@@ -186,6 +200,11 @@ namespace GameLogic.Control
                     StrainHoldCount++;
                     continue;
                 }
+
+                LastEmissionContext = new EmissionContext(
+                    fire.EntityId, SimFaction.PlayerMinion, ControllerKind.AiFriendly, organ.OrganId,
+                    snapshot.Position[idx], snapshot.Radius[idx], fire.AimDirection, fire.TargetPart,
+                    _releaseSeed);
 
                 bool released = OrganReleaseRunner.Release(
                     _sim, _status, idx, snapshot.Position[idx], snapshot.Radius[idx],

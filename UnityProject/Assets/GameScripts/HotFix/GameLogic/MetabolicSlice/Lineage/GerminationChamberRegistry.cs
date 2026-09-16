@@ -16,10 +16,11 @@ namespace GameLogic.MetabolicSlice.Lineage
     /// 已生成个体的绑定字段也不会被这次提交改写——"旧单位保持 V1" 在结构上就是"没人碰过它的引用"。
     ///
     /// 只消费蓝图库/谱系已建立的对象模型（<see cref="LineageRegistry"/>/<see cref="BiomassLedger"/>），
-    /// 不碰 ComposeEngine 核心与 <c>CarrierCompiler</c> 的既有职责——生成个体只是在
-    /// <see cref="Control.UnitLoadoutRegistry"/> 里挂一份"主器官=模板 OrganelleId"的显式装配，
-    /// 供内核驱动的 AI 自动开火路径消费；基因对装配的影响仍是 <c>CompileFromRecipe</c> 的事，
-    /// 只有当这具身体未来被直控接管时才会经那条路真正结算（本期不做，见下）。
+    /// 不碰 ComposeEngine 核心与 <c>CarrierCompiler</c> 的既有职责——生成个体在
+    /// <see cref="Control.UnitLoadoutRegistry"/> 里挂一份"主器官=模板 OrganelleId+有序基因"的显式
+    /// 装配（M4-R00-02 队列②号项），供 AI 自动开火路径（<see cref="Control.MinionOrganCombatDriver"/>）
+    /// 与直控释放路径共用同一条 <c>OrganKernelActionTable.ResolveCompiled</c>→<c>CarrierCompiler</c>
+    /// 链路真正结算——不再是"基因只在直控接管时生效"。
     ///
     /// 接管资格（自行拍板，见类型末尾方法 <see cref="BuildSpawnRequest"/>）：GDD 现有文本
     /// （§5.1/§6.6）没有把"萌生腔新生个体"列入玩家可意识传递对象的范围，M2-06 试玩门禁的
@@ -294,7 +295,10 @@ namespace GameLogic.MetabolicSlice.Lineage
             _sim.Spawn(BuildSpawnRequest(ticket, logicId));
 
             _organScratch.Clear();
-            _organScratch.Add(new UnitLoadoutOrgan(ticket.Version.OrganelleId, LoadoutAction.Primary));
+            // M4-R00-02 队列②号项：模板版本自己就带着有序基因 id（提交模板时就定版），
+            // 传下去才能让 CarrierCompiler 真的算出随基因变化的伤害——此前这里只取
+            // OrganelleId，GeneIds 被就地丢弃，是"友军基因对战斗零影响"这条症状的根因。
+            _organScratch.Add(new UnitLoadoutOrgan(ticket.Version.OrganelleId, LoadoutAction.Primary, geneIds: ticket.Version.GeneIds));
             _unitLoadouts?.RegisterExplicitPending(logicId, _organScratch);
 
             _pendingBinds.Add(new PendingBind

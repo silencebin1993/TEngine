@@ -1,3 +1,4 @@
+using System;
 using BinGames.Sim;
 using GameLogic.Ability;
 using GameLogic.Battle;
@@ -100,6 +101,16 @@ namespace GameLogic.Control
         /// <summary>最近一次成功释放落到内核的请求形状。验收/调试读它确认"打出来的东西和器官对得上"。</summary>
         public OrganKernelAction LastReleasedKernelAction { get; private set; }
 
+        /// <summary>M4-R00-02 队列①-1：最近一次内核路释放的发射上下文（诊断/回归锚点，见
+        /// `EmissionContext` 类注释——尚未成为唯一入口）。玩家本体委托路走 <see cref="AbilitySystem"/>，
+        /// 不产生它，保持默认值。</summary>
+        public EmissionContext LastEmissionContext { get; private set; }
+
+        /// <summary>内核路释放次数计数，喂给 <see cref="OrganKernelActionTable.ResolveCompiled"/> 当
+        /// seed——只需要在同一局内单调递增、对同一次释放前后一致（预览/判定用同一个数），
+        /// 不需要额外的随机源。</summary>
+        private int _kernelReleaseSeed;
+
         /// <summary>三个量的账本（M2-03c）。UI 只读快照走 <see cref="ControlledVitals"/>。</summary>
         public UnitVitalsRegistry Vitals => _vitals;
 
@@ -171,6 +182,8 @@ namespace GameLogic.Control
             LastReleasedOrganId = null;
             LastReleasedKernelAction = OrganKernelAction.None;
             LastReleaseResult = DirectActionAvailability.NoControlledUnit;
+            LastEmissionContext = default;
+            _kernelReleaseSeed = 0;
 
             _scope?.Dispose();
             // M1-06 把"控制权变了"收敛成了唯一一条出口。动作集只订阅它，不自己去猜
@@ -279,9 +292,14 @@ namespace GameLogic.Control
             bool onPlayerBody = view.Faction == SimFaction.Player &&
                                 loadout.Origin == UnitLoadoutOrigin.PlayerProjection;
 
-            // 形态与代价同一个来源：这件器官自己的目录条目。两条释放路都在这里解析一次，
-            // 于是"能不能按"与"按了要付多少"永远说的是同一件器官。
-            OrganKernelAction act = OrganKernelActionTable.Resolve(organ.OrganId);
+            // 形态与代价同一个来源：这件器官自己的目录条目，伤害数值已换成真实编译结果
+            // （M4-R00-02 队列①-1，见 OrganKernelActionTable.ResolveCompiled 注释）。
+            // 两条释放路都在这里解析一次，于是"能不能按"与"按了要付多少"永远说的是同一件器官。
+            // geneIds 直接取自装配（M4-R00-02 队列②号项）：TemplateDerived 友军（萌生腔/回巢改造）
+            // 现在真的带基因；ArchetypeDerived 固定队友结构上没有基因概念，organ.GeneIds 恒为 null，
+            // 兜底传空列表。
+            OrganKernelAction act = OrganKernelActionTable.ResolveCompiled(
+                organ.OrganId, organ.GeneIds ?? Array.Empty<string>(), _kernelReleaseSeed);
 
             // ── M2-03c：三道闸门，与失能同样**在释放入口**拦 ──
             // 只在 UI 上把按钮灰掉、不在入口拦的话，按键照样生效，那是"显示禁用、实际可用"。
@@ -359,6 +377,13 @@ namespace GameLogic.Control
         /// </summary>
         private bool ReleaseOnKernel(in SimControlledUnitView view, in OrganKernelAction act, float2 aim)
         {
+            _kernelReleaseSeed++;
+
+            // M4-R00-02 队列①-1：记录本次释放的发射上下文（诊断/回归锚点，见 EmissionContext 类注释）。
+            LastEmissionContext = new EmissionContext(
+                view.EntityId, view.Faction, ControllerKind.DirectFriendly, act.OrganId,
+                view.Position, view.Radius, aim, SimBodyPartSlot.None, _kernelReleaseSeed);
+
             // surgicalAim: true 是直控特有的——手术窗口（M2-05）本来就是"人手瞄准接点"的产物。
             // AI 那条路按内核给的锁定接点来，不共用这个开关。
             bool released = OrganReleaseRunner.Release(

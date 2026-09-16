@@ -4,6 +4,8 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using BinGames.Sim;
+using GameLogic.Ability;
+using GameLogic.Ability.Executors;
 using GameLogic.Battle;
 using GameLogic.Battle.Feedback;
 using GameLogic.Cards;
@@ -97,6 +99,8 @@ namespace GameLogic.EditorTools
                 ValidateFormationSharedPathing();
                 ValidateDirectControlDetachment();
                 ValidateFormationEncounter();
+                ValidateAbilityResourceLayerBoundary();
+                ValidateFriendlyGeneProjection();
             }
             catch (Exception e)
             {
@@ -1635,6 +1639,48 @@ namespace GameLogic.EditorTools
                     $"AI {aiAct.Kind}/伤害 {aiAct.Damage:F1}/速度 {aiAct.Speed:F1}/半径 {aiAct.Radius:F2}/" +
                     $"寿命 {aiAct.Lifetime:F2}/穿透 {aiAct.Pierce}/冷却 {aiAct.Cooldown:F2}" +
                     "——这是 M2-07 的全部立论，只比「都能打出伤害」是不够的（那用旧路径也成立）");
+
+                // ── 4b. M4-R00-02 队列①-1：伤害数值已换成真实编译结果，不再是热更层自己猜的常量 ──
+                // 如实记录一个重要边界（不夸大本次修复的范围）：友军装配今天不携带基因数据，
+                // 而 ComposeEngine 链路里"每件攻击器官不同"这件事本身**由基因决定**——裸链路
+                // （EnergyCore→Actuator）对任何攻击器官都是同一路 Energy→Damage 直传，
+                // 空基因下不同器官会算出**相同**的基础伤害，这不是本次改动的回归，是这条化学链路
+                // 一直如此。本次修复换掉的是"热更层自己拍的 DefaultDamage=6f"这件更糟的事——
+                // 换成的数至少是 ComposeEngine 真实算出来的（EnergyCore 基准 10f），且一旦友军装配
+                // 接入基因（M4-R00-02 队列②号项），才是这条改动真正开始生效的时候。
+                Expect(!Mathf.Approximately(playerAct.Damage, OrganKernelActionTable.DefaultDamage) ||
+                       !Mathf.Approximately(aiAct.Damage, OrganKernelActionTable.DefaultDamage),
+                    $"至少一侧的伤害应已不再是旧的热更层常量 DefaultDamage={OrganKernelActionTable.DefaultDamage:F1}" +
+                    $"（实测玩家 {playerAct.Damage:F2} / AI {aiAct.Damage:F2}）——否则 ResolveCompiled 只是换了个名字");
+
+                // 证明管线真的会响应基因（即使今天友军装配还不携带基因）：同一件器官，
+                // 挂一条真实基因前后，编译结果应不同——这是"以后接入基因就会生效"这条论证
+                // 唯一站得住的证据，不能只靠读代码论证。刻意选 gene_vacuole（挂 Capacitor 模块，
+                // 真的会乘 packet.Energy），不能随手挑目录第一条——"追踪/状态"类基因不改
+                // Energy 链路，会做出与本条断言相反的假红。
+                string sampleGeneId = GeneCatalog.AllGeneIds.Contains("gene_vacuole")
+                    ? "gene_vacuole"
+                    : GeneCatalog.AllGeneIds.FirstOrDefault();
+                Expect(sampleGeneId != null, "GeneCatalog 应至少有一条基因用于本项对照");
+                if (sampleGeneId != null)
+                {
+                    OrganKernelAction bareAct = OrganKernelActionTable.ResolveCompiled(
+                        aiOrganId, Array.Empty<string>(), seed: 1);
+                    OrganKernelAction genedAct = OrganKernelActionTable.ResolveCompiled(
+                        aiOrganId, new[] { sampleGeneId }, seed: 1);
+                    Expect(bareAct.IsValid && genedAct.IsValid,
+                        $"同一件器官带 / 不带基因都应解析出有效内核动作（{aiOrganId} + {sampleGeneId}）");
+                    Expect(!Mathf.Approximately(bareAct.Damage, genedAct.Damage) ||
+                           !Mathf.Approximately(bareAct.Cooldown, genedAct.Cooldown) ||
+                           !Mathf.Approximately(bareAct.MetabolicCost, genedAct.MetabolicCost),
+                        $"挂上基因 {sampleGeneId} 前后，同一件器官 {aiOrganId} 的编译结果（伤害/冷却/代谢）" +
+                        $"至少应有一项改变（裸链路伤害={bareAct.Damage:F2} 挂基因后={genedAct.Damage:F2}）——" +
+                        "否则本次改动接的这条化学链路对基因根本没反应，友军装配以后接基因也不会有用");
+                }
+
+                // 退役器官不应因为换了解析函数就"复活"——与 Resolve 同一口径。
+                Expect(!OrganKernelActionTable.ResolveCompiled("org_hook", Array.Empty<string>(), seed: 2).IsValid,
+                    "已退役器官 org_hook 经 ResolveCompiled 解析仍应无效，不能绕过 Resolve 的退役检查复活");
 
                 // ── 5. 拆台不留悬挂：位放掉之后退回降级路，不是变哑巴 ──────
                 actions.Unbind();
@@ -3304,6 +3350,381 @@ namespace GameLogic.EditorTools
             // 验收 5：回归 [33]~[37]。本方法不改动它们的任何断言，靠 RunAll() 里五者继续跑、
             // 继续绿灯来验证，这里不重复断言内容。
             Line("  · [33]~[37] 回归由 RunAll() 统一跑，见对应方法本身，未在此处重复断言");
+        }
+
+        /// <summary>
+        /// [39] 卡牌 <see cref="AbilitySystem"/>/<see cref="ResourceWallet"/> 与器官
+        /// <see cref="UnitVitalsRegistry"/> 的分层边界（M4-R00-02 队列①，2026-09-15 bin 拍板：
+        /// **分层，不合并成一个统一钱包**——见
+        /// `production/design/m4-r00-02-item1-ability-truth-unification/DESIGN.md` §1b）。
+        ///
+        /// 验收 a/b 是分层本身：两套账本各自独立运作，互不知情。
+        /// 验收 c 是跨层触发时的真实观察结果——**如实记录一个不在本次分层决策修复范围内、但值得
+        /// 产品知道的边界**：玩家本体按 Primary 键委托到卡牌槎位时，会经过
+        /// <see cref="DirectControlActions.TryRelease"/> 的器官闸门（走 <see cref="UnitVitalsRegistry"/>
+        /// 记一笔"这件 Primary 器官"的代谢/过载债），但委托执行走的是
+        /// <see cref="AbilitySystem.TryCastAuto"/>，**不经过</see>
+        /// <c>CellPlayerController.TryCastSlot</c> 的体力检查——即这条路径下体力完全不扣。
+        /// 这不是"重复扣费"（两边都只各记一次或零次，没有任何一边被扣两次），而是"同一次操作在
+        /// 两套账本上被记了不对称的账"。本方法只如实断言现状，不擅自改写这条路径的产品语义。
+        /// </summary>
+        private static void ValidateAbilityResourceLayerBoundary()
+        {
+            Line("\n[39] 卡牌/器官分层边界（M4-R00-02 队列①，分层不合并）");
+
+            var stats = new StatSheet();
+            stats.ResetToDefaults();
+
+            var wallet = new ResourceWallet();
+            wallet.Bind(stats);
+            wallet.OnEnter();
+
+            var sim = new SimBridge();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 32;
+            cfg.ArenaHalfExtent = 60f;
+            cfg.RandomSeed = 0xC0FFEE09u;
+            sim.Begin(cfg, Array.Empty<BehaviorArchetype>());
+            sim.ConfigureControlSwitch(100f, 0f);
+
+            var abilities = new AbilitySystem();
+            abilities.RegisterExecutor(new EffectResource());
+            abilities.Bind(sim, stats);
+
+            const float StaminaCost = 12f;
+            const float GainValue = 5f;
+            // 槎位 0 恒为冲刺，PlayerPrimaryAbilitySlot=1——占位授予一个哑技能占槎位 0，
+            // 真正观察用的技能落在槎位 1，才会被 DirectControlActions 的委托路径命中。
+            Expect(abilities.Grant(new AbilitySpec { Id = 0, Cooldown = 0.05f, TargetMode = TargetMode.Self }),
+                "应能授予占位槎位 0（冲刺）");
+            var observedSpec = new AbilitySpec
+            {
+                Id = 1,
+                Cooldown = 0.05f,
+                Charges = 1,
+                StaminaCost = StaminaCost,
+                TargetMode = TargetMode.Self,
+                Effects = new List<EffectSpec>
+                {
+                    new EffectSpec
+                    {
+                        Kind = EffectKind.Resource, Resource = ResourceKind.EvoEnergy,
+                        Value = GainValue, ScaleWithPower = false,
+                    },
+                },
+            };
+            Expect(abilities.Grant(observedSpec), "应能授予槎位 1 的观测用技能");
+
+            var registry = new UnitLoadoutRegistry();
+            var fakeSource = new FakePlayerLoadoutSource();
+            var actions = new DirectControlActions();
+            var aim = new float2(1f, 0f);
+            InputRouter.Reset();
+
+            try
+            {
+                registry.Bind(sim, fakeSource);
+                SimEntityId body = sim.ControlledUnitId;
+                registry.RegisterPlayerBody(body);
+                actions.Bind(sim, registry, abilities: abilities, status: null);
+
+                const int FriendLogicId = 9801;
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(10f, 2f), Health = 40f, Radius = 0.8f, MaxSpeed = 0f,
+                    ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                    IntentSource = IntentSource.AI, LogicId = FriendLogicId,
+                });
+                registry.RegisterArchetypePending(FriendLogicId, ArchetypeLoadoutTable.SporeArchetypeId);
+                sim.OnUpdate(1f / 60f);
+                registry.ResolvePending(sim.Snapshot);
+                SimEntityId friend = FindEntityId(sim.Snapshot, FriendLogicId, out _);
+                Expect(friend.IsValid, "友军应已落地并拥有有效稳定实体 ID");
+
+                // ── a. 卡牌独立释放：只扣 ResourceWallet，不建立任何器官账本记录 ──
+                Expect(!actions.Vitals.IsTracked(body),
+                    "测试开局时玩家本体的器官账本（UnitVitalsRegistry）应尚未有任何记录");
+                float staminaBefore = wallet.Stamina;
+                float evoBefore = wallet.EvoEnergy;
+                bool cardCastOk = wallet.TrySpend(ResourceKind.Stamina, observedSpec.StaminaCost)
+                                   && abilities.TryCastAuto(1);
+                Expect(cardCastOk, "独立卡牌施放路径（体力检查 + AbilitySystem 施放）应成功");
+                Expect(Mathf.Approximately(wallet.Stamina, staminaBefore - StaminaCost),
+                    $"体力应精确扣掉 {StaminaCost}（实际 {staminaBefore:F1}→{wallet.Stamina:F1}）");
+                Expect(Mathf.Approximately(wallet.EvoEnergy, evoBefore + GainValue),
+                    $"卡牌效果应精确生效（进化能 {evoBefore:F1}→{wallet.EvoEnergy:F1}）");
+                Expect(!actions.Vitals.IsTracked(body),
+                    "卡牌独立释放不应在器官账本里为玩家本体建立任何记录——两套账本完全独立，" +
+                    "这是本次 bin 拍板的分层决策要求的最基本保证");
+
+                // ── b. 器官独立释放：只走 UnitVitalsRegistry，完全不触碰卡牌钱包 ──
+                Expect(sim.RequestControlSwitch(friend) == ControlRequestResult.Success, "应能接管友军");
+                float staminaBeforeOrgan = wallet.Stamina;
+                float evoBeforeOrgan = wallet.EvoEnergy;
+                bool organReleased = actions.TryRelease(LoadoutAction.Primary, aim);
+                Expect(organReleased, "友军的器官释放应成功");
+                Expect(Mathf.Approximately(wallet.Stamina, staminaBeforeOrgan) &&
+                       Mathf.Approximately(wallet.EvoEnergy, evoBeforeOrgan),
+                    $"器官释放不应触碰卡牌钱包的任何资源（体力 {staminaBeforeOrgan:F1}→{wallet.Stamina:F1}，" +
+                    $"进化能 {evoBeforeOrgan:F1}→{wallet.EvoEnergy:F1}）");
+                Expect(actions.Vitals.IsTracked(friend),
+                    "器官释放应在 UnitVitalsRegistry 里为该身体建立记录——账本本身与卡牌无关地正常运作");
+
+                // ── c. 跨层触发（玩家本体按 Primary 委托到卡牌槎位 1）：如实记录现状 ──
+                Expect(sim.RequestControlSwitch(body) == ControlRequestResult.Success, "应能切回玩家本体");
+                // 槎位 1 在 a 步已经消费过充能，这里推进冷却让它回到 Ready——不然 c 步测的是
+                // "槎位没冷却好"而不是"跨层触发的真实结果"。
+                abilities.OnUpdate(observedSpec.Cooldown + 0.05f);
+                fakeSource.Organs.Clear();
+                fakeSource.Organs.Add(new UnitLoadoutOrgan("org_emitter", LoadoutAction.Primary));
+                actions.Rebuild();
+
+                UnitVitalsView vitalsBeforeCross = actions.Vitals.Get(body);
+                float evoBeforeCross = wallet.EvoEnergy;
+                float staminaBeforeCross = wallet.Stamina;
+                bool crossOk = actions.TryRelease(LoadoutAction.Primary, aim);
+                Expect(crossOk, "玩家本体按 Primary 应成功委托到卡牌槎位 1（org_emitter 是现役攻击器官）");
+
+                UnitVitalsView vitalsAfterCross = actions.Vitals.Get(body);
+                Expect(vitalsAfterCross.Metabolism < vitalsBeforeCross.Metabolism &&
+                       vitalsAfterCross.Strain > vitalsBeforeCross.Strain,
+                    "器官账本这一侧只应被记一次（不能是零次或两次）：委托路径仍会对 Primary 器官" +
+                    "本身走一次 Evaluate/Commit，这是 TryRelease 统一闸门的既有设计");
+                Expect(Mathf.Approximately(wallet.EvoEnergy, evoBeforeCross + GainValue),
+                    $"卡牌这一侧的效果应精确生效恰好一次（进化能 {evoBeforeCross:F1}→{wallet.EvoEnergy:F1}）——" +
+                    "证明委托没有让 RunEffects 被多算或漏算");
+                // 如实记录：这条委托路径调用的是 AbilitySystem.TryCastAuto，不经过
+                // CellPlayerController.TryCastSlot 的体力检查，所以体力在这条路径下不会被扣——
+                // 这不是"重复扣费"，是"跨层触发时体力这一侧完全没被计费"，与本次分层决策要解决的
+                // 问题不同类，如实记录留给产品判断是否需要另开故事处理，本方法不擅自改写它。
+                Expect(Mathf.Approximately(wallet.Stamina, staminaBeforeCross),
+                    $"【如实记录，非本次范围】玩家本体委托路径（TryRelease→ReleaseOnPlayerBody→" +
+                    $"AbilitySystem.TryCastAuto）不经过 CellPlayerController.TryCastSlot 的体力检查，" +
+                    $"体力当前确实未被扣（{staminaBeforeCross:F1}→{wallet.Stamina:F1}）——" +
+                    "若产品认为这条路径也该扣体力，需要另开故事显式接线，不属于本次分层决策范围");
+
+                // ── d. 同一器官三种控制来源结果一致：已由 [25] 覆盖，本方法不重复断言 ──
+                Line("  · 同一器官玩家/直控友军/AI 结果一致已由 [25] 覆盖，未在此处重复断言");
+
+                // ── e. 卡牌不能绕过器官禁用闸门 ──
+                fakeSource.Organs.Clear();
+                fakeSource.Organs.Add(new UnitLoadoutOrgan("org_emitter", LoadoutAction.Primary, disabled: true));
+                actions.Rebuild();
+                bool releasedWhileDisabled = actions.TryRelease(LoadoutAction.Primary, aim);
+                Expect(!releasedWhileDisabled &&
+                       actions.LastReleaseResult == DirectActionAvailability.OrganDisabled,
+                    "Primary 器官被禁用时，即使卡牌槎位 1 本身已就绪，委托路径也必须在入口被拒" +
+                    "（原因 OrganDisabled）——卡牌不能绕过器官禁用闸门去执行任何委托效果");
+            }
+            finally
+            {
+                actions.Unbind();
+                registry.Unbind();
+                sim.End();
+                InputRouter.Reset();
+            }
+        }
+
+        /// <summary>
+        /// M4-R00-02 队列②号项：萌生腔新生个体的基因终于被传下去了（此前
+        /// <see cref="GerminationChamberRegistry.SpawnFromTicket"/> 只取
+        /// <c>ticket.Version.OrganelleId</c>，<c>GeneIds</c> 被就地丢弃，是"友军基因对战斗表现
+        /// 零影响"这条症状的根因——见
+        /// <c>production/design/m4-r00-02-item2-any-entity-projection/DESIGN.md</c>）。
+        ///
+        /// 用两具**分别在独立 SimBridge 里**、经真实萌生腔生产入口（<c>Enqueue</c>→计时→
+        /// <see cref="GerminationChamberRegistry.SpawnFromTicket"/>，不手工构造
+        /// <see cref="UnitLoadoutOrgan"/>）落地的个体，比较它们经 AI 自动开火
+        /// （<see cref="MinionOrganCombatDriver"/>，与直控同一条 <see cref="OrganReleaseRunner"/>/
+        /// <c>ResolveCompiled</c> 链路）打出来的东西是否因基因组合不同而不同。分两个独立 sim 而不是
+        /// 同场对照：新生个体的落点由萌生腔按玩家位置自动摆放（GDD 没有腔体坐标概念），硬把两具凑到
+        /// 同一场景里会导致索敌/攻击范围互相干扰，让归因变得不可靠。
+        /// </summary>
+        private static void ValidateFriendlyGeneProjection()
+        {
+            Line("\n[40] 友军接入统一装配签名：萌生腔新生个体真的带基因（M4-R00-02 队列②）");
+
+            OrganelleDef organelle = OrganelleCatalog.All.Values.FirstOrDefault(o => o.AttackMethod && !o.IsRetired);
+            Expect(organelle != null, "OrganelleCatalog 应至少有一条 AttackMethod 未退役器官用于本项自检");
+            if (organelle == null)
+            {
+                return;
+            }
+
+            const string VacuoleGeneId = "gene_vacuole";
+            List<string> allGenes = GeneCatalog.AllGeneIds.ToList();
+            List<string> otherGenes = allGenes.Where(g => g != VacuoleGeneId).Take(2).ToList();
+            Expect(allGenes.Contains(VacuoleGeneId) && otherGenes.Count == 2,
+                "本项需要 gene_vacuole（挂 Capacitor，真的会乘 packet.Energy，见 [25]④b 同一选择理由）" +
+                "加两条其它基因作对照，GeneCatalog 应满足");
+            if (!allGenes.Contains(VacuoleGeneId) || otherGenes.Count < 2)
+            {
+                return;
+            }
+
+            // 基线配方：两条与 gene_vacuole 无关的基因。换基因配方：换掉其中一条为 gene_vacuole。
+            // 两者都满足 LineageRegistry.MinGeneSlots=2 的槽位下限。
+            List<string> bareGenes = otherGenes;
+            List<string> genedGenes = new List<string> { otherGenes[0], VacuoleGeneId };
+
+            OrganKernelAction bareAct = RunFriendlyGeneProjectionScenario(
+                organelle.Id, "lineage-gene-proj-bare", bareGenes, 0xC0FFEE41u, out IReadOnlyList<string> bareLoadoutGenes);
+            OrganKernelAction genedAct = RunFriendlyGeneProjectionScenario(
+                organelle.Id, "lineage-gene-proj-gened", genedGenes, 0xC0FFEE42u, out IReadOnlyList<string> genedLoadoutGenes);
+
+            Expect(bareAct.IsValid && genedAct.IsValid,
+                $"两套场景都应解析出有效内核动作（基线 {bareAct.IsValid} / 换基因 {genedAct.IsValid}）");
+            if (!bareAct.IsValid || !genedAct.IsValid)
+            {
+                return;
+            }
+
+            Expect(!Mathf.Approximately(bareAct.Damage, genedAct.Damage) ||
+                   !Mathf.Approximately(bareAct.Cooldown, genedAct.Cooldown) ||
+                   !Mathf.Approximately(bareAct.MetabolicCost, genedAct.MetabolicCost),
+                $"同一件主器官，萌生腔真实生产入口落地的两具个体因基因组合不同（基线 " +
+                $"[{string.Join(",", bareLoadoutGenes ?? Array.Empty<string>())}] vs 换基因 " +
+                $"[{string.Join(",", genedLoadoutGenes ?? Array.Empty<string>())}]），AI 开火编译结果" +
+                $"应至少一项不同（基线伤害={bareAct.Damage:F2}/冷却={bareAct.Cooldown:F2} " +
+                $"换基因后伤害={genedAct.Damage:F2}/冷却={genedAct.Cooldown:F2}）——这是" +
+                "\"友军基因影响战斗表现\"这条症状**在生产路径**（萌生腔 Enqueue→AI 自动开火，不是" +
+                "直连 ResolveCompiled）上第一次有真实断言，不能只靠①号项 [25]④b 的直连证明推断" +
+                "生产路径也接上了");
+        }
+
+        /// <summary>单套"提交配方→萌生腔入队→落地→AI 开火"场景，供 <see cref="ValidateFriendlyGeneProjection"/>
+        /// 对两种基因组合各跑一遍并比较。</summary>
+        private static OrganKernelAction RunFriendlyGeneProjectionScenario(
+            string organelleId, string lineageId, List<string> geneIds, uint randomSeed, out IReadOnlyList<string> loadoutGeneIds)
+        {
+            loadoutGeneIds = null;
+
+            var blueprints = new BlueprintRegistry();
+            blueprints.Resolve(organelleId, BlueprintSourceKind.Organelle, 1f, 0f);
+            foreach (string g in geneIds)
+            {
+                blueprints.Resolve(g, BlueprintSourceKind.Gene, 1f, 0f);
+            }
+
+            var lineages = new LineageRegistry();
+            lineages.Bind(blueprints);
+            PhenotypeTemplateVersion version = lineages.CommitTemplate(lineageId, "assault", organelleId, geneIds, "keep_distance", out string commitErr);
+            Expect(version != null && commitErr == null, $"本项前置：{lineageId} 配方提交应成功（{commitErr}）");
+            if (version == null)
+            {
+                return OrganKernelAction.None;
+            }
+
+            var ledger = new BiomassLedger();
+            ledger.OnEnter();
+            var chamber = new GerminationChamberRegistry();
+            chamber.OnEnter();
+
+            var sim = new SimBridge();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 32;
+            cfg.ArenaHalfExtent = 60f;
+            cfg.RandomSeed = randomSeed;
+            // 萌生腔生成的个体固定用 ArchetypeLoadoutTable.SporeArchetypeId（=13，见
+            // GerminationChamberRegistry.BuildSpawnRequest），数组必须够长且该索引是
+            // MinionSeekAttack，否则这具个体在内核里查不到有效行为原型，索敌/攻击永远不会触发。
+            const int DummyArchetypeId = 0;
+            var archetypes = new BehaviorArchetype[ArchetypeLoadoutTable.SporeArchetypeId + 1];
+            archetypes[DummyArchetypeId] = new BehaviorArchetype
+            {
+                Kind = BehaviorKind.Stationary, Accel = 0f, TurnRate = 0f, AggroRange = 0f,
+                AttackRange = 0.5f, AttackCooldown = 99f, AttackDamage = 0f,
+                Separation = 0f, ChargeSpeedMul = 1f,
+            };
+            archetypes[ArchetypeLoadoutTable.SporeArchetypeId] = new BehaviorArchetype
+            {
+                Kind = BehaviorKind.MinionSeekAttack, Accel = 12f, TurnRate = 0f, AggroRange = 12f,
+                AttackRange = 6f, AttackCooldown = 0.25f, AttackDamage = 5f,
+                Separation = 0f, ChargeSpeedMul = 1f,
+            };
+            sim.Begin(cfg, archetypes);
+
+            var unitLoadouts = new UnitLoadoutRegistry();
+            var fakeSource = new FakePlayerLoadoutSource();
+            unitLoadouts.Bind(sim, fakeSource);
+            unitLoadouts.RegisterPlayerBody(sim.ControlledUnitId);
+            chamber.Bind(sim, lineages, ledger, unitLoadouts);
+
+            var actions = new DirectControlActions();
+            actions.Bind(sim, unitLoadouts, abilities: null, status: null);
+
+            try
+            {
+                int ticket = chamber.Enqueue(lineageId, "assault", out PhenotypeTemplateVersion captured, out string enqErr);
+                Expect(ticket != 0 && enqErr == null, $"本项前置：{lineageId} 入队应成功（{enqErr}）");
+                if (ticket == 0)
+                {
+                    return OrganKernelAction.None;
+                }
+
+                // 一次性推满萌生耗时：SpawnFromTicket 只需在 OnUpdate 内被触发一次，具体帧数无所谓，
+                // 这不是要重测计时器本身（[29] 已经测过）。
+                chamber.OnUpdate(GerminationChamberRegistry.GerminationSeconds + 0.1f);
+                // 落地：Spawn 请求要等 sim 真的推进一帧才会出现在快照里（与 [25]/[29] 同一套两段式）。
+                sim.OnUpdate(1f / 60f);
+                chamber.OnUpdate(1f / 60f); // 让 ResolvePendingBinds 用上一步之后的新快照重新解析一次。
+                unitLoadouts.ResolvePending(sim.Snapshot);
+
+                SimEntityId spawned = SimEntityId.None;
+                foreach (KeyValuePair<SimEntityId, GerminationChamberRegistry.UnitBinding> kv in chamber.Bindings)
+                {
+                    if (ReferenceEquals(kv.Value.Version, captured))
+                    {
+                        spawned = kv.Key;
+                        break;
+                    }
+                }
+                Expect(spawned.IsValid, $"本项前置：{lineageId} 的新生个体应落地并完成谱系绑定");
+                if (!spawned.IsValid)
+                {
+                    return OrganKernelAction.None;
+                }
+
+                UnitLoadout loadout = unitLoadouts.Get(spawned);
+                Expect(loadout.TryGetOrgan(LoadoutAction.Primary, out UnitLoadoutOrgan organ),
+                    $"{lineageId} 新生个体应装配了主器官");
+                loadoutGeneIds = organ.GeneIds;
+                Expect(organ.GeneIds != null && organ.GeneIds.SequenceEqual(geneIds),
+                    $"{lineageId} 新生个体装配上的 GeneIds 应与提交模板一致（实得 " +
+                    $"[{(organ.GeneIds == null ? "null" : string.Join(",", organ.GeneIds))}]）——" +
+                    "这是本次要修的根因点：GerminationChamberRegistry.SpawnFromTicket 此前把它丢了");
+
+                if (!sim.TryResolveUnitIndex(spawned, out int spawnedIdx))
+                {
+                    return OrganKernelAction.None;
+                }
+                float2 spawnedPos = sim.Snapshot.Position[spawnedIdx];
+
+                sim.Spawn(new SpawnRequest
+                {
+                    Position = spawnedPos + new float2(4f, 0f), Health = 100000f, Radius = 0.6f, MaxSpeed = 0f,
+                    ArchetypeId = DummyArchetypeId, Faction = SimFaction.Hostile,
+                    IntentSource = IntentSource.AI, LogicId = 9910,
+                });
+                sim.OnUpdate(1f / 60f);
+
+                int releaseBefore = actions.MinionCombat.ReleaseCount;
+                for (int f = 0; f < 240 && actions.MinionCombat.ReleaseCount == releaseBefore; f++)
+                {
+                    sim.OnUpdate(1f / 60f);
+                    actions.Tick(1f / 60f, paused: false);
+                }
+
+                Expect(actions.MinionCombat.ReleaseCount > releaseBefore,
+                    $"{lineageId} 新生个体应能通过 AI 器官释放路径真的开过火");
+                return actions.MinionCombat.LastReleasedKernelAction;
+            }
+            finally
+            {
+                actions.Unbind();
+                unitLoadouts.Unbind();
+                sim.End();
+            }
         }
 
         private static bool PathClearsAllObstacles(List<float2> path, List<ObstacleSpec> obstacles, float clearance)
@@ -5354,8 +5775,13 @@ namespace GameLogic.EditorTools
                 bool myceliumHas = myceliumLoadout.TryGetOrgan(LoadoutAction.Primary, out UnitLoadoutOrgan myceliumOrgan);
                 Expect(sporeHas && myceliumHas, "两名友军都应有主器官");
 
-                OrganKernelAction sporeAct = OrganKernelActionTable.Resolve(sporeOrgan.OrganId);
-                OrganKernelAction myceliumAct = OrganKernelActionTable.Resolve(myceliumOrgan.OrganId);
+                // M4-R00-02 队列①-1：预期值必须与 TryRelease 内部实际调用的解析函数一致
+                // （ResolveCompiled，见其类注释），否则本测试算的是"改动前会扣多少"，
+                // 不是"改动后真的扣了多少"——那是测试自己制造的假红/假绿。
+                OrganKernelAction sporeAct = OrganKernelActionTable.ResolveCompiled(
+                    sporeOrgan.OrganId, Array.Empty<string>(), seed: 0);
+                OrganKernelAction myceliumAct = OrganKernelActionTable.ResolveCompiled(
+                    myceliumOrgan.OrganId, Array.Empty<string>(), seed: 0);
                 Expect(sporeAct.IsValid && sporeAct.Damage > 0f,
                     $"孢子的主器官 {sporeOrgan.OrganId} 应是一次真攻击（有内核形态且有伤害），不是零伤害挂标记");
                 Expect(myceliumAct.IsValid && myceliumAct.Damage > 0f,
