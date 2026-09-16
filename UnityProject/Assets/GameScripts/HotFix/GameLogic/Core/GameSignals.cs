@@ -108,6 +108,9 @@ namespace GameLogic.Core
         /// 多发必须以 Direction 为中轴在 ±半角内展开——旧实现表现层用的是 360° 环形均分，
         /// Count=2 时第二发直接朝正后方，与判定的前向锥完全对不上。</summary>
         public float SpreadAngle;
+        /// <summary>M4-R00-02 队列③：<see cref="ComposeEngine.Core.HitEvent.RadialRequested"/> 原样转发——
+        /// <see cref="SpreadAngle"/>&lt;=0 且多发时，表现层据此判定是环射还是同向发射，不得自己猜。</summary>
+        public bool RadialRequested;
 
         /// <summary>近战扇形触及距离（仅 Melee 底盘有效，0 表示非近战）。表现层据此画出真实打击范围。</summary>
         public float MeleeReach;

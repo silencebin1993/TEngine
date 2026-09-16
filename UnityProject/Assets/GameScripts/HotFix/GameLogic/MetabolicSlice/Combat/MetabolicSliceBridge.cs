@@ -1205,7 +1205,7 @@ namespace GameLogic.MetabolicSlice.Combat
                     float2 sd = new float2(math.cos(ring), math.sin(ring));
                     BinGames.Sim.ProjectileRequest req = CombatBallistics.Build(
                         evt, center + sd * radius, sd, 0, 1,
-                        MathF.Max(0.1f, evt.Scale) * 0.7f, shotId, (uint)s);
+                        MathF.Max(0.1f, evt.Scale) * 0.7f, shotId);
                     req.Damage = evt.Damage * MeleeSplitShotDamageMul;
                     req.SplitCount = 0;
                     req.Tint = tint;
@@ -1452,7 +1452,7 @@ namespace GameLogic.MetabolicSlice.Combat
             for (int s = 0; s < shots; s++)
             {
                 BinGames.Sim.ProjectileRequest req = CombatBallistics.Build(
-                    evt, edge, dir, s, shots, scale * 0.7f, shotId, (uint)s);
+                    evt, edge, dir, s, shots, scale * 0.7f, shotId);
                 req.Damage = evt.Damage * MeleeSplitShotDamageMul;
                 req.SplitCount = 0;
                 req.Tint = tint;
@@ -1480,7 +1480,7 @@ namespace GameLogic.MetabolicSlice.Combat
             for (int h = 0; h < hits; h++)
             {
                 BinGames.Sim.ProjectileRequest req = CombatBallistics.Build(
-                    evt, origin, baseDir, h, hits, scale, shotId, (uint)(_seed * 397 + h));
+                    evt, origin, baseDir, h, hits, scale, shotId);
                 req.Tint = tint;
                 _sim.FireProjectile(req);
                 LastFiredProjectileCount++;
@@ -1721,6 +1721,7 @@ namespace GameLogic.MetabolicSlice.Combat
                     HasProjectile = evt.Damage > 0f,
                     KernelProjectile = kernelProjectile,
                     SpreadAngle = evt.SpreadAngle,
+                    RadialRequested = evt.RadialRequested,
                     MeleeReach = melee ? CombatBallistics.MeleeReach * MathF.Max(0.1f, evt.Scale) : 0f,
                     MeleeHalfAngleDeg = melee ? CombatBallistics.MeleeHalfAngle(evt) : 0f,
                     // 非弹道效果的**实际**结算坐标（Field 布场点 / Aura 贴身点），已由判定侧算好。
@@ -2672,57 +2673,6 @@ namespace GameLogic.MetabolicSlice.Combat
                 }
             }
             return found ? (float2?)best : null;
-        }
-
-        /// <summary>story-002：SpreadAngle 收窄的锥形扇散——与 <see cref="MeleeFanDirection"/> 同一公式，
-        /// 参数化成通用角度供 Bolt-tail 多发复用，不新起一套系数。</summary>
-        public static float2 ConeFanDirection(float2 baseDir, int index, int count, float angleDegrees)
-        {
-            float2 n = math.normalizesafe(baseDir, DefaultForward);
-            if (count <= 1)
-            {
-                return n;
-            }
-            float halfRad = angleDegrees * math.PI / 180f * 0.5f;
-            float t = (float)index / (count - 1);
-            float angle = math.lerp(-halfRad, halfRad, t);
-            float cos = math.cos(angle);
-            float sin = math.sin(angle);
-            return new float2(n.x * cos - n.y * sin, n.x * sin + n.y * cos);
-        }
-
-        /// <summary>story-006：Count 多发/Explode 落点方向扇形展开，与
-        /// <see cref="GameLogic.Battle.Feedback.WhiteboxComposeProjectileFeedback"/> 视觉飞行用同一公式
-        /// （禁止另起系数分叉，比照 D3/D6 先例）。count&lt;=1 时原样返回归一化后的 baseDir。</summary>
-        public static float2 FanDirection(float2 baseDir, int index, int count)
-        {
-            float2 n = math.normalizesafe(baseDir, DefaultForward);
-            if (count <= 1)
-            {
-                return n;
-            }
-            float angle = 2f * math.PI * index / count;
-            float cos = math.cos(angle);
-            float sin = math.sin(angle);
-            return new float2(n.x * cos - n.y * sin, n.x * sin + n.y * cos);
-        }
-
-        /// <summary>story-007 R6：近战前方扇形展开——只在 ±<see cref="FxRecipeCatalog.Global"/>.ArcHalfAngleDeg
-        /// 范围内分布（复用该已有全局系数，不新增系数），与 <see cref="FanDirection"/>（全向散射，Bolt/AOE 多发用）
-        /// 不同。count&lt;=1 时原样返回归一化后的 baseDir（居中不偏转，对应"多数近战器官 hits=1"的常见情形）。</summary>
-        public static float2 MeleeFanDirection(float2 baseDir, int index, int count)
-        {
-            float2 n = math.normalizesafe(baseDir, DefaultForward);
-            if (count <= 1)
-            {
-                return n;
-            }
-            float halfRad = FxRecipeCatalog.Global.ArcHalfAngleDeg * math.PI / 180f;
-            float t = (float)index / (count - 1);
-            float angle = math.lerp(-halfRad, halfRad, t);
-            float cos = math.cos(angle);
-            float sin = math.sin(angle);
-            return new float2(n.x * cos - n.y * sin, n.x * sin + n.y * cos);
         }
 
         /// <summary>

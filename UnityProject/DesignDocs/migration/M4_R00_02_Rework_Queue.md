@@ -43,7 +43,12 @@
 
 ## ③ 战斗角度/命中/阵营/成本错误
 
-9. **合并四套扇形角度公式为单一纯函数**（`CP-REQ-012`冲突）。
+9. **合并四套扇形角度公式为单一纯函数**（`CP-REQ-012`冲突）。**2026-09-16 已完成**——实读代码后
+   确认三套是死代码（零调用点，已删除），真正在用的 `CombatBallistics.FanDirection` 两处违规经
+   bin 拍板修复：新增 `Packet/HitEvent.RadialRequested`（ComposeEngine 侧）让环射改为显式声明
+   （org_orbitcilia/gene_harmonic 视觉不变），单发抖动分支按规格删除（`gene_fan` 单发场景手感
+   变化，登记 `DEBT-COMBAT-ANGLE-01`）。设计与实施记录：
+   `production/design/m4-r00-02-item3-9-fan-angle-unification/DESIGN.md`。
 10. **真实发射点挂点+身体朝向字段**（`CP-REQ-003/004`缺失）。
 11. **编队锚点算法改领队优先，排除脱队/卡死成员**（`FC-REQ-003`冲突）。
 

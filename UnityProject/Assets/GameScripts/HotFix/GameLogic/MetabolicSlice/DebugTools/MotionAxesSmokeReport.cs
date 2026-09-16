@@ -106,7 +106,7 @@ namespace GameLogic.MetabolicSlice.DebugTools
             }
             BinGames.Sim.ProjectileRequest weaveReq = CombatBallistics.Build(
                 ballistic, default(Unity.Mathematics.float2), new Unity.Mathematics.float2(1f, 0f),
-                0, 1, 1f, 1, 0u);
+                0, 1, 1f, 1);
             // 切向速度 = 绕轨半径 × 角速度，1.5 × 120°/s ≈ 3.14 u/s。
             float expectedAmp = 1.5f * Unity.Mathematics.math.radians(120f);
             if (Unity.Mathematics.math.abs(weaveReq.WeaveAmp - expectedAmp) > 0.01f

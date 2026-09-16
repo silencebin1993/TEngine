@@ -15,6 +15,7 @@ using GameLogic.Control;
 using GameLogic.Core;
 using GameLogic.MetabolicSlice.Blueprint;
 using GameLogic.MetabolicSlice.Carrier;
+using GameLogic.MetabolicSlice.Combat;
 using GameLogic.MetabolicSlice.ContentCatalog;
 using GameLogic.MetabolicSlice.Lineage;
 using GameLogic.MetabolicSlice.WildOrgan;
@@ -101,6 +102,7 @@ namespace GameLogic.EditorTools
                 ValidateFormationEncounter();
                 ValidateAbilityResourceLayerBoundary();
                 ValidateFriendlyGeneProjection();
+                ValidateFanDirectionUnified();
             }
             catch (Exception e)
             {
@@ -3724,6 +3726,94 @@ namespace GameLogic.EditorTools
                 actions.Unbind();
                 unitLoadouts.Unbind();
                 sim.End();
+            }
+        }
+
+        /// <summary>
+        /// M4-R00-02 队列③号项第9条：合并全仓四套互不一致的扇形角度公式为单一纯函数
+        /// （CP-REQ-012）。审计点名四个同名/近名函数，实读代码后确认其中三个
+        /// （<c>MetabolicSliceBridge.FanDirection/ConeFanDirection/MeleeFanDirection</c>）全仓零调用点，
+        /// 是死代码，已直接删除；真正在用的只有 <see cref="CombatBallistics.FanDirection"/> 一个，
+        /// 但它有两处违反 CP-REQ-012 书面规格（经 bin 拍板确认修复方向）：
+        /// ①`count&gt;1` 且 `spreadDeg&lt;=0` 时曾无条件退化成 360° 环形均分，规格要求这种情况必须
+        /// "同向发射"，环射必须由显式基元声明——已在 ComposeEngine 侧新增 `Packet/HitEvent.
+        /// RadialRequested`（`Scatterer` 单独存在时声明），本项验证该声明端到端穿透到生产内容
+        /// （org_orbitcilia/gene_harmonic）。②`count==1` 且 `spreadDeg&gt;0` 时曾把扇角当"精度抖动"用，
+        /// 规格要求单发严格沿轴——已删除该分支（副作用：gene_fan 单独装配在单发武器上时会变得
+        /// 没有可观测效果，这是需要产品知晓的内容表现变化，非本项测试断言范围）。
+        /// </summary>
+        private static void ValidateFanDirectionUnified()
+        {
+            Line("\n[41] 扇形角度公式统一为单一纯函数（CP-REQ-012，M4-R00-02 队列③）");
+
+            float2 aim = new float2(0f, 1f);
+
+            // ── 1. count<=1 严格沿轴，不受 spreadDeg/radialRequested 影响 ──
+            float2 straight1 = CombatBallistics.FanDirection(aim, 0, 1, 0f, false);
+            float2 straight2 = CombatBallistics.FanDirection(aim, 0, 1, 60f, false);
+            float2 straight3 = CombatBallistics.FanDirection(aim, 0, 1, 60f, true);
+            Expect(FloatsEqual(straight1, aim) && FloatsEqual(straight2, aim) && FloatsEqual(straight3, aim),
+                "count<=1 必须严格沿瞄准轴，不受 spreadDeg/radialRequested 影响——旧实现曾把 " +
+                "spreadDeg>0 时的单发解释成精度抖动，与 CP-REQ-012（散射精度应是独立的 " +
+                "AccuracyJitter 字段）冲突，已删除该分支");
+
+            // ── 2. count>1 且 spreadDeg<=0 且未声明 radial：默认同向发射，不再隐式环射 ──
+            float2 parallel0 = CombatBallistics.FanDirection(aim, 0, 3, 0f, false);
+            float2 parallel1 = CombatBallistics.FanDirection(aim, 1, 3, 0f, false);
+            float2 parallel2 = CombatBallistics.FanDirection(aim, 2, 3, 0f, false);
+            Expect(FloatsEqual(parallel0, aim) && FloatsEqual(parallel1, aim) && FloatsEqual(parallel2, aim),
+                "count>1 且 spreadDeg<=0 且未声明 radialRequested 时应同向发射——CP-REQ-012 要求环射" +
+                "必须由 Radial 基元显式声明，不能从\"没配扇角\"隐式反推");
+
+            // ── 3. count>1 且 spreadDeg<=0 且声明了 radial：环形均分 ──
+            float2 ring0 = CombatBallistics.FanDirection(aim, 0, 2, 0f, true);
+            float2 ring1 = CombatBallistics.FanDirection(aim, 1, 2, 0f, true);
+            Expect(FloatsEqual(ring0, aim), "环射第 0 发应与基准方向重合（index=0 → 角度 0）");
+            Expect(math.dot(ring0, ring1) < -0.99f,
+                $"2 发环射应彼此相反（180°），实际点积 {math.dot(ring0, ring1):F3}——" +
+                "这正是 org_orbitcilia\"绕一圈打\"手感的几何来源");
+
+            // ── 4. count>1 且 spreadDeg>0：±half 内确定性均分（既有兼容分支，不应回归） ──
+            float2 fan0 = CombatBallistics.FanDirection(aim, 0, 3, 60f, false);
+            float2 fan2 = CombatBallistics.FanDirection(aim, 2, 3, 60f, false);
+            float angleBetween = math.degrees(math.acos(math.clamp(math.dot(fan0, fan2), -1f, 1f)));
+            Expect(math.abs(angleBetween - 60f) < 0.5f,
+                $"3 发、总扇角 60° 时首尾两发夹角应为 60°，实际 {angleBetween:F2}°");
+
+            // ── 5. 生产入口：org_orbitcilia（Scatterer 单独存在，没配 SpreadModule）真的携带
+            //    RadialRequested，不是本次新增字段却零消费者 ──
+            var engine = new ComposeEngine.Engine();
+            var world = new ComposeEngine.Core.WorldState();
+            List<ComposeEngine.Core.HitEvent> orbitEvents = CarrierCompiler.CompileFromRecipe(
+                engine, "org_orbitcilia", Array.Empty<string>(), world, seed: 1);
+            Expect(orbitEvents.Count == 1, $"org_orbitcilia 应产出 1 条 HitEvent，实际 {orbitEvents.Count}");
+            if (orbitEvents.Count == 1)
+            {
+                ComposeEngine.Core.HitEvent orbitEvt = orbitEvents[0];
+                Expect(orbitEvt.RadialRequested,
+                    "org_orbitcilia 只挂 Scatterer 没配 SpreadModule，编译出的 HitEvent 必须携带 " +
+                    "RadialRequested=true——否则它会从\"绕一圈打\"退化成\"往一个方向打\"，是可见的" +
+                    "内容行为倒退");
+                Expect(orbitEvt.SpreadAngle <= 0f, "org_orbitcilia 没有配 SpreadModule，SpreadAngle 应保持默认 0");
+                Expect(orbitEvt.Count >= 2f, $"org_orbitcilia 的 ScattererCount 应至少产出 2 发，实际 Count={orbitEvt.Count}");
+            }
+
+            // ── 6. 生产入口：gene_harmonic 挂在任意攻击器官上同样携带 RadialRequested ──
+            OrganelleDef organelle = OrganelleCatalog.All.Values
+                .FirstOrDefault(o => o.AttackMethod && !o.IsRetired && o.Id != "org_orbitcilia");
+            Expect(organelle != null, "本项前置：需要一条非 org_orbitcilia 的 AttackMethod 未退役器官用于 gene_harmonic 对照");
+            if (organelle != null)
+            {
+                List<ComposeEngine.Core.HitEvent> harmonicEvents = CarrierCompiler.CompileFromRecipe(
+                    engine, organelle.Id, new[] { "gene_harmonic" }, world, seed: 2);
+                Expect(harmonicEvents.Count >= 1, "gene_harmonic 挂载后应至少产出 1 条 HitEvent");
+                if (harmonicEvents.Count >= 1)
+                {
+                    ComposeEngine.Core.HitEvent harmonicEvt = harmonicEvents[0];
+                    Expect(harmonicEvt.RadialRequested,
+                        $"gene_harmonic 挂在 {organelle.Id} 上（未配 SpreadModule）时，编译结果同样必须携带 " +
+                        "RadialRequested=true");
+                }
             }
         }
 

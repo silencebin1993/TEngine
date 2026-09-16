@@ -101,7 +101,7 @@ namespace GameLogic.MetabolicSlice.Combat
         /// 是绕鼠标方向左右裂，不是绕世界坐标轴裂。
         /// </summary>
         public static ProjectileRequest Build(HitEvent evt, float2 origin, float2 baseDir,
-            int index, int count, float scale, int shotId, uint jitterSeed)
+            int index, int count, float scale, int shotId)
         {
             float speedMul = evt.Speed > 0f ? evt.Speed : 1f;
             float speed = BaseSpeed * math.clamp(speedMul, 0.25f, 6f);
@@ -113,7 +113,7 @@ namespace GameLogic.MetabolicSlice.Combat
 
             float radius = BaseProjectileRadius * math.max(0.2f, scale);
 
-            float2 dir = FanDirection(baseDir, index, count, evt.SpreadAngle, jitterSeed);
+            float2 dir = FanDirection(baseDir, index, count, evt.SpreadAngle, evt.RadialRequested);
 
             var flags = SimProjectileFlags.None;
             float drag = 0f;
@@ -209,19 +209,29 @@ namespace GameLogic.MetabolicSlice.Combat
         }
 
         /// <summary>
-        /// 多发方向：以 <paramref name="baseDir"/> 为中轴，在 ±spread/2 内均分。
+        /// 多发方向：以 <paramref name="baseDir"/> 为中轴，在 ±spread/2 内确定性均分
+        /// （CP-REQ-012，M4-R00-02 队列③号项，合并此前全仓四套互不一致的扇形公式为这一个纯函数）。
         ///
-        /// count==1 且 spread&gt;0 时给一个**确定性**抖动（不是均分到中轴）——这样"扇散"对单发武器
-        /// 也是有意义的（散射精度），而不是只有多发才生效的死参数。用 shot 序号做种子，
-        /// 保证同一次开火重复调用（判定/表现/预览）拿到完全相同的方向。
+        /// - <paramref name="count"/>&lt;=1：严格沿中轴，不产生任何偏差——旧实现曾把
+        ///   <paramref name="spreadDeg"/>&gt;0 时的单发解释成"确定性抖动/精度散射"，与规格冲突
+        ///   （规格里散射精度是独立的 AccuracyJitter 字段，尚未实现，不能借用 SpreadAngle 顶替）。
+        /// - <paramref name="count"/>&gt;1 且 <paramref name="spreadDeg"/>&lt;=0：默认**同向发射**，
+        ///   除非 <paramref name="radialRequested"/> 为 true（即 <c>Scatterer</c> 声明过"我要环射"，
+        ///   见 <c>ComposeEngine.Core.HitEvent.RadialRequested</c>）——环射必须由基元显式声明，
+        ///   不能从"没配扇角"隐式反推，否则任何忘记配扇角的多发都会意外变成环形爆开。
+        /// - <paramref name="count"/>&gt;1 且 <paramref name="spreadDeg"/>&gt;0：在 ±half 内确定性均分。
         /// </summary>
-        public static float2 FanDirection(float2 baseDir, int index, int count, float spreadDeg, uint jitterSeed)
+        public static float2 FanDirection(float2 baseDir, int index, int count, float spreadDeg, bool radialRequested)
         {
             float2 n = math.normalizesafe(baseDir, new float2(0f, 1f));
+            if (count <= 1)
+            {
+                return n;
+            }
+
             if (spreadDeg <= 0f)
             {
-                // 无扇角的多发：退回环形均分（原地爆开式多发，如无 Spread 的 Scatterer）。
-                if (count <= 1)
+                if (!radialRequested)
                 {
                     return n;
                 }
@@ -230,14 +240,6 @@ namespace GameLogic.MetabolicSlice.Combat
             }
 
             float half = math.radians(spreadDeg) * 0.5f;
-            if (count <= 1)
-            {
-                uint h = jitterSeed * 2654435761u + 0x9E3779B9u;
-                h ^= h >> 15;
-                float t = (h & 0xFFFFu) / 65535f * 2f - 1f;
-                return Rotate(n, t * half);
-            }
-
             float u = (float)index / (count - 1);
             return Rotate(n, math.lerp(-half, half, u));
         }

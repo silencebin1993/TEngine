@@ -515,9 +515,10 @@ namespace GameLogic.Battle.Feedback
                 {
                     float phase = 2f * MathF.PI * h / segments;
                     // 与判定层 CombatBallistics.FanDirection 同一个函数——不是"同一个系数"，是同一份代码，
-                    // 因此不存在再次分叉的可能。SpreadAngle=0 时退化为环形均分（原地爆开式多发）。
+                    // 因此不存在再次分叉的可能。是否环射由 signal.RadialRequested 显式决定
+                    // （CP-REQ-012，M4-R00-02 队列③），不再从 SpreadAngle<=0 隐式反推。
                     float2 dir = CombatBallistics.FanDirection(signal.Direction, h, segments,
-                        signal.SpreadAngle, (uint)h);
+                        signal.SpreadAngle, signal.RadialRequested);
                     SpawnMarker(kind, fxOrigin, dir, phase, signal.Spin, signal.Orbit, radius, life, castColor);
                 }
             }

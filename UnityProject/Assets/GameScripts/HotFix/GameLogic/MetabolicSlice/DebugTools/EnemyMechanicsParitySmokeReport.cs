@@ -254,7 +254,7 @@ namespace GameLogic.MetabolicSlice.DebugTools
                 };
                 evt.Tags.Add("ReceptorMemory");
                 ProjectileRequest withMemory = CombatBallistics.Build(
-                    evt, float2.zero, new float2(1f, 0f), 0, 1, 1f, 1, 0u);
+                    evt, float2.zero, new float2(1f, 0f), 0, 1, 1f, 1);
 
                 var plain = new HitEvent
                 {
@@ -262,7 +262,7 @@ namespace GameLogic.MetabolicSlice.DebugTools
                     Shape = "Bolt", AttackPattern = ComposeEngine.Core.AttackPattern.Projectile,
                 };
                 ProjectileRequest noMemory = CombatBallistics.Build(
-                    plain, float2.zero, new float2(1f, 0f), 0, 1, 1f, 1, 0u);
+                    plain, float2.zero, new float2(1f, 0f), 0, 1, 1f, 1);
 
                 if ((withMemory.ApplyStatus & SimStatus.Marked) == 0)
                 {
