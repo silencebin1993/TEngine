@@ -109,6 +109,7 @@ namespace GameLogic.EditorTools
                 ValidateSharedCapabilityCatalog();
                 ValidateAllyDeathSignal();
                 ValidateHomecomingRealCombatExit();
+                ValidateWildOrganFieldPersistence();
             }
             catch (Exception e)
             {
@@ -4490,6 +4491,118 @@ namespace GameLogic.EditorTools
                 "完成改造后应摘掉 Stunned/Invulnerable，真实重入战斗调度");
 
             sim.End();
+        }
+
+        /// <summary>
+        /// M4-R00-02 队列⑤-21（M3-R04-WILD-FULL-CHAIN"死亡掉落缺失、存读档整段不存在"）：野生器官
+        /// 跨局持久化，范围刻意收窄为只覆盖 <see cref="WildOrganState.InField"/>（见
+        /// <see cref="WildOrganPersistence"/> 类型注释——Carried/Installed 按 SimEntityId 记账，
+        /// 读档后无法安全重建归属，是与队列20号相同的根因）。① IO 层往返/损坏/版本回归，
+        /// 全程备份/恢复真实存档文件；② 注册表层往返——两个独立 `WildOrganRegistry` 实例，
+        /// 第一个 Drop 一件 InField + 拾取一件到 Carried 后 OnExit，第二个 OnEnter 应只复原
+        /// InField 那一件，证明范围边界真的生效而不是误存了 Carried。
+        /// </summary>
+        private static void ValidateWildOrganFieldPersistence()
+        {
+            Line("\n[48] 野生器官地面战利品存读档（M4-R00-02 队列⑤-21，范围仅 InField）");
+
+            string path = WildOrganPersistence.FilePath;
+            bool hadBackup = File.Exists(path);
+            string backup = hadBackup ? File.ReadAllText(path) : null;
+
+            try
+            {
+                // ── 1. IO 层往返/损坏/版本回归 ──
+                var written = new List<WildOrganFieldSaveEntry>
+                {
+                    new WildOrganFieldSaveEntry
+                    {
+                        SourceId = "org_phago", Kind = (int)BlueprintSourceKind.Organelle,
+                        PositionX = 12.5f, PositionY = -3.25f, Contamination = 0.4f,
+                    },
+                };
+                WildOrganPersistence.Save(written);
+                WildOrganFieldHistory loaded = WildOrganPersistence.Load();
+                Expect(loaded.Entries.Count == 1 && loaded.Entries[0].SourceId == "org_phago" &&
+                       math.abs(loaded.Entries[0].PositionX - 12.5f) < 0.001f &&
+                       math.abs(loaded.Entries[0].PositionY - (-3.25f)) < 0.001f &&
+                       math.abs(loaded.Entries[0].Contamination - 0.4f) < 0.001f,
+                    "IO 层往返后字段应一致");
+
+                File.WriteAllText(path, "{not json");
+                WildOrganFieldHistory corrupted = WildOrganPersistence.Load();
+                Expect(corrupted.Entries.Count == 0, "损坏 JSON 应安全降级为空场景，不抛异常");
+
+                File.WriteAllText(path, "{\"Version\":0,\"FieldEntries\":[]}");
+                WildOrganFieldHistory legacy = WildOrganPersistence.Load();
+                Expect(legacy.Entries.Count == 0, "不认识的存档版本应安全降级为空场景，不抛异常");
+
+                // ── 2. 注册表层往返：Carried 不应被误存 ──
+                // 复用 OnEnter：此刻磁盘上仍是上面第①步留下的"Version:0"旧存档，Load() 已确认
+                // 会安全降级为空场景，等价于一次干净的 OnEnter，不需要额外清场。
+                var writer = new WildOrganRegistry();
+                writer.OnEnter();
+
+                string fieldInstanceId = writer.DropInField("org_phago", BlueprintSourceKind.Organelle, new float2(5f, 5f));
+                string carriedSourceId = OrganelleCatalog.All.Values.FirstOrDefault(o => !o.IsRetired && o.Id != "org_phago")?.Id ?? "org_phago";
+                string carriedInstanceId = writer.DropInField(carriedSourceId, BlueprintSourceKind.Organelle, new float2(0f, 0f));
+                Expect(!string.IsNullOrEmpty(fieldInstanceId) && !string.IsNullOrEmpty(carriedInstanceId),
+                    "本项前置：两件测试用野生器官都应能放置成功");
+
+                var sim2 = new SimBridge();
+                SimConfig cfg2 = SimConfig.Default;
+                cfg2.UnitCapacity = 8;
+                cfg2.ArenaHalfExtent = 30f;
+                sim2.Begin(cfg2, Array.Empty<BehaviorArchetype>());
+                writer.Bind(sim2, null);
+                try
+                {
+                    sim2.Spawn(new SpawnRequest
+                    {
+                        Position = new float2(0f, 0f), Health = 10f, Radius = 0.5f, MaxSpeed = 0f,
+                        ArchetypeId = 0, Faction = SimFaction.PlayerMinion, IntentSource = IntentSource.AI, LogicId = 9820,
+                    });
+                    sim2.OnUpdate(1f / 60f);
+                    SimEntityId picker = FindEntityId(sim2.Snapshot, 9820, out _);
+                    Expect(picker.IsValid, "本项前置：拾取者应成功落地");
+
+                    WildOrganPickupResult pickupResult = writer.TryPickup(picker, carriedInstanceId);
+                    Expect(pickupResult == WildOrganPickupResult.Ok, $"本项前置：拾取应成功（实际 {pickupResult}）");
+                }
+                finally
+                {
+                    sim2.End();
+                }
+
+                writer.OnExit();
+
+                var reader = new WildOrganRegistry();
+                reader.OnEnter();
+                var reloadedFieldInstances = reader.AllInstances.Where(i => i.State == WildOrganState.InField).ToList();
+                Expect(reloadedFieldInstances.Count == 1,
+                    $"重新 OnEnter 后应只复原 1 件 InField 战利品（实际 {reloadedFieldInstances.Count}）——" +
+                    "Carried 的那件不应被误存/误复原");
+                if (reloadedFieldInstances.Count == 1)
+                {
+                    WildOrganInstance restored = reloadedFieldInstances[0];
+                    Expect(restored.SourceId == "org_phago" &&
+                           math.abs(restored.FieldPosition.x - 5f) < 0.001f &&
+                           math.abs(restored.FieldPosition.y - 5f) < 0.001f,
+                        "复原的 InField 实物应保留原 SourceId 与坐标");
+                }
+                reader.OnExit();
+            }
+            finally
+            {
+                if (hadBackup)
+                {
+                    File.WriteAllText(path, backup);
+                }
+                else
+                {
+                    File.Delete(path);
+                }
+            }
         }
 
         private static bool PathClearsAllObstacles(List<float2> path, List<ObstacleSpec> obstacles, float clearance)

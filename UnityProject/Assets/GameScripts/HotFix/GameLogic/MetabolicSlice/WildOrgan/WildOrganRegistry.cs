@@ -86,6 +86,10 @@ namespace GameLogic.MetabolicSlice.WildOrgan
         /// 统一退订，写法照抄 <see cref="Command.Formation.FormationMovementDriver"/> 的绑定范式。</summary>
         private SignalScope _scope;
 
+        /// <summary>全部实物的只读视图，同 <see cref="Blueprint.BlueprintRegistry.AllEntries"/> 同一范式——
+        /// 存读档/未来 UI 枚举都走这一个入口，不额外开小口子。</summary>
+        public IReadOnlyCollection<WildOrganInstance> AllInstances => _instances.Values;
+
         public void Bind(SimBridge sim, UnitLoadoutRegistry unitLoadouts)
         {
             _sim = sim;
@@ -100,12 +104,47 @@ namespace GameLogic.MetabolicSlice.WildOrgan
             _nextInstanceSeq = 1;
             _scope = new SignalScope();
             _scope.On<AllyDeathSignal>(OnAllyDeath);
+
+            // M4-R00-02 队列⑤-21：只复原 InField 战利品，理由见 WildOrganPersistence 类型注释
+            // （Carried/Installed 按 SimEntityId 记账，读档后无法安全重建归属）。
+            WildOrganFieldHistory history = WildOrganPersistence.Load();
+            foreach (WildOrganFieldSaveEntry entry in history.Entries)
+            {
+                BlueprintSourceKind kind = entry.Kind == (int)BlueprintSourceKind.Gene
+                    ? BlueprintSourceKind.Gene
+                    : BlueprintSourceKind.Organelle;
+                string instanceId = DropInField(entry.SourceId, kind, new float2(entry.PositionX, entry.PositionY));
+                if (instanceId != null && _instances.TryGetValue(instanceId, out WildOrganInstance instance))
+                {
+                    instance.Contamination = Clamp01(entry.Contamination);
+                }
+            }
         }
 
         public override void OnExit()
         {
             _scope?.Dispose();
             _scope = null;
+
+            var fieldEntries = new List<WildOrganFieldSaveEntry>();
+            foreach (WildOrganInstance instance in _instances.Values)
+            {
+                if (instance.State != WildOrganState.InField)
+                {
+                    continue;
+                }
+
+                fieldEntries.Add(new WildOrganFieldSaveEntry
+                {
+                    SourceId = instance.SourceId,
+                    Kind = (int)instance.Kind,
+                    PositionX = instance.FieldPosition.x,
+                    PositionY = instance.FieldPosition.y,
+                    Contamination = instance.Contamination,
+                });
+            }
+
+            WildOrganPersistence.Save(fieldEntries);
         }
 
         private void OnAllyDeath(AllyDeathSignal signal)
