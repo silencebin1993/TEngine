@@ -129,9 +129,11 @@ namespace GameLogic.MetabolicSlice.Lineage
         public bool IsRetrofitting(SimEntityId entityId) => _inProgress.ContainsKey(entityId);
 
         /// <summary>校验位置/交战/携带物/网络，锁定目标版本与成本，扣费。全部通过才返回
-        /// <see cref="RetrofitRejectReason.None"/> 并把该实体标记为"改造中"（暂时移出战斗的最小
-        /// 可用形态：拒绝对同一实体重复开票；具体从战斗调度里摘除留给后续故事接线，见类型注释）。
-        /// 任一校验失败 Reject-to-Safe：不扣费、不产生任何副作用。</summary>
+        /// <see cref="RetrofitRejectReason.None"/> 并把该实体标记为"改造中"——M4-R00-02 队列⑤-21
+        /// （M3-R03-RETURN-REAL-COMBAT-EXIT）起真的从战斗调度摘除：叠加 <see cref="SimStatus.Stunned"/>
+        /// （AI/命令双路径当帧只出 Idle 意图，不再继续自动开火/移动）+ <see cref="SimStatus.Invulnerable"/>
+        /// （<c>JobDamage</c> 跳过伤害结算，不再"原地挨打"），<see cref="CompleteRetrofit"/>/
+        /// <see cref="CancelRetrofit"/> 对称摘掉。任一校验失败 Reject-to-Safe：不扣费、不产生任何副作用。</summary>
         public RetrofitRejectReason TryBeginRetrofit(SimEntityId entityId)
         {
             if (!entityId.IsValid)
@@ -191,6 +193,8 @@ namespace GameLogic.MetabolicSlice.Lineage
                 Cost = cost,
             };
 
+            SetCombatExitStatus(entityId, exiting: true);
+
             return RetrofitRejectReason.None;
         }
 
@@ -205,7 +209,21 @@ namespace GameLogic.MetabolicSlice.Lineage
 
             _inProgress.Remove(entityId);
             _biomass?.Refund(ticket.LineageId, ticket.Cost);
+            SetCombatExitStatus(entityId, exiting: false);
             return true;
+        }
+
+        /// <summary>M4-R00-02 队列⑤-21：战斗调度摘除/重入的唯一写口——<see cref="SimBridge.TryResolveUnitIndex"/>
+        /// 查不到（已死亡/未落地）时安全 no-op，不是失败：摘除的对象已经不在战斗里，重入的对象
+        /// 死活都不需要再改状态。</summary>
+        private void SetCombatExitStatus(SimEntityId entityId, bool exiting)
+        {
+            if (_sim == null || !_sim.TryResolveUnitIndex(entityId, out int unitIndex))
+            {
+                return;
+            }
+
+            _sim.ApplyStatusUnit(unitIndex, SimStatus.Stunned | SimStatus.Invulnerable, add: exiting);
         }
 
         /// <summary>完成：把绑定原地替换成锁定版本，并用新版本的主器官+有序基因重挂
@@ -222,6 +240,7 @@ namespace GameLogic.MetabolicSlice.Lineage
             }
 
             _inProgress.Remove(entityId);
+            SetCombatExitStatus(entityId, exiting: false);
 
             _chambers?.UpdateBinding(entityId, ticket.LineageId, ticket.TemplateName, ticket.LockedVersion);
 

@@ -108,6 +108,7 @@ namespace GameLogic.EditorTools
                 ValidateFormationCommandPriorityGuard();
                 ValidateSharedCapabilityCatalog();
                 ValidateAllyDeathSignal();
+                ValidateHomecomingRealCombatExit();
             }
             catch (Exception e)
             {
@@ -4365,6 +4366,130 @@ namespace GameLogic.EditorTools
                 e2eSim.End();
                 hub.Exit();
             }
+        }
+
+        /// <summary>
+        /// M4-R00-02 队列⑤-21（M3-R03-RETURN-REAL-COMBAT-EXIT）：回巢改造此前"只标记字典、
+        /// 从未真的从战斗调度摘除"——类型注释原文自陈"具体从战斗调度里摘除留给后续故事接线"。
+        /// 本项验证开票/取消/完成三个转折点真的会给个体叠加/摘除 Stunned+Invulnerable，
+        /// 而不是只改一个内存字典。复用 [30] 的最小可行 fixture，只加战斗状态断言，
+        /// 不重复 [30] 已经覆盖的各条 RejectReason 分支。
+        /// </summary>
+        private static void ValidateHomecomingRealCombatExit()
+        {
+            Line("\n[47] 回巢改造真实战斗摘除/重入（M4-R00-02 队列⑤-21，M3-R03-RETURN-REAL-COMBAT-EXIT）");
+
+            OrganelleDef organelle = OrganelleCatalog.All.Values.FirstOrDefault(o => o.AttackMethod && !o.IsRetired);
+            List<string> geneIds = GeneCatalog.AllGeneIds.Take(2).ToList();
+            Expect(organelle != null, "本项前置：OrganelleCatalog 应至少有一条 AttackMethod 未退役器官");
+            Expect(geneIds.Count == 2, "本项前置：GeneCatalog 应至少有两条基因");
+            if (organelle == null || geneIds.Count < 2)
+            {
+                return;
+            }
+
+            var blueprints = new BlueprintRegistry();
+            blueprints.Resolve(organelle.Id, BlueprintSourceKind.Organelle, 1f, 0f);
+            foreach (string g in geneIds)
+            {
+                blueprints.Resolve(g, BlueprintSourceKind.Gene, 1f, 0f);
+            }
+
+            var lineages = new LineageRegistry();
+            lineages.Bind(blueprints);
+            PhenotypeTemplateVersion v1 = lineages.CommitTemplate("lineage-exit", "assault", organelle.Id, geneIds, "keep_distance", out _);
+            Expect(v1 != null, "本项前置：合法配方提交应成功产生版本 1");
+
+            var ledger = new BiomassLedger();
+            ledger.OnEnter();
+            ledger.Deposit("lineage-exit", 999f);
+            var chamber = new GerminationChamberRegistry();
+            chamber.OnEnter();
+
+            var sim = new SimBridge();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 16;
+            cfg.ArenaHalfExtent = 60f;
+            var archetypes = new[]
+            {
+                new BehaviorArchetype
+                {
+                    Kind = BehaviorKind.Stationary, Accel = 0f, TurnRate = 0f, AggroRange = 0f,
+                    AttackRange = 0.5f, AttackCooldown = 99f, AttackDamage = 0f,
+                    Separation = 0f, ChargeSpeedMul = 1f,
+                },
+            };
+            sim.Begin(cfg, archetypes);
+
+            var unitLoadouts = new UnitLoadoutRegistry();
+            var fakeSource = new FakePlayerLoadoutSource();
+            unitLoadouts.Bind(sim, fakeSource);
+            unitLoadouts.RegisterPlayerBody(sim.ControlledUnitId);
+
+            chamber.Bind(sim, lineages, ledger, unitLoadouts);
+
+            var retrofit = new HomecomingRetrofitService();
+            retrofit.OnEnter();
+            retrofit.Bind(sim, lineages, ledger, unitLoadouts, chamber);
+
+            const int NearLogicId = 9810;
+            float2 playerPos = sim.PlayerPosition;
+            sim.Spawn(new SpawnRequest
+            {
+                Position = playerPos + new float2(2f, 0f), Health = 40f, Radius = 0.8f, MaxSpeed = 0f,
+                ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                IntentSource = IntentSource.AI, LogicId = NearLogicId, ExcludeFromControl = true,
+            });
+            sim.OnUpdate(1f / 60f);
+            SimSnapshot snap = sim.Snapshot;
+            SimEntityId near = FindEntityId(snap, NearLogicId, out int nearIdx);
+            Expect(near.IsValid, "本项前置：测试个体应成功落地");
+            if (!near.IsValid)
+            {
+                sim.End();
+                return;
+            }
+
+            chamber.UpdateBinding(near, "lineage-exit", "assault", v1);
+            unitLoadouts.RegisterExplicit(near, new List<UnitLoadoutOrgan> { new UnitLoadoutOrgan(v1.OrganelleId, LoadoutAction.Primary) });
+            PhenotypeTemplateVersion v2 = lineages.CommitTemplate("lineage-exit", "assault", organelle.Id, geneIds, "escort", out _);
+            Expect(v2 != null && v2.Version == 2, "本项前置：第二次提交应产生版本 2");
+
+            Expect((sim.Snapshot.Status[nearIdx] & (uint)SimStatus.Stunned) == 0u &&
+                   (sim.Snapshot.Status[nearIdx] & (uint)SimStatus.Invulnerable) == 0u,
+                "本项前置：改造开始前不应带有 Stunned/Invulnerable");
+
+            HomecomingRetrofitService.RetrofitRejectReason reason = retrofit.TryBeginRetrofit(near);
+            Expect(reason == HomecomingRetrofitService.RetrofitRejectReason.None,
+                $"本项前置：满足条件时开票应成功（实际 {reason}）");
+
+            sim.OnUpdate(1f / 60f); // ApplyStatusUnit 是排队命令，推进一帧让它真正落到快照里
+            SimSnapshot snapDuring = sim.Snapshot;
+            Expect((snapDuring.Status[nearIdx] & (uint)SimStatus.Stunned) != 0u,
+                "开票成功后应叠加 Stunned——AI/命令双路径当帧只出 Idle 意图，不再继续自动开火/移动");
+            Expect((snapDuring.Status[nearIdx] & (uint)SimStatus.Invulnerable) != 0u,
+                "开票成功后应叠加 Invulnerable——JobDamage 跳过伤害结算，不再原地挨打");
+
+            bool cancelled = retrofit.CancelRetrofit(near);
+            Expect(cancelled, "本项前置：取消应成功");
+            sim.OnUpdate(1f / 60f);
+            SimSnapshot snapAfterCancel = sim.Snapshot;
+            Expect((snapAfterCancel.Status[nearIdx] & (uint)SimStatus.Stunned) == 0u &&
+                   (snapAfterCancel.Status[nearIdx] & (uint)SimStatus.Invulnerable) == 0u,
+                "取消改造后应摘掉 Stunned/Invulnerable，真实重入战斗调度");
+
+            reason = retrofit.TryBeginRetrofit(near);
+            Expect(reason == HomecomingRetrofitService.RetrofitRejectReason.None, "本项前置：重新开票应再次成功");
+            sim.OnUpdate(1f / 60f);
+            bool completed = retrofit.CompleteRetrofit(near);
+            Expect(completed, "本项前置：完成改造应成功");
+            sim.OnUpdate(1f / 60f);
+            SimSnapshot snapAfterComplete = sim.Snapshot;
+            Expect((snapAfterComplete.Status[nearIdx] & (uint)SimStatus.Stunned) == 0u &&
+                   (snapAfterComplete.Status[nearIdx] & (uint)SimStatus.Invulnerable) == 0u,
+                "完成改造后应摘掉 Stunned/Invulnerable，真实重入战斗调度");
+
+            sim.End();
         }
 
         private static bool PathClearsAllObstacles(List<float2> path, List<ObstacleSpec> obstacles, float clearance)
