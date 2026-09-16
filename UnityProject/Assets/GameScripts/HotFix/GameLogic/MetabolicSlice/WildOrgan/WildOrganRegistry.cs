@@ -45,11 +45,10 @@ namespace GameLogic.MetabolicSlice.WildOrgan
     /// 装配重建流程），本类型从未引用、从未调用 <see cref="LineageRegistry"/>/
     /// <see cref="PhenotypeTemplateVersion"/> 的任何写入口（验收 1）。
     ///
-    /// ── 身体死亡 ──
-    /// <see cref="HandleBodyDeath"/> 是真实入口（GDD §6.7"身体死亡时通常丢失"），但尚未接到任何
-    /// 死亡信号——与 M3-06"暂时移出战斗"同等风险取舍：本仓现有 <c>KillSignal</c> 只带 <c>LogicId</c>
-    /// 且语义是"击杀"而非"友方个体阵亡"，贸然订阅需要新增信号或改动战斗结算路径，风险收益比不划算，
-    /// 留给后续故事按需接线，这里保证调用后行为正确。
+    /// ── 身体死亡 ──（M4-R00-02 队列⑤-21：<see cref="HandleBodyDeath"/> 此前是"真实入口但从未
+    /// 被调用"的技术债，同 <see cref="Command.Formation.FormationRegistry"/> 的取舍。现已改为订阅
+    /// 新增的 <see cref="AllyDeathSignal"/>（由 <c>CellDevourSystem.ResolveDeaths</c> 在
+    /// <see cref="SimFaction.PlayerMinion"/> 死亡分支真实广播），生产环境真的会调用。
     /// </summary>
     public sealed class WildOrganRegistry : GameModuleBase
     {
@@ -83,6 +82,10 @@ namespace GameLogic.MetabolicSlice.WildOrgan
         private SimBridge _sim;
         private UnitLoadoutRegistry _unitLoadouts;
 
+        /// <summary>M4-R00-02 队列⑤-21：<see cref="AllyDeathSignal"/> 订阅。用 <see cref="SignalScope"/>
+        /// 统一退订，写法照抄 <see cref="Command.Formation.FormationMovementDriver"/> 的绑定范式。</summary>
+        private SignalScope _scope;
+
         public void Bind(SimBridge sim, UnitLoadoutRegistry unitLoadouts)
         {
             _sim = sim;
@@ -95,6 +98,19 @@ namespace GameLogic.MetabolicSlice.WildOrgan
             _carried.Clear();
             _installed.Clear();
             _nextInstanceSeq = 1;
+            _scope = new SignalScope();
+            _scope.On<AllyDeathSignal>(OnAllyDeath);
+        }
+
+        public override void OnExit()
+        {
+            _scope?.Dispose();
+            _scope = null;
+        }
+
+        private void OnAllyDeath(AllyDeathSignal signal)
+        {
+            HandleBodyDeath(signal.EntityId);
         }
 
         public WildOrganInstance GetInstance(string instanceId)

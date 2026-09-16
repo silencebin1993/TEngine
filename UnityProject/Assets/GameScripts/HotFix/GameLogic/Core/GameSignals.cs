@@ -37,6 +37,18 @@ namespace GameLogic.Core
         public bool WasBoss;
     }
 
+    /// <summary>
+    /// M4-R00-02 队列⑤-19/21：友方个体（<see cref="SimFaction.PlayerMinion"/>）真实阵亡——
+    /// 与 <see cref="KillSignal"/> 刻意区分：那条信号的语义是"击杀"（谁被玩家打死了，用于奖励/
+    /// 图鉴/卡牌 OnKill），这条信号的语义是"我方个体没了"（用于跨系统清理自己持有的该实体状态，
+    /// 如编队成员、临时器官安装记录）。只带 <see cref="EntityId"/>：消费方各自按需查自己的记录，
+    /// 不在这里塞任何一个消费方专属的字段。
+    /// </summary>
+    public struct AllyDeathSignal
+    {
+        public SimEntityId EntityId;
+    }
+
     /// <summary>玩家造成伤害命中。</summary>
     public struct HitSignal
     {

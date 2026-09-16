@@ -8,11 +8,10 @@ namespace GameLogic.Command.Formation
     /// M4-01：编队领域模型的注册表。与 <see cref="GameLogic.MetabolicSlice.Lineage.LineageRegistry"/>
     /// 同一范式——纯内存 <see cref="Dictionary{TKey,TValue}"/>，无持久化层。
     ///
-    /// ── 死亡信号现状（技术债，先例见 <c>WildOrganRegistry.HandleBodyDeath</c>）──
-    /// <see cref="HandleMemberDeath"/> 是真实入口，行为完全正确（含清理 <see cref="Formation.DetachedMembers"/>
-    /// 与跨编队遍历），但本 story 未接任何死亡信号——本仓现有 <c>DeathEvent</c>/<c>KillSignal</c>
-    /// 语义都是"击杀"而非"友方个体阵亡"，贸然订阅需要新增信号或改动战斗结算路径，风险收益比不划算，
-    /// 留给后续故事（M4-02/M4-05 附近）按需接线。
+    /// ── 死亡信号 ──（M4-R00-02 队列⑤-19：<see cref="HandleMemberDeath"/> 此前是"真实入口但从未
+    /// 被调用"的技术债——本仓现有 <c>KillSignal</c> 语义是"击杀"而非"友方个体阵亡"。现已改为订阅
+    /// 新增的 <see cref="AllyDeathSignal"/>（由 <c>CellDevourSystem.ResolveDeaths</c> 在
+    /// <see cref="BinGames.Sim.SimFaction.PlayerMinion"/> 死亡分支真实广播），生产环境真的会调用。
     /// </summary>
     public sealed class FormationRegistry : GameModuleBase
     {
@@ -21,7 +20,30 @@ namespace GameLogic.Command.Formation
         private readonly Dictionary<string, Formation> _formations = new Dictionary<string, Formation>();
         private int _nextFormationSeq = 1;
 
+        /// <summary>M4-R00-02 队列⑤-19：<see cref="AllyDeathSignal"/> 订阅。用 <see cref="SignalScope"/>
+        /// 统一退订，写法照抄 <see cref="Command.Formation.FormationMovementDriver"/> 的绑定范式。</summary>
+        private SignalScope _scope;
+
         public IReadOnlyCollection<Formation> AllFormations => _formations.Values;
+
+        public override void OnEnter()
+        {
+            base.OnEnter();
+            _scope = new SignalScope();
+            _scope.On<AllyDeathSignal>(OnAllyDeath);
+        }
+
+        public override void OnExit()
+        {
+            base.OnExit();
+            _scope?.Dispose();
+            _scope = null;
+        }
+
+        private void OnAllyDeath(AllyDeathSignal signal)
+        {
+            HandleMemberDeath(signal.EntityId);
+        }
 
         public Formation CreateFormation()
         {

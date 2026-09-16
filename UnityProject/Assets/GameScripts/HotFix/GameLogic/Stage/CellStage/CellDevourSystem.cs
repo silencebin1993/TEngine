@@ -273,6 +273,9 @@ namespace GameLogic.Stage.CellStage
                 {
                     // 附属体死亡（战损或自然消亡）：归还 MinionCap 配额，不结算奖励。
                     _minions?.Release();
+                    // M4-R00-02 队列⑤-19/21：广播友方个体真实阵亡，供 FormationRegistry/
+                    // WildOrganRegistry 等各自清理自己持有的该实体状态（编队成员/临时器官安装）。
+                    Signals.Publish(new AllyDeathSignal { EntityId = d.EntityId });
                     continue;
                 }
 

@@ -2178,6 +2178,7 @@ namespace BinGames.Sim
             {
                 _deathEvents[_deathCount++] = new DeathEvent
                 {
+                    EntityId = _entityId[idx],
                     LogicId = _logicId[idx],
                     ArchetypeId = _archetypeId[idx],
                     Position = _position[idx],
@@ -2371,6 +2372,7 @@ namespace BinGames.Sim
             {
                 _deathEvents[_deathCount++] = new DeathEvent
                 {
+                    EntityId = _entityId[idx],
                     LogicId = _logicId[idx],
                     ArchetypeId = _archetypeId[idx],
                     Position = _position[idx],

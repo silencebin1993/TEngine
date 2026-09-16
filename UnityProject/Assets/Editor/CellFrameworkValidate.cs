@@ -107,6 +107,7 @@ namespace GameLogic.EditorTools
                 ValidateFormationAnchorLeaderPriority();
                 ValidateFormationCommandPriorityGuard();
                 ValidateSharedCapabilityCatalog();
+                ValidateAllyDeathSignal();
             }
             catch (Exception e)
             {
@@ -4220,6 +4221,150 @@ namespace GameLogic.EditorTools
                 "抽查：攻击应为已实现");
             Expect(SharedCapabilityCatalog.StatusOf(SharedCapability.Repair) == SharedCapabilityStatus.NotImplemented,
                 "抽查：修复应为不存在（2026-09-16 推翻旧审计'已落地5项'里的判断）");
+        }
+
+        /// <summary>
+        /// M4-R00-02 队列⑤-19/21（共享死亡信号）：<see cref="FormationRegistry.HandleMemberDeath"/>/
+        /// <see cref="WildOrganRegistry.HandleBodyDeath"/> 此前都是"逻辑完全正确但生产环境从未调用"
+        /// 的技术债——本仓现有 <c>KillSignal</c> 语义是"击杀"而非"友方个体阵亡"。本项验证两层：
+        /// ① 内核 <see cref="DeathEvent"/> 新增的 <see cref="DeathEvent.EntityId"/> 字段在伤害致死
+        /// 与吞噬清除两条路径都正确携带死者稳定身份；② 生产入口 E2E——真的通过
+        /// <c>CellDevourSystem.ResolveDeaths</c> 杀死一个编队成员，确认它会广播新增的
+        /// <see cref="AllyDeathSignal"/>，并且 FormationRegistry/WildOrganRegistry 的订阅会真的
+        /// 调用到那两个此前"写对了但没人叫"的方法。
+        /// </summary>
+        private static void ValidateAllyDeathSignal()
+        {
+            Line("\n[46] 友方个体阵亡信号闭环（M4-R00-02 队列⑤-19/21，共享死亡信号）");
+
+            // ── 1. 内核层：DeathEvent.EntityId 在伤害致死与吞噬清除两条路径都应正确携带死者稳定身份 ──
+            var kernelWorld = new SimWorld();
+            SimConfig kernelCfg = SimConfig.Default;
+            kernelCfg.UnitCapacity = 16;
+            kernelWorld.Initialize(kernelCfg);
+            kernelWorld.SetArchetypes(DataRegistry.Instance.ArchetypeArray());
+
+            SimCommandBuffer kernelCmds = default;
+            kernelCmds.Initialize(Unity.Collections.Allocator.Persistent, 16);
+            try
+            {
+                kernelWorld.SetPlayerPosition(float2.zero);
+                int idxDamage = kernelWorld.SpawnUnit(new SpawnRequest
+                {
+                    Position = new float2(5f, 0f), Health = 10f, Radius = 0.5f,
+                    MaxSpeed = 0f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion, LogicId = 8801,
+                });
+                int idxDevour = kernelWorld.SpawnUnit(new SpawnRequest
+                {
+                    Position = new float2(-5f, 0f), Health = 10f, Radius = 0.5f,
+                    MaxSpeed = 0f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion, LogicId = 8802,
+                });
+                kernelWorld.TryGetEntityId(idxDamage, out SimEntityId expectedDamageId);
+                kernelWorld.TryGetEntityId(idxDevour, out SimEntityId expectedDevourId);
+                Expect(expectedDamageId.IsValid && expectedDevourId.IsValid, "本项前置：两具测试个体都应有有效 EntityId");
+
+                kernelCmds.Damage(new DamageRequest
+                {
+                    Origin = new float2(5f, 0f), Radius = 1f,
+                    TargetIndex = SimConst.InvalidIndex, Amount = 1000f,
+                    TargetFaction = SimFaction.PlayerMinion,
+                });
+                kernelCmds.SetPlayerIntent(PlayerIntent.Idle);
+                kernelWorld.Step(1f / 60f, ref kernelCmds);
+                kernelWorld.KillUnit(idxDevour, 0);
+
+                SimSnapshot kernelSnap = kernelWorld.GetSnapshot();
+                Expect(kernelSnap.DeathCount == 2, $"应产生2条死亡事件（实际 {kernelSnap.DeathCount}）");
+
+                bool foundDamageId = false, foundDevourId = false;
+                for (int i = 0; i < kernelSnap.DeathCount; i++)
+                {
+                    DeathEvent d = kernelSnap.Deaths[i];
+                    if (d.LogicId == 8801)
+                    {
+                        Expect(d.EntityId == expectedDamageId,
+                            $"伤害致死的 DeathEvent.EntityId 应等于死者稳定身份（实际 {d.EntityId.Value} 期望 {expectedDamageId.Value}）");
+                        foundDamageId = true;
+                    }
+                    else if (d.LogicId == 8802)
+                    {
+                        Expect(d.EntityId == expectedDevourId,
+                            $"吞噬清除的 DeathEvent.EntityId 应等于死者稳定身份（实际 {d.EntityId.Value} 期望 {expectedDevourId.Value}）");
+                        foundDevourId = true;
+                    }
+                }
+                Expect(foundDamageId, "应找到伤害致死事件");
+                Expect(foundDevourId, "应找到吞噬致死事件");
+            }
+            finally
+            {
+                kernelCmds.Dispose();
+                kernelWorld.Dispose();
+            }
+
+            // ── 2. 生产入口 E2E：CellDevourSystem 处理真实死亡事件时应广播 AllyDeathSignal，
+            //    FormationRegistry/WildOrganRegistry 订阅后应真的调用既有的 HandleMemberDeath/
+            //    HandleBodyDeath——不是手动 Publish 信号验证订阅存在，是真的杀死一个单位。
+            var hub = new ModuleHub();
+            var e2eSim = hub.Register(new SimBridge());
+            var e2eFormations = hub.Register(new FormationRegistry());
+            var e2eWildOrgans = hub.Register(new WildOrganRegistry());
+            var e2eDevour = hub.Register(new CellDevourSystem());
+            var e2eLoadouts = new UnitLoadoutRegistry();
+            e2eDevour.Bind(e2eSim, null, null, null, null, null, null, null);
+            e2eWildOrgans.Bind(e2eSim, e2eLoadouts);
+            hub.Enter();
+
+            SimConfig e2eCfg = SimConfig.Default;
+            e2eCfg.UnitCapacity = 16;
+            e2eCfg.ArenaHalfExtent = 60f;
+            e2eSim.Begin(e2eCfg, Array.Empty<BehaviorArchetype>());
+
+            try
+            {
+                e2eSim.Spawn(new SpawnRequest
+                {
+                    Position = new float2(0f, 0f), Health = 10f, Radius = 0.5f, MaxSpeed = 0f,
+                    ArchetypeId = 0, Faction = SimFaction.PlayerMinion, IntentSource = IntentSource.AI, LogicId = 8901,
+                });
+                e2eSim.OnUpdate(1f / 60f);
+                SimSnapshot e2eSnap = e2eSim.Snapshot;
+                SimEntityId memberId = FindEntityId(e2eSnap, 8901, out int memberIdx);
+                Expect(memberId.IsValid, "本项前置：测试个体应落地");
+
+                Formation e2eFormation = e2eFormations.CreateFormation();
+                e2eFormation.AddMember(memberId);
+                Expect(e2eFormation.IsMember(memberId), "本项前置：测试个体应已加入编队");
+
+                e2eLoadouts.Bind(e2eSim, null);
+                e2eLoadouts.RegisterExplicit(memberId, Array.Empty<UnitLoadoutOrgan>());
+                float2 dropPosition = e2eSnap.Position[memberIdx];
+                string dropInstanceId = e2eWildOrgans.DropInField("org_phago", BlueprintSourceKind.Organelle, dropPosition);
+                Expect(!string.IsNullOrEmpty(dropInstanceId), "本项前置：应能在场上放置一件测试用野生器官");
+
+                WildOrganPickupResult pickupResult = e2eWildOrgans.TryPickup(memberId, dropInstanceId);
+                Expect(pickupResult == WildOrganPickupResult.Ok, $"本项前置：测试个体应能拾取测试器官（实际 {pickupResult}）");
+
+                WildOrganInstallResult installResult = e2eWildOrgans.TryInstallTemporary(memberId, dropInstanceId);
+                Expect(installResult == WildOrganInstallResult.Ok, $"本项前置：测试个体应能装上临时器官（实际 {installResult}）");
+                Expect(e2eWildOrgans.TryGetInstalled(memberId, out _), "本项前置：应能查到刚装上的临时器官");
+
+                e2eSim.DamageUnit(memberIdx, 9999f);
+                hub.Update(1f / 60f);
+                hub.Update(1f / 60f);
+
+                Expect(!e2eFormation.IsMember(memberId),
+                    "友方个体真实死亡后，FormationRegistry 应通过 AllyDeathSignal 真的调用 " +
+                    "HandleMemberDeath 把它从编队移除（此前这条生产路径从未被调用过）");
+                Expect(!e2eWildOrgans.TryGetInstalled(memberId, out _),
+                    "友方个体真实死亡后，WildOrganRegistry 应通过 AllyDeathSignal 真的调用 " +
+                    "HandleBodyDeath 清掉临时器官安装记录（此前这条生产路径从未被调用过）");
+            }
+            finally
+            {
+                e2eSim.End();
+                hub.Exit();
+            }
         }
 
         private static bool PathClearsAllObstacles(List<float2> path, List<ObstacleSpec> obstacles, float clearance)

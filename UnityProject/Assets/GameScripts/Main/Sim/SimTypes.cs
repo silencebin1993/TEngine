@@ -767,6 +767,9 @@ namespace BinGames.Sim
     /// </summary>
     public struct DeathEvent
     {
+        /// <summary>死者的稳定身份。M4-R00-02 队列⑤-19/21：热更层需要靠它反查具体是哪个编队成员/
+        /// 哪具挂载了临时器官的身体死了——LogicId 只是配置表 id，同一 id 可能对应场上多具个体。</summary>
+        public SimEntityId EntityId;
         public int LogicId;
         public int ArchetypeId;
         public float2 Position;
