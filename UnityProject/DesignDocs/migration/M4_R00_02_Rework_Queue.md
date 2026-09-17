@@ -42,9 +42,27 @@
 ## ② 正式入口不存在
 
 4. **编队/十类命令接入真实右键输入**（`FC-REQ-021`——本包最大单点缺口）。折入 `M4-R02`。
+   **2026-09-17 核实：不可直接开工**——`UnitCommandKind`只有Move/Attack/Guard/Retreat 4值，
+   11类命令表里另外7类（攻击器官类别/搬运物/占据接口/建立伏击/禁暴露能力/自动提取/觅食供养）
+   在内核枚举层面完全不存在，是命令种类本身未实现而非接线缺口，且撞④-13未完成的前置接口。
 5. **`Interact`动作接入真实交互目标**（`M2-R04`缺失——已有`WildOrganRegistry.TryPickup`未接线）。
+   **2026-09-17 核实：不可直接开工**——`DirectControlActions.TryRelease`要求
+   `loadout.TryGetOrgan(Interact,...)`必须成立才会往下走，而全仓当前没有任何原型往Interact
+   槽塞过任何器官（玩家本体按`IPlayerLoadoutSource.cs:33`刻意留空；Mycelium已把org_cilia从
+   Interact移到Utility，因为Interact恒判NoInteractTarget）。纯技术接线`InteractTargetsAvailable`
+   不会产生任何玩家可见效果，真正卡点是"Interact槽绑哪个器官"这个产品/内容决策，需先拍板。
 6. **模板/萌生/回巢/野生器官 UI 从调试面板迁移到正式玩家入口**（`M3-R05`缺失）。
+   **2026-09-17 部分完成**——四子系统里"萌生"一块已转正（信息量最小、后端逻辑已齐备）：新增
+   `BattleGerminationUIToolkit`（UI Toolkit生产面板，X键），照抄`BattleCarrierUIToolkit`模式，
+   逐字对齐`CellDebugHud.DrawLineageTemplateSection`展示口径。设计记录：
+   `production/design/m4-r00-02-item2-6-germination-ui/DESIGN.md`。**仍未做**：模板编辑（多选+
+   冲突预览，规模大需交互稿）、回巢（过期筛选控件，中等规模）、野生器官（依赖本队列条目5，
+   条目5卡在产品决策，同一条依赖链）。
 7. **手术接点从2槽占位转为按原型/骨骼配置的N接点+正式生成池**（`CP-REQ-071`部分）。
+   **2026-09-17 核实：技术形状明确但规模大**——`SimBodyPartSlot`枚举只有None/Primary/Secondary
+   三值，要改成N接点需要改内核数据结构，波及`JobDamage.cs`/`JobProjectile.cs`/`SimWorld.cs`等
+   多个Job；接点选择本身（P键循环）也还是调试级输入，无正式UI。无产品分歧，但属架构级改动，
+   审计建议单独立项、不与其它队列项混做。
 8. **M4-06 多线固定遭遇真实关卡编排框架**（`FC-TEST-007`缺失——当前是绕过命令生产链的headless
    脚本），依赖④的 Carry/信号压制先落地，是本队列里最大的一个故事，建议拆结算里程碑单开子队列。
 

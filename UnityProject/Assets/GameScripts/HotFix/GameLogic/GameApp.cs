@@ -70,6 +70,11 @@ public partial class GameApp
         // UI Toolkit 版 LookDev 自由装配沙盒（任务四：UI 重设计）：同上不挂 [Window]，
         // 常驻单例默认隐藏，CellDebugHud「LookDev 沙盒」菜单按钮唤起，sortingOrder=5。
         new GameObject("BattleSandboxUIToolkit").AddComponent<BattleSandboxUIToolkit>();
+
+        // UI Toolkit 版萌生腔面板（M4-R00-02 队列②号项第6条，M3-R05）：同上不挂 [Window]，
+        // 常驻单例默认隐藏，X 键切换，sortingOrder=7。模板/萌生列表从 CellDebugHud 的 Y 键
+        // 调试面板迁到正式入口，只做"萌生"一块（模板编辑/回巢/野生器官三块转正登记为独立后续故事）。
+        new GameObject("BattleGerminationUIToolkit").AddComponent<BattleGerminationUIToolkit>();
     }
     
     private static void Release()
