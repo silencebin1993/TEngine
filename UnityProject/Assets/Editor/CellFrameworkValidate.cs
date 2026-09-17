@@ -114,6 +114,7 @@ namespace GameLogic.EditorTools
                 ValidateSquadInputTranslation();
                 ValidateCombatTransientTeardown();
                 ValidateFormationCommandQueueVisualization();
+                ValidateSquadCommandQueueRequest();
             }
             catch (Exception e)
             {
@@ -2849,6 +2850,144 @@ namespace GameLogic.EditorTools
             // 验收 5：空队列上调用 ClearQueue 安全返回 0，不抛异常。
             Formation emptyFormation = registry.CreateFormation();
             Expect(emptyFormation.ClearQueue() == 0, "空队列 ClearQueue 应返回 0");
+        }
+
+        /// <summary>
+        /// M4-R00-02 队列⑥-25 补完（FC-REQ-022"插队/追加"）：`SquadCommandSystem.Issue` 的
+        /// <c>queueBehindActive</c> 参数与 `HandleCommandInput` 右键分支的 Shift 判定。[52] 只测
+        /// `Formation` 自身的队列 API；本项测"玩家显式请求排队"这一段输入到 Formation 之间的接线，
+        /// 且必须走真实 <see cref="SquadCommandSystem"/>/<see cref="SimBridge"/>，不直连内部字段。
+        /// </summary>
+        private static void ValidateSquadCommandQueueRequest()
+        {
+            Line("\n[53] 插队/追加输入接线（FC-REQ-022，⑥-25补完）");
+
+            var hub = new ModuleHub();
+            var formations = hub.Register(new FormationRegistry());
+            var sim = hub.Register(new SimBridge());
+            hub.Enter();
+
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 16;
+            cfg.ArenaHalfExtent = 80f;
+            sim.Begin(cfg, System.Array.Empty<BehaviorArchetype>());
+
+            var cameraGo = new GameObject("ValidateSquadCommandQueueRequest_TempCamera");
+            Camera camera = cameraGo.AddComponent<Camera>();
+            var rt = new RenderTexture(256, 256, 0);
+            camera.targetTexture = rt;
+            cameraGo.transform.position = new Vector3(0f, 10f, 0f);
+            cameraGo.transform.rotation = Quaternion.Euler(90f, 0f, 0f); // 俯视，正下方
+
+            var squad = new SquadCommandSystem();
+            squad.Bind(sim, camera, formations);
+            var reader = new ScriptedInputReader();
+            InputRouter.Reset();
+            InputRouter.SetScope(InputScope.Strategy);
+            InputRouter.DebugSetReader(reader);
+
+            try
+            {
+                SimEntityId SpawnAndResolve(int logicId, float2 pos)
+                {
+                    sim.Spawn(new SpawnRequest
+                    {
+                        Position = pos, Health = 20f, Radius = 0.5f, MaxSpeed = 4f,
+                        ArchetypeId = 0, Faction = SimFaction.PlayerMinion,
+                        IntentSource = IntentSource.AI, LogicId = logicId,
+                    });
+                    sim.OnUpdate(1f / 60f);
+                    return FindEntityId(sim.Snapshot, logicId, out _);
+                }
+
+                // 验收 1：编队正在执行命令时，queueBehindActive=true 不应覆盖，应追加进等待队列。
+                SimEntityId a1 = SpawnAndResolve(95001, new float2(0f, 0f));
+                Expect(a1.IsValid, "本项前置：测试个体 a1 应成功落地");
+                squad.SelectExplicit(new[] { a1 });
+                squad.AssignGroup(1);
+                Formation formation = formations.FindFormationContaining(a1);
+                Expect(formation != null, "本项前置：编组后应存在对应 Formation");
+                // AssignGroup 本身会清空 _activeFormationId（见其源码注释与实现），必须
+                // RecallGroup 一次才会把它指回槽位1的编队——否则下面的 Issue 会掉进"裸选择集"
+                // 路径而不是编队路径（ResolveActiveFormationForCurrentSelection 的既有约束）。
+                squad.RecallGroup(1);
+
+                squad.Issue(UnitCommandKind.Guard, new float2(1f, 1f), SimEntityId.None, paused: false);
+                Expect(formation.ActiveCommand != null && formation.ActiveCommand.Command.Kind == FormationCommand.CommandKind.Guard,
+                    "本项前置：不带 queueBehindActive 的下令应正常 Activate（回归 [49]）");
+
+                int queuedCount = squad.Issue(UnitCommandKind.Move, new float2(5f, 5f), SimEntityId.None,
+                    paused: false, queueBehindActive: true);
+                Expect(queuedCount == 1, $"排队请求应按选择集大小返回受影响单位数（实际 {queuedCount}）");
+                Expect(formation.ActiveCommand.Command.Kind == FormationCommand.CommandKind.Guard,
+                    "queueBehindActive=true 时不应覆盖当前 ActiveCommand（还是 Guard，不是 Move）");
+                Expect(formation.PendingCommands.Count == 1 && formation.PendingCommands[0].Command.Kind == FormationCommand.CommandKind.Move,
+                    "queueBehindActive=true 应把新命令追加进等待队列，不是丢弃");
+                Expect(squad.LastFormationDispatchOutcome == SquadFormationDispatchOutcome.QueuedByPlayerRequest,
+                    $"应记录为 QueuedByPlayerRequest（实际 {squad.LastFormationDispatchOutcome}）");
+
+                // 验收 2：不带 Shift（queueBehindActive=false）的下一条命令仍应覆盖——两种语义不能混淆。
+                squad.Issue(UnitCommandKind.Retreat, new float2(-3f, -3f), SimEntityId.None, paused: false);
+                Expect(formation.ActiveCommand.Command.Kind == FormationCommand.CommandKind.Retreat,
+                    "不带 queueBehindActive 的下令应恢复覆盖语义（IssueCommand 的既有行为不回归）");
+                Expect(formation.PendingCommands.Count == 0,
+                    "覆盖语义会清空等待队列——IssueCommand 本身既有行为，queueBehindActive 不改变它");
+
+                // 验收 3：编队原本空闲时 queueBehindActive=true 应立即提升为 Active 并补发内核命令
+                //（否则排队条目没有任何终结事件来触发提升，会永远卡在 Pending，玩家会以为按了没反应）。
+                SimEntityId b1 = SpawnAndResolve(95002, new float2(10f, 10f));
+                Expect(b1.IsValid, "本项前置：测试个体 b1 应成功落地");
+                squad.SelectExplicit(new[] { b1 });
+                squad.AssignGroup(2);
+                squad.RecallGroup(2); // 同上：AssignGroup 会清空 _activeFormationId，必须 Recall 一次。
+                Formation idleFormation = formations.FindFormationContaining(b1);
+                Expect(idleFormation != null && idleFormation.ActiveCommand == null,
+                    "本项前置：刚编组、从未下过命令的编队应处于空闲（无 ActiveCommand）");
+
+                int idleQueuedCount = squad.Issue(UnitCommandKind.Guard, new float2(10f, 10f), SimEntityId.None,
+                    paused: false, queueBehindActive: true);
+                Expect(idleQueuedCount == 1, $"空闲编队上的排队请求也应立即生效并返回受影响单位数（实际 {idleQueuedCount}）");
+                Expect(idleFormation.ActiveCommand != null
+                    && idleFormation.ActiveCommand.Command.Kind == FormationCommand.CommandKind.Guard
+                    && idleFormation.ActiveCommand.State == FormationCommandState.Active,
+                    "空闲编队排队后应自动提升为 Active，不应该卡在 Pending 里没人管");
+                Expect(idleFormation.PendingCommands.Count == 0, "提升后等待队列应重新变空");
+                Expect(sim.TryGetCommand(b1, out UnitCommand dispatched) && dispatched.Kind == UnitCommandKind.Guard,
+                    "Guard 是需要补发内核命令的两条腿之一，空闲提升后应真的下发给 SimBridge，不能只停在 Formation 状态机");
+
+                // 验收 4：真实输入接线——Shift+右键应走排队而不是覆盖，不 Shift 的右键照旧覆盖。
+                // 复用槽位1的编队（当前 Active=Retreat，来自验收2），screen(128,128) 对应世界(0,0)。
+                // 用 RecallGroup 而不是 SelectExplicit——后者会清空 _activeFormationId，
+                // 右键会掉回"裸选择集"路径而不是编队路径（ResolveActiveFormationForCurrentSelection
+                // 的既有约束，见该方法注释）。
+                reader.MousePosition = new Vector3(128f, 128f, 0f);
+                squad.RecallGroup(1);
+                reader.SetHeld(KeyCode.LeftShift, true);
+                reader.ClickMouseButtonDown(1);
+                squad.Tick(paused: false);
+                reader.EndFrame();
+                reader.SetHeld(KeyCode.LeftShift, false);
+                Expect(formation.ActiveCommand.Command.Kind == FormationCommand.CommandKind.Retreat,
+                    "真实 Shift+右键：不应覆盖当前 ActiveCommand（还是验收2里下的 Retreat）");
+                Expect(formation.PendingCommands.Count == 1 && formation.PendingCommands[0].Command.Kind == FormationCommand.CommandKind.Move,
+                    "真实 Shift+右键点空地应追加一条 Move 到等待队列——证明 HandleCommandInput 的 Shift 判定真的接到了 Issue(queueBehindActive)");
+
+                reader.ClickMouseButtonDown(1);
+                squad.Tick(paused: false);
+                reader.EndFrame();
+                Expect(formation.ActiveCommand.Command.Kind == FormationCommand.CommandKind.Move
+                    && formation.PendingCommands.Count == 0,
+                    "真实右键（不按 Shift）应恢复覆盖语义：清空刚才排的队并直接 Activate 新命令");
+            }
+            finally
+            {
+                squad.Unbind();
+                hub.Exit();
+                InputRouter.Reset();
+                camera.targetTexture = null;
+                UnityEngine.Object.DestroyImmediate(rt);
+                UnityEngine.Object.DestroyImmediate(cameraGo);
+            }
         }
 
         /// <summary>

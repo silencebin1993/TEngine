@@ -22,6 +22,13 @@ namespace GameLogic.Command
         /// 当前设计范围内不可达（唯一命令源、同一优先级），保留给未来的多优先级命令源故事。</summary>
         QueuedBehindHigherPriority,
 
+        /// <summary>⑥-25（FC-REQ-022"插队/追加"）：玩家按住 Shift 右键显式请求排队，走
+        /// <see cref="Formation.Formation.EnqueueCommand"/> 而不是 <see cref="Formation.Formation.IssueCommand"/>
+        /// 的覆盖判定——与 <see cref="QueuedBehindHigherPriority"/> 的区别是触发原因不同
+        /// （玩家显式请求 vs 优先级判定），编队原本空闲时会被立即提升为 Active（见
+        /// <see cref="SquadCommandSystem.Issue"/> 的 <c>queueBehindActive</c> 参数）。</summary>
+        QueuedByPlayerRequest,
+
         /// <summary>暂停期间排队的编队命令，在恢复兑现前编队被重新编组（成员与排队时的快照不再
         /// 匹配），命令作废——不下发任何内核/编队命令，不静默退化为普通移动。</summary>
         CancelledStaleMembership,

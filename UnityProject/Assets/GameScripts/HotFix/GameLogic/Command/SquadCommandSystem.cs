@@ -12,6 +12,7 @@ using FormationRegistry = GameLogic.Command.Formation.FormationRegistry;
 using FormationCommand = GameLogic.Command.Formation.FormationCommand;
 using FormationCommandPriority = GameLogic.Command.Formation.FormationCommandPriority;
 using FormationCommandIssueResult = GameLogic.Command.Formation.FormationCommandIssueResult;
+using FormationCommandState = GameLogic.Command.Formation.FormationCommandState;
 
 namespace GameLogic.Command
 {
@@ -405,16 +406,19 @@ namespace GameLogic.Command
             }
 
             // 右键 = 智能命令：点在敌人身上就是攻击，点在空地就是移动。
+            // ⑥-25（FC-REQ-022"插队/追加"）：按住 Shift 时不覆盖当前命令，排到编队队列末尾。
             if (InputRouter.Reader.GetMouseButtonDown(1) &&
                 TryScreenToWorld(InputRouter.Reader.MousePosition, out float2 world))
             {
+                bool queueBehindActive = InputRouter.Reader.GetKey(KeyCode.LeftShift)
+                    || InputRouter.Reader.GetKey(KeyCode.RightShift);
                 if (TryPickHostile(world, out SimEntityId hostile))
                 {
-                    Issue(UnitCommandKind.Attack, world, hostile, paused, _pendingAttackPart);
+                    Issue(UnitCommandKind.Attack, world, hostile, paused, _pendingAttackPart, queueBehindActive);
                 }
                 else
                 {
-                    Issue(UnitCommandKind.Move, world, SimEntityId.None, paused);
+                    Issue(UnitCommandKind.Move, world, SimEntityId.None, paused, queueBehindActive: queueBehindActive);
                 }
                 return;
             }
@@ -443,8 +447,12 @@ namespace GameLogic.Command
         /// </summary>
         /// <param name="targetPart">M2-05b：只有 <see cref="UnitCommandKind.Attack"/> 会消费它，
         /// 其它命令类型传了也没有意义（内核侧 <c>ResolveMinionCombat</c> 只在 Attack 分支读它）。</param>
+        /// <param name="queueBehindActive">⑥-25（FC-REQ-022"插队/追加"）：玩家显式请求排队
+        /// （Shift+右键）而不是覆盖。只在能解析出编队时生效（裸选择集没有排队容器，见
+        /// <see cref="EnqueueToFormation"/> 与 M4-R02 桥接范围）；<paramref name="paused"/> 为 true
+        /// 时本参数不起作用——暂停期间一律走既有的 <see cref="_queued"/> 机制，恢复时按下达顺序兑现。</param>
         public int Issue(UnitCommandKind kind, float2 targetPosition, SimEntityId targetEntity, bool paused,
-            SimBodyPartSlot targetPart = SimBodyPartSlot.None)
+            SimBodyPartSlot targetPart = SimBodyPartSlot.None, bool queueBehindActive = false)
         {
             if (_sim == null || !_sim.Running || _selection.Count == 0)
             {
@@ -478,6 +486,10 @@ namespace GameLogic.Command
 
             if (formation != null)
             {
+                if (queueBehindActive)
+                {
+                    return EnqueueToFormation(formation, kind, command, _selection);
+                }
                 return IssueToFormation(formation, kind, command, _selection);
             }
 
@@ -550,6 +562,59 @@ namespace GameLogic.Command
             {
                 // 排队等待中：不重复下内核命令，避免"内核已经在执行/移动，编队层却说排队中"的
                 // 不一致。今天在本设计范围内不可达——见 DESIGN.md 2.5"已知限制"。
+                return 0;
+            }
+
+            if (kind == UnitCommandKind.Attack || kind == UnitCommandKind.Guard)
+            {
+                var targetArray = new SimEntityId[targets.Count];
+                for (int i = 0; i < targets.Count; i++)
+                {
+                    targetArray[i] = targets[i];
+                }
+                int accepted = _sim.IssueCommand(targetArray, rawCommand);
+                if (accepted > 0)
+                {
+                    IssuedCommandCount++;
+                }
+                return accepted;
+            }
+
+            IssuedCommandCount++;
+            return targets.Count;
+        }
+
+        /// <summary>
+        /// ⑥-25（FC-REQ-022"插队/追加"）：玩家显式请求排队（Shift+右键），永远走
+        /// <see cref="Formation.Formation.EnqueueCommand"/>，不经 <see cref="Formation.Formation.IssueCommand"/>
+        /// 的覆盖/优先级判定——这正是"追加"与"覆盖"的语义区别。
+        ///
+        /// 编队原本空闲（没有 Active 命令）时必须在这里主动提升一次：<see cref="Formation.Formation"/>
+        /// 只在 Complete/Fail/Interrupt 时联动提升下一条，纯 Enqueue 不会触发任何终结事件，
+        /// 空队列变成一条 Pending 之后如果没人主动提升就会永远卡住，玩家会以为排队按了没反应。
+        /// 提升出来的必然是我们刚加的这一条（队列原本是空的），因此复用调用方传入的
+        /// <paramref name="kind"/>/<paramref name="rawCommand"/> 补发内核命令是安全的，不需要
+        /// 反查 <see cref="Formation.FormationCommandEntry.Command"/> 再映射回 <see cref="UnitCommandKind"/>。
+        /// </summary>
+        private int EnqueueToFormation(SquadFormation formation, UnitCommandKind kind, UnitCommand rawCommand,
+            IReadOnlyList<SimEntityId> targets)
+        {
+            var formationCommand = new FormationCommand(MapKind(kind), rawCommand.TargetEntity,
+                rawCommand.TargetPosition, priority: FormationCommandPriority.NormalPlayerCommand);
+            formation.EnqueueCommand(formationCommand);
+            LastFormationDispatchOutcome = SquadFormationDispatchOutcome.QueuedByPlayerRequest;
+
+            bool wasIdle = formation.ActiveCommand == null
+                || formation.ActiveCommand.State != FormationCommandState.Active;
+            if (!wasIdle)
+            {
+                // 编队正在执行别的命令：纯追加，排在后面，前面终结后由既有的
+                // TryActivateNextPending 联动自动提升，这里不用管。
+                return targets.Count;
+            }
+
+            if (!formation.TryActivateNextPending())
+            {
                 return 0;
             }
 

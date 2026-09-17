@@ -106,22 +106,17 @@
 ## ⑥ UI/表现/可访问性
 
 25. **命令队列可视化+插队/取消/清空交互**（`FC-REQ-022/060`部分）。
-    **2026-09-17 部分完成**——已实现并用真实 Play 会话验证："可视化"（`FormationCommandOverlay`
-    新增渲染 `Formation.PendingCommands` 每行+取消按钮+清空队列按钮）、"取消单条"
+    **2026-09-17 已完成**——"可视化"（`FormationCommandOverlay` 新增渲染
+    `Formation.PendingCommands` 每行+取消按钮+清空队列按钮）、"取消单条"
     （`Formation.CancelQueuedCommand(index)`，按下标安全，越界no-op）、"清队列"
     （`Formation.ClearQueue()`，返回清空条数，终结态/FailReason写入同`InterruptActiveCommand`
-    口径）。自动化 `CellFrameworkValidate.cs [52]`（15项断言）+ 真实Play会话验证（真实
-    `FormationRegistry`+`FormationCommandOverlay`绑定，渲染多帧无console error）。
-    **未完成：`FC-REQ-022`"插队/追加"的输入触发源**——核实发现 `SquadCommandSystem.Issue`→
-    `IssueToFormation`→`Formation.IssueCommand` 是当前唯一的真实玩家命令入口，且全部玩家命令
-    统一用 `FormationCommandPriority.NormalPlayerCommand`（同优先级），`IssueCommand` 的覆盖
-    判定是"仅当新命令优先级严格更低才排队"，同优先级恒覆盖——**没有任何真实按键/Shift 修饰键
-    会调用 `Formation.EnqueueCommand`**，`HandleCommandInput` 右键分支也没有 Shift 检测。
-    `EnqueueCommand`本身的插队排序逻辑（按Priority降序插入）已在`[34]`验证过、功能是对的，
-    缺的只是"真实玩家操作→调用它"这一段输入接线，且涉及"排队条目被提升为Active后
-    Attack/Guard还需要补发`_sim.IssueCommand`"（现在只有`IssueToFormation`覆盖路径会发，
-    `TryActivateNextPending`提升不会）——这是比UI更大的一块，本轮未做，登记为独立后续故事，
-    不与UI改动混在一起验收。
+    口径）、"插队/追加"（`SquadCommandSystem.Issue` 新增 `queueBehindActive` 参数，
+    `HandleCommandInput` 右键分支识别 Shift 修饰键，编队忙时纯追加、编队空闲时立即提升为
+    Active 并按需补发 `_sim.IssueCommand`）全部落地。自动化 `CellFrameworkValidate.cs
+    [52]`（Formation队列API，15项）+`[53]`（Issue接线含真实Shift+右键输入驱动，18项）+
+    真实Play会话验证（真实`FormationRegistry`+`FormationCommandOverlay`绑定，渲染多帧无
+    console error）。首轮实现只做了可视化+取消/清空，"插队"输入接线是同日第二轮补完
+    （原先误判为独立后续故事，实测后发现范围可控，当场一并做完）。
 26. **直控HUD补编队目标/汇合方向/失败提示+战略视角"被直控过"标记**（`FC-REQV-061`缺失）。
 27. **拒绝反馈补炮口阻挡/落点非法/召唤容量/信号权限对应码+可访问性辅助**（`CP-REQ-081/082`）。
 28. **HUD失败文案改"原因→状态→后果→可恢复方法"四段式模板**（`IC-REQ-013`部分、`CP-REQ-081`、
