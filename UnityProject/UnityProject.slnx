@@ -26,6 +26,7 @@
   <Project Path="GameProto.csproj" />
   <Project Path="Unity.VisualStudio.Editor.csproj" />
   <Project Path="Unity.InputSystem.csproj" />
+  <Project Path="GameLogic.csproj" />
   <Project Path="Unity.Entities.csproj" />
   <Project Path="MCPForUnity.Editor.csproj" />
   <Project Path="Unity.Scenes.csproj" />
@@ -34,7 +35,6 @@
   <Project Path="Unity.AI.Mesh.csproj" />
   <Project Path="YooAsset.RuntimeExtension.csproj" />
   <Project Path="UniTask.csproj" />
-  <Project Path="GameLogic.csproj" />
   <Project Path="Unity.AI.Assistant.Editor.csproj" />
   <Project Path="Unity.InternalAPIEngineBridge.002.csproj" />
   <Project Path="Unity.InferenceEngine.Tokenization.csproj" />
