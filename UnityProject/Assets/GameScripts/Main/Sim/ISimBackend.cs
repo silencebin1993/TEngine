@@ -55,6 +55,11 @@ namespace BinGames.Sim
         /// <summary>取出一条待处理的控制权变更（FIFO）。消费即出队，同一条只会被发布一次。</summary>
         bool TryConsumeControlChange(out ControlChangeEvent change);
 
+        /// <summary>CP-REQ-092：世界拆除前（腔室切换/退出）对存活弹体/持续区域做确定性清空，
+        /// 而不是让 <see cref="Dispose"/> 把它们连同整个世界一起静默销毁。必须在 <see cref="Dispose"/>
+        /// 之前调用；调用后这些实体在本局内不再存活。</summary>
+        SimTeardownSummary TerminateTransientsForTeardown();
+
         void Dispose();
     }
 }

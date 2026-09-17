@@ -2455,6 +2455,76 @@ namespace BinGames.Sim
             }
         }
 
+        /// <summary>CP-REQ-092：世界拆除（腔室切换/退出）前对存活弹体/持续区域做确定性清空。
+        /// 必须在 <see cref="Dispose"/> 之前调用——之后所有原生容器已释放，无法再遍历。
+        /// 单线程直接遍历（拆除只发生一次、实体数量远小于每帧模拟规模，不值得为它排 Job）。</summary>
+        public SimTeardownSummary TerminateTransientsForTeardown()
+        {
+            var summary = new SimTeardownSummary();
+            if (!_created)
+            {
+                return summary;
+            }
+
+            if (_projectiles.IsCreated)
+            {
+                for (int p = 0; p < _projectiles.Length; p++)
+                {
+                    ProjectileState s = _projectiles[p];
+                    if (s.Alive == 0)
+                    {
+                        continue;
+                    }
+
+                    s.Alive = 0;
+                    _projectiles[p] = s;
+                    summary.ProjectilesTerminated++;
+
+                    // 与 JobProjectile.End 同一条回传规矩：终结永远回传真实位置，
+                    // 热更层/测试据此断言拆除是"明确销毁"而不是静默消失。
+                    _projectileEndQueue.Enqueue(new ProjectileEndEvent
+                    {
+                        Position = s.Position,
+                        Direction = math.normalizesafe(s.Velocity, new float2(0f, 1f)),
+                        Damage = 0f,
+                        AreaRadius = 0f,
+                        LingerSeconds = 0f,
+                        LingerRadius = 0f,
+                        SourceLogicId = s.SourceLogicId,
+                        VisualId = s.VisualId,
+                        Reason = ProjectileEndReason.WorldTeardown,
+                    });
+                }
+            }
+
+            _projectileEndCount = 0;
+            while (_projectileEndQueue.TryDequeue(out ProjectileEndEvent pe))
+            {
+                if (_projectileEndCount < _projectileEndEvents.Length)
+                {
+                    _projectileEndEvents[_projectileEndCount++] = pe;
+                }
+            }
+
+            if (_zones.IsCreated)
+            {
+                for (int z = 0; z < _zones.Length; z++)
+                {
+                    ZoneState zs = _zones[z];
+                    if (zs.Alive == 0)
+                    {
+                        continue;
+                    }
+
+                    zs.Alive = 0;
+                    _zones[z] = zs;
+                    summary.ZonesTerminated++;
+                }
+            }
+
+            return summary;
+        }
+
         public void Dispose()
         {
             if (!_created)

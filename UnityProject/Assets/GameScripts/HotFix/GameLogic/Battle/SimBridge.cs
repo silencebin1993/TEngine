@@ -120,12 +120,18 @@ namespace GameLogic.Battle
             RefreshAvailability(0f);
         }
 
+        /// <summary>CP-REQ-092：最近一次 <see cref="End"/> 对存活弹体/持续区域做的确定性清空摘要。
+        /// 世界还没开过局时为默认值（全 0），不是"清空了 0 个"的断言证据。</summary>
+        public SimTeardownSummary LastTeardownSummary { get; private set; }
+
         public void End()
         {
             if (_backend != null)
             {
                 // 内核 Dispose 之后控制状态就问不到了；先把它抄进托管侧的控制记忆。
                 _handoff = CaptureHandoff();
+                // CP-REQ-092：弹体/持续区域不能被 Dispose 静默连带销毁，必须先确定性清空+留痕。
+                LastTeardownSummary = _backend.TerminateTransientsForTeardown();
                 _backend.Dispose();
                 _backend = null;
             }

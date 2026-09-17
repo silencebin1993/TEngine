@@ -746,6 +746,19 @@ namespace BinGames.Sim
         OutOfBounds = 2,
         /// <summary>撞上静态障碍。</summary>
         Obstacle = 3,
+        /// <summary>CP-REQ-092：腔室切换/退出导致的世界拆除，不是自然终结——
+        /// 用来把"确定性销毁"和"打中/飞没/撞障"区分开，热更层/测试可据此断言
+        /// 拆除不是静默丢弃。</summary>
+        WorldTeardown = 4,
+    }
+
+    /// <summary>CP-REQ-092：世界拆除（腔室切换/退出）时对存活弹体/持续区域做的确定性清空摘要。
+    /// 弹体清空会真实回传 <see cref="ProjectileEndEvent"/>（Reason=WorldTeardown），持续区域
+    /// 没有独立的终结事件管线（渲染层同一时刻本就在拆除），只计数。</summary>
+    public struct SimTeardownSummary
+    {
+        public int ProjectilesTerminated;
+        public int ZonesTerminated;
     }
 
     /// <summary>

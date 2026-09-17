@@ -294,16 +294,31 @@ namespace GameLogic.Battle.Feedback
 
         public void Dispose()
         {
+            // 同 WhiteboxSquadOverlay/WhiteboxAiHandoffOverlay：Edit 模式下只能 DestroyImmediate。
             if (_poolRoot != null)
             {
                 for (int i = 0; i < _mr.Length; i++)
                 {
                     if (_mr[i] != null)
                     {
-                        UnityEngine.Object.Destroy(_mr[i].sharedMaterial);
+                        if (Application.isPlaying)
+                        {
+                            UnityEngine.Object.Destroy(_mr[i].sharedMaterial);
+                        }
+                        else
+                        {
+                            UnityEngine.Object.DestroyImmediate(_mr[i].sharedMaterial);
+                        }
                     }
                 }
-                UnityEngine.Object.Destroy(_poolRoot);
+                if (Application.isPlaying)
+                {
+                    UnityEngine.Object.Destroy(_poolRoot);
+                }
+                else
+                {
+                    UnityEngine.Object.DestroyImmediate(_poolRoot);
+                }
                 _poolRoot = null;
             }
 
@@ -312,7 +327,14 @@ namespace GameLogic.Battle.Feedback
 
             if (_matTemplate != null)
             {
-                UnityEngine.Object.Destroy(_matTemplate);
+                if (Application.isPlaying)
+                {
+                    UnityEngine.Object.Destroy(_matTemplate);
+                }
+                else
+                {
+                    UnityEngine.Object.DestroyImmediate(_matTemplate);
+                }
                 _matTemplate = null;
             }
 

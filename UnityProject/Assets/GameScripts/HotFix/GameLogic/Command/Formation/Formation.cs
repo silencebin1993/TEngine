@@ -243,6 +243,41 @@ namespace GameLogic.Command.Formation
 
         public int PendingCommandCount => _pendingCommands.Count;
 
+        /// <summary>M4-R00-02 队列⑥-25（FC-REQ-022/060）：只读枚举整条等待队列，供 UI 可视化/
+        /// 自检使用。<see cref="List{T}"/> 走 <see cref="IReadOnlyList{T}"/> 接口暴露，调用方拿不到
+        /// Add/Remove——沿用 <see cref="FormationCommandEntry"/> 本身"外部只读"的既有纪律。</summary>
+        public IReadOnlyList<FormationCommandEntry> PendingCommands => _pendingCommands;
+
+        /// <summary>取消等待队列里的某一条（按 <see cref="PendingCommands"/> 当前下标），不影响
+        /// <see cref="ActiveCommand"/>。下标越界安全 no-op——UI 点击时序可能对着一个已经因为
+        /// 其它原因变化过的队列，不应该抛异常。</summary>
+        public bool CancelQueuedCommand(int index, FormationCommandFailReason reason = FormationCommandFailReason.Cancelled)
+        {
+            if (index < 0 || index >= _pendingCommands.Count)
+            {
+                return false;
+            }
+
+            FormationCommandEntry entry = _pendingCommands[index];
+            entry.State = FormationCommandState.Interrupted;
+            entry.FailReason = reason;
+            _pendingCommands.RemoveAt(index);
+            return true;
+        }
+
+        /// <summary>清空整条等待队列，不影响 <see cref="ActiveCommand"/>。返回被清空的条数。</summary>
+        public int ClearQueue(FormationCommandFailReason reason = FormationCommandFailReason.Cancelled)
+        {
+            int count = _pendingCommands.Count;
+            for (int i = 0; i < count; i++)
+            {
+                _pendingCommands[i].State = FormationCommandState.Interrupted;
+                _pendingCommands[i].FailReason = reason;
+            }
+            _pendingCommands.Clear();
+            return count;
+        }
+
         /// <summary>覆盖：若已有 Active 命令，先标记 <see cref="FormationCommandState.Interrupted"/>/
         /// <see cref="FormationCommandFailReason.PreemptedByOverride"/> 并清空等待队列（对齐
         /// SquadCommandSystem 现有 UX——新下令替换旧排队，不是追加），再把新命令直接设为 Active。

@@ -77,11 +77,51 @@
 22. **`IsNetworked`从恒true改为显式可切换状态**（`FS-REQ-041/061`接口阻塞——`M4-GATE-03`"断网"
     负向项目前无法被真实触发）。折入 `M3-R03`。
 23. **搬运/护送命令死亡分支统一失败原因码**（`FS-REQ-060`接口阻塞，不静默清空/悬挂）。
+    **2026-09-16 状态：不可直接开工**——已实读代码核实：`FormationRegistry.HandleMemberDeath`
+    确实对 `CommandKind.Carry` 零处理（只判 `Attack`/`OrganCategory`），死亡时成员被静默移出
+    编队但 `ActiveCommand` 停在 `Active` 不收口，问题真实存在；但 `SharedCapability.Carry`
+    在 `SharedCapabilityCatalog.cs` 标记 `Placeholder`——全仓 `CommandKind.Carry` 仅2处命中
+    （枚举声明+UI配色），没有任何生产入口会真正激活一条 Carry 命令，也没有独立的
+    "护送/Escort"命令种类（"护送"目前只是 M4-06 产品叙事，无代码实体）。只补死亡分支状态机
+    会停留在死代码上，无法从正式入口跑通正负旅程，违反规格完整性硬规则。**需先有 Carry
+    真实激活接线（搬运者分配+载荷/目标绑定）才能一并补死亡失败原因码**，建议与那条接线
+    故事合并开工，不单独作为本队列的下一项。
 24. **战斗内弹体/场/召唤/持续事件存读档**（`CP-REQ-092`缺失，需与存读档里程碑口径确认是否阻塞）。
+    **2026-09-16 已完成**——核实：全仓唯一存档触发点在 `CellStageFlow.Exit()`→`SimBridge.End()`→
+    `_backend.Dispose()`，发生在整个 `SimWorld` 已销毁之后，弹体/场/召唤（召唤物即普通单位，
+    与本项无关）在此之前一律被 Dispose 静默带走，无结算无反馈，违反 `CP-REQ-092`"清空必须
+    确定性结算或明确销毁并反馈"的底线；未被 `ARCH-TASK-ENTITY-IDENTITY-01` 等阻塞（存档时刻
+    这些实体已随世界一起销毁，不存在"跨局重建身份"的场景）。选择"明确销毁并反馈"分支
+    （非完整序列化，条文本身允许）：
+    - `SimTypes.cs` 新增 `ProjectileEndReason.WorldTeardown` + `SimTeardownSummary`（计数）。
+    - `ISimBackend`/`SimWorld.TerminateTransientsForTeardown()`：`Dispose` 之前对存活弹体
+      逐个置终结并真实回传 `ProjectileEndEvent`（同 `JobProjectile.End` 的回传纪律），
+      持续区域逐个置终结并计数。
+    - `SimBridge.End()` 在 `_backend.Dispose()` 之前调用，结果存入新增
+      `SimBridge.LastTeardownSummary` 供断言/遥测。
+    - `CellFrameworkValidate.cs [51]`：真起 `SimBridge` 发射1枚长寿命弹体+铺1块长持续区域，
+      断言拆除前存活、`sim.End()` 后 `LastTeardownSummary` 两项计数均≥1。Unity batchmode
+      `RunAll` 1051/1051 通过（`production/qa/evidence/_unity-validate.log`，本地未入库）。
 
 ## ⑥ UI/表现/可访问性
 
 25. **命令队列可视化+插队/取消/清空交互**（`FC-REQ-022/060`部分）。
+    **2026-09-17 部分完成**——已实现并用真实 Play 会话验证："可视化"（`FormationCommandOverlay`
+    新增渲染 `Formation.PendingCommands` 每行+取消按钮+清空队列按钮）、"取消单条"
+    （`Formation.CancelQueuedCommand(index)`，按下标安全，越界no-op）、"清队列"
+    （`Formation.ClearQueue()`，返回清空条数，终结态/FailReason写入同`InterruptActiveCommand`
+    口径）。自动化 `CellFrameworkValidate.cs [52]`（15项断言）+ 真实Play会话验证（真实
+    `FormationRegistry`+`FormationCommandOverlay`绑定，渲染多帧无console error）。
+    **未完成：`FC-REQ-022`"插队/追加"的输入触发源**——核实发现 `SquadCommandSystem.Issue`→
+    `IssueToFormation`→`Formation.IssueCommand` 是当前唯一的真实玩家命令入口，且全部玩家命令
+    统一用 `FormationCommandPriority.NormalPlayerCommand`（同优先级），`IssueCommand` 的覆盖
+    判定是"仅当新命令优先级严格更低才排队"，同优先级恒覆盖——**没有任何真实按键/Shift 修饰键
+    会调用 `Formation.EnqueueCommand`**，`HandleCommandInput` 右键分支也没有 Shift 检测。
+    `EnqueueCommand`本身的插队排序逻辑（按Priority降序插入）已在`[34]`验证过、功能是对的，
+    缺的只是"真实玩家操作→调用它"这一段输入接线，且涉及"排队条目被提升为Active后
+    Attack/Guard还需要补发`_sim.IssueCommand`"（现在只有`IssueToFormation`覆盖路径会发，
+    `TryActivateNextPending`提升不会）——这是比UI更大的一块，本轮未做，登记为独立后续故事，
+    不与UI改动混在一起验收。
 26. **直控HUD补编队目标/汇合方向/失败提示+战略视角"被直控过"标记**（`FC-REQV-061`缺失）。
 27. **拒绝反馈补炮口阻挡/落点非法/召唤容量/信号权限对应码+可访问性辅助**（`CP-REQ-081/082`）。
 28. **HUD失败文案改"原因→状态→后果→可恢复方法"四段式模板**（`IC-REQ-013`部分、`CP-REQ-081`、

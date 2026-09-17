@@ -112,6 +112,8 @@ namespace GameLogic.EditorTools
                 ValidateWildOrganFieldPersistence();
                 ValidateSquadFormationBridge();
                 ValidateSquadInputTranslation();
+                ValidateCombatTransientTeardown();
+                ValidateFormationCommandQueueVisualization();
             }
             catch (Exception e)
             {
@@ -2784,6 +2786,72 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>
+        /// M4-R00-02 队列⑥-25（FC-REQ-022/060）：命令队列可视化 + 插队/取消/清空交互。
+        /// 只测 <see cref="Formation.PendingCommands"/>/<see cref="Formation.CancelQueuedCommand"/>/
+        /// <see cref="Formation.ClearQueue"/> 三个新 API 本身的行为契约（下标语义、越界安全、
+        /// 终结态/FailReason 写入、不触碰 ActiveCommand）——真实 UI 点击已由
+        /// <see cref="FormationCommandOverlay"/> 复用既有 IMGUI 管线（同 [34] 验收 7 口径，不强制走
+        /// 真实 OnGUI 渲染测试）。
+        /// </summary>
+        private static void ValidateFormationCommandQueueVisualization()
+        {
+            Line("\n[52] 命令队列可视化+插队/取消/清空交互（FC-REQ-022/060）");
+
+            var registry = new FormationRegistry();
+            var entityA = new SimEntityId(6001);
+
+            // 验收 1：PendingCommands 只读枚举与 PendingCommandCount/PeekCommand 口径一致。
+            Formation readFormation = registry.CreateFormation();
+            Expect(readFormation.PendingCommands.Count == 0, "本项前置：新编队 PendingCommands 应为空");
+            readFormation.EnqueueCommand(new FormationCommand(FormationCommand.CommandKind.Move, targetPosition: new float2(1f, 1f)));
+            readFormation.EnqueueCommand(new FormationCommand(FormationCommand.CommandKind.Attack, targetEntity: entityA));
+            Expect(readFormation.PendingCommands.Count == 2 && readFormation.PendingCommandCount == 2,
+                "PendingCommands.Count 应与 PendingCommandCount 一致");
+            Expect(readFormation.PendingCommands[0].Command.Kind == FormationCommand.CommandKind.Move
+                && readFormation.PendingCommands[1].Command.Kind == FormationCommand.CommandKind.Attack,
+                "PendingCommands 下标顺序应与入队/优先级排序结果一致（与 PeekCommand 看到的队首同一份数据）");
+
+            // 验收 2：取消队列中间一条——只移除该条，其余下标依次前移，不影响 ActiveCommand。
+            Formation cancelFormation = registry.CreateFormation();
+            cancelFormation.IssueCommand(new FormationCommand(FormationCommand.CommandKind.Guard, targetPosition: new float2(0f, 0f)));
+            cancelFormation.EnqueueCommand(new FormationCommand(FormationCommand.CommandKind.Move, targetPosition: new float2(1f, 1f)));
+            cancelFormation.EnqueueCommand(new FormationCommand(FormationCommand.CommandKind.Attack, targetEntity: entityA));
+            cancelFormation.EnqueueCommand(new FormationCommand(FormationCommand.CommandKind.Retreat, targetPosition: new float2(2f, 2f)));
+            FormationCommandEntry cancelledEntry = cancelFormation.PendingCommands[1];
+            bool cancelled = cancelFormation.CancelQueuedCommand(1);
+            Expect(cancelled, "取消存在的下标应返回 true");
+            Expect(cancelFormation.PendingCommands.Count == 2
+                && cancelFormation.PendingCommands[0].Command.Kind == FormationCommand.CommandKind.Move
+                && cancelFormation.PendingCommands[1].Command.Kind == FormationCommand.CommandKind.Retreat,
+                "取消中间一条后，其余条目应依次前移，Attack 应从队列消失");
+            Expect(cancelledEntry.State == FormationCommandState.Interrupted && cancelledEntry.FailReason == FormationCommandFailReason.Cancelled,
+                "被取消的 entry 应标记 Interrupted/Cancelled（同 InterruptActiveCommand 默认 reason 口径）");
+            Expect(cancelFormation.ActiveCommand != null && cancelFormation.ActiveCommand.Command.Kind == FormationCommand.CommandKind.Guard
+                && cancelFormation.ActiveCommand.State == FormationCommandState.Active,
+                "取消等待队列条目不应触碰 ActiveCommand");
+
+            // 验收 3：越界下标安全 no-op，不抛异常、不改变队列。
+            Expect(!cancelFormation.CancelQueuedCommand(-1), "负数下标应返回 false");
+            Expect(!cancelFormation.CancelQueuedCommand(99), "越界下标应返回 false");
+            Expect(cancelFormation.PendingCommands.Count == 2, "越界取消不应改变队列内容");
+
+            // 验收 4：清空队列。返回被清空条数，全部标记 Interrupted/Cancelled，ActiveCommand 不受影响。
+            FormationCommandEntry clearedMove = cancelFormation.PendingCommands[0];
+            FormationCommandEntry clearedRetreat = cancelFormation.PendingCommands[1];
+            int clearedCount = cancelFormation.ClearQueue();
+            Expect(clearedCount == 2, $"ClearQueue 应返回清空前的队列条数（实际 {clearedCount}）");
+            Expect(cancelFormation.PendingCommands.Count == 0, "ClearQueue 后队列应为空");
+            Expect(clearedMove.State == FormationCommandState.Interrupted && clearedRetreat.State == FormationCommandState.Interrupted,
+                "ClearQueue 应把队列里每一条都标记 Interrupted，不是只清空列表本身");
+            Expect(cancelFormation.ActiveCommand != null && cancelFormation.ActiveCommand.State == FormationCommandState.Active,
+                "清空等待队列不应触碰 ActiveCommand");
+
+            // 验收 5：空队列上调用 ClearQueue 安全返回 0，不抛异常。
+            Formation emptyFormation = registry.CreateFormation();
+            Expect(emptyFormation.ClearQueue() == 0, "空队列 ClearQueue 应返回 0");
+        }
+
+        /// <summary>
         /// M4-03：六种教义。<see cref="FormationDoctrineProfile"/> 是"教义 → 参数"的定义 + 只读
         /// 查询层，不接任何真实 AI 决策（见 D1 边界）。详见
         /// production/session-state/preflight-decisions.md「M4-03 六种教义」验收映射 1~5。
@@ -4977,6 +5045,55 @@ namespace GameLogic.EditorTools
                 camera.targetTexture = null;
                 UnityEngine.Object.DestroyImmediate(rt);
                 UnityEngine.Object.DestroyImmediate(cameraGo);
+            }
+        }
+
+        /// <summary>
+        /// CP-REQ-092：世界拆除（腔室切换/退出）时，存活弹体/持续区域不能被 <c>Dispose</c>
+        /// 静默连带销毁——必须先确定性清空并留下可断言的痕迹（<see cref="SimTeardownSummary"/>）。
+        /// 弹体额外要求真实回传 <see cref="ProjectileEndEvent"/>（Reason=WorldTeardown），
+        /// 不是只清计数（见 <see cref="BinGames.Sim.SimWorld.TerminateTransientsForTeardown"/>）。
+        /// </summary>
+        private static void ValidateCombatTransientTeardown()
+        {
+            Line("\n[51] 战斗内弹体/持续区域拆除确定性清空（CP-REQ-092）");
+
+            var sim = new SimBridge();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 16;
+            cfg.ArenaHalfExtent = 260f;
+            sim.Begin(cfg, Array.Empty<BehaviorArchetype>());
+
+            try
+            {
+                sim.FireProjectile(new float2(0f, 0f), new float2(0f, 1f), speed: 5f, damage: 1f,
+                    lifetime: 30f, sourceLogicId: 98001);
+                sim.SpawnZone(new float2(10f, 10f), radius: 2f, seconds: 30f, damagePerTick: 1f,
+                    interval: 0.5f, sourceLogicId: 98002);
+                sim.OnUpdate(1f / 60f);
+
+                int aliveProjectilesBefore = 0;
+                var projectiles = sim.World.Projectiles;
+                for (int p = 0; p < projectiles.Length; p++)
+                {
+                    if (projectiles[p].Alive != 0) { aliveProjectilesBefore++; }
+                }
+                Expect(aliveProjectilesBefore >= 1,
+                    $"本项前置：应至少有1个存活弹体（实际 {aliveProjectilesBefore}）");
+                Expect(sim.LiveZoneCount >= 1,
+                    $"本项前置：应至少有1个存活持续区域（实际 {sim.LiveZoneCount}）");
+
+                sim.End();
+
+                Expect(sim.LastTeardownSummary.ProjectilesTerminated >= 1,
+                    $"世界拆除应确定性清空存活弹体（实际清空 {sim.LastTeardownSummary.ProjectilesTerminated}）——"
+                    + "不能靠 Dispose 静默连带销毁");
+                Expect(sim.LastTeardownSummary.ZonesTerminated >= 1,
+                    $"世界拆除应确定性清空存活持续区域（实际清空 {sim.LastTeardownSummary.ZonesTerminated}）");
+            }
+            finally
+            {
+                sim.End(); // 幂等：正常路径已经 End 过；这里只兜异常路径。
             }
         }
 
