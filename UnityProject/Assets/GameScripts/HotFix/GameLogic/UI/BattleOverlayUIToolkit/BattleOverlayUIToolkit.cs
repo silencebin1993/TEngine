@@ -14,6 +14,8 @@ using GameLogic.Stage;
 using GameLogic.Stage.CellStage;
 using GameLogic.UI.Battle;
 using GameLogic.UI.Common;
+using GameLogic.UI.LineageWorkshop;
+using GameLogic.UI.TacticalCommand;
 
 namespace GameLogic
 {
@@ -119,6 +121,16 @@ namespace GameLogic
         private Button _btnOpenDeckFromPause;
         private Button _btnAbandon;
 
+        // 二级详情与危险操作确认：复用同一份 Overlay 文档，避免再建全屏 UIDocument 吞掉下层点击。
+        private VisualElement _detailRoot;
+        private Label _detailTitle;
+        private ScrollView _detailBody;
+        private Button _detailActionButton;
+        private Action _detailAction;
+        private VisualElement _abandonConfirmRoot;
+        private bool _detailVisible;
+        private bool _abandonConfirmVisible;
+
         private PanelKind _current = PanelKind.None;
 
         /// <summary>供 execute_code 验收探针只读访问。</summary>
@@ -180,6 +192,7 @@ namespace GameLogic
             // 自己没托管到隐藏——默认 pickingMode.Position 会在整局游戏里持续吞掉最上层
             // （sortingOrder=10）全屏范围的每一次点击，Draft/Metabolic 等下层面板全部点不动。
             // 子面板按钮各自已有 pickingMode.Position，不依赖父节点转发，Ignore 不影响它们。
+            _root.pickingMode = PickingMode.Ignore;
             _overlayRoot = _root.Q<VisualElement>("OverlayRoot");
             if (_overlayRoot != null)
             {
@@ -213,12 +226,17 @@ namespace GameLogic
                 _itemDesc[i] = slot.Q<Label>("ItemDesc");
                 _itemCost[i] = slot.Q<Label>("ItemCost");
                 _btnBuy[i] = slot.Q<Button>("BtnBuy");
+                Button inspect = slot.Q<Button>("BtnInspectItem");
 
                 int slotIndex = i;
                 if (_btnBuy[i] != null)
                 {
                     // D9：点击瞬间读最新数据，不缓存。
                     _btnBuy[i].clicked += () => GameRoot.CellStage?.Shop?.TryBuy(slotIndex);
+                }
+                if (inspect != null)
+                {
+                    inspect.clicked += () => ShowShopItemDetail(slotIndex);
                 }
             }
 
@@ -275,16 +293,37 @@ namespace GameLogic
                 _btnOpenMetabolicFromPause.clicked += () =>
                 {
                     SetPanel(PanelKind.None);
-                    BattleMetabolicUIToolkit.Instance?.SetVisible(true);
+                    BattleCarrierUIToolkit.Instance?.SetPanelOpen(true);
                 };
             }
             if (_btnAbandon != null)
             {
-                _btnAbandon.clicked += () =>
-                {
-                    GameRoot.CellStage?.MarkAbandoned();
-                    GameRoot.EndRun();
-                };
+                _btnAbandon.clicked += ShowAbandonConfirmation;
+            }
+
+            _detailRoot = _root.Q<VisualElement>("OverlayDetailPanel");
+            _detailTitle = _root.Q<Label>("OverlayDetailTitle");
+            _detailBody = _root.Q<ScrollView>("OverlayDetailBody");
+            _detailActionButton = _root.Q<Button>("OverlayDetailActionButton");
+            Button closeDetail = _root.Q<Button>("CloseOverlayDetailButton");
+            if (closeDetail != null)
+            {
+                closeDetail.clicked += CloseDetail;
+            }
+            if (_detailActionButton != null)
+            {
+                _detailActionButton.clicked += InvokeDetailAction;
+            }
+            _abandonConfirmRoot = _root.Q<VisualElement>("AbandonConfirmPanel");
+            Button cancelAbandon = _root.Q<Button>("CancelAbandonButton");
+            if (cancelAbandon != null)
+            {
+                cancelAbandon.clicked += CloseAbandonConfirmation;
+            }
+            Button confirmAbandon = _root.Q<Button>("ConfirmAbandonButton");
+            if (confirmAbandon != null)
+            {
+                confirmAbandon.clicked += ConfirmAbandon;
             }
 
             // 用户要求全部面板可拖拽：四个子面板各用自己已有的 title Label 当把手。
@@ -294,22 +333,23 @@ namespace GameLogic
             AttachDrag(_codexRoot, _codexRoot?.Q<Label>("CodexTitle"), "codex");
             VisualElement pauseDialog = _pauseRoot?.Q<VisualElement>("PauseDialog");
             AttachDrag(pauseDialog, pauseDialog?.Q<Label>("PauseTitle"), "pause");
+            AttachDrag(_detailRoot, _detailTitle, "overlay-detail");
+            AttachDrag(_abandonConfirmRoot, _root.Q<Label>("AbandonConfirmTitle"), "abandon-confirm");
         }
 
-        private static void AttachDrag(VisualElement panel, Label handle, string prefsKey)
+        private void AttachDrag(VisualElement panel, Label handle, string prefsKey)
         {
             if (panel == null || handle == null)
             {
                 return;
             }
-            var drag = new PanelDragManipulator(handle, panel, prefsKey);
-            handle.AddManipulator(drag);
-            drag.ApplyPersistedPosition();
+            UiWindowFocus.Attach(_document, panel, handle, prefsKey);
         }
 
         public void ShowDeck() => SetPanel(PanelKind.Deck);
         public void ShowShop() => SetPanel(PanelKind.Shop);
         public void ShowCodex() => SetPanel(PanelKind.Codex);
+        public void ShowPause() => SetPanel(PanelKind.Pause);
         public void CloseAll() => SetPanel(PanelKind.None);
 
         /// <summary>供 execute_code 断言直调，不模拟点击。</summary>
@@ -393,6 +433,12 @@ namespace GameLogic
         /// </summary>
         private void SetPanel(PanelKind kind)
         {
+            if (kind != _current)
+            {
+                _detailVisible = false;
+                _detailAction = null;
+                _abandonConfirmVisible = false;
+            }
             bool willPause = kind == PanelKind.Pause;
             bool wasPause = _current == PanelKind.Pause;
             if (willPause != wasPause)
@@ -412,6 +458,26 @@ namespace GameLogic
             // InputRouter——否则卡组面板开着的时候 WASD 还在推镜头。
             InputRouter.SetModalUi(kind != PanelKind.None);
             ApplyDisplay();
+            if (kind != PanelKind.None)
+            {
+                UiWindowFocus.BringToFront(_document, GetFocusedPanel(kind));
+            }
+        }
+
+        private VisualElement GetFocusedPanel(PanelKind kind)
+        {
+            if (kind == PanelKind.Pause)
+            {
+                return _pauseRoot?.Q<VisualElement>("PauseDialog");
+            }
+
+            switch (kind)
+            {
+                case PanelKind.Deck: return _deckRoot;
+                case PanelKind.Shop: return _shopRoot;
+                case PanelKind.Codex: return _codexRoot;
+                default: return null;
+            }
         }
 
         private void ApplyDisplay()
@@ -432,6 +498,107 @@ namespace GameLogic
             {
                 _pauseRoot.style.display = _current == PanelKind.Pause ? DisplayStyle.Flex : DisplayStyle.None;
             }
+            if (_detailRoot != null)
+            {
+                _detailRoot.style.display = _detailVisible ? DisplayStyle.Flex : DisplayStyle.None;
+            }
+            if (_abandonConfirmRoot != null)
+            {
+                _abandonConfirmRoot.style.display = _abandonConfirmVisible ? DisplayStyle.Flex : DisplayStyle.None;
+            }
+        }
+
+        private void ShowShopItemDetail(int slotIndex)
+        {
+            ShopSystem shop = GameRoot.CellStage?.Shop;
+            if (shop == null || slotIndex < 0 || slotIndex >= ShopSystem.SlotCount)
+            {
+                return;
+            }
+
+            ShopItemSpec item = shop.GetSlot(slotIndex);
+            bool soldOut = shop.IsSoldOut(slotIndex);
+            ShowDetail(item.Name,
+                item.Desc,
+                $"价格：{item.Cost:F0} 营养质\n{(soldOut ? "该商品已售出。" : "购买后将立即生效。")}",
+                soldOut ? null : $"购买（{item.Cost:F0}）",
+                soldOut ? null : (Action)(() =>
+                {
+                    bool purchased = GameRoot.CellStage?.Shop?.TryBuy(slotIndex) ?? false;
+                    ShowDetail(item.Name, item.Desc,
+                        purchased ? "购买成功，效果已生效。" : "购买失败：营养质不足或商品已售出。",
+                        null, null);
+                }));
+        }
+
+        private void ShowDetail(string title, string body, string extra, string actionText, Action action)
+        {
+            if (_detailRoot == null || _detailBody == null)
+            {
+                return;
+            }
+
+            _detailTitle.text = title ?? "详情";
+            _detailBody.Clear();
+            AddDetailLine(body, "list-row");
+            AddDetailLine(extra, "dim");
+            _detailAction = action;
+            if (_detailActionButton != null)
+            {
+                _detailActionButton.text = actionText ?? string.Empty;
+                _detailActionButton.style.display = action == null ? DisplayStyle.None : DisplayStyle.Flex;
+            }
+            _detailVisible = true;
+            ApplyDisplay();
+            UiWindowFocus.BringToFront(_document, _detailRoot);
+        }
+
+        private void AddDetailLine(string text, string className)
+        {
+            if (string.IsNullOrEmpty(text) || _detailBody == null)
+            {
+                return;
+            }
+            var label = new Label(text);
+            label.AddToClassList(className);
+            _detailBody.Add(label);
+        }
+
+        private void InvokeDetailAction()
+        {
+            Action action = _detailAction;
+            if (action == null)
+            {
+                return;
+            }
+            action();
+        }
+
+        private void CloseDetail()
+        {
+            _detailVisible = false;
+            _detailAction = null;
+            ApplyDisplay();
+        }
+
+        private void ShowAbandonConfirmation()
+        {
+            _abandonConfirmVisible = true;
+            ApplyDisplay();
+            UiWindowFocus.BringToFront(_document, _abandonConfirmRoot);
+        }
+
+        private void CloseAbandonConfirmation()
+        {
+            _abandonConfirmVisible = false;
+            ApplyDisplay();
+        }
+
+        private void ConfirmAbandon()
+        {
+            CloseAbandonConfirmation();
+            GameRoot.CellStage?.MarkAbandoned();
+            GameRoot.EndRun();
         }
 
         private void Update()
@@ -477,6 +644,14 @@ namespace GameLogic
                     if (_current != PanelKind.Pause && BattleCarrierUIToolkit.Instance != null && BattleCarrierUIToolkit.Instance.IsPanelOpen)
                     {
                         BattleCarrierUIToolkit.Instance.SetPanelOpen(false);
+                    }
+                    else if (_current != PanelKind.Pause && LineageWorkshopUIToolkit.Instance != null && LineageWorkshopUIToolkit.Instance.IsPanelOpen)
+                    {
+                        LineageWorkshopUIToolkit.Instance.SetPanelOpen(false);
+                    }
+                    else if (_current != PanelKind.Pause && TacticalCommandUIToolkit.Instance != null && TacticalCommandUIToolkit.Instance.IsPanelOpen)
+                    {
+                        TacticalCommandUIToolkit.Instance.SetPanelOpen(false);
                     }
                     else
                     {
@@ -579,10 +754,14 @@ namespace GameLogic
                         $"<color={CellDebugHud.RarityColor(e.Spec.Rarity)}>{e.Spec.Name}</color>{stack}");
                     label.AddToClassList("list-row");
                     // R4：hover 卡牌图标显示 Description 摘要。
-                    string desc = e.Spec.Desc;
-                    label.RegisterCallback<PointerEnterEvent>(evt => ShowTooltip(desc, evt.position));
-                    label.RegisterCallback<PointerLeaveEvent>(evt => HideTooltip());
-                    _ownedCardList.Add(label);
+                string desc = e.Spec.Desc;
+                label.RegisterCallback<PointerEnterEvent>(evt => ShowTooltip(desc, evt.position));
+                label.RegisterCallback<PointerLeaveEvent>(evt => HideTooltip());
+                CardSpec spec = e.Spec;
+                label.RegisterCallback<ClickEvent>(_ => ShowDetail(spec.Name, spec.Desc,
+                    $"路线：{CellDebugHud.RouteName(spec.Route)} · 稀有度：{CellDebugHud.RarityLabel(spec.Rarity)}",
+                    null, null));
+                _ownedCardList.Add(label);
                 }
             }
         }
@@ -864,6 +1043,8 @@ namespace GameLogic
             string tooltipText = BuildCodexTooltip(name, description, extra, source);
             row.RegisterCallback<PointerEnterEvent>(evt => ShowTooltip(tooltipText, evt.position));
             row.RegisterCallback<PointerLeaveEvent>(evt => HideTooltip());
+            row.RegisterCallback<ClickEvent>(_ => ShowDetail(name, description,
+                string.IsNullOrEmpty(extra) ? $"来源：{source}" : $"{extra}\n来源：{source}", null, null));
 
             _codexEntryList.Add(row);
         }

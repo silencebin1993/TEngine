@@ -376,6 +376,34 @@ namespace GameLogic.Command
             return _groups.TryGetValue(slot, out List<SimEntityId> members) ? members.Count : 0;
         }
 
+        /// <summary>移除数字编队及其 Formation 成员关系；不会影响单位当前正在执行的命令。</summary>
+        public void ClearGroup(int slot)
+        {
+            if (!_groups.TryGetValue(slot, out List<SimEntityId> members))
+            {
+                return;
+            }
+
+            if (_groupFormationIds.TryGetValue(slot, out string formationId))
+            {
+                SquadFormation formation = _formations?.GetFormation(formationId);
+                if (formation != null)
+                {
+                    for (int i = 0; i < members.Count; i++)
+                    {
+                        formation.RemoveMember(members[i]);
+                    }
+                }
+                _groupFormationIds.Remove(slot);
+                if (_activeFormationId == formationId)
+                {
+                    _activeFormationId = null;
+                }
+            }
+
+            _groups.Remove(slot);
+        }
+
         /// <summary>
         /// 某个编组的成员（只读，不含存活过滤）。M2-04a 的交还延续要在交还那一刻记下
         /// "这个单位属于哪些编队"，而编队归属只存在这里——内核不认识编队。
@@ -397,7 +425,7 @@ namespace GameLogic.Command
             // "下一次 Attack 打哪个接点"，与右键命令解耦，避免手抖顺序把状态搞乱。
             if (InputRouter.ConsumeKeyDown(KeyCode.P, InputScope.Strategy))
             {
-                _pendingAttackPart = NextAttackPart(_pendingAttackPart);
+                CyclePendingAttackPart();
             }
 
             if (_selection.Count == 0)
@@ -716,6 +744,13 @@ namespace GameLogic.Command
             {
                 AddToSelection(ids[i]);
             }
+        }
+
+        /// <summary>正式战术 UI 与 P 键共用同一套攻击接点循环，避免双份状态机。</summary>
+        public SimBodyPartSlot CyclePendingAttackPart()
+        {
+            _pendingAttackPart = NextAttackPart(_pendingAttackPart);
+            return _pendingAttackPart;
         }
 
         /// <summary>M2-05b 调试输入：None → Primary → Secondary → None 循环。</summary>

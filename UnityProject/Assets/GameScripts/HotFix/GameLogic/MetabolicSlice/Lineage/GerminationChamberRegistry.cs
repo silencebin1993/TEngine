@@ -41,7 +41,7 @@ namespace GameLogic.MetabolicSlice.Lineage
         private const float PlaceholderRadius = 0.8f;
         private const float PlaceholderSpeed = 4f;
 
-        private sealed class GerminationTicket
+        internal sealed class GerminationTicket
         {
             public int TicketId;
             public string LineageId;
@@ -65,6 +65,28 @@ namespace GameLogic.MetabolicSlice.Lineage
                 LineageId = lineageId;
                 TemplateName = templateName;
                 Version = version;
+            }
+        }
+
+        /// <summary>玩家 UI 的只读队列快照。暴露必要字段而不泄露可变票据对象，
+        /// 取消仍必须经 <see cref="Cancel"/>，保证退款逻辑只有一处。</summary>
+        public readonly struct PendingTicketInfo
+        {
+            public readonly int TicketId;
+            public readonly string LineageId;
+            public readonly string TemplateName;
+            public readonly int Version;
+            public readonly float Cost;
+            public readonly float SecondsLeft;
+
+            internal PendingTicketInfo(GerminationTicket ticket)
+            {
+                TicketId = ticket.TicketId;
+                LineageId = ticket.LineageId;
+                TemplateName = ticket.TemplateName;
+                Version = ticket.Version?.Version ?? 0;
+                Cost = ticket.Cost;
+                SecondsLeft = ticket.SecondsLeft;
             }
         }
 
@@ -211,6 +233,27 @@ namespace GameLogic.MetabolicSlice.Lineage
         public int PendingCount(string lineageId)
         {
             return _queues.TryGetValue(lineageId, out List<GerminationTicket> queue) ? queue.Count : 0;
+        }
+
+        /// <summary>把指定谱系的待萌生订单复制到调用方缓存，供 UI 显示倒计时与取消入口。
+        /// 调用方提供列表，避免每次刷新额外分配集合。</summary>
+        public void CopyPendingTickets(string lineageId, List<PendingTicketInfo> destination)
+        {
+            if (destination == null)
+            {
+                return;
+            }
+
+            destination.Clear();
+            if (!_queues.TryGetValue(lineageId, out List<GerminationTicket> queue))
+            {
+                return;
+            }
+
+            for (int i = 0; i < queue.Count; i++)
+            {
+                destination.Add(new PendingTicketInfo(queue[i]));
+            }
         }
 
         public bool TryGetBinding(SimEntityId entityId, out UnitBinding binding)

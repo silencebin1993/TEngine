@@ -14,6 +14,7 @@ using GameLogic.Stage;
 using GameLogic.Stage.CellStage;
 using GameLogic.Stats;
 using GameLogic.UI.Battle;
+using GameLogic.UI.Common;
 
 namespace GameLogic
 {
@@ -167,6 +168,7 @@ namespace GameLogic
 
         private void CacheNodes()
         {
+            _root.pickingMode = PickingMode.Ignore;
             _phaseName = _root.Q<Label>("PhaseName");
             _phaseIndex = _root.Q<Label>("PhaseIndex");
             _phaseProgress = _root.Q<ProgressBar>("PhaseProgress");
@@ -232,6 +234,15 @@ namespace GameLogic
                 _skillCharge[i] = slot.Q<Label>("ChargeBadge");
                 _skillCooldownOverlay[i] = slot.Q<VisualElement>("CooldownOverlay");
             }
+
+            VisualElement hudLeft = _root.Q<VisualElement>("HudLeft");
+            UiWindowFocus.Attach(_document, hudLeft, _phaseName, "hud-left");
+            VisualElement axisPanel = _root.Q<VisualElement>("AxisTouchPanel");
+            UiWindowFocus.Attach(_document, axisPanel, axisPanel?.Q<Label>(className: "title"), "hud-axis");
+            VisualElement chainPanel = _root.Q<VisualElement>("ChainSummary");
+            UiWindowFocus.Attach(_document, chainPanel, chainPanel?.Q<Label>(className: "title"), "hud-chain");
+            VisualElement skillPanel = _root.Q<VisualElement>("SkillBarPanel");
+            UiWindowFocus.Attach(_document, skillPanel, _root.Q<Label>("SkillBarHandle"), "hud-skills");
         }
 
         private void Update()

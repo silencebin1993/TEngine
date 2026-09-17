@@ -6,6 +6,7 @@ using GameLogic.MetabolicSlice.Combat;
 using GameLogic.MetabolicSlice.DebugTools;
 using GameLogic.Stage;
 using GameLogic.Stage.CellStage;
+using GameLogic.UI.Common;
 using TEngine;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -109,6 +110,7 @@ namespace GameLogic
         private void CacheNodes()
         {
             _panelRoot = _root.Q<VisualElement>("BattleSandboxUI");
+            _root.pickingMode = PickingMode.Ignore;
             _geneList = _root.Q<ScrollView>("SandboxGeneList");
             _organList = _root.Q<ScrollView>("SandboxOrganList");
             _overrideList = _root.Q<ScrollView>("SandboxOverrideList");
@@ -148,6 +150,8 @@ namespace GameLogic
                 });
             }
             if (_autoFireIntervalLabel != null) { _autoFireIntervalLabel.text = $"间隔 {_autoFireInterval:0.0}s"; }
+
+            UiWindowFocus.Attach(_document, _panelRoot, _root.Q<Label>("SandboxTitleBar"), "sandbox");
         }
 
         /// <summary>基因/器官多选列表 + 7 维度覆盖行 + 预设模板按钮——都是"本会话固定内容"，
@@ -460,6 +464,10 @@ namespace GameLogic
             if (_panelRoot != null)
             {
                 _panelRoot.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
+            }
+            if (visible)
+            {
+                UiWindowFocus.BringToFront(_document, _panelRoot);
             }
             RefreshReopenChip();
         }

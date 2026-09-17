@@ -23,6 +23,10 @@ namespace GameLogic
 
         private VisualElement _root;
         private Label _resultBody;
+        private VisualElement _detailPanel;
+        private ScrollView _detailList;
+        private bool _detailOpen;
+        private bool _dismissed;
 
         private bool _visible;
 
@@ -73,16 +77,41 @@ namespace GameLogic
         private void CacheNodes()
         {
             _resultBody = _root.Q<Label>("ResultBody");
+            Button restart = _root.Q<Button>("RestartRunButton");
+            if (restart != null)
+            {
+                restart.clicked += () =>
+                {
+                    _dismissed = false;
+                    GameRoot.StartCellStage();
+                };
+            }
+            Button returnToHub = _root.Q<Button>("ReturnToHubButton");
+            if (returnToHub != null)
+            {
+                returnToHub.clicked += () => _dismissed = true;
+            }
+            _detailPanel = _root.Q<VisualElement>("ResultDetailPanel");
+            _detailList = _root.Q<ScrollView>("ResultDetailList");
+            Button viewDetails = _root.Q<Button>("ViewResultDetailsButton");
+            if (viewDetails != null)
+            {
+                viewDetails.clicked += ShowDetails;
+            }
+            Button closeDetails = _root.Q<Button>("CloseResultDetailButton");
+            if (closeDetails != null)
+            {
+                closeDetails.clicked += HideDetails;
+            }
 
             // 用户要求全部面板可拖拽：无遮挡关键操作区，标题栏作把手直接拖面板本身。
             VisualElement panel = _root.Q<VisualElement>("BattleResultUI");
             Label title = _root.Q<Label>("ResultTitle");
             if (panel != null && title != null)
             {
-                var drag = new PanelDragManipulator(title, panel, "result");
-                title.AddManipulator(drag);
-                drag.ApplyPersistedPosition();
+                UiWindowFocus.Attach(_document, panel, title, "result");
             }
+            UiWindowFocus.Attach(_document, _detailPanel, _root.Q<Label>("ResultDetailTitle"), "result-detail");
         }
 
         private void Update()
@@ -90,7 +119,12 @@ namespace GameLogic
             bool running = GameRoot.CellStage?.IsRunning ?? false;
             StageOutcome last = GameRoot.Director?.LastOutcome;
             bool hasResult = last != null && last.StageId != StageId.None;
-            bool show = !running && hasResult;
+            if (running)
+            {
+                _dismissed = false;
+                HideDetails();
+            }
+            bool show = !running && hasResult && !_dismissed;
             _visible = show;
 
             if (_root == null)
@@ -106,6 +140,46 @@ namespace GameLogic
             if (_resultBody != null)
             {
                 _resultBody.text = CellDebugHud.BuildResultText(last);
+            }
+        }
+
+        private void ShowDetails()
+        {
+            StageOutcome outcome = GameRoot.Director?.LastOutcome;
+            if (outcome == null || _detailPanel == null || _detailList == null)
+            {
+                return;
+            }
+
+            _detailList.Clear();
+            AddDetailLine($"阶段：{outcome.StageId} · {(outcome.Victory ? "完成" : "失败")}");
+            AddDetailLine($"等级：{outcome.Level} · 用时：{outcome.DurationSeconds:F1}s");
+            AddDetailLine($"吞噬：{outcome.Statistics.FoodDevoured} · 击杀：{outcome.Statistics.EnemiesKilled} · 精英：{outcome.Statistics.ElitesKilled}");
+            AddDetailLine($"输出：{outcome.Statistics.TotalDamageDealt:F0} · 承伤：{outcome.Statistics.TotalDamageTaken:F0}");
+            AddDetailLine($"营养质：{outcome.Statistics.NutrientEarned:F0} · 突变质：{outcome.Statistics.MutagenEarned:F0}");
+            AddDetailLine($"最高体积：{outcome.Statistics.PeakVolume:F2} · 最大连吃：{outcome.Statistics.MaxDevourCombo}");
+            if (outcome.KeyCards != null && outcome.KeyCards.Count > 0)
+            {
+                AddDetailLine("关键卡牌：" + string.Join("、", outcome.KeyCards.ConvertAll(card => card.Name)));
+            }
+            _detailOpen = true;
+            _detailPanel.style.display = DisplayStyle.Flex;
+            UiWindowFocus.BringToFront(_document, _detailPanel);
+        }
+
+        private void AddDetailLine(string text)
+        {
+            var label = new Label(text);
+            label.AddToClassList("list-row");
+            _detailList.Add(label);
+        }
+
+        private void HideDetails()
+        {
+            _detailOpen = false;
+            if (_detailPanel != null)
+            {
+                _detailPanel.style.display = DisplayStyle.None;
             }
         }
 

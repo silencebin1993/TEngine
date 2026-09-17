@@ -40,6 +40,9 @@ namespace GameLogic
         private Label _noGeneHint;
         private Button _organViewToggle;
         private Button _geneViewToggle;
+        private VisualElement _detailPanel;
+        private Label _detailTitle;
+        private Label _detailBody;
 
         /// <summary>story-002（equip-flow）D5：结构槽展示区 4 格固定顺序 Armor/Motility/Vital/Appendage。</summary>
         private Label _structuralSlotArmor;
@@ -91,6 +94,14 @@ namespace GameLogic
         public void SetPanelOpen(bool open)
         {
             _panelOpen = open;
+            if (open)
+            {
+                UiWindowFocus.BringToFront(_document, _root?.Q<VisualElement>("BattleCarrierUI"));
+            }
+            else
+            {
+                CloseDetail();
+            }
         }
 
         private void Awake()
@@ -157,12 +168,16 @@ namespace GameLogic
             _noGeneHint = _root.Q<Label>("NoGeneHint");
             _organViewToggle = _root.Q<Button>("OrganViewToggle");
             _geneViewToggle = _root.Q<Button>("GeneViewToggle");
+            _detailPanel = _root.Q<VisualElement>("CarrierDetailPanel");
+            _detailTitle = _root.Q<Label>("CarrierDetailTitle");
+            _detailBody = _root.Q<Label>("CarrierDetailBody");
 
             _structuralSlotArmor = _root.Q<Label>("StructuralSlot_Armor");
             _structuralSlotMotility = _root.Q<Label>("StructuralSlot_Motility");
             _structuralSlotVital = _root.Q<Label>("StructuralSlot_Vital");
             _structuralSlotAppendage = _root.Q<Label>("StructuralSlot_Appendage");
             _structuralReplaceHint = _root.Q<Label>("StructuralReplaceHint");
+            _root.pickingMode = PickingMode.Ignore;
 
             // story-003（slot-unlimited-codex）R4：已拥有/全量 Tab，纯 UI 展示态切换，不写数据。
             if (_organViewToggle != null)
@@ -173,6 +188,11 @@ namespace GameLogic
             {
                 _geneViewToggle.clicked += () => SetShowAllGenes(!_showAllGenes);
             }
+            Button detailClose = _root.Q<Button>("CarrierDetailClose");
+            if (detailClose != null)
+            {
+                detailClose.clicked += CloseDetail;
+            }
 
             // 用户要求全部面板可拖拽：面板根节点已被基因/器官拖拽手势占用（本文件的 D5/D8），
             // 不能复用根节点当把手，改用新增的 CarrierTitleBar 标题栏。
@@ -180,9 +200,11 @@ namespace GameLogic
             Label titleBar = _root.Q<Label>("CarrierTitleBar");
             if (carrierPanel != null && titleBar != null)
             {
-                var drag = new PanelDragManipulator(titleBar, carrierPanel, "carrier");
-                titleBar.AddManipulator(drag);
-                drag.ApplyPersistedPosition();
+                UiWindowFocus.Attach(_document, carrierPanel, titleBar, "carrier");
+            }
+            if (_detailPanel != null && _detailTitle != null)
+            {
+                UiWindowFocus.Attach(_document, _detailPanel, _detailTitle, "carrier-detail");
             }
 
             // story-002 R2：槽位按钮不再由 UXML 预置 Slot0/1/2，改 RefreshSlotBar 运行时按
@@ -311,6 +333,7 @@ namespace GameLogic
             _root.style.display = (running && _panelOpen) ? DisplayStyle.Flex : DisplayStyle.None;
             if (!running)
             {
+                CloseDetail();
                 return;
             }
         }
@@ -394,7 +417,11 @@ namespace GameLogic
                 {
                     btn.AddToClassList("carrier-active");
                 }
-                btn.clicked += () => registry.SetActive(carrierId);
+                btn.clicked += () =>
+                {
+                    registry.SetActive(carrierId);
+                    ShowCarrierDetail(carrier);
+                };
                 // story-005 R4：hover 器官图标显示 Description 摘要。
                 string desc = carrier.OrganelleId != null ? OrganelleCatalog.Get(carrier.OrganelleId)?.Description : null;
                 btn.RegisterCallback<PointerEnterEvent>(evt => BattleOverlayUIToolkit.Instance?.ShowTooltip(desc, evt.position));
@@ -433,7 +460,11 @@ namespace GameLogic
                 string desc = e.Description;
                 btn.RegisterCallback<PointerEnterEvent>(evt => BattleOverlayUIToolkit.Instance?.ShowTooltip(desc, evt.position));
                 btn.RegisterCallback<PointerLeaveEvent>(evt => BattleOverlayUIToolkit.Instance?.HideTooltip());
-                btn.clicked += () => TogglePreviewHighlight(btn);
+                btn.clicked += () =>
+                {
+                    TogglePreviewHighlight(btn);
+                    ShowOrganelleDetail(e.Id, e.DisplayName, e.Description, "图鉴目录：只读预览，不会获得或装备该器官。");
+                };
                 _carrierList.Add(btn);
             }
         }
@@ -507,6 +538,7 @@ namespace GameLogic
                 // story-005 R4：hover 已装备槽位显示基因 Description 摘要，动态查最新装备。
                 slot.RegisterCallback<PointerEnterEvent>(evt => OnSlotPointerEnter(evt, slotIndex));
                 slot.RegisterCallback<PointerLeaveEvent>(evt => BattleOverlayUIToolkit.Instance?.HideTooltip());
+                slot.clicked += () => ShowSlotDetail(slotIndex);
             }
         }
 
@@ -572,7 +604,11 @@ namespace GameLogic
                 string desc = e.Description;
                 btn.RegisterCallback<PointerEnterEvent>(evt => BattleOverlayUIToolkit.Instance?.ShowTooltip(desc, evt.position));
                 btn.RegisterCallback<PointerLeaveEvent>(evt => BattleOverlayUIToolkit.Instance?.HideTooltip());
-                btn.clicked += () => TogglePreviewHighlight(btn);
+                btn.clicked += () =>
+                {
+                    TogglePreviewHighlight(btn);
+                    ShowGeneDetail(e.Id, e.DisplayName, e.Description, "图鉴目录：只读预览，不会获得或装备该基因。");
+                };
                 _geneList.Add(btn);
             }
         }
@@ -604,8 +640,80 @@ namespace GameLogic
                     string desc = GeneCatalog.GetDescription(geneId);
                     btn.RegisterCallback<PointerEnterEvent>(evt => BattleOverlayUIToolkit.Instance?.ShowTooltip(desc, evt.position));
                     btn.RegisterCallback<PointerLeaveEvent>(evt => BattleOverlayUIToolkit.Instance?.HideTooltip());
+                    btn.clicked += () => ShowGeneDetail(geneId, GeneCatalog.GetDisplayName(geneId), GeneCatalog.GetDescription(geneId), $"储备实例：{instanceId}。拖到中间的空插槽即可装备。");
                     _geneList.Add(btn);
                 }
+            }
+        }
+
+        private void ShowCarrierDetail(CarrierInstance carrier)
+        {
+            if (carrier == null)
+            {
+                return;
+            }
+            string organelleId = carrier.OrganelleId;
+            string title = GetCarrierDisplayName(carrier);
+            string description = organelleId != null ? OrganelleCatalog.Get(organelleId)?.Description : null;
+            OpenDetail(title, $"{description ?? "暂无说明。"}\n\n载体 ID：{carrier.CarrierId}\n器官 ID：{organelleId ?? "未记录"}\n基因插槽：{carrier.Slots.Count}\n\n当前为活动载体；把储备基因拖到中间空槽即可装备。");
+        }
+
+        private void ShowOrganelleDetail(string id, string displayName, string description, string state)
+        {
+            OpenDetail(displayName ?? id, $"{description ?? "暂无说明。"}\n\n目录 ID：{id}\n{state}");
+        }
+
+        private void ShowGeneDetail(string id, string displayName, string description, string state)
+        {
+            OpenDetail(displayName ?? id, $"{description ?? "暂无说明。"}\n\n基因 ID：{id}\n{state}");
+        }
+
+        private void ShowSlotDetail(int slotIndex)
+        {
+            MetabolicSlicePanel panel = MetabolicSlicePanel.Instance;
+            CarrierInstance carrier = panel?.CarrierRegistry.ActiveCarrier;
+            if (carrier == null || slotIndex < 0 || slotIndex >= carrier.Slots.Count)
+            {
+                return;
+            }
+            string instanceId = carrier.Slots[slotIndex].GeneInstanceId;
+            if (string.IsNullOrEmpty(instanceId))
+            {
+                OpenDetail($"插槽 {slotIndex + 1}", "当前为空。\n\n从右侧“基因储备”拖入一个基因，即可装备到这个插槽。");
+                return;
+            }
+            GeneInstance gene = panel.GeneReserve.Find(instanceId);
+            if (gene == null)
+            {
+                OpenDetail($"插槽 {slotIndex + 1}", $"已装备实例：{instanceId}\n\n该实例目前不在储备索引中，无法读取完整说明。");
+                return;
+            }
+            ShowGeneDetail(gene.GeneId, GeneCatalog.GetDisplayName(gene.GeneId), GeneCatalog.GetDescription(gene.GeneId), $"已装备于活动载体的插槽 {slotIndex + 1}。拖回右侧列表可卸下。");
+        }
+
+        private void OpenDetail(string title, string body)
+        {
+            if (_detailPanel == null)
+            {
+                return;
+            }
+            if (_detailTitle != null)
+            {
+                _detailTitle.text = title;
+            }
+            if (_detailBody != null)
+            {
+                _detailBody.text = body;
+            }
+            _detailPanel.style.display = DisplayStyle.Flex;
+            UiWindowFocus.BringToFront(_document, _detailPanel);
+        }
+
+        private void CloseDetail()
+        {
+            if (_detailPanel != null)
+            {
+                _detailPanel.style.display = DisplayStyle.None;
             }
         }
 

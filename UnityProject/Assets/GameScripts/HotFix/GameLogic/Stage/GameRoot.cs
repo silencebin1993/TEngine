@@ -115,8 +115,8 @@ namespace GameLogic.Stage
         private static GameObject _hudHost;
 
         /// <summary>
-        /// 挂载 IMGUI 调试 HUD。正式 UI（UIWindow + prefab）就绪后应移除本方法。
-        /// 见 UI/Battle/CellDebugHud.cs 的说明。
+        /// 挂载全构建都需要的装配状态桥；IMGUI/压力测试只保留在编辑器和开发构建，
+        /// 正式玩家入口由 UI Toolkit 运行中枢与玩法面板负责。
         /// </summary>
         private static void MountDebugHud()
         {
@@ -124,11 +124,16 @@ namespace GameLogic.Stage
             {
                 return;
             }
-            _hudHost = new GameObject("[CellDebugHud]");
+            _hudHost = new GameObject("[GameUiSupport]");
             Object.DontDestroyOnLoad(_hudHost);
-            _hudHost.AddComponent<UI.Battle.CellDebugHud>();
             _hudHost.AddComponent<UI.Battle.MetabolicSlicePanel>();
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            // 已被 UI Toolkit 覆盖的旧 IMGUI 调试 HUD 不得默认盖在玩家界面上；
+            // 如需做历史对照，可在运行时显式启用该组件。
+            UI.Battle.CellDebugHud debugHud = _hudHost.AddComponent<UI.Battle.CellDebugHud>();
+            debugHud.enabled = false;
             _hudHost.AddComponent<Battle.StressTestToggle>();
+#endif
         }
 
         private static void Shutdown()

@@ -107,9 +107,7 @@ namespace GameLogic
             Label draftTitle = _root.Q<Label>("DraftTitle");
             if (draftPanel != null && draftTitle != null)
             {
-                var drag = new PanelDragManipulator(draftTitle, draftPanel, "draft");
-                draftTitle.AddManipulator(drag);
-                drag.ApplyPersistedPosition();
+                UiWindowFocus.Attach(_document, draftPanel, draftTitle, "draft");
             }
 
             for (int i = 0; i < CardCount; i++)

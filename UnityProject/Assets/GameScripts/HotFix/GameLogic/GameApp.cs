@@ -40,6 +40,9 @@ public partial class GameApp
         // 详见 DesignDocs/Game_Framework_Design.md §8。
         GameLogic.Stage.GameRoot.Startup();
 
+        // 运行中枢必须先于战斗页常驻：无阶段时它提供开局入口，运行中它提供唯一的跨玩法导航。
+        new GameObject("GameShellUIToolkit").AddComponent<GameLogic.UI.GameShell.GameShellUIToolkit>();
+
         GameModule.UI.ShowUIAsync<BattleMainUI>();
 
         // UI Toolkit 版 HUD（battle-ui-toolkit/story-001，D1/D2）：不挂 [Window]，
@@ -75,6 +78,10 @@ public partial class GameApp
         // 常驻单例默认隐藏，X 键切换，sortingOrder=7。模板/萌生列表从 CellDebugHud 的 Y 键
         // 调试面板迁到正式入口，只做"萌生"一块（模板编辑/回巢/野生器官三块转正登记为独立后续故事）。
         new GameObject("BattleGerminationUIToolkit").AddComponent<BattleGerminationUIToolkit>();
+
+        // 补齐原型期仍在 IMGUI / 键盘里的玩家玩法入口：模板版本、回巢改造与数字编队。
+        new GameObject("LineageWorkshopUIToolkit").AddComponent<GameLogic.UI.LineageWorkshop.LineageWorkshopUIToolkit>();
+        new GameObject("TacticalCommandUIToolkit").AddComponent<GameLogic.UI.TacticalCommand.TacticalCommandUIToolkit>();
     }
     
     private static void Release()

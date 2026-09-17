@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -40,14 +41,32 @@ namespace GameLogic
         private ScrollView _templateList;
         private Label _noTemplateHint;
         private Label _feedbackLabel;
+        private VisualElement _templatesView;
+        private VisualElement _queueView;
+        private Button _templatesTab;
+        private Button _queueTab;
+        private ScrollView _queueList;
+        private readonly List<GerminationChamberRegistry.PendingTicketInfo> _ticketBuffer =
+            new List<GerminationChamberRegistry.PendingTicketInfo>(8);
 
         private bool _panelOpen;
+        private bool _showQueue;
 
         /// <summary>供 execute_code 断言只读访问，同 BattleCarrierUIToolkit.Instance 先例。</summary>
         public static BattleGerminationUIToolkit Instance { get; private set; }
 
         /// <summary>只读探针：面板当前是否处于打开态。</summary>
         public bool IsPanelOpen => _panelOpen;
+
+        /// <summary>供运行中枢、工坊和 Esc 互斥逻辑统一控制显隐，不再只能依赖 X 键。</summary>
+        public void SetPanelOpen(bool open)
+        {
+            _panelOpen = open;
+            if (open)
+            {
+                UiWindowFocus.BringToFront(_document, _root?.Q<VisualElement>("BattleGerminationUI"));
+            }
+        }
 
         private void Awake()
         {
@@ -93,22 +112,41 @@ namespace GameLogic
             _templateList = _root.Q<ScrollView>("TemplateList");
             _noTemplateHint = _root.Q<Label>("NoTemplateHint");
             _feedbackLabel = _root.Q<Label>("FeedbackLabel");
+            _templatesView = _root.Q<VisualElement>("GerminationTemplatesView");
+            _queueView = _root.Q<VisualElement>("GerminationQueueView");
+            _templatesTab = _root.Q<Button>("GerminationTemplatesTab");
+            _queueTab = _root.Q<Button>("GerminationQueueTab");
+            _queueList = _root.Q<ScrollView>("GerminationQueueList");
+            _root.pickingMode = PickingMode.Ignore;
+
+            Button closeButton = _root.Q<Button>("GerminationCloseButton");
+            if (closeButton != null)
+            {
+                closeButton.clicked += () => SetPanelOpen(false);
+            }
+            if (_templatesTab != null)
+            {
+                _templatesTab.clicked += () => SetView(showQueue: false);
+            }
+            if (_queueTab != null)
+            {
+                _queueTab.clicked += () => SetView(showQueue: true);
+            }
 
             VisualElement panel = _root.Q<VisualElement>("BattleGerminationUI");
             Label titleBar = _root.Q<Label>("GerminationTitleBar");
             if (panel != null && titleBar != null)
             {
-                var drag = new PanelDragManipulator(titleBar, panel, "germination");
-                titleBar.AddManipulator(drag);
-                drag.ApplyPersistedPosition();
+                UiWindowFocus.Attach(_document, panel, titleBar, "germination");
             }
+            SetView(showQueue: false);
         }
 
         private void Update()
         {
             if (Input.GetKeyDown(KeyCode.X))
             {
-                _panelOpen = !_panelOpen;
+                SetPanelOpen(!_panelOpen);
             }
 
             if (_root == null)
@@ -125,6 +163,7 @@ namespace GameLogic
             }
 
             RefreshList(cell);
+            RefreshQueue(cell);
         }
 
         /// <summary>逐字对齐 <c>CellDebugHud.DrawLineageTemplateSection</c> 的数据口径：只读
@@ -205,6 +244,80 @@ namespace GameLogic
             _feedbackLabel.text = ticket != 0
                 ? $"已排入萌生腔（票据 {ticket}）"
                 : $"萌生失败：{error}";
+            if (ticket != 0)
+            {
+                SetView(showQueue: true);
+            }
+        }
+
+        private void SetView(bool showQueue)
+        {
+            _showQueue = showQueue;
+            _templatesView?.EnableInClassList("is-hidden", showQueue);
+            _queueView?.EnableInClassList("is-hidden", !showQueue);
+            _templatesTab?.EnableInClassList("is-selected", !showQueue);
+            _queueTab?.EnableInClassList("is-selected", showQueue);
+        }
+
+        private void RefreshQueue(CellStageFlow cell)
+        {
+            if (_queueList == null)
+            {
+                return;
+            }
+
+            _queueList.Clear();
+            GerminationChamberRegistry chambers = cell.GerminationChambers;
+            if (chambers == null)
+            {
+                AddQueueHint("萌生腔模块未就绪。");
+                return;
+            }
+
+            chambers.CopyPendingTickets(PlayerLineageId, _ticketBuffer);
+            if (_ticketBuffer.Count == 0)
+            {
+                AddQueueHint("当前没有待萌生订单。");
+                return;
+            }
+
+            for (int i = 0; i < _ticketBuffer.Count; i++)
+            {
+                GerminationChamberRegistry.PendingTicketInfo ticket = _ticketBuffer[i];
+                var row = new VisualElement();
+                row.AddToClassList("germination-row");
+                var info = new Label($"#{ticket.TicketId} · {ticket.TemplateName} V{ticket.Version}");
+                info.AddToClassList("germination-row-info");
+                row.Add(info);
+                var meta = new Label($"剩余 {Mathf.Max(0f, ticket.SecondsLeft):F1}s · 已支付 {ticket.Cost:F0} 生物质");
+                meta.AddToClassList("dim");
+                meta.AddToClassList("germination-row-meta");
+                row.Add(meta);
+                int ticketId = ticket.TicketId;
+                var cancel = new Button { text = "取消并退款" };
+                cancel.AddToClassList("germination-row-btn");
+                cancel.clicked += () => CancelTicket(ticketId);
+                row.Add(cancel);
+                _queueList.Add(row);
+            }
+        }
+
+        private void CancelTicket(int ticketId)
+        {
+            bool cancelled = GameRoot.CellStage?.GerminationChambers?.Cancel(ticketId) ?? false;
+            if (_feedbackLabel != null)
+            {
+                _feedbackLabel.text = cancelled
+                    ? $"已取消订单 #{ticketId}，生物质已全额退回。"
+                    : "订单已完成或不存在，无法取消。";
+            }
+        }
+
+        private void AddQueueHint(string text)
+        {
+            var hint = new Label(text);
+            hint.AddToClassList("dim");
+            _queueList.Add(hint);
         }
 
         private static void SetHintVisible(Label hint, bool visible, string text = null)
