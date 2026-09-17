@@ -29,6 +29,14 @@ namespace BinGames.Sim
         public NativeArray<uint> Status;
         public NativeArray<byte> Alive;
 
+        /// <summary>M4-R00-02 队列①-3（IC-REQ-010）：按目标槽位记"最近一次命中它的来源"，
+        /// 死亡时 SimWorld.EmitDeath/KillUnit 据此填 DeathEvent.Killer(Logic/Entity)Id——
+        /// 内核此前从未真正产出过击杀者信息（两条死亡路径都硬编码 0）。写在每次命中而不是只在
+        /// 致命一击时写，这样致命伤来自哪个请求与"死亡判定发生在哪个分支"（本 job 的 lethal 分支，
+        /// 或 JobCollectDeaths 对受控实体累积伤害的全量血量扫描）无关，读到的都是最后一次命中。</summary>
+        public NativeArray<SimEntityId> LastHitSourceEntityId;
+        public NativeArray<int> LastHitSourceLogicId;
+
         /// <summary>
         /// surgical-window（M2-05a）：稀疏登记的身体接点表。未登记的实体不受影响——
         /// 这是本 job 唯一新增的可写状态，其余字段与死亡判定路径逐字不变。
@@ -278,6 +286,11 @@ namespace BinGames.Sim
             if ((st & (uint)SimStatus.Vulnerable) != 0u) { final *= VulnerableMul; }
             if ((st & (uint)SimStatus.Hardened) != 0u) { final *= HardenedMul; }
 
+            // M4-R00-02 队列①-3：记在分支之前，三条分支（surgical/受控/普通）都覆盖到，
+            // 不用在每条分支里各写一遍。
+            LastHitSourceEntityId[i] = req.SourceEntityId;
+            LastHitSourceLogicId[i] = req.SourceLogicId;
+
             if (req.ApplyStatus != SimStatus.None)
             {
                 Status[i] = st | (uint)req.ApplyStatus;
@@ -293,7 +306,9 @@ namespace BinGames.Sim
                     HitEvents.Add(new HitEvent
                     {
                         TargetLogicId = LogicId[i],
+                        TargetEntityId = EntityId[i],
                         SourceLogicId = req.SourceLogicId,
+                        SourceEntityId = req.SourceEntityId,
                         Position = Position[i],
                         Damage = final,
                         // 接点伤害从不直接致死——死亡判定只看整体 Health，见 SimUnitBody 的口径说明。
@@ -317,7 +332,9 @@ namespace BinGames.Sim
                     HitEvents.Add(new HitEvent
                     {
                         TargetLogicId = LogicId[i],
+                        TargetEntityId = EntityId[i],
                         SourceLogicId = req.SourceLogicId,
+                        SourceEntityId = req.SourceEntityId,
                         Position = Position[i],
                         Damage = final,
                         Lethal = false,
@@ -344,7 +361,9 @@ namespace BinGames.Sim
                 HitEvents.Add(new HitEvent
                 {
                     TargetLogicId = LogicId[i],
+                    TargetEntityId = EntityId[i],
                     SourceLogicId = req.SourceLogicId,
+                    SourceEntityId = req.SourceEntityId,
                     Position = Position[i],
                     Damage = final,
                     Lethal = lethal,

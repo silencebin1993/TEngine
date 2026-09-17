@@ -74,6 +74,7 @@ namespace GameLogic.Control
 
             float2 dir = math.normalizesafe(aim, new float2(1f, 0f));
             int sourceLogicId = ResolveLogicId(sim, unitIndex);
+            SimEntityId sourceEntityId = ResolveEntityId(sim, unitIndex);
 
             switch (act.Kind)
             {
@@ -93,12 +94,13 @@ namespace GameLogic.Control
                         emitterPos,
                         dir, act.Speed, act.Damage, act.Radius, act.Lifetime, act.Pierce,
                         targetFaction, act.ApplyStatus, sourceLogicId,
-                        targetPart: targetPart, surgicalAim: surgicalAim);
+                        targetPart: targetPart, surgicalAim: surgicalAim, sourceEntityId: sourceEntityId);
                     break;
 
                 case OrganKernelActionKind.Cone:
                     sim.DamageCone(origin, act.Radius, dir, act.HalfAngleDeg, act.Damage,
-                        targetFaction, act.ApplyStatus, sourceLogicId: sourceLogicId);
+                        targetFaction, act.ApplyStatus, sourceLogicId: sourceLogicId,
+                        sourceEntityId: sourceEntityId);
                     break;
 
                 case OrganKernelActionKind.Zone:
@@ -106,7 +108,8 @@ namespace GameLogic.Control
                         act.FollowSelf ? origin : origin + dir * (act.Radius * ZoneThrowDistanceMul),
                         act.Radius, act.Seconds, act.Damage, act.Interval,
                         targetFaction, applyStatus: act.ApplyStatus, sourceLogicId: sourceLogicId,
-                        followUnitIndex: act.FollowSelf ? unitIndex : SimConst.InvalidIndex);
+                        followUnitIndex: act.FollowSelf ? unitIndex : SimConst.InvalidIndex,
+                        sourceEntityId: sourceEntityId);
                     break;
 
                 case OrganKernelActionKind.Status:
@@ -134,6 +137,16 @@ namespace GameLogic.Control
             return unitIndex >= 0 && unitIndex < snapshot.Count && snapshot.LogicId.IsCreated
                 ? snapshot.LogicId[unitIndex]
                 : 0;
+        }
+
+        /// <summary>M4-R00-02 队列①-3（IC-REQ-010）：取释放者的稳定身份，与 <see cref="ResolveLogicId"/>
+        /// 同一道理——LogicId 场上同配置多实例时会串，归属击杀/命中需要用这个。</summary>
+        private static SimEntityId ResolveEntityId(SimBridge sim, int unitIndex)
+        {
+            SimSnapshot snapshot = sim.Snapshot;
+            return unitIndex >= 0 && unitIndex < snapshot.Count && snapshot.EntityId.IsCreated
+                ? snapshot.EntityId[unitIndex]
+                : SimEntityId.None;
         }
     }
 }

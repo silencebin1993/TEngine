@@ -171,7 +171,8 @@ namespace GameLogic.MetabolicSlice.Combat
         /// <param name="arenaHalfExtent">场地半边长，配合 <paramref name="obstacles"/> 一起判越界。</param>
         public static ProjectileRequest Build(HitEvent evt, float2 origin, float2 baseDir,
             int index, int count, float scale, int shotId,
-            float bodyRadius = 0f, ObstacleSpec[] obstacles = null, float arenaHalfExtent = 0f)
+            float bodyRadius = 0f, ObstacleSpec[] obstacles = null, float arenaHalfExtent = 0f,
+            SimEntityId sourceEntityId = default)
         {
             float speedMul = evt.Speed > 0f ? evt.Speed : 1f;
             float speed = BaseSpeed * math.clamp(speedMul, 0.25f, 6f);
@@ -265,6 +266,7 @@ namespace GameLogic.MetabolicSlice.Combat
                 TargetFaction = SimFaction.Hostile,
                 ApplyStatus = applyStatus,
                 SourceLogicId = shotId,
+                SourceEntityId = sourceEntityId,
                 VisualId = 0,
 
                 Homing = homing,

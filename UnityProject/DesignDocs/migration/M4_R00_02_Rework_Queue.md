@@ -30,7 +30,14 @@
 2. **友军/敌方/Alpha 接入统一装配签名释放**（`M3-R02-ANY-ENTITY-PROJECTION`缺失）——依赖①-1
    的`EmissionContext`落地。折入 `M3-R02`。
 3. **伤害/死亡事件迁移到稳定`SimEntityId`**（`IC-REQ-010`部分，2026-09-11遗留至今未落地）。
-   折入 `M1-R01`。
+   折入 `M1-R01`。**2026-09-17 已完成**——`HitEvent`/`DeathEvent`/`DamageRequest`/
+   `ProjectileRequest`/`ZoneRequest`及对应`State`全部新增`SourceEntityId`/`TargetEntityId`/
+   `KillerEntityId`字段并接线到全部生产/消费点；`KillerLogicId`此前两条死亡路径（`JobDamage`
+   致死、`KillUnit`吞噬）都硬编码0，本次新增`JobDamage.LastHitSourceEntityId`记录管线后首次
+   真正归属。`ARCH-TASK-ENTITY-IDENTITY-01`（跨局身份不稳定）与本条无冲突——本条只要求同局内
+   归属。设计与实施记录：`production/design/m4-r00-02-item1-3-stable-source-identity/DESIGN.md`；
+   `CellFrameworkValidate.cs` `[56]`（同LogicId多实例场景），`tools/unity-validate.sh` 1145/1145
+   通过。已知未覆盖：`JobContactDamage`（敌方接触玩家）从未有来源概念，本次未新增，见DESIGN §7。
 
 ## ② 正式入口不存在
 

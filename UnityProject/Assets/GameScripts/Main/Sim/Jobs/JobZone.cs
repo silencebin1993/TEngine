@@ -76,6 +76,7 @@ namespace BinGames.Sim
                     ChainRange = 4f,
                     ChainFalloff = 0.75f,
                     SourceLogicId = s.SourceLogicId,
+                    SourceEntityId = s.SourceEntityId,
                 });
                 s.TickTimer = math.max(0.02f, s.Interval);
             }

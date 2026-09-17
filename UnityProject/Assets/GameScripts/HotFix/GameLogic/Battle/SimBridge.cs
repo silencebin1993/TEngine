@@ -730,7 +730,7 @@ namespace GameLogic.Battle
             SimStatus applyStatus = SimStatus.None,
             SimStatus requireStatus = SimStatus.None,
             int chainCount = 0, float chainRange = 4f, float chainFalloff = 0.75f,
-            int sourceLogicId = 0)
+            int sourceLogicId = 0, SimEntityId sourceEntityId = default)
         {
             if (!_running) { return; }
             _cmds.Damage(new DamageRequest
@@ -746,6 +746,7 @@ namespace GameLogic.Battle
                 ChainRange = chainRange,
                 ChainFalloff = chainFalloff,
                 SourceLogicId = sourceLogicId,
+                SourceEntityId = sourceEntityId,
             });
         }
 
@@ -753,7 +754,7 @@ namespace GameLogic.Battle
         public void DamageUnit(int unitIndex, float amount,
             SimStatus applyStatus = SimStatus.None,
             int chainCount = 0, float chainRange = 4f, float chainFalloff = 0.75f,
-            int sourceLogicId = 0)
+            int sourceLogicId = 0, SimEntityId sourceEntityId = default)
         {
             if (!_running) { return; }
             _cmds.Damage(new DamageRequest
@@ -769,6 +770,7 @@ namespace GameLogic.Battle
                 ChainRange = chainRange,
                 ChainFalloff = chainFalloff,
                 SourceLogicId = sourceLogicId,
+                SourceEntityId = sourceEntityId,
             });
         }
 
@@ -818,7 +820,7 @@ namespace GameLogic.Battle
             SimStatus applyStatus = SimStatus.None,
             int sourceLogicId = 0, int visualId = 0,
             SimBodyPartSlot targetPart = SimBodyPartSlot.None,
-            bool surgicalAim = false)
+            bool surgicalAim = false, SimEntityId sourceEntityId = default)
         {
             if (!_running) { return; }
             _cmds.Projectile(new ProjectileRequest
@@ -835,6 +837,7 @@ namespace GameLogic.Battle
                 // 来源在弹体飞行期间必须保持真实 LogicId；只有 JobProjectile 确认命中具体接点时
                 // 才给那一条 DamageRequest 编码，避免正常弹体终结/表现/归因链收到负数来源。
                 SourceLogicId = sourceLogicId,
+                SourceEntityId = sourceEntityId,
                 VisualId = visualId,
                 TargetPart = targetPart,
                 Flags = surgicalAim ? SimProjectileFlags.SurgicalAim : SimProjectileFlags.None,
@@ -861,7 +864,8 @@ namespace GameLogic.Battle
         public void DamageCone(float2 origin, float radius, float2 coneDir, float halfAngleDeg, float amount,
             SimFaction targetFaction = SimFaction.Hostile,
             SimStatus applyStatus = SimStatus.None,
-            int chainCount = 0, float nearRadius = 0f, int sourceLogicId = 0)
+            int chainCount = 0, float nearRadius = 0f, int sourceLogicId = 0,
+            SimEntityId sourceEntityId = default)
         {
             if (!_running) { return; }
             bool full = halfAngleDeg >= 180f || math.lengthsq(coneDir) < 1e-6f;
@@ -878,6 +882,7 @@ namespace GameLogic.Battle
                 ChainRange = 4f,
                 ChainFalloff = 0.75f,
                 SourceLogicId = sourceLogicId,
+                SourceEntityId = sourceEntityId,
                 ConeDir = full ? float2.zero : math.normalizesafe(coneDir),
                 ConeCosHalf = full ? -1f : math.cos(math.radians(halfAngleDeg)),
                 ConeNearRadius = nearRadius,
@@ -911,7 +916,8 @@ namespace GameLogic.Battle
             float interval, SimFaction targetFaction = SimFaction.Hostile,
             float growthRate = 0f, float maxRadius = 0f, SimStatus applyStatus = SimStatus.None,
             int chainCount = 0, int sourceLogicId = 0,
-            int followUnitIndex = SimConst.InvalidIndex, uint tint = 0u)
+            int followUnitIndex = SimConst.InvalidIndex, uint tint = 0u,
+            SimEntityId sourceEntityId = default)
         {
             if (!_running) { return; }
             _cmds.Zone(new ZoneRequest
@@ -927,6 +933,7 @@ namespace GameLogic.Battle
                 ApplyStatus = applyStatus,
                 ChainCount = chainCount,
                 SourceLogicId = sourceLogicId,
+                SourceEntityId = sourceEntityId,
                 FollowUnitIndex = followUnitIndex,
                 Tint = tint,
             });
@@ -953,7 +960,10 @@ namespace GameLogic.Battle
             return w.DeflectProjectiles(origin, radius,
                 full ? float2.zero : math.normalizesafe(coneDir),
                 full ? -1f : math.cos(math.radians(halfAngleDeg)),
-                sourceFaction, newSourceLogicId, SimFaction.Hostile, damageMul);
+                sourceFaction, newSourceLogicId, SimFaction.Hostile, damageMul,
+                // 弹反的语义恒是"归属玩家"（doc 注释：调头+换阵营+归属玩家），
+                // 与 newSourceLogicId 走同一约定，不需要单独一个调用方参数。
+                ControlledUnitId);
         }
 
         /// <summary>combat-primitive-overhaul：本帧弹体终结事件条数（真实落点）。热更层放留坑/命中表现用。</summary>
@@ -1086,7 +1096,16 @@ namespace GameLogic.Battle
         /// <summary>吞噬结算：直接击杀并生成死亡事件。</summary>
         public void ConsumeUnit(int unitIndex)
         {
-            (_backend as SimWorld)?.KillUnit(unitIndex, 0);
+            // M4-R00-02 队列①-3（IC-REQ-010）：吞噬者恒是当前受控实体（见 JobDevourScan.ActorIndex
+            // 只喂 controlledIndex），killerLogicId 此前一直硬编码 0——这里第一次真正归属。
+            int killerLogicId = 0;
+            SimEntityId killerEntityId = SimEntityId.None;
+            if (_snapshot.TryResolveControlledUnit(out int controlledIdx))
+            {
+                killerLogicId = _snapshot.LogicId[controlledIdx];
+                killerEntityId = _snapshot.EntityId[controlledIdx];
+            }
+            (_backend as SimWorld)?.KillUnit(unitIndex, killerLogicId, killerEntityId);
             if (_backend != null)
             {
                 _snapshot = _backend.GetSnapshot();

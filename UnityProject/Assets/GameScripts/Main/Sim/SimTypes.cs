@@ -432,6 +432,9 @@ namespace BinGames.Sim
         public float ChainFalloff;
         /// <summary>用于伤害来源归属与事件回传。</summary>
         public int SourceLogicId;
+        /// <summary>M4-R00-02 队列①-3（IC-REQ-010）：来源的稳定身份。LogicId 只是配置表 id，
+        /// 场上多个同配置实例会串——需要按实例归属击杀/命中时用这个，不要用 SourceLogicId。</summary>
+        public SimEntityId SourceEntityId;
 
         /// <summary>
         /// surgical-window（M2-05a）：把这次伤害定向到目标身上的某个身体接点，而不是整体 Health。
@@ -611,6 +614,8 @@ namespace BinGames.Sim
         public SimFaction TargetFaction;
         public SimStatus ApplyStatus;
         public int SourceLogicId;
+        /// <summary>M4-R00-02 队列①-3（IC-REQ-010）：见 <see cref="DamageRequest.SourceEntityId"/>。</summary>
+        public SimEntityId SourceEntityId;
         public int VisualId;
 
         // ── combat-primitive-overhaul：弹道基元。全部留 0 时行为与旧版逐字一致（零回归）。──
@@ -691,6 +696,8 @@ namespace BinGames.Sim
         public uint ApplyStatus;
         public int ChainCount;
         public int SourceLogicId;
+        /// <summary>M4-R00-02 队列①-3（IC-REQ-010）：见 <see cref="DamageRequest.SourceEntityId"/>。</summary>
+        public SimEntityId SourceEntityId;
         /// <summary>跟随某个单位（光环）。<see cref="SimConst.InvalidIndex"/> = 钉在原地。</summary>
         public int FollowUnitIndex;
         /// <summary>RGBA8 实例色（0 = 渲染器默认）。</summary>
@@ -712,6 +719,8 @@ namespace BinGames.Sim
         public SimStatus ApplyStatus;
         public int ChainCount;
         public int SourceLogicId;
+        /// <summary>M4-R00-02 队列①-3（IC-REQ-010）：见 <see cref="DamageRequest.SourceEntityId"/>。</summary>
+        public SimEntityId SourceEntityId;
         public int FollowUnitIndex;
         public uint Tint;
     }
@@ -731,6 +740,8 @@ namespace BinGames.Sim
         public float LingerSeconds;
         public float LingerRadius;
         public int SourceLogicId;
+        /// <summary>M4-R00-02 队列①-3（IC-REQ-010）：见 <see cref="DamageRequest.SourceEntityId"/>。</summary>
+        public SimEntityId SourceEntityId;
         public int VisualId;
         public ProjectileEndReason Reason;
     }
@@ -791,6 +802,11 @@ namespace BinGames.Sim
         public SimStatus StatusAtDeath;
         /// <summary>击杀来源的逻辑 id；0 表示环境或自然死亡。</summary>
         public int KillerLogicId;
+        /// <summary>M4-R00-02 队列①-3（IC-REQ-010）：击杀来源的稳定身份；None 表示环境/自然死亡，
+        /// 或来源本身不是可归属身份的单位（如接触伤害，见 JobContactDamage 的已知缺口）。
+        /// 同 <see cref="EntityId"/> 的道理：KillerLogicId 只是配置表 id，场上同配置多实例时
+        /// 不能靠它反查"到底是哪一个"打死的。</summary>
+        public SimEntityId KillerEntityId;
         /// <summary>致死来源类型。</summary>
         public DeathCauseKind CauseKind;
         /// <summary>M2-05c：死亡前是否登记过至少一个身体接点。只记录模拟事实，奖励由热更层解释。</summary>
@@ -802,6 +818,11 @@ namespace BinGames.Sim
     {
         public int TargetLogicId;
         public int SourceLogicId;
+        /// <summary>M4-R00-02 队列①-3（IC-REQ-010）：命中目标的稳定身份。见 <see cref="DeathEvent.EntityId"/>
+        /// 同一道理——TargetLogicId 只是配置表 id，场上同配置多实例时不能靠它反查具体是哪一个。</summary>
+        public SimEntityId TargetEntityId;
+        /// <summary>M4-R00-02 队列①-3（IC-REQ-010）：见 <see cref="DamageRequest.SourceEntityId"/>。</summary>
+        public SimEntityId SourceEntityId;
         public float2 Position;
         public float Damage;
         public bool Lethal;

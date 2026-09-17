@@ -152,6 +152,7 @@ namespace GameLogic.Stage.CellStage
                 Signals.Publish(new HitSignal
                 {
                     TargetLogicId = h.TargetLogicId,
+                    TargetEntityId = h.TargetEntityId,
                     Position = h.Position,
                     Damage = h.Damage,
                     Lethal = h.Lethal,

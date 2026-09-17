@@ -39,6 +39,9 @@ namespace BinGames.Sim
         private NativeArray<int> _logicId;
         private NativeArray<int> _visualId;
         private NativeArray<SimEntityId> _entityId;
+        /// <summary>M4-R00-02 队列①-3（IC-REQ-010）：见 JobDamage.LastHitSourceEntityId 的注释。</summary>
+        private NativeArray<SimEntityId> _lastHitSourceEntityId;
+        private NativeArray<int> _lastHitSourceLogicId;
         private NativeArray<byte> _intentSource;
         private NativeArray<byte> _intentSourceBeforePlayer;
         /// <summary>逐槽位的"不可接管"标记。见 <see cref="SpawnRequest.ExcludeFromControl"/>。</summary>
@@ -186,6 +189,8 @@ namespace BinGames.Sim
             _logicId = new NativeArray<int>(cap, A);
             _visualId = new NativeArray<int>(cap, A);
             _entityId = new NativeArray<SimEntityId>(cap, A);
+            _lastHitSourceEntityId = new NativeArray<SimEntityId>(cap, A);
+            _lastHitSourceLogicId = new NativeArray<int>(cap, A);
             _intentSource = new NativeArray<byte>(cap, A);
             _intentSourceBeforePlayer = new NativeArray<byte>(cap, A);
             _excludeFromControl = new NativeArray<byte>(cap, A);
@@ -1006,7 +1011,8 @@ namespace BinGames.Sim
         /// <param name="coneCosHalf">扇形半角余弦，仅 <paramref name="coneDir"/> 非零时生效。</param>
         /// <returns>实际弹回的弹体数。</returns>
         public int DeflectProjectiles(float2 origin, float radius, float2 coneDir, float coneCosHalf,
-            SimFaction ownFaction, int newSourceLogicId, SimFaction newTargetFaction, float damageMul)
+            SimFaction ownFaction, int newSourceLogicId, SimFaction newTargetFaction, float damageMul,
+            SimEntityId newSourceEntityId = default)
         {
             if (!_created || !_projectiles.IsCreated || radius <= 0f)
             {
@@ -1046,6 +1052,7 @@ namespace BinGames.Sim
                 s.Velocity = -s.Velocity;
                 s.TargetFaction = (byte)newTargetFaction;
                 s.SourceLogicId = newSourceLogicId;
+                s.SourceEntityId = newSourceEntityId;
                 s.Damage *= damageMul;
                 s.LastHitIndex = SimConst.InvalidIndex;
                 s.HitCooldown = 0f;
@@ -1290,6 +1297,8 @@ namespace BinGames.Sim
                     Bodies = _bodies,
                     PendingDeaths = _pendingDeaths,
                     HitEvents = _hitEvents,
+                    LastHitSourceEntityId = _lastHitSourceEntityId,
+                    LastHitSourceLogicId = _lastHitSourceLogicId,
                     ControlledDamageOut = _controlledDamage,
                     ControlledUnitIndex = hasControlledUnit ? controlledIndex : SimConst.InvalidIndex,
                     InvCellSize = _hash.InvCellSize,
@@ -1563,6 +1572,7 @@ namespace BinGames.Sim
                         Amount = arc.AttackDamage,
                         TargetFaction = SimFaction.Hostile,
                         SourceLogicId = _logicId[i],
+                        SourceEntityId = _entityId[i],
                     });
                     _damageScratch.Add(new DamageRequest
                     {
@@ -1572,6 +1582,7 @@ namespace BinGames.Sim
                         Amount = _health[i] + 999f,
                         TargetFaction = SimFaction.PlayerMinion,
                         SourceLogicId = _logicId[i],
+                        SourceEntityId = _entityId[i],
                     });
                 }
                 else if (_attackTimer[i] <= 0f)
@@ -1584,6 +1595,7 @@ namespace BinGames.Sim
                         Amount = arc.AttackDamage,
                         TargetFaction = SimFaction.Hostile,
                         SourceLogicId = _logicId[i],
+                        SourceEntityId = _entityId[i],
                         // 只有真正锁定到命令指定实体时才透传接点：打到临时找来的替代目标身上
                         // 套用玩家原本瞄准另一个实体的接点没有意义（那具身体八成根本没配这个接点，
                         // 会被 JobDamage 的既有回退语义悄悄吞成整体伤害，看似"能跑"实则文不对题）。
@@ -1995,6 +2007,9 @@ namespace BinGames.Sim
             _faction[idx] = (byte)req.Faction;
             _alive[idx] = 1;
             _entityId[idx] = AllocateEntityId();
+            // 槽位复用前必须清：否则新占用者死亡时会读到上一任的击杀者记录（串体）。
+            _lastHitSourceEntityId[idx] = SimEntityId.None;
+            _lastHitSourceLogicId[idx] = 0;
             _excludeFromControl[idx] = (byte)(req.ExcludeFromControl ? 1 : 0);
             IntentSource initialIntentSource = req.IntentSource == IntentSource.Scripted
                 ? IntentSource.Scripted
@@ -2086,6 +2101,7 @@ namespace BinGames.Sim
                     ApplyStatus = (uint)req.ApplyStatus,
                     ChainCount = req.ChainCount,
                     SourceLogicId = req.SourceLogicId,
+                    SourceEntityId = req.SourceEntityId,
                     FollowUnitIndex = req.FollowUnitIndex,
                     Tint = req.Tint,
                     Alive = 1,
@@ -2117,6 +2133,7 @@ namespace BinGames.Sim
                     TargetFaction = (byte)req.TargetFaction,
                     ApplyStatus = (uint)req.ApplyStatus,
                     SourceLogicId = req.SourceLogicId,
+                    SourceEntityId = req.SourceEntityId,
                     VisualId = req.VisualId,
                     Alive = 1,
 
@@ -2185,7 +2202,8 @@ namespace BinGames.Sim
                     Radius = _radius[idx],
                     Faction = (SimFaction)_faction[idx],
                     StatusAtDeath = (SimStatus)_status[idx],
-                    KillerLogicId = 0,
+                    KillerLogicId = _lastHitSourceLogicId[idx],
+                    KillerEntityId = _lastHitSourceEntityId[idx],
                     CauseKind = DeathCauseKind.Damage,
                     HadSurgicalBody = (byte)(_bodies.IsCreated && _bodies.ContainsKey(_entityId[idx]) ? 1 : 0),
                 };
@@ -2362,7 +2380,7 @@ namespace BinGames.Sim
         }
 
         /// <summary>直接击杀（吞噬结算用）。</summary>
-        public void KillUnit(int idx, int killerLogicId)
+        public void KillUnit(int idx, int killerLogicId, SimEntityId killerEntityId = default)
         {
             if (!_created || idx < 0 || idx >= _unitCount || _alive[idx] == 0)
             {
@@ -2380,6 +2398,7 @@ namespace BinGames.Sim
                     Faction = (SimFaction)_faction[idx],
                     StatusAtDeath = (SimStatus)_status[idx],
                     KillerLogicId = killerLogicId,
+                    KillerEntityId = killerEntityId,
                     CauseKind = DeathCauseKind.Devour,
                     HadSurgicalBody = (byte)(_bodies.IsCreated && _bodies.ContainsKey(_entityId[idx]) ? 1 : 0),
                 };
@@ -2491,6 +2510,7 @@ namespace BinGames.Sim
                         LingerSeconds = 0f,
                         LingerRadius = 0f,
                         SourceLogicId = s.SourceLogicId,
+                        SourceEntityId = s.SourceEntityId,
                         VisualId = s.VisualId,
                         Reason = ProjectileEndReason.WorldTeardown,
                     });
@@ -2536,6 +2556,8 @@ namespace BinGames.Sim
             SafeF(ref _health); SafeF(ref _radius); SafeF(ref _maxSpeed); SafeF(ref _attackTimer);
             SafeI(ref _archetypeId); SafeI(ref _logicId); SafeI(ref _visualId);
             if (_entityId.IsCreated) { _entityId.Dispose(); }
+            if (_lastHitSourceEntityId.IsCreated) { _lastHitSourceEntityId.Dispose(); }
+            if (_lastHitSourceLogicId.IsCreated) { _lastHitSourceLogicId.Dispose(); }
             if (_intentSource.IsCreated) { _intentSource.Dispose(); }
             if (_intentSourceBeforePlayer.IsCreated) { _intentSourceBeforePlayer.Dispose(); }
             if (_excludeFromControl.IsCreated) { _excludeFromControl.Dispose(); }

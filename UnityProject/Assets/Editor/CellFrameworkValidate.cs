@@ -117,6 +117,7 @@ namespace GameLogic.EditorTools
                 ValidateSquadCommandQueueRequest();
                 ValidateDirectFormationHud();
                 ValidateControlFeedbackFourPart();
+                ValidateStableKillerIdentity();
             }
             catch (Exception e)
             {
@@ -1206,6 +1207,118 @@ namespace GameLogic.EditorTools
                 }
                 Expect(foundDamage, "应找到 LogicId=1 的伤害致死事件");
                 Expect(foundDevour, "应找到 LogicId=2 的吞噬致死事件");
+            }
+            finally
+            {
+                cmds.Dispose();
+                world.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// M4-R00-02 队列①-3（IC-REQ-010）：伤害/死亡事件迁移到稳定 SimEntityId。
+        ///
+        /// 复现队列文档点名的症状——"同类敌人同场存活时命中/死亡来源可能记混"：两个受害者
+        /// 故意共享同一个 LogicId（同配置的两只敌人），只有 SimEntityId 能区分它们。此前
+        /// KillerLogicId 在两条死亡路径（JobDamage 致死、KillUnit 吞噬）里都硬编码 0，
+        /// 从未真正归属过——本用例断言它现在真的写上了攻击者的稳定身份。
+        /// </summary>
+        private static void ValidateStableKillerIdentity()
+        {
+            Line("\n[56] 击杀者稳定身份归属：伤害/死亡事件迁移到 SimEntityId（M4-R00-02 队列①-3，IC-REQ-010）");
+
+            var world = new SimWorld();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 64;
+            world.Initialize(cfg);
+            world.SetArchetypes(DataRegistry.Instance.ArchetypeArray());
+
+            SimCommandBuffer cmds = default;
+            cmds.Initialize(Unity.Collections.Allocator.Persistent, 32);
+
+            try
+            {
+                world.SetPlayerPosition(float2.zero);
+
+                int idxAttacker = world.SpawnUnit(new SpawnRequest
+                {
+                    Position = new float2(0f, 5f), Health = 10f, Radius = 0.5f,
+                    MaxSpeed = 0f, ArchetypeId = 0, Faction = SimFaction.PlayerMinion, LogicId = 42,
+                });
+                // 两个受害者共享同一个 LogicId：真实场景里"同一种敌人生成了两只"就是这个形状。
+                int idxVictim1 = world.SpawnUnit(new SpawnRequest
+                {
+                    Position = new float2(5f, 0f), Health = 10f, Radius = 0.5f,
+                    MaxSpeed = 0f, ArchetypeId = 0, Faction = SimFaction.Hostile, LogicId = 7,
+                });
+                int idxVictim2 = world.SpawnUnit(new SpawnRequest
+                {
+                    Position = new float2(-5f, 0f), Health = 10f, Radius = 0.5f,
+                    MaxSpeed = 0f, ArchetypeId = 0, Faction = SimFaction.Hostile, LogicId = 7,
+                });
+
+                SimSnapshot pre = world.GetSnapshot();
+                SimEntityId attackerEntityId = pre.EntityId[idxAttacker];
+                SimEntityId victim1EntityId = pre.EntityId[idxVictim1];
+                SimEntityId victim2EntityId = pre.EntityId[idxVictim2];
+                Expect(victim1EntityId != victim2EntityId,
+                    "两个共享同一 LogicId 的受害者必须仍有不同的 SimEntityId");
+
+                // 单体伤害，显式带上攻击者的稳定身份，只打 victim1。
+                cmds.Damage(new DamageRequest
+                {
+                    Origin = float2.zero, Radius = -1f, TargetIndex = idxVictim1,
+                    Amount = 1000f, TargetFaction = SimFaction.None,
+                    SourceLogicId = pre.LogicId[idxAttacker], SourceEntityId = attackerEntityId,
+                });
+                cmds.SetPlayerIntent(PlayerIntent.Idle);
+                world.Step(1f / 60f, ref cmds);
+
+                SimSnapshot s1 = world.GetSnapshot();
+                bool foundHit = false;
+                for (int i = 0; i < s1.HitCount; i++)
+                {
+                    HitEvent h = s1.Hits[i];
+                    if (h.TargetEntityId == victim1EntityId)
+                    {
+                        Expect(h.SourceEntityId == attackerEntityId,
+                            $"命中事件应带攻击者的稳定身份（实际 {h.SourceEntityId}）");
+                        foundHit = true;
+                    }
+                }
+                Expect(foundHit, "应产生一条命中 victim1 的 HitEvent（按 TargetEntityId 定位）");
+
+                Expect(s1.DeathCount == 1, $"应只有 victim1 死亡（实际 {s1.DeathCount}）");
+                DeathEvent d1 = s1.Deaths[0];
+                Expect(d1.EntityId == victim1EntityId,
+                    "死亡事件的 EntityId 应精确指向 victim1，不能靠共享的 LogicId=7 猜");
+                Expect(d1.KillerEntityId == attackerEntityId,
+                    $"死亡事件的击杀者应归属攻击者的稳定身份（实际 {d1.KillerEntityId}）——" +
+                    "此前 KillerLogicId 恒为 0，从未真正归属过任何来源");
+                Expect(d1.KillerLogicId == pre.LogicId[idxAttacker],
+                    $"KillerLogicId 也应同步归属攻击者（实际 {d1.KillerLogicId}）");
+
+                // 吞噬路径：直接验证内核 KillUnit 新增的 killerEntityId 参数被正确写入 DeathEvent
+                // （SimBridge.ConsumeUnit 从受控实体快照解出这两个值后转发到这里，参见该方法注释）。
+                // _deathEvents 在两次 Step 之间是累积的（同 [7] ValidateDeathCauseKind 的既有行为：
+                // 上面 Step() 产的 victim1 死亡事件还留着），这里不假设下标，按 EntityId 找。
+                world.KillUnit(idxVictim2, pre.LogicId[idxAttacker], attackerEntityId);
+                SimSnapshot s2 = world.GetSnapshot();
+                Expect(s2.DeathCount == 2,
+                    $"应累积 victim1（Step）+ victim2（KillUnit）共 2 条死亡事件（实际 {s2.DeathCount}）");
+                bool foundVictim2Death = false;
+                for (int i = 0; i < s2.DeathCount; i++)
+                {
+                    DeathEvent d = s2.Deaths[i];
+                    if (d.EntityId != victim2EntityId)
+                    {
+                        continue;
+                    }
+                    foundVictim2Death = true;
+                    Expect(d.KillerEntityId == attackerEntityId,
+                        $"KillUnit 新增的 killerEntityId 参数应写入 DeathEvent.KillerEntityId（实际 {d.KillerEntityId}）");
+                }
+                Expect(foundVictim2Death, "应找到精确指向 victim2 的吞噬死亡事件");
             }
             finally
             {

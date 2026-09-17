@@ -17,6 +17,8 @@ namespace BinGames.Sim
         public byte TargetFaction;
         public uint ApplyStatus;
         public int SourceLogicId;
+        /// <summary>M4-R00-02 队列①-3（IC-REQ-010）：见 <see cref="DamageRequest.SourceEntityId"/>。</summary>
+        public SimEntityId SourceEntityId;
         public int VisualId;
         public byte Alive;
 
@@ -246,6 +248,7 @@ namespace BinGames.Sim
                         RequireStatus = SimStatus.None,
                         ChainCount = 0,
                         SourceLogicId = s.SourceLogicId,
+                        SourceEntityId = s.SourceEntityId,
                     });
                 }
             }
@@ -433,6 +436,7 @@ namespace BinGames.Sim
                                 ChainRange = 4f,
                                 ChainFalloff = 0.75f,
                                 SourceLogicId = s.SourceLogicId,
+                                SourceEntityId = s.SourceEntityId,
                             });
                         }
                         else
@@ -457,6 +461,7 @@ namespace BinGames.Sim
                                 ChainRange = 4f,
                                 ChainFalloff = 0.75f,
                                 SourceLogicId = damageSourceLogicId,
+                                SourceEntityId = s.SourceEntityId,
                                 TargetPart = hitPart,
                             });
                         }
@@ -563,6 +568,7 @@ namespace BinGames.Sim
                     RequireStatus = SimStatus.None,
                     ChainCount = 0,
                     SourceLogicId = s.SourceLogicId,
+                    SourceEntityId = s.SourceEntityId,
                 });
             }
 
@@ -592,6 +598,7 @@ namespace BinGames.Sim
                             TargetFaction = (SimFaction)s.TargetFaction,
                             ApplyStatus = (SimStatus)s.ApplyStatus,
                             SourceLogicId = s.SourceLogicId,
+                            SourceEntityId = s.SourceEntityId,
                             VisualId = s.VisualId,
                             Generation = (byte)(s.Generation + 1),
                             ChainCount = s.ChainCount,
@@ -618,6 +625,7 @@ namespace BinGames.Sim
                         TargetFaction = (SimFaction)s.TargetFaction,
                         ApplyStatus = (SimStatus)s.ApplyStatus,
                         SourceLogicId = s.SourceLogicId,
+                        SourceEntityId = s.SourceEntityId,
                         VisualId = s.VisualId,
                         Generation = (byte)(s.Generation + 1),
                         Flags = SimProjectileFlags.Returning,
@@ -637,6 +645,7 @@ namespace BinGames.Sim
                 LingerSeconds = s.LingerSeconds,
                 LingerRadius = s.LingerRadius,
                 SourceLogicId = s.SourceLogicId,
+                SourceEntityId = s.SourceEntityId,
                 VisualId = s.VisualId,
                 Reason = reason,
             });

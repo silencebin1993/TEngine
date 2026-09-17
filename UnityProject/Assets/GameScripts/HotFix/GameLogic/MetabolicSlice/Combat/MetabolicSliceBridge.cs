@@ -1078,7 +1078,7 @@ namespace GameLogic.MetabolicSlice.Combat
                 _sim.DamageCone(center, radius, math.normalizesafe(facing, DefaultForward),
                     coneHalf, evt.Damage, BinGames.Sim.SimFaction.Hostile,
                     chainCount: chainCount, nearRadius: CombatBallistics.MeleeNearRadius,
-                    sourceLogicId: shotId);
+                    sourceLogicId: shotId, sourceEntityId: _sim.ControlledUnitId);
                 if (evt.Pull > 0f)
                 {
                     _sim.ApplyStatusArea(center, radius,
@@ -1088,7 +1088,7 @@ namespace GameLogic.MetabolicSlice.Combat
             }
             else
             {
-                DamageAreaPrimitive(center, radius, evt.Damage, evt.Chain, evt.Pull, shotId);
+                DamageAreaPrimitive(center, radius, evt.Damage, evt.Chain, evt.Pull, shotId, _sim.ControlledUnitId);
             }
 
             // ④ Count 发数 → 脉冲次数。摊在窗口里，而不是同一帧叠 N 次
@@ -1205,7 +1205,8 @@ namespace GameLogic.MetabolicSlice.Combat
                     float2 sd = new float2(math.cos(ring), math.sin(ring));
                     BinGames.Sim.ProjectileRequest req = CombatBallistics.Build(
                         evt, center + sd * radius, sd, 0, 1,
-                        MathF.Max(0.1f, evt.Scale) * 0.7f, shotId);
+                        MathF.Max(0.1f, evt.Scale) * 0.7f, shotId,
+                        sourceEntityId: _sim.ControlledUnitId);
                     req.Damage = evt.Damage * MeleeSplitShotDamageMul;
                     req.SplitCount = 0;
                     req.Tint = tint;
@@ -1401,7 +1402,8 @@ namespace GameLogic.MetabolicSlice.Combat
 
             _sim.DamageCone(coneOrigin, reach, dir, halfAngleDeg, damage,
                 BinGames.Sim.SimFaction.Hostile, chainCount: chainCount,
-                nearRadius: CombatBallistics.MeleeNearRadius, sourceLogicId: shotId);
+                nearRadius: CombatBallistics.MeleeNearRadius, sourceLogicId: shotId,
+                sourceEntityId: _sim.ControlledUnitId);
 
             if (deflect)
             {
@@ -1452,7 +1454,8 @@ namespace GameLogic.MetabolicSlice.Combat
             for (int s = 0; s < shots; s++)
             {
                 BinGames.Sim.ProjectileRequest req = CombatBallistics.Build(
-                    evt, edge, dir, s, shots, scale * 0.7f, shotId);
+                    evt, edge, dir, s, shots, scale * 0.7f, shotId,
+                    sourceEntityId: _sim.ControlledUnitId);
                 req.Damage = evt.Damage * MeleeSplitShotDamageMul;
                 req.SplitCount = 0;
                 req.Tint = tint;
@@ -1481,7 +1484,8 @@ namespace GameLogic.MetabolicSlice.Combat
             {
                 BinGames.Sim.ProjectileRequest req = CombatBallistics.Build(
                     evt, origin, baseDir, h, hits, scale, shotId,
-                    bodyRadius: _sim.PlayerRadius, obstacles: _sim.Obstacles, arenaHalfExtent: _sim.ArenaHalfExtent);
+                    bodyRadius: _sim.PlayerRadius, obstacles: _sim.Obstacles, arenaHalfExtent: _sim.ArenaHalfExtent,
+                    sourceEntityId: _sim.ControlledUnitId);
                 req.Tint = tint;
                 _sim.FireProjectile(req);
                 LastFiredProjectileCount++;
@@ -2599,11 +2603,11 @@ namespace GameLogic.MetabolicSlice.Combat
         /// Pull 用内核已实现的 Slowed 减速（JobIntegrate 的 SlowMul）模拟"被拖拽锚定"，都不是新起模拟，
         /// 只是把此前恒 0/未接线的参数真正传下去。</summary>
         private void DamageAreaPrimitive(float2 pos, float radius, float amount, float chain, float pull,
-            int sourceLogicId = 0)
+            int sourceLogicId = 0, BinGames.Sim.SimEntityId sourceEntityId = default)
         {
             int chainCount = chain > 0f ? Math.Max(0, (int)MathF.Round(chain)) : 0;
             _sim.DamageArea(pos, radius, amount, BinGames.Sim.SimFaction.Hostile,
-                chainCount: chainCount, sourceLogicId: sourceLogicId);
+                chainCount: chainCount, sourceLogicId: sourceLogicId, sourceEntityId: sourceEntityId);
             if (pull > 0f)
             {
                 _sim.ApplyStatusArea(pos, radius, BinGames.Sim.SimStatus.Slowed | BinGames.Sim.SimStatus.Pulled,

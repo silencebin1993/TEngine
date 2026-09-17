@@ -53,6 +53,10 @@ namespace GameLogic.Core
     public struct HitSignal
     {
         public int TargetLogicId;
+        /// <summary>M4-R00-02 队列①-3（IC-REQ-010）：命中目标的稳定身份。TargetLogicId 只是
+        /// 配置表 id，场上同配置多实例时不能靠它反查具体是哪一个——需要按实例区分的消费者
+        /// 应改读这个字段。</summary>
+        public BinGames.Sim.SimEntityId TargetEntityId;
         public float2 Position;
         public float Damage;
         public bool Lethal;
