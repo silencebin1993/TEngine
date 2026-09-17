@@ -2,7 +2,13 @@ using BinGames.Sim;
 using GameLogic.Battle;
 using GameLogic.Command;
 using GameLogic.Core;
+using Unity.Mathematics;
 using UnityEngine;
+using Formation = GameLogic.Command.Formation.Formation;
+using FormationCommandEntry = GameLogic.Command.Formation.FormationCommandEntry;
+using FormationCommandFailReason = GameLogic.Command.Formation.FormationCommandFailReason;
+using FormationCommandState = GameLogic.Command.Formation.FormationCommandState;
+using FormationRegistry = GameLogic.Command.Formation.FormationRegistry;
 
 namespace GameLogic.Battle.Feedback
 {
@@ -29,16 +35,27 @@ namespace GameLogic.Battle.Feedback
         private static readonly Color AttackCommandColor = new Color(1f, 0.4f, 0.35f, 0.8f);
         private static readonly Color GuardCommandColor = new Color(1f, 0.85f, 0.3f, 0.75f);
         private static readonly Color RetreatCommandColor = new Color(0.7f, 0.5f, 1f, 0.75f);
+        /// <summary>M4-R00-02 队列⑥-26（FC-REQ-061）：战略视角标记"当前被直控成员"的颜色。
+        /// 刻意与 <see cref="SelectedUnitColor"/>（绿色，代表"选中了"）区分开——直控标记与选择
+        /// 是两个独立维度：可能选中了别人却仍在直控这一个，也可能直控这个但没选中它。</summary>
+        private static readonly Color ControlledMarkerColor = new Color(1f, 0.85f, 0.15f, 0.95f);
+        private const float ControlledMarkerRadius = 1.3f;
 
         private SimBridge _sim;
         private SquadCommandSystem _squad;
+        private FormationRegistry _formations;
         private Material _lineMaterial;
         private GUIStyle _partLabelStyle;
+        private GUIStyle _directFormationStyle;
 
-        public void Bind(SimBridge sim, SquadCommandSystem squad)
+        /// <summary><paramref name="formations"/> 供 FC-REQ-061 直控 HUD 查"当前受控单位属于
+        /// 哪个编队"；可为 null（历史调用点/未接编队系统的测试场景），此时直控编队信息区块不显示，
+        /// 其余既有行为不受影响。</summary>
+        public void Bind(SimBridge sim, SquadCommandSystem squad, FormationRegistry formations = null)
         {
             _sim = sim;
             _squad = squad;
+            _formations = formations;
         }
 
         private void OnDestroy()
@@ -100,6 +117,7 @@ namespace GameLogic.Battle.Feedback
 
             DrawSelectionBox();
             DrawSelectedUnitsAndCommands();
+            DrawControlledUnitMarker();
 
             GL.End();
             GL.PopMatrix();
@@ -112,18 +130,82 @@ namespace GameLogic.Battle.Feedback
         /// </summary>
         private void OnGUI()
         {
-            if (_sim == null || !_sim.Running || _squad == null || !InputRouter.Owns(InputScope.Strategy))
+            if (_sim == null || !_sim.Running || _squad == null)
             {
                 return;
             }
 
-            _partLabelStyle ??= new GUIStyle(GUI.skin.box)
+            if (InputRouter.Owns(InputScope.Strategy))
+            {
+                _partLabelStyle ??= new GUIStyle(GUI.skin.box)
+                {
+                    fontSize = 14,
+                    alignment = TextAnchor.MiddleLeft,
+                };
+                GUI.Box(new Rect(12f, 164f, 330f, 28f),
+                    $"[P] RTS 攻击接点：{PartLabel(_squad.PendingAttackPart)}", _partLabelStyle);
+            }
+
+            DrawDirectFormationBlock();
+        }
+
+        /// <summary>
+        /// M4-R00-02 队列⑥-26（FC-REQ-061 战略/直控连续性）：直控视角下补显示所属编队的目标/
+        /// 汇合方向/失败提示——玩家接管一具身体后镜头切走，不该因此看不到自己部队在干什么。
+        /// </summary>
+        private void DrawDirectFormationBlock()
+        {
+            if (_formations == null || !InputRouter.Owns(InputScope.Direct))
+            {
+                return;
+            }
+
+            SimWorld world = _sim.World;
+            SimEntityId controlled = _sim.ControlledUnitId;
+            if (world == null || !controlled.IsValid ||
+                !world.TryGetUnitControlState(controlled, out SimUnitControlState state) || !state.IsAlive)
+            {
+                return;
+            }
+
+            Formation formation = _formations.FindFormationContaining(controlled);
+            string text = BuildDirectFormationText(formation, world, state.Position);
+            if (text == null)
+            {
+                // 直控单位不属于任何编队：不画这个区块，不是画一行"无编队"——
+                // 大多数玩家旅程里直控单位从未被编过组，常驻一行空文案只会添乱。
+                return;
+            }
+
+            _directFormationStyle ??= new GUIStyle(GUI.skin.box)
             {
                 fontSize = 14,
                 alignment = TextAnchor.MiddleLeft,
             };
-            GUI.Box(new Rect(12f, 164f, 330f, 28f),
-                $"[P] RTS 攻击接点：{PartLabel(_squad.PendingAttackPart)}", _partLabelStyle);
+            GUI.Box(new Rect(12f, 196f, 460f, 28f), text, _directFormationStyle);
+        }
+
+        /// <summary>
+        /// M4-R00-02 队列⑥-26：战略视角下标记"当前被直控成员"——与选中状态无关，选没选它都画。
+        /// 直控视角下不画（那一刻镜头本身就锁在它身上，标记自己没有意义）。
+        /// </summary>
+        private void DrawControlledUnitMarker()
+        {
+            if (!InputRouter.Owns(InputScope.Strategy))
+            {
+                return;
+            }
+
+            SimWorld world = _sim.World;
+            SimEntityId controlled = _sim.ControlledUnitId;
+            if (world == null || !controlled.IsValid ||
+                !world.TryGetUnitControlState(controlled, out SimUnitControlState state) || !state.IsAlive)
+            {
+                return;
+            }
+
+            GL.Color(ControlledMarkerColor);
+            Ring(new Vector3(state.Position.x, GroundY, state.Position.y), ControlledMarkerRadius);
         }
 
         private static string PartLabel(SimBodyPartSlot slot)
@@ -214,6 +296,131 @@ namespace GameLogic.Battle.Feedback
                 Line(unitPos, target);
                 Ring(target, cmd.Kind == UnitCommandKind.Guard ? Mathf.Max(0.5f, cmd.ArriveRadius) : 0.5f);
             }
+        }
+
+        /// <summary>
+        /// M4-R00-02 队列⑥-26（FC-REQ-061）：直控 HUD 编队信息文案。纯函数，供自检直接断言，
+        /// 不强制走真实 OnGUI 渲染管线测试（同 <see cref="FormationCommandOverlay.ColorFor"/>
+        /// 的既有先例）。<paramref name="formation"/> 为 null 时返回 null（不属于任何编队，
+        /// 调用方据此决定"不画这个区块"而不是"画一行空文案"）。
+        ///
+        /// **"断粮"/"载荷被抢"两类关键失败提示不在本方法覆盖范围**——核实过全仓
+        /// Endurance/续航/Carry/载荷均是死代码占位或压根不存在（见⑤-23核实结论、
+        /// `SharedCapabilityCatalog.Carry=Placeholder`），没有数据可读，属于对应机制落地后
+        /// 再补的债，不在本项编造假数据。
+        /// </summary>
+        public static string BuildDirectFormationText(Formation formation, SimWorld world, float2 controlledWorldPos)
+        {
+            if (formation == null)
+            {
+                return null;
+            }
+
+            var sb = new System.Text.StringBuilder();
+            sb.Append($"编队 {formation.Id}");
+
+            FormationCommandEntry active = formation.ActiveCommand;
+            if (active != null)
+            {
+                sb.Append($"　命令 {active.Command.Kind}[{active.State}]");
+                if (active.State == FormationCommandState.Failed || active.State == FormationCommandState.Interrupted)
+                {
+                    sb.Append($"　原因 {FailReasonLabel(active.FailReason)}");
+                }
+            }
+            else
+            {
+                sb.Append("　当前空闲");
+            }
+
+            if (world != null && TryComputeRallyDirection(formation, world, controlledWorldPos, out float bearingDeg))
+            {
+                // 四舍五入到整数度后再取模：浮点噪声可能让"正北偏一点点负角"算出 359.6xx°，
+                // :F0 直接格式化会显示"360°"而不是"0°"——360 不是一个合法的罗盘读数，
+                // 玩家会读成"这是哪个方向"。
+                int bearingDegRounded = Mathf.RoundToInt(bearingDeg) % 360;
+                sb.Append($"　汇合方向 {bearingDegRounded}°");
+            }
+
+            return sb.ToString();
+        }
+
+        /// <summary>汇合方向：编队有生效中的命令时指向命令目标（单位目标用其当前实时位置，
+        /// 不是下令时的旧坐标，同 <see cref="DrawSelectedUnitsAndCommands"/> 对 Attack 目标的口径）；
+        /// 编队空闲/没有可解析目标时指向编队成员的平均位置——玩家离开编队后最想知道"我的队伍在哪"。
+        /// 角度按 0°=北（世界+Z）、顺时针增大计（俯视地面，+X 东、+Z 北，符合玩家读罗盘方位的直觉）。</summary>
+        private static bool TryComputeRallyDirection(Formation formation, SimWorld world, float2 fromPos, out float bearingDeg)
+        {
+            bearingDeg = 0f;
+
+            FormationCommandEntry active = formation.ActiveCommand;
+            if (active != null && active.State == FormationCommandState.Active)
+            {
+                if (active.Command.TargetEntity.HasValue &&
+                    world.TryGetUnitControlState(active.Command.TargetEntity.Value, out SimUnitControlState tgt) && tgt.IsAlive)
+                {
+                    return SetBearing(fromPos, tgt.Position, out bearingDeg);
+                }
+                if (active.Command.TargetPosition.HasValue)
+                {
+                    return SetBearing(fromPos, active.Command.TargetPosition.Value, out bearingDeg);
+                }
+            }
+
+            return TryComputeMemberAveragePosition(formation, world, out float2 average)
+                && SetBearing(fromPos, average, out bearingDeg);
+        }
+
+        private static bool TryComputeMemberAveragePosition(Formation formation, SimWorld world, out float2 average)
+        {
+            average = float2.zero;
+            int count = 0;
+            foreach (SimEntityId member in formation.Members)
+            {
+                if (!world.TryGetUnitControlState(member, out SimUnitControlState state) || !state.IsAlive)
+                {
+                    continue;
+                }
+                average += state.Position;
+                count++;
+            }
+
+            if (count == 0)
+            {
+                return false;
+            }
+            average /= count;
+            return true;
+        }
+
+        private static bool SetBearing(float2 fromPos, float2 toPos, out float bearingDeg)
+        {
+            float2 delta = toPos - fromPos;
+            if (math.lengthsq(delta) < 0.0001f)
+            {
+                // 目标就在脚下：没有方向可言，不给一个抖动的随机角度误导玩家。
+                bearingDeg = 0f;
+                return false;
+            }
+            bearingDeg = math.degrees(math.atan2(delta.x, delta.y));
+            if (bearingDeg < 0f)
+            {
+                bearingDeg += 360f;
+            }
+            return true;
+        }
+
+        private static string FailReasonLabel(FormationCommandFailReason reason)
+        {
+            return reason switch
+            {
+                FormationCommandFailReason.InvalidTarget => "目标失效",
+                FormationCommandFailReason.Cancelled => "已取消",
+                FormationCommandFailReason.PreemptedByOverride => "被新命令覆盖",
+                FormationCommandFailReason.Stuck => "卡死",
+                FormationCommandFailReason.NoValidAnchor => "找不到有效锚点",
+                _ => "未知",
+            };
         }
 
         private static Color ColorFor(UnitCommandKind kind)

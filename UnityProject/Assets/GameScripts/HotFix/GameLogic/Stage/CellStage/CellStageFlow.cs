@@ -412,7 +412,8 @@ namespace GameLogic.Stage.CellStage
             // 刻意不挂 DontDestroyOnLoad——那在 Edit 模式必抛，而回归测试会直接 Enter() 本阶段。
             var overlayGo = new GameObject("__SquadOverlay");
             _squadOverlay = overlayGo.AddComponent<WhiteboxSquadOverlay>();
-            _squadOverlay.Bind(_sim, _squadCommands);
+            // ⑥-26（FC-REQ-061）：直控 HUD 编队信息区块需要反查"受控单位属于哪个编队"。
+            _squadOverlay.Bind(_sim, _squadCommands, _formations);
             // M2-04a 调试显示挂在同一个 GO 上：Exit 整个销毁它，不多一条要单独清理的路径。
             _handoffOverlay = overlayGo.AddComponent<Battle.Feedback.WhiteboxAiHandoffOverlay>();
             _handoffOverlay.Bind(_sim, _aiHandoff);

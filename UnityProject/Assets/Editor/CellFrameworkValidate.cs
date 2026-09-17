@@ -115,6 +115,7 @@ namespace GameLogic.EditorTools
                 ValidateCombatTransientTeardown();
                 ValidateFormationCommandQueueVisualization();
                 ValidateSquadCommandQueueRequest();
+                ValidateDirectFormationHud();
             }
             catch (Exception e)
             {
@@ -2987,6 +2988,93 @@ namespace GameLogic.EditorTools
                 camera.targetTexture = null;
                 UnityEngine.Object.DestroyImmediate(rt);
                 UnityEngine.Object.DestroyImmediate(cameraGo);
+            }
+        }
+
+        /// <summary>
+        /// M4-R00-02 队列⑥-26（FC-REQ-061 战略/直控连续性）：直控 HUD 编队目标/汇合方向/
+        /// 失败提示文案。只测 <see cref="WhiteboxSquadOverlay.BuildDirectFormationText"/> 这个纯函数
+        /// 本身（同 [34] 验收7 对 <see cref="FormationCommandOverlay.ColorFor"/> 的既有口径，
+        /// 不强制走真实 OnGUI 渲染管线测试），但用真实 <see cref="SimBridge"/>/<see cref="SimWorld"/>
+        /// 驱动，不直连内部字段——汇合方向要读真实单位位置，伪造快照会让方向角断言失去意义。
+        /// </summary>
+        private static void ValidateDirectFormationHud()
+        {
+            Line("\n[54] 直控HUD编队目标/汇合方向/失败提示（FC-REQ-061）");
+
+            var registry = new FormationRegistry();
+            var sim = new SimBridge();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 16;
+            cfg.ArenaHalfExtent = 80f;
+            sim.Begin(cfg, Array.Empty<BehaviorArchetype>());
+
+            try
+            {
+                SimEntityId SpawnAndResolve(int logicId, float2 pos, SimFaction faction = SimFaction.PlayerMinion)
+                {
+                    sim.Spawn(new SpawnRequest
+                    {
+                        Position = pos, Health = 20f, Radius = 0.5f, MaxSpeed = 4f,
+                        ArchetypeId = 0, Faction = faction, IntentSource = IntentSource.AI, LogicId = logicId,
+                    });
+                    sim.OnUpdate(1f / 60f);
+                    return FindEntityId(sim.Snapshot, logicId, out _);
+                }
+
+                // 验收 1：不属于任何编队时返回 null（调用方据此不画区块，不是画空文案）。
+                string noFormationText = WhiteboxSquadOverlay.BuildDirectFormationText(null, sim.World, float2.zero);
+                Expect(noFormationText == null, "不属于任何编队应返回 null");
+
+                // 验收 2：编队空闲（无 ActiveCommand）+ 有存活成员——文案含"当前空闲"，
+                // 汇合方向指向成员平均位置。控制者站在(0,0)，唯一成员在正北(0,10)，
+                // 期望方位角≈0°。
+                SimEntityId idleMember = SpawnAndResolve(94001, new float2(0f, 10f));
+                Expect(idleMember.IsValid, "本项前置：idleMember 应成功落地");
+                Formation idleFormation = registry.CreateFormation();
+                idleFormation.AddMember(idleMember);
+
+                string idleText = WhiteboxSquadOverlay.BuildDirectFormationText(idleFormation, sim.World, float2.zero);
+                Expect(idleText != null && idleText.Contains("当前空闲"), $"空闲编队文案应含'当前空闲'（实际：{idleText}）");
+                Expect(idleText.Contains("汇合方向 0°"), $"控制者在原点、唯一成员在正北时汇合方向应≈0°（实际：{idleText}）");
+
+                // 验收 3：Active Move 命令——汇合方向指向 TargetPosition，不是成员位置。
+                // TargetPosition 设在正东 (10,0)，期望方位角≈90°。
+                Formation moveFormation = registry.CreateFormation();
+                moveFormation.AddMember(idleMember);
+                moveFormation.IssueCommand(new FormationCommand(FormationCommand.CommandKind.Move,
+                    targetPosition: new float2(10f, 0f)));
+                string moveText = WhiteboxSquadOverlay.BuildDirectFormationText(moveFormation, sim.World, float2.zero);
+                Expect(moveText != null && moveText.Contains("命令 Move[Active]"),
+                    $"生效中的 Move 命令应显示命令种类与状态（实际：{moveText}）");
+                Expect(moveText.Contains("汇合方向 90°"),
+                    $"Move 命令目标在正东时汇合方向应≈90°，不是指向成员位置（实际：{moveText}）");
+
+                // 验收 4：Active Attack 命令——汇合方向应指向 TargetEntity 查到的实时位置
+                //（走 world.TryGetUnitControlState 现查，不是缓存下令时的坐标），
+                // 而不是像 Move 那样直接读 Command.TargetPosition（Attack 命令构造时没传它）。
+                SimEntityId hostile = SpawnAndResolve(94002, new float2(0f, 10f), SimFaction.Hostile);
+                Expect(hostile.IsValid, "本项前置：hostile 应成功落地");
+                Formation attackFormation = registry.CreateFormation();
+                attackFormation.AddMember(idleMember);
+                attackFormation.IssueCommand(new FormationCommand(FormationCommand.CommandKind.Attack, targetEntity: hostile));
+
+                string attackText = WhiteboxSquadOverlay.BuildDirectFormationText(attackFormation, sim.World, float2.zero);
+                Expect(attackText != null && attackText.Contains("命令 Attack[Active]") && attackText.Contains("汇合方向 0°"),
+                    $"Attack 目标在正北，汇合方向应从 TargetEntity 实时位置算出≈0°（实际：{attackText}）");
+
+                // 验收 5：命令失败——文案含失败原因中文标签。
+                Formation failedFormation = registry.CreateFormation();
+                failedFormation.AddMember(idleMember);
+                failedFormation.IssueCommand(new FormationCommand(FormationCommand.CommandKind.Guard, targetPosition: float2.zero));
+                failedFormation.FailActiveCommand(FormationCommandFailReason.Stuck);
+                string failedText = WhiteboxSquadOverlay.BuildDirectFormationText(failedFormation, sim.World, float2.zero);
+                Expect(failedText != null && failedText.Contains("原因 卡死"),
+                    $"Failed 状态应显示失败原因中文标签（实际：{failedText}）");
+            }
+            finally
+            {
+                sim.End();
             }
         }
 
