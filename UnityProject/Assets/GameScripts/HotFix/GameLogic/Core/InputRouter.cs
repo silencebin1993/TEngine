@@ -39,6 +39,10 @@ namespace GameLogic.Core
         /// <summary>当前输入归属。默认 <see cref="InputScope.Direct"/>，与既有单人直控行为一致。</summary>
         public static InputScope Scope { get; private set; } = InputScope.Direct;
 
+        /// <summary>硬件输入后端。默认真读 <see cref="UnityEngine.Input"/>；
+        /// <see cref="DebugSetReader"/> 供测试注入按帧回放实现（`DEBT-M4R02-INPUT-SIM-01`）。</summary>
+        public static IInputReader Reader { get; private set; } = UnityInputReader.Instance;
+
         /// <summary>
         /// 输入是否被"抢焦点"的东西占着。两个来源**故意分开存**：
         /// 面板由 UI 层在开关时写，玩法暂停由阶段每帧同步。
@@ -93,6 +97,22 @@ namespace GameLogic.Core
             _strategicPause = false;
             _frame = -1;
             ConsumedKeys.Clear();
+            Reader = UnityInputReader.Instance;
+        }
+
+        /// <summary>测试注入硬件输入后端（`DEBT-M4R02-INPUT-SIM-01`）。传 null 恢复生产实现。
+        /// 不清空 <see cref="ConsumedKeys"/>——调用方按需配合 <see cref="DebugClearConsumedKeys"/>
+        /// 模拟帧边界，Editor 测试之间 <see cref="Time.frameCount"/> 往往不会真的变化。</summary>
+        public static void DebugSetReader(IInputReader reader)
+        {
+            Reader = reader ?? UnityInputReader.Instance;
+        }
+
+        /// <summary>测试模拟"进入下一帧"：清空同帧按键消费记录，不影响 Scope/模态/暂停状态。
+        /// 仅供 Editor 自检使用（`DEBT-M4R02-INPUT-SIM-01`）。</summary>
+        public static void DebugClearConsumedKeys()
+        {
+            ConsumedKeys.Clear();
         }
 
         /// <summary>指定域这一帧是否持有输入所有权。</summary>
@@ -118,7 +138,7 @@ namespace GameLogic.Core
         /// </summary>
         public static bool ConsumeKeyDown(KeyCode key, InputScope scope)
         {
-            if (!Owns(scope) || !Input.GetKeyDown(key))
+            if (!Owns(scope) || !Reader.GetKeyDown(key))
             {
                 return false;
             }
@@ -133,7 +153,7 @@ namespace GameLogic.Core
         /// </summary>
         public static bool ConsumeGlobalKeyDown(KeyCode key, bool allowDuringModal = false)
         {
-            if ((ModalUiOpen && !allowDuringModal) || !Input.GetKeyDown(key))
+            if ((ModalUiOpen && !allowDuringModal) || !Reader.GetKeyDown(key))
             {
                 return false;
             }
@@ -146,7 +166,7 @@ namespace GameLogic.Core
         /// 互斥由 <see cref="Scope"/> 保证：Direct 与 Strategy 不可能同时成立。</summary>
         public static bool GetKey(KeyCode key, InputScope scope)
         {
-            return Owns(scope) && Input.GetKey(key);
+            return Owns(scope) && Reader.GetKey(key);
         }
 
         /// <summary>指针位置。过渡期间一律不给——镜头在动，屏幕坐标反投影出来的世界点没有意义。</summary>
@@ -154,7 +174,7 @@ namespace GameLogic.Core
         {
             if (Owns(scope))
             {
-                screenPosition = Input.mousePosition;
+                screenPosition = Reader.MousePosition;
                 return true;
             }
 
@@ -165,7 +185,7 @@ namespace GameLogic.Core
         /// <summary>滚轮增量。缩放归战略视角，直控下不改视距。</summary>
         public static float GetScrollDelta(InputScope scope)
         {
-            return Owns(scope) ? Input.mouseScrollDelta.y : 0f;
+            return Owns(scope) ? Reader.MouseScrollDelta : 0f;
         }
 
         private static void SyncFrame()

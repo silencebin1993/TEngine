@@ -111,6 +111,7 @@ namespace GameLogic.EditorTools
                 ValidateHomecomingRealCombatExit();
                 ValidateWildOrganFieldPersistence();
                 ValidateSquadFormationBridge();
+                ValidateSquadInputTranslation();
             }
             catch (Exception e)
             {
@@ -4848,6 +4849,137 @@ namespace GameLogic.EditorTools
             }
         }
 
+        /// <summary>
+        /// `DEBT-M4R02-INPUT-SIM-01`（`production/design/qa-journey-bot-real-input/DESIGN.md`
+        /// Tier 1）：`SquadCommandSystem.HandleGroupInput`/`HandleCommandInput` 真读键鼠输入的
+        /// 两个方法本身此前完全没有自动化覆盖——包括 [49] 在内的全部既有测试都直调
+        /// `AssignGroup`/`Issue`/`SelectExplicit` 等公开 API，绕开了"按键组合 → 调用哪个 API"
+        /// 这一段翻译逻辑。本项驱动真实的 <see cref="SquadCommandSystem.Tick"/>，用
+        /// <see cref="ScriptedInputReader"/>（经 <see cref="InputRouter.DebugSetReader"/> 注入）
+        /// 模拟键鼠事件，覆盖：①单独 Ctrl+1 编组；②无 Ctrl 的数字键改为召回语义（与①互斥，
+        /// 同一个键位两种解读不能混淆）；③右键智能命令按点击目标分流 Move/Attack；
+        /// ④G/H 单键触发 Guard/Retreat。不验证 Unity 相机把物理键鼠事件送进
+        /// <c>UnityEngine.Input</c> 这一步——那是引擎自己的职责；相机→世界坐标换算本身用固定
+        /// 尺寸 RenderTexture 钉死像素维度，避免 batchmode 下无 Game View 导致坐标漂移。
+        /// </summary>
+        private static void ValidateSquadInputTranslation()
+        {
+            Line("\n[50] 编队命令真实键鼠输入翻译层（DEBT-M4R02-INPUT-SIM-01，QA Tier 1）");
+
+            var sim = new SimBridge();
+            SimConfig cfg = SimConfig.Default;
+            cfg.UnitCapacity = 32;
+            cfg.ArenaHalfExtent = 260f;
+            sim.Begin(cfg, Array.Empty<BehaviorArchetype>());
+
+            var cameraGo = new GameObject("ValidateSquadInputTranslation_TempCamera");
+            Camera camera = cameraGo.AddComponent<Camera>();
+            var rt = new RenderTexture(256, 256, 0);
+            camera.targetTexture = rt;
+            cameraGo.transform.position = new Vector3(0f, 10f, 0f);
+            cameraGo.transform.rotation = Quaternion.Euler(90f, 0f, 0f); // 俯视，正下方
+
+            var squad = new SquadCommandSystem();
+            var reader = new ScriptedInputReader();
+
+            InputRouter.Reset();
+            InputRouter.SetScope(InputScope.Strategy);
+            InputRouter.DebugSetReader(reader);
+            reader.MousePosition = new Vector3(128f, 128f, 0f); // 256x256 目标纹理的屏幕中心 → 世界(0,0)
+
+            try
+            {
+                squad.Bind(sim, camera, null); // 本项只关心输入翻译层，Formation 语义已由 [49] 覆盖
+
+                SimEntityId SpawnAndResolve(int logicId, float2 pos, SimFaction faction)
+                {
+                    sim.Spawn(new SpawnRequest
+                    {
+                        Position = pos, Health = 20f, Radius = 0.5f, MaxSpeed = 4f,
+                        ArchetypeId = 0, Faction = faction, IntentSource = IntentSource.AI, LogicId = logicId,
+                    });
+                    sim.OnUpdate(1f / 60f);
+                    return FindEntityId(sim.Snapshot, logicId, out _);
+                }
+
+                // ── ①②：Ctrl+数字=编组，纯数字=召回，同一个键位两种语义不能混淆 ──
+                SimEntityId u1 = SpawnAndResolve(97001, new float2(50f, 50f), SimFaction.PlayerMinion);
+                SimEntityId u2 = SpawnAndResolve(97002, new float2(51f, 50f), SimFaction.PlayerMinion);
+                Expect(u1.IsValid && u2.IsValid, "本项前置：测试个体 u1/u2 应成功落地");
+
+                squad.SelectExplicit(new[] { u1, u2 });
+                reader.SetHeld(KeyCode.LeftControl, true);
+                reader.PressKeyDown(KeyCode.Alpha1);
+                squad.Tick(paused: false);
+                Expect(squad.GroupSize(1) == 2,
+                    $"①Ctrl+1 应把当前选择集（2人）编入槽位1（实际 {squad.GroupSize(1)}）");
+                reader.EndFrame();
+                InputRouter.DebugClearConsumedKeys();
+                reader.SetHeld(KeyCode.LeftControl, false);
+
+                squad.ClearSelection();
+                Expect(squad.Selection.Count == 0, "本项前置：召回测试前应先清空选择集");
+                reader.PressKeyDown(KeyCode.Alpha1); // 这次不按 Ctrl
+                squad.Tick(paused: false);
+                Expect(squad.Selection.Count == 2 && squad.Selection.Contains(u1) && squad.Selection.Contains(u2),
+                    $"②无 Ctrl 的数字键1应走召回语义，把槽位1成员恢复进选择集（实际 {squad.Selection.Count} 人）");
+                reader.EndFrame();
+                InputRouter.DebugClearConsumedKeys();
+
+                // ── ③：右键智能命令按点击目标分流——点空地/点友军都不是攻击，只有点敌人才是 ──
+                SimEntityId clicker = SpawnAndResolve(97003, new float2(200f, 200f), SimFaction.PlayerMinion);
+                Expect(clicker.IsValid, "本项前置：测试个体 clicker 应成功落地");
+                squad.SelectExplicit(new[] { clicker });
+
+                reader.ClickMouseButtonDown(1);
+                squad.Tick(paused: false);
+                Expect(sim.TryGetCommand(clicker, out UnitCommand emptyCmd) && emptyCmd.Kind == UnitCommandKind.Move,
+                    $"③右键点空地应下达 Move（实际 {(sim.TryGetCommand(clicker, out UnitCommand ec) ? ec.Kind.ToString() : "无命令")}）");
+                reader.EndFrame();
+
+                SimEntityId friendAtClick = SpawnAndResolve(97004, new float2(0f, 0f), SimFaction.PlayerMinion);
+                Expect(friendAtClick.IsValid, "本项前置：测试个体 friendAtClick 应成功落地");
+                reader.ClickMouseButtonDown(1);
+                squad.Tick(paused: false);
+                Expect(sim.TryGetCommand(clicker, out UnitCommand friendCmd) && friendCmd.Kind == UnitCommandKind.Move,
+                    "③右键点友军不应触发 Attack——TryPickHostile 只认 Hostile 阵营，应仍下达 Move");
+                reader.EndFrame();
+
+                SimEntityId hostileAtClick = SpawnAndResolve(97005, new float2(0f, 0f), SimFaction.Hostile);
+                Expect(hostileAtClick.IsValid, "本项前置：测试个体 hostileAtClick 应成功落地");
+                reader.ClickMouseButtonDown(1);
+                squad.Tick(paused: false);
+                Expect(sim.TryGetCommand(clicker, out UnitCommand hostileCmd) &&
+                       hostileCmd.Kind == UnitCommandKind.Attack && hostileCmd.TargetEntity == hostileAtClick,
+                    $"③右键点敌人应下达 Attack 且目标为该敌人（实际 {(sim.TryGetCommand(clicker, out UnitCommand hc) ? $"{hc.Kind}/{hc.TargetEntity}" : "无命令")}）");
+                reader.EndFrame();
+
+                // ── ④：G/H 单键分别触发 Guard/Retreat，不依赖右键 ──
+                reader.PressKeyDown(KeyCode.G);
+                squad.Tick(paused: false);
+                Expect(sim.TryGetCommand(clicker, out UnitCommand guardCmd) && guardCmd.Kind == UnitCommandKind.Guard,
+                    $"④G 键应下达 Guard（实际 {(sim.TryGetCommand(clicker, out UnitCommand gc) ? gc.Kind.ToString() : "无命令")}）");
+                reader.EndFrame();
+                InputRouter.DebugClearConsumedKeys();
+
+                reader.PressKeyDown(KeyCode.H);
+                squad.Tick(paused: false);
+                Expect(sim.TryGetCommand(clicker, out UnitCommand retreatCmd) && retreatCmd.Kind == UnitCommandKind.Retreat,
+                    $"④H 键应下达 Retreat（实际 {(sim.TryGetCommand(clicker, out UnitCommand rc) ? rc.Kind.ToString() : "无命令")}）");
+                reader.EndFrame();
+                InputRouter.DebugClearConsumedKeys();
+            }
+            finally
+            {
+                squad.Unbind();
+                sim.End();
+                InputRouter.Reset();
+                camera.targetTexture = null;
+                UnityEngine.Object.DestroyImmediate(rt);
+                UnityEngine.Object.DestroyImmediate(cameraGo);
+            }
+        }
+
         private static bool PathClearsAllObstacles(List<float2> path, List<ObstacleSpec> obstacles, float clearance)
         {
             const float epsilon = 1e-3f;
@@ -8724,6 +8856,55 @@ namespace GameLogic.EditorTools
             public void CollectOrgans(System.Collections.Generic.List<UnitLoadoutOrgan> buffer)
             {
                 buffer.AddRange(Organs);
+            }
+        }
+
+        /// <summary>`DEBT-M4R02-INPUT-SIM-01`：按帧回放的测试用 <see cref="IInputReader"/>。
+        /// 持续状态（<see cref="SetHeld"/>）跨帧保留，边沿事件（按下/松开）只在
+        /// <see cref="EndFrame"/> 之前的这一帧有效——语义对齐真实键鼠：一次物理按下只会
+        /// 让 GetKeyDown 在按下的那一帧为 true。只在本 Editor 测试文件内使用，不进生产程序集。</summary>
+        private sealed class ScriptedInputReader : IInputReader
+        {
+            private readonly System.Collections.Generic.HashSet<KeyCode> _held =
+                new System.Collections.Generic.HashSet<KeyCode>();
+            private readonly System.Collections.Generic.HashSet<KeyCode> _downThisFrame =
+                new System.Collections.Generic.HashSet<KeyCode>();
+            private readonly System.Collections.Generic.HashSet<int> _mouseDownThisFrame =
+                new System.Collections.Generic.HashSet<int>();
+            private readonly System.Collections.Generic.HashSet<int> _mouseUpThisFrame =
+                new System.Collections.Generic.HashSet<int>();
+
+            public Vector3 MousePosition { get; set; }
+            public float MouseScrollDelta { get; set; }
+
+            public bool GetKey(KeyCode key) => _held.Contains(key);
+            public bool GetKeyDown(KeyCode key) => _downThisFrame.Contains(key);
+            public bool GetMouseButtonDown(int button) => _mouseDownThisFrame.Contains(button);
+            public bool GetMouseButtonUp(int button) => _mouseUpThisFrame.Contains(button);
+
+            public void SetHeld(KeyCode key, bool held)
+            {
+                if (held) { _held.Add(key); } else { _held.Remove(key); }
+            }
+
+            /// <summary>模拟"这一帧按下"：本帧 GetKeyDown 为 true，并转入持续按住状态。</summary>
+            public void PressKeyDown(KeyCode key)
+            {
+                _held.Add(key);
+                _downThisFrame.Add(key);
+            }
+
+            public void ReleaseKey(KeyCode key) => _held.Remove(key);
+
+            public void ClickMouseButtonDown(int button) => _mouseDownThisFrame.Add(button);
+            public void ClickMouseButtonUp(int button) => _mouseUpThisFrame.Add(button);
+
+            /// <summary>推进到下一帧：清空本帧边沿事件，持续按住状态保留。</summary>
+            public void EndFrame()
+            {
+                _downThisFrame.Clear();
+                _mouseDownThisFrame.Clear();
+                _mouseUpThisFrame.Clear();
             }
         }
 

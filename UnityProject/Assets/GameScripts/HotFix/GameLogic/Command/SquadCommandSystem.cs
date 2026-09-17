@@ -162,19 +162,20 @@ namespace GameLogic.Command
 
         private void HandleSelectionInput()
         {
-            if (Input.GetMouseButtonDown(0) && TryScreenToWorld(Input.mousePosition, out float2 down))
+            if (InputRouter.Reader.GetMouseButtonDown(0) &&
+                TryScreenToWorld(InputRouter.Reader.MousePosition, out float2 down))
             {
                 _dragging = true;
                 _dragStartWorld = down;
                 _dragCurrentWorld = down;
             }
 
-            if (_dragging && TryScreenToWorld(Input.mousePosition, out float2 move))
+            if (_dragging && TryScreenToWorld(InputRouter.Reader.MousePosition, out float2 move))
             {
                 _dragCurrentWorld = move;
             }
 
-            if (!_dragging || !Input.GetMouseButtonUp(0))
+            if (!_dragging || !InputRouter.Reader.GetMouseButtonUp(0))
             {
                 return;
             }
@@ -183,7 +184,7 @@ namespace GameLogic.Command
             // M4-R02 最小桥接：任何拖框/点选都结束"正在操作某支已召回编队"的状态——不尝试
             // 判断这次选中的人是不是恰好等于某支编队的成员，简单规则、没有歧义（见 DESIGN.md 2.3）。
             _activeFormationId = null;
-            bool additive = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+            bool additive = InputRouter.Reader.GetKey(KeyCode.LeftShift) || InputRouter.Reader.GetKey(KeyCode.RightShift);
             float2 lo = math.min(_dragStartWorld, _dragCurrentWorld);
             float2 hi = math.max(_dragStartWorld, _dragCurrentWorld);
             float2 size = hi - lo;
@@ -248,7 +249,7 @@ namespace GameLogic.Command
 
         private void HandleGroupInput()
         {
-            bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+            bool ctrl = InputRouter.Reader.GetKey(KeyCode.LeftControl) || InputRouter.Reader.GetKey(KeyCode.RightControl);
             for (int slot = 1; slot <= 9; slot++)
             {
                 KeyCode key = KeyCode.Alpha0 + slot;
@@ -404,7 +405,8 @@ namespace GameLogic.Command
             }
 
             // 右键 = 智能命令：点在敌人身上就是攻击，点在空地就是移动。
-            if (Input.GetMouseButtonDown(1) && TryScreenToWorld(Input.mousePosition, out float2 world))
+            if (InputRouter.Reader.GetMouseButtonDown(1) &&
+                TryScreenToWorld(InputRouter.Reader.MousePosition, out float2 world))
             {
                 if (TryPickHostile(world, out SimEntityId hostile))
                 {
@@ -418,14 +420,14 @@ namespace GameLogic.Command
             }
 
             if (InputRouter.ConsumeKeyDown(KeyCode.G, InputScope.Strategy) &&
-                TryScreenToWorld(Input.mousePosition, out float2 guardAt))
+                TryScreenToWorld(InputRouter.Reader.MousePosition, out float2 guardAt))
             {
                 Issue(UnitCommandKind.Guard, guardAt, SimEntityId.None, paused);
                 return;
             }
 
             if (InputRouter.ConsumeKeyDown(KeyCode.H, InputScope.Strategy) &&
-                TryScreenToWorld(Input.mousePosition, out float2 retreatTo))
+                TryScreenToWorld(InputRouter.Reader.MousePosition, out float2 retreatTo))
             {
                 Issue(UnitCommandKind.Retreat, retreatTo, SimEntityId.None, paused);
             }
