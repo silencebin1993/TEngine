@@ -130,8 +130,42 @@
     "被直控过"按原文实际语义（"当前"而非历史"曾经"）实现，跨接管周期的历史标记若后续被
     要求，需另外设计数据源，不在本项范围。
 27. **拒绝反馈补炮口阻挡/落点非法/召唤容量/信号权限对应码+可访问性辅助**（`CP-REQ-081/082`）。
+    **2026-09-17 核实：本条目描述已过期，且剩余部分均非"接线"规模，暂不开工，登记如下**：
+    - 炮口阻挡——**已完成**，与本条目描述冲突的是队列③-10（2026-09-16 03:11 提交）已经把
+      `EmitterBlocked` 拒绝码 + `CombatBallistics.TryResolveEmitterPosition` 真实障碍检测
+      完整接好（`DirectActionSet.cs`/`OrganReleaseRunner.cs`/`DirectControlActions.cs`），
+      `M1_M4_Completeness_Audit.md` 判定写在这次提交**之前**，已经过期。
+    - 落点非法——核实全仓 `Zone`/`EffectSpawn` 释放路径**完全没有落点合法性校验**（射程/障碍/
+      场外一律接受），不是缺一个拒绝码，是校验逻辑本身要从零设计，规模与 CP-REQ-082 相当。
+    - 召唤容量——底层容量数据是真的存在（`MinionRegistry.Reserve`/`SimWorld.
+      SummonPressureCeiling`），但"召唤"根本不在 `OrganKernelActionKind`/`DirectActionAvailability`
+      覆盖的直控释放动作里（该枚举只有 Projectile/Cone/Zone/Status 四种），现在超限走的是卡牌
+      `EffectSpawn` 静默裁剪数量（只打一条 `Log.Info`，不是拒绝反馈语境）。真要满足
+      CP-REQ-081，得先决定"召唤"要不要成为直控释放的第五种内核动作类型，这是设计决策不是接线。
+    - 信号/权限——核实全仓 `信号|权限|Signal|Permission` 无任何门禁语义的代码，只有战场叙事
+      提及"信号"（通讯/侦察器官）与一句未落地的设计约束声明（`EmissionContext.cs` 注释），
+      概念本身在代码里从未实现，加枚举值会是永远触发不到的死代码。
+    - 可访问性（`CP-REQ-082`）——审计原文自己标"新故事"，核实确认全仓无任何瞄准辅助/接点
+      吸附/危险区轮廓/色盲编码实现，维持"新故事"判定，不在本条目范围内做。
+    以上落点非法/信号权限/召唤容量(直控释放路径)/可访问性四项，均需要先出设计方案（不是
+    "读代码就能确定怎么接"），登记为独立后续故事，不与⑥其它条目的"接线补全"混为一谈。
 28. **HUD失败文案改"原因→状态→后果→可恢复方法"四段式模板**（`IC-REQ-013`部分、`CP-REQ-081`、
     `FS-REQ-072`接口阻塞，结构改造可与⑱⑲同批做）。
+    **2026-09-17 已完成（IC-REQ-013部分）**——新增`FourPartFeedback`结构体+`ControlFeedback`
+    静态纯函数（`ForSwitch`/`ForChange`/`ForAvailability`），`BattleHudToolkit`状态行改用
+    `CompactLabel`（原因短句）+`tooltip`挂完整四段（不新增UXML结构，UI Toolkit `Label.tooltip`
+    原生支持悬浮显示）。内容按`FS-REQ-072`"内容先占位"口径给最小可读文案，结构钉死。
+    过程中发现并修复两处真实bug：`ControlChangeReason.Released`与`ControlAvailability.Released`
+    （玩家进战略视角放下意识——**游戏里的常态，几乎每局都会频繁触发**）此前与"意识真的无处可去"
+    共用"控制目标丢失"泛化文案，玩家会把正常操作误读成报错。`CellFrameworkValidate.cs [55]`：
+    穷举三个枚举全部值断言四段齐全+专项断言Released场景不再是丢失/无处可去文案。
+    **CP-REQ-081部分未做，登记发现**：核实`DirectControlActions.LastReleaseResult`
+    （`DirectActionAvailability`拒绝原因，含⑥-27刚补的`EmitterBlocked`）全仓**从未被任何UI
+    消费**——计算是对的，但玩家永远看不到，是IC-REQ-013"静默无反应不是安全降级"明确禁止的
+    情形。未接线是因为它与HUD可见的`AbilitySystem`技能槽（`RefreshSkillSlots`读`cell.Abilities.
+    Slots`）是两套不同系统，两者关系需要先厘清（`DirectActionAvailability.NotReady`注释提到
+    "玩家本体委托路径"，暗示两者有交集但代码里没有实际读取点），不是简单接一行代码，登记为
+    独立后续故事，不在本轮范围内猜测性接线。
 29. **敌方任务来源可解释调试接口**（`FS-REQ-050`接口阻塞——违反`05_`自己"没契约测试不得声称
     已准备"的规则）。
 30. **模板多谱系版本对比/成本冲突可视化+个体面板追溯**（`M3-R05`剩余UI细项）。

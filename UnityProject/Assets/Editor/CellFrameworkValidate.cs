@@ -116,6 +116,7 @@ namespace GameLogic.EditorTools
                 ValidateFormationCommandQueueVisualization();
                 ValidateSquadCommandQueueRequest();
                 ValidateDirectFormationHud();
+                ValidateControlFeedbackFourPart();
             }
             catch (Exception e)
             {
@@ -3076,6 +3077,62 @@ namespace GameLogic.EditorTools
             {
                 sim.End();
             }
+        }
+
+        /// <summary>
+        /// M4-R00-02 队列⑥-28（`IC-REQ-013`/`FS-REQ-072` 因果反馈四段式）：
+        /// <see cref="ControlFeedback"/> 三个纯函数（`ForSwitch`/`ForChange`/`ForAvailability`）的
+        /// 分支覆盖——枚举里每一个值都必须给出四段齐全的 <see cref="FourPartFeedback"/>，不能有
+        /// 任何值静默落进"一句笼统的话"（IC-REQ-013 审计原话点名的问题）。
+        ///
+        /// 额外断言 <see cref="ControlChangeReason.Released"/>/<see cref="ControlAvailability.Released"/>
+        /// 两处真实发现的 bug 已修：这是玩家主动放下意识进战略视角的**常态**，此前与"意识无处可去"
+        /// 共用"控制目标丢失"文案，会让玩家把正常操作读成报错。
+        /// </summary>
+        private static void ValidateControlFeedbackFourPart()
+        {
+            Line("\n[55] 控制反馈四段式文案（IC-REQ-013/FS-REQ-072）");
+
+            void ExpectComplete(FourPartFeedback fb, string label)
+            {
+                Expect(!string.IsNullOrEmpty(fb.Reason) && !string.IsNullOrEmpty(fb.State)
+                    && !string.IsNullOrEmpty(fb.Consequence) && !string.IsNullOrEmpty(fb.Recovery),
+                    $"{label} 应四段齐全（实际：{fb}）");
+            }
+
+            var entity = new SimEntityId(7001);
+
+            // 验收 1：ForSwitch 覆盖 ControlRequestResult 全部枚举值。
+            foreach (ControlRequestResult result in Enum.GetValues(typeof(ControlRequestResult)))
+            {
+                ExpectComplete(ControlFeedback.ForSwitch(result, 3, entity), $"ForSwitch({result})");
+            }
+
+            // 验收 2：ForChange 覆盖 ControlChangeReason 全部枚举值，valid/invalid 目标各测一次。
+            foreach (ControlChangeReason reason in Enum.GetValues(typeof(ControlChangeReason)))
+            {
+                ExpectComplete(ControlFeedback.ForChange(reason, entity), $"ForChange({reason}, valid)");
+                ExpectComplete(ControlFeedback.ForChange(reason, SimEntityId.None), $"ForChange({reason}, none)");
+            }
+
+            // 验收 3：ForAvailability 覆盖 ControlAvailability 全部枚举值。
+            foreach (ControlAvailability availability in Enum.GetValues(typeof(ControlAvailability)))
+            {
+                ExpectComplete(ControlFeedback.ForAvailability(availability), $"ForAvailability({availability})");
+            }
+
+            // 验收 4：Released 场景的既有 bug 已修——不应再落进泛化的"目标丢失/无处可去"文案。
+            FourPartFeedback releasedChange = ControlFeedback.ForChange(ControlChangeReason.Released, SimEntityId.None);
+            Expect(!releasedChange.Reason.Contains("丢失") && !releasedChange.Reason.Contains("无处可去"),
+                $"ForChange(Released) 是玩家主动放下意识的正常状态，不应显示成丢失/无处可去（实际：{releasedChange.Reason}）");
+            Expect(releasedChange.State.Contains("正常"),
+                $"ForChange(Released) 的状态段应明确标注这是正常状态（实际：{releasedChange.State}）");
+
+            FourPartFeedback releasedAvailability = ControlFeedback.ForAvailability(ControlAvailability.Released);
+            Expect(!releasedAvailability.Reason.Contains("丢失"),
+                $"ForAvailability(Released) 不应显示成丢失（实际：{releasedAvailability.Reason}）");
+            Expect(!ControlFeedback.ForAvailability(ControlAvailability.None).Equals(releasedAvailability),
+                "None（真无处可去）与 Released（主动放下，正常）必须是两段不同的文案，不能共用同一个分支");
         }
 
         /// <summary>
