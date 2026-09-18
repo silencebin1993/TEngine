@@ -5433,11 +5433,29 @@ namespace GameLogic.EditorTools
                     $"④H 键应下达 Retreat（实际 {(sim.TryGetCommand(clicker, out UnitCommand rc) ? rc.Kind.ToString() : "无命令")}）");
                 reader.EndFrame();
                 InputRouter.DebugClearConsumedKeys();
+
+                // ── ⑤：鼠标命中 UI 时，世界框选与右键命令必须完全让位。──
+                int issuedBeforeUiHit = squad.IssuedCommandCount;
+                InputRouter.SetUiPointerBlocker(() => true);
+                reader.ClickMouseButtonDown(1);
+                squad.Tick(paused: false);
+                Expect(squad.IssuedCommandCount == issuedBeforeUiHit,
+                    "⑤鼠标命中 UI 时右键不得向世界下达命令");
+                reader.EndFrame();
+
+                squad.ClearSelection();
+                reader.ClickMouseButtonDown(0);
+                squad.Tick(paused: false);
+                Expect(!squad.IsDragging && squad.Selection.Count == 0,
+                    "⑤鼠标命中 UI 时左键不得启动地图框选或改变选择集");
+                reader.EndFrame();
+                InputRouter.SetUiPointerBlocker(null);
             }
             finally
             {
                 squad.Unbind();
                 sim.End();
+                InputRouter.SetUiPointerBlocker(null);
                 InputRouter.Reset();
                 camera.targetTexture = null;
                 UnityEngine.Object.DestroyImmediate(rt);

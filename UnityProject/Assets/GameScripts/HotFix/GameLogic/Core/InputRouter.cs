@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -56,6 +57,8 @@ namespace GameLogic.Core
         private static bool _modalUi;
         private static bool _gameplayPaused;
         private static bool _strategicPause;
+        private static Func<bool> _uiPointerBlocker;
+        private static readonly HashSet<int> UiCapturedPointers = new HashSet<int>();
         private static int _frame = -1;
         private static readonly HashSet<KeyCode> ConsumedKeys = new HashSet<KeyCode>();
 
@@ -68,6 +71,35 @@ namespace GameLogic.Core
         public static void SetModalUi(bool open)
         {
             _modalUi = open;
+        }
+
+        /// <summary>
+        /// 由 UI Toolkit 注册的指针命中检测。核心输入层不依赖具体 UI 框架，只询问“这一帧鼠标是否落在可见 UI 上”。
+        /// </summary>
+        public static void SetUiPointerBlocker(Func<bool> blocker)
+        {
+            _uiPointerBlocker = blocker;
+        }
+
+        /// <summary>是否有 UI 正在拖动并独占指针。拖动跨出窗口范围后仍保持 true，直到释放。</summary>
+        public static bool UiPointerCaptured => UiCapturedPointers.Count > 0;
+
+        /// <summary>UI 标题栏开始拖动时调用；只锁指针，不改变键盘输入域。</summary>
+        public static void CaptureUiPointer(int pointerId)
+        {
+            UiCapturedPointers.Add(pointerId);
+        }
+
+        /// <summary>UI 指针释放或意外失去捕获时调用。</summary>
+        public static void ReleaseUiPointer(int pointerId)
+        {
+            UiCapturedPointers.Remove(pointerId);
+        }
+
+        /// <summary>世界层是否必须让出鼠标：指针命中任意可见 UI，或正在拖动 UI 窗口。</summary>
+        public static bool IsUiPointerBlocked()
+        {
+            return UiPointerCaptured || (_uiPointerBlocker?.Invoke() ?? false);
         }
 
         /// <summary>
@@ -95,6 +127,7 @@ namespace GameLogic.Core
             _modalUi = false;
             _gameplayPaused = false;
             _strategicPause = false;
+            UiCapturedPointers.Clear();
             _frame = -1;
             ConsumedKeys.Clear();
             Reader = UnityInputReader.Instance;
@@ -138,7 +171,7 @@ namespace GameLogic.Core
         /// </summary>
         public static bool ConsumeKeyDown(KeyCode key, InputScope scope)
         {
-            if (!Owns(scope) || !Reader.GetKeyDown(key))
+            if (!Owns(scope) || (IsMouseButton(key) && IsUiPointerBlocked()) || !Reader.GetKeyDown(key))
             {
                 return false;
             }
@@ -172,7 +205,7 @@ namespace GameLogic.Core
         /// <summary>指针位置。过渡期间一律不给——镜头在动，屏幕坐标反投影出来的世界点没有意义。</summary>
         public static bool TryGetPointer(InputScope scope, out Vector3 screenPosition)
         {
-            if (Owns(scope))
+            if (Owns(scope) && !IsUiPointerBlocked())
             {
                 screenPosition = Reader.MousePosition;
                 return true;
@@ -185,7 +218,24 @@ namespace GameLogic.Core
         /// <summary>滚轮增量。缩放归战略视角，直控下不改视距。</summary>
         public static float GetScrollDelta(InputScope scope)
         {
-            return Owns(scope) ? Reader.MouseScrollDelta : 0f;
+            return Owns(scope) && !IsUiPointerBlocked() ? Reader.MouseScrollDelta : 0f;
+        }
+
+        /// <summary>世界层读取鼠标按下的唯一入口；UI 覆盖区域和拖动期间一律不给下层玩法。</summary>
+        public static bool GetMouseButtonDown(int button, InputScope scope)
+        {
+            return Owns(scope) && !IsUiPointerBlocked() && Reader.GetMouseButtonDown(button);
+        }
+
+        /// <summary>释放不按 UI 命中拦截，保证已在世界中开始的合法框选能正常收尾。</summary>
+        public static bool GetMouseButtonUp(int button, InputScope scope)
+        {
+            return Owns(scope) && Reader.GetMouseButtonUp(button);
+        }
+
+        private static bool IsMouseButton(KeyCode key)
+        {
+            return key == KeyCode.Mouse0 || key == KeyCode.Mouse1 || key == KeyCode.Mouse2;
         }
 
         private static void SyncFrame()

@@ -5,17 +5,19 @@ using UnityEngine;
 namespace BinGames.EditorTools.QA
 {
     /// <summary>
-    /// QA 菜单：编辑器快捷键屏蔽开关，供自动化验收（模拟键鼠输入）时避免误触
-    /// Unity 内置快捷键（Ctrl+S/Ctrl+Z/Delete 等）。是否屏蔽由用户在菜单里自行决定，
+    /// QA 菜单：编辑器快捷键屏蔽开关，供自动化验收（模拟键鼠输入）时避免误触。
+    /// 只屏蔽带修饰键的组合快捷键（Ctrl/Alt/Shift/Command），不影响 Del、鼠标按键和普通单键。
     /// 状态存 EditorPrefs，重启编辑器后维持上次选择。
-    /// 用 <see cref="ShortcutManager"/> 官方 API 清空/恢复绑定，不用事件消费 hack ——
-    /// 恢复时会把所有快捷键（含用户此前的自定义绑定）重置为 Unity 默认值，这是已知代价。
+    ///
+    /// 屏蔽状态使用独立的快捷键配置文件承载。取消屏蔽时切回 Unity 默认配置文件，
+    /// 避免逐条 ClearShortcutOverride 导致编辑器卡顿，也能清除旧实现遗留的空覆盖。
     /// </summary>
     [InitializeOnLoad]
     internal static class EditorShortcutToggle
     {
         private const string MenuPath = "QA/屏蔽编辑器快捷键";
         private const string PrefsKey = "BinGames.QA.ShortcutsBlocked";
+        private const string BlockedProfileId = "BinGames.QA.ShortcutsBlocked";
 
         static EditorShortcutToggle()
         {
@@ -49,23 +51,72 @@ namespace BinGames.EditorTools.QA
         private static void Apply(bool block)
         {
             var manager = ShortcutManager.instance;
+
+            if (!block)
+            {
+                // 切回默认配置文件会一次性恢复所有 Unity 默认绑定。
+                // 这也能绕过旧实现写入当前用户配置文件的空覆盖。
+                manager.activeProfileId = ShortcutManager.defaultProfileId;
+
+                if (ProfileExists(manager, BlockedProfileId))
+                {
+                    manager.DeleteProfile(BlockedProfileId);
+                }
+
+                Debug.Log("[QA] 已恢复编辑器快捷键为 Unity 默认值");
+                return;
+            }
+
+            if (ProfileExists(manager, BlockedProfileId))
+            {
+                manager.activeProfileId = BlockedProfileId;
+                return;
+            }
+
+            // 从默认配置文件创建，避免继承旧实现可能写入的全量空覆盖。
+            manager.activeProfileId = ShortcutManager.defaultProfileId;
+            manager.CreateProfile(BlockedProfileId);
+            manager.activeProfileId = BlockedProfileId;
+
             int count = 0;
             foreach (var id in manager.GetAvailableShortcutIds())
             {
-                if (block)
+                if (!HasModifier(manager.GetShortcutBinding(id)))
                 {
-                    manager.RebindShortcut(id, ShortcutBinding.empty);
+                    continue;
                 }
-                else
-                {
-                    manager.ClearShortcutOverride(id);
-                }
+
+                manager.RebindShortcut(id, ShortcutBinding.empty);
                 count++;
             }
 
-            Debug.Log(block
-                ? $"[QA] 已屏蔽编辑器全部快捷键（{count} 项，通过 QA/屏蔽编辑器快捷键 菜单可恢复）"
-                : $"[QA] 已恢复编辑器快捷键为 Unity 默认值（{count} 项）");
+            Debug.Log($"[QA] 已屏蔽编辑器组合快捷键（{count} 项，通过 QA/屏蔽编辑器快捷键 菜单可恢复）");
+        }
+
+        private static bool ProfileExists(IShortcutManager manager, string profileId)
+        {
+            foreach (var availableProfileId in manager.GetAvailableProfileIds())
+            {
+                if (availableProfileId == profileId)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool HasModifier(ShortcutBinding binding)
+        {
+            foreach (var combination in binding.keyCombinationSequence)
+            {
+                if (combination.modifiers != ShortcutModifiers.None)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
     }
 }

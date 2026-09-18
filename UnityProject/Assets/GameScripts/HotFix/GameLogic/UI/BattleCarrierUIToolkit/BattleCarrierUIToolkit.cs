@@ -179,6 +179,12 @@ namespace GameLogic
             _structuralReplaceHint = _root.Q<Label>("StructuralReplaceHint");
             _root.pickingMode = PickingMode.Ignore;
 
+            Button closeButton = _root.Q<Button>("CarrierCloseButton");
+            if (closeButton != null)
+            {
+                closeButton.clicked += () => SetPanelOpen(false);
+            }
+
             // story-003（slot-unlimited-codex）R4：已拥有/全量 Tab，纯 UI 展示态切换，不写数据。
             if (_organViewToggle != null)
             {

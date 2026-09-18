@@ -163,20 +163,32 @@ namespace GameLogic.Command
 
         private void HandleSelectionInput()
         {
-            if (InputRouter.Reader.GetMouseButtonDown(0) &&
-                TryScreenToWorld(InputRouter.Reader.MousePosition, out float2 down))
+            // UI 标题栏拖动是独占手势。即便之前世界层已开始框选，也必须立即取消，
+            // 否则松手时会把“拖窗口”误结算成地图框选。
+            if (InputRouter.UiPointerCaptured)
+            {
+                _dragging = false;
+                return;
+            }
+
+            if (InputRouter.GetMouseButtonDown(0, InputScope.Strategy) &&
+                InputRouter.TryGetPointer(InputScope.Strategy, out Vector3 pointerDown) &&
+                TryScreenToWorld(pointerDown, out float2 down))
             {
                 _dragging = true;
                 _dragStartWorld = down;
                 _dragCurrentWorld = down;
             }
 
-            if (_dragging && TryScreenToWorld(InputRouter.Reader.MousePosition, out float2 move))
+            // 框选已经从地图开始后，允许鼠标掠过 HUD/面板边缘仍持续更新终点；
+            // 首次按下仍走 InputRouter 的 UI 命中拦截，因此 UI 内点击绝不会发起框选。
+            if (_dragging && InputRouter.Owns(InputScope.Strategy) &&
+                TryScreenToWorld(InputRouter.Reader.MousePosition, out float2 move))
             {
                 _dragCurrentWorld = move;
             }
 
-            if (!_dragging || !InputRouter.Reader.GetMouseButtonUp(0))
+            if (!_dragging || !InputRouter.GetMouseButtonUp(0, InputScope.Strategy))
             {
                 return;
             }
@@ -435,8 +447,9 @@ namespace GameLogic.Command
 
             // 右键 = 智能命令：点在敌人身上就是攻击，点在空地就是移动。
             // ⑥-25（FC-REQ-022"插队/追加"）：按住 Shift 时不覆盖当前命令，排到编队队列末尾。
-            if (InputRouter.Reader.GetMouseButtonDown(1) &&
-                TryScreenToWorld(InputRouter.Reader.MousePosition, out float2 world))
+            if (InputRouter.GetMouseButtonDown(1, InputScope.Strategy) &&
+                InputRouter.TryGetPointer(InputScope.Strategy, out Vector3 pointerCommand) &&
+                TryScreenToWorld(pointerCommand, out float2 world))
             {
                 bool queueBehindActive = InputRouter.Reader.GetKey(KeyCode.LeftShift)
                     || InputRouter.Reader.GetKey(KeyCode.RightShift);
