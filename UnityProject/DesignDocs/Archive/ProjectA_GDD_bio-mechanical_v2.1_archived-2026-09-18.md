@@ -46,7 +46,7 @@
 - 要实现攻击、弹道或基元：读第 6、16 章和 `detailed/02_Combat_Projection_And_Primitives.md`。
 - 要实现编队与 M4：读第 8 章和 `detailed/03_Formation_Command_Pathfinding_And_Doctrine.md`。
 - 要实现敌人进化与首领：读第 10、11 章。
-- 要实现区域 Alpha：再读 `detailed/04_Alpha_Pack_And_Adaptive_Abilities.md`。
+- 区域 Alpha 的旧详细文档已删除；本归档不得作为实现入口。
 - 要让 AI 开发：按 `detailed/00_Implementation_Completeness_Contract.md` 和里程碑点名的需求 ID 执行，不自行从旧案补需求，也不得把示例当完整清单。
 
 ---
@@ -654,7 +654,7 @@ AI 不是故意愚蠢，而是**风险保守、精度有限、不会发明临场
 
 **诱离**必须依赖世界中可解释的刺激，而不是脚本强制首领走到预设点。有效诱饵至少包括高价值食物、可归档样本、领地威胁和伪造群体信号。Alpha 是否响应取决于当前储备、已知风险、护群完整度和谱系性格；UI 在布置前预览吸引对象、可能路径、持续时间和被识破条件。
 
-完整规则见 `detailed/01_Faction_Survival_And_Ecology.md` 与 `detailed/04_Alpha_Pack_And_Adaptive_Abilities.md`。
+区域 Alpha 的完整旧规则文档已删除；本归档不得恢复其产品范围。
 
 ### 9.6 敌我共享能力与 AI 边界
 
@@ -820,7 +820,7 @@ Alpha 不使用一张与本局学习无关的固定技能表。程序只固定**
 
 例如核心拥有“蓄力扫射”动作骨架；若学到穿透、分裂和导电，实际招式会从器官接点沿预告方向发射穿透骨针，命中后在入射方向两侧分裂，并由导电膜扩散。若护群信号中继被切断，分裂后的猎手包夹命令不会同步执行；若代谢储备不足，核心只能使用低阶直射版本。复杂性来自同一套基元和护群协同，不来自为每一种结果另写一个死技能。
 
-每个动作配方必须保存来源证据、使用的基元、空间生效阶段、代价、视觉预告、取消条件和 AI 使用阈值；完整格式见 `detailed/02_Combat_Projection_And_Primitives.md` 与 `detailed/04_Alpha_Pack_And_Adaptive_Abilities.md`。
+每个动作配方在当时需保存来源证据、基元、空间生效阶段、代价、视觉预告、取消条件和 AI 阈值；区域 Alpha 的旧格式文档已删除，当前实现按 ER Story 规格。
 
 #### 食源与护群的实际作用
 

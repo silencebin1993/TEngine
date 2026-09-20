@@ -1,7 +1,9 @@
 # 材质定案：阳光培养皿 · BioGlass（细胞阶段）
 
+> **Retired / 2026-09-19：** 此材质方向不适用于《地球归还》Demo，旧 shader 仅为可复用代码/性能参考；不得照此生成新材质和场景。现行美术方向见 [ProjectA_GDD.md](ProjectA_GDD.md) §11。
+
 > 版本：v1.0 · 2026-08-10  
-> 上位文档：`Art_Direction_Cell_Stage.md`（造形 / Tripo 管线不变）  
+> 管线参考：[现行美术生产技术](../../../production/design/earth-reclamation/ART-PRODUCTION-TECHNICAL-REFERENCE.md)；本文 BioGlass 视觉仅供历史材质考古。
 > 运行时入口：`BinGames/SimBioGlass`（测试主视觉）· `BinGames/SimInstancedUnlit`（远距 / 压测 LOD）  
 > 渲染路径：Built-in RP · `Graphics.RenderMeshInstanced` · 每批 ≤1023
 
@@ -31,7 +33,7 @@
 - 污染/腐蚀/灾变：同相**降饱和 + 偏脏**（褐紫、病绿），禁止与生命色同样鲜艳。
 - 同屏主色建议 ≤5（己方、食物、普敌、精英、污染）。
 
-与 `Art_Direction_Cell_Stage.md` §5 六路线色兼容：路线色仍是实例 `_Color`；本 shader 只负责「怎么把这色画成凝胶」。
+历史上与旧六路线色兼容：路线色仍是实例 `_Color`；本 shader 只负责「怎么把这色画成凝胶」，不构成《地球归还》视觉需求。
 
 ---
 

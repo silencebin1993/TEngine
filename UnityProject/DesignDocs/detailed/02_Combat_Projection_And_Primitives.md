@@ -1,5 +1,7 @@
 # 战斗投射、角度与基元生效阶段详细规格
 
+> **Historical technical reference / 2026-09-19：** 可按当前 ER Story 点名核对既有战斗/基元实现，旧生物表现和旧目标不再是产品需求；现行入口见 [DesignDocs README](../README.md)。
+
 > 适用：玩家直控、友军 AI、敌军、Alpha、器官/基因、近战、弹体、场地、光环、召唤与表现预览。
 > 上级：`../ProjectA_GDD.md` §6、§7、§16；组合代数：`../最新改动需求/组合引擎-正名与全阶段变化词宪法.md`。
 > 本文件补齐宿主空间语义；若与 `F:/Project/BinGames/ComposeEngine/docs/HostApplyContract.md` 的历史最小实现冲突，以本文件作为 ProjectA 产品目标，并建立迁移任务，不静默折中。

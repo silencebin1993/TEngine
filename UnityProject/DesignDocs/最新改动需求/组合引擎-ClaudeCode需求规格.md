@@ -1,5 +1,7 @@
 # 化学引擎代码库需求规格（给 Claude Code）
 
+> **Technical reference only / 2026-09-19：** 本文只能用于核对已实现 ComposeEngine；未完成的旧化学需求不得自动转为《地球归还》任务。现行入口见 [DesignDocs README](../README.md)。
+
 > 用途：把本文整份交给 Claude Code，生成一个**可复用、尽量万能适配**的「组合化学引擎」库。  
 > 实现路线：**做法 C**（基元只写本地规则 + 固定引擎做叠加/规约/结算）。  
 > **禁止**方案 A（基元互相 `isinstance` / 两两配对接口膨胀）。

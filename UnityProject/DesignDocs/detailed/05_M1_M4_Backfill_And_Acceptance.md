@@ -1,5 +1,7 @@
 # M1–M4 规格补录、缺口返工与自动验收计划
 
+> **Retired / 2026-09-19：** 旧 M1～M4 任务和验收已不是当前队列。新 ER-0～ER-8、ERD 与 AC 见 [DesignDocs README](../README.md)；仅保留旧测试经验作历史。
+
 > 当前基线（2026-09-15）：M1、M2、M3 已按旧任务卡标 Done；M4-01～M4-05 Done；下一原计划项为 M4-06。
 > 本文件不改写历史完成事实。它定义新详细规格发布后的产品完整性复验与返工顺序。
 > 强制门禁：`00_Implementation_Completeness_Contract.md`。

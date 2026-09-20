@@ -1,5 +1,7 @@
 # 阵营生存、资源闭环与共享 AI 详细规格
 
+> **Historical technical reference / 2026-09-19：** 旧阵营/生态产品目标已退役。只在当前 ER Story 明确点名时核对已实现 AI/资源代码，不得据本文新增《地球归还》需求；现行入口见 [DesignDocs README](../README.md)。
+
 > 适用：玩家个体/编队/谱系、三条敌方谱系、Alpha 护群、M5 资源网络、M6 采样进化与 M7 首领。
 > 上级：`../ProjectA_GDD.md` §8–§11。完整性门禁：`00_Implementation_Completeness_Contract.md`。
 

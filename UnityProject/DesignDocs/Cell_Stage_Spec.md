@@ -553,7 +553,7 @@ StageOutcome {
 ## 17. 代谢化学系统（切片 / 有向管 / 双系统 / 三轴复玩）
 
 > **权威叙述（2026-08-11 起生效）** — 本节已从旧「反应矩阵/催化卡」设计整节改写为已落地架构的摘要。  
-> **唯一实现细节权威**：`DesignDocs/最新改动需求/`（冻结总案 `代谢切片-冻结总案-基元与美术.md`、`组合引擎-ClaudeCode需求规格.md`、`复玩三轴-ClaudeCode需求规格.md`）。本节只做产品级摘要，字段/管道/种类定义以那三份文件为准，禁止只读本节就动手实现。  
+> **历史实现细节说明**：旧复玩规格已删除；仍可核对的基元字段/组合技术只以当前 DesignDocs README 点名的技术参考和 `production/design/earth-reclamation/LEGACY-SYSTEM-FACTS.md` 为准。本节不能作为现行产品实现输入。
 > **历史提案记录**：`openspec/changes/metabolic-slice-chemengine/`（追溯型 change，proposal/design/tasks 覆盖 ChemEngine + MetabolicSlice + 三轴的完整决策链）。  
 > 旧设计（Status×Status 反应矩阵 / 催化卡注入 Affix / `OnReaction` 连锁）已作废；完整历史见 git（commit `2f34343` 之前版本）。
 

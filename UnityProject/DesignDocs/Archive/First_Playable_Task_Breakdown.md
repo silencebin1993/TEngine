@@ -8,7 +8,7 @@
 - `Assets/Scenes/main.unity`
 - `Assets/GameScripts/HotFix/GameLogic/GameApp.cs`
 - TEngine 热更代码目录与基础 UI 框架
-- `GDD_Starter_Pack.md`
+- 已删除旧 GDD（本归档不得作为实现入口）
 - `First_Playable_Spec.md`
 
 当前未发现：

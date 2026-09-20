@@ -1,5 +1,7 @@
 # 编队、命令、共享路径与教义详细规格
 
+> **Historical technical reference / 2026-09-19：** 可按当前 ER Story 点名核对已实现编队/路径/教义契约，旧题材或旧里程碑目标不得自动续做；现行入口见 [DesignDocs README](../README.md)。
+
 > 适用：M2 基础命令回归、M4-01～M4-06、M5 空间网络、M7 多线首领。
 > 上级：`../ProjectA_GDD.md` §7–§9。完整性门禁：`00_Implementation_Completeness_Contract.md`。
 

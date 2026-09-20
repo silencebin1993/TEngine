@@ -65,11 +65,11 @@ TEngine 基于 HybridCLR + YooAsset + UniTask + Luban 构建。
 
 若任务涉及 ProjectA 玩法、AI、模拟、UI 或验收，在写代码前还必须：
 
-1. 从 `DesignDocs/README.md` 找到任务对应的 `DesignDocs/detailed/` 详细规格；
-2. 先在 `DesignDocs/detailed/07_M0_M10_Story_Coverage_Matrix.md` 找到该任务的覆盖 ID，再读取 `00_Implementation_Completeness_Contract.md` 与任务卡点名的需求 ID；
+1. 从 `DesignDocs/README.md` 找到任务对应的《地球归还》ERD、内容锁定表、基元规格与 Story 施工卡；
+2. 先在 `production/design/earth-reclamation/REQUIREMENT-TO-PLAYABLE-TRACE.md` 找到对应 ERD 覆盖，再读取 `AI-EXECUTION-PROTOCOL.md`、`DEMO-ACCEPTANCE.md` 与任务卡点名的需求 ID；
 3. 任务卡补齐正常旅程、负向矩阵、正式入口 E2E 和需求覆盖矩阵；
 4. 不把里程碑标题、示例、占位、深层直调或“非目标”当作省略正常玩家功能的依据；
-5. 已完成 M1–M4 的返工与复验按 `DesignDocs/detailed/05_M1_M4_Backfill_And_Acceptance.md`。
+5. 历史 M1–M4 的返工与复验只作考古；现行功能按 ER Story 施工，不把历史 Done 视为新产品完成。
 
 **当 references 规范与代码实际 API 冲突时**：
 1. 使用 Grep 搜索实际方法签名验证（例：`Grep "ForceUnloadUnusedAssets"` 确认参数名）

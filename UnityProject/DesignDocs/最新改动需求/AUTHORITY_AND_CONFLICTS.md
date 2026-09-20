@@ -1,5 +1,7 @@
 # 权威切换与冲突表（2026-08-11，2026-08-12 补丁：D7/D8 文案融合）
 
+> **Retired as product authority / 2026-09-19：** 下文“当前权威”“专项权威”仅描述旧生物/代谢产品当时的状态，现在不得作为新功能、文案、美术或范围需求。只有当前 ER Story 明确点名核对已实现 ComposeEngine 技术行为时才可局部查阅；现行产品和实施入口见 [DesignDocs README](../README.md)。
+
 > [!IMPORTANT]
 > **2026-09-11 产品权威边界补丁：** 本文件继续作为代谢化学、器官/基因内部组合语义和 ComposeEngine 的专项权威；游戏的产品循环、对象层级、获取与装配传播、RTS/意识传递、敌方进化、首领和胜负，以上级目录 [`ProjectA_GDD.md`](../ProjectA_GDD.md) 为准。下文指向的 `production/design` 文件仅在这些专项内部规则上可复用，不得覆盖新 GDD 的产品语义。实施迁移按 [`ProjectA_Milestones.md`](../ProjectA_Milestones.md) 执行。
 
@@ -19,8 +21,8 @@
 | 冻结宪法（细胞 v1 基元/字段/管道/禁令） | `代谢切片-冻结总案-基元与美术.md` | 仅管道序/正交字段/禁 `is` 组合；**目录与分类以 combat-identity-rework 为准** |
 | ComposeEngine 独立库（做法 C API） | `组合引擎-ClaudeCode需求规格.md` | 实现/改核时；与正名宪法一起守做法 C |
 | 卡牌/切片包装 | `细胞肉鸽-基元卡牌包装.md` | ComposeEngine 绿后的下一窗 |
-| 复玩三轴 | `复玩三轴-ClaudeCode需求规格.md` | 包装落地后 |
-| 玩家白话名词 | `代谢切片-白话名词说明书.md` | 写 UI/文案时；程序窗默认不读 |
+| 遗留环境/消化/背包事实 | [现行遗留系统事实](../../../../production/design/earth-reclamation/LEGACY-SYSTEM-FACTS.md) | 仅需核对现有实现时；不派生 Demo 功能 |
+| 玩家机械文案 | [现行术语迁移表](../../../../production/design/earth-reclamation/TERM-MIGRATION.md) | 写 UI/文案时；旧白话说明书已删除 |
 | 美术出图 | `美术AI静图出图规范.md` | 美术窗；程序窗禁止读 |
 
 **正名（2026-08-13）**：对外权威名 = **组合引擎 / ComposeEngine**（sprint-010 story-001 **已真改符号**：库目录/命名空间/DLL/Unity Plugins 路径/规格文件名均已切换）。元素反应 ⊂ Substance 轴；变大/散射/旋转/位移等是一等能力。细胞 v1 目录不因此作废。

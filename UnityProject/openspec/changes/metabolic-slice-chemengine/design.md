@@ -24,7 +24,7 @@
 
 **D4 — ChemEngine 技术形态**（摘 `化学引擎-ClaudeCode需求规格.md` §3/§4）：C# `netstandard2.1` 独立文件夹 `ChemEngine/`，`src/ChemEngine/{Core,Modules,Contracts,Statuses,Engine,Catalog,Serialization}`；`dotnet build -c Release` 产出 `ChemEngine.dll`；Unity 侧只拷贝源码或放 DLL 到 `Assets/Plugins/ChemEngine/`，**不得**把游戏桥接代码编进核心 DLL；核心概念覆盖 `Packet`/`HitEvent`/`RuleVector`/`Module`/`Contract`/`Status`/`Reaction`/`Engine` 主入口。
 
-**D5 — 三轴复玩摘要**（摘 `复玩三轴-ClaudeCode需求规格.md` §1/§2/§3）：轴 A 环境残留 + 地形 Tag（落地于 `GameLogic/MetabolicSlice/Environment/`：TerrainCell/ResidueStack/WorldEnvironment/EnvironmentReactionCatalog）；轴 B 背包逼弃 + 双系统合成（限容储备囊 + 合成台，落地为 `CraftRecipe.AllowFromEquipped` + `CraftService.Craft` 重载支持囊+槽合成）；轴 C1 捕食消化（落地于 `Digestion/`：Reagent/DigestionChamber/DigestionEvent，事件解耦不直连 Bag）；C2 不可逆蜕变留二期未做。
+**D5 — 历史复玩系统事实**：旧规格已删除；可核对事实见 `production/design/earth-reclamation/LEGACY-SYSTEM-FACTS.md`。环境残留与消化目录存在，但不自动成为当前 Demo 内容；旧文档所称 `CraftRecipe`/`CraftService` 未被本轮源码审计确认可作为当前正式合成入口，不能据此宣称已完成。
 
 **D6 — 真实落地战斗桥接架构**（区别于规格文件里的设计态描述，本节引用真实已存在代码）：`MetabolicSliceBridge`（`GameLogic/MetabolicSlice/Combat/MetabolicSliceBridge.cs`）持有 `ChemEngine.Engine` + `SlotGrid` + `MetabolicSliceRunner`；`Priority = ModulePriority.MetabolicBridge`；由 `CellStageFlow.RegisterModules()` 注册挂载。每 Tick 调用 `_runner.Tick(grid, contracts, worldState, seed)` 产出 `HitEvent[]`，当前只消费 `evt.Damage` 转 `_sim.DamageArea(...)`，`Heal`/`Shield`/`Displace` 等字段留后续 story。
 

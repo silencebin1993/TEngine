@@ -3,7 +3,7 @@
 > 对应产品权威：`ProjectA_GDD.md`  
 > 用途：供 AI 工作者逐项领取、实施、测试和交接  
 > 原则：里程碑只规定顺序；`detailed/` 规定完整行为；一项任务交付一个玩家可验证的完整结果
-> 逐项门禁：`detailed/07_M0_M10_Story_Coverage_Matrix.md` 为 M0～M10 全 77 条任务的覆盖总表。每项必须先找到自己的覆盖 ID、详细文案、玩家结果、正常测试和负向测试；没有矩阵行不得开工或标 Done。
+> 逐项门禁：历史 M0～M10 覆盖矩阵已删除；本归档只记录当时的过程，不能据此开工或标 Done。
 
 ---
 
@@ -87,9 +87,9 @@
 | 生存、资源、敌我 AI、食源/搬运 | `detailed/01_Faction_Survival_And_Ecology.md` | `FS-*` |
 | 器官、弹道、角度、基元、手术接点 | `detailed/02_Combat_Projection_And_Primitives.md` | `CP-*` |
 | 编队、命令、教义、路径与直控脱队 | `detailed/03_Formation_Command_Pathfinding_And_Doctrine.md` | `FC-*` |
-| 区域 Alpha | `detailed/04_Alpha_Pack_And_Adaptive_Abilities.md` | `AL-*` |
+| 区域 Alpha | 旧详细规格已删除 | `AL-*` |
 | M1–M4 历史补验与返工 | `detailed/05_M1_M4_Backfill_And_Acceptance.md` | `M1-R*`～`M4-GATE-*` |
-| M0～M10 逐项覆盖 | `detailed/07_M0_M10_Story_Coverage_Matrix.md` | `COV-M0-*`～`COV-M10-*` |
+| M0～M10 逐项覆盖 | 旧覆盖矩阵已删除 | `COV-M0-*`～`COV-M10-*` |
 
 ---
 
@@ -597,7 +597,7 @@
 
 **里程碑目标：** 玩家能看见敌人如何从证据变成反制，并能在每一步介入。
 
-**详细规格：** `detailed/01_Faction_Survival_And_Ecology.md` 的敌方任务/信息搬运，`detailed/02_Combat_Projection_And_Primitives.md` 的通用 AbilityRecipe，`detailed/04_Alpha_Pack_And_Adaptive_Abilities.md` 的学习配方前置。
+**历史规格：** `detailed/01_Faction_Survival_And_Ecology.md` 的敌方任务/信息搬运与 `detailed/02_Combat_Projection_And_Primitives.md` 的通用 AbilityRecipe；区域 Alpha 的旧学习配方文档已删除。
 
 ### M6-01 进化账本
 
@@ -667,7 +667,7 @@
 
 **里程碑目标：** 一局出现明确起伏，并以玩家亲手塑造的史诗狩猎和文明发射结束。
 
-**详细规格：** 区域 Alpha 全部执行 `detailed/04_Alpha_Pack_And_Adaptive_Abilities.md`，并复用 `detailed/01_Faction_Survival_And_Ecology.md` 与 `detailed/02_Combat_Projection_And_Primitives.md`；不得建立 Boss 专用假食源、假搬运或独立死技能系统。
+**历史规格：** 区域 Alpha 的旧详细文档已删除；本段仅保留当时“不建立 Boss 专用假食源、假搬运或独立死技能系统”的过程记录。
 
 ### M7-01 战役导演替代时间轴
 
@@ -750,7 +750,7 @@
 
 **里程碑目标：** 在不依赖 PCG 和大量内容的情况下，交付 20–30 分钟可反复试玩的完整游戏。
 
-**集成规格：** M8 不重新发明规则，而是把 `detailed/00_Implementation_Completeness_Contract.md`、`01_Faction_Survival_And_Ecology.md`、`02_Combat_Projection_And_Primitives.md`、`03_Formation_Command_Pathfinding_And_Doctrine.md` 和 `04_Alpha_Pack_And_Adaptive_Abilities.md` 的玩家旅程完整接通。每个故事开工前建立需求 ID 覆盖矩阵；“固定地图”只是先验证完整游戏，不是永久禁止 PCG、更多单位或更多组合。
+**历史集成规格：** M8 当时接通过 `00`～`03` 的玩家旅程；区域 Alpha 旧文档与覆盖矩阵均已删除。本段不构成当前产品的 PCG、内容或系统需求。
 
 ### M8-01 固定战役地图
 
@@ -807,7 +807,7 @@
 
 **进入条件：** M8-06 达到门槛。未达到不得开始。
 
-**详细规格：** `detailed/06_M9_M10_PCG_Content_Polish_And_Acceptance.md` §3～§8；所有生成结果必须复用 GDD §9 的共享生态、§16 的投射/确定性和 `00_Implementation_Completeness_Contract.md` 的完整性门禁。M9 扩大空间与重玩机会，不改变核心规则。
+**历史规格：** M9 旧 PCG 文档已删除；本段只记录当时的范围，不构成当前 PCG 需求。
 
 ### M9-01 图章规范与标注工具
 
@@ -866,7 +866,7 @@
 
 ## M10：美术、声音、可访问性与商店演示
 
-**详细规格：** `detailed/06_M9_M10_PCG_Content_Polish_And_Acceptance.md` §9～§16，并严格读取 `02_Combat_Projection_And_Primitives.md` 的阶段事件。M10 只替换已验证的行为表现，不以预渲染、占位音画或宣传素材代替可玩功能。
+**历史规格：** M10 旧 PCG/表现文档已删除；“不以预渲染、占位音画或宣传素材代替可玩功能”仅作为过程记录，当前门禁以《地球归还》验收矩阵为准。
 
 ### M10-01 模块化美术规范
 

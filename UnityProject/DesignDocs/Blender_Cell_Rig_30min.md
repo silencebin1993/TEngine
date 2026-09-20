@@ -1,6 +1,6 @@
 # 细胞玩家基底：30 分钟绑 3 根骨（非美术向）
 
-> 配套：`Art_Direction_Cell_Stage.md` §6 动画分级  
+> 动画生产边界：[现行美术生产技术](../../../production/design/earth-reclamation/ART-PRODUCTION-TECHNICAL-REFERENCE.md)；本文细胞骨骼示例仅供历史考古。
 > 对象：开局圆泡 `player_base_core`（及同拓扑的低面有机体）  
 > Blender：**4.0+**（菜单名以 4.x 中文/英文并列）  
 > 目标：能让「核呼吸 / 口缘张合」真动顶点；**不是**学完建模
@@ -260,4 +260,4 @@ Tripo 静态 mesh
 
 ---
 
-*本文只服务细胞阶段玩家轻骨骼。改动画分级策略时，与 `Art_Direction_Cell_Stage.md` 同步升版说明。*
+*本文只服务细胞阶段玩家轻骨骼。现行项目的动画分级与绑定以现行美术生产技术及对应 Story 为准。*
