@@ -192,6 +192,9 @@ namespace GameLogic.Stage
             // ER2-INPUT-01 AC-UI-005：战略速度/暂停常驻 HUD，细胞阶段与归还谷地共用同一个实例
             // （谁在跑就显示谁，见该类 Update() 里的可见性判断），不随任一场景的 Enter/Exit 增删。
             _hudHost.AddComponent<UI.Common.StrategyClockHudToolkit>();
+            // ER3-ECO-01 AC-ECO-009：资源账本 HUD（可用/预留/最近收支），左上角，与右上角的速度
+            // HUD 不重叠；只在归还谷地激活时可见，见该类 Update() 判断。
+            _hudHost.AddComponent<UI.Common.EconomyHudToolkit>();
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             // 已被 UI Toolkit 覆盖的旧 IMGUI 调试 HUD 不得默认盖在玩家界面上；
             // 如需做历史对照，可在运行时显式启用该组件。
