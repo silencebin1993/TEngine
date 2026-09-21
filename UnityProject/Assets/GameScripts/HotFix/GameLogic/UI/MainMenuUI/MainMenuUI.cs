@@ -11,14 +11,13 @@ namespace GameLogic
     /// 走 TEngine UIWindow 规范；完整机械美术主题由 ER2-THEME-01 接手打磨，本类不做视觉终稿。
     ///
     /// 冷启动第一屏由 <c>GameApp.StartGameLogic</c> 直接 <c>ShowUIAsync&lt;MainMenuUI&gt;()</c> 打开
-    /// （见该方法注释），细胞阶段（占位区域）自然结束后 <see cref="GameLogic.Stage.GameRoot"/> 也会
+    /// （见该方法注释），归还谷地/细胞阶段自然结束后 <see cref="GameLogic.Stage.GameRoot"/> 也会
     /// 重新打开本窗口，"返回菜单"因此复用同一入口。
     ///
-    /// 本 Story 范围内不接真实"归还谷地"场景（ER2-SCENE-01 尚未实现）：新建/继续/读取成功后，
-    /// 把结果写入 <see cref="CampaignSession"/> 后关闭主菜单并调用
-    /// <see cref="GameLogic.Stage.GameRoot.StartCellStage()"/>/<see cref="GameLogic.Stage.GameRoot.ResumeCellStage()"/>——
-    /// 细胞阶段是当前唯一真实可达的正式区域入口（ER1-REUSE-01/ER1-ID-01/ER1-SAVE-02 已确立的先例），
-    /// 诚实占位，不伪造尚不存在的归还谷地场景。</summary>
+    /// ER2-SCENE-01 起：新建/继续/读取成功后，把结果写入 <see cref="CampaignSession"/> 后关闭主菜单
+    /// 并调用 <see cref="GameLogic.Stage.GameRoot.StartHomeValley()"/>/
+    /// <see cref="GameLogic.Stage.GameRoot.ResumeHomeValley()"/> 进入归还谷地正式场景
+    /// （<see cref="GameLogic.Campaign.Regions.HomeValleyController"/>）。</summary>
     [Window(UILayer.UI, location: "MainMenuUI")]
     public class MainMenuUI : UIWindow
     {
@@ -338,12 +337,11 @@ namespace GameLogic
             CampaignSession.Set(slotIndex, state);
             Log.Info($"[MainMenuUI] 新战役已创建：campaignId={campaignId} slot={slotIndex} phase={state.CampaignPhase}");
 
-            // ER2-BOOT-01：归还谷地正式场景尚不存在（ER2-SCENE-01 范围）。细胞阶段是当前唯一真实
-            // 可达的正式区域入口（ER1-REUSE-01/ER1-ID-01/ER1-SAVE-02 已确立的先例），诚实占位进入，
-            // 不停在主菜单假装"已开局"。GameApp.MountGameplayUi() 幂等，首次开局才真正挂载战斗 UI。
+            // ER2-SCENE-01：新战役进入归还谷地正式场景。GameApp.MountGameplayUi() 幂等，
+            // 首次开局才真正挂载常驻 UI 壳层（战斗 HUD 等），与归还谷地自身的场景构建互不相关。
             GameApp.MountGameplayUi();
             Close();
-            GameLogic.Stage.GameRoot.StartCellStage();
+            GameLogic.Stage.GameRoot.StartHomeValley();
         }
 
         private void LoadIntoSession(int slotIndex)
@@ -377,11 +375,11 @@ namespace GameLogic
             Log.Info($"[MainMenuUI] 已读取战役：campaignId={result.State.CampaignId} slot={slotIndex} " +
                 $"phase={result.State.CampaignPhase}");
 
-            // ER2-BOOT-01：同 StartNewCampaign 的占位说明——"继续"与"读取"都走恢复语义
-            // （GameRoot.ResumeCellStage，不是新局），进正式归还谷地场景前的诚实占位。
+            // ER2-SCENE-01："继续"与"读取"都走恢复语义（GameRoot.ResumeHomeValley，不是新局）——
+            // Controller 内部按已有 RegionRecord/MachineRecord 复用，不重复播种。
             GameApp.MountGameplayUi();
             Close();
-            GameLogic.Stage.GameRoot.ResumeCellStage();
+            GameLogic.Stage.GameRoot.ResumeHomeValley();
         }
     }
 }

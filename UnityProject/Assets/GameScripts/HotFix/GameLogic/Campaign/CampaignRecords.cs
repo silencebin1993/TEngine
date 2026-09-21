@@ -102,7 +102,7 @@ namespace GameLogic.Campaign
         public float Health;
         public BuildingConstructionState ConstructionState;
         public int PowerPriority;
-        public string PowerState;
+        public BuildingPowerState PowerState;
         public CargoEntry[] Inventory;
         public string[] QueueIds;
         public string BlockedReason;

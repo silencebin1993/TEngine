@@ -27,7 +27,8 @@ namespace GameLogic.Campaign
         NewCampaign = 0,
         /// <summary>主菜单显式保存（非六类自动点，预留）。</summary>
         Manual = 1,
-        /// <summary>自动点 1/6：家园进入完成。TODO(ER2-SCENE-01)。</summary>
+        /// <summary>自动点 1/6：家园进入完成。ER2-SCENE-01 起由
+        /// <see cref="GameLogic.Campaign.Regions.HomeValleyController.Enter"/> 触发。</summary>
         HomeEntryComplete = 2,
         /// <summary>自动点 2/6：远征出发确认前。TODO(ER5-EXP-01)。</summary>
         ExpeditionDepartConfirm = 3,
@@ -52,6 +53,30 @@ namespace GameLogic.Campaign
         Damaged = 4,
         Disabled = 5,
         Destroyed = 6,
+    }
+
+    /// <summary>ERD-DAT-004 BuildingRecord.powerState 封闭枚举（此前是裸 <c>string</c> 占位，
+    /// ER2-SCENE-01 起改为类型化）。UI-AND-ONBOARDING-SPEC.md UI-04/UI-16 明确这是与
+    /// <see cref="BuildingConstructionState"/> 正交的第二根轴（例如"Operational 但 Brownout"，
+    /// 见 UI-16："信标位...Operational 但 Brownout 时给电力缺 20"）：ConstructionState 描述建筑本身
+    /// 建成/受损状态，PowerState 描述它当前能否吃到电/出口是否堵塞。<see cref="Brownout"/>（电力容量
+    /// 不足降级）与 <see cref="OutputBlocked"/>（工厂出口堵塞）的真实判定分别属于 ER3-PWR-01
+    /// （ERD-ECO-002）和 ER4-FAC-01（ERD-FAC-001），本 Story 只建立类型化枚举与可区分表现基础设施，
+    /// 新建建筑一律先给 <see cref="NotApplicable"/>（核心/免电建筑）或 <see cref="Unpowered"/>，
+    /// 不在这里伪造电网仲裁结果。</summary>
+    [Serializable]
+    public enum BuildingPowerState
+    {
+        /// <summary>该建筑不参与电网（当前内容锁定表里没有这类建筑，占位保留）。</summary>
+        NotApplicable = 0,
+        /// <summary>已建成但尚未接入电网/发电机未修复。</summary>
+        Unpowered = 1,
+        /// <summary>正常吃到所需电力。</summary>
+        Powered = 2,
+        /// <summary>电网容量不足，按优先级降级（ERD-ECO-002）。</summary>
+        Brownout = 3,
+        /// <summary>产物出口堵塞（ERD-FAC-001，仅装配类建筑适用）。</summary>
+        OutputBlocked = 4,
     }
 
     /// <summary>ERD-DAT-005 ResourceTransaction.state。</summary>

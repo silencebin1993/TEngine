@@ -1,3 +1,5 @@
+using GameLogic.Campaign;
+using GameLogic.Campaign.Regions;
 using GameLogic.Core;
 using GameLogic.Stage.CellStage;
 using TEngine;
@@ -16,12 +18,18 @@ namespace GameLogic.Stage
     {
         private static StageDirector _director;
         private static bool _started;
+        private static HomeValleyController _homeValley;
 
         public static StageDirector Director => _director;
 
         /// <summary>当前细胞阶段流程。UI 需要读它的状态。</summary>
         public static CellStageFlow CellStage =>
             _director?.Get<CellStageFlow>(StageId.Cell);
+
+        /// <summary>ER2-SCENE-01：归还谷地不是 <see cref="StageId"/> 枚举里的一员（那是宏观演化
+        /// 阶段骨架，见 <see cref="HomeValleyController"/> 类注释），由 GameRoot 直接持有并驱动，
+        /// 与 <see cref="_hudHost"/> 同一种"director 之外的常驻子系统"处理方式。</summary>
+        public static HomeValleyController HomeValley => _homeValley;
 
         public static void Startup()
         {
@@ -60,12 +68,39 @@ namespace GameLogic.Stage
             StartCellStage(CellStageEntryMode.Resume);
         }
 
+        /// <summary>ER2-SCENE-01：新战役进入归还谷地正式场景。要求 <see cref="CampaignSession"/>
+        /// 已经 Set 好（<c>MainMenuUI.StartNewCampaign</c> 的调用顺序），否则 Controller 会拒绝进入。</summary>
+        public static void StartHomeValley()
+        {
+            if (!_started)
+            {
+                Startup();
+            }
+            _homeValley ??= new HomeValleyController();
+            _homeValley.Enter(resume: false);
+        }
+
+        /// <summary>ER2-SCENE-01：读档/继续战役进入归还谷地；与 <see cref="StartHomeValley"/> 共用
+        /// 同一套播种/复用逻辑——首次进入播种，之后一律复用已有记录，不重复生成。</summary>
+        public static void ResumeHomeValley()
+        {
+            if (!_started)
+            {
+                Startup();
+            }
+            _homeValley ??= new HomeValleyController();
+            _homeValley.Enter(resume: true);
+        }
+
         /// <summary>结束当前局，回到无阶段状态。ER2-BOOT-01：唯一的"返回菜单"出口——不管调用方是
         /// 玩家主动退出、阶段自然结束（死亡/通关）还是调试/测试代码，一律重新打开正式主菜单，
-        /// 不停在旧运行中枢首页或黑屏。</summary>
+        /// 不停在旧运行中枢首页或黑屏。ER2-SCENE-01 补充：同时收摊归还谷地并显式
+        /// <see cref="CampaignSession.Clear"/>——ERD-PER-002 生命周期红线，回菜单不得残留上一局引用。</summary>
         public static void EndRun()
         {
+            _homeValley?.Exit();
             _director?.EndCurrent();
+            CampaignSession.Clear();
             GameModule.UI.ShowUIAsync<MainMenuUI>();
         }
 
@@ -105,6 +140,7 @@ namespace GameLogic.Stage
 
             float dt = Time.deltaTime;
             _director.Update(dt);
+            _homeValley?.Update(dt);
 
             // 阶段自然结束（死亡或通关）时收摊并回主菜单。
             // 由 GameRoot 判断而不是阶段自己切换，保证阶段不需要知道 director。
@@ -151,6 +187,8 @@ namespace GameLogic.Stage
             }
             _director?.Dispose();
             _director = null;
+            _homeValley?.Exit();
+            _homeValley = null;
             Signals.Clear();
             _started = false;
             Log.Info("[GameRoot] 已关闭。");

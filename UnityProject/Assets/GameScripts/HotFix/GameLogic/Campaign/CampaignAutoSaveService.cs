@@ -4,7 +4,7 @@ namespace GameLogic.Campaign
     ///
     /// 本 Story 只建立"触发这六类保存点的统一调用约定"，不负责在尚不存在的业务系统里插桩调用——
     /// 六个触发点各自对应的正式游戏系统大多还没实现，接入时机由下列 TODO 指向的后续 Story 负责：
-    ///   - HomeEntryComplete          → ER2-SCENE-01（归还谷地正式场景，家园进入完成时机才存在）
+    ///   - HomeEntryComplete          → 已接入（ER2-SCENE-01，HomeValleyController.Enter）
     ///   - ExpeditionDepartConfirm    → ER5-EXP-01（准备与区域切换事务）
     ///   - ExpeditionResolutionComplete → ER5-RETURN-01（撤离、全灭与回城结算）
     ///   - BlueprintSaved            → ER4-BLP-01（蓝图记录与编辑器）
