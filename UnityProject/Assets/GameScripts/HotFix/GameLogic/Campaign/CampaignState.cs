@@ -47,6 +47,13 @@ namespace GameLogic.Campaign
         public RegionRecord[] RegionRecords = Array.Empty<RegionRecord>();
         public EventLedgerEntry[] EventLedger = Array.Empty<EventLedgerEntry>();
 
+        /// <summary>ER3-ECO-01：ERD-DAT-005 资源事务账本。骨架字段本身随 ER1-SAVE-01 落地
+        /// （<see cref="ResourceTransactionRecord"/> 定义在 CampaignRecords.cs），本 Story 起
+        /// 由 <see cref="CampaignEconomyLedger"/> 唯一写入口写入真实数据；建造/生产/维修/改造/
+        /// 解析奖励一律经该类而非直接改 <see cref="Scrap"/>/<see cref="TechData"/>/
+        /// <see cref="PowerCapacity"/> 字段。</summary>
+        public ResourceTransactionRecord[] ResourceTransactions = Array.Empty<ResourceTransactionRecord>();
+
         public ControlHandoffRecord ControlHandoff = new ControlHandoffRecord();
         public SaveReason LastSaveReason = SaveReason.NewCampaign;
 
@@ -92,6 +99,7 @@ namespace GameLogic.Campaign
                 FactoryQueues = Array.Empty<FactoryQueueItemRecord>(),
                 RegionRecords = Array.Empty<RegionRecord>(),
                 EventLedger = Array.Empty<EventLedgerEntry>(),
+                ResourceTransactions = Array.Empty<ResourceTransactionRecord>(),
                 ControlHandoff = new ControlHandoffRecord(),
                 LastSaveReason = SaveReason.NewCampaign,
                 ObjectiveRecords = Array.Empty<ObjectiveRecord>(),
@@ -123,6 +131,8 @@ namespace GameLogic.Campaign
                 .OrderBy(r => r.RegionId, StringComparer.Ordinal).ToArray();
             EventLedger = (EventLedger ?? Array.Empty<EventLedgerEntry>())
                 .OrderBy(r => r.EventId, StringComparer.Ordinal).ToArray();
+            ResourceTransactions = (ResourceTransactions ?? Array.Empty<ResourceTransactionRecord>())
+                .OrderBy(r => r.TransactionId, StringComparer.Ordinal).ToArray();
             ObjectiveRecords = (ObjectiveRecords ?? Array.Empty<ObjectiveRecord>())
                 .OrderBy(r => r.ObjectiveId, StringComparer.Ordinal).ToArray();
         }

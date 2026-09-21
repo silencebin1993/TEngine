@@ -88,6 +88,7 @@ namespace GameLogic.Campaign.Regions
             state.CurrentRegionId = HomeValleyLayout.RegionId;
             RecomputePower(state); // 幂等：新建战役刚播种、或读档恢复旧存档，都用当前数据重算一次。
             RearmInterruptedWorkOrders(state);
+            RearmInterruptedSalvage(state);
 
             BuildVisuals(state);
             SetupCameraDirector();
@@ -432,10 +433,11 @@ namespace GameLogic.Campaign.Regions
         }
 
         /// <summary>对 Damaged 建筑发起正式修复：立即按 <see cref="HomeValleyLayout.RepairProfile"/>
-        /// 扣废料（DEMO-CONTENT-LOCK.md §2.1"初始缓存与仓库同走事务API"——扣款是事务的即时半段，
-        /// 完工是另一半，这里用"扣款即时+完工计时"实现，不做可取消的中途退款，因为本表所有修复都
-        /// 没有"可取消"用例）、登记一条 <see cref="WorkOrderRecord"/>，交给 <see cref="TickRepairs"/>
-        /// 计时完工。触发方式（点建筑/E 交互）由 ER5-INT-01/UI-04 负责调用本方法，本类不做输入绑定。</summary>
+        /// 经 <see cref="CampaignEconomyLedger"/> 预留（Proposed→Reserved，此刻真正扣废料）、登记一条
+        /// <see cref="WorkOrderRecord"/> 并把 <see cref="WorkOrderRecord.ResourceTransactionId"/> 指向
+        /// 该事务、转 Running，交给 <see cref="TickRepairs"/> 计时完工时 Commit（ER3-ECO-01 收口
+        /// DEBT-ER2SCENE01-01 遗留的"直接改 state.Scrap"写法）。触发方式（点建筑/E 交互）由
+        /// ER5-INT-01/UI-04 负责调用本方法，本类不做输入绑定。</summary>
         public RepairStartResult TryStartRepair(string buildingTypeId)
         {
             CampaignState state = CampaignSession.Current;
@@ -460,12 +462,18 @@ namespace GameLogic.Campaign.Regions
             {
                 return RepairStartResult.Fail($"{buildingTypeId} 已有维修订单在进行中。");
             }
-            if (state.Scrap < profile.ScrapCost)
-            {
-                return RepairStartResult.Fail($"废料不足：需要 {profile.ScrapCost}，当前 {state.Scrap}。");
-            }
 
-            state.Scrap -= profile.ScrapCost;
+            string transactionId = building.BuildingId + ":repair-tx:" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            CampaignEconomyLedger.ProposeConsume(state, transactionId, building.BuildingId,
+                CampaignEconomyLedger.ResourceScrap, profile.ScrapCost);
+            CampaignEconomyLedger.LedgerResult reserve = CampaignEconomyLedger.Reserve(state, transactionId);
+            if (!reserve.Success)
+            {
+                CampaignEconomyLedger.Cancel(state, transactionId);
+                return RepairStartResult.Fail($"废料不足：需要 {profile.ScrapCost}，当前 {state.Scrap}（{reserve.FailureReason}）。");
+            }
+            CampaignEconomyLedger.MarkRunning(state, transactionId);
+
             var order = new WorkOrderRecord
             {
                 WorkOrderId = building.BuildingId + ":repair:" + Guid.NewGuid().ToString("N").Substring(0, 8),
@@ -475,7 +483,7 @@ namespace GameLogic.Campaign.Regions
                 SourceId = null,
                 DestinationId = null,
                 RequiredTags = Array.Empty<string>(),
-                ResourceTransactionId = null,
+                ResourceTransactionId = transactionId,
                 Priority = 0,
                 CreatedTick = 0,
                 AssignedMachineLogicId = 0,
@@ -486,7 +494,7 @@ namespace GameLogic.Campaign.Regions
             state.WorkOrders = (state.WorkOrders ?? Array.Empty<WorkOrderRecord>()).Append(order).ToArray();
             _repairRemainingSeconds[building.BuildingId] = profile.Seconds;
 
-            Log.Info($"[HomeValleyController] 开始修复 {buildingTypeId}：扣废料 {profile.ScrapCost}，预计 {profile.Seconds}s。");
+            Log.Info($"[HomeValleyController] 开始修复 {buildingTypeId}：扣废料 {profile.ScrapCost}，预计 {profile.Seconds}s（事务 {transactionId}）。");
             return RepairStartResult.Ok(order.WorkOrderId);
         }
 
@@ -528,6 +536,41 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
+        /// <summary>拆解残骸没有 <see cref="WorkOrderRecord"/> 承载（一次性节点，不走工作单系统），
+        /// 进程重启后能否续期只能靠 <see cref="CampaignEconomyLedger"/> 自己的事务状态判断：
+        /// 事务卡在 Reserved/Running 且节点尚未出现在 <see cref="RegionRecord.DestroyedNodeIds"/>，
+        /// 说明重启前正在拆解、内存计时器已丢失——与 <see cref="RearmInterruptedWorkOrders"/> 同样的
+        /// "整段时长重新计时"兜底，不做精确续期。</summary>
+        private void RearmInterruptedSalvage(CampaignState state)
+        {
+            RegionRecord region = state.RegionRecords?.FirstOrDefault(r => r.RegionId == HomeValleyLayout.RegionId);
+            if (region == null)
+            {
+                return;
+            }
+
+            foreach (string nodeId in new[] { HomeValleyLayout.Wreckage1NodeId, HomeValleyLayout.Wreckage2NodeId })
+            {
+                if (region.DestroyedNodeIds != null && region.DestroyedNodeIds.Contains(nodeId))
+                {
+                    continue;
+                }
+                if (_salvageRemainingSeconds.ContainsKey(nodeId))
+                {
+                    continue;
+                }
+                ResourceTransactionRecord tx = CampaignEconomyLedger.Find(state, nodeId + ":salvage-tx");
+                if (tx == null || (tx.State != ResourceTransactionState.Reserved && tx.State != ResourceTransactionState.Running))
+                {
+                    continue;
+                }
+
+                _salvageRemainingSeconds[nodeId] = HomeValleyLayout.WreckageDismantleSeconds;
+                Log.Warning($"[HomeValleyController] 重启后发现未完工的拆解事务 {tx.TransactionId}，" +
+                    $"按完整时长 {HomeValleyLayout.WreckageDismantleSeconds}s 重新计时（不精确续期，见方法注释）。");
+            }
+        }
+
         private void TickRepairs(float dt)
         {
             if (_repairRemainingSeconds.Count == 0)
@@ -564,23 +607,33 @@ namespace GameLogic.Campaign.Regions
 
             building.ConstructionState = BuildingConstructionState.Operational;
 
-            if (building.BuildingTypeId == HomeValleyLayout.BuildingTypeGenerator)
-            {
-                state.PowerCapacity += 80f; // DEMO-CONTENT-LOCK.md §2.1：修复后额外电力 80。
-            }
-            else if (building.BuildingTypeId == HomeValleyLayout.BuildingTypeSignalTower)
-            {
-                state.SignalBandwidth += 5f; // §2.1：额外带宽 5，开放破碎都市（区域解锁属于 ER5 范围）。
-            }
-            // 仓库：只转 Operational。容量 300 是仓储守恒（ERD-ECO-003）的字段范畴，
-            // 属于 ER3-STO-01——本 Story 不新增未经该 Story 定义的容量字段。
-
             WorkOrderRecord order = state.WorkOrders?.LastOrDefault(w =>
                 w.TargetId == buildingId && w.State == WorkOrderState.InProgress);
+            if (order != null && !string.IsNullOrEmpty(order.ResourceTransactionId))
+            {
+                CampaignEconomyLedger.Commit(state, order.ResourceTransactionId);
+            }
             if (order != null)
             {
                 order.State = WorkOrderState.Completed;
             }
+
+            if (building.BuildingTypeId == HomeValleyLayout.BuildingTypeGenerator)
+            {
+                // DEMO-CONTENT-LOCK.md §2.1：修复后额外电力 80，走生产型事务经 CampaignEconomyLedger
+                // 发放（幂等：同一 WorkOrder 的电力赠款事务重复走到这里不会二次记账）。
+                string powerTxId = (order?.WorkOrderId ?? buildingId) + ":power-grant";
+                CampaignEconomyLedger.ProposeProduce(state, powerTxId, buildingId,
+                    CampaignEconomyLedger.ResourcePower, 80f);
+                CampaignEconomyLedger.Reserve(state, powerTxId);
+                CampaignEconomyLedger.Commit(state, powerTxId);
+            }
+            else if (building.BuildingTypeId == HomeValleyLayout.BuildingTypeSignalTower)
+            {
+                state.SignalBandwidth += 5f; // §2.1：带宽不在 ER3-ECO-01 顶层三资源范围内（ER5-SIG-01）。
+            }
+            // 仓库：只转 Operational。容量 300 是仓储守恒（ERD-ECO-003）的字段范畴，
+            // 属于 ER3-STO-01——本 Story 不新增未经该 Story 定义的容量字段。
 
             RecomputePower(state);
             RefreshBuildingVisual(building);
@@ -588,7 +641,10 @@ namespace GameLogic.Campaign.Regions
         }
 
         /// <summary>拆解残骸（DEMO-CONTENT-LOCK.md §2.1：一次性 60 废料，12 秒）。与修复不同——
-        /// 完工才发废料，不是即时扣款，因为这是产出而非消耗事务。</summary>
+        /// 完工才发废料，不是即时扣款，因为这是产出而非消耗事务：经
+        /// <see cref="CampaignEconomyLedger.ProposeProduce"/> 登记，Reserve/Running 阶段不动资源池，
+        /// <see cref="CompleteSalvage"/> Commit 时才真正发放。transactionId 用 nodeId 派生、全程确定
+        /// （一个残骸只会被拆一次），天然幂等——读档重放不会二次发放。</summary>
         public RepairStartResult TryStartSalvage(string nodeId)
         {
             CampaignState state = CampaignSession.Current;
@@ -614,8 +670,14 @@ namespace GameLogic.Campaign.Regions
                 return RepairStartResult.Fail($"{nodeId} 已有拆解任务在进行中。");
             }
 
+            string transactionId = nodeId + ":salvage-tx";
+            CampaignEconomyLedger.ProposeProduce(state, transactionId, nodeId,
+                CampaignEconomyLedger.ResourceScrap, HomeValleyLayout.WreckageScrapYield);
+            CampaignEconomyLedger.Reserve(state, transactionId);
+            CampaignEconomyLedger.MarkRunning(state, transactionId);
+
             _salvageRemainingSeconds[nodeId] = HomeValleyLayout.WreckageDismantleSeconds;
-            Log.Info($"[HomeValleyController] 开始拆解 {nodeId}，预计 {HomeValleyLayout.WreckageDismantleSeconds}s。");
+            Log.Info($"[HomeValleyController] 开始拆解 {nodeId}，预计 {HomeValleyLayout.WreckageDismantleSeconds}s（事务 {transactionId}）。");
             return RepairStartResult.Ok(nodeId);
         }
 
@@ -654,7 +716,7 @@ namespace GameLogic.Campaign.Regions
             }
 
             region.DestroyedNodeIds = region.DestroyedNodeIds.Append(nodeId).ToArray();
-            state.Scrap += HomeValleyLayout.WreckageScrapYield;
+            CampaignEconomyLedger.Commit(state, nodeId + ":salvage-tx");
 
             Transform wreckageGo = _root != null ? _root.transform.Find("Wreckage_" + nodeId) : null;
             if (wreckageGo != null)

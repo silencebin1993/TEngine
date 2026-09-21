@@ -146,14 +146,15 @@ namespace GameLogic.Campaign
                 RequireNoDuplicates(state.BuildingRecords?.Select(r => r?.BuildingId), "BuildingRecords.BuildingId");
                 RequireNoDuplicates(state.WorkOrders?.Select(r => r?.WorkOrderId), "WorkOrders.WorkOrderId");
                 RequireNoDuplicates(state.FactoryQueues?.Select(r => r?.QueueItemId), "FactoryQueues.QueueItemId");
+                RequireNoDuplicates(state.ResourceTransactions?.Select(r => r?.TransactionId), "ResourceTransactions.TransactionId");
             }
             catch (Exception e)
             {
                 return Fail(RestoreStep.BuildingsAndQueues, e.Message, slotIndex, state);
             }
-            if (state.BuildingRecords == null || state.BuildingRecords.Length == 0)
+            if (state.FactoryQueues == null || state.FactoryQueues.Length == 0)
             {
-                warnings.Add("[BuildingsAndQueues] 无消费方：ER3-ECO-01/ER3-WRK-01/ER4-FAC-01 前恒为空数组。");
+                warnings.Add("[BuildingsAndQueues] 无消费方：ER4-FAC-01 前 FactoryQueues 恒为空数组。");
             }
 
             // ── 5. MachineRecords（唯一真正有生产数据的恢复步骤）──
