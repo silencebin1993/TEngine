@@ -377,7 +377,7 @@ namespace GameLogic.Stage.CellStage
         /// </summary>
         private void HandleStrategicPauseInput()
         {
-            if (!InputRouter.ConsumeKeyDown(KeyCode.Space, InputScope.Strategy))
+            if (!InputRouter.ConsumeAction(GameActionId.TogglePause, InputScope.Strategy))
             {
                 return;
             }
@@ -1554,6 +1554,14 @@ namespace GameLogic.Stage.CellStage
             HandleStrategicPauseInput();
             InputRouter.SetGameplayPaused(_paused, _strategicPause);
             _cameraDirector?.Tick(_paused);
+
+            // AC-UI-005：战略速度 0.5x/1x/2x 只缩放"世界"的 dt；直控视角锁 1x——玩家亲自操作的
+            // 那具身体手感不该因为战略速度设置跟着变快变慢。缩放后的 dt 统一喂给下面所有消费者
+            // （_directActions/_aiHandoff/_hub），不逐处特判：directLocked 时缩放因子本来就是 1，
+            // 结果与"不缩放"完全一致。
+            bool directLocked = _cameraDirector != null && _cameraDirector.Mode == GameLogic.View.ViewMode.Direct;
+            dt = StrategyClock.GetScaledDt(dt, directLocked);
+
             ParkControlOnStrategyView();
             ResolvePendingAllyHolds();
             // ER1-ID-01：把"Spawn 入队、下一次 Step 才有实体"的机器登记补上，与上面友军待命

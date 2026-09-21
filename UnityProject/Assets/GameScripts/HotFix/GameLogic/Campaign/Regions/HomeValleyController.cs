@@ -2,7 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using GameLogic.Campaign;
+using GameLogic.Core;
+using GameLogic.View;
 using TEngine;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace GameLogic.Campaign.Regions
@@ -31,6 +34,25 @@ namespace GameLogic.Campaign.Regions
         private HomeValleyMachineMarker _selected;
         private readonly Dictionary<string, float> _repairRemainingSeconds = new Dictionary<string, float>(3);
         private readonly Dictionary<string, float> _salvageRemainingSeconds = new Dictionary<string, float>(2);
+
+        /// <summary>ER2-INPUT-01：归还谷地自己的镜头状态机实例（不共享细胞阶段那个——两边场景
+        /// 互斥运行，各自 Bind 自己的 Camera.main，生命周期也该各管各的，见 Exit() 的 Unbind）。</summary>
+        private CameraDirector _cameraDirector;
+        /// <summary>当前被直控（WASD 亲自开）的机器。null＝没有接管，处于战略选中+下令模式。</summary>
+        private HomeValleyMachineMarker _possessed;
+        /// <summary>ER2-INPUT-01 AC-UI-005：本区域自己的暂停态，镜像 CellStageFlow 的
+        /// _paused/_strategicPause 写法（只有"战略暂停"一种，没有模态面板暂停的第二条路径——
+        /// 归还谷地目前没有选卡/商店这类会自己置位暂停的模态面板）。</summary>
+        private bool _paused;
+        /// <summary>HUD 暂停按钮/速度显示读这个；Space 键路径见 <see cref="HandlePauseInput"/>，
+        /// 两条路径写同一个 <see cref="_paused"/> 字段，互不冲突。</summary>
+        public bool IsPaused => _paused;
+
+        /// <summary>供 HUD 暂停按钮直接调用（不经过 InputRouter/Space）。</summary>
+        public void SetPaused(bool paused)
+        {
+            _paused = paused;
+        }
 
         /// <summary>本类由 <see cref="GameLogic.Stage.GameRoot"/> 用 <c>??=</c> 惰性创建、跨多局
         /// 复用同一实例（同一进程内先后玩过 A、B 两局）。<see cref="_repairRemainingSeconds"/> 等运行时
@@ -68,7 +90,7 @@ namespace GameLogic.Campaign.Regions
             RearmInterruptedWorkOrders(state);
 
             BuildVisuals(state);
-            SetupCamera();
+            SetupCameraDirector();
 
             IsActive = true;
 
@@ -89,10 +111,130 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
+
+            // 同 CellStageFlow.Update 的既定写法：暂停开关与 InputRouter 同步、镜头驱动，
+            // 都必须在下面的暂停早退**之前**——ER2-INPUT-01 M2-02 同款要求：暂停下仍要能选人。
+            HandlePauseInput();
+            InputRouter.SetGameplayPaused(_paused, strategic: true);
+            _cameraDirector?.Tick(_paused);
+
+            // 落回战略视角才清空接管——过渡途中（Strategy→Direct 或 Direct→Strategy）都不清，
+            // 否则 EnsureDirectTarget 刚给的目标会在过渡没走完时就被抹掉，接管请求白做。
+            if (_cameraDirector != null && _cameraDirector.Mode == ViewMode.Strategy)
+            {
+                _possessed = null;
+            }
+
             HandleSelectionClick();
-            TickMachineMovement(dt);
-            TickRepairs(dt);
-            TickSalvage(dt);
+
+            bool directLocked = _cameraDirector != null && _cameraDirector.Mode == ViewMode.Direct;
+            float scaledDt = _paused ? 0f : StrategyClock.GetScaledDt(dt, directLocked);
+
+            HandleDirectControl(scaledDt);
+
+            if (_paused)
+            {
+                return;
+            }
+
+            TickMachineMovement(scaledDt);
+            TickRepairs(scaledDt);
+            TickSalvage(scaledDt);
+        }
+
+        /// <summary>Space（Strategy 域）：与 CellStageFlow.HandleStrategicPauseInput 同款语义。
+        /// 只能从战略视角触发/解除——直控下 Space 域不匹配，天然读不到。</summary>
+        private void HandlePauseInput()
+        {
+            if (InputRouter.ConsumeAction(GameActionId.TogglePause, InputScope.Strategy))
+            {
+                _paused = !_paused;
+            }
+        }
+
+        /// <summary>ER2-INPUT-01：Tab 循环切换接管目标 + WASD 直控移动。仅在真正处于 Direct
+        /// 视角（不含过渡中）且确有接管目标时生效；<see cref="InputRouter"/> 的域互斥已经保证
+        /// 战略视角下这里的 GetActionKey/ConsumeAction 全部读不到东西，不需要再判一次 Mode。</summary>
+        private void HandleDirectControl(float dt)
+        {
+            if (_possessed == null)
+            {
+                return;
+            }
+
+            if (InputRouter.ConsumeAction(GameActionId.CycleControlTarget, InputScope.Direct))
+            {
+                CycleControlTarget();
+            }
+
+            float x = 0f;
+            float z = 0f;
+            if (InputRouter.GetActionKey(GameActionId.MoveLeft, InputScope.Direct)) { x -= 1f; }
+            if (InputRouter.GetActionKey(GameActionId.MoveRight, InputScope.Direct)) { x += 1f; }
+            if (InputRouter.GetActionKey(GameActionId.MoveBack, InputScope.Direct)) { z -= 1f; }
+            if (InputRouter.GetActionKey(GameActionId.MoveForward, InputScope.Direct)) { z += 1f; }
+
+            _possessed.DirectMove(new Vector3(x, 0f, z), dt);
+        }
+
+        /// <summary>按 LogicId 稳定顺序循环到下一台机器（同 CellPlayerController.RequestNextControlCandidate
+        /// 的排序写法：不按距离，避免两台机器之间来回跳）。只有一台机器时循环到自己，行为等价于原地不动。</summary>
+        private void CycleControlTarget()
+        {
+            if (_machineMarkers.Count == 0 || _possessed == null)
+            {
+                return;
+            }
+
+            int current = _possessed.LogicId;
+            HomeValleyMachineMarker next = null;
+            HomeValleyMachineMarker first = _machineMarkers[0];
+            foreach (HomeValleyMachineMarker marker in _machineMarkers)
+            {
+                if (marker.LogicId < first.LogicId)
+                {
+                    first = marker;
+                }
+                if (marker.LogicId > current && (next == null || marker.LogicId < next.LogicId))
+                {
+                    next = marker;
+                }
+            }
+            next ??= first;
+
+            _possessed.CancelCommandMove();
+            _possessed = next;
+            _possessed.CancelCommandMove();
+            _selected?.SetSelected(false);
+            _selected = next;
+            _selected.SetSelected(true);
+        }
+
+        /// <summary>ER2-INPUT-01：CameraDirector 请求"给我一个直控目标"时的钩子（M 键从战略切
+        /// 直控那一刻触发）。用当前选中的机器；没有选中就拒绝，镜头会照常留在战略视角
+        /// （与细胞阶段"没有可接管的身体"是同一失败语义）。</summary>
+        private bool EnsureDirectTarget()
+        {
+            if (_selected == null)
+            {
+                return false;
+            }
+            _possessed = _selected;
+            _possessed.CancelCommandMove();
+            return true;
+        }
+
+        /// <summary>CameraDirector 的直控锚点来源：接管中的机器的世界 XZ 位置；没有接管返回 false。</summary>
+        private bool TryGetPossessedAnchor(out float2 anchor)
+        {
+            if (_possessed != null)
+            {
+                Vector3 p = _possessed.transform.position;
+                anchor = new float2(p.x, p.z);
+                return true;
+            }
+            anchor = float2.zero;
+            return false;
         }
 
         private void TickMachineMovement(float dt)
@@ -115,6 +257,12 @@ namespace GameLogic.Campaign.Regions
 
             SyncLiveStateBackToRecords();
             DestroyVisuals();
+            // ER2-INPUT-01：与 CellStageFlow 同款纪律——离场解绑镜头，InputRouter.Reset() 顺带清掉
+            // 本区域可能留下的 Scope/模态残留，避免粘到下一次进场或切去细胞阶段。
+            _cameraDirector?.Unbind();
+            _cameraDirector = null;
+            _possessed = null;
+            _paused = false;
             IsActive = false;
             Log.Info("[HomeValleyController] 已退出归还谷地。");
         }
@@ -674,9 +822,12 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        // ── 相机（静态取景，交互式平移/接管属于 ER2-INPUT-01）─────────────────
+        // ── 相机（ER2-INPUT-01：CameraDirector 驱动，Strategy 起始 + WASD 接管）───
 
-        private void SetupCamera()
+        /// <summary>初始朝向/背景/裁剪面与改造前逐值一致，只是把"镜头怎么动"交给
+        /// <see cref="CameraDirector"/>；固定俯视旋转本类自己设一次（CameraDirector 从不碰旋转，
+        /// 全程只写 position/orthographicSize，见该类设计要点第 1 条）。</summary>
+        private void SetupCameraDirector()
         {
             _camera = Camera.main;
             if (_camera == null)
@@ -692,26 +843,39 @@ namespace GameLogic.Campaign.Regions
             _camera.backgroundColor = new Color(0.05f, 0.07f, 0.10f);
             _camera.nearClipPlane = 0.1f;
             _camera.farClipPlane = 200f;
+            _camera.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
 
+            _cameraDirector = new CameraDirector();
             Vector2 focus = HomeValleyLayout.ClampToBounds(HomeValleyLayout.CameraFocusStart);
-            _camera.transform.SetPositionAndRotation(
-                new Vector3(focus.x, 40f, focus.y),
-                Quaternion.Euler(90f, 0f, 0f));
+            var followOffset = new Vector3(0f, 40f, 0f);
+            // 矩形边界（X 半宽 28 / Z 半宽 30，见 HomeValleyLayout）比 CameraDirector 的单标量方形
+            // 钳制窄——取较小值（28）保证任何一条轴都不会真的越界，代价是 Z 轴少 2 个单位余量，
+            // 可接受（CameraDirector 本就"非目标：不做电影级轨迹"，没打算为单个场景扩展成矩形钳制）。
+            _cameraDirector.Bind(_camera, TryGetPossessedAnchor, followOffset,
+                HomeValleyLayout.CameraBoundsHalfExtentX, startInStrategy: true, initialDirectOrthographicSize: 14f);
+            _cameraDirector.FocusStrategyOn(new float2(focus.x, focus.y));
+            _cameraDirector.EnsureDirectTarget = EnsureDirectTarget;
         }
 
-        // ── 机器选择 / 点选移动 / 到点自动干活 ────────────────────────────────
+        // ── 机器选择 / 点选移动 / 到点自动干活 / WASD 接管 ────────────────────
 
         /// <summary>左键点机器＝选中；已选中时左键点建筑/残骸＝下令走过去、到点自动
-        /// 修复/拆解；点空地＝纯移动。这是归还谷地范围内的最小 RTS 式"选中+下令"，
-        /// 不是 ER2-INPUT-01 要交付的统一输入域表——见类注释范围边界。</summary>
+        /// 修复/拆解；点空地＝纯移动。这是归还谷地范围内的最小 RTS 式"选中+下令"，M 键切 Direct
+        /// 后改由 <see cref="HandleDirectControl"/> 的 WASD 接管——两者互斥：本方法走
+        /// <see cref="InputScope.Strategy"/>，Direct/Transition 期间 <see cref="InputRouter"/>
+        /// 天然读不到，不需要在这里另判一次镜头模式。</summary>
         private void HandleSelectionClick()
         {
-            if (_camera == null || !Input.GetMouseButtonDown(0))
+            if (_camera == null || !InputRouter.GetMouseButtonDown(0, InputScope.Strategy))
             {
                 return;
             }
 
-            Ray ray = _camera.ScreenPointToRay(Input.mousePosition);
+            if (!InputRouter.TryGetPointer(InputScope.Strategy, out Vector3 pointer))
+            {
+                return;
+            }
+            Ray ray = _camera.ScreenPointToRay(pointer);
             if (!Physics.Raycast(ray, out RaycastHit hit, 500f))
             {
                 return;
@@ -788,6 +952,7 @@ namespace GameLogic.Campaign.Regions
             }
             _machineMarkers.Clear();
             _selected = null;
+            _possessed = null;
         }
 
         // ── 自检（ER2-SCENE-01 负向矩阵，供 execute_code / 自动化验收直接断言）───

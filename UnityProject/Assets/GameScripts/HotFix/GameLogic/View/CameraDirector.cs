@@ -55,11 +55,17 @@ namespace GameLogic.View
         /// <summary>战略平移允许越出场地边界的余量，让玩家能看清贴边的单位。</summary>
         private const float StrategyBoundsPadding = 6f;
 
-        /// <summary>切换战略/直控的按键。Tab 已经归"切换控制目标"（M1 核心机制），不再复用。</summary>
-        public const KeyCode ToggleViewKey = KeyCode.M;
+        /// <summary>
+        /// ER2-INPUT-01：直控锚点来源。原先硬编码问 <c>SimBridge</c>，只有细胞阶段能用；
+        /// 归还谷地没有 SimBridge（ER2-SCENE-01 明确裁决不接内核，见 <c>HomeValleyController</c>
+        /// 类注释），改成委托后两边可以共用同一套镜头状态机而不互相耦合——CameraDirector
+        /// 仍然"一个字都不碰模拟状态"（类注释设计要点第 1 条），只是把"哪个模拟"外部化。
+        /// 返回 true 且给出锚点＝有可跟随的直控目标；false＝当前没有（回退战略视角）。
+        /// </summary>
+        public delegate bool DirectAnchorProvider(out float2 anchor);
 
         private Camera _camera;
-        private SimBridge _sim;
+        private DirectAnchorProvider _anchorProvider;
         private Vector3 _followOffset;
         private float _arenaHalfExtent = 40f;
         private float _directOrthographicSize = 16f;
@@ -85,29 +91,63 @@ namespace GameLogic.View
         /// <summary>本局累计的模式切换次数。验收用，确认"一次请求只切一次"。</summary>
         public int ModeChangeCount { get; private set; }
 
+        /// <summary>细胞阶段既有调用点：直接传 SimBridge，内部包一层委托。行为与改造前逐字节一致
+        /// （起始态仍是 Direct）——不改动 CellStageFlow 的调用现场。</summary>
         public void Bind(Camera camera, SimBridge sim, Vector3 followOffset, float arenaHalfExtent)
         {
+            Bind(camera,
+                (out float2 anchor) =>
+                {
+                    if (sim != null && sim.Running &&
+                        sim.TryGetPresentationAnchor(out anchor, out bool hasControlled) && hasControlled)
+                    {
+                        return true;
+                    }
+                    anchor = float2.zero;
+                    return false;
+                },
+                followOffset, arenaHalfExtent, startInStrategy: false);
+        }
+
+        /// <summary>ER2-INPUT-01 通用入口：不依赖 SimBridge，任何"能报出一个直控锚点"的场景
+        /// 都能接（归还谷地的 <see cref="GameLogic.Campaign.Regions.HomeValleyMachineMarker"/> 即是一例）。
+        /// <paramref name="startInStrategy"/>：归还谷地没有"默认应该直控谁"的天然答案（多台平等机器，
+        /// 不是单一玩家本体），一进场从 Strategy 开始是确定性安全态，与"无效目标回退 Strategy"
+        /// 同一原则（AC-CTL-006）；细胞阶段沿用原有"进场即直控玩家本体"，见上方重载。</summary>
+        public void Bind(Camera camera, DirectAnchorProvider anchorProvider, Vector3 followOffset,
+            float arenaHalfExtent, bool startInStrategy, float? initialDirectOrthographicSize = null)
+        {
             _camera = camera;
-            _sim = sim;
+            _anchorProvider = anchorProvider;
             _followOffset = followOffset;
             _arenaHalfExtent = math.max(1f, arenaHalfExtent);
             if (_camera != null)
             {
-                _directOrthographicSize = _camera.orthographicSize;
+                // 归还谷地进场时相机是战略远景尺寸（见 startInStrategy 分支），直接拿来当"直控该用
+                // 多大视野"没有意义——显式给一个贴身尺寸；细胞阶段不传，沿用改造前"就用当前相机尺寸"
+                // 的行为（进场即直控玩家本体，此刻相机尺寸本来就是直控惯用值）。
+                _directOrthographicSize = initialDirectOrthographicSize ?? _camera.orthographicSize;
             }
 
-            _mode = ViewMode.Direct;
-            _pendingMode = ViewMode.Direct;
+            _mode = startInStrategy ? ViewMode.Strategy : ViewMode.Direct;
+            _pendingMode = _mode;
             _transitionRemaining = 0f;
             ModeChangeCount = 0;
             _strategyFocus = float2.zero;
-            InputRouter.SetScope(InputScope.Direct);
+            if (startInStrategy && _camera != null)
+            {
+                _strategyOrthographicSize = math.clamp(_camera.orthographicSize, MinOrthographicSize, MaxOrthographicSize);
+                ClampStrategyFocus();
+                _camera.transform.position = StrategyCameraPosition();
+                _camera.orthographicSize = _strategyOrthographicSize;
+            }
+            InputRouter.SetScope(_mode == ViewMode.Strategy ? InputScope.Strategy : InputScope.Direct);
         }
 
         public void Unbind()
         {
             _camera = null;
-            _sim = null;
+            _anchorProvider = null;
             InputRouter.Reset();
         }
 
@@ -119,7 +159,7 @@ namespace GameLogic.View
         /// </summary>
         public void Tick(bool paused)
         {
-            if (_camera == null || _sim == null)
+            if (_camera == null || _anchorProvider == null)
             {
                 return;
             }
@@ -172,7 +212,7 @@ namespace GameLogic.View
                 return;
             }
 
-            if (InputRouter.ConsumeGlobalKeyDown(ToggleViewKey))
+            if (InputRouter.ConsumeGlobalAction(GameActionId.ToggleCameraView))
             {
                 if (_mode == ViewMode.Direct)
                 {
@@ -399,8 +439,7 @@ namespace GameLogic.View
         /// <summary>直控跟随目标。只认"确实有受控实体"，回退锚点不算——那是战略视角的活。</summary>
         private bool TryGetDirectAnchor(out float2 anchor)
         {
-            if (_sim != null && _sim.Running &&
-                _sim.TryGetPresentationAnchor(out anchor, out bool hasControlled) && hasControlled)
+            if (_anchorProvider != null && _anchorProvider(out anchor))
             {
                 return true;
             }

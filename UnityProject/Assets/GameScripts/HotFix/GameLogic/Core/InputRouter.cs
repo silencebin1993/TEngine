@@ -202,6 +202,28 @@ namespace GameLogic.Core
             return Owns(scope) && Reader.GetKey(key);
         }
 
+        // ── ER2-INPUT-01：按逻辑动作消费（键位重绑落点）──────────────────────
+        // 玩法/UI 层新代码一律用这组 Consume*Action，不再写字面量 KeyCode——
+        // 物理键→逻辑动作的唯一解析点是 Settings.GameSettings.KeyBindings（AC-ACC-001）。
+
+        /// <summary>按逻辑动作消费一次按下，域内互斥、同帧唯一。</summary>
+        public static bool ConsumeAction(GameActionId action, InputScope scope)
+        {
+            return ConsumeKeyDown(Settings.GameSettings.KeyBindings.GetKey(action), scope);
+        }
+
+        /// <summary>按逻辑动作消费一次全局按下（不受 Scope 限制，见 <see cref="ConsumeGlobalKeyDown"/>）。</summary>
+        public static bool ConsumeGlobalAction(GameActionId action, bool allowDuringModal = false)
+        {
+            return ConsumeGlobalKeyDown(Settings.GameSettings.KeyBindings.GetKey(action), allowDuringModal);
+        }
+
+        /// <summary>按逻辑动作读取持续按住状态。</summary>
+        public static bool GetActionKey(GameActionId action, InputScope scope)
+        {
+            return GetKey(Settings.GameSettings.KeyBindings.GetKey(action), scope);
+        }
+
         /// <summary>指针位置。过渡期间一律不给——镜头在动，屏幕坐标反投影出来的世界点没有意义。</summary>
         public static bool TryGetPointer(InputScope scope, out Vector3 screenPosition)
         {

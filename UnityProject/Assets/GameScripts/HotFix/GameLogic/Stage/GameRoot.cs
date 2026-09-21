@@ -31,6 +31,25 @@ namespace GameLogic.Stage
         /// 与 <see cref="_hudHost"/> 同一种"director 之外的常驻子系统"处理方式。</summary>
         public static HomeValleyController HomeValley => _homeValley;
 
+        /// <summary>ER2-INPUT-01 HUD：不管当前活跃的是细胞阶段还是归还谷地，统一问"世界是否暂停"。
+        /// 两边各自有独立的 _paused 字段（见各自类注释），这里只做只读桥接，不新造第三份状态。</summary>
+        public static bool IsWorldPaused =>
+            (CellStage != null && CellStage.IsRunning && CellStage.Paused) ||
+            (_homeValley != null && _homeValley.IsActive && _homeValley.IsPaused);
+
+        /// <summary>HUD 暂停按钮的统一入口（不经过 InputRouter/Space，按钮点击直接调）。</summary>
+        public static void ToggleWorldPause()
+        {
+            if (CellStage != null && CellStage.IsRunning)
+            {
+                CellStage.SetPaused(!CellStage.Paused, strategic: true);
+            }
+            else if (_homeValley != null && _homeValley.IsActive)
+            {
+                _homeValley.SetPaused(!_homeValley.IsPaused);
+            }
+        }
+
         public static void Startup()
         {
             if (_started)
@@ -101,6 +120,8 @@ namespace GameLogic.Stage
             _homeValley?.Exit();
             _director?.EndCurrent();
             CampaignSession.Clear();
+            // ER2-INPUT-01：回菜单复位战略速度，不让上一局选的倍率粘到下一局（同 InputRouter.Reset 纪律）。
+            Core.StrategyClock.Reset();
             GameModule.UI.ShowUIAsync<MainMenuUI>();
         }
 
@@ -168,6 +189,9 @@ namespace GameLogic.Stage
             _hudHost = new GameObject("[GameUiSupport]");
             Object.DontDestroyOnLoad(_hudHost);
             _hudHost.AddComponent<UI.Battle.MetabolicSlicePanel>();
+            // ER2-INPUT-01 AC-UI-005：战略速度/暂停常驻 HUD，细胞阶段与归还谷地共用同一个实例
+            // （谁在跑就显示谁，见该类 Update() 里的可见性判断），不随任一场景的 Enter/Exit 增删。
+            _hudHost.AddComponent<UI.Common.StrategyClockHudToolkit>();
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             // 已被 UI Toolkit 覆盖的旧 IMGUI 调试 HUD 不得默认盖在玩家界面上；
             // 如需做历史对照，可在运行时显式启用该组件。

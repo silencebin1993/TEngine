@@ -637,7 +637,7 @@ namespace GameLogic
                 // 显示期间 Esc 又把 Pause 叠加到 Draft 上。
                 // Esc 必须在模态面板打开时也响应——它正是用来关面板的，所以 allowDuringModal。
                 else if ((_current == PanelKind.Pause || !cell.Paused) &&
-                         InputRouter.ConsumeGlobalKeyDown(KeyCode.Escape, allowDuringModal: true))
+                         InputRouter.ConsumeGlobalAction(GameActionId.Cancel, allowDuringModal: true))
                 {
                     // story-003（topdown-hud-projectile-fix）R4：装配面板打开时，第一次 Esc 只关它本身，
                     // 不同帧弹 Pause（避免双层遮挡）；面板已关时才走原 HandleEscKeyToggle，第二次 Esc 才进 Pause。

@@ -51,6 +51,29 @@ namespace GameLogic.Campaign.Regions
             PendingArrivalAction = onArrive;
         }
 
+        /// <summary>ER2-INPUT-01：接管开始前调用，清空未完成的点选移动指令——直控（WASD）与
+        /// CommandMoveTo 是两条独立的位移来源，同时生效会互相拉扯位置，接管期间只认前者。</summary>
+        public void CancelCommandMove()
+        {
+            _moveTarget = null;
+            IsMoving = false;
+            PendingArrivalAction = null;
+        }
+
+        /// <summary>ER2-INPUT-01：WASD 直控移动。<paramref name="worldDirXZ"/> 已归一化的世界 XZ
+        /// 方向（Y 分量忽略）。与 <see cref="CommandMoveTo"/> 用同一个 <see cref="MoveSpeed"/>，
+        /// 手感一致——玩家切换"指哪打哪"和"亲自开"不应该感觉像换了台机器。</summary>
+        public void DirectMove(Vector3 worldDirXZ, float dt)
+        {
+            if (worldDirXZ.sqrMagnitude <= 0.0001f)
+            {
+                return;
+            }
+            Vector3 pos = transform.position;
+            Vector3 step = worldDirXZ.normalized * (MoveSpeed * dt);
+            transform.position = new Vector3(pos.x + step.x, pos.y, pos.z + step.z);
+        }
+
         /// <summary>由 <see cref="HomeValleyController.Update"/> 每帧驱动。到达后清空目标并执行
         /// 一次性到达动作（若有），返回值供调用方判断本帧是否发生了到达事件。</summary>
         public bool Tick(float dt)

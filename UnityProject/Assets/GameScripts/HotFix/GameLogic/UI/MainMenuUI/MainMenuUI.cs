@@ -1,7 +1,10 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using GameLogic.Campaign;
+using GameLogic.Core;
+using GameLogic.Settings;
 using Log = TEngine.Log;
 
 namespace GameLogic
@@ -41,6 +44,62 @@ namespace GameLogic
 
         private Transform _tfSettings;
         private Button _btnSettingsBack;
+        private Button _btnResetAllDefaults;
+
+        /// <summary>ER2-INPUT-01：可重绑动作 → 按钮文字。顺序即 UI 顺序，也是
+        /// <see cref="InputBindingSet.RebindableActions"/> 在设置面板里展示的全部动作。</summary>
+        private readonly Dictionary<GameActionId, Text> _rebindLabels = new Dictionary<GameActionId, Text>();
+        private static readonly (GameActionId Action, string RowLabel)[] RebindRows =
+        {
+            (GameActionId.Interact, "世界交互"),
+            (GameActionId.CycleControlTarget, "循环接管目标"),
+            (GameActionId.ToggleCameraView, "切换镜头视角"),
+            (GameActionId.TogglePause, "暂停/继续"),
+            (GameActionId.Cancel, "取消/返回"),
+            (GameActionId.DirectSkillSlot0, "冲刺"),
+        };
+
+        private Toggle _toggleEdgePan;
+        private Toggle _toggleScreenShake;
+        private Toggle _toggleFlashReduction;
+        private Toggle _toggleSubtitles;
+        private Toggle _toggleColorblindIcons;
+
+        private Slider _sliderUiScale;
+        private Slider _sliderCameraSpeed;
+        private Slider _sliderMasterVolume;
+        private Slider _sliderMusicVolume;
+        private Slider _sliderSfxVolume;
+        private Slider _sliderUiVolume;
+
+        /// <summary>正在等待玩家按下新键的动作；null＝当前没有在监听重绑。</summary>
+        private GameActionId? _rebindListening;
+        /// <summary>已检测到冲突、等待玩家再点一次同一按钮确认覆盖。三者必须同时有效才允许确认。</summary>
+        private GameActionId? _rebindConflictAction;
+        private GameActionId _rebindConflictWith;
+        private KeyCode _rebindConflictKey;
+
+        /// <summary>重绑监听时轮询的候选键，不遍历全部 ~500 个 KeyCode——只覆盖玩家实际按得到、
+        /// 也说得清楚"按了哪个键"的常用集合。监听只在玩家主动点了重绑按钮后才短暂发生，
+        /// 一帧 O(候选数) 不构成性能问题（不是每帧默认发生的路径）。</summary>
+        private static readonly KeyCode[] RebindCandidateKeys = BuildRebindCandidateKeys();
+
+        private static KeyCode[] BuildRebindCandidateKeys()
+        {
+            var list = new List<KeyCode>();
+            for (KeyCode k = KeyCode.A; k <= KeyCode.Z; k++) { list.Add(k); }
+            for (KeyCode k = KeyCode.Alpha0; k <= KeyCode.Alpha9; k++) { list.Add(k); }
+            for (KeyCode k = KeyCode.F1; k <= KeyCode.F12; k++) { list.Add(k); }
+            list.AddRange(new[]
+            {
+                KeyCode.Space, KeyCode.Tab, KeyCode.Escape, KeyCode.Return, KeyCode.Backspace,
+                KeyCode.LeftShift, KeyCode.RightShift, KeyCode.LeftControl, KeyCode.RightControl,
+                KeyCode.LeftAlt, KeyCode.RightAlt, KeyCode.CapsLock,
+                KeyCode.UpArrow, KeyCode.DownArrow, KeyCode.LeftArrow, KeyCode.RightArrow,
+                KeyCode.Mouse0, KeyCode.Mouse1, KeyCode.Mouse2, KeyCode.Mouse3, KeyCode.Mouse4,
+            });
+            return list.ToArray();
+        }
 
         private Transform _tfSlotList;
         private Text[] _slotInfoTexts;
@@ -71,6 +130,42 @@ namespace GameLogic
             _tfSettings = FindChild("m_tf_Settings");
             _btnSettingsBack = FindChildComponent<Button>("m_tf_Settings/m_btn_SettingsBack");
             _btnSettingsBack.onClick.AddListener(OnSettingsBackClicked);
+            _btnResetAllDefaults = FindChildComponent<Button>("m_tf_Settings/m_btn_ResetAllDefaults");
+            _btnResetAllDefaults.onClick.AddListener(OnResetAllDefaultsClicked);
+
+            const string colLeft = "m_tf_Settings/m_scroll_Settings/m_tf_SettingsColumns/m_tf_SettingsColLeft";
+            const string colRight = "m_tf_Settings/m_scroll_Settings/m_tf_SettingsColumns/m_tf_SettingsColRight";
+            foreach ((GameActionId action, string _) in RebindRows)
+            {
+                Button btn = FindChildComponent<Button>(colLeft + "/m_row_Rebind_" + action + "/m_btn_Rebind_" + action);
+                _rebindLabels[action] = btn.GetComponentInChildren<Text>();
+                GameActionId captured = action; // 闭包捕获，避免 foreach 变量复用坑。
+                btn.onClick.AddListener(() => OnRebindButtonClicked(captured));
+            }
+
+            _toggleEdgePan = FindChildComponent<Toggle>(colLeft + "/m_row_Toggle_EdgePan/m_toggle_EdgePan");
+            _toggleScreenShake = FindChildComponent<Toggle>(colLeft + "/m_row_Toggle_ScreenShake/m_toggle_ScreenShake");
+            _toggleFlashReduction = FindChildComponent<Toggle>(colRight + "/m_row_Toggle_FlashReduction/m_toggle_FlashReduction");
+            _toggleSubtitles = FindChildComponent<Toggle>(colRight + "/m_row_Toggle_Subtitles/m_toggle_Subtitles");
+            _toggleColorblindIcons = FindChildComponent<Toggle>(colRight + "/m_row_Toggle_ColorblindIcons/m_toggle_ColorblindIcons");
+            _toggleEdgePan.onValueChanged.AddListener(GameSettings.SetEdgePanEnabled);
+            _toggleScreenShake.onValueChanged.AddListener(GameSettings.SetScreenShakeEnabled);
+            _toggleFlashReduction.onValueChanged.AddListener(GameSettings.SetFlashReductionEnabled);
+            _toggleSubtitles.onValueChanged.AddListener(GameSettings.SetSubtitlesEnabled);
+            _toggleColorblindIcons.onValueChanged.AddListener(GameSettings.SetColorblindSafeIconsEnabled);
+
+            _sliderUiScale = FindChildComponent<Slider>(colRight + "/m_row_Slider_UiScale/m_slider_UiScale");
+            _sliderCameraSpeed = FindChildComponent<Slider>(colRight + "/m_row_Slider_CameraSpeed/m_slider_CameraSpeed");
+            _sliderMasterVolume = FindChildComponent<Slider>(colRight + "/m_row_Slider_MasterVolume/m_slider_MasterVolume");
+            _sliderMusicVolume = FindChildComponent<Slider>(colRight + "/m_row_Slider_MusicVolume/m_slider_MusicVolume");
+            _sliderSfxVolume = FindChildComponent<Slider>(colRight + "/m_row_Slider_SfxVolume/m_slider_SfxVolume");
+            _sliderUiVolume = FindChildComponent<Slider>(colRight + "/m_row_Slider_UiVolume/m_slider_UiVolume");
+            _sliderUiScale.onValueChanged.AddListener(GameSettings.SetUiScale);
+            _sliderCameraSpeed.onValueChanged.AddListener(GameSettings.SetCameraSpeedMultiplier);
+            _sliderMasterVolume.onValueChanged.AddListener(GameSettings.SetMasterVolume);
+            _sliderMusicVolume.onValueChanged.AddListener(GameSettings.SetMusicVolume);
+            _sliderSfxVolume.onValueChanged.AddListener(GameSettings.SetSfxVolume);
+            _sliderUiVolume.onValueChanged.AddListener(GameSettings.SetUiVolume);
 
             _tfSlotList = FindChild("m_tf_SlotList");
             _slotInfoTexts = new[]
@@ -135,6 +230,146 @@ namespace GameLogic
             {
                 RefreshSlotList();
             }
+            else if (view == MenuView.Settings)
+            {
+                RefreshSettingsView();
+            }
+            else
+            {
+                // 离开设置视图（进 SlotList/ConfirmOverwrite 都不该发生，但 Root 会）：
+                // 取消任何正在进行的重绑监听/冲突确认，避免切走之后按键还在悄悄改键位。
+                CancelRebindState();
+            }
+        }
+
+        /// <summary>ER2-INPUT-01 AC-ACC-001：设置面板每次打开都从 <see cref="GameSettings"/>
+        /// 拉最新值刷新控件——用 SetValueWithoutNotify，避免"读回填充"触发一次多余的 Save+广播。</summary>
+        private void RefreshSettingsView()
+        {
+            _toggleEdgePan.SetIsOnWithoutNotify(GameSettings.EdgePanEnabled);
+            _toggleScreenShake.SetIsOnWithoutNotify(GameSettings.ScreenShakeEnabled);
+            _toggleFlashReduction.SetIsOnWithoutNotify(GameSettings.FlashReductionEnabled);
+            _toggleSubtitles.SetIsOnWithoutNotify(GameSettings.SubtitlesEnabled);
+            _toggleColorblindIcons.SetIsOnWithoutNotify(GameSettings.ColorblindSafeIconsEnabled);
+
+            _sliderUiScale.SetValueWithoutNotify(GameSettings.UiScale);
+            _sliderCameraSpeed.SetValueWithoutNotify(GameSettings.CameraSpeedMultiplier);
+            _sliderMasterVolume.SetValueWithoutNotify(GameSettings.MasterVolume);
+            _sliderMusicVolume.SetValueWithoutNotify(GameSettings.MusicVolume);
+            _sliderSfxVolume.SetValueWithoutNotify(GameSettings.SfxVolume);
+            _sliderUiVolume.SetValueWithoutNotify(GameSettings.UiVolume);
+
+            RefreshKeybindLabels();
+        }
+
+        private void RefreshKeybindLabels()
+        {
+            foreach ((GameActionId action, string _) in RebindRows)
+            {
+                KeyCode key = GameSettings.KeyBindings.GetKey(action);
+                _rebindLabels[action].text = KeyDisplayName(key);
+            }
+        }
+
+        private static string KeyDisplayName(KeyCode key)
+        {
+            switch (key)
+            {
+                case KeyCode.LeftShift: return "LShift";
+                case KeyCode.RightShift: return "RShift";
+                case KeyCode.LeftControl: return "LCtrl";
+                case KeyCode.RightControl: return "RCtrl";
+                case KeyCode.LeftAlt: return "LAlt";
+                case KeyCode.RightAlt: return "RAlt";
+                case KeyCode.Mouse0: return "鼠标左键";
+                case KeyCode.Mouse1: return "鼠标右键";
+                case KeyCode.Mouse2: return "鼠标中键";
+                default: return key.ToString();
+            }
+        }
+
+        // ── ER2-INPUT-01：键位重绑（点击→监听下一次按键→冲突需再点一次确认）──────
+
+        private void OnRebindButtonClicked(GameActionId action)
+        {
+            // 正在等待"再点一次确认覆盖"，且点的就是同一个按钮＝确认。
+            if (_rebindConflictAction == action)
+            {
+                GameSettings.ForceRebindKey(action, _rebindConflictKey, _rebindConflictWith);
+                CancelRebindState(); // 内部会用刚落地的新绑定刷新全部标签。
+                return;
+            }
+
+            CancelRebindState();
+            _rebindListening = action;
+            _rebindLabels[action].text = "按任意键…";
+        }
+
+        /// <summary>UIWindow 每帧回调；只有重绑监听/冲突确认中才做事，其余帧 O(1) 早退。</summary>
+        protected override void OnUpdate()
+        {
+            if (_rebindListening == null)
+            {
+                return;
+            }
+
+            GameActionId action = _rebindListening.Value;
+            for (int i = 0; i < RebindCandidateKeys.Length; i++)
+            {
+                KeyCode key = RebindCandidateKeys[i];
+                if (!Input.GetKeyDown(key))
+                {
+                    continue;
+                }
+
+                _rebindListening = null;
+                GameActionId conflict;
+                if (GameSettings.TryRebindKey(action, key, out conflict))
+                {
+                    RefreshKeybindLabels();
+                }
+                else
+                {
+                    // 冲突：不落地，等玩家再点一次同一按钮确认覆盖（见 OnRebindButtonClicked）。
+                    _rebindConflictAction = action;
+                    _rebindConflictWith = conflict;
+                    _rebindConflictKey = key;
+                    _rebindLabels[action].text = "覆盖 " + ConflictRowLabel(conflict) + "？再点一次";
+                }
+                return;
+            }
+        }
+
+        private static string ConflictRowLabel(GameActionId action)
+        {
+            foreach ((GameActionId a, string label) in RebindRows)
+            {
+                if (a == action)
+                {
+                    return label;
+                }
+            }
+            return action.ToString();
+        }
+
+        /// <summary>取消监听/冲突确认。同时刷新键位标签——若上一个正在监听/等确认的按钮
+        /// 不是本次触发者（玩家中途点了别的重绑按钮/离开设置面板），它的文字会卡在
+        /// "按任意键…"/"覆盖…？"，必须在这里统一复位，不能指望调用方各自记得刷新。</summary>
+        private void CancelRebindState()
+        {
+            _rebindListening = null;
+            _rebindConflictAction = null;
+            if (_rebindLabels.Count > 0)
+            {
+                RefreshKeybindLabels();
+            }
+        }
+
+        private void OnResetAllDefaultsClicked()
+        {
+            CancelRebindState();
+            GameSettings.ResetAllToDefault();
+            RefreshSettingsView();
         }
 
         private void RefreshRootView()

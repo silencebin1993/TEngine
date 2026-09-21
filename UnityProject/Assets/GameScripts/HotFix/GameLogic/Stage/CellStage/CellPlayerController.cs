@@ -46,14 +46,12 @@ namespace GameLogic.Stage.CellStage
         public SimEntityId LastControlChangeUnitId { get; private set; } = SimEntityId.None;
 
         /// <summary>
-        /// 技能槽快捷键。槽 0 恒为冲刺（空格）。
-        /// 正式玩法槽位上限 5；末尾 T/G/C 留给 GM 一键解锁后的额外技能。
+        /// 技能槽数量上限（8）。槽 0（冲刺）的实际按键改由 <see cref="GameActionId.DirectSkillSlot0"/>
+        /// 经 <see cref="InputRouter.ConsumeAction"/> 解析（默认 LeftShift，见 ER2-INPUT-01：Space
+        /// 被 ERD 域表固定分配给全局暂停，与冲刺原键 Space 冲突，故冲刺挪键）；槽 1..7 全部自动施放
+        /// （见 <see cref="PollAbilityInput"/>），不消费任何按键，这里只用数组长度做上限裁剪。
         /// </summary>
-        private static readonly KeyCode[] SlotKeys =
-        {
-            KeyCode.Space, KeyCode.Q, KeyCode.E, KeyCode.R, KeyCode.F,
-            KeyCode.T, KeyCode.G, KeyCode.C,
-        };
+        private const int SlotCountCap = 8;
 
         public void Bind(SimBridge sim, StatSheet stats, AbilitySystem abilities,
             ResourceWallet wallet, Camera cam,
@@ -117,7 +115,7 @@ namespace GameLogic.Stage.CellStage
                 return;
             }
 
-            if (InputRouter.ConsumeKeyDown(KeyCode.Tab, InputScope.Direct))
+            if (InputRouter.ConsumeAction(GameActionId.CycleControlTarget, InputScope.Direct))
             {
                 RequestNextControlCandidate();
             }
@@ -290,9 +288,9 @@ namespace GameLogic.Stage.CellStage
                 return;
             }
 
-            int slots = Mathf.Min(_abilities.SlotCount, SlotKeys.Length);
+            int slots = Mathf.Min(_abilities.SlotCount, SlotCountCap);
 
-            if (slots > 0 && InputRouter.ConsumeKeyDown(SlotKeys[0], InputScope.Direct))
+            if (slots > 0 && InputRouter.ConsumeAction(GameActionId.DirectSkillSlot0, InputScope.Direct))
             {
                 TryCastSlot(0, autoAim: false);
             }
@@ -336,7 +334,7 @@ namespace GameLogic.Stage.CellStage
                 _actions.TryRelease(Control.LoadoutAction.Utility, aim);
             }
 
-            if (InputRouter.ConsumeKeyDown(KeyCode.E, InputScope.Direct))
+            if (InputRouter.ConsumeAction(GameActionId.Interact, InputScope.Direct))
             {
                 _actions.TryRelease(Control.LoadoutAction.Interact, aim);
             }
