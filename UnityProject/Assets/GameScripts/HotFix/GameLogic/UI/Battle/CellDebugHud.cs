@@ -90,7 +90,7 @@ namespace GameLogic.UI.Battle
 
         private static readonly string[] RouteNames =
         {
-            "无", "吞噬扩张", "机动猎食", "电化统治", "孢子繁殖", "菌毯筑巢", "异化污染", "跨路线",
+            "无", "拆解扩张", "机动猎食", "电化统治", "量产扩散", "菌毯筑巢", "异化污染", "跨路线",
         };
 
         /// <summary>全部面板可拖拽（用户要求）：位置持久化到 PlayerPrefs，windowId 100-106+110 互不冲突。
@@ -267,11 +267,11 @@ namespace GameLogic.UI.Battle
                 _menuRect.height = h;
             }
 
-            ImguiDragUtil.DrawDraggable(100, ref _menuRect, "细胞纪元", "gm_menu", id =>
+            ImguiDragUtil.DrawDraggable(100, ref _menuRect, "归还纪元", "gm_menu", id =>
             {
-                GUILayout.Label("细胞纪元", _big);
+                GUILayout.Label("归还纪元", _big);
                 GUILayout.Space(6f);
-                GUILayout.Label("从一个漂流细胞开始，在一小时内吞噬、突变、筑巢，\n成为这片微观海域的原核霸主。", _label);
+                GUILayout.Label("从一枚迫降的地球归还核心开始，在一小时内拆解回收、升级重组、扩张网络，\n成为这片归还带的核心枢纽。", _label);
                 GUILayout.Space(14f);
 
                 if (GUILayout.Button("开始漂流", GUILayout.Height(38f)))
@@ -340,7 +340,9 @@ namespace GameLogic.UI.Battle
                 }
             });
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
             DrawConsciousnessTargetMarkers(cell);
+#endif
         }
 
         /// <summary>
@@ -393,6 +395,11 @@ namespace GameLogic.UI.Battle
             }
         }
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        /// <summary>ER2-BOOT-01：引用 <see cref="CellStageFlow.ConsciousnessPlaytestTargetLogicId"/>
+        /// 等常量仅在 <c>#if UNITY_EDITOR || DEVELOPMENT_BUILD</c> 内定义，正式 Standalone 构建里
+        /// 不存在——本方法与 <see cref="DrawConsciousnessPartMarker"/> 必须同一守卫，否则 Release
+        /// 构建报 CS0117（此前从未做过真实 Windows 构建，未曾暴露）。</summary>
         private void DrawConsciousnessTargetMarkers(CellStageFlow cell)
         {
             Camera cam = Camera.main;
@@ -444,6 +451,7 @@ namespace GameLogic.UI.Battle
             GUI.Box(rect, $"{label}  {state}");
             GUI.color = before;
         }
+#endif
 
         /// <summary>battle-ui-polish/story-003 D4 最小暴露：新 UI Toolkit 结算面板复用同一份文案，不重写拼接逻辑。</summary>
         public static string BuildResultText(StageOutcome o)
@@ -462,10 +470,10 @@ namespace GameLogic.UI.Battle
             return $"{head}\n\n" +
                    $"存活 {m:00}:{s:00}　到达时期 {phase}/6　等级 {o.Level}　卡牌 {o.AllCards.Count}\n" +
                    $"主导路线 {RouteName(o.DominantRoute)}\n" +
-                   $"吞噬 {o.Statistics.FoodDevoured}　击杀 {o.Statistics.EnemiesKilled}　" +
+                   $"拆解回收 {o.Statistics.FoodDevoured}　击杀 {o.Statistics.EnemiesKilled}　" +
                    $"精英 {o.Statistics.ElitesKilled}\n" +
                    $"峰值体积 {o.Statistics.PeakVolume:F1}　峰值敌人 {o.Statistics.PeakEnemyCount}\n" +
-                   $"生涯记录：累计击杀 {o.Lifetime.TotalKills}　累计吞噬 {o.Lifetime.TotalDevoured}　" +
+                   $"生涯记录：累计击杀 {o.Lifetime.TotalKills}　累计拆解回收 {o.Lifetime.TotalDevoured}　" +
                    $"最长存活 {bm:00}:{bs:00}　最高等级 {o.Lifetime.BestLevel}";
         }
 
@@ -476,7 +484,7 @@ namespace GameLogic.UI.Battle
                 case "pollution": return "你追求的力量终于认不出宿主。";
                 case "devoured": return "更大的口器找到了你。这片水域从不记得失败者的形状。";
                 case "abandoned": return "你收起伪足，退回安全的水流——这场漂流的痕迹已经留在体内。";
-                default: return "细胞膜再也无法维持形状。";
+                default: return "核心外壳彻底解体，再也无法维持结构。";
             }
         }
 
@@ -1033,7 +1041,7 @@ namespace GameLogic.UI.Battle
             switch (t)
             {
                 case CardTrigger.Passive: return "获得即生效";
-                case CardTrigger.OnDevour: return "吞噬时";
+                case CardTrigger.OnDevour: return "拆解回收时";
                 case CardTrigger.OnKill: return "击杀时";
                 case CardTrigger.OnHit: return "命中时";
                 case CardTrigger.OnHurt: return "受伤时";

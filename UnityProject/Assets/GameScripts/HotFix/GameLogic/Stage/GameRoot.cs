@@ -60,10 +60,13 @@ namespace GameLogic.Stage
             StartCellStage(CellStageEntryMode.Resume);
         }
 
-        /// <summary>结束当前局，回到无阶段状态。</summary>
+        /// <summary>结束当前局，回到无阶段状态。ER2-BOOT-01：唯一的"返回菜单"出口——不管调用方是
+        /// 玩家主动退出、阶段自然结束（死亡/通关）还是调试/测试代码，一律重新打开正式主菜单，
+        /// 不停在旧运行中枢首页或黑屏。</summary>
         public static void EndRun()
         {
             _director?.EndCurrent();
+            GameModule.UI.ShowUIAsync<MainMenuUI>();
         }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -105,10 +108,12 @@ namespace GameLogic.Stage
 
             // 阶段自然结束（死亡或通关）时收摊并回主菜单。
             // 由 GameRoot 判断而不是阶段自己切换，保证阶段不需要知道 director。
+            // 统一走 EndRun()（而不是直接 _director.EndCurrent()），使"自然结束"与"玩家/调试代码主动
+            // 调用 EndRun()"两条路径共用同一套回菜单逻辑，不重复也不遗漏。
             CellStageFlow cell = CellStage;
             if (_director.CurrentId == StageId.Cell && cell != null && !cell.IsRunning)
             {
-                _director.EndCurrent();
+                EndRun();
             }
         }
 

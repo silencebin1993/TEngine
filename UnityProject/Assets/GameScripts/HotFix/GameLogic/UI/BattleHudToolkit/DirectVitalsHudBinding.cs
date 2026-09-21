@@ -46,7 +46,7 @@ namespace GameLogic.UI.Battle
         {
             if (!vitals.Valid)
             {
-                return "代谢 --";
+                return "电量 --";
             }
 
             // 「过载债」是累积量，「已过载」是状态——两个词分开，玩家才读得出
@@ -55,7 +55,7 @@ namespace GameLogic.UI.Battle
                 ? $"过载债 {vitals.Strain:F0}/{vitals.StrainThreshold:F0} 已过载"
                 : $"过载债 {vitals.Strain:F0}/{vitals.StrainThreshold:F0}";
 
-            return $"代谢 {vitals.Metabolism:F0}/{vitals.MetabolismMax:F0}　{strain}" +
+            return $"电量 {vitals.Metabolism:F0}/{vitals.MetabolismMax:F0}　{strain}" +
                    $"　主 {FormatCooldown(vitals.PrimaryCooldown)}" +
                    $"　功 {FormatCooldown(vitals.UtilityCooldown)}";
         }

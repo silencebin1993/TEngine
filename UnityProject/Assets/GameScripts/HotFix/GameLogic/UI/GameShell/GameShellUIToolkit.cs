@@ -140,7 +140,10 @@ namespace GameLogic.UI.GameShell
         {
             CellStageFlow cell = GameRoot.CellStage;
             bool running = cell != null && cell.IsRunning;
-            _homeView?.EnableInClassList("is-hidden", running);
+            // ER2-BOOT-01：homeView（旧运行中枢首页，"开始新局/继续"等仍是切产品前的旧生物题材按钮）
+            // 永久隐藏——正式主菜单 MainMenuUI 才是唯一的"无战役进行中"入口，见 GameApp.MountGameplayUi
+            // 与 GameRoot.EndRun 的注释。这里不判断 running，避免它在 MainMenuUI 背后可见/可点。
+            _homeView?.EnableInClassList("is-hidden", true);
             _runNavigation?.EnableInClassList("is-hidden", !running);
             _settingsOverlay?.EnableInClassList("is-hidden", !_settingsOpen);
 
@@ -155,7 +158,7 @@ namespace GameLogic.UI.GameShell
             {
                 if (_runStateLabel != null)
                 {
-                    _runStateLabel.text = cell.Paused ? "细胞阶段 · 已暂停" : "细胞阶段 · 进行中";
+                    _runStateLabel.text = cell.Paused ? "归还阶段 · 已暂停" : "归还阶段 · 进行中";
                 }
                 if (_walletLabel != null && cell.Wallet != null)
                 {

@@ -154,7 +154,7 @@ namespace GameLogic
             _detailList.Clear();
             AddDetailLine($"阶段：{outcome.StageId} · {(outcome.Victory ? "完成" : "失败")}");
             AddDetailLine($"等级：{outcome.Level} · 用时：{outcome.DurationSeconds:F1}s");
-            AddDetailLine($"吞噬：{outcome.Statistics.FoodDevoured} · 击杀：{outcome.Statistics.EnemiesKilled} · 精英：{outcome.Statistics.ElitesKilled}");
+            AddDetailLine($"拆解回收：{outcome.Statistics.FoodDevoured} · 击杀：{outcome.Statistics.EnemiesKilled} · 精英：{outcome.Statistics.ElitesKilled}");
             AddDetailLine($"输出：{outcome.Statistics.TotalDamageDealt:F0} · 承伤：{outcome.Statistics.TotalDamageTaken:F0}");
             AddDetailLine($"营养质：{outcome.Statistics.NutrientEarned:F0} · 突变质：{outcome.Statistics.MutagenEarned:F0}");
             AddDetailLine($"最高体积：{outcome.Statistics.PeakVolume:F2} · 最大连吃：{outcome.Statistics.MaxDevourCombo}");

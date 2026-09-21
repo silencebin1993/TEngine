@@ -34,11 +34,36 @@ public partial class GameApp
         StartGameLogic();
     }
     
+    /// <summary>ER2-BOOT-01：战斗/旧运行中枢 UI 是否已挂载。冷启动不再无条件挂载它们——
+    /// 那一整套（GameShellUIToolkit 的“工坊/仓/图鉴”等）仍是切产品前的旧生物题材命名，
+    /// 直接摆在冷启动第一屏会让玩家看到未改名的旧入口。真正的冷启动第一屏是
+    /// <see cref="GameLogic.MainMenuUI"/>；只有玩家从主菜单成功新建/继续/读取战役后，
+    /// 才调用 <see cref="MountGameplayUi"/> 把这些 UI 挂上去。</summary>
+    private static bool _gameplayUiMounted;
+
     private static void StartGameLogic()
     {
         // 正式游戏框架启动。注册所有阶段与更新驱动。
         // 详见 DesignDocs/Game_Framework_Design.md §8。
         GameLogic.Stage.GameRoot.Startup();
+
+        // ER2-BOOT-01：冷启动第一屏必须是《地球归还》正式主菜单（新建/继续/读取/设置/退出），
+        // 不允许通过 GM/测试菜单进入 Demo——旧运行中枢与战斗 UI 延后到 MountGameplayUi()。
+        GameModule.UI.ShowUIAsync<GameLogic.MainMenuUI>();
+    }
+
+    /// <summary>ER2-BOOT-01：把战斗/旧运行中枢 UI 的常驻挂载从冷启动延后到"玩家从主菜单真正开局"之后。
+    /// 同进程内幂等——新建/继续/读取反复调用只会真正挂载一次。调试/回归测试如果绕开 MainMenuUI
+    /// 直接调用 GameRoot.StartCellStage()/ResumeCellStage()，需要自己先调用本方法，否则战斗 HUD
+    /// 等面板不存在（历史上这些面板一直随 StartGameLogic 无条件挂载，直连测试沿用的就是那批实例；
+    /// 现在需要显式挂载一次，行为等价，只是时机从"进程启动"改成"本方法被调用时"）。</summary>
+    public static void MountGameplayUi()
+    {
+        if (_gameplayUiMounted)
+        {
+            return;
+        }
+        _gameplayUiMounted = true;
 
         // 运行中枢必须先于战斗页常驻：无阶段时它提供开局入口，运行中它提供唯一的跨玩法导航。
         new GameObject("GameShellUIToolkit").AddComponent<GameLogic.UI.GameShell.GameShellUIToolkit>();
@@ -87,6 +112,8 @@ public partial class GameApp
     private static void Release()
     {
         SingletonSystem.Release();
+        // 场景/域卸载时挂载的 GameObject 会一并销毁，标记复位，避免下次 Entrance 误判"已挂载"而跳过。
+        _gameplayUiMounted = false;
         Log.Warning("======= Release GameApp =======");
     }
 }

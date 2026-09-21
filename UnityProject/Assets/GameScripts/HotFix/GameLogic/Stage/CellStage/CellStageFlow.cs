@@ -7,6 +7,7 @@ using GameLogic.Ability.Executors;
 using GameLogic.ArtBinding;
 using GameLogic.Battle;
 using GameLogic.Battle.Feedback;
+using GameLogic.Campaign;
 using GameLogic.Cards;
 using GameLogic.Command;
 using GameLogic.Core;
@@ -543,6 +544,10 @@ namespace GameLogic.Stage.CellStage
                 _stats.Get(StatId.Volume),
                 _stats.Get(StatId.MoveSpeed));
             SetupUnitLoadouts();
+            // ER1-ID-01：MachineRegistry 绑定到本次 SimWorld 会话，必须排在 SpawnControlAllies 之前——
+            // 那里要往里登记机器记录 + 挂起绑定项。区域占位见字面量说明：ER2/ER5 区域系统尚未建立，
+            // 细胞阶段固定代表唯一一个占位区域。
+            MachineRegistry.Bind(_sim, CellStageMachineRegionId);
             SpawnControlAllies();
 
             // M1-06：只有显式“恢复旧局”才把意识放回上次那具躯体。
@@ -554,7 +559,13 @@ namespace GameLogic.Stage.CellStage
             // 世界保留自带的默认受控实体，不需要额外分支。
             if (_entryMode == CellStageEntryMode.Resume)
             {
-                _sim.RequestControlRestore(ControlPersistence.Load());
+                // ER1-SAVE-02：有活动战役时，CampaignState.ControlHandoff 是唯一权威（SYSTEMS-SPEC.md
+                // 第 37 行要求的合并）；没有活动战役（调试/回归测试直连 GameRoot.ResumeCellStage，
+                // 不经 MainMenuUI）时保留旧版独立文件兜底，不回归 M1-06 既有行为。
+                ControlHandoffState handoff = CampaignSession.HasActiveCampaign
+                    ? ResolveCampaignControlHandoff()
+                    : ControlPersistence.Load();
+                _sim.RequestControlRestore(handoff);
             }
 
             // 轻障碍（story-009）：数据驱动随机布局，白模一次性生成。
@@ -585,6 +596,38 @@ namespace GameLogic.Stage.CellStage
                 new Color(1f, 0.95f, 0.35f, 1f));
         }
 
+        /// <summary>ER1-SAVE-02：把 <c>CampaignSession.Current.ControlHandoff</c>（战役级、
+        /// <see cref="MachineRegistry"/> LogicId 号段）翻译成本次会话可用的 <see cref="ControlHandoffState"/>
+        /// （局内 LogicId 号段，<see cref="SimBridge.RequestControlRestore"/> 认的那一个）。
+        /// 必须在 <c>SpawnControlAllies()</c> 之后、<c>Update()</c> 第一次驱动
+        /// <see cref="MachineRegistry.ResolvePending"/> 之前调用——翻译表（挂起绑定项）这时一定就绪。
+        /// 战役里没有控制记录（新战役、或 ControlledLogicId 已被读档编排器合法回退为 0）时返回
+        /// <see cref="ControlHandoffState.None"/>，世界保留自带的默认受控实体。</summary>
+        private ControlHandoffState ResolveCampaignControlHandoff()
+        {
+            ControlHandoffRecord record = CampaignSession.Current?.ControlHandoff;
+            if (record == null)
+            {
+                return ControlHandoffState.None;
+            }
+
+            var state = new ControlHandoffState
+            {
+                FallbackAnchor = new Unity.Mathematics.float2(record.AnchorX, record.AnchorY),
+                HasAnchor = record.HasAnchor,
+                HasRecord = record.HasAnchor || record.ControlledLogicId != 0,
+            };
+
+            if (record.ControlledLogicId != 0 &&
+                MachineRegistry.TryGetPendingSessionLogicId(record.ControlledLogicId, out int sessionLogicId))
+            {
+                state.ControlledLogicId = sessionLogicId;
+                state.HasRecord = true;
+            }
+
+            return state;
+        }
+
         /// <summary>
         /// M1 固定房间的两名真实友军。复用现有孢子/菌丝体召唤原型，未受控时继续执行
         /// PlayerMinion AI；与默认本体合计三名可控单位，出生点均在临时信号范围内。
@@ -600,6 +643,20 @@ namespace GameLogic.Stage.CellStage
 
         /// <summary>可控友军共用的造型 id（2026-09-14）。见 <see cref="SpawnControlAllies"/> 里的说明。</summary>
         public const int ControlAllyVisualId = Control.ArchetypeLoadoutTable.SporeArchetypeId;
+
+        /// <summary>ER1-ID-01：<see cref="MachineRegistry"/> 区域占位——ER2-SCENE-01/ER5-REGION-01
+        /// 建立正式区域系统之前，细胞阶段固定代表这一个区域，机制先行、内容后补。</summary>
+        public const string CellStageMachineRegionId = "cell-stage";
+
+        /// <summary>ER1-ID-01：细胞阶段友军的机器底盘 id（当前唯一可达正式生成入口的载体）。
+        /// 不是正式内容锁定表条目——ER2-THEME-01/ER4-CONTENT-01 之后由真正的机械主题底盘替换，
+        /// 本 Story 只要求它们能作为 <see cref="MachineRegistry"/> 唯一性/持久化机制的真实验证载体。</summary>
+        private const string SporeAllyChassisId = "chassis_ally_spore";
+        private const string MyceliumAllyChassisId = "chassis_ally_mycelium";
+
+        /// <summary>ER1-ID-01：占位蓝图 id——ER4-BLP-01 建立正式蓝图目录前的显式占位（不是空缺失），
+        /// 见 <see cref="MachineRegistry.SpawnMachine"/> 的 Reject-to-Safe 说明。</summary>
+        private static string PlaceholderBlueprintId(string chassisId) => "placeholder:" + chassisId;
 
         /// <summary>
         /// 第 <paramref name="index"/> 名可控友军的**装配**取哪个原型（2026-09-14）。
@@ -621,6 +678,33 @@ namespace GameLogic.Stage.CellStage
             return index == 0
                 ? Control.ArchetypeLoadoutTable.SporeArchetypeId
                 : Control.ArchetypeLoadoutTable.MyceliumArchetypeId;
+        }
+
+        /// <summary>ER1-SAVE-02：Resume 模式下优先复用 <see cref="MachineRegistry"/> 里已存在的同一具
+        /// 友军记录（读档已经把它的 LogicId/血量/经历带回来了），而不是每次进场都当"新机器"分配新
+        /// LogicId——否则 <c>CampaignState.ControlHandoff</c> 记的旧 LogicId 永远找不到对应实体，
+        /// 读档后的控制恢复形同虚设。NewRun/LookDevSandbox/ConsciousnessPlaytest 没有"上一局"概念，
+        /// 始终走正常 <see cref="MachineRegistry.SpawnMachine"/>。返回 0 表示登记被拒绝（Reject-to-Safe，
+        /// 调用方按既有约定把它当"这具友军这次没有 MachineRegistry 身份"处理，不阻断整局）。</summary>
+        private int SpawnOrReuseMachine(string chassisId, Vector2 position, float health, int sessionLogicId)
+        {
+            if (_entryMode == CellStageEntryMode.Resume &&
+                MachineRegistry.TryFindReusableRecord(chassisId, CellStageMachineRegionId, out int existingLogicId))
+            {
+                MachineRegistry.ArmPendingBind(existingLogicId, sessionLogicId);
+                return existingLogicId;
+            }
+
+            MachineOpResult result = MachineRegistry.SpawnMachine(
+                chassisId, PlaceholderBlueprintId(chassisId), CellStageMachineRegionId, position, health, health);
+            if (!result.Success)
+            {
+                TEngine.Log.Warning($"[CellStageFlow] MachineRegistry 拒绝登记友军（{chassisId}）：{result.Error} {result.Message}");
+                return 0;
+            }
+
+            MachineRegistry.ArmPendingBind(result.LogicId, sessionLogicId);
+            return result.LogicId;
         }
 
         private void SpawnControlAllies()
@@ -645,6 +729,12 @@ namespace GameLogic.Stage.CellStage
                 VisualId = ControlAllyVisualId,
             });
             _unitLoadouts?.RegisterArchetypePending(sporeLogicId, AllyLoadoutArchetypeId(0));
+            // ER1-ID-01：战役级 LogicId 与本行上面的 sporeLogicId（SimBridge 局内号）是两套完全独立的
+            // 号段，不要混淆——后者只是关联键，见 MachineRegistry 类注释。
+            // ER1-SAVE-02：Resume 时优先复用读档带回来的既有记录（SpawnOrReuseMachine），
+            // 不再无条件当"新机器"分配新 LogicId——否则 ControlHandoff 记的旧 LogicId 永远找不到
+            // 对应实体，读档后的控制恢复形同虚设。
+            _sporeMachineLogicId = SpawnOrReuseMachine(SporeAllyChassisId, new Vector2(-4f, 2f), health, sporeLogicId);
 
             int myceliumLogicId = _sim.NextLogicId();
             _sim.Spawn(new SpawnRequest
@@ -673,6 +763,7 @@ namespace GameLogic.Stage.CellStage
                 VisualId = ControlAllyVisualId,
             });
             _unitLoadouts?.RegisterArchetypePending(myceliumLogicId, AllyLoadoutArchetypeId(1));
+            _myceliumMachineLogicId = SpawnOrReuseMachine(MyceliumAllyChassisId, new Vector2(4f, 2f), health, myceliumLogicId);
 
             // 2026-09-14 试玩反馈：「存在友方一直移动的角色，我并未下令他自己移动干嘛」。
             // 友军出生是 IntentSource.AI，原型 13 的 MinionSeekAttack 在索敌半径(8)内找不到
@@ -703,6 +794,85 @@ namespace GameLogic.Stage.CellStage
         private readonly List<int> _pendingAllyHolds = new List<int>(2);
         private int _pendingAllyHoldFrames;
         private readonly SimEntityId[] _allyHoldTarget = new SimEntityId[1];
+
+        /// <summary>ER1-ID-01：两名友军各自在 <see cref="MachineRegistry"/> 里的战役级 LogicId
+        /// （0 = 登记被拒绝，未产出机器记录）。留着供 <see cref="SyncMachineRegistryLiveState"/> 与
+        /// 回归/Play Mode 验收读取，不参与任何每帧路径。</summary>
+        private int _sporeMachineLogicId;
+        private int _myceliumMachineLogicId;
+
+        /// <summary>验收入口：两名友军的 MachineRegistry LogicId（0 表示登记失败）。</summary>
+        public (int SporeMachineLogicId, int MyceliumMachineLogicId) DebugMachineLogicIds =>
+            (_sporeMachineLogicId, _myceliumMachineLogicId);
+
+        /// <summary>
+        /// ER1-ID-01：存档前把两名友军的实况（位置/血量/装配签名）同步回
+        /// <see cref="MachineRegistry"/>。必须在 <c>_hub.Exit()</c>／World Dispose 之前调用——
+        /// 之后快照与装配注册表就都不可读了。找不到实体（已阵亡/跨区）时对应那具安全跳过，
+        /// 不影响另一具。
+        /// </summary>
+        private void SyncMachineRegistryLiveState()
+        {
+            if (_sim == null || !_sim.Running)
+            {
+                return;
+            }
+
+            SyncOneMachineLiveState(_sporeMachineLogicId);
+            SyncOneMachineLiveState(_myceliumMachineLogicId);
+
+            // ER1-SAVE-02：把"存档那一刻谁在被直控"完整写进 ControlHandoff（ER1-SAVE-01 建好字段，
+            // 本 Story 补上真正的锚点捕获——之前 HasAnchor 恒为 false 是占位，见 DEBT-ER1SAVE01-07；
+            // 现在与旧版 ControlPersistence.Save(_sim.CurrentHandoff) 读同一份 _sim 状态，两套持久化
+            // 落到同一份数据源，不再各写各的）。ControlledLogicId 用 MachineRegistry 的战役级号段
+            // （不是 _sim.CurrentHandoff.ControlledLogicId 那个局内号段——两者不可混用，见
+            // MachineRegistry.TryGetPendingSessionLogicId 的说明）。
+            if (CampaignSession.HasActiveCampaign)
+            {
+                bool hasControlled = MachineRegistry.TryGetLogicId(_sim.ControlledUnitId, out int controlledLogicId);
+                ControlHandoffState liveHandoff = _sim.CurrentHandoff;
+                CampaignSession.Current.ControlHandoff.ControlledLogicId = hasControlled ? controlledLogicId : 0;
+                CampaignSession.Current.ControlHandoff.HasAnchor = liveHandoff.HasAnchor;
+                CampaignSession.Current.ControlHandoff.AnchorX = liveHandoff.FallbackAnchor.x;
+                CampaignSession.Current.ControlHandoff.AnchorY = liveHandoff.FallbackAnchor.y;
+            }
+        }
+
+        private void SyncOneMachineLiveState(int machineLogicId)
+        {
+            if (machineLogicId == 0 || !MachineRegistry.TryGetEntity(machineLogicId, out SimEntityId entity))
+            {
+                return;
+            }
+            if (!_sim.TryResolveUnitIndex(entity, out int index) || index >= _sim.Snapshot.Count)
+            {
+                return;
+            }
+
+            BinGames.Sim.SimSnapshot snap = _sim.Snapshot;
+            string signature = BuildLoadoutSignature(_unitLoadouts?.Get(entity));
+            Unity.Mathematics.float2 pos = snap.Position[index];
+            MachineRegistry.SyncLiveState(machineLogicId, new Vector2(pos.x, pos.y), snap.Health[index], signature);
+        }
+
+        /// <summary>把一份装配折成一条稳定字符串，供 <see cref="MachineRecord.LoadoutSignature"/>
+        /// 落盘——按动作槽排序后拼 "Action:OrganId"，同一份装配任何时候折出的串必须相同（
+        /// <c>UnitLoadout.Organs</c> 内部顺序不保证跨查询稳定时，这里显式排序兜底）。</summary>
+        private static string BuildLoadoutSignature(Control.UnitLoadout loadout)
+        {
+            if (loadout == null || loadout.OrganCount == 0)
+            {
+                return string.Empty;
+            }
+
+            var parts = new List<string>(loadout.OrganCount);
+            foreach (Control.UnitLoadoutOrgan organ in loadout.Organs)
+            {
+                parts.Add($"{organ.Action}:{organ.OrganId}:{(organ.Disabled ? "D" : "E")}");
+            }
+            parts.Sort(StringComparer.Ordinal);
+            return string.Join("|", parts);
+        }
 
         /// <summary>出生即待命的解析上限帧数。同 <c>UnitLoadoutRegistry.MaxResolveAttempts</c> 的理由：
         /// 出生即死的项不该被无限扫下去。</summary>
@@ -1386,6 +1556,9 @@ namespace GameLogic.Stage.CellStage
             _cameraDirector?.Tick(_paused);
             ParkControlOnStrategyView();
             ResolvePendingAllyHolds();
+            // ER1-ID-01：把"Spawn 入队、下一次 Step 才有实体"的机器登记补上，与上面友军待命
+            // 解析同一节流约定（挂起表空时一行都不扫）。
+            MachineRegistry.ResolvePending(_sim.Snapshot);
             // M2-02：选择与命令同样要在暂停早退之前——"暂停下令后恢复顺序稳定"是它的验收项，
             // 而下令这件事本身必须在冻结期间还能发生。
             _squadCommands?.Tick(_paused);
@@ -1462,6 +1635,14 @@ namespace GameLogic.Stage.CellStage
         private void OnControlledUnitChanged(ControlledUnitChangedSignal signal)
         {
             _renderer?.ClearControlledPresentation();
+
+            // ER1-ID-01：接管次数是 MachineRecord 的"经历"字段之一（ERD-DAT-002）。
+            // 只有映射到 MachineRegistry 的实体才有对应记录（当前是两名细胞阶段友军）；
+            // 玩家本体、非机器实体查不到 LogicId 时安全 no-op。
+            if (signal.CurrentUnitId.IsValid && MachineRegistry.TryGetLogicId(signal.CurrentUnitId, out int logicId))
+            {
+                MachineRegistry.RecordControlled(logicId);
+            }
         }
 
         private Mesh _coneCache;
@@ -2045,13 +2226,29 @@ namespace GameLogic.Stage.CellStage
         {
             BuildOutcome();
 
+            // ER1-ID-01：必须在 _hub.Exit()/World Dispose 之前同步——之后快照与装配注册表都读不到了。
+            SyncMachineRegistryLiveState();
+
             _hub.Exit();
             _hub.Dispose();
 
-            // M1-06：本局唯一一次控制记忆落盘。必须在 _hub.Exit() 之后——
-            // SimBridge.End() 会在内核 Dispose 前把控制状态抄进托管侧，这里读到的才是完整的那一份。
-            // 与生涯统计同一条 Reject-to-Safe 纪律：Save 永不 throw，存档异常不阻塞退出流程。
-            ControlPersistence.Save(_sim.CurrentHandoff);
+            // ER1-ID-01：等价于"区域卸载"——只清 LogicId↔SimEntityId 映射，MachineRecord 原样保留
+            // （跨区暂时无实体，不是记录消失）。真正开新战役时由 MainMenuUI 调用 ResetForNewCampaign。
+            MachineRegistry.Unbind();
+
+            // ER1-SAVE-02：控制记忆落盘现在按"是否有活动战役"分路（SYSTEMS-SPEC.md 第 37 行要求的
+            // ControlHandoffState/ControlPersistence 并入 CampaignState）——
+            // 有活动战役：已在上面 SyncMachineRegistryLiveState() 用 _sim.CurrentHandoff 完整写进
+            // CampaignSession.Current.ControlHandoff（那次读取发生在 _hub.Exit()/Dispose 之前，_sim
+            // 仍在跑，CurrentHandoff 走的是同一个 CaptureHandoff() 实时路径，数据等价，不需要重复写）；
+            // 这里不再写独立文件，避免出现两份互相不知道对方存在的权威来源。
+            // 没有活动战役（调试/回归测试直连 GameRoot.StartCellStage，不经 MainMenuUI）：保留旧版
+            // 独立文件兜底，不回归 M1-06 既有行为。M1-06 原注释：SimBridge.End() 会在内核 Dispose 前
+            // 把控制状态抄进托管侧，这里读到的才是完整的那一份；Save 永不 throw，存档异常不阻塞退出。
+            if (!CampaignSession.HasActiveCampaign)
+            {
+                ControlPersistence.Save(_sim.CurrentHandoff);
+            }
 
             // M2-01/M2-02：解绑镜头与指挥层并复位输入所有权，
             // 否则上一局的 Scope/模态状态、选择集与编组会粘到下一局。

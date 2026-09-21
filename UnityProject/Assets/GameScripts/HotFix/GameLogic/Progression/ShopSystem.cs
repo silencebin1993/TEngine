@@ -43,12 +43,12 @@ namespace GameLogic.Progression
         {
             new ShopItemSpec
             {
-                Name = "细胞修复", Desc = "回复 20% 生命上限",
+                Name = "外壳修复", Desc = "回复 20% 生命上限",
                 Cost = 12f, Effect = ShopEffectKind.HealPercent, Value = 0.2f,
             },
             new ShopItemSpec
             {
-                Name = "随机基因", Desc = "获得一张随机普通卡牌",
+                Name = "随机固件", Desc = "获得一张随机普通卡牌",
                 Cost = 18f, Effect = ShopEffectKind.RandomCard, Value = 0f,
             },
             new ShopItemSpec
@@ -63,7 +63,7 @@ namespace GameLogic.Progression
             },
             new ShopItemSpec
             {
-                Name = "器官零件", Desc = "获得一枚随机器官零件，直接入储备囊",
+                Name = "备用组件", Desc = "获得一枚随机备用组件，直接入储备囊",
                 Cost = 15f, Effect = ShopEffectKind.GrantOrganPart, Value = 0f,
             },
         };
