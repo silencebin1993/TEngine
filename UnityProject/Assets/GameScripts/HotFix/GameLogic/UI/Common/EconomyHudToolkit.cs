@@ -1,5 +1,6 @@
 using Cysharp.Threading.Tasks;
 using GameLogic.Campaign;
+using GameLogic.Campaign.Regions;
 using GameLogic.Stage;
 using TEngine;
 using UnityEngine;
@@ -18,7 +19,11 @@ namespace GameLogic.UI.Common
     ///
     /// 只读固定 3 条最近流水的 Label 做轻量对象复用，不逐帧新增/销毁 VisualElement——账本变更
     /// 频率低（修复/拆解完工才变），但仍遵守"UI 层不逐帧分配 GC"的习惯写法。
-    /// </summary>
+    ///
+    /// ER3-PWR-01 起额外挂了一个"电网"分区，展示 <see cref="HomeValleyPowerGrid.GetSummary"/>
+    /// 的供给/需求/差额/被停建筑（STORY-EXECUTION-CARDS.md #ER3-PWR-01"显示供给/需求/差额/
+    /// 被停建筑"要求的展示部分）。改优先级/主动关停的正式 UI 交互入口留给 ER5-INT-01/UI-04——
+    /// 那部分依赖尚未实现的 E 交互系统，本类只做只读展示，不新增按钮。</summary>
     public sealed class EconomyHudToolkit : MonoBehaviour
     {
         private const int RecentCount = 3;
@@ -31,6 +36,8 @@ namespace GameLogic.UI.Common
         private Label _availableLabel;
         private Label _reservedLabel;
         private readonly Label[] _recentLabels = new Label[RecentCount];
+        private Label _powerLabel;
+        private Label _brownoutLabel;
 
         public static EconomyHudToolkit Instance { get; private set; }
 
@@ -104,6 +111,17 @@ namespace GameLogic.UI.Common
                 _recentLabels[i] = label;
                 _panel.Add(label);
             }
+
+            _powerLabel = new Label();
+            _powerLabel.style.color = Color.white;
+            _powerLabel.style.marginTop = 4;
+            _panel.Add(_powerLabel);
+
+            _brownoutLabel = new Label();
+            _brownoutLabel.style.color = new Color(0.95f, 0.4f, 0.35f);
+            _brownoutLabel.style.fontSize = 11;
+            _brownoutLabel.style.display = DisplayStyle.None;
+            _panel.Add(_brownoutLabel);
         }
 
         private void Update()
@@ -146,6 +164,21 @@ namespace GameLogic.UI.Common
                 ResourceTransactionRecord entry = summary.RecentEntries[i];
                 label.text = FormatEntry(entry);
                 label.style.display = DisplayStyle.Flex;
+            }
+
+            HomeValleyPowerGrid.GridSummary power = HomeValleyPowerGrid.GetSummary(state);
+            _powerLabel.text = power.Shortfall > 0f
+                ? $"电力：供给{power.TotalSupply:0}/需求{power.TotalDemand:0}（差额{power.Shortfall:0}）"
+                : $"电力：供给{power.TotalSupply:0}/需求{power.TotalDemand:0}";
+
+            if (power.BrownoutBuildingIds.Length > 0)
+            {
+                _brownoutLabel.text = "断电：" + string.Join("、", power.BrownoutBuildingIds);
+                _brownoutLabel.style.display = DisplayStyle.Flex;
+            }
+            else
+            {
+                _brownoutLabel.style.display = DisplayStyle.None;
             }
         }
 

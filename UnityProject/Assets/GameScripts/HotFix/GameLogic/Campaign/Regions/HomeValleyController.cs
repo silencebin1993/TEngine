@@ -86,7 +86,7 @@ namespace GameLogic.Campaign.Regions
             EnsureRegionSeeded(state);
             EnsureMachinesSeeded(state);
             state.CurrentRegionId = HomeValleyLayout.RegionId;
-            RecomputePower(state); // 幂等：新建战役刚播种、或读档恢复旧存档，都用当前数据重算一次。
+            HomeValleyPowerGrid.Recompute(state); // 幂等：新建战役刚播种、或读档恢复旧存档，都用当前数据重算一次。
             RearmInterruptedWorkOrders(state);
             RearmInterruptedSalvage(state);
 
@@ -318,7 +318,8 @@ namespace GameLogic.Campaign.Regions
                 NewBuilding(HomeValleyLayout.SignalTower, BuildingConstructionState.Damaged,
                     BuildingPowerState.NotApplicable, health: PlaceholderStructureHealth),
                 // PowerState 先给 NotApplicable 占位——EnsureRegionSeeded 返回后 Enter() 立即调用
-                // RecomputePower，会按 ERD-ECO-002 的容量/优先级仲裁重新计算成 Powered/Brownout。
+                // HomeValleyPowerGrid.Recompute，会按 ERD-ECO-002 的容量/优先级仲裁重新计算成
+                // Powered/Brownout。
                 NewBuilding(HomeValleyLayout.AssemblyStation, BuildingConstructionState.Operational,
                     BuildingPowerState.NotApplicable, health: PlaceholderStructureHealth),
                 NewBuilding(HomeValleyLayout.AnalysisBench, BuildingConstructionState.Operational,
@@ -329,11 +330,12 @@ namespace GameLogic.Campaign.Regions
             state.BuildingRecords = (state.BuildingRecords ?? Array.Empty<BuildingRecord>())
                 .Concat(buildings).ToArray();
 
-            // DEMO-CONTENT-LOCK.md §2.2：核心基础电力 20、带宽 3。真实电网容量/需求聚合与脏重算
-            // 属于 ER3-PWR-01（MILESTONES.md 第 143 行），本 Story 只落这两个"核心天生自带"的数值，
-            // 不在这里计算 PowerDemand 聚合。
-            state.PowerCapacity = 20f;
-            state.SignalBandwidth = 3f;
+            // DEMO-CONTENT-LOCK.md §2.2：核心基础电力 20、带宽 3——只是占位显示值，Enter() 里
+            // 紧接着的 HomeValleyPowerGrid.Recompute 会用同样的常量重新算一遍并覆盖（此刻发电机/
+            // 信号塔都还是 Damaged，算出来的结果与这里完全一致，这两行只防御"万一 Recompute
+            // 调用点被后续改动移除"的极端情况，不是第二份权威来源）。
+            state.PowerCapacity = HomeValleyLayout.BaseCoreSupply;
+            state.SignalBandwidth = HomeValleyLayout.BaseSignalBandwidth;
 
             Log.Info("[HomeValleyController] 首次进入归还谷地：已播种 RegionRecord + 7 条建筑记录。");
         }
@@ -618,24 +620,15 @@ namespace GameLogic.Campaign.Regions
                 order.State = WorkOrderState.Completed;
             }
 
-            if (building.BuildingTypeId == HomeValleyLayout.BuildingTypeGenerator)
-            {
-                // DEMO-CONTENT-LOCK.md §2.1：修复后额外电力 80，走生产型事务经 CampaignEconomyLedger
-                // 发放（幂等：同一 WorkOrder 的电力赠款事务重复走到这里不会二次记账）。
-                string powerTxId = (order?.WorkOrderId ?? buildingId) + ":power-grant";
-                CampaignEconomyLedger.ProposeProduce(state, powerTxId, buildingId,
-                    CampaignEconomyLedger.ResourcePower, 80f);
-                CampaignEconomyLedger.Reserve(state, powerTxId);
-                CampaignEconomyLedger.Commit(state, powerTxId);
-            }
-            else if (building.BuildingTypeId == HomeValleyLayout.BuildingTypeSignalTower)
-            {
-                state.SignalBandwidth += 5f; // §2.1：带宽不在 ER3-ECO-01 顶层三资源范围内（ER5-SIG-01）。
-            }
+            // 发电机的"额外电力 80"、信号塔的"额外带宽 5"都不再在这里手写增量——ER3-PWR-01 起
+            // HomeValleyPowerGrid.Recompute 每次都从当前 Operational 建筑动态求和，建筑一旦转
+            // Operational，下面这行 Recompute 自然会把它的贡献算进去。ER3-ECO-01 曾经把发电机的
+            // +80 走 CampaignEconomyLedger 当"生产型事务"记账——那是错的：PowerCapacity 不是一个
+            // 可以被消耗/授予的资源余额，而是电网仲裁的只读派生值，已改正。
             // 仓库：只转 Operational。容量 300 是仓储守恒（ERD-ECO-003）的字段范畴，
             // 属于 ER3-STO-01——本 Story 不新增未经该 Story 定义的容量字段。
 
-            RecomputePower(state);
+            HomeValleyPowerGrid.Recompute(state);
             RefreshBuildingVisual(building);
             Log.Info($"[HomeValleyController] {buildingId} 修复完成，转 Operational。");
         }
@@ -725,40 +718,6 @@ namespace GameLogic.Campaign.Regions
             }
 
             Log.Info($"[HomeValleyController] {nodeId} 拆解完成，+{HomeValleyLayout.WreckageScrapYield} 废料。");
-        }
-
-        /// <summary>ERD-ECO-002 电网仲裁的最小实现：按优先级（数字小优先）+ buildingId 稳定排序
-        /// 确定性分配 <see cref="CampaignState.PowerCapacity"/>；分不到的 Operational 消费者进
-        /// Brownout（与 DEMO-IMPLEMENTATION-SPEC.md ERD-ECO-002 原文一致）。只在容量/建筑状态变化后
-        /// 调用（Enter/修复完工），不逐帧重算——满足"热更层每帧不得 O(建筑数)"的性能纪律。
-        /// 只覆盖归还谷地目前存在的建筑类型；跨区域/信标加入后的更完整仲裁属于 ER3-PWR-01。</summary>
-        private static void RecomputePower(CampaignState state)
-        {
-            List<BuildingRecord> consumers = state.BuildingRecords
-                .Where(b => b.RegionId == HomeValleyLayout.RegionId
-                    && b.ConstructionState == BuildingConstructionState.Operational
-                    && HomeValleyLayout.PowerProfile.ContainsKey(b.BuildingTypeId))
-                .OrderBy(b => b.PowerPriority)
-                .ThenBy(b => b.BuildingId, StringComparer.Ordinal)
-                .ToList();
-
-            float remaining = state.PowerCapacity;
-            float totalDemand = 0f;
-            foreach (BuildingRecord building in consumers)
-            {
-                float need = HomeValleyLayout.PowerProfile[building.BuildingTypeId].PowerDemand;
-                totalDemand += need;
-                if (remaining >= need)
-                {
-                    building.PowerState = BuildingPowerState.Powered;
-                    remaining -= need;
-                }
-                else
-                {
-                    building.PowerState = BuildingPowerState.Brownout;
-                }
-            }
-            state.PowerDemand = totalDemand;
         }
 
         private static BuildingRecord FindBuilding(CampaignState state, string buildingTypeId)
