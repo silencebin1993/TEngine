@@ -709,7 +709,17 @@ namespace GameLogic.Campaign.Regions
             }
 
             region.DestroyedNodeIds = region.DestroyedNodeIds.Append(nodeId).ToArray();
-            CampaignEconomyLedger.Commit(state, nodeId + ":salvage-tx");
+
+            // ER3-STO-01：拆解产出先落地面物（ERD-ECO-003"地面物是独立实体"），再尝试交付进家园存量——
+            // 不再无条件直接 Commit。仓满时废料留在地面（TryCollectWreckageDrop 幂等重试），不会凭空
+            // 消失，也不会绕过 HomeValleyCargo 的容量天花板超发。
+            Vector2 dropPosition = nodeId == HomeValleyLayout.Wreckage1NodeId
+                ? HomeValleyLayout.Wreckage1.Position
+                : HomeValleyLayout.Wreckage2.Position;
+            HomeValleyCargo.SpawnGroundItem(state, HomeValleyLayout.RegionId, dropPosition,
+                CampaignEconomyLedger.ResourceScrap, HomeValleyLayout.WreckageScrapYield, nodeId + ":salvage-drop");
+
+            HomeValleyCargo.StoreResult delivered = TryCollectWreckageDrop(nodeId);
 
             Transform wreckageGo = _root != null ? _root.transform.Find("Wreckage_" + nodeId) : null;
             if (wreckageGo != null)
@@ -717,7 +727,32 @@ namespace GameLogic.Campaign.Regions
                 UnityEngine.Object.Destroy(wreckageGo.gameObject);
             }
 
-            Log.Info($"[HomeValleyController] {nodeId} 拆解完成，+{HomeValleyLayout.WreckageScrapYield} 废料。");
+            string outcome = delivered.Success
+                ? $"+{HomeValleyLayout.WreckageScrapYield} 废料已入库"
+                : $"仓满，{HomeValleyLayout.WreckageScrapYield} 废料留在地面待收集（{delivered.FailureReason}）";
+            Log.Info($"[HomeValleyController] {nodeId} 拆解完成，{outcome}。");
+        }
+
+        /// <summary>把一处残骸拆解产出的地面物交付进家园存量。仓满时保持在地面（不丢弃），供玩家在
+        /// 腾出空间（如修复仓库）后重试；幂等——同一 nodeId 的拆解物只会被拾取/交付一次，重复调用
+        /// 在已交付后找不到地面物直接返回失败，不会二次发放。</summary>
+        public HomeValleyCargo.StoreResult TryCollectWreckageDrop(string nodeId)
+        {
+            CampaignState state = CampaignSession.Current;
+            if (state == null || !IsActive)
+            {
+                return HomeValleyCargo.StoreResult.Fail("没有活动的归还谷地会话。");
+            }
+
+            string salvageInstanceId = nodeId + ":salvage-drop";
+            GroundItemRecord item = HomeValleyCargo.FindGroundItemBySalvageId(state, salvageInstanceId);
+            if (item == null)
+            {
+                return HomeValleyCargo.StoreResult.Fail("地面上没有待收集的残骸拆解物。");
+            }
+
+            HomeValleyCargo.HaulTicket ticket = HomeValleyCargo.TryReserveHaul(state, item.GroundItemId);
+            return HomeValleyCargo.CommitHaul(state, ticket, nodeId + ":salvage-tx");
         }
 
         private static BuildingRecord FindBuilding(CampaignState state, string buildingTypeId)

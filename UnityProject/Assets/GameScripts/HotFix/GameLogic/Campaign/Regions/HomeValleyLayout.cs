@@ -27,6 +27,10 @@ namespace GameLogic.Campaign.Regions
         // ── 机器 ID（DEMO-CONTENT-LOCK.md §2.1，与旧细胞阶段 chassis_ally_* 占位彻底区分）──
         public const string Erc001ChassisId = "erc_001";
         public const string Erc002ChassisId = "erc_002";
+        /// <summary>默认战斗履带（DEMO-CONTENT-LOCK.md 行53），由 ER4-FAC-01 装配站生产，
+        /// 归还谷地本身不出生这台机器——这里先落货位数据，ER3-STO-01 出发校验/货位计算
+        /// 需要引用这个 ID，不等 ER4-FAC-01 落地才补。</summary>
+        public const string Erc003ChassisId = "erc_003";
 
         /// <summary>单个空间锚点：位置 + 最小净空半径，供 <see cref="Validate"/> 做不重叠/可达性检查。</summary>
         public readonly struct Anchor
@@ -124,6 +128,31 @@ namespace GameLogic.Campaign.Regions
                 [BuildingTypeWarehouse] = (10, 10f),
                 [BuildingTypeSignalTower] = (40, 15f),
             };
+
+        /// <summary>ER3-STO-01 ERD-ECO-003：归还核心应急缓存容量（DEMO-IMPLEMENTATION-SPEC.md ERD-ECO-003：
+        /// "初始180废料存在归还核心应急缓存中，缓存是有限库存，上限180"）。恒定生效，不依赖任何建筑
+        /// Operational 状态——核心缓存本身不是一栋可损坏的建筑。只接受废料，不接受远征战利品（模块/
+        /// 数据盒等），见 <see cref="Regions.HomeValleyCargo.GetStorageCapacity"/>。</summary>
+        public const int CoreCacheCapacity = 180;
+
+        /// <summary>仓库修复（<see cref="BuildingTypeWarehouse"/> 转 Operational）后追加的库存容量
+        /// （DEMO-IMPLEMENTATION-SPEC.md ERD-ECO-003"仓库修复后搬运机可将剩余库存转运过去"）。
+        /// 与 <see cref="CoreCacheCapacity"/> 是两个独立叠加的容量来源，仓库未修复时贡献为 0。</summary>
+        public const int WarehouseCapacity = 300;
+
+        /// <summary>货物占用货位换算（DEMO-CONTENT-LOCK.md §2.3"废料每箱40占1货位"）。完整模块/
+        /// 终端数据盒/核心数据各占1货位，不用这个换算——只有废料按数量/本值向上取整。</summary>
+        public const int ScrapUnitsPerCargoSlot = 40;
+
+        /// <summary>各机型基础货位（DEMO-CONTENT-LOCK.md §2.3：ERC-001=4/ERC-002=2/ERC-003=1）。
+        /// 货舱结构模块（+2，最多一个，不叠加成6）属于 ER4-BLP-01 蓝图槽位范畴，本表只落每型默认值，
+        /// 不在此处理蓝图改装。</summary>
+        public static readonly IReadOnlyDictionary<string, int> MachineCargoSlots = new Dictionary<string, int>
+        {
+            [Erc001ChassisId] = 4,
+            [Erc002ChassisId] = 2,
+            [Erc003ChassisId] = 1,
+        };
 
         /// <summary>全部空间锚点（含机器出生点、残骸、信标预留位），供不重叠/可达性校验遍历。</summary>
         public static IEnumerable<Anchor> AllAnchors()

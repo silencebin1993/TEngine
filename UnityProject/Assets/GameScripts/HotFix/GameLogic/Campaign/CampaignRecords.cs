@@ -108,6 +108,23 @@ namespace GameLogic.Campaign
         public string BlockedReason;
     }
 
+    /// <summary>ER3-STO-01：ERD-ECO-003 地面物——独立于仓库/核心缓存/机器货舱的第三类存放位置。
+    /// 搬运"从来源预留、到达目标才提交"的语义里，尚未（或不再）被任何容器持有的物品必须有自己的
+    /// 记录而不是凭空消失/凭空出现；机器搬运中阵亡、目标满、玩家取消/换目标，都会让物品落在地面。
+    /// <see cref="SalvageInstanceId"/> 是"这一份具体掉落"的唯一标识（不是内容类型 ID）——同一来源
+    /// （如同一处残骸节点）只产生一次，用于 100 次压力测试时判重/去重，防止同一个来源被重复领取
+    /// 或在中断重试链路上复制出第二份。</summary>
+    [Serializable]
+    public sealed class GroundItemRecord
+    {
+        public string GroundItemId;
+        public string RegionId;
+        public Vector2 Position;
+        public string ResourceType;
+        public int Amount;
+        public string SalvageInstanceId;
+    }
+
     /// <summary>ERD-DAT-005 ResourceTransaction：跨帧资源消费的唯一凭证，取消/重试必须幂等。</summary>
     [Serializable]
     public sealed class ResourceTransactionRecord

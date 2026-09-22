@@ -54,6 +54,11 @@ namespace GameLogic.Campaign
         /// <see cref="PowerCapacity"/> 字段。</summary>
         public ResourceTransactionRecord[] ResourceTransactions = Array.Empty<ResourceTransactionRecord>();
 
+        /// <summary>ER3-STO-01：ERD-ECO-003 地面物——不属于任何仓库/机器货舱的第三类存放位置，
+        /// 见 <see cref="GroundItemRecord"/> 类注释。真实读写入口是
+        /// <see cref="GameLogic.Campaign.Regions.HomeValleyCargo"/>，不在别处直接改本数组。</summary>
+        public GroundItemRecord[] GroundItems = Array.Empty<GroundItemRecord>();
+
         public ControlHandoffRecord ControlHandoff = new ControlHandoffRecord();
         public SaveReason LastSaveReason = SaveReason.NewCampaign;
 
@@ -100,6 +105,7 @@ namespace GameLogic.Campaign
                 RegionRecords = Array.Empty<RegionRecord>(),
                 EventLedger = Array.Empty<EventLedgerEntry>(),
                 ResourceTransactions = Array.Empty<ResourceTransactionRecord>(),
+                GroundItems = Array.Empty<GroundItemRecord>(),
                 ControlHandoff = new ControlHandoffRecord(),
                 LastSaveReason = SaveReason.NewCampaign,
                 ObjectiveRecords = Array.Empty<ObjectiveRecord>(),
@@ -133,6 +139,8 @@ namespace GameLogic.Campaign
                 .OrderBy(r => r.EventId, StringComparer.Ordinal).ToArray();
             ResourceTransactions = (ResourceTransactions ?? Array.Empty<ResourceTransactionRecord>())
                 .OrderBy(r => r.TransactionId, StringComparer.Ordinal).ToArray();
+            GroundItems = (GroundItems ?? Array.Empty<GroundItemRecord>())
+                .OrderBy(r => r.GroundItemId, StringComparer.Ordinal).ToArray();
             ObjectiveRecords = (ObjectiveRecords ?? Array.Empty<ObjectiveRecord>())
                 .OrderBy(r => r.ObjectiveId, StringComparer.Ordinal).ToArray();
         }

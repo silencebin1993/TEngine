@@ -38,6 +38,8 @@ namespace GameLogic.UI.Common
         private readonly Label[] _recentLabels = new Label[RecentCount];
         private Label _powerLabel;
         private Label _brownoutLabel;
+        private Label _storageLabel;
+        private Label _groundItemsLabel;
 
         public static EconomyHudToolkit Instance { get; private set; }
 
@@ -122,6 +124,17 @@ namespace GameLogic.UI.Common
             _brownoutLabel.style.fontSize = 11;
             _brownoutLabel.style.display = DisplayStyle.None;
             _panel.Add(_brownoutLabel);
+
+            _storageLabel = new Label();
+            _storageLabel.style.color = Color.white;
+            _storageLabel.style.marginTop = 4;
+            _panel.Add(_storageLabel);
+
+            _groundItemsLabel = new Label();
+            _groundItemsLabel.style.color = new Color(0.95f, 0.75f, 0.35f);
+            _groundItemsLabel.style.fontSize = 11;
+            _groundItemsLabel.style.display = DisplayStyle.None;
+            _panel.Add(_groundItemsLabel);
         }
 
         private void Update()
@@ -179,6 +192,21 @@ namespace GameLogic.UI.Common
             else
             {
                 _brownoutLabel.style.display = DisplayStyle.None;
+            }
+
+            int capacity = HomeValleyCargo.GetStorageCapacity(state, CampaignEconomyLedger.ResourceScrap);
+            int used = HomeValleyCargo.GetStorageUsed(state, CampaignEconomyLedger.ResourceScrap);
+            _storageLabel.text = $"仓储：{used}/{capacity}";
+
+            int groundCount = state.GroundItems?.Length ?? 0;
+            if (groundCount > 0)
+            {
+                _groundItemsLabel.text = $"地面待收集：{groundCount} 处";
+                _groundItemsLabel.style.display = DisplayStyle.Flex;
+            }
+            else
+            {
+                _groundItemsLabel.style.display = DisplayStyle.None;
             }
         }
 

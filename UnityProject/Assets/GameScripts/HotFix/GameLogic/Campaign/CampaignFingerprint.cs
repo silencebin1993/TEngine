@@ -46,6 +46,9 @@ namespace GameLogic.Campaign
             public EventLedgerEntry[] EventLedger;
             public ObjectiveRecord[] ObjectiveRecords;
             public int ControlledLogicId;
+            /// <summary>ER3-STO-01：地面物是仓储守恒的一部分，读档重放后必须逐字节一致
+            /// （同 <see cref="MachineRecords"/> 等其余存量字段的处理方式）。</summary>
+            public GroundItemRecord[] GroundItems;
         }
 
         /// <summary>计算稳定指纹（十六进制 SHA256 字符串）。<paramref name="state"/> 为空时返回空串
@@ -79,6 +82,7 @@ namespace GameLogic.Campaign
                 EventLedger = state.EventLedger,
                 ObjectiveRecords = state.ObjectiveRecords,
                 ControlledLogicId = state.ControlHandoff?.ControlledLogicId ?? 0,
+                GroundItems = state.GroundItems,
             };
 
             string json = JsonUtility.ToJson(payload);
