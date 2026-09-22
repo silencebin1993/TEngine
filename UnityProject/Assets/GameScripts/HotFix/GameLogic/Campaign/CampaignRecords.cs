@@ -12,9 +12,11 @@ namespace GameLogic.Campaign
         public int Amount;
     }
 
-    /// <summary>ERD-WRK-002 五类工作优先级（Haul/Build/Repair/Salvage/Recharge），定长 5，
-    /// 下标对应 <see cref="WorkOrderKind"/> 的枚举值。数值越大优先级越高，本 Story 只落盘骨架，
-    /// 不实现分配算法（ER3-WRK-02）。</summary>
+    /// <summary>ERD-WRK-002 五类工作优先级（Haul/Build/Repair/Salvage/Recharge）。数值 1～4 越大
+    /// 优先级越高，0＝该机器永久禁用该类工作（ER3-WRK-02 起自动分配的唯一读取来源，不影响玩家
+    /// 直接点选下令——直控式点选是显式命令，绕过优先级偏好）。ER1-SAVE-01 只落盘骨架时字段全部
+    /// 是 0；<see cref="Default"/> 是"全部启用、优先级中等"的出厂值，新机器与旧存档全零迁移都用它，
+    /// 详见 <see cref="MachineRegistry"/> 的调用点。</summary>
     [Serializable]
     public sealed class WorkPriorities
     {
@@ -23,6 +25,51 @@ namespace GameLogic.Campaign
         public int Repair;
         public int Salvage;
         public int Recharge;
+
+        public static WorkPriorities Default() => new WorkPriorities
+        {
+            Haul = 2,
+            Build = 2,
+            Repair = 2,
+            Salvage = 2,
+            Recharge = 2,
+        };
+
+        /// <summary>本项目从未发布过存档兼容承诺；"全零"只可能是 ER1-SAVE-01 骨架期从未真正写过
+        /// 优先级的旧战役（本 Story 起才第一次有 UI 能把某一类调回 0＝禁用），迁移时一并变成
+        /// <see cref="Default"/>。真正的玩家操作不可能一次性把五类全部调成禁用之外还恰好全是 0——
+        /// 但即使真的发生，后果也只是"这台机器下一次读档后自动分配恢复默认优先级"，不是数据损坏。</summary>
+        public bool IsUninitialized() => Haul == 0 && Build == 0 && Repair == 0 && Salvage == 0 && Recharge == 0;
+
+        public int Get(WorkOrderKind kind)
+        {
+            switch (kind)
+            {
+                case WorkOrderKind.Haul: return Haul;
+                case WorkOrderKind.Build: return Build;
+                case WorkOrderKind.Repair: return Repair;
+                case WorkOrderKind.Salvage: return Salvage;
+                case WorkOrderKind.Recharge: return Recharge;
+                default: return 0;
+            }
+        }
+
+        public void Set(WorkOrderKind kind, int value)
+        {
+            switch (kind)
+            {
+                case WorkOrderKind.Haul: Haul = value; break;
+                case WorkOrderKind.Build: Build = value; break;
+                case WorkOrderKind.Repair: Repair = value; break;
+                case WorkOrderKind.Salvage: Salvage = value; break;
+                case WorkOrderKind.Recharge: Recharge = value; break;
+            }
+        }
+
+        public WorkPriorities Clone() => new WorkPriorities
+        {
+            Haul = Haul, Build = Build, Repair = Repair, Salvage = Salvage, Recharge = Recharge,
+        };
     }
 
     /// <summary>ERD-DAT-002 MachineRecord：个体机器的长期真相。

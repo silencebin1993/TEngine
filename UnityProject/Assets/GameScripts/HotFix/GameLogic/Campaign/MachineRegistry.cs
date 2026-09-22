@@ -242,7 +242,7 @@ namespace GameLogic.Campaign
                 CurrentWorkOrderId = null,
                 Cargo = Array.Empty<CargoEntry>(),
                 DoctrineId = null,
-                WorkPriorities = new WorkPriorities(),
+                WorkPriorities = WorkPriorities.Default(),
                 ExperienceFlags = Array.Empty<string>(),
                 KillCount = 0,
                 JobsCompleted = 0,
@@ -448,6 +448,25 @@ namespace GameLogic.Campaign
         public static bool TryGetRecord(int logicId, out MachineRecord record) =>
             _records.TryGetValue(logicId, out record);
 
+        /// <summary>ER3-WRK-02：玩家调整单台机器的工作类别偏好（RimWorld 式 1～4/0＝禁用）。
+        /// 只做范围/存在性校验，不触碰 <see cref="HomeValleyWorkOrders"/> 的分配状态——调用方
+        /// （UI）负责在写入成功后调用 <c>HomeValleyWorkOrders.MarkDirty()</c> 让下一次分配立即
+        /// 感知变化，不必等满 0.5 秒轮询窗口。</summary>
+        public static bool TrySetWorkPriority(int logicId, WorkOrderKind kind, int priority)
+        {
+            if (priority < 0 || priority > 4)
+            {
+                return false;
+            }
+            if (!_records.TryGetValue(logicId, out MachineRecord record) || !record.IsAlive)
+            {
+                return false;
+            }
+            record.WorkPriorities ??= WorkPriorities.Default();
+            record.WorkPriorities.Set(kind, priority);
+            return true;
+        }
+
         // ── 阵亡 ─────────────────────────────────────────────
 
         private static void OnAllyDeath(AllyDeathSignal signal)
@@ -605,7 +624,13 @@ namespace GameLogic.Campaign
                 CurrentWorkOrderId = src.CurrentWorkOrderId,
                 Cargo = src.Cargo?.ToArray() ?? Array.Empty<CargoEntry>(),
                 DoctrineId = src.DoctrineId,
-                WorkPriorities = src.WorkPriorities ?? new WorkPriorities(),
+                // ER3-WRK-02：深拷贝而非复用引用（此前 `src.WorkPriorities ?? new WorkPriorities()`
+                // 在非空时直接共享同一个可变对象，本 Story 起 WorkPriorities 会被 TrySetWorkPriority
+                // 原地修改，共享引用会让"克隆体"和"源记录"互相污染）；全零视为 ER1-SAVE-01 骨架期
+                // 从未写过的旧数据，迁移为 Default（见 WorkPriorities.IsUninitialized 文档）。
+                WorkPriorities = src.WorkPriorities == null || src.WorkPriorities.IsUninitialized()
+                    ? WorkPriorities.Default()
+                    : src.WorkPriorities.Clone(),
                 ExperienceFlags = src.ExperienceFlags?.ToArray() ?? Array.Empty<string>(),
                 KillCount = src.KillCount,
                 JobsCompleted = src.JobsCompleted,

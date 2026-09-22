@@ -355,6 +355,7 @@ namespace GameLogic.Campaign.Regions
                 order.State = WorkOrderState.Cancelled;
                 order.FailureReason = "source-vanished";
                 order.AssignedMachineLogicId = 0;
+                MarkAssignmentDirty(); // 机器立即空出来，ER3-WRK-02 分配引擎不必等满 0.5 秒窗口。
                 return false;
             }
 
@@ -390,6 +391,7 @@ namespace GameLogic.Campaign.Regions
             {
                 order.State = WorkOrderState.Failed;
                 order.FailureReason = "cargo-lost";
+                MarkAssignmentDirty();
                 return;
             }
 
@@ -423,6 +425,7 @@ namespace GameLogic.Campaign.Regions
             machine.Cargo = Array.Empty<CargoEntry>();
             order.State = WorkOrderState.Completed;
             order.FailureReason = null;
+            MarkAssignmentDirty();
         }
 
         // ── Recharge ─────────────────────────────────────────────────────────────
@@ -548,6 +551,7 @@ namespace GameLogic.Campaign.Regions
             ReleaseResourcesAndCargo(state, order, machineCurrentPosition, refund: true);
             order.State = WorkOrderState.Cancelled;
             order.AssignedMachineLogicId = 0;
+            MarkAssignmentDirty();
         }
 
         // ── 中断：机器受控（WASD 接管）────────────────────────────────────────────
@@ -566,6 +570,7 @@ namespace GameLogic.Campaign.Regions
             PathWatch.Remove(order.WorkOrderId);
             order.State = WorkOrderState.Ready;
             order.AssignedMachineLogicId = 0;
+            MarkAssignmentDirty(); // 订单立即回到分配池，另一台空闲机器不必等满 0.5 秒窗口。
         }
 
         // ── 每帧驱动 ─────────────────────────────────────────────────────────────
@@ -574,47 +579,196 @@ namespace GameLogic.Campaign.Regions
         /// （归还谷地量级恒定个位数，不违反"热更层每帧不得 O(建筑/敌人数)"的性能纪律——那条规则约束
         /// 的是战斗热路径，不是这种个位数量级的战略层管理循环）。
         /// <paramref name="getMachinePosition"/>：查询机器当前世界 XZ 坐标（用于赶路阶段的路径停滞
-        /// 看门狗），找不到返回 null。<paramref name="releaseMachineMovement"/>：PathBlocked 触发时
-        /// 让调用方对应地 <c>marker.CancelCommandMove()</c>，本类不直接依赖 MonoBehaviour 类型。</summary>
+        /// 看门狗，以及 ER3-WRK-02 分配引擎估算路径距离），找不到返回 null。<paramref name="releaseMachineMovement"/>：
+        /// PathBlocked 触发时让调用方对应地 <c>marker.CancelCommandMove()</c>。<paramref name="isDirectControlled"/>：
+        /// ERD-WRK-002"直控机器暂不领取新单"的判定来源（<see cref="HomeValleyController"/> 的 <c>_possessed</c>
+        /// 是私有字段，只能靠委托查询，不下沉到本类）。<paramref name="beginAssignedMovement"/>：分配引擎选中
+        /// 一台空闲机器后，让调用方对该订单发起真实移动（复用玩家点选下令同一条移动链）。本类不直接依赖
+        /// MonoBehaviour/Transform 类型。</summary>
         public static void Tick(CampaignState state, float dt, Func<int, Vector2?> getMachinePosition,
-            Action<int> releaseMachineMovement)
+            Action<int> releaseMachineMovement, Func<int, bool> isDirectControlled, Action<WorkOrderRecord> beginAssignedMovement)
         {
-            if (state?.WorkOrders == null || state.WorkOrders.Length == 0)
+            if (state == null)
             {
-                TickBatteryRegen(state, dt);
                 return;
             }
 
-            foreach (WorkOrderRecord order in state.WorkOrders)
+            if (state.WorkOrders != null && state.WorkOrders.Length > 0)
             {
-                if (IsTerminal(order.State))
+                foreach (WorkOrderRecord order in state.WorkOrders)
                 {
-                    continue;
-                }
+                    if (IsTerminal(order.State))
+                    {
+                        continue;
+                    }
 
-                // 机器死亡检查：对当前仍绑定机器的订单统一检查存活状态，覆盖 Reserved/InProgress 两态。
-                if (order.AssignedMachineLogicId > 0
-                    && (!MachineRegistry.TryGetRecord(order.AssignedMachineLogicId, out MachineRecord assignedRecord) || !assignedRecord.IsAlive))
-                {
-                    HandleMachineDeath(state, order);
-                    continue;
-                }
+                    // 机器死亡检查：对当前仍绑定机器的订单统一检查存活状态，覆盖 Reserved/InProgress 两态。
+                    if (order.AssignedMachineLogicId > 0
+                        && (!MachineRegistry.TryGetRecord(order.AssignedMachineLogicId, out MachineRecord assignedRecord) || !assignedRecord.IsAlive))
+                    {
+                        HandleMachineDeath(state, order);
+                        continue;
+                    }
 
-                switch (order.State)
-                {
-                    case WorkOrderState.Reserved:
-                        TickReserved(state, order, dt, getMachinePosition, releaseMachineMovement);
-                        break;
-                    case WorkOrderState.InProgress:
-                        TickInProgress(state, order, dt);
-                        break;
-                    case WorkOrderState.Waiting:
-                        TickWaiting(state, order, dt);
-                        break;
+                    switch (order.State)
+                    {
+                        case WorkOrderState.Reserved:
+                            TickReserved(state, order, dt, getMachinePosition, releaseMachineMovement);
+                            break;
+                        case WorkOrderState.InProgress:
+                            TickInProgress(state, order, dt);
+                            break;
+                        case WorkOrderState.Waiting:
+                            TickWaiting(state, order, dt);
+                            break;
+                    }
                 }
             }
 
             TickBatteryRegen(state, dt);
+            TickAssignment(state, dt, getMachinePosition, isDirectControlled, beginAssignedMovement);
+        }
+
+        // ── ER3-WRK-02：确定性自动分配 ───────────────────────────────────────────
+
+        /// <summary>脏事件标记——不落盘（进程重启后最坏情况是多等一次 0.5 秒窗口，不是正确性问题，
+        /// 同 <see cref="PathWatch"/> 一类瞬态记忆的既定处理方式）。订单完成/取消/死亡/回 Ready 时
+        /// 由本类各终止路径自行标记；玩家改动机器工作偏好由调用方（UI）在写入
+        /// <see cref="MachineRegistry.TrySetWorkPriority"/> 成功后调用本方法。</summary>
+        private static bool _assignDirty = true;
+        private static float _assignTimer;
+        private const float AssignIntervalSeconds = 0.5f;
+
+        public static void MarkAssignmentDirty()
+        {
+            _assignDirty = true;
+        }
+
+        /// <summary>ERD-WRK-002："空闲机器每 0.5 秒或收到脏事件时评估一次"——本方法就是那次评估，
+        /// 不在每帧都跑，满足 AC-PER-003/006 对 64 机/200 单场景"无热更每帧全量扫描"的要求。</summary>
+        private static void TickAssignment(CampaignState state, float dt, Func<int, Vector2?> getMachinePosition,
+            Func<int, bool> isDirectControlled, Action<WorkOrderRecord> beginAssignedMovement)
+        {
+            _assignTimer += dt;
+            if (!_assignDirty && _assignTimer < AssignIntervalSeconds)
+            {
+                return;
+            }
+            _assignTimer = 0f;
+            _assignDirty = false;
+
+            if (beginAssignedMovement == null || state.WorkOrders == null || state.WorkOrders.Length == 0)
+            {
+                return;
+            }
+
+            List<WorkOrderRecord> readyOrders = null;
+            foreach (WorkOrderRecord order in state.WorkOrders)
+            {
+                if (order.State == WorkOrderState.Ready)
+                {
+                    (readyOrders ??= new List<WorkOrderRecord>()).Add(order);
+                }
+            }
+            if (readyOrders == null)
+            {
+                return;
+            }
+
+            // 候选机器：存活、在归还谷地区域内、不在厂内、不在直控、当前没有在办订单——
+            // 按 LogicId 升序排序，不依赖 MachineRegistry.AllRecords（Dictionary.Values）的枚举顺序。
+            List<MachineRecord> idleMachines = null;
+            foreach (MachineRecord machine in MachineRegistry.AllRecords)
+            {
+                if (machine.RegionId != HomeValleyLayout.RegionId || !machine.IsAlive || machine.IsInFactory)
+                {
+                    continue;
+                }
+                if (isDirectControlled != null && isDirectControlled(machine.LogicId))
+                {
+                    continue;
+                }
+                if (FindActiveOrderForMachine(state, machine.LogicId) != null)
+                {
+                    continue;
+                }
+                (idleMachines ??= new List<MachineRecord>()).Add(machine);
+            }
+            if (idleMachines == null)
+            {
+                return;
+            }
+            idleMachines.Sort((a, b) => a.LogicId.CompareTo(b.LogicId));
+
+            foreach (MachineRecord machine in idleMachines)
+            {
+                WorkOrderRecord best = null;
+                int bestCategoryPriority = 0;
+                float bestDistance = 0f;
+                Vector2 fromPos = getMachinePosition?.Invoke(machine.LogicId) ?? machine.WorldPosition;
+
+                foreach (WorkOrderRecord order in readyOrders)
+                {
+                    if (order.AssignedMachineLogicId != 0)
+                    {
+                        continue; // 本轮已被排在前面（LogicId 更小）的机器领走。
+                    }
+                    if (!IsCapable(machine.ChassisId, order.Kind))
+                    {
+                        continue;
+                    }
+                    int categoryPriority = machine.WorkPriorities?.Get(order.Kind) ?? 0;
+                    if (categoryPriority <= 0)
+                    {
+                        continue; // 0＝该机器对这一类工作永久禁用（不影响玩家直接点选下令）。
+                    }
+
+                    float distance = Vector2.Distance(fromPos, ResolveWorkPosition(state, order));
+                    if (best == null || IsBetterCandidate(categoryPriority, order, distance, bestCategoryPriority, best, bestDistance))
+                    {
+                        best = order;
+                        bestCategoryPriority = categoryPriority;
+                        bestDistance = distance;
+                    }
+                }
+
+                if (best == null)
+                {
+                    continue;
+                }
+
+                WorkOrderOpResult assigned = ReassignExisting(state, best, machine.LogicId);
+                if (assigned.Success)
+                {
+                    beginAssignedMovement(best);
+                }
+            }
+        }
+
+        /// <summary>ERD-WRK-002 排序键，从高到低：机器对该类工作的优先级(1～4) → 订单自身 Priority →
+        /// createdTick 小者优先 → 估算路径短者优先 → workOrderId 字典序小者优先（最终稳定平局判定）。
+        /// 全部输入都是落盘字段或本帧计算的确定值，不含墙上时间或容器枚举顺序，保证 AC-WRK-001
+        /// "同一订单集分配一致"。</summary>
+        private static bool IsBetterCandidate(int candidateCategoryPriority, WorkOrderRecord candidate, float candidateDistance,
+            int bestCategoryPriority, WorkOrderRecord best, float bestDistance)
+        {
+            if (candidateCategoryPriority != bestCategoryPriority)
+            {
+                return candidateCategoryPriority > bestCategoryPriority;
+            }
+            if (candidate.Priority != best.Priority)
+            {
+                return candidate.Priority > best.Priority;
+            }
+            if (candidate.CreatedTick != best.CreatedTick)
+            {
+                return candidate.CreatedTick < best.CreatedTick;
+            }
+            if (!Mathf.Approximately(candidateDistance, bestDistance))
+            {
+                return candidateDistance < bestDistance;
+            }
+            return string.CompareOrdinal(candidate.WorkOrderId, best.WorkOrderId) < 0;
         }
 
         /// <summary>赶路阶段停滞看门狗的瞬态记忆——不落盘，不需要落盘：真实进程重启后最多重新起算
@@ -680,7 +834,10 @@ namespace GameLogic.Campaign.Regions
         /// <summary>Waiting/path-blocked 的 30 秒冷却计时——瞬态，理由同 <see cref="PathWatch"/>。</summary>
         private static readonly Dictionary<string, float> WaitingWatch = new Dictionary<string, float>(4);
 
-        private static Vector2 ResolveWorkPosition(CampaignState state, WorkOrderRecord order)
+        /// <summary>目标的世界 XZ 坐标——赶路看门狗（<see cref="TickReserved"/>）与 ER3-WRK-02 分配
+        /// 引擎/自动分配后触发移动的调用方（<see cref="HomeValleyController"/>）共用同一份解析，
+        /// 保证"看门狗判定的距离"与"实际走过去的目的地"永远一致。</summary>
+        public static Vector2 ResolveWorkPosition(CampaignState state, WorkOrderRecord order)
         {
             switch (order.Kind)
             {
@@ -730,6 +887,7 @@ namespace GameLogic.Campaign.Regions
                     WaitingWatch.Remove(order.WorkOrderId);
                     order.State = WorkOrderState.Ready;
                     order.FailureReason = null;
+                    MarkAssignmentDirty(); // ERD-WRK-003"30秒后重试"：立即让分配引擎重新评估这条订单。
                 }
                 else
                 {
@@ -787,6 +945,7 @@ namespace GameLogic.Campaign.Regions
                 order.State = WorkOrderState.Failed;
                 order.FailureReason = "target-destroyed";
                 CampaignEconomyLedger.Cancel(state, order.ResourceTransactionId);
+                MarkAssignmentDirty();
                 return;
             }
 
@@ -794,6 +953,7 @@ namespace GameLogic.Campaign.Regions
             CampaignEconomyLedger.Commit(state, order.ResourceTransactionId);
             HomeValleyPowerGrid.Recompute(state);
             order.State = WorkOrderState.Completed;
+            MarkAssignmentDirty();
         }
 
         private static void CompleteBuild(CampaignState state, WorkOrderRecord order)
@@ -804,6 +964,7 @@ namespace GameLogic.Campaign.Regions
                 order.State = WorkOrderState.Failed;
                 order.FailureReason = "target-destroyed";
                 CampaignEconomyLedger.Cancel(state, order.ResourceTransactionId);
+                MarkAssignmentDirty();
                 return;
             }
 
@@ -811,6 +972,7 @@ namespace GameLogic.Campaign.Regions
             CampaignEconomyLedger.Commit(state, order.ResourceTransactionId);
             HomeValleyPowerGrid.Recompute(state);
             order.State = WorkOrderState.Completed;
+            MarkAssignmentDirty();
         }
 
         private static void CompleteSalvage(CampaignState state, WorkOrderRecord order)
@@ -819,6 +981,7 @@ namespace GameLogic.Campaign.Regions
             if (region == null || (region.DestroyedNodeIds != null && region.DestroyedNodeIds.Contains(order.TargetId)))
             {
                 order.State = WorkOrderState.Completed; // 幂等：另一条路径已经拆过（不应发生，但不留幽灵订单）。
+                MarkAssignmentDirty();
                 return;
             }
 
@@ -838,6 +1001,7 @@ namespace GameLogic.Campaign.Regions
             }
 
             order.State = WorkOrderState.Completed;
+            MarkAssignmentDirty();
         }
 
         private static void TickRecharge(CampaignState state, WorkOrderRecord order, float dt)
@@ -846,6 +1010,7 @@ namespace GameLogic.Campaign.Regions
             {
                 order.State = WorkOrderState.Cancelled;
                 order.FailureReason = "machine-not-found";
+                MarkAssignmentDirty();
                 return;
             }
 
@@ -854,6 +1019,7 @@ namespace GameLogic.Campaign.Regions
             if (machine.Battery >= max)
             {
                 order.State = WorkOrderState.Completed;
+                MarkAssignmentDirty();
             }
         }
 
@@ -907,6 +1073,7 @@ namespace GameLogic.Campaign.Regions
             order.State = WorkOrderState.Failed;
             order.FailureReason = "machine-died";
             order.AssignedMachineLogicId = 0;
+            MarkAssignmentDirty();
         }
 
         private static void ReleaseResourcesAndCargo(CampaignState state, WorkOrderRecord order, Vector2 dropPosition, bool refund)

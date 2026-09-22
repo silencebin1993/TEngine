@@ -114,9 +114,12 @@ namespace GameLogic.Campaign.Regions
 
             // 落回战略视角才清空接管——过渡途中（Strategy→Direct 或 Direct→Strategy）都不清，
             // 否则 EnsureDirectTarget 刚给的目标会在过渡没走完时就被抹掉，接管请求白做。
-            if (_cameraDirector != null && _cameraDirector.Mode == ViewMode.Strategy)
+            if (_cameraDirector != null && _cameraDirector.Mode == ViewMode.Strategy && _possessed != null)
             {
                 _possessed = null;
+                // ERD-WRK-002"退出后重评估"：这台机器刚从直控释放，立即让分配引擎把它纳入下一轮候选，
+                // 不必等满 0.5 秒轮询窗口。
+                HomeValleyWorkOrders.MarkAssignmentDirty();
             }
 
             HandleSelectionClick();
@@ -136,7 +139,8 @@ namespace GameLogic.Campaign.Regions
             CampaignState state = CampaignSession.Current;
             if (state != null)
             {
-                HomeValleyWorkOrders.Tick(state, scaledDt, GetMachinePosition, ReleaseMachineMovement);
+                HomeValleyWorkOrders.Tick(state, scaledDt, GetMachinePosition, ReleaseMachineMovement,
+                    IsMachineDirectControlled, BeginAutoAssignedMovement);
                 SyncWorldVisuals(state);
             }
         }
@@ -169,6 +173,48 @@ namespace GameLogic.Campaign.Regions
                     return;
                 }
             }
+        }
+
+        private HomeValleyMachineMarker FindMarker(int logicId)
+        {
+            foreach (HomeValleyMachineMarker marker in _machineMarkers)
+            {
+                if (marker.LogicId == logicId)
+                {
+                    return marker;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>ERD-WRK-002"直控机器暂不领取新单"的判定来源——<see cref="HomeValleyWorkOrders.Tick"/>
+        /// 的分配引擎不下沉持有 <see cref="_possessed"/>，只能靠委托查询。</summary>
+        private bool IsMachineDirectControlled(int logicId)
+        {
+            return _possessed != null && _possessed.LogicId == logicId;
+        }
+
+        /// <summary>ER3-WRK-02 分配引擎选中一台空闲机器后的回调：与玩家点选下令
+        /// （<see cref="CommandWork"/>/<see cref="CommandHaul"/>）共用同一条移动链
+        /// （<see cref="BeginMovementForOrder"/>），只是移动指令的发起方从"玩家点击"变成
+        /// "分配引擎"，目的地也相应从"鼠标射线落点"改用 <see cref="HomeValleyWorkOrders.ResolveWorkPosition"/>
+        /// 的精确锚点坐标（两者在建筑/残骸/地面物上的取值本就是同一位置，行为一致）。</summary>
+        private void BeginAutoAssignedMovement(WorkOrderRecord order)
+        {
+            HomeValleyMachineMarker marker = FindMarker(order.AssignedMachineLogicId);
+            if (marker == null)
+            {
+                // 理论上不应发生：分配引擎只从 MachineRegistry 里活着、在本区域的记录中选人，
+                // 而 _machineMarkers 应与之同步；真出现就跳过这一轮，订单已是 Reserved，
+                // 下一次 0.5 秒评估会因为它一直没有实际动起来而继续留在候选池里（不会丢单）。
+                Log.Warning($"[HomeValleyController] 自动分配命中订单 {order.WorkOrderId}，" +
+                    $"但机器 {order.AssignedMachineLogicId} 无可视化对象，本轮跳过移动。");
+                return;
+            }
+
+            Vector2 pos2 = HomeValleyWorkOrders.ResolveWorkPosition(CampaignSession.Current, order);
+            Vector3 destination = new Vector3(pos2.x, 1f, pos2.y);
+            BeginMovementForOrder(marker, destination, order);
         }
 
         /// <summary>Space（Strategy 域）：与 CellStageFlow.HandleStrategicPauseInput 同款语义。
@@ -245,6 +291,38 @@ namespace GameLogic.Campaign.Regions
             _selected?.SetSelected(false);
             _selected = next;
             _selected.SetSelected(true);
+        }
+
+        /// <summary>UI 只读查询当前选中机器（工作面板显示/编辑该机器工作偏好用），没有选中返回 null。</summary>
+        public int? SelectedMachineLogicId => _selected != null ? _selected.LogicId : (int?)null;
+
+        /// <summary>供工作单面板"点击定位"（AC-UI-003）调用：把选中切到该订单当前指派的机器并高亮，
+        /// 与鼠标直接点机器同一套视觉反馈。订单尚未指派机器（Ready/Waiting）时无具体对象可定位，
+        /// 返回 false，调用方保持原选中不报错——完整的"打开恢复面板"仍是 ER5-INT-01/UI-04 范围。</summary>
+        public bool TrySelectMachine(int logicId)
+        {
+            HomeValleyMachineMarker marker = FindMarker(logicId);
+            if (marker == null)
+            {
+                return false;
+            }
+            _selected?.SetSelected(false);
+            _selected = marker;
+            _selected.SetSelected(true);
+            return true;
+        }
+
+        /// <summary>供工作单面板"调整工作偏好"控件调用：写入 <see cref="MachineRecord.WorkPriorities"/>
+        /// 并立即唤醒分配引擎（STORY-EXECUTION-CARDS.md"优先级变化即时更新"），不必等满 0.5 秒
+        /// 轮询窗口。0＝该机器永久禁用这一类自动分配，不影响玩家直接点选下令（显式命令绕过偏好）。</summary>
+        public static bool TrySetMachineWorkPriority(int logicId, WorkOrderKind kind, int priority)
+        {
+            bool ok = MachineRegistry.TrySetWorkPriority(logicId, kind, priority);
+            if (ok)
+            {
+                HomeValleyWorkOrders.MarkAssignmentDirty();
+            }
+            return ok;
         }
 
         /// <summary>ER2-INPUT-01：CameraDirector 请求"给我一个直控目标"时的钩子（M 键从战略切
@@ -831,15 +909,13 @@ namespace GameLogic.Campaign.Regions
             if (buildingTypeId == HomeValleyLayout.BuildingTypeCore)
             {
                 CommandWork(moving, destination, "recharge:" + moving.LogicId,
-                    () => HomeValleyWorkOrders.TryCreateRecharge(state, moving.LogicId),
-                    HomeValleyWorkOrders.OnArrivedAtWork, "充电");
+                    () => HomeValleyWorkOrders.TryCreateRecharge(state, moving.LogicId), "充电");
                 return;
             }
             if (buildingTypeId != null)
             {
                 CommandWork(moving, destination, HomeValleyLayout.RegionId + ":" + buildingTypeId,
-                    () => HomeValleyWorkOrders.TryCreateRepair(state, buildingTypeId, moving.LogicId),
-                    HomeValleyWorkOrders.OnArrivedAtWork, "修复 " + buildingTypeId);
+                    () => HomeValleyWorkOrders.TryCreateRepair(state, buildingTypeId, moving.LogicId), "修复 " + buildingTypeId);
                 return;
             }
 
@@ -847,8 +923,7 @@ namespace GameLogic.Campaign.Regions
             if (buildSiteId != null)
             {
                 CommandWork(moving, destination, HomeValleyLayout.RegionId + ":" + buildSiteId,
-                    () => HomeValleyWorkOrders.TryCreateBuild(state, buildSiteId, moving.LogicId),
-                    HomeValleyWorkOrders.OnArrivedAtWork, "建造 " + buildSiteId);
+                    () => HomeValleyWorkOrders.TryCreateBuild(state, buildSiteId, moving.LogicId), "建造 " + buildSiteId);
                 return;
             }
 
@@ -856,8 +931,7 @@ namespace GameLogic.Campaign.Regions
             if (wreckageNodeId != null)
             {
                 CommandWork(moving, destination, wreckageNodeId,
-                    () => HomeValleyWorkOrders.TryCreateSalvage(state, wreckageNodeId, moving.LogicId),
-                    HomeValleyWorkOrders.OnArrivedAtWork, "拆解 " + wreckageNodeId);
+                    () => HomeValleyWorkOrders.TryCreateSalvage(state, wreckageNodeId, moving.LogicId), "拆解 " + wreckageNodeId);
                 return;
             }
 
@@ -894,7 +968,7 @@ namespace GameLogic.Campaign.Regions
         /// "换了目标"——必须与对应 TryCreateX 内部登记的 TargetId 完全一致（Repair/Build 传建筑
         /// BuildingId，Salvage 传 nodeId，Recharge 传 "recharge:"+LogicId），否则会误判成换目标。</summary>
         private static void CommandWork(HomeValleyMachineMarker moving, Vector3 destination, string prospectiveTargetId,
-            Func<HomeValleyWorkOrders.WorkOrderOpResult> create, Action<CampaignState, string> onArrive, string label)
+            Func<HomeValleyWorkOrders.WorkOrderOpResult> create, string label)
         {
             CampaignState state = CampaignSession.Current;
             EnsureMachineFree(moving, state, prospectiveTargetId);
@@ -904,11 +978,15 @@ namespace GameLogic.Campaign.Regions
                 Log.Warning($"[HomeValleyController] 下令{label}失败：{r.FailureReason}");
                 return;
             }
-            moving.CommandMoveTo(destination, () => onArrive(state, r.WorkOrderId));
+            WorkOrderRecord order = HomeValleyWorkOrders.Find(state, r.WorkOrderId);
+            if (order != null)
+            {
+                BeginMovementForOrder(moving, destination, order);
+            }
         }
 
-        /// <summary>Haul 专属两腿下令：先创建订单，第一腿到地面物拾取，成功后立即接第二腿到交付点
-        /// （固定归还核心）。两腿之间没有玩家再点一次的空档——货物一旦拿到手，机器会自己开去交货。</summary>
+        /// <summary>Haul 专属下令：先创建订单，再走与其它四类共用的 <see cref="BeginMovementForOrder"/>
+        /// （两腿——拾取/交付——的分支就在那个方法内部，按 <see cref="WorkOrderKind.Haul"/> 判断）。</summary>
         private static void CommandHaul(HomeValleyMachineMarker moving, Vector3 destination, string groundItemId, CampaignState state)
         {
             EnsureMachineFree(moving, state, groundItemId);
@@ -918,18 +996,38 @@ namespace GameLogic.Campaign.Regions
                 Log.Warning($"[HomeValleyController] 下令搬运 {groundItemId} 失败：{r.FailureReason}");
                 return;
             }
-
-            string workOrderId = r.WorkOrderId;
-            moving.CommandMoveTo(destination, () =>
+            WorkOrderRecord order = HomeValleyWorkOrders.Find(state, r.WorkOrderId);
+            if (order != null)
             {
-                if (!HomeValleyWorkOrders.OnArrivedAtHaulSource(CampaignSession.Current, workOrderId))
+                BeginMovementForOrder(moving, destination, order);
+            }
+        }
+
+        /// <summary>五类工作单共用的"发起移动、到点触发对应回调"链——玩家点选下令
+        /// （<see cref="CommandWork"/>/<see cref="CommandHaul"/>）与 ER3-WRK-02 自动分配
+        /// （<see cref="BeginAutoAssignedMovement"/>）在订单已创建/已指派之后，都走这一条，
+        /// 保证两种下令来源的移动/到达行为完全一致。Haul 是两腿（拾取→交付核心），其余四类
+        /// 到点直接触发 <see cref="HomeValleyWorkOrders.OnArrivedAtWork"/>。</summary>
+        private static void BeginMovementForOrder(HomeValleyMachineMarker moving, Vector3 destination, WorkOrderRecord order)
+        {
+            string workOrderId = order.WorkOrderId;
+
+            if (order.Kind == WorkOrderKind.Haul)
+            {
+                moving.CommandMoveTo(destination, () =>
                 {
-                    return;
-                }
-                Vector3 corePos = new Vector3(HomeValleyLayout.Core.Position.x, 1f, HomeValleyLayout.Core.Position.y);
-                moving.CommandMoveTo(corePos, () =>
-                    HomeValleyWorkOrders.OnArrivedAtHaulDestination(CampaignSession.Current, workOrderId));
-            });
+                    if (!HomeValleyWorkOrders.OnArrivedAtHaulSource(CampaignSession.Current, workOrderId))
+                    {
+                        return;
+                    }
+                    Vector3 corePos = new Vector3(HomeValleyLayout.Core.Position.x, 1f, HomeValleyLayout.Core.Position.y);
+                    moving.CommandMoveTo(corePos, () =>
+                        HomeValleyWorkOrders.OnArrivedAtHaulDestination(CampaignSession.Current, workOrderId));
+                });
+                return;
+            }
+
+            moving.CommandMoveTo(destination, () => HomeValleyWorkOrders.OnArrivedAtWork(CampaignSession.Current, workOrderId));
         }
 
         private static string BuildingTypeIdFromHit(RaycastHit hit)
