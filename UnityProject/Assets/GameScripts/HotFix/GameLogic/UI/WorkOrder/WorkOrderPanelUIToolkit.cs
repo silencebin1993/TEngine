@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
 using GameLogic.Campaign;
+using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Regions;
 using GameLogic.Stage;
 using TEngine;
@@ -194,7 +195,9 @@ namespace GameLogic.UI.WorkOrder
                 WorkOrderRecord order = _liveOrdersCache[i];
                 row.style.display = DisplayStyle.Flex;
                 row.Q<Label>("Kind").text = order.Kind.ToString();
-                row.Q<Label>("Target").text = order.TargetId;
+                // ER4-CONTENT-01：建筑类目标改显机械内容目录 DisplayName（如"发电机"），
+                // 不再直接暴露内部拼接 id（如 "home_valley:generator"）；非建筑目标安全回退原始 id。
+                row.Q<Label>("Target").text = MechanicalContentFacade.ResolveWorkOrderTargetLabel(order.TargetId);
 
                 Label stateLabel = row.Q<Label>("State");
                 stateLabel.text = order.State.ToString();

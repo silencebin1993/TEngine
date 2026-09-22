@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using GameLogic.Campaign.Content;
 using UnityEngine;
 
 namespace GameLogic.Campaign.Regions
@@ -166,6 +167,9 @@ namespace GameLogic.Campaign.Regions
             [Erc002ChassisId] = 100f,
             [Erc003ChassisId] = 120f,
             [ErcRescueChassisId] = 100f,
+            // ER4-CONTENT-01：维修悬浮底盘（Content.ChassisCatalog.ChassisHoverId），生产队列待
+            // ER4-FAC-01，先落数据不等该 Story 落地才补（同 Erc003ChassisId 先例）。
+            [ChassisCatalog.ChassisHoverId] = 140f,
         };
 
         /// <summary>被动恢复速率（不在充电点时也生效，DEMO-CONTENT-LOCK.md §2.4"被动恢复每秒1"）。</summary>
@@ -218,6 +222,8 @@ namespace GameLogic.Campaign.Regions
             [Erc001ChassisId] = 4,
             [Erc002ChassisId] = 2,
             [Erc003ChassisId] = 1,
+            // ER4-CONTENT-01：维修悬浮底盘，同上先落数据。
+            [ChassisCatalog.ChassisHoverId] = 1,
         };
 
         /// <summary>ER3-SOFTLOCK-01 AC-ECO-011 触发阈值之一："废料 &lt; 35"。35 不是随意选的数字——
