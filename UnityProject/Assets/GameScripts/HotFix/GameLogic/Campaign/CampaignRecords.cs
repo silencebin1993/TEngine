@@ -253,6 +253,10 @@ namespace GameLogic.Campaign
         public float Progress;
         public FactoryQueueState State;
         public string BlockedReason;
+        /// <summary>ER4-FAC-01：补齐 ER1-SAVE-01 遗留的骨架缺口（同 <see cref="WorkOrderRecord.Progress"/>
+        /// 补齐先例）——"多订单按稳定队列顺序执行"需要一个不受 <see cref="CampaignState.NormalizeForSave"/>
+        /// 按 <see cref="QueueItemId"/> 字典序排序影响的真实创建顺序，落盘保证读档后 FIFO 顺序不变。</summary>
+        public long CreatedTick;
     }
 
     /// <summary>ERD-EXP-001 RegionRecord。铸造外围和核心共用一条记录（同一 RegionId）。</summary>

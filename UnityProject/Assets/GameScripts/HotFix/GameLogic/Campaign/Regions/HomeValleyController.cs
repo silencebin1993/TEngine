@@ -80,6 +80,7 @@ namespace GameLogic.Campaign.Regions
 
             EnsureRegionSeeded(state);
             EnsureMachinesSeeded(state);
+            HomeValleyFactory.EnsureBlueprintsSeeded(state); // ER4-FAC-01：装配站默认三条生产蓝图。
             state.CurrentRegionId = HomeValleyLayout.RegionId;
             HomeValleyPowerGrid.Recompute(state); // 幂等：新建战役刚播种、或读档恢复旧存档，都用当前数据重算一次。
 
@@ -149,6 +150,7 @@ namespace GameLogic.Campaign.Regions
             {
                 HomeValleyWorkOrders.Tick(state, scaledDt, GetMachinePosition, ReleaseMachineMovement,
                     IsMachineDirectControlled, BeginAutoAssignedMovement);
+                HomeValleyFactory.Tick(state, scaledDt); // ER4-FAC-01：装配站生产队列。
                 HomeValleySoftlockGuard.Tick(state, scaledDt, BeginAutoAssignedMovement);
                 SyncWorldVisuals(state);
             }
@@ -316,6 +318,12 @@ namespace GameLogic.Campaign.Regions
         /// <summary>UI 只读查询当前选中机器（工作面板显示/编辑该机器工作偏好用），没有选中返回 null。</summary>
         public int? SelectedMachineLogicId => _selected != null ? _selected.LogicId : (int?)null;
 
+        /// <summary>ER4-FAC-01：装配站面板开关状态。点击装配站建筑切换（见 <see cref="HandleSelectionClick"/>），
+        /// 独立于机器选中/移动指令——面板是管理界面，不要求玩家先选一台机器才能打开。</summary>
+        private bool _factoryPanelOpen;
+        public bool IsFactoryPanelOpen => _factoryPanelOpen;
+        public void SetFactoryPanelOpen(bool open) => _factoryPanelOpen = open;
+
         /// <summary>供工作单面板"点击定位"（AC-UI-003）调用：把选中切到该订单当前指派的机器并高亮，
         /// 与鼠标直接点机器同一套视觉反馈。订单尚未指派机器（Ready/Waiting）时无具体对象可定位，
         /// 返回 false，调用方保持原选中不报错——完整的"打开恢复面板"仍是 ER5-INT-01/UI-04 范围。</summary>
@@ -406,6 +414,7 @@ namespace GameLogic.Campaign.Regions
             _cameraDirector = null;
             _possessed = null;
             _paused = false;
+            _factoryPanelOpen = false;
             IsActive = false;
             Log.Info("[HomeValleyController] 已退出归还谷地。");
         }
@@ -930,6 +939,15 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
+            // ER4-FAC-01：装配站是管理面板入口，不是工作单目标——独立于机器选中状态拦截在最前面，
+            // 不落到下面"_selected == null 就忽略"或"Operational 非核心建筑=拆除"的通用建筑路由。
+            string earlyBuildingTypeId = BuildingTypeIdFromHit(hit);
+            if (earlyBuildingTypeId == HomeValleyLayout.BuildingTypeAssemblyStation)
+            {
+                _factoryPanelOpen = !_factoryPanelOpen;
+                return;
+            }
+
             if (_selected == null)
             {
                 return;
@@ -943,7 +961,14 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
-            string buildingTypeId = BuildingTypeIdFromHit(hit);
+            // ER4-FAC-01：机器收到的第一条真实命令即视为"驶出工厂"——占用出口的完工机器只有在玩家
+            // 真正开始使用它之后才让位，让下一项排队机器有机会生成，见 HomeValleyFactory 类注释。
+            if (MachineRegistry.TryGetRecord(moving.LogicId, out MachineRecord movingRecord) && movingRecord.IsInFactory)
+            {
+                HomeValleyFactory.ReleaseFromFactory(moving.LogicId);
+            }
+
+            string buildingTypeId = earlyBuildingTypeId;
             if (buildingTypeId == HomeValleyLayout.BuildingTypeCore)
             {
                 CommandWork(moving, destination, "recharge:" + moving.LogicId,

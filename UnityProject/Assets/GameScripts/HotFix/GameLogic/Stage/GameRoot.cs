@@ -205,6 +205,11 @@ namespace GameLogic.Stage
             var workOrderHudHost = new GameObject("[WorkOrderHudHost]");
             Object.DontDestroyOnLoad(workOrderHudHost);
             workOrderHudHost.AddComponent<UI.WorkOrder.WorkOrderPanelUIToolkit>();
+            // ER4-FAC-01：装配站生产队列面板，同样独立 GameObject（同一条 UIDocument 唯一性纪律），
+            // 只在归还谷地激活且玩家点开装配站时可见（见 FactoryPanelUIToolkit.Update）。
+            var factoryHudHost = new GameObject("[HomeValleyFactoryHost]");
+            Object.DontDestroyOnLoad(factoryHudHost);
+            factoryHudHost.AddComponent<UI.Factory.FactoryPanelUIToolkit>();
             // ER3-SOFTLOCK-01：家园核心被毁的全屏失败面板，同样独立 GameObject（同一条 UIDocument
             // 唯一性纪律），只在归还谷地激活且核心已被摧毁时可见。
             var homeValleyFailureHost = new GameObject("[HomeValleyFailureHost]");

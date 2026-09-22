@@ -237,6 +237,51 @@ namespace GameLogic.Campaign.Regions
         /// <see cref="RepairProfile"/> 同量级的中间值（介于仓库10秒和信号塔40秒之间）。</summary>
         public const float DemolishSeconds = 15f;
 
+        // ── ER4-FAC-01：装配站默认生产蓝图（STORY-EXECUTION-CARDS.md 第2条点名的三条默认数值，
+        // 与 DEMO-CONTENT-LOCK.md §2.4 行53～55 一致；ER4-BLP-01 正式电路/蓝图编辑器落地前，这是
+        // 装配站面板"生产"可选的封闭三项，不是玩家可自由组合的完整蓝图系统）───────────────
+
+        /// <summary>默认战斗履带 ERC-003（DEMO-CONTENT-LOCK.md 行53："60 废料，30 秒"）。</summary>
+        public const string BlueprintErc003Id = "bp_erc003";
+        /// <summary>新搬运轮式（行54："35 废料，20 秒"）。<see cref="ProduceBlueprintDefault.ChassisId"/>
+        /// 复用 <see cref="Erc002ChassisId"/>——与开局 ERC-002 是同一"搬运轮式"底盘类型（多台机器共享
+        /// 同一 ChassisId 取值，本就是既有约定，<see cref="Erc003ChassisId"/> 同理也会被多台战斗履带
+        /// 共享），不新增第二套字符串常量，<see cref="Content.ChassisCatalog.ResolveArchetype"/> 与
+        /// <see cref="HomeValleyWorkOrders"/> 的 ChassisCapabilities 表都不需要为此改动。</summary>
+        public const string BlueprintHaulerId = "bp_hauler";
+        /// <summary>默认维修悬浮（行55："55 废料，25 秒"），底盘取
+        /// <see cref="Content.ChassisCatalog.ChassisHoverId"/>。</summary>
+        public const string BlueprintHoverId = "bp_hover";
+
+        /// <summary>单条默认生产蓝图的静态数据：底盘、展示名、出厂废料成本、生产秒数。
+        /// <see cref="Regions.HomeValleyFactory"/> 用本表播种 <see cref="BlueprintRecord"/>（成本随
+        /// <see cref="BlueprintVersionRecord.ScrapCost"/> 落盘、可被"版本锁定"覆盖——见该类"改蓝图
+        /// activeVersion 不回溯改已排订单"注释），秒数则是本 Story 唯一权威来源，不随蓝图版本变化
+        /// （当前内容锁定表没有"同一底盘不同版本耗时不同"的设计意图，避免无依据地引入第二根变化轴）。</summary>
+        public readonly struct ProduceBlueprintDefault
+        {
+            public readonly string ChassisId;
+            public readonly string DisplayName;
+            public readonly int ScrapCost;
+            public readonly float Seconds;
+
+            public ProduceBlueprintDefault(string chassisId, string displayName, int scrapCost, float seconds)
+            {
+                ChassisId = chassisId;
+                DisplayName = displayName;
+                ScrapCost = scrapCost;
+                Seconds = seconds;
+            }
+        }
+
+        public static readonly IReadOnlyDictionary<string, ProduceBlueprintDefault> FactoryProduceDefaults =
+            new Dictionary<string, ProduceBlueprintDefault>
+            {
+                [BlueprintErc003Id] = new ProduceBlueprintDefault(Erc003ChassisId, "战斗履带 ERC-003", 60, 30f),
+                [BlueprintHaulerId] = new ProduceBlueprintDefault(Erc002ChassisId, "搬运机", 35, 20f),
+                [BlueprintHoverId] = new ProduceBlueprintDefault(ChassisCatalog.ChassisHoverId, "维修机", 55, 25f),
+            };
+
         /// <summary>全部空间锚点（含机器出生点、残骸、信标预留位），供不重叠/可达性校验遍历。</summary>
         public static IEnumerable<Anchor> AllAnchors()
         {
