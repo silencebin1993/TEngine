@@ -153,6 +153,13 @@ namespace GameLogic.Campaign
         public CargoEntry[] Inventory;
         public string[] QueueIds;
         public string BlockedReason;
+        /// <summary>ER3-SOFTLOCK-01 AC-ECO-012："非核心建筑拆除按实际投入50%返还"——建成/修复该建筑
+        /// 时玩家实际花费的废料总额，在 <see cref="Regions.HomeValleyWorkOrders"/> 的 CompleteBuild/
+        /// CompleteRepair 完成那一刻写入。开局即 Operational、从未走过建造/修复流程的建筑（装配站/
+        /// 解析台/维修台/核心）恒为 0——玩家没有为它们实际投入过废料，拆除按字面"实际投入"返还 0，
+        /// 是忠于卡片原文的设计取舍，不是遗漏。旧存档缺该字段时 JsonUtility 按 int 默认值 0 迁移，
+        /// 效果等同于"从未真正花过钱"，安全。</summary>
+        public int InvestedScrap;
     }
 
     /// <summary>ER3-STO-01：ERD-ECO-003 地面物——独立于仓库/核心缓存/机器货舱的第三类存放位置。

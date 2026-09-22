@@ -37,6 +37,11 @@ namespace GameLogic.Campaign.Regions
         /// 归还谷地本身不出生这台机器——这里先落货位数据，ER3-STO-01 出发校验/货位计算
         /// 需要引用这个 ID，不等 ER4-FAC-01 落地才补。</summary>
         public const string Erc003ChassisId = "erc_003";
+        /// <summary>ER3-SOFTLOCK-01 AC-ECO-011："核心紧急重启搬运机"——家园经济彻底卡死（无正式
+        /// 搬运机且废料/装配站都指望不上）时核心自动打印的受限单位，只能 Repair（见
+        /// <see cref="HomeValleyWorkOrders"/> 的 ChassisCapabilities），不参与正常机队编号/生产统计。
+        /// 见 <see cref="HomeValleySoftlockGuard"/>。</summary>
+        public const string ErcRescueChassisId = "erc_rescue";
 
         /// <summary>单个空间锚点：位置 + 最小净空半径，供 <see cref="Validate"/> 做不重叠/可达性检查。</summary>
         public readonly struct Anchor
@@ -160,6 +165,7 @@ namespace GameLogic.Campaign.Regions
             [Erc001ChassisId] = 100f,
             [Erc002ChassisId] = 100f,
             [Erc003ChassisId] = 120f,
+            [ErcRescueChassisId] = 100f,
         };
 
         /// <summary>被动恢复速率（不在充电点时也生效，DEMO-CONTENT-LOCK.md §2.4"被动恢复每秒1"）。</summary>
@@ -213,6 +219,17 @@ namespace GameLogic.Campaign.Regions
             [Erc002ChassisId] = 2,
             [Erc003ChassisId] = 1,
         };
+
+        /// <summary>ER3-SOFTLOCK-01 AC-ECO-011 触发阈值之一："废料 &lt; 35"。35 不是随意选的数字——
+        /// 对应 ER4-FAC-01 卡片点名的"搬运机 35 废料/20 秒"生产成本（STORY-EXECUTION-CARDS.md
+        /// ER4-FAC-01 第2条），语义是"如果废料多到能在（未来的）装配站生产一台新搬运机，就不算真的
+        /// 卡死"——装配站真实生产队列尚未落地（ER4-FAC-01），这里只借用同一个数值做判定，不等
+        /// 该 Story 落地才补这条兜底。</summary>
+        public const int EmergencyRescueScrapThreshold = 35;
+
+        /// <summary>ER3-SOFTLOCK-01 AC-ECO-012：拆除非核心建筑的耗时。卡片未点名具体秒数，取和
+        /// <see cref="RepairProfile"/> 同量级的中间值（介于仓库10秒和信号塔40秒之间）。</summary>
+        public const float DemolishSeconds = 15f;
 
         /// <summary>全部空间锚点（含机器出生点、残骸、信标预留位），供不重叠/可达性校验遍历。</summary>
         public static IEnumerable<Anchor> AllAnchors()

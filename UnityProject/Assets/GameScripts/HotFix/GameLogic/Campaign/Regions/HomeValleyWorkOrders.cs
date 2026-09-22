@@ -67,6 +67,9 @@ namespace GameLogic.Campaign.Regions
                     WorkOrderKind.Salvage, WorkOrderKind.Recharge,
                 },
                 [HomeValleyLayout.Erc003ChassisId] = new[] { WorkOrderKind.Recharge },
+                // ER3-SOFTLOCK-01：紧急救援机只能 Repair——AC-ECO-011"不能战斗、没有货舱、不能拆废料
+                // 或刷生产统计"，只登记这一项能力，天然拒绝 Haul/Build/Salvage/Recharge。
+                [HomeValleyLayout.ErcRescueChassisId] = new[] { WorkOrderKind.Repair },
             };
 
         private static string[] RequiredTagsFor(WorkOrderKind kind) => new[] { kind.ToString().ToLowerInvariant() };
@@ -188,6 +191,54 @@ namespace GameLogic.Campaign.Regions
             return WorkOrderOpResult.Ok(workOrderId);
         }
 
+        /// <summary>ER3-SOFTLOCK-01 AC-ECO-011"核心紧急重启搬运机…执行建筑修复"——紧急救援机专属的
+        /// 免费修复：不走 <see cref="CampaignEconomyLedger"/>（<c>resourceTransactionId</c> 恒为
+        /// null），因为这条机制存在的唯一理由就是"玩家连废料都拿不出手"（触发阈值本身是废料&lt;35，
+        /// 极端情况下是 0）——如果紧急机自己的修复还要正常收费，AC-ECO-011 描述的"核心紧急重启"
+        /// 在废料归零时会变得不可能打破死锁，与卡片"从正式 UI 恢复供电和可生产状态"的意图矛盾。
+        /// 只允许 <see cref="HomeValleyLayout.ErcRescueChassisId"/> 调用，避免正式搬运机也走这条
+        /// 免费捷径绕过正常经济。<see cref="CompleteRepair"/> 对 null 事务 id 安全跳过 Commit。</summary>
+        public static WorkOrderOpResult TryCreateEmergencyRepair(CampaignState state, string buildingTypeId, int machineLogicId)
+        {
+            if (!MachineRegistry.TryGetRecord(machineLogicId, out MachineRecord record) || !record.IsAlive
+                || record.ChassisId != HomeValleyLayout.ErcRescueChassisId)
+            {
+                return WorkOrderOpResult.Fail("not-rescue-machine");
+            }
+
+            BuildingRecord building = state.BuildingRecords?.FirstOrDefault(b =>
+                b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId == buildingTypeId);
+            if (building == null)
+            {
+                return WorkOrderOpResult.Fail($"building-not-found:{buildingTypeId}");
+            }
+
+            WorkOrderRecord existing = FindActiveByTarget(state, WorkOrderKind.Repair, building.BuildingId);
+            if (existing != null)
+            {
+                if (existing.State != WorkOrderState.Ready)
+                {
+                    return WorkOrderOpResult.Fail($"order-already-active:{existing.State}");
+                }
+                return ReassignExisting(state, existing, machineLogicId);
+            }
+
+            if (building.ConstructionState != BuildingConstructionState.Damaged)
+            {
+                return WorkOrderOpResult.Fail($"not-damaged:{building.ConstructionState}");
+            }
+            if (!HomeValleyLayout.RepairProfile.TryGetValue(buildingTypeId, out (int ScrapCost, float Seconds) profile))
+            {
+                return WorkOrderOpResult.Fail($"no-repair-profile:{buildingTypeId}");
+            }
+
+            string workOrderId = building.BuildingId + ":emergency-repair:" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            var order = NewOrder(state, workOrderId, WorkOrderKind.Repair, building.BuildingId, machineLogicId,
+                resourceTransactionId: null, duration: profile.Seconds);
+            Append(state, order);
+            return WorkOrderOpResult.Ok(workOrderId);
+        }
+
         // ── Build（唯一真实内容：第二座发电机）─────────────────────────────────────
 
         public static WorkOrderOpResult TryCreateBuild(CampaignState state, string buildingTypeId, int machineLogicId)
@@ -296,6 +347,61 @@ namespace GameLogic.Campaign.Regions
 
             var order = NewOrder(state, workOrderId, WorkOrderKind.Salvage, nodeId, machineLogicId,
                 resourceTransactionId: txId, duration: HomeValleyLayout.WreckageDismantleSeconds);
+            Append(state, order);
+            return WorkOrderOpResult.Ok(workOrderId);
+        }
+
+        // ── Demolish（ER3-SOFTLOCK-01 AC-ECO-012：拆除非核心建筑，按实际投入50%返还）──────
+        // 刻意复用 WorkOrderKind.Salvage 而不新增枚举值——ERD-WRK-001 把 kind 定义为"封闭"集合
+        // （Haul/Build/Repair/Salvage/Recharge），"拆解"本来就是这份契约里最贴切的语义；
+        // CompleteSalvage 按 TargetId 是残骸节点还是 BuildingId 分流到两套完成逻辑，工作面板/
+        // 看门狗/分配引擎全部免费直接复用，不需要为一个新 kind 再铺一遍状态机。
+
+        public static WorkOrderOpResult TryCreateDemolish(CampaignState state, string buildingTypeId, int machineLogicId)
+        {
+            if (buildingTypeId == HomeValleyLayout.BuildingTypeCore)
+            {
+                return WorkOrderOpResult.Fail("cannot-demolish-core");
+            }
+
+            BuildingRecord building = state.BuildingRecords?.FirstOrDefault(b =>
+                b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId == buildingTypeId);
+            if (building == null)
+            {
+                return WorkOrderOpResult.Fail($"building-not-found:{buildingTypeId}");
+            }
+
+            WorkOrderRecord existing = FindActiveByTarget(state, WorkOrderKind.Salvage, building.BuildingId);
+            if (existing != null)
+            {
+                if (existing.State != WorkOrderState.Ready)
+                {
+                    return WorkOrderOpResult.Fail($"order-already-active:{existing.State}");
+                }
+                return ReassignExisting(state, existing, machineLogicId);
+            }
+
+            if (building.ConstructionState != BuildingConstructionState.Operational)
+            {
+                // Damaged 建筑走 Repair（还没真的建成/修复过，谈不上"实际投入"可以拆返）；
+                // Planned/Building/Disabled/Destroyed 同样不是合法拆除目标。
+                return WorkOrderOpResult.Fail($"not-operational:{building.ConstructionState}");
+            }
+
+            MachineCheck check = CheckMachine(machineLogicId, WorkOrderKind.Salvage);
+            if (!check.Ok)
+            {
+                return WorkOrderOpResult.Fail(check.FailureReason);
+            }
+
+            string workOrderId = building.BuildingId + ":demolish:" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            string txId = workOrderId + ":tx";
+            int refund = building.InvestedScrap / 2; // 向下取整；0 投入（开局即 Operational 的建筑）返还 0，忠于字面。
+            CampaignEconomyLedger.ProposeProduce(state, txId, building.BuildingId, CampaignEconomyLedger.ResourceScrap, refund);
+            CampaignEconomyLedger.Reserve(state, txId);
+
+            var order = NewOrder(state, workOrderId, WorkOrderKind.Salvage, building.BuildingId, machineLogicId,
+                resourceTransactionId: txId, duration: HomeValleyLayout.DemolishSeconds);
             Append(state, order);
             return WorkOrderOpResult.Ok(workOrderId);
         }
@@ -944,13 +1050,28 @@ namespace GameLogic.Campaign.Regions
             {
                 order.State = WorkOrderState.Failed;
                 order.FailureReason = "target-destroyed";
-                CampaignEconomyLedger.Cancel(state, order.ResourceTransactionId);
+                if (!string.IsNullOrEmpty(order.ResourceTransactionId))
+                {
+                    CampaignEconomyLedger.Cancel(state, order.ResourceTransactionId);
+                }
                 MarkAssignmentDirty();
                 return;
             }
 
             building.ConstructionState = BuildingConstructionState.Operational;
-            CampaignEconomyLedger.Commit(state, order.ResourceTransactionId);
+            // ER3-SOFTLOCK-01：紧急救援机的免费修复（见 TryCreateEmergencyRepair）没有事务 id，
+            // 玩家没有真正花过废料，InvestedScrap 保持 0——日后拆这栋楼返还 0，忠于"实际投入"字面。
+            if (!string.IsNullOrEmpty(order.ResourceTransactionId))
+            {
+                // 记下这次真正花掉的废料，供日后"拆除按实际投入50%返还"使用——从 RepairProfile
+                // 按建筑类型重新查一次（与创建订单时 Reserve 的数值来源相同的常量表，不会漂移），
+                // 不需要反查 ResourceTransactionRecord 本体。
+                if (HomeValleyLayout.RepairProfile.TryGetValue(building.BuildingTypeId, out (int ScrapCost, float Seconds) repairProfile))
+                {
+                    building.InvestedScrap = repairProfile.ScrapCost;
+                }
+                CampaignEconomyLedger.Commit(state, order.ResourceTransactionId);
+            }
             HomeValleyPowerGrid.Recompute(state);
             order.State = WorkOrderState.Completed;
             MarkAssignmentDirty();
@@ -969,13 +1090,32 @@ namespace GameLogic.Campaign.Regions
             }
 
             building.ConstructionState = BuildingConstructionState.Operational;
+            if (HomeValleyLayout.BuildProfile.TryGetValue(building.BuildingTypeId, out (int ScrapCost, float Seconds) buildProfile))
+            {
+                building.InvestedScrap = buildProfile.ScrapCost;
+            }
             CampaignEconomyLedger.Commit(state, order.ResourceTransactionId);
             HomeValleyPowerGrid.Recompute(state);
             order.State = WorkOrderState.Completed;
             MarkAssignmentDirty();
         }
 
+        /// <summary>Salvage 的完成分支路由：残骸节点走既有 ER3-STO-01 逻辑，建筑（ER3-SOFTLOCK-01
+        /// 拆除）走新分支。两者用 TargetId 的字符串格式天然区分——残骸节点固定是
+        /// <see cref="HomeValleyLayout.Wreckage1NodeId"/>/<see cref="HomeValleyLayout.Wreckage2NodeId"/>
+        /// 这两个常量，建筑 ID 恒为 "region:type" 格式，两个命名空间不会碰撞，不需要在
+        /// <see cref="WorkOrderRecord"/> 上加一个额外字段区分"这是哪种 Salvage"。</summary>
         private static void CompleteSalvage(CampaignState state, WorkOrderRecord order)
+        {
+            if (order.TargetId == HomeValleyLayout.Wreckage1NodeId || order.TargetId == HomeValleyLayout.Wreckage2NodeId)
+            {
+                CompleteWreckageSalvage(state, order);
+                return;
+            }
+            CompleteDemolish(state, order);
+        }
+
+        private static void CompleteWreckageSalvage(CampaignState state, WorkOrderRecord order)
         {
             RegionRecord region = state.RegionRecords?.FirstOrDefault(r => r.RegionId == HomeValleyLayout.RegionId);
             if (region == null || (region.DestroyedNodeIds != null && region.DestroyedNodeIds.Contains(order.TargetId)))
@@ -1000,6 +1140,38 @@ namespace GameLogic.Campaign.Regions
                 HomeValleyCargo.CommitHaul(state, ticket, order.ResourceTransactionId);
             }
 
+            order.State = WorkOrderState.Completed;
+            MarkAssignmentDirty();
+        }
+
+        /// <summary>ER3-SOFTLOCK-01 AC-ECO-012：建筑真正从 <see cref="CampaignState.BuildingRecords"/>
+        /// 移除（"拆除"是永久性的，不是变回 Damaged），产出走地面物+两阶段票据——与残骸拆解同一套
+        /// "仓满就留在地面待收集"的诚实处理，不强行塞进仓库。</summary>
+        private static void CompleteDemolish(CampaignState state, WorkOrderRecord order)
+        {
+            BuildingRecord building = state.BuildingRecords?.FirstOrDefault(b => b.BuildingId == order.TargetId);
+            if (building == null)
+            {
+                order.State = WorkOrderState.Failed;
+                order.FailureReason = "target-destroyed";
+                CampaignEconomyLedger.Cancel(state, order.ResourceTransactionId);
+                MarkAssignmentDirty();
+                return;
+            }
+
+            state.BuildingRecords = state.BuildingRecords.Where(b => b.BuildingId != building.BuildingId).ToArray();
+
+            HomeValleyCargo.SpawnGroundItem(state, HomeValleyLayout.RegionId, building.Position,
+                CampaignEconomyLedger.ResourceScrap, building.InvestedScrap / 2, order.TargetId + ":demolish-drop");
+
+            GroundItemRecord dropped = HomeValleyCargo.FindGroundItemBySalvageId(state, order.TargetId + ":demolish-drop");
+            if (dropped != null)
+            {
+                HomeValleyCargo.HaulTicket ticket = HomeValleyCargo.TryReserveHaul(state, dropped.GroundItemId);
+                HomeValleyCargo.CommitHaul(state, ticket, order.ResourceTransactionId);
+            }
+
+            HomeValleyPowerGrid.Recompute(state); // 拆掉一个电力消费者/供给者，电网必须重算。
             order.State = WorkOrderState.Completed;
             MarkAssignmentDirty();
         }

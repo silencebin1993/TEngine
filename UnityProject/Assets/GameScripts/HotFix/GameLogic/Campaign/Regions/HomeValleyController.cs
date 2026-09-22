@@ -112,6 +112,15 @@ namespace GameLogic.Campaign.Regions
             InputRouter.SetGameplayPaused(_paused, strategic: true);
             _cameraDirector?.Tick(_paused);
 
+            CampaignState state = CampaignSession.Current;
+            if (state != null && HomeValleySoftlockGuard.IsCoreDestroyed(state))
+            {
+                // ER3-SOFTLOCK-01 AC-ECO-011"核心被毁只能失败界面"：世界冻结——不再接受选中/命令/
+                // 移动/工作单推进，只留镜头能看、失败面板（HomeValleyFailureUIToolkit 独立轮询同一
+                // 状态显示）。不需要额外维护"已展示过"标记：Destroyed 是终态，不会变回其它状态。
+                return;
+            }
+
             // 落回战略视角才清空接管——过渡途中（Strategy→Direct 或 Direct→Strategy）都不清，
             // 否则 EnsureDirectTarget 刚给的目标会在过渡没走完时就被抹掉，接管请求白做。
             if (_cameraDirector != null && _cameraDirector.Mode == ViewMode.Strategy && _possessed != null)
@@ -136,11 +145,11 @@ namespace GameLogic.Campaign.Regions
 
             TickMachineMovement(scaledDt);
 
-            CampaignState state = CampaignSession.Current;
             if (state != null)
             {
                 HomeValleyWorkOrders.Tick(state, scaledDt, GetMachinePosition, ReleaseMachineMovement,
                     IsMachineDirectControlled, BeginAutoAssignedMovement);
+                HomeValleySoftlockGuard.Tick(state, scaledDt, BeginAutoAssignedMovement);
                 SyncWorldVisuals(state);
             }
         }
@@ -204,11 +213,22 @@ namespace GameLogic.Campaign.Regions
             HomeValleyMachineMarker marker = FindMarker(order.AssignedMachineLogicId);
             if (marker == null)
             {
-                // 理论上不应发生：分配引擎只从 MachineRegistry 里活着、在本区域的记录中选人，
-                // 而 _machineMarkers 应与之同步；真出现就跳过这一轮，订单已是 Reserved，
+                // ER3-SOFTLOCK-01：紧急救援机是本帧才登记进 MachineRegistry 的（不像开局两台机器
+                // 在 Enter() 的 BuildVisuals 里就有可视化对象），当场补建一个再继续——不能指望
+                // SyncWorldVisuals 的逐帧对账（那是本帧 Update 更晚才跑，等它跑到时这次移动指令
+                // 已经错过），否则一台机器生成后要等到下一次真正调用它才会显形。
+                if (MachineRegistry.TryGetRecord(order.AssignedMachineLogicId, out MachineRecord record) && record.IsAlive)
+                {
+                    BuildMachineVisual(record);
+                    marker = FindMarker(order.AssignedMachineLogicId);
+                }
+            }
+            if (marker == null)
+            {
+                // 理论上不应再发生（上面已经补建过一次）；真出现就跳过这一轮，订单已是 Reserved，
                 // 下一次 0.5 秒评估会因为它一直没有实际动起来而继续留在候选池里（不会丢单）。
                 Log.Warning($"[HomeValleyController] 自动分配命中订单 {order.WorkOrderId}，" +
-                    $"但机器 {order.AssignedMachineLogicId} 无可视化对象，本轮跳过移动。");
+                    $"但机器 {order.AssignedMachineLogicId} 无可视化对象且补建失败，本轮跳过移动。");
                 return;
             }
 
@@ -471,7 +491,8 @@ namespace GameLogic.Campaign.Regions
             HomeValleyLayout.Anchor anchor,
             BuildingConstructionState constructionState,
             BuildingPowerState powerState,
-            float health)
+            float health,
+            int investedScrap = 0)
         {
             HomeValleyLayout.PowerProfile.TryGetValue(anchor.Id, out (float PowerDemand, int PowerPriority) profile);
             return new BuildingRecord
@@ -488,6 +509,7 @@ namespace GameLogic.Campaign.Regions
                 Inventory = Array.Empty<CargoEntry>(),
                 QueueIds = Array.Empty<string>(),
                 BlockedReason = null,
+                InvestedScrap = investedScrap,
             };
         }
 
@@ -653,6 +675,22 @@ namespace GameLogic.Campaign.Regions
                 else
                 {
                     RefreshBuildingVisual(building);
+                }
+            }
+
+            // ER3-SOFTLOCK-01：紧急救援机是运行时（不是 Enter 那一刻）才登记进 MachineRegistry 的，
+            // BuildVisuals 只在首次进入时跑一次，覆盖不到这种"游玩过程中新出现的机器"——与建筑/
+            // 地面物同一套"逐帧对账"处理，不新增专属分支。
+            foreach (MachineRecord machine in MachineRegistry.AllRecords)
+            {
+                if (machine.RegionId != HomeValleyLayout.RegionId || !machine.IsAlive)
+                {
+                    continue;
+                }
+                bool hasMarker = _machineMarkers.Any(m => m.LogicId == machine.LogicId);
+                if (!hasMarker)
+                {
+                    BuildMachineVisual(machine);
                 }
             }
 
@@ -914,6 +952,19 @@ namespace GameLogic.Campaign.Regions
             }
             if (buildingTypeId != null)
             {
+                // ER3-SOFTLOCK-01 AC-ECO-012：同一次点击按建筑当前状态分流——Damaged 只能修复
+                // （原有行为不变），Operational 的非核心建筑改为拆除（50%返还实际投入）。两种状态
+                // 互斥，不需要额外输入手势区分"想修复"还是"想拆除"。Core 已在上面分流去 Recharge，
+                // 不会走到这里。
+                BuildingRecord targetBuilding = state.BuildingRecords?.FirstOrDefault(b =>
+                    b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId == buildingTypeId);
+                if (targetBuilding != null && targetBuilding.ConstructionState == BuildingConstructionState.Operational)
+                {
+                    CommandWork(moving, destination, targetBuilding.BuildingId,
+                        () => HomeValleyWorkOrders.TryCreateDemolish(state, buildingTypeId, moving.LogicId), "拆除 " + buildingTypeId);
+                    return;
+                }
+
                 CommandWork(moving, destination, HomeValleyLayout.RegionId + ":" + buildingTypeId,
                     () => HomeValleyWorkOrders.TryCreateRepair(state, buildingTypeId, moving.LogicId), "修复 " + buildingTypeId);
                 return;

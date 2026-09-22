@@ -205,6 +205,11 @@ namespace GameLogic.Stage
             var workOrderHudHost = new GameObject("[WorkOrderHudHost]");
             Object.DontDestroyOnLoad(workOrderHudHost);
             workOrderHudHost.AddComponent<UI.WorkOrder.WorkOrderPanelUIToolkit>();
+            // ER3-SOFTLOCK-01：家园核心被毁的全屏失败面板，同样独立 GameObject（同一条 UIDocument
+            // 唯一性纪律），只在归还谷地激活且核心已被摧毁时可见。
+            var homeValleyFailureHost = new GameObject("[HomeValleyFailureHost]");
+            Object.DontDestroyOnLoad(homeValleyFailureHost);
+            homeValleyFailureHost.AddComponent<UI.HomeValleyFailure.HomeValleyFailureUIToolkit>();
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             // 已被 UI Toolkit 覆盖的旧 IMGUI 调试 HUD 不得默认盖在玩家界面上；
             // 如需做历史对照，可在运行时显式启用该组件。
