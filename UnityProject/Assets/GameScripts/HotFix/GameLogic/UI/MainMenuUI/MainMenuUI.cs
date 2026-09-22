@@ -111,6 +111,7 @@ namespace GameLogic
         private Text _textConfirmInfo;
         private Button _btnConfirmYes;
         private Button _btnConfirmNo;
+        private bool _visualSystemApplied;
 
         protected override void ScriptGenerator()
         {
@@ -133,8 +134,12 @@ namespace GameLogic
             _btnResetAllDefaults = FindChildComponent<Button>("m_tf_Settings/m_btn_ResetAllDefaults");
             _btnResetAllDefaults.onClick.AddListener(OnResetAllDefaultsClicked);
 
-            const string colLeft = "m_tf_Settings/m_scroll_Settings/m_tf_SettingsColumns/m_tf_SettingsColLeft";
-            const string colRight = "m_tf_Settings/m_scroll_Settings/m_tf_SettingsColumns/m_tf_SettingsColRight";
+            // ER2-INPUT-01 附带修复：ScrollRect 补了真正的 Viewport（RectMask2D）后，Content
+            // (m_tf_SettingsColumns) 多套了一层 "Viewport" 节点，这里的路径常量必须跟着改，
+            // 否则 FindChildComponent 全部找空，ScriptGenerator 会在这里 NullReferenceException
+            // （2026-09-21 实锤过一次：加 Viewport 时漏改了这两个路径常量）。
+            const string colLeft = "m_tf_Settings/m_scroll_Settings/Viewport/m_tf_SettingsColumns/m_tf_SettingsColLeft";
+            const string colRight = "m_tf_Settings/m_scroll_Settings/Viewport/m_tf_SettingsColumns/m_tf_SettingsColRight";
             foreach ((GameActionId action, string _) in RebindRows)
             {
                 Button btn = FindChildComponent<Button>(colLeft + "/m_row_Rebind_" + action + "/m_btn_Rebind_" + action);
@@ -207,12 +212,440 @@ namespace GameLogic
 
         protected override void OnCreate()
         {
+            ApplyVisualSystem();
             SetView(MenuView.Root);
         }
 
         protected override void OnRefresh()
         {
+            ApplyVisualSystem();
             SetView(MenuView.Root);
+        }
+
+        // 正式菜单保留既有节点与所有业务绑定，只在运行时统一整理视觉层级。
+        // 这样存档、重绑、无障碍和音量设置的功能不依赖预制体美术改动，也不会因改名失联。
+        private void ApplyVisualSystem()
+        {
+            if (_visualSystemApplied)
+            {
+                return;
+            }
+
+            _visualSystemApplied = true;
+
+            Color page = new Color(0.025f, 0.055f, 0.075f, 1f);
+            Color surface = new Color(0.055f, 0.12f, 0.15f, 0.96f);
+            Color raised = new Color(0.075f, 0.17f, 0.20f, 0.98f);
+            Color edge = new Color(0.20f, 0.64f, 0.62f, 0.42f);
+            Color text = new Color(0.88f, 0.96f, 0.95f, 1f);
+            Color muted = new Color(0.55f, 0.70f, 0.71f, 1f);
+            Color accent = new Color(0.25f, 0.88f, 0.76f, 1f);
+            Color warning = new Color(0.96f, 0.61f, 0.29f, 1f);
+            Color danger = new Color(0.90f, 0.31f, 0.31f, 1f);
+
+            RectTransform canvasRoot = _tfRoot.parent as RectTransform;
+            if (canvasRoot != null)
+            {
+                ConfigureMenuCanvas(canvasRoot);
+                EnsureSurface(canvasRoot, "MenuBackdrop", page, Color.clear, 0, true);
+            }
+
+            ConfigureView(_tfRoot as RectTransform, new Vector2(560f, 560f), surface, edge, 34);
+            ConfigureView(_tfSlotList as RectTransform, new Vector2(1120f, 720f), surface, edge, 34);
+            ConfigureView(_tfConfirmOverwrite as RectTransform, new Vector2(620f, 460f), raised, new Color(warning.r, warning.g, warning.b, 0.76f), 30);
+            ConfigureView(_tfSettings as RectTransform, new Vector2(1320f, 790f), surface, edge, 30);
+
+            Font menuFont = _textContinueReason.font;
+            EnsureViewHeader(_tfRoot, "VisualMenuHeader", "地球归还", "EARTH RECLAMATION  ·  CAMPAIGN COMMAND", menuFont, accent);
+            EnsureViewHeader(_tfSlotList, "VisualSlotHeader", "战役档案", "选择一个档案继续，或在空槽创建新战役", menuFont, accent);
+            EnsureViewHeader(_tfConfirmOverwrite, "VisualConfirmHeader", "覆盖确认", "这项操作不可撤销", menuFont, warning);
+
+            ConfigureMainActions(accent, text, muted, warning, danger);
+            ConfigureSaveCards(text, muted, accent, warning);
+            ConfigureSettings(text, muted, accent, edge, raised);
+            ConfigureTypography(text, muted, accent, warning);
+
+            Canvas.ForceUpdateCanvases();
+            RebuildLayout(_tfRoot as RectTransform);
+            RebuildLayout(_tfSlotList as RectTransform);
+            RebuildLayout(_tfConfirmOverwrite as RectTransform);
+            RebuildLayout(_tfSettings as RectTransform);
+        }
+
+        private static void ConfigureView(RectTransform view, Vector2 size, Color fill, Color edge, int padding)
+        {
+            if (view == null)
+            {
+                return;
+            }
+
+            view.anchorMin = new Vector2(0.5f, 0.5f);
+            view.anchorMax = new Vector2(0.5f, 0.5f);
+            view.pivot = new Vector2(0.5f, 0.5f);
+            view.anchoredPosition = Vector2.zero;
+            view.sizeDelta = size;
+
+            EnsureSurface(view, "VisualSurface", fill, edge, 2, true);
+
+            VerticalLayoutGroup layout = view.GetComponent<VerticalLayoutGroup>();
+            if (layout != null)
+            {
+                layout.padding = new RectOffset(padding, padding, padding, padding);
+                layout.spacing = 12;
+                layout.childAlignment = TextAnchor.UpperCenter;
+                layout.childControlWidth = true;
+                layout.childControlHeight = true;
+                layout.childForceExpandWidth = true;
+                layout.childForceExpandHeight = false;
+            }
+        }
+
+        // MainMenuUI 的 Canvas 实际是嵌套在共享 UIRoot/UICanvas 之下的子 Canvas，不是独立根 Canvas。
+        // 嵌套 Canvas 的 renderMode 由 Unity 强制跟随根 Canvas——这里如果手动赋值 renderMode，赋值会被
+        // Unity 转发改写共享的根 Canvas（实测会把全局 UICanvas 从 ScreenSpaceCamera 冲成
+        // ScreenSpaceOverlay，波及其他所有窗口）；这里再加的 CanvasScaler 对嵌套 Canvas 也完全不生效
+        // （只有根 Canvas 的 CanvasScaler 真正参与缩放计算）。参考分辨率的纠正统一放在
+        // GameApp.FixUiRootReferenceResolution() 里对共享根 Canvas 做一次，这里只保留对嵌套 Canvas
+        // 真正有效的部分：同级绘制顺序。
+        private static void ConfigureMenuCanvas(RectTransform canvasRoot)
+        {
+            Canvas canvas = canvasRoot.GetComponent<Canvas>();
+            if (canvas == null)
+            {
+                return;
+            }
+
+            canvas.overrideSorting = true;
+            canvas.sortingOrder = 100;
+        }
+
+        private void ConfigureMainActions(Color accent, Color text, Color muted, Color warning, Color danger)
+        {
+            StyleButton(_btnNew, accent, new Color(0.72f, 1f, 0.90f, 1f), new Color(0.02f, 0.10f, 0.10f, 1f), 58, true);
+            StyleButton(_btnContinue, new Color(0.08f, 0.25f, 0.28f, 1f), accent, text, 46, false);
+            StyleButton(_btnLoad, new Color(0.06f, 0.16f, 0.20f, 1f), new Color(0.22f, 0.54f, 0.58f, 1f), text, 46, false);
+            StyleButton(_btnSettings, new Color(0.06f, 0.16f, 0.20f, 1f), new Color(0.22f, 0.54f, 0.58f, 1f), text, 46, false);
+            StyleButton(_btnQuit, new Color(0.15f, 0.075f, 0.09f, 1f), danger, new Color(1f, 0.80f, 0.80f, 1f), 40, false);
+            StyleButton(_btnBack, new Color(0.06f, 0.16f, 0.20f, 1f), new Color(0.22f, 0.54f, 0.58f, 1f), text, 42, false);
+            StyleButton(_btnConfirmYes, new Color(0.40f, 0.14f, 0.12f, 1f), danger, new Color(1f, 0.85f, 0.84f, 1f), 48, true);
+            StyleButton(_btnConfirmNo, new Color(0.06f, 0.16f, 0.20f, 1f), new Color(0.22f, 0.54f, 0.58f, 1f), text, 48, false);
+            StyleButton(_btnSettingsBack, accent, new Color(0.72f, 1f, 0.90f, 1f), new Color(0.02f, 0.10f, 0.10f, 1f), 46, true);
+            StyleButton(_btnResetAllDefaults, new Color(0.18f, 0.12f, 0.06f, 1f), warning, new Color(1f, 0.87f, 0.67f, 1f), 42, false);
+
+            _textContinueReason.color = warning;
+            _textContinueReason.alignment = TextAnchor.MiddleCenter;
+            _textContinueReason.fontSize = 14;
+            SetLayoutHeight(_textContinueReason.transform, 24, false);
+
+            _textConfirmInfo.color = new Color(1f, 0.84f, 0.55f, 1f);
+            _textConfirmInfo.alignment = TextAnchor.UpperCenter;
+            _textConfirmInfo.horizontalOverflow = HorizontalWrapMode.Wrap;
+            _textConfirmInfo.verticalOverflow = VerticalWrapMode.Overflow;
+            SetLayoutHeight(_textConfirmInfo.transform, 150, false);
+        }
+
+        private void ConfigureSaveCards(Color text, Color muted, Color accent, Color warning)
+        {
+            for (int i = 0; i < _slotInfoTexts.Length; i++)
+            {
+                Transform card = _slotInfoTexts[i].transform.parent;
+                EnsureSurface(card as RectTransform, "VisualSurface", new Color(0.035f, 0.10f, 0.13f, 0.96f), new Color(accent.r, accent.g, accent.b, 0.30f), 1, true);
+                SetLayoutHeight(card, 142, false);
+                _slotInfoTexts[i].color = text;
+                _slotInfoTexts[i].fontSize = 16;
+                _slotInfoTexts[i].alignment = TextAnchor.UpperLeft;
+                _slotInfoTexts[i].horizontalOverflow = HorizontalWrapMode.Wrap;
+                _slotInfoTexts[i].verticalOverflow = VerticalWrapMode.Overflow;
+                StyleButton(_slotActionButtons[i], new Color(0.07f, 0.24f, 0.25f, 1f), accent, text, 42, false);
+                // 槽位行是"信息文本(flexible) + 操作按钮(紧凑宽度)"布局；StyleButton 统一把按钮
+                // flexibleWidth 设成 1 会让按钮抢占一半行宽，这里改回紧凑宽度，把空间让给信息文本。
+                LayoutElement actionLayout = _slotActionButtons[i].GetComponent<LayoutElement>();
+                actionLayout.flexibleWidth = 0;
+                actionLayout.preferredWidth = 180;
+                actionLayout.minWidth = 160;
+            }
+        }
+
+        private void ConfigureSettings(Color text, Color muted, Color accent, Color edge, Color raised)
+        {
+            Transform columns = _tfSettings.Find("m_scroll_Settings/Viewport/m_tf_SettingsColumns");
+            if (columns != null)
+            {
+                EnsureSurface(columns as RectTransform, "VisualSurface", new Color(0.025f, 0.075f, 0.095f, 0.78f), new Color(edge.r, edge.g, edge.b, 0.55f), 1, true);
+            }
+
+            SetLayoutHeight(_tfSettings.Find("m_text_SettingsInfo"), 42, false);
+            SetLayoutHeight(_tfSettings.Find("m_scroll_Settings"), 0, true);
+
+            string[] rows =
+            {
+                "m_tf_Settings/m_scroll_Settings/Viewport/m_tf_SettingsColumns/m_tf_SettingsColLeft",
+                "m_tf_Settings/m_scroll_Settings/Viewport/m_tf_SettingsColumns/m_tf_SettingsColRight",
+            };
+            foreach (string path in rows)
+            {
+                Transform column = FindChild(path);
+                if (column == null)
+                {
+                    continue;
+                }
+
+                foreach (Transform row in column)
+                {
+                    if (row.name.StartsWith("m_row_", StringComparison.Ordinal))
+                    {
+                        EnsureSurface(row as RectTransform, "VisualRow", raised, new Color(edge.r, edge.g, edge.b, 0.38f), 1, true);
+                    }
+                }
+            }
+
+            foreach (Toggle toggle in _tfSettings.GetComponentsInChildren<Toggle>(true))
+            {
+                Image background = toggle.targetGraphic as Image;
+                if (background != null)
+                {
+                    background.color = new Color(0.04f, 0.13f, 0.16f, 1f);
+                }
+                Image checkmark = toggle.graphic as Image;
+                if (checkmark != null)
+                {
+                    checkmark.color = accent;
+                }
+            }
+
+            foreach (Slider slider in _tfSettings.GetComponentsInChildren<Slider>(true))
+            {
+                if (slider.fillRect != null)
+                {
+                    Image fill = slider.fillRect.GetComponent<Image>();
+                    if (fill != null) fill.color = accent;
+                }
+                if (slider.handleRect != null)
+                {
+                    Image handle = slider.handleRect.GetComponent<Image>();
+                    if (handle != null) handle.color = new Color(0.82f, 1f, 0.94f, 1f);
+                }
+            }
+
+            foreach (Button rebind in _tfSettings.GetComponentsInChildren<Button>(true))
+            {
+                if (rebind.name.StartsWith("m_btn_Rebind_", StringComparison.Ordinal))
+                {
+                    StyleButton(rebind, new Color(0.06f, 0.21f, 0.23f, 1f), accent, text, 34, false);
+                    // 同上：重绑按钮是行内的"当前键位"展示控件，不该抢占一半行宽。
+                    LayoutElement rebindLayout = rebind.GetComponent<LayoutElement>();
+                    rebindLayout.flexibleWidth = 0;
+                    rebindLayout.preferredWidth = 140;
+                    rebindLayout.minWidth = 120;
+                }
+            }
+        }
+
+        private void ConfigureTypography(Color text, Color muted, Color accent, Color warning)
+        {
+            foreach (Text label in _tfRoot.parent.GetComponentsInChildren<Text>(true))
+            {
+                label.raycastTarget = false;
+                if (label.transform.parent != null && label.transform.parent.name.StartsWith("Visual", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                if (label.name.StartsWith("m_text_Header", StringComparison.Ordinal) || label.name == "m_text_SettingsInfo")
+                {
+                    label.color = accent;
+                    label.fontStyle = FontStyle.Bold;
+                    label.fontSize = 19;
+                }
+                else if (label.name.StartsWith("m_text_Label", StringComparison.Ordinal))
+                {
+                    label.color = muted;
+                    label.fontSize = 15;
+                }
+                else if (label.name.Contains("Confirm"))
+                {
+                    label.color = warning;
+                    label.fontSize = 17;
+                }
+                else if (label != _textContinueReason)
+                {
+                    label.color = text;
+                }
+            }
+        }
+
+        private static void StyleButton(Button button, Color fill, Color border, Color labelColor, int height, bool primary)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            Image image = button.GetComponent<Image>();
+            if (image != null)
+            {
+                image.color = fill;
+                image.raycastTarget = true;
+            }
+
+            Outline outline = button.GetComponent<Outline>();
+            if (outline == null)
+            {
+                outline = button.gameObject.AddComponent<Outline>();
+            }
+            outline.effectColor = border;
+            outline.effectDistance = new Vector2(1f, -1f);
+
+            ColorBlock colors = button.colors;
+            colors.normalColor = Color.white;
+            colors.highlightedColor = new Color(1.12f, 1.12f, 1.12f, 1f);
+            colors.pressedColor = new Color(0.78f, 0.90f, 0.88f, 1f);
+            colors.selectedColor = colors.highlightedColor;
+            colors.disabledColor = new Color(0.50f, 0.54f, 0.55f, 0.65f);
+            colors.colorMultiplier = 1f;
+            button.colors = colors;
+
+            LayoutElement element = button.GetComponent<LayoutElement>();
+            if (element == null)
+            {
+                element = button.gameObject.AddComponent<LayoutElement>();
+            }
+            element.minHeight = height;
+            element.preferredHeight = height;
+            element.flexibleWidth = 1;
+
+            Text label = button.GetComponentInChildren<Text>(true);
+            if (label != null)
+            {
+                label.color = labelColor;
+                label.fontSize = primary ? 18 : 16;
+                label.fontStyle = primary ? FontStyle.Bold : FontStyle.Normal;
+                label.alignment = TextAnchor.MiddleCenter;
+                label.raycastTarget = false;
+            }
+        }
+
+        private static void EnsureViewHeader(Transform parent, string name, string title, string subtitle, Font font, Color accent)
+        {
+            if (parent == null || parent.Find(name) != null)
+            {
+                return;
+            }
+
+            GameObject header = new GameObject(name, typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(LayoutElement));
+            header.transform.SetParent(parent, false);
+            header.transform.SetSiblingIndex(1);
+
+            VerticalLayoutGroup layout = header.GetComponent<VerticalLayoutGroup>();
+            layout.spacing = 3;
+            layout.childAlignment = TextAnchor.MiddleCenter;
+            layout.childControlWidth = true;
+            layout.childControlHeight = true;
+            layout.childForceExpandWidth = true;
+            layout.childForceExpandHeight = false;
+
+            LayoutElement size = header.GetComponent<LayoutElement>();
+            size.preferredHeight = 82;
+            size.minHeight = 82;
+
+            Text titleLabel = CreateHeaderText(header.transform, "Title", title, font, 34, FontStyle.Bold, accent);
+            Text subtitleLabel = CreateHeaderText(header.transform, "Subtitle", subtitle, font, 13, FontStyle.Normal, new Color(accent.r, accent.g, accent.b, 0.72f));
+            titleLabel.GetComponent<LayoutElement>().preferredHeight = 48;
+            subtitleLabel.GetComponent<LayoutElement>().preferredHeight = 22;
+        }
+
+        private static Text CreateHeaderText(Transform parent, string name, string value, Font font, int fontSize, FontStyle style, Color color)
+        {
+            GameObject labelObject = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Text), typeof(LayoutElement));
+            labelObject.transform.SetParent(parent, false);
+            Text label = labelObject.GetComponent<Text>();
+            label.font = font;
+            label.text = value;
+            label.fontSize = fontSize;
+            label.fontStyle = style;
+            label.color = color;
+            label.alignment = TextAnchor.MiddleCenter;
+            label.raycastTarget = false;
+            return label;
+        }
+
+        private static void SetLayoutHeight(Transform transform, int height, bool flexible)
+        {
+            if (transform == null)
+            {
+                return;
+            }
+
+            LayoutElement element = transform.GetComponent<LayoutElement>();
+            if (element == null)
+            {
+                element = transform.gameObject.AddComponent<LayoutElement>();
+            }
+            element.minHeight = height;
+            element.preferredHeight = height;
+            element.flexibleHeight = flexible ? 1f : 0f;
+            element.flexibleWidth = 1f;
+        }
+
+        private static void RebuildLayout(RectTransform transform)
+        {
+            if (transform != null && transform.gameObject.activeInHierarchy)
+            {
+                LayoutRebuilder.ForceRebuildLayoutImmediate(transform);
+            }
+        }
+
+        private static Image EnsureSurface(RectTransform parent, string name, Color fill, Color edge, int edgeWidth, bool firstSibling)
+        {
+            if (parent == null)
+            {
+                return null;
+            }
+
+            Transform existing = parent.Find(name);
+            Image image;
+            if (existing == null)
+            {
+                GameObject surface = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+                surface.transform.SetParent(parent, false);
+                image = surface.GetComponent<Image>();
+                image.raycastTarget = false;
+                LayoutElement layoutElement = surface.AddComponent<LayoutElement>();
+                layoutElement.ignoreLayout = true;
+                RectTransform rect = surface.GetComponent<RectTransform>();
+                rect.anchorMin = Vector2.zero;
+                rect.anchorMax = Vector2.one;
+                rect.offsetMin = Vector2.zero;
+                rect.offsetMax = Vector2.zero;
+            }
+            else
+            {
+                image = existing.GetComponent<Image>();
+            }
+
+            LayoutElement existingLayoutElement = image.GetComponent<LayoutElement>();
+            if (existingLayoutElement != null)
+            {
+                existingLayoutElement.ignoreLayout = true;
+            }
+
+            if (firstSibling)
+            {
+                image.transform.SetAsFirstSibling();
+            }
+            image.color = fill;
+
+            if (edgeWidth > 0)
+            {
+                Outline outline = image.GetComponent<Outline>();
+                if (outline == null)
+                {
+                    outline = image.gameObject.AddComponent<Outline>();
+                }
+                outline.effectColor = edge;
+                outline.effectDistance = new Vector2(edgeWidth, -edgeWidth);
+            }
+
+            return image;
         }
 
         private void SetView(MenuView view)

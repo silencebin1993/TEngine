@@ -47,9 +47,38 @@ public partial class GameApp
         // 详见 DesignDocs/Game_Framework_Design.md §8。
         GameLogic.Stage.GameRoot.Startup();
 
+        FixUiRootReferenceResolution();
+
         // ER2-BOOT-01：冷启动第一屏必须是《地球归还》正式主菜单（新建/继续/读取/设置/退出），
         // 不允许通过 GM/测试菜单进入 Demo——旧运行中枢与战斗 UI 延后到 MountGameplayUi()。
         GameModule.UI.ShowUIAsync<GameLogic.MainMenuUI>();
+    }
+
+    /// <summary>共享 <c>UIRoot</c>（<c>Assets/TEngine/</c> 框架资产，禁止直接改）上的 CanvasScaler
+    /// 遗留手机竖屏参考分辨率 750x1334，与本项目实际目标 1920x1080 横屏不符——UI Toolkit 侧
+    /// <c>BattleHudPanelSettings</c> 已是 1920x1080，本项目不是竖屏手游。嵌套 Canvas（每个 UIWindow
+    /// 自己的 Canvas）上的 CanvasScaler 在 Unity 里不参与实际缩放计算，只有这个共享根 Canvas 的
+    /// CanvasScaler 才真正生效，所以必须在这里统一纠正一次，不能指望各窗口各自在运行时打补丁
+    /// （旧写法曾经这样做，副作用是给嵌套 Canvas 设置 renderMode 会转发改写这个共享根 Canvas）。</summary>
+    private static void FixUiRootReferenceResolution()
+    {
+        // 直接找场景里的 UIRoot（跟 UIModule.OnInit 用同一种查法），不依赖 UIModule 单例是否已经
+        // OnInit 过——这里跑在 StartGameLogic 最早期，第一次真正触发 GameModule.UI 还在后面一行，
+        // 此时读 UIModule.UIRoot 静态属性只会拿到 null（曾经这样写过，静默跳过、完全没生效）。
+        GameObject uiRootGo = GameObject.Find("UIRoot");
+        UnityEngine.UI.CanvasScaler scaler = uiRootGo != null
+            ? uiRootGo.GetComponentInChildren<UnityEngine.UI.CanvasScaler>()
+            : null;
+        if (scaler == null)
+        {
+            Log.Warning("[GameApp] UIRoot 未找到 CanvasScaler，跳过参考分辨率纠正。");
+            return;
+        }
+
+        scaler.uiScaleMode = UnityEngine.UI.CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920f, 1080f);
+        scaler.screenMatchMode = UnityEngine.UI.CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
+        scaler.matchWidthOrHeight = 0.5f;
     }
 
     /// <summary>ER2-BOOT-01：把战斗/旧运行中枢 UI 的常驻挂载从冷启动延后到"玩家从主菜单真正开局"之后。

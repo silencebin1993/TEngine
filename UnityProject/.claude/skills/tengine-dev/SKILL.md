@@ -22,7 +22,9 @@ TEngine 是基于 HybridCLR + YooAsset + UniTask + Luban 的 Unity 游戏框架�
 
 | 任务类型 | 必读文档 | 进阶文档 | 优先级 |
 |---------|---------|---------|--------|
-| UI 开发 | [ui-lifecycle.md](references/ui-lifecycle.md) | [ui-patterns.md](references/ui-patterns.md) | P0 |
+| UI 开发（新面板：战斗/经营，UI Toolkit） | [ui-toolkit.md](references/ui-toolkit.md) | `Docs/UI/UI_PIPELINE.md` + `UI_WORKFLOW_GUIDE.md`（完整 SOP） | P0 |
+| UI 开发（旧链：登录/启动/热更，uGUI/UIWindow 生命周期 API） | [ui-lifecycle.md](references/ui-lifecycle.md) | [ui-patterns.md](references/ui-patterns.md) | P0 |
+| UI 开发（旧链：uGUI 布局排版/LayoutGroup/多分辨率/Canvas 缩放） | [ui-ugui-layout.md](references/ui-ugui-layout.md) | — | P0 |
 | 事件系统 | [event-system.md](references/event-system.md) | [event-antipatterns.md](references/event-antipatterns.md) | P0 |
 | 资源加载 | [resource-api.md](references/resource-api.md) | [resource-patterns.md](references/resource-patterns.md) | P0 |
 | 模块使用 | [modules.md](references/modules.md) | — | P0 |

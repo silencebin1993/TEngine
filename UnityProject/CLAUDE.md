@@ -49,7 +49,9 @@ TEngine 基于 HybridCLR + YooAsset + UniTask + Luban 构建。
 
 | 场景 | 必须查询主题 |
 |------|------------|
-| UI 开发 | ui-lifecycle.md — UIWindow 生命周期、UIWidget 规范 |
+| UI 开发（新面板：战斗/经营，UI Toolkit） | ui-toolkit.md — UXML/USS/UIDocument 规范；先读 `Docs/UI/UI_PIPELINE.md` |
+| UI 开发（旧链：登录/启动/热更，uGUI 生命周期 API） | ui-lifecycle.md — UIWindow 生命周期、UIWidget 规范 |
+| UI 开发（旧链：uGUI 布局/LayoutGroup/多分辨率/Canvas 缩放） | ui-ugui-layout.md — LayoutGroup 陷阱、Button Label 陷阱、嵌套 Canvas 缩放陷阱 |
 | 资源加载 | resource-api.md — LoadAssetAsync API、释放时机 |
 | 热更代码 | hotfix-workflow.md — 程序集划分、GameApp 入口、热更边界 |
 | 事件系统 | event-system.md — GameEvent 用法、AddUIEvent 规范 |
@@ -96,7 +98,9 @@ TEngine 基于 HybridCLR + YooAsset + UniTask + Luban 构建。
 |-----|------|------|
 | architecture.md | 项目结构/启动流程（含 **GameRes** 目录） | 核心 |
 | modules.md | 模块 API（Timer/Scene/Audio/Fsm）| 核心 |
-| ui-lifecycle.md | UI 开发（生命周期/层级/属性）| 核心 |
+| ui-lifecycle.md | UI 开发-旧链（uGUI 生命周期/层级/属性）| 核心 |
+| ui-ugui-layout.md | UI 开发-旧链（uGUI LayoutGroup/Canvas 缩放/多分辨率）| 核心 |
+| ui-toolkit.md | UI 开发-新面板（UI Toolkit：UXML/USS/UIDocument）| 核心 |
 | event-system.md | 事件系统（两种模式/核心接口）| 核心 |
 | resource-api.md | 资源加载/卸载（**路径 = GameRes/Raw**）| 核心 |
 | hotfix-workflow.md | 热更代码（HybridCLR/程序集划分/热更包）| 核心 |

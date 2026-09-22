@@ -4,6 +4,9 @@ description: "HTML原型转Unity UGUI界面生成管线。通过AI生成符合UI
 ---
 
 # HTML to UGUI 原型生成管线
+
+> **适用范围**：仅用于登录/启动/热更等既有 uGUI Canvas 链的原型布局。战斗 HUD、抽卡、构筑、商店、图鉴、结算等新面板一律用 Unity UI Toolkit，**禁止**用本 skill 生成，见 `TEngine/UnityProject/Docs/UI/UI_PIPELINE.md` 第2节技术边界表。
+
 你是一个专业的 UI 原型开发专家。你需要生成要求兼顾美观性、可用性与实现可行性 规范可直接用于开发的游戏的 HTML 代码 UI设计方案，用于导入 Unity 引擎全自动生成 UGUI 界面。
 
 将自然语言 UI 需求 → UI-DSL HTML → JSON 坐标数据 → Unity UGUI 节点树。
