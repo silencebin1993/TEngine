@@ -79,7 +79,8 @@ namespace GameLogic.Campaign.Regions
         public const float CameraBoundsHalfExtentZ = 30f;
 
         /// <summary>各建筑 Operational 时的电力需求与默认优先级（DEMO-CONTENT-LOCK.md §2.2）。
-        /// 数值只是原样落数据，电网仲裁逻辑属于 ER3-PWR-01，本 Story 不实现。</summary>
+        /// 玩家可在 1～4 范围内调整 <see cref="BuildingRecord.PowerPriority"/>（ER3-PWR-01
+        /// <see cref="HomeValleyPowerGrid.TrySetPriority"/>），此表只是新建筑落地时的默认值。</summary>
         public static readonly IReadOnlyDictionary<string, (float PowerDemand, int PowerPriority)> PowerProfile =
             new Dictionary<string, (float, int)>
             {
@@ -90,6 +91,29 @@ namespace GameLogic.Campaign.Regions
                 [BuildingTypeRepairBay] = (15f, 3),
                 [BuildingTypeSignalTower] = (20f, 2),
             };
+
+        /// <summary>ER3-PWR-01：核心自带基础供电（DEMO-CONTENT-LOCK.md §2.1"核心20"），不依赖任何
+        /// 建筑的 Operational 状态——发电机损坏/被关停时，这部分供给仍然存在，保证核心（demand 10）
+        /// 永远不会被电网仲裁断电。<see cref="HomeValleyPowerGrid.Recompute"/> 每次都从这个常量算起，
+        /// 不是一个可以被"扣减"的历史累加值。</summary>
+        public const float BaseCoreSupply = 20f;
+
+        /// <summary>ER3-PWR-01：供给类建筑（目前只有发电机）Operational 时贡献的电力供给
+        /// （DEMO-CONTENT-LOCK.md §2.1"电机+80"）。与 <see cref="PowerProfile"/>（消费侧）是两张
+        /// 独立的表——发电机本身不消费电力，也不在 PowerProfile 里出现。</summary>
+        public static readonly IReadOnlyDictionary<string, float> PowerSupplyProfile =
+            new Dictionary<string, float>
+            {
+                [BuildingTypeGenerator] = 80f,
+            };
+
+        /// <summary>核心自带基础带宽（DEMO-CONTENT-LOCK.md §2.2"基础带宽 3"），不依赖信号塔状态，
+        /// 与 <see cref="SignalTowerBandwidthBonus"/> 是两个独立叠加的来源。</summary>
+        public const float BaseSignalBandwidth = 3f;
+
+        /// <summary>信号塔 Operational 且实际分到电（Powered）时的额外带宽加成（§2.2"额外带宽 5"）；
+        /// 断电（Brownout/Unpowered）时这部分加成不生效（ER3-PWR-01："信号塔断电同时降低带宽"）。</summary>
+        public const float SignalTowerBandwidthBonus = 5f;
 
         /// <summary>修复成本/时长（DEMO-CONTENT-LOCK.md §2.1）。装配站/解析台/维修台无需修复材料前置，
         /// 不在此表出现。</summary>
