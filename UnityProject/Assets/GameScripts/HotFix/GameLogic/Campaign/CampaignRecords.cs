@@ -173,6 +173,16 @@ namespace GameLogic.Campaign
         public WorkOrderState State;
         public string FailureReason;
         public int RetryCount;
+        /// <summary>ER3-WRK-01：补齐 ER1-SAVE-01 遗留的骨架缺口（此前无字段能表达"还剩多少"，
+        /// 进程重启只能"整段时长重新计时"，见 ER2-SCENE-01/ER3-STO-01 的 RearmInterrupted* 兜底注释）。
+        /// 含义按 <see cref="State"/> 区分：<see cref="WorkOrderState.InProgress"/> 时是"到目标后计时中的
+        /// 工作时长"（秒），<see cref="WorkOrderState.Waiting"/> 且 <see cref="FailureReason"/> 为
+        /// "path-blocked" 时借用同一字段表达"已等待秒数"（两种含义互斥，同一时刻只处于一种状态，
+        /// 不会混淆）；其余状态下恒为 0，不承载意义。随 <see cref="WorkOrderRecord"/> 一起落盘，
+        /// 读档直接从上次进度续期，不再需要 RearmInterrupted* 那类"整段重新计时"兜底。</summary>
+        public float Progress;
+        /// <summary>Progress 达到该值即完工/该等待窗口到期。语义同样按 <see cref="State"/> 区分。</summary>
+        public float Duration;
     }
 
     /// <summary>ERD-FAC-001 工厂队列项。</summary>

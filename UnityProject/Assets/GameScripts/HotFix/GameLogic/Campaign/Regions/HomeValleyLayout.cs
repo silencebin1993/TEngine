@@ -23,6 +23,12 @@ namespace GameLogic.Campaign.Regions
         public const string BuildingTypeAssemblyStation = "assembly_station";
         public const string BuildingTypeAnalysisBench = "analysis_bench";
         public const string BuildingTypeRepairBay = "repair_bay";
+        /// <summary>ER3-WRK-01 Build 工作单的唯一真实内容（DEMO-CONTENT-LOCK.md §2.2："额外建造第二座
+        /// 发电机（60废料、40秒、+80容量)"）。独立 BuildingTypeId（不复用 <see cref="BuildingTypeGenerator"/>）
+        /// 只是为了不破坏既有"Building_"+typeId 的可视化/点选命名约定（两者共用同一发电机语义，
+        /// <see cref="PowerSupplyProfile"/> 各自登记 80，<see cref="HomeValleyPowerGrid.Recompute"/> 按
+        /// Operational 建筑逐条求和，天然支持同时存在两座发电机，不需要改电网仲裁代码）。</summary>
+        public const string BuildingTypeGenerator2 = "generator_2";
 
         // ── 机器 ID（DEMO-CONTENT-LOCK.md §2.1，与旧细胞阶段 chassis_ally_* 占位彻底区分）──
         public const string Erc001ChassisId = "erc_001";
@@ -57,6 +63,11 @@ namespace GameLogic.Campaign.Regions
         public static readonly Anchor AssemblyExit = new Anchor("assembly_exit", new Vector2(8f, -20f), 1.5f);
         public static readonly Anchor AnalysisBench = new Anchor(BuildingTypeAnalysisBench, new Vector2(-10f, -20f), 3f);
         public static readonly Anchor RepairBay = new Anchor(BuildingTypeRepairBay, new Vector2(16f, -14f), 3f);
+        /// <summary>第二座发电机建造位（ER3-WRK-01 Build）。与全部既有锚点净空不重叠，见
+        /// <see cref="Validate"/> 自检——(24,-8) 半径3：距仓库(20,0,r3.5)约8.9、距维修台(16,-14,r3)约10、
+        /// 距装配出口(8,-20,r1.5)约20，均留有余量；未建成前只是一处可点选的空地占位（"BuildSite_" +
+        /// <see cref="BuildingTypeGenerator2"/>），不预先生成 <see cref="BuildingRecord"/>。</summary>
+        public static readonly Anchor Generator2Site = new Anchor(BuildingTypeGenerator2, new Vector2(24f, -8f), 3f);
 
         // ── 机器出生点（DEMO-CONTENT-LOCK.md §2.1：ERC-001/002）───────────────────────
         public static readonly Anchor Erc001Spawn = new Anchor(Erc001ChassisId, new Vector2(-10f, 6f), 1.5f);
@@ -109,6 +120,7 @@ namespace GameLogic.Campaign.Regions
             new Dictionary<string, float>
             {
                 [BuildingTypeGenerator] = 80f,
+                [BuildingTypeGenerator2] = 80f,
             };
 
         /// <summary>核心自带基础带宽（DEMO-CONTENT-LOCK.md §2.2"基础带宽 3"），不依赖信号塔状态，
@@ -128,6 +140,54 @@ namespace GameLogic.Campaign.Regions
                 [BuildingTypeWarehouse] = (10, 10f),
                 [BuildingTypeSignalTower] = (40, 15f),
             };
+
+        /// <summary>ER3-WRK-01 Build 工作单成本/时长（DEMO-CONTENT-LOCK.md §2.2 唯一点名的真实建造
+        /// 内容——第二座发电机）。与 <see cref="RepairProfile"/> 是两张独立的表：Repair 面向"已存在但
+        /// Damaged"的建筑，Build 面向"尚不存在、需要新建"的建筑，键集合故意不重叠。</summary>
+        public static readonly IReadOnlyDictionary<string, (int ScrapCost, float Seconds)> BuildProfile =
+            new Dictionary<string, (int, float)>
+            {
+                [BuildingTypeGenerator2] = (60, 40f),
+            };
+
+        /// <summary>ER3-WRK-01 Recharge：默认电池容量（DEMO-CONTENT-LOCK.md §2.4"默认电池容量：
+        /// 搬运100、战斗120、维修140"）。ERC-001/002 均为搬运轮式；ERC-003 是战斗履带（见该常量旁注释）。
+        /// 主/功能/维修动作消耗战术电池的完整战斗能耗模型属于 ER4-PRIM-04/战斗基元 Story（本 Story 之外
+        /// 没有真实的电池消耗来源），本 Story 交付的是"被动恢复+家园充电点+完整 Recharge 状态机"这套
+        /// 真实机制，可用 <see cref="MachineRecord.Battery"/> 公开字段在测试里直接调低模拟低电触发。</summary>
+        public static readonly IReadOnlyDictionary<string, float> BatteryCapacity = new Dictionary<string, float>
+        {
+            [Erc001ChassisId] = 100f,
+            [Erc002ChassisId] = 100f,
+            [Erc003ChassisId] = 120f,
+        };
+
+        /// <summary>被动恢复速率（不在充电点时也生效，DEMO-CONTENT-LOCK.md §2.4"被动恢复每秒1"）。</summary>
+        public const float BatteryPassiveRegenPerSecond = 1f;
+
+        /// <summary>家园充电点速率（DEMO-CONTENT-LOCK.md §2.4"家园有电充电点每秒10"）。Recharge
+        /// 工作单在 <see cref="Core"/>（归还核心，永远 Powered，见 <see cref="HomeValleyPowerGrid"/>
+        /// 类注释）进行，不新增专属充电桩建筑。</summary>
+        public const float BatteryHomeChargeRatePerSecond = 10f;
+
+        /// <summary>低电自动候选阈值（DEMO-CONTENT-LOCK.md §2.4"电池低于20%时自动候选"）——
+        /// 自动候选算法本身属于 ER3-WRK-02，本 Story 只落这个阈值常量供该 Story 直接复用，
+        /// 以及供玩家手动 Recharge 判断"是否真的需要充"的 HUD 展示阈值。</summary>
+        public const float BatteryLowFraction = 0.2f;
+
+        /// <summary>ERD-WRK-003 第二条："路径连续5秒无进展"判定窗口。归还谷地当前只有直线插值移动、
+        /// 无真实寻路/障碍物系统（<see cref="HomeValleyMachineMarker"/> 全程必达），本 Story 按"净位移
+        /// 是否推进"实现这条规则本身（看门狗式防御性代码，真实寻路阻塞场景要等未来引入 NavMesh 后
+        /// 天然复用同一套状态机，不是本 Story 的缺口），用单元测试直接冻结位置驱动触发/释放来验证。</summary>
+        public const float PathStallSeconds = 5f;
+
+        /// <summary>路径卡住判定的最小净位移阈值（低于此值视为"没有推进"）。</summary>
+        public const float PathStallEpsilon = 0.05f;
+
+        /// <summary>PathBlocked 冷却窗口（ERD-WRK-003"30 秒后...重试"）——自动重试分配算法本身属于
+        /// ER3-WRK-02（该 Story 的分配器会在此窗口结束后把 Ready 订单纳入候选池），本 Story 只保证
+        /// 冷却结束后订单状态会从 Waiting 自动回到 Ready，可供玩家手动重新指派。</summary>
+        public const float PathBlockedRetrySeconds = 30f;
 
         /// <summary>ER3-STO-01 ERD-ECO-003：归还核心应急缓存容量（DEMO-IMPLEMENTATION-SPEC.md ERD-ECO-003：
         /// "初始180废料存在归还核心应急缓存中，缓存是有限库存，上限180"）。恒定生效，不依赖任何建筑
@@ -166,6 +226,7 @@ namespace GameLogic.Campaign.Regions
             yield return AssemblyExit;
             yield return AnalysisBench;
             yield return RepairBay;
+            yield return Generator2Site;
             yield return Erc001Spawn;
             yield return Erc002Spawn;
             yield return Wreckage1;

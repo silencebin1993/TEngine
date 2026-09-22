@@ -49,6 +49,10 @@ namespace GameLogic.Campaign
             /// <summary>ER3-STO-01：地面物是仓储守恒的一部分，读档重放后必须逐字节一致
             /// （同 <see cref="MachineRecords"/> 等其余存量字段的处理方式）。</summary>
             public GroundItemRecord[] GroundItems;
+            /// <summary>ER3-WRK-01：WorkOrder 现在带 Progress/Duration 真实进度，读档重放后
+            /// 必须逐字节一致（同一套"存量字段必须参与指纹"的规则，此前骨架阶段没有真正的进度
+            /// 可比较，未纳入；现在纳入。</summary>
+            public WorkOrderRecord[] WorkOrders;
         }
 
         /// <summary>计算稳定指纹（十六进制 SHA256 字符串）。<paramref name="state"/> 为空时返回空串
@@ -83,6 +87,7 @@ namespace GameLogic.Campaign
                 ObjectiveRecords = state.ObjectiveRecords,
                 ControlledLogicId = state.ControlHandoff?.ControlledLogicId ?? 0,
                 GroundItems = state.GroundItems,
+                WorkOrders = state.WorkOrders,
             };
 
             string json = JsonUtility.ToJson(payload);

@@ -32,8 +32,6 @@ namespace GameLogic.Campaign.Regions
         private Camera _camera;
         private readonly List<HomeValleyMachineMarker> _machineMarkers = new List<HomeValleyMachineMarker>(4);
         private HomeValleyMachineMarker _selected;
-        private readonly Dictionary<string, float> _repairRemainingSeconds = new Dictionary<string, float>(3);
-        private readonly Dictionary<string, float> _salvageRemainingSeconds = new Dictionary<string, float>(2);
 
         /// <summary>ER2-INPUT-01：归还谷地自己的镜头状态机实例（不共享细胞阶段那个——两边场景
         /// 互斥运行，各自 Bind 自己的 Camera.main，生命周期也该各管各的，见 Exit() 的 Unbind）。</summary>
@@ -55,10 +53,12 @@ namespace GameLogic.Campaign.Regions
         }
 
         /// <summary>本类由 <see cref="GameLogic.Stage.GameRoot"/> 用 <c>??=</c> 惰性创建、跨多局
-        /// 复用同一实例（同一进程内先后玩过 A、B 两局）。<see cref="_repairRemainingSeconds"/> 等运行时
-        /// 计时字典是纯内存态、不落盘、按 <see cref="BuildingRecord.BuildingId"/> 这个在任何战役里都
-        /// 长得一样的字符串做键——不清空的话，A 局一个没跑完的维修计时会被 B 局的同名建筑误认成
-        /// "已有订单在进行中"（实测发现，真实 bug，不是假设）。用 CampaignId 判断是否真的换了一局。</summary>
+        /// 复用同一实例（同一进程内先后玩过 A、B 两局）。ER3-WRK-01 起 WorkOrder 的进度
+        /// （<see cref="WorkOrderRecord.Progress"/>/<see cref="WorkOrderRecord.Duration"/>）已经落在
+        /// <see cref="CampaignState"/> 本体里，不再需要本类持有按 BuildingId 做键的纯内存计时字典
+        /// （ER2-SCENE-01 曾在此踩过"A 局残留计时污染 B 局同名建筑"的真实 bug，起因正是那类字典）；
+        /// <see cref="HomeValleyWorkOrders"/> 内部仅有的瞬态看门狗字典按 WorkOrderId（含 GUID）做键，
+        /// 天然不会跨局撞名。<c>_boundCampaignId</c> 仍保留，供将来其它运行时缓存复用同一纪律。</summary>
         private string _boundCampaignId;
 
         public void Enter(bool resume)
@@ -76,19 +76,12 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
-            if (_boundCampaignId != state.CampaignId)
-            {
-                _repairRemainingSeconds.Clear();
-                _salvageRemainingSeconds.Clear();
-                _boundCampaignId = state.CampaignId;
-            }
+            _boundCampaignId = state.CampaignId;
 
             EnsureRegionSeeded(state);
             EnsureMachinesSeeded(state);
             state.CurrentRegionId = HomeValleyLayout.RegionId;
             HomeValleyPowerGrid.Recompute(state); // 幂等：新建战役刚播种、或读档恢复旧存档，都用当前数据重算一次。
-            RearmInterruptedWorkOrders(state);
-            RearmInterruptedSalvage(state);
 
             BuildVisuals(state);
             SetupCameraDirector();
@@ -139,8 +132,43 @@ namespace GameLogic.Campaign.Regions
             }
 
             TickMachineMovement(scaledDt);
-            TickRepairs(scaledDt);
-            TickSalvage(scaledDt);
+
+            CampaignState state = CampaignSession.Current;
+            if (state != null)
+            {
+                HomeValleyWorkOrders.Tick(state, scaledDt, GetMachinePosition, ReleaseMachineMovement);
+                SyncWorldVisuals(state);
+            }
+        }
+
+        /// <summary>供 <see cref="HomeValleyWorkOrders.Tick"/> 赶路阶段路径停滞看门狗查询机器实时坐标
+        /// （<see cref="MachineRecord.WorldPosition"/> 只在 Exit 时才同步，赶路途中是过期值，必须读
+        /// Transform 实时位置）。</summary>
+        private Vector2? GetMachinePosition(int logicId)
+        {
+            foreach (HomeValleyMachineMarker marker in _machineMarkers)
+            {
+                if (marker.LogicId == logicId)
+                {
+                    Vector3 p = marker.transform.position;
+                    return new Vector2(p.x, p.z);
+                }
+            }
+            return null;
+        }
+
+        /// <summary>PathBlocked 触发时的释放回调：让对应 marker 停止赶路，不留一个订单已经
+        /// Waiting/释放但视觉上机器还在朝旧目标走的不一致状态。</summary>
+        private void ReleaseMachineMovement(int logicId)
+        {
+            foreach (HomeValleyMachineMarker marker in _machineMarkers)
+            {
+                if (marker.LogicId == logicId)
+                {
+                    marker.CancelCommandMove();
+                    return;
+                }
+            }
         }
 
         /// <summary>Space（Strategy 域）：与 CellStageFlow.HandleStrategicPauseInput 同款语义。
@@ -206,6 +234,14 @@ namespace GameLogic.Campaign.Regions
             _possessed.CancelCommandMove();
             _possessed = next;
             _possessed.CancelCommandMove();
+
+            // 同 EnsureDirectTarget：切换到的新机器也不能一边被玩家直控、一边还被工作单状态机推进。
+            CampaignState state = CampaignSession.Current;
+            if (state != null)
+            {
+                HomeValleyWorkOrders.OnMachinePossessed(state, next.LogicId);
+            }
+
             _selected?.SetSelected(false);
             _selected = next;
             _selected.SetSelected(true);
@@ -222,6 +258,14 @@ namespace GameLogic.Campaign.Regions
             }
             _possessed = _selected;
             _possessed.CancelCommandMove();
+
+            // ERD-WRK-003 第三条：接管中的机器不再持有在办订单（保留已搬货物/已扣资源，订单回 Ready
+            // 等待重新指派），不能一边被玩家亲自开、一边又被工作单状态机继续推进。
+            CampaignState state = CampaignSession.Current;
+            if (state != null)
+            {
+                HomeValleyWorkOrders.OnMachinePossessed(state, _possessed.LogicId);
+            }
             return true;
         }
 
@@ -414,16 +458,7 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        // ── 资源事务 / WorkOrder 修复 / 残骸拆解（DEBT-ER2SCENE01-01 收口）─────
-
-        public readonly struct RepairStartResult
-        {
-            public readonly bool Success;
-            public readonly string Message;
-            private RepairStartResult(bool success, string message) { Success = success; Message = message; }
-            public static RepairStartResult Ok(string message) => new RepairStartResult(true, message);
-            public static RepairStartResult Fail(string message) => new RepairStartResult(false, message);
-        }
+        // ── 资源事务展示 ─────────────────────────────────────────────────────────
 
         /// <summary>核心"应急缓存180/180"是 <see cref="CampaignState.Scrap"/> 的封顶展示，不是独立
         /// 容器——ERD-ECO-001 完整的多容器资源事务模型（核心缓存/仓库/机器货舱互相转移、总量守恒）
@@ -432,305 +467,6 @@ namespace GameLogic.Campaign.Regions
         {
             const int cap = 180;
             return (Mathf.Clamp(state.Scrap, 0, cap), cap);
-        }
-
-        /// <summary>对 Damaged 建筑发起正式修复：立即按 <see cref="HomeValleyLayout.RepairProfile"/>
-        /// 经 <see cref="CampaignEconomyLedger"/> 预留（Proposed→Reserved，此刻真正扣废料）、登记一条
-        /// <see cref="WorkOrderRecord"/> 并把 <see cref="WorkOrderRecord.ResourceTransactionId"/> 指向
-        /// 该事务、转 Running，交给 <see cref="TickRepairs"/> 计时完工时 Commit（ER3-ECO-01 收口
-        /// DEBT-ER2SCENE01-01 遗留的"直接改 state.Scrap"写法）。触发方式（点建筑/E 交互）由
-        /// ER5-INT-01/UI-04 负责调用本方法，本类不做输入绑定。</summary>
-        public RepairStartResult TryStartRepair(string buildingTypeId)
-        {
-            CampaignState state = CampaignSession.Current;
-            if (state == null || !IsActive)
-            {
-                return RepairStartResult.Fail("没有活动的归还谷地会话。");
-            }
-            if (!HomeValleyLayout.RepairProfile.TryGetValue(buildingTypeId, out (int ScrapCost, float Seconds) profile))
-            {
-                return RepairStartResult.Fail($"{buildingTypeId} 不在修复清单里（无需修复材料前置或不存在）。");
-            }
-            BuildingRecord building = FindBuilding(state, buildingTypeId);
-            if (building == null)
-            {
-                return RepairStartResult.Fail($"归还谷地没有 {buildingTypeId} 建筑记录。");
-            }
-            if (building.ConstructionState != BuildingConstructionState.Damaged)
-            {
-                return RepairStartResult.Fail($"{buildingTypeId} 当前是 {building.ConstructionState}，不是 Damaged，无需修复。");
-            }
-            if (_repairRemainingSeconds.ContainsKey(building.BuildingId))
-            {
-                return RepairStartResult.Fail($"{buildingTypeId} 已有维修订单在进行中。");
-            }
-
-            string transactionId = building.BuildingId + ":repair-tx:" + Guid.NewGuid().ToString("N").Substring(0, 8);
-            CampaignEconomyLedger.ProposeConsume(state, transactionId, building.BuildingId,
-                CampaignEconomyLedger.ResourceScrap, profile.ScrapCost);
-            CampaignEconomyLedger.LedgerResult reserve = CampaignEconomyLedger.Reserve(state, transactionId);
-            if (!reserve.Success)
-            {
-                CampaignEconomyLedger.Cancel(state, transactionId);
-                return RepairStartResult.Fail($"废料不足：需要 {profile.ScrapCost}，当前 {state.Scrap}（{reserve.FailureReason}）。");
-            }
-            CampaignEconomyLedger.MarkRunning(state, transactionId);
-
-            var order = new WorkOrderRecord
-            {
-                WorkOrderId = building.BuildingId + ":repair:" + Guid.NewGuid().ToString("N").Substring(0, 8),
-                Kind = WorkOrderKind.Repair,
-                IssuerId = "player",
-                TargetId = building.BuildingId,
-                SourceId = null,
-                DestinationId = null,
-                RequiredTags = Array.Empty<string>(),
-                ResourceTransactionId = transactionId,
-                Priority = 0,
-                CreatedTick = 0,
-                AssignedMachineLogicId = 0,
-                State = WorkOrderState.InProgress,
-                FailureReason = null,
-                RetryCount = 0,
-            };
-            state.WorkOrders = (state.WorkOrders ?? Array.Empty<WorkOrderRecord>()).Append(order).ToArray();
-            _repairRemainingSeconds[building.BuildingId] = profile.Seconds;
-
-            Log.Info($"[HomeValleyController] 开始修复 {buildingTypeId}：扣废料 {profile.ScrapCost}，预计 {profile.Seconds}s（事务 {transactionId}）。");
-            return RepairStartResult.Ok(order.WorkOrderId);
-        }
-
-        /// <summary>进程重启（真实读档，不是同进程 Exit/Enter 往返）后，内存计时器天然是空的——
-        /// <see cref="WorkOrderRecord"/>（ERD-WRK-001）当前没有 Duration/Progress 字段能还原"还剩多少
-        /// 秒"，这是记录类型本身的缺口（完整状态机是 ER3-WRK-01/02 的范围）。本方法用"整段时长重新计时"
-        /// 兜底，保证卡在 InProgress 的订单能继续走完而不是永久卡死——重启前的部分进度会被重置，
-        /// 不是精确续期，但优于永久软锁。</summary>
-        private void RearmInterruptedWorkOrders(CampaignState state)
-        {
-            if (state.WorkOrders == null)
-            {
-                return;
-            }
-
-            foreach (WorkOrderRecord order in state.WorkOrders)
-            {
-                if (order.State != WorkOrderState.InProgress || order.Kind != WorkOrderKind.Repair)
-                {
-                    continue;
-                }
-                if (_repairRemainingSeconds.ContainsKey(order.TargetId))
-                {
-                    continue;
-                }
-                BuildingRecord building = state.BuildingRecords?.FirstOrDefault(b => b.BuildingId == order.TargetId);
-                if (building == null || building.RegionId != HomeValleyLayout.RegionId)
-                {
-                    continue;
-                }
-                if (!HomeValleyLayout.RepairProfile.TryGetValue(building.BuildingTypeId, out (int ScrapCost, float Seconds) profile))
-                {
-                    continue;
-                }
-
-                _repairRemainingSeconds[order.TargetId] = profile.Seconds;
-                Log.Warning($"[HomeValleyController] 重启后发现未完工的维修订单 {order.WorkOrderId}，" +
-                    $"按完整时长 {profile.Seconds}s 重新计时（不精确续期，见方法注释）。");
-            }
-        }
-
-        /// <summary>拆解残骸没有 <see cref="WorkOrderRecord"/> 承载（一次性节点，不走工作单系统），
-        /// 进程重启后能否续期只能靠 <see cref="CampaignEconomyLedger"/> 自己的事务状态判断：
-        /// 事务卡在 Reserved/Running 且节点尚未出现在 <see cref="RegionRecord.DestroyedNodeIds"/>，
-        /// 说明重启前正在拆解、内存计时器已丢失——与 <see cref="RearmInterruptedWorkOrders"/> 同样的
-        /// "整段时长重新计时"兜底，不做精确续期。</summary>
-        private void RearmInterruptedSalvage(CampaignState state)
-        {
-            RegionRecord region = state.RegionRecords?.FirstOrDefault(r => r.RegionId == HomeValleyLayout.RegionId);
-            if (region == null)
-            {
-                return;
-            }
-
-            foreach (string nodeId in new[] { HomeValleyLayout.Wreckage1NodeId, HomeValleyLayout.Wreckage2NodeId })
-            {
-                if (region.DestroyedNodeIds != null && region.DestroyedNodeIds.Contains(nodeId))
-                {
-                    continue;
-                }
-                if (_salvageRemainingSeconds.ContainsKey(nodeId))
-                {
-                    continue;
-                }
-                ResourceTransactionRecord tx = CampaignEconomyLedger.Find(state, nodeId + ":salvage-tx");
-                if (tx == null || (tx.State != ResourceTransactionState.Reserved && tx.State != ResourceTransactionState.Running))
-                {
-                    continue;
-                }
-
-                _salvageRemainingSeconds[nodeId] = HomeValleyLayout.WreckageDismantleSeconds;
-                Log.Warning($"[HomeValleyController] 重启后发现未完工的拆解事务 {tx.TransactionId}，" +
-                    $"按完整时长 {HomeValleyLayout.WreckageDismantleSeconds}s 重新计时（不精确续期，见方法注释）。");
-            }
-        }
-
-        private void TickRepairs(float dt)
-        {
-            if (_repairRemainingSeconds.Count == 0)
-            {
-                return;
-            }
-            CampaignState state = CampaignSession.Current;
-            if (state == null)
-            {
-                return;
-            }
-
-            var buildingIds = new List<string>(_repairRemainingSeconds.Keys);
-            foreach (string buildingId in buildingIds)
-            {
-                float remaining = _repairRemainingSeconds[buildingId] - dt;
-                if (remaining > 0f)
-                {
-                    _repairRemainingSeconds[buildingId] = remaining;
-                    continue;
-                }
-                _repairRemainingSeconds.Remove(buildingId);
-                CompleteRepair(state, buildingId);
-            }
-        }
-
-        private void CompleteRepair(CampaignState state, string buildingId)
-        {
-            BuildingRecord building = state.BuildingRecords.FirstOrDefault(b => b.BuildingId == buildingId);
-            if (building == null)
-            {
-                return;
-            }
-
-            building.ConstructionState = BuildingConstructionState.Operational;
-
-            WorkOrderRecord order = state.WorkOrders?.LastOrDefault(w =>
-                w.TargetId == buildingId && w.State == WorkOrderState.InProgress);
-            if (order != null && !string.IsNullOrEmpty(order.ResourceTransactionId))
-            {
-                CampaignEconomyLedger.Commit(state, order.ResourceTransactionId);
-            }
-            if (order != null)
-            {
-                order.State = WorkOrderState.Completed;
-            }
-
-            // 发电机的"额外电力 80"、信号塔的"额外带宽 5"都不再在这里手写增量——ER3-PWR-01 起
-            // HomeValleyPowerGrid.Recompute 每次都从当前 Operational 建筑动态求和，建筑一旦转
-            // Operational，下面这行 Recompute 自然会把它的贡献算进去。ER3-ECO-01 曾经把发电机的
-            // +80 走 CampaignEconomyLedger 当"生产型事务"记账——那是错的：PowerCapacity 不是一个
-            // 可以被消耗/授予的资源余额，而是电网仲裁的只读派生值，已改正。
-            // 仓库：只转 Operational。容量 300 是仓储守恒（ERD-ECO-003）的字段范畴，
-            // 属于 ER3-STO-01——本 Story 不新增未经该 Story 定义的容量字段。
-
-            HomeValleyPowerGrid.Recompute(state);
-            RefreshBuildingVisual(building);
-            Log.Info($"[HomeValleyController] {buildingId} 修复完成，转 Operational。");
-        }
-
-        /// <summary>拆解残骸（DEMO-CONTENT-LOCK.md §2.1：一次性 60 废料，12 秒）。与修复不同——
-        /// 完工才发废料，不是即时扣款，因为这是产出而非消耗事务：经
-        /// <see cref="CampaignEconomyLedger.ProposeProduce"/> 登记，Reserve/Running 阶段不动资源池，
-        /// <see cref="CompleteSalvage"/> Commit 时才真正发放。transactionId 用 nodeId 派生、全程确定
-        /// （一个残骸只会被拆一次），天然幂等——读档重放不会二次发放。</summary>
-        public RepairStartResult TryStartSalvage(string nodeId)
-        {
-            CampaignState state = CampaignSession.Current;
-            if (state == null || !IsActive)
-            {
-                return RepairStartResult.Fail("没有活动的归还谷地会话。");
-            }
-            if (nodeId != HomeValleyLayout.Wreckage1NodeId && nodeId != HomeValleyLayout.Wreckage2NodeId)
-            {
-                return RepairStartResult.Fail($"{nodeId} 不是归还谷地的残骸节点。");
-            }
-            RegionRecord region = state.RegionRecords?.FirstOrDefault(r => r.RegionId == HomeValleyLayout.RegionId);
-            if (region == null)
-            {
-                return RepairStartResult.Fail("归还谷地区域记录不存在。");
-            }
-            if (region.DestroyedNodeIds.Contains(nodeId))
-            {
-                return RepairStartResult.Fail($"{nodeId} 已经拆解过了。");
-            }
-            if (_salvageRemainingSeconds.ContainsKey(nodeId))
-            {
-                return RepairStartResult.Fail($"{nodeId} 已有拆解任务在进行中。");
-            }
-
-            string transactionId = nodeId + ":salvage-tx";
-            CampaignEconomyLedger.ProposeProduce(state, transactionId, nodeId,
-                CampaignEconomyLedger.ResourceScrap, HomeValleyLayout.WreckageScrapYield);
-            CampaignEconomyLedger.Reserve(state, transactionId);
-            CampaignEconomyLedger.MarkRunning(state, transactionId);
-
-            _salvageRemainingSeconds[nodeId] = HomeValleyLayout.WreckageDismantleSeconds;
-            Log.Info($"[HomeValleyController] 开始拆解 {nodeId}，预计 {HomeValleyLayout.WreckageDismantleSeconds}s（事务 {transactionId}）。");
-            return RepairStartResult.Ok(nodeId);
-        }
-
-        private void TickSalvage(float dt)
-        {
-            if (_salvageRemainingSeconds.Count == 0)
-            {
-                return;
-            }
-            CampaignState state = CampaignSession.Current;
-            if (state == null)
-            {
-                return;
-            }
-
-            var nodeIds = new List<string>(_salvageRemainingSeconds.Keys);
-            foreach (string nodeId in nodeIds)
-            {
-                float remaining = _salvageRemainingSeconds[nodeId] - dt;
-                if (remaining > 0f)
-                {
-                    _salvageRemainingSeconds[nodeId] = remaining;
-                    continue;
-                }
-                _salvageRemainingSeconds.Remove(nodeId);
-                CompleteSalvage(state, nodeId);
-            }
-        }
-
-        private void CompleteSalvage(CampaignState state, string nodeId)
-        {
-            RegionRecord region = state.RegionRecords?.FirstOrDefault(r => r.RegionId == HomeValleyLayout.RegionId);
-            if (region == null || region.DestroyedNodeIds.Contains(nodeId))
-            {
-                return;
-            }
-
-            region.DestroyedNodeIds = region.DestroyedNodeIds.Append(nodeId).ToArray();
-
-            // ER3-STO-01：拆解产出先落地面物（ERD-ECO-003"地面物是独立实体"），再尝试交付进家园存量——
-            // 不再无条件直接 Commit。仓满时废料留在地面（TryCollectWreckageDrop 幂等重试），不会凭空
-            // 消失，也不会绕过 HomeValleyCargo 的容量天花板超发。
-            Vector2 dropPosition = nodeId == HomeValleyLayout.Wreckage1NodeId
-                ? HomeValleyLayout.Wreckage1.Position
-                : HomeValleyLayout.Wreckage2.Position;
-            HomeValleyCargo.SpawnGroundItem(state, HomeValleyLayout.RegionId, dropPosition,
-                CampaignEconomyLedger.ResourceScrap, HomeValleyLayout.WreckageScrapYield, nodeId + ":salvage-drop");
-
-            HomeValleyCargo.StoreResult delivered = TryCollectWreckageDrop(nodeId);
-
-            Transform wreckageGo = _root != null ? _root.transform.Find("Wreckage_" + nodeId) : null;
-            if (wreckageGo != null)
-            {
-                UnityEngine.Object.Destroy(wreckageGo.gameObject);
-            }
-
-            string outcome = delivered.Success
-                ? $"+{HomeValleyLayout.WreckageScrapYield} 废料已入库"
-                : $"仓满，{HomeValleyLayout.WreckageScrapYield} 废料留在地面待收集（{delivered.FailureReason}）";
-            Log.Info($"[HomeValleyController] {nodeId} 拆解完成，{outcome}。");
         }
 
         /// <summary>把一处残骸拆解产出的地面物交付进家园存量。仓满时保持在地面（不丢弃），供玩家在
@@ -753,12 +489,6 @@ namespace GameLogic.Campaign.Regions
 
             HomeValleyCargo.HaulTicket ticket = HomeValleyCargo.TryReserveHaul(state, item.GroundItemId);
             return HomeValleyCargo.CommitHaul(state, ticket, nodeId + ":salvage-tx");
-        }
-
-        private static BuildingRecord FindBuilding(CampaignState state, string buildingTypeId)
-        {
-            return state.BuildingRecords?.FirstOrDefault(b =>
-                b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId == buildingTypeId);
         }
 
         private void RefreshBuildingVisual(BuildingRecord building)
@@ -800,10 +530,98 @@ namespace GameLogic.Campaign.Regions
 
             BuildBeaconSlotVisual();
 
+            if (!state.BuildingRecords.Any(b => b.BuildingId == HomeValleyLayout.RegionId + ":" + HomeValleyLayout.BuildingTypeGenerator2))
+            {
+                BuildBuildSiteVisual(HomeValleyLayout.Generator2Site);
+            }
+
+            foreach (GroundItemRecord item in state.GroundItems ?? Array.Empty<GroundItemRecord>())
+            {
+                if (item.RegionId == HomeValleyLayout.RegionId)
+                {
+                    BuildGroundItemVisual(item);
+                }
+            }
+
             foreach (MachineRecord machine in MachineRegistry.AllRecords.Where(m =>
                 m.RegionId == HomeValleyLayout.RegionId && m.IsAlive))
             {
                 BuildMachineVisual(machine);
+            }
+        }
+
+        /// <summary>ER3-WRK-01：把当前 <see cref="CampaignState"/> 与已生成的占位可视化对账，覆盖
+        /// "订单在游玩过程中完工/产生新地面物"这些 <see cref="BuildVisuals"/>（只在 Enter 时跑一次）
+        /// 覆盖不到的场景。个位数量级的建筑/地面物，逐帧对账开销可忽略，不违反热更层性能纪律
+        /// （那条规则约束的是战斗热路径，参见 <see cref="HomeValleyWorkOrders"/> 类注释同一处说明）。</summary>
+        private void SyncWorldVisuals(CampaignState state)
+        {
+            if (_root == null)
+            {
+                return;
+            }
+
+            foreach (BuildingRecord building in state.BuildingRecords.Where(b => b.RegionId == HomeValleyLayout.RegionId))
+            {
+                Transform go = _root.transform.Find("Building_" + building.BuildingTypeId);
+                if (go == null)
+                {
+                    BuildBuildingVisual(building);
+                    if (building.BuildingTypeId == HomeValleyLayout.BuildingTypeGenerator2)
+                    {
+                        DestroyChild("BuildSite_" + HomeValleyLayout.BuildingTypeGenerator2);
+                    }
+                }
+                else
+                {
+                    RefreshBuildingVisual(building);
+                }
+            }
+
+            RegionRecord region = state.RegionRecords?.FirstOrDefault(r => r.RegionId == HomeValleyLayout.RegionId);
+            if (region != null)
+            {
+                if (region.DestroyedNodeIds.Contains(HomeValleyLayout.Wreckage1NodeId))
+                {
+                    DestroyChild("Wreckage_" + HomeValleyLayout.Wreckage1NodeId);
+                }
+                if (region.DestroyedNodeIds.Contains(HomeValleyLayout.Wreckage2NodeId))
+                {
+                    DestroyChild("Wreckage_" + HomeValleyLayout.Wreckage2NodeId);
+                }
+            }
+
+            var liveGroundItemIds = new HashSet<string>();
+            foreach (GroundItemRecord item in state.GroundItems ?? Array.Empty<GroundItemRecord>())
+            {
+                if (item.RegionId != HomeValleyLayout.RegionId)
+                {
+                    continue;
+                }
+                liveGroundItemIds.Add(item.GroundItemId);
+                if (_root.transform.Find("GroundItem_" + item.GroundItemId) == null)
+                {
+                    BuildGroundItemVisual(item);
+                }
+            }
+            for (int i = _root.transform.childCount - 1; i >= 0; i--)
+            {
+                Transform child = _root.transform.GetChild(i);
+                const string prefix = "GroundItem_";
+                if (child.name.StartsWith(prefix, StringComparison.Ordinal)
+                    && !liveGroundItemIds.Contains(child.name.Substring(prefix.Length)))
+                {
+                    UnityEngine.Object.Destroy(child.gameObject);
+                }
+            }
+        }
+
+        private void DestroyChild(string childName)
+        {
+            Transform child = _root != null ? _root.transform.Find(childName) : null;
+            if (child != null)
+            {
+                UnityEngine.Object.Destroy(child.gameObject);
             }
         }
 
@@ -827,6 +645,32 @@ namespace GameLogic.Campaign.Regions
             go.transform.localScale = new Vector3(2.5f, 0.5f, 2.5f);
             Renderer renderer = go.GetComponent<Renderer>();
             renderer.material = new Material(Shader.Find("Standard")) { color = new Color(0.45f, 0.35f, 0.25f) };
+        }
+
+        /// <summary>ER3-WRK-01 Build：尚未建成的建造位占位（半透明，与 <see cref="BuildBeaconSlotVisual"/>
+        /// 同一手法），可点选发起 <see cref="HomeValleyWorkOrders.TryCreateBuild"/>。</summary>
+        private void BuildBuildSiteVisual(HomeValleyLayout.Anchor site)
+        {
+            GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            go.name = "BuildSite_" + site.Id;
+            go.transform.SetParent(_root.transform, false);
+            go.transform.position = new Vector3(site.Position.x, 0.1f, site.Position.y);
+            go.transform.localScale = new Vector3(3f, 0.2f, 3f);
+            Renderer renderer = go.GetComponent<Renderer>();
+            renderer.material = new Material(Shader.Find("Standard")) { color = new Color(0.3f, 0.6f, 0.9f, 0.4f) };
+        }
+
+        /// <summary>ER3-WRK-01 Haul：地面待搬运物品的可视化，可点选发起
+        /// <see cref="HomeValleyWorkOrders.TryCreateHaul"/>。</summary>
+        private void BuildGroundItemVisual(GroundItemRecord item)
+        {
+            GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            go.name = "GroundItem_" + item.GroundItemId;
+            go.transform.SetParent(_root.transform, false);
+            go.transform.position = new Vector3(item.Position.x, 0.35f, item.Position.y);
+            go.transform.localScale = new Vector3(0.9f, 0.7f, 0.9f);
+            Renderer renderer = go.GetComponent<Renderer>();
+            renderer.material = new Material(Shader.Find("Standard")) { color = new Color(0.85f, 0.75f, 0.35f) };
         }
 
         private void BuildBeaconSlotVisual()
@@ -922,7 +766,31 @@ namespace GameLogic.Campaign.Regions
         /// 天然读不到，不需要在这里另判一次镜头模式。</summary>
         private void HandleSelectionClick()
         {
-            if (_camera == null || !InputRouter.GetMouseButtonDown(0, InputScope.Strategy))
+            if (_camera == null)
+            {
+                return;
+            }
+
+            // 右键＝取消选中机器当前的在办工作单（STORY-EXECUTION-CARDS.md #ER3-WRK-01 要求的
+            // "取消"矩阵列在本 Story 唯一的真实触发入口——正式取消按钮留 ER5-INT-01/UI-04）。
+            // 取消不清空选中/不影响移动指令本身，机器停在原地等待下一次点选下令。
+            if (_selected != null && InputRouter.GetMouseButtonDown(1, InputScope.Strategy))
+            {
+                CampaignState cancelState = CampaignSession.Current;
+                WorkOrderRecord active = cancelState != null
+                    ? HomeValleyWorkOrders.FindActiveOrderForMachine(cancelState, _selected.LogicId)
+                    : null;
+                if (active != null)
+                {
+                    Vector3 pos = _selected.transform.position;
+                    HomeValleyWorkOrders.CancelOrder(cancelState, active.WorkOrderId, new Vector2(pos.x, pos.z));
+                    _selected.CancelCommandMove();
+                    Log.Info($"[HomeValleyController] 已取消 {_selected.LogicId} 的在办订单 {active.WorkOrderId}。");
+                }
+                return;
+            }
+
+            if (!InputRouter.GetMouseButtonDown(0, InputScope.Strategy))
             {
                 return;
             }
@@ -953,36 +821,115 @@ namespace GameLogic.Campaign.Regions
 
             HomeValleyMachineMarker moving = _selected;
             Vector3 destination = hit.point;
+            CampaignState state = CampaignSession.Current;
+            if (state == null)
+            {
+                return;
+            }
 
             string buildingTypeId = BuildingTypeIdFromHit(hit);
+            if (buildingTypeId == HomeValleyLayout.BuildingTypeCore)
+            {
+                CommandWork(moving, destination, "recharge:" + moving.LogicId,
+                    () => HomeValleyWorkOrders.TryCreateRecharge(state, moving.LogicId),
+                    HomeValleyWorkOrders.OnArrivedAtWork, "充电");
+                return;
+            }
             if (buildingTypeId != null)
             {
-                moving.CommandMoveTo(destination, () =>
-                {
-                    RepairStartResult r = TryStartRepair(buildingTypeId);
-                    if (!r.Success)
-                    {
-                        Log.Warning($"[HomeValleyController] 到达 {buildingTypeId} 后无法开始修复：{r.Message}");
-                    }
-                });
+                CommandWork(moving, destination, HomeValleyLayout.RegionId + ":" + buildingTypeId,
+                    () => HomeValleyWorkOrders.TryCreateRepair(state, buildingTypeId, moving.LogicId),
+                    HomeValleyWorkOrders.OnArrivedAtWork, "修复 " + buildingTypeId);
+                return;
+            }
+
+            string buildSiteId = BuildSiteIdFromHit(hit);
+            if (buildSiteId != null)
+            {
+                CommandWork(moving, destination, HomeValleyLayout.RegionId + ":" + buildSiteId,
+                    () => HomeValleyWorkOrders.TryCreateBuild(state, buildSiteId, moving.LogicId),
+                    HomeValleyWorkOrders.OnArrivedAtWork, "建造 " + buildSiteId);
                 return;
             }
 
             string wreckageNodeId = WreckageNodeIdFromHit(hit);
             if (wreckageNodeId != null)
             {
-                moving.CommandMoveTo(destination, () =>
-                {
-                    RepairStartResult r = TryStartSalvage(wreckageNodeId);
-                    if (!r.Success)
-                    {
-                        Log.Warning($"[HomeValleyController] 到达 {wreckageNodeId} 后无法开始拆解：{r.Message}");
-                    }
-                });
+                CommandWork(moving, destination, wreckageNodeId,
+                    () => HomeValleyWorkOrders.TryCreateSalvage(state, wreckageNodeId, moving.LogicId),
+                    HomeValleyWorkOrders.OnArrivedAtWork, "拆解 " + wreckageNodeId);
+                return;
+            }
+
+            string groundItemId = GroundItemIdFromHit(hit);
+            if (groundItemId != null)
+            {
+                CommandHaul(moving, destination, groundItemId, state);
                 return;
             }
 
             moving.CommandMoveTo(destination);
+        }
+
+        /// <summary>"换目标"守卫：点选新工作前，若该机器已经在办一个指向**不同**目标的订单（还在
+        /// 赶路或正在工作），先按玩家取消处理——否则旧订单会被静默丢弃在 Reserved/InProgress，货舱/
+        /// 已扣资源永久悬空（ER3-STO-01"100次...换目标压力测试"同一类真实 bug，这里同样要守）。
+        /// 点的是**同一个**目标（重复点同一栋楼/同一残骸）时刻意不取消——那种场景要落到各 TryCreateX
+        /// 内部"按 TargetId 复用/拒绝已在办"的既有逻辑，不能在这里先取消再重新创建导致重复扣款。</summary>
+        private static void EnsureMachineFree(HomeValleyMachineMarker moving, CampaignState state, string newTargetId)
+        {
+            WorkOrderRecord active = HomeValleyWorkOrders.FindActiveOrderForMachine(state, moving.LogicId);
+            if (active == null || active.TargetId == newTargetId)
+            {
+                return;
+            }
+            Vector3 pos = moving.transform.position;
+            HomeValleyWorkOrders.CancelOrder(state, active.WorkOrderId, new Vector2(pos.x, pos.z));
+        }
+
+        /// <summary>Repair/Build/Salvage/Recharge 共用的下令模板：点击那一刻立即创建/复用订单（真正
+        /// 扣款/校验在这里发生，不是到达后才发生——见 <see cref="HomeValleyWorkOrders"/> 类注释
+        /// "订单何时创建"），成功才真正下达移动指令；失败只记日志，机器原地不动、不白跑一趟。
+        /// <paramref name="prospectiveTargetId"/> 用于 <see cref="EnsureMachineFree"/> 判断是否真的
+        /// "换了目标"——必须与对应 TryCreateX 内部登记的 TargetId 完全一致（Repair/Build 传建筑
+        /// BuildingId，Salvage 传 nodeId，Recharge 传 "recharge:"+LogicId），否则会误判成换目标。</summary>
+        private static void CommandWork(HomeValleyMachineMarker moving, Vector3 destination, string prospectiveTargetId,
+            Func<HomeValleyWorkOrders.WorkOrderOpResult> create, Action<CampaignState, string> onArrive, string label)
+        {
+            CampaignState state = CampaignSession.Current;
+            EnsureMachineFree(moving, state, prospectiveTargetId);
+            HomeValleyWorkOrders.WorkOrderOpResult r = create();
+            if (!r.Success)
+            {
+                Log.Warning($"[HomeValleyController] 下令{label}失败：{r.FailureReason}");
+                return;
+            }
+            moving.CommandMoveTo(destination, () => onArrive(state, r.WorkOrderId));
+        }
+
+        /// <summary>Haul 专属两腿下令：先创建订单，第一腿到地面物拾取，成功后立即接第二腿到交付点
+        /// （固定归还核心）。两腿之间没有玩家再点一次的空档——货物一旦拿到手，机器会自己开去交货。</summary>
+        private static void CommandHaul(HomeValleyMachineMarker moving, Vector3 destination, string groundItemId, CampaignState state)
+        {
+            EnsureMachineFree(moving, state, groundItemId);
+            HomeValleyWorkOrders.WorkOrderOpResult r = HomeValleyWorkOrders.TryCreateHaul(state, groundItemId, moving.LogicId);
+            if (!r.Success)
+            {
+                Log.Warning($"[HomeValleyController] 下令搬运 {groundItemId} 失败：{r.FailureReason}");
+                return;
+            }
+
+            string workOrderId = r.WorkOrderId;
+            moving.CommandMoveTo(destination, () =>
+            {
+                if (!HomeValleyWorkOrders.OnArrivedAtHaulSource(CampaignSession.Current, workOrderId))
+                {
+                    return;
+                }
+                Vector3 corePos = new Vector3(HomeValleyLayout.Core.Position.x, 1f, HomeValleyLayout.Core.Position.y);
+                moving.CommandMoveTo(corePos, () =>
+                    HomeValleyWorkOrders.OnArrivedAtHaulDestination(CampaignSession.Current, workOrderId));
+            });
         }
 
         private static string BuildingTypeIdFromHit(RaycastHit hit)
@@ -995,6 +942,20 @@ namespace GameLogic.Campaign.Regions
         private static string WreckageNodeIdFromHit(RaycastHit hit)
         {
             const string prefix = "Wreckage_";
+            string name = hit.collider.gameObject.name;
+            return name.StartsWith(prefix, StringComparison.Ordinal) ? name.Substring(prefix.Length) : null;
+        }
+
+        private static string BuildSiteIdFromHit(RaycastHit hit)
+        {
+            const string prefix = "BuildSite_";
+            string name = hit.collider.gameObject.name;
+            return name.StartsWith(prefix, StringComparison.Ordinal) ? name.Substring(prefix.Length) : null;
+        }
+
+        private static string GroundItemIdFromHit(RaycastHit hit)
+        {
+            const string prefix = "GroundItem_";
             string name = hit.collider.gameObject.name;
             return name.StartsWith(prefix, StringComparison.Ordinal) ? name.Substring(prefix.Length) : null;
         }

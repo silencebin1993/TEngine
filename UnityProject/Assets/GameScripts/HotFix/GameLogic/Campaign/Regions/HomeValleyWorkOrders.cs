@@ -1,0 +1,938 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+
+namespace GameLogic.Campaign.Regions
+{
+    /// <summary>ER3-WRK-01：ERD-WRK-001/003 五类 WorkOrder（Haul/Build/Repair/Salvage/Recharge）的
+    /// 唯一状态机实现，取代 ER2-SCENE-01/ER3-STO-01 遗留的"每类各自一套 _xxxRemainingSeconds 内存
+    /// 字典 + 到达才补登一条几乎不参与状态机的 WorkOrderRecord"写法。
+    ///
+    /// ── 订单何时创建 ──
+    /// 玩家点选目标那一刻（不是到达那一刻）就创建/复用订单并转 <see cref="WorkOrderState.Reserved"/>——
+    /// 与旧写法（到达后才 new 一条 InProgress 记录）不同，机器在赶路途中也真实"持有"一份订单，
+    /// 工作面板才有东西可显示，ERD-WRK-003"路径卡住/机器受控/机器死亡"这些中断规则在赶路阶段
+    /// 才有意义去打断。消费型资源（Repair/Build）在创建那一刻立即 Reserve（真正扣款）——与
+    /// ER3-ECO-01/ER2-SCENE-01 既有 UX 一致："下令那一刻就看到废料减少"，不是走到地方才扣。
+    ///
+    /// ── Duration/Progress 落盘 ──
+    /// <see cref="WorkOrderRecord.Progress"/>/<see cref="WorkOrderRecord.Duration"/>（本 Story 新增字段）
+    /// 直接持久化在订单里，真实进程重启不再需要"整段时长重新计时"的兜底（<c>RearmInterruptedWorkOrders</c>/
+    /// <c>RearmInterruptedSalvage</c> 那类写法本 Story 起不再需要，读档后 <see cref="Tick"/> 直接从
+    /// 上次的 Progress 续走）。
+    ///
+    /// ── 机器死亡/受控没有真实触发源 ──
+    /// 归还谷地当前没有战斗，机器不会真的阵亡；"机器受控"只在 WASD 接管时发生。本类的死亡/受控处理
+    /// 规则本身是真实、可独立单测的（<see cref="MachineRegistry.MarkDeadByLogicId"/> 已存在，只是尚无
+    /// 归还谷地内的调用方），Play Mode 验收只能覆盖"受控"这一条真实可触发路径，死亡走离线单测直接调用
+    /// 该 API 模拟，见 evidence 文档——这是依赖尚不存在（家园内战斗）的诚实范围裁剪，不是遗漏。</summary>
+    public static class HomeValleyWorkOrders
+    {
+        public readonly struct WorkOrderOpResult
+        {
+            public readonly bool Success;
+            public readonly string FailureReason;
+            public readonly string WorkOrderId;
+
+            private WorkOrderOpResult(bool success, string failureReason, string workOrderId)
+            {
+                Success = success;
+                FailureReason = failureReason;
+                WorkOrderId = workOrderId;
+            }
+
+            public static WorkOrderOpResult Ok(string workOrderId) => new WorkOrderOpResult(true, null, workOrderId);
+            public static WorkOrderOpResult Fail(string reason) => new WorkOrderOpResult(false, reason, null);
+        }
+
+        private const string DestinationCore = HomeValleyLayout.RegionId + ":" + HomeValleyLayout.BuildingTypeCore;
+
+        // ── 能力（RequiredTags 的最小落地：Demo 现存机型能力表）───────────────────────
+        // ERC-001/002 是通用搬运轮式，"可搬运/建造/拆解/建筑基础维修/编队/直控"（DEMO-CONTENT-LOCK.md
+        // §2.1）；ERC-003 是战斗履带，只能给自己 Recharge，不承担家园劳务——它当前不会在归还谷地出生
+        // （由 ER4-FAC-01 装配站生产后驶出工厂），这里先落数据，不等它落地才补。
+
+        private static readonly Dictionary<string, WorkOrderKind[]> ChassisCapabilities =
+            new Dictionary<string, WorkOrderKind[]>
+            {
+                [HomeValleyLayout.Erc001ChassisId] = new[]
+                {
+                    WorkOrderKind.Haul, WorkOrderKind.Build, WorkOrderKind.Repair,
+                    WorkOrderKind.Salvage, WorkOrderKind.Recharge,
+                },
+                [HomeValleyLayout.Erc002ChassisId] = new[]
+                {
+                    WorkOrderKind.Haul, WorkOrderKind.Build, WorkOrderKind.Repair,
+                    WorkOrderKind.Salvage, WorkOrderKind.Recharge,
+                },
+                [HomeValleyLayout.Erc003ChassisId] = new[] { WorkOrderKind.Recharge },
+            };
+
+        private static string[] RequiredTagsFor(WorkOrderKind kind) => new[] { kind.ToString().ToLowerInvariant() };
+
+        private static bool IsCapable(string chassisId, WorkOrderKind kind)
+        {
+            return ChassisCapabilities.TryGetValue(chassisId, out WorkOrderKind[] kinds) && kinds.Contains(kind);
+        }
+
+        // ── 查询 ─────────────────────────────────────────────────────────────────
+
+        public static WorkOrderRecord Find(CampaignState state, string workOrderId)
+        {
+            return state?.WorkOrders?.FirstOrDefault(o => o.WorkOrderId == workOrderId);
+        }
+
+        private static bool IsTerminal(WorkOrderState s) =>
+            s == WorkOrderState.Completed || s == WorkOrderState.Cancelled || s == WorkOrderState.Failed;
+
+        private static WorkOrderRecord FindActiveByTarget(CampaignState state, WorkOrderKind kind, string targetId)
+        {
+            return state.WorkOrders?.LastOrDefault(o => o.Kind == kind && o.TargetId == targetId && !IsTerminal(o.State));
+        }
+
+        public static WorkOrderRecord FindActiveOrderForMachine(CampaignState state, int machineLogicId)
+        {
+            if (machineLogicId <= 0)
+            {
+                return null;
+            }
+            return state.WorkOrders?.LastOrDefault(o => o.AssignedMachineLogicId == machineLogicId && !IsTerminal(o.State));
+        }
+
+        private static void Append(CampaignState state, WorkOrderRecord order)
+        {
+            state.WorkOrders = (state.WorkOrders ?? Array.Empty<WorkOrderRecord>()).Append(order).ToArray();
+        }
+
+        private static long NowTick(CampaignState state) => (long)(state.PlaySeconds * 1000f);
+
+        // ── 通用创建前置校验 ─────────────────────────────────────────────────────
+
+        private readonly struct MachineCheck
+        {
+            public readonly bool Ok;
+            public readonly string FailureReason;
+            public readonly MachineRecord Record;
+            private MachineCheck(bool ok, string reason, MachineRecord record) { Ok = ok; FailureReason = reason; Record = record; }
+            public static MachineCheck Pass(MachineRecord r) => new MachineCheck(true, null, r);
+            public static MachineCheck Bad(string reason) => new MachineCheck(false, reason, null);
+        }
+
+        private static MachineCheck CheckMachine(int machineLogicId, WorkOrderKind kind)
+        {
+            if (!MachineRegistry.TryGetRecord(machineLogicId, out MachineRecord record) || !record.IsAlive)
+            {
+                return MachineCheck.Bad("machine-not-found-or-dead");
+            }
+            if (record.RegionId != HomeValleyLayout.RegionId)
+            {
+                return MachineCheck.Bad("machine-out-of-region");
+            }
+            if (!IsCapable(record.ChassisId, kind))
+            {
+                return MachineCheck.Bad($"machine-not-capable:{record.ChassisId}:{kind}");
+            }
+            return MachineCheck.Pass(record);
+        }
+
+        // ── Repair ───────────────────────────────────────────────────────────────
+
+        public static WorkOrderOpResult TryCreateRepair(CampaignState state, string buildingTypeId, int machineLogicId)
+        {
+            BuildingRecord building = state.BuildingRecords?.FirstOrDefault(b =>
+                b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId == buildingTypeId);
+            if (building == null)
+            {
+                return WorkOrderOpResult.Fail($"building-not-found:{buildingTypeId}");
+            }
+
+            WorkOrderRecord existing = FindActiveByTarget(state, WorkOrderKind.Repair, building.BuildingId);
+            if (existing != null)
+            {
+                if (existing.State != WorkOrderState.Ready)
+                {
+                    return WorkOrderOpResult.Fail($"order-already-active:{existing.State}");
+                }
+                return ReassignExisting(state, existing, machineLogicId);
+            }
+
+            if (building.ConstructionState != BuildingConstructionState.Damaged)
+            {
+                return WorkOrderOpResult.Fail($"not-damaged:{building.ConstructionState}");
+            }
+            if (!HomeValleyLayout.RepairProfile.TryGetValue(buildingTypeId, out (int ScrapCost, float Seconds) profile))
+            {
+                return WorkOrderOpResult.Fail($"no-repair-profile:{buildingTypeId}");
+            }
+
+            MachineCheck check = CheckMachine(machineLogicId, WorkOrderKind.Repair);
+            if (!check.Ok)
+            {
+                return WorkOrderOpResult.Fail(check.FailureReason);
+            }
+
+            string workOrderId = building.BuildingId + ":repair:" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            string txId = workOrderId + ":tx";
+            CampaignEconomyLedger.ProposeConsume(state, txId, building.BuildingId, CampaignEconomyLedger.ResourceScrap, profile.ScrapCost);
+            CampaignEconomyLedger.LedgerResult reserve = CampaignEconomyLedger.Reserve(state, txId);
+            if (!reserve.Success)
+            {
+                CampaignEconomyLedger.Cancel(state, txId);
+                return WorkOrderOpResult.Fail($"insufficient-scrap:{reserve.FailureReason}");
+            }
+
+            var order = NewOrder(state, workOrderId, WorkOrderKind.Repair, building.BuildingId, machineLogicId,
+                resourceTransactionId: txId, duration: profile.Seconds);
+            Append(state, order);
+            return WorkOrderOpResult.Ok(workOrderId);
+        }
+
+        // ── Build（唯一真实内容：第二座发电机）─────────────────────────────────────
+
+        public static WorkOrderOpResult TryCreateBuild(CampaignState state, string buildingTypeId, int machineLogicId)
+        {
+            if (!HomeValleyLayout.BuildProfile.TryGetValue(buildingTypeId, out (int ScrapCost, float Seconds) profile))
+            {
+                return WorkOrderOpResult.Fail($"no-build-profile:{buildingTypeId}");
+            }
+
+            string plannedBuildingId = HomeValleyLayout.RegionId + ":" + buildingTypeId;
+            bool alreadyExists = state.BuildingRecords?.Any(b => b.BuildingId == plannedBuildingId) ?? false;
+
+            WorkOrderRecord existing = FindActiveByTarget(state, WorkOrderKind.Build, plannedBuildingId);
+            if (existing != null)
+            {
+                if (existing.State != WorkOrderState.Ready)
+                {
+                    return WorkOrderOpResult.Fail($"order-already-active:{existing.State}");
+                }
+                return ReassignExisting(state, existing, machineLogicId);
+            }
+
+            if (alreadyExists)
+            {
+                return WorkOrderOpResult.Fail("already-built");
+            }
+
+            MachineCheck check = CheckMachine(machineLogicId, WorkOrderKind.Build);
+            if (!check.Ok)
+            {
+                return WorkOrderOpResult.Fail(check.FailureReason);
+            }
+
+            string workOrderId = plannedBuildingId + ":build:" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            string txId = workOrderId + ":tx";
+            CampaignEconomyLedger.ProposeConsume(state, txId, plannedBuildingId, CampaignEconomyLedger.ResourceScrap, profile.ScrapCost);
+            CampaignEconomyLedger.LedgerResult reserve = CampaignEconomyLedger.Reserve(state, txId);
+            if (!reserve.Success)
+            {
+                CampaignEconomyLedger.Cancel(state, txId);
+                return WorkOrderOpResult.Fail($"insufficient-scrap:{reserve.FailureReason}");
+            }
+
+            var planned = new BuildingRecord
+            {
+                BuildingId = plannedBuildingId,
+                BuildingTypeId = buildingTypeId,
+                RegionId = HomeValleyLayout.RegionId,
+                Position = HomeValleyLayout.Generator2Site.Position,
+                Rotation = 0f,
+                Health = 100f,
+                ConstructionState = BuildingConstructionState.Planned,
+                PowerPriority = 1,
+                PowerState = BuildingPowerState.NotApplicable,
+                Inventory = Array.Empty<CargoEntry>(),
+                QueueIds = Array.Empty<string>(),
+                BlockedReason = null,
+            };
+            state.BuildingRecords = (state.BuildingRecords ?? Array.Empty<BuildingRecord>()).Append(planned).ToArray();
+
+            var order = NewOrder(state, workOrderId, WorkOrderKind.Build, plannedBuildingId, machineLogicId,
+                resourceTransactionId: txId, duration: profile.Seconds);
+            Append(state, order);
+            return WorkOrderOpResult.Ok(workOrderId);
+        }
+
+        // ── Salvage（拆解残骸，保持 ER3-STO-01 已验证的落地/收货行为）────────────────
+
+        public static WorkOrderOpResult TryCreateSalvage(CampaignState state, string nodeId, int machineLogicId)
+        {
+            if (nodeId != HomeValleyLayout.Wreckage1NodeId && nodeId != HomeValleyLayout.Wreckage2NodeId)
+            {
+                return WorkOrderOpResult.Fail($"not-a-wreckage-node:{nodeId}");
+            }
+            RegionRecord region = state.RegionRecords?.FirstOrDefault(r => r.RegionId == HomeValleyLayout.RegionId);
+            if (region == null)
+            {
+                return WorkOrderOpResult.Fail("region-not-found");
+            }
+
+            WorkOrderRecord existing = FindActiveByTarget(state, WorkOrderKind.Salvage, nodeId);
+            if (existing != null)
+            {
+                if (existing.State != WorkOrderState.Ready)
+                {
+                    return WorkOrderOpResult.Fail($"order-already-active:{existing.State}");
+                }
+                return ReassignExisting(state, existing, machineLogicId);
+            }
+
+            if (region.DestroyedNodeIds != null && region.DestroyedNodeIds.Contains(nodeId))
+            {
+                return WorkOrderOpResult.Fail("already-salvaged");
+            }
+
+            MachineCheck check = CheckMachine(machineLogicId, WorkOrderKind.Salvage);
+            if (!check.Ok)
+            {
+                return WorkOrderOpResult.Fail(check.FailureReason);
+            }
+
+            string workOrderId = nodeId + ":salvage:" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            string txId = nodeId + ":salvage-tx"; // 沿用 ER3-STO-01 的固定派生 id：一个残骸只拆一次，天然幂等。
+            CampaignEconomyLedger.ProposeProduce(state, txId, nodeId, CampaignEconomyLedger.ResourceScrap, HomeValleyLayout.WreckageScrapYield);
+            CampaignEconomyLedger.Reserve(state, txId);
+
+            var order = NewOrder(state, workOrderId, WorkOrderKind.Salvage, nodeId, machineLogicId,
+                resourceTransactionId: txId, duration: HomeValleyLayout.WreckageDismantleSeconds);
+            Append(state, order);
+            return WorkOrderOpResult.Ok(workOrderId);
+        }
+
+        // ── Haul（地面物两阶段搬运，复用 HomeValleyCargo 的票据 API）──────────────────
+
+        public static WorkOrderOpResult TryCreateHaul(CampaignState state, string groundItemId, int machineLogicId)
+        {
+            WorkOrderRecord existing = FindActiveByTarget(state, WorkOrderKind.Haul, groundItemId);
+            if (existing != null)
+            {
+                if (existing.State != WorkOrderState.Ready)
+                {
+                    return WorkOrderOpResult.Fail($"order-already-active:{existing.State}");
+                }
+                return ReassignExisting(state, existing, machineLogicId);
+            }
+
+            GroundItemRecord item = HomeValleyCargo.FindGroundItem(state, groundItemId);
+            if (item == null)
+            {
+                return WorkOrderOpResult.Fail($"ground-item-not-found:{groundItemId}");
+            }
+
+            MachineCheck check = CheckMachine(machineLogicId, WorkOrderKind.Haul);
+            if (!check.Ok)
+            {
+                return WorkOrderOpResult.Fail(check.FailureReason);
+            }
+
+            string workOrderId = groundItemId + ":haul:" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            var order = NewOrder(state, workOrderId, WorkOrderKind.Haul, groundItemId, machineLogicId,
+                resourceTransactionId: null, duration: 0f);
+            order.SourceId = groundItemId;
+            order.DestinationId = DestinationCore;
+            Append(state, order);
+            return WorkOrderOpResult.Ok(workOrderId);
+        }
+
+        /// <summary>第一腿到达（地面物所在位置）：拾取——移出地面、镜像进机器货舱
+        /// （<see cref="MachineRecord.Cargo"/>，ER3-STO-01 预留但未强制使用的字段，本 Story 起真正
+        /// 承载"搬运在途"的持久化状态，跨帧/跨进程重启都能正确复原，不再需要临时票据）。</summary>
+        public static bool OnArrivedAtHaulSource(CampaignState state, string workOrderId)
+        {
+            WorkOrderRecord order = Find(state, workOrderId);
+            if (order == null || order.Kind != WorkOrderKind.Haul || order.State != WorkOrderState.Reserved)
+            {
+                return false;
+            }
+
+            PathWatch.Remove(order.WorkOrderId); // 离开 Reserved（第一腿赶路结束）。
+
+            HomeValleyCargo.HaulTicket ticket = HomeValleyCargo.TryReserveHaul(state, order.SourceId);
+            if (ticket == null)
+            {
+                // 地面物在赶路途中消失（另一动作已收走）——目标已毁，取消订单，机器空手返回战略层。
+                order.State = WorkOrderState.Cancelled;
+                order.FailureReason = "source-vanished";
+                order.AssignedMachineLogicId = 0;
+                return false;
+            }
+
+            if (MachineRegistry.TryGetRecord(order.AssignedMachineLogicId, out MachineRecord machine))
+            {
+                machine.Cargo = new[] { new CargoEntry { ResourceType = ticket.ResourceType, Amount = ticket.Amount } };
+            }
+
+            order.State = WorkOrderState.InProgress; // 第二腿：搬运在途，货已在机器货舱里。
+            return true;
+        }
+
+        /// <summary>第二腿到达（交付点，固定为归还核心）：交付；仓满则 Waiting/storage-full，货物
+        /// 留在机器货舱（不落地、不丢失），<see cref="Tick"/> 每帧重试直到腾出空间或玩家取消。</summary>
+        public static void OnArrivedAtHaulDestination(CampaignState state, string workOrderId)
+        {
+            WorkOrderRecord order = Find(state, workOrderId);
+            if (order == null || order.Kind != WorkOrderKind.Haul || order.State != WorkOrderState.InProgress)
+            {
+                return;
+            }
+            TryDeliverHaul(state, order);
+        }
+
+        /// <summary>交付前自己先查容量——不能直接靠 <see cref="HomeValleyCargo.CommitHaul"/> 判定失败，
+        /// 那个方法失败时会把物品放回地面（服务"拾取即交付"的旧单帧流程，见其文档），而这里的货物
+        /// 一直稳定持有在 <see cref="MachineRecord.Cargo"/>——两边都保留会变成"货舱和地面各一份"的
+        /// 真实复制 bug（实测踩到过）。仓满就地留在货舱，不调用 CommitHaul，不产生地面物副本。</summary>
+        private static void TryDeliverHaul(CampaignState state, WorkOrderRecord order)
+        {
+            if (!MachineRegistry.TryGetRecord(order.AssignedMachineLogicId, out MachineRecord machine)
+                || machine.Cargo == null || machine.Cargo.Length == 0)
+            {
+                order.State = WorkOrderState.Failed;
+                order.FailureReason = "cargo-lost";
+                return;
+            }
+
+            CargoEntry cargo = machine.Cargo[0];
+            int available = HomeValleyCargo.GetAvailableSpace(state, cargo.ResourceType);
+            if (available < cargo.Amount)
+            {
+                order.State = WorkOrderState.Waiting;
+                order.FailureReason = $"storage-full:need={cargo.Amount}:have={available}";
+                return;
+            }
+
+            var ticket = new HomeValleyCargo.HaulTicket
+            {
+                ResourceType = cargo.ResourceType,
+                Amount = cargo.Amount,
+                SalvageInstanceId = order.SourceId,
+                SourcePosition = machine.WorldPosition,
+            };
+            HomeValleyCargo.StoreResult delivered = HomeValleyCargo.CommitHaul(state, ticket);
+            if (!delivered.Success)
+            {
+                // 防御性兜底：容量校验和 CommitHaul 之间理论上不该出现竞态（单线程、同一帧内完成），
+                // 万一未来出现，CommitHaul 已经把货放回地面——这里同步清空货舱，不留双份。
+                machine.Cargo = Array.Empty<CargoEntry>();
+                order.State = WorkOrderState.Waiting;
+                order.FailureReason = delivered.FailureReason;
+                return;
+            }
+
+            machine.Cargo = Array.Empty<CargoEntry>();
+            order.State = WorkOrderState.Completed;
+            order.FailureReason = null;
+        }
+
+        // ── Recharge ─────────────────────────────────────────────────────────────
+
+        public static WorkOrderOpResult TryCreateRecharge(CampaignState state, int machineLogicId)
+        {
+            string targetId = "recharge:" + machineLogicId;
+            WorkOrderRecord existing = FindActiveByTarget(state, WorkOrderKind.Recharge, targetId);
+            if (existing != null)
+            {
+                if (existing.State != WorkOrderState.Ready)
+                {
+                    return WorkOrderOpResult.Fail($"order-already-active:{existing.State}");
+                }
+                return ReassignExisting(state, existing, machineLogicId);
+            }
+
+            MachineCheck check = CheckMachine(machineLogicId, WorkOrderKind.Recharge);
+            if (!check.Ok)
+            {
+                return WorkOrderOpResult.Fail(check.FailureReason);
+            }
+
+            float max = HomeValleyLayout.BatteryCapacity.TryGetValue(check.Record.ChassisId, out float cap) ? cap : 100f;
+            if (check.Record.Battery >= max)
+            {
+                return WorkOrderOpResult.Fail("battery-already-full");
+            }
+
+            string workOrderId = targetId + ":" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            var order = NewOrder(state, workOrderId, WorkOrderKind.Recharge, targetId, machineLogicId,
+                resourceTransactionId: null, duration: 0f);
+            Append(state, order);
+            return WorkOrderOpResult.Ok(workOrderId);
+        }
+
+        // ── 通用：到达工作地点（Repair/Build/Salvage/Recharge 共用）────────────────────
+
+        public static void OnArrivedAtWork(CampaignState state, string workOrderId)
+        {
+            WorkOrderRecord order = Find(state, workOrderId);
+            if (order == null || order.State != WorkOrderState.Reserved)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(order.ResourceTransactionId))
+            {
+                CampaignEconomyLedger.MarkRunning(state, order.ResourceTransactionId);
+            }
+            PathWatch.Remove(order.WorkOrderId); // 离开 Reserved：赶路看门狗不再需要跟踪这条订单。
+            order.State = WorkOrderState.InProgress;
+            // 故意不把 Progress 清零：新订单本来就是 0（NewOrder 初始化），但机器受控中断后被重新指派
+            // 续工的订单，Progress 是"已经干了多少"的真实进度（ERD-WRK-003"机器受控...保留已搬货物"
+            // 同一条纪律延伸到工作进度本身，不是只保货物），这里清零会让续工的人白干一次已完成的部分。
+        }
+
+        // ── 通用创建辅助 ─────────────────────────────────────────────────────────
+
+        private static WorkOrderRecord NewOrder(CampaignState state, string workOrderId, WorkOrderKind kind,
+            string targetId, int machineLogicId, string resourceTransactionId, float duration)
+        {
+            return new WorkOrderRecord
+            {
+                WorkOrderId = workOrderId,
+                Kind = kind,
+                IssuerId = "player",
+                TargetId = targetId,
+                SourceId = null,
+                DestinationId = null,
+                RequiredTags = RequiredTagsFor(kind),
+                ResourceTransactionId = resourceTransactionId,
+                Priority = 0,
+                CreatedTick = NowTick(state),
+                AssignedMachineLogicId = machineLogicId,
+                State = WorkOrderState.Reserved,
+                FailureReason = null,
+                RetryCount = 0,
+                Progress = 0f,
+                Duration = duration,
+            };
+        }
+
+        private static WorkOrderOpResult ReassignExisting(CampaignState state, WorkOrderRecord order, int machineLogicId)
+        {
+            MachineCheck check = CheckMachine(machineLogicId, order.Kind);
+            if (!check.Ok)
+            {
+                return WorkOrderOpResult.Fail(check.FailureReason);
+            }
+
+            // Haul 的货物挂在"上一台"机器的 Cargo 上（若已拾取），换机重派要把货物转移过去——
+            // 抽象为"另一台机器接手运货"，不是复制/凭空生成。
+            if (order.Kind == WorkOrderKind.Haul && MachineRegistry.TryGetRecord(order.AssignedMachineLogicId, out MachineRecord prev)
+                && prev.Cargo != null && prev.Cargo.Length > 0)
+            {
+                MachineRegistry.TryGetRecord(machineLogicId, out MachineRecord next);
+                if (next != null)
+                {
+                    next.Cargo = prev.Cargo;
+                }
+                prev.Cargo = Array.Empty<CargoEntry>();
+            }
+
+            order.AssignedMachineLogicId = machineLogicId;
+            order.State = WorkOrderState.Reserved;
+            order.RetryCount++;
+            return WorkOrderOpResult.Ok(order.WorkOrderId);
+        }
+
+        // ── 中断：玩家取消 ───────────────────────────────────────────────────────
+
+        public static void CancelOrder(CampaignState state, string workOrderId, Vector2 machineCurrentPosition)
+        {
+            WorkOrderRecord order = Find(state, workOrderId);
+            if (order == null || IsTerminal(order.State))
+            {
+                return;
+            }
+
+            PathWatch.Remove(order.WorkOrderId);
+            WaitingWatch.Remove(order.WorkOrderId);
+            ReleaseResourcesAndCargo(state, order, machineCurrentPosition, refund: true);
+            order.State = WorkOrderState.Cancelled;
+            order.AssignedMachineLogicId = 0;
+        }
+
+        // ── 中断：机器受控（WASD 接管）────────────────────────────────────────────
+
+        /// <summary>ERD-WRK-003 第三条："机器受控：保留已搬货物，订单回 Ready，不复制物品"——资源
+        /// 事务/货舱原样保留（不退款、不落地），只是暂停并解除机器绑定，等待玩家之后重新指派
+        /// （可以是同一台机器，也可以是另一台——本 Story 不强制回到原机器，Ready 是"任何合格机器
+        /// 都能接手"的通用等待态，与 ER3-WRK-02 的自动分配池是同一批候选）。</summary>
+        public static void OnMachinePossessed(CampaignState state, int machineLogicId)
+        {
+            WorkOrderRecord order = FindActiveOrderForMachine(state, machineLogicId);
+            if (order == null)
+            {
+                return;
+            }
+            PathWatch.Remove(order.WorkOrderId);
+            order.State = WorkOrderState.Ready;
+            order.AssignedMachineLogicId = 0;
+        }
+
+        // ── 每帧驱动 ─────────────────────────────────────────────────────────────
+
+        /// <summary>由 <see cref="HomeValleyController.Update"/> 每帧调用一次，只遍历当前非终态订单
+        /// （归还谷地量级恒定个位数，不违反"热更层每帧不得 O(建筑/敌人数)"的性能纪律——那条规则约束
+        /// 的是战斗热路径，不是这种个位数量级的战略层管理循环）。
+        /// <paramref name="getMachinePosition"/>：查询机器当前世界 XZ 坐标（用于赶路阶段的路径停滞
+        /// 看门狗），找不到返回 null。<paramref name="releaseMachineMovement"/>：PathBlocked 触发时
+        /// 让调用方对应地 <c>marker.CancelCommandMove()</c>，本类不直接依赖 MonoBehaviour 类型。</summary>
+        public static void Tick(CampaignState state, float dt, Func<int, Vector2?> getMachinePosition,
+            Action<int> releaseMachineMovement)
+        {
+            if (state?.WorkOrders == null || state.WorkOrders.Length == 0)
+            {
+                TickBatteryRegen(state, dt);
+                return;
+            }
+
+            foreach (WorkOrderRecord order in state.WorkOrders)
+            {
+                if (IsTerminal(order.State))
+                {
+                    continue;
+                }
+
+                // 机器死亡检查：对当前仍绑定机器的订单统一检查存活状态，覆盖 Reserved/InProgress 两态。
+                if (order.AssignedMachineLogicId > 0
+                    && (!MachineRegistry.TryGetRecord(order.AssignedMachineLogicId, out MachineRecord assignedRecord) || !assignedRecord.IsAlive))
+                {
+                    HandleMachineDeath(state, order);
+                    continue;
+                }
+
+                switch (order.State)
+                {
+                    case WorkOrderState.Reserved:
+                        TickReserved(state, order, dt, getMachinePosition, releaseMachineMovement);
+                        break;
+                    case WorkOrderState.InProgress:
+                        TickInProgress(state, order, dt);
+                        break;
+                    case WorkOrderState.Waiting:
+                        TickWaiting(state, order, dt);
+                        break;
+                }
+            }
+
+            TickBatteryRegen(state, dt);
+        }
+
+        /// <summary>赶路阶段停滞看门狗的瞬态记忆——不落盘，不需要落盘：真实进程重启后最多重新起算
+        /// 一次 5 秒窗口，不是正确性问题，只是"停滞计时器归零"，见类注释"死亡/受控没有真实触发源"
+        /// 同一段讨论。按 WorkOrderId 建索引；订单离开 Reserved（到达/取消/死亡/PathBlocked 触发）时
+        /// 由 <see cref="Tick"/> 顶部统一清理，不会无界增长（上限＝当前赶路中的机器数，个位数）。</summary>
+        private static readonly Dictionary<string, (float lastDistance, float stallSeconds)> PathWatch =
+            new Dictionary<string, (float, float)>(4);
+
+        /// <summary>ERD-WRK-003 第二条看门狗：赶路阶段连续 <see cref="HomeValleyLayout.PathStallSeconds"/>
+        /// 秒净位移不推进即判定 PathBlocked。停滞计时存在 <see cref="PathWatch"/>（瞬态），不占用
+        /// <see cref="WorkOrderRecord.Progress"/>/<see cref="WorkOrderRecord.Duration"/>——那两个字段在
+        /// Reserved 阶段已经承载真实含义（Repair/Build/Salvage 创建时就写入了完工所需的工作时长，
+        /// 供稍后 InProgress 阶段直接使用），复用会把这份数据在赶路途中冲掉。</summary>
+        private static void TickReserved(CampaignState state, WorkOrderRecord order, float dt,
+            Func<int, Vector2?> getMachinePosition, Action<int> releaseMachineMovement)
+        {
+            if (getMachinePosition == null || order.AssignedMachineLogicId <= 0)
+            {
+                return;
+            }
+            Vector2? pos = getMachinePosition(order.AssignedMachineLogicId);
+            if (!pos.HasValue)
+            {
+                return;
+            }
+
+            Vector2 targetPos = ResolveWorkPosition(state, order);
+            float distance = Vector2.Distance(pos.Value, targetPos);
+
+            if (!PathWatch.TryGetValue(order.WorkOrderId, out (float lastDistance, float stallSeconds) watch))
+            {
+                PathWatch[order.WorkOrderId] = (distance, 0f);
+                return;
+            }
+
+            if (distance < watch.lastDistance - HomeValleyLayout.PathStallEpsilon)
+            {
+                PathWatch[order.WorkOrderId] = (distance, 0f);
+                return;
+            }
+
+            float stallSeconds = watch.stallSeconds + dt;
+            if (stallSeconds >= HomeValleyLayout.PathStallSeconds)
+            {
+                PathWatch.Remove(order.WorkOrderId);
+                int releasedMachine = order.AssignedMachineLogicId;
+                order.State = WorkOrderState.Waiting;
+                order.FailureReason = "path-blocked";
+                order.AssignedMachineLogicId = 0;
+                // 注意：不碰 Progress/Duration——Repair/Build/Salvage 在 Reserved 阶段就已经写入了真实
+                // 工作时长，PathBlocked 只是"赶路没走到"，那份数据要留到真正 InProgress 时使用，
+                // 30 秒冷却单独存 WaitingWatch（瞬态，同 PathWatch）。
+                WaitingWatch[order.WorkOrderId] = 0f;
+                releaseMachineMovement?.Invoke(releasedMachine);
+            }
+            else
+            {
+                PathWatch[order.WorkOrderId] = (watch.lastDistance, stallSeconds);
+            }
+        }
+
+        /// <summary>Waiting/path-blocked 的 30 秒冷却计时——瞬态，理由同 <see cref="PathWatch"/>。</summary>
+        private static readonly Dictionary<string, float> WaitingWatch = new Dictionary<string, float>(4);
+
+        private static Vector2 ResolveWorkPosition(CampaignState state, WorkOrderRecord order)
+        {
+            switch (order.Kind)
+            {
+                case WorkOrderKind.Repair:
+                    BuildingRecord repairTarget = state.BuildingRecords?.FirstOrDefault(b => b.BuildingId == order.TargetId);
+                    return repairTarget?.Position ?? Vector2.zero;
+                case WorkOrderKind.Build:
+                    return HomeValleyLayout.Generator2Site.Position;
+                case WorkOrderKind.Salvage:
+                    return order.TargetId == HomeValleyLayout.Wreckage1NodeId
+                        ? HomeValleyLayout.Wreckage1.Position
+                        : HomeValleyLayout.Wreckage2.Position;
+                case WorkOrderKind.Haul:
+                    GroundItemRecord item = HomeValleyCargo.FindGroundItem(state, order.SourceId);
+                    return item?.Position ?? HomeValleyLayout.Core.Position;
+                case WorkOrderKind.Recharge:
+                    return HomeValleyLayout.Core.Position;
+                default:
+                    return Vector2.zero;
+            }
+        }
+
+        private static void TickInProgress(CampaignState state, WorkOrderRecord order, float dt)
+        {
+            switch (order.Kind)
+            {
+                case WorkOrderKind.Repair:
+                case WorkOrderKind.Build:
+                case WorkOrderKind.Salvage:
+                    TickTimedWork(state, order, dt);
+                    break;
+                case WorkOrderKind.Recharge:
+                    TickRecharge(state, order, dt);
+                    break;
+                case WorkOrderKind.Haul:
+                    break; // Haul 的 InProgress 是"货在货舱、正走向交付点"，由到达回调驱动，Tick 不推进。
+            }
+        }
+
+        private static void TickWaiting(CampaignState state, WorkOrderRecord order, float dt)
+        {
+            if (order.FailureReason == "path-blocked")
+            {
+                float waited = (WaitingWatch.TryGetValue(order.WorkOrderId, out float w) ? w : 0f) + dt;
+                if (waited >= HomeValleyLayout.PathBlockedRetrySeconds)
+                {
+                    WaitingWatch.Remove(order.WorkOrderId);
+                    order.State = WorkOrderState.Ready;
+                    order.FailureReason = null;
+                }
+                else
+                {
+                    WaitingWatch[order.WorkOrderId] = waited;
+                }
+                return;
+            }
+
+            if (order.Kind == WorkOrderKind.Haul && order.FailureReason != null && order.FailureReason.StartsWith("storage-full"))
+            {
+                TryDeliverHaul(state, order); // 每帧轻量重试：仓储腾出空间即可自动完成，不需要玩家手动点collect。
+                return;
+            }
+
+            // "no-power" 分支不在本 Story 落地——见 TickTimedWork 上方注释，当前没有真实触发源。
+        }
+
+        /// <summary>ERD-WRK-003 第五条"断电：建筑相关订单 Waiting/NoPower；维修发电机订单不依赖被修
+        /// 目标供电"：勘查确认归还谷地当前没有 Repair/Build 会真实触发这条规则的场景——Repair/Build
+        /// 的目标在完工前从不是电网消费者本身（<see cref="BuildingConstructionState.Damaged"/>/
+        /// <see cref="BuildingConstructionState.Planned"/> 建筑不在 <see cref="HomeValleyPowerGrid.Recompute"/>
+        /// 的 Operational 消费者集合里），"发电机例外"这句话要成立的前提（发电机本身会被断电阻塞）
+        /// 也就不存在。真正会出现"Operational 建筑运行中被断电暂停"的场景是工厂队列消耗中途断电——
+        /// 那是 ERD-FAC-001 自己的 <see cref="FactoryQueueState.WaitingPower"/>，属于 ER4-FAC-01，
+        /// 不是本 Story 的 Repair/Build。此处不发明一个当前测不出真实分支的假状态；DEBT 已登记在
+        /// evidence 文档，若未来出现"Operational 建筑上的 Repair/Build 类工作单"（当前没有），
+        /// 届时补齐即可，不影响本 Story 已实现规则的正确性。</summary>
+        private static void TickTimedWork(CampaignState state, WorkOrderRecord order, float dt)
+        {
+            order.Progress += dt;
+            if (order.Progress < order.Duration)
+            {
+                return;
+            }
+
+            switch (order.Kind)
+            {
+                case WorkOrderKind.Repair:
+                    CompleteRepair(state, order);
+                    break;
+                case WorkOrderKind.Build:
+                    CompleteBuild(state, order);
+                    break;
+                case WorkOrderKind.Salvage:
+                    CompleteSalvage(state, order);
+                    break;
+            }
+        }
+
+        private static void CompleteRepair(CampaignState state, WorkOrderRecord order)
+        {
+            BuildingRecord building = state.BuildingRecords?.FirstOrDefault(b => b.BuildingId == order.TargetId);
+            if (building == null)
+            {
+                order.State = WorkOrderState.Failed;
+                order.FailureReason = "target-destroyed";
+                CampaignEconomyLedger.Cancel(state, order.ResourceTransactionId);
+                return;
+            }
+
+            building.ConstructionState = BuildingConstructionState.Operational;
+            CampaignEconomyLedger.Commit(state, order.ResourceTransactionId);
+            HomeValleyPowerGrid.Recompute(state);
+            order.State = WorkOrderState.Completed;
+        }
+
+        private static void CompleteBuild(CampaignState state, WorkOrderRecord order)
+        {
+            BuildingRecord building = state.BuildingRecords?.FirstOrDefault(b => b.BuildingId == order.TargetId);
+            if (building == null)
+            {
+                order.State = WorkOrderState.Failed;
+                order.FailureReason = "target-destroyed";
+                CampaignEconomyLedger.Cancel(state, order.ResourceTransactionId);
+                return;
+            }
+
+            building.ConstructionState = BuildingConstructionState.Operational;
+            CampaignEconomyLedger.Commit(state, order.ResourceTransactionId);
+            HomeValleyPowerGrid.Recompute(state);
+            order.State = WorkOrderState.Completed;
+        }
+
+        private static void CompleteSalvage(CampaignState state, WorkOrderRecord order)
+        {
+            RegionRecord region = state.RegionRecords?.FirstOrDefault(r => r.RegionId == HomeValleyLayout.RegionId);
+            if (region == null || (region.DestroyedNodeIds != null && region.DestroyedNodeIds.Contains(order.TargetId)))
+            {
+                order.State = WorkOrderState.Completed; // 幂等：另一条路径已经拆过（不应发生，但不留幽灵订单）。
+                return;
+            }
+
+            region.DestroyedNodeIds = (region.DestroyedNodeIds ?? Array.Empty<string>()).Append(order.TargetId).ToArray();
+
+            Vector2 dropPosition = order.TargetId == HomeValleyLayout.Wreckage1NodeId
+                ? HomeValleyLayout.Wreckage1.Position
+                : HomeValleyLayout.Wreckage2.Position;
+            HomeValleyCargo.SpawnGroundItem(state, HomeValleyLayout.RegionId, dropPosition,
+                CampaignEconomyLedger.ResourceScrap, HomeValleyLayout.WreckageScrapYield, order.TargetId + ":salvage-drop");
+
+            GroundItemRecord dropped = HomeValleyCargo.FindGroundItemBySalvageId(state, order.TargetId + ":salvage-drop");
+            if (dropped != null)
+            {
+                HomeValleyCargo.HaulTicket ticket = HomeValleyCargo.TryReserveHaul(state, dropped.GroundItemId);
+                HomeValleyCargo.CommitHaul(state, ticket, order.ResourceTransactionId);
+            }
+
+            order.State = WorkOrderState.Completed;
+        }
+
+        private static void TickRecharge(CampaignState state, WorkOrderRecord order, float dt)
+        {
+            if (!MachineRegistry.TryGetRecord(order.AssignedMachineLogicId, out MachineRecord machine))
+            {
+                order.State = WorkOrderState.Cancelled;
+                order.FailureReason = "machine-not-found";
+                return;
+            }
+
+            float max = HomeValleyLayout.BatteryCapacity.TryGetValue(machine.ChassisId, out float cap) ? cap : 100f;
+            machine.Battery = Mathf.Min(max, machine.Battery + HomeValleyLayout.BatteryHomeChargeRatePerSecond * dt);
+            if (machine.Battery >= max)
+            {
+                order.State = WorkOrderState.Completed;
+            }
+        }
+
+        /// <summary>被动恢复（DEMO-CONTENT-LOCK.md §2.4"被动恢复每秒1"），对区域内所有存活机器生效，
+        /// 正在 InProgress-Recharge 的机器跳过（那条路径已经在用更快的家园充电速率推进，不重复叠加）。</summary>
+        private static void TickBatteryRegen(CampaignState state, float dt)
+        {
+            if (state == null)
+            {
+                return;
+            }
+            var rechargingLogicIds = new HashSet<int>(
+                (state.WorkOrders ?? Array.Empty<WorkOrderRecord>())
+                    .Where(o => o.Kind == WorkOrderKind.Recharge && o.State == WorkOrderState.InProgress)
+                    .Select(o => o.AssignedMachineLogicId));
+
+            foreach (MachineRecord machine in MachineRegistry.AllRecords)
+            {
+                if (machine.RegionId != HomeValleyLayout.RegionId || !machine.IsAlive || rechargingLogicIds.Contains(machine.LogicId))
+                {
+                    continue;
+                }
+                float max = HomeValleyLayout.BatteryCapacity.TryGetValue(machine.ChassisId, out float cap) ? cap : 100f;
+                if (machine.Battery < max)
+                {
+                    machine.Battery = Mathf.Min(max, machine.Battery + HomeValleyLayout.BatteryPassiveRegenPerSecond * dt);
+                }
+            }
+        }
+
+        // ── 中断：机器死亡（ERD-WRK-003 第四条）────────────────────────────────────
+
+        /// <summary>ERD-WRK-003 原文允许"订单回 Ready 或 Failed"两种实现选择，本类统一选 Failed——
+        /// 不选 Ready 是刻意的：资源事务一旦退款（Cancel）就永久终结，不能再 Commit；如果订单回到
+        /// Ready 又被重新指派，<see cref="OnArrivedAtWork"/>/<see cref="CompleteRepair"/> 等后续步骤会
+        /// 对着一笔已终结的事务再次 MarkRunning/Commit——这些调用会静默失败（<see cref="CampaignEconomyLedger"/>
+        /// 对终态事务的写操作直接拒绝，不抛异常），实际效果是"建筑/残骸被标记完工，但对应的废料
+        /// 从未真正扣款/发放"，一个真实的账目漏洞。Failed 是终态，玩家必须重新点选目标发起全新订单
+        /// （重新 Propose+Reserve 一笔干净的事务），彻底避免这类"复活旧事务"的漏洞类别，货舱掉落物/
+        /// 已建 Planned 建筑的撤销仍然发生，机器没有白白损失任何已实际持有的东西。</summary>
+        private static void HandleMachineDeath(CampaignState state, WorkOrderRecord order)
+        {
+            PathWatch.Remove(order.WorkOrderId);
+            WaitingWatch.Remove(order.WorkOrderId);
+
+            Vector2 dropPosition = MachineRegistry.TryGetRecord(order.AssignedMachineLogicId, out MachineRecord dead)
+                ? dead.WorldPosition
+                : Vector2.zero;
+
+            ReleaseResourcesAndCargo(state, order, dropPosition, refund: true);
+            order.State = WorkOrderState.Failed;
+            order.FailureReason = "machine-died";
+            order.AssignedMachineLogicId = 0;
+        }
+
+        private static void ReleaseResourcesAndCargo(CampaignState state, WorkOrderRecord order, Vector2 dropPosition, bool refund)
+        {
+            if (order.Kind == WorkOrderKind.Haul
+                && MachineRegistry.TryGetRecord(order.AssignedMachineLogicId, out MachineRecord machine)
+                && machine.Cargo != null && machine.Cargo.Length > 0)
+            {
+                CargoEntry cargo = machine.Cargo[0];
+                HomeValleyCargo.SpawnGroundItem(state, HomeValleyLayout.RegionId, dropPosition,
+                    cargo.ResourceType, cargo.Amount, order.SourceId + ":redrop:" + order.WorkOrderId);
+                machine.Cargo = Array.Empty<CargoEntry>();
+            }
+
+            if (refund && !string.IsNullOrEmpty(order.ResourceTransactionId))
+            {
+                CampaignEconomyLedger.Cancel(state, order.ResourceTransactionId);
+            }
+
+            if (order.Kind == WorkOrderKind.Build)
+            {
+                // 未建成的规划建筑一并撤销，不留"永久 Planned 幽灵建筑"。
+                state.BuildingRecords = (state.BuildingRecords ?? Array.Empty<BuildingRecord>())
+                    .Where(b => b.BuildingId != order.TargetId)
+                    .ToArray();
+            }
+        }
+    }
+}
