@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Content;
 using TEngine;
 using UnityEngine;
@@ -164,6 +165,43 @@ namespace GameLogic.Campaign.Regions
                 Log.Info($"[FracturedCityRegion] 敌人 {enemyInstanceId} 已阵亡。");
             }
             return ActionResult.Ok();
+        }
+
+        /// <summary>ER5-CMD-01：战略 Attack 命令的唯一命中结算入口——与
+        /// <see cref="HomeValleyCombatTargets.TryAttack"/> 同一模式（不重新计算伤害，直接用
+        /// <see cref="MachineLoadoutRegistry"/> 解析出的编译结果），保证"AI/玩家使用同装配"的规则
+        /// 在破碎都市同样成立，也保证本区域只有一处代码真正调用 <see cref="TryDamageEnemy"/>
+        /// 结算武器伤害。</summary>
+        public static ActionResult TryAttackEnemy(CampaignState state, int attackerLogicId, string enemyInstanceId, int seed, bool isAiSource)
+        {
+            if (state == null)
+            {
+                return ActionResult.Fail("没有活动的破碎都市会话。");
+            }
+            RegionEnemyRecord enemy = FindEnemy(state, enemyInstanceId);
+            if (enemy == null)
+            {
+                return ActionResult.Fail($"敌人 {enemyInstanceId} 不存在。");
+            }
+            if (!enemy.IsAlive)
+            {
+                return ActionResult.Fail("目标已阵亡。");
+            }
+
+            MachineCombatResolution resolution = isAiSource
+                ? MachineLoadoutRegistry.ResolveForAi(state, attackerLogicId, seed)
+                : MachineLoadoutRegistry.ResolveForDirectControl(state, attackerLogicId, seed);
+            if (!resolution.Success)
+            {
+                return ActionResult.Fail(resolution.FailureReason);
+            }
+            if (!resolution.Preview.HasCombatOutput)
+            {
+                return ActionResult.Fail("当前装配没有可攻击的主武器出口（8号汇槽为空）。");
+            }
+
+            float damage = Mathf.Max(0f, resolution.Preview.TotalNormalizedDamage);
+            return TryDamageEnemy(state, enemyInstanceId, damage);
         }
 
         // ── 干扰（DEMO-CONTENT-LOCK.md §4.1 第2条）───────────────────────────

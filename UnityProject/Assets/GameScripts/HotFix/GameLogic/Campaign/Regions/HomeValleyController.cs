@@ -54,6 +54,11 @@ namespace GameLogic.Campaign.Regions
             _paused = paused;
         }
 
+        /// <summary>ER5-CMD-01：战略命令正式化——多选/编组/Move·Attack·Guard·Retreat，与
+        /// <see cref="FracturedCityController"/> 共用同一套引擎（见该类自己的实例），避免两个区域
+        /// 各写一套判定逻辑。UI（<c>RegionCommandBarUIToolkit</c>）与热键都通过它读写状态。</summary>
+        public readonly RegionSquadCommandSystem SquadCommands = new RegionSquadCommandSystem();
+
         /// <summary>本类由 <see cref="GameLogic.Stage.GameRoot"/> 用 <c>??=</c> 惰性创建、跨多局
         /// 复用同一实例（同一进程内先后玩过 A、B 两局）。ER3-WRK-01 起 WorkOrder 的进度
         /// （<see cref="WorkOrderRecord.Progress"/>/<see cref="WorkOrderRecord.Duration"/>）已经落在
@@ -99,6 +104,7 @@ namespace GameLogic.Campaign.Regions
 
             BuildVisuals(state);
             SetupCameraDirector();
+            SetupSquadCommands();
 
             IsActive = true;
 
@@ -145,10 +151,14 @@ namespace GameLogic.Campaign.Regions
                 HomeValleyWorkOrders.MarkAssignmentDirty();
             }
 
-            HandleSelectionClick();
-
             bool directLocked = _cameraDirector != null && _cameraDirector.Mode == ViewMode.Direct;
             float scaledDt = _paused ? 0f : StrategyClock.GetScaledDt(dt, directLocked);
+
+            // ER5-CMD-01：必须在 HandleSelectionClick 之前跑——本帧"这次左键释放是框选/武装命令
+            // 确认，还是留给旧单点逻辑处理"的判定结果（ConsumedClickThisFrame）要先算好。战略暂停下
+            // 仍然要能选人/排队命令，因此也在下面的暂停早退之前。
+            SquadCommands.Tick(_paused, scaledDt);
+            HandleSelectionClick();
 
             HandleDirectControl(scaledDt);
 
@@ -251,6 +261,11 @@ namespace GameLogic.Campaign.Regions
                     $"但机器 {order.AssignedMachineLogicId} 无可视化对象且补建失败，本轮跳过移动。");
                 return;
             }
+
+            // ER5-CMD-01：分配引擎即将接管这台机器的 Transform，先取消可能正在执行的战略命令
+            // （理论上分配引擎只挑选空闲机器，但受控/战略命令中的机器不参与分配——这里仍双保险一次，
+            // 免得未来分配条件变化时悄悄引入两套移动系统同帧打架的问题）。
+            SquadCommands.CancelCommandFor(order.AssignedMachineLogicId);
 
             Vector2 pos2 = HomeValleyWorkOrders.ResolveWorkPosition(CampaignSession.Current, order);
             Vector3 destination = new Vector3(pos2.x, 1f, pos2.y);
@@ -568,6 +583,10 @@ namespace GameLogic.Campaign.Regions
             _paused = false;
             _factoryPanelOpen = false;
             _expeditionPrepPanelOpen = false;
+            // ER5-CMD-01：选择集/编组/排队命令/最近事件全部清空——不跨局残留（DestroyVisuals 已经
+            // 摧毁 _root，SquadCommands 内部对选中环/目的地标记的 Destroy 调用在此之后只是安全的
+            // no-op，真正要紧的是清掉 C# 侧的字典/列表状态）。
+            SquadCommands.Unbind();
             IsActive = false;
             Log.Info("[HomeValleyController] 已退出归还谷地。");
         }
@@ -1117,6 +1136,94 @@ namespace GameLogic.Campaign.Regions
             _cameraDirector.EnsureDirectTarget = EnsureDirectTarget;
         }
 
+        // ── ER5-CMD-01：战略命令（多选/编组/Move·Attack·Guard·Retreat）────────
+
+        /// <summary>把归还谷地的具体数据/规则接进共享的 <see cref="RegionSquadCommandSystem"/>。
+        /// 障碍物用 <see cref="HomeValleyLayout.AllAnchors"/> 的既有锚点表（含 ClearanceRadius）
+        /// 当最小局部避障的圆形障碍，不新造一份布局数据。</summary>
+        private void SetupSquadCommands()
+        {
+            var obstacles = new List<(Vector2 Position, float Radius)>();
+            foreach (HomeValleyLayout.Anchor anchor in HomeValleyLayout.AllAnchors())
+            {
+                obstacles.Add((anchor.Position, anchor.ClearanceRadius));
+            }
+
+            SquadCommands.Bind(new RegionSquadCommandContext
+            {
+                Camera = _camera,
+                Markers = _machineMarkers,
+                VisualRoot = _root,
+                IsDirectControlled = IsMachineDirectControlled,
+                IsEligible = logicId => MachineRegistry.TryGetRecord(logicId, out MachineRecord rec) && rec.IsAlive && !rec.IsInFactory,
+                CancelWorkIfAny = CancelActiveWorkOrderIfAny,
+                SafePoint = HomeValleyLayout.Core.Position,
+                Obstacles = obstacles,
+                FindHostileNear = FindLowThreatHostileNear,
+                ResolveHostile = ResolveLowThreatHostile,
+                TryAttack = TrySquadAttackLowThreatTarget,
+                AttackRange = HomeValleyCombatTargets.EngageRange,
+                AttackCooldownSeconds = 1.2f,
+            });
+        }
+
+        /// <summary>ER5-CMD-01 下令前置："换目标"式的既有纪律——下一条军事命令视同玩家显式取消
+        /// 当前在办工作单（同右键取消/CommandWork 换目标同一条规矩），不能一边被战略命令牵着走、
+        /// 一边工作单状态机还在推进同一台机器。</summary>
+        private void CancelActiveWorkOrderIfAny(int logicId)
+        {
+            CampaignState state = CampaignSession.Current;
+            HomeValleyMachineMarker marker = FindMarker(logicId);
+            if (state == null || marker == null)
+            {
+                return;
+            }
+            WorkOrderRecord active = HomeValleyWorkOrders.FindActiveOrderForMachine(state, logicId);
+            if (active == null)
+            {
+                return;
+            }
+            Vector3 pos = marker.transform.position;
+            HomeValleyWorkOrders.CancelOrder(state, active.WorkOrderId, new Vector2(pos.x, pos.z));
+        }
+
+        /// <summary>归还谷地目前只有唯一一个低威胁残骸靶可当 Attack 目标——武装攻击点击/命中判定
+        /// 复用同一份 <see cref="HomeValleyCombatTargets"/> 数据，不重复定义"敌方"概念。</summary>
+        private RegionHostileInfo? FindLowThreatHostileNear(Vector2 worldPoint, float pickRadius)
+        {
+            CampaignState state = CampaignSession.Current;
+            CombatTargetRecord target = HomeValleyCombatTargets.Find(state, HomeValleyCombatTargets.LowThreatTargetId);
+            if (target == null || target.Health <= 0f || Vector2.Distance(worldPoint, target.Position) > pickRadius)
+            {
+                return null;
+            }
+            return new RegionHostileInfo(target.TargetId, target.Position, target.Health > 0f);
+        }
+
+        private RegionHostileInfo? ResolveLowThreatHostile(string hostileId)
+        {
+            CampaignState state = CampaignSession.Current;
+            CombatTargetRecord target = HomeValleyCombatTargets.Find(state, hostileId);
+            return target == null ? (RegionHostileInfo?)null : new RegionHostileInfo(target.TargetId, target.Position, target.Health > 0f);
+        }
+
+        /// <summary>Attack 命令的伤害结算——与 <see cref="TickAutoEngage"/>/<see cref="HandleDirectControl"/>
+        /// 共用同一个 <see cref="HomeValleyCombatTargets.TryAttack"/> 唯一入口，三条路径（AI 自动/玩家直控
+        /// 瞄准/战略 Attack 命令）不重复实现命中或伤害。目标 HP 归零视为"战略命令意义上的目标丢失"
+        /// （靶标本身会按 <see cref="HomeValleyCombatTargets.RegenSeconds"/> 自动复位，那是独立的背景行为，
+        /// 与这条命令是否已经结束无关）。</summary>
+        private RegionAttackOutcome TrySquadAttackLowThreatTarget(int attackerLogicId, string hostileId)
+        {
+            CampaignState state = CampaignSession.Current;
+            HomeValleyCombatTargets.HitResult result =
+                HomeValleyCombatTargets.TryAttack(state, attackerLogicId, hostileId, state?.RandomSeed ?? 0, isAiSource: false);
+            if (!result.Success)
+            {
+                return RegionAttackOutcome.Fail(result.FailureReason);
+            }
+            return RegionAttackOutcome.Ok(targetDestroyed: result.RemainingHealth <= 0f);
+        }
+
         // ── 机器选择 / 点选移动 / 到点自动干活 / WASD 接管 ────────────────────
 
         /// <summary>左键点机器＝选中；已选中时左键点建筑/残骸＝下令走过去、到点自动
@@ -1150,7 +1257,17 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
-            if (!InputRouter.GetMouseButtonDown(0, InputScope.Strategy))
+            // ER5-CMD-01：框选/武装命令确认点击由 SquadCommands.Tick（本帧更早跑过）先处理；
+            // 真发生了框选或确认了武装命令，这次释放就不该再落到下面的单点选中/工作下令分支
+            // （否则拖框松手的位置会被当成移动/修复目标点）。触发点从 GetMouseButtonDown 改成
+            // GetMouseButtonUp——与 SquadCommands 内部判断"点击还是拖拽"用的同一次抬起事件同步，
+            // 纯点击（未发生拖动）时对时序/结果没有可感知影响，逐字保留原有分支顺序。
+            if (SquadCommands.ConsumedClickThisFrame)
+            {
+                return;
+            }
+
+            if (!InputRouter.GetMouseButtonUp(0, InputScope.Strategy))
             {
                 return;
             }
@@ -1171,6 +1288,7 @@ namespace GameLogic.Campaign.Regions
                 _selected?.SetSelected(false);
                 _selected = marker;
                 _selected.SetSelected(true);
+                SquadCommands.SelectSingle(marker.LogicId); // 单点选中同步进战略命令的选择集。
                 return;
             }
 
@@ -1210,6 +1328,10 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
+            // ER5-CMD-01：接下来的所有分支都会让"工作"移动系统接管这台机器的 Transform
+            // （CommandWork/CommandHaul/纯移动 fallback）；先取消它可能正在执行的战略命令，
+            // 避免两套移动来源同一帧争抢同一个 transform.position。
+            SquadCommands.CancelCommandFor(moving.LogicId);
 
             // ER4-FAC-01：机器收到的第一条真实命令即视为"驶出工厂"——占用出口的完工机器只有在玩家
             // 真正开始使用它之后才让位，让下一项排队机器有机会生成，见 HomeValleyFactory 类注释。

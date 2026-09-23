@@ -45,6 +45,13 @@ namespace GameLogic.Campaign.Regions
 
         public void SetPaused(bool paused) => _paused = paused;
 
+        /// <summary>ER5-CMD-01：与 <see cref="HomeValleyController.SquadCommands"/> 同一套引擎、
+        /// 各自一份实例（两区域互斥运行，但各自的选择集/编组/命令状态不该跨区域串）。</summary>
+        public readonly RegionSquadCommandSystem SquadCommands = new RegionSquadCommandSystem();
+        /// <summary>Attack 命令的接战距离——破碎都市锚点间距比归还谷地紧凑（10～15 量级），
+        /// 沿用 <see cref="InteractRange"/> 的同一空间尺度加倍，不直接照抄归还谷地的 12 米。</summary>
+        private const float AttackRange = 6f;
+
         /// <summary>最小可用切场入口：把 <paramref name="expeditionLogicIds"/> 指定的家园存活机器
         /// 转移进破碎都市（RegionId 改写+定位到入口安全区），要求区域已经 <see cref="RegionState.Available"/>
         /// 或以上（由 ER5-SIG-01 的 <see cref="HomeValleySignal.RecomputeUnlock"/> 真实判定，本类不重复
@@ -92,6 +99,7 @@ namespace GameLogic.Campaign.Regions
 
             BuildVisuals(state);
             SetupCameraDirector();
+            SetupSquadCommands();
 
             IsActive = true;
             _wipeResolved = false;
@@ -167,10 +175,13 @@ namespace GameLogic.Campaign.Regions
                 _possessed = null;
             }
 
-            HandleSelectionClick();
-
             bool directLocked = _cameraDirector != null && _cameraDirector.Mode == ViewMode.Direct;
             float scaledDt = _paused ? 0f : StrategyClock.GetScaledDt(dt, directLocked);
+
+            // ER5-CMD-01：同 HomeValleyController 先例——必须在 HandleSelectionClick 之前跑，
+            // 战略暂停下仍要能选人/排队命令。
+            SquadCommands.Tick(_paused, scaledDt);
+            HandleSelectionClick();
 
             HandleDirectControl(scaledDt);
 
@@ -294,6 +305,7 @@ namespace GameLogic.Campaign.Regions
             _possessed = null;
             _selected = null;
             _paused = false;
+            SquadCommands.Unbind();
             IsActive = false;
             Log.Info($"[FracturedCityController] 已退出破碎都市（evacuateSuccess={evacuateSuccess}）。");
         }
@@ -396,9 +408,13 @@ namespace GameLogic.Campaign.Regions
 
         // ── 选中/移动/直控（复用 HomeValleyMachineMarker 同款最小 RTS 手感）───────────
 
+        /// <summary>ER5-CMD-01：本类原先"点空地＝CommandMoveTo"的最小点选移动（类注释点名要被本
+        /// Story 取代）已移除——移动现在只能通过 <see cref="SquadCommands"/> 的正式 Move 命令下达。
+        /// 点击行为因此只剩"选中"：框选/武装命令确认点击由 <see cref="SquadCommands"/> 先处理，
+        /// 这里只处理单点选中一台机器。</summary>
         private void HandleSelectionClick()
         {
-            if (_camera == null || !InputRouter.GetMouseButtonDown(0, InputScope.Strategy))
+            if (_camera == null || SquadCommands.ConsumedClickThisFrame || !InputRouter.GetMouseButtonUp(0, InputScope.Strategy))
             {
                 return;
             }
@@ -418,14 +434,8 @@ namespace GameLogic.Campaign.Regions
                 _selected?.SetSelected(false);
                 _selected = marker;
                 _selected.SetSelected(true);
-                return;
+                SquadCommands.SelectSingle(marker.LogicId);
             }
-
-            if (_selected == null)
-            {
-                return;
-            }
-            _selected.CommandMoveTo(hit.point);
         }
 
         private void HandleDirectControl(float dt)
@@ -525,6 +535,83 @@ namespace GameLogic.Campaign.Regions
                 FracturedCityLayout.CameraBoundsHalfExtentX, startInStrategy: true, initialDirectOrthographicSize: 14f);
             _cameraDirector.FocusStrategyOn(new float2(FracturedCityLayout.CameraFocusStart.x, FracturedCityLayout.CameraFocusStart.y));
             _cameraDirector.EnsureDirectTarget = EnsureDirectTarget;
+        }
+
+        // ── ER5-CMD-01：战略命令（多选/编组/Move·Attack·Guard·Retreat）────────
+
+        private void SetupSquadCommands()
+        {
+            var obstacles = new List<(Vector2 Position, float Radius)>();
+            foreach (FracturedCityLayout.Anchor anchor in FracturedCityLayout.AllAnchors())
+            {
+                obstacles.Add((anchor.Position, anchor.ClearanceRadius));
+            }
+
+            SquadCommands.Bind(new RegionSquadCommandContext
+            {
+                Camera = _camera,
+                Markers = _machineMarkers,
+                VisualRoot = _root,
+                IsDirectControlled = IsMachineDirectControlled,
+                IsEligible = logicId => MachineRegistry.TryGetRecord(logicId, out MachineRecord rec) &&
+                    rec.IsAlive && rec.RegionId == FracturedCityLayout.RegionId,
+                CancelWorkIfAny = null, // 破碎都市没有"工作单"这一层概念。
+                SafePoint = FracturedCityLayout.EntryEvac.Position,
+                Obstacles = obstacles,
+                FindHostileNear = FindEnemyHostileNear,
+                ResolveHostile = ResolveEnemyHostile,
+                TryAttack = TrySquadAttackEnemy,
+                AttackRange = AttackRange,
+                AttackCooldownSeconds = 1.2f,
+            });
+        }
+
+        private RegionHostileInfo? FindEnemyHostileNear(Vector2 worldPoint, float pickRadius)
+        {
+            CampaignState state = CampaignSession.Current;
+            if (state?.RegionEnemies == null)
+            {
+                return null;
+            }
+            RegionEnemyRecord best = null;
+            float bestDist = pickRadius;
+            foreach (RegionEnemyRecord enemy in state.RegionEnemies)
+            {
+                if (enemy.RegionId != FracturedCityLayout.RegionId || !enemy.IsAlive)
+                {
+                    continue;
+                }
+                float dist = Vector2.Distance(worldPoint, enemy.Position);
+                if (dist <= bestDist)
+                {
+                    bestDist = dist;
+                    best = enemy;
+                }
+            }
+            return best == null ? (RegionHostileInfo?)null : new RegionHostileInfo(best.EnemyInstanceId, best.Position, best.IsAlive);
+        }
+
+        private RegionHostileInfo? ResolveEnemyHostile(string hostileId)
+        {
+            RegionEnemyRecord enemy = FracturedCityRegion.FindEnemy(CampaignSession.Current, hostileId);
+            return enemy == null ? (RegionHostileInfo?)null : new RegionHostileInfo(enemy.EnemyInstanceId, enemy.Position, enemy.IsAlive);
+        }
+
+        /// <summary>Attack 命令的伤害结算——唯一入口 <see cref="FracturedCityRegion.TryAttackEnemy"/>，
+        /// 本方法只负责把 <see cref="FracturedCityRegion.ActionResult"/> 翻译成
+        /// <see cref="RegionAttackOutcome"/>（附带"目标是否已被击毁"，靠结算后重新查一次记录判断，
+        /// 不在 ActionResult 里重复加字段）。</summary>
+        private RegionAttackOutcome TrySquadAttackEnemy(int attackerLogicId, string hostileId)
+        {
+            CampaignState state = CampaignSession.Current;
+            FracturedCityRegion.ActionResult result =
+                FracturedCityRegion.TryAttackEnemy(state, attackerLogicId, hostileId, state?.RandomSeed ?? 0, isAiSource: false);
+            if (!result.Success)
+            {
+                return RegionAttackOutcome.Fail(result.FailureReason);
+            }
+            RegionEnemyRecord enemy = FracturedCityRegion.FindEnemy(state, hostileId);
+            return RegionAttackOutcome.Ok(targetDestroyed: enemy == null || !enemy.IsAlive);
         }
 
         // ── 可视化（占位几何体，同 HomeValleyController 手法）─────────────────

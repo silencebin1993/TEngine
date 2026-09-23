@@ -47,5 +47,15 @@ namespace GameLogic.Core
         /// <summary>战略平移左右键（方向键左右，独立于 WASD 的 A/D，供手柄式单手操作）。</summary>
         StrategyPanLeft = 30,
         StrategyPanRight = 31,
+
+        /// <summary>ER5-CMD-01：战略命令快捷键（Strategy 域，配合 GameLogic.Campaign.Regions 下的
+        /// RegionSquadCommandSystem）。Move/Attack 是"武装待命，下一次左键点击世界确认目标"；
+        /// Guard/Retreat 目标固定（分别为"当前位置"/"区域安全点"），按下即立即下达（或战略暂停下
+        /// 排队）。这四个是战术固定键，不纳入 <see cref="InputBindingSet.RebindableActions"/>
+        /// （同 WASD 的范围裁剪理由）。</summary>
+        CommandMove = 32,
+        CommandAttack = 33,
+        CommandGuard = 34,
+        CommandRetreat = 35,
     }
 }

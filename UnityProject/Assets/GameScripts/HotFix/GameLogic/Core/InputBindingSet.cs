@@ -85,6 +85,12 @@ namespace GameLogic.Core
                 case GameActionId.Group9: return KeyCode.Alpha9;
                 case GameActionId.StrategyPanLeft: return KeyCode.LeftArrow;
                 case GameActionId.StrategyPanRight: return KeyCode.RightArrow;
+                // ER5-CMD-01：G/H 沿用仓库里旧 SquadCommandSystem（细胞阶段）的 Guard/Retreat 肌肉记忆；
+                // V/C 是 Move/Attack 的武装键（该系统里 Move 靠右键智能命令，未占用独立键位）。
+                case GameActionId.CommandMove: return KeyCode.V;
+                case GameActionId.CommandAttack: return KeyCode.C;
+                case GameActionId.CommandGuard: return KeyCode.G;
+                case GameActionId.CommandRetreat: return KeyCode.H;
                 default: return KeyCode.None;
             }
         }
