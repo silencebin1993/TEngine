@@ -86,6 +86,7 @@ namespace GameLogic.Campaign.Regions
             HomeValleyFactory.EnsureBlueprintsSeeded(state); // ER4-FAC-01：装配站默认三条生产蓝图 + ER4-PRIM-02 电路板数据。
             PrimitiveInventory.EnsureSeeded(state); // ER4-PRIM-03：战役唯一基元仓，开局8格+1件聚焦镜，幂等。
             HomeValleyCombatTargets.EnsureSeeded(state); // ER4-PRIM-05：低威胁残骸靶，幂等。
+            HomeValleySignal.EnsureSeeded(state); // ER5-SIG-01：破碎都市 Locked 区域记录，幂等。
             EnsureMachinesSeeded(state);
             // ER4-BLP-02 STORY-EXECUTION-CARDS.md 第3条："区域卸载/重新生成……时登记/解绑装配登记表"。
             // MachineLoadoutRegistry 是本次会话内的"哪台机当前装配是什么"缓存（同 MachineRegistry 自身
@@ -166,6 +167,7 @@ namespace GameLogic.Campaign.Regions
                 PrimitiveCraftStation.Tick(state, scaledDt); // ER4-PRIM-04：合成台升级/拆解队列。
                 HomeValleyCombatTargets.Tick(state, scaledDt); // ER4-PRIM-05：低威胁残骸靶被动再生。
                 TickAutoEngage(state, scaledDt); // ER4-PRIM-05：AI 同出口自动交战。
+                HomeValleySignal.RecomputeUnlock(state); // ER5-SIG-01：破碎都市解锁判定。
                 HomeValleySoftlockGuard.Tick(state, scaledDt, BeginAutoAssignedMovement);
                 SyncWorldVisuals(state);
             }

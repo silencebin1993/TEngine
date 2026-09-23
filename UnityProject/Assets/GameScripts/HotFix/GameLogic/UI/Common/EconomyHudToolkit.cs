@@ -38,6 +38,7 @@ namespace GameLogic.UI.Common
         private readonly Label[] _recentLabels = new Label[RecentCount];
         private Label _powerLabel;
         private Label _brownoutLabel;
+        private Label _signalLabel;
         private Label _storageLabel;
         private Label _groundItemsLabel;
 
@@ -125,6 +126,13 @@ namespace GameLogic.UI.Common
             _brownoutLabel.style.display = DisplayStyle.None;
             _panel.Add(_brownoutLabel);
 
+            // ER5-SIG-01：信号带宽此前只有数据（HomeValleyPowerGrid.Recompute 正确计算），
+            // 从未在任何 HUD 展示——"塔停电时带宽回落"缺一个真实可见的地方。
+            _signalLabel = new Label();
+            _signalLabel.style.color = Color.white;
+            _signalLabel.style.marginTop = 4;
+            _panel.Add(_signalLabel);
+
             _storageLabel = new Label();
             _storageLabel.style.color = Color.white;
             _storageLabel.style.marginTop = 4;
@@ -193,6 +201,12 @@ namespace GameLogic.UI.Common
             {
                 _brownoutLabel.style.display = DisplayStyle.None;
             }
+
+            float bandwidth = HomeValleySignal.BandwidthCapacity(state);
+            string bandwidthSource = HomeValleySignal.TowerContributing(state) ? "基础3+塔5" : "基础3（塔未通电）";
+            RegionRecord silentRuins = HomeValleySignal.Find(state);
+            string unlockNote = silentRuins != null && silentRuins.State != RegionState.Locked ? "｜破碎都市已解锁" : string.Empty;
+            _signalLabel.text = $"信号带宽：{bandwidth:0}（{bandwidthSource}）{unlockNote}";
 
             int capacity = HomeValleyCargo.GetStorageCapacity(state, CampaignEconomyLedger.ResourceScrap);
             int used = HomeValleyCargo.GetStorageUsed(state, CampaignEconomyLedger.ResourceScrap);
