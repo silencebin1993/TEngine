@@ -79,8 +79,10 @@ namespace GameLogic.Campaign.Regions
             _boundCampaignId = state.CampaignId;
 
             EnsureRegionSeeded(state);
+            // ER4-PRIM-02：蓝图播种必须先于机器播种——ERC-001/002 的 MachineRecord.BlueprintId 现在
+            // 指向真实 BlueprintRecord（bp_erc001/bp_hauler），不再是占位字符串，见 EnsureMachinesSeeded。
+            HomeValleyFactory.EnsureBlueprintsSeeded(state); // ER4-FAC-01：装配站默认三条生产蓝图 + ER4-PRIM-02 电路板数据。
             EnsureMachinesSeeded(state);
-            HomeValleyFactory.EnsureBlueprintsSeeded(state); // ER4-FAC-01：装配站默认三条生产蓝图。
             state.CurrentRegionId = HomeValleyLayout.RegionId;
             HomeValleyPowerGrid.Recompute(state); // 幂等：新建战役刚播种、或读档恢复旧存档，都用当前数据重算一次。
 
@@ -324,6 +326,13 @@ namespace GameLogic.Campaign.Regions
         public bool IsFactoryPanelOpen => _factoryPanelOpen;
         public void SetFactoryPanelOpen(bool open) => _factoryPanelOpen = open;
 
+        /// <summary>ER4-PRIM-02：电路板面板开关状态，由 <c>CircuitBoardPanelUIToolkit</c> 自身的常驻
+        /// 切换按钮驱动（不占用建筑点选路由——正式"家园蓝图"容器入口留 ER4-BLP-01，本 Story 先提供一个
+        /// 独立可达的入口，不强求等那个容器落地才能测试/使用电路板）。</summary>
+        private bool _circuitBoardPanelOpen;
+        public bool IsCircuitBoardPanelOpen => _circuitBoardPanelOpen;
+        public void SetCircuitBoardPanelOpen(bool open) => _circuitBoardPanelOpen = open;
+
         /// <summary>供工作单面板"点击定位"（AC-UI-003）调用：把选中切到该订单当前指派的机器并高亮，
         /// 与鼠标直接点机器同一套视觉反馈。订单尚未指派机器（Ready/Waiting）时无具体对象可定位，
         /// 返回 false，调用方保持原选中不报错——完整的"打开恢复面板"仍是 ER5-INT-01/UI-04 范围。</summary>
@@ -523,13 +532,18 @@ namespace GameLogic.Campaign.Regions
         }
 
         /// <summary>首次进入才登记 ERC-001/002；已有记录（新战役当局已生成，或读档已恢复）时
-        /// 原样复用，绝不重复 SpawnMachine——否则每次回城都会多出一台机器（AC-LIFE-001/002）。</summary>
+        /// 原样复用，绝不重复 SpawnMachine——否则每次回城都会多出一台机器（AC-LIFE-001/002）。
+        ///
+        /// ER4-PRIM-02 前：blueprintId 传的是字面 "placeholder:erc_001" 占位串，没有对应的真实
+        /// <see cref="BlueprintRecord"/>——"默认机器"这个说法只停留在纸面。本 Story 起改传真实蓝图 ID
+        /// （bp_erc001/bp_hauler，由 <see cref="HomeValleyFactory.EnsureBlueprintsSeeded"/> 保证在本方法
+        /// 调用前已经播种好，见 <see cref="Enter"/> 调用顺序调整）。</summary>
         private static void EnsureMachinesSeeded(CampaignState state)
         {
-            SpawnIfMissing(HomeValleyLayout.Erc001Spawn);
-            SpawnIfMissing(HomeValleyLayout.Erc002Spawn);
+            SpawnIfMissing(HomeValleyLayout.Erc001Spawn, HomeValleyLayout.BlueprintErc001Id);
+            SpawnIfMissing(HomeValleyLayout.Erc002Spawn, HomeValleyLayout.BlueprintHaulerId);
 
-            void SpawnIfMissing(HomeValleyLayout.Anchor spawn)
+            void SpawnIfMissing(HomeValleyLayout.Anchor spawn, string blueprintId)
             {
                 bool exists = MachineRegistry.AllRecords.Any(r =>
                     r.RegionId == HomeValleyLayout.RegionId && r.ChassisId == spawn.Id && r.IsAlive);
@@ -540,7 +554,7 @@ namespace GameLogic.Campaign.Regions
 
                 MachineOpResult result = MachineRegistry.SpawnMachine(
                     chassisId: spawn.Id,
-                    blueprintId: "placeholder:" + spawn.Id,
+                    blueprintId: blueprintId,
                     regionId: HomeValleyLayout.RegionId,
                     position: spawn.Position,
                     health: 100f,

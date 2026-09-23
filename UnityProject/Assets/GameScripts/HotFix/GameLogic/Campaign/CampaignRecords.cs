@@ -124,6 +124,50 @@ namespace GameLogic.Campaign
         public string[] FactionTags;
         public string CompileSignature;
         public float CreatedAtPlaySeconds;
+
+        // ── ER4-PRIM-02：3×3 电路板（PRIMITIVE-FULL-DEMO-SPEC.md §3）──────────────────
+        // 旧档（ER1-SAVE-01～ER4-FAC-01 期间创建的骨架）这五个字段全为 null/0，
+        // 由 Blueprint.BlueprintCircuitDefaults.EnsureCircuitDataSeeded 在下次进入归还谷地时
+        // 就地迁入默认合法板（见该类注释），不复制任何玩家仓实例。
+
+        /// <summary>9 槽类型，行优先 0～8，当前恒等于 <c>Blueprint.BlueprintCircuitLayout.SlotTypeAt(i)</c>
+        /// 的计算结果——落盘是满足"存9槽类型"的字面存档契约与未来非固定布局的扩展点，不是每局可各自不同
+        /// 的数据（Demo 固定同一网格，§3.3）。</summary>
+        public GameLogic.MetabolicSlice.Grid.SlotType[] CircuitSlotTypes;
+
+        /// <summary>9 槽内容 ID（<c>GameLogic.MetabolicSlice.CardDefs.CardCatalog</c> 的条目 id），行优先
+        /// 0～8。index0＝固定源槽（<see cref="Blueprint.BlueprintCircuitChipCatalog.DefaultSourceContentId"/>
+        /// 或其它 <c>IsSource</c> 条目，不可编辑——这是 DEBT-ER4PRIM01-01 的裁决落点：编译/签名/预览均真实
+        /// 读取这个 ID，而不是像旧 <c>CarrierCompiler.BuildRecipe</c> 那样硬编码 <c>EnergyCore(10f)</c>）；
+        /// index8＝固定汇槽，由 <see cref="PrimaryId"/> 派生（<see cref="Blueprint.BlueprintCircuitChipCatalog.ResolveSinkContentId"/>），
+        /// 同样不可编辑；index1～7＝玩家可装卸的基元芯片 id，null/空串表示空槽。</summary>
+        public string[] CircuitSlotContentIds;
+
+        /// <summary>玩家画的有向导线（四邻、无自环、无重复，软帽见 <c>SlotGrid.TryAddEdge</c>），
+        /// 保存前已按 (From,To) 升序排列以保证签名/JSON 稳定。</summary>
+        public BlueprintCircuitEdgeRecord[] CircuitEdges;
+
+        /// <summary>保存那一刻的 <see cref="CampaignSaveService.CurrentContentVersion"/> 快照，参与
+        /// <see cref="CompileSignature"/>——未来内容表结构性变化（槽位规则、固件解析方式等）时用于识别
+        /// "本版本基于已变化的内容定义编译"，触发重新校验，而不是让旧签名静默失效当作仍然合法。</summary>
+        public int ContentVersionAtCompile;
+    }
+
+    /// <summary>ER4-PRIM-02：<see cref="BlueprintVersionRecord.CircuitEdges"/> 的单条有向边。
+    /// 独立类型而非 (int,int) 元组是为了兼容 <see cref="JsonUtility"/>（不支持元组序列化）。</summary>
+    [Serializable]
+    public sealed class BlueprintCircuitEdgeRecord
+    {
+        public int From;
+        public int To;
+
+        public BlueprintCircuitEdgeRecord() { }
+
+        public BlueprintCircuitEdgeRecord(int from, int to)
+        {
+            From = from;
+            To = to;
+        }
     }
 
     /// <summary>ERD-DAT-003 BlueprintRecord。</summary>

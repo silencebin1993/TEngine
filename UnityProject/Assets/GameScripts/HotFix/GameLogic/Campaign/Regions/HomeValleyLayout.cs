@@ -253,6 +253,14 @@ namespace GameLogic.Campaign.Regions
         /// <see cref="Content.ChassisCatalog.ChassisHoverId"/>。</summary>
         public const string BlueprintHoverId = "bp_hover";
 
+        /// <summary>ER4-PRIM-02：ERC-001（开局搬运轮式，货舱型）的默认蓝图 ID。ERC-001 不进入
+        /// <see cref="FactoryProduceDefaults"/>（它是开局固定单位，不可在装配站再生产一台），但
+        /// PRIMITIVE-FULL-DEMO-SPEC.md §3.1 要求所有默认机器都有自洽的电路板数据；DEMO-CONTENT-LOCK.md
+        /// §2.4"货舱……ERC-001 开局即带"确认它的默认装配是纯搬运型（<see cref="Content.ComponentCatalog.StructCargoId"/>，
+        /// 无主组件），因此没有可攻击的 8 号汇槽——这是设计使然而非缺口，见
+        /// <see cref="Blueprint.BlueprintCircuitDefaults"/> 类注释。</summary>
+        public const string BlueprintErc001Id = "bp_erc001";
+
         /// <summary>单条默认生产蓝图的静态数据：底盘、展示名、出厂废料成本、生产秒数。
         /// <see cref="Regions.HomeValleyFactory"/> 用本表播种 <see cref="BlueprintRecord"/>（成本随
         /// <see cref="BlueprintVersionRecord.ScrapCost"/> 落盘、可被"版本锁定"覆盖——见该类"改蓝图

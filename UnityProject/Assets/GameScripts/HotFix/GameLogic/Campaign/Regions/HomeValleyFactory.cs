@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using GameLogic.Campaign.Blueprint;
 
 namespace GameLogic.Campaign.Regions
 {
@@ -108,6 +109,12 @@ namespace GameLogic.Campaign.Regions
                 };
                 state.BlueprintRecords = state.BlueprintRecords.Append(record).ToArray();
             }
+
+            // ER4-PRIM-02：补 ERC-001 默认蓝图 + 把本方法上面刚创建的骨架（PrimaryId/UtilityId/
+            // StructureId/OrderedFirmwareIds 全为 null/空、CircuitSlotContentIds 为 null）就地迁入
+            // 默认合法电路板，也顺带覆盖旧存档（ER1-SAVE-01～本 Story 上线前创建）缺电路数据的情形——
+            // 单一幂等入口，见 BlueprintCircuitDefaults 类注释。
+            BlueprintCircuitDefaults.EnsureCircuitDataSeeded(state);
         }
 
         // ── 查询 ─────────────────────────────────────────────────────────────────

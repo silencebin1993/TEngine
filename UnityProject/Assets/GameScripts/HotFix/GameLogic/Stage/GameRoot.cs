@@ -210,6 +210,12 @@ namespace GameLogic.Stage
             var factoryHudHost = new GameObject("[HomeValleyFactoryHost]");
             Object.DontDestroyOnLoad(factoryHudHost);
             factoryHudHost.AddComponent<UI.Factory.FactoryPanelUIToolkit>();
+            // ER4-PRIM-02：3×3 电路板面板，同样独立 GameObject（同一条 UIDocument 唯一性纪律）。
+            // 面板自带常驻切换按钮，不依赖建筑点选路由，只在归还谷地激活时可见
+            // （见 CircuitBoardPanelUIToolkit.Update）。
+            var circuitBoardHudHost = new GameObject("[HomeValleyCircuitBoardHost]");
+            Object.DontDestroyOnLoad(circuitBoardHudHost);
+            circuitBoardHudHost.AddComponent<UI.CircuitBoard.CircuitBoardPanelUIToolkit>();
             // ER3-SOFTLOCK-01：家园核心被毁的全屏失败面板，同样独立 GameObject（同一条 UIDocument
             // 唯一性纪律），只在归还谷地激活且核心已被摧毁时可见。
             var homeValleyFailureHost = new GameObject("[HomeValleyFailureHost]");
