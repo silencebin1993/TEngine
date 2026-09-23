@@ -151,6 +151,15 @@ namespace GameLogic.Campaign
         /// <see cref="CompileSignature"/>——未来内容表结构性变化（槽位规则、固件解析方式等）时用于识别
         /// "本版本基于已变化的内容定义编译"，触发重新校验，而不是让旧签名静默失效当作仍然合法。</summary>
         public int ContentVersionAtCompile;
+
+        /// <summary>ER4-PRIM-03：9 槽与 <see cref="PrimitiveChipRecord.PartId"/> 的对应关系，
+        /// 行优先 0～8，与 <see cref="CircuitSlotContentIds"/> 平行——后者记录"这个槽装的是什么内容"，
+        /// 本字段记录"具体是仓里哪一个物理实例"。0/8 固定槽永远为 null（源/汇不占用基元仓实例）；
+        /// 1～7 空槽同样为 null。旧档（本字段落地前的记录）迁移后本字段维持全 null——旧档迁移只保证
+        /// 默认线合法可编译，不凭空造出玩家从未真正拥有过的仓内实例。刻意不参与
+        /// <see cref="BlueprintCircuitBoard"/> 的 <c>ComputeSignature</c>：签名描述"内容"而非"哪个实例"，
+        /// 两个物理实例只要 CardDefId 相同就应产出同一签名，不能让实例更替误判蓝图内容变化。</summary>
+        public string[] CircuitSlotPartIds;
     }
 
     /// <summary>ER4-PRIM-02：<see cref="BlueprintVersionRecord.CircuitEdges"/> 的单条有向边。
@@ -221,6 +230,44 @@ namespace GameLogic.Campaign
         public string ResourceType;
         public int Amount;
         public string SalvageInstanceId;
+    }
+
+    /// <summary>ER4-PRIM-03 STORY-EXECUTION-CARDS.md 第1条："仓/草稿槽/待领取三态恰一"。</summary>
+    public enum PrimitiveChipState
+    {
+        /// <summary>在基元仓里，未装入任何蓝图草稿。</summary>
+        Bag,
+        /// <summary>已装入某个蓝图（<see cref="PrimitiveChipRecord.DraftBlueprintId"/>/
+        /// <see cref="PrimitiveChipRecord.DraftSlot"/>）的 1～7 号自由槽。</summary>
+        Draft,
+        /// <summary>仓满时新生成的实例排队等待玩家腾格领取，不丢失、不阻断来源事件。</summary>
+        Pending,
+    }
+
+    /// <summary>ERD-PRM-003 战役唯一基元芯片实例账，`Campaign.Primitive.PrimitiveInventory` 的唯一
+    /// 写入口写入。全 public 字段（非属性）以兼容 <see cref="JsonUtility"/>——与既有
+    /// <see cref="GameLogic.MetabolicSlice.Bag.PartInstance"/>（只读属性，不可直接 JsonUtility 序列化）
+    /// 不是同一个类型：本类型是该实例在"战役存档层"的落盘投影，<c>PartId</c> 与
+    /// <see cref="GameLogic.MetabolicSlice.Bag.PartInstance.PartId"/> 同一命名空间但生成规则独立
+    /// （"pchip_"前缀 GUID，与 <see cref="GroundItemRecord.SalvageInstanceId"/>/
+    /// <see cref="CampaignState.UnlockedContentIds"/>/<see cref="MachineRecord.LogicId"/> 三套 id
+    /// 空间互不相交——STORY-EXECUTION-CARDS.md 第1条"实例ID不可与远征货物、解锁目录、机器成品混用"的
+    /// 具体落点）。</summary>
+    [Serializable]
+    public sealed class PrimitiveChipRecord
+    {
+        public string PartId;
+        /// <summary><see cref="GameLogic.MetabolicSlice.CardDefs.CardCatalog"/> 的条目 id
+        /// （Demo 范围内恒为 <c>"organ_focus"</c>="聚焦镜"，<c>"organ_focus_plus"</c> 精校镜是
+        /// ER4-PRIM-04 合成产物，字段结构上已支持，未来无需改 schema）。</summary>
+        public string CardDefId;
+        public PrimitiveChipState State;
+        /// <summary>仅 <see cref="PrimitiveChipState.Draft"/> 有效：当前装在哪个 BlueprintId 的电路草稿里。</summary>
+        public string DraftBlueprintId;
+        /// <summary>仅 <see cref="PrimitiveChipState.Draft"/> 有效：装在该蓝图的第几号槽（1～7）。</summary>
+        public int DraftSlot = -1;
+        /// <summary>解析来源的 salvageInstanceId，去重用（同一来源只生成一次实例）；补印来源为 null。</summary>
+        public string SourceSalvageId;
     }
 
     /// <summary>ERD-DAT-005 ResourceTransaction：跨帧资源消费的唯一凭证，取消/重试必须幂等。</summary>

@@ -3,6 +3,7 @@ using System.Linq;
 using Cysharp.Threading.Tasks;
 using GameLogic.Campaign;
 using GameLogic.Campaign.Blueprint;
+using GameLogic.Campaign.Primitive;
 using GameLogic.Campaign.Regions;
 using GameLogic.MetabolicSlice.Grid;
 using GameLogic.Stage;
@@ -45,10 +46,22 @@ namespace GameLogic.UI.CircuitBoard
         private readonly Button[] _slotButtons = new Button[BlueprintCircuitLayout.SlotCount];
         private Label _selectedSlotLabel;
 
-        private TextField _chipIdField;
-        private Button _placeChipButton;
+        private DropdownField _bagChipDropdown;
+        private Button _equipChipButton;
         private Button _removeChipButton;
         private Label _sourceLabel;
+        private Label _bagCapacityLabel;
+        private Label _pendingLabel;
+        private DropdownField _pendingChipDropdown;
+        private Button _claimPendingButton;
+        private Button _printChipButton;
+        private Label _bagResultLabel;
+
+        /// <summary>ER4-PRIM-03：<see cref="_bagChipDropdown"/>/<see cref="_pendingChipDropdown"/> 的
+        /// choices 是展示文本（人读，含 PartId 短形式方便区分同名芯片），这两张表把下拉框选中索引换回
+        /// 真正的 PartId——DropdownField 本身不支持"显示名/取值"分离，这是最小代价的绑定写法。</summary>
+        private readonly List<string> _bagPartIdsByDropdownIndex = new List<string>();
+        private readonly List<string> _pendingPartIdsByDropdownIndex = new List<string>();
 
         private TextField _edgeFromField;
         private TextField _edgeToField;
@@ -143,10 +156,16 @@ namespace GameLogic.UI.CircuitBoard
             }
             _selectedSlotLabel = _root.Q<Label>("SelectedSlotLabel");
 
-            _chipIdField = _root.Q<TextField>("ChipIdField");
-            _placeChipButton = _root.Q<Button>("PlaceChipButton");
+            _bagChipDropdown = _root.Q<DropdownField>("BagChipDropdown");
+            _equipChipButton = _root.Q<Button>("EquipChipButton");
             _removeChipButton = _root.Q<Button>("RemoveChipButton");
             _sourceLabel = _root.Q<Label>("SourceLabel");
+            _bagCapacityLabel = _root.Q<Label>("BagCapacityLabel");
+            _pendingLabel = _root.Q<Label>("PendingLabel");
+            _pendingChipDropdown = _root.Q<DropdownField>("PendingChipDropdown");
+            _claimPendingButton = _root.Q<Button>("ClaimPendingButton");
+            _printChipButton = _root.Q<Button>("PrintChipButton");
+            _bagResultLabel = _root.Q<Label>("BagResultLabel");
 
             _edgeFromField = _root.Q<TextField>("EdgeFromField");
             _edgeToField = _root.Q<TextField>("EdgeToField");
@@ -206,8 +225,34 @@ namespace GameLogic.UI.CircuitBoard
                 _slotButtons[i].clicked += () => SelectSlot(slot);
             }
 
-            _placeChipButton.clicked += () => RunOp(() => _board.TryPlaceChip(_selectedSlot ?? -1, _chipIdField.value));
-            _removeChipButton.clicked += () => RunOp(() => _board.TryRemoveChip(_selectedSlot ?? -1));
+            _equipChipButton.clicked += () => RunBagOp(() =>
+            {
+                if (_selectedSlot == null)
+                {
+                    return CircuitOpResult.Fail("no-slot-selected", "请先点选一个 1～7 号槽。");
+                }
+                int index = _bagChipDropdown.index;
+                if (index < 0 || index >= _bagPartIdsByDropdownIndex.Count)
+                {
+                    return CircuitOpResult.Fail("no-chip-selected", "仓中没有可装的芯片，或未选中。");
+                }
+                string partId = _bagPartIdsByDropdownIndex[index];
+                return PrimitiveInventory.TryMoveToDraft(CampaignSession.Current, _board, _selectedBlueprintId, _selectedSlot.Value, partId);
+            });
+            _removeChipButton.clicked += () => RunBagOp(() =>
+                PrimitiveInventory.TryMoveToBag(CampaignSession.Current, _board, _selectedSlot ?? -1));
+            _claimPendingButton.clicked += () => RunBagOp(() =>
+            {
+                int index = _pendingChipDropdown.index;
+                if (index < 0 || index >= _pendingPartIdsByDropdownIndex.Count)
+                {
+                    return CircuitOpResult.Fail("no-pending-selected", "待领取队列为空，或未选中。");
+                }
+                string partId = _pendingPartIdsByDropdownIndex[index];
+                return PrimitiveInventory.TryClaimPending(CampaignSession.Current, partId);
+            });
+            _printChipButton.clicked += () => RunBagOp(() =>
+                PrimitiveInventory.TryPrintChip(CampaignSession.Current, PrimitiveInventory.DefaultChipContentId));
 
             _addEdgeButton.clicked += () =>
             {
@@ -259,9 +304,35 @@ namespace GameLogic.UI.CircuitBoard
             RefreshAll();
         }
 
+        /// <summary>同 <see cref="RunOp"/>，但结果文本写进基元仓自己的
+        /// <see cref="_bagResultLabel"/>（STORY-EXECUTION-CARDS.md 第2条"显示……所有失败码"，与电路
+        /// 校验/保存的失败提示分开陈列，不混在同一行）。</summary>
+        private void RunBagOp(System.Func<CircuitOpResult> op)
+        {
+            if (_board == null)
+            {
+                return;
+            }
+            CircuitOpResult r = op();
+            _bagResultLabel.text = r.Success ? string.Empty : $"操作失败[{r.Code}]：{r.Message}";
+            RefreshAll();
+        }
+
         private void SetPanelOpen(bool open)
         {
             GameRoot.HomeValley?.SetCircuitBoardPanelOpen(open);
+            if (!open)
+            {
+                // ER4-PRIM-03：关闭面板＝离开当前蓝图的编辑会话，未保存的实例装/卸改动释放回仓
+                // （"退出……时资源与实例守恒"）。仅回滚仓账本还不够——execute_code 实测发现的真实
+                // 缺陷：本类的 _board 字段此前在这里不会被清空/重建，玩家关闭再重新打开面板会看到
+                // 一块"槽位视觉上仍装着芯片，但该实例其实已经在 ReconcileCurrentBlueprintDrafts 里
+                // 放回仓"的鬼画面（_board.SlotContentIds/SlotPartIds 与仓账本真实状态脱节），下一次
+                // 装卸操作还会因为 _board 仍认为槽位"已占用"而被 TryMoveToDraft/TryPlaceChip 误拒。
+                // 修复：关闭时把 _board 重新从当前已保存版本加载一次，与账本保持同步。
+                ReconcileCurrentBlueprintDrafts();
+                ReloadBoardFromSaved();
+            }
             if (open && _board == null)
             {
                 SelectBlueprint(HomeValleyLayout.BlueprintErc003Id);
@@ -271,10 +342,29 @@ namespace GameLogic.UI.CircuitBoard
 
         private void SelectBlueprint(string blueprintId)
         {
+            // ER4-PRIM-03："跨草稿"守恒：离开上一个正在编辑的蓝图前，把它名下未落进已保存版本的
+            // Draft 实例释放回仓，不让切换蓝图偷偷丢/复制实例。
+            ReconcileCurrentBlueprintDrafts();
+
             _selectedBlueprintId = blueprintId;
             _selectedSlot = null;
+            ReloadBoardFromSaved();
+            RefreshAll();
+        }
+
+        /// <summary>把 <see cref="_board"/> 从 <see cref="_selectedBlueprintId"/> 当前的已保存活跃版本
+        /// 重新加载——<see cref="SelectBlueprint"/>（切换蓝图）与 <see cref="SetPanelOpen"/>（关闭面板后
+        /// 回滚未保存改动）共用，保证 <c>_board</c> 与 <see cref="PrimitiveInventory"/> 账本、与磁盘上
+        /// 真正保存过的内容三者随时一致，不留"仓账本已回滚但板面显示没跟着回滚"的视觉/逻辑鬼影。</summary>
+        private void ReloadBoardFromSaved()
+        {
+            if (string.IsNullOrEmpty(_selectedBlueprintId))
+            {
+                _board = null;
+                return;
+            }
             CampaignState state = CampaignSession.Current;
-            BlueprintVersionRecord version = FindActiveVersion(state, blueprintId);
+            BlueprintVersionRecord version = FindActiveVersion(state, _selectedBlueprintId);
             _board = BlueprintCircuitBoard.FromVersion(version);
             if (version == null && state != null)
             {
@@ -282,7 +372,20 @@ namespace GameLogic.UI.CircuitBoard
                 // 仍给出可编辑的默认草稿，不阻断面板本身可用性。
                 _board.ChassisId = null;
             }
-            RefreshAll();
+        }
+
+        /// <summary>把 <see cref="_selectedBlueprintId"/> 名下、不属于其最后一次真实保存版本的
+        /// Draft 实例释放回仓。<see cref="SelectBlueprint"/>（切换到别的蓝图前）与
+        /// <see cref="SetPanelOpen"/>（关闭面板）两处调用，逻辑完全一致，抽成共享方法防止漏调一处。</summary>
+        private void ReconcileCurrentBlueprintDrafts()
+        {
+            if (string.IsNullOrEmpty(_selectedBlueprintId))
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            BlueprintVersionRecord savedVersion = FindActiveVersion(state, _selectedBlueprintId);
+            PrimitiveInventory.ReconcileBlueprintDrafts(state, _selectedBlueprintId, savedVersion?.CircuitSlotPartIds);
         }
 
         private static BlueprintVersionRecord FindActiveVersion(CampaignState state, string blueprintId)
@@ -294,10 +397,6 @@ namespace GameLogic.UI.CircuitBoard
         private void SelectSlot(int slot)
         {
             _selectedSlot = slot;
-            if (_board != null && !string.IsNullOrEmpty(_board.SlotContentIds[slot]))
-            {
-                _chipIdField.value = BlueprintCircuitLayout.IsFixedSlot(slot) ? string.Empty : _board.SlotContentIds[slot];
-            }
             RefreshAll();
         }
 
@@ -388,6 +487,7 @@ namespace GameLogic.UI.CircuitBoard
             }
             RefreshBlueprintBar();
             RefreshGrid();
+            RefreshBag();
             RefreshEdgeAndFirmware();
             RefreshHistoryLabel();
             if (_board != null)
@@ -465,6 +565,56 @@ namespace GameLogic.UI.CircuitBoard
                 ? BlueprintCircuitChipCatalog.DisplayNameFor(_board.SlotContentIds[BlueprintCircuitLayout.SourceSlot])
                 : null;
             _sourceLabel.text = $"0 号源槽（不可拆，由底盘电源固定决定）：{sourceName ?? "-"}";
+        }
+
+        /// <summary>ER4-PRIM-03 STORY-EXECUTION-CARDS.md 第2条："正式 UI 显示容量、实例来源、合法目标
+        /// 和所有失败码"——容量=<see cref="_bagCapacityLabel"/>，实例来源见每个下拉选项文本
+        /// （PartId 短形式区分同名芯片，来自解析还是补印看 <see cref="PrimitiveChipRecord.SourceSalvageId"/>
+        /// 是否为空），合法目标由 <see cref="PrimitiveInventory.TryMoveToDraft"/> 内部复用
+        /// <see cref="BlueprintCircuitBoard.TryPlaceChip"/> 校验、失败码通过 <see cref="RunBagOp"/>
+        /// 写入 <see cref="_bagResultLabel"/>。</summary>
+        private void RefreshBag()
+        {
+            CampaignState state = CampaignSession.Current;
+            int bagCount = PrimitiveInventory.BagCount(state);
+            _bagCapacityLabel.text = $"仓 {bagCount}/{PrimitiveInventory.Capacity}";
+
+            _bagPartIdsByDropdownIndex.Clear();
+            var bagChoices = new List<string>();
+            foreach (PrimitiveChipRecord item in PrimitiveInventory.BagItems(state))
+            {
+                string source = string.IsNullOrEmpty(item.SourceSalvageId) ? "补印" : "解析";
+                bagChoices.Add($"{BlueprintCircuitChipCatalog.DisplayNameFor(item.CardDefId)}［{source}·{item.PartId.Substring(0, System.Math.Min(10, item.PartId.Length))}］");
+                _bagPartIdsByDropdownIndex.Add(item.PartId);
+            }
+            _bagChipDropdown.choices = bagChoices;
+            if (bagChoices.Count == 0)
+            {
+                _bagChipDropdown.SetValueWithoutNotify(string.Empty);
+            }
+            else if (_bagChipDropdown.index < 0 || _bagChipDropdown.index >= bagChoices.Count)
+            {
+                _bagChipDropdown.index = 0;
+            }
+
+            IReadOnlyList<PrimitiveChipRecord> pending = PrimitiveInventory.PendingItems(state);
+            _pendingLabel.text = pending.Count == 0 ? "待领取：无" : $"待领取：{pending.Count} 件（仓满时新实例排队于此，不丢失）";
+            _pendingPartIdsByDropdownIndex.Clear();
+            var pendingChoices = new List<string>();
+            foreach (PrimitiveChipRecord item in pending)
+            {
+                pendingChoices.Add($"{BlueprintCircuitChipCatalog.DisplayNameFor(item.CardDefId)}［{item.PartId.Substring(0, System.Math.Min(10, item.PartId.Length))}］");
+                _pendingPartIdsByDropdownIndex.Add(item.PartId);
+            }
+            _pendingChipDropdown.choices = pendingChoices;
+            if (pendingChoices.Count == 0)
+            {
+                _pendingChipDropdown.SetValueWithoutNotify(string.Empty);
+            }
+            else if (_pendingChipDropdown.index < 0 || _pendingChipDropdown.index >= pendingChoices.Count)
+            {
+                _pendingChipDropdown.index = 0;
+            }
         }
 
         private void RefreshEdgeAndFirmware()

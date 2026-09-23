@@ -53,6 +53,9 @@ namespace GameLogic.Campaign
             /// 必须逐字节一致（同一套"存量字段必须参与指纹"的规则，此前骨架阶段没有真正的进度
             /// 可比较，未纳入；现在纳入。</summary>
             public WorkOrderRecord[] WorkOrders;
+            /// <summary>ER4-PRIM-03：基元芯片实例账是仓储守恒的一部分，读档重放后必须逐字节一致
+            /// （同 <see cref="GroundItems"/> 的处理方式）。</summary>
+            public PrimitiveChipRecord[] PrimitiveChips;
         }
 
         /// <summary>计算稳定指纹（十六进制 SHA256 字符串）。<paramref name="state"/> 为空时返回空串
@@ -88,6 +91,7 @@ namespace GameLogic.Campaign
                 ControlledLogicId = state.ControlHandoff?.ControlledLogicId ?? 0,
                 GroundItems = state.GroundItems,
                 WorkOrders = state.WorkOrders,
+                PrimitiveChips = state.PrimitiveChips,
             };
 
             string json = JsonUtility.ToJson(payload);

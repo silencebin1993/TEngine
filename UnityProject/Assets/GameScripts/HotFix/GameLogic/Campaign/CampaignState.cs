@@ -59,6 +59,13 @@ namespace GameLogic.Campaign
         /// <see cref="GameLogic.Campaign.Regions.HomeValleyCargo"/>，不在别处直接改本数组。</summary>
         public GroundItemRecord[] GroundItems = Array.Empty<GroundItemRecord>();
 
+        /// <summary>ER4-PRIM-03：ERD-PRM-003 战役唯一基元芯片实例账（8 格仓+草稿+待领取三态），
+        /// 唯一写入口 <see cref="GameLogic.Campaign.Primitive.PrimitiveInventory"/>。新战役为空数组，
+        /// 由 <c>PrimitiveInventory.EnsureSeeded</c> 首次进入归还谷地时播种（开局8格+1件聚焦镜），
+        /// 不在 <see cref="CreateNew"/> 里直接写死初始内容——与 <see cref="BlueprintRecords"/> 的既有
+        /// "骨架 vs 播种"分工一致（播种入口幂等，可重复调用不重复生成）。</summary>
+        public PrimitiveChipRecord[] PrimitiveChips = Array.Empty<PrimitiveChipRecord>();
+
         public ControlHandoffRecord ControlHandoff = new ControlHandoffRecord();
         public SaveReason LastSaveReason = SaveReason.NewCampaign;
 
@@ -106,6 +113,7 @@ namespace GameLogic.Campaign
                 EventLedger = Array.Empty<EventLedgerEntry>(),
                 ResourceTransactions = Array.Empty<ResourceTransactionRecord>(),
                 GroundItems = Array.Empty<GroundItemRecord>(),
+                PrimitiveChips = Array.Empty<PrimitiveChipRecord>(),
                 ControlHandoff = new ControlHandoffRecord(),
                 LastSaveReason = SaveReason.NewCampaign,
                 ObjectiveRecords = Array.Empty<ObjectiveRecord>(),
@@ -143,6 +151,8 @@ namespace GameLogic.Campaign
                 .OrderBy(r => r.GroundItemId, StringComparer.Ordinal).ToArray();
             ObjectiveRecords = (ObjectiveRecords ?? Array.Empty<ObjectiveRecord>())
                 .OrderBy(r => r.ObjectiveId, StringComparer.Ordinal).ToArray();
+            PrimitiveChips = (PrimitiveChips ?? Array.Empty<PrimitiveChipRecord>())
+                .OrderBy(r => r.PartId, StringComparer.Ordinal).ToArray();
         }
     }
 }

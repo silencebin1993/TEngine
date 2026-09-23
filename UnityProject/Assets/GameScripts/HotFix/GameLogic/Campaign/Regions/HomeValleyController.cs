@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using GameLogic.Campaign;
+using GameLogic.Campaign.Primitive;
 using GameLogic.Core;
 using GameLogic.View;
 using TEngine;
@@ -82,6 +83,7 @@ namespace GameLogic.Campaign.Regions
             // ER4-PRIM-02：蓝图播种必须先于机器播种——ERC-001/002 的 MachineRecord.BlueprintId 现在
             // 指向真实 BlueprintRecord（bp_erc001/bp_hauler），不再是占位字符串，见 EnsureMachinesSeeded。
             HomeValleyFactory.EnsureBlueprintsSeeded(state); // ER4-FAC-01：装配站默认三条生产蓝图 + ER4-PRIM-02 电路板数据。
+            PrimitiveInventory.EnsureSeeded(state); // ER4-PRIM-03：战役唯一基元仓，开局8格+1件聚焦镜，幂等。
             EnsureMachinesSeeded(state);
             state.CurrentRegionId = HomeValleyLayout.RegionId;
             HomeValleyPowerGrid.Recompute(state); // 幂等：新建战役刚播种、或读档恢复旧存档，都用当前数据重算一次。

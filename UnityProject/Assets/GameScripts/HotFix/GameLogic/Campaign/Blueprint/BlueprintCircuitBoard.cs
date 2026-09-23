@@ -81,6 +81,14 @@ namespace GameLogic.Campaign.Blueprint
         /// <summary>固定长度 9，index0/8 由 <see cref="SyncFixedSlots"/> 自动维护，玩家不可直接改。</summary>
         public string[] SlotContentIds = new string[BlueprintCircuitLayout.SlotCount];
 
+        /// <summary>ER4-PRIM-03：与 <see cref="SlotContentIds"/> 平行的 9 槽 <c>PrimitiveChipRecord.PartId</c>
+        /// 对应表——记录"这个槽具体是仓里哪一个物理实例"，与"槽里装的是什么内容"分开。0/8 固定槽与空闲槽
+        /// 恒为 null。本类不直接维护实例账本身（不引用 <c>PrimitiveInventory</c>，避免电路板模型反向依赖
+        /// 仓储层）——<see cref="TryPlaceChip"/>/<see cref="TryRemoveChip"/> 只负责"内容变了就清空旧的实例
+        /// 关联"这一自愈规则，真正把某实例绑定到某槽是调用方（<c>PrimitiveInventory.TryMoveToDraft</c>）
+        /// 在装/卸成功后显式赋值的职责。</summary>
+        public string[] SlotPartIds = new string[BlueprintCircuitLayout.SlotCount];
+
         private readonly List<(int From, int To)> _edges = new List<(int, int)>();
         public IReadOnlyList<(int From, int To)> Edges => _edges;
 
@@ -168,6 +176,17 @@ namespace GameLogic.Campaign.Blueprint
                 }
             }
 
+            // ER4-PRIM-03：同样的 JsonUtility null→"" 规整问题，且旧档（本字段落地前保存的版本）该
+            // 数组本身可能是 null——两种情况都保持全 null（board.SlotPartIds 字段初始值），不臆造实例。
+            if (version.CircuitSlotPartIds != null && version.CircuitSlotPartIds.Length == BlueprintCircuitLayout.SlotCount)
+            {
+                for (int i = 0; i < BlueprintCircuitLayout.SlotCount; i++)
+                {
+                    string raw = version.CircuitSlotPartIds[i];
+                    board.SlotPartIds[i] = string.IsNullOrEmpty(raw) ? null : raw;
+                }
+            }
+
             board.SyncFixedSlots();
             return board;
         }
@@ -198,6 +217,7 @@ namespace GameLogic.Campaign.Blueprint
                 FactionTags = Array.Empty<string>(),
                 CircuitSlotTypes = BlueprintCircuitLayout.BuildSlotTypes(),
                 CircuitSlotContentIds = (string[])SlotContentIds.Clone(),
+                CircuitSlotPartIds = (string[])SlotPartIds.Clone(),
                 CircuitEdges = sortedEdges,
                 ContentVersionAtCompile = CampaignSaveService.CurrentContentVersion,
                 CompileSignature = ComputeSignature(),
@@ -217,6 +237,10 @@ namespace GameLogic.Campaign.Blueprint
                 SlotContentIds[BlueprintCircuitLayout.SourceSlot] = BlueprintCircuitChipCatalog.DefaultSourceContentId;
             }
             SlotContentIds[BlueprintCircuitLayout.SinkSlot] = BlueprintCircuitChipCatalog.ResolveSinkContentId(PrimaryId);
+            // ER4-PRIM-03：0/8 号固定槽由底盘电源/主组件派生，从不占用基元仓实例——防御性清空，
+            // 避免旧数据或调用方误写留下的悬空 PartId 关联。
+            SlotPartIds[BlueprintCircuitLayout.SourceSlot] = null;
+            SlotPartIds[BlueprintCircuitLayout.SinkSlot] = null;
         }
 
         /// <summary>玩家在正式电路板 UI 里对 0 号槽做的唯一操作——从已知合法源内容中选择
@@ -251,8 +275,22 @@ namespace GameLogic.Campaign.Blueprint
                 return CircuitOpResult.Fail("illegal_chip",
                     $"'{contentId}' 不能装入 {slot} 号槽（类型 {slotType}）——未解锁、非法内容或槽型不匹配。");
             }
+            // ER4-PRIM-03 execute_code 实测发现的真实缺陷：本方法此前对已占用槽位无条件覆盖写
+            // SlotContentIds[slot]，不做"槽位已空"校验。ER4-PRIM-02 自身校验从未测过这个场景（当时
+            // 槽内容只是字符串，覆盖不产生可观察后果），但基元仓接入真实实例账后，覆盖会让旧实例的
+            // PrimitiveChipRecord 停留在 Draft/DraftSlot 却再也没有真正占着这个槽——实例账"仓/草稿/
+            // 待领取恰处一地"的不变量被打破（AC-PRM-006）。必须先卸下已占用内容（TryRemoveChip）才能
+            // 装新内容，与 UI 上"装/卸是两个显式动作"的既有设计一致，不是回归而是补齐一直缺失的校验。
+            if (!string.IsNullOrEmpty(SlotContentIds[slot]))
+            {
+                return CircuitOpResult.Fail("slot_occupied", $"{slot} 号槽已装有内容，请先卸下再装入新内容。");
+            }
             CaptureUndo();
             SlotContentIds[slot] = contentId;
+            // ER4-PRIM-03：新内容落进这个槽，旧的实例关联（如果有）不再有效——真正把新内容绑定到某个
+            // 仓内实例是调用方（PrimitiveInventory.TryMoveToDraft）在本方法返回 Success 后显式赋值
+            // SlotPartIds[slot] 的职责，这里只负责不留悬空引用。
+            SlotPartIds[slot] = null;
             CommitUndo();
             return CircuitOpResult.Ok();
         }
@@ -273,6 +311,7 @@ namespace GameLogic.Campaign.Blueprint
             }
             CaptureUndo();
             SlotContentIds[slot] = null;
+            SlotPartIds[slot] = null;
             CommitUndo();
             return CircuitOpResult.Ok();
         }
@@ -356,6 +395,7 @@ namespace GameLogic.Campaign.Blueprint
         private sealed class Snapshot
         {
             public string[] Slots;
+            public string[] PartIds;
             public List<(int, int)> Edges;
             public string[] Firmware;
         }
@@ -367,6 +407,7 @@ namespace GameLogic.Campaign.Blueprint
             _pendingUndo = new Snapshot
             {
                 Slots = (string[])SlotContentIds.Clone(),
+                PartIds = (string[])SlotPartIds.Clone(),
                 Edges = new List<(int, int)>(_edges),
                 Firmware = (string[])FirmwareSlots.Clone(),
             };
@@ -399,6 +440,7 @@ namespace GameLogic.Campaign.Blueprint
             var redoSnap = new Snapshot
             {
                 Slots = (string[])SlotContentIds.Clone(),
+                PartIds = (string[])SlotPartIds.Clone(),
                 Edges = new List<(int, int)>(_edges),
                 Firmware = (string[])FirmwareSlots.Clone(),
             };
@@ -423,6 +465,7 @@ namespace GameLogic.Campaign.Blueprint
             var undoSnap = new Snapshot
             {
                 Slots = (string[])SlotContentIds.Clone(),
+                PartIds = (string[])SlotPartIds.Clone(),
                 Edges = new List<(int, int)>(_edges),
                 Firmware = (string[])FirmwareSlots.Clone(),
             };
@@ -435,6 +478,7 @@ namespace GameLogic.Campaign.Blueprint
         private void Apply(Snapshot s)
         {
             SlotContentIds = (string[])s.Slots.Clone();
+            SlotPartIds = (string[])s.PartIds.Clone();
             _edges.Clear();
             _edges.AddRange(s.Edges);
             FirmwareSlots = (string[])s.Firmware.Clone();
