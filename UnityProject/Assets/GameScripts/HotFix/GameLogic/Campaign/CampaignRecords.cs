@@ -416,6 +416,20 @@ namespace GameLogic.Campaign
         public int ExpeditionCount;
         public bool CoreGateUnlocked;
         public string CoreState;
+        /// <summary>ER5-SILENT-01：静默侦察机在玩家机器身上留下的检测标记，唯一写入口
+        /// <see cref="Regions.FracturedCityRegion.TryMarkMachine"/>/<see cref="Regions.FracturedCityRegion.TryClearMark"/>。
+        /// 与 ER6-REACT-01 未来"标记跳转"反应系统（玩家武器标记敌方目标）是两个独立概念——那一套
+        /// 标记加在 <see cref="RegionEnemyRecord"/> 上，这一套加在玩家 <see cref="MachineRecord"/>
+        /// 上，互不共享存储也互不干扰判定。</summary>
+        public MarkedMachineRecord[] MarkedMachines;
+    }
+
+    /// <summary>见 <see cref="RegionRecord.MarkedMachines"/> 类注释。</summary>
+    [Serializable]
+    public sealed class MarkedMachineRecord
+    {
+        public int MachineLogicId;
+        public float ExpireAtPlaySeconds;
     }
 
     /// <summary>ER5-REGION-01：远征区域内的敌方/节点实例（静默侦察机、静默干扰机等）。与家园

@@ -59,6 +59,15 @@ namespace GameLogic.Campaign.Regions
         /// 沿用 <see cref="InteractRange"/> 的同一空间尺度加倍，不直接照抄归还谷地的 12 米。</summary>
         private const float AttackRange = 6f;
 
+        /// <summary>ER5-SILENT-01：锚点净空障碍物列表，建一份供 <see cref="SquadCommands"/>/
+        /// <see cref="Interact"/>/敌人 AI 视线判定共用（此前 SetupSquadCommands/SetupInteraction 各自
+        /// 重建一份等价列表，这里合并为单一来源，行为不变）。</summary>
+        private List<(Vector2 Position, float Radius)> _obstacles;
+
+        /// <summary>ER5-SILENT-01：静默侦察机扫描脉冲的可视化到期时间（Unity 真实时间，不受战略
+        /// 暂停/慢放影响——纯反馈动画，不是游戏状态），键为敌人实例 ID。</summary>
+        private readonly Dictionary<string, float> _scanPulseExpireRealtime = new Dictionary<string, float>();
+
         /// <summary>最小可用切场入口：把 <paramref name="expeditionLogicIds"/> 指定的家园存活机器
         /// 转移进破碎都市（RegionId 改写+定位到入口安全区），要求区域已经 <see cref="RegionState.Available"/>
         /// 或以上（由 ER5-SIG-01 的 <see cref="HomeValleySignal.RecomputeUnlock"/> 真实判定，本类不重复
@@ -103,6 +112,12 @@ namespace GameLogic.Campaign.Regions
             // Enter 方法，必须同样补上，不能只覆盖出发这一条路径。
             RegisterAllRegionMachineLoadouts(state);
             state.CurrentRegionId = FracturedCityLayout.RegionId;
+
+            _obstacles = new List<(Vector2 Position, float Radius)>();
+            foreach (FracturedCityLayout.Anchor anchor in FracturedCityLayout.AllAnchors())
+            {
+                _obstacles.Add((anchor.Position, anchor.ClearanceRadius));
+            }
 
             BuildVisuals(state);
             SetupCameraDirector();
@@ -211,6 +226,13 @@ namespace GameLogic.Campaign.Regions
             }
 
             FracturedCityRegion.TickEnemies(state, scaledDt);
+            // ER5-SILENT-01：真实敌人 AI（移动/标记/清标记/攻击）——必须在 Control.Tick 之前跑，
+            // 这样干扰机本帧刚打死的受控机可以在同一帧被死亡回弹侦测到，不用多等一帧。
+            FracturedCityEnemyAi.Tick(state, scaledDt, BuildVisibleMachines(), IsLineOfSightClear);
+            foreach (string markedEnemyId in FracturedCityEnemyAi.MarkedThisTick)
+            {
+                TriggerScanPulse(markedEnemyId);
+            }
             // ER5-CTL-01：干扰宽限（Suspended→恢复/None）与受控机死亡回弹统一由 Control.Tick 处理——
             // 取代原来本类专属的 TickJamGrace，同一套状态机现在归还谷地/破碎都市共用。
             Control.Tick(scaledDt);
@@ -463,6 +485,114 @@ namespace GameLogic.Campaign.Regions
                 _lastFacing = new Vector2(x, z).normalized; // ER5-INT-01：E 候选"指向"排序读这个。
             }
             _possessed.DirectMove(new Vector3(x, 0f, z), dt);
+
+            // ER5-SILENT-01：破碎都市此前完全没有直控攻击入口（只有战略 Attack 命令）——验收卡"玩家
+            // 策略/直控各打一场"需要这一条。同 HomeValleyController.TryDirectAttack 同一套鼠标瞄准
+            // 手感（左键、Direct 域，两域互斥不会与 Strategy 点选冲突）。
+            if (InputRouter.GetMouseButtonDown(0, InputScope.Direct) &&
+                InputRouter.TryGetPointer(InputScope.Direct, out Vector3 aimPointer))
+            {
+                TryDirectAttackEnemy(aimPointer);
+            }
+        }
+
+        /// <summary>直控攻击：鼠标屏幕位置反投影到地面（y=0）算出瞄准方向，交给
+        /// <see cref="FracturedCityRegion.TryFindEnemyInAim"/> 做锥形+射程判定；命中后走
+        /// <see cref="FracturedCityRegion.TryAttackEnemy"/> 唯一结算入口（与战略 Attack 命令共用同一
+        /// 装配伤害出口，AC-REA-003"AI/玩家同装配"同一结构在破碎都市同样成立）。瞄准落空/没有装配
+        /// 输出都是合法负向路径，只记日志不抛错。</summary>
+        private void TryDirectAttackEnemy(Vector3 screenPointer)
+        {
+            if (_camera == null || _possessed == null)
+            {
+                return;
+            }
+
+            Ray ray = _camera.ScreenPointToRay(screenPointer);
+            var groundPlane = new Plane(Vector3.up, Vector3.zero);
+            if (!groundPlane.Raycast(ray, out float enter))
+            {
+                return;
+            }
+            Vector3 worldPoint = ray.GetPoint(enter);
+
+            Vector3 originV3 = _possessed.transform.position;
+            Vector2 origin = new Vector2(originV3.x, originV3.z);
+            Vector2 aimDir = new Vector2(worldPoint.x, worldPoint.z) - origin;
+
+            CampaignState state = CampaignSession.Current;
+            if (state == null)
+            {
+                return;
+            }
+
+            RegionEnemyRecord target = FracturedCityRegion.TryFindEnemyInAim(state, origin, aimDir);
+            if (target == null)
+            {
+                Log.Info("[FracturedCityController] 直控攻击：瞄准方向/射程内没有可命中的敌人。");
+                return;
+            }
+
+            FracturedCityRegion.TryAttackEnemy(state, _possessed.LogicId, target.EnemyInstanceId, state.RandomSeed, isAiSource: false);
+        }
+
+        // ── ER5-SILENT-01：敌人 AI 传感器数据 / 视线判定（复用交互系统同款障碍物遮挡算法）───
+
+        private List<FracturedCityEnemyAi.VisibleMachine> BuildVisibleMachines()
+        {
+            var list = new List<FracturedCityEnemyAi.VisibleMachine>(_machineMarkers.Count);
+            foreach (HomeValleyMachineMarker marker in _machineMarkers)
+            {
+                if (marker == null || !MachineRegistry.TryGetRecord(marker.LogicId, out MachineRecord rec) || !rec.IsAlive)
+                {
+                    continue;
+                }
+                Vector3 p = marker.transform.position;
+                list.Add(new FracturedCityEnemyAi.VisibleMachine(marker.LogicId, new Vector2(p.x, p.z)));
+            }
+            return list;
+        }
+
+        private bool IsLineOfSightClear(Vector2 from, Vector2 to)
+        {
+            if (_obstacles == null)
+            {
+                return true;
+            }
+            foreach ((Vector2 Position, float Radius) obstacle in _obstacles)
+            {
+                if (Vector2.Distance(obstacle.Position, to) <= obstacle.Radius + 0.1f)
+                {
+                    continue; // 目标自己所在的锚点不算挡住自己。
+                }
+                // ER5-SILENT-01 实测发现的真实缺陷：敌人经常就站在自己的出生锚点上（静默侦察机
+                // 出生点/静默干扰机守节点），这份障碍物列表包含所有锚点本身——若不同时排除"起点
+                // 自己所在的锚点"，敌人会被自己的出生点/驻守点净空圈挡住向任意方向的视线，
+                // 永远看不到任何目标（execute_code 复现：scout1 站在出生点时朝正上方的畅通方向
+                // 仍返回"被遮挡"）。与上面"目标自己所在锚点"是同一条豁免规则的对称版本。
+                if (Vector2.Distance(obstacle.Position, from) <= obstacle.Radius + 0.1f)
+                {
+                    continue;
+                }
+                if (SegmentIntersectsCircle(from, to, obstacle.Position, obstacle.Radius))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private static bool SegmentIntersectsCircle(Vector2 a, Vector2 b, Vector2 center, float radius)
+        {
+            Vector2 ab = b - a;
+            float lenSq = ab.sqrMagnitude;
+            if (lenSq <= 0.0001f)
+            {
+                return Vector2.Distance(a, center) <= radius;
+            }
+            float t = Mathf.Clamp01(Vector2.Dot(center - a, ab) / lenSq);
+            Vector2 closest = a + ab * t;
+            return Vector2.Distance(closest, center) <= radius;
         }
 
         /// <summary>CameraDirector 请求"给我一个直控目标"的钩子（M 键触发）。ER5-CTL-01 起校验/提交都
@@ -537,12 +667,6 @@ namespace GameLogic.Campaign.Regions
         /// <summary>可达性判定复用 <see cref="SetupSquadCommands"/> 同一份锚点净空障碍列表。</summary>
         private void SetupInteraction()
         {
-            var obstacles = new List<(Vector2 Position, float Radius)>();
-            foreach (FracturedCityLayout.Anchor anchor in FracturedCityLayout.AllAnchors())
-            {
-                obstacles.Add((anchor.Position, anchor.ClearanceRadius));
-            }
-
             Interact.Bind(new RegionInteractContext
             {
                 GetPossessed = () => _possessed,
@@ -560,7 +684,7 @@ namespace GameLogic.Campaign.Regions
                 },
                 BuildCandidates = BuildInteractCandidates,
                 GetFacing = () => _lastFacing,
-                Obstacles = obstacles,
+                Obstacles = _obstacles,
             });
         }
 
@@ -819,12 +943,6 @@ namespace GameLogic.Campaign.Regions
 
         private void SetupSquadCommands()
         {
-            var obstacles = new List<(Vector2 Position, float Radius)>();
-            foreach (FracturedCityLayout.Anchor anchor in FracturedCityLayout.AllAnchors())
-            {
-                obstacles.Add((anchor.Position, anchor.ClearanceRadius));
-            }
-
             SquadCommands.Bind(new RegionSquadCommandContext
             {
                 Camera = _camera,
@@ -835,7 +953,7 @@ namespace GameLogic.Campaign.Regions
                     rec.IsAlive && rec.RegionId == FracturedCityLayout.RegionId,
                 CancelWorkIfAny = null, // 破碎都市没有"工作单"这一层概念。
                 SafePoint = FracturedCityLayout.EntryEvac.Position,
-                Obstacles = obstacles,
+                Obstacles = _obstacles,
                 FindHostileNear = FindEnemyHostileNear,
                 ResolveHostile = ResolveEnemyHostile,
                 TryAttack = TrySquadAttackEnemy,
@@ -988,7 +1106,43 @@ namespace GameLogic.Campaign.Regions
                     ? new Color(0.6f, 0.15f, 0.55f)
                     : new Color(0.75f, 0.35f, 0.15f);
                 renderer.material = new Material(Shader.Find("Standard")) { color = enemy.IsAlive ? baseColor : new Color(0.25f, 0.25f, 0.25f) };
+
+                // ER5-SILENT-01：侦察机的"扫描线"非听觉反馈——初始禁用，命中标记那一帧短暂显示
+                // （见 TriggerScanPulse），满足 AC-ACC-002"失去听觉时有扫描线/边界/图标"。
+                if (enemy.EnemyTypeId == EnemyCatalog.ScoutId)
+                {
+                    GameObject pulse = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                    pulse.name = "ScanPulse_" + enemy.EnemyInstanceId;
+                    pulse.transform.SetParent(_root.transform, false);
+                    pulse.transform.position = new Vector3(enemy.Position.x, 0.03f, enemy.Position.y);
+                    pulse.transform.localScale = new Vector3(FracturedCityLayout.ScoutMarkRange * 2f, 0.02f, FracturedCityLayout.ScoutMarkRange * 2f);
+                    UnityEngine.Object.Destroy(pulse.GetComponent<Collider>());
+                    Renderer pulseRenderer = pulse.GetComponent<Renderer>();
+                    pulseRenderer.material = new Material(Shader.Find("Standard")) { color = new Color(0.95f, 0.85f, 0.2f, 0.35f) };
+                    pulseRenderer.enabled = false;
+                }
             }
+        }
+
+        /// <summary>点亮一次侦察机扫描脉冲的可视反馈，<see cref="_scanPulseExpireRealtime"/> 记录到期时间，
+        /// 由 <see cref="SyncWorldVisuals"/> 每帧检查并熄灭——纯表现层动画，不驱动任何游戏状态。</summary>
+        private void TriggerScanPulse(string enemyInstanceId)
+        {
+            if (_root == null)
+            {
+                return;
+            }
+            Transform pulse = _root.transform.Find("ScanPulse_" + enemyInstanceId);
+            if (pulse == null)
+            {
+                return;
+            }
+            Renderer renderer = pulse.GetComponent<Renderer>();
+            if (renderer != null)
+            {
+                renderer.enabled = true;
+            }
+            _scanPulseExpireRealtime[enemyInstanceId] = Time.time + 0.6f;
         }
 
         private void BuildMachineVisual(MachineRecord machine)
@@ -1044,6 +1198,47 @@ namespace GameLogic.Campaign.Regions
                         ? new Color(0.6f, 0.15f, 0.55f)
                         : new Color(0.75f, 0.35f, 0.15f);
                     RefreshColor("Enemy_" + enemy.EnemyInstanceId, enemy.IsAlive ? baseColor : new Color(0.25f, 0.25f, 0.25f));
+
+                    // ER5-SILENT-01：敌人现在真的会移动（侦察机后撤/巡逻）——同步可视化位置。
+                    Transform enemyT = _root.transform.Find("Enemy_" + enemy.EnemyInstanceId);
+                    if (enemyT != null)
+                    {
+                        enemyT.position = new Vector3(enemy.Position.x, 1f, enemy.Position.y);
+                        Transform pulseT = _root.transform.Find("ScanPulse_" + enemy.EnemyInstanceId);
+                        if (pulseT != null)
+                        {
+                            pulseT.position = new Vector3(enemy.Position.x, 0.03f, enemy.Position.y);
+                        }
+                    }
+                }
+            }
+
+            if (_scanPulseExpireRealtime.Count > 0)
+            {
+                List<string> expired = null;
+                foreach (KeyValuePair<string, float> kv in _scanPulseExpireRealtime)
+                {
+                    if (Time.time < kv.Value)
+                    {
+                        continue;
+                    }
+                    Transform pulse = _root.transform.Find("ScanPulse_" + kv.Key);
+                    if (pulse != null)
+                    {
+                        Renderer renderer = pulse.GetComponent<Renderer>();
+                        if (renderer != null)
+                        {
+                            renderer.enabled = false;
+                        }
+                    }
+                    (expired ??= new List<string>()).Add(kv.Key);
+                }
+                if (expired != null)
+                {
+                    foreach (string key in expired)
+                    {
+                        _scanPulseExpireRealtime.Remove(key);
+                    }
                 }
             }
         }
@@ -1061,6 +1256,7 @@ namespace GameLogic.Campaign.Regions
         private void DestroyVisuals()
         {
             _machineMarkers.Clear();
+            _scanPulseExpireRealtime.Clear();
             if (_root != null)
             {
                 UnityEngine.Object.Destroy(_root);

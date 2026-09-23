@@ -520,6 +520,35 @@ namespace GameLogic.Campaign
             return MachineOpResult.Ok(logicId);
         }
 
+        /// <summary>ER5-SILENT-01：唯一"机器受到外部伤害"写入口——此前项目里从未存在过一条真实会让
+        /// <see cref="MachineRecord.Health"/> 因为敌方攻击而降低的代码路径（<see cref="SyncLiveState"/>
+        /// 只是把已经算好的血量写回，不是伤害来源；<c>HomeValleyCombatTargets</c>/
+        /// <c>FracturedCityRegion.TryDamageEnemy</c> 都是"玩家/AI 打敌人"，没有反向"敌人打玩家"）。
+        /// 归零时复用 <see cref="MarkDeadByLogicId"/> 的既有死亡收尾（IsAlive=false/清实体绑定），
+        /// 这样 <c>RegionControlSystem.Tick</c> 的死亡回弹侦测（读 <see cref="TryGetRecord"/> 的
+        /// <c>IsAlive</c>）第一次有真实触发源，不再需要人工调用 <see cref="MarkDeadByLogicId"/> 模拟
+        /// （DEBT-ER5CTL01-03/DEBT-ER5CMD01-01 均因"没有会真正杀死友军的敌方战斗 AI"而登记，本方法
+        /// 是它们的真实覆盖点）。Reject-to-Safe：目标不存在/已阵亡直接安全返回，不抛异常、不重复
+        /// 触发死亡副作用。</summary>
+        public static MachineOpResult ApplyDamage(int logicId, float damage)
+        {
+            if (!_records.TryGetValue(logicId, out MachineRecord record))
+            {
+                return MachineOpResult.Fail(MachineRegistryError.UnknownLogicId, $"LogicId {logicId} 未登记。", logicId);
+            }
+            if (!record.IsAlive)
+            {
+                return MachineOpResult.Ok(logicId, "目标已阵亡，忽略重复伤害。");
+            }
+
+            record.Health = Mathf.Max(0f, record.Health - Mathf.Max(0f, damage));
+            if (record.Health <= 0f)
+            {
+                return MarkDeadByLogicId(logicId);
+            }
+            return MachineOpResult.Ok(logicId, $"机器 {logicId} 受到 {damage:F1} 点伤害，剩余 {record.Health:F1}/{record.MaxHealth:F0}。");
+        }
+
         // ── 活体状态同步（存档前拉一次实况）───────────────────
 
         /// <summary>存档前把活体机器的位置/血量/装配签名等易变字段从当前会话同步回记录。

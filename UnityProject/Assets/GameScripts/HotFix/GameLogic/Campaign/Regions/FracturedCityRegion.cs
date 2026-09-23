@@ -109,10 +109,12 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        /// <summary>逐帧驱动静默侦察机标记周期（DEMO-CONTENT-LOCK.md §4.1"每8秒标记"）。敌人数量
-        /// 个位数，O(1) 量级，不违反热更层性能纪律。标记本身只是"可读"的节奏事件（天线扫描/短鸣），
-        /// 真正的检测后果（触发交战/警戒升级 AI）属于 ER5-SILENT-01，本 Story 只保证节奏计时器真实
-        /// 存在且写 <see cref="RegionRecord.EnemyAlertLevel"/>（供 HUD/后续 Story 直接读取）。</summary>
+        /// <summary>ER5-SILENT-01 起：本方法只做"警戒等级缓慢衰减"这一项与具体敌人无关的背景行为。
+        /// 静默侦察机真正的标记周期（冷却计时+是否命中目标+呼叫干扰）已迁移到
+        /// <see cref="FracturedCityEnemyAi.Tick"/>——那里需要 Controller 提供的实时友军位置/视线遮挡
+        /// 判定（"标记不魔法穿墙"），本类不持有可视化 Transform，做不到这一层判定，故不再在此处
+        /// 盲目按计时器触发标记（此前版本的行为——ER5-REGION-01 骨架阶段合理，敌人 AI 真正落地后
+        /// 不再合理）。</summary>
         public static void TickEnemies(CampaignState state, float dt)
         {
             if (state?.RegionEnemies == null || dt <= 0f)
@@ -120,26 +122,21 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             RegionRecord region = Find(state);
-            foreach (RegionEnemyRecord enemy in state.RegionEnemies)
-            {
-                if (!enemy.IsAlive || enemy.EnemyTypeId != EnemyCatalog.ScoutId)
-                {
-                    continue;
-                }
-                enemy.CycleCooldownRemaining -= dt;
-                if (enemy.CycleCooldownRemaining <= 0f)
-                {
-                    enemy.CycleCooldownRemaining = FracturedCityLayout.ScoutMarkIntervalSeconds;
-                    if (region != null)
-                    {
-                        region.EnemyAlertLevel = Mathf.Clamp(region.EnemyAlertLevel + 5f, 0f, 100f);
-                    }
-                    Log.Info($"[FracturedCityRegion] {enemy.EnemyInstanceId} 天线扫描标记（周期性节奏事件）。");
-                }
-            }
             if (region != null && region.EnemyAlertLevel > 0f)
             {
                 region.EnemyAlertLevel = Mathf.Max(0f, region.EnemyAlertLevel - dt); // 缓慢衰减，非目标：完整警戒 AI。
+            }
+        }
+
+        /// <summary>静默侦察机成功标记目标时调用——由 <see cref="FracturedCityEnemyAi"/> 驱动，
+        /// 抬升 <see cref="RegionRecord.EnemyAlertLevel"/>（ERD-ENY-001"呼叫干扰"的最小可用代理：
+        /// 本 Story 不新增敌人增援生成机制，用警戒等级上升作为其可被 HUD/后续 Story 读取的真实后果）。</summary>
+        public static void BumpAlertFromMark(CampaignState state)
+        {
+            RegionRecord region = Find(state);
+            if (region != null)
+            {
+                region.EnemyAlertLevel = Mathf.Clamp(region.EnemyAlertLevel + 5f, 0f, 100f);
             }
         }
 
@@ -162,9 +159,160 @@ namespace GameLogic.Campaign.Regions
             {
                 enemy.IsAlive = false;
                 MarkDestroyed(state, enemyInstanceId);
+                SpawnEnemyLoot(state, enemy);
                 Log.Info($"[FracturedCityRegion] 敌人 {enemyInstanceId} 已阵亡。");
             }
             return ActionResult.Ok();
+        }
+
+        /// <summary>ER5-SILENT-01"战利品生成...使用正式货物链"——复用 <see cref="HomeValleyCargo.SpawnGroundItem"/>
+        /// （同箱子废料掉落同一入口），不新造第二套地面物类型。数量按敌人类型区分（ERD-ENY-001"掉落"
+        /// 列只是 flavor 文案，DEMO-CONTENT-LOCK.md 未点名具体数字——真正的两件关键技术仍然只来自
+        /// 监听节点摧毁/终端读取，见类注释"关键掉落和终端物由正式货物链处理"，本方法产出的是普通废料，
+        /// 不与关键物生命周期混淆）。<paramref name="enemy"/> 调用时刻其 <see cref="RegionEnemyRecord.IsAlive"/>
+        /// 已经置为 false，只会在死亡转换的那一帧触发一次（幂等由调用方 <see cref="TryDamageEnemy"/>
+        /// 的早退保证）。</summary>
+        private static void SpawnEnemyLoot(CampaignState state, RegionEnemyRecord enemy)
+        {
+            int amount = enemy.EnemyTypeId == EnemyCatalog.JammerId
+                ? FracturedCityLayout.JammerScrapLoot
+                : FracturedCityLayout.ScoutScrapLoot;
+            HomeValleyCargo.SpawnGroundItem(state, RegionId, enemy.Position,
+                CampaignEconomyLedger.ResourceScrap, amount, enemy.EnemyInstanceId + ":scrap");
+            Log.Info($"[FracturedCityRegion] 敌人 {enemy.EnemyInstanceId} 掉落 {amount} 废料。");
+        }
+
+        /// <summary>ER5-SILENT-01：敌人对玩家机器造成伤害的唯一入口，与 <see cref="TryDamageEnemy"/>
+        /// 对称。写入通过 <see cref="MachineRegistry.ApplyDamage"/>。阵营判断是字面运行时校验——只接受
+        /// <see cref="MachineRecord.FactionId"/>=="Player" 的存活机器，且必须仍在本区域（跨区域/已
+        /// 切场的旧 LogicId 直接拒绝，不允许"隔空打击"）。</summary>
+        public static ActionResult TryEnemyAttackMachine(CampaignState state, string enemyInstanceId, int targetLogicId, float damage)
+        {
+            RegionEnemyRecord enemy = FindEnemy(state, enemyInstanceId);
+            if (enemy == null || !enemy.IsAlive)
+            {
+                return ActionResult.Fail("攻击者不存在或已阵亡。");
+            }
+            if (!MachineRegistry.TryGetRecord(targetLogicId, out MachineRecord machine) || !machine.IsAlive)
+            {
+                return ActionResult.Fail("目标机器不存在或已阵亡。");
+            }
+            if (machine.RegionId != RegionId)
+            {
+                return ActionResult.Fail("目标机器不在本区域。");
+            }
+            if (machine.FactionId != "Player")
+            {
+                return ActionResult.Fail("目标非玩家阵营，拒绝攻击（阵营判断）。");
+            }
+
+            MachineOpResult result = MachineRegistry.ApplyDamage(targetLogicId, damage);
+            if (!result.Success)
+            {
+                return ActionResult.Fail(result.Message);
+            }
+            Log.Info($"[FracturedCityRegion] 敌人 {enemyInstanceId} 命中机器 {targetLogicId}，伤害 {damage:F1}。");
+            return ActionResult.Ok();
+        }
+
+        /// <summary>直控攻击的锥形命中判定——同 <see cref="HomeValleyCombatTargets.TryFindTargetInAim"/>
+        /// 同一设计语言的独立最小实现（目标类型是 <see cref="RegionEnemyRecord"/> 而非
+        /// <see cref="CombatTargetRecord"/>，破碎都市此前完全没有直控攻击入口，ER5-SILENT-01 首次补上，
+        /// 满足验收卡"玩家策略/直控各打一场"里的直控那一半）。</summary>
+        public static RegionEnemyRecord TryFindEnemyInAim(CampaignState state, Vector2 origin, Vector2 aimDirection)
+        {
+            if (state?.RegionEnemies == null || aimDirection.sqrMagnitude < 1e-6f)
+            {
+                return null;
+            }
+            Vector2 dirNorm = aimDirection.normalized;
+            float cosHalf = Mathf.Cos(FracturedCityLayout.DirectAttackAimHalfAngleDeg * Mathf.Deg2Rad);
+            foreach (RegionEnemyRecord enemy in state.RegionEnemies)
+            {
+                if (enemy.RegionId != RegionId || !enemy.IsAlive)
+                {
+                    continue;
+                }
+                Vector2 toTarget = enemy.Position - origin;
+                float dist = toTarget.magnitude;
+                if (dist > FracturedCityLayout.DirectAttackRange || dist < 0.01f)
+                {
+                    continue;
+                }
+                float cosAngle = Vector2.Dot(dirNorm, toTarget.normalized);
+                if (cosAngle >= cosHalf)
+                {
+                    return enemy;
+                }
+            }
+            return null;
+        }
+
+        // ── 标记（静默侦察机施加 / 静默干扰机清除，ERD-ENY-001"标记"/"清除标记"）─────────
+
+        /// <summary>当前是否处于被标记状态（未过期）。</summary>
+        public static bool IsMachineMarked(CampaignState state, int machineLogicId)
+        {
+            RegionRecord region = Find(state);
+            MarkedMachineRecord mark = region?.MarkedMachines?.FirstOrDefault(m => m.MachineLogicId == machineLogicId);
+            return mark != null && mark.ExpireAtPlaySeconds > (state?.PlaySeconds ?? 0f);
+        }
+
+        /// <summary>施加/刷新标记——幂等（同一机器重复标记只刷新过期时间，不产生重复条目）。</summary>
+        public static void TryMarkMachine(CampaignState state, int machineLogicId, float durationSeconds)
+        {
+            RegionRecord region = Find(state);
+            if (region == null)
+            {
+                return;
+            }
+            region.MarkedMachines ??= Array.Empty<MarkedMachineRecord>();
+            MarkedMachineRecord existing = region.MarkedMachines.FirstOrDefault(m => m.MachineLogicId == machineLogicId);
+            float expireAt = state.PlaySeconds + durationSeconds;
+            if (existing != null)
+            {
+                existing.ExpireAtPlaySeconds = expireAt;
+            }
+            else
+            {
+                region.MarkedMachines = region.MarkedMachines.Append(new MarkedMachineRecord
+                {
+                    MachineLogicId = machineLogicId,
+                    ExpireAtPlaySeconds = expireAt,
+                }).ToArray();
+            }
+            Log.Info($"[FracturedCityRegion] 机器 {machineLogicId} 已被标记（{durationSeconds:F0}秒）。");
+        }
+
+        /// <summary>清除标记（静默干扰机在其半径内的效果）。返回是否真的清除了一条存在的标记，
+        /// 供调用方判断是否要播放"清标记"反馈。</summary>
+        public static bool TryClearMark(CampaignState state, int machineLogicId)
+        {
+            RegionRecord region = Find(state);
+            if (region?.MarkedMachines == null || region.MarkedMachines.Length == 0)
+            {
+                return false;
+            }
+            int before = region.MarkedMachines.Length;
+            region.MarkedMachines = region.MarkedMachines.Where(m => m.MachineLogicId != machineLogicId).ToArray();
+            bool cleared = region.MarkedMachines.Length != before;
+            if (cleared)
+            {
+                Log.Info($"[FracturedCityRegion] 干扰机已清除机器 {machineLogicId} 的标记。");
+            }
+            return cleared;
+        }
+
+        /// <summary>惰性清理已过期的标记（每帧调用，个位数条目，O(1) 量级）。</summary>
+        public static void SweepExpiredMarks(CampaignState state)
+        {
+            RegionRecord region = Find(state);
+            if (region?.MarkedMachines == null || region.MarkedMachines.Length == 0)
+            {
+                return;
+            }
+            float now = state.PlaySeconds;
+            region.MarkedMachines = region.MarkedMachines.Where(m => m.ExpireAtPlaySeconds > now).ToArray();
         }
 
         /// <summary>ER5-CMD-01：战略 Attack 命令的唯一命中结算入口——与

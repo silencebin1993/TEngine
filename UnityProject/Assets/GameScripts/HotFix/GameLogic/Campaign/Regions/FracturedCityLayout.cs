@@ -74,6 +74,27 @@ namespace GameLogic.Campaign.Regions
         public const int CrateScrapAmount = 40; // DEMO-CONTENT-LOCK.md §4.1第3条"周围三箱各40废料"。
         public const float PoiDiscoveryRadius = 8f; // 玩家机器进入该半径即"发现"该物件，写 DiscoveredNodes。
 
+        // ── ER5-SILENT-01：敌人 AI 调校（数值来源见 FracturedCityEnemyAi 类注释——DEMO-CONTENT-LOCK.md
+        // §5 只给了 HP/标记间隔/干扰半径，未点名武器伤害/射程/移动速度，以下是本 Story 按既有连射器
+        // 数值量级（8伤害/0.45秒冷却）向下取的保守默认值，非文档摘录）───────────────────────
+        public const float ScoutMarkRange = 10f; // 侦察机标记距离，超出或被遮挡（"不魔法穿墙"）不生效。
+        public const float ScoutFleeTriggerRange = 6f; // 玩家进入此距离，侦察机后撤（"后撤"字面行为）。
+        public const float ScoutFleeLeash = 5f; // 后撤不超过出生点这个半径，避免越界闯入干扰机/其它锚点。
+        public const float ScoutPatrolRadius = 2.5f; // 无威胁时的巡逻摆动半径。
+        public const float ScoutMoveSpeed = 2.2f;
+        public const int ScoutScrapLoot = 15; // 击破掉落（正式货物链 HomeValleyCargo.SpawnGroundItem）。
+
+        public const float JammerAttackRange = 8f; // 驻守节点的防御性攻击——干扰机唯一会主动开火的敌人。
+        public const float JammerAttackDamage = 6f;
+        public const float JammerAttackCooldownSeconds = 2.5f;
+        public const int JammerScrapLoot = 20;
+
+        public const float MarkDurationSeconds = 10f; // 标记状态持续时间，干扰机可提前清除或自然过期。
+
+        // 直控攻击（玩家WASD+左键瞄准），同 HomeValleyCombatTargets.TryFindTargetInAim 同一设计语言：
+        public const float DirectAttackRange = 12f;
+        public const float DirectAttackAimHalfAngleDeg = 60f;
+
         public static IEnumerable<Anchor> AllAnchors()
         {
             yield return EntryEvac;
