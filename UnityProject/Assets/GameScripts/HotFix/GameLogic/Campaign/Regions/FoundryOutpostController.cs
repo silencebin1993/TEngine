@@ -26,6 +26,10 @@ namespace GameLogic.Campaign.Regions
         public bool IsActive { get; private set; }
         public bool IsPaused => _paused;
         public bool IsWiped => _wipeResolved;
+        /// <summary>ER6-REGION-01：撤离确认面板开关——与 <see cref="FracturedCityController.IsEvacPanelOpen"/>
+        /// 同一定位。</summary>
+        public bool IsEvacPanelOpen { get; private set; }
+        public void SetEvacPanelOpen(bool open) => IsEvacPanelOpen = open;
 
         private GameObject _root;
         private Camera _camera;
@@ -77,6 +81,7 @@ namespace GameLogic.Campaign.Regions
                 region.State = RegionState.Active;
             }
             FoundryOutpostRegion.RecoveryLockerCheck(state);
+            FoundryOutpostRegion.RecomputeCoreGate(state);
 
             TransportMachinesIn(state, expeditionLogicIds);
             RegisterAllRegionMachineLoadouts(state);
@@ -186,6 +191,7 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
+            FoundryOutpostRegion.RecomputeCoreGate(state);
             CannonCombat.TickHeatDissipation(state, scaledDt);
             if (_possessed != null)
             {
@@ -433,11 +439,36 @@ namespace GameLogic.Campaign.Regions
                 _lastFacing = new Vector2(x, z).normalized;
             }
             _possessed.DirectMove(new Vector3(x, 0f, z), dt);
+            ClampPossessedAgainstCoreGate();
 
             if (InputRouter.GetMouseButtonDown(0, InputScope.Direct) &&
                 InputRouter.TryGetPointer(InputScope.Direct, out Vector3 aimPointer))
             {
                 TryDirectAttackEnemy(aimPointer);
+            }
+        }
+
+        /// <summary>ER6-REGION-01："物理碰撞"这一重控制——直控 WASD 移动结束后，若门锁定且当前
+        /// 受控机已越过核心分区封锁线，立即把它推回线内（同一帧修正，不产生可感知的"穿模一下"）。
+        /// 与编队 Move 命令走 <see cref="ClampAgainstCoreGate"/> 裁剪目的地是两条独立路径——直控没有
+        /// "目的地"概念（逐帧累积位移），只能在位移发生后做边界钳制，这正是与"导航阻挡"（钳制目的地）
+        /// 刻意区分开的第二重控制，不是同一机制的重复实现。</summary>
+        private void ClampPossessedAgainstCoreGate()
+        {
+            if (_possessed == null)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            RegionRecord region = state != null ? FoundryOutpostRegion.Find(state) : null;
+            if (region == null || region.CoreGateUnlocked)
+            {
+                return;
+            }
+            Vector3 p = _possessed.transform.position;
+            if (p.z > FoundryOutpostLayout.CoreGateBlockLineY)
+            {
+                _possessed.transform.position = new Vector3(p.x, p.y, FoundryOutpostLayout.CoreGateBlockLineY);
             }
         }
 
@@ -678,6 +709,55 @@ namespace GameLogic.Campaign.Regions
                 }
             }
 
+            // ER6-REGION-01：撤离确认——按住 E 只打开确认面板，真正的回城结算只在玩家在面板内点击
+            // "确认撤离"后由 ExpeditionReturnService 执行，同 FracturedCityController 同一先例
+            // （ER5-RETURN-01 类注释）。外围撤离点一直可用（DEMO-CONTENT-LOCK.md §4.2第3条）。
+            if (!IsEvacPanelOpen)
+            {
+                list.Add(new RegionInteractCandidate
+                {
+                    Id = "evac:" + FoundryOutpostLayout.EntryEvacId,
+                    Category = RegionInteractCategory.EvacConfirm,
+                    Position = FoundryOutpostLayout.EntryEvac.Position,
+                    HoldSeconds = 1f,
+                    Priority = -10,
+                    ActionVerb = "查看撤离清单",
+                    Validate = () => RegionInteractResult.Ok(),
+                    Complete = () =>
+                    {
+                        SetEvacPanelOpen(true);
+                        return RegionInteractResult.Ok("撤离清单已打开。");
+                    },
+                });
+            }
+
+            // ER6-REGION-01：封锁门状态查看——"交互拒绝"这一重控制。锁定时给出缺项原因；解锁后仅
+            // 确认状态（核心分区战斗内容属于 ER7-CORE-01，本 Story 不切场，见
+            // FoundryOutpostRegion.CanEnterCoreZone 类注释）。
+            list.Add(new RegionInteractCandidate
+            {
+                Id = "coregate:" + FoundryOutpostLayout.CoreGateId,
+                Category = RegionInteractCategory.GateCheck,
+                Position = FoundryOutpostLayout.CoreGate.Position,
+                HoldSeconds = 0.5f,
+                Priority = 5,
+                ActionVerb = "查看",
+                Validate = () =>
+                {
+                    FoundryOutpostRegion.ActionResult gate = FoundryOutpostRegion.CanEnterCoreZone(CampaignSession.Current);
+                    return gate.Success
+                        ? RegionInteractResult.Ok()
+                        : RegionInteractResult.Fail(RegionInteractFailure.GateLocked, gate.FailureReason);
+                },
+                Complete = () =>
+                {
+                    FoundryOutpostRegion.ActionResult gate = FoundryOutpostRegion.CanEnterCoreZone(CampaignSession.Current);
+                    return gate.Success
+                        ? RegionInteractResult.Ok("核心分区封锁门已开启，正式核心战由后续内容衔接。")
+                        : RegionInteractResult.Fail(RegionInteractFailure.GateLocked, gate.FailureReason);
+                },
+            });
+
             return list;
         }
 
@@ -832,7 +912,22 @@ namespace GameLogic.Campaign.Regions
                 TryAttack = TrySquadAttackEnemy,
                 AttackRange = AttackRange,
                 AttackCooldownSeconds = 1.2f,
+                ClampDestination = ClampAgainstCoreGate,
             });
+        }
+
+        /// <summary>ER6-REGION-01："导航阻挡"这一重控制——编队 Move 命令的目的地不能越过核心分区
+        /// 封锁线（门锁定时）。只钳制 Y 分量、保留 X（沿门前排队而不是被强行拉回中轴线），与
+        /// <see cref="FoundryOutpostRegion.IsBeyondCoreGateLine"/> 同一判据。</summary>
+        private Vector2 ClampAgainstCoreGate(Vector2 target)
+        {
+            CampaignState state = CampaignSession.Current;
+            RegionRecord region = state != null ? FoundryOutpostRegion.Find(state) : null;
+            if (region == null || region.CoreGateUnlocked || !FoundryOutpostRegion.IsBeyondCoreGateLine(target))
+            {
+                return target;
+            }
+            return new Vector2(target.x, FoundryOutpostLayout.CoreGateBlockLineY);
         }
 
         private RegionHostileInfo? FindEnemyHostileNear(Vector2 worldPoint, float pickRadius)
@@ -896,7 +991,7 @@ namespace GameLogic.Campaign.Regions
             BuildAnchorVisual(FoundryOutpostLayout.ArmorCache, PrimitiveType.Cube, CacheColor(state, FoundryOutpostLayout.ArmorCacheId), 0.6f, false);
             BuildAnchorVisual(FoundryOutpostLayout.HeatSinkCache, PrimitiveType.Cube, CacheColor(state, FoundryOutpostLayout.HeatSinkCacheId), 0.6f, false);
             BuildAnchorVisual(FoundryOutpostLayout.ArmorPierceCache, PrimitiveType.Cube, CacheColor(state, FoundryOutpostLayout.ArmorPierceCacheId), 0.6f, false);
-            BuildAnchorVisual(FoundryOutpostLayout.CoreGate, PrimitiveType.Cube, new Color(0.5f, 0.15f, 0.15f), 1.5f, false);
+            BuildAnchorVisual(FoundryOutpostLayout.CoreGate, PrimitiveType.Cube, GateColor(state), 1.5f, false);
             BuildEnemyVisuals(state);
 
             foreach (MachineRecord m in MachineRegistry.AllRecords)
@@ -937,6 +1032,16 @@ namespace GameLogic.Campaign.Regions
             RegionRecord region = FoundryOutpostRegion.Find(state);
             bool looted = region?.LootedContainerIds != null && region.LootedContainerIds.Contains(cacheId);
             return looted ? new Color(0.3f, 0.3f, 0.3f) : new Color(0.35f, 0.55f, 0.85f);
+        }
+
+        /// <summary>ER6-REGION-01：门色随三灯实时变化——红＝锁定，绿＝已开启（不切场，核心分区内容
+        /// 留 ER7-CORE-01）。</summary>
+        private static Color GateColor(CampaignState state)
+        {
+            RegionRecord region = FoundryOutpostRegion.Find(state);
+            return region != null && region.CoreGateUnlocked
+                ? new Color(0.2f, 0.65f, 0.25f)
+                : new Color(0.5f, 0.15f, 0.15f);
         }
 
         private void BuildEnemyVisuals(CampaignState state)
@@ -1003,6 +1108,7 @@ namespace GameLogic.Campaign.Regions
             RefreshColor("Poi_" + FoundryOutpostLayout.ArmorCacheId, CacheColor(state, FoundryOutpostLayout.ArmorCacheId));
             RefreshColor("Poi_" + FoundryOutpostLayout.HeatSinkCacheId, CacheColor(state, FoundryOutpostLayout.HeatSinkCacheId));
             RefreshColor("Poi_" + FoundryOutpostLayout.ArmorPierceCacheId, CacheColor(state, FoundryOutpostLayout.ArmorPierceCacheId));
+            RefreshColor("Poi_" + FoundryOutpostLayout.CoreGateId, GateColor(state));
 
             if (state.RegionEnemies != null)
             {

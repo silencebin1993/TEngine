@@ -170,12 +170,20 @@ namespace GameLogic.UI.Expedition
             if (!snapshot.RegionReachable)
             {
                 _blockedLabel.text = snapshot.BlockedReason == "region-locked"
-                    ? "破碎都市尚未解锁：修复信号塔并生产 ERC-003 战斗履带后再来。"
+                    ? "尚无可出击目标：修复信号塔并生产 ERC-003 战斗履带后再来（第二次出征需先带回并解析\n静默技术、保存跨派系蓝图且完成 ERC-003 回厂改造）。"
                     : "没有活动战役。";
                 return;
             }
 
-            _intelLabel.text = $"目标：破碎都市（第 {snapshot.ExpeditionCount + 1} 次出击）｜警戒 {snapshot.EnemyAlertLevel:F0}/100\n{snapshot.EnemyIntelText}";
+            // ER6-REGION-01：目标名/文案不再硬编码破碎都市——第二次出征以后目标固定切到铸造前哨外围。
+            string targetName = snapshot.Target == ExpeditionDepartureService.ExpeditionTarget.FoundryOutpost
+                ? "铸造前哨外围"
+                : "破碎都市";
+            string objectiveLine = string.IsNullOrEmpty(snapshot.ObjectivePreviewText)
+                ? string.Empty
+                : "\n目标：" + snapshot.ObjectivePreviewText;
+            _intelLabel.text = $"目标：{targetName}（第 {snapshot.ExpeditionCount + 1} 次出击）｜警戒 {snapshot.EnemyAlertLevel:F0}/100" +
+                objectiveLine + $"\n{snapshot.EnemyIntelText}";
 
             // ER6-EXPOSE-01：暴露值+带宽实时展示，让玩家在出发前就能看到"关闭广播"的真实取舍。
             _exposureLabel.text = $"信号暴露 {state.SignalExposure:F0}/100｜带宽 {state.SignalBandwidth:F0}" +

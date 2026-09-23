@@ -32,6 +32,10 @@ namespace GameLogic.Campaign.Regions
         TerminalRead = 2,
         EvacConfirm = 3,
         BeaconActivate = 4,
+        /// <summary>ER6-REGION-01：封锁门状态查看——锁定时给出缺项原因（交互拒绝），解锁后仅确认
+        /// 状态，不产生任何切场效果（核心分区战斗内容属于 ER7-CORE-01，见
+        /// <see cref="FoundryOutpostRegion.CanEnterCoreZone"/> 类注释）。</summary>
+        GateCheck = 5,
     }
 
     public enum RegionInteractFailure : byte
@@ -57,6 +61,9 @@ namespace GameLogic.Campaign.Regions
         ModalBlocked,
         /// <summary>进度中被取消（离开范围/松开按键/目标失效）。</summary>
         Cancelled,
+        /// <summary>ER6-REGION-01：封锁门三灯未全亮，交互拒绝（"重炮解析/熔穿过载蓝图保存/现役机
+        /// 实装"缺项文案随 <see cref="RegionInteractResult.PlayerText"/> 一并给出）。</summary>
+        GateLocked,
     }
 
     public readonly struct RegionInteractResult

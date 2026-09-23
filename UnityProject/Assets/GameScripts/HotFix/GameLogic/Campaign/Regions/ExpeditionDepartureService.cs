@@ -37,6 +37,41 @@ namespace GameLogic.Campaign.Regions
         public const int MinRosterSize = 3;
         public const int MaxRosterSize = 5;
 
+        /// <summary>ER6-REGION-01：本类此前硬编码目标破碎都市（DIGEST 已登记的已知缺口），现推广为
+        /// 支持第二次出征目标铸造前哨外围。None＝两区域都还 Locked（还没修信号塔/生产 ERC-003，或
+        /// 还没保存跨派系蓝图/改造 ERC-003）；进攻核心分区不是"出发去一个新地图"，是同一
+        /// foundry_outpost 会话内的门禁（见 <see cref="FoundryOutpostRegion.CanEnterCoreZone"/>），
+        /// 不在本枚举范围内。</summary>
+        public enum ExpeditionTarget
+        {
+            None = 0,
+            SilentRuins = 1,
+            FoundryOutpost = 2,
+        }
+
+        /// <summary>目标解析唯一入口——铸造前哨外围一旦解锁（DEMO-CONTENT-LOCK.md §4.2 前置："跨派系
+        /// 蓝图已保存且 ERC-003 已改造"，<see cref="FoundryOutpostRegion.RecomputeUnlock"/> 真实判定），
+        /// 后续出征即以它为目标；玩家不会再被要求回破碎都市（该区域已完成"带回两件技术"的一次性
+        /// 目标，DEMO-CONTENT-LOCK.md §4.4 OBJ-05～07 是线性推进，不循环）。</summary>
+        public static ExpeditionTarget ResolveTarget(CampaignState state)
+        {
+            if (state == null)
+            {
+                return ExpeditionTarget.None;
+            }
+            RegionRecord foundry = FoundryOutpostRegion.Find(state);
+            if (foundry != null && foundry.State != RegionState.Locked)
+            {
+                return ExpeditionTarget.FoundryOutpost;
+            }
+            RegionRecord fractured = FracturedCityRegion.Find(state);
+            if (fractured != null && fractured.State != RegionState.Locked)
+            {
+                return ExpeditionTarget.SilentRuins;
+            }
+            return ExpeditionTarget.None;
+        }
+
         /// <summary>"主作战组件"＝会伤敌的主组件（连射器/切割束/铸造重炮）。维修束是主组件但
         /// "只修友军不能伤敌"（DEMO-CONTENT-LOCK.md §5），不算战斗力，出征队伍全员维修束应当仍被
         /// "无武器"拦截。</summary>
@@ -162,10 +197,16 @@ namespace GameLogic.Campaign.Regions
             public readonly string EnemyIntelText;
             public readonly float EnemyAlertLevel;
             public readonly int ExpeditionCount;
+            /// <summary>ER6-REGION-01：本次出征目标区域，供 UI 显示正确的目标名/敌情，不再硬编码
+            /// "破碎都市"。</summary>
+            public readonly ExpeditionTarget Target;
+            /// <summary>DEMO-CONTENT-LOCK.md 行203"第二次准备：'外围侦察，重炮回收后撤离；主核心区
+            /// 暂不可进入'"——目标明确文案，Target 为 FoundryOutpost 时给出。</summary>
+            public readonly string ObjectivePreviewText;
 
             public PrepSnapshot(bool regionReachable, string blockedReason, MachineIntel[] machines,
                 float bandwidthCapacity, int minRecommendedCargoSlots, string enemyIntelText,
-                float enemyAlertLevel, int expeditionCount)
+                float enemyAlertLevel, int expeditionCount, ExpeditionTarget target, string objectivePreviewText)
             {
                 RegionReachable = regionReachable;
                 BlockedReason = blockedReason;
@@ -175,6 +216,8 @@ namespace GameLogic.Campaign.Regions
                 EnemyIntelText = enemyIntelText;
                 EnemyAlertLevel = enemyAlertLevel;
                 ExpeditionCount = expeditionCount;
+                Target = target;
+                ObjectivePreviewText = objectivePreviewText;
             }
         }
 
@@ -185,15 +228,17 @@ namespace GameLogic.Campaign.Regions
         {
             if (state == null)
             {
-                return new PrepSnapshot(false, "no-active-campaign", Array.Empty<MachineIntel>(), 0f, 0, null, 0f, 0);
+                return new PrepSnapshot(false, "no-active-campaign", Array.Empty<MachineIntel>(), 0f, 0, null, 0f, 0,
+                    ExpeditionTarget.None, null);
             }
 
-            RegionRecord region = FracturedCityRegion.Find(state);
-            if (region == null || region.State == RegionState.Locked)
+            ExpeditionTarget target = ResolveTarget(state);
+            if (target == ExpeditionTarget.None)
             {
+                RegionRecord fractured = FracturedCityRegion.Find(state);
                 return new PrepSnapshot(false, "region-locked", Array.Empty<MachineIntel>(),
-                    HomeValleySignal.BandwidthCapacity(state), 0, null, region?.EnemyAlertLevel ?? 0f,
-                    region?.ExpeditionCount ?? 0);
+                    HomeValleySignal.BandwidthCapacity(state), 0, null, fractured?.EnemyAlertLevel ?? 0f,
+                    fractured?.ExpeditionCount ?? 0, ExpeditionTarget.None, null);
             }
 
             MachineIntel[] machines = MachineRegistry.AllRecords
@@ -202,29 +247,61 @@ namespace GameLogic.Campaign.Regions
                 .Select(m => BuildIntel(state, m))
                 .ToArray();
 
+            if (target == ExpeditionTarget.FoundryOutpost)
+            {
+                RegionRecord foundry = FoundryOutpostRegion.Find(state);
+                bool enemiesSeeded = state.RegionEnemies != null &&
+                    state.RegionEnemies.Any(e => e.RegionId == FoundryOutpostLayout.RegionId);
+                int aliveArmorBots = enemiesSeeded
+                    ? state.RegionEnemies.Count(e => e.RegionId == FoundryOutpostLayout.RegionId && e.EnemyTypeId == EnemyCatalog.ArmorBotId && e.IsAlive)
+                    : 2;
+                int aliveStriders = enemiesSeeded
+                    ? state.RegionEnemies.Count(e => e.RegionId == FoundryOutpostLayout.RegionId && e.EnemyTypeId == EnemyCatalog.StriderId && e.IsAlive)
+                    : 1;
+                int aliveRepairBots = enemiesSeeded
+                    ? state.RegionEnemies.Count(e => e.RegionId == FoundryOutpostLayout.RegionId && e.EnemyTypeId == EnemyCatalog.RepairBotId && e.IsAlive)
+                    : 1;
+                string foundryIntel = $"铸造护甲机 x{aliveArmorBots}（HP{FoundryOutpostLayout.ArmorBotMaxHealth:F0}，正面减伤40%）｜" +
+                    $"铸造步进炮 x{aliveStriders}（HP{FoundryOutpostLayout.StriderMaxHealth:F0}，1秒瞄准线）｜" +
+                    $"铸造维修机 x{aliveRepairBots}（HP{FoundryOutpostLayout.RepairBotMaxHealth:F0}）";
+
+                return new PrepSnapshot(true, null, machines, HomeValleySignal.BandwidthCapacity(state),
+                    MinRecommendedCargoSlots(target, foundry), foundryIntel, foundry?.EnemyAlertLevel ?? 0f,
+                    foundry?.ExpeditionCount ?? 0, target,
+                    "外围侦察，重炮回收后撤离；主核心区暂不可进入。");
+            }
+
+            RegionRecord region = FracturedCityRegion.Find(state);
             // 敌人是内容锁定表里固定的 2 侦察机+1 干扰机（不随机变化），首次进入前
             // RegionEnemies 尚未播种（EnsureEnemiesSeeded 在 FracturedCityController.Enter 内），
             // 此时展示固定编制而不是"x0"——"没播种"不等于"这个区域没有敌人"，否则第一次准备面板
             // 会误导玩家以为区域已清空。已播种后展示真实存活数，随敌人被击破递减。
-            bool enemiesSeeded = state.RegionEnemies != null && state.RegionEnemies.Any(e => e.RegionId == FracturedCityLayout.RegionId);
-            int aliveScouts = enemiesSeeded
+            bool ruinsEnemiesSeeded = state.RegionEnemies != null && state.RegionEnemies.Any(e => e.RegionId == FracturedCityLayout.RegionId);
+            int aliveScouts = ruinsEnemiesSeeded
                 ? state.RegionEnemies.Count(e => e.RegionId == FracturedCityLayout.RegionId && e.EnemyTypeId == EnemyCatalog.ScoutId && e.IsAlive)
                 : 2;
-            int aliveJammers = enemiesSeeded
+            int aliveJammers = ruinsEnemiesSeeded
                 ? state.RegionEnemies.Count(e => e.RegionId == FracturedCityLayout.RegionId && e.EnemyTypeId == EnemyCatalog.JammerId && e.IsAlive)
                 : 1;
             string intel = $"静默侦察机 x{aliveScouts}（HP{FracturedCityLayout.ScoutMaxHealth:F0}，标记周期8秒）｜" +
                 $"静默干扰机 x{aliveJammers}（HP{FracturedCityLayout.JammerMaxHealth:F0}，干扰半径{FracturedCityLayout.JammerRadius:F0}米）";
 
             return new PrepSnapshot(true, null, machines, HomeValleySignal.BandwidthCapacity(state),
-                MinRecommendedCargoSlots(region), intel, region.EnemyAlertLevel, region.ExpeditionCount);
+                MinRecommendedCargoSlots(target, region), intel, region.EnemyAlertLevel, region.ExpeditionCount,
+                target, "破碎都市：侦察带回静默技术并撤离。");
         }
 
         /// <summary>DEMO-CONTENT-LOCK.md §2.3："第一次出征必需标记器、协议数据盒和三箱废料共5货位；
         /// 第二次出征必需重炮与三箱废料共4货位。"仅供面板展示参考，不是出发硬性拦截项——关键物要在
-        /// 区域内才能拾取，出发时机器货舱通常还是空的。</summary>
-        public static int MinRecommendedCargoSlots(RegionRecord region)
+        /// 区域内才能拾取，出发时机器货舱通常还是空的。铸造前哨外围自己的 <see cref="RegionRecord.ExpeditionCount"/>
+        /// 从 0 起（它是"第二次"全局出征但对它自己是"第一次"进入），不能沿用破碎都市那套
+        /// "ExpeditionCount&lt;=0 即 5 货位"的判据，按 <paramref name="target"/> 直接分流。</summary>
+        public static int MinRecommendedCargoSlots(ExpeditionTarget target, RegionRecord region)
         {
+            if (target == ExpeditionTarget.FoundryOutpost)
+            {
+                return 4;
+            }
             return (region?.ExpeditionCount ?? 0) <= 0 ? 5 : 4;
         }
 
@@ -386,8 +463,8 @@ namespace GameLogic.Campaign.Regions
                 return new DepartureResult(DepartureOutcome.Blocked, new[] { "no-active-campaign" }, null);
             }
 
-            RegionRecord region = FracturedCityRegion.Find(precheckState);
-            if (region == null || region.State == RegionState.Locked)
+            ExpeditionTarget target = ResolveTarget(precheckState);
+            if (target == ExpeditionTarget.None)
             {
                 return new DepartureResult(DepartureOutcome.Blocked, new[] { "region-locked" }, null);
             }
@@ -439,15 +516,30 @@ namespace GameLogic.Campaign.Regions
 
                 // ── 区域卸载/载入 + 机器生成/装配登记 ───────────────────────────────
                 GameRoot.HomeValley?.Exit();
-                GameRoot.StartFracturedCity(manifest);
-
-                if (GameRoot.FracturedCity == null || !GameRoot.FracturedCity.IsActive)
+                RegionRecord regionAfter;
+                string targetLabel;
+                if (target == ExpeditionTarget.FoundryOutpost)
                 {
-                    throw new InvalidOperationException("FracturedCityController.Enter 未能激活（区域状态在校验后被并发改变？）。");
+                    GameRoot.StartFoundryOutpost(manifest);
+                    if (GameRoot.FoundryOutpost == null || !GameRoot.FoundryOutpost.IsActive)
+                    {
+                        throw new InvalidOperationException("FoundryOutpostController.Enter 未能激活（区域状态在校验后被并发改变？）。");
+                    }
+                    regionAfter = FoundryOutpostRegion.Find(state);
+                    targetLabel = "铸造前哨外围";
+                }
+                else
+                {
+                    GameRoot.StartFracturedCity(manifest);
+                    if (GameRoot.FracturedCity == null || !GameRoot.FracturedCity.IsActive)
+                    {
+                        throw new InvalidOperationException("FracturedCityController.Enter 未能激活（区域状态在校验后被并发改变？）。");
+                    }
+                    regionAfter = FracturedCityRegion.Find(state);
+                    targetLabel = "破碎都市";
                 }
 
                 // ── 只有整个切换成功才增加 expeditionCount ──────────────────────────
-                RegionRecord regionAfter = FracturedCityRegion.Find(state);
                 if (regionAfter != null)
                 {
                     regionAfter.ExpeditionCount += 1;
@@ -457,9 +549,10 @@ namespace GameLogic.Campaign.Regions
                 }
 
                 // ── 控制恢复：新区域固定以战略视角开场、无遗留直控目标（见
-                // FracturedCityController.SetupCameraDirector 的 startInStrategy:true），本步骤
-                // 无需额外动作，这里只显式记一条日志确认该不变量，供故障注入测试断言。──────
-                Log.Info($"[ExpeditionDepartureService] 出发成功：{manifest.Length} 台机器进入破碎都市，" +
+                // FracturedCityController/FoundryOutpostController.SetupCameraDirector 的
+                // startInStrategy:true），本步骤无需额外动作，这里只显式记一条日志确认该不变量，
+                // 供故障注入测试断言。────────────────────────────────────────────
+                Log.Info($"[ExpeditionDepartureService] 出发成功：{manifest.Length} 台机器进入{targetLabel}，" +
                     $"第 {regionAfter?.ExpeditionCount ?? -1} 次出击。");
 
                 // 立即把 ExpeditionCount 增量也持久化，不必等下一次自然存档点才落盘
@@ -498,6 +591,7 @@ namespace GameLogic.Campaign.Regions
             }
 
             GameRoot.FracturedCity?.Exit(evacuateSuccess: false);
+            GameRoot.FoundryOutpost?.Exit(evacuateSuccess: false);
             if (GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive)
             {
                 GameRoot.HomeValley.Exit();

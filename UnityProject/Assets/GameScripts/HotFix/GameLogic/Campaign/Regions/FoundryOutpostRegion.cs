@@ -344,7 +344,129 @@ namespace GameLogic.Campaign.Regions
                 damage = EnemyCatalog.ComputeFrontalArmorReducedDamage(damage, isFrontalHit: true);
             }
 
-            return TryDamageEnemy(state, enemyInstanceId, damage);
+            // ER6-REGION-01：标记跳转在外围实战触发（AC-JRN-014）——与 FracturedCityRegion.TryAttackEnemy
+            // 同一顺序，"目标已标记时"才跳转，查询顺序在本次命中造成的新标记之前（第一次命中只留标记，
+            // 再次命中已标记目标才跳转）。护甲机正面减伤已在上面应用，跳转伤害基于减伤后的伤害值。
+            bool wasMarkedBeforeThisHit = IsEnemyMarked(state, enemyInstanceId);
+
+            ActionResult primaryResult = TryDamageEnemy(state, enemyInstanceId, damage);
+            if (!primaryResult.Success)
+            {
+                return primaryResult;
+            }
+
+            if (resolution.Preview.HasMarkerFunction && enemy.IsAlive)
+            {
+                TryMarkEnemy(state, enemyInstanceId, FracturedCityLayout.EnemyMarkDurationSeconds);
+            }
+
+            if (resolution.Preview.ReactionId == MechanicalReactionCatalog.ReactionMarkJumpId && wasMarkedBeforeThisHit)
+            {
+                ApplyMarkJump(state, enemyInstanceId, enemy.Position, damage, isReachable);
+            }
+
+            return primaryResult;
+        }
+
+        /// <summary>标记跳转链式伤害——与 <see cref="FracturedCityRegion.ApplyMarkJump"/> 同一实现（候选＝
+        /// 存活/同区域/已标记/8米内/可达，按距离→稳定 EnemyInstanceId 排序，最多 2 个，每跳伤害为上一跳
+        /// 60%，不重复跳转）。复用 <see cref="FracturedCityLayout"/> 的跳转常量——这是通用反应数值
+        /// （DEMO-CONTENT-LOCK.md §2.4/§5），不是破碎都市专属，不重复定义第二份常量。</summary>
+        private static void ApplyMarkJump(CampaignState state, string primaryEnemyInstanceId, Vector2 primaryPosition,
+            float primaryDamage, Func<Vector2, Vector2, bool> isReachable)
+        {
+            SweepExpiredEnemyMarks(state);
+            RegionRecord region = Find(state);
+            if (region?.MarkedEnemies == null || state.RegionEnemies == null)
+            {
+                return;
+            }
+
+            var candidates = new List<RegionEnemyRecord>();
+            foreach (RegionEnemyRecord candidate in state.RegionEnemies)
+            {
+                if (candidate.EnemyInstanceId == primaryEnemyInstanceId || !candidate.IsAlive
+                    || candidate.RegionId != RegionId)
+                {
+                    continue;
+                }
+                if (!IsEnemyMarked(state, candidate.EnemyInstanceId))
+                {
+                    continue;
+                }
+                float dist = Vector2.Distance(primaryPosition, candidate.Position);
+                if (dist > FracturedCityLayout.MarkJumpRange)
+                {
+                    continue;
+                }
+                if (isReachable != null && !isReachable(primaryPosition, candidate.Position))
+                {
+                    continue;
+                }
+                candidates.Add(candidate);
+            }
+
+            candidates.Sort((a, b) =>
+            {
+                float da = Vector2.Distance(primaryPosition, a.Position);
+                float db = Vector2.Distance(primaryPosition, b.Position);
+                int cmp = da.CompareTo(db);
+                return cmp != 0 ? cmp : string.CompareOrdinal(a.EnemyInstanceId, b.EnemyInstanceId);
+            });
+
+            float jumpDamage = primaryDamage;
+            int jumps = Mathf.Min(FracturedCityLayout.MarkJumpMaxTargets, candidates.Count);
+            for (int i = 0; i < jumps; i++)
+            {
+                jumpDamage *= FracturedCityLayout.MarkJumpDamageFalloff;
+                TryDamageEnemy(state, candidates[i].EnemyInstanceId, jumpDamage);
+                Log.Info($"[FoundryOutpostRegion] 标记跳转：{primaryEnemyInstanceId} → {candidates[i].EnemyInstanceId}，伤害 {jumpDamage:F1}。");
+            }
+        }
+
+        // ── 敌方标记（ER6-REGION-01：与 FracturedCityRegion.MarkedEnemies 同一结构，各区域
+        // RegionRecord 各自一份 MarkedEnemies 数组，互不共享存储）──────────────────────────
+
+        public static bool IsEnemyMarked(CampaignState state, string enemyInstanceId)
+        {
+            RegionRecord region = Find(state);
+            MarkedEnemyRecord mark = region?.MarkedEnemies?.FirstOrDefault(m => m.EnemyInstanceId == enemyInstanceId);
+            return mark != null && mark.ExpireAtPlaySeconds > (state?.PlaySeconds ?? 0f);
+        }
+
+        public static void TryMarkEnemy(CampaignState state, string enemyInstanceId, float durationSeconds)
+        {
+            RegionRecord region = Find(state);
+            if (region == null)
+            {
+                return;
+            }
+            region.MarkedEnemies ??= Array.Empty<MarkedEnemyRecord>();
+            MarkedEnemyRecord existing = region.MarkedEnemies.FirstOrDefault(m => m.EnemyInstanceId == enemyInstanceId);
+            float expireAt = state.PlaySeconds + durationSeconds;
+            if (existing != null)
+            {
+                existing.ExpireAtPlaySeconds = expireAt;
+            }
+            else
+            {
+                region.MarkedEnemies = region.MarkedEnemies.Append(new MarkedEnemyRecord
+                {
+                    EnemyInstanceId = enemyInstanceId,
+                    ExpireAtPlaySeconds = expireAt,
+                }).ToArray();
+            }
+        }
+
+        public static void SweepExpiredEnemyMarks(CampaignState state)
+        {
+            RegionRecord region = Find(state);
+            if (region?.MarkedEnemies == null || region.MarkedEnemies.Length == 0)
+            {
+                return;
+            }
+            float now = state.PlaySeconds;
+            region.MarkedEnemies = region.MarkedEnemies.Where(m => m.ExpireAtPlaySeconds > now).ToArray();
         }
 
         /// <summary>铸造维修机"优先救低血同伴"的唯一写入口——钳制到 <see cref="RegionEnemyRecord.MaxHealth"/>，
@@ -581,6 +703,125 @@ namespace GameLogic.Campaign.Regions
             SpawnQuestItemOnGround(state, contentId, FoundryOutpostLayout.RecoveryLocker.Position);
             Log.Info("[FoundryOutpostRegion] 关键物恢复柜：铸造重炮模块已重生成保底件。");
         }
+
+        // ── 核心分区封锁门（ER6-REGION-01）───────────────────────────────────
+
+        /// <summary>三灯——DEMO-CONTENT-LOCK.md §4.2第3条"核心区门显示'重炮解析/熔穿过载蓝图保存/
+        /// 实装机器'三项状态"。三项都是对既有系统的只读结构性判定（同
+        /// <see cref="RecomputeUnlock"/> 类注释"结构性判定，不新造标记字段"同一纪律），每次查询都
+        /// 现场重算——不是一次性解锁后就永久为真的存量标记，"只保存未实装"必须能在玩家后续把蓝图
+        /// 从现役机上换下后重新回到锁定状态（验收卡第3条字面要求，与区域 RegionState 的单向终态
+        /// 不是同一种语义）。</summary>
+        public readonly struct CoreGateLights
+        {
+            /// <summary>灯1："重炮解析"——<see cref="ComponentCatalog.CompCannonId"/> 已进
+            /// <see cref="CampaignState.UnlockedContentIds"/>（<see cref="HomeValleyAnalysis.Complete"/>
+            /// 解析铸造重炮模块后写入，唯一权威来源）。</summary>
+            public readonly bool CannonAnalyzed;
+            /// <summary>灯2："熔穿过载蓝图保存"——<see cref="MechanicalReactionCatalog.ReactionMeltOverloadId"/>
+            /// 已被 <see cref="BlueprintEditorService.TrySave"/> 充过一次技术数据（
+            /// <see cref="BlueprintEditorService.IsReactionCharged"/>，与 ER6-EXPOSE-01 跨派系判定同一
+            /// EventLedger 结构性判定手法）——只要求"保存过"，不要求当前仍装在任何机器上。</summary>
+            public readonly bool OverloadBlueprintSaved;
+            /// <summary>灯3："现役机实装"——存在至少一台存活机器，其当前蓝图版本编译出的 ReactionId
+            /// 恰为熔穿过载（不是"保存过某个版本"，是"现在真的挂在某台活着的机器上"）。</summary>
+            public readonly bool MachineEquipped;
+
+            public bool AllReady => CannonAnalyzed && OverloadBlueprintSaved && MachineEquipped;
+
+            public CoreGateLights(bool cannonAnalyzed, bool overloadBlueprintSaved, bool machineEquipped)
+            {
+                CannonAnalyzed = cannonAnalyzed;
+                OverloadBlueprintSaved = overloadBlueprintSaved;
+                MachineEquipped = machineEquipped;
+            }
+        }
+
+        public static CoreGateLights ComputeCoreGateLights(CampaignState state)
+        {
+            if (state == null)
+            {
+                return new CoreGateLights(false, false, false);
+            }
+
+            bool cannonAnalyzed = state.UnlockedContentIds != null &&
+                Array.IndexOf(state.UnlockedContentIds, ComponentCatalog.CompCannonId) >= 0;
+            bool overloadSaved = BlueprintEditorService.IsReactionCharged(state, MechanicalReactionCatalog.ReactionMeltOverloadId);
+
+            bool machineEquipped = false;
+            foreach (MachineRecord m in MachineRegistry.AllRecords)
+            {
+                if (m == null || !m.IsAlive || string.IsNullOrEmpty(m.BlueprintId))
+                {
+                    continue;
+                }
+                BlueprintRecord record = BlueprintEditorService.Find(state, m.BlueprintId);
+                BlueprintVersionRecord version = record?.Versions?.FirstOrDefault(v => v.Version == m.BlueprintVersion);
+                if (version == null)
+                {
+                    continue;
+                }
+                BlueprintCircuitBoard board = BlueprintCircuitBoard.FromVersion(version);
+                string reactionId = BlueprintCircuitCompiler.DetectReactionId(board);
+                if (reactionId == MechanicalReactionCatalog.ReactionMeltOverloadId)
+                {
+                    machineEquipped = true;
+                    break;
+                }
+            }
+
+            return new CoreGateLights(cannonAnalyzed, overloadSaved, machineEquipped);
+        }
+
+        /// <summary>实时刷新 <see cref="RegionRecord.CoreGateUnlocked"/>——供 UI/门锚点每帧读一个
+        /// 布尔值而不必各自重新计算三灯，同时保留 <see cref="ComputeCoreGateLights"/> 供需要逐灯明细
+        /// 的调用方（准备页/门旁交互文案）使用。</summary>
+        public static bool RecomputeCoreGate(CampaignState state)
+        {
+            RegionRecord region = Find(state);
+            if (region == null)
+            {
+                return false;
+            }
+            bool ready = ComputeCoreGateLights(state).AllReady;
+            region.CoreGateUnlocked = ready;
+            return ready;
+        }
+
+        /// <summary>封锁门唯一的"能不能通行"判定入口——四重控制（导航阻挡/物理碰撞/交互拒绝/战役
+        /// 目标校验，验收卡第2条）全部调用这一个方法，不各自重算一遍三灯，保证四处判断结果永远
+        /// 一致。失败文案逐项列出缺项，供 UI/交互提示直接展示。</summary>
+        public static ActionResult CanEnterCoreZone(CampaignState state)
+        {
+            CoreGateLights lights = ComputeCoreGateLights(state);
+            RegionRecord region = Find(state);
+            if (region != null)
+            {
+                region.CoreGateUnlocked = lights.AllReady;
+            }
+            if (lights.AllReady)
+            {
+                return ActionResult.Ok();
+            }
+            var missing = new List<string>();
+            if (!lights.CannonAnalyzed)
+            {
+                missing.Add("重炮解析");
+            }
+            if (!lights.OverloadBlueprintSaved)
+            {
+                missing.Add("熔穿过载蓝图保存");
+            }
+            if (!lights.MachineEquipped)
+            {
+                missing.Add("现役机实装");
+            }
+            return ActionResult.Fail("核心分区封锁：缺少 " + string.Join("、", missing) + "。");
+        }
+
+        /// <summary>某坐标是否已越过核心分区封锁线——与 X 坐标无关（不给"绕路"留任何有限宽度缺口）。
+        /// 门锁定时，直控移动/编队 Move 目的地都要用这个判定做裁剪。</summary>
+        public static bool IsBeyondCoreGateLine(Vector2 position) => position.y > FoundryOutpostLayout.CoreGateBlockLineY;
 
         // ── 自检 ──────────────────────────────────────────────────────────
 

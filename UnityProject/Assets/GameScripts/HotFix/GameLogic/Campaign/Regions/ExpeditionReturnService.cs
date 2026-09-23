@@ -35,6 +35,43 @@ namespace GameLogic.Campaign.Regions
         private const float InjuredHealthFraction = 0.99f; // 只要挨过打（未满血）即记一条战斗损伤。
         private const float SeverelyInjuredHealthFraction = 0.3f;
 
+        /// <summary>ER6-REGION-01：本类此前硬编码 <see cref="GameRoot.FracturedCity"/>，现推广支持
+        /// 铸造前哨外围——两个 Controller 具体类型不同但都暴露 IsActive/IsWiped/Exit(bool) 同一形状，
+        /// 用委托打包成一份统一上下文，不给两者加共享接口（避免为了这一件事改动两个已验收 Story 的
+        /// 类型结构）。</summary>
+        private readonly struct ActiveExpedition
+        {
+            public readonly bool Active;
+            public readonly string RegionId;
+            public readonly bool IsWiped;
+            public readonly Action<bool> Exit;
+
+            public ActiveExpedition(bool active, string regionId, bool isWiped, Action<bool> exit)
+            {
+                Active = active;
+                RegionId = regionId;
+                IsWiped = isWiped;
+                Exit = exit;
+            }
+
+            public static readonly ActiveExpedition None = new ActiveExpedition(false, null, false, null);
+        }
+
+        private static ActiveExpedition ResolveActive()
+        {
+            FracturedCityController fc = GameRoot.FracturedCity;
+            if (fc != null && fc.IsActive)
+            {
+                return new ActiveExpedition(true, FracturedCityLayout.RegionId, fc.IsWiped, fc.Exit);
+            }
+            FoundryOutpostController fo = GameRoot.FoundryOutpost;
+            if (fo != null && fo.IsActive)
+            {
+                return new ActiveExpedition(true, FoundryOutpostLayout.RegionId, fo.IsWiped, fo.Exit);
+            }
+            return ActiveExpedition.None;
+        }
+
         public readonly struct ManifestEntry
         {
             public readonly int LogicId;
@@ -75,9 +112,12 @@ namespace GameLogic.Campaign.Regions
             public readonly KeyTechEntry[] KeyTech;
             public readonly bool ObjectivesComplete;
             public readonly int GroundScrapItemCount;
+            /// <summary>ER6-REGION-01：撤离结算的目标区域 RegionId，UI 据此选择"破碎都市"/"铸造前哨
+            /// 外围（侦察成功）"两套用语，不再假设永远是破碎都市。</summary>
+            public readonly string RegionId;
 
             public ReturnSnapshot(bool available, bool isWipe, ManifestEntry[] roster, KeyTechEntry[] keyTech,
-                bool objectivesComplete, int groundScrapItemCount)
+                bool objectivesComplete, int groundScrapItemCount, string regionId)
             {
                 Available = available;
                 IsWipe = isWipe;
@@ -85,31 +125,39 @@ namespace GameLogic.Campaign.Regions
                 KeyTech = keyTech ?? Array.Empty<KeyTechEntry>();
                 ObjectivesComplete = objectivesComplete;
                 GroundScrapItemCount = groundScrapItemCount;
+                RegionId = regionId;
             }
 
             public static readonly ReturnSnapshot Unavailable = new ReturnSnapshot(
-                false, false, Array.Empty<ManifestEntry>(), Array.Empty<KeyTechEntry>(), false, 0);
+                false, false, Array.Empty<ManifestEntry>(), Array.Empty<KeyTechEntry>(), false, 0, null);
         }
 
         /// <summary>面板刷新用的整份快照——已上车（存活成员，撤离后其携带的 Carried 关键物变
         /// Recovered）/遗留货物（地面废料条目数）/幸存阵亡（<see cref="ManifestEntry.IsAlive"/>）/
         /// 未完成目标（<see cref="ReturnSnapshot.ObjectivesComplete"/>）/当前技术是否仍不可解析
-        /// （<see cref="KeyTechEntry.State"/> 非 Recovered 即"仍不可解析"）一次性给全。</summary>
+        /// （<see cref="KeyTechEntry.State"/> 非 Recovered 即"仍不可解析"）一次性给全。ER6-REGION-01：
+        /// 泛化为两个远征区域共用（<see cref="ResolveActive"/>），不再硬编码破碎都市。</summary>
         public static ReturnSnapshot BuildSnapshot(CampaignState state)
         {
-            FracturedCityController fc = GameRoot.FracturedCity;
-            if (state == null || fc == null || !fc.IsActive)
+            ActiveExpedition active = ResolveActive();
+            if (state == null || !active.Active)
             {
                 return ReturnSnapshot.Unavailable;
             }
 
             ManifestEntry[] roster = MachineRegistry.AllRecords
-                .Where(m => m != null && m.RegionId == FracturedCityLayout.RegionId)
+                .Where(m => m != null && m.RegionId == active.RegionId)
                 .OrderBy(m => m.DisplayNumber)
                 .Select(m => new ManifestEntry(m.LogicId, m.DisplayNumber, m.ChassisId, m.IsAlive, m.Health, m.MaxHealth))
                 .ToArray();
 
-            KeyTechEntry[] keyTech = new[] { FracturedCityLayout.MarkerModuleContentId, FracturedCityLayout.ProtocolDataboxContentId }
+            // 关键技术 contentId 清单按目标区域分流——破碎都市两件（标记器/协议数据盒），铸造前哨
+            // 外围一件（重炮模块，三种可选缓存不计入"关键模块"门槛，DEMO-CONTENT-LOCK.md §4.2第3条）。
+            string[] keyContentIds = active.RegionId == FoundryOutpostLayout.RegionId
+                ? new[] { FoundryOutpostLayout.CannonModuleContentId }
+                : new[] { FracturedCityLayout.MarkerModuleContentId, FracturedCityLayout.ProtocolDataboxContentId };
+
+            KeyTechEntry[] keyTech = keyContentIds
                 .Select(contentId =>
                 {
                     // 展示优先级 Recovered（已带回）> Carried（在手，正准备带回）> OnGround（未拾取）>
@@ -127,11 +175,13 @@ namespace GameLogic.Campaign.Regions
                 })
                 .ToArray();
 
-            RegionRecord region = FracturedCityRegion.Find(state);
-            int groundScrap = state.GroundItems?.Count(g => g.RegionId == FracturedCityLayout.RegionId) ?? 0;
+            RegionRecord region = active.RegionId == FoundryOutpostLayout.RegionId
+                ? FoundryOutpostRegion.Find(state)
+                : FracturedCityRegion.Find(state);
+            int groundScrap = state.GroundItems?.Count(g => g.RegionId == active.RegionId) ?? 0;
 
-            return new ReturnSnapshot(true, fc.IsWiped, roster, keyTech,
-                region != null && region.State == RegionState.Cleared, groundScrap);
+            return new ReturnSnapshot(true, active.IsWiped, roster, keyTech,
+                region != null && region.State == RegionState.Cleared, groundScrap, active.RegionId);
         }
 
         public readonly struct ReturnResult
@@ -153,12 +203,12 @@ namespace GameLogic.Campaign.Regions
         /// 这是重复点击的第二次事件）直接安全拒绝，不重复标记经历/不重复存档。</summary>
         public static ReturnResult TryConfirmEvacuation()
         {
-            FracturedCityController fc = GameRoot.FracturedCity;
-            if (fc == null || !fc.IsActive)
+            ActiveExpedition active = ResolveActive();
+            if (!active.Active)
             {
                 return ReturnResult.Fail("not-active");
             }
-            if (fc.IsWiped)
+            if (active.IsWiped)
             {
                 return ReturnResult.Fail("use-abandon-for-wipe");
             }
@@ -171,8 +221,8 @@ namespace GameLogic.Campaign.Regions
             InputRouter.SetModalUi(true);
             try
             {
-                MarkExperienceAndInjuryBeforeExit(state);
-                fc.Exit(evacuateSuccess: true);
+                MarkExperienceAndInjuryBeforeExit(state, active.RegionId);
+                active.Exit(true);
                 GameRoot.ResumeHomeValley();
 
                 SaveResult saveResult = CampaignAutoSaveService.SaveAuto(SaveReason.ExpeditionResolutionComplete);
@@ -194,12 +244,12 @@ namespace GameLogic.Campaign.Regions
         /// <see cref="MachineExperienceFlags.Expedition"/>，没有幸存者所以不会有 <c>Returned</c>）+存档。</summary>
         public static ReturnResult TryConfirmAbandon()
         {
-            FracturedCityController fc = GameRoot.FracturedCity;
-            if (fc == null || !fc.IsActive)
+            ActiveExpedition active = ResolveActive();
+            if (!active.Active)
             {
                 return ReturnResult.Fail("not-active");
             }
-            if (!fc.IsWiped)
+            if (!active.IsWiped)
             {
                 return ReturnResult.Fail("not-wiped");
             }
@@ -212,8 +262,8 @@ namespace GameLogic.Campaign.Regions
             InputRouter.SetModalUi(true);
             try
             {
-                MarkExperienceAndInjuryBeforeExit(state);
-                fc.Exit(evacuateSuccess: true); // _wipeResolved 已真，内部跳过重复结算，见类注释。
+                MarkExperienceAndInjuryBeforeExit(state, active.RegionId);
+                active.Exit(true); // _wipeResolved 已真，内部跳过重复结算，见类注释。
                 GameRoot.ResumeHomeValley();
 
                 SaveResult saveResult = CampaignAutoSaveService.SaveAuto(SaveReason.ExpeditionResolutionComplete);
@@ -230,17 +280,18 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        /// <summary>必须在 <see cref="FracturedCityController.Exit"/> 之前调用——之后存活机器的
+        /// <summary>必须在 Controller.Exit 之前调用——之后存活机器的
         /// <see cref="MachineRecord.RegionId"/> 已经被改写回家园，"当前还在本区域"这个筛选条件会失效。
         /// 全员（含阵亡者）记一次 <see cref="MachineExperienceFlags.Expedition"/>（"首次参与远征"与
         /// 是否生还无关）；只有存活者额外记 <see cref="MachineExperienceFlags.Returned"/>、递增
         /// <see cref="MachineRecord.ExpeditionsCompleted"/>、按当前 HP 比例写伤势（
         /// <see cref="MachineRecord.InjuryFlags"/> 此前是从未被写过的骨架字段，本 Story 首次接入真实
-        /// 触发源——ER5-SILENT-01 起机器在区域内才会真的掉血，此前没有数据可写）。</summary>
-        private static void MarkExperienceAndInjuryBeforeExit(CampaignState state)
+        /// 触发源——ER5-SILENT-01 起机器在区域内才会真的掉血，此前没有数据可写）。ER6-REGION-01：
+        /// 按 <paramref name="regionId"/> 泛化，不再硬编码破碎都市。</summary>
+        private static void MarkExperienceAndInjuryBeforeExit(CampaignState state, string regionId)
         {
             List<MachineRecord> inRegion = MachineRegistry.AllRecords
-                .Where(m => m != null && m.RegionId == FracturedCityLayout.RegionId)
+                .Where(m => m != null && m.RegionId == regionId)
                 .ToList();
 
             foreach (MachineRecord m in inRegion)

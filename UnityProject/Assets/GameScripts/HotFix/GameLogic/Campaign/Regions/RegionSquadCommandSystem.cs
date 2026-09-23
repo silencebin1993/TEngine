@@ -81,6 +81,10 @@ namespace GameLogic.Campaign.Regions
         public Action<int> CancelWorkIfAny;
         public Vector2 SafePoint;
         public List<(Vector2 Position, float Radius)> Obstacles;
+        /// <summary>ER6-REGION-01：可选目的地裁剪——供铸造前哨外围把 Move 目的地钳制在核心分区封锁线
+        /// 以内（"导航阻挡"，见 <see cref="FoundryOutpostRegion.CanEnterCoreZone"/>）。null（默认，
+        /// 归还谷地/破碎都市不传）表示不裁剪，向后兼容不受影响。</summary>
+        public Func<Vector2, Vector2> ClampDestination;
         public Func<Vector2, float, RegionHostileInfo?> FindHostileNear;
         public Func<string, RegionHostileInfo?> ResolveHostile;
         public Func<int, string, RegionAttackOutcome> TryAttack;
@@ -516,7 +520,8 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             _armedKind = null;
-            Issue(RegionCommandKind.Move, target, null, paused);
+            Vector2 clamped = _ctx.ClampDestination != null ? _ctx.ClampDestination(target) : target;
+            Issue(RegionCommandKind.Move, clamped, null, paused);
         }
 
         public void IssueAttack(string hostileId, bool paused)

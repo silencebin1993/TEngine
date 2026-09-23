@@ -107,8 +107,13 @@ namespace GameLogic.UI.Expedition
                 return;
             }
 
+            // ER6-REGION-01：两个远征区域共用同一面板——分别读各自 Controller 的 IsEvacPanelOpen/
+            // IsWiped，与 ExpeditionReturnService.ResolveActive 同一判定口径（"哪个 Controller
+            // IsActive 就是当前活动远征"），不假设永远是破碎都市。
             FracturedCityController fc = GameRoot.FracturedCity;
-            bool open = fc != null && fc.IsActive && (fc.IsEvacPanelOpen || fc.IsWiped);
+            FoundryOutpostController fo = GameRoot.FoundryOutpost;
+            bool open = (fc != null && fc.IsActive && (fc.IsEvacPanelOpen || fc.IsWiped)) ||
+                (fo != null && fo.IsActive && (fo.IsEvacPanelOpen || fo.IsWiped));
             _panel.style.display = open ? DisplayStyle.Flex : DisplayStyle.None;
             if (!open)
             {
@@ -148,7 +153,23 @@ namespace GameLogic.UI.Expedition
             string keyTechText = string.Join("；", snapshot.KeyTech.Select(k =>
                 $"{DisplayNameFor(k.ContentId)}：{DescribeQuestState(k.State)}"));
             _keyTechLabel.text = "关键技术：" + keyTechText;
-            _objectiveLabel.text = snapshot.ObjectivesComplete ? "任务目标：已完成" : "任务目标：尚未完成（撤离后保持\"待补回收\"）";
+
+            // ER6-REGION-01（DEMO-CONTENT-LOCK.md §4.2第4条）："允许不打Boss就撤离，且结算文本称为
+            // 成功侦察而非失败逃跑"——铸造前哨外围撤离不管重炮是否带回都不该读作"未完成/失败"；只有
+            // 破碎都市沿用旧有"待补回收"用语（该区域是双关键物任务，语义不同）。
+            bool isFoundry = snapshot.RegionId == FoundryOutpostLayout.RegionId;
+            if (isFoundry)
+            {
+                _objectiveLabel.text = snapshot.IsWipe
+                    ? "任务目标：侦察未能完成（外围全灭，可再次侦察，一次性废料/缓存已领取部分不会重刷）"
+                    : snapshot.ObjectivesComplete
+                        ? "任务目标：侦察成功——重炮已归档为货物。核心区仍封锁；回城解析，完成第二次编译后再进攻。"
+                        : "任务目标：侦察成功（重炮未带回，可再次侦察补回；核心区仍封锁）";
+            }
+            else
+            {
+                _objectiveLabel.text = snapshot.ObjectivesComplete ? "任务目标：已完成" : "任务目标：尚未完成（撤离后保持\"待补回收\"）";
+            }
             _groundLabel.text = snapshot.GroundScrapItemCount > 0
                 ? $"遗留货物：地面仍有 {snapshot.GroundScrapItemCount} 处未装载物资（撤离后不自动入账）"
                 : "遗留货物：无";
@@ -178,10 +199,12 @@ namespace GameLogic.UI.Expedition
                 : $"幸存 {aliveCount} 台，阵亡 {deadCount} 台。确认撤离后，幸存机器携带的关键物视为已带回，未装车的物资留在原地。";
         }
 
+        /// <summary>ER6-REGION-01：改查 <see cref="HomeValleyAnalysis.YieldTable"/> 统一权威展示名
+        /// （已覆盖破碎都市两件+铸造前哨外围四件），不再各区域各写一份硬编码映射，查不到才回退原始 id。</summary>
         private static string DisplayNameFor(string contentId) =>
-            contentId == FracturedCityLayout.MarkerModuleContentId ? "静默标记器模块"
-            : contentId == FracturedCityLayout.ProtocolDataboxContentId ? "协议数据盒"
-            : contentId;
+            HomeValleyAnalysis.YieldTable.TryGetValue(contentId, out HomeValleyAnalysis.YieldInfo info)
+                ? info.DisplayName
+                : contentId;
 
         private static string DescribeQuestState(RegionQuestItemState state)
         {
@@ -207,7 +230,11 @@ namespace GameLogic.UI.Expedition
 
         private void OnCancelClicked()
         {
+            // 两区域中哪个真正 IsEvacPanelOpen 就关哪个——全灭时(IsWiped)面板自动显示但没有
+            // "取消"意义（全队已无法继续），Cancel 按钮结构上只在非全灭分支渲染，这里双路调用是
+            // 防御性写法，成对 SetEvacPanelOpen(false) 在另一路上是安全的 no-op。
             GameRoot.FracturedCity?.SetEvacPanelOpen(false);
+            GameRoot.FoundryOutpost?.SetEvacPanelOpen(false);
         }
 
         private void OnAbandonClicked()

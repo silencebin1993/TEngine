@@ -47,9 +47,13 @@ namespace GameLogic.Campaign.Regions
         public const string HeatSinkCacheId = "fo_cache_heatsink";
         public const string ArmorPierceCacheId = "fo_cache_armorpierce";
         public const string RecoveryLockerId = "fo_recovery_locker";
-        /// <summary>核心区门占位——ER6-REGION-01 落地封锁门/三灯显示时使用，本 Story 只保证空间
-        /// 上留出这个点、Validate() 覆盖它，不实现任何门禁逻辑。</summary>
+        /// <summary>核心区门——ER6-REGION-01：导航阻挡/物理碰撞/交互拒绝/战役目标校验四重控制的
+        /// 唯一物件锚点，见 <see cref="FoundryOutpostRegion.CanEnterCoreZone"/>。</summary>
         public const string CoreGateId = "fo_core_gate";
+        /// <summary>核心分区入口占位——门后空间的稳定物件 ID（DEMO-CONTENT-LOCK.md §2.5"同一
+        /// foundry_outpost 保留外围/核心两个分区"）。本 Story 只保证该点存在、Validate() 覆盖它，
+        /// 两供能节点/主核心的真实内容留 ER7-CORE-01 在此基础上搭建，不抢先实现。</summary>
+        public const string CoreZoneEntryId = "fo_core_zone_entry";
 
         // ── 关键物内容 ID ────────────────────────────────────────────────────
         /// <summary>步进炮首次击破掉落，唯一关键物（DEMO-CONTENT-LOCK.md §4.1第4条"关键模块"的
@@ -76,6 +80,14 @@ namespace GameLogic.Campaign.Regions
         public static readonly Anchor ArmorPierceCache = new Anchor(ArmorPierceCacheId, new Vector2(0f, 14f), 1f);
         public static readonly Anchor RecoveryLocker = new Anchor(RecoveryLockerId, new Vector2(0f, -12f), 1.5f);
         public static readonly Anchor CoreGate = new Anchor(CoreGateId, new Vector2(0f, 24f), 2.5f);
+        /// <summary>核心分区入口占位，门后约4.5米——ER7-CORE-01 的搭建起点，本 Story 只占位（半径
+        /// 收小到 1，确保与门净空不重叠、且不超出相机边界 <see cref="CameraBoundsHalfExtentZ"/>）。</summary>
+        public static readonly Anchor CoreZoneEntry = new Anchor(CoreZoneEntryId, new Vector2(0f, 28.5f), 1f);
+
+        /// <summary>ER6-REGION-01："物理碰撞"边界——门锁定时，任何机器（直控 WASD/编队 Move 命令
+        /// 目的地）都不能越过这条 Y 线进入核心分区，与 X 坐标无关（不给"绕路"留一个有限宽度的缺口，
+        /// 验收卡第3条"绕路……都不能跳门"字面要求）。取值＝门锚点 Y 减净空半径（门的物理前沿）。</summary>
+        public static readonly float CoreGateBlockLineY = CoreGate.Position.y - CoreGate.ClearanceRadius;
 
         /// <summary>相机初始聚焦点——入口安全区与掩体火力线之间。</summary>
         public static readonly Vector2 CameraFocusStart = new Vector2(0f, -6f);
@@ -134,6 +146,7 @@ namespace GameLogic.Campaign.Regions
             yield return ArmorPierceCache;
             yield return RecoveryLocker;
             yield return CoreGate;
+            yield return CoreZoneEntry;
         }
 
         public static IEnumerable<string> AllPoiIds()
