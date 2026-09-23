@@ -550,6 +550,39 @@ namespace GameLogic.Campaign
             return MachineOpResult.Ok(logicId);
         }
 
+        /// <summary>ER4-MCH-01：<see cref="MachineExperienceFlags"/> 八项的唯一写入口。幂等——
+        /// 已经记过的标记不会重复追加，调用方不需要自己先查一遍"有没有"。返回 true 表示这是
+        /// 真正的"首次"（调用方可据此触发一次性反馈，如提示音/日志），false 表示早已记过或
+        /// LogicId 不存在。</summary>
+        public static bool TryMarkExperience(int logicId, string flagId)
+        {
+            if (!_records.TryGetValue(logicId, out MachineRecord record) || string.IsNullOrEmpty(flagId))
+            {
+                return false;
+            }
+            record.ExperienceFlags ??= Array.Empty<string>();
+            if (Array.IndexOf(record.ExperienceFlags, flagId) >= 0)
+            {
+                return false;
+            }
+            record.ExperienceFlags = record.ExperienceFlags.Append(flagId).ToArray();
+            return true;
+        }
+
+        /// <summary>ER4-MCH-01 第1条"统计与战斗事件统一来源，不在 UI 猜计数"——工作单完成的唯一
+        /// 统计写入口，由 <see cref="Regions.HomeValleyWorkOrders"/> 每个真实 CompleteXxx 分支调用。
+        /// 同时顺带标记 <see cref="MachineExperienceFlags.FirstJob"/>。死亡/未知 LogicId 静默 no-op
+        /// （订单完成回调不应该因为统计写入失败而级联失败）。</summary>
+        public static void RecordJobCompleted(int logicId)
+        {
+            if (!_records.TryGetValue(logicId, out MachineRecord record))
+            {
+                return;
+            }
+            record.JobsCompleted++;
+            TryMarkExperience(logicId, MachineExperienceFlags.FirstJob);
+        }
+
         // ── 存读档 ───────────────────────────────────────────
 
         /// <summary>写回 <see cref="CampaignState"/>：整份覆盖 <see cref="CampaignState.MachineRecords"/>

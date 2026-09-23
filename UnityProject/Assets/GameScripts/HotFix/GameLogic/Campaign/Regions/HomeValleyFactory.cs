@@ -607,6 +607,9 @@ namespace GameLogic.Campaign.Regions
             {
                 record.IsInFactory = true; // 占用出口，直到玩家给它第一条真实命令（ReleaseFromFactory）。
             }
+            // ER4-MCH-01：真正"生产"出来的机器才记这个经历标记——开局自带的 ERC-001/002 从不走这条
+            // 分支，天然不会获得它，正确反映"它们不是被生产出来的"。
+            MachineRegistry.TryMarkExperience(spawn.LogicId, MachineExperienceFlags.Produced);
 
             // ER4-BLP-02 STORY-EXECUTION-CARDS.md 第3条："工厂出厂……时登记 MachineLoadoutRegistry"。
             // 登记失败（理论上不应发生，producedVersion 已在上面确认存在）只记警告，不回滚已完成的生产——

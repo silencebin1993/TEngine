@@ -52,6 +52,13 @@ namespace GameLogic.UI.WorkOrder
         private VisualElement _priorityRows;
         private readonly Dictionary<WorkOrderKind, Button> _priorityButtons = new Dictionary<WorkOrderKind, Button>(5);
 
+        /// <summary>ER4-MCH-01 STORY-EXECUTION-CARDS.md 第2条"机器面板显示编号、当前装配、状态、
+        /// 经历、工作/命令、伤势与恢复动作"——只读展示，复用本面板已有的"选中机器"数据源
+        /// （<see cref="RefreshPriorityRows"/> 同一套 <c>SelectedMachineLogicId</c>），不新开一个
+        /// 独立 UIDocument 宿主（同一条"一个 GameObject 一个 UIDocument"纪律）。</summary>
+        private Label _machineDetailEmptyLabel;
+        private Label _machineDetailLabel;
+
         private float _refreshTimer;
 
         public static WorkOrderPanelUIToolkit Instance { get; private set; }
@@ -96,6 +103,8 @@ namespace GameLogic.UI.WorkOrder
             _alertList = _root.Q<ScrollView>("AlertList");
             _priorityEmptyLabel = _root.Q<Label>("PriorityEmptyLabel");
             _priorityRows = _root.Q<VisualElement>("PriorityRows");
+            _machineDetailEmptyLabel = _root.Q<Label>("MachineDetailEmptyLabel");
+            _machineDetailLabel = _root.Q<Label>("MachineDetailLabel");
 
             for (int i = 0; i < MaxRows; i++)
             {
@@ -159,6 +168,49 @@ namespace GameLogic.UI.WorkOrder
             RefreshOrderList(state);
             RefreshAlertList(state);
             RefreshPriorityRows();
+            RefreshMachineDetail();
+        }
+
+        /// <summary>ER4-MCH-01：选中机器时展示编号/底盘/装配/HP/电池/状态/经历/统计——与
+        /// <see cref="HomeValleyCombatTargets"/>/<see cref="HomeValleyWorkOrders"/> 等唯一写入口
+        /// 产出的字段直接读，不在 UI 侧重新猜/累加计数。伤势目前只有 <see cref="MachineRecord.InjuryFlags"/>
+        /// 骨架字段（无真实写入源，归还谷地没有让机器受伤的触发源），如实显示"无记录"而不是编一个
+        /// 假伤痕出来，符合"缺失视觉伤痕时不能用存档字段代替玩家反馈"的红线——这里反过来也不能拿
+        /// 空字段冒充"有伤痕"。</summary>
+        private void RefreshMachineDetail()
+        {
+            if (_machineDetailLabel == null || _machineDetailEmptyLabel == null)
+            {
+                return;
+            }
+            int? selected = GameRoot.HomeValley?.SelectedMachineLogicId;
+            bool hasSelection = selected.HasValue && MachineRegistry.TryGetRecord(selected.Value, out _);
+            _machineDetailEmptyLabel.style.display = hasSelection ? DisplayStyle.None : DisplayStyle.Flex;
+            _machineDetailLabel.style.display = hasSelection ? DisplayStyle.Flex : DisplayStyle.None;
+            if (!hasSelection)
+            {
+                return;
+            }
+
+            MachineRegistry.TryGetRecord(selected.Value, out MachineRecord record);
+            string status = !record.IsAlive ? "阵亡（纪念记录）"
+                : record.IsInFactory ? "厂内待驶出"
+                : GameRoot.HomeValley != null && GameRoot.HomeValley.IsMachineDirectControlled(record.LogicId) ? "直控中"
+                : string.IsNullOrEmpty(record.CurrentWorkOrderId) ? "空闲" : "工作中";
+
+            string experience = record.ExperienceFlags != null && record.ExperienceFlags.Length > 0
+                ? string.Join("、", System.Array.ConvertAll(record.ExperienceFlags, MachineExperienceFlags.DisplayName))
+                : "无";
+            string injuries = record.InjuryFlags != null && record.InjuryFlags.Length > 0
+                ? string.Join("、", record.InjuryFlags)
+                : "无记录";
+
+            _machineDetailLabel.text =
+                $"编号 #{record.DisplayNumber}（LogicId {record.LogicId}）｜底盘 {record.ChassisId}｜" +
+                $"装配 v{record.BlueprintVersion}｜状态 {status}\n" +
+                $"HP {record.Health:F0}/{record.MaxHealth:F0}｜电池 {record.Battery:F0}｜伤势 {injuries}\n" +
+                $"经历：{experience}\n" +
+                $"统计：工作{record.JobsCompleted}｜接管{record.TimesControlled}｜远征{record.ExpeditionsCompleted}｜击杀{record.KillCount}";
         }
 
         private void RefreshOrderList(CampaignState state)

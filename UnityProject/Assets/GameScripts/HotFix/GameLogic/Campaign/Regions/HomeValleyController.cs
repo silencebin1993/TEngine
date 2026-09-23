@@ -425,6 +425,9 @@ namespace GameLogic.Campaign.Regions
             {
                 HomeValleyWorkOrders.OnMachinePossessed(state, next.LogicId);
             }
+            // ER4-MCH-01：Tab 循环切换到的每一台也是一次真实"接管"，同 EnsureDirectTarget 补记统计/经历。
+            MachineRegistry.RecordControlled(next.LogicId);
+            MachineRegistry.TryMarkExperience(next.LogicId, MachineExperienceFlags.Controlled);
 
             _selected?.SetSelected(false);
             _selected = next;
@@ -501,6 +504,11 @@ namespace GameLogic.Campaign.Regions
             {
                 HomeValleyWorkOrders.OnMachinePossessed(state, _possessed.LogicId);
             }
+            // ER4-MCH-01：归还谷地的直控接管此前从未调用 MachineRegistry.RecordControlled——该方法
+            // 此前只被 CellStageFlow（细胞阶段）调用，TimesControlled 统计对归还谷地机器恒为0，
+            // 是真实缺口，这里补上（连同"接管"经历一次性标记）。
+            MachineRegistry.RecordControlled(_possessed.LogicId);
+            MachineRegistry.TryMarkExperience(_possessed.LogicId, MachineExperienceFlags.Controlled);
             return true;
         }
 

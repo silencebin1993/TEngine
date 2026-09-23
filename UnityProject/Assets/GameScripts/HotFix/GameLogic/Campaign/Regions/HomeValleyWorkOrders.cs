@@ -531,6 +531,7 @@ namespace GameLogic.Campaign.Regions
             machine.Cargo = Array.Empty<CargoEntry>();
             order.State = WorkOrderState.Completed;
             order.FailureReason = null;
+            MachineRegistry.RecordJobCompleted(order.AssignedMachineLogicId); // ER4-MCH-01：统计与经历唯一写入口。
             MarkAssignmentDirty();
         }
 
@@ -1074,6 +1075,7 @@ namespace GameLogic.Campaign.Regions
             }
             HomeValleyPowerGrid.Recompute(state);
             order.State = WorkOrderState.Completed;
+            MachineRegistry.RecordJobCompleted(order.AssignedMachineLogicId); // ER4-MCH-01：统计与经历唯一写入口。
             MarkAssignmentDirty();
         }
 
@@ -1097,6 +1099,7 @@ namespace GameLogic.Campaign.Regions
             CampaignEconomyLedger.Commit(state, order.ResourceTransactionId);
             HomeValleyPowerGrid.Recompute(state);
             order.State = WorkOrderState.Completed;
+            MachineRegistry.RecordJobCompleted(order.AssignedMachineLogicId); // ER4-MCH-01：统计与经历唯一写入口。
             MarkAssignmentDirty();
         }
 
@@ -1141,6 +1144,7 @@ namespace GameLogic.Campaign.Regions
             }
 
             order.State = WorkOrderState.Completed;
+            MachineRegistry.RecordJobCompleted(order.AssignedMachineLogicId); // ER4-MCH-01：统计与经历唯一写入口。
             MarkAssignmentDirty();
         }
 
@@ -1173,6 +1177,7 @@ namespace GameLogic.Campaign.Regions
 
             HomeValleyPowerGrid.Recompute(state); // 拆掉一个电力消费者/供给者，电网必须重算。
             order.State = WorkOrderState.Completed;
+            MachineRegistry.RecordJobCompleted(order.AssignedMachineLogicId); // ER4-MCH-01：统计与经历唯一写入口。
             MarkAssignmentDirty();
         }
 
@@ -1191,6 +1196,7 @@ namespace GameLogic.Campaign.Regions
             if (machine.Battery >= max)
             {
                 order.State = WorkOrderState.Completed;
+                MachineRegistry.RecordJobCompleted(order.AssignedMachineLogicId); // ER4-MCH-01：统计与经历唯一写入口。
                 MarkAssignmentDirty();
             }
         }
