@@ -232,6 +232,23 @@ namespace GameLogic.Campaign
         public string SalvageInstanceId;
     }
 
+    /// <summary>ER4-PRIM-05 STORY-EXECUTION-CARDS.md 第1条"低威胁残骸靶"——归还谷地范围内的静止
+    /// 战斗验证目标。落盘（而非纯运行时对象）是为了支持存读档往返后仍可复测同一目标（§5.1 第2步
+    /// "保存退出并重启读取同一战役……比较同一目标/输入的签名和事件"），见
+    /// <see cref="Regions.HomeValleyCombatTargets"/>。</summary>
+    [Serializable]
+    public sealed class CombatTargetRecord
+    {
+        public string TargetId;
+        public string RegionId;
+        public Vector2 Position;
+        public float Health;
+        public float MaxHealth;
+        /// <summary>命中后短暂冷却重生用；不是"死亡"——低威胁残骸靶是可反复验证的靶标，
+        /// 不是一次性可摧毁物（见 <see cref="Regions.HomeValleyCombatTargets"/> 类注释）。</summary>
+        public float RegenCooldownRemaining;
+    }
+
     /// <summary>ER4-PRIM-03 STORY-EXECUTION-CARDS.md 第1条："仓/草稿槽/待领取三态恰一"。</summary>
     public enum PrimitiveChipState
     {

@@ -71,6 +71,12 @@ namespace GameLogic.Campaign
         /// 同一"单 Running 工位 FIFO"结构模式。新战役为空数组，不预先生成任何队列项。</summary>
         public CraftQueueItemRecord[] CraftQueues = Array.Empty<CraftQueueItemRecord>();
 
+        /// <summary>ER4-PRIM-05：归还谷地范围内的低威胁残骸靶（<see cref="CombatTargetRecord"/>），
+        /// 唯一写入口 <see cref="GameLogic.Campaign.Regions.HomeValleyCombatTargets"/>。新战役为空数组，
+        /// 由该类 <c>EnsureSeeded</c> 首次进入归还谷地时播种，与 <see cref="PrimitiveChips"/> 同一
+        /// "骨架 vs 播种"分工。</summary>
+        public CombatTargetRecord[] CombatTargets = Array.Empty<CombatTargetRecord>();
+
         public ControlHandoffRecord ControlHandoff = new ControlHandoffRecord();
         public SaveReason LastSaveReason = SaveReason.NewCampaign;
 
@@ -120,6 +126,7 @@ namespace GameLogic.Campaign
                 GroundItems = Array.Empty<GroundItemRecord>(),
                 PrimitiveChips = Array.Empty<PrimitiveChipRecord>(),
                 CraftQueues = Array.Empty<CraftQueueItemRecord>(),
+                CombatTargets = Array.Empty<CombatTargetRecord>(),
                 ControlHandoff = new ControlHandoffRecord(),
                 LastSaveReason = SaveReason.NewCampaign,
                 ObjectiveRecords = Array.Empty<ObjectiveRecord>(),
@@ -161,6 +168,8 @@ namespace GameLogic.Campaign
                 .OrderBy(r => r.PartId, StringComparer.Ordinal).ToArray();
             CraftQueues = (CraftQueues ?? Array.Empty<CraftQueueItemRecord>())
                 .OrderBy(r => r.QueueItemId, StringComparer.Ordinal).ToArray();
+            CombatTargets = (CombatTargets ?? Array.Empty<CombatTargetRecord>())
+                .OrderBy(r => r.TargetId, StringComparer.Ordinal).ToArray();
         }
     }
 }

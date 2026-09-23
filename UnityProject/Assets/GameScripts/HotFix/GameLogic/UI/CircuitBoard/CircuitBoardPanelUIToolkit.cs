@@ -110,6 +110,11 @@ namespace GameLogic.UI.CircuitBoard
         private Label _previewSummaryLabel;
         private ScrollView _pathList;
         private Label _costSummaryLabel;
+        /// <summary>ER4-PRIM-05 STORY-EXECUTION-CARDS.md 第2条"UI/VFX/SFX/日志与同一事件匹配"——
+        /// 展示 <see cref="Campaign.Regions.HomeValleyCombatTargets.RecentEvents"/> 最新一条，
+        /// 与日志（<c>Log.Info</c>）读的是同一份 <see cref="Campaign.Regions.HomeValleyCombatTargets.HitResult"/>
+        /// 数据，不是 UI 自己另算一份摘要。</summary>
+        private Label _lastCombatResultLabel;
 
         private Button _saveButton;
         private Button _closeButton;
@@ -229,6 +234,7 @@ namespace GameLogic.UI.CircuitBoard
             _previewSummaryLabel = _root.Q<Label>("PreviewSummaryLabel");
             _pathList = _root.Q<ScrollView>("PathList");
             _costSummaryLabel = _root.Q<Label>("CostSummaryLabel");
+            _lastCombatResultLabel = _root.Q<Label>("LastCombatResultLabel");
 
             _saveButton = _root.Q<Button>("SaveButton");
             _closeButton = _root.Q<Button>("CloseButton");
@@ -719,6 +725,22 @@ namespace GameLogic.UI.CircuitBoard
             RefreshIssues();
             RefreshPreview();
             RefreshCostSummary();
+            RefreshLastCombat();
+        }
+
+        /// <summary>ER4-PRIM-05：显示最近一次真实命中/未命中事件——与 <see cref="RefreshPreview"/>
+        /// 的区别是后者是"如果打会怎样"的编译预览，本方法是"真的打过一次之后发生了什么"
+        /// （<see cref="Campaign.Regions.HomeValleyCombatTargets.TryAttack"/> 唯一写入口产出）。</summary>
+        private void RefreshLastCombat()
+        {
+            if (_lastCombatResultLabel == null)
+            {
+                return;
+            }
+            IReadOnlyList<HomeValleyCombatTargets.HitResult> events = HomeValleyCombatTargets.RecentEvents;
+            _lastCombatResultLabel.text = events.Count == 0
+                ? "尚无实战记录。"
+                : events[events.Count - 1].Summarize();
         }
 
         private void RefreshBlueprintList()

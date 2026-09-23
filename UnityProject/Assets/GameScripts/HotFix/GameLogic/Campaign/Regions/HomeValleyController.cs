@@ -85,6 +85,7 @@ namespace GameLogic.Campaign.Regions
             // 指向真实 BlueprintRecord（bp_erc001/bp_hauler），不再是占位字符串，见 EnsureMachinesSeeded。
             HomeValleyFactory.EnsureBlueprintsSeeded(state); // ER4-FAC-01：装配站默认三条生产蓝图 + ER4-PRIM-02 电路板数据。
             PrimitiveInventory.EnsureSeeded(state); // ER4-PRIM-03：战役唯一基元仓，开局8格+1件聚焦镜，幂等。
+            HomeValleyCombatTargets.EnsureSeeded(state); // ER4-PRIM-05：低威胁残骸靶，幂等。
             EnsureMachinesSeeded(state);
             // ER4-BLP-02 STORY-EXECUTION-CARDS.md 第3条："区域卸载/重新生成……时登记/解绑装配登记表"。
             // MachineLoadoutRegistry 是本次会话内的"哪台机当前装配是什么"缓存（同 MachineRegistry 自身
@@ -163,6 +164,8 @@ namespace GameLogic.Campaign.Regions
                     IsMachineDirectControlled, BeginAutoAssignedMovement);
                 HomeValleyFactory.Tick(state, scaledDt); // ER4-FAC-01：装配站生产队列。
                 PrimitiveCraftStation.Tick(state, scaledDt); // ER4-PRIM-04：合成台升级/拆解队列。
+                HomeValleyCombatTargets.Tick(state, scaledDt); // ER4-PRIM-05：低威胁残骸靶被动再生。
+                TickAutoEngage(state, scaledDt); // ER4-PRIM-05：AI 同出口自动交战。
                 HomeValleySoftlockGuard.Tick(state, scaledDt, BeginAutoAssignedMovement);
                 SyncWorldVisuals(state);
             }
@@ -285,6 +288,106 @@ namespace GameLogic.Campaign.Regions
             if (InputRouter.GetActionKey(GameActionId.MoveForward, InputScope.Direct)) { z += 1f; }
 
             _possessed.DirectMove(new Vector3(x, 0f, z), dt);
+
+            // ER4-PRIM-05 STORY-EXECUTION-CARDS.md 第1条"鼠标瞄准+左键攻击"——归还谷地 WASD 直控此前
+            // 只有移动，这是本 Story 唯一的全新玩法机制（其余都是把已有编译/装配出口接起来）。左键复用
+            // 与 Strategy 域选中点击（HandleSelectionClick）同一套 InputRouter.GetMouseButtonDown 用法，
+            // 只是域换成 Direct——两个域互斥，同一物理键不会被重复消费。
+            if (InputRouter.GetMouseButtonDown(0, InputScope.Direct) &&
+                InputRouter.TryGetPointer(InputScope.Direct, out Vector3 aimPointer))
+            {
+                TryDirectAttack(aimPointer);
+            }
+        }
+
+        /// <summary>直控攻击：鼠标屏幕位置反投影到地面（y=0）算出瞄准方向，交给
+        /// <see cref="HomeValleyCombatTargets.TryFindTargetInAim"/> 做锥形+射程判定；命中后走
+        /// <see cref="HomeValleyCombatTargets.TryAttack"/> 唯一结算入口（与 AI 共用同一实现）。
+        /// 瞄准落空/没有装配输出都是合法负向路径，只记日志不抛错。</summary>
+        private void TryDirectAttack(Vector3 screenPointer)
+        {
+            if (_camera == null || _possessed == null)
+            {
+                return;
+            }
+
+            Ray ray = _camera.ScreenPointToRay(screenPointer);
+            var groundPlane = new Plane(Vector3.up, Vector3.zero);
+            if (!groundPlane.Raycast(ray, out float enter))
+            {
+                return;
+            }
+            Vector3 worldPoint = ray.GetPoint(enter);
+
+            Vector3 originV3 = _possessed.transform.position;
+            Vector2 origin = new Vector2(originV3.x, originV3.z);
+            Vector2 aimDir = new Vector2(worldPoint.x, worldPoint.z) - origin;
+
+            CampaignState state = CampaignSession.Current;
+            if (state == null)
+            {
+                return;
+            }
+
+            CombatTargetRecord target = HomeValleyCombatTargets.TryFindTargetInAim(state, origin, aimDir);
+            if (target == null)
+            {
+                Log.Info("[HomeValleyController] 直控攻击：瞄准方向/射程内没有可命中的低威胁残骸靶。");
+                return;
+            }
+
+            HomeValleyCombatTargets.TryAttack(state, _possessed.LogicId, target.TargetId, state.RandomSeed, isAiSource: false);
+        }
+
+        /// <summary>ER4-PRIM-05 STORY-EXECUTION-CARDS.md 第2条"玩家/AI 各使用一次同一出口"——归还谷地
+        /// 没有真实战斗 AI 决策系统（ER5/ER6 区域战斗前不引入），这里给出的是"未被直控、空闲、在射程内
+        /// 的机器每隔若干秒自动打一次"的最小真实自动行为，走的是与玩家直控完全相同的
+        /// <see cref="HomeValleyCombatTargets.TryAttack"/> 入口（<c>isAiSource: true</c>），结构上
+        /// 保证与 AC-REA-003"AI/玩家同装配同结果"一致，不是给 AI 另开小灶的假实现。</summary>
+        private const float AiEngageIntervalSeconds = 5f;
+        private readonly Dictionary<int, float> _aiEngageCooldown = new Dictionary<int, float>();
+
+        private void TickAutoEngage(CampaignState state, float dt)
+        {
+            if (state == null || dt <= 0f)
+            {
+                return;
+            }
+
+            foreach (HomeValleyMachineMarker marker in _machineMarkers)
+            {
+                if (marker == null)
+                {
+                    continue;
+                }
+                int logicId = marker.LogicId;
+                if (_possessed != null && _possessed.LogicId == logicId)
+                {
+                    continue; // 直控由玩家自己打，不与自动交战抢同一台机器的输出。
+                }
+                if (!MachineRegistry.TryGetRecord(logicId, out MachineRecord record) || !record.IsAlive || record.IsInFactory)
+                {
+                    continue;
+                }
+
+                float remaining = _aiEngageCooldown.TryGetValue(logicId, out float r) ? r - dt : 0f;
+                if (remaining > 0f)
+                {
+                    _aiEngageCooldown[logicId] = remaining;
+                    continue;
+                }
+
+                Vector3 posV3 = marker.transform.position;
+                var origin = new Vector2(posV3.x, posV3.z);
+                CombatTargetRecord target = HomeValleyCombatTargets.Find(state, HomeValleyCombatTargets.LowThreatTargetId);
+                if (target == null || target.Health <= 0f || Vector2.Distance(origin, target.Position) > HomeValleyCombatTargets.EngageRange)
+                {
+                    continue; // 不在射程内不算真正尝试过一次交战，不消耗冷却。
+                }
+
+                HomeValleyCombatTargets.TryAttack(state, logicId, target.TargetId, state.RandomSeed, isAiSource: true);
+                _aiEngageCooldown[logicId] = AiEngageIntervalSeconds;
+            }
         }
 
         /// <summary>按 LogicId 稳定顺序循环到下一台机器（同 CellPlayerController.RequestNextControlCandidate
@@ -702,6 +805,7 @@ namespace GameLogic.Campaign.Regions
             }
 
             BuildBeaconSlotVisual();
+            BuildCombatTargetVisual();
 
             if (!state.BuildingRecords.Any(b => b.BuildingId == HomeValleyLayout.RegionId + ":" + HomeValleyLayout.BuildingTypeGenerator2))
             {
@@ -764,6 +868,14 @@ namespace GameLogic.Campaign.Regions
                 if (!hasMarker)
                 {
                     BuildMachineVisual(machine);
+                }
+            }
+
+            foreach (CombatTargetRecord target in state.CombatTargets ?? Array.Empty<CombatTargetRecord>())
+            {
+                if (target.RegionId == HomeValleyLayout.RegionId)
+                {
+                    RefreshCombatTargetVisual(target);
                 }
             }
 
@@ -860,6 +972,44 @@ namespace GameLogic.Campaign.Regions
             go.transform.localScale = new Vector3(0.9f, 0.7f, 0.9f);
             Renderer renderer = go.GetComponent<Renderer>();
             renderer.material = new Material(Shader.Find("Standard")) { color = new Color(0.85f, 0.75f, 0.35f) };
+        }
+
+        /// <summary>ER4-PRIM-05：低威胁残骸靶占位可视化（同 <see cref="BuildWreckageVisual"/> 手法，
+        /// 独立颜色区分"可命中的靶"与"可拆解的残骸"两个不同概念）。<see cref="SyncWorldVisuals"/>
+        /// 每帧按 HP 比例刷新颜色，是本 Story"占位 VFX"承诺的最小落地（真正的命中/聚焦差异证据仍是
+        /// <see cref="HomeValleyCombatTargets.HitResult"/> 事件与日志，颜色只是补充反馈，不是唯一证据，
+        /// 符合 `.claude/rules/projecta-spec-completeness.md` 第4条"占位VFX不能单独标Done"的字面要求
+        /// ——这里 VFX 只是辅助，主证据在事件数据）。</summary>
+        private void BuildCombatTargetVisual()
+        {
+            GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            go.name = "CombatTarget_" + HomeValleyCombatTargets.LowThreatTargetId;
+            go.transform.SetParent(_root.transform, false);
+            Vector2 pos = HomeValleyLayout.LowThreatTargetPosition;
+            go.transform.position = new Vector3(pos.x, 0.6f, pos.y);
+            go.transform.localScale = new Vector3(1.6f, 0.6f, 1.6f);
+            Renderer renderer = go.GetComponent<Renderer>();
+            renderer.material = new Material(Shader.Find("Standard")) { color = new Color(0.8f, 0.2f, 0.2f) };
+        }
+
+        /// <summary>目标 HP 比例→颜色：满血深红（危险靶标配色，与"可拆解残骸"的棕色区分），
+        /// 打空后变灰（再生冷却中），复位后重新变红。</summary>
+        private void RefreshCombatTargetVisual(CombatTargetRecord target)
+        {
+            if (_root == null)
+            {
+                return;
+            }
+            Transform go = _root.transform.Find("CombatTarget_" + target.TargetId);
+            Renderer renderer = go != null ? go.GetComponent<Renderer>() : null;
+            if (renderer == null)
+            {
+                return;
+            }
+            float fraction = target.MaxHealth > 0f ? Mathf.Clamp01(target.Health / target.MaxHealth) : 0f;
+            renderer.material.color = target.Health <= 0f
+                ? new Color(0.4f, 0.4f, 0.4f)
+                : Color.Lerp(new Color(0.55f, 0.1f, 0.1f), new Color(0.9f, 0.25f, 0.2f), fraction);
         }
 
         private void BuildBeaconSlotVisual()

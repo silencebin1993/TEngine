@@ -59,6 +59,9 @@ namespace GameLogic.Campaign
             /// <summary>ER4-PRIM-04：合成队列带真实 Progress/材料预留，读档重放后必须逐字节一致
             /// （同 <see cref="WorkOrders"/>/<see cref="FactoryQueueItemRecord"/> 先例）。</summary>
             public CraftQueueItemRecord[] CraftQueues;
+            /// <summary>ER4-PRIM-05：低威胁残骸靶的 HP/再生状态，读档重放后必须逐字节一致
+            /// （同 <see cref="GroundItems"/>/<see cref="PrimitiveChips"/> 先例）。</summary>
+            public CombatTargetRecord[] CombatTargets;
         }
 
         /// <summary>计算稳定指纹（十六进制 SHA256 字符串）。<paramref name="state"/> 为空时返回空串
@@ -96,6 +99,7 @@ namespace GameLogic.Campaign
                 WorkOrders = state.WorkOrders,
                 PrimitiveChips = state.PrimitiveChips,
                 CraftQueues = state.CraftQueues,
+                CombatTargets = state.CombatTargets,
             };
 
             string json = JsonUtility.ToJson(payload);

@@ -87,6 +87,14 @@ namespace GameLogic.Campaign.Regions
         public const int WreckageScrapYield = 60;
         public const float WreckageDismantleSeconds = 12f;
 
+        /// <summary>ER4-PRIM-05：低威胁残骸靶——归还谷地范围内的静止命中验证目标（DEBT-ER1R01-GRAPH-01
+        /// 门禁"3×3电路图链未接正式战斗"的落点，见 <see cref="HomeValleyCombatTargets"/> 类注释）。
+        /// (-20,14) 半径2：距信号塔(-14,14,r3)6.0（所需5.0）、距残骸1(-20,-4,r2)18、距ERC-001出生点
+        /// (-10,6,r1.5)12.8，均留有余量，在相机边界内（|x|+r=22&lt;=28，|z|+r=16&lt;=30）。</summary>
+        public const string LowThreatTargetAnchorId = "combat_target_low_threat";
+        public static readonly Anchor LowThreatTarget = new Anchor(LowThreatTargetAnchorId, new Vector2(-20f, 14f), 2f);
+        public static readonly Vector2 LowThreatTargetPosition = LowThreatTarget.Position;
+
         /// <summary>信标预留位（DEMO-CONTENT-LOCK.md §2.2："解锁前不存在"）——只标记空间占位，
         /// 解锁前不生成 <see cref="BuildingRecord"/>，真正建造由 ER7-BEACON-01 接手。</summary>
         public const string BeaconSlotId = "beacon_slot";
@@ -308,6 +316,7 @@ namespace GameLogic.Campaign.Regions
             yield return Wreckage1;
             yield return Wreckage2;
             yield return BeaconSlot;
+            yield return LowThreatTarget;
         }
 
         /// <summary>把任意焦点位置夹回相机矩形边界内。ER2-SCENE-01 只交付边界数据与本方法；
