@@ -88,6 +88,12 @@ namespace GameLogic.Campaign
         /// 播种（与 <see cref="RegionEnemies"/> 不同——关键物"是否存在"本身就是玩家行为的产物）。</summary>
         public RegionQuestItemRecord[] RegionQuestItems = Array.Empty<RegionQuestItemRecord>();
 
+        /// <summary>ER6-ANA-01：解析台队列（<see cref="AnalysisQueueItemRecord"/>），唯一写入口
+        /// <see cref="GameLogic.Campaign.Regions.HomeValleyAnalysis"/>。新战役为空数组，只在玩家真正
+        /// 把一件已带回的模块送去解析台那一刻才生成第一条记录，同 <see cref="RegionQuestItems"/> 一样
+        /// 不预先播种。</summary>
+        public AnalysisQueueItemRecord[] AnalysisQueues = Array.Empty<AnalysisQueueItemRecord>();
+
         public ControlHandoffRecord ControlHandoff = new ControlHandoffRecord();
         public SaveReason LastSaveReason = SaveReason.NewCampaign;
 
@@ -140,6 +146,7 @@ namespace GameLogic.Campaign
                 CombatTargets = Array.Empty<CombatTargetRecord>(),
                 RegionEnemies = Array.Empty<RegionEnemyRecord>(),
                 RegionQuestItems = Array.Empty<RegionQuestItemRecord>(),
+                AnalysisQueues = Array.Empty<AnalysisQueueItemRecord>(),
                 ControlHandoff = new ControlHandoffRecord(),
                 LastSaveReason = SaveReason.NewCampaign,
                 ObjectiveRecords = Array.Empty<ObjectiveRecord>(),
@@ -187,6 +194,8 @@ namespace GameLogic.Campaign
                 .OrderBy(r => r.EnemyInstanceId, StringComparer.Ordinal).ToArray();
             RegionQuestItems = (RegionQuestItems ?? Array.Empty<RegionQuestItemRecord>())
                 .OrderBy(r => r.SalvageInstanceId, StringComparer.Ordinal).ToArray();
+            AnalysisQueues = (AnalysisQueues ?? Array.Empty<AnalysisQueueItemRecord>())
+                .OrderBy(r => r.QueueItemId, StringComparer.Ordinal).ToArray();
         }
     }
 }

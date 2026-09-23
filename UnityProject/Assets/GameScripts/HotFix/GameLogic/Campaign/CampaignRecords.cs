@@ -484,6 +484,44 @@ namespace GameLogic.Campaign
         public Vector2 Position;
     }
 
+    /// <summary>ER6-ANA-01：解析台队列状态——同 <see cref="CraftQueueState"/> 同一命名/语义纪律
+    /// （断电转 WaitingPower 且保留进度，不是本 Story 另起一套新词汇）。</summary>
+    [Serializable]
+    public enum AnalysisQueueState
+    {
+        Queued = 0,
+        Running = 1,
+        WaitingPower = 2,
+        Completed = 3,
+        Cancelled = 4,
+        Failed = 5,
+    }
+
+    /// <summary>ER6-ANA-01 STORY-EXECUTION-CARDS.md："未归档模块在货舱/地面/仓库/搬运中/解析台五态
+    /// 只有一个真持有者"——货舱/地面两态已经是 <see cref="RegionQuestItemRecord"/>
+    /// 的 Carried/OnGround（区域内，未改动）；一旦 Recovered，同一 <see cref="RegionQuestItemRecord.SalvageInstanceId"/>
+    /// 只可能处于本类型定义的家园侧状态之一：Recovered 且没有任何 <see cref="AnalysisQueueItemRecord"/>
+    /// 引用它＝"仓库"（未排队）；本记录 <see cref="State"/>==Queued＝"搬运中"（送去解析台排队中，本
+    /// Demo 不做真实运输在途时间，同 <see cref="HomeValleyCargo"/> 先例）；==Running＝"解析台"（正在
+    /// 解析，进度真实推进）；==Completed/Cancelled/Failed 是终态。<see cref="RegionQuestItemRecord.State"/>
+    /// 一旦变 Recovered 就不会再变回 Carried/OnGround（<see cref="Regions.FracturedCityRegion.ResolveExtraction"/>
+    /// 只处理当前 Carried 态条目），"不让同一 salvageInstanceId 同时装车和解析"因此是结构性保证，不需要
+    /// 额外互斥校验。</summary>
+    [Serializable]
+    public sealed class AnalysisQueueItemRecord
+    {
+        public string QueueItemId;
+        public string SalvageInstanceId;
+        /// <summary>如 <see cref="Regions.FracturedCityLayout.MarkerModuleContentId"/>——用于查
+        /// <see cref="Regions.HomeValleyAnalysis.YieldTable"/> 取解锁目标/技术数据/时长。</summary>
+        public string ContentId;
+        public float Duration;
+        public float Progress;
+        public AnalysisQueueState State;
+        public string BlockedReason;
+        public long CreatedTick;
+    }
+
     /// <summary>DEMO-CONTENT-LOCK.md：逐目标持久化 ObjectiveRecord，字段与该文档"必须作为可存档
     /// ObjectiveRecord 实现"一段一致（objectiveId/state/startedAtPlaySeconds/completedAtPlaySeconds/eventId）。
     /// 不在 ERD-DAT-001 的 CampaignState 必须字段表里，但 STORY-EXECUTION-CARDS.md #ER1-SAVE-01

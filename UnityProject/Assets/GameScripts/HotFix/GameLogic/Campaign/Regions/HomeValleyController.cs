@@ -192,6 +192,7 @@ namespace GameLogic.Campaign.Regions
                     IsMachineDirectControlled, BeginAutoAssignedMovement);
                 HomeValleyFactory.Tick(state, scaledDt); // ER4-FAC-01：装配站生产队列。
                 PrimitiveCraftStation.Tick(state, scaledDt); // ER4-PRIM-04：合成台升级/拆解队列。
+                HomeValleyAnalysis.Tick(state, scaledDt); // ER6-ANA-01：解析台队列。
                 HomeValleyCombatTargets.Tick(state, scaledDt); // ER4-PRIM-05：低威胁残骸靶被动再生。
                 TickAutoEngage(state, scaledDt); // ER4-PRIM-05：AI 同出口自动交战。
                 HomeValleySignal.RecomputeUnlock(state); // ER5-SIG-01：破碎都市解锁判定。
@@ -476,6 +477,13 @@ namespace GameLogic.Campaign.Regions
         private bool _craftStationPanelOpen;
         public bool IsCraftStationPanelOpen => _craftStationPanelOpen;
         public void SetCraftStationPanelOpen(bool open) => _craftStationPanelOpen = open;
+
+        /// <summary>ER6-ANA-01：解析台面板开关状态——同 <see cref="IsExpeditionPrepPanelOpen"/> 先例，
+        /// 点击已修复（Operational）的解析台建筑切换（专属建筑，不像装配站要身兼三职，不需要常驻
+        /// 切换按钮那一套）。</summary>
+        private bool _analysisPanelOpen;
+        public bool IsAnalysisPanelOpen => _analysisPanelOpen;
+        public void SetAnalysisPanelOpen(bool open) => _analysisPanelOpen = open;
 
         /// <summary>供工作单面板"点击定位"（AC-UI-003）调用：把选中切到该订单当前指派的机器并高亮，
         /// 与鼠标直接点机器同一套视觉反馈。订单尚未指派机器（Ready/Waiting）时无具体对象可定位，
@@ -1548,6 +1556,21 @@ namespace GameLogic.Campaign.Regions
                 if (tower != null && tower.ConstructionState == BuildingConstructionState.Operational)
                 {
                     _expeditionPrepPanelOpen = !_expeditionPrepPanelOpen;
+                    return;
+                }
+            }
+
+            // ER6-ANA-01：解析台已修复（Operational）时点击切换解析面板，同信号塔先例——不落到下面
+            // "Operational 非核心建筑=拆除"通用分流，把解析台拆掉会让已带回但未解析的关键模块永久卡死
+            // （没有第二个解析入口），明显不是玩家点它的意图。
+            if (earlyBuildingTypeId == HomeValleyLayout.BuildingTypeAnalysisBench)
+            {
+                CampaignState benchState = CampaignSession.Current;
+                BuildingRecord bench = benchState?.BuildingRecords?.FirstOrDefault(b =>
+                    b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId == HomeValleyLayout.BuildingTypeAnalysisBench);
+                if (bench != null && bench.ConstructionState == BuildingConstructionState.Operational)
+                {
+                    _analysisPanelOpen = !_analysisPanelOpen;
                     return;
                 }
             }

@@ -273,6 +273,11 @@ namespace GameLogic.Stage
             var craftStationHudHost = new GameObject("[HomeValleyCraftStationHost]");
             Object.DontDestroyOnLoad(craftStationHudHost);
             craftStationHudHost.AddComponent<UI.PrimitiveCraft.PrimitiveCraftPanelUIToolkit>();
+            // ER6-ANA-01：解析台面板，同样独立 GameObject（同一条 UIDocument 唯一性纪律），只在归还
+            // 谷地激活且玩家点开已修复的解析台建筑时可见（见 AnalysisPanelUIToolkit.Update）。
+            var analysisHudHost = new GameObject("[HomeValleyAnalysisHost]");
+            Object.DontDestroyOnLoad(analysisHudHost);
+            analysisHudHost.AddComponent<UI.Analysis.AnalysisPanelUIToolkit>();
             // ER3-SOFTLOCK-01：家园核心被毁的全屏失败面板，同样独立 GameObject（同一条 UIDocument
             // 唯一性纪律），只在归还谷地激活且核心已被摧毁时可见。
             var homeValleyFailureHost = new GameObject("[HomeValleyFailureHost]");
