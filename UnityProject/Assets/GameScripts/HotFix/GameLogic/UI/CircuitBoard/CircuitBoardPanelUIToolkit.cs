@@ -1,8 +1,10 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Cysharp.Threading.Tasks;
 using GameLogic.Campaign;
 using GameLogic.Campaign.Blueprint;
+using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Primitive;
 using GameLogic.Campaign.Regions;
 using GameLogic.MetabolicSlice.Grid;
@@ -13,35 +15,59 @@ using UnityEngine.UIElements;
 
 namespace GameLogic.UI.CircuitBoard
 {
-    /// <summary>ER4-PRIM-02 STORY-EXECUTION-CARDS.md 第2条："正式电路板 UI 可装/移芯片、画/删四邻有向边、
-    /// 撤销/重做20步，显示空槽被动、源汇、路径/效果；非法边、重复边、环、不可达、孤立芯片、>4路径、
-    /// 越边帽/负载逐项高亮并保留草稿。"结构落在 UXML/USS（<c>unity-ui-toolkit.md</c> 硬规则），C# 只做
-    /// 数据绑定与事件，与 <see cref="Factory.FactoryPanelUIToolkit"/>/<see cref="WorkOrder.WorkOrderPanelUIToolkit"/>
-    /// 同一套刷新降频/行池写法。
+    /// <summary>ER4-BLP-01 STORY-EXECUTION-CARDS.md："编辑器提供新建/打开/复制/另存/保存/取消/恢复草稿/
+    /// 归档入口；外层底盘1、主组件1、功能0～1、结构0～1、有序固件2槽，另有已接好的3×3电路板、基元仓与
+    /// 合成台入口"。本类是 ER4-PRIM-02 起就存在的电路板面板的正式升级——原面板只覆盖 3×3 电路内层，
+    /// 外层槽（底盘/主组件/功能/结构）此前只能由 <c>BlueprintCircuitDefaults</c> 预置四条固定蓝图，玩家
+    /// 无法真正新建/复制/改外层装配；本 Story 补齐这一层，CRUD 编排交给
+    /// <see cref="BlueprintEditorService"/>，本类只做数据绑定与事件（UI Toolkit 硬规则）。
     ///
-    /// 面板开关状态由 <see cref="HomeValleyController.IsCircuitBoardPanelOpen"/> 持有，但本类自带一个
-    /// 常驻切换按钮（<c>EntryToggleButton</c>）驱动它——正式"家园蓝图"容器入口留 ER4-BLP-01，本 Story
-    /// 提供一个独立可达的入口，不占用装配站建筑点选路由（避免与 <see cref="Factory.FactoryPanelUIToolkit"/>
-    /// 的既有点选路由冲突）。所有装/卸/画边/固件/撤销重做操作都通过 <see cref="BlueprintCircuitBoard"/>
-    /// 完成——本类不直接改 <c>BlueprintVersionRecord</c> 字段。</summary>
+    /// 面板开关状态仍由 <see cref="HomeValleyController.IsCircuitBoardPanelOpen"/> 持有；所有装/卸/画边/
+    /// 固件/外层槽/撤销重做/CRUD 操作都通过 <see cref="BlueprintCircuitBoard"/>/<see cref="BlueprintEditorService"/>
+    /// 完成——本类不直接改 <c>BlueprintRecord</c>/<c>BlueprintVersionRecord</c> 字段。</summary>
     public sealed class CircuitBoardPanelUIToolkit : MonoBehaviour
     {
         private const int MaxIssueRows = 10;
         private const int MaxPathRows = BlueprintCircuitLayout.MaxPaths;
+        private const int MaxBlueprintRows = 24;
         private const float RefreshIntervalSeconds = 0.2f;
 
         private UIDocument _document;
         private VisualTreeAsset _visualTree;
         private VisualTreeAsset _issueRowTemplate;
         private VisualTreeAsset _pathRowTemplate;
+        private VisualTreeAsset _blueprintRowTemplate;
         private PanelSettings _panelSettings;
 
         private VisualElement _root;
         private Button _entryToggleButton;
         private VisualElement _panel;
 
-        private readonly Dictionary<string, Button> _bpButtons = new Dictionary<string, Button>();
+        // ── 蓝图列表 / CRUD ──────────────────────────────────────────────────────
+        private ScrollView _blueprintListScroll;
+        private readonly List<Button> _blueprintRowPool = new List<Button>(MaxBlueprintRows);
+        private readonly List<string> _blueprintIdsByRowIndex = new List<string>(MaxBlueprintRows);
+        private TextField _newBlueprintNameField;
+        private Button _newBlueprintButton;
+        private Button _duplicateBlueprintButton;
+        private Button _saveAsButton;
+        private Button _archiveButton;
+        private Button _cancelDraftButton;
+        private Button _restoreDraftButton;
         private Label _activeBlueprintLabel;
+
+        // ── 外层槽 ───────────────────────────────────────────────────────────────
+        private DropdownField _chassisDropdown;
+        private DropdownField _primaryDropdown;
+        private DropdownField _utilityDropdown;
+        private DropdownField _structureDropdown;
+        private Button _clearUtilityButton;
+        private Button _clearStructureButton;
+        private Label _lockedContentHintLabel;
+        private readonly List<string> _chassisIdsByIndex = new List<string>();
+        private readonly List<string> _primaryIdsByIndex = new List<string>();
+        private readonly List<string> _utilityIdsByIndex = new List<string>();
+        private readonly List<string> _structureIdsByIndex = new List<string>();
 
         private readonly Button[] _slotButtons = new Button[BlueprintCircuitLayout.SlotCount];
         private Label _selectedSlotLabel;
@@ -57,9 +83,6 @@ namespace GameLogic.UI.CircuitBoard
         private Button _printChipButton;
         private Label _bagResultLabel;
 
-        /// <summary>ER4-PRIM-03：<see cref="_bagChipDropdown"/>/<see cref="_pendingChipDropdown"/> 的
-        /// choices 是展示文本（人读，含 PartId 短形式方便区分同名芯片），这两张表把下拉框选中索引换回
-        /// 真正的 PartId——DropdownField 本身不支持"显示名/取值"分离，这是最小代价的绑定写法。</summary>
         private readonly List<string> _bagPartIdsByDropdownIndex = new List<string>();
         private readonly List<string> _pendingPartIdsByDropdownIndex = new List<string>();
 
@@ -69,12 +92,14 @@ namespace GameLogic.UI.CircuitBoard
         private Button _removeEdgeButton;
         private Label _edgeListLabel;
 
-        private TextField _firmware0Field;
-        private TextField _firmware1Field;
+        private DropdownField _firmware0Dropdown;
+        private DropdownField _firmware1Dropdown;
         private Button _setFirmware0Button;
         private Button _clearFirmware0Button;
         private Button _setFirmware1Button;
         private Button _clearFirmware1Button;
+        private readonly List<string> _firmware0IdsByIndex = new List<string>();
+        private readonly List<string> _firmware1IdsByIndex = new List<string>();
 
         private Button _undoButton;
         private Button _redoButton;
@@ -84,6 +109,7 @@ namespace GameLogic.UI.CircuitBoard
         private Label _issuesEmptyLabel;
         private Label _previewSummaryLabel;
         private ScrollView _pathList;
+        private Label _costSummaryLabel;
 
         private Button _saveButton;
         private Button _closeButton;
@@ -92,12 +118,6 @@ namespace GameLogic.UI.CircuitBoard
         private readonly List<TemplateContainer> _issueRowPool = new List<TemplateContainer>(MaxIssueRows);
         private readonly List<TemplateContainer> _pathRowPool = new List<TemplateContainer>(MaxPathRows);
 
-        private static readonly string[] BlueprintOrder =
-        {
-            HomeValleyLayout.BlueprintErc001Id, HomeValleyLayout.BlueprintHaulerId,
-            HomeValleyLayout.BlueprintErc003Id, HomeValleyLayout.BlueprintHoverId,
-        };
-
         private string _selectedBlueprintId;
         private BlueprintCircuitBoard _board;
         private int? _selectedSlot;
@@ -105,11 +125,19 @@ namespace GameLogic.UI.CircuitBoard
         private BlueprintCircuitPreview _lastPreview;
         private float _refreshTimer;
 
+        /// <summary>ER4-BLP-01 STORY-EXECUTION-CARDS.md 第1条"恢复草稿"入口的落点：离开某蓝图（切换/关闭
+        /// 面板）前若草稿签名与已保存版本不同，把完整内容（不含 <c>CircuitSlotPartIds</c> 实例绑定，见
+        /// <see cref="SnapshotCurrentDraftIfDirty"/> 注释）存进本字典；玩家未做任何保存就切回同一蓝图时，
+        /// 用<see cref="_restoreDraftButton"/>取回，不必重新画一遍电路。只存内存，不落盘——关掉游戏/切换
+        /// 战役即丢失，这是"恢复"而非"自动持久化草稿"的既定范围。</summary>
+        private readonly Dictionary<string, BlueprintVersionRecord> _draftSnapshots = new Dictionary<string, BlueprintVersionRecord>();
+
         private async void Start()
         {
             _visualTree = await GameModule.Resource.LoadAssetAsync<VisualTreeAsset>("CircuitBoardPanel");
             _issueRowTemplate = await GameModule.Resource.LoadAssetAsync<VisualTreeAsset>("CircuitIssueRow");
             _pathRowTemplate = await GameModule.Resource.LoadAssetAsync<VisualTreeAsset>("CircuitPathRow");
+            _blueprintRowTemplate = await GameModule.Resource.LoadAssetAsync<VisualTreeAsset>("CircuitBlueprintRow");
             _panelSettings = await GameModule.Resource.LoadAssetAsync<PanelSettings>("BattleHudPanelSettings");
             if (this == null)
             {
@@ -144,11 +172,23 @@ namespace GameLogic.UI.CircuitBoard
             _entryToggleButton = _root.Q<Button>("EntryToggleButton");
             _panel = _root.Q<VisualElement>("CircuitBoardPanelRoot");
 
-            _bpButtons[HomeValleyLayout.BlueprintErc001Id] = _root.Q<Button>("BpBtn_Erc001");
-            _bpButtons[HomeValleyLayout.BlueprintHaulerId] = _root.Q<Button>("BpBtn_Hauler");
-            _bpButtons[HomeValleyLayout.BlueprintErc003Id] = _root.Q<Button>("BpBtn_Erc003");
-            _bpButtons[HomeValleyLayout.BlueprintHoverId] = _root.Q<Button>("BpBtn_Hover");
+            _blueprintListScroll = _root.Q<ScrollView>("BlueprintList");
+            _newBlueprintNameField = _root.Q<TextField>("NewBlueprintNameField");
+            _newBlueprintButton = _root.Q<Button>("NewBlueprintButton");
+            _duplicateBlueprintButton = _root.Q<Button>("DuplicateBlueprintButton");
+            _saveAsButton = _root.Q<Button>("SaveAsButton");
+            _archiveButton = _root.Q<Button>("ArchiveButton");
+            _cancelDraftButton = _root.Q<Button>("CancelDraftButton");
+            _restoreDraftButton = _root.Q<Button>("RestoreDraftButton");
             _activeBlueprintLabel = _root.Q<Label>("ActiveBlueprintLabel");
+
+            _chassisDropdown = _root.Q<DropdownField>("ChassisDropdown");
+            _primaryDropdown = _root.Q<DropdownField>("PrimaryDropdown");
+            _utilityDropdown = _root.Q<DropdownField>("UtilityDropdown");
+            _structureDropdown = _root.Q<DropdownField>("StructureDropdown");
+            _clearUtilityButton = _root.Q<Button>("ClearUtilityButton");
+            _clearStructureButton = _root.Q<Button>("ClearStructureButton");
+            _lockedContentHintLabel = _root.Q<Label>("LockedContentHintLabel");
 
             for (int i = 0; i < BlueprintCircuitLayout.SlotCount; i++)
             {
@@ -173,8 +213,8 @@ namespace GameLogic.UI.CircuitBoard
             _removeEdgeButton = _root.Q<Button>("RemoveEdgeButton");
             _edgeListLabel = _root.Q<Label>("EdgeListLabel");
 
-            _firmware0Field = _root.Q<TextField>("Firmware0Field");
-            _firmware1Field = _root.Q<TextField>("Firmware1Field");
+            _firmware0Dropdown = _root.Q<DropdownField>("Firmware0Dropdown");
+            _firmware1Dropdown = _root.Q<DropdownField>("Firmware1Dropdown");
             _setFirmware0Button = _root.Q<Button>("SetFirmware0Button");
             _clearFirmware0Button = _root.Q<Button>("ClearFirmware0Button");
             _setFirmware1Button = _root.Q<Button>("SetFirmware1Button");
@@ -188,6 +228,7 @@ namespace GameLogic.UI.CircuitBoard
             _issuesEmptyLabel = _root.Q<Label>("IssuesEmptyLabel");
             _previewSummaryLabel = _root.Q<Label>("PreviewSummaryLabel");
             _pathList = _root.Q<ScrollView>("PathList");
+            _costSummaryLabel = _root.Q<Label>("CostSummaryLabel");
 
             _saveButton = _root.Q<Button>("SaveButton");
             _closeButton = _root.Q<Button>("CloseButton");
@@ -207,23 +248,65 @@ namespace GameLogic.UI.CircuitBoard
                 _pathList.Add(row);
                 _pathRowPool.Add(row);
             }
+            for (int i = 0; i < MaxBlueprintRows; i++)
+            {
+                TemplateContainer row = _blueprintRowTemplate.CloneTree();
+                row.style.display = DisplayStyle.None;
+                _blueprintListScroll.Add(row);
+                Button btn = row.Q<Button>("OpenButton");
+                int capturedIndex = i;
+                btn.clicked += () => OnBlueprintRowClicked(capturedIndex);
+                _blueprintRowPool.Add(btn);
+                _blueprintIdsByRowIndex.Add(null);
+            }
         }
 
         private void WireEvents()
         {
             _entryToggleButton.clicked += () => SetPanelOpen(!(GameRoot.HomeValley?.IsCircuitBoardPanelOpen ?? false));
 
-            foreach (KeyValuePair<string, Button> kv in _bpButtons)
-            {
-                string id = kv.Key;
-                kv.Value.clicked += () => SelectBlueprint(id);
-            }
-
             for (int i = 0; i < BlueprintCircuitLayout.SlotCount; i++)
             {
                 int slot = i;
                 _slotButtons[i].clicked += () => SelectSlot(slot);
             }
+
+            // ── CRUD：新建/打开/复制/另存/保存/取消/恢复草稿/归档 ──────────────────
+            _newBlueprintButton.clicked += OnNewBlueprintClicked;
+            _duplicateBlueprintButton.clicked += OnDuplicateBlueprintClicked;
+            _saveAsButton.clicked += () => DoSave(saveAsNewRecord: true);
+            _saveButton.clicked += () => DoSave(saveAsNewRecord: false);
+            _archiveButton.clicked += OnArchiveClicked;
+            _cancelDraftButton.clicked += OnCancelDraftClicked;
+            _restoreDraftButton.clicked += OnRestoreDraftClicked;
+
+            // ── 外层槽：选中即生效（校验/解锁不通过则保留原值并给出失败原因）────────
+            _chassisDropdown.RegisterValueChangedCallback(_ => RunOuterOp(() =>
+            {
+                int idx = _chassisDropdown.index;
+                if (idx < 0 || idx >= _chassisIdsByIndex.Count) return CircuitOpResult.Fail("no-selection", "未选中底盘。");
+                return _board.TrySetChassis(CampaignSession.Current, _chassisIdsByIndex[idx]);
+            }));
+            _primaryDropdown.RegisterValueChangedCallback(_ => RunOuterOp(() =>
+            {
+                int idx = _primaryDropdown.index;
+                if (idx < 0 || idx >= _primaryIdsByIndex.Count) return CircuitOpResult.Fail("no-selection", "未选中主组件。");
+                return _board.TrySetPrimary(CampaignSession.Current, _primaryIdsByIndex[idx]);
+            }));
+            _utilityDropdown.RegisterValueChangedCallback(_ => RunOuterOp(() =>
+            {
+                int idx = _utilityDropdown.index;
+                if (idx < 0 || idx >= _utilityIdsByIndex.Count) return CircuitOpResult.Fail("no-selection", "未选中功能组件。");
+                return _board.TrySetUtility(CampaignSession.Current, _utilityIdsByIndex[idx]);
+            }));
+            _structureDropdown.RegisterValueChangedCallback(_ => RunOuterOp(() =>
+            {
+                int idx = _structureDropdown.index;
+                if (idx < 0 || idx >= _structureIdsByIndex.Count) return CircuitOpResult.Fail("no-selection", "未选中结构。");
+                return _board.TrySetStructure(CampaignSession.Current, _structureIdsByIndex[idx]);
+            }));
+            _clearUtilityButton.clicked += () => RunOuterOp(() => _board.TrySetUtility(CampaignSession.Current, null));
+            _clearStructureButton.clicked += () => RunOuterOp(() => _board.TrySetStructure(CampaignSession.Current, null));
 
             _equipChipButton.clicked += () => RunBagOp(() =>
             {
@@ -273,9 +356,19 @@ namespace GameLogic.UI.CircuitBoard
                 }
             };
 
-            _setFirmware0Button.clicked += () => RunOp(() => _board.TrySetFirmware(0, _firmware0Field.value));
+            _setFirmware0Button.clicked += () => RunOp(() =>
+            {
+                int idx = _firmware0Dropdown.index;
+                string id = idx >= 0 && idx < _firmware0IdsByIndex.Count ? _firmware0IdsByIndex[idx] : null;
+                return _board.TrySetFirmware(CampaignSession.Current, 0, id);
+            });
             _clearFirmware0Button.clicked += () => RunOp(() => _board.TryClearFirmware(0));
-            _setFirmware1Button.clicked += () => RunOp(() => _board.TrySetFirmware(1, _firmware1Field.value));
+            _setFirmware1Button.clicked += () => RunOp(() =>
+            {
+                int idx = _firmware1Dropdown.index;
+                string id = idx >= 0 && idx < _firmware1IdsByIndex.Count ? _firmware1IdsByIndex[idx] : null;
+                return _board.TrySetFirmware(CampaignSession.Current, 1, id);
+            });
             _clearFirmware1Button.clicked += () => RunOp(() => _board.TryClearFirmware(1));
 
             _undoButton.clicked += () =>
@@ -289,11 +382,139 @@ namespace GameLogic.UI.CircuitBoard
                 RefreshAll();
             };
 
-            _saveButton.clicked += OnSaveClicked;
             _closeButton.clicked += () => SetPanelOpen(false);
         }
 
-        private void RunOp(System.Func<CircuitOpResult> op)
+        private void OnBlueprintRowClicked(int rowIndex)
+        {
+            if (rowIndex < 0 || rowIndex >= _blueprintIdsByRowIndex.Count)
+            {
+                return;
+            }
+            string blueprintId = _blueprintIdsByRowIndex[rowIndex];
+            if (string.IsNullOrEmpty(blueprintId))
+            {
+                return;
+            }
+            SelectBlueprint(blueprintId);
+        }
+
+        private void OnNewBlueprintClicked()
+        {
+            CampaignState state = CampaignSession.Current;
+            if (state == null)
+            {
+                _saveResultLabel.text = "没有活动战役，无法新建。";
+                return;
+            }
+            SnapshotCurrentDraftIfDirty();
+            ReconcileCurrentBlueprintDrafts();
+            BlueprintRecord record = BlueprintEditorService.CreateNew(state, _newBlueprintNameField.value);
+            _saveResultLabel.text = $"已新建蓝图“{record.DisplayName}”，请选择底盘/主组件后保存。";
+            SelectBlueprint(record.BlueprintId);
+        }
+
+        private void OnDuplicateBlueprintClicked()
+        {
+            CampaignState state = CampaignSession.Current;
+            if (state == null || string.IsNullOrEmpty(_selectedBlueprintId))
+            {
+                _saveResultLabel.text = "请先在列表中打开一个蓝图再复制。";
+                return;
+            }
+            SnapshotCurrentDraftIfDirty();
+            ReconcileCurrentBlueprintDrafts();
+            BlueprintRecord record = BlueprintEditorService.Duplicate(state, _selectedBlueprintId, _newBlueprintNameField.value);
+            if (record == null)
+            {
+                _saveResultLabel.text = "复制失败：来源蓝图尚无已保存版本。";
+                return;
+            }
+            _saveResultLabel.text = $"已复制为“{record.DisplayName}”（独立新记录，未装的基元芯片实例需重新装配）。";
+            SelectBlueprint(record.BlueprintId);
+        }
+
+        private void OnArchiveClicked()
+        {
+            CampaignState state = CampaignSession.Current;
+            if (state == null || string.IsNullOrEmpty(_selectedBlueprintId))
+            {
+                return;
+            }
+            CircuitOpResult r = BlueprintEditorService.TryArchive(state, _selectedBlueprintId);
+            _saveResultLabel.text = r.Success
+                ? "已归档：仍可被机器/队列引用读取，不再默认出现在新的打开列表首屏。"
+                : $"归档失败[{r.Code}]：{r.Message}";
+            RefreshAll();
+        }
+
+        private void OnCancelDraftClicked()
+        {
+            // AC-BLP-002/DEMO-IMPLEMENTATION-SPEC.md："任何失败保持草稿且不扣资源"；取消同样不扣废料/
+            // 技术数据——本操作从不触碰 CampaignEconomyLedger，只回滚编辑模型与基元仓账本。先快照
+            // （见 <see cref="_draftSnapshots"/> 类注释），让"取消草稿"与"恢复草稿"互为可逆操作——玩家
+            // 手滑点了取消，还能用恢复草稿要回来，不是单向不可逆的丢弃。
+            SnapshotCurrentDraftIfDirty();
+            ReconcileCurrentBlueprintDrafts();
+            ReloadBoardFromSaved();
+            _saveResultLabel.text = "已取消草稿，恢复到最近保存版本（未扣废料/技术数据；如需要可点“恢复草稿”取回）。";
+            RefreshAll();
+        }
+
+        private void OnRestoreDraftClicked()
+        {
+            if (string.IsNullOrEmpty(_selectedBlueprintId) || !_draftSnapshots.TryGetValue(_selectedBlueprintId, out BlueprintVersionRecord snapshot))
+            {
+                _saveResultLabel.text = "没有可恢复的未保存草稿。";
+                return;
+            }
+            _board = BlueprintCircuitBoard.FromVersion(snapshot);
+            _saveResultLabel.text = "已恢复未保存草稿的槽位/导线/固件内容（基元仓实例绑定需重新从仓装入，避免同一实例被复制）。";
+            RefreshAll();
+        }
+
+        private void DoSave(bool saveAsNewRecord)
+        {
+            if (_board == null)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            if (state == null)
+            {
+                _saveResultLabel.text = "没有活动战役，无法保存。";
+                return;
+            }
+
+            string targetBlueprintId = saveAsNewRecord ? null : _selectedBlueprintId;
+            string displayName = null;
+            if (saveAsNewRecord || string.IsNullOrEmpty(_selectedBlueprintId))
+            {
+                displayName = string.IsNullOrEmpty(_newBlueprintNameField.value) ? null : _newBlueprintNameField.value;
+            }
+
+            BlueprintSaveResult result = BlueprintEditorService.TrySave(state, _board, targetBlueprintId, displayName, saveAsNewRecord);
+            if (!result.Success)
+            {
+                _saveResultLabel.text = $"保存被拒绝：{result.FailureReason}";
+                RefreshAll();
+                return;
+            }
+
+            _draftSnapshots.Remove(result.BlueprintId);
+            string chargeNote = result.TechDataCharged > 0
+                ? $"；首次保存跨派系反应“{ReactionDisplayName(result.ReactionId)}”，已扣技术数据 {result.TechDataCharged}"
+                : (result.ReactionId != null ? $"；触发反应“{ReactionDisplayName(result.ReactionId)}”（已在本战役扣过费，本次免费）" : string.Empty);
+            _saveResultLabel.text = $"已保存“{result.BlueprintId}”为版本 {result.Version}{chargeNote}。";
+            _selectedBlueprintId = result.BlueprintId;
+            ReloadBoardFromSaved();
+            RefreshAll();
+        }
+
+        private static string ReactionDisplayName(string reactionId) =>
+            reactionId != null && MechanicalReactionCatalog.TryGet(reactionId, out MechanicalContentDef def) ? def.DisplayName : reactionId;
+
+        private void RunOp(Func<CircuitOpResult> op)
         {
             if (_board == null)
             {
@@ -304,10 +525,21 @@ namespace GameLogic.UI.CircuitBoard
             RefreshAll();
         }
 
-        /// <summary>同 <see cref="RunOp"/>，但结果文本写进基元仓自己的
-        /// <see cref="_bagResultLabel"/>（STORY-EXECUTION-CARDS.md 第2条"显示……所有失败码"，与电路
-        /// 校验/保存的失败提示分开陈列，不混在同一行）。</summary>
-        private void RunBagOp(System.Func<CircuitOpResult> op)
+        /// <summary>外层槽操作的结果文本走 <see cref="_lockedContentHintLabel"/> 旁的
+        /// <see cref="_saveResultLabel"/>，与内层电路操作共用同一提示位置——玩家关心的是"这次点击成不成功"，
+        /// 不需要为外层/内层分别开两条提示。</summary>
+        private void RunOuterOp(Func<CircuitOpResult> op)
+        {
+            if (_board == null)
+            {
+                return;
+            }
+            CircuitOpResult r = op();
+            _saveResultLabel.text = r.Success ? string.Empty : $"操作失败[{r.Code}]：{r.Message}";
+            RefreshAll();
+        }
+
+        private void RunBagOp(Func<CircuitOpResult> op)
         {
             if (_board == null)
             {
@@ -323,27 +555,44 @@ namespace GameLogic.UI.CircuitBoard
             GameRoot.HomeValley?.SetCircuitBoardPanelOpen(open);
             if (!open)
             {
-                // ER4-PRIM-03：关闭面板＝离开当前蓝图的编辑会话，未保存的实例装/卸改动释放回仓
-                // （"退出……时资源与实例守恒"）。仅回滚仓账本还不够——execute_code 实测发现的真实
-                // 缺陷：本类的 _board 字段此前在这里不会被清空/重建，玩家关闭再重新打开面板会看到
-                // 一块"槽位视觉上仍装着芯片，但该实例其实已经在 ReconcileCurrentBlueprintDrafts 里
-                // 放回仓"的鬼画面（_board.SlotContentIds/SlotPartIds 与仓账本真实状态脱节），下一次
-                // 装卸操作还会因为 _board 仍认为槽位"已占用"而被 TryMoveToDraft/TryPlaceChip 误拒。
-                // 修复：关闭时把 _board 重新从当前已保存版本加载一次，与账本保持同步。
+                // ER4-PRIM-03/ER4-BLP-01：关闭面板＝离开当前蓝图的编辑会话。未保存的实例装/卸改动释放
+                // 回仓之前先快照内容（恢复草稿用），再回滚账本、重新从已保存版本加载 _board，避免槽位
+                // 视觉与仓账本真实状态脱节的鬼影（ER4-PRIM-03 实测过的真实缺陷，同一套修复继续沿用）。
+                SnapshotCurrentDraftIfDirty();
                 ReconcileCurrentBlueprintDrafts();
                 ReloadBoardFromSaved();
             }
             if (open && _board == null)
             {
-                SelectBlueprint(HomeValleyLayout.BlueprintErc003Id);
+                SelectFirstAvailableBlueprint();
             }
             RefreshAll();
         }
 
+        private void SelectFirstAvailableBlueprint()
+        {
+            CampaignState state = CampaignSession.Current;
+            BlueprintRecord first = state?.BlueprintRecords?
+                .Where(b => b != null)
+                .OrderBy(b => b.Archived)
+                .ThenBy(b => b.BlueprintId, StringComparer.Ordinal)
+                .FirstOrDefault();
+            if (first != null)
+            {
+                SelectBlueprint(first.BlueprintId);
+            }
+            else
+            {
+                SelectBlueprint(HomeValleyLayout.BlueprintErc003Id);
+            }
+        }
+
         private void SelectBlueprint(string blueprintId)
         {
-            // ER4-PRIM-03："跨草稿"守恒：离开上一个正在编辑的蓝图前，把它名下未落进已保存版本的
-            // Draft 实例释放回仓，不让切换蓝图偷偷丢/复制实例。
+            // ER4-PRIM-03/ER4-BLP-01："跨草稿"守恒：离开上一个正在编辑的蓝图前，先快照未保存内容
+            // （恢复草稿用），再把它名下未落进已保存版本的 Draft 实例释放回仓，不让切换蓝图偷偷丢/
+            // 复制实例。
+            SnapshotCurrentDraftIfDirty();
             ReconcileCurrentBlueprintDrafts();
 
             _selectedBlueprintId = blueprintId;
@@ -353,9 +602,7 @@ namespace GameLogic.UI.CircuitBoard
         }
 
         /// <summary>把 <see cref="_board"/> 从 <see cref="_selectedBlueprintId"/> 当前的已保存活跃版本
-        /// 重新加载——<see cref="SelectBlueprint"/>（切换蓝图）与 <see cref="SetPanelOpen"/>（关闭面板后
-        /// 回滚未保存改动）共用，保证 <c>_board</c> 与 <see cref="PrimitiveInventory"/> 账本、与磁盘上
-        /// 真正保存过的内容三者随时一致，不留"仓账本已回滚但板面显示没跟着回滚"的视觉/逻辑鬼影。</summary>
+        /// 重新加载。</summary>
         private void ReloadBoardFromSaved()
         {
             if (string.IsNullOrEmpty(_selectedBlueprintId))
@@ -364,19 +611,10 @@ namespace GameLogic.UI.CircuitBoard
                 return;
             }
             CampaignState state = CampaignSession.Current;
-            BlueprintVersionRecord version = FindActiveVersion(state, _selectedBlueprintId);
+            BlueprintVersionRecord version = BlueprintEditorService.FindActiveVersion(state, _selectedBlueprintId);
             _board = BlueprintCircuitBoard.FromVersion(version);
-            if (version == null && state != null)
-            {
-                // 蓝图记录尚未播种（例如未经 HomeValleyController.Enter 的独立测试场景）——
-                // 仍给出可编辑的默认草稿，不阻断面板本身可用性。
-                _board.ChassisId = null;
-            }
         }
 
-        /// <summary>把 <see cref="_selectedBlueprintId"/> 名下、不属于其最后一次真实保存版本的
-        /// Draft 实例释放回仓。<see cref="SelectBlueprint"/>（切换到别的蓝图前）与
-        /// <see cref="SetPanelOpen"/>（关闭面板）两处调用，逻辑完全一致，抽成共享方法防止漏调一处。</summary>
         private void ReconcileCurrentBlueprintDrafts()
         {
             if (string.IsNullOrEmpty(_selectedBlueprintId))
@@ -384,58 +622,36 @@ namespace GameLogic.UI.CircuitBoard
                 return;
             }
             CampaignState state = CampaignSession.Current;
-            BlueprintVersionRecord savedVersion = FindActiveVersion(state, _selectedBlueprintId);
+            BlueprintVersionRecord savedVersion = BlueprintEditorService.FindActiveVersion(state, _selectedBlueprintId);
             PrimitiveInventory.ReconcileBlueprintDrafts(state, _selectedBlueprintId, savedVersion?.CircuitSlotPartIds);
         }
 
-        private static BlueprintVersionRecord FindActiveVersion(CampaignState state, string blueprintId)
-        {
-            BlueprintRecord record = state?.BlueprintRecords?.FirstOrDefault(b => b.BlueprintId == blueprintId);
-            return record?.Versions?.FirstOrDefault(v => v.Version == record.ActiveVersion);
-        }
-
-        private void SelectSlot(int slot)
-        {
-            _selectedSlot = slot;
-            RefreshAll();
-        }
-
-        private void OnSaveClicked()
+        /// <summary>见 <see cref="_draftSnapshots"/> 类注释：只在草稿签名与已保存版本不同（真的有未保存
+        /// 改动）时才存快照，避免"从未改过就点了一下切换"也占一条记录（无害但没必要）。不存
+        /// <see cref="BlueprintVersionRecord.CircuitSlotPartIds"/>（实例绑定）——那部分已经被
+        /// <see cref="ReconcileCurrentBlueprintDrafts"/> 回收，"恢复草稿"只恢复内容结构，不臆造仓内
+        /// 实例仍然存在。</summary>
+        private void SnapshotCurrentDraftIfDirty()
         {
             if (_board == null || string.IsNullOrEmpty(_selectedBlueprintId))
             {
                 return;
             }
             CampaignState state = CampaignSession.Current;
-            if (state == null)
+            BlueprintVersionRecord saved = BlueprintEditorService.FindActiveVersion(state, _selectedBlueprintId);
+            string currentSignature = _board.ComputeSignature();
+            if (saved != null && saved.CompileSignature == currentSignature)
             {
-                _saveResultLabel.text = "没有活动战役，无法保存。";
                 return;
             }
+            BlueprintVersionRecord snapshot = _board.ToVersion(-1, state?.PlaySeconds ?? 0f);
+            snapshot.CircuitSlotPartIds = null;
+            _draftSnapshots[_selectedBlueprintId] = snapshot;
+        }
 
-            CircuitValidationResult validation = _board.Validate();
-            if (!validation.IsValid)
-            {
-                _saveResultLabel.text = $"保存被拒绝：{validation.Issues.Count} 个问题未解决，见上方列表。";
-                RefreshAll();
-                return;
-            }
-
-            state.BlueprintRecords ??= System.Array.Empty<BlueprintRecord>();
-            BlueprintRecord record = state.BlueprintRecords.FirstOrDefault(b => b.BlueprintId == _selectedBlueprintId);
-            if (record == null)
-            {
-                _saveResultLabel.text = "找不到对应的蓝图记录，无法保存（请先进入归还谷地播种默认蓝图）。";
-                return;
-            }
-
-            int nextVersion = (record.Versions?.Length > 0 ? record.Versions.Max(v => v.Version) : 0) + 1;
-            BlueprintVersionRecord newVersion = _board.ToVersion(nextVersion, state.PlaySeconds);
-            record.Versions = (record.Versions ?? System.Array.Empty<BlueprintVersionRecord>())
-                .Append(newVersion).ToArray();
-            record.ActiveVersion = nextVersion;
-
-            _saveResultLabel.text = $"已保存为版本 {nextVersion}（签名 {newVersion.CompileSignature.Substring(0, System.Math.Min(24, newVersion.CompileSignature.Length))}…）。";
+        private void SelectSlot(int slot)
+        {
+            _selectedSlot = slot;
             RefreshAll();
         }
 
@@ -461,13 +677,12 @@ namespace GameLogic.UI.CircuitBoard
                 return;
             }
 
-            // 面板开关状态是公开字段（HomeValleyController.SetCircuitBoardPanelOpen），不保证只有本类
-            // 自己的 EntryToggleButton 会翻它（未来 ER4-BLP-01 的"家园蓝图"容器很可能从别处调用同一个
-            // 入口）——因此默认蓝图的懒加载必须放在 Update 里而不是只在按钮点击回调里，否则外部直接翻开
-            // 关会看到空白"未选择蓝图"面板（Play Mode 实测发现的真实 bug，已修复）。
+            // 面板开关状态是公开字段，不保证只有本类自己的 EntryToggleButton 会翻它——默认蓝图的懒加载
+            // 必须放在 Update 里而不是只在按钮点击回调里，否则外部直接翻开关会看到空白面板
+            // （ER4-PRIM-02 Play Mode 实测发现的真实 bug，修复方式沿用）。
             if (_board == null)
             {
-                SelectBlueprint(HomeValleyLayout.BlueprintErc003Id);
+                SelectFirstAvailableBlueprint();
             }
 
             _refreshTimer -= Time.unscaledDeltaTime;
@@ -485,7 +700,8 @@ namespace GameLogic.UI.CircuitBoard
             {
                 return;
             }
-            RefreshBlueprintBar();
+            RefreshBlueprintList();
+            RefreshOuterSlots();
             RefreshGrid();
             RefreshBag();
             RefreshEdgeAndFirmware();
@@ -502,18 +718,133 @@ namespace GameLogic.UI.CircuitBoard
             }
             RefreshIssues();
             RefreshPreview();
+            RefreshCostSummary();
         }
 
-        private void RefreshBlueprintBar()
+        private void RefreshBlueprintList()
         {
-            foreach (KeyValuePair<string, Button> kv in _bpButtons)
+            CampaignState state = CampaignSession.Current;
+            List<BlueprintRecord> records = (state?.BlueprintRecords ?? Array.Empty<BlueprintRecord>())
+                .Where(b => b != null)
+                .OrderBy(b => b.Archived)
+                .ThenBy(b => b.BlueprintId, StringComparer.Ordinal)
+                .ToList();
+
+            for (int i = 0; i < MaxBlueprintRows; i++)
             {
-                kv.Value.EnableInClassList("cb-bp-btn-active", kv.Key == _selectedBlueprintId);
+                Button btn = _blueprintRowPool[i];
+                if (i >= records.Count)
+                {
+                    btn.parent.style.display = DisplayStyle.None;
+                    _blueprintIdsByRowIndex[i] = null;
+                    continue;
+                }
+                BlueprintRecord r = records[i];
+                btn.parent.style.display = DisplayStyle.Flex;
+                _blueprintIdsByRowIndex[i] = r.BlueprintId;
+                string archivedTag = r.Archived ? "* " : string.Empty;
+                string versionTag = r.Versions?.Length > 0 ? $"v{r.ActiveVersion}" : "草稿未保存";
+                btn.text = $"{archivedTag}{r.DisplayName}［{versionTag}］";
+                btn.EnableInClassList("cb-bp-list-btn-active", r.BlueprintId == _selectedBlueprintId);
+                btn.EnableInClassList("cb-bp-list-btn-archived", r.Archived);
             }
+
             _activeBlueprintLabel.text = _board == null
                 ? "未选择蓝图"
-                : $"{_selectedBlueprintId}（底盘 {_board.ChassisId ?? "-"}｜主组件 {_board.PrimaryId ?? "-"}）";
+                : $"{_selectedBlueprintId ?? "(未保存新蓝图)"}（底盘 {_board.ChassisId ?? "-"}｜主组件 {_board.PrimaryId ?? "-"}）";
         }
+
+        // ── 外层槽：只展示已解锁选项（ER4-BLP-01 第1条"未解锁不可选"）──────────────
+
+        private void RefreshOuterSlots()
+        {
+            CampaignState state = CampaignSession.Current;
+
+            PopulateDropdown(_chassisDropdown, _chassisIdsByIndex,
+                ChassisCatalog.All.Values, state,
+                _board != null ? (ChassisCatalog.ResolveArchetype(_board.ChassisId) ?? _board.ChassisId) : null,
+                includeEmptyOption: false);
+
+            PopulateDropdown(_primaryDropdown, _primaryIdsByIndex,
+                ComponentCatalog.All.Values.Where(d => d.Category == MechanicalContentCategory.MainComponent), state,
+                _board?.PrimaryId, includeEmptyOption: false);
+
+            PopulateDropdown(_utilityDropdown, _utilityIdsByIndex,
+                ComponentCatalog.All.Values.Where(d => d.Category == MechanicalContentCategory.FunctionComponent), state,
+                _board?.UtilityId, includeEmptyOption: true);
+
+            PopulateDropdown(_structureDropdown, _structureIdsByIndex,
+                ComponentCatalog.All.Values.Where(d => d.Category == MechanicalContentCategory.Structure), state,
+                _board?.StructureId, includeEmptyOption: true);
+
+            RefreshLockedContentHint(state);
+        }
+
+        private static void PopulateDropdown(DropdownField dropdown, List<string> idsByIndex,
+            IEnumerable<MechanicalContentDef> candidates, CampaignState state, string currentSelectedId, bool includeEmptyOption)
+        {
+            idsByIndex.Clear();
+            var choices = new List<string>();
+            if (includeEmptyOption)
+            {
+                choices.Add("（空）");
+                idsByIndex.Add(null);
+            }
+            else if (string.IsNullOrEmpty(currentSelectedId))
+            {
+                // 必填槽（底盘/主组件）尚未真正设过值时，用一个不对应任何合法内容 ID 的占位项忠实展示
+                // "未选择"，不能默认选中列表第一项——那会让下拉框显示一个内容，但 board 字段其实仍是
+                // null，造成"UI 看着选好了、保存却报缺底盘"的视觉与数据不一致。
+                choices.Add("（请选择）");
+                idsByIndex.Add(null);
+            }
+            foreach (MechanicalContentDef def in candidates.OrderBy(d => d.Id, StringComparer.Ordinal))
+            {
+                if (!MechanicalContentUnlock.IsUnlocked(state, def.Id))
+                {
+                    continue;
+                }
+                choices.Add($"{def.DisplayName}（{def.ScrapCost}废料/负载{def.Load}）");
+                idsByIndex.Add(def.Id);
+            }
+            dropdown.choices = choices;
+            if (choices.Count == 0)
+            {
+                dropdown.SetValueWithoutNotify(string.Empty);
+                return;
+            }
+            int selectedIndex = string.IsNullOrEmpty(currentSelectedId) ? 0 : idsByIndex.IndexOf(currentSelectedId);
+            if (selectedIndex < 0)
+            {
+                selectedIndex = 0;
+            }
+            dropdown.SetValueWithoutNotify(choices[selectedIndex]);
+        }
+
+        private void RefreshLockedContentHint(CampaignState state)
+        {
+            var lines = new List<string>();
+            foreach (MechanicalContentDef def in MechanicalContentFacade.All.Values)
+            {
+                if (!IsEquipCategory(def.Category) || MechanicalContentUnlock.IsUnlocked(state, def.Id))
+                {
+                    continue;
+                }
+                ContentUnlockState cls = MechanicalContentUnlock.Classify(state, def.Id);
+                string tag = cls == ContentUnlockState.RetrievedPendingAnalysis ? "已携回待解析" : "未知";
+                lines.Add($"{def.DisplayName}[{tag}]");
+            }
+            _lockedContentHintLabel.text = lines.Count == 0
+                ? "全部外层内容已解锁。"
+                : $"未解锁（不可选）：{string.Join("、", lines.OrderBy(s => s, StringComparer.Ordinal))}";
+        }
+
+        private static bool IsEquipCategory(MechanicalContentCategory category) =>
+            category == MechanicalContentCategory.Chassis
+            || category == MechanicalContentCategory.MainComponent
+            || category == MechanicalContentCategory.FunctionComponent
+            || category == MechanicalContentCategory.Structure
+            || category == MechanicalContentCategory.Firmware;
 
         private void RefreshGrid()
         {
@@ -544,14 +875,10 @@ namespace GameLogic.UI.CircuitBoard
                 }
                 else if (BlueprintCircuitLayout.IsFixedSlot(i))
                 {
-                    // 0 号无合法源/8 号主组件无攻击输出时留空——中性提示，不是校验问题（Validate 不对
-                    // 固定槽本身报 IsolatedChip/NoValidPath 以外的错）。
                     label = $"{i}\n（空）";
                 }
                 else
                 {
-                    // STORY-EXECUTION-CARDS.md ER4-PRIM-02 第2条"显示空槽被动"：未装芯片的自由槽
-                    // 仍要展示其固定槽类型与机械化被动文案（PRIMITIVE-FULL-DEMO-SPEC.md §3.3 第3条）。
                     SlotType slotType = BlueprintCircuitLayout.SlotTypeAt(i);
                     label = $"{i}\n{BlueprintCircuitLayout.SlotTypeDisplayName(slotType)}\n{BlueprintCircuitLayout.SlotPassiveDisplay(slotType)}";
                 }
@@ -567,12 +894,6 @@ namespace GameLogic.UI.CircuitBoard
             _sourceLabel.text = $"0 号源槽（不可拆，由底盘电源固定决定）：{sourceName ?? "-"}";
         }
 
-        /// <summary>ER4-PRIM-03 STORY-EXECUTION-CARDS.md 第2条："正式 UI 显示容量、实例来源、合法目标
-        /// 和所有失败码"——容量=<see cref="_bagCapacityLabel"/>，实例来源见每个下拉选项文本
-        /// （PartId 短形式区分同名芯片，来自解析还是补印看 <see cref="PrimitiveChipRecord.SourceSalvageId"/>
-        /// 是否为空），合法目标由 <see cref="PrimitiveInventory.TryMoveToDraft"/> 内部复用
-        /// <see cref="BlueprintCircuitBoard.TryPlaceChip"/> 校验、失败码通过 <see cref="RunBagOp"/>
-        /// 写入 <see cref="_bagResultLabel"/>。</summary>
         private void RefreshBag()
         {
             CampaignState state = CampaignSession.Current;
@@ -619,18 +940,24 @@ namespace GameLogic.UI.CircuitBoard
 
         private void RefreshEdgeAndFirmware()
         {
+            CampaignState state = CampaignSession.Current;
             if (_board == null)
             {
                 _edgeListLabel.text = string.Empty;
-                _firmware0Field.SetValueWithoutNotify(string.Empty);
-                _firmware1Field.SetValueWithoutNotify(string.Empty);
+                _firmware0Dropdown.choices = new List<string>();
+                _firmware1Dropdown.choices = new List<string>();
+                _firmware0Dropdown.SetValueWithoutNotify(string.Empty);
+                _firmware1Dropdown.SetValueWithoutNotify(string.Empty);
                 return;
             }
             _edgeListLabel.text = _board.Edges.Count == 0
                 ? "无导线"
                 : string.Join(", ", _board.Edges.OrderBy(e => e.From).ThenBy(e => e.To).Select(e => $"{e.From}→{e.To}"));
-            _firmware0Field.SetValueWithoutNotify(_board.FirmwareSlots[0] ?? string.Empty);
-            _firmware1Field.SetValueWithoutNotify(_board.FirmwareSlots[1] ?? string.Empty);
+
+            PopulateDropdown(_firmware0Dropdown, _firmware0IdsByIndex, FirmwareCatalog.All.Values, state,
+                _board.FirmwareSlots[0], includeEmptyOption: true);
+            PopulateDropdown(_firmware1Dropdown, _firmware1IdsByIndex, FirmwareCatalog.All.Values, state,
+                _board.FirmwareSlots[1], includeEmptyOption: true);
         }
 
         private void RefreshHistoryLabel()
@@ -695,6 +1022,54 @@ namespace GameLogic.UI.CircuitBoard
             }
         }
 
+        /// <summary>STORY-EXECUTION-CARDS.md ER4-BLP-01 第2条："每次改槽重算废料成本、负载已用/上限、
+        /// 伤害、能耗、带宽、热量、派系标签、反应和敌方对策"——伤害已经在 <see cref="RefreshPreview"/>，
+        /// 其余维度集中在本行。技术数据费用预览用 <see cref="BlueprintEditorService.ReactionTechDataCost"/>
+        /// + <see cref="BlueprintEditorService.IsReactionCharged"/> 判断"这次保存是否真的要扣钱"，与
+        /// <see cref="DoSave"/> 实际保存时走的同一对静态方法，不会出现预览说要扣费、实际保存不扣（或反之）
+        /// 的不一致。</summary>
+        private void RefreshCostSummary()
+        {
+            if (_board == null)
+            {
+                _costSummaryLabel.text = string.Empty;
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            int scrap = _board.ComputeScrapCost();
+            _board.TryComputeLoadPreview(out int load, out int? capacity);
+            int bandwidth = _board.ComputeBandwidthCost();
+            float heat = _board.ComputeHeatBudget();
+            string[] factions = _board.ComputeFactionTags();
+            string reactionId = BlueprintCircuitCompiler.DetectReactionId(_board);
+
+            string factionText = factions.Length == 0 ? "无" : string.Join("+", factions);
+            string crossFactionNote = factions.Length >= 2 ? "（跨派系）" : string.Empty;
+
+            string reactionNote;
+            string counterNote;
+            if (reactionId == null)
+            {
+                reactionNote = "无具名反应";
+                counterNote = "无（通用组合无固定敌方对策）";
+            }
+            else
+            {
+                MechanicalReactionCatalog.TryGet(reactionId, out MechanicalContentDef reactionDef);
+                int cost = BlueprintEditorService.ReactionTechDataCost(reactionId);
+                bool charged = BlueprintEditorService.IsReactionCharged(state, reactionId);
+                reactionNote = charged
+                    ? $"{reactionDef?.DisplayName}（本战役已扣过技术数据，再次保存免费）"
+                    : $"{reactionDef?.DisplayName}（首次保存将扣技术数据 {cost}，当前 {state?.TechData ?? 0}）";
+                counterNote = reactionDef?.ValuesSummary ?? "-";
+            }
+
+            _costSummaryLabel.text =
+                $"废料成本 {scrap}｜负载 {load}/{(capacity.HasValue ? capacity.Value.ToString() : "-")}｜带宽 +{bandwidth}｜热量 {heat:F0}\n" +
+                $"派系 {factionText}{crossFactionNote}｜反应：{reactionNote}\n" +
+                $"敌方对策：{counterNote}";
+        }
+
         private void OnDestroy()
         {
             if (_visualTree != null)
@@ -711,6 +1086,11 @@ namespace GameLogic.UI.CircuitBoard
             {
                 GameModule.Resource.UnloadAsset(_pathRowTemplate);
                 _pathRowTemplate = null;
+            }
+            if (_blueprintRowTemplate != null)
+            {
+                GameModule.Resource.UnloadAsset(_blueprintRowTemplate);
+                _blueprintRowTemplate = null;
             }
             if (_panelSettings != null)
             {

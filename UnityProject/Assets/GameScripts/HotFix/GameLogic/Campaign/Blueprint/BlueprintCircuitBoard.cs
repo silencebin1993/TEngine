@@ -213,8 +213,8 @@ namespace GameLogic.Campaign.Blueprint
                 ScrapCost = ComputeScrapCost(),
                 PowerCost = 0,
                 BandwidthCost = ComputeBandwidthCost(),
-                HeatBudget = 0f,
-                FactionTags = Array.Empty<string>(),
+                HeatBudget = ComputeHeatBudget(),
+                FactionTags = ComputeFactionTags(),
                 CircuitSlotTypes = BlueprintCircuitLayout.BuildSlotTypes(),
                 CircuitSlotContentIds = (string[])SlotContentIds.Clone(),
                 CircuitSlotPartIds = (string[])SlotPartIds.Clone(),
@@ -253,6 +253,107 @@ namespace GameLogic.Campaign.Blueprint
             }
             CaptureUndo();
             SlotContentIds[BlueprintCircuitLayout.SourceSlot] = contentId;
+            CommitUndo();
+            return CircuitOpResult.Ok();
+        }
+
+        // ── 外层槽：底盘/主组件/功能/结构/固件（ER4-BLP-01）────────────────────────
+        // PRIMITIVE-FULL-DEMO-SPEC.md §2："蓝图外层仍为 1 底盘、1 主组件、0～1 功能、0～1 结构和最多
+        // 2 个有序固件"。以下五个方法是玩家在正式蓝图编辑器里改这些外层槽的唯一入口——校验已解锁
+        // （<see cref="MechanicalContentUnlock"/>）、槽位类别匹配（不能把结构塞进主组件槽等"错槽"）、
+        // 内容已知；不合法一律 Fail 并保留草稿，不修改任何字段。底盘/主组件变化后必须
+        // <see cref="SyncFixedSlots"/>（0/8 固定槽随之联动）。
+
+        public CircuitOpResult TrySetChassis(CampaignState state, string chassisId)
+        {
+            if (string.IsNullOrEmpty(chassisId))
+            {
+                return CircuitOpResult.Fail("chassis_required", "底盘不能为空。");
+            }
+            string archetype = ChassisCatalog.ResolveArchetype(chassisId) ?? chassisId;
+            if (!ChassisCatalog.TryGet(archetype, out MechanicalContentDef def))
+            {
+                return CircuitOpResult.Fail("unknown_chassis", $"'{chassisId}' 不是已知底盘。");
+            }
+            if (!MechanicalContentUnlock.IsUnlocked(state, archetype))
+            {
+                return CircuitOpResult.Fail("chassis_locked", $"底盘“{def.DisplayName}”尚未解锁：{def.LockedHintText}");
+            }
+            CaptureUndo();
+            ChassisId = chassisId;
+            CommitUndo();
+            SyncFixedSlots();
+            return CircuitOpResult.Ok();
+        }
+
+        public CircuitOpResult TrySetPrimary(CampaignState state, string primaryId)
+        {
+            if (string.IsNullOrEmpty(primaryId))
+            {
+                return CircuitOpResult.Fail("primary_required", "主组件不能为空。");
+            }
+            if (!ComponentCatalog.TryGet(primaryId, out MechanicalContentDef def)
+                || def.Category != MechanicalContentCategory.MainComponent)
+            {
+                return CircuitOpResult.Fail("wrong_slot", $"'{primaryId}' 不是合法的主组件（错槽）。");
+            }
+            if (!MechanicalContentUnlock.IsUnlocked(state, primaryId))
+            {
+                return CircuitOpResult.Fail("primary_locked", $"主组件“{def.DisplayName}”尚未解锁：{def.LockedHintText}");
+            }
+            CaptureUndo();
+            PrimaryId = primaryId;
+            CommitUndo();
+            SyncFixedSlots();
+            return CircuitOpResult.Ok();
+        }
+
+        /// <summary>功能组件 0～1 个；<paramref name="utilityId"/> 传 null/空即卸下（卸下不需要解锁校验）。</summary>
+        public CircuitOpResult TrySetUtility(CampaignState state, string utilityId)
+        {
+            if (string.IsNullOrEmpty(utilityId))
+            {
+                CaptureUndo();
+                UtilityId = null;
+                CommitUndo();
+                return CircuitOpResult.Ok();
+            }
+            if (!ComponentCatalog.TryGet(utilityId, out MechanicalContentDef def)
+                || def.Category != MechanicalContentCategory.FunctionComponent)
+            {
+                return CircuitOpResult.Fail("wrong_slot", $"'{utilityId}' 不是合法的功能组件（错槽）。");
+            }
+            if (!MechanicalContentUnlock.IsUnlocked(state, utilityId))
+            {
+                return CircuitOpResult.Fail("utility_locked", $"功能组件“{def.DisplayName}”尚未解锁：{def.LockedHintText}");
+            }
+            CaptureUndo();
+            UtilityId = utilityId;
+            CommitUndo();
+            return CircuitOpResult.Ok();
+        }
+
+        /// <summary>结构 0～1 个；<paramref name="structureId"/> 传 null/空即卸下。</summary>
+        public CircuitOpResult TrySetStructure(CampaignState state, string structureId)
+        {
+            if (string.IsNullOrEmpty(structureId))
+            {
+                CaptureUndo();
+                StructureId = null;
+                CommitUndo();
+                return CircuitOpResult.Ok();
+            }
+            if (!ComponentCatalog.TryGet(structureId, out MechanicalContentDef def)
+                || def.Category != MechanicalContentCategory.Structure)
+            {
+                return CircuitOpResult.Fail("wrong_slot", $"'{structureId}' 不是合法的结构（错槽）。");
+            }
+            if (!MechanicalContentUnlock.IsUnlocked(state, structureId))
+            {
+                return CircuitOpResult.Fail("structure_locked", $"结构“{def.DisplayName}”尚未解锁：{def.LockedHintText}");
+            }
+            CaptureUndo();
+            StructureId = structureId;
             CommitUndo();
             return CircuitOpResult.Ok();
         }
@@ -362,15 +463,24 @@ namespace GameLogic.Campaign.Blueprint
 
         // ── 固件 ─────────────────────────────────────────────────────────────────
 
-        public CircuitOpResult TrySetFirmware(int index, string firmwareId)
+        public CircuitOpResult TrySetFirmware(CampaignState state, int index, string firmwareId)
         {
             if (index != 0 && index != 1)
             {
                 return CircuitOpResult.Fail("firmware_index_out_of_range", "固件槽只有 0/1 两个。");
             }
+            if (string.IsNullOrEmpty(firmwareId))
+            {
+                // UI 下拉框的"（空）"选项落到这里——语义等同显式调用 TryClearFirmware，不当非法输入报错。
+                return TryClearFirmware(index);
+            }
             if (!FirmwareCatalog.TryGet(firmwareId, out MechanicalContentDef def) || def.LegacyFacadeId == null)
             {
                 return CircuitOpResult.Fail("firmware_unknown", $"'{firmwareId}' 不是已知固件或无可编译等价实现。");
+            }
+            if (!MechanicalContentUnlock.IsUnlocked(state, firmwareId))
+            {
+                return CircuitOpResult.Fail("firmware_locked", $"固件“{def.DisplayName}”尚未解锁：{def.LockedHintText}");
             }
             CaptureUndo();
             FirmwareSlots[index] = firmwareId;
@@ -578,6 +688,10 @@ namespace GameLogic.Campaign.Blueprint
             }
         }
 
+        /// <summary>公开版本供 UI 摘要实时展示"负载已用/上限"，与 <see cref="Validate"/> 内部判定同一
+        /// 计算，不另起一套数字。</summary>
+        public bool TryComputeLoadPreview(out int totalLoad, out int? capacity) => TryComputeLoad(out totalLoad, out capacity);
+
         private bool TryComputeLoad(out int totalLoad, out int? capacity)
         {
             totalLoad = 0;
@@ -598,7 +712,8 @@ namespace GameLogic.Campaign.Blueprint
             return MechanicalContentFacade.TryGet(contentId, out MechanicalContentDef def) ? def.Load : 0;
         }
 
-        private int ComputeScrapCost()
+        /// <summary>公开供 UI 摘要实时展示废料成本，与 <see cref="ToVersion"/> 落盘同一计算。</summary>
+        public int ComputeScrapCost()
         {
             int cost = 0;
             string archetype = ChassisCatalog.ResolveArchetype(ChassisId) ?? ChassisId;
@@ -617,11 +732,74 @@ namespace GameLogic.Campaign.Blueprint
             return MechanicalContentFacade.TryGet(contentId, out MechanicalContentDef def) ? def.ScrapCost : 0;
         }
 
-        private int ComputeBandwidthCost()
+        /// <summary>公开供 UI 摘要实时展示带宽成本，与 <see cref="ToVersion"/> 落盘同一计算。</summary>
+        public int ComputeBandwidthCost()
         {
             // DEMO-CONTENT-LOCK.md §2.4："信号中继...机体带宽需求+1"——目前唯一有明确带宽数字的组件。
             return StructureId == ComponentCatalog.StructRelayId ? 1 : 0;
         }
+
+        /// <summary>DEMO-CONTENT-LOCK.md §2.4/§5 字面数字："一般主武器基础伤害+15%、额外热量+15"；
+        /// "与重炮组合时改为熔穿过载：……在重炮基础热量40上再加25，不再叠加一般+15热量"。公开方法供 UI
+        /// 实时预览（不落盘也复算），<see cref="ToVersion"/> 落盘同一结果——不能各算一套。</summary>
+        public float ComputeHeatBudget()
+        {
+            bool hasCannon = PrimaryId == ComponentCatalog.CompCannonId;
+            bool hasOverload = FirmwareSlots[0] == FirmwareCatalog.FwOverloadId || FirmwareSlots[1] == FirmwareCatalog.FwOverloadId;
+            if (hasCannon && hasOverload)
+            {
+                return 65f; // 熔穿过载：基础40 + 25
+            }
+            if (hasCannon)
+            {
+                return 40f;
+            }
+            if (hasOverload)
+            {
+                return 15f; // 一般主武器额外热量+15
+            }
+            return 0f;
+        }
+
+        /// <summary>装配来源派系映射：基础蓝图库＝"归还"，破碎都市＝"静默"，铸造前哨（含可选缓存）＝"铸造"。
+        /// 两个具名跨派系反应（标记跳转＝归还+静默，熔穿过载＝归还+铸造）天然对应这里产出 2 个不同标签
+        /// 的场景——"跨派系"不是独立字段，是 <c>FactionTags.Length &gt;= 2</c> 这一结果。公开方法供 UI
+        /// 实时预览，<see cref="ToVersion"/> 落盘同一结果。</summary>
+        public string[] ComputeFactionTags()
+        {
+            var tags = new List<string>();
+            void AddFrom(string contentId)
+            {
+                if (string.IsNullOrEmpty(contentId) || !MechanicalContentFacade.TryGet(contentId, out MechanicalContentDef def))
+                {
+                    return;
+                }
+                string tag = FactionTagFor(def.Source);
+                if (tag != null && !tags.Contains(tag))
+                {
+                    tags.Add(tag);
+                }
+            }
+
+            string chassisArchetype = ChassisCatalog.ResolveArchetype(ChassisId) ?? ChassisId;
+            AddFrom(chassisArchetype);
+            AddFrom(PrimaryId);
+            AddFrom(UtilityId);
+            AddFrom(StructureId);
+            AddFrom(FirmwareSlots[0]);
+            AddFrom(FirmwareSlots[1]);
+            tags.Sort(StringComparer.Ordinal);
+            return tags.ToArray();
+        }
+
+        private static string FactionTagFor(MechanicalContentSource source) => source switch
+        {
+            MechanicalContentSource.BaseBlueprint => "归还",
+            MechanicalContentSource.SilentRuinsSalvage => "静默",
+            MechanicalContentSource.FoundryMandatory => "铸造",
+            MechanicalContentSource.FoundryOptionalCache => "铸造",
+            _ => null,
+        };
 
         // ── 签名 ─────────────────────────────────────────────────────────────────
 

@@ -159,9 +159,11 @@ namespace GameLogic.Campaign.Blueprint
         }
 
         /// <summary>DEMO-CONTENT-LOCK.md §3 两条具名反应的纯函数判定（<see cref="MechanicalReactionCatalog"/>，
-        /// ER4-CONTENT-01 已实现）。找不到匹配时返回中性说明，不是错误——满足 STORY-EXECUTION-CARDS.md
-        /// ER4-PRIM-02 第2条"不存在具名反应的合法组合必须有通用预览，不提示缺反应"。</summary>
-        private static string ResolveReactionHint(BlueprintCircuitBoard board)
+        /// ER4-CONTENT-01 已实现）——单一判定入口，供预览（<see cref="ResolveReactionHint"/>）与保存期扣费
+        /// （<c>BlueprintEditorService.TrySave</c>）共用同一结果（STORY-EXECUTION-CARDS.md ER4-BLP-01
+        /// 第2条"预览与实际编译共用同一结果"）。返回 null 表示当前组合未触发任何具名反应（合法状态，不是
+        /// 错误——合法组合仍按通用正交组合结算）。</summary>
+        public static string DetectReactionId(BlueprintCircuitBoard board)
         {
             var mainComponentIds = new[] { board.PrimaryId }.Where(id => !string.IsNullOrEmpty(id)).ToList();
             var functionComponentIds = new[] { board.UtilityId }.Where(id => !string.IsNullOrEmpty(id)).ToList();
@@ -169,13 +171,23 @@ namespace GameLogic.Campaign.Blueprint
 
             if (MechanicalReactionCatalog.DetectMarkJump(mainComponentIds, functionComponentIds, firmwareIds))
             {
-                MechanicalReactionCatalog.TryGet(MechanicalReactionCatalog.ReactionMarkJumpId, out MechanicalContentDef def);
-                return $"触发具名反应：{def?.DisplayName ?? "标记跳转"}。";
+                return MechanicalReactionCatalog.ReactionMarkJumpId;
             }
             if (MechanicalReactionCatalog.DetectMeltOverload(mainComponentIds, firmwareIds))
             {
-                MechanicalReactionCatalog.TryGet(MechanicalReactionCatalog.ReactionMeltOverloadId, out MechanicalContentDef def);
-                return $"触发具名反应：{def?.DisplayName ?? "熔穿过载"}。";
+                return MechanicalReactionCatalog.ReactionMeltOverloadId;
+            }
+            return null;
+        }
+
+        /// <summary>不存在具名反应时返回中性说明，不是错误——满足 STORY-EXECUTION-CARDS.md ER4-PRIM-02
+        /// 第2条"不存在具名反应的合法组合必须有通用预览，不提示缺反应"。</summary>
+        private static string ResolveReactionHint(BlueprintCircuitBoard board)
+        {
+            string reactionId = DetectReactionId(board);
+            if (reactionId != null && MechanicalReactionCatalog.TryGet(reactionId, out MechanicalContentDef def))
+            {
+                return $"触发具名反应：{def.DisplayName}。";
             }
             return "无具名反应（通用预览已生成，效果按普通正交组合结算）。";
         }
