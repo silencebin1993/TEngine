@@ -126,9 +126,16 @@ namespace GameLogic.Campaign.Regions
             return Mathf.Max(0f, armorReductionFraction - FracturedCityLayout.OverloadArmorPierceBonus);
         }
 
-        /// <summary>被动散热——由 <see cref="FracturedCityController.Update"/> 每帧调用一次（机器数量
-        /// 个位数，O(1) 量级）。只处理有热量在身的机器，避免每帧对全部机器做一次
-        /// <see cref="MachineLoadoutRegistry.Resolve"/>。</summary>
+        /// <summary>被动散热——由 <see cref="FracturedCityController.Update"/>/<see cref="FoundryOutpostController.Update"/>
+        /// 每帧各自调用一次（机器数量个位数，O(1) 量级）。只处理有热量在身的机器，避免每帧对全部
+        /// 机器做一次 <see cref="MachineLoadoutRegistry.Resolve"/>。
+        ///
+        /// ── ER6-FOUNDRY-01 修复的真实缺陷 ──
+        /// 本方法原本额外要求 <c>m.RegionId == FracturedCityLayout.RegionId</c>——ER6-REACT-02 落地时
+        /// 铸造重炮唯一可战斗区域只有破碎都市，这条过滤形同"只处理有热量的机器"的等价写法；铸造前哨
+        /// 外围接入重炮战斗（护甲机穿甲）后，这条过滤会让 foundry_outpost 里积热的机器永远不散热
+        /// （本方法从两区域各自的 Update 调用，但过滤条件只认一个区域），已移除该区域限制——热量是
+        /// 机体自身属性，不该因为"当前站在哪个区域"而冻结，回家园后继续散热同样是正确行为。</summary>
         public static void TickHeatDissipation(CampaignState state, float dt)
         {
             if (state == null || dt <= 0f)
@@ -137,7 +144,7 @@ namespace GameLogic.Campaign.Regions
             }
             foreach (MachineRecord m in MachineRegistry.AllRecords)
             {
-                if (m == null || !m.IsAlive || m.RegionId != FracturedCityLayout.RegionId || m.WeaponHeat <= 0f)
+                if (m == null || !m.IsAlive || m.WeaponHeat <= 0f)
                 {
                     continue;
                 }

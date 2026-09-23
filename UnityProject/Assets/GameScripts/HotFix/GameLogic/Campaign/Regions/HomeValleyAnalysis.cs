@@ -43,13 +43,19 @@ namespace GameLogic.Campaign.Regions
         {
             public readonly string UnlockContentId;
             public readonly int TechDataYield;
+            /// <summary>ER6-FOUNDRY-01：DEMO-CONTENT-LOCK.md §2.5"首次解析三种可选铸造模块每种+5，
+            /// 重复模块只转为+2"——<see cref="UnlockContentId"/> 在本次解析完成前已经在
+            /// <see cref="CampaignState.UnlockedContentIds"/> 里时改发这个值。默认与
+            /// <see cref="TechDataYield"/> 相同（关键物两条旧表项没有"重复"语义，不受影响）。</summary>
+            public readonly int RepeatTechDataYield;
             public readonly float Duration;
             public readonly string DisplayName;
 
-            public YieldInfo(string unlockContentId, int techDataYield, float duration, string displayName)
+            public YieldInfo(string unlockContentId, int techDataYield, float duration, string displayName, int? repeatTechDataYield = null)
             {
                 UnlockContentId = unlockContentId;
                 TechDataYield = techDataYield;
+                RepeatTechDataYield = repeatTechDataYield ?? techDataYield;
                 Duration = duration;
                 DisplayName = displayName;
             }
@@ -57,9 +63,8 @@ namespace GameLogic.Campaign.Regions
 
         /// <summary>解析目标唯一权威表——键是 <see cref="RegionQuestItemRecord.ContentId"/>（战场原始模块
         /// 标识），值是解析完成后真正解锁的可装配内容 ID（进 <see cref="CampaignState.UnlockedContentIds"/>）
-        /// + 技术数据产出 + 时长。ER6-FOUNDRY-01 铸造重炮掉落落地后应在此追加
-        /// <c>quest_cannon_module → (ComponentCatalog.CompCannonId, 15, ...)</c> 一行，不需要改动本类
-        /// 其余逻辑。</summary>
+        /// + 技术数据产出 + 时长。ER6-FOUNDRY-01 起补齐铸造重炮（关键物，同"静默标记器"先例）与三种
+        /// 可选技术缓存（"首次+5/重复+2"，见 <see cref="YieldInfo.RepeatTechDataYield"/>）。</summary>
         public static readonly IReadOnlyDictionary<string, YieldInfo> YieldTable = new Dictionary<string, YieldInfo>
         {
             // DEMO-CONTENT-LOCK.md §2.5："解析静默标记器 +8"。
@@ -68,11 +73,22 @@ namespace GameLogic.Campaign.Regions
             // DEMO-CONTENT-LOCK.md §2.5："解析标记跳转协议数据盒 +12"。
             [FracturedCityLayout.ProtocolDataboxContentId] =
                 new YieldInfo(FirmwareCatalog.FwMarkTagId, 12, 15f, "标记跳转固件"),
+            // DEMO-CONTENT-LOCK.md §2.5："解析铸造重炮 +15"。
+            [FoundryOutpostLayout.CannonModuleContentId] =
+                new YieldInfo(ComponentCatalog.CompCannonId, 15, 20f, "铸造重炮模块"),
+            // DEMO-CONTENT-LOCK.md §2.5："首次解析三种可选铸造模块每种+5，重复模块只转为+2"。
+            [FoundryOutpostLayout.ArmorCacheContentId] =
+                new YieldInfo(ComponentCatalog.StructArmorId, 5, 8f, "重甲技术缓存", repeatTechDataYield: 2),
+            [FoundryOutpostLayout.HeatSinkCacheContentId] =
+                new YieldInfo(ComponentCatalog.StructFinId, 5, 8f, "散热鳍技术缓存", repeatTechDataYield: 2),
+            [FoundryOutpostLayout.ArmorPierceCacheContentId] =
+                new YieldInfo(FirmwareCatalog.FwArmorPierceId, 5, 8f, "装甲击穿技术缓存", repeatTechDataYield: 2),
         };
 
-        /// <summary>Demo 关键物总数个位数（当前 2 件，未来 ER6-FOUNDRY-01 追加 1 件），队列上限给一点
-        /// 余量即可，不需要 <see cref="Primitive.PrimitiveCraftStation.MaxActiveQueueItems"/> 那种量级。</summary>
-        public const int MaxActiveQueueItems = 5;
+        /// <summary>Demo 关键物+可选模块总数个位数（2 件关键物 + ER6-FOUNDRY-01 追加的重炮关键物与
+        /// 三种可选技术缓存共 4 件，合计 6 种 contentId），队列上限给一点余量即可，不需要
+        /// <see cref="Primitive.PrimitiveCraftStation.MaxActiveQueueItems"/> 那种量级。</summary>
+        public const int MaxActiveQueueItems = 8;
 
         public readonly struct AnalysisOpResult
         {
@@ -307,15 +323,21 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
+            // ER6-FOUNDRY-01："首次解析三种可选铸造模块每种+5，重复模块只转为+2"——在追加解锁之前
+            // 先查一次是否已经解锁过，决定用哪个数值（关键物两条旧表项 RepeatTechDataYield==TechDataYield，
+            // 行为不变）。当前 foundry_outpost 设计每种可选缓存只有一份实例，这条分支结构正确但暂无
+            // 真实触发路径（同 AC-JRN-014 一类"结构就绪、尚不可达"先例，见证据文档）。
             state.UnlockedContentIds ??= Array.Empty<string>();
-            if (Array.IndexOf(state.UnlockedContentIds, info.UnlockContentId) < 0)
+            bool alreadyUnlocked = Array.IndexOf(state.UnlockedContentIds, info.UnlockContentId) >= 0;
+            int techYield = alreadyUnlocked ? info.RepeatTechDataYield : info.TechDataYield;
+            if (!alreadyUnlocked)
             {
                 state.UnlockedContentIds = state.UnlockedContentIds.Append(info.UnlockContentId).ToArray();
             }
 
             // 技术数据：生产型事务，Commit 那一刻才真正 +N（同 PrimitiveCraftStation 拆解分支模式）。
             string txId = item.QueueItemId + ":techdata";
-            CampaignEconomyLedger.ProposeProduce(state, txId, item.QueueItemId, CampaignEconomyLedger.ResourceTechData, info.TechDataYield);
+            CampaignEconomyLedger.ProposeProduce(state, txId, item.QueueItemId, CampaignEconomyLedger.ResourceTechData, techYield);
             CampaignEconomyLedger.LedgerResult reserve = CampaignEconomyLedger.Reserve(state, txId);
             if (reserve.Success)
             {
@@ -325,7 +347,8 @@ namespace GameLogic.Campaign.Regions
 
             item.State = AnalysisQueueState.Completed;
             item.BlockedReason = null;
-            Log.Info($"[HomeValleyAnalysis] {info.DisplayName} 解析完成：解锁 {info.UnlockContentId}，技术数据 +{info.TechDataYield}。");
+            Log.Info($"[HomeValleyAnalysis] {info.DisplayName} 解析完成：解锁 {info.UnlockContentId}，技术数据 +{techYield}" +
+                (alreadyUnlocked ? "（重复模块折扣）" : string.Empty) + "。");
         }
     }
 }

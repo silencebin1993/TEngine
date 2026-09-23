@@ -24,6 +24,9 @@ namespace GameLogic.Stage
         /// 一样由 GameRoot 直接持有并驱动。两者互斥（同一时刻只有一个 IsActive——切场时调用方必须先
         /// Exit 旧区域再 Enter 新区域，本类不做自动互斥保护，遵循既有"调用方负责生命周期顺序"约定）。</summary>
         private static FracturedCityController _fracturedCity;
+        /// <summary>ER6-FOUNDRY-01：铸造前哨外围，与 <see cref="_fracturedCity"/> 同一持有方式，三者
+        /// （含 <see cref="_homeValley"/>）互斥不能同时 Active，调用方负责生命周期顺序。</summary>
+        private static FoundryOutpostController _foundryOutpost;
 
         public static StageDirector Director => _director;
 
@@ -39,12 +42,16 @@ namespace GameLogic.Stage
         /// <summary>ER5-REGION-01：当前破碎都市控制器实例（可能为 null——尚未进入过）。</summary>
         public static FracturedCityController FracturedCity => _fracturedCity;
 
+        /// <summary>ER6-FOUNDRY-01：当前铸造前哨外围控制器实例（可能为 null——尚未进入过）。</summary>
+        public static FoundryOutpostController FoundryOutpost => _foundryOutpost;
+
         /// <summary>ER2-INPUT-01 HUD：不管当前活跃的是细胞阶段还是归还谷地，统一问"世界是否暂停"。
         /// 两边各自有独立的 _paused 字段（见各自类注释），这里只做只读桥接，不新造第三份状态。</summary>
         public static bool IsWorldPaused =>
             (CellStage != null && CellStage.IsRunning && CellStage.Paused) ||
             (_homeValley != null && _homeValley.IsActive && _homeValley.IsPaused) ||
-            (_fracturedCity != null && _fracturedCity.IsActive && _fracturedCity.IsPaused);
+            (_fracturedCity != null && _fracturedCity.IsActive && _fracturedCity.IsPaused) ||
+            (_foundryOutpost != null && _foundryOutpost.IsActive && _foundryOutpost.IsPaused);
 
         /// <summary>HUD 暂停按钮的统一入口（不经过 InputRouter/Space，按钮点击直接调）。</summary>
         public static void ToggleWorldPause()
@@ -60,6 +67,10 @@ namespace GameLogic.Stage
             else if (_fracturedCity != null && _fracturedCity.IsActive)
             {
                 _fracturedCity.SetPaused(!_fracturedCity.IsPaused);
+            }
+            else if (_foundryOutpost != null && _foundryOutpost.IsActive)
+            {
+                _foundryOutpost.SetPaused(!_foundryOutpost.IsPaused);
             }
         }
 
@@ -161,6 +172,41 @@ namespace GameLogic.Stage
             _fracturedCity?.Exit(evacuateSuccess);
         }
 
+        /// <summary>ER6-FOUNDRY-01：最小可用切场入口——与 <see cref="StartFracturedCity"/> 同一定位
+        /// （远征准备/往返事务的正式编排属于 ER6-REGION-01 对 <see cref="ExpeditionDepartureService"/>
+        /// 的扩展）。要求区域已 <see cref="Campaign.RegionState.Available"/>（跨派系蓝图已保存+ERC-003
+        /// 已改造，<see cref="FoundryOutpostRegion.RecomputeUnlock"/> 真实判定）。</summary>
+        public static void StartFoundryOutpost(System.Collections.Generic.IEnumerable<int> expeditionLogicIds)
+        {
+            if (!_started)
+            {
+                Startup();
+            }
+            _foundryOutpost ??= new FoundryOutpostController();
+            _foundryOutpost.Enter(expeditionLogicIds, resume: false);
+        }
+
+        /// <summary>读档/继续战役时若上次保存点仍在铸造前哨外围，用同一批机器重新进入。</summary>
+        public static void ResumeFoundryOutpost()
+        {
+            if (!_started)
+            {
+                Startup();
+            }
+            CampaignState state = CampaignSession.Current;
+            var alreadyThere = state?.MachineRecords?
+                .Where(m => m.RegionId == FoundryOutpostLayout.RegionId && m.IsAlive)
+                .Select(m => m.LogicId) ?? System.Array.Empty<int>();
+            _foundryOutpost ??= new FoundryOutpostController();
+            _foundryOutpost.Enter(alreadyThere, resume: true);
+        }
+
+        /// <summary>铸造前哨外围撤离/暂离出口——与 <see cref="ExitFracturedCity"/> 同一定位。</summary>
+        public static void ExitFoundryOutpost(bool evacuateSuccess)
+        {
+            _foundryOutpost?.Exit(evacuateSuccess);
+        }
+
         /// <summary>结束当前局，回到无阶段状态。ER2-BOOT-01：唯一的"返回菜单"出口——不管调用方是
         /// 玩家主动退出、阶段自然结束（死亡/通关）还是调试/测试代码，一律重新打开正式主菜单，
         /// 不停在旧运行中枢首页或黑屏。ER2-SCENE-01 补充：同时收摊归还谷地并显式
@@ -169,6 +215,7 @@ namespace GameLogic.Stage
         {
             _homeValley?.Exit();
             _fracturedCity?.Exit(evacuateSuccess: false);
+            _foundryOutpost?.Exit(evacuateSuccess: false);
             _director?.EndCurrent();
             CampaignSession.Clear();
             // ER2-INPUT-01：回菜单复位战略速度，不让上一局选的倍率粘到下一局（同 InputRouter.Reset 纪律）。
@@ -214,6 +261,7 @@ namespace GameLogic.Stage
             _director.Update(dt);
             _homeValley?.Update(dt);
             _fracturedCity?.Update(dt);
+            _foundryOutpost?.Update(dt);
 
             // 阶段自然结束（死亡或通关）时收摊并回主菜单。
             // 由 GameRoot 判断而不是阶段自己切换，保证阶段不需要知道 director。

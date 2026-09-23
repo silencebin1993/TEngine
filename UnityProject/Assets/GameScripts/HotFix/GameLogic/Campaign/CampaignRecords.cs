@@ -499,6 +499,11 @@ namespace GameLogic.Campaign
         /// <summary>周期性节奏计时器，语义按 <see cref="EnemyTypeId"/> 区分（静默侦察机＝标记冷却，
         /// DEMO-CONTENT-LOCK.md §4.1"每8秒标记"）。</summary>
         public float CycleCooldownRemaining;
+        /// <summary>ER6-FOUNDRY-01：第二个通用计时槽，语义同样按 <see cref="EnemyTypeId"/> 区分（同
+        /// <see cref="CycleCooldownRemaining"/> 先例，不为每个敌类型各开一个专属字段）——铸造步进炮＝
+        /// 瞄准剩余秒数（&gt;0 表示已进入"1秒瞄准线"预警阶段，归零时才真正开火，DEMO-CONTENT-LOCK.md
+        /// §5"1秒瞄准线"）；其余敌类型恒为 0，不承载意义。</summary>
+        public float SecondaryTimer;
     }
 
     /// <summary>ER5-REGION-01 STORY-EXECUTION-CARDS.md 第2条"货物 Lost/Recovered 写 RegionRecord"
