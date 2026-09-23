@@ -47,6 +47,12 @@ namespace GameLogic.Campaign.Regions
             public int Amount;
             public string SalvageInstanceId;
             public Vector2 SourcePosition;
+            /// <summary>ER5-INT-01：原地面物所属区域——storage-full/DropHaul 把物品放回地面时必须落回
+            /// 这里而不是硬编码归还谷地。补在本 Story 是因为它是第一个真正从破碎都市调用
+            /// <see cref="CommitHaul"/> 的调用方（此前 <see cref="TryReserveHaul"/>/<see cref="CommitHaul"/>
+            /// 只服务归还谷地自己的残骸拆解掉落，两者恰好同一区域，这个字段缺失从未被真实触发过）；
+            /// 不补的话，破碎都市开箱后仓满重试会把地面物悄悄"传送"到归还谷地，在当前区域再也找不到。</summary>
+            public string RegionId;
         }
 
         /// <summary>家园存量总容量：核心缓存恒定 <see cref="HomeValleyLayout.CoreCacheCapacity"/>；
@@ -146,6 +152,7 @@ namespace GameLogic.Campaign.Regions
                 Amount = item.Amount,
                 SalvageInstanceId = item.SalvageInstanceId,
                 SourcePosition = item.Position,
+                RegionId = item.RegionId,
             };
             RemoveGroundItem(state, item.GroundItemId);
             return ticket;
@@ -173,7 +180,7 @@ namespace GameLogic.Campaign.Regions
             int available = GetAvailableSpace(state, ticket.ResourceType);
             if (available < ticket.Amount)
             {
-                SpawnGroundItem(state, HomeValleyLayout.RegionId, ticket.SourcePosition,
+                SpawnGroundItem(state, ticket.RegionId ?? HomeValleyLayout.RegionId, ticket.SourcePosition,
                     ticket.ResourceType, ticket.Amount, ticket.SalvageInstanceId);
                 return StoreResult.Fail($"storage-full:need={ticket.Amount}:have={available}");
             }
@@ -199,7 +206,7 @@ namespace GameLogic.Campaign.Regions
             {
                 return null;
             }
-            return SpawnGroundItem(state, HomeValleyLayout.RegionId, dropPosition,
+            return SpawnGroundItem(state, ticket.RegionId ?? HomeValleyLayout.RegionId, dropPosition,
                 ticket.ResourceType, ticket.Amount, ticket.SalvageInstanceId);
         }
 

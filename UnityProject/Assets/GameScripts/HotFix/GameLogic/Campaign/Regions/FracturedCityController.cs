@@ -50,6 +50,11 @@ namespace GameLogic.Campaign.Regions
         /// <summary>ER5-CTL-01：任意接管正式化，与 <see cref="HomeValleyController.Control"/> 同一
         /// 共享引擎的各自一份实例（干扰场/宽限恢复绑定见 <see cref="SetupControlSystem"/>）。</summary>
         public readonly RegionControlSystem Control = new RegionControlSystem();
+        /// <summary>ER5-INT-01：Direct 的 E 交互唯一实现，与 <see cref="HomeValleyController.Interact"/>
+        /// 共用同一引擎、各自一份实例。</summary>
+        public readonly RegionInteractionSystem Interact = new RegionInteractionSystem();
+        /// <summary>ER5-INT-01："指向"排序用——直控移动最近一次非零方向，同 HomeValleyController 先例。</summary>
+        private Vector2 _lastFacing = new Vector2(1f, 0f);
         /// <summary>Attack 命令的接战距离——破碎都市锚点间距比归还谷地紧凑（10～15 量级），
         /// 沿用 <see cref="InteractRange"/> 的同一空间尺度加倍，不直接照抄归还谷地的 12 米。</summary>
         private const float AttackRange = 6f;
@@ -103,6 +108,7 @@ namespace GameLogic.Campaign.Regions
             SetupCameraDirector();
             SetupSquadCommands();
             SetupControlSystem();
+            SetupInteraction();
 
             IsActive = true;
             _wipeResolved = false;
@@ -189,6 +195,7 @@ namespace GameLogic.Campaign.Regions
             HandleSelectionClick();
 
             HandleDirectControl(scaledDt);
+            Interact.Tick(scaledDt); // ER5-INT-01：候选/进度推进——暂停时 scaledDt=0，进度天然冻结。
 
             if (_paused)
             {
@@ -288,6 +295,7 @@ namespace GameLogic.Campaign.Regions
             _paused = false;
             SquadCommands.Unbind();
             Control.Unbind();
+            Interact.Unbind();
             IsActive = false;
             Log.Info($"[FracturedCityController] 已退出破碎都市（evacuateSuccess={evacuateSuccess}）。");
         }
@@ -450,6 +458,10 @@ namespace GameLogic.Campaign.Regions
             if (InputRouter.GetActionKey(GameActionId.MoveRight, InputScope.Direct)) { x += 1f; }
             if (InputRouter.GetActionKey(GameActionId.MoveBack, InputScope.Direct)) { z -= 1f; }
             if (InputRouter.GetActionKey(GameActionId.MoveForward, InputScope.Direct)) { z += 1f; }
+            if (x != 0f || z != 0f)
+            {
+                _lastFacing = new Vector2(x, z).normalized; // ER5-INT-01：E 候选"指向"排序读这个。
+            }
             _possessed.DirectMove(new Vector3(x, 0f, z), dt);
         }
 
@@ -518,6 +530,241 @@ namespace GameLogic.Campaign.Regions
             }
             anchor = float2.zero;
             return false;
+        }
+
+        // ── ER5-INT-01：E 交互（残骸拆解=监听节点/战利品装载/终端读取/撤离确认占位）─────
+
+        /// <summary>可达性判定复用 <see cref="SetupSquadCommands"/> 同一份锚点净空障碍列表。</summary>
+        private void SetupInteraction()
+        {
+            var obstacles = new List<(Vector2 Position, float Radius)>();
+            foreach (FracturedCityLayout.Anchor anchor in FracturedCityLayout.AllAnchors())
+            {
+                obstacles.Add((anchor.Position, anchor.ClearanceRadius));
+            }
+
+            Interact.Bind(new RegionInteractContext
+            {
+                GetPossessed = () => _possessed,
+                GateCheck = () =>
+                {
+                    // DEBT-ER5INT01-03：RegionInteractFailure.MachineLostControl 枚举值已定义，但
+                    // "控制彻底丢失"这一刻 RegionControlSystem 已经把 Controller._possessed 写回 null
+                    // （SignalLost→SetPossessed(null)），本类 Tick() 顶部的 possessed==null 判定先一步
+                    // 短路返回 NoControlledUnit，GateCheck 这里永远轮不到——两者对玩家的可见效果完全一致
+                    // （交互整块消失），只是失败码归类不同，不是漏做。干扰宽限期内（Suspended）刻意不拦截：
+                    // 直控移动本来就不检查 Availability，监听节点/终端等目标恰好全部落在节点自己的干扰
+                    // 半径内，若在这里拦，"按住 E 摧毁节点解除干扰"这条唯一解法会在 2 秒宽限内被自己先
+                    // 拦掉，变成打不开的死锁。
+                    return InputRouter.ModalUiOpen ? RegionInteractFailure.ModalBlocked : RegionInteractFailure.None;
+                },
+                BuildCandidates = BuildInteractCandidates,
+                GetFacing = () => _lastFacing,
+                Obstacles = obstacles,
+            });
+        }
+
+        private List<RegionInteractCandidate> BuildInteractCandidates()
+        {
+            var list = new List<RegionInteractCandidate>(8);
+            CampaignState state = CampaignSession.Current;
+            if (state == null || _possessed == null)
+            {
+                return list;
+            }
+            RegionRecord region = FracturedCityRegion.Find(state);
+
+            bool nodeDestroyed = region?.DestroyedNodeIds != null && region.DestroyedNodeIds.Contains(FracturedCityLayout.ListeningNodeId);
+            if (!nodeDestroyed)
+            {
+                list.Add(new RegionInteractCandidate
+                {
+                    Id = "node:" + FracturedCityLayout.ListeningNodeId,
+                    Category = RegionInteractCategory.WreckageSalvage,
+                    Position = FracturedCityLayout.ListeningNode.Position,
+                    // 摧毁节点必须站在它自己的干扰半径内（InteractRange 3米 < JammerRadius 12米，无法
+                    // 从场外够到）——按住时长必须留在 FracturedCityLayout.ControlJamGraceSeconds（2秒）
+                    // 宽限之内，否则直控在拆到一半时先一步被判 Suspended，永远够不到"摧毁后干扰解除"
+                    // 这个唯一解法，等于把自己的干扰机制锁死成无解。
+                    HoldSeconds = 1.5f,
+                    Priority = 20,
+                    ActionVerb = "拆解",
+                    Validate = () =>
+                    {
+                        RegionRecord r = FracturedCityRegion.Find(CampaignSession.Current);
+                        return r?.DestroyedNodeIds != null && r.DestroyedNodeIds.Contains(FracturedCityLayout.ListeningNodeId)
+                            ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "监听节点已被摧毁。")
+                            : RegionInteractResult.Ok();
+                    },
+                    Complete = () => ToInteractResult(TryInteractListeningNode(), "监听节点已摧毁：干扰区消失，标记器模块已掉落。"),
+                });
+            }
+
+            bool terminalLooted = region?.LootedContainerIds != null && region.LootedContainerIds.Contains(FracturedCityLayout.TerminalId);
+            if (!terminalLooted)
+            {
+                list.Add(new RegionInteractCandidate
+                {
+                    Id = "terminal:" + FracturedCityLayout.TerminalId,
+                    Category = RegionInteractCategory.TerminalRead,
+                    Position = FracturedCityLayout.Terminal.Position,
+                    // 终端（0,10）与监听节点（0,4）相距6米，节点摧毁前同样落在12米干扰半径内——
+                    // 同上一条注释理由，按住时长必须留在2秒宽限之内。
+                    HoldSeconds = 1.5f,
+                    Priority = 15,
+                    ActionVerb = "读取",
+                    Validate = () =>
+                    {
+                        RegionRecord r = FracturedCityRegion.Find(CampaignSession.Current);
+                        return r?.LootedContainerIds != null && r.LootedContainerIds.Contains(FracturedCityLayout.TerminalId)
+                            ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "终端已读取过。")
+                            : RegionInteractResult.Ok();
+                    },
+                    Complete = () => ToInteractResult(TryInteractTerminal(), "协议终端已读取：协议数据盒已产出。"),
+                });
+            }
+
+            AddCrateCandidate(list, region, FracturedCityLayout.Crate1Id, FracturedCityLayout.Crate1.Position);
+            AddCrateCandidate(list, region, FracturedCityLayout.Crate2Id, FracturedCityLayout.Crate2.Position);
+            AddCrateCandidate(list, region, FracturedCityLayout.Crate3Id, FracturedCityLayout.Crate3.Position);
+
+            if (state.RegionQuestItems != null)
+            {
+                foreach (RegionQuestItemRecord item in state.RegionQuestItems)
+                {
+                    if (item.RegionId != FracturedCityLayout.RegionId || item.State != RegionQuestItemState.OnGround)
+                    {
+                        continue;
+                    }
+                    string salvageInstanceId = item.SalvageInstanceId;
+                    list.Add(new RegionInteractCandidate
+                    {
+                        Id = "quest:" + salvageInstanceId,
+                        Category = RegionInteractCategory.LootLoad,
+                        Position = item.Position,
+                        HoldSeconds = 0.5f,
+                        Priority = 25, // 关键物优先于普通废料装载。
+                        ActionVerb = "装载",
+                        Validate = () =>
+                        {
+                            RegionQuestItemRecord q = FracturedCityRegion.FindQuestItem(CampaignSession.Current, salvageInstanceId);
+                            return q == null || q.State != RegionQuestItemState.OnGround
+                                ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "地面上没有该关键物。")
+                                : RegionInteractResult.Ok();
+                        },
+                        Complete = () => ToInteractResult(TryCollectNearestQuestItem(salvageInstanceId), "关键物已装入货舱。"),
+                    });
+                }
+            }
+
+            if (state.GroundItems != null)
+            {
+                foreach (GroundItemRecord item in state.GroundItems)
+                {
+                    if (item.RegionId != FracturedCityLayout.RegionId)
+                    {
+                        continue;
+                    }
+                    string groundItemId = item.GroundItemId;
+                    Vector2 pos = item.Position;
+                    list.Add(new RegionInteractCandidate
+                    {
+                        Id = "loot:" + groundItemId,
+                        Category = RegionInteractCategory.LootLoad,
+                        Position = pos,
+                        HoldSeconds = 0.5f,
+                        Priority = 10,
+                        ActionVerb = "装载",
+                        Validate = () =>
+                        {
+                            GroundItemRecord g = HomeValleyCargo.FindGroundItem(CampaignSession.Current, groundItemId);
+                            return g == null
+                                ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "地面物已不存在。")
+                                : RegionInteractResult.Ok();
+                        },
+                        Complete = () => CompleteLootLoad(groundItemId),
+                    });
+                }
+            }
+
+            // 撤离确认：占位交互——真正的到达确认面板/回城结算由 ER5-RETURN-01 接手（DEBT-ER5INT01-01）。
+            list.Add(new RegionInteractCandidate
+            {
+                Id = "evac:" + FracturedCityLayout.EntryEvacId,
+                Category = RegionInteractCategory.EvacConfirm,
+                Position = FracturedCityLayout.EntryEvac.Position,
+                HoldSeconds = 1f,
+                Priority = -10,
+                ActionVerb = "确认撤离（占位）",
+                Validate = () => RegionInteractResult.Ok(),
+                Complete = () =>
+                {
+                    Log.Info("[FracturedCityController] 撤离确认：占位确认（真正的到达确认面板/回城结算见 " +
+                        "ER5-RETURN-01，DEBT-ER5INT01-01）。");
+                    return RegionInteractResult.Ok("占位确认：完整撤离结算流程尚未实装（ER5-RETURN-01）。");
+                },
+            });
+
+            return list;
+        }
+
+        private void AddCrateCandidate(List<RegionInteractCandidate> list, RegionRecord region, string crateId, Vector2 position)
+        {
+            bool looted = region?.LootedContainerIds != null && region.LootedContainerIds.Contains(crateId);
+            if (looted)
+            {
+                return;
+            }
+            list.Add(new RegionInteractCandidate
+            {
+                Id = "crate:" + crateId,
+                Category = RegionInteractCategory.LootLoad,
+                Position = position,
+                HoldSeconds = 1f,
+                Priority = 12,
+                ActionVerb = "打开",
+                Validate = () =>
+                {
+                    RegionRecord r = FracturedCityRegion.Find(CampaignSession.Current);
+                    return r?.LootedContainerIds != null && r.LootedContainerIds.Contains(crateId)
+                        ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "该箱子已打开过。")
+                        : RegionInteractResult.Ok();
+                },
+                Complete = () => ToInteractResult(TryInteractCrate(crateId),
+                    $"箱子已打开：{FracturedCityLayout.CrateScrapAmount} 废料已落地。"),
+            });
+        }
+
+        /// <summary>ER5-INT-01 战利品装载——通用地面物两阶段搬运票据一次性走完（同
+        /// <see cref="HomeValleyController.TryCollectWreckageDrop"/> 先例，泛化到任意本区域地面物）。</summary>
+        private RegionInteractResult CompleteLootLoad(string groundItemId)
+        {
+            CampaignState state = CampaignSession.Current;
+            if (state == null)
+            {
+                return RegionInteractResult.Fail(RegionInteractFailure.NoControlledUnit, "没有活动的破碎都市会话。");
+            }
+            HomeValleyCargo.HaulTicket ticket = HomeValleyCargo.TryReserveHaul(state, groundItemId);
+            if (ticket == null)
+            {
+                return RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "地面物已不存在。");
+            }
+            HomeValleyCargo.StoreResult store = HomeValleyCargo.CommitHaul(state, ticket);
+            if (!store.Success)
+            {
+                RegionInteractFailure failure = store.FailureReason != null && store.FailureReason.StartsWith("storage-full")
+                    ? RegionInteractFailure.CargoFull
+                    : RegionInteractFailure.TargetGone;
+                return RegionInteractResult.Fail(failure, "装载失败：" + store.FailureReason);
+            }
+            return RegionInteractResult.Ok("装载完成。");
+        }
+
+        private static RegionInteractResult ToInteractResult(FracturedCityRegion.ActionResult result, string successText)
+        {
+            return result.Success
+                ? RegionInteractResult.Ok(successText)
+                : RegionInteractResult.Fail(RegionInteractFailure.TargetGone, result.FailureReason);
         }
 
         private void TickMachineMovement(float dt)

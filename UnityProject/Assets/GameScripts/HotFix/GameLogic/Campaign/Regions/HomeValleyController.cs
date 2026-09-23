@@ -64,6 +64,15 @@ namespace GameLogic.Campaign.Regions
         /// 同一委托范式，同一实例贯穿本区域生命周期。</summary>
         public readonly RegionControlSystem Control = new RegionControlSystem();
 
+        /// <summary>ER5-INT-01：Direct 的 E 交互唯一实现——候选排序/校验/按住进度框架，与
+        /// <see cref="FracturedCityController.Interact"/> 共用同一引擎、各自一份实例。</summary>
+        public readonly RegionInteractionSystem Interact = new RegionInteractionSystem();
+
+        /// <summary>ER5-INT-01："指向"排序用——WASD 最近一次非零输入方向，供 E 交互候选排序参考
+        /// （没有独立瞄准输入，直控移动方向是最自然的"朝向"近似，同 <see cref="TryDirectAttack"/>
+        /// 用鼠标瞄准是两个不同的交互——世界物体交互没有理由强制玩家先拿鼠标点一下）。</summary>
+        private Vector2 _lastFacing = new Vector2(1f, 0f);
+
         /// <summary>本类由 <see cref="GameLogic.Stage.GameRoot"/> 用 <c>??=</c> 惰性创建、跨多局
         /// 复用同一实例（同一进程内先后玩过 A、B 两局）。ER3-WRK-01 起 WorkOrder 的进度
         /// （<see cref="WorkOrderRecord.Progress"/>/<see cref="WorkOrderRecord.Duration"/>）已经落在
@@ -111,6 +120,7 @@ namespace GameLogic.Campaign.Regions
             SetupCameraDirector();
             SetupSquadCommands();
             SetupControlSystem();
+            SetupInteraction();
 
             IsActive = true;
 
@@ -166,6 +176,7 @@ namespace GameLogic.Campaign.Regions
             HandleSelectionClick();
 
             HandleDirectControl(scaledDt);
+            Interact.Tick(scaledDt); // ER5-INT-01：候选/进度推进——暂停时 scaledDt=0，进度天然冻结。
 
             if (_paused)
             {
@@ -176,6 +187,7 @@ namespace GameLogic.Campaign.Regions
 
             if (state != null)
             {
+                TickDirectSalvageRangeGuard(state); // ER5-INT-01：直控拆解离开3米即取消并恢复原状。
                 HomeValleyWorkOrders.Tick(state, scaledDt, GetMachinePosition, ReleaseMachineMovement,
                     IsMachineDirectControlled, BeginAutoAssignedMovement);
                 HomeValleyFactory.Tick(state, scaledDt); // ER4-FAC-01：装配站生产队列。
@@ -316,6 +328,11 @@ namespace GameLogic.Campaign.Regions
             if (InputRouter.GetActionKey(GameActionId.MoveRight, InputScope.Direct)) { x += 1f; }
             if (InputRouter.GetActionKey(GameActionId.MoveBack, InputScope.Direct)) { z -= 1f; }
             if (InputRouter.GetActionKey(GameActionId.MoveForward, InputScope.Direct)) { z += 1f; }
+
+            if (x != 0f || z != 0f)
+            {
+                _lastFacing = new Vector2(x, z).normalized; // ER5-INT-01：E 候选"指向"排序读这个。
+            }
 
             _possessed.DirectMove(new Vector3(x, 0f, z), dt);
 
@@ -563,6 +580,199 @@ namespace GameLogic.Campaign.Regions
             });
         }
 
+        // ── ER5-INT-01：E 交互（残骸拆解/战利品装载/信标启动占位）───────────────────
+
+        /// <summary>把归还谷地的候选来源/朝向/门槛接进共享的 <see cref="RegionInteractionSystem"/>。
+        /// 可达性判定复用 <see cref="SetupSquadCommands"/> 同一份锚点净空障碍列表——两处都是"锚点当
+        /// 局部静态障碍"的同一份事实，不重复建第二份。</summary>
+        private void SetupInteraction()
+        {
+            var obstacles = new List<(Vector2 Position, float Radius)>();
+            foreach (HomeValleyLayout.Anchor anchor in HomeValleyLayout.AllAnchors())
+            {
+                obstacles.Add((anchor.Position, anchor.ClearanceRadius));
+            }
+
+            Interact.Bind(new RegionInteractContext
+            {
+                GetPossessed = () => _possessed,
+                GateCheck = () =>
+                {
+                    // 归还谷地没有干扰机制（Control 绑定时 IsPositionJammed 传 null），不会有 Suspended
+                    // 态。DEBT-ER5INT01-03：MachineLostControl 判定口与 FracturedCityController 同款
+                    // 理由，见该处注释——"控制彻底丢失"由 Tick() 顶部 possessed==null 分支统一处理为
+                    // NoControlledUnit，效果一致。
+                    return InputRouter.ModalUiOpen ? RegionInteractFailure.ModalBlocked : RegionInteractFailure.None;
+                },
+                BuildCandidates = BuildInteractCandidates,
+                GetFacing = () => _lastFacing,
+                Obstacles = obstacles,
+            });
+        }
+
+        private List<RegionInteractCandidate> BuildInteractCandidates()
+        {
+            var list = new List<RegionInteractCandidate>(4);
+            CampaignState state = CampaignSession.Current;
+            if (state == null || _possessed == null)
+            {
+                return list;
+            }
+
+            RegionRecord region = state.RegionRecords?.FirstOrDefault(r => r.RegionId == HomeValleyLayout.RegionId);
+            AddWreckageCandidate(list, region, HomeValleyLayout.Wreckage1NodeId, HomeValleyLayout.Wreckage1.Position);
+            AddWreckageCandidate(list, region, HomeValleyLayout.Wreckage2NodeId, HomeValleyLayout.Wreckage2.Position);
+
+            if (state.GroundItems != null)
+            {
+                foreach (GroundItemRecord item in state.GroundItems)
+                {
+                    if (item.RegionId != HomeValleyLayout.RegionId)
+                    {
+                        continue;
+                    }
+                    string groundItemId = item.GroundItemId;
+                    Vector2 pos = item.Position;
+                    list.Add(new RegionInteractCandidate
+                    {
+                        Id = "loot:" + groundItemId,
+                        Category = RegionInteractCategory.LootLoad,
+                        Position = pos,
+                        HoldSeconds = 0.5f,
+                        Priority = 10,
+                        ActionVerb = "装载",
+                        Validate = () =>
+                        {
+                            GroundItemRecord g = HomeValleyCargo.FindGroundItem(CampaignSession.Current, groundItemId);
+                            return g == null
+                                ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "地面物已不存在。")
+                                : RegionInteractResult.Ok();
+                        },
+                        Complete = () => CompleteLootLoad(groundItemId),
+                    });
+                }
+            }
+
+            // 信标启动：占位交互——真正建造/供电/解锁由 ER7-BEACON-01 接手（DEBT-ER5INT01-02）。
+            list.Add(new RegionInteractCandidate
+            {
+                Id = "beacon:" + HomeValleyLayout.BeaconSlotId,
+                Category = RegionInteractCategory.BeaconActivate,
+                Position = HomeValleyLayout.BeaconSlot.Position,
+                HoldSeconds = 1.5f,
+                Priority = -10,
+                ActionVerb = "启动信标（占位）",
+                Validate = () => RegionInteractResult.Ok(),
+                Complete = () =>
+                {
+                    Log.Info("[HomeValleyController] 信标启动：占位确认（建造/供电/真实启动流程见 " +
+                        "ER7-BEACON-01，DEBT-ER5INT01-02）。");
+                    return RegionInteractResult.Ok("占位确认：信标建造/供电/启动流程尚未实装（ER7-BEACON-01）。");
+                },
+            });
+
+            return list;
+        }
+
+        private void AddWreckageCandidate(List<RegionInteractCandidate> list, RegionRecord region, string nodeId, Vector2 position)
+        {
+            bool destroyed = region?.DestroyedNodeIds != null && region.DestroyedNodeIds.Contains(nodeId);
+            if (destroyed)
+            {
+                return;
+            }
+            list.Add(new RegionInteractCandidate
+            {
+                Id = "wreckage:" + nodeId,
+                Category = RegionInteractCategory.WreckageSalvage,
+                Position = position,
+                HoldSeconds = 0f, // 点击即启动/加入——真正耗时由 HomeValleyWorkOrders 的 Duration 状态机负责。
+                Priority = 20,
+                ActionVerb = "拆解",
+                Validate = () =>
+                {
+                    CampaignState s = CampaignSession.Current;
+                    RegionRecord r = s?.RegionRecords?.FirstOrDefault(x => x.RegionId == HomeValleyLayout.RegionId);
+                    return r?.DestroyedNodeIds != null && r.DestroyedNodeIds.Contains(nodeId)
+                        ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "残骸已被拆解。")
+                        : RegionInteractResult.Ok();
+                },
+                Complete = () => CompleteWreckageSalvageInteract(nodeId),
+            });
+        }
+
+        /// <summary>E 触发的直控拆解：与点选下令同一条 <see cref="HomeValleyWorkOrders.TryCreateSalvage"/>
+        /// 状态机——机器已经站在范围内，等同"已到达"，立即推进 Reserved→InProgress，不再走 CommandMoveTo
+        /// 赶路那一段（不需要，也不应该：直控机器本来就不接受 CommandMoveTo 覆盖，见类注释既有纪律）。</summary>
+        private RegionInteractResult CompleteWreckageSalvageInteract(string nodeId)
+        {
+            CampaignState state = CampaignSession.Current;
+            if (state == null || _possessed == null)
+            {
+                return RegionInteractResult.Fail(RegionInteractFailure.NoControlledUnit, "没有受控机器。");
+            }
+            HomeValleyWorkOrders.WorkOrderOpResult result = HomeValleyWorkOrders.TryCreateSalvage(state, nodeId, _possessed.LogicId);
+            if (!result.Success)
+            {
+                return RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "拆解无法开始：" + result.FailureReason);
+            }
+            HomeValleyWorkOrders.OnArrivedAtWork(state, result.WorkOrderId);
+            HomeValleyWorkOrders.MarkAssignmentDirty();
+            return RegionInteractResult.Ok("拆解已开始。");
+        }
+
+        /// <summary>E 触发的战利品装载——通用地面物两阶段搬运票据一次性走完（同
+        /// <see cref="TryCollectWreckageDrop"/> 先例，泛化到任意本区域地面物，不限定拆解掉落）。</summary>
+        private RegionInteractResult CompleteLootLoad(string groundItemId)
+        {
+            CampaignState state = CampaignSession.Current;
+            if (state == null)
+            {
+                return RegionInteractResult.Fail(RegionInteractFailure.NoControlledUnit, "没有活动的归还谷地会话。");
+            }
+            HomeValleyCargo.HaulTicket ticket = HomeValleyCargo.TryReserveHaul(state, groundItemId);
+            if (ticket == null)
+            {
+                return RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "地面物已不存在。");
+            }
+            HomeValleyCargo.StoreResult store = HomeValleyCargo.CommitHaul(state, ticket);
+            if (!store.Success)
+            {
+                RegionInteractFailure failure = store.FailureReason != null && store.FailureReason.StartsWith("storage-full")
+                    ? RegionInteractFailure.CargoFull
+                    : RegionInteractFailure.TargetGone;
+                return RegionInteractResult.Fail(failure, "装载失败：" + store.FailureReason);
+            }
+            return RegionInteractResult.Ok("装载完成。");
+        }
+
+        /// <summary>ER5-INT-01"离开3米时停止并恢复原物状态"——直控拆解没有独立的距离守卫（既有
+        /// WorkOrder Tick 只在赶路阶段 Reserved 才看位置），玩家用 WASD 亲自把机器开走属于本 Story
+        /// 引入的新场景，需要单独看住。<see cref="HomeValleyWorkOrders.CancelOrder"/> 会原样退还预留的
+        /// 废料事务、不留半点产出——"恢复原物状态"字面意义上的满足（节点没被标记摧毁，没有资源变化）。</summary>
+        private void TickDirectSalvageRangeGuard(CampaignState state)
+        {
+            if (_possessed == null)
+            {
+                return;
+            }
+            WorkOrderRecord order = HomeValleyWorkOrders.FindActiveOrderForMachine(state, _possessed.LogicId);
+            if (order == null || order.Kind != WorkOrderKind.Salvage)
+            {
+                return;
+            }
+            Vector2 targetPos = HomeValleyWorkOrders.ResolveWorkPosition(state, order);
+            Vector3 p = _possessed.transform.position;
+            if (Vector2.Distance(new Vector2(p.x, p.z), targetPos) <= RegionInteractionSystem.InteractRange)
+            {
+                return;
+            }
+            Vector2 currentPos = new Vector2(p.x, p.z);
+            HomeValleyWorkOrders.CancelOrder(state, order.WorkOrderId, currentPos);
+            Interact.NotifySubtitle("已离开交互范围，拆解已取消并恢复原状。");
+            Log.Info($"[HomeValleyController] 直控拆解 {order.WorkOrderId} 因离开交互范围（>{RegionInteractionSystem.InteractRange}米）被取消。");
+        }
+
         /// <summary>CameraDirector 的直控锚点来源：接管中的机器的世界 XZ 位置；没有接管返回 false。</summary>
         private bool TryGetPossessedAnchor(out float2 anchor)
         {
@@ -612,6 +822,7 @@ namespace GameLogic.Campaign.Regions
             // no-op，真正要紧的是清掉 C# 侧的字典/列表状态）。
             SquadCommands.Unbind();
             Control.Unbind();
+            Interact.Unbind();
             IsActive = false;
             Log.Info("[HomeValleyController] 已退出归还谷地。");
         }

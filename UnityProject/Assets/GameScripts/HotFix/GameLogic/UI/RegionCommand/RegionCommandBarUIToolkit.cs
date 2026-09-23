@@ -44,6 +44,12 @@ namespace GameLogic.UI.RegionCommand
         private readonly Dictionary<int, Button> _candidateButtons = new Dictionary<int, Button>(8);
         private float _controlFeedbackRemaining;
 
+        // ── ER5-INT-01：E 交互提示 + 进度条 + 字幕 ───────────────────────────
+        private Label _interactPromptLabel;
+        private VisualElement _interactProgressTrack;
+        private VisualElement _interactProgressFill;
+        private Label _interactSubtitleLabel;
+
         private async void Start()
         {
             _visualTree = await GameModule.Resource.LoadAssetAsync<VisualTreeAsset>("RegionCommandBar");
@@ -89,6 +95,10 @@ namespace GameLogic.UI.RegionCommand
             _controlledUnitLabel = _root.Q<Label>("ControlledUnitLabel");
             _controlFeedbackLabel = _root.Q<Label>("ControlFeedbackLabel");
             _candidateStrip = _root.Q<ScrollView>("ControlCandidateStrip");
+            _interactPromptLabel = _root.Q<Label>("InteractPromptLabel");
+            _interactProgressTrack = _root.Q<VisualElement>("InteractProgressTrack");
+            _interactProgressFill = _root.Q<VisualElement>("InteractProgressFill");
+            _interactSubtitleLabel = _root.Q<Label>("InteractSubtitleLabel");
 
             for (int i = 0; i < 9; i++)
             {
@@ -170,6 +180,21 @@ namespace GameLogic.UI.RegionCommand
             if (GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsActive)
             {
                 return GameRoot.FracturedCity.Control;
+            }
+            return null;
+        }
+
+        /// <summary>ER5-INT-01：当前哪个区域在跑，就读它的 RegionInteractionSystem——与
+        /// <see cref="ActiveControl"/> 同一模式。</summary>
+        private static RegionInteractionSystem ActiveInteraction()
+        {
+            if (GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive)
+            {
+                return GameRoot.HomeValley.Interact;
+            }
+            if (GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsActive)
+            {
+                return GameRoot.FracturedCity.Interact;
             }
             return null;
         }
@@ -278,6 +303,7 @@ namespace GameLogic.UI.RegionCommand
             }
 
             RefreshControlHud();
+            RefreshInteractHud();
         }
 
         /// <summary>ER5-CTL-01：受控机 编号/蓝图 显示 + 失联宽限（Suspended）提示 + Tab 候选条。</summary>
@@ -359,6 +385,70 @@ namespace GameLogic.UI.RegionCommand
             {
                 _candidateStrip.Remove(_candidateButtons[logicId]);
                 _candidateButtons.Remove(logicId);
+            }
+        }
+
+        /// <summary>ER5-INT-01：E 交互主候选提示（动词 + 当前按键名，随重绑动态拼接，不写死"按 E"）+
+        /// 按住/点击进度条 + 完成/拒绝字幕。没有主候选或没有受控机时整块隐藏——不占战略视角的屏幕。</summary>
+        private void RefreshInteractHud()
+        {
+            RegionInteractionSystem interact = ActiveInteraction();
+            if (_interactPromptLabel == null)
+            {
+                return;
+            }
+
+            if (interact == null)
+            {
+                _interactPromptLabel.text = string.Empty;
+                if (_interactProgressTrack != null)
+                {
+                    _interactProgressTrack.style.display = DisplayStyle.None;
+                }
+                _interactSubtitleLabel.text = string.Empty;
+                return;
+            }
+
+            RegionInteractCandidate candidate = interact.PrimaryCandidate;
+            string keyLabel = RegionInteractionSystem.InteractKeyLabel;
+            if (candidate != null)
+            {
+                string verb = candidate.HoldSeconds > 0.0001f ? "按住" : "按";
+                _interactPromptLabel.text = $"{verb} {keyLabel} {candidate.ActionVerb}";
+            }
+            else if (interact.LastFailure != RegionInteractFailure.None && interact.LastFailure != RegionInteractFailure.NoControlledUnit)
+            {
+                _interactPromptLabel.text = InteractFailureText(interact.LastFailure, interact.LastFailureText);
+            }
+            else
+            {
+                _interactPromptLabel.text = string.Empty;
+            }
+
+            if (_interactProgressTrack != null)
+            {
+                bool showProgress = candidate != null && candidate.HoldSeconds > 0.0001f && interact.Progress01 > 0f;
+                _interactProgressTrack.style.display = showProgress ? DisplayStyle.Flex : DisplayStyle.None;
+                if (showProgress && _interactProgressFill != null)
+                {
+                    _interactProgressFill.style.width = new Length(interact.Progress01 * 100f, LengthUnit.Percent);
+                }
+            }
+
+            _interactSubtitleLabel.text = interact.LastSubtitle ?? string.Empty;
+        }
+
+        private static string InteractFailureText(RegionInteractFailure failure, string detail)
+        {
+            switch (failure)
+            {
+                case RegionInteractFailure.OutOfRange: return "距离过远，无法交互。";
+                case RegionInteractFailure.Occluded: return "视线被遮挡，无法交互。";
+                case RegionInteractFailure.CargoFull: return detail ?? "货舱/仓储已满。";
+                case RegionInteractFailure.MachineLostControl: return "信号中断，机器暂时失控。";
+                case RegionInteractFailure.ModalBlocked: return string.Empty; // 模态打开时不必再提示世界交互。
+                case RegionInteractFailure.TargetGone: return detail ?? "目标已不可用。";
+                default: return string.Empty;
             }
         }
 
