@@ -445,6 +445,16 @@ namespace GameLogic.Campaign.Regions
         public bool IsFactoryPanelOpen => _factoryPanelOpen;
         public void SetFactoryPanelOpen(bool open) => _factoryPanelOpen = open;
 
+        /// <summary>ER5-EXP-01：远征准备面板开关状态。点击已修复（Operational）的信号塔切换（见
+        /// <see cref="HandleSelectionClick"/>）——同一栋建筑 Damaged 时点击仍走既有"修复"下令路径，
+        /// 不冲突（两者按建筑当前施工状态互斥分流）。信号塔是叙事上的"往破碎都市广播/建立航线"的
+        /// 那个建筑，AC-JRN-006 原文"修复信号塔；破碎都市从 Locked 变 Available；远征准备列出机器
+        /// 能力和带宽"三件事本就是同一条玩家旅程的连续三步，复用它做出征准备的入口而不是另建一个
+        /// 专属"远征闸门"建筑物，避免内容锁定表再加一条无预算的新建筑。</summary>
+        private bool _expeditionPrepPanelOpen;
+        public bool IsExpeditionPrepPanelOpen => _expeditionPrepPanelOpen;
+        public void SetExpeditionPrepPanelOpen(bool open) => _expeditionPrepPanelOpen = open;
+
         /// <summary>ER4-PRIM-02：电路板面板开关状态，由 <c>CircuitBoardPanelUIToolkit</c> 自身的常驻
         /// 切换按钮驱动（不占用建筑点选路由——正式"家园蓝图"容器入口留 ER4-BLP-01，本 Story 先提供一个
         /// 独立可达的入口，不强求等那个容器落地才能测试/使用电路板）。</summary>
@@ -557,6 +567,7 @@ namespace GameLogic.Campaign.Regions
             _possessed = null;
             _paused = false;
             _factoryPanelOpen = false;
+            _expeditionPrepPanelOpen = false;
             IsActive = false;
             Log.Info("[HomeValleyController] 已退出归还谷地。");
         }
@@ -1170,6 +1181,21 @@ namespace GameLogic.Campaign.Regions
             {
                 _factoryPanelOpen = !_factoryPanelOpen;
                 return;
+            }
+
+            // ER5-EXP-01：信号塔已修复（Operational）时点击切换远征准备面板，不落到下面的
+            // "Operational 非核心建筑=拆除"通用分流——把信号塔拆掉会让已解锁的破碎都市重新变得
+            // 不可达，明显不是玩家点它的意图。Damaged 时不拦截，落到下面正常的"修复"下令路径。
+            if (earlyBuildingTypeId == HomeValleyLayout.BuildingTypeSignalTower)
+            {
+                CampaignState towerState = CampaignSession.Current;
+                BuildingRecord tower = towerState?.BuildingRecords?.FirstOrDefault(b =>
+                    b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId == HomeValleyLayout.BuildingTypeSignalTower);
+                if (tower != null && tower.ConstructionState == BuildingConstructionState.Operational)
+                {
+                    _expeditionPrepPanelOpen = !_expeditionPrepPanelOpen;
+                    return;
+                }
             }
 
             if (_selected == null)

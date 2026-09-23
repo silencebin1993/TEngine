@@ -278,6 +278,11 @@ namespace GameLogic.Stage
             var homeValleyFailureHost = new GameObject("[HomeValleyFailureHost]");
             Object.DontDestroyOnLoad(homeValleyFailureHost);
             homeValleyFailureHost.AddComponent<UI.HomeValleyFailure.HomeValleyFailureUIToolkit>();
+            // ER5-EXP-01：远征准备面板，同样独立 GameObject（同一条 UIDocument 唯一性纪律），
+            // 只在归还谷地激活且玩家点开信号塔时可见（见 ExpeditionPrepPanelUIToolkit.Update）。
+            var expeditionPrepHost = new GameObject("[HomeValleyExpeditionPrepHost]");
+            Object.DontDestroyOnLoad(expeditionPrepHost);
+            expeditionPrepHost.AddComponent<UI.Expedition.ExpeditionPrepPanelUIToolkit>();
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             // 已被 UI Toolkit 覆盖的旧 IMGUI 调试 HUD 不得默认盖在玩家界面上；
             // 如需做历史对照，可在运行时显式启用该组件。

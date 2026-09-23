@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Content;
 using GameLogic.Core;
 using GameLogic.View;
@@ -79,6 +80,14 @@ namespace GameLogic.Campaign.Regions
             FracturedCityRegion.RecoveryLockerCheck(state);
 
             TransportMachinesIn(state, expeditionLogicIds);
+            // ER5-EXP-01：区域卸载（HomeValleyController.Exit）无条件 MachineLoadoutRegistry.Clear()
+            // （ER4-BLP-02 既定纪律："区域卸载与登记表解绑成对"），本类此前不会在载入时重新登记——
+            // 出征机器进入破碎都市后会立刻查不到自己的装配，MachineLoadoutRegistry.Resolve 拒绝生成
+            // 默认强力替身，战斗直接失效。这是一个真实存在的既有缺口，不是本 Story 顺手加的功能；
+            // 补在这里（而不是调用方 ExpeditionDepartureService）是因为 ResumeFracturedCity（读档/
+            // 暂离后继续，同样先经过一次 HomeValleyController 生命周期或进程重启）走的是同一个
+            // Enter 方法，必须同样补上，不能只覆盖出发这一条路径。
+            RegisterAllRegionMachineLoadouts(state);
             state.CurrentRegionId = FracturedCityLayout.RegionId;
 
             BuildVisuals(state);
@@ -120,6 +129,26 @@ namespace GameLogic.Campaign.Regions
                 Vector2 offset = new Vector2((i % 3 - 1) * 2.5f, -1f - (i / 3) * 2.5f);
                 record.WorldPosition = spawnBase + offset;
                 i++;
+            }
+        }
+
+        /// <summary>ER5-EXP-01：与 <c>HomeValleyController.RegisterAllRegionMachineLoadouts</c> 同一份
+        /// 逻辑，按当前区域全部存活机器补登记（不是仅出征名单——读档恢复/暂离后继续时，
+        /// <paramref name="state"/> 里可能已有多批曾经出征过的机器，全部需要重新登记，不只是本次
+        /// Enter 调用刚传入的那一批）。幂等：已登记的机器重复调用直接覆盖同一份数据，无副作用。</summary>
+        private static void RegisterAllRegionMachineLoadouts(CampaignState state)
+        {
+            foreach (MachineRecord m in MachineRegistry.AllRecords)
+            {
+                if (m == null || !m.IsAlive || m.RegionId != FracturedCityLayout.RegionId || string.IsNullOrEmpty(m.BlueprintId))
+                {
+                    continue;
+                }
+                CircuitOpResult result = MachineLoadoutRegistry.Register(state, m.LogicId, m.BlueprintId, m.BlueprintVersion);
+                if (!result.Success)
+                {
+                    Log.Warning($"[FracturedCityController] 机器 {m.LogicId} 装配登记失败：{result.Message}");
+                }
             }
         }
 

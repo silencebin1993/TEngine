@@ -234,6 +234,22 @@ namespace GameLogic.Campaign.Regions
             [ChassisCatalog.ChassisHoverId] = 1,
         };
 
+        /// <summary>ER5-EXP-01：各机型基础信号带宽占用（DEMO-CONTENT-LOCK.md §2.1/§2.4：ERC-001=1/
+        /// ERC-002=1/ERC-003=2/维修悬浮=1）。与 <see cref="Content.ComponentCatalog.StructRelayId"/>
+        /// （信号中继，机体带宽需求+1，落在 <see cref="BlueprintVersionRecord.BandwidthCost"/>）是两个
+        /// 独立叠加的来源——前者是"这台机器本身占多少信号带宽"（不管装什么），后者是"这份装配额外
+        /// 加多少"，出征准备面板的"总带宽"校验须两者相加，不能只读其中一个（否则默认装配全部
+        /// BandwidthCost=0，超带宽拦截永远不可能触发）。<see cref="ErcRescueChassisId"/> 未在此登记，
+        /// 与 <see cref="MachineCargoSlots"/> 同一处理方式——它没有独立带宽值，缺省 0（该机型本就
+        /// "不参与远征"人设，真正卡它的是无武器/无货位两项，不需要单独占位一个带宽数字）。</summary>
+        public static readonly IReadOnlyDictionary<string, float> MachineBandwidthCost = new Dictionary<string, float>
+        {
+            [Erc001ChassisId] = 1f,
+            [Erc002ChassisId] = 1f,
+            [Erc003ChassisId] = 2f,
+            [ChassisCatalog.ChassisHoverId] = 1f,
+        };
+
         /// <summary>ER3-SOFTLOCK-01 AC-ECO-011 触发阈值之一："废料 &lt; 35"。35 不是随意选的数字——
         /// 对应 ER4-FAC-01 卡片点名的"搬运机 35 废料/20 秒"生产成本（STORY-EXECUTION-CARDS.md
         /// ER4-FAC-01 第2条），语义是"如果废料多到能在（未来的）装配站生产一台新搬运机，就不算真的

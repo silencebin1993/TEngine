@@ -362,10 +362,18 @@ namespace GameLogic.Campaign.Regions
 
         /// <summary>撤离/结算：把当前 Carried 状态的关键物按携带机器是否存活分流成 Recovered/Lost；
         /// OnGround（未拾取）的原样保留供下次进入继续拾取（"缺任一关键技术时允许撤离但任务保持
-        /// 待补回收"）。<paramref name="survivingLogicIds"/> 为空集合即代表全灭。每次调用推进
-        /// <see cref="RegionRecord.ExpeditionCount"/>；两件关键物均曾 Recovered 过时把区域标记
-        /// Cleared（"允许撤离但任务保持待补回收"意味着未集齐前不算 Cleared）。幂等边界：只处理当前
-        /// Carried 态的条目，已经 Recovered/Lost 的历史记录不会被重复改写。</summary>
+        /// 待补回收"）。<paramref name="survivingLogicIds"/> 为空集合即代表全灭。两件关键物均曾
+        /// Recovered 过时把区域标记 Cleared（"允许撤离但任务保持待补回收"意味着未集齐前不算
+        /// Cleared）。幂等边界：只处理当前 Carried 态的条目，已经 Recovered/Lost 的历史记录不会被
+        /// 重复改写。
+        ///
+        /// ── ExpeditionCount 不在本方法推进（ER5-EXP-01 修正）──
+        /// 此前版本在这里 <c>region.ExpeditionCount += 1</c>，语义是"每次撤离/全灭结算算一次"；
+        /// ER5-EXP-01 STORY-EXECUTION-CARDS.md 明确写"只有整个切换成功才增加 expeditionCount"，
+        /// 指的是出发那一刻的区域切换事务，不是撤离结算——两个时机都写同一个字段会让它在一次完整
+        /// 往返里被计两次，字段含义自相矛盾。唯一写入口现在是
+        /// <see cref="ExpeditionDepartureService.TryDepart"/>，本方法不再改写该字段（当时没有任何
+        /// 消费方读它，改动不影响 ER5-REGION-01 已验证的行为）。</summary>
         public static void ResolveExtraction(CampaignState state, IReadOnlyCollection<int> survivingLogicIds)
         {
             RegionRecord region = Find(state);
@@ -399,7 +407,6 @@ namespace GameLogic.Campaign.Regions
                 }
             }
             region.LostQuestSalvageIds = lost.ToArray();
-            region.ExpeditionCount += 1;
 
             bool markerRecovered = state.RegionQuestItems.Any(q =>
                 q.ContentId == FracturedCityLayout.MarkerModuleContentId && q.State == RegionQuestItemState.Recovered);

@@ -33,7 +33,7 @@
 
 - UI 只能调用领域模块的公开入口：例如模板提交走 `LineageRegistry.CommitTemplate`，萌生走 `GerminationChamberRegistry.Enqueue`，回巢走 `HomecomingRetrofitService`。
 - UI 不重写校验、扣费或状态机；失败文案应显示领域模块返回的原因。
-- 运行中控制器加载资源时复用 `BattleHudPanelSettings`，并用明确的 `sortingOrder`：HUD 0、运行中枢 2、装配 4（旧细胞阶段面板）、家园装配站生产面板 6（ER4-FAC-01，与"装配 4"是两套不同系统，勿混用）、战术 5、萌生 7、覆盖面板 10、表型工坊 11、结算 12、家园失败面板 20（ER3-SOFTLOCK-01，全屏阻断式模态，必须盖过任何既有 HUD/面板）。
+- 运行中控制器加载资源时复用 `BattleHudPanelSettings`，并用明确的 `sortingOrder`：HUD 0、运行中枢 2、装配 4（旧细胞阶段面板）、家园装配站生产面板 6（ER4-FAC-01，与"装配 4"是两套不同系统，勿混用）、战术 5、萌生 7、远征准备面板 8（ER5-EXP-01）、覆盖面板 10、表型工坊 11、结算 12、家园失败面板 20（ER3-SOFTLOCK-01，全屏阻断式模态，必须盖过任何既有 HUD/面板）。
 - 新面板默认隐藏，且在阶段不运行时自动隐藏。开发 HUD 不能默认覆盖正式 UI。
 
 ## 5. 每次改 UI 的验收顺序
