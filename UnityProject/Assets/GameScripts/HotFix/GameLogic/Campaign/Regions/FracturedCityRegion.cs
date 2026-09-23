@@ -154,6 +154,17 @@ namespace GameLogic.Campaign.Regions
             {
                 return ActionResult.Fail("目标已阵亡。");
             }
+
+            // ER7-CORE-01：铸造重炮命中路径统一走 CannonCombat.TryFire→本方法（与实际触发区域无关，
+            // 只按 EnemyInstanceId 全局查找——见 CannonCombat 类注释），Boss 节点/主核心因此也可能从
+            // 这条路径进来，同 FoundryOutpostRegion.TryDamageEnemy 同一处理，委托
+            // FoundryOutpostCoreBoss.ApplyDamage，不落入通用阵亡+掉落分支。
+            if (enemy.EnemyTypeId == FoundryOutpostLayout.BossNodeTypeId || enemy.EnemyTypeId == FoundryOutpostLayout.BossCoreTypeId)
+            {
+                (bool bossOk, string bossReason) = FoundryOutpostCoreBoss.ApplyDamage(state, enemy, damage);
+                return bossOk ? ActionResult.Ok() : ActionResult.Fail(bossReason);
+            }
+
             enemy.Health = Mathf.Max(0f, enemy.Health - Mathf.Max(0f, damage));
             if (enemy.Health <= 0f)
             {

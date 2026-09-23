@@ -37,7 +37,8 @@ namespace GameLogic.Campaign.Regions
         /// 默认）时行为与此前完全一致（伤害不打折）。</summary>
         public static FracturedCityRegion.ActionResult TryFire(CampaignState state, int attackerLogicId,
             string enemyInstanceId, MachineCombatResolution resolution, System.Func<Vector2, Vector2, bool> isReachable,
-            bool isFrontalArmoredHit = false, float armorReductionFraction = 0f, bool targetHeatResistant = false)
+            bool isFrontalArmoredHit = false, float armorReductionFraction = 0f, bool targetHeatResistant = false,
+            float damageMultiplier = 1f)
         {
             LastCallWasStillAiming = false;
 
@@ -125,6 +126,9 @@ namespace GameLogic.Campaign.Regions
                 float effectiveReduction = ApplyArmorPierce(armorReductionFraction, overloadActive, targetHeatResistant);
                 damage *= Mathf.Max(0f, 1f - effectiveReduction);
             }
+            // ER7-CORE-01：Phase2 主核心"侧后+20%"——调用方（唯一 FoundryOutpostRegion.TryAttackEnemy）
+            // 已经用真实 attackerPosition 算好倍率，这里只做纯乘法，不反向依赖 Boss 状态机。
+            damage *= damageMultiplier;
             return FracturedCityRegion.TryDamageEnemy(state, enemyInstanceId, damage);
         }
 

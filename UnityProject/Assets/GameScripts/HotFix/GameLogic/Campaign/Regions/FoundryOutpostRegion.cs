@@ -127,6 +127,9 @@ namespace GameLogic.Campaign.Regions
             // 影响；也必须在 Enter() 每次调用（含 resume）时都执行一遍——已锁定值不变时是纯粹的
             // no-op（Reconcile 内部先判断实例是否已存在且类型匹配）。
             ReconcileAdaptiveSupportEnemy(state, Find(state));
+            // ER7-CORE-01：90暴露核心入口增援——ER6-ADAPT-01 当时只预告，本方法是真正的实装点
+            // （独立于上面 Flanker/JammerSupport 那条 adaptation 增援槽位，"不把它伪装成adaptation"）。
+            ReconcileCoreReinforcement(state, Find(state));
 
             void SeedIfMissing(string instanceId, string typeId, Vector2 position, float maxHealth)
             {
@@ -214,6 +217,45 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
+        /// <summary>ER7-CORE-01：90暴露核心入口增援护甲机——ER6-ADAPT-01 出发页预告的"核心战一台护甲机
+        /// 增援"在这里真正落地。条件＝核心门已解锁（三灯全亮，否则这次出发根本还打不到核心）且暴露
+        /// 已越过90阈值（<see cref="CampaignExposureLedger.HasReachedCoreReinforcement"/>）。与
+        /// <see cref="ReconcileAdaptiveSupportEnemy"/> 同一增/撤纪律，但完全独立（不是三种 adaptation
+        /// 之一，不占用 Flanker/JammerSupport 的槽位判定）。</summary>
+        private static void ReconcileCoreReinforcement(CampaignState state, RegionRecord region)
+        {
+            if (state == null || region == null)
+            {
+                return;
+            }
+            bool shouldExist = region.State != RegionState.Locked
+                && CanEnterCoreZone(state).Success
+                && CampaignExposureLedger.HasReachedCoreReinforcement(state);
+            bool exists = FindEnemy(state, FoundryOutpostLayout.CoreReinforcementSpawnId) != null;
+            if (shouldExist == exists)
+            {
+                return;
+            }
+            if (!shouldExist)
+            {
+                state.RegionEnemies = state.RegionEnemies.Where(e => e.EnemyInstanceId != FoundryOutpostLayout.CoreReinforcementSpawnId).ToArray();
+                return;
+            }
+            state.RegionEnemies = (state.RegionEnemies ?? Array.Empty<RegionEnemyRecord>()).Append(new RegionEnemyRecord
+            {
+                EnemyInstanceId = FoundryOutpostLayout.CoreReinforcementSpawnId,
+                RegionId = RegionId,
+                EnemyTypeId = EnemyCatalog.ArmorBotId,
+                Position = FoundryOutpostLayout.CoreReinforcementSpawn.Position,
+                Health = FoundryOutpostLayout.ArmorBotMaxHealth,
+                MaxHealth = FoundryOutpostLayout.ArmorBotMaxHealth,
+                IsAlive = true,
+                CycleCooldownRemaining = 0f,
+                SecondaryTimer = 0f,
+            }).ToArray();
+            Log.Info("[FoundryOutpostRegion] 信号暴露突破90：核心入口增援护甲机已布防（出发页预告已兑现）。");
+        }
+
         public static void TickEnemies(CampaignState state, float dt)
         {
             if (state?.RegionEnemies == null || dt <= 0f)
@@ -240,6 +282,16 @@ namespace GameLogic.Campaign.Regions
             {
                 return ActionResult.Fail("目标已阵亡。");
             }
+
+            // ER7-CORE-01：节点/主核心是"护盾/阶段"语义，不是"死了掉废料"，全部委托
+            // FoundryOutpostCoreBoss.ApplyDamage（唯一伤害/阶段转换判定入口，见该类类注释），不落入
+            // 下面的通用阵亡+掉落分支。
+            if (enemy.EnemyTypeId == FoundryOutpostLayout.BossNodeTypeId || enemy.EnemyTypeId == FoundryOutpostLayout.BossCoreTypeId)
+            {
+                (bool bossOk, string bossReason) = FoundryOutpostCoreBoss.ApplyDamage(state, enemy, damage);
+                return bossOk ? ActionResult.Ok() : ActionResult.Fail(bossReason);
+            }
+
             enemy.Health = Mathf.Max(0f, enemy.Health - Mathf.Max(0f, damage));
             if (enemy.Health <= 0f)
             {
@@ -359,6 +411,10 @@ namespace GameLogic.Campaign.Regions
             {
                 facing = FoundryOutpostLayout.FlankerFacing;
             }
+            else if (enemy.EnemyInstanceId == FoundryOutpostLayout.CoreReinforcementSpawnId)
+            {
+                facing = new Vector2(0f, -1f); // 面朝入口方向（同护甲机驻守语义，朝来袭方向）。
+            }
             Vector2 toAttacker = attackerPosition - enemy.Position;
             if (toAttacker.sqrMagnitude < 1e-6f)
             {
@@ -413,11 +469,16 @@ namespace GameLogic.Campaign.Regions
                 bool isFrontalArmored = enemy.EnemyTypeId == EnemyCatalog.ArmorBotId && IsFrontalHit(enemy, attackerPosition);
                 RegionRecord adaptRegion = Find(state);
                 bool heatResistant = adaptRegion != null && adaptRegion.AdaptationId == AdaptationCatalog.HeatResistant;
+                // ER7-CORE-01：Phase2 主核心"侧后+20%"——恒为1（不影响护甲机/其它敌人），只在目标是
+                // 主核心且当前恰为 Phase2 时才可能大于1，与 HeatResistant 的穿甲折扣是完全独立的两个
+                // 乘数（不会互相抵消/叠加错顺序，先穿甲折算减伤比例，再整体乘伤害倍率）。
+                float bossMultiplier = FoundryOutpostCoreBoss.ComputeDamageMultiplier(state, enemy, attackerPosition);
                 FracturedCityRegion.ActionResult cannonResult = CannonCombat.TryFire(
                     state, attackerLogicId, enemyInstanceId, resolution, isReachable,
                     isFrontalArmoredHit: isFrontalArmored,
                     armorReductionFraction: FoundryOutpostLayout.ArmorBotFrontalReductionPct,
-                    targetHeatResistant: heatResistant);
+                    targetHeatResistant: heatResistant,
+                    damageMultiplier: bossMultiplier);
                 return cannonResult.Success ? ActionResult.Ok() : ActionResult.Fail(cannonResult.FailureReason);
             }
 
@@ -431,6 +492,7 @@ namespace GameLogic.Campaign.Regions
             {
                 damage = EnemyCatalog.ComputeFrontalArmorReducedDamage(damage, isFrontalHit: true);
             }
+            damage *= FoundryOutpostCoreBoss.ComputeDamageMultiplier(state, enemy, attackerPosition);
 
             // ER6-REGION-01：标记跳转在外围实战触发（AC-JRN-014）——与 FracturedCityRegion.TryAttackEnemy
             // 同一顺序，"目标已标记时"才跳转，查询顺序在本次命中造成的新标记之前（第一次命中只留标记，
@@ -684,7 +746,10 @@ namespace GameLogic.Campaign.Regions
         public static RegionQuestItemRecord FindQuestItem(CampaignState state, string salvageInstanceId) =>
             state?.RegionQuestItems?.FirstOrDefault(q => q.SalvageInstanceId == salvageInstanceId);
 
-        private static void SpawnQuestItemOnGround(CampaignState state, string contentId, Vector2 position)
+        /// <summary>ER7-CORE-01：从 private 放宽到 internal——<see cref="FoundryOutpostCoreBoss"/>
+        /// 需要用同一条关键物生命周期（OnGround→Carried→Recovered/Lost）落地核心数据盒，不新造第二套
+        /// 关键物生成逻辑。仍是同程序集内部细节，不对外公开。</summary>
+        internal static void SpawnQuestItemOnGround(CampaignState state, string contentId, Vector2 position)
         {
             string salvageInstanceId = $"{RegionId}:{contentId}:{Guid.NewGuid():N}".Substring(0, 40);
             state.RegionQuestItems = (state.RegionQuestItems ?? Array.Empty<RegionQuestItemRecord>()).Append(
@@ -917,19 +982,38 @@ namespace GameLogic.Campaign.Regions
         {
             var violations = new List<string>();
             RegionRecord region = Find(state);
-            // ER6-ADAPT-01：Flanker/JammerSupport 各带一台条件播种的反制增援，基线之外 +1；None/
-            // HeatResistant 不额外播种，仍是基线 4。
+            var allEnemies = state?.RegionEnemies?.Where(e => e.RegionId == RegionId).ToList() ?? new List<RegionEnemyRecord>();
+
+            // ── 外围固定内容：基线4 + ER6-ADAPT-01 Flanker/JammerSupport 反制增援（互斥，最多+1）+
+            // ER7-CORE-01 90暴露核心入口增援（与反制增援独立，可能同时存在）───────────────────
             bool hasAdaptiveSlot = region != null &&
                 (region.AdaptationId == AdaptationCatalog.Flanker || region.AdaptationId == AdaptationCatalog.JammerSupport);
-            int expectedCount = hasAdaptiveSlot ? 5 : 4;
-            int enemyCount = state?.RegionEnemies?.Count(e => e.RegionId == RegionId) ?? 0;
-            if (enemyCount != expectedCount)
+            bool hasCoreReinforcement = allEnemies.Any(e => e.EnemyInstanceId == FoundryOutpostLayout.CoreReinforcementSpawnId);
+            int expectedOutskirtsCount = 4 + (hasAdaptiveSlot ? 1 : 0) + (hasCoreReinforcement ? 1 : 0);
+            int outskirtsCount = allEnemies.Count(e =>
+                e.EnemyInstanceId != FoundryOutpostLayout.CoreNode1Id && e.EnemyInstanceId != FoundryOutpostLayout.CoreNode2Id &&
+                e.EnemyInstanceId != FoundryOutpostLayout.MainCoreId && e.EnemyInstanceId != FoundryOutpostLayout.CoreRepairBotSummonId);
+            if (outskirtsCount != expectedOutskirtsCount)
             {
-                violations.Add($"铸造前哨外围敌人实例数应为 {expectedCount}（基线 2 护甲机+1 步进炮+1 维修机" +
-                    $"{(hasAdaptiveSlot ? "+1 反制增援" : "")}），实际 {enemyCount}。");
+                violations.Add($"铸造前哨外围（不含核心分区）敌人实例数应为 {expectedOutskirtsCount}（基线4" +
+                    $"{(hasAdaptiveSlot ? "+1 反制增援" : "")}{(hasCoreReinforcement ? "+1 核心入口增援" : "")}），实际 {outskirtsCount}。");
             }
-            var dupCheck = state?.RegionEnemies?.Where(e => e.RegionId == RegionId)
-                .GroupBy(e => e.EnemyInstanceId).Where(g => g.Count() > 1).ToList();
+
+            // ── 核心分区：未初始化恒为0；已初始化必为两节点+主核心3条，Transition后可能再+1维修机 ──
+            bool coreInitialized = FoundryOutpostCoreBoss.IsInitialized(region);
+            int coreCount = allEnemies.Count(e =>
+                e.EnemyInstanceId == FoundryOutpostLayout.CoreNode1Id || e.EnemyInstanceId == FoundryOutpostLayout.CoreNode2Id ||
+                e.EnemyInstanceId == FoundryOutpostLayout.MainCoreId || e.EnemyInstanceId == FoundryOutpostLayout.CoreRepairBotSummonId);
+            if (!coreInitialized && coreCount != 0)
+            {
+                violations.Add($"核心分区尚未初始化（CoreState=Locked）但已存在 {coreCount} 条核心实例，数据不一致。");
+            }
+            if (coreInitialized && coreCount != 3 && coreCount != 4)
+            {
+                violations.Add($"核心分区已初始化，敌人实例数应为3（两节点+主核心）或4（Transition后+1维修机），实际 {coreCount}。");
+            }
+
+            var dupCheck = allEnemies.GroupBy(e => e.EnemyInstanceId).Where(g => g.Count() > 1).ToList();
             if (dupCheck != null && dupCheck.Count > 0)
             {
                 violations.Add($"存在重复的 EnemyInstanceId：{string.Join(",", dupCheck.Select(g => g.Key))}");

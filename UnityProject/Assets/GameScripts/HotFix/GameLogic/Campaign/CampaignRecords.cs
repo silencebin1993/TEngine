@@ -444,7 +444,28 @@ namespace GameLogic.Campaign
         public string AdaptationId;
         public int ExpeditionCount;
         public bool CoreGateUnlocked;
+        /// <summary>ER7-CORE-01：<see cref="CoreBossState"/> 的字符串存储（<see cref="Enum.ToString()"/>），
+        /// 唯一写入口 <see cref="Regions.FoundryOutpostCoreBoss.TryTransition"/>。null/空＝
+        /// <see cref="CoreBossState.Locked"/>（尚未首次进入核心分区）。</summary>
         public string CoreState;
+
+        // ── ER7-CORE-01：Boss 战 FSM/计时/一次性标记——只在 FoundryOutpost 的 RegionRecord 上有意义
+        // （同 AdaptationId/CoreGateUnlocked 先例，共享类但只对特定区域字段有效）。两供能节点+主核心
+        // 的 HP/存活本身**不**在这里重复记账——它们就是三条 <see cref="RegionEnemyRecord"/>
+        // （EnemyTypeId="boss_node"/"boss_core"），复用该类型已有的 Health/MaxHealth/IsAlive/
+        // CycleCooldownRemaining 字段与既有 <see cref="Regions.FoundryOutpostRegion.TryDamageEnemy"/>/
+        // <see cref="Regions.CannonCombat.TryFire"/> 伤害结算路径（含铸造重炮/熔穿过载），不新造第二套
+        // 伤害管线。唯一写入口全部集中在 Regions.FoundryOutpostCoreBoss，不在别处散落改这些字段。──
+        /// <summary>Transition 阶段结束的 PlaySeconds 时间戳，0＝当前不在 Transition。</summary>
+        public float CoreTransitionEndAtPlaySeconds;
+        /// <summary>"只召一台维修机"——一次性标记，Transition 每次触发只允许召唤一次。</summary>
+        public bool CoreTransitionRepairBotSummoned;
+        /// <summary>核心数据盒是否已经掉落过——"主核心毁灭只掉一次核心数据盒"幂等标记。</summary>
+        public bool CoreDataDropped;
+        /// <summary>Phase2 区域封锁预警的 PlaySeconds 时间戳，0＝未触发。达到该时间戳后
+        /// <see cref="CoreLockoutActive"/> 才真正置真（"提前2秒可见/可听提示"）。</summary>
+        public float CoreLockoutWarnAtPlaySeconds;
+        public bool CoreLockoutActive;
 
         /// <summary>ER6-EXPOSE-01："一次远征中每累计30秒直控+5"——按本区域当次远征累计直控秒数，
         /// 在 <see cref="Regions.ExpeditionDepartureService.TryDepart"/> 每次真正出发时清零（"一次

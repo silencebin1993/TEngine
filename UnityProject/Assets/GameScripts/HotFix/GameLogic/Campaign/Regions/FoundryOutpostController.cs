@@ -192,6 +192,8 @@ namespace GameLogic.Campaign.Regions
             }
 
             FoundryOutpostRegion.RecomputeCoreGate(state);
+            TickCoreZoneEntry(state);
+            FoundryOutpostCoreBoss.Tick(state, scaledDt, BuildVisibleMachines(), IsLineOfSightClear);
             CannonCombat.TickHeatDissipation(state, scaledDt);
             if (_possessed != null)
             {
@@ -207,6 +209,31 @@ namespace GameLogic.Campaign.Regions
             TickDiscovery(state);
             TickWipeDetection(state);
             SyncWorldVisuals(state);
+        }
+
+        /// <summary>ER7-CORE-01："进入前存安全档"——首次有任意区域机器越过核心分区封锁线（门已解锁，
+        /// Boss 尚未初始化）时触发一次 <see cref="SaveReason.BossEngageEnter"/> 自动档，再
+        /// <see cref="FoundryOutpostCoreBoss.EnsureInitialized"/>。不限直控，编队 Move 命令把机器带
+        /// 进去同样触发——两条穿越路径（直控 WASD/编队 Move）都要能触发首次进场，不只认直控。</summary>
+        private void TickCoreZoneEntry(CampaignState state)
+        {
+            RegionRecord region = FoundryOutpostRegion.Find(state);
+            if (region == null || !region.CoreGateUnlocked || FoundryOutpostCoreBoss.IsInitialized(region))
+            {
+                return;
+            }
+            bool anyCrossed = _machineMarkers.Any(m => m != null && m.transform.position.z > FoundryOutpostLayout.CoreGateBlockLineY);
+            if (!anyCrossed)
+            {
+                return;
+            }
+            SaveResult saveResult = CampaignAutoSaveService.SaveAuto(SaveReason.BossEngageEnter);
+            if (!saveResult.Success)
+            {
+                Log.Warning($"[FoundryOutpostController] BossEngageEnter 自动存档未成功（{saveResult.Outcome} " +
+                    $"{saveResult.Message}），仍继续初始化 Boss 战（不因存档失败卡住玩家，下次自然存档点会补上）。");
+            }
+            FoundryOutpostCoreBoss.EnsureInitialized(state, region);
         }
 
         private void TickDiscovery(CampaignState state)
@@ -440,6 +467,7 @@ namespace GameLogic.Campaign.Regions
             }
             _possessed.DirectMove(new Vector3(x, 0f, z), dt);
             ClampPossessedAgainstCoreGate();
+            ClampPossessedAgainstCoreLockout();
 
             if (InputRouter.GetMouseButtonDown(0, InputScope.Direct) &&
                 InputRouter.TryGetPointer(InputScope.Direct, out Vector3 aimPointer))
@@ -469,6 +497,27 @@ namespace GameLogic.Campaign.Regions
             if (p.z > FoundryOutpostLayout.CoreGateBlockLineY)
             {
                 _possessed.transform.position = new Vector3(p.x, p.y, FoundryOutpostLayout.CoreGateBlockLineY);
+            }
+        }
+
+        /// <summary>ER7-CORE-01：Phase2 区域封锁的直控物理钳制——与 <see cref="ClampPossessedAgainstCoreGate"/>
+        /// 方向相反的第二重控制（那条挡"进"，这条挡"出"），同一"每帧钳制"纪律。</summary>
+        private void ClampPossessedAgainstCoreLockout()
+        {
+            if (_possessed == null)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            RegionRecord region = state != null ? FoundryOutpostRegion.Find(state) : null;
+            if (region == null || !region.CoreLockoutActive)
+            {
+                return;
+            }
+            Vector3 p = _possessed.transform.position;
+            if (p.z < FoundryOutpostLayout.CoreLockoutLineY)
+            {
+                _possessed.transform.position = new Vector3(p.x, p.y, FoundryOutpostLayout.CoreLockoutLineY);
             }
         }
 
@@ -918,16 +967,30 @@ namespace GameLogic.Campaign.Regions
 
         /// <summary>ER6-REGION-01："导航阻挡"这一重控制——编队 Move 命令的目的地不能越过核心分区
         /// 封锁线（门锁定时）。只钳制 Y 分量、保留 X（沿门前排队而不是被强行拉回中轴线），与
-        /// <see cref="FoundryOutpostRegion.IsBeyondCoreGateLine"/> 同一判据。</summary>
+        /// <see cref="FoundryOutpostRegion.IsBeyondCoreGateLine"/> 同一判据。
+        ///
+        /// ── ER7-CORE-01 追加：Phase2 区域封锁（方向相反的第二条钳制）──
+        /// 门锁定挡的是"进"（目的地 Y 上限），<see cref="RegionRecord.CoreLockoutActive"/> 挡的是
+        /// "出"（目的地 Y 下限，不让编队 Move 命令把机器带出核心分区）——两条判据方向相反、互不冲突，
+        /// 同一方法内先后各裁一次即可（不会同时触发，门解锁后才可能进入核心分区触发 Boss 战，此时
+        /// CoreGateUnlocked 恒真，第一段判定天然不生效）。</summary>
         private Vector2 ClampAgainstCoreGate(Vector2 target)
         {
             CampaignState state = CampaignSession.Current;
             RegionRecord region = state != null ? FoundryOutpostRegion.Find(state) : null;
-            if (region == null || region.CoreGateUnlocked || !FoundryOutpostRegion.IsBeyondCoreGateLine(target))
+            if (region == null)
             {
                 return target;
             }
-            return new Vector2(target.x, FoundryOutpostLayout.CoreGateBlockLineY);
+            if (!region.CoreGateUnlocked && FoundryOutpostRegion.IsBeyondCoreGateLine(target))
+            {
+                return new Vector2(target.x, FoundryOutpostLayout.CoreGateBlockLineY);
+            }
+            if (region.CoreLockoutActive && target.y < FoundryOutpostLayout.CoreLockoutLineY)
+            {
+                return new Vector2(target.x, FoundryOutpostLayout.CoreLockoutLineY);
+            }
+            return target;
         }
 
         private RegionHostileInfo? FindEnemyHostileNear(Vector2 worldPoint, float pickRadius)

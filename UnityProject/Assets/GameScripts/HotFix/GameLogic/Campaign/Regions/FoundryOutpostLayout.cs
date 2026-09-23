@@ -109,7 +109,65 @@ namespace GameLogic.Campaign.Regions
         /// <summary>相机初始聚焦点——入口安全区与掩体火力线之间。</summary>
         public static readonly Vector2 CameraFocusStart = new Vector2(0f, -6f);
         public const float CameraBoundsHalfExtentX = 22f;
-        public const float CameraBoundsHalfExtentZ = 30f;
+        /// <summary>ER7-CORE-01：核心分区（两供能节点+主核心）落在 CoreZoneEntry（y=28.5）更深处，
+        /// 原 30 已不够覆盖，扩到 52 同时仍覆盖外围最远锚点 EntryEvac（y=-20）。</summary>
+        public const float CameraBoundsHalfExtentZ = 52f;
+
+        // ── ER7-CORE-01：核心分区（两供能节点+主核心+Boss 战内容）──────────────
+        // 同一 foundry_outpost 会话内部的第三个空间子区（ER6-REGION-01 已确立"核心分区门禁在外围
+        // 场景内部解决，不是出发去新地图"），锚点表沿用与外围完全相同的纯 Transform 纪律。
+        public const string CoreNode1Id = "fo_core_node_1";
+        public const string CoreNode2Id = "fo_core_node_2";
+        public const string MainCoreId = "fo_main_core";
+        public const string CoreRepairBotSummonId = "fo_core_repairbot";
+        /// <summary>信号暴露90增援——ER6-ADAPT-01 出发页只预告，本 Story 是真正的入口实装点
+        /// （"不把它伪装成adaptation"字面要求：走独立的 <see cref="Regions.FoundryOutpostRegion.
+        /// ReconcileCoreReinforcement"/>，与 Flanker/JammerSupport 那条 adaptation 增援槽位完全独立）。</summary>
+        public const string CoreReinforcementSpawnId = "fo_core_reinforcement";
+        /// <summary>核心数据盒——Boss Destroyed 后唯一掉落的关键物内容 ID，与铸造重炮模块同一
+        /// OnGround→Carried→Recovered/Lost 生命周期。</summary>
+        public const string CoreDataContentId = "quest_core_data";
+
+        public static readonly Anchor CoreNode1 = new Anchor(CoreNode1Id, new Vector2(-7f, 38f), 2f);
+        public static readonly Anchor CoreNode2 = new Anchor(CoreNode2Id, new Vector2(7f, 38f), 2f);
+        public static readonly Anchor MainCore = new Anchor(MainCoreId, new Vector2(0f, 45f), 3f);
+        /// <summary>Transition 期间召唤的一次性维修机出生点——与主核心保持最小净空但不重叠。</summary>
+        public static readonly Anchor CoreRepairBotSummon = new Anchor(CoreRepairBotSummonId, new Vector2(0f, 40f), 1.5f);
+        /// <summary>守入口的90暴露增援护甲机——刻意放在核心分区入口内侧（CoreZoneEntry 之后），
+        /// "预告核心战入口护甲机增援"字面要求，不是外围掩体那两台的第三台。</summary>
+        public static readonly Anchor CoreReinforcementSpawn = new Anchor(CoreReinforcementSpawnId, new Vector2(-4f, 30f), 1.5f);
+
+        /// <summary>Phase2 区域封锁线——DEMO-CONTENT-LOCK.md"Phase2……新增区域封锁"字面要求：一旦
+        /// 触发（提前2秒预警），任何机器都不能再越过这条线退回外围（与 CoreGateBlockLineY 是两条完全
+        /// 独立的边界——前者挡"未解锁时进入"，这条挡"Phase2 后逃离"，语义方向相反）。取值介于
+        /// CoreZoneEntry（28.5）与两节点（38）之间，不干扰节点/主核心战斗空间。</summary>
+        public const float CoreLockoutLineY = 32f;
+        public const float CoreLockoutWarnSeconds = 2f; // "提前2秒可见/可听提示"。
+
+        /// <summary>主核心固定朝向——面朝入口方向（散热口在背面）。Phase2"侧后+20%"判定复用与
+        /// 护甲机 <see cref="FoundryOutpostRegion.IsFrontalHit"/> 同一锥角框架，但语义相反（背后是
+        /// 弱点而非减伤区）。</summary>
+        public static readonly Vector2 MainCoreFacing = new Vector2(0f, -1f);
+        public const float MainCoreFrontalHalfAngleDeg = 75f; // 与护甲机同一量级，锥角外＝侧后。
+
+        /// <summary>两供能节点共用的 EnemyTypeId——本身不是 <see cref="Content.EnemyCatalog"/> 目录条目
+        /// （节点是设施不是敌人角色，无需图鉴/AI 权限等内容层字段），只是 <see cref="RegionEnemyRecord"/>
+        /// 复用其 Health/MaxHealth/IsAlive/CycleCooldownRemaining 字段+既有伤害结算管线（含铸造重炮/
+        /// 熔穿过载）时的判别标签，唯一消费方 <see cref="Regions.FoundryOutpostCoreBoss"/>。</summary>
+        public const string BossNodeTypeId = "boss_node";
+        public const string BossCoreTypeId = "boss_core";
+
+        // ── Boss 数值（DEMO-CONTENT-LOCK.md §4.3 逐字）─────────────────────────
+        public const float NodeMaxHealth = 100f;
+        public const float MainCoreMaxHealth = 600f;
+        public const float Phase1TransitionHealthFraction = 0.6f; // "降至60%时……Transition"。
+        public const float TransitionDurationSeconds = 5f;
+        public const float Phase2BackHitBonusPct = 0.2f; // "侧后+20%"。
+        // 主核心自卫攻击（Phase1/Phase2 生效，Transition 不攻击）——DEMO-CONTENT-LOCK.md 未点名具体
+        // 数字，按铸造步进炮同一量级取保守 judgment call（同 FoundryOutpostEnemyAi 类注释先例）。
+        public const float CoreAttackRange = 16f;
+        public const float CoreAttackDamage = 18f;
+        public const float CoreAttackCooldownSeconds = 2f;
 
         // ── 敌人 HP（唯一真相 Content.EnemyCatalog，不重复发明）─────────────────
         public const float ArmorBotMaxHealth = 160f; // EnemyCatalog.ArmorBotId ValuesSummary。
@@ -166,6 +224,11 @@ namespace GameLogic.Campaign.Regions
             yield return CoreZoneEntry;
             yield return FlankerSpawn;
             yield return JammerSupportSpawn;
+            yield return CoreNode1;
+            yield return CoreNode2;
+            yield return MainCore;
+            yield return CoreRepairBotSummon;
+            yield return CoreReinforcementSpawn;
         }
 
         public static IEnumerable<string> AllPoiIds()

@@ -187,6 +187,23 @@ namespace GameLogic.Campaign
         Completed = 2,
     }
 
+    /// <summary>ER7-CORE-01 STORY-EXECUTION-CARDS.md："Boss 状态仅 Locked→Shielded→Phase1→
+    /// Transition→Phase2→Destroyed，非法跳转拒绝并给开发诊断，不在玩家 HUD 泄漏枚举名"——存入
+    /// <see cref="RegionRecord.CoreState"/>（该字段此前是 ER6-FOUNDRY-01 留下的纯骨架，从未被写过），
+    /// 合法转换表与拒绝逻辑唯一实现见 <see cref="Regions.FoundryOutpostCoreBoss.TryTransition"/>。
+    /// 玩家可见文案走 <see cref="Regions.FoundryOutpostCoreBoss.DisplayPhaseText"/>，不直接吐这个
+    /// 枚举名。</summary>
+    [Serializable]
+    public enum CoreBossState
+    {
+        Locked = 0,
+        Shielded = 1,
+        Phase1 = 2,
+        Transition = 3,
+        Phase2 = 4,
+        Destroyed = 5,
+    }
+
     /// <summary>ER1-SAVE-01：存档槽四态（STORY-EXECUTION-CARDS.md #ER1-SAVE-01 第一条）。</summary>
     [Serializable]
     public enum CampaignSlotState

@@ -347,6 +347,11 @@ namespace GameLogic.Stage
             var regionCommandBarHost = new GameObject("[RegionCommandBarHost]");
             Object.DontDestroyOnLoad(regionCommandBarHost);
             regionCommandBarHost.AddComponent<UI.RegionCommand.RegionCommandBarUIToolkit>();
+            // ER7-CORE-01：Boss 血条/阶段/节点/预警/热量面板，同样独立 GameObject（同一条 UIDocument
+            // 唯一性纪律），只在铸造前哨激活且核心分区 Boss 已初始化时可见（见该类 Update()）。
+            var coreBossHudHost = new GameObject("[CoreBossHudHost]");
+            Object.DontDestroyOnLoad(coreBossHudHost);
+            coreBossHudHost.AddComponent<UI.CoreBoss.CoreBossHudUIToolkit>();
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             // 已被 UI Toolkit 覆盖的旧 IMGUI 调试 HUD 不得默认盖在玩家界面上；
             // 如需做历史对照，可在运行时显式启用该组件。
