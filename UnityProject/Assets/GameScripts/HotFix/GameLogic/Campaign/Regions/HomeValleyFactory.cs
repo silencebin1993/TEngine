@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using GameLogic.Campaign.Blueprint;
+using GameLogic.Campaign.Content;
 
 namespace GameLogic.Campaign.Regions
 {
@@ -54,14 +55,15 @@ namespace GameLogic.Campaign.Regions
         private static readonly FactoryQueueState[] CancellableStates =
         {
             FactoryQueueState.Queued, FactoryQueueState.WaitingResources,
-            FactoryQueueState.WaitingPower, FactoryQueueState.Running,
+            FactoryQueueState.WaitingPower, FactoryQueueState.WaitingTarget, FactoryQueueState.Running,
         };
 
         private static bool IsCancellable(FactoryQueueState s) => CancellableStates.Contains(s);
 
         private static bool IsHeadCandidate(FactoryQueueState s) =>
             s == FactoryQueueState.Queued || s == FactoryQueueState.WaitingResources
-            || s == FactoryQueueState.WaitingPower || s == FactoryQueueState.Running;
+            || s == FactoryQueueState.WaitingPower || s == FactoryQueueState.WaitingTarget
+            || s == FactoryQueueState.Running;
 
         // ── 蓝图播种（首次使用即建，幂等；不等 ER4-BLP-01 正式蓝图编辑器落地才补，同
         // ChassisCatalog.ChassisHoverId"先落数据"先例）──────────────────────────────────
@@ -208,13 +210,100 @@ namespace GameLogic.Campaign.Regions
             return FactoryOpResult.Ok(queueItemId);
         }
 
-        /// <summary>回厂改造——范围裁剪（STORY-EXECUTION-CARDS.md #ER4-FAC-01 明确"生产队列"是本 Story
-        /// 范围，改造完整业务流程留 ER4-RETROFIT-01，本 Story 只交付面板"改造"Tab 骨架/明确禁用态）。
-        /// DEBT-ER4FAC01-01：承接 ER4-RETROFIT-01，最迟门禁该 Story 开工前，自动测试为该 Story 补齐
-        /// 真实改造 E2E。刻意返回明确失败原因而不是静默假装成功，UI 据此显示禁用态而不是空按钮。</summary>
-        public static FactoryOpResult TryEnqueueRetrofit(CampaignState state, int targetMachineLogicId, string blueprintId)
+        /// <summary>ER4-RETROFIT-01（提前于 ER4-PRIM-05 落地——STORY-BOARD.md #25 的玩家旅程"将 ERC-003
+        /// 回厂改造"硬依赖它，领取规则允许把确有必要的前置准备登记为当前 Story 子任务，不改看板顺序；
+        /// 待队列正式排到 #27 时该 Story 的验收卡已被本次实现覆盖，届时只需核对/补测）。
+        ///
+        /// 回厂改造——同一物理机体换一套装配，不是造一台新机：只更新
+        /// <see cref="MachineRecord.BlueprintId"/>/<see cref="MachineRecord.BlueprintVersion"/>/
+        /// <see cref="MachineRecord.LoadoutSignature"/>，<c>LogicId</c>/编号/HP/伤势/货物/经历/统计原样
+        /// 保留。目标蓝图必须与机体当前底盘同一原型（<see cref="ChassisCatalog.ResolveArchetype"/>
+        /// 相同）——"回厂改造"换的是脑子不是身体，跨底盘换装不在本 Story 语义内。
+        ///
+        /// 成本＝正差额且下限 <see cref="RetrofitMinScrapCost"/>：新版本废料成本减目标机当前版本成本，
+        /// 降级/平级改造仍收最低工时费，不倒找钱。默认时长 <see cref="RetrofitDurationSeconds"/> 秒。
+        ///
+        /// 目标资格在入队那一刻校验一次（与 <see cref="IsBlueprintUnlocked"/> 同一"只在入队校验"纪律）：
+        /// 存活、在家园区域、未占用出口、未被直控（由调用方——UI/HomeValleyController——解析后传入，本类
+        /// 不反向依赖 Controller）、当前没有在办工作单。范围裁剪：归还谷地当前无"可中断/不可中断工作"
+        /// 分类系统（该分类属于 ER5-EXP-01），本方法保守地把"有任何在办工作单"一律视为不可改造，不区分
+        /// 类型——不会误放行，只会偏保守拒绝，符合 Reject-to-Safe。</summary>
+        public const float RetrofitDurationSeconds = 25f;
+        public const int RetrofitMinScrapCost = 10;
+
+        public static FactoryOpResult TryEnqueueRetrofit(CampaignState state, int targetMachineLogicId,
+            string blueprintId, int blueprintVersion, bool targetIsDirectControlled)
         {
-            return FactoryOpResult.Fail("not-implemented:ER4-RETROFIT-01");
+            if (state == null || string.IsNullOrEmpty(blueprintId))
+            {
+                return FactoryOpResult.Fail("invalid-args");
+            }
+            if (!MachineRegistry.TryGetRecord(targetMachineLogicId, out MachineRecord machine) || !machine.IsAlive)
+            {
+                return FactoryOpResult.Fail("target-not-alive");
+            }
+            if (machine.RegionId != HomeValleyLayout.RegionId)
+            {
+                return FactoryOpResult.Fail("target-not-in-home-valley");
+            }
+            if (machine.IsInFactory)
+            {
+                return FactoryOpResult.Fail("target-occupying-factory-exit");
+            }
+            if (targetIsDirectControlled)
+            {
+                return FactoryOpResult.Fail("target-directly-controlled");
+            }
+            if (!string.IsNullOrEmpty(machine.CurrentWorkOrderId))
+            {
+                return FactoryOpResult.Fail("target-busy-with-work-order");
+            }
+            bool alreadyQueuedForRetrofit = state.FactoryQueues != null && state.FactoryQueues.Any(q =>
+                q.Kind == FactoryQueueKind.Retrofit && q.TargetMachineLogicId == targetMachineLogicId && IsCancellable(q.State));
+            if (alreadyQueuedForRetrofit)
+            {
+                return FactoryOpResult.Fail("target-already-queued-for-retrofit");
+            }
+
+            BlueprintRecord bp = state.BlueprintRecords?.FirstOrDefault(b => b.BlueprintId == blueprintId);
+            BlueprintVersionRecord newVersion = bp?.Versions?.FirstOrDefault(v => v.Version == blueprintVersion);
+            if (newVersion == null)
+            {
+                return FactoryOpResult.Fail("blueprint-version-not-found");
+            }
+
+            string targetArchetype = ChassisCatalog.ResolveArchetype(newVersion.ChassisId) ?? newVersion.ChassisId;
+            string currentArchetype = ChassisCatalog.ResolveArchetype(machine.ChassisId) ?? machine.ChassisId;
+            if (targetArchetype != currentArchetype)
+            {
+                return FactoryOpResult.Fail("chassis-mismatch");
+            }
+
+            BlueprintRecord currentBp = state.BlueprintRecords?.FirstOrDefault(b => b.BlueprintId == machine.BlueprintId);
+            BlueprintVersionRecord currentVersion = currentBp?.Versions?.FirstOrDefault(v => v.Version == machine.BlueprintVersion);
+            int currentCost = currentVersion?.ScrapCost ?? 0;
+            int cost = Math.Max(RetrofitMinScrapCost, newVersion.ScrapCost - currentCost);
+
+            string queueItemId = blueprintId + ":retrofit:" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            string txId = queueItemId + ":tx";
+            CampaignEconomyLedger.ProposeConsume(state, txId, queueItemId, CampaignEconomyLedger.ResourceScrap, cost);
+
+            var item = new FactoryQueueItemRecord
+            {
+                QueueItemId = queueItemId,
+                Kind = FactoryQueueKind.Retrofit,
+                BlueprintId = blueprintId,
+                BlueprintVersion = blueprintVersion,
+                TargetMachineLogicId = targetMachineLogicId,
+                TransactionId = txId,
+                Duration = RetrofitDurationSeconds,
+                Progress = 0f,
+                State = FactoryQueueState.Queued,
+                BlockedReason = null,
+                CreatedTick = NowTick(state),
+            };
+            Append(state, item);
+            return FactoryOpResult.Ok(queueItemId);
         }
 
         // ── 取消 ─────────────────────────────────────────────────────────────────
@@ -327,6 +416,26 @@ namespace GameLogic.Campaign.Regions
 
         private static void TickHead(CampaignState state, FactoryQueueItemRecord item, float dt, BuildingRecord station)
         {
+            // 改造项在真正开工前重新核验目标——入队与排到队首之间可能经过任意长时间，目标可能已经
+            // 阵亡/离开家园区域，此时不能假装继续正常推进。Running 之后不再重复这项检查（同
+            // "已排入队列的项不因之后解析台断电而回溯失效"的既有纪律，开工后只受电力门控）。
+            if (item.Kind == FactoryQueueKind.Retrofit && item.State != FactoryQueueState.Running)
+            {
+                if (!MachineRegistry.TryGetRecord(item.TargetMachineLogicId, out MachineRecord target) || !target.IsAlive)
+                {
+                    item.State = FactoryQueueState.Failed;
+                    item.BlockedReason = "target-lost";
+                    CampaignEconomyLedger.Cancel(state, item.TransactionId);
+                    return;
+                }
+                if (target.RegionId != HomeValleyLayout.RegionId)
+                {
+                    item.State = FactoryQueueState.WaitingTarget;
+                    item.BlockedReason = "target-left-home-valley";
+                    return;
+                }
+            }
+
             // 真实 bug（execute_code 实测发现）：HomeValleyPowerGrid.Recompute 的消费者过滤条件是
             // ConstructionState==Operational——玩家用 TryToggleShutdown 把装配站关停（转 Disabled）后，
             // Recompute 的仲裁循环整条跳过它，PowerState 字段停留在关停前最后一次算出的 Powered，不会
@@ -347,7 +456,7 @@ namespace GameLogic.Campaign.Regions
                 item.Progress += dt;
                 if (item.Progress >= item.Duration)
                 {
-                    CompleteProduction(state, item);
+                    CompleteHeadItem(state, item);
                 }
                 return;
             }
@@ -374,9 +483,20 @@ namespace GameLogic.Campaign.Regions
             item.BlockedReason = null;
         }
 
-        private static void CompleteProduction(CampaignState state, FactoryQueueItemRecord item)
+        /// <summary>队首完工分发：Produce 生成新机需要占用唯一出口，走既有 OutputBlocked 门控；
+        /// Retrofit 改的是已经在场的机体本身，没有"新物体要驶出"这回事——目标机全程留在原地，不占用
+        /// <see cref="MachineRecord.IsInFactory"/> 出口标记，因此不经过 <see cref="IsExitBlocked"/> 门控，
+        /// 直接完成。这是刻意的范围简化（不模拟"机体实际行驶到装配站"的位移/寻路），已在
+        /// <see cref="TryEnqueueRetrofit"/> 类注释登记。</summary>
+        private static void CompleteHeadItem(CampaignState state, FactoryQueueItemRecord item)
         {
             item.Progress = item.Duration; // 钳制：不倒退、不无界累加超过 Duration。
+
+            if (item.Kind == FactoryQueueKind.Retrofit)
+            {
+                CompleteRetrofit(state, item);
+                return;
+            }
 
             if (IsExitBlocked(state))
             {
@@ -386,6 +506,49 @@ namespace GameLogic.Campaign.Regions
             }
 
             SpawnProducedMachine(state, item);
+        }
+
+        /// <summary>回厂改造完工：只更新 <see cref="MachineRecord.BlueprintId"/>/
+        /// <see cref="MachineRecord.BlueprintVersion"/>/<see cref="MachineRecord.LoadoutSignature"/>，
+        /// LogicId/编号/HP/伤势/货物/经历/统计原样保留——AC-MCH-001"经历/统计不因改造丢失或重置"、
+        /// AC-BLP-003"新版本不改变旧机，回厂改造后才更新旧机"在这里同时兑现：旧版本记录本身从未被
+        /// 改写（只是这台机不再引用它），仍可通过 <see cref="BlueprintEditorService.FindActiveVersion"/>
+        /// 之外的历史版本查询正常解析（AC-BLP-004"被机器引用的版本不可删除"天然满足，本类从不删除
+        /// 任何 <see cref="BlueprintVersionRecord"/>）。目标已不在场/已阵亡/版本已不可解析（理论上不
+        /// 应发生，TickHead 已在开工前核验过一次，这里是完工时的第二道防御）时转 Failed 并退款。</summary>
+        private static void CompleteRetrofit(CampaignState state, FactoryQueueItemRecord item)
+        {
+            if (!MachineRegistry.TryGetRecord(item.TargetMachineLogicId, out MachineRecord machine) || !machine.IsAlive)
+            {
+                item.State = FactoryQueueState.Failed;
+                item.BlockedReason = "target-lost";
+                CampaignEconomyLedger.Cancel(state, item.TransactionId);
+                return;
+            }
+
+            BlueprintRecord bp = state.BlueprintRecords?.FirstOrDefault(b => b.BlueprintId == item.BlueprintId);
+            BlueprintVersionRecord version = bp?.Versions?.FirstOrDefault(v => v.Version == item.BlueprintVersion);
+            if (version == null)
+            {
+                item.State = FactoryQueueState.Failed;
+                item.BlockedReason = "blueprint-version-missing";
+                CampaignEconomyLedger.Cancel(state, item.TransactionId);
+                return;
+            }
+
+            machine.BlueprintId = item.BlueprintId;
+            machine.BlueprintVersion = item.BlueprintVersion;
+            machine.LoadoutSignature = version.CompileSignature;
+
+            CircuitOpResult loadoutRegister = MachineLoadoutRegistry.Register(state, machine.LogicId, item.BlueprintId, item.BlueprintVersion);
+            if (!loadoutRegister.Success)
+            {
+                TEngine.Log.Warning($"[HomeValleyFactory] 机器 {machine.LogicId} 改造后装配登记失败：{loadoutRegister.Message}");
+            }
+
+            CampaignEconomyLedger.Commit(state, item.TransactionId);
+            item.State = FactoryQueueState.Completed;
+            item.BlockedReason = null;
         }
 
         private static void TryReleaseOutputBlocked(CampaignState state, FactoryQueueItemRecord item)

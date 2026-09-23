@@ -211,8 +211,9 @@ namespace GameLogic.Campaign.Regions
         }
 
         /// <summary>ERD-WRK-002"直控机器暂不领取新单"的判定来源——<see cref="HomeValleyWorkOrders.Tick"/>
-        /// 的分配引擎不下沉持有 <see cref="_possessed"/>，只能靠委托查询。</summary>
-        private bool IsMachineDirectControlled(int logicId)
+        /// 的分配引擎不下沉持有 <see cref="_possessed"/>，只能靠委托查询。ER4-RETROFIT-01：改造面板
+        /// （<c>UI.Factory.FactoryPanelUIToolkit</c>）同样需要"目标机是否正被直控"这一判定，改为公开。</summary>
+        public bool IsMachineDirectControlled(int logicId)
         {
             return _possessed != null && _possessed.LogicId == logicId;
         }
