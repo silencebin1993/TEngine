@@ -263,8 +263,8 @@ public class MainToolbarDropdownSceneSelector
     {
         var allScenes = new List<(string sceneName, string scenePath)>();
 
-        // 查找项目中所有场景文件
-        string[] guids = AssetDatabase.FindAssets("t:Scene");
+        // 仅扫描业务项目的 Assets，排除 Packages 中插件携带的示例场景。
+        string[] guids = AssetDatabase.FindAssets("t:Scene", new[] { "Assets" });
         foreach (var guid in guids)
         {
             var scenePath = AssetDatabase.GUIDToAssetPath(guid);
