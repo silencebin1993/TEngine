@@ -28,6 +28,13 @@ namespace GameLogic.Campaign.Regions
     {
         public bool IsActive { get; private set; }
         public bool IsPaused => _paused;
+        /// <summary>ER5-RETURN-01：全灭检测结果只读暴露——<see cref="ExpeditionReturnService"/> 据此
+        /// 区分"玩家主动撤离"与"全灭放弃远征"两条确认路径，不在服务类里另存一份判定。</summary>
+        public bool IsWiped => _wipeResolved;
+        /// <summary>ER5-RETURN-01：撤离确认面板开关——同 <see cref="HomeValleyController.IsExpeditionPrepPanelOpen"/>
+        /// 先例，由到达撤离点的 E 交互打开，玩家在面板内确认或取消。</summary>
+        public bool IsEvacPanelOpen { get; private set; }
+        public void SetEvacPanelOpen(bool open) => IsEvacPanelOpen = open;
 
         private GameObject _root;
         private Camera _camera;
@@ -261,14 +268,20 @@ namespace GameLogic.Campaign.Regions
         /// <summary>全灭检测：本区域曾经有过机器、当前全部阵亡时，自动结算 Lost（不自动弹出结算 UI/
         /// 强制退出场景——完整的失败回城结算属于 ER5-RETURN-01，本 Story 只保证数据层真相正确，
         /// 幂等，同一次全灭只结算一次。</summary>
+        /// <summary>ER5-RETURN-01 实测发现的真实缺陷：原实现读 <c>state.MachineRecords</c>——那是
+        /// <see cref="MachineRegistry.ExportToCampaignState"/>（存档前/显式调用）才会更新的克隆快照，
+        /// 不是实时数据（同 ER5-SILENT-01 已记录的"血量字段陷阱"同一性质，这里是第二处真实踩坑，
+        /// 后果更严重：全灭检测在没有任何存档动作发生的连续 Play 过程中会一直读到"全部存活"的过期
+        /// 快照，永远侦测不到全灭，直到凑巧发生一次自动存档）。改读 <see cref="MachineRegistry.AllRecords"/>
+        /// （权威实时来源，同 <c>SetupSquadCommands.IsEligible</c> 等既有用法一致）。</summary>
         private void TickWipeDetection(CampaignState state)
         {
             if (_wipeResolved || _machineMarkers.Count == 0)
             {
                 return;
             }
-            bool anyAlive = state.MachineRecords != null && state.MachineRecords
-                .Any(m => m.RegionId == FracturedCityLayout.RegionId && m.IsAlive);
+            bool anyAlive = MachineRegistry.AllRecords
+                .Any(m => m != null && m.RegionId == FracturedCityLayout.RegionId && m.IsAlive);
             if (anyAlive)
             {
                 return;
@@ -294,8 +307,12 @@ namespace GameLogic.Campaign.Regions
                 SyncLiveStateBackToRecords();
                 if (evacuateSuccess && !_wipeResolved)
                 {
-                    List<int> survivors = (state.MachineRecords ?? Array.Empty<MachineRecord>())
-                        .Where(m => m.RegionId == FracturedCityLayout.RegionId && m.IsAlive)
+                    // ER5-RETURN-01 实测发现的真实缺陷：同 TickWipeDetection，此前读 state.MachineRecords
+                    // 是过期快照——若有机器在"最近一次自动存档之后、Exit 之前"这段时间阵亡（例如本 Story
+                    // 起真实敌方 AI 能杀死玩家机器），旧代码仍会把它当存活者一起送回家园、错误地把它
+                    // 携带的关键物标记 Recovered。改读 MachineRegistry.AllRecords（权威实时来源）。
+                    List<int> survivors = MachineRegistry.AllRecords
+                        .Where(m => m != null && m.RegionId == FracturedCityLayout.RegionId && m.IsAlive)
                         .Select(m => m.LogicId).ToList();
                     FracturedCityRegion.ResolveExtraction(state, survivors);
                     foreach (int logicId in survivors)
@@ -811,23 +828,28 @@ namespace GameLogic.Campaign.Regions
                 }
             }
 
-            // 撤离确认：占位交互——真正的到达确认面板/回城结算由 ER5-RETURN-01 接手（DEBT-ER5INT01-01）。
-            list.Add(new RegionInteractCandidate
+            // ER5-RETURN-01：撤离确认——按住 E 只打开确认面板（已上车/遗留货物/幸存阵亡/未完成目标/
+            // 关键技术是否仍不可解析，见 ExpeditionReturnPanelUIToolkit），真正的回城结算只在玩家在
+            // 面板内点击"确认撤离"后由 ExpeditionReturnService.TryConfirmEvacuation 执行——"确认后才
+            // 进入回城事务"（验收卡第1条字面要求），按住 E 本身不产生任何不可逆效果，可随时取消。
+            if (!IsEvacPanelOpen)
             {
-                Id = "evac:" + FracturedCityLayout.EntryEvacId,
-                Category = RegionInteractCategory.EvacConfirm,
-                Position = FracturedCityLayout.EntryEvac.Position,
-                HoldSeconds = 1f,
-                Priority = -10,
-                ActionVerb = "确认撤离（占位）",
-                Validate = () => RegionInteractResult.Ok(),
-                Complete = () =>
+                list.Add(new RegionInteractCandidate
                 {
-                    Log.Info("[FracturedCityController] 撤离确认：占位确认（真正的到达确认面板/回城结算见 " +
-                        "ER5-RETURN-01，DEBT-ER5INT01-01）。");
-                    return RegionInteractResult.Ok("占位确认：完整撤离结算流程尚未实装（ER5-RETURN-01）。");
-                },
-            });
+                    Id = "evac:" + FracturedCityLayout.EntryEvacId,
+                    Category = RegionInteractCategory.EvacConfirm,
+                    Position = FracturedCityLayout.EntryEvac.Position,
+                    HoldSeconds = 1f,
+                    Priority = -10,
+                    ActionVerb = "查看撤离清单",
+                    Validate = () => RegionInteractResult.Ok(),
+                    Complete = () =>
+                    {
+                        SetEvacPanelOpen(true);
+                        return RegionInteractResult.Ok("撤离清单已打开。");
+                    },
+                });
+            }
 
             return list;
         }

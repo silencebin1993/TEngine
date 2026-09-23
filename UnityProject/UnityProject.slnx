@@ -6,6 +6,7 @@
   <Project Path="Unity.Mathematics.csproj" />
   <Project Path="Unity.Cinemachine.Editor.csproj" />
   <Project Path="HybridCLR.Editor.csproj" />
+  <Project Path="GameLogic.csproj" />
   <Project Path="TEngine.Runtime.csproj" />
   <Project Path="Unity.InferenceEngine.Microsoft.Msagl.csproj" />
   <Project Path="Unity.AI.Assistant.Runtime.csproj" />
@@ -23,7 +24,6 @@
   <Project Path="Unity.AI.Mesh.csproj" />
   <Project Path="MCPForUnity.Editor.csproj" />
   <Project Path="UniTask.csproj" />
-  <Project Path="GameLogic.csproj" />
   <Project Path="Unity.Searcher.Editor.csproj" />
   <Project Path="Unity.ProBuilder.Editor.csproj" />
   <Project Path="glTFast.csproj" />

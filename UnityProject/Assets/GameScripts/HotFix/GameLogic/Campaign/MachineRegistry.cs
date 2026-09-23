@@ -569,6 +569,40 @@ namespace GameLogic.Campaign
             }
         }
 
+        /// <summary>ER5-RETURN-01：<see cref="MachineRecord.InjuryFlags"/> 的唯一写入口——此前是从未
+        /// 被写过的骨架字段（<c>WorkOrderPanelUIToolkit</c> 类注释明确记录"归还谷地没有让机器受伤的
+        /// 触发源"，如实显示"无记录"）。ER5-SILENT-01 起机器在区域内会因敌方攻击真的掉血，本 Story
+        /// 起才有数据可写。幂等：同一标签不会重复追加（同 <see cref="TryMarkExperience"/> 纪律，但
+        /// 这里允许多个不同标签共存——伤势按次记录，不是"首次"型的封闭集合）。</summary>
+        public static bool TryMarkInjury(int logicId, string injuryLabel)
+        {
+            if (!_records.TryGetValue(logicId, out MachineRecord record) || string.IsNullOrEmpty(injuryLabel))
+            {
+                return false;
+            }
+            record.InjuryFlags ??= Array.Empty<string>();
+            if (Array.IndexOf(record.InjuryFlags, injuryLabel) >= 0)
+            {
+                return false;
+            }
+            record.InjuryFlags = record.InjuryFlags.Append(injuryLabel).ToArray();
+            return true;
+        }
+
+        /// <summary>ER5-RETURN-01：<see cref="MachineRecord.ExpeditionsCompleted"/> 的唯一写入口——
+        /// 此前只在 <see cref="SpawnMachine"/>/<see cref="LoadFromCampaignState"/> 里初始化为 0，
+        /// 从未被递增过（同 <see cref="MachineExperienceFlags.Expedition"/> 性质，DEBT-ER4MCH01-01
+        /// 登记的"依赖 ER5 远征系统"五项之一，本 Story 补上真实触发源）。不做幂等去重——它是次数
+        /// 统计，不是"首次"标记，调用方（<see cref="Regions.ExpeditionReturnService"/>）保证每次
+        /// 成功返程只调用一次。</summary>
+        public static void RecordExpeditionCompleted(int logicId)
+        {
+            if (_records.TryGetValue(logicId, out MachineRecord record))
+            {
+                record.ExpeditionsCompleted++;
+            }
+        }
+
         public static MachineOpResult RecordControlled(int logicId)
         {
             if (!_records.TryGetValue(logicId, out MachineRecord record))

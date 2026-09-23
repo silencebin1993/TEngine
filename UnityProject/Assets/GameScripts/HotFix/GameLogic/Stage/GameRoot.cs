@@ -283,6 +283,11 @@ namespace GameLogic.Stage
             var expeditionPrepHost = new GameObject("[HomeValleyExpeditionPrepHost]");
             Object.DontDestroyOnLoad(expeditionPrepHost);
             expeditionPrepHost.AddComponent<UI.Expedition.ExpeditionPrepPanelUIToolkit>();
+            // ER5-RETURN-01：撤离确认/放弃远征面板，同样独立 GameObject（同一条 UIDocument 唯一性
+            // 纪律），只在破碎都市激活且到达撤离点/全灭时可见（见 ExpeditionReturnPanelUIToolkit.Update）。
+            var expeditionReturnHost = new GameObject("[FracturedCityExpeditionReturnHost]");
+            Object.DontDestroyOnLoad(expeditionReturnHost);
+            expeditionReturnHost.AddComponent<UI.Expedition.ExpeditionReturnPanelUIToolkit>();
             // ER5-CMD-01：战略命令条（选择集/编组/Move·Attack·Guard·Retreat），同样独立 GameObject
             // （同一条 UIDocument 唯一性纪律）；归还谷地与破碎都市共用同一个实例，谁在跑就显示谁的
             // RegionSquadCommandSystem（见该类 Update() 判断）。
