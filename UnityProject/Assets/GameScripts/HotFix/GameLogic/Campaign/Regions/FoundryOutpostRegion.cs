@@ -122,6 +122,12 @@ namespace GameLogic.Campaign.Regions
             SeedIfMissing(FoundryOutpostLayout.RepairBotSpawnId, EnemyCatalog.RepairBotId,
                 FoundryOutpostLayout.RepairBotSpawn.Position, FoundryOutpostLayout.RepairBotMaxHealth);
 
+            // ER6-ADAPT-01：基线4只敌人播种完成后，按本区域已锁定的 AdaptationId 增/撤反制增援槽位
+            // （Flanker/JammerSupport 各一组）。必须在基线播种之后调用，保证幂等 SeedIfMissing 不受
+            // 影响；也必须在 Enter() 每次调用（含 resume）时都执行一遍——已锁定值不变时是纯粹的
+            // no-op（Reconcile 内部先判断实例是否已存在且类型匹配）。
+            ReconcileAdaptiveSupportEnemy(state, Find(state));
+
             void SeedIfMissing(string instanceId, string typeId, Vector2 position, float maxHealth)
             {
                 if (FindEnemy(state, instanceId) != null)
@@ -140,6 +146,71 @@ namespace GameLogic.Campaign.Regions
                     CycleCooldownRemaining = 0f,
                     SecondaryTimer = 0f,
                 }).ToArray();
+            }
+        }
+
+        /// <summary>ER6-ADAPT-01：反制增援槽位的唯一增/撤入口——<see cref="RegionRecord.AdaptationId"/>
+        /// 决定当前应该存在哪一个（Flanker→护甲机类型的 <see cref="FoundryOutpostLayout.FlankerSpawnId"/>，
+        /// JammerSupport→复用 <see cref="EnemyCatalog.JammerId"/> 的 <see cref="FoundryOutpostLayout.JammerSupportSpawnId"/>，
+        /// None/HeatResistant→都不需要）。每次 <see cref="EnsureEnemiesSeeded"/>（即每次真实 Enter，包含
+        /// resume）调用一遍：已存在且类型匹配则不动（保留其当前血量/存活状态，不是每次重置）；不该存在
+        /// 的槽位如果还留着（同一 foundry_outpost 跨多次出征、适应从 Flanker 换成 JammerSupport 等场景）
+        /// 就撤掉——这一步只会在 Enter() 时（两次真实出征之间）发生，不会在同一场战斗进行到一半时把
+        /// 敌人凭空撤走，与"战中不偷换"要求不冲突（锁定的是 AdaptationId 本身，不是这个槽位实例）。</summary>
+        private static void ReconcileAdaptiveSupportEnemy(CampaignState state, RegionRecord region)
+        {
+            if (state == null || region == null)
+            {
+                return;
+            }
+
+            string requiredInstanceId = region.AdaptationId switch
+            {
+                AdaptationCatalog.Flanker => FoundryOutpostLayout.FlankerSpawnId,
+                AdaptationCatalog.JammerSupport => FoundryOutpostLayout.JammerSupportSpawnId,
+                _ => null,
+            };
+
+            RemoveAdaptiveSlotIfStale(state, FoundryOutpostLayout.FlankerSpawnId,
+                keep: requiredInstanceId == FoundryOutpostLayout.FlankerSpawnId);
+            RemoveAdaptiveSlotIfStale(state, FoundryOutpostLayout.JammerSupportSpawnId,
+                keep: requiredInstanceId == FoundryOutpostLayout.JammerSupportSpawnId);
+
+            if (requiredInstanceId == null || FindEnemy(state, requiredInstanceId) != null)
+            {
+                return; // 当前适应不需要增援槽位，或需要的槽位已经存在（类型经上面两步保证正确）。
+            }
+
+            bool isJammer = requiredInstanceId == FoundryOutpostLayout.JammerSupportSpawnId;
+            string enemyTypeId = isJammer ? EnemyCatalog.JammerId : EnemyCatalog.ArmorBotId;
+            Vector2 position = isJammer ? FoundryOutpostLayout.JammerSupportSpawn.Position : FoundryOutpostLayout.FlankerSpawn.Position;
+            float maxHealth = isJammer ? FracturedCityLayout.JammerMaxHealth : FoundryOutpostLayout.ArmorBotMaxHealth;
+
+            state.RegionEnemies = (state.RegionEnemies ?? Array.Empty<RegionEnemyRecord>()).Append(new RegionEnemyRecord
+            {
+                EnemyInstanceId = requiredInstanceId,
+                RegionId = RegionId,
+                EnemyTypeId = enemyTypeId,
+                Position = position,
+                Health = maxHealth,
+                MaxHealth = maxHealth,
+                IsAlive = true,
+                CycleCooldownRemaining = 0f,
+                SecondaryTimer = 0f,
+            }).ToArray();
+            Log.Info($"[FoundryOutpostRegion] 反制增援已布防：{requiredInstanceId}（{enemyTypeId}），对应适应 {region.AdaptationId}。");
+        }
+
+        private static void RemoveAdaptiveSlotIfStale(CampaignState state, string instanceId, bool keep)
+        {
+            if (keep || state?.RegionEnemies == null)
+            {
+                return;
+            }
+            if (state.RegionEnemies.Any(e => e.EnemyInstanceId == instanceId))
+            {
+                state.RegionEnemies = state.RegionEnemies.Where(e => e.EnemyInstanceId != instanceId).ToArray();
+                Log.Info($"[FoundryOutpostRegion] 反制增援已撤下：{instanceId}（适应已切换，不再需要）。");
             }
         }
 
@@ -282,6 +353,12 @@ namespace GameLogic.Campaign.Regions
             Vector2 facing = enemy.EnemyInstanceId == FoundryOutpostLayout.ArmorBotLeftSpawnId
                 ? FoundryOutpostLayout.ArmorBotLeftFacing
                 : FoundryOutpostLayout.ArmorBotRightFacing;
+            // ER6-ADAPT-01：侧袭增援复用护甲机类型时用自己的朝向常量，不套用左/右掩体默认三元判定
+            // （它站的位置既不是左也不是右掩体，套用会给出错误的正面锥角基准）。
+            if (enemy.EnemyInstanceId == FoundryOutpostLayout.FlankerSpawnId)
+            {
+                facing = FoundryOutpostLayout.FlankerFacing;
+            }
             Vector2 toAttacker = attackerPosition - enemy.Position;
             if (toAttacker.sqrMagnitude < 1e-6f)
             {
@@ -328,8 +405,19 @@ namespace GameLogic.Campaign.Regions
                 // ActionResult（同名不同类型，Success/FailureReason 结构相同）——本方法域内统一用
                 // 自己的 ActionResult，这里做一次纯字段转换，不改 CannonCombat 本身（ER6-REACT-02
                 // 已验收，不引入非必要改动）。
+                //
+                // ER6-ADAPT-01：铸造重炮命中护甲机正面时，与普通武器同一套 IsFrontalHit 判定+
+                // ArmorBotFrontalReductionPct 基线，但额外经 CannonCombat.ApplyArmorPierce 按"是否熔穿
+                // 过载生效"与"目标是否 HeatResistant 适应"调整穿甲——这正是 ER6-REACT-02 当时把
+                // targetHeatResistant 参数留空、注释点名"该系统尚未开工"的落地点。
+                bool isFrontalArmored = enemy.EnemyTypeId == EnemyCatalog.ArmorBotId && IsFrontalHit(enemy, attackerPosition);
+                RegionRecord adaptRegion = Find(state);
+                bool heatResistant = adaptRegion != null && adaptRegion.AdaptationId == AdaptationCatalog.HeatResistant;
                 FracturedCityRegion.ActionResult cannonResult = CannonCombat.TryFire(
-                    state, attackerLogicId, enemyInstanceId, resolution, isReachable);
+                    state, attackerLogicId, enemyInstanceId, resolution, isReachable,
+                    isFrontalArmoredHit: isFrontalArmored,
+                    armorReductionFraction: FoundryOutpostLayout.ArmorBotFrontalReductionPct,
+                    targetHeatResistant: heatResistant);
                 return cannonResult.Success ? ActionResult.Ok() : ActionResult.Fail(cannonResult.FailureReason);
             }
 
@@ -828,10 +916,17 @@ namespace GameLogic.Campaign.Regions
         public static List<string> SelfCheckNoDuplicates(CampaignState state)
         {
             var violations = new List<string>();
+            RegionRecord region = Find(state);
+            // ER6-ADAPT-01：Flanker/JammerSupport 各带一台条件播种的反制增援，基线之外 +1；None/
+            // HeatResistant 不额外播种，仍是基线 4。
+            bool hasAdaptiveSlot = region != null &&
+                (region.AdaptationId == AdaptationCatalog.Flanker || region.AdaptationId == AdaptationCatalog.JammerSupport);
+            int expectedCount = hasAdaptiveSlot ? 5 : 4;
             int enemyCount = state?.RegionEnemies?.Count(e => e.RegionId == RegionId) ?? 0;
-            if (enemyCount != 4)
+            if (enemyCount != expectedCount)
             {
-                violations.Add($"铸造前哨外围敌人实例数应为 4（2 护甲机 + 1 步进炮 + 1 维修机），实际 {enemyCount}。");
+                violations.Add($"铸造前哨外围敌人实例数应为 {expectedCount}（基线 2 护甲机+1 步进炮+1 维修机" +
+                    $"{(hasAdaptiveSlot ? "+1 反制增援" : "")}），实际 {enemyCount}。");
             }
             var dupCheck = state?.RegionEnemies?.Where(e => e.RegionId == RegionId)
                 .GroupBy(e => e.EnemyInstanceId).Where(g => g.Count() > 1).ToList();

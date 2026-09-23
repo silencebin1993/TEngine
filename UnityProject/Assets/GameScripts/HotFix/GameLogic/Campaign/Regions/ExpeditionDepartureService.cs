@@ -204,9 +204,27 @@ namespace GameLogic.Campaign.Regions
             /// 暂不可进入'"——目标明确文案，Target 为 FoundryOutpost 时给出。</summary>
             public readonly string ObjectivePreviewText;
 
+            /// <summary>ER6-ADAPT-01：<see cref="EnemyAdaptationService.ComputeAdaptation"/> 的实时预览
+            /// （未锁定，出发确认时才真正写入 <see cref="RegionRecord.AdaptationId"/>）。DEMO-CONTENT-LOCK.md
+            /// 行205"第三次准备：敌方反制名、来源和具体应对建议；未见情报时显示None"——恒为
+            /// <see cref="AdaptationCatalog.None"/> 时四个文案字段自然落到"无反制"那一条，不需要调用方
+            /// 额外判空。</summary>
+            public readonly string AdaptationId;
+            public readonly string AdaptationDisplayName;
+            public readonly string AdaptationSourceText;
+            public readonly string AdaptationHazardText;
+            public readonly string AdaptationCounterHintText;
+            /// <summary>ER6-ADAPT-01 STORY-EXECUTION-CARDS.md 第3条"90暴露额外入口护甲机单独预告，
+            /// 不把它伪装成adaptation"——独立字段，不并入上面四个 Adaptation* 字段。</summary>
+            public readonly bool CoreReinforcementForecast;
+            public readonly string CoreReinforcementForecastText;
+
             public PrepSnapshot(bool regionReachable, string blockedReason, MachineIntel[] machines,
                 float bandwidthCapacity, int minRecommendedCargoSlots, string enemyIntelText,
-                float enemyAlertLevel, int expeditionCount, ExpeditionTarget target, string objectivePreviewText)
+                float enemyAlertLevel, int expeditionCount, ExpeditionTarget target, string objectivePreviewText,
+                string adaptationId, string adaptationDisplayName, string adaptationSourceText,
+                string adaptationHazardText, string adaptationCounterHintText,
+                bool coreReinforcementForecast, string coreReinforcementForecastText)
             {
                 RegionReachable = regionReachable;
                 BlockedReason = blockedReason;
@@ -218,7 +236,38 @@ namespace GameLogic.Campaign.Regions
                 ExpeditionCount = expeditionCount;
                 Target = target;
                 ObjectivePreviewText = objectivePreviewText;
+                AdaptationId = adaptationId;
+                AdaptationDisplayName = adaptationDisplayName;
+                AdaptationSourceText = adaptationSourceText;
+                AdaptationHazardText = adaptationHazardText;
+                AdaptationCounterHintText = adaptationCounterHintText;
+                CoreReinforcementForecast = coreReinforcementForecast;
+                CoreReinforcementForecastText = coreReinforcementForecastText;
             }
+        }
+
+        /// <summary>ER6-ADAPT-01：三份面板快照共用同一份反制情报计算——"面板显示与出发时锁定必须是
+        /// 同一套算法"，不允许面板自己再算一遍。<paramref name="state"/> 为 null 时直接给 None 默认值，
+        /// 不调用 <see cref="EnemyAdaptationService.ComputeAdaptation"/>（该方法本身也对 null 安全，这里
+        /// 提前短路只是避免无意义的一次函数调用）。</summary>
+        private static (string id, string name, string source, string hazard, string counter,
+            bool reinforcement, string reinforcementText) BuildAdaptationDisplay(CampaignState state)
+        {
+            if (state == null)
+            {
+                AdaptationCatalog.AdaptationInfo noneInfo = AdaptationCatalog.Describe(AdaptationCatalog.None);
+                return (AdaptationCatalog.None, noneInfo.DisplayName, noneInfo.SourceText, noneInfo.HazardText,
+                    noneInfo.CounterHintText, false, null);
+            }
+            string adaptationId = EnemyAdaptationService.ComputeAdaptation(state);
+            AdaptationCatalog.AdaptationInfo info = AdaptationCatalog.Describe(adaptationId);
+            bool reinforcement = CampaignExposureLedger.HasReachedCoreReinforcement(state);
+            string reinforcementText = reinforcement
+                ? "信号暴露已突破90：下一次进攻核心分区时，入口会额外增援一台铸造护甲机布防" +
+                  "（出发前预告，不是本次适应，届时在核心战入口实装）。"
+                : null;
+            return (adaptationId, info.DisplayName, info.SourceText, info.HazardText, info.CounterHintText,
+                reinforcement, reinforcementText);
         }
 
         /// <summary>面板展示用的整份快照。<paramref name="state"/> 为空或区域尚未 Available 时
@@ -229,7 +278,7 @@ namespace GameLogic.Campaign.Regions
             if (state == null)
             {
                 return new PrepSnapshot(false, "no-active-campaign", Array.Empty<MachineIntel>(), 0f, 0, null, 0f, 0,
-                    ExpeditionTarget.None, null);
+                    ExpeditionTarget.None, null, AdaptationCatalog.None, null, null, null, null, false, null);
             }
 
             ExpeditionTarget target = ResolveTarget(state);
@@ -238,7 +287,8 @@ namespace GameLogic.Campaign.Regions
                 RegionRecord fractured = FracturedCityRegion.Find(state);
                 return new PrepSnapshot(false, "region-locked", Array.Empty<MachineIntel>(),
                     HomeValleySignal.BandwidthCapacity(state), 0, null, fractured?.EnemyAlertLevel ?? 0f,
-                    fractured?.ExpeditionCount ?? 0, ExpeditionTarget.None, null);
+                    fractured?.ExpeditionCount ?? 0, ExpeditionTarget.None, null,
+                    AdaptationCatalog.None, null, null, null, null, false, null);
             }
 
             MachineIntel[] machines = MachineRegistry.AllRecords
@@ -265,10 +315,17 @@ namespace GameLogic.Campaign.Regions
                     $"铸造步进炮 x{aliveStriders}（HP{FoundryOutpostLayout.StriderMaxHealth:F0}，1秒瞄准线）｜" +
                     $"铸造维修机 x{aliveRepairBots}（HP{FoundryOutpostLayout.RepairBotMaxHealth:F0}）";
 
+                // ER6-ADAPT-01：第二次出征起（目标已切到铸造前哨外围）才有"上次战斗暴露"这个前提——
+                // 见 EnemyAdaptationService 类注释范围裁决，第一次出征（破碎都市）恒 None，走下面的
+                // else 分支不调用 ComputeAdaptation。
+                var adapt = BuildAdaptationDisplay(state);
+
                 return new PrepSnapshot(true, null, machines, HomeValleySignal.BandwidthCapacity(state),
                     MinRecommendedCargoSlots(target, foundry), foundryIntel, foundry?.EnemyAlertLevel ?? 0f,
                     foundry?.ExpeditionCount ?? 0, target,
-                    "外围侦察，重炮回收后撤离；主核心区暂不可进入。");
+                    "外围侦察，重炮回收后撤离；主核心区暂不可进入。",
+                    adapt.id, adapt.name, adapt.source, adapt.hazard, adapt.counter,
+                    adapt.reinforcement, adapt.reinforcementText);
             }
 
             RegionRecord region = FracturedCityRegion.Find(state);
@@ -286,9 +343,20 @@ namespace GameLogic.Campaign.Regions
             string intel = $"静默侦察机 x{aliveScouts}（HP{FracturedCityLayout.ScoutMaxHealth:F0}，标记周期8秒）｜" +
                 $"静默干扰机 x{aliveJammers}（HP{FracturedCityLayout.JammerMaxHealth:F0}，干扰半径{FracturedCityLayout.JammerRadius:F0}米）";
 
+            // ER6-ADAPT-01：第一次出征（破碎都市）没有"上次战斗"这个前提，恒 None——不调用
+            // EnemyAdaptationService.ComputeAdaptation，直接用 None 的文案兜底（AC-ADP-001"无历史为
+            // None"字面要求）。90暴露核心增援预告与本次出征目标无关，仍照常计算展示。
+            AdaptationCatalog.AdaptationInfo noneInfo = AdaptationCatalog.Describe(AdaptationCatalog.None);
+            bool reinforcementForecast = CampaignExposureLedger.HasReachedCoreReinforcement(state);
+            string reinforcementForecastText = reinforcementForecast
+                ? "信号暴露已突破90：下一次进攻核心分区时，入口会额外增援一台铸造护甲机布防（出发前预告，届时在核心战入口实装）。"
+                : null;
+
             return new PrepSnapshot(true, null, machines, HomeValleySignal.BandwidthCapacity(state),
                 MinRecommendedCargoSlots(target, region), intel, region.EnemyAlertLevel, region.ExpeditionCount,
-                target, "破碎都市：侦察带回静默技术并撤离。");
+                target, "破碎都市：侦察带回静默技术并撤离。",
+                AdaptationCatalog.None, noneInfo.DisplayName, noneInfo.SourceText, noneInfo.HazardText,
+                noneInfo.CounterHintText, reinforcementForecast, reinforcementForecastText);
         }
 
         /// <summary>DEMO-CONTENT-LOCK.md §2.3："第一次出征必需标记器、协议数据盒和三箱废料共5货位；
@@ -513,6 +581,20 @@ namespace GameLogic.Campaign.Regions
 
                 // ── 出发快照（本次事务的名单，供日志与后续步骤复用，不重新查询）─────────
                 int[] manifest = selectedLogicIds.ToArray();
+
+                // ── ER6-ADAPT-01：反制锁定必须在 StartFoundryOutpost（进而 Enter()→
+                // EnsureEnemiesSeeded→ReconcileAdaptiveSupportEnemy）之前写入 RegionRecord.AdaptationId，
+                // 否则本次进场时 Flanker/JammerSupport 的增援槽位还读不到刚锁定的值。RegionRecord 骨架
+                // 记录在玩家第一次进入归还谷地时就已播种（见 HomeValleyController.Enter），此处必然能
+                // Find 到，不需要再 EnsureRegionRecordSeeded 一次。────────────────────────
+                if (target == ExpeditionTarget.FoundryOutpost)
+                {
+                    RegionRecord foundryPreLock = FoundryOutpostRegion.Find(state);
+                    if (foundryPreLock != null)
+                    {
+                        EnemyAdaptationService.LockAdaptation(state, foundryPreLock);
+                    }
+                }
 
                 // ── 区域卸载/载入 + 机器生成/装配登记 ───────────────────────────────
                 GameRoot.HomeValley?.Exit();

@@ -28,8 +28,16 @@ namespace GameLogic.Campaign.Regions
         /// 天然契合，不需要调用方专门写一套"等瞄准完成"的新逻辑）。</summary>
         public static bool LastCallWasStillAiming { get; private set; }
 
+        /// <summary><paramref name="isFrontalArmoredHit"/>/<paramref name="armorReductionFraction"/>/
+        /// <paramref name="targetHeatResistant"/> 是 ER6-ADAPT-01 补上的护甲穿透接口——调用方（目前唯一是
+        /// <see cref="FoundryOutpostRegion.TryAttackEnemy"/>）在目标是护甲机且命中正面时传入基线减伤
+        /// 比例，本方法据此经 <see cref="ApplyArmorPierce"/> 结合"是否熔穿过载生效"与"目标是否
+        /// HeatResistant 适应"计算最终有效减伤。<paramref name="isFrontalArmoredHit"/> 为假（默认值，
+        /// <see cref="FracturedCityRegion.TryAttackEnemy"/> 现役敌人无正面装甲概念，调用方不传即为此
+        /// 默认）时行为与此前完全一致（伤害不打折）。</summary>
         public static FracturedCityRegion.ActionResult TryFire(CampaignState state, int attackerLogicId,
-            string enemyInstanceId, MachineCombatResolution resolution, System.Func<Vector2, Vector2, bool> isReachable)
+            string enemyInstanceId, MachineCombatResolution resolution, System.Func<Vector2, Vector2, bool> isReachable,
+            bool isFrontalArmoredHit = false, float armorReductionFraction = 0f, bool targetHeatResistant = false)
         {
             LastCallWasStillAiming = false;
 
@@ -104,10 +112,19 @@ namespace GameLogic.Campaign.Regions
                 Log.Info($"[CannonCombat] 机器 {attackerLogicId} 重炮过热（{attacker.WeaponHeat:F0}），停火直到降到60以下。");
             }
 
-            // 基础伤害不受过载影响（过载只改变热量与穿甲，见类注释）。穿甲对无护甲目标无效果——
-            // FracturedCity 现役敌人（侦察/干扰机）没有正面装甲概念，ApplyArmorPierce 在这里恒等于
-            // "不减伤"，真正生效要等 ER6-FOUNDRY-01 的护甲机落地（见证据文档范围裁剪说明）。
+            // 基础伤害不受过载影响（过载只改变热量与穿甲，见类注释）。穿甲只在目标有正面装甲概念时
+            // 才有意义——ER6-ADAPT-01 落地前 FracturedCity 现役敌人（侦察/干扰机）没有正面装甲，调用方
+            // 不传 isFrontalArmoredHit 即维持"不减伤"旧行为；铸造前哨护甲机接入后，调用方传入基线
+            // 减伤比例，这里用 ApplyArmorPierce 结合过载/HeatResistant 算出最终有效减伤——
+            // "HeatResistant 只减额外穿甲效果，不清除基础重炮伤害"：没有过载时不受影响，
+            // 有过载但目标 HeatResistant 时减伤比例回落到基线（穿甲加成被完全抵消），两者都不改变
+            // CannonBaseDamage 这个基础值本身。
             float damage = FracturedCityLayout.CannonBaseDamage;
+            if (isFrontalArmoredHit && armorReductionFraction > 0f)
+            {
+                float effectiveReduction = ApplyArmorPierce(armorReductionFraction, overloadActive, targetHeatResistant);
+                damage *= Mathf.Max(0f, 1f - effectiveReduction);
+            }
             return FracturedCityRegion.TryDamageEnemy(state, enemyInstanceId, damage);
         }
 
@@ -115,8 +132,8 @@ namespace GameLogic.Campaign.Regions
         /// 基础重炮伤害"——纯函数，独立于 <see cref="Content.EnemyCatalog.ComputeFrontalArmorReducedDamage"/>
         /// 的硬编码0.4正面减伤常量（不同敌人未来可能有不同护甲值，这里只处理"穿甲怎么削减护甲减伤
         /// 这个百分比"这一层，不关心减伤基线具体是多少），<paramref name="targetHeatResistant"/> 是
-        /// ER6-ADAPT-01 敌方 HeatResistant 适应的读取口（该系统尚未开工，调用方传 false 即为当前
-        /// 唯一真实可达路径）。</summary>
+        /// ER6-ADAPT-01 敌方 HeatResistant 适应的读取口，由 <see cref="TryFire"/> 经调用方传入的
+        /// <see cref="RegionRecord.AdaptationId"/> 判定结果驱动（见 <see cref="FoundryOutpostRegion.TryAttackEnemy"/>）。</summary>
         public static float ApplyArmorPierce(float armorReductionFraction, bool overloadActive, bool targetHeatResistant)
         {
             if (!overloadActive || targetHeatResistant)

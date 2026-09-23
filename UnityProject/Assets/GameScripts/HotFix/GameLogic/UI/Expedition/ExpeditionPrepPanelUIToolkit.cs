@@ -33,6 +33,8 @@ namespace GameLogic.UI.Expedition
         private Label _blockedLabel;
         private VisualElement _body;
         private Label _intelLabel;
+        private Label _adaptationLabel;
+        private Label _reinforcementForecastLabel;
         private Label _exposureLabel;
         private Toggle _towerBroadcastOffToggle;
         private ScrollView _list;
@@ -89,6 +91,8 @@ namespace GameLogic.UI.Expedition
             _blockedLabel = _root.Q<Label>("BlockedLabel");
             _body = _root.Q<VisualElement>("Body");
             _intelLabel = _root.Q<Label>("IntelLabel");
+            _adaptationLabel = _root.Q<Label>("AdaptationLabel");
+            _reinforcementForecastLabel = _root.Q<Label>("ReinforcementForecastLabel");
             _exposureLabel = _root.Q<Label>("ExposureLabel");
             _towerBroadcastOffToggle = _root.Q<Toggle>("TowerBroadcastOffToggle");
             _list = _root.Q<ScrollView>("MachineList");
@@ -184,6 +188,19 @@ namespace GameLogic.UI.Expedition
                 : "\n目标：" + snapshot.ObjectivePreviewText;
             _intelLabel.text = $"目标：{targetName}（第 {snapshot.ExpeditionCount + 1} 次出击）｜警戒 {snapshot.EnemyAlertLevel:F0}/100" +
                 objectiveLine + $"\n{snapshot.EnemyIntelText}";
+
+            // ER6-ADAPT-01：反制情报——四段合一显示（None 时文案自然落到"无反制/安全默认"那一条，
+            // 不需要额外判空）。90暴露核心增援预告独立一行，不并入反制文案。
+            _adaptationLabel.text = $"敌方反制：{snapshot.AdaptationDisplayName}\n" +
+                $"来源：{snapshot.AdaptationSourceText}\n" +
+                $"危险：{snapshot.AdaptationHazardText}\n" +
+                $"应对：{snapshot.AdaptationCounterHintText}";
+            _reinforcementForecastLabel.text = snapshot.CoreReinforcementForecast ? snapshot.CoreReinforcementForecastText : string.Empty;
+            _reinforcementForecastLabel.RemoveFromClassList("exp-reinforcement-visible");
+            if (snapshot.CoreReinforcementForecast)
+            {
+                _reinforcementForecastLabel.AddToClassList("exp-reinforcement-visible");
+            }
 
             // ER6-EXPOSE-01：暴露值+带宽实时展示，让玩家在出发前就能看到"关闭广播"的真实取舍。
             _exposureLabel.text = $"信号暴露 {state.SignalExposure:F0}/100｜带宽 {state.SignalBandwidth:F0}" +

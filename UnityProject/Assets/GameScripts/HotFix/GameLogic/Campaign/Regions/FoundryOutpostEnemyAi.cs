@@ -64,6 +64,13 @@ namespace GameLogic.Campaign.Regions
                 {
                     TickRepairBot(state, enemy, dt, machines);
                 }
+                else if (enemy.EnemyTypeId == EnemyCatalog.JammerId)
+                {
+                    // ER6-ADAPT-01：JammerSupport 反制增援——复用 EnemyCatalog.JammerId（"敌方现有
+                    // 技术树内编制变化"，不新造敌类型），只在 FoundryOutpostRegion.AdaptationId 锁定为
+                    // JammerSupport 时由 ReconcileAdaptiveSupportEnemy 条件播种。
+                    TickJammerSupport(state, enemy, dt, machines, hasLineOfSight);
+                }
             }
         }
 
@@ -211,6 +218,27 @@ namespace GameLogic.Campaign.Regions
             {
                 Log.Info($"[FoundryOutpostEnemyAi] {enemy.EnemyInstanceId} 治疗 {lowestAlly.EnemyInstanceId} +{FoundryOutpostLayout.RepairBotHealAmount:F0}。");
             }
+        }
+
+        // ── ER6-ADAPT-01：干扰支援——驻守支援位不移动 + 自卫攻击（同静默干扰机 FracturedCityEnemyAi.
+        // TickJammer 的防御性攻击分支同一数值/节奏，直接复用 FracturedCityLayout.JammerAttack* 常量，
+        // 不重复定义第二份数字；不清玩家标记——铸造前哨没有 FracturedCity 那套"监听节点干扰玩家标记"
+        // 的对应机制，这里只保留"支援火力"这一项可观察效果）。────────────────────────────────
+        private static void TickJammerSupport(CampaignState state, RegionEnemyRecord enemy, float dt,
+            IReadOnlyList<VisibleMachine> machines, LineOfSightCheck hasLineOfSight)
+        {
+            enemy.CycleCooldownRemaining -= dt;
+            if (enemy.CycleCooldownRemaining > 0f)
+            {
+                return;
+            }
+            VisibleMachine? target = FindNearestVisible(enemy.Position, machines, hasLineOfSight, FracturedCityLayout.JammerAttackRange);
+            if (!target.HasValue)
+            {
+                return; // 无目标不重置冷却，目标一出现立刻可以开火（同护甲机/步进炮先例）。
+            }
+            enemy.CycleCooldownRemaining = FracturedCityLayout.JammerAttackCooldownSeconds;
+            FoundryOutpostRegion.TryEnemyAttackMachine(state, enemy.EnemyInstanceId, target.Value.LogicId, FracturedCityLayout.JammerAttackDamage);
         }
 
         private static VisibleMachine? FindNearestVisible(Vector2 from, IReadOnlyList<VisibleMachine> machines,

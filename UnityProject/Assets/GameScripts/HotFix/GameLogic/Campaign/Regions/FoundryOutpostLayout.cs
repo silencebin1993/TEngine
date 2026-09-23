@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using GameLogic.Campaign.Content;
 using UnityEngine;
 
 namespace GameLogic.Campaign.Regions
@@ -54,6 +55,14 @@ namespace GameLogic.Campaign.Regions
         /// foundry_outpost 保留外围/核心两个分区"）。本 Story 只保证该点存在、Validate() 覆盖它，
         /// 两供能节点/主核心的真实内容留 ER7-CORE-01 在此基础上搭建，不抢先实现。</summary>
         public const string CoreZoneEntryId = "fo_core_zone_entry";
+        /// <summary>ER6-ADAPT-01："Flanker 多一组侧袭出生组"——只在
+        /// <see cref="RegionRecord.AdaptationId"/> 锁定为 <see cref="AdaptationCatalog.Flanker"/>
+        /// 时由 <see cref="FoundryOutpostRegion"/> 条件播种，见该类 ReconcileAdaptiveSupportEnemy。</summary>
+        public const string FlankerSpawnId = "fo_flanker";
+        /// <summary>ER6-ADAPT-01："JammerSupport 多一组干扰支援组"——同上，锁定为
+        /// <see cref="AdaptationCatalog.JammerSupport"/> 时条件播种，敌类型复用既有
+        /// <see cref="EnemyCatalog.JammerId"/>（"敌方现有技术树内编制变化"，不新造敌人）。</summary>
+        public const string JammerSupportSpawnId = "fo_jammer_support";
 
         // ── 关键物内容 ID ────────────────────────────────────────────────────
         /// <summary>步进炮首次击破掉落，唯一关键物（DEMO-CONTENT-LOCK.md §4.1第4条"关键模块"的
@@ -83,6 +92,14 @@ namespace GameLogic.Campaign.Regions
         /// <summary>核心分区入口占位，门后约4.5米——ER7-CORE-01 的搭建起点，本 Story 只占位（半径
         /// 收小到 1，确保与门净空不重叠、且不超出相机边界 <see cref="CameraBoundsHalfExtentZ"/>）。</summary>
         public static readonly Anchor CoreZoneEntry = new Anchor(CoreZoneEntryId, new Vector2(0f, 28.5f), 1f);
+        /// <summary>侧袭出生点——刻意放在左侧掩体外侧、entry 与掩体连线之外，模拟"从侧翼绕出"而不是
+        /// 与既有护甲机同一驻守正面。</summary>
+        public static readonly Anchor FlankerSpawn = new Anchor(FlankerSpawnId, new Vector2(-14f, 4f), 1.5f);
+        /// <summary>干扰支援出生点——镜像侧袭点在右侧，与既有敌人锚点保持独立净空。</summary>
+        public static readonly Anchor JammerSupportSpawn = new Anchor(JammerSupportSpawnId, new Vector2(14f, 4f), 1.5f);
+        /// <summary>侧袭单位固定朝向——面朝战场中央（约朝入口/回收点连线方向），供
+        /// <see cref="FoundryOutpostRegion.IsFrontalHit"/> 复用既有护甲机正面判定框架。</summary>
+        public static readonly Vector2 FlankerFacing = new Vector2(1f, -0.6f).normalized;
 
         /// <summary>ER6-REGION-01："物理碰撞"边界——门锁定时，任何机器（直控 WASD/编队 Move 命令
         /// 目的地）都不能越过这条 Y 线进入核心分区，与 X 坐标无关（不给"绕路"留一个有限宽度的缺口，
@@ -147,6 +164,8 @@ namespace GameLogic.Campaign.Regions
             yield return RecoveryLocker;
             yield return CoreGate;
             yield return CoreZoneEntry;
+            yield return FlankerSpawn;
+            yield return JammerSupportSpawn;
         }
 
         public static IEnumerable<string> AllPoiIds()
