@@ -51,6 +51,15 @@ namespace GameLogic.Campaign.Blueprint
         /// 目录独立于反应组合的单独行为，不是本 Story 臆造）。</summary>
         public bool HasMarkerFunction;
 
+        /// <summary>ER6-REACT-02：主组件是否为铸造重炮（<see cref="Content.ComponentCatalog.CompCannonId"/>）——
+        /// 战斗结算据此判断是否走 <see cref="Regions.CannonCombat"/> 的瞄准线/冷却/热量状态机，而不是
+        /// 普通连射器/切割束那种即时命中路径。</summary>
+        public bool HasCannonPrimary;
+
+        /// <summary>ER6-REACT-02：结构槽是否装了散热鳍（<see cref="Content.ComponentCatalog.StructFinId"/>）——
+        /// 额外 +5/秒散热（DEMO-CONTENT-LOCK.md §2.4）。</summary>
+        public bool HasHeatSinkStructure;
+
         public string NoteText;
     }
 
@@ -73,6 +82,20 @@ namespace GameLogic.Campaign.Blueprint
         {
             board.SyncFixedSlots();
             var preview = new BlueprintCircuitPreview();
+
+            // ER6-REACT-01/02：反应/标记/重炮/散热鳍这几个标志只是"电路板外层槽装了什么"的直接读取，
+            // 与下面"ComposeEngine 能不能真的编出一条 source→sink 路径"完全无关，必须放在任何早退
+            // return 之前——真实踩过的坑：comp_cannon 在 MechanicalContentFacade 里没有 LegacyFacadeId
+            // （DEBT-ER4CONTENT01-05，铸造重炮尚未接入共享 OrganelleCatalog/CarrierCompiler 装配链，
+            // 见 MechanicalContentCombatFactory 类注释），导致 SinkSlot 内容恒为空、下面的早退分支必然
+            // 命中——如果这几个字段放在早退之后才算，铸造重炮永远读不到 HasCannonPrimary=true，
+            // ER6-REACT-02 的整条战斗链会在第一步就被误判"没有武器"拒绝（execute_code 实测复现过
+            // 这个问题）。铸造重炮的伤害本来就是 CannonCombat 里的固定设计常量、不读
+            // TotalNormalizedDamage，不依赖这里的 ComposeEngine 编译结果，所以提前计算完全安全。
+            preview.ReactionId = DetectReactionId(board);
+            preview.HasMarkerFunction = board.UtilityId == ComponentCatalog.FuncMarkerId;
+            preview.HasCannonPrimary = board.PrimaryId == ComponentCatalog.CompCannonId;
+            preview.HasHeatSinkStructure = board.StructureId == ComponentCatalog.StructFinId;
 
             if (string.IsNullOrEmpty(board.SlotContentIds[BlueprintCircuitLayout.SinkSlot]))
             {
@@ -134,8 +157,6 @@ namespace GameLogic.Campaign.Blueprint
 
             preview.TotalNormalizedDamage = compiled.Count > 0 ? totalDamage / compiled.Count : 0f;
             preview.ReactionHint = ResolveReactionHint(board);
-            preview.ReactionId = DetectReactionId(board);
-            preview.HasMarkerFunction = board.UtilityId == ComponentCatalog.FuncMarkerId;
             return preview;
         }
 

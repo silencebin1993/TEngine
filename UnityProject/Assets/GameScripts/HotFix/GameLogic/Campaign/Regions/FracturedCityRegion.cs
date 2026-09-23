@@ -348,6 +348,17 @@ namespace GameLogic.Campaign.Regions
             {
                 return ActionResult.Fail(resolution.FailureReason);
             }
+            // ER6-REACT-02：铸造重炮走独立的瞄准线/冷却/热量状态机，不复用下面连射器/切割束的
+            // 即时命中+标记跳转路径（重炮反应槽只对熔穿过载生效，见 CannonCombat 类注释）。必须在
+            // HasCombatOutput 早退检查**之前**判定——铸造重炮在 MechanicalContentFacade 里没有
+            // LegacyFacadeId（DEBT-ER4CONTENT01-05，尚未接入共享 ComposeEngine 装配链），
+            // HasCombatOutput 对它结构上恒为 false；但重炮伤害本来就是 CannonCombat 里的固定设计
+            // 常量、不读 TotalNormalizedDamage，不需要 HasCombatOutput 为真。
+            if (resolution.Preview.HasCannonPrimary)
+            {
+                return CannonCombat.TryFire(state, attackerLogicId, enemyInstanceId, resolution, isReachable);
+            }
+
             if (!resolution.Preview.HasCombatOutput)
             {
                 return ActionResult.Fail("当前装配没有可攻击的主武器出口（8号汇槽为空）。");

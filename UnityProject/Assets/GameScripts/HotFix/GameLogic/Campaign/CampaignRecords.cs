@@ -103,6 +103,19 @@ namespace GameLogic.Campaign
         public bool IsAlive;
         public bool IsInFactory;
         public bool IsDeployed;
+
+        // ── ER6-REACT-02：铸造重炮/熔穿过载武器状态（"热量Stat管线未建立"此前一直是 DEBT-ER4CONTENT01-XX
+        // 的字面原文，本 Story 首次接入真实数据，见 Regions.CannonCombat 类注释）─────────────
+        public float WeaponHeat;
+        /// <summary>热量≥<see cref="Regions.FracturedCityLayout.WeaponHeatOverheatThreshold"/> 时置真，
+        /// 必须降到 &lt;<see cref="Regions.FracturedCityLayout.WeaponHeatRecoverThreshold"/> 才清除——
+        /// 迟滞（hysteresis）而不是单一阈值来回抖动，"低于60方可恢复"字面要求。</summary>
+        public bool IsWeaponOverheated;
+        /// <summary>重炮"1秒瞄准线"进行中标记——非0表示已开始瞄准，达到这个时间戳才真正开火；
+        /// 0＝当前未在瞄准。</summary>
+        public float CannonAimReadyAtPlaySeconds;
+        /// <summary>重炮"3秒冷却"——低于这个时间戳前新的开火请求被拒绝（含瞄准环节，不是开火后才计）。</summary>
+        public float NextCannonActionAtPlaySeconds;
     }
 
     /// <summary>ERD-DAT-003 BlueprintRecord 的单条版本，只追加不原地改写。</summary>

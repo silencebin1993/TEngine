@@ -745,6 +745,10 @@ namespace GameLogic.Campaign
                 IsAlive = src.IsAlive,
                 IsInFactory = src.IsInFactory,
                 IsDeployed = src.IsDeployed,
+                WeaponHeat = src.WeaponHeat,
+                IsWeaponOverheated = src.IsWeaponOverheated,
+                CannonAimReadyAtPlaySeconds = src.CannonAimReadyAtPlaySeconds,
+                NextCannonActionAtPlaySeconds = src.NextCannonActionAtPlaySeconds,
             };
         }
     }

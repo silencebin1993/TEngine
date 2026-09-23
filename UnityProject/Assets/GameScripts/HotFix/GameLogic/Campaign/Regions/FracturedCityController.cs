@@ -232,6 +232,7 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
+            CannonCombat.TickHeatDissipation(state, scaledDt); // ER6-REACT-02：铸造重炮被动散热。
             FracturedCityRegion.TickEnemies(state, scaledDt);
             // ER5-SILENT-01：真实敌人 AI（移动/标记/清标记/攻击）——必须在 Control.Tick 之前跑，
             // 这样干扰机本帧刚打死的受控机可以在同一帧被死亡回弹侦测到，不用多等一帧。

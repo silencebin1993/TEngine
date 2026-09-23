@@ -103,6 +103,19 @@ namespace GameLogic.Campaign.Regions
         /// 目标数），沿用 ER5-SILENT-01 玩家侧标记同一量级（10秒），同类取舍见该 Story 类注释。</summary>
         public const float EnemyMarkDurationSeconds = 10f;
 
+        // ── ER6-REACT-02：铸造重炮/熔穿过载（数值来自 DEMO-CONTENT-LOCK.md §5，唯一点名数字）──
+        public const float CannonRange = 20f;
+        public const float CannonBaseDamage = 55f;
+        public const float CannonCooldownSeconds = 3f;
+        public const float CannonAimSeconds = 1f;
+        public const float CannonBaseHeatPerShot = 40f;
+        public const float OverloadExtraHeatPerShot = 25f; // 40+25=65（反应激活时每发实际积热）。
+        public const float OverloadArmorPierceBonus = 0.3f; // "额外穿甲+30%"，HeatResistant 只削这一项。
+        public const float WeaponHeatOverheatThreshold = 100f;
+        public const float WeaponHeatRecoverThreshold = 60f; // 迟滞下限，"低于60方可恢复"。
+        public const float WeaponHeatDissipationPerSecond = 10f;
+        public const float HeatSinkBonusDissipationPerSecond = 5f; // 散热鳍额外散热。
+
         public static IEnumerable<Anchor> AllAnchors()
         {
             yield return EntryEvac;
