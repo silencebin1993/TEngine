@@ -226,6 +226,12 @@ namespace GameLogic.Campaign.Regions
                 // ER6-LOOP-01：撤离事务已提交（active.Exit 内部完成 ResolveExtraction），OBJ-05/07 的
                 // "战利品判定发生在撤离事务提交时"字面要求就是这一刻，不等回到家园下一帧。
                 CampaignObjectiveTracker.Recompute(state);
+                // ER7-FAIL-01：主动撤离（非全灭）如果 Boss 还没打完（Phase!=Destroyed），本次尝试作废，
+                // 下次进核心分区重新开始，不允许带着半血 Boss 状态跨出击继续磨。
+                if (active.RegionId == FoundryOutpostLayout.RegionId)
+                {
+                    FoundryOutpostCoreBoss.ResetToPreBossState(state, FoundryOutpostRegion.Find(state));
+                }
                 GameRoot.ResumeHomeValley();
 
                 SaveResult saveResult = CampaignAutoSaveService.SaveAuto(SaveReason.ExpeditionResolutionComplete);
@@ -270,6 +276,11 @@ namespace GameLogic.Campaign.Regions
                 // ER6-LOOP-01：同 TryConfirmEvacuation——全灭放弃同样是一次"撤离事务提交"（结算为全
                 // Lost），Recompute 幂等，即使本次不会推进任何 OBJ 也不会产生副作用。
                 CampaignObjectiveTracker.Recompute(state);
+                // ER7-FAIL-01：全灭同样作废未完成的 Boss 尝试——同 TryConfirmEvacuation 分支。
+                if (active.RegionId == FoundryOutpostLayout.RegionId)
+                {
+                    FoundryOutpostCoreBoss.ResetToPreBossState(state, FoundryOutpostRegion.Find(state));
+                }
                 GameRoot.ResumeHomeValley();
 
                 SaveResult saveResult = CampaignAutoSaveService.SaveAuto(SaveReason.ExpeditionResolutionComplete);

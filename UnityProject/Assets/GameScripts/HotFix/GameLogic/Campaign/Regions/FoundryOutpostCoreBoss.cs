@@ -270,6 +270,60 @@ namespace GameLogic.Campaign.Regions
             return cosAngle < cosHalf; // 不在正面锥角内＝侧后（散热口暴露方向）。
         }
 
+        /// <summary>ER7-FAIL-01 STORY-EXECUTION-CARDS.md 第2条："Boss Phase2撤离/全灭/退出下次从Boss前
+        /// 自动档恢复主核心与节点状态，不允许跨出击磨血或重复阶段奖励；已安全结算的外围回收和蓝图仍
+        /// 保留"——唯一调用点 <see cref="ExpeditionReturnService.TryConfirmEvacuation"/>/
+        /// <see cref="ExpeditionReturnService.TryConfirmAbandon"/>，在"撤离事务已提交"之后立即调用。
+        /// 只重置 Boss 专属字段（三条 RegionEnemyRecord 的 HP/存活+ <see cref="RegionRecord.CoreState"/>
+        /// 等 FSM 字段），不碰蓝图/机队/仓储/关键物——"从 Boss 前自动档恢复"字面上等价于把这些字段
+        /// 恢复成 <see cref="SaveReason.BossEngageEnter"/> 那次存档时的样子（该次存档正是在
+        /// <see cref="EnsureInitialized"/> 之前打的，此时 Boss 尚是 Locked），不需要真的做一次磁盘
+        /// 读档来达到同样效果——比对全量回滚（<see cref="ExpeditionDepartureService"/> 那种"回出发前档"）
+        /// 更精确：不会把本次已经安全结算的外围战利品/蓝图/机队变更也一并撤销。
+        ///
+        /// Destroyed 后不重置（"不允许重复阶段奖励"的反面——已经拿到的胜利不会被撤离动作抹掉，核心
+        /// 数据盒不管有没有装车都原样留在地面/货舱，供下次再来捡，同既有关键物"未拾取则留在场上"
+        /// 生命周期，不特殊处理）。</summary>
+        public static void ResetToPreBossState(CampaignState state, RegionRecord region)
+        {
+            if (state == null || region == null || !IsInitialized(region) || GetState(region) == CoreBossState.Destroyed)
+            {
+                return;
+            }
+
+            CoreBossState before = GetState(region);
+            state.RegionEnemies = (state.RegionEnemies ?? Array.Empty<RegionEnemyRecord>())
+                .Where(e => e.EnemyInstanceId != FoundryOutpostLayout.CoreRepairBotSummonId) // 一次性召唤物，撤走。
+                .ToArray();
+            ResetBossRecord(state, FoundryOutpostLayout.CoreNode1Id, FoundryOutpostLayout.NodeMaxHealth);
+            ResetBossRecord(state, FoundryOutpostLayout.CoreNode2Id, FoundryOutpostLayout.NodeMaxHealth);
+            ResetBossRecord(state, FoundryOutpostLayout.MainCoreId, FoundryOutpostLayout.MainCoreMaxHealth);
+
+            region.CoreState = null; // Locked——下次越线重新 EnsureInitialized，天然拿到满血全新一轮。
+            region.CoreTransitionEndAtPlaySeconds = 0f;
+            region.CoreTransitionRepairBotSummoned = false;
+            region.CoreLockoutWarnAtPlaySeconds = 0f;
+            region.CoreLockoutActive = false;
+            // CoreDataDropped 不重置于此——本方法只在"未 Destroyed"时执行（上面已早退），Destroyed
+            // 之后才可能为真，本分支内它必然仍是 false，写不写都一样，保留默认值不做无意义赋值。
+
+            Log.Info($"[FoundryOutpostCoreBoss] 未完成的 Boss 尝试已重置（原状态 {before}）：两节点+主核心" +
+                "恢复满血，下次进入核心分区重新开始，不跨出击磨血。");
+        }
+
+        private static void ResetBossRecord(CampaignState state, string instanceId, float maxHealth)
+        {
+            RegionEnemyRecord record = FoundryOutpostRegion.FindEnemy(state, instanceId);
+            if (record == null)
+            {
+                return;
+            }
+            record.Health = maxHealth;
+            record.MaxHealth = maxHealth;
+            record.IsAlive = true;
+            record.CycleCooldownRemaining = 0f;
+        }
+
         /// <summary>每帧驱动——Transition 计时→自动进 Phase2；Phase2 区域封锁预警→生效；Phase1/Phase2
         /// 主核心自卫攻击。<see cref="CoreBossState.Destroyed"/> 后整体 no-op（"停止新增敌方生产"，
         /// 不会再召维修机/不会再触发任何转换）。唯一调用点 <see cref="FoundryOutpostController.Update"/>。</summary>

@@ -20,7 +20,9 @@ namespace GameLogic.UI.HomeValleyFailure
         private PanelSettings _panelSettings;
 
         private VisualElement _root;
+        private Label _lastSaveLabel;
         private Button _backToMenuButton;
+        private bool _wasShown;
 
         public static HomeValleyFailureUIToolkit Instance { get; private set; }
 
@@ -57,6 +59,7 @@ namespace GameLogic.UI.HomeValleyFailure
             }
 
             _root.style.display = DisplayStyle.None;
+            _lastSaveLabel = _root.Q<Label>("LastSaveLabel");
             _backToMenuButton = _root.Q<Button>("BackToMenuButton");
             _backToMenuButton.clicked += () => GameRoot.EndRun();
         }
@@ -71,6 +74,35 @@ namespace GameLogic.UI.HomeValleyFailure
             bool shouldShow = GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive
                 && HomeValleySoftlockGuard.IsCoreDestroyed(CampaignSession.Current);
             _root.style.display = shouldShow ? DisplayStyle.Flex : DisplayStyle.None;
+
+            // ER7-FAIL-01 STORY-EXECUTION-CARDS.md 第1条："显示死因、最近安全自动档与返回菜单；无可
+            // 读档时给清晰提示，不能留在不可操作世界"——只在刚刚从隐藏变可见时算一次（面板显示期间
+            // 存档槽状态不会再变化，不需要每帧重算），失败后玩家唯一能做的事仍是"返回主菜单"，
+            // 这里只是让按钮旁边的文字准确反映"回去之后能不能继续"。
+            if (shouldShow && !_wasShown)
+            {
+                RefreshLastSaveInfo();
+            }
+            _wasShown = shouldShow;
+        }
+
+        private void RefreshLastSaveInfo()
+        {
+            int slot = CampaignSession.ActiveSlotIndex;
+            if (slot < 0)
+            {
+                _lastSaveLabel.text = "无法定位本局存档槽位，返回主菜单后请从存档列表手动选择。";
+                return;
+            }
+            CampaignSlotMetadata meta = CampaignSaveService.GetSlotMetadata(slot);
+            if (meta.State != CampaignSlotState.Ready)
+            {
+                // "无可读档时给清晰提示"——不能让玩家以为"返回主菜单"还能接着玩这局。
+                _lastSaveLabel.text = $"未找到可读取的安全存档（{meta.State}）。返回主菜单后需要新建战役，本局无法继续。";
+                return;
+            }
+            _lastSaveLabel.text = $"最近安全自动档：第 {slot} 槽 · {meta.WrittenAtUtc} · 阶段 {meta.CampaignPhase} · " +
+                $"游戏内 {meta.PlaySeconds:F0} 秒。返回主菜单后可从该存档继续（本次核心被毁前的进度已保留）。";
         }
 
         private void OnDestroy()
