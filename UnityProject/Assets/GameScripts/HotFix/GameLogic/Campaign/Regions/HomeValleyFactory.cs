@@ -411,13 +411,27 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
+            // ER4-BLP-02：把这次生产锁定的版本号+其真实 CompileSignature 一起写进新机记录——
+            // 此前 SpawnMachine 对 BlueprintVersion/LoadoutSignature 恒写死 1/""，与本类"锁定生产那一刻
+            // ActiveVersion"的既有设计（item.BlueprintVersion）完全脱节。找不到对应版本记录（理论上不应
+            // 发生，防御性兜底）时签名留空，不臆造一个假签名。
+            string loadoutSignature = null;
+            BlueprintRecord producedBp = state.BlueprintRecords?.FirstOrDefault(b => b.BlueprintId == item.BlueprintId);
+            BlueprintVersionRecord producedVersion = producedBp?.Versions?.FirstOrDefault(v => v.Version == item.BlueprintVersion);
+            if (producedVersion != null)
+            {
+                loadoutSignature = producedVersion.CompileSignature;
+            }
+
             MachineOpResult spawn = MachineRegistry.SpawnMachine(
                 chassisId: def.ChassisId,
                 blueprintId: item.BlueprintId,
                 regionId: HomeValleyLayout.RegionId,
                 position: HomeValleyLayout.AssemblyExit.Position,
                 health: 100f,
-                maxHealth: 100f);
+                maxHealth: 100f,
+                blueprintVersion: item.BlueprintVersion,
+                loadoutSignature: loadoutSignature);
             if (!spawn.Success)
             {
                 item.State = FactoryQueueState.Failed;
@@ -429,6 +443,16 @@ namespace GameLogic.Campaign.Regions
             if (MachineRegistry.TryGetRecord(spawn.LogicId, out MachineRecord record))
             {
                 record.IsInFactory = true; // 占用出口，直到玩家给它第一条真实命令（ReleaseFromFactory）。
+            }
+
+            // ER4-BLP-02 STORY-EXECUTION-CARDS.md 第3条："工厂出厂……时登记 MachineLoadoutRegistry"。
+            // 登记失败（理论上不应发生，producedVersion 已在上面确认存在）只记警告，不回滚已完成的生产——
+            // 机器本身已经真实登记且真实扣款，装配解析失败属于"这台机战斗时打不出东西"的可见故障，
+            // 不应该反过来让整次生产失败。
+            CircuitOpResult loadoutRegister = MachineLoadoutRegistry.Register(state, spawn.LogicId, item.BlueprintId, item.BlueprintVersion);
+            if (!loadoutRegister.Success)
+            {
+                TEngine.Log.Warning($"[HomeValleyFactory] 机器 {spawn.LogicId} 装配登记失败：{loadoutRegister.Message}");
             }
 
             CampaignEconomyLedger.Commit(state, item.TransactionId);

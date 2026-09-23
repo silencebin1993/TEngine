@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using GameLogic.Campaign;
+using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Primitive;
 using GameLogic.Core;
 using GameLogic.View;
@@ -85,6 +86,12 @@ namespace GameLogic.Campaign.Regions
             HomeValleyFactory.EnsureBlueprintsSeeded(state); // ER4-FAC-01：装配站默认三条生产蓝图 + ER4-PRIM-02 电路板数据。
             PrimitiveInventory.EnsureSeeded(state); // ER4-PRIM-03：战役唯一基元仓，开局8格+1件聚焦镜，幂等。
             EnsureMachinesSeeded(state);
+            // ER4-BLP-02 STORY-EXECUTION-CARDS.md 第3条："区域卸载/重新生成……时登记/解绑装配登记表"。
+            // MachineLoadoutRegistry 是本次会话内的"哪台机当前装配是什么"缓存（同 MachineRegistry 自身
+            // Bind/Unbind 的既有纪律：只清映射，不清 CampaignState 里的长期记录）——EnsureMachinesSeeded
+            // 只在"首次生成"那一刻单独登记新机，第二次进入（机器已存在、SpawnIfMissing 早退）不会重新
+            // 登记，必须在这里对当前区域全部存活机器统一补一遍，否则读档/重进就会看到空注册表。
+            RegisterAllRegionMachineLoadouts(state);
             state.CurrentRegionId = HomeValleyLayout.RegionId;
             HomeValleyPowerGrid.Recompute(state); // 幂等：新建战役刚播种、或读档恢复旧存档，都用当前数据重算一次。
 
@@ -426,6 +433,9 @@ namespace GameLogic.Campaign.Regions
 
             SyncLiveStateBackToRecords();
             DestroyVisuals();
+            // ER4-BLP-02：区域卸载与登记表解绑成对——清空当前会话的装配登记缓存（不影响
+            // CampaignState.MachineRecords 本身，机器长期记录原样保留，下次 Enter 重新登记）。
+            MachineLoadoutRegistry.Clear();
             // ER2-INPUT-01：与 CellStageFlow 同款纪律——离场解绑镜头，InputRouter.Reset() 顺带清掉
             // 本区域可能留下的 Scope/模态残留，避免粘到下一次进场或切去细胞阶段。
             _cameraDirector?.Unbind();
@@ -561,17 +571,47 @@ namespace GameLogic.Campaign.Regions
                     return;
                 }
 
+                // ER4-BLP-02：开局机同样是"生产"的一种（只是不经装配站队列），同样要写真实版本号+签名，
+                // 不能让 ERC-001/002 这两台永远停留在 BlueprintVersion=1/LoadoutSignature="" 的假状态。
+                // 装配登记表本身由调用方 Enter() 在 EnsureMachinesSeeded 之后统一跑一遍
+                // RegisterAllRegionMachineLoadouts 补齐，这里不重复登记。
+                BlueprintRecord bp = state.BlueprintRecords?.FirstOrDefault(b => b.BlueprintId == blueprintId);
+                BlueprintVersionRecord version = bp?.Versions?.FirstOrDefault(v => v.Version == bp.ActiveVersion);
+
                 MachineOpResult result = MachineRegistry.SpawnMachine(
                     chassisId: spawn.Id,
                     blueprintId: blueprintId,
                     regionId: HomeValleyLayout.RegionId,
                     position: spawn.Position,
                     health: 100f,
-                    maxHealth: 100f);
+                    maxHealth: 100f,
+                    blueprintVersion: version?.Version ?? 1,
+                    loadoutSignature: version?.CompileSignature);
 
                 if (!result.Success)
                 {
                     Log.Error($"[HomeValleyController] 登记机器 {spawn.Id} 失败：{result.Error} {result.Message}");
+                }
+            }
+        }
+
+        /// <summary>ER4-BLP-02：把当前区域全部存活机器的 (BlueprintId, BlueprintVersion) 重新登记进
+        /// <see cref="MachineLoadoutRegistry"/>——覆盖"读档/重进直接带着已存在的机器记录"这条
+        /// <see cref="EnsureMachinesSeeded"/> 的"首次生成"分支不会走到的路径。版本记录解析不到时只记警告
+        /// 跳过该台（"任何环节绑定失败进入可见错误并拒绝生成默认强力替身"），不阻断其余机器登记或整个
+        /// Enter 流程。</summary>
+        private static void RegisterAllRegionMachineLoadouts(CampaignState state)
+        {
+            foreach (MachineRecord m in MachineRegistry.AllRecords)
+            {
+                if (m == null || !m.IsAlive || m.RegionId != HomeValleyLayout.RegionId || string.IsNullOrEmpty(m.BlueprintId))
+                {
+                    continue;
+                }
+                CircuitOpResult result = MachineLoadoutRegistry.Register(state, m.LogicId, m.BlueprintId, m.BlueprintVersion);
+                if (!result.Success)
+                {
+                    Log.Warning($"[HomeValleyController] 机器 {m.LogicId} 装配登记失败：{result.Message}");
                 }
             }
         }

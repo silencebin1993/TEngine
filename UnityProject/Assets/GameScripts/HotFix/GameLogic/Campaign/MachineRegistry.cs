@@ -209,9 +209,19 @@ namespace GameLogic.Campaign
         /// Reject-to-Safe：<paramref name="chassisId"/>/<paramref name="blueprintId"/> 任一为空
         /// 都拒绝登记，不产生半成品记录。当前唯一真实调用方是
         /// <c>CellStageFlow.SpawnControlAllies</c>（细胞阶段友军桥接）；ER4-BLP-01 建立正式蓝图目录后，
-        /// 其余正式生成入口（工厂/回厂等）改传真实 <c>blueprintId</c> 即可，本方法签名不需要变。</summary>
+        /// 其余正式生成入口（工厂/回厂等）改传真实 <c>blueprintId</c> 即可，本方法签名不需要变。
+        ///
+        /// ER4-BLP-02：新增 <paramref name="blueprintVersion"/>/<paramref name="loadoutSignature"/> 可选
+        /// 参数（默认值 1/空串与此前硬编码行为逐字相同，不改变任何既有调用方的既有语义）——"同一
+        /// BlueprintVersion 在生产……中使用同一装配签名"（STORY-EXECUTION-CARDS.md ER4-BLP-02 第2条）
+        /// 此前对所有生产入口恒为假：无论蓝图实际保存到第几版，新机永远写死 <c>BlueprintVersion=1</c>、
+        /// <c>LoadoutSignature=""</c>。真实生产入口（<c>HomeValleyFactory.SpawnProducedMachine</c>/
+        /// <c>HomeValleyController.EnsureMachinesSeeded</c>）改传调用方已经解析出的真实版本号与
+        /// <see cref="GameLogic.Campaign.Blueprint.BlueprintVersionRecord.CompileSignature"/>；细胞阶段/
+        /// 紧急机等无真实蓝图版本概念的调用方不传，维持原样。</summary>
         public static MachineOpResult SpawnMachine(string chassisId, string blueprintId, string regionId,
-            Vector2 position, float health, float maxHealth, string factionId = "Player")
+            Vector2 position, float health, float maxHealth, string factionId = "Player",
+            int blueprintVersion = 1, string loadoutSignature = null)
         {
             if (string.IsNullOrEmpty(chassisId))
             {
@@ -230,8 +240,8 @@ namespace GameLogic.Campaign
                 DisplayNumber = displayNumber,
                 ChassisId = chassisId,
                 BlueprintId = blueprintId,
-                BlueprintVersion = 1,
-                LoadoutSignature = string.Empty,
+                BlueprintVersion = blueprintVersion,
+                LoadoutSignature = loadoutSignature ?? string.Empty,
                 FactionId = factionId,
                 RegionId = regionId,
                 WorldPosition = position,
