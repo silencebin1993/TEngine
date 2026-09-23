@@ -418,6 +418,58 @@ namespace GameLogic.Campaign
         public string CoreState;
     }
 
+    /// <summary>ER5-REGION-01：远征区域内的敌方/节点实例（静默侦察机、静默干扰机等）。与家园
+    /// <see cref="MachineRecord"/>（玩家机队，有 LogicId/蓝图/货舱等玩家侧语义）是两套独立记录——
+    /// 敌方只需要"稳定实例 ID + 位置 + 血量 + 存活"这一最小集合，不接 MachineLoadoutRegistry/
+    /// BlueprintCircuitCompiler（那是玩家装配链路）。真正的敌方 AI 行为树/阵型属于 ER5-SILENT-01，
+    /// 本类型只是它将要写入的数据骨架（同 ER1-SAVE-01 对 RegionRecord 的"骨架先行"先例）。</summary>
+    [Serializable]
+    public sealed class RegionEnemyRecord
+    {
+        public string EnemyInstanceId;
+        public string RegionId;
+        /// <summary><see cref="Content.EnemyCatalog"/> 的条目 id（如 enemy_scout/enemy_jammer）。</summary>
+        public string EnemyTypeId;
+        public Vector2 Position;
+        public float Health;
+        public float MaxHealth;
+        public bool IsAlive;
+        /// <summary>周期性节奏计时器，语义按 <see cref="EnemyTypeId"/> 区分（静默侦察机＝标记冷却，
+        /// DEMO-CONTENT-LOCK.md §4.1"每8秒标记"）。</summary>
+        public float CycleCooldownRemaining;
+    }
+
+    /// <summary>ER5-REGION-01 STORY-EXECUTION-CARDS.md 第2条"货物 Lost/Recovered 写 RegionRecord"
+    /// + DEMO-CONTENT-LOCK.md §4.1 第4条"关键模块若已从地面拾取但撤离失败，原掉落实例标记 Lost，
+    /// 下一次进入……由同一任务恢复柜重生成一份同 contentId、不同 salvageInstanceId 的保底件"。
+    /// 关键任务物（标记器模块/协议数据盒）需要 OnGround→Carried→Recovered/Lost 这条独立生命周期，
+    /// 不能复用 <see cref="GroundItemRecord"/>（无"已被某台机器携带"状态）或
+    /// <see cref="CargoEntry"/>（无实例身份，无法区分"丢失的具体是哪一份"）。</summary>
+    [Serializable]
+    public enum RegionQuestItemState
+    {
+        OnGround = 0,
+        Carried = 1,
+        Recovered = 2,
+        Lost = 3,
+    }
+
+    [Serializable]
+    public sealed class RegionQuestItemRecord
+    {
+        public string SalvageInstanceId;
+        public string RegionId;
+        /// <summary>如 <see cref="Regions.FracturedCityLayout.MarkerModuleContentId"/>/
+        /// <see cref="Regions.FracturedCityLayout.ProtocolDataboxContentId"/>。</summary>
+        public string ContentId;
+        public RegionQuestItemState State;
+        /// <summary>仅 <see cref="RegionQuestItemState.Carried"/> 有效：当前由哪台机器携带
+        /// （<see cref="MachineRecord.LogicId"/>）。</summary>
+        public int CarrierLogicId;
+        /// <summary>仅 <see cref="RegionQuestItemState.OnGround"/> 有效。</summary>
+        public Vector2 Position;
+    }
+
     /// <summary>DEMO-CONTENT-LOCK.md：逐目标持久化 ObjectiveRecord，字段与该文档"必须作为可存档
     /// ObjectiveRecord 实现"一段一致（objectiveId/state/startedAtPlaySeconds/completedAtPlaySeconds/eventId）。
     /// 不在 ERD-DAT-001 的 CampaignState 必须字段表里，但 STORY-EXECUTION-CARDS.md #ER1-SAVE-01

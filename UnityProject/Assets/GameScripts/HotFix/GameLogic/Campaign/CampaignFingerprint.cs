@@ -62,6 +62,10 @@ namespace GameLogic.Campaign
             /// <summary>ER4-PRIM-05：低威胁残骸靶的 HP/再生状态，读档重放后必须逐字节一致
             /// （同 <see cref="GroundItems"/>/<see cref="PrimitiveChips"/> 先例）。</summary>
             public CombatTargetRecord[] CombatTargets;
+            /// <summary>ER5-REGION-01：破碎都市敌方/节点、关键任务物状态，读档重放后必须逐字节一致
+            /// （同 <see cref="CombatTargets"/>/<see cref="GroundItems"/> 先例）。</summary>
+            public RegionEnemyRecord[] RegionEnemies;
+            public RegionQuestItemRecord[] RegionQuestItems;
         }
 
         /// <summary>计算稳定指纹（十六进制 SHA256 字符串）。<paramref name="state"/> 为空时返回空串
@@ -100,6 +104,8 @@ namespace GameLogic.Campaign
                 PrimitiveChips = state.PrimitiveChips,
                 CraftQueues = state.CraftQueues,
                 CombatTargets = state.CombatTargets,
+                RegionEnemies = state.RegionEnemies,
+                RegionQuestItems = state.RegionQuestItems,
             };
 
             string json = JsonUtility.ToJson(payload);

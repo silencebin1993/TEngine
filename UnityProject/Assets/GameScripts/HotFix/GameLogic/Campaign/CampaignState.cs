@@ -77,6 +77,17 @@ namespace GameLogic.Campaign
         /// "骨架 vs 播种"分工。</summary>
         public CombatTargetRecord[] CombatTargets = Array.Empty<CombatTargetRecord>();
 
+        /// <summary>ER5-REGION-01：远征区域敌方/节点实例（<see cref="RegionEnemyRecord"/>），
+        /// 唯一写入口 <see cref="GameLogic.Campaign.Regions.FracturedCityRegion"/>。新战役为空数组，
+        /// 由该类 <c>EnsureSeeded</c> 首次进入破碎都市时播种，与 <see cref="CombatTargets"/> 同一
+        /// "骨架 vs 播种"分工。</summary>
+        public RegionEnemyRecord[] RegionEnemies = Array.Empty<RegionEnemyRecord>();
+
+        /// <summary>ER5-REGION-01：远征区域关键任务物实例（<see cref="RegionQuestItemRecord"/>），
+        /// 唯一写入口同上。新战役为空数组，只在节点摧毁/终端读取那一刻才真正生成第一条记录，不预先
+        /// 播种（与 <see cref="RegionEnemies"/> 不同——关键物"是否存在"本身就是玩家行为的产物）。</summary>
+        public RegionQuestItemRecord[] RegionQuestItems = Array.Empty<RegionQuestItemRecord>();
+
         public ControlHandoffRecord ControlHandoff = new ControlHandoffRecord();
         public SaveReason LastSaveReason = SaveReason.NewCampaign;
 
@@ -127,6 +138,8 @@ namespace GameLogic.Campaign
                 PrimitiveChips = Array.Empty<PrimitiveChipRecord>(),
                 CraftQueues = Array.Empty<CraftQueueItemRecord>(),
                 CombatTargets = Array.Empty<CombatTargetRecord>(),
+                RegionEnemies = Array.Empty<RegionEnemyRecord>(),
+                RegionQuestItems = Array.Empty<RegionQuestItemRecord>(),
                 ControlHandoff = new ControlHandoffRecord(),
                 LastSaveReason = SaveReason.NewCampaign,
                 ObjectiveRecords = Array.Empty<ObjectiveRecord>(),
@@ -170,6 +183,10 @@ namespace GameLogic.Campaign
                 .OrderBy(r => r.QueueItemId, StringComparer.Ordinal).ToArray();
             CombatTargets = (CombatTargets ?? Array.Empty<CombatTargetRecord>())
                 .OrderBy(r => r.TargetId, StringComparer.Ordinal).ToArray();
+            RegionEnemies = (RegionEnemies ?? Array.Empty<RegionEnemyRecord>())
+                .OrderBy(r => r.EnemyInstanceId, StringComparer.Ordinal).ToArray();
+            RegionQuestItems = (RegionQuestItems ?? Array.Empty<RegionQuestItemRecord>())
+                .OrderBy(r => r.SalvageInstanceId, StringComparer.Ordinal).ToArray();
         }
     }
 }
