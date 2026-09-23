@@ -59,6 +59,11 @@ namespace GameLogic.Campaign.Regions
         /// 各写一套判定逻辑。UI（<c>RegionCommandBarUIToolkit</c>）与热键都通过它读写状态。</summary>
         public readonly RegionSquadCommandSystem SquadCommands = new RegionSquadCommandSystem();
 
+        /// <summary>ER5-CTL-01：任意接管正式化——Tab 候选/候选条点击/M 键首次接管统一走
+        /// <see cref="RegionControlSystem.TrySwitchControlledUnit"/>，与 <see cref="SquadCommands"/>
+        /// 同一委托范式，同一实例贯穿本区域生命周期。</summary>
+        public readonly RegionControlSystem Control = new RegionControlSystem();
+
         /// <summary>本类由 <see cref="GameLogic.Stage.GameRoot"/> 用 <c>??=</c> 惰性创建、跨多局
         /// 复用同一实例（同一进程内先后玩过 A、B 两局）。ER3-WRK-01 起 WorkOrder 的进度
         /// （<see cref="WorkOrderRecord.Progress"/>/<see cref="WorkOrderRecord.Duration"/>）已经落在
@@ -105,6 +110,7 @@ namespace GameLogic.Campaign.Regions
             BuildVisuals(state);
             SetupCameraDirector();
             SetupSquadCommands();
+            SetupControlSystem();
 
             IsActive = true;
 
@@ -143,12 +149,11 @@ namespace GameLogic.Campaign.Regions
 
             // 落回战略视角才清空接管——过渡途中（Strategy→Direct 或 Direct→Strategy）都不清，
             // 否则 EnsureDirectTarget 刚给的目标会在过渡没走完时就被抹掉，接管请求白做。
+            // ER5-CTL-01：经 Control.ReleaseToStrategy 统一处理（取消 Move/Attack 残留命令、发布
+            // RegionControlledUnitChangedSignal），不再由本方法直接写 _possessed。
             if (_cameraDirector != null && _cameraDirector.Mode == ViewMode.Strategy && _possessed != null)
             {
-                _possessed = null;
-                // ERD-WRK-002"退出后重评估"：这台机器刚从直控释放，立即让分配引擎把它纳入下一轮候选，
-                // 不必等满 0.5 秒轮询窗口。
-                HomeValleyWorkOrders.MarkAssignmentDirty();
+                Control.ReleaseToStrategy();
             }
 
             bool directLocked = _cameraDirector != null && _cameraDirector.Mode == ViewMode.Direct;
@@ -179,6 +184,7 @@ namespace GameLogic.Campaign.Regions
                 TickAutoEngage(state, scaledDt); // ER4-PRIM-05：AI 同出口自动交战。
                 HomeValleySignal.RecomputeUnlock(state); // ER5-SIG-01：破碎都市解锁判定。
                 HomeValleySoftlockGuard.Tick(state, scaledDt, BeginAutoAssignedMovement);
+                Control.Tick(scaledDt); // ER5-CTL-01：受控机死亡回弹侦测（归还谷地无干扰机制，Suspended 永不触发）。
                 SyncWorldVisuals(state);
             }
         }
@@ -294,7 +300,14 @@ namespace GameLogic.Campaign.Regions
 
             if (InputRouter.ConsumeAction(GameActionId.CycleControlTarget, InputScope.Direct))
             {
-                CycleControlTarget();
+                // ER5-CTL-01：Tab 循环与候选条点击/M 键首次接管统一走 TrySwitchControlledUnit——
+                // 失败（本区域只有一台合法机器时 NextCandidate 返回自己 → AleadyControlled）只记日志，
+                // 不改变当前受控目标。
+                RegionControlSwitchResult tabResult = Control.TrySwitchControlledUnit(null);
+                if (!tabResult.Success && tabResult.Failure != RegionControlFailure.AlreadyControlled)
+                {
+                    Log.Info($"[HomeValleyController] Tab 切换接管目标失败：{tabResult.PlayerText}");
+                }
             }
 
             float x = 0f;
@@ -407,52 +420,16 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        /// <summary>按 LogicId 稳定顺序循环到下一台机器（同 CellPlayerController.RequestNextControlCandidate
-        /// 的排序写法：不按距离，避免两台机器之间来回跳）。只有一台机器时循环到自己，行为等价于原地不动。</summary>
-        private void CycleControlTarget()
-        {
-            if (_machineMarkers.Count == 0 || _possessed == null)
-            {
-                return;
-            }
-
-            int current = _possessed.LogicId;
-            HomeValleyMachineMarker next = null;
-            HomeValleyMachineMarker first = _machineMarkers[0];
-            foreach (HomeValleyMachineMarker marker in _machineMarkers)
-            {
-                if (marker.LogicId < first.LogicId)
-                {
-                    first = marker;
-                }
-                if (marker.LogicId > current && (next == null || marker.LogicId < next.LogicId))
-                {
-                    next = marker;
-                }
-            }
-            next ??= first;
-
-            _possessed.CancelCommandMove();
-            _possessed = next;
-            _possessed.CancelCommandMove();
-
-            // 同 EnsureDirectTarget：切换到的新机器也不能一边被玩家直控、一边还被工作单状态机推进。
-            CampaignState state = CampaignSession.Current;
-            if (state != null)
-            {
-                HomeValleyWorkOrders.OnMachinePossessed(state, next.LogicId);
-            }
-            // ER4-MCH-01：Tab 循环切换到的每一台也是一次真实"接管"，同 EnsureDirectTarget 补记统计/经历。
-            MachineRegistry.RecordControlled(next.LogicId);
-            MachineRegistry.TryMarkExperience(next.LogicId, MachineExperienceFlags.Controlled);
-
-            _selected?.SetSelected(false);
-            _selected = next;
-            _selected.SetSelected(true);
-        }
-
         /// <summary>UI 只读查询当前选中机器（工作面板显示/编辑该机器工作偏好用），没有选中返回 null。</summary>
         public int? SelectedMachineLogicId => _selected != null ? _selected.LogicId : (int?)null;
+
+        /// <summary>ER5-CTL-01：HUD 显示"编号/蓝图"用——当前受控机器 LogicId，没有接管返回 null。</summary>
+        public int? PossessedMachineLogicId => _possessed != null ? _possessed.LogicId : (int?)null;
+
+        /// <summary>ER5-CTL-01：候选条 UI 点击一台合法机器后，若镜头尚未处于 Direct，补一次正式的
+        /// 0.35 秒过渡请求（Tab/M 键路径已经在各自域内触发，这条专供候选条这种"战略视角下点击 UI
+        /// 直接接管"的新入口）。已经在 Direct 时是安全 no-op（不产生第二次过渡）。</summary>
+        public bool RequestDirectView() => _cameraDirector != null && _cameraDirector.RequestDirect();
 
         /// <summary>ER4-FAC-01：装配站面板开关状态。点击装配站建筑切换（见 <see cref="HandleSelectionClick"/>），
         /// 独立于机器选中/移动指令——面板是管理界面，不要求玩家先选一台机器才能打开。</summary>
@@ -514,29 +491,76 @@ namespace GameLogic.Campaign.Regions
 
         /// <summary>ER2-INPUT-01：CameraDirector 请求"给我一个直控目标"时的钩子（M 键从战略切
         /// 直控那一刻触发）。用当前选中的机器；没有选中就拒绝，镜头会照常留在战略视角
-        /// （与细胞阶段"没有可接管的身体"是同一失败语义）。</summary>
+        /// （与细胞阶段"没有可接管的身体"是同一失败语义）。ER5-CTL-01 起校验/提交都经
+        /// <see cref="Control"/>，本方法只负责"没有显式选中直接拒绝"这条前置门槛
+        /// （<see cref="RegionControlSystem.TrySwitchControlledUnit"/> 的 <c>explicitLogicId</c> 为
+        /// null 时走 Tab 循环语义，不是"没选中就拒绝"，两者不能共用同一条路径）。</summary>
         private bool EnsureDirectTarget()
         {
             if (_selected == null)
             {
                 return false;
             }
-            _possessed = _selected;
-            _possessed.CancelCommandMove();
+            RegionControlSwitchResult result = Control.TrySwitchControlledUnit(_selected.LogicId);
+            if (!result.Success)
+            {
+                Log.Info($"[HomeValleyController] 接管请求被拒绝：{result.PlayerText}");
+            }
+            return result.Success;
+        }
 
-            // ERD-WRK-003 第三条：接管中的机器不再持有在办订单（保留已搬货物/已扣资源，订单回 Ready
-            // 等待重新指派），不能一边被玩家亲自开、一边又被工作单状态机继续推进。
+        /// <summary>ER5-CTL-01：<see cref="Control"/> 接管成功提交后的收尾——同旧
+        /// EnsureDirectTarget/CycleControlTarget 的既有纪律（工作单让位 + 选中同步高亮 +
+        /// MachineRegistry 统计），现在两条路径与候选条 UI 共用同一个回调。</summary>
+        private void OnControlPossessCommitted(int logicId)
+        {
             CampaignState state = CampaignSession.Current;
             if (state != null)
             {
-                HomeValleyWorkOrders.OnMachinePossessed(state, _possessed.LogicId);
+                // ERD-WRK-003 第三条：接管中的机器不再持有在办订单（保留已搬货物/已扣资源，订单回
+                // Ready 等待重新指派），不能一边被玩家亲自开、一边又被工作单状态机继续推进。
+                HomeValleyWorkOrders.OnMachinePossessed(state, logicId);
             }
-            // ER4-MCH-01：归还谷地的直控接管此前从未调用 MachineRegistry.RecordControlled——该方法
-            // 此前只被 CellStageFlow（细胞阶段）调用，TimesControlled 统计对归还谷地机器恒为0，
-            // 是真实缺口，这里补上（连同"接管"经历一次性标记）。
-            MachineRegistry.RecordControlled(_possessed.LogicId);
-            MachineRegistry.TryMarkExperience(_possessed.LogicId, MachineExperienceFlags.Controlled);
-            return true;
+            // ER4-MCH-01：任何一次真实接管都补记统计/经历（含 Tab 循环/候选条点击，不只是首次 M 键）。
+            MachineRegistry.RecordControlled(logicId);
+            MachineRegistry.TryMarkExperience(logicId, MachineExperienceFlags.Controlled);
+
+            HomeValleyMachineMarker marker = FindMarker(logicId);
+            if (marker != null)
+            {
+                _selected?.SetSelected(false);
+                _selected = marker;
+                _selected.SetSelected(true);
+            }
+        }
+
+        /// <summary>ER5-CTL-01：<see cref="Control"/> 释放一台机器时的收尾（切换出去/回战略/死亡/
+        /// 失联全部经这条口子）——"退出后重评估"：这台机器不再受玩家亲自驾驶，立即让分配引擎把它
+        /// 纳入下一轮候选，不必等满 0.5 秒轮询窗口。</summary>
+        private void OnControlReleased(int logicId)
+        {
+            HomeValleyWorkOrders.MarkAssignmentDirty();
+        }
+
+        /// <summary>把归还谷地的具体绑定接进共享的 <see cref="RegionControlSystem"/>；归还谷地没有
+        /// 干扰机制，<see cref="RegionControlContext.IsPositionJammed"/> 留 null——SignalJammed/
+        /// Suspended 两个分支在本区域永远不会触发，这是区域差异，不是遗漏（同 <c>CancelWorkIfAny</c>
+        /// 在 <see cref="SetupSquadCommands"/> 的既有先例：破碎都市传 null 是同一处理方式的镜像）。</summary>
+        private void SetupControlSystem()
+        {
+            Control.Bind(new RegionControlContext
+            {
+                RegionId = HomeValleyLayout.RegionId,
+                Markers = _machineMarkers,
+                GetPossessed = () => _possessed,
+                SetPossessed = marker => _possessed = marker,
+                IsCameraTransitioning = () => _cameraDirector != null && _cameraDirector.Mode == ViewMode.Transition,
+                IsPositionJammed = null,
+                SquadCommands = SquadCommands,
+                OnPossessCommitted = OnControlPossessCommitted,
+                OnReleased = OnControlReleased,
+                FallbackAnchor = () => HomeValleyLayout.Core.Position,
+            });
         }
 
         /// <summary>CameraDirector 的直控锚点来源：接管中的机器的世界 XZ 位置；没有接管返回 false。</summary>
@@ -587,6 +611,7 @@ namespace GameLogic.Campaign.Regions
             // 摧毁 _root，SquadCommands 内部对选中环/目的地标记的 Destroy 调用在此之后只是安全的
             // no-op，真正要紧的是清掉 C# 侧的字典/列表状态）。
             SquadCommands.Unbind();
+            Control.Unbind();
             IsActive = false;
             Log.Info("[HomeValleyController] 已退出归还谷地。");
         }

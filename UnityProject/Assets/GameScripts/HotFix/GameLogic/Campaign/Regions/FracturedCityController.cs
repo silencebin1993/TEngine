@@ -35,7 +35,6 @@ namespace GameLogic.Campaign.Regions
         private readonly List<HomeValleyMachineMarker> _machineMarkers = new List<HomeValleyMachineMarker>(5);
         private HomeValleyMachineMarker _selected;
         private HomeValleyMachineMarker _possessed;
-        private float _jamGraceRemaining;
         private bool _paused;
         private bool _wipeResolved;
 
@@ -48,6 +47,9 @@ namespace GameLogic.Campaign.Regions
         /// <summary>ER5-CMD-01：与 <see cref="HomeValleyController.SquadCommands"/> 同一套引擎、
         /// 各自一份实例（两区域互斥运行，但各自的选择集/编组/命令状态不该跨区域串）。</summary>
         public readonly RegionSquadCommandSystem SquadCommands = new RegionSquadCommandSystem();
+        /// <summary>ER5-CTL-01：任意接管正式化，与 <see cref="HomeValleyController.Control"/> 同一
+        /// 共享引擎的各自一份实例（干扰场/宽限恢复绑定见 <see cref="SetupControlSystem"/>）。</summary>
+        public readonly RegionControlSystem Control = new RegionControlSystem();
         /// <summary>Attack 命令的接战距离——破碎都市锚点间距比归还谷地紧凑（10～15 量级），
         /// 沿用 <see cref="InteractRange"/> 的同一空间尺度加倍，不直接照抄归还谷地的 12 米。</summary>
         private const float AttackRange = 6f;
@@ -100,6 +102,7 @@ namespace GameLogic.Campaign.Regions
             BuildVisuals(state);
             SetupCameraDirector();
             SetupSquadCommands();
+            SetupControlSystem();
 
             IsActive = true;
             _wipeResolved = false;
@@ -170,9 +173,11 @@ namespace GameLogic.Campaign.Regions
             InputRouter.SetGameplayPaused(_paused, strategic: true);
             _cameraDirector?.Tick(_paused);
 
+            // ER5-CTL-01：经 Control.ReleaseToStrategy 统一处理（取消 Move/Attack 残留命令、发布
+            // RegionControlledUnitChangedSignal），不再直接写 _possessed。
             if (_cameraDirector != null && _cameraDirector.Mode == ViewMode.Strategy && _possessed != null)
             {
-                _possessed = null;
+                Control.ReleaseToStrategy();
             }
 
             bool directLocked = _cameraDirector != null && _cameraDirector.Mode == ViewMode.Direct;
@@ -199,36 +204,12 @@ namespace GameLogic.Campaign.Regions
             }
 
             FracturedCityRegion.TickEnemies(state, scaledDt);
-            TickJamGrace(state, scaledDt);
+            // ER5-CTL-01：干扰宽限（Suspended→恢复/None）与受控机死亡回弹统一由 Control.Tick 处理——
+            // 取代原来本类专属的 TickJamGrace，同一套状态机现在归还谷地/破碎都市共用。
+            Control.Tick(scaledDt);
             TickDiscovery(state);
             TickWipeDetection(state);
             SyncWorldVisuals(state);
-        }
-
-        /// <summary>"原已受控机器在 2 秒宽限后回弹或交还战略视角，友军 AI 不冻结"——本方法只处理
-        /// 玩家当前直控目标的宽限计时；其余未被直控的机器移动/敌人节奏计时器在
-        /// <see cref="TickMachineMovement"/>/<see cref="FracturedCityRegion.TickEnemies"/> 里无条件继续
-        /// 跑（不受本方法或干扰场状态影响），这就是"友军 AI 不冻结"的结构性保证。</summary>
-        private void TickJamGrace(CampaignState state, float dt)
-        {
-            if (_possessed == null)
-            {
-                return;
-            }
-            Vector3 p = _possessed.transform.position;
-            bool jammed = FracturedCityRegion.IsPositionJammed(state, new Vector2(p.x, p.z));
-            if (!jammed)
-            {
-                _jamGraceRemaining = FracturedCityLayout.ControlJamGraceSeconds;
-                return;
-            }
-            _jamGraceRemaining -= dt;
-            if (_jamGraceRemaining <= 0f)
-            {
-                Log.Info($"[FracturedCityController] 机器 {_possessed.LogicId} 在干扰场内宽限期结束，控制回弹到战略视角。");
-                _cameraDirector?.RequestStrategy();
-                _possessed = null;
-            }
         }
 
         private void TickDiscovery(CampaignState state)
@@ -306,6 +287,7 @@ namespace GameLogic.Campaign.Regions
             _selected = null;
             _paused = false;
             SquadCommands.Unbind();
+            Control.Unbind();
             IsActive = false;
             Log.Info($"[FracturedCityController] 已退出破碎都市（evacuateSuccess={evacuateSuccess}）。");
         }
@@ -406,6 +388,13 @@ namespace GameLogic.Campaign.Regions
 
         public bool IsMachineDirectControlled(int logicId) => _possessed != null && _possessed.LogicId == logicId;
 
+        /// <summary>ER5-CTL-01：HUD 显示"编号/蓝图"用——当前受控机器 LogicId，没有接管返回 null。</summary>
+        public int? PossessedMachineLogicId => _possessed != null ? _possessed.LogicId : (int?)null;
+
+        /// <summary>同 <see cref="HomeValleyController.RequestDirectView"/> 先例：候选条 UI 点击后若镜头
+        /// 尚未处于 Direct，补一次正式过渡请求。</summary>
+        public bool RequestDirectView() => _cameraDirector != null && _cameraDirector.RequestDirect();
+
         // ── 选中/移动/直控（复用 HomeValleyMachineMarker 同款最小 RTS 手感）───────────
 
         /// <summary>ER5-CMD-01：本类原先"点空地＝CommandMoveTo"的最小点选移动（类注释点名要被本
@@ -444,6 +433,18 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
+
+            if (InputRouter.ConsumeAction(GameActionId.CycleControlTarget, InputScope.Direct))
+            {
+                // ER5-CTL-01：破碎都市此前完全没有接线 Tab 循环——本 Story 补上，与归还谷地共用
+                // 同一个 TrySwitchControlledUnit 入口。
+                RegionControlSwitchResult tabResult = Control.TrySwitchControlledUnit(null);
+                if (!tabResult.Success && tabResult.Failure != RegionControlFailure.AlreadyControlled)
+                {
+                    Log.Info($"[FracturedCityController] Tab 切换接管目标失败：{tabResult.PlayerText}");
+                }
+            }
+
             float x = 0f, z = 0f;
             if (InputRouter.GetActionKey(GameActionId.MoveLeft, InputScope.Direct)) { x -= 1f; }
             if (InputRouter.GetActionKey(GameActionId.MoveRight, InputScope.Direct)) { x += 1f; }
@@ -452,29 +453,59 @@ namespace GameLogic.Campaign.Regions
             _possessed.DirectMove(new Vector3(x, 0f, z), dt);
         }
 
-        /// <summary>CameraDirector 请求"给我一个直控目标"的钩子（M 键触发）。干扰场内的新接管请求
-        /// 在这里被拒绝——"进入时接管请求返回 SignalJammed"（DEMO-CONTENT-LOCK.md §4.1 第2条），
-        /// 已经处于接管中的机器不受影响（见 <see cref="TickJamGrace"/> 的独立宽限期处理）。</summary>
+        /// <summary>CameraDirector 请求"给我一个直控目标"的钩子（M 键触发）。ER5-CTL-01 起校验/提交都
+        /// 经 <see cref="Control"/>（含干扰场 SignalJammed 判定，见 <see cref="SetupControlSystem"/> 绑定的
+        /// <see cref="FracturedCityRegion.IsPositionJammed"/>），本方法只负责"没有显式选中直接拒绝"这条
+        /// 前置门槛，同 <see cref="HomeValleyController.EnsureDirectTarget"/> 先例。</summary>
         private bool EnsureDirectTarget()
         {
             if (_selected == null)
             {
                 return false;
             }
-            CampaignState state = CampaignSession.Current;
-            Vector3 p = _selected.transform.position;
-            FracturedCityRegion.ActionResult request = FracturedCityRegion.TryRequestControl(state, new Vector2(p.x, p.z));
-            if (!request.Success)
+            RegionControlSwitchResult result = Control.TrySwitchControlledUnit(_selected.LogicId);
+            if (!result.Success)
             {
-                Log.Info($"[FracturedCityController] 接管请求被拒绝：{request.FailureReason}");
-                return false;
+                Log.Info($"[FracturedCityController] 接管请求被拒绝：{result.PlayerText}");
             }
-            _possessed = _selected;
-            _possessed.CancelCommandMove();
-            _jamGraceRemaining = FracturedCityLayout.ControlJamGraceSeconds;
-            MachineRegistry.RecordControlled(_possessed.LogicId);
-            MachineRegistry.TryMarkExperience(_possessed.LogicId, MachineExperienceFlags.Controlled);
-            return true;
+            return result.Success;
+        }
+
+        /// <summary>ER5-CTL-01：<see cref="Control"/> 接管成功提交后的收尾——同 HomeValleyController
+        /// 镜像先例（本区域没有工作单概念，不需要 OnMachinePossessed）。</summary>
+        private void OnControlPossessCommitted(int logicId)
+        {
+            MachineRegistry.RecordControlled(logicId);
+            MachineRegistry.TryMarkExperience(logicId, MachineExperienceFlags.Controlled);
+
+            HomeValleyMachineMarker marker = FindMarker(logicId);
+            if (marker != null)
+            {
+                _selected?.SetSelected(false);
+                _selected = marker;
+                _selected.SetSelected(true);
+            }
+        }
+
+        /// <summary>把破碎都市的具体绑定接进共享的 <see cref="RegionControlSystem"/>——干扰场判定复用
+        /// ER5-REGION-01 既有的 <see cref="FracturedCityRegion.IsPositionJammed"/>（不新造第二个判据），
+        /// 2 秒宽限沿用 <see cref="FracturedCityLayout.ControlJamGraceSeconds"/>。</summary>
+        private void SetupControlSystem()
+        {
+            Control.Bind(new RegionControlContext
+            {
+                RegionId = FracturedCityLayout.RegionId,
+                Markers = _machineMarkers,
+                GetPossessed = () => _possessed,
+                SetPossessed = marker => _possessed = marker,
+                IsCameraTransitioning = () => _cameraDirector != null && _cameraDirector.Mode == ViewMode.Transition,
+                IsPositionJammed = pos => FracturedCityRegion.IsPositionJammed(CampaignSession.Current, pos),
+                SquadCommands = SquadCommands,
+                OnPossessCommitted = OnControlPossessCommitted,
+                OnReleased = null,
+                FallbackAnchor = () => FracturedCityLayout.EntryEvac.Position,
+                JamGraceSeconds = FracturedCityLayout.ControlJamGraceSeconds,
+            });
         }
 
         private bool TryGetPossessedAnchor(out float2 anchor)

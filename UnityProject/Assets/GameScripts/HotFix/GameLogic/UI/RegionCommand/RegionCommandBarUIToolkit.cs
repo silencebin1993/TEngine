@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
+using GameLogic.Campaign;
 using GameLogic.Campaign.Regions;
 using GameLogic.Stage;
 using TEngine;
@@ -35,6 +36,13 @@ namespace GameLogic.UI.RegionCommand
         private Button _stopButton;
         private ScrollView _eventLog;
         private readonly List<Label> _eventLabels = new List<Label>(MaxEventLines);
+
+        // ── ER5-CTL-01：任意接管 HUD（编号/蓝图 + Tab 候选条）───────────────
+        private Label _controlledUnitLabel;
+        private Label _controlFeedbackLabel;
+        private ScrollView _candidateStrip;
+        private readonly Dictionary<int, Button> _candidateButtons = new Dictionary<int, Button>(8);
+        private float _controlFeedbackRemaining;
 
         private async void Start()
         {
@@ -78,6 +86,9 @@ namespace GameLogic.UI.RegionCommand
             _retreatButton = _root.Q<Button>("RetreatButton");
             _stopButton = _root.Q<Button>("StopButton");
             _eventLog = _root.Q<ScrollView>("EventLog");
+            _controlledUnitLabel = _root.Q<Label>("ControlledUnitLabel");
+            _controlFeedbackLabel = _root.Q<Label>("ControlFeedbackLabel");
+            _candidateStrip = _root.Q<ScrollView>("ControlCandidateStrip");
 
             for (int i = 0; i < 9; i++)
             {
@@ -148,6 +159,63 @@ namespace GameLogic.UI.RegionCommand
             return false;
         }
 
+        // ── ER5-CTL-01：当前哪个区域在跑，就读它的 RegionControlSystem/接管状态 ──────
+
+        private static RegionControlSystem ActiveControl()
+        {
+            if (GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive)
+            {
+                return GameRoot.HomeValley.Control;
+            }
+            if (GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsActive)
+            {
+                return GameRoot.FracturedCity.Control;
+            }
+            return null;
+        }
+
+        private static int? ActivePossessedLogicId()
+        {
+            if (GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive)
+            {
+                return GameRoot.HomeValley.PossessedMachineLogicId;
+            }
+            if (GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsActive)
+            {
+                return GameRoot.FracturedCity.PossessedMachineLogicId;
+            }
+            return null;
+        }
+
+        /// <summary>候选条点击一台合法机器后，若镜头尚未处于 Direct，补一次正式过渡请求。</summary>
+        private static void ActiveRequestDirectView()
+        {
+            if (GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive)
+            {
+                GameRoot.HomeValley.RequestDirectView();
+                return;
+            }
+            if (GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsActive)
+            {
+                GameRoot.FracturedCity.RequestDirectView();
+            }
+        }
+
+        private void OnCandidateButtonClicked(int logicId)
+        {
+            RegionControlSwitchResult result = ActiveControl()?.TrySwitchControlledUnit(logicId) ?? RegionControlSwitchResult.Fail(RegionControlFailure.Ineligible);
+            if (result.Success)
+            {
+                ActiveRequestDirectView();
+                _controlFeedbackLabel.text = string.Empty;
+            }
+            else
+            {
+                _controlFeedbackLabel.text = "拒绝：" + result.PlayerText;
+                _controlFeedbackRemaining = 3f;
+            }
+        }
+
         private void Update()
         {
             if (_panel == null)
@@ -207,6 +275,90 @@ namespace GameLogic.UI.RegionCommand
             {
                 int sourceIndex = total - MaxEventLines + i;
                 _eventLabels[i].text = sourceIndex >= 0 ? events[sourceIndex] : string.Empty;
+            }
+
+            RefreshControlHud();
+        }
+
+        /// <summary>ER5-CTL-01：受控机 编号/蓝图 显示 + 失联宽限（Suspended）提示 + Tab 候选条。</summary>
+        private void RefreshControlHud()
+        {
+            RegionControlSystem control = ActiveControl();
+            if (control == null || _controlledUnitLabel == null)
+            {
+                return;
+            }
+
+            int? possessedId = ActivePossessedLogicId();
+            if (possessedId.HasValue && MachineRegistry.TryGetRecord(possessedId.Value, out MachineRecord rec))
+            {
+                string prefix = control.Availability == RegionControlAvailability.Suspended ? "重连中…" : "受控";
+                _controlledUnitLabel.text = $"{prefix}：#{rec.DisplayNumber} {rec.BlueprintId}";
+            }
+            else
+            {
+                _controlledUnitLabel.text = "战略视角";
+            }
+
+            if (_controlFeedbackRemaining > 0f)
+            {
+                _controlFeedbackRemaining -= Time.unscaledDeltaTime;
+                if (_controlFeedbackRemaining <= 0f)
+                {
+                    _controlFeedbackLabel.text = string.Empty;
+                }
+            }
+
+            RefreshCandidateStrip(control, possessedId);
+        }
+
+        /// <summary>候选条按钮数量随机器存活/在场情况变化，按钮集合与 <see cref="RegionControlSystem.GetCandidateLogicIds"/>
+        /// 对账（新增补建、消失移除），复用现有按钮避免每帧重建 VisualElement。</summary>
+        private void RefreshCandidateStrip(RegionControlSystem control, int? possessedId)
+        {
+            if (_candidateStrip == null)
+            {
+                return;
+            }
+
+            List<int> candidates = control.GetCandidateLogicIds();
+            var seen = new HashSet<int>();
+            foreach (int logicId in candidates)
+            {
+                seen.Add(logicId);
+                if (!_candidateButtons.TryGetValue(logicId, out Button btn))
+                {
+                    btn = new Button { text = "#" + logicId };
+                    btn.AddToClassList("cmd-candidate-btn");
+                    int capturedId = logicId;
+                    btn.clicked += () => OnCandidateButtonClicked(capturedId);
+                    _candidateStrip.Add(btn);
+                    _candidateButtons[logicId] = btn;
+                }
+
+                if (MachineRegistry.TryGetRecord(logicId, out MachineRecord rec))
+                {
+                    btn.text = "#" + rec.DisplayNumber;
+                }
+                btn.RemoveFromClassList("cmd-candidate-btn-current");
+                if (possessedId.HasValue && possessedId.Value == logicId)
+                {
+                    btn.AddToClassList("cmd-candidate-btn-current");
+                }
+            }
+
+            var stale = new List<int>();
+            foreach (KeyValuePair<int, Button> kv in _candidateButtons)
+            {
+                if (!seen.Contains(kv.Key))
+                {
+                    stale.Add(kv.Key);
+                }
+            }
+            foreach (int logicId in stale)
+            {
+                _candidateStrip.Remove(_candidateButtons[logicId]);
+                _candidateButtons.Remove(logicId);
             }
         }
 

@@ -635,6 +635,21 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
+        /// <summary>ER5-CTL-01：接管/释放一台机器时查询它当前是否有在办战略命令及其种类——
+        /// <see cref="RegionControlSystem"/> 据此判断释放时该不该自动恢复（Guard/Retreat 恢复，
+        /// Move/Attack 释放前先取消，见该类 <c>ReleaseInternal</c>）。不影响 <see cref="_active"/>
+        /// 本身，纯只读查询。</summary>
+        public bool TryGetActiveCommandKind(int logicId, out RegionCommandKind kind)
+        {
+            if (_active.TryGetValue(logicId, out ActiveCommand cmd))
+            {
+                kind = cmd.Kind;
+                return true;
+            }
+            kind = default;
+            return false;
+        }
+
         /// <summary>单机取消，不看选择集/不发事件日志刷屏——供区域自己的"工作"移动系统
         /// （<c>HomeValleyController</c> 的 WorkOrder/CommandWork/CommandHaul）在接管一台机器的
         /// Transform 之前调用，避免两套移动来源（旧工作移动 vs 本类的战略命令）同一帧争抢同一个
