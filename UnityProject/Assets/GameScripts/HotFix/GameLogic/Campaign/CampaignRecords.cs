@@ -364,6 +364,22 @@ namespace GameLogic.Campaign
         public string Payload;
     }
 
+    /// <summary>ER6-EXPOSE-01：信号暴露 HUD 明细唯一权威来源——每笔批准来源的暴露变化独立一条记录，
+    /// "净值不合并成神秘数值"（摧毁监听节点同时产生+8/-15两条独立记录）。与 <see cref="EventLedgerEntry"/>
+    /// 是同一批次写入的两份不同用途记录（后者管幂等判重，本类型管玩家可读的"发生了什么/改了多少"），
+    /// 唯一写入口 <see cref="CampaignExposureLedger"/>。</summary>
+    [Serializable]
+    public sealed class SignalExposureEventRecord
+    {
+        public string EventId;
+        /// <summary>玩家可读来源文案，如"重型机生产"/"摧毁节点"/"塔关广播"。</summary>
+        public string Source;
+        public float Delta;
+        public float AtPlaySeconds;
+        /// <summary>本笔结算后的暴露值（钳制后），供 HUD 直接展示"当时到了多少"而不必重放全部历史。</summary>
+        public float ResultingExposure;
+    }
+
     /// <summary>ERD-WRK-001 WorkOrder。</summary>
     [Serializable]
     public sealed class WorkOrderRecord
@@ -429,6 +445,11 @@ namespace GameLogic.Campaign
         public int ExpeditionCount;
         public bool CoreGateUnlocked;
         public string CoreState;
+
+        /// <summary>ER6-EXPOSE-01："一次远征中每累计30秒直控+5"——按本区域当次远征累计直控秒数，
+        /// 在 <see cref="Regions.ExpeditionDepartureService.TryDepart"/> 每次真正出发时清零（"一次
+        /// 远征"的边界），唯一写入口 <see cref="CampaignExposureLedger.TickDirectControlExposure"/>。</summary>
+        public float DirectControlAccumulatedSeconds;
         /// <summary>ER5-SILENT-01：静默侦察机在玩家机器身上留下的检测标记，唯一写入口
         /// <see cref="Regions.FracturedCityRegion.TryMarkMachine"/>/<see cref="Regions.FracturedCityRegion.TryClearMark"/>。
         /// 与 ER6-REACT-01 未来"标记跳转"反应系统（玩家武器标记敌方目标）是两个独立概念——那一套

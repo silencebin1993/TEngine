@@ -94,6 +94,32 @@ namespace GameLogic.Campaign
         /// 不预先播种。</summary>
         public AnalysisQueueItemRecord[] AnalysisQueues = Array.Empty<AnalysisQueueItemRecord>();
 
+        /// <summary>ER6-EXPOSE-01：信号暴露事件明细（HUD"来源"展示唯一权威来源），唯一写入口
+        /// <see cref="CampaignExposureLedger"/>。每笔一次性事件（幂等经 <see cref="CampaignEventLedger"/>），
+        /// 不循环覆盖、不合并——"净值−7但不合并成神秘数值"（摧毁监听节点同时产生两笔）是这个数组
+        /// 存在的直接原因。新战役为空数组。</summary>
+        public SignalExposureEventRecord[] SignalExposureEvents = Array.Empty<SignalExposureEventRecord>();
+
+        /// <summary>ER6-EXPOSE-01：家园信号塔"主动关闭广播"玩家开关（与断电/未修复的
+        /// <see cref="BuildingConstructionState"/>/<see cref="BuildingPowerState"/> 是完全独立的另一维度——
+        /// 塔本身可以是 Operational+Powered，玩家仍可以主动选择不广播换取暴露下降）。唯一写入口
+        /// <see cref="CampaignExposureLedger.SetTowerBroadcastOff"/>。</summary>
+        public bool SignalTowerBroadcastOff;
+
+        /// <summary>ER6-EXPOSE-01："家园关闭信号塔主动广播时每10秒-2"的累计计时器——达到10秒重置
+        /// 为0并结算一笔暴露事件，唯一写入口 <see cref="CampaignExposureLedger.TickTowerBroadcastOff"/>。</summary>
+        public float TowerBroadcastOffElapsedSeconds;
+
+        /// <summary>ER6-EXPOSE-01："一次远征中每累计30秒直控+5"的累计计时器——按区域/当前远征次数
+        /// 归零（见 <see cref="RegionRecord.DirectControlAccumulatedSeconds"/>），这里只是全局递增
+        /// 序号，为每次跨越30秒生成不重复的 eventId（"重复规则"不依赖这个序号本身的值，只依赖它
+        /// 单调递增，供 <see cref="CampaignExposureLedger.TickDirectControlExposure"/> 使用）。</summary>
+        public int DirectControlExposureGrantCount;
+
+        /// <summary>ER6-EXPOSE-01：暴露30阈值"静默侦察提示"允许重复触发（降到阈值下再升高可再次
+        /// 触发），单调递增供每次穿越生成不重复的 eventId。</summary>
+        public int ScoutTipCrossCount;
+
         public ControlHandoffRecord ControlHandoff = new ControlHandoffRecord();
         public SaveReason LastSaveReason = SaveReason.NewCampaign;
 
@@ -147,6 +173,11 @@ namespace GameLogic.Campaign
                 RegionEnemies = Array.Empty<RegionEnemyRecord>(),
                 RegionQuestItems = Array.Empty<RegionQuestItemRecord>(),
                 AnalysisQueues = Array.Empty<AnalysisQueueItemRecord>(),
+                SignalExposureEvents = Array.Empty<SignalExposureEventRecord>(),
+                SignalTowerBroadcastOff = false,
+                TowerBroadcastOffElapsedSeconds = 0f,
+                DirectControlExposureGrantCount = 0,
+                ScoutTipCrossCount = 0,
                 ControlHandoff = new ControlHandoffRecord(),
                 LastSaveReason = SaveReason.NewCampaign,
                 ObjectiveRecords = Array.Empty<ObjectiveRecord>(),
@@ -196,6 +227,8 @@ namespace GameLogic.Campaign
                 .OrderBy(r => r.SalvageInstanceId, StringComparer.Ordinal).ToArray();
             AnalysisQueues = (AnalysisQueues ?? Array.Empty<AnalysisQueueItemRecord>())
                 .OrderBy(r => r.QueueItemId, StringComparer.Ordinal).ToArray();
+            SignalExposureEvents = (SignalExposureEvents ?? Array.Empty<SignalExposureEventRecord>())
+                .OrderBy(r => r.EventId, StringComparer.Ordinal).ToArray();
         }
     }
 }

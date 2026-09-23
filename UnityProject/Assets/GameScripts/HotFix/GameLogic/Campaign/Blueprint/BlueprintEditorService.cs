@@ -322,6 +322,14 @@ namespace GameLogic.Campaign.Blueprint
                 }).ToArray();
             }
 
+            // ER6-EXPOSE-01："首次使用异派固件 +10"——"异派"＝跨派系组合，board.ComputeFactionTags()
+            // 已经是"跨派系"的唯一权威判定（Length>=2，见该方法类注释），不重新发明第二套判据。
+            // 按 blueprintId+version 记账：同一蓝图的每个版本号只会被保存一次，天然满足"首次"语义。
+            if (board.ComputeFactionTags().Length >= 2)
+            {
+                CampaignExposureLedger.GrantCrossFactionFirmwareFirstUse(state, record.BlueprintId, nextVersion);
+            }
+
             return BlueprintSaveResult.Ok(record.BlueprintId, nextVersion, reactionId, needsCharge ? techCost : 0);
         }
     }

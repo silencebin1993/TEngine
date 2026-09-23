@@ -113,8 +113,13 @@ namespace GameLogic.Campaign.Regions
 
             state.PowerCapacity = totalSupply;
             state.PowerDemand = totalDemand;
-            state.SignalBandwidth = HomeValleyLayout.BaseSignalBandwidth
-                + (signalTowerPowered ? HomeValleyLayout.SignalTowerBandwidthBonus : 0f);
+            // ER6-EXPOSE-01："家园关闭信号塔主动广播……带宽减少3"——玩家主动开关（与本方法自己算出的
+            // signalTowerPowered 供电状态完全独立的另一维度），带宽唯一真相仍在本方法集中计算，
+            // CampaignExposureLedger 本身不碰这个字段。
+            float broadcastOffPenalty = state.SignalTowerBroadcastOff ? CampaignExposureLedger.TowerBroadcastOffBandwidthPenalty : 0f;
+            state.SignalBandwidth = Math.Max(0f, HomeValleyLayout.BaseSignalBandwidth
+                + (signalTowerPowered ? HomeValleyLayout.SignalTowerBandwidthBonus : 0f)
+                - broadcastOffPenalty);
 
             return new GridSummary(totalSupply, totalDemand, Math.Max(0f, totalDemand - totalSupply),
                 brownout.ToArray(), consumers.Select(b => b.BuildingId).ToArray());

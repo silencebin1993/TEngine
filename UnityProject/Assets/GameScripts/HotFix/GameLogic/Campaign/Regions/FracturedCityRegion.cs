@@ -587,6 +587,9 @@ namespace GameLogic.Campaign.Regions
 
             MarkDestroyed(state, FracturedCityLayout.ListeningNodeId);
             SpawnQuestItemOnGround(state, FracturedCityLayout.MarkerModuleContentId, FracturedCityLayout.ListeningNode.Position);
+            // ER6-EXPOSE-01："摧毁监听节点同时记录战斗暴露+8与监听链断开-15，两笔来源独立，净值-7"
+            // （DEMO-IMPLEMENTATION-SPEC.md ERD-ECO-004 原文）。
+            CampaignExposureLedger.GrantNodeDestroyed(state, FracturedCityLayout.ListeningNodeId);
             Log.Info("[FracturedCityRegion] 监听节点已摧毁：干扰区消失，标记器模块已掉落。");
             return ActionResult.Ok();
         }

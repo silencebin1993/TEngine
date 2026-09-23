@@ -33,6 +33,8 @@ namespace GameLogic.UI.Expedition
         private Label _blockedLabel;
         private VisualElement _body;
         private Label _intelLabel;
+        private Label _exposureLabel;
+        private Toggle _towerBroadcastOffToggle;
         private ScrollView _list;
         private Label _summaryLabel;
         private Label _reasonsLabel;
@@ -87,6 +89,8 @@ namespace GameLogic.UI.Expedition
             _blockedLabel = _root.Q<Label>("BlockedLabel");
             _body = _root.Q<VisualElement>("Body");
             _intelLabel = _root.Q<Label>("IntelLabel");
+            _exposureLabel = _root.Q<Label>("ExposureLabel");
+            _towerBroadcastOffToggle = _root.Q<Toggle>("TowerBroadcastOffToggle");
             _list = _root.Q<ScrollView>("MachineList");
             _summaryLabel = _root.Q<Label>("SummaryLabel");
             _reasonsLabel = _root.Q<Label>("ReasonsLabel");
@@ -116,6 +120,10 @@ namespace GameLogic.UI.Expedition
             _closeButton.clicked += OnCloseClicked;
             _confirmInterruptButton.clicked += OnConfirmInterruptClicked;
             _cancelInterruptButton.clicked += OnCancelInterruptClicked;
+            // ER6-EXPOSE-01：塔关广播开关——玩家可在出发前看到当前暴露值与"关闭广播省暴露但降带宽"
+            // 的实时取舍（"玩家可看见出征/接管损失"字面要求）。
+            _towerBroadcastOffToggle.RegisterValueChangedCallback(evt =>
+                CampaignExposureLedger.SetTowerBroadcastOff(CampaignSession.Current, evt.newValue));
         }
 
         private void Update()
@@ -168,6 +176,11 @@ namespace GameLogic.UI.Expedition
             }
 
             _intelLabel.text = $"目标：破碎都市（第 {snapshot.ExpeditionCount + 1} 次出击）｜警戒 {snapshot.EnemyAlertLevel:F0}/100\n{snapshot.EnemyIntelText}";
+
+            // ER6-EXPOSE-01：暴露值+带宽实时展示，让玩家在出发前就能看到"关闭广播"的真实取舍。
+            _exposureLabel.text = $"信号暴露 {state.SignalExposure:F0}/100｜带宽 {state.SignalBandwidth:F0}" +
+                (state.SignalTowerBroadcastOff ? "（广播已关闭，−3带宽）" : string.Empty);
+            _towerBroadcastOffToggle.SetValueWithoutNotify(state.SignalTowerBroadcastOff);
 
             // 勾选集里已经不再存在/不再合法的 LogicId 清掉（机器阵亡/被移出家园等）。
             var validIds = new HashSet<int>(snapshot.Machines.Where(m => m.Eligible).Select(m => m.LogicId));

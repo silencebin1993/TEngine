@@ -233,6 +233,16 @@ namespace GameLogic.Campaign.Regions
             }
 
             CannonCombat.TickHeatDissipation(state, scaledDt); // ER6-REACT-02：铸造重炮被动散热。
+            if (_possessed != null)
+            {
+                // ER6-EXPOSE-01："一次远征中每累计30秒直控+5"——只在真正直控（不是战略视角选中）
+                // 且未暂停（scaledDt 已经在暂停时被上游钳成0）时累计。
+                RegionRecord region = FracturedCityRegion.Find(state);
+                if (region != null)
+                {
+                    CampaignExposureLedger.TickDirectControlExposure(state, region, scaledDt);
+                }
+            }
             FracturedCityRegion.TickEnemies(state, scaledDt);
             // ER5-SILENT-01：真实敌人 AI（移动/标记/清标记/攻击）——必须在 Control.Tick 之前跑，
             // 这样干扰机本帧刚打死的受控机可以在同一帧被死亡回弹侦测到，不用多等一帧。

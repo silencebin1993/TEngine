@@ -611,6 +611,14 @@ namespace GameLogic.Campaign.Regions
             // 分支，天然不会获得它，正确反映"它们不是被生产出来的"。
             MachineRegistry.TryMarkExperience(spawn.LogicId, MachineExperienceFlags.Produced);
 
+            // ER6-EXPOSE-01："生产重型机 +8"——Demo 唯一"重型"机型是战斗履带 ERC-003（唯一可生产的
+            // 战斗底盘，区别于搬运轮式/维修悬浮），开局自带的 ERC-001/002 不走这条 SpawnProducedMachine
+            // 分支，与经历标记同一"只有真正生产出来才计"的判据。
+            if (def.ChassisId == HomeValleyLayout.Erc003ChassisId)
+            {
+                CampaignExposureLedger.GrantHeavyMachineProduced(state, spawn.LogicId);
+            }
+
             // ER4-BLP-02 STORY-EXECUTION-CARDS.md 第3条："工厂出厂……时登记 MachineLoadoutRegistry"。
             // 登记失败（理论上不应发生，producedVersion 已在上面确认存在）只记警告，不回滚已完成的生产——
             // 机器本身已经真实登记且真实扣款，装配解析失败属于"这台机战斗时打不出东西"的可见故障，

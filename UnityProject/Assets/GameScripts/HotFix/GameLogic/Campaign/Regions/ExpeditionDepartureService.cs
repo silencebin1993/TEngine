@@ -451,6 +451,9 @@ namespace GameLogic.Campaign.Regions
                 if (regionAfter != null)
                 {
                     regionAfter.ExpeditionCount += 1;
+                    // ER6-EXPOSE-01："一次远征中每累计30秒直控"——"一次远征"的边界就是这里，新的
+                    // 出发必须从0开始累计，不带着上一次远征剩下的零头。
+                    regionAfter.DirectControlAccumulatedSeconds = 0f;
                 }
 
                 // ── 控制恢复：新区域固定以战略视角开场、无遗留直控目标（见

@@ -196,6 +196,7 @@ namespace GameLogic.Campaign.Regions
                 HomeValleyCombatTargets.Tick(state, scaledDt); // ER4-PRIM-05：低威胁残骸靶被动再生。
                 TickAutoEngage(state, scaledDt); // ER4-PRIM-05：AI 同出口自动交战。
                 HomeValleySignal.RecomputeUnlock(state); // ER5-SIG-01：破碎都市解锁判定。
+                CampaignExposureLedger.TickTowerBroadcastOff(state, scaledDt); // ER6-EXPOSE-01：塔关广播每10秒-2。
                 HomeValleySoftlockGuard.Tick(state, scaledDt, BeginAutoAssignedMovement);
                 Control.Tick(scaledDt); // ER5-CTL-01：受控机死亡回弹侦测（归还谷地无干扰机制，Suspended 永不触发）。
                 SyncWorldVisuals(state);

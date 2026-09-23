@@ -171,7 +171,13 @@ namespace GameLogic.Campaign.Regions
             string eventId = "emergency-rescue:" + result.LogicId + ":" + Guid.NewGuid().ToString("N").Substring(0, 8);
             CampaignEventLedger.TryGrant(state, eventId, "EmergencyRescue", state.PlaySeconds);
 
-            state.SignalExposure = Mathf.Clamp(state.SignalExposure + 10f, 0f, 100f);
+            // ER6-EXPOSE-01 实测发现并移除的真实缺陷：此前这里有一行
+            // `state.SignalExposure = Mathf.Clamp(state.SignalExposure + 10f, 0f, 100f);`——紧急救援机
+            // 生成不在 DEMO-IMPLEMENTATION-SPEC.md ERD-ECO-004 点名的六类批准来源里（"暴露只由批准
+            // 来源变化"，AC-EXP-005），是一条未经批准的直接写入。此前该字段从未被任何系统真正消费，
+            // 这条写入没有产生过可观测后果；本 Story 起 SignalExposure 有了真实唯一写入口
+            // `CampaignExposureLedger`，继续保留这行会让紧急救援机悄悄污染暴露值，已删除（不是
+            // 改成走批准来源，是这条写入本身就不该存在）。
 
             // AC-ECO-011"执行建筑修复"：核心自己派它去修一栋 Damaged 建筑，不等玩家点选——一台只会
             // Repair、生成后没有玩家介入就永远闲置在核心旁的机器毫无意义，也无法真正打破软锁
