@@ -35,6 +35,16 @@ namespace GameLogic.Campaign
         public float PowerDemand;
         public float SignalBandwidth;
         public float SignalExposure;
+        /// <summary>ER7-BEACON-01：信标启动二次确认后进入10秒不可取消演出的起始 PlaySeconds，
+        /// <c>-1</c>＝当前未在演出中（**不能用 0 当"未开始"哨兵**——新战役极早期就把信标造好并启动是
+        /// 合法边界情况，此时 <see cref="CampaignState.PlaySeconds"/> 可能恰好还是 0，用 0 当哨兵会
+        /// 把"刚在0秒启动"误判成"从未启动"，本 Story 实测踩过这个坑）。唯一写入口
+        /// <see cref="Regions.HomeValleyBeacon.TryStartLaunch"/>，演出结束
+        /// （<see cref="Regions.HomeValleyBeacon.Tick"/> 判定）后授予
+        /// <see cref="CampaignObjectiveTracker.BeaconLaunchEventId"/> 一次性事件，不重置本字段
+        /// （已启动过是永久事实，同其余一次性标记同一纪律，用 EventLedger 判"是否已授予"而不是靠
+        /// 这个时间戳本身的值域推断状态）。</summary>
+        public float BeaconLaunchStartedAtPlaySeconds = -1f;
 
         public string[] CompletedObjectiveIds = Array.Empty<string>();
         public string[] UnlockedContentIds = Array.Empty<string>();

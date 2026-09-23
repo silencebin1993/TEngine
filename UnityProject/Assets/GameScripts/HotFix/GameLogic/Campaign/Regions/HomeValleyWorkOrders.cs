@@ -239,7 +239,16 @@ namespace GameLogic.Campaign.Regions
             return WorkOrderOpResult.Ok(workOrderId);
         }
 
-        // ── Build（唯一真实内容：第二座发电机）─────────────────────────────────────
+        // ── Build（第二座发电机 + ER7-BEACON-01 导航信标）───────────────────────────
+
+        /// <summary>ER7-BEACON-01：此前只有第二座发电机一种可建内容，<see cref="TryCreateBuild"/> 曾把
+        /// 建造位坐标硬编码成 <see cref="HomeValleyLayout.Generator2Site"/>。新增导航信标后必须按
+        /// <paramref name="buildingTypeId"/> 分流，否则信标会被错误放到发电机2的坑位上。</summary>
+        private static Vector2 ResolveBuildSitePosition(string buildingTypeId) => buildingTypeId switch
+        {
+            HomeValleyLayout.BuildingTypeBeacon => HomeValleyLayout.BeaconSlot.Position,
+            _ => HomeValleyLayout.Generator2Site.Position,
+        };
 
         public static WorkOrderOpResult TryCreateBuild(CampaignState state, string buildingTypeId, int machineLogicId)
         {
@@ -287,11 +296,16 @@ namespace GameLogic.Campaign.Regions
                 BuildingId = plannedBuildingId,
                 BuildingTypeId = buildingTypeId,
                 RegionId = HomeValleyLayout.RegionId,
-                Position = HomeValleyLayout.Generator2Site.Position,
+                Position = ResolveBuildSitePosition(buildingTypeId),
                 Rotation = 0f,
                 Health = 100f,
                 ConstructionState = BuildingConstructionState.Planned,
-                PowerPriority = 1,
+                // ER7-BEACON-01：同 Position 一样此前硬编码 1（只服务过发电机2，默认优先级恰好也是1，
+                // 巧合掩盖了这条硬编码）。新增信标默认优先级2（见 HomeValleyLayout.PowerProfile）后
+                // 如果不读表会被错误按1接入电网仲裁，改为按 PowerProfile 默认值取，查不到则退化1。
+                PowerPriority = HomeValleyLayout.PowerProfile.TryGetValue(buildingTypeId, out (float, int) profileEntry)
+                    ? profileEntry.Item2
+                    : 1,
                 PowerState = BuildingPowerState.NotApplicable,
                 Inventory = Array.Empty<CargoEntry>(),
                 QueueIds = Array.Empty<string>(),

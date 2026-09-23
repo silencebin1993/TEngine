@@ -199,6 +199,7 @@ namespace GameLogic.Campaign.Regions
                 HomeValleySignal.RecomputeUnlock(state); // ER5-SIG-01：破碎都市解锁判定。
                 FoundryOutpostRegion.RecomputeUnlock(state); // ER6-FOUNDRY-01：铸造前哨外围解锁判定。
                 CampaignExposureLedger.TickTowerBroadcastOff(state, scaledDt); // ER6-EXPOSE-01：塔关广播每10秒-2。
+                HomeValleyBeacon.Tick(state, scaledDt); // ER7-BEACON-01：信标启动10秒不可取消演出计时。
                 HomeValleySoftlockGuard.Tick(state, scaledDt, BeginAutoAssignedMovement);
                 Control.Tick(scaledDt); // ER5-CTL-01：受控机死亡回弹侦测（归还谷地无干扰机制，Suspended 永不触发）。
                 SyncWorldVisuals(state);
@@ -468,6 +469,13 @@ namespace GameLogic.Campaign.Regions
         public bool IsExpeditionPrepPanelOpen => _expeditionPrepPanelOpen;
         public void SetExpeditionPrepPanelOpen(bool open) => _expeditionPrepPanelOpen = open;
 
+        /// <summary>ER7-BEACON-01：信标启动确认面板开关状态——同 <see cref="IsExpeditionPrepPanelOpen"/>
+        /// 先例，E 交互 `Complete` 只负责打开面板（"二次确认"的第一次确认已经是"按住E"本身，面板里的
+        /// 确认按钮才是第二次），真正调用 <see cref="HomeValleyBeacon.TryStartLaunch"/> 的是面板按钮。</summary>
+        private bool _beaconLaunchPanelOpen;
+        public bool IsBeaconLaunchPanelOpen => _beaconLaunchPanelOpen;
+        public void SetBeaconLaunchPanelOpen(bool open) => _beaconLaunchPanelOpen = open;
+
         /// <summary>ER4-PRIM-02：电路板面板开关状态，由 <c>CircuitBoardPanelUIToolkit</c> 自身的常驻
         /// 切换按钮驱动（不占用建筑点选路由——正式"家园蓝图"容器入口留 ER4-BLP-01，本 Story 先提供一个
         /// 独立可达的入口，不强求等那个容器落地才能测试/使用电路板）。</summary>
@@ -664,23 +672,36 @@ namespace GameLogic.Campaign.Regions
                 }
             }
 
-            // 信标启动：占位交互——真正建造/供电/解锁由 ER7-BEACON-01 接手（DEBT-ER5INT01-02）。
-            list.Add(new RegionInteractCandidate
+            // ER7-BEACON-01：信标启动——只在建筑真实存在时提供候选（未建成时"按E"没有意义，玩家应该
+            // 去点建造位造它，不是对着预留位空按E）。真正的启动判定（Operational/Powered/是否已启动过）
+            // 全部委托 HomeValleyBeacon，本候选的 Complete 只打开二次确认面板，不直接调用 TryStartLaunch
+            // （"E 交互要求玩家二次确认"字面要求——按住E是第一次确认，面板里再点一次确认按钮才真正启动）。
+            if (HomeValleyBeacon.Exists(state))
             {
-                Id = "beacon:" + HomeValleyLayout.BeaconSlotId,
-                Category = RegionInteractCategory.BeaconActivate,
-                Position = HomeValleyLayout.BeaconSlot.Position,
-                HoldSeconds = 1.5f,
-                Priority = -10,
-                ActionVerb = "启动信标（占位）",
-                Validate = () => RegionInteractResult.Ok(),
-                Complete = () =>
+                list.Add(new RegionInteractCandidate
                 {
-                    Log.Info("[HomeValleyController] 信标启动：占位确认（建造/供电/真实启动流程见 " +
-                        "ER7-BEACON-01，DEBT-ER5INT01-02）。");
-                    return RegionInteractResult.Ok("占位确认：信标建造/供电/启动流程尚未实装（ER7-BEACON-01）。");
-                },
-            });
+                    Id = "beacon:" + HomeValleyLayout.BeaconSlotId,
+                    Category = RegionInteractCategory.BeaconActivate,
+                    Position = HomeValleyLayout.BeaconSlot.Position,
+                    HoldSeconds = 1.5f,
+                    Priority = -10,
+                    ActionVerb = "启动信标",
+                    Validate = () =>
+                    {
+                        CampaignState s = CampaignSession.Current;
+                        if (HomeValleyBeacon.IsLaunched(s) || HomeValleyBeacon.IsLaunching(s))
+                        {
+                            return RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "信标已启动。");
+                        }
+                        return RegionInteractResult.Ok();
+                    },
+                    Complete = () =>
+                    {
+                        SetBeaconLaunchPanelOpen(true);
+                        return RegionInteractResult.Ok();
+                    },
+                });
+            }
 
             return list;
         }
@@ -1091,7 +1112,20 @@ namespace GameLogic.Campaign.Regions
                 BuildWreckageVisual(HomeValleyLayout.Wreckage2);
             }
 
-            BuildBeaconSlotVisual();
+            // ER7-BEACON-01：解锁前（OBJ-09 未完成）仍是不可交互的"预留位"标记；解锁后且尚未建成时
+            // 换成真正可点选建造的 BuildSite（同发电机2 同一套可视化+点击建造管线）。
+            bool beaconBuilt = state.BuildingRecords.Any(b => b.BuildingId == HomeValleyLayout.RegionId + ":" + HomeValleyLayout.BuildingTypeBeacon);
+            if (!beaconBuilt)
+            {
+                if (HomeValleyBeacon.IsUnlocked(state))
+                {
+                    BuildBuildSiteVisual(HomeValleyLayout.BeaconSlot);
+                }
+                else
+                {
+                    BuildBeaconSlotVisual();
+                }
+            }
             BuildCombatTargetVisual();
 
             if (!state.BuildingRecords.Any(b => b.BuildingId == HomeValleyLayout.RegionId + ":" + HomeValleyLayout.BuildingTypeGenerator2))
@@ -1135,11 +1169,25 @@ namespace GameLogic.Campaign.Regions
                     {
                         DestroyChild("BuildSite_" + HomeValleyLayout.BuildingTypeGenerator2);
                     }
+                    else if (building.BuildingTypeId == HomeValleyLayout.BuildingTypeBeacon)
+                    {
+                        DestroyChild("BuildSite_" + HomeValleyLayout.BuildingTypeBeacon);
+                    }
                 }
                 else
                 {
                     RefreshBuildingVisual(building);
                 }
+            }
+
+            // ER7-BEACON-01：OBJ-09 可能在玩家已经站在归还谷地期间完成（远征回城撤离那一刻）——
+            // BuildVisuals 的"锁定预留位 vs 可点选建造位"判断只在 Enter 时跑一次，这里补一次逐帧对账，
+            // 把还没来得及切换的锁定预留位换成真正可建造的 BuildSite。
+            bool beaconBuiltNow = state.BuildingRecords.Any(b => b.BuildingId == HomeValleyLayout.RegionId + ":" + HomeValleyLayout.BuildingTypeBeacon);
+            if (!beaconBuiltNow && HomeValleyBeacon.IsUnlocked(state) && _root.transform.Find("BeaconSlot_Reserved") != null)
+            {
+                DestroyChild("BeaconSlot_Reserved");
+                BuildBuildSiteVisual(HomeValleyLayout.BeaconSlot);
             }
 
             // ER3-SOFTLOCK-01：紧急救援机是运行时（不是 Enter 那一刻）才登记进 MachineRegistry 的，

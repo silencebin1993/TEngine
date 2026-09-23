@@ -38,6 +38,17 @@ namespace GameLogic.Campaign
         public const string Obj06 = "OBJ-06";
         public const string Obj07 = "OBJ-07";
         public const string Obj08 = "OBJ-08";
+        /// <summary>ER7-BEACON-01：OBJ-09/10 补齐 ER6-LOOP-01 当时明确排除在范围外的两项（"OBJ-09/10是
+        /// ER7产出，均不在本Story范围"）——ER7-CORE-01/ER7-FAIL-01 落地后，OBJ-09 的四个子条件
+        /// （核心进攻正式出发/两节点毁/Boss Destroyed/核心数据入货舱且成功撤离）已经全部有真实权威
+        /// 字段可读，本 Story 是它们第一次被真正聚合判定的地方。</summary>
+        public const string Obj09 = "OBJ-09";
+        public const string Obj10 = "OBJ-10";
+
+        /// <summary>ER7-BEACON-01：信标启动一次性事件 id——<see cref="Regions.HomeValleyBeacon"/> 的
+        /// 10秒不可取消演出结束时唯一写入口 <see cref="CampaignEventLedger.TryGrant"/> 授予，OBJ-10 的
+        /// 完成条件就是"这个事件是否已被授予过"（结构性判定，不额外发明第二个"已启动"标记字段）。</summary>
+        public const string BeaconLaunchEventId = "beacon_launch_confirmed";
 
         /// <summary>唯一重算入口——调用点：<see cref="ExpeditionReturnService.TryConfirmEvacuation"/>/
         /// <see cref="ExpeditionReturnService.TryConfirmAbandon"/>（撤离事务提交时，OBJ-05/07"战利品
@@ -57,11 +68,20 @@ namespace GameLogic.Campaign
             RecomputeObj06(state);
             RecomputeObj07(state);
             RecomputeObj08(state);
+            RecomputeObj09(state);
+            RecomputeObj10(state);
         }
 
         /// <summary>出发时机的 CampaignPhase 前进——与 OBJ 完成结算是两条独立的触发线
         /// （DEMO-CONTENT-LOCK.md"其中 FirstExpedition、FoundryScouting 在对应出发时即可进入，完成后
-        /// 仍保留该阶段直到下一次编译"）。唯一调用点 <see cref="ExpeditionDepartureService.TryDepart"/>。</summary>
+        /// 仍保留该阶段直到下一次编译"）。唯一调用点 <see cref="ExpeditionDepartureService.TryDepart"/>。
+        ///
+        /// ── ER7-BEACON-01 追加：CoreAssault 判定 ──
+        /// "第三次出击（核心进攻）"与"第二次出击（外围侦察）"共用同一个
+        /// <see cref="ExpeditionDepartureService.ExpeditionTarget.FoundryOutpost"/>（ER6-REGION-01 既定
+        /// 架构，核心分区门禁在外围场景内部解决），本类用 <see cref="FoundryOutpostRegion.CanEnterCoreZone"/>
+        /// 在出发那一刻是否已经为真来区分这是"去外围"还是"去核心"——与 90暴露核心入口增援
+        /// （<see cref="FoundryOutpostRegion.ReconcileCoreReinforcement"/>）同一判别信号，不新造第二套。</summary>
         public static void OnDeparted(CampaignState state, ExpeditionDepartureService.ExpeditionTarget target)
         {
             if (state == null)
@@ -74,7 +94,8 @@ namespace GameLogic.Campaign
             }
             else if (target == ExpeditionDepartureService.ExpeditionTarget.FoundryOutpost)
             {
-                AdvancePhase(state, CampaignPhase.FoundryScouting);
+                bool isCoreAssault = FoundryOutpostRegion.CanEnterCoreZone(state).Success;
+                AdvancePhase(state, isCoreAssault ? CampaignPhase.CoreAssault : CampaignPhase.FoundryScouting);
             }
         }
 
@@ -264,6 +285,65 @@ namespace GameLogic.Campaign
             if (FoundryOutpostRegion.ComputeCoreGateLights(state).AllReady)
             {
                 Complete(state, Obj08, CampaignPhase.SecondCrossCompiled);
+            }
+        }
+
+        /// <summary>"OBJ-09 摧毁主核心并回收数据｜OBJ-08，核心进攻正式出发（正常为第三次）、两供能
+        /// 节点毁、Boss Destroyed、核心数据入货舱且成功撤离｜CoreAssault 在进攻出发时进入；结算后
+        /// BeaconReady，解锁导航信标配方"——"两供能节点毁"结构上蕴含在 Boss 能到达
+        /// <see cref="CoreBossState.Destroyed"/> 这一事实里（节点不毁就进不了 Phase1，进不了 Phase1
+        /// 就打不到 Destroyed，见 <see cref="FoundryOutpostCoreBoss.ApplyDamage"/> 的门禁），不需要
+        /// 再单独查一遍两条 RegionEnemyRecord。"核心数据入货舱且成功撤离"就是
+        /// <see cref="FoundryOutpostLayout.CoreDataContentId"/> 已 Recovered（撤离结算时写入，同
+        /// OBJ-05/07 的"战利品判定发生在撤离事务提交时"字面要求）。</summary>
+        private static void RecomputeObj09(CampaignState state)
+        {
+            if (IsCompleted(state, Obj09))
+            {
+                return;
+            }
+            if (!IsCompleted(state, Obj08))
+            {
+                return;
+            }
+            RegionRecord foundry = FoundryOutpostRegion.Find(state);
+            if (foundry == null || foundry.State == RegionState.Locked)
+            {
+                return;
+            }
+            Activate(state, Obj09);
+
+            bool bossDestroyed = FoundryOutpostCoreBoss.GetState(foundry) == CoreBossState.Destroyed;
+            bool coreDataRecovered = state.RegionQuestItems != null && state.RegionQuestItems.Any(q =>
+                q.ContentId == FoundryOutpostLayout.CoreDataContentId && q.State == RegionQuestItemState.Recovered);
+            if (bossDestroyed && coreDataRecovered)
+            {
+                Complete(state, Obj09, CampaignPhase.BeaconReady);
+            }
+        }
+
+        /// <summary>"OBJ-10 建造并启动返航信标｜OBJ-09，信标Operational、Powered、玩家用E确认启动｜
+        /// Completed；10秒演出与一次性结算"——完成条件是 <see cref="BeaconLaunchEventId"/> 事件已被
+        /// 授予（唯一写入口 <see cref="Regions.HomeValleyBeacon"/> 的10秒不可取消演出结束时），本方法
+        /// 只负责观察这个事件并推进 <see cref="CampaignPhase.Completed"/>，不重复判定
+        /// Operational/Powered/二次确认——那些是 <see cref="Regions.HomeValleyBeacon.TryStartLaunch"/>
+        /// 自己的门禁，事件只有真正通过门禁才会被授予。</summary>
+        private static void RecomputeObj10(CampaignState state)
+        {
+            if (IsCompleted(state, Obj10))
+            {
+                return;
+            }
+            if (!IsCompleted(state, Obj09))
+            {
+                return;
+            }
+            Activate(state, Obj10);
+
+            bool launched = state.EventLedger != null && state.EventLedger.Any(e => e.EventId == BeaconLaunchEventId);
+            if (launched)
+            {
+                Complete(state, Obj10, CampaignPhase.Completed);
             }
         }
     }

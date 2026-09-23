@@ -30,6 +30,11 @@ namespace GameLogic.Campaign.Regions
         /// <see cref="PowerSupplyProfile"/> 各自登记 80，<see cref="HomeValleyPowerGrid.Recompute"/> 按
         /// Operational 建筑逐条求和，天然支持同时存在两座发电机，不需要改电网仲裁代码）。</summary>
         public const string BuildingTypeGenerator2 = "generator_2";
+        /// <summary>ER7-BEACON-01：导航信标（DEMO-CONTENT-LOCK.md §逐目标持久化表 OBJ-10"建造并启动
+        /// 返航信标"）。解锁前不存在（<see cref="CampaignObjectiveTracker.Obj09"/> 完成才可见/可建），
+        /// 建造流程与 <see cref="BuildingTypeGenerator2"/> 共用同一 <see cref="HomeValleyWorkOrders.TryCreateBuild"/>
+        /// Build 工作单管线，不新造第二套建造系统。</summary>
+        public const string BuildingTypeBeacon = "beacon";
 
         // ── 机器 ID（DEMO-CONTENT-LOCK.md §2.1，与旧细胞阶段 chassis_ally_* 占位彻底区分）──
         public const string Erc001ChassisId = "erc_001";
@@ -119,6 +124,11 @@ namespace GameLogic.Campaign.Regions
                 [BuildingTypeAnalysisBench] = (15f, 2),
                 [BuildingTypeRepairBay] = (15f, 3),
                 [BuildingTypeSignalTower] = (20f, 2),
+                // ER7-BEACON-01 STORY-EXECUTION-CARDS.md："成本120、需电30"——既有五项需求合计90
+                // （10+5+25+15+15+20=90，容量100），加上信标30即120，超出容量20——与卡片"加入信标后
+                // 120/100的20差额"逐字吻合，数值不是巧合，是本 Story 按卡片原文反推验证过既有
+                // PowerProfile 之后才写的常量。
+                [BuildingTypeBeacon] = (30f, 2),
             };
 
         /// <summary>ER3-PWR-01：核心自带基础供电（DEMO-CONTENT-LOCK.md §2.1"核心20"），不依赖任何
@@ -162,6 +172,9 @@ namespace GameLogic.Campaign.Regions
             new Dictionary<string, (int, float)>
             {
                 [BuildingTypeGenerator2] = (60, 40f),
+                // ER7-BEACON-01："导航信标成本120"（DEMO-IMPLEMENTATION-SPEC.md ERD-ECO-001 基线表）。
+                // 建造时长文档未点名，按发电机2同一量级取保守 judgment call（非文档摘录）。
+                [BuildingTypeBeacon] = (120, 45f),
             };
 
         /// <summary>ER3-WRK-01 Recharge：默认电池容量（DEMO-CONTENT-LOCK.md §2.4"默认电池容量：

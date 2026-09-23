@@ -352,6 +352,11 @@ namespace GameLogic.Stage
             var coreBossHudHost = new GameObject("[CoreBossHudHost]");
             Object.DontDestroyOnLoad(coreBossHudHost);
             coreBossHudHost.AddComponent<UI.CoreBoss.CoreBossHudUIToolkit>();
+            // ER7-BEACON-01：信标启动二次确认面板，同样独立 GameObject（同一条 UIDocument 唯一性
+            // 纪律），只在归还谷地激活且玩家对着已建成的信标按 E 时可见（见该类 Update()）。
+            var beaconLaunchHost = new GameObject("[BeaconLaunchPanelHost]");
+            Object.DontDestroyOnLoad(beaconLaunchHost);
+            beaconLaunchHost.AddComponent<UI.Beacon.BeaconLaunchPanelUIToolkit>();
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             // 已被 UI Toolkit 覆盖的旧 IMGUI 调试 HUD 不得默认盖在玩家界面上；
             // 如需做历史对照，可在运行时显式启用该组件。
