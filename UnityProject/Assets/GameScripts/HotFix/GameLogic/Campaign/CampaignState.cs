@@ -66,6 +66,11 @@ namespace GameLogic.Campaign
         /// "骨架 vs 播种"分工一致（播种入口幂等，可重复调用不重复生成）。</summary>
         public PrimitiveChipRecord[] PrimitiveChips = Array.Empty<PrimitiveChipRecord>();
 
+        /// <summary>ER4-PRIM-04：ERD-PRM-004 合成台唯一队列，唯一写入口
+        /// <see cref="GameLogic.Campaign.Primitive.PrimitiveCraftStation"/>，与 <see cref="FactoryQueues"/>
+        /// 同一"单 Running 工位 FIFO"结构模式。新战役为空数组，不预先生成任何队列项。</summary>
+        public CraftQueueItemRecord[] CraftQueues = Array.Empty<CraftQueueItemRecord>();
+
         public ControlHandoffRecord ControlHandoff = new ControlHandoffRecord();
         public SaveReason LastSaveReason = SaveReason.NewCampaign;
 
@@ -114,6 +119,7 @@ namespace GameLogic.Campaign
                 ResourceTransactions = Array.Empty<ResourceTransactionRecord>(),
                 GroundItems = Array.Empty<GroundItemRecord>(),
                 PrimitiveChips = Array.Empty<PrimitiveChipRecord>(),
+                CraftQueues = Array.Empty<CraftQueueItemRecord>(),
                 ControlHandoff = new ControlHandoffRecord(),
                 LastSaveReason = SaveReason.NewCampaign,
                 ObjectiveRecords = Array.Empty<ObjectiveRecord>(),
@@ -153,6 +159,8 @@ namespace GameLogic.Campaign
                 .OrderBy(r => r.ObjectiveId, StringComparer.Ordinal).ToArray();
             PrimitiveChips = (PrimitiveChips ?? Array.Empty<PrimitiveChipRecord>())
                 .OrderBy(r => r.PartId, StringComparer.Ordinal).ToArray();
+            CraftQueues = (CraftQueues ?? Array.Empty<CraftQueueItemRecord>())
+                .OrderBy(r => r.QueueItemId, StringComparer.Ordinal).ToArray();
         }
     }
 }

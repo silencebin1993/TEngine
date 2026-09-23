@@ -29,8 +29,8 @@ namespace GameLogic.Campaign.Primitive
         /// <summary>可从"解析/补印"渠道生成基元原型的内容 id 白名单——STORY-EXECUTION-CARDS.md 第1条
         /// "静默标记器/协议/重炮仍只解锁原定组件/固件，不被误转芯片"的具体落点：不在这张白名单里的内容
         /// 一律拒绝生成基元芯片实例，不管调用方传了什么 id。"organ_focus_plus"（精校镜）是 ER4-PRIM-04
-        /// 的合成台产物，不通过解析/补印获得，故意不在此列——字段/枚举结构已支持，未来落地合成台时
-        /// 由合成台直接调用 <see cref="GrantCraftedInternal"/> 写入，不需要改 schema。</summary>
+        /// 的合成台产物，不通过解析/补印获得，故意不在此列——由合成台调用 <see cref="GrantCrafted"/>
+        /// 单独写入。</summary>
         private static readonly HashSet<string> PrimitiveChipSourceIds = new HashSet<string> { DefaultChipContentId };
 
         public static bool IsPrimitiveChipSource(string contentId) =>
@@ -193,6 +193,8 @@ namespace GameLogic.Campaign.Primitive
             {
                 return CircuitOpResult.Fail("not-pending", "该实例不在待领取队列中。");
             }
+            // Pending 实例结构上不可能被合成台预留（预留只发生在 Bag 态实例上，见
+            // TryReserveForCraft），此处不需要额外校验 ReservedByTransactionId。
             if (BagCount(state) >= Capacity)
             {
                 return CircuitOpResult.Fail("bag-full", "基元仓已满，无法领取，请先腾格。");
@@ -222,6 +224,12 @@ namespace GameLogic.Campaign.Primitive
             if (record.State != PrimitiveChipState.Bag)
             {
                 return CircuitOpResult.Fail("not-in-bag", "该实例不在仓中（可能已装在别处或待领取）。");
+            }
+            if (!string.IsNullOrEmpty(record.ReservedByTransactionId))
+            {
+                // ER4-PRIM-04：该实例已被合成台预留为材料，装/卸/领取三条既有通道必须统一拒绝
+                // （PRIMITIVE-FULL-DEMO-SPEC.md §4.2"未被其他事务预留……UI 显示已预留/不可装拆"）。
+                return CircuitOpResult.Fail("reserved-for-craft", "该实例已被合成台预留为材料，暂不可装卸。");
             }
 
             CircuitOpResult placed = board.TryPlaceChip(slot, record.CardDefId);
@@ -307,6 +315,61 @@ namespace GameLogic.Campaign.Primitive
             }
         }
 
+        // ── ER4-PRIM-04：合成台材料预留 ──────────────────────────────────────────
+
+        /// <summary>把一个 Bag 态实例预留给某个合成/拆解事务（<paramref name="transactionId"/> 即
+        /// <c>CraftQueueItemRecord.QueueItemId</c>）。预留期间实例仍是 Bag 态、仍占仓格（"仓占用暂不
+        /// 下降"），但 <see cref="TryMoveToDraft"/> 会拒绝对它的装卸——由 <c>PrimitiveCraftStation</c>
+        /// 在入队时对每个材料调用一次，两个材料任一预留失败则整体回滚（调用方负责，本方法本身单实例
+        /// 原子）。</summary>
+        public static CircuitOpResult TryReserveForCraft(CampaignState state, string partId, string transactionId)
+        {
+            PrimitiveChipRecord record = Find(state, partId);
+            if (record == null)
+            {
+                return CircuitOpResult.Fail("part-not-found", $"找不到实例 '{partId}'。");
+            }
+            if (record.State != PrimitiveChipState.Bag)
+            {
+                return CircuitOpResult.Fail("not-in-bag", "材料必须在仓中（如在草稿槽，请先卸回仓）。");
+            }
+            if (!string.IsNullOrEmpty(record.ReservedByTransactionId) && record.ReservedByTransactionId != transactionId)
+            {
+                return CircuitOpResult.Fail("already-reserved", "该实例已被另一个合成/拆解事务预留。");
+            }
+            record.ReservedByTransactionId = transactionId;
+            return CircuitOpResult.Ok();
+        }
+
+        /// <summary>取消/失败时释放材料预留（实例本身不受影响，仍在仓中）。找不到实例或未被该事务预留
+        /// 均安全 no-op——供 <c>PrimitiveCraftStation.TryCancel</c> 无条件调用，不必先查状态。</summary>
+        public static void ReleaseCraftReservation(CampaignState state, string partId, string transactionId)
+        {
+            PrimitiveChipRecord record = Find(state, partId);
+            if (record != null && record.ReservedByTransactionId == transactionId)
+            {
+                record.ReservedByTransactionId = null;
+            }
+        }
+
+        /// <summary>合成/拆解真正提交时消耗一件材料——实例整体从 <see cref="CampaignState.PrimitiveChips"/>
+        /// 移除（不是转到别的 State；材料被真正消耗掉，不再是"某处的一个实例"）。只允许消耗仍处于 Bag
+        /// 态且确实被该事务预留的实例，防止提交时序错乱下误删无关实例。</summary>
+        public static CircuitOpResult ConsumeReservedMaterial(CampaignState state, string partId, string transactionId)
+        {
+            PrimitiveChipRecord record = Find(state, partId);
+            if (record == null)
+            {
+                return CircuitOpResult.Fail("part-not-found", $"找不到实例 '{partId}'（合成材料在提交前消失）。");
+            }
+            if (record.State != PrimitiveChipState.Bag || record.ReservedByTransactionId != transactionId)
+            {
+                return CircuitOpResult.Fail("material-mismatch", $"实例 '{partId}' 状态与预留不一致，无法消耗。");
+            }
+            state.PrimitiveChips = state.PrimitiveChips.Where(p => p.PartId != partId).ToArray();
+            return CircuitOpResult.Ok();
+        }
+
         // ── 事件账本（审计用，不是核心正确性依据——核心依据是 SourceSalvageId 去重与状态机本身）──
 
         private static void AppendLedger(CampaignState state, string category, string partId, string contentId)
@@ -326,13 +389,16 @@ namespace GameLogic.Campaign.Primitive
             state.EventLedger = state.EventLedger.Append(entry).ToArray();
         }
 
-        /// <summary>预留给 ER4-PRIM-04 合成台落地时调用（合成产物如"精校聚焦镜"直接进仓，不经解析/
-        /// 补印两条既有渠道）——本 Story 范围内未接线，仅声明结构，不额外增加本 Story 的验收面。</summary>
-        internal static CircuitOpResult GrantCraftedInternal(CampaignState state, string contentId)
+        /// <summary>ER4-PRIM-04：合成台升级配方产物（"精校聚焦镜"等）直接进仓的唯一入口，不经解析/
+        /// 补印两条既有渠道（后两者都要求内容在 <see cref="PrimitiveChipSourceIds"/> 白名单里，合成
+        /// 产物故意不在白名单——只有合成台自己能创造它）。仓满时自动落 Pending，行为与
+        /// <see cref="TryGrantFromSalvage"/>/<see cref="TryPrintChip"/> 一致，返回新实例的 PartId 供
+        /// 调用方（<c>PrimitiveCraftStation</c>）写入 <c>CraftQueueItemRecord.OutputPartId</c>。</summary>
+        public static string GrantCrafted(CampaignState state, string contentId)
         {
             if (state == null)
             {
-                return CircuitOpResult.Fail("no-campaign", "没有活动战役。");
+                return null;
             }
             var record = new PrimitiveChipRecord
             {
@@ -342,7 +408,8 @@ namespace GameLogic.Campaign.Primitive
                 State = BagCount(state) < Capacity ? PrimitiveChipState.Bag : PrimitiveChipState.Pending,
             };
             state.PrimitiveChips = (state.PrimitiveChips ?? Array.Empty<PrimitiveChipRecord>()).Append(record).ToArray();
-            return CircuitOpResult.Ok();
+            AppendLedger(state, "PrimitiveChipCraft", record.PartId, contentId);
+            return record.PartId;
         }
     }
 }

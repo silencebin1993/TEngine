@@ -155,6 +155,7 @@ namespace GameLogic.Campaign.Regions
                 HomeValleyWorkOrders.Tick(state, scaledDt, GetMachinePosition, ReleaseMachineMovement,
                     IsMachineDirectControlled, BeginAutoAssignedMovement);
                 HomeValleyFactory.Tick(state, scaledDt); // ER4-FAC-01：装配站生产队列。
+                PrimitiveCraftStation.Tick(state, scaledDt); // ER4-PRIM-04：合成台升级/拆解队列。
                 HomeValleySoftlockGuard.Tick(state, scaledDt, BeginAutoAssignedMovement);
                 SyncWorldVisuals(state);
             }
@@ -334,6 +335,12 @@ namespace GameLogic.Campaign.Regions
         private bool _circuitBoardPanelOpen;
         public bool IsCircuitBoardPanelOpen => _circuitBoardPanelOpen;
         public void SetCircuitBoardPanelOpen(bool open) => _circuitBoardPanelOpen = open;
+
+        /// <summary>ER4-PRIM-04：合成台面板开关状态，同 <see cref="IsCircuitBoardPanelOpen"/> 先例——
+        /// 自带常驻切换按钮，不占用建筑点选路由。</summary>
+        private bool _craftStationPanelOpen;
+        public bool IsCraftStationPanelOpen => _craftStationPanelOpen;
+        public void SetCraftStationPanelOpen(bool open) => _craftStationPanelOpen = open;
 
         /// <summary>供工作单面板"点击定位"（AC-UI-003）调用：把选中切到该订单当前指派的机器并高亮，
         /// 与鼠标直接点机器同一套视觉反馈。订单尚未指派机器（Ready/Waiting）时无具体对象可定位，

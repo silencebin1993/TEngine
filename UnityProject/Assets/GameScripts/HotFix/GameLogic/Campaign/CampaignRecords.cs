@@ -268,6 +268,40 @@ namespace GameLogic.Campaign
         public int DraftSlot = -1;
         /// <summary>解析来源的 salvageInstanceId，去重用（同一来源只生成一次实例）；补印来源为 null。</summary>
         public string SourceSalvageId;
+
+        /// <summary>ER4-PRIM-04：非空时表示该实例已被某个 <see cref="CraftQueueItemRecord"/>（值即其
+        /// <c>TransactionId</c>）预留为合成/拆解材料——"原子登记 reservedByTransactionId……仓占用暂不
+        /// 下降，UI 显示已预留/不可装拆"（PRIMITIVE-FULL-DEMO-SPEC.md §4.2）。预留期间仍是 Bag 态
+        /// （占仓格），但 <c>PrimitiveInventory.TryMoveToDraft</c>/<c>TryMoveToBag</c>/
+        /// <c>TryClaimPending</c> 必须拒绝对被预留实例的操作，防止同一实例被合成台与电路板面板同时
+        /// 拿走。</summary>
+        public string ReservedByTransactionId;
+    }
+
+    /// <summary>ER4-PRIM-04 STORY-EXECUTION-CARDS.md：合成台唯一队列项。<c>PrimitiveCraftStation</c>
+    /// 唯一写入口，不得在别处直接改 <see cref="CampaignState.CraftQueues"/>——与
+    /// <see cref="HomeValleyFactory"/>/<see cref="FactoryQueueItemRecord"/> 同一结构模式（单 Running
+    /// 工位 FIFO、<c>CreatedTick</c> 稳定排序）。</summary>
+    [Serializable]
+    public sealed class CraftQueueItemRecord
+    {
+        public string QueueItemId;
+        public CraftQueueKind Kind;
+        /// <summary>固定长度2：Upgrade 用两个槽（MaterialPartIds[1] 非空），Disassemble 只用第一个
+        /// （MaterialPartIds[1] 恒为 null/空串）。</summary>
+        public string[] MaterialPartIds = { null, null };
+        /// <summary>废料侧资源事务 id（Upgrade=消费5废料，Disassemble=产出2废料）；材料实例本身的锁
+        /// 由 <see cref="PrimitiveChipRecord.ReservedByTransactionId"/>（值即本字段/本项 QueueItemId）
+        /// 承载，不经 <see cref="CampaignEconomyLedger"/>（后者只管三顶层资源，不管物品实例）。</summary>
+        public string TransactionId;
+        public float Duration;
+        public float Progress;
+        public CraftQueueState State;
+        public string BlockedReason;
+        /// <summary>Upgrade 完成后新生成的 focus_plus 实例 PartId（Bag 或 Pending 态）；Disassemble 恒
+        /// 为 null（产出是废料不是实例）。</summary>
+        public string OutputPartId;
+        public long CreatedTick;
     }
 
     /// <summary>ERD-DAT-005 ResourceTransaction：跨帧资源消费的唯一凭证，取消/重试必须幂等。</summary>

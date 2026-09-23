@@ -139,6 +139,34 @@ namespace GameLogic.Campaign
         Failed = 8,
     }
 
+    /// <summary>ER4-PRIM-04 STORY-EXECUTION-CARDS.md：合成台两条最小配方。</summary>
+    public enum CraftQueueKind
+    {
+        /// <summary>两件 focus_basic + 5 废料 → 一件 focus_plus。</summary>
+        Upgrade = 0,
+        /// <summary>任意一件可拆芯片 → 2 废料（固定返还）。</summary>
+        Disassemble = 1,
+    }
+
+    /// <summary>PRIMITIVE-FULL-DEMO-SPEC.md §4.2 合成/拆解事务逐状态真相。与
+    /// <see cref="FactoryQueueState"/> 同构（单 Running 工位 FIFO + 断电暂停），但
+    /// Committing/OutputWaiting 是本枚举独有——合成有"到时二次核验+原子提交"这一步骤需要显式建模
+    /// （工厂生产的"完工"判定更简单，不需要单独的 Committing 态）。</summary>
+    [Serializable]
+    public enum CraftQueueState
+    {
+        Queued = 0,
+        WaitingResources = 1,
+        WaitingPower = 2,
+        Running = 3,
+        Committing = 4,
+        /// <summary>升级产物因仓满而进入待领取队列时的终态（拆解不会进入本状态，产出是废料无容量限制）。</summary>
+        OutputWaiting = 5,
+        Completed = 6,
+        Cancelled = 7,
+        Failed = 8,
+    }
+
     /// <summary>ERD-EXP-001 RegionRecord.state。</summary>
     [Serializable]
     public enum RegionState

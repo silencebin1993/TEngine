@@ -56,6 +56,9 @@ namespace GameLogic.Campaign
             /// <summary>ER4-PRIM-03：基元芯片实例账是仓储守恒的一部分，读档重放后必须逐字节一致
             /// （同 <see cref="GroundItems"/> 的处理方式）。</summary>
             public PrimitiveChipRecord[] PrimitiveChips;
+            /// <summary>ER4-PRIM-04：合成队列带真实 Progress/材料预留，读档重放后必须逐字节一致
+            /// （同 <see cref="WorkOrders"/>/<see cref="FactoryQueueItemRecord"/> 先例）。</summary>
+            public CraftQueueItemRecord[] CraftQueues;
         }
 
         /// <summary>计算稳定指纹（十六进制 SHA256 字符串）。<paramref name="state"/> 为空时返回空串
@@ -92,6 +95,7 @@ namespace GameLogic.Campaign
                 GroundItems = state.GroundItems,
                 WorkOrders = state.WorkOrders,
                 PrimitiveChips = state.PrimitiveChips,
+                CraftQueues = state.CraftQueues,
             };
 
             string json = JsonUtility.ToJson(payload);

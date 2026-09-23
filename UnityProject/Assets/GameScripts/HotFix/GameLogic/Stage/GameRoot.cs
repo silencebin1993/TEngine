@@ -216,6 +216,11 @@ namespace GameLogic.Stage
             var circuitBoardHudHost = new GameObject("[HomeValleyCircuitBoardHost]");
             Object.DontDestroyOnLoad(circuitBoardHudHost);
             circuitBoardHudHost.AddComponent<UI.CircuitBoard.CircuitBoardPanelUIToolkit>();
+            // ER4-PRIM-04：合成台面板，同样独立 GameObject（同一条 UIDocument 唯一性纪律），
+            // 只在归还谷地激活时可见（见 PrimitiveCraftPanelUIToolkit.Update）。
+            var craftStationHudHost = new GameObject("[HomeValleyCraftStationHost]");
+            Object.DontDestroyOnLoad(craftStationHudHost);
+            craftStationHudHost.AddComponent<UI.PrimitiveCraft.PrimitiveCraftPanelUIToolkit>();
             // ER3-SOFTLOCK-01：家园核心被毁的全屏失败面板，同样独立 GameObject（同一条 UIDocument
             // 唯一性纪律），只在归还谷地激活且核心已被摧毁时可见。
             var homeValleyFailureHost = new GameObject("[HomeValleyFailureHost]");
