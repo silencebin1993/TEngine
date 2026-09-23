@@ -38,6 +38,19 @@ namespace GameLogic.Campaign.Blueprint
         /// <summary>命中的具名反应展示名，或找不到时的中性说明（永不为 null/空，永不显示"缺反应"错误）。</summary>
         public string ReactionHint = "无具名反应（通用预览已生成）。";
 
+        /// <summary>ER6-REACT-01：<see cref="BlueprintCircuitCompiler.DetectReactionId"/> 的原始结果
+        /// （<see cref="Content.MechanicalReactionCatalog.ReactionMarkJumpId"/> 等），供战斗结算代码
+        /// （<see cref="Regions.FracturedCityRegion.TryAttackEnemy"/>）直接判定用，不必重新解析
+        /// <see cref="ReactionHint"/> 展示文本或重新拿 <see cref="BlueprintCircuitBoard"/> 现算一次——
+        /// "AI 与直控读同一 reactionId"（验收卡原文）字面上就是读这个字段。null＝无具名反应。</summary>
+        public string ReactionId;
+
+        /// <summary>ER6-REACT-01：功能槽是否装了静默标记器（<see cref="Content.ComponentCatalog.FuncMarkerId"/>）——
+        /// 内容目录原文"标记主目标及附近至多两个敌人"：只要装了标记器，命中就会打标记，即使没有配齐
+        /// 标记跳转固件+兼容主组件（那样只是标记本身不产生跳转，"无标记跳转固件仍可以标记"是内容
+        /// 目录独立于反应组合的单独行为，不是本 Story 臆造）。</summary>
+        public bool HasMarkerFunction;
+
         public string NoteText;
     }
 
@@ -121,6 +134,8 @@ namespace GameLogic.Campaign.Blueprint
 
             preview.TotalNormalizedDamage = compiled.Count > 0 ? totalDamage / compiled.Count : 0f;
             preview.ReactionHint = ResolveReactionHint(board);
+            preview.ReactionId = DetectReactionId(board);
+            preview.HasMarkerFunction = board.UtilityId == ComponentCatalog.FuncMarkerId;
             return preview;
         }
 

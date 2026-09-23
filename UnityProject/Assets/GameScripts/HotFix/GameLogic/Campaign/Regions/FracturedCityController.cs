@@ -550,7 +550,8 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
-            FracturedCityRegion.TryAttackEnemy(state, _possessed.LogicId, target.EnemyInstanceId, state.RandomSeed, isAiSource: false);
+            FracturedCityRegion.TryAttackEnemy(state, _possessed.LogicId, target.EnemyInstanceId, state.RandomSeed,
+                isAiSource: false, isReachable: IsLineOfSightClear);
         }
 
         // ── ER5-SILENT-01：敌人 AI 传感器数据 / 视线判定（复用交互系统同款障碍物遮挡算法）───
@@ -1023,7 +1024,8 @@ namespace GameLogic.Campaign.Regions
         {
             CampaignState state = CampaignSession.Current;
             FracturedCityRegion.ActionResult result =
-                FracturedCityRegion.TryAttackEnemy(state, attackerLogicId, hostileId, state?.RandomSeed ?? 0, isAiSource: false);
+                FracturedCityRegion.TryAttackEnemy(state, attackerLogicId, hostileId, state?.RandomSeed ?? 0,
+                    isAiSource: false, isReachable: IsLineOfSightClear);
             if (!result.Success)
             {
                 return RegionAttackOutcome.Fail(result.FailureReason);

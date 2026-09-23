@@ -422,6 +422,12 @@ namespace GameLogic.Campaign
         /// 标记加在 <see cref="RegionEnemyRecord"/> 上，这一套加在玩家 <see cref="MachineRecord"/>
         /// 上，互不共享存储也互不干扰判定。</summary>
         public MarkedMachineRecord[] MarkedMachines;
+
+        /// <summary>ER6-REACT-01：标记跳转反应的"敌方标记"——玩家装配静默标记器命中敌人时打上，供
+        /// 标记跳转固件识别跳转目标。与 <see cref="MarkedMachines"/>（静默侦察机标记玩家机器，ER5-SILENT-01）
+        /// 是同一"标记"词汇下两个完全独立的方向（谁标记谁、用途都不同），互不共享存储。唯一写入口
+        /// <see cref="Regions.FracturedCityRegion.TryMarkEnemy"/>/<see cref="Regions.FracturedCityRegion.TryClearEnemyMark"/>。</summary>
+        public MarkedEnemyRecord[] MarkedEnemies;
     }
 
     /// <summary>见 <see cref="RegionRecord.MarkedMachines"/> 类注释。</summary>
@@ -429,6 +435,14 @@ namespace GameLogic.Campaign
     public sealed class MarkedMachineRecord
     {
         public int MachineLogicId;
+        public float ExpireAtPlaySeconds;
+    }
+
+    /// <summary>见 <see cref="RegionRecord.MarkedEnemies"/> 类注释。</summary>
+    [Serializable]
+    public sealed class MarkedEnemyRecord
+    {
+        public string EnemyInstanceId;
         public float ExpireAtPlaySeconds;
     }
 

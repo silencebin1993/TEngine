@@ -157,6 +157,24 @@ namespace GameLogic.Campaign.Regions
                 }
             }
 
+            // ER6-REACT-01："干扰清标记"（DEMO-CONTENT-LOCK.md §2.4 标记跳转反制手段之一）——干扰机
+            // 同样清除半径内友方（其它敌人）身上玩家打的标记，保护己方不被跳转链锁定。与上面清玩家
+            // 机器标记是两个完全独立的方向（谁标记谁），本条不影响上面那条的判定。
+            if (state?.RegionEnemies != null)
+            {
+                foreach (RegionEnemyRecord ally in state.RegionEnemies)
+                {
+                    if (ally.EnemyInstanceId == enemy.EnemyInstanceId || !ally.IsAlive || ally.RegionId != FracturedCityRegion.RegionId)
+                    {
+                        continue;
+                    }
+                    if (Vector2.Distance(enemy.Position, ally.Position) <= FracturedCityLayout.JammerRadius)
+                    {
+                        FracturedCityRegion.TryClearEnemyMark(state, ally.EnemyInstanceId);
+                    }
+                }
+            }
+
             // CycleCooldownRemaining 对干扰机复用为"自卫攻击冷却"（同一字段，语义按 EnemyTypeId
             // 区分，见 RegionEnemyRecord 类注释）。
             enemy.CycleCooldownRemaining -= dt;

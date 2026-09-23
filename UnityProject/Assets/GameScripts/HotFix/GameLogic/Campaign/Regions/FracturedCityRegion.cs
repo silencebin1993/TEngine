@@ -320,7 +320,12 @@ namespace GameLogic.Campaign.Regions
         /// <see cref="MachineLoadoutRegistry"/> 解析出的编译结果），保证"AI/玩家使用同装配"的规则
         /// 在破碎都市同样成立，也保证本区域只有一处代码真正调用 <see cref="TryDamageEnemy"/>
         /// 结算武器伤害。</summary>
-        public static ActionResult TryAttackEnemy(CampaignState state, int attackerLogicId, string enemyInstanceId, int seed, bool isAiSource)
+        /// <summary>ER6-REACT-01：<paramref name="isReachable"/> 可选——squad/直控两条调用方都能提供
+        /// Controller 侧真实视线遮挡判定（复用 ER5-SILENT-01 同一套锚点净空算法，"额外目标按合法阵营、
+        /// 可达、距离、稳定LogicId排序"字面要求）；传 null 时退化为"总是可达"（不破坏本方法早于本
+        /// Story 就已存在的调用方兼容性——旧调用点不需要同步改造才能继续工作）。</summary>
+        public static ActionResult TryAttackEnemy(CampaignState state, int attackerLogicId, string enemyInstanceId, int seed,
+            bool isAiSource, Func<Vector2, Vector2, bool> isReachable = null)
         {
             if (state == null)
             {
@@ -349,7 +354,150 @@ namespace GameLogic.Campaign.Regions
             }
 
             float damage = Mathf.Max(0f, resolution.Preview.TotalNormalizedDamage);
-            return TryDamageEnemy(state, enemyInstanceId, damage);
+
+            // ER6-REACT-01："目标已标记时"才跳转——查询顺序在本次命中造成的新标记之前，第一次命中
+            // （目标当时还没有标记）只留下标记、不跳转；同一目标被再次命中时才触发跳转，符合
+            // "无标记/只有一个目标退化为正常攻击"字面语义（本方法内联判定，不是靠额外状态机）。
+            bool wasMarkedBeforeThisHit = IsEnemyMarked(state, enemyInstanceId);
+
+            ActionResult primaryResult = TryDamageEnemy(state, enemyInstanceId, damage);
+            if (!primaryResult.Success)
+            {
+                return primaryResult;
+            }
+
+            if (resolution.Preview.HasMarkerFunction)
+            {
+                // 内容目录原文"标记主目标及附近至多两个敌人"——标记只要装了标记器就打，与是否配齐
+                // 完整反应组合无关；目标已阵亡时不再需要标记（TryDamageEnemy 内部已经把它从活着的
+                // 敌人里摘掉，重新标记一个尸体没有意义）。
+                if (enemy.IsAlive)
+                {
+                    TryMarkEnemy(state, enemyInstanceId, FracturedCityLayout.EnemyMarkDurationSeconds);
+                }
+            }
+
+            if (resolution.Preview.ReactionId == MechanicalReactionCatalog.ReactionMarkJumpId && wasMarkedBeforeThisHit)
+            {
+                ApplyMarkJump(state, enemyInstanceId, enemy.Position, damage, isReachable);
+            }
+
+            return primaryResult;
+        }
+
+        /// <summary>标记跳转链式伤害——按"合法阵营（本方法域内只处理 RegionEnemyRecord，结构上不可能
+        /// 打到友军）、可达（<paramref name="isReachable"/>）、距离（8米内）、稳定 LogicId（此处用
+        /// EnemyInstanceId 字符串序作稳定排序键，敌人没有整数 LogicId）"排序，最多再打 2 个目标，
+        /// 每跳伤害为上一跳的 60%（DEMO-CONTENT-LOCK.md §2.4）。跳转目标本身不需要重新标记/不再次
+        /// 递归跳转——"不循环连锁"（验收卡字面要求）。</summary>
+        private static void ApplyMarkJump(CampaignState state, string primaryEnemyInstanceId, Vector2 primaryPosition,
+            float primaryDamage, Func<Vector2, Vector2, bool> isReachable)
+        {
+            SweepExpiredEnemyMarks(state);
+            RegionRecord region = Find(state);
+            if (region?.MarkedEnemies == null || state.RegionEnemies == null)
+            {
+                return;
+            }
+
+            var candidates = new List<RegionEnemyRecord>();
+            foreach (RegionEnemyRecord candidate in state.RegionEnemies)
+            {
+                if (candidate.EnemyInstanceId == primaryEnemyInstanceId || !candidate.IsAlive
+                    || candidate.RegionId != RegionId)
+                {
+                    continue;
+                }
+                if (!IsEnemyMarked(state, candidate.EnemyInstanceId))
+                {
+                    continue;
+                }
+                float dist = Vector2.Distance(primaryPosition, candidate.Position);
+                if (dist > FracturedCityLayout.MarkJumpRange)
+                {
+                    continue;
+                }
+                if (isReachable != null && !isReachable(primaryPosition, candidate.Position))
+                {
+                    continue;
+                }
+                candidates.Add(candidate);
+            }
+
+            candidates.Sort((a, b) =>
+            {
+                float da = Vector2.Distance(primaryPosition, a.Position);
+                float db = Vector2.Distance(primaryPosition, b.Position);
+                int cmp = da.CompareTo(db);
+                return cmp != 0 ? cmp : string.CompareOrdinal(a.EnemyInstanceId, b.EnemyInstanceId);
+            });
+
+            float jumpDamage = primaryDamage;
+            int jumps = Mathf.Min(FracturedCityLayout.MarkJumpMaxTargets, candidates.Count);
+            for (int i = 0; i < jumps; i++)
+            {
+                jumpDamage *= FracturedCityLayout.MarkJumpDamageFalloff;
+                TryDamageEnemy(state, candidates[i].EnemyInstanceId, jumpDamage);
+                Log.Info($"[FracturedCityRegion] 标记跳转：{primaryEnemyInstanceId} → {candidates[i].EnemyInstanceId}，伤害 {jumpDamage:F1}。");
+            }
+        }
+
+        // ── 敌方标记（ER6-REACT-01：静默标记器命中打标记，标记跳转固件识别跳转目标）───────
+
+        public static bool IsEnemyMarked(CampaignState state, string enemyInstanceId)
+        {
+            RegionRecord region = Find(state);
+            MarkedEnemyRecord mark = region?.MarkedEnemies?.FirstOrDefault(m => m.EnemyInstanceId == enemyInstanceId);
+            return mark != null && mark.ExpireAtPlaySeconds > (state?.PlaySeconds ?? 0f);
+        }
+
+        public static void TryMarkEnemy(CampaignState state, string enemyInstanceId, float durationSeconds)
+        {
+            RegionRecord region = Find(state);
+            if (region == null)
+            {
+                return;
+            }
+            region.MarkedEnemies ??= Array.Empty<MarkedEnemyRecord>();
+            MarkedEnemyRecord existing = region.MarkedEnemies.FirstOrDefault(m => m.EnemyInstanceId == enemyInstanceId);
+            float expireAt = state.PlaySeconds + durationSeconds;
+            if (existing != null)
+            {
+                existing.ExpireAtPlaySeconds = expireAt;
+            }
+            else
+            {
+                region.MarkedEnemies = region.MarkedEnemies.Append(new MarkedEnemyRecord
+                {
+                    EnemyInstanceId = enemyInstanceId,
+                    ExpireAtPlaySeconds = expireAt,
+                }).ToArray();
+            }
+        }
+
+        /// <summary>"干扰清标记"（DEMO-CONTENT-LOCK.md §2.4 反制手段）——静默干扰机在其半径内清除
+        /// 敌方标记，供 <see cref="FracturedCityEnemyAi.TickJammer"/> 调用。</summary>
+        public static bool TryClearEnemyMark(CampaignState state, string enemyInstanceId)
+        {
+            RegionRecord region = Find(state);
+            if (region?.MarkedEnemies == null || region.MarkedEnemies.Length == 0)
+            {
+                return false;
+            }
+            int before = region.MarkedEnemies.Length;
+            region.MarkedEnemies = region.MarkedEnemies.Where(m => m.EnemyInstanceId != enemyInstanceId).ToArray();
+            return region.MarkedEnemies.Length != before;
+        }
+
+        public static void SweepExpiredEnemyMarks(CampaignState state)
+        {
+            RegionRecord region = Find(state);
+            if (region?.MarkedEnemies == null || region.MarkedEnemies.Length == 0)
+            {
+                return;
+            }
+            float now = state.PlaySeconds;
+            region.MarkedEnemies = region.MarkedEnemies.Where(m => m.ExpireAtPlaySeconds > now).ToArray();
         }
 
         // ── 干扰（DEMO-CONTENT-LOCK.md §4.1 第2条）───────────────────────────

@@ -95,6 +95,14 @@ namespace GameLogic.Campaign.Regions
         public const float DirectAttackRange = 12f;
         public const float DirectAttackAimHalfAngleDeg = 60f;
 
+        // ── ER6-REACT-01：标记跳转反应（数值来自 DEMO-CONTENT-LOCK.md §2.4/§5，唯一点名数字）───
+        public const float MarkJumpRange = 8f; // "最多额外跳2个8米内目标"。
+        public const int MarkJumpMaxTargets = 2;
+        public const float MarkJumpDamageFalloff = 0.6f; // "每跳伤害为上一跳的60%"。
+        /// <summary>敌方被标记的持续时间——DEMO-CONTENT-LOCK.md 未点名具体秒数（只给跳转范围/衰减/
+        /// 目标数），沿用 ER5-SILENT-01 玩家侧标记同一量级（10秒），同类取舍见该 Story 类注释。</summary>
+        public const float EnemyMarkDurationSeconds = 10f;
+
         public static IEnumerable<Anchor> AllAnchors()
         {
             yield return EntryEvac;
