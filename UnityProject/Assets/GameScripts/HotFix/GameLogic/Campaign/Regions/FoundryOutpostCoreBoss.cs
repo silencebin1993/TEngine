@@ -109,6 +109,18 @@ namespace GameLogic.Campaign.Regions
             region.CoreLockoutActive = false;
 
             TryTransition(state, region, CoreBossState.Shielded);
+
+            // ER7-CREDITS-01：MachineExperienceFlags.BossParticipation 此前"依赖尚未实现的 ER7 Boss
+            // 内容，当前无真实触发源"（ER4-MCH-01 DEBT-ER4MCH01-01 原文）——ER7-CORE-01 落地后这个
+            // 触发源第一次真实存在：越过核心分区封锁线的那一刻，在场全部机器记一次"参与过 Boss 战"。
+            foreach (MachineRecord m in MachineRegistry.AllRecords)
+            {
+                if (m != null && m.IsAlive && m.RegionId == FoundryOutpostRegion.RegionId)
+                {
+                    MachineRegistry.TryMarkExperience(m.LogicId, MachineExperienceFlags.BossParticipation);
+                }
+            }
+
             Log.Info("[FoundryOutpostCoreBoss] Boss 战已初始化：两供能节点+主核心就位。");
         }
 

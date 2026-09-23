@@ -232,6 +232,13 @@ namespace GameLogic.Campaign.Regions
             _jamGraceRemaining = _ctx.JamGraceSeconds;
             Availability = RegionControlAvailability.Controlled;
             SwitchCount++;
+            // ER7-CREDITS-01：战役级"接管次数"统计——唯一写入口，见 CampaignState.TotalControlTakeovers
+            // 类注释（与本类自己的 SwitchCount 是两件独立的事，不要合并）。
+            CampaignState state = CampaignSession.Current;
+            if (state != null)
+            {
+                state.TotalControlTakeovers++;
+            }
 
             PublishChange(previousLogicId, target.LogicId, RegionControlChangeReason.PlayerRequest, targetPos2);
             return RegionControlSwitchResult.Ok(target.LogicId);

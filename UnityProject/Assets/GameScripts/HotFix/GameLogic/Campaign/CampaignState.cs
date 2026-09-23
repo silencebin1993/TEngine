@@ -45,6 +45,14 @@ namespace GameLogic.Campaign
         /// （已启动过是永久事实，同其余一次性标记同一纪律，用 EventLedger 判"是否已授予"而不是靠
         /// 这个时间戳本身的值域推断状态）。</summary>
         public float BeaconLaunchStartedAtPlaySeconds = -1f;
+        /// <summary>ER7-CREDITS-01：玩家主动接管机器的累计次数（"接管次数"结算统计项）。唯一写入口
+        /// <see cref="Regions.RegionControlSystem.TrySwitchControlledUnit"/> 成功分支——与该类既有的
+        /// 纯内存 <see cref="Regions.RegionControlSystem.SwitchCount"/>（每个区域控制器各自一份、
+        /// 切场即清零，此前没有任何调用方消费）是两件独立的事：那个字段留给调试/单区域内瞬时计数，
+        /// 这个字段才是跨区域、跨读档累加、真正落盘的战役级统计。死亡回弹自动重指向（
+        /// <see cref="Regions.RegionControlSystem"/> 内部的"受控机阵亡……自动切换"分支）不计入——
+        /// 不是玩家主动发起的接管。</summary>
+        public int TotalControlTakeovers;
 
         public string[] CompletedObjectiveIds = Array.Empty<string>();
         public string[] UnlockedContentIds = Array.Empty<string>();
