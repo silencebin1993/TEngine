@@ -186,8 +186,11 @@ namespace GameLogic.UI.Expedition
             string objectiveLine = string.IsNullOrEmpty(snapshot.ObjectivePreviewText)
                 ? string.Empty
                 : "\n目标：" + snapshot.ObjectivePreviewText;
+            // ER6-LOOP-01：最小可见的目标进度提示——CampaignObjectiveTracker 此前只写状态无任何 HUD
+            // 呈现，这里先把阶段名+最新已完成 OBJ 接进已有的情报文案，不新开一整块目标面板
+            // （DEBT-ER6LOOP01-01 登记完整目标 HUD/地图，留给 ER9-TUTOR-01 等 onboarding 系列）。
             _intelLabel.text = $"目标：{targetName}（第 {snapshot.ExpeditionCount + 1} 次出击）｜警戒 {snapshot.EnemyAlertLevel:F0}/100" +
-                objectiveLine + $"\n{snapshot.EnemyIntelText}";
+                objectiveLine + $"\n{snapshot.EnemyIntelText}\n{DescribeObjectiveProgress(state)}";
 
             // ER6-ADAPT-01：反制情报——四段合一显示（None 时文案自然落到"无反制/安全默认"那一条，
             // 不需要额外判空）。90暴露核心增援预告独立一行，不并入反制文案。
@@ -271,6 +274,30 @@ namespace GameLogic.UI.Expedition
             }
 
             _departButton.SetEnabled(!interruptVisible);
+        }
+
+        /// <summary>ER6-LOOP-01：最小可见文案——阶段名 + 已完成的最靠后一条 OBJ-05～08。不追踪
+        /// OBJ-01～04/09/10（不在 CampaignObjectiveTracker 范围内，见该类类注释）。</summary>
+        private static string DescribeObjectiveProgress(CampaignState state)
+        {
+            if (state == null)
+            {
+                return string.Empty;
+            }
+            string latestObj = null;
+            foreach (string id in new[]
+                     {
+                         CampaignObjectiveTracker.Obj08, CampaignObjectiveTracker.Obj07,
+                         CampaignObjectiveTracker.Obj06, CampaignObjectiveTracker.Obj05,
+                     })
+            {
+                if (CampaignObjectiveTracker.IsCompleted(state, id))
+                {
+                    latestObj = id;
+                    break;
+                }
+            }
+            return $"阶段：{state.CampaignPhase}" + (latestObj != null ? $"｜最新完成：{latestObj}" : string.Empty);
         }
 
         private static string DescribeStatus(ExpeditionDepartureService.MachineIntel m)

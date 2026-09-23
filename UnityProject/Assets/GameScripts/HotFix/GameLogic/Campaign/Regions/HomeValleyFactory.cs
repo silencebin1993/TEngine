@@ -549,6 +549,9 @@ namespace GameLogic.Campaign.Regions
             CampaignEconomyLedger.Commit(state, item.TransactionId);
             item.State = FactoryQueueState.Completed;
             item.BlockedReason = null;
+
+            // ER6-LOOP-01：回厂改造完工是 OBJ-06"ERC-003 正式回厂改造完成"子条件的唯一真实写入口。
+            CampaignObjectiveTracker.Recompute(state);
         }
 
         private static void TryReleaseOutputBlocked(CampaignState state, FactoryQueueItemRecord item)

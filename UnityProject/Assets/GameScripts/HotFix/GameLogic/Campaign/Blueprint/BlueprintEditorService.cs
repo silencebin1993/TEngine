@@ -330,6 +330,10 @@ namespace GameLogic.Campaign.Blueprint
                 CampaignExposureLedger.GrantCrossFactionFirmwareFirstUse(state, record.BlueprintId, nextVersion);
             }
 
+            // ER6-LOOP-01：蓝图保存是 OBJ-06/08"蓝图保存"子条件的唯一真实写入口，保存成功后立即重算，
+            // 不必等玩家回到家园下一帧或下一次远征触发才反映。
+            CampaignObjectiveTracker.Recompute(state);
+
             return BlueprintSaveResult.Ok(record.BlueprintId, nextVersion, reactionId, needsCharge ? techCost : 0);
         }
     }

@@ -596,6 +596,10 @@ namespace GameLogic.Campaign.Regions
                     }
                 }
 
+                // ── ER6-LOOP-01：出发时机的 CampaignPhase 前进（FirstExpedition/FoundryScouting）——
+                // 与下方 OBJ 完成结算是两条独立触发线，见 CampaignObjectiveTracker.OnDeparted 类注释。
+                CampaignObjectiveTracker.OnDeparted(state, target);
+
                 // ── 区域卸载/载入 + 机器生成/装配登记 ───────────────────────────────
                 GameRoot.HomeValley?.Exit();
                 RegionRecord regionAfter;

@@ -349,6 +349,9 @@ namespace GameLogic.Campaign.Regions
             item.BlockedReason = null;
             Log.Info($"[HomeValleyAnalysis] {info.DisplayName} 解析完成：解锁 {info.UnlockContentId}，技术数据 +{techYield}" +
                 (alreadyUnlocked ? "（重复模块折扣）" : string.Empty) + "。");
+
+            // ER6-LOOP-01：解析完成是 OBJ-06/08"解析"子条件的唯一真实写入口。
+            CampaignObjectiveTracker.Recompute(state);
         }
     }
 }
