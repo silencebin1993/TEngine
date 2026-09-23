@@ -24,6 +24,10 @@ MonoBehaviour:
   - UniTask.dll
   - YooAsset.dll
   - UnityEngine.CoreModule.dll
+  - Nebukam.Common.dll
+  - Nebukam.ORCA.dll
+  - UnityEngine.JSONSerializeModule.dll
+  - UnityEngine.UIElementsModule.dll
   LogicMainDllName: GameLogic.dll
   AssemblyTextAssetExtension: .bytes
   AssemblyTextAssetPath: GameRes/Raw/DLL
