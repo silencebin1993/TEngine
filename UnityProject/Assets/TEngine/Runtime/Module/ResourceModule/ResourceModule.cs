@@ -851,22 +851,57 @@ namespace TEngine
 
             _assetLoadingList.Add(assetObjectKey);
 
-            AssetHandle handle = GetHandleAsync(location, assetType, packageName);
-            bool cancelOrFailed = await handle.ToUniTask(cancellationToken: cancellationToken).AttachExternalCancellation(cancellationToken).SuppressCancellationThrow();
-
-            if (cancelOrFailed)
+            // ER8-E2E-01（2026-09-23）：真机 YooAsset 真实异步加载下，启动阶段会有 20+ 个
+            // UIToolkit 面板在同一帧内并发发起 LoadAssetAsync（见 GameRoot.MountDebugHud），
+            // 命中 YooAsset provider/bundle 生命周期上的瞬时竞态时 handle.AssetObject 会是
+            // null 但 handle.Status==Failed（不是取消，SuppressCancellationThrow 不会拦到）。
+            // 此前这里没有像同类回调版 LoadAssetAsync（见下方 935 行版本）那样做失败检测，
+            // 直接把 null Target 传进 AssetObject.Create，触发
+            // GameFrameworkException: Target 'X' is invalid. 把整个面板 Start() 崩掉——
+            // Editor Simulate Mode 是同步读取，从未触发过这个分支，本条是 47 个 Story 里
+            // 第一次跑真机异步加载才暴露的真实缺口。此前 47 个 Story 全部靠 Editor Play Mode
+            // 验收未曾复现。这里补齐失败检测 + 有限次重试（重试成功证明是瞬时竞态；连续
+            // 多次失败则如实把 LastError 打到日志，不静默吞掉，也不跳过预热掩盖问题）。
+            const int maxAttempts = 3;
+            UnityEngine.Object result = null;
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
             {
-                _assetLoadingList.Remove(assetObjectKey);
-                handle.Dispose();
-                return null;
-            }
+                AssetHandle handle = GetHandleAsync(location, assetType, packageName);
+                bool cancelOrFailed = await handle.ToUniTask(cancellationToken: cancellationToken).AttachExternalCancellation(cancellationToken).SuppressCancellationThrow();
 
-            assetObject = AssetObject.Create(assetObjectKey, handle.AssetObject, handle, this);
-            _assetPool.Register(assetObject, true);
+                if (cancelOrFailed)
+                {
+                    handle.Dispose();
+                    break;
+                }
+
+                if (handle.AssetObject == null || handle.Status == EOperationStatus.Failed)
+                {
+                    Log.Warning($"LoadAssetAsync '{location}' attempt {attempt}/{maxAttempts} failed: {handle.LastError}");
+                    handle.Dispose();
+                    if (attempt < maxAttempts)
+                    {
+                        await UniTask.Yield();
+                        continue;
+                    }
+
+                    break;
+                }
+
+                assetObject = AssetObject.Create(assetObjectKey, handle.AssetObject, handle, this);
+                _assetPool.Register(assetObject, true);
+                result = handle.AssetObject;
+                break;
+            }
 
             _assetLoadingList.Remove(assetObjectKey);
 
-            return handle.AssetObject;
+            if (result == null)
+            {
+                Log.Error($"LoadAssetAsync '{location}' failed after {maxAttempts} attempts.");
+            }
+
+            return result;
         }
 
         public async UniTask<GameObject> LoadGameObjectAsync(string location, Transform parent = null, CancellationToken cancellationToken = default, string packageName = "")

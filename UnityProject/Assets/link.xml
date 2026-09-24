@@ -1,0 +1,28 @@
+<linker>
+  <!--
+    ER8-E2E-01（2026-09-23）：真机 IL2CPP 构建下，全部 UI Toolkit 面板（VisualTreeAsset，
+    FactoryPanel/CoreBossHud/RegionCommandBar/...等 25+ 个）在运行时反序列化 UXML 时
+    命中：
+
+      Unknown managed type referenced: UnityEngine.UIElementsModule
+      UnityEngine.UIElements.VisualElement/UxmlSerializedData
+      Should not occur! Internal logic error: please report bug.
+
+    根因：HybridCLR 自动生成的 Assets/HybridCLRGenerate/link.xml 只保留了 VisualElement
+    本体（preserve="all"），没有覆盖它的嵌套类型 UxmlSerializedData（以及 Button/Label/
+    ScrollView 等内置控件各自的 UxmlSerializedData 嵌套类）。这些嵌套类型只被 Unity UI
+    Toolkit 运行时在反序列化 .uxml 时通过反射按类型名动态查找，HybridCLR 对 GameLogic.dll
+    字节码做静态扫描生成 AOT 补充元数据时天然看不到这类"只被引擎自己反射引用"的用法，
+    所以无论重跑多少次 HybridCLR/Generate/All 都补不上——这是独立于 HybridCLR AOT 元数据
+    机制之外的、IL2CPP 托管代码裁剪（Managed Stripping）层面的缺口。
+
+    Editor Play Mode（含本轮验证过的 OfflinePlayMode 真实异步加载）不受影响，因为 Editor
+    不走 IL2CPP 裁剪，此前 47 个 Story 靠 Editor Play Mode 验收从未暴露过这个问题；这也是
+    为什么该问题只在真机 exe 里出现。
+
+    修复：整体保留 UnityEngine.UIElementsModule 程序集，这是 Unity 官方文档推荐的解决
+    "IL2CPP 裁剪掉 UI Toolkit 反射用到的类型"这类问题的标准手段（link.xml 本身就是为此
+    设计），不是绕过——本文件独立于 HybridCLRGenerate 目录，不会被下次 GenerateAll 覆写。
+  -->
+  <assembly fullname="UnityEngine.UIElementsModule" preserve="all" />
+</linker>
