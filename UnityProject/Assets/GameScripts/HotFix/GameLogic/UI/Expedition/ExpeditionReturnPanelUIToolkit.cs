@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Cysharp.Threading.Tasks;
 using GameLogic.Campaign;
+using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Regions;
 using GameLogic.Stage;
 using TEngine;
@@ -189,7 +190,9 @@ namespace GameLogic.UI.Expedition
                 row.AddToClassList(m.IsAlive ? "exp-row-alive" : "exp-row-dead");
 
                 row.Q<Label>("Number").text = $"#{m.DisplayNumber}";
-                row.Q<Label>("Chassis").text = m.ChassisId;
+                row.Q<Label>("Chassis").text = ChassisCatalog.TryGet(m.ChassisId, out MechanicalContentDef chassisDef)
+                    ? chassisDef.DisplayName
+                    : m.ChassisId;
                 row.Q<Label>("Health").text = m.IsAlive ? $"HP{m.Health:F0}/{m.MaxHealth:F0}" : "—";
                 row.Q<Label>("Status").text = m.IsAlive ? "幸存，将随撤离返回家园" : "阵亡（纪念记录，黑匣子保留经历，机体不复活）";
             }

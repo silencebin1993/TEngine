@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Cysharp.Threading.Tasks;
 using GameLogic.Campaign;
+using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Regions;
 using GameLogic.Stage;
 using TEngine;
@@ -234,7 +235,9 @@ namespace GameLogic.UI.Expedition
                 }
 
                 row.Q<Label>("Number").text = $"#{m.DisplayNumber}";
-                row.Q<Label>("Chassis").text = m.ChassisId;
+                row.Q<Label>("Chassis").text = ChassisCatalog.TryGet(m.ChassisId, out MechanicalContentDef chassisDef)
+                    ? chassisDef.DisplayName
+                    : m.ChassisId;
                 row.Q<Label>("Health").text = $"HP{m.Health:F0}/{m.MaxHealth:F0}";
                 row.Q<Label>("Cargo").text = $"货{m.CargoSlots}";
                 row.Q<Label>("Bandwidth").text = $"带宽{m.BandwidthCost:F0}";
