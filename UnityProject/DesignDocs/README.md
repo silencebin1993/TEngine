@@ -12,7 +12,7 @@
 6. [AI-EXECUTION-PROTOCOL.md](../../../production/design/earth-reclamation/AI-EXECUTION-PROTOCOL.md)：AI 施工纪律、证据与 Windows 可玩构建放行门禁。
 7. [STORY-BOARD.md](../../../production/design/earth-reclamation/STORY-BOARD.md)：53 项顺序与状态。
 8. [STORY-EXECUTION-CARDS.md](../../../production/design/earth-reclamation/STORY-EXECUTION-CARDS.md)：每项逐条施工卡。
-9. [UI-AND-ONBOARDING-SPEC.md](../../../production/design/earth-reclamation/UI-AND-ONBOARDING-SPEC.md)：19 屏交互、错误反馈和 13 步教学。
+9. [UI-AND-ONBOARDING-SPEC.md](../../../production/design/earth-reclamation/UI-AND-ONBOARDING-SPEC.md)：19 屏交互与错误反馈（教学最后再做）。
 10. [MILESTONES.md](../../../production/design/earth-reclamation/MILESTONES.md)：一次领取一个的 Story 清单。
 11. [DEMO-ACCEPTANCE.md](../../../production/design/earth-reclamation/DEMO-ACCEPTANCE.md)：全功能 Demo 验收矩阵。
 12. [SYSTEMS-SPEC.md](../../../production/design/earth-reclamation/SYSTEMS-SPEC.md)：现有代码复用、Facade 和接入顺序。
