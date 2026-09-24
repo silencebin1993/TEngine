@@ -18,7 +18,7 @@
 12. [SYSTEMS-SPEC.md](../../../production/design/earth-reclamation/SYSTEMS-SPEC.md)：现有代码复用、Facade 和接入顺序。
 13. [00_Implementation_Completeness_Contract.md](detailed/00_Implementation_Completeness_Contract.md)：所有 Story 的完整性强制门禁。
 
-正式版方向稿：[ProjectA_FullGame_Design.md](ProjectA_FullGame_Design.md)（草案，Demo 封版后生效；在此之前 Demo 施工、验收与术语审计仍只以 ProjectA_GDD.md 及其 ERD 为准，不得据此改 Demo Story）。
+正式版（FG，门禁中）：[方向稿](ProjectA_FullGame_Design.md) → [里程碑](ProjectA_FullGame_Milestones.md) → [详细设计 fullgame/](fullgame/FG00_Completeness_Addendum.md) → `production/design/full-game/`（卡片与看板）。Demo 封版并由用户宣布开启 FG-M0 之前只允许改 FG 文档；Demo 施工、验收与术语审计仍只以 ProjectA_GDD.md 及其 ERD 为准，不得据此改 Demo Story。
 
 63 条 ERD 逐项承接和专项验收映射：[REQUIREMENT-TO-PLAYABLE-TRACE.md](../../../production/design/earth-reclamation/REQUIREMENT-TO-PLAYABLE-TRACE.md)。旧文件保留/清理状态：[OLD-DOC-RETIREMENT-AUDIT.md](../../../production/design/earth-reclamation/OLD-DOC-RETIREMENT-AUDIT.md)。
 

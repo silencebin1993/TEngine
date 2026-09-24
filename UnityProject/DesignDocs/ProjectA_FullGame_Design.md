@@ -11,6 +11,7 @@
 - **与 Demo 的关系**：Demo 的静默、铸造两派系内容和三个固定区域，原样作为正式版第一幕的骨架。本文件只给这些内容补上叙事解释，不改 Demo 规则。
 - **生效方式**：Demo 封版后，按第 16 章的变更清单逐项改写 GDD，并同步更新 ERD ID、Story 和验收矩阵（遵守 OPEN-QUESTIONS.md:3 的变更纪律）。在此之前，本文件只是方向稿。
 - **本版的由来**：Demo 设计里，"直控"和"基元电路"是两条互不相交的规则线，谁来操作机器，电路的行为都一样，导致直控只剩彩蛋价值。本版的核心修正是让直控**进入电路**。
+- **施工文档**：里程碑见 [ProjectA_FullGame_Milestones.md](ProjectA_FullGame_Milestones.md)（含默认决策登记）；详细设计见 [fullgame/](fullgame/FG00_Completeness_Addendum.md)（FG00～FG16）；Story 卡片与看板在 `production/design/full-game/`。本文件只讲方向，**具体行为以详细设计为准**。
 
 ---
 
