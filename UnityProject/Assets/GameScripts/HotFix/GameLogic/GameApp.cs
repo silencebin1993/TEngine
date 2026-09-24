@@ -133,9 +133,8 @@ public partial class GameApp
         // 调试面板迁到正式入口，只做"萌生"一块（模板编辑/回巢/野生器官三块转正登记为独立后续故事）。
         new GameObject("BattleGerminationUIToolkit").AddComponent<BattleGerminationUIToolkit>();
 
-        // 补齐原型期仍在 IMGUI / 键盘里的玩家玩法入口：模板版本、回巢改造与数字编队。
+        // 补齐原型期仍在 IMGUI / 键盘里的玩家玩法入口：模板版本与回巢改造。
         new GameObject("LineageWorkshopUIToolkit").AddComponent<GameLogic.UI.LineageWorkshop.LineageWorkshopUIToolkit>();
-        new GameObject("TacticalCommandUIToolkit").AddComponent<GameLogic.UI.TacticalCommand.TacticalCommandUIToolkit>();
     }
     
     private static void Release()

@@ -3,7 +3,6 @@ using GameLogic.Core;
 using GameLogic.Stage;
 using GameLogic.Stage.CellStage;
 using GameLogic.UI.LineageWorkshop;
-using GameLogic.UI.TacticalCommand;
 using GameLogic.UI.Common;
 using TEngine;
 using UnityEngine;
@@ -95,7 +94,6 @@ namespace GameLogic.UI.GameShell
             BindClick("deckButton", OpenDeck);
             BindClick("shopButton", OpenShop);
             BindClick("codexButton", OpenCodex);
-            BindClick("tacticsButton", OpenTactics);
             BindClick("pauseButton", OpenPause);
             BindClick("settingsButton", OpenSettings);
             BindClick("fps60Button", () => SetTargetFrameRate(60));
@@ -232,12 +230,6 @@ namespace GameLogic.UI.GameShell
             }
         }
 
-        private void OpenTactics()
-        {
-            CloseAllGameplayPanels();
-            TacticalCommandUIToolkit.Instance?.SetPanelOpen(true);
-        }
-
         private void OpenPause()
         {
             CloseAllGameplayPanels();
@@ -250,7 +242,6 @@ namespace GameLogic.UI.GameShell
             BattleCarrierUIToolkit.Instance?.SetPanelOpen(false);
             BattleGerminationUIToolkit.Instance?.SetPanelOpen(false);
             LineageWorkshopUIToolkit.Instance?.SetPanelOpen(false);
-            TacticalCommandUIToolkit.Instance?.SetPanelOpen(false);
         }
 
         private void OpenSettings()

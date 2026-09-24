@@ -9,6 +9,7 @@ using GameLogic.Campaign.Primitive;
 using GameLogic.Campaign.Regions;
 using GameLogic.MetabolicSlice.Grid;
 using GameLogic.Stage;
+using GameLogic.UI.Common;
 using TEngine;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -61,8 +62,6 @@ namespace GameLogic.UI.CircuitBoard
         private DropdownField _primaryDropdown;
         private DropdownField _utilityDropdown;
         private DropdownField _structureDropdown;
-        private Button _clearUtilityButton;
-        private Button _clearStructureButton;
         private Label _lockedContentHintLabel;
         private readonly List<string> _chassisIdsByIndex = new List<string>();
         private readonly List<string> _primaryIdsByIndex = new List<string>();
@@ -71,6 +70,11 @@ namespace GameLogic.UI.CircuitBoard
 
         private readonly Button[] _slotButtons = new Button[BlueprintCircuitLayout.SlotCount];
         private Label _selectedSlotLabel;
+        private Label _selectedSlotDetailLabel;
+
+        /// <summary>网格上两格之间的导线接口：横向 EdgeH_行_列 连 (行,列)-(行,列+1)，纵向 EdgeV_行_列 连
+        /// (行,列)-(行+1,列)。A 恒为左/上格、B 恒为右/下格，点击在 无→A→B→B→A→双向→无 之间循环。</summary>
+        private readonly List<(Button Button, int A, int B, bool Horizontal)> _edgeButtons = new List<(Button, int, int, bool)>();
 
         private DropdownField _bagChipDropdown;
         private Button _equipChipButton;
@@ -86,18 +90,10 @@ namespace GameLogic.UI.CircuitBoard
         private readonly List<string> _bagPartIdsByDropdownIndex = new List<string>();
         private readonly List<string> _pendingPartIdsByDropdownIndex = new List<string>();
 
-        private TextField _edgeFromField;
-        private TextField _edgeToField;
-        private Button _addEdgeButton;
-        private Button _removeEdgeButton;
         private Label _edgeListLabel;
 
         private DropdownField _firmware0Dropdown;
         private DropdownField _firmware1Dropdown;
-        private Button _setFirmware0Button;
-        private Button _clearFirmware0Button;
-        private Button _setFirmware1Button;
-        private Button _clearFirmware1Button;
         private readonly List<string> _firmware0IdsByIndex = new List<string>();
         private readonly List<string> _firmware1IdsByIndex = new List<string>();
 
@@ -105,10 +101,10 @@ namespace GameLogic.UI.CircuitBoard
         private Button _redoButton;
         private Label _historyDepthLabel;
 
-        private ScrollView _issuesList;
+        private VisualElement _issuesList;
         private Label _issuesEmptyLabel;
         private Label _previewSummaryLabel;
-        private ScrollView _pathList;
+        private VisualElement _pathList;
         private Label _costSummaryLabel;
         /// <summary>ER4-PRIM-05 STORY-EXECUTION-CARDS.md 第2条"UI/VFX/SFX/日志与同一事件匹配"——
         /// 展示 <see cref="Campaign.Regions.HomeValleyCombatTargets.RecentEvents"/> 最新一条，
@@ -119,6 +115,7 @@ namespace GameLogic.UI.CircuitBoard
         private Button _saveButton;
         private Button _closeButton;
         private Label _saveResultLabel;
+        private VisualElement _pendingRow;
 
         private readonly List<TemplateContainer> _issueRowPool = new List<TemplateContainer>(MaxIssueRows);
         private readonly List<TemplateContainer> _pathRowPool = new List<TemplateContainer>(MaxPathRows);
@@ -191,8 +188,6 @@ namespace GameLogic.UI.CircuitBoard
             _primaryDropdown = _root.Q<DropdownField>("PrimaryDropdown");
             _utilityDropdown = _root.Q<DropdownField>("UtilityDropdown");
             _structureDropdown = _root.Q<DropdownField>("StructureDropdown");
-            _clearUtilityButton = _root.Q<Button>("ClearUtilityButton");
-            _clearStructureButton = _root.Q<Button>("ClearStructureButton");
             _lockedContentHintLabel = _root.Q<Label>("LockedContentHintLabel");
 
             for (int i = 0; i < BlueprintCircuitLayout.SlotCount; i++)
@@ -200,6 +195,22 @@ namespace GameLogic.UI.CircuitBoard
                 _slotButtons[i] = _root.Q<Button>("Slot" + i);
             }
             _selectedSlotLabel = _root.Q<Label>("SelectedSlotLabel");
+            _selectedSlotDetailLabel = _root.Q<Label>("SelectedSlotDetailLabel");
+            for (int row = 0; row < 3; row++)
+            {
+                for (int col = 0; col < 3; col++)
+                {
+                    int slot = row * 3 + col;
+                    if (col < 2)
+                    {
+                        _edgeButtons.Add((_root.Q<Button>($"EdgeH_{row}_{col}"), slot, slot + 1, true));
+                    }
+                    if (row < 2)
+                    {
+                        _edgeButtons.Add((_root.Q<Button>($"EdgeV_{row}_{col}"), slot, slot + 3, false));
+                    }
+                }
+            }
 
             _bagChipDropdown = _root.Q<DropdownField>("BagChipDropdown");
             _equipChipButton = _root.Q<Button>("EquipChipButton");
@@ -209,30 +220,23 @@ namespace GameLogic.UI.CircuitBoard
             _pendingLabel = _root.Q<Label>("PendingLabel");
             _pendingChipDropdown = _root.Q<DropdownField>("PendingChipDropdown");
             _claimPendingButton = _root.Q<Button>("ClaimPendingButton");
+            _pendingRow = _root.Q<VisualElement>("PendingRow");
             _printChipButton = _root.Q<Button>("PrintChipButton");
             _bagResultLabel = _root.Q<Label>("BagResultLabel");
 
-            _edgeFromField = _root.Q<TextField>("EdgeFromField");
-            _edgeToField = _root.Q<TextField>("EdgeToField");
-            _addEdgeButton = _root.Q<Button>("AddEdgeButton");
-            _removeEdgeButton = _root.Q<Button>("RemoveEdgeButton");
             _edgeListLabel = _root.Q<Label>("EdgeListLabel");
 
             _firmware0Dropdown = _root.Q<DropdownField>("Firmware0Dropdown");
             _firmware1Dropdown = _root.Q<DropdownField>("Firmware1Dropdown");
-            _setFirmware0Button = _root.Q<Button>("SetFirmware0Button");
-            _clearFirmware0Button = _root.Q<Button>("ClearFirmware0Button");
-            _setFirmware1Button = _root.Q<Button>("SetFirmware1Button");
-            _clearFirmware1Button = _root.Q<Button>("ClearFirmware1Button");
 
             _undoButton = _root.Q<Button>("UndoButton");
             _redoButton = _root.Q<Button>("RedoButton");
             _historyDepthLabel = _root.Q<Label>("HistoryDepthLabel");
 
-            _issuesList = _root.Q<ScrollView>("IssuesList");
+            _issuesList = _root.Q<VisualElement>("IssuesList");
             _issuesEmptyLabel = _root.Q<Label>("IssuesEmptyLabel");
             _previewSummaryLabel = _root.Q<Label>("PreviewSummaryLabel");
-            _pathList = _root.Q<ScrollView>("PathList");
+            _pathList = _root.Q<VisualElement>("PathList");
             _costSummaryLabel = _root.Q<Label>("CostSummaryLabel");
             _lastCombatResultLabel = _root.Q<Label>("LastCombatResultLabel");
 
@@ -311,14 +315,12 @@ namespace GameLogic.UI.CircuitBoard
                 if (idx < 0 || idx >= _structureIdsByIndex.Count) return CircuitOpResult.Fail("no-selection", "未选中结构。");
                 return _board.TrySetStructure(CampaignSession.Current, _structureIdsByIndex[idx]);
             }));
-            _clearUtilityButton.clicked += () => RunOuterOp(() => _board.TrySetUtility(CampaignSession.Current, null));
-            _clearStructureButton.clicked += () => RunOuterOp(() => _board.TrySetStructure(CampaignSession.Current, null));
 
             _equipChipButton.clicked += () => RunBagOp(() =>
             {
                 if (_selectedSlot == null)
                 {
-                    return CircuitOpResult.Fail("no-slot-selected", "请先点选一个 1～7 号槽。");
+                    return CircuitOpResult.Fail("no-slot-selected", "请先在电路板上点选一个 1～7 号槽。");
                 }
                 int index = _bagChipDropdown.index;
                 if (index < 0 || index >= _bagPartIdsByDropdownIndex.Count)
@@ -343,39 +345,20 @@ namespace GameLogic.UI.CircuitBoard
             _printChipButton.clicked += () => RunBagOp(() =>
                 PrimitiveInventory.TryPrintChip(CampaignSession.Current, PrimitiveInventory.DefaultChipContentId));
 
-            _addEdgeButton.clicked += () =>
+            foreach ((Button button, int a, int b, bool _) in _edgeButtons)
             {
-                if (int.TryParse(_edgeFromField.value, out int from) && int.TryParse(_edgeToField.value, out int to))
+                if (button != null)
                 {
-                    RunOp(() => _board.TryAddEdge(from, to));
+                    button.clicked += () => RunOp(() => CycleEdge(a, b));
                 }
-                else
-                {
-                    _saveResultLabel.text = "请输入合法的槽号（0～8）。";
-                }
-            };
-            _removeEdgeButton.clicked += () =>
-            {
-                if (int.TryParse(_edgeFromField.value, out int from) && int.TryParse(_edgeToField.value, out int to))
-                {
-                    RunOp(() => _board.TryRemoveEdge(from, to));
-                }
-            };
+            }
 
-            _setFirmware0Button.clicked += () => RunOp(() =>
-            {
-                int idx = _firmware0Dropdown.index;
-                string id = idx >= 0 && idx < _firmware0IdsByIndex.Count ? _firmware0IdsByIndex[idx] : null;
-                return _board.TrySetFirmware(CampaignSession.Current, 0, id);
-            });
-            _clearFirmware0Button.clicked += () => RunOp(() => _board.TryClearFirmware(0));
-            _setFirmware1Button.clicked += () => RunOp(() =>
-            {
-                int idx = _firmware1Dropdown.index;
-                string id = idx >= 0 && idx < _firmware1IdsByIndex.Count ? _firmware1IdsByIndex[idx] : null;
-                return _board.TrySetFirmware(CampaignSession.Current, 1, id);
-            });
-            _clearFirmware1Button.clicked += () => RunOp(() => _board.TryClearFirmware(1));
+            // 固件与外层槽一致：选中即生效。原先"下拉选好再点设置"的两步式会被 0.2 秒一次的刷新把下拉值
+            // 重置回当前固件，玩家的选择等不到点按钮就被覆盖。选"（空）"即清空该位。
+            _firmware0Dropdown.RegisterValueChangedCallback(_ => RunOp(() =>
+                _board.TrySetFirmware(CampaignSession.Current, 0, IdAt(_firmware0IdsByIndex, _firmware0Dropdown.index))));
+            _firmware1Dropdown.RegisterValueChangedCallback(_ => RunOp(() =>
+                _board.TrySetFirmware(CampaignSession.Current, 1, IdAt(_firmware1IdsByIndex, _firmware1Dropdown.index))));
 
             _undoButton.clicked += () =>
             {
@@ -661,6 +644,60 @@ namespace GameLogic.UI.CircuitBoard
             RefreshAll();
         }
 
+        private bool HasEdge(int from, int to)
+        {
+            if (_board == null)
+            {
+                return false;
+            }
+            foreach ((int From, int To) e in _board.Edges)
+            {
+                if (e.From == from && e.To == to)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>接口循环：无 → A→B → B→A → 双向 → 无。每一步都经 <see cref="BlueprintCircuitBoard"/>
+        /// 的画/删边入口，四邻、软帽等校验与失败文案保持原样。某一步加边被拒（如已达边数软帽）时退到"无"
+        /// 并说明原因，保证任何状态下连点都能把这条导线删掉，不会卡在某个方向上。</summary>
+        private CircuitOpResult CycleEdge(int a, int b)
+        {
+            bool forward = HasEdge(a, b);
+            bool reverse = HasEdge(b, a);
+            if (!forward && !reverse)
+            {
+                return _board.TryAddEdge(a, b);
+            }
+            if (forward && !reverse)
+            {
+                CircuitOpResult removed = _board.TryRemoveEdge(a, b);
+                if (!removed.Success)
+                {
+                    return removed;
+                }
+                CircuitOpResult flipped = _board.TryAddEdge(b, a);
+                return flipped.Success ? flipped : CircuitOpResult.Fail(flipped.Code, $"已删除 {a}→{b}；无法改为 {b}→{a}：{flipped.Message}");
+            }
+            if (!forward)
+            {
+                CircuitOpResult both = _board.TryAddEdge(a, b);
+                if (both.Success)
+                {
+                    return both;
+                }
+                CircuitOpResult cleared = _board.TryRemoveEdge(b, a);
+                return cleared.Success ? CircuitOpResult.Fail(both.Code, $"已删除 {b}→{a}；无法改为双向：{both.Message}") : cleared;
+            }
+            CircuitOpResult first = _board.TryRemoveEdge(a, b);
+            return first.Success ? _board.TryRemoveEdge(b, a) : first;
+        }
+
+        private static string IdAt(List<string> ids, int index) =>
+            index >= 0 && index < ids.Count ? ids[index] : null;
+
         private void Update()
         {
             if (_panel == null)
@@ -706,12 +743,7 @@ namespace GameLogic.UI.CircuitBoard
             {
                 return;
             }
-            RefreshBlueprintList();
-            RefreshOuterSlots();
-            RefreshGrid();
-            RefreshBag();
-            RefreshEdgeAndFirmware();
-            RefreshHistoryLabel();
+            // 先算校验与预览，网格的问题高亮才与本次草稿一致（原先顺序会滞后一次刷新）。
             if (_board != null)
             {
                 _lastValidation = _board.Validate();
@@ -722,6 +754,12 @@ namespace GameLogic.UI.CircuitBoard
                 _lastValidation = null;
                 _lastPreview = null;
             }
+            RefreshBlueprintList();
+            RefreshOuterSlots();
+            RefreshGrid();
+            RefreshBag();
+            RefreshEdgeAndFirmware();
+            RefreshHistoryLabel();
             RefreshIssues();
             RefreshPreview();
             RefreshCostSummary();
@@ -764,16 +802,28 @@ namespace GameLogic.UI.CircuitBoard
                 BlueprintRecord r = records[i];
                 btn.parent.style.display = DisplayStyle.Flex;
                 _blueprintIdsByRowIndex[i] = r.BlueprintId;
-                string archivedTag = r.Archived ? "* " : string.Empty;
-                string versionTag = r.Versions?.Length > 0 ? $"v{r.ActiveVersion}" : "草稿未保存";
-                btn.text = $"{archivedTag}{r.DisplayName}［{versionTag}］";
+                string versionTag = r.Versions?.Length > 0 ? $"v{r.ActiveVersion}" : "未保存";
+                string archivedTag = r.Archived ? "（已归档）" : string.Empty;
+                btn.text = $"{r.DisplayName}  {versionTag}{archivedTag}";
                 btn.EnableInClassList("cb-bp-list-btn-active", r.BlueprintId == _selectedBlueprintId);
                 btn.EnableInClassList("cb-bp-list-btn-archived", r.Archived);
             }
 
-            _activeBlueprintLabel.text = _board == null
-                ? "未选择蓝图"
-                : $"{_selectedBlueprintId ?? "(未保存新蓝图)"}（底盘 {_board.ChassisId ?? "-"}｜主组件 {_board.PrimaryId ?? "-"}）";
+            _activeBlueprintLabel.text = DescribeActiveBlueprint(state, records);
+        }
+
+        private string DescribeActiveBlueprint(CampaignState state, List<BlueprintRecord> records)
+        {
+            if (_board == null)
+            {
+                return "未选择蓝图";
+            }
+            BlueprintRecord record = records.FirstOrDefault(r => r.BlueprintId == _selectedBlueprintId);
+            string name = record?.DisplayName ?? "新蓝图";
+            BlueprintVersionRecord saved = BlueprintEditorService.FindActiveVersion(state, _selectedBlueprintId);
+            string version = saved != null ? $"已保存 v{record?.ActiveVersion}" : "尚未保存";
+            bool dirty = saved == null || saved.CompileSignature != _board.ComputeSignature();
+            return dirty ? $"正在编辑：{name}（{version}）· 有未保存改动" : $"正在编辑：{name}（{version}）";
         }
 
         // ── 外层槽：只展示已解锁选项（ER4-BLP-01 第1条"未解锁不可选"）──────────────
@@ -826,7 +876,8 @@ namespace GameLogic.UI.CircuitBoard
                 {
                     continue;
                 }
-                choices.Add($"{def.DisplayName}（{def.ScrapCost}废料/负载{def.Load}）");
+                // 选项文本里不能出现 "/"：下拉菜单会把它当子菜单分隔符，把一项拆成两级菜单。
+                choices.Add($"{def.DisplayName}（{def.ScrapCost} 废料 · 负载 {def.Load}）".Replace('/', '／'));
                 idsByIndex.Add(def.Id);
             }
             dropdown.choices = choices;
@@ -890,30 +941,62 @@ namespace GameLogic.UI.CircuitBoard
             {
                 Button btn = _slotButtons[i];
                 string content = _board != null ? _board.SlotContentIds[i] : null;
-                string label;
-                if (!string.IsNullOrEmpty(content))
-                {
-                    label = $"{i}\n{BlueprintCircuitChipCatalog.DisplayNameFor(content)}";
-                }
-                else if (BlueprintCircuitLayout.IsFixedSlot(i))
-                {
-                    label = $"{i}\n（空）";
-                }
-                else
-                {
-                    SlotType slotType = BlueprintCircuitLayout.SlotTypeAt(i);
-                    label = $"{i}\n{BlueprintCircuitLayout.SlotTypeDisplayName(slotType)}\n{BlueprintCircuitLayout.SlotPassiveDisplay(slotType)}";
-                }
-                btn.text = label;
+                string head = i == BlueprintCircuitLayout.SourceSlot ? $"{i} · 源"
+                    : i == BlueprintCircuitLayout.SinkSlot ? $"{i} · 汇"
+                    : $"{i} · {BlueprintCircuitLayout.SlotTypeDisplayName(BlueprintCircuitLayout.SlotTypeAt(i))}";
+                string body = string.IsNullOrEmpty(content) ? "（空）" : BlueprintCircuitChipCatalog.DisplayNameFor(content);
+                btn.text = $"{head}\n{body}";
+                btn.EnableInClassList("cb-slot-filled", !string.IsNullOrEmpty(content));
                 btn.EnableInClassList("cb-slot-selected", _selectedSlot.HasValue && _selectedSlot.Value == i);
                 btn.EnableInClassList("cb-slot-issue", issueSlots.Contains(i));
             }
-            _selectedSlotLabel.text = _selectedSlot.HasValue ? $"已选中 {_selectedSlot.Value} 号槽" : "未选中槽位";
 
+            foreach ((Button button, int a, int b, bool horizontal) in _edgeButtons)
+            {
+                if (button == null)
+                {
+                    continue;
+                }
+                bool forward = HasEdge(a, b);
+                bool reverse = HasEdge(b, a);
+                button.text = forward && reverse ? (horizontal ? "⇄" : "⇅")
+                    : forward ? (horizontal ? "→" : "↓")
+                    : reverse ? (horizontal ? "←" : "↑")
+                    : "·";
+                button.EnableInClassList("cb-edge-on", forward || reverse);
+                button.tooltip = $"{a} 号与 {b} 号之间的导线";
+            }
+
+            RefreshSlotInspector();
+        }
+
+        private void RefreshSlotInspector()
+        {
             string sourceName = _board != null
                 ? BlueprintCircuitChipCatalog.DisplayNameFor(_board.SlotContentIds[BlueprintCircuitLayout.SourceSlot])
                 : null;
-            _sourceLabel.text = $"0 号源槽（不可拆，由底盘电源固定决定）：{sourceName ?? "-"}";
+            _sourceLabel.text = $"电源（0 号源槽，由底盘决定）：{sourceName ?? "-"}";
+
+            if (!_selectedSlot.HasValue)
+            {
+                _selectedSlotLabel.text = "未选中槽位";
+                _selectedSlotDetailLabel.text = "点击左侧电路板上的格子查看和装配。";
+                _equipChipButton.SetEnabled(false);
+                _removeChipButton.SetEnabled(false);
+                return;
+            }
+
+            int slot = _selectedSlot.Value;
+            SlotType slotType = BlueprintCircuitLayout.SlotTypeAt(slot);
+            string content = _board?.SlotContentIds[slot];
+            string contentName = string.IsNullOrEmpty(content) ? "空" : BlueprintCircuitChipCatalog.DisplayNameFor(content);
+            bool fixedSlot = BlueprintCircuitLayout.IsFixedSlot(slot);
+            _selectedSlotLabel.text = $"{slot} 号槽 · {BlueprintCircuitLayout.SlotTypeDisplayName(slotType)}";
+            _selectedSlotDetailLabel.text = fixedSlot
+                ? $"当前：{contentName}\n{(slot == BlueprintCircuitLayout.SourceSlot ? "源槽" : "汇槽")}固定，不可拆装。"
+                : $"当前：{contentName}\n{BlueprintCircuitLayout.SlotPassiveDisplay(slotType)}";
+            _equipChipButton.SetEnabled(!fixedSlot);
+            _removeChipButton.SetEnabled(!fixedSlot && !string.IsNullOrEmpty(content));
         }
 
         private void RefreshBag()
@@ -927,37 +1010,23 @@ namespace GameLogic.UI.CircuitBoard
             foreach (PrimitiveChipRecord item in PrimitiveInventory.BagItems(state))
             {
                 string source = string.IsNullOrEmpty(item.SourceSalvageId) ? "补印" : "解析";
-                bagChoices.Add($"{BlueprintCircuitChipCatalog.DisplayNameFor(item.CardDefId)}［{source}·{item.PartId.Substring(0, System.Math.Min(10, item.PartId.Length))}］");
+                bagChoices.Add($"{BlueprintCircuitChipCatalog.DisplayNameFor(item.CardDefId)}（{source} #{DropdownChoices.ShortId(item.PartId)}）");
                 _bagPartIdsByDropdownIndex.Add(item.PartId);
             }
-            _bagChipDropdown.choices = bagChoices;
-            if (bagChoices.Count == 0)
-            {
-                _bagChipDropdown.SetValueWithoutNotify(string.Empty);
-            }
-            else if (_bagChipDropdown.index < 0 || _bagChipDropdown.index >= bagChoices.Count)
-            {
-                _bagChipDropdown.index = 0;
-            }
+            DropdownChoices.Apply(_bagChipDropdown, bagChoices, "仓内没有芯片");
 
             IReadOnlyList<PrimitiveChipRecord> pending = PrimitiveInventory.PendingItems(state);
-            _pendingLabel.text = pending.Count == 0 ? "待领取：无" : $"待领取：{pending.Count} 件（仓满时新实例排队于此，不丢失）";
+            _pendingLabel.text = pending.Count == 0 ? string.Empty : $"待领取 {pending.Count} 件（仓满时新芯片在此排队，不会丢失）";
+            _pendingLabel.EnableInClassList("cb-hidden", pending.Count == 0);
+            _pendingRow.EnableInClassList("cb-hidden", pending.Count == 0);
             _pendingPartIdsByDropdownIndex.Clear();
             var pendingChoices = new List<string>();
             foreach (PrimitiveChipRecord item in pending)
             {
-                pendingChoices.Add($"{BlueprintCircuitChipCatalog.DisplayNameFor(item.CardDefId)}［{item.PartId.Substring(0, System.Math.Min(10, item.PartId.Length))}］");
+                pendingChoices.Add($"{BlueprintCircuitChipCatalog.DisplayNameFor(item.CardDefId)} #{DropdownChoices.ShortId(item.PartId)}");
                 _pendingPartIdsByDropdownIndex.Add(item.PartId);
             }
-            _pendingChipDropdown.choices = pendingChoices;
-            if (pendingChoices.Count == 0)
-            {
-                _pendingChipDropdown.SetValueWithoutNotify(string.Empty);
-            }
-            else if (_pendingChipDropdown.index < 0 || _pendingChipDropdown.index >= pendingChoices.Count)
-            {
-                _pendingChipDropdown.index = 0;
-            }
+            DropdownChoices.Apply(_pendingChipDropdown, pendingChoices, "无");
         }
 
         private void RefreshEdgeAndFirmware()
@@ -973,8 +1042,8 @@ namespace GameLogic.UI.CircuitBoard
                 return;
             }
             _edgeListLabel.text = _board.Edges.Count == 0
-                ? "无导线"
-                : string.Join(", ", _board.Edges.OrderBy(e => e.From).ThenBy(e => e.To).Select(e => $"{e.From}→{e.To}"));
+                ? "导线：无"
+                : "导线：" + string.Join("，", _board.Edges.OrderBy(e => e.From).ThenBy(e => e.To).Select(e => $"{e.From}→{e.To}"));
 
             PopulateDropdown(_firmware0Dropdown, _firmware0IdsByIndex, FirmwareCatalog.All.Values, state,
                 _board.FirmwareSlots[0], includeEmptyOption: true);
@@ -984,7 +1053,9 @@ namespace GameLogic.UI.CircuitBoard
 
         private void RefreshHistoryLabel()
         {
-            _historyDepthLabel.text = _board == null ? "撤销0/重做0" : $"撤销{_board.UndoDepth}/重做{_board.RedoDepth}";
+            _historyDepthLabel.text = _board == null ? string.Empty : $"可撤销 {_board.UndoDepth} · 可重做 {_board.RedoDepth}";
+            _undoButton.SetEnabled(_board != null && _board.UndoDepth > 0);
+            _redoButton.SetEnabled(_board != null && _board.RedoDepth > 0);
         }
 
         private void RefreshIssues()
@@ -1026,7 +1097,7 @@ namespace GameLogic.UI.CircuitBoard
             else
             {
                 _previewSummaryLabel.text =
-                    $"有效路径 {_lastPreview.PathCount} 条｜归一化总伤害 {_lastPreview.TotalNormalizedDamage:F1}｜{_lastPreview.ReactionHint}";
+                    $"有效路径 {_lastPreview.PathCount} 条 · 归一化总伤害 {_lastPreview.TotalNormalizedDamage:F1}\n{_lastPreview.ReactionHint}";
             }
 
             for (int i = 0; i < MaxPathRows; i++)
@@ -1087,8 +1158,8 @@ namespace GameLogic.UI.CircuitBoard
             }
 
             _costSummaryLabel.text =
-                $"废料成本 {scrap}｜负载 {load}/{(capacity.HasValue ? capacity.Value.ToString() : "-")}｜带宽 +{bandwidth}｜热量 {heat:F0}\n" +
-                $"派系 {factionText}{crossFactionNote}｜反应：{reactionNote}\n" +
+                $"废料成本 {scrap}\n负载 {load}/{(capacity.HasValue ? capacity.Value.ToString() : "-")} · 带宽 +{bandwidth} · 热量 {heat:F0}\n" +
+                $"派系：{factionText}{crossFactionNote}\n反应：{reactionNote}\n" +
                 $"敌方对策：{counterNote}";
         }
 

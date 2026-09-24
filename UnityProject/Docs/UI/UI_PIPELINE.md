@@ -104,7 +104,7 @@ Assets/GameScripts/HotFix/GameLogic/UI/<Feature>/
 
 - UXML 节点 `name` 使用 `camelCase`；USS 类使用 `kebab-case`；名称是 C# 查询契约，改名必须同步改绑定代码。
 - 不在 UXML 写 `style` 属性。定位、尺寸、颜色、可见性与状态都定义在 USS 类中。
-- 通用样式优先补到共享 `BattleUI.uss`，页面私有样式留在功能页面的 USS。禁止复制粘贴一整段按钮、滚动条或卡片样式。
+- 通用样式优先补到共享样式表，页面私有样式留在功能页面的 USS。禁止复制粘贴一整段按钮、滚动条或卡片样式。旧细胞阶段/战斗面板用 `BattleUI.uss`；《地球归还》浮动窗口用 `Raw/UI/Common/MachineWindow.uss`（`mw-window`/`mw-header`/`mw-btn`/`mw-field` 等，UXML 里先引它再引本页 USS）。
 - `Button` 的点击、`TextField` 的变更和列表元素的绑定，在控制器 `CacheNodes` / `BindEvents` 中集中注册；销毁时对称清理。
 - 只通过 `AddToClassList` / `RemoveFromClassList` 表示视觉状态。不要用 `element.style.*` 写临时视觉数值。
 - 无交互的全屏根节点必须 `PickingMode.Ignore`；显示模态窗时，只有遮罩和可操作面板可以接收点击。

@@ -6,6 +6,7 @@ using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Primitive;
 using GameLogic.Campaign.Regions;
 using GameLogic.Stage;
+using GameLogic.UI.Common;
 using TEngine;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -243,10 +244,15 @@ namespace GameLogic.UI.PrimitiveCraft
                 upgradeChoices.Add(ShortLabel(item));
                 _upgradeChoicePartIds.Add(item.PartId);
             }
-            _upgradeMaterialADropdown.choices = upgradeChoices;
-            _upgradeMaterialBDropdown.choices = upgradeChoices;
-            ClampIndex(_upgradeMaterialADropdown, upgradeChoices.Count);
-            ClampIndex(_upgradeMaterialBDropdown, upgradeChoices.Count);
+            DropdownChoices.Apply(_upgradeMaterialADropdown, upgradeChoices, "仓内没有可用的聚焦镜");
+            DropdownChoices.Apply(_upgradeMaterialBDropdown, new List<string>(upgradeChoices), "仓内没有可用的聚焦镜");
+            // 两个材料默认不同：同一实例填两次必然被 TryEnqueueUpgrade 拒绝，默认值应当是一组能直接排入的合法组合。
+            if (upgradeChoices.Count >= 2 && _upgradeMaterialBDropdown.index == _upgradeMaterialADropdown.index)
+            {
+                _upgradeMaterialBDropdown.SetValueWithoutNotify(
+                    _upgradeMaterialBDropdown.choices[_upgradeMaterialADropdown.index == 0 ? 1 : 0]);
+            }
+            _enqueueUpgradeButton.SetEnabled(upgradeChoices.Count >= 2);
 
             // 拆解材料下拉：任意未被预留的仓内实例。
             _disassembleChoicePartIds.Clear();
@@ -260,8 +266,8 @@ namespace GameLogic.UI.PrimitiveCraft
                 disassembleChoices.Add(ShortLabel(item));
                 _disassembleChoicePartIds.Add(item.PartId);
             }
-            _disassembleMaterialDropdown.choices = disassembleChoices;
-            ClampIndex(_disassembleMaterialDropdown, disassembleChoices.Count);
+            DropdownChoices.Apply(_disassembleMaterialDropdown, disassembleChoices, "仓内没有可拆解的芯片");
+            _enqueueDisassembleButton.SetEnabled(disassembleChoices.Count > 0);
 
             // 队列展示 + 可取消项下拉。
             CraftQueueItemRecord[] queues = state?.CraftQueues ?? System.Array.Empty<CraftQueueItemRecord>();
@@ -276,7 +282,7 @@ namespace GameLogic.UI.PrimitiveCraft
                 row.style.display = DisplayStyle.Flex;
                 CraftQueueItemRecord q = queues[i];
                 row.Q<Label>("Kind").text = q.Kind == CraftQueueKind.Upgrade ? "升级" : "拆解";
-                row.Q<Label>("State").text = q.State.ToString();
+                row.Q<Label>("State").text = DescribeState(q.State);
                 row.Q<Label>("Progress").text = $"{q.Progress:F1}/{q.Duration:F1}s";
                 row.Q<Label>("Reason").text = q.BlockedReason ?? string.Empty;
             }
@@ -290,11 +296,11 @@ namespace GameLogic.UI.PrimitiveCraft
                 {
                     continue;
                 }
-                cancelChoices.Add((q.Kind == CraftQueueKind.Upgrade ? "升级" : "拆解") + "·" + q.State + "·" + Shorten(q.QueueItemId));
+                cancelChoices.Add($"{(q.Kind == CraftQueueKind.Upgrade ? "升级" : "拆解")} · {DescribeState(q.State)} #{DropdownChoices.ShortId(q.QueueItemId)}");
                 _cancelChoiceQueueIds.Add(q.QueueItemId);
             }
-            _cancelQueueDropdown.choices = cancelChoices;
-            ClampIndex(_cancelQueueDropdown, cancelChoices.Count);
+            DropdownChoices.Apply(_cancelQueueDropdown, cancelChoices, "没有可取消的任务");
+            _cancelQueueButton.SetEnabled(cancelChoices.Count > 0);
 
             // 待领取产物下拉（全局 Pending 池，与电路板面板共享同一份数据源）。
             _pendingChoicePartIds.Clear();
@@ -304,28 +310,31 @@ namespace GameLogic.UI.PrimitiveCraft
                 pendingChoices.Add(ShortLabel(item));
                 _pendingChoicePartIds.Add(item.PartId);
             }
-            _pendingOutputDropdown.choices = pendingChoices;
-            ClampIndex(_pendingOutputDropdown, pendingChoices.Count);
+            DropdownChoices.Apply(_pendingOutputDropdown, pendingChoices, "没有待领取的产物");
+            _claimOutputButton.SetEnabled(pendingChoices.Count > 0);
         }
 
         private static string ShortLabel(PrimitiveChipRecord item)
         {
             string source = string.IsNullOrEmpty(item.SourceSalvageId) ? "补印/合成" : "解析";
-            string reserved = string.IsNullOrEmpty(item.ReservedByTransactionId) ? string.Empty : "·已预留";
-            return $"{BlueprintCircuitChipCatalog.DisplayNameFor(item.CardDefId)}［{source}·{Shorten(item.PartId)}{reserved}］";
+            string reserved = string.IsNullOrEmpty(item.ReservedByTransactionId) ? string.Empty : " · 已预留";
+            return $"{BlueprintCircuitChipCatalog.DisplayNameFor(item.CardDefId)}（{source} #{DropdownChoices.ShortId(item.PartId)}{reserved}）";
         }
 
-        private static string Shorten(string id) => string.IsNullOrEmpty(id) ? id : id.Substring(0, System.Math.Min(10, id.Length));
-
-        private static void ClampIndex(DropdownField dropdown, int choiceCount)
+        private static string DescribeState(CraftQueueState state)
         {
-            if (choiceCount == 0)
+            switch (state)
             {
-                dropdown.SetValueWithoutNotify(string.Empty);
-            }
-            else if (dropdown.index < 0 || dropdown.index >= choiceCount)
-            {
-                dropdown.index = 0;
+                case CraftQueueState.Queued: return "排队中";
+                case CraftQueueState.WaitingResources: return "缺材料";
+                case CraftQueueState.WaitingPower: return "缺电力";
+                case CraftQueueState.Running: return "进行中";
+                case CraftQueueState.Committing: return "结算中";
+                case CraftQueueState.OutputWaiting: return "待领取";
+                case CraftQueueState.Completed: return "已完成";
+                case CraftQueueState.Cancelled: return "已取消";
+                case CraftQueueState.Failed: return "失败";
+                default: return state.ToString();
             }
         }
 

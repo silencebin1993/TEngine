@@ -15,7 +15,6 @@ using GameLogic.Stage.CellStage;
 using GameLogic.UI.Battle;
 using GameLogic.UI.Common;
 using GameLogic.UI.LineageWorkshop;
-using GameLogic.UI.TacticalCommand;
 
 namespace GameLogic
 {
@@ -648,10 +647,6 @@ namespace GameLogic
                     else if (_current != PanelKind.Pause && LineageWorkshopUIToolkit.Instance != null && LineageWorkshopUIToolkit.Instance.IsPanelOpen)
                     {
                         LineageWorkshopUIToolkit.Instance.SetPanelOpen(false);
-                    }
-                    else if (_current != PanelKind.Pause && TacticalCommandUIToolkit.Instance != null && TacticalCommandUIToolkit.Instance.IsPanelOpen)
-                    {
-                        TacticalCommandUIToolkit.Instance.SetPanelOpen(false);
                     }
                     else
                     {

@@ -55,9 +55,19 @@ namespace GameLogic.UI.Common
             drag.ApplyPersistedPosition();
         }
 
+        private const float PanelRescanIntervalSeconds = 1f;
+        private static readonly List<IPanel> KnownPanels = new List<IPanel>();
+        private static float _nextPanelScanTime;
+
+        /// <summary>
+        /// 世界层（相机滚轮缩放、点选、框选）是否必须让出鼠标。两路判定取并集：
+        /// ① 经 <see cref="Attach"/> 注册的可拖动窗口；② 任意 UI Toolkit 面板上真实拾取到的可见控件——
+        /// 后者覆盖没有走 Attach 的面板（蓝图编辑器、合成台、区域指挥栏等），否则鼠标停在这些面板上
+        /// 滚轮会穿透去缩放相机而不是滚动面板。
+        /// </summary>
         private static bool IsPointerOverRegisteredWindow()
         {
-            Vector2 panelPosition = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
+            Vector2 screenTopLeft = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
             for (int i = RegisteredWindows.Count - 1; i >= 0; i--)
             {
                 VisualElement window = RegisteredWindows[i];
@@ -71,12 +81,77 @@ namespace GameLogic.UI.Common
                 {
                     continue;
                 }
-                if (window.worldBound.Contains(panelPosition))
+                // worldBound 是面板坐标；PanelSettings 按 1920×1080 缩放，必须换算，不能直接拿屏幕像素比。
+                if (window.worldBound.Contains(RuntimePanelUtils.ScreenToPanel(window.panel, screenTopLeft)))
+                {
+                    return true;
+                }
+            }
+            return IsPointerOverPickableUi(screenTopLeft);
+        }
+
+        private static bool IsPointerOverPickableUi(Vector2 screenTopLeft)
+        {
+            RefreshKnownPanels();
+            for (int i = 0; i < KnownPanels.Count; i++)
+            {
+                IPanel panel = KnownPanels[i];
+                if (panel == null || panel.visualTree == null)
+                {
+                    continue;
+                }
+                VisualElement picked = panel.Pick(RuntimePanelUtils.ScreenToPanel(panel, screenTopLeft));
+                if (picked != null && BlocksWorldPointer(picked, panel.visualTree.worldBound))
                 {
                     return true;
                 }
             }
             return false;
+        }
+
+        /// <summary>
+        /// 从拾取到的元素沿祖先链向上找：途经任一可见控件（按钮、文字、下拉、滚动区等）或有背景的窗口即算命中 UI；
+        /// 先碰到铺满全屏的布局容器则放行。这样窗口里的透明内容容器（如 ScrollView 的 content）仍算在窗口上，
+        /// 而一个漏设 picking-mode="Ignore" 的全屏透明容器不会让整个战场永久收不到鼠标。
+        /// </summary>
+        private static bool BlocksWorldPointer(VisualElement picked, Rect panelBounds)
+        {
+            for (VisualElement current = picked; current != null; current = current.parent)
+            {
+                Rect bounds = current.worldBound;
+                if (bounds.width >= panelBounds.width * 0.9f && bounds.height >= panelBounds.height * 0.9f)
+                {
+                    return false;
+                }
+                bool plainContainer = current.GetType() == typeof(VisualElement) || current is TemplateContainer;
+                if (!plainContainer
+                    || current.resolvedStyle.backgroundColor.a > 0.01f
+                    || current.resolvedStyle.backgroundImage.texture != null
+                    || current.resolvedStyle.backgroundImage.sprite != null)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static void RefreshKnownPanels()
+        {
+            if (KnownPanels.Count > 0 && Time.unscaledTime < _nextPanelScanTime)
+            {
+                return;
+            }
+            _nextPanelScanTime = Time.unscaledTime + PanelRescanIntervalSeconds;
+            KnownPanels.Clear();
+            UIDocument[] documents = Object.FindObjectsByType<UIDocument>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            for (int i = 0; i < documents.Length; i++)
+            {
+                IPanel panel = documents[i].rootVisualElement?.panel;
+                if (panel != null && !KnownPanels.Contains(panel))
+                {
+                    KnownPanels.Add(panel);
+                }
+            }
         }
 
         /// <summary>
