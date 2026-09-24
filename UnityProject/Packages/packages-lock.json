@@ -1,11 +1,11 @@
 {
   "dependencies": {
     "com.code-philosophy.hybridclr": {
-      "version": "https://gitee.com/focus-creative-games/hybridclr_unity.git",
+      "version": "https://gitee.com/focus-creative-games/hybridclr_unity.git#v8.13.0",
       "depth": 0,
       "source": "git",
       "dependencies": {},
-      "hash": "4df417e56ad827cd7e70a54662f0e8bab90aafe9"
+      "hash": "ca7f87b6a72f3739f99a5ad0c957c7aae0cbd922"
     },
     "com.coplaydev.unity-mcp": {
       "version": "https://github.com/CoplayDev/unity-mcp.git?path=/MCPForUnity#main",
