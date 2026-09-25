@@ -205,7 +205,7 @@ namespace GameLogic.UI.Factory
                 return;
             }
             HomeValleyFactory.FactoryOpResult r = HomeValleyFactory.TryEnqueueProduce(state, blueprintId);
-            _produceHint.text = r.Success ? string.Empty : $"生产失败：{r.FailureReason}";
+            _produceHint.text = r.Success ? string.Empty : "生产失败：" + HomeValleyFactory.DescribeFailure(r.FailureReason);
         }
 
         private void RefreshQueueList(CampaignState state)
@@ -454,7 +454,7 @@ namespace GameLogic.UI.Factory
             bool directlyControlled = GameRoot.HomeValley?.IsMachineDirectControlled(logicId) ?? false;
             HomeValleyFactory.FactoryOpResult r = HomeValleyFactory.TryEnqueueRetrofit(
                 state, logicId, m.BlueprintId, versionNumber, directlyControlled);
-            _retrofitHintLabel.text = r.Success ? string.Empty : $"改造排队失败：{r.FailureReason}";
+            _retrofitHintLabel.text = r.Success ? string.Empty : "改造排队失败：" + HomeValleyFactory.DescribeFailure(r.FailureReason);
         }
 
         private void RefreshExitStatus(CampaignState state)

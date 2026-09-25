@@ -27,6 +27,11 @@ namespace GameLogic.UI.Common
             {
                 return "出厂失败，材料已退还";
             }
+            string shortfall = Campaign.CampaignEconomyLedger.DescribeShortfall(code);
+            if (shortfall != null)
+            {
+                return shortfall + "，补足后自动开工";
+            }
             switch (code)
             {
                 case "assembly-station-unpowered": return "装配站断电，恢复供电后继续（进度保留）";

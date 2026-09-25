@@ -141,6 +141,37 @@ namespace GameLogic.Campaign.Regions
             return blueprintId == HomeValleyLayout.BlueprintErc003Id || blueprintId == HomeValleyLayout.BlueprintHaulerId;
         }
 
+        /// <summary>ER8-NEG-01：生产/改造/取消排队失败的玩家文字——此前面板直接显示原因码。</summary>
+        public static string DescribeFailure(string reason)
+        {
+            if (string.IsNullOrEmpty(reason))
+            {
+                return "暂时无法排队";
+            }
+            if (reason.StartsWith("blueprint-locked:", StringComparison.Ordinal))
+            {
+                return reason.EndsWith(HomeValleyLayout.BlueprintHoverId, StringComparison.Ordinal)
+                    ? "悬浮机蓝图未解锁：先让解析台通电运转"
+                    : "这张蓝图还没有解锁";
+            }
+            if (reason.StartsWith("no-production-profile", StringComparison.Ordinal)) return "这张蓝图不能在装配站生产";
+            if (reason.StartsWith("no-active-version", StringComparison.Ordinal)) return "这张蓝图还没有保存过可用版本";
+            if (reason.StartsWith("not-found:", StringComparison.Ordinal)) return "这一项已经不在队列里";
+            if (reason.StartsWith("cannot-cancel-from:", StringComparison.Ordinal)) return "这一项已经完成或出厂，不能取消";
+            switch (reason)
+            {
+                case "target-not-alive": return "这台机器已阵亡";
+                case "target-not-in-home-valley": return "这台机器不在归还谷地（远征中）";
+                case "target-occupying-factory-exit": return "这台机器正停在装配站出口，先让它驶离";
+                case "target-directly-controlled": return "这台机器正被你直接操控，先退出接管";
+                case "target-busy-with-work-order": return "这台机器正在执行工单，先取消或等它完成";
+                case "target-already-queued-for-retrofit": return "这台机器已经在改造队列里";
+                case "blueprint-version-not-found": return "所选蓝图版本已不存在";
+                case "chassis-mismatch": return "蓝图底盘与这台机器不一致";
+                default: return "暂时无法排队";
+            }
+        }
+
         /// <summary>出口是否被占用——供 UI"出口"状态展示与 <see cref="Tick"/> 自身复用同一条判定。</summary>
         public static bool IsExitBlocked(CampaignState state)
         {
@@ -149,6 +180,26 @@ namespace GameLogic.Campaign.Regions
         }
 
         private static long NowTick(CampaignState state) => (long)(state.PlaySeconds * 1000f);
+
+        /// <summary>入队时刻：战役时间毫秒，且严格大于本队列已有的任何一项。暂停中连续排队时战役时间不走，
+        /// 此前几项的时刻相同，先后只能靠随机 ID 字符串比较——顺序随机，后排的甚至会插到正在做的那一项前面。
+        /// 现在同一时刻排的也按点击先后（ER8-NEG-01 负向自检发现）。</summary>
+        private static long NextCreatedTick(CampaignState state)
+        {
+            long tick = NowTick(state);
+            FactoryQueueItemRecord[] queue = state.FactoryQueues;
+            if (queue != null)
+            {
+                foreach (FactoryQueueItemRecord q in queue)
+                {
+                    if (q != null && q.CreatedTick >= tick)
+                    {
+                        tick = q.CreatedTick + 1;
+                    }
+                }
+            }
+            return tick;
+        }
 
         private static void Append(CampaignState state, FactoryQueueItemRecord item)
         {
@@ -204,7 +255,7 @@ namespace GameLogic.Campaign.Regions
                 Progress = 0f,
                 State = FactoryQueueState.Queued,
                 BlockedReason = null,
-                CreatedTick = NowTick(state),
+                CreatedTick = NextCreatedTick(state),
             };
             Append(state, item);
             return FactoryOpResult.Ok(queueItemId);
@@ -300,7 +351,7 @@ namespace GameLogic.Campaign.Regions
                 Progress = 0f,
                 State = FactoryQueueState.Queued,
                 BlockedReason = null,
-                CreatedTick = NowTick(state),
+                CreatedTick = NextCreatedTick(state),
             };
             Append(state, item);
             return FactoryOpResult.Ok(queueItemId);

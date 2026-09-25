@@ -122,6 +122,62 @@ namespace GameLogic.Campaign.Regions
             public static MachineCheck Bad(string reason) => new MachineCheck(false, reason, null);
         }
 
+        /// <summary>ER8-NEG-01：下令失败（修复/建造/拆解/拆除/充电/搬运）的玩家文字——此前只写日志，玩家点了没反应。
+        /// 原因码原样留给逻辑与日志。</summary>
+        public static string DescribeCommandFailure(string reason)
+        {
+            if (string.IsNullOrEmpty(reason))
+            {
+                return "无法执行这项命令";
+            }
+            string shortfall = CampaignEconomyLedger.DescribeShortfall(reason);
+            if (shortfall != null)
+            {
+                return shortfall + "（拆解残骸、把废料搬进仓库后再试）";
+            }
+            if (reason.StartsWith("machine-not-capable:", StringComparison.Ordinal))
+            {
+                string kind = reason.Substring(reason.LastIndexOf(':') + 1);
+                return $"这台机器不能{KindVerb(kind)}，换一台搬运机试试";
+            }
+            if (reason.StartsWith("order-already-active", StringComparison.Ordinal)) return "这项工作已经有机器在做";
+            if (reason.StartsWith("not-damaged", StringComparison.Ordinal)) return "这座建筑没有损坏，不需要修复";
+            if (reason.StartsWith("no-repair-profile", StringComparison.Ordinal)) return "这座建筑不能修复";
+            if (reason.StartsWith("no-build-profile", StringComparison.Ordinal)) return "这里不能建造";
+            if (reason.StartsWith("not-operational", StringComparison.Ordinal)) return "只有运转中的建筑才能拆除";
+            if (reason.StartsWith("building-not-found", StringComparison.Ordinal)
+                || reason.StartsWith("ground-item-not-found", StringComparison.Ordinal)
+                || reason.StartsWith("not-a-wreckage-node", StringComparison.Ordinal)
+                || reason == "region-not-found")
+            {
+                return "目标已不存在";
+            }
+            switch (reason)
+            {
+                case "machine-not-found-or-dead": return "这台机器已不在场";
+                case "machine-out-of-region": return "这台机器不在归还谷地";
+                case "already-built": return "这里已经建好了";
+                case "already-salvaged": return "这处残骸已经拆完";
+                case "battery-already-full": return "电量已满，不需要充电";
+                case "cannot-demolish-core": return "归还核心不能拆除";
+                case "not-rescue-machine": return "只有紧急救援机能做紧急修复";
+                default: return "无法执行这项命令";
+            }
+        }
+
+        private static string KindVerb(string kind)
+        {
+            switch (kind)
+            {
+                case nameof(WorkOrderKind.Haul): return "搬运";
+                case nameof(WorkOrderKind.Build): return "建造";
+                case nameof(WorkOrderKind.Repair): return "修复";
+                case nameof(WorkOrderKind.Salvage): return "拆解";
+                case nameof(WorkOrderKind.Recharge): return "给别的建筑充电";
+                default: return "做这项工作";
+            }
+        }
+
         private static MachineCheck CheckMachine(int machineLogicId, WorkOrderKind kind)
         {
             if (!MachineRegistry.TryGetRecord(machineLogicId, out MachineRecord record) || !record.IsAlive)

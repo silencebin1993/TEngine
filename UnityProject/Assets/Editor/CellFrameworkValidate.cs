@@ -126,6 +126,7 @@ namespace GameLogic.EditorTools
                 _fail += ObjectiveSelfCheck.Run(Report);
                 _fail += SilhouetteSelfCheck.Run(Report);
                 _fail += FeedbackVfxSelfCheck.Run(Report);
+                _fail += NegativePathSelfCheck.Run(Report);
             }
             catch (Exception e)
             {

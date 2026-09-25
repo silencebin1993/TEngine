@@ -113,7 +113,10 @@ namespace GameLogic.Campaign
         /// <summary>Demo 骨架先给 3 个固定槽位；不是最终产品的存档数量上限，只是本 Story 的最小可用范围。</summary>
         public const int SlotCount = 3;
 
-        public static string SaveDirectory => Path.Combine(Application.persistentDataPath, "Campaigns");
+        /// <summary>自检专用：把存档目录临时改到别处（用完置回 null）。负向旅程要制造损坏存档，绝不能碰玩家真实槽位。</summary>
+        public static string SaveDirectoryOverrideForTests { get; set; }
+
+        public static string SaveDirectory => SaveDirectoryOverrideForTests ?? Path.Combine(Application.persistentDataPath, "Campaigns");
 
         public static string SlotPath(int slotIndex) =>
             Path.Combine(SaveDirectory, $"campaign_slot{slotIndex}.json");

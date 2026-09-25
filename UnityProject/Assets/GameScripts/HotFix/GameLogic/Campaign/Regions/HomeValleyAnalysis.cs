@@ -151,6 +151,26 @@ namespace GameLogic.Campaign.Regions
 
         private static long NowTick(CampaignState state) => (long)(state.PlaySeconds * 1000f);
 
+        /// <summary>入队时刻：战役时间毫秒，且严格大于本队列已有的任何一项。暂停中连续排队时战役时间不走，
+        /// 此前几项的时刻相同，先后只能靠随机 ID 字符串比较——顺序随机，后排的甚至会插到正在做的那一项前面。
+        /// 现在同一时刻排的也按点击先后（ER8-NEG-01 负向自检发现）。</summary>
+        private static long NextCreatedTick(CampaignState state)
+        {
+            long tick = NowTick(state);
+            AnalysisQueueItemRecord[] queue = state.AnalysisQueues;
+            if (queue != null)
+            {
+                foreach (AnalysisQueueItemRecord q in queue)
+                {
+                    if (q != null && q.CreatedTick >= tick)
+                    {
+                        tick = q.CreatedTick + 1;
+                    }
+                }
+            }
+            return tick;
+        }
+
         private static int ActiveCount(CampaignState state) =>
             state.AnalysisQueues?.Count(q => IsActive(q.State)) ?? 0;
 
@@ -193,7 +213,7 @@ namespace GameLogic.Campaign.Regions
                 Duration = info.Duration,
                 Progress = 0f,
                 State = AnalysisQueueState.Queued,
-                CreatedTick = NowTick(state),
+                CreatedTick = NextCreatedTick(state),
             };
             state.AnalysisQueues = (state.AnalysisQueues ?? Array.Empty<AnalysisQueueItemRecord>()).Append(queueItem).ToArray();
             return AnalysisOpResult.Ok(queueItemId);

@@ -25,6 +25,40 @@ namespace GameLogic.Campaign
     /// </summary>
     public static class CampaignEconomyLedger
     {
+        private static readonly System.Text.RegularExpressions.Regex ShortfallPattern =
+            new System.Text.RegularExpressions.Regex(@"insufficient:(\w+):need=([\d.]+):have=([\d.]+)");
+
+        /// <summary>从 <c>insufficient:{资源}:need={X}:have={Y}</c>（可能带前缀，如 insufficient-scrap:）解析缺口。</summary>
+        public static bool TryParseShortfall(string reason, out string resourceType, out float need, out float have)
+        {
+            resourceType = null;
+            need = have = 0f;
+            if (string.IsNullOrEmpty(reason))
+            {
+                return false;
+            }
+            System.Text.RegularExpressions.Match m = ShortfallPattern.Match(reason);
+            if (!m.Success)
+            {
+                return false;
+            }
+            resourceType = m.Groups[1].Value;
+            float.TryParse(m.Groups[2].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out need);
+            float.TryParse(m.Groups[3].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out have);
+            return true;
+        }
+
+        /// <summary>缺料的玩家文字：“废料不足：需要 30，现有 10”。不是缺料原因码返回 null。</summary>
+        public static string DescribeShortfall(string reason)
+        {
+            if (!TryParseShortfall(reason, out string resourceType, out float need, out float have))
+            {
+                return null;
+            }
+            string name = resourceType == "Scrap" ? "废料" : resourceType == "TechData" ? "技术数据" : "资源";
+            return $"{name}不足：需要 {need:0}，现有 {have:0}";
+        }
+
         public const string ResourceScrap = "Scrap";
         public const string ResourceTechData = "TechData";
         public const string ResourcePower = "PowerCapacity";

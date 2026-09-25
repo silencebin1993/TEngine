@@ -1828,6 +1828,8 @@ namespace GameLogic.Campaign.Regions
             if (!r.Success)
             {
                 Log.Warning($"[HomeValleyController] 下令{label}失败：{r.FailureReason}");
+                // ER8-NEG-01：此前只写日志，玩家点了没有任何反应。
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Denied, HomeValleyWorkOrders.DescribeCommandFailure(r.FailureReason));
                 return;
             }
             WorkOrderRecord order = HomeValleyWorkOrders.Find(state, r.WorkOrderId);
@@ -1846,6 +1848,7 @@ namespace GameLogic.Campaign.Regions
             if (!r.Success)
             {
                 Log.Warning($"[HomeValleyController] 下令搬运 {groundItemId} 失败：{r.FailureReason}");
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Denied, HomeValleyWorkOrders.DescribeCommandFailure(r.FailureReason));
                 return;
             }
             WorkOrderRecord order = HomeValleyWorkOrders.Find(state, r.WorkOrderId);
