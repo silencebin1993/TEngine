@@ -122,6 +122,7 @@ namespace GameLogic.EditorTools
                 _fail += FeedbackCueSelfCheck.Run(Report);
                 _fail += SettingsConsumersSelfCheck.Run(Report);
                 _fail += ContentIconsSelfCheck.Run(Report);
+                _fail += CampaignFlowSelfCheck.Run(Report);
             }
             catch (Exception e)
             {

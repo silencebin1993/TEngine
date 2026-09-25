@@ -1080,11 +1080,12 @@ namespace GameLogic
             Log.Info($"[MainMenuUI] 已读取战役：campaignId={result.State.CampaignId} slot={slotIndex} " +
                 $"phase={result.State.CampaignPhase}");
 
-            // ER2-SCENE-01："继续"与"读取"都走恢复语义（GameRoot.ResumeHomeValley，不是新局）——
-            // Controller 内部按已有 RegionRecord/MachineRecord 复用，不重复播种。
+            // ER2-SCENE-01："继续"与"读取"都走恢复语义（不是新局）——Controller 内部按已有
+            // RegionRecord/MachineRecord 复用，不重复播种。DEBT-ER6REGION01-01：按存档所在区域恢复，
+            // 在远征区域存档退出的玩家不再被送回归还谷地。
             GameApp.MountGameplayUi();
             Close();
-            GameLogic.Stage.GameRoot.ResumeHomeValley();
+            GameLogic.Stage.GameRoot.ResumeCampaign();
         }
     }
 }

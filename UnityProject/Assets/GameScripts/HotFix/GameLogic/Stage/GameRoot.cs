@@ -135,6 +135,48 @@ namespace GameLogic.Stage
             _homeValley.Enter(resume: true);
         }
 
+        /// <summary>DEBT-ER6REGION01-01：继续/读取战役时应恢复到哪个区域。此前主菜单固定回归还谷地——
+        /// 在破碎都市/铸造前哨存档退出的玩家重进后被送回家园，而机器仍记在远征区域名下。
+        /// 规则：存档的当前区域是远征区域且那里还有存活机器 → 回到该区域；否则回归还谷地。
+        /// 纯函数，自检直接断言。</summary>
+        public static string ResolveResumeRegion(CampaignState state)
+        {
+            string region = state?.CurrentRegionId;
+            if ((region == FracturedCityLayout.RegionId || region == FoundryOutpostLayout.RegionId)
+                && state.MachineRecords != null
+                && state.MachineRecords.Any(m => m != null && m.IsAlive && m.RegionId == region))
+            {
+                return region;
+            }
+            return HomeValleyLayout.RegionId;
+        }
+
+        /// <summary>继续/读取战役的唯一入口（主菜单调用）：按 <see cref="ResolveResumeRegion"/> 恢复到存档所在
+        /// 区域；远征区域控制器拒绝进入时安全回退归还谷地，不会停在空场景。</summary>
+        public static void ResumeCampaign()
+        {
+            string region = ResolveResumeRegion(CampaignSession.Current);
+            if (region == FracturedCityLayout.RegionId)
+            {
+                ResumeFracturedCity();
+                if (_fracturedCity != null && _fracturedCity.IsActive)
+                {
+                    return;
+                }
+                Log.Warning("[GameRoot] 读档恢复破碎都市未能激活，回退归还谷地。");
+            }
+            else if (region == FoundryOutpostLayout.RegionId)
+            {
+                ResumeFoundryOutpost();
+                if (_foundryOutpost != null && _foundryOutpost.IsActive)
+                {
+                    return;
+                }
+                Log.Warning("[GameRoot] 读档恢复铸造前哨外围未能激活，回退归还谷地。");
+            }
+            ResumeHomeValley();
+        }
+
         /// <summary>ER5-REGION-01：最小可用切场入口——把 <paramref name="expeditionLogicIds"/> 指定的
         /// 家园存活机器带去破碎都市。要求区域已 <see cref="Campaign.RegionState.Available"/>（ER5-SIG-01
         /// 信号塔修复+ERC-003生产），否则 Controller 会拒绝进入并记录日志，不静默失败。完整的"远征准备
