@@ -27,6 +27,10 @@ namespace GameLogic.Campaign.Feedback
         /// <summary>默认正文；调用方给了 detail 时拼成“正文：detail”，正文为空则只显示 detail。</summary>
         public string Caption;
 
+        /// <summary>0～1，这个时刻给屏幕震动注入的震动量（<see cref="ScreenShake"/>）；0＝不震。
+        /// 只给真正的大事件，并随距离衰减；设置“屏幕震动”关闭时整体不生效。</summary>
+        public float Shake;
+
         public FeedbackCaptionMode CaptionMode = FeedbackCaptionMode.Always;
         public FeedbackTone Tone = FeedbackTone.Info;
         public float CaptionSeconds = 4f;
@@ -105,15 +109,15 @@ namespace GameLogic.Campaign.Feedback
             Add(new FeedbackCueDef { Id = FeedbackCueId.ProductionComplete, SfxId = "sfx_production_complete", Tag = "生产", Caption = "生产完成", Tone = FeedbackTone.Good, RequirementNote = "AC-AUD-001 生产" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.Failure, SfxId = "sfx_failure", Tag = "失败", Caption = string.Empty, Tone = FeedbackTone.Danger, CaptionSeconds = 5f, RequirementNote = "AC-AUD-001 失败" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.ExpeditionWiped, SfxId = "sfx_failure", Tag = "失败", Caption = "远征队已全部失去行动能力", Tone = FeedbackTone.Danger, CaptionSeconds = 6f, RequirementNote = "AC-AUD-001 失败（远征全灭）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.CoreDestroyed, SfxId = "sfx_core_destroyed", Tag = "失败", Caption = "归还核心被摧毁", Tone = FeedbackTone.Danger, CaptionSeconds = 6f, RequirementNote = "AC-AUD-001 失败（核心被毁）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.CoreDestroyed, Shake = 0.8f, SfxId = "sfx_core_destroyed", Tag = "失败", Caption = "归还核心被摧毁", Tone = FeedbackTone.Danger, CaptionSeconds = 6f, RequirementNote = "AC-AUD-001 失败（核心被毁）" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.AnalysisComplete, SfxId = "sfx_analysis_complete", Tag = "解析", Caption = "解析完成", Tone = FeedbackTone.Good, CaptionSeconds = 5f, RequirementNote = "AC-AUD-001 解析" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.ReactionMarkJump, SfxId = "sfx_reaction_markjump", MinIntervalSeconds = 0.15f, Tag = "反应", Caption = "标记跳转", Tone = FeedbackTone.Info, CaptionSeconds = 2.5f, RequirementNote = "AC-AUD-001 反应" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.ReactionMeltOverload, SfxId = "sfx_reaction_melt", MinIntervalSeconds = 0.15f, Tag = "反应", Caption = "熔穿过载", Tone = FeedbackTone.Info, CaptionSeconds = 2.5f, RequirementNote = "AC-AUD-001 反应" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.BossPhase, SfxId = "sfx_boss_phase", Tag = "首领", Caption = "主核心阶段变化", Tone = FeedbackTone.Warning, CaptionSeconds = 5f, RequirementNote = "AC-AUD-001 Boss 阶段" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.BossPhase, Shake = 0.45f, SfxId = "sfx_boss_phase", Tag = "首领", Caption = "主核心阶段变化", Tone = FeedbackTone.Warning, CaptionSeconds = 5f, RequirementNote = "AC-AUD-001 Boss 阶段" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.BossLockoutWarning, SfxId = "sfx_alarm_warning", Tag = "警报", Caption = "核心分区即将封锁，2 秒后无法退回外围", Tone = FeedbackTone.Danger, CaptionSeconds = 4f, RequirementNote = "AC-AUD-001 Boss 阶段；DEBT-ER7CORE01-01 可听预警" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.BossLockoutActive, SfxId = "sfx_lockout_engaged", Tag = "警报", Caption = "核心分区已封锁，无法退回外围", Tone = FeedbackTone.Danger, CaptionSeconds = 5f, RequirementNote = "AC-AUD-001 Boss 阶段；DEBT-ER7CORE01-01" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.BossDestroyed, SfxId = "sfx_core_destroyed", Tag = "首领", Caption = "主核心已摧毁", Tone = FeedbackTone.Good, CaptionSeconds = 6f, RequirementNote = "AC-AUD-001 Boss 阶段" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.BeaconLaunch, SfxId = "sfx_beacon_launch", Tag = "信标", Caption = "导航信标启动", Tone = FeedbackTone.Good, CaptionSeconds = 6f, RequirementNote = "AC-AUD-001 信标" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.BossLockoutActive, Shake = 0.5f, SfxId = "sfx_lockout_engaged", Tag = "警报", Caption = "核心分区已封锁，无法退回外围", Tone = FeedbackTone.Danger, CaptionSeconds = 5f, RequirementNote = "AC-AUD-001 Boss 阶段；DEBT-ER7CORE01-01" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.BossDestroyed, Shake = 0.8f, SfxId = "sfx_core_destroyed", Tag = "首领", Caption = "主核心已摧毁", Tone = FeedbackTone.Good, CaptionSeconds = 6f, RequirementNote = "AC-AUD-001 Boss 阶段" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.BeaconLaunch, Shake = 0.35f, SfxId = "sfx_beacon_launch", Tag = "信标", Caption = "导航信标启动", Tone = FeedbackTone.Good, CaptionSeconds = 6f, RequirementNote = "AC-AUD-001 信标" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.Victory, SfxId = "sfx_victory", Tag = "信标", Caption = "信标发射完成", Tone = FeedbackTone.Good, CaptionSeconds = 6f, RequirementNote = "AC-AUD-001 信标" });
 
             // ── 战斗与远征 ─────────────────────────────────────────────────
@@ -121,13 +125,13 @@ namespace GameLogic.Campaign.Feedback
             // 装甲削减、蓄力、击毁）出字幕，并且只在“字幕”开启时出。
             Add(new FeedbackCueDef { Id = FeedbackCueId.WeaponFire, SfxId = "sfx_weapon_fire", Volume = 0.7f, MinIntervalSeconds = 0.08f, CaptionMode = FeedbackCaptionMode.None, RequirementNote = "ComponentCatalog.SfxId 消费点" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.CannonCharge, SfxId = "sfx_cannon_charge", Volume = 0.8f, MinIntervalSeconds = 0.2f, Tag = "重炮", Caption = "蓄力", CaptionMode = FeedbackCaptionMode.SubtitlesOnly, CaptionSeconds = 2f, RequirementNote = "ER6-REACT-02 瞄准阶段" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.CannonFire, SfxId = "sfx_cannon_fire", MinIntervalSeconds = 0.1f, CaptionMode = FeedbackCaptionMode.None, RequirementNote = "ComponentCatalog comp_cannon" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.CannonFire, Shake = 0.25f, SfxId = "sfx_cannon_fire", MinIntervalSeconds = 0.1f, CaptionMode = FeedbackCaptionMode.None, RequirementNote = "ComponentCatalog comp_cannon" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.EnemyHit, SfxId = "sfx_hit", Volume = 0.6f, MinIntervalSeconds = 0.06f, CaptionMode = FeedbackCaptionMode.None });
             Add(new FeedbackCueDef { Id = FeedbackCueId.ArmorHit, SfxId = "sfx_hit_armor", Volume = 0.7f, MinIntervalSeconds = 0.1f, Tag = "命中", Caption = "装甲正面，伤害被削减", CaptionMode = FeedbackCaptionMode.SubtitlesOnly, CaptionSeconds = 2f });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.EnemyDestroyed, SfxId = "sfx_enemy_destroyed", MinIntervalSeconds = 0.12f, Tag = "击毁", Caption = string.Empty, CaptionMode = FeedbackCaptionMode.SubtitlesOnly, CaptionSeconds = 2.5f });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.EnemyDestroyed, Shake = 0.15f, SfxId = "sfx_enemy_destroyed", MinIntervalSeconds = 0.12f, Tag = "击毁", Caption = string.Empty, CaptionMode = FeedbackCaptionMode.SubtitlesOnly, CaptionSeconds = 2.5f });
             Add(new FeedbackCueDef { Id = FeedbackCueId.EnemyAttack, SfxId = "sfx_enemy_fire", Volume = 0.7f, MinIntervalSeconds = 0.15f, CaptionMode = FeedbackCaptionMode.None, RequirementNote = "EnemyCatalog.SfxId 消费点；字幕由紧随其后的“受损”给出，避免一次攻击两条字幕" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.MachineDamaged, SfxId = "sfx_machine_damaged", Volume = 0.8f, MinIntervalSeconds = 0.4f, Tag = "受损", Caption = string.Empty, CaptionMode = FeedbackCaptionMode.SubtitlesOnly, Tone = FeedbackTone.Warning, CaptionSeconds = 2f });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.MachineDestroyed, SfxId = "sfx_machine_destroyed", Tag = "损失", Caption = string.Empty, Tone = FeedbackTone.Danger, CaptionSeconds = 5f });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.MachineDestroyed, Shake = 0.3f, SfxId = "sfx_machine_destroyed", Tag = "损失", Caption = string.Empty, Tone = FeedbackTone.Danger, CaptionSeconds = 5f });
             Add(new FeedbackCueDef { Id = FeedbackCueId.WeaponOverheat, SfxId = "sfx_weapon_overheat", MinIntervalSeconds = 0.5f, Tag = "过热", Caption = "重炮过热停火", Tone = FeedbackTone.Warning, CaptionSeconds = 3f });
             Add(new FeedbackCueDef { Id = FeedbackCueId.Pickup, SfxId = "sfx_pickup", Tag = "装载", Caption = string.Empty, Tone = FeedbackTone.Good, CaptionSeconds = 3f });
             Add(new FeedbackCueDef { Id = FeedbackCueId.ExpeditionDepart, SfxId = "sfx_expedition_depart", Tag = "出征", Caption = "远征队出发", Tone = FeedbackTone.Info, CaptionSeconds = 4f });

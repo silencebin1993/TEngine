@@ -19,6 +19,14 @@ namespace GameLogic.Battle.Feedback
         private const float HurtDuration = 0.55f;
         private const float HurtHold = 0.08f;
         private const float HurtPeakAlpha = 0.62f;
+
+        // ER8-CONTENT-01 AC-ACC-003：设置“降低闪光”开启时，全屏受伤红闪与地面命中闪光都压到约三分之一，
+        // 仍保留可辨认的受击提示（伤害数字与声音不受影响），只去掉大面积高对比闪烁。
+        private const float FlashReductionFactor = 0.3f;
+
+        private static float FlashScale => Settings.GameSettings.FlashReductionEnabled ? FlashReductionFactor : 1f;
+
+        private static float HurtPeak => HurtPeakAlpha * FlashScale;
         private const float HurtFovPunch = 1.8f;
         // story-004：默认相机改透视后，orthoSize 推近对透视相机无效，改按 FOV 收窄；
         // 比例参照 orthoSize 16→推近 1.8（约 11%）换算到默认 FOV 50，非精确值，允许目测微调。
@@ -162,7 +170,7 @@ namespace GameLogic.Battle.Feedback
             // 立刻打到峰值，避免首帧 alpha≈0 被当成「没反馈」
             if (_overlayImage != null)
             {
-                _overlayImage.color = new Color(HurtColor.r, HurtColor.g, HurtColor.b, HurtPeakAlpha);
+                _overlayImage.color = new Color(HurtColor.r, HurtColor.g, HurtColor.b, HurtPeak);
             }
 
             PunchCamera();
@@ -236,12 +244,12 @@ namespace GameLogic.Battle.Feedback
             float a;
             if (t > 1f - holdRatio)
             {
-                a = HurtPeakAlpha;
+                a = HurtPeak;
             }
             else
             {
                 float u = t / (1f - holdRatio);
-                a = HurtPeakAlpha * (u * u);
+                a = HurtPeak * (u * u);
             }
 
             _overlayImage.color = new Color(HurtColor.r, HurtColor.g, HurtColor.b, a);
@@ -251,6 +259,11 @@ namespace GameLogic.Battle.Feedback
 
         private void PunchCamera()
         {
+            // 镜头推近属于“镜头运动”，跟随设置“屏幕震动”一起关。
+            if (!Settings.GameSettings.ScreenShakeEnabled)
+            {
+                return;
+            }
             Camera cam = Camera.main;
             if (cam == null)
             {
@@ -377,6 +390,7 @@ namespace GameLogic.Battle.Feedback
             _flashTf[idx].localRotation = Quaternion.identity;
             _flashTf[idx].localScale = Vector3.one * scale * 0.55f;
             _flashRenderer[idx].enabled = true;
+            color.a *= FlashScale;
             _flashRenderer[idx].sharedMaterial.color = color;
             _flashTimeLeft[idx] = life;
             _flashLife[idx] = life;
@@ -412,7 +426,7 @@ namespace GameLogic.Battle.Feedback
                 _flashTf[i].localScale = Vector3.one * (_flashBaseScale[i] * s);
 
                 Color c = _flashColor[i];
-                c.a = (1f - u) * (1f - u);
+                c.a = (1f - u) * (1f - u) * FlashScale;
                 _flashRenderer[i].sharedMaterial.color = c;
             }
         }

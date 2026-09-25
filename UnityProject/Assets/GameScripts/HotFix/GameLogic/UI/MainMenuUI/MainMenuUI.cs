@@ -254,6 +254,7 @@ namespace GameLogic
             ConfigureView(_tfSlotList as RectTransform, new Vector2(1120f, 720f), surface, edge, 34);
             ConfigureView(_tfConfirmOverwrite as RectTransform, new Vector2(620f, 460f), raised, new Color(warning.r, warning.g, warning.b, 0.76f), 30);
             ConfigureView(_tfSettings as RectTransform, new Vector2(1320f, 790f), surface, edge, 30);
+            FitViewsToCanvas(force: true);
 
             Font menuFont = _textContinueReason.font;
             EnsureViewHeader(_tfRoot, "VisualMenuHeader", "地球归还", "EARTH RECLAMATION  ·  CAMPAIGN COMMAND", menuFont, accent);
@@ -272,13 +273,21 @@ namespace GameLogic
             RebuildLayout(_tfSettings as RectTransform);
         }
 
-        private static void ConfigureView(RectTransform view, Vector2 size, Color fill, Color edge, int padding)
+        // ER8-CONTENT-01 AC-UI-004：四个视图的设计尺寸（1920×1080 参考坐标）。UI 缩放 140% 时根画布只剩约
+        // 1371×771（5:4 屏幕更窄），固定尺寸会越出屏幕——实际尺寸取“设计尺寸”与“画布减边距”的较小值，
+        // 设置页主体本来就在滚动视图里，变矮不丢内容。
+        private readonly Dictionary<RectTransform, Vector2> _viewDesignSizes = new Dictionary<RectTransform, Vector2>(4);
+        private Vector2 _fittedCanvasSize;
+        private const float ViewScreenMargin = 24f;
+
+        private void ConfigureView(RectTransform view, Vector2 size, Color fill, Color edge, int padding)
         {
             if (view == null)
             {
                 return;
             }
 
+            _viewDesignSizes[view] = size;
             view.anchorMin = new Vector2(0.5f, 0.5f);
             view.anchorMax = new Vector2(0.5f, 0.5f);
             view.pivot = new Vector2(0.5f, 0.5f);
@@ -738,9 +747,37 @@ namespace GameLogic
             _rebindLabels[action].text = "按任意键…";
         }
 
+        /// <summary>按根画布当前尺寸收紧各视图（尺寸没变时 O(1) 早退）。UI 缩放/窗口分辨率变化都会改变
+        /// 根画布的参考坐标尺寸，所以在每帧回调里比较一次即可覆盖两种情况。</summary>
+        private void FitViewsToCanvas(bool force)
+        {
+            Canvas canvas = (_tfRoot as RectTransform)?.GetComponentInParent<Canvas>();
+            Canvas root = canvas != null ? canvas.rootCanvas : null;
+            if (root == null)
+            {
+                return;
+            }
+            Vector2 canvasSize = ((RectTransform)root.transform).rect.size;
+            if (!force && (canvasSize - _fittedCanvasSize).sqrMagnitude < 1f)
+            {
+                return;
+            }
+            _fittedCanvasSize = canvasSize;
+            Vector2 limit = new Vector2(Mathf.Max(200f, canvasSize.x - ViewScreenMargin * 2f),
+                Mathf.Max(200f, canvasSize.y - ViewScreenMargin * 2f));
+            foreach (KeyValuePair<RectTransform, Vector2> pair in _viewDesignSizes)
+            {
+                if (pair.Key != null)
+                {
+                    pair.Key.sizeDelta = Vector2.Min(pair.Value, limit);
+                }
+            }
+        }
+
         /// <summary>UIWindow 每帧回调；只有重绑监听/冲突确认中才做事，其余帧 O(1) 早退。</summary>
         protected override void OnUpdate()
         {
+            FitViewsToCanvas(force: false);
             if (_rebindListening == null)
             {
                 return;

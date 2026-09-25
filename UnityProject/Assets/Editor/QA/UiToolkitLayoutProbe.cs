@@ -40,9 +40,12 @@ namespace BinGames.EditorTools
         /// 以便默认隐藏的面板也能被测到。
         /// <paramref name="prepare"/> 可选：在默认的显隐/压测处理之后、强制布局之前调用，供调用方把
         /// 运行时才会出现的内容（固定槽位的隐藏行、只由代码填写的 Label 文本）摆出来一起测。
+        /// <paramref name="uiScale"/>：设置里的“UI 缩放”（AC-UI-004 的 0.8/1.0/1.4），写进克隆出的
+        /// PanelSettings.scale，与运行时 <c>UiScaleApplier</c> 同一落点。
         /// </summary>
         public static string Probe(string uxmlPath, string panelRootName = null, bool stressFill = true,
-            string panelSettingsPath = DefaultPanelSettingsPath, System.Action<VisualElement> prepare = null)
+            string panelSettingsPath = DefaultPanelSettingsPath, System.Action<VisualElement> prepare = null,
+            float uiScale = 1f)
         {
             var vta = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(uxmlPath);
             var sourceSettings = AssetDatabase.LoadAssetAtPath<PanelSettings>(panelSettingsPath);
@@ -55,19 +58,20 @@ namespace BinGames.EditorTools
             int totalProblems = LintFolder(uxmlPath, sb);
             foreach (Vector2Int res in DefaultResolutions)
             {
-                totalProblems += ProbeAt(vta, sourceSettings, panelRootName, stressFill, res, sb, prepare);
+                totalProblems += ProbeAt(vta, sourceSettings, panelRootName, stressFill, res, sb, prepare, uiScale);
             }
             sb.Insert(0, totalProblems == 0 ? "PASS 无布局问题\n" : $"FAIL 共 {totalProblems} 处问题\n");
             return sb.ToString();
         }
 
         private static int ProbeAt(VisualTreeAsset vta, PanelSettings sourceSettings, string panelRootName, bool stressFill,
-            Vector2Int resolution, StringBuilder sb, System.Action<VisualElement> prepare = null)
+            Vector2Int resolution, StringBuilder sb, System.Action<VisualElement> prepare = null, float uiScale = 1f)
         {
             // 克隆 PanelSettings 并挂一张目标尺寸的 RenderTexture：面板按这个尺寸 + 原缩放规则算参考坐标，
             // 等价于在该分辨率的屏幕上布局，不需要真的改 Game 视图分辨率。
             PanelSettings settings = Object.Instantiate(sourceSettings);
             settings.hideFlags = HideFlags.HideAndDontSave;
+            settings.scale = uiScale;
             var rt = new RenderTexture(resolution.x, resolution.y, 0) { hideFlags = HideFlags.HideAndDontSave };
             settings.targetTexture = rt;
             var go = new GameObject("__UiToolkitLayoutProbe") { hideFlags = HideFlags.HideAndDontSave };
@@ -110,7 +114,9 @@ namespace BinGames.EditorTools
                         return;
                     }
                     Rect r = e.worldBound;
-                    if (r.width > 0.5f && !IsInsideScrollContent(e, target) && !Contains(rootRect, r) && reported.Add(e))
+                    // 滚动区的内容容器纵向比视口（乃至窗口）高是滚动的正常状态，只查横向是否撑破。
+                    bool outside = IsScrollContentContainer(e) ? !ContainsHorizontally(rootRect, r) : !Contains(rootRect, r);
+                    if (r.width > 0.5f && !IsInsideScrollContent(e, target) && outside && reported.Add(e))
                     {
                         problems++;
                         if (problems <= 20) sb.AppendLine($"  越界：{Describe(e)} {Fmt(r)}");
@@ -290,6 +296,23 @@ namespace BinGames.EditorTools
             }
             return false;
         }
+
+        /// <summary>是不是某个 ScrollView 的内容容器（Unity 6 里两者之间还隔着 content-and-scroll 容器与
+        /// viewport 两层，不能只看祖父节点）。</summary>
+        private static bool IsScrollContentContainer(VisualElement e)
+        {
+            for (VisualElement c = e.parent; c != null; c = c.parent)
+            {
+                if (c is ScrollView scroll)
+                {
+                    return scroll.contentContainer == e;
+                }
+            }
+            return false;
+        }
+
+        private static bool ContainsHorizontally(Rect outer, Rect inner) =>
+            inner.xMin >= outer.xMin - 0.5f && inner.xMax <= outer.xMax + 0.5f;
 
         private static bool Contains(Rect outer, Rect inner) =>
             inner.xMin >= outer.xMin - 0.5f && inner.yMin >= outer.yMin - 0.5f &&

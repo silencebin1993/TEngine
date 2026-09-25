@@ -262,8 +262,10 @@ namespace GameLogic.Stage
             _homeValley?.Update(dt);
             _fracturedCity?.Update(dt);
             _foundryOutpost?.Update(dt);
-            // ER8-CONTENT-01：音量设置同步、音效预加载、字幕条过期。主菜单里也要跑（设置面板在那里）。
+            // ER8-CONTENT-01：音量设置同步、音效预加载、字幕条过期；UI 缩放设置作用到界面。
+            // 主菜单里也要跑（设置面板在那里）。
             Campaign.Feedback.FeedbackCues.Tick();
+            Settings.UiScaleApplier.Tick();
 
             // 阶段自然结束（死亡或通关）时收摊并回主菜单。
             // 由 GameRoot 判断而不是阶段自己切换，保证阶段不需要知道 director。

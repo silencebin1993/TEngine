@@ -176,6 +176,11 @@ namespace GameLogic.Campaign.Feedback
             LastCue = cue;
 
             float now = Time.realtimeSinceStartup;
+            if (def.Shake > 0f)
+            {
+                // 远处的爆炸震得轻（与音量同一距离衰减）；设置关闭时 ScreenShake 自己拒收。
+                ScreenShake.AddTrauma(def.Shake * volumeScale);
+            }
             string sfx = string.IsNullOrEmpty(sfxOverride) ? def.SfxId : sfxOverride;
             if (!string.IsNullOrEmpty(sfx) && now - LastPlayRealtime[index] >= def.MinIntervalSeconds)
             {

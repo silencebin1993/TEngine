@@ -1,5 +1,7 @@
 using GameLogic.Battle;
+using GameLogic.Campaign.Feedback;
 using GameLogic.Core;
+using GameLogic.Settings;
 using Unity.Mathematics;
 using UnityEngine;
 
@@ -83,6 +85,9 @@ namespace GameLogic.View
         private float2 _strategyFocus;
         private float _strategyOrthographicSize = 28f;
 
+        /// <summary>上一帧叠加在相机上的震屏偏移，下一帧开头先撤掉。</summary>
+        private Vector3 _appliedShake;
+
         public ViewMode Mode => _mode;
         public bool InTransition => _mode == ViewMode.Transition;
         public float2 StrategyFocus => _strategyFocus;
@@ -119,6 +124,7 @@ namespace GameLogic.View
         {
             _camera = camera;
             _anchorProvider = anchorProvider;
+            _appliedShake = Vector3.zero; // 新绑定的相机上没有本类叠过的偏移。
             _followOffset = followOffset;
             _arenaHalfExtent = math.max(1f, arenaHalfExtent);
             if (_camera != null)
@@ -146,6 +152,11 @@ namespace GameLogic.View
 
         public void Unbind()
         {
+            if (_camera != null)
+            {
+                _camera.transform.position -= _appliedShake;
+            }
+            _appliedShake = Vector3.zero;
             _camera = null;
             _anchorProvider = null;
             InputRouter.Reset();
@@ -163,6 +174,11 @@ namespace GameLogic.View
             {
                 return;
             }
+
+            // ER8-CONTENT-01 屏幕震动：先撤掉上一帧叠上去的偏移，下面三种模式都读写“干净”的相机位置
+            // （直控跟随从当前位置做平滑，偏移不撤掉会被当成起点吃进去，越积越歪）。
+            _camera.transform.position -= _appliedShake;
+            _appliedShake = Vector3.zero;
 
             // 钳制单帧步长。一次卡顿、一个断点、或加载后的第一帧都可能给出很大的 dt，
             // 不钳的话整段过渡会被**一帧吃完**——玩家看到的是镜头闪现，而不是移动过去。
@@ -184,6 +200,10 @@ namespace GameLogic.View
                     TickDirect(dt, paused);
                     break;
             }
+
+            // 最后统一叠加本帧震屏偏移（设置关闭时恒为零）。
+            _appliedShake = ScreenShake.Sample(dt, _camera.orthographicSize, _camera.transform);
+            _camera.transform.position += _appliedShake;
         }
 
         /// <summary>把输入所有权按当前状态发布出去。这是"过渡期间冻结冲突输入"的落点。</summary>
@@ -364,11 +384,13 @@ namespace GameLogic.View
 
         private void TickStrategy(float dt)
         {
-            float2 pan = ReadPanInput();
+            float2 pan = ReadPanInput(out bool fromEdge);
             if (math.lengthsq(pan) > 0f)
             {
                 // 平移速度随视野缩放：拉得越远，同样一次推屏移动的世界距离越大，否则远景下挪不动。
-                float speed = StrategyPanSpeed * (_strategyOrthographicSize / 16f);
+                // ER8-CONTENT-01：设置里的“镜头速度”与“边缘平移速度”此前零消费方，在这里生效。
+                float speed = StrategyPanSpeed * (_strategyOrthographicSize / 16f) * GameSettings.CameraSpeedMultiplier
+                              * (fromEdge ? GameSettings.EdgePanSpeedMultiplier : 1f);
                 _strategyFocus += math.normalize(pan) * speed * dt;
                 ClampStrategyFocus();
             }
@@ -387,8 +409,9 @@ namespace GameLogic.View
             _camera.orthographicSize = _strategyOrthographicSize;
         }
 
-        private float2 ReadPanInput()
+        private float2 ReadPanInput(out bool fromEdge)
         {
+            fromEdge = false;
             float x = 0f;
             float y = 0f;
             if (InputRouter.GetKey(KeyCode.A, InputScope.Strategy) ||
@@ -406,7 +429,9 @@ namespace GameLogic.View
             }
 
             // 屏幕边缘推屏。只在指针确实在窗口内时生效，否则 Alt-Tab 出去镜头会自己一直飘。
-            if (!InputRouter.TryGetPointer(InputScope.Strategy, out Vector3 pointer) ||
+            // 设置“边缘平移”关闭时完全不推（此前该开关无人读取，边缘平移永远开着）。
+            if (!GameSettings.EdgePanEnabled ||
+                !InputRouter.TryGetPointer(InputScope.Strategy, out Vector3 pointer) ||
                 pointer.x < 0f || pointer.y < 0f ||
                 pointer.x > Screen.width || pointer.y > Screen.height)
             {
@@ -417,6 +442,7 @@ namespace GameLogic.View
             else if (pointer.x >= Screen.width - StrategyEdgePanMargin) { x += 1f; }
             if (pointer.y <= StrategyEdgePanMargin) { y -= 1f; }
             else if (pointer.y >= Screen.height - StrategyEdgePanMargin) { y += 1f; }
+            fromEdge = x != 0f || y != 0f;
             return new float2(x, y);
         }
 

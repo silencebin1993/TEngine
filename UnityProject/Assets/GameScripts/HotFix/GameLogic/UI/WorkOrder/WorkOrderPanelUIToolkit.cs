@@ -246,23 +246,30 @@ namespace GameLogic.UI.WorkOrder
 
                 WorkOrderRecord order = _liveOrdersCache[i];
                 row.style.display = DisplayStyle.Flex;
-                row.Q<Label>("Kind").text = order.Kind.ToString();
+                // ER8-CONTENT-01 AC-THEME-001：类型/状态此前直接 ToString()（Haul、InProgress 等英文枚举名），
+                // 原因列直接显示原因码（machine-died、storage-full:need=…）——全部改为玩家文字。
+                row.Q<Label>("Kind").text = KindText(order.Kind);
                 // ER4-CONTENT-01：建筑类目标改显机械内容目录 DisplayName（如"发电机"），
-                // 不再直接暴露内部拼接 id（如 "home_valley:generator"）；非建筑目标安全回退原始 id。
-                row.Q<Label>("Target").text = MechanicalContentFacade.ResolveWorkOrderTargetLabel(order.TargetId);
+                // 不再直接暴露内部拼接 id（如 "home_valley:generator"）；非建筑目标按工单类型给通用称呼。
+                string targetLabel = MechanicalContentFacade.ResolveWorkOrderTargetLabel(order.TargetId);
+                row.Q<Label>("Target").text = targetLabel == order.TargetId ? FallbackTargetText(order.Kind) : targetLabel;
 
                 Label stateLabel = row.Q<Label>("State");
-                stateLabel.text = order.State.ToString();
+                stateLabel.text = StateText(order.State);
                 stateLabel.RemoveFromClassList("wop-row-state-waiting");
                 stateLabel.RemoveFromClassList("wop-row-state-failed");
                 if (order.State == WorkOrderState.Waiting)
                 {
                     stateLabel.AddToClassList("wop-row-state-waiting");
                 }
+                else if (order.State == WorkOrderState.Failed)
+                {
+                    stateLabel.AddToClassList("wop-row-state-failed");
+                }
 
                 Label reasonLabel = row.Q<Label>("Reason");
                 bool hasReason = !string.IsNullOrEmpty(order.FailureReason);
-                reasonLabel.text = hasReason ? order.FailureReason : string.Empty;
+                reasonLabel.text = hasReason ? ReasonText(order.FailureReason) : string.Empty;
                 if (hasReason)
                 {
                     reasonLabel.AddToClassList("wop-row-reason-visible");
@@ -357,6 +364,69 @@ namespace GameLogic.UI.WorkOrder
             if (HomeValleyController.TrySetMachineWorkPriority(selected.Value, kind, next))
             {
                 button.text = next.ToString();
+            }
+        }
+
+        public static string KindText(WorkOrderKind kind)
+        {
+            switch (kind)
+            {
+                case WorkOrderKind.Haul: return "搬运";
+                case WorkOrderKind.Build: return "建造";
+                case WorkOrderKind.Repair: return "维修";
+                case WorkOrderKind.Salvage: return "拆解";
+                case WorkOrderKind.Recharge: return "充电";
+                default: return "工作";
+            }
+        }
+
+        public static string StateText(WorkOrderState state)
+        {
+            switch (state)
+            {
+                case WorkOrderState.Proposed: return "待确认";
+                case WorkOrderState.Ready: return "待分配";
+                case WorkOrderState.Reserved: return "已预留";
+                case WorkOrderState.InProgress: return "进行中";
+                case WorkOrderState.Waiting: return "等待中";
+                case WorkOrderState.Completed: return "已完成";
+                case WorkOrderState.Cancelled: return "已取消";
+                case WorkOrderState.Failed: return "失败";
+                default: return string.Empty;
+            }
+        }
+
+        /// <summary>工单原因码 → 玩家文字。原因码仍原样留在记录里供逻辑与日志使用。</summary>
+        public static string ReasonText(string reason)
+        {
+            if (string.IsNullOrEmpty(reason))
+            {
+                return string.Empty;
+            }
+            if (reason.StartsWith("storage-full", System.StringComparison.Ordinal))
+            {
+                return "仓库已满，腾出仓位后自动继续";
+            }
+            switch (reason)
+            {
+                case "machine-died": return "执行机器损失，资源已退还";
+                case "machine-not-found": return "执行机器已不在场";
+                case "target-destroyed": return "目标已不存在";
+                case "source-vanished": return "物资已不在原处";
+                case "cargo-lost": return "货物已丢失";
+                case "path-blocked": return "路径受阻，正在等待通行";
+                default: return "暂时受阻";
+            }
+        }
+
+        private static string FallbackTargetText(WorkOrderKind kind)
+        {
+            switch (kind)
+            {
+                case WorkOrderKind.Haul: return "地面物资";
+                case WorkOrderKind.Salvage: return "残骸";
+                case WorkOrderKind.Recharge: return "充电";
+                default: return "建筑";
             }
         }
 

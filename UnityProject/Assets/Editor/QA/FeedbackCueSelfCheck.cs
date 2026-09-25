@@ -66,6 +66,7 @@ namespace GameLogic.EditorTools
                 CheckContentSfxResolved();
                 CheckAcAud001Categories();
                 CheckCaptionTexts();
+                CheckPlayerFacingEnumTexts();
                 CheckRaiseCaptionAndThrottle();
                 CheckSubtitlesSetting();
                 CheckPowerGridEdges();
@@ -201,6 +202,44 @@ namespace GameLogic.EditorTools
             Expect(bad.Count == 0, bad.Count == 0
                 ? "字幕标签/正文零禁用词、零内部 ID（AC-THEME-001）"
                 : "字幕文字违规：" + string.Join("、", bad));
+        }
+
+        /// <summary>本轮修掉的动态拼接泄漏（工单面板、资源 HUD）：每个枚举值/原因码都必须映射成
+        /// 零 ASCII 字母的玩家文字，新增枚举值忘了补映射时这里会红。</summary>
+        private static void CheckPlayerFacingEnumTexts()
+        {
+            var ascii = new Regex("[A-Za-z]");
+            var bad = new List<string>();
+            foreach (WorkOrderKind kind in Enum.GetValues(typeof(WorkOrderKind)))
+            {
+                string t = GameLogic.UI.WorkOrder.WorkOrderPanelUIToolkit.KindText(kind);
+                if (string.IsNullOrEmpty(t) || ascii.IsMatch(t) || t == "工作") bad.Add($"工单类型 {kind}→“{t}”");
+            }
+            foreach (WorkOrderState state in Enum.GetValues(typeof(WorkOrderState)))
+            {
+                string t = GameLogic.UI.WorkOrder.WorkOrderPanelUIToolkit.StateText(state);
+                if (string.IsNullOrEmpty(t) || ascii.IsMatch(t)) bad.Add($"工单状态 {state}→“{t}”");
+            }
+            foreach (string code in new[] { "machine-died", "machine-not-found", "target-destroyed", "source-vanished",
+                         "cargo-lost", "path-blocked", "storage-full:need=3:have=0", "some-new-code" })
+            {
+                string t = GameLogic.UI.WorkOrder.WorkOrderPanelUIToolkit.ReasonText(code);
+                if (string.IsNullOrEmpty(t) || ascii.IsMatch(t)) bad.Add($"工单原因 {code}→“{t}”");
+            }
+            foreach (ResourceTransactionState state in Enum.GetValues(typeof(ResourceTransactionState)))
+            {
+                string t = CampaignEconomyLedger.StateDisplayName(state);
+                if (string.IsNullOrEmpty(t) || ascii.IsMatch(t)) bad.Add($"交易状态 {state}→“{t}”");
+            }
+            foreach (string res in new[] { CampaignEconomyLedger.ResourceScrap, CampaignEconomyLedger.ResourceTechData,
+                         CampaignEconomyLedger.ResourcePower, "UnknownType" })
+            {
+                string t = CampaignEconomyLedger.ResourceDisplayName(res);
+                if (string.IsNullOrEmpty(t) || ascii.IsMatch(t)) bad.Add($"资源 {res}→“{t}”");
+            }
+            Expect(bad.Count == 0, bad.Count == 0
+                ? "工单类型/状态/原因码、资源名、交易状态全部映射为玩家文字（零英文枚举、零原因码，AC-THEME-001）"
+                : "玩家文字映射缺失：" + string.Join("、", bad));
         }
 
         // ── 行为：统一出口 ───────────────────────────────────────────────
