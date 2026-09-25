@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Cysharp.Threading.Tasks;
+using GameLogic.UI.Common;
 using GameLogic.Campaign;
 using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Regions;
@@ -190,9 +191,11 @@ namespace GameLogic.UI.Expedition
                 row.AddToClassList(m.IsAlive ? "exp-row-alive" : "exp-row-dead");
 
                 row.Q<Label>("Number").text = $"#{m.DisplayNumber}";
-                row.Q<Label>("Chassis").text = ChassisCatalog.TryGet(m.ChassisId, out MechanicalContentDef chassisDef)
-                    ? chassisDef.DisplayName
-                    : m.ChassisId;
+                // ER8-CONTENT-01：m.ChassisId 是机型编号（erc_001），此前直接查底盘表必然查不到、回退成把 erc_001
+                // 原样显示给玩家——先归到底盘类别再取展示名；系统占位机（救援机等）显示“机器”。行首图标＝底盘。
+                string chassisLabel = MechanicalContentFacade.ResolveChassisLabel(m.ChassisId);
+                row.Q<Label>("Chassis").text = string.IsNullOrEmpty(chassisLabel) || chassisLabel == m.ChassisId ? "机器" : chassisLabel;
+                ContentIcons.Apply(row.Q<VisualElement>("Icon"), m.ChassisId);
                 row.Q<Label>("Health").text = m.IsAlive ? $"HP{m.Health:F0}/{m.MaxHealth:F0}" : "—";
                 row.Q<Label>("Status").text = m.IsAlive ? "幸存，将随撤离返回家园" : "阵亡（纪念记录，黑匣子保留经历，机体不复活）";
             }

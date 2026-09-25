@@ -121,6 +121,7 @@ namespace GameLogic.EditorTools
                 // ER8-CONTENT-01：《地球归还》反馈音效与字幕（AC-AUD-001），独立类，结果并入本报告。
                 _fail += FeedbackCueSelfCheck.Run(Report);
                 _fail += SettingsConsumersSelfCheck.Run(Report);
+                _fail += ContentIconsSelfCheck.Run(Report);
             }
             catch (Exception e)
             {

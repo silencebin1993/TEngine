@@ -1,5 +1,6 @@
 using System.Linq;
 using Cysharp.Threading.Tasks;
+using GameLogic.UI.Common;
 using GameLogic.Campaign;
 using GameLogic.Campaign.Regions;
 using GameLogic.Stage;
@@ -143,6 +144,7 @@ namespace GameLogic.UI.Victory
                 }
                 CampaignCredits.MachineSummary m = snapshot.Machines[i];
                 row.style.display = DisplayStyle.Flex;
+                ContentIcons.Apply(row.Q<VisualElement>("Icon"), m.ChassisId); // ER8-CONTENT-01：行首底盘图标。
                 Label numberLabel = row.Q<Label>("NumberLabel");
                 numberLabel.text = $"#{m.DisplayNumber}（{(m.IsAlive ? "幸存" : "阵亡")}）";
                 numberLabel.RemoveFromClassList("vp-machine-alive");

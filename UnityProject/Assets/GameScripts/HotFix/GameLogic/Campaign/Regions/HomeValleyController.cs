@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using GameLogic.UI.Common;
+using GameLogic.Settings;
 using GameLogic.Campaign;
 using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Primitive;
@@ -33,6 +35,8 @@ namespace GameLogic.Campaign.Regions
         private GameObject _root;
         private Camera _camera;
         private readonly List<HomeValleyMachineMarker> _machineMarkers = new List<HomeValleyMachineMarker>(4);
+        /// <summary>ER8-CONTENT-01：建筑状态悬浮标记，按 BuildingTypeId 索引。</summary>
+        private readonly Dictionary<string, WorldBadge> _buildingBadges = new Dictionary<string, WorldBadge>();
         private HomeValleyMachineMarker _selected;
 
         /// <summary>ER2-INPUT-01：归还谷地自己的镜头状态机实例（不共享细胞阶段那个——两边场景
@@ -1087,6 +1091,10 @@ namespace GameLogic.Campaign.Regions
             {
                 renderer.material.color = ColorForBuilding(building);
             }
+            if (_buildingBadges.TryGetValue(building.BuildingTypeId, out WorldBadge badge) && badge != null)
+            {
+                badge.SetIcon(StateIconFor(building));
+            }
         }
 
         // ── 可视化（占位几何体）────────────────────────────────────────────
@@ -1094,6 +1102,7 @@ namespace GameLogic.Campaign.Regions
         private void BuildVisuals(CampaignState state)
         {
             _root = new GameObject("[HomeValley]");
+            _buildingBadges.Clear();
             _machineMarkers.Clear();
             _selected = null;
 
@@ -1270,6 +1279,43 @@ namespace GameLogic.Campaign.Regions
             go.transform.localScale = new Vector3(3f, 2f, 3f);
             Renderer renderer = go.GetComponent<Renderer>();
             renderer.material = new Material(Shader.Find("Standard")) { color = ColorForBuilding(building) };
+
+            // ER8-CONTENT-01 AC-ACC-002：状态标记挂在区域根节点、悬在建筑正上方（建筑立方体是非等比缩放，
+            // 挂在它下面会把贴图拉斜）。没有碰撞体，不影响点选建筑的射线。
+            WorldBadge badge = WorldBadge.Create(_root.transform, "Badge_" + building.BuildingTypeId,
+                new Vector3(building.Position.x, 2.9f, building.Position.y), 1.3f);
+            _buildingBadges[building.BuildingTypeId] = badge;
+            badge.SetIcon(StateIconFor(building));
+        }
+
+        /// <summary>建筑状态 → 悬浮标记（外形区分：损坏✕圆 / 欠电闪电三角 / 出口堵塞横杠八边形 /
+        /// 断电电源符号圆）；正常运转不显示。电源类建筑（发电机）不参与用电，不标“断电”。</summary>
+        public static string StateIconFor(BuildingRecord building)
+        {
+            if (building.ConstructionState == BuildingConstructionState.Damaged)
+            {
+                return ContentIcons.StateDamaged;
+            }
+            bool consumer = HomeValleyLayout.PowerProfile.ContainsKey(building.BuildingTypeId);
+            if (building.ConstructionState == BuildingConstructionState.Disabled)
+            {
+                return consumer ? ContentIcons.StateUnpowered : null;
+            }
+            if (building.ConstructionState != BuildingConstructionState.Operational)
+            {
+                return null;
+            }
+            switch (building.PowerState)
+            {
+                case BuildingPowerState.Brownout:
+                    return ContentIcons.StateBrownout;
+                case BuildingPowerState.OutputBlocked:
+                    return ContentIcons.StateBlocked;
+                case BuildingPowerState.Powered:
+                    return null;
+                default:
+                    return consumer ? ContentIcons.StateUnpowered : null;
+            }
         }
 
         private void BuildWreckageVisual(HomeValleyLayout.Anchor wreckage)
@@ -1377,20 +1423,30 @@ namespace GameLogic.Campaign.Regions
             _machineMarkers.Add(marker);
         }
 
-        private static Color ColorForBuilding(BuildingRecord building)
+        public static Color ColorForBuilding(BuildingRecord building)
         {
+            // ER8-CONTENT-01：设置“色盲安全图标”开启时换用 Okabe-Ito 色盲友好色板（红/绿对立改为
+            // 朱红/蓝绿）；无论哪套颜色，状态本身都由头顶的形状标记表达（AC-ACC-002 不只靠颜色）。
+            bool cvd = GameSettings.ColorblindSafeIconsEnabled;
             if (building.ConstructionState == BuildingConstructionState.Damaged)
             {
-                return new Color(0.75f, 0.25f, 0.2f); // 红：Damaged
+                return cvd ? new Color(0.84f, 0.37f, 0f) : new Color(0.75f, 0.25f, 0.2f); // 红：Damaged
+            }
+            // 电源类建筑（发电机）本身不用电，PowerState 恒为未接电；运转中应显示“在工作”，
+            // 此前一直被涂成“未接电”的灰色，容易误读成停机。
+            if (building.ConstructionState == BuildingConstructionState.Operational
+                && HomeValleyLayout.PowerSupplyProfile.ContainsKey(building.BuildingTypeId))
+            {
+                return cvd ? new Color(0f, 0.62f, 0.45f) : new Color(0.25f, 0.7f, 0.3f);
             }
             switch (building.PowerState)
             {
                 case BuildingPowerState.Brownout:
-                    return new Color(0.85f, 0.7f, 0.15f); // 黄：Brownout
+                    return cvd ? new Color(0.94f, 0.89f, 0.26f) : new Color(0.85f, 0.7f, 0.15f); // 黄：Brownout
                 case BuildingPowerState.OutputBlocked:
-                    return new Color(0.9f, 0.45f, 0.1f); // 橙：OutputBlocked
+                    return cvd ? new Color(0.9f, 0.62f, 0f) : new Color(0.9f, 0.45f, 0.1f); // 橙：OutputBlocked
                 case BuildingPowerState.Powered:
-                    return new Color(0.25f, 0.7f, 0.3f); // 绿：Operational + Powered
+                    return cvd ? new Color(0f, 0.62f, 0.45f) : new Color(0.25f, 0.7f, 0.3f); // 绿：Operational + Powered
                 default:
                     return new Color(0.5f, 0.55f, 0.6f); // 灰：Operational 但未接电（Unpowered/NotApplicable）
             }

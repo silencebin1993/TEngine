@@ -19,11 +19,15 @@ namespace GameLogic.Campaign
             public readonly bool IsAlive;
             public readonly string[] ExperienceDisplayNames;
 
-            public MachineSummary(int displayNumber, bool isAlive, string[] experienceDisplayNames)
+            /// <summary>机型编号（erc_001 等），胜利页据此显示底盘图标（ER8-CONTENT-01）。</summary>
+            public readonly string ChassisId;
+
+            public MachineSummary(int displayNumber, bool isAlive, string[] experienceDisplayNames, string chassisId = null)
             {
                 DisplayNumber = displayNumber;
                 IsAlive = isAlive;
                 ExperienceDisplayNames = experienceDisplayNames;
+                ChassisId = chassisId;
             }
         }
 
@@ -68,7 +72,8 @@ namespace GameLogic.Campaign
                 .Select(m => new MachineSummary(
                     m.DisplayNumber,
                     m.IsAlive,
-                    (m.ExperienceFlags ?? Array.Empty<string>()).Select(MachineExperienceFlags.DisplayName).ToArray()))
+                    (m.ExperienceFlags ?? Array.Empty<string>()).Select(MachineExperienceFlags.DisplayName).ToArray(),
+                    m.ChassisId))
                 .ToArray();
 
             // 使用过的跨派系蓝图——EventLedger 里 "exposure:cross_faction_firmware:{blueprintId}:{version}"

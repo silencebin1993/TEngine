@@ -266,6 +266,7 @@ namespace GameLogic.Stage
             // 主菜单里也要跑（设置面板在那里）。
             Campaign.Feedback.FeedbackCues.Tick();
             Settings.UiScaleApplier.Tick();
+            UI.Common.ContentIcons.Tick();
 
             // 阶段自然结束（死亡或通关）时收摊并回主菜单。
             // 由 GameRoot 判断而不是阶段自己切换，保证阶段不需要知道 director。

@@ -282,9 +282,13 @@ namespace GameLogic.UI.PrimitiveCraft
                 row.style.display = DisplayStyle.Flex;
                 CraftQueueItemRecord q = queues[i];
                 row.Q<Label>("Kind").text = q.Kind == CraftQueueKind.Upgrade ? "升级" : "拆解";
+                // ER8-CONTENT-01：行首图标＝升级产物 / 被拆解的芯片；原因列此前直接显示原因码。
+                ContentIcons.Apply(row.Q<VisualElement>("Icon"), q.Kind == CraftQueueKind.Upgrade
+                    ? PrimitiveCraftStation.UpgradeOutputContentId
+                    : MaterialChipContentId(state, q));
                 row.Q<Label>("State").text = DescribeState(q.State);
                 row.Q<Label>("Progress").text = $"{q.Progress:F1}/{q.Duration:F1}s";
-                row.Q<Label>("Reason").text = q.BlockedReason ?? string.Empty;
+                row.Q<Label>("Reason").text = QueueText.Reason(q.BlockedReason);
             }
 
             _cancelChoiceQueueIds.Clear();
@@ -319,6 +323,23 @@ namespace GameLogic.UI.PrimitiveCraft
             string source = string.IsNullOrEmpty(item.SourceSalvageId) ? "补印/合成" : "解析";
             string reserved = string.IsNullOrEmpty(item.ReservedByTransactionId) ? string.Empty : " · 已预留";
             return $"{BlueprintCircuitChipCatalog.DisplayNameFor(item.CardDefId)}（{source} #{DropdownChoices.ShortId(item.PartId)}{reserved}）";
+        }
+
+        private static string MaterialChipContentId(CampaignState state, CraftQueueItemRecord q)
+        {
+            string partId = q.MaterialPartIds != null && q.MaterialPartIds.Length > 0 ? q.MaterialPartIds[0] : null;
+            if (string.IsNullOrEmpty(partId) || state?.PrimitiveChips == null)
+            {
+                return null;
+            }
+            foreach (PrimitiveChipRecord chip in state.PrimitiveChips)
+            {
+                if (chip != null && chip.PartId == partId)
+                {
+                    return chip.CardDefId;
+                }
+            }
+            return null;
         }
 
         private static string DescribeState(CraftQueueState state)

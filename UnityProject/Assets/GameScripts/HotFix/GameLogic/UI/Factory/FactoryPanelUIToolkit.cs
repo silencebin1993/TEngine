@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Cysharp.Threading.Tasks;
+using GameLogic.UI.Common;
 using GameLogic.Campaign;
 using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Content;
@@ -241,10 +242,23 @@ namespace GameLogic.UI.Factory
                 row.style.display = DisplayStyle.Flex;
                 string kindTag = item.Kind == FactoryQueueKind.Retrofit ? "[改造]" : "[生产]";
                 row.Q<Label>("Blueprint").text = kindTag + ResolveBlueprintDisplayName(item.BlueprintId);
-                row.Q<Label>("State").text = item.State.ToString();
+                // ER8-CONTENT-01：行首图标＝产出（或被改造）机器的底盘；状态与原因此前直接显示英文枚举与原因码。
+                ContentIcons.Apply(row.Q<VisualElement>("Icon"), ResolveRowChassisId(item));
+                row.Q<Label>("State").text = QueueText.FactoryState(item.State);
                 row.Q<Label>("Progress").text = item.Duration > 0f ? $"{item.Progress:F0}/{item.Duration:F0}s" : string.Empty;
-                row.Q<Label>("Reason").text = item.BlockedReason ?? string.Empty;
+                row.Q<Label>("Reason").text = QueueText.Reason(item.BlockedReason);
             }
+        }
+
+        private static string ResolveRowChassisId(FactoryQueueItemRecord item)
+        {
+            if (item.Kind == FactoryQueueKind.Retrofit)
+            {
+                return MachineRegistry.TryGetRecord(item.TargetMachineLogicId, out MachineRecord target) ? target.ChassisId : null;
+            }
+            return HomeValleyLayout.FactoryProduceDefaults.TryGetValue(item.BlueprintId, out HomeValleyLayout.ProduceBlueprintDefault def)
+                ? def.ChassisId
+                : null;
         }
 
         private void OnRowClicked(int rowIndex)

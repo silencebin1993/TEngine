@@ -69,6 +69,7 @@ namespace GameLogic.UI.CircuitBoard
         private readonly List<string> _structureIdsByIndex = new List<string>();
 
         private readonly Button[] _slotButtons = new Button[BlueprintCircuitLayout.SlotCount];
+        private readonly VisualElement[] _slotIcons = new VisualElement[BlueprintCircuitLayout.SlotCount];
         private Label _selectedSlotLabel;
         private Label _selectedSlotDetailLabel;
 
@@ -193,6 +194,7 @@ namespace GameLogic.UI.CircuitBoard
             for (int i = 0; i < BlueprintCircuitLayout.SlotCount; i++)
             {
                 _slotButtons[i] = _root.Q<Button>("Slot" + i);
+                _slotIcons[i] = _root.Q<VisualElement>("Slot" + i + "Icon");
             }
             _selectedSlotLabel = _root.Q<Label>("SelectedSlotLabel");
             _selectedSlotDetailLabel = _root.Q<Label>("SelectedSlotDetailLabel");
@@ -950,6 +952,7 @@ namespace GameLogic.UI.CircuitBoard
                     : $"{i} · {BlueprintCircuitLayout.SlotTypeDisplayName(BlueprintCircuitLayout.SlotTypeAt(i))}";
                 string body = string.IsNullOrEmpty(content) ? "（空）" : BlueprintCircuitChipCatalog.DisplayNameFor(content);
                 btn.text = $"{head}\n{body}";
+                ContentIcons.Apply(_slotIcons[i], content); // ER8-CONTENT-01：槽内内容图标（外形区分类别）。
                 btn.EnableInClassList("cb-slot-filled", !string.IsNullOrEmpty(content));
                 btn.EnableInClassList("cb-slot-selected", _selectedSlot.HasValue && _selectedSlot.Value == i);
                 btn.EnableInClassList("cb-slot-issue", issueSlots.Contains(i));

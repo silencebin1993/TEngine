@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using GameLogic.UI.Common;
 using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Content;
 using GameLogic.Core;
@@ -1052,6 +1053,7 @@ namespace GameLogic.Campaign.Regions
         private void BuildVisuals(CampaignState state)
         {
             _root = new GameObject("[FracturedCityRoot]");
+            _enemyBadges.Clear();
 
             BuildAnchorVisual(FracturedCityLayout.EntryEvac, PrimitiveType.Cylinder, new Color(0.2f, 0.7f, 0.9f, 0.5f), 0.05f, true);
             BuildAnchorVisual(FracturedCityLayout.RecoveryLocker, PrimitiveType.Cube, new Color(0.6f, 0.5f, 0.2f), 0.8f, false);
@@ -1143,6 +1145,13 @@ namespace GameLogic.Campaign.Regions
                     ? new Color(0.6f, 0.15f, 0.55f)
                     : new Color(0.75f, 0.35f, 0.15f);
                 renderer.material = new Material(Shader.Find("Standard")) { color = enemy.IsAlive ? baseColor : new Color(0.25f, 0.25f, 0.25f) };
+
+                // ER8-CONTENT-01 AC-ACC-002：敌人头顶的类型标记（倒三角＝敌方，角标圆点/方块＝静默/铸造阵营），
+                // 敌我不再只靠胶囊体颜色区分。胶囊体等比缩放，标记直接挂在它下面随之移动。
+                WorldBadge enemyBadge = WorldBadge.Create(go.transform, "Badge", go.transform.position + Vector3.up * 1.9f, 1.1f);
+                enemyBadge.SetIcon(EnemyBadgeIcon(enemy.EnemyTypeId));
+                enemyBadge.SetVisible(enemy.IsAlive);
+                _enemyBadges[enemy.EnemyInstanceId] = enemyBadge;
 
                 // ER5-SILENT-01：侦察机的"扫描线"非听觉反馈——初始禁用，命中标记那一帧短暂显示
                 // （见 TriggerScanPulse），满足 AC-ACC-002"失去听觉时有扫描线/边界/图标"。
@@ -1236,6 +1245,10 @@ namespace GameLogic.Campaign.Regions
                         : new Color(0.75f, 0.35f, 0.15f);
                     RefreshColor("Enemy_" + enemy.EnemyInstanceId, enemy.IsAlive ? baseColor : new Color(0.25f, 0.25f, 0.25f));
 
+                    if (_enemyBadges.TryGetValue(enemy.EnemyInstanceId, out WorldBadge enemyBadge) && enemyBadge != null)
+                    {
+                        enemyBadge.SetVisible(enemy.IsAlive);
+                    }
                     // ER5-SILENT-01：敌人现在真的会移动（侦察机后撤/巡逻）——同步可视化位置。
                     Transform enemyT = _root.transform.Find("Enemy_" + enemy.EnemyInstanceId);
                     if (enemyT != null)
@@ -1279,6 +1292,19 @@ namespace GameLogic.Campaign.Regions
                 }
             }
         }
+
+        /// <summary>ER8-CONTENT-01：敌人类型 → 头顶标记图标。Boss 节点/主核心不是内容目录条目，统一用主核心图标。</summary>
+        private static string EnemyBadgeIcon(string enemyTypeId)
+        {
+            if (enemyTypeId == FoundryOutpostLayout.BossNodeTypeId || enemyTypeId == FoundryOutpostLayout.BossCoreTypeId)
+            {
+                return ContentIcons.IconIdFor(EnemyCatalog.CoreBossId);
+            }
+            return ContentIcons.IconIdFor(enemyTypeId);
+        }
+
+        /// <summary>ER8-CONTENT-01：敌人头顶标记，按 EnemyInstanceId 索引。</summary>
+        private readonly Dictionary<string, WorldBadge> _enemyBadges = new Dictionary<string, WorldBadge>();
 
         private void RefreshColor(string childName, Color color)
         {

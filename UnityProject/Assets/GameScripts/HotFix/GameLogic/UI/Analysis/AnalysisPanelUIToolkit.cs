@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Cysharp.Threading.Tasks;
+using GameLogic.UI.Common;
 using GameLogic.Campaign;
 using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Regions;
@@ -156,10 +157,12 @@ namespace GameLogic.UI.Analysis
                 row.style.display = DisplayStyle.Flex;
                 AnalysisQueueItemRecord q = queues[i];
                 HomeValleyAnalysis.YieldTable.TryGetValue(q.ContentId, out HomeValleyAnalysis.YieldInfo info);
-                row.Q<Label>("Name").text = string.IsNullOrEmpty(info.DisplayName) ? q.ContentId : info.DisplayName;
+                // ER8-CONTENT-01：名字查不到时此前回退成原始内容 ID；原因列此前直接显示原因码。行首图标＝解析后解锁的内容。
+                row.Q<Label>("Name").text = string.IsNullOrEmpty(info.DisplayName) ? "待解析模块" : info.DisplayName;
+                ContentIcons.Apply(row.Q<VisualElement>("Icon"), info.UnlockContentId);
                 row.Q<Label>("State").text = DescribeState(q.State);
                 row.Q<Label>("Progress").text = $"{q.Progress:F1}/{q.Duration:F1}s";
-                row.Q<Label>("Reason").text = q.BlockedReason ?? string.Empty;
+                row.Q<Label>("Reason").text = QueueText.Reason(q.BlockedReason);
             }
 
             _cancelChoiceQueueIds.Clear();
