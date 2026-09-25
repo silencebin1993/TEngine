@@ -29,6 +29,11 @@ namespace GameLogic.Settings
 
         public bool SubtitlesEnabled = true;
         public bool ColorblindSafeIconsEnabled = false; // AC-ACC-002。
+
+        /// <summary>FG0-DATA-01（FGR-ARC-006）：界面语言代码，见 <see cref="GameLogic.Localization.GameLanguageCodes"/>。
+        /// 存语言代码而不是枚举整数——以后加语言、调整枚举顺序都不会把老玩家的设置读成别的语言；
+        /// 读不懂的代码回落简体中文（<see cref="GameSettings.Language"/>）。旧设置 JSON 没有这个字段时按默认值补齐。</summary>
+        public string Language = GameLogic.Localization.GameLanguageCodes.ZhCn;
     }
 
     /// <summary>
@@ -82,6 +87,11 @@ namespace GameLogic.Settings
         public static float UiVolume => Data.UiVolume;
         public static bool SubtitlesEnabled => Data.SubtitlesEnabled;
         public static bool ColorblindSafeIconsEnabled => Data.ColorblindSafeIconsEnabled;
+
+        /// <summary>FG0-DATA-01：当前界面语言。<see cref="GameLogic.Localization.GameText"/> 每次取文本都读这里，
+        /// 所以切换后下一次刷新界面就是新语言，不需要重载表。</summary>
+        public static GameLogic.Localization.GameLanguage Language =>
+            GameLogic.Localization.GameLanguageCodes.Parse(Data.Language);
 
         private static void EnsureLoaded()
         {
@@ -197,6 +207,14 @@ namespace GameLogic.Settings
         public static void SetSubtitlesEnabled(bool enabled)
         {
             Data.SubtitlesEnabled = enabled;
+            Save();
+        }
+
+        /// <summary>FG0-DATA-01：切换界面语言并落盘；广播 <see cref="ISettingsEvent.OnSettingsChanged"/>，
+        /// 订阅方按新语言刷新文本。</summary>
+        public static void SetLanguage(GameLogic.Localization.GameLanguage language)
+        {
+            Data.Language = GameLogic.Localization.GameLanguageCodes.ToCode(language);
             Save();
         }
 

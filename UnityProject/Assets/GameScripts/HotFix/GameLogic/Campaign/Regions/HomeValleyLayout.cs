@@ -115,21 +115,14 @@ namespace GameLogic.Campaign.Regions
         /// <summary>各建筑 Operational 时的电力需求与默认优先级（DEMO-CONTENT-LOCK.md §2.2）。
         /// 玩家可在 1～4 范围内调整 <see cref="BuildingRecord.PowerPriority"/>（ER3-PWR-01
         /// <see cref="HomeValleyPowerGrid.TrySetPriority"/>），此表只是新建筑落地时的默认值。</summary>
-        public static readonly IReadOnlyDictionary<string, (float PowerDemand, int PowerPriority)> PowerProfile =
-            new Dictionary<string, (float, int)>
+        public static IReadOnlyDictionary<string, (float PowerDemand, int PowerPriority)> PowerProfile
+        {
+            get
             {
-                [BuildingTypeCore] = (10f, 1),
-                [BuildingTypeWarehouse] = (5f, 1),
-                [BuildingTypeAssemblyStation] = (25f, 2),
-                [BuildingTypeAnalysisBench] = (15f, 2),
-                [BuildingTypeRepairBay] = (15f, 3),
-                [BuildingTypeSignalTower] = (20f, 2),
-                // ER7-BEACON-01 STORY-EXECUTION-CARDS.md："成本120、需电30"——既有五项需求合计90
-                // （10+5+25+15+15+20=90，容量100），加上信标30即120，超出容量20——与卡片"加入信标后
-                // 120/100的20差额"逐字吻合，数值不是巧合，是本 Story 按卡片原文反推验证过既有
-                // PowerProfile 之后才写的常量。
-                [BuildingTypeBeacon] = (30f, 2),
-            };
+                EnsureContentProfiles();
+                return _powerProfile;
+            }
+        }
 
         /// <summary>ER3-PWR-01：核心自带基础供电（DEMO-CONTENT-LOCK.md §2.1"核心20"），不依赖任何
         /// 建筑的 Operational 状态——发电机损坏/被关停时，这部分供给仍然存在，保证核心（demand 10）
@@ -140,12 +133,14 @@ namespace GameLogic.Campaign.Regions
         /// <summary>ER3-PWR-01：供给类建筑（目前只有发电机）Operational 时贡献的电力供给
         /// （DEMO-CONTENT-LOCK.md §2.1"电机+80"）。与 <see cref="PowerProfile"/>（消费侧）是两张
         /// 独立的表——发电机本身不消费电力，也不在 PowerProfile 里出现。</summary>
-        public static readonly IReadOnlyDictionary<string, float> PowerSupplyProfile =
-            new Dictionary<string, float>
+        public static IReadOnlyDictionary<string, float> PowerSupplyProfile
+        {
+            get
             {
-                [BuildingTypeGenerator] = 80f,
-                [BuildingTypeGenerator2] = 80f,
-            };
+                EnsureContentProfiles();
+                return _powerSupplyProfile;
+            }
+        }
 
         /// <summary>核心自带基础带宽（DEMO-CONTENT-LOCK.md §2.2"基础带宽 3"），不依赖信号塔状态，
         /// 与 <see cref="SignalTowerBandwidthBonus"/> 是两个独立叠加的来源。</summary>
@@ -157,26 +152,75 @@ namespace GameLogic.Campaign.Regions
 
         /// <summary>修复成本/时长（DEMO-CONTENT-LOCK.md §2.1）。装配站/解析台/维修台无需修复材料前置，
         /// 不在此表出现。</summary>
-        public static readonly IReadOnlyDictionary<string, (int ScrapCost, float Seconds)> RepairProfile =
-            new Dictionary<string, (int, float)>
+        public static IReadOnlyDictionary<string, (int ScrapCost, float Seconds)> RepairProfile
+        {
+            get
             {
-                [BuildingTypeGenerator] = (30, 20f),
-                [BuildingTypeWarehouse] = (10, 10f),
-                [BuildingTypeSignalTower] = (40, 15f),
-            };
+                EnsureContentProfiles();
+                return _repairProfile;
+            }
+        }
 
         /// <summary>ER3-WRK-01 Build 工作单成本/时长（DEMO-CONTENT-LOCK.md §2.2 唯一点名的真实建造
         /// 内容——第二座发电机）。与 <see cref="RepairProfile"/> 是两张独立的表：Repair 面向"已存在但
         /// Damaged"的建筑，Build 面向"尚不存在、需要新建"的建筑，键集合故意不重叠。</summary>
-        public static readonly IReadOnlyDictionary<string, (int ScrapCost, float Seconds)> BuildProfile =
-            new Dictionary<string, (int, float)>
+        public static IReadOnlyDictionary<string, (int ScrapCost, float Seconds)> BuildProfile
+        {
+            get
             {
-                [BuildingTypeGenerator2] = (60, 40f),
-                // ER7-BEACON-01："导航信标成本120"（DEMO-IMPLEMENTATION-SPEC.md ERD-ECO-001 基线表）。
-                // 建造时长文档未点名，按发电机2同一量级取保守 judgment call（非文档摘录）。
-                [BuildingTypeBeacon] = (120, 45f),
-            };
+                EnsureContentProfiles();
+                return _buildProfile;
+            }
+        }
 
+        // ── FG0-DATA-01（FGR-ARC-005）：以上四张档案是 Luban 表 fg.TbBuilding 的派生视图 ──────────────
+        // 数值与 Demo 常量逐项一致（DEMO-CONTENT-LOCK.md §2.1/§2.2、ER7-BEACON-01），数据源改为
+        // tools/cell_tables/fgdata.py。成员判定：powerDemand>0 进 PowerProfile；powerSupply>0 进
+        // PowerSupplyProfile；repairSeconds>0 进 RepairProfile；buildSeconds>0 进 BuildProfile
+        // （check_luban R6 保证"秒数为 0 时废料也为 0"，不会出现"有成本却不可建"的半行）。
+        // 表重载 / 测试注入时 FgContentTables.Revision 变化，下一次读取按新表重建（读取本身 O(1)）。
+        private static int _contentProfileRevision;
+        private static Dictionary<string, (float PowerDemand, int PowerPriority)> _powerProfile;
+        private static Dictionary<string, float> _powerSupplyProfile;
+        private static Dictionary<string, (int ScrapCost, float Seconds)> _repairProfile;
+        private static Dictionary<string, (int ScrapCost, float Seconds)> _buildProfile;
+
+        private static void EnsureContentProfiles()
+        {
+            int revision = FgContentTables.Revision;
+            if (_powerProfile != null && _contentProfileRevision == revision)
+            {
+                return;
+            }
+            var power = new Dictionary<string, (float PowerDemand, int PowerPriority)>();
+            var supply = new Dictionary<string, float>();
+            var repair = new Dictionary<string, (int ScrapCost, float Seconds)>();
+            var build = new Dictionary<string, (int ScrapCost, float Seconds)>();
+            foreach (GameConfig.fg.Building row in FgContentTables.Buildings)
+            {
+                if (row.PowerDemand > 0f)
+                {
+                    power[row.TypeId] = (row.PowerDemand, row.PowerPriority);
+                }
+                if (row.PowerSupply > 0f)
+                {
+                    supply[row.TypeId] = row.PowerSupply;
+                }
+                if (row.RepairSeconds > 0f)
+                {
+                    repair[row.TypeId] = (row.RepairScrap, row.RepairSeconds);
+                }
+                if (row.BuildSeconds > 0f)
+                {
+                    build[row.TypeId] = (row.BuildScrap, row.BuildSeconds);
+                }
+            }
+            _powerProfile = power;
+            _powerSupplyProfile = supply;
+            _repairProfile = repair;
+            _buildProfile = build;
+            _contentProfileRevision = revision;
+        }
         /// <summary>ER3-WRK-01 Recharge：默认电池容量（DEMO-CONTENT-LOCK.md §2.4"默认电池容量：
         /// 搬运100、战斗120、维修140"）。ERC-001/002 均为搬运轮式；ERC-003 是战斗履带（见该常量旁注释）。
         /// 主/功能/维修动作消耗战术电池的完整战斗能耗模型属于 ER4-PRIM-04/战斗基元 Story（本 Story 之外

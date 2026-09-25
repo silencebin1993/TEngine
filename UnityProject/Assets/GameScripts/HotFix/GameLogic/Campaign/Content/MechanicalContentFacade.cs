@@ -50,8 +50,8 @@ namespace GameLogic.Campaign.Content
         /// <summary>工单目标标签展示名解析——<see cref="Regions.WorkOrderRecord.TargetId"/> 对建筑类目标
         /// 的取值格式是 <c>"home_valley:generator"</c>（<see cref="HomeValleyLayout.RegionId"/> + ":" +
         /// BuildingTypeId，见 <c>HomeValleyWorkOrders.TryCreateRepair</c>）。剥离区域前缀后查
-        /// <see cref="BuildingCatalog.ResolveByBuildingTypeId"/>；查不到（地面物/残骸等不在本 Story
-        /// 建筑目录范围内的目标）安全回退成原始 id，不抛异常、不显示空白。</summary>
+        /// fg.TbBuilding 的名称文本键（<see cref="FgContentTables"/> + <see cref="Localization.GameText"/>）；
+        /// 查不到（地面物/残骸等非建筑目标）安全回退成原始 id，不抛异常、不显示空白。</summary>
         public static string ResolveWorkOrderTargetLabel(string targetId)
         {
             if (string.IsNullOrEmpty(targetId))
@@ -66,10 +66,13 @@ namespace GameLogic.Campaign.Content
                 key = key.Substring(prefix.Length);
             }
 
-            string buildingContentId = BuildingCatalog.ResolveByBuildingTypeId(key);
-            if (buildingContentId != null && BuildingCatalog.TryGet(buildingContentId, out MechanicalContentDef def))
+            // FG0-DATA-01（FGR-ARC-006）：建筑名走文本键——fg.TbBuilding 的 nameKey → GameText（当前语言）。
+            // 查不到建筑行（地面物/残骸等非建筑目标）仍按原约定返回原始 id，由调用方给通用称呼；
+            // 查到行但文本键缺失时返回 ⟦key⟧，让缺失在界面上可见，而不是悄悄退回内部 id。
+            // 顺带修正：导航信标此前不在 BuildingCatalog.ResolveByBuildingTypeId 里，工单/字幕只能显示通用称呼。
+            if (FgContentTables.TryGetBuilding(key, out GameConfig.fg.Building row))
             {
-                return def.DisplayName;
+                return Localization.GameText.Get(row.NameKey);
             }
 
             return targetId;

@@ -130,6 +130,8 @@ namespace GameLogic.EditorTools
                 _fail += MainMenuSelfCheck.Run(Report);
                 // FG0-DOC-01：GDD 0.2 合并、Demo 文档归档冻结、TERM-MIGRATION 0.2 名表与题材审计词表、设计版本切换。
                 _fail += DesignDocsAuditSelfCheck.Run(Report);
+                // FG0-DATA-01：建筑 / 敌人 / 文本三类数据从 Luban 表到运行时、缺失键标记、负向矩阵、python 已知坑检查。
+                _fail += FgDataPipelineSelfCheck.Run(Report);
             }
             catch (Exception e)
             {

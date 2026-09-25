@@ -91,6 +91,18 @@ public partial class Tables
     /// </summary>
     public cell.TbStructuralTriggerHookParams TbStructuralTriggerHookParams {get; }
     /// <summary>
+    /// 建筑
+    /// </summary>
+    public fg.TbBuilding TbBuilding {get; }
+    /// <summary>
+    /// 本地化文本
+    /// </summary>
+    public fg.TbLocText TbLocText {get; }
+    /// <summary>
+    /// 机械敌人
+    /// </summary>
+    public fg.TbMechEnemy TbMechEnemy {get; }
+    /// <summary>
     /// 细胞阶段场地与时间轴
     /// </summary>
     public fp.TbCellArena TbCellArena {get; }
@@ -153,6 +165,9 @@ public partial class Tables
         TbStatusEffect = new cell.TbStatusEffect(loader("cell_tbstatuseffect"));
         TbStructuralEffectParams = new cell.TbStructuralEffectParams(loader("cell_tbstructuraleffectparams"));
         TbStructuralTriggerHookParams = new cell.TbStructuralTriggerHookParams(loader("cell_tbstructuraltriggerhookparams"));
+        TbBuilding = new fg.TbBuilding(loader("fg_tbbuilding"));
+        TbLocText = new fg.TbLocText(loader("fg_tbloctext"));
+        TbMechEnemy = new fg.TbMechEnemy(loader("fg_tbmechenemy"));
         TbCellArena = new fp.TbCellArena(loader("fp_tbcellarena"));
         TbCreatureArena = new fp.TbCreatureArena(loader("fp_tbcreaturearena"));
         TbEnemy = new fp.TbEnemy(loader("fp_tbenemy"));
@@ -188,6 +203,9 @@ public partial class Tables
         TbStatusEffect.ResolveRef(this);
         TbStructuralEffectParams.ResolveRef(this);
         TbStructuralTriggerHookParams.ResolveRef(this);
+        TbBuilding.ResolveRef(this);
+        TbLocText.ResolveRef(this);
+        TbMechEnemy.ResolveRef(this);
         TbCellArena.ResolveRef(this);
         TbCreatureArena.ResolveRef(this);
         TbEnemy.ResolveRef(this);

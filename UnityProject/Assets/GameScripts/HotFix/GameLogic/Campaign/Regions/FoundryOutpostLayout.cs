@@ -159,7 +159,7 @@ namespace GameLogic.Campaign.Regions
 
         // ── Boss 数值（DEMO-CONTENT-LOCK.md §4.3 逐字）─────────────────────────
         public const float NodeMaxHealth = 100f;
-        public const float MainCoreMaxHealth = 600f;
+        public static float MainCoreMaxHealth => FgContentTables.Enemy(EnemyCatalog.CoreBossId).MaxHp; // FG0-DATA-01：fg.TbMechEnemy。
         public const float Phase1TransitionHealthFraction = 0.6f; // "降至60%时……Transition"。
         public const float TransitionDurationSeconds = 5f;
         public const float Phase2BackHitBonusPct = 0.2f; // "侧后+20%"。
@@ -169,30 +169,30 @@ namespace GameLogic.Campaign.Regions
         public const float CoreAttackDamage = 18f;
         public const float CoreAttackCooldownSeconds = 2f;
 
-        // ── 敌人 HP（唯一真相 Content.EnemyCatalog，不重复发明）─────────────────
-        public const float ArmorBotMaxHealth = 160f; // EnemyCatalog.ArmorBotId ValuesSummary。
-        public const float StriderMaxHealth = 110f; // EnemyCatalog.StriderId ValuesSummary。
-        public const float RepairBotMaxHealth = 80f; // EnemyCatalog.RepairBotId ValuesSummary。
+        // ── 敌人 HP：FG0-DATA-01 起唯一真相是 Luban 表 fg.TbMechEnemy（tools/cell_tables/fgdata.py）──────
+        public static float ArmorBotMaxHealth => FgContentTables.Enemy(EnemyCatalog.ArmorBotId).MaxHp;
+        public static float StriderMaxHealth => FgContentTables.Enemy(EnemyCatalog.StriderId).MaxHp;
+        public static float RepairBotMaxHealth => FgContentTables.Enemy(EnemyCatalog.RepairBotId).MaxHp;
         public const int CrateScrapAmount = 40; // DEMO-CONTENT-LOCK.md §4.2第3条"三箱各40废料"。
         public const float PoiDiscoveryRadius = 8f;
 
         // ── ER6-FOUNDRY-01：敌人 AI 调校（数值来源见 FoundryOutpostEnemyAi 类注释——
         // DEMO-CONTENT-LOCK.md §5 只给了 HP/正面减伤40%/1秒瞄准线三个数字，其余是本 Story 按
         // FracturedCityLayout 既有敌人调校同一保守量级取的judgment call，非文档摘录）───────
-        public const float ArmorBotFrontalReductionPct = 0.4f; // 复用 EnemyCatalog.ComputeFrontalArmorReducedDamage。
+        public static float ArmorBotFrontalReductionPct => FgContentTables.Enemy(EnemyCatalog.ArmorBotId).FrontalDamageReduction; // fg.TbMechEnemy，与 EnemyCatalog.ComputeFrontalArmorReducedDamage 同源。
         public const float ArmorBotFrontalHalfAngleDeg = 75f; // "正面"锥角——供攻击方向判定是否命中正面。
         public static readonly Vector2 ArmorBotLeftFacing = new Vector2(0.4f, -1f).normalized; // 朝向入口/掩体前方。
         public static readonly Vector2 ArmorBotRightFacing = new Vector2(-0.4f, -1f).normalized;
         public const float ArmorBotAttackRange = 9f;
         public const float ArmorBotAttackDamage = 10f;
         public const float ArmorBotAttackCooldownSeconds = 1.6f;
-        public const int ArmorBotScrapLoot = 25;
+        public static int ArmorBotScrapLoot => FgContentTables.Enemy(EnemyCatalog.ArmorBotId).ScrapLoot;
 
         public const float StriderAimSeconds = 1f; // EnemyCatalog.StriderId ValuesSummary 字面数字。
         public const float StriderAttackRange = 14f;
         public const float StriderAttackDamage = 20f; // "重炮回收点"驻守单位，伤害量级高于护甲机自卫攻击。
         public const float StriderAttackCooldownSeconds = 2.5f; // 开火后到下一次可以重新瞄准的冷却。
-        public const int StriderScrapLoot = 30;
+        public static int StriderScrapLoot => FgContentTables.Enemy(EnemyCatalog.StriderId).ScrapLoot;
 
         public const float RepairBotMoveSpeed = 2.4f;
         public const float RepairBotHealRange = 6f;
@@ -200,7 +200,7 @@ namespace GameLogic.Campaign.Regions
         public const float RepairBotHealCooldownSeconds = 3f;
         public const float RepairBotFleeTriggerRange = 5f; // 玩家进入此距离，维修机后撤（支援单位不硬扛）。
         public const float RepairBotFleeLeash = 6f;
-        public const int RepairBotScrapLoot = 15;
+        public static int RepairBotScrapLoot => FgContentTables.Enemy(EnemyCatalog.RepairBotId).ScrapLoot;
 
         // 直控攻击（同 FracturedCityLayout.DirectAttackRange/DirectAttackAimHalfAngleDeg 同一设计语言）：
         public const float DirectAttackRange = 14f;

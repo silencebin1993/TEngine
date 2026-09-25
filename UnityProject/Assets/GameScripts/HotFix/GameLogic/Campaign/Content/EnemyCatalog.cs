@@ -180,9 +180,10 @@ namespace GameLogic.Campaign.Content
         /// <summary>铸造护甲机"正面减伤40%，侧后不减"（DEMO-CONTENT-LOCK.md §5）的纯函数版本，
         /// 不依赖 Sim/JobDamage——真正接入战斗伤害结算属于 ER6-FOUNDRY-01，这里先把数值规则
         /// 本身做成可独立验证、未来可以直接搬进结算代码的形式，而不是只停留在文档数字。</summary>
+        /// <remarks>FG0-DATA-01：减伤比例改由 Luban 表 fg.TbMechEnemy 的 frontalDamageReduction 提供（护甲机 0.4），不再写死。</remarks>
         public static float ComputeFrontalArmorReducedDamage(float rawDamage, bool isFrontalHit)
         {
-            const float frontalDamageReductionPct = 0.4f;
+            float frontalDamageReductionPct = FgContentTables.Enemy(ArmorBotId).FrontalDamageReduction;
             return isFrontalHit ? rawDamage * (1f - frontalDamageReductionPct) : rawDamage;
         }
     }

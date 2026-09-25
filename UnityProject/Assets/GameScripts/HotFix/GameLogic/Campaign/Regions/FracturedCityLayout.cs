@@ -65,9 +65,10 @@ namespace GameLogic.Campaign.Regions
         public const float CameraBoundsHalfExtentZ = 30f;
 
         // ── 数值调校（唯一真相：ER4-CONTENT-01 EnemyCatalog + DEMO-CONTENT-LOCK.md §4.1，不重复发明）──
-        public const float ScoutMaxHealth = 70f; // EnemyCatalog.ScoutId ValuesSummary。
+        // FG0-DATA-01：敌人生命 / 掉落来自 Luban 表 fg.TbMechEnemy（tools/cell_tables/fgdata.py），不再写死常量。
+        public static float ScoutMaxHealth => FgContentTables.Enemy(EnemyCatalog.ScoutId).MaxHp;
         public const float ScoutMarkIntervalSeconds = 8f;
-        public const float JammerMaxHealth = 90f; // EnemyCatalog.JammerId ValuesSummary。
+        public static float JammerMaxHealth => FgContentTables.Enemy(EnemyCatalog.JammerId).MaxHp;
         public const float JammerRadius = 12f; // 同上。
         public const float ListeningNodeMaxHealth = 50f; // 内容锁定表未点名具体 HP，取与静默侦察机同量级。
         public const float ControlJamGraceSeconds = 2f; // "原已受控机器在2秒宽限后回弹"。
@@ -82,12 +83,12 @@ namespace GameLogic.Campaign.Regions
         public const float ScoutFleeLeash = 5f; // 后撤不超过出生点这个半径，避免越界闯入干扰机/其它锚点。
         public const float ScoutPatrolRadius = 2.5f; // 无威胁时的巡逻摆动半径。
         public const float ScoutMoveSpeed = 2.2f;
-        public const int ScoutScrapLoot = 15; // 击破掉落（正式货物链 HomeValleyCargo.SpawnGroundItem）。
+        public static int ScoutScrapLoot => FgContentTables.Enemy(EnemyCatalog.ScoutId).ScrapLoot; // 击破掉落（正式货物链 HomeValleyCargo.SpawnGroundItem），fg.TbMechEnemy。
 
         public const float JammerAttackRange = 8f; // 驻守节点的防御性攻击——干扰机唯一会主动开火的敌人。
         public const float JammerAttackDamage = 6f;
         public const float JammerAttackCooldownSeconds = 2.5f;
-        public const int JammerScrapLoot = 20;
+        public static int JammerScrapLoot => FgContentTables.Enemy(EnemyCatalog.JammerId).ScrapLoot;
 
         public const float MarkDurationSeconds = 10f; // 标记状态持续时间，干扰机可提前清除或自然过期。
 

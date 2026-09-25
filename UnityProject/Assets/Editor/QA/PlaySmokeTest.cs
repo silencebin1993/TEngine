@@ -20,6 +20,7 @@ namespace GameLogic.EditorTools
     /// 打开 main.unity 进 Play → 存档改到临时目录（绝不碰玩家槽位）→ 点主菜单“新建”→ 点空槽位 → 进归还谷地 →
     /// 读目标条 → 按 J 开任务日志、Esc 关 → 按出征同样的调用顺序进破碎都市 → 进铸造前哨 → 回归还谷地。
     /// 全程收集 Error/Exception/Assert，任何一条都算失败。
+    /// FG0-DATA-01：每段扫描界面文本里的 ⟦key⟧ 缺失标记；工单目标名走文本键；区域播种的敌人生命等于 fg.TbMechEnemy 表值。
     ///
     /// 用法：<c>bash tools/unity-play-smoke.sh</c>（影子工程里跑，编辑器开着也行）。进 Play 会重载域，
     /// 驱动状态存在 SessionState 里，[InitializeOnLoad] 重载后接着跑。
@@ -212,6 +213,7 @@ namespace GameLogic.EditorTools
             SpriteRenderer pinRenderer = pin != null ? pin.GetComponent<SpriteRenderer>() : null;
             Check(pinRenderer != null && pinRenderer.enabled && pinRenderer.sprite != null,
                 $"定位针贴图已加载并显示（位置 {(pin != null ? pin.position.ToString("F1") : "无")}）");
+            CheckNoTextMarkers("归还谷地");
             PressKey(GameSettings.KeyBindings.GetKey(GameActionId.ToggleMissionLog));
             Next(5, "归还谷地运行 6 秒；按任务日志键");
         }
@@ -287,6 +289,12 @@ namespace GameLogic.EditorTools
                 Finish("鼠标下令修复没有生效");
                 return;
             }
+            // FG0-DATA-01：工单目标名 = fg.TbBuilding.nameKey → GameText（表经 Play 模式的资源系统加载）。
+            string generatorLabel = Campaign.Content.MechanicalContentFacade.ResolveWorkOrderTargetLabel(
+                Campaign.Regions.HomeValleyLayout.RegionId + ":" + Campaign.Regions.HomeValleyLayout.BuildingTypeGenerator);
+            Check(generatorLabel == Localization.GameText.Get("building.generator.name") && !Localization.GameText.ContainsMarker(generatorLabel)
+                  && generatorLabel != Campaign.Regions.HomeValleyLayout.RegionId + ":" + Campaign.Regions.HomeValleyLayout.BuildingTypeGenerator,
+                $"工单目标名走文本键：“{generatorLabel}”（Play 模式下 fg 表已加载）");
             Next(12, "等机器走过去修好发电机");
         }
 
@@ -317,6 +325,7 @@ namespace GameLogic.EditorTools
             string title = ObjectiveTitle();
             Write($"  - 修好 1.5 秒后目标条：{title}");
             Check(title.Contains("目标 2/10"), "修好发电机后目标条跳到目标 2/10");
+            CheckNoTextMarkers("发电机修好后");
             Transform station = FindNamed("Building_" + Campaign.Regions.HomeValleyLayout.BuildingTypeAssemblyStation);
             if (station == null)
             {
@@ -379,6 +388,8 @@ namespace GameLogic.EditorTools
             Write($"  - 目标条第 2 项：{item}；备注行：{note}");
             Check(item.Contains("：在地面") || item.Contains("：已装上") || item.Contains("：摧毁监听节点后掉落"), "远征中目标条写出关键物现状或获得方式");
             Write($"  - 世界特效活动中 {VfxActive()} 个");
+            CheckEnemiesFromTable(Campaign.Regions.FracturedCityLayout.RegionId, Campaign.Content.EnemyCatalog.ScoutId);
+            CheckNoTextMarkers("破碎都市");
             int[] roster = MachineRegistry.AllRecords.Where(m => m != null && m.IsAlive).Select(m => m.LogicId).ToArray();
             GameRoot.FracturedCity?.Exit(evacuateSuccess: false);
             Campaign.Regions.FoundryOutpostRegion.EnsureRegionRecordSeeded(CampaignSession.Current);
@@ -417,6 +428,8 @@ namespace GameLogic.EditorTools
             }
             bool active = GameRoot.FoundryOutpost != null && GameRoot.FoundryOutpost.IsActive;
             Write($"  - 铸造前哨激活：{active}；目标条：{ObjectiveTitle()}；剪影 {CountNamed("Silhouette")} 个；世界特效活动中 {VfxActive()} 个");
+            CheckEnemiesFromTable(Campaign.Regions.FoundryOutpostLayout.RegionId, Campaign.Content.EnemyCatalog.ArmorBotId);
+            CheckNoTextMarkers("铸造前哨");
             GameRoot.FoundryOutpost?.Exit(evacuateSuccess: false);
             GameRoot.ResumeHomeValley();
             Next(9, "回到归还谷地");
@@ -430,6 +443,7 @@ namespace GameLogic.EditorTools
             }
             bool active = GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive;
             Write($"  - 归还谷地激活：{active}");
+            CheckNoTextMarkers("回到归还谷地");
             Finish(active ? "完成" : "回不到归还谷地");
         }
 
@@ -534,6 +548,49 @@ namespace GameLogic.EditorTools
             {
                 SessionState.SetInt(K + "Errors", SessionState.GetInt(K + "Errors", 0) + 1);
             }
+        }
+
+        /// <summary>FG0-DATA-01：扫描当前所有可见界面文本（UI Toolkit 与 UGUI），任何 ⟦key⟧ 缺失标记都算失败——
+        /// 缺失的文本键在正常流程里必须被发现，而不是靠人眼。</summary>
+        private static void CheckNoTextMarkers(string where)
+        {
+            var hits = new System.Collections.Generic.List<string>();
+            int scanned = 0;
+            foreach (UIDocument doc in Object.FindObjectsByType<UIDocument>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            {
+                if (doc.rootVisualElement == null)
+                {
+                    continue;
+                }
+                doc.rootVisualElement.Query<TextElement>().ForEach(t =>
+                {
+                    scanned++;
+                    if (Localization.GameText.ContainsMarker(t.text))
+                    {
+                        hits.Add(t.text);
+                    }
+                });
+            }
+            foreach (UnityEngine.UI.Text t in Object.FindObjectsByType<UnityEngine.UI.Text>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            {
+                scanned++;
+                if (Localization.GameText.ContainsMarker(t.text))
+                {
+                    hits.Add(t.text);
+                }
+            }
+            Check(hits.Count == 0 && scanned > 0,
+                $"{where}：扫描界面文本 {scanned} 个，缺失键标记 {hits.Count} 个{(hits.Count > 0 ? "：" + string.Join("｜", hits.Take(5)) : string.Empty)}");
+        }
+
+        /// <summary>FG0-DATA-01：Play 模式下区域播种的敌人生命来自 fg.TbMechEnemy。</summary>
+        private static void CheckEnemiesFromTable(string regionId, string enemyTypeId)
+        {
+            float expected = Campaign.Content.FgContentTables.Enemy(enemyTypeId).MaxHp;
+            RegionEnemyRecord[] enemies = CampaignSession.Current?.RegionEnemies?
+                .Where(e => e != null && e.RegionId == regionId && e.EnemyTypeId == enemyTypeId).ToArray() ?? Array.Empty<RegionEnemyRecord>();
+            Check(enemies.Length > 0 && enemies.All(e => Mathf.Approximately(e.MaxHealth, expected)),
+                $"{enemyTypeId} 播种 {enemies.Length} 个，MaxHealth 全部等于表值 {expected}");
         }
 
         private static Transform FindNamed(string name) =>

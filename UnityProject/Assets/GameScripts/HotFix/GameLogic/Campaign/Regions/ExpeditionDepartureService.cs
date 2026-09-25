@@ -246,6 +246,10 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
+        /// <summary>FG0-DATA-01：敌人显示名 = fg.TbMechEnemy.nameKey 经 GameText 取当前语言；键缺失显示 ⟦key⟧。</summary>
+        private static string EnemyName(string enemyTypeId) =>
+            Localization.GameText.Get(FgContentTables.Enemy(enemyTypeId).NameKey);
+
         /// <summary>ER6-ADAPT-01：三份面板快照共用同一份反制情报计算——"面板显示与出发时锁定必须是
         /// 同一套算法"，不允许面板自己再算一遍。<paramref name="state"/> 为 null 时直接给 None 默认值，
         /// 不调用 <see cref="EnemyAdaptationService.ComputeAdaptation"/>（该方法本身也对 null 安全，这里
@@ -311,9 +315,11 @@ namespace GameLogic.Campaign.Regions
                 int aliveRepairBots = enemiesSeeded
                     ? state.RegionEnemies.Count(e => e.RegionId == FoundryOutpostLayout.RegionId && e.EnemyTypeId == EnemyCatalog.RepairBotId && e.IsAlive)
                     : 1;
-                string foundryIntel = $"铸造护甲机 x{aliveArmorBots}（HP{FoundryOutpostLayout.ArmorBotMaxHealth:F0}，正面减伤40%）｜" +
-                    $"铸造步进炮 x{aliveStriders}（HP{FoundryOutpostLayout.StriderMaxHealth:F0}，1秒瞄准线）｜" +
-                    $"铸造维修机 x{aliveRepairBots}（HP{FoundryOutpostLayout.RepairBotMaxHealth:F0}）";
+                // FG0-DATA-01：敌人名走文本键（fg.TbMechEnemy.nameKey → GameText），生命/减伤读 fg.TbMechEnemy；
+                // 其余情报措辞是 Demo 遗留文案，统一在 FG15-UX-03 迁移到文本键。
+                string foundryIntel = $"{EnemyName(EnemyCatalog.ArmorBotId)} x{aliveArmorBots}（HP{FoundryOutpostLayout.ArmorBotMaxHealth:F0}，正面减伤{FoundryOutpostLayout.ArmorBotFrontalReductionPct * 100f:F0}%）｜" +
+                    $"{EnemyName(EnemyCatalog.StriderId)} x{aliveStriders}（HP{FoundryOutpostLayout.StriderMaxHealth:F0}，1秒瞄准线）｜" +
+                    $"{EnemyName(EnemyCatalog.RepairBotId)} x{aliveRepairBots}（HP{FoundryOutpostLayout.RepairBotMaxHealth:F0}）";
 
                 // ER6-ADAPT-01：第二次出征起（目标已切到铸造前哨外围）才有"上次战斗暴露"这个前提——
                 // 见 EnemyAdaptationService 类注释范围裁决，第一次出征（破碎都市）恒 None，走下面的
@@ -340,8 +346,8 @@ namespace GameLogic.Campaign.Regions
             int aliveJammers = ruinsEnemiesSeeded
                 ? state.RegionEnemies.Count(e => e.RegionId == FracturedCityLayout.RegionId && e.EnemyTypeId == EnemyCatalog.JammerId && e.IsAlive)
                 : 1;
-            string intel = $"静默侦察机 x{aliveScouts}（HP{FracturedCityLayout.ScoutMaxHealth:F0}，标记周期8秒）｜" +
-                $"静默干扰机 x{aliveJammers}（HP{FracturedCityLayout.JammerMaxHealth:F0}，干扰半径{FracturedCityLayout.JammerRadius:F0}米）";
+            string intel = $"{EnemyName(EnemyCatalog.ScoutId)} x{aliveScouts}（HP{FracturedCityLayout.ScoutMaxHealth:F0}，标记周期8秒）｜" +
+                $"{EnemyName(EnemyCatalog.JammerId)} x{aliveJammers}（HP{FracturedCityLayout.JammerMaxHealth:F0}，干扰半径{FracturedCityLayout.JammerRadius:F0}米）";
 
             // ER6-ADAPT-01：第一次出征（破碎都市）没有"上次战斗"这个前提，恒 None——不调用
             // EnemyAdaptationService.ComputeAdaptation，直接用 None 的文案兜底（AC-ADP-001"无历史为
