@@ -124,6 +124,7 @@ namespace GameLogic.EditorTools
                 _fail += ContentIconsSelfCheck.Run(Report);
                 _fail += CampaignFlowSelfCheck.Run(Report);
                 _fail += ObjectiveSelfCheck.Run(Report);
+                _fail += SilhouetteSelfCheck.Run(Report);
             }
             catch (Exception e)
             {

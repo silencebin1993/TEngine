@@ -81,6 +81,7 @@ namespace GameLogic.EditorTools
                 CheckCameraSpeedAndEdgePan();
                 CheckScreenShake();
                 CheckFlashReduction();
+                CheckPanelTheme();
             }
             catch (Exception e)
             {
@@ -106,6 +107,32 @@ namespace GameLogic.EditorTools
             {
                 setter(saved);
             }
+        }
+
+        // ── 题材用词（DEBT-ER2THEME01-01 回归闸门）────────────────────────
+
+        /// <summary>《地球归还》正式面板 UXML 里写死的文字不得出现旧生物题材词或内部 ID。旧细胞阶段界面虽然随
+        /// 战役挂载，但全程隐藏（只在细胞阶段运行时显示），不在此列。</summary>
+        private static void CheckPanelTheme()
+        {
+            var hits = new List<string>();
+            int scanned = 0;
+            foreach ((string uxml, string _) in Panels)
+            {
+                string text = System.IO.File.ReadAllText(UiRoot + uxml);
+                foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(text, @"\btext=""([^""]*)"""))
+                {
+                    string value = m.Groups[1].Value;
+                    scanned++;
+                    if (FeedbackCueSelfCheck.ForbiddenWords.IsMatch(value) || FeedbackCueSelfCheck.InternalIdPattern.IsMatch(value))
+                    {
+                        hits.Add($"{uxml}“{value}”");
+                    }
+                }
+            }
+            // 扫描本身失效（正则写坏、一条都没匹配到）必须报错，不能静默通过。
+            Expect(hits.Count == 0 && scanned >= 50, $"{Panels.Length} 个正式面板的 {scanned} 处界面文字无旧题材词、无内部 ID" +
+                                    (hits.Count == 0 ? string.Empty : "：" + string.Join("；", hits)));
         }
 
         // ── UI 缩放 ────────────────────────────────────────────────────

@@ -1145,6 +1145,8 @@ namespace GameLogic.Campaign.Regions
                     ? new Color(0.6f, 0.15f, 0.55f)
                     : new Color(0.75f, 0.35f, 0.15f);
                 renderer.material = new Material(Shader.Find("Standard")) { color = enemy.IsAlive ? baseColor : new Color(0.25f, 0.25f, 0.25f) };
+                // AC-THEME-002：静默阵营细高“天线”剪影（胶囊只留作命中盒）。
+                PlaceholderSilhouette.ApplyEnemy(go, renderer, enemy.EnemyTypeId);
 
                 // ER8-CONTENT-01 AC-ACC-002：敌人头顶的类型标记（倒三角＝敌方，角标圆点/方块＝静默/铸造阵营），
                 // 敌我不再只靠胶囊体颜色区分。胶囊体等比缩放，标记直接挂在它下面随之移动。
@@ -1200,6 +1202,7 @@ namespace GameLogic.Campaign.Regions
             Renderer renderer = go.GetComponent<Renderer>();
             Color baseColor = new Color(0.7f, 0.85f, 0.75f); // 与归还谷地机器配色区分（略带绿，"出征中"）。
             renderer.material = new Material(Shader.Find("Standard")) { color = baseColor };
+            PlaceholderSilhouette.ApplyMachine(go, renderer, machine.ChassisId); // AC-THEME-002 车辆剪影。
 
             HomeValleyMachineMarker marker = go.AddComponent<HomeValleyMachineMarker>();
             marker.Initialize(machine.LogicId, machine.ChassisId, renderer, baseColor);

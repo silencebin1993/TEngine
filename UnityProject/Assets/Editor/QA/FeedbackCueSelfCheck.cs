@@ -30,10 +30,10 @@ namespace GameLogic.EditorTools
         private const string CaptionHudUxml = "Assets/GameRes/Raw/UI/Feedback/FeedbackCaptionHud.uxml";
 
         // 与 ER2-THEME-01 / ER8-CONTENT-01 静态审计同一张禁用词表。
-        private static readonly Regex ForbiddenWords = new Regex("细胞|孢子|菌丝|基因|器官|吞噬|代谢|谱系|萌生|债兽");
+        internal static readonly Regex ForbiddenWords = new Regex("细胞|孢子|菌丝|基因|器官|吞噬|代谢|谱系|萌生|债兽");
 
         // 内部 ID 的典型形态：snake_case 标识符、区域前缀、占位字样。
-        private static readonly Regex InternalIdPattern = new Regex(@"[a-z]+_[a-z0-9_]+|home_valley:|placeholder|TODO", RegexOptions.IgnoreCase);
+        internal static readonly Regex InternalIdPattern = new Regex(@"[a-z]+_[a-z0-9_]+|home_valley:|placeholder|TODO", RegexOptions.IgnoreCase);
 
         private static StringBuilder _report;
         private static int _fail;

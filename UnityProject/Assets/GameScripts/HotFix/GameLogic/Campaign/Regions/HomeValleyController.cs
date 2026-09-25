@@ -1453,6 +1453,8 @@ namespace GameLogic.Campaign.Regions
             Renderer renderer = go.GetComponent<Renderer>();
             Color baseColor = new Color(0.7f, 0.75f, 0.8f);
             renderer.material = new Material(Shader.Find("Standard")) { color = baseColor };
+            // AC-THEME-002：按底盘拼车辆剪影（胶囊只留作命中盒），与静默/铸造敌人在灰度下也能分清。
+            PlaceholderSilhouette.ApplyMachine(go, renderer, machine.ChassisId);
 
             HomeValleyMachineMarker marker = go.AddComponent<HomeValleyMachineMarker>();
             marker.Initialize(machine.LogicId, machine.ChassisId, renderer, baseColor);
