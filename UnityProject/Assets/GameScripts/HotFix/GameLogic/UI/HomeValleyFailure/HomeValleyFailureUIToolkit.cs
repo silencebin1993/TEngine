@@ -5,6 +5,7 @@ using GameLogic.Stage;
 using TEngine;
 using UnityEngine;
 using UnityEngine.UIElements;
+using GameLogic.UI.Kit;
 
 namespace GameLogic.UI.HomeValleyFailure
 {
@@ -76,6 +77,8 @@ namespace GameLogic.UI.HomeValleyFailure
             bool shouldShow = GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive
                 && HomeValleySoftlockGuard.IsCoreDestroyed(CampaignSession.Current);
             _root.style.display = shouldShow ? DisplayStyle.Flex : DisplayStyle.None;
+            // FG0-UX-01（FGR-UX-001）：失败页不能 Esc 关掉，Esc 也不许穿透去开一个被它盖住的暂停菜单。
+            UiEscapeStack.SyncBlocking(this, shouldShow);
 
             // ER7-FAIL-01 STORY-EXECUTION-CARDS.md 第1条："显示死因、最近安全自动档与返回菜单；无可
             // 读档时给清晰提示，不能留在不可操作世界"——只在刚刚从隐藏变可见时算一次（面板显示期间
@@ -87,7 +90,7 @@ namespace GameLogic.UI.HomeValleyFailure
                 // ER8-CONTENT-01 AC-AUD-001 失败：核心被毁至今没有真实战斗触发源（只有
                 // HomeValleySoftlockGuard 的调试入口），挂在“失败页第一次出现”这个边沿上，
                 // 将来无论哪条路径把核心打爆，玩家都会同时听到并看到。
-                Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.CoreDestroyed);
+                Campaign.Feedback.FeedbackCues.RaiseLocated(Campaign.Feedback.FeedbackCueId.CoreDestroyed, Campaign.Regions.HomeValleyLayout.Core.Position);
             }
             _wasShown = shouldShow;
         }

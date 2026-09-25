@@ -270,7 +270,8 @@ namespace GameLogic.Campaign.Regions
                 if (anyFailed)
                 {
                     // ER8-CONTENT-01 AC-AUD-001 失败：只在真的有进行中的解析被中止时出声。
-                    Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Failure, "解析台被毁，进行中的解析已中止");
+                    Feedback.FeedbackCues.RaiseLocatedIfKnown(Feedback.FeedbackCueId.Failure,
+                        Feedback.FeedbackCues.BuildingPositionOfType(state, HomeValleyLayout.BuildingTypeAnalysisBench), "解析台被毁，进行中的解析已中止");
                 }
                 return;
             }
@@ -347,7 +348,8 @@ namespace GameLogic.Campaign.Regions
             {
                 item.State = AnalysisQueueState.Failed;
                 item.BlockedReason = "quest-item-missing";
-                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Failure, "解析失败：待解析的模块已不在仓库");
+                Feedback.FeedbackCues.RaiseLocatedIfKnown(Feedback.FeedbackCueId.Failure,
+                    Feedback.FeedbackCues.BuildingPositionOfType(state, HomeValleyLayout.BuildingTypeAnalysisBench), "解析失败：待解析的模块已不在仓库");
                 return;
             }
 
@@ -380,7 +382,8 @@ namespace GameLogic.Campaign.Regions
 
             // ER8-CONTENT-01 AC-AUD-001 解析：唯一完成点出声与字幕，音色取解析台 BuildingCatalog.SfxId。
             string unlockedName = Feedback.FeedbackCues.ContentName(info.UnlockContentId);
-            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.AnalysisComplete,
+            Feedback.FeedbackCues.RaiseLocatedIfKnown(Feedback.FeedbackCueId.AnalysisComplete,
+                Feedback.FeedbackCues.BuildingPositionOfType(state, HomeValleyLayout.BuildingTypeAnalysisBench),
                 (alreadyUnlocked || string.IsNullOrEmpty(unlockedName) ? info.DisplayName : $"{info.DisplayName}，解锁 {unlockedName}")
                 + $"，技术数据 +{techYield}",
                 Feedback.FeedbackCues.BuildingTypeSfx(HomeValleyLayout.BuildingTypeAnalysisBench));

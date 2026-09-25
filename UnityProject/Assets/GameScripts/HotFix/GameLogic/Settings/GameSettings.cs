@@ -14,7 +14,12 @@ namespace GameLogic.Settings
     {
         public InputBindingEntry[] KeyBindings;
 
-        public float UiScale = 1f; // AC-UI-004：80%/100%/140% 三档，允许任意连续值。
+        /// <summary>FG0-UX-01：<see cref="KeyBindings"/> 的格式版本。初值必须是 0——旧 JSON 没有这个字段时
+        /// JsonUtility 保留初值，0 正好表示“ER2 全表快照格式”，读入时迁移；保存时写
+        /// <see cref="InputBindingSet.CurrentFormatVersion"/>。</summary>
+        public int KeyBindingsFormat;
+
+        public float UiScale = 1f; // FG0-UX-01：范围 80%～150%（fg.TbUiTuning ui.scale_min / ui.scale_max，FGR-UX-060）。
         public bool EdgePanEnabled = true;
         public float EdgePanSpeedMultiplier = 1f;
         public float CameraSpeedMultiplier = 1f;
@@ -34,6 +39,23 @@ namespace GameLogic.Settings
         /// 存语言代码而不是枚举整数——以后加语言、调整枚举顺序都不会把老玩家的设置读成别的语言；
         /// 读不懂的代码回落简体中文（<see cref="GameSettings.Language"/>）。旧设置 JSON 没有这个字段时按默认值补齐。</summary>
         public string Language = GameLogic.Localization.GameLanguageCodes.ZhCn;
+
+        /// <summary>FG0-UX-01（FGR-UX-060）：通知弹出提示停留时长倍率（乘在各等级的默认秒数上）。</summary>
+        public float NotificationToastScale = 1f;
+
+        /// <summary>FG0-UX-01（FGR-UX-021）：玩家改过的“触发时自动暂停”勾选。没有条目的类型按表里的默认值。</summary>
+        public NotifyAutoPauseEntry[] NotifyAutoPause;
+
+        /// <summary>FG0-UX-01（FG00 B14）：已经触发过的引导钩子（每个钩子对每个玩家只触发一次）。</summary>
+        public string[] SeenGuidanceHooks;
+    }
+
+    /// <summary>一条“某类通知触发时是否自动暂停”的玩家设置。</summary>
+    [Serializable]
+    public struct NotifyAutoPauseEntry
+    {
+        public string TypeId;
+        public bool Enabled;
     }
 
     /// <summary>
@@ -87,6 +109,13 @@ namespace GameLogic.Settings
         public static float UiVolume => Data.UiVolume;
         public static bool SubtitlesEnabled => Data.SubtitlesEnabled;
         public static bool ColorblindSafeIconsEnabled => Data.ColorblindSafeIconsEnabled;
+        public static float NotificationToastScale => Data.NotificationToastScale;
+
+        /// <summary>FG0-UX-01：读旧设置时的按键迁移结果（只在本次进程读盘时有值）。通知中心取走一次后清空，
+        /// 用来告诉玩家“按键方案已更新，保留了几个、恢复了几个”。</summary>
+        public static InputBindingSet.LegacyMigrationReport PendingKeyMigration { get; private set; }
+
+        public static void ClearPendingKeyMigration() => PendingKeyMigration = default;
 
         /// <summary>FG0-DATA-01：当前界面语言。<see cref="GameLogic.Localization.GameText"/> 每次取文本都读这里，
         /// 所以切换后下一次刷新界面就是新语言，不需要重载表。</summary>
@@ -121,7 +150,15 @@ namespace GameLogic.Settings
                     _data = new GameSettingsData();
                 }
             }
-            _keyBindings = InputBindingSet.FromEntries(_data.KeyBindings);
+            _keyBindings = InputBindingSet.FromEntries(_data.KeyBindings, _data.KeyBindingsFormat,
+                out InputBindingSet.LegacyMigrationReport report);
+            PendingKeyMigration = report;
+            if (report.Migrated || report.DroppedCount > 0)
+            {
+                // 迁移过的格式立刻写回，下次读盘不再迁移（迁移只发生一次，通知也只发一次）。
+                Log.Info($"[GameSettings] 按键设置已迁移到格式 {InputBindingSet.CurrentFormatVersion}：保留 {report.KeptCount}，恢复默认 {report.DroppedCount}");
+                Save();
+            }
             Revision++;
         }
 
@@ -131,6 +168,7 @@ namespace GameLogic.Settings
         private static void Save()
         {
             _data.KeyBindings = _keyBindings.ToEntries();
+            _data.KeyBindingsFormat = InputBindingSet.CurrentFormatVersion;
             string json = JsonUtility.ToJson(_data);
             PlayerPrefs.SetString(PrefsKey, json);
             PlayerPrefs.Save();
@@ -144,9 +182,73 @@ namespace GameLogic.Settings
             listener?.OnSettingsChanged();
         }
 
+        /// <summary>UI 缩放的允许范围（fg.TbUiTuning，FGR-UX-060：80%～150%）。</summary>
+        public static float UiScaleMin => UiTuningValues.Get("ui.scale_min");
+        public static float UiScaleMax => UiTuningValues.Get("ui.scale_max");
+
         public static void SetUiScale(float value)
         {
-            Data.UiScale = Mathf.Clamp(value, 0.8f, 1.4f);
+            Data.UiScale = Mathf.Clamp(value, UiScaleMin, UiScaleMax);
+            Save();
+        }
+
+        /// <summary>FG0-UX-01（FGR-UX-060）：通知停留时长倍率，范围取自 fg.TbUiTuning。</summary>
+        public static void SetNotificationToastScale(float value)
+        {
+            Data.NotificationToastScale = Mathf.Clamp(value, UiTuningValues.Get("notify.toast_scale_min"),
+                UiTuningValues.Get("notify.toast_scale_max"));
+            Save();
+        }
+
+        /// <summary>某类通知是否触发自动暂停：玩家改过的优先，否则用表里的默认值。</summary>
+        public static bool IsNotifyAutoPauseEnabled(string typeId, bool tableDefault)
+        {
+            NotifyAutoPauseEntry[] entries = Data.NotifyAutoPause;
+            if (entries != null)
+            {
+                for (int i = 0; i < entries.Length; i++)
+                {
+                    if (entries[i].TypeId == typeId)
+                    {
+                        return entries[i].Enabled;
+                    }
+                }
+            }
+            return tableDefault;
+        }
+
+        public static bool HasSeenGuidanceHook(string hookId) =>
+            Data.SeenGuidanceHooks != null && Array.IndexOf(Data.SeenGuidanceHooks, hookId) >= 0;
+
+        public static void MarkGuidanceHookSeen(string hookId)
+        {
+            if (string.IsNullOrEmpty(hookId) || HasSeenGuidanceHook(hookId))
+            {
+                return;
+            }
+            var list = new System.Collections.Generic.List<string>(Data.SeenGuidanceHooks ?? Array.Empty<string>()) { hookId };
+            Data.SeenGuidanceHooks = list.ToArray();
+            Save();
+        }
+
+        public static void SetNotifyAutoPause(string typeId, bool enabled)
+        {
+            if (string.IsNullOrEmpty(typeId))
+            {
+                return;
+            }
+            var list = new System.Collections.Generic.List<NotifyAutoPauseEntry>(Data.NotifyAutoPause ?? Array.Empty<NotifyAutoPauseEntry>());
+            int index = list.FindIndex(e => e.TypeId == typeId);
+            var entry = new NotifyAutoPauseEntry { TypeId = typeId, Enabled = enabled };
+            if (index >= 0)
+            {
+                list[index] = entry;
+            }
+            else
+            {
+                list.Add(entry);
+            }
+            Data.NotifyAutoPause = list.ToArray();
             Save();
         }
 
@@ -224,24 +326,41 @@ namespace GameLogic.Settings
             Save();
         }
 
-        /// <summary>true=成功重绑；false 且 <paramref name="conflict"/> 有值=与另一动作撞键，
-        /// 调用方（设置 UI）应弹确认，确认后调用 <see cref="ForceRebindKey"/>。</summary>
-        public static bool TryRebindKey(GameActionId action, KeyCode key, out GameActionId conflict)
+        /// <summary>FG0-UX-01：尝试重绑。Conflict 时不落地，<paramref name="conflicts"/> 给出冲突方，
+        /// 调用方弹确认框（覆盖 / 取消），选覆盖再调 <see cref="ForceRebind"/>。</summary>
+        public static RebindResult TryRebind(GameActionId action, InputChord chord, System.Collections.Generic.List<GameActionId> conflicts)
         {
             EnsureLoaded();
-            bool ok = _keyBindings.TryRebind(action, key, out conflict);
-            if (ok)
+            RebindResult result = _keyBindings.TryRebind(action, chord, conflicts);
+            if (result == RebindResult.Ok)
             {
                 Save();
             }
-            return ok;
+            return result;
         }
 
-        public static void ForceRebindKey(GameActionId action, KeyCode key, GameActionId conflict)
+        /// <summary>确认覆盖：冲突方变为未绑定。冲突方里有必须保留按键的动作时返回 RequiredBlocked，什么都不改。</summary>
+        public static RebindResult ForceRebind(GameActionId action, InputChord chord, System.Collections.Generic.List<GameActionId> blockedBy = null)
         {
             EnsureLoaded();
-            _keyBindings.ForceRebind(action, key, conflict);
-            Save();
+            RebindResult result = _keyBindings.ForceRebind(action, chord, blockedBy);
+            if (result == RebindResult.Ok)
+            {
+                Save();
+            }
+            return result;
+        }
+
+        /// <summary>单个动作恢复默认（默认键与别的改过的动作撞键时返回 Conflict，不落地）。</summary>
+        public static RebindResult ResetKeyBinding(GameActionId action, System.Collections.Generic.List<GameActionId> conflicts = null)
+        {
+            EnsureLoaded();
+            RebindResult result = _keyBindings.ResetToDefault(action, conflicts);
+            if (result == RebindResult.Ok)
+            {
+                Save();
+            }
+            return result;
         }
 
         public static void ResetKeyBindingsToDefault()

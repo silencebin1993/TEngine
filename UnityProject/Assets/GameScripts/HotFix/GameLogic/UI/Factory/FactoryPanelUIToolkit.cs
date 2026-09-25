@@ -10,6 +10,7 @@ using GameLogic.Stage;
 using TEngine;
 using UnityEngine;
 using UnityEngine.UIElements;
+using GameLogic.UI.Kit;
 
 namespace GameLogic.UI.Factory
 {
@@ -150,6 +151,9 @@ namespace GameLogic.UI.Factory
             }
         }
 
+        /// <summary>FG0-UX-01（FGR-UX-001）：Esc 逐层返回——面板开着时在 Esc 栈里占一层（缓存委托，不每帧分配）。</summary>
+        private System.Action _escClose;
+
         private void Update()
         {
             if (_panel == null)
@@ -159,6 +163,7 @@ namespace GameLogic.UI.Factory
 
             bool open = GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive && GameRoot.HomeValley.IsFactoryPanelOpen;
             _panel.style.display = open ? DisplayStyle.Flex : DisplayStyle.None;
+            UiEscapeStack.Sync(this, open, _escClose ??= () => GameRoot.HomeValley?.SetFactoryPanelOpen(false));
             if (!open)
             {
                 return;

@@ -45,6 +45,9 @@ namespace GameLogic.Campaign.Regions
         /// <summary>ER2-INPUT-01：归还谷地自己的镜头状态机实例（不共享细胞阶段那个——两边场景
         /// 互斥运行，各自 Bind 自己的 Camera.main，生命周期也该各管各的，见 Exit() 的 Unbind）。</summary>
         private CameraDirector _cameraDirector;
+
+        /// <summary>FG0-UX-01：通知“定位”要让当前区域的镜头飞到事件位置（只读访问，不改所有权）。</summary>
+        public CameraDirector CameraDirector => _cameraDirector;
         /// <summary>当前被直控（WASD 亲自开）的机器。null＝没有接管，处于战略选中+下令模式。</summary>
         private HomeValleyMachineMarker _possessed;
         /// <summary>ER2-INPUT-01 AC-UI-005：本区域自己的暂停态，镜像 CellStageFlow 的
@@ -131,6 +134,8 @@ namespace GameLogic.Campaign.Regions
             SetupInteraction();
 
             IsActive = true;
+            // FG0-UX-01（FGR-UX-020 定位）：机器阵亡等通知按 LogicId 取机器标记的实时位置。
+            MachineRegistry.LivePositionProvider = FindMachineMarkerPosition;
 
             SaveResult saveResult = CampaignAutoSaveService.SaveAuto(SaveReason.HomeEntryComplete);
             if (!saveResult.Success)
@@ -873,6 +878,10 @@ namespace GameLogic.Campaign.Regions
             Control.Unbind();
             Interact.Unbind();
             IsActive = false;
+            if (MachineRegistry.LivePositionProvider == (System.Func<int, Vector2?>)FindMachineMarkerPosition)
+            {
+                MachineRegistry.LivePositionProvider = null;
+            }
             Log.Info("[HomeValleyController] 已退出归还谷地。");
         }
 
@@ -1042,6 +1051,28 @@ namespace GameLogic.Campaign.Regions
                 {
                     Log.Warning($"[HomeValleyController] 机器 {m.LogicId} 装配登记失败：{result.Message}");
                 }
+            }
+        }
+
+        /// <summary>FG0-UX-01：暂停菜单“保存并返回主菜单”存档前调用——只写回实时状态，不卸载区域。</summary>
+        private Vector2? FindMachineMarkerPosition(int logicId)
+        {
+            foreach (HomeValleyMachineMarker marker in _machineMarkers)
+            {
+                if (marker != null && marker.LogicId == logicId)
+                {
+                    Vector3 p = marker.transform.position;
+                    return new Vector2(p.x, p.z);
+                }
+            }
+            return null;
+        }
+
+        public void SyncLiveStateForSave()
+        {
+            if (IsActive)
+            {
+                SyncLiveStateBackToRecords();
             }
         }
 
@@ -1630,7 +1661,8 @@ namespace GameLogic.Campaign.Regions
             // 右键＝取消选中机器当前的在办工作单（STORY-EXECUTION-CARDS.md #ER3-WRK-01 要求的
             // "取消"矩阵列在本 Story 唯一的真实触发入口——正式取消按钮留 ER5-INT-01/UI-04）。
             // 取消不清空选中/不影响移动指令本身，机器停在原地等待下一次点选下令。
-            if (_selected != null && InputRouter.GetMouseButtonDown(1, InputScope.Strategy))
+            // FG0-UX-01：同一次右键已用来取消“武装待命”时，不再顺带取消机器的在办工单。
+            if (_selected != null && !SquadCommands.ConsumedSecondaryThisFrame && InputRouter.GetMouseButtonDown(1, InputScope.Strategy))
             {
                 CampaignState cancelState = CampaignSession.Current;
                 WorkOrderRecord active = cancelState != null

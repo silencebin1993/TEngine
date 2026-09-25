@@ -134,6 +134,9 @@ namespace GameLogic.EditorTools
                 _fail += FgDataPipelineSelfCheck.Run(Report);
                 // FG0-SAVE-01：存档 v2 骨架——版本升级链、Demo 存档提示、写入中途强制结束与备份恢复、已移除内容转废料、存档卡新字段。
                 _fail += FgSaveV2SelfCheck.Run(Report);
+                // FG0-UX-01：UI 基础件（12 类）与输入上下文——动作登记表、上下文与组合键、重绑冲突、旧设置迁移、通知中心、
+                // 浮层基础件、面板与布局探针（四种分辨率 × 缩放极值 × 中英文）、文本键、性能。
+                _fail += FgUiKitSelfCheck.Run(Report);
             }
             catch (Exception e)
             {

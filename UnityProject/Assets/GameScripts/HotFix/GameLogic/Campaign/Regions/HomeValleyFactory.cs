@@ -574,7 +574,8 @@ namespace GameLogic.Campaign.Regions
                 item.State = FactoryQueueState.Failed;
                 item.BlockedReason = "target-lost";
                 CampaignEconomyLedger.Cancel(state, item.TransactionId);
-                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Failure, "改造失败：目标机器已不在场，已退还材料");
+                Feedback.FeedbackCues.RaiseLocatedIfKnown(Feedback.FeedbackCueId.Failure,
+                    Feedback.FeedbackCues.BuildingPositionOfType(state, HomeValleyLayout.BuildingTypeAssemblyStation), "改造失败：目标机器已不在场，已退还材料");
                 return;
             }
 
@@ -603,7 +604,8 @@ namespace GameLogic.Campaign.Regions
             item.BlockedReason = null;
 
             // ER8-CONTENT-01 AC-AUD-001 生产：改造完工与新机出厂同属“生产”类反馈。
-            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.ProductionComplete,
+            Feedback.FeedbackCues.RaiseLocatedIfKnown(Feedback.FeedbackCueId.ProductionComplete,
+                Feedback.FeedbackCues.BuildingPositionOfType(state, HomeValleyLayout.BuildingTypeAssemblyStation),
                 $"{Feedback.FeedbackCues.MachineLabel(machine.LogicId)} 改造完成，已换装 v{item.BlueprintVersion}",
                 Feedback.FeedbackCues.BuildingTypeSfx(HomeValleyLayout.BuildingTypeAssemblyStation));
 
@@ -660,7 +662,8 @@ namespace GameLogic.Campaign.Regions
                 item.State = FactoryQueueState.Failed;
                 item.BlockedReason = $"spawn-failed:{spawn.Error}";
                 CampaignEconomyLedger.Cancel(state, item.TransactionId);
-                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Failure, "生产失败，已退还材料");
+                Feedback.FeedbackCues.RaiseLocatedIfKnown(Feedback.FeedbackCueId.Failure,
+                    Feedback.FeedbackCues.BuildingPositionOfType(state, HomeValleyLayout.BuildingTypeAssemblyStation), "生产失败，已退还材料");
                 return;
             }
 
@@ -697,7 +700,8 @@ namespace GameLogic.Campaign.Regions
 
             // ER8-CONTENT-01 AC-AUD-001 生产：出厂那一刻（唯一完成点）出声与字幕，音色取装配站
             // BuildingCatalog.SfxId。
-            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.ProductionComplete,
+            Feedback.FeedbackCues.RaiseLocatedIfKnown(Feedback.FeedbackCueId.ProductionComplete,
+                Feedback.FeedbackCues.BuildingPositionOfType(state, HomeValleyLayout.BuildingTypeAssemblyStation),
                 $"{Feedback.FeedbackCues.MachineLabel(spawn.LogicId)} {MechanicalContentFacade.ResolveChassisLabel(def.ChassisId)} 已出厂",
                 Feedback.FeedbackCues.BuildingTypeSfx(HomeValleyLayout.BuildingTypeAssemblyStation));
         }

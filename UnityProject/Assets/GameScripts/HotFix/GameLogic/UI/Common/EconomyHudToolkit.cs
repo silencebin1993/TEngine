@@ -139,6 +139,10 @@ namespace GameLogic.UI.Common
             _storageLabel.style.marginTop = 4;
             _panel.Add(_storageLabel);
 
+            // FG0-UX-01（FGR-UX-030 / FG-GAP-003）：电力与信号带宽是复合数值，悬停展开来源（与电网仲裁同一份数据）。
+            Kit.UiTooltip.Attach(_powerLabel, () => HomeValueBreakdown.Power(CampaignSession.Current));
+            Kit.UiTooltip.Attach(_signalLabel, () => HomeValueBreakdown.Signal(CampaignSession.Current));
+
             _groundItemsLabel = new Label();
             _groundItemsLabel.style.color = new Color(0.95f, 0.75f, 0.35f);
             _groundItemsLabel.style.fontSize = 11;

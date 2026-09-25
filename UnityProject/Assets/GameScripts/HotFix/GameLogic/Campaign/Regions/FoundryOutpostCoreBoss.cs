@@ -66,11 +66,11 @@ namespace GameLogic.Campaign.Regions
             // 文案走 DisplayPhaseText（不把枚举名给玩家看）。
             if (to == CoreBossState.Destroyed)
             {
-                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.BossDestroyed);
+                Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.BossDestroyed, FoundryOutpostLayout.MainCore.Position);
             }
             else
             {
-                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.BossPhase, DisplayPhaseText(region));
+                Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.BossPhase, FoundryOutpostLayout.MainCore.Position, DisplayPhaseText(region));
             }
             return true;
         }
@@ -372,7 +372,7 @@ namespace GameLogic.Campaign.Regions
                         region.CoreLockoutWarnAtPlaySeconds = state.PlaySeconds + FoundryOutpostLayout.CoreLockoutWarnSeconds;
                         Log.Info("[FoundryOutpostCoreBoss] Phase2 区域封锁预警：2秒后核心分区入口锁死。");
                         // DEBT-ER7CORE01-01：此前只有 HUD 文字，没看 HUD 的玩家收不到预警——补上可听警报。
-                        Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.BossLockoutWarning);
+                        Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.BossLockoutWarning, FoundryOutpostLayout.CoreGate.Position);
                     }
                 }
                 return; // Transition 期间不攻击（DEMO-CONTENT-LOCK.md 字面要求）。
@@ -383,7 +383,7 @@ namespace GameLogic.Campaign.Regions
             {
                 region.CoreLockoutActive = true;
                 Log.Info("[FoundryOutpostCoreBoss] 区域封锁已生效：核心分区不能再退回外围。");
-                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.BossLockoutActive);
+                Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.BossLockoutActive, FoundryOutpostLayout.CoreGate.Position);
             }
 
             if (s == CoreBossState.Phase1 || s == CoreBossState.Phase2)

@@ -171,6 +171,8 @@ namespace GameLogic.Campaign
         public LootPacketState LootPackets = new LootPacketState();
         public StatsState Stats = new StatsState();
         public SaveHistoryState SaveHistory = new SaveHistoryState();
+        /// <summary>FG0-UX-01：通知中心历史（FGR-UX-020）。唯一写入口是 <c>GameLogic.Notifications.NotificationCenter</c>。</summary>
+        public NotificationHistoryState Notifications = new NotificationHistoryState();
 
         /// <summary>新建战役：ERD-ECO-001 的 Demo 初始废料基线（180）已在设计文档给出数值，
         /// 直接采用；其余经济/工作/建筑/区域集合按 Done 定义留空，等待 ER3/ER4/ER5 写入真实数据。</summary>
@@ -236,6 +238,7 @@ namespace GameLogic.Campaign
                 LootPackets = new LootPacketState(),
                 Stats = new StatsState(),
                 SaveHistory = new SaveHistoryState(),
+                Notifications = new NotificationHistoryState(),
             };
         }
 
@@ -287,6 +290,8 @@ namespace GameLogic.Campaign
             CampaignFgStateDomains.EnsureAll(this);
             World.ChunkDiffs = World.ChunkDiffs
                 .OrderBy(r => r.SurfaceId, StringComparer.Ordinal).ThenBy(r => r.ChunkX).ThenBy(r => r.ChunkY).ToArray();
+            Notifications.Entries = Notifications.Entries
+                .OrderBy(r => r.Id).ToArray();
             SaveHistory.Notices = SaveHistory.Notices
                 .OrderBy(r => r.CreatedAtUtc, StringComparer.Ordinal).ThenBy(r => r.NoticeId, StringComparer.Ordinal).ToArray();
         }

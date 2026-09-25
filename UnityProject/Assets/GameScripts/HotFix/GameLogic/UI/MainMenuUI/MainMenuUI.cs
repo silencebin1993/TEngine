@@ -58,7 +58,8 @@ namespace GameLogic
             (GameActionId.TogglePause, "暂停/继续"),
             (GameActionId.Cancel, "取消/返回"),
             (GameActionId.ToggleMissionLog, "任务日志与地图"),
-            (GameActionId.DirectSkillSlot0, "冲刺"),
+            // FG0-UX-01：原“冲刺”行（DirectSkillSlot0）在 0.2 是尚未开放的“接入技能 1”，换成已接入玩法的“通知中心”。
+            (GameActionId.ToggleNotificationCenter, "通知中心"),
         };
 
         private Toggle _toggleEdgePan;
@@ -76,32 +77,12 @@ namespace GameLogic
 
         /// <summary>正在等待玩家按下新键的动作；null＝当前没有在监听重绑。</summary>
         private GameActionId? _rebindListening;
-        /// <summary>已检测到冲突、等待玩家再点一次同一按钮确认覆盖。三者必须同时有效才允许确认。</summary>
-        private GameActionId? _rebindConflictAction;
-        private GameActionId _rebindConflictWith;
-        private KeyCode _rebindConflictKey;
+        /// <summary>FG0-UX-01：改键采集（组合键、单独修饰键、滚轮、鼠标键；Esc 取消）。与 UI Toolkit 按键面板共用同一实现。</summary>
+        private readonly InputCapture _rebindCapture = new InputCapture();
 
-        /// <summary>重绑监听时轮询的候选键，不遍历全部 ~500 个 KeyCode——只覆盖玩家实际按得到、
-        /// 也说得清楚"按了哪个键"的常用集合。监听只在玩家主动点了重绑按钮后才短暂发生，
-        /// 一帧 O(候选数) 不构成性能问题（不是每帧默认发生的路径）。</summary>
-        private static readonly KeyCode[] RebindCandidateKeys = BuildRebindCandidateKeys();
-
-        private static KeyCode[] BuildRebindCandidateKeys()
-        {
-            var list = new List<KeyCode>();
-            for (KeyCode k = KeyCode.A; k <= KeyCode.Z; k++) { list.Add(k); }
-            for (KeyCode k = KeyCode.Alpha0; k <= KeyCode.Alpha9; k++) { list.Add(k); }
-            for (KeyCode k = KeyCode.F1; k <= KeyCode.F12; k++) { list.Add(k); }
-            list.AddRange(new[]
-            {
-                KeyCode.Space, KeyCode.Tab, KeyCode.Escape, KeyCode.Return, KeyCode.Backspace,
-                KeyCode.LeftShift, KeyCode.RightShift, KeyCode.LeftControl, KeyCode.RightControl,
-                KeyCode.LeftAlt, KeyCode.RightAlt, KeyCode.CapsLock,
-                KeyCode.UpArrow, KeyCode.DownArrow, KeyCode.LeftArrow, KeyCode.RightArrow,
-                KeyCode.Mouse0, KeyCode.Mouse1, KeyCode.Mouse2, KeyCode.Mouse3, KeyCode.Mouse4,
-            });
-            return list.ToArray();
-        }
+        /// <summary>FG0-UX-01：设置页上“全部按键设置…”按钮（运行时从“恢复默认”按钮复制一个，放在它后面，由同一个布局组排版）。
+        /// 打开 UI Toolkit 的完整按键面板（全部动作、按上下文分页、搜索、冲突确认）。</summary>
+        private Button _btnAllKeyBindings;
 
         private Transform _tfSlotList;
         private Text[] _slotInfoTexts;
@@ -135,6 +116,8 @@ namespace GameLogic
             _btnSettingsBack.onClick.AddListener(OnSettingsBackClicked);
             _btnResetAllDefaults = FindChildComponent<Button>("m_tf_Settings/m_btn_ResetAllDefaults");
             _btnResetAllDefaults.onClick.AddListener(OnResetAllDefaultsClicked);
+            _btnAllKeyBindings = CreateAllKeyBindingsButton(_btnResetAllDefaults);
+            _btnAllKeyBindings?.onClick.AddListener(OnAllKeyBindingsClicked);
 
             // ER2-INPUT-01 附带修复：ScrollRect 补了真正的 Viewport（RectMask2D）后，Content
             // (m_tf_SettingsColumns) 多套了一层 "Viewport" 节点，这里的路径常量必须跟着改，
@@ -154,6 +137,14 @@ namespace GameLogic
                     continue;
                 }
                 _rebindLabels[action] = btn.GetComponentInChildren<Text>();
+                // FG0-UX-01：行名跟动作登记表同一个名字（文本键，随语言切换），不再用预制体里写死的中文。
+                foreach (Text rowText in btn.transform.parent.GetComponentsInChildren<Text>(true))
+                {
+                    if (!rowText.transform.IsChildOf(btn.transform) && InputActionCatalog.TryGet(action, out InputActionDef rowDef))
+                    {
+                        rowText.text = rowDef.DisplayName;
+                    }
+                }
                 GameActionId captured = action; // 闭包捕获，避免 foreach 变量复用坑。
                 btn.onClick.AddListener(() => OnRebindButtonClicked(captured));
             }
@@ -175,6 +166,9 @@ namespace GameLogic
             _sliderMusicVolume = FindChildComponent<Slider>(colRight + "/m_row_Slider_MusicVolume/m_slider_MusicVolume");
             _sliderSfxVolume = FindChildComponent<Slider>(colRight + "/m_row_Slider_SfxVolume/m_slider_SfxVolume");
             _sliderUiVolume = FindChildComponent<Slider>(colRight + "/m_row_Slider_UiVolume/m_slider_UiVolume");
+            // FG0-UX-01（FGR-UX-060）：UI 缩放范围 80%～150% 来自 fg.TbUiTuning，不信预制体里写的滑条上下限。
+            _sliderUiScale.minValue = GameSettings.UiScaleMin;
+            _sliderUiScale.maxValue = GameSettings.UiScaleMax;
             _sliderUiScale.onValueChanged.AddListener(GameSettings.SetUiScale);
             _sliderCameraSpeed.onValueChanged.AddListener(GameSettings.SetCameraSpeedMultiplier);
             _sliderMasterVolume.onValueChanged.AddListener(GameSettings.SetMasterVolume);
@@ -227,6 +221,28 @@ namespace GameLogic
             ApplyVisualSystem();
             AttachClickSounds();
             SetView(MenuView.Root);
+        }
+
+        /// <summary>FG0-UX-01：在“恢复默认”按钮后面复制出“全部按键设置…”。两者同属设置页的布局组，排版由布局组负责，
+        /// 不写坐标；文字走文本键。预制体没有这个节点（GameRes 子仓的预制体只能在编辑器里安全改，
+        /// 这里复制既有按钮避免手改 YAML），MainMenuSelfCheck 断言它存在、可点、能打开面板。</summary>
+        private static Button CreateAllKeyBindingsButton(Button template)
+        {
+            if (template == null)
+            {
+                return null;
+            }
+            GameObject copy = UnityEngine.Object.Instantiate(template.gameObject, template.transform.parent, false);
+            copy.name = "m_btn_AllKeyBindings";
+            copy.transform.SetSiblingIndex(template.transform.GetSiblingIndex() + 1);
+            Button button = copy.GetComponent<Button>();
+            button.onClick = new Button.ButtonClickedEvent();
+            Text label = copy.GetComponentInChildren<Text>(true);
+            if (label != null)
+            {
+                label.text = Localization.GameText.Get("ui.keybind.open_all");
+            }
+            return button;
         }
 
         /// <summary>ER8（DEBT-ER2BOOT01-04 音效部分）：主菜单与设置页此前按任何按钮都没有声音。UI Toolkit 面板的
@@ -748,43 +764,27 @@ namespace GameLogic
             {
                 if (_rebindLabels.TryGetValue(action, out Text label))
                 {
-                    label.text = KeyDisplayName(GameSettings.KeyBindings.GetKey(action));
+                    label.text = InputDisplay.ForAction(action);
                 }
             }
         }
 
-        private static string KeyDisplayName(KeyCode key)
-        {
-            switch (key)
-            {
-                case KeyCode.LeftShift: return "LShift";
-                case KeyCode.RightShift: return "RShift";
-                case KeyCode.LeftControl: return "LCtrl";
-                case KeyCode.RightControl: return "RCtrl";
-                case KeyCode.LeftAlt: return "LAlt";
-                case KeyCode.RightAlt: return "RAlt";
-                case KeyCode.Mouse0: return "鼠标左键";
-                case KeyCode.Mouse1: return "鼠标右键";
-                case KeyCode.Mouse2: return "鼠标中键";
-                default: return key.ToString();
-            }
-        }
-
-        // ── ER2-INPUT-01：键位重绑（点击→监听下一次按键→冲突需再点一次确认）──────
+        // ── ER2-INPUT-01 / FG0-UX-01：键位重绑（点击→监听下一次按键→冲突弹确认框：覆盖或取消）──────
 
         private void OnRebindButtonClicked(GameActionId action)
         {
-            // 正在等待"再点一次确认覆盖"，且点的就是同一个按钮＝确认。
-            if (_rebindConflictAction == action)
-            {
-                GameSettings.ForceRebindKey(action, _rebindConflictKey, _rebindConflictWith);
-                CancelRebindState(); // 内部会用刚落地的新绑定刷新全部标签。
-                return;
-            }
-
             CancelRebindState();
             _rebindListening = action;
-            _rebindLabels[action].text = "按任意键…";
+            _rebindCapture.Reset();
+            InputRouter.SetRebindCapture(true);
+            _rebindLabels[action].text = Localization.GameText.Get("input.rebind.listening");
+        }
+
+        /// <summary>打开完整按键面板（UI Toolkit）。</summary>
+        private void OnAllKeyBindingsClicked()
+        {
+            CancelRebindState();
+            UI.Kit.KeyBindingsPanelUIToolkit.Open();
         }
 
         /// <summary>按根画布当前尺寸收紧各视图（尺寸没变时 O(1) 早退）。UI 缩放/窗口分辨率变化都会改变
@@ -824,42 +824,21 @@ namespace GameLogic
             }
 
             GameActionId action = _rebindListening.Value;
-            for (int i = 0; i < RebindCandidateKeys.Length; i++)
+            InputCapture.Result result = _rebindCapture.Poll(out InputChord chord);
+            if (result == InputCapture.Result.Waiting)
             {
-                KeyCode key = RebindCandidateKeys[i];
-                if (!Input.GetKeyDown(key))
-                {
-                    continue;
-                }
-
-                _rebindListening = null;
-                GameActionId conflict;
-                if (GameSettings.TryRebindKey(action, key, out conflict))
-                {
-                    RefreshKeybindLabels();
-                }
-                else
-                {
-                    // 冲突：不落地，等玩家再点一次同一按钮确认覆盖（见 OnRebindButtonClicked）。
-                    _rebindConflictAction = action;
-                    _rebindConflictWith = conflict;
-                    _rebindConflictKey = key;
-                    _rebindLabels[action].text = "覆盖 " + ConflictRowLabel(conflict) + "？再点一次";
-                }
                 return;
             }
-        }
-
-        private static string ConflictRowLabel(GameActionId action)
-        {
-            foreach ((GameActionId a, string label) in RebindRows)
+            _rebindListening = null;
+            InputRouter.SetRebindCapture(false);
+            if (result == InputCapture.Result.Cancelled)
             {
-                if (a == action)
-                {
-                    return label;
-                }
+                RefreshKeybindLabels();
+                return;
             }
-            return action.ToString();
+            // 与 UI Toolkit 按键面板同一套流程：冲突时弹确认框（覆盖 / 取消），必须保留按键的动作不能被抢。
+            UI.Kit.KeyBindingFlow.Rebind(action, chord, _ => RefreshKeybindLabels());
+            RefreshKeybindLabels();
         }
 
         /// <summary>取消监听/冲突确认。同时刷新键位标签——若上一个正在监听/等确认的按钮
@@ -867,8 +846,11 @@ namespace GameLogic
         /// "按任意键…"/"覆盖…？"，必须在这里统一复位，不能指望调用方各自记得刷新。</summary>
         private void CancelRebindState()
         {
+            if (_rebindListening != null)
+            {
+                InputRouter.SetRebindCapture(false);
+            }
             _rebindListening = null;
-            _rebindConflictAction = null;
             if (_rebindLabels.Count > 0)
             {
                 RefreshKeybindLabels();

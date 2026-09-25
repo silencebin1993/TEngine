@@ -8,6 +8,7 @@ using GameLogic.UI.Common;
 using TEngine;
 using UnityEngine;
 using UnityEngine.UIElements;
+using GameLogic.UI.Kit;
 
 namespace GameLogic.UI.Objective
 {
@@ -108,14 +109,14 @@ namespace GameLogic.UI.Objective
                 return;
             }
 
-            if (InputRouter.ConsumeGlobalAction(GameActionId.ToggleMissionLog))
+            // FG0-UX-01：FG13 第 5 节把“任务日志”（L）与“地图”（M）分成两个键；Demo 的任务日志窗口同时就是战役地图，
+            // 两个键都打开它（世界地图由后续 Story 单独做时再把 OpenMap 改接新窗口）。
+            if (InputRouter.ConsumeGlobalAction(GameActionId.ToggleMissionLog) || InputRouter.ConsumeGlobalAction(GameActionId.OpenMap))
             {
                 SetOpen(!_open);
             }
-            else if (_open && InputRouter.ConsumeGlobalAction(GameActionId.Cancel, allowDuringModal: true))
-            {
-                SetOpen(false);
-            }
+            // FG0-UX-01：Esc 不在这里抢先读——任务日志在 Esc 栈里占一层，由 UiKitInputPump 统一“先关最上层”
+            // （例如任务日志上面又开了通知中心，Esc 先关通知中心）。
 
             if (!_open)
             {
@@ -130,6 +131,8 @@ namespace GameLogic.UI.Objective
             Render(state);
         }
 
+        private System.Action _escClose;
+
         private void SetOpen(bool open)
         {
             _open = open;
@@ -139,6 +142,11 @@ namespace GameLogic.UI.Objective
             {
                 _refreshTimer = 0f;
                 UiWindowFocus.BringToFront(_document, _window);
+                UiEscapeStack.Push(this, _escClose ??= () => SetOpen(false));
+            }
+            else
+            {
+                UiEscapeStack.Remove(this);
             }
         }
 

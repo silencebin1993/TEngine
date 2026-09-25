@@ -95,6 +95,10 @@ public partial class Tables
     /// </summary>
     public fg.TbBuilding TbBuilding {get; }
     /// <summary>
+    /// 输入动作
+    /// </summary>
+    public fg.TbInputAction TbInputAction {get; }
+    /// <summary>
     /// 本地化文本
     /// </summary>
     public fg.TbLocText TbLocText {get; }
@@ -103,9 +107,21 @@ public partial class Tables
     /// </summary>
     public fg.TbMechEnemy TbMechEnemy {get; }
     /// <summary>
+    /// 通知分级
+    /// </summary>
+    public fg.TbNotifyTier TbNotifyTier {get; }
+    /// <summary>
+    /// 通知类型
+    /// </summary>
+    public fg.TbNotifyType TbNotifyType {get; }
+    /// <summary>
     /// 已移除内容
     /// </summary>
     public fg.TbRemovedContent TbRemovedContent {get; }
+    /// <summary>
+    /// 界面调参
+    /// </summary>
+    public fg.TbUiTuning TbUiTuning {get; }
     /// <summary>
     /// 细胞阶段场地与时间轴
     /// </summary>
@@ -170,9 +186,13 @@ public partial class Tables
         TbStructuralEffectParams = new cell.TbStructuralEffectParams(loader("cell_tbstructuraleffectparams"));
         TbStructuralTriggerHookParams = new cell.TbStructuralTriggerHookParams(loader("cell_tbstructuraltriggerhookparams"));
         TbBuilding = new fg.TbBuilding(loader("fg_tbbuilding"));
+        TbInputAction = new fg.TbInputAction(loader("fg_tbinputaction"));
         TbLocText = new fg.TbLocText(loader("fg_tbloctext"));
         TbMechEnemy = new fg.TbMechEnemy(loader("fg_tbmechenemy"));
+        TbNotifyTier = new fg.TbNotifyTier(loader("fg_tbnotifytier"));
+        TbNotifyType = new fg.TbNotifyType(loader("fg_tbnotifytype"));
         TbRemovedContent = new fg.TbRemovedContent(loader("fg_tbremovedcontent"));
+        TbUiTuning = new fg.TbUiTuning(loader("fg_tbuituning"));
         TbCellArena = new fp.TbCellArena(loader("fp_tbcellarena"));
         TbCreatureArena = new fp.TbCreatureArena(loader("fp_tbcreaturearena"));
         TbEnemy = new fp.TbEnemy(loader("fp_tbenemy"));
@@ -209,9 +229,13 @@ public partial class Tables
         TbStructuralEffectParams.ResolveRef(this);
         TbStructuralTriggerHookParams.ResolveRef(this);
         TbBuilding.ResolveRef(this);
+        TbInputAction.ResolveRef(this);
         TbLocText.ResolveRef(this);
         TbMechEnemy.ResolveRef(this);
+        TbNotifyTier.ResolveRef(this);
+        TbNotifyType.ResolveRef(this);
         TbRemovedContent.ResolveRef(this);
+        TbUiTuning.ResolveRef(this);
         TbCellArena.ResolveRef(this);
         TbCreatureArena.ResolveRef(this);
         TbEnemy.ResolveRef(this);

@@ -137,7 +137,59 @@ namespace GameLogic.Campaign.Feedback
         public static void RaiseAt(FeedbackCueId cue, Vector3 worldPosition, string detail = null, string sfxOverride = null)
         {
             LogMoment(cue, worldPosition);
-            RaiseInternal(cue, detail, sfxOverride, DistanceAttenuation(worldPosition));
+            RaiseInternal(cue, detail, sfxOverride, DistanceAttenuation(worldPosition), worldPosition);
+        }
+
+        /// <summary>FG0-UX-01（FGR-UX-020 定位）：非战斗时刻带上世界坐标——音量、震屏、字幕与 <see cref="Raise(FeedbackCueId, string, string)"/>
+        /// 完全一样（不按距离衰减，缺电 / 建成这类提示不该因为镜头在远处就变小声），位置只交给通知中心做“点击定位”。</summary>
+        public static void RaiseLocated(FeedbackCueId cue, Vector2 groundPosition, string detail = null, string sfxOverride = null)
+        {
+            RaiseInternal(cue, detail, sfxOverride, 1f, new Vector3(groundPosition.x, 0f, groundPosition.y));
+        }
+
+        /// <summary>同 <see cref="RaiseLocated"/>，位置未知（例如对应建筑已不在）时退回不带位置的 <see cref="Raise(FeedbackCueId, string, string)"/>。</summary>
+        public static void RaiseLocatedIfKnown(FeedbackCueId cue, Vector2? groundPosition, string detail = null, string sfxOverride = null)
+        {
+            if (groundPosition.HasValue)
+            {
+                RaiseLocated(cue, groundPosition.Value, detail, sfxOverride);
+            }
+            else
+            {
+                RaiseInternal(cue, detail, sfxOverride, 1f);
+            }
+        }
+
+        /// <summary>第一座 <paramref name="buildingTypeId"/> 建筑的地面坐标（通知定位用）；没有这类建筑时返回 null。</summary>
+        public static Vector2? BuildingPositionOfType(CampaignState state, string buildingTypeId)
+        {
+            BuildingRecord[] records = state?.BuildingRecords;
+            if (records == null)
+            {
+                return null;
+            }
+            for (int i = 0; i < records.Length; i++)
+            {
+                if (records[i] != null && records[i].BuildingTypeId == buildingTypeId)
+                {
+                    return records[i].Position;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>FG0-UX-01：一次时刻涉及多处（例如同一次电网重算里三栋楼一起停机）：字幕与音效只出一次（用合并后的
+        /// <paramref name="captionDetail"/>），通知中心按地点逐条记成员——同类在聚合窗口内合并成“N 处缺电”，展开后逐条可定位。</summary>
+        public static void RaiseLocatedGroup(FeedbackCueId cue, string captionDetail, IReadOnlyList<string> memberDetails,
+            IReadOnlyList<Vector2> memberPositions, string sfxOverride = null)
+        {
+            RaiseInternal(cue, captionDetail, sfxOverride, 1f, null, notify: false);
+            int n = Mathf.Min(memberDetails?.Count ?? 0, memberPositions?.Count ?? 0);
+            for (int i = 0; i < n; i++)
+            {
+                Vector2 p = memberPositions[i];
+                GameLogic.Notifications.NotificationCenter.OnCue(cue, memberDetails[i], new Vector3(p.x, 0f, p.y));
+            }
         }
 
         /// <summary>区域逻辑坐标版本：区域记录里的 <c>Vector2</c> 是地面坐标（x, z）。</summary>
@@ -145,7 +197,7 @@ namespace GameLogic.Campaign.Feedback
         {
             var world = new Vector3(groundPosition.x, 0f, groundPosition.y);
             LogMoment(cue, world);
-            RaiseInternal(cue, detail, sfxOverride, DistanceAttenuation(world));
+            RaiseInternal(cue, detail, sfxOverride, DistanceAttenuation(world), world);
         }
 
         /// <summary>字幕里的机器称呼，与各面板一致的“#编号”；找不到记录返回空串。</summary>
@@ -212,7 +264,8 @@ namespace GameLogic.Campaign.Feedback
                 : null;
         }
 
-        private static void RaiseInternal(FeedbackCueId cue, string detail, string sfxOverride, float volumeScale)
+        private static void RaiseInternal(FeedbackCueId cue, string detail, string sfxOverride, float volumeScale, Vector3? position = null,
+            bool notify = true)
         {
             FeedbackCueDef def = FeedbackCueCatalog.Get(cue);
             if (def == null)
@@ -242,6 +295,22 @@ namespace GameLogic.Campaign.Feedback
             if (showCaption)
             {
                 PushCaption(def, ComposeText(def.Caption, detail), now);
+            }
+
+            // FG0-UX-01（FGR-UX-020）：表里登记过的时刻同时进通知中心（分级、聚合、定位、历史）。
+            // 没有映射的高频时刻（开火、命中……）在 OnCue 里按数组下标 O(1) 直接返回。
+            if (notify)
+            {
+                GameLogic.Notifications.NotificationCenter.OnCue(cue, detail, position);
+            }
+        }
+
+        /// <summary>FG0-UX-01：通知等级提示音（FGR-UX-022）。冷却由通知中心按等级管理，这里只负责走界面音量通道播放。</summary>
+        public static void PlayNotificationSound(string sfxId)
+        {
+            if (!string.IsNullOrEmpty(sfxId))
+            {
+                PlayClip(sfxId, AudioType.UISound, 1f);
             }
         }
 

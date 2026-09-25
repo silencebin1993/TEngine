@@ -7,6 +7,7 @@ using GameLogic.Stage;
 using TEngine;
 using UnityEngine;
 using UnityEngine.UIElements;
+using GameLogic.UI.Kit;
 
 namespace GameLogic.UI.Victory
 {
@@ -96,6 +97,8 @@ namespace GameLogic.UI.Victory
             CampaignState state = CampaignSession.Current;
             bool shouldShow = GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive
                 && HomeValleyBeacon.IsLaunched(state) && !HomeValleyBeacon.IsLaunching(state);
+            // FG0-UX-01（FGR-UX-001）：胜利页不能 Esc 关掉，Esc 也不许穿透去开一个被它盖住的暂停菜单。
+            UiEscapeStack.SyncBlocking(this, shouldShow);
 
             _panel.RemoveFromClassList("vp-root-visible");
             if (shouldShow)

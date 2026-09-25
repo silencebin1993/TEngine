@@ -246,16 +246,21 @@ namespace GameLogic.View
         }
 
         /// <summary>请求进入战略视角。已在战略或正在过渡时忽略，不会叠加。</summary>
-        public bool RequestStrategy()
+        public bool RequestStrategy() => RequestStrategy(null);
+
+        /// <summary>请求进入战略视角，并让过渡直接落到 <paramref name="focus"/>（FG0-UX-01 通知定位：
+        /// 接入视角下点通知，镜头要拉回战略并飞到事件位置，而不是停在自己机器上方）。
+        /// <paramref name="focus"/> 为空时从当前镜头继承注视点。</summary>
+        public bool RequestStrategy(float2? focus)
         {
             if (_camera == null || _mode == ViewMode.Strategy || _mode == ViewMode.Transition)
             {
                 return false;
             }
 
-            // 从当前镜头继承注视点，避免"拉远的瞬间画面跳到别处"。
+            // 从当前镜头继承注视点，避免"拉远的瞬间画面跳到别处"；指定了目标焦点时直接过渡到目标。
             Vector3 pos = _camera.transform.position;
-            _strategyFocus = new float2(pos.x - _followOffset.x, pos.z - _followOffset.z);
+            _strategyFocus = focus ?? new float2(pos.x - _followOffset.x, pos.z - _followOffset.z);
             _directOrthographicSize = _camera.orthographicSize;
             ClampStrategyFocus();
             BeginTransition(ViewMode.Strategy, StrategyCameraPosition(), _strategyOrthographicSize);
@@ -304,6 +309,11 @@ namespace GameLogic.View
         {
             _strategyFocus = worldPosition;
             ClampStrategyFocus();
+            // 正在拉回战略视角的过渡里改焦点：过渡终点跟着改，不在落地时再“跳”一下。
+            if (_camera != null && _mode == ViewMode.Transition && _pendingMode == ViewMode.Strategy)
+            {
+                _transitionTo = StrategyCameraPosition();
+            }
         }
 
         private void BeginTransition(ViewMode target, Vector3 targetPosition, float targetSize)
@@ -395,7 +405,8 @@ namespace GameLogic.View
                 ClampStrategyFocus();
             }
 
-            float scroll = InputRouter.GetScrollDelta(InputScope.Strategy);
+            // FG0-UX-01：缩放走可重绑的“拉近 / 拉远”动作（默认滚轮上 / 下，可改成键盘键）。
+            float scroll = InputRouter.GetZoomDelta(InputScope.Strategy);
             if (math.abs(scroll) > 0.001f)
             {
                 _strategyOrthographicSize = math.clamp(
@@ -414,14 +425,15 @@ namespace GameLogic.View
             fromEdge = false;
             float x = 0f;
             float y = 0f;
-            if (InputRouter.GetKey(KeyCode.A, InputScope.Strategy) ||
-                InputRouter.GetKey(KeyCode.LeftArrow, InputScope.Strategy)) { x -= 1f; }
-            if (InputRouter.GetKey(KeyCode.D, InputScope.Strategy) ||
-                InputRouter.GetKey(KeyCode.RightArrow, InputScope.Strategy)) { x += 1f; }
-            if (InputRouter.GetKey(KeyCode.S, InputScope.Strategy) ||
-                InputRouter.GetKey(KeyCode.DownArrow, InputScope.Strategy)) { y -= 1f; }
-            if (InputRouter.GetKey(KeyCode.W, InputScope.Strategy) ||
-                InputRouter.GetKey(KeyCode.UpArrow, InputScope.Strategy)) { y += 1f; }
+            // FG0-UX-01：平移键全部走可重绑动作（WASD 与方向键两组），不再写字面量 KeyCode。
+            if (InputRouter.GetActionKey(GameActionId.MoveLeft, InputScope.Strategy) ||
+                InputRouter.GetActionKey(GameActionId.StrategyPanLeft, InputScope.Strategy)) { x -= 1f; }
+            if (InputRouter.GetActionKey(GameActionId.MoveRight, InputScope.Strategy) ||
+                InputRouter.GetActionKey(GameActionId.StrategyPanRight, InputScope.Strategy)) { x += 1f; }
+            if (InputRouter.GetActionKey(GameActionId.MoveBack, InputScope.Strategy) ||
+                InputRouter.GetActionKey(GameActionId.StrategyPanDown, InputScope.Strategy)) { y -= 1f; }
+            if (InputRouter.GetActionKey(GameActionId.MoveForward, InputScope.Strategy) ||
+                InputRouter.GetActionKey(GameActionId.StrategyPanUp, InputScope.Strategy)) { y += 1f; }
 
             if (x != 0f || y != 0f)
             {

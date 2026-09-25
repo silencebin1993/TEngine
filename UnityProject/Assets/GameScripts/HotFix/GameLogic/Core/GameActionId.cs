@@ -25,14 +25,13 @@ namespace GameLogic.Core
         DirectSkillSlot3 = 7,
         DirectSkillSlot4 = 8,
 
-        /// <summary>E：世界交互（Direct 域）。归还谷地的 E 交互正式实现属于 ER5-INT-01/UI-04，
-        /// 本 Story 只保证这个键统一经过 <see cref="InputRouter"/> 且可重绑。</summary>
+        /// <summary>E：世界交互（Direct 域 = FG 的“接入”上下文）。</summary>
         Interact = 9,
 
         /// <summary>Tab：循环切换当前受控/接管目标（Direct 域）。</summary>
         CycleControlTarget = 10,
 
-        /// <summary>M：战略/直控视角切换（全局键，见 <see cref="InputRouter.ConsumeGlobalAction"/>）。</summary>
+        /// <summary>战略 / 接入视角切换（FG13“接入 / 退出”，FG0-UX-01 起默认 V；全局键，见 <see cref="InputRouter.ConsumeGlobalAction"/>）。</summary>
         ToggleCameraView = 11,
 
         /// <summary>Space：暂停/恢复（全局键）。AC-UI-005：暂停恢复此前速度。</summary>
@@ -51,13 +50,56 @@ namespace GameLogic.Core
         /// <summary>ER5-CMD-01：战略命令快捷键（Strategy 域，配合 GameLogic.Campaign.Regions 下的
         /// RegionSquadCommandSystem）。Move/Attack 是"武装待命，下一次左键点击世界确认目标"；
         /// Guard/Retreat 目标固定（分别为"当前位置"/"区域安全点"），按下即立即下达（或战略暂停下
-        /// 排队）。这四个是战术固定键，不纳入 <see cref="InputBindingSet.RebindableActions"/>
-        /// （同 WASD 的范围裁剪理由）。</summary>
+        /// 排队）。FG0-UX-01 起全部可重绑；默认键为与 FG13 第 5 节合并后的 R/T/G/Z。</summary>
         CommandMove = 32,
         CommandAttack = 33,
         CommandGuard = 34,
         CommandRetreat = 35,
-        /// <summary>ER8（DEBT-ER6LOOP01-01）：打开/关闭任务日志与战役地图，默认 J，可重绑。</summary>
+        /// <summary>ER8（DEBT-ER6LOOP01-01）：打开/关闭任务日志与战役地图。FG0-UX-01 起默认 L（FG13 第 5 节）。</summary>
         ToggleMissionLog = 36,
+
+        // ── FG0-UX-01（FG13 第 5 节 / FGR-ARC-012）：其余全部玩家动作。只追加、不重排——
+        // 设置 JSON 按整数存动作 ID。默认键、所属上下文、是否已接入玩法都在 fg.TbInputAction，
+        // 自检核对“本枚举的每个成员 == 表里的一行”，多一个少一个都失败。
+        StrategyPanUp = 40,
+        StrategyPanDown = 41,
+        ZoomIn = 42,
+        ZoomOut = 43,
+        FocusHomeCore = 44,
+        FollowSelection = 45,
+        SpeedHalf = 46,
+        SpeedNormal = 47,
+        SpeedDouble = 48,
+        SpeedTriple = 49,
+        PrimaryAction = 50,
+        SecondaryAction = 51,
+        GroupAssign1 = 52, GroupAssign2 = 53, GroupAssign3 = 54, GroupAssign4 = 55, GroupAssign5 = 56,
+        GroupAssign6 = 57, GroupAssign7 = 58, GroupAssign8 = 59, GroupAssign9 = 60,
+        OpenBuildMenu = 61,
+        Hotbar1 = 62, Hotbar2 = 63, Hotbar3 = 64, Hotbar4 = 65, Hotbar5 = 66,
+        Hotbar6 = 67, Hotbar7 = 68, Hotbar8 = 69, Hotbar9 = 70, Hotbar10 = 71,
+        Rotate = 72,
+        DemolishMode = 73,
+        Eyedropper = 74,
+        UpgradePlan = 75,
+        Copy = 76,
+        Paste = 77,
+        Undo = 78,
+        Redo = 79,
+        LayoutLibrary = 80,
+        ToggleOverlay = 81,
+        JumpHome = 82,
+        JumpPreviousMachine = 83,
+        OpenMap = 84,
+        OpenRoster = 85,
+        OpenResearch = 86,
+        OpenFirmware = 87,
+        OpenCodex = 88,
+        OpenIntel = 89,
+        ToggleNotificationCenter = 90,
+        UiConfirm = 91,
+        PinTooltip = 92,
+        QuickSave = 93,
+        QuickLoad = 94,
     }
 }

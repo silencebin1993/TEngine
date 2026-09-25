@@ -53,6 +53,99 @@ namespace GameLogic.Stage
             (_fracturedCity != null && _fracturedCity.IsActive && _fracturedCity.IsPaused) ||
             (_foundryOutpost != null && _foundryOutpost.IsActive && _foundryOutpost.IsPaused);
 
+        /// <summary>FG0-UX-01：三个区域里是否有一个正在运行（通知、暂停菜单、界面快捷键据此判断“在不在游戏世界里”）。</summary>
+        public static bool AnyRegionActive =>
+            (_homeValley != null && _homeValley.IsActive) ||
+            (_fracturedCity != null && _fracturedCity.IsActive) ||
+            (_foundryOutpost != null && _foundryOutpost.IsActive);
+
+        /// <summary>FG0-UX-01：当前运行区域的 ID（通知成员记录它；定位时与当前区域比对）。不在区域里返回空串。</summary>
+        public static string ActiveRegionId =>
+            _homeValley != null && _homeValley.IsActive ? Campaign.Regions.HomeValleyLayout.RegionId :
+            _fracturedCity != null && _fracturedCity.IsActive ? Campaign.Regions.FracturedCityLayout.RegionId :
+            _foundryOutpost != null && _foundryOutpost.IsActive ? Campaign.Regions.FoundryOutpostLayout.RegionId :
+            string.Empty;
+
+        /// <summary>FG0-UX-01：当前运行区域的镜头（通知定位用）。</summary>
+        public static View.CameraDirector ActiveCameraDirector =>
+            _homeValley != null && _homeValley.IsActive ? _homeValley.CameraDirector :
+            _fracturedCity != null && _fracturedCity.IsActive ? _fracturedCity.CameraDirector :
+            _foundryOutpost != null && _foundryOutpost.IsActive ? _foundryOutpost.CameraDirector :
+            null;
+
+        /// <summary>FG0-UX-01：把当前世界设为暂停 / 继续（暂停菜单、通知自动暂停）。与 <see cref="ToggleWorldPause"/> 同一落点。</summary>
+        public static void SetWorldPaused(bool paused)
+        {
+            if (IsWorldPaused != paused)
+            {
+                ToggleWorldPause();
+            }
+        }
+
+        /// <summary>FG0-UX-01（FGR-UX-021）：通知触发的自动暂停。只在世界正在运行时暂停并返回 true。</summary>
+        private static bool AutoPauseForNotification()
+        {
+            if (!Application.isPlaying || !AnyRegionActive || IsWorldPaused)
+            {
+                return false;
+            }
+            SetWorldPaused(true);
+            return IsWorldPaused;
+        }
+
+        /// <summary>FG0-UX-01（FGR-UX-020 定位）：镜头飞到通知位置。位置在别的区域、或没有镜头时给出原因文本键。</summary>
+        private static bool LocateForNotification(string regionId, Vector3 position, out string failureKey)
+        {
+            return LocateOn(ActiveCameraDirector, ActiveRegionId, regionId, position, out failureKey);
+        }
+
+        /// <summary>定位的真实镜头逻辑（自检用真实 <see cref="View.CameraDirector"/> 直接驱动这里）。
+        /// 接入（直控）视角：先拉回战略并把过渡终点设成通知位置——不能先设焦点再 RequestStrategy，
+        /// 后者会用当前镜头位置改写焦点，镜头停在自己机器上方。</summary>
+        public static bool LocateOn(View.CameraDirector director, string activeRegionId, string regionId, Vector3 position, out string failureKey)
+        {
+            failureKey = null;
+            if (!string.IsNullOrEmpty(regionId) && regionId != (activeRegionId ?? string.Empty))
+            {
+                failureKey = "ui.notify.other_region";
+                return false;
+            }
+            if (director == null)
+            {
+                failureKey = "ui.notify.no_camera";
+                return false;
+            }
+            var focus = new Unity.Mathematics.float2(position.x, position.z);
+            if (director.Mode == View.ViewMode.Direct)
+            {
+                director.RequestStrategy(focus);
+            }
+            else
+            {
+                director.FocusStrategyOn(focus);
+            }
+            return true;
+        }
+
+        /// <summary>FG0-UX-01（暂停菜单“保存并返回主菜单”）：存档前把当前区域的实时状态（机器位置、血量）
+        /// 写回记录——与区域 Exit 里的写回同一段代码，但不卸载区域（保存失败时玩家留在游戏里）。
+        /// 机器记录导出由 <see cref="Campaign.CampaignAutoSaveService.SaveWithExport"/> 负责。</summary>
+        public static void SyncActiveRegionForSave()
+        {
+            if (_homeValley != null && _homeValley.IsActive)
+            {
+                _homeValley.SyncLiveStateForSave();
+            }
+            if (_fracturedCity != null && _fracturedCity.IsActive)
+            {
+                _fracturedCity.SyncLiveStateForSave();
+            }
+            if (_foundryOutpost != null && _foundryOutpost.IsActive)
+            {
+                _foundryOutpost.SyncLiveStateForSave();
+            }
+        }
+
         /// <summary>HUD 暂停按钮的统一入口（不经过 InputRouter/Space，按钮点击直接调）。</summary>
         public static void ToggleWorldPause()
         {
@@ -95,6 +188,13 @@ namespace GameLogic.Stage
             Utility.Unity.AddDestroyListener(Shutdown);
 
             MountDebugHud();
+
+            // FG0-UX-01：通知中心的自动暂停 / 定位 / 区域来源接到当前运行的区域；UI 基础件（浮层、通知、按键面板、
+            // 暂停菜单）从主菜单阶段就挂上（主菜单的改键冲突确认、全部按键面板也要用）。
+            GameLogic.Notifications.NotificationCenter.AutoPauseHandler = AutoPauseForNotification;
+            GameLogic.Notifications.NotificationCenter.LocateHandler = LocateForNotification;
+            GameLogic.Notifications.NotificationCenter.RegionProvider = () => ActiveRegionId;
+            UI.Kit.UiKitRuntime.Mount();
 
             Log.Info("[GameRoot] 启动完成。已注册阶段：Cell");
         }
@@ -255,6 +355,9 @@ namespace GameLogic.Stage
         /// <see cref="CampaignSession.Clear"/>——ERD-PER-002 生命周期红线，回菜单不得残留上一局引用。</summary>
         public static void EndRun()
         {
+            // FG0-UX-01：离开世界时统一收起世界里打开的界面基础件（暂停菜单、按键面板、确认框、右键菜单、拖放、
+            // 样例页）并清空 Esc 栈——否则胜负页上按 Esc 打开的暂停菜单会带着世界暂停与模态残留盖在主菜单上。
+            UI.Kit.UiKitRuntime.CloseWorldUi();
             _homeValley?.Exit();
             _fracturedCity?.Exit(evacuateSuccess: false);
             _foundryOutpost?.Exit(evacuateSuccess: false);
@@ -307,6 +410,8 @@ namespace GameLogic.Stage
             // ER8-CONTENT-01：音量设置同步、音效预加载、字幕条过期；UI 缩放设置作用到界面。
             // 主菜单里也要跑（设置面板在那里）。
             Campaign.Feedback.FeedbackCues.Tick();
+            // FG0-UX-01：通知中心——弹出条过期、跟随战役切换重新绑定历史（主菜单里也要跑：回菜单时清空）。
+            GameLogic.Notifications.NotificationCenter.Tick();
             Settings.UiScaleApplier.Tick();
             UI.Common.ContentIcons.Tick();
 

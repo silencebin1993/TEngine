@@ -206,7 +206,7 @@ namespace GameLogic.UI.Objective
         }
 
         public static string HintText() =>
-            $"按 {GameSettings.KeyBindings.GetKey(GameActionId.ToggleMissionLog)} 查看任务日志与战役地图";
+            $"按 {InputDisplay.ForAction(GameActionId.ToggleMissionLog)} 查看任务日志与战役地图";
 
         private void OnDestroy()
         {

@@ -45,7 +45,7 @@ namespace BinGames.EditorTools
         /// </summary>
         public static string Probe(string uxmlPath, string panelRootName = null, bool stressFill = true,
             string panelSettingsPath = DefaultPanelSettingsPath, System.Action<VisualElement> prepare = null,
-            float uiScale = 1f)
+            float uiScale = 1f, Vector2Int[] resolutions = null)
         {
             var vta = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(uxmlPath);
             var sourceSettings = AssetDatabase.LoadAssetAtPath<PanelSettings>(panelSettingsPath);
@@ -56,7 +56,7 @@ namespace BinGames.EditorTools
 
             var sb = new StringBuilder();
             int totalProblems = LintFolder(uxmlPath, sb);
-            foreach (Vector2Int res in DefaultResolutions)
+            foreach (Vector2Int res in resolutions ?? DefaultResolutions)
             {
                 totalProblems += ProbeAt(vta, sourceSettings, panelRootName, stressFill, res, sb, prepare, uiScale);
             }
@@ -260,7 +260,7 @@ namespace BinGames.EditorTools
         }
 
         /// <summary><c>ValidateLayout</c> 在 BaseVisualElementPanel 上是 internal；不跑它 resolvedStyle/worldBound 都是旧值。</summary>
-        private static void ForceLayout(VisualElement element)
+        public static void ForceLayout(VisualElement element)
         {
             IPanel panel = element?.panel;
             panel?.GetType().GetMethod("ValidateLayout",

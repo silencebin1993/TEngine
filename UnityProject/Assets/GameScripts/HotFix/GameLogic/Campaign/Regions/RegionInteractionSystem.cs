@@ -156,7 +156,7 @@ namespace GameLogic.Campaign.Regions
         public string LastFailureText { get; private set; }
         public string LastSubtitle { get; private set; }
 
-        public static string InteractKeyLabel => GameSettings.KeyBindings.GetKey(GameActionId.Interact).ToString();
+        public static string InteractKeyLabel => InputDisplay.ForAction(GameActionId.Interact);
 
         public void Bind(RegionInteractContext ctx)
         {

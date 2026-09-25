@@ -40,6 +40,9 @@ namespace GameLogic.Campaign.Regions
         private GameObject _root;
         private Camera _camera;
         private CameraDirector _cameraDirector;
+
+        /// <summary>FG0-UX-01：通知“定位”要让当前区域的镜头飞到事件位置（只读访问，不改所有权）。</summary>
+        public CameraDirector CameraDirector => _cameraDirector;
         private readonly List<HomeValleyMachineMarker> _machineMarkers = new List<HomeValleyMachineMarker>(5);
         private HomeValleyMachineMarker _selected;
         private HomeValleyMachineMarker _possessed;
@@ -134,6 +137,8 @@ namespace GameLogic.Campaign.Regions
             SetupInteraction();
 
             IsActive = true;
+            // FG0-UX-01（FGR-UX-020 定位）：机器阵亡等通知按 LogicId 取机器标记的实时位置。
+            MachineRegistry.LivePositionProvider = FindMachineMarkerPosition;
             _wipeResolved = false;
 
             SaveResult saveResult = CampaignAutoSaveService.SaveAuto(SaveReason.ExpeditionDepartConfirm);
@@ -350,7 +355,33 @@ namespace GameLogic.Campaign.Regions
             Control.Unbind();
             Interact.Unbind();
             IsActive = false;
+            if (MachineRegistry.LivePositionProvider == (System.Func<int, Vector2?>)FindMachineMarkerPosition)
+            {
+                MachineRegistry.LivePositionProvider = null;
+            }
             Log.Info($"[FracturedCityController] 已退出破碎都市（evacuateSuccess={evacuateSuccess}）。");
+        }
+
+        /// <summary>FG0-UX-01：暂停菜单“保存并返回主菜单”存档前调用——只写回实时状态，不卸载区域。</summary>
+        private Vector2? FindMachineMarkerPosition(int logicId)
+        {
+            foreach (HomeValleyMachineMarker marker in _machineMarkers)
+            {
+                if (marker != null && marker.LogicId == logicId)
+                {
+                    Vector3 p = marker.transform.position;
+                    return new Vector2(p.x, p.z);
+                }
+            }
+            return null;
+        }
+
+        public void SyncLiveStateForSave()
+        {
+            if (IsActive)
+            {
+                SyncLiveStateBackToRecords();
+            }
         }
 
         private void SyncLiveStateBackToRecords()

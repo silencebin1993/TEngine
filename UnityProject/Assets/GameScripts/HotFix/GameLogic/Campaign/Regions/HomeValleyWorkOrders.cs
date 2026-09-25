@@ -1149,7 +1149,7 @@ namespace GameLogic.Campaign.Regions
             MachineRegistry.RecordJobCompleted(order.AssignedMachineLogicId); // ER4-MCH-01：统计与经历唯一写入口。
             MarkAssignmentDirty();
             // ER8-CONTENT-01：完工音按建筑区分（BuildingCatalog.SfxId 的消费点）。
-            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.BuildComplete,
+            Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.BuildComplete, building.Position,
                 Feedback.FeedbackCues.BuildingLabel(building.BuildingId) + "已修复",
                 Feedback.FeedbackCues.BuildingTypeSfx(building.BuildingTypeId));
         }
@@ -1177,7 +1177,7 @@ namespace GameLogic.Campaign.Regions
             order.State = WorkOrderState.Completed;
             MachineRegistry.RecordJobCompleted(order.AssignedMachineLogicId); // ER4-MCH-01：统计与经历唯一写入口。
             MarkAssignmentDirty();
-            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.BuildComplete,
+            Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.BuildComplete, building.Position,
                 Feedback.FeedbackCues.BuildingLabel(building.BuildingId) + "已建成",
                 Feedback.FeedbackCues.BuildingTypeSfx(building.BuildingTypeId));
         }
@@ -1333,7 +1333,7 @@ namespace GameLogic.Campaign.Regions
             MarkAssignmentDirty();
             // ER8-CONTENT-01 AC-AUD-001 失败：执行机器损失导致工单中止。
             string target = Feedback.FeedbackCues.BuildingLabel(order.TargetId);
-Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Failure,
+            Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.Failure, dropPosition,
                 (string.IsNullOrEmpty(target) ? "工单" : target + " 工单") + "中止：执行机器损失，资源已退还");
         }
 

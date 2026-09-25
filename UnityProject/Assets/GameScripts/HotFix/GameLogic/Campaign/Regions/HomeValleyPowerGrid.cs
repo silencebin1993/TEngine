@@ -92,6 +92,9 @@ namespace GameLogic.Campaign.Regions
             var brownout = new List<string>();
             List<string> newlyLost = null;
             List<string> newlyRestored = null;
+            // FG0-UX-01（FGR-UX-020 定位）：逐栋记下坐标，通知中心按楼逐条可定位（“3 处缺电”展开后每条都能点）。
+            List<UnityEngine.Vector2> lostAt = null;
+            List<UnityEngine.Vector2> restoredAt = null;
 
             foreach (BuildingRecord building in consumers)
             {
@@ -109,6 +112,7 @@ namespace GameLogic.Campaign.Regions
                     if (before == BuildingPowerState.Brownout)
                     {
                         (newlyRestored ??= new List<string>()).Add(Feedback.FeedbackCues.BuildingLabel(building.BuildingId));
+                        (restoredAt ??= new List<UnityEngine.Vector2>()).Add(building.Position);
                     }
                 }
                 else
@@ -118,6 +122,7 @@ namespace GameLogic.Campaign.Regions
                     if (before != BuildingPowerState.Brownout)
                     {
                         (newlyLost ??= new List<string>()).Add(Feedback.FeedbackCues.BuildingLabel(building.BuildingId));
+                        (lostAt ??= new List<UnityEngine.Vector2>()).Add(building.Position);
                     }
                 }
             }
@@ -126,11 +131,13 @@ namespace GameLogic.Campaign.Regions
             // 不会误报）；同一次重算里多栋楼一起停机合并成一条。
             if (newlyLost != null)
             {
-                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.PowerLost, string.Join("、", newlyLost) + " 停机");
+                Feedback.FeedbackCues.RaiseLocatedGroup(Feedback.FeedbackCueId.PowerLost, string.Join("、", newlyLost) + " 停机",
+                    newlyLost.Select(n => n + " 停机").ToList(), lostAt);
             }
             if (newlyRestored != null)
             {
-                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.PowerRestored, string.Join("、", newlyRestored));
+                Feedback.FeedbackCues.RaiseLocatedGroup(Feedback.FeedbackCueId.PowerRestored, string.Join("、", newlyRestored),
+                    newlyRestored, restoredAt);
             }
 
             state.PowerCapacity = totalSupply;

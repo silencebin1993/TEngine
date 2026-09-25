@@ -27,7 +27,8 @@ namespace GameLogic.EditorTools
     {
         private const string HudUxml = "Assets/GameRes/Raw/UI/Objective/ObjectiveHud.uxml";
         private const string LogUxml = "Assets/GameRes/Raw/UI/Objective/MissionLog.uxml";
-        private static readonly float[] UiScales = { 0.8f, 1f, 1.4f };
+        // FG0-UX-01（FGR-UX-060）：UI 缩放上限从 140% 提到 150%，极值按新上限测。
+        private static readonly float[] UiScales = { 0.8f, 1f, 1.5f };
 
         // 与 FeedbackCueSelfCheck 同一张禁用词表（唯一来源 ThemeLexicon，含 0.2 名表禁用词）与内部 ID 形态。
         private static readonly Regex ForbiddenWords = ThemeLexicon.Forbidden;
@@ -485,12 +486,12 @@ namespace GameLogic.EditorTools
 
         private static void CheckKeyBinding()
         {
+            // FG0-UX-01：默认键按 FG13 第 5 节合并为 L（J 让给“跳回上一台机器”）；冲突按上下文判定。
             KeyCode key = InputBindingSet.GetHardcodedDefault(GameActionId.ToggleMissionLog);
-            var clash = InputBindingSet.RebindableActions
-                .Where(a => a != GameActionId.ToggleMissionLog && InputBindingSet.GetHardcodedDefault(a) == key)
-                .ToList();
-            Expect(key == KeyCode.J && InputBindingSet.IsRebindable(GameActionId.ToggleMissionLog) && clash.Count == 0,
-                $"任务日志键默认 J、可在设置里重绑、默认键位不与其他动作冲突{(clash.Count == 0 ? string.Empty : "（冲突：" + string.Join(",", clash) + "）")}");
+            var clash = new List<GameActionId>();
+            InputBindingSet.CreateDefault().CollectConflicts(GameActionId.ToggleMissionLog, InputBindingSet.GetDefaultChord(GameActionId.ToggleMissionLog), clash);
+            Expect(key == KeyCode.L && InputBindingSet.IsRebindable(GameActionId.ToggleMissionLog) && clash.Count == 0,
+                $"任务日志键默认 L、可在设置里重绑、默认键位在任何上下文都不与其他动作冲突{(clash.Count == 0 ? string.Empty : "（冲突：" + string.Join(",", clash) + "）")}");
             Expect(ObjectiveHudUIToolkit.HintText().Contains(GameLogic.Settings.GameSettings.KeyBindings.GetKey(GameActionId.ToggleMissionLog).ToString()),
                 "目标条提示里的按键跟随当前键位设置");
         }

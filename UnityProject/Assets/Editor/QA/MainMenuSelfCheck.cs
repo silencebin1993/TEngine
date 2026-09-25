@@ -79,16 +79,31 @@ namespace GameLogic.EditorTools
 
                 var labels = (Dictionary<GameActionId, Text>)typeof(MainMenuUI)
                     .GetField("_rebindLabels", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(window);
+                // FG0-UX-01：主菜单设置页保留 ER2 的常用动作行（预制体里的固定行），其余全部动作在“全部按键…”打开的
+                // UI Toolkit 面板里重绑。这里逐个核对预制体里的常用行都绑上了，并且“全部按键…”按钮真实存在、有点击响应。
+                var rows = (Array)typeof(MainMenuUI).GetField("RebindRows", BindingFlags.Static | BindingFlags.NonPublic)?.GetValue(null);
                 var missing = new List<string>();
-                foreach (GameActionId action in InputBindingSet.RebindableActions)
+                int rowCount = 0;
+                if (rows != null)
                 {
-                    if (labels == null || !labels.ContainsKey(action))
+                    foreach (object row in rows)
                     {
-                        missing.Add(action.ToString());
+                        rowCount++;
+                        var action = (GameActionId)row.GetType().GetField("Item1").GetValue(row);
+                        if (labels == null || !labels.ContainsKey(action))
+                        {
+                            missing.Add(action.ToString());
+                        }
                     }
                 }
-                Expect(missing.Count == 0, "设置页每个可重绑动作都有对应的一行（预制体节点齐全）" +
+                Expect(rowCount >= 7 && missing.Count == 0, $"设置页 {rowCount} 个常用改键行都有对应的预制体节点" +
                                            (missing.Count == 0 ? string.Empty : "——缺：" + string.Join("、", missing)));
+                var allKeys = (Button)typeof(MainMenuUI).GetField("_btnAllKeyBindings", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(window);
+                Text allKeysLabel = allKeys != null ? allKeys.GetComponentInChildren<Text>(true) : null;
+                Expect(allKeys != null && allKeys.onClick.GetPersistentEventCount() == 0 && CountRuntimeListeners(allKeys) > 0
+                       && allKeysLabel != null && allKeysLabel.text == Localization.GameText.Get("ui.keybind.open_all")
+                       && allKeys.transform.parent == ((Button)typeof(MainMenuUI).GetField("_btnResetAllDefaults", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(window)).transform.parent,
+                    $"设置页有“全部按键…”按钮（文本键、与“恢复默认”同一布局组、已接点击）：{(allKeysLabel != null ? allKeysLabel.text : "无")}");
                 Expect(errors.Count == 0, "初始化过程零报错" + (errors.Count == 0 ? string.Empty : "——" + string.Join("；", errors)));
                 CheckSlotText();
             }
@@ -102,6 +117,14 @@ namespace GameLogic.EditorTools
                 UnityEngine.Object.DestroyImmediate(instance);
             }
             return _fail;
+        }
+
+        /// <summary>UnityEvent 的运行时监听数（AddListener 加的，不含预制体里序列化的）。</summary>
+        private static int CountRuntimeListeners(Button button)
+        {
+            object calls = typeof(UnityEngine.Events.UnityEventBase).GetField("m_Calls", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(button.onClick);
+            object runtime = calls?.GetType().GetField("m_RuntimeCalls", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(calls);
+            return runtime is System.Collections.ICollection c ? c.Count : 0;
         }
 
         /// <summary>存档卡/覆盖确认/失败页的玩家文字：不出现战役 ID、英文阶段枚举、UTC 时间串、区域内部 ID。</summary>

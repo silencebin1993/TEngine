@@ -7,6 +7,7 @@ using GameLogic.Campaign.Feedback;
 using GameLogic.Core;
 using GameLogic.Settings;
 using GameLogic.Stage;
+using GameLogic.UI.Kit;
 using GameLogic.UI.Objective;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -27,6 +28,12 @@ namespace GameLogic.EditorTools
     /// FG0-SAVE-01：进主菜单前预置 Demo 存档与写坏的存档 → 查“继续”原因 → 打开存档列表查两张卡的提示 → 点 Demo 卡“新建于此槽”→
     /// 确认框点“否”（文件不变）→ 点“读取备份” → 返回后再新建；收尾查自动存档是 v2 → 经唯一回菜单出口回主菜单 → 存档里放一件
     /// 已移除内容（测试表）→ 点“读取”把这份 v2 存档读进游戏 → 查迁移字幕与废料。
+    /// FG0-UX-01：主菜单设置页点“全部按键…”打开 UI Toolkit 按键面板（85 个动作）→ Esc 关闭；归还谷地里按通知中心键开 / 关
+    /// 通知中心 → 按“尚未开放”的图鉴键看到提示 → Esc 打开暂停菜单（世界暂停）→ 点“按键设置”→ 搜索框获得焦点后按快捷键不触发 →
+    /// Esc 逐层关闭按键面板、暂停菜单（世界恢复）。
+    /// FG0-UX-01 审查修复：生产面板开着按 Esc → 面板关闭、暂停菜单不开；电路板蓝图命名框打字时 Space / C 不触发，失焦后 Esc 关电路板；
+    /// 回家园后改一台机器的记录 → Esc → 暂停菜单“保存并返回主菜单”→ 确认（真实存档路径，不再走 EndRun 捷径）→ 读档核对机器记录；
+    /// 读档进游戏后核心被毁 → 失败页上按 Esc 不开暂停菜单 → 点失败页“返回主菜单”→ 暂停菜单、Esc 栈、模态都不残留。
     ///
     /// 用法：<c>bash tools/unity-play-smoke.sh</c>（影子工程里跑，编辑器开着也行）。进 Play 会重载域，
     /// 驱动状态存在 SessionState 里，[InitializeOnLoad] 重载后接着跑。
@@ -118,6 +125,17 @@ namespace GameLogic.EditorTools
                     case 12: StepRepairDone(inStep); break;
                     case 13: StepFactoryOpen(inStep); break;
                     case 14: StepFactoryClosed(inStep); break;
+                    case 15: StepFactoryEscClosed(inStep); break;
+                    case 16: StepFactoryReopened(inStep); break;
+                    case 60: StepCircuitOpened(inStep); break;
+                    case 61: StepTypingSpace(inStep); break;
+                    case 62: StepTypingReserved(inStep); break;
+                    case 63: StepCircuitEscClosed(inStep); break;
+                    case 70: StepPauseForSave(inStep); break;
+                    case 71: StepSaveConfirm(inStep); break;
+                    case 80: StepFailureShown(inStep); break;
+                    case 81: StepFailureEsc(inStep); break;
+                    case 82: StepFailureBackToMenu(inStep); break;
                     case 7: StepRuins(inStep); break;
                     case 8: StepFoundry(inStep); break;
                     case 9: StepBackHome(inStep); break;
@@ -129,6 +147,17 @@ namespace GameLogic.EditorTools
                     case 26: StepMenuAfterRun(inStep); break;
                     case 27: StepLoadSlotList(inStep); break;
                     case 28: StepLoadedIntoGame(inStep); break;
+                    case 30: StepNotifyCenterOpen(inStep); break;
+                    case 31: StepNotifyCenterClosed(inStep); break;
+                    case 32: StepReservedKeyHint(inStep); break;
+                    case 33: StepPauseMenuOpen(inStep); break;
+                    case 34: StepKeyBindingsFromPause(inStep); break;
+                    case 35: StepSearchSwallowsHotkeys(inStep); break;
+                    case 36: StepEscClosesKeyBindings(inStep); break;
+                    case 37: StepEscClosesPauseMenu(inStep); break;
+                    case 40: StepMenuSettings(inStep); break;
+                    case 41: StepMenuAllKeyBindings(inStep); break;
+                    case 42: StepMenuAllKeyBindingsClosed(inStep); break;
                 }
             }
             catch (Exception e)
@@ -278,7 +307,69 @@ namespace GameLogic.EditorTools
                 return;
             }
             back.onClick.Invoke();
-            Next(1, "返回主菜单");
+            Next(40, "返回主菜单");
+        }
+
+        // ── FG0-UX-01：主菜单的“全部按键…” ─────────────────────────────
+
+        private static void StepMenuSettings(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            Button settings = FindActiveButton("m_btn_Settings");
+            if (settings == null)
+            {
+                Finish("主菜单找不到“设置”按钮");
+                return;
+            }
+            settings.onClick.Invoke();
+            Next(41, "点“设置”");
+        }
+
+        private static void StepMenuAllKeyBindings(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            Button all = FindActiveButton("m_btn_AllKeyBindings");
+            string label = all != null ? all.GetComponentInChildren<UnityEngine.UI.Text>(true)?.text : null;
+            Check(all != null && label == Localization.GameText.Get("ui.keybind.open_all"), $"设置页有“{label}”按钮");
+            if (all == null)
+            {
+                Finish("设置页没有“全部按键…”按钮");
+                return;
+            }
+            all.onClick.Invoke();
+            Next(42, "点“全部按键…”");
+        }
+
+        private static void StepMenuAllKeyBindingsClosed(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            if (SessionState.GetInt(K + "KeysSub", 0) == 0)
+            {
+                KeyBindingsPanelUIToolkit panel = KeyBindingsPanelUIToolkit.Instance;
+                VisualElement window = panel != null && panel.Root != null ? panel.Root.Q<VisualElement>("KeyBindingsRoot") : null;
+                Check(KeyBindingsPanelUIToolkit.IsOpen && panel.VisibleRows.Count == InputActionCatalog.All.Count
+                      && window != null && window.resolvedStyle.display == DisplayStyle.Flex && window.worldBound.width > 400f,
+                    $"主菜单打开 UI Toolkit 按键面板：显示 {panel?.VisibleRows.Count} 个动作（窗口宽 {window?.worldBound.width:F0}）");
+                CheckNoTextMarkers("主菜单按键面板");
+                PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
+                SessionState.SetInt(K + "KeysSub", 1);
+                SessionState.SetFloat(K + "StepStart", (float)EditorApplication.timeSinceStartup);
+                return;
+            }
+            SessionState.SetInt(K + "KeysSub", 0);
+            Check(!KeyBindingsPanelUIToolkit.IsOpen, "按 Esc 关闭按键面板");
+            Button back = FindActiveButton("m_btn_SettingsBack");
+            back?.onClick.Invoke();
+            Next(1, "从设置页返回主菜单");
         }
 
         private static UnityEngine.UI.Text FindText(string name) =>
@@ -387,6 +478,124 @@ namespace GameLogic.EditorTools
             {
                 SessionState.SetInt(K + "Errors", SessionState.GetInt(K + "Errors", 0) + 1);
             }
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.ToggleNotificationCenter));
+            Next(30, "按通知中心键");
+        }
+
+        // ── FG0-UX-01：通知中心、尚未开放提示、暂停菜单、按键面板、搜索框吞键、Esc 逐层返回 ─────────
+
+        private static void StepNotifyCenterOpen(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            VisualElement center = NotificationHudUIToolkit.Instance?.Root?.Q<VisualElement>("NotifyCenter");
+            Check(NotificationHudUIToolkit.CenterOpen && center != null && center.resolvedStyle.display == DisplayStyle.Flex,
+                $"通知中心打开（历史 {Notifications.NotificationCenter.History.Count} 条：{string.Join("／", Notifications.NotificationCenter.History.Take(3).Select(e => e.Text))}）");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.ToggleNotificationCenter));
+            Next(31, "再按一次通知中心键");
+        }
+
+        private static void StepNotifyCenterClosed(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            Check(!NotificationHudUIToolkit.CenterOpen, "再按一次关闭通知中心");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.OpenCodex));
+            Next(32, "按图鉴键（图鉴由 FG2-FW-05 承接，尚未开放）");
+        }
+
+        private static void StepReservedKeyHint(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            var toast = Notifications.NotificationCenter.Toasts.FirstOrDefault(e => e.Type.Id == "feature_locked");
+            string shown = string.Join("／", (NotificationHudUIToolkit.Instance?.Root?.Q<VisualElement>("ToastList")?.Query<Label>().ToList()
+                ?? new System.Collections.Generic.List<Label>()).Where(l => l.resolvedStyle.display == DisplayStyle.Flex && !string.IsNullOrEmpty(l.text)).Select(l => l.text));
+            Check(toast != null && shown.Contains(Localization.GameText.Get("input.action.open_codex.name")),
+                $"按尚未开放的键给出提示，不静默：弹出条“{shown}”");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
+            Next(33, "按 Esc（没有打开的面板 → 暂停菜单）");
+        }
+
+        private static void StepPauseMenuOpen(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            Check(PauseMenuUIToolkit.IsOpen && GameRoot.IsWorldPaused && InputRouter.ActiveContext == InputContext.Interface,
+                "Esc 打开暂停菜单：世界暂停、输入切到界面上下文");
+            Check(ClickUitk("[PauseMenuHost]", "PauseKeyBindings"), "点暂停菜单“按键设置”");
+            Next(34, "点“按键设置”");
+        }
+
+        private static void StepKeyBindingsFromPause(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            Check(KeyBindingsPanelUIToolkit.IsOpen, "按键面板在暂停菜单上方打开");
+            TextField search = KeyBindingsPanelUIToolkit.Instance?.Root?.Q<TextField>("KeyBindingsSearch");
+            search?.Focus();
+            Next(35, "搜索框获得焦点");
+        }
+
+        private static void StepSearchSwallowsHotkeys(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            if (SessionState.GetInt(K + "SearchSub", 0) == 0)
+            {
+                Check(InputRouter.TextInputFocused, "搜索框获得焦点 → 快捷键整体让位（真实 FocusIn 事件）");
+                PressKey(GameSettings.KeyBindings.GetKey(GameActionId.ToggleNotificationCenter));
+                SessionState.SetInt(K + "SearchSub", 1);
+                SessionState.SetFloat(K + "StepStart", (float)EditorApplication.timeSinceStartup);
+                return;
+            }
+            SessionState.SetInt(K + "SearchSub", 0);
+            Check(!NotificationHudUIToolkit.CenterOpen, "在搜索框里按通知中心键不会打开通知中心");
+            KeyBindingsPanelUIToolkit.Instance?.Root?.Q<TextField>("KeyBindingsSearch")?.Blur();
+            Next(36, "搜索框失焦");
+        }
+
+        private static void StepEscClosesKeyBindings(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            if (SessionState.GetInt(K + "EscSub", 0) == 0)
+            {
+                Check(!InputRouter.TextInputFocused, "搜索框失焦后快捷键恢复");
+                PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
+                SessionState.SetInt(K + "EscSub", 1);
+                SessionState.SetFloat(K + "StepStart", (float)EditorApplication.timeSinceStartup);
+                return;
+            }
+            SessionState.SetInt(K + "EscSub", 0);
+            Check(!KeyBindingsPanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen, "Esc 先关最上层的按键面板，暂停菜单还在（FGR-UX-001）");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
+            Next(37, "再按 Esc");
+        }
+
+        private static void StepEscClosesPauseMenu(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            Check(!PauseMenuUIToolkit.IsOpen && !GameRoot.IsWorldPaused && InputRouter.ActiveContext != InputContext.Interface,
+                "再按 Esc 关闭暂停菜单：世界恢复运行，输入回到游戏上下文");
+            CheckNoTextMarkers("UI 基础件（通知 / 暂停菜单 / 按键面板）");
             Campaign.Regions.HomeValleyMachineMarker hauler = Object.FindObjectsByType<Campaign.Regions.HomeValleyMachineMarker>(
                     FindObjectsInactive.Exclude, FindObjectsSortMode.None)
                 .OrderBy(m => m.LogicId).FirstOrDefault();
@@ -398,6 +607,31 @@ namespace GameLogic.EditorTools
             ClickWorld(hauler.transform.position);
             SessionState.SetInt(K + "Worker", hauler.LogicId);
             Next(10, $"鼠标左键点选机器 #{hauler.LogicId}");
+        }
+
+        /// <summary>点一个 UI Toolkit 按钮：走按钮自己的 Clickable（与鼠标点击同一回调），不绕到控制器私有方法。</summary>
+        private static bool ClickUitk(string hostName, string buttonName)
+        {
+            GameObject host = GameObject.Find(hostName);
+            UIDocument doc = host != null ? host.GetComponent<UIDocument>() : null;
+            UnityEngine.UIElements.Button b = doc?.rootVisualElement?.Q<UnityEngine.UIElements.Button>(buttonName);
+            if (b == null || b.clickable == null)
+            {
+                return false;
+            }
+            System.Reflection.MethodInfo invoke = typeof(Clickable).GetMethod("Invoke",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public,
+                null, new[] { typeof(EventBase) }, null);
+            if (invoke == null)
+            {
+                return false;
+            }
+            using (ClickEvent evt = ClickEvent.GetPooled())
+            {
+                evt.target = b;
+                invoke.Invoke(b.clickable, new object[] { evt });
+            }
+            return true;
         }
 
         private static void StepClickGenerator(double inStep)
@@ -493,6 +727,33 @@ namespace GameLogic.EditorTools
                 Campaign.Regions.HomeValleyLayout.BlueprintHoverId);
             Check(!open || (hoverUnlocked ? !hint.Contains("先让解析台通电") : hint.Contains("先让解析台通电")),
                 hoverUnlocked ? "维修机已解锁：提示行不再显示解锁条件" : "维修机未解锁：提示行写明解锁条件");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
+            Next(15, "生产面板开着时按 Esc");
+        }
+
+        private static void StepFactoryEscClosed(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            Check(GameRoot.HomeValley != null && !GameRoot.HomeValley.IsFactoryPanelOpen && !PauseMenuUIToolkit.IsOpen && !GameRoot.IsWorldPaused,
+                "生产面板开着按 Esc：先关生产面板，暂停菜单没有打开（FGR-UX-001 先关最上层面板）");
+            Transform station = FindNamed("Building_" + Campaign.Regions.HomeValleyLayout.BuildingTypeAssemblyStation);
+            if (station != null)
+            {
+                ClickWorld(station.position);
+            }
+            Next(16, "再点装配站（重新打开生产面板）");
+        }
+
+        private static void StepFactoryReopened(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            Check(GameRoot.HomeValley != null && GameRoot.HomeValley.IsFactoryPanelOpen, "再点装配站重新打开生产面板");
             Transform station = FindNamed("Building_" + Campaign.Regions.HomeValleyLayout.BuildingTypeAssemblyStation);
             if (station != null)
             {
@@ -508,6 +769,73 @@ namespace GameLogic.EditorTools
                 return;
             }
             Check(GameRoot.HomeValley != null && !GameRoot.HomeValley.IsFactoryPanelOpen, "再点装配站关闭生产面板");
+            Check(ClickUitk("[HomeValleyCircuitBoardHost]", "EntryToggleButton"), "点“蓝图编辑器”入口");
+            Next(60, "打开电路板（蓝图编辑器）");
+        }
+
+        // ── FG0-UX-01 审查修复：Demo 文本框打字时快捷键让位 ─────────────────────
+
+        private static TextField CircuitNameField()
+        {
+            GameObject host = GameObject.Find("[HomeValleyCircuitBoardHost]");
+            return host != null ? host.GetComponent<UIDocument>()?.rootVisualElement?.Q<TextField>("NewBlueprintNameField") : null;
+        }
+
+        private static void StepCircuitOpened(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            Check(GameRoot.HomeValley != null && GameRoot.HomeValley.IsCircuitBoardPanelOpen, "电路板面板打开");
+            TextField field = CircuitNameField();
+            field?.Focus();
+            SessionState.SetInt(K + "NotifyBefore", Notifications.NotificationCenter.History.Count);
+            Next(61, "蓝图命名框获得焦点");
+        }
+
+        private static void StepTypingSpace(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            if (SessionState.GetInt(K + "TypeSub", 0) == 0)
+            {
+                Check(InputRouter.TextInputFocused && InputRouter.KeyboardSuppressed, "蓝图命名框拿到焦点 → 全局文本焦点探针判定在打字，快捷键整体让位");
+                PressKey(GameSettings.KeyBindings.GetKey(GameActionId.TogglePause));
+                SessionState.SetInt(K + "TypeSub", 1);
+                SessionState.SetFloat(K + "StepStart", (float)EditorApplication.timeSinceStartup);
+                return;
+            }
+            SessionState.SetInt(K + "TypeSub", 0);
+            Check(!GameRoot.IsWorldPaused, "在命名框里按 Space（暂停键）不会暂停世界");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.OpenCodex));
+            Next(62, "在命名框里按图鉴键（尚未开放的动作）");
+        }
+
+        private static void StepTypingReserved(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            int before = SessionState.GetInt(K + "NotifyBefore", 0);
+            Check(Notifications.NotificationCenter.History.Count == before && Notifications.NotificationCenter.Toasts.All(e => e.Type.Id != "feature_locked"),
+                "在命名框里按尚未开放的键不弹“后续版本开放”，也不产生任何通知");
+            CircuitNameField()?.Blur();
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
+            Next(63, "命名框失焦后按 Esc");
+        }
+
+        private static void StepCircuitEscClosed(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            Check(GameRoot.HomeValley != null && !GameRoot.HomeValley.IsCircuitBoardPanelOpen && !PauseMenuUIToolkit.IsOpen && !InputRouter.TextInputFocused,
+                "失焦后快捷键恢复；Esc 先关电路板面板，暂停菜单没有打开");
             InputRouter.DebugSetReader(null);
 
             int[] roster = HomeMachines();
@@ -598,8 +926,43 @@ namespace GameLogic.EditorTools
                 return;
             }
             SessionState.SetInt(K + "PlayedSlot", CampaignSession.ActiveSlotIndex);
-            GameRoot.EndRun();
-            Next(26, "测试捷径：调用胜利 / 失败页“返回主菜单”按钮用的唯一出口 GameRoot.EndRun()");
+            // 上次自动存档之后再改一台机器的记录（完成 3 次工作）：暂停菜单存档必须先导出机器记录，否则这 3 次会丢。
+            MachineRecord worker = MachineRegistry.AllRecords.Where(m => m != null && m.IsAlive).OrderBy(m => m.LogicId).FirstOrDefault();
+            if (worker == null)
+            {
+                Finish("归还谷地里没有存活的机器");
+                return;
+            }
+            for (int i = 0; i < 3; i++)
+            {
+                MachineRegistry.RecordJobCompleted(worker.LogicId);
+            }
+            SessionState.SetInt(K + "SavedWorker", worker.LogicId);
+            SessionState.SetInt(K + "SavedJobs", worker.JobsCompleted);
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
+            Next(70, $"机器 #{worker.DisplayNumber} 在自动存档之后又完成 3 次工作（共 {worker.JobsCompleted}）；按 Esc 打开暂停菜单");
+        }
+
+        private static void StepPauseForSave(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            Check(PauseMenuUIToolkit.IsOpen, "Esc 打开暂停菜单");
+            Check(ClickUitk("[PauseMenuHost]", "PauseSaveQuit"), "点“保存并返回主菜单”");
+            Next(71, "点“保存并返回主菜单”");
+        }
+
+        private static void StepSaveConfirm(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            Check(UiConfirmDialog.IsOpen, "弹出二次确认（写明保存到哪个槽位）");
+            Check(ClickUitk("[UiKitOverlayHost]", "ConfirmOk"), "确认框点“确认”");
+            Next(26, "确认：保存到当前槽位并经唯一回菜单出口回到主菜单");
         }
 
         private const string SmokeRemovedId = "organ_removed_smoke";
@@ -628,6 +991,12 @@ namespace GameLogic.EditorTools
                 return;
             }
             CampaignState s = onDisk.State;
+            Check(!PauseMenuUIToolkit.IsOpen && UiEscapeStack.Count == 0 && !InputRouter.ModalUiOpen,
+                "回到主菜单：暂停菜单已收起，Esc 栈与模态都没有残留");
+            int savedWorker = SessionState.GetInt(K + "SavedWorker", 0);
+            MachineRecord savedRecord = s.MachineRecords?.FirstOrDefault(m => m.LogicId == savedWorker);
+            Check(savedRecord != null && savedRecord.JobsCompleted == SessionState.GetInt(K + "SavedJobs", -1),
+                $"暂停菜单存档先导出机器记录：存档里机器 #{savedRecord?.DisplayNumber} 完成工作 {savedRecord?.JobsCompleted}（期望 {SessionState.GetInt(K + "SavedJobs", -1)}）");
             SessionState.SetInt(K + "ScrapBefore", s.Scrap);
             s.PrimitiveChips = (s.PrimitiveChips ?? Array.Empty<PrimitiveChipRecord>())
                 .Concat(new[] { new PrimitiveChipRecord { PartId = "pchip_smoke_removed", CardDefId = SmokeRemovedId, State = PrimitiveChipState.Bag } })
@@ -686,6 +1055,80 @@ namespace GameLogic.EditorTools
                 $"读档进入游戏：已移除内容转换为废料（{before}→{st?.Scrap}）");
             Check(captions.Any(c => c.Contains("静默侦察机") && c.Contains("9 废料")), "进入游戏后弹出迁移字幕");
             CheckNoTextMarkers("读档进入游戏");
+            Campaign.Regions.HomeValleySoftlockGuard.DebugDestroyCore(st);
+            Next(80, "测试捷径：核心被毁（HomeValleySoftlockGuard.DebugDestroyCore），等失败页出现");
+        }
+
+        // ── FG0-UX-01 审查修复：胜负页上的 Esc 与回主菜单收尾 ───────────────────
+
+        private static bool FailurePageShown()
+        {
+            GameObject host = GameObject.Find("[HomeValleyFailureHost]");
+            VisualElement root = host != null ? host.GetComponent<UIDocument>()?.rootVisualElement : null;
+            UnityEngine.UIElements.Button uiBack = root?.Q<UnityEngine.UIElements.Button>("BackToMenuButton");
+            return uiBack != null && IsDisplayed(uiBack);
+        }
+
+        private static bool IsDisplayed(VisualElement e)
+        {
+            for (VisualElement x = e; x != null; x = x.parent)
+            {
+                if (x.resolvedStyle.display == DisplayStyle.None)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private static void StepFailureShown(double inStep)
+        {
+            if (!FailurePageShown())
+            {
+                if (inStep > 10)
+                {
+                    Finish("核心被毁后 10 秒内没出现失败页");
+                }
+                return;
+            }
+            if (inStep < 1)
+            {
+                return;
+            }
+            Check(true, "核心被毁 → 失败页出现");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
+            Next(81, "在失败页上按 Esc");
+        }
+
+        private static void StepFailureEsc(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            Check(!PauseMenuUIToolkit.IsOpen && FailurePageShown(),
+                "失败页上按 Esc：不打开被失败页盖住的暂停菜单，失败页也不被关掉（只能用页面按钮离开）");
+            Check(ClickUitk("[HomeValleyFailureHost]", "BackToMenuButton"), "点失败页“返回主菜单”");
+            Next(82, "点失败页“返回主菜单”");
+        }
+
+        private static void StepFailureBackToMenu(double inStep)
+        {
+            Button load = FindActiveButton("m_btn_Load");
+            if (load == null)
+            {
+                if (inStep > 60)
+                {
+                    Finish("60 秒内没从失败页回到主菜单");
+                }
+                return;
+            }
+            if (inStep < 1)
+            {
+                return;
+            }
+            Check(!PauseMenuUIToolkit.IsOpen && UiEscapeStack.Count == 0 && !InputRouter.ModalUiOpen && !GameRoot.AnyRegionActive,
+                "从失败页回到主菜单：暂停菜单没有盖在主菜单上，Esc 栈与模态都没有残留");
             Finish("完成");
         }
 

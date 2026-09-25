@@ -9,6 +9,7 @@ using GameLogic.Stage;
 using TEngine;
 using UnityEngine;
 using UnityEngine.UIElements;
+using GameLogic.UI.Kit;
 
 namespace GameLogic.UI.Expedition
 {
@@ -134,6 +135,9 @@ namespace GameLogic.UI.Expedition
                 CampaignExposureLedger.SetTowerBroadcastOff(CampaignSession.Current, evt.newValue));
         }
 
+        /// <summary>FG0-UX-01（FGR-UX-001）：Esc 逐层返回——面板开着时在 Esc 栈里占一层（缓存委托，不每帧分配）。</summary>
+        private System.Action _escClose;
+
         private void Update()
         {
             if (_panel == null)
@@ -143,6 +147,7 @@ namespace GameLogic.UI.Expedition
 
             HomeValleyController hv = GameRoot.HomeValley;
             bool open = hv != null && hv.IsActive && hv.IsExpeditionPrepPanelOpen;
+            UiEscapeStack.Sync(this, open, _escClose ??= OnCloseClicked);
             _panel.style.display = open ? DisplayStyle.Flex : DisplayStyle.None;
             if (!open)
             {
@@ -301,7 +306,7 @@ namespace GameLogic.UI.Expedition
             string current = currentId != null
                 ? "当前目标：" + CampaignObjectiveCatalog.TitleOf(currentId)
                 : completed == total ? "全部目标完成" : "当前目标：无";
-            return $"{current}｜已完成 {completed}/{total}（按 {Settings.GameSettings.KeyBindings.GetKey(Core.GameActionId.ToggleMissionLog)} 看任务日志）";
+            return $"{current}｜已完成 {completed}/{total}（按 {Core.InputDisplay.ForAction(Core.GameActionId.ToggleMissionLog)} 看任务日志）";
         }
 
         private static string DescribeStatus(ExpeditionDepartureService.MachineIntel m)

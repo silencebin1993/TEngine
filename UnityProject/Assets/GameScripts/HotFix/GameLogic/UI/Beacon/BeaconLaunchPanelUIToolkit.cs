@@ -5,6 +5,7 @@ using GameLogic.Stage;
 using TEngine;
 using UnityEngine;
 using UnityEngine.UIElements;
+using GameLogic.UI.Kit;
 
 namespace GameLogic.UI.Beacon
 {
@@ -65,6 +66,9 @@ namespace GameLogic.UI.Beacon
             _closeButton.clicked += OnCloseClicked;
         }
 
+        /// <summary>FG0-UX-01（FGR-UX-001）：Esc 逐层返回——面板开着时在 Esc 栈里占一层（缓存委托，不每帧分配）。</summary>
+        private System.Action _escClose;
+
         private void Update()
         {
             if (_panel == null)
@@ -74,6 +78,7 @@ namespace GameLogic.UI.Beacon
 
             HomeValleyController hv = GameRoot.HomeValley;
             bool open = hv != null && hv.IsActive && hv.IsBeaconLaunchPanelOpen;
+            UiEscapeStack.Sync(this, open, _escClose ??= OnCloseClicked);
             _panel.RemoveFromClassList("blp-root-visible");
             if (open)
             {

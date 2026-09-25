@@ -153,6 +153,12 @@ namespace GameLogic.Campaign.Regions
         public RegionCommandKind? ArmedKind => _armedKind;
         public bool ConsumedClickThisFrame => _clickConsumedThisFrame;
 
+        /// <summary>FG0-UX-01（FGR-UX-001）：本帧的功能键（默认右键）已被“取消武装待命”用掉，
+        /// 下游（归还谷地右键取消工单）不要再读同一次右键。</summary>
+        public bool ConsumedSecondaryThisFrame => _secondaryConsumedThisFrame;
+
+        private bool _secondaryConsumedThisFrame;
+
         public void Bind(RegionSquadCommandContext context)
         {
             _ctx = context;
@@ -188,6 +194,7 @@ namespace GameLogic.Campaign.Regions
         public void Tick(bool paused, float dt)
         {
             _clickConsumedThisFrame = false;
+            _secondaryConsumedThisFrame = false;
             _cachedPaused = paused;
             if (_ctx == null)
             {
@@ -344,29 +351,26 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        // ── 编组：1～9 调组，Ctrl+1～9 保存组 ────────────────────────────
+        // ── 编组：FG0-UX-01 起按 FG13 第 5 节默认 Alt+1～9 选择、Ctrl+1～9 设定，两者都是独立的可重绑动作 ──
 
         private void HandleGroupHotkeys()
         {
-            bool ctrl = InputRouter.Reader.GetKey(KeyCode.LeftControl) || InputRouter.Reader.GetKey(KeyCode.RightControl);
             for (int slot = 1; slot <= 9; slot++)
             {
-                GameActionId action = GroupActionFor(slot);
-                if (!InputRouter.ConsumeAction(action, InputScope.Strategy))
-                {
-                    continue;
-                }
-                if (ctrl)
+                if (InputRouter.ConsumeAction(GroupAssignActionFor(slot), InputScope.Strategy))
                 {
                     AssignGroup(slot);
+                    return;
                 }
-                else
+                if (InputRouter.ConsumeAction(GroupActionFor(slot), InputScope.Strategy))
                 {
                     RecallGroup(slot);
+                    return;
                 }
-                return;
             }
         }
+
+        private static GameActionId GroupAssignActionFor(int slot) => (GameActionId)((int)GameActionId.GroupAssign1 + slot - 1);
 
         private static GameActionId GroupActionFor(int slot)
         {
@@ -419,6 +423,14 @@ namespace GameLogic.Campaign.Regions
         {
             if (_armedKind.HasValue && InputRouter.ConsumeAction(GameActionId.Cancel, InputScope.Strategy))
             {
+                CancelArm();
+                return;
+            }
+
+            // FG0-UX-01（FGR-UX-001）：“等下一次点击选目标”是一种选择模式，右键（功能动作）也能取消它。
+            if (_armedKind.HasValue && InputRouter.GetMouseButtonDown(1, InputScope.Strategy))
+            {
+                _secondaryConsumedThisFrame = true;
                 CancelArm();
                 return;
             }

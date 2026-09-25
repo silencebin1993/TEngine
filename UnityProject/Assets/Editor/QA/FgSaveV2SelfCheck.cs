@@ -138,7 +138,7 @@ namespace GameLogic.EditorTools
 
             LoadResult loaded = CampaignSaveService.Load(slot);
             Expect(loaded.Success && DomainsJson(loaded.State) == expectDomains,
-                $"16 个新状态域逐个往返一致（世界种子 / 生成器版本 / 区块差异 / 幕 / 日 / 读档通知 / 各域版本号）");
+                $"17 个新状态域逐个往返一致（世界种子 / 生成器版本 / 区块差异 / 幕 / 日 / 读档通知 / 通知历史（FG0-UX-01）/ 各域版本号）");
 
             // 登记表与 CampaignState 字段一一对应：新增域忘了登记会在这里失败。
             var domainTypes = new HashSet<Type>(typeof(CampaignFgStateDomains).Assembly.GetTypes()
@@ -147,7 +147,7 @@ namespace GameLogic.EditorTools
             string[] fields = typeof(CampaignState).GetFields(BindingFlags.Public | BindingFlags.Instance)
                 .Where(f => domainTypes.Contains(f.FieldType)).Select(f => f.Name).OrderBy(n => n).ToArray();
             string[] registered = CampaignFgStateDomains.All.Select(d => d.FieldName).OrderBy(n => n).ToArray();
-            Expect(fields.Length == 16 && fields.SequenceEqual(registered) && CampaignFgStateDomains.All.All(d => !string.IsNullOrEmpty(d.OwnerStory)),
+            Expect(fields.Length == 17 && fields.SequenceEqual(registered) && CampaignFgStateDomains.All.All(d => !string.IsNullOrEmpty(d.OwnerStory)),
                 $"CampaignState 上 {fields.Length} 个状态域全部登记且写明承接 Story（{string.Join("、", fields)}）");
 
             // 旧正文缺域（比如 v2 早期存档还没有某个域）：读档补空域，不是 null。

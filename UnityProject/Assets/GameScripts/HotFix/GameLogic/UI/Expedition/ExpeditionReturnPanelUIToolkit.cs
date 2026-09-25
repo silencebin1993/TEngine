@@ -9,6 +9,7 @@ using GameLogic.Stage;
 using TEngine;
 using UnityEngine;
 using UnityEngine.UIElements;
+using GameLogic.UI.Kit;
 
 namespace GameLogic.UI.Expedition
 {
@@ -102,6 +103,10 @@ namespace GameLogic.UI.Expedition
             _abandonButton.clicked += OnAbandonClicked;
         }
 
+        /// <summary>FG0-UX-01（FGR-UX-001）：Esc 逐层返回——面板开着时在 Esc 栈里占一层（缓存委托，不每帧分配）。</summary>
+        private System.Action _escClose;
+        private readonly object _wipeEscOwner = new object();
+
         private void Update()
         {
             if (_panel == null)
@@ -117,6 +122,10 @@ namespace GameLogic.UI.Expedition
             bool open = (fc != null && fc.IsActive && (fc.IsEvacPanelOpen || fc.IsWiped)) ||
                 (fo != null && fo.IsActive && (fo.IsEvacPanelOpen || fo.IsWiped));
             _panel.style.display = open ? DisplayStyle.Flex : DisplayStyle.None;
+            // FG0-UX-01：撤离确认可以 Esc 取消；全灭页不能 Esc 关掉，也不让 Esc 穿透去开暂停菜单。
+            bool wiped = (fc != null && fc.IsActive && fc.IsWiped) || (fo != null && fo.IsActive && fo.IsWiped);
+            UiEscapeStack.Sync(this, open && !wiped, _escClose ??= OnCancelClicked);
+            UiEscapeStack.SyncBlocking(_wipeEscOwner, open && wiped);
             if (!open)
             {
                 return;

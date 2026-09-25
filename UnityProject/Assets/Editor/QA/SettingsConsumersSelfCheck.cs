@@ -45,7 +45,8 @@ namespace GameLogic.EditorTools
             ("WorkOrder/WorkOrderPanel.uxml", "WorkOrderPanelRoot"),
         };
 
-        private static readonly float[] UiScales = { 0.8f, 1f, 1.4f };
+        // FG0-UX-01（FGR-UX-060）：UI 缩放上限从 140% 提到 150%，极值按新上限测。
+        private static readonly float[] UiScales = { 0.8f, 1f, 1.5f };
 
         private static StringBuilder _report;
         private static int _fail;

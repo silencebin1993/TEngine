@@ -25,12 +25,7 @@ namespace GameLogic.Campaign
                 return new SaveResult(SaveOutcome.NoActiveCampaign, "没有活动战役，跳过自动存档。");
             }
 
-            // ER1-ID-01：机器记录唯一由 MachineRegistry 写回 CampaignState，任何触发点存档前都过一次这里，
-            // 不需要各个 SaveAuto 调用方自己记得导出。MachineRegistry 未绑定任何 SimWorld 会话时
-            // （如战役刚新建、尚未进过战斗）内存态是空集合，导出空数组，不是错误。
-            MachineRegistry.ExportToCampaignState(CampaignSession.Current);
-
-            SaveResult result = CampaignSaveService.Save(CampaignSession.ActiveSlotIndex, CampaignSession.Current, reason);
+            SaveResult result = SaveWithExport(CampaignSession.ActiveSlotIndex, reason);
             if (result.Success)
             {
                 // ER8-CONTENT-01：本作只有自动存档（SaveReason.Manual 仍是预留），每次写盘成功给一条轻提示，
@@ -38,6 +33,22 @@ namespace GameLogic.Campaign
                 Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.SaveComplete, "自动存档");
             }
             return result;
+        }
+
+        /// <summary>存档前同步 + 写盘的唯一公共入口（自动存档与 FG0-UX-01 暂停菜单“保存并返回主菜单”共用）。
+        /// ER1-ID-01：机器记录唯一由 MachineRegistry 写回 CampaignState，任何存档前都过一次这里，
+        /// 调用方不必自己记得导出。MachineRegistry 未绑定任何 SimWorld 会话时
+        /// （如战役刚新建、尚未进过战斗）内存态是空集合，导出空数组，不是错误。
+        /// 区域里的实时状态（机器位置、血量）先由调用方经 <c>GameRoot.SyncActiveRegionForSave</c> 写回记录。</summary>
+        public static SaveResult SaveWithExport(int slotIndex, SaveReason reason)
+        {
+            CampaignState state = CampaignSession.Current;
+            if (state == null)
+            {
+                return new SaveResult(SaveOutcome.NoActiveCampaign, "没有活动战役，跳过存档。");
+            }
+            MachineRegistry.ExportToCampaignState(state);
+            return CampaignSaveService.Save(slotIndex, state, reason);
         }
     }
 }

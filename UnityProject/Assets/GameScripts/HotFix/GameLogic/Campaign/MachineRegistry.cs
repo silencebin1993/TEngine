@@ -442,6 +442,27 @@ namespace GameLogic.Campaign
 
         // ── 查询 ─────────────────────────────────────────────
 
+        /// <summary>FG0-UX-01：区域控制器进场时登记“按 LogicId 查机器标记实时位置”，离场时清掉。</summary>
+        public static System.Func<int, Vector2?> LivePositionProvider;
+
+        /// <summary>机器此刻的地面坐标（x, z）：区域机器标记 → 内核实体 → 失败。记录里的 WorldPosition 只在存档前同步，不算“实时”。</summary>
+        public static bool TryGetLivePosition(int logicId, out Vector2 position)
+        {
+            Vector2? fromRegion = LivePositionProvider?.Invoke(logicId);
+            if (fromRegion.HasValue)
+            {
+                position = fromRegion.Value;
+                return true;
+            }
+            if (_sim != null && _logicToEntity.TryGetValue(logicId, out SimEntityId entity) && _sim.TryGetPosition(entity, out Unity.Mathematics.float2 p))
+            {
+                position = new Vector2(p.x, p.y);
+                return true;
+            }
+            position = default;
+            return false;
+        }
+
         public static bool TryGetEntity(int logicId, out SimEntityId entity) =>
             _logicToEntity.TryGetValue(logicId, out entity);
 
@@ -509,6 +530,8 @@ namespace GameLogic.Campaign
                 return MachineOpResult.Ok(logicId, "已经是阵亡状态，忽略重复标记。");
             }
 
+            // FG0-UX-01（FGR-UX-020 定位）：阵亡那一刻的实时位置（区域机器标记 / 内核实体），取不到才用记录里的上次同步值。
+            Vector2 deathPosition = TryGetLivePosition(logicId, out Vector2 live) ? live : record.WorldPosition;
             record.IsAlive = false;
             record.IsDeployed = false;
             if (_logicToEntity.TryGetValue(logicId, out SimEntityId entity))
@@ -519,7 +542,7 @@ namespace GameLogic.Campaign
 
             // ER8-CONTENT-01：存活→阵亡的唯一翻转点（重复标记在上面已早退，不会重复出声）。
             // 记录里的 WorldPosition 只在存档前同步，平时可能是旧值——不按距离衰减。
-            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.MachineDestroyed, "#" + record.DisplayNumber + " 被击毁");
+            Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.MachineDestroyed, deathPosition, "#" + record.DisplayNumber + " 被击毁");
             return MachineOpResult.Ok(logicId);
         }
 

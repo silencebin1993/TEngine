@@ -13,6 +13,7 @@ using GameLogic.UI.Common;
 using TEngine;
 using UnityEngine;
 using UnityEngine.UIElements;
+using GameLogic.UI.Kit;
 
 namespace GameLogic.UI.CircuitBoard
 {
@@ -165,6 +166,8 @@ namespace GameLogic.UI.CircuitBoard
                 return;
             }
 
+            // FG0-UX-01：蓝图命名框打字时快捷键让位（全局文本焦点探针按面板判定）。
+            UiTextFocusProbe.Register(_root);
             BindElements();
             WireEvents();
             SetPanelOpen(false);
@@ -704,6 +707,9 @@ namespace GameLogic.UI.CircuitBoard
         private static string IdAt(List<string> ids, int index) =>
             index >= 0 && index < ids.Count ? ids[index] : null;
 
+        /// <summary>FG0-UX-01（FGR-UX-001）：Esc 逐层返回——面板开着时在 Esc 栈里占一层（缓存委托，不每帧分配）。</summary>
+        private System.Action _escClose;
+
         private void Update()
         {
             if (_panel == null)
@@ -716,11 +722,13 @@ namespace GameLogic.UI.CircuitBoard
             if (!regionActive)
             {
                 _panel.EnableInClassList("cb-hidden", true);
+                UiEscapeStack.Sync(this, false, null);
                 return;
             }
 
             bool open = GameRoot.HomeValley.IsCircuitBoardPanelOpen;
             _panel.EnableInClassList("cb-hidden", !open);
+            UiEscapeStack.Sync(this, open, _escClose ??= () => SetPanelOpen(false));
             if (!open)
             {
                 return;

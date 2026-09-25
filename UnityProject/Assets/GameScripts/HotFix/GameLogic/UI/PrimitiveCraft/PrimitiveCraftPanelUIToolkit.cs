@@ -10,6 +10,7 @@ using GameLogic.UI.Common;
 using TEngine;
 using UnityEngine;
 using UnityEngine.UIElements;
+using GameLogic.UI.Kit;
 
 namespace GameLogic.UI.PrimitiveCraft
 {
@@ -189,6 +190,9 @@ namespace GameLogic.UI.PrimitiveCraft
             RefreshAll();
         }
 
+        /// <summary>FG0-UX-01（FGR-UX-001）：Esc 逐层返回——面板开着时在 Esc 栈里占一层（缓存委托，不每帧分配）。</summary>
+        private System.Action _escClose;
+
         private void Update()
         {
             if (_panel == null)
@@ -201,11 +205,13 @@ namespace GameLogic.UI.PrimitiveCraft
             if (!regionActive)
             {
                 _panel.EnableInClassList("craft-hidden", true);
+                UiEscapeStack.Sync(this, false, null);
                 return;
             }
 
             bool open = GameRoot.HomeValley.IsCraftStationPanelOpen;
             _panel.EnableInClassList("craft-hidden", !open);
+            UiEscapeStack.Sync(this, open, _escClose ??= () => SetPanelOpen(false));
             if (!open)
             {
                 return;

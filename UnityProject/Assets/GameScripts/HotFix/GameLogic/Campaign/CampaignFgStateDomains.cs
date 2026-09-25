@@ -154,6 +154,51 @@ namespace GameLogic.Campaign
         public SaveNoticeRecord[] Notices = Array.Empty<SaveNoticeRecord>();
     }
 
+    /// <summary>FG0-UX-01（FGR-UX-020）：通知中心历史。按等级 / 类型筛选、点击定位都读这里；
+    /// 只存类型 ID 与细节参数，正文在显示时按当前语言用文本键拼出。条数上限见 fg.TbUiTuning notify.history_capacity。</summary>
+    [Serializable]
+    public sealed class NotificationHistoryState
+    {
+        public int DomainVersion = 1;
+        /// <summary>下一条通知的 ID（单调递增，读档后继续往后编，不会与历史撞号）。</summary>
+        public long NextId = 1;
+        /// <summary>已经转进通知历史的读档变更（<see cref="SaveNoticeRecord.NoticeId"/>），同一条不会转两次。</summary>
+        public string[] ImportedSaveNoticeIds = Array.Empty<string>();
+        public NotificationRecord[] Entries = Array.Empty<NotificationRecord>();
+    }
+
+    /// <summary>一条（可能是聚合后的）通知。</summary>
+    [Serializable]
+    public sealed class NotificationRecord
+    {
+        public long Id;
+        /// <summary>fg.TbNotifyType 的类型 ID。</summary>
+        public string TypeId;
+        /// <summary>聚合了几次（“3 座建筑缺电”的 3）。</summary>
+        public int Count = 1;
+        /// <summary>来源说明的文本键与参数（FGR-BASE-020：由哪条规则 / 哪个系统触发）。空 = 系统事件。</summary>
+        public string SourceKey = string.Empty;
+        public string SourceArg = string.Empty;
+        public NotificationMemberRecord[] Members = Array.Empty<NotificationMemberRecord>();
+    }
+
+    /// <summary>聚合里的一条成员：细节、位置、时间。</summary>
+    [Serializable]
+    public sealed class NotificationMemberRecord
+    {
+        /// <summary>细节参数（例如建筑名）。若它本身是文本键，显示时按当前语言解析。</summary>
+        public string Detail = string.Empty;
+        public bool HasLocation;
+        public string RegionId = string.Empty;
+        public float X;
+        public float Y;
+        public float Z;
+        public string CreatedAtUtc = string.Empty;
+        /// <summary>产生时的游戏日与游戏秒（统一时钟接入前为 0，界面改显示本地时间）。</summary>
+        public int GameDay;
+        public double GameSeconds;
+    }
+
     /// <summary>一条读档通知。文本不落盘，只存文本键与参数，切换语言后回看仍是当前语言。</summary>
     [Serializable]
     public sealed class SaveNoticeRecord
@@ -203,7 +248,8 @@ namespace GameLogic.Campaign
             new DomainInfo(nameof(CampaignState.SignalCore), "FG1-SIG-01（信号核）", s => s.SignalCore),
             new DomainInfo(nameof(CampaignState.LootPackets), "FG08 掉落数据包", s => s.LootPackets),
             new DomainInfo(nameof(CampaignState.Stats), "FG15 / FG16 统计", s => s.Stats),
-            new DomainInfo(nameof(CampaignState.SaveHistory), "FG0-SAVE-01（本 Story）", s => s.SaveHistory),
+            new DomainInfo(nameof(CampaignState.SaveHistory), "FG0-SAVE-01", s => s.SaveHistory),
+            new DomainInfo(nameof(CampaignState.Notifications), "FG0-UX-01（通知中心历史）", s => s.Notifications),
         };
 
         /// <summary>把缺失（null）的域补成空域。读档后与存档前都会调用；已有数据的域原样保留。</summary>
@@ -231,6 +277,18 @@ namespace GameLogic.Campaign
             s.Stats ??= new StatsState();
             s.SaveHistory ??= new SaveHistoryState();
             s.SaveHistory.Notices ??= Array.Empty<SaveNoticeRecord>();
+            s.Notifications ??= new NotificationHistoryState();
+            s.Notifications.Entries ??= Array.Empty<NotificationRecord>();
+            s.Notifications.ImportedSaveNoticeIds ??= Array.Empty<string>();
+            foreach (NotificationRecord r in s.Notifications.Entries)
+            {
+                if (r != null)
+                {
+                    r.Members ??= Array.Empty<NotificationMemberRecord>();
+                    r.SourceKey ??= string.Empty;
+                    r.SourceArg ??= string.Empty;
+                }
+            }
         }
     }
 }
