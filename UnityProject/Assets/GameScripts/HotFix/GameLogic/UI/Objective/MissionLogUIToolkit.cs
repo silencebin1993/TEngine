@@ -305,7 +305,7 @@ namespace GameLogic.UI.Objective
             }
             IEnumerable<string> names = state.RegionQuestItems
                 .Where(q => q != null && q.RegionId == regionId && q.State == RegionQuestItemState.Recovered)
-                .Select(q => q.ContentId == FoundryOutpostLayout.CoreDataContentId ? "核心数据" : Campaign.Feedback.FeedbackCues.QuestItemName(q.ContentId))
+                .Select(q => Campaign.Feedback.FeedbackCues.QuestItemName(q.ContentId))
                 .Distinct();
             return string.Join("、", names);
         }

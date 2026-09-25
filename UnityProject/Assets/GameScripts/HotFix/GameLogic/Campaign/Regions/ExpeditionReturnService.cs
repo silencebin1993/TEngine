@@ -96,11 +96,14 @@ namespace GameLogic.Campaign.Regions
         {
             public readonly string ContentId;
             public readonly RegionQuestItemState State;
+            /// <summary>玩家可见现状（与常驻目标条同一份 <see cref="CampaignObjectiveCatalog.QuestStatusText"/>）。</summary>
+            public readonly string StatusText;
 
-            public KeyTechEntry(string contentId, RegionQuestItemState state)
+            public KeyTechEntry(string contentId, RegionQuestItemState state, string statusText)
             {
                 ContentId = contentId;
                 State = state;
+                StatusText = statusText;
             }
         }
 
@@ -115,9 +118,13 @@ namespace GameLogic.Campaign.Regions
             /// <summary>ER6-REGION-01：撤离结算的目标区域 RegionId，UI 据此选择"破碎都市"/"铸造前哨
             /// 外围（侦察成功）"两套用语，不再假设永远是破碎都市。</summary>
             public readonly string RegionId;
+            /// <summary>ER8：这次是核心进攻（封锁门已开或主核心已激活）——撤离面板改用核心进攻用语，
+            /// 关键物改列核心数据（此前仍列早已带回的重炮，并提示“核心区仍封锁”）。</summary>
+            public readonly bool CoreAssault;
+            public readonly bool BossDestroyed;
 
             public ReturnSnapshot(bool available, bool isWipe, ManifestEntry[] roster, KeyTechEntry[] keyTech,
-                bool objectivesComplete, int groundScrapItemCount, string regionId)
+                bool objectivesComplete, int groundScrapItemCount, string regionId, bool coreAssault = false, bool bossDestroyed = false)
             {
                 Available = available;
                 IsWipe = isWipe;
@@ -126,10 +133,32 @@ namespace GameLogic.Campaign.Regions
                 ObjectivesComplete = objectivesComplete;
                 GroundScrapItemCount = groundScrapItemCount;
                 RegionId = regionId;
+                CoreAssault = coreAssault;
+                BossDestroyed = bossDestroyed;
             }
 
             public static readonly ReturnSnapshot Unavailable = new ReturnSnapshot(
                 false, false, Array.Empty<ManifestEntry>(), Array.Empty<KeyTechEntry>(), false, 0, null);
+        }
+
+        /// <summary>撤离面板要列的关键物（自检直接断言）：破碎都市两件（标记器/协议数据盒），铸造前哨外围一件
+        /// （重炮模块，三种可选缓存不计入"关键模块"门槛，DEMO-CONTENT-LOCK.md §4.2第3条）；核心进攻（封锁门已开
+        /// 或主核心已激活）只列核心数据——重炮早在侦察时带回。</summary>
+        public static string[] KeyContentIdsFor(CampaignState state, string regionId, out bool coreAssault, out bool bossDestroyed)
+        {
+            coreAssault = false;
+            bossDestroyed = false;
+            if (regionId != FoundryOutpostLayout.RegionId)
+            {
+                return new[] { FracturedCityLayout.MarkerModuleContentId, FracturedCityLayout.ProtocolDataboxContentId };
+            }
+            RegionRecord foundry = FoundryOutpostRegion.Find(state);
+            coreAssault = foundry != null
+                && (FoundryOutpostCoreBoss.IsInitialized(foundry) || FoundryOutpostRegion.ComputeCoreGateLights(state).AllReady);
+            bossDestroyed = coreAssault && FoundryOutpostCoreBoss.GetState(foundry) == CoreBossState.Destroyed;
+            return coreAssault
+                ? new[] { FoundryOutpostLayout.CoreDataContentId }
+                : new[] { FoundryOutpostLayout.CannonModuleContentId };
         }
 
         /// <summary>面板刷新用的整份快照——已上车（存活成员，撤离后其携带的 Carried 关键物变
@@ -151,37 +180,21 @@ namespace GameLogic.Campaign.Regions
                 .Select(m => new ManifestEntry(m.LogicId, m.DisplayNumber, m.ChassisId, m.IsAlive, m.Health, m.MaxHealth))
                 .ToArray();
 
-            // 关键技术 contentId 清单按目标区域分流——破碎都市两件（标记器/协议数据盒），铸造前哨
-            // 外围一件（重炮模块，三种可选缓存不计入"关键模块"门槛，DEMO-CONTENT-LOCK.md §4.2第3条）。
-            string[] keyContentIds = active.RegionId == FoundryOutpostLayout.RegionId
-                ? new[] { FoundryOutpostLayout.CannonModuleContentId }
-                : new[] { FracturedCityLayout.MarkerModuleContentId, FracturedCityLayout.ProtocolDataboxContentId };
-
-            KeyTechEntry[] keyTech = keyContentIds
-                .Select(contentId =>
-                {
-                    // 展示优先级 Recovered（已带回）> Carried（在手，正准备带回）> OnGround（未拾取）>
-                    // Lost（本轮丢失，恢复柜会在下次进入时补一份新实例）——不是枚举数值顺序（Lost=3
-                    // 数值最大但展示优先级最低），恢复柜可能已经为同一 contentId 生成第二条 OnGround
-                    // 记录，此时应展示"还能捡"而不是旧的"已丢失"。
-                    RegionQuestItemRecord item = state.RegionQuestItems?
-                        .Where(q => q.ContentId == contentId)
-                        .OrderBy(q => q.State == RegionQuestItemState.Recovered ? 0
-                            : q.State == RegionQuestItemState.Carried ? 1
-                            : q.State == RegionQuestItemState.OnGround ? 2
-                            : 3)
-                        .FirstOrDefault();
-                    return new KeyTechEntry(contentId, item?.State ?? RegionQuestItemState.OnGround);
-                })
-                .ToArray();
-
             RegionRecord region = active.RegionId == FoundryOutpostLayout.RegionId
                 ? FoundryOutpostRegion.Find(state)
                 : FracturedCityRegion.Find(state);
+            string[] keyContentIds = KeyContentIdsFor(state, active.RegionId, out bool coreAssault, out bool bossDestroyed);
+
+            // 同一关键物多条记录时的取舍（已带回 > 已装车 > 在地面 > 已丢失）与现状文字都走目标表的同一份实现。
+            KeyTechEntry[] keyTech = keyContentIds
+                .Select(contentId => new KeyTechEntry(contentId,
+                    CampaignObjectiveCatalog.BestQuestItem(state, contentId)?.State ?? RegionQuestItemState.OnGround,
+                    CampaignObjectiveCatalog.QuestStatusText(state, contentId)))
+                .ToArray();
             int groundScrap = state.GroundItems?.Count(g => g.RegionId == active.RegionId) ?? 0;
 
             return new ReturnSnapshot(true, active.IsWiped, roster, keyTech,
-                region != null && region.State == RegionState.Cleared, groundScrap, active.RegionId);
+                region != null && region.State == RegionState.Cleared, groundScrap, active.RegionId, coreAssault, bossDestroyed);
         }
 
         public readonly struct ReturnResult

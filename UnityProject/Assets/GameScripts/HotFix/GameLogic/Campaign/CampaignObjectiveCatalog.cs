@@ -9,28 +9,34 @@ using UnityEngine;
 namespace GameLogic.Campaign
 {
     /// <summary>目标清单里的一项：玩家可见文字 + 是否已达成（结构性读取既有权威字段）+ 这一步在归还谷地
-    /// 的哪里做（世界目标标记的落点；null＝不在某个具体位置，例如在蓝图编辑器里保存）。</summary>
+    /// 的哪里做（世界目标标记的落点；null＝不在某个具体位置，例如在蓝图编辑器里保存）+ 未完成时的现状
+    /// （UI-10：关键物“在地面/已装车/已带回”，null＝没有可补充的现状）。</summary>
     public sealed class ObjectiveItemDef
     {
         public readonly string Label;
         public readonly Func<CampaignState, bool> IsDone;
         public readonly Func<CampaignState, Vector2?> HomeLocation;
+        public readonly Func<CampaignState, string> Status;
 
-        public ObjectiveItemDef(string label, Func<CampaignState, bool> isDone, Func<CampaignState, Vector2?> homeLocation = null)
+        public ObjectiveItemDef(string label, Func<CampaignState, bool> isDone, Func<CampaignState, Vector2?> homeLocation = null,
+            Func<CampaignState, string> status = null)
         {
             Label = label;
             IsDone = isDone;
             HomeLocation = homeLocation;
+            Status = status;
         }
     }
 
-    /// <summary>OBJ-01～10 的一行定义（DEMO-CONTENT-LOCK.md §4.4）。</summary>
+    /// <summary>OBJ-01～10 的一行定义（DEMO-CONTENT-LOCK.md §4.4）。<see cref="RegionNote"/>：人在该目标区域时
+    /// 目标条额外显示的一行（可选物资进度，例如废料箱），null＝没有。</summary>
     public sealed class ObjectiveDef
     {
         public string Id;
         public string Title;
         public string RegionId;
         public ObjectiveItemDef[] Items;
+        public Func<CampaignState, string> RegionNote;
     }
 
     /// <summary>DEBT-ER6LOOP01-01 / AC-CAM-001：OBJ-01～10 的玩家可见定义——标题、所在区域、进度清单。
@@ -114,6 +120,67 @@ namespace GameLogic.Campaign
             return true;
         }
 
+        /// <summary>同一关键物可能有多条记录（丢失后恢复柜补发新实例）：按 已带回 &gt; 已装车 &gt; 在地面 &gt; 已丢失
+        /// 取最能代表现状的一条（撤离面板与目标条同一口径）；从未出现过返回 null。</summary>
+        public static RegionQuestItemRecord BestQuestItem(CampaignState state, string contentId) =>
+            state?.RegionQuestItems?
+                .Where(q => q != null && q.ContentId == contentId)
+                .OrderBy(q => q.State == RegionQuestItemState.Recovered ? 0
+                    : q.State == RegionQuestItemState.Carried ? 1
+                    : q.State == RegionQuestItemState.OnGround ? 2
+                    : 3)
+                .FirstOrDefault();
+
+        /// <summary>UI-10：关键物现状文字。“装车”不等于“带回”——只有撤离结算后才算带回。</summary>
+        public static string QuestStatusText(CampaignState state, string contentId)
+        {
+            RegionQuestItemRecord item = BestQuestItem(state, contentId);
+            if (item == null)
+            {
+                return contentId == FoundryOutpostLayout.CannonModuleContentId ? "击破步进炮后掉落"
+                    : contentId == FoundryOutpostLayout.CoreDataContentId ? "摧毁主核心后掉落"
+                    : "尚未发现";
+            }
+            switch (item.State)
+            {
+                case RegionQuestItemState.Recovered:
+                    return "已带回";
+                case RegionQuestItemState.Carried:
+                    string carrier = Feedback.FeedbackCues.MachineLabel(item.CarrierLogicId);
+                    return string.IsNullOrEmpty(carrier) ? "已装车，撤离后才算带回" : $"已装上 {carrier}，撤离后才算带回";
+                case RegionQuestItemState.Lost:
+                    return "已丢失，下次进入由恢复柜补发";
+                default:
+                    return "在地面，还没装车";
+            }
+        }
+
+        /// <summary>可选物资：废料箱开了几个、地面还剩几堆没装车（废料不影响目标完成，只影响回家后的资源）。</summary>
+        public static string CrateNote(CampaignState state, string regionId, string[] crateIds)
+        {
+            RegionRecord region = state?.RegionRecords?.FirstOrDefault(r => r != null && r.RegionId == regionId);
+            int opened = crateIds.Count(id => region?.LootedContainerIds != null && region.LootedContainerIds.Contains(id));
+            int piles = state?.GroundItems?.Count(g => g != null && g.RegionId == regionId) ?? 0;
+            return piles > 0
+                ? $"可选：废料箱已开 {opened}/{crateIds.Length}，地面还有 {piles} 堆没装车"
+                : $"可选：废料箱已开 {opened}/{crateIds.Length}";
+        }
+
+        private static readonly string[] RuinsCrates = { FracturedCityLayout.Crate1Id, FracturedCityLayout.Crate2Id, FracturedCityLayout.Crate3Id };
+        private static readonly string[] FoundryCrates = { FoundryOutpostLayout.Crate1Id, FoundryOutpostLayout.Crate2Id, FoundryOutpostLayout.Crate3Id };
+
+        private static string NodeStatus(CampaignState s)
+        {
+            RegionRecord foundry = FoundryOutpostRegion.Find(s);
+            if (foundry == null || !FoundryOutpostCoreBoss.IsInitialized(foundry))
+            {
+                return "进入核心分区后出现";
+            }
+            int destroyed = new[] { FoundryOutpostLayout.CoreNode1Id, FoundryOutpostLayout.CoreNode2Id }
+                .Count(id => FoundryOutpostRegion.FindEnemy(s, id) is RegionEnemyRecord node && !node.IsAlive);
+            return $"已摧毁 {destroyed}/2";
+        }
+
         /// <summary>玩家可见的区域名。</summary>
         public static string RegionDisplayName(string regionId)
         {
@@ -154,6 +221,8 @@ namespace GameLogic.Campaign
 
         private static bool QuestRecovered(CampaignState s, string contentId) =>
             s.RegionQuestItems != null && s.RegionQuestItems.Any(q => q.ContentId == contentId && q.State == RegionQuestItemState.Recovered);
+
+        private static Func<CampaignState, string> QuestStatus(string contentId) => s => QuestStatusText(s, contentId);
 
         private static bool EventGranted(CampaignState s, string eventId) =>
             s.EventLedger != null && s.EventLedger.Any(e => e.EventId == eventId);
@@ -251,9 +320,12 @@ namespace GameLogic.Campaign
                     Items = new[]
                     {
                         new ObjectiveItemDef("从信号塔出发前往破碎都市", s => Departures(s, ruins) > 0),
-                        new ObjectiveItemDef($"带着{marker}撤离回家", s => QuestRecovered(s, FracturedCityLayout.MarkerModuleContentId)),
-                        new ObjectiveItemDef($"带着{databox}撤离回家", s => QuestRecovered(s, FracturedCityLayout.ProtocolDataboxContentId)),
+                        new ObjectiveItemDef($"带着{marker}撤离回家", s => QuestRecovered(s, FracturedCityLayout.MarkerModuleContentId),
+                            status: QuestStatus(FracturedCityLayout.MarkerModuleContentId)),
+                        new ObjectiveItemDef($"带着{databox}撤离回家", s => QuestRecovered(s, FracturedCityLayout.ProtocolDataboxContentId),
+                            status: QuestStatus(FracturedCityLayout.ProtocolDataboxContentId)),
                     },
+                    RegionNote = s => CrateNote(s, ruins, RuinsCrates),
                 },
                 new ObjectiveDef
                 {
@@ -276,8 +348,10 @@ namespace GameLogic.Campaign
                     {
                         new ObjectiveItemDef("出发前往铸造前哨外围", s => Departures(s, foundry) > 0),
                         new ObjectiveItemDef($"带着{cannon}撤离回家",
-                            s => FoundryOutpostRegion.Find(s)?.State == RegionState.Cleared),
+                            s => FoundryOutpostRegion.Find(s)?.State == RegionState.Cleared,
+                            status: QuestStatus(FoundryOutpostLayout.CannonModuleContentId)),
                     },
+                    RegionNote = s => CrateNote(s, foundry, FoundryCrates),
                 },
                 new ObjectiveDef
                 {
@@ -296,9 +370,10 @@ namespace GameLogic.Campaign
                     Id = CampaignObjectiveTracker.Obj09, Title = "摧毁主核心并回收数据", RegionId = foundry,
                     Items = new[]
                     {
-                        new ObjectiveItemDef("摧毁两个供能节点", s => BossState(s) >= CoreBossState.Phase1),
+                        new ObjectiveItemDef("摧毁两个供能节点", s => BossState(s) >= CoreBossState.Phase1, status: NodeStatus),
                         new ObjectiveItemDef("摧毁铸造前哨主核心", s => BossState(s) == CoreBossState.Destroyed),
-                        new ObjectiveItemDef("带着核心数据撤离回家", s => QuestRecovered(s, FoundryOutpostLayout.CoreDataContentId)),
+                        new ObjectiveItemDef("带着核心数据撤离回家", s => QuestRecovered(s, FoundryOutpostLayout.CoreDataContentId),
+                            status: QuestStatus(FoundryOutpostLayout.CoreDataContentId)),
                     },
                 },
                 new ObjectiveDef

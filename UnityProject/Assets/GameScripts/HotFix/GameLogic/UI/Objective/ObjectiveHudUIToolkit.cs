@@ -21,6 +21,14 @@ namespace GameLogic.UI.Objective
         public int ItemCount;
         public readonly string[] ItemLabels = new string[ItemSlots];
         public readonly bool[] ItemDone = new bool[ItemSlots];
+        /// <summary>未完成项的现状（UI-10“在地面/已装车/已带回”），null＝没有。</summary>
+        public readonly string[] ItemStatus = new string[ItemSlots];
+        /// <summary>人在该目标区域时的附加一行（可选物资进度），空串＝不显示。</summary>
+        public string Note = string.Empty;
+
+        /// <summary>一行清单的完整显示文字。</summary>
+        public string ItemText(int index) =>
+            string.IsNullOrEmpty(ItemStatus[index]) ? ItemLabels[index] : ItemLabels[index] + "：" + ItemStatus[index];
     }
 
     /// <summary>ER8 收尾（DEBT-ER6LOOP01-01 / AC-CAM-001 / ERD-UI-002）：常驻“当前目标”条。
@@ -38,6 +46,7 @@ namespace GameLogic.UI.Objective
         private Label _title;
         private Label _region;
         private Label _hint;
+        private Label _note;
         private readonly VisualElement[] _items = new VisualElement[ObjectiveHudView.ItemSlots];
         private readonly Label[] _marks = new Label[ObjectiveHudView.ItemSlots];
         private readonly Label[] _texts = new Label[ObjectiveHudView.ItemSlots];
@@ -75,6 +84,7 @@ namespace GameLogic.UI.Objective
             _title = root.Q<Label>("ObjectiveTitle");
             _region = root.Q<Label>("ObjectiveRegion");
             _hint = root.Q<Label>("ObjectiveHint");
+            _note = root.Q<Label>("ObjectiveNote");
             for (int i = 0; i < ObjectiveHudView.ItemSlots; i++)
             {
                 _items[i] = root.Q<VisualElement>("ObjectiveItem" + i);
@@ -131,8 +141,10 @@ namespace GameLogic.UI.Objective
                 }
                 _items[i].EnableInClassList("obj-item-done", _view.ItemDone[i]);
                 _marks[i].text = _view.ItemDone[i] ? "√" : "○";
-                _texts[i].text = _view.ItemLabels[i];
+                _texts[i].text = _view.ItemText(i);
             }
+            _note.text = _view.Note;
+            _note.EnableInClassList("obj-item-hidden", string.IsNullOrEmpty(_view.Note));
             _hint.text = HintText();
         }
 
@@ -144,6 +156,7 @@ namespace GameLogic.UI.Objective
             view.ItemCount = 0;
             view.Title = string.Empty;
             view.Region = string.Empty;
+            view.Note = string.Empty;
             if (state == null)
             {
                 return;
@@ -172,6 +185,7 @@ namespace GameLogic.UI.Objective
             {
                 view.ItemLabels[i] = def.Items[i].Label;
                 view.ItemDone[i] = def.Items[i].IsDone(state);
+                view.ItemStatus[i] = view.ItemDone[i] ? null : def.Items[i].Status?.Invoke(state);
                 if (view.ItemDone[i])
                 {
                     done++;
@@ -182,6 +196,10 @@ namespace GameLogic.UI.Objective
             view.Title = $"目标 {index + 1}/{CampaignObjectiveCatalog.All.Length}：{def.Title}";
             string where = CampaignObjectiveCatalog.RegionDisplayName(def.RegionId);
             string here = state.CurrentRegionId;
+            if (here == def.RegionId && def.RegionNote != null)
+            {
+                view.Note = def.RegionNote(state) ?? string.Empty;
+            }
             view.Region = !string.IsNullOrEmpty(here) && here != def.RegionId
                 ? $"地点：{where}（你现在在{CampaignObjectiveCatalog.RegionDisplayName(here)}）｜进度 {done}/{def.Items.Length}"
                 : $"地点：{where}｜进度 {done}/{def.Items.Length}";

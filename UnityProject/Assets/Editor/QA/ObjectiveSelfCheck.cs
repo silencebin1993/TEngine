@@ -9,6 +9,7 @@ using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Feedback;
 using GameLogic.Campaign.Regions;
 using GameLogic.Core;
+using GameLogic.UI.Expedition;
 using GameLogic.UI.Objective;
 using UnityEditor;
 using UnityEngine;
@@ -65,6 +66,7 @@ namespace GameLogic.EditorTools
                 CheckSkippedStepSuperseded();
                 CheckOldSaveSuperseded();
                 CheckHudAndLogText();
+                CheckExpeditionStatus();
                 CheckKeyBinding();
                 CheckPanelLayout();
             }
@@ -356,14 +358,109 @@ namespace GameLogic.EditorTools
             Expect(leaks.Count == 0, "目标条/日志/地图合成的全部文字无内部 ID、无禁用词" + (leaks.Count == 0 ? string.Empty : "：" + string.Join("；", leaks)));
         }
 
+        // ── 远征中的目标现状（UI-10）与核心进攻撤离用语 ─────────────────────────
+
+        private static void CheckExpeditionStatus()
+        {
+            MachineRegistry.ResetForNewCampaign();
+            FeedbackCues.ResetForTests();
+            CampaignState state = NewHomeState("objective-selfcheck-expedition", 15);
+            string marker = FracturedCityLayout.MarkerModuleContentId;
+            string databox = FracturedCityLayout.ProtocolDataboxContentId;
+
+            Expect(CampaignObjectiveCatalog.QuestStatusText(state, marker) == "尚未发现"
+                   && CampaignObjectiveCatalog.QuestStatusText(state, FoundryOutpostLayout.CannonModuleContentId) == "击破步进炮后掉落"
+                   && CampaignObjectiveCatalog.QuestStatusText(state, FoundryOutpostLayout.CoreDataContentId) == "摧毁主核心后掉落",
+                "还没出现的关键物：写明怎么获得（重炮/核心数据写掉落条件）");
+
+            AddQuest(state, FracturedCityLayout.RegionId, marker, RegionQuestItemState.OnGround);
+            Expect(CampaignObjectiveCatalog.QuestStatusText(state, marker) == "在地面，还没装车", "关键物在地面 → “在地面，还没装车”");
+
+            int carrier = MachineRegistry.SpawnMachine(HomeValleyLayout.Erc003ChassisId, HomeValleyLayout.BlueprintErc003Id,
+                FracturedCityLayout.RegionId, Vector2.zero, 120f, 120f).LogicId;
+            MachineRegistry.TryGetRecord(carrier, out MachineRecord carrierRecord);
+            state.RegionQuestItems.First(q => q.ContentId == marker).State = RegionQuestItemState.Carried;
+            state.RegionQuestItems.First(q => q.ContentId == marker).CarrierLogicId = carrier;
+            string carried = CampaignObjectiveCatalog.QuestStatusText(state, marker);
+            Expect(carried == $"已装上 #{carrierRecord.DisplayNumber}，撤离后才算带回",
+                $"装车不等于带回：写明装在哪台、撤离后才算（实际“{carried}”）");
+
+            state.RegionQuestItems = state.RegionQuestItems.Append(new RegionQuestItemRecord
+            {
+                SalvageInstanceId = "selfcheck:databox-lost", RegionId = FracturedCityLayout.RegionId, ContentId = databox, State = RegionQuestItemState.Lost,
+            }).Append(new RegionQuestItemRecord
+            {
+                SalvageInstanceId = "selfcheck:databox-respawn", RegionId = FracturedCityLayout.RegionId, ContentId = databox, State = RegionQuestItemState.OnGround,
+            }).ToArray();
+            Expect(CampaignObjectiveCatalog.QuestStatusText(state, databox) == "在地面，还没装车",
+                "丢失后恢复柜补发了新实例 → 显示“还能捡”，不显示旧的“已丢失”");
+
+            // 人在破碎都市：目标条逐项写现状 + 可选废料箱进度。
+            SetBuilding(state, HomeValleyLayout.BuildingTypeGenerator, BuildingConstructionState.Operational, BuildingPowerState.NotApplicable);
+            EnsureRegion(state, FracturedCityLayout.RegionId, RegionState.Active).ExpeditionCount = 1;
+            RegionRecord ruins = state.RegionRecords.First(r => r.RegionId == FracturedCityLayout.RegionId);
+            ruins.LootedContainerIds = new[] { FracturedCityLayout.Crate1Id };
+            state.GroundItems = new[]
+            {
+                new GroundItemRecord { GroundItemId = "selfcheck:pile", RegionId = FracturedCityLayout.RegionId, ResourceType = "Scrap", Amount = 40 },
+            };
+            state.CurrentRegionId = FracturedCityLayout.RegionId;
+            CampaignObjectiveTracker.OnDeparted(state, ExpeditionDepartureService.ExpeditionTarget.SilentRuins);
+            var view = new ObjectiveHudView();
+            ObjectiveHudUIToolkit.Compose(state, view);
+            Expect(CampaignObjectiveTracker.CurrentObjectiveId(state) == CampaignObjectiveTracker.Obj05 && view.ItemCount == 3
+                   && view.ItemText(0) == "从信号塔出发前往破碎都市"
+                   && view.ItemText(1).EndsWith("：" + carried, StringComparison.Ordinal)
+                   && view.ItemText(2).EndsWith("：在地面，还没装车", StringComparison.Ordinal),
+                $"远征目标栏：已完成项不加注，关键物逐项写现状（实际“{view.ItemText(1)}”“{view.ItemText(2)}”）");
+            Expect(view.Note == "可选：废料箱已开 1/3，地面还有 1 堆没装车", $"远征目标栏：可选废料箱进度（实际“{view.Note}”）");
+            state.CurrentRegionId = HomeValleyLayout.RegionId;
+            ObjectiveHudUIToolkit.Compose(state, view);
+            Expect(view.Note == string.Empty, "人不在该区域时不显示废料箱进度");
+
+            // 核心进攻：节点进度、撤离面板列核心数据、撤离用语。
+            FoundryOutpostRegion.EnsureRegionRecordSeeded(state);
+            RegionRecord foundry = FoundryOutpostRegion.Find(state);
+            string[] scoutKeys = ExpeditionReturnService.KeyContentIdsFor(state, FoundryOutpostLayout.RegionId, out bool scoutAssault, out _);
+            Expect(!scoutAssault && scoutKeys.Length == 1 && scoutKeys[0] == FoundryOutpostLayout.CannonModuleContentId,
+                "外围侦察撤离：关键物列重炮");
+
+            foundry.State = RegionState.Cleared;
+            FoundryOutpostCoreBoss.EnsureInitialized(state, foundry);
+            ObjectiveDef obj09 = CampaignObjectiveCatalog.Get(CampaignObjectiveTracker.Obj09);
+            string nodes = obj09.Items[0].Status(state);
+            FoundryOutpostRegion.FindEnemy(state, FoundryOutpostLayout.CoreNode1Id).IsAlive = false;
+            string oneNode = obj09.Items[0].Status(state);
+            Expect(nodes == "已摧毁 0/2" && oneNode == "已摧毁 1/2", $"核心进攻：供能节点进度（实际“{nodes}”→“{oneNode}”）");
+
+            string[] coreKeys = ExpeditionReturnService.KeyContentIdsFor(state, FoundryOutpostLayout.RegionId, out bool assault, out bool destroyed);
+            Expect(assault && !destroyed && coreKeys.Length == 1 && coreKeys[0] == FoundryOutpostLayout.CoreDataContentId,
+                "核心进攻撤离：关键物改列核心数据（此前仍列早已带回的重炮）");
+
+            string alive = ExpeditionReturnPanelUIToolkit.DescribeCoreAssault(Snapshot(false, false, RegionQuestItemState.OnGround));
+            string wipe = ExpeditionReturnPanelUIToolkit.DescribeCoreAssault(Snapshot(true, false, RegionQuestItemState.OnGround));
+            string noData = ExpeditionReturnPanelUIToolkit.DescribeCoreAssault(Snapshot(false, true, RegionQuestItemState.OnGround));
+            string aboard = ExpeditionReturnPanelUIToolkit.DescribeCoreAssault(Snapshot(false, true, RegionQuestItemState.Carried));
+            Expect(alive.Contains("本次核心进攻作废") && wipe.Contains("全灭") && noData.Contains("先装车再撤离") && aboard.Contains("返航信标")
+                   && !(alive + wipe + noData + aboard).Contains("侦察"),
+                $"核心进攻撤离用语四种情况各不相同，且不再说“侦察成功/核心区仍封锁”（实际“{aboard}”）");
+            Expect(FeedbackCues.QuestItemName(FoundryOutpostLayout.CoreDataContentId) == "核心数据", "核心数据有玩家可见名（拾取字幕、撤离面板）");
+        }
+
+        private static ExpeditionReturnService.ReturnSnapshot Snapshot(bool wipe, bool bossDestroyed, RegionQuestItemState dataState) =>
+            new ExpeditionReturnService.ReturnSnapshot(true, wipe, null,
+                new[] { new ExpeditionReturnService.KeyTechEntry(FoundryOutpostLayout.CoreDataContentId, dataState, "selfcheck") },
+                true, 0, FoundryOutpostLayout.RegionId, coreAssault: true, bossDestroyed: bossDestroyed);
+
         private static IEnumerable<string> AllComposedText(CampaignState state, ObjectiveHudView view)
         {
             ObjectiveHudUIToolkit.Compose(state, view);
             yield return view.Title;
             yield return view.Region;
+            yield return view.Note;
             for (int i = 0; i < view.ItemCount; i++)
             {
-                yield return view.ItemLabels[i];
+                yield return view.ItemText(i);
             }
             for (int i = 0; i < CampaignObjectiveCatalog.All.Length; i++)
             {
@@ -413,8 +510,10 @@ namespace GameLogic.EditorTools
                 {
                     root.Q<VisualElement>("ObjectiveItem" + i)?.RemoveFromClassList("obj-item-hidden");
                     SetLabel(root, "ObjectiveItemMark" + i, "○");
-                    SetLabel(root, "ObjectiveItemText" + i, longestItems[i % longestItems.Length]);
+                    SetLabel(root, "ObjectiveItemText" + i, longestItems[i % longestItems.Length] + "：已丢失，下次进入由恢复柜补发");
                 }
+                root.Q<Label>("ObjectiveNote")?.RemoveFromClassList("obj-item-hidden");
+                SetLabel(root, "ObjectiveNote", "可选：废料箱已开 3/3，地面还有 12 堆没装车");
                 SetLabel(root, "ObjectiveHint", "按 LeftBracket 查看任务日志与战役地图");
             }
 

@@ -135,6 +135,11 @@ namespace GameLogic.Campaign.Feedback
         /// <summary>关键物展示名（解析产出表里登记的名字）；查不到回退“关键物”。</summary>
         public static string QuestItemName(string contentId)
         {
+            // 核心数据盒不进解析表（Boss 掉落、带回即启用信标配方），单独给名字，不回退成笼统的“关键物”。
+            if (contentId == Regions.FoundryOutpostLayout.CoreDataContentId)
+            {
+                return "核心数据";
+            }
             return !string.IsNullOrEmpty(contentId)
                    && Regions.HomeValleyAnalysis.YieldTable.TryGetValue(contentId, out Regions.HomeValleyAnalysis.YieldInfo info)
                    && !string.IsNullOrEmpty(info.DisplayName)

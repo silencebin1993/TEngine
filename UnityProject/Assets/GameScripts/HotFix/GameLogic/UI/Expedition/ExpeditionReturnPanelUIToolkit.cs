@@ -153,14 +153,18 @@ namespace GameLogic.UI.Expedition
             int deadCount = snapshot.Roster.Length - aliveCount;
 
             string keyTechText = string.Join("；", snapshot.KeyTech.Select(k =>
-                $"{DisplayNameFor(k.ContentId)}：{DescribeQuestState(k.State)}"));
+                $"{Campaign.Feedback.FeedbackCues.QuestItemName(k.ContentId)}：{k.StatusText}"));
             _keyTechLabel.text = "关键技术：" + keyTechText;
 
             // ER6-REGION-01（DEMO-CONTENT-LOCK.md §4.2第4条）："允许不打Boss就撤离，且结算文本称为
             // 成功侦察而非失败逃跑"——铸造前哨外围撤离不管重炮是否带回都不该读作"未完成/失败"；只有
             // 破碎都市沿用旧有"待补回收"用语（该区域是双关键物任务，语义不同）。
             bool isFoundry = snapshot.RegionId == FoundryOutpostLayout.RegionId;
-            if (isFoundry)
+            if (snapshot.CoreAssault)
+            {
+                _objectiveLabel.text = DescribeCoreAssault(snapshot);
+            }
+            else if (isFoundry)
             {
                 _objectiveLabel.text = snapshot.IsWipe
                     ? "任务目标：侦察未能完成（外围全灭，可再次侦察，一次性废料/缓存已领取部分不会重刷）"
@@ -205,23 +209,25 @@ namespace GameLogic.UI.Expedition
                 : $"幸存 {aliveCount} 台，阵亡 {deadCount} 台。确认撤离后，幸存机器携带的关键物视为已带回，未装车的物资留在原地。";
         }
 
-        /// <summary>ER6-REGION-01：改查 <see cref="HomeValleyAnalysis.YieldTable"/> 统一权威展示名
-        /// （已覆盖破碎都市两件+铸造前哨外围四件），不再各区域各写一份硬编码映射，查不到才回退原始 id。</summary>
-        private static string DisplayNameFor(string contentId) =>
-            HomeValleyAnalysis.YieldTable.TryGetValue(contentId, out HomeValleyAnalysis.YieldInfo info)
-                ? info.DisplayName
-                : contentId;
-
-        private static string DescribeQuestState(RegionQuestItemState state)
+        /// <summary>ER8：核心进攻的撤离用语（此前沿用外围侦察的“侦察成功……核心区仍封锁”）。主核心没打完就撤离，
+        /// 本次尝试作废（ER7-FAIL-01 <c>ResetToPreBossState</c>）；打完但核心数据没装车，要先装车。</summary>
+        public static string DescribeCoreAssault(ExpeditionReturnService.ReturnSnapshot snapshot)
         {
-            switch (state)
+            bool dataAboard = snapshot.KeyTech.Any(k => k.ContentId == FoundryOutpostLayout.CoreDataContentId
+                && (k.State == RegionQuestItemState.Carried || k.State == RegionQuestItemState.Recovered));
+            if (snapshot.IsWipe)
             {
-                case RegionQuestItemState.Recovered: return "已带回";
-                case RegionQuestItemState.Carried: return "已装车（撤离后带回）";
-                case RegionQuestItemState.OnGround: return "尚未拾取";
-                case RegionQuestItemState.Lost: return "已丢失（下次进入由恢复柜补发）";
-                default: return "未知";
+                return snapshot.BossDestroyed
+                    ? "任务目标：主核心已摧毁，但远征队全灭，核心数据没能带回"
+                    : "任务目标：核心进攻失败（远征队全灭）——主核心与供能节点恢复原状，整备后再次进攻";
             }
+            if (!snapshot.BossDestroyed)
+            {
+                return "任务目标：主核心未摧毁——现在撤离，本次核心进攻作废，下次重新开始";
+            }
+            return dataAboard
+                ? "任务目标：主核心已摧毁，核心数据已装车——撤离后回家建造并启动返航信标"
+                : "任务目标：主核心已摧毁，但核心数据还没装车——先装车再撤离";
         }
 
         private void OnConfirmClicked()
