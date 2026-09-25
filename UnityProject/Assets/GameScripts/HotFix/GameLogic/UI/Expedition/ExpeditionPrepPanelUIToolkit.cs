@@ -415,6 +415,8 @@ namespace GameLogic.UI.Expedition
                     _pendingInterruptLogicIds = System.Array.Empty<int>();
                     _reasonsLabel.text = "无法出发：" + string.Join("；", result.Reasons.Select(DescribeReason));
                     _reasonsLabel.AddToClassList("exp-reasons-visible");
+                    // ER8-CONTENT-01 AC-AUD-001 拒绝：面板内原因之外，再给声音与字幕条。
+                    Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.Denied, _reasonsLabel.text);
                     break;
             }
             _refreshTimer = 0f;

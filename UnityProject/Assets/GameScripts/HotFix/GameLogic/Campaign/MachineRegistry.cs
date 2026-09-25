@@ -517,6 +517,9 @@ namespace GameLogic.Campaign
                 _logicToEntity.Remove(logicId);
             }
 
+            // ER8-CONTENT-01：存活→阵亡的唯一翻转点（重复标记在上面已早退，不会重复出声）。
+            // 记录里的 WorldPosition 只在存档前同步，平时可能是旧值——不按距离衰减。
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.MachineDestroyed, "#" + record.DisplayNumber + " 被击毁");
             return MachineOpResult.Ok(logicId);
         }
 
@@ -546,6 +549,9 @@ namespace GameLogic.Campaign
             {
                 return MarkDeadByLogicId(logicId);
             }
+            // ER8-CONTENT-01：受损音按时刻节流（每台机器被连续攻击也不会刷屏）；字幕仅在“字幕”开启时出。
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.MachineDamaged,
+                $"#{record.DisplayNumber} 耐久 {record.Health:F0}/{record.MaxHealth:F0}");
             return MachineOpResult.Ok(logicId, $"机器 {logicId} 受到 {damage:F1} 点伤害，剩余 {record.Health:F1}/{record.MaxHealth:F0}。");
         }
 

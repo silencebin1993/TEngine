@@ -300,6 +300,8 @@ namespace GameLogic.Campaign.Regions
             FracturedCityRegion.ResolveExtraction(state, Array.Empty<int>());
             _wipeResolved = true;
             Log.Info("[FracturedCityController] 全灭：区域内所有机器阵亡，已结算携带中的关键物为 Lost。");
+            // ER8-CONTENT-01 AC-AUD-001 失败：全灭结算的唯一一次性边沿（_wipeResolved）。
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.ExpeditionWiped, "携带中的关键物已遗失");
         }
 
         /// <summary>撤离结算：把当前存活于本区域的机器货物按 Recovered 处理并送回归还谷地。

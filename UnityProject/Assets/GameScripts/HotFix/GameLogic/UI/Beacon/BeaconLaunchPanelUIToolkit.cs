@@ -129,8 +129,22 @@ namespace GameLogic.UI.Beacon
             if (!result.Success)
             {
                 Log.Warning($"[BeaconLaunchPanelUIToolkit] 启动失败：{result.FailureReason}");
+                // ER8-CONTENT-01 AC-AUD-001 拒绝：此前只写日志，玩家点了没反应。原因码翻成玩家可读文字。
+                Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.Denied, LaunchFailureText(result.FailureReason));
             }
             _refreshTimer = 0f;
+        }
+
+        private static string LaunchFailureText(string reason)
+        {
+            switch (reason)
+            {
+                case "already-launched": return "信标已经启动过。";
+                case "already-launching": return "信标正在发射演出中。";
+                case "not-unlocked": return "信标尚未解锁：需要先摧毁主核心并带回核心数据。";
+                case "not-operational-or-powered": return "信标未完工或未通电，先解决供电缺口。";
+                default: return "信标暂时无法启动。";
+            }
         }
 
         private void OnCloseClicked()

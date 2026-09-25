@@ -652,6 +652,8 @@ namespace GameLogic.Campaign.Regions
                 }
 
                 InputRouter.SetModalUi(false);
+                // ER8-CONTENT-01：出发事务提交成功的唯一出口。
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.ExpeditionDepart, $"{selectedLogicIds.Count} 台机器");
                 return new DepartureResult(DepartureOutcome.Success, null, null);
             }
             catch (Exception e)

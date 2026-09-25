@@ -182,6 +182,9 @@ namespace GameLogic.Campaign.Regions
             {
                 SpawnGroundItem(state, ticket.RegionId ?? HomeValleyLayout.RegionId, ticket.SourcePosition,
                     ticket.ResourceType, ticket.Amount, ticket.SalvageInstanceId);
+                // ER8-CONTENT-01 AC-AUD-001 仓满：货物已原样放回地面，提示玩家腾仓后可再搬。
+                Feedback.FeedbackCues.RaiseAt(Feedback.FeedbackCueId.StorageFull, ticket.SourcePosition,
+                    $"{CampaignEconomyLedger.ResourceDisplayName(ticket.ResourceType)} ×{ticket.Amount} 放回地面，腾出仓位后可再次搬运");
                 return StoreResult.Fail($"storage-full:need={ticket.Amount}:have={available}");
             }
 

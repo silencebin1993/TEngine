@@ -90,11 +90,14 @@ namespace GameLogic.Campaign.Regions
             float totalDemand = 0f;
             bool signalTowerPowered = false;
             var brownout = new List<string>();
+            List<string> newlyLost = null;
+            List<string> newlyRestored = null;
 
             foreach (BuildingRecord building in consumers)
             {
                 float need = HomeValleyLayout.PowerProfile[building.BuildingTypeId].PowerDemand;
                 totalDemand += need;
+                BuildingPowerState before = building.PowerState;
                 if (remaining >= need)
                 {
                     building.PowerState = BuildingPowerState.Powered;
@@ -103,12 +106,31 @@ namespace GameLogic.Campaign.Regions
                     {
                         signalTowerPowered = true;
                     }
+                    if (before == BuildingPowerState.Brownout)
+                    {
+                        (newlyRestored ??= new List<string>()).Add(Feedback.FeedbackCues.BuildingLabel(building.BuildingId));
+                    }
                 }
                 else
                 {
                     building.PowerState = BuildingPowerState.Brownout;
                     brownout.Add(building.BuildingId);
+                    if (before != BuildingPowerState.Brownout)
+                    {
+                        (newlyLost ??= new List<string>()).Add(Feedback.FeedbackCues.BuildingLabel(building.BuildingId));
+                    }
                 }
+            }
+
+            // ER8-CONTENT-01 AC-AUD-001 断电：只在状态真正翻转的那次重算出声（读档/重复重算状态不变，
+            // 不会误报）；同一次重算里多栋楼一起停机合并成一条。
+            if (newlyLost != null)
+            {
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.PowerLost, string.Join("、", newlyLost) + " 停机");
+            }
+            if (newlyRestored != null)
+            {
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.PowerRestored, string.Join("、", newlyRestored));
             }
 
             state.PowerCapacity = totalSupply;

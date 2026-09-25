@@ -70,6 +70,8 @@ namespace GameLogic.Campaign.Regions
                 // 瞄准是攻击动作真正开始前的独立阶段，不是伤害结算的一部分）。
                 attacker.CannonAimReadyAtPlaySeconds = now + FracturedCityLayout.CannonAimSeconds;
                 LastCallWasStillAiming = true;
+                // ER8-CONTENT-01：1 秒瞄准线开始的那一刻出蓄力音（瞄准线本身是它的等价视觉）。
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.CannonCharge, "#" + attacker.DisplayNumber);
                 return FracturedCityRegion.ActionResult.Ok();
             }
 
@@ -107,10 +109,20 @@ namespace GameLogic.Campaign.Regions
             float heatThisShot = FracturedCityLayout.CannonBaseHeatPerShot
                 + (overloadActive ? FracturedCityLayout.OverloadExtraHeatPerShot : 0f);
             attacker.WeaponHeat += heatThisShot;
+
+            // ER8-CONTENT-01：开火音取主武器 ComponentCatalog.SfxId；熔穿过载是这一发真正生效的反应
+            // （AC-AUD-001 反应），过热是停火的边沿（IsWeaponOverheated 由 false 翻 true 只此一处）。
+            Feedback.FeedbackCues.RaiseAt(Feedback.FeedbackCueId.CannonFire, enemy.Position, null, Feedback.FeedbackCues.ContentSfx(resolution.Preview.PrimaryId));
+            if (overloadActive)
+            {
+                Feedback.FeedbackCues.RaiseAt(Feedback.FeedbackCueId.ReactionMeltOverload, enemy.Position, "穿甲强化，热量额外上升",
+                    Feedback.FeedbackCues.ContentSfx(MechanicalReactionCatalog.ReactionMeltOverloadId));
+            }
             if (attacker.WeaponHeat >= FracturedCityLayout.WeaponHeatOverheatThreshold)
             {
                 attacker.IsWeaponOverheated = true;
                 Log.Info($"[CannonCombat] 机器 {attackerLogicId} 重炮过热（{attacker.WeaponHeat:F0}），停火直到降到60以下。");
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.WeaponOverheat, "#" + attacker.DisplayNumber + "，降到 60 以下才能再开火");
             }
 
             // 基础伤害不受过载影响（过载只改变热量与穿甲，见类注释）。穿甲只在目标有正面装甲概念时
@@ -125,6 +137,7 @@ namespace GameLogic.Campaign.Regions
             {
                 float effectiveReduction = ApplyArmorPierce(armorReductionFraction, overloadActive, targetHeatResistant);
                 damage *= Mathf.Max(0f, 1f - effectiveReduction);
+                Feedback.FeedbackCues.RaiseAt(Feedback.FeedbackCueId.ArmorHit, enemy.Position);
             }
             // ER7-CORE-01：Phase2 主核心"侧后+20%"——调用方（唯一 FoundryOutpostRegion.TryAttackEnemy）
             // 已经用真实 attackerPosition 算好倍率，这里只做纯乘法，不反向依赖 Boss 状态机。

@@ -1,5 +1,6 @@
 using Cysharp.Threading.Tasks;
 using GameLogic.Campaign;
+using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Regions;
 using GameLogic.Stage;
 using TEngine;
@@ -194,7 +195,10 @@ namespace GameLogic.UI.Common
 
             if (power.BrownoutBuildingIds.Length > 0)
             {
-                _brownoutLabel.text = "断电：" + string.Join("、", power.BrownoutBuildingIds);
+                // ER8-CONTENT-01 AC-THEME-001：此前直接拼接 BuildingId（“home_valley:signal_tower”），
+                // 把内部 ID 显示给了玩家；改为内容目录展示名。
+                _brownoutLabel.text = "断电：" + string.Join("、",
+                    System.Array.ConvertAll(power.BrownoutBuildingIds, MechanicalContentFacade.ResolveWorkOrderTargetLabel));
                 _brownoutLabel.style.display = DisplayStyle.Flex;
             }
             else
@@ -228,9 +232,11 @@ namespace GameLogic.UI.Common
         /// 与 <see cref="CampaignEconomyLedger"/> 的符号约定一致，见该类注释。</summary>
         private static string FormatEntry(ResourceTransactionRecord entry)
         {
+            // ER8-CONTENT-01 AC-THEME-001：此前显示“OwnerId ±n [Committed]”——内部 ID 与英文枚举名
+            // 直接漏给了玩家。改为资源展示名 + 数量 + 中文状态。
             float delta = -entry.Requested;
             string sign = delta >= 0f ? "+" : "";
-            return $"{entry.OwnerId} {sign}{delta:0} [{entry.State}]";
+            return $"{CampaignEconomyLedger.ResourceDisplayName(entry.ResourceType)} {sign}{delta:0}（{CampaignEconomyLedger.StateDisplayName(entry.State)}）";
         }
 
         private void OnDestroy()

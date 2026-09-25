@@ -418,6 +418,8 @@ namespace GameLogic.Campaign.Primitive
             }
             item.State = CraftQueueState.Failed;
             item.BlockedReason = reason;
+            // ER8-CONTENT-01 AC-AUD-001 失败：reason 是内部原因码，不直接给玩家看。
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Failure, "合成失败，材料已释放");
         }
     }
 }

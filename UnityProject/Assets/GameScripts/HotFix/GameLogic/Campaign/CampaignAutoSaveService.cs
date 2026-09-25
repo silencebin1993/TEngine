@@ -30,7 +30,14 @@ namespace GameLogic.Campaign
             // （如战役刚新建、尚未进过战斗）内存态是空集合，导出空数组，不是错误。
             MachineRegistry.ExportToCampaignState(CampaignSession.Current);
 
-            return CampaignSaveService.Save(CampaignSession.ActiveSlotIndex, CampaignSession.Current, reason);
+            SaveResult result = CampaignSaveService.Save(CampaignSession.ActiveSlotIndex, CampaignSession.Current, reason);
+            if (result.Success)
+            {
+                // ER8-CONTENT-01：本作只有自动存档（SaveReason.Manual 仍是预留），每次写盘成功给一条轻提示，
+                // 玩家据此知道“现在退出不会丢进度”。
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.SaveComplete, "自动存档");
+            }
+            return result;
         }
     }
 }

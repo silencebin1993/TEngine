@@ -268,6 +268,8 @@ namespace GameLogic.Campaign.Regions
             FoundryOutpostRegion.ResolveExtraction(state, Array.Empty<int>());
             _wipeResolved = true;
             Log.Info("[FoundryOutpostController] 全灭：区域内所有机器阵亡，已结算携带中的关键物为 Lost。");
+            // ER8-CONTENT-01 AC-AUD-001 失败：全灭结算的唯一一次性边沿（_wipeResolved）。
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.ExpeditionWiped, "携带中的关键物已遗失");
         }
 
         /// <summary>撤离结算数据层——同 <see cref="FracturedCityController.Exit"/> 在 ER5-RETURN-01 补 UI

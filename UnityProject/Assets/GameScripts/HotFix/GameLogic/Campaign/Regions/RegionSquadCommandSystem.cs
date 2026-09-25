@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using GameLogic.Campaign.Feedback;
 using GameLogic.Core;
 using TEngine;
 using UnityEngine;
@@ -477,6 +478,7 @@ namespace GameLogic.Campaign.Regions
                 if (hostile == null || !hostile.Value.Alive)
                 {
                     PushEvent("攻击失败：未指向有效目标。");
+                    FeedbackCues.Raise(FeedbackCueId.Denied, "攻击失败：未指向有效目标。");
                     return;
                 }
                 IssueAttack(hostile.Value.HostileId, IsCallerPaused());
@@ -534,6 +536,7 @@ namespace GameLogic.Campaign.Regions
             if (hostile == null || !hostile.Value.Alive)
             {
                 PushEvent("攻击失败：未指向有效目标。");
+                FeedbackCues.Raise(FeedbackCueId.Denied, "攻击失败：未指向有效目标。");
                 return;
             }
             _armedKind = null;
@@ -560,6 +563,7 @@ namespace GameLogic.Campaign.Regions
                     Targets = _selection.ToArray(),
                 });
                 PushEvent($"{KindLabel(kind)} 已排队（{_selection.Count} 台，等待恢复）。");
+                FeedbackCues.Raise(FeedbackCueId.CommandAck);
                 return;
             }
 
@@ -594,12 +598,17 @@ namespace GameLogic.Campaign.Regions
 
         private void StartCommandForTargets(RegionCommandKind kind, Vector2 targetPosition, string hostileId, IReadOnlyList<int> targets)
         {
+            int firstStarted = 0;
             for (int i = 0; i < targets.Count; i++)
             {
                 int logicId = targets[i];
                 if (_ctx.IsDirectControlled(logicId) || !_ctx.IsEligible(logicId))
                 {
                     continue; // 受控机排除在编队接管之外（每次真正开始执行时再核对一遍，双保险）。
+                }
+                if (firstStarted == 0)
+                {
+                    firstStarted = logicId;
                 }
                 _ctx.CancelWorkIfAny?.Invoke(logicId);
 
@@ -625,6 +634,12 @@ namespace GameLogic.Campaign.Regions
                 };
             }
             PushEvent($"{KindLabel(kind)} 已下达（{targets.Count} 台）。");
+            if (firstStarted != 0)
+            {
+                // 命令确认音按第一台接令机器的底盘区分（ChassisCatalog.SfxId 的消费点）；
+                // 选择框与路径线是它的等价视觉反馈，不出字幕。
+                FeedbackCues.Raise(FeedbackCueId.CommandAck, null, FeedbackCues.MachineChassisSfx(firstStarted));
+            }
         }
 
         /// <summary>停止：清除选择集内所有机器的当前命令，交还 AI（Guard 的"取消"落点）。</summary>
@@ -877,6 +892,7 @@ namespace GameLogic.Campaign.Regions
             }
 
             PushEvent($"机器 #{logicId} 路径持续受阻，已放弃命令并交还 AI。");
+            FeedbackCues.Raise(FeedbackCueId.Denied, FeedbackCues.MachineLabel(logicId) + " 路径持续受阻，已放弃命令");
             return true;
         }
 

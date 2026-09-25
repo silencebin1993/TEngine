@@ -262,6 +262,8 @@ namespace GameLogic.Stage
             _homeValley?.Update(dt);
             _fracturedCity?.Update(dt);
             _foundryOutpost?.Update(dt);
+            // ER8-CONTENT-01：音量设置同步、音效预加载、字幕条过期。主菜单里也要跑（设置面板在那里）。
+            Campaign.Feedback.FeedbackCues.Tick();
 
             // 阶段自然结束（死亡或通关）时收摊并回主菜单。
             // 由 GameRoot 判断而不是阶段自己切换，保证阶段不需要知道 director。
@@ -362,6 +364,11 @@ namespace GameLogic.Stage
             var victoryPageHost = new GameObject("[VictoryPageHost]");
             Object.DontDestroyOnLoad(victoryPageHost);
             victoryPageHost.AddComponent<UI.Victory.VictoryPageUIToolkit>();
+            // ER8-CONTENT-01 AC-AUD-001：反馈字幕条（每个关键声音的非声音等价反馈），同样独立 GameObject
+            // （同一条 UIDocument 唯一性纪律）。全程常驻、不拦截点击，只渲染 FeedbackCues.ActiveCaptions。
+            var feedbackCaptionHost = new GameObject("[FeedbackCaptionHudHost]");
+            Object.DontDestroyOnLoad(feedbackCaptionHost);
+            feedbackCaptionHost.AddComponent<UI.Feedback.FeedbackCaptionHudUIToolkit>();
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             // 已被 UI Toolkit 覆盖的旧 IMGUI 调试 HUD 不得默认盖在玩家界面上；
             // 如需做历史对照，可在运行时显式启用该组件。

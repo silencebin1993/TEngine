@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using GameLogic.Campaign.Feedback;
 using GameLogic.Core;
 using TEngine;
 using UnityEngine;
@@ -158,8 +159,27 @@ namespace GameLogic.Campaign.Regions
 
         /// <summary>唯一的接管请求入口。<paramref name="explicitLogicId"/> 为 null 时走 Tab 循环
         /// （按 LogicId 稳定顺序挑下一个合法候选）；给出具体值时供候选条按钮/程序化调用。
-        /// 拒绝（Success=false）时不改变当前受控目标，不发布事件。</summary>
+        /// 拒绝（Success=false）时不改变当前受控目标，不发布事件。
+        ///
+        /// ER8-CONTENT-01 AC-AUD-001：成功＝“接管”音与字幕，拒绝＝“拒绝”音与原因字幕。
+        /// “已在操控/镜头切换中/面板打开”三种是无害的重复按键，不出拒绝音。</summary>
         public RegionControlSwitchResult TrySwitchControlledUnit(int? explicitLogicId)
+        {
+            RegionControlSwitchResult result = TrySwitchControlledUnitCore(explicitLogicId);
+            if (result.Success)
+            {
+                FeedbackCues.Raise(FeedbackCueId.Takeover, FeedbackCues.MachineLabel(result.LogicId));
+            }
+            else if (result.Failure != RegionControlFailure.AlreadyControlled
+                     && result.Failure != RegionControlFailure.TransitionInProgress
+                     && result.Failure != RegionControlFailure.ModalBlocked)
+            {
+                FeedbackCues.Raise(FeedbackCueId.Denied, result.PlayerText);
+            }
+            return result;
+        }
+
+        private RegionControlSwitchResult TrySwitchControlledUnitCore(int? explicitLogicId)
         {
             if (_ctx == null)
             {
@@ -303,11 +323,18 @@ namespace GameLogic.Campaign.Regions
                 Availability = RegionControlAvailability.Controlled;
                 if (wasSuspended)
                 {
+                    FeedbackCues.RaiseAt(FeedbackCueId.SignalRestored, pos2, FeedbackCues.MachineLabel(current.LogicId));
                     PublishChange(current.LogicId, current.LogicId, RegionControlChangeReason.SignalRestored, pos2);
                 }
                 return;
             }
 
+            if (Availability != RegionControlAvailability.Suspended)
+            {
+                // 进入干扰的第一帧：先预警（宽限期内离开干扰区即可恢复），宽限耗尽时再报一次失控。
+                FeedbackCues.RaiseAt(FeedbackCueId.SignalLost, pos2,
+                    FeedbackCues.MachineLabel(current.LogicId) + $" 受到干扰，{_ctx.JamGraceSeconds:0} 秒内离开干扰区可恢复");
+            }
             Availability = RegionControlAvailability.Suspended;
             _jamGraceRemaining -= dt;
             if (_jamGraceRemaining > 0f)
@@ -316,6 +343,7 @@ namespace GameLogic.Campaign.Regions
             }
 
             Log.Info($"[RegionControlSystem] 机器 {current.LogicId} 失联宽限期耗尽，控制权收回（{_ctx.RegionId}）。");
+            FeedbackCues.RaiseAt(FeedbackCueId.SignalLost, pos2, FeedbackCues.MachineLabel(current.LogicId) + " 失联，控制权已收回");
             ReleaseInternal(current);
             _ctx.SetPossessed?.Invoke(null);
             Availability = RegionControlAvailability.None;

@@ -236,6 +236,7 @@ namespace GameLogic.Campaign.Regions
             bool benchDestroyed = bench == null || bench.ConstructionState == BuildingConstructionState.Destroyed;
             if (benchDestroyed)
             {
+                bool anyFailed = false;
                 foreach (AnalysisQueueItemRecord it in state.AnalysisQueues)
                 {
                     if (!IsActive(it.State))
@@ -244,6 +245,12 @@ namespace GameLogic.Campaign.Regions
                     }
                     it.State = AnalysisQueueState.Failed;
                     it.BlockedReason = "analysis-bench-destroyed";
+                    anyFailed = true;
+                }
+                if (anyFailed)
+                {
+                    // ER8-CONTENT-01 AC-AUD-001 失败：只在真的有进行中的解析被中止时出声。
+                    Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Failure, "解析台被毁，进行中的解析已中止");
                 }
                 return;
             }
@@ -320,6 +327,7 @@ namespace GameLogic.Campaign.Regions
             {
                 item.State = AnalysisQueueState.Failed;
                 item.BlockedReason = "quest-item-missing";
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Failure, "解析失败：待解析的模块已不在仓库");
                 return;
             }
 
@@ -349,6 +357,13 @@ namespace GameLogic.Campaign.Regions
             item.BlockedReason = null;
             Log.Info($"[HomeValleyAnalysis] {info.DisplayName} 解析完成：解锁 {info.UnlockContentId}，技术数据 +{techYield}" +
                 (alreadyUnlocked ? "（重复模块折扣）" : string.Empty) + "。");
+
+            // ER8-CONTENT-01 AC-AUD-001 解析：唯一完成点出声与字幕，音色取解析台 BuildingCatalog.SfxId。
+            string unlockedName = Feedback.FeedbackCues.ContentName(info.UnlockContentId);
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.AnalysisComplete,
+                (alreadyUnlocked || string.IsNullOrEmpty(unlockedName) ? info.DisplayName : $"{info.DisplayName}，解锁 {unlockedName}")
+                + $"，技术数据 +{techYield}",
+                Feedback.FeedbackCues.BuildingTypeSfx(HomeValleyLayout.BuildingTypeAnalysisBench));
 
             // ER6-LOOP-01：解析完成是 OBJ-06/08"解析"子条件的唯一真实写入口。
             CampaignObjectiveTracker.Recompute(state);

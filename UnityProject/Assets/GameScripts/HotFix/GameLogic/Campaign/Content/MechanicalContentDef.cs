@@ -110,6 +110,11 @@ namespace GameLogic.Campaign.Content
         public string ActionId;
 
         public string VfxId;
+
+        /// <summary>这条内容“动作时”的专属音色，<c>Assets/GameRes/Raw/Audios/Sfx/</c> 下的文件名：武器开火、
+        /// 反应触发、底盘接令、敌人攻击、建筑完工时由 <see cref="Feedback.FeedbackCues"/> 在对应时刻播放
+        /// （ER8-CONTENT-01）。空串＝本身不发声（结构件/固件的声音由所属武器或反应发出），不是缺失。
+        /// 自检逐条核对非空值都有真实音频文件。</summary>
         public string SfxId;
 
         /// <summary>图鉴/装配预览用 key，当前退化为 DisplayName + Description 文本预览。</summary>

@@ -299,6 +299,12 @@ namespace GameLogic.Campaign.Regions
                 MarkDestroyed(state, enemyInstanceId);
                 SpawnEnemyLoot(state, enemy);
                 Log.Info($"[FoundryOutpostRegion] 敌人 {enemyInstanceId} 已阵亡。");
+                // ER8-CONTENT-01：存活→阵亡翻转点（已阵亡在上面早退），击毁音与“字幕”模式下的击毁字幕。
+                Feedback.FeedbackCues.RaiseAt(Feedback.FeedbackCueId.EnemyDestroyed, enemy.Position, Feedback.FeedbackCues.ContentName(enemy.EnemyTypeId));
+            }
+            else
+            {
+                Feedback.FeedbackCues.RaiseAt(Feedback.FeedbackCueId.EnemyHit, enemy.Position);
             }
             return ActionResult.Ok();
         }
@@ -353,6 +359,8 @@ namespace GameLogic.Campaign.Regions
                 return ActionResult.Fail("目标非玩家阵营，拒绝攻击（阵营判断）。");
             }
 
+            // ER8-CONTENT-01：敌人开火音按敌人类型区分（EnemyCatalog.SfxId 的消费点）。
+            Feedback.FeedbackCues.RaiseAt(Feedback.FeedbackCueId.EnemyAttack, enemy.Position, null, Feedback.FeedbackCues.ContentSfx(enemy.EnemyTypeId));
             MachineOpResult result = MachineRegistry.ApplyDamage(targetLogicId, damage);
             if (!result.Success)
             {
@@ -491,12 +499,15 @@ namespace GameLogic.Campaign.Regions
             if (IsFrontalHit(enemy, attackerPosition))
             {
                 damage = EnemyCatalog.ComputeFrontalArmorReducedDamage(damage, isFrontalHit: true);
+                Feedback.FeedbackCues.RaiseAt(Feedback.FeedbackCueId.ArmorHit, enemy.Position);
             }
             damage *= FoundryOutpostCoreBoss.ComputeDamageMultiplier(state, enemy, attackerPosition);
 
             // ER6-REGION-01：标记跳转在外围实战触发（AC-JRN-014）——与 FracturedCityRegion.TryAttackEnemy
             // 同一顺序，"目标已标记时"才跳转，查询顺序在本次命中造成的新标记之前（第一次命中只留标记，
             // 再次命中已标记目标才跳转）。护甲机正面减伤已在上面应用，跳转伤害基于减伤后的伤害值。
+            // ER8-CONTENT-01：开火音按主武器区分（ComponentCatalog.SfxId 的消费点）。重炮走 CannonCombat 自己的音。
+            Feedback.FeedbackCues.RaiseAt(Feedback.FeedbackCueId.WeaponFire, enemy.Position, null, Feedback.FeedbackCues.ContentSfx(resolution.Preview.PrimaryId));
             bool wasMarkedBeforeThisHit = IsEnemyMarked(state, enemyInstanceId);
 
             ActionResult primaryResult = TryDamageEnemy(state, enemyInstanceId, damage);
@@ -571,6 +582,12 @@ namespace GameLogic.Campaign.Regions
                 jumpDamage *= FracturedCityLayout.MarkJumpDamageFalloff;
                 TryDamageEnemy(state, candidates[i].EnemyInstanceId, jumpDamage);
                 Log.Info($"[FoundryOutpostRegion] 标记跳转：{primaryEnemyInstanceId} → {candidates[i].EnemyInstanceId}，伤害 {jumpDamage:F1}。");
+            }
+            if (jumps > 0)
+            {
+                // ER8-CONTENT-01 AC-AUD-001 反应：真正跳出去才算触发（无合法跳转目标时退化为普通命中，不出反应音）。
+                Feedback.FeedbackCues.RaiseAt(Feedback.FeedbackCueId.ReactionMarkJump, primaryPosition, $"跳转 {jumps} 个目标",
+                    Feedback.FeedbackCues.ContentSfx(MechanicalReactionCatalog.ReactionMarkJumpId));
             }
         }
 
@@ -780,6 +797,7 @@ namespace GameLogic.Campaign.Regions
             item.CarrierLogicId = carrierLogicId;
             item.Position = default;
             Log.Info($"[FoundryOutpostRegion] {item.ContentId} 已装入机器 {carrierLogicId} 货舱。");
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Pickup, $"{Feedback.FeedbackCues.QuestItemName(item.ContentId)} → {Feedback.FeedbackCues.MachineLabel(carrierLogicId)} 货舱");
             return ActionResult.Ok();
         }
 

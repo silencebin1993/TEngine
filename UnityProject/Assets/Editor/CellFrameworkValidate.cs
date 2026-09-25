@@ -118,6 +118,8 @@ namespace GameLogic.EditorTools
                 ValidateDirectFormationHud();
                 ValidateControlFeedbackFourPart();
                 ValidateStableKillerIdentity();
+                // ER8-CONTENT-01：《地球归还》反馈音效与字幕（AC-AUD-001），独立类，结果并入本报告。
+                _fail += FeedbackCueSelfCheck.Run(Report);
             }
             catch (Exception e)
             {
@@ -7811,7 +7813,8 @@ namespace GameLogic.EditorTools
                 InputRouter.SetScope(InputScope.Direct);
                 UnitVitalsView shown = actions.ControlledVitals;
                 DirectVitalsHudBinding.Apply(block, text, shown);
-                string expectMetabolism = $"代谢 {shown.Metabolism:F0}/{shown.MetabolismMax:F0}";
+                // ER1-2 机械化禁用词清零（5dc92865）后玩家文案“代谢”→“电量”，断言跟随现行文案。
+                string expectMetabolism = $"电量 {shown.Metabolism:F0}/{shown.MetabolismMax:F0}";
                 Expect(shown.Valid && block.style.display.value == DisplayStyle.Flex &&
                        text.text.Contains(expectMetabolism),
                     $"直控视角下三个量应按真实数值上屏（实际「{text.text}」，应含「{expectMetabolism}」）");

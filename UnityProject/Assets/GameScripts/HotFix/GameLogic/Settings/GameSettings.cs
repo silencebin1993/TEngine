@@ -66,6 +66,10 @@ namespace GameLogic.Settings
             }
         }
 
+        /// <summary>每次读盘/改值 +1。消费方（音量桥 <c>FeedbackCues.Tick</c> 等）比较版本号决定要不要
+        /// 重新应用，不必订阅事件，也不会漏掉“读盘后第一次应用”。</summary>
+        public static int Revision { get; private set; }
+
         public static float UiScale => Data.UiScale;
         public static bool EdgePanEnabled => Data.EdgePanEnabled;
         public static float EdgePanSpeedMultiplier => Data.EdgePanSpeedMultiplier;
@@ -108,6 +112,7 @@ namespace GameLogic.Settings
                 }
             }
             _keyBindings = InputBindingSet.FromEntries(_data.KeyBindings);
+            Revision++;
         }
 
         /// <summary>落盘并广播 <see cref="ISettingsEvent.OnSettingsChanged"/>。所有 Set* 方法与
@@ -119,6 +124,7 @@ namespace GameLogic.Settings
             string json = JsonUtility.ToJson(_data);
             PlayerPrefs.SetString(PrefsKey, json);
             PlayerPrefs.Save();
+            Revision++;
 
             // GameEventHelper.Init() 正常在 GameApp.Entrance() 最先调用，玩法期间广播必然安全；
             // 这里仍判空——本类是纯数据层，允许编辑器工具/单元测试在完整游戏启动之前调用

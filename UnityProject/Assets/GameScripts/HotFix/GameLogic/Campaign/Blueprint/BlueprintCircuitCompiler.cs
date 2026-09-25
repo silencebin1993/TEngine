@@ -56,6 +56,10 @@ namespace GameLogic.Campaign.Blueprint
         /// 普通连射器/切割束那种即时命中路径。</summary>
         public bool HasCannonPrimary;
 
+        /// <summary>ER8-CONTENT-01：主组件内容 ID（comp_gun 等），与 <see cref="HasCannonPrimary"/> 同一时刻
+        /// 从电路板外层槽读出。战斗反馈据此播放该武器在 ComponentCatalog 里登记的专属开火音。</summary>
+        public string PrimaryId;
+
         /// <summary>ER6-REACT-02：结构槽是否装了散热鳍（<see cref="Content.ComponentCatalog.StructFinId"/>）——
         /// 额外 +5/秒散热（DEMO-CONTENT-LOCK.md §2.4）。</summary>
         public bool HasHeatSinkStructure;
@@ -95,6 +99,7 @@ namespace GameLogic.Campaign.Blueprint
             preview.ReactionId = DetectReactionId(board);
             preview.HasMarkerFunction = board.UtilityId == ComponentCatalog.FuncMarkerId;
             preview.HasCannonPrimary = board.PrimaryId == ComponentCatalog.CompCannonId;
+            preview.PrimaryId = board.PrimaryId;
             preview.HasHeatSinkStructure = board.StructureId == ComponentCatalog.StructFinId;
 
             if (string.IsNullOrEmpty(board.SlotContentIds[BlueprintCircuitLayout.SinkSlot]))

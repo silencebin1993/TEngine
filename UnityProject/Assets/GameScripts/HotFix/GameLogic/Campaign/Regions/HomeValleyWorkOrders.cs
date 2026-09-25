@@ -1070,6 +1070,7 @@ namespace GameLogic.Campaign.Regions
                     CampaignEconomyLedger.Cancel(state, order.ResourceTransactionId);
                 }
                 MarkAssignmentDirty();
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Failure, "修复工单失败：目标建筑已不存在，废料已退还");
                 return;
             }
 
@@ -1091,6 +1092,10 @@ namespace GameLogic.Campaign.Regions
             order.State = WorkOrderState.Completed;
             MachineRegistry.RecordJobCompleted(order.AssignedMachineLogicId); // ER4-MCH-01：统计与经历唯一写入口。
             MarkAssignmentDirty();
+            // ER8-CONTENT-01：完工音按建筑区分（BuildingCatalog.SfxId 的消费点）。
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.BuildComplete,
+                Feedback.FeedbackCues.BuildingLabel(building.BuildingId) + "已修复",
+                Feedback.FeedbackCues.BuildingTypeSfx(building.BuildingTypeId));
         }
 
         private static void CompleteBuild(CampaignState state, WorkOrderRecord order)
@@ -1102,6 +1107,7 @@ namespace GameLogic.Campaign.Regions
                 order.FailureReason = "target-destroyed";
                 CampaignEconomyLedger.Cancel(state, order.ResourceTransactionId);
                 MarkAssignmentDirty();
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Failure, "建造工单失败：规划地块已不存在，废料已退还");
                 return;
             }
 
@@ -1115,6 +1121,9 @@ namespace GameLogic.Campaign.Regions
             order.State = WorkOrderState.Completed;
             MachineRegistry.RecordJobCompleted(order.AssignedMachineLogicId); // ER4-MCH-01：统计与经历唯一写入口。
             MarkAssignmentDirty();
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.BuildComplete,
+                Feedback.FeedbackCues.BuildingLabel(building.BuildingId) + "已建成",
+                Feedback.FeedbackCues.BuildingTypeSfx(building.BuildingTypeId));
         }
 
         /// <summary>Salvage 的完成分支路由：残骸节点走既有 ER3-STO-01 逻辑，建筑（ER3-SOFTLOCK-01
@@ -1266,6 +1275,10 @@ namespace GameLogic.Campaign.Regions
             order.FailureReason = "machine-died";
             order.AssignedMachineLogicId = 0;
             MarkAssignmentDirty();
+            // ER8-CONTENT-01 AC-AUD-001 失败：执行机器损失导致工单中止。
+            string target = Feedback.FeedbackCues.BuildingLabel(order.TargetId);
+Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Failure,
+                (string.IsNullOrEmpty(target) ? "工单" : target + " 工单") + "中止：执行机器损失，资源已退还");
         }
 
         private static void ReleaseResourcesAndCargo(CampaignState state, WorkOrderRecord order, Vector2 dropPosition, bool refund)

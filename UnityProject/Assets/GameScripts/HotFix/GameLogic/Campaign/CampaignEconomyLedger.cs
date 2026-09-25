@@ -29,6 +29,33 @@ namespace GameLogic.Campaign
         public const string ResourceTechData = "TechData";
         public const string ResourcePower = "PowerCapacity";
 
+        /// <summary>玩家可见的资源名。未知类型回退“资源”，绝不把内部键直接显示给玩家（AC-THEME-001）。</summary>
+        public static string ResourceDisplayName(string resourceType)
+        {
+            switch (resourceType)
+            {
+                case ResourceScrap: return "废料";
+                case ResourceTechData: return "技术数据";
+                case ResourcePower: return "电力";
+                default: return "资源";
+            }
+        }
+
+        /// <summary>玩家可见的交易状态。</summary>
+        public static string StateDisplayName(ResourceTransactionState state)
+        {
+            switch (state)
+            {
+                case ResourceTransactionState.Proposed: return "待确认";
+                case ResourceTransactionState.Reserved: return "已预留";
+                case ResourceTransactionState.Running: return "进行中";
+                case ResourceTransactionState.Committed: return "已结算";
+                case ResourceTransactionState.Cancelled: return "已取消";
+                case ResourceTransactionState.Failed: return "失败";
+                default: return string.Empty;
+            }
+        }
+
         public readonly struct LedgerResult
         {
             public readonly bool Success;

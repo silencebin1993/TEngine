@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using GameLogic.Campaign.Feedback;
 using GameLogic.Core;
 using GameLogic.Settings;
 using UnityEngine;
@@ -224,6 +225,11 @@ namespace GameLogic.Campaign.Regions
                 Progress01 = 0f;
                 LastFailure = gate;
                 LastFailureText = null;
+                if (gate == RegionInteractFailure.MachineLostControl
+                    && InputRouter.ConsumeAction(GameActionId.Interact, InputScope.Direct))
+                {
+                    RaiseRejection(gate, "受控机失联，暂时无法交互。");
+                }
                 return;
             }
 
@@ -254,6 +260,12 @@ namespace GameLogic.Campaign.Regions
                 Progress01 = 0f;
                 LastFailure = check.Failure;
                 LastFailureText = check.PlayerText;
+                // 校验失败时提示条早已显示原因；玩家仍按下 E 的那一帧才是“被拒绝”，出拒绝音与字幕
+                // （AC-AUD-001 拒绝/仓满）。不按键只是在看提示，不出声。
+                if (InputRouter.ConsumeAction(GameActionId.Interact, InputScope.Direct))
+                {
+                    RaiseRejection(check.Failure, check.PlayerText);
+                }
                 return;
             }
             LastFailure = RegionInteractFailure.None;
@@ -300,8 +312,21 @@ namespace GameLogic.Campaign.Regions
             {
                 LastFailure = result.Failure;
                 LastFailureText = result.PlayerText;
+                RaiseRejection(result.Failure, result.PlayerText);
             }
             Progress01 = 0f;
+        }
+
+        /// <summary>ER8-CONTENT-01：交互被拒的声音+字幕。满仓单独归“仓满”，其余归“拒绝”；
+        /// 玩家自己取消（松手/离开范围）不算拒绝。</summary>
+        private static void RaiseRejection(RegionInteractFailure failure, string playerText)
+        {
+            if (failure == RegionInteractFailure.Cancelled || failure == RegionInteractFailure.ModalBlocked)
+            {
+                return;
+            }
+            FeedbackCues.Raise(failure == RegionInteractFailure.CargoFull ? FeedbackCueId.StorageFull : FeedbackCueId.Denied,
+                playerText);
         }
 
         /// <summary>排序：指向 → 距离≤3米（过滤）→ 可达/无遮挡（过滤）→ 优先级 → 稳定 ID。</summary>

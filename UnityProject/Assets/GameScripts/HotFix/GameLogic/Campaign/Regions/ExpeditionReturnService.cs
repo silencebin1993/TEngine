@@ -240,6 +240,8 @@ namespace GameLogic.Campaign.Regions
                     Log.Warning($"[ExpeditionReturnService] 远征结算后自动存档未成功（{saveResult.Outcome} " +
                         $"{saveResult.Message}）——切场本身已完成，不回滚，下次自然存档点会补上。");
                 }
+                // ER8-CONTENT-01：撤离事务提交并回到家园（全灭放弃不走这里，全灭那一刻已有失败提示）。
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Evacuate);
                 return ReturnResult.Ok();
             }
             finally

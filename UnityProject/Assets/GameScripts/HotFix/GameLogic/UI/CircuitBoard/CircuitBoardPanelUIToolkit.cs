@@ -486,6 +486,8 @@ namespace GameLogic.UI.CircuitBoard
             if (!result.Success)
             {
                 _saveResultLabel.text = $"保存被拒绝：{result.FailureReason}";
+                // ER8-CONTENT-01 AC-AUD-001 拒绝：面板文字之外补声音与字幕条。
+                Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.Denied, _saveResultLabel.text);
                 RefreshAll();
                 return;
             }
@@ -494,7 +496,9 @@ namespace GameLogic.UI.CircuitBoard
             string chargeNote = result.TechDataCharged > 0
                 ? $"；首次保存跨派系反应“{ReactionDisplayName(result.ReactionId)}”，已扣技术数据 {result.TechDataCharged}"
                 : (result.ReactionId != null ? $"；触发反应“{ReactionDisplayName(result.ReactionId)}”（已在本战役扣过费，本次免费）" : string.Empty);
-            _saveResultLabel.text = $"已保存“{result.BlueprintId}”为版本 {result.Version}{chargeNote}。";
+            // ER8-CONTENT-01 AC-THEME-001：此前显示 BlueprintId（bp_erc003 等内部 ID），改为蓝图展示名。
+            string savedName = state.BlueprintRecords?.FirstOrDefault(b => b.BlueprintId == result.BlueprintId)?.DisplayName;
+            _saveResultLabel.text = $"已保存“{(string.IsNullOrEmpty(savedName) ? "蓝图" : savedName)}”为版本 {result.Version}{chargeNote}。";
             _selectedBlueprintId = result.BlueprintId;
             ReloadBoardFromSaved();
             RefreshAll();

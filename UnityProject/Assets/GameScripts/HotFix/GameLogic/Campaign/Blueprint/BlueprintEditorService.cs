@@ -246,13 +246,16 @@ namespace GameLogic.Campaign.Blueprint
         {
             if (state == null || board == null)
             {
-                return BlueprintSaveResult.Fail("no-active-campaign");
+                return BlueprintSaveResult.Fail("没有进行中的战役。");
             }
 
+            // ER8-CONTENT-01 AC-THEME-001：FailureReason 会原样显示在蓝图编辑器与字幕条上，
+            // 只放玩家可读文字；错误码只进日志。
             CircuitOpResult outerCheck = ValidateOuterSlots(state, board);
             if (!outerCheck.Success)
             {
-                return BlueprintSaveResult.Fail($"[{outerCheck.Code}] {outerCheck.Message}");
+                TEngine.Log.Info($"[BlueprintEditorService] 外层槽校验未通过：{outerCheck.Code}");
+                return BlueprintSaveResult.Fail(outerCheck.Message);
             }
 
             CircuitValidationResult validation = board.Validate();
@@ -274,13 +277,15 @@ namespace GameLogic.Campaign.Blueprint
                     state, chargeTxId, blueprintId ?? "blueprint_editor", CampaignEconomyLedger.ResourceTechData, techCost);
                 if (!propose.Success)
                 {
-                    return BlueprintSaveResult.Fail($"技术数据登记失败：{propose.FailureReason}");
+                    TEngine.Log.Warning($"[BlueprintEditorService] 反应技术数据登记失败：{propose.FailureReason}");
+                    return BlueprintSaveResult.Fail("技术数据登记失败，请重试。");
                 }
                 CampaignEconomyLedger.LedgerResult reserve = CampaignEconomyLedger.Reserve(state, chargeTxId);
                 if (!reserve.Success)
                 {
                     CampaignEconomyLedger.Cancel(state, chargeTxId);
-                    return BlueprintSaveResult.Fail($"技术数据不足（需要 {techCost}）：{reserve.FailureReason}");
+                    TEngine.Log.Info($"[BlueprintEditorService] 反应技术数据预留失败：{reserve.FailureReason}");
+                    return BlueprintSaveResult.Fail($"技术数据不足：首次保存该跨派系反应需要 {techCost} 技术数据。");
                 }
             }
 

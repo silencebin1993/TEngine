@@ -523,6 +523,7 @@ namespace GameLogic.Campaign.Regions
                 item.State = FactoryQueueState.Failed;
                 item.BlockedReason = "target-lost";
                 CampaignEconomyLedger.Cancel(state, item.TransactionId);
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Failure, "改造失败：目标机器已不在场，已退还材料");
                 return;
             }
 
@@ -549,6 +550,11 @@ namespace GameLogic.Campaign.Regions
             CampaignEconomyLedger.Commit(state, item.TransactionId);
             item.State = FactoryQueueState.Completed;
             item.BlockedReason = null;
+
+            // ER8-CONTENT-01 AC-AUD-001 生产：改造完工与新机出厂同属“生产”类反馈。
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.ProductionComplete,
+                $"{Feedback.FeedbackCues.MachineLabel(machine.LogicId)} 改造完成，已换装 v{item.BlueprintVersion}",
+                Feedback.FeedbackCues.BuildingTypeSfx(HomeValleyLayout.BuildingTypeAssemblyStation));
 
             // ER6-LOOP-01：回厂改造完工是 OBJ-06"ERC-003 正式回厂改造完成"子条件的唯一真实写入口。
             CampaignObjectiveTracker.Recompute(state);
@@ -603,6 +609,7 @@ namespace GameLogic.Campaign.Regions
                 item.State = FactoryQueueState.Failed;
                 item.BlockedReason = $"spawn-failed:{spawn.Error}";
                 CampaignEconomyLedger.Cancel(state, item.TransactionId);
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Failure, "生产失败，已退还材料");
                 return;
             }
 
@@ -636,6 +643,12 @@ namespace GameLogic.Campaign.Regions
             item.TargetMachineLogicId = spawn.LogicId;
             item.State = FactoryQueueState.Completed;
             item.BlockedReason = null;
+
+            // ER8-CONTENT-01 AC-AUD-001 生产：出厂那一刻（唯一完成点）出声与字幕，音色取装配站
+            // BuildingCatalog.SfxId。
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.ProductionComplete,
+                $"{Feedback.FeedbackCues.MachineLabel(spawn.LogicId)} {MechanicalContentFacade.ResolveChassisLabel(def.ChassisId)} 已出厂",
+                Feedback.FeedbackCues.BuildingTypeSfx(HomeValleyLayout.BuildingTypeAssemblyStation));
         }
     }
 }

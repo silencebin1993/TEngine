@@ -82,6 +82,10 @@ namespace GameLogic.UI.HomeValleyFailure
             if (shouldShow && !_wasShown)
             {
                 RefreshLastSaveInfo();
+                // ER8-CONTENT-01 AC-AUD-001 失败：核心被毁至今没有真实战斗触发源（只有
+                // HomeValleySoftlockGuard 的调试入口），挂在“失败页第一次出现”这个边沿上，
+                // 将来无论哪条路径把核心打爆，玩家都会同时听到并看到。
+                Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.CoreDestroyed);
             }
             _wasShown = shouldShow;
         }

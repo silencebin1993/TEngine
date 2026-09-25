@@ -38,9 +38,11 @@ namespace BinGames.EditorTools
         /// <paramref name="panelRootName"/> 为空时检查整棵树；<paramref name="stressFill"/> 为 true 时
         /// 往所有 DropdownField / TextField 塞 <see cref="StressText"/>。面板根上名字含 "hidden" 的类会被移除，
         /// 以便默认隐藏的面板也能被测到。
+        /// <paramref name="prepare"/> 可选：在默认的显隐/压测处理之后、强制布局之前调用，供调用方把
+        /// 运行时才会出现的内容（固定槽位的隐藏行、只由代码填写的 Label 文本）摆出来一起测。
         /// </summary>
         public static string Probe(string uxmlPath, string panelRootName = null, bool stressFill = true,
-            string panelSettingsPath = DefaultPanelSettingsPath)
+            string panelSettingsPath = DefaultPanelSettingsPath, System.Action<VisualElement> prepare = null)
         {
             var vta = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(uxmlPath);
             var sourceSettings = AssetDatabase.LoadAssetAtPath<PanelSettings>(panelSettingsPath);
@@ -53,14 +55,14 @@ namespace BinGames.EditorTools
             int totalProblems = LintFolder(uxmlPath, sb);
             foreach (Vector2Int res in DefaultResolutions)
             {
-                totalProblems += ProbeAt(vta, sourceSettings, panelRootName, stressFill, res, sb);
+                totalProblems += ProbeAt(vta, sourceSettings, panelRootName, stressFill, res, sb, prepare);
             }
             sb.Insert(0, totalProblems == 0 ? "PASS 无布局问题\n" : $"FAIL 共 {totalProblems} 处问题\n");
             return sb.ToString();
         }
 
         private static int ProbeAt(VisualTreeAsset vta, PanelSettings sourceSettings, string panelRootName, bool stressFill,
-            Vector2Int resolution, StringBuilder sb)
+            Vector2Int resolution, StringBuilder sb, System.Action<VisualElement> prepare = null)
         {
             // 克隆 PanelSettings 并挂一张目标尺寸的 RenderTexture：面板按这个尺寸 + 原缩放规则算参考坐标，
             // 等价于在该分辨率的屏幕上布局，不需要真的改 Game 视图分辨率。
@@ -87,6 +89,7 @@ namespace BinGames.EditorTools
                 {
                     StressFill(target);
                 }
+                prepare?.Invoke(target);
                 ForceLayout(treeRoot);
 
                 Rect panelRect = treeRoot.panel.visualTree.worldBound;
