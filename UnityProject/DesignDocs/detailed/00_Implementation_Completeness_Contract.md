@@ -2,7 +2,7 @@
 
 > 状态：ProjectA 所有新故事、返工故事和里程碑门禁的强制执行规范。
 > 目的：防止 AI 只实现任务标题或示例，留下一个“能编译但不像正常游戏”的半成品。
-> 产品语义上级：`../ProjectA_GDD.md`。实施顺序上级：`../ProjectA_Milestones.md`。
+> 产品语义上级：`../ProjectA_GDD.md`（GDD 0.2）。实施顺序上级：`../ProjectA_FullGame_Milestones.md`（0.2）；Demo 阶段为 `../ProjectA_Milestones.md`（Demo 版本冻结）。
 
 ## 1. 完成的定义
 

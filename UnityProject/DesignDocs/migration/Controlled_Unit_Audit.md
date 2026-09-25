@@ -1,8 +1,10 @@
 # M1-01 玩家索引依赖审计
 
+> **GDD 章节号（FG0-DOC-01 注）：** 本文件里的"GDD §x"都指生物机械版 GDD（0.1 及更早），原文见 [ProjectA_GDD_bio-mechanical_archived-2026-09-18.md](../Archive/ProjectA_GDD_bio-mechanical_archived-2026-09-18.md)，与现行 GDD 0.2（`../ProjectA_GDD.md`）的章节不对应。
+
 > 审计日期：2026-09-11  
 > 代码基线：`TEngine e1e07c0be7e742863847d35e68a77f9e4c5c7616`  
-> 产品权威：`DesignDocs/ProjectA_GDD.md` §7、§16.1、§16.4  
+> 产品权威：生物机械版 GDD §7、§16.1、§16.4（见上方注）  
 > 实施权威：`DesignDocs/ProjectA_Milestones.md` M1-01～M1-06  
 > 本任务只审计，不修改运行逻辑。
 

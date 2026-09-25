@@ -1,28 +1,32 @@
 # DesignDocs 当前权威入口
 
-> 2026-09-18 起，当前产品只有《地球归还》一套语义。旧生物、Cell Stage、债兽和旧 PCG 文档不得作为产品需求输入。
+> 2026-09-25 起，现行设计为 **GDD 0.2（《地球归还》正式版）**；Demo（0.1）设计冻结，只用于 Demo 回归与追溯。旧生物、Cell Stage、债兽和旧 PCG 文档不得作为产品需求输入。
 
-## 必读顺序
+## 必读顺序（0.2 正式版）
 
-1. [ProjectA_GDD.md](ProjectA_GDD.md)：产品最高权威，规定做成什么和 Demo 封闭范围。
-2. [ProjectA_Milestones.md](ProjectA_Milestones.md)：阶段门禁与当前实施顺序。
-3. [DEMO-IMPLEMENTATION-SPEC.md](../../../production/design/earth-reclamation/DEMO-IMPLEMENTATION-SPEC.md)：带 ERD ID 的自包含实现需求。
-4. [DEMO-CONTENT-LOCK.md](../../../production/design/earth-reclamation/DEMO-CONTENT-LOCK.md)：已批准系统的具体配表、地图、战利品、反馈和时间预算。
-5. [PRIMITIVE-FULL-DEMO-SPEC.md](../../../production/design/earth-reclamation/PRIMITIVE-FULL-DEMO-SPEC.md)：基元、3×3 电路、有限仓、装卸、合成和实战接线的强制规格。
-6. [AI-EXECUTION-PROTOCOL.md](../../../production/design/earth-reclamation/AI-EXECUTION-PROTOCOL.md)：AI 施工纪律、证据与 Windows 可玩构建放行门禁。
-7. [STORY-BOARD.md](../../../production/design/earth-reclamation/STORY-BOARD.md)：53 项顺序与状态。
-8. [STORY-EXECUTION-CARDS.md](../../../production/design/earth-reclamation/STORY-EXECUTION-CARDS.md)：每项逐条施工卡。
-9. [UI-AND-ONBOARDING-SPEC.md](../../../production/design/earth-reclamation/UI-AND-ONBOARDING-SPEC.md)：19 屏交互与错误反馈（教学最后再做）。
-10. [MILESTONES.md](../../../production/design/earth-reclamation/MILESTONES.md)：一次领取一个的 Story 清单。
-11. [DEMO-ACCEPTANCE.md](../../../production/design/earth-reclamation/DEMO-ACCEPTANCE.md)：全功能 Demo 验收矩阵。
-12. [SYSTEMS-SPEC.md](../../../production/design/earth-reclamation/SYSTEMS-SPEC.md)：现有代码复用、Facade 和接入顺序。
-13. [00_Implementation_Completeness_Contract.md](detailed/00_Implementation_Completeness_Contract.md)：所有 Story 的完整性强制门禁。
+1. [ProjectA_GDD.md](ProjectA_GDD.md)：GDD 0.2，产品最高权威（已合并正式版设计案与里程碑默认决策 D-01～D-22）。
+2. [ProjectA_FullGame_Milestones.md](ProjectA_FullGame_Milestones.md)：FG-M0～M15 的顺序、出口与出口旅程。
+3. [fullgame/FG00_Completeness_Addendum.md](fullgame/FG00_Completeness_Addendum.md)：FG 完整性附加契约（B01～B25 正常游戏基线）。
+4. [detailed/00_Implementation_Completeness_Contract.md](detailed/00_Implementation_Completeness_Contract.md)：所有 Story 的完整性强制门禁（Ready 十项与完成矩阵）。
+5. [production/design/full-game/README.md](../../../production/design/full-game/README.md)：FG 制作目录（领取流程、证据规则）。
+6. [FG-STORY-BOARD.md](../../../production/design/full-game/FG-STORY-BOARD.md)：139 条 Story 的顺序与状态。
+7. [FG-STORY-CARDS.md](../../../production/design/full-game/FG-STORY-CARDS.md)：逐条施工卡片；只读自己那一张。
+8. `fullgame/FG01～FG17`：卡片点名的章节与需求 ID（不要整本通读）。
+9. [FG-GAP-REGISTER.md](../../../production/design/full-game/FG-GAP-REGISTER.md)：规格漏写、但正常玩家需要的缺口登记。
+10. [ProjectA_FullGame_Design.md](ProjectA_FullGame_Design.md)：GDD 0.2 的展开背景与名表出处，需要时读对应章节。
+11. [TERM-MIGRATION.md](../../../production/design/earth-reclamation/TERM-MIGRATION.md)：术语迁移 0.2（§6 正式版名表与禁用词，题材审计词表与之逐词一致）。
 
-正式版（FG，门禁中）：[方向稿](ProjectA_FullGame_Design.md) → [里程碑](ProjectA_FullGame_Milestones.md) → [详细设计 fullgame/](fullgame/FG00_Completeness_Addendum.md) → `production/design/full-game/`（卡片与看板）。Demo 封版并由用户宣布开启 FG-M0 之前只允许改 FG 文档；Demo 施工、验收与术语审计仍只以 ProjectA_GDD.md 及其 ERD 为准，不得据此改 Demo Story。
+设计版本：Demo 及更早的全部设计为 **0.1**，正式版为 **0.2**。每次设计/计划文案提交的修订号（0.x.y）与旧版本号对照见 [DESIGN-VERSIONS.md](../../../production/design/DESIGN-VERSIONS.md)。
 
-设计版本：Demo 及更早的全部设计为 **0.1**，正式版（FG）为 **0.2**。每次设计/计划文案提交的修订号（0.x.y）与旧版本号对照见 [DESIGN-VERSIONS.md](../../../production/design/DESIGN-VERSIONS.md)。
+## Demo（0.1，版本冻结）
 
-63 条 ERD 逐项承接和专项验收映射：[REQUIREMENT-TO-PLAYABLE-TRACE.md](../../../production/design/earth-reclamation/REQUIREMENT-TO-PLAYABLE-TRACE.md)。旧文件保留/清理状态：[OLD-DOC-RETIREMENT-AUDIT.md](../../../production/design/earth-reclamation/OLD-DOC-RETIREMENT-AUDIT.md)。
+以下文件标有"Demo 版本冻结"，不删除、不再推进，只用于 Demo 回归测试、ERD / AC 编号追溯与代码考古：
+
+- [Archive/ProjectA_GDD_0.1_Demo.md](Archive/ProjectA_GDD_0.1_Demo.md)：Demo 的 GDD 0.1 原文。
+- [ProjectA_Milestones.md](ProjectA_Milestones.md)：Demo 阶段门禁 ER-0～ER-9。
+- [production/design/earth-reclamation/](../../../production/design/earth-reclamation/README.md)：DEMO-IMPLEMENTATION-SPEC、DEMO-CONTENT-LOCK、PRIMITIVE-FULL-DEMO-SPEC、AI-EXECUTION-PROTOCOL、STORY-BOARD、STORY-EXECUTION-CARDS、UI-AND-ONBOARDING-SPEC、MILESTONES、DEMO-ACCEPTANCE、SYSTEMS-SPEC、REQUIREMENT-TO-PLAYABLE-TRACE 等（TERM-MIGRATION 除外，它已升为 0.2）。
+
+Demo 的 63 条 ERD 逐项承接见 [REQUIREMENT-TO-PLAYABLE-TRACE.md](../../../production/design/earth-reclamation/REQUIREMENT-TO-PLAYABLE-TRACE.md)；旧文件保留/清理状态见 [OLD-DOC-RETIREMENT-AUDIT.md](../../../production/design/earth-reclamation/OLD-DOC-RETIREMENT-AUDIT.md)。代码与自检里引用的 ERD / AC 编号仍指向这些冻结文档，不得删除或改号。
 
 ## 按需技术参考
 
@@ -37,9 +41,9 @@
 | 组合引擎 | 最新改动需求/组合引擎-正名与全阶段变化词宪法.md | ComposeEngine 内部规则；玩家文案仍以机械规格为准 |
 | 基元装配 | 最新改动需求/细胞肉鸽-基元卡牌包装.md | 已实现的 3×3 有向图、空槽被动、有限仓与装卸事实；以新规格为玩家规则 |
 | 基元字段/结算 | 最新改动需求/代谢切片-冻结总案-基元与美术.md | 已实现的正交字段和结算顺序；旧卡牌与生物美术不继承 |
-| 术语包装 | production/design/earth-reclamation/TERM-MIGRATION.md | 旧符号到机械领域的包装策略 |
+| 术语包装 | production/design/earth-reclamation/TERM-MIGRATION.md | 旧符号到机械领域的包装策略；§6 为 0.2 名表 |
 
-技术参考中的旧生物名是当前代码事实，不是继续实现旧玩法的授权。冲突时始终以 GDD 0.1 和 ERD 需求为准。
+技术参考中的旧生物名是当前代码事实，不是继续实现旧玩法的授权。冲突时始终以 GDD 0.2 与 FG 详细设计为准。
 
 ## 历史与禁止入口
 
@@ -49,6 +53,6 @@
 - 最新改动需求/ 中的旧玩家文案与复玩旧案不得作为产品需求；上表两份基元技术参考必须保留用于核对，不因旧标题删除。
 - production/design/ 下未被当前 ERD 点名的旧 Epic：只作实现历史。
 
-## 当前唯一 Next
+## 当前 Next
 
-ER-0 文档门禁已于 2026-09-19 完成；下一条仅为 ER1-REUSE-01。用户本轮要求暂不修改业务代码，因此这条属于后续施工，不得把本轮文档交付冒充可玩 Demo。禁止继续旧生物产品 Story。
+0.2 正式版施工中：当前里程碑与当前 Story 以 `production/session-state/DIGEST.md` 的"正式版（FG）"段和 [FG-STORY-BOARD.md](../../../production/design/full-game/FG-STORY-BOARD.md) 为准。Demo 队列（ER-0～ER-9）已冻结，禁止继续旧生物产品 Story。

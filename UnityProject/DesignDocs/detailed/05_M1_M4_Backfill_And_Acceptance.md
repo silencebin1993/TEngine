@@ -1,5 +1,7 @@
 # M1–M4 规格补录、缺口返工与自动验收计划
 
+> **GDD 章节号（FG0-DOC-01 注）：** 本文件里的"GDD §x"都指生物机械版 GDD（0.1 及更早），原文见 [ProjectA_GDD_bio-mechanical_archived-2026-09-18.md](../Archive/ProjectA_GDD_bio-mechanical_archived-2026-09-18.md)，与现行 GDD 0.2（`../ProjectA_GDD.md`）的章节不对应。
+
 > **Retired / 2026-09-19：** 旧 M1～M4 任务和验收已不是当前队列。新 ER-0～ER-8、ERD 与 AC 见 [DesignDocs README](../README.md)；仅保留旧测试经验作历史。
 
 > 当前基线（2026-09-15）：M1、M2、M3 已按旧任务卡标 Done；M4-01～M4-05 Done；下一原计划项为 M4-06。
@@ -19,7 +21,7 @@
 
 ### M4-R00-01 建立覆盖矩阵
 
-- **输入文档：** 本目录 00～04、`../ProjectA_GDD.md`、`../ProjectA_Milestones.md`、`../migration/` 现有契约、ComposeEngine HostApply 契约。
+- **输入文档：** 本目录 00～04、生物机械版 GDD（见文件头注）、`../ProjectA_Milestones.md`、`../migration/` 现有契约、ComposeEngine HostApply 契约。
 - **读取代码：** 只读 M1–M4 真实入口、模拟桥、装配/释放、手术、蓝图/谱系/模板、编队/教义/路径、UI 与自检。
 - **交付：** `DesignDocs/migration/M1_M4_Completeness_Audit.md`。
 - **每行：** `REQ-ID / 当前生产入口 / 当前实现 / 自动测试 / 完整·部分·缺失·冲突 / 用户症状 / 修复故事`。

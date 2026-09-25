@@ -19,8 +19,8 @@
 |---|---|---|
 | 接管 | 任意友军可接管，只改变输入和镜头 | 保留，并增加"插入固件、重编译" |
 | 电路 | 3×3，0 号格是源点，8 号格是主组件 | 增加"接入口"格子类型 |
-| 固件 | AI 与玩家同规则，文档里有 AI-safe 概念但代码未实现 | 分常规固件和核心固件；核心固件只能在信号核里 |
-| 暴露 | "连续直控"计入暴露 | 改为按核心固件发动和裸跑计入 |
+| 固件 | AI 与玩家同规则；GDD 0.1 §8.1 的"AI 可用功能动作白名单"概念（已归档）代码未实现 | 分常规固件和核心固件；核心固件只能在信号核里 |
+| 暴露 | GDD 0.1 §8.5 把直控时长算作暴露来源（已归档） | 改为按核心固件发动和裸跑计入 |
 | 可复用 | `AiHandoffSystem`、`ControlHandoffState`、`EmissionContext`、`CameraDirector`、`PathCompiler`、`OverloadSuppressionMirror`、`CampaignExposureLedger` | — |
 
 ---

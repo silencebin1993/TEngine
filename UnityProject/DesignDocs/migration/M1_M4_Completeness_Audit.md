@@ -1,8 +1,10 @@
 # M1–M4 需求覆盖差距审计（M4-R00，正式交付物）
 
+> **GDD 章节号（FG0-DOC-01 注）：** 本文件里的"GDD §x"都指生物机械版 GDD（0.1 及更早），原文见 [ProjectA_GDD_bio-mechanical_archived-2026-09-18.md](../Archive/ProjectA_GDD_bio-mechanical_archived-2026-09-18.md)，与现行 GDD 0.2（`../ProjectA_GDD.md`）的章节不对应。
+
 > 生成于 2026-09-15。依据 `detailed/05_M1_M4_Backfill_And_Acceptance.md` §2 M4-R00-01/02 执行。
 > 方法：4 个并行只读子 agent，按 05_ §3~§6 的返工包拆块（M1/M2/M3/M4），各自实读设计文档
-> （`detailed/00~04`、`ProjectA_GDD.md`、`migration/*.md` 相关契约）与代码（`Main/Sim/`、
+> （`detailed/00~04`、生物机械版 GDD（见上方注）、`migration/*.md` 相关契约）与代码（`Main/Sim/`、
 > `HotFix/GameLogic/`、`Assets/Editor/CellFrameworkValidate.cs`），全程未修改任何游戏代码。
 > 判定口径（`00_Implementation_Completeness_Contract.md`）：字段已存在／可深层直调／带 TODO
 > 一律不得判「完整」，只能判「部分」或「缺失」。

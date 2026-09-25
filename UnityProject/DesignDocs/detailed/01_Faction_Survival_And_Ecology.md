@@ -1,9 +1,11 @@
 # 阵营生存、资源闭环与共享 AI 详细规格
 
+> **GDD 章节号（FG0-DOC-01 注）：** 本文件里的"GDD §x"都指生物机械版 GDD（0.1 及更早），原文见 [ProjectA_GDD_bio-mechanical_archived-2026-09-18.md](../Archive/ProjectA_GDD_bio-mechanical_archived-2026-09-18.md)，与现行 GDD 0.2（`../ProjectA_GDD.md`）的章节不对应。
+
 > **Historical technical reference / 2026-09-19：** 旧阵营/生态产品目标已退役。只在当前 ER Story 明确点名时核对已实现 AI/资源代码，不得据本文新增《地球归还》需求；现行入口见 [DesignDocs README](../README.md)。
 
 > 适用：玩家个体/编队/谱系、三条敌方谱系、Alpha 护群、M5 资源网络、M6 采样进化与 M7 首领。
-> 上级：`../ProjectA_GDD.md` §8–§11。完整性门禁：`00_Implementation_Completeness_Contract.md`。
+> 上级：生物机械版 GDD §8–§11（见上方注）。完整性门禁：`00_Implementation_Completeness_Contract.md`。
 
 ## 1. 产品结论
 

@@ -29,8 +29,8 @@ namespace GameLogic.EditorTools
         private const string LogUxml = "Assets/GameRes/Raw/UI/Objective/MissionLog.uxml";
         private static readonly float[] UiScales = { 0.8f, 1f, 1.4f };
 
-        // 与 FeedbackCueSelfCheck 同一张禁用词表与内部 ID 形态。
-        private static readonly Regex ForbiddenWords = new Regex("细胞|孢子|菌丝|基因|器官|吞噬|代谢|谱系|萌生|债兽");
+        // 与 FeedbackCueSelfCheck 同一张禁用词表（唯一来源 ThemeLexicon，含 0.2 名表禁用词）与内部 ID 形态。
+        private static readonly Regex ForbiddenWords = ThemeLexicon.Forbidden;
         private static readonly Regex InternalIdPattern = new Regex(@"[a-z]+_[a-z0-9_]+|OBJ-\d|home_valley|placeholder|TODO", RegexOptions.IgnoreCase);
 
         private static StringBuilder _report;

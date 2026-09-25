@@ -29,8 +29,8 @@ namespace GameLogic.EditorTools
         private const string SfxFolder = "Assets/GameRes/Raw/Audios/Sfx/";
         private const string CaptionHudUxml = "Assets/GameRes/Raw/UI/Feedback/FeedbackCaptionHud.uxml";
 
-        // 与 ER2-THEME-01 / ER8-CONTENT-01 静态审计同一张禁用词表。
-        internal static readonly Regex ForbiddenWords = new Regex("细胞|孢子|菌丝|基因|器官|吞噬|代谢|谱系|萌生|债兽");
+        // 与 ER2-THEME-01 / ER8-CONTENT-01 静态审计同一张禁用词表；FG0-DOC-01 起唯一来源是 ThemeLexicon（含 0.2 名表禁用词）。
+        internal static readonly Regex ForbiddenWords = ThemeLexicon.Forbidden;
 
         // 内部 ID 的典型形态：snake_case 标识符、区域前缀、占位字样。
         internal static readonly Regex InternalIdPattern = new Regex(@"[a-z]+_[a-z0-9_]+|home_valley:|placeholder|TODO", RegexOptions.IgnoreCase);

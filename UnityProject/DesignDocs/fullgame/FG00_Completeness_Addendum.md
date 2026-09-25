@@ -16,6 +16,8 @@
 ## 1. 门禁与生效
 
 ### FGR-BASE-001 FG 施工门禁
+> **2026-09-25 已开启**：用户宣布"全面开展 0.2 版本的开发"，FG-M0 开工，`ER8-RC-01` 前置由用户豁免；GDD 已由 FG0-DOC-01 升为 0.2，Demo 的 GDD 0.1 与 ERD 冻结。以下为开启前的门禁原文，保留作记录。
+
 - 在 `ER8-RC-01 Demo Complete` 标为 Completed、**并且用户明确宣布开启 FG-M0** 之前，只允许修改 FG 文档（`DesignDocs/ProjectA_FullGame_*`、`DesignDocs/fullgame/`、`production/design/full-game/`）。
 - 在此之前，禁止改业务代码去实现 FG 需求；禁止修改 Demo 的 GDD、ERD、`STORY-BOARD.md`、`DIGEST.md` 当前队列；禁止把 FG Story 写进 Demo 看板。
 

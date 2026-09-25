@@ -1,5 +1,7 @@
 # 接管交还契约（M2-04a + M2-04b 交付物）
 
+> **GDD 章节号（FG0-DOC-01 注）：** 本文件里的"GDD §x"都指生物机械版 GDD（0.1 及更早），原文见 [ProjectA_GDD_bio-mechanical_archived-2026-09-18.md](../Archive/ProjectA_GDD_bio-mechanical_archived-2026-09-18.md)，与现行 GDD 0.2（`../ProjectA_GDD.md`）的章节不对应。
+
 **状态：** 已实现并验收。M2-04a = 自检 `[18]` 段 66 条；M2-04b = 自检 `[19]` 段 29 条。FAIL=0。
 **适用范围：** "玩家松开一个单位之后，那具身体接下来做什么"。
 **单一规则真相：** 本文件 + `HotFix/GameLogic/Control/AiHandoffSystem.cs`

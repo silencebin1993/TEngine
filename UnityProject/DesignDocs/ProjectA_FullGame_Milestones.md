@@ -1,21 +1,23 @@
 # 《地球归还》正式版里程碑（FG）
 
 > 版本：0.2（历次修订见 [设计版本总账](../../../production/design/DESIGN-VERSIONS.md)）
-> 状态：**草案，门禁中**。Demo（ER8）封版、并且用户明确宣布开启 FG-M0 之前，本文件里的任何 Story 都不得开工（FGR-BASE-001）。
-> 上游：[ProjectA_FullGame_Design.md](ProjectA_FullGame_Design.md)。契约：[fullgame/FG00](fullgame/FG00_Completeness_Addendum.md) + [detailed/00](detailed/00_Implementation_Completeness_Contract.md)。
+> 状态：**已生效**。2026-09-25 用户宣布开启 0.2，FG-M0 开工（`ER8-RC-01` 前置由用户豁免，FGR-BASE-001）。
+> 上游：[ProjectA_GDD.md](ProjectA_GDD.md)（GDD 0.2，已合并本文件第 1 节的默认决策，见其附录 A）；展开背景 [ProjectA_FullGame_Design.md](ProjectA_FullGame_Design.md)。契约：[fullgame/FG00](fullgame/FG00_Completeness_Addendum.md) + [detailed/00](detailed/00_Implementation_Completeness_Contract.md)。
 > Story 卡片：`production/design/full-game/FG-STORY-CARDS.md`；看板：`production/design/full-game/FG-STORY-BOARD.md`。
 
 ---
 
 ## 0. 与 Demo 的关系
 
-- 本文件是**版本迭代**：Demo 封版之后的下一个大版本。它**不影响**当前 Demo 的任何进度：Demo 的 GDD、ERD、`STORY-BOARD.md`、`DIGEST.md` 队列都不动。
+- 本文件是**版本迭代**：Demo 之后的下一个大版本（0.2）。开工后 GDD 已升为 0.2；Demo 的 GDD 0.1（归档）、ERD 与 `STORY-BOARD.md` 冻结，只用于 Demo 回归与追溯，不再推进。
 - 里程碑只决定**顺序**；每个功能**完整应该做成什么样**，以卡片点名的 `fullgame/FGxx` 详细设计为准。
 - 每个 Story 都必须过 FG00 的**正常游戏基线清单**（B01～B25）。规格没写、但正常玩家需要的东西，要么补上，要么登记缺口，禁止静默省略。
 
 ---
 
 ## 1. 默认决策登记（请用户审阅，可以逐条推翻）
+
+> 2026-09-25 起本节决策已并入 GDD 0.2 附录 A，与 GDD 同等效力；本节保留审阅过程。推翻任何一条，要同时改 GDD 0.2。
 
 以下是写详细设计时按推荐默认值定下的决策。推翻任何一条，都要同步改对应的 FG 文档。
 
@@ -332,7 +334,8 @@
 
 | 文档 | 内容 |
 |---|---|
-| [ProjectA_FullGame_Design.md](ProjectA_FullGame_Design.md) | 正式版设计方向 |
+| [ProjectA_GDD.md](ProjectA_GDD.md) | GDD 0.2：产品最高权威（已合并设计方向与本文件第 1 节） |
+| [ProjectA_FullGame_Design.md](ProjectA_FullGame_Design.md) | 正式版设计方向（展开背景与名表出处） |
 | 本文件 | 里程碑与顺序 |
 | [fullgame/FG00](fullgame/FG00_Completeness_Addendum.md) | 完整性附加契约（正常游戏基线） |
 | [fullgame/FG01](fullgame/FG01_Signal_Uplink.md) | 信号接入与核心固件 |

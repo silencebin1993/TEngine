@@ -1,7 +1,9 @@
 # 谱系 / 表型模板 ← 现有 Carrier·基因系统 映射（M3-01）
 
+> **GDD 章节号（FG0-DOC-01 注）：** 本文件里的"GDD §x"都指生物机械版 GDD（0.1 及更早），原文见 [ProjectA_GDD_bio-mechanical_archived-2026-09-18.md](../Archive/ProjectA_GDD_bio-mechanical_archived-2026-09-18.md)，与现行 GDD 0.2（`../ProjectA_GDD.md`）的章节不对应。
+
 **状态：** M3-01 交付物，2026-09-13。只做映射与适配方案，**不改代码**（里程碑非目标）。
-**上游权威：** 产品语义以 `ProjectA_GDD.md` §6 为准；实施顺序以 `ProjectA_Milestones.md` M3 为准。
+**上游权威：** 产品语义以生物机械版 GDD §6 为准（见上方注）；实施顺序以 `ProjectA_Milestones.md` M3 为准。
 **下游消费者：** M3-02 蓝图库、M3-03 谱系/表型模板、M3-04 装配签名缓存。
 
 > 注意：M3 整体仍被 M2-06 人测门禁阻塞（见 `Consciousness_Playtest_Gate.md`）。

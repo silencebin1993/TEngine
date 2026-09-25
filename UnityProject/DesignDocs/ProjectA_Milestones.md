@@ -1,7 +1,9 @@
 # 《ProjectA》全功能 Demo 实施里程碑
 
+> **Demo 版本冻结（0.1）**：本文件属于《地球归还》Demo（设计 0.1），自 2026-09-25（FG0-DOC-01）起冻结，只用于 Demo 回归测试、ERD / AC 编号追溯与代码考古，不再作为新需求来源，也不再推进。Demo 的产品上级是 [GDD 0.1（已归档）](Archive/ProjectA_GDD_0.1_Demo.md)；正式版（0.2）权威是 [ProjectA_GDD.md](ProjectA_GDD.md) 与 `production/design/full-game/`。
+
 > 版本：0.1（历次修订见 [设计版本总账](../../../production/design/DESIGN-VERSIONS.md)）
-> 产品权威：[ProjectA_GDD.md](ProjectA_GDD.md)
+> 产品权威：[GDD 0.1（已归档）](Archive/ProjectA_GDD_0.1_Demo.md)
 > 需求权威：[DEMO-IMPLEMENTATION-SPEC.md](../../../production/design/earth-reclamation/DEMO-IMPLEMENTATION-SPEC.md)
 > 内容基线：[DEMO-CONTENT-LOCK.md](../../../production/design/earth-reclamation/DEMO-CONTENT-LOCK.md)
 > 基元全功能：[PRIMITIVE-FULL-DEMO-SPEC.md](../../../production/design/earth-reclamation/PRIMITIVE-FULL-DEMO-SPEC.md)
@@ -33,7 +35,7 @@
 1. 仓库根 AGENTS.md 与工程 AGENTS.md；
 2. production/session-state/DIGEST.md；
 3. DesignDocs/README.md；
-4. ProjectA_GDD.md；
+4. Archive/ProjectA_GDD_0.1_Demo.md（GDD 0.1）；
 5. 本文当前阶段；
 6. AI-EXECUTION-PROTOCOL.md 与 STORY-BOARD.md 当前唯一 Pending/InProgress 项；
 7. STORY-EXECUTION-CARDS.md 当前 Story 逐条施工卡，UI Story 同时读 UI-AND-ONBOARDING-SPEC.md；

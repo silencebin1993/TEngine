@@ -128,6 +128,8 @@ namespace GameLogic.EditorTools
                 _fail += FeedbackVfxSelfCheck.Run(Report);
                 _fail += NegativePathSelfCheck.Run(Report);
                 _fail += MainMenuSelfCheck.Run(Report);
+                // FG0-DOC-01：GDD 0.2 合并、Demo 文档归档冻结、TERM-MIGRATION 0.2 名表与题材审计词表、设计版本切换。
+                _fail += DesignDocsAuditSelfCheck.Run(Report);
             }
             catch (Exception e)
             {
