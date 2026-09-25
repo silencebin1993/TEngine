@@ -422,6 +422,11 @@ namespace GameLogic.Stage
             var missionLogHost = new GameObject("[MissionLogHost]");
             Object.DontDestroyOnLoad(missionLogHost);
             missionLogHost.AddComponent<UI.Objective.MissionLogUIToolkit>();
+            // ER8-CONTENT-01（DEBT-ER8CONTENT01-01 VFX 半边）：命中/击毁/敌方开火/重炮/反应/信号的世界特效，
+            // 统一读 FeedbackCues 的带位置时刻；固定对象池，不随敌人数增长。
+            var feedbackVfxHost = new GameObject("[FeedbackVfxHost]");
+            Object.DontDestroyOnLoad(feedbackVfxHost);
+            feedbackVfxHost.AddComponent<View.FeedbackVfxPresenter>();
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             // 已被 UI Toolkit 覆盖的旧 IMGUI 调试 HUD 不得默认盖在玩家界面上；
             // 如需做历史对照，可在运行时显式启用该组件。

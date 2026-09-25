@@ -68,6 +68,47 @@ namespace GameLogic.Campaign.Feedback
 
         public static IReadOnlyList<FeedbackCaption> ActiveCaptions => Captions;
 
+        /// <summary>带位置的反馈时刻（世界坐标，地面高度 0），供世界特效层（<c>View/FeedbackVfxPresenter</c>）逐条读取——
+        /// 玩法代码只报时刻，不直接调特效。</summary>
+        public readonly struct PositionalMoment
+        {
+            public readonly long Sequence;
+            public readonly FeedbackCueId Cue;
+            public readonly Vector3 Position;
+
+            public PositionalMoment(long sequence, FeedbackCueId cue, Vector3 position)
+            {
+                Sequence = sequence;
+                Cue = cue;
+                Position = position;
+            }
+        }
+
+        private const int MomentCapacity = 64;
+        private static readonly PositionalMoment[] Moments = new PositionalMoment[MomentCapacity];
+        private static long _momentSequence;
+
+        /// <summary>至今记录过的带位置时刻总数（单调递增，读方据此追；测试重置也不回退）。</summary>
+        public static long MomentSequence => _momentSequence;
+
+        /// <summary>把序号大于 <paramref name="afterSequence"/> 的时刻按先后追加到 <paramref name="into"/>。读方落后超过
+        /// 缓冲容量时更早的已被覆盖，只给最近一批。返回当前最新序号，下次从这里接着读。</summary>
+        public static long ReadMoments(long afterSequence, List<PositionalMoment> into)
+        {
+            long first = System.Math.Max(afterSequence + 1, _momentSequence - MomentCapacity + 1);
+            for (long s = first; s <= _momentSequence; s++)
+            {
+                into.Add(Moments[(int)(s % MomentCapacity)]);
+            }
+            return _momentSequence;
+        }
+
+        private static void LogMoment(FeedbackCueId cue, Vector3 position)
+        {
+            _momentSequence++;
+            Moments[(int)(_momentSequence % MomentCapacity)] = new PositionalMoment(_momentSequence, cue, position);
+        }
+
         /// <summary>本进程内某个时刻被触发的累计次数（含被节流的）。</summary>
         public static int CountOf(FeedbackCueId id)
         {
@@ -95,13 +136,16 @@ namespace GameLogic.Campaign.Feedback
         /// <summary>带世界坐标的战斗时刻：音量按与镜头落点的距离衰减（保底 30%）。</summary>
         public static void RaiseAt(FeedbackCueId cue, Vector3 worldPosition, string detail = null, string sfxOverride = null)
         {
+            LogMoment(cue, worldPosition);
             RaiseInternal(cue, detail, sfxOverride, DistanceAttenuation(worldPosition));
         }
 
         /// <summary>区域逻辑坐标版本：区域记录里的 <c>Vector2</c> 是地面坐标（x, z）。</summary>
         public static void RaiseAt(FeedbackCueId cue, Vector2 groundPosition, string detail = null, string sfxOverride = null)
         {
-            RaiseInternal(cue, detail, sfxOverride, DistanceAttenuation(new Vector3(groundPosition.x, 0f, groundPosition.y)));
+            var world = new Vector3(groundPosition.x, 0f, groundPosition.y);
+            LogMoment(cue, world);
+            RaiseInternal(cue, detail, sfxOverride, DistanceAttenuation(world));
         }
 
         /// <summary>字幕里的机器称呼，与各面板一致的“#编号”；找不到记录返回空串。</summary>

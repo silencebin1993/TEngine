@@ -31,6 +31,11 @@ namespace GameLogic.UI.Common
         /// <summary>世界目标标记（定位针）：当前目标下一步要去的位置。</summary>
         public const string ObjectiveMarker = "icon_objective_marker";
 
+        /// <summary>世界特效贴图（白色，运行时着色）：软圆、细环、火花。</summary>
+        public const string VfxBurst = "vfx_burst";
+        public const string VfxRing = "vfx_ring";
+        public const string VfxSpark = "vfx_spark";
+
         private static readonly Dictionary<string, string> ChipIcons = new Dictionary<string, string>
         {
             ["organ_focus"] = "icon_chip_focus",
@@ -85,6 +90,9 @@ namespace GameLogic.UI.Common
             ids.Add(StateUnpowered);
             ids.Add(StateBlocked);
             ids.Add(ObjectiveMarker);
+            ids.Add(VfxBurst);
+            ids.Add(VfxRing);
+            ids.Add(VfxSpark);
             return ids;
         }
 
