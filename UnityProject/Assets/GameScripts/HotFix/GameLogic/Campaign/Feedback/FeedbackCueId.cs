@@ -55,6 +55,8 @@ namespace GameLogic.Campaign.Feedback
         // ── 战役目标（DEBT-ER6LOOP01-01） ──
         ObjectiveActivated,
         ObjectiveComplete,
+        // ── 家园软锁救援（ER8-NEG-01：此前紧急救援机出现时没有任何提示） ──
+        EmergencyRescue,
 
         Max,
     }

@@ -202,6 +202,12 @@ namespace GameLogic.Campaign.Regions
                 }
             }
 
+            // ER8-NEG-01：此前只写日志——玩家看到一台陌生机器凭空出现却不知道为什么、它要去干什么。
+            string rescueLabel = Feedback.FeedbackCues.MachineLabel(result.LogicId);
+            string targetLabel = target != null ? Feedback.FeedbackCues.BuildingLabel(target.BuildingId) : string.Empty;
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.EmergencyRescue,
+                !string.IsNullOrEmpty(targetLabel) ? $"{rescueLabel} 前去修复{targetLabel}（免费）" : $"{rescueLabel} 在核心旁待命");
+
             Log.Info($"[HomeValleySoftlockGuard] 家园经济卡死，核心生成紧急搬运机 LogicId={result.LogicId}" +
                 (target != null ? $"，已下令修复 {target.BuildingTypeId}。" : "，当前没有 Damaged 建筑可修。"));
         }

@@ -56,6 +56,9 @@ namespace GameLogic.EditorTools
                 CheckRepairShortfall();
                 CheckProductionShortfallPowerAndExit();
                 CheckQueueOrderWhilePaused();
+                CheckWorkforceWipeRescue();
+                CheckPathBlocked();
+                CheckSignalJam();
                 CheckStorageFull();
                 CheckCorruptSaveAndReloads(tempSaves);
                 CheckLostKeyModuleReissue();
@@ -201,6 +204,89 @@ namespace GameLogic.EditorTools
                 ordered &= sa == FactoryQueueState.Running && sb == FactoryQueueState.Queued && sc == FactoryQueueState.Queued;
             }
             Expect(ordered, "暂停中连续排 3 台（战役时间不走）：8 轮都按点击先后开工，后排的不会插队");
+        }
+
+        // ── 工作机全灭 / 路径堵塞 / 信号干扰 ─────────────────────────────────
+
+        private static void CheckWorkforceWipeRescue()
+        {
+            MachineRegistry.ResetForNewCampaign();
+            FeedbackCues.ResetForTests();
+            CampaignState s = CampaignState.CreateNew("neg-rescue", "Standard", 50);
+            s.CurrentRegionId = HomeValleyLayout.RegionId;
+            s.BuildingRecords = new[]
+            {
+                Building(HomeValleyLayout.BuildingTypeCore, BuildingConstructionState.Operational, BuildingPowerState.NotApplicable),
+                Building(HomeValleyLayout.BuildingTypeGenerator, BuildingConstructionState.Damaged, BuildingPowerState.NotApplicable),
+            };
+            s.Scrap = 0;
+            int worker = MachineRegistry.SpawnMachine(HomeValleyLayout.Erc001ChassisId, HomeValleyLayout.BlueprintErc001Id,
+                HomeValleyLayout.RegionId, Vector2.zero, 100f, 100f).LogicId;
+            HomeValleySoftlockGuard.Tick(s, 0.6f, null);
+            Expect(!MachineRegistry.AllRecords.Any(m => m.ChassisId == HomeValleyLayout.ErcRescueChassisId),
+                "还有活着的工作机：不派紧急救援机（不替玩家做决定）");
+
+            MachineRegistry.ApplyDamage(worker, 9999f);
+            HomeValleySoftlockGuard.Tick(s, 0.6f, null);
+            MachineRecord rescue = MachineRegistry.AllRecords.FirstOrDefault(m => m.ChassisId == HomeValleyLayout.ErcRescueChassisId && m.IsAlive);
+            bool repairOrder = rescue != null && (s.WorkOrders ?? Array.Empty<WorkOrderRecord>()).Any(o =>
+                o.Kind == WorkOrderKind.Repair && o.AssignedMachineLogicId == rescue.LogicId);
+            string caption = FeedbackCues.LastCaptionText ?? string.Empty;
+            Expect(rescue != null && repairOrder && s.Scrap == 0, "工作机全灭且没钱造新的：核心派出紧急救援机，免费修复受损建筑");
+            Expect(FeedbackCues.CountOf(FeedbackCueId.EmergencyRescue) == 1 && caption.Contains("紧急救援") && caption.Contains("发电机"),
+                $"紧急救援有提示（声音+字幕）写明它去修什么（实际“{caption}”）——此前只写日志");
+
+            HomeValleySoftlockGuard.Tick(s, 0.6f, null);
+            HomeValleySoftlockGuard.Tick(s, 0.6f, null);
+            Expect(MachineRegistry.AllRecords.Count(m => m.ChassisId == HomeValleyLayout.ErcRescueChassisId && m.IsAlive) == 1
+                   && FeedbackCues.CountOf(FeedbackCueId.EmergencyRescue) == 1,
+                "救援机活着时不重复派、不重复提示");
+        }
+
+        private static void CheckPathBlocked()
+        {
+            MachineRegistry.ResetForNewCampaign();
+            CampaignState s = CampaignState.CreateNew("neg-path", "Standard", 51);
+            s.CurrentRegionId = HomeValleyLayout.RegionId;
+            s.BuildingRecords = new[] { Building(HomeValleyLayout.BuildingTypeGenerator, BuildingConstructionState.Damaged, BuildingPowerState.NotApplicable) };
+            s.Scrap = 100;
+            int worker = MachineRegistry.SpawnMachine(HomeValleyLayout.Erc001ChassisId, HomeValleyLayout.BlueprintErc001Id,
+                HomeValleyLayout.RegionId, new Vector2(-30f, -30f), 100f, 100f).LogicId;
+            HomeValleyWorkOrders.WorkOrderOpResult r = HomeValleyWorkOrders.TryCreateRepair(s, HomeValleyLayout.BuildingTypeGenerator, worker);
+            WorkOrderRecord order = HomeValleyWorkOrders.Find(s, r.WorkOrderId);
+            int scrapAfterReserve = s.Scrap;
+            int released = 0;
+            Func<int, Vector2?> stuck = id => new Vector2(-30f, -30f); // 机器原地不动（被挡住）。
+            for (int i = 0; i < 12; i++)
+            {
+                HomeValleyWorkOrders.Tick(s, 0.5f, stuck, id => released++, id => false, o => { });
+            }
+            string text = WorkOrderPanelUIToolkit.ReasonText(order.FailureReason);
+            Expect(order.State == WorkOrderState.Waiting && order.FailureReason == "path-blocked" && released == 1 && s.Scrap == scrapAfterReserve,
+                $"路径堵塞：5 秒没有靠近目标 → 转“等待”、放开机器、不退款不重复扣费（状态 {order.State}，释放 {released} 次）");
+            Expect(text.Contains("路径受阻") && Readable(text), $"路径堵塞：工单面板写“{text}”");
+
+            for (int i = 0; i < 64; i++)
+            {
+                HomeValleyWorkOrders.Tick(s, 0.5f, stuck, id => { }, id => false, o => { });
+            }
+            Expect(order.State != WorkOrderState.Waiting && order.State != WorkOrderState.Cancelled && order.State != WorkOrderState.Failed
+                   && s.Scrap == scrapAfterReserve,
+                $"恢复：30 秒后工单重新进入分配（状态 {order.State}），费用仍只扣一次");
+        }
+
+        private static void CheckSignalJam()
+        {
+            CampaignState s = CampaignState.CreateNew("neg-jam", "Standard", 52);
+            FracturedCityRegion.EnsureRegionRecordSeeded(s);
+            Vector2 near = FracturedCityLayout.ListeningNode.Position + new Vector2(FracturedCityLayout.JammerRadius - 1f, 0f);
+            Vector2 far = FracturedCityLayout.ListeningNode.Position + new Vector2(FracturedCityLayout.JammerRadius + 1f, 0f);
+            bool jammedNear = FracturedCityRegion.IsPositionJammed(s, near);
+            bool jammedFar = FracturedCityRegion.IsPositionJammed(s, far);
+            RegionRecord ruins = FracturedCityRegion.Find(s);
+            ruins.DestroyedNodeIds = (ruins.DestroyedNodeIds ?? Array.Empty<string>()).Append(FracturedCityLayout.ListeningNodeId).ToArray();
+            Expect(jammedNear && !jammedFar && !FracturedCityRegion.IsPositionJammed(s, near),
+                "信号干扰：监听节点半径内失联、半径外正常；摧毁监听节点后干扰解除（恢复动作）");
         }
 
         // ── 仓满 ────────────────────────────────────────────────────

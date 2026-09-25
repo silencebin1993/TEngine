@@ -146,6 +146,7 @@ namespace GameLogic.Campaign.Feedback
 
             // ── 战役目标 ───────────────────────────────────────────────────
             Add(new FeedbackCueDef { Id = FeedbackCueId.ObjectiveActivated, SfxId = "sfx_objective_new", Channel = AudioType.UISound, Tag = "新目标", Caption = string.Empty, Tone = FeedbackTone.Info, CaptionSeconds = 6f, RequirementNote = "AC-CAM-001 目标 HUD/日志" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.EmergencyRescue, SfxId = "sfx_emergency_rescue", Tag = "紧急救援", Caption = "所有工作机都已损失，核心派出紧急救援机", Tone = FeedbackTone.Warning, CaptionSeconds = 8f, RequirementNote = "AC-ECO-011 紧急救援" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.ObjectiveComplete, SfxId = "sfx_objective_complete", Tag = "目标完成", Caption = string.Empty, Tone = FeedbackTone.Good, CaptionSeconds = 6f, RequirementNote = "AC-CAM-001 完成事件" });
 
             return defs;
