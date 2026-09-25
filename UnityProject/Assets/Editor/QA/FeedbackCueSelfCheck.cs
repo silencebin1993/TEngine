@@ -73,6 +73,7 @@ namespace GameLogic.EditorTools
                 CheckBossTransitions();
                 CheckSettingsBridge();
                 CheckCaptionHudLayout();
+                CheckMainMenuClickSounds();
             }
             catch (Exception e)
             {
@@ -370,6 +371,42 @@ namespace GameLogic.EditorTools
             Expect(!FeedbackCues.AudioSettingsInSync, "改设置后音量桥标记为待同步");
             FeedbackCues.Tick();
             Expect(FeedbackCues.AudioSettingsInSync, "下一帧 Tick 后设置音量已推给音频模块（设置滑条不再是摆设）");
+        }
+
+        /// <summary>DEBT-ER2BOOT01-04 音效部分：uGUI 主菜单每个按钮按下都有点击音（UI Toolkit 面板的点击音在共享面板根上）。</summary>
+        private static void CheckMainMenuClickSounds()
+        {
+            const string prefabPath = "Assets/GameRes/Raw/UI/MainMenuUI.prefab";
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+            if (prefab == null)
+            {
+                Fail($"找不到主菜单预制体 {prefabPath}");
+                return;
+            }
+            GameObject instance = UnityEngine.Object.Instantiate(prefab);
+            instance.hideFlags = HideFlags.HideAndDontSave;
+            try
+            {
+                int attached = MainMenuUI.AttachClickSounds(instance);
+                FeedbackCues.ResetForTests();
+                int invoked = 0;
+                foreach (UnityEngine.UI.Button button in instance.GetComponentsInChildren<UnityEngine.UI.Button>(true))
+                {
+                    if (button.onClick.GetPersistentEventCount() > 0)
+                    {
+                        continue; // 预制体里另有序列化监听的按钮不在编辑器里触发（避免调用到未绑定的窗口逻辑）。
+                    }
+                    button.onClick.Invoke();
+                    invoked++;
+                }
+                Expect(attached >= 10 && invoked == attached && FeedbackCues.CountOf(FeedbackCueId.UiClick) == invoked,
+                    $"主菜单 {attached} 个按钮按下都有点击音（触发 {invoked} 个，点击音 {FeedbackCues.CountOf(FeedbackCueId.UiClick)} 次）");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(instance);
+                FeedbackCues.ResetForTests();
+            }
         }
 
         private static void CheckCaptionHudLayout()

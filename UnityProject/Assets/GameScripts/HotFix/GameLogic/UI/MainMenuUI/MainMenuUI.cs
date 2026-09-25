@@ -214,8 +214,34 @@ namespace GameLogic
         protected override void OnCreate()
         {
             ApplyVisualSystem();
+            AttachClickSounds();
             SetView(MenuView.Root);
         }
+
+        /// <summary>ER8（DEBT-ER2BOOT01-04 音效部分）：主菜单与设置页此前按任何按钮都没有声音。UI Toolkit 面板的
+        /// 点击音挂在共享面板根上（<c>FeedbackCaptionHudUIToolkit</c>），uGUI 菜单不在那个面板里，这里给窗口内
+        /// 每个按钮补一次（菜单按钮都在预制体里，运行时不新建按钮）。</summary>
+        private void AttachClickSounds()
+        {
+            AttachClickSounds(gameObject);
+        }
+
+        /// <summary>给 <paramref name="root"/> 下每个按钮挂点击音，返回挂了几个（自检直接对预制体调用）。</summary>
+        public static int AttachClickSounds(GameObject root)
+        {
+            if (root == null)
+            {
+                return 0;
+            }
+            Button[] buttons = root.GetComponentsInChildren<Button>(true);
+            foreach (Button button in buttons)
+            {
+                button.onClick.AddListener(PlayClickSound);
+            }
+            return buttons.Length;
+        }
+
+        private static void PlayClickSound() => Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.UiClick);
 
         protected override void OnRefresh()
         {
