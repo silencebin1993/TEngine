@@ -214,7 +214,9 @@ namespace GameLogic.Campaign
         Ready = 1,
         /// <summary>文件存在但校验和/JSON 解析失败。</summary>
         Corrupt = 2,
-        /// <summary>schemaVersion 比当前客户端更新，明确拒绝读取。</summary>
+        /// <summary>schemaVersion 比当前客户端更新（或缺少升级器），明确拒绝读取。</summary>
         Incompatible = 3,
+        /// <summary>FG0-SAVE-01：Demo（0.1）存档。正式版不迁移，明确提示，文件原样保留。</summary>
+        DemoSave = 4,
     }
 }

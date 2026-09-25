@@ -57,6 +57,8 @@ namespace GameLogic.Campaign.Feedback
         ObjectiveComplete,
         // ── 家园软锁救援（ER8-NEG-01：此前紧急救援机出现时没有任何提示） ──
         EmergencyRescue,
+        // ── 存档（FG0-SAVE-01：读档时内容迁移的通知——已移除内容转成废料等） ──
+        SaveContentMigrated,
 
         Max,
     }

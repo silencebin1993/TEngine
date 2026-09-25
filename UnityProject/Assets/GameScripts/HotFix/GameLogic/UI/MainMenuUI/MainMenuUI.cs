@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.UI;
 using GameLogic.Campaign;
@@ -218,6 +219,8 @@ namespace GameLogic
 
         /// <summary>覆盖写确认目标槽位；仅在"新建"遇到三槽全满时使用。-1 表示当前没有待确认的覆盖。</summary>
         private int _pendingOverwriteSlot = -1;
+        /// <summary>覆盖确认框取消后回到哪一页（从存档列表点"新建于此槽"时回列表，从主菜单"新建"时回主菜单）。</summary>
+        private MenuView _confirmReturnView = MenuView.Root;
 
         protected override void OnCreate()
         {
@@ -881,11 +884,14 @@ namespace GameLogic
 
         private void RefreshRootView()
         {
-            int continueSlot = CampaignSaveService.ResolveContinueSlot();
+            // FG0-SAVE-01：一次刷新只读一遍各槽位（大存档读头部要几百毫秒），"继续"与原因都用这一份元数据。
+            CampaignSlotMetadata[] metas = CampaignSaveService.GetAllSlotMetadata();
+            int continueSlot = CampaignSaveService.ResolveContinueSlot(metas);
             bool canContinue = continueSlot >= 0;
             _btnContinue.interactable = canContinue;
             // AC-UI-002：禁用按钮必须同时给出不可用原因，不能只是灰掉。
-            _textContinueReason.text = canContinue ? string.Empty : "没有可读取的安全存档，请先新建战役";
+            // FG0-SAVE-01：只有 Demo 存档时说明"Demo 存档不能继续"，而不是笼统的"没有存档"。
+            _textContinueReason.text = canContinue ? string.Empty : CampaignSlotText.ContinueUnavailable(CampaignSaveService.AnyDemoSave(metas));
         }
 
         private void RefreshSlotList()
@@ -899,38 +905,11 @@ namespace GameLogic
 
         private void RefreshSlotCard(int slotIndex, CampaignSlotMetadata meta)
         {
-            Text info = _slotInfoTexts[slotIndex];
-            Button action = _slotActionButtons[slotIndex];
-            Text label = _slotActionLabels[slotIndex];
-
-            switch (meta.State)
-            {
-                case CampaignSlotState.Empty:
-                    info.text = $"槽位 {slotIndex + 1}：空槽";
-                    action.interactable = true;
-                    label.text = "新建于此槽";
-                    break;
-                case CampaignSlotState.Ready:
-                    // ERD-UI-001：存档项必须展示时间、战役阶段、游戏时长、最后区域和内容版本。
-                    // 不显示战役 ID、英文阶段枚举、UTC 时间串和区域内部 ID（CampaignSlotText 统一成玩家文字）。
-                    info.text = $"槽位 {slotIndex + 1}：{CampaignSlotText.Summary(meta)}";
-                    action.interactable = true;
-                    label.text = "读取";
-                    break;
-                case CampaignSlotState.Corrupt:
-                    // 具体错误只进日志（ErrorMessage 是给开发看的英文异常信息）。
-                    info.text = $"槽位 {slotIndex + 1}：存档损坏" +
-                        (meta.HasBackup ? "\n可尝试恢复备份" : "\n无可用备份，无法恢复");
-                    action.interactable = meta.HasBackup;
-                    label.text = "恢复备份";
-                    break;
-                case CampaignSlotState.Incompatible:
-                    info.text = $"槽位 {slotIndex + 1}：存档版本（{meta.SchemaVersion}）比当前客户端更新，无法读取" +
-                        (meta.HasBackup ? "\n可尝试恢复备份" : "");
-                    action.interactable = meta.HasBackup;
-                    label.text = meta.HasBackup ? "恢复备份" : "不可用";
-                    break;
-            }
+            // ERD-UI-001 + FG0-SAVE-01（FGR-SYS-007 / FGR-SYS-003）：存档卡显示幕、难度、种子、阶段、时长、区域、
+            // 保存时间；坏档显示稳定原因与备份状态；Demo 存档明确提示不迁移。文字全部经 CampaignSlotText（文本键）。
+            _slotInfoTexts[slotIndex].text = CampaignSlotText.CardText(meta);
+            _slotActionButtons[slotIndex].interactable = CampaignSlotText.ActionEnabled(meta);
+            _slotActionLabels[slotIndex].text = CampaignSlotText.ActionLabel(meta);
         }
 
         #region 事件
@@ -945,11 +924,21 @@ namespace GameLogic
             }
 
             // 三槽全满：按 STORY-EXECUTION-CARDS.md 要求，覆盖写入前先展示原档信息并二次确认；
-            // 取消不改任何文件（Save 只在 OnConfirmYesClicked 里才会被调用）。固定取槽位 0，
-            // 多槽选择 UI 留给 ER2-BOOT-01 的美术终稿。
-            _pendingOverwriteSlot = 0;
-            CampaignSlotMetadata meta = CampaignSaveService.GetSlotMetadata(0);
-            _textConfirmInfo.text = $"槽位 1 已有存档：\n{CampaignSlotText.Summary(meta)}\n\n新建战役将覆盖此存档，是否继续？";
+            // 取消不改任何文件（Save 只在 OnConfirmYesClicked 里才会被调用）。
+            // FG0-SAVE-01：优先占用读不了、也没有可读备份的槽位（Demo 存档 / 坏档 / 版本更新的存档，原文件另存保留），
+            // 都没有时才覆盖槽位 1 的可读战役（多槽选择 UI 属于 FG15-SYS-01，DEBT-FG0SAVE01-02）。
+            CampaignSlotMetadata[] metas = CampaignSaveService.GetAllSlotMetadata();
+            CampaignSlotMetadata target = metas.FirstOrDefault(CampaignSlotText.StartsNewInSlot) ?? metas[0];
+            ConfirmNewInSlot(target, MenuView.Root);
+        }
+
+        /// <summary>在已有文件的槽位新建战役前先确认（B04）：可读存档显示摘要；Demo / 读不出的存档写明原文件会另存为
+        /// *.keep-* 保留（永不自动删除存档）。</summary>
+        private void ConfirmNewInSlot(CampaignSlotMetadata meta, MenuView returnView)
+        {
+            _pendingOverwriteSlot = meta.SlotIndex;
+            _confirmReturnView = returnView;
+            _textConfirmInfo.text = CampaignSlotText.OverwriteConfirm(meta);
             SetView(MenuView.ConfirmOverwrite);
         }
 
@@ -1005,13 +994,23 @@ namespace GameLogic
                     break;
                 case CampaignSlotState.Corrupt:
                 case CampaignSlotState.Incompatible:
+                    // FGR-SYS-003"提供读取备份的选项"：备份可读取时恢复备份，坏掉的主档另存为 *.keep-corrupt-*。
+                    // 头部可读但读档失败过的主档，GetSlotMetadata 已按读档结果报成损坏（不会再走 Ready 反复读坏档）。
                     if (meta.HasBackup)
                     {
-                        bool restored = CampaignSaveService.RestoreFromBak(slotIndex);
-                        Log.Info($"[MainMenuUI] 槽位 {slotIndex} 恢复备份：{(restored ? "成功" : "失败")}");
+                        bool restored = CampaignSaveService.RestoreFromBak(slotIndex, out string kept);
+                        Log.Info($"[MainMenuUI] 槽位 {slotIndex} 读取备份：{(restored ? "成功" : "失败")}；原主档保留为 {kept ?? "（无）"}");
+                        RefreshSlotList();
                     }
-
-                    RefreshSlotList();
+                    else
+                    {
+                        // 读不了、备份也不可用：新建于此槽（先确认，原文件另存保留）。
+                        ConfirmNewInSlot(meta, MenuView.SlotList);
+                    }
+                    break;
+                case CampaignSlotState.DemoSave:
+                    // Demo 存档不迁移（FGR-ARC-008）：不能读取，但可以在此槽新建（先确认，Demo 文件另存保留）。
+                    ConfirmNewInSlot(meta, MenuView.SlotList);
                     break;
             }
         }
@@ -1026,7 +1025,7 @@ namespace GameLogic
             }
             else
             {
-                SetView(MenuView.Root);
+                SetView(_confirmReturnView);
             }
         }
 
@@ -1034,7 +1033,7 @@ namespace GameLogic
         {
             // 取消不改文件：这里全程没有调用过 CampaignSaveService.Save。
             _pendingOverwriteSlot = -1;
-            SetView(MenuView.Root);
+            SetView(_confirmReturnView);
         }
 
         #endregion
@@ -1095,13 +1094,17 @@ namespace GameLogic
                 Log.Warning($"[MainMenuUI] 槽位 {slotIndex} 恢复编排在 {result.FailedStep} 步骤失败：{result.Message}");
                 SetView(MenuView.SlotList);
                 RefreshSlotList();
-                // 安全错误页占位（ER2-BOOT-01 建正式错误页前）：复用槽位卡片显示失败原因 +
-                // 保留"恢复备份"（无备份则禁用），不做任何写入或状态切换。
-                _slotInfoTexts[slotIndex].text =
-                    $"槽位 {slotIndex + 1}：恢复编排失败（{result.FailedStep}）：{result.Message}" +
-                    (result.HasBackup ? "\n可尝试恢复备份" : "\n无可用备份，无法恢复");
-                _slotActionButtons[slotIndex].interactable = result.HasBackup;
-                _slotActionLabels[slotIndex].text = result.HasBackup ? "恢复备份" : "不可用";
+                // 安全错误页：复用槽位卡片显示**稳定原因**（FG0-SAVE-01：文本键，不再把开发用异常串给玩家看）+
+                // "读取备份"（备份不可读则禁用），不做任何写入或状态切换。
+                // 头部可读但升级 / 正文 / 结构校验失败的主档，读档与恢复编排已登记为"读档失败"：GetSlotMetadata 把它报成
+                // 损坏并完整校验备份，列表、"继续"与按钮点击三处一致（点"读取备份"真正恢复备份）。
+                CampaignSlotMetadata failMeta = CampaignSaveService.GetSlotMetadata(slotIndex);
+                if (failMeta.State == CampaignSlotState.Ready)
+                {
+                    CampaignSaveService.RecordLoadFailure(slotIndex, result.Reason, result.FileSchemaVersion);
+                    failMeta = CampaignSaveService.GetSlotMetadata(slotIndex);
+                }
+                RefreshSlotCard(slotIndex, failMeta);
                 return;
             }
 
@@ -1121,6 +1124,10 @@ namespace GameLogic
             GameApp.MountGameplayUi();
             Close();
             GameLogic.Stage.GameRoot.ResumeCampaign();
+
+            // FG0-SAVE-01（FGR-SYS-004）：读档时内容迁移（已移除内容转成废料等）的通知，进入游戏后逐条提示（超过字幕上限时
+            // 最后一条合并为"另有 N 条"）；同一批通知已写入 CampaignState.SaveHistory，供通知中心历史回看（FG0-UX-01）。
+            SaveContentReconciler.RaiseLoadNotices(result.Notices);
         }
     }
 }

@@ -40,9 +40,17 @@ namespace GameLogic.Campaign
         public readonly CampaignState State;
         public readonly bool HasBackup;
         public readonly string[] Warnings;
+        /// <summary>FG0-SAVE-01：VersionAndChecksum 步骤的读档结果与稳定原因码（玩家文字据此生成）。</summary>
+        public readonly LoadOutcome LoadOutcome;
+        public readonly SaveFailureReason Reason;
+        public readonly int FileSchemaVersion;
+        /// <summary>FG0-SAVE-01：读档时新产生的通知（已移除内容转废料等），进入游戏后展示给玩家。</summary>
+        public readonly SaveNoticeRecord[] Notices;
 
         public RestoreResult(RestoreOutcome outcome, RestoreStep failedStep, string message,
-            CampaignState state, bool hasBackup, string[] warnings)
+            CampaignState state, bool hasBackup, string[] warnings,
+            LoadOutcome loadOutcome = LoadOutcome.Success, SaveFailureReason reason = SaveFailureReason.None,
+            int fileSchemaVersion = -1, SaveNoticeRecord[] notices = null)
         {
             Outcome = outcome;
             FailedStep = failedStep;
@@ -50,6 +58,10 @@ namespace GameLogic.Campaign
             State = state;
             HasBackup = hasBackup;
             Warnings = warnings ?? Array.Empty<string>();
+            LoadOutcome = loadOutcome;
+            Reason = reason;
+            FileSchemaVersion = fileSchemaVersion;
+            Notices = notices ?? Array.Empty<SaveNoticeRecord>();
         }
 
         public bool Success => Outcome == RestoreOutcome.Success;
@@ -114,8 +126,11 @@ namespace GameLogic.Campaign
 
             if (!loadResult.Success)
             {
-                return Fail(RestoreStep.VersionAndChecksum,
-                    $"存档头部/校验和/版本检查未通过（{loadResult.Outcome}）：{loadResult.Message}", slotIndex);
+                bool backup = CampaignSaveService.GetSlotMetadata(slotIndex).HasBackup;
+                return new RestoreResult(RestoreOutcome.Fail, RestoreStep.VersionAndChecksum,
+                    $"存档头部/校验和/版本检查未通过（{loadResult.Outcome}）：{loadResult.Message}", null, backup,
+                    Array.Empty<string>(), loadResult.Outcome, loadResult.Reason,
+                    loadResult.MigrationFailedFromVersion > 0 ? loadResult.MigrationFailedFromVersion : loadResult.FileSchemaVersion);
             }
 
             // ── 2. DomainRecords ──────────────────────────────
@@ -220,9 +235,10 @@ namespace GameLogic.Campaign
                 warnings.Add("[ObjectiveAndHud] 无消费方：Objective/HUD 系统未接入前恒为空数组。");
             }
 
-            bool hasBackup = CampaignSaveService.GetSlotMetadata(slotIndex).HasBackup;
+            // 主档刚通过完整读档：这里只需要知道备份文件在不在，不必再整份读一遍（大存档省几百毫秒）。
+            bool hasBackup = CampaignSaveService.BackupFileExists(slotIndex);
             return new RestoreResult(RestoreOutcome.Success, RestoreStep.None, null, state, hasBackup,
-                warnings.ToArray());
+                warnings.ToArray(), LoadOutcome.Success, SaveFailureReason.None, loadResult.FileSchemaVersion, loadResult.Notices);
         }
 
         /// <summary>ControlRestore 步骤的实现：<see cref="CampaignState.ControlHandoff"/> 指向的
@@ -298,8 +314,13 @@ namespace GameLogic.Campaign
         /// 调用方不得拿到半恢复的状态当可用数据用。</summary>
         private static RestoreResult Fail(RestoreStep step, string message, int slotIndex, CampaignState _ = null)
         {
+            // FG0-SAVE-01（FGR-SYS-003）：头部与校验和都通过、但恢复失败的主档登记为"读档失败"，之后列表把它显示为损坏、
+            // "读取备份"真正可用，不再反复读同一份坏档；hasBackup 因此按完整校验过的备份给出。
+            CampaignSaveService.RecordLoadFailure(slotIndex, SaveFailureReason.Payload, CampaignSaveService.CurrentSchemaVersion);
             bool hasBackup = CampaignSaveService.GetSlotMetadata(slotIndex).HasBackup;
-            return new RestoreResult(RestoreOutcome.Fail, step, message, null, hasBackup, Array.Empty<string>());
+            // 头部与校验都通过、但结构校验失败（重复 ID 等）：对玩家就是"存档内容无法解析"。
+            return new RestoreResult(RestoreOutcome.Fail, step, message, null, hasBackup, Array.Empty<string>(),
+                LoadOutcome.Corrupt, SaveFailureReason.Payload);
         }
     }
 }

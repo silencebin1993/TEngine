@@ -103,6 +103,10 @@ public partial class Tables
     /// </summary>
     public fg.TbMechEnemy TbMechEnemy {get; }
     /// <summary>
+    /// 已移除内容
+    /// </summary>
+    public fg.TbRemovedContent TbRemovedContent {get; }
+    /// <summary>
     /// 细胞阶段场地与时间轴
     /// </summary>
     public fp.TbCellArena TbCellArena {get; }
@@ -168,6 +172,7 @@ public partial class Tables
         TbBuilding = new fg.TbBuilding(loader("fg_tbbuilding"));
         TbLocText = new fg.TbLocText(loader("fg_tbloctext"));
         TbMechEnemy = new fg.TbMechEnemy(loader("fg_tbmechenemy"));
+        TbRemovedContent = new fg.TbRemovedContent(loader("fg_tbremovedcontent"));
         TbCellArena = new fp.TbCellArena(loader("fp_tbcellarena"));
         TbCreatureArena = new fp.TbCreatureArena(loader("fp_tbcreaturearena"));
         TbEnemy = new fp.TbEnemy(loader("fp_tbenemy"));
@@ -206,6 +211,7 @@ public partial class Tables
         TbBuilding.ResolveRef(this);
         TbLocText.ResolveRef(this);
         TbMechEnemy.ResolveRef(this);
+        TbRemovedContent.ResolveRef(this);
         TbCellArena.ResolveRef(this);
         TbCreatureArena.ResolveRef(this);
         TbEnemy.ResolveRef(this);

@@ -132,6 +132,8 @@ namespace GameLogic.EditorTools
                 _fail += DesignDocsAuditSelfCheck.Run(Report);
                 // FG0-DATA-01：建筑 / 敌人 / 文本三类数据从 Luban 表到运行时、缺失键标记、负向矩阵、python 已知坑检查。
                 _fail += FgDataPipelineSelfCheck.Run(Report);
+                // FG0-SAVE-01：存档 v2 骨架——版本升级链、Demo 存档提示、写入中途强制结束与备份恢复、已移除内容转废料、存档卡新字段。
+                _fail += FgSaveV2SelfCheck.Run(Report);
             }
             catch (Exception e)
             {

@@ -502,9 +502,20 @@ namespace GameLogic.EditorTools
                             diffs.Add($"文本 {f[1]} 与源数据不一致");
                         }
                         break;
+                    case "R":
+                        // FG0-SAVE-01：已移除内容表（读档时转废料用）。
+                        if (!SaveContentReconciler.TryGetRemoved(f[1], out RemovedContent rc))
+                        {
+                            diffs.Add($"已移除内容 {f[1]} 不在运行时表");
+                        }
+                        else if (rc.Kind != f[2] || rc.NameKey != f[3] || rc.ScrapRefund != int.Parse(f[4]) || rc.RemovedInContentVersion != int.Parse(f[5]))
+                        {
+                            diffs.Add($"已移除内容 {f[1]} 与源数据不一致");
+                        }
+                        break;
                 }
             }
-            int runtimeRows = FgContentTables.Buildings.Count + FgContentTables.Enemies.Count + GameText.Count;
+            int runtimeRows = FgContentTables.Buildings.Count + FgContentTables.Enemies.Count + GameText.Count + SaveContentReconciler.Rows.Count;
             Expect(diffs.Count == 0 && rows == runtimeRows,
                 $"源数据 fgdata.py（{rows} 行）与运行时表（{runtimeRows} 行）逐字段一致——改了源数据却没重新生成会在这里失败" +
                 (diffs.Count == 0 ? string.Empty : "：" + string.Join("；", diffs.Take(6))));

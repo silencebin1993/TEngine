@@ -154,6 +154,24 @@ namespace GameLogic.Campaign
         /// 重新编排（不像 LogicId 那样有"永不复用"的硬约束），这里先按同样单调递增的口径落盘。</summary>
         public int NextMachineDisplayNumber = 1;
 
+        // ── FG0-SAVE-01：存档 v2 新增状态域（FGR-ARC-008）。类型与承接 Story 见 CampaignFgStateDomains.cs。──
+        public WorldGenState World = new WorldGenState();
+        public CampaignProgressState Progress = new CampaignProgressState();
+        public GameClockState Clock = new GameClockState();
+        public GridState Grid = new GridState();
+        public BeltItemState Belts = new BeltItemState();
+        public PipeFluidState Pipes = new PipeFluidState();
+        public ResearchState Research = new ResearchState();
+        public WeatherState Weather = new WeatherState();
+        public RaidState Raids = new RaidState();
+        public DirectorEventState DirectorEvents = new DirectorEventState();
+        public QuestState Quests = new QuestState();
+        public StandingRuleState StandingRules = new StandingRuleState();
+        public SignalCoreState SignalCore = new SignalCoreState();
+        public LootPacketState LootPackets = new LootPacketState();
+        public StatsState Stats = new StatsState();
+        public SaveHistoryState SaveHistory = new SaveHistoryState();
+
         /// <summary>新建战役：ERD-ECO-001 的 Demo 初始废料基线（180）已在设计文档给出数值，
         /// 直接采用；其余经济/工作/建筑/区域集合按 Done 定义留空，等待 ER3/ER4/ER5 写入真实数据。</summary>
         public static CampaignState CreateNew(string campaignId, string difficultyId, int randomSeed)
@@ -201,6 +219,23 @@ namespace GameLogic.Campaign
                 ObjectiveRecords = Array.Empty<ObjectiveRecord>(),
                 NextMachineLogicId = 1,
                 NextMachineDisplayNumber = 1,
+                // FG0-SAVE-01：世界种子在新建时确定，等于战役种子（FGR-ARC-010：玩法随机流由它派生）。
+                World = new WorldGenState { WorldSeed = randomSeed },
+                Progress = new CampaignProgressState(),
+                Clock = new GameClockState(),
+                Grid = new GridState(),
+                Belts = new BeltItemState(),
+                Pipes = new PipeFluidState(),
+                Research = new ResearchState(),
+                Weather = new WeatherState(),
+                Raids = new RaidState(),
+                DirectorEvents = new DirectorEventState(),
+                Quests = new QuestState(),
+                StandingRules = new StandingRuleState(),
+                SignalCore = new SignalCoreState(),
+                LootPackets = new LootPacketState(),
+                Stats = new StatsState(),
+                SaveHistory = new SaveHistoryState(),
             };
         }
 
@@ -247,6 +282,13 @@ namespace GameLogic.Campaign
                 .OrderBy(r => r.QueueItemId, StringComparer.Ordinal).ToArray();
             SignalExposureEvents = (SignalExposureEvents ?? Array.Empty<SignalExposureEventRecord>())
                 .OrderBy(r => r.EventId, StringComparer.Ordinal).ToArray();
+
+            // FG0-SAVE-01：新状态域不得为 null；区块差异与读档通知按稳定键排序。
+            CampaignFgStateDomains.EnsureAll(this);
+            World.ChunkDiffs = World.ChunkDiffs
+                .OrderBy(r => r.SurfaceId, StringComparer.Ordinal).ThenBy(r => r.ChunkX).ThenBy(r => r.ChunkY).ToArray();
+            SaveHistory.Notices = SaveHistory.Notices
+                .OrderBy(r => r.CreatedAtUtc, StringComparer.Ordinal).ThenBy(r => r.NoticeId, StringComparer.Ordinal).ToArray();
         }
     }
 }

@@ -370,6 +370,23 @@ namespace GameLogic.Campaign.Primitive
             return CircuitOpResult.Ok();
         }
 
+        /// <summary>FG0-SAVE-01：读档时"内容已被游戏移除"的实例整体移出基元仓（由 <see cref="SaveContentReconciler"/>
+        /// 在废料入账成功后调用，是本类之外唯一的移除路径）。只移除 Bag / Pending 且未被预留的实例；装进蓝图的
+        /// （Draft）与仍被合成预留的实例一律保留，防止调用方时序错乱误删。返回实际移除的件数。</summary>
+        public static int RemoveForContentMigration(CampaignState state, IEnumerable<string> partIds)
+        {
+            if (state?.PrimitiveChips == null || partIds == null)
+            {
+                return 0;
+            }
+            var targets = new HashSet<string>(partIds.Where(id => !string.IsNullOrEmpty(id)), StringComparer.Ordinal);
+            int before = state.PrimitiveChips.Length;
+            state.PrimitiveChips = state.PrimitiveChips.Where(p => !(targets.Contains(p.PartId)
+                                                                     && p.State != PrimitiveChipState.Draft
+                                                                     && string.IsNullOrEmpty(p.ReservedByTransactionId))).ToArray();
+            return before - state.PrimitiveChips.Length;
+        }
+
         // ── 事件账本（审计用，不是核心正确性依据——核心依据是 SourceSalvageId 去重与状态机本身）──
 
         private static void AppendLedger(CampaignState state, string category, string partId, string contentId)

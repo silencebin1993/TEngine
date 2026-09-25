@@ -1,7 +1,9 @@
 using System;
 using System.IO;
 using System.Linq;
+using GameConfig.fg;
 using GameLogic.Campaign;
+using GameLogic.Campaign.Feedback;
 using GameLogic.Core;
 using GameLogic.Settings;
 using GameLogic.Stage;
@@ -10,6 +12,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.UIElements;
+using Luban;
 using Button = UnityEngine.UI.Button;
 using Object = UnityEngine.Object;
 
@@ -21,6 +24,9 @@ namespace GameLogic.EditorTools
     /// 读目标条 → 按 J 开任务日志、Esc 关 → 按出征同样的调用顺序进破碎都市 → 进铸造前哨 → 回归还谷地。
     /// 全程收集 Error/Exception/Assert，任何一条都算失败。
     /// FG0-DATA-01：每段扫描界面文本里的 ⟦key⟧ 缺失标记；工单目标名走文本键；区域播种的敌人生命等于 fg.TbMechEnemy 表值。
+    /// FG0-SAVE-01：进主菜单前预置 Demo 存档与写坏的存档 → 查“继续”原因 → 打开存档列表查两张卡的提示 → 点 Demo 卡“新建于此槽”→
+    /// 确认框点“否”（文件不变）→ 点“读取备份” → 返回后再新建；收尾查自动存档是 v2 → 经唯一回菜单出口回主菜单 → 存档里放一件
+    /// 已移除内容（测试表）→ 点“读取”把这份 v2 存档读进游戏 → 查迁移字幕与废料。
     ///
     /// 用法：<c>bash tools/unity-play-smoke.sh</c>（影子工程里跑，编辑器开着也行）。进 Play 会重载域，
     /// 驱动状态存在 SessionState 里，[InitializeOnLoad] 重载后接着跑。
@@ -115,6 +121,14 @@ namespace GameLogic.EditorTools
                     case 7: StepRuins(inStep); break;
                     case 8: StepFoundry(inStep); break;
                     case 9: StepBackHome(inStep); break;
+                    case 20: StepOpenSlotList(inStep); break;
+                    case 21: StepSlotCards(inStep); break;
+                    case 22: StepBackupRestored(inStep); break;
+                    case 24: StepDemoConfirmShown(inStep); break;
+                    case 25: StepDemoConfirmCancelled(inStep); break;
+                    case 26: StepMenuAfterRun(inStep); break;
+                    case 27: StepLoadSlotList(inStep); break;
+                    case 28: StepLoadedIntoGame(inStep); break;
                 }
             }
             catch (Exception e)
@@ -138,8 +152,137 @@ namespace GameLogic.EditorTools
                 return;
             }
             CampaignSaveService.SaveDirectoryOverrideForTests = SessionState.GetString(K + "Saves", null);
-            Next(1, "已进入 Play；存档目录改到临时目录：" + CampaignSaveService.SaveDirectoryOverrideForTests);
+            Write("已进入 Play；存档目录改到临时目录：" + CampaignSaveService.SaveDirectoryOverrideForTests);
+            SeedSaveSlots();
+            Next(20, "预置存档：槽位 2 = 真实 Demo（0.1）存档，槽位 3 = 主档被截断、备份完好的 v2 存档");
         }
+
+        /// <summary>FG0-SAVE-01：主菜单出现前在临时存档目录里放一个 Demo 存档和一个写坏的存档，冒烟走玩家看到的提示与"读取备份"。</summary>
+        private static void SeedSaveSlots()
+        {
+            string dir = CampaignSaveService.SaveDirectory;
+            Directory.CreateDirectory(dir);
+            string fixture = Path.Combine(Application.dataPath, "Editor/QA/Fixtures/DemoSave_v1_slot.json.txt");
+            File.Copy(fixture, CampaignSaveService.SlotPath(1), true);
+            CampaignState s = CampaignState.CreateNew("smoke-backup", "Standard", 20260925);
+            CampaignSaveService.Save(2, s, SaveReason.Manual);
+            s.Scrap += 1;
+            CampaignSaveService.Save(2, s, SaveReason.Manual);
+            string main = CampaignSaveService.SlotPath(2);
+            string text = File.ReadAllText(main);
+            File.WriteAllText(main, text.Substring(0, text.Length / 2));
+        }
+
+        private static void StepOpenSlotList(double inStep)
+        {
+            Button load = FindActiveButton("m_btn_Load");
+            if (load == null)
+            {
+                if (inStep > 150)
+                {
+                    Finish("150 秒内主菜单没出现（找不到“读取”按钮）");
+                }
+                return;
+            }
+            if (inStep < 2)
+            {
+                return;
+            }
+            string reason = FindText("m_text_ContinueReason")?.text ?? "（节点没找到）";
+            Button cont = Object.FindObjectsByType<Button>(FindObjectsInactive.Exclude, FindObjectsSortMode.None).FirstOrDefault(b => b.name == "m_btn_Continue");
+            Check(cont != null && !cont.interactable && reason.Contains("Demo"),
+                $"只有 Demo 存档与坏档时“继续”不可用，原因：“{reason}”");
+            load.onClick.Invoke();
+            Next(21, $"主菜单出现（{inStep:F0} 秒），点“读取”打开存档列表");
+        }
+
+        private static void StepSlotCards(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            string demo = FindText("m_text_Slot1Info")?.text ?? string.Empty;
+            string broken = FindText("m_text_Slot2Info")?.text ?? string.Empty;
+            Button demoAction = Object.FindObjectsByType<Button>(FindObjectsInactive.Exclude, FindObjectsSortMode.None).FirstOrDefault(b => b.name == "m_btn_Slot1Action");
+            Write($"  - 槽位 2 卡片：{demo.Replace("\n", " / ")}");
+            Write($"  - 槽位 3 卡片：{broken.Replace("\n", " / ")}");
+            string demoLabel = FindText("m_text_Slot1ActionLabel")?.text ?? string.Empty;
+            Check(demo.Contains("Demo（0.1）") && demo.Contains("请新建战役") && demoAction != null && demoAction.interactable && demoLabel == "新建于此槽",
+                $"Demo 存档卡明确提示不迁移，按钮“{demoLabel}”（先确认，原文件另存保留）");
+            Check(broken.Contains("文件不完整") && broken.Contains("可以读取上一版备份"), "坏档卡显示原因与可读取的备份");
+            CheckNoTextMarkers("存档列表");
+            if (demoAction == null || !demoAction.interactable)
+            {
+                Finish("Demo 卡按钮不可点");
+                return;
+            }
+            demoAction.onClick.Invoke();
+            Next(24, "点槽位 2（Demo）的“新建于此槽”");
+        }
+
+        private static void StepDemoConfirmShown(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            string info = FindText("m_text_ConfirmInfo")?.text ?? string.Empty;
+            Button no = FindActiveButton("m_btn_ConfirmNo");
+            Write($"  - 确认框：{info.Replace("\n", " / ")}");
+            Check(no != null && info.Contains("Demo") && info.Contains("campaign_slot1.json.keep-*"), "在 Demo 槽位新建前弹确认框，写明原文件会另存保留");
+            if (no == null)
+            {
+                Finish("Demo 卡点击后没有出现确认框");
+                return;
+            }
+            no.onClick.Invoke();
+            Next(25, "确认框点“否”");
+        }
+
+        private static void StepDemoConfirmCancelled(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            string fixture = Path.Combine(Application.dataPath, "Editor/QA/Fixtures/DemoSave_v1_slot.json.txt");
+            bool untouched = File.ReadAllBytes(CampaignSaveService.SlotPath(1)).SequenceEqual(File.ReadAllBytes(fixture))
+                             && CampaignSaveService.PreservedFiles(1).Length == 0;
+            Button restore = FindActiveButton("m_btn_Slot2Action");
+            Check(untouched && restore != null, "取消后回到存档列表，Demo 文件逐字节不变、没有产生任何另存文件");
+            if (restore == null)
+            {
+                Finish("坏档的“读取备份”按钮不可点");
+                return;
+            }
+            restore.onClick.Invoke();
+            Next(22, "点槽位 3 的“读取备份”");
+        }
+
+        private static void StepBackupRestored(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            string card = FindText("m_text_Slot2Info")?.text ?? string.Empty;
+            string label = FindText("m_text_Slot2ActionLabel")?.text ?? string.Empty;
+            bool kept = CampaignSaveService.PreservedFiles(2).Any(p => p.Contains(".keep-corrupt-"));
+            Check(card.Contains("第 1 幕") && card.Contains("种子 20260925") && label == "读取" && kept,
+                $"读取备份后槽位 3 恢复为可读存档（“{card.Replace("\n", " / ")}”，按钮“{label}”），截断的主档另存保留");
+            Button back = FindActiveButton("m_btn_Back");
+            if (back == null)
+            {
+                Finish("存档列表的“返回”按钮找不到");
+                return;
+            }
+            back.onClick.Invoke();
+            Next(1, "返回主菜单");
+        }
+
+        private static UnityEngine.UI.Text FindText(string name) =>
+            Object.FindObjectsByType<UnityEngine.UI.Text>(FindObjectsInactive.Exclude, FindObjectsSortMode.None).FirstOrDefault(t => t.name == name);
 
         private static void StepClickNew(double inStep)
         {
@@ -444,7 +587,106 @@ namespace GameLogic.EditorTools
             bool active = GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive;
             Write($"  - 归还谷地激活：{active}");
             CheckNoTextMarkers("回到归还谷地");
-            Finish(active ? "完成" : "回不到归还谷地");
+            // FG0-SAVE-01：正式流程里的自动存档写成 v2（带卡片头），槽位卡可读。
+            CampaignSlotMetadata saved = CampaignSaveService.GetSlotMetadata(CampaignSession.ActiveSlotIndex);
+            Check(saved.State == CampaignSlotState.Ready && saved.SchemaVersion == CampaignSaveService.CurrentSchemaVersion && saved.ProductVersion == "0.2"
+                  && saved.WorldSeed == CampaignSession.Current.World.WorldSeed,
+                $"正式流程的存档：槽位 {CampaignSession.ActiveSlotIndex + 1} 为 v{saved.SchemaVersion}、游戏版本 {saved.ProductVersion}、种子 {saved.WorldSeed}");
+            if (!active)
+            {
+                Finish("回不到归还谷地");
+                return;
+            }
+            SessionState.SetInt(K + "PlayedSlot", CampaignSession.ActiveSlotIndex);
+            GameRoot.EndRun();
+            Next(26, "测试捷径：调用胜利 / 失败页“返回主菜单”按钮用的唯一出口 GameRoot.EndRun()");
+        }
+
+        private const string SmokeRemovedId = "organ_removed_smoke";
+
+        /// <summary>FG0-SAVE-01：主菜单出现后，在刚玩过的存档里放一件已移除内容（测试表，不改正式表），然后从“读取”进游戏。</summary>
+        private static void StepMenuAfterRun(double inStep)
+        {
+            Button load = FindActiveButton("m_btn_Load");
+            if (load == null)
+            {
+                if (inStep > 60)
+                {
+                    Finish("60 秒内没回到主菜单");
+                }
+                return;
+            }
+            if (inStep < 2)
+            {
+                return;
+            }
+            int slot = SessionState.GetInt(K + "PlayedSlot", 0);
+            LoadResult onDisk = CampaignSaveService.Load(slot);
+            if (!onDisk.Success)
+            {
+                Finish($"刚玩过的存档读不出来：{onDisk.Outcome}/{onDisk.Reason}");
+                return;
+            }
+            CampaignState s = onDisk.State;
+            SessionState.SetInt(K + "ScrapBefore", s.Scrap);
+            s.PrimitiveChips = (s.PrimitiveChips ?? Array.Empty<PrimitiveChipRecord>())
+                .Concat(new[] { new PrimitiveChipRecord { PartId = "pchip_smoke_removed", CardDefId = SmokeRemovedId, State = PrimitiveChipState.Bag } })
+                .ToArray();
+            CampaignSaveService.Save(slot, s, SaveReason.Manual);
+            var buf = new ByteBuf();
+            buf.WriteSize(1);
+            buf.WriteString(SmokeRemovedId);
+            buf.WriteString("primitive_chip");
+            buf.WriteString("enemy.scout.name");
+            buf.WriteInt(9);
+            buf.WriteInt(2);
+            SaveContentReconciler.OverrideForTests(new TbRemovedContent(buf), id => id != SmokeRemovedId);
+            load.onClick.Invoke();
+            Next(27, $"回到主菜单；测试捷径：槽位 {slot + 1} 存档里放一件已移除内容（测试表：退还 9 废料），点“读取”");
+        }
+
+        private static void StepLoadSlotList(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            int slot = SessionState.GetInt(K + "PlayedSlot", 0);
+            string label = FindText($"m_text_Slot{slot}ActionLabel")?.text ?? string.Empty;
+            Button action = FindActiveButton($"m_btn_Slot{slot}Action");
+            Check(action != null && label == "读取", $"槽位 {slot + 1} 卡片按钮是“{label}”");
+            if (action == null)
+            {
+                Finish("找不到刚玩过的存档的“读取”按钮");
+                return;
+            }
+            action.onClick.Invoke();
+            Next(28, $"点槽位 {slot + 1} 的“读取”");
+        }
+
+        private static void StepLoadedIntoGame(double inStep)
+        {
+            if (!(GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive))
+            {
+                if (inStep > 120)
+                {
+                    Finish("120 秒内读档没进入归还谷地");
+                }
+                return;
+            }
+            if (inStep < 1)
+            {
+                return;
+            }
+            CampaignState st = CampaignSession.Current;
+            string[] captions = FeedbackCues.ActiveCaptions.Where(c => c.Cue == FeedbackCueId.SaveContentMigrated).Select(c => c.Text).ToArray();
+            Write($"  - 读档字幕：{string.Join("／", captions)}");
+            int before = SessionState.GetInt(K + "ScrapBefore", 0);
+            Check(st != null && st.PrimitiveChips.All(c => c.CardDefId != SmokeRemovedId) && st.Scrap == before + 9,
+                $"读档进入游戏：已移除内容转换为废料（{before}→{st?.Scrap}）");
+            Check(captions.Any(c => c.Contains("静默侦察机") && c.Contains("9 废料")), "进入游戏后弹出迁移字幕");
+            CheckNoTextMarkers("读档进入游戏");
+            Finish("完成");
         }
 
         // ── 工具 ────────────────────────────────────────────────────
@@ -467,6 +709,7 @@ namespace GameLogic.EditorTools
             try
             {
                 InputRouter.DebugSetReader(null);
+                SaveContentReconciler.ResetForTests();
                 CampaignSaveService.SaveDirectoryOverrideForTests = null;
                 string saves = SessionState.GetString(K + "Saves", null);
                 if (!string.IsNullOrEmpty(saves) && Directory.Exists(saves))

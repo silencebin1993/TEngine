@@ -139,6 +139,8 @@ namespace GameLogic.Campaign.Feedback
 
             // ── 家园与通用 ─────────────────────────────────────────────────
             Add(new FeedbackCueDef { Id = FeedbackCueId.BuildComplete, SfxId = "sfx_build_complete", Tag = "建造", Caption = "完工", Tone = FeedbackTone.Good, RequirementNote = "BuildingCatalog.SfxId 消费点" });
+            // FG0-SAVE-01：读档后的内容迁移通知（正文由 SaveContentReconciler.Render 走文本键生成），停留更久。
+            Add(new FeedbackCueDef { Id = FeedbackCueId.SaveContentMigrated, SfxId = "sfx_objective_new", Channel = AudioType.UISound, Tag = "存档", Caption = string.Empty, Tone = FeedbackTone.Warning, CaptionSeconds = 10f, MinIntervalSeconds = 0f, RequirementNote = "FGR-SYS-004 读档后通知" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.SaveComplete, SfxId = "sfx_save_ok", Channel = AudioType.UISound, Tag = "存档", Caption = "已保存", Tone = FeedbackTone.Info, CaptionSeconds = 2.5f, MinIntervalSeconds = 1f });
             Add(new FeedbackCueDef { Id = FeedbackCueId.CommandAck, SfxId = "sfx_command_ack", Channel = AudioType.UISound, Volume = 0.7f, MinIntervalSeconds = 0.15f, CaptionMode = FeedbackCaptionMode.None, RequirementNote = "ChassisCatalog.SfxId 消费点（命令确认音按底盘区分）" });
             // 按钮本身的按下态就是等价视觉反馈，不出字幕。
