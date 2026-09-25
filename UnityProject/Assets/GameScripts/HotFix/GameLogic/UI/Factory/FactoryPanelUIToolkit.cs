@@ -182,11 +182,24 @@ namespace GameLogic.UI.Factory
             }
         }
 
+        /// <summary>维修机未解锁时按钮是灰的，此前界面不说为什么——在生产提示行写明解锁条件（不改按钮尺寸）。</summary>
+        public const string HoverLockedHint = "维修机：先让解析台通电运转后解锁";
+
         private void RefreshProduceButtons(CampaignState state)
         {
             SetProduceButton(_produceErc003, state, HomeValleyLayout.BlueprintErc003Id);
             SetProduceButton(_produceHauler, state, HomeValleyLayout.BlueprintHaulerId);
             SetProduceButton(_produceHover, state, HomeValleyLayout.BlueprintHoverId);
+
+            bool hoverLocked = state == null || !HomeValleyFactory.IsBlueprintUnlocked(state, HomeValleyLayout.BlueprintHoverId);
+            if (hoverLocked && string.IsNullOrEmpty(_produceHint.text))
+            {
+                _produceHint.text = HoverLockedHint;
+            }
+            else if (!hoverLocked && _produceHint.text == HoverLockedHint)
+            {
+                _produceHint.text = string.Empty;
+            }
         }
 
         private static void SetProduceButton(Button button, CampaignState state, string blueprintId)
