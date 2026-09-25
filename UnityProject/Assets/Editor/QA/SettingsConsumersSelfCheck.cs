@@ -37,6 +37,8 @@ namespace GameLogic.EditorTools
             ("Factory/FactoryPanel.uxml", "FactoryPanelRoot"),
             ("Feedback/FeedbackCaptionHud.uxml", "FeedbackCaptionRoot"),
             ("HomeValleyFailure/HomeValleyFailure.uxml", "HomeValleyFailureRoot"),
+            ("Objective/MissionLog.uxml", "MissionLogRoot"),
+            ("Objective/ObjectiveHud.uxml", "ObjectiveHudRoot"),
             ("PrimitiveCraft/PrimitiveCraftPanel.uxml", "CraftPanelRoot"),
             ("RegionCommand/RegionCommandBar.uxml", "RegionCommandBarRoot"),
             ("Victory/VictoryPage.uxml", "VictoryPageRoot"),

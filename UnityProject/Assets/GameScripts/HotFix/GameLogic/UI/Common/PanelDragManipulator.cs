@@ -13,6 +13,13 @@ namespace GameLogic.UI.Common
     {
         private const int FirstFloatingOrder = 32;
         private const int LastFloatingOrder = 30000;
+
+        /// <summary>字幕条：非声音等价反馈，任何被点到前面的浮动窗口都不能盖住它（只比全屏模态低）。</summary>
+        public const int CaptionSortingOrder = LastFloatingOrder + 50;
+
+        /// <summary>全屏阻断式模态（家园失败页、胜利页）：必须盖过被点到前面的浮动窗口（浮动层 33～30000）。</summary>
+        public const int ModalSortingOrder = LastFloatingOrder + 100;
+
         private static int _nextSortingOrder = FirstFloatingOrder;
         private static readonly List<VisualElement> RegisteredWindows = new List<VisualElement>();
 

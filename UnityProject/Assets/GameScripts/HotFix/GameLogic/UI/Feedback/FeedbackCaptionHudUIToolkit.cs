@@ -48,9 +48,9 @@ namespace GameLogic.UI.Feedback
             _document = gameObject.AddComponent<UIDocument>();
             _document.visualTreeAsset = _visualTree;
             _document.panelSettings = _panelSettings;
-            // UI_WORKFLOW_GUIDE.md 分层表：结算(12)之上、家园失败/胜利全屏模态(20)之下——
-            // 打开任何玩法面板时通知仍可见，但不会盖住阻断式失败页。
-            _document.sortingOrder = 13;
+            // UI_WORKFLOW_GUIDE.md 分层表：所有面板（含被点到前面的浮动窗口）之上、全屏模态之下——
+            // 打开任何玩法面板时通知仍可见，但不会盖住阻断式失败页/胜利页。
+            _document.sortingOrder = Common.UiWindowFocus.CaptionSortingOrder;
 
             for (int guard = 0; guard < 10 && _document.rootVisualElement == null; guard++)
             {

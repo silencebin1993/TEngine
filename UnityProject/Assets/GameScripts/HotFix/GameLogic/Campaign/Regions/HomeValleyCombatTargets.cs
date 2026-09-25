@@ -244,6 +244,11 @@ namespace GameLogic.Campaign.Regions
             var ok = HitResult.Ok(damage, target.Health, target.MaxHealth,
                 resolution.Preview.ReactionHint, resolution.CompileSignature, isAiSource, attackerLogicId);
             PushEvent(ok);
+            if (!isAiSource)
+            {
+                // ER8 / OBJ-03“建造第一台战斗机并接管”：首次直控命中低威胁靶的一次性事件（幂等）。
+                CampaignEventLedger.TryGrant(state, CampaignObjectiveCatalog.DirectHitEventId, "DirectHit", state.PlaySeconds, targetId);
+            }
             return ok;
         }
 

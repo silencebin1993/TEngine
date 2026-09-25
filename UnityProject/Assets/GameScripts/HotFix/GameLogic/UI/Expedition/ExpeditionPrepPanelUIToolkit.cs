@@ -190,9 +190,8 @@ namespace GameLogic.UI.Expedition
             string objectiveLine = string.IsNullOrEmpty(snapshot.ObjectivePreviewText)
                 ? string.Empty
                 : "\n目标：" + snapshot.ObjectivePreviewText;
-            // ER6-LOOP-01：最小可见的目标进度提示——CampaignObjectiveTracker 此前只写状态无任何 HUD
-            // 呈现，这里先把阶段名+最新已完成 OBJ 接进已有的情报文案，不新开一整块目标面板
-            // （DEBT-ER6LOOP01-01 登记完整目标 HUD/地图，留给 ER9-TUTOR-01 等 onboarding 系列）。
+            // ER6-LOOP-01 起在情报文案末尾附目标进度；ER8 收尾（DEBT-ER6LOOP01-01）常驻目标条/任务日志
+            // 落地后，这一行与它们同源（当前目标标题 + 完成数），不再显示原始阶段枚举名与 OBJ 编号。
             _intelLabel.text = $"目标：{targetName}（第 {snapshot.ExpeditionCount + 1} 次出击）｜警戒 {snapshot.EnemyAlertLevel:F0}/100" +
                 objectiveLine + $"\n{snapshot.EnemyIntelText}\n{DescribeObjectiveProgress(state)}";
 
@@ -289,28 +288,20 @@ namespace GameLogic.UI.Expedition
             _departButton.SetEnabled(!interruptVisible);
         }
 
-        /// <summary>ER6-LOOP-01：最小可见文案——阶段名 + 已完成的最靠后一条 OBJ-05～08。不追踪
-        /// OBJ-01～04/09/10（不在 CampaignObjectiveTracker 范围内，见该类类注释）。</summary>
+        /// <summary>当前目标标题 + 已完成数，与常驻目标条（<see cref="CampaignObjectiveCatalog"/>）同源。</summary>
         private static string DescribeObjectiveProgress(CampaignState state)
         {
             if (state == null)
             {
                 return string.Empty;
             }
-            string latestObj = null;
-            foreach (string id in new[]
-                     {
-                         CampaignObjectiveTracker.Obj08, CampaignObjectiveTracker.Obj07,
-                         CampaignObjectiveTracker.Obj06, CampaignObjectiveTracker.Obj05,
-                     })
-            {
-                if (CampaignObjectiveTracker.IsCompleted(state, id))
-                {
-                    latestObj = id;
-                    break;
-                }
-            }
-            return $"阶段：{state.CampaignPhase}" + (latestObj != null ? $"｜最新完成：{latestObj}" : string.Empty);
+            int total = CampaignObjectiveCatalog.All.Length;
+            int completed = CampaignObjectiveCatalog.All.Count(d => CampaignObjectiveTracker.IsCompleted(state, d.Id));
+            string currentId = CampaignObjectiveTracker.CurrentObjectiveId(state);
+            string current = currentId != null
+                ? "当前目标：" + CampaignObjectiveCatalog.TitleOf(currentId)
+                : completed == total ? "全部目标完成" : "当前目标：无";
+            return $"{current}｜已完成 {completed}/{total}（按 {Settings.GameSettings.KeyBindings.GetKey(Core.GameActionId.ToggleMissionLog)} 看任务日志）";
         }
 
         private static string DescribeStatus(ExpeditionDepartureService.MachineIntel m)

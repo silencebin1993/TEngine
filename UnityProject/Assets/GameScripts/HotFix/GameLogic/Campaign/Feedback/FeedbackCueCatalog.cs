@@ -144,6 +144,10 @@ namespace GameLogic.Campaign.Feedback
             // 按钮本身的按下态就是等价视觉反馈，不出字幕。
             Add(new FeedbackCueDef { Id = FeedbackCueId.UiClick, SfxId = "sfx_ui_click", Channel = AudioType.UISound, Volume = 0.8f, MinIntervalSeconds = 0.04f, CaptionMode = FeedbackCaptionMode.None });
 
+            // ── 战役目标 ───────────────────────────────────────────────────
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ObjectiveActivated, SfxId = "sfx_objective_new", Channel = AudioType.UISound, Tag = "新目标", Caption = string.Empty, Tone = FeedbackTone.Info, CaptionSeconds = 6f, RequirementNote = "AC-CAM-001 目标 HUD/日志" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ObjectiveComplete, SfxId = "sfx_objective_complete", Tag = "目标完成", Caption = string.Empty, Tone = FeedbackTone.Good, CaptionSeconds = 6f, RequirementNote = "AC-CAM-001 完成事件" });
+
             return defs;
         }
     }

@@ -414,6 +414,14 @@ namespace GameLogic.Stage
             var feedbackCaptionHost = new GameObject("[FeedbackCaptionHudHost]");
             Object.DontDestroyOnLoad(feedbackCaptionHost);
             feedbackCaptionHost.AddComponent<UI.Feedback.FeedbackCaptionHudUIToolkit>();
+            // ER8 收尾 DEBT-ER6LOOP01-01：常驻当前目标条 + 任务日志/战役地图窗口，各自独立 GameObject
+            // （同一条 UIDocument 唯一性纪律）。只在三个区域之一激活时可见，只读追踪器与目标表。
+            var objectiveHudHost = new GameObject("[ObjectiveHudHost]");
+            Object.DontDestroyOnLoad(objectiveHudHost);
+            objectiveHudHost.AddComponent<UI.Objective.ObjectiveHudUIToolkit>();
+            var missionLogHost = new GameObject("[MissionLogHost]");
+            Object.DontDestroyOnLoad(missionLogHost);
+            missionLogHost.AddComponent<UI.Objective.MissionLogUIToolkit>();
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             // 已被 UI Toolkit 覆盖的旧 IMGUI 调试 HUD 不得默认盖在玩家界面上；
             // 如需做历史对照，可在运行时显式启用该组件。

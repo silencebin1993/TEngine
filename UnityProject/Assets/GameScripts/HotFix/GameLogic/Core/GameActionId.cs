@@ -57,5 +57,7 @@ namespace GameLogic.Core
         CommandAttack = 33,
         CommandGuard = 34,
         CommandRetreat = 35,
+        /// <summary>ER8（DEBT-ER6LOOP01-01）：打开/关闭任务日志与战役地图，默认 J，可重绑。</summary>
+        ToggleMissionLog = 36,
     }
 }

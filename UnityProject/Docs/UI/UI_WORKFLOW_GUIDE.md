@@ -32,7 +32,7 @@
 
 - UI 只能调用领域模块的公开入口：例如模板提交走 `LineageRegistry.CommitTemplate`，萌生走 `GerminationChamberRegistry.Enqueue`，回巢走 `HomecomingRetrofitService`。
 - UI 不重写校验、扣费或状态机；失败文案应显示领域模块返回的原因。
-- 运行中控制器加载资源时复用 `BattleHudPanelSettings`，并用明确的 `sortingOrder`：HUD 0、战略命令条 1（ER5-CMD-01，归还谷地/破碎都市共用，常驻底部）、运行中枢 2、装配 4（旧细胞阶段面板）、家园装配站生产面板 6（ER4-FAC-01，与"装配 4"是两套不同系统，勿混用）、萌生 7、远征准备面板 8（ER5-EXP-01）、蓝图编辑器 8（ER4-BLP-01，与远征准备不会同屏）、合成台 9（ER4-PRIM-04）、覆盖面板 10、表型工坊 11、结算 12、家园失败面板 20（ER3-SOFTLOCK-01，全屏阻断式模态，必须盖过任何既有 HUD/面板）。
+- 运行中控制器加载资源时复用 `BattleHudPanelSettings`，并用明确的 `sortingOrder`：HUD 0、战略命令条 1（ER5-CMD-01，归还谷地/破碎都市共用，常驻底部）、运行中枢 2、装配 4（旧细胞阶段面板）、家园装配站生产面板 6（ER4-FAC-01，与"装配 4"是两套不同系统，勿混用）、萌生 7、远征准备面板 8（ER5-EXP-01）、蓝图编辑器 8（ER4-BLP-01，与远征准备不会同屏）、合成台 9（ER4-PRIM-04）、覆盖面板 10（含任务日志/战役地图、信标启动确认）、表型工坊 11、结算 12；当前目标条 3（右上角速度 HUD 正下方，常驻、不拦截点击）；被点击/拖动的浮动窗口经 `UiWindowFocus.BringToFront` 提到浮动层 33～30000；字幕条 `UiWindowFocus.CaptionSortingOrder`（30050，浮动层之上，任何窗口都盖不住）；家园失败面板/胜利页 `UiWindowFocus.ModalSortingOrder`（30100，全屏阻断式模态，必须盖过任何 HUD/面板/浮动窗口；此前固定 20，被点到前面的窗口会盖在失败页上）。
 - 新面板默认隐藏，且在阶段不运行时自动隐藏。开发 HUD 不能默认覆盖正式 UI。
 
 ## 5. 每次改 UI 的验收顺序

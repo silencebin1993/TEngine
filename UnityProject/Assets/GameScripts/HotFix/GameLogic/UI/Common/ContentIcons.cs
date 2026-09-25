@@ -28,6 +28,9 @@ namespace GameLogic.UI.Common
         public const string StateUnpowered = "icon_state_unpowered";
         public const string StateBlocked = "icon_state_blocked";
 
+        /// <summary>世界目标标记（定位针）：当前目标下一步要去的位置。</summary>
+        public const string ObjectiveMarker = "icon_objective_marker";
+
         private static readonly Dictionary<string, string> ChipIcons = new Dictionary<string, string>
         {
             ["organ_focus"] = "icon_chip_focus",
@@ -81,6 +84,7 @@ namespace GameLogic.UI.Common
             ids.Add(StateDamaged);
             ids.Add(StateUnpowered);
             ids.Add(StateBlocked);
+            ids.Add(ObjectiveMarker);
             return ids;
         }
 

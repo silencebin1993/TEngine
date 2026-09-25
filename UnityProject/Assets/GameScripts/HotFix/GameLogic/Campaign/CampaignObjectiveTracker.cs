@@ -34,6 +34,13 @@ namespace GameLogic.Campaign
     /// 天然会重复触发，见下）、重复读档都不会二次记录/二次推进阶段/二次发奖（AC-CAM-001 字面要求）。</summary>
     public static class CampaignObjectiveTracker
     {
+        /// <summary>ER8 收尾（DEBT-ER6LOOP01-01 / AC-CAM-001“OBJ-01～10 均有持久 ObjectiveRecord”）：
+        /// OBJ-01～04 此前没有任何记录与判定（类注释里说的“派生快照”实际不存在）。完成判定用
+        /// <see cref="CampaignObjectiveCatalog"/> 的清单（全部达成＝完成），同样只读既有权威字段。</summary>
+        public const string Obj01 = "OBJ-01";
+        public const string Obj02 = "OBJ-02";
+        public const string Obj03 = "OBJ-03";
+        public const string Obj04 = "OBJ-04";
         public const string Obj05 = "OBJ-05";
         public const string Obj06 = "OBJ-06";
         public const string Obj07 = "OBJ-07";
@@ -64,12 +71,45 @@ namespace GameLogic.Campaign
             {
                 return;
             }
+            // 头尾各做一次“被超越的目标静默补记完成”：头一次处理旧档（OBJ-05 以后已有记录、OBJ-01～04
+            // 从未记录），尾一次处理本轮刚被另一条路径激活的后续目标（跳过 OBJ-03 直控命中就出征）。
+            SupersedeSkipped(state);
+            RecomputeByChecklist(state, Obj01, null);
+            RecomputeByChecklist(state, Obj02, Obj01);
+            RecomputeByChecklist(state, Obj03, Obj02);
+            RecomputeByChecklist(state, Obj04, Obj03);
             RecomputeObj05(state);
             RecomputeObj06(state);
             RecomputeObj07(state);
             RecomputeObj08(state);
             RecomputeObj09(state);
             RecomputeObj10(state);
+            SupersedeSkipped(state);
+        }
+
+        /// <summary>目标链严格线性：某个后续目标已经开始（进行中或已完成）时，它前面仍未完成的目标视为
+        /// 已被超越，静默补记完成（不发“新目标/目标完成”提示，不推进阶段）。保证任何时刻最多一个进行中
+        /// 的目标——目标条不会停在玩家早已走过的步骤上。正常流程里前置必然已完成，这里不产生任何动作；
+        /// 只有 OBJ-05 有“正式出发过”这条旁路（旧档没有 OBJ-04 记录），实际只会补记 OBJ-01～04。</summary>
+        private static void SupersedeSkipped(CampaignState state)
+        {
+            ObjectiveDef[] all = CampaignObjectiveCatalog.All;
+            int furthest = -1;
+            for (int i = all.Length - 1; i >= 0; i--)
+            {
+                if (StateOf(state, all[i].Id) != ObjectiveState.Locked)
+                {
+                    furthest = i;
+                    break;
+                }
+            }
+            for (int i = 0; i < furthest; i++)
+            {
+                if (!IsCompleted(state, all[i].Id))
+                {
+                    Complete(state, all[i].Id, resultPhase: null, silent: true);
+                }
+            }
         }
 
         /// <summary>出发时机的 CampaignPhase 前进——与 OBJ 完成结算是两条独立的触发线
@@ -88,6 +128,8 @@ namespace GameLogic.Campaign
             {
                 return;
             }
+            // 出发前先结算一次：OBJ-04“至少 3 台可出征”要在机器离开归还谷地之前判定。
+            Recompute(state);
             if (target == ExpeditionDepartureService.ExpeditionTarget.SilentRuins)
             {
                 AdvancePhase(state, CampaignPhase.FirstExpedition);
@@ -141,7 +183,7 @@ namespace GameLogic.Campaign
             return rec;
         }
 
-        private static void Activate(CampaignState state, string objectiveId)
+        private static void Activate(CampaignState state, string objectiveId, bool silent = false)
         {
             ObjectiveRecord rec = EnsureRecord(state, objectiveId);
             if (rec.State != ObjectiveState.Locked)
@@ -150,10 +192,51 @@ namespace GameLogic.Campaign
             }
             rec.State = ObjectiveState.Active;
             rec.StartedAtPlaySeconds = state.PlaySeconds;
+            // ER8：新目标出现的那一刻给提示（Locked→Active 只发生一次；读档时已是 Active 不会重复）。
+            if (!silent)
+            {
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.ObjectiveActivated, CampaignObjectiveCatalog.TitleOf(objectiveId));
+            }
+        }
+
+        /// <summary>OBJ-01～04：前置完成即激活，清单全部达成即完成（不推进 CampaignPhase——
+        /// 这四项都在 Landing 阶段内，首次出发时才进入 FirstExpedition）。</summary>
+        private static void RecomputeByChecklist(CampaignState state, string objectiveId, string prerequisiteId)
+        {
+            if (IsCompleted(state, objectiveId))
+            {
+                return;
+            }
+            if (prerequisiteId != null && !IsCompleted(state, prerequisiteId))
+            {
+                return;
+            }
+            Activate(state, objectiveId);
+            if (CampaignObjectiveCatalog.AllItemsDone(state, objectiveId))
+            {
+                Complete(state, objectiveId, resultPhase: null);
+            }
+        }
+
+        /// <summary>当前应该展示给玩家的目标：按 OBJ-01～10 顺序第一个进行中的目标；全部完成返回 null。</summary>
+        public static string CurrentObjectiveId(CampaignState state)
+        {
+            if (state == null)
+            {
+                return null;
+            }
+            foreach (ObjectiveDef def in CampaignObjectiveCatalog.All)
+            {
+                if (StateOf(state, def.Id) == ObjectiveState.Active)
+                {
+                    return def.Id;
+                }
+            }
+            return null;
         }
 
         /// <summary>完成一个目标——幂等（已完成直接返回），可选联动推进 <see cref="CampaignPhase"/>。</summary>
-        private static void Complete(CampaignState state, string objectiveId, CampaignPhase? resultPhase)
+        private static void Complete(CampaignState state, string objectiveId, CampaignPhase? resultPhase, bool silent = false)
         {
             ObjectiveRecord rec = EnsureRecord(state, objectiveId);
             if (rec.State == ObjectiveState.Completed)
@@ -162,7 +245,8 @@ namespace GameLogic.Campaign
             }
             if (rec.State == ObjectiveState.Locked)
             {
-                Activate(state, objectiveId); // 防御：理论上调用方总会先 Activate，这里兜底不留缺口。
+                // 防御：理论上调用方总会先 Activate，这里兜底不留缺口；补记完成时不单独提示“新目标”。
+                Activate(state, objectiveId, silent: true);
             }
             string eventId = $"objective_complete:{state.CampaignId}:{objectiveId}";
             CampaignEventLedger.TryGrant(state, eventId, "ObjectiveComplete", state.PlaySeconds, objectiveId);
@@ -175,7 +259,11 @@ namespace GameLogic.Campaign
             {
                 AdvancePhase(state, resultPhase.Value);
             }
-            Log.Info($"[CampaignObjectiveTracker] {objectiveId} 已完成。");
+            Log.Info($"[CampaignObjectiveTracker] {objectiveId} 已完成{(silent ? "（被后续目标超越，静默补记）" : string.Empty)}。");
+            if (!silent)
+            {
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.ObjectiveComplete, CampaignObjectiveCatalog.TitleOf(objectiveId));
+            }
         }
 
         // ── 逐目标判定（结构性，复用既有权威字段，不重复实现判定逻辑）─────────
@@ -192,9 +280,11 @@ namespace GameLogic.Campaign
                 return;
             }
             RegionRecord ruins = FracturedCityRegion.Find(state);
-            if (ruins == null || ruins.ExpeditionCount <= 0)
+            bool departed = ruins != null && ruins.ExpeditionCount > 0;
+            // ER8：OBJ-04 完成即激活（此前要等真的出发过才出现，玩家在家园里看不到“下一步去破碎都市”）。
+            if (!departed && !IsCompleted(state, Obj04))
             {
-                return; // 尚未正式出发过，维持 Locked。
+                return;
             }
             Activate(state, Obj05);
 

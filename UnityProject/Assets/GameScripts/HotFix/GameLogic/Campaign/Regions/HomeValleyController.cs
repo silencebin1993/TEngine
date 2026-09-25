@@ -37,6 +37,9 @@ namespace GameLogic.Campaign.Regions
         private readonly List<HomeValleyMachineMarker> _machineMarkers = new List<HomeValleyMachineMarker>(4);
         /// <summary>ER8-CONTENT-01：建筑状态悬浮标记，按 BuildingTypeId 索引。</summary>
         private readonly Dictionary<string, WorldBadge> _buildingBadges = new Dictionary<string, WorldBadge>();
+        private float _objectiveRecomputeTimer;
+        /// <summary>ER8 收尾（UI-14“世界标记使用同一目标状态”）：当前目标下一步所在位置的定位针，唯一一个。</summary>
+        private WorldBadge _objectiveMarker;
         private HomeValleyMachineMarker _selected;
 
         /// <summary>ER2-INPUT-01：归还谷地自己的镜头状态机实例（不共享细胞阶段那个——两边场景
@@ -145,6 +148,16 @@ namespace GameLogic.Campaign.Regions
             if (!IsActive)
             {
                 return;
+            }
+
+            // ER8（DEBT-ER6LOOP01-01）：目标兜底重算——OBJ-01～04 依赖建筑修复/通电/生产/直控命中等多处
+            // 状态变化，逐个调用点接线容易漏；0.5 秒真实时间重算一次（纯查询 + 幂等写，开销常数级）。
+            _objectiveRecomputeTimer -= Time.unscaledDeltaTime;
+            if (_objectiveRecomputeTimer <= 0f)
+            {
+                _objectiveRecomputeTimer = 0.5f;
+                CampaignObjectiveTracker.Recompute(CampaignSession.Current);
+                RefreshObjectiveMarker(CampaignSession.Current);
             }
 
             // 同 CellStageFlow.Update 的既定写法：暂停开关与 InputRouter 同步、镜头驱动，
@@ -1079,6 +1092,26 @@ namespace GameLogic.Campaign.Regions
             return HomeValleyCargo.CommitHaul(state, ticket, nodeId + ":salvage-tx");
         }
 
+        /// <summary>定位针悬在建筑状态标记（y=2.9）上方，与目标条读同一份 <see cref="CampaignObjectiveCatalog"/>；
+        /// 下一步不在具体位置上（例如去蓝图编辑器保存）时隐藏，不指错地方。</summary>
+        private void RefreshObjectiveMarker(CampaignState state)
+        {
+            if (_objectiveMarker == null)
+            {
+                return;
+            }
+            if (state == null || !CampaignObjectiveCatalog.TryGetHomeMarker(state, out Vector2 where))
+            {
+                _objectiveMarker.SetVisible(false);
+                return;
+            }
+            _objectiveMarker.transform.position = new Vector3(where.x, ObjectiveMarkerHeight, where.y);
+            _objectiveMarker.SetIcon(ContentIcons.ObjectiveMarker);
+            _objectiveMarker.SetVisible(true);
+        }
+
+        private const float ObjectiveMarkerHeight = 4.4f;
+
         private void RefreshBuildingVisual(BuildingRecord building)
         {
             if (_root == null)
@@ -1136,6 +1169,9 @@ namespace GameLogic.Campaign.Regions
                 }
             }
             BuildCombatTargetVisual();
+
+            _objectiveMarker = WorldBadge.Create(_root.transform, "Badge_Objective", new Vector3(0f, ObjectiveMarkerHeight, 0f), 1.6f);
+            RefreshObjectiveMarker(state);
 
             if (!state.BuildingRecords.Any(b => b.BuildingId == HomeValleyLayout.RegionId + ":" + HomeValleyLayout.BuildingTypeGenerator2))
             {
@@ -1879,6 +1915,7 @@ namespace GameLogic.Campaign.Regions
                 UnityEngine.Object.Destroy(_root);
                 _root = null;
             }
+            _objectiveMarker = null;
             _machineMarkers.Clear();
             _selected = null;
             _possessed = null;

@@ -44,7 +44,9 @@ namespace GameLogic.UI.HomeValleyFailure
             _document = gameObject.AddComponent<UIDocument>();
             _document.visualTreeAsset = _visualTree;
             _document.panelSettings = _panelSettings;
-            _document.sortingOrder = 20; // 家园失败面板（UI_WORKFLOW_GUIDE.md 第4节）：全屏阻断式模态，必须盖过任何既有 HUD/面板。
+            // 家园失败面板（UI_WORKFLOW_GUIDE.md 第4节）：全屏阻断式模态，必须盖过任何既有 HUD/面板——包括被点到
+            // 前面的浮动窗口（浮动层 33～30000；此前固定 20，点过的装配站/蓝图窗口会盖在失败页上面）。
+            _document.sortingOrder = Common.UiWindowFocus.ModalSortingOrder;
 
             for (int guard = 0; guard < 10 && _document.rootVisualElement == null; guard++)
             {

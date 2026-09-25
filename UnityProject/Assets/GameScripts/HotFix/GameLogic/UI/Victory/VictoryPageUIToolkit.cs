@@ -54,8 +54,8 @@ namespace GameLogic.UI.Victory
             _document.visualTreeAsset = _visualTree;
             _document.panelSettings = _panelSettings;
             // 全屏阻断式模态，同家园失败面板（UI_WORKFLOW_GUIDE.md 第4节）同一量级——两者互斥（一个
-            // 是核心被毁失败，一个是信标启动成功），不会同时显示，共用 sortingOrder 不冲突。
-            _document.sortingOrder = 20;
+            // 是核心被毁失败，一个是信标启动成功），不会同时显示，共用 sortingOrder 不冲突；同样要盖过浮动窗口。
+            _document.sortingOrder = Common.UiWindowFocus.ModalSortingOrder;
 
             for (int guard = 0; guard < 10 && _document.rootVisualElement == null; guard++)
             {

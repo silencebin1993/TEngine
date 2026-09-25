@@ -99,7 +99,7 @@ namespace GameLogic.EditorTools
                 }
             }
             Expect(missing.Count == 0, missing.Count == 0
-                ? $"全部 {ids.Count} 个图标（35 条内容 + 2 件基元芯片 + 4 个建筑状态）都有真实贴图"
+                ? $"全部 {ids.Count} 个图标（35 条内容 + 2 件基元芯片 + 4 个建筑状态 + 1 个目标定位针）都有真实贴图"
                 : "图标贴图缺失：" + string.Join("、", missing));
             Expect(badImport.Count == 0, badImport.Count == 0
                 ? "图标导入设置统一（无 mipmap、边缘钳制、透明通道）"

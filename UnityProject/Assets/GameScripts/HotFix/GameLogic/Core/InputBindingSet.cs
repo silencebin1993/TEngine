@@ -40,6 +40,7 @@ namespace GameLogic.Core
             GameActionId.TogglePause,
             GameActionId.Cancel,
             GameActionId.DirectSkillSlot0,
+            GameActionId.ToggleMissionLog,
         };
 
         private readonly Dictionary<GameActionId, KeyCode> _bindings = new Dictionary<GameActionId, KeyCode>();
@@ -91,6 +92,7 @@ namespace GameLogic.Core
                 case GameActionId.CommandAttack: return KeyCode.C;
                 case GameActionId.CommandGuard: return KeyCode.G;
                 case GameActionId.CommandRetreat: return KeyCode.H;
+                case GameActionId.ToggleMissionLog: return KeyCode.J;
                 default: return KeyCode.None;
             }
         }

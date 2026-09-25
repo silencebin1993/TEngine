@@ -52,6 +52,10 @@ namespace GameLogic.Campaign.Feedback
         CommandAck,
         UiClick,
 
+        // ── 战役目标（DEBT-ER6LOOP01-01） ──
+        ObjectiveActivated,
+        ObjectiveComplete,
+
         Max,
     }
 

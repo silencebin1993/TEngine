@@ -56,6 +56,7 @@ namespace GameLogic
             (GameActionId.ToggleCameraView, "切换镜头视角"),
             (GameActionId.TogglePause, "暂停/继续"),
             (GameActionId.Cancel, "取消/返回"),
+            (GameActionId.ToggleMissionLog, "任务日志与地图"),
             (GameActionId.DirectSkillSlot0, "冲刺"),
         };
 
