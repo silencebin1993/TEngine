@@ -20,6 +20,8 @@
 
 正式版（FG，门禁中）：[方向稿](ProjectA_FullGame_Design.md) → [里程碑](ProjectA_FullGame_Milestones.md) → [详细设计 fullgame/](fullgame/FG00_Completeness_Addendum.md) → `production/design/full-game/`（卡片与看板）。Demo 封版并由用户宣布开启 FG-M0 之前只允许改 FG 文档；Demo 施工、验收与术语审计仍只以 ProjectA_GDD.md 及其 ERD 为准，不得据此改 Demo Story。
 
+设计版本：Demo 及更早的全部设计为 **0.1**，正式版（FG）为 **0.2**。每次设计/计划文案提交的修订号（0.x.y）与旧版本号对照见 [DESIGN-VERSIONS.md](../../../production/design/DESIGN-VERSIONS.md)。
+
 63 条 ERD 逐项承接和专项验收映射：[REQUIREMENT-TO-PLAYABLE-TRACE.md](../../../production/design/earth-reclamation/REQUIREMENT-TO-PLAYABLE-TRACE.md)。旧文件保留/清理状态：[OLD-DOC-RETIREMENT-AUDIT.md](../../../production/design/earth-reclamation/OLD-DOC-RETIREMENT-AUDIT.md)。
 
 ## 按需技术参考
@@ -37,7 +39,7 @@
 | 基元字段/结算 | 最新改动需求/代谢切片-冻结总案-基元与美术.md | 已实现的正交字段和结算顺序；旧卡牌与生物美术不继承 |
 | 术语包装 | production/design/earth-reclamation/TERM-MIGRATION.md | 旧符号到机械领域的包装策略 |
 
-技术参考中的旧生物名是当前代码事实，不是继续实现旧玩法的授权。冲突时始终以 GDD v3.1 和 ERD 需求为准。
+技术参考中的旧生物名是当前代码事实，不是继续实现旧玩法的授权。冲突时始终以 GDD 0.1 和 ERD 需求为准。
 
 ## 历史与禁止入口
 

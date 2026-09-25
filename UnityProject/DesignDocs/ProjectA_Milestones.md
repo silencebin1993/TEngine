@@ -1,6 +1,6 @@
 # 《ProjectA》全功能 Demo 实施里程碑
 
-> 版本：3.1
+> 版本：0.1（历次修订见 [设计版本总账](../../../production/design/DESIGN-VERSIONS.md)）
 > 产品权威：[ProjectA_GDD.md](ProjectA_GDD.md)
 > 需求权威：[DEMO-IMPLEMENTATION-SPEC.md](../../../production/design/earth-reclamation/DEMO-IMPLEMENTATION-SPEC.md)
 > 内容基线：[DEMO-CONTENT-LOCK.md](../../../production/design/earth-reclamation/DEMO-CONTENT-LOCK.md)
@@ -72,7 +72,7 @@
 
 ### 必须完成
 
-- GDD v3.1、DEMO-IMPLEMENTATION-SPEC、DEMO-ACCEPTANCE、SYSTEMS-SPEC、MILESTONES 互相链接且没有冲突。
+- GDD 0.1、DEMO-IMPLEMENTATION-SPEC、DEMO-ACCEPTANCE、SYSTEMS-SPEC、MILESTONES 互相链接且没有冲突。
 - DesignDocs/README 与 production/design/README 只把上述文档列为当前产品/实施入口。
 - production/design/earth-reclamation/GDD.md 改成短重定向，不保留第二份产品正文。
 - 旧生物设计从权威索引移除，Archive README 明确“禁止作为需求输入”。

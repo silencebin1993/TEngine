@@ -1,7 +1,8 @@
-# 《地球归还》正式版设计案 v1
+# 《地球归还》正式版设计案 0.2
 
+> 版本：0.2（历次修订见 [设计版本总账](../../../production/design/DESIGN-VERSIONS.md)）
 > 状态：**草案，Demo 封版后生效**。日期：2026-09-24。
-> 本文件不替代 [ProjectA_GDD.md](ProjectA_GDD.md)。在 Demo（ER8）封版之前，所有施工、验收和术语审计仍以 GDD v3.1 及其派生 ERD 为准。
+> 本文件不替代 [ProjectA_GDD.md](ProjectA_GDD.md)。在 Demo（ER8）封版之前，所有施工、验收和术语审计仍以 GDD 0.1（Demo）及其派生 ERD 为准。
 
 ---
 

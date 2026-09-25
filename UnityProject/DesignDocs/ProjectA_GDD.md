@@ -1,6 +1,6 @@
 # 《ProjectA》产品设计最高权威（地球归还）
 
-> 版本：3.1 · Demo 闭环版
+> 版本：0.1 · Demo 闭环版（历次修订见 [设计版本总账](../../../production/design/DESIGN-VERSIONS.md)）
 > 日期：2026-09-18
 > 状态：Accepted；本文规定做成什么
 > 平台：Steam / Windows；单机买断；键鼠优先

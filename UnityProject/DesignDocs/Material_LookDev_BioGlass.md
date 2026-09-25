@@ -2,7 +2,7 @@
 
 > **Retired / 2026-09-19：** 此材质方向不适用于《地球归还》Demo，旧 shader 仅为可复用代码/性能参考；不得照此生成新材质和场景。现行美术方向见 [ProjectA_GDD.md](ProjectA_GDD.md) §11。
 
-> 版本：v1.0 · 2026-08-10  
+> 版本：0.1 · 2026-08-10  
 > 管线参考：[现行美术生产技术](../../../production/design/earth-reclamation/ART-PRODUCTION-TECHNICAL-REFERENCE.md)；本文 BioGlass 视觉仅供历史材质考古。
 > 运行时入口：`BinGames/SimBioGlass`（测试主视觉）· `BinGames/SimInstancedUnlit`（远距 / 压测 LOD）  
 > 渲染路径：Built-in RP · `Graphics.RenderMeshInstanced` · 每批 ≤1023
@@ -103,5 +103,5 @@
 
 | 版本 | 内容 |
 |---|---|
-| v1.0 | 定案阳光培养皿；落地 `SimBioGlass`；与吉卜力鲜艳色 + BioGlass 合流 |
-| v1.1 | 软边；`_Motion`/`_Impact` 游动与受击方向形变（`SimRenderer`） |
+| 0.1 初稿 | 定案阳光培养皿；落地 `SimBioGlass`；与吉卜力鲜艳色 + BioGlass 合流 |
+| 0.1 修订一 | 软边；`_Motion`/`_Impact` 游动与受击方向形变（`SimRenderer`） |

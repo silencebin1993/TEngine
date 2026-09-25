@@ -1,5 +1,6 @@
 # 《地球归还》正式版里程碑（FG）
 
+> 版本：0.2（历次修订见 [设计版本总账](../../../production/design/DESIGN-VERSIONS.md)）
 > 状态：**草案，门禁中**。Demo（ER8）封版、并且用户明确宣布开启 FG-M0 之前，本文件里的任何 Story 都不得开工（FGR-BASE-001）。
 > 上游：[ProjectA_FullGame_Design.md](ProjectA_FullGame_Design.md)。契约：[fullgame/FG00](fullgame/FG00_Completeness_Addendum.md) + [detailed/00](detailed/00_Implementation_Completeness_Contract.md)。
 > Story 卡片：`production/design/full-game/FG-STORY-CARDS.md`；看板：`production/design/full-game/FG-STORY-BOARD.md`。
@@ -101,7 +102,7 @@
 - UI 基础件 12 类（FGR-ARC-007）；输入按上下文划分（FGR-ARC-012）。
 - 存档 v2 骨架；Demo 存档给出明确提示（FGR-ARC-008）。
 - 旅程机器人框架扩展到 FG；搭好性能场景（FGR-ARC-011）。
-- 把正式版设计合并进 GDD v4，Demo GDD 作为 v3.1 历史保留。
+- 把正式版设计合并进 GDD 并升为 0.2，Demo GDD 作为 0.1 历史保留。
 
 **出口旅程 FGJ-M0**：用固定测试种子从主菜单开新档，确认生成结果与该种子的基准一致 → 在格网上放置、旋转、拆除几座建筑 → 派出一支远征队沿地形行进 1,000 格，同时让家园继续运行 → 镜头飞回家园看一眼 → 再飞回远征队 → 远征队返回家园；全程的状态与不观察时的对照完全一致。
 
