@@ -137,7 +137,10 @@ namespace GameLogic.Campaign
             RegionQuestItemRecord item = BestQuestItem(state, contentId);
             if (item == null)
             {
-                return contentId == FoundryOutpostLayout.CannonModuleContentId ? "击破步进炮后掉落"
+                // 还没出现过：写明怎么获得（此前标记器/数据盒只写“尚未发现”，玩家不知道去哪找）。
+                return contentId == FracturedCityLayout.MarkerModuleContentId ? "摧毁监听节点后掉落"
+                    : contentId == FracturedCityLayout.ProtocolDataboxContentId ? "读取协议终端后获得"
+                    : contentId == FoundryOutpostLayout.CannonModuleContentId ? "击破步进炮后掉落"
                     : contentId == FoundryOutpostLayout.CoreDataContentId ? "摧毁主核心后掉落"
                     : "尚未发现";
             }

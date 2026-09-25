@@ -144,6 +144,14 @@ namespace GameLogic
             foreach ((GameActionId action, string _) in RebindRows)
             {
                 Button btn = FindChildComponent<Button>(colLeft + "/m_row_Rebind_" + action + "/m_btn_Rebind_" + action);
+                if (btn == null)
+                {
+                    // 2026-09-25 实锤：代码里新增了重绑行、预制体没加对应节点，这里空引用让整个主菜单初始化中断
+                    // （后面的开关/滑条/存档槽全没绑上，新建进不了游戏）。缺一行只影响这一行，不能拖垮整页；
+                    // 自检 MainMenuSelfCheck 会因为缺行直接失败。
+                    Log.Error($"[MainMenuUI] 预制体缺少重绑行 m_row_Rebind_{action}，该动作暂时无法在设置里重绑。");
+                    continue;
+                }
                 _rebindLabels[action] = btn.GetComponentInChildren<Text>();
                 GameActionId captured = action; // 闭包捕获，避免 foreach 变量复用坑。
                 btn.onClick.AddListener(() => OnRebindButtonClicked(captured));
@@ -735,8 +743,10 @@ namespace GameLogic
         {
             foreach ((GameActionId action, string _) in RebindRows)
             {
-                KeyCode key = GameSettings.KeyBindings.GetKey(action);
-                _rebindLabels[action].text = KeyDisplayName(key);
+                if (_rebindLabels.TryGetValue(action, out Text label))
+                {
+                    label.text = KeyDisplayName(GameSettings.KeyBindings.GetKey(action));
+                }
             }
         }
 
@@ -902,15 +912,14 @@ namespace GameLogic
                     break;
                 case CampaignSlotState.Ready:
                     // ERD-UI-001：存档项必须展示时间、战役阶段、游戏时长、最后区域和内容版本。
-                    info.text = $"槽位 {slotIndex + 1}：{meta.CampaignId}\n阶段 {meta.CampaignPhase}　" +
-                        $"游戏时长 {meta.PlaySeconds:F0}s\n存档时间 {meta.WrittenAtUtc}\n" +
-                        $"最后区域 {(string.IsNullOrEmpty(meta.LastRegionId) ? "（尚未进入任何区域）" : meta.LastRegionId)}　" +
-                        $"内容版本 {meta.ContentVersion}";
+                    // 不显示战役 ID、英文阶段枚举、UTC 时间串和区域内部 ID（CampaignSlotText 统一成玩家文字）。
+                    info.text = $"槽位 {slotIndex + 1}：{CampaignSlotText.Summary(meta)}";
                     action.interactable = true;
                     label.text = "读取";
                     break;
                 case CampaignSlotState.Corrupt:
-                    info.text = $"槽位 {slotIndex + 1}：存档损坏（{meta.ErrorMessage}）" +
+                    // 具体错误只进日志（ErrorMessage 是给开发看的英文异常信息）。
+                    info.text = $"槽位 {slotIndex + 1}：存档损坏" +
                         (meta.HasBackup ? "\n可尝试恢复备份" : "\n无可用备份，无法恢复");
                     action.interactable = meta.HasBackup;
                     label.text = "恢复备份";
@@ -940,8 +949,7 @@ namespace GameLogic
             // 多槽选择 UI 留给 ER2-BOOT-01 的美术终稿。
             _pendingOverwriteSlot = 0;
             CampaignSlotMetadata meta = CampaignSaveService.GetSlotMetadata(0);
-            _textConfirmInfo.text = $"槽位 1 已有存档：\ncampaignId={meta.CampaignId}\n阶段 {meta.CampaignPhase}　" +
-                $"时长 {meta.PlaySeconds:F0}s\n存档时间 {meta.WrittenAtUtc}\n\n新建战役将覆盖此存档，是否继续？";
+            _textConfirmInfo.text = $"槽位 1 已有存档：\n{CampaignSlotText.Summary(meta)}\n\n新建战役将覆盖此存档，是否继续？";
             SetView(MenuView.ConfirmOverwrite);
         }
 

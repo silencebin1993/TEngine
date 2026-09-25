@@ -104,11 +104,13 @@ namespace GameLogic.UI.HomeValleyFailure
             if (meta.State != CampaignSlotState.Ready)
             {
                 // "无可读档时给清晰提示"——不能让玩家以为"返回主菜单"还能接着玩这局。
-                _lastSaveLabel.text = $"未找到可读取的安全存档（{meta.State}）。返回主菜单后需要新建战役，本局无法继续。";
+                _lastSaveLabel.text = $"未找到可读取的安全存档（{CampaignSlotText.StateName(meta.State)}）。返回主菜单后需要新建战役，本局无法继续。";
                 return;
             }
-            _lastSaveLabel.text = $"最近安全自动档：第 {slot} 槽 · {meta.WrittenAtUtc} · 阶段 {meta.CampaignPhase} · " +
-                $"游戏内 {meta.PlaySeconds:F0} 秒。返回主菜单后可从该存档继续（本次核心被毁前的进度已保留）。";
+            // 槽位号与主菜单一致从 1 开始（此前写成“第 0 槽”）；时间、阶段、时长都是玩家文字。
+            _lastSaveLabel.text = $"最近安全自动档：槽位 {CampaignSlotText.SlotNumber(slot)} · 保存于 {CampaignSlotText.SavedAt(meta.WrittenAtUtc)} · " +
+                $"{CampaignSlotText.PhaseName(meta.CampaignPhase)} · 游戏时长 {CampaignSlotText.PlayTime(meta.PlaySeconds)}。" +
+                "返回主菜单后可从该存档继续（本次核心被毁前的进度已保留）。";
         }
 
         private void OnDestroy()

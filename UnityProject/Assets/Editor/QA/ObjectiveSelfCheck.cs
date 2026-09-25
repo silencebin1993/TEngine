@@ -368,10 +368,11 @@ namespace GameLogic.EditorTools
             string marker = FracturedCityLayout.MarkerModuleContentId;
             string databox = FracturedCityLayout.ProtocolDataboxContentId;
 
-            Expect(CampaignObjectiveCatalog.QuestStatusText(state, marker) == "尚未发现"
+            Expect(CampaignObjectiveCatalog.QuestStatusText(state, marker) == "摧毁监听节点后掉落"
+                   && CampaignObjectiveCatalog.QuestStatusText(state, databox) == "读取协议终端后获得"
                    && CampaignObjectiveCatalog.QuestStatusText(state, FoundryOutpostLayout.CannonModuleContentId) == "击破步进炮后掉落"
                    && CampaignObjectiveCatalog.QuestStatusText(state, FoundryOutpostLayout.CoreDataContentId) == "摧毁主核心后掉落",
-                "还没出现的关键物：写明怎么获得（重炮/核心数据写掉落条件）");
+                "还没出现的关键物：写明怎么获得（标记器/数据盒/重炮/核心数据各写获得方式）");
 
             AddQuest(state, FracturedCityLayout.RegionId, marker, RegionQuestItemState.OnGround);
             Expect(CampaignObjectiveCatalog.QuestStatusText(state, marker) == "在地面，还没装车", "关键物在地面 → “在地面，还没装车”");
