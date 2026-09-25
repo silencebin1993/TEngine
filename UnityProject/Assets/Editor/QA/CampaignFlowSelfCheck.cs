@@ -38,6 +38,7 @@ namespace GameLogic.EditorTools
             try
             {
                 CheckResumeRegion();
+                CheckExpeditionForecast();
             }
             catch (Exception e)
             {
@@ -70,6 +71,49 @@ namespace GameLogic.EditorTools
 
             state.CurrentRegionId = null;
             Expect(GameRoot.ResolveResumeRegion(state) == HomeValleyLayout.RegionId, "旧档没有当前区域 → 回归还谷地");
+        }
+
+        /// <summary>DEBT-ER5EXP01-01：出征预估的估算编制必须与真实播种一致；风险分档边界；没有武器的描述。</summary>
+        private static void CheckExpeditionForecast()
+        {
+            CampaignState state = CampaignState.CreateNew("flow-selfcheck-forecast", "Standard", 4);
+            FracturedCityRegion.EnsureEnemiesSeeded(state);
+            SumAlive(state, FracturedCityLayout.RegionId, out int ruinsCount, out float ruinsHealth);
+            ExpeditionForecast.EstimateGarrison(ExpeditionDepartureService.ExpeditionTarget.SilentRuins, out int estCount, out float estHealth);
+            Expect(ruinsCount == estCount && Mathf.Approximately(ruinsHealth, estHealth),
+                $"破碎都市估算编制与真实播种一致（估算 {estCount} 个/{estHealth:F0}，实际 {ruinsCount} 个/{ruinsHealth:F0}）");
+
+            FoundryOutpostRegion.EnsureEnemiesSeeded(state);
+            SumAlive(state, FoundryOutpostLayout.RegionId, out int foundryCount, out float foundryHealth);
+            ExpeditionForecast.EstimateGarrison(ExpeditionDepartureService.ExpeditionTarget.FoundryOutpost, out int estFoundryCount, out float estFoundryHealth);
+            Expect(foundryCount == estFoundryCount && Mathf.Approximately(foundryHealth, estFoundryHealth),
+                $"铸造前哨外围估算编制与真实播种一致（估算 {estFoundryCount} 个/{estFoundryHealth:F0}，实际 {foundryCount} 个/{foundryHealth:F0}）");
+
+            Expect(ExpeditionForecast.RiskFor(0f, 100f, 0f) == ExpeditionRisk.High, "没有火力 → 风险高");
+            Expect(ExpeditionForecast.RiskFor(50f, 300f, 0f) == ExpeditionRisk.Low, "6 轮内清场 → 风险低");
+            Expect(ExpeditionForecast.RiskFor(50f, 600f, 0f) == ExpeditionRisk.Medium, "12 轮内清场 → 风险中");
+            Expect(ExpeditionForecast.RiskFor(50f, 601f, 0f) == ExpeditionRisk.High, "超过 12 轮 → 风险高");
+            Expect(ExpeditionForecast.RiskFor(50f, 300f, 60f) == ExpeditionRisk.Medium, "警戒 ≥60 → 风险升一档");
+
+            ExpeditionForecast.Result none = ExpeditionForecast.Compute(state, new int[0], ExpeditionDepartureService.ExpeditionTarget.SilentRuins);
+            string text = ExpeditionForecast.Describe(none);
+            Expect(none.Risk == ExpeditionRisk.High && text.Contains("无法清场") && text.Contains("风险 高"),
+                $"没选武器机 → 预估写明“无法清场”且风险高（实际“{text}”）");
+        }
+
+        private static void SumAlive(CampaignState state, string regionId, out int count, out float health)
+        {
+            count = 0;
+            health = 0f;
+            foreach (RegionEnemyRecord e in state.RegionEnemies ?? new RegionEnemyRecord[0])
+            {
+                if (e != null && e.RegionId == regionId && e.IsAlive
+                    && e.EnemyTypeId != FoundryOutpostLayout.BossNodeTypeId && e.EnemyTypeId != FoundryOutpostLayout.BossCoreTypeId)
+                {
+                    count++;
+                    health += e.Health;
+                }
+            }
         }
 
         private static MachineRecord Machine(int logicId, string regionId, bool alive)

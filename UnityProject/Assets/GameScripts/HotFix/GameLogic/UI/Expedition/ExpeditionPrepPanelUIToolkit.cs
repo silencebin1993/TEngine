@@ -41,6 +41,7 @@ namespace GameLogic.UI.Expedition
         private Toggle _towerBroadcastOffToggle;
         private ScrollView _list;
         private Label _summaryLabel;
+        private Label _forecastLabel;
         private Label _reasonsLabel;
         private VisualElement _interruptSection;
         private Label _interruptLabel;
@@ -99,6 +100,7 @@ namespace GameLogic.UI.Expedition
             _towerBroadcastOffToggle = _root.Q<Toggle>("TowerBroadcastOffToggle");
             _list = _root.Q<ScrollView>("MachineList");
             _summaryLabel = _root.Q<Label>("SummaryLabel");
+            _forecastLabel = _root.Q<Label>("ForecastLabel");
             _reasonsLabel = _root.Q<Label>("ReasonsLabel");
             _interruptSection = _root.Q<VisualElement>("InterruptSection");
             _interruptLabel = _root.Q<Label>("InterruptLabel");
@@ -260,6 +262,11 @@ namespace GameLogic.UI.Expedition
                 $"{ExpeditionDepartureService.MaxRosterSize}｜货位 {validation.TotalCargoSlots}" +
                 $"（建议≥{snapshot.MinRecommendedCargoSlots}）｜带宽 {validation.TotalBandwidth:F0}/{validation.BandwidthCapacity:F0}" +
                 $"｜武器 {(validation.HasWeapon ? "有" : "无")}";
+            // DEBT-ER5EXP01-01：总火力/维修能力/风险此前只有“武器 有/无”，现在按真实装配与目标区域敌情计算。
+            if (_forecastLabel != null)
+            {
+                _forecastLabel.text = ExpeditionForecast.Describe(ExpeditionForecast.Compute(state, selectedArray, snapshot.Target));
+            }
 
             bool showReasons = validation.BlockingReasons.Length > 0 && _pendingInterruptLogicIds.Length == 0;
             _reasonsLabel.text = showReasons ? "无法出发：" + string.Join("；", validation.BlockingReasons.Select(DescribeReason)) : string.Empty;
