@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using GameLogic.Campaign.Grid;
+using GameLogic.Campaign.Logistics;
 using GameLogic.Campaign.Regions;
 using GameLogic.Campaign.WorldGen;
 using GameLogic.Core;
@@ -157,6 +158,8 @@ namespace GameLogic.Campaign.WorldSim
             {
                 BindLivePositions();
                 HomeGridService.Streamer(state).KeepResident = IsChunkActive;
+                // FG0-ARCH-02：星球表面的传送带内核随家园载入（从存档恢复），与家园同一生命周期。
+                BeltNetworkService.Load(state);
                 RefreshActivity(state);
             }
             return Home;
@@ -205,6 +208,7 @@ namespace GameLogic.Campaign.WorldSim
             FracturedCity?.Exit(evacuateSuccess: false);
             FoundryOutpost?.Exit(evacuateSuccess: false);
             Home?.Exit();
+            BeltNetworkService.Unload();
             FracturedCity = null;
             FoundryOutpost = null;
             Home = null;
@@ -221,6 +225,8 @@ namespace GameLogic.Campaign.WorldSim
             {
                 site.SyncLiveStateForSave();
             }
+            // FG0-ARCH-02：传送带内核快照（按网络分块）写进 BeltItemState。
+            BeltNetworkService.WriteTo(BeltNetworkService.BoundState);
         }
 
         private static void BindLivePositions()
@@ -384,6 +390,8 @@ namespace GameLogic.Campaign.WorldSim
                 // 行进中的队伍在星球表面（家园所在的表面）上。
                 CurrentSiteId = HomeValleyLayout.RegionId;
                 WorldTransitSystem.Step(state, dt);
+                // FG0-ARCH-02：传送带内核（星球表面）按游戏时间累计推进到自己的 20 Hz（只看步序号，与镜头 / 帧率 / 倍速无关）。
+                BeltNetworkService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                 stepped = true;
             }
             finally

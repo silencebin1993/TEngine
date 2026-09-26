@@ -30,6 +30,10 @@ namespace GameLogic.Core
         public const string WorldFirstDispatch = "world.dispatch.first";
         /// <summary>FG0-ARCH-01：第一次看到行进中的突袭（FG6-DEF-04 的预警引导会接在这里）。</summary>
         public const string WorldFirstRaidInTransit = "world.raid.first_in_transit";
+        /// <summary>FG0-ARCH-02：第一次放下传送带（FG3-LOG-03 的“传送带怎么用”引导接在这里）。</summary>
+        public const string LogisticsFirstBelt = "logistics.belt.first_placed";
+        /// <summary>FG0-ARCH-02：第一次出现堵塞的传送带（FGR-LOG-025“下游满了就停下”的首次说明时机）。</summary>
+        public const string LogisticsFirstBlocked = "logistics.belt.first_blocked";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -39,6 +43,7 @@ namespace GameLogic.Core
             BuildModeFirstOpen, FirstPlacement, FirstBlockedPlacement,
             WorldFirstGenerating,
             WorldFirstFocusSwitch, WorldFirstDispatch, WorldFirstRaidInTransit,
+            LogisticsFirstBelt, LogisticsFirstBlocked,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

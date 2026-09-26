@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using GameLogic.Campaign.Grid;
+using GameLogic.Campaign.Logistics;
 using GameLogic.Campaign.Regions;
 using GameLogic.Core;
 using GameLogic.View;
@@ -100,6 +101,8 @@ namespace GameLogic.Campaign.WorldSim
                 }
             }
             TickMarkers(state, focus);
+            // FG0-ARCH-02：传送带（近景逐物品实例化 / 远景流动贴图），每帧一次 O(1) 调用，逐物品工作在 AOT。
+            BeltNetworkService.Render(WorldView.Camera);
         }
 
         private static void TickMarkers(CampaignState state, GridCell focus)

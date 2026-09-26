@@ -100,11 +100,50 @@ namespace GameLogic.Campaign
         public int Radius;
     }
 
-    /// <summary>传送带与带上物品（FG0-ARCH-02 / FG03）。</summary>
+    /// <summary>传送带与带上物品（FG0-ARCH-02 / FG03）。唯一写入口 <see cref="Logistics.BeltNetworkService"/>（存档前
+    /// <c>WorldSimulation.SyncAllForSave</c> 调它把内核快照写进来；读档后它从这里恢复内核）。
+    /// FGR-ARC-004“存档按网络分块”：每个物流网络一块（格、物品位置与种类、汇入轮次），base64 编码的二进制，自带校验和；
+    /// 单块损坏只丢那一块并如实告知（物品数计入“移出”，账本仍平衡），其余网络照常恢复。
+    /// 域版本：1 = FG0-ARCH-02 之前的空骨架（读档得到空网络）；2 = 本格式。统计窗口（吞吐）不进存档，读档后重新累计。</summary>
     [Serializable]
     public sealed class BeltItemState
     {
-        public int DomainVersion = 1;
+        public int DomainVersion = 2;
+        /// <summary>内核快照格式版本（<see cref="BinGames.Sim.Logistics.BeltKernel.FormatVersion"/>）；0 = 没有传送带数据。</summary>
+        public int FormatVersion;
+        /// <summary>内核已执行的固定步数（端口节拍、统计窗口对齐都以它为时间轴）。</summary>
+        public long KernelSteps;
+        /// <summary>物品守恒账（FGT-LOG-006）：推上 / 放入 / 收下 / 移出的累计数。</summary>
+        public long Emitted;
+        public long Inserted;
+        public long Delivered;
+        public long Removed;
+        /// <summary>存档卡与自检用的摘要（真相在 <see cref="Networks"/>）。</summary>
+        public int CellCount;
+        public int ItemCount;
+        public BeltNetworkRecord[] Networks = Array.Empty<BeltNetworkRecord>();
+        /// <summary>端口块（base64）：建筑的输入输出端口状态（缓存、节拍、累计数）。</summary>
+        public string Ports = string.Empty;
+        /// <summary>输入端口所属建筑的名字文本键（堵塞原因“下游 X 的输入已满”用；端口本身在 <see cref="Ports"/>）。</summary>
+        public BeltSinkNameRecord[] SinkNames = Array.Empty<BeltSinkNameRecord>();
+    }
+
+    /// <summary>输入端口编号 → 所属建筑名字的文本键。</summary>
+    [Serializable]
+    public sealed class BeltSinkNameRecord
+    {
+        public int PortId;
+        public string NameKey;
+    }
+
+    /// <summary>一个物流网络（弱连通的一组传送带）的存档块。</summary>
+    [Serializable]
+    public sealed class BeltNetworkRecord
+    {
+        public int Cells;
+        public int Items;
+        /// <summary>base64 编码的网络块（格式见 BeltKernel.Serialize）。</summary>
+        public string Payload;
     }
 
     /// <summary>管线与流体（FG03 管线 Story）。</summary>
@@ -342,6 +381,9 @@ namespace GameLogic.Campaign
                 s.Grid.NextInstanceSerial = 2;
             }
             s.Belts ??= new BeltItemState();
+            s.Belts.Networks ??= Array.Empty<BeltNetworkRecord>();
+            s.Belts.Ports ??= string.Empty;
+            s.Belts.SinkNames ??= Array.Empty<BeltSinkNameRecord>();
             s.Pipes ??= new PipeFluidState();
             s.Research ??= new ResearchState();
             s.Weather ??= new WeatherState();

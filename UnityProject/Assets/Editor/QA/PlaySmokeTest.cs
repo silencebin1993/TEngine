@@ -4,6 +4,8 @@ using System.Linq;
 using GameConfig.fg;
 using GameLogic.Campaign;
 using GameLogic.Campaign.Feedback;
+using GameLogic.Campaign.Grid;
+using GameLogic.Campaign.Logistics;
 using GameLogic.Campaign.WorldSim;
 using GameLogic.Core;
 using GameLogic.Settings;
@@ -15,6 +17,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.UIElements;
 using Luban;
+using BinGames.Sim.Logistics;
 using Button = UnityEngine.UI.Button;
 using Object = UnityEngine.Object;
 
@@ -158,6 +161,10 @@ namespace GameLogic.EditorTools
                     case 128: StepWorldShuttle(inStep); break;
                     case 8: StepFoundry(inStep); break;
                     case 9: StepBackHome(inStep); break;
+                    case 130: StepBeltsLaid(inStep); break;
+                    case 131: StepBeltsFar(inStep); break;
+                    case 132: StepBeltsNear(inStep); break;
+                    case 133: StepBeltsDone(inStep); break;
                     case 20: StepOpenSlotList(inStep); break;
                     case 21: StepSlotCards(inStep); break;
                     case 22: StepBackupRestored(inStep); break;
@@ -1532,6 +1539,196 @@ namespace GameLogic.EditorTools
                 return;
             }
             SessionState.SetInt(K + "PlayedSlot", CampaignSession.ActiveSlotIndex);
+            LayBelts();
+        }
+
+        // ── FG0-ARCH-02：传送带内核（正式放置工具属于 FG3-LOG-01 / 03，这里用测试捷径铺设，验证内核在真实 Play 帧里运转、渲染、存读档）──
+
+        private const int SmokeSinkPort = 3;
+
+        /// <summary>测试捷径：经正式入口 BeltNetworkService.TryPlace（含格网校验）在核心附近按规则找空地，铺一条带输出 / 输入端口的直线 + 一个装了物品的环。</summary>
+        private static void LayBelts()
+        {
+            CampaignState s = CampaignSession.Current;
+            Check(BeltNetworkService.IsRunning && ReferenceEquals(BeltNetworkService.BoundState, s), "传送带内核随家园载入（BeltNetworkService 绑定当前战役）");
+            GridCell core = HomeGridService.CorePivot(s);
+            GridCell origin = default;
+            bool found = false;
+            for (int r = 6; r <= 30 && !found; r++)
+            {
+                for (int dy = -r; dy <= r && !found; dy++)
+                {
+                    for (int dx = -r; dx <= r && !found; dx++)
+                    {
+                        if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != r)
+                        {
+                            continue;
+                        }
+                        bool ok = true;
+                        for (int y = 0; y < 6 && ok; y++)
+                        {
+                            for (int x = 0; x < 12 && ok; x++)
+                            {
+                                ok = HomeGridService.ValidateBeltCell(s, new GridCell(core.X + dx + x, core.Y + dy + y)).Ok;
+                            }
+                        }
+                        if (ok)
+                        {
+                            origin = new GridCell(core.X + dx, core.Y + dy);
+                            found = true;
+                        }
+                    }
+                }
+            }
+            if (!found)
+            {
+                Finish("核心附近找不到 12×6 的空地铺传送带");
+                return;
+            }
+            int placed = 0;
+            string firstFail = null;
+            void Place(int x, int y, BeltDir d)
+            {
+                BeltOpResult r = BeltNetworkService.TryPlace(s, new GridCell(origin.X + x, origin.Y + y), d, 0);
+                if (r.Ok)
+                {
+                    placed++;
+                }
+                else
+                {
+                    firstFail ??= r.Describe();
+                }
+            }
+            for (int x = 0; x < 10; x++)
+            {
+                Place(x, 0, BeltDir.East);
+            }
+            // 4×4 的环（12 格）。
+            for (int x = 6; x < 9; x++)
+            {
+                Place(x, 2, BeltDir.East);
+            }
+            for (int y = 2; y < 5; y++)
+            {
+                Place(9, y, BeltDir.North);
+            }
+            for (int x = 9; x > 6; x--)
+            {
+                Place(x, 5, BeltDir.West);
+            }
+            for (int y = 5; y > 2; y--)
+            {
+                Place(6, y, BeltDir.South);
+            }
+            BeltNetworkService.TryAddSource(s, 1, origin, 1, 1, BeltConst.Unlimited);
+            BeltNetworkService.TryAddSink(s, SmokeSinkPort, new GridCell(origin.X + 10, origin.Y), BeltConst.Unlimited, 0);
+            BeltKernel k = BeltNetworkService.Kernel;
+            int[,] ring = { { 6, 2 }, { 7, 2 }, { 8, 2 }, { 9, 2 }, { 9, 3 }, { 9, 4 }, { 9, 5 }, { 8, 5 }, { 7, 5 }, { 6, 5 }, { 6, 4 }, { 6, 3 } };
+            for (int i = 0; i < ring.GetLength(0); i++)
+            {
+                k.InsertItemAt(origin.X + ring[i, 0], origin.Y + ring[i, 1], 5000, (ushort)(20 + i));
+            }
+            SessionState.SetString(K + "BeltRing", RingSignature(k, origin.X, origin.Y));
+            SessionState.SetInt(K + "BeltCells", placed);
+            SessionState.SetInt(K + "BeltX", origin.X);
+            SessionState.SetInt(K + "BeltY", origin.Y);
+            SessionState.SetString(K + "BeltHash", k.ComputeStateHash().ToString());
+            SessionState.SetInt(K + "BeltSteps", (int)k.StepIndex);
+            SessionState.SetInt(K + "BeltRenders", BeltNetworkService.RenderCalls);
+            Check(placed == 22 && firstFail == null && k.ItemCount == 12,
+                $"测试捷径：经正式入口在核心附近（原点 {origin}，按规则搜索，不写死坐标）铺 {placed} 格传送带（直线 + 环，环上 {k.ItemCount} 件）{(firstFail != null ? "；失败：" + firstFail : string.Empty)}");
+            Next(130, "FG0-ARCH-02：传送带已铺好，等真实 Play 帧推进");
+        }
+
+        /// <summary>环（12 格）的签名“件数;每格的物品编号@位置”：件数不变、签名变化 = 环在转且没丢件
+        /// （逐格记物品编号，整格平移也能看出来——只比位置和的话，恰好转过整数格时会误判为没动）。</summary>
+        private static string RingSignature(BeltKernel k, int ox, int oy)
+        {
+            int[,] ring = { { 6, 2 }, { 7, 2 }, { 8, 2 }, { 9, 2 }, { 9, 3 }, { 9, 4 }, { 9, 5 }, { 8, 5 }, { 7, 5 }, { 6, 5 }, { 6, 4 }, { 6, 3 } };
+            int count = 0;
+            var sb = new System.Text.StringBuilder();
+            for (int i = 0; i < ring.GetLength(0); i++)
+            {
+                k.TryGetCellInfo(ox + ring[i, 0], oy + ring[i, 1], out BeltCellInfo c);
+                count += c.Count;
+                for (int s = 0; s < c.Count; s++)
+                {
+                    sb.Append(i).Append(':').Append(c.ItemAt(s)).Append('@').Append(c.PosAt(s)).Append(',');
+                }
+            }
+            return count + ";" + sb;
+        }
+
+        private static void StepBeltsLaid(double inStep)
+        {
+            if (inStep < 4)
+            {
+                return;
+            }
+            BeltKernel k = BeltNetworkService.Kernel;
+            int steps = (int)k.StepIndex - SessionState.GetInt(K + "BeltSteps", 0);
+            k.TryGetPortInfo(1, out BeltPortInfo src);
+            BeltLedger l = k.Ledger;
+            int renders = BeltNetworkService.RenderCalls - SessionState.GetInt(K + "BeltRenders", 0);
+            BeltRenderer r = BeltNetworkService.Renderer;
+            int ox = SessionState.GetInt(K + "BeltX", 0);
+            int oy = SessionState.GetInt(K + "BeltY", 0);
+            k.TryGetCellInfo(ox + 9, oy + 3, out BeltCellInfo ringCell);
+            float ortho = WorldView.Camera != null ? WorldView.Camera.orthographicSize : 0f;
+            Write($"  - 传送带：4 真实秒内核走了 {steps} 步（20 Hz × 当前倍速 {GameClock.EffectiveSpeed}x），输出端口推上 {src.Total} 件，在带 {l.OnBelts} 件；绘制 {renders} 次（正交 {ortho:F1}），" +
+                  $"实例 {r?.LastCellInstances} 格 + {r?.LastItemInstances} 件，{(r != null && r.GpuAvailable ? "GPU 绘制" : "无图形设备：" + r?.GpuUnavailableReason)}");
+            Check(steps >= 40 && src.Total > 0 && l.Balanced && k.CapacityViolations == 0 && k.ComputeStateHash().ToString() != SessionState.GetString(K + "BeltHash", string.Empty),
+                $"真实 Play 帧里传送带内核按固定步推进：{steps} 步，输出端口推上 {src.Total} 件，账本平衡（推上 {l.Emitted} + 放入 {l.Inserted} − 收下 {l.Delivered} = 在带 {l.OnBelts}）");
+            string ringNow = RingSignature(k, ox, oy);
+            string ringBefore = SessionState.GetString(K + "BeltRing", string.Empty);
+            Check(ringCell.InLoop && ringNow != ringBefore && ringNow.Split(';')[0] == ringBefore.Split(';')[0],
+                $"环照常转：环上件数不变（{ringNow.Split(';')[0]} 件）、物品位置变了；悬停“{BeltNetworkService.DescribeCell(new GridCell(ox + 9, oy + 3))}”");
+            Check(renders > 30 && r != null && !r.FarMode && r.LastCellInstances == SessionState.GetInt(K + "BeltCells", -1) && r.LastItemInstances == k.ItemCount,
+                $"近景逐物品实例化：每帧一次 Render（{renders} 次），{r?.LastCellInstances} 格 + {r?.LastItemInstances} 件实例");
+            CheckNoTextMarkers("传送带");
+            SessionState.SetFloat(K + "BeltOrtho", ortho);
+            // 真实滚轮输入（可重绑的“缩小”动作）拉远到远景。
+            InputRouter.DebugSetReader(new ScriptedReader { Mouse = OffScreen, Scroll = -1f, ScrollFrom = Time.frameCount + 1, ScrollTo = Time.frameCount + 12 });
+            Next(131, "滚轮拉远镜头");
+        }
+
+        private static void StepBeltsFar(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            BeltRenderer r = BeltNetworkService.Renderer;
+            float ortho = WorldView.Camera != null ? WorldView.Camera.orthographicSize : 0f;
+            Check(r != null && r.FarMode && r.LastItemInstances == 0 && r.LastCellInstances > 0 && ortho >= BeltNetworkService.RenderSettings.FlowOrthoEnter,
+                $"滚轮拉远到正交半高 {ortho:F1}（原 {SessionState.GetFloat(K + "BeltOrtho", 0f):F1}）：切到远景流动贴图，不再逐物品绘制（物品实例 {r?.LastItemInstances}，格实例 {r?.LastCellInstances}）");
+            InputRouter.DebugSetReader(new ScriptedReader { Mouse = OffScreen, Scroll = 1f, ScrollFrom = Time.frameCount + 1, ScrollTo = Time.frameCount + 12 });
+            Next(132, "滚轮拉近镜头");
+        }
+
+        private static void StepBeltsNear(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            BeltRenderer r = BeltNetworkService.Renderer;
+            Check(r != null && !r.FarMode && r.LastItemInstances > 0, $"拉回近景：恢复逐物品实例（{r?.LastItemInstances} 件）");
+            InputRouter.DebugSetReader(new ScriptedReader { Mouse = OffScreen });
+            Next(133, "传送带段结束，回到存档流程");
+        }
+
+        private static void StepBeltsDone(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            BeginPauseSave();
+        }
+
+        private static void BeginPauseSave()
+        {
             // 上次自动存档之后再改一台机器的记录（完成 3 次工作）：暂停菜单存档必须先导出机器记录，否则这 3 次会丢。
             MachineRecord worker = MachineRegistry.AllRecords.Where(m => m != null && m.IsAlive).OrderBy(m => m.LogicId).FirstOrDefault();
             if (worker == null)
@@ -1603,6 +1800,11 @@ namespace GameLogic.EditorTools
             MachineRecord savedRecord = s.MachineRecords?.FirstOrDefault(m => m.LogicId == savedWorker);
             Check(savedRecord != null && savedRecord.JobsCompleted == SessionState.GetInt(K + "SavedJobs", -1),
                 $"暂停菜单存档先导出机器记录：存档里机器 #{savedRecord?.DisplayNumber} 完成工作 {savedRecord?.JobsCompleted}（期望 {SessionState.GetInt(K + "SavedJobs", -1)}）");
+            Check(s.Belts != null && s.Belts.FormatVersion == BeltKernel.FormatVersion && s.Belts.CellCount == SessionState.GetInt(K + "BeltCells", -1)
+                  && s.Belts.Networks.Length >= 2 && s.Belts.KernelSteps > 0,
+                $"暂停菜单存档带上传送带：{s.Belts?.CellCount} 格、{s.Belts?.ItemCount} 件、{s.Belts?.Networks.Length} 个网络块（按网络分块）");
+            SessionState.SetInt(K + "BeltSavedItems", s.Belts?.ItemCount ?? -1);
+            SessionState.SetString(K + "BeltSavedSteps", (s.Belts?.KernelSteps ?? -1).ToString());
             SessionState.SetInt(K + "ScrapBefore", s.Scrap);
             s.PrimitiveChips = (s.PrimitiveChips ?? Array.Empty<PrimitiveChipRecord>())
                 .Concat(new[] { new PrimitiveChipRecord { PartId = "pchip_smoke_removed", CardDefId = SmokeRemovedId, State = PrimitiveChipState.Bag } })
@@ -1661,6 +1863,13 @@ namespace GameLogic.EditorTools
                 $"读档进入游戏：已移除内容转换为废料（{before}→{st?.Scrap}）");
             Check(captions.Any(c => c.Contains("静默侦察机") && c.Contains("9 废料")), "进入游戏后弹出迁移字幕");
             CheckNoTextMarkers("读档进入游戏");
+            BeltKernel bk = BeltNetworkService.Kernel;
+            int bx = SessionState.GetInt(K + "BeltX", 0);
+            int by = SessionState.GetInt(K + "BeltY", 0);
+            Check(bk != null && bk.CellCount == SessionState.GetInt(K + "BeltCells", -1) && bk.Ledger.Balanced
+                  && bk.StepIndex >= long.Parse(SessionState.GetString(K + "BeltSavedSteps", "0"))
+                  && HomeGridService.MapFor(st).GetBelt(new GridCell(bx, by)) != 0 && BeltNetworkService.LastLoadError == null,
+                $"读档恢复传送带：{bk?.CellCount} 格、{bk?.ItemCount} 件（存档时 {SessionState.GetInt(K + "BeltSavedItems", -1)} 件，读档后已继续运行），账本平衡，格网传送带层恢复");
             Campaign.Regions.HomeValleySoftlockGuard.DebugDestroyCore(st);
             Next(80, "测试捷径：核心被毁（HomeValleySoftlockGuard.DebugDestroyCore），等失败页出现");
         }
@@ -1943,7 +2152,10 @@ namespace GameLogic.EditorTools
             public bool GetMouseButtonDown(int button) => button == Button && Time.frameCount == DownFrame;
             public bool GetMouseButtonUp(int button) => button == Button && Time.frameCount == UpFrame;
             public Vector3 MousePosition => Mouse;
-            public float MouseScrollDelta => 0f;
+            public float Scroll;
+            public int ScrollFrom = -1;
+            public int ScrollTo = -1;
+            public float MouseScrollDelta => Time.frameCount >= ScrollFrom && Time.frameCount <= ScrollTo ? Scroll : 0f;
         }
     }
 }

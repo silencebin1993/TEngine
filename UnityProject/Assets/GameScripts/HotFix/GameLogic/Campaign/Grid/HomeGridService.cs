@@ -100,6 +100,8 @@ namespace GameLogic.Campaign.Grid
                 _map.SetExplored(state.Grid.Explored);
                 RememberGenerationKey(state);
                 _recordsRef = null;
+                // FG0-ARCH-02：传送带层是派生缓存（真相在传送带内核），新图建好就套回去——否则换图后建筑能压到带上、有带的区块会被回收。
+                Logistics.BeltNetworkService.ApplyGridLayer(state, _map);
             }
             if (!ReferenceEquals(_recordsRef, state.BuildingRecords))
             {
@@ -570,6 +572,91 @@ namespace GameLogic.Campaign.Grid
                 r.Add(new GridReason(GridBlockReason.InsufficientScrap, "grid.reason.insufficient_scrap",
                     r.ScrapCost.ToString(), Mathf.FloorToInt(state.Scrap).ToString()));
             }
+            return r;
+        }
+
+        /// <summary>
+        /// FG0-ARCH-02：一格传送带能不能放。与建筑放置同一套逐格规则：世界坐标上限、迷雾、地形可建、污染、建筑占用、
+        /// 已有传送带 / 管线、开局锚点障碍（残骸、靶、出口）。与建筑不同的一条：传送带**可以**放在归还核心外的保留通道上——
+        /// 通道留给机器通行，地面传送带不挡路；否则核心的输入端口（在通道里）永远接不上带（FG00 B11 软锁）。
+        /// </summary>
+        public static GridPlacementResult ValidateBeltCell(CampaignState state, GridCell cell, GridPlacementResult into = null)
+        {
+            GridPlacementResult r = into ?? new GridPlacementResult();
+            r.TypeId = "belt";
+            r.Pivot = cell;
+            r.Rotation = 0;
+            r.Cells.Clear();
+            r.CellOk.Clear();
+            r.Reasons.Clear();
+            r.ScrapCost = 0;
+            r.BuildSeconds = 0f;
+            r.Cells.Add(cell);
+            if (state == null)
+            {
+                r.Add(GridReason.Of(GridBlockReason.NoRegion));
+                r.CellOk.Add(false);
+                return r;
+            }
+            HomeGridMap map = MapFor(state);
+            int worldLimit = GridContent.TuningInt("world.coord_limit");
+            if (!WorldCoord.WithinLimit(cell, worldLimit))
+            {
+                r.Add(new GridReason(GridBlockReason.WorldLimit, "grid.reason.world_limit", worldLimit.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+                r.CellOk.Add(false);
+                return r;
+            }
+            CollectObstacles(state);
+            int blockLevel = GridContent.TuningInt("grid.pollution_block_level");
+            HomeGridMap.Chunk chunk = map.ChunkAt(cell, out int idx);
+            bool ok = true;
+            if (chunk.Explored[idx] == 0)
+            {
+                r.Add(GridReason.Of(GridBlockReason.Fog));
+                ok = false;
+            }
+            byte t = chunk.Terrain[idx];
+            GridTerrain terrain = GridContent.TerrainByCode(t);
+            if (terrain == null || terrain.Buildable != 1)
+            {
+                r.Add(new GridReason(GridBlockReason.Terrain, "grid.reason.terrain", terrain != null ? terrain.NameKey : t.ToString()));
+                ok = false;
+            }
+            byte p = chunk.Pollution[idx];
+            if (p >= blockLevel)
+            {
+                r.Add(new GridReason(GridBlockReason.Pollution, "grid.reason.pollution", p.ToString()));
+                ok = false;
+            }
+            int occ = chunk.Occupancy[idx];
+            if (occ != 0)
+            {
+                string other = map.OccupantId(occ);
+                string otherType = other != null && ById.TryGetValue(other, out BuildingRecord ob) ? ob.BuildingTypeId : null;
+                r.Add(new GridReason(GridBlockReason.Occupied, "grid.reason.occupied", otherType != null ? DisplayName(otherType) : other ?? string.Empty));
+                ok = false;
+            }
+            if (chunk.Belt[idx] != 0)
+            {
+                r.Add(GridReason.Of(GridBlockReason.OccupiedBelt));
+                ok = false;
+            }
+            if (chunk.Pipe[idx] != 0)
+            {
+                r.Add(GridReason.Of(GridBlockReason.OccupiedPipe));
+                ok = false;
+            }
+            for (int k = 0; k < Obstacles.Count; k++)
+            {
+                Obstacle o = Obstacles[k];
+                if (Math.Max(Math.Abs(cell.X - o.Cell.X), Math.Abs(cell.Y - o.Cell.Y)) <= o.Radius)
+                {
+                    r.Add(new GridReason(GridBlockReason.Obstacle, "grid.reason.obstacle", o.NameKey));
+                    ok = false;
+                    break;
+                }
+            }
+            r.CellOk.Add(ok);
             return r;
         }
 
