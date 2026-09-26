@@ -93,6 +93,10 @@ namespace GameLogic.Campaign.WorldGen
         /// <summary>本流式加载器用内核（工作线程）生成；false = 旧版本原型地形，主线程生成。</summary>
         public bool UsesKernel => _kernelSource != null;
 
+        /// <summary>FG0-ARCH-01（FGR-GEN-052 第 1、2 条）：世界模拟的活跃区块（有己方实体 / 行进中的队伍 / 被观察）一律常驻，不参与回收。
+        /// 由 <see cref="WorldSim.WorldSimulation"/> 注入（键 = <see cref="HomeGridMap.Key"/>）；未注入时沿用原条件。</summary>
+        public Func<long, bool> KeepResident;
+
         public WorldChunkStreamer(HomeGridMap map)
         {
             _map = map ?? throw new ArgumentNullException(nameof(map));
@@ -414,7 +418,7 @@ namespace GameLogic.Campaign.WorldGen
             foreach (HomeGridMap.Chunk c in _map.LoadedChunks)
             {
                 long k = HomeGridMap.Key(c.ChunkX, c.ChunkY);
-                if (_desired.Contains(k) || c.Modified)
+                if (_desired.Contains(k) || c.Modified || (KeepResident != null && KeepResident(k)))
                 {
                     continue; // 镜头窗口里的与已修改的不回收；已探索 / 预生成区的纯地形区块照样可回收（生成过一次即可）。
                 }

@@ -937,7 +937,7 @@ namespace GameLogic.EditorTools
         {
             var results = new List<string>();
             bool allSame = true;
-            foreach (float speed in new[] { 0.5f, 1f, 2f })
+            foreach (float speed in new[] { 0.5f, 1f, 2f, 3f })
             {
                 CampaignState s = NewHome(5000);
                 GridCell spot = FindValid(s, "generator_2", new GridCell(-8, 26), 10) ?? new GridCell(0, 30);
@@ -968,7 +968,7 @@ namespace GameLogic.EditorTools
                 allSame &= pausedNoProgress && Mathf.Abs(game - 40f) < 0.6f && Mathf.Abs(real * speed - game) < 0.6f;
             }
             StrategyClock.Reset();
-            Expect(allSame, $"倍速矩阵：暂停时施工不推进；0.5x / 1x / 2x 下完工都需要约 40 秒游戏时间，真实时间按倍速缩放（{string.Join("；", results)}）。3x 档见 DEBT-FG0UX01-03");
+            Expect(allSame, $"倍速矩阵：暂停时施工不推进；0.5x / 1x / 2x / 3x 下完工都需要约 40 秒游戏时间，真实时间按倍速缩放（{string.Join("；", results)}）");
         }
 
         // ── H. 存读档 ────────────────────────────────────────────────────────────

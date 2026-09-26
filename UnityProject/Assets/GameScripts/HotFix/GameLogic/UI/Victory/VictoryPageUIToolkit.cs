@@ -95,7 +95,7 @@ namespace GameLogic.UI.Victory
             }
 
             CampaignState state = CampaignSession.Current;
-            bool shouldShow = GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive
+            bool shouldShow = GameRoot.HomeValley != null && GameRoot.HomeValley.IsLoaded
                 && HomeValleyBeacon.IsLaunched(state) && !HomeValleyBeacon.IsLaunching(state);
             // FG0-UX-01（FGR-UX-001）：胜利页不能 Esc 关掉，Esc 也不许穿透去开一个被它盖住的暂停菜单。
             UiEscapeStack.SyncBlocking(this, shouldShow);

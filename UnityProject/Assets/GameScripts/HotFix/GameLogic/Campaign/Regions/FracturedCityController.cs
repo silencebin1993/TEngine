@@ -4,6 +4,7 @@ using System.Linq;
 using GameLogic.UI.Common;
 using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Content;
+using GameLogic.Campaign.WorldSim;
 using GameLogic.Core;
 using GameLogic.View;
 using TEngine;
@@ -25,10 +26,16 @@ namespace GameLogic.Campaign.Regions
     /// 可发生。E 交互正式输入链路属于 ER5-INT-01——本类把交互动作做成可直接调用的公开方法
     /// （<see cref="TryInteractListeningNode"/> 等），供未来 E 键调用，也供本 Story 自身的
     /// execute_code/Play Mode 验收直接调用。</summary>
-    public sealed class FracturedCityController
+    public sealed class FracturedCityController : IWorldSite
     {
-        public bool IsActive { get; private set; }
-        public bool IsPaused => _paused;
+        /// <summary>FG0-ARCH-01：本地点已载入、正在被世界模拟推进（与镜头在不在这里无关；派遣不再退出家园）。</summary>
+        public bool IsLoaded { get; private set; }
+
+        /// <summary>已载入**并且**镜头正在观察这里（界面面板、输入据此判断）。模拟推进不看它（FGR-BASE-021）。</summary>
+        public bool IsActive => IsLoaded && WorldView.IsObserved(SiteId);
+
+        /// <summary>FG0-ARCH-01：暂停属于整个世界（<see cref="GameClock"/>）。</summary>
+        public bool IsPaused => GameClock.Paused;
         /// <summary>ER5-RETURN-01：全灭检测结果只读暴露——<see cref="ExpeditionReturnService"/> 据此
         /// 区分"玩家主动撤离"与"全灭放弃远征"两条确认路径，不在服务类里另存一份判定。</summary>
         public bool IsWiped => _wipeResolved;
@@ -39,21 +46,23 @@ namespace GameLogic.Campaign.Regions
 
         private GameObject _root;
         private Camera _camera;
-        private CameraDirector _cameraDirector;
+        /// <summary>FG0-ARCH-01：镜头归全局镜头管理器（<see cref="WorldView"/>）；本地点被观察时借用。</summary>
+        private CameraDirector _cameraDirector => IsActive && WorldView.Director.IsBound ? WorldView.Director : null;
+        private WorldCameraProfile _cameraProfile;
 
         /// <summary>FG0-UX-01：通知“定位”要让当前区域的镜头飞到事件位置（只读访问，不改所有权）。</summary>
         public CameraDirector CameraDirector => _cameraDirector;
         private readonly List<HomeValleyMachineMarker> _machineMarkers = new List<HomeValleyMachineMarker>(5);
         private HomeValleyMachineMarker _selected;
         private HomeValleyMachineMarker _possessed;
-        private bool _paused;
         private bool _wipeResolved;
 
         /// <summary>玩家/机器与固定物件的最小交互距离（"距离≤3米"，同 ER5-INT-01 卡片点名的数字，
         /// 本 Story 先用它做交互挂载点的距离判定，不等该 Story 落地才补）。</summary>
         public const float InteractRange = 3f;
 
-        public void SetPaused(bool paused) => _paused = paused;
+        /// <summary>暂停 / 继续整个世界（FG0-ARCH-01：统一时钟）。</summary>
+        public void SetPaused(bool paused) => GameClock.SetPaused(paused);
 
         /// <summary>ER5-CMD-01：与 <see cref="HomeValleyController.SquadCommands"/> 同一套引擎、
         /// 各自一份实例（两区域互斥运行，但各自的选择集/编组/命令状态不该跨区域串）。</summary>
@@ -85,7 +94,7 @@ namespace GameLogic.Campaign.Regions
         /// 校验解锁条件，只读结果）。</summary>
         public void Enter(IEnumerable<int> expeditionLogicIds, bool resume)
         {
-            if (IsActive)
+            if (IsLoaded)
             {
                 Log.Warning("[FracturedCityController] Enter 被重复调用，忽略（已处于激活状态）。");
                 return;
@@ -131,14 +140,14 @@ namespace GameLogic.Campaign.Regions
             }
 
             BuildVisuals(state);
-            SetupCameraDirector();
+            SetupCameraProfile();
             SetupSquadCommands();
             SetupControlSystem();
             SetupInteraction();
+            _root.SetActive(false); // FG0-ARCH-01：镜头观察这里时才显示（WorldView.Observe → SetObserved）。
 
-            IsActive = true;
-            // FG0-UX-01（FGR-UX-020 定位）：机器阵亡等通知按 LogicId 取机器标记的实时位置。
-            MachineRegistry.LivePositionProvider = FindMachineMarkerPosition;
+            IsLoaded = true;
+            // FG0-UX-01（FGR-UX-020 定位）：机器实时位置由 WorldSimulation.LivePosition 统一向各地点查询。
             _wipeResolved = false;
 
             SaveResult saveResult = CampaignAutoSaveService.SaveAuto(SaveReason.ExpeditionDepartConfirm);
@@ -197,72 +206,138 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        public void Update(float dt)
+        // ── FG0-ARCH-01：世界地点（IWorldSite）──────────────────────────────────
+
+        public string SiteId => FracturedCityLayout.RegionId;
+        public WorldSurfaceKind SurfaceKind => WorldSurfaceKind.LegacyRegion;
+        public WorldCameraProfile CameraProfile => _cameraProfile;
+        public Vector2? LivePosition(int logicId) => FindMachineMarkerPosition(logicId);
+
+        public int LiveMachineCount
         {
-            if (!IsActive)
+            get
+            {
+                int n = 0;
+                foreach (HomeValleyMachineMarker m in _machineMarkers)
+                {
+                    if (m != null && MachineRegistry.TryGetRecord(m.LogicId, out MachineRecord r) && r.IsAlive && r.RegionId == SiteId)
+                    {
+                        n++;
+                    }
+                }
+                return n;
+            }
+        }
+
+        /// <summary>“飞到远征地点”的落点：存活机器的中心；全灭时取镜头起始点。</summary>
+        public Vector2 DefaultFocus
+        {
+            get
+            {
+                Vector2 sum = Vector2.zero;
+                int n = 0;
+                foreach (HomeValleyMachineMarker m in _machineMarkers)
+                {
+                    if (m != null && MachineRegistry.TryGetRecord(m.LogicId, out MachineRecord r) && r.IsAlive)
+                    {
+                        Vector3 p = m.transform.position;
+                        sum += new Vector2(p.x, p.z);
+                        n++;
+                    }
+                }
+                return n > 0 ? sum / n : FracturedCityLayout.CameraFocusStart;
+            }
+        }
+
+        /// <summary>FG0-ARCH-01：镜头观察 / 离开本地点。离开时释放接入、收起撤离确认；表现对象隐藏不销毁，模拟照常推进。</summary>
+        public void SetObserved(bool observed)
+        {
+            if (!IsLoaded || _root == null)
             {
                 return;
             }
+            if (!observed)
+            {
+                if (_possessed != null)
+                {
+                    Control.ReleaseToStrategy();
+                }
+                IsEvacPanelOpen = false;
+            }
+            _root.SetActive(observed);
+            CampaignState state = CampaignSession.Current;
+            if (observed && state != null)
+            {
+                SyncWorldVisuals(state);
+            }
+        }
 
-            InputRouter.SetGameplayPaused(_paused, strategic: true);
-            _cameraDirector?.Tick(_paused);
-
-            // ER5-CTL-01：经 Control.ReleaseToStrategy 统一处理（取消 Move/Attack 残留命令、发布
-            // RegionControlledUnitChangedSignal），不再直接写 _possessed。
+        /// <summary>FG0-ARCH-01：镜头在这里时每帧——玩家输入（选择、下令、接入、交互）与画面对账。</summary>
+        public void FrameUpdate(float realDt, float frameScaledDt)
+        {
+            if (!IsLoaded)
+            {
+                return;
+            }
+            bool paused = GameClock.Paused;
+            // ER5-CTL-01：经 Control.ReleaseToStrategy 统一处理（取消 Move/Attack 残留命令、发布 RegionControlledUnitChangedSignal）。
             if (_cameraDirector != null && _cameraDirector.Mode == ViewMode.Strategy && _possessed != null)
             {
                 Control.ReleaseToStrategy();
             }
-
-            bool directLocked = _cameraDirector != null && _cameraDirector.Mode == ViewMode.Direct;
-            float scaledDt = _paused ? 0f : StrategyClock.GetScaledDt(dt, directLocked);
-
-            // ER5-CMD-01：同 HomeValleyController 先例——必须在 HandleSelectionClick 之前跑，
-            // 战略暂停下仍要能选人/排队命令。
-            SquadCommands.Tick(_paused, scaledDt);
+            // ER5-CMD-01：战略暂停下仍要能选人/排队命令。
+            SquadCommands.TickInput(paused);
             HandleSelectionClick();
-
-            HandleDirectControl(scaledDt);
-            Interact.Tick(scaledDt); // ER5-INT-01：候选/进度推进——暂停时 scaledDt=0，进度天然冻结。
-
-            if (_paused)
-            {
-                return;
-            }
-
-            TickMachineMovement(scaledDt);
+            HandleDirectControl(frameScaledDt);
+            Interact.Tick(frameScaledDt); // ER5-INT-01：候选/进度推进——暂停时为 0，进度天然冻结。
 
             CampaignState state = CampaignSession.Current;
             if (state == null)
             {
                 return;
             }
-
-            CannonCombat.TickHeatDissipation(state, scaledDt); // ER6-REACT-02：铸造重炮被动散热。
-            if (_possessed != null)
+            if (!paused)
             {
-                // ER6-EXPOSE-01："一次远征中每累计30秒直控+5"——只在真正直控（不是战略视角选中）
-                // 且未暂停（scaledDt 已经在暂停时被上游钳成0）时累计。
-                RegionRecord region = FracturedCityRegion.Find(state);
-                if (region != null)
+                if (_possessed != null)
                 {
-                    CampaignExposureLedger.TickDirectControlExposure(state, region, scaledDt);
+                    // ER6-EXPOSE-01："一次远征中每累计30秒直控+5"——只在真正接入且未暂停时累计（接入是玩家本帧的操作，世界锁 1x）。
+                    RegionRecord region = FracturedCityRegion.Find(state);
+                    if (region != null)
+                    {
+                        CampaignExposureLedger.TickDirectControlExposure(state, region, frameScaledDt);
+                    }
                 }
+                // ER5-CTL-01：干扰宽限与受控机死亡回弹（在本帧全部模拟步之后，敌人本帧打死受控机能在同一帧被侦测到）。
+                Control.Tick(frameScaledDt);
             }
-            FracturedCityRegion.TickEnemies(state, scaledDt);
-            // ER5-SILENT-01：真实敌人 AI（移动/标记/清标记/攻击）——必须在 Control.Tick 之前跑，
-            // 这样干扰机本帧刚打死的受控机可以在同一帧被死亡回弹侦测到，不用多等一帧。
-            FracturedCityEnemyAi.Tick(state, scaledDt, BuildVisibleMachines(), IsLineOfSightClear);
+            SyncWorldVisuals(state);
+        }
+
+        /// <summary>FG0-ARCH-01：一个固定模拟步。由 <see cref="WorldSimulation"/> 调用——**无论镜头在不在这里都执行**
+        /// （玩家看着家园时，远征队照样在打仗、敌人照样在巡逻；FGR-BASE-021）。本方法不得读取观察状态。</summary>
+        public void SimStep(float dt)
+        {
+            if (!IsLoaded)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            if (state == null)
+            {
+                return;
+            }
+            TickMachineMovement(dt);
+            SquadCommands.TickSim(dt);
+            CannonCombat.TickHeatDissipation(state, dt); // ER6-REACT-02：铸造重炮被动散热。
+            FracturedCityRegion.TickEnemies(state, dt);
+            // ER5-SILENT-01：真实敌人 AI（移动/标记/清标记/攻击）。
+            FracturedCityEnemyAi.Tick(state, dt, BuildVisibleMachines(), IsLineOfSightClear);
             foreach (string markedEnemyId in FracturedCityEnemyAi.MarkedThisTick)
             {
-                TriggerScanPulse(markedEnemyId);
+                TriggerScanPulse(markedEnemyId); // 纯表现（扫描脉冲），不改模拟状态。
             }
-            // ER5-CTL-01：干扰宽限（Suspended→恢复/None）与受控机死亡回弹统一由 Control.Tick 处理——
-            // 取代原来本类专属的 TickJamGrace，同一套状态机现在归还谷地/破碎都市共用。
-            Control.Tick(scaledDt);
             TickDiscovery(state);
             TickWipeDetection(state);
-            SyncWorldVisuals(state);
         }
 
         private void TickDiscovery(CampaignState state)
@@ -315,7 +390,7 @@ namespace GameLogic.Campaign.Regions
         /// 供玩家中途保存退出后下次继续，不强行判定成功或失败。</summary>
         public void Exit(bool evacuateSuccess)
         {
-            if (!IsActive)
+            if (!IsLoaded)
             {
                 return;
             }
@@ -345,20 +420,19 @@ namespace GameLogic.Campaign.Regions
                 }
             }
 
+            if (state != null && evacuateSuccess && state.CurrentRegionId == FracturedCityLayout.RegionId)
+            {
+                // FG0-ARCH-01：远征结束，世界的“当前远征地点”回到家园（读档恢复按它决定观察哪里）。
+                state.CurrentRegionId = HomeValleyLayout.RegionId;
+            }
             DestroyVisuals();
-            _cameraDirector?.Unbind();
-            _cameraDirector = null;
+            // FG0-ARCH-01：镜头归全局镜头管理器；观察中的地点被卸载时它会自动回到家园（WorldView.FrameEnd）。
             _possessed = null;
             _selected = null;
-            _paused = false;
             SquadCommands.Unbind();
             Control.Unbind();
             Interact.Unbind();
-            IsActive = false;
-            if (MachineRegistry.LivePositionProvider == (System.Func<int, Vector2?>)FindMachineMarkerPosition)
-            {
-                MachineRegistry.LivePositionProvider = null;
-            }
+            IsLoaded = false;
             Log.Info($"[FracturedCityController] 已退出破碎都市（evacuateSuccess={evacuateSuccess}）。");
         }
 
@@ -378,7 +452,7 @@ namespace GameLogic.Campaign.Regions
 
         public void SyncLiveStateForSave()
         {
-            if (IsActive)
+            if (IsLoaded)
             {
                 SyncLiveStateBackToRecords();
             }
@@ -981,30 +1055,22 @@ namespace GameLogic.Campaign.Regions
 
         // ── 相机 ──────────────────────────────────────────────────────────
 
-        private void SetupCameraDirector()
+        /// <summary>FG0-ARCH-01：本地点的镜头配置（与 Demo 逐值一致）；镜头本身由 <see cref="WorldView"/> 持有。
+        /// 本地点仍是 Demo 的手工地图（独立表面、局部坐标），平移范围沿用方形边界（DEBT-FG0ARCH01-01）。</summary>
+        private void SetupCameraProfile()
         {
-            _camera = Camera.main;
-            if (_camera == null)
+            _camera = WorldView.EnsureCamera();
+            _cameraProfile = new WorldCameraProfile
             {
-                var go = new GameObject("Main Camera", typeof(Camera));
-                go.tag = "MainCamera";
-                _camera = go.GetComponent<Camera>();
-            }
-
-            _camera.orthographic = true;
-            _camera.orthographicSize = FracturedCityLayout.CameraBoundsHalfExtentZ;
-            _camera.clearFlags = CameraClearFlags.SolidColor;
-            _camera.backgroundColor = new Color(0.08f, 0.06f, 0.07f); // 破碎都市：偏冷灰红，与归还谷地区分。
-            _camera.nearClipPlane = 0.1f;
-            _camera.farClipPlane = 200f;
-            _camera.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
-
-            _cameraDirector = new CameraDirector();
-            var followOffset = new Vector3(0f, 40f, 0f);
-            _cameraDirector.Bind(_camera, TryGetPossessedAnchor, followOffset,
-                FracturedCityLayout.CameraBoundsHalfExtentX, startInStrategy: true, initialDirectOrthographicSize: 14f);
-            _cameraDirector.FocusStrategyOn(new float2(FracturedCityLayout.CameraFocusStart.x, FracturedCityLayout.CameraFocusStart.y));
-            _cameraDirector.EnsureDirectTarget = EnsureDirectTarget;
+                DirectAnchor = TryGetPossessedAnchor,
+                EnsureDirectTarget = EnsureDirectTarget,
+                ArenaHalfExtent = FracturedCityLayout.CameraBoundsHalfExtentX,
+                FollowOffset = new Vector3(0f, 40f, 0f),
+                InitialStrategyOrthographicSize = FracturedCityLayout.CameraBoundsHalfExtentZ,
+                InitialDirectOrthographicSize = 14f,
+                StartFocus = FracturedCityLayout.CameraFocusStart,
+                Background = new Color(0.08f, 0.06f, 0.07f),
+            };
         }
 
         // ── ER5-CMD-01：战略命令（多选/编组/Move·Attack·Guard·Retreat）────────
@@ -1115,7 +1181,7 @@ namespace GameLogic.Campaign.Regions
                 : new Vector3(1.2f, height * 2f, 1.2f);
             if (isMarkerRing)
             {
-                UnityEngine.Object.Destroy(go.GetComponent<Collider>());
+                GameLogic.View.UnityObjects.Release(go.GetComponent<Collider>());
             }
             Renderer renderer = go.GetComponent<Renderer>();
             renderer.material = new Material(Shader.Find("Standard")) { color = color };
@@ -1149,7 +1215,7 @@ namespace GameLogic.Campaign.Regions
             field.transform.SetParent(_root.transform, false);
             field.transform.position = new Vector3(FracturedCityLayout.ListeningNode.Position.x, 0.02f, FracturedCityLayout.ListeningNode.Position.y);
             field.transform.localScale = new Vector3(FracturedCityLayout.JammerRadius * 2f, 0.02f, FracturedCityLayout.JammerRadius * 2f);
-            UnityEngine.Object.Destroy(field.GetComponent<Collider>());
+            GameLogic.View.UnityObjects.Release(field.GetComponent<Collider>());
             Renderer fieldRenderer = field.GetComponent<Renderer>();
             fieldRenderer.material = new Material(Shader.Find("Standard")) { color = new Color(0.6f, 0.1f, 0.5f, 0.15f) };
             fieldRenderer.enabled = !destroyed;
@@ -1195,7 +1261,7 @@ namespace GameLogic.Campaign.Regions
                     pulse.transform.SetParent(_root.transform, false);
                     pulse.transform.position = new Vector3(enemy.Position.x, 0.03f, enemy.Position.y);
                     pulse.transform.localScale = new Vector3(FracturedCityLayout.ScoutMarkRange * 2f, 0.02f, FracturedCityLayout.ScoutMarkRange * 2f);
-                    UnityEngine.Object.Destroy(pulse.GetComponent<Collider>());
+                    GameLogic.View.UnityObjects.Release(pulse.GetComponent<Collider>());
                     Renderer pulseRenderer = pulse.GetComponent<Renderer>();
                     pulseRenderer.material = new Material(Shader.Find("Standard")) { color = new Color(0.95f, 0.85f, 0.2f, 0.35f) };
                     pulseRenderer.enabled = false;
@@ -1356,7 +1422,7 @@ namespace GameLogic.Campaign.Regions
             _scanPulseExpireRealtime.Clear();
             if (_root != null)
             {
-                UnityEngine.Object.Destroy(_root);
+                GameLogic.View.UnityObjects.Release(_root);
                 _root = null;
             }
         }

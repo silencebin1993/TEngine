@@ -93,10 +93,8 @@ namespace GameLogic.UI.Objective
             }
         }
 
-        internal static bool AnyRegionActive() =>
-            (GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive) ||
-            (GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsActive) ||
-            (GameRoot.FoundryOutpost != null && GameRoot.FoundryOutpost.IsActive);
+        /// <summary>FG0-ARCH-01：在游戏世界里（任一地点已载入）就显示——镜头在哪个地点都一样。</summary>
+        internal static bool AnyRegionActive() => GameRoot.AnyRegionActive;
 
         private void Update()
         {
@@ -195,7 +193,7 @@ namespace GameLogic.UI.Objective
             int index = Array.IndexOf(CampaignObjectiveCatalog.All, def);
             view.Title = $"目标 {index + 1}/{CampaignObjectiveCatalog.All.Length}：{def.Title}";
             string where = CampaignObjectiveCatalog.RegionDisplayName(def.RegionId);
-            string here = state.CurrentRegionId;
+            string here = GameLogic.Campaign.WorldSim.WorldView.ObservedSiteId ?? state.CurrentRegionId; // FG0-ARCH-01：镜头所在的地点。
             if (here == def.RegionId && def.RegionNote != null)
             {
                 view.Note = def.RegionNote(state) ?? string.Empty;

@@ -24,6 +24,12 @@ namespace GameLogic.Core
         public const string FirstBlockedPlacement = "build.placement.first_blocked";
         /// <summary>FG0-ARCH-05：第一次看到“生成中”的占位地貌（镜头移到还没生成的区块；FG17 第 4 节）。</summary>
         public const string WorldFirstGenerating = "world.generating.first_seen";
+        /// <summary>FG0-ARCH-01：第一次把镜头飞到另一个地点（家园 ↔ 远征 / 突袭；“整个世界同时运行”的首次体验）。</summary>
+        public const string WorldFirstFocusSwitch = "world.focus.first_switch";
+        /// <summary>FG0-ARCH-01：第一次派遣远征而家园继续运行（“派遣不再退出家园”的首次说明时机）。</summary>
+        public const string WorldFirstDispatch = "world.dispatch.first";
+        /// <summary>FG0-ARCH-01：第一次看到行进中的突袭（FG6-DEF-04 的预警引导会接在这里）。</summary>
+        public const string WorldFirstRaidInTransit = "world.raid.first_in_transit";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -32,6 +38,7 @@ namespace GameLogic.Core
             FirstUrgentNotification, FirstAutoPause, FirstReservedAction,
             BuildModeFirstOpen, FirstPlacement, FirstBlockedPlacement,
             WorldFirstGenerating,
+            WorldFirstFocusSwitch, WorldFirstDispatch, WorldFirstRaidInTransit,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

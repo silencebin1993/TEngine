@@ -24,6 +24,7 @@ namespace GameLogic.UI.Kit
             overlay.AddComponent<UiKitInputPump>();
             Create<NotificationHudUIToolkit>("[NotificationHudHost]");
             Create<BuildModeHudUIToolkit>("[BuildModeHudHost]"); // FG0-ARCH-04：家园建造模式入口与建造栏（30030，低于通知）。
+            Create<WorldBarHudUIToolkit>("[WorldBarHost]"); // FG0-ARCH-01：世界时间条（游戏日、0.5x～3x、暂停、关注点），右上角 HUD 层 3。
             Create<PauseMenuUIToolkit>("[PauseMenuHost]");
             Create<KeyBindingsPanelUIToolkit>("[KeyBindingsHost]");
 #if UNITY_EDITOR || DEVELOPMENT_BUILD

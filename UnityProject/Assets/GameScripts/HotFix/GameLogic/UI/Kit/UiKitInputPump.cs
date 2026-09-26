@@ -11,7 +11,7 @@ namespace GameLogic.UI.Kit
     /// 先消费自己的键（同帧同键只有第一个消费者拿到，见 <see cref="InputRouter"/>），剩下的才轮到这里：
     /// 1. 取消键（FGR-UX-001）：拖动中先取消拖动 → 关闭最上层（<see cref="UiEscapeStack"/>）→ 在区域里时打开暂停菜单；
     /// 2. 通知中心开关（FGR-UX-020）；
-    /// 3. 速度 0.5x / 1x / 2x（FG13 第 5 节：1 / 2 / 3 键）——驱动既有 <see cref="StrategyClock"/>；
+    /// 3. 速度 0.5x / 1x / 2x / 3x（FG13 第 5 节：1 / 2 / 3 / 4 键）——驱动统一时钟（<see cref="StrategyClock"/> 是它的外观）；
     /// 4. “尚未开放”的动作（fg.TbInputAction status=reserved）：按下时发一条信息通知说明，不静默（IC-REQ-013）。
     /// 每帧 O(动作数) 次按键查询，与实体数量无关。
     /// </summary>
@@ -74,6 +74,10 @@ namespace GameLogic.UI.Kit
             else if (InputRouter.ConsumeAction(GameActionId.SpeedDouble, InputScope.Strategy))
             {
                 StrategyClock.SetSpeed(2f);
+            }
+            else if (InputRouter.ConsumeAction(GameActionId.SpeedTriple, InputScope.Strategy))
+            {
+                StrategyClock.SetSpeed(3f); // FG0-ARCH-01（FGR-ARC-009）：统一时钟加 3x 档。
             }
 
             var all = InputActionCatalog.All;

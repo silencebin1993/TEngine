@@ -75,13 +75,29 @@ namespace GameLogic.Campaign.Feedback
             public readonly long Sequence;
             public readonly FeedbackCueId Cue;
             public readonly Vector3 Position;
+            /// <summary>FG0-ARCH-01：发生在哪个地点（区域 ID）。特效层只画镜头正在观察的地点的时刻——Demo 的远征地点与家园
+            /// 坐标重叠，不过滤的话远征里的命中会画在家园画面上。</summary>
+            public readonly string SiteId;
 
-            public PositionalMoment(long sequence, FeedbackCueId cue, Vector3 position)
+            public PositionalMoment(long sequence, FeedbackCueId cue, Vector3 position, string siteId = null)
             {
                 Sequence = sequence;
                 Cue = cue;
                 Position = position;
+                SiteId = siteId;
             }
+        }
+
+        /// <summary>FG0-ARCH-01：时刻发生的地点（GameRoot 注入：模拟步期间是正在推进的地点，否则是观察中的地点）。</summary>
+        public static System.Func<string> SiteProvider;
+        /// <summary>FG0-ARCH-01：镜头正在观察的地点（GameRoot 注入）。不在世界里为 null。</summary>
+        public static System.Func<string> ObservedSiteProvider;
+
+        /// <summary>时刻是否发生在镜头正在观察的地点（任一方未知时视为是，保持 Demo 行为）。</summary>
+        public static bool IsInObservedSite(string siteId)
+        {
+            string observed = ObservedSiteProvider?.Invoke();
+            return string.IsNullOrEmpty(siteId) || string.IsNullOrEmpty(observed) || siteId == observed;
         }
 
         private const int MomentCapacity = 64;
@@ -106,7 +122,7 @@ namespace GameLogic.Campaign.Feedback
         private static void LogMoment(FeedbackCueId cue, Vector3 position)
         {
             _momentSequence++;
-            Moments[(int)(_momentSequence % MomentCapacity)] = new PositionalMoment(_momentSequence, cue, position);
+            Moments[(int)(_momentSequence % MomentCapacity)] = new PositionalMoment(_momentSequence, cue, position, SiteProvider?.Invoke());
         }
 
         /// <summary>本进程内某个时刻被触发的累计次数（含被节流的）。</summary>
@@ -471,6 +487,11 @@ namespace GameLogic.Campaign.Feedback
 
         private static float DistanceAttenuation(Vector3 worldPosition)
         {
+            // FG0-ARCH-01：镜头不在事件所在的地点——这不是“画面里远处”的声音，按最远距离的保底音量播（字幕与通知照常）。
+            if (!IsInObservedSite(SiteProvider?.Invoke()))
+            {
+                return FloorVolume;
+            }
             Camera cam = Camera.main;
             if (cam == null)
             {

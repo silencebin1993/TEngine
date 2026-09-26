@@ -286,6 +286,16 @@ namespace GameLogic.Campaign.Regions
             }
 
             ExpeditionTarget target = ResolveTarget(state);
+            if (WorldSim.WorldSimulation.ActiveExpedition != null)
+            {
+                // FG0-ARCH-01：派遣不再退出家园，玩家可以在远征途中回家园打开远征准备——同一时刻只允许一支远征队在外
+                // （多支远征属于 FG8-EXP-01，FG-GAP-016），给出明确原因而不是让按钮静默失效。
+                RegionRecord underway = FracturedCityRegion.Find(state);
+                return new PrepSnapshot(false, "expedition-underway", Array.Empty<MachineIntel>(),
+                    HomeValleySignal.BandwidthCapacity(state), 0, null, underway?.EnemyAlertLevel ?? 0f,
+                    underway?.ExpeditionCount ?? 0, ExpeditionTarget.None, null,
+                    AdaptationCatalog.None, null, null, null, null, false, null);
+            }
             if (target == ExpeditionTarget.None)
             {
                 RegionRecord fractured = FracturedCityRegion.Find(state);
@@ -537,6 +547,11 @@ namespace GameLogic.Campaign.Regions
                 return new DepartureResult(DepartureOutcome.Blocked, new[] { "no-active-campaign" }, null);
             }
 
+            if (WorldSim.WorldSimulation.ActiveExpedition != null)
+            {
+                return new DepartureResult(DepartureOutcome.Blocked, new[] { "expedition-underway" }, null);
+            }
+
             ExpeditionTarget target = ResolveTarget(precheckState);
             if (target == ExpeditionTarget.None)
             {
@@ -606,16 +621,15 @@ namespace GameLogic.Campaign.Regions
                 // 与下方 OBJ 完成结算是两条独立触发线，见 CampaignObjectiveTracker.OnDeparted 类注释。
                 CampaignObjectiveTracker.OnDeparted(state, target);
 
-                // ── 区域卸载/载入 + 机器生成/装配登记 ───────────────────────────────
-                GameRoot.HomeValley?.Exit();
+                // ── FG0-ARCH-01：派遣——家园**不退出**、继续运行；只载入远征地点（机器生成 / 装配登记在 Enter 内），镜头飞过去 ──
                 RegionRecord regionAfter;
                 string targetLabel;
                 if (target == ExpeditionTarget.FoundryOutpost)
                 {
                     GameRoot.StartFoundryOutpost(manifest);
-                    if (GameRoot.FoundryOutpost == null || !GameRoot.FoundryOutpost.IsActive)
+                    if (GameRoot.FoundryOutpost == null || !GameRoot.FoundryOutpost.IsLoaded)
                     {
-                        throw new InvalidOperationException("FoundryOutpostController.Enter 未能激活（区域状态在校验后被并发改变？）。");
+                        throw new InvalidOperationException("FoundryOutpostController.Enter 未能载入（区域状态在校验后被并发改变？）。");
                     }
                     regionAfter = FoundryOutpostRegion.Find(state);
                     targetLabel = "铸造前哨外围";
@@ -623,7 +637,7 @@ namespace GameLogic.Campaign.Regions
                 else
                 {
                     GameRoot.StartFracturedCity(manifest);
-                    if (GameRoot.FracturedCity == null || !GameRoot.FracturedCity.IsActive)
+                    if (GameRoot.FracturedCity == null || !GameRoot.FracturedCity.IsLoaded)
                     {
                         throw new InvalidOperationException("FracturedCityController.Enter 未能激活（区域状态在校验后被并发改变？）。");
                     }
@@ -684,12 +698,8 @@ namespace GameLogic.Campaign.Regions
                 return false;
             }
 
-            GameRoot.FracturedCity?.Exit(evacuateSuccess: false);
-            GameRoot.FoundryOutpost?.Exit(evacuateSuccess: false);
-            if (GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive)
-            {
-                GameRoot.HomeValley.Exit();
-            }
+            // FG0-ARCH-01：整个世界一起卸载（半载入的远征地点 + 一直在运行的家园），读回出发前档后重新载入家园。
+            WorldSim.WorldSimulation.UnloadAll();
 
             RestoreResult restore = CampaignRestoreOrchestrator.Restore(slotIndex);
             if (!restore.Success)

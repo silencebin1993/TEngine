@@ -186,7 +186,7 @@ namespace GameLogic.EditorTools
             var enumMembers = ((GameActionId[])Enum.GetValues(typeof(GameActionId))).Distinct().ToList();
             var missing = enumMembers.Where(a => !InputActionCatalog.TryGet(a, out _)).ToList();
             var extra = InputActionCatalog.All.Where(d => !enumMembers.Contains(d.Action)).ToList();
-            Expect(missing.Count == 0 && extra.Count == 0 && InputActionCatalog.All.Count == enumMembers.Count && enumMembers.Count == 85,
+            Expect(missing.Count == 0 && extra.Count == 0 && InputActionCatalog.All.Count == enumMembers.Count && enumMembers.Count == 86, // FG0-ARCH-01 新增“切换关注点”（85 → 86）
                 $"GameActionId 的 {enumMembers.Count} 个成员与表里 {InputActionCatalog.All.Count} 行一一对应（缺：{string.Join(",", missing)}；多：{string.Join(",", extra.Select(d => d.Action))}）");
 
             InputBindingSet defaults = InputBindingSet.CreateDefault();
@@ -433,12 +433,13 @@ namespace GameLogic.EditorTools
             var conflicts = new List<GameActionId>();
 
             // 不冲突：直接生效并落盘，重新读盘后仍在（存读档）。
-            RebindResult ok = GameSettings.TryRebind(GameActionId.CommandGuard, new InputChord(KeyCode.Tab), conflicts);
+            // FG0-ARCH-01 起 Tab 在战略上下文是“切换关注点”，改用战略里空闲的 P 键验证“不冲突直接生效”。
+            RebindResult ok = GameSettings.TryRebind(GameActionId.CommandGuard, new InputChord(KeyCode.P), conflicts);
             string json = PlayerPrefs.GetString(SettingsPrefsKey, string.Empty);
             GameSettings.Load();
-            Expect(ok == RebindResult.Ok && GameSettings.KeyBindings.GetChord(GameActionId.CommandGuard).Key == KeyCode.Tab
+            Expect(ok == RebindResult.Ok && GameSettings.KeyBindings.GetChord(GameActionId.CommandGuard).Key == KeyCode.P
                    && json.Contains("\"KeyBindingsFormat\":2"),
-                "守备命令改到 Tab（Tab 只在接入里用，战略里不冲突）→ 直接生效、写盘（格式 2），重新读盘后仍是 Tab");
+                "守备命令改到 P（战略里空闲）→ 直接生效、写盘（格式 2），重新读盘后仍是 P");
 
             // 冲突：R 已是移动命令（战略）。不落地，走确认框；取消 → 不变。
             GameSettings.ResetKeyBindingsToDefault();
@@ -755,7 +756,8 @@ namespace GameLogic.EditorTools
                 return true;
             };
             bool locateAgg = NotificationCenter.Locate(agg, 1, out _);
-            Expect(!locateReal && realReason == "ui.notify.no_camera" && !locateNone && noneReason == "ui.notify.no_location"
+            // FG0-ARCH-01：定位由全局镜头跨地点飞过去；事件所在地点没有在运行（这里整个世界都没载入）时给出“已不在运行”的原因。
+            Expect(!locateReal && realReason == "ui.world.site_unloaded" && !locateNone && noneReason == "ui.notify.no_location"
                    && locateAgg && flown == new Vector3(3f, 0f, 3f),
                 $"定位：没有运行区域时说明“{GameText.Get(realReason ?? string.Empty)}”；没有位置的通知说明“{GameText.Get(noneReason ?? string.Empty)}”；聚合里第 2 条成员飞到 {flown}");
             CheckRealCameraLocate();
@@ -867,10 +869,11 @@ namespace GameLogic.EditorTools
             Frame(reader);
             float speedAfter4 = StrategyClock.SpeedMultiplier;
             StrategyClock.Reset();
+            // FG0-ARCH-01 起 3x 档已接入统一时钟（DEBT-FG0UX01-03 关闭）：按 4 → 3x，不再提示“尚未开放”。
             Expect(locked != null && hotbar1.Status == InputActionStatus.Reserved && lockedText.Contains(GameText.Get(hotbar1.NameKey)) && notInHistory
-                   && Mathf.Approximately(speed2, 2f) && Mathf.Approximately(speedAfter4, 2f)
-                   && NotificationCenter.Toasts.Any(e => e.Type.Id == "feature_locked" && e.Text.Contains(GameText.Get("input.action.speed_triple.name"))),
-                $"按 F1（快捷栏 1，后续开放）→ 弹出“{lockedText}”（只弹出、不进历史）；按 3 → 2x；按 4（3x，FG7-ENV-01 承接）→ 速度不变并提示尚未开放");
+                   && Mathf.Approximately(speed2, 2f) && Mathf.Approximately(speedAfter4, 3f)
+                   && !NotificationCenter.Toasts.Any(e => e.Type.Id == "feature_locked" && e.Text.Contains(GameText.Get("input.action.speed_triple.name"))),
+                $"按 F1（快捷栏 1，后续开放）→ 弹出“{lockedText}”（只弹出、不进历史）；按 3 → 2x；按 4 → 3x（FG0-ARCH-01 统一时钟），不再提示尚未开放");
         }
 
         // ── G. 存读档 ─────────────────────────────────────────────────────────
@@ -1433,8 +1436,8 @@ namespace GameLogic.EditorTools
                     hard.Add(Path.GetFileName(f) + ":" + m.Groups[1].Value);
                 }
             }
-            // FG0-ARCH-04 新增 BuildModeHud.uxml（建造栏），共 6 份。
-            Expect(uxmlCount == 6 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
+            // FG0-ARCH-04 新增 BuildModeHud.uxml（建造栏），FG0-ARCH-01 新增 WorldBar.uxml（世界时间条），共 7 份。
+            Expect(uxmlCount == 7 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
 
             string[] codeDirs =
             {

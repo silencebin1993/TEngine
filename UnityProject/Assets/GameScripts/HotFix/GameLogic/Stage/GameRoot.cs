@@ -1,6 +1,7 @@
 using System.Linq;
 using GameLogic.Campaign;
 using GameLogic.Campaign.Regions;
+using GameLogic.Campaign.WorldSim;
 using GameLogic.Core;
 using GameLogic.Stage.CellStage;
 using TEngine;
@@ -19,14 +20,8 @@ namespace GameLogic.Stage
     {
         private static StageDirector _director;
         private static bool _started;
-        private static HomeValleyController _homeValley;
-        /// <summary>ER5-REGION-01：破碎都市不是 <see cref="StageId"/> 一员，同 <see cref="_homeValley"/>
-        /// 一样由 GameRoot 直接持有并驱动。两者互斥（同一时刻只有一个 IsActive——切场时调用方必须先
-        /// Exit 旧区域再 Enter 新区域，本类不做自动互斥保护，遵循既有"调用方负责生命周期顺序"约定）。</summary>
-        private static FracturedCityController _fracturedCity;
-        /// <summary>ER6-FOUNDRY-01：铸造前哨外围，与 <see cref="_fracturedCity"/> 同一持有方式，三者
-        /// （含 <see cref="_homeValley"/>）互斥不能同时 Active，调用方负责生命周期顺序。</summary>
-        private static FoundryOutpostController _foundryOutpost;
+        // FG0-ARCH-01：三个区域控制器不再由 GameRoot 各自持有、互斥运行——它们是同一个世界模拟（WorldSimulation）里的三个地点，
+        // 已载入的地点同时推进；镜头与输入由全局的 WorldView 持有。下面的属性只是读取入口（UI 与服务沿用）。
 
         public static StageDirector Director => _director;
 
@@ -34,44 +29,30 @@ namespace GameLogic.Stage
         public static CellStageFlow CellStage =>
             _director?.Get<CellStageFlow>(StageId.Cell);
 
-        /// <summary>ER2-SCENE-01：归还谷地不是 <see cref="StageId"/> 枚举里的一员（那是宏观演化
-        /// 阶段骨架，见 <see cref="HomeValleyController"/> 类注释），由 GameRoot 直接持有并驱动，
-        /// 与 <see cref="_hudHost"/> 同一种"director 之外的常驻子系统"处理方式。</summary>
-        public static HomeValleyController HomeValley => _homeValley;
+        /// <summary>归还谷地（家园）地点；未载入时为 null 或 IsLoaded=false。</summary>
+        public static HomeValleyController HomeValley => WorldSimulation.Home;
 
-        /// <summary>ER5-REGION-01：当前破碎都市控制器实例（可能为 null——尚未进入过）。</summary>
-        public static FracturedCityController FracturedCity => _fracturedCity;
+        /// <summary>破碎都市地点（可能为 null——尚未派遣过）。</summary>
+        public static FracturedCityController FracturedCity => WorldSimulation.FracturedCity;
 
-        /// <summary>ER6-FOUNDRY-01：当前铸造前哨外围控制器实例（可能为 null——尚未进入过）。</summary>
-        public static FoundryOutpostController FoundryOutpost => _foundryOutpost;
+        /// <summary>铸造前哨外围地点（可能为 null——尚未派遣过）。</summary>
+        public static FoundryOutpostController FoundryOutpost => WorldSimulation.FoundryOutpost;
 
-        /// <summary>ER2-INPUT-01 HUD：不管当前活跃的是细胞阶段还是归还谷地，统一问"世界是否暂停"。
-        /// 两边各自有独立的 _paused 字段（见各自类注释），这里只做只读桥接，不新造第三份状态。</summary>
+        /// <summary>“世界是否暂停”：旧细胞阶段仍用它自己的暂停；0.2 的世界只有一个统一时钟（FG0-ARCH-01，FGR-ARC-009）。</summary>
         public static bool IsWorldPaused =>
             (CellStage != null && CellStage.IsRunning && CellStage.Paused) ||
-            (_homeValley != null && _homeValley.IsActive && _homeValley.IsPaused) ||
-            (_fracturedCity != null && _fracturedCity.IsActive && _fracturedCity.IsPaused) ||
-            (_foundryOutpost != null && _foundryOutpost.IsActive && _foundryOutpost.IsPaused);
+            (WorldSimulation.AnyLoaded && GameClock.Paused);
 
-        /// <summary>FG0-UX-01：三个区域里是否有一个正在运行（通知、暂停菜单、界面快捷键据此判断“在不在游戏世界里”）。</summary>
-        public static bool AnyRegionActive =>
-            (_homeValley != null && _homeValley.IsActive) ||
-            (_fracturedCity != null && _fracturedCity.IsActive) ||
-            (_foundryOutpost != null && _foundryOutpost.IsActive);
+        /// <summary>是否在游戏世界里（有任一地点已载入；通知、暂停菜单、界面快捷键据此判断）。</summary>
+        public static bool AnyRegionActive => WorldSimulation.AnyLoaded;
 
-        /// <summary>FG0-UX-01：当前运行区域的 ID（通知成员记录它；定位时与当前区域比对）。不在区域里返回空串。</summary>
+        /// <summary>“事件发生在哪个地点”：模拟步期间是正在推进的地点，否则是镜头正在观察的地点。不在世界里返回空串。</summary>
         public static string ActiveRegionId =>
-            _homeValley != null && _homeValley.IsActive ? Campaign.Regions.HomeValleyLayout.RegionId :
-            _fracturedCity != null && _fracturedCity.IsActive ? Campaign.Regions.FracturedCityLayout.RegionId :
-            _foundryOutpost != null && _foundryOutpost.IsActive ? Campaign.Regions.FoundryOutpostLayout.RegionId :
-            string.Empty;
+            WorldSimulation.CurrentSiteId ?? (WorldSimulation.AnyLoaded ? WorldView.ObservedSiteId : null) ?? string.Empty;
 
-        /// <summary>FG0-UX-01：当前运行区域的镜头（通知定位用）。</summary>
+        /// <summary>全局镜头（通知定位用）；不在世界里为 null。</summary>
         public static View.CameraDirector ActiveCameraDirector =>
-            _homeValley != null && _homeValley.IsActive ? _homeValley.CameraDirector :
-            _fracturedCity != null && _fracturedCity.IsActive ? _fracturedCity.CameraDirector :
-            _foundryOutpost != null && _foundryOutpost.IsActive ? _foundryOutpost.CameraDirector :
-            null;
+            WorldSimulation.AnyLoaded && WorldView.Director.IsBound ? WorldView.Director : null;
 
         /// <summary>FG0-UX-01：把当前世界设为暂停 / 继续（暂停菜单、通知自动暂停）。与 <see cref="ToggleWorldPause"/> 同一落点。</summary>
         public static void SetWorldPaused(bool paused)
@@ -93,13 +74,16 @@ namespace GameLogic.Stage
             return IsWorldPaused;
         }
 
-        /// <summary>FG0-UX-01（FGR-UX-020 定位）：镜头飞到通知位置。位置在别的区域、或没有镜头时给出原因文本键。</summary>
+        /// <summary>FG0-UX-01 / FG0-ARCH-01（FGR-UX-020 定位）：镜头飞到通知位置——**跨地点也能飞**（整个世界同时运行，
+        /// DEBT-FG0UX01-07 关闭）；地点已不在运行（远征已结束）时给出原因文本键。</summary>
         private static bool LocateForNotification(string regionId, Vector3 position, out string failureKey)
         {
-            return LocateOn(ActiveCameraDirector, ActiveRegionId, regionId, position, out failureKey);
+            return WorldView.Locate(regionId, position, out failureKey);
         }
 
-        /// <summary>定位的真实镜头逻辑（自检用真实 <see cref="View.CameraDirector"/> 直接驱动这里）。
+        /// <summary>单个镜头上的定位语义（FG0-UX-01）。FG0-ARCH-01 起正式定位走 <see cref="WorldView.Locate"/>（跨地点、平滑飞跃，
+        /// 接入视角下同样先拉回战略并以目标为终点）；本方法保留同一表面内的旧语义，供 FgUiKitSelfCheck 的镜头回归直接驱动。
+        /// 定位的真实镜头逻辑（自检用真实 <see cref="View.CameraDirector"/> 直接驱动这里）。
         /// 接入（直控）视角：先拉回战略并把过渡终点设成通知位置——不能先设焦点再 RequestStrategy，
         /// 后者会用当前镜头位置改写焦点，镜头停在自己机器上方。</summary>
         public static bool LocateOn(View.CameraDirector director, string activeRegionId, string regionId, Vector3 position, out string failureKey)
@@ -127,44 +111,35 @@ namespace GameLogic.Stage
             return true;
         }
 
-        /// <summary>FG0-UX-01（暂停菜单“保存并返回主菜单”）：存档前把当前区域的实时状态（机器位置、血量）
-        /// 写回记录——与区域 Exit 里的写回同一段代码，但不卸载区域（保存失败时玩家留在游戏里）。
-        /// 机器记录导出由 <see cref="Campaign.CampaignAutoSaveService.SaveWithExport"/> 负责。</summary>
+        /// <summary>FG0-UX-01（暂停菜单“保存并返回主菜单”）：存档前把每个已载入地点的实时状态（机器位置、血量）写回记录，
+        /// 不卸载（保存失败时玩家留在游戏里）。机器记录导出由 <see cref="Campaign.CampaignAutoSaveService.SaveWithExport"/> 负责。</summary>
         public static void SyncActiveRegionForSave()
         {
-            if (_homeValley != null && _homeValley.IsActive)
-            {
-                _homeValley.SyncLiveStateForSave();
-            }
-            if (_fracturedCity != null && _fracturedCity.IsActive)
-            {
-                _fracturedCity.SyncLiveStateForSave();
-            }
-            if (_foundryOutpost != null && _foundryOutpost.IsActive)
-            {
-                _foundryOutpost.SyncLiveStateForSave();
-            }
+            WorldSimulation.SyncAllForSave();
         }
 
-        /// <summary>HUD 暂停按钮的统一入口（不经过 InputRouter/Space，按钮点击直接调）。</summary>
+        /// <summary>HUD 暂停按钮的统一入口：旧细胞阶段用自己的暂停；世界里暂停 / 继续整个世界（统一时钟）。</summary>
         public static void ToggleWorldPause()
         {
             if (CellStage != null && CellStage.IsRunning)
             {
                 CellStage.SetPaused(!CellStage.Paused, strategic: true);
             }
-            else if (_homeValley != null && _homeValley.IsActive)
+            else if (WorldSimulation.AnyLoaded)
             {
-                _homeValley.SetPaused(!_homeValley.IsPaused);
+                GameClock.TogglePause();
             }
-            else if (_fracturedCity != null && _fracturedCity.IsActive)
-            {
-                _fracturedCity.SetPaused(!_fracturedCity.IsPaused);
-            }
-            else if (_foundryOutpost != null && _foundryOutpost.IsActive)
-            {
-                _foundryOutpost.SetPaused(!_foundryOutpost.IsPaused);
-            }
+        }
+
+        /// <summary>FG0-ARCH-01：通知与反馈时刻的“发生在哪个地点 / 镜头在哪个地点 / 点击定位”接到整个世界（Startup 调用；
+        /// batchmode 自检不走 Startup，直接调用本方法接上同一套提供者）。</summary>
+        public static void BindWorldProviders()
+        {
+            GameLogic.Notifications.NotificationCenter.LocateHandler = LocateForNotification;
+            GameLogic.Notifications.NotificationCenter.RegionProvider = () => ActiveRegionId;
+            // 反馈时刻（特效、音量）记下发生在哪个地点；镜头不在那个地点时不在眼前的画面上放特效、音量压到最低。
+            Campaign.Feedback.FeedbackCues.SiteProvider = () => ActiveRegionId;
+            Campaign.Feedback.FeedbackCues.ObservedSiteProvider = () => WorldSimulation.AnyLoaded ? WorldView.ObservedSiteId : null;
         }
 
         public static void Startup()
@@ -192,8 +167,7 @@ namespace GameLogic.Stage
             // FG0-UX-01：通知中心的自动暂停 / 定位 / 区域来源接到当前运行的区域；UI 基础件（浮层、通知、按键面板、
             // 暂停菜单）从主菜单阶段就挂上（主菜单的改键冲突确认、全部按键面板也要用）。
             GameLogic.Notifications.NotificationCenter.AutoPauseHandler = AutoPauseForNotification;
-            GameLogic.Notifications.NotificationCenter.LocateHandler = LocateForNotification;
-            GameLogic.Notifications.NotificationCenter.RegionProvider = () => ActiveRegionId;
+            BindWorldProviders();
             UI.Kit.UiKitRuntime.Mount();
 
             Log.Info("[GameRoot] 启动完成。已注册阶段：Cell");
@@ -211,28 +185,41 @@ namespace GameLogic.Stage
             StartCellStage(CellStageEntryMode.Resume);
         }
 
-        /// <summary>ER2-SCENE-01：新战役进入归还谷地正式场景。要求 <see cref="CampaignSession"/>
-        /// 已经 Set 好（<c>MainMenuUI.StartNewCampaign</c> 的调用顺序），否则 Controller 会拒绝进入。</summary>
+        /// <summary>ER2-SCENE-01 / FG0-ARCH-01：新战役载入家园并把镜头放在家园。要求 <see cref="CampaignSession"/> 已经 Set 好。</summary>
         public static void StartHomeValley()
         {
             if (!_started)
             {
                 Startup();
             }
-            _homeValley ??= new HomeValleyController();
-            _homeValley.Enter(resume: false);
+            HomeValleyController home = WorldSimulation.LoadHome(resume: false);
+            if (home != null && home.IsLoaded)
+            {
+                WorldView.Observe(home.SiteId);
+            }
         }
 
-        /// <summary>ER2-SCENE-01：读档/继续战役进入归还谷地；与 <see cref="StartHomeValley"/> 共用
-        /// 同一套播种/复用逻辑——首次进入播种，之后一律复用已有记录，不重复生成。</summary>
+        /// <summary>读档进入家园；家园已经在运行（远征撤离 / 放弃后回来）时只把镜头飞回家园——**不重新进入**，
+        /// 远征期间家园一直在运行（FG0-ARCH-01：派遣不退出家园）。</summary>
         public static void ResumeHomeValley()
         {
-            if (!_started)
+            // 世界已在运行（派遣 / 回家园）时不需要、也不重复启动；只有从主菜单进入时才启动。
+            if (!_started && !WorldSimulation.AnyLoaded)
             {
                 Startup();
             }
-            _homeValley ??= new HomeValleyController();
-            _homeValley.Enter(resume: true);
+            HomeValleyController home = WorldSimulation.Home != null && WorldSimulation.Home.IsLoaded
+                ? WorldSimulation.Home
+                : WorldSimulation.LoadHome(resume: true);
+            if (home != null && home.IsLoaded)
+            {
+                // 没有远征地点在运行时，世界的“当前地点”就是家园（读档恢复据此决定镜头放在哪里；与 Demo 回家园重新进入时写入的值一致）。
+                if (WorldSimulation.ActiveExpedition == null && CampaignSession.Current != null)
+                {
+                    CampaignSession.Current.CurrentRegionId = HomeValleyLayout.RegionId;
+                }
+                WorldView.Observe(home.SiteId);
+            }
         }
 
         /// <summary>DEBT-ER6REGION01-01：继续/读取战役时应恢复到哪个区域。此前主菜单固定回归还谷地——
@@ -251,51 +238,63 @@ namespace GameLogic.Stage
             return HomeValleyLayout.RegionId;
         }
 
-        /// <summary>继续/读取战役的唯一入口（主菜单调用）：按 <see cref="ResolveResumeRegion"/> 恢复到存档所在
-        /// 区域；远征区域控制器拒绝进入时安全回退归还谷地，不会停在空场景。</summary>
+        /// <summary>继续/读取战役的唯一入口（主菜单调用）。FG0-ARCH-01：整个世界一起恢复——家园总是载入并运行；存档时在外的远征
+        /// （<see cref="ResolveResumeRegion"/>）也一起载入，镜头放在远征地点；远征地点拒绝载入时安全回退只看家园，不会停在空场景。</summary>
         public static void ResumeCampaign()
-        {
-            string region = ResolveResumeRegion(CampaignSession.Current);
-            if (region == FracturedCityLayout.RegionId)
-            {
-                ResumeFracturedCity();
-                if (_fracturedCity != null && _fracturedCity.IsActive)
-                {
-                    return;
-                }
-                Log.Warning("[GameRoot] 读档恢复破碎都市未能激活，回退归还谷地。");
-            }
-            else if (region == FoundryOutpostLayout.RegionId)
-            {
-                ResumeFoundryOutpost();
-                if (_foundryOutpost != null && _foundryOutpost.IsActive)
-                {
-                    return;
-                }
-                Log.Warning("[GameRoot] 读档恢复铸造前哨外围未能激活，回退归还谷地。");
-            }
-            ResumeHomeValley();
-        }
-
-        /// <summary>ER5-REGION-01：最小可用切场入口——把 <paramref name="expeditionLogicIds"/> 指定的
-        /// 家园存活机器带去破碎都市。要求区域已 <see cref="Campaign.RegionState.Available"/>（ER5-SIG-01
-        /// 信号塔修复+ERC-003生产），否则 Controller 会拒绝进入并记录日志，不静默失败。完整的"远征准备
-        /// 面板选人数校验/出发确认/冻结输入快照"编排属于 ER5-EXP-01，本方法是它将要调用的底层入口。</summary>
-        public static void StartFracturedCity(System.Collections.Generic.IEnumerable<int> expeditionLogicIds)
         {
             if (!_started)
             {
                 Startup();
             }
-            _fracturedCity ??= new FracturedCityController();
-            _fracturedCity.Enter(expeditionLogicIds, resume: false);
+            string region = ResolveResumeRegion(CampaignSession.Current);
+            HomeValleyController home = WorldSimulation.LoadHome(resume: true);
+            if (region == FracturedCityLayout.RegionId)
+            {
+                ResumeFracturedCity();
+                if (WorldSimulation.FracturedCity != null && WorldSimulation.FracturedCity.IsLoaded)
+                {
+                    return;
+                }
+                Log.Warning("[GameRoot] 读档恢复破碎都市未能载入，镜头回到归还谷地。");
+            }
+            else if (region == FoundryOutpostLayout.RegionId)
+            {
+                ResumeFoundryOutpost();
+                if (WorldSimulation.FoundryOutpost != null && WorldSimulation.FoundryOutpost.IsLoaded)
+                {
+                    return;
+                }
+                Log.Warning("[GameRoot] 读档恢复铸造前哨外围未能载入，镜头回到归还谷地。");
+            }
+            if (home != null && home.IsLoaded)
+            {
+                WorldView.Observe(home.SiteId);
+            }
         }
 
-        /// <summary>读档/继续战役时若上次保存点仍在破碎都市，用同一批（当前仍标记 RegionId=silent_ruins
-        /// 的）机器重新进入——不需要调用方重新指定 LogicId 列表。</summary>
+        /// <summary>ER5-REGION-01 / FG0-ARCH-01：派遣入口——把 <paramref name="expeditionLogicIds"/> 指定的家园存活机器派到破碎都市。
+        /// **家园继续运行**（不再 Exit），镜头飞到远征地点；要求区域已 Available，否则控制器拒绝载入并记录日志。
+        /// 完整的准备 / 校验 / 事务编排在 <see cref="ExpeditionDepartureService.TryDepart"/>。</summary>
+        public static void StartFracturedCity(System.Collections.Generic.IEnumerable<int> expeditionLogicIds)
+        {
+            // 世界已在运行（派遣 / 回家园）时不需要、也不重复启动；只有从主菜单进入时才启动。
+            if (!_started && !WorldSimulation.AnyLoaded)
+            {
+                Startup();
+            }
+            FracturedCityController site = WorldSimulation.LoadFracturedCity(expeditionLogicIds, resume: false);
+            if (site != null && site.IsLoaded)
+            {
+                WorldView.Observe(site.SiteId);
+                GuidanceHooks.Raise(GuidanceHooks.WorldFirstDispatch);
+            }
+        }
+
+        /// <summary>读档时上次保存点仍在破碎都市：用仍标记在那里的存活机器重新载入（家园也在运行）。</summary>
         public static void ResumeFracturedCity()
         {
-            if (!_started)
+            // 世界已在运行（派遣 / 回家园）时不需要、也不重复启动；只有从主菜单进入时才启动。
+            if (!_started && !WorldSimulation.AnyLoaded)
             {
                 Startup();
             }
@@ -303,35 +302,41 @@ namespace GameLogic.Stage
             var alreadyThere = state?.MachineRecords?
                 .Where(m => m.RegionId == FracturedCityLayout.RegionId && m.IsAlive)
                 .Select(m => m.LogicId) ?? System.Array.Empty<int>();
-            _fracturedCity ??= new FracturedCityController();
-            _fracturedCity.Enter(alreadyThere, resume: true);
+            FracturedCityController site = WorldSimulation.LoadFracturedCity(alreadyThere, resume: true);
+            if (site != null && site.IsLoaded)
+            {
+                WorldView.Observe(site.SiteId);
+            }
         }
 
-        /// <summary>破碎都市撤离/暂离出口——与 <see cref="EndRun"/>（回主菜单）是两件不同的事：
-        /// 本方法只把控制器切回归还谷地，不清空 <see cref="CampaignSession"/>。</summary>
+        /// <summary>破碎都市撤离 / 暂离出口：卸载远征地点（家园一直在运行）；镜头若在那里则回到家园。</summary>
         public static void ExitFracturedCity(bool evacuateSuccess)
         {
-            _fracturedCity?.Exit(evacuateSuccess);
+            WorldSimulation.FracturedCity?.Exit(evacuateSuccess);
+            WorldView.EnsureObservedLoaded();
         }
 
-        /// <summary>ER6-FOUNDRY-01：最小可用切场入口——与 <see cref="StartFracturedCity"/> 同一定位
-        /// （远征准备/往返事务的正式编排属于 ER6-REGION-01 对 <see cref="ExpeditionDepartureService"/>
-        /// 的扩展）。要求区域已 <see cref="Campaign.RegionState.Available"/>（跨派系蓝图已保存+ERC-003
-        /// 已改造，<see cref="FoundryOutpostRegion.RecomputeUnlock"/> 真实判定）。</summary>
+        /// <summary>ER6-FOUNDRY-01 / FG0-ARCH-01：派遣到铸造前哨外围（同 <see cref="StartFracturedCity"/>）。</summary>
         public static void StartFoundryOutpost(System.Collections.Generic.IEnumerable<int> expeditionLogicIds)
         {
-            if (!_started)
+            // 世界已在运行（派遣 / 回家园）时不需要、也不重复启动；只有从主菜单进入时才启动。
+            if (!_started && !WorldSimulation.AnyLoaded)
             {
                 Startup();
             }
-            _foundryOutpost ??= new FoundryOutpostController();
-            _foundryOutpost.Enter(expeditionLogicIds, resume: false);
+            FoundryOutpostController site = WorldSimulation.LoadFoundryOutpost(expeditionLogicIds, resume: false);
+            if (site != null && site.IsLoaded)
+            {
+                WorldView.Observe(site.SiteId);
+                GuidanceHooks.Raise(GuidanceHooks.WorldFirstDispatch);
+            }
         }
 
-        /// <summary>读档/继续战役时若上次保存点仍在铸造前哨外围，用同一批机器重新进入。</summary>
+        /// <summary>读档时上次保存点仍在铸造前哨外围：用同一批机器重新载入。</summary>
         public static void ResumeFoundryOutpost()
         {
-            if (!_started)
+            // 世界已在运行（派遣 / 回家园）时不需要、也不重复启动；只有从主菜单进入时才启动。
+            if (!_started && !WorldSimulation.AnyLoaded)
             {
                 Startup();
             }
@@ -339,14 +344,18 @@ namespace GameLogic.Stage
             var alreadyThere = state?.MachineRecords?
                 .Where(m => m.RegionId == FoundryOutpostLayout.RegionId && m.IsAlive)
                 .Select(m => m.LogicId) ?? System.Array.Empty<int>();
-            _foundryOutpost ??= new FoundryOutpostController();
-            _foundryOutpost.Enter(alreadyThere, resume: true);
+            FoundryOutpostController site = WorldSimulation.LoadFoundryOutpost(alreadyThere, resume: true);
+            if (site != null && site.IsLoaded)
+            {
+                WorldView.Observe(site.SiteId);
+            }
         }
 
-        /// <summary>铸造前哨外围撤离/暂离出口——与 <see cref="ExitFracturedCity"/> 同一定位。</summary>
+        /// <summary>铸造前哨外围撤离 / 暂离出口（同 <see cref="ExitFracturedCity"/>）。</summary>
         public static void ExitFoundryOutpost(bool evacuateSuccess)
         {
-            _foundryOutpost?.Exit(evacuateSuccess);
+            WorldSimulation.FoundryOutpost?.Exit(evacuateSuccess);
+            WorldView.EnsureObservedLoaded();
         }
 
         /// <summary>结束当前局，回到无阶段状态。ER2-BOOT-01：唯一的"返回菜单"出口——不管调用方是
@@ -358,13 +367,12 @@ namespace GameLogic.Stage
             // FG0-UX-01：离开世界时统一收起世界里打开的界面基础件（暂停菜单、按键面板、确认框、右键菜单、拖放、
             // 样例页）并清空 Esc 栈——否则胜负页上按 Esc 打开的暂停菜单会带着世界暂停与模态残留盖在主菜单上。
             UI.Kit.UiKitRuntime.CloseWorldUi();
-            _homeValley?.Exit();
-            _fracturedCity?.Exit(evacuateSuccess: false);
-            _foundryOutpost?.Exit(evacuateSuccess: false);
+            // FG0-ARCH-01：整个世界一起卸载（远征地点、家园），全局镜头解绑并复位输入。
+            WorldSimulation.UnloadAll();
             _director?.EndCurrent();
             CampaignSession.Clear();
-            // ER2-INPUT-01：回菜单复位战略速度，不让上一局选的倍率粘到下一局（同 InputRouter.Reset 纪律）。
-            Core.StrategyClock.Reset();
+            // ER2-INPUT-01 / FG0-ARCH-01：回菜单复位统一时钟（速度 1x、未暂停、时间轴归零），不让上一局的状态粘到下一局。
+            GameClock.ResetSession();
             GameModule.UI.ShowUIAsync<MainMenuUI>();
         }
 
@@ -404,9 +412,8 @@ namespace GameLogic.Stage
 
             float dt = Time.deltaTime;
             _director.Update(dt);
-            _homeValley?.Update(dt);
-            _fracturedCity?.Update(dt);
-            _foundryOutpost?.Update(dt);
+            // FG0-ARCH-01：整个世界（家园 + 远征地点 + 行进中的队伍）按统一时钟的固定步同时推进；镜头只决定玩家看哪里。
+            WorldSimulation.Frame(Time.unscaledDeltaTime);
             // ER8-CONTENT-01：音量设置同步、音效预加载、字幕条过期；UI 缩放设置作用到界面。
             // 主菜单里也要跑（设置面板在那里）。
             Campaign.Feedback.FeedbackCues.Tick();
@@ -551,8 +558,7 @@ namespace GameLogic.Stage
             }
             _director?.Dispose();
             _director = null;
-            _homeValley?.Exit();
-            _homeValley = null;
+            WorldSimulation.UnloadAll();
             Signals.Clear();
             _started = false;
             Log.Info("[GameRoot] 已关闭。");

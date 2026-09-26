@@ -415,10 +415,9 @@ namespace GameLogic.Notifications
             }
             if (m.GameDay > 0)
             {
-                int minuteOfDay = (int)(m.GameSeconds / 60.0) % (24 * 60);
-                string hhmm = (minuteOfDay / 60).ToString("00", CultureInfo.InvariantCulture) + ":" +
-                              (minuteOfDay % 60).ToString("00", CultureInfo.InvariantCulture);
-                return GameText.Format("ui.notify.time_day", m.GameDay.ToString(CultureInfo.InvariantCulture), hhmm);
+                // FG0-ARCH-01：统一时钟接入后按游戏日换算（1x 下 1 游戏日 = clock.day_seconds 真实秒），与世界时间条同一公式。
+                return GameText.Format("ui.notify.time_day", m.GameDay.ToString(CultureInfo.InvariantCulture),
+                    GameLogic.Core.GameClock.FormatHhMm(m.GameSeconds));
             }
             if (DateTime.TryParse(m.CreatedAtUtc, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTime utc))
             {

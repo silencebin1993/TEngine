@@ -52,14 +52,20 @@ namespace GameLogic.Campaign
         public bool IsSandbox;
     }
 
-    /// <summary>统一游戏时钟（FGR-ARC-009 / FGR-ENV-001，FG0-ARCH-01 填写）。<see cref="Day"/> = 0 表示
-    /// 时钟尚未接入，存档卡不显示"第几日"。</summary>
+    /// <summary>统一游戏时钟（FGR-ARC-009 / FGR-ENV-001）。唯一写入口 <see cref="Core.GameClock"/>（FG0-ARCH-01 起每个模拟步写一次）。
+    /// <see cref="Day"/> = 0 表示时钟尚未接入（FG0-ARCH-01 之前的存档），存档卡不显示"第几日"；读档时由 GameClock 补算。</summary>
     [Serializable]
     public sealed class GameClockState
     {
         public int DomainVersion = 1;
+        /// <summary>已模拟的游戏秒数（= <see cref="Ticks"/> / <see cref="StepHz"/>；1x 下与真实秒数相同）。</summary>
         public double GameSeconds;
+        /// <summary>第几个游戏日（从 1 起；由 GameSeconds 与 clock.day_seconds / clock.start_hour 推导，存下来供存档卡直接显示）。</summary>
         public int Day;
+        /// <summary>FG0-ARCH-01：已执行的固定模拟步数（确定性回放的时间轴）。</summary>
+        public long Ticks;
+        /// <summary>FG0-ARCH-01：写入 <see cref="Ticks"/> 时的步长频率；读档时与当前 clock.sim_step_hz 不同则按 GameSeconds 换算。</summary>
+        public int StepHz;
     }
 
     /// <summary>格网建造（FG0-ARCH-04 / FG03）。唯一写入口 <see cref="Grid.HomeGridService"/>。
@@ -122,11 +128,51 @@ namespace GameLogic.Campaign
         public int DomainVersion = 1;
     }
 
-    /// <summary>突袭（FG06）。</summary>
+    /// <summary>突袭（FG06）。FG0-ARCH-01 起保存"行进中的队伍"（星球表面上的突袭部队，由 <see cref="WorldSim.WorldTransitSystem"/> 唯一写入）；
+    /// 突袭导演、编成、攻城与结算由 FG6-DEF-04～08 在本域追加字段。</summary>
     [Serializable]
     public sealed class RaidState
     {
         public int DomainVersion = 1;
+        /// <summary>FG0-ARCH-01：星球上行进中 / 已到达、尚未结算的队伍。</summary>
+        public TransitGroupRecord[] InTransit = Array.Empty<TransitGroupRecord>();
+        /// <summary>FG0-ARCH-01：下一个队伍序号（GroupId = "transit-" + 序号，确定性，不用 GUID）。</summary>
+        public int NextGroupSerial = 1;
+    }
+
+    /// <summary>队伍种类。</summary>
+    public enum TransitGroupKind
+    {
+        Raid = 0,
+    }
+
+    /// <summary>队伍状态。</summary>
+    public enum TransitGroupState
+    {
+        Marching = 0,
+        Arrived = 1,
+    }
+
+    /// <summary>FG0-ARCH-01：星球表面上的一支行进中的队伍（聚合体：只存人数与位置，逐单位模拟在 FG0-ARCH-03 的战斗内核）。
+    /// 位置用双精度格坐标（格心在整数处），远离原点也不丢精度（FGR-GEN-051）。</summary>
+    [Serializable]
+    public sealed class TransitGroupRecord
+    {
+        public string GroupId;
+        public TransitGroupKind Kind;
+        public TransitGroupState State;
+        /// <summary>出发地（领地 ID，如 silent；显示"来自哪里"与 B25 种子无关性证明用）。</summary>
+        public string OriginId;
+        public int UnitCount;
+        public double PosX;
+        public double PosY;
+        public double TargetX;
+        public double TargetY;
+        /// <summary>行进速度（格 / 游戏秒）。</summary>
+        public float Speed;
+        public long DispatchedAtTick;
+        /// <summary>到达时的模拟步（未到达为 -1）。</summary>
+        public long ArrivedAtTick = -1;
     }
 
     /// <summary>事件导演（FG10）。</summary>
@@ -300,6 +346,11 @@ namespace GameLogic.Campaign
             s.Research ??= new ResearchState();
             s.Weather ??= new WeatherState();
             s.Raids ??= new RaidState();
+            s.Raids.InTransit ??= Array.Empty<TransitGroupRecord>();
+            if (s.Raids.NextGroupSerial < 1)
+            {
+                s.Raids.NextGroupSerial = 1;
+            }
             s.DirectorEvents ??= new DirectorEventState();
             s.Quests ??= new QuestState();
             s.StandingRules ??= new StandingRuleState();

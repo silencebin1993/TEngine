@@ -101,5 +101,7 @@ namespace GameLogic.Core
         PinTooltip = 92,
         QuickSave = 93,
         QuickLoad = 94,
+        /// <summary>FG0-ARCH-01（FGR-ARC-002）：在家园、远征地点、行进中的突袭之间依次飞跃镜头（战略上下文，默认 Tab）。</summary>
+        CycleWorldFocus = 95,
     }
 }

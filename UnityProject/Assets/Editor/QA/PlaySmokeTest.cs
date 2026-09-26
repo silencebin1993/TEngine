@@ -4,6 +4,7 @@ using System.Linq;
 using GameConfig.fg;
 using GameLogic.Campaign;
 using GameLogic.Campaign.Feedback;
+using GameLogic.Campaign.WorldSim;
 using GameLogic.Core;
 using GameLogic.Settings;
 using GameLogic.Stage;
@@ -146,6 +147,15 @@ namespace GameLogic.EditorTools
                     case 81: StepFailureEsc(inStep); break;
                     case 82: StepFailureBackToMenu(inStep); break;
                     case 7: StepRuins(inStep); break;
+                    case 120: StepWorldHomeKeepsRunning(inStep); break;
+                    case 121: StepWorldFlownHome(inStep); break;
+                    case 122: StepWorldTabToExpedition(inStep); break;
+                    case 123: StepWorldTabToRaid(inStep); break;
+                    case 124: StepWorldTriple(inStep); break;
+                    case 125: StepWorldPaused(inStep); break;
+                    case 126: StepWorldPausedHeld(inStep); break;
+                    case 127: StepWorldHomeKey(inStep); break;
+                    case 128: StepWorldShuttle(inStep); break;
                     case 8: StepFoundry(inStep); break;
                     case 9: StepBackHome(inStep); break;
                     case 20: StepOpenSlotList(inStep); break;
@@ -1200,9 +1210,10 @@ namespace GameLogic.EditorTools
             int[] roster = HomeMachines();
             UnlockLikeDeparture(Campaign.Regions.FracturedCityRegion.Find(CampaignSession.Current),
                 Campaign.Regions.ExpeditionDepartureService.ExpeditionTarget.SilentRuins);
-            GameRoot.HomeValley?.Exit();
+            // FG0-ARCH-01：派遣不再退出家园——与正式出发事务（ExpeditionDepartureService.TryDepart）同一个调用：只载入远征地点，镜头飞过去。
+            SessionState.SetString(K + "TicksAtDispatch", GameClock.Ticks.ToString());
             GameRoot.StartFracturedCity(roster);
-            Next(7, $"测试捷径：标记破碎都市可出征并记一次出征，按出征同样的调用顺序进入（{roster.Length} 台机器）");
+            Next(7, $"测试捷径：标记破碎都市可出征并记一次出征，按出征同样的调用顺序派遣（{roster.Length} 台机器；家园不退出）");
         }
 
         private static void StepRuins(double inStep)
@@ -1220,13 +1231,249 @@ namespace GameLogic.EditorTools
             Write($"  - 世界特效活动中 {VfxActive()} 个");
             CheckEnemiesFromTable(Campaign.Regions.FracturedCityLayout.RegionId, Campaign.Content.EnemyCatalog.ScoutId);
             CheckNoTextMarkers("破碎都市");
+            Next(120, "FG0-ARCH-01：整个世界同时运行——远征进行中，家园没有退出");
+        }
+
+        // ── FG0-ARCH-01：整个世界同时运行、统一时钟、全局镜头（世界时间条、Tab / Home / 4 / Space 走正式输入）─────────
+
+        private static readonly Vector3 OffScreen = new Vector3(-10f, -10f, 0f);
+
+        /// <summary>模拟按下一次键，光标在窗口外（不触发边缘推屏）。</summary>
+        private static void PressKeyOffScreen(KeyCode key)
+        {
+            InputRouter.DebugSetReader(new ScriptedReader { Key = key, KeyFrame = Time.frameCount + 1, Mouse = OffScreen });
+        }
+
+        private static bool WorldBarReady(out WorldBarHudUIToolkit hud)
+        {
+            hud = WorldBarHudUIToolkit.Instance;
+            if (hud == null || !hud.IsReady)
+            {
+                return false;
+            }
+            hud.Refresh();
+            return hud.BarVisible;
+        }
+
+        private static Vector2 CameraFocus() => new Vector2(WorldView.Director.StrategyFocus.x, WorldView.Director.StrategyFocus.y);
+
+        private static void StepWorldHomeKeepsRunning(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            long atDispatch = long.TryParse(SessionState.GetString(K + "TicksAtDispatch", "0"), out long t) ? t : 0;
+            bool homeRunning = GameRoot.HomeValley != null && GameRoot.HomeValley.IsLoaded && !GameRoot.HomeValley.IsActive;
+            bool ruinsObserved = GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsActive;
+            GameObject homeRoot = GameObject.Find("[HomeValley]");
+            Check(homeRunning && ruinsObserved && GameClock.Ticks > atDispatch && homeRoot == null,
+                $"派遣后家园仍在运行（已载入、不被观察、表现对象隐藏）、镜头在破碎都市；统一时钟 {atDispatch}→{GameClock.Ticks} 步");
+            if (!WorldBarReady(out WorldBarHudUIToolkit hud))
+            {
+                if (inStep > 10)
+                {
+                    Finish("世界时间条没有出现");
+                }
+                return;
+            }
+            Write($"  - 世界时间条：{hud.DayTimeText}；状态 {hud.StatusText}；关注点 {string.Join(" / ", hud.FocusButtons.Where(b => IsDisplayed(b)).Select(b => b.text))}");
+            Check(hud.DayTimeText.StartsWith("第 ") && hud.FocusButtonCount >= 2, "世界时间条显示“第 N 日 HH:MM”与关注点（家园、远征）");
+            CheckNoTextMarkers("世界时间条");
+            // 光标移到窗口外：这一段要核对镜头落点，不能让屏幕边缘推屏把镜头推走（batchmode 下光标默认在左下角 = 边缘）。
+            InputRouter.DebugSetReader(new ScriptedReader { Mouse = OffScreen });
+            Check(ClickUitk("[WorldBarHost]", "WorldFocus0"), "点关注点“家园”");
+            Next(121, "点世界时间条的关注点“家园”：镜头飞回家园（远征继续运行）");
+        }
+
+        private static void StepWorldFlownHome(double inStep)
+        {
+            if (inStep < 1.2)
+            {
+                return;
+            }
+            bool homeObserved = GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive;
+            bool ruinsRunning = GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsLoaded && !GameRoot.FracturedCity.IsActive;
+            GameObject homeRoot = GameObject.Find("[HomeValley]");
+            GameObject ruinsRoot = GameObject.Find("[FracturedCityRoot]");
+            Check(homeObserved && ruinsRunning && homeRoot != null && ruinsRoot == null && Vector2.Distance(CameraFocus(), Campaign.Regions.HomeValleyLayout.Core.Position) < 1f,
+                $"镜头回到家园（焦点 {CameraFocus()}）：家园表现对象显示、破碎都市表现对象隐藏但仍在运行");
+            Check(WorldPlanetView.TerrainShown, "普通视角显示镜头附近区块的地貌层（DEBT-FG0ARCH05-02）");
+            // 测试捷径：派一支突袭（突袭导演属于 FG6-DEF-04；这里只验证行进中的队伍与镜头飞跃）。
+            TransitGroupRecord raid = WorldTransitSystem.DispatchRaidFromTerritory(CampaignSession.Current, "silent", 6, out string failure);
+            Check(raid != null, $"测试捷径：从规划层领地派出一支突袭（{failure ?? raid?.GroupId}）");
+            SessionState.SetString(K + "RaidId", raid?.GroupId ?? string.Empty);
+            PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.CycleWorldFocus));
+            Next(122, "按“切换关注点”（Tab）");
+        }
+
+        private static void StepWorldTabToExpedition(double inStep)
+        {
+            if (inStep < 1.2)
+            {
+                return;
+            }
+            Check(GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsActive && WorldView.LastFocusTargetId == "site:" + Campaign.Regions.FracturedCityLayout.RegionId,
+                $"Tab：镜头从家园飞到远征地点（关注点 {WorldView.LastFocusTargetId}）");
+            PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.CycleWorldFocus));
+            SessionState.SetInt(K + "FlightMaxPlaceholder", 0);
+            SessionState.SetFloat(K + "FlightMaxFrameMs", 0f);
+            SessionState.SetInt(K + "FlightFrames", 0);
+            SessionState.SetInt(K + "FlightLastFrame", -1);
+            SessionState.SetBool(K + "RaidChecked", false);
+            Next(123, "再按 Tab");
+        }
+
+        /// <summary>远距离飞跃期间逐帧采样（DEBT-FG0ARCH05-01 ①）：地貌层“生成中”占位块数的峰值、真实帧耗时峰值。</summary>
+        private static void SampleFlight()
+        {
+            int frame = Time.frameCount;
+            if (SessionState.GetInt(K + "FlightLastFrame", -1) == frame)
+            {
+                return;
+            }
+            SessionState.SetInt(K + "FlightLastFrame", frame);
+            SessionState.SetInt(K + "FlightFrames", SessionState.GetInt(K + "FlightFrames", 0) + 1);
+            Campaign.Regions.WorldTerrainOverlay terrain = WorldPlanetView.Terrain;
+            int placeholders = terrain != null ? terrain.PlaceholderCount : 0;
+            if (placeholders > SessionState.GetInt(K + "FlightMaxPlaceholder", 0))
+            {
+                SessionState.SetInt(K + "FlightMaxPlaceholder", placeholders);
+            }
+            float ms = Time.unscaledDeltaTime * 1000f;
+            if (SessionState.GetInt(K + "FlightFrames", 0) > 2 && ms > SessionState.GetFloat(K + "FlightMaxFrameMs", 0f))
+            {
+                SessionState.SetFloat(K + "FlightMaxFrameMs", ms); // 按键那一两帧不计（输入注入本身的编辑器开销）
+            }
+        }
+
+        private static void StepWorldTabToRaid(double inStep)
+        {
+            SampleFlight();
+            if (inStep < 1.2)
+            {
+                return;
+            }
+            string raidId = SessionState.GetString(K + "RaidId", string.Empty);
+            TransitGroupRecord raid = WorldTransitSystem.Find(CampaignSession.Current, raidId);
+            if (!SessionState.GetBool(K + "RaidChecked", false))
+            {
+                SessionState.SetBool(K + "RaidChecked", true);
+                bool marker = WorldPlanetView.TryGetMarkerPosition(raidId, out Vector3 markerPos) && GameObject.Find("RaidMarker_" + raidId) != null;
+                Check(GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive && WorldView.LastFocusTargetId == raidId && raid != null
+                      && Vector2.Distance(CameraFocus(), WorldTransitSystem.Position(raid)) < 3f && marker,
+                    $"再按 Tab：镜头飞到行进中的突袭（焦点 {CameraFocus()}，突袭在 {WorldTransitSystem.Position(raid)}），镜头附近生成突袭标记（{markerPos}）");
+            }
+            // DEBT-FG0ARCH05-01 ①：远距离飞跃露出没生成的区块——先显示“生成中”占位，随后补齐，主线程不卡。
+            Campaign.Regions.WorldTerrainOverlay terrain = WorldPlanetView.Terrain;
+            int now = terrain != null ? terrain.PlaceholderCount : -1;
+            if (now != 0 && inStep < 10)
+            {
+                return;
+            }
+            int maxPlaceholder = SessionState.GetInt(K + "FlightMaxPlaceholder", 0);
+            float maxFrameMs = SessionState.GetFloat(K + "FlightMaxFrameMs", 0f);
+            int frames = SessionState.GetInt(K + "FlightFrames", 0);
+            Write($"  - 飞跃采样：{frames} 帧，“生成中”占位峰值 {maxPlaceholder} 块，现在 {now} 块；真实帧耗时峰值 {maxFrameMs:F0} ms" +
+                  $"（活跃区块 {WorldSimulation.ActiveChunkCount}，窗口 ({terrain?.WindowChunkX},{terrain?.WindowChunkY}) 半径 {terrain?.WindowRadius}）");
+            Check(maxPlaceholder > 0 && now == 0 && maxFrameMs < 250f,
+                $"远距离飞跃（约 {Vector2.Distance(Campaign.Regions.HomeValleyLayout.Core.Position, CameraFocus()):F0} 格）：新露出的区块先显示“生成中”占位（峰值 {maxPlaceholder} 块），" +
+                $"{inStep:F1} 秒内补齐（剩 {now} 块）；主线程单帧峰值 {maxFrameMs:F0} ms（上限 250 ms）");
+            PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.SpeedTriple));
+            Next(124, "按 4（3x）");
+        }
+
+        private static void StepWorldTriple(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            WorldBarReady(out WorldBarHudUIToolkit hud);
+            Check(Mathf.Approximately(GameClock.Speed, 3f) && hud != null && hud.StatusText.Contains("3x"),
+                $"4 键：整个世界 3x（状态“{hud?.StatusText}”）");
+            PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.TogglePause));
+            Next(125, "按 Space 暂停整个世界");
+        }
+
+        private static void StepWorldPaused(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            string raidId = SessionState.GetString(K + "RaidId", string.Empty);
+            TransitGroupRecord raid = WorldTransitSystem.Find(CampaignSession.Current, raidId);
+            Check(GameClock.Paused && GameRoot.IsWorldPaused, "Space：整个世界暂停");
+            SessionState.SetString(K + "PausedTicks", GameClock.Ticks.ToString());
+            SessionState.SetString(K + "PausedRaid", raid != null ? raid.PosX.ToString("R") : "none");
+            Next(126, "暂停中等 1.5 秒");
+        }
+
+        private static void StepWorldPausedHeld(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            string raidId = SessionState.GetString(K + "RaidId", string.Empty);
+            TransitGroupRecord raid = WorldTransitSystem.Find(CampaignSession.Current, raidId);
+            Check(GameClock.Ticks.ToString() == SessionState.GetString(K + "PausedTicks", "") && raid != null
+                  && raid.PosX.ToString("R") == SessionState.GetString(K + "PausedRaid", ""),
+                $"暂停期间时间轴不动（{GameClock.Ticks} 步），行进中的突袭也停住");
+            PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.TogglePause));
+            SessionState.SetInt(K + "UnpauseFrame", Time.frameCount);
+            Next(127, "按 Space 继续");
+        }
+
+        private static void StepWorldHomeKey(double inStep)
+        {
+            if (inStep < 0.3)
+            {
+                return;
+            }
+            if (!SessionState.GetBool(K + "HomeKeyPressed", false))
+            {
+                Check(!GameClock.Paused, "Space：整个世界继续");
+                SessionState.SetBool(K + "HomeKeyPressed", true);
+                PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.FocusHomeCore));
+                return;
+            }
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            Check(GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive && Vector2.Distance(CameraFocus(), Campaign.Regions.HomeValleyLayout.Core.Position) < 1f,
+                $"Home：镜头回到归还核心（焦点 {CameraFocus()}）");
+            SessionState.SetInt(K + "Shuttles", 0);
+            Next(128, "在家园与远征之间来回飞跃（Tab 依次切换）");
+        }
+
+        private static void StepWorldShuttle(double inStep)
+        {
+            int n = SessionState.GetInt(K + "Shuttles", 0);
+            if (inStep < 0.8 * (n + 1))
+            {
+                return;
+            }
+            if (n < 6)
+            {
+                PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.CycleWorldFocus));
+                SessionState.SetInt(K + "Shuttles", n + 1);
+                return;
+            }
+            bool stillBoth = GameRoot.HomeValley != null && GameRoot.HomeValley.IsLoaded && GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsLoaded;
+            Check(stillBoth && WorldView.ObserveSwitchCount >= 6, $"来回飞跃 6 次后家园与远征都仍在运行（跨地点切换累计 {WorldView.ObserveSwitchCount} 次）");
+            CheckNoTextMarkers("世界时间条（飞跃后）");
+            StrategyClock.SetSpeed(1f);
+
             int[] roster = MachineRegistry.AllRecords.Where(m => m != null && m.IsAlive).Select(m => m.LogicId).ToArray();
             GameRoot.FracturedCity?.Exit(evacuateSuccess: false);
             Campaign.Regions.FoundryOutpostRegion.EnsureRegionRecordSeeded(CampaignSession.Current);
             UnlockLikeDeparture(Campaign.Regions.FoundryOutpostRegion.Find(CampaignSession.Current),
                 Campaign.Regions.ExpeditionDepartureService.ExpeditionTarget.FoundryOutpost);
             GameRoot.StartFoundryOutpost(roster);
-            Next(8, "测试捷径：标记铸造前哨外围可出征，进入");
+            Next(8, "测试捷径：暂离破碎都市（镜头自动回家园），标记铸造前哨外围可出征，派遣");
         }
 
         private static void StepFoundry(double inStep)

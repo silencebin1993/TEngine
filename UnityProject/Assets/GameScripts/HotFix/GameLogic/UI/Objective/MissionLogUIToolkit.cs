@@ -217,7 +217,7 @@ namespace GameLogic.UI.Objective
         /// 解锁条件、出征次数与带回内容、主核心状态。</summary>
         public static void ComposeRegionRow(CampaignState state, string regionId, out string name, out string stateText, out string detail)
         {
-            bool here = state != null && state.CurrentRegionId == regionId;
+            bool here = state != null && (GameLogic.Campaign.WorldSim.WorldView.ObservedSiteId ?? state.CurrentRegionId) == regionId; // FG0-ARCH-01：镜头所在的地点。
             name = CampaignObjectiveCatalog.RegionDisplayName(regionId) + (here ? " ◆" : string.Empty);
             var parts = new List<string>(5);
             ObjectiveDef current = CampaignObjectiveCatalog.Get(CampaignObjectiveTracker.CurrentObjectiveId(state));

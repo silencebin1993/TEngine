@@ -26,6 +26,12 @@ namespace GameLogic.Campaign.Regions
         private const float CheckIntervalSeconds = 0.5f;
         private static float _timer;
 
+        /// <summary>FG0-ARCH-01：会话开始时把检查计时归零（理由同 <see cref="HomeValleyWorkOrders.ResetSessionState"/>）。</summary>
+        public static void ResetSessionState()
+        {
+            _timer = 0f;
+        }
+
         /// <summary>紧急机的出厂血量——比 ERC-001/002 的占位血量更脆（DEMO-CONTENT-LOCK.md 未点名
         /// 具体数值，这是"应急拼装、不是正式产线机型"的设计取舍），不影响任何验收数值。</summary>
         private const float RescueMachineHealth = 60f;

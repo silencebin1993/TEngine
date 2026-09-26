@@ -51,9 +51,14 @@ namespace GameLogic.View
         // ── 战略视角 ──
         private const float StrategyPanSpeed = 28f;
         private const float StrategyEdgePanMargin = 8f;
-        private const float MinOrthographicSize = 8f;
-        private const float MaxOrthographicSize = 46f;
-        private const float ZoomStep = 3.5f;
+        // FG0-ARCH-01 修复：战略缩放范围入表（fg.TbHomeTuning camera.zoom_*），缺表时回落 Demo 初值。
+        // 旧细胞阶段等没加载 fg 表的场合静默用初值（不刷告警；表内有没有这三行由 FgWorldSimSelfCheck A 段断言）。
+        private static float MinOrthographicSize => Tune("camera.zoom_min_ortho", 8f);
+        private static float MaxOrthographicSize => math.max(MinOrthographicSize, Tune("camera.zoom_max_ortho", 46f));
+        private static float ZoomStep => Tune("camera.zoom_step", 3.5f);
+
+        private static float Tune(string id, float fallback) =>
+            GameLogic.Campaign.Grid.GridContent.TryGetTuning(id, out float v) ? v : fallback;
         /// <summary>战略平移允许越出场地边界的余量，让玩家能看清贴边的单位。</summary>
         private const float StrategyBoundsPadding = 6f;
 
@@ -80,6 +85,13 @@ namespace GameLogic.View
         private Vector3 _transitionTo;
         private float _transitionFromSize;
         private float _transitionToSize;
+        /// <summary>FG0-ARCH-01：本次过渡的时长（视角切换 0.35 秒；镜头飞跃 camera.fly_seconds）。</summary>
+        private float _transitionDuration = TransitionSeconds;
+
+        /// <summary>FG0-ARCH-01：矩形平移边界（星球表面按已探索范围给出）。未设置时沿用以原点为中心的方形 <see cref="_arenaHalfExtent"/>。</summary>
+        private bool _hasRectBounds;
+        private float2 _boundsMin;
+        private float2 _boundsMax;
 
         /// <summary>战略视角的注视点（世界 XZ）。进入战略时从当前镜头继承，之后由玩家平移。</summary>
         private float2 _strategyFocus;
@@ -92,6 +104,17 @@ namespace GameLogic.View
         public bool InTransition => _mode == ViewMode.Transition;
         public float2 StrategyFocus => _strategyFocus;
         public float OrthographicSize => _camera != null ? _camera.orthographicSize : 0f;
+        /// <summary>FG0-ARCH-01：战略视角的缩放（全局镜头按地点记忆 / 恢复）。</summary>
+        public float StrategyOrthographicSize => _strategyOrthographicSize;
+        public bool IsBound => _camera != null;
+        /// <summary>FG0-ARCH-01：当前生效的平移边界（自检用）。</summary>
+        public float2 BoundsMin => _hasRectBounds ? _boundsMin : new float2(-_arenaHalfExtent - StrategyBoundsPadding);
+        public float2 BoundsMax => _hasRectBounds ? _boundsMax : new float2(_arenaHalfExtent + StrategyBoundsPadding);
+        public int FlightCount { get; private set; }
+
+        /// <summary>FG0-ARCH-01：镜头用的真实帧时间来源（默认 <see cref="Time.unscaledDeltaTime"/>）。batchmode 自检在同一编辑器帧里
+        /// 连续驱动几千帧，Unity 的 unscaledDeltaTime 不变，注入固定值才能让过渡按帧真实走完。</summary>
+        public static System.Func<float> RealDeltaTime = () => Time.unscaledDeltaTime;
 
         /// <summary>本局累计的模式切换次数。验收用，确认"一次请求只切一次"。</summary>
         public int ModeChangeCount { get; private set; }
@@ -127,6 +150,7 @@ namespace GameLogic.View
             _appliedShake = Vector3.zero; // 新绑定的相机上没有本类叠过的偏移。
             _followOffset = followOffset;
             _arenaHalfExtent = math.max(1f, arenaHalfExtent);
+            _hasRectBounds = false;
             if (_camera != null)
             {
                 // 归还谷地进场时相机是战略远景尺寸（见 startInStrategy 分支），直接拿来当"直控该用
@@ -150,7 +174,10 @@ namespace GameLogic.View
             InputRouter.SetScope(_mode == ViewMode.Strategy ? InputScope.Strategy : InputScope.Direct);
         }
 
-        public void Unbind()
+        public void Unbind() => Unbind(resetInput: true);
+
+        /// <summary>FG0-ARCH-01：全局镜头在地点之间切换时解绑但不复位输入（模态 / 建造上下文属于玩家当前的界面状态，不因镜头换地点而丢）。</summary>
+        public void Unbind(bool resetInput)
         {
             if (_camera != null)
             {
@@ -159,7 +186,52 @@ namespace GameLogic.View
             _appliedShake = Vector3.zero;
             _camera = null;
             _anchorProvider = null;
-            InputRouter.Reset();
+            _hasRectBounds = false;
+            if (resetInput)
+            {
+                InputRouter.Reset();
+            }
+        }
+
+        /// <summary>FG0-ARCH-01：设置矩形平移边界（世界坐标 XZ），立即把焦点钳进去。</summary>
+        public void SetStrategyBounds(Vector2 min, Vector2 max)
+        {
+            _hasRectBounds = true;
+            _boundsMin = new float2(math.min(min.x, max.x), math.min(min.y, max.y));
+            _boundsMax = new float2(math.max(min.x, max.x), math.max(min.y, max.y));
+            ClampStrategyFocus();
+        }
+
+        /// <summary>FG0-ARCH-01：直接设定战略视角（地点记忆恢复用，不做过渡）。</summary>
+        public void SetStrategyView(float2 focus, float orthographicSize)
+        {
+            _strategyFocus = focus;
+            _strategyOrthographicSize = math.clamp(orthographicSize, MinOrthographicSize, MaxOrthographicSize);
+            ClampStrategyFocus();
+            if (_camera != null && _mode == ViewMode.Strategy)
+            {
+                _camera.transform.position = StrategyCameraPosition();
+                _camera.orthographicSize = _strategyOrthographicSize;
+            }
+        }
+
+        /// <summary>FG0-ARCH-01（FG17 FGR-GEN-080“点击任意位置或通知，镜头飞过去”）：用 <paramref name="seconds"/> 平滑飞到
+        /// <paramref name="focus"/>。接入视角下先拉回战略并以目标为终点；过渡中改终点。返回 false = 没有绑定镜头。</summary>
+        public bool FlyStrategyTo(float2 focus, float seconds)
+        {
+            if (_camera == null)
+            {
+                return false;
+            }
+            FlightCount++;
+            if (_mode == ViewMode.Direct)
+            {
+                return RequestStrategy(focus);
+            }
+            _strategyFocus = focus;
+            ClampStrategyFocus();
+            BeginTransition(ViewMode.Strategy, StrategyCameraPosition(), _strategyOrthographicSize, math.max(0.01f, seconds));
+            return true;
         }
 
         /// <summary>
@@ -184,7 +256,7 @@ namespace GameLogic.View
             // 不钳的话整段过渡会被**一帧吃完**——玩家看到的是镜头闪现，而不是移动过去。
             // （这条不是假想：Editor 非 Play 下 unscaledDeltaTime 实测就远大于 TransitionSeconds，
             // 回归断言里的过渡一次 Tick 就收敛，正是同一个现象。）
-            float dt = math.min(Time.unscaledDeltaTime, MaxStepSeconds);
+            float dt = math.min(RealDeltaTime(), MaxStepSeconds);
             PublishInputScope();
             ReadModeRequests();
 
@@ -316,11 +388,12 @@ namespace GameLogic.View
             }
         }
 
-        private void BeginTransition(ViewMode target, Vector3 targetPosition, float targetSize)
+        private void BeginTransition(ViewMode target, Vector3 targetPosition, float targetSize, float duration = TransitionSeconds)
         {
             _pendingMode = target;
             _mode = ViewMode.Transition;
-            _transitionRemaining = TransitionSeconds;
+            _transitionDuration = duration;
+            _transitionRemaining = duration;
             _transitionFrom = _camera.transform.position;
             _transitionTo = targetPosition;
             _transitionFromSize = _camera.orthographicSize;
@@ -334,7 +407,7 @@ namespace GameLogic.View
             _transitionRemaining -= dt;
             float t = _transitionRemaining <= 0f
                 ? 1f
-                : 1f - math.saturate(_transitionRemaining / TransitionSeconds);
+                : 1f - math.saturate(_transitionRemaining / _transitionDuration);
             // smoothstep：两端速度为零，不做更花的曲线（非目标：不做电影级轨迹）。
             float eased = t * t * (3f - 2f * t);
 
@@ -460,6 +533,11 @@ namespace GameLogic.View
 
         private void ClampStrategyFocus()
         {
+            if (_hasRectBounds)
+            {
+                _strategyFocus = math.clamp(_strategyFocus, _boundsMin, _boundsMax);
+                return;
+            }
             float limit = _arenaHalfExtent + StrategyBoundsPadding;
             _strategyFocus = math.clamp(_strategyFocus, new float2(-limit, -limit), new float2(limit, limit));
         }

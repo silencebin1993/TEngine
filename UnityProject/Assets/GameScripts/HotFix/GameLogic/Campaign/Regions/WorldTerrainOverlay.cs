@@ -86,10 +86,15 @@ namespace GameLogic.Campaign.Regions
         public int WindowRadius => _windowRadius;
         public Texture2D PlaceholderTexture => _placeholder;
 
-        public WorldTerrainOverlay(Transform parent)
+        private readonly float _height;
+
+        /// <param name="alpha">贴图不透明度（建造模式 0.55；FG0-ARCH-01 普通视角的地貌表现层更淡）。</param>
+        /// <param name="height">贴图离地高度（普通视角放在建筑与机器下面）。</param>
+        public WorldTerrainOverlay(Transform parent, float alpha = 0.55f, float height = 0.03f)
         {
             _parent = parent;
-            _material = new Material(Shader.Find("Sprites/Default")) { color = new Color(1f, 1f, 1f, 0.55f) };
+            _height = height;
+            _material = new Material(Shader.Find("Sprites/Default")) { color = new Color(1f, 1f, 1f, alpha) };
             _placeholder = BuildPlaceholder();
         }
 
@@ -283,7 +288,7 @@ namespace GameLogic.Campaign.Regions
             t.Go.name = $"TerrainChunk_{cx}_{cy}";
             t.Go.SetActive(true);
             float half = (_chunkSize - 1) * 0.5f;
-            t.Go.transform.position = new Vector3(cx * _chunkSize + half, 0.03f, cy * _chunkSize + half);
+            t.Go.transform.position = new Vector3(cx * _chunkSize + half, _height, cy * _chunkSize + half);
             t.Go.transform.localScale = new Vector3(_chunkSize, _chunkSize, 1f);
             SetTexture(t, _placeholder);
             return t;

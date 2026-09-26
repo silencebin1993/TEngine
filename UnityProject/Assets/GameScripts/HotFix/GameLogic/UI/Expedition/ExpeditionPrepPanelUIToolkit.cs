@@ -184,7 +184,9 @@ namespace GameLogic.UI.Expedition
             {
                 _blockedLabel.text = snapshot.BlockedReason == "region-locked"
                     ? "尚无可出击目标：修复信号塔并生产 ERC-003 战斗履带后再来（第二次出征需先带回并解析\n静默技术、保存跨派系蓝图且完成 ERC-003 回厂改造）。"
-                    : "没有活动战役。";
+                    : snapshot.BlockedReason == "expedition-underway"
+                        ? GameLogic.Localization.GameText.Get("expedition.reason.underway") // FG0-ARCH-01：远征在外时家园照常运行、可以回来看，但不能再派第二支。
+                        : "没有活动战役。";
                 return;
             }
 
@@ -356,6 +358,10 @@ namespace GameLogic.UI.Expedition
             {
                 return "队伍没有可用货位";
             }
+            if (reason == "expedition-underway")
+            {
+                return GameLogic.Localization.GameText.Get("expedition.reason.underway");
+            }
             if (reason.StartsWith("machine-"))
             {
                 return "队伍里有机器不满足出征条件（" + reason + "）";
@@ -411,7 +417,7 @@ namespace GameLogic.UI.Expedition
                 case ExpeditionDepartureService.DepartureOutcome.Success:
                     _selected.Clear();
                     _pendingInterruptLogicIds = System.Array.Empty<int>();
-                    // 场景已切到破碎都市，HomeValley.IsActive 下一帧起为 false，Update() 会自动隐藏本面板。
+                    // FG0-ARCH-01：镜头已飞到远征地点（家园继续运行），HomeValley.IsActive 立即为 false，Update() 会自动隐藏本面板。
                     break;
                 case ExpeditionDepartureService.DepartureOutcome.NeedsInterruptConfirmation:
                     _pendingInterruptLogicIds = result.InterruptibleLogicIds;

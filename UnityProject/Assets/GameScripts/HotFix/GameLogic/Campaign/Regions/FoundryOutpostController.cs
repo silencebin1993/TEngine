@@ -4,6 +4,7 @@ using System.Linq;
 using GameLogic.UI.Common;
 using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Content;
+using GameLogic.Campaign.WorldSim;
 using GameLogic.Core;
 using GameLogic.View;
 using TEngine;
@@ -22,10 +23,16 @@ namespace GameLogic.Campaign.Regions
     /// 供未来 Story 挂 UI。远征出发/往返事务的正式编排属于 ER6-REGION-01 对 <see cref="ExpeditionDepartureService"/>
     /// 的扩展（目前该服务硬编码目标破碎都市），本类的 <see cref="Enter"/> 是它将要调用的最小可用
     /// 切场入口，与 ER5-REGION-01 对 <see cref="FracturedCityController.Enter"/> 的定位完全对称。</summary>
-    public sealed class FoundryOutpostController
+    public sealed class FoundryOutpostController : IWorldSite
     {
-        public bool IsActive { get; private set; }
-        public bool IsPaused => _paused;
+        /// <summary>FG0-ARCH-01：本地点已载入、正在被世界模拟推进（与镜头在不在这里无关；派遣不再退出家园）。</summary>
+        public bool IsLoaded { get; private set; }
+
+        /// <summary>已载入**并且**镜头正在观察这里（界面面板、输入据此判断）。模拟推进不看它（FGR-BASE-021）。</summary>
+        public bool IsActive => IsLoaded && WorldView.IsObserved(SiteId);
+
+        /// <summary>FG0-ARCH-01：暂停属于整个世界（<see cref="GameClock"/>）。</summary>
+        public bool IsPaused => GameClock.Paused;
         public bool IsWiped => _wipeResolved;
         /// <summary>ER6-REGION-01：撤离确认面板开关——与 <see cref="FracturedCityController.IsEvacPanelOpen"/>
         /// 同一定位。</summary>
@@ -34,19 +41,21 @@ namespace GameLogic.Campaign.Regions
 
         private GameObject _root;
         private Camera _camera;
-        private CameraDirector _cameraDirector;
+        /// <summary>FG0-ARCH-01：镜头归全局镜头管理器（<see cref="WorldView"/>）；本地点被观察时借用。</summary>
+        private CameraDirector _cameraDirector => IsActive && WorldView.Director.IsBound ? WorldView.Director : null;
+        private WorldCameraProfile _cameraProfile;
 
         /// <summary>FG0-UX-01：通知“定位”要让当前区域的镜头飞到事件位置（只读访问，不改所有权）。</summary>
         public CameraDirector CameraDirector => _cameraDirector;
         private readonly List<HomeValleyMachineMarker> _machineMarkers = new List<HomeValleyMachineMarker>(5);
         private HomeValleyMachineMarker _selected;
         private HomeValleyMachineMarker _possessed;
-        private bool _paused;
         private bool _wipeResolved;
 
         public const float InteractRange = 3f;
 
-        public void SetPaused(bool paused) => _paused = paused;
+        /// <summary>暂停 / 继续整个世界（FG0-ARCH-01：统一时钟）。</summary>
+        public void SetPaused(bool paused) => GameClock.SetPaused(paused);
 
         public readonly RegionSquadCommandSystem SquadCommands = new RegionSquadCommandSystem();
         public readonly RegionControlSystem Control = new RegionControlSystem();
@@ -58,7 +67,7 @@ namespace GameLogic.Campaign.Regions
 
         public void Enter(IEnumerable<int> expeditionLogicIds, bool resume)
         {
-            if (IsActive)
+            if (IsLoaded)
             {
                 Log.Warning("[FoundryOutpostController] Enter 被重复调用，忽略（已处于激活状态）。");
                 return;
@@ -98,14 +107,14 @@ namespace GameLogic.Campaign.Regions
             }
 
             BuildVisuals(state);
-            SetupCameraDirector();
+            SetupCameraProfile();
             SetupSquadCommands();
             SetupControlSystem();
             SetupInteraction();
+            _root.SetActive(false); // FG0-ARCH-01：镜头观察这里时才显示（WorldView.Observe → SetObserved）。
 
-            IsActive = true;
-            // FG0-UX-01（FGR-UX-020 定位）：机器阵亡等通知按 LogicId 取机器标记的实时位置。
-            MachineRegistry.LivePositionProvider = FindMachineMarkerPosition;
+            IsLoaded = true;
+            // FG0-UX-01（FGR-UX-020 定位）：机器实时位置由 WorldSimulation.LivePosition 统一向各地点查询。
             _wipeResolved = false;
 
             SaveResult saveResult = CampaignAutoSaveService.SaveAuto(SaveReason.ExpeditionDepartConfirm);
@@ -160,61 +169,136 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        public void Update(float dt)
+        // ── FG0-ARCH-01：世界地点（IWorldSite）──────────────────────────────────
+
+        public string SiteId => FoundryOutpostLayout.RegionId;
+        public WorldSurfaceKind SurfaceKind => WorldSurfaceKind.LegacyRegion;
+        public WorldCameraProfile CameraProfile => _cameraProfile;
+        public Vector2? LivePosition(int logicId) => FindMachineMarkerPosition(logicId);
+
+        public int LiveMachineCount
         {
-            if (!IsActive)
+            get
+            {
+                int n = 0;
+                foreach (HomeValleyMachineMarker m in _machineMarkers)
+                {
+                    if (m != null && MachineRegistry.TryGetRecord(m.LogicId, out MachineRecord r) && r.IsAlive && r.RegionId == SiteId)
+                    {
+                        n++;
+                    }
+                }
+                return n;
+            }
+        }
+
+        /// <summary>“飞到远征地点”的落点：存活机器的中心；全灭时取镜头起始点。</summary>
+        public Vector2 DefaultFocus
+        {
+            get
+            {
+                Vector2 sum = Vector2.zero;
+                int n = 0;
+                foreach (HomeValleyMachineMarker m in _machineMarkers)
+                {
+                    if (m != null && MachineRegistry.TryGetRecord(m.LogicId, out MachineRecord r) && r.IsAlive)
+                    {
+                        Vector3 p = m.transform.position;
+                        sum += new Vector2(p.x, p.z);
+                        n++;
+                    }
+                }
+                return n > 0 ? sum / n : FoundryOutpostLayout.CameraFocusStart;
+            }
+        }
+
+        /// <summary>FG0-ARCH-01：镜头观察 / 离开本地点。离开时释放接入、收起撤离确认；表现对象隐藏不销毁，模拟照常推进。</summary>
+        public void SetObserved(bool observed)
+        {
+            if (!IsLoaded || _root == null)
             {
                 return;
             }
+            if (!observed)
+            {
+                if (_possessed != null)
+                {
+                    Control.ReleaseToStrategy();
+                }
+                IsEvacPanelOpen = false;
+            }
+            _root.SetActive(observed);
+            CampaignState state = CampaignSession.Current;
+            if (observed && state != null)
+            {
+                SyncWorldVisuals(state);
+            }
+        }
 
-            InputRouter.SetGameplayPaused(_paused, strategic: true);
-            _cameraDirector?.Tick(_paused);
-
+        /// <summary>FG0-ARCH-01：镜头在这里时每帧——玩家输入（选择、下令、接入、交互）与画面对账。</summary>
+        public void FrameUpdate(float realDt, float frameScaledDt)
+        {
+            if (!IsLoaded)
+            {
+                return;
+            }
+            bool paused = GameClock.Paused;
+            // ER5-CTL-01：经 Control.ReleaseToStrategy 统一处理（取消 Move/Attack 残留命令、发布 RegionControlledUnitChangedSignal）。
             if (_cameraDirector != null && _cameraDirector.Mode == ViewMode.Strategy && _possessed != null)
             {
                 Control.ReleaseToStrategy();
             }
-
-            bool directLocked = _cameraDirector != null && _cameraDirector.Mode == ViewMode.Direct;
-            float scaledDt = _paused ? 0f : StrategyClock.GetScaledDt(dt, directLocked);
-
-            SquadCommands.Tick(_paused, scaledDt);
+            // ER5-CMD-01：战略暂停下仍要能选人/排队命令。
+            SquadCommands.TickInput(paused);
             HandleSelectionClick();
-
-            HandleDirectControl(scaledDt);
-            Interact.Tick(scaledDt);
-
-            if (_paused)
-            {
-                return;
-            }
-
-            TickMachineMovement(scaledDt);
+            HandleDirectControl(frameScaledDt);
+            Interact.Tick(frameScaledDt); // ER5-INT-01：候选/进度推进——暂停时为 0，进度天然冻结。
 
             CampaignState state = CampaignSession.Current;
             if (state == null)
             {
                 return;
             }
+            if (!paused)
+            {
+                if (_possessed != null)
+                {
+                    // ER6-EXPOSE-01："一次远征中每累计30秒直控+5"——只在真正接入且未暂停时累计（接入是玩家本帧的操作，世界锁 1x）。
+                    RegionRecord region = FoundryOutpostRegion.Find(state);
+                    if (region != null)
+                    {
+                        CampaignExposureLedger.TickDirectControlExposure(state, region, frameScaledDt);
+                    }
+                }
+                // ER5-CTL-01：干扰宽限与受控机死亡回弹（在本帧全部模拟步之后，敌人本帧打死受控机能在同一帧被侦测到）。
+                Control.Tick(frameScaledDt);
+            }
+            SyncWorldVisuals(state);
+        }
 
+        /// <summary>FG0-ARCH-01：一个固定模拟步。由 <see cref="WorldSimulation"/> 调用——**无论镜头在不在这里都执行**
+        /// （玩家看着家园时，远征队照样在打仗、敌人照样在巡逻；FGR-BASE-021）。本方法不得读取观察状态。</summary>
+        public void SimStep(float dt)
+        {
+            if (!IsLoaded)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            if (state == null)
+            {
+                return;
+            }
+            TickMachineMovement(dt);
+            SquadCommands.TickSim(dt);
             FoundryOutpostRegion.RecomputeCoreGate(state);
             TickCoreZoneEntry(state);
-            FoundryOutpostCoreBoss.Tick(state, scaledDt, BuildVisibleMachines(), IsLineOfSightClear);
-            CannonCombat.TickHeatDissipation(state, scaledDt);
-            if (_possessed != null)
-            {
-                RegionRecord region = FoundryOutpostRegion.Find(state);
-                if (region != null)
-                {
-                    CampaignExposureLedger.TickDirectControlExposure(state, region, scaledDt);
-                }
-            }
-            FoundryOutpostRegion.TickEnemies(state, scaledDt);
-            FoundryOutpostEnemyAi.Tick(state, scaledDt, BuildVisibleMachines(), IsLineOfSightClear);
-            Control.Tick(scaledDt);
+            FoundryOutpostCoreBoss.Tick(state, dt, BuildVisibleMachines(), IsLineOfSightClear);
+            CannonCombat.TickHeatDissipation(state, dt);
+            FoundryOutpostRegion.TickEnemies(state, dt);
+            FoundryOutpostEnemyAi.Tick(state, dt, BuildVisibleMachines(), IsLineOfSightClear);
             TickDiscovery(state);
             TickWipeDetection(state);
-            SyncWorldVisuals(state);
         }
 
         /// <summary>ER7-CORE-01："进入前存安全档"——首次有任意区域机器越过核心分区封锁线（门已解锁，
@@ -233,14 +317,34 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
-            SaveResult saveResult = CampaignAutoSaveService.SaveAuto(SaveReason.BossEngageEnter);
-            if (!saveResult.Success)
+            if (_bossEngagePending)
             {
-                Log.Warning($"[FoundryOutpostController] BossEngageEnter 自动存档未成功（{saveResult.Outcome} " +
-                    $"{saveResult.Message}），仍继续初始化 Boss 战（不因存档失败卡住玩家，下次自然存档点会补上）。");
+                return;
             }
-            FoundryOutpostCoreBoss.EnsureInitialized(state, region);
+            // FG0-ARCH-01 修复（ERD-SAV-002“自动档不得在事务半提交中写入”）：本方法在模拟步中途执行（家园已推进本步、
+            // 队伍与时钟还没推进）。存档 + Boss 初始化一起排到本步整步提交之后，存档里的时钟与各地点状态落在同一步；
+            // Boss 从下一步开始计时（晚 1 个固定步），读档后越线检测会同样再触发一次，行为一致。
+            _bossEngagePending = true;
+            WorldSim.WorldSimulation.RunAfterStep(() =>
+            {
+                _bossEngagePending = false;
+                CampaignState current = CampaignSession.Current;
+                RegionRecord currentRegion = current != null ? FoundryOutpostRegion.Find(current) : null;
+                if (!IsLoaded || currentRegion == null || FoundryOutpostCoreBoss.IsInitialized(currentRegion))
+                {
+                    return;
+                }
+                SaveResult saveResult = CampaignAutoSaveService.SaveAuto(SaveReason.BossEngageEnter);
+                if (!saveResult.Success)
+                {
+                    Log.Warning($"[FoundryOutpostController] BossEngageEnter 自动存档未成功（{saveResult.Outcome} " +
+                        $"{saveResult.Message}），仍继续初始化 Boss 战（不因存档失败卡住玩家，下次自然存档点会补上）。");
+                }
+                FoundryOutpostCoreBoss.EnsureInitialized(current, currentRegion);
+            });
         }
+
+        private bool _bossEngagePending;
 
         private void TickDiscovery(CampaignState state)
         {
@@ -282,7 +386,7 @@ namespace GameLogic.Campaign.Regions
         /// 之前的裸实现（ER6-REGION-01 将在此之上加撤离确认面板/封锁门三灯）。</summary>
         public void Exit(bool evacuateSuccess)
         {
-            if (!IsActive)
+            if (!IsLoaded)
             {
                 return;
             }
@@ -308,20 +412,19 @@ namespace GameLogic.Campaign.Regions
                 }
             }
 
+            if (state != null && evacuateSuccess && state.CurrentRegionId == FoundryOutpostLayout.RegionId)
+            {
+                // FG0-ARCH-01：远征结束，世界的“当前远征地点”回到家园（读档恢复按它决定观察哪里）。
+                state.CurrentRegionId = HomeValleyLayout.RegionId;
+            }
             DestroyVisuals();
-            _cameraDirector?.Unbind();
-            _cameraDirector = null;
+            // FG0-ARCH-01：镜头归全局镜头管理器；观察中的地点被卸载时它会自动回到家园（WorldView.FrameEnd）。
             _possessed = null;
             _selected = null;
-            _paused = false;
             SquadCommands.Unbind();
             Control.Unbind();
             Interact.Unbind();
-            IsActive = false;
-            if (MachineRegistry.LivePositionProvider == (System.Func<int, Vector2?>)FindMachineMarkerPosition)
-            {
-                MachineRegistry.LivePositionProvider = null;
-            }
+            IsLoaded = false;
             Log.Info($"[FoundryOutpostController] 已退出铸造前哨外围（evacuateSuccess={evacuateSuccess}）。");
         }
 
@@ -341,7 +444,7 @@ namespace GameLogic.Campaign.Regions
 
         public void SyncLiveStateForSave()
         {
-            if (IsActive)
+            if (IsLoaded)
             {
                 SyncLiveStateBackToRecords();
             }
@@ -949,30 +1052,22 @@ namespace GameLogic.Campaign.Regions
 
         // ── 相机 ──────────────────────────────────────────────────────────
 
-        private void SetupCameraDirector()
+        /// <summary>FG0-ARCH-01：本地点的镜头配置（与 Demo 逐值一致）；镜头本身由 <see cref="WorldView"/> 持有。
+        /// 本地点仍是 Demo 的手工地图（独立表面、局部坐标），平移范围沿用方形边界（DEBT-FG0ARCH01-01）。</summary>
+        private void SetupCameraProfile()
         {
-            _camera = Camera.main;
-            if (_camera == null)
+            _camera = WorldView.EnsureCamera();
+            _cameraProfile = new WorldCameraProfile
             {
-                var go = new GameObject("Main Camera", typeof(Camera));
-                go.tag = "MainCamera";
-                _camera = go.GetComponent<Camera>();
-            }
-
-            _camera.orthographic = true;
-            _camera.orthographicSize = FoundryOutpostLayout.CameraBoundsHalfExtentZ;
-            _camera.clearFlags = CameraClearFlags.SolidColor;
-            _camera.backgroundColor = new Color(0.09f, 0.08f, 0.06f); // 铸造前哨：偏冷金属棕，与另两区域区分。
-            _camera.nearClipPlane = 0.1f;
-            _camera.farClipPlane = 200f;
-            _camera.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
-
-            _cameraDirector = new CameraDirector();
-            var followOffset = new Vector3(0f, 40f, 0f);
-            _cameraDirector.Bind(_camera, TryGetPossessedAnchor, followOffset,
-                FoundryOutpostLayout.CameraBoundsHalfExtentX, startInStrategy: true, initialDirectOrthographicSize: 14f);
-            _cameraDirector.FocusStrategyOn(new float2(FoundryOutpostLayout.CameraFocusStart.x, FoundryOutpostLayout.CameraFocusStart.y));
-            _cameraDirector.EnsureDirectTarget = EnsureDirectTarget;
+                DirectAnchor = TryGetPossessedAnchor,
+                EnsureDirectTarget = EnsureDirectTarget,
+                ArenaHalfExtent = FoundryOutpostLayout.CameraBoundsHalfExtentX,
+                FollowOffset = new Vector3(0f, 40f, 0f),
+                InitialStrategyOrthographicSize = FoundryOutpostLayout.CameraBoundsHalfExtentZ,
+                InitialDirectOrthographicSize = 14f,
+                StartFocus = FoundryOutpostLayout.CameraFocusStart,
+                Background = new Color(0.09f, 0.08f, 0.06f),
+            };
         }
 
         // ── 战略命令 ──────────────────────────────────────────────────────
@@ -1112,7 +1207,7 @@ namespace GameLogic.Campaign.Regions
                 : new Vector3(1.2f, height * 2f, 1.2f);
             if (isMarkerRing)
             {
-                UnityEngine.Object.Destroy(go.GetComponent<Collider>());
+                GameLogic.View.UnityObjects.Release(go.GetComponent<Collider>());
             }
             Renderer renderer = go.GetComponent<Renderer>();
             renderer.material = new Material(Shader.Find("Standard")) { color = color };
@@ -1270,7 +1365,7 @@ namespace GameLogic.Campaign.Regions
             _machineMarkers.Clear();
             if (_root != null)
             {
-                UnityEngine.Object.Destroy(_root);
+                GameLogic.View.UnityObjects.Release(_root);
                 _root = null;
             }
         }

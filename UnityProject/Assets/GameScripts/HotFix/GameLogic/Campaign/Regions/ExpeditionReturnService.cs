@@ -60,12 +60,12 @@ namespace GameLogic.Campaign.Regions
         private static ActiveExpedition ResolveActive()
         {
             FracturedCityController fc = GameRoot.FracturedCity;
-            if (fc != null && fc.IsActive)
+            if (fc != null && fc.IsLoaded)
             {
                 return new ActiveExpedition(true, FracturedCityLayout.RegionId, fc.IsWiped, fc.Exit);
             }
             FoundryOutpostController fo = GameRoot.FoundryOutpost;
-            if (fo != null && fo.IsActive)
+            if (fo != null && fo.IsLoaded)
             {
                 return new ActiveExpedition(true, FoundryOutpostLayout.RegionId, fo.IsWiped, fo.Exit);
             }

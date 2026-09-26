@@ -907,6 +907,16 @@ namespace GameLogic.Campaign.Regions
             _assignDirty = true;
         }
 
+        /// <summary>FG0-ARCH-01：接到一个战役（新建 / 读档 / 回滚）时清空本类的瞬态记忆（分配计时、赶路与等待看门狗）。
+        /// 不清的话，上一次载入残留的计时会让同一存档读两次跑出不同结果（观察 / 不观察对照自检会发现）。</summary>
+        public static void ResetSessionState()
+        {
+            _assignDirty = true;
+            _assignTimer = 0f;
+            PathWatch.Clear();
+            WaitingWatch.Clear();
+        }
+
         /// <summary>ERD-WRK-002："空闲机器每 0.5 秒或收到脏事件时评估一次"——本方法就是那次评估，
         /// 不在每帧都跑，满足 AC-PER-003/006 对 64 机/200 单场景"无热更每帧全量扫描"的要求。</summary>
         private static void TickAssignment(CampaignState state, float dt, Func<int, Vector2?> getMachinePosition,

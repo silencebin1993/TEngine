@@ -74,7 +74,8 @@ namespace GameLogic.UI.HomeValleyFailure
                 return;
             }
 
-            bool shouldShow = GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive
+            // FG0-ARCH-01：家园一直在运行（镜头在远征地点时也一样），核心被毁的失败页不看镜头在哪里。
+            bool shouldShow = GameRoot.HomeValley != null && GameRoot.HomeValley.IsLoaded
                 && HomeValleySoftlockGuard.IsCoreDestroyed(CampaignSession.Current);
             _root.style.display = shouldShow ? DisplayStyle.Flex : DisplayStyle.None;
             // FG0-UX-01（FGR-UX-001）：失败页不能 Esc 关掉，Esc 也不许穿透去开一个被它盖住的暂停菜单。

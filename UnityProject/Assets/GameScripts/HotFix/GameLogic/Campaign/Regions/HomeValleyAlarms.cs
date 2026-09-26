@@ -47,6 +47,12 @@ namespace GameLogic.Campaign.Regions
 
         private static readonly HashSet<string> _seen = new HashSet<string>(4);
 
+        /// <summary>FG0-ARCH-01：会话开始时清空告警去重记忆。</summary>
+        public static void ResetSessionState()
+        {
+            _seen.Clear();
+        }
+
         /// <summary>每次 UI 刷新调用：返回当前应显示的告警（已去重、已按威胁排序）。归还谷地工作单
         /// 数量恒定个位数（同 <see cref="HomeValleyWorkOrders.Tick"/> 的既定性能纪律），全量扫描
         /// 不违反 AC-PER-006 的"无每帧大量分配"——那条约束的是分配算法本身的运行频率，不是这种

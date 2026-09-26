@@ -542,7 +542,7 @@ namespace GameLogic.Campaign.Regions
             Collider c = go.GetComponent<Collider>();
             if (c != null)
             {
-                Object.Destroy(c); // 不挡选中射线。
+                GameLogic.View.UnityObjects.Release(c); // 不挡选中射线。
             }
             go.transform.SetParent(parent, false);
             go.GetComponent<Renderer>().sharedMaterial = material;
@@ -553,7 +553,7 @@ namespace GameLogic.Campaign.Regions
         {
             if (_root != null)
             {
-                Object.Destroy(_root);
+                GameLogic.View.UnityObjects.Release(_root);
                 _root = null;
             }
             _tiles.Clear();
@@ -572,7 +572,7 @@ namespace GameLogic.Campaign.Regions
         {
             if (asset != null)
             {
-                Object.Destroy(asset);
+                GameLogic.View.UnityObjects.Release(asset);
                 asset = null;
             }
         }

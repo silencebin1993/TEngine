@@ -1,60 +1,32 @@
-using System;
-using UnityEngine;
-
 namespace GameLogic.Core
 {
     /// <summary>
-    /// ER2-INPUT-01 AC-UI-005：战略速度 0.5x/1x/2x。全局单例——归还谷地与细胞阶段互斥运行
-    /// （不会同时活跃），共用同一个倍率不会有两边打架的问题，也让 HUD 只需要一个速度选择器。
-    ///
-    /// 只管速度倍率，不管暂停：暂停已经有各自战场既定的机制（<c>CellStageFlow._paused</c>/
-    /// <c>HomeValleyController</c> 的镜像实现），且都绑定 Space（Strategy 域），二者天然独立——
-    /// "Space 暂停恢复此前速度"因此是免费成立的：暂停不touch <see cref="SpeedMultiplier"/>，
-    /// 恢复时不管过去多久，倍率还是暂停前那个值。
+    /// ER2-INPUT-01 AC-UI-005 的战略速度入口。FG0-ARCH-01 起只是 <see cref="GameClock"/>（统一游戏时钟）的外观：
+    /// 倍率、档位（0.5x / 1x / 2x / 3x，FGR-ARC-009 加 3x）都读写统一时钟，不再有第二份状态。
+    /// 暂停也在统一时钟里（<see cref="GameClock.Paused"/>），整个世界同时暂停；旧细胞阶段仍用自己的 _paused（Demo 之前的产品，不接入世界）。
     /// </summary>
     public static class StrategyClock
     {
-        public static readonly float[] AllowedMultipliers = { 0.5f, 1f, 2f };
+        /// <summary>允许的倍率档（与 <see cref="GameClock.Speeds"/> 是同一个数组）。</summary>
+        public static float[] AllowedMultipliers => GameClock.Speeds;
 
-        public static float SpeedMultiplier { get; private set; } = 1f;
+        public static float SpeedMultiplier => GameClock.Speed;
 
-        public static void SetSpeed(float multiplier)
-        {
-            float nearest = AllowedMultipliers[0];
-            float bestDelta = Mathf.Abs(multiplier - nearest);
-            foreach (float candidate in AllowedMultipliers)
-            {
-                float delta = Mathf.Abs(multiplier - candidate);
-                if (delta < bestDelta)
-                {
-                    nearest = candidate;
-                    bestDelta = delta;
-                }
-            }
-            SpeedMultiplier = nearest;
-        }
+        public static void SetSpeed(float multiplier) => GameClock.SetSpeed(multiplier);
 
-        /// <summary>下一档（1x→2x→...循环）。HUD 按钮可以直接调 <see cref="SetSpeed"/> 指定档位，
-        /// 本方法给"单键循环切换"这类更简的入口用。</summary>
-        public static void CycleSpeed()
-        {
-            int index = Array.IndexOf(AllowedMultipliers, SpeedMultiplier);
-            int next = (index < 0 ? 0 : index + 1) % AllowedMultipliers.Length;
-            SpeedMultiplier = AllowedMultipliers[next];
-        }
+        /// <summary>下一档（0.5x→1x→2x→3x→0.5x 循环）。</summary>
+        public static void CycleSpeed() => GameClock.CycleSpeed();
 
-        /// <summary><paramref name="directLocked"/>=true（当前是直控视角）时无视速度倍率、锁 1x。
-        /// 战场自己的暂停语义（_paused）不在这里管——调用方在暂停时通常根本不会走到这一步
-        /// （细胞阶段暂停早退在这句之后；归还谷地暂停直接跳过对应 Tick），本方法只做倍率缩放。</summary>
+        /// <summary>旧细胞阶段按帧缩放用（<paramref name="directLocked"/>=true 时锁 1x）。世界里的系统不用它：走固定步。</summary>
         public static float GetScaledDt(float rawDt, bool directLocked)
         {
-            return directLocked ? rawDt : rawDt * SpeedMultiplier;
+            return directLocked ? rawDt : rawDt * GameClock.Speed;
         }
 
-        /// <summary>新战役/回主菜单时复位，避免上一局选的倍率粘到下一局（同 InputRouter.Reset 的纪律）。</summary>
+        /// <summary>新战役 / 回主菜单时把倍率复位到 1x（暂停与时间轴由 <see cref="GameClock.ResetSession"/> 复位）。</summary>
         public static void Reset()
         {
-            SpeedMultiplier = 1f;
+            GameClock.SetSpeed(1f);
         }
     }
 }

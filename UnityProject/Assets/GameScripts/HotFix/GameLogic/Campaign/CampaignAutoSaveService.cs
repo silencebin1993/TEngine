@@ -39,7 +39,9 @@ namespace GameLogic.Campaign
         /// ER1-ID-01：机器记录唯一由 MachineRegistry 写回 CampaignState，任何存档前都过一次这里，
         /// 调用方不必自己记得导出。MachineRegistry 未绑定任何 SimWorld 会话时
         /// （如战役刚新建、尚未进过战斗）内存态是空集合，导出空数组，不是错误。
-        /// 区域里的实时状态（机器位置、血量）先由调用方经 <c>GameRoot.SyncActiveRegionForSave</c> 写回记录。</summary>
+        /// FG0-ARCH-01 修复：家园在派遣 / 远征期间不再 Exit，机器实时位置只在表现对象上——
+        /// 所以这里对**每一次**存档（自动档与手动档同一条路径）先把全部已载入地点的实时状态写回记录，
+        /// 再导出，调用方不必再自己记得同步（旧的 <c>GameRoot.SyncActiveRegionForSave</c> 预同步变成幂等冗余）。</summary>
         public static SaveResult SaveWithExport(int slotIndex, SaveReason reason)
         {
             CampaignState state = CampaignSession.Current;
@@ -47,6 +49,7 @@ namespace GameLogic.Campaign
             {
                 return new SaveResult(SaveOutcome.NoActiveCampaign, "没有活动战役，跳过存档。");
             }
+            WorldSim.WorldSimulation.SyncAllForSave();
             MachineRegistry.ExportToCampaignState(state);
             return CampaignSaveService.Save(slotIndex, state, reason);
         }

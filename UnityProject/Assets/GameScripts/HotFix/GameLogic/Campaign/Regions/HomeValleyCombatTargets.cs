@@ -102,6 +102,12 @@ namespace GameLogic.Campaign.Regions
         private static readonly List<HitResult> _recentEvents = new List<HitResult>(MaxRecentEvents);
         public static IReadOnlyList<HitResult> RecentEvents => _recentEvents;
 
+        /// <summary>FG0-ARCH-01：会话开始时清空上一局的最近命中展示缓冲。</summary>
+        public static void ResetSessionState()
+        {
+            _recentEvents.Clear();
+        }
+
         private static void PushEvent(HitResult result)
         {
             _recentEvents.Add(result);

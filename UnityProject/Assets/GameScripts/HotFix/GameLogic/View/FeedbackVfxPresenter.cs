@@ -160,6 +160,11 @@ namespace GameLogic.View
             bool reduced = GameSettings.FlashReductionEnabled;
             for (int i = 0; i < _incoming.Count; i++)
             {
+                // FG0-ARCH-01：只画镜头正在观察的地点里发生的时刻（其它地点照常在模拟，但不在眼前）。
+                if (!FeedbackCues.IsInObservedSite(_incoming[i].SiteId))
+                {
+                    continue;
+                }
                 if (TryGetSpec(_incoming[i].Cue, reduced, out VfxSpec spec))
                 {
                     Spawn(_incoming[i], spec, now);

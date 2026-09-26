@@ -7,6 +7,7 @@ using GameLogic.Campaign;
 using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Grid;
 using GameLogic.Campaign.Primitive;
+using GameLogic.Campaign.WorldSim;
 using GameLogic.Core;
 using GameLogic.View;
 using TEngine;
@@ -29,9 +30,14 @@ namespace GameLogic.Campaign.Regions
     /// 不接 SimBridge——避免在没把握的情况下往共享战斗内核里加东西。统一 Direct/Strategy/
     /// Transition/Modal 输入域表、WASD 直控换乘、真正的镜头接管仍是 ER2-INPUT-01 的范围，
     /// E 交互按钮/UI 面板仍是 ER5-INT-01/UI-04 的范围（DIGEST 早已登记，不是本 Story 新开的口子）。</summary>
-    public sealed class HomeValleyController
+    public sealed class HomeValleyController : IWorldSite
     {
-        public bool IsActive { get; private set; }
+        /// <summary>FG0-ARCH-01：本地点已载入、正在被世界模拟推进（与镜头在不在这里无关）。</summary>
+        public bool IsLoaded { get; private set; }
+
+        /// <summary>已载入**并且**镜头正在观察这里（界面面板、输入据此判断“玩家在不在家园”）。
+        /// 模拟推进不看它（FGR-BASE-021），见 <see cref="SimStep"/>。</summary>
+        public bool IsActive => IsLoaded && WorldView.IsObserved(SiteId);
 
         private GameObject _root;
         private Camera _camera;
@@ -50,27 +56,19 @@ namespace GameLogic.Campaign.Regions
         private WorldBadge _objectiveMarker;
         private HomeValleyMachineMarker _selected;
 
-        /// <summary>ER2-INPUT-01：归还谷地自己的镜头状态机实例（不共享细胞阶段那个——两边场景
-        /// 互斥运行，各自 Bind 自己的 Camera.main，生命周期也该各管各的，见 Exit() 的 Unbind）。</summary>
-        private CameraDirector _cameraDirector;
+        /// <summary>FG0-ARCH-01：镜头归全局镜头管理器（<see cref="WorldView"/>）所有；本地点被观察时借用它，否则为 null。</summary>
+        private CameraDirector _cameraDirector => IsActive && WorldView.Director.IsBound ? WorldView.Director : null;
+        private WorldCameraProfile _cameraProfile;
 
         /// <summary>FG0-UX-01：通知“定位”要让当前区域的镜头飞到事件位置（只读访问，不改所有权）。</summary>
         public CameraDirector CameraDirector => _cameraDirector;
         /// <summary>当前被直控（WASD 亲自开）的机器。null＝没有接管，处于战略选中+下令模式。</summary>
         private HomeValleyMachineMarker _possessed;
-        /// <summary>ER2-INPUT-01 AC-UI-005：本区域自己的暂停态，镜像 CellStageFlow 的
-        /// _paused/_strategicPause 写法（只有"战略暂停"一种，没有模态面板暂停的第二条路径——
-        /// 归还谷地目前没有选卡/商店这类会自己置位暂停的模态面板）。</summary>
-        private bool _paused;
-        /// <summary>HUD 暂停按钮/速度显示读这个；Space 键路径见 <see cref="HandlePauseInput"/>，
-        /// 两条路径写同一个 <see cref="_paused"/> 字段，互不冲突。</summary>
-        public bool IsPaused => _paused;
+        /// <summary>FG0-ARCH-01：暂停属于整个世界（<see cref="GameClock"/>），不再是本区域自己的字段。</summary>
+        public bool IsPaused => GameClock.Paused;
 
-        /// <summary>供 HUD 暂停按钮直接调用（不经过 InputRouter/Space）。</summary>
-        public void SetPaused(bool paused)
-        {
-            _paused = paused;
-        }
+        /// <summary>供 HUD 暂停按钮直接调用：暂停 / 继续整个世界。</summary>
+        public void SetPaused(bool paused) => GameClock.SetPaused(paused);
 
         /// <summary>ER5-CMD-01：战略命令正式化——多选/编组/Move·Attack·Guard·Retreat，与
         /// <see cref="FracturedCityController"/> 共用同一套引擎（见该类自己的实例），避免两个区域
@@ -106,7 +104,7 @@ namespace GameLogic.Campaign.Regions
 
         public void Enter(bool resume)
         {
-            if (IsActive)
+            if (IsLoaded)
             {
                 Log.Warning("[HomeValleyController] Enter 被重复调用，忽略（已处于激活状态）。");
                 return;
@@ -141,15 +139,15 @@ namespace GameLogic.Campaign.Regions
             HomeGridService.MapFor(state); // FG0-ARCH-04：旧档迁移到格网 + 占用层重建（幂等）。
 
             BuildVisuals(state);
-            SetupCameraDirector();
+            SetupCameraProfile();
             SetupSquadCommands();
             SetupControlSystem();
             SetupInteraction();
+            _root.SetActive(false); // FG0-ARCH-01：表现对象在镜头观察这里时才显示（WorldView.Observe → SetObserved）。
 
-            IsActive = true;
+            IsLoaded = true;
             HomeValleyBuildMode.Bind(BuildMode);
-            // FG0-UX-01（FGR-UX-020 定位）：机器阵亡等通知按 LogicId 取机器标记的实时位置。
-            MachineRegistry.LivePositionProvider = FindMachineMarkerPosition;
+            // FG0-UX-01（FGR-UX-020 定位）：机器实时位置由 WorldSimulation.LivePosition 统一向各地点查询。
 
             SaveResult saveResult = CampaignAutoSaveService.SaveAuto(SaveReason.HomeEntryComplete);
             if (!saveResult.Success)
@@ -162,107 +160,178 @@ namespace GameLogic.Campaign.Regions
                 $"建筑 {CountRegionBuildings(state)} 项，机器 {_machineMarkers.Count} 台。");
         }
 
-        public void Update(float dt)
+        // ── FG0-ARCH-01：世界地点（IWorldSite）──────────────────────────────────
+
+        public string SiteId => HomeValleyLayout.RegionId;
+        public WorldSurfaceKind SurfaceKind => WorldSurfaceKind.Planet;
+        public bool IsWiped => false;
+        public int LiveMachineCount => _machineMarkers.Count;
+        public WorldCameraProfile CameraProfile => _cameraProfile;
+        public Vector2 DefaultFocus => HomeValleyLayout.Core.Position;
+        public Vector2? LivePosition(int logicId) => FindMachineMarkerPosition(logicId);
+
+        /// <summary>FG0-ARCH-01：镜头观察 / 离开家园。离开时释放接入、收起建造模式与家园面板（这些属于“玩家在看家园”的界面状态），
+        /// 表现对象隐藏但不销毁——模拟照常推进（Demo 的机器位置仍记在表现对象的 Transform 上）。回来时画面对账一次。</summary>
+        public void SetObserved(bool observed)
         {
-            if (!IsActive)
+            if (!IsLoaded || _root == null)
             {
                 return;
             }
+            if (!observed)
+            {
+                if (_possessed != null)
+                {
+                    Control.ReleaseToStrategy();
+                }
+                BuildMode.Close();
+                _factoryPanelOpen = false;
+                _expeditionPrepPanelOpen = false;
+                _beaconLaunchPanelOpen = false;
+                _circuitBoardPanelOpen = false;
+                _craftStationPanelOpen = false;
+                _analysisPanelOpen = false;
+                SquadCommands.PointerSuppressed = false;
+            }
+            _root.SetActive(observed);
+            CampaignState state = CampaignSession.Current;
+            if (observed && state != null)
+            {
+                SyncWorldVisuals(state);
+                RefreshObjectiveMarker(state);
+            }
+        }
 
-            // ER8（DEBT-ER6LOOP01-01）：目标兜底重算——OBJ-01～04 依赖建筑修复/通电/生产/直控命中等多处
-            // 状态变化，逐个调用点接线容易漏；0.5 秒真实时间重算一次（纯查询 + 幂等写，开销常数级）。
-            _objectiveRecomputeTimer -= Time.unscaledDeltaTime;
+        /// <summary>FG0-ARCH-01：镜头在家园时每帧——玩家输入（建造、选择、下令、接入）与画面对账。不推进任何模拟计时
+        /// （接入移动与交互进度是玩家本帧的实时输入，按统一时钟缩放过的本帧时间走，暂停时为 0）。</summary>
+        public void FrameUpdate(float realDt, float frameScaledDt)
+        {
+            if (!IsLoaded)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            bool paused = GameClock.Paused;
+
+            // 目标定位针（纯表现）每 0.5 秒真实时间对账一次；目标本身由世界模拟按游戏时间重算。
+            _objectiveRecomputeTimer -= realDt;
             if (_objectiveRecomputeTimer <= 0f)
             {
                 _objectiveRecomputeTimer = 0.5f;
-                CampaignObjectiveTracker.Recompute(CampaignSession.Current);
-                RefreshObjectiveMarker(CampaignSession.Current);
+                RefreshObjectiveMarker(state);
             }
 
-            // 同 CellStageFlow.Update 的既定写法：暂停开关与 InputRouter 同步、镜头驱动，
-            // 都必须在下面的暂停早退**之前**——ER2-INPUT-01 M2-02 同款要求：暂停下仍要能选人。
-            HandlePauseInput();
-            InputRouter.SetGameplayPaused(_paused, strategic: true);
-            _cameraDirector?.Tick(_paused);
-
-            CampaignState state = CampaignSession.Current;
-            // FG0-ARCH-05（FGR-GEN-050 / FGR-ARC-013）：区块流式加载跟随镜头焦点（俯视正交镜头，焦点 = 镜头 xz）。与游戏时间无关：
-            // 战略暂停、倍速、核心被毁的失败页期间照常进行；生成在工作线程，主线程只在预算内接入结果。
-            if (state != null && _camera != null)
-            {
-                Vector3 camPos = _camera.transform.position;
-                HomeGridService.Streamer(state).Tick(GridCell.FromWorld(new Vector2(camPos.x, camPos.z)));
-            }
             if (state != null && HomeValleySoftlockGuard.IsCoreDestroyed(state))
             {
                 BuildMode.Close(); // 失败页期间不能规划。
-                // ER3-SOFTLOCK-01 AC-ECO-011"核心被毁只能失败界面"：世界冻结——不再接受选中/命令/
-                // 移动/工作单推进，只留镜头能看、失败面板（HomeValleyFailureUIToolkit 独立轮询同一
-                // 状态显示）。不需要额外维护"已展示过"标记：Destroyed 是终态，不会变回其它状态。
+                // ER3-SOFTLOCK-01 AC-ECO-011"核心被毁只能失败界面"：不再接受选中/命令/移动（模拟侧见 SimStep 的同一判定）。
                 return;
             }
 
-            // 落回战略视角才清空接管——过渡途中（Strategy→Direct 或 Direct→Strategy）都不清，
-            // 否则 EnsureDirectTarget 刚给的目标会在过渡没走完时就被抹掉，接管请求白做。
-            // ER5-CTL-01：经 Control.ReleaseToStrategy 统一处理（取消 Move/Attack 残留命令、发布
-            // RegionControlledUnitChangedSignal），不再由本方法直接写 _possessed。
+            // 落回战略视角才清空接管——过渡途中不清，否则接管请求白做（ER5-CTL-01 经 Control.ReleaseToStrategy 统一处理）。
             if (_cameraDirector != null && _cameraDirector.Mode == ViewMode.Strategy && _possessed != null)
             {
                 Control.ReleaseToStrategy();
             }
 
-            bool directLocked = _cameraDirector != null && _cameraDirector.Mode == ViewMode.Direct;
-            float scaledDt = _paused ? 0f : StrategyClock.GetScaledDt(dt, directLocked);
-
-            // ER5-CMD-01：必须在 HandleSelectionClick 之前跑——本帧"这次左键释放是框选/武装命令
-            // 确认，还是留给旧单点逻辑处理"的判定结果（ConsumedClickThisFrame）要先算好。战略暂停下
-            // 仍然要能选人/排队命令，因此也在下面的暂停早退之前。
-            // FG0-ARCH-04：建造模式先拿输入（B / X / R、放置与拆除的鼠标）；开着时框选与点选下令让位。战略暂停下也能规划。
-            // 本帧开始时开着、或本帧刚打开的建造模式都拥有本帧的鼠标：右键“逐级取消”退出建造模式的那一下，
-            // 不能在同一帧再被点选逻辑当成“右键取消已选机器的工单”（点击穿透）。
+            // ER5-CMD-01 / FG0-ARCH-04：建造模式先拿输入（B / X / R、放置与拆除的鼠标）；开着时框选与点选下令让位。战略暂停下也能规划。
+            // 本帧开始时开着、或本帧刚打开的建造模式都拥有本帧的鼠标（右键退出建造模式的那一下不能再被当成“取消工单”）。
             bool buildModeWasOpen = BuildMode.IsOpen;
             BuildMode.Tick(_camera, state, _cameraDirector != null && _cameraDirector.Mode == ViewMode.Strategy);
             bool buildModeOwnsPointer = buildModeWasOpen || BuildMode.IsOpen;
             SquadCommands.PointerSuppressed = buildModeOwnsPointer;
-            SquadCommands.Tick(_paused, scaledDt);
+            SquadCommands.TickInput(paused);
             if (!buildModeOwnsPointer)
             {
                 HandleSelectionClick();
             }
 
-            HandleDirectControl(scaledDt);
-            Interact.Tick(scaledDt); // ER5-INT-01：候选/进度推进——暂停时 scaledDt=0，进度天然冻结。
-
-            if (_paused)
-            {
-                // FG0-ARCH-04：战略暂停中也能规划（放虚影、标记拆除、旋转），画面要立即跟上格网状态；
-                // 对账只读状态、不推进任何模拟。
-                if (state != null)
-                {
-                    SyncWorldVisuals(state);
-                }
-                return;
-            }
-
-            TickMachineMovement(scaledDt);
-
-            if (state != null)
+            HandleDirectControl(frameScaledDt);
+            Interact.Tick(frameScaledDt); // ER5-INT-01：候选/进度推进——暂停时为 0，进度天然冻结。
+            if (!paused && state != null)
             {
                 TickDirectSalvageRangeGuard(state); // ER5-INT-01：直控拆解离开3米即取消并恢复原状。
-                HomeValleyWorkOrders.Tick(state, scaledDt, GetMachinePosition, ReleaseMachineMovement,
-                    IsMachineDirectControlled, BeginAutoAssignedMovement);
-                HomeValleyFactory.Tick(state, scaledDt); // ER4-FAC-01：装配站生产队列。
-                PrimitiveCraftStation.Tick(state, scaledDt); // ER4-PRIM-04：合成台升级/拆解队列。
-                HomeValleyAnalysis.Tick(state, scaledDt); // ER6-ANA-01：解析台队列。
-                HomeValleyCombatTargets.Tick(state, scaledDt); // ER4-PRIM-05：低威胁残骸靶被动再生。
-                TickAutoEngage(state, scaledDt); // ER4-PRIM-05：AI 同出口自动交战。
-                HomeValleySignal.RecomputeUnlock(state); // ER5-SIG-01：破碎都市解锁判定。
-                FoundryOutpostRegion.RecomputeUnlock(state); // ER6-FOUNDRY-01：铸造前哨外围解锁判定。
-                CampaignExposureLedger.TickTowerBroadcastOff(state, scaledDt); // ER6-EXPOSE-01：塔关广播每10秒-2。
-                HomeValleyBeacon.Tick(state, scaledDt); // ER7-BEACON-01：信标启动10秒不可取消演出计时。
-                HomeValleySoftlockGuard.Tick(state, scaledDt, BeginAutoAssignedMovement);
-                Control.Tick(scaledDt); // ER5-CTL-01：受控机死亡回弹侦测（归还谷地无干扰机制，Suspended 永不触发）。
+                Control.Tick(frameScaledDt); // ER5-CTL-01：受控机死亡回弹侦测。
+            }
+            if (state != null)
+            {
+                // 画面对账（纯表现：建筑、残骸、地面物、靶子）；暂停中规划的建筑也要立即显示。
                 SyncWorldVisuals(state);
+            }
+        }
+
+        /// <summary>FG0-ARCH-01：一个固定模拟步（dt = 1 / clock.sim_step_hz 游戏秒）。由 <see cref="WorldSimulation"/> 调用——
+        /// **无论镜头在不在家园都执行**（FGR-BASE-021：远征时家园照常生产、施工、解析；DEBT-FG0ARCH04-14 关闭）。
+        /// 本方法不得读取观察状态；自检用“观察 / 不观察”对照逐字段比较来守护这一条。</summary>
+        public void SimStep(float dt)
+        {
+            if (!IsLoaded)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            if (state == null || HomeValleySoftlockGuard.IsCoreDestroyed(state))
+            {
+                return; // 核心被毁：家园冻结，只剩失败页（ER3-SOFTLOCK-01）。
+            }
+            SyncSimEntities(state);
+            TickMachineMovement(dt);
+            SquadCommands.TickSim(dt);
+            HomeValleyWorkOrders.Tick(state, dt, GetMachinePosition, ReleaseMachineMovement,
+                IsMachineDirectControlled, BeginAutoAssignedMovement);
+            HomeValleyFactory.Tick(state, dt); // ER4-FAC-01：装配站生产队列。
+            PrimitiveCraftStation.Tick(state, dt); // ER4-PRIM-04：合成台升级/拆解队列。
+            HomeValleyAnalysis.Tick(state, dt); // ER6-ANA-01：解析台队列。
+            HomeValleyCombatTargets.Tick(state, dt); // ER4-PRIM-05：低威胁残骸靶被动再生。
+            TickAutoEngage(state, dt); // ER4-PRIM-05：AI 同出口自动交战。
+            HomeValleySignal.RecomputeUnlock(state); // ER5-SIG-01：破碎都市解锁判定。
+            FoundryOutpostRegion.RecomputeUnlock(state); // ER6-FOUNDRY-01：铸造前哨外围解锁判定。
+            CampaignExposureLedger.TickTowerBroadcastOff(state, dt); // ER6-EXPOSE-01：塔关广播每10秒-2。
+            HomeValleyBeacon.Tick(state, dt); // ER7-BEACON-01：信标启动10秒不可取消演出计时。
+            HomeValleySoftlockGuard.Tick(state, dt, BeginAutoAssignedMovement);
+        }
+
+        private readonly HashSet<int> _markerIds = new HashSet<int>();
+
+        /// <summary>FG0-ARCH-01：让“家园里有哪些机器”的表现对象与记录一致——新出厂、紧急救援、远征归来的机器补上；
+        /// 被派遣出去的机器移走。Demo 的机器位置记在表现对象的 Transform 上，所以这一步属于模拟（每步都做，与观察无关）。
+        /// 开销 O(机器数)，无分配。</summary>
+        private void SyncSimEntities(CampaignState state)
+        {
+            _markerIds.Clear();
+            for (int i = _machineMarkers.Count - 1; i >= 0; i--)
+            {
+                HomeValleyMachineMarker m = _machineMarkers[i];
+                if (m == null)
+                {
+                    _machineMarkers.RemoveAt(i);
+                    continue;
+                }
+                if (!MachineRegistry.TryGetRecord(m.LogicId, out MachineRecord rec) || rec.RegionId != HomeValleyLayout.RegionId)
+                {
+                    // 被派遣到远征地点（或记录已不存在）：这台机器不在家园了。
+                    if (_possessed == m)
+                    {
+                        Control.ReleaseToStrategy();
+                        _possessed = null;
+                    }
+                    if (_selected == m)
+                    {
+                        _selected = null;
+                    }
+                    GameLogic.View.UnityObjects.Release(m.gameObject);
+                    _machineMarkers.RemoveAt(i);
+                    continue;
+                }
+                _markerIds.Add(m.LogicId);
+            }
+            foreach (MachineRecord machine in MachineRegistry.AllRecords)
+            {
+                if (machine != null && machine.RegionId == HomeValleyLayout.RegionId && machine.IsAlive && !_markerIds.Contains(machine.LogicId))
+                {
+                    BuildMachineVisual(machine);
+                    _markerIds.Add(machine.LogicId);
+                }
             }
         }
 
@@ -353,16 +422,6 @@ namespace GameLogic.Campaign.Regions
             Vector2 pos2 = HomeValleyWorkOrders.ResolveWorkPosition(CampaignSession.Current, order);
             Vector3 destination = new Vector3(pos2.x, 1f, pos2.y);
             BeginMovementForOrder(marker, destination, order);
-        }
-
-        /// <summary>Space（Strategy 域）：与 CellStageFlow.HandleStrategicPauseInput 同款语义。
-        /// 只能从战略视角触发/解除——直控下 Space 域不匹配，天然读不到。</summary>
-        private void HandlePauseInput()
-        {
-            if (InputRouter.ConsumeAction(GameActionId.TogglePause, InputScope.Strategy))
-            {
-                _paused = !_paused;
-            }
         }
 
         /// <summary>ER2-INPUT-01：Tab 循环切换接管目标 + WASD 直控移动。仅在真正处于 Direct
@@ -892,7 +951,7 @@ namespace GameLogic.Campaign.Regions
         /// 这就是"持久化"要求：回城/再次读档要看到同一批建筑与残骸状态，不是重新生成。</summary>
         public void Exit()
         {
-            if (!IsActive)
+            if (!IsLoaded)
             {
                 return;
             }
@@ -906,12 +965,8 @@ namespace GameLogic.Campaign.Regions
             // ER4-BLP-02：区域卸载与登记表解绑成对——清空当前会话的装配登记缓存（不影响
             // CampaignState.MachineRecords 本身，机器长期记录原样保留，下次 Enter 重新登记）。
             MachineLoadoutRegistry.Clear();
-            // ER2-INPUT-01：与 CellStageFlow 同款纪律——离场解绑镜头，InputRouter.Reset() 顺带清掉
-            // 本区域可能留下的 Scope/模态残留，避免粘到下一次进场或切去细胞阶段。
-            _cameraDirector?.Unbind();
-            _cameraDirector = null;
+            // FG0-ARCH-01：镜头归全局镜头管理器（WorldSimulation.UnloadAll → WorldView.Reset 统一解绑并复位输入）。
             _possessed = null;
-            _paused = false;
             _factoryPanelOpen = false;
             _expeditionPrepPanelOpen = false;
             // ER5-CMD-01：选择集/编组/排队命令/最近事件全部清空——不跨局残留（DestroyVisuals 已经
@@ -920,11 +975,7 @@ namespace GameLogic.Campaign.Regions
             SquadCommands.Unbind();
             Control.Unbind();
             Interact.Unbind();
-            IsActive = false;
-            if (MachineRegistry.LivePositionProvider == (System.Func<int, Vector2?>)FindMachineMarkerPosition)
-            {
-                MachineRegistry.LivePositionProvider = null;
-            }
+            IsLoaded = false;
             Log.Info("[HomeValleyController] 已退出归还谷地。");
         }
 
@@ -1065,7 +1116,7 @@ namespace GameLogic.Campaign.Regions
 
         public void SyncLiveStateForSave()
         {
-            if (IsActive)
+            if (IsLoaded)
             {
                 SyncLiveStateBackToRecords();
             }
@@ -1079,8 +1130,13 @@ namespace GameLogic.Campaign.Regions
                 {
                     continue;
                 }
+                // FG0-ARCH-01：刚派遣出去的机器在家园下一步回收标记之前仍留有旧标记——不许用家园坐标覆盖它在远征地点的记录。
+                if (MachineRegistry.TryGetRecord(marker.LogicId, out MachineRecord rec) && rec.RegionId != HomeValleyLayout.RegionId)
+                {
+                    continue;
+                }
                 Vector3 p = marker.transform.position;
-                float health = MachineRegistry.TryGetRecord(marker.LogicId, out MachineRecord rec) ? rec.Health : 100f;
+                float health = rec != null ? rec.Health : 100f;
                 MachineRegistry.SyncLiveState(marker.LogicId, new Vector2(p.x, p.z), health, null);
             }
         }
@@ -1102,7 +1158,7 @@ namespace GameLogic.Campaign.Regions
         public HomeValleyCargo.StoreResult TryCollectWreckageDrop(string nodeId)
         {
             CampaignState state = CampaignSession.Current;
-            if (state == null || !IsActive)
+            if (state == null || !IsLoaded)
             {
                 return HomeValleyCargo.StoreResult.Fail("没有活动的归还谷地会话。");
             }
@@ -1307,7 +1363,7 @@ namespace GameLogic.Campaign.Regions
                 {
                     if (_buildingVisuals.TryGetValue(gone, out Transform t) && t != null)
                     {
-                        UnityEngine.Object.Destroy(t.gameObject);
+                        GameLogic.View.UnityObjects.Release(t.gameObject);
                     }
                     _buildingVisuals.Remove(gone);
                     DestroyChild("Badge_" + gone);
@@ -1335,21 +1391,8 @@ namespace GameLogic.Campaign.Regions
                 BuildBuildSiteVisual(HomeValleyLayout.BeaconSlot, HomeValleyLayout.BuildingTypeBeacon); // 取消了信标规划后建造位回来。
             }
 
-            // ER3-SOFTLOCK-01：紧急救援机是运行时（不是 Enter 那一刻）才登记进 MachineRegistry 的，
-            // BuildVisuals 只在首次进入时跑一次，覆盖不到这种"游玩过程中新出现的机器"——与建筑/
-            // 地面物同一套"逐帧对账"处理，不新增专属分支。
-            foreach (MachineRecord machine in MachineRegistry.AllRecords)
-            {
-                if (machine.RegionId != HomeValleyLayout.RegionId || !machine.IsAlive)
-                {
-                    continue;
-                }
-                bool hasMarker = _machineMarkers.Any(m => m.LogicId == machine.LogicId);
-                if (!hasMarker)
-                {
-                    BuildMachineVisual(machine);
-                }
-            }
+            // FG0-ARCH-01：运行时新出现的机器（紧急救援、出厂、远征归来）改由 SyncSimEntities 在每个模拟步补上表现对象——
+            // 机器位置记在表现对象上，属于模拟；放在画面对账里会让“有没有人在看家园”改变结果（FGR-BASE-021）。
 
             foreach (CombatTargetRecord target in state.CombatTargets ?? Array.Empty<CombatTargetRecord>())
             {
@@ -1392,7 +1435,7 @@ namespace GameLogic.Campaign.Regions
                 if (child.name.StartsWith(prefix, StringComparison.Ordinal)
                     && !liveGroundItemIds.Contains(child.name.Substring(prefix.Length)))
                 {
-                    UnityEngine.Object.Destroy(child.gameObject);
+                    GameLogic.View.UnityObjects.Release(child.gameObject);
                 }
             }
         }
@@ -1402,7 +1445,7 @@ namespace GameLogic.Campaign.Regions
             Transform child = _root != null ? _root.transform.Find(childName) : null;
             if (child != null)
             {
-                UnityEngine.Object.Destroy(child.gameObject);
+                GameLogic.View.UnityObjects.Release(child.gameObject);
             }
         }
 
@@ -1540,7 +1583,7 @@ namespace GameLogic.Campaign.Regions
                 HomeValleyLayout.BeaconSlot.Position.y);
             go.transform.localScale = new Vector3(HomeValleyLayout.BeaconSlot.ClearanceRadius * 2f, 0.1f,
                 HomeValleyLayout.BeaconSlot.ClearanceRadius * 2f);
-            UnityEngine.Object.Destroy(go.GetComponent<Collider>());
+            GameLogic.View.UnityObjects.Release(go.GetComponent<Collider>());
             Renderer renderer = go.GetComponent<Renderer>();
             renderer.material = new Material(Shader.Find("Standard")) { color = new Color(0.3f, 0.5f, 0.8f, 0.4f) };
         }
@@ -1604,37 +1647,24 @@ namespace GameLogic.Campaign.Regions
 
         // ── 相机（ER2-INPUT-01：CameraDirector 驱动，Strategy 起始 + WASD 接管）───
 
-        /// <summary>初始朝向/背景/裁剪面与改造前逐值一致，只是把"镜头怎么动"交给
-        /// <see cref="CameraDirector"/>；固定俯视旋转本类自己设一次（CameraDirector 从不碰旋转，
-        /// 全程只写 position/orthographicSize，见该类设计要点第 1 条）。</summary>
-        private void SetupCameraDirector()
+        /// <summary>FG0-ARCH-01：本地点的镜头配置（初始朝向 / 背景 / 裁剪面与 Demo 逐值一致）。镜头本身由 <see cref="WorldView"/> 持有。
+        /// 家园在星球表面上：平移范围不再钳在谷地里，而是已探索区域 + 边距（DEBT-FG0ARCH05-01），并包含行进中的队伍。</summary>
+        private void SetupCameraProfile()
         {
-            _camera = Camera.main;
-            if (_camera == null)
-            {
-                var go = new GameObject("Main Camera", typeof(Camera));
-                go.tag = "MainCamera";
-                _camera = go.GetComponent<Camera>();
-            }
-
-            _camera.orthographic = true;
-            _camera.orthographicSize = HomeValleyLayout.CameraBoundsHalfExtentZ;
-            _camera.clearFlags = CameraClearFlags.SolidColor;
-            _camera.backgroundColor = new Color(0.05f, 0.07f, 0.10f);
-            _camera.nearClipPlane = 0.1f;
-            _camera.farClipPlane = 200f;
-            _camera.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
-
-            _cameraDirector = new CameraDirector();
+            _camera = WorldView.EnsureCamera();
             Vector2 focus = HomeValleyLayout.ClampToBounds(HomeValleyLayout.CameraFocusStart);
-            var followOffset = new Vector3(0f, 40f, 0f);
-            // 矩形边界（X 半宽 28 / Z 半宽 30，见 HomeValleyLayout）比 CameraDirector 的单标量方形
-            // 钳制窄——取较小值（28）保证任何一条轴都不会真的越界，代价是 Z 轴少 2 个单位余量，
-            // 可接受（CameraDirector 本就"非目标：不做电影级轨迹"，没打算为单个场景扩展成矩形钳制）。
-            _cameraDirector.Bind(_camera, TryGetPossessedAnchor, followOffset,
-                HomeValleyLayout.CameraBoundsHalfExtentX, startInStrategy: true, initialDirectOrthographicSize: 14f);
-            _cameraDirector.FocusStrategyOn(new float2(focus.x, focus.y));
-            _cameraDirector.EnsureDirectTarget = EnsureDirectTarget;
+            _cameraProfile = new WorldCameraProfile
+            {
+                DirectAnchor = TryGetPossessedAnchor,
+                EnsureDirectTarget = EnsureDirectTarget,
+                ArenaHalfExtent = HomeValleyLayout.CameraBoundsHalfExtentX,
+                DynamicBounds = () => WorldView.PlanetBounds(CampaignSession.Current),
+                FollowOffset = new Vector3(0f, 40f, 0f),
+                InitialStrategyOrthographicSize = HomeValleyLayout.CameraBoundsHalfExtentZ,
+                InitialDirectOrthographicSize = 14f,
+                StartFocus = focus,
+                Background = new Color(0.05f, 0.07f, 0.10f),
+            };
         }
 
         // ── ER5-CMD-01：战略命令（多选/编组/Move·Attack·Guard·Retreat）────────
@@ -2035,7 +2065,7 @@ namespace GameLogic.Campaign.Regions
         {
             if (_root != null)
             {
-                UnityEngine.Object.Destroy(_root);
+                GameLogic.View.UnityObjects.Release(_root);
                 _root = null;
             }
             _objectiveMarker = null;

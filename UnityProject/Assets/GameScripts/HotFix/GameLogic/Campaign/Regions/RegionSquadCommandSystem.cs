@@ -197,12 +197,47 @@ namespace GameLogic.Campaign.Regions
         /// （下达即排队，不立即执行）。</summary>
         public void Tick(bool paused, float dt)
         {
+            if (!TickInputCore(paused))
+            {
+                return;
+            }
+            if (!paused)
+            {
+                TickSim(dt);
+            }
+            SyncSelectionVisuals();
+        }
+
+        /// <summary>FG0-ARCH-01：玩家输入部分（选择 / 编组 / 下令），只在本区域被观察时每帧调用；不推进任何移动。</summary>
+        public void TickInput(bool paused)
+        {
+            if (TickInputCore(paused))
+            {
+                SyncSelectionVisuals();
+            }
+        }
+
+        /// <summary>FG0-ARCH-01：模拟部分（排队命令落地、移动 / 攻击推进），由世界模拟按固定步调用——
+        /// 无论本区域是否被观察都执行（FGR-BASE-021），与输入所有权无关。</summary>
+        public void TickSim(float dt)
+        {
+            if (_ctx == null || dt <= 0f)
+            {
+                return;
+            }
+            FlushQueued();
+            TickActiveCommands(dt);
+        }
+
+        /// <summary>返回 false = 本帧没有输入所有权（或未绑定），调用方不再刷新选中表现。</summary>
+        private bool TickInputCore(bool paused)
+        {
             _clickConsumedThisFrame = false;
             _secondaryConsumedThisFrame = false;
             _cachedPaused = paused;
             if (_ctx == null)
             {
-                return;
+                return false;
             }
 
             PruneSelection();
@@ -210,7 +245,7 @@ namespace GameLogic.Campaign.Regions
             if (!InputRouter.Owns(InputScope.Strategy))
             {
                 _dragging = false;
-                return;
+                return false;
             }
 
             if (PointerSuppressed)
@@ -223,14 +258,7 @@ namespace GameLogic.Campaign.Regions
                 HandleGroupHotkeys();
                 HandleCommandHotkeys(paused);
             }
-
-            if (!paused)
-            {
-                FlushQueued();
-                TickActiveCommands(dt);
-            }
-
-            SyncSelectionVisuals();
+            return true;
         }
 
         // ── 选择：框选/单选 ──────────────────────────────────────────────
@@ -939,7 +967,7 @@ namespace GameLogic.Campaign.Regions
             {
                 if (_selectionRings[id] != null)
                 {
-                    UnityEngine.Object.Destroy(_selectionRings[id]);
+                    GameLogic.View.UnityObjects.Release(_selectionRings[id]);
                 }
                 _selectionRings.Remove(id);
             }
@@ -961,7 +989,7 @@ namespace GameLogic.Campaign.Regions
                     ring.name = "SquadRing_" + id;
                     ring.transform.SetParent(_ctx.VisualRoot.transform, false);
                     ring.transform.localScale = new Vector3(1.6f, 0.02f, 1.6f);
-                    UnityEngine.Object.Destroy(ring.GetComponent<Collider>());
+                    GameLogic.View.UnityObjects.Release(ring.GetComponent<Collider>());
                     Renderer r = ring.GetComponent<Renderer>();
                     r.material = new Material(Shader.Find("Standard")) { color = new Color(1f, 0.85f, 0.2f, 0.55f) };
                     _selectionRings[id] = ring;
@@ -977,7 +1005,7 @@ namespace GameLogic.Campaign.Regions
             {
                 if (go != null)
                 {
-                    UnityEngine.Object.Destroy(go);
+                    GameLogic.View.UnityObjects.Release(go);
                 }
             }
             _selectionRings.Clear();
@@ -1015,7 +1043,7 @@ namespace GameLogic.Campaign.Regions
                 _destinationMarkerGo.name = "SquadCommandDestination";
                 _destinationMarkerGo.transform.SetParent(_ctx.VisualRoot.transform, false);
                 _destinationMarkerGo.transform.localScale = new Vector3(0.6f, 0.03f, 0.6f);
-                UnityEngine.Object.Destroy(_destinationMarkerGo.GetComponent<Collider>());
+                GameLogic.View.UnityObjects.Release(_destinationMarkerGo.GetComponent<Collider>());
                 _destinationMarkerGo.GetComponent<Renderer>().material = new Material(Shader.Find("Standard"));
             }
             if (_pathBarGo == null)
@@ -1025,7 +1053,7 @@ namespace GameLogic.Campaign.Regions
                 _pathBarGo = GameObject.CreatePrimitive(PrimitiveType.Cube);
                 _pathBarGo.name = "SquadCommandPath";
                 _pathBarGo.transform.SetParent(_ctx.VisualRoot.transform, false);
-                UnityEngine.Object.Destroy(_pathBarGo.GetComponent<Collider>());
+                GameLogic.View.UnityObjects.Release(_pathBarGo.GetComponent<Collider>());
                 _pathBarGo.GetComponent<Renderer>().material = new Material(Shader.Find("Standard"));
             }
 
@@ -1052,12 +1080,12 @@ namespace GameLogic.Campaign.Regions
         {
             if (_destinationMarkerGo != null)
             {
-                UnityEngine.Object.Destroy(_destinationMarkerGo);
+                GameLogic.View.UnityObjects.Release(_destinationMarkerGo);
                 _destinationMarkerGo = null;
             }
             if (_pathBarGo != null)
             {
-                UnityEngine.Object.Destroy(_pathBarGo);
+                GameLogic.View.UnityObjects.Release(_pathBarGo);
                 _pathBarGo = null;
             }
         }

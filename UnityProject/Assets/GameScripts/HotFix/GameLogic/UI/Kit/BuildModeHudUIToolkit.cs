@@ -129,7 +129,9 @@ namespace GameLogic.UI.Kit
         {
             HomeValleyBuildMode mode = HomeValleyBuildMode.Current;
             CampaignState state = CampaignSession.Current;
-            bool available = mode != null && state != null && InputRouter.Scope == InputScope.Strategy && !InputRouter.ModalUiOpen;
+            // FG0-ARCH-01：家园在远征期间照常运行（建造模式仍绑定着），但镜头不在家园时不给建造入口——建造只对眼前的家园。
+            bool homeObserved = Stage.GameRoot.HomeValley != null && Stage.GameRoot.HomeValley.IsActive;
+            bool available = mode != null && state != null && homeObserved && InputRouter.Scope == InputScope.Strategy && !InputRouter.ModalUiOpen;
             bool open = mode != null && mode.IsOpen;
             SetVisible(_entry, available && !open);
             SetVisible(_panel, open);

@@ -108,10 +108,9 @@ namespace GameLogic.UI.Common
 
             // ER8 收尾：破碎都市/铸造前哨同样走 StrategyClock 与 GameRoot.ToggleWorldPause，此前这里漏了两个
             // 远征区域——出征时看不到当前速度、点不到暂停按钮（AC-UI-005“HUD 显示实际值”）。
-            bool active = (GameRoot.CellStage != null && GameRoot.CellStage.IsRunning) ||
-                (GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive) ||
-                (GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsActive) ||
-                (GameRoot.FoundryOutpost != null && GameRoot.FoundryOutpost.IsActive);
+            // FG0-ARCH-01：0.2 的世界用 UI Toolkit 的世界时间条（WorldBarHudUIToolkit：游戏日、0.5x～3x、暂停、关注点）；
+            // 本旧 HUD 只剩旧细胞阶段在用（Demo 之前的产品）。
+            bool active = GameRoot.CellStage != null && GameRoot.CellStage.IsRunning;
             _bar.style.display = active ? DisplayStyle.Flex : DisplayStyle.None;
             if (!active)
             {
