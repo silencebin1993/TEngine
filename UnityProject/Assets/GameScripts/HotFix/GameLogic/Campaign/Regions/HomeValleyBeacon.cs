@@ -41,7 +41,7 @@ namespace GameLogic.Campaign.Regions
         public static bool IsUnlocked(CampaignState state) =>
             CampaignObjectiveTracker.IsCompleted(state, CampaignObjectiveTracker.Obj09);
 
-        private static BuildingRecord FindBuilding(CampaignState state) =>
+        public static BuildingRecord FindBuilding(CampaignState state) =>
             state?.BuildingRecords?.FirstOrDefault(b => b.BuildingTypeId == HomeValleyLayout.BuildingTypeBeacon);
 
         public static bool Exists(CampaignState state) => FindBuilding(state) != null;

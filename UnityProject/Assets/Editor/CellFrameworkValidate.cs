@@ -137,6 +137,9 @@ namespace GameLogic.EditorTools
                 // FG0-UX-01：UI 基础件（12 类）与输入上下文——动作登记表、上下文与组合键、重绑冲突、旧设置迁移、通知中心、
                 // 浮层基础件、面板与布局探针（四种分辨率 × 缩放极值 × 中英文）、文本键、性能。
                 _fail += FgUiKitSelfCheck.Run(Report);
+                // FG0-ARCH-04：格网建造原型与锚点迁移——开局布局表、放置 / 旋转 / 拆除 / 占地校验与负向矩阵、正式输入、
+                // 施工倍速、存读档与旧档迁移、后台一致性、叠加层与建造栏、性能。
+                _fail += FgGridBuildSelfCheck.Run(Report);
             }
             catch (Exception e)
             {

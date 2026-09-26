@@ -62,11 +62,36 @@ namespace GameLogic.Campaign
         public int Day;
     }
 
-    /// <summary>格网建造（FG0-ARCH-04 / FG03）。</summary>
+    /// <summary>格网建造（FG0-ARCH-04 / FG03）。唯一写入口 <see cref="Grid.HomeGridService"/>。
+    /// 占用层不进存档：它由 <see cref="CampaignState.BuildingRecords"/>（枢轴格 + 朝向）唯一推导，读档后重建，
+    /// 所以存读档不可能出现“记录与占用不一致”。地形 / 污染层由（种子, 地形来源）确定性生成，只有被修改过的区块才进
+    /// <see cref="WorldGenState.ChunkDiffs"/>（FGR-GEN-060，编码由 FG0-ARCH-05 定义；本 Story 没有修改地形的玩法）。</summary>
     [Serializable]
     public sealed class GridState
     {
         public int DomainVersion = 1;
+        /// <summary>开局布局 / 旧档迁移的版本。0 = 这份存档里的建筑还没有格网字段（FG0-ARCH-04 之前的 v2 存档），
+        /// 读档时按 Position 迁移后写成 <see cref="Grid.HomeGridService.LayoutVersion"/>。</summary>
+        public int LayoutVersion;
+        /// <summary>归还核心的枢轴格（开局布局以它为锚点，FG00 B25）。世界生成（FG3-GEN-01）落地前恒为原点。</summary>
+        public int CorePivotX;
+        public int CorePivotY;
+        /// <summary>地形来源标识（<see cref="Grid.IGridTerrainSource.SourceId"/>），读档时用同一来源重建地形层。</summary>
+        public string TerrainSourceId = string.Empty;
+        /// <summary>同类建筑第 2 座起的实例序号（BuildingId = home_valley:&lt;type&gt;#&lt;n&gt;），单调递增，读档后继续往后编。</summary>
+        public int NextInstanceSerial = 2;
+        /// <summary>迷雾层：已探索的圆形区域（FGR-LOG-013）。开局 = 核心周围 grid.explored_radius_start 格；
+        /// 信号塔覆盖、机器探索扩张由 FG3-LOG-01 / FG1-SIG-07 追加。</summary>
+        public ExploredAreaRecord[] Explored = Array.Empty<ExploredAreaRecord>();
+    }
+
+    /// <summary>一块已探索的圆形区域（格网坐标）。</summary>
+    [Serializable]
+    public sealed class ExploredAreaRecord
+    {
+        public int CenterX;
+        public int CenterY;
+        public int Radius;
     }
 
     /// <summary>传送带与带上物品（FG0-ARCH-02 / FG03）。</summary>
@@ -264,6 +289,12 @@ namespace GameLogic.Campaign
             s.Progress ??= new CampaignProgressState();
             s.Clock ??= new GameClockState();
             s.Grid ??= new GridState();
+            s.Grid.Explored ??= Array.Empty<ExploredAreaRecord>();
+            s.Grid.TerrainSourceId ??= string.Empty;
+            if (s.Grid.NextInstanceSerial < 2)
+            {
+                s.Grid.NextInstanceSerial = 2;
+            }
             s.Belts ??= new BeltItemState();
             s.Pipes ??= new PipeFluidState();
             s.Research ??= new ResearchState();

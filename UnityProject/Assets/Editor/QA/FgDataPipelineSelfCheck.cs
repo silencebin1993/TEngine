@@ -470,8 +470,13 @@ namespace GameLogic.EditorTools
                 {
                     continue;
                 }
-                rows++;
                 string[] f = raw.Split('\t');
+                // FG0-ARCH-04 的五张格网表（G/P/L/X/H）由 FgGridBuildSelfCheck A 段逐字段比对，这里只数本 Story 的四类。
+                if (f[0] == "G" || f[0] == "P" || f[0] == "L" || f[0] == "X" || f[0] == "H")
+                {
+                    continue;
+                }
+                rows++;
                 switch (f[0])
                 {
                     case "B":

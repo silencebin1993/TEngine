@@ -140,6 +140,7 @@ namespace GameLogic.Campaign.Regions
                 string kind = reason.Substring(reason.LastIndexOf(':') + 1);
                 return $"这台机器不能{KindVerb(kind)}，换一台搬运机试试";
             }
+            if (reason.StartsWith(GridFailurePrefix, StringComparison.Ordinal)) return reason.Substring(GridFailurePrefix.Length);
             if (reason.StartsWith("order-already-active", StringComparison.Ordinal)) return "这项工作已经有机器在做";
             if (reason.StartsWith("not-damaged", StringComparison.Ordinal)) return "这座建筑没有损坏，不需要修复";
             if (reason.StartsWith("no-repair-profile", StringComparison.Ordinal)) return "这座建筑不能修复";
@@ -160,6 +161,7 @@ namespace GameLogic.Campaign.Regions
                 case "already-salvaged": return "这处残骸已经拆完";
                 case "battery-already-full": return "电量已满，不需要充电";
                 case "cannot-demolish-core": return "归还核心不能拆除";
+                case "not-rebuildable": return Localization.GameText.Get("grid.reason.not_rebuildable");
                 case "not-rescue-machine": return "只有紧急救援机能做紧急修复";
                 default: return "无法执行这项命令";
             }
@@ -295,27 +297,18 @@ namespace GameLogic.Campaign.Regions
             return WorkOrderOpResult.Ok(workOrderId);
         }
 
-        // ── Build（第二座发电机 + ER7-BEACON-01 导航信标）───────────────────────────
+        // ── Build（FG0-ARCH-04 起一律经格网放置：HomeGridService.TryPlace → TryCreateBuildAt）─────────────
 
-        /// <summary>ER7-BEACON-01：此前只有第二座发电机一种可建内容，<see cref="TryCreateBuild"/> 曾把
-        /// 建造位坐标硬编码成 <see cref="HomeValleyLayout.Generator2Site"/>。新增导航信标后必须按
-        /// <paramref name="buildingTypeId"/> 分流，否则信标会被错误放到发电机2的坑位上。</summary>
-        private static Vector2 ResolveBuildSitePosition(string buildingTypeId) => buildingTypeId switch
+        /// <summary>Demo 建造位点选路径（机器选中后点“建造位”）：<paramref name="siteOrTypeId"/> 是开局布局里的建造位锚点
+        /// （generator_2 / beacon_slot）或建造位的建筑类型。FG0-ARCH-04 起建造位只是“建议位置”，放置照样经过格网校验
+        /// （被别的建筑占了、在迷雾里……都会给出原因），不再有第二套建造入口。</summary>
+        public static WorkOrderOpResult TryCreateBuild(CampaignState state, string siteOrTypeId, int machineLogicId)
         {
-            HomeValleyLayout.BuildingTypeBeacon => HomeValleyLayout.BeaconSlot.Position,
-            _ => HomeValleyLayout.Generator2Site.Position,
-        };
-
-        public static WorkOrderOpResult TryCreateBuild(CampaignState state, string buildingTypeId, int machineLogicId)
-        {
-            if (!HomeValleyLayout.BuildProfile.TryGetValue(buildingTypeId, out (int ScrapCost, float Seconds) profile))
+            if (!TryResolveSite(siteOrTypeId, out GameConfig.fg.StartLayout site))
             {
-                return WorkOrderOpResult.Fail($"no-build-profile:{buildingTypeId}");
+                return WorkOrderOpResult.Fail($"no-build-profile:{siteOrTypeId}");
             }
-
-            string plannedBuildingId = HomeValleyLayout.RegionId + ":" + buildingTypeId;
-            bool alreadyExists = state.BuildingRecords?.Any(b => b.BuildingId == plannedBuildingId) ?? false;
-
+            string plannedBuildingId = HomeValleyLayout.RegionId + ":" + site.TypeId;
             WorkOrderRecord existing = FindActiveByTarget(state, WorkOrderKind.Build, plannedBuildingId);
             if (existing != null)
             {
@@ -325,21 +318,79 @@ namespace GameLogic.Campaign.Regions
                 }
                 return ReassignExisting(state, existing, machineLogicId);
             }
-
-            if (alreadyExists)
+            if (state.BuildingRecords?.Any(b => b.BuildingId == plannedBuildingId) ?? false)
             {
                 return WorkOrderOpResult.Fail("already-built");
             }
-
             MachineCheck check = CheckMachine(machineLogicId, WorkOrderKind.Build);
             if (!check.Ok)
             {
                 return WorkOrderOpResult.Fail(check.FailureReason);
             }
+            Grid.GridCell cell = Grid.HomeGridService.AnchorCell(state, site.AnchorId);
+            Grid.GridOpResult placed = Grid.HomeGridService.TryPlace(state, site.TypeId, cell, site.Rotation, machineLogicId);
+            if (!placed.Success)
+            {
+                return WorkOrderOpResult.Fail(GridFailurePrefix + placed.Describe());
+            }
+            WorkOrderRecord order = FindActiveByTarget(state, WorkOrderKind.Build, placed.BuildingId);
+            return order != null ? WorkOrderOpResult.Ok(order.WorkOrderId) : WorkOrderOpResult.Fail("order-missing");
+        }
 
-            string workOrderId = plannedBuildingId + ":build:" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        /// <summary>格网放置被拒时的原因码前缀；后面跟当前语言的原因文本，<see cref="DescribeCommandFailure"/> 原样显示。</summary>
+        public const string GridFailurePrefix = "grid:";
+
+        private static bool TryResolveSite(string siteOrTypeId, out GameConfig.fg.StartLayout site)
+        {
+            site = null;
+            if (siteOrTypeId == null)
+            {
+                return false;
+            }
+            if (Grid.GridContent.TryGetLayout(siteOrTypeId, out GameConfig.fg.StartLayout row) && row.Kind == "site")
+            {
+                site = row;
+                return true;
+            }
+            foreach (GameConfig.fg.StartLayout r in Grid.GridContent.StartLayout)
+            {
+                if (r.Kind == "site" && r.TypeId == siteOrTypeId)
+                {
+                    site = r;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// FG0-ARCH-04：在格网上已经校验过的位置生成“规划中”的建筑记录与新建工作单（唯一调用方 <see cref="Grid.HomeGridService.TryPlace"/>）。
+        /// 废料在此预留（Propose → Reserve，完工 Commit，取消 Cancel 全额退回）。
+        /// <paramref name="machineLogicId"/> = 0 时工作单进入待分配池（Ready），由空闲机器按 ERD-WRK-002 自动领取。
+        /// </summary>
+        public static WorkOrderOpResult TryCreateBuildAt(CampaignState state, string buildingTypeId, string buildingId,
+            Grid.GridCell pivot, int rotation, Vector2 center, int machineLogicId)
+        {
+            if (!HomeValleyLayout.BuildProfile.TryGetValue(buildingTypeId, out (int ScrapCost, float Seconds) profile))
+            {
+                return WorkOrderOpResult.Fail($"no-build-profile:{buildingTypeId}");
+            }
+            if (state.BuildingRecords?.Any(b => b.BuildingId == buildingId) ?? false)
+            {
+                return WorkOrderOpResult.Fail("already-built");
+            }
+            if (machineLogicId != 0)
+            {
+                MachineCheck check = CheckMachine(machineLogicId, WorkOrderKind.Build);
+                if (!check.Ok)
+                {
+                    return WorkOrderOpResult.Fail(check.FailureReason);
+                }
+            }
+
+            string workOrderId = buildingId + ":build:" + Guid.NewGuid().ToString("N").Substring(0, 8);
             string txId = workOrderId + ":tx";
-            CampaignEconomyLedger.ProposeConsume(state, txId, plannedBuildingId, CampaignEconomyLedger.ResourceScrap, profile.ScrapCost);
+            CampaignEconomyLedger.ProposeConsume(state, txId, buildingId, CampaignEconomyLedger.ResourceScrap, profile.ScrapCost);
             CampaignEconomyLedger.LedgerResult reserve = CampaignEconomyLedger.Reserve(state, txId);
             if (!reserve.Success)
             {
@@ -349,16 +400,16 @@ namespace GameLogic.Campaign.Regions
 
             var planned = new BuildingRecord
             {
-                BuildingId = plannedBuildingId,
+                BuildingId = buildingId,
                 BuildingTypeId = buildingTypeId,
                 RegionId = HomeValleyLayout.RegionId,
-                Position = ResolveBuildSitePosition(buildingTypeId),
-                Rotation = 0f,
+                Position = center,
+                Rotation = Grid.GridMath.NormalizeRotation(rotation),
+                GridX = pivot.X,
+                GridY = pivot.Y,
                 Health = 100f,
                 ConstructionState = BuildingConstructionState.Planned,
-                // ER7-BEACON-01：同 Position 一样此前硬编码 1（只服务过发电机2，默认优先级恰好也是1，
-                // 巧合掩盖了这条硬编码）。新增信标默认优先级2（见 HomeValleyLayout.PowerProfile）后
-                // 如果不读表会被错误按1接入电网仲裁，改为按 PowerProfile 默认值取，查不到则退化1。
+                // ER7-BEACON-01：按 PowerProfile 默认优先级接入电网仲裁，查不到则退化 1。
                 PowerPriority = HomeValleyLayout.PowerProfile.TryGetValue(buildingTypeId, out (float, int) profileEntry)
                     ? profileEntry.Item2
                     : 1,
@@ -369,9 +420,14 @@ namespace GameLogic.Campaign.Regions
             };
             state.BuildingRecords = (state.BuildingRecords ?? Array.Empty<BuildingRecord>()).Append(planned).ToArray();
 
-            var order = NewOrder(state, workOrderId, WorkOrderKind.Build, plannedBuildingId, machineLogicId,
+            var order = NewOrder(state, workOrderId, WorkOrderKind.Build, buildingId, machineLogicId,
                 resourceTransactionId: txId, duration: profile.Seconds);
+            if (machineLogicId == 0)
+            {
+                order.State = WorkOrderState.Ready; // 待分配池：空闲机器 0.5 秒内领取（ERD-WRK-002）。
+            }
             Append(state, order);
+            MarkAssignmentDirty();
             return WorkOrderOpResult.Ok(workOrderId);
         }
 
@@ -433,18 +489,40 @@ namespace GameLogic.Campaign.Regions
             {
                 return WorkOrderOpResult.Fail("cannot-demolish-core");
             }
-
             BuildingRecord building = state.BuildingRecords?.FirstOrDefault(b =>
                 b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId == buildingTypeId);
             if (building == null)
             {
                 return WorkOrderOpResult.Fail($"building-not-found:{buildingTypeId}");
             }
+            return TryCreateDemolishBuilding(state, building.BuildingId, machineLogicId);
+        }
+
+        /// <summary>FG0-ARCH-04：按建筑 ID 拆除（同类建筑可以有多座，按类型找会拆错那一座）。
+        /// <paramref name="machineLogicId"/> = 0：拆除模式下的“标记拆除”，工作单进入待分配池由空闲机器领取。</summary>
+        public static WorkOrderOpResult TryCreateDemolishBuilding(CampaignState state, string buildingId, int machineLogicId)
+        {
+            BuildingRecord building = state.BuildingRecords?.FirstOrDefault(b =>
+                b.RegionId == HomeValleyLayout.RegionId && b.BuildingId == buildingId);
+            if (building == null)
+            {
+                return WorkOrderOpResult.Fail($"building-not-found:{buildingId}");
+            }
+            if (building.BuildingTypeId == HomeValleyLayout.BuildingTypeCore)
+            {
+                return WorkOrderOpResult.Fail("cannot-demolish-core");
+            }
+            if (Grid.HomeGridService.IsDemolishForbidden(building.BuildingTypeId))
+            {
+                // FG0-ARCH-04（FG00 B11）：本局无法重建的开局建筑（placeable=0）拆了会让引用它的目标永远完不成，战役软锁。
+                // 拆除模式与 Demo 的“点选机器再点建筑”两条入口都在这里拦住。
+                return WorkOrderOpResult.Fail("not-rebuildable");
+            }
 
             WorkOrderRecord existing = FindActiveByTarget(state, WorkOrderKind.Salvage, building.BuildingId);
             if (existing != null)
             {
-                if (existing.State != WorkOrderState.Ready)
+                if (existing.State != WorkOrderState.Ready || machineLogicId == 0)
                 {
                     return WorkOrderOpResult.Fail($"order-already-active:{existing.State}");
                 }
@@ -458,10 +536,13 @@ namespace GameLogic.Campaign.Regions
                 return WorkOrderOpResult.Fail($"not-operational:{building.ConstructionState}");
             }
 
-            MachineCheck check = CheckMachine(machineLogicId, WorkOrderKind.Salvage);
-            if (!check.Ok)
+            if (machineLogicId != 0)
             {
-                return WorkOrderOpResult.Fail(check.FailureReason);
+                MachineCheck check = CheckMachine(machineLogicId, WorkOrderKind.Salvage);
+                if (!check.Ok)
+                {
+                    return WorkOrderOpResult.Fail(check.FailureReason);
+                }
             }
 
             string workOrderId = building.BuildingId + ":demolish:" + Guid.NewGuid().ToString("N").Substring(0, 8);
@@ -472,7 +553,12 @@ namespace GameLogic.Campaign.Regions
 
             var order = NewOrder(state, workOrderId, WorkOrderKind.Salvage, building.BuildingId, machineLogicId,
                 resourceTransactionId: txId, duration: HomeValleyLayout.DemolishSeconds);
+            if (machineLogicId == 0)
+            {
+                order.State = WorkOrderState.Ready;
+            }
             Append(state, order);
+            MarkAssignmentDirty();
             return WorkOrderOpResult.Ok(workOrderId);
         }
 
@@ -1022,11 +1108,22 @@ namespace GameLogic.Campaign.Regions
                     BuildingRecord repairTarget = state.BuildingRecords?.FirstOrDefault(b => b.BuildingId == order.TargetId);
                     return repairTarget?.Position ?? Vector2.zero;
                 case WorkOrderKind.Build:
-                    return HomeValleyLayout.Generator2Site.Position;
+                    // FG0-ARCH-04：建造位由格网决定（规划中的建筑记录的占地中心）。此前恒返回发电机2 的坑位，
+                    // 信标与自由放置的建筑会让机器走错地方。
+                    BuildingRecord buildTarget = state.BuildingRecords?.FirstOrDefault(b => b.BuildingId == order.TargetId);
+                    return buildTarget?.Position ?? HomeValleyLayout.Generator2Site.Position;
                 case WorkOrderKind.Salvage:
-                    return order.TargetId == HomeValleyLayout.Wreckage1NodeId
-                        ? HomeValleyLayout.Wreckage1.Position
-                        : HomeValleyLayout.Wreckage2.Position;
+                    if (order.TargetId == HomeValleyLayout.Wreckage1NodeId)
+                    {
+                        return HomeValleyLayout.Wreckage1.Position;
+                    }
+                    if (order.TargetId == HomeValleyLayout.Wreckage2NodeId)
+                    {
+                        return HomeValleyLayout.Wreckage2.Position;
+                    }
+                    // FG0-ARCH-04：拆除建筑走到建筑本身（此前落到残骸 2 的位置）。
+                    BuildingRecord demolishTarget = state.BuildingRecords?.FirstOrDefault(b => b.BuildingId == order.TargetId);
+                    return demolishTarget?.Position ?? HomeValleyLayout.Wreckage2.Position;
                 case WorkOrderKind.Haul:
                     GroundItemRecord item = HomeValleyCargo.FindGroundItem(state, order.SourceId);
                     return item?.Position ?? HomeValleyLayout.Core.Position;
@@ -1230,6 +1327,9 @@ namespace GameLogic.Campaign.Regions
         /// <summary>ER3-SOFTLOCK-01 AC-ECO-012：建筑真正从 <see cref="CampaignState.BuildingRecords"/>
         /// 移除（"拆除"是永久性的，不是变回 Damaged），产出走地面物+两阶段票据——与残骸拆解同一套
         /// "仓满就留在地面待收集"的诚实处理，不强行塞进仓库。</summary>
+        /// <summary>拆除返还地面物的 salvage ID（每张拆除工单唯一）。</summary>
+        public static string DemolishDropId(WorkOrderRecord order) => order.WorkOrderId + ":demolish-drop"; // 工单 ID 已含目标建筑 ID
+
         private static void CompleteDemolish(CampaignState state, WorkOrderRecord order)
         {
             BuildingRecord building = state.BuildingRecords?.FirstOrDefault(b => b.BuildingId == order.TargetId);
@@ -1244,10 +1344,12 @@ namespace GameLogic.Campaign.Regions
 
             state.BuildingRecords = state.BuildingRecords.Where(b => b.BuildingId != building.BuildingId).ToArray();
 
+            // 地面物按 salvage ID 去重：带上工单 ID，同一建筑 ID 被重建再拆时，第二份返还不会被旧的地面物吞掉。
+            string dropId = DemolishDropId(order);
             HomeValleyCargo.SpawnGroundItem(state, HomeValleyLayout.RegionId, building.Position,
-                CampaignEconomyLedger.ResourceScrap, building.InvestedScrap / 2, order.TargetId + ":demolish-drop");
+                CampaignEconomyLedger.ResourceScrap, building.InvestedScrap / 2, dropId);
 
-            GroundItemRecord dropped = HomeValleyCargo.FindGroundItemBySalvageId(state, order.TargetId + ":demolish-drop");
+            GroundItemRecord dropped = HomeValleyCargo.FindGroundItemBySalvageId(state, dropId);
             if (dropped != null)
             {
                 HomeValleyCargo.HaulTicket ticket = HomeValleyCargo.TryReserveHaul(state, dropped.GroundItemId);

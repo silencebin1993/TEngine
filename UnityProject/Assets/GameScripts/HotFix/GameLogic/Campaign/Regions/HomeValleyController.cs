@@ -5,6 +5,7 @@ using GameLogic.UI.Common;
 using GameLogic.Settings;
 using GameLogic.Campaign;
 using GameLogic.Campaign.Blueprint;
+using GameLogic.Campaign.Grid;
 using GameLogic.Campaign.Primitive;
 using GameLogic.Core;
 using GameLogic.View;
@@ -37,6 +38,13 @@ namespace GameLogic.Campaign.Regions
         private readonly List<HomeValleyMachineMarker> _machineMarkers = new List<HomeValleyMachineMarker>(4);
         /// <summary>ER8-CONTENT-01：建筑状态悬浮标记，按 BuildingTypeId 索引。</summary>
         private readonly Dictionary<string, WorldBadge> _buildingBadges = new Dictionary<string, WorldBadge>();
+        /// <summary>FG0-ARCH-04：本帧仍存在的建筑本地键（对账时移除已拆除建筑的可视化）。复用同一个集合，不每帧分配。</summary>
+        private readonly HashSet<string> _liveBuildingKeys = new HashSet<string>(StringComparer.Ordinal);
+        // FG0-ARCH-04 复审：建筑占位方块按本地键缓存（替代逐帧 Transform.Find 线性扫子节点，对账从 O(N²) 降到 O(N)）；
+        // “已消失的建筑”扫描只在建筑记录数组被替换（新增 / 移除都会换数组）时做，不再每帧读 child.name 分配字符串。
+        private readonly Dictionary<string, Transform> _buildingVisuals = new Dictionary<string, Transform>(StringComparer.Ordinal);
+        private readonly List<string> _goneBuildingKeys = new List<string>(4);
+        private BuildingRecord[] _visualsRecordsRef;
         private float _objectiveRecomputeTimer;
         /// <summary>ER8 收尾（UI-14“世界标记使用同一目标状态”）：当前目标下一步所在位置的定位针，唯一一个。</summary>
         private WorldBadge _objectiveMarker;
@@ -77,6 +85,10 @@ namespace GameLogic.Campaign.Regions
         /// <summary>ER5-INT-01：Direct 的 E 交互唯一实现——候选排序/校验/按住进度框架，与
         /// <see cref="FracturedCityController.Interact"/> 共用同一引擎、各自一份实例。</summary>
         public readonly RegionInteractionSystem Interact = new RegionInteractionSystem();
+
+        /// <summary>FG0-ARCH-04：家园的建造模式（放置 / 旋转 / 拆除，走正式输入）。家园激活期间经
+        /// <see cref="HomeValleyBuildMode.Current"/> 暴露给 HUD 与自检。</summary>
+        public readonly HomeValleyBuildMode BuildMode = new HomeValleyBuildMode();
 
         /// <summary>ER5-INT-01："指向"排序用——WASD 最近一次非零输入方向，供 E 交互候选排序参考
         /// （没有独立瞄准输入，直控移动方向是最自然的"朝向"近似，同 <see cref="TryDirectAttack"/>
@@ -126,6 +138,7 @@ namespace GameLogic.Campaign.Regions
             RegisterAllRegionMachineLoadouts(state);
             state.CurrentRegionId = HomeValleyLayout.RegionId;
             HomeValleyPowerGrid.Recompute(state); // 幂等：新建战役刚播种、或读档恢复旧存档，都用当前数据重算一次。
+            HomeGridService.MapFor(state); // FG0-ARCH-04：旧档迁移到格网 + 占用层重建（幂等）。
 
             BuildVisuals(state);
             SetupCameraDirector();
@@ -134,6 +147,7 @@ namespace GameLogic.Campaign.Regions
             SetupInteraction();
 
             IsActive = true;
+            HomeValleyBuildMode.Bind(BuildMode);
             // FG0-UX-01（FGR-UX-020 定位）：机器阵亡等通知按 LogicId 取机器标记的实时位置。
             MachineRegistry.LivePositionProvider = FindMachineMarkerPosition;
 
@@ -174,6 +188,7 @@ namespace GameLogic.Campaign.Regions
             CampaignState state = CampaignSession.Current;
             if (state != null && HomeValleySoftlockGuard.IsCoreDestroyed(state))
             {
+                BuildMode.Close(); // 失败页期间不能规划。
                 // ER3-SOFTLOCK-01 AC-ECO-011"核心被毁只能失败界面"：世界冻结——不再接受选中/命令/
                 // 移动/工作单推进，只留镜头能看、失败面板（HomeValleyFailureUIToolkit 独立轮询同一
                 // 状态显示）。不需要额外维护"已展示过"标记：Destroyed 是终态，不会变回其它状态。
@@ -195,14 +210,30 @@ namespace GameLogic.Campaign.Regions
             // ER5-CMD-01：必须在 HandleSelectionClick 之前跑——本帧"这次左键释放是框选/武装命令
             // 确认，还是留给旧单点逻辑处理"的判定结果（ConsumedClickThisFrame）要先算好。战略暂停下
             // 仍然要能选人/排队命令，因此也在下面的暂停早退之前。
+            // FG0-ARCH-04：建造模式先拿输入（B / X / R、放置与拆除的鼠标）；开着时框选与点选下令让位。战略暂停下也能规划。
+            // 本帧开始时开着、或本帧刚打开的建造模式都拥有本帧的鼠标：右键“逐级取消”退出建造模式的那一下，
+            // 不能在同一帧再被点选逻辑当成“右键取消已选机器的工单”（点击穿透）。
+            bool buildModeWasOpen = BuildMode.IsOpen;
+            BuildMode.Tick(_camera, state, _cameraDirector != null && _cameraDirector.Mode == ViewMode.Strategy);
+            bool buildModeOwnsPointer = buildModeWasOpen || BuildMode.IsOpen;
+            SquadCommands.PointerSuppressed = buildModeOwnsPointer;
             SquadCommands.Tick(_paused, scaledDt);
-            HandleSelectionClick();
+            if (!buildModeOwnsPointer)
+            {
+                HandleSelectionClick();
+            }
 
             HandleDirectControl(scaledDt);
             Interact.Tick(scaledDt); // ER5-INT-01：候选/进度推进——暂停时 scaledDt=0，进度天然冻结。
 
             if (_paused)
             {
+                // FG0-ARCH-04：战略暂停中也能规划（放虚影、标记拆除、旋转），画面要立即跟上格网状态；
+                // 对账只读状态、不推进任何模拟。
+                if (state != null)
+                {
+                    SyncWorldVisuals(state);
+                }
                 return;
             }
 
@@ -704,7 +735,8 @@ namespace GameLogic.Campaign.Regions
                 {
                     Id = "beacon:" + HomeValleyLayout.BeaconSlotId,
                     Category = RegionInteractCategory.BeaconActivate,
-                    Position = HomeValleyLayout.BeaconSlot.Position,
+                    // FG0-ARCH-04：信标可以放在格网上任意合法位置，交互点跟着建筑走。
+                    Position = HomeValleyBeacon.FindBuilding(state)?.Position ?? HomeValleyLayout.BeaconSlot.Position,
                     HoldSeconds = 1.5f,
                     Priority = -10,
                     ActionVerb = "启动信标",
@@ -859,6 +891,9 @@ namespace GameLogic.Campaign.Regions
             }
 
             SyncLiveStateBackToRecords();
+            BuildMode.Shutdown(); // FG0-ARCH-04：建造模式的虚影 / 叠加层 / 输入上下文与区域成对释放。
+            HomeValleyBuildMode.Unbind(BuildMode);
+            SquadCommands.PointerSuppressed = false;
             DestroyVisuals();
             // ER4-BLP-02：区域卸载与登记表解绑成对——清空当前会话的装配登记缓存（不影响
             // CampaignState.MachineRecords 本身，机器长期记录原样保留，下次 Enter 重新登记）。
@@ -924,26 +959,9 @@ namespace GameLogic.Campaign.Regions
             state.RegionRecords = (state.RegionRecords ?? Array.Empty<RegionRecord>())
                 .Append(region).ToArray();
 
-            var buildings = new List<BuildingRecord>
-            {
-                NewBuilding(HomeValleyLayout.Core, BuildingConstructionState.Operational,
-                    BuildingPowerState.Powered, health: 500f),
-                NewBuilding(HomeValleyLayout.Generator, BuildingConstructionState.Damaged,
-                    BuildingPowerState.NotApplicable, health: PlaceholderStructureHealth),
-                NewBuilding(HomeValleyLayout.Warehouse, BuildingConstructionState.Damaged,
-                    BuildingPowerState.NotApplicable, health: PlaceholderStructureHealth),
-                NewBuilding(HomeValleyLayout.SignalTower, BuildingConstructionState.Damaged,
-                    BuildingPowerState.NotApplicable, health: PlaceholderStructureHealth),
-                // PowerState 先给 NotApplicable 占位——EnsureRegionSeeded 返回后 Enter() 立即调用
-                // HomeValleyPowerGrid.Recompute，会按 ERD-ECO-002 的容量/优先级仲裁重新计算成
-                // Powered/Brownout。
-                NewBuilding(HomeValleyLayout.AssemblyStation, BuildingConstructionState.Operational,
-                    BuildingPowerState.NotApplicable, health: PlaceholderStructureHealth),
-                NewBuilding(HomeValleyLayout.AnalysisBench, BuildingConstructionState.Operational,
-                    BuildingPowerState.NotApplicable, health: PlaceholderStructureHealth),
-                NewBuilding(HomeValleyLayout.RepairBay, BuildingConstructionState.Operational,
-                    BuildingPowerState.NotApplicable, health: PlaceholderStructureHealth),
-            };
+            // FG0-ARCH-04（FGR-ARC-001“迁移”）：Demo 的 7 座固定锚点建筑改为按开局布局表 fg.TbStartLayout 生成的格网建筑
+            // （位置 = 核心枢轴格 + 偏移，朝向写在表里，占地来自 fg.TbBuildingGrid）；唯一生成入口 HomeGridService.CreateStartBuildings。
+            List<BuildingRecord> buildings = HomeGridService.CreateStartBuildings(state);
             state.BuildingRecords = (state.BuildingRecords ?? Array.Empty<BuildingRecord>())
                 .Concat(buildings).ToArray();
 
@@ -955,37 +973,6 @@ namespace GameLogic.Campaign.Regions
             state.SignalBandwidth = HomeValleyLayout.BaseSignalBandwidth;
 
             Log.Info("[HomeValleyController] 首次进入归还谷地：已播种 RegionRecord + 7 条建筑记录。");
-        }
-
-        /// <summary>建筑没有内容锁定表专属 HP 数值（只有维修材料/时间），暂用中性占位；
-        /// 等建筑受损/战斗机制的 Story 落地时再替换成真实数值，不影响本 Story 的
-        /// Damaged/Operational 可区分表现要求。</summary>
-        private const float PlaceholderStructureHealth = 100f;
-
-        private static BuildingRecord NewBuilding(
-            HomeValleyLayout.Anchor anchor,
-            BuildingConstructionState constructionState,
-            BuildingPowerState powerState,
-            float health,
-            int investedScrap = 0)
-        {
-            HomeValleyLayout.PowerProfile.TryGetValue(anchor.Id, out (float PowerDemand, int PowerPriority) profile);
-            return new BuildingRecord
-            {
-                BuildingId = HomeValleyLayout.RegionId + ":" + anchor.Id,
-                BuildingTypeId = anchor.Id,
-                RegionId = HomeValleyLayout.RegionId,
-                Position = anchor.Position,
-                Rotation = 0f,
-                Health = health,
-                ConstructionState = constructionState,
-                PowerPriority = profile.PowerPriority,
-                PowerState = powerState,
-                Inventory = Array.Empty<CargoEntry>(),
-                QueueIds = Array.Empty<string>(),
-                BlockedReason = null,
-                InvestedScrap = investedScrap,
-            };
         }
 
         /// <summary>首次进入才登记 ERC-001/002；已有记录（新战役当局已生成，或读档已恢复）时
@@ -1149,16 +1136,40 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
-            Transform go = _root.transform.Find("Building_" + building.BuildingTypeId);
+            string key = LocalKey(building.BuildingId);
+            Transform go = _buildingVisuals.TryGetValue(key, out Transform cached) && cached != null ? cached : null;
             Renderer renderer = go != null ? go.GetComponent<Renderer>() : null;
             if (renderer != null)
             {
                 renderer.material.color = ColorForBuilding(building);
+                PlaceBuildingTransform(go, building); // FG0-ARCH-04：旋转后占地 / 朝向跟着变（格网是唯一真相）。
             }
-            if (_buildingBadges.TryGetValue(building.BuildingTypeId, out WorldBadge badge) && badge != null)
+            if (_buildingBadges.TryGetValue(key, out WorldBadge badge) && badge != null)
             {
                 badge.SetIcon(StateIconFor(building));
             }
+        }
+
+        /// <summary>FG0-ARCH-04：建筑 ID → 可视化节点名里的本地键（"home_valley:generator_2#2" → "generator_2#2"）。
+        /// 开局建筑与每类第一座的本地键就是建筑类型 ID，Demo 以来按 "Building_" + 类型 查节点的代码与冒烟不受影响。</summary>
+        public static string LocalKey(string buildingId)
+        {
+            string prefix = HomeValleyLayout.RegionId + ":";
+            return buildingId != null && buildingId.StartsWith(prefix, StringComparison.Ordinal) ? buildingId.Substring(prefix.Length) : buildingId;
+        }
+
+        /// <summary>占位方块按格网占地摆放：中心 = 占地中心，尺寸 = 占地格数（略缩一圈留出格线），绕 Y 轴按朝向旋转。</summary>
+        private static void PlaceBuildingTransform(Transform t, BuildingRecord building)
+        {
+            Vector2Int size = GridContent.TryGetBuilding(building.BuildingTypeId, out GameConfig.fg.BuildingGrid g)
+                ? new Vector2Int(g.FootprintW, g.FootprintH)
+                : new Vector2Int(3, 3);
+            // 规划中 / 施工中（还没建成）：扁平的“虚影”方块，与完工建筑明显不同（FGR-LOG-006 原型）。
+            bool ghost = IsPlannedGhost(building);
+            float height = ghost ? 0.5f : 2f;
+            t.position = new Vector3(building.Position.x, height * 0.5f, building.Position.y);
+            t.rotation = Quaternion.Euler(0f, GridMath.NormalizeRotation(building.Rotation), 0f);
+            t.localScale = new Vector3(Mathf.Max(0.5f, size.x - 0.2f), height, Mathf.Max(0.5f, size.y - 0.2f));
         }
 
         // ── 可视化（占位几何体）────────────────────────────────────────────
@@ -1167,6 +1178,8 @@ namespace GameLogic.Campaign.Regions
         {
             _root = new GameObject("[HomeValley]");
             _buildingBadges.Clear();
+            _buildingVisuals.Clear();
+            _visualsRecordsRef = null;
             _machineMarkers.Clear();
             _selected = null;
 
@@ -1187,12 +1200,12 @@ namespace GameLogic.Campaign.Regions
 
             // ER7-BEACON-01：解锁前（OBJ-09 未完成）仍是不可交互的"预留位"标记；解锁后且尚未建成时
             // 换成真正可点选建造的 BuildSite（同发电机2 同一套可视化+点击建造管线）。
-            bool beaconBuilt = state.BuildingRecords.Any(b => b.BuildingId == HomeValleyLayout.RegionId + ":" + HomeValleyLayout.BuildingTypeBeacon);
+            bool beaconBuilt = HomeValleyBeacon.Exists(state);
             if (!beaconBuilt)
             {
                 if (HomeValleyBeacon.IsUnlocked(state))
                 {
-                    BuildBuildSiteVisual(HomeValleyLayout.BeaconSlot);
+                    BuildBuildSiteVisual(HomeValleyLayout.BeaconSlot, HomeValleyLayout.BuildingTypeBeacon);
                 }
                 else
                 {
@@ -1206,7 +1219,7 @@ namespace GameLogic.Campaign.Regions
 
             if (!state.BuildingRecords.Any(b => b.BuildingId == HomeValleyLayout.RegionId + ":" + HomeValleyLayout.BuildingTypeGenerator2))
             {
-                BuildBuildSiteVisual(HomeValleyLayout.Generator2Site);
+                BuildBuildSiteVisual(HomeValleyLayout.Generator2Site, HomeValleyLayout.BuildingTypeGenerator2);
             }
 
             foreach (GroundItemRecord item in state.GroundItems ?? Array.Empty<GroundItemRecord>())
@@ -1235,19 +1248,34 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
-            foreach (BuildingRecord building in state.BuildingRecords.Where(b => b.RegionId == HomeValleyLayout.RegionId))
+            bool recordsChanged = !ReferenceEquals(_visualsRecordsRef, state.BuildingRecords);
+            _visualsRecordsRef = state.BuildingRecords;
+            if (recordsChanged)
             {
-                Transform go = _root.transform.Find("Building_" + building.BuildingTypeId);
-                if (go == null)
+                _liveBuildingKeys.Clear();
+            }
+            foreach (BuildingRecord building in state.BuildingRecords)
+            {
+                if (building == null || building.RegionId != HomeValleyLayout.RegionId)
+                {
+                    continue;
+                }
+                string key = LocalKey(building.BuildingId);
+                if (recordsChanged)
+                {
+                    _liveBuildingKeys.Add(key);
+                }
+                if (!_buildingVisuals.TryGetValue(key, out Transform go) || go == null)
                 {
                     BuildBuildingVisual(building);
-                    if (building.BuildingTypeId == HomeValleyLayout.BuildingTypeGenerator2)
+                    // 这一类的“建议建造位”已被真正的建筑取代（首座建成 / 规划就占用了这个本地键）。
+                    if (building.BuildingId == HomeValleyLayout.RegionId + ":" + HomeValleyLayout.BuildingTypeGenerator2)
                     {
-                        DestroyChild("BuildSite_" + HomeValleyLayout.BuildingTypeGenerator2);
+                        DestroyChild("BuildSite_" + HomeValleyLayout.Generator2Site.Id);
                     }
                     else if (building.BuildingTypeId == HomeValleyLayout.BuildingTypeBeacon)
                     {
-                        DestroyChild("BuildSite_" + HomeValleyLayout.BuildingTypeBeacon);
+                        DestroyChild("BuildSite_" + HomeValleyLayout.BeaconSlot.Id);
                     }
                 }
                 else
@@ -1255,15 +1283,48 @@ namespace GameLogic.Campaign.Regions
                     RefreshBuildingVisual(building);
                 }
             }
+            // FG0-ARCH-04：拆除完成 / 取消规划后建筑记录消失，占位方块与状态标记一并移除（此前拆掉的建筑会一直留在画面上）。
+            // 只在记录数组被替换时扫描（记录的增删都会换数组；旋转 / 状态变化是原地改字段，由上面的逐座刷新处理）。
+            if (recordsChanged)
+            {
+                _goneBuildingKeys.Clear();
+                foreach (KeyValuePair<string, Transform> kv in _buildingVisuals)
+                {
+                    if (!_liveBuildingKeys.Contains(kv.Key))
+                    {
+                        _goneBuildingKeys.Add(kv.Key);
+                    }
+                }
+                foreach (string gone in _goneBuildingKeys)
+                {
+                    if (_buildingVisuals.TryGetValue(gone, out Transform t) && t != null)
+                    {
+                        UnityEngine.Object.Destroy(t.gameObject);
+                    }
+                    _buildingVisuals.Remove(gone);
+                    DestroyChild("Badge_" + gone);
+                    _buildingBadges.Remove(gone);
+                }
+            }
+            // 取消了规划、类型又回到 0 座时，Demo 的建议建造位重新出现。
+            if (!state.BuildingRecords.Any(b => b.BuildingId == HomeValleyLayout.RegionId + ":" + HomeValleyLayout.BuildingTypeGenerator2)
+                && _root.transform.Find("BuildSite_" + HomeValleyLayout.Generator2Site.Id) == null)
+            {
+                BuildBuildSiteVisual(HomeValleyLayout.Generator2Site, HomeValleyLayout.BuildingTypeGenerator2);
+            }
 
             // ER7-BEACON-01：OBJ-09 可能在玩家已经站在归还谷地期间完成（远征回城撤离那一刻）——
             // BuildVisuals 的"锁定预留位 vs 可点选建造位"判断只在 Enter 时跑一次，这里补一次逐帧对账，
             // 把还没来得及切换的锁定预留位换成真正可建造的 BuildSite。
-            bool beaconBuiltNow = state.BuildingRecords.Any(b => b.BuildingId == HomeValleyLayout.RegionId + ":" + HomeValleyLayout.BuildingTypeBeacon);
+            bool beaconBuiltNow = HomeValleyBeacon.Exists(state);
             if (!beaconBuiltNow && HomeValleyBeacon.IsUnlocked(state) && _root.transform.Find("BeaconSlot_Reserved") != null)
             {
                 DestroyChild("BeaconSlot_Reserved");
-                BuildBuildSiteVisual(HomeValleyLayout.BeaconSlot);
+                BuildBuildSiteVisual(HomeValleyLayout.BeaconSlot, HomeValleyLayout.BuildingTypeBeacon);
+            }
+            else if (!beaconBuiltNow && HomeValleyBeacon.IsUnlocked(state) && _root.transform.Find("BuildSite_" + HomeValleyLayout.BeaconSlot.Id) == null)
+            {
+                BuildBuildSiteVisual(HomeValleyLayout.BeaconSlot, HomeValleyLayout.BuildingTypeBeacon); // 取消了信标规划后建造位回来。
             }
 
             // ER3-SOFTLOCK-01：紧急救援机是运行时（不是 Enter 那一刻）才登记进 MachineRegistry 的，
@@ -1339,19 +1400,20 @@ namespace GameLogic.Campaign.Regions
 
         private void BuildBuildingVisual(BuildingRecord building)
         {
+            string key = LocalKey(building.BuildingId);
             GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            go.name = "Building_" + building.BuildingTypeId;
+            go.name = "Building_" + key;
             go.transform.SetParent(_root.transform, false);
-            go.transform.position = new Vector3(building.Position.x, 1f, building.Position.y);
-            go.transform.localScale = new Vector3(3f, 2f, 3f);
+            _buildingVisuals[key] = go.transform;
+            PlaceBuildingTransform(go.transform, building);
             Renderer renderer = go.GetComponent<Renderer>();
             renderer.material = new Material(Shader.Find("Standard")) { color = ColorForBuilding(building) };
 
             // ER8-CONTENT-01 AC-ACC-002：状态标记挂在区域根节点、悬在建筑正上方（建筑立方体是非等比缩放，
             // 挂在它下面会把贴图拉斜）。没有碰撞体，不影响点选建筑的射线。
-            WorldBadge badge = WorldBadge.Create(_root.transform, "Badge_" + building.BuildingTypeId,
+            WorldBadge badge = WorldBadge.Create(_root.transform, "Badge_" + key,
                 new Vector3(building.Position.x, 2.9f, building.Position.y), 1.3f);
-            _buildingBadges[building.BuildingTypeId] = badge;
+            _buildingBadges[key] = badge;
             badge.SetIcon(StateIconFor(building));
         }
 
@@ -1398,13 +1460,14 @@ namespace GameLogic.Campaign.Regions
 
         /// <summary>ER3-WRK-01 Build：尚未建成的建造位占位（半透明，与 <see cref="BuildBeaconSlotVisual"/>
         /// 同一手法），可点选发起 <see cref="HomeValleyWorkOrders.TryCreateBuild"/>。</summary>
-        private void BuildBuildSiteVisual(HomeValleyLayout.Anchor site)
+        private void BuildBuildSiteVisual(HomeValleyLayout.Anchor site, string typeId)
         {
             GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
             go.name = "BuildSite_" + site.Id;
             go.transform.SetParent(_root.transform, false);
             go.transform.position = new Vector3(site.Position.x, 0.1f, site.Position.y);
-            go.transform.localScale = new Vector3(3f, 0.2f, 3f);
+            Vector2Int size = GridContent.TryGetBuilding(typeId, out GameConfig.fg.BuildingGrid g) ? new Vector2Int(g.FootprintW, g.FootprintH) : new Vector2Int(3, 3);
+            go.transform.localScale = new Vector3(size.x, 0.2f, size.y);
             Renderer renderer = go.GetComponent<Renderer>();
             renderer.material = new Material(Shader.Find("Standard")) { color = new Color(0.3f, 0.6f, 0.9f, 0.4f) };
         }
@@ -1492,11 +1555,21 @@ namespace GameLogic.Campaign.Regions
             _machineMarkers.Add(marker);
         }
 
+        /// <summary>FG0-ARCH-04：还没建成的格网建筑（规划中 / 已预留材料 / 施工中）。</summary>
+        public static bool IsPlannedGhost(BuildingRecord building) =>
+            building.ConstructionState == BuildingConstructionState.Planned
+            || building.ConstructionState == BuildingConstructionState.MaterialReserved
+            || building.ConstructionState == BuildingConstructionState.Building;
+
         public static Color ColorForBuilding(BuildingRecord building)
         {
             // ER8-CONTENT-01：设置“色盲安全图标”开启时换用 Okabe-Ito 色盲友好色板（红/绿对立改为
             // 朱红/蓝绿）；无论哪套颜色，状态本身都由头顶的形状标记表达（AC-ACC-002 不只靠颜色）。
             bool cvd = GameSettings.ColorblindSafeIconsEnabled;
+            if (IsPlannedGhost(building))
+            {
+                return new Color(0.45f, 0.65f, 0.95f); // 淡蓝：规划中的虚影（形状上也是扁平方块，不只靠颜色）。
+            }
             if (building.ConstructionState == BuildingConstructionState.Damaged)
             {
                 return cvd ? new Color(0.84f, 0.37f, 0f) : new Color(0.75f, 0.25f, 0.2f); // 红：Damaged
@@ -1776,7 +1849,11 @@ namespace GameLogic.Campaign.Regions
                 HomeValleyFactory.ReleaseFromFactory(moving.LogicId);
             }
 
-            string buildingTypeId = earlyBuildingTypeId;
+            // FG0-ARCH-04：点中的是哪一座（本地键 → 建筑 ID → 记录），而不是“这一类的第一座”。
+            BuildingRecord clicked = earlyBuildingTypeId != null
+                ? state.BuildingRecords?.FirstOrDefault(b => b.BuildingId == HomeValleyLayout.RegionId + ":" + earlyBuildingTypeId)
+                : null;
+            string buildingTypeId = clicked?.BuildingTypeId ?? earlyBuildingTypeId;
             if (buildingTypeId == HomeValleyLayout.BuildingTypeCore)
             {
                 CommandWork(moving, destination, "recharge:" + moving.LogicId,
@@ -1789,12 +1866,11 @@ namespace GameLogic.Campaign.Regions
                 // （原有行为不变），Operational 的非核心建筑改为拆除（50%返还实际投入）。两种状态
                 // 互斥，不需要额外输入手势区分"想修复"还是"想拆除"。Core 已在上面分流去 Recharge，
                 // 不会走到这里。
-                BuildingRecord targetBuilding = state.BuildingRecords?.FirstOrDefault(b =>
-                    b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId == buildingTypeId);
+                BuildingRecord targetBuilding = clicked;
                 if (targetBuilding != null && targetBuilding.ConstructionState == BuildingConstructionState.Operational)
                 {
                     CommandWork(moving, destination, targetBuilding.BuildingId,
-                        () => HomeValleyWorkOrders.TryCreateDemolish(state, buildingTypeId, moving.LogicId), "拆除 " + buildingTypeId);
+                        () => HomeValleyWorkOrders.TryCreateDemolishBuilding(state, targetBuilding.BuildingId, moving.LogicId), "拆除 " + buildingTypeId);
                     return;
                 }
 
@@ -1806,7 +1882,9 @@ namespace GameLogic.Campaign.Regions
             string buildSiteId = BuildSiteIdFromHit(hit);
             if (buildSiteId != null)
             {
-                CommandWork(moving, destination, HomeValleyLayout.RegionId + ":" + buildSiteId,
+                // FG0-ARCH-04：建造位是开局布局里的“建议位置”，放置经格网校验（HomeValleyWorkOrders.TryCreateBuild → HomeGridService.TryPlace）。
+                GridContent.TryGetLayout(buildSiteId, out GameConfig.fg.StartLayout siteRow);
+                CommandWork(moving, destination, HomeValleyLayout.RegionId + ":" + (siteRow != null ? siteRow.TypeId : buildSiteId),
                     () => HomeValleyWorkOrders.TryCreateBuild(state, buildSiteId, moving.LogicId), "建造 " + buildSiteId);
                 return;
             }

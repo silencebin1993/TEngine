@@ -210,8 +210,16 @@ namespace GameLogic.Campaign
         public string BuildingId;
         public string BuildingTypeId;
         public string RegionId;
+        /// <summary>占地的几何中心（世界 XZ）。FG0-ARCH-04 起由格网唯一计算（<see cref="Grid.HomeGridService"/>），
+        /// 机器走过去施工 / 维修、可视化、通知定位都读它；不要单独改它。</summary>
         public Vector2 Position;
+        /// <summary>FG0-ARCH-04（FGR-ARC-001 / FG-GAP-006）：朝向，0 / 90 / 180 / 270（俯视顺时针），决定占地与端口方向。
+        /// 唯一写入口是 <see cref="Grid.HomeGridService"/>（开局布局、放置、旋转、旧档迁移）。</summary>
         public float Rotation;
+        /// <summary>FG0-ARCH-04：枢轴格（格网坐标，1 格 = 1 米）。占地 = 枢轴格 + fg.TbBuildingGrid 的尺寸按 <see cref="Rotation"/> 旋转。
+        /// 旧存档没有这两个字段时由 <see cref="Grid.HomeGridService.EnsureMigrated"/> 按 <see cref="Position"/> 补齐。</summary>
+        public int GridX;
+        public int GridY;
         public float Health;
         public BuildingConstructionState ConstructionState;
         public int PowerPriority;

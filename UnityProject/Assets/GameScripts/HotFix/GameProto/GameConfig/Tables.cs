@@ -95,6 +95,22 @@ public partial class Tables
     /// </summary>
     public fg.TbBuilding TbBuilding {get; }
     /// <summary>
+    /// 建筑格网属性
+    /// </summary>
+    public fg.TbBuildingGrid TbBuildingGrid {get; }
+    /// <summary>
+    /// 建筑端口
+    /// </summary>
+    public fg.TbBuildingPort TbBuildingPort {get; }
+    /// <summary>
+    /// 地形类型
+    /// </summary>
+    public fg.TbGridTerrain TbGridTerrain {get; }
+    /// <summary>
+    /// 家园与格网调参
+    /// </summary>
+    public fg.TbHomeTuning TbHomeTuning {get; }
+    /// <summary>
     /// 输入动作
     /// </summary>
     public fg.TbInputAction TbInputAction {get; }
@@ -118,6 +134,10 @@ public partial class Tables
     /// 已移除内容
     /// </summary>
     public fg.TbRemovedContent TbRemovedContent {get; }
+    /// <summary>
+    /// 开局布局
+    /// </summary>
+    public fg.TbStartLayout TbStartLayout {get; }
     /// <summary>
     /// 界面调参
     /// </summary>
@@ -186,12 +206,17 @@ public partial class Tables
         TbStructuralEffectParams = new cell.TbStructuralEffectParams(loader("cell_tbstructuraleffectparams"));
         TbStructuralTriggerHookParams = new cell.TbStructuralTriggerHookParams(loader("cell_tbstructuraltriggerhookparams"));
         TbBuilding = new fg.TbBuilding(loader("fg_tbbuilding"));
+        TbBuildingGrid = new fg.TbBuildingGrid(loader("fg_tbbuildinggrid"));
+        TbBuildingPort = new fg.TbBuildingPort(loader("fg_tbbuildingport"));
+        TbGridTerrain = new fg.TbGridTerrain(loader("fg_tbgridterrain"));
+        TbHomeTuning = new fg.TbHomeTuning(loader("fg_tbhometuning"));
         TbInputAction = new fg.TbInputAction(loader("fg_tbinputaction"));
         TbLocText = new fg.TbLocText(loader("fg_tbloctext"));
         TbMechEnemy = new fg.TbMechEnemy(loader("fg_tbmechenemy"));
         TbNotifyTier = new fg.TbNotifyTier(loader("fg_tbnotifytier"));
         TbNotifyType = new fg.TbNotifyType(loader("fg_tbnotifytype"));
         TbRemovedContent = new fg.TbRemovedContent(loader("fg_tbremovedcontent"));
+        TbStartLayout = new fg.TbStartLayout(loader("fg_tbstartlayout"));
         TbUiTuning = new fg.TbUiTuning(loader("fg_tbuituning"));
         TbCellArena = new fp.TbCellArena(loader("fp_tbcellarena"));
         TbCreatureArena = new fp.TbCreatureArena(loader("fp_tbcreaturearena"));
@@ -229,12 +254,17 @@ public partial class Tables
         TbStructuralEffectParams.ResolveRef(this);
         TbStructuralTriggerHookParams.ResolveRef(this);
         TbBuilding.ResolveRef(this);
+        TbBuildingGrid.ResolveRef(this);
+        TbBuildingPort.ResolveRef(this);
+        TbGridTerrain.ResolveRef(this);
+        TbHomeTuning.ResolveRef(this);
         TbInputAction.ResolveRef(this);
         TbLocText.ResolveRef(this);
         TbMechEnemy.ResolveRef(this);
         TbNotifyTier.ResolveRef(this);
         TbNotifyType.ResolveRef(this);
         TbRemovedContent.ResolveRef(this);
+        TbStartLayout.ResolveRef(this);
         TbUiTuning.ResolveRef(this);
         TbCellArena.ResolveRef(this);
         TbCreatureArena.ResolveRef(this);

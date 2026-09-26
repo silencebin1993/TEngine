@@ -31,6 +31,11 @@ namespace GameLogic.EditorTools
     /// FG0-UX-01：主菜单设置页点“全部按键…”打开 UI Toolkit 按键面板（85 个动作）→ Esc 关闭；归还谷地里按通知中心键开 / 关
     /// 通知中心 → 按“尚未开放”的图鉴键看到提示 → Esc 打开暂停菜单（世界暂停）→ 点“按键设置”→ 搜索框获得焦点后按快捷键不触发 →
     /// Esc 逐层关闭按键面板、暂停菜单（世界恢复）。
+    /// FG0-ARCH-04：按暂停键 → 按建造菜单键打开建造模式（输入上下文 = 建造）→ 点建造栏选发电机 → 鼠标悬停空地（虚影合法）→ 按旋转键 →
+    /// 左键放置（规划中的格网建筑，暂停中不开工）→ 核心旁左键（被拒并给原因）→ 按拆除模式键 → 点虚影取消规划（全额退款）→
+    /// 拆除模式点仓库（本局无法重建：被拒、不弹确认、仓库保留，复审第 2 轮软锁修复）→
+    /// Esc 退出建造模式（不开暂停菜单）→ 恢复运行，再接原有的点选机器 / 修发电机流程；下令修复后（机器仍选中、有在办工单）
+    /// 按 B 进建造模式 → 右键退出 → 修复工单没有被这次右键穿透取消（复审 P1）。
     /// FG0-UX-01 审查修复：生产面板开着按 Esc → 面板关闭、暂停菜单不开；电路板蓝图命名框打字时 Space / C 不触发，失焦后 Esc 关电路板；
     /// 回家园后改一台机器的记录 → Esc → 暂停菜单“保存并返回主菜单”→ 确认（真实存档路径，不再走 EndRun 捷径）→ 读档核对机器记录；
     /// 读档进游戏后核心被毁 → 失败页上按 Esc 不开暂停菜单 → 点失败页“返回主菜单”→ 暂停菜单、Esc 栈、模态都不残留。
@@ -127,6 +132,8 @@ namespace GameLogic.EditorTools
                     case 14: StepFactoryClosed(inStep); break;
                     case 15: StepFactoryEscClosed(inStep); break;
                     case 16: StepFactoryReopened(inStep); break;
+                    case 17: StepBuildOpenedWithOrder(inStep); break;
+                    case 18: StepBuildRightClickExit(inStep); break;
                     case 60: StepCircuitOpened(inStep); break;
                     case 61: StepTypingSpace(inStep); break;
                     case 62: StepTypingReserved(inStep); break;
@@ -155,6 +162,17 @@ namespace GameLogic.EditorTools
                     case 35: StepSearchSwallowsHotkeys(inStep); break;
                     case 36: StepEscClosesKeyBindings(inStep); break;
                     case 37: StepEscClosesPauseMenu(inStep); break;
+                    case 90: StepBuildPaused(inStep); break;
+                    case 91: StepBuildOpened(inStep); break;
+                    case 92: StepBuildHover(inStep); break;
+                    case 93: StepBuildRotated(inStep); break;
+                    case 94: StepBuildPlaced(inStep); break;
+                    case 95: StepBuildRejected(inStep); break;
+                    case 96: StepBuildDemolishMode(inStep); break;
+                    case 97: StepBuildCancelled(inStep); break;
+                    case 100: StepBuildDemolishRefused(inStep); break;
+                    case 98: StepBuildEsc(inStep); break;
+                    case 99: StepBuildResume(inStep); break;
                     case 40: StepMenuSettings(inStep); break;
                     case 41: StepMenuAllKeyBindings(inStep); break;
                     case 42: StepMenuAllKeyBindingsClosed(inStep); break;
@@ -596,6 +614,227 @@ namespace GameLogic.EditorTools
             Check(!PauseMenuUIToolkit.IsOpen && !GameRoot.IsWorldPaused && InputRouter.ActiveContext != InputContext.Interface,
                 "再按 Esc 关闭暂停菜单：世界恢复运行，输入回到游戏上下文");
             CheckNoTextMarkers("UI 基础件（通知 / 暂停菜单 / 按键面板）");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.TogglePause));
+            Next(90, "FG0-ARCH-04：按暂停键（战略暂停中也能规划建造）");
+        }
+
+        // ── FG0-ARCH-04：建造模式（正式输入：B 打开、点建造栏选建筑、鼠标悬停预览、R 旋转、左键放置、非法位置给原因、
+        //    X 拆除模式点虚影取消规划、Esc 退出；全程战略暂停）─────────────────────────────────────────
+
+        private static Vector3 _buildMouse;
+
+        private static void HoverWorld(Vector3 world)
+        {
+            Camera cam = Camera.main;
+            Vector3 screen = cam != null ? cam.WorldToScreenPoint(world) : Vector3.zero;
+            _buildMouse = new Vector3(screen.x, screen.y, 0f);
+            InputRouter.DebugSetReader(new ScriptedReader { Mouse = _buildMouse });
+        }
+
+        private static void PressKeyKeepMouse(KeyCode key)
+        {
+            InputRouter.DebugSetReader(new ScriptedReader { Key = key, KeyFrame = Time.frameCount + 1, Mouse = _buildMouse });
+        }
+
+        private static Campaign.Grid.GridCell? FindBuildCell(CampaignState state, string typeId, Campaign.Grid.GridCell from, int radius)
+        {
+            for (int r = 0; r <= radius; r++)
+            {
+                for (int dy = -r; dy <= r; dy++)
+                {
+                    for (int dx = -r; dx <= r; dx++)
+                    {
+                        if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != r)
+                        {
+                            continue;
+                        }
+                        var c = new Campaign.Grid.GridCell(from.X + dx, from.Y + dy);
+                        if (Campaign.Grid.HomeGridService.ValidatePlacement(state, typeId, c, 0).Ok)
+                        {
+                            return c;
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+
+        private static void StepBuildPaused(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(GameRoot.HomeValley != null && GameRoot.HomeValley.IsPaused, "战略暂停已开启");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.OpenBuildMenu));
+            Next(91, "按建造菜单键（默认 B）打开建造模式");
+        }
+
+        private static void StepBuildOpened(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            BuildModeHudUIToolkit hud = BuildModeHudUIToolkit.Instance;
+            Check(mode != null && mode.IsOpen && InputRouter.ActiveContext == InputContext.Build && hud != null && hud.PanelVisible && hud.ItemCount >= 1,
+                $"建造模式打开：输入上下文 = 建造，建造栏显示 {hud?.ItemCount} 种可放置建筑");
+            CheckNoTextMarkers("建造栏");
+            Check(ClickUitk("[BuildModeHudHost]", "BuildItem0") && mode != null && mode.SelectedTypeId == Campaign.Regions.HomeValleyLayout.BuildingTypeGenerator2,
+                $"点建造栏第一项选中发电机（{mode?.SelectedTypeId}）");
+            CampaignState state = CampaignSession.Current;
+            Campaign.Grid.GridCell? cell = state != null ? FindBuildCell(state, Campaign.Regions.HomeValleyLayout.BuildingTypeGenerator2, new Campaign.Grid.GridCell(4, 8), 8) : null;
+            if (cell == null)
+            {
+                Finish("镜头附近找不到能放发电机的空地");
+                return;
+            }
+            SessionState.SetInt(K + "BuildX", cell.Value.X);
+            SessionState.SetInt(K + "BuildY", cell.Value.Y);
+            SessionState.SetFloat(K + "BuildScrap", state.Scrap);
+            HoverWorld(new Vector3(cell.Value.X, 0f, cell.Value.Y));
+            Next(92, $"鼠标移到空地 {cell.Value}（虚影跟随）");
+        }
+
+        private static Campaign.Grid.GridCell BuildCell() =>
+            new Campaign.Grid.GridCell(SessionState.GetInt(K + "BuildX", 0), SessionState.GetInt(K + "BuildY", 0));
+
+        private static void StepBuildHover(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Check(mode != null && mode.HasHover && mode.HoverCell == BuildCell() && mode.Preview != null && mode.Preview.Ok,
+                $"虚影吸附到格子 {mode?.HoverCell}，预览合法；建造栏状态行：{BuildModeHudUIToolkit.Instance?.StatusLabelText.Replace("\n", " ")}");
+            PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.Rotate));
+            Next(93, "按旋转键（默认 R）");
+        }
+
+        private static void StepBuildRotated(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Check(mode != null && mode.GhostRotation == 90 && mode.Preview != null && mode.Preview.Rotation == 90, $"虚影旋转到 {mode?.GhostRotation}°");
+            Campaign.Grid.GridCell c = BuildCell();
+            ClickWorld(new Vector3(c.X, 0f, c.Y));
+            Next(94, "鼠标左键放置");
+        }
+
+        private static void StepBuildPlaced(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            BuildingRecord placed = state != null ? Campaign.Grid.HomeGridService.BuildingAt(state, BuildCell()) : null;
+            WorkOrderRecord order = placed != null ? state.WorkOrders.FirstOrDefault(o => o.TargetId == placed.BuildingId && o.Kind == WorkOrderKind.Build) : null;
+            Check(placed != null && placed.ConstructionState == BuildingConstructionState.Planned && Mathf.Approximately(placed.Rotation, 90f)
+                  && order != null && order.State == WorkOrderState.Ready && GhostVisual(placed) != null && GhostVisual(placed).localScale.y < 1f,
+                $"放下规划中的发电机（朝向 {placed?.Rotation}°，占格 + 画面上立即出现扁平的虚影方块，高 {(placed != null ? GhostVisual(placed)?.localScale.y : null)}），暂停中工单在待分配池（{order?.State}）不开工");
+            SessionState.SetString(K + "BuildId", placed?.BuildingId ?? string.Empty);
+            HoverWorld(new Vector3(0f, 0f, 3f));
+            ClickWorld(new Vector3(0f, 0f, 3f));
+            Next(95, "在归还核心旁（通道 / 占用）左键放置");
+        }
+
+        private static Transform GhostVisual(BuildingRecord b) =>
+            b == null ? null : FindNamed("Building_" + Campaign.Regions.HomeValleyController.LocalKey(b.BuildingId));
+
+        private static void StepBuildRejected(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            int homeBuildings = state?.BuildingRecords?.Count(b => b.RegionId == Campaign.Regions.HomeValleyLayout.RegionId) ?? 0;
+            Check(mode != null && !mode.LastResult.Success && mode.StatusIsError && mode.StatusText.Contains("不能放置") && homeBuildings == 8,
+                $"非法位置被拒并给出原因：“{mode?.StatusText}”（建筑仍是 {homeBuildings} 座）");
+            _buildMouse = Vector3.zero;
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.DemolishMode));
+            Next(96, "按拆除模式键（默认 X）");
+        }
+
+        private static void StepBuildDemolishMode(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Check(mode != null && mode.IsOpen && mode.DemolishMode, "进入拆除模式");
+            Campaign.Grid.GridCell c = BuildCell();
+            ClickWorld(new Vector3(c.X, 0f, c.Y));
+            Next(97, "拆除模式下左键点刚放的虚影（取消规划）");
+        }
+
+        private static void StepBuildCancelled(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            string id = SessionState.GetString(K + "BuildId", string.Empty);
+            bool gone = state != null && state.BuildingRecords.All(b => b.BuildingId != id);
+            Check(gone && Mathf.Approximately(state.Scrap, SessionState.GetFloat(K + "BuildScrap", -1f)) && Campaign.Grid.HomeGridService.BuildingAt(state, BuildCell()) == null
+                  && FindNamed("Building_" + Campaign.Regions.HomeValleyController.LocalKey(id)) == null,
+                $"取消规划：虚影方块消失、占格释放、废料全额退回（{state?.Scrap}）");
+            BuildingRecord warehouse = state?.BuildingRecords?.FirstOrDefault(b => b.BuildingId == WarehouseBuildingId);
+            Vector2 wp = warehouse != null ? warehouse.Position : Vector2.zero;
+            ClickWorld(new Vector3(wp.x, 0f, wp.y));
+            Next(100, "拆除模式下左键点仓库（本局无法重建，应被拒绝）");
+        }
+
+        private const string WarehouseBuildingId = Campaign.Regions.HomeValleyLayout.RegionId + ":" + Campaign.Regions.HomeValleyLayout.BuildingTypeWarehouse;
+
+        private static void StepBuildDemolishRefused(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            bool kept = state != null && state.BuildingRecords.Any(b => b.BuildingId == WarehouseBuildingId)
+                        && !Campaign.Grid.HomeGridService.IsMarkedForDemolish(state, WarehouseBuildingId);
+            Check(mode != null && mode.IsOpen && mode.DemolishMode && mode.HoverBuildingId == WarehouseBuildingId && !mode.LastResult.Success
+                  && mode.StatusIsError && mode.StatusText.Contains("无法重建") && !mode.StatusText.StartsWith("不能放置") && !UiConfirmDialog.IsOpen && kept,
+                $"拆除模式点仓库：不弹确认框，直接拒绝（“{mode?.StatusText}”），仓库保留、未标记拆除（防软锁）");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
+            Next(98, "按 Esc 退出建造模式");
+        }
+
+        private static void StepBuildEsc(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Check(mode != null && !mode.IsOpen && !PauseMenuUIToolkit.IsOpen && InputRouter.ActiveContext == InputContext.Strategy
+                  && FindNamed("[BuildMode]") == null && BuildModeHudUIToolkit.Instance != null && !BuildModeHudUIToolkit.Instance.PanelVisible,
+                "Esc 退出建造模式（不会顺带打开暂停菜单），输入回到战略上下文，虚影 / 叠加层已释放");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.TogglePause));
+            Next(99, "按暂停键恢复运行");
+        }
+
+        private static void StepBuildResume(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(GameRoot.HomeValley != null && !GameRoot.HomeValley.IsPaused, "战略暂停已解除");
+            InputRouter.DebugSetReader(null);
             Campaign.Regions.HomeValleyMachineMarker hauler = Object.FindObjectsByType<Campaign.Regions.HomeValleyMachineMarker>(
                     FindObjectsInactive.Exclude, FindObjectsSortMode.None)
                 .OrderBy(m => m.LogicId).FirstOrDefault();
@@ -672,6 +911,45 @@ namespace GameLogic.EditorTools
             Check(generatorLabel == Localization.GameText.Get("building.generator.name") && !Localization.GameText.ContainsMarker(generatorLabel)
                   && generatorLabel != Campaign.Regions.HomeValleyLayout.RegionId + ":" + Campaign.Regions.HomeValleyLayout.BuildingTypeGenerator,
                 $"工单目标名走文本键：“{generatorLabel}”（Play 模式下 fg 表已加载）");
+            // FG0-ARCH-04 复审：机器仍选中、身上有在办的修复工单时，按 B 进建造模式再右键退出——
+            // 退出那一下不能穿透到点选逻辑、把机器的修复工单取消掉。
+            Check(GameRoot.HomeValley != null && GameRoot.HomeValley.SelectedMachineLogicId == SessionState.GetInt(K + "Worker", -1),
+                $"下令修复后机器仍被选中（#{GameRoot.HomeValley?.SelectedMachineLogicId}）");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.OpenBuildMenu));
+            Next(17, "机器选中且有在办修复工单时，按建造菜单键（默认 B）");
+        }
+
+        private static WorkOrderRecord ActiveRepairOrder(CampaignState state) =>
+            state?.WorkOrders?.LastOrDefault(o => o.Kind == WorkOrderKind.Repair
+                && o.TargetId == Campaign.Regions.HomeValleyLayout.RegionId + ":" + Campaign.Regions.HomeValleyLayout.BuildingTypeGenerator);
+
+        private static void StepBuildOpenedWithOrder(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Check(mode != null && mode.IsOpen && mode.SelectedTypeId == null && !mode.DemolishMode, "建造模式打开（未选建筑、不在拆除模式）");
+            Transform core = FindNamed("Building_" + Campaign.Regions.HomeValleyLayout.BuildingTypeCore);
+            RightClickWorld(core != null ? core.position + new Vector3(6f, 0f, 6f) : Vector3.zero);
+            Next(18, "右键（没有选中建筑时右键 = 退出建造模式）");
+        }
+
+        private static void StepBuildRightClickExit(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            WorkOrderRecord order = ActiveRepairOrder(CampaignSession.Current);
+            Check(mode != null && !mode.IsOpen && InputRouter.ActiveContext == InputContext.Strategy,
+                "右键退出建造模式，输入回到战略上下文");
+            Check(order != null && order.State != WorkOrderState.Cancelled && order.State != WorkOrderState.Failed
+                  && GameRoot.HomeValley != null && GameRoot.HomeValley.SelectedMachineLogicId == SessionState.GetInt(K + "Worker", -1),
+                $"退出建造模式的右键没有穿透：机器仍选中，修复工单未被取消（{order?.State}）");
+            InputRouter.DebugSetReader(null);
             Next(12, "等机器走过去修好发电机");
         }
 
@@ -1296,6 +1574,20 @@ namespace GameLogic.EditorTools
             InputRouter.DebugSetReader(new ScriptedReader { Key = key, KeyFrame = Time.frameCount + 1 });
         }
 
+        /// <summary>模拟鼠标右键点世界里一点（下一帧按下、再下一帧抬起）。</summary>
+        private static void RightClickWorld(Vector3 world)
+        {
+            Camera cam = Camera.main;
+            Vector3 screen = cam != null ? cam.WorldToScreenPoint(world) : Vector3.zero;
+            InputRouter.DebugSetReader(new ScriptedReader
+            {
+                Mouse = new Vector3(screen.x, screen.y, 0f),
+                Button = 1,
+                DownFrame = Time.frameCount + 1,
+                UpFrame = Time.frameCount + 2,
+            });
+        }
+
         /// <summary>模拟鼠标左键点世界里一点：光标移到它的屏幕位置，下一帧按下、再下一帧抬起（和人点一次一样）。</summary>
         private static void ClickWorld(Vector3 world)
         {
@@ -1316,11 +1608,12 @@ namespace GameLogic.EditorTools
             public Vector3 Mouse;
             public int DownFrame = -1;
             public int UpFrame = -1;
+            public int Button;
 
             public bool GetKey(KeyCode key) => false;
             public bool GetKeyDown(KeyCode key) => key == Key && Time.frameCount == KeyFrame;
-            public bool GetMouseButtonDown(int button) => button == 0 && Time.frameCount == DownFrame;
-            public bool GetMouseButtonUp(int button) => button == 0 && Time.frameCount == UpFrame;
+            public bool GetMouseButtonDown(int button) => button == Button && Time.frameCount == DownFrame;
+            public bool GetMouseButtonUp(int button) => button == Button && Time.frameCount == UpFrame;
             public Vector3 MousePosition => Mouse;
             public float MouseScrollDelta => 0f;
         }

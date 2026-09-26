@@ -18,12 +18,17 @@ namespace GameLogic.Core
         public const string FirstUrgentNotification = "ui.notification.first_urgent";
         public const string FirstAutoPause = "ui.notification.first_auto_pause";
         public const string FirstReservedAction = "ui.input.first_reserved_action";
+        /// <summary>FG0-ARCH-04：第一次打开建造模式 / 第一次放下建筑 / 第一次放置被拒（FG03 第 4 节“首次打开建造菜单”的引导钩子）。</summary>
+        public const string BuildModeFirstOpen = "build.mode.first_open";
+        public const string FirstPlacement = "build.placement.first";
+        public const string FirstBlockedPlacement = "build.placement.first_blocked";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
             NotificationCenterFirstOpen, KeyBindingsFirstOpen, PauseMenuFirstOpen,
             FirstUrgentNotification, FirstAutoPause, FirstReservedAction,
+            BuildModeFirstOpen, FirstPlacement, FirstBlockedPlacement,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

@@ -188,6 +188,10 @@ namespace GameLogic.Campaign.Regions
 
         // ── 每帧驱动 ──────────────────────────────────────────────────────
 
+        /// <summary>FG0-ARCH-04：建造模式开着时鼠标归建造（放置 / 拆除），框选、单点选中与“武装命令”的点击都不处理；
+        /// 已下达的命令照常推进（机器不会因为玩家在规划而停下）。</summary>
+        public bool PointerSuppressed { get; set; }
+
         /// <summary>由 Controller.Update 在暂停早退**之前**调用——战略暂停下仍要能选人/排队命令。
         /// <paramref name="paused"/>=true 时不推进任何移动/攻击 Tick，只处理选择/编组/命令下达
         /// （下达即排队，不立即执行）。</summary>
@@ -209,9 +213,16 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
-            HandleDragAndClick();
-            HandleGroupHotkeys();
-            HandleCommandHotkeys(paused);
+            if (PointerSuppressed)
+            {
+                _dragging = false;
+            }
+            else
+            {
+                HandleDragAndClick();
+                HandleGroupHotkeys();
+                HandleCommandHotkeys(paused);
+            }
 
             if (!paused)
             {

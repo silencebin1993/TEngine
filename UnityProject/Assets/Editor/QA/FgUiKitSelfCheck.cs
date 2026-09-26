@@ -849,9 +849,11 @@ namespace GameLogic.EditorTools
             var reader = new FakeReader();
             InputRouter.DebugSetReader(reader);
             InputRouter.SetScope(InputScope.Strategy);
-            reader.Press(KeyCode.B);
+            // FG0-ARCH-04 起建造菜单（B）已接入玩法，改用仍未开放的快捷栏 1（F1，FG3-LOG-01 承接）验证“尚未开放”提示。
+            reader.Press(KeyCode.F1);
             UiKitInputPump.ProcessWorldKeys();
             Frame(reader);
+            InputActionCatalog.TryGet(GameActionId.Hotbar1, out InputActionDef hotbar1);
             NotificationEntry locked = NotificationCenter.Toasts.FirstOrDefault(e => e.Type.Id == "feature_locked");
             string lockedText = locked?.Text;
             bool notInHistory = NotificationCenter.History.All(e => e.Type.Id != "feature_locked");
@@ -865,10 +867,10 @@ namespace GameLogic.EditorTools
             Frame(reader);
             float speedAfter4 = StrategyClock.SpeedMultiplier;
             StrategyClock.Reset();
-            Expect(locked != null && lockedText.Contains(GameText.Get("input.action.open_build_menu.name")) && notInHistory
+            Expect(locked != null && hotbar1.Status == InputActionStatus.Reserved && lockedText.Contains(GameText.Get(hotbar1.NameKey)) && notInHistory
                    && Mathf.Approximately(speed2, 2f) && Mathf.Approximately(speedAfter4, 2f)
                    && NotificationCenter.Toasts.Any(e => e.Type.Id == "feature_locked" && e.Text.Contains(GameText.Get("input.action.speed_triple.name"))),
-                $"按 B（建造菜单，后续开放）→ 弹出“{lockedText}”（只弹出、不进历史）；按 3 → 2x；按 4（3x，FG7-ENV-01 承接）→ 速度不变并提示尚未开放");
+                $"按 F1（快捷栏 1，后续开放）→ 弹出“{lockedText}”（只弹出、不进历史）；按 3 → 2x；按 4（3x，FG7-ENV-01 承接）→ 速度不变并提示尚未开放");
         }
 
         // ── G. 存读档 ─────────────────────────────────────────────────────────
@@ -1431,7 +1433,8 @@ namespace GameLogic.EditorTools
                     hard.Add(Path.GetFileName(f) + ":" + m.Groups[1].Value);
                 }
             }
-            Expect(uxmlCount == 5 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
+            // FG0-ARCH-04 新增 BuildModeHud.uxml（建造栏），共 6 份。
+            Expect(uxmlCount == 6 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
 
             string[] codeDirs =
             {

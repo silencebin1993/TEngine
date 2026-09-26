@@ -65,6 +65,12 @@ namespace GameLogic.Campaign.Content
             {
                 key = key.Substring(prefix.Length);
             }
+            // FG0-ARCH-04：同类第 2 座起的建筑 ID 带实例序号（generator_2#2），名字按类型取。
+            int hash = key.IndexOf('#');
+            if (hash > 0)
+            {
+                key = key.Substring(0, hash);
+            }
 
             // FG0-DATA-01（FGR-ARC-006）：建筑名走文本键——fg.TbBuilding 的 nameKey → GameText（当前语言）。
             // 查不到建筑行（地面物/残骸等非建筑目标）仍按原约定返回原始 id，由调用方给通用称呼；

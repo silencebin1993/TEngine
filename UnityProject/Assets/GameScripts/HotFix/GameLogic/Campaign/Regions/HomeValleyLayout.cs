@@ -64,53 +64,70 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        // ── 建筑锚点（DEMO-CONTENT-LOCK.md §1/2.1/2.2）───────────────────────────────
-        public static readonly Anchor Core = new Anchor(BuildingTypeCore, new Vector2(0f, 0f), 4f);
-        public static readonly Anchor Generator = new Anchor(BuildingTypeGenerator, new Vector2(14f, 14f), 3f);
-        public static readonly Anchor Warehouse = new Anchor(BuildingTypeWarehouse, new Vector2(20f, 0f), 3.5f);
-        public static readonly Anchor WarehouseExit = new Anchor("warehouse_exit", new Vector2(20f, 8f), 1.5f);
-        public static readonly Anchor SignalTower = new Anchor(BuildingTypeSignalTower, new Vector2(-14f, 14f), 3f);
-        public static readonly Anchor AssemblyStation = new Anchor(BuildingTypeAssemblyStation, new Vector2(0f, -20f), 3.5f);
-        public static readonly Anchor AssemblyExit = new Anchor("assembly_exit", new Vector2(8f, -20f), 1.5f);
-        public static readonly Anchor AnalysisBench = new Anchor(BuildingTypeAnalysisBench, new Vector2(-10f, -20f), 3f);
-        public static readonly Anchor RepairBay = new Anchor(BuildingTypeRepairBay, new Vector2(16f, -14f), 3f);
-        /// <summary>第二座发电机建造位（ER3-WRK-01 Build）。与全部既有锚点净空不重叠，见
-        /// <see cref="Validate"/> 自检——(24,-8) 半径3：距仓库(20,0,r3.5)约8.9、距维修台(16,-14,r3)约10、
-        /// 距装配出口(8,-20,r1.5)约20，均留有余量；未建成前只是一处可点选的空地占位（"BuildSite_" +
-        /// <see cref="BuildingTypeGenerator2"/>），不预先生成 <see cref="BuildingRecord"/>。</summary>
-        public static readonly Anchor Generator2Site = new Anchor(BuildingTypeGenerator2, new Vector2(24f, -8f), 3f);
+        // ── FG0-ARCH-04（FGR-ARC-001“迁移”）：Demo 的固定锚点 → 开局布局表 fg.TbStartLayout ─────────────────
+        // 坐标 = 归还核心枢轴格 + 表里的偏移（手工锚点，FG00 B25）。核心落点由世界生成决定（FG3-GEN-01），在那之前是原点，
+        // 所以这些位置与 Demo 常量逐项相同；净空半径同样来自表（clearance 列），Validate 的不重叠自检照旧。
+        // 建筑本身已是格网建筑（BuildingRecord.GridX/GridY/Rotation），这里的建筑锚点只给“开局布局里它原本在哪”的查询用。
+        public static Anchor Core => LayoutAnchor(BuildingTypeCore);
+        public static Anchor Generator => LayoutAnchor(BuildingTypeGenerator);
+        public static Anchor Warehouse => LayoutAnchor(BuildingTypeWarehouse);
+        public static Anchor WarehouseExit => LayoutAnchor("warehouse_exit");
+        public static Anchor SignalTower => LayoutAnchor(BuildingTypeSignalTower);
+        public static Anchor AssemblyStation => LayoutAnchor(BuildingTypeAssemblyStation);
+        public static Anchor AssemblyExit => LayoutAnchor("assembly_exit");
+        public static Anchor AnalysisBench => LayoutAnchor(BuildingTypeAnalysisBench);
+        public static Anchor RepairBay => LayoutAnchor(BuildingTypeRepairBay);
+        /// <summary>第二座发电机的建议建造位（开局布局 kind=site）。FG0-ARCH-04 起发电机可以在格网上自由放置、可以建多座；
+        /// 这里只是 Demo 流程点“建造位”时的默认落点，放置同样经过格网校验。</summary>
+        public static Anchor Generator2Site => LayoutAnchor(BuildingTypeGenerator2);
 
-        // ── 机器出生点（DEMO-CONTENT-LOCK.md §2.1：ERC-001/002）───────────────────────
-        public static readonly Anchor Erc001Spawn = new Anchor(Erc001ChassisId, new Vector2(-10f, 6f), 1.5f);
-        public static readonly Anchor Erc002Spawn = new Anchor(Erc002ChassisId, new Vector2(-10f, -6f), 1.5f);
+        public static Anchor Erc001Spawn => LayoutAnchor(Erc001ChassisId);
+        public static Anchor Erc002Spawn => LayoutAnchor(Erc002ChassisId);
 
         // ── 一次性残骸节点（DEMO-CONTENT-LOCK.md §2.1：两处各 60 废料）────────────────
         public const string Wreckage1NodeId = "home_valley_wreckage_1";
         public const string Wreckage2NodeId = "home_valley_wreckage_2";
-        public static readonly Anchor Wreckage1 = new Anchor(Wreckage1NodeId, new Vector2(-20f, -4f), 2f);
-        public static readonly Anchor Wreckage2 = new Anchor(Wreckage2NodeId, new Vector2(-4f, 20f), 2f);
-        public const int WreckageScrapYield = 60;
-        public const float WreckageDismantleSeconds = 12f;
+        public static Anchor Wreckage1 => LayoutAnchor(Wreckage1NodeId);
+        public static Anchor Wreckage2 => LayoutAnchor(Wreckage2NodeId);
+        public static int WreckageScrapYield => Grid.GridContent.TuningInt("home.wreckage_scrap_yield");
+        public static float WreckageDismantleSeconds => Grid.GridContent.Tuning("home.wreckage_dismantle_seconds");
 
-        /// <summary>ER4-PRIM-05：低威胁残骸靶——归还谷地范围内的静止命中验证目标（DEBT-ER1R01-GRAPH-01
-        /// 门禁"3×3电路图链未接正式战斗"的落点，见 <see cref="HomeValleyCombatTargets"/> 类注释）。
-        /// (-20,14) 半径2：距信号塔(-14,14,r3)6.0（所需5.0）、距残骸1(-20,-4,r2)18、距ERC-001出生点
-        /// (-10,6,r1.5)12.8，均留有余量，在相机边界内（|x|+r=22&lt;=28，|z|+r=16&lt;=30）。</summary>
+        /// <summary>ER4-PRIM-05：低威胁残骸靶——归还谷地范围内的静止命中验证目标（见 <see cref="HomeValleyCombatTargets"/>）。</summary>
         public const string LowThreatTargetAnchorId = "combat_target_low_threat";
-        public static readonly Anchor LowThreatTarget = new Anchor(LowThreatTargetAnchorId, new Vector2(-20f, 14f), 2f);
-        public static readonly Vector2 LowThreatTargetPosition = LowThreatTarget.Position;
+        public static Anchor LowThreatTarget => LayoutAnchor(LowThreatTargetAnchorId);
+        public static Vector2 LowThreatTargetPosition => LowThreatTarget.Position;
 
-        /// <summary>信标预留位（DEMO-CONTENT-LOCK.md §2.2："解锁前不存在"）——只标记空间占位，
-        /// 解锁前不生成 <see cref="BuildingRecord"/>，真正建造由 ER7-BEACON-01 接手。</summary>
+        /// <summary>信标的建议建造位（开局布局 kind=site）。解锁前不可建（fg.TbBuildingGrid unlockRule=beacon）。</summary>
         public const string BeaconSlotId = "beacon_slot";
-        public static readonly Anchor BeaconSlot = new Anchor(BeaconSlotId, new Vector2(12f, 22f), 3f);
+        public static Anchor BeaconSlot => LayoutAnchor(BeaconSlotId);
 
-        /// <summary>相机初始聚焦点——两台初始机器与核心之间，非任意值。</summary>
-        public static readonly Vector2 CameraFocusStart = new Vector2(-4f, 2f);
+        /// <summary>相机初始聚焦点——两台初始机器与核心之间。</summary>
+        public static Vector2 CameraFocusStart => LayoutAnchor("camera_focus").Position;
 
-        /// <summary>相机矩形边界半宽/半高（世界 X/Z），覆盖全部锚点 + 安全边距。</summary>
+        /// <summary>相机矩形边界半宽/半高（世界 X/Z，相对核心），覆盖全部锚点 + 安全边距。镜头自由平移由 FG0-ARCH-01 接手。</summary>
         public const float CameraBoundsHalfExtentX = 28f;
         public const float CameraBoundsHalfExtentZ = 30f;
+
+        private static int _anchorRevision;
+        private static readonly Dictionary<string, Anchor> AnchorCache = new Dictionary<string, Anchor>(StringComparer.Ordinal);
+
+        /// <summary>开局布局表里的一个锚点（世界 XZ = 核心枢轴格 + 偏移）。查不到抛异常（布局表坏了不能悄悄放到原点）。</summary>
+        public static Anchor LayoutAnchor(string anchorId)
+        {
+            if (_anchorRevision != Grid.GridContent.Revision)
+            {
+                AnchorCache.Clear();
+                _anchorRevision = Grid.GridContent.Revision;
+            }
+            Grid.GridCell core = Grid.HomeGridService.CorePivot(CampaignSession.Current);
+            if (!AnchorCache.TryGetValue(anchorId, out Anchor local))
+            {
+                GameConfig.fg.StartLayout row = Grid.GridContent.Layout(anchorId);
+                local = new Anchor(row.AnchorId, new Vector2(row.OffsetX, row.OffsetY), row.Clearance);
+                AnchorCache[anchorId] = local;
+            }
+            return new Anchor(local.Id, local.Position + new Vector2(core.X, core.Y), local.ClearanceRadius);
+        }
 
         /// <summary>各建筑 Operational 时的电力需求与默认优先级（DEMO-CONTENT-LOCK.md §2.2）。
         /// 玩家可在 1～4 范围内调整 <see cref="BuildingRecord.PowerPriority"/>（ER3-PWR-01
@@ -128,7 +145,7 @@ namespace GameLogic.Campaign.Regions
         /// 建筑的 Operational 状态——发电机损坏/被关停时，这部分供给仍然存在，保证核心（demand 10）
         /// 永远不会被电网仲裁断电。<see cref="HomeValleyPowerGrid.Recompute"/> 每次都从这个常量算起，
         /// 不是一个可以被"扣减"的历史累加值。</summary>
-        public const float BaseCoreSupply = 20f;
+        public static float BaseCoreSupply => Grid.GridContent.Tuning("home.core_base_supply");
 
         /// <summary>ER3-PWR-01：供给类建筑（目前只有发电机）Operational 时贡献的电力供给
         /// （DEMO-CONTENT-LOCK.md §2.1"电机+80"）。与 <see cref="PowerProfile"/>（消费侧）是两张
@@ -144,11 +161,11 @@ namespace GameLogic.Campaign.Regions
 
         /// <summary>核心自带基础带宽（DEMO-CONTENT-LOCK.md §2.2"基础带宽 3"），不依赖信号塔状态，
         /// 与 <see cref="SignalTowerBandwidthBonus"/> 是两个独立叠加的来源。</summary>
-        public const float BaseSignalBandwidth = 3f;
+        public static float BaseSignalBandwidth => Grid.GridContent.Tuning("home.base_signal_bandwidth");
 
         /// <summary>信号塔 Operational 且实际分到电（Powered）时的额外带宽加成（§2.2"额外带宽 5"）；
         /// 断电（Brownout/Unpowered）时这部分加成不生效（ER3-PWR-01："信号塔断电同时降低带宽"）。</summary>
-        public const float SignalTowerBandwidthBonus = 5f;
+        public static float SignalTowerBandwidthBonus => Grid.GridContent.Tuning("home.signal_tower_bandwidth_bonus");
 
         /// <summary>修复成本/时长（DEMO-CONTENT-LOCK.md §2.1）。装配站/解析台/维修台无需修复材料前置，
         /// 不在此表出现。</summary>
@@ -226,29 +243,40 @@ namespace GameLogic.Campaign.Regions
         /// 主/功能/维修动作消耗战术电池的完整战斗能耗模型属于 ER4-PRIM-04/战斗基元 Story（本 Story 之外
         /// 没有真实的电池消耗来源），本 Story 交付的是"被动恢复+家园充电点+完整 Recharge 状态机"这套
         /// 真实机制，可用 <see cref="MachineRecord.Battery"/> 公开字段在测试里直接调低模拟低电触发。</summary>
-        public static readonly IReadOnlyDictionary<string, float> BatteryCapacity = new Dictionary<string, float>
+        public static IReadOnlyDictionary<string, float> BatteryCapacity
         {
-            [Erc001ChassisId] = 100f,
-            [Erc002ChassisId] = 100f,
-            [Erc003ChassisId] = 120f,
-            [ErcRescueChassisId] = 100f,
-            // ER4-CONTENT-01：维修悬浮底盘（Content.ChassisCatalog.ChassisHoverId），生产队列待
-            // ER4-FAC-01，先落数据不等该 Story 落地才补（同 Erc003ChassisId 先例）。
-            [ChassisCatalog.ChassisHoverId] = 140f,
-        };
+            get
+            {
+                // FG0-ARCH-04（DEBT-FG0DATA01-03）：数值入 fg.TbHomeTuning（home.battery.<底盘ID>），与 Demo 常量逐项一致。
+                if (_battery == null || _batteryRevision != Grid.GridContent.Revision)
+                {
+                    var d = new Dictionary<string, float>(StringComparer.Ordinal);
+                    foreach (string chassis in new[] { Erc001ChassisId, Erc002ChassisId, Erc003ChassisId, ErcRescueChassisId, ChassisCatalog.ChassisHoverId })
+                    {
+                        d[chassis] = Grid.GridContent.Tuning("home.battery." + chassis);
+                    }
+                    _battery = d;
+                    _batteryRevision = Grid.GridContent.Revision;
+                }
+                return _battery;
+            }
+        }
+
+        private static Dictionary<string, float> _battery;
+        private static int _batteryRevision;
 
         /// <summary>被动恢复速率（不在充电点时也生效，DEMO-CONTENT-LOCK.md §2.4"被动恢复每秒1"）。</summary>
-        public const float BatteryPassiveRegenPerSecond = 1f;
+        public static float BatteryPassiveRegenPerSecond => Grid.GridContent.Tuning("home.battery_passive_regen_per_second");
 
         /// <summary>家园充电点速率（DEMO-CONTENT-LOCK.md §2.4"家园有电充电点每秒10"）。Recharge
         /// 工作单在 <see cref="Core"/>（归还核心，永远 Powered，见 <see cref="HomeValleyPowerGrid"/>
         /// 类注释）进行，不新增专属充电桩建筑。</summary>
-        public const float BatteryHomeChargeRatePerSecond = 10f;
+        public static float BatteryHomeChargeRatePerSecond => Grid.GridContent.Tuning("home.battery_home_charge_per_second");
 
         /// <summary>低电自动候选阈值（DEMO-CONTENT-LOCK.md §2.4"电池低于20%时自动候选"）——
         /// 自动候选算法本身属于 ER3-WRK-02，本 Story 只落这个阈值常量供该 Story 直接复用，
         /// 以及供玩家手动 Recharge 判断"是否真的需要充"的 HUD 展示阈值。</summary>
-        public const float BatteryLowFraction = 0.2f;
+        public static float BatteryLowFraction => Grid.GridContent.Tuning("home.battery_low_fraction");
 
         /// <summary>ERD-WRK-003 第二条："路径连续5秒无进展"判定窗口。归还谷地当前只有直线插值移动、
         /// 无真实寻路/障碍物系统（<see cref="HomeValleyMachineMarker"/> 全程必达），本 Story 按"净位移
@@ -268,16 +296,16 @@ namespace GameLogic.Campaign.Regions
         /// "初始180废料存在归还核心应急缓存中，缓存是有限库存，上限180"）。恒定生效，不依赖任何建筑
         /// Operational 状态——核心缓存本身不是一栋可损坏的建筑。只接受废料，不接受远征战利品（模块/
         /// 数据盒等），见 <see cref="Regions.HomeValleyCargo.GetStorageCapacity"/>。</summary>
-        public const int CoreCacheCapacity = 180;
+        public static int CoreCacheCapacity => Grid.GridContent.TuningInt("home.core_cache_capacity");
 
         /// <summary>仓库修复（<see cref="BuildingTypeWarehouse"/> 转 Operational）后追加的库存容量
         /// （DEMO-IMPLEMENTATION-SPEC.md ERD-ECO-003"仓库修复后搬运机可将剩余库存转运过去"）。
         /// 与 <see cref="CoreCacheCapacity"/> 是两个独立叠加的容量来源，仓库未修复时贡献为 0。</summary>
-        public const int WarehouseCapacity = 300;
+        public static int WarehouseCapacity => Grid.GridContent.TuningInt("home.warehouse_capacity");
 
         /// <summary>货物占用货位换算（DEMO-CONTENT-LOCK.md §2.3"废料每箱40占1货位"）。完整模块/
         /// 终端数据盒/核心数据各占1货位，不用这个换算——只有废料按数量/本值向上取整。</summary>
-        public const int ScrapUnitsPerCargoSlot = 40;
+        public static int ScrapUnitsPerCargoSlot => Grid.GridContent.TuningInt("home.scrap_units_per_cargo_slot");
 
         /// <summary>各机型基础货位（DEMO-CONTENT-LOCK.md §2.3：ERC-001=4/ERC-002=2/ERC-003=1）。
         /// 货舱结构模块（+2，最多一个，不叠加成6）属于 ER4-BLP-01 蓝图槽位范畴，本表只落每型默认值，
@@ -312,11 +340,11 @@ namespace GameLogic.Campaign.Regions
         /// ER4-FAC-01 第2条），语义是"如果废料多到能在（未来的）装配站生产一台新搬运机，就不算真的
         /// 卡死"——装配站真实生产队列尚未落地（ER4-FAC-01），这里只借用同一个数值做判定，不等
         /// 该 Story 落地才补这条兜底。</summary>
-        public const int EmergencyRescueScrapThreshold = 35;
+        public static int EmergencyRescueScrapThreshold => Grid.GridContent.TuningInt("home.emergency_rescue_scrap_threshold");
 
         /// <summary>ER3-SOFTLOCK-01 AC-ECO-012：拆除非核心建筑的耗时。卡片未点名具体秒数，取和
         /// <see cref="RepairProfile"/> 同量级的中间值（介于仓库10秒和信号塔40秒之间）。</summary>
-        public const float DemolishSeconds = 15f;
+        public static float DemolishSeconds => Grid.GridContent.Tuning("home.demolish_seconds");
 
         // ── ER4-FAC-01：装配站默认生产蓝图（STORY-EXECUTION-CARDS.md 第2条点名的三条默认数值，
         // 与 DEMO-CONTENT-LOCK.md §2.4 行53～55 一致；ER4-BLP-01 正式电路/蓝图编辑器落地前，这是

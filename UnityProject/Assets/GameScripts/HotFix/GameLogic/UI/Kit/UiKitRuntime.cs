@@ -5,7 +5,7 @@ namespace GameLogic.UI.Kit
     /// <summary>
     /// FG0-UX-01：UI 基础件的挂载入口（由 <c>GameRoot.Startup</c> 调用，进程内只挂一次）。
     /// 每个面板一个 DontDestroyOnLoad 宿主、一个 UIDocument；分层（sortingOrder）见各面板的 Order 常量与
-    /// UI_WORKFLOW_GUIDE.md 第 4 节：通知 30040 &lt; 暂停菜单 30070 &lt; 按键面板 30080 &lt; 样例页 30090 &lt; 浮层 30200。
+    /// UI_WORKFLOW_GUIDE.md 第 4 节：建造栏 30030 &lt; 通知 30040 &lt; 暂停菜单 30070 &lt; 按键面板 30080 &lt; 样例页 30090 &lt; 浮层 30200。
     /// </summary>
     public static class UiKitRuntime
     {
@@ -23,6 +23,7 @@ namespace GameLogic.UI.Kit
             GameObject overlay = Create<UiKitOverlayUIToolkit>("[UiKitOverlayHost]");
             overlay.AddComponent<UiKitInputPump>();
             Create<NotificationHudUIToolkit>("[NotificationHudHost]");
+            Create<BuildModeHudUIToolkit>("[BuildModeHudHost]"); // FG0-ARCH-04：家园建造模式入口与建造栏（30030，低于通知）。
             Create<PauseMenuUIToolkit>("[PauseMenuHost]");
             Create<KeyBindingsPanelUIToolkit>("[KeyBindingsHost]");
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
