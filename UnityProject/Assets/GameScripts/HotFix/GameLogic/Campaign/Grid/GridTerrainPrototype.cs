@@ -12,12 +12,23 @@ namespace GameLogic.Campaign.Grid
         /// <summary>来源标识（写进 GridState.TerrainSourceId，读档时知道这份存档的建筑是按哪份地形校验过的）。</summary>
         string SourceId { get; }
 
+        /// <summary>生成身份（来源 + 种子 + 版本 + 世界设置 + 表面 + 核心落点）。身份相同 → 生成结果逐格相同。</summary>
+        string SourceKey { get; }
+
         /// <summary>一个格子的初始地形字节值（fg.TbGridTerrain.code）与污染等级（0～3）。必须只取决于（种子, 格子），与访问顺序无关。</summary>
         void Sample(int x, int y, out byte terrain, out byte pollution);
+
+        /// <summary>整块生成（FG0-ARCH-05：世界生成器在这里走 Burst 内核）。结果必须与逐格 <see cref="Sample"/> 相同。</summary>
+        void FillChunk(int chunkX, int chunkY, int size, byte[] terrain, byte[] pollution);
+
+        /// <summary>这个区块在表面上存在（室内表面是有限的；星球受坐标上限约束）。</summary>
+        bool ChunkExists(int chunkX, int chunkY, int size);
     }
 
     /// <summary>
-    /// FG0-ARCH-04：FG0-ARCH-05 世界生成器落地前的**原型地形来源**。按（种子, 格子）确定性生成悬崖、水源、矿脉、废墟、油井与污染，
+    /// FG0-ARCH-04：FG0-ARCH-05 世界生成器落地前的**原型地形来源**。FG0-ARCH-05 起它是“生成器版本 0”的旧版本路径：
+    /// 只给 FG0-ARCH-05 之前的存档（GridState.TerrainSourceId = prototype-v1）重建未修改区块，新战役一律用 WorldTerrainSource
+    /// （FGR-GEN-061）。**不要再改它的算法与 grid.terrain.* 调参**——FgWorldGenSelfCheck 的回归哈希守护旧版本结果不变。按（种子, 格子）确定性生成悬崖、水源、矿脉、废墟、油井与污染，
     /// 同一种子任意访问顺序结果相同（整数哈希 + 值噪声，不用 System.Random）。
     /// 起始区保证：核心周围 <c>grid.start_protect_radius</c> 格、开局布局每个建筑 / 建造位占地外 <c>grid.start_protect_margin</c> 圈、
     /// 非建筑锚点（出生点、残骸、靶子、出口）周围 <c>grid.anchor_protect_radius</c> 格强制为可建空地且无污染，
@@ -47,10 +58,13 @@ namespace GameLogic.Campaign.Grid
 
         public string SourceId => Id;
 
+        public string SourceKey { get; }
+
         public GridTerrainPrototype(int seed, GridCell corePivot)
         {
             _seed = seed;
             _core = corePivot;
+            SourceKey = Id + "|" + seed + "|" + corePivot;
             _protectRadius = GridContent.TuningInt("grid.start_protect_radius");
             _anchorRadius = GridContent.TuningInt("grid.anchor_protect_radius");
             int margin = GridContent.TuningInt("grid.start_protect_margin");
@@ -149,6 +163,24 @@ namespace GameLogic.Campaign.Grid
                 pollution = (byte)Mathf.Clamp(level, 1, 3);
             }
         }
+
+        public void FillChunk(int chunkX, int chunkY, int size, byte[] terrain, byte[] pollution)
+        {
+            int baseX = chunkX * size;
+            int baseY = chunkY * size;
+            for (int ly = 0; ly < size; ly++)
+            {
+                for (int lx = 0; lx < size; lx++)
+                {
+                    Sample(baseX + lx, baseY + ly, out byte t, out byte p);
+                    int i = ly * size + lx;
+                    terrain[i] = t;
+                    pollution[i] = p;
+                }
+            }
+        }
+
+        public bool ChunkExists(int chunkX, int chunkY, int size) => true;
 
         // ── 确定性噪声：整数哈希的格点值 + 平滑双线性插值。只依赖（种子, 盐, 格点），与调用顺序无关。──────────
 

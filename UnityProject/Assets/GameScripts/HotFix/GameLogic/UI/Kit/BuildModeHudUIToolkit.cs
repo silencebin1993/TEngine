@@ -50,6 +50,10 @@ namespace GameLogic.UI.Kit
         public bool EntryVisible => _entry != null && !_entry.ClassListContains("uk-hidden");
         public bool PanelVisible => _panel != null && !_panel.ClassListContains("uk-hidden");
         public string StatusLabelText => _status?.text ?? string.Empty;
+        /// <summary>FG0-ARCH-05：“正在生成地形”提示（镜头周围有区块还没生成好时可见）。</summary>
+        public bool GeneratingVisible => _generating != null && !_generating.ClassListContains("uk-hidden");
+        public string GeneratingLabelText => _generating?.text ?? string.Empty;
+        private Label _generating;
 
         private void Awake()
         {
@@ -75,6 +79,7 @@ namespace GameLogic.UI.Kit
             _hint = root.Q<Label>("BuildHint");
             _status = root.Q<Label>("BuildStatus");
             _placeholder = root.Q<Label>("BuildPlaceholder");
+            _generating = root.Q<Label>("BuildGenerating");
 
             _entry.clicked += () => HomeValleyBuildMode.Current?.Open();
             _close.clicked += () => HomeValleyBuildMode.Current?.Close();
@@ -194,6 +199,13 @@ namespace GameLogic.UI.Kit
             }
             _status.text = status;
             _status.EnableInClassList("bm-status-error", error);
+
+            int generating = mode.GeneratingChunkCount;
+            SetVisible(_generating, generating > 0);
+            if (_generating != null)
+            {
+                _generating.text = generating > 0 ? GameText.Format("ui.world.generating", generating) : string.Empty;
+            }
         }
 
         private void SyncItems(HomeValleyBuildMode mode, CampaignState state)

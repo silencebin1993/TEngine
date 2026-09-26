@@ -21,7 +21,8 @@ namespace GameLogic.Campaign.Regions
     /// 战略暂停下可以继续规划，施工在恢复后推进（FG03 第 4 节）。
     ///
     /// 表现（占位，FG00 B22）：虚影逐格着色（绿 = 可放、红 = 不可放），不合法时再叠一个“叉”形（色盲安全，颜色之外有形状）；
-    /// 端口用箭头（输出橙色长箭头、输入青色短箭头，形状不同）；地形叠加层按 fg.TbGridTerrain 的颜色 + 图案画出核心周围一片，
+    /// 端口用箭头（输出橙色长箭头、输入青色短箭头，形状不同）；地形叠加层按 fg.TbGridTerrain 的颜色 + 图案画出镜头周围的区块
+    /// （FG0-ARCH-05：按区块分块、跟随镜头，贴图在 Burst 工作线程画；还没生成好的区块显示“生成中”占位，见 <see cref="WorldTerrainOverlay"/>），
     /// 迷雾变暗、污染加斜线、核心通道加黄框。全部由格网数据推导，不另算一套（FG14 硬约束 4）。
     ///
     /// 状态只读写 <see cref="HomeGridService"/>；本类不保存任何需要进存档的东西（选择、朝向是界面状态）。
@@ -54,9 +55,8 @@ namespace GameLogic.Campaign.Regions
         private readonly List<GridCell> _cells = new List<GridCell>(32);
         private readonly GridPlacementResult _previewBuffer = new GridPlacementResult();
         private GameObject _root;
-        private GameObject _overlay;
-        private Texture2D _overlayTexture;
-        private Material _overlayMaterial;
+        private WorldTerrainOverlay _terrain;
+        private int _terrainRevision = -1;
         private Material _okMaterial;
         private Material _badMaterial;
         private Material _markMaterial;
@@ -101,7 +101,11 @@ namespace GameLogic.Campaign.Regions
             InputRouter.SetBuildMode(true);
             GuidanceHooks.Raise(GuidanceHooks.BuildModeFirstOpen);
             EnsureVisuals();
-            RebuildOverlay();
+            CampaignState openState = CampaignSession.Current;
+            if (openState != null)
+            {
+                UpdateTerrainOverlay(openState, HomeGridService.CorePivot(openState));
+            }
             SetStatus(string.Empty, false);
         }
 
@@ -334,7 +338,41 @@ namespace GameLogic.Campaign.Regions
 
             RefreshPreview(state);
             RefreshVisuals(state);
+            // FG0-ARCH-05：地形叠加层跟随镜头（俯视正交镜头，焦点 = 镜头 xz）；没生成好的区块显示占位，从不在这里同步生成。
+            GridCell focus = camera != null
+                ? GridCell.FromWorld(new Vector2(camera.transform.position.x, camera.transform.position.z))
+                : HomeGridService.CorePivot(state);
+            UpdateTerrainOverlay(state, focus);
         }
+
+        /// <summary>刷新地形叠加层（窗口跟随 <paramref name="focus"/>）；画面变化（含“生成中”区块数）时 Revision+1，建造栏据此刷新。</summary>
+        public void UpdateTerrainOverlay(CampaignState state, GridCell focus, bool completeNow = false)
+        {
+            if (_terrain == null || state == null)
+            {
+                return;
+            }
+            _terrain.Update(state, focus, completeNow);
+            if (_terrain.Revision != _terrainRevision)
+            {
+                _terrainRevision = _terrain.Revision;
+                Revision++;
+                if (_terrain.PendingCount > 0)
+                {
+                    GuidanceHooks.Raise(GuidanceHooks.WorldFirstGenerating); // B14：只埋钩子，引导内容在 FG15-UX-04
+                }
+            }
+        }
+
+        /// <summary>自检用：同步补齐窗口内缺的区块并等贴图画完（正式流程从不这样做）。</summary>
+        public void CompleteOverlayNow(CampaignState state, GridCell? focus = null) =>
+            UpdateTerrainOverlay(state, focus ?? HomeGridService.CorePivot(state), completeNow: true);
+
+        /// <summary>地形叠加层（未打开建造模式时为 null）。</summary>
+        public WorldTerrainOverlay TerrainOverlay => _terrain;
+
+        /// <summary>镜头周围还没生成好的区块数（建造栏显示“正在生成地形（N 个区块）…”）。</summary>
+        public int GeneratingChunkCount => _terrain?.PendingCount ?? 0;
 
         private static bool TryPointerCell(Camera camera, Vector3 screen, out GridCell cell)
         {
@@ -485,7 +523,8 @@ namespace GameLogic.Campaign.Regions
             _markMaterial = new Material(unlit) { color = new Color(0.95f, 0.45f, 0.1f, 0.55f) };
             _outMaterial = new Material(unlit) { color = new Color(1f, 0.6f, 0.1f, 0.95f) };
             _inMaterial = new Material(unlit) { color = new Color(0.2f, 0.85f, 0.95f, 0.95f) };
-            _overlayMaterial = new Material(unlit) { color = new Color(1f, 1f, 1f, 0.55f) };
+            _terrain = new WorldTerrainOverlay(_root.transform);
+            _terrainRevision = -1;
             _cross = new GameObject("GhostCross");
             _cross.transform.SetParent(_root.transform, false);
             for (int i = 0; i < 2; i++)
@@ -520,9 +559,8 @@ namespace GameLogic.Campaign.Regions
             _tiles.Clear();
             _arrows.Clear();
             _cross = null;
-            _overlay = null;
-            DestroyAsset(ref _overlayTexture);
-            DestroyAsset(ref _overlayMaterial);
+            _terrain?.Dispose();
+            _terrain = null;
             DestroyAsset(ref _okMaterial);
             DestroyAsset(ref _badMaterial);
             DestroyAsset(ref _markMaterial);
@@ -663,117 +701,13 @@ namespace GameLogic.Campaign.Regions
             head.GetComponent<Renderer>().sharedMaterial = m;
         }
 
-        // ── 地形叠加层（打开建造模式时生成一次；数据全部来自格网）──────────────────────────────
-
-        private const int PixelsPerCell = 6;
-
-        /// <summary>重画核心周围的地形叠加层（颜色 + 图案 + 迷雾 + 污染 + 核心通道）。只在打开建造模式时调用。</summary>
-        public void RebuildOverlay()
+        /// <summary>叠加层上某格某像素的颜色（自检读画面）；这一格的区块还在“生成中”时返回 false。</summary>
+        public bool TryGetOverlayPixel(GridCell cell, int px, int py, out Color32 color)
         {
-            CampaignState state = CampaignSession.Current;
-            if (_root == null || state == null)
-            {
-                return;
-            }
-            HomeGridMap map = HomeGridService.MapFor(state);
-            GridCell core = HomeGridService.CorePivot(state);
-            int radius = Mathf.Max(4, GridContent.TuningInt("grid.overlay_radius"));
-            int cells = radius * 2 + 1;
-            int size = cells * PixelsPerCell;
-            DestroyAsset(ref _overlayTexture);
-            _overlayTexture = new Texture2D(size, size, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
-            var pixels = new Color32[size * size];
-            int ring = GridContent.TuningInt("grid.core_reserve_ring");
-            int blockLevel = GridContent.TuningInt("grid.pollution_block_level");
-            BuildingRecord coreRecord = null;
-            foreach (BuildingRecord b in state.BuildingRecords ?? Array.Empty<BuildingRecord>())
-            {
-                if (b != null && b.BuildingTypeId == HomeValleyLayout.BuildingTypeCore && b.RegionId == HomeValleyLayout.RegionId)
-                {
-                    coreRecord = b;
-                    break;
-                }
-            }
-            GridCell coreMin = core, coreMax = core;
-            if (coreRecord != null && GridContent.TryGetBuilding(coreRecord.BuildingTypeId, out BuildingGrid cg))
-            {
-                GridMath.FootprintBounds(new GridCell(coreRecord.GridX, coreRecord.GridY), cg.FootprintW, cg.FootprintH,
-                    GridMath.NormalizeRotation(coreRecord.Rotation), out coreMin, out coreMax);
-            }
-            for (int cy = 0; cy < cells; cy++)
-            {
-                for (int cx = 0; cx < cells; cx++)
-                {
-                    var cell = new GridCell(core.X - radius + cx, core.Y - radius + cy);
-                    GridTerrain t = GridContent.TerrainByCode(map.GetTerrain(cell));
-                    Color32 baseColor = t != null && ColorUtility.TryParseHtmlString(t.Color, out Color c) ? (Color32)c : new Color32(90, 90, 90, 255);
-                    string pattern = t?.Pattern ?? "none";
-                    bool explored = map.IsExplored(cell);
-                    int pollution = map.GetPollution(cell);
-                    bool reserve = cell.X >= coreMin.X - ring && cell.X <= coreMax.X + ring && cell.Y >= coreMin.Y - ring && cell.Y <= coreMax.Y + ring
-                                   && !(cell.X >= coreMin.X && cell.X <= coreMax.X && cell.Y >= coreMin.Y && cell.Y <= coreMax.Y);
-                    for (int py = 0; py < PixelsPerCell; py++)
-                    {
-                        for (int px = 0; px < PixelsPerCell; px++)
-                        {
-                            Color32 col = baseColor;
-                            if (PatternPixel(pattern, px, py))
-                            {
-                                col = Shade(col, 0.55f);
-                            }
-                            if (pollution > 0 && (px + PixelsPerCell - 1 - py) % (pollution >= blockLevel ? 2 : 3) == 0)
-                            {
-                                col = new Color32(150, 40, 150, 255); // 污染：紫色反斜线，≥ 不可建等级时更密。
-                            }
-                            if (reserve && (px == 0 || py == 0 || px == PixelsPerCell - 1 || py == PixelsPerCell - 1))
-                            {
-                                col = new Color32(230, 200, 40, 255); // 核心通道：黄色框。
-                            }
-                            else if (px == 0 || py == 0)
-                            {
-                                col = Shade(col, 0.8f); // 格线（FG03 第 4 节“格线显示”）。
-                            }
-                            if (!explored)
-                            {
-                                col = Shade(col, 0.25f); // 迷雾：大幅变暗。
-                            }
-                            pixels[(cy * PixelsPerCell + py) * size + cx * PixelsPerCell + px] = col;
-                        }
-                    }
-                }
-            }
-            _overlayTexture.SetPixels32(pixels);
-            _overlayTexture.Apply(false, false);
-            if (_overlay == null)
-            {
-                _overlay = NewPrimitive(PrimitiveType.Quad, "TerrainOverlay", _root.transform, _overlayMaterial);
-                _overlay.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
-            }
-            _overlayMaterial.mainTexture = _overlayTexture;
-            _overlay.transform.position = new Vector3(core.X, 0.03f, core.Y);
-            _overlay.transform.localScale = new Vector3(cells, cells, 1f);
-            Revision++;
+            color = default;
+            return _terrain != null && _terrain.TryGetPixel(cell, px, py, out color);
         }
 
-        private static bool PatternPixel(string pattern, int x, int y)
-        {
-            int n = PixelsPerCell;
-            switch (pattern)
-            {
-                case "hatch": return (x + y) % 3 == 0;
-                case "dots": return (x == n / 2 || x == n / 2 - 1) && (y == n / 2 || y == n / 2 - 1);
-                case "waves": return y == n / 2 + ((x / 2) % 2 == 0 ? 0 : 1);
-                case "cross": return x == y || x == n - 1 - y;
-                case "grid": return x % 3 == 1 || y % 3 == 1;
-                default: return false;
-            }
-        }
-
-        private static Color32 Shade(Color32 c, float k) => new Color32((byte)(c.r * k), (byte)(c.g * k), (byte)(c.b * k), c.a);
-
-        /// <summary>叠加层纹理（自检读像素用）。</summary>
-        public Texture2D OverlayTexture => _overlayTexture;
-        public int OverlayRadius => GridContent.TuningInt("grid.overlay_radius");
         public bool GhostCrossVisible => _cross != null && _cross.activeSelf;
 
         /// <summary>第 <paramref name="index"/> 个端口箭头的朝向（世界 xz 平面；自检核对箭头方向与端口一致）。</summary>

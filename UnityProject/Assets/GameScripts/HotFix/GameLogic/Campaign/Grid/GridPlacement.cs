@@ -31,6 +31,8 @@ namespace GameLogic.Campaign.Grid
         CannotRotateCore,
         /// <summary>只能开局预置（placeable=0）的关键建筑：拆掉就再也造不回来，会软锁战役（FG00 B11），不允许拆除。</summary>
         NotRebuildable,
+        /// <summary>FG0-ARCH-05（FGR-GEN-051）：超出世界坐标上限（world.coord_limit）。</summary>
+        WorldLimit,
     }
 
     /// <summary>一条原因：原因码 + 文本键 + 参数（参数本身若是文本键，显示时按当前语言解析）。</summary>

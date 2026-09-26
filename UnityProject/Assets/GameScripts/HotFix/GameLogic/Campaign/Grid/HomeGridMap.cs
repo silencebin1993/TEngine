@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using GameLogic.Campaign.WorldGen;
+using TEngine;
 
 namespace GameLogic.Campaign.Grid
 {
@@ -14,16 +16,29 @@ namespace GameLogic.Campaign.Grid
         Fog = 5,
     }
 
+    /// <summary>区块状态（FGR-GEN-060）：未生成 / 已生成未修改 / 已修改。只有已修改的区块进存档。</summary>
+    public enum ChunkState : byte
+    {
+        NotGenerated = 0,
+        Generated = 1,
+        Modified = 2,
+    }
+
     /// <summary>
-    /// FG0-ARCH-04（FGR-ARC-001）：一张表面（家园）的**无限格网**，按区块（初值 32×32，fg.TbHomeTuning grid.chunk_size）
-    /// 惰性创建，每个区块六层：地形、污染、占用、传送带、管线、迷雾。
+    /// FG0-ARCH-04（FGR-ARC-001）/ FG0-ARCH-05（FGR-GEN-050、060）：一张表面的**无限格网**，按区块（初值 32×32，
+    /// fg.TbHomeTuning grid.chunk_size）存储，每个区块六层：地形、污染、占用、传送带、管线、迷雾。
     ///
-    /// - 地形 / 污染：区块第一次被访问时由 <see cref="IGridTerrainSource"/> 按（种子, 格子）生成，与访问顺序无关。
-    /// - 占用：建筑记录的派生缓存（格子 → 建筑序号）。唯一真相是 <see cref="BuildingRecord"/> 的枢轴格与朝向；
-    ///   <see cref="HomeGridService"/> 在建筑记录变化时整体重建，旋转时增量改写。
-    /// - 传送带 / 管线：层与读写接口已就绪，写入者是 FG0-ARCH-02（传送带内核）与 FG3-LOG-05（管线）；
-    ///   放置校验已经把它们当作“被占用”。
-    /// - 迷雾：已探索 = 落在任一已探索圆里（GridState.Explored），区块创建时按圆计算，圆变化时整体失效重算。
+    /// - 地形 / 污染：由 <see cref="IGridTerrainSource"/> 按（种子, 版本, 世界设置, 表面, 格子）生成，与访问顺序无关。两条入口：
+    ///   流式加载（<see cref="WorldChunkStreamer"/> 在工作线程生成，主线程 <see cref="TryAdopt"/> 接入）与同步兜底（玩法查询碰到
+    ///   还没生成的区块时 <see cref="ChunkAt"/> 当场生成）。两条入口结果逐字节相同（自检）。
+    /// - 区块差异（FGR-GEN-060）：<see cref="SetTerrain"/> / <see cref="SetPollution"/> 第一次改某个区块时保存“生成基线”副本并把区块
+    ///   标为已修改；存档时 <see cref="CollectDiffs"/> 只输出与基线不同的格子；改回原样的区块自动回到“未修改”。读档后区块被生成
+    ///   （无论哪条入口）时，先按种子生成再套上存档里的差异。
+    /// - 占用：建筑记录的派生缓存（格子 → 建筑序号），<see cref="HomeGridService"/> 维护，不进存档。
+    /// - 传送带 / 管线：层与读写接口已就绪（FG0-ARCH-02 / FG3-LOG-05 写入）。
+    /// - 迷雾：已探索 = 落在任一已探索圆里（GridState.Explored）。
+    /// - 回收（FGR-GEN-052“纯地形区块不需要模拟”）：未修改、没有建筑 / 传送带 / 管线的区块可以被 <see cref="TryEvict"/> 丢弃，
+    ///   需要时按种子重新生成，结果相同。
     /// 每次查询 O(1)（字典取区块 + 数组下标），与建筑数、区块数无关。
     /// </summary>
     public sealed class HomeGridMap
@@ -43,6 +58,12 @@ namespace GameLogic.Campaign.Grid
             /// <summary>1 = 已探索。</summary>
             public readonly byte[] Explored;
             public int ExploredRevision = -1;
+            /// <summary>地形 / 污染内容的版本（每次修改 +1；叠加层据此重画）。</summary>
+            public int ContentRevision;
+            /// <summary>已修改（与生成基线不同的可能性）；基线在第一次修改时保存。</summary>
+            public bool Modified;
+            public byte[] BaseTerrain;
+            public byte[] BasePollution;
 
             public Chunk(int cx, int cy, int size)
             {
@@ -56,19 +77,47 @@ namespace GameLogic.Campaign.Grid
                 Pipe = new ushort[n];
                 Explored = new byte[n];
             }
+
+            /// <summary>有建筑、传送带或管线（不能回收）。O(格数)。</summary>
+            public bool HasStructures()
+            {
+                for (int i = 0; i < Occupancy.Length; i++)
+                {
+                    if (Occupancy[i] != 0 || Belt[i] != 0 || Pipe[i] != 0)
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            }
         }
 
         private readonly Dictionary<long, Chunk> _chunks = new Dictionary<long, Chunk>();
         private readonly List<string> _occupantIds = new List<string>();
         private readonly Dictionary<string, int> _occupantIndex = new Dictionary<string, int>(StringComparer.Ordinal);
+        /// <summary>存档里的区块差异（编码后）：键 = 区块。未加载的区块也保留在这里，存档时原样写回（FGR-GEN-060）。</summary>
+        private readonly Dictionary<long, string> _savedDiffs = new Dictionary<long, string>();
+        private readonly List<ChunkCellDiff> _diffScratch = new List<ChunkCellDiff>(64);
         private ExploredAreaRecord[] _explored = Array.Empty<ExploredAreaRecord>();
         private int _exploredRevision;
 
         public int ChunkSize { get; }
         public IGridTerrainSource TerrainSource { get; }
+        /// <summary>这张格网是哪个表面（fg.TbSurface.id），区块差异按它存。</summary>
+        public string SurfaceId { get; }
         public int LoadedChunkCount => _chunks.Count;
+        /// <summary>任何区块被生成、接入、回收或地形 / 污染被修改时 +1。</summary>
+        public int Revision { get; private set; }
+        public int ExploredRevision => _exploredRevision;
+        public ExploredAreaRecord[] ExploredAreas => _explored;
+        /// <summary>同步生成的区块数（玩法查询碰到还没生成的区块；正常游戏里被预生成边距覆盖，应当很少）。</summary>
+        public int SyncGeneratedCount { get; private set; }
+        /// <summary>经流式加载（工作线程）接入的区块数。</summary>
+        public int AdoptedCount { get; private set; }
+        public int EvictedCount { get; private set; }
+        public IEnumerable<Chunk> LoadedChunks => _chunks.Values;
 
-        public HomeGridMap(int chunkSize, IGridTerrainSource terrainSource)
+        public HomeGridMap(int chunkSize, IGridTerrainSource terrainSource, string surfaceId = WorldGenContent.EarthSurfaceId)
         {
             if (chunkSize < 1)
             {
@@ -76,11 +125,18 @@ namespace GameLogic.Campaign.Grid
             }
             ChunkSize = chunkSize;
             TerrainSource = terrainSource ?? throw new ArgumentNullException(nameof(terrainSource));
+            SurfaceId = surfaceId;
         }
 
-        private static long Key(int cx, int cy) => ((long)cx << 32) ^ (uint)cy;
+        public static long Key(int cx, int cy) => ((long)cx << 32) ^ (uint)cy;
 
-        /// <summary>取（必要时生成）格子所在的区块。</summary>
+        public static void Unkey(long key, out int cx, out int cy)
+        {
+            cx = (int)(key >> 32);
+            cy = (int)(uint)key;
+        }
+
+        /// <summary>取（必要时同步生成）格子所在的区块。</summary>
         public Chunk ChunkAt(GridCell cell, out int index)
         {
             ChunkAddress a = GridMath.Address(cell, ChunkSize);
@@ -90,6 +146,8 @@ namespace GameLogic.Campaign.Grid
             {
                 chunk = Generate(a.ChunkX, a.ChunkY);
                 _chunks[key] = chunk;
+                SyncGeneratedCount++;
+                Revision++;
             }
             if (chunk.ExploredRevision != _exploredRevision)
             {
@@ -100,23 +158,183 @@ namespace GameLogic.Campaign.Grid
 
         public bool IsChunkLoaded(int cx, int cy) => _chunks.ContainsKey(Key(cx, cy));
 
+        /// <summary>已加载的区块（不触发生成）；没加载返回 null。</summary>
+        public Chunk TryGetLoaded(int cx, int cy)
+        {
+            if (!_chunks.TryGetValue(Key(cx, cy), out Chunk c))
+            {
+                return null;
+            }
+            if (c.ExploredRevision != _exploredRevision)
+            {
+                RefreshExplored(c);
+            }
+            return c;
+        }
+
+        public ChunkState StateOf(int cx, int cy)
+        {
+            if (!_chunks.TryGetValue(Key(cx, cy), out Chunk c))
+            {
+                return ChunkState.NotGenerated;
+            }
+            return c.Modified ? ChunkState.Modified : ChunkState.Generated;
+        }
+
         private Chunk Generate(int cx, int cy)
         {
             var chunk = new Chunk(cx, cy, ChunkSize);
-            int baseX = cx * ChunkSize;
-            int baseY = cy * ChunkSize;
-            for (int ly = 0; ly < ChunkSize; ly++)
-            {
-                for (int lx = 0; lx < ChunkSize; lx++)
-                {
-                    TerrainSource.Sample(baseX + lx, baseY + ly, out byte t, out byte p);
-                    int i = ly * ChunkSize + lx;
-                    chunk.Terrain[i] = t;
-                    chunk.Pollution[i] = p;
-                }
-            }
+            TerrainSource.FillChunk(cx, cy, ChunkSize, chunk.Terrain, chunk.Pollution);
+            ApplySavedDiff(chunk);
             return chunk;
         }
+
+        /// <summary>接入工作线程生成的区块（主线程）。区块已存在（比如被同步查询先生成了）时丢弃结果并返回 false——两条入口结果相同。</summary>
+        public bool TryAdopt(int cx, int cy, byte[] terrain, byte[] pollution)
+        {
+            long key = Key(cx, cy);
+            if (_chunks.ContainsKey(key))
+            {
+                return false;
+            }
+            var chunk = new Chunk(cx, cy, ChunkSize);
+            Buffer.BlockCopy(terrain, 0, chunk.Terrain, 0, chunk.Terrain.Length);
+            Buffer.BlockCopy(pollution, 0, chunk.Pollution, 0, chunk.Pollution.Length);
+            ApplySavedDiff(chunk);
+            _chunks[key] = chunk;
+            AdoptedCount++;
+            Revision++;
+            return true;
+        }
+
+        /// <summary>回收一个纯地形、未修改、没有建筑 / 传送带 / 管线的区块（之后需要时按种子重新生成）。不满足条件返回 false。</summary>
+        public bool TryEvict(int cx, int cy)
+        {
+            long key = Key(cx, cy);
+            if (!_chunks.TryGetValue(key, out Chunk c) || c.Modified || _savedDiffs.ContainsKey(key) || c.HasStructures())
+            {
+                return false;
+            }
+            _chunks.Remove(key);
+            EvictedCount++;
+            Revision++;
+            return true;
+        }
+
+        // ── 区块差异（FGR-GEN-060）────────────────────────────────────────────────
+
+        /// <summary>读档：设置这张表面的已保存差异（只接受本表面的记录；编码已在读档时校验过）。</summary>
+        public void SetSavedDiffs(IEnumerable<ChunkDiffRecord> records)
+        {
+            _savedDiffs.Clear();
+            if (records == null)
+            {
+                return;
+            }
+            foreach (ChunkDiffRecord r in records)
+            {
+                if (r != null && r.SurfaceId == SurfaceId)
+                {
+                    _savedDiffs[Key(r.ChunkX, r.ChunkY)] = r.DiffPayload;
+                }
+            }
+            // 已加载的区块立刻套用（通常 SetSavedDiffs 在建图后、生成任何区块前调用）。
+            foreach (Chunk c in _chunks.Values)
+            {
+                ApplySavedDiff(c);
+            }
+        }
+
+        private void ApplySavedDiff(Chunk chunk)
+        {
+            if (chunk.Modified || !_savedDiffs.TryGetValue(Key(chunk.ChunkX, chunk.ChunkY), out string payload))
+            {
+                return;
+            }
+            if (!WorldDiffCodec.TryDecode(payload, ChunkSize, _diffScratch, out string error))
+            {
+                // 读档时已整体校验；走到这里说明是运行中被外部改坏，保留原样、不套用，写 Error 便于发现。
+                Log.Error($"[HomeGridMap] 表面 {SurfaceId} 区块 ({chunk.ChunkX},{chunk.ChunkY}) 的差异无法解码：{error}");
+                return;
+            }
+            chunk.BaseTerrain = (byte[])chunk.Terrain.Clone();
+            chunk.BasePollution = (byte[])chunk.Pollution.Clone();
+            chunk.Modified = true;
+            foreach (ChunkCellDiff d in _diffScratch)
+            {
+                if ((d.Mask & ChunkCellDiff.TerrainBit) != 0)
+                {
+                    chunk.Terrain[d.Index] = d.Terrain;
+                }
+                if ((d.Mask & ChunkCellDiff.PollutionBit) != 0)
+                {
+                    chunk.Pollution[d.Index] = d.Pollution;
+                }
+            }
+            chunk.ContentRevision++;
+        }
+
+        private void Touch(Chunk chunk)
+        {
+            if (!chunk.Modified)
+            {
+                chunk.BaseTerrain = (byte[])chunk.Terrain.Clone();
+                chunk.BasePollution = (byte[])chunk.Pollution.Clone();
+                chunk.Modified = true;
+            }
+            chunk.ContentRevision++;
+            Revision++;
+        }
+
+        /// <summary>
+        /// 存档：这张表面的全部区块差异——已加载且真的与基线不同的区块重新编码（改回原样的区块回到“未修改”、不再保存），
+        /// 没加载的区块沿用读档时的差异。已生成但未修改的区块不输出（读档时按种子重新生成）。
+        /// </summary>
+        public void CollectDiffs(List<ChunkDiffRecord> into)
+        {
+            foreach (Chunk c in _chunks.Values)
+            {
+                if (!c.Modified)
+                {
+                    continue;
+                }
+                _diffScratch.Clear();
+                for (int i = 0; i < c.Terrain.Length; i++)
+                {
+                    byte mask = 0;
+                    if (c.Terrain[i] != c.BaseTerrain[i])
+                    {
+                        mask |= ChunkCellDiff.TerrainBit;
+                    }
+                    if (c.Pollution[i] != c.BasePollution[i])
+                    {
+                        mask |= ChunkCellDiff.PollutionBit;
+                    }
+                    if (mask != 0)
+                    {
+                        _diffScratch.Add(new ChunkCellDiff((ushort)i, mask, c.Terrain[i], c.Pollution[i]));
+                    }
+                }
+                long key = Key(c.ChunkX, c.ChunkY);
+                if (_diffScratch.Count == 0)
+                {
+                    c.Modified = false;
+                    c.BaseTerrain = null;
+                    c.BasePollution = null;
+                    _savedDiffs.Remove(key);
+                    continue;
+                }
+                _savedDiffs[key] = WorldDiffCodec.Encode(ChunkSize, _diffScratch);
+            }
+            foreach (KeyValuePair<long, string> kv in _savedDiffs)
+            {
+                Unkey(kv.Key, out int cx, out int cy);
+                into.Add(new ChunkDiffRecord { SurfaceId = SurfaceId, ChunkX = cx, ChunkY = cy, DiffPayload = kv.Value });
+            }
+        }
+
+        /// <summary>这张表面有差异的区块数（含未加载的）。</summary>
+        public int SavedDiffCount => _savedDiffs.Count;
 
         // ── 地形 / 污染 ──────────────────────────────────────────────────────────
 
@@ -124,10 +342,29 @@ namespace GameLogic.Campaign.Grid
 
         public byte GetPollution(GridCell cell) => ChunkAt(cell, out int i).Pollution[i];
 
-        /// <summary>测试与后续地形改造（FG07 净化、FG0-ARCH-05 差异）用：直接改一格地形 / 污染。</summary>
-        public void SetTerrain(GridCell cell, byte terrain) => ChunkAt(cell, out int i).Terrain[i] = terrain;
+        /// <summary>地形改造（FG07 净化、拆废墟……）的写入口：改一格地形。区块因此变为“已修改”，进存档差异。</summary>
+        public void SetTerrain(GridCell cell, byte terrain)
+        {
+            Chunk c = ChunkAt(cell, out int i);
+            if (c.Terrain[i] == terrain)
+            {
+                return;
+            }
+            Touch(c);
+            c.Terrain[i] = terrain;
+        }
 
-        public void SetPollution(GridCell cell, byte level) => ChunkAt(cell, out int i).Pollution[i] = (byte)Math.Min(level, (byte)3);
+        public void SetPollution(GridCell cell, byte level)
+        {
+            Chunk c = ChunkAt(cell, out int i);
+            byte v = (byte)Math.Min(level, (byte)3);
+            if (c.Pollution[i] == v)
+            {
+                return;
+            }
+            Touch(c);
+            c.Pollution[i] = v;
+        }
 
         // ── 传送带 / 管线（FG0-ARCH-02 / FG3-LOG-05 写入）─────────────────────────────
 

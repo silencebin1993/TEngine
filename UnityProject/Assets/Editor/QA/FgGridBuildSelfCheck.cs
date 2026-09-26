@@ -11,6 +11,7 @@ using GameLogic.Campaign;
 using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Grid;
 using GameLogic.Campaign.Regions;
+using GameLogic.Campaign.WorldGen;
 using GameLogic.Core;
 using GameLogic.Localization;
 using GameLogic.Settings;
@@ -393,8 +394,8 @@ namespace GameLogic.EditorTools
             BuildingRecord core = home.First(b => b.BuildingTypeId == "core");
             Expect(gen.ConstructionState == BuildingConstructionState.Damaged && core.ConstructionState == BuildingConstructionState.Operational
                    && Mathf.Approximately(core.Health, 500f) && s.Grid.LayoutVersion == HomeGridService.LayoutVersion
-                   && s.Grid.Explored.Length == 1 && s.Grid.Explored[0].Radius == 40 && s.Grid.TerrainSourceId == GridTerrainPrototype.Id,
-                "开局状态来自表（发电机受损、核心运转 500 生命）；格网域写入布局版本、开局探索半径 40、地形来源");
+                   && s.Grid.Explored.Length == 1 && s.Grid.Explored[0].Radius == 40 && s.Grid.TerrainSourceId == WorldTerrainSource.Id,
+                "开局状态来自表（发电机受损、核心运转 500 生命）；格网域写入布局版本、开局探索半径 40、地形来源（FG0-ARCH-05 起新战役 = 世界生成器）");
             Expect(HomeValleyLayout.Validate().Count == 0 && HomeValleyLayout.Core.Position == Vector2.zero && HomeValleyLayout.Generator2Site.Position == new Vector2(24, -8)
                    && HomeValleyLayout.BeaconSlot.Position == new Vector2(12, 22) && HomeValleyLayout.CameraFocusStart == new Vector2(-4, 2),
                 "非建筑锚点（建造位、出生点、残骸、镜头焦点）改由开局布局表提供，位置不变、净空不重叠");
@@ -432,7 +433,7 @@ namespace GameLogic.EditorTools
                 }
             }
             Expect(badSeeds.Count == 0, $"B25：{Seeds.Length} 个种子（含负数）下开局 7 座建筑与 2 个建造位全部合法{(badSeeds.Count == 0 ? string.Empty : "——" + string.Join("；", badSeeds.Take(5)))}");
-            Expect(cliffSeeds == Seeds.Length, $"原型地形在每个种子的已探索区内都生成了悬崖（{cliffSeeds}/{Seeds.Length}），非法地形的负向用例在任意种子下可测");
+            Expect(cliffSeeds == Seeds.Length, $"世界生成器（FG0-ARCH-05 起新战役的地形来源）在每个种子的已探索区内都生成了悬崖（{cliffSeeds}/{Seeds.Length}），非法地形的负向用例在任意种子下可测");
 
             // 确定性：同一种子，两张新图按相反顺序访问同一片区块，逐格一致；不同种子不同。
             var proto = new GridTerrainPrototype(99, new GridCell(0, 0));
@@ -993,7 +994,7 @@ namespace GameLogic.EditorTools
             Dictionary<GridCell, string> gotOcc = loaded.Success ? HomeGridService.MapFor(l).SnapshotOccupancy() : new Dictionary<GridCell, string>();
             bool occSame = gotOcc.Count == expectOcc.Count && expectOcc.All(kv => gotOcc.TryGetValue(kv.Key, out string v) && v == kv.Value);
             Expect(saved.Success && loaded.Success && BuildingsJson(l) == expectBuildings && occSame && l.Grid.NextInstanceSerial == serial
-                   && l.Grid.LayoutVersion == HomeGridService.LayoutVersion && l.Grid.Explored.Length == 2 && l.Grid.TerrainSourceId == GridTerrainPrototype.Id,
+                   && l.Grid.LayoutVersion == HomeGridService.LayoutVersion && l.Grid.Explored.Length == 2 && l.Grid.TerrainSourceId == WorldTerrainSource.Id,
                 $"真文件存读档：建筑枢轴格 / 朝向 / 中心 / 状态逐字段一致，占用层重建后 {gotOcc.Count} 格逐格一致，实例序号 {serial}、布局版本、探索区、地形来源往返");
             if (loaded.Success)
             {
@@ -1097,22 +1098,29 @@ namespace GameLogic.EditorTools
             try
             {
                 mode.Open();
-                Texture2D tex = mode.OverlayTexture;
-                int radius = mode.OverlayRadius;
+                // FG0-ARCH-05：叠加层按区块分块、跟随镜头，贴图在工作线程画；这里同步补齐窗口再读像素（断言与 FG0-ARCH-04 相同）。
+                mode.CompleteOverlayNow(s);
                 GridCell? cliff = FindTerrain(s, "cliff", 36);
-                bool ok = tex != null && tex.width == (radius * 2 + 1) * 6;
-                string detail = "无纹理";
+                bool ok = mode.TerrainOverlay != null && mode.TerrainOverlay.TileCount > 0 && mode.TerrainOverlay.PlaceholderCount == 0;
+                string detail = "无贴图";
                 if (ok && cliff != null)
                 {
-                    Color32 Pixel(GridCell c, int px, int py) => tex.GetPixel((c.X + radius) * 6 + px, (c.Y + radius) * 6 + py);
+                    Color32 Pixel(GridCell c, int px, int py)
+                    {
+                        if (!mode.TryGetOverlayPixel(c, px, py, out Color32 col))
+                        {
+                            ok = false;
+                        }
+                        return col;
+                    }
                     ColorUtility.TryParseHtmlString(GridContent.Terrains.First(t => t.Id == "cliff").Color, out Color cliffColor);
                     Color32 cc = cliffColor;
                     Color32 plain = Pixel(cliff.Value, 2, 2);
                     Color32 hatch = Pixel(cliff.Value, 3, 3);
-                    Color32 fog = Pixel(new GridCell(radius, radius), 3, 2);
+                    Color32 fog = Pixel(new GridCell(36, 36), 3, 2);
                     Color32 reserve = Pixel(new GridCell(0, 4), 0, 0);
-                    ok = Close(plain, cc) && hatch.r < plain.r && fog.r < 60 && fog.g < 60 && reserve.r > 200 && reserve.g > 180;
-                    detail = $"悬崖底色 {plain} 斜线 {hatch}；迷雾 {fog}；核心通道 {reserve}";
+                    ok = ok && Close(plain, cc) && hatch.r < plain.r && fog.r < 60 && fog.g < 60 && reserve.r > 200 && reserve.g > 180;
+                    detail = $"悬崖底色 {plain} 斜线 {hatch}；迷雾 {fog}；核心通道 {reserve}；贴图 {mode.TerrainOverlay.TileCount} 块";
                 }
                 Expect(ok && cliff != null, $"地形叠加层由格网数据画出：悬崖 = 表颜色 + 斜线图案（色盲安全），迷雾变暗，核心通道黄框（{detail}）");
 

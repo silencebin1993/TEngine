@@ -36,6 +36,8 @@ namespace GameLogic.EditorTools
     /// 拆除模式点仓库（本局无法重建：被拒、不弹确认、仓库保留，复审第 2 轮软锁修复）→
     /// Esc 退出建造模式（不开暂停菜单）→ 恢复运行，再接原有的点选机器 / 修发电机流程；下令修复后（机器仍选中、有在办工单）
     /// 按 B 进建造模式 → 右键退出 → 修复工单没有被这次右键穿透取消（复审 P1）。
+    /// FG0-ARCH-05：暂停菜单显示世界种子与世界设置、点“复制种子”写进剪贴板；建造模式里地形叠加层按区块显示（家园进入后由工作线程预生成、
+    /// 没有“生成中”占位）→ 按住镜头右移键平移、跨过区块边界 → 叠加层窗口跟随、新露出的区块补齐，流式加载主线程每帧开销有上限。
     /// FG0-UX-01 审查修复：生产面板开着按 Esc → 面板关闭、暂停菜单不开；电路板蓝图命名框打字时 Space / C 不触发，失焦后 Esc 关电路板；
     /// 回家园后改一台机器的记录 → Esc → 暂停菜单“保存并返回主菜单”→ 确认（真实存档路径，不再走 EndRun 捷径）→ 读档核对机器记录；
     /// 读档进游戏后核心被毁 → 失败页上按 Esc 不开暂停菜单 → 点失败页“返回主菜单”→ 暂停菜单、Esc 栈、模态都不残留。
@@ -172,6 +174,9 @@ namespace GameLogic.EditorTools
                     case 97: StepBuildCancelled(inStep); break;
                     case 100: StepBuildDemolishRefused(inStep); break;
                     case 98: StepBuildEsc(inStep); break;
+                    case 110: StepWorldPanStart(inStep); break;
+                    case 111: StepWorldPanMoved(inStep); break;
+                    case 112: StepWorldPanSettled(inStep); break;
                     case 99: StepBuildResume(inStep); break;
                     case 40: StepMenuSettings(inStep); break;
                     case 41: StepMenuAllKeyBindings(inStep); break;
@@ -316,8 +321,8 @@ namespace GameLogic.EditorTools
             string card = FindText("m_text_Slot2Info")?.text ?? string.Empty;
             string label = FindText("m_text_Slot2ActionLabel")?.text ?? string.Empty;
             bool kept = CampaignSaveService.PreservedFiles(2).Any(p => p.Contains(".keep-corrupt-"));
-            Check(card.Contains("第 1 幕") && card.Contains("种子 20260925") && label == "读取" && kept,
-                $"读取备份后槽位 3 恢复为可读存档（“{card.Replace("\n", " / ")}”，按钮“{label}”），截断的主档另存保留");
+            Check(card.Contains("第 1 幕") && card.Contains("种子 20260925") && card.Contains("世界 标准") && label == "读取" && kept,
+                $"读取备份后槽位 3 恢复为可读存档（“{card.Replace("\n", " / ")}”，含世界设置摘要（FG0-ARCH-05），按钮“{label}”），截断的主档另存保留");
             Button back = FindActiveButton("m_btn_Back");
             if (back == null)
             {
@@ -549,6 +554,17 @@ namespace GameLogic.EditorTools
             }
             Check(PauseMenuUIToolkit.IsOpen && GameRoot.IsWorldPaused && InputRouter.ActiveContext == InputContext.Interface,
                 "Esc 打开暂停菜单：世界暂停、输入切到界面上下文");
+            // FG0-ARCH-05（FGR-GEN-001）：暂停菜单显示世界种子与世界设置，“复制种子”写进剪贴板。
+            CampaignState st = CampaignSession.Current;
+            string seed = st?.World != null ? st.World.WorldSeed.ToString(System.Globalization.CultureInfo.InvariantCulture) : "?";
+            PauseMenuUIToolkit pm = PauseMenuUIToolkit.Instance;
+            Check(pm != null && pm.WorldSeedLabelText.Contains(seed) && pm.WorldSettingsLabelText.Contains("v" + Campaign.WorldGen.WorldGenVersions.Current),
+                $"暂停菜单显示“{pm?.WorldSeedLabelText}”“{pm?.WorldSettingsLabelText}”");
+            string oldClip = GUIUtility.systemCopyBuffer;
+            bool copied = ClickUitk("[PauseMenuHost]", "PauseCopySeed");
+            string clip = GUIUtility.systemCopyBuffer;
+            GUIUtility.systemCopyBuffer = oldClip;
+            Check(copied && clip == seed && pm != null && pm.FeedbackText.Contains(seed), $"点“复制种子”：剪贴板 = {clip}，提示“{pm?.FeedbackText}”");
             Check(ClickUitk("[PauseMenuHost]", "PauseKeyBindings"), "点暂停菜单“按键设置”");
             Next(34, "点“按键设置”");
         }
@@ -809,6 +825,71 @@ namespace GameLogic.EditorTools
             Check(mode != null && mode.IsOpen && mode.DemolishMode && mode.HoverBuildingId == WarehouseBuildingId && !mode.LastResult.Success
                   && mode.StatusIsError && mode.StatusText.Contains("无法重建") && !mode.StatusText.StartsWith("不能放置") && !UiConfirmDialog.IsOpen && kept,
                 $"拆除模式点仓库：不弹确认框，直接拒绝（“{mode?.StatusText}”），仓库保留、未标记拆除（防软锁）");
+            Next(110, "FG0-ARCH-05：检查地形叠加层（按区块跟随镜头）");
+        }
+
+        // ── FG0-ARCH-05：地形叠加层按区块跟随镜头；区块由工作线程流式生成，主线程不卡；镜头平移跨过区块边界后新露出的区块补齐 ──
+
+        private sealed class HeldReader : IInputReader
+        {
+            public KeyCode Held;
+            public Vector3 Mouse;
+
+            public bool GetKey(KeyCode key) => key == Held;
+            public bool GetKeyDown(KeyCode key) => false;
+            public bool GetMouseButtonDown(int button) => false;
+            public bool GetMouseButtonUp(int button) => false;
+            public Vector3 MousePosition => Mouse;
+            public float MouseScrollDelta => 0f;
+        }
+
+        private static void StepWorldPanStart(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Campaign.Regions.WorldTerrainOverlay ov = mode?.TerrainOverlay;
+            Campaign.WorldGen.WorldChunkStreamer streamer = state != null ? Campaign.Grid.HomeGridService.Streamer(state) : null;
+            int r = Campaign.Grid.GridContent.TuningInt("world.view_radius_chunks");
+            int tiles = (2 * r + 1) * (2 * r + 1);
+            Check(ov != null && ov.TileCount == tiles && ov.PlaceholderCount == 0 && BuildModeHudUIToolkit.Instance != null && !BuildModeHudUIToolkit.Instance.GeneratingVisible
+                  && streamer != null && streamer.UsesKernel && streamer.TotalIntegrated > 0,
+                $"地形叠加层按区块显示 {ov?.TileCount}/{tiles} 块、没有“生成中”占位（家园进入后已由工作线程预生成 {streamer?.TotalIntegrated} 块）；世界生成器 = {state?.Grid?.TerrainSourceId} v{state?.World?.GeneratorVersion}");
+            SessionState.SetInt(K + "PanStartChunk", ov != null ? ov.WindowChunkX : int.MinValue);
+            streamer?.ResetMetrics();
+            InputRouter.DebugSetReader(new HeldReader { Held = GameSettings.KeyBindings.GetKey(GameActionId.StrategyPanRight), Mouse = _buildMouse });
+            Next(111, "按住镜头右移键（默认 →）平移镜头");
+        }
+
+        private static void StepWorldPanMoved(double inStep)
+        {
+            if (inStep < 2.0)
+            {
+                return;
+            }
+            InputRouter.DebugSetReader(new ScriptedReader { Mouse = _buildMouse });
+            Next(112, "松开右移键，等新露出的区块补齐");
+        }
+
+        private static void StepWorldPanSettled(double inStep)
+        {
+            if (inStep < 1.0)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Campaign.Regions.WorldTerrainOverlay ov = mode?.TerrainOverlay;
+            Campaign.WorldGen.WorldChunkStreamer streamer = state != null ? Campaign.Grid.HomeGridService.Streamer(state) : null;
+            int startChunk = SessionState.GetInt(K + "PanStartChunk", int.MinValue);
+            Camera cam = Camera.main;
+            Check(ov != null && ov.WindowChunkX > startChunk && ov.PlaceholderCount == 0 && BuildModeHudUIToolkit.Instance != null && !BuildModeHudUIToolkit.Instance.GeneratingVisible,
+                $"镜头右移（x = {cam?.transform.position.x:F1}）跨过区块边界：叠加层窗口从区块 {startChunk} 跟到 {ov?.WindowChunkX}，新露出的区块已补齐、没有残留占位");
+            Check(streamer != null && streamer.MaxTickMs < 16.0,
+                $"平移期间流式加载主线程每帧最多 {streamer?.MaxTickMs:F3} ms（真实 Play，影子工程 batchmode）");
             PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
             Next(98, "按 Esc 退出建造模式");
         }

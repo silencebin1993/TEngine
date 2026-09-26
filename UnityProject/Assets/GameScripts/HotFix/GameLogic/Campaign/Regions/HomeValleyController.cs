@@ -186,6 +186,13 @@ namespace GameLogic.Campaign.Regions
             _cameraDirector?.Tick(_paused);
 
             CampaignState state = CampaignSession.Current;
+            // FG0-ARCH-05（FGR-GEN-050 / FGR-ARC-013）：区块流式加载跟随镜头焦点（俯视正交镜头，焦点 = 镜头 xz）。与游戏时间无关：
+            // 战略暂停、倍速、核心被毁的失败页期间照常进行；生成在工作线程，主线程只在预算内接入结果。
+            if (state != null && _camera != null)
+            {
+                Vector3 camPos = _camera.transform.position;
+                HomeGridService.Streamer(state).Tick(GridCell.FromWorld(new Vector2(camPos.x, camPos.z)));
+            }
             if (state != null && HomeValleySoftlockGuard.IsCoreDestroyed(state))
             {
                 BuildMode.Close(); // 失败页期间不能规划。
@@ -892,6 +899,7 @@ namespace GameLogic.Campaign.Regions
 
             SyncLiveStateBackToRecords();
             BuildMode.Shutdown(); // FG0-ARCH-04：建造模式的虚影 / 叠加层 / 输入上下文与区域成对释放。
+            HomeGridService.ShutdownStreaming(); // FG0-ARCH-05：在飞的区块生成任务与区域成对释放（格网本身保留）。
             HomeValleyBuildMode.Unbind(BuildMode);
             SquadCommands.PointerSuppressed = false;
             DestroyVisuals();

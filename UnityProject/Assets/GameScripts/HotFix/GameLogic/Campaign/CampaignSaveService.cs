@@ -132,6 +132,9 @@ namespace GameLogic.Campaign
         /// <summary>第几日；0 = 统一时钟尚未接入，卡片不显示（FG0-ARCH-01 起有值）。</summary>
         public int Day;
         public int WorldSeed;
+        /// <summary>FG0-ARCH-05：世界设置预设 ID 与生成器版本（存档卡显示世界设置摘要，FG17 第 4 节）。FG0-ARCH-05 之前的存档为空 / 0，卡片不显示。</summary>
+        public string WorldSettingsId;
+        public int GeneratorVersion;
         public bool IsPostgame;
         public bool IsSandbox;
         /// <summary>缩略图文件路径。尚未实现截图（DEBT-FG0SAVE01-01 → FG15-SYS-01），恒为 null。</summary>
@@ -173,6 +176,8 @@ namespace GameLogic.Campaign
         public int Act;
         public int Day;
         public int WorldSeed;
+        public string WorldSettingsId;
+        public int GeneratorVersion;
         public bool IsPostgame;
         public bool IsSandbox;
     }
@@ -277,6 +282,8 @@ namespace GameLogic.Campaign
             state.LastSaveReason = reason;
             state.SchemaVersion = schema;
             state.ContentVersion = CurrentContentVersion;
+            // FG0-ARCH-05（FGR-GEN-060）：把各表面被修改过的区块写进区块差异（只存修改；未修改的读档时按种子重新生成）。
+            WorldGen.WorldGenService.CaptureDiffs(state);
             state.NormalizeForSave();
 
             string dir = SaveDirectory;
@@ -548,6 +555,8 @@ namespace GameLogic.Campaign
             Act = s.Progress?.Act ?? 1,
             Day = s.Clock?.Day ?? 0,
             WorldSeed = s.World?.WorldSeed ?? s.RandomSeed,
+            WorldSettingsId = s.World?.WorldSettingsId,
+            GeneratorVersion = s.World?.GeneratorVersion ?? 0,
             IsPostgame = s.Progress?.IsPostgame ?? false,
             IsSandbox = s.Progress?.IsSandbox ?? false,
         };
@@ -652,6 +661,15 @@ namespace GameLogic.Campaign
             CampaignFgStateDomains.EnsureAll(state);
             state.SchemaVersion = chain.TargetVersion;
 
+            // FG0-ARCH-05（FGR-GEN-061 / 060）：生成器版本比本版本游戏新 → 版本更新（Newer）；已知表面的区块差异损坏 → 正文损坏。
+            if (!WorldGen.WorldGenService.ValidateForLoad(state, out SaveFailureReason worldReason, out string worldMessage))
+            {
+                TEngine.Log.Warning($"[CampaignSaveService] 槽位 {slotIndex} 世界数据无法恢复：{worldMessage}（原文件未改动）");
+                RecordLoadFailure(slotIndex, worldReason, envelope.SchemaVersion);
+                return new LoadResult(worldReason == SaveFailureReason.Newer ? LoadOutcome.Incompatible : LoadOutcome.Corrupt, null, worldMessage,
+                    worldReason, envelope.SchemaVersion);
+            }
+
             SaveNoticeRecord[] notices;
             try
             {
@@ -744,6 +762,8 @@ namespace GameLogic.Campaign
             meta.Act = card.Act;
             meta.Day = card.Day;
             meta.WorldSeed = card.WorldSeed;
+            meta.WorldSettingsId = card.WorldSettingsId;
+            meta.GeneratorVersion = card.GeneratorVersion;
             meta.IsPostgame = card.IsPostgame;
             meta.IsSandbox = card.IsSandbox;
             meta.ThumbnailPath = null;

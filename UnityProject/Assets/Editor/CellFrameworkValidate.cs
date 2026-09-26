@@ -140,6 +140,9 @@ namespace GameLogic.EditorTools
                 // FG0-ARCH-04：格网建造原型与锚点迁移——开局布局表、放置 / 旋转 / 拆除 / 占地校验与负向矩阵、正式输入、
                 // 施工倍速、存读档与旧档迁移、后台一致性、叠加层与建造栏、性能。
                 _fail += FgGridBuildSelfCheck.Run(Report);
+                // FG0-ARCH-05：世界生成与区块流式加载——确定性（四种访问顺序 / 三条编译路径）、随机流分离、表面、规划层、坐标、
+                // 工作线程流式加载与性能、差异存档、生成器版本回归哈希、暂停倍速与后台一致、叠加层“生成中”占位、暂停菜单种子。
+                _fail += FgWorldGenSelfCheck.Run(Report);
             }
             catch (Exception e)
             {

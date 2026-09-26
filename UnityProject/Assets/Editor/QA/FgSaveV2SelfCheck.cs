@@ -8,6 +8,7 @@ using System.Reflection;
 using System.Text;
 using GameConfig.fg;
 using GameLogic.Campaign;
+using GameLogic.Campaign.WorldGen;
 using GameLogic.Campaign.Primitive;
 using GameLogic.Localization;
 using GameLogic.Settings;
@@ -125,8 +126,9 @@ namespace GameLogic.EditorTools
 
             int slot = 0;
             CampaignState s = CampaignState.CreateNew("fgsave-format", "Standard", 13579);
-            Expect(s.World != null && s.World.WorldSeed == 13579 && s.World.GeneratorVersion == 0 && s.Progress.Act == 1 && s.Clock.Day == 0,
-                "新建战役：世界种子 = 战役种子，生成器版本 0（Demo 固定地图），第 1 幕，时钟未接入（Day=0）");
+            Expect(s.World != null && s.World.WorldSeed == 13579 && s.World.GeneratorVersion == WorldGenVersions.Current
+                   && s.World.WorldSettingsId == WorldGenContent.DefaultPresetId && s.Progress.Act == 1 && s.Clock.Day == 0,
+                $"新建战役：世界种子 = 战役种子，生成器版本 = 当前 v{WorldGenVersions.Current}（FG0-ARCH-05 起程序生成），世界设置 default，第 1 幕，时钟未接入（Day=0）");
             FillDomains(s);
             string expectDomains = DomainsJson(s);
             SaveResult saved = CampaignSaveService.Save(slot, s, SaveReason.Manual);
@@ -161,7 +163,8 @@ namespace GameLogic.EditorTools
 
         private static void FillDomains(CampaignState s)
         {
-            s.World.GeneratorVersion = 3;
+            // FG0-ARCH-05 起读档会拒绝本版本生成不了的生成器版本（> 当前），这里用当前版本（≠ 字段默认值 0，丢字段仍能被发现）。
+            s.World.GeneratorVersion = WorldGenVersions.Current;
             s.World.WorldSettingsId = "selfcheck";
             s.World.ChunkDiffs = new[]
             {

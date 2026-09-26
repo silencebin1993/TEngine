@@ -21,6 +21,8 @@ namespace GameLogic.UI.Kit
 
         private VisualElement _root;
         private Label _feedback;
+        private Label _worldSeed;
+        private Label _worldSettings;
         private bool _wasPausedBeforeOpen;
 
         protected override string UxmlLocation => "PauseMenu";
@@ -63,6 +65,13 @@ namespace GameLogic.UI.Kit
                 NotificationHudUIToolkit.OpenCenter();
             });
             Bind(root, "PauseSaveQuit", "ui.pause.save_and_quit", AskSaveAndQuit);
+            _worldSeed = root.Q<Label>("PauseWorldSeed");
+            _worldSettings = root.Q<Label>("PauseWorldSettings");
+            Button copy = Bind(root, "PauseCopySeed", "ui.pause.copy_seed", CopySeed);
+            if (copy != null)
+            {
+                UiTooltip.Attach(copy, () => new TooltipContent { Title = GameText.Get("ui.pause.copy_seed"), Body = SeedText() });
+            }
             Button gallery = Bind(root, "PauseGallery", "ui.pause.gallery", UiKitGalleryUIToolkit.Open);
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             gallery?.RemoveFromClassList("uk-hidden");
@@ -107,6 +116,7 @@ namespace GameLogic.UI.Kit
                 {
                     _feedback.text = string.Empty;
                 }
+                RefreshWorldInfo();
             }
             else
             {
@@ -116,6 +126,44 @@ namespace GameLogic.UI.Kit
                 {
                     GameRoot.SetWorldPaused(false);
                 }
+            }
+        }
+
+        /// <summary>种子与世界设置（FGR-GEN-001：种子显示在暂停菜单、可以一键复制；FG17 第 4 节：暂停菜单里可以查看当前世界的设置）。</summary>
+        public void RefreshWorldInfo()
+        {
+            CampaignState state = CampaignSession.Current;
+            if (_worldSeed != null)
+            {
+                _worldSeed.text = state?.World != null ? GameText.Format("ui.pause.world_seed", SeedText()) : string.Empty;
+            }
+            if (_worldSettings != null)
+            {
+                _worldSettings.text = Campaign.WorldGen.WorldGenService.DescribeSettings(state);
+            }
+        }
+
+        public string WorldSeedLabelText => _worldSeed?.text ?? string.Empty;
+        public string WorldSettingsLabelText => _worldSettings?.text ?? string.Empty;
+        public string FeedbackText => _feedback?.text ?? string.Empty;
+
+        private static string SeedText() =>
+            CampaignSession.Current?.World != null
+                ? CampaignSession.Current.World.WorldSeed.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                : string.Empty;
+
+        /// <summary>把世界种子复制到系统剪贴板（按钮与自检同一入口）。</summary>
+        public void CopySeed()
+        {
+            string seed = SeedText();
+            if (string.IsNullOrEmpty(seed))
+            {
+                return;
+            }
+            UnityEngine.GUIUtility.systemCopyBuffer = seed;
+            if (_feedback != null)
+            {
+                _feedback.text = GameText.Format("ui.pause.seed_copied", seed);
             }
         }
 

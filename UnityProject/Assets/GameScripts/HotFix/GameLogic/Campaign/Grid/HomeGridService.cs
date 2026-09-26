@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using GameConfig.fg;
 using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Regions;
+using GameLogic.Campaign.WorldGen;
 using TEngine;
 using UnityEngine;
 
@@ -43,12 +44,22 @@ namespace GameLogic.Campaign.Grid
         /// <summary>当前开局布局 / 迁移版本。写入 GridState.LayoutVersion。</summary>
         public const int LayoutVersion = 1;
 
-        public const string SurfaceId = "home";
+        /// <summary>家园所在的表面（FGR-ARC-014：家园、各阵营领地、白潮滩头都在同一个星球表面上）。</summary>
+        public const string SurfaceId = WorldGenContent.EarthSurfaceId;
 
         private static CampaignState _state;
         private static HomeGridMap _map;
         private static BuildingRecord[] _recordsRef;
         private static int _contentRevision;
+        private static int _worldRevision;
+        private static WorldChunkStreamer _streamer;
+        // 生成身份缓存（逐字段比较，查询热路径上不拼字符串）。
+        private static string _keySourceId;
+        private static int _keySeed;
+        private static int _keyVersion;
+        private static string _keySettings;
+        private static int _keyCoreX;
+        private static int _keyCoreY;
         private static int _occupancyRebuilds;
         private static readonly Dictionary<string, int> TypeCounts = new Dictionary<string, int>(StringComparer.Ordinal);
         private static readonly Dictionary<string, BuildingRecord> ById = new Dictionary<string, BuildingRecord>(StringComparer.Ordinal);
@@ -76,13 +87,18 @@ namespace GameLogic.Campaign.Grid
                 CampaignFgStateDomains.EnsureAll(state);
             }
             EnsureMigrated(state);
-            if (!ReferenceEquals(state, _state) || _map == null || _contentRevision != GridContent.Revision
-                || !string.Equals(_map.TerrainSource.SourceId, state.Grid.TerrainSourceId, StringComparison.Ordinal))
+            if (!ReferenceEquals(state, _state) || _map == null || _contentRevision != GridContent.Revision || _worldRevision != WorldGenContent.Revision
+                || !SameGenerationKey(state))
             {
+                DisposeStreamer();
                 _state = state;
                 _contentRevision = GridContent.Revision;
-                _map = new HomeGridMap(GridContent.TuningInt("grid.chunk_size"), CreateTerrainSource(state));
+                _worldRevision = WorldGenContent.Revision;
+                _map = new HomeGridMap(GridContent.TuningInt("grid.chunk_size"), CreateTerrainSource(state), SurfaceId);
+                // FG0-ARCH-05（FGR-GEN-060）：读档后被修改过的区块在生成时套上存档里的差异。
+                _map.SetSavedDiffs(state.World?.ChunkDiffs);
                 _map.SetExplored(state.Grid.Explored);
+                RememberGenerationKey(state);
                 _recordsRef = null;
             }
             if (!ReferenceEquals(_recordsRef, state.BuildingRecords))
@@ -92,20 +108,72 @@ namespace GameLogic.Campaign.Grid
             return _map;
         }
 
-        /// <summary>丢掉缓存（测试注入表、换战役后调用；下次查询重新生成）。</summary>
+        /// <summary>丢掉缓存（测试注入表、换战役后调用；下次查询重新生成）。在飞的生成任务一并释放。</summary>
         public static void Invalidate()
         {
+            DisposeStreamer();
             _state = null;
             _map = null;
             _recordsRef = null;
+            WorldGenService.Invalidate();
+        }
+
+        /// <summary>与 <paramref name="state"/> 绑定的格网（本次会话已为它建过图）；没绑定返回 null，不会新建。存档时收集区块差异用。</summary>
+        public static HomeGridMap BoundMap(CampaignState state) => state != null && ReferenceEquals(state, _state) ? _map : null;
+
+        /// <summary>家园表面（地球）的区块流式加载器（FGR-GEN-050）。区域每帧用镜头焦点驱动它；换战役 / 换地形来源时自动重建。</summary>
+        public static WorldChunkStreamer Streamer(CampaignState state)
+        {
+            HomeGridMap map = MapFor(state);
+            if (_streamer == null || _streamer.IsDisposed || !ReferenceEquals(_streamer.Map, map))
+            {
+                _streamer?.Dispose();
+                _streamer = new WorldChunkStreamer(map);
+            }
+            return _streamer;
+        }
+
+        /// <summary>区域卸载时调用：释放在飞生成任务的原生内存（格网本身保留，回家时继续用）。</summary>
+        public static void ShutdownStreaming() => DisposeStreamer();
+
+        private static void DisposeStreamer()
+        {
+            _streamer?.Dispose();
+            _streamer = null;
+        }
+
+        private static bool SameGenerationKey(CampaignState state)
+        {
+            WorldGenState w = state.World;
+            GridCell core = CorePivot(state);
+            return string.Equals(_keySourceId, state.Grid.TerrainSourceId, StringComparison.Ordinal)
+                   && _keySeed == (w?.WorldSeed ?? state.RandomSeed) && _keyVersion == (w?.GeneratorVersion ?? 0)
+                   && string.Equals(_keySettings, w?.WorldSettingsId, StringComparison.Ordinal) && _keyCoreX == core.X && _keyCoreY == core.Y;
+        }
+
+        private static void RememberGenerationKey(CampaignState state)
+        {
+            WorldGenState w = state.World;
+            GridCell core = CorePivot(state);
+            _keySourceId = state.Grid.TerrainSourceId;
+            _keySeed = w?.WorldSeed ?? state.RandomSeed;
+            _keyVersion = w?.GeneratorVersion ?? 0;
+            _keySettings = w?.WorldSettingsId;
+            _keyCoreX = core.X;
+            _keyCoreY = core.Y;
         }
 
         private static IGridTerrainSource CreateTerrainSource(CampaignState state)
         {
-            // FG0-ARCH-05 的世界生成器落地后在这里按 TerrainSourceId 选择来源；目前只有原型来源。
+            // FG0-ARCH-05（FGR-GEN-061）：按存档记录的来源选择——worldgen = 世界生成器（按 WorldGenState.GeneratorVersion 的参数行）；
+            // prototype-v1 = FG0-ARCH-05 之前存档的原型地形（生成器版本 0 的旧路径，保留不改）。
             if (string.IsNullOrEmpty(state.Grid.TerrainSourceId))
             {
-                state.Grid.TerrainSourceId = GridTerrainPrototype.Id;
+                state.Grid.TerrainSourceId = state.World != null && state.World.GeneratorVersion >= 1 ? WorldTerrainSource.Id : GridTerrainPrototype.Id;
+            }
+            if (state.Grid.TerrainSourceId == WorldTerrainSource.Id && state.World != null && state.World.GeneratorVersion >= 1)
+            {
+                return WorldGenService.CreateSource(state, SurfaceId);
             }
             return new GridTerrainPrototype(state.World != null ? state.World.WorldSeed : state.RandomSeed, CorePivot(state));
         }
@@ -169,7 +237,16 @@ namespace GameLogic.Campaign.Grid
             state.Grid.CorePivotX = 0;
             state.Grid.CorePivotY = 0;
             EnsureStartExplored(state);
-            state.Grid.TerrainSourceId = GridTerrainPrototype.Id;
+            // FG0-ARCH-05：新战役（WorldGenState.GeneratorVersion >= 1）的地形来自世界生成器；版本 0 的战役沿用原型来源。
+            if (state.World != null && state.World.GeneratorVersion >= 1)
+            {
+                WorldGenService.PresetFor(state); // 世界设置不存在时回退 default（只可能发生在从没生成过地形的战役上）
+                state.Grid.TerrainSourceId = WorldTerrainSource.Id;
+            }
+            else
+            {
+                state.Grid.TerrainSourceId = GridTerrainPrototype.Id;
+            }
             state.Grid.LayoutVersion = LayoutVersion;
         }
 
@@ -257,7 +334,8 @@ namespace GameLogic.Campaign.Grid
             EnsureStartExplored(state);
             if (string.IsNullOrEmpty(state.Grid.TerrainSourceId))
             {
-                state.Grid.TerrainSourceId = GridTerrainPrototype.Id;
+                // FG0-ARCH-05：FG0-ARCH-04 之前的存档生成器版本都是 0 → 原型地形；版本 >= 1 的战役（还没进过家园）→ 世界生成器。
+                state.Grid.TerrainSourceId = state.World != null && state.World.GeneratorVersion >= 1 ? WorldTerrainSource.Id : GridTerrainPrototype.Id;
             }
             state.Grid.LayoutVersion = LayoutVersion;
             if (any)
@@ -267,6 +345,15 @@ namespace GameLogic.Campaign.Grid
         }
 
         // ── 查询 ─────────────────────────────────────────────────────────────────
+
+        /// <summary>归还核心的占地范围（叠加层画核心通道用）；没有核心返回 false。</summary>
+        public static bool TryGetCoreBounds(CampaignState state, out GridCell min, out GridCell max)
+        {
+            MapFor(state);
+            min = _coreMin;
+            max = _coreMax;
+            return _hasCore;
+        }
 
         public static BuildingRecord FindBuilding(CampaignState state, string buildingId)
         {
@@ -398,9 +485,17 @@ namespace GameLogic.Campaign.Grid
 
             CollectObstacles(state);
             GridMath.FootprintCells(pivot, g.FootprintW, g.FootprintH, r.Rotation, r.Cells);
+            int worldLimit = GridContent.TuningInt("world.coord_limit");
             for (int i = 0; i < r.Cells.Count; i++)
             {
                 GridCell c = r.Cells[i];
+                if (!WorldCoord.WithinLimit(c, worldLimit))
+                {
+                    // FG0-ARCH-05（FGR-GEN-051）：超出世界坐标上限——不去生成那里的区块，直接给原因。
+                    r.Add(new GridReason(GridBlockReason.WorldLimit, "grid.reason.world_limit", worldLimit.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+                    r.CellOk.Add(false);
+                    continue;
+                }
                 HomeGridMap.Chunk chunk = map.ChunkAt(c, out int idx);
                 bool ok = true;
                 if (chunk.Explored[idx] == 0)

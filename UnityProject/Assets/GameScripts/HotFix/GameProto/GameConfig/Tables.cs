@@ -139,9 +139,25 @@ public partial class Tables
     /// </summary>
     public fg.TbStartLayout TbStartLayout {get; }
     /// <summary>
+    /// 表面
+    /// </summary>
+    public fg.TbSurface TbSurface {get; }
+    /// <summary>
+    /// 领地规划
+    /// </summary>
+    public fg.TbTerritory TbTerritory {get; }
+    /// <summary>
     /// 界面调参
     /// </summary>
     public fg.TbUiTuning TbUiTuning {get; }
+    /// <summary>
+    /// 生成器版本
+    /// </summary>
+    public fg.TbWorldGenVersion TbWorldGenVersion {get; }
+    /// <summary>
+    /// 世界设置预设
+    /// </summary>
+    public fg.TbWorldPreset TbWorldPreset {get; }
     /// <summary>
     /// 细胞阶段场地与时间轴
     /// </summary>
@@ -217,7 +233,11 @@ public partial class Tables
         TbNotifyType = new fg.TbNotifyType(loader("fg_tbnotifytype"));
         TbRemovedContent = new fg.TbRemovedContent(loader("fg_tbremovedcontent"));
         TbStartLayout = new fg.TbStartLayout(loader("fg_tbstartlayout"));
+        TbSurface = new fg.TbSurface(loader("fg_tbsurface"));
+        TbTerritory = new fg.TbTerritory(loader("fg_tbterritory"));
         TbUiTuning = new fg.TbUiTuning(loader("fg_tbuituning"));
+        TbWorldGenVersion = new fg.TbWorldGenVersion(loader("fg_tbworldgenversion"));
+        TbWorldPreset = new fg.TbWorldPreset(loader("fg_tbworldpreset"));
         TbCellArena = new fp.TbCellArena(loader("fp_tbcellarena"));
         TbCreatureArena = new fp.TbCreatureArena(loader("fp_tbcreaturearena"));
         TbEnemy = new fp.TbEnemy(loader("fp_tbenemy"));
@@ -265,7 +285,11 @@ public partial class Tables
         TbNotifyType.ResolveRef(this);
         TbRemovedContent.ResolveRef(this);
         TbStartLayout.ResolveRef(this);
+        TbSurface.ResolveRef(this);
+        TbTerritory.ResolveRef(this);
         TbUiTuning.ResolveRef(this);
+        TbWorldGenVersion.ResolveRef(this);
+        TbWorldPreset.ResolveRef(this);
         TbCellArena.ResolveRef(this);
         TbCreatureArena.ResolveRef(this);
         TbEnemy.ResolveRef(this);

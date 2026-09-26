@@ -472,7 +472,8 @@ namespace GameLogic.EditorTools
                 }
                 string[] f = raw.Split('\t');
                 // FG0-ARCH-04 的五张格网表（G/P/L/X/H）由 FgGridBuildSelfCheck A 段逐字段比对，这里只数本 Story 的四类。
-                if (f[0] == "G" || f[0] == "P" || f[0] == "L" || f[0] == "X" || f[0] == "H")
+                // FG0-ARCH-05 的世界生成四张表（WV/WP/WS/WT）由 FgWorldGenSelfCheck 逐字段比对。
+                if (f[0] == "G" || f[0] == "P" || f[0] == "L" || f[0] == "X" || f[0] == "H" || f[0].StartsWith("W", StringComparison.Ordinal))
                 {
                     continue;
                 }

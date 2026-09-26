@@ -222,7 +222,8 @@ namespace GameLogic.Campaign
                 NextMachineLogicId = 1,
                 NextMachineDisplayNumber = 1,
                 // FG0-SAVE-01：世界种子在新建时确定，等于战役种子（FGR-ARC-010：玩法随机流由它派生）。
-                World = new WorldGenState { WorldSeed = randomSeed },
+                // FG0-ARCH-05：新战役用当前生成器版本与默认世界设置（FGR-GEN-061；世界设置界面在 FG3-GEN-01）。
+                World = NewWorld(randomSeed),
                 Progress = new CampaignProgressState(),
                 Clock = new GameClockState(),
                 Grid = new GridState(),
@@ -240,6 +241,13 @@ namespace GameLogic.Campaign
                 SaveHistory = new SaveHistoryState(),
                 Notifications = new NotificationHistoryState(),
             };
+        }
+
+        private static WorldGenState NewWorld(int seed)
+        {
+            var w = new WorldGenState { WorldSeed = seed };
+            WorldGen.WorldGenService.InitializeNewWorld(w);
+            return w;
         }
 
         /// <summary>STORY-EXECUTION-CARDS.md #ER1-SAVE-01："序列化前对稳定 ID 排序"——

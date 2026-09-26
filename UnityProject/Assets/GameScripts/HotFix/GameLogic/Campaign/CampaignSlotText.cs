@@ -82,7 +82,7 @@ namespace GameLogic.Campaign
         public static string DifficultyName(string difficultyId) =>
             GameText.Get($"difficulty.{(string.IsNullOrEmpty(difficultyId) ? "standard" : difficultyId.ToLowerInvariant())}.name");
 
-        /// <summary>存档卡第一行的正式版字段（FGR-SYS-007）：幕｜第几日（时钟接入后）｜难度｜种子｜后日谈 / 沙盒。</summary>
+        /// <summary>存档卡第一行的正式版字段（FGR-SYS-007）：幕｜第几日（时钟接入后）｜难度｜种子｜世界设置｜后日谈 / 沙盒。</summary>
         public static string FgFields(CampaignSlotMetadata meta)
         {
             var parts = new List<string> { GameText.Format("save.card.act", Math.Max(1, meta.Act)) };
@@ -92,6 +92,11 @@ namespace GameLogic.Campaign
             }
             parts.Add(DifficultyName(meta.DifficultyId));
             parts.Add(GameText.Format("save.card.seed", meta.WorldSeed.ToString(CultureInfo.InvariantCulture)));
+            if (!string.IsNullOrEmpty(meta.WorldSettingsId))
+            {
+                // FG17 第 4 节：存档卡片显示种子和世界设置摘要。FG0-ARCH-05 之前的存档卡没有这个字段，不显示。
+                parts.Add(GameText.Format("save.card.world", WorldGen.WorldGenService.PresetName(meta.GeneratorVersion, meta.WorldSettingsId)));
+            }
             if (meta.IsPostgame)
             {
                 parts.Add(GameText.Get("save.card.postgame"));
