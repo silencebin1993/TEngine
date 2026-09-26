@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using GameLogic.UI.Common;
+using BinGames.Sim.Combat;
 using GameLogic.Campaign.Blueprint;
+using GameLogic.Campaign.Combat;
 using GameLogic.Campaign.Content;
 using GameLogic.Campaign.WorldSim;
 using GameLogic.Core;
@@ -47,10 +49,34 @@ namespace GameLogic.Campaign.Regions
 
         /// <summary>FG0-UX-01：通知“定位”要让当前区域的镜头飞到事件位置（只读访问，不改所有权）。</summary>
         public CameraDirector CameraDirector => _cameraDirector;
+        /// <summary>本地点机器的逻辑句柄（战斗内核单位的门面，不是表现对象；FG0-ARCH-03）。</summary>
         private readonly List<HomeValleyMachineMarker> _machineMarkers = new List<HomeValleyMachineMarker>(5);
+        /// <summary>FG0-ARCH-03：本地点的战斗内核（机器、敌人、首领主核心的逐单位逻辑都在里面）。</summary>
+        private CombatSite _combat;
+        private FoundryOutpostCombatRules _combatRules;
+        private RegionSquadCommandContext _squadCtx;
+        /// <summary>上一次与内核对账时的敌人记录数组（首领初始化 / 召唤会替换数组；引用变了才对账，O(1) 判定）。</summary>
+        private RegionEnemyRecord[] _lastRoster;
+        public CombatSite Combat => _combat;
         private HomeValleyMachineMarker _selected;
         private HomeValleyMachineMarker _possessed;
         private bool _wipeResolved;
+        /// <summary>FG0-ARCH-03：全灭检测里“记录侧还有存活机器”的缓存，按 <see cref="MachineRegistry.RosterRevision"/> 失效
+        /// （名册没变的步不再逐台扫描记录，O(1)）。</summary>
+        private int _wipeRosterRevision = int.MinValue;
+        private bool _wipeRecordAlive;
+
+        // FG0-ARCH-03：核心门三灯的输入快照。三灯要逐台机器解析当前蓝图（O(机器数)，还有分配），只在输入变化时重算：
+        // 机器名册版本号（存活 / 地点 / 改造）、解锁表、事件账本（熔穿过载充能）、蓝图表、地点记录表都是整体替换的数组，按引用比较即可。
+        private int _gateRosterRevision = int.MinValue;
+        private object _gateStateRef;
+        private object _gateUnlockRef;
+        private object _gateLedgerRef;
+        private object _gateBlueprintsRef;
+        private object _gateRegionsRef;
+
+        /// <summary>自检用：核心门三灯真正重算（O(机器数)）的次数；输入没变的步不增加。</summary>
+        public int CoreGateRecomputeCount { get; private set; }
 
         public const float InteractRange = 3f;
 
@@ -106,16 +132,19 @@ namespace GameLogic.Campaign.Regions
                 _obstacles.Add((anchor.Position, anchor.ClearanceRadius));
             }
 
-            BuildVisuals(state);
+            // FG0-ARCH-03：机器与敌人进本地点的战斗内核（读档时从快照恢复；新派遣按记录建）。表现对象只在被观察时建（SetObserved）。
+            OpenCombat(state, resume);
             SetupCameraProfile();
             SetupSquadCommands();
             SetupControlSystem();
             SetupInteraction();
-            _root.SetActive(false); // FG0-ARCH-01：镜头观察这里时才显示（WorldView.Observe → SetObserved）。
 
             IsLoaded = true;
             // FG0-UX-01（FGR-UX-020 定位）：机器实时位置由 WorldSimulation.LivePosition 统一向各地点查询。
             _wipeResolved = false;
+            _wipeRosterRevision = int.MinValue;
+            _gateRosterRevision = int.MinValue;
+            _gateStateRef = null;
 
             SaveResult saveResult = CampaignAutoSaveService.SaveAuto(SaveReason.ExpeditionDepartConfirm);
             if (!saveResult.Success)
@@ -146,7 +175,8 @@ namespace GameLogic.Campaign.Regions
                     i++;
                     continue;
                 }
-                record.RegionId = FoundryOutpostLayout.RegionId;
+                CombatSites.ExportMachine(logicId); // FG0-ARCH-03：热量 / 冷却随机器走，不因换地点清零。
+                MachineRegistry.MoveToRegion(record, FoundryOutpostLayout.RegionId);
                 Vector2 offset = new Vector2((i % 3 - 1) * 2.5f, -1f - (i / 3) * 2.5f);
                 record.WorldPosition = spawnBase + offset;
                 i++;
@@ -176,49 +206,22 @@ namespace GameLogic.Campaign.Regions
         public WorldCameraProfile CameraProfile => _cameraProfile;
         public Vector2? LivePosition(int logicId) => FindMachineMarkerPosition(logicId);
 
-        public int LiveMachineCount
-        {
-            get
-            {
-                int n = 0;
-                foreach (HomeValleyMachineMarker m in _machineMarkers)
-                {
-                    if (m != null && MachineRegistry.TryGetRecord(m.LogicId, out MachineRecord r) && r.IsAlive && r.RegionId == SiteId)
-                    {
-                        n++;
-                    }
-                }
-                return n;
-            }
-        }
+        public int LiveMachineCount => _combat != null ? _combat.CountAliveMachines() : 0;
 
-        /// <summary>“飞到远征地点”的落点：存活机器的中心；全灭时取镜头起始点。</summary>
-        public Vector2 DefaultFocus
-        {
-            get
-            {
-                Vector2 sum = Vector2.zero;
-                int n = 0;
-                foreach (HomeValleyMachineMarker m in _machineMarkers)
-                {
-                    if (m != null && MachineRegistry.TryGetRecord(m.LogicId, out MachineRecord r) && r.IsAlive)
-                    {
-                        Vector3 p = m.transform.position;
-                        sum += new Vector2(p.x, p.z);
-                        n++;
-                    }
-                }
-                return n > 0 ? sum / n : FoundryOutpostLayout.CameraFocusStart;
-            }
-        }
+        /// <summary>“飞到远征地点”的落点：存活机器的中心（内核位置）；全灭时取镜头起始点。</summary>
+        public Vector2 DefaultFocus =>
+            _combat != null && _combat.TryMachineCentroid(out Vector2 c)
+                ? c
+                : FoundryOutpostLayout.CameraFocusStart;
 
         /// <summary>FG0-ARCH-01：镜头观察 / 离开本地点。离开时释放接入、收起撤离确认；表现对象隐藏不销毁，模拟照常推进。</summary>
         public void SetObserved(bool observed)
         {
-            if (!IsLoaded || _root == null)
+            if (!IsLoaded)
             {
                 return;
             }
+            CampaignState state = CampaignSession.Current;
             if (!observed)
             {
                 if (_possessed != null)
@@ -226,10 +229,17 @@ namespace GameLogic.Campaign.Regions
                     Control.ReleaseToStrategy();
                 }
                 IsEvacPanelOpen = false;
+                // FG0-ARCH-03（DEBT-FG0ARCH01-03）：不被观察时不保留任何表现对象，模拟照常在内核里跑。
+                DestroyVisuals();
+                SquadCommands.ReleaseVisuals();
+                _combat?.ReleaseRender();
+                return;
             }
-            _root.SetActive(observed);
-            CampaignState state = CampaignSession.Current;
-            if (observed && state != null)
+            if (_root == null && state != null)
+            {
+                BuildVisuals(state);
+            }
+            if (state != null)
             {
                 SyncWorldVisuals(state);
             }
@@ -273,6 +283,8 @@ namespace GameLogic.Campaign.Regions
                 // ER5-CTL-01：干扰宽限与受控机死亡回弹（在本帧全部模拟步之后，敌人本帧打死受控机能在同一帧被侦测到）。
                 Control.Tick(frameScaledDt);
             }
+            // FG0-ARCH-03：表现对象按内核位置插值（一次 Burst 作业）+ 实例化绘制（常数次调用，与单位数无关）。
+            _combat?.FrameRender(_camera, GameClock.StepAlpha);
             SyncWorldVisuals(state);
         }
 
@@ -289,15 +301,15 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
-            TickMachineMovement(dt);
             SquadCommands.TickSim(dt);
-            FoundryOutpostRegion.RecomputeCoreGate(state);
+            RecomputeCoreGateIfInputsChanged(state);
             TickCoreZoneEntry(state);
-            FoundryOutpostCoreBoss.Tick(state, dt, BuildVisibleMachines(), IsLineOfSightClear);
-            CannonCombat.TickHeatDissipation(state, dt);
-            FoundryOutpostRegion.TickEnemies(state, dt);
-            FoundryOutpostEnemyAi.Tick(state, dt, BuildVisibleMachines(), IsLineOfSightClear);
-            TickDiscovery(state);
+            FoundryOutpostCoreBoss.Tick(state, dt); // 首领阶段状态机（O(1)）；主核心开火在内核里。
+            SyncEnemyRosterIfChanged(state);          // 首领初始化 / 召唤替换了记录数组时才对账。
+            CombatDemoContent.SyncBossFlags(_combat, state); // 阶段 → 内核标志（O(3)）。
+            FoundryOutpostRegion.TickEnemies(state, dt); // 警戒值衰减（O(1)）。
+            // FG0-ARCH-03：机器移动与编队命令、重炮散热、护甲机 / 步进炮 / 维修机 / 干扰支援 / 主核心的 AI 与攻击、兴趣点发现——全部在战斗内核的一步里（Burst）。
+            _combat?.Step(dt, GameClock.GameSeconds);
             TickWipeDetection(state);
         }
 
@@ -305,6 +317,26 @@ namespace GameLogic.Campaign.Regions
         /// Boss 尚未初始化）时触发一次 <see cref="SaveReason.BossEngageEnter"/> 自动档，再
         /// <see cref="FoundryOutpostCoreBoss.EnsureInitialized"/>。不限直控，编队 Move 命令把机器带
         /// 进去同样触发——两条穿越路径（直控 WASD/编队 Move）都要能触发首次进场，不只认直控。</summary>
+        /// <summary>FG0-ARCH-03：每步刷新 <see cref="RegionRecord.CoreGateUnlocked"/>（Demo 每帧整套重算）——输入没变时 O(1) 跳过，
+        /// 结果与每步重算相同（自检“核心门三灯按输入变化重算”对照）。进场时仍整套重算一次。</summary>
+        private void RecomputeCoreGateIfInputsChanged(CampaignState state)
+        {
+            if (_gateRosterRevision == MachineRegistry.RosterRevision && ReferenceEquals(_gateStateRef, state)
+                && ReferenceEquals(_gateUnlockRef, state.UnlockedContentIds) && ReferenceEquals(_gateLedgerRef, state.EventLedger)
+                && ReferenceEquals(_gateBlueprintsRef, state.BlueprintRecords) && ReferenceEquals(_gateRegionsRef, state.RegionRecords))
+            {
+                return;
+            }
+            _gateRosterRevision = MachineRegistry.RosterRevision;
+            _gateStateRef = state;
+            _gateUnlockRef = state.UnlockedContentIds;
+            _gateLedgerRef = state.EventLedger;
+            _gateBlueprintsRef = state.BlueprintRecords;
+            _gateRegionsRef = state.RegionRecords;
+            CoreGateRecomputeCount++;
+            FoundryOutpostRegion.RecomputeCoreGate(state);
+        }
+
         private void TickCoreZoneEntry(CampaignState state)
         {
             RegionRecord region = FoundryOutpostRegion.Find(state);
@@ -312,7 +344,7 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
-            bool anyCrossed = _machineMarkers.Any(m => m != null && m.transform.position.z > FoundryOutpostLayout.CoreGateBlockLineY);
+            bool anyCrossed = _combat != null && _combat.AnyMachineBeyondY(FoundryOutpostLayout.CoreGateBlockLineY);
             if (!anyCrossed)
             {
                 return;
@@ -346,31 +378,20 @@ namespace GameLogic.Campaign.Regions
 
         private bool _bossEngagePending;
 
-        private void TickDiscovery(CampaignState state)
-        {
-            foreach (HomeValleyMachineMarker marker in _machineMarkers)
-            {
-                if (marker == null)
-                {
-                    continue;
-                }
-                Vector3 p = marker.transform.position;
-                var pos2 = new Vector2(p.x, p.z);
-                foreach (FoundryOutpostLayout.Anchor anchor in FoundryOutpostLayout.AllAnchors())
-                {
-                    FoundryOutpostRegion.TryDiscover(state, anchor.Id, pos2, anchor.Position);
-                }
-            }
-        }
-
         private void TickWipeDetection(CampaignState state)
         {
             if (_wipeResolved || _machineMarkers.Count == 0)
             {
                 return;
             }
-            bool anyAlive = MachineRegistry.AllRecords
-                .Any(m => m != null && m.RegionId == FoundryOutpostLayout.RegionId && m.IsAlive);
+            // 内核存活计数（AOT）+ 记录侧存活（只在机器名册版本号变化后重扫一次，平时 O(1)）。
+            bool kernelAlive = _combat != null && _combat.CountAliveMachines() > 0;
+            if (kernelAlive && _wipeRosterRevision != MachineRegistry.RosterRevision)
+            {
+                _wipeRosterRevision = MachineRegistry.RosterRevision;
+                _wipeRecordAlive = MachineRegistry.AllRecords.Any(m => m != null && m.RegionId == FoundryOutpostLayout.RegionId && m.IsAlive);
+            }
+            bool anyAlive = kernelAlive && _wipeRecordAlive;
             if (anyAlive)
             {
                 return;
@@ -394,6 +415,8 @@ namespace GameLogic.Campaign.Regions
             CampaignState state = CampaignSession.Current;
             if (state != null)
             {
+                // FG0-ARCH-03：内核随后释放——积压的玩法事件（大量同时阵亡时跨步排队的阵亡、掉落、反馈）先全部结算，不随队列丢掉。
+                _combat?.FlushPendingEvents();
                 SyncLiveStateBackToRecords();
                 if (evacuateSuccess && !_wipeResolved)
                 {
@@ -405,7 +428,7 @@ namespace GameLogic.Campaign.Regions
                     {
                         if (MachineRegistry.TryGetRecord(logicId, out MachineRecord record))
                         {
-                            record.RegionId = HomeValleyLayout.RegionId;
+                            MachineRegistry.MoveToRegion(record, HomeValleyLayout.RegionId);
                             record.WorldPosition = HomeValleyLayout.Core.Position + new Vector2(2f, -2f);
                         }
                     }
@@ -418,6 +441,12 @@ namespace GameLogic.Campaign.Regions
                 state.CurrentRegionId = HomeValleyLayout.RegionId;
             }
             DestroyVisuals();
+            SquadCommands.ReleaseVisuals();
+            // FG0-ARCH-03：远征结束（或整个世界卸载），本地点的战斗内核释放；存档里的快照随之删除（记录已写回）。
+            CombatSites.Close(SiteId, state, dropRecord: true);
+            _combat = null;
+            _lastRoster = null;
+            _machineMarkers.Clear();
             // FG0-ARCH-01：镜头归全局镜头管理器；观察中的地点被卸载时它会自动回到家园（WorldView.FrameEnd）。
             _possessed = null;
             _selected = null;
@@ -429,18 +458,8 @@ namespace GameLogic.Campaign.Regions
         }
 
         /// <summary>FG0-UX-01：暂停菜单“保存并返回主菜单”存档前调用——只写回实时状态，不卸载区域。</summary>
-        private Vector2? FindMachineMarkerPosition(int logicId)
-        {
-            foreach (HomeValleyMachineMarker marker in _machineMarkers)
-            {
-                if (marker != null && marker.LogicId == logicId)
-                {
-                    Vector3 p = marker.transform.position;
-                    return new Vector2(p.x, p.z);
-                }
-            }
-            return null;
-        }
+        private Vector2? FindMachineMarkerPosition(int logicId) =>
+            _combat != null && _combat.TryGetMachinePosition(logicId, out Vector2 p) ? p : (Vector2?)null;
 
         public void SyncLiveStateForSave()
         {
@@ -450,18 +469,23 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
+        /// <summary>内核实时状态写回记录（机器位置 / 热量 / 冷却、敌人位置 / 血量 / 计时、标记）。内核快照本身由 CombatSites.WriteTo 写。</summary>
         private void SyncLiveStateBackToRecords()
         {
+            CampaignState state = CampaignSession.Current;
+            if (_combat == null || _combat.IsDisposed || state == null)
+            {
+                return;
+            }
             foreach (HomeValleyMachineMarker marker in _machineMarkers)
             {
-                if (marker == null)
+                if (marker != null)
                 {
-                    continue;
+                    _combat.ExportMachine(marker.LogicId, includePosition: true);
                 }
-                Vector3 p = marker.transform.position;
-                float health = MachineRegistry.TryGetRecord(marker.LogicId, out MachineRecord rec) ? rec.Health : 100f;
-                MachineRegistry.SyncLiveState(marker.LogicId, new Vector2(p.x, p.z), health, null);
             }
+            _combat.ExportEnemies(state);
+            _combat.ExportMarks(FoundryOutpostRegion.Find(state), GameClock.GameSeconds);
         }
 
         // ── 交互挂载点 ────────────────────────────────────────────────────
@@ -474,8 +498,7 @@ namespace GameLogic.Campaign.Regions
                 {
                     continue;
                 }
-                Vector3 p = marker.transform.position;
-                if (Vector2.Distance(new Vector2(p.x, p.z), anchorPosition) <= InteractRange)
+                if (Vector2.Distance(marker.Position, anchorPosition) <= InteractRange)
                 {
                     logicId = marker.LogicId;
                     return true;
@@ -567,7 +590,7 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
-            HomeValleyMachineMarker marker = hit.collider.GetComponent<HomeValleyMachineMarker>();
+            HomeValleyMachineMarker marker = hit.collider.GetComponent<MachineView>()?.Marker;
             if (marker != null)
             {
                 _selected?.SetSelected(false);
@@ -602,9 +625,9 @@ namespace GameLogic.Campaign.Regions
             {
                 _lastFacing = new Vector2(x, z).normalized;
             }
-            _possessed.DirectMove(new Vector3(x, 0f, z), dt);
-            ClampPossessedAgainstCoreGate();
-            ClampPossessedAgainstCoreLockout();
+            // FG0-ARCH-03：直控输入交给内核（模拟步里按机器速度移动并按封锁线钳制；暂停时不走步）。
+            _possessed.SetDirectInput(new Vector2(x, z));
+            UpdateDirectClamp();
 
             if (InputRouter.GetMouseButtonDown(0, InputScope.Direct) &&
                 InputRouter.TryGetPointer(InputScope.Direct, out Vector3 aimPointer))
@@ -613,49 +636,15 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        /// <summary>ER6-REGION-01："物理碰撞"这一重控制——直控 WASD 移动结束后，若门锁定且当前
-        /// 受控机已越过核心分区封锁线，立即把它推回线内（同一帧修正，不产生可感知的"穿模一下"）。
-        /// 与编队 Move 命令走 <see cref="ClampAgainstCoreGate"/> 裁剪目的地是两条独立路径——直控没有
-        /// "目的地"概念（逐帧累积位移），只能在位移发生后做边界钳制，这正是与"导航阻挡"（钳制目的地）
-        /// 刻意区分开的第二重控制，不是同一机制的重复实现。</summary>
-        private void ClampPossessedAgainstCoreGate()
+        /// <summary>ER6-REGION-01 / ER7-CORE-01：直控的两重物理钳制（门锁定挡“进”：y 上限 = 封锁线；Phase2 区域封锁挡“出”：y 下限 = 封锁线）。
+        /// 钳制在内核的直控移动里做（同一步内生效，不产生可感知的“穿模一下”），这里每帧只写两个数（O(1)）。</summary>
+        private void UpdateDirectClamp()
         {
-            if (_possessed == null)
-            {
-                return;
-            }
             CampaignState state = CampaignSession.Current;
             RegionRecord region = state != null ? FoundryOutpostRegion.Find(state) : null;
-            if (region == null || region.CoreGateUnlocked)
-            {
-                return;
-            }
-            Vector3 p = _possessed.transform.position;
-            if (p.z > FoundryOutpostLayout.CoreGateBlockLineY)
-            {
-                _possessed.transform.position = new Vector3(p.x, p.y, FoundryOutpostLayout.CoreGateBlockLineY);
-            }
-        }
-
-        /// <summary>ER7-CORE-01：Phase2 区域封锁的直控物理钳制——与 <see cref="ClampPossessedAgainstCoreGate"/>
-        /// 方向相反的第二重控制（那条挡"进"，这条挡"出"），同一"每帧钳制"纪律。</summary>
-        private void ClampPossessedAgainstCoreLockout()
-        {
-            if (_possessed == null)
-            {
-                return;
-            }
-            CampaignState state = CampaignSession.Current;
-            RegionRecord region = state != null ? FoundryOutpostRegion.Find(state) : null;
-            if (region == null || !region.CoreLockoutActive)
-            {
-                return;
-            }
-            Vector3 p = _possessed.transform.position;
-            if (p.z < FoundryOutpostLayout.CoreLockoutLineY)
-            {
-                _possessed.transform.position = new Vector3(p.x, p.y, FoundryOutpostLayout.CoreLockoutLineY);
-            }
+            double maxY = region != null && !region.CoreGateUnlocked ? FoundryOutpostLayout.CoreGateBlockLineY : CombatConst.NoClamp;
+            double minY = region != null && region.CoreLockoutActive ? FoundryOutpostLayout.CoreLockoutLineY : -CombatConst.NoClamp;
+            _combat?.SetDirectClamp(minY, maxY);
         }
 
         private void TryDirectAttackEnemy(Vector3 screenPointer)
@@ -673,7 +662,7 @@ namespace GameLogic.Campaign.Regions
             }
             Vector3 worldPoint = ray.GetPoint(enter);
 
-            Vector3 originV3 = _possessed.transform.position;
+            Vector3 originV3 = _possessed.Position3;
             Vector2 origin = new Vector2(originV3.x, originV3.z);
             Vector2 aimDir = new Vector2(worldPoint.x, worldPoint.z) - origin;
 
@@ -691,62 +680,11 @@ namespace GameLogic.Campaign.Regions
             }
 
             FoundryOutpostRegion.TryAttackEnemy(state, _possessed.LogicId, target.EnemyInstanceId, state.RandomSeed,
-                isAiSource: false, attackerPosition: origin, isReachable: IsLineOfSightClear);
+                isAiSource: false, attackerPosition: origin);
         }
 
         // ── 敌人 AI 传感器数据 / 视线判定 ─────────────────────────────────
 
-        private List<FoundryOutpostEnemyAi.VisibleMachine> BuildVisibleMachines()
-        {
-            var list = new List<FoundryOutpostEnemyAi.VisibleMachine>(_machineMarkers.Count);
-            foreach (HomeValleyMachineMarker marker in _machineMarkers)
-            {
-                if (marker == null || !MachineRegistry.TryGetRecord(marker.LogicId, out MachineRecord rec) || !rec.IsAlive)
-                {
-                    continue;
-                }
-                Vector3 p = marker.transform.position;
-                list.Add(new FoundryOutpostEnemyAi.VisibleMachine(marker.LogicId, new Vector2(p.x, p.z)));
-            }
-            return list;
-        }
-
-        private bool IsLineOfSightClear(Vector2 from, Vector2 to)
-        {
-            if (_obstacles == null)
-            {
-                return true;
-            }
-            foreach ((Vector2 Position, float Radius) obstacle in _obstacles)
-            {
-                if (Vector2.Distance(obstacle.Position, to) <= obstacle.Radius + 0.1f)
-                {
-                    continue;
-                }
-                if (Vector2.Distance(obstacle.Position, from) <= obstacle.Radius + 0.1f)
-                {
-                    continue;
-                }
-                if (SegmentIntersectsCircle(from, to, obstacle.Position, obstacle.Radius))
-                {
-                    return false;
-                }
-            }
-            return true;
-        }
-
-        private static bool SegmentIntersectsCircle(Vector2 a, Vector2 b, Vector2 center, float radius)
-        {
-            Vector2 ab = b - a;
-            float lenSq = ab.sqrMagnitude;
-            if (lenSq <= 0.0001f)
-            {
-                return Vector2.Distance(a, center) <= radius;
-            }
-            float t = Mathf.Clamp01(Vector2.Dot(center - a, ab) / lenSq);
-            Vector2 closest = a + ab * t;
-            return Vector2.Distance(closest, center) <= radius;
-        }
 
         private bool EnsureDirectTarget()
         {
@@ -783,7 +721,7 @@ namespace GameLogic.Campaign.Regions
                 RegionId = FoundryOutpostLayout.RegionId,
                 Markers = _machineMarkers,
                 GetPossessed = () => _possessed,
-                SetPossessed = marker => _possessed = marker,
+                SetPossessed = SetPossessedMarker,
                 IsCameraTransitioning = () => _cameraDirector != null && _cameraDirector.Mode == ViewMode.Transition,
                 IsPositionJammed = null, // 铸造前哨外围没有干扰机制（干扰是破碎都市专属）。
                 SquadCommands = SquadCommands,
@@ -794,12 +732,27 @@ namespace GameLogic.Campaign.Regions
             });
         }
 
+        /// <summary>接入状态写进内核：受控机不执行编队命令，位移来自直控输入（释放时清零输入）。</summary>
+        private void SetPossessedMarker(HomeValleyMachineMarker marker)
+        {
+            if (_possessed != null && _possessed != marker)
+            {
+                _combat?.SetPossessed(_possessed.LogicId, false);
+            }
+            _possessed = marker;
+            if (marker != null)
+            {
+                _combat?.SetPossessed(marker.LogicId, true);
+            }
+        }
+
         private bool TryGetPossessedAnchor(out float2 anchor)
         {
             if (_possessed != null)
             {
-                Vector3 p = _possessed.transform.position;
-                anchor = new float2(p.x, p.z);
+                // 镜头跟随插值后的画面位置（有表现对象时），60 Hz 模拟在高帧率下镜头也不一顿一顿；没有表现对象时读内核位置。
+                Vector3 v = _possessed.View != null ? _possessed.View.transform.position : _possessed.Position3;
+                anchor = new float2(v.x, v.z);
                 return true;
             }
             anchor = float2.zero;
@@ -1030,14 +983,6 @@ namespace GameLogic.Campaign.Regions
                 : RegionInteractResult.Fail(RegionInteractFailure.TargetGone, result.FailureReason);
         }
 
-        private void TickMachineMovement(float dt)
-        {
-            foreach (HomeValleyMachineMarker marker in _machineMarkers)
-            {
-                marker.Tick(dt);
-            }
-        }
-
         private HomeValleyMachineMarker FindMarker(int logicId)
         {
             foreach (HomeValleyMachineMarker marker in _machineMarkers)
@@ -1074,7 +1019,7 @@ namespace GameLogic.Campaign.Regions
 
         private void SetupSquadCommands()
         {
-            SquadCommands.Bind(new RegionSquadCommandContext
+            _squadCtx = new RegionSquadCommandContext
             {
                 Camera = _camera,
                 Markers = _machineMarkers,
@@ -1087,11 +1032,13 @@ namespace GameLogic.Campaign.Regions
                 Obstacles = _obstacles,
                 FindHostileNear = FindEnemyHostileNear,
                 ResolveHostile = ResolveEnemyHostile,
-                TryAttack = TrySquadAttackEnemy,
+                Site = _combat,
+                HostileUnit = id => _combat != null && _combat.TryGetEnemyUnit(id, out int u) ? u : 0,
                 AttackRange = AttackRange,
                 AttackCooldownSeconds = 1.2f,
                 ClampDestination = ClampAgainstCoreGate,
-            });
+            };
+            SquadCommands.Bind(_squadCtx);
         }
 
         /// <summary>ER6-REGION-01："导航阻挡"这一重控制——编队 Move 命令的目的地不能越过核心分区
@@ -1122,51 +1069,23 @@ namespace GameLogic.Campaign.Regions
             return target;
         }
 
+        /// <summary>点选敌人：内核里离点击点最近的存活敌人（并列取靠后者，同 Demo）。</summary>
         private RegionHostileInfo? FindEnemyHostileNear(Vector2 worldPoint, float pickRadius)
         {
-            CampaignState state = CampaignSession.Current;
-            if (state?.RegionEnemies == null)
+            if (_combat == null || _combat.IsDisposed)
             {
                 return null;
             }
-            RegionEnemyRecord best = null;
-            float bestDist = pickRadius;
-            foreach (RegionEnemyRecord enemy in state.RegionEnemies)
-            {
-                if (enemy.RegionId != FoundryOutpostLayout.RegionId || !enemy.IsAlive)
-                {
-                    continue;
-                }
-                float dist = Vector2.Distance(worldPoint, enemy.Position);
-                if (dist <= bestDist)
-                {
-                    bestDist = dist;
-                    best = enemy;
-                }
-            }
-            return best == null ? (RegionHostileInfo?)null : new RegionHostileInfo(best.EnemyInstanceId, best.Position, best.IsAlive);
+            return _combat.TryFindNearestEnemy(worldPoint, pickRadius, out string id) ? ResolveEnemyHostile(id) : null;
         }
 
         private RegionHostileInfo? ResolveEnemyHostile(string hostileId)
         {
-            RegionEnemyRecord enemy = FoundryOutpostRegion.FindEnemy(CampaignSession.Current, hostileId);
-            return enemy == null ? (RegionHostileInfo?)null : new RegionHostileInfo(enemy.EnemyInstanceId, enemy.Position, enemy.IsAlive);
-        }
-
-        private RegionAttackOutcome TrySquadAttackEnemy(int attackerLogicId, string hostileId)
-        {
-            CampaignState state = CampaignSession.Current;
-            MachineRecord attacker = MachineRegistry.TryGetRecord(attackerLogicId, out MachineRecord rec) ? rec : null;
-            Vector2 attackerPos = attacker?.WorldPosition ?? Vector2.zero;
-            FoundryOutpostRegion.ActionResult result =
-                FoundryOutpostRegion.TryAttackEnemy(state, attackerLogicId, hostileId, state?.RandomSeed ?? 0,
-                    isAiSource: false, attackerPosition: attackerPos, isReachable: IsLineOfSightClear);
-            if (!result.Success)
+            if (_combat == null || !_combat.TryGetEnemyPosition(hostileId, out Vector2 pos))
             {
-                return RegionAttackOutcome.Fail(result.FailureReason);
+                return null;
             }
-            RegionEnemyRecord enemy = FoundryOutpostRegion.FindEnemy(state, hostileId);
-            return RegionAttackOutcome.Ok(targetDestroyed: enemy == null || !enemy.IsAlive);
+            return new RegionHostileInfo(hostileId, pos, _combat.IsEnemyAlive(hostileId));
         }
 
         // ── 可视化（占位几何体，同 FracturedCityController 手法）───────────
@@ -1187,12 +1106,16 @@ namespace GameLogic.Campaign.Regions
             BuildAnchorVisual(FoundryOutpostLayout.CoreGate, PrimitiveType.Cube, GateColor(state), 1.5f, false);
             BuildEnemyVisuals(state);
 
-            foreach (MachineRecord m in MachineRegistry.AllRecords)
+            foreach (HomeValleyMachineMarker marker in _machineMarkers)
             {
-                if (m.IsAlive && m.RegionId == FoundryOutpostLayout.RegionId)
+                if (marker != null && MachineRegistry.TryGetRecord(marker.LogicId, out MachineRecord m) && m.IsAlive)
                 {
-                    BuildMachineVisual(m);
+                    BuildMachineView(marker, m);
                 }
+            }
+            if (_squadCtx != null)
+            {
+                _squadCtx.VisualRoot = _root;
             }
         }
 
@@ -1210,7 +1133,7 @@ namespace GameLogic.Campaign.Regions
                 GameLogic.View.UnityObjects.Release(go.GetComponent<Collider>());
             }
             Renderer renderer = go.GetComponent<Renderer>();
-            renderer.material = new Material(Shader.Find("Standard")) { color = color };
+            renderer.sharedMaterial = ViewMaterials.Standard(color);
         }
 
         private static Color CrateColor(CampaignState state, string crateId)
@@ -1245,17 +1168,22 @@ namespace GameLogic.Campaign.Regions
             }
             foreach (RegionEnemyRecord enemy in state.RegionEnemies)
             {
-                if (enemy.RegionId != FoundryOutpostLayout.RegionId)
+                if (enemy.RegionId != FoundryOutpostLayout.RegionId || _enemyBadges.ContainsKey(enemy.EnemyInstanceId))
                 {
                     continue;
                 }
+                Vector2 at = _combat != null && _combat.TryGetEnemyPosition(enemy.EnemyInstanceId, out Vector2 live) ? live : enemy.Position;
                 GameObject go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
                 go.name = "Enemy_" + enemy.EnemyInstanceId;
                 go.transform.SetParent(_root.transform, false);
-                go.transform.position = new Vector3(enemy.Position.x, 1f, enemy.Position.y);
+                go.transform.position = new Vector3(at.x, 1f, at.y);
+                if (_combat != null && _combat.TryGetEnemyUnit(enemy.EnemyInstanceId, out int enemyUnit))
+                {
+                    _combat.BindView(enemyUnit, go.transform, 1f); // 位置每帧由内核插值写入（FrameRender）。
+                }
                 Renderer renderer = go.GetComponent<Renderer>();
                 Color baseColor = EnemyBaseColor(enemy.EnemyTypeId);
-                renderer.material = new Material(Shader.Find("Standard")) { color = enemy.IsAlive ? baseColor : new Color(0.25f, 0.25f, 0.25f) };
+                renderer.sharedMaterial = ViewMaterials.Standard(enemy.IsAlive ? baseColor : new Color(0.25f, 0.25f, 0.25f));
                 // AC-THEME-002：铸造阵营方正厚重剪影；供能节点/主核心是大块结构（胶囊只留作命中盒）。
                 PlaceholderSilhouette.ApplyEnemy(go, renderer, enemy.EnemyTypeId);
 
@@ -1281,20 +1209,104 @@ namespace GameLogic.Campaign.Regions
             return new Color(0.2f, 0.55f, 0.4f); // 维修机：青绿（区别于攻击单位的暖色系）。
         }
 
-        private void BuildMachineVisual(MachineRecord machine)
+        private void BuildMachineView(HomeValleyMachineMarker marker, MachineRecord machine)
         {
+            Vector2 at = marker.Position;
             GameObject go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
             go.name = "Machine_" + machine.ChassisId + "_" + machine.LogicId;
             go.transform.SetParent(_root.transform, false);
-            go.transform.position = new Vector3(machine.WorldPosition.x, 1f, machine.WorldPosition.y);
+            go.transform.position = new Vector3(at.x, 1f, at.y);
             Renderer renderer = go.GetComponent<Renderer>();
             Color baseColor = new Color(0.75f, 0.8f, 0.9f); // 与另两区域机器配色区分（偏冷灰蓝）。
-            renderer.material = new Material(Shader.Find("Standard")) { color = baseColor };
+            renderer.sharedMaterial = ViewMaterials.Standard(baseColor);
             PlaceholderSilhouette.ApplyMachine(go, renderer, machine.ChassisId); // AC-THEME-002 车辆剪影。
 
-            HomeValleyMachineMarker marker = go.AddComponent<HomeValleyMachineMarker>();
-            marker.Initialize(machine.LogicId, machine.ChassisId, renderer, baseColor);
-            _machineMarkers.Add(marker);
+            MachineView view = go.AddComponent<MachineView>();
+            view.Initialize(renderer, baseColor);
+            marker.AttachView(view);
+            _combat?.BindView(marker.UnitId, go.transform, 1f);
+        }
+
+        /// <summary>FG0-ARCH-03：进场 / 读档时建立本地点的战斗内核：障碍、兴趣点、机器、敌人、标记、首领阶段标志。</summary>
+        private void OpenCombat(CampaignState state, bool resume)
+        {
+            _combatRules = new FoundryOutpostCombatRules { OnEnemyVisualChanged = RefreshEnemyView };
+            _combat = CombatSites.Open(SiteId, state, resume, _combatRules, out bool restored);
+            _combat.Squad = SquadCommands;
+            _combat.SetObstacles(CombatDemoContent.Obstacles(_obstacles));
+            RegionRecord region = FoundryOutpostRegion.Find(state);
+            if (!restored)
+            {
+                var pois = new List<float3>();
+                var reached = new List<bool>();
+                foreach (FoundryOutpostLayout.Anchor a in _combatRules.Pois)
+                {
+                    pois.Add(new float3(a.Position.x, a.Position.y, FoundryOutpostLayout.PoiDiscoveryRadius));
+                    reached.Add(region?.DiscoveredNodes != null && region.DiscoveredNodes.Contains(a.Id));
+                }
+                _combat.SetPois(pois, reached);
+            }
+            SyncCombatMachines(state);
+            CombatDemoContent.ReconcileEnemies(_combat, state, FoundryOutpostLayout.RegionId);
+            _lastRoster = state.RegionEnemies;
+            if (!restored)
+            {
+                _combat.ImportMarks(region);
+            }
+            CombatDemoContent.SyncBossFlags(_combat, state);
+            _combat.RefreshAllMachineWeapons(state);
+        }
+
+        /// <summary>本区域存活机器 ↔ 内核单位对账（进场、读档）；逻辑句柄按记录顺序排列。</summary>
+        private void SyncCombatMachines(CampaignState state)
+        {
+            _machineMarkers.Clear();
+            foreach (MachineRecord m in MachineRegistry.AllRecords)
+            {
+                if (m == null || !m.IsAlive || m.RegionId != FoundryOutpostLayout.RegionId)
+                {
+                    continue;
+                }
+                HomeValleyMachineMarker marker = _combat.SpawnMachine(state, m, m.WorldPosition, autoEngage: false);
+                if (marker != null)
+                {
+                    _machineMarkers.Add(marker);
+                }
+            }
+            foreach (int stale in _combat.MachinesNotIn(id => MachineRegistry.TryGetRecord(id, out MachineRecord r) && r.IsAlive && r.RegionId == FoundryOutpostLayout.RegionId))
+            {
+                _combat.RemoveMachine(stale, export: false);
+            }
+        }
+
+        /// <summary>首领初始化 / 过渡召唤 / 反制增援会替换敌人记录数组：引用变了才对账（O(1) 判定），被观察时补建新敌人的表现对象。</summary>
+        private void SyncEnemyRosterIfChanged(CampaignState state)
+        {
+            if (_combat == null || ReferenceEquals(state.RegionEnemies, _lastRoster))
+            {
+                return;
+            }
+            CombatDemoContent.ReconcileEnemies(_combat, state, FoundryOutpostLayout.RegionId);
+            _lastRoster = state.RegionEnemies;
+            if (_root != null)
+            {
+                BuildEnemyVisuals(state);
+            }
+        }
+
+        /// <summary>敌人阵亡等状态变化时刷新它的表现（事件驱动，不每帧扫全部敌人）。</summary>
+        private void RefreshEnemyView(string enemyInstanceId)
+        {
+            RegionEnemyRecord enemy = FoundryOutpostRegion.FindEnemy(CampaignSession.Current, enemyInstanceId);
+            if (_root == null || enemy == null)
+            {
+                return;
+            }
+            RefreshColor("Enemy_" + enemy.EnemyInstanceId, enemy.IsAlive ? EnemyBaseColor(enemy.EnemyTypeId) : new Color(0.25f, 0.25f, 0.25f));
+            if (_enemyBadges.TryGetValue(enemy.EnemyInstanceId, out WorldBadge badge) && badge != null)
+            {
+                badge.SetVisible(enemy.IsAlive);
+            }
         }
 
         private void SyncWorldVisuals(CampaignState state)
@@ -1313,28 +1325,7 @@ namespace GameLogic.Campaign.Regions
             RefreshColor("Poi_" + FoundryOutpostLayout.ArmorPierceCacheId, CacheColor(state, FoundryOutpostLayout.ArmorPierceCacheId));
             RefreshColor("Poi_" + FoundryOutpostLayout.CoreGateId, GateColor(state));
 
-            if (state.RegionEnemies != null)
-            {
-                foreach (RegionEnemyRecord enemy in state.RegionEnemies)
-                {
-                    if (enemy.RegionId != FoundryOutpostLayout.RegionId)
-                    {
-                        continue;
-                    }
-                    Color baseColor = EnemyBaseColor(enemy.EnemyTypeId);
-                    RefreshColor("Enemy_" + enemy.EnemyInstanceId, enemy.IsAlive ? baseColor : new Color(0.25f, 0.25f, 0.25f));
-
-                    if (_enemyBadges.TryGetValue(enemy.EnemyInstanceId, out WorldBadge enemyBadge) && enemyBadge != null)
-                    {
-                        enemyBadge.SetVisible(enemy.IsAlive);
-                    }
-                    Transform enemyT = _root.transform.Find("Enemy_" + enemy.EnemyInstanceId);
-                    if (enemyT != null)
-                    {
-                        enemyT.position = new Vector3(enemy.Position.x, 1f, enemy.Position.y);
-                    }
-                }
-            }
+            // FG0-ARCH-03：敌人位置由内核每帧插值写入（FrameRender）；颜色 / 头顶标记在阵亡事件时刷新（RefreshEnemyView），不每帧扫全部敌人。
         }
 
         /// <summary>ER8-CONTENT-01：敌人类型 → 头顶标记图标。Boss 节点/主核心不是内容目录条目，统一用主核心图标。</summary>
@@ -1356,13 +1347,22 @@ namespace GameLogic.Campaign.Regions
             Renderer r = t != null ? t.GetComponent<Renderer>() : null;
             if (r != null)
             {
-                r.material.color = color;
+                ViewMaterials.Recolor(r, color);
             }
         }
 
         private void DestroyVisuals()
         {
-            _machineMarkers.Clear();
+            foreach (HomeValleyMachineMarker marker in _machineMarkers)
+            {
+                marker?.DetachView();
+            }
+            _combat?.ClearViews();
+            _enemyBadges.Clear();
+            if (_squadCtx != null)
+            {
+                _squadCtx.VisualRoot = null;
+            }
             if (_root != null)
             {
                 GameLogic.View.UnityObjects.Release(_root);

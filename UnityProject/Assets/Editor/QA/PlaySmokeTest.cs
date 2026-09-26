@@ -165,6 +165,10 @@ namespace GameLogic.EditorTools
                     case 131: StepBeltsFar(inStep); break;
                     case 132: StepBeltsNear(inStep); break;
                     case 133: StepBeltsDone(inStep); break;
+                    case 129: StepRuinsCombat(inStep); break;
+                    case 140: StepRaidStart(inStep); break;
+                    case 141: StepRaidRunning(inStep); break;
+                    case 142: StepRaidCleared(inStep); break;
                     case 20: StepOpenSlotList(inStep); break;
                     case 21: StepSlotCards(inStep); break;
                     case 22: StepBackupRestored(inStep); break;
@@ -933,7 +937,8 @@ namespace GameLogic.EditorTools
             }
             Check(GameRoot.HomeValley != null && !GameRoot.HomeValley.IsPaused, "战略暂停已解除");
             InputRouter.DebugSetReader(null);
-            Campaign.Regions.HomeValleyMachineMarker hauler = Object.FindObjectsByType<Campaign.Regions.HomeValleyMachineMarker>(
+            // FG0-ARCH-03：机器的画面对象是 MachineView（被观察的地点才有），逻辑句柄在战斗内核里。
+            Campaign.Regions.MachineView hauler = Object.FindObjectsByType<Campaign.Regions.MachineView>(
                     FindObjectsInactive.Exclude, FindObjectsSortMode.None)
                 .OrderBy(m => m.LogicId).FirstOrDefault();
             if (hauler == null)
@@ -1238,6 +1243,52 @@ namespace GameLogic.EditorTools
             Write($"  - 世界特效活动中 {VfxActive()} 个");
             CheckEnemiesFromTable(Campaign.Regions.FracturedCityLayout.RegionId, Campaign.Content.EnemyCatalog.ScoutId);
             CheckNoTextMarkers("破碎都市");
+            // FG0-ARCH-03：远征战斗在战斗内核里——编队攻击（与战略命令栏 / 热键同一个 IssueAttack 入口）打驻守的干扰机。
+            Campaign.Regions.FracturedCityController city = GameRoot.FracturedCity;
+            Campaign.Combat.CombatSite site = city?.Combat;
+            int[] ids = MachineRegistry.AllRecords.Where(m => m != null && m.IsAlive && m.RegionId == Campaign.Regions.FracturedCityLayout.RegionId)
+                .Select(m => m.LogicId).ToArray();
+            RegionEnemyRecord jammer = CampaignSession.Current?.RegionEnemies?.FirstOrDefault(e => e.EnemyInstanceId == Campaign.Regions.FracturedCityLayout.JammerSpawnId);
+            int views = Object.FindObjectsByType<Campaign.Regions.MachineView>(FindObjectsInactive.Include, FindObjectsSortMode.None)
+                .Count(v => v.Marker != null && v.Marker.Site == site);
+            Check(site != null && site.MachineCount == ids.Length && views == ids.Length && GameObject.Find("[FracturedCityRoot]") != null,
+                $"破碎都市战斗内核：{site?.MachineCount} 台机器、{site?.EnemyIds.Count()} 个敌人在内核里；被观察时每台机器都有表现对象（{views} 个）");
+            SessionState.SetFloat(K + "JammerHp", jammer != null ? jammer.Health : -1f);
+            SessionState.SetString(K + "RuinsTicks", GameClock.Ticks.ToString());
+            city?.SquadCommands.DebugSelectMany(ids);
+            city?.SquadCommands.IssueAttack(Campaign.Regions.FracturedCityLayout.JammerSpawnId, paused: false);
+            Next(129, $"编队攻击：{ids.Length} 台机器攻击静默干扰机（耐久 {jammer?.Health:F0}）");
+        }
+
+        private static void StepRuinsCombat(double inStep)
+        {
+            if (inStep < 6)
+            {
+                return;
+            }
+            Campaign.Regions.FracturedCityController city = GameRoot.FracturedCity;
+            Campaign.Combat.CombatSite site = city?.Combat;
+            RegionEnemyRecord jammer = CampaignSession.Current?.RegionEnemies?.FirstOrDefault(e => e.EnemyInstanceId == Campaign.Regions.FracturedCityLayout.JammerSpawnId);
+            float hp0 = SessionState.GetFloat(K + "JammerHp", -1f);
+            long ticks0 = long.Parse(SessionState.GetString(K + "RuinsTicks", "0"));
+            string recent = city == null ? string.Empty : string.Join(" / ", city.SquadCommands.RecentEvents.Skip(Math.Max(0, city.SquadCommands.RecentEvents.Count - 4)));
+            bool anyWeapon = site != null && MachineRegistry.AllRecords.Any(m => m != null && m.IsAlive && m.RegionId == Campaign.Regions.FracturedCityLayout.RegionId
+                && site.TryGetMachineWeapon(m.LogicId, out Campaign.Combat.MachineWeaponInfo w) && w.WeaponIndex >= 0);
+            bool damaged = jammer != null && (jammer.Health < hp0 || !jammer.IsAlive);
+            Write($"  - 6 真实秒：内核走了 {GameClock.Ticks - ticks0} 步，干扰机耐久 {hp0:F0}→{jammer?.Health:F0}；编队事件：{recent}");
+            Check(GameClock.Ticks - ticks0 >= 300 && (damaged || !anyWeapon) && recent.Length > 0 && !recent.Contains("⟦"),
+                anyWeapon ? "真实 Play 帧里编队攻击在战斗内核里执行：追上去开火，干扰机掉血" : "编队攻击执行到开火结算，没有武器时给出可读原因");
+            // 表现对象的位置 = 内核位置（插值），不另算一套。
+            float maxGap = 0f;
+            foreach (Campaign.Regions.MachineView v in Object.FindObjectsByType<Campaign.Regions.MachineView>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            {
+                if (v.Marker != null && v.Marker.Site == site)
+                {
+                    Vector2 k = v.Marker.Position;
+                    maxGap = Mathf.Max(maxGap, Vector2.Distance(k, new Vector2(v.transform.position.x, v.transform.position.z)));
+                }
+            }
+            Check(maxGap < 0.5f, $"机器表现对象跟随内核位置插值（最大偏差 {maxGap:F3} 米 < 一步位移）");
             Next(120, "FG0-ARCH-01：整个世界同时运行——远征进行中，家园没有退出");
         }
 
@@ -1264,6 +1315,10 @@ namespace GameLogic.EditorTools
 
         private static Vector2 CameraFocus() => new Vector2(WorldView.Director.StrategyFocus.x, WorldView.Director.StrategyFocus.y);
 
+        /// <summary>FG0-ARCH-03：场景里是否还有这个名字的根对象（含隐藏的）。不被观察的地点表现对象应当已经销毁，而不只是隐藏。</summary>
+        private static bool RootExistsIncludingInactive(string name) =>
+            Object.FindObjectsByType<Transform>(FindObjectsInactive.Include, FindObjectsSortMode.None).Any(t => t.parent == null && t.name == name);
+
         private static void StepWorldHomeKeepsRunning(double inStep)
         {
             if (inStep < 1.5)
@@ -1273,9 +1328,9 @@ namespace GameLogic.EditorTools
             long atDispatch = long.TryParse(SessionState.GetString(K + "TicksAtDispatch", "0"), out long t) ? t : 0;
             bool homeRunning = GameRoot.HomeValley != null && GameRoot.HomeValley.IsLoaded && !GameRoot.HomeValley.IsActive;
             bool ruinsObserved = GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsActive;
-            GameObject homeRoot = GameObject.Find("[HomeValley]");
-            Check(homeRunning && ruinsObserved && GameClock.Ticks > atDispatch && homeRoot == null,
-                $"派遣后家园仍在运行（已载入、不被观察、表现对象隐藏）、镜头在破碎都市；统一时钟 {atDispatch}→{GameClock.Ticks} 步");
+            bool homeRootExists = RootExistsIncludingInactive("[HomeValley]");
+            Check(homeRunning && ruinsObserved && GameClock.Ticks > atDispatch && !homeRootExists,
+                $"派遣后家园仍在运行（已载入、不被观察、表现对象已销毁——含隐藏的也没有）、镜头在破碎都市；统一时钟 {atDispatch}→{GameClock.Ticks} 步");
             if (!WorldBarReady(out WorldBarHudUIToolkit hud))
             {
                 if (inStep > 10)
@@ -1302,9 +1357,9 @@ namespace GameLogic.EditorTools
             bool homeObserved = GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive;
             bool ruinsRunning = GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsLoaded && !GameRoot.FracturedCity.IsActive;
             GameObject homeRoot = GameObject.Find("[HomeValley]");
-            GameObject ruinsRoot = GameObject.Find("[FracturedCityRoot]");
-            Check(homeObserved && ruinsRunning && homeRoot != null && ruinsRoot == null && Vector2.Distance(CameraFocus(), Campaign.Regions.HomeValleyLayout.Core.Position) < 1f,
-                $"镜头回到家园（焦点 {CameraFocus()}）：家园表现对象显示、破碎都市表现对象隐藏但仍在运行");
+            bool ruinsRootExists = RootExistsIncludingInactive("[FracturedCityRoot]");
+            Check(homeObserved && ruinsRunning && homeRoot != null && !ruinsRootExists && Vector2.Distance(CameraFocus(), Campaign.Regions.HomeValleyLayout.Core.Position) < 1f,
+                $"镜头回到家园（焦点 {CameraFocus()}）：家园表现对象重建并显示、破碎都市表现对象已销毁（含隐藏的也没有）但仍在运行");
             Check(WorldPlanetView.TerrainShown, "普通视角显示镜头附近区块的地貌层（DEBT-FG0ARCH05-02）");
             // 测试捷径：派一支突袭（突袭导演属于 FG6-DEF-04；这里只验证行进中的队伍与镜头飞跃）。
             TransitGroupRecord raid = WorldTransitSystem.DispatchRaidFromTerritory(CampaignSession.Current, "silent", 6, out string failure);
@@ -1724,6 +1779,90 @@ namespace GameLogic.EditorTools
             {
                 return;
             }
+            Next(140, "FG0-ARCH-03：家园突袭战斗原型（测试捷径）");
+        }
+
+        // ── FG0-ARCH-03：家园突袭的逐单位 / 逐弹体逻辑在战斗内核（测试捷径生成性能场景；正式突袭导演与到达结算属于 FG6）──
+
+        private static void StepRaidStart(double inStep)
+        {
+            if (inStep < 0.2)
+            {
+                return;
+            }
+            Campaign.Combat.CombatSite home = GameRoot.HomeValley?.Combat;
+            if (home == null)
+            {
+                Finish("家园没有战斗内核");
+                return;
+            }
+            Campaign.Combat.CombatBench.Spec spec = Campaign.Combat.CombatBench.PerfSpec();
+            Vector2 center = Campaign.Regions.HomeValleyLayout.Core.Position + new Vector2(0f, 160f);
+            Campaign.Combat.CombatBench.SpawnPerfScenario(home, center, 200, 80, spec);
+            // 镜头留在家园（性能场景在北面 160 米：突袭者感知 60 米，碰不到家园的机器，不影响后面的存档流程）。
+            SessionState.SetString(K + "RaidTicks", GameClock.Ticks.ToString());
+            SessionState.SetInt(K + "RaidMaxProj", 0);
+            SessionState.SetFloat(K + "RaidMaxFrameMs", 0f);
+            SessionState.SetInt(K + "RaidFrames", 0);
+            SessionState.SetFloat(K + "RaidFrameMsSum", 0f);
+            SessionState.SetInt(K + "RaidHomeMachines", GameRoot.HomeValley?.LiveMachineCount ?? -1);
+            Next(141, "测试捷径：家园北面 160 米生成 200 个突袭者 + 80 座炮塔（性能场景）");
+        }
+
+        private static string HomeValleyLayoutRegion() => Campaign.Regions.HomeValleyLayout.RegionId;
+
+        private static void StepRaidRunning(double inStep)
+        {
+            Campaign.Combat.CombatSite home = GameRoot.HomeValley?.Combat;
+            if (home == null)
+            {
+                Finish("家园战斗内核丢了");
+                return;
+            }
+            float ms = Time.unscaledDeltaTime * 1000f;
+            // 编辑器 update 一帧会回调多次：每个 Play 帧只采样一次。
+            bool newFrame = Time.frameCount != SessionState.GetInt(K + "RaidLastFrame", -1);
+            SessionState.SetInt(K + "RaidLastFrame", Time.frameCount);
+            if (inStep > 3 && newFrame)
+            {
+                SessionState.SetInt(K + "RaidMaxProj", Math.Max(SessionState.GetInt(K + "RaidMaxProj", 0), home.Kernel.ProjectileCount));
+                SessionState.SetFloat(K + "RaidMaxFrameMs", Mathf.Max(SessionState.GetFloat(K + "RaidMaxFrameMs", 0f), ms));
+                SessionState.SetInt(K + "RaidFrames", SessionState.GetInt(K + "RaidFrames", 0) + 1);
+                SessionState.SetFloat(K + "RaidFrameMsSum", SessionState.GetFloat(K + "RaidFrameMsSum", 0f) + ms);
+            }
+            if (inStep < 8)
+            {
+                return;
+            }
+            long ticks = GameClock.Ticks - long.Parse(SessionState.GetString(K + "RaidTicks", "0"));
+            int maxProj = SessionState.GetInt(K + "RaidMaxProj", 0);
+            int frames = SessionState.GetInt(K + "RaidFrames", 0);
+            float avgMs = frames > 0 ? SessionState.GetFloat(K + "RaidFrameMsSum", 0f) / frames : 0f;
+            int raiders = home.Kernel.CountAlive(BinGames.Sim.Combat.CombatFaction.Hostile);
+            int turrets = home.Kernel.CountAlive(BinGames.Sim.Combat.CombatFaction.Player, BinGames.Sim.Combat.CombatUnitKind.Turret);
+            BinGames.Sim.Combat.CombatRenderer r = home.Renderer;
+            Write($"  - 突袭原型 8 真实秒：内核 {ticks} 步，弹体峰值 {maxProj} 枚，存活突袭者 {raiders}、炮塔 {turrets}；内核单步 {home.LastKernelMs:F3} ms；" +
+                  $"真实帧 平均 {avgMs:F1} ms / 最长 {SessionState.GetFloat(K + "RaidMaxFrameMs", 0f):F1} ms（{frames} 帧，-nographics 下只含 CPU）；" +
+                  $"实例 {r?.LastUnitInstances} 单位 + {r?.LastProjectileInstances} 弹体，{(r != null && r.GpuAvailable ? "GPU 绘制" : "无图形设备：" + r?.GpuUnavailableReason)}");
+            Check(ticks >= 400 && maxProj >= 1500 && raiders >= 150 && turrets >= 60 && r != null && r.LastUnitInstances == raiders + turrets && r.LastProjectileInstances == home.Kernel.ProjectileCount,
+                $"真实 Play 帧里家园战斗内核跑着 {raiders} 个突袭者、{turrets} 座炮塔、峰值 {maxProj} 枚弹体（≥ 1,500），实例化缓冲与内核一致");
+            CheckNoTextMarkers("家园突袭原型");
+            int removed = Campaign.Combat.CombatBench.ClearPrototypeUnits(home);
+            Next(142, $"清场：移除 {removed} 个原型单位，剩下的弹体飞完即消失");
+        }
+
+        private static void StepRaidCleared(double inStep)
+        {
+            if (inStep < 5)
+            {
+                return;
+            }
+            Campaign.Combat.CombatSite home = GameRoot.HomeValley?.Combat;
+            int machinesBefore = SessionState.GetInt(K + "RaidHomeMachines", -1);
+            Check(home != null && home.Kernel.CountAlive(BinGames.Sim.Combat.CombatFaction.Hostile) == 0 && home.Kernel.ProjectileCount == 0
+                  && home.Kernel.CountAlive(BinGames.Sim.Combat.CombatFaction.Player, BinGames.Sim.Combat.CombatUnitKind.Turret) == 0
+                  && GameRoot.HomeValley?.LiveMachineCount == machinesBefore,
+                $"原型单位清场后弹体飞完消失（剩 {home?.Kernel.ProjectileCount} 枚），家园机器数不变（{machinesBefore} → {GameRoot.HomeValley?.LiveMachineCount} 台；此时远征队仍在外）");
             BeginPauseSave();
         }
 

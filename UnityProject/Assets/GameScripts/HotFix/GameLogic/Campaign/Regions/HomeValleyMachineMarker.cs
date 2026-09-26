@@ -1,111 +1,137 @@
+using System;
+using GameLogic.Campaign.Combat;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace GameLogic.Campaign.Regions
 {
-    /// <summary>ER2-SCENE-01（2026-09-21 用户裁决"填完再结"补做）：归还谷地占位几何体上的机器
-    /// 组件——选中/高亮 + 点选移动指令。这是归还谷地范围内的轻量 RTS 式"选中+下令"实现，直接用
-    /// Transform 插值移动，不接 SimBridge/CellPlayerController：后者是"单一意识附体换人"模型
-    /// （<c>CellPlayerController.Bind</c> 要求 StatSheet/AbilitySystem/ResourceWallet 这类玩家进化
-    /// 属性，勘查确认与"多台平等工作机器"语义不符，见 evidence 文档），不是这里要的东西。
-    /// 统一的 Direct/Strategy/Transition/Modal 输入域表、WASD 直控换乘仍是 ER2-INPUT-01 的范围，
-    /// 本类只保证"选中的机器能被指哪打哪、到点自动干活"这条 Journey 本身真实可玩。</summary>
-    public sealed class HomeValleyMachineMarker : MonoBehaviour
+    /// <summary>
+    /// 一台己方机器在某个地点里的**逻辑句柄**（FG0-ARCH-03 起不再是 MonoBehaviour）。
+    ///
+    /// 机器的位置、移动（工作赶路 / 编队命令 / 直控）、武器热量与冷却的真相都在该地点的战斗内核（<see cref="CombatSite"/>）里，
+    /// 本类只是按 LogicId 找到内核单位的门面。画面对象 <see cref="MachineView"/> 只在地点被观察时存在（DEBT-FG0ARCH01-03 收口）：
+    /// 地点不被观察时没有任何渲染器、碰撞体、材质，模拟照常。
+    /// 类名沿用 Demo（选择、接管、交互、编队系统都以它为机器的引用），语义从“带 Transform 的表现对象”变为“内核单位句柄”。
+    /// </summary>
+    public sealed class HomeValleyMachineMarker
     {
-        public int LogicId { get; private set; }
-        public string ChassisId { get; private set; }
-        public bool IsMoving { get; private set; }
+        /// <summary>工作赶路的速度与到达半径（Demo HomeValleyMachineMarker 常量）。</summary>
+        public const float MoveSpeed = 6f;
+        public const float ArrivalDistance = 1.2f;
 
-        private Renderer _renderer;
-        private Color _baseColor;
-        private Vector3? _moveTarget;
-        private const float MoveSpeed = 6f;
-        private const float ArrivalDistance = 1.2f;
-        private static readonly Color SelectedColor = new Color(1f, 0.85f, 0.2f, 1f);
+        public int LogicId { get; }
+        public string ChassisId { get; }
+        public CombatSite Site { get; }
+        public int UnitId { get; }
 
-        /// <summary>到达目的地后要自动触发的动作（修复某建筑 / 拆解某残骸）。null 表示纯移动，
-        /// 不做任何自动交互——满足"编队/移动"与"工作"是两件独立的事这条语义。</summary>
-        public System.Action PendingArrivalAction { get; private set; }
+        /// <summary>画面对象（被观察时才有；不被观察时为 null）。</summary>
+        public MachineView View { get; private set; }
 
-        public void Initialize(int logicId, string chassisId, Renderer renderer, Color baseColor)
+        public bool IsSelected { get; private set; }
+
+        /// <summary>工作赶路到达时要执行的回调（Demo 语义：到达那一步执行一次）。</summary>
+        public Action PendingArrivalAction { get; private set; }
+
+        public HomeValleyMachineMarker(int logicId, string chassisId, CombatSite site, int unitId)
         {
             LogicId = logicId;
             ChassisId = chassisId;
-            _renderer = renderer;
-            _baseColor = baseColor;
-            SetSelected(false);
+            Site = site;
+            UnitId = unitId;
+        }
+
+        /// <summary>机器还在内核里（地点没卸载、单位没被移除）。</summary>
+        public bool IsValid => Site != null && Site.UnitExists(UnitId);
+
+        /// <summary>内核里的当前位置（x, z）。单位已不存在时返回最后已知位置。</summary>
+        public Vector2 Position
+        {
+            get
+            {
+                if (Site != null && Site.TryGetUnitPosition(UnitId, out double2 p))
+                {
+                    _lastKnown = new Vector2((float)p.x, (float)p.y);
+                }
+                return _lastKnown;
+            }
+        }
+
+        /// <summary>内核位置的三维形式（y = 1，与 Demo 表现对象的高度一致；距离比较只看 x / z）。</summary>
+        public Vector3 Position3
+        {
+            get
+            {
+                Vector2 p = Position;
+                return new Vector3(p.x, 1f, p.y);
+            }
+        }
+
+        /// <summary>双精度位置（远离原点也不丢精度）。</summary>
+        public double2 PositionD => Site != null && Site.TryGetUnitPosition(UnitId, out double2 p) ? p : new double2(_lastKnown.x, _lastKnown.y);
+
+        private Vector2 _lastKnown;
+
+        /// <summary>是否在工作赶路中。</summary>
+        public bool IsMoving => Site != null && Site.TryGetCommand(UnitId, out var cmd)
+                                && cmd.Kind == BinGames.Sim.Combat.CombatCommandKind.WorkMove;
+
+        /// <summary>内核里的工作赶路是带到达回调下达的（<see cref="CombatSite.WorkMoveArrivalTag"/>，随快照进存档）而回调还没挂上——
+        /// 读档后由家园按在办的工作订单重挂（<see cref="ResumeArrivalAction"/>），走到目的地照常开工。</summary>
+        public bool AwaitsArrivalAction => PendingArrivalAction == null && Site != null && Site.TryGetCommand(UnitId, out var cmd)
+                                           && cmd.Kind == BinGames.Sim.Combat.CombatCommandKind.WorkMove && cmd.Target == CombatSite.WorkMoveArrivalTag;
+
+        /// <summary>直接放置（出生、传送）。</summary>
+        public void SetPosition(Vector2 position) => Site?.SetUnitPosition(UnitId, position);
+
+        public void CommandMoveTo(Vector3 worldTarget, Action onArrive = null)
+        {
+            PendingArrivalAction = onArrive;
+            Site?.IssueWorkMove(UnitId, new Vector2(worldTarget.x, worldTarget.z), onArrive != null);
+        }
+
+        /// <summary>读档后重挂到达回调（不重新下达移动：内核里的赶路原样继续，只补上内存里的回调）。</summary>
+        public void ResumeArrivalAction(Action onArrive)
+        {
+            PendingArrivalAction = onArrive;
+        }
+
+        /// <summary>取消工作赶路（只取消工作赶路；编队命令由编队系统自己取消）。</summary>
+        public void CancelCommandMove()
+        {
+            PendingArrivalAction = null;
+            if (IsMoving)
+            {
+                Site.ClearCommand(UnitId);
+            }
+        }
+
+        /// <summary>直控移动输入（每帧由被观察的地点写入；内核在模拟步里按机器速度移动）。零向量 = 停。</summary>
+        public void SetDirectInput(Vector2 direction) => Site?.SetDirectInput(UnitId, direction);
+
+        /// <summary>内核报告“工作赶路到达”：执行一次回调（Demo 到达即回调，回调里可能立刻下一段赶路）。</summary>
+        internal void OnWorkArrived()
+        {
+            Action action = PendingArrivalAction;
+            PendingArrivalAction = null;
+            action?.Invoke();
         }
 
         public void SetSelected(bool selected)
         {
-            if (_renderer == null)
-            {
-                return;
-            }
-            _renderer.material.color = selected ? SelectedColor : _baseColor;
+            IsSelected = selected;
+            View?.SetSelected(selected);
         }
 
-        public void CommandMoveTo(Vector3 worldTarget, System.Action onArrive = null)
+        public void AttachView(MachineView view)
         {
-            _moveTarget = worldTarget;
-            IsMoving = true;
-            PendingArrivalAction = onArrive;
+            View = view;
+            view?.Bind(this);
+            view?.SetSelected(IsSelected);
         }
 
-        /// <summary>ER2-INPUT-01：接管开始前调用，清空未完成的点选移动指令——直控（WASD）与
-        /// CommandMoveTo 是两条独立的位移来源，同时生效会互相拉扯位置，接管期间只认前者。</summary>
-        public void CancelCommandMove()
+        public void DetachView()
         {
-            _moveTarget = null;
-            IsMoving = false;
-            PendingArrivalAction = null;
-        }
-
-        /// <summary>ER2-INPUT-01：WASD 直控移动。<paramref name="worldDirXZ"/> 已归一化的世界 XZ
-        /// 方向（Y 分量忽略）。与 <see cref="CommandMoveTo"/> 用同一个 <see cref="MoveSpeed"/>，
-        /// 手感一致——玩家切换"指哪打哪"和"亲自开"不应该感觉像换了台机器。</summary>
-        public void DirectMove(Vector3 worldDirXZ, float dt)
-        {
-            if (worldDirXZ.sqrMagnitude <= 0.0001f)
-            {
-                return;
-            }
-            Vector3 pos = transform.position;
-            Vector3 step = worldDirXZ.normalized * (MoveSpeed * dt);
-            transform.position = new Vector3(pos.x + step.x, pos.y, pos.z + step.z);
-        }
-
-        /// <summary>由 <see cref="HomeValleyController.Update"/> 每帧驱动。到达后清空目标并执行
-        /// 一次性到达动作（若有），返回值供调用方判断本帧是否发生了到达事件。</summary>
-        public bool Tick(float dt)
-        {
-            if (!_moveTarget.HasValue)
-            {
-                return false;
-            }
-
-            Vector3 target = _moveTarget.Value;
-            Vector3 pos = transform.position;
-            Vector3 toTarget = target - pos;
-            toTarget.y = 0f;
-
-            if (toTarget.sqrMagnitude <= ArrivalDistance * ArrivalDistance)
-            {
-                transform.position = new Vector3(target.x, pos.y, target.z);
-                _moveTarget = null;
-                IsMoving = false;
-                System.Action action = PendingArrivalAction;
-                PendingArrivalAction = null;
-                action?.Invoke();
-                return true;
-            }
-
-            Vector3 step = toTarget.normalized * (MoveSpeed * dt);
-            if (step.sqrMagnitude > toTarget.sqrMagnitude)
-            {
-                step = toTarget;
-            }
-            transform.position = pos + step;
-            return false;
+            View = null;
         }
     }
 }

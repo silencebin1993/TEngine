@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using GameLogic.Campaign.Blueprint;
+using GameLogic.Campaign.Combat;
 using GameLogic.Campaign.Content;
 using TEngine;
 using UnityEngine;
@@ -283,30 +284,51 @@ namespace GameLogic.Campaign.Regions
                 return ActionResult.Fail("目标已阵亡。");
             }
 
-            // ER7-CORE-01：节点/主核心是"护盾/阶段"语义，不是"死了掉废料"，全部委托
-            // FoundryOutpostCoreBoss.ApplyDamage（唯一伤害/阶段转换判定入口，见该类类注释），不落入
-            // 下面的通用阵亡+掉落分支。
+            // ER7-CORE-01：节点/主核心是"护盾/阶段"语义，全部委托 FoundryOutpostCoreBoss.ApplyDamage（唯一伤害/阶段转换判定入口）。
             if (enemy.EnemyTypeId == FoundryOutpostLayout.BossNodeTypeId || enemy.EnemyTypeId == FoundryOutpostLayout.BossCoreTypeId)
             {
                 (bool bossOk, string bossReason) = FoundryOutpostCoreBoss.ApplyDamage(state, enemy, damage);
+                CombatSite bossSite = CombatSites.Get(RegionId);
+                if (bossSite != null)
+                {
+                    bossSite.SyncEnemyFromRecord(enemy);
+                    CombatDemoContent.SyncBossFlags(bossSite, state);
+                }
                 return bossOk ? ActionResult.Ok() : ActionResult.Fail(bossReason);
+            }
+
+            // FG0-ARCH-03：地点已载入时血量真相在战斗内核。
+            CombatSite site = CombatSites.Get(RegionId);
+            if (site != null && site.TryDamageEnemy(enemyInstanceId, damage))
+            {
+                return ActionResult.Ok();
             }
 
             enemy.Health = Mathf.Max(0f, enemy.Health - Mathf.Max(0f, damage));
             if (enemy.Health <= 0f)
             {
                 enemy.IsAlive = false;
-                MarkDestroyed(state, enemyInstanceId);
-                SpawnEnemyLoot(state, enemy);
-                Log.Info($"[FoundryOutpostRegion] 敌人 {enemyInstanceId} 已阵亡。");
-                // ER8-CONTENT-01：存活→阵亡翻转点（已阵亡在上面早退），击毁音与“字幕”模式下的击毁字幕。
-                Feedback.FeedbackCues.RaiseAt(Feedback.FeedbackCueId.EnemyDestroyed, enemy.Position, Feedback.FeedbackCues.ContentName(enemy.EnemyTypeId));
+                OnEnemyKilled(state, enemy);
             }
             else
             {
                 Feedback.FeedbackCues.RaiseAt(Feedback.FeedbackCueId.EnemyHit, enemy.Position);
             }
             return ActionResult.Ok();
+        }
+
+        /// <summary>敌人阵亡的全部副作用（写“场上物件已清除”、掉落、日志、击毁反馈）。内核报告阵亡、未载入时直接扣血致死，都走这里一处。</summary>
+        public static void OnEnemyKilled(CampaignState state, RegionEnemyRecord enemy)
+        {
+            if (state == null || enemy == null)
+            {
+                return;
+            }
+            MarkDestroyed(state, enemy.EnemyInstanceId);
+            SpawnEnemyLoot(state, enemy);
+            Log.Info($"[FoundryOutpostRegion] 敌人 {enemy.EnemyInstanceId} 已阵亡。");
+            // ER8-CONTENT-01：存活→阵亡翻转点，击毁音与“字幕”模式下的击毁字幕。
+            Feedback.FeedbackCues.RaiseAt(Feedback.FeedbackCueId.EnemyDestroyed, enemy.Position, Feedback.FeedbackCues.ContentName(enemy.EnemyTypeId));
         }
 
         /// <summary>DEMO-CONTENT-LOCK.md §4.1第4条"步进炮首次击破必产生铸造重炮模块"——只在步进炮
@@ -337,45 +359,19 @@ namespace GameLogic.Campaign.Regions
                 CampaignEconomyLedger.ResourceScrap, amount, enemy.EnemyInstanceId + ":scrap");
         }
 
-        /// <summary>敌人对玩家机器造成伤害的唯一入口，与 <see cref="FracturedCityRegion.TryEnemyAttackMachine"/>
-        /// 同一纪律。</summary>
-        public static ActionResult TryEnemyAttackMachine(CampaignState state, string enemyInstanceId, int targetLogicId, float damage)
-        {
-            RegionEnemyRecord enemy = FindEnemy(state, enemyInstanceId);
-            if (enemy == null || !enemy.IsAlive)
-            {
-                return ActionResult.Fail("攻击者不存在或已阵亡。");
-            }
-            if (!MachineRegistry.TryGetRecord(targetLogicId, out MachineRecord machine) || !machine.IsAlive)
-            {
-                return ActionResult.Fail("目标机器不存在或已阵亡。");
-            }
-            if (machine.RegionId != RegionId)
-            {
-                return ActionResult.Fail("目标机器不在本区域。");
-            }
-            if (machine.FactionId != "Player")
-            {
-                return ActionResult.Fail("目标非玩家阵营，拒绝攻击（阵营判断）。");
-            }
-
-            // ER8-CONTENT-01：敌人开火音按敌人类型区分（EnemyCatalog.SfxId 的消费点）。
-            Feedback.FeedbackCues.RaiseAt(Feedback.FeedbackCueId.EnemyAttack, enemy.Position, null, Feedback.FeedbackCues.ContentSfx(enemy.EnemyTypeId));
-            MachineOpResult result = MachineRegistry.ApplyDamage(targetLogicId, damage);
-            if (!result.Success)
-            {
-                return ActionResult.Fail(result.Message);
-            }
-            Log.Info($"[FoundryOutpostRegion] 敌人 {enemyInstanceId} 命中机器 {targetLogicId}，伤害 {damage:F1}。");
-            return ActionResult.Ok();
-        }
-
         /// <summary>直控攻击的锥形命中判定，同 <see cref="FracturedCityRegion.TryFindEnemyInAim"/>。</summary>
         public static RegionEnemyRecord TryFindEnemyInAim(CampaignState state, Vector2 origin, Vector2 aimDirection)
         {
             if (state?.RegionEnemies == null || aimDirection.sqrMagnitude < 1e-6f)
             {
                 return null;
+            }
+            // FG0-ARCH-03：地点已载入时敌人位置的真相在战斗内核（逐单位扫描在 AOT）。
+            CombatSite site = CombatSites.Get(RegionId);
+            if (site != null)
+            {
+                return site.TryFindEnemyInCone(origin, aimDirection, FoundryOutpostLayout.DirectAttackRange, FoundryOutpostLayout.DirectAttackAimHalfAngleDeg,
+                    out string id) ? FindEnemy(state, id) : null;
             }
             Vector2 dirNorm = aimDirection.normalized;
             float cosHalf = Mathf.Cos(FoundryOutpostLayout.DirectAttackAimHalfAngleDeg * Mathf.Deg2Rad);
@@ -400,46 +396,34 @@ namespace GameLogic.Campaign.Regions
             return null;
         }
 
-        /// <summary>护甲机"正面减伤40%，侧后不减"的命中方向判定——攻击方向（攻击者→护甲机）与护甲机
-        /// 固定朝向（<see cref="FoundryOutpostLayout.ArmorBotLeftFacing"/>/<c>RightFacing</c>，驻守
-        /// 掩体不转身）夹角在 <see cref="FoundryOutpostLayout.ArmorBotFrontalHalfAngleDeg"/> 锥角内即
-        /// "正面命中"。非护甲机固定恒为 false（无意义）。</summary>
-        public static bool IsFrontalHit(RegionEnemyRecord enemy, Vector2 attackerPosition)
+        /// <summary>护甲机的固定朝向（驻守掩体不转身）：左 / 右掩体、侧袭增援、核心入口增援各自的朝向常量。
+        /// 战斗内核据此判定“正面命中”（锥角 <see cref="FoundryOutpostLayout.ArmorBotFrontalHalfAngleDeg"/>，正面减伤读 fg.TbMechEnemy）。</summary>
+        public static Vector2 ArmorFacingOf(RegionEnemyRecord enemy)
         {
-            if (enemy == null || enemy.EnemyTypeId != EnemyCatalog.ArmorBotId)
+            if (enemy == null)
             {
-                return false;
+                return new Vector2(0f, -1f);
             }
-            Vector2 facing = enemy.EnemyInstanceId == FoundryOutpostLayout.ArmorBotLeftSpawnId
-                ? FoundryOutpostLayout.ArmorBotLeftFacing
-                : FoundryOutpostLayout.ArmorBotRightFacing;
-            // ER6-ADAPT-01：侧袭增援复用护甲机类型时用自己的朝向常量，不套用左/右掩体默认三元判定
-            // （它站的位置既不是左也不是右掩体，套用会给出错误的正面锥角基准）。
             if (enemy.EnemyInstanceId == FoundryOutpostLayout.FlankerSpawnId)
             {
-                facing = FoundryOutpostLayout.FlankerFacing;
+                return FoundryOutpostLayout.FlankerFacing;
             }
-            else if (enemy.EnemyInstanceId == FoundryOutpostLayout.CoreReinforcementSpawnId)
+            if (enemy.EnemyInstanceId == FoundryOutpostLayout.CoreReinforcementSpawnId)
             {
-                facing = new Vector2(0f, -1f); // 面朝入口方向（同护甲机驻守语义，朝来袭方向）。
+                return new Vector2(0f, -1f); // 面朝入口方向（同护甲机驻守语义，朝来袭方向）。
             }
-            Vector2 toAttacker = attackerPosition - enemy.Position;
-            if (toAttacker.sqrMagnitude < 1e-6f)
-            {
-                return true; // 贴脸命中视为正面，不给一个不可能出现的方向留歧义。
-            }
-            float cosAngle = Vector2.Dot(facing.normalized, toAttacker.normalized);
-            float cosHalf = Mathf.Cos(FoundryOutpostLayout.ArmorBotFrontalHalfAngleDeg * Mathf.Deg2Rad);
-            return cosAngle >= cosHalf;
+            return enemy.EnemyInstanceId == FoundryOutpostLayout.ArmorBotLeftSpawnId
+                ? FoundryOutpostLayout.ArmorBotLeftFacing
+                : FoundryOutpostLayout.ArmorBotRightFacing;
         }
 
-        /// <summary>唯一攻击结算入口——与 <see cref="FracturedCityRegion.TryAttackEnemy"/> 同一装配伤害
-        /// 出口（<see cref="MachineLoadoutRegistry"/>），玩家策略命令/直控共用（AC-REA-003"AI/玩家同
-        /// 装配"结构性成立）。护甲机命中后按 <see cref="IsFrontalHit"/> 应用正面减伤，铸造重炮走独立
-        /// <see cref="CannonCombat"/> 状态机（与破碎都市同一分支顺序：必须在 HasCombatOutput 早退检查
-        /// 之前判定 HasCannonPrimary，理由同 <see cref="FracturedCityRegion.TryAttackEnemy"/> 类注释）。</summary>
+        /// <summary>唯一攻击结算入口（编队攻击命令在内核里走同一段规则；本方法是直控点击的入口）。
+        /// FG0-ARCH-03：护甲机正面减伤、铸造重炮两段式与熔穿过载穿甲、耐热反制、主核心阶段二侧后 +20%、标记与标记跳转全部在战斗内核
+        /// （CombatLogic.FireAt），用内核里的实时位置判定命中方向（Demo 编队攻击此前读的是只在存档时同步的记录位置）。</summary>
+        /// <remarks>Demo 的 isReachable 回调参数已删除（视线判定在内核）。<paramref name="seed"/> / <paramref name="isAiSource"/> /
+        /// <paramref name="attackerPosition"/> 保留签名：命中方向用内核里的实时位置判定，规则不区分来源、没有随机量。</remarks>
         public static ActionResult TryAttackEnemy(CampaignState state, int attackerLogicId, string enemyInstanceId,
-            int seed, bool isAiSource, Vector2 attackerPosition, Func<Vector2, Vector2, bool> isReachable = null)
+            int seed, bool isAiSource, Vector2 attackerPosition)
         {
             if (state == null)
             {
@@ -454,141 +438,14 @@ namespace GameLogic.Campaign.Regions
             {
                 return ActionResult.Fail("目标已阵亡。");
             }
-
-            MachineCombatResolution resolution = isAiSource
-                ? MachineLoadoutRegistry.ResolveForAi(state, attackerLogicId, seed)
-                : MachineLoadoutRegistry.ResolveForDirectControl(state, attackerLogicId, seed);
-            if (!resolution.Success)
+            CombatSite site = CombatSites.Get(RegionId);
+            if (site == null)
             {
-                return ActionResult.Fail(resolution.FailureReason);
+                return ActionResult.Fail("铸造前哨外围没有载入，不能结算攻击。");
             }
-
-            if (resolution.Preview.HasCannonPrimary)
-            {
-                // CannonCombat 是与 FracturedCityRegion 共享的独立状态机，返回类型是它自己的
-                // ActionResult（同名不同类型，Success/FailureReason 结构相同）——本方法域内统一用
-                // 自己的 ActionResult，这里做一次纯字段转换，不改 CannonCombat 本身（ER6-REACT-02
-                // 已验收，不引入非必要改动）。
-                //
-                // ER6-ADAPT-01：铸造重炮命中护甲机正面时，与普通武器同一套 IsFrontalHit 判定+
-                // ArmorBotFrontalReductionPct 基线，但额外经 CannonCombat.ApplyArmorPierce 按"是否熔穿
-                // 过载生效"与"目标是否 HeatResistant 适应"调整穿甲——这正是 ER6-REACT-02 当时把
-                // targetHeatResistant 参数留空、注释点名"该系统尚未开工"的落地点。
-                bool isFrontalArmored = enemy.EnemyTypeId == EnemyCatalog.ArmorBotId && IsFrontalHit(enemy, attackerPosition);
-                RegionRecord adaptRegion = Find(state);
-                bool heatResistant = adaptRegion != null && adaptRegion.AdaptationId == AdaptationCatalog.HeatResistant;
-                // ER7-CORE-01：Phase2 主核心"侧后+20%"——恒为1（不影响护甲机/其它敌人），只在目标是
-                // 主核心且当前恰为 Phase2 时才可能大于1，与 HeatResistant 的穿甲折扣是完全独立的两个
-                // 乘数（不会互相抵消/叠加错顺序，先穿甲折算减伤比例，再整体乘伤害倍率）。
-                float bossMultiplier = FoundryOutpostCoreBoss.ComputeDamageMultiplier(state, enemy, attackerPosition);
-                FracturedCityRegion.ActionResult cannonResult = CannonCombat.TryFire(
-                    state, attackerLogicId, enemyInstanceId, resolution, isReachable,
-                    isFrontalArmoredHit: isFrontalArmored,
-                    armorReductionFraction: FoundryOutpostLayout.ArmorBotFrontalReductionPct,
-                    targetHeatResistant: heatResistant,
-                    damageMultiplier: bossMultiplier);
-                return cannonResult.Success ? ActionResult.Ok() : ActionResult.Fail(cannonResult.FailureReason);
-            }
-
-            if (!resolution.Preview.HasCombatOutput)
-            {
-                return ActionResult.Fail("当前装配没有可攻击的主武器出口（8号汇槽为空）。");
-            }
-
-            float damage = Mathf.Max(0f, resolution.Preview.TotalNormalizedDamage);
-            if (IsFrontalHit(enemy, attackerPosition))
-            {
-                damage = EnemyCatalog.ComputeFrontalArmorReducedDamage(damage, isFrontalHit: true);
-                Feedback.FeedbackCues.RaiseAt(Feedback.FeedbackCueId.ArmorHit, enemy.Position);
-            }
-            damage *= FoundryOutpostCoreBoss.ComputeDamageMultiplier(state, enemy, attackerPosition);
-
-            // ER6-REGION-01：标记跳转在外围实战触发（AC-JRN-014）——与 FracturedCityRegion.TryAttackEnemy
-            // 同一顺序，"目标已标记时"才跳转，查询顺序在本次命中造成的新标记之前（第一次命中只留标记，
-            // 再次命中已标记目标才跳转）。护甲机正面减伤已在上面应用，跳转伤害基于减伤后的伤害值。
-            // ER8-CONTENT-01：开火音按主武器区分（ComponentCatalog.SfxId 的消费点）。重炮走 CannonCombat 自己的音。
-            Feedback.FeedbackCues.RaiseAt(Feedback.FeedbackCueId.WeaponFire, enemy.Position, null, Feedback.FeedbackCues.ContentSfx(resolution.Preview.PrimaryId));
-            bool wasMarkedBeforeThisHit = IsEnemyMarked(state, enemyInstanceId);
-
-            ActionResult primaryResult = TryDamageEnemy(state, enemyInstanceId, damage);
-            if (!primaryResult.Success)
-            {
-                return primaryResult;
-            }
-
-            if (resolution.Preview.HasMarkerFunction && enemy.IsAlive)
-            {
-                TryMarkEnemy(state, enemyInstanceId, FracturedCityLayout.EnemyMarkDurationSeconds);
-            }
-
-            if (resolution.Preview.ReactionId == MechanicalReactionCatalog.ReactionMarkJumpId && wasMarkedBeforeThisHit)
-            {
-                ApplyMarkJump(state, enemyInstanceId, enemy.Position, damage, isReachable);
-            }
-
-            return primaryResult;
-        }
-
-        /// <summary>标记跳转链式伤害——与 <see cref="FracturedCityRegion.ApplyMarkJump"/> 同一实现（候选＝
-        /// 存活/同区域/已标记/8米内/可达，按距离→稳定 EnemyInstanceId 排序，最多 2 个，每跳伤害为上一跳
-        /// 60%，不重复跳转）。复用 <see cref="FracturedCityLayout"/> 的跳转常量——这是通用反应数值
-        /// （DEMO-CONTENT-LOCK.md §2.4/§5），不是破碎都市专属，不重复定义第二份常量。</summary>
-        private static void ApplyMarkJump(CampaignState state, string primaryEnemyInstanceId, Vector2 primaryPosition,
-            float primaryDamage, Func<Vector2, Vector2, bool> isReachable)
-        {
-            SweepExpiredEnemyMarks(state);
-            RegionRecord region = Find(state);
-            if (region?.MarkedEnemies == null || state.RegionEnemies == null)
-            {
-                return;
-            }
-
-            var candidates = new List<RegionEnemyRecord>();
-            foreach (RegionEnemyRecord candidate in state.RegionEnemies)
-            {
-                if (candidate.EnemyInstanceId == primaryEnemyInstanceId || !candidate.IsAlive
-                    || candidate.RegionId != RegionId)
-                {
-                    continue;
-                }
-                if (!IsEnemyMarked(state, candidate.EnemyInstanceId))
-                {
-                    continue;
-                }
-                float dist = Vector2.Distance(primaryPosition, candidate.Position);
-                if (dist > FracturedCityLayout.MarkJumpRange)
-                {
-                    continue;
-                }
-                if (isReachable != null && !isReachable(primaryPosition, candidate.Position))
-                {
-                    continue;
-                }
-                candidates.Add(candidate);
-            }
-
-            candidates.Sort((a, b) =>
-            {
-                float da = Vector2.Distance(primaryPosition, a.Position);
-                float db = Vector2.Distance(primaryPosition, b.Position);
-                int cmp = da.CompareTo(db);
-                return cmp != 0 ? cmp : string.CompareOrdinal(a.EnemyInstanceId, b.EnemyInstanceId);
-            });
-
-            float jumpDamage = primaryDamage;
-            int jumps = Mathf.Min(FracturedCityLayout.MarkJumpMaxTargets, candidates.Count);
-            for (int i = 0; i < jumps; i++)
-            {
-                jumpDamage *= FracturedCityLayout.MarkJumpDamageFalloff;
-                TryDamageEnemy(state, candidates[i].EnemyInstanceId, jumpDamage);
-                Log.Info($"[FoundryOutpostRegion] 标记跳转：{primaryEnemyInstanceId} → {candidates[i].EnemyInstanceId}，伤害 {jumpDamage:F1}。");
-            }
-            if (jumps > 0)
-            {
-                // ER8-CONTENT-01 AC-AUD-001 反应：真正跳出去才算触发（无合法跳转目标时退化为普通命中，不出反应音）。
-                Feedback.FeedbackCues.RaiseAt(Feedback.FeedbackCueId.ReactionMarkJump, primaryPosition, $"跳转 {jumps} 个目标",
-                    Feedback.FeedbackCues.ContentSfx(MechanicalReactionCatalog.ReactionMarkJumpId));
-            }
+            return site.TryFireAtEnemy(attackerLogicId, enemyInstanceId, out _, out string reason)
+                ? ActionResult.Ok()
+                : ActionResult.Fail(reason);
         }
 
         // ── 敌方标记（ER6-REGION-01：与 FracturedCityRegion.MarkedEnemies 同一结构，各区域

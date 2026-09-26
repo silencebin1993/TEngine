@@ -349,8 +349,7 @@ namespace GameLogic.Campaign.Regions
         /// <summary>每帧驱动——Transition 计时→自动进 Phase2；Phase2 区域封锁预警→生效；Phase1/Phase2
         /// 主核心自卫攻击。<see cref="CoreBossState.Destroyed"/> 后整体 no-op（"停止新增敌方生产"，
         /// 不会再召维修机/不会再触发任何转换）。唯一调用点 <see cref="FoundryOutpostController.Update"/>。</summary>
-        public static void Tick(CampaignState state, float dt, IReadOnlyList<FoundryOutpostEnemyAi.VisibleMachine> machines,
-            FoundryOutpostEnemyAi.LineOfSightCheck hasLineOfSight)
+        public static void Tick(CampaignState state, float dt)
         {
             RegionRecord region = FoundryOutpostRegion.Find(state);
             if (region == null || !IsInitialized(region) || dt <= 0f)
@@ -386,61 +385,9 @@ namespace GameLogic.Campaign.Regions
                 Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.BossLockoutActive, FoundryOutpostLayout.CoreGate.Position);
             }
 
-            if (s == CoreBossState.Phase1 || s == CoreBossState.Phase2)
-            {
-                TickCoreAttack(state, region, dt, machines, hasLineOfSight);
-            }
+            // FG0-ARCH-03：主核心的开火（阶段一 / 二，射程内最近的可见机器，冷却）在战斗内核里执行——
+            // 本方法只推进阶段状态机；阶段变化由 CombatDemoContent.SyncBossFlags 同步成内核里“可开火 / 可伤 / 侧后加成”三个标志。
         }
 
-        /// <summary>主核心自卫攻击——DEMO-CONTENT-LOCK.md 未点名具体数字，按铸造步进炮同一量级取保守
-        /// judgment call（同 <see cref="FoundryOutpostEnemyAi"/> 类注释先例，非文档摘录）。</summary>
-        private static void TickCoreAttack(CampaignState state, RegionRecord region, float dt,
-            IReadOnlyList<FoundryOutpostEnemyAi.VisibleMachine> machines, FoundryOutpostEnemyAi.LineOfSightCheck hasLineOfSight)
-        {
-            RegionEnemyRecord core = FoundryOutpostRegion.FindEnemy(state, FoundryOutpostLayout.MainCoreId);
-            if (core == null || !core.IsAlive)
-            {
-                return;
-            }
-            core.CycleCooldownRemaining -= dt;
-            if (core.CycleCooldownRemaining > 0f)
-            {
-                return;
-            }
-            FoundryOutpostEnemyAi.VisibleMachine? target = FindNearestVisible(core.Position, machines, hasLineOfSight, FoundryOutpostLayout.CoreAttackRange);
-            if (!target.HasValue)
-            {
-                return;
-            }
-            core.CycleCooldownRemaining = FoundryOutpostLayout.CoreAttackCooldownSeconds;
-            MachineRegistry.ApplyDamage(target.Value.LogicId, FoundryOutpostLayout.CoreAttackDamage);
-            Log.Info($"[FoundryOutpostCoreBoss] 主核心命中机器 {target.Value.LogicId}，伤害 {FoundryOutpostLayout.CoreAttackDamage:F0}。");
-        }
-
-        private static FoundryOutpostEnemyAi.VisibleMachine? FindNearestVisible(Vector2 from,
-            IReadOnlyList<FoundryOutpostEnemyAi.VisibleMachine> machines, FoundryOutpostEnemyAi.LineOfSightCheck hasLineOfSight, float maxRange)
-        {
-            if (machines == null)
-            {
-                return null;
-            }
-            FoundryOutpostEnemyAi.VisibleMachine? best = null;
-            float bestDist = maxRange;
-            foreach (FoundryOutpostEnemyAi.VisibleMachine m in machines)
-            {
-                float dist = Vector2.Distance(from, m.Position);
-                if (dist > bestDist)
-                {
-                    continue;
-                }
-                if (hasLineOfSight != null && !hasLineOfSight(from, m.Position))
-                {
-                    continue;
-                }
-                bestDist = dist;
-                best = m;
-            }
-            return best;
-        }
     }
 }

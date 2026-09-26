@@ -43,6 +43,10 @@ namespace GameLogic.Core
         /// <summary>本帧按倍率缩放后的游戏时间（暂停为 0）。只给"玩家本帧的实时输入"（接入移动、交互进度）用；
         /// 一切会被观察影响的模拟都必须走固定步（<see cref="Campaign.WorldSim.WorldSimulation"/>）。</summary>
         public static float FrameScaledDt { get; private set; }
+
+        /// <summary>FG0-ARCH-03：距上一个模拟步已经过去的比例（0～1，= 累计量 / 步长）。表现层用它在上一步与本步位置之间插值
+        /// （60 Hz 模拟在任意帧率、任意倍速下画面连续）；只影响画面，不影响模拟。</summary>
+        public static float StepAlpha => (float)Math.Min(1.0, Math.Max(0.0, _accumulator * StepHz));
         public static int LastFrameSteps { get; private set; }
         /// <summary>因单帧步数上限而丢弃的步数累计（世界短暂变慢，不跳步；性能证据用）。</summary>
         public static long DroppedSteps { get; private set; }

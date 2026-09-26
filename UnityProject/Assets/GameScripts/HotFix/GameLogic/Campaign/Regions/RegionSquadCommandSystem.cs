@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using GameLogic.Campaign.Feedback;
 using GameLogic.Core;
 using TEngine;
+using GameLogic.View;
 using UnityEngine;
 
 namespace GameLogic.Campaign.Regions
@@ -88,24 +89,20 @@ namespace GameLogic.Campaign.Regions
         public Func<Vector2, Vector2> ClampDestination;
         public Func<Vector2, float, RegionHostileInfo?> FindHostileNear;
         public Func<string, RegionHostileInfo?> ResolveHostile;
-        public Func<int, string, RegionAttackOutcome> TryAttack;
+        /// <summary>FG0-ARCH-03：本地点的战斗内核（编队命令的执行在内核里：移动、避障、受阻判定、接战距离、攻击冷却、开火规则）。</summary>
+        public GameLogic.Campaign.Combat.CombatSite Site;
+        /// <summary>敌对目标 ID → 内核单位 ID（0 = 不存在）。</summary>
+        public Func<string, int> HostileUnit;
         public float AttackRange = 6f;
         public float AttackCooldownSeconds = 1f;
     }
 
     public sealed class RegionSquadCommandSystem
     {
-        private const float MoveSpeed = 6f; // 与 HomeValleyMachineMarker.MoveSpeed 手感一致。
         private const float ArriveRadius = 1.2f;
         private const float GuardArriveRadius = 0.3f; // 原地守备，基本不需要位移就算"到位"。
         private const float MinDragWorldSize = 0.6f;
         private const float ClickPickRadius = 1.6f;
-        private const float LookaheadDistance = 3f;
-        private const float MachineRadius = 0.9f;
-        private const float AvoidWeight = 1.35f;
-        private const float ProgressCheckInterval = 1f;
-        private const float MinProgressDelta = 0.5f;
-        private const int MaxStuckStrikes = 3;
         private const int MaxRecentEvents = 24;
         private const int MaxRingVisuals = 32;
 
@@ -113,8 +110,6 @@ namespace GameLogic.Campaign.Regions
 
         private readonly List<int> _selection = new List<int>(32);
         private readonly Dictionary<int, List<int>> _groups = new Dictionary<int, List<int>>(9);
-        private readonly Dictionary<int, ActiveCommand> _active = new Dictionary<int, ActiveCommand>(32);
-        private readonly List<QueuedCommand> _queued = new List<QueuedCommand>(16);
         private readonly List<string> _recentEvents = new List<string>(MaxRecentEvents);
         private readonly Dictionary<int, GameObject> _selectionRings = new Dictionary<int, GameObject>(32);
         private GameObject _destinationMarkerGo;
@@ -125,30 +120,11 @@ namespace GameLogic.Campaign.Regions
         private Vector2 _dragCurrent;
         private bool _clickConsumedThisFrame;
         private RegionCommandKind? _armedKind;
-
-        private struct ActiveCommand
-        {
-            public RegionCommandKind Kind;
-            public Vector2 TargetPosition;
-            public string HostileId;
-            public float ArriveRadius;
-            public float ProgressCheckTimer;
-            public float LastProgressDistance;
-            public int StuckStrikes;
-            public float AttackCooldownRemaining;
-            public bool HasLastProgressDistance;
-        }
-
-        private struct QueuedCommand
-        {
-            public RegionCommandKind Kind;
-            public Vector2 TargetPosition;
-            public string HostileId;
-            public int[] Targets;
-        }
+        /// <summary>暂停中下达、还没执行过一步的命令条数（UI“已排队 N 条”）。命令本身已经写进内核（进存档），恢复后的第一步开始执行。</summary>
+        private int _pendingIssues;
 
         public IReadOnlyList<int> Selection => _selection;
-        public int QueuedCommandCount => _queued.Count;
+        public int QueuedCommandCount => _pendingIssues;
         public IReadOnlyList<string> RecentEvents => _recentEvents;
         public RegionCommandKind? ArmedKind => _armedKind;
         public bool ConsumedClickThisFrame => _clickConsumedThisFrame;
@@ -164,9 +140,8 @@ namespace GameLogic.Campaign.Regions
             _ctx = context;
             _selection.Clear();
             _groups.Clear();
-            _active.Clear();
-            _queued.Clear();
             _recentEvents.Clear();
+            _pendingIssues = 0;
             _dragging = false;
             _armedKind = null;
             ClearSelectionRings();
@@ -180,10 +155,16 @@ namespace GameLogic.Campaign.Regions
             _ctx = null;
             _selection.Clear();
             _groups.Clear();
-            _active.Clear();
-            _queued.Clear();
+            _pendingIssues = 0;
             _dragging = false;
             _armedKind = null;
+        }
+
+        /// <summary>地点不再被观察：销毁选中环与目的地标记（画面对象只在被观察时存在）。选择集与命令保留。</summary>
+        public void ReleaseVisuals()
+        {
+            ClearSelectionRings();
+            ClearDestinationVisual();
         }
 
         // ── 每帧驱动 ──────────────────────────────────────────────────────
@@ -192,20 +173,10 @@ namespace GameLogic.Campaign.Regions
         /// 已下达的命令照常推进（机器不会因为玩家在规划而停下）。</summary>
         public bool PointerSuppressed { get; set; }
 
-        /// <summary>由 Controller.Update 在暂停早退**之前**调用——战略暂停下仍要能选人/排队命令。
-        /// <paramref name="paused"/>=true 时不推进任何移动/攻击 Tick，只处理选择/编组/命令下达
-        /// （下达即排队，不立即执行）。</summary>
+        /// <summary>输入 + 表现（被观察时每帧）。命令的执行在战斗内核的模拟步里（与是否被观察无关）。</summary>
         public void Tick(bool paused, float dt)
         {
-            if (!TickInputCore(paused))
-            {
-                return;
-            }
-            if (!paused)
-            {
-                TickSim(dt);
-            }
-            SyncSelectionVisuals();
+            TickInput(paused);
         }
 
         /// <summary>FG0-ARCH-01：玩家输入部分（选择 / 编组 / 下令），只在本区域被观察时每帧调用；不推进任何移动。</summary>
@@ -214,19 +185,18 @@ namespace GameLogic.Campaign.Regions
             if (TickInputCore(paused))
             {
                 SyncSelectionVisuals();
+                UpdateDestinationVisual();
             }
         }
 
-        /// <summary>FG0-ARCH-01：模拟部分（排队命令落地、移动 / 攻击推进），由世界模拟按固定步调用——
-        /// 无论本区域是否被观察都执行（FGR-BASE-021），与输入所有权无关。</summary>
+        /// <summary>FG0-ARCH-03：模拟步开头调用（只有不暂停时才有模拟步）：暂停中下达的命令从这一步起开始执行，“已排队”计数清零。
+        /// 命令的移动 / 攻击推进在战斗内核里（<see cref="GameLogic.Campaign.Combat.CombatSite.Step"/>），无论本区域是否被观察（FGR-BASE-021）。</summary>
         public void TickSim(float dt)
         {
-            if (_ctx == null || dt <= 0f)
+            if (dt > 0f)
             {
-                return;
+                _pendingIssues = 0;
             }
-            FlushQueued();
-            TickActiveCommands(dt);
         }
 
         /// <summary>返回 false = 本帧没有输入所有权（或未绑定），调用方不再刷新选中表现。</summary>
@@ -326,8 +296,8 @@ namespace GameLogic.Campaign.Regions
                 {
                     continue; // 受控机排除在框选之外——从源头不进入编队选择。
                 }
-                Vector3 p = marker.transform.position;
-                if (p.x >= lo.x && p.x <= hi.x && p.z >= lo.y && p.z <= hi.y)
+                Vector2 p = marker.Position;
+                if (p.x >= lo.x && p.x <= hi.x && p.y >= lo.y && p.y <= hi.y)
                 {
                     AddToSelection(marker.LogicId);
                 }
@@ -538,8 +508,7 @@ namespace GameLogic.Campaign.Regions
             IssueMoveTo(worldPoint, IsCallerPaused());
         }
 
-        /// <summary>Guard/Retreat 走"立即命令"（目标固定，不需要点击确认）；暂停期间仍然只是排队，
-        /// 与武装+点击路径共用同一个 <see cref="Issue"/> 出口。</summary>
+        /// <summary>Guard/Retreat 走"立即命令"（目标固定，不需要点击确认）；暂停期间下达即“排队”（写进内核，恢复后第一步执行）。</summary>
         public void IssueGuardHere(bool paused)
         {
             if (_selection.Count == 0)
@@ -547,8 +516,7 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             _armedKind = null; // Guard 是立即命令，不该留着别的命令还在"武装待命"。
-            // 每台机器守自己当前的位置——目标在 Issue 时按选择集逐台各自计算，这里传 NaN 作为
-            // "使用发出命令那一刻各自当前位置" 的标记，由 StartCommand 识别。
+            // 每台机器守自己当前的位置：传 NaN，由内核按执行者当前位置落点。
             Issue(RegionCommandKind.Guard, new Vector2(float.NaN, float.NaN), null, paused);
         }
 
@@ -562,10 +530,7 @@ namespace GameLogic.Campaign.Regions
             Issue(RegionCommandKind.Retreat, _ctx.SafePoint, null, paused);
         }
 
-        /// <summary>Move/Attack 的非武装直发变体——供验收/调试与未来其它正式入口（如工作分配引擎
-        /// 以外的自动化 journey）直接下令，不必先武装再模拟一次世界点击。武装+点击路径
-        /// （<see cref="ArmCommand"/>/<see cref="ResolveAndIssueArmed"/>）内部最终也调用这两个方法
-        /// 走到的同一个 <see cref="Issue"/> 出口，行为完全一致。</summary>
+        /// <summary>Move/Attack 的非武装直发变体——供验收/调试与未来其它正式入口直接下令；武装+点击路径最终走同一个 <see cref="Issue"/> 出口。</summary>
         public void IssueMoveTo(Vector2 target, bool paused)
         {
             if (_selection.Count == 0)
@@ -594,357 +559,174 @@ namespace GameLogic.Campaign.Regions
             Issue(RegionCommandKind.Attack, hostile.Value.Position, hostileId, paused);
         }
 
-        /// <summary>本类唯一的命令派发出口——立即执行或排队，由 <paramref name="paused"/> 决定。
-        /// 排队时快照当时的选择集（LogicId 数组），不引用 <see cref="_selection"/> 本身——暂停期间
-        /// 玩家还会继续改选择，恢复时必须按下令那一刻的名单执行，不能被后续改选择污染。</summary>
+        /// <summary>本类唯一的命令派发出口。命令直接写进战斗内核（FG-GAP-018：命令随内核快照进存档，读档后继续执行）；
+        /// 暂停中下达的标为“待执行”，恢复后的第一步开始执行（Demo 的“暂停下达即排队、恢复时按下令那一刻的名单执行”）。</summary>
         private void Issue(RegionCommandKind kind, Vector2 targetPosition, string hostileId, bool paused)
         {
             if (_selection.Count == 0)
             {
                 return;
             }
-
+            int started = StartCommandForTargets(kind, targetPosition, hostileId, _selection, paused);
             if (paused)
             {
-                _queued.Add(new QueuedCommand
+                if (started > 0)
                 {
-                    Kind = kind,
-                    TargetPosition = targetPosition,
-                    HostileId = hostileId,
-                    Targets = _selection.ToArray(),
-                });
-                PushEvent($"{KindLabel(kind)} 已排队（{_selection.Count} 台，等待恢复）。");
+                    _pendingIssues++;
+                }
+                PushEvent($"{KindLabel(kind)} 已排队（{started} 台，等待恢复）。");
                 FeedbackCues.Raise(FeedbackCueId.CommandAck);
-                return;
             }
-
-            StartCommandForTargets(kind, targetPosition, hostileId, _selection);
         }
 
-        private void FlushQueued()
+        private static BinGames.Sim.Combat.CombatCommandKind ToKernel(RegionCommandKind kind)
         {
-            if (_queued.Count == 0)
+            switch (kind)
             {
-                return;
+                case RegionCommandKind.Move: return BinGames.Sim.Combat.CombatCommandKind.Move;
+                case RegionCommandKind.Attack: return BinGames.Sim.Combat.CombatCommandKind.Attack;
+                case RegionCommandKind.Guard: return BinGames.Sim.Combat.CombatCommandKind.Guard;
+                default: return BinGames.Sim.Combat.CombatCommandKind.Retreat;
             }
-            foreach (QueuedCommand q in _queued)
-            {
-                var alive = new List<int>(q.Targets.Length);
-                foreach (int id in q.Targets)
-                {
-                    // 受控机排除在编队接管之外；死亡/离场机器直接跳过，不报错。
-                    if (_ctx.IsEligible(id) && !_ctx.IsDirectControlled(id))
-                    {
-                        alive.Add(id);
-                    }
-                }
-                if (alive.Count == 0)
-                {
-                    continue;
-                }
-                StartCommandForTargets(q.Kind, q.TargetPosition, q.HostileId, alive);
-            }
-            _queued.Clear();
         }
 
-        private void StartCommandForTargets(RegionCommandKind kind, Vector2 targetPosition, string hostileId, IReadOnlyList<int> targets)
+        private static bool TryFromKernel(BinGames.Sim.Combat.CombatCommandKind kind, out RegionCommandKind result)
+        {
+            switch (kind)
+            {
+                case BinGames.Sim.Combat.CombatCommandKind.Move: result = RegionCommandKind.Move; return true;
+                case BinGames.Sim.Combat.CombatCommandKind.Attack: result = RegionCommandKind.Attack; return true;
+                case BinGames.Sim.Combat.CombatCommandKind.Guard: result = RegionCommandKind.Guard; return true;
+                case BinGames.Sim.Combat.CombatCommandKind.Retreat: result = RegionCommandKind.Retreat; return true;
+                default: result = default; return false;
+            }
+        }
+
+        private int StartCommandForTargets(RegionCommandKind kind, Vector2 targetPosition, string hostileId, IReadOnlyList<int> targets, bool pending)
         {
             int firstStarted = 0;
+            int started = 0;
+            int targetUnit = kind == RegionCommandKind.Attack && _ctx.HostileUnit != null ? _ctx.HostileUnit(hostileId) : 0;
             for (int i = 0; i < targets.Count; i++)
             {
                 int logicId = targets[i];
                 if (_ctx.IsDirectControlled(logicId) || !_ctx.IsEligible(logicId))
                 {
-                    continue; // 受控机排除在编队接管之外（每次真正开始执行时再核对一遍，双保险）。
+                    continue; // 受控机排除在编队接管之外。
                 }
+                HomeValleyMachineMarker marker = FindMarker(logicId);
+                if (marker == null || _ctx.Site == null)
+                {
+                    continue;
+                }
+                _ctx.CancelWorkIfAny?.Invoke(logicId);
+                marker.CancelCommandMove(); // 与“工作赶路”互斥：同一条内核命令槽，后下达的覆盖。
+                bool ok = _ctx.Site.IssueCommand(marker.UnitId, ToKernel(kind), targetPosition, targetUnit,
+                    kind == RegionCommandKind.Guard ? GuardArriveRadius : ArriveRadius,
+                    _ctx.AttackRange, _ctx.AttackCooldownSeconds, pending);
+                if (!ok)
+                {
+                    continue;
+                }
+                started++;
                 if (firstStarted == 0)
                 {
                     firstStarted = logicId;
                 }
-                _ctx.CancelWorkIfAny?.Invoke(logicId);
-
-                HomeValleyMachineMarker marker = FindMarker(logicId);
-                Vector2 startTarget = targetPosition;
-                if (kind == RegionCommandKind.Guard && float.IsNaN(targetPosition.x))
-                {
-                    Vector3 p = marker != null ? marker.transform.position : Vector3.zero;
-                    startTarget = new Vector2(p.x, p.z);
-                }
-                marker?.CancelCommandMove(); // 与旧"工作"移动互斥，避免两条移动来源打架。
-
-                _active[logicId] = new ActiveCommand
-                {
-                    Kind = kind,
-                    TargetPosition = startTarget,
-                    HostileId = hostileId,
-                    ArriveRadius = kind == RegionCommandKind.Guard ? GuardArriveRadius : ArriveRadius,
-                    ProgressCheckTimer = ProgressCheckInterval,
-                    HasLastProgressDistance = false,
-                    StuckStrikes = 0,
-                    AttackCooldownRemaining = 0f,
-                };
             }
-            PushEvent($"{KindLabel(kind)} 已下达（{targets.Count} 台）。");
-            if (firstStarted != 0)
+            if (!pending)
             {
-                // 命令确认音按第一台接令机器的底盘区分（ChassisCatalog.SfxId 的消费点）；
-                // 选择框与路径线是它的等价视觉反馈，不出字幕。
-                FeedbackCues.Raise(FeedbackCueId.CommandAck, null, FeedbackCues.MachineChassisSfx(firstStarted));
+                PushEvent($"{KindLabel(kind)} 已下达（{started} 台）。");
+                if (firstStarted != 0)
+                {
+                    // 命令确认音按第一台接令机器的底盘区分（ChassisCatalog.SfxId 的消费点）；选择框与路径线是它的等价视觉反馈，不出字幕。
+                    FeedbackCues.Raise(FeedbackCueId.CommandAck, null, FeedbackCues.MachineChassisSfx(firstStarted));
+                }
             }
+            return started;
         }
 
-        /// <summary>停止：清除选择集内所有机器的当前命令，交还 AI（Guard 的"取消"落点）。</summary>
+        /// <summary>停止：清除选择集内所有机器的当前编队命令，交还 AI（Guard 的"取消"落点）。</summary>
         public void Stop()
         {
             _armedKind = null;
             foreach (int id in _selection)
             {
-                if (_active.Remove(id))
+                if (TryGetActiveCommandKind(id, out _))
                 {
+                    CancelCommandFor(id);
                     PushEvent($"机器 #{id} 已停止，交还 AI。");
                 }
             }
         }
 
-        /// <summary>ER5-CTL-01：接管/释放一台机器时查询它当前是否有在办战略命令及其种类——
-        /// <see cref="RegionControlSystem"/> 据此判断释放时该不该自动恢复（Guard/Retreat 恢复，
-        /// Move/Attack 释放前先取消，见该类 <c>ReleaseInternal</c>）。不影响 <see cref="_active"/>
-        /// 本身，纯只读查询。</summary>
+        /// <summary>ER5-CTL-01：接管/释放一台机器时查询它当前的编队命令种类（工作赶路不算编队命令）。纯只读查询。</summary>
         public bool TryGetActiveCommandKind(int logicId, out RegionCommandKind kind)
         {
-            if (_active.TryGetValue(logicId, out ActiveCommand cmd))
-            {
-                kind = cmd.Kind;
-                return true;
-            }
             kind = default;
-            return false;
+            HomeValleyMachineMarker marker = _ctx != null ? FindMarker(logicId) : null;
+            if (marker == null || _ctx.Site == null || !_ctx.Site.TryGetCommand(marker.UnitId, out BinGames.Sim.Combat.CombatCommand cmd))
+            {
+                return false;
+            }
+            return TryFromKernel(cmd.Kind, out kind);
         }
 
-        /// <summary>单机取消，不看选择集/不发事件日志刷屏——供区域自己的"工作"移动系统
-        /// （<c>HomeValleyController</c> 的 WorkOrder/CommandWork/CommandHaul）在接管一台机器的
-        /// Transform 之前调用，避免两套移动来源（旧工作移动 vs 本类的战略命令）同一帧争抢同一个
-        /// <c>transform.position</c>。没有在办战略命令时是安全的 no-op。</summary>
+        /// <summary>单机取消编队命令（工作分配接管一台机器之前调用；没有在办的编队命令时是安全的 no-op）。</summary>
         public void CancelCommandFor(int logicId)
         {
-            _active.Remove(logicId);
-        }
-
-        // ── 每帧推进命令 ──────────────────────────────────────────────────
-
-        private void TickActiveCommands(float dt)
-        {
-            if (_active.Count == 0 || dt <= 0f)
+            if (TryGetActiveCommandKind(logicId, out _))
             {
-                return;
-            }
-            var finished = new List<int>();
-            var keys = new List<int>(_active.Keys);
-            foreach (int logicId in keys)
-            {
-                if (_ctx.IsDirectControlled(logicId))
-                {
-                    continue; // 受控机排除在编队接管之外——本帧不推进，交还后自动恢复。
-                }
-                if (!_ctx.IsEligible(logicId))
-                {
-                    finished.Add(logicId);
-                    continue;
-                }
                 HomeValleyMachineMarker marker = FindMarker(logicId);
-                if (marker == null)
-                {
-                    finished.Add(logicId);
-                    continue;
-                }
-
-                ActiveCommand cmd = _active[logicId];
-                bool done = TickOneCommand(logicId, marker, ref cmd, dt);
-                if (done)
-                {
-                    finished.Add(logicId);
-                }
-                else
-                {
-                    _active[logicId] = cmd;
-                }
+                _ctx.Site.ClearCommand(marker.UnitId);
             }
-            foreach (int id in finished)
-            {
-                _active.Remove(id);
-            }
-            UpdateDestinationVisual();
         }
 
-        /// <summary>返回 true 表示命令已结束（无论成功/失败），调用方据此从 <see cref="_active"/> 摘除
-        /// ——摘除即"交还 AI"：本类不持有任何机器的命令状态就意味着它回到区域自身的自由行为
-        /// （归还谷地的工作分配引擎/破碎都市的静止待命），与 AC-CMD-001"交还 AI"字面一致。</summary>
-        private bool TickOneCommand(int logicId, HomeValleyMachineMarker marker, ref ActiveCommand cmd, float dt)
+        /// <summary>FG0-ARCH-03：内核报告的编队命令事件 → 编队事件文本与反馈（文本与 Demo 逐条一致）。</summary>
+        public void OnKernelEvent(in BinGames.Sim.Combat.CombatEvent e, int logicId, string hostileId, GameLogic.Campaign.Combat.CombatSite site)
         {
-            Vector3 posV3 = marker.transform.position;
-            var pos = new Vector2(posV3.x, posV3.z);
-
-            if (cmd.Kind == RegionCommandKind.Attack)
+            switch (e.Kind)
             {
-                RegionHostileInfo? hostile = _ctx.ResolveHostile?.Invoke(cmd.HostileId);
-                if (hostile == null || !hostile.Value.Alive)
+                case BinGames.Sim.Combat.CombatEventKind.AttackOutcome:
                 {
-                    PushEvent($"机器 #{logicId} 攻击目标已丢失，交还 AI。");
-                    return true;
-                }
-                cmd.TargetPosition = hostile.Value.Position;
-            }
-
-            float distance = Vector2.Distance(pos, cmd.TargetPosition);
-            bool inRange = cmd.Kind == RegionCommandKind.Attack
-                ? distance <= _ctx.AttackRange
-                : distance <= cmd.ArriveRadius;
-
-            if (cmd.Kind == RegionCommandKind.Attack)
-            {
-                if (!inRange)
-                {
-                    StepTowards(marker, pos, cmd.TargetPosition, dt);
-                }
-                cmd.AttackCooldownRemaining -= dt;
-                if (inRange && cmd.AttackCooldownRemaining <= 0f)
-                {
-                    cmd.AttackCooldownRemaining = _ctx.AttackCooldownSeconds;
-                    RegionAttackOutcome outcome = _ctx.TryAttack != null
-                        ? _ctx.TryAttack(logicId, cmd.HostileId)
-                        : RegionAttackOutcome.Fail("未接入伤害结算。");
-                    if (outcome.Success)
+                    var r = (BinGames.Sim.Combat.CombatFireResult)e.Code;
+                    bool destroyed = e.Code2 != 0;
+                    if (r == BinGames.Sim.Combat.CombatFireResult.Ok || r == BinGames.Sim.Combat.CombatFireResult.StillAiming)
                     {
-                        PushEvent(outcome.TargetDestroyed
-                            ? $"机器 #{logicId} 击毁目标 {cmd.HostileId}，交还 AI。"
-                            : $"机器 #{logicId} 命中 {cmd.HostileId}。");
-                        if (outcome.TargetDestroyed)
-                        {
-                            return true;
-                        }
+                        PushEvent(destroyed
+                            ? $"机器 #{logicId} 击毁目标 {hostileId}，交还 AI。"
+                            : $"机器 #{logicId} 命中 {hostileId}。");
                     }
                     else
                     {
-                        PushEvent($"机器 #{logicId} 攻击未命中：{outcome.FailureReason}");
+                        PushEvent($"机器 #{logicId} 攻击未命中：{site?.FireReason(r, logicId, hostileId)}");
+                    }
+                    return;
+                }
+                case BinGames.Sim.Combat.CombatEventKind.CommandStuckStrike:
+                    PushEvent($"机器 #{logicId} 路径受阻，正在尝试重新绕行（第 {(int)e.Value}/{(int)e.Value2} 次）。");
+                    return;
+                case BinGames.Sim.Combat.CombatEventKind.CommandEnded:
+                {
+                    var reason = (BinGames.Sim.Combat.CombatEndReason)e.Code;
+                    var kind = (BinGames.Sim.Combat.CombatCommandKind)e.Code2;
+                    switch (reason)
+                    {
+                        case BinGames.Sim.Combat.CombatEndReason.Arrived:
+                            PushEvent($"机器 #{logicId} 已{(kind == BinGames.Sim.Combat.CombatCommandKind.Retreat ? "撤到安全点" : "到达目标")}，交还 AI。");
+                            return;
+                        case BinGames.Sim.Combat.CombatEndReason.TargetLost:
+                            PushEvent($"机器 #{logicId} 攻击目标已丢失，交还 AI。");
+                            return;
+                        case BinGames.Sim.Combat.CombatEndReason.Stuck:
+                            PushEvent($"机器 #{logicId} 路径持续受阻，已放弃命令并交还 AI。");
+                            FeedbackCues.Raise(FeedbackCueId.Denied, FeedbackCues.MachineLabel(logicId) + " 路径持续受阻，已放弃命令");
+                            return;
+                        default:
+                            return; // 击毁目标的文本随攻击结果一起写过了。
                     }
                 }
-                return false;
             }
-
-            if (inRange)
-            {
-                if (cmd.Kind == RegionCommandKind.Guard)
-                {
-                    return false; // 持久命令，到位后不结束，一直守到取消。
-                }
-                PushEvent($"机器 #{logicId} 已{(cmd.Kind == RegionCommandKind.Retreat ? "撤到安全点" : "到达目标")}，交还 AI。");
-                return true;
-            }
-
-            bool blocked = StepTowards(marker, pos, cmd.TargetPosition, dt);
-            return TrackProgressAndMaybeGiveUp(logicId, ref cmd, pos, dt, blocked);
-        }
-
-        /// <summary>朝目标推进一步，带最小局部避障；返回本帧是否检测到障碍导致绕行
-        /// （供上层做"路径受阻"判定的一个信号，另一个信号是 <see cref="TrackProgressAndMaybeGiveUp"/>
-        /// 的距离进展）。</summary>
-        private bool StepTowards(HomeValleyMachineMarker marker, Vector2 pos, Vector2 target, float dt)
-        {
-            Vector2 toTarget = target - pos;
-            if (toTarget.sqrMagnitude < 0.0001f)
-            {
-                return false;
-            }
-            Vector2 desired = toTarget.normalized;
-            bool blocked = TryFindBlockingObstacle(pos, desired, out Vector2 obstaclePos);
-
-            Vector2 moveDir = desired;
-            if (blocked)
-            {
-                Vector2 toObstacle = obstaclePos - pos;
-                Vector2 perp = new Vector2(-desired.y, desired.x);
-                float side = Vector2.Dot(perp, toObstacle) >= 0f ? -1f : 1f;
-                moveDir = (desired + perp * (side * AvoidWeight)).normalized;
-            }
-
-            Vector2 step = moveDir * (MoveSpeed * dt);
-            if (step.sqrMagnitude > toTarget.sqrMagnitude)
-            {
-                step = toTarget;
-            }
-            Vector2 next = pos + step;
-            marker.transform.position = new Vector3(next.x, marker.transform.position.y, next.y);
-            return blocked;
-        }
-
-        private bool TryFindBlockingObstacle(Vector2 pos, Vector2 desiredDir, out Vector2 obstaclePos)
-        {
-            obstaclePos = default;
-            if (_ctx.Obstacles == null)
-            {
-                return false;
-            }
-            float bestDist = float.MaxValue;
-            bool found = false;
-            foreach ((Vector2 Position, float Radius) obstacle in _ctx.Obstacles)
-            {
-                Vector2 toObstacle = obstacle.Position - pos;
-                float along = Vector2.Dot(toObstacle, desiredDir);
-                if (along <= 0f || along > LookaheadDistance)
-                {
-                    continue;
-                }
-                Vector2 closest = pos + desiredDir * along;
-                float perpDist = Vector2.Distance(closest, obstacle.Position);
-                if (perpDist > obstacle.Radius + MachineRadius)
-                {
-                    continue;
-                }
-                if (along < bestDist)
-                {
-                    bestDist = along;
-                    obstaclePos = obstacle.Position;
-                    found = true;
-                }
-            }
-            return found;
-        }
-
-        /// <summary>每 <see cref="ProgressCheckInterval"/> 秒核对一次到目标的距离是否真的在缩短；
-        /// 连续 <see cref="MaxStuckStrikes"/> 次不达标（含被 <see cref="StepTowards"/> 判定为绕行中）
-        /// 就判定"路径持续受阻"，放弃命令交还 AI——这是"不让机器永远站桩"的硬保证，不是靠感觉判断。
-        /// 用于比较的位置取自本帧推进**之前**的坐标（每秒才评估一次，帧内位移量级远小于评估间隔，
-        /// 误差可忽略，避免为了这一个数字额外多存一份"推进后坐标"）。</summary>
-        private bool TrackProgressAndMaybeGiveUp(int logicId, ref ActiveCommand cmd, Vector2 pos, float dt, bool blockedThisFrame)
-        {
-            cmd.ProgressCheckTimer -= dt;
-            if (cmd.ProgressCheckTimer > 0f)
-            {
-                return false;
-            }
-            cmd.ProgressCheckTimer = ProgressCheckInterval;
-
-            float distanceNow = Vector2.Distance(pos, cmd.TargetPosition);
-            bool madeProgress = !cmd.HasLastProgressDistance || (cmd.LastProgressDistance - distanceNow) >= MinProgressDelta;
-            cmd.LastProgressDistance = distanceNow;
-            cmd.HasLastProgressDistance = true;
-
-            if (madeProgress)
-            {
-                cmd.StuckStrikes = 0;
-                return false;
-            }
-
-            cmd.StuckStrikes++;
-            if (cmd.StuckStrikes < MaxStuckStrikes)
-            {
-                PushEvent($"机器 #{logicId} 路径受阻，正在尝试重新绕行（第 {cmd.StuckStrikes}/{MaxStuckStrikes} 次）。");
-                return false;
-            }
-
-            PushEvent($"机器 #{logicId} 路径持续受阻，已放弃命令并交还 AI。");
-            FeedbackCues.Raise(FeedbackCueId.Denied, FeedbackCues.MachineLabel(logicId) + " 路径持续受阻，已放弃命令");
-            return true;
         }
 
         // ── 视觉：选中环 + 目的地/路径 ──────────────────────────────────
@@ -991,11 +773,11 @@ namespace GameLogic.Campaign.Regions
                     ring.transform.localScale = new Vector3(1.6f, 0.02f, 1.6f);
                     GameLogic.View.UnityObjects.Release(ring.GetComponent<Collider>());
                     Renderer r = ring.GetComponent<Renderer>();
-                    r.material = new Material(Shader.Find("Standard")) { color = new Color(1f, 0.85f, 0.2f, 0.55f) };
+                    r.sharedMaterial = ViewMaterials.Standard(new Color(1f, 0.85f, 0.2f, 0.55f));
                     _selectionRings[id] = ring;
                 }
-                Vector3 p = marker.transform.position;
-                ring.transform.position = new Vector3(p.x, 0.03f, p.z);
+                Vector2 p = marker.Position;
+                ring.transform.position = new Vector3(p.x, 0.03f, p.y);
             }
         }
 
@@ -1018,20 +800,24 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             // 只展示"选择集中第一台仍在执行命令的机器"的目标点/路径，避免多目标混成一团看不清——
-            // 命令状态本身（RecentEvents/QueuedCommandCount）才是逐机精确的验收依据。
-            ActiveCommand? shown = null;
+            // 命令状态本身（RecentEvents/QueuedCommandCount）才是逐机精确的验收依据。命令真相在战斗内核里（O(选择集) 次查询）。
+            RegionCommandKind shownKind = default;
+            Vector2 shownTarget = default;
             HomeValleyMachineMarker shownMarker = null;
             foreach (int id in _selection)
             {
-                if (_active.TryGetValue(id, out ActiveCommand cmd))
+                HomeValleyMachineMarker m = FindMarker(id);
+                if (m != null && _ctx.Site != null && _ctx.Site.TryGetCommand(m.UnitId, out BinGames.Sim.Combat.CombatCommand cmd)
+                    && TryFromKernel(cmd.Kind, out RegionCommandKind k))
                 {
-                    shown = cmd;
-                    shownMarker = FindMarker(id);
+                    shownKind = k;
+                    shownTarget = new Vector2((float)cmd.Pos.x, (float)cmd.Pos.y);
+                    shownMarker = m;
                     break;
                 }
             }
 
-            if (shown == null || shownMarker == null)
+            if (shownMarker == null)
             {
                 ClearDestinationVisual();
                 return;
@@ -1044,7 +830,7 @@ namespace GameLogic.Campaign.Regions
                 _destinationMarkerGo.transform.SetParent(_ctx.VisualRoot.transform, false);
                 _destinationMarkerGo.transform.localScale = new Vector3(0.6f, 0.03f, 0.6f);
                 GameLogic.View.UnityObjects.Release(_destinationMarkerGo.GetComponent<Collider>());
-                _destinationMarkerGo.GetComponent<Renderer>().material = new Material(Shader.Find("Standard"));
+                _destinationMarkerGo.GetComponent<Renderer>().sharedMaterial = ViewMaterials.Standard(Color.white);
             }
             if (_pathBarGo == null)
             {
@@ -1054,18 +840,17 @@ namespace GameLogic.Campaign.Regions
                 _pathBarGo.name = "SquadCommandPath";
                 _pathBarGo.transform.SetParent(_ctx.VisualRoot.transform, false);
                 GameLogic.View.UnityObjects.Release(_pathBarGo.GetComponent<Collider>());
-                _pathBarGo.GetComponent<Renderer>().material = new Material(Shader.Find("Standard"));
+                _pathBarGo.GetComponent<Renderer>().sharedMaterial = ViewMaterials.Standard(Color.white);
             }
 
-            ActiveCommand value = shown.Value;
-            Color kindColor = KindColor(value.Kind);
+            Color kindColor = KindColor(shownKind);
 
             _destinationMarkerGo.SetActive(true);
-            _destinationMarkerGo.transform.position = new Vector3(value.TargetPosition.x, 0.04f, value.TargetPosition.y);
-            _destinationMarkerGo.GetComponent<Renderer>().material.color = kindColor;
+            _destinationMarkerGo.transform.position = new Vector3(shownTarget.x, 0.04f, shownTarget.y);
+            _destinationMarkerGo.GetComponent<Renderer>().sharedMaterial = ViewMaterials.Standard(kindColor);
 
-            Vector3 from = shownMarker.transform.position;
-            var to = new Vector3(value.TargetPosition.x, from.y, value.TargetPosition.y);
+            Vector3 from = shownMarker.Position3;
+            var to = new Vector3(shownTarget.x, from.y, shownTarget.y);
             Vector3 mid = (from + to) * 0.5f;
             mid.y = 0.05f;
             float length = Vector3.Distance(new Vector3(from.x, 0f, from.z), new Vector3(to.x, 0f, to.z));
@@ -1073,7 +858,7 @@ namespace GameLogic.Campaign.Regions
             _pathBarGo.transform.position = mid;
             _pathBarGo.transform.rotation = Quaternion.LookRotation(to - from, Vector3.up);
             _pathBarGo.transform.localScale = new Vector3(0.15f, 0.02f, Mathf.Max(0.01f, length));
-            _pathBarGo.GetComponent<Renderer>().material.color = kindColor;
+            _pathBarGo.GetComponent<Renderer>().sharedMaterial = ViewMaterials.Standard(kindColor);
         }
 
         private void ClearDestinationVisual()

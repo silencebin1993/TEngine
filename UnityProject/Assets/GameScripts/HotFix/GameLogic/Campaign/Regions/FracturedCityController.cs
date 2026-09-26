@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using GameLogic.UI.Common;
+using BinGames.Sim.Combat;
 using GameLogic.Campaign.Blueprint;
+using GameLogic.Campaign.Combat;
 using GameLogic.Campaign.Content;
 using GameLogic.Campaign.WorldSim;
 using GameLogic.Core;
@@ -52,10 +54,22 @@ namespace GameLogic.Campaign.Regions
 
         /// <summary>FG0-UX-01：通知“定位”要让当前区域的镜头飞到事件位置（只读访问，不改所有权）。</summary>
         public CameraDirector CameraDirector => _cameraDirector;
+        /// <summary>本地点机器的逻辑句柄（战斗内核单位的门面，不是表现对象；FG0-ARCH-03）。</summary>
         private readonly List<HomeValleyMachineMarker> _machineMarkers = new List<HomeValleyMachineMarker>(5);
+        /// <summary>FG0-ARCH-03：本地点的战斗内核（机器、敌人的逐单位逻辑都在里面）。</summary>
+        private CombatSite _combat;
+        private FracturedCityCombatRules _combatRules;
+        private RegionSquadCommandContext _squadCtx;
+        /// <summary>敌人表现对象（被观察时才有），按实例 ID。</summary>
+        private readonly Dictionary<string, GameObject> _enemyViews = new Dictionary<string, GameObject>();
+        public CombatSite Combat => _combat;
         private HomeValleyMachineMarker _selected;
         private HomeValleyMachineMarker _possessed;
         private bool _wipeResolved;
+        /// <summary>FG0-ARCH-03：全灭检测里“记录侧还有存活机器”的缓存，按 <see cref="MachineRegistry.RosterRevision"/> 失效
+        /// （名册没变的步不再逐台扫描记录，O(1)）。</summary>
+        private int _wipeRosterRevision = int.MinValue;
+        private bool _wipeRecordAlive;
 
         /// <summary>玩家/机器与固定物件的最小交互距离（"距离≤3米"，同 ER5-INT-01 卡片点名的数字，
         /// 本 Story 先用它做交互挂载点的距离判定，不等该 Story 落地才补）。</summary>
@@ -139,16 +153,17 @@ namespace GameLogic.Campaign.Regions
                 _obstacles.Add((anchor.Position, anchor.ClearanceRadius));
             }
 
-            BuildVisuals(state);
+            // FG0-ARCH-03：机器与敌人进本地点的战斗内核（读档时从快照恢复；新派遣按记录建）。表现对象只在被观察时建（SetObserved）。
+            OpenCombat(state, resume);
             SetupCameraProfile();
             SetupSquadCommands();
             SetupControlSystem();
             SetupInteraction();
-            _root.SetActive(false); // FG0-ARCH-01：镜头观察这里时才显示（WorldView.Observe → SetObserved）。
 
             IsLoaded = true;
             // FG0-UX-01（FGR-UX-020 定位）：机器实时位置由 WorldSimulation.LivePosition 统一向各地点查询。
             _wipeResolved = false;
+            _wipeRosterRevision = int.MinValue;
 
             SaveResult saveResult = CampaignAutoSaveService.SaveAuto(SaveReason.ExpeditionDepartConfirm);
             if (!saveResult.Success)
@@ -179,7 +194,8 @@ namespace GameLogic.Campaign.Regions
                     i++;
                     continue; // 已在本区域（读档恢复/重复调用场景），不重复定位打断玩家当前进度。
                 }
-                record.RegionId = FracturedCityLayout.RegionId;
+                CombatSites.ExportMachine(logicId); // FG0-ARCH-03：热量 / 冷却随机器走，不因换地点清零。
+                MachineRegistry.MoveToRegion(record, FracturedCityLayout.RegionId);
                 Vector2 offset = new Vector2((i % 3 - 1) * 2.5f, -1f - (i / 3) * 2.5f);
                 record.WorldPosition = spawnBase + offset;
                 i++;
@@ -213,49 +229,22 @@ namespace GameLogic.Campaign.Regions
         public WorldCameraProfile CameraProfile => _cameraProfile;
         public Vector2? LivePosition(int logicId) => FindMachineMarkerPosition(logicId);
 
-        public int LiveMachineCount
-        {
-            get
-            {
-                int n = 0;
-                foreach (HomeValleyMachineMarker m in _machineMarkers)
-                {
-                    if (m != null && MachineRegistry.TryGetRecord(m.LogicId, out MachineRecord r) && r.IsAlive && r.RegionId == SiteId)
-                    {
-                        n++;
-                    }
-                }
-                return n;
-            }
-        }
+        public int LiveMachineCount => _combat != null ? _combat.CountAliveMachines() : 0;
 
-        /// <summary>“飞到远征地点”的落点：存活机器的中心；全灭时取镜头起始点。</summary>
-        public Vector2 DefaultFocus
-        {
-            get
-            {
-                Vector2 sum = Vector2.zero;
-                int n = 0;
-                foreach (HomeValleyMachineMarker m in _machineMarkers)
-                {
-                    if (m != null && MachineRegistry.TryGetRecord(m.LogicId, out MachineRecord r) && r.IsAlive)
-                    {
-                        Vector3 p = m.transform.position;
-                        sum += new Vector2(p.x, p.z);
-                        n++;
-                    }
-                }
-                return n > 0 ? sum / n : FracturedCityLayout.CameraFocusStart;
-            }
-        }
+        /// <summary>“飞到远征地点”的落点：存活机器的中心（内核位置）；全灭时取镜头起始点。</summary>
+        public Vector2 DefaultFocus =>
+            _combat != null && _combat.TryMachineCentroid(out Vector2 c)
+                ? c
+                : FracturedCityLayout.CameraFocusStart;
 
         /// <summary>FG0-ARCH-01：镜头观察 / 离开本地点。离开时释放接入、收起撤离确认；表现对象隐藏不销毁，模拟照常推进。</summary>
         public void SetObserved(bool observed)
         {
-            if (!IsLoaded || _root == null)
+            if (!IsLoaded)
             {
                 return;
             }
+            CampaignState state = CampaignSession.Current;
             if (!observed)
             {
                 if (_possessed != null)
@@ -263,10 +252,17 @@ namespace GameLogic.Campaign.Regions
                     Control.ReleaseToStrategy();
                 }
                 IsEvacPanelOpen = false;
+                // FG0-ARCH-03（DEBT-FG0ARCH01-03）：不被观察时不保留任何表现对象（渲染器、碰撞体、材质都销毁），模拟照常在内核里跑。
+                DestroyVisuals();
+                SquadCommands.ReleaseVisuals();
+                _combat?.ReleaseRender();
+                return;
             }
-            _root.SetActive(observed);
-            CampaignState state = CampaignSession.Current;
-            if (observed && state != null)
+            if (_root == null && state != null)
+            {
+                BuildVisuals(state);
+            }
+            if (state != null)
             {
                 SyncWorldVisuals(state);
             }
@@ -310,6 +306,8 @@ namespace GameLogic.Campaign.Regions
                 // ER5-CTL-01：干扰宽限与受控机死亡回弹（在本帧全部模拟步之后，敌人本帧打死受控机能在同一帧被侦测到）。
                 Control.Tick(frameScaledDt);
             }
+            // FG0-ARCH-03：表现对象按内核位置插值（一次 Burst 作业）+ 实例化绘制（常数次调用，与单位数无关）。
+            _combat?.FrameRender(_camera, GameClock.StepAlpha);
             SyncWorldVisuals(state);
         }
 
@@ -326,35 +324,12 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
-            TickMachineMovement(dt);
             SquadCommands.TickSim(dt);
-            CannonCombat.TickHeatDissipation(state, dt); // ER6-REACT-02：铸造重炮被动散热。
-            FracturedCityRegion.TickEnemies(state, dt);
-            // ER5-SILENT-01：真实敌人 AI（移动/标记/清标记/攻击）。
-            FracturedCityEnemyAi.Tick(state, dt, BuildVisibleMachines(), IsLineOfSightClear);
-            foreach (string markedEnemyId in FracturedCityEnemyAi.MarkedThisTick)
-            {
-                TriggerScanPulse(markedEnemyId); // 纯表现（扫描脉冲），不改模拟状态。
-            }
-            TickDiscovery(state);
+            FracturedCityRegion.TickEnemies(state, dt); // 警戒值衰减（O(1)）。
+            // FG0-ARCH-03：机器移动与编队命令、重炮散热、侦察 / 干扰机 AI、攻击、标记、兴趣点发现——全部在战斗内核的一步里（Burst）；
+            // 需要玩法层结算的（敌人阵亡掉落、对机器的伤害、标记记录、发现）作为事件交回，每步有上限。
+            _combat?.Step(dt, GameClock.GameSeconds);
             TickWipeDetection(state);
-        }
-
-        private void TickDiscovery(CampaignState state)
-        {
-            foreach (HomeValleyMachineMarker marker in _machineMarkers)
-            {
-                if (marker == null)
-                {
-                    continue;
-                }
-                Vector3 p = marker.transform.position;
-                var pos2 = new Vector2(p.x, p.z);
-                foreach (FracturedCityLayout.Anchor anchor in FracturedCityLayout.AllAnchors())
-                {
-                    FracturedCityRegion.TryDiscover(state, anchor.Id, pos2, anchor.Position);
-                }
-            }
         }
 
         /// <summary>全灭检测：本区域曾经有过机器、当前全部阵亡时，自动结算 Lost（不自动弹出结算 UI/
@@ -372,8 +347,15 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
-            bool anyAlive = MachineRegistry.AllRecords
-                .Any(m => m != null && m.RegionId == FracturedCityLayout.RegionId && m.IsAlive);
+            // FG0-ARCH-03：机器阵亡由记录驱动、内核同步（MachineRegistry.MachineDied），这里读内核的存活计数（O(1) 次 AOT 调用）。
+            // 内核存活计数（AOT）+ 记录侧存活（只在机器名册版本号变化后重扫一次，平时 O(1)）。
+            bool kernelAlive = _combat != null && _combat.CountAliveMachines() > 0;
+            if (kernelAlive && _wipeRosterRevision != MachineRegistry.RosterRevision)
+            {
+                _wipeRosterRevision = MachineRegistry.RosterRevision;
+                _wipeRecordAlive = MachineRegistry.AllRecords.Any(m => m != null && m.RegionId == FracturedCityLayout.RegionId && m.IsAlive);
+            }
+            bool anyAlive = kernelAlive && _wipeRecordAlive;
             if (anyAlive)
             {
                 return;
@@ -398,6 +380,8 @@ namespace GameLogic.Campaign.Regions
             CampaignState state = CampaignSession.Current;
             if (state != null)
             {
+                // FG0-ARCH-03：内核随后释放——积压的玩法事件（大量同时阵亡时跨步排队的阵亡、掉落、反馈）先全部结算，不随队列丢掉。
+                _combat?.FlushPendingEvents();
                 SyncLiveStateBackToRecords();
                 if (evacuateSuccess && !_wipeResolved)
                 {
@@ -413,7 +397,7 @@ namespace GameLogic.Campaign.Regions
                     {
                         if (MachineRegistry.TryGetRecord(logicId, out MachineRecord record))
                         {
-                            record.RegionId = HomeValleyLayout.RegionId;
+                            MachineRegistry.MoveToRegion(record, HomeValleyLayout.RegionId);
                             record.WorldPosition = HomeValleyLayout.Core.Position + new Vector2(2f, -2f);
                         }
                     }
@@ -426,6 +410,11 @@ namespace GameLogic.Campaign.Regions
                 state.CurrentRegionId = HomeValleyLayout.RegionId;
             }
             DestroyVisuals();
+            SquadCommands.ReleaseVisuals();
+            // FG0-ARCH-03：远征结束（或整个世界卸载），本地点的战斗内核释放；存档里的快照随之删除（记录已写回）。
+            CombatSites.Close(SiteId, state, dropRecord: true);
+            _combat = null;
+            _machineMarkers.Clear();
             // FG0-ARCH-01：镜头归全局镜头管理器；观察中的地点被卸载时它会自动回到家园（WorldView.FrameEnd）。
             _possessed = null;
             _selected = null;
@@ -437,18 +426,8 @@ namespace GameLogic.Campaign.Regions
         }
 
         /// <summary>FG0-UX-01：暂停菜单“保存并返回主菜单”存档前调用——只写回实时状态，不卸载区域。</summary>
-        private Vector2? FindMachineMarkerPosition(int logicId)
-        {
-            foreach (HomeValleyMachineMarker marker in _machineMarkers)
-            {
-                if (marker != null && marker.LogicId == logicId)
-                {
-                    Vector3 p = marker.transform.position;
-                    return new Vector2(p.x, p.z);
-                }
-            }
-            return null;
-        }
+        private Vector2? FindMachineMarkerPosition(int logicId) =>
+            _combat != null && _combat.TryGetMachinePosition(logicId, out Vector2 p) ? p : (Vector2?)null;
 
         public void SyncLiveStateForSave()
         {
@@ -458,18 +437,23 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
+        /// <summary>内核实时状态写回记录（机器位置 / 热量 / 冷却、敌人位置 / 血量 / 计时、标记）。内核快照本身由 CombatSites.WriteTo 写。</summary>
         private void SyncLiveStateBackToRecords()
         {
+            CampaignState state = CampaignSession.Current;
+            if (_combat == null || _combat.IsDisposed || state == null)
+            {
+                return;
+            }
             foreach (HomeValleyMachineMarker marker in _machineMarkers)
             {
-                if (marker == null)
+                if (marker != null)
                 {
-                    continue;
+                    _combat.ExportMachine(marker.LogicId, includePosition: true);
                 }
-                Vector3 p = marker.transform.position;
-                float health = MachineRegistry.TryGetRecord(marker.LogicId, out MachineRecord rec) ? rec.Health : 100f;
-                MachineRegistry.SyncLiveState(marker.LogicId, new Vector2(p.x, p.z), health, null);
             }
+            _combat.ExportEnemies(state);
+            _combat.ExportMarks(FracturedCityRegion.Find(state), GameClock.GameSeconds);
         }
 
         // ── 交互挂载点（供 ER5-INT-01 的正式 E 输入调用，本 Story 先暴露真实底层动作）───
@@ -482,8 +466,7 @@ namespace GameLogic.Campaign.Regions
                 {
                     continue;
                 }
-                Vector3 p = marker.transform.position;
-                if (Vector2.Distance(new Vector2(p.x, p.z), anchorPosition) <= InteractRange)
+                if (Vector2.Distance(marker.Position, anchorPosition) <= InteractRange)
                 {
                     logicId = marker.LogicId;
                     return true;
@@ -583,7 +566,7 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
-            HomeValleyMachineMarker marker = hit.collider.GetComponent<HomeValleyMachineMarker>();
+            HomeValleyMachineMarker marker = hit.collider.GetComponent<MachineView>()?.Marker;
             if (marker != null)
             {
                 _selected?.SetSelected(false);
@@ -620,7 +603,8 @@ namespace GameLogic.Campaign.Regions
             {
                 _lastFacing = new Vector2(x, z).normalized; // ER5-INT-01：E 候选"指向"排序读这个。
             }
-            _possessed.DirectMove(new Vector3(x, 0f, z), dt);
+            // FG0-ARCH-03：直控输入交给内核（模拟步里按机器速度移动；暂停时不走步）。
+            _possessed.SetDirectInput(new Vector2(x, z));
 
             // ER5-SILENT-01：破碎都市此前完全没有直控攻击入口（只有战略 Attack 命令）——验收卡"玩家
             // 策略/直控各打一场"需要这一条。同 HomeValleyController.TryDirectAttack 同一套鼠标瞄准
@@ -652,7 +636,7 @@ namespace GameLogic.Campaign.Regions
             }
             Vector3 worldPoint = ray.GetPoint(enter);
 
-            Vector3 originV3 = _possessed.transform.position;
+            Vector3 originV3 = _possessed.Position3;
             Vector2 origin = new Vector2(originV3.x, originV3.z);
             Vector2 aimDir = new Vector2(worldPoint.x, worldPoint.z) - origin;
 
@@ -670,67 +654,11 @@ namespace GameLogic.Campaign.Regions
             }
 
             FracturedCityRegion.TryAttackEnemy(state, _possessed.LogicId, target.EnemyInstanceId, state.RandomSeed,
-                isAiSource: false, isReachable: IsLineOfSightClear);
+                isAiSource: false);
         }
 
         // ── ER5-SILENT-01：敌人 AI 传感器数据 / 视线判定（复用交互系统同款障碍物遮挡算法）───
 
-        private List<FracturedCityEnemyAi.VisibleMachine> BuildVisibleMachines()
-        {
-            var list = new List<FracturedCityEnemyAi.VisibleMachine>(_machineMarkers.Count);
-            foreach (HomeValleyMachineMarker marker in _machineMarkers)
-            {
-                if (marker == null || !MachineRegistry.TryGetRecord(marker.LogicId, out MachineRecord rec) || !rec.IsAlive)
-                {
-                    continue;
-                }
-                Vector3 p = marker.transform.position;
-                list.Add(new FracturedCityEnemyAi.VisibleMachine(marker.LogicId, new Vector2(p.x, p.z)));
-            }
-            return list;
-        }
-
-        private bool IsLineOfSightClear(Vector2 from, Vector2 to)
-        {
-            if (_obstacles == null)
-            {
-                return true;
-            }
-            foreach ((Vector2 Position, float Radius) obstacle in _obstacles)
-            {
-                if (Vector2.Distance(obstacle.Position, to) <= obstacle.Radius + 0.1f)
-                {
-                    continue; // 目标自己所在的锚点不算挡住自己。
-                }
-                // ER5-SILENT-01 实测发现的真实缺陷：敌人经常就站在自己的出生锚点上（静默侦察机
-                // 出生点/静默干扰机守节点），这份障碍物列表包含所有锚点本身——若不同时排除"起点
-                // 自己所在的锚点"，敌人会被自己的出生点/驻守点净空圈挡住向任意方向的视线，
-                // 永远看不到任何目标（execute_code 复现：scout1 站在出生点时朝正上方的畅通方向
-                // 仍返回"被遮挡"）。与上面"目标自己所在锚点"是同一条豁免规则的对称版本。
-                if (Vector2.Distance(obstacle.Position, from) <= obstacle.Radius + 0.1f)
-                {
-                    continue;
-                }
-                if (SegmentIntersectsCircle(from, to, obstacle.Position, obstacle.Radius))
-                {
-                    return false;
-                }
-            }
-            return true;
-        }
-
-        private static bool SegmentIntersectsCircle(Vector2 a, Vector2 b, Vector2 center, float radius)
-        {
-            Vector2 ab = b - a;
-            float lenSq = ab.sqrMagnitude;
-            if (lenSq <= 0.0001f)
-            {
-                return Vector2.Distance(a, center) <= radius;
-            }
-            float t = Mathf.Clamp01(Vector2.Dot(center - a, ab) / lenSq);
-            Vector2 closest = a + ab * t;
-            return Vector2.Distance(closest, center) <= radius;
-        }
 
         /// <summary>CameraDirector 请求"给我一个直控目标"的钩子（M 键触发）。ER5-CTL-01 起校验/提交都
         /// 经 <see cref="Control"/>（含干扰场 SignalJammed 判定，见 <see cref="SetupControlSystem"/> 绑定的
@@ -776,7 +704,7 @@ namespace GameLogic.Campaign.Regions
                 RegionId = FracturedCityLayout.RegionId,
                 Markers = _machineMarkers,
                 GetPossessed = () => _possessed,
-                SetPossessed = marker => _possessed = marker,
+                SetPossessed = SetPossessedMarker,
                 IsCameraTransitioning = () => _cameraDirector != null && _cameraDirector.Mode == ViewMode.Transition,
                 IsPositionJammed = pos => FracturedCityRegion.IsPositionJammed(CampaignSession.Current, pos),
                 SquadCommands = SquadCommands,
@@ -787,12 +715,27 @@ namespace GameLogic.Campaign.Regions
             });
         }
 
+        /// <summary>接入状态写进内核：受控机不执行编队命令，位移来自直控输入（释放时清零输入）。</summary>
+        private void SetPossessedMarker(HomeValleyMachineMarker marker)
+        {
+            if (_possessed != null && _possessed != marker)
+            {
+                _combat?.SetPossessed(_possessed.LogicId, false);
+            }
+            _possessed = marker;
+            if (marker != null)
+            {
+                _combat?.SetPossessed(marker.LogicId, true);
+            }
+        }
+
         private bool TryGetPossessedAnchor(out float2 anchor)
         {
             if (_possessed != null)
             {
-                Vector3 p = _possessed.transform.position;
-                anchor = new float2(p.x, p.z);
+                // 镜头跟随插值后的画面位置（有表现对象时），60 Hz 模拟在高帧率下镜头也不一顿一顿；没有表现对象时读内核位置。
+                Vector3 v = _possessed.View != null ? _possessed.View.transform.position : _possessed.Position3;
+                anchor = new float2(v.x, v.z);
                 return true;
             }
             anchor = float2.zero;
@@ -1033,14 +976,6 @@ namespace GameLogic.Campaign.Regions
                 : RegionInteractResult.Fail(RegionInteractFailure.TargetGone, result.FailureReason);
         }
 
-        private void TickMachineMovement(float dt)
-        {
-            foreach (HomeValleyMachineMarker marker in _machineMarkers)
-            {
-                marker.Tick(dt);
-            }
-        }
-
         private HomeValleyMachineMarker FindMarker(int logicId)
         {
             foreach (HomeValleyMachineMarker marker in _machineMarkers)
@@ -1077,7 +1012,7 @@ namespace GameLogic.Campaign.Regions
 
         private void SetupSquadCommands()
         {
-            SquadCommands.Bind(new RegionSquadCommandContext
+            _squadCtx = new RegionSquadCommandContext
             {
                 Camera = _camera,
                 Markers = _machineMarkers,
@@ -1090,59 +1025,31 @@ namespace GameLogic.Campaign.Regions
                 Obstacles = _obstacles,
                 FindHostileNear = FindEnemyHostileNear,
                 ResolveHostile = ResolveEnemyHostile,
-                TryAttack = TrySquadAttackEnemy,
+                Site = _combat,
+                HostileUnit = id => _combat != null && _combat.TryGetEnemyUnit(id, out int u) ? u : 0,
                 AttackRange = AttackRange,
                 AttackCooldownSeconds = 1.2f,
-            });
+            };
+            SquadCommands.Bind(_squadCtx);
         }
 
+        /// <summary>点选敌人：内核里离点击点最近的存活敌人（并列取靠后者，同 Demo）。</summary>
         private RegionHostileInfo? FindEnemyHostileNear(Vector2 worldPoint, float pickRadius)
         {
-            CampaignState state = CampaignSession.Current;
-            if (state?.RegionEnemies == null)
+            if (_combat == null || _combat.IsDisposed)
             {
                 return null;
             }
-            RegionEnemyRecord best = null;
-            float bestDist = pickRadius;
-            foreach (RegionEnemyRecord enemy in state.RegionEnemies)
-            {
-                if (enemy.RegionId != FracturedCityLayout.RegionId || !enemy.IsAlive)
-                {
-                    continue;
-                }
-                float dist = Vector2.Distance(worldPoint, enemy.Position);
-                if (dist <= bestDist)
-                {
-                    bestDist = dist;
-                    best = enemy;
-                }
-            }
-            return best == null ? (RegionHostileInfo?)null : new RegionHostileInfo(best.EnemyInstanceId, best.Position, best.IsAlive);
+            return _combat.TryFindNearestEnemy(worldPoint, pickRadius, out string id) ? ResolveEnemyHostile(id) : null;
         }
 
         private RegionHostileInfo? ResolveEnemyHostile(string hostileId)
         {
-            RegionEnemyRecord enemy = FracturedCityRegion.FindEnemy(CampaignSession.Current, hostileId);
-            return enemy == null ? (RegionHostileInfo?)null : new RegionHostileInfo(enemy.EnemyInstanceId, enemy.Position, enemy.IsAlive);
-        }
-
-        /// <summary>Attack 命令的伤害结算——唯一入口 <see cref="FracturedCityRegion.TryAttackEnemy"/>，
-        /// 本方法只负责把 <see cref="FracturedCityRegion.ActionResult"/> 翻译成
-        /// <see cref="RegionAttackOutcome"/>（附带"目标是否已被击毁"，靠结算后重新查一次记录判断，
-        /// 不在 ActionResult 里重复加字段）。</summary>
-        private RegionAttackOutcome TrySquadAttackEnemy(int attackerLogicId, string hostileId)
-        {
-            CampaignState state = CampaignSession.Current;
-            FracturedCityRegion.ActionResult result =
-                FracturedCityRegion.TryAttackEnemy(state, attackerLogicId, hostileId, state?.RandomSeed ?? 0,
-                    isAiSource: false, isReachable: IsLineOfSightClear);
-            if (!result.Success)
+            if (_combat == null || !_combat.TryGetEnemyPosition(hostileId, out Vector2 pos))
             {
-                return RegionAttackOutcome.Fail(result.FailureReason);
+                return null;
             }
-            RegionEnemyRecord enemy = FracturedCityRegion.FindEnemy(state, hostileId);
-            return RegionAttackOutcome.Ok(targetDestroyed: enemy == null || !enemy.IsAlive);
+            return new RegionHostileInfo(hostileId, pos, _combat.IsEnemyAlive(hostileId));
         }
 
         // ── 可视化（占位几何体，同 HomeValleyController 手法）─────────────────
@@ -1161,12 +1068,16 @@ namespace GameLogic.Campaign.Regions
             BuildNodeVisual(state);
             BuildEnemyVisuals(state);
 
-            foreach (MachineRecord m in MachineRegistry.AllRecords)
+            foreach (HomeValleyMachineMarker marker in _machineMarkers)
             {
-                if (m.IsAlive && m.RegionId == FracturedCityLayout.RegionId)
+                if (marker != null && MachineRegistry.TryGetRecord(marker.LogicId, out MachineRecord m) && m.IsAlive)
                 {
-                    BuildMachineVisual(m);
+                    BuildMachineView(marker, m);
                 }
+            }
+            if (_squadCtx != null)
+            {
+                _squadCtx.VisualRoot = _root;
             }
         }
 
@@ -1184,7 +1095,7 @@ namespace GameLogic.Campaign.Regions
                 GameLogic.View.UnityObjects.Release(go.GetComponent<Collider>());
             }
             Renderer renderer = go.GetComponent<Renderer>();
-            renderer.material = new Material(Shader.Find("Standard")) { color = color };
+            renderer.sharedMaterial = ViewMaterials.Standard(color);
         }
 
         private static Color CrateColor(CampaignState state, string crateId)
@@ -1204,10 +1115,7 @@ namespace GameLogic.Campaign.Regions
             go.transform.position = new Vector3(FracturedCityLayout.ListeningNode.Position.x, 1f, FracturedCityLayout.ListeningNode.Position.y);
             go.transform.localScale = new Vector3(1.5f, 1.5f, 1.5f);
             Renderer renderer = go.GetComponent<Renderer>();
-            renderer.material = new Material(Shader.Find("Standard"))
-            {
-                color = destroyed ? new Color(0.3f, 0.3f, 0.3f) : new Color(0.8f, 0.2f, 0.6f),
-            };
+            renderer.sharedMaterial = ViewMaterials.Standard(destroyed ? new Color(0.3f, 0.3f, 0.3f) : new Color(0.8f, 0.2f, 0.6f));
 
             // 干扰场半径可视化环（半透明，随节点摧毁一起消失于 SyncWorldVisuals）。
             GameObject field = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
@@ -1217,7 +1125,7 @@ namespace GameLogic.Campaign.Regions
             field.transform.localScale = new Vector3(FracturedCityLayout.JammerRadius * 2f, 0.02f, FracturedCityLayout.JammerRadius * 2f);
             GameLogic.View.UnityObjects.Release(field.GetComponent<Collider>());
             Renderer fieldRenderer = field.GetComponent<Renderer>();
-            fieldRenderer.material = new Material(Shader.Find("Standard")) { color = new Color(0.6f, 0.1f, 0.5f, 0.15f) };
+            fieldRenderer.sharedMaterial = ViewMaterials.Standard(new Color(0.6f, 0.1f, 0.5f, 0.15f));
             fieldRenderer.enabled = !destroyed;
         }
 
@@ -1233,15 +1141,21 @@ namespace GameLogic.Campaign.Regions
                 {
                     continue;
                 }
+                Vector2 at = _combat != null && _combat.TryGetEnemyPosition(enemy.EnemyInstanceId, out Vector2 live) ? live : enemy.Position;
                 GameObject go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
                 go.name = "Enemy_" + enemy.EnemyInstanceId;
                 go.transform.SetParent(_root.transform, false);
-                go.transform.position = new Vector3(enemy.Position.x, 1f, enemy.Position.y);
+                go.transform.position = new Vector3(at.x, 1f, at.y);
+                _enemyViews[enemy.EnemyInstanceId] = go;
+                if (_combat != null && _combat.TryGetEnemyUnit(enemy.EnemyInstanceId, out int enemyUnit))
+                {
+                    _combat.BindView(enemyUnit, go.transform, 1f); // 位置每帧由内核插值写入（FrameRender）。
+                }
                 Renderer renderer = go.GetComponent<Renderer>();
                 Color baseColor = enemy.EnemyTypeId == EnemyCatalog.JammerId
                     ? new Color(0.6f, 0.15f, 0.55f)
                     : new Color(0.75f, 0.35f, 0.15f);
-                renderer.material = new Material(Shader.Find("Standard")) { color = enemy.IsAlive ? baseColor : new Color(0.25f, 0.25f, 0.25f) };
+                renderer.sharedMaterial = ViewMaterials.Standard(enemy.IsAlive ? baseColor : new Color(0.25f, 0.25f, 0.25f));
                 // AC-THEME-002：静默阵营细高“天线”剪影（胶囊只留作命中盒）。
                 PlaceholderSilhouette.ApplyEnemy(go, renderer, enemy.EnemyTypeId);
 
@@ -1263,7 +1177,7 @@ namespace GameLogic.Campaign.Regions
                     pulse.transform.localScale = new Vector3(FracturedCityLayout.ScoutMarkRange * 2f, 0.02f, FracturedCityLayout.ScoutMarkRange * 2f);
                     GameLogic.View.UnityObjects.Release(pulse.GetComponent<Collider>());
                     Renderer pulseRenderer = pulse.GetComponent<Renderer>();
-                    pulseRenderer.material = new Material(Shader.Find("Standard")) { color = new Color(0.95f, 0.85f, 0.2f, 0.35f) };
+                    pulseRenderer.sharedMaterial = ViewMaterials.Standard(new Color(0.95f, 0.85f, 0.2f, 0.35f));
                     pulseRenderer.enabled = false;
                 }
             }
@@ -1290,20 +1204,91 @@ namespace GameLogic.Campaign.Regions
             _scanPulseExpireRealtime[enemyInstanceId] = Time.time + 0.6f;
         }
 
-        private void BuildMachineVisual(MachineRecord machine)
+        private void BuildMachineView(HomeValleyMachineMarker marker, MachineRecord machine)
         {
+            Vector2 at = marker.Position;
             GameObject go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
             go.name = "Machine_" + machine.ChassisId + "_" + machine.LogicId;
             go.transform.SetParent(_root.transform, false);
-            go.transform.position = new Vector3(machine.WorldPosition.x, 1f, machine.WorldPosition.y);
+            go.transform.position = new Vector3(at.x, 1f, at.y);
             Renderer renderer = go.GetComponent<Renderer>();
             Color baseColor = new Color(0.7f, 0.85f, 0.75f); // 与归还谷地机器配色区分（略带绿，"出征中"）。
-            renderer.material = new Material(Shader.Find("Standard")) { color = baseColor };
+            renderer.sharedMaterial = ViewMaterials.Standard(baseColor);
             PlaceholderSilhouette.ApplyMachine(go, renderer, machine.ChassisId); // AC-THEME-002 车辆剪影。
 
-            HomeValleyMachineMarker marker = go.AddComponent<HomeValleyMachineMarker>();
-            marker.Initialize(machine.LogicId, machine.ChassisId, renderer, baseColor);
-            _machineMarkers.Add(marker);
+            MachineView view = go.AddComponent<MachineView>();
+            view.Initialize(renderer, baseColor);
+            marker.AttachView(view);
+            _combat?.BindView(marker.UnitId, go.transform, 1f);
+        }
+
+        /// <summary>FG0-ARCH-03：进场 / 读档时建立本地点的战斗内核：障碍、兴趣点、机器、敌人、标记。</summary>
+        private void OpenCombat(CampaignState state, bool resume)
+        {
+            _combatRules = new FracturedCityCombatRules { OnScanPulse = TriggerScanPulse, OnEnemyVisualChanged = RefreshEnemyView };
+            _combat = CombatSites.Open(SiteId, state, resume, _combatRules, out bool restored);
+            _combat.Squad = SquadCommands;
+            _combat.SetObstacles(CombatDemoContent.Obstacles(_obstacles));
+            RegionRecord region = FracturedCityRegion.Find(state);
+            if (!restored)
+            {
+                var pois = new List<float3>();
+                var reached = new List<bool>();
+                foreach (FracturedCityLayout.Anchor a in _combatRules.Pois)
+                {
+                    pois.Add(new float3(a.Position.x, a.Position.y, FracturedCityLayout.PoiDiscoveryRadius));
+                    reached.Add(region?.DiscoveredNodes != null && region.DiscoveredNodes.Contains(a.Id));
+                }
+                _combat.SetPois(pois, reached);
+            }
+            SyncCombatMachines(state);
+            CombatDemoContent.ReconcileEnemies(_combat, state, FracturedCityLayout.RegionId);
+            if (!restored)
+            {
+                _combat.ImportMarks(region);
+            }
+            _combat.RefreshAllMachineWeapons(state);
+        }
+
+        /// <summary>本区域存活机器 ↔ 内核单位对账（进场、读档）；逻辑句柄按记录顺序排列。</summary>
+        private void SyncCombatMachines(CampaignState state)
+        {
+            _machineMarkers.Clear();
+            foreach (MachineRecord m in MachineRegistry.AllRecords)
+            {
+                if (m == null || !m.IsAlive || m.RegionId != FracturedCityLayout.RegionId)
+                {
+                    continue;
+                }
+                HomeValleyMachineMarker marker = _combat.SpawnMachine(state, m, m.WorldPosition, autoEngage: false);
+                if (marker != null)
+                {
+                    _machineMarkers.Add(marker);
+                }
+            }
+            foreach (int stale in _combat.MachinesNotIn(id => MachineRegistry.TryGetRecord(id, out MachineRecord r) && r.IsAlive && r.RegionId == FracturedCityLayout.RegionId))
+            {
+                _combat.RemoveMachine(stale, export: false);
+            }
+        }
+
+        /// <summary>敌人阵亡等状态变化时刷新它的表现（事件驱动，不每帧扫全部敌人）。</summary>
+        private void RefreshEnemyView(string enemyInstanceId)
+        {
+            CampaignState state = CampaignSession.Current;
+            RegionEnemyRecord enemy = FracturedCityRegion.FindEnemy(state, enemyInstanceId);
+            if (_root == null || enemy == null)
+            {
+                return;
+            }
+            Color baseColor = enemy.EnemyTypeId == EnemyCatalog.JammerId
+                ? new Color(0.6f, 0.15f, 0.55f)
+                : new Color(0.75f, 0.35f, 0.15f);
+            RefreshColor("Enemy_" + enemy.EnemyInstanceId, enemy.IsAlive ? baseColor : new Color(0.25f, 0.25f, 0.25f));
+            if (_enemyBadges.TryGetValue(enemy.EnemyInstanceId, out WorldBadge badge) && badge != null)
+            {
+                badge.SetVisible(enemy.IsAlive);
+            }
         }
 
         private void SyncWorldVisuals(CampaignState state)
@@ -1332,47 +1317,22 @@ namespace GameLogic.Campaign.Regions
                 region?.LootedContainerIds != null && region.LootedContainerIds.Contains(FracturedCityLayout.TerminalId)
                     ? new Color(0.3f, 0.3f, 0.3f) : new Color(0.2f, 0.5f, 0.8f));
 
-            if (state.RegionEnemies != null)
-            {
-                foreach (RegionEnemyRecord enemy in state.RegionEnemies)
-                {
-                    if (enemy.RegionId != FracturedCityLayout.RegionId)
-                    {
-                        continue;
-                    }
-                    Color baseColor = enemy.EnemyTypeId == EnemyCatalog.JammerId
-                        ? new Color(0.6f, 0.15f, 0.55f)
-                        : new Color(0.75f, 0.35f, 0.15f);
-                    RefreshColor("Enemy_" + enemy.EnemyInstanceId, enemy.IsAlive ? baseColor : new Color(0.25f, 0.25f, 0.25f));
-
-                    if (_enemyBadges.TryGetValue(enemy.EnemyInstanceId, out WorldBadge enemyBadge) && enemyBadge != null)
-                    {
-                        enemyBadge.SetVisible(enemy.IsAlive);
-                    }
-                    // ER5-SILENT-01：敌人现在真的会移动（侦察机后撤/巡逻）——同步可视化位置。
-                    Transform enemyT = _root.transform.Find("Enemy_" + enemy.EnemyInstanceId);
-                    if (enemyT != null)
-                    {
-                        enemyT.position = new Vector3(enemy.Position.x, 1f, enemy.Position.y);
-                        Transform pulseT = _root.transform.Find("ScanPulse_" + enemy.EnemyInstanceId);
-                        if (pulseT != null)
-                        {
-                            pulseT.position = new Vector3(enemy.Position.x, 0.03f, enemy.Position.y);
-                        }
-                    }
-                }
-            }
-
+            // FG0-ARCH-03：敌人位置由内核每帧插值写入（FrameRender）；颜色 / 头顶标记在阵亡事件时刷新（RefreshEnemyView），不每帧扫全部敌人。
             if (_scanPulseExpireRealtime.Count > 0)
             {
                 List<string> expired = null;
                 foreach (KeyValuePair<string, float> kv in _scanPulseExpireRealtime)
                 {
+                    Transform pulse = _root.transform.Find("ScanPulse_" + kv.Key);
                     if (Time.time < kv.Value)
                     {
+                        // 脉冲显示期间跟随侦察机（O(显示中的脉冲)；位置真相在内核）。
+                        if (pulse != null && _combat != null && _combat.TryGetEnemyPosition(kv.Key, out Vector2 pulseAt))
+                        {
+                            pulse.position = new Vector3(pulseAt.x, 0.03f, pulseAt.y);
+                        }
                         continue;
                     }
-                    Transform pulse = _root.transform.Find("ScanPulse_" + kv.Key);
                     if (pulse != null)
                     {
                         Renderer renderer = pulse.GetComponent<Renderer>();
@@ -1412,14 +1372,24 @@ namespace GameLogic.Campaign.Regions
             Renderer r = t != null ? t.GetComponent<Renderer>() : null;
             if (r != null)
             {
-                r.material.color = color;
+                ViewMaterials.Recolor(r, color);
             }
         }
 
         private void DestroyVisuals()
         {
-            _machineMarkers.Clear();
+            foreach (HomeValleyMachineMarker marker in _machineMarkers)
+            {
+                marker?.DetachView();
+            }
+            _combat?.ClearViews();
+            _enemyViews.Clear();
+            _enemyBadges.Clear();
             _scanPulseExpireRealtime.Clear();
+            if (_squadCtx != null)
+            {
+                _squadCtx.VisualRoot = null;
+            }
             if (_root != null)
             {
                 GameLogic.View.UnityObjects.Release(_root);

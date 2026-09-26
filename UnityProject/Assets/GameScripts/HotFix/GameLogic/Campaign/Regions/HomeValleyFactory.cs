@@ -393,6 +393,7 @@ namespace GameLogic.Campaign.Regions
             if (MachineRegistry.TryGetRecord(machineLogicId, out MachineRecord record) && record.IsInFactory)
             {
                 record.IsInFactory = false;
+                Combat.CombatSites.SyncFactoryState(record); // FG0-ARCH-03：驶出工厂后才参与自动交战（内核标志）。
             }
         }
 
@@ -592,6 +593,7 @@ namespace GameLogic.Campaign.Regions
             machine.BlueprintId = item.BlueprintId;
             machine.BlueprintVersion = item.BlueprintVersion;
             machine.LoadoutSignature = version.CompileSignature;
+            MachineRegistry.NotifyLoadoutChanged(machine); // FG0-ARCH-03：核心门三灯等按名册版本号重算。
 
             CircuitOpResult loadoutRegister = MachineLoadoutRegistry.Register(state, machine.LogicId, item.BlueprintId, item.BlueprintVersion);
             if (!loadoutRegister.Success)
@@ -670,6 +672,7 @@ namespace GameLogic.Campaign.Regions
             if (MachineRegistry.TryGetRecord(spawn.LogicId, out MachineRecord record))
             {
                 record.IsInFactory = true; // 占用出口，直到玩家给它第一条真实命令（ReleaseFromFactory）。
+                Combat.CombatSites.SyncFactoryState(record); // FG0-ARCH-03：厂内机器不参与自动交战、不消耗交战冷却（内核标志）。
             }
             // ER4-MCH-01：真正"生产"出来的机器才记这个经历标记——开局自带的 ERC-001/002 从不走这条
             // 分支，天然不会获得它，正确反映"它们不是被生产出来的"。

@@ -146,6 +146,34 @@ namespace GameLogic.Campaign
         public string Payload;
     }
 
+    /// <summary>战斗内核（FG0-ARCH-03 / FG14 FGR-ARC-003）：每个已载入地点一份内核快照（单位位置、耐久镜像、武器热量与冷却、
+    /// 编队命令（FG-GAP-018：读档后单位继续执行读档前的命令）、标记、飞行中的弹体、未处理完的玩法事件）。
+    /// 唯一写入口 <see cref="Combat.CombatSites.WriteTo"/>（<c>WorldSimulation.SyncAllForSave</c> 调它）；读档时地点载入用它恢复。
+    /// 快照是 base64 编码的二进制（带校验和）；损坏或格式不认识时按机器 / 敌人记录重建并发通知（记录仍是存在性与耐久的真相）。
+    /// 位置在快照里是双精度，离原点一百万格仍是亚毫米精度（DEBT-FG0ARCH05-01 第 ② 项）。</summary>
+    [Serializable]
+    public sealed class CombatState
+    {
+        public int DomainVersion = 1;
+        public CombatSiteRecord[] Sites = Array.Empty<CombatSiteRecord>();
+    }
+
+    /// <summary>一个地点的战斗内核快照。</summary>
+    [Serializable]
+    public sealed class CombatSiteRecord
+    {
+        public string SiteId;
+        /// <summary>内核快照格式版本（<see cref="BinGames.Sim.Combat.CombatConst.FormatVersion"/>）。</summary>
+        public int FormatVersion;
+        public long KernelSteps;
+        /// <summary>摘要（存档卡 / 自检用；真相在 <see cref="Payload"/>）。</summary>
+        public int Units;
+        public int Projectiles;
+        public string Payload;
+        /// <summary>内核单位外部键表：敌人实例 ID（单位的 ExtKey 是这张表的下标；机器的 ExtKey 直接是 LogicId）。</summary>
+        public string[] Keys = Array.Empty<string>();
+    }
+
     /// <summary>管线与流体（FG03 管线 Story）。</summary>
     [Serializable]
     public sealed class PipeFluidState
@@ -348,6 +376,7 @@ namespace GameLogic.Campaign
             new DomainInfo(nameof(CampaignState.Clock), "FG0-ARCH-01（统一时钟）", s => s.Clock),
             new DomainInfo(nameof(CampaignState.Grid), "FG0-ARCH-04（格网建造）", s => s.Grid),
             new DomainInfo(nameof(CampaignState.Belts), "FG0-ARCH-02（传送带内核）", s => s.Belts),
+            new DomainInfo(nameof(CampaignState.Combat), "FG0-ARCH-03（战斗内核）", s => s.Combat),
             new DomainInfo(nameof(CampaignState.Pipes), "FG03 管线与流体", s => s.Pipes),
             new DomainInfo(nameof(CampaignState.Research), "FG05 研究", s => s.Research),
             new DomainInfo(nameof(CampaignState.Weather), "FG07 天气", s => s.Weather),
@@ -384,6 +413,16 @@ namespace GameLogic.Campaign
             s.Belts.Networks ??= Array.Empty<BeltNetworkRecord>();
             s.Belts.Ports ??= string.Empty;
             s.Belts.SinkNames ??= Array.Empty<BeltSinkNameRecord>();
+            s.Combat ??= new CombatState();
+            s.Combat.Sites ??= Array.Empty<CombatSiteRecord>();
+            foreach (CombatSiteRecord r in s.Combat.Sites)
+            {
+                if (r != null)
+                {
+                    r.Keys ??= Array.Empty<string>();
+                    r.Payload ??= string.Empty;
+                }
+            }
             s.Pipes ??= new PipeFluidState();
             s.Research ??= new ResearchState();
             s.Weather ??= new WeatherState();

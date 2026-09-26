@@ -236,7 +236,7 @@ namespace GameLogic.Campaign.Regions
                 return RegionControlSwitchResult.Fail(RegionControlFailure.AlreadyControlled);
             }
 
-            Vector3 targetPos = target.transform.position;
+            Vector3 targetPos = target.Position3;
             var targetPos2 = new Vector2(targetPos.x, targetPos.z);
             if (_ctx.IsPositionJammed != null && _ctx.IsPositionJammed(targetPos2))
             {
@@ -278,7 +278,7 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             int previousLogicId = current.LogicId;
-            Vector3 p = current.transform.position;
+            Vector3 p = current.Position3;
             ReleaseInternal(current);
             _ctx.SetPossessed?.Invoke(null);
             Availability = RegionControlAvailability.None;
@@ -313,7 +313,7 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
-            Vector3 p = current.transform.position;
+            Vector3 p = current.Position3;
             var pos2 = new Vector2(p.x, p.z);
             bool jammed = _ctx.IsPositionJammed(pos2);
             if (!jammed)
@@ -355,7 +355,7 @@ namespace GameLogic.Campaign.Regions
         /// 兜底，这里只负责把 <c>_possessed</c> 正确置空/置新）。</summary>
         private void HandleDeathRebound(HomeValleyMachineMarker deadMarker)
         {
-            Vector3 deadPos = deadMarker.transform.position;
+            Vector3 deadPos = deadMarker.Position3;
             var deadPos2 = new Vector2(deadPos.x, deadPos.z);
 
             HomeValleyMachineMarker best = null;
@@ -372,7 +372,7 @@ namespace GameLogic.Campaign.Regions
                     {
                         continue;
                     }
-                    float dist = Vector3.Distance(deadPos, m.transform.position);
+                    float dist = Vector3.Distance(deadPos, m.Position3);
                     if (best == null || dist < bestDist - 0.0001f ||
                         (dist <= bestDist + 0.0001f && m.LogicId < best.LogicId))
                     {

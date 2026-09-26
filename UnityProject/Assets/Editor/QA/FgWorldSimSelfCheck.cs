@@ -710,12 +710,18 @@ namespace GameLogic.EditorTools
             int distinctLogic = MachineRegistry.AllRecords.Where(m => m != null).Select(m => m.LogicId).Distinct().Count();
             int buildingIds = reloaded.BuildingRecords.Select(b => b.BuildingId).Distinct().Count();
             int homeMarkers = WorldSimulation.Home.LiveMachineCount;
-            int markerObjects = Object.FindObjectsByType<HomeValleyMachineMarker>(FindObjectsInactive.Include, FindObjectsSortMode.None).Length;
+            // FG0-ARCH-03（DEBT-FG0ARCH01-03 收口）：机器逻辑句柄在各地点的战斗内核里（家园 + 远征 = 全部存活机器）；
+            // 画面对象（MachineView）只在被观察的地点存在，不被观察的地点一个都没有（含隐藏的也不算）。
+            string observedSite = WorldView.ObservedSiteId;
+            int markerObjects = Object.FindObjectsByType<MachineView>(FindObjectsInactive.Include, FindObjectsSortMode.None).Length;
+            int observedAlive = MachineRegistry.AllRecords.Count(m => m != null && m.IsAlive && m.RegionId == observedSite);
+            int handles = (WorldSimulation.Home?.LiveMachineCount ?? 0) + (WorldSimulation.FracturedCity?.LiveMachineCount ?? 0);
             int expectedMarkers = MachineRegistry.AllRecords.Count(m => m != null && m.IsAlive && (m.RegionId == HomeValleyLayout.RegionId || m.RegionId == FracturedCityLayout.RegionId));
             Expect(logicIds == distinctLogic && MachineRegistry.AllRecords.Count(m => m != null && m.IsAlive) == aliveBeforeSecond
                    && buildingIds == reloaded.BuildingRecords.Length && reloaded.BuildingRecords.Length == buildingsBeforeSecond
-                   && homeMarkers == HomeMachineCount() && markerObjects == expectedMarkers,
-                $"再存再读：机器记录 {logicIds} 条无重复编号、建筑 {reloaded.BuildingRecords.Length} 座无重复 ID；场景里的机器表现对象 {markerObjects} 个 = 家园与远征的存活机器（家园 {homeMarkers}）");
+                   && homeMarkers == HomeMachineCount() && handles == expectedMarkers && markerObjects == observedAlive,
+                $"再存再读：机器记录 {logicIds} 条无重复编号、建筑 {reloaded.BuildingRecords.Length} 座无重复 ID；战斗内核里的机器句柄 {handles} 个 = 家园与远征的存活机器 {expectedMarkers}（家园 {homeMarkers}）；" +
+                $"场景里的机器表现对象 {markerObjects} 个 = 被观察地点（{observedSite}）的存活机器 {observedAlive}，不被观察的地点没有表现对象");
             WorldSimulation.UnloadAll();
         }
 

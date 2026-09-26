@@ -90,17 +90,34 @@ namespace GameLogic.Campaign.Blueprint
             }
 
             _entries[machineLogicId] = new Entry { BlueprintId = blueprintId, Version = version };
+            Changed?.Invoke(machineLogicId);
             return CircuitOpResult.Ok();
         }
 
+        /// <summary>FG0-ARCH-03：某台机器的装配登记变了（登记 / 解绑）。战斗内核订阅它，只在变化时重算这台机器的武器参数，
+        /// 不在每次开火时重新编译装配（参数 LogicId；整表清空时为 0）。</summary>
+        public static event System.Action<int> Changed;
+
         /// <summary>解绑：区域卸载/机器阵亡/装配变更（回厂改造换版本前先解绑旧的，再登记新的）均调用本方法。
         /// 未登记时安全返回 false，不是错误——解绑一个从未登记过的 id 是合法的幂等操作。</summary>
-        public static bool Unregister(int machineLogicId) => _entries.Remove(machineLogicId);
+        public static bool Unregister(int machineLogicId)
+        {
+            bool removed = _entries.Remove(machineLogicId);
+            if (removed)
+            {
+                Changed?.Invoke(machineLogicId);
+            }
+            return removed;
+        }
 
         /// <summary>整表清空——区域整体卸载（<c>HomeValleyController.Exit</c>）时调用，语义与
         /// <c>Control.UnitLoadoutRegistry.Unbind</c> 一致："只清映射，不清 CampaignState 里的长期记录"，
         /// 机器数据本身仍在 <see cref="CampaignState.MachineRecords"/>，下次进场由调用方重新登记。</summary>
-        public static void Clear() => _entries.Clear();
+        public static void Clear()
+        {
+            _entries.Clear();
+            Changed?.Invoke(0);
+        }
 
         /// <summary>唯一真正的解析实现——把登记的 (blueprintId, version) 现场解析成
         /// <see cref="BlueprintCircuitPreview"/>。不读取任何缓存的编译结果：内容版本迁移

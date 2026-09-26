@@ -160,6 +160,8 @@ namespace GameLogic.Campaign
         public GameClockState Clock = new GameClockState();
         public GridState Grid = new GridState();
         public BeltItemState Belts = new BeltItemState();
+        /// <summary>FG0-ARCH-03：战斗内核快照（每个已载入地点一份）。唯一写入口是 <c>Combat.CombatSites.WriteTo</c>。</summary>
+        public CombatState Combat = new CombatState();
         public PipeFluidState Pipes = new PipeFluidState();
         public ResearchState Research = new ResearchState();
         public WeatherState Weather = new WeatherState();
@@ -228,6 +230,7 @@ namespace GameLogic.Campaign
                 Clock = new GameClockState(),
                 Grid = new GridState(),
                 Belts = new BeltItemState(),
+                Combat = new CombatState(),
                 Pipes = new PipeFluidState(),
                 Research = new ResearchState(),
                 Weather = new WeatherState(),
@@ -300,6 +303,8 @@ namespace GameLogic.Campaign
                 .OrderBy(r => r.SurfaceId, StringComparer.Ordinal).ThenBy(r => r.ChunkX).ThenBy(r => r.ChunkY).ToArray();
             Notifications.Entries = Notifications.Entries
                 .OrderBy(r => r.Id).ToArray();
+            Combat.Sites = Combat.Sites
+                .Where(r => r != null).OrderBy(r => r.SiteId, StringComparer.Ordinal).ToArray();
             SaveHistory.Notices = SaveHistory.Notices
                 .OrderBy(r => r.CreatedAtUtc, StringComparer.Ordinal).ThenBy(r => r.NoticeId, StringComparer.Ordinal).ToArray();
         }

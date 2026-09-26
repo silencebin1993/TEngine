@@ -148,6 +148,59 @@ namespace GameLogic.Campaign.Regions
         public static CombatTargetRecord Find(CampaignState state, string targetId) =>
             state?.CombatTargets?.FirstOrDefault(t => t.TargetId == targetId);
 
+        /// <summary>FG0-ARCH-03：训练靶在家园战斗内核里的单位（中立、血量在记录里）。自动交战的射程与间隔判定在内核，
+        /// 命中结算仍走 <see cref="TryAttack"/>（结算后回写镜像）。</summary>
+        public static int EnsureDummyUnit(GameLogic.Campaign.Combat.CombatSite site, CampaignState state)
+        {
+            CombatTargetRecord t = Find(state, LowThreatTargetId);
+            if (site == null || t == null)
+            {
+                return 0;
+            }
+            if (site.TryGetEnemyUnit(LowThreatTargetId, out int existing))
+            {
+                return existing;
+            }
+            var rec = new RegionEnemyRecord
+            {
+                EnemyInstanceId = LowThreatTargetId,
+                RegionId = HomeValleyLayout.RegionId,
+                EnemyTypeId = LowThreatTargetId,
+                Position = t.Position,
+                Health = t.Health,
+                MaxHealth = t.MaxHealth,
+                IsAlive = true,
+            };
+            int unit = site.SpawnEnemy(rec, new BinGames.Sim.Combat.CombatSpawn
+            {
+                Kind = BinGames.Sim.Combat.CombatUnitKind.Structure,
+                Faction = BinGames.Sim.Combat.CombatFaction.Neutral,
+                Behavior = BinGames.Sim.Combat.CombatBehavior.None,
+                Flags = BinGames.Sim.Combat.CombatUnitFlags.Alive | BinGames.Sim.Combat.CombatUnitFlags.Targetable | BinGames.Sim.Combat.CombatUnitFlags.ExternalHealth,
+                Radius = 1f,
+                Weapon = -1,
+                BehaviorProfile = -1,
+                Priority = 1,
+                ArmorHalfAngleDeg = 90f,
+                ArmorFacing = new Unity.Mathematics.float2(0f, -1f),
+                Home = new Unity.Mathematics.double2(t.Position.x, t.Position.y),
+            });
+            site.SetEngage(unit, EngageRange, 5f);
+            return unit;
+        }
+
+        /// <summary>把训练靶记录的血量写进内核镜像（命中结算、被动再生之后；O(1)）。</summary>
+        public static void SyncDummy(GameLogic.Campaign.Combat.CombatSite site, CampaignState state)
+        {
+            CombatTargetRecord t = Find(state, LowThreatTargetId);
+            if (site == null || t == null || !site.TryGetEnemyUnit(LowThreatTargetId, out int unit))
+            {
+                return;
+            }
+            // 打空即“不可选中”（编队攻击随之结束、自动交战不再尝试）；再生满血后恢复。
+            site.SetUnitHealth(unit, t.Health, t.MaxHealth, t.Health > 0f);
+        }
+
         /// <summary>被动再生：命中冷却结束后自动满血复位，供 <see cref="HomeValleyController.Update"/>
         /// 逐帧驱动（目标数量个位数，O(1) 量级，不违反热更层性能纪律）。</summary>
         public static void Tick(CampaignState state, float dt)

@@ -126,6 +126,33 @@ namespace GameLogic.Campaign
         public static bool IsBound => _sim != null;
         public static IReadOnlyCollection<MachineRecord> AllRecords => _records.Values;
 
+        /// <summary>FG0-ARCH-03：机器名册版本号——任何机器的“存在 / 所在地点 / 存活 / 当前蓝图版本”变化时加一
+        /// （登记、读档、清空、换地点、阵亡、改造）。热更层每个模拟步都要知道的“哪些机器在这里”（家园句柄对账、
+        /// 远征全灭检测、铸造前哨核心门三灯）只在版本号变化时做一次 O(机器数)，平时每步 O(1)（FG14 硬约束 1）。
+        /// 因此机器记录的这四个字段只能经本类写：<see cref="MoveToRegion"/>、<see cref="NotifyLoadoutChanged"/>、
+        /// <see cref="Register"/>、<see cref="MarkDeadByLogicId"/>、<see cref="LoadFromCampaignState"/>。</summary>
+        public static int RosterRevision { get; private set; }
+
+        /// <summary>FG0-ARCH-03：机器换地点的唯一写入口（出发、撤离、回城）。</summary>
+        public static void MoveToRegion(MachineRecord record, string regionId)
+        {
+            if (record == null || record.RegionId == regionId)
+            {
+                return;
+            }
+            record.RegionId = regionId;
+            RosterRevision++;
+        }
+
+        /// <summary>FG0-ARCH-03：机器当前蓝图（BlueprintId / BlueprintVersion）被改写后调用（改造完成）。</summary>
+        public static void NotifyLoadoutChanged(MachineRecord record)
+        {
+            if (record != null)
+            {
+                RosterRevision++;
+            }
+        }
+
         // ── 会话生命周期 ─────────────────────────────────────
 
         /// <summary>绑定到当前 SimWorld 会话；<paramref name="regionId"/> 是本会话代表的区域
@@ -185,6 +212,7 @@ namespace GameLogic.Campaign
         {
             Unbind();
             _records.Clear();
+            RosterRevision++;
             _everAllocated.Clear();
             _nextLogicId = 1;
             _nextDisplayNumber = 1;
@@ -264,6 +292,7 @@ namespace GameLogic.Campaign
             };
 
             _records[logicId] = record;
+            RosterRevision++;
             return MachineOpResult.Ok(logicId, $"已登记机器 LogicId={logicId} DisplayNumber={displayNumber}");
         }
 
@@ -371,7 +400,7 @@ namespace GameLogic.Campaign
 
             _logicToEntity[logicId] = entity;
             _entityToLogic[entity.Value] = logicId;
-            record.RegionId = _activeRegionId ?? record.RegionId;
+            MoveToRegion(record, _activeRegionId ?? record.RegionId);
             record.IsDeployed = true;
             return MachineOpResult.Ok(logicId);
         }
@@ -534,6 +563,7 @@ namespace GameLogic.Campaign
             Vector2 deathPosition = TryGetLivePosition(logicId, out Vector2 live) ? live : record.WorldPosition;
             record.IsAlive = false;
             record.IsDeployed = false;
+            RosterRevision++;
             if (_logicToEntity.TryGetValue(logicId, out SimEntityId entity))
             {
                 _entityToLogic.Remove(entity.Value);
@@ -543,8 +573,14 @@ namespace GameLogic.Campaign
             // ER8-CONTENT-01：存活→阵亡的唯一翻转点（重复标记在上面已早退，不会重复出声）。
             // 记录里的 WorldPosition 只在存档前同步，平时可能是旧值——不按距离衰减。
             Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.MachineDestroyed, deathPosition, "#" + record.DisplayNumber + " 被击毁");
+            // FG0-ARCH-03：机器所在地点的战斗内核据此把单位标为阵亡（O(1)，不需要每步对账）。
+            MachineDied?.Invoke(logicId);
             return MachineOpResult.Ok(logicId);
         }
+
+        /// <summary>FG0-ARCH-03：机器存活→阵亡的唯一翻转点之后触发（参数 LogicId）。战斗内核订阅它，
+        /// 机器血量真相仍在记录里（维修、出厂、改造都写记录），内核只保留镜像。</summary>
+        public static event System.Action<int> MachineDied;
 
         /// <summary>ER5-SILENT-01：唯一"机器受到外部伤害"写入口——此前项目里从未存在过一条真实会让
         /// <see cref="MachineRecord.Health"/> 因为敌方攻击而降低的代码路径（<see cref="SyncLiveState"/>
@@ -728,6 +764,7 @@ namespace GameLogic.Campaign
                 _records[r.LogicId] = CloneRecord(r);
                 _everAllocated.Add(r.LogicId);
             }
+            RosterRevision++;
 
             int maxSeen = _everAllocated.Count > 0 ? _everAllocated.Max() + 1 : 1;
             _nextLogicId = Math.Max(Math.Max(state.NextMachineLogicId, 1), maxSeen);

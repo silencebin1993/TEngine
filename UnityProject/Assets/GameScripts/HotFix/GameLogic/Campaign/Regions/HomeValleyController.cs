@@ -4,7 +4,9 @@ using System.Linq;
 using GameLogic.UI.Common;
 using GameLogic.Settings;
 using GameLogic.Campaign;
+using BinGames.Sim.Combat;
 using GameLogic.Campaign.Blueprint;
+using GameLogic.Campaign.Combat;
 using GameLogic.Campaign.Grid;
 using GameLogic.Campaign.Primitive;
 using GameLogic.Campaign.WorldSim;
@@ -41,7 +43,14 @@ namespace GameLogic.Campaign.Regions
 
         private GameObject _root;
         private Camera _camera;
+        /// <summary>家园机器的逻辑句柄（战斗内核单位的门面，不是表现对象；FG0-ARCH-03）。</summary>
         private readonly List<HomeValleyMachineMarker> _machineMarkers = new List<HomeValleyMachineMarker>(4);
+        /// <summary>FG0-ARCH-03：家园（星球表面）的战斗内核：机器移动（工作赶路 / 编队命令 / 直控）、训练靶自动交战，
+        /// 以及家园突袭的突袭者与炮塔（FG6 接入；性能场景与测试捷径已可用）。</summary>
+        private CombatSite _combat;
+        private HomeValleyCombatRules _combatRules;
+        private RegionSquadCommandContext _squadCtx;
+        public CombatSite Combat => _combat;
         /// <summary>ER8-CONTENT-01：建筑状态悬浮标记，按 BuildingTypeId 索引。</summary>
         private readonly Dictionary<string, WorldBadge> _buildingBadges = new Dictionary<string, WorldBadge>();
         /// <summary>FG0-ARCH-04：本帧仍存在的建筑本地键（对账时移除已拆除建筑的可视化）。复用同一个集合，不每帧分配。</summary>
@@ -138,12 +147,12 @@ namespace GameLogic.Campaign.Regions
             HomeValleyPowerGrid.Recompute(state); // 幂等：新建战役刚播种、或读档恢复旧存档，都用当前数据重算一次。
             HomeGridService.MapFor(state); // FG0-ARCH-04：旧档迁移到格网 + 占用层重建（幂等）。
 
-            BuildVisuals(state);
+            // FG0-ARCH-03：机器进家园的战斗内核（读档时从快照恢复，含编队命令；新战役按记录建）。表现对象只在被观察时建（SetObserved）。
+            OpenCombat(state, resume);
             SetupCameraProfile();
             SetupSquadCommands();
             SetupControlSystem();
             SetupInteraction();
-            _root.SetActive(false); // FG0-ARCH-01：表现对象在镜头观察这里时才显示（WorldView.Observe → SetObserved）。
 
             IsLoaded = true;
             HomeValleyBuildMode.Bind(BuildMode);
@@ -165,7 +174,7 @@ namespace GameLogic.Campaign.Regions
         public string SiteId => HomeValleyLayout.RegionId;
         public WorldSurfaceKind SurfaceKind => WorldSurfaceKind.Planet;
         public bool IsWiped => false;
-        public int LiveMachineCount => _machineMarkers.Count;
+        public int LiveMachineCount => _combat != null ? _combat.CountAliveMachines() : 0;
         public WorldCameraProfile CameraProfile => _cameraProfile;
         public Vector2 DefaultFocus => HomeValleyLayout.Core.Position;
         public Vector2? LivePosition(int logicId) => FindMachineMarkerPosition(logicId);
@@ -174,10 +183,11 @@ namespace GameLogic.Campaign.Regions
         /// 表现对象隐藏但不销毁——模拟照常推进（Demo 的机器位置仍记在表现对象的 Transform 上）。回来时画面对账一次。</summary>
         public void SetObserved(bool observed)
         {
-            if (!IsLoaded || _root == null)
+            if (!IsLoaded)
             {
                 return;
             }
+            CampaignState state = CampaignSession.Current;
             if (!observed)
             {
                 if (_possessed != null)
@@ -192,10 +202,17 @@ namespace GameLogic.Campaign.Regions
                 _craftStationPanelOpen = false;
                 _analysisPanelOpen = false;
                 SquadCommands.PointerSuppressed = false;
+                // FG0-ARCH-03（DEBT-FG0ARCH01-03）：不被观察时不保留表现对象（建筑方块、机器、标记都销毁），模拟照常在内核与记录里跑。
+                DestroyVisuals();
+                SquadCommands.ReleaseVisuals();
+                _combat?.ReleaseRender();
+                return;
             }
-            _root.SetActive(observed);
-            CampaignState state = CampaignSession.Current;
-            if (observed && state != null)
+            if (_root == null && state != null)
+            {
+                BuildVisuals(state);
+            }
+            if (state != null)
             {
                 SyncWorldVisuals(state);
                 RefreshObjectiveMarker(state);
@@ -258,6 +275,8 @@ namespace GameLogic.Campaign.Regions
                 // 画面对账（纯表现：建筑、残骸、地面物、靶子）；暂停中规划的建筑也要立即显示。
                 SyncWorldVisuals(state);
             }
+            // FG0-ARCH-03：机器表现对象按内核位置插值 + 突袭者 / 炮塔 / 弹体实例化绘制（常数次调用，与单位数无关）。
+            _combat?.FrameRender(_camera, GameClock.StepAlpha);
         }
 
         /// <summary>FG0-ARCH-01：一个固定模拟步（dt = 1 / clock.sim_step_hz 游戏秒）。由 <see cref="WorldSimulation"/> 调用——
@@ -275,15 +294,18 @@ namespace GameLogic.Campaign.Regions
                 return; // 核心被毁：家园冻结，只剩失败页（ER3-SOFTLOCK-01）。
             }
             SyncSimEntities(state);
-            TickMachineMovement(dt);
+            HomeValleyCombatTargets.SyncDummy(_combat, state); // 训练靶血量镜像（O(1)）。
             SquadCommands.TickSim(dt);
+            // FG0-ARCH-03：机器的工作赶路、编队命令、直控移动、训练靶自动交战（射程与间隔）、家园突袭的突袭者与炮塔、弹体——
+            // 全部在家园战斗内核的一步里（Burst）；到达回调、对机器 / 训练靶的伤害结算作为事件交回，每步有上限。
+            _combat?.Step(dt, GameClock.GameSeconds);
             HomeValleyWorkOrders.Tick(state, dt, GetMachinePosition, ReleaseMachineMovement,
                 IsMachineDirectControlled, BeginAutoAssignedMovement);
             HomeValleyFactory.Tick(state, dt); // ER4-FAC-01：装配站生产队列。
             PrimitiveCraftStation.Tick(state, dt); // ER4-PRIM-04：合成台升级/拆解队列。
             HomeValleyAnalysis.Tick(state, dt); // ER6-ANA-01：解析台队列。
             HomeValleyCombatTargets.Tick(state, dt); // ER4-PRIM-05：低威胁残骸靶被动再生。
-            TickAutoEngage(state, dt); // ER4-PRIM-05：AI 同出口自动交战。
+            // ER4-PRIM-05：AI 同出口自动交战——射程 / 间隔判定在内核（AutoEngage 行为），结算走 HomeValleyCombatRules.OnEngageRequest。
             HomeValleySignal.RecomputeUnlock(state); // ER5-SIG-01：破碎都市解锁判定。
             FoundryOutpostRegion.RecomputeUnlock(state); // ER6-FOUNDRY-01：铸造前哨外围解锁判定。
             CampaignExposureLedger.TickTowerBroadcastOff(state, dt); // ER6-EXPOSE-01：塔关广播每10秒-2。
@@ -293,11 +315,25 @@ namespace GameLogic.Campaign.Regions
 
         private readonly HashSet<int> _markerIds = new HashSet<int>();
 
-        /// <summary>FG0-ARCH-01：让“家园里有哪些机器”的表现对象与记录一致——新出厂、紧急救援、远征归来的机器补上；
-        /// 被派遣出去的机器移走。Demo 的机器位置记在表现对象的 Transform 上，所以这一步属于模拟（每步都做，与观察无关）。
-        /// 开销 O(机器数)，无分配。</summary>
+        /// <summary>FG0-ARCH-03：上次名册对账时的 <see cref="MachineRegistry.RosterRevision"/>（int.MinValue = 下一步必须对账）。</summary>
+        private int _rosterSynced = int.MinValue;
+
+        /// <summary>自检用：名册对账真正执行（O(机器数)）的次数。名册没变的步不增加（DEBT-FG0ARCH03-06 收口的守护）。</summary>
+        public int RosterSyncCount { get; private set; }
+
+        /// <summary>FG0-ARCH-01：让“家园里有哪些机器”的战斗内核句柄与记录一致——新出厂、紧急救援、远征归来的机器补上；
+        /// 被派遣出去的机器移走。属于模拟（与观察无关）。
+        /// FG0-ARCH-03：只在机器名册版本号（<see cref="MachineRegistry.RosterRevision"/>：登记、读档、换地点、阵亡、改造）
+        /// 变化后做一次 O(机器数)；名册没变的步 O(1)。有机器没能建出句柄时不记为已对账，下一步重试。</summary>
         private void SyncSimEntities(CampaignState state)
         {
+            int revision = MachineRegistry.RosterRevision;
+            if (_rosterSynced == revision)
+            {
+                return;
+            }
+            RosterSyncCount++;
+            bool complete = true;
             _markerIds.Clear();
             for (int i = _machineMarkers.Count - 1; i >= 0; i--)
             {
@@ -319,7 +355,13 @@ namespace GameLogic.Campaign.Regions
                     {
                         _selected = null;
                     }
-                    GameLogic.View.UnityObjects.Release(m.gameObject);
+                    // 派遣时机器状态已经由出发事务写回记录（CombatSites.ExportMachine）；这里不再导出，免得用家园位置覆盖远征落点。
+                    if (m.View != null)
+                    {
+                        GameLogic.View.UnityObjects.Release(m.View.gameObject);
+                    }
+                    m.DetachView();
+                    _combat?.RemoveMachine(m.LogicId, export: false);
                     _machineMarkers.RemoveAt(i);
                     continue;
                 }
@@ -329,10 +371,11 @@ namespace GameLogic.Campaign.Regions
             {
                 if (machine != null && machine.RegionId == HomeValleyLayout.RegionId && machine.IsAlive && !_markerIds.Contains(machine.LogicId))
                 {
-                    BuildMachineVisual(machine);
+                    complete &= CreateMachineHandle(machine) != null;
                     _markerIds.Add(machine.LogicId);
                 }
             }
+            _rosterSynced = complete ? revision : int.MinValue;
         }
 
         /// <summary>供 <see cref="HomeValleyWorkOrders.Tick"/> 赶路阶段路径停滞看门狗查询机器实时坐标
@@ -340,41 +383,23 @@ namespace GameLogic.Campaign.Regions
         /// Transform 实时位置）。</summary>
         private Vector2? GetMachinePosition(int logicId)
         {
-            foreach (HomeValleyMachineMarker marker in _machineMarkers)
-            {
-                if (marker.LogicId == logicId)
-                {
-                    Vector3 p = marker.transform.position;
-                    return new Vector2(p.x, p.z);
-                }
-            }
-            return null;
+            // FG0-ARCH-03：句柄按 LogicId 在战斗地点的字典里（O(1)），不逐台扫描。
+            HomeValleyMachineMarker marker = FindMarker(logicId);
+            return marker != null ? marker.Position : (Vector2?)null;
         }
 
         /// <summary>PathBlocked 触发时的释放回调：让对应 marker 停止赶路，不留一个订单已经
         /// Waiting/释放但视觉上机器还在朝旧目标走的不一致状态。</summary>
         private void ReleaseMachineMovement(int logicId)
         {
-            foreach (HomeValleyMachineMarker marker in _machineMarkers)
-            {
-                if (marker.LogicId == logicId)
-                {
-                    marker.CancelCommandMove();
-                    return;
-                }
-            }
+            FindMarker(logicId)?.CancelCommandMove();
         }
 
+        /// <summary>FG0-ARCH-03：按 LogicId 取家园里的机器句柄——战斗地点的字典查找（O(1)）；
+        /// 句柄集合与 <see cref="_machineMarkers"/> 一致（两者只在 <see cref="CreateMachineHandle"/> / 对账 / 进出场时同步增删）。</summary>
         private HomeValleyMachineMarker FindMarker(int logicId)
         {
-            foreach (HomeValleyMachineMarker marker in _machineMarkers)
-            {
-                if (marker.LogicId == logicId)
-                {
-                    return marker;
-                }
-            }
-            return null;
+            return _combat != null && _combat.TryGetMachineMarker(logicId, out HomeValleyMachineMarker marker) ? marker : null;
         }
 
         /// <summary>ERD-WRK-002"直控机器暂不领取新单"的判定来源——<see cref="HomeValleyWorkOrders.Tick"/>
@@ -401,7 +426,7 @@ namespace GameLogic.Campaign.Regions
                 // 已经错过），否则一台机器生成后要等到下一次真正调用它才会显形。
                 if (MachineRegistry.TryGetRecord(order.AssignedMachineLogicId, out MachineRecord record) && record.IsAlive)
                 {
-                    BuildMachineVisual(record);
+                    CreateMachineHandle(record);
                     marker = FindMarker(order.AssignedMachineLogicId);
                 }
             }
@@ -458,7 +483,8 @@ namespace GameLogic.Campaign.Regions
                 _lastFacing = new Vector2(x, z).normalized; // ER5-INT-01：E 候选"指向"排序读这个。
             }
 
-            _possessed.DirectMove(new Vector3(x, 0f, z), dt);
+            // FG0-ARCH-03：直控输入交给内核（模拟步里按机器速度移动；暂停时不走步）。
+            _possessed.SetDirectInput(new Vector2(x, z));
 
             // ER4-PRIM-05 STORY-EXECUTION-CARDS.md 第1条"鼠标瞄准+左键攻击"——归还谷地 WASD 直控此前
             // 只有移动，这是本 Story 唯一的全新玩法机制（其余都是把已有编译/装配出口接起来）。左键复用
@@ -490,7 +516,7 @@ namespace GameLogic.Campaign.Regions
             }
             Vector3 worldPoint = ray.GetPoint(enter);
 
-            Vector3 originV3 = _possessed.transform.position;
+            Vector3 originV3 = _possessed.Position3;
             Vector2 origin = new Vector2(originV3.x, originV3.z);
             Vector2 aimDir = new Vector2(worldPoint.x, worldPoint.z) - origin;
 
@@ -510,58 +536,11 @@ namespace GameLogic.Campaign.Regions
             HomeValleyCombatTargets.TryAttack(state, _possessed.LogicId, target.TargetId, state.RandomSeed, isAiSource: false);
         }
 
-        /// <summary>ER4-PRIM-05 STORY-EXECUTION-CARDS.md 第2条"玩家/AI 各使用一次同一出口"——归还谷地
-        /// 没有真实战斗 AI 决策系统（ER5/ER6 区域战斗前不引入），这里给出的是"未被直控、空闲、在射程内
-        /// 的机器每隔若干秒自动打一次"的最小真实自动行为，走的是与玩家直控完全相同的
-        /// <see cref="HomeValleyCombatTargets.TryAttack"/> 入口（<c>isAiSource: true</c>），结构上
-        /// 保证与 AC-REA-003"AI/玩家同装配同结果"一致，不是给 AI 另开小灶的假实现。</summary>
-        private const float AiEngageIntervalSeconds = 5f;
-        private readonly Dictionary<int, float> _aiEngageCooldown = new Dictionary<int, float>();
+        /// <summary>ER4-PRIM-05 STORY-EXECUTION-CARDS.md 第2条"玩家/AI 各使用一次同一出口"——未被直控、空闲、在射程内的机器每隔 5 秒自动打一次训练靶。
+        /// FG0-ARCH-03：逐机器的射程 / 间隔判定在家园战斗内核（AutoEngage 行为，每步 O(机器数) 在 AOT）；命中结算仍走
+        /// <see cref="HomeValleyCombatTargets.TryAttack"/>（<c>isAiSource: true</c>，经 HomeValleyCombatRules.OnEngageRequest），与玩家直控同一出口。</summary>
+        public const float AiEngageIntervalSeconds = 5f;
 
-        private void TickAutoEngage(CampaignState state, float dt)
-        {
-            if (state == null || dt <= 0f)
-            {
-                return;
-            }
-
-            foreach (HomeValleyMachineMarker marker in _machineMarkers)
-            {
-                if (marker == null)
-                {
-                    continue;
-                }
-                int logicId = marker.LogicId;
-                if (_possessed != null && _possessed.LogicId == logicId)
-                {
-                    continue; // 直控由玩家自己打，不与自动交战抢同一台机器的输出。
-                }
-                if (!MachineRegistry.TryGetRecord(logicId, out MachineRecord record) || !record.IsAlive || record.IsInFactory)
-                {
-                    continue;
-                }
-
-                float remaining = _aiEngageCooldown.TryGetValue(logicId, out float r) ? r - dt : 0f;
-                if (remaining > 0f)
-                {
-                    _aiEngageCooldown[logicId] = remaining;
-                    continue;
-                }
-
-                Vector3 posV3 = marker.transform.position;
-                var origin = new Vector2(posV3.x, posV3.z);
-                CombatTargetRecord target = HomeValleyCombatTargets.Find(state, HomeValleyCombatTargets.LowThreatTargetId);
-                if (target == null || target.Health <= 0f || Vector2.Distance(origin, target.Position) > HomeValleyCombatTargets.EngageRange)
-                {
-                    continue; // 不在射程内不算真正尝试过一次交战，不消耗冷却。
-                }
-
-                HomeValleyCombatTargets.TryAttack(state, logicId, target.TargetId, state.RandomSeed, isAiSource: true);
-                _aiEngageCooldown[logicId] = AiEngageIntervalSeconds;
-            }
-        }
-
-        /// <summary>UI 只读查询当前选中机器（工作面板显示/编辑该机器工作偏好用），没有选中返回 null。</summary>
         public int? SelectedMachineLogicId => _selected != null ? _selected.LogicId : (int?)null;
 
         /// <summary>ER5-CTL-01：HUD 显示"编号/蓝图"用——当前受控机器 LogicId，没有接管返回 null。</summary>
@@ -708,7 +687,7 @@ namespace GameLogic.Campaign.Regions
                 RegionId = HomeValleyLayout.RegionId,
                 Markers = _machineMarkers,
                 GetPossessed = () => _possessed,
-                SetPossessed = marker => _possessed = marker,
+                SetPossessed = SetPossessedMarker,
                 IsCameraTransitioning = () => _cameraDirector != null && _cameraDirector.Mode == ViewMode.Transition,
                 IsPositionJammed = null,
                 SquadCommands = SquadCommands,
@@ -914,7 +893,7 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             Vector2 targetPos = HomeValleyWorkOrders.ResolveWorkPosition(state, order);
-            Vector3 p = _possessed.transform.position;
+            Vector3 p = _possessed.Position3;
             if (Vector2.Distance(new Vector2(p.x, p.z), targetPos) <= RegionInteractionSystem.InteractRange)
             {
                 return;
@@ -930,19 +909,26 @@ namespace GameLogic.Campaign.Regions
         {
             if (_possessed != null)
             {
-                Vector3 p = _possessed.transform.position;
-                anchor = new float2(p.x, p.z);
+                // 镜头跟随插值后的画面位置（有表现对象时），60 Hz 模拟在高帧率下镜头也不一顿一顿；没有表现对象时读内核位置。
+                Vector3 v = _possessed.View != null ? _possessed.View.transform.position : _possessed.Position3;
+                anchor = new float2(v.x, v.z);
                 return true;
             }
             anchor = float2.zero;
             return false;
         }
 
-        private void TickMachineMovement(float dt)
+        /// <summary>接入状态写进内核：受控机不执行编队命令，位移来自直控输入（释放时清零输入）。</summary>
+        private void SetPossessedMarker(HomeValleyMachineMarker marker)
         {
-            foreach (HomeValleyMachineMarker marker in _machineMarkers)
+            if (_possessed != null && _possessed != marker)
             {
-                marker.Tick(dt);
+                _combat?.SetPossessed(_possessed.LogicId, false);
+            }
+            _possessed = marker;
+            if (marker != null)
+            {
+                _combat?.SetPossessed(marker.LogicId, true);
             }
         }
 
@@ -956,12 +942,20 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
+            // FG0-ARCH-03：内核随后释放——积压的玩法事件先全部结算，不随队列丢掉。
+            _combat?.FlushPendingEvents();
             SyncLiveStateBackToRecords();
+            // FG0-ARCH-03：家园战斗内核随家园卸载释放（整个世界卸载 = 回主菜单 / 回滚）；存档里的快照随之删除（记录已写回）。
+            CombatSites.Close(SiteId, CampaignSession.Current, dropRecord: true);
+            _combat = null;
             BuildMode.Shutdown(); // FG0-ARCH-04：建造模式的虚影 / 叠加层 / 输入上下文与区域成对释放。
             HomeGridService.ShutdownStreaming(); // FG0-ARCH-05：在飞的区块生成任务与区域成对释放（格网本身保留）。
             HomeValleyBuildMode.Unbind(BuildMode);
             SquadCommands.PointerSuppressed = false;
             DestroyVisuals();
+            _machineMarkers.Clear();
+            _rosterSynced = int.MinValue;
+            _selected = null;
             // ER4-BLP-02：区域卸载与登记表解绑成对——清空当前会话的装配登记缓存（不影响
             // CampaignState.MachineRecords 本身，机器长期记录原样保留，下次 Enter 重新登记）。
             MachineLoadoutRegistry.Clear();
@@ -1101,18 +1095,8 @@ namespace GameLogic.Campaign.Regions
         }
 
         /// <summary>FG0-UX-01：暂停菜单“保存并返回主菜单”存档前调用——只写回实时状态，不卸载区域。</summary>
-        private Vector2? FindMachineMarkerPosition(int logicId)
-        {
-            foreach (HomeValleyMachineMarker marker in _machineMarkers)
-            {
-                if (marker != null && marker.LogicId == logicId)
-                {
-                    Vector3 p = marker.transform.position;
-                    return new Vector2(p.x, p.z);
-                }
-            }
-            return null;
-        }
+        private Vector2? FindMachineMarkerPosition(int logicId) =>
+            _combat != null && _combat.TryGetMachinePosition(logicId, out Vector2 p) ? p : (Vector2?)null;
 
         public void SyncLiveStateForSave()
         {
@@ -1135,9 +1119,8 @@ namespace GameLogic.Campaign.Regions
                 {
                     continue;
                 }
-                Vector3 p = marker.transform.position;
-                float health = rec != null ? rec.Health : 100f;
-                MachineRegistry.SyncLiveState(marker.LogicId, new Vector2(p.x, p.z), health, null);
+                // FG0-ARCH-03：位置、热量、冷却的真相在内核（血量真相在记录里，不动）。
+                _combat?.ExportMachine(marker.LogicId, includePosition: true);
             }
         }
 
@@ -1205,7 +1188,7 @@ namespace GameLogic.Campaign.Regions
             Renderer renderer = go != null ? go.GetComponent<Renderer>() : null;
             if (renderer != null)
             {
-                renderer.material.color = ColorForBuilding(building);
+                renderer.sharedMaterial = ViewMaterials.Standard(ColorForBuilding(building));
                 PlaceBuildingTransform(go, building); // FG0-ARCH-04：旋转后占地 / 朝向跟着变（格网是唯一真相）。
             }
             if (_buildingBadges.TryGetValue(key, out WorldBadge badge) && badge != null)
@@ -1244,8 +1227,6 @@ namespace GameLogic.Campaign.Regions
             _buildingBadges.Clear();
             _buildingVisuals.Clear();
             _visualsRecordsRef = null;
-            _machineMarkers.Clear();
-            _selected = null;
 
             foreach (BuildingRecord building in state.BuildingRecords.Where(b => b.RegionId == HomeValleyLayout.RegionId))
             {
@@ -1294,10 +1275,17 @@ namespace GameLogic.Campaign.Regions
                 }
             }
 
-            foreach (MachineRecord machine in MachineRegistry.AllRecords.Where(m =>
-                m.RegionId == HomeValleyLayout.RegionId && m.IsAlive))
+            foreach (HomeValleyMachineMarker marker in _machineMarkers)
             {
-                BuildMachineVisual(machine);
+                if (marker == null || !MachineRegistry.TryGetRecord(marker.LogicId, out MachineRecord machine) || !machine.IsAlive)
+                {
+                    continue;
+                }
+                BuildMachineView(marker, machine);
+            }
+            if (_squadCtx != null)
+            {
+                _squadCtx.VisualRoot = _root;
             }
         }
 
@@ -1458,7 +1446,7 @@ namespace GameLogic.Campaign.Regions
             _buildingVisuals[key] = go.transform;
             PlaceBuildingTransform(go.transform, building);
             Renderer renderer = go.GetComponent<Renderer>();
-            renderer.material = new Material(Shader.Find("Standard")) { color = ColorForBuilding(building) };
+            renderer.sharedMaterial = ViewMaterials.Standard(ColorForBuilding(building));
 
             // ER8-CONTENT-01 AC-ACC-002：状态标记挂在区域根节点、悬在建筑正上方（建筑立方体是非等比缩放，
             // 挂在它下面会把贴图拉斜）。没有碰撞体，不影响点选建筑的射线。
@@ -1506,7 +1494,7 @@ namespace GameLogic.Campaign.Regions
             go.transform.position = new Vector3(wreckage.Position.x, 0.5f, wreckage.Position.y);
             go.transform.localScale = new Vector3(2.5f, 0.5f, 2.5f);
             Renderer renderer = go.GetComponent<Renderer>();
-            renderer.material = new Material(Shader.Find("Standard")) { color = new Color(0.45f, 0.35f, 0.25f) };
+            renderer.sharedMaterial = ViewMaterials.Standard(new Color(0.45f, 0.35f, 0.25f));
         }
 
         /// <summary>ER3-WRK-01 Build：尚未建成的建造位占位（半透明，与 <see cref="BuildBeaconSlotVisual"/>
@@ -1520,7 +1508,7 @@ namespace GameLogic.Campaign.Regions
             Vector2Int size = GridContent.TryGetBuilding(typeId, out GameConfig.fg.BuildingGrid g) ? new Vector2Int(g.FootprintW, g.FootprintH) : new Vector2Int(3, 3);
             go.transform.localScale = new Vector3(size.x, 0.2f, size.y);
             Renderer renderer = go.GetComponent<Renderer>();
-            renderer.material = new Material(Shader.Find("Standard")) { color = new Color(0.3f, 0.6f, 0.9f, 0.4f) };
+            renderer.sharedMaterial = ViewMaterials.Standard(new Color(0.3f, 0.6f, 0.9f, 0.4f));
         }
 
         /// <summary>ER3-WRK-01 Haul：地面待搬运物品的可视化，可点选发起
@@ -1533,7 +1521,7 @@ namespace GameLogic.Campaign.Regions
             go.transform.position = new Vector3(item.Position.x, 0.35f, item.Position.y);
             go.transform.localScale = new Vector3(0.9f, 0.7f, 0.9f);
             Renderer renderer = go.GetComponent<Renderer>();
-            renderer.material = new Material(Shader.Find("Standard")) { color = new Color(0.85f, 0.75f, 0.35f) };
+            renderer.sharedMaterial = ViewMaterials.Standard(new Color(0.85f, 0.75f, 0.35f));
         }
 
         /// <summary>ER4-PRIM-05：低威胁残骸靶占位可视化（同 <see cref="BuildWreckageVisual"/> 手法，
@@ -1551,7 +1539,7 @@ namespace GameLogic.Campaign.Regions
             go.transform.position = new Vector3(pos.x, 0.6f, pos.y);
             go.transform.localScale = new Vector3(1.6f, 0.6f, 1.6f);
             Renderer renderer = go.GetComponent<Renderer>();
-            renderer.material = new Material(Shader.Find("Standard")) { color = new Color(0.8f, 0.2f, 0.2f) };
+            renderer.sharedMaterial = ViewMaterials.Standard(new Color(0.8f, 0.2f, 0.2f));
         }
 
         /// <summary>目标 HP 比例→颜色：满血深红（危险靶标配色，与"可拆解残骸"的棕色区分），
@@ -1569,9 +1557,9 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             float fraction = target.MaxHealth > 0f ? Mathf.Clamp01(target.Health / target.MaxHealth) : 0f;
-            renderer.material.color = target.Health <= 0f
+            renderer.sharedMaterial = ViewMaterials.Standard(target.Health <= 0f
                 ? new Color(0.4f, 0.4f, 0.4f)
-                : Color.Lerp(new Color(0.55f, 0.1f, 0.1f), new Color(0.9f, 0.25f, 0.2f), fraction);
+                : Color.Lerp(new Color(0.55f, 0.1f, 0.1f), new Color(0.9f, 0.25f, 0.2f), fraction));
         }
 
         private void BuildBeaconSlotVisual()
@@ -1585,25 +1573,89 @@ namespace GameLogic.Campaign.Regions
                 HomeValleyLayout.BeaconSlot.ClearanceRadius * 2f);
             GameLogic.View.UnityObjects.Release(go.GetComponent<Collider>());
             Renderer renderer = go.GetComponent<Renderer>();
-            renderer.material = new Material(Shader.Find("Standard")) { color = new Color(0.3f, 0.5f, 0.8f, 0.4f) };
+            renderer.sharedMaterial = ViewMaterials.Standard(new Color(0.3f, 0.5f, 0.8f, 0.4f));
         }
 
-        private void BuildMachineVisual(MachineRecord machine)
+        /// <summary>一台家园机器进内核并建立逻辑句柄；被观察时同时建表现对象。</summary>
+        private HomeValleyMachineMarker CreateMachineHandle(MachineRecord machine)
         {
+            if (_combat == null || machine == null)
+            {
+                return null;
+            }
+            HomeValleyMachineMarker existing = FindMarker(machine.LogicId);
+            if (existing != null)
+            {
+                return existing;
+            }
+            HomeValleyMachineMarker marker = _combat.SpawnMachine(CampaignSession.Current, machine, machine.WorldPosition, autoEngage: true);
+            if (marker == null)
+            {
+                return null;
+            }
+            _machineMarkers.Add(marker);
+            if (_root != null)
+            {
+                BuildMachineView(marker, machine);
+            }
+            return marker;
+        }
+
+        private void BuildMachineView(HomeValleyMachineMarker marker, MachineRecord machine)
+        {
+            Vector2 at = marker.Position;
             GameObject go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
             go.name = "Machine_" + machine.ChassisId;
             go.transform.SetParent(_root.transform, false);
-            go.transform.position = new Vector3(machine.WorldPosition.x, 1f, machine.WorldPosition.y);
+            go.transform.position = new Vector3(at.x, 1f, at.y);
             go.transform.localScale = new Vector3(1f, 1f, 1f);
             Renderer renderer = go.GetComponent<Renderer>();
             Color baseColor = new Color(0.7f, 0.75f, 0.8f);
-            renderer.material = new Material(Shader.Find("Standard")) { color = baseColor };
+            renderer.sharedMaterial = ViewMaterials.Standard(baseColor);
             // AC-THEME-002：按底盘拼车辆剪影（胶囊只留作命中盒），与静默/铸造敌人在灰度下也能分清。
             PlaceholderSilhouette.ApplyMachine(go, renderer, machine.ChassisId);
 
-            HomeValleyMachineMarker marker = go.AddComponent<HomeValleyMachineMarker>();
-            marker.Initialize(machine.LogicId, machine.ChassisId, renderer, baseColor);
-            _machineMarkers.Add(marker);
+            MachineView view = go.AddComponent<MachineView>();
+            view.Initialize(renderer, baseColor);
+            marker.AttachView(view);
+            _combat?.BindView(marker.UnitId, go.transform, 1f);
+        }
+
+        /// <summary>FG0-ARCH-03：进场 / 读档时建立家园的战斗内核（机器、训练靶；突袭者与炮塔随存档快照恢复）。</summary>
+        private void OpenCombat(CampaignState state, bool resume)
+        {
+            _combatRules = new HomeValleyCombatRules { IsDirectControlled = IsMachineDirectControlled };
+            _combat = CombatSites.Open(SiteId, state, resume, _combatRules, out _);
+            _combat.Squad = SquadCommands;
+            var obstacles = new List<(Vector2 Position, float Radius)>();
+            foreach (HomeValleyLayout.Anchor anchor in HomeValleyLayout.AllAnchors())
+            {
+                obstacles.Add((anchor.Position, anchor.ClearanceRadius));
+            }
+            _combat.SetObstacles(CombatDemoContent.Obstacles(obstacles));
+            _machineMarkers.Clear();
+            _rosterSynced = int.MinValue; // 新内核：第一步做一次完整对账。
+            foreach (MachineRecord m in MachineRegistry.AllRecords)
+            {
+                if (m != null && m.IsAlive && m.RegionId == HomeValleyLayout.RegionId)
+                {
+                    HomeValleyMachineMarker marker = _combat.SpawnMachine(state, m, m.WorldPosition, autoEngage: true);
+                    if (marker != null)
+                    {
+                        _machineMarkers.Add(marker);
+                        _combat.SetMachineInFactory(m.LogicId, m.IsInFactory); // 读档恢复的单位按记录对齐“厂内”标志（O(1)）。
+                    }
+                }
+            }
+            foreach (int stale in _combat.MachinesNotIn(id => MachineRegistry.TryGetRecord(id, out MachineRecord r) && r.IsAlive && r.RegionId == HomeValleyLayout.RegionId))
+            {
+                _combat.RemoveMachine(stale, export: false);
+            }
+            LastResumedWorkArrivals = ResumeWorkArrivals(state, _machineMarkers);
+            int dummy = HomeValleyCombatTargets.EnsureDummyUnit(_combat, state);
+            _combat.SetEngage(dummy, HomeValleyCombatTargets.EngageRange, AiEngageIntervalSeconds);
+            HomeValleyCombatTargets.SyncDummy(_combat, state);
+            _combat.RefreshAllMachineWeapons(state);
         }
 
         /// <summary>FG0-ARCH-04：还没建成的格网建筑（规划中 / 已预留材料 / 施工中）。</summary>
@@ -1680,7 +1732,7 @@ namespace GameLogic.Campaign.Regions
                 obstacles.Add((anchor.Position, anchor.ClearanceRadius));
             }
 
-            SquadCommands.Bind(new RegionSquadCommandContext
+            _squadCtx = new RegionSquadCommandContext
             {
                 Camera = _camera,
                 Markers = _machineMarkers,
@@ -1692,10 +1744,12 @@ namespace GameLogic.Campaign.Regions
                 Obstacles = obstacles,
                 FindHostileNear = FindLowThreatHostileNear,
                 ResolveHostile = ResolveLowThreatHostile,
-                TryAttack = TrySquadAttackLowThreatTarget,
+                Site = _combat,
+                HostileUnit = id => _combat != null && _combat.TryGetEnemyUnit(id, out int u) ? u : 0,
                 AttackRange = HomeValleyCombatTargets.EngageRange,
                 AttackCooldownSeconds = 1.2f,
-            });
+            };
+            SquadCommands.Bind(_squadCtx);
         }
 
         /// <summary>ER5-CMD-01 下令前置："换目标"式的既有纪律——下一条军事命令视同玩家显式取消
@@ -1714,7 +1768,7 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
-            Vector3 pos = marker.transform.position;
+            Vector3 pos = marker.Position3;
             HomeValleyWorkOrders.CancelOrder(state, active.WorkOrderId, new Vector2(pos.x, pos.z));
         }
 
@@ -1736,23 +1790,6 @@ namespace GameLogic.Campaign.Regions
             CampaignState state = CampaignSession.Current;
             CombatTargetRecord target = HomeValleyCombatTargets.Find(state, hostileId);
             return target == null ? (RegionHostileInfo?)null : new RegionHostileInfo(target.TargetId, target.Position, target.Health > 0f);
-        }
-
-        /// <summary>Attack 命令的伤害结算——与 <see cref="TickAutoEngage"/>/<see cref="HandleDirectControl"/>
-        /// 共用同一个 <see cref="HomeValleyCombatTargets.TryAttack"/> 唯一入口，三条路径（AI 自动/玩家直控
-        /// 瞄准/战略 Attack 命令）不重复实现命中或伤害。目标 HP 归零视为"战略命令意义上的目标丢失"
-        /// （靶标本身会按 <see cref="HomeValleyCombatTargets.RegenSeconds"/> 自动复位，那是独立的背景行为，
-        /// 与这条命令是否已经结束无关）。</summary>
-        private RegionAttackOutcome TrySquadAttackLowThreatTarget(int attackerLogicId, string hostileId)
-        {
-            CampaignState state = CampaignSession.Current;
-            HomeValleyCombatTargets.HitResult result =
-                HomeValleyCombatTargets.TryAttack(state, attackerLogicId, hostileId, state?.RandomSeed ?? 0, isAiSource: false);
-            if (!result.Success)
-            {
-                return RegionAttackOutcome.Fail(result.FailureReason);
-            }
-            return RegionAttackOutcome.Ok(targetDestroyed: result.RemainingHealth <= 0f);
         }
 
         // ── 机器选择 / 点选移动 / 到点自动干活 / WASD 接管 ────────────────────
@@ -1781,7 +1818,7 @@ namespace GameLogic.Campaign.Regions
                     : null;
                 if (active != null)
                 {
-                    Vector3 pos = _selected.transform.position;
+                    Vector3 pos = _selected.Position3;
                     HomeValleyWorkOrders.CancelOrder(cancelState, active.WorkOrderId, new Vector2(pos.x, pos.z));
                     _selected.CancelCommandMove();
                     Log.Info($"[HomeValleyController] 已取消 {_selected.LogicId} 的在办订单 {active.WorkOrderId}。");
@@ -1814,7 +1851,7 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
-            HomeValleyMachineMarker marker = hit.collider.GetComponent<HomeValleyMachineMarker>();
+            HomeValleyMachineMarker marker = hit.collider.GetComponent<MachineView>()?.Marker;
             if (marker != null)
             {
                 _selected?.SetSelected(false);
@@ -1957,7 +1994,7 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
-            Vector3 pos = moving.transform.position;
+            Vector3 pos = moving.Position3;
             HomeValleyWorkOrders.CancelOrder(state, active.WorkOrderId, new Vector2(pos.x, pos.z));
         }
 
@@ -2017,21 +2054,72 @@ namespace GameLogic.Campaign.Regions
 
             if (order.Kind == WorkOrderKind.Haul)
             {
-                moving.CommandMoveTo(destination, () =>
-                {
-                    if (!HomeValleyWorkOrders.OnArrivedAtHaulSource(CampaignSession.Current, workOrderId))
-                    {
-                        return;
-                    }
-                    Vector3 corePos = new Vector3(HomeValleyLayout.Core.Position.x, 1f, HomeValleyLayout.Core.Position.y);
-                    moving.CommandMoveTo(corePos, () =>
-                        HomeValleyWorkOrders.OnArrivedAtHaulDestination(CampaignSession.Current, workOrderId));
-                });
+                moving.CommandMoveTo(destination, HaulSourceArrival(moving, workOrderId));
                 return;
             }
 
-            moving.CommandMoveTo(destination, () => HomeValleyWorkOrders.OnArrivedAtWork(CampaignSession.Current, workOrderId));
+            moving.CommandMoveTo(destination, WorkArrival(workOrderId));
         }
+
+        // 到达回调（三种）：派工时挂上；读档后按订单状态重挂（ResumeWorkArrivals）。两处用同一组构造，行为一致。
+        private static Action WorkArrival(string workOrderId) =>
+            () => HomeValleyWorkOrders.OnArrivedAtWork(CampaignSession.Current, workOrderId);
+
+        private static Action HaulDestinationArrival(string workOrderId) =>
+            () => HomeValleyWorkOrders.OnArrivedAtHaulDestination(CampaignSession.Current, workOrderId);
+
+        private static Action HaulSourceArrival(HomeValleyMachineMarker moving, string workOrderId) =>
+            () =>
+            {
+                if (!HomeValleyWorkOrders.OnArrivedAtHaulSource(CampaignSession.Current, workOrderId))
+                {
+                    return;
+                }
+                Vector3 corePos = new Vector3(HomeValleyLayout.Core.Position.x, 1f, HomeValleyLayout.Core.Position.y);
+                moving.CommandMoveTo(corePos, HaulDestinationArrival(workOrderId));
+            };
+
+        /// <summary>
+        /// FG0-ARCH-03：读档恢复后，给“带到达回调下达、还在赶路”的机器按它在办的工作订单重挂回调（回调只在内存里，赶路命令随内核快照进存档）。
+        /// 映射与派工时一致：搬运且订单仍是 Reserved = 去取货那一腿；搬运且 InProgress = 送回核心那一腿；其余四类 Reserved = 到点开工。
+        /// 对不上的（订单已终结 / 等待中）不挂，交给停滞看门狗与分配引擎（与 Demo 相同的兜底）。O(家园机器数)，只在载入时一次。
+        /// </summary>
+        private static int ResumeWorkArrivals(CampaignState state, IEnumerable<HomeValleyMachineMarker> markers)
+        {
+            int resumed = 0;
+            if (state == null)
+            {
+                return 0;
+            }
+            foreach (HomeValleyMachineMarker marker in markers)
+            {
+                if (marker == null || !marker.AwaitsArrivalAction)
+                {
+                    continue;
+                }
+                WorkOrderRecord order = HomeValleyWorkOrders.FindActiveOrderForMachine(state, marker.LogicId);
+                Action action = null;
+                if (order != null && order.Kind == WorkOrderKind.Haul)
+                {
+                    action = order.State == WorkOrderState.Reserved ? HaulSourceArrival(marker, order.WorkOrderId)
+                        : order.State == WorkOrderState.InProgress ? HaulDestinationArrival(order.WorkOrderId)
+                        : null;
+                }
+                else if (order != null && order.State == WorkOrderState.Reserved)
+                {
+                    action = WorkArrival(order.WorkOrderId);
+                }
+                if (action != null)
+                {
+                    marker.ResumeArrivalAction(action);
+                    resumed++;
+                }
+            }
+            return resumed;
+        }
+
+        /// <summary>最近一次载入时重挂的工作赶路回调数（自检读）。</summary>
+        public int LastResumedWorkArrivals { get; private set; }
 
         private static string BuildingTypeIdFromHit(RaycastHit hit)
         {
@@ -2069,9 +2157,19 @@ namespace GameLogic.Campaign.Regions
                 _root = null;
             }
             _objectiveMarker = null;
-            _machineMarkers.Clear();
-            _selected = null;
-            _possessed = null;
+            // FG0-ARCH-03：机器逻辑句柄不随表现对象销毁（地点不被观察时模拟照常）；只断开画面。
+            foreach (HomeValleyMachineMarker marker in _machineMarkers)
+            {
+                marker?.DetachView();
+            }
+            _combat?.ClearViews();
+            _buildingVisuals.Clear();
+            _buildingBadges.Clear();
+            _visualsRecordsRef = null;
+            if (_squadCtx != null)
+            {
+                _squadCtx.VisualRoot = null;
+            }
         }
 
         // ── 自检（ER2-SCENE-01 负向矩阵，供 execute_code / 自动化验收直接断言）───

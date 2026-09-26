@@ -234,7 +234,7 @@ namespace GameLogic.Campaign.Regions
             }
 
             List<RegionInteractCandidate> candidates = _ctx.BuildCandidates?.Invoke();
-            Vector3 posV3 = possessed.transform.position;
+            Vector3 posV3 = possessed.Position3;
             var machinePos = new Vector2(posV3.x, posV3.z);
             Vector2 facing = _ctx.GetFacing?.Invoke() ?? Vector2.zero;
 

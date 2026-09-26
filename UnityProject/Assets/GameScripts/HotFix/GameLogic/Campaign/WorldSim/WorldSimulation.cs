@@ -209,6 +209,8 @@ namespace GameLogic.Campaign.WorldSim
             FoundryOutpost?.Exit(evacuateSuccess: false);
             Home?.Exit();
             BeltNetworkService.Unload();
+            Combat.CombatSites.CloseAll(); // FG0-ARCH-03：保险——各地点 Exit 已各自释放内核，这里确保没有泄漏的原生容器。
+            GameLogic.View.ViewMaterials.ReleaseAll(); // FG0-ARCH-03：地点表现对象的共享材质与世界成对释放（各地点的表现对象此时已全部销毁）。
             FracturedCity = null;
             FoundryOutpost = null;
             Home = null;
@@ -227,6 +229,8 @@ namespace GameLogic.Campaign.WorldSim
             }
             // FG0-ARCH-02：传送带内核快照（按网络分块）写进 BeltItemState。
             BeltNetworkService.WriteTo(BeltNetworkService.BoundState);
+            // FG0-ARCH-03：每个已载入地点的战斗内核快照（单位、编队命令、冷却、热量、标记、飞行中的弹体）写进 CombatState。
+            Combat.CombatSites.WriteTo(CampaignSession.Current);
         }
 
         private static void BindLivePositions()
