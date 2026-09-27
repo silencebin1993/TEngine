@@ -664,6 +664,11 @@ namespace BinGames.Sim.Nav
                 {
                     return false;
                 }
+                if (n == 1)
+                {
+                    // 已到终点格：不再往外走（否则同格或正好 45° 时会多查终点外侧两格，误判被挡）。
+                    break;
+                }
                 if (err > 0)
                 {
                     x += sx;
@@ -722,6 +727,22 @@ namespace BinGames.Sim.Nav
         // ─────────────────────────────── 一条请求 ───────────────────────────────
 
         private static int H(int2 c, int2 t) => Octile(c, t);
+
+        /// <summary>区块里有没有哪个入口节点从该格可达（<paramref name="dist"/> 是区块内 Dijkstra 的结果）。</summary>
+        private static bool AnyEntryReachable(ref NavWork w, int slot, int cls, int2 chunk, int size, NativeArray<int> dist)
+        {
+            NavChunkGraph cg = w.Graphs[slot * NavConst.MaxClasses + cls];
+            int2 cb = chunk * size;
+            for (int k = cg.NodeStart; k < cg.NodeStart + cg.NodeCount; k++)
+            {
+                int2 lc = w.Nodes[k].Cell - cb;
+                if (dist[lc.y * size + lc.x] < NavConst.Infinity)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
 
         /// <summary>
         /// 一条请求的完整寻路。逐格路线写进 <paramref name="sc"/>.Cells（首项 = 落地后的起点），结果状态写进 <paramref name="res"/>；
@@ -809,101 +830,122 @@ namespace BinGames.Sim.Nav
             {
                 LocalDijkstra(ref w, ref sc, tSlot, cls, t, sc.GoalDist);
             }
-            sc.Heap.Clear();
-            sc.G.Clear();
-            sc.From.Clear();
-            sc.Closed.Clear();
+            // 起点或目标在自己区块里被围住（走不到任何区块入口）时，放大搜索框也没用：不重搜，免得真不可达时白白多搜几轮。
+            bool canRetry = AnyEntryReachable(ref w, sSlot, cls, sc0, size, sc.StartDist)
+                            && (!goalOk || AnyEntryReachable(ref w, tSlot, cls, tc0, size, sc.GoalDist));
             int hs = H(s, t);
-            sc.G[NavConst.NodeStart] = 0;
-            HeapPush(sc.Heap, new NavHeapItem { F = hs, H = hs, TieY = s.y, TieX = s.x, Item = NavConst.NodeStart, G = 0 });
             int best = NavConst.NodeStart;
             int bestH = hs;
             int expanded = 0;
             bool found = false;
             bool limit = false;
-            while (sc.Heap.Length > 0)
+            // 搜索框只是剪枝：框里搜空了但有邻居被框挡掉（clipped），说明可能要绕出框（长河、悬崖），
+            // 放大边距重搜，而不是直接报“完全阻断”。展开数跨轮累计，总量仍受 MaxExpansions 约束。
+            for (int attempt = 0; ; attempt++)
             {
-                NavHeapItem it = HeapPop(sc.Heap);
-                int id = it.Item;
-                if (sc.Closed.Contains(id))
+                bool clipped = false;
+                sc.Heap.Clear();
+                sc.G.Clear();
+                sc.From.Clear();
+                sc.Closed.Clear();
+                sc.G[NavConst.NodeStart] = 0;
+                HeapPush(sc.Heap, new NavHeapItem { F = hs, H = hs, TieY = s.y, TieX = s.x, Item = NavConst.NodeStart, G = 0 });
+                best = NavConst.NodeStart;
+                bestH = hs;
+                while (sc.Heap.Length > 0)
                 {
-                    continue;
-                }
-                sc.Closed.Add(id);
-                if (id == NavConst.NodeGoal)
-                {
-                    found = true;
-                    break;
-                }
-                if (++expanded > cfg.MaxExpansions)
-                {
-                    limit = true;
-                    break;
-                }
-                if (id != NavConst.NodeStart && it.H < bestH)
-                {
-                    bestH = it.H;
-                    best = id;
-                }
-                int g0 = it.G;
-                if (id == NavConst.NodeStart)
-                {
-                    NavChunkGraph sg = w.Graphs[sSlot * NavConst.MaxClasses + cls];
-                    int2 cb = sc0 * size;
-                    for (int k = sg.NodeStart; k < sg.NodeStart + sg.NodeCount; k++)
+                    NavHeapItem it = HeapPop(sc.Heap);
+                    int id = it.Item;
+                    if (sc.Closed.Contains(id))
                     {
-                        int2 lc = w.Nodes[k].Cell - cb;
-                        int d = sc.StartDist[lc.y * size + lc.x];
+                        continue;
+                    }
+                    sc.Closed.Add(id);
+                    if (id == NavConst.NodeGoal)
+                    {
+                        found = true;
+                        break;
+                    }
+                    if (++expanded > cfg.MaxExpansions)
+                    {
+                        limit = true;
+                        break;
+                    }
+                    if (id != NavConst.NodeStart && it.H < bestH)
+                    {
+                        bestH = it.H;
+                        best = id;
+                    }
+                    int g0 = it.G;
+                    if (id == NavConst.NodeStart)
+                    {
+                        NavChunkGraph sg = w.Graphs[sSlot * NavConst.MaxClasses + cls];
+                        int2 cb = sc0 * size;
+                        for (int k = sg.NodeStart; k < sg.NodeStart + sg.NodeCount; k++)
+                        {
+                            int2 lc = w.Nodes[k].Cell - cb;
+                            int d = sc.StartDist[lc.y * size + lc.x];
+                            if (d < NavConst.Infinity)
+                            {
+                                Relax(ref w, ref sc, id, k, g0 + d, t);
+                            }
+                        }
+                        continue;
+                    }
+                    EnsureEdges(ref w, ref sc, id);
+                    NavNode node = w.Nodes[id];
+                    for (int e = node.EdgeStart; e < node.EdgeStart + node.EdgeCount; e++)
+                    {
+                        NavEdge edge = w.Edges[e];
+                        Relax(ref w, ref sc, id, edge.To, g0 + edge.Cost, t);
+                    }
+                    int2 myChunk = ChunkOf(node.Cell, size);
+                    for (int k = 0; k < 4; k++)
+                    {
+                        int2 c2 = node.Cell + Dir8(k);
+                        int2 ch2 = ChunkOf(c2, size);
+                        if (ch2.x == myChunk.x && ch2.y == myChunk.y)
+                        {
+                            continue;
+                        }
+                        if (ch2.x < minCx || ch2.x > maxCx || ch2.y < minCy || ch2.y > maxCy)
+                        {
+                            clipped = true;
+                            continue;
+                        }
+                        int slot2 = EnsureChunkGraph(ref w, ch2.x, ch2.y, cls);
+                        if (slot2 < 0)
+                        {
+                            continue;
+                        }
+                        int m = FindNode(ref w, slot2, cls, c2);
+                        if (m < 0)
+                        {
+                            continue;
+                        }
+                        byte ca = NavGridOps.CellAt(ref w.Grid, node.Cell.x, node.Cell.y);
+                        byte cc = NavGridOps.CellAt(ref w.Grid, c2.x, c2.y);
+                        Relax(ref w, ref sc, id, m, g0 + StepCost(ca, cc, false), t);
+                    }
+                    if (goalOk && node.Slot == tSlot)
+                    {
+                        int2 lc = node.Cell - tc0 * size;
+                        int d = sc.GoalDist[lc.y * size + lc.x];
                         if (d < NavConst.Infinity)
                         {
-                            Relax(ref w, ref sc, id, k, g0 + d, t);
+                            RelaxGoal(ref sc, id, g0 + d, t);
                         }
                     }
-                    continue;
                 }
-                EnsureEdges(ref w, ref sc, id);
-                NavNode node = w.Nodes[id];
-                for (int e = node.EdgeStart; e < node.EdgeStart + node.EdgeCount; e++)
+                if (found || limit || !clipped || !canRetry || attempt >= NavConst.MaxMarginRetries)
                 {
-                    NavEdge edge = w.Edges[e];
-                    Relax(ref w, ref sc, id, edge.To, g0 + edge.Cost, t);
+                    break;
                 }
-                int2 myChunk = ChunkOf(node.Cell, size);
-                for (int k = 0; k < 4; k++)
-                {
-                    int2 c2 = node.Cell + Dir8(k);
-                    int2 ch2 = ChunkOf(c2, size);
-                    if (ch2.x == myChunk.x && ch2.y == myChunk.y)
-                    {
-                        continue;
-                    }
-                    if (ch2.x < minCx || ch2.x > maxCx || ch2.y < minCy || ch2.y > maxCy)
-                    {
-                        continue;
-                    }
-                    int slot2 = EnsureChunkGraph(ref w, ch2.x, ch2.y, cls);
-                    if (slot2 < 0)
-                    {
-                        continue;
-                    }
-                    int m = FindNode(ref w, slot2, cls, c2);
-                    if (m < 0)
-                    {
-                        continue;
-                    }
-                    byte ca = NavGridOps.CellAt(ref w.Grid, node.Cell.x, node.Cell.y);
-                    byte cc = NavGridOps.CellAt(ref w.Grid, c2.x, c2.y);
-                    Relax(ref w, ref sc, id, m, g0 + StepCost(ca, cc, false), t);
-                }
-                if (goalOk && node.Slot == tSlot)
-                {
-                    int2 lc = node.Cell - tc0 * size;
-                    int d = sc.GoalDist[lc.y * size + lc.x];
-                    if (d < NavConst.Infinity)
-                    {
-                        RelaxGoal(ref sc, id, g0 + d, t);
-                    }
-                }
+                margin = margin * 2 + 4;
+                minCx = math.min(sc0.x, tc0.x) - margin;
+                maxCx = math.max(sc0.x, tc0.x) + margin;
+                minCy = math.min(sc0.y, tc0.y) - margin;
+                maxCy = math.max(sc0.y, tc0.y) + margin;
             }
             res.Expanded = expanded;
             NavCounters cn = w.Counters[0];

@@ -741,6 +741,7 @@ namespace GameLogic.Campaign.Regions
             }
             PathWatch.Remove(order.WorkOrderId); // 离开 Reserved：赶路看门狗不再需要跟踪这条订单。
             order.State = WorkOrderState.InProgress;
+            order.UnreachableNotified = false; // 到了工作地点：以后再次无法到达要重新通知。
             // 故意不把 Progress 清零：新订单本来就是 0（NewOrder 初始化），但机器受控中断后被重新指派
             // 续工的订单，Progress 是"已经干了多少"的真实进度（ERD-WRK-003"机器受控...保留已搬货物"
             // 同一条纪律延伸到工作进度本身，不是只保货物），这里清零会让续工的人白干一次已完成的部分。
@@ -941,6 +942,11 @@ namespace GameLogic.Campaign.Regions
             WorkOrderRecord order = FindActiveOrderForMachine(state, logicId);
             if (order == null)
             {
+                // 没有工单的直接移动命令（右键地面）：命令已结束，也要告诉玩家为什么没动（<paramref name="at"/> = 目标点）。
+                string text = GameLogic.Localization.GameText.Format("nav.squad.unreachable", logicId.ToString(),
+                    Nav.NavService.FailText(reason, new Grid.GridCell(Mathf.RoundToInt(at.x), Mathf.RoundToInt(at.y))));
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Denied, text);
+                GameLogic.Notifications.NotificationCenter.Post("unreachable", text, new Vector3(at.x, 0f, at.y));
                 return;
             }
             string code = UnreachablePrefix + ((int)reason).ToString(System.Globalization.CultureInfo.InvariantCulture);

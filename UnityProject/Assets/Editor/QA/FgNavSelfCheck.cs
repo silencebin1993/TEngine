@@ -109,6 +109,7 @@ namespace GameLogic.EditorTools
                 Step(CheckCacheIndependence);
                 Step(CheckSharing);
                 Step(CheckIncrementalAndRequeue);
+                Step(CheckDetourAndRecheck);
                 Step(CheckPendingSnapshot);
                 Step(CheckCombatFollow);
                 Step(CheckCombatRouteCutAndSnapshot);
@@ -241,7 +242,7 @@ namespace GameLogic.EditorTools
                 }
             }
             GameSettings.SetLanguage(GameLanguage.ZhCn);
-            Expect(noText.Count == 0 && NotificationCatalog.Find("unreachable") != null,
+            Expect(noText.Count == 0 && NotificationCatalog.TryGetType("unreachable", out _),
                 $"{keys.Length} 个 nav / outpost 文本键中英齐全，通知类型“无法到达”已登记{(noText.Count == 0 ? string.Empty : "；缺：" + string.Join(",", noText))}");
         }
 
@@ -626,6 +627,73 @@ namespace GameLogic.EditorTools
                    && reopened.Status == NavStatus.Ok && clear && k.ChangedCount > 0,
                 $"固定延迟：第 6 步才采纳（第 5 步不采纳）；批次在飞时缺口被堵上 → 采纳校验不过、原请求重新排队（{requeued} 条）→ 下一批按新地形判“被完全阻断”；" +
                 "缺口重新打开 → 区块图增量失效，再请求又能找到路");
+        }
+
+        /// <summary>云端复审修复（2026-09-27）：出框绕路不再误报阻断、直线检测不越过终点、在飞期间地形变化后失败结果重算一次。</summary>
+        private static void CheckDetourAndRecheck()
+        {
+            var pts = new List<int2>();
+            int cs = NavService.ConfigFromTuning().ChunkSize;
+
+            // 1) 一堵长墙只在第 13 排区块开口：起终点区块外接矩形 + 边距的框里没有路，要绕出框。
+            int openRow = 13 * cs;
+            Func<int, int, bool> longWall = (x, y) => x == cs + cs / 2 && y < openRow;
+            using (NavKernel k = Synth(3, 14, longWall))
+            {
+                NavResult r = k.FindNow(Req(10, 16, 3 * cs - 10, 16), pts, false, out _);
+                bool clear = k.RouteClear(new int2(10, 16), pts, 0, NavConst.ClassPlayer);
+                bool around = pts.Any(p => p.y >= openRow);
+                Expect(r.Status == NavStatus.Ok && clear && around,
+                    $"绕路要走出搜索框（长墙只在 y ≥ {openRow} 开口）：放大边距重搜后找到路（{r.Status}，长 {r.Length:F0} 格），不误报“被完全阻断”");
+            }
+
+            // 2) 直线检测到终点就停：正好 45° 或起终点同格时，不检查终点外侧的格子。
+            using (NavKernel k = Synth(1, 1, (x, y) => (x == 11 && y == 10) || (x == 10 && y == 11)))
+            using (NavKernel k2 = Synth(1, 1, (x, y) => (x == 9 && y == 10) || (x == 10 && y == 9)))
+            {
+                bool diag = k.RouteClear(new int2(5, 5), new List<int2> { new int2(10, 10) }, 0, NavConst.ClassPlayer);
+                bool same = k2.RouteClear(new int2(10, 10), new List<int2> { new int2(10, 10) }, 0, NavConst.ClassPlayer);
+                Expect(diag && same, "直线检测：45° 线段终点外侧有障碍、单位正站在路点格上且旁边有障碍，路线都判为畅通（不误判被挡）");
+            }
+
+            // 3) 批次在飞时缺口被打开：旧副本上算出的“无法到达”不交出，重算一次后给出通路。
+            bool gapOpen = false;
+            bool toggle = false;
+            Func<int, int, bool> wall = (x, y) => (x == 32 && (!gapOpen || y < 3 || y > 4)) || (toggle && x == 5 && y == 30);
+            using (NavKernel k = Synth(2, 1, wall))
+            {
+                k.Enqueue(Req(10, 16, 50, 16, key: 1, serial: 1));
+                k.TrySchedule(0);
+                gapOpen = true;
+                PushSynth(k, 2, 1, wall, asChange: true);
+                k.BeginAdoption();
+                bool held = k.ResultCount == 1 && k.Result(0).Status == NavStatus.Failed && !k.ResultValid(0) && k.QueueCount == 1;
+                k.EndAdoption();
+                k.TrySchedule(6);
+                k.BeginAdoption();
+                bool reached = k.ResultCount == 1 && k.Result(0).Status == NavStatus.Ok && k.ResultValid(0);
+                k.EndAdoption();
+
+                // 4) 地形一直在变也不会让单位永远等：同一请求的失败只重算一次，第二次如实交出。
+                gapOpen = false;
+                PushSynth(k, 2, 1, wall, asChange: true);
+                k.Enqueue(Req(10, 16, 50, 16, key: 1, serial: 2));
+                k.TrySchedule(12);
+                toggle = !toggle;
+                PushSynth(k, 2, 1, wall, asChange: true);
+                k.BeginAdoption();
+                bool firstHeld = k.ResultCount == 1 && !k.ResultValid(0);
+                k.EndAdoption();
+                k.TrySchedule(18);
+                toggle = !toggle;
+                PushSynth(k, 2, 1, wall, asChange: true);
+                k.BeginAdoption();
+                NavResult last = k.Result(0);
+                bool delivered = k.ResultCount == 1 && last.Status == NavStatus.Failed && last.Reason == NavFailReason.Unreachable && k.ResultValid(0);
+                k.EndAdoption();
+                Expect(held && reached && firstHeld && delivered,
+                    "批次在飞时屏障被拆：旧地形上的“无法到达”不交出、重算后给出通路；地形持续变化时同一请求只重算一次，第二次如实报“被完全阻断”");
+            }
         }
 
         private static void CheckPendingSnapshot()
@@ -1748,7 +1816,8 @@ namespace GameLogic.EditorTools
                     }
                 }
                 reason = o.LastWakeReason;
-                PatrolRecord p = WorldOutpostSystem.Patrols(s).First(x => x.OutpostId == o.OutpostId);
+                string oid = o.OutpostId; // out 参数不能被 lambda 捕获（CS1628）
+                PatrolRecord p = WorldOutpostSystem.Patrols(s).First(x => x.OutpostId == oid);
                 return SimFields(o) + "#" + SimFields(p);
             }
             string ctl = RunOnce(true, out OutpostRecord oc, out _, out _);

@@ -13,8 +13,8 @@ namespace BinGames.Sim.Nav
     /// </summary>
     public static class NavConst
     {
-        /// <summary>存档快照格式版本（<see cref="NavKernel.SerializePending"/>）。</summary>
-        public const int FormatVersion = 1;
+        /// <summary>存档快照格式版本（<see cref="NavKernel.SerializePending"/>）。2 = 加“在飞期间地形变化”标志；1 仍可读（标志按 false）。</summary>
+        public const int FormatVersion = 2;
 
         /// <summary>快照魔数 “NAV1”。</summary>
         public const uint Magic = 0x3156414E;
@@ -36,6 +36,9 @@ namespace BinGames.Sim.Nav
         /// <summary>直走一格的基础代价（两格代价倍率的平均 × 10）；斜走 × 14。整数运算，结果与平台无关。</summary>
         public const int Ortho = 10;
         public const int Diag = 14;
+
+        /// <summary>抽象搜索框挡掉了邻居却没搜到目标时，放大边距重搜的次数（边距 m → 2m + 4）。</summary>
+        public const int MaxMarginRetries = 2;
 
         public const int NodeStart = -2;
         public const int NodeGoal = -3;
@@ -76,6 +79,8 @@ namespace BinGames.Sim.Nav
         None = 0,
         /// <summary>目标不可达时返回走到最近可达点的部分路线（敌方行军：FG06 攻城在 FG6-DEF-05）。</summary>
         AllowPartial = 1,
+        /// <summary>内核内部：这条请求的“失败”结果因批次在飞期间地形变了而重算过一次；再失败就如实交出（防止地形持续变化时单位永远等结果）。</summary>
+        RetriedAfterChange = 2,
     }
 
     /// <summary>一条寻路请求。<see cref="OwnerTag"/> / <see cref="OwnerKey"/> / <see cref="Serial"/> 由请求方给出，结果原样带回（请求方据此认领、丢弃过期结果）。</summary>

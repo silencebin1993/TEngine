@@ -532,7 +532,7 @@ namespace GameLogic.Campaign.Nav
         public static string FailText(NavFailReason r, GridCell goal)
         {
             string text = GameText.Get(FailKey(r));
-            if (_map != null && !_map.IsExplored(goal))
+            if (_map != null && !_map.IsExploredNoLoad(goal))
             {
                 text += GameText.Get("nav.fail.in_fog");
             }

@@ -153,7 +153,8 @@ namespace BinGames.Sim.Combat
                         if (reason == CombatEndReason.Unreachable)
                         {
                             // FG0-ARCH-06：目标无法到达——不原地发呆，把原因交给热更层（工单转等待并通知）。
-                            Gameplay(ref d, CombatEventKind.WorkBlocked, i, 0, navFail, 0f, d.Pos[i], navFail, (byte)kind);
+                            // 事件位置 = 赶路目标点（没有工单的直接移动命令靠它把通知定位到玩家想去的地方）。
+                            Gameplay(ref d, CombatEventKind.WorkBlocked, i, 0, navFail, 0f, targetPos, navFail, (byte)kind);
                         }
                         else
                         {

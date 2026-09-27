@@ -71,6 +71,8 @@ namespace BinGames.Sim.Nav
         private JobHandle _handle;
         private bool _batchActive;
         private bool _adopting;
+        /// <summary>批次在飞期间有地形变化推进镜像（asChange）：采纳时“失败”结果也要重算一次（在调度时的旧工作副本上算出的，屏障拆除 / 净化打通后可能已经可达）。</summary>
+        private bool _changedInFlight;
         private long _scheduleTick;
         private long _dueTick;
         private readonly HashSet<long> _pendingApply = new HashSet<long>();
@@ -211,6 +213,10 @@ namespace BinGames.Sim.Nav
                 if (asChange)
                 {
                     MarkChanged(key);
+                    if (_batchActive)
+                    {
+                        _changedInFlight = true;
+                    }
                 }
             }
             return changed;
@@ -399,10 +405,23 @@ namespace BinGames.Sim.Nav
                     new NavValidateJob { G = _mirror, Results = _results.AsArray(), Points = _points.AsArray(), Valid = arr }.Run();
                     for (int i = 0; i < n; i++)
                     {
+                        NavResult ri = _results[i];
+                        // 失败结果是在调度时的工作副本上算的：在飞期间地形变了就重算一次（只一次，见 RetriedAfterChange）。
+                        bool staleFailure = _changedInFlight && ri.Status == NavStatus.Failed
+                                            && (ri.Request.Flags & NavRequestFlags.RetriedAfterChange) == 0;
+                        if (staleFailure)
+                        {
+                            arr[i] = 0;
+                        }
                         _valid[i] = arr[i];
                         if (arr[i] == 0)
                         {
-                            _queue.Add(_results[i].Request);
+                            NavRequest again = ri.Request;
+                            if (staleFailure)
+                            {
+                                again.Flags |= NavRequestFlags.RetriedAfterChange;
+                            }
+                            _queue.Add(again);
                             Requeued++;
                         }
                     }
@@ -419,11 +438,12 @@ namespace BinGames.Sim.Nav
 
         public int ResultCount => _adopting ? _results.Length : 0;
 
-        public NavResult Result(int i) => _results[i];
+        // 只在采纳期间可读（批次已完成）；作业在飞时读会触发安全检查异常。
+        public NavResult Result(int i) => _adopting ? _results[i] : default;
 
-        public bool ResultValid(int i) => _valid[i] != 0;
+        public bool ResultValid(int i) => _adopting && _valid[i] != 0;
 
-        public int2 ResultPoint(int i) => _points[i];
+        public int2 ResultPoint(int i) => _adopting ? _points[i] : default;
 
         /// <summary>把本批里属于 <paramref name="ownerTag"/> 的有效结果交给战斗内核（单位还在等这条才采纳）。返回采纳条数。</summary>
         public int DeliverCombat(CombatKernel k, int ownerTag)
@@ -499,6 +519,7 @@ namespace BinGames.Sim.Nav
             _handle = job.Schedule();
             JobHandle.ScheduleBatchedJobs();
             _batchActive = true;
+            _changedInFlight = false;
             _scheduleTick = tick;
             _dueTick = tick + Config.LatencySteps;
             _watch.Stop();
@@ -630,6 +651,7 @@ namespace BinGames.Sim.Nav
             w.Write(_batchActive);
             w.Write(_scheduleTick);
             w.Write(_dueTick);
+            w.Write(_changedInFlight);
             int rn = _batchActive ? _results.Length : 0;
             w.Write(rn);
             for (int i = 0; i < rn; i++)
@@ -692,7 +714,8 @@ namespace BinGames.Sim.Nav
             {
                 return NavLoadResult.BadMagic;
             }
-            if (BitConverter.ToInt32(data, 4) != NavConst.FormatVersion)
+            int version = BitConverter.ToInt32(data, 4);
+            if (version != NavConst.FormatVersion && version != 1)
             {
                 return NavLoadResult.UnknownFormat;
             }
@@ -709,6 +732,7 @@ namespace BinGames.Sim.Nav
             bool active;
             long sched;
             long due;
+            bool changedInFlight = false;
             try
             {
                 using var ms = new MemoryStream(data, 0, bodyLen, false);
@@ -727,6 +751,10 @@ namespace BinGames.Sim.Nav
                 active = r.ReadBoolean();
                 sched = r.ReadInt64();
                 due = r.ReadInt64();
+                if (version >= 2)
+                {
+                    changedInFlight = r.ReadBoolean();
+                }
                 int rn = r.ReadInt32();
                 if (rn < 0 || rn > 1 << 16)
                 {
@@ -799,6 +827,7 @@ namespace BinGames.Sim.Nav
             _batchCount = results.Count;
             _scheduleTick = sched;
             _dueTick = due;
+            _changedInFlight = active && changedInFlight;
             _adopting = false;
             ClearChanged();
             foreach (long k in changed)
@@ -878,6 +907,7 @@ namespace BinGames.Sim.Nav
             }
             Mix(_batchActive ? 1 : 0);
             Mix(_dueTick);
+            Mix(_changedInFlight ? 1 : 0);
             if (_batchActive)
             {
                 for (int i = 0; i < _results.Length; i++)

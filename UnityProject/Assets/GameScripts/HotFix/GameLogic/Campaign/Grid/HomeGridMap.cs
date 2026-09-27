@@ -416,6 +416,25 @@ namespace GameLogic.Campaign.Grid
 
         public bool IsExplored(GridCell cell) => ChunkAt(cell, out int i).Explored[i] != 0;
 
+        /// <summary>与 <see cref="IsExplored"/> 同一判定，但不生成区块（直接按已探索区域算）：模拟步里查询用，不留生成区块的副作用。</summary>
+        public bool IsExploredNoLoad(GridCell cell)
+        {
+            foreach (ExploredAreaRecord a in _explored)
+            {
+                if (a == null || a.Radius < 0)
+                {
+                    continue;
+                }
+                long dx = cell.X - a.CenterX;
+                long dy = cell.Y - a.CenterY;
+                if (dx * dx + dy * dy <= (long)a.Radius * a.Radius)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         private void RefreshExplored(Chunk chunk)
         {
             int baseX = chunk.ChunkX * ChunkSize;
