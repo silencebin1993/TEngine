@@ -3,6 +3,7 @@ using System.Reflection;
 using GameLogic.Campaign.WorldSim;
 using GameLogic.Core;
 using UnityEngine;
+using UnityEngine.UIElements;
 using Object = UnityEngine.Object;
 
 namespace GameLogic.EditorTools.JourneyBots
@@ -67,7 +68,7 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 MouseA = m,
                 MouseB = m,
-                Button = button,
+                MouseButton = button,
                 DownFrame = Time.frameCount + 1,
                 UpFrame = Time.frameCount + 2,
             });
@@ -125,12 +126,12 @@ namespace GameLogic.EditorTools.JourneyBots
             public int SwitchFrame = -1;
             public int DownFrame = -1;
             public int UpFrame = -1;
-            public int Button;
+            public int MouseButton;
 
             public bool GetKey(KeyCode key) => false;
             public bool GetKeyDown(KeyCode key) => key == Key && Time.frameCount == KeyFrame;
-            public bool GetMouseButtonDown(int button) => button == Button && Time.frameCount == DownFrame;
-            public bool GetMouseButtonUp(int button) => button == Button && Time.frameCount == UpFrame;
+            public bool GetMouseButtonDown(int button) => button == MouseButton && Time.frameCount == DownFrame;
+            public bool GetMouseButtonUp(int button) => button == MouseButton && Time.frameCount == UpFrame;
             public Vector3 MousePosition => SwitchFrame >= 0 && Time.frameCount >= SwitchFrame ? MouseB : MouseA;
             public float MouseScrollDelta => 0f;
         }
