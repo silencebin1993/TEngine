@@ -113,7 +113,6 @@ namespace GameLogic.Campaign.Regions
         private readonly List<string> _recentEvents = new List<string>(MaxRecentEvents);
         private readonly Dictionary<int, GameObject> _selectionRings = new Dictionary<int, GameObject>(32);
         private GameObject _destinationMarkerGo;
-        private GameObject _pathBarGo;
 
         private bool _dragging;
         private Vector2 _dragStart;
@@ -722,6 +721,18 @@ namespace GameLogic.Campaign.Regions
                             PushEvent($"机器 #{logicId} 路径持续受阻，已放弃命令并交还 AI。");
                             FeedbackCues.Raise(FeedbackCueId.Denied, FeedbackCues.MachineLabel(logicId) + " 路径持续受阻，已放弃命令");
                             return;
+                        case BinGames.Sim.Combat.CombatEndReason.Unreachable:
+                        {
+                            // FG0-ARCH-06：寻路失败——命令结束并给出明确原因（不原地发呆）；通知可定位到目标点。
+                            var fail = (BinGames.Sim.Nav.NavFailReason)(int)e.Value;
+                            var target = new Vector2((float)e.Pos.x, (float)e.Pos.y); // 内核在“无法到达”时把命令目标点放在事件位置上。
+                            string text = GameLogic.Localization.GameText.Format("nav.squad.unreachable", logicId.ToString(),
+                                GameLogic.Campaign.Nav.NavService.FailText(fail, GameLogic.Campaign.Nav.NavService.CellOf(e.Pos.x, e.Pos.y)));
+                            PushEvent(text);
+                            FeedbackCues.Raise(FeedbackCueId.Denied, text);
+                            GameLogic.Notifications.NotificationCenter.Post("unreachable", text, new Vector3(target.x, 0f, target.y));
+                            return;
+                        }
                         default:
                             return; // 击毁目标的文本随攻击结果一起写过了。
                     }
@@ -832,33 +843,84 @@ namespace GameLogic.Campaign.Regions
                 GameLogic.View.UnityObjects.Release(_destinationMarkerGo.GetComponent<Collider>());
                 _destinationMarkerGo.GetComponent<Renderer>().sharedMaterial = ViewMaterials.Standard(Color.white);
             }
-            if (_pathBarGo == null)
-            {
-                // 不用 LineRenderer（需要额外模块引用）——用一根压扁拉长的 Cube 当路径指示条，
-                // 与本类其余可视化（选中环/目的地标记）同一手法：CreatePrimitive + 缩放，无新依赖。
-                _pathBarGo = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                _pathBarGo.name = "SquadCommandPath";
-                _pathBarGo.transform.SetParent(_ctx.VisualRoot.transform, false);
-                GameLogic.View.UnityObjects.Release(_pathBarGo.GetComponent<Collider>());
-                _pathBarGo.GetComponent<Renderer>().sharedMaterial = ViewMaterials.Standard(Color.white);
-            }
-
             Color kindColor = KindColor(shownKind);
 
             _destinationMarkerGo.SetActive(true);
             _destinationMarkerGo.transform.position = new Vector3(shownTarget.x, 0.04f, shownTarget.y);
             _destinationMarkerGo.GetComponent<Renderer>().sharedMaterial = ViewMaterials.Standard(kindColor);
 
+            // FG0-ARCH-06：寻路地点（家园）沿实际路线画折线（路点来自战斗内核，O(路点数)，只在被观察时、只画选择集里的一台）；
+            // 还在规划路线时只画目标点；Demo 的独立表面仍是一根直线。
+            _routeScratch.Clear();
             Vector3 from = shownMarker.Position3;
-            var to = new Vector3(shownTarget.x, from.y, shownTarget.y);
-            Vector3 mid = (from + to) * 0.5f;
-            mid.y = 0.05f;
-            float length = Vector3.Distance(new Vector3(from.x, 0f, from.z), new Vector3(to.x, 0f, to.z));
-            _pathBarGo.SetActive(true);
-            _pathBarGo.transform.position = mid;
-            _pathBarGo.transform.rotation = Quaternion.LookRotation(to - from, Vector3.up);
-            _pathBarGo.transform.localScale = new Vector3(0.15f, 0.02f, Mathf.Max(0.01f, length));
-            _pathBarGo.GetComponent<Renderer>().sharedMaterial = ViewMaterials.Standard(kindColor);
+            if (_ctx.Site != null && _ctx.Site.NavEnabled)
+            {
+                _ctx.Site.CopyRoute(shownMarker.UnitId, _routeScratch);
+            }
+            else
+            {
+                _routeScratch.Add(new Unity.Mathematics.double2(shownTarget.x, shownTarget.y));
+            }
+            int bars = Mathf.Min(_routeScratch.Count, MaxPathBars);
+            for (int k = 0; k < bars; k++)
+            {
+                GameObject bar = PathBar(k);
+                Unity.Mathematics.double2 q = _routeScratch[k];
+                var to = new Vector3((float)q.x, from.y, (float)q.y);
+                Vector3 mid = (from + to) * 0.5f;
+                mid.y = 0.05f;
+                float length = Vector3.Distance(new Vector3(from.x, 0f, from.z), new Vector3(to.x, 0f, to.z));
+                bar.SetActive(length > 0.01f);
+                if (length > 0.01f)
+                {
+                    bar.transform.position = mid;
+                    bar.transform.rotation = Quaternion.LookRotation(to - from, Vector3.up);
+                    bar.transform.localScale = new Vector3(0.15f, 0.02f, length);
+                    bar.GetComponent<Renderer>().sharedMaterial = ViewMaterials.Standard(kindColor);
+                }
+                from = to;
+            }
+            for (int k = bars; k < _pathBars.Count; k++)
+            {
+                _pathBars[k].SetActive(false);
+            }
+        }
+
+        /// <summary>路线折线最多画几段（超出的只画前面这些，终点标记照常）。</summary>
+        private const int MaxPathBars = 32;
+        private readonly List<GameObject> _pathBars = new List<GameObject>(8);
+        private readonly List<Unity.Mathematics.double2> _routeScratch = new List<Unity.Mathematics.double2>(32);
+
+        /// <summary>路径指示条对象池（不用 LineRenderer：压扁拉长的 Cube，与选中环 / 目的地标记同一手法，无新依赖）。</summary>
+        private GameObject PathBar(int k)
+        {
+            while (_pathBars.Count <= k)
+            {
+                GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                go.name = "SquadCommandPath";
+                go.transform.SetParent(_ctx.VisualRoot.transform, false);
+                GameLogic.View.UnityObjects.Release(go.GetComponent<Collider>());
+                go.GetComponent<Renderer>().sharedMaterial = ViewMaterials.Standard(Color.white);
+                _pathBars.Add(go);
+            }
+            return _pathBars[k];
+        }
+
+        /// <summary>自检用：当前画出的路径段数（激活的指示条）。</summary>
+        public int VisiblePathBarCount
+        {
+            get
+            {
+                int n = 0;
+                foreach (GameObject go in _pathBars)
+                {
+                    if (go != null && go.activeSelf)
+                    {
+                        n++;
+                    }
+                }
+                return n;
+            }
         }
 
         private void ClearDestinationVisual()
@@ -868,11 +930,14 @@ namespace GameLogic.Campaign.Regions
                 GameLogic.View.UnityObjects.Release(_destinationMarkerGo);
                 _destinationMarkerGo = null;
             }
-            if (_pathBarGo != null)
+            foreach (GameObject go in _pathBars)
             {
-                GameLogic.View.UnityObjects.Release(_pathBarGo);
-                _pathBarGo = null;
+                if (go != null)
+                {
+                    GameLogic.View.UnityObjects.Release(go);
+                }
             }
+            _pathBars.Clear();
         }
 
         private static Color KindColor(RegionCommandKind kind)

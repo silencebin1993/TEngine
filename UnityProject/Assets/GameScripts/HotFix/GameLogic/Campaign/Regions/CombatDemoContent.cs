@@ -393,5 +393,11 @@ namespace GameLogic.Campaign.Regions
             HomeValleyCombatTargets.TryAttack(state, attackerLogicId, key, state.RandomSeed, isAiSource: false);
             HomeValleyCombatTargets.SyncDummy(site, state);
         }
+
+        /// <summary>FG0-ARCH-06：工作地点无法到达——工单转为等待（带原因，30 秒后重试），并发一条可定位的“无法到达”通知。</summary>
+        public override void OnWorkBlocked(CombatSite site, int logicId, BinGames.Sim.Nav.NavFailReason reason, Vector2 at)
+        {
+            HomeValleyWorkOrders.OnWorkUnreachable(CampaignSession.Current, logicId, reason, at);
+        }
     }
 }

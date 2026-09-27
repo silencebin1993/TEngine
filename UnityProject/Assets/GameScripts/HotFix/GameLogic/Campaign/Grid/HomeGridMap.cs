@@ -39,6 +39,8 @@ namespace GameLogic.Campaign.Grid
     /// - 迷雾：已探索 = 落在任一已探索圆里（GridState.Explored）。
     /// - 回收（FGR-GEN-052“纯地形区块不需要模拟”）：未修改、没有建筑 / 传送带 / 管线的区块可以被 <see cref="TryEvict"/> 丢弃，
     ///   需要时按种子重新生成，结果相同。
+    /// - 通行（FG0-ARCH-06）：会改变“哪里能走”的变化——地形改写、建筑占用增删、读档差异套用——记下所在区块（<see cref="DrainNavDirty"/>），
+    ///   寻路服务在下一个模拟步开头把这些区块推进寻路内核（增量，与区块总数无关）。纯地形区块寻路内核按种子自己生成，不需要推送。
     /// 每次查询 O(1)（字典取区块 + 数组下标），与建筑数、区块数无关。
     /// </summary>
     public sealed class HomeGridMap
@@ -100,6 +102,32 @@ namespace GameLogic.Campaign.Grid
         private readonly List<ChunkCellDiff> _diffScratch = new List<ChunkCellDiff>(64);
         private ExploredAreaRecord[] _explored = Array.Empty<ExploredAreaRecord>();
         private int _exploredRevision;
+        /// <summary>FG0-ARCH-06：自上次取走后通行可能变化的区块（键 = <see cref="Key"/>）。</summary>
+        private readonly HashSet<long> _navDirty = new HashSet<long>();
+
+        /// <summary>通行可能变化、还没推给寻路内核的区块数。</summary>
+        public int NavDirtyCount => _navDirty.Count;
+
+        /// <summary>取走通行可能变化的区块（按键排序，确定性），并清空记录。</summary>
+        public void DrainNavDirty(List<long> into)
+        {
+            into.Clear();
+            into.AddRange(_navDirty);
+            _navDirty.Clear();
+            into.Sort();
+        }
+
+        /// <summary>只看不取（存档时把还没同步的变化一并记进寻路快照）。</summary>
+        public void PeekNavDirty(List<long> into)
+        {
+            into.Clear();
+            into.AddRange(_navDirty);
+            into.Sort();
+        }
+
+        public void ClearNavDirty() => _navDirty.Clear();
+
+        private void MarkNavDirty(Chunk c) => _navDirty.Add(Key(c.ChunkX, c.ChunkY));
 
         public int ChunkSize { get; }
         public IGridTerrainSource TerrainSource { get; }
@@ -260,6 +288,7 @@ namespace GameLogic.Campaign.Grid
             chunk.BaseTerrain = (byte[])chunk.Terrain.Clone();
             chunk.BasePollution = (byte[])chunk.Pollution.Clone();
             chunk.Modified = true;
+            MarkNavDirty(chunk);
             foreach (ChunkCellDiff d in _diffScratch)
             {
                 if ((d.Mask & ChunkCellDiff.TerrainBit) != 0)
@@ -352,6 +381,7 @@ namespace GameLogic.Campaign.Grid
             }
             Touch(c);
             c.Terrain[i] = terrain;
+            MarkNavDirty(c);
         }
 
         public void SetPollution(GridCell cell, byte level)
@@ -436,6 +466,14 @@ namespace GameLogic.Campaign.Grid
         {
             foreach (Chunk c in _chunks.Values)
             {
+                for (int i = 0; i < c.Occupancy.Length; i++)
+                {
+                    if (c.Occupancy[i] != 0)
+                    {
+                        MarkNavDirty(c);
+                        break;
+                    }
+                }
                 Array.Clear(c.Occupancy, 0, c.Occupancy.Length);
             }
             _occupantIds.Clear();
@@ -453,7 +491,12 @@ namespace GameLogic.Campaign.Grid
             }
             for (int k = 0; k < cells.Count; k++)
             {
-                ChunkAt(cells[k], out int i).Occupancy[i] = idx;
+                Chunk c = ChunkAt(cells[k], out int i);
+                if (c.Occupancy[i] != idx)
+                {
+                    c.Occupancy[i] = idx;
+                    MarkNavDirty(c);
+                }
             }
         }
 
@@ -470,6 +513,7 @@ namespace GameLogic.Campaign.Grid
                 if (c.Occupancy[i] == idx)
                 {
                     c.Occupancy[i] = 0;
+                    MarkNavDirty(c);
                 }
             }
         }

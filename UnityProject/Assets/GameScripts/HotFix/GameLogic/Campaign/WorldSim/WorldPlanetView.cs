@@ -32,6 +32,12 @@ namespace GameLogic.Campaign.WorldSim
         private static readonly HashSet<string> LiveScratch = new HashSet<string>(StringComparer.Ordinal);
         private static Material _raidMaterial;
         private static Material _arrivedMaterial;
+        private static Material _outpostMaterial;
+        private static Material _patrolMaterial;
+        private static bool _placeholderLogged;
+
+        /// <summary>FG0-ARCH-06：当前画出来的据点 / 巡逻标记数（自检：迷雾外不画、休眠的也按“此刻”位置画）。</summary>
+        public static int VisibleOutpostMarkerCount { get; private set; }
 
         public static bool Visible => _root != null && _root.activeSelf;
         public static WorldTerrainOverlay Terrain => _terrain;
@@ -149,6 +155,7 @@ namespace GameLogic.Campaign.WorldSim
                 }
                 RendererScratch.Clear();
             }
+            TickOutpostMarkers(state, focus, radius);
             GoneScratch.Clear();
             foreach (KeyValuePair<string, GameObject> kv in Markers)
             {
@@ -162,6 +169,84 @@ namespace GameLogic.Campaign.WorldSim
                 UnityObjects.Release(Markers[id]);
                 Markers.Remove(id);
             }
+        }
+
+        /// <summary>
+        /// FG0-ARCH-06：敌方据点与巡逻的标记——只画已探索区域里的（迷雾不泄露情报），只画镜头附近的；休眠的据点 / 巡逻用只读补算的“此刻”位置
+        /// （<see cref="WorldOutpostSystem.PeekPatrolPosition"/>，不唤醒、不改状态：观察不改变结果）。美术是占位（B22）。
+        /// </summary>
+        private static void TickOutpostMarkers(CampaignState state, GridCell focus, float radius)
+        {
+            VisibleOutpostMarkerCount = 0;
+            HomeGridMap map = HomeGridService.BoundMap(state);
+            if (map == null)
+            {
+                return;
+            }
+            foreach (OutpostRecord o in WorldOutpostSystem.Outposts(state))
+            {
+                if (o == null)
+                {
+                    continue;
+                }
+                PlaceOutpostMarker(o.OutpostId, o.CellX, o.CellY, focus, radius, map, isPatrol: false);
+            }
+            foreach (PatrolRecord p in WorldOutpostSystem.Patrols(state))
+            {
+                if (p == null)
+                {
+                    continue;
+                }
+                Vector2 at = WorldOutpostSystem.PeekPatrolPosition(state, p);
+                PlaceOutpostMarker(p.PatrolId, at.x, at.y, focus, radius, map, isPatrol: true);
+            }
+        }
+
+        private static void PlaceOutpostMarker(string id, float x, float y, GridCell focus, float radius, HomeGridMap map, bool isPatrol)
+        {
+            LiveScratch.Add(id);
+            Markers.TryGetValue(id, out GameObject go);
+            bool near = Math.Abs(x - focus.X) <= radius && Math.Abs(y - focus.Y) <= radius;
+            bool explored = near && map.IsExplored(new GridCell(Mathf.RoundToInt(x), Mathf.RoundToInt(y)));
+            if (!explored)
+            {
+                if (go != null && go.activeSelf)
+                {
+                    go.SetActive(false);
+                }
+                return;
+            }
+            if (go == null)
+            {
+                go = CreateOutpostMarker(id, isPatrol);
+                Markers[id] = go;
+                if (!_placeholderLogged)
+                {
+                    _placeholderLogged = true;
+                    TEngine.Log.Info("[WorldPlanetView] " + GameLogic.Localization.GameText.Get("outpost.placeholder"));
+                }
+            }
+            if (!go.activeSelf)
+            {
+                go.SetActive(true);
+            }
+            go.transform.position = new Vector3(x, 0f, y);
+            VisibleOutpostMarkerCount++;
+        }
+
+        private static GameObject CreateOutpostMarker(string id, bool isPatrol)
+        {
+            var go = new GameObject((isPatrol ? "PatrolMarker_" : "OutpostMarker_") + id);
+            go.transform.SetParent(_root.transform, false);
+            GameObject body = GameObject.CreatePrimitive(isPatrol ? PrimitiveType.Sphere : PrimitiveType.Cube);
+            UnityObjects.Release(body.GetComponent<Collider>());
+            body.name = isPatrol ? "Disc" : "Tower";
+            body.transform.SetParent(go.transform, false);
+            // 形状区分（不只靠颜色，B15）：据点 = 高方柱，巡逻 = 扁球。
+            body.transform.localPosition = isPatrol ? new Vector3(0f, 0.6f, 0f) : new Vector3(0f, 2.5f, 0f);
+            body.transform.localScale = isPatrol ? new Vector3(2.2f, 0.8f, 2.2f) : new Vector3(2.5f, 5f, 2.5f);
+            body.GetComponent<Renderer>().sharedMaterial = isPatrol ? _patrolMaterial : _outpostMaterial;
+            return go;
         }
 
         private static GameObject CreateMarker(string groupId)
@@ -203,6 +288,8 @@ namespace GameLogic.Campaign.WorldSim
             Shader shader = Shader.Find("Standard");
             _raidMaterial = new Material(shader) { color = new Color(0.85f, 0.18f, 0.12f) };
             _arrivedMaterial = new Material(shader) { color = new Color(1f, 0.55f, 0.1f) };
+            _outpostMaterial = new Material(shader) { color = new Color(0.45f, 0.12f, 0.35f) };
+            _patrolMaterial = new Material(shader) { color = new Color(0.72f, 0.22f, 0.55f) };
         }
 
         /// <summary>离开世界：销毁全部表现对象与材质、释放贴图任务（成对释放）。</summary>
@@ -227,6 +314,17 @@ namespace GameLogic.Campaign.WorldSim
                 UnityObjects.Release(_arrivedMaterial);
                 _arrivedMaterial = null;
             }
+            if (_outpostMaterial != null)
+            {
+                UnityObjects.Release(_outpostMaterial);
+                _outpostMaterial = null;
+            }
+            if (_patrolMaterial != null)
+            {
+                UnityObjects.Release(_patrolMaterial);
+                _patrolMaterial = null;
+            }
+            VisibleOutpostMarkerCount = 0;
         }
     }
 }

@@ -300,7 +300,7 @@ namespace GameLogic.Campaign.Regions
             // 全部在家园战斗内核的一步里（Burst）；到达回调、对机器 / 训练靶的伤害结算作为事件交回，每步有上限。
             _combat?.Step(dt, GameClock.GameSeconds);
             HomeValleyWorkOrders.Tick(state, dt, GetMachinePosition, ReleaseMachineMovement,
-                IsMachineDirectControlled, BeginAutoAssignedMovement);
+                IsMachineDirectControlled, BeginAutoAssignedMovement, GetRemainingRoute, ResumeHaulDelivery);
             HomeValleyFactory.Tick(state, dt); // ER4-FAC-01：装配站生产队列。
             PrimitiveCraftStation.Tick(state, dt); // ER4-PRIM-04：合成台升级/拆解队列。
             HomeValleyAnalysis.Tick(state, dt); // ER6-ANA-01：解析台队列。
@@ -386,6 +386,30 @@ namespace GameLogic.Campaign.Regions
             // FG0-ARCH-03：句柄按 LogicId 在战斗地点的字典里（O(1)），不逐台扫描。
             HomeValleyMachineMarker marker = FindMarker(logicId);
             return marker != null ? marker.Position : (Vector2?)null;
+        }
+
+        /// <summary>FG0-ARCH-06：机器沿寻路路线剩余的长度（赶路看门狗按它判断推进；不在沿路线走返回 null，退回直线距离）。</summary>
+        private float? GetRemainingRoute(int logicId)
+        {
+            HomeValleyMachineMarker marker = FindMarker(logicId);
+            if (marker == null || _combat == null)
+            {
+                return null;
+            }
+            double remaining = _combat.RemainingRoute(marker.UnitId);
+            return remaining >= 0 ? (float)remaining : (float?)null;
+        }
+
+        /// <summary>FG0-ARCH-06：搬运送货那一腿（核心）无法到达、等待 30 秒后，重新下达送货赶路。</summary>
+        private void ResumeHaulDelivery(WorkOrderRecord order)
+        {
+            HomeValleyMachineMarker marker = order != null ? FindMarker(order.AssignedMachineLogicId) : null;
+            if (marker == null)
+            {
+                return;
+            }
+            Vector3 corePos = new Vector3(HomeValleyLayout.Core.Position.x, 1f, HomeValleyLayout.Core.Position.y);
+            marker.CommandMoveTo(corePos, HaulDestinationArrival(order.WorkOrderId));
         }
 
         /// <summary>PathBlocked 触发时的释放回调：让对应 marker 停止赶路，不留一个订单已经

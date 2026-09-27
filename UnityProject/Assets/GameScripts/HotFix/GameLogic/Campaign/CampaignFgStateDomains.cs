@@ -196,7 +196,8 @@ namespace GameLogic.Campaign
     }
 
     /// <summary>突袭（FG06）。FG0-ARCH-01 起保存"行进中的队伍"（星球表面上的突袭部队，由 <see cref="WorldSim.WorldTransitSystem"/> 唯一写入）；
-    /// 突袭导演、编成、攻城与结算由 FG6-DEF-04～08 在本域追加字段。</summary>
+    /// FG0-ARCH-06 起保存敌方据点与巡逻（突袭的出发地；休眠与唤醒，由 <see cref="WorldSim.WorldOutpostSystem"/> 唯一写入）。
+    /// 突袭导演、编成、攻城与结算由 FG6-DEF-04～08 在本域追加字段；据点的正式生成由 FG3-GEN-01 / FG8-GEN-02，增援规则由 FG8-EXP-03 接手。</summary>
     [Serializable]
     public sealed class RaidState
     {
@@ -205,6 +206,90 @@ namespace GameLogic.Campaign
         public TransitGroupRecord[] InTransit = Array.Empty<TransitGroupRecord>();
         /// <summary>FG0-ARCH-01：下一个队伍序号（GroupId = "transit-" + 序号，确定性，不用 GUID）。</summary>
         public int NextGroupSerial = 1;
+        /// <summary>FG0-ARCH-06：队伍寻路请求的序号计数（队伍只认领序号一致的结果）。</summary>
+        public int NextNavSerial = 1;
+        /// <summary>FG0-ARCH-06：敌方据点（FGR-GEN-034；休眠与唤醒 FGR-GEN-052 第 3 条 / FGR-ARC-016）。</summary>
+        public OutpostRecord[] Outposts = Array.Empty<OutpostRecord>();
+        /// <summary>FG0-ARCH-06：据点派出的巡逻（与所属据点一起休眠 / 唤醒）。</summary>
+        public PatrolRecord[] Patrols = Array.Empty<PatrolRecord>();
+        public int NextOutpostSerial = 1;
+        public int NextPatrolSerial = 1;
+        /// <summary>FG0-ARCH-06：排队等唤醒的据点（每步至多 outpost.wakes_per_step 个，分帧进行；存档保留顺序）。</summary>
+        public string[] PendingWakeIds = Array.Empty<string>();
+        public string[] PendingWakeReasons = Array.Empty<string>();
+    }
+
+    /// <summary>
+    /// FG0-ARCH-06：一个敌方据点（聚合体：驻军人数 + 增援计时）。
+    /// 离所有己方实体都很远时<b>休眠</b>（不参与每步模拟）；被惊动时按确定性规则补算休眠期间应有的变化（增援），
+    /// 结果与“一直在模拟”逐字段一致（FGT-GEN-010）。<see cref="SimTick"/> = 下一个要模拟的步：比它小的步都已经算过。
+    /// </summary>
+    [Serializable]
+    public sealed class OutpostRecord
+    {
+        public string OutpostId;
+        /// <summary>所属领地（fg.TbTerritory 的领地 ID；显示“来自哪里”）。</summary>
+        public string TerritoryId;
+        public int CellX;
+        public int CellY;
+        public int Garrison;
+        public int GarrisonCap;
+        /// <summary>增援间隔（模拟步）与下一次增援的步。增援点落在固定网格上（出生步 + k × 间隔），满员时这一次作废。</summary>
+        public long ReinforceIntervalTicks;
+        public long NextReinforceTick;
+        public long ReinforcementsApplied;
+        public long SimTick;
+        public bool Dormant;
+        public long DormantSinceTick = -1;
+        public int WakeCount;
+        public long LastWakeTick = -1;
+        /// <summary>最近一次被惊动的原因（文本键 outpost.wake.*）。</summary>
+        public string LastWakeReason = string.Empty;
+        /// <summary>始终完整模拟、不休眠（“一直在模拟”的对照组；也留给以后不能休眠的特殊据点）。</summary>
+        public bool AlwaysSimulate;
+    }
+
+    /// <summary>
+    /// FG0-ARCH-06：据点派出的一支巡逻（聚合体）。沿寻路路线在据点与折返点之间来回走；进度按定点数（千分之一格）记，
+    /// 每步前进 <see cref="SpeedMilliPerTick"/>，休眠补算 = 一次乘法，与逐步累加逐位相同。
+    /// </summary>
+    [Serializable]
+    public sealed class PatrolRecord
+    {
+        public string PatrolId;
+        public int Serial;
+        public string OutpostId;
+        public int UnitCount;
+        public int TurnX;
+        public int TurnY;
+        /// <summary>去程路线（格坐标，首项 = 据点格）；回程按原路返回。</summary>
+        public int[] RouteX = Array.Empty<int>();
+        public int[] RouteY = Array.Empty<int>();
+        /// <summary>一个来回的长度（千分之一格）。</summary>
+        public long LoopMilli;
+        public long ProgressMilli;
+        public int SpeedMilliPerTick;
+        /// <summary>0 = 需要路线，1 = 等寻路结果，2 = 路线就绪，3 = 寻路失败（原地驻守）。</summary>
+        public int RouteState;
+        public int NavSerial;
+        public int NavReason;
+        /// <summary>路线交到的那一步（从这一步起按路线前进）。</summary>
+        public long RouteReadyTick = -1;
+        public double PosX;
+        public double PosY;
+    }
+
+    /// <summary>
+    /// FG0-ARCH-06：星球表面寻路内核的待处理状态——排队的请求、已算好还没到采纳步的结果、存档那一刻还没同步的格网变化。
+    /// 唯一写入口是 <c>GameLogic.Campaign.Nav.NavService.WriteTo</c>；格网本身不在这里（读档时按种子 + 区块差异 + 建筑重建）。
+    /// </summary>
+    [Serializable]
+    public sealed class NavState
+    {
+        public int DomainVersion = 1;
+        public string SurfaceId = string.Empty;
+        /// <summary>base64 二进制快照（BinGames.Sim.Nav.NavKernel.SerializePending；魔数、格式版本、校验和）。空 = 没有待处理的寻路。</summary>
+        public string Payload = string.Empty;
     }
 
     /// <summary>队伍种类。</summary>
@@ -240,6 +325,19 @@ namespace GameLogic.Campaign
         public long DispatchedAtTick;
         /// <summary>到达时的模拟步（未到达为 -1）。</summary>
         public long ArrivedAtTick = -1;
+        /// <summary>FG0-ARCH-06：寻路请求的键（= 队伍序号）。</summary>
+        public int NavKey;
+        /// <summary>FG0-ARCH-06：0 = 需要路线，1 = 等寻路结果，2 = 沿路线走，3 = 寻路失败。</summary>
+        public int RouteState;
+        public int NavSerial;
+        /// <summary>寻路失败 / 部分路线的原因（BinGames.Sim.Nav.NavFailReason 数值）；0 = 无。</summary>
+        public int NavReason;
+        /// <summary>沿地形的路线（格坐标路点，不含出发格）与下一个要走向的路点下标。</summary>
+        public int[] RouteX = Array.Empty<int>();
+        public int[] RouteY = Array.Empty<int>();
+        public int RouteIndex;
+        /// <summary>到达时通往核心的路是完全堵住的（停在最近处；攻城在 FG6-DEF-05）。</summary>
+        public bool Blocked;
     }
 
     /// <summary>事件导演（FG10）。</summary>
@@ -389,6 +487,7 @@ namespace GameLogic.Campaign
             new DomainInfo(nameof(CampaignState.Stats), "FG15 / FG16 统计", s => s.Stats),
             new DomainInfo(nameof(CampaignState.SaveHistory), "FG0-SAVE-01", s => s.SaveHistory),
             new DomainInfo(nameof(CampaignState.Notifications), "FG0-UX-01（通知中心历史）", s => s.Notifications),
+            new DomainInfo(nameof(CampaignState.Nav), "FG0-ARCH-06（层级寻路：排队请求与待采纳结果）", s => s.Nav),
         };
 
         /// <summary>把缺失（null）的域补成空域。读档后与存档前都会调用；已有数据的域原样保留。</summary>
@@ -432,6 +531,48 @@ namespace GameLogic.Campaign
             {
                 s.Raids.NextGroupSerial = 1;
             }
+            foreach (TransitGroupRecord g in s.Raids.InTransit)
+            {
+                if (g != null)
+                {
+                    g.RouteX ??= Array.Empty<int>();
+                    g.RouteY ??= Array.Empty<int>();
+                }
+            }
+            s.Raids.Outposts ??= Array.Empty<OutpostRecord>();
+            s.Raids.Patrols ??= Array.Empty<PatrolRecord>();
+            foreach (OutpostRecord o in s.Raids.Outposts)
+            {
+                if (o != null)
+                {
+                    o.LastWakeReason ??= string.Empty;
+                }
+            }
+            foreach (PatrolRecord p in s.Raids.Patrols)
+            {
+                if (p != null)
+                {
+                    p.RouteX ??= Array.Empty<int>();
+                    p.RouteY ??= Array.Empty<int>();
+                }
+            }
+            s.Raids.PendingWakeIds ??= Array.Empty<string>();
+            s.Raids.PendingWakeReasons ??= Array.Empty<string>();
+            if (s.Raids.NextNavSerial < 1)
+            {
+                s.Raids.NextNavSerial = 1;
+            }
+            if (s.Raids.NextOutpostSerial < 1)
+            {
+                s.Raids.NextOutpostSerial = 1;
+            }
+            if (s.Raids.NextPatrolSerial < 1)
+            {
+                s.Raids.NextPatrolSerial = 1;
+            }
+            s.Nav ??= new NavState();
+            s.Nav.SurfaceId ??= string.Empty;
+            s.Nav.Payload ??= string.Empty;
             s.DirectorEvents ??= new DirectorEventState();
             s.Quests ??= new QuestState();
             s.StandingRules ??= new StandingRuleState();

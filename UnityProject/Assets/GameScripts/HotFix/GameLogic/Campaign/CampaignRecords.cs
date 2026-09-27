@@ -416,6 +416,8 @@ namespace GameLogic.Campaign
         public float Progress;
         /// <summary>Progress 达到该值即完工/该等待窗口到期。语义同样按 <see cref="State"/> 区分。</summary>
         public float Duration;
+        /// <summary>FG0-ARCH-06：这张工单已经发过一次“无法到达”通知（之后 30 秒一次的重试不再刷屏；随存档保留，读档后也不重复发）。</summary>
+        public bool UnreachableNotified;
     }
 
     /// <summary>ERD-FAC-001 工厂队列项。</summary>

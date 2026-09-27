@@ -3,6 +3,7 @@ using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
+using BinGames.Sim.Nav;
 
 namespace BinGames.Sim.Combat
 {
@@ -47,6 +48,7 @@ namespace BinGames.Sim.Combat
             d.Scalars[0] = s;
 
             MaybeCompact(ref d);
+            MaybeCompactRoutes(ref d);
 
             int n = d.Count;
             for (int i = 0; i < n; i++)
@@ -121,10 +123,12 @@ namespace BinGames.Sim.Combat
                 if (math.lengthsq(dir) > 0.0001f)
                 {
                     double2 step = (double2)(math.normalize(dir) * (d.Speed[i] * dt));
-                    double2 p = d.Pos[i] + step;
+                    double2 p0 = d.Pos[i];
+                    double2 p = p0 + step;
                     CombatScalars s = d.Scalars[0];
                     p.y = math.clamp(p.y, s.DirectMinY, s.DirectMaxY);
-                    d.Pos[i] = p;
+                    // FG0-ARCH-06：星球格网上直控也不能穿过悬崖、水和建筑（贴着边滑动）。
+                    d.Pos[i] = MoveCollide(ref d, i, p0, p);
                 }
                 return;
             }
@@ -138,21 +142,41 @@ namespace BinGames.Sim.Combat
                 {
                     int target = cmd.Target;
                     CombatCommandKind kind = cmd.Kind;
+                    double2 targetPos = cmd.Pos;
                     cmd = default;
                     d.Cmd[i] = cmd;
+                    byte navFail = d.NavFail[i];
+                    DropRoute(ref d, i);
+                    d.NavSt[i] = (byte)CombatNavState.None;
                     if (kind == CombatCommandKind.WorkMove)
                     {
-                        Gameplay(ref d, CombatEventKind.WorkArrived, i, 0, 0f, 0f, d.Pos[i], 0, 0);
+                        if (reason == CombatEndReason.Unreachable)
+                        {
+                            // FG0-ARCH-06：目标无法到达——不原地发呆，把原因交给热更层（工单转等待并通知）。
+                            Gameplay(ref d, CombatEventKind.WorkBlocked, i, 0, navFail, 0f, d.Pos[i], navFail, (byte)kind);
+                        }
+                        else
+                        {
+                            Gameplay(ref d, CombatEventKind.WorkArrived, i, 0, 0f, 0f, d.Pos[i], 0, 0);
+                        }
                     }
                     else
                     {
-                        Gameplay(ref d, CombatEventKind.CommandEnded, i, target, 0f, 0f, d.Pos[i], (byte)reason, (byte)kind);
+                        // 无法到达时事件位置 = 命令目标点（通知定位到玩家想去的地方）；其余 = 执行者位置（与 Demo 一致）。
+                        Gameplay(ref d, CombatEventKind.CommandEnded, i, target, navFail, 0f,
+                            reason == CombatEndReason.Unreachable ? targetPos : d.Pos[i], (byte)reason, (byte)kind);
                     }
                 }
                 else
                 {
                     d.Cmd[i] = cmd;
                 }
+            }
+
+            CombatCommandKind ck = d.Cmd[i].Kind;
+            if (ck == CombatCommandKind.Move || ck == CombatCommandKind.Retreat || ck == CombatCommandKind.Guard || ck == CombatCommandKind.Attack)
+            {
+                Separate(ref d, ref grid, i, d.Speed[i], dt);
             }
 
             CombatBehavior b = (CombatBehavior)d.Behavior[i];
@@ -171,6 +195,11 @@ namespace BinGames.Sim.Combat
         {
             reason = CombatEndReason.None;
             double2 pos = d.Pos[i];
+
+            if (d.Config.NavEnabled != 0 && cmd.Kind != CombatCommandKind.Attack)
+            {
+                return TickNavMove(ref d, i, ref cmd, dt, out reason);
+            }
 
             if (cmd.Kind == CombatCommandKind.WorkMove)
             {
@@ -283,7 +312,7 @@ namespace BinGames.Sim.Combat
             {
                 step = toTarget;
             }
-            d.Pos[i] = pos + step;
+            d.Pos[i] = MoveCollide(ref d, i, pos, pos + step);
             return blocked;
         }
 
@@ -648,13 +677,29 @@ namespace BinGames.Sim.Combat
             d.Cycle[i] = c;
             if (t < 0)
             {
-                MoveToward(ref d, i, pos, d.Home[i], p.Speed * dt, 0.5);
+                if (d.Config.NavEnabled != 0)
+                {
+                    // FG0-ARCH-06：没有目标时沿寻路路线朝目标点前进（允许部分路线：堵死时走到最近处，攻城在 FG6-DEF-05）。
+                    RaiderRouteMove(ref d, i, p.Speed, dt);
+                }
+                else
+                {
+                    MoveToward(ref d, i, pos, d.Home[i], p.Speed * dt, 0.5);
+                }
+                Separate(ref d, ref grid, i, p.Speed, dt);
                 return;
+            }
+            if (d.Config.NavEnabled != 0 && (d.NavSt[i] == (byte)CombatNavState.Following || d.NavSt[i] == (byte)CombatNavState.Awaiting))
+            {
+                // 追击目标会离开路线：目标丢失后从当前位置重新要路线（在等的结果按序号作废）。
+                DropRoute(ref d, i);
+                d.NavSt[i] = (byte)CombatNavState.NeedRoute;
             }
             double dist = math.distance(pos, d.Pos[t]);
             if (dist > wp.Range)
             {
                 MoveToward(ref d, i, pos, d.Pos[t], p.Speed * dt, wp.Range * 0.9);
+                Separate(ref d, ref grid, i, p.Speed, dt);
                 return;
             }
             if (c > 0f)
@@ -673,7 +718,7 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
-            d.Pos[i] = pos + to / len * math.min(stepLen, len - stopAt);
+            d.Pos[i] = MoveCollide(ref d, i, pos, pos + to / len * math.min(stepLen, len - stopAt));
         }
 
         /// <summary>单位主动攻击（驻守开火 / 瞄准线 / 突袭者 / 炮塔）：弹体武器生成弹体，其余即时命中。</summary>
@@ -1298,6 +1343,403 @@ namespace BinGames.Sim.Combat
                     }
                 }
             }
+        }
+
+        // ─────────────────────────────── 寻路（FG0-ARCH-06）───────────────────────────────
+
+        /// <summary>世界坐标 → 格子（格心在整数处，四舍五入到最近格心）。与寻路内核、热更层的换算一致。</summary>
+        public static int2 CellOf(double2 p) => new int2((int)math.floor(p.x + 0.5), (int)math.floor(p.y + 0.5));
+
+        public static byte ClassOf(ref CombatData d, int i) => d.Faction[i] == (byte)CombatFaction.Player ? NavConst.ClassPlayer : NavConst.ClassHostile;
+
+        private static bool Walkable(ref CombatData d, int2 cell, int cls) => NavGridOps.Passable(ref d.Nav, cell, cls);
+
+        /// <summary>
+        /// 一步移动的格网碰撞（只在 <see cref="CombatConfig.NavEnabled"/> 的地点）：目标格走不了时先试只沿 x、再试只沿 y（贴边滑动），都不行就不动；
+        /// 斜着跨格时两侧都被挡也算撞上（不从两个障碍之间的缝里挤过去）。单位本身站在不可走的格子里（被新建筑压住）时放行，让它走出来。
+        /// </summary>
+        public static double2 MoveCollide(ref CombatData d, int i, double2 from, double2 to)
+        {
+            if (d.Config.NavEnabled == 0)
+            {
+                return to;
+            }
+            int cls = ClassOf(ref d, i);
+            int2 cf = CellOf(from);
+            int2 ct = CellOf(to);
+            if (ct.x == cf.x && ct.y == cf.y)
+            {
+                return to;
+            }
+            if (!Walkable(ref d, cf, cls))
+            {
+                return to;
+            }
+            bool diag = ct.x != cf.x && ct.y != cf.y;
+            if (Walkable(ref d, ct, cls) && (!diag || (Walkable(ref d, new int2(ct.x, cf.y), cls) && Walkable(ref d, new int2(cf.x, ct.y), cls))))
+            {
+                return to;
+            }
+            var ax = new double2(to.x, from.y);
+            if (Walkable(ref d, CellOf(ax), cls))
+            {
+                return ax;
+            }
+            var ay = new double2(from.x, to.y);
+            if (Walkable(ref d, CellOf(ay), cls))
+            {
+                return ay;
+            }
+            return from;
+        }
+
+        private static void DropRoute(ref CombatData d, int i)
+        {
+            CombatScalars s = d.Scalars[0];
+            s.RouteGarbage += d.RouteLen[i];
+            d.Scalars[0] = s;
+            d.RouteLen[i] = 0;
+            d.RouteIdx[i] = 0;
+        }
+
+        /// <summary>发出一条寻路请求（序号递增；单位转为“等路线”，原地等待固定延迟后的结果）。</summary>
+        private static void EmitNavRequest(ref CombatData d, int i, int2 goal, byte flags)
+        {
+            CombatScalars s = d.Scalars[0];
+            s.NextNavSerial++;
+            d.Scalars[0] = s;
+            DropRoute(ref d, i);
+            d.NavSerial[i] = s.NextNavSerial;
+            d.NavSt[i] = (byte)CombatNavState.Awaiting;
+            d.NavFail[i] = 0;
+            d.NavOut.Add(new CombatNavRequest
+            {
+                UnitId = d.Id[i],
+                Serial = s.NextNavSerial,
+                Start = CellOf(d.Pos[i]),
+                Goal = goal,
+                Class = ClassOf(ref d, i),
+                Flags = flags,
+            });
+        }
+
+        /// <summary>当前要走向的点：路线的下一个路点；最后一段走向精确终点。</summary>
+        private static double2 RouteTarget(ref CombatData d, int i, int idx)
+        {
+            int len = d.RouteLen[i];
+            if (idx >= len - 1)
+            {
+                return d.RouteEnd[i];
+            }
+            int2 c = d.RoutePts[d.RouteOff[i] + idx];
+            return new double2(c.x, c.y);
+        }
+
+        /// <summary>沿路线走 speed × dt（一步里可以连续越过几个路点），终点处停住；最后按格网碰撞落位。</summary>
+        private static void FollowRoute(ref CombatData d, int i, float speed, float dt)
+        {
+            double remaining = speed * dt;
+            double2 p0 = d.Pos[i];
+            double2 p = p0;
+            int idx = d.RouteIdx[i];
+            int len = d.RouteLen[i];
+            for (int guard = 0; guard < 8 && remaining > 1e-12; guard++)
+            {
+                double2 target = RouteTarget(ref d, i, idx);
+                double2 to = target - p;
+                double dist = math.length(to);
+                if (dist <= remaining)
+                {
+                    p = target;
+                    remaining -= dist;
+                    if (idx < len)
+                    {
+                        idx++;
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+                else
+                {
+                    p += to / dist * remaining;
+                    remaining = 0;
+                }
+            }
+            d.RouteIdx[i] = idx;
+            d.Pos[i] = MoveCollide(ref d, i, p0, p);
+        }
+
+        /// <summary>沿路线剩余的长度（受阻判定、热更层赶路看门狗用）。</summary>
+        public static double RemainingRouteLength(ref CombatData d, int i)
+        {
+            double2 p = d.Pos[i];
+            int len = d.RouteLen[i];
+            int idx = d.RouteIdx[i];
+            double sum = 0;
+            for (int k = idx; ; k++)
+            {
+                double2 t = RouteTarget(ref d, i, k);
+                sum += math.distance(p, t);
+                p = t;
+                if (k >= len - 1)
+                {
+                    break;
+                }
+            }
+            return sum;
+        }
+
+        /// <summary>
+        /// 寻路地点的移动命令（移动 / 守备 / 撤退 / 工作赶路）：需要路线时发请求并原地等；拿到路线沿路点走；失败以“无法到达”结束。
+        /// 到达判定与 Demo 一致（进入到达半径；工作赶路对齐到目标点），但只在最后一段（直线可见终点）上判，不会隔着墙“到达”。
+        /// </summary>
+        private static bool TickNavMove(ref CombatData d, int i, ref CombatCommand cmd, float dt, out CombatEndReason reason)
+        {
+            reason = CombatEndReason.None;
+            double2 pos = d.Pos[i];
+            double arrive2 = (double)cmd.Arrive * cmd.Arrive;
+            var st = (CombatNavState)d.NavSt[i];
+            if (st == CombatNavState.None || st == CombatNavState.NeedRoute)
+            {
+                if (math.distancesq(pos, cmd.Pos) <= arrive2 && NavSearch.LineClear(ref d.Nav, CellOf(pos), CellOf(cmd.Pos), ClassOf(ref d, i)))
+                {
+                    if (cmd.Kind == CombatCommandKind.Guard)
+                    {
+                        return false;
+                    }
+                    if (cmd.Kind == CombatCommandKind.WorkMove)
+                    {
+                        d.Pos[i] = cmd.Pos;
+                    }
+                    reason = CombatEndReason.Arrived;
+                    return true;
+                }
+                EmitNavRequest(ref d, i, CellOf(cmd.Pos), 0);
+                return false;
+            }
+            if (st == CombatNavState.Awaiting)
+            {
+                return false;
+            }
+            if (st == CombatNavState.Failed)
+            {
+                reason = CombatEndReason.Unreachable;
+                return true;
+            }
+            int len = d.RouteLen[i];
+            int idx = d.RouteIdx[i];
+            double2 end = d.RouteEnd[i];
+            if (idx >= len - 1 && math.distancesq(pos, end) <= arrive2)
+            {
+                if (cmd.Kind == CombatCommandKind.Guard)
+                {
+                    return false; // 持久命令：到位后一直守到取消。
+                }
+                if (cmd.Kind == CombatCommandKind.WorkMove)
+                {
+                    d.Pos[i] = end;
+                }
+                reason = CombatEndReason.Arrived;
+                return true;
+            }
+            FollowRoute(ref d, i, d.Speed[i], dt);
+            if (cmd.Kind == CombatCommandKind.WorkMove)
+            {
+                return false; // 工作赶路的停滞看门狗在热更层（按剩余路线长度）。
+            }
+            // 路径受阻判定（Demo TrackProgressAndMaybeGiveUp）：按剩余路线长度每隔 ProgressInterval 秒核对一次。
+            cmd.ProgTimer -= dt;
+            if (cmd.ProgTimer > 0f)
+            {
+                return false;
+            }
+            cmd.ProgTimer = d.Config.ProgressInterval;
+            float distNow = (float)RemainingRouteLength(ref d, i);
+            bool progressed = cmd.HasLast == 0 || (cmd.LastDist - distNow) >= d.Config.MinProgress || distNow <= cmd.Arrive;
+            cmd.LastDist = distNow;
+            cmd.HasLast = 1;
+            if (progressed)
+            {
+                cmd.Stuck = 0;
+                return false;
+            }
+            cmd.Stuck++;
+            if (cmd.Stuck < d.Config.MaxStuckStrikes)
+            {
+                Gameplay(ref d, CombatEventKind.CommandStuckStrike, i, 0, cmd.Stuck, d.Config.MaxStuckStrikes, pos, 0, (byte)cmd.Kind);
+                return false;
+            }
+            reason = CombatEndReason.Stuck;
+            return true;
+        }
+
+        /// <summary>突袭者没有目标时沿路线走向目标点（到了就停；路线失败则原地待命，计数由寻路内核给出）。</summary>
+        private static void RaiderRouteMove(ref CombatData d, int i, float speed, float dt)
+        {
+            double2 pos = d.Pos[i];
+            double2 home = d.Home[i];
+            var st = (CombatNavState)d.NavSt[i];
+            if (st == CombatNavState.None || st == CombatNavState.NeedRoute)
+            {
+                if (math.distancesq(pos, home) <= 0.25)
+                {
+                    return;
+                }
+                EmitNavRequest(ref d, i, CellOf(home), (byte)NavRequestFlags.AllowPartial);
+                return;
+            }
+            if (st != CombatNavState.Following)
+            {
+                return;
+            }
+            if (d.RouteIdx[i] >= d.RouteLen[i] && math.distancesq(pos, d.RouteEnd[i]) <= 0.25)
+            {
+                return;
+            }
+            FollowRoute(ref d, i, speed, dt);
+        }
+
+        /// <summary>
+        /// 分离（DEBT-FG0ARCH03-03）：同阵营、会移动的单位互相重叠时各自推开一半重叠量，每步至多 移动速度 × dt × SeparationFactor。
+        /// 只看这一步开始时的位置（Prev），与遍历顺序无关；完全重合时按两者 ID 派生的固定方向推开。推开也受格网碰撞约束。
+        /// </summary>
+        private static void Separate(ref CombatData d, ref CombatGrid grid, int i, float speed, float dt)
+        {
+            if (d.Config.NavEnabled == 0 || d.Config.SeparationFactor <= 0f || d.Has(i, CombatUnitFlags.Possessed))
+            {
+                return;
+            }
+            double2 pi = d.Prev[i];
+            float ri = d.Radius[i];
+            double reach = ri + grid.MaxRadius;
+            int x0 = grid.CellOf(pi.x - reach);
+            int x1 = grid.CellOf(pi.x + reach);
+            int y0 = grid.CellOf(pi.y - reach);
+            int y1 = grid.CellOf(pi.y + reach);
+            byte faction = d.Faction[i];
+            double2 push = double2.zero;
+            for (int cy = y0; cy <= y1; cy++)
+            {
+                for (int cx = x0; cx <= x1; cx++)
+                {
+                    if (!grid.TryGetCell(cx, cy, out int start, out int count))
+                    {
+                        continue;
+                    }
+                    for (int k = start; k < start + count; k++)
+                    {
+                        int j = grid.Slots[k];
+                        if (j == i || d.Faction[j] != faction || !d.IsAlive(j))
+                        {
+                            continue;
+                        }
+                        byte bj = d.Behavior[j];
+                        if (bj != (byte)CombatBehavior.Raider && bj != (byte)CombatBehavior.Commanded && bj != (byte)CombatBehavior.AutoEngage)
+                        {
+                            continue;
+                        }
+                        double2 dv = pi - d.Prev[j];
+                        double dist = math.length(dv);
+                        double min = ri + d.Radius[j];
+                        if (dist >= min)
+                        {
+                            continue;
+                        }
+                        double2 dir;
+                        if (dist > 1e-6)
+                        {
+                            dir = dv / dist;
+                        }
+                        else
+                        {
+                            int a = math.min(d.Id[i], d.Id[j]);
+                            int b = math.max(d.Id[i], d.Id[j]);
+                            double ang = (math.hash(new int2(a, b)) & 0xFFFF) / 65536.0 * 6.283185307179586;
+                            dir = new double2(math.cos(ang), math.sin(ang)) * (d.Id[i] < d.Id[j] ? 1.0 : -1.0);
+                        }
+                        push += dir * ((min - dist) * 0.5);
+                    }
+                }
+            }
+            double len = math.length(push);
+            if (len < 1e-9)
+            {
+                return;
+            }
+            double maxStep = speed * dt * d.Config.SeparationFactor;
+            if (len > maxStep)
+            {
+                push *= maxStep / len;
+            }
+            double2 from = d.Pos[i];
+            d.Pos[i] = MoveCollide(ref d, i, from, from + push);
+        }
+
+        /// <summary>路线池里作废的路点过半时按槽位顺序整理（确定性）。</summary>
+        public static void MaybeCompactRoutes(ref CombatData d)
+        {
+            CombatScalars s = d.Scalars[0];
+            if (s.RouteGarbage < 1024 || s.RouteGarbage * 2 < d.RoutePts.Length)
+            {
+                return;
+            }
+            var live = new NativeList<int2>(math.max(16, d.RoutePts.Length - s.RouteGarbage), Allocator.Temp);
+            for (int i = 0; i < d.Count; i++)
+            {
+                int off = d.RouteOff[i];
+                int len = d.RouteLen[i];
+                d.RouteOff[i] = live.Length;
+                for (int k = 0; k < len; k++)
+                {
+                    live.Add(d.RoutePts[off + k]);
+                }
+            }
+            d.RoutePts.Clear();
+            for (int k = 0; k < live.Length; k++)
+            {
+                d.RoutePts.Add(live[k]);
+            }
+            live.Dispose();
+            s.RouteGarbage = 0;
+            d.Scalars[0] = s;
+        }
+
+        /// <summary>地形变化后：沿路线走的单位，剩余路线上出现了走不了的格子就重新要路线（从当前位置）。返回失效的单位数。</summary>
+        public static int InvalidateBlockedRoutes(ref CombatData d)
+        {
+            int n = 0;
+            for (int i = 0; i < d.Count; i++)
+            {
+                if (!d.IsAlive(i) || d.NavSt[i] != (byte)CombatNavState.Following)
+                {
+                    continue;
+                }
+                int len = d.RouteLen[i];
+                int idx = d.RouteIdx[i];
+                int cls = ClassOf(ref d, i);
+                int2 prev = CellOf(d.Pos[i]);
+                bool clear = true;
+                bool inside = !Walkable(ref d, prev, cls);
+                for (int k = idx; k < len && clear; k++)
+                {
+                    int2 q = d.RoutePts[d.RouteOff[i] + k];
+                    if (!(inside && k == idx) && !NavSearch.LineClear(ref d.Nav, prev, q, cls))
+                    {
+                        clear = false;
+                    }
+                    prev = q;
+                }
+                if (clear)
+                {
+                    continue;
+                }
+                DropRoute(ref d, i);
+                d.NavSt[i] = (byte)CombatNavState.NeedRoute;
+                n++;
+            }
+            return n;
         }
 
         // ─────────────────────────────── 压实 ───────────────────────────────

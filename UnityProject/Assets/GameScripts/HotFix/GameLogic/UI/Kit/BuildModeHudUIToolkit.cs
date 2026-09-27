@@ -193,6 +193,12 @@ namespace GameLogic.UI.Kit
                     ? GameText.Format("ui.build.valid", HomeGridService.DisplayName(preview.TypeId), facing)
                     : GameText.Format("ui.build.invalid", preview.Describe())) + "\n" + HomeValleyBuildMode.DescribePorts(ports);
                 error = !preview.Ok;
+                // FG0-ARCH-06：只警告不阻止的提示（机器将无法到达某建筑）另起一行，用警告样式（不只靠颜色：文字以“注意：”开头）。
+                foreach (string w in preview.Warnings)
+                {
+                    status += "\n" + w;
+                }
+                _status.EnableInClassList("bm-status-warning", preview.Ok && preview.Warnings.Count > 0);
             }
             else if (string.IsNullOrEmpty(status) && mode.HoverBuildingId != null)
             {

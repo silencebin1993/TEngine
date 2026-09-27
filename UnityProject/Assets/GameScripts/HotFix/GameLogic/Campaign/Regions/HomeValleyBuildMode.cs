@@ -413,8 +413,20 @@ namespace GameLogic.Campaign.Regions
             _previewRecordsRef = state.BuildingRecords;
             _previewScrap = state.Scrap;
             Preview = HomeGridService.ValidatePlacement(state, SelectedTypeId, HoverCell, GhostRotation, into: _previewBuffer);
+            Preview.Warnings.Clear();
+            if (Preview.Ok)
+            {
+                // FG0-ARCH-06（FGR-LOG-012 / FG03“放置会让某座建筑变得机器无法到达时，给出警告（不阻止）”）：
+                // 只在格子 / 朝向 / 建筑记录变化时算一次（Burst 泛洪，家园范围内毫秒级以下）。
+                if (Nav.NavService.PlacementCutsOff(state, SelectedTypeId, HoverCell, GhostRotation, _cutOffScratch) > 0)
+                {
+                    Preview.Warnings.Add(GameText.Format("nav.build.unreachable_warning", string.Join(GameText.Language == GameLanguage.En ? ", " : "、", _cutOffScratch)));
+                }
+            }
             Revision++;
         }
+
+        private readonly List<string> _cutOffScratch = new List<string>(4);
 
         private static int HashCode(int a, int b, int c, int d) => unchecked(((a * 397) ^ b) * 397 ^ c) * 397 ^ d;
 

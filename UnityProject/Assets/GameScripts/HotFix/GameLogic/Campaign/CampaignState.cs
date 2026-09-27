@@ -175,6 +175,8 @@ namespace GameLogic.Campaign
         public SaveHistoryState SaveHistory = new SaveHistoryState();
         /// <summary>FG0-UX-01：通知中心历史（FGR-UX-020）。唯一写入口是 <c>GameLogic.Notifications.NotificationCenter</c>。</summary>
         public NotificationHistoryState Notifications = new NotificationHistoryState();
+        /// <summary>FG0-ARCH-06：星球表面寻路内核的待处理状态。唯一写入口是 <c>Nav.NavService.WriteTo</c>。</summary>
+        public NavState Nav = new NavState();
 
         /// <summary>新建战役：ERD-ECO-001 的 Demo 初始废料基线（180）已在设计文档给出数值，
         /// 直接采用；其余经济/工作/建筑/区域集合按 Done 定义留空，等待 ER3/ER4/ER5 写入真实数据。</summary>

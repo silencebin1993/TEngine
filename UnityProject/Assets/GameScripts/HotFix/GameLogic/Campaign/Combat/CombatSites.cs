@@ -35,8 +35,19 @@ namespace GameLogic.Campaign.Combat
         {
             EnsureHooks();
             Close(siteId, state, dropRecord: false);
-            var site = new CombatSite(siteId, CombatSite.ConfigFromTuning()) { Rules = rules };
+            CombatConfig cfg = CombatSite.ConfigFromTuning();
+            if (siteId == HomeValleyLayout.RegionId && Nav.NavService.IsBound)
+            {
+                // FG0-ARCH-06：家园在星球格网上——移动走层级寻路、不穿越不可通行的格子、同阵营移动单位互相分离。
+                cfg.NavEnabled = 1;
+                cfg.SeparationFactor = Nav.NavService.Tuning("nav.separation_factor", 0.5f);
+            }
+            var site = new CombatSite(siteId, cfg) { Rules = rules };
             Sites[siteId] = site;
+            if (cfg.NavEnabled != 0)
+            {
+                Nav.NavService.BindCombat(site);
+            }
             restored = false;
             CombatSiteRecord rec = FindRecord(state, siteId);
             if (resume && rec != null)

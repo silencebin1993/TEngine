@@ -774,7 +774,14 @@ namespace BinGames.EditorTools.FeatureArt
                     return false;
                 }
 
-                slot.location = Path.GetFileNameWithoutExtension(path);
+                var location = Path.GetFileNameWithoutExtension(path);
+                if (HasFilenameConflict(location))
+                {
+                    reason = $"拒绝：{slot.id} 文件名 {location} 在 Raw 下不唯一，无法使用 AddressByFileName 绑定。";
+                    return false;
+                }
+
+                slot.location = location;
                 slot.package = "";
                 return true;
             }
@@ -1068,6 +1075,11 @@ namespace BinGames.EditorTools.FeatureArt
             foreach (var guid in guids)
             {
                 var path = AssetDatabase.GUIDToAssetPath(guid);
+                if (AssetDatabase.IsValidFolder(path))
+                {
+                    continue;
+                }
+
                 if (Path.GetFileNameWithoutExtension(path) == location)
                 {
                     count++;

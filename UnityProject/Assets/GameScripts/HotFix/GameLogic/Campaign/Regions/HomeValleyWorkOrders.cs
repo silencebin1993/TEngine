@@ -848,8 +848,12 @@ namespace GameLogic.Campaign.Regions
         /// 是私有字段，只能靠委托查询，不下沉到本类）。<paramref name="beginAssignedMovement"/>：分配引擎选中
         /// 一台空闲机器后，让调用方对该订单发起真实移动（复用玩家点选下令同一条移动链）。本类不直接依赖
         /// MonoBehaviour/Transform 类型。</summary>
+        /// <param name="remainingPath">FG0-ARCH-06：机器沿路线剩余的长度（米；不在沿路线走返回 null）。赶路看门狗用它判断“有没有在推进”——
+        /// 绕路时直线距离会暂时变大，只看直线会把正常绕行误判成路径受阻。</param>
+        /// <param name="resumeDelivery">FG0-ARCH-06：搬运送货那一腿（核心）无法到达、等待 30 秒后，重新下达送货赶路。</param>
         public static void Tick(CampaignState state, float dt, Func<int, Vector2?> getMachinePosition,
-            Action<int> releaseMachineMovement, Func<int, bool> isDirectControlled, Action<WorkOrderRecord> beginAssignedMovement)
+            Action<int> releaseMachineMovement, Func<int, bool> isDirectControlled, Action<WorkOrderRecord> beginAssignedMovement,
+            Func<int, float?> remainingPath = null, Action<WorkOrderRecord> resumeDelivery = null)
         {
             if (state == null)
             {
@@ -876,10 +880,10 @@ namespace GameLogic.Campaign.Regions
                     switch (order.State)
                     {
                         case WorkOrderState.Reserved:
-                            TickReserved(state, order, dt, getMachinePosition, releaseMachineMovement);
+                            TickReserved(state, order, dt, getMachinePosition, releaseMachineMovement, remainingPath);
                             break;
                         case WorkOrderState.InProgress:
-                            TickInProgress(state, order, dt);
+                            TickInProgress(state, order, dt, resumeDelivery);
                             break;
                         case WorkOrderState.Waiting:
                             TickWaiting(state, order, dt);
@@ -905,6 +909,83 @@ namespace GameLogic.Campaign.Regions
         public static void MarkAssignmentDirty()
         {
             _assignDirty = true;
+        }
+
+        // ── FG0-ARCH-06：工作地点无法到达 ─────────────────────────────────────────────
+
+        /// <summary>“无法到达”的失败原因码：unreachable:<NavFailReason 数值>。</summary>
+        public const string UnreachablePrefix = "unreachable:";
+
+        public static bool IsUnreachableReason(string reason) => reason != null && reason.StartsWith(UnreachablePrefix, StringComparison.Ordinal);
+
+        public static BinGames.Sim.Nav.NavFailReason ParseUnreachable(string reason)
+        {
+            if (IsUnreachableReason(reason) && int.TryParse(reason.Substring(UnreachablePrefix.Length), out int v))
+            {
+                return (BinGames.Sim.Nav.NavFailReason)v;
+            }
+            return BinGames.Sim.Nav.NavFailReason.Unreachable;
+        }
+
+        /// <summary>
+        /// 内核报告机器的工作赶路寻路失败（FG0-ARCH-06：“寻路失败时给出明确原因，不让单位原地发呆”）：
+        /// 赶路阶段的工单转为等待（原因 unreachable:*，30 秒后与“路径受阻”同一套重试），机器立即空出来；搬运送货那一腿保持在办、30 秒后重发送货赶路。
+        /// 每张工单第一次无法到达时发一条可定位的“无法到达”通知（带原因与解决办法），之后的重试不再刷屏。
+        /// </summary>
+        public static void OnWorkUnreachable(CampaignState state, int logicId, BinGames.Sim.Nav.NavFailReason reason, Vector2 at)
+        {
+            if (state == null)
+            {
+                return;
+            }
+            WorkOrderRecord order = FindActiveOrderForMachine(state, logicId);
+            if (order == null)
+            {
+                return;
+            }
+            string code = UnreachablePrefix + ((int)reason).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            Vector2 target = ResolveWorkPosition(state, order);
+            if (order.State == WorkOrderState.Reserved)
+            {
+                PathWatch.Remove(order.WorkOrderId);
+                order.State = WorkOrderState.Waiting;
+                order.FailureReason = code;
+                order.AssignedMachineLogicId = 0;
+                WaitingWatch[order.WorkOrderId] = 0f;
+            }
+            else if (order.State == WorkOrderState.InProgress && order.Kind == WorkOrderKind.Haul)
+            {
+                order.FailureReason = code;
+                WaitingWatch[order.WorkOrderId] = 0f;
+            }
+            else
+            {
+                return;
+            }
+            if (!order.UnreachableNotified)
+            {
+                order.UnreachableNotified = true;
+                string reasonText = Nav.NavService.FailText(reason, new Grid.GridCell(Mathf.RoundToInt(target.x), Mathf.RoundToInt(target.y)));
+                string detail = GameLogic.Localization.GameText.Format("nav.work.unreachable", Feedback.FeedbackCues.MachineLabel(logicId),
+                    DescribeTarget(state, order), reasonText, GameLogic.Localization.GameText.Get("nav.fail.fix"));
+                GameLogic.Notifications.NotificationCenter.Post("unreachable", detail, new Vector3(target.x, 0f, target.y));
+            }
+            UnityEngine.Debug.Log($"[HomeValleyWorkOrders] 工单 {order.WorkOrderId} 无法到达（{reason}），转为等待，30 秒后重试。");
+        }
+
+        /// <summary>工单目标的显示名（建筑名；其它按目标 ID）。</summary>
+        public static string DescribeTarget(CampaignState state, WorkOrderRecord order)
+        {
+            BuildingRecord b = state?.BuildingRecords?.FirstOrDefault(x => x.BuildingId == order.TargetId);
+            if (b != null)
+            {
+                return Grid.HomeGridService.DisplayName(b.BuildingTypeId);
+            }
+            if (order.Kind == WorkOrderKind.Recharge || order.Kind == WorkOrderKind.Haul)
+            {
+                return Grid.HomeGridService.DisplayName(HomeValleyLayout.BuildingTypeCore);
+            }
+            return order.TargetId ?? string.Empty;
         }
 
         /// <summary>FG0-ARCH-01：接到一个战役（新建 / 读档 / 回滚）时清空本类的瞬态记忆（分配计时、赶路与等待看门狗）。
@@ -1057,7 +1138,7 @@ namespace GameLogic.Campaign.Regions
         /// Reserved 阶段已经承载真实含义（Repair/Build/Salvage 创建时就写入了完工所需的工作时长，
         /// 供稍后 InProgress 阶段直接使用），复用会把这份数据在赶路途中冲掉。</summary>
         private static void TickReserved(CampaignState state, WorkOrderRecord order, float dt,
-            Func<int, Vector2?> getMachinePosition, Action<int> releaseMachineMovement)
+            Func<int, Vector2?> getMachinePosition, Action<int> releaseMachineMovement, Func<int, float?> remainingPath = null)
         {
             if (getMachinePosition == null || order.AssignedMachineLogicId <= 0)
             {
@@ -1071,6 +1152,12 @@ namespace GameLogic.Campaign.Regions
 
             Vector2 targetPos = ResolveWorkPosition(state, order);
             float distance = Vector2.Distance(pos.Value, targetPos);
+            // FG0-ARCH-06：沿寻路路线走时按剩余路线长度判断推进（绕路时直线距离会变大）。
+            float? along = remainingPath?.Invoke(order.AssignedMachineLogicId);
+            if (along.HasValue)
+            {
+                distance = along.Value;
+            }
 
             if (!PathWatch.TryGetValue(order.WorkOrderId, out (float lastDistance, float stallSeconds) watch))
             {
@@ -1144,8 +1231,24 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        private static void TickInProgress(CampaignState state, WorkOrderRecord order, float dt)
+        private static void TickInProgress(CampaignState state, WorkOrderRecord order, float dt, Action<WorkOrderRecord> resumeDelivery = null)
         {
+            if (order.Kind == WorkOrderKind.Haul && IsUnreachableReason(order.FailureReason))
+            {
+                // FG0-ARCH-06：货在货舱、核心无法到达：30 秒后重新下达送货赶路（期间原因显示在工单面板）。
+                float waited = (WaitingWatch.TryGetValue(order.WorkOrderId, out float w) ? w : 0f) + dt;
+                if (waited >= HomeValleyLayout.PathBlockedRetrySeconds)
+                {
+                    WaitingWatch.Remove(order.WorkOrderId);
+                    order.FailureReason = null;
+                    resumeDelivery?.Invoke(order);
+                }
+                else
+                {
+                    WaitingWatch[order.WorkOrderId] = waited;
+                }
+                return;
+            }
             switch (order.Kind)
             {
                 case WorkOrderKind.Repair:
@@ -1163,7 +1266,7 @@ namespace GameLogic.Campaign.Regions
 
         private static void TickWaiting(CampaignState state, WorkOrderRecord order, float dt)
         {
-            if (order.FailureReason == "path-blocked")
+            if (order.FailureReason == "path-blocked" || IsUnreachableReason(order.FailureReason))
             {
                 float waited = (WaitingWatch.TryGetValue(order.WorkOrderId, out float w) ? w : 0f) + dt;
                 if (waited >= HomeValleyLayout.PathBlockedRetrySeconds)

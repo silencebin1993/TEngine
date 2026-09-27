@@ -407,6 +407,12 @@ namespace GameLogic.UI.WorkOrder
             {
                 return "仓库已满，腾出仓位后自动继续";
             }
+            if (Campaign.Regions.HomeValleyWorkOrders.IsUnreachableReason(reason))
+            {
+                // FG0-ARCH-06：目标无法到达（带原因；30 秒后重试）。
+                return GameLogic.Localization.GameText.Format("nav.work.reason",
+                    GameLogic.Localization.GameText.Get(Campaign.Nav.NavService.FailKey(Campaign.Regions.HomeValleyWorkOrders.ParseUnreachable(reason))));
+            }
             switch (reason)
             {
                 case "machine-died": return "执行机器损失，资源已退还";

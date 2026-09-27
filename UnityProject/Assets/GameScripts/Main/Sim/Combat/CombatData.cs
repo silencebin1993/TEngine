@@ -2,6 +2,7 @@ using System;
 using System.Runtime.InteropServices;
 using Unity.Collections;
 using Unity.Mathematics;
+using BinGames.Sim.Nav;
 
 namespace BinGames.Sim.Combat
 {
@@ -62,6 +63,10 @@ namespace BinGames.Sim.Combat
         public int Revision;
         /// <summary>事件序号计数。</summary>
         public int EventSeq;
+        /// <summary>FG0-ARCH-06：下一条寻路请求的序号（单位只认领序号与自己在等的那条一致的结果）。</summary>
+        public int NextNavSerial;
+        /// <summary>FG0-ARCH-06：路线池里已作废的路点数（过半时整理）。</summary>
+        public int RouteGarbage;
     }
 
     /// <summary>
@@ -100,6 +105,22 @@ namespace BinGames.Sim.Combat
         public NativeList<double> MarkedUntil;
         public NativeList<CombatCommand> Cmd;
         public NativeList<float2> Direct;
+
+        // ── FG0-ARCH-06 寻路（每单位；只在 Config.NavEnabled 的地点使用）──
+        public NativeList<byte> NavSt;
+        public NativeList<int> NavSerial;
+        public NativeList<byte> NavFail;
+        public NativeList<int> RouteOff;
+        public NativeList<int> RouteLen;
+        public NativeList<int> RouteIdx;
+        /// <summary>路线终点的精确位置（目标格可走时 = 命令目标点；目标被占时 = 就近可达格的格心）。</summary>
+        public NativeList<double2> RouteEnd;
+        /// <summary>路线路点池（格坐标）。</summary>
+        public NativeList<int2> RoutePts;
+        /// <summary>本步新发出、还没交给寻路内核的请求（热更层每步整体转交）。</summary>
+        public NativeList<CombatNavRequest> NavOut;
+        /// <summary>通行格网镜像（归寻路内核所有，内核只读 / 按需生成纯地形区块；没有寻路的地点是一张空格网）。不随本结构释放。</summary>
+        public NavGrid Nav;
 
         /// <summary>单位 ID → 槽位（-1 = 不存在）。ID 单调递增、永不复用。</summary>
         public NativeList<int> SlotOfId;
@@ -156,6 +177,15 @@ namespace BinGames.Sim.Combat
                 MarkedUntil = new NativeList<double>(capacity, Allocator.Persistent),
                 Cmd = new NativeList<CombatCommand>(capacity, Allocator.Persistent),
                 Direct = new NativeList<float2>(capacity, Allocator.Persistent),
+                NavSt = new NativeList<byte>(capacity, Allocator.Persistent),
+                NavSerial = new NativeList<int>(capacity, Allocator.Persistent),
+                NavFail = new NativeList<byte>(capacity, Allocator.Persistent),
+                RouteOff = new NativeList<int>(capacity, Allocator.Persistent),
+                RouteLen = new NativeList<int>(capacity, Allocator.Persistent),
+                RouteIdx = new NativeList<int>(capacity, Allocator.Persistent),
+                RouteEnd = new NativeList<double2>(capacity, Allocator.Persistent),
+                RoutePts = new NativeList<int2>(64, Allocator.Persistent),
+                NavOut = new NativeList<CombatNavRequest>(8, Allocator.Persistent),
                 SlotOfId = new NativeList<int>(capacity + 1, Allocator.Persistent),
                 Weapons = new NativeList<CombatWeapon>(16, Allocator.Persistent),
                 Profiles = new NativeList<CombatBehaviorProfile>(16, Allocator.Persistent),
@@ -210,6 +240,15 @@ namespace BinGames.Sim.Combat
             MarkedUntil.Dispose();
             Cmd.Dispose();
             Direct.Dispose();
+            NavSt.Dispose();
+            NavSerial.Dispose();
+            NavFail.Dispose();
+            RouteOff.Dispose();
+            RouteLen.Dispose();
+            RouteIdx.Dispose();
+            RouteEnd.Dispose();
+            RoutePts.Dispose();
+            NavOut.Dispose();
             SlotOfId.Dispose();
             Weapons.Dispose();
             Profiles.Dispose();
@@ -269,6 +308,13 @@ namespace BinGames.Sim.Combat
             MarkedUntil.Add(0);
             Cmd.Add(default);
             Direct.Add(float2.zero);
+            NavSt.Add(0);
+            NavSerial.Add(0);
+            NavFail.Add(0);
+            RouteOff.Add(0);
+            RouteLen.Add(0);
+            RouteIdx.Add(0);
+            RouteEnd.Add(s.Position);
             while (SlotOfId.Length <= id)
             {
                 SlotOfId.Add(-1);
@@ -306,6 +352,13 @@ namespace BinGames.Sim.Combat
             MarkedUntil[to] = MarkedUntil[from];
             Cmd[to] = Cmd[from];
             Direct[to] = Direct[from];
+            NavSt[to] = NavSt[from];
+            NavSerial[to] = NavSerial[from];
+            NavFail[to] = NavFail[from];
+            RouteOff[to] = RouteOff[from];
+            RouteLen[to] = RouteLen[from];
+            RouteIdx[to] = RouteIdx[from];
+            RouteEnd[to] = RouteEnd[from];
         }
 
         public void Truncate(int length)
@@ -336,6 +389,13 @@ namespace BinGames.Sim.Combat
             MarkedUntil.ResizeUninitialized(length);
             Cmd.ResizeUninitialized(length);
             Direct.ResizeUninitialized(length);
+            NavSt.ResizeUninitialized(length);
+            NavSerial.ResizeUninitialized(length);
+            NavFail.ResizeUninitialized(length);
+            RouteOff.ResizeUninitialized(length);
+            RouteLen.ResizeUninitialized(length);
+            RouteIdx.ResizeUninitialized(length);
+            RouteEnd.ResizeUninitialized(length);
         }
 
         /// <summary>全部单位与标量清空（读档前）。武器 / 行为表、障碍、兴趣点另行覆盖。</summary>
@@ -347,6 +407,8 @@ namespace BinGames.Sim.Combat
             Projectiles.Clear();
             Gameplay.Clear();
             Cues.Clear();
+            RoutePts.Clear();
+            NavOut.Clear();
         }
     }
 }

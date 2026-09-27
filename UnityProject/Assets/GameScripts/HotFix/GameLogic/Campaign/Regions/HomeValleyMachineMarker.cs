@@ -108,6 +108,12 @@ namespace GameLogic.Campaign.Regions
         /// <summary>直控移动输入（每帧由被观察的地点写入；内核在模拟步里按机器速度移动）。零向量 = 停。</summary>
         public void SetDirectInput(Vector2 direction) => Site?.SetDirectInput(UnitId, direction);
 
+        /// <summary>FG0-ARCH-06：内核报告“工作地点无法到达”：到达回调作废（工单由地点规则转为等待并给出原因）。</summary>
+        internal void OnWorkBlocked()
+        {
+            PendingArrivalAction = null;
+        }
+
         /// <summary>内核报告“工作赶路到达”：执行一次回调（Demo 到达即回调，回调里可能立刻下一段赶路）。</summary>
         internal void OnWorkArrived()
         {

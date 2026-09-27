@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using BinGames.Sim.Combat;
+using BinGames.Sim.Nav;
 using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Feedback;
@@ -33,6 +34,8 @@ namespace GameLogic.Campaign.Combat
         public virtual void OnMarkMissed(CombatSite site, RegionEnemyRecord scout) { }
         public virtual void OnPoiReached(CombatSite site, int poiIndex, int logicId, Vector2 machinePosition) { }
         public virtual void OnEngageRequest(CombatSite site, int logicId) { }
+        /// <summary>FG0-ARCH-06：工作赶路寻路失败（目标无法到达）。<paramref name="at"/> = 机器所在位置。</summary>
+        public virtual void OnWorkBlocked(CombatSite site, int logicId, NavFailReason reason, Vector2 at) { }
         /// <summary>目标“当前不可伤”时给玩家看的原因（阶段名）。</summary>
         public virtual string InvulnerableDetail(RegionEnemyRecord enemy) => string.Empty;
     }
@@ -660,6 +663,62 @@ namespace GameLogic.Campaign.Combat
             }
         }
 
+        // ─────────────────────────────── 寻路（FG0-ARCH-06）───────────────────────────────
+
+        /// <summary>本地点在星球格网上、移动走层级寻路（家园）。</summary>
+        public bool NavEnabled => !IsDisposed && Kernel.Config.NavEnabled != 0;
+        public bool NavBound => !IsDisposed && Kernel.NavBound;
+
+        /// <summary>绑定寻路内核的镜像（碰撞、路线失效检查读它）。</summary>
+        public void BindNav(NavKernel nav)
+        {
+            if (!IsDisposed && nav != null && !nav.IsDisposed)
+            {
+                Kernel.BindNav(nav.Mirror);
+            }
+        }
+
+        public void UnbindNav()
+        {
+            if (!IsDisposed)
+            {
+                Kernel.UnbindNav();
+            }
+        }
+
+        /// <summary>寻路内核把本批结果交给本地点的单位（AOT，O(1) 次调用）。</summary>
+        public int DeliverRoutes(NavKernel nav, int ownerTag) => IsDisposed || nav == null ? 0 : nav.DeliverCombat(Kernel, ownerTag);
+
+        /// <summary>本步新发出的寻路请求整体转交寻路内核（AOT，O(1) 次调用）。</summary>
+        public int CollectNavRequests(NavKernel nav, int ownerTag, long tick) => IsDisposed || nav == null ? 0 : nav.CollectFromCombat(Kernel, ownerTag, tick);
+
+        /// <summary>地形变化后：剩余路线被挡的单位重新要路线。</summary>
+        public int InvalidateBlockedRoutes() => IsDisposed ? 0 : Kernel.InvalidateBlockedRoutes();
+
+        /// <summary>寻路快照读不了时：所有在等路线的单位重新发请求（不会永远等下去）。</summary>
+        public int ReissueAwaitingRoutes() => IsDisposed ? 0 : Kernel.ReissueAwaiting();
+
+        public bool TryGetNavState(int unitId, out CombatNavState state, out NavFailReason fail)
+        {
+            state = CombatNavState.None;
+            fail = NavFailReason.None;
+            return !IsDisposed && Kernel.TryGetNavState(unitId, out state, out fail);
+        }
+
+        /// <summary>沿路线剩余的长度（米）；不在沿路线走返回 -1（赶路看门狗按它判断“有没有在推进”，绕路时直线距离会变大）。</summary>
+        public double RemainingRoute(int unitId) => IsDisposed ? -1 : Kernel.RemainingRoute(unitId);
+
+        /// <summary>剩余路线（从下一个路点起，末项 = 终点），画路线指示用。</summary>
+        public int CopyRoute(int unitId, List<double2> into)
+        {
+            if (IsDisposed)
+            {
+                into.Clear();
+                return 0;
+            }
+            return Kernel.CopyRoute(unitId, into);
+        }
+
         // ─────────────────────────────── 步与事件 ───────────────────────────────
 
         /// <summary>一个模拟步：内核一步 + 排空事件。<paramref name="time"/> = 这一步开始时的游戏秒。</summary>
@@ -869,6 +928,19 @@ namespace GameLogic.Campaign.Combat
                     if (_markerByUnit.TryGetValue(e.Unit, out HomeValleyMachineMarker marker))
                     {
                         marker.OnWorkArrived();
+                    }
+                    return;
+                }
+                case CombatEventKind.WorkBlocked:
+                {
+                    // FG0-ARCH-06：工作地点无法到达——到达回调作废，交给地点规则（工单转等待 + 带原因的通知），机器不会原地发呆等看门狗。
+                    if (_markerByUnit.TryGetValue(e.Unit, out HomeValleyMachineMarker marker))
+                    {
+                        marker.OnWorkBlocked();
+                    }
+                    if (_unitMachine.TryGetValue(e.Unit, out int logicId))
+                    {
+                        Rules?.OnWorkBlocked(this, logicId, (NavFailReason)e.Code, new Vector2((float)e.Pos.x, (float)e.Pos.y));
                     }
                     return;
                 }

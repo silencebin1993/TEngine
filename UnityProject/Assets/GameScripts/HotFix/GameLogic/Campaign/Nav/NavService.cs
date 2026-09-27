@@ -1,0 +1,554 @@
+using System;
+using System.Collections.Generic;
+using BinGames.Sim.Nav;
+using BinGames.Sim.WorldGen;
+using GameConfig.fg;
+using GameLogic.Campaign.Combat;
+using GameLogic.Campaign.Grid;
+using GameLogic.Campaign.Regions;
+using GameLogic.Campaign.WorldGen;
+using GameLogic.Campaign.WorldSim;
+using GameLogic.Core;
+using GameLogic.Localization;
+using GameLogic.Notifications;
+using TEngine;
+using Unity.Mathematics;
+
+namespace GameLogic.Campaign.Nav
+{
+    /// <summary>
+    /// FG0-ARCH-06（FG14 FGR-ARC-015 层级寻路）：星球表面（家园所在的表面）的寻路服务——寻路内核（<see cref="NavKernel"/>，AOT + Burst）的桥接层，
+    /// 与传送带的 BeltNetworkService、战斗的 CombatSite 同一角色。热更层碰寻路内核只经这里。
+    ///
+    /// 每个模拟步开头（<see cref="BeginStep"/>，由 WorldSimulation 调用；只看步序号，与镜头、帧率、倍速无关）：
+    /// 1. 格网里通行可能变化的区块（建筑增删、地形改写、读档差异）推进内核镜像；
+    /// 2. 到了采纳步的批次：在镜像上校验后交给请求方——家园战斗内核（机器、突袭者，AOT 直接交付）、行进中的队伍、巡逻；
+    /// 3. 有区块变化时：各请求方检查手里的路线，被新障碍截断的重新要路线；
+    /// 4. 收集家园战斗内核本步新发出的请求，没有批次在飞时调度下一批（工作线程）。
+    /// 热更层开销 = O(变化的区块 + 本批结果条数 + 队伍 / 巡逻数)，与单位数、路线长度无关。
+    /// 生命周期与家园同步：<see cref="Bind"/>（家园载入前）/ <see cref="Unload"/>（整个世界卸载）。
+    /// </summary>
+    public static class NavService
+    {
+        /// <summary>请求方标签（结果按它交付；存档里原样保留）。</summary>
+        public const int OwnerHomeCombat = 1;
+        public const int OwnerTransit = 2;
+        public const int OwnerPatrol = 3;
+
+        public static NavKernel Kernel { get; private set; }
+        public static CampaignState BoundState { get; private set; }
+        public static string SurfaceId { get; private set; }
+
+        /// <summary>旧原型地形（没有世界生成参数）只覆盖核心附近这么多区块（格网同步生成后推送）；之外视为地形未知。</summary>
+        public const int PrototypeRadiusChunks = 4;
+
+        private static HomeGridMap _map;
+        private static byte[] _occBlock = new byte[64];
+        private static readonly List<long> Dirty = new List<long>(64);
+        private static readonly List<long> PeekScratch = new List<long>(64);
+        private static bool _restoreFailed;
+        private static readonly System.Diagnostics.Stopwatch Watch = new System.Diagnostics.Stopwatch();
+
+        public static long PushedChunks { get; private set; }
+        public static long StepsRun { get; private set; }
+        public static double LastBeginStepMs { get; private set; }
+        public static double MaxBeginStepMs { get; private set; }
+        public static int LastDelivered { get; private set; }
+        public static long TotalDelivered { get; private set; }
+        public static long InvalidationPasses { get; private set; }
+        public static string LastLoadProblem { get; private set; }
+
+        public static bool IsBound => Kernel != null && !Kernel.IsDisposed;
+
+        // ─────────────────────────────── 配置 ───────────────────────────────
+
+        public static NavConfig ConfigFromTuning()
+        {
+            NavConfig c = NavConfig.Default;
+            c.ChunkSize = GridContent.TuningInt("grid.chunk_size");
+            c.LatencySteps = TuningInt("nav.latency_steps", c.LatencySteps);
+            c.BatchMaxRequests = TuningInt("nav.batch_max_requests", c.BatchMaxRequests);
+            c.BatchDistanceBudget = TuningInt("nav.batch_distance_budget", c.BatchDistanceBudget);
+            c.SearchMarginChunks = TuningInt("nav.search_margin_chunks", c.SearchMarginChunks);
+            c.MaxExpansions = TuningInt("nav.max_expansions", c.MaxExpansions);
+            c.GoalSearchRadius = TuningInt("nav.goal_search_radius", c.GoalSearchRadius);
+            c.StartSearchRadius = TuningInt("nav.start_search_radius", c.StartSearchRadius);
+            c.SmoothLookahead = TuningInt("nav.smooth_lookahead", c.SmoothLookahead);
+            c.CoordLimit = GridContent.TryGetTuning("world.coord_limit", out float lim) ? (int)Math.Round(lim) : c.CoordLimit;
+            return c;
+        }
+
+        public static float Tuning(string id, float fallback)
+        {
+            if (GridContent.TryGetTuning(id, out float v))
+            {
+                return v;
+            }
+            Log.Error($"[NavService] fg.TbHomeTuning 缺少 {id}，暂用规格初值 {fallback}（改 tools/cell_tables/fgdata_nav.py 后重新生成）。");
+            return fallback;
+        }
+
+        private static int TuningInt(string id, int fallback) => (int)Math.Round(Tuning(id, fallback));
+
+        /// <summary>地形码 → 通行字节（fg.TbGridTerrain.navCost：0 = 全部类别不可通行；否则代价倍率写进高 4 位）。表里没有的码 = 不可通行。</summary>
+        public static byte[] TerrainTable()
+        {
+            var t = new byte[256];
+            for (int i = 0; i < 256; i++)
+            {
+                t[i] = NavConst.Solid;
+            }
+            foreach (GridTerrain row in GridContent.Terrains)
+            {
+                if (row == null || row.Code < 0 || row.Code > 255)
+                {
+                    continue;
+                }
+                int cost = Math.Max(0, Math.Min(15, row.NavCost));
+                t[row.Code] = cost == 0 ? NavConst.Solid : (byte)(cost << 4);
+            }
+            return t;
+        }
+
+        // ─────────────────────────────── 生命周期 ───────────────────────────────
+
+        /// <summary>
+        /// 为战役的星球表面建寻路内核（家园载入前调用）：镜像按格网建好基线（被修改过的 / 有建筑的区块；读档差异所在的区块先同步载入），
+        /// 再从存档恢复排队的请求与待采纳的结果（<see cref="NavState"/>）。
+        /// </summary>
+        public static void Bind(CampaignState state)
+        {
+            Unload();
+            if (state == null)
+            {
+                return;
+            }
+            CampaignFgStateDomains.EnsureAll(state);
+            _map = HomeGridService.MapFor(state);
+            SurfaceId = _map.SurfaceId;
+            BoundState = state;
+            NavConfig cfg = ConfigFromTuning();
+            bool hasGen = _map.TerrainSource is WorldTerrainSource;
+            WorldGenParams gen = default;
+            WorldGenRect[] rects = null;
+            WorldGenZone[] zones = null;
+            if (hasGen)
+            {
+                var src = (WorldTerrainSource)_map.TerrainSource;
+                gen = src.Params;
+                rects = src.Rects;
+                zones = src.Zones;
+            }
+            Kernel = new NavKernel(cfg, TerrainTable(), hasGen, gen, rects, zones);
+
+            // 读档差异所在的区块：同步载入（套上差异），镜像以它为准（否则内核会按种子生成出“没被修改过”的样子）。
+            foreach (ChunkDiffRecord r in state.World?.ChunkDiffs ?? Array.Empty<ChunkDiffRecord>())
+            {
+                if (r != null && r.SurfaceId == SurfaceId)
+                {
+                    _map.ChunkAt(new GridCell(r.ChunkX * _map.ChunkSize, r.ChunkY * _map.ChunkSize), out _);
+                }
+            }
+            if (!hasGen)
+            {
+                // 旧原型地形：内核不会就地生成，核心附近固定范围的区块同步生成后全部推送（与镜头无关）。
+                GridCell core = HomeGridService.CorePivot(state);
+                ChunkAddress a = GridMath.Address(core, _map.ChunkSize);
+                for (int dy = -PrototypeRadiusChunks; dy <= PrototypeRadiusChunks; dy++)
+                {
+                    for (int dx = -PrototypeRadiusChunks; dx <= PrototypeRadiusChunks; dx++)
+                    {
+                        _map.ChunkAt(new GridCell((a.ChunkX + dx) * _map.ChunkSize, (a.ChunkY + dy) * _map.ChunkSize), out _);
+                    }
+                }
+            }
+            var keys = new List<long>();
+            foreach (HomeGridMap.Chunk c in _map.LoadedChunks)
+            {
+                if (!hasGen || c.Modified || c.HasStructures())
+                {
+                    keys.Add(HomeGridMap.Key(c.ChunkX, c.ChunkY));
+                }
+            }
+            keys.Sort();
+            foreach (long key in keys)
+            {
+                Push(key, asChange: false);
+            }
+            _map.ClearNavDirty();
+
+            _restoreFailed = false;
+            LastLoadProblem = null;
+            string payload = state.Nav?.Payload;
+            if (!string.IsNullOrEmpty(payload) && state.Nav.SurfaceId == SurfaceId)
+            {
+                NavLoadResult lr;
+                try
+                {
+                    lr = Kernel.LoadPending(Convert.FromBase64String(payload));
+                }
+                catch (FormatException)
+                {
+                    lr = NavLoadResult.BadMagic;
+                }
+                if (lr != NavLoadResult.Ok)
+                {
+                    // 读不了：丢掉排队的请求，等路线的请求方全部重新要（载入完成后，AfterSitesLoaded）。如实告知。
+                    _restoreFailed = true;
+                    LastLoadProblem = lr.ToString();
+                    Log.Warning($"[NavService] 寻路快照读不了（{lr}），等路线的单位将重新规划路线。");
+                    NotificationCenter.Post("save_migrated", GameText.Get("nav.load.rebuilt"));
+                }
+            }
+        }
+
+        /// <summary>家园（及其战斗内核）载入完成后：寻路快照读不了时，让所有“等路线”的请求方重新发请求（不会永远等下去）。</summary>
+        public static void AfterSitesLoaded(CampaignState state)
+        {
+            if (!_restoreFailed || !IsBound)
+            {
+                return;
+            }
+            _restoreFailed = false;
+            CombatSites.Get(HomeValleyLayout.RegionId)?.ReissueAwaitingRoutes();
+            WorldTransitSystem.ReissueAwaiting(state);
+            WorldOutpostSystem.ReissueAwaiting(state);
+        }
+
+        public static void Unload()
+        {
+            CombatSites.Get(HomeValleyLayout.RegionId)?.UnbindNav();
+            Kernel?.Dispose();
+            Kernel = null;
+            _map = null;
+            BoundState = null;
+            Dirty.Clear();
+        }
+
+        /// <summary>家园战斗内核打开时绑定镜像（碰撞、路线检查都读它）。</summary>
+        public static void BindCombat(CombatSite site)
+        {
+            if (site != null && IsBound)
+            {
+                site.BindNav(Kernel);
+            }
+        }
+
+        // ─────────────────────────────── 格网变化 ───────────────────────────────
+
+        private static void Push(long key, bool asChange)
+        {
+            HomeGridMap.Unkey(key, out int cx, out int cy);
+            HomeGridMap.Chunk c = _map.TryGetLoaded(cx, cy) ?? _map.ChunkAt(new GridCell(cx * _map.ChunkSize, cy * _map.ChunkSize), out _);
+            int oc = _map.OccupantCount;
+            if (_occBlock.Length < oc)
+            {
+                _occBlock = new byte[Math.Max(oc, _occBlock.Length * 2)];
+            }
+            for (int i = 0; i < oc; i++)
+            {
+                _occBlock[i] = NavConst.BlockAll; // 建筑挡住全部移动类别；FG06 的闸门（只挡敌方）在 FG6-DEF-01 按类型区分。
+            }
+            Kernel.PushChunk(cx, cy, c.Terrain, c.Occupancy, _occBlock, oc, asChange);
+            PushedChunks++;
+        }
+
+        /// <summary>把格网里通行可能变化的区块推进镜像（每步开头；放置预览与存档前也调用——只是提前，不改变哪一步生效）。</summary>
+        public static void SyncGridChanges()
+        {
+            if (!IsBound || _map == null)
+            {
+                return;
+            }
+            HomeGridMap current = HomeGridService.BoundMap(BoundState);
+            if (current != null && !ReferenceEquals(current, _map))
+            {
+                // 格网被重建（内容表重载 / 生成参数变化）：改指向新格网，把它的已修改 / 有建筑的区块整体推一遍（按变化处理）。
+                Log.Warning("[NavService] 格网实例被替换，重新推送已修改 / 有建筑的区块。");
+                _map = current;
+                var keys = new List<long>();
+                foreach (HomeGridMap.Chunk c in _map.LoadedChunks)
+                {
+                    if (c.Modified || c.HasStructures())
+                    {
+                        keys.Add(HomeGridMap.Key(c.ChunkX, c.ChunkY));
+                    }
+                }
+                keys.Sort();
+                foreach (long key in keys)
+                {
+                    Push(key, asChange: true);
+                }
+                _map.ClearNavDirty();
+                return;
+            }
+            if (_map.NavDirtyCount == 0)
+            {
+                return;
+            }
+            _map.DrainNavDirty(Dirty);
+            foreach (long key in Dirty)
+            {
+                Push(key, asChange: true);
+            }
+            Dirty.Clear();
+        }
+
+        // ─────────────────────────────── 每步 ───────────────────────────────
+
+        /// <summary>一个模拟步开头的寻路流水线（见类注释）。</summary>
+        public static void BeginStep(CampaignState state)
+        {
+            if (!IsBound || state == null || !ReferenceEquals(state, BoundState))
+            {
+                return;
+            }
+            Watch.Restart();
+            long tick = GameClock.Ticks;
+            SyncGridChanges();
+            CombatSite home = CombatSites.Get(HomeValleyLayout.RegionId);
+            LastDelivered = 0;
+            if (Kernel.IsDue(tick))
+            {
+                Kernel.BeginAdoption();
+                if (home != null)
+                {
+                    LastDelivered += home.DeliverRoutes(Kernel, OwnerHomeCombat);
+                }
+                int n = Kernel.ResultCount;
+                for (int i = 0; i < n; i++)
+                {
+                    NavResult r = Kernel.Result(i);
+                    if (!Kernel.ResultValid(i))
+                    {
+                        continue;
+                    }
+                    if (r.Request.OwnerTag == OwnerTransit)
+                    {
+                        LastDelivered += WorldTransitSystem.DeliverRoute(state, r, Kernel) ? 1 : 0;
+                    }
+                    else if (r.Request.OwnerTag == OwnerPatrol)
+                    {
+                        LastDelivered += WorldOutpostSystem.DeliverRoute(state, r, Kernel, tick) ? 1 : 0;
+                    }
+                }
+                Kernel.EndAdoption();
+                TotalDelivered += LastDelivered;
+            }
+            if (Kernel.ChangedCount > 0)
+            {
+                // 地形变了：手里的路线被新障碍截断的重新要（按当前位置）。只查“路线上的格子现在走不走得了”，没挡到的不动。
+                int invalid = 0;
+                if (home != null)
+                {
+                    invalid += home.InvalidateBlockedRoutes();
+                }
+                invalid += WorldTransitSystem.InvalidateRoutes(state, Kernel);
+                invalid += WorldOutpostSystem.InvalidateRoutes(state, Kernel);
+                Kernel.Invalidated += invalid;
+                Kernel.ClearChanged();
+                InvalidationPasses++;
+            }
+            if (home != null)
+            {
+                home.CollectNavRequests(Kernel, OwnerHomeCombat, tick);
+            }
+            Kernel.TrySchedule(tick);
+            StepsRun++;
+            Watch.Stop();
+            LastBeginStepMs = Watch.Elapsed.TotalMilliseconds;
+            if (LastBeginStepMs > MaxBeginStepMs)
+            {
+                MaxBeginStepMs = LastBeginStepMs;
+            }
+        }
+
+        /// <summary>热更层的请求方（队伍、巡逻）发一条请求。</summary>
+        public static void Request(int ownerTag, int ownerKey, int serial, byte cls, GridCell start, GridCell goal, bool allowPartial)
+        {
+            if (!IsBound)
+            {
+                return;
+            }
+            Kernel.Enqueue(new NavRequest
+            {
+                OwnerTag = ownerTag,
+                OwnerKey = ownerKey,
+                Serial = serial,
+                Class = cls,
+                Flags = allowPartial ? NavRequestFlags.AllowPartial : NavRequestFlags.None,
+                Start = new int2(start.X, start.Y),
+                Goal = new int2(goal.X, goal.Y),
+                IssuedTick = GameClock.Ticks,
+            });
+        }
+
+        /// <summary>世界坐标 → 格子（与寻路内核、战斗内核同一换算：四舍五入到最近格心）。</summary>
+        public static GridCell CellOf(double x, double y) => new GridCell((int)Math.Floor(x + 0.5), (int)Math.Floor(y + 0.5));
+
+        // ─────────────────────────────── 存档 ───────────────────────────────
+
+        /// <summary>存档：把还没同步的格网变化推进镜像（只是提前，生效仍在下一步），写排队请求 / 待采纳结果 / 变化区块。</summary>
+        public static void WriteTo(CampaignState state)
+        {
+            if (state == null)
+            {
+                return;
+            }
+            CampaignFgStateDomains.EnsureAll(state);
+            if (!IsBound || !ReferenceEquals(state, BoundState))
+            {
+                return;
+            }
+            SyncGridChanges();
+            state.Nav.SurfaceId = SurfaceId;
+            state.Nav.Payload = Convert.ToBase64String(Kernel.SerializePending());
+        }
+
+        // ─────────────────────────────── 放置预览（FGR-LOG-012 / FG03“放置会让某座建筑变得机器无法到达时，给出警告（不阻止）”）───────────────────────────────
+
+        private static readonly List<int2> Sources = new List<int2>(64);
+        private static readonly List<int2> Extra = new List<int2>(64);
+        private static readonly List<int2> Probes = new List<int2>(512);
+        private static readonly List<int> ProbeOwner = new List<int>(512);
+        private static readonly List<BuildingRecord> Owners = new List<BuildingRecord>(32);
+        private static readonly List<GridCell> Cells = new List<GridCell>(64);
+
+        /// <summary>
+        /// 放置预览的可达性：假设把 <paramref name="typeId"/> 放在（<paramref name="pivot"/>, <paramref name="rotation"/>），
+        /// 从归还核心外一圈出发（机器的活动中心）做泛洪；原来能到、放下后到不了的建筑写进 <paramref name="newlyUnreachable"/>（显示名）。
+        /// 区域 = 全部家园建筑外接矩形 + nav.preview_margin_cells。只在预览格 / 朝向变化时调用（Burst，毫秒级以下）。
+        /// </summary>
+        public static int PlacementCutsOff(CampaignState state, string typeId, GridCell pivot, int rotation, List<string> newlyUnreachable)
+        {
+            newlyUnreachable?.Clear();
+            if (!IsBound || state == null || !ReferenceEquals(state, BoundState) || !GridContent.TryGetBuilding(typeId, out BuildingGrid g))
+            {
+                return 0;
+            }
+            SyncGridChanges();
+            if (!HomeGridService.TryGetCoreBounds(state, out GridCell coreMin, out GridCell coreMax))
+            {
+                return 0;
+            }
+            Owners.Clear();
+            Probes.Clear();
+            ProbeOwner.Clear();
+            Sources.Clear();
+            Extra.Clear();
+            int minX = coreMin.X, minY = coreMin.Y, maxX = coreMax.X, maxY = coreMax.Y;
+            foreach (BuildingRecord b in state.BuildingRecords ?? Array.Empty<BuildingRecord>())
+            {
+                if (b == null || b.RegionId != HomeValleyLayout.RegionId || b.BuildingTypeId == HomeValleyLayout.BuildingTypeCore
+                    || !GridContent.TryGetBuilding(b.BuildingTypeId, out BuildingGrid bg))
+                {
+                    continue;
+                }
+                GridMath.FootprintBounds(new GridCell(b.GridX, b.GridY), bg.FootprintW, bg.FootprintH, GridMath.NormalizeRotation(b.Rotation), out GridCell bmin, out GridCell bmax);
+                int owner = Owners.Count;
+                Owners.Add(b);
+                AddRing(bmin, bmax, owner);
+                minX = Math.Min(minX, bmin.X);
+                minY = Math.Min(minY, bmin.Y);
+                maxX = Math.Max(maxX, bmax.X);
+                maxY = Math.Max(maxY, bmax.Y);
+            }
+            if (Owners.Count == 0)
+            {
+                return 0;
+            }
+            GridMath.FootprintCells(pivot, g.FootprintW, g.FootprintH, GridMath.NormalizeRotation(rotation), Cells);
+            foreach (GridCell c in Cells)
+            {
+                Extra.Add(new int2(c.X, c.Y));
+                minX = Math.Min(minX, c.X);
+                minY = Math.Min(minY, c.Y);
+                maxX = Math.Max(maxX, c.X);
+                maxY = Math.Max(maxY, c.Y);
+            }
+            for (int x = coreMin.X - 1; x <= coreMax.X + 1; x++)
+            {
+                Sources.Add(new int2(x, coreMin.Y - 1));
+                Sources.Add(new int2(x, coreMax.Y + 1));
+            }
+            for (int y = coreMin.Y; y <= coreMax.Y; y++)
+            {
+                Sources.Add(new int2(coreMin.X - 1, y));
+                Sources.Add(new int2(coreMax.X + 1, y));
+            }
+            int margin = Math.Max(2, (int)Math.Round(Tuning("nav.preview_margin_cells", 16f)));
+            var min = new int2(minX - margin, minY - margin);
+            var max = new int2(maxX + margin, maxY + margin);
+            var before = new bool[Owners.Count];
+            var after = new bool[Owners.Count];
+            Kernel.Reachability(NavConst.ClassPlayer, min, max, Sources, null, Probes, ProbeOwner, before);
+            Kernel.Reachability(NavConst.ClassPlayer, min, max, Sources, Extra, Probes, ProbeOwner, after);
+            int n = 0;
+            for (int i = 0; i < Owners.Count; i++)
+            {
+                if (before[i] && !after[i])
+                {
+                    n++;
+                    newlyUnreachable?.Add(HomeGridService.DisplayName(Owners[i].BuildingTypeId));
+                }
+            }
+            return n;
+        }
+
+        private static void AddRing(GridCell bmin, GridCell bmax, int owner)
+        {
+            for (int x = bmin.X; x <= bmax.X; x++)
+            {
+                Probes.Add(new int2(x, bmin.Y - 1));
+                ProbeOwner.Add(owner);
+                Probes.Add(new int2(x, bmax.Y + 1));
+                ProbeOwner.Add(owner);
+            }
+            for (int y = bmin.Y; y <= bmax.Y; y++)
+            {
+                Probes.Add(new int2(bmin.X - 1, y));
+                ProbeOwner.Add(owner);
+                Probes.Add(new int2(bmax.X + 1, y));
+                ProbeOwner.Add(owner);
+            }
+        }
+
+        // ─────────────────────────────── 文本 ───────────────────────────────
+
+        public static string FailKey(NavFailReason r)
+        {
+            switch (r)
+            {
+                case NavFailReason.StartBlocked: return "nav.fail.start_blocked";
+                case NavFailReason.GoalBlocked: return "nav.fail.goal_blocked";
+                case NavFailReason.SearchLimit: return "nav.fail.search_limit";
+                case NavFailReason.OutOfWorld: return "nav.fail.out_of_world";
+                case NavFailReason.UnknownTerrain: return "nav.fail.unknown_terrain";
+                default: return "nav.fail.unreachable";
+            }
+        }
+
+        /// <summary>失败原因（当前语言）；目标在未探索区域时追加说明。</summary>
+        public static string FailText(NavFailReason r, GridCell goal)
+        {
+            string text = GameText.Get(FailKey(r));
+            if (_map != null && !_map.IsExplored(goal))
+            {
+                text += GameText.Get("nav.fail.in_fog");
+            }
+            return text;
+        }
+
+        /// <summary>重置本会话的计数（新战役 / 读档）。</summary>
+        public static void ResetCounters()
+        {
+            PushedChunks = 0;
+            StepsRun = 0;
+            LastBeginStepMs = 0;
+            MaxBeginStepMs = 0;
+            LastDelivered = 0;
+            TotalDelivered = 0;
+            InvalidationPasses = 0;
+        }
+    }
+}

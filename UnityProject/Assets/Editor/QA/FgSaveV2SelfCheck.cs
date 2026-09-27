@@ -150,7 +150,8 @@ namespace GameLogic.EditorTools
                 .Where(f => domainTypes.Contains(f.FieldType)).Select(f => f.Name).OrderBy(n => n).ToArray();
             string[] registered = CampaignFgStateDomains.All.Select(d => d.FieldName).OrderBy(n => n).ToArray();
             // FG0-ARCH-03 新增第 18 个域 Combat（战斗内核快照；FGR-ARC-008 的“突袭”之外，远征战斗也要进存档）。
-            Expect(fields.Length == 18 && fields.Contains("Combat") && fields.SequenceEqual(registered) && CampaignFgStateDomains.All.All(d => !string.IsNullOrEmpty(d.OwnerStory)),
+            // FG0-ARCH-06 新增第 19 个域 Nav（星球表面寻路内核的排队请求与待采纳结果；读档接着跑与不存档一致）。
+            Expect(fields.Length == 19 && fields.Contains("Combat") && fields.Contains("Nav") && fields.SequenceEqual(registered) && CampaignFgStateDomains.All.All(d => !string.IsNullOrEmpty(d.OwnerStory)),
                 $"CampaignState 上 {fields.Length} 个状态域全部登记且写明承接 Story（{string.Join("、", fields)}）");
 
             // 旧正文缺域（比如 v2 早期存档还没有某个域）：读档补空域，不是 null。

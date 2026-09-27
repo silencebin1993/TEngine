@@ -13,8 +13,12 @@ namespace BinGames.Sim.Combat
     /// </summary>
     public static class CombatConst
     {
-        /// <summary>存档快照格式版本（<see cref="CombatKernel.Serialize"/>）。不认识的版本整块不读、原样保留。</summary>
-        public const int FormatVersion = 1;
+        /// <summary>存档快照格式版本（<see cref="CombatKernel.Serialize"/>）。不认识的版本整块不读、原样保留。
+        /// 2 = FG0-ARCH-06：每个单位追加寻路状态与路线路点、待交给寻路内核的请求（读取仍认 1：寻路字段取默认）。</summary>
+        public const int FormatVersion = 2;
+
+        /// <summary>仍能读取的最老格式版本。</summary>
+        public const int MinReadableFormat = 1;
 
         /// <summary>快照魔数 “CBK1”。</summary>
         public const uint Magic = 0x314B4243;
@@ -127,6 +131,33 @@ namespace BinGames.Sim.Combat
         WorkMove = 5,
     }
 
+    /// <summary>FG0-ARCH-06：单位的寻路状态（只在 <see cref="CombatConfig.NavEnabled"/> 的地点使用）。</summary>
+    public enum CombatNavState : byte
+    {
+        None = 0,
+        /// <summary>需要一条路线：下一次推进移动时发出请求。</summary>
+        NeedRoute = 1,
+        /// <summary>请求已发出，等寻路内核按固定延迟交回结果（这期间原地等待，不走直线）。</summary>
+        Awaiting = 2,
+        /// <summary>沿路线走。</summary>
+        Following = 3,
+        /// <summary>寻路失败：命令以“无法到达”结束（原因随事件交给热更层显示）。</summary>
+        Failed = 4,
+    }
+
+    /// <summary>FG0-ARCH-06：内核交给寻路内核的一条请求（热更层每步一次性转交，O(1) 次调用）。</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CombatNavRequest
+    {
+        public int UnitId;
+        public int Serial;
+        public int2 Start;
+        public int2 Goal;
+        public byte Class;
+        public byte Flags;
+        public short Pad;
+    }
+
     /// <summary>命令结束原因（热更层据此写编队事件文本与反馈）。</summary>
     public enum CombatEndReason : byte
     {
@@ -138,6 +169,8 @@ namespace BinGames.Sim.Combat
         Cancelled = 5,
         /// <summary>执行者阵亡或离场。</summary>
         Dead = 6,
+        /// <summary>FG0-ARCH-06：寻路失败（被完全阻断 / 目标处无处可站 / 超出搜索范围……）。事件的 Value = <see cref="BinGames.Sim.Nav.NavFailReason"/>。</summary>
+        Unreachable = 7,
     }
 
     /// <summary>
@@ -176,6 +209,8 @@ namespace BinGames.Sim.Combat
         EngageRequest = 13,
         /// <summary>干扰单位清掉了一台机器身上的标记。Unit=机器，Other=干扰单位。</summary>
         MarkCleared = 14,
+        /// <summary>FG0-ARCH-06：工作赶路寻路失败（目标无法到达）。Unit=机器，Code=<see cref="BinGames.Sim.Nav.NavFailReason"/>，Pos=机器位置。</summary>
+        WorkBlocked = 15,
 
         // ── 提示事件（有上限，可丢弃）──
         /// <summary>己方普通武器开火（Unit=攻击者，Other=目标）。</summary>
@@ -408,6 +443,10 @@ namespace BinGames.Sim.Combat
         public float Lookahead;
         public float AvoidRadius;
         public float AvoidWeight;
+        /// <summary>FG0-ARCH-06：1 = 本地点在星球格网上，移动走层级寻路路线、不穿越不可通行的格子（家园）；0 = Demo 的独立表面（破碎都市、铸造前哨：圆形障碍 + 局部绕障）。</summary>
+        public byte NavEnabled;
+        /// <summary>FG0-ARCH-06：分离（同阵营移动单位互相推开，不叠在同一处）的最大推开速度占移动速度的比例；0 = 关。</summary>
+        public float SeparationFactor;
 
         public static CombatConfig Default => new CombatConfig
         {
@@ -422,6 +461,8 @@ namespace BinGames.Sim.Combat
             Lookahead = 3f,
             AvoidRadius = 0.9f,
             AvoidWeight = 1.35f,
+            NavEnabled = 0,
+            SeparationFactor = 0.5f,
         };
     }
 

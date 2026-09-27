@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using GameLogic.Campaign.Grid;
 using GameLogic.Campaign.Logistics;
+using GameLogic.Campaign.Nav;
 using GameLogic.Campaign.Regions;
 using GameLogic.Campaign.WorldGen;
 using GameLogic.Core;
@@ -129,6 +130,8 @@ namespace GameLogic.Campaign.WorldSim
             HomeValleySoftlockGuard.ResetSessionState();
             HomeValleyAlarms.ResetSessionState();
             HomeValleyCombatTargets.ResetSessionState();
+            WorldOutpostSystem.ResetSession();
+            NavService.ResetCounters();
             ActiveChunkSet.Clear();
             _objectiveTimer = 0;
             _activityTimer = 0;
@@ -152,8 +155,11 @@ namespace GameLogic.Campaign.WorldSim
                 return Home;
             }
             EnsureSession(state);
+            // FG0-ARCH-06：星球表面的寻路内核先于家园建好（家园的战斗内核打开时绑定它的通行镜像；读档时恢复排队的请求与待采纳的结果）。
+            NavService.Bind(state);
             Home = new HomeValleyController();
             Home.Enter(resume);
+            NavService.AfterSitesLoaded(state);
             if (Home.IsLoaded)
             {
                 BindLivePositions();
@@ -210,6 +216,7 @@ namespace GameLogic.Campaign.WorldSim
             Home?.Exit();
             BeltNetworkService.Unload();
             Combat.CombatSites.CloseAll(); // FG0-ARCH-03：保险——各地点 Exit 已各自释放内核，这里确保没有泄漏的原生容器。
+            NavService.Unload(); // FG0-ARCH-06：寻路内核在战斗内核之后释放（战斗内核绑定着它的通行镜像）。
             GameLogic.View.ViewMaterials.ReleaseAll(); // FG0-ARCH-03：地点表现对象的共享材质与世界成对释放（各地点的表现对象此时已全部销毁）。
             FracturedCity = null;
             FoundryOutpost = null;
@@ -231,6 +238,8 @@ namespace GameLogic.Campaign.WorldSim
             BeltNetworkService.WriteTo(BeltNetworkService.BoundState);
             // FG0-ARCH-03：每个已载入地点的战斗内核快照（单位、编队命令、冷却、热量、标记、飞行中的弹体）写进 CombatState。
             Combat.CombatSites.WriteTo(CampaignSession.Current);
+            // FG0-ARCH-06：寻路内核的排队请求、待采纳结果、还没同步的格网变化写进 NavState（读档接着跑与不存档一致）。
+            NavService.WriteTo(CampaignSession.Current);
         }
 
         private static void BindLivePositions()
@@ -376,6 +385,8 @@ namespace GameLogic.Campaign.WorldSim
             bool stepped = false;
             try
             {
+                // FG0-ARCH-06：寻路流水线（格网变化推进镜像 → 到期批次采纳 → 被截断的路线重规划 → 调度下一批），只看步序号。
+                NavService.BeginStep(state);
                 if (Home != null && Home.IsLoaded)
                 {
                     CurrentSiteId = Home.SiteId;
@@ -394,6 +405,8 @@ namespace GameLogic.Campaign.WorldSim
                 // 行进中的队伍在星球表面（家园所在的表面）上。
                 CurrentSiteId = HomeValleyLayout.RegionId;
                 WorldTransitSystem.Step(state, dt);
+                // FG0-ARCH-06：敌方据点与巡逻（休眠判定、分帧唤醒、活跃的推进一步）。
+                WorldOutpostSystem.Step(state, GameClock.Ticks);
                 // FG0-ARCH-02：传送带内核（星球表面）按游戏时间累计推进到自己的 20 Hz（只看步序号，与镜头 / 帧率 / 倍速无关）。
                 BeltNetworkService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                 stepped = true;
@@ -457,6 +470,8 @@ namespace GameLogic.Campaign.WorldSim
                 ChunkAddress a = GridMath.Address(new GridCell((int)Math.Floor(g.PosX + 0.5), (int)Math.Floor(g.PosY + 0.5)), map.ChunkSize);
                 ActiveChunkSet.Add(HomeGridMap.Key(a.ChunkX, a.ChunkY));
             }
+            // FG0-ARCH-06：醒着的巡逻所在区块（“行进中的巡逻”完整模拟；休眠的不计）。
+            WorldOutpostSystem.AddActivePatrolChunks(state, map.ChunkSize, ActiveChunkSet);
             ActivityRefreshCount++;
         }
     }

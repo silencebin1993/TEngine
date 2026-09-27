@@ -98,6 +98,8 @@ namespace GameLogic.Campaign.Grid
         public readonly List<bool> CellOk = new List<bool>(25);
         public int ScrapCost;
         public float BuildSeconds;
+        /// <summary>FG0-ARCH-06：只警告、不阻止的提示（当前语言，已拼好）——例如“放下后机器将无法到达某建筑”（FGR-LOG-012）。</summary>
+        public readonly List<string> Warnings = new List<string>(1);
 
         public bool Ok => Reasons.Count == 0;
 

@@ -955,9 +955,16 @@ namespace GameLogic.EditorTools
                     continue;
                 }
                 origins.Add($"{g.PosX:F0},{g.PosY:F0}");
+                // FG0-ARCH-06：队伍沿地形走，出发后按固定延迟拿到路线；预计到达时间在拿到路线后沿路线算（断言精度不变：±2 步）。
+                int waited = 0;
+                while (g.RouteState != WorldTransitSystem.RouteFollowing && g.State == TransitGroupState.Marching && waited++ < 600)
+                {
+                    WorldSimulation.StepMany(1);
+                }
+                long etaFrom = GameClock.Ticks;
                 double eta = WorldTransitSystem.EtaSeconds(g);
                 WorldSimulation.StepMany((int)Math.Ceiling(eta * GameClock.StepHz) + 60);
-                allArrive &= g.State == TransitGroupState.Arrived && Math.Abs(g.ArrivedAtTick - (long)Math.Ceiling(eta * 60)) <= 2;
+                allArrive &= g.State == TransitGroupState.Arrived && !g.Blocked && Math.Abs(g.ArrivedAtTick - etaFrom - (long)Math.Ceiling(eta * 60)) <= 2;
                 (Vector2 min, Vector2 max) = WorldView.PlanetBounds(s);
                 bool inBounds = g.PosX >= min.x && g.PosX <= max.x && g.PosY >= min.y && g.PosY <= max.y;
                 allArrive &= inBounds;

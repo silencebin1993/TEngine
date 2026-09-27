@@ -5,6 +5,7 @@ using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
+using BinGames.Sim.Nav;
 
 namespace BinGames.Sim.Combat
 {
@@ -35,6 +36,9 @@ namespace BinGames.Sim.Combat
     {
         private CombatData _d;
         private CombatEvent[] _drainBuffer = new CombatEvent[64];
+        /// <summary>没有绑定寻路镜像时用的空格网（Burst 作业要求原生容器都已创建）。</summary>
+        private NavGrid _dummyNav;
+        private bool _navBound;
 
         public CombatKernel(in CombatConfig config, int capacity = 64)
         {
@@ -64,6 +68,8 @@ namespace BinGames.Sim.Combat
                 c.MaxStuckStrikes = 3;
             }
             _d = CombatData.Create(c, capacity);
+            _dummyNav = NavGrid.Create(8, null, false, default, null, null, 0, 1);
+            _d.Nav = _dummyNav;
             LiveKernels++;
         }
 
@@ -92,6 +98,159 @@ namespace BinGames.Sim.Combat
                 _d.Dispose();
                 LiveKernels--;
             }
+            if (_dummyNav.IsCreated)
+            {
+                _dummyNav.Dispose();
+            }
+            _navBound = false;
+        }
+
+        // ─────────────────────────────── 寻路（FG0-ARCH-06）───────────────────────────────
+
+        /// <summary>是否绑定了寻路镜像（家园）。</summary>
+        public bool NavBound => _navBound;
+
+        /// <summary>绑定寻路内核的通行格网镜像（归寻路内核所有；解绑或寻路内核释放前必须先解绑）。</summary>
+        public void BindNav(NavGrid mirror)
+        {
+            _d.Nav = mirror;
+            _navBound = mirror.IsCreated;
+        }
+
+        public void UnbindNav()
+        {
+            _d.Nav = _dummyNav;
+            _navBound = false;
+        }
+
+        /// <summary>待交给寻路内核的请求数（本步新发出）。</summary>
+        public int NavPendingCount => _d.NavOut.Length;
+
+        private void ResetNav(int i)
+        {
+            CombatScalars s = _d.Scalars[0];
+            s.RouteGarbage += _d.RouteLen[i];
+            _d.Scalars[0] = s;
+            _d.RouteLen[i] = 0;
+            _d.RouteIdx[i] = 0;
+            _d.NavSt[i] = (byte)CombatNavState.None;
+            _d.NavFail[i] = 0;
+        }
+
+        /// <summary>
+        /// 寻路内核交回一条结果：单位还在、还在等这条（序号一致）才采纳；否则丢弃（命令已换、单位已死、结果过期）。
+        /// 路线终点：终点格就是目标所在格时用目标点本身（工作赶路对齐到精确位置），否则用就近可达格的格心。
+        /// </summary>
+        public bool ApplyRoute(int unitId, int serial, NavStatus status, NavFailReason reason, NativeArray<int2> pts, int from, int count, int2 end)
+        {
+            int i = _d.SlotOf(unitId);
+            if (i < 0 || !_d.IsAlive(i) || _d.NavSt[i] != (byte)CombatNavState.Awaiting || _d.NavSerial[i] != serial)
+            {
+                return false;
+            }
+            if (status == NavStatus.Ok || status == NavStatus.Partial)
+            {
+                CombatScalars s = _d.Scalars[0];
+                s.RouteGarbage += _d.RouteLen[i];
+                s.Revision++;
+                _d.Scalars[0] = s;
+                _d.RouteOff[i] = _d.RoutePts.Length;
+                for (int k = 0; k < count; k++)
+                {
+                    _d.RoutePts.Add(pts[from + k]);
+                }
+                _d.RouteLen[i] = count;
+                _d.RouteIdx[i] = 0;
+                double2 target = _d.Behavior[i] == (byte)CombatBehavior.Raider ? _d.Home[i] : _d.Cmd[i].Pos;
+                int2 tc = CombatLogic.CellOf(target);
+                _d.RouteEnd[i] = tc.x == end.x && tc.y == end.y ? target : new double2(end.x, end.y);
+                _d.NavSt[i] = (byte)CombatNavState.Following;
+                _d.NavFail[i] = (byte)(status == NavStatus.Partial ? reason : NavFailReason.None);
+            }
+            else
+            {
+                _d.NavSt[i] = (byte)CombatNavState.Failed;
+                _d.NavFail[i] = (byte)reason;
+            }
+            return true;
+        }
+
+        /// <summary>寻路快照读不了时：所有“等路线”的单位改为重新要路线（下一次推进时发新请求，旧序号作废）。返回单位数。</summary>
+        public int ReissueAwaiting()
+        {
+            int n = 0;
+            for (int i = 0; i < _d.Count; i++)
+            {
+                if (_d.NavSt[i] == (byte)CombatNavState.Awaiting)
+                {
+                    _d.NavSt[i] = (byte)CombatNavState.NeedRoute;
+                    n++;
+                }
+            }
+            return n;
+        }
+
+        /// <summary>地形变化后检查全部“沿路线走”的单位：剩余路线被挡的改为重新要路线。返回失效数。</summary>
+        public int InvalidateBlockedRoutes()
+        {
+            if (!_navBound)
+            {
+                return 0;
+            }
+            var result = new NativeArray<int>(1, Allocator.TempJob);
+            try
+            {
+                new CombatNavInvalidateJob { D = _d, Out = result }.Run();
+                return result[0];
+            }
+            finally
+            {
+                result.Dispose();
+            }
+        }
+
+        public bool TryGetNavState(int id, out CombatNavState state, out NavFailReason fail)
+        {
+            int i = _d.SlotOf(id);
+            if (i < 0)
+            {
+                state = CombatNavState.None;
+                fail = NavFailReason.None;
+                return false;
+            }
+            state = (CombatNavState)_d.NavSt[i];
+            fail = (NavFailReason)_d.NavFail[i];
+            return true;
+        }
+
+        /// <summary>沿路线剩余的长度（米）；没有在沿路线走时返回 -1。</summary>
+        public double RemainingRoute(int id)
+        {
+            int i = _d.SlotOf(id);
+            if (i < 0 || _d.NavSt[i] != (byte)CombatNavState.Following)
+            {
+                return -1;
+            }
+            return CombatLogic.RemainingRouteLength(ref _d, i);
+        }
+
+        /// <summary>复制单位剩余的路线（从当前要走向的路点起，末项 = 精确终点）。没有路线返回 0。</summary>
+        public int CopyRoute(int id, List<double2> into)
+        {
+            into.Clear();
+            int i = _d.SlotOf(id);
+            if (i < 0 || _d.NavSt[i] != (byte)CombatNavState.Following)
+            {
+                return 0;
+            }
+            int len = _d.RouteLen[i];
+            for (int k = _d.RouteIdx[i]; k < len - 1; k++)
+            {
+                int2 c = _d.RoutePts[_d.RouteOff[i] + k];
+                into.Add(new double2(c.x, c.y));
+            }
+            into.Add(_d.RouteEnd[i]);
+            return into.Count;
         }
 
         // ─────────────────────────────── 表 ───────────────────────────────
@@ -298,6 +457,12 @@ namespace BinGames.Sim.Combat
             {
                 _d.Prev[i] = pos;
             }
+            if (_d.NavSt[i] == (byte)CombatNavState.Following)
+            {
+                // 传送后原路线不再从脚下开始：下一次推进时从新位置重新要路线。
+                ResetNav(i);
+                _d.NavSt[i] = (byte)CombatNavState.NeedRoute;
+            }
             Touch();
             return true;
         }
@@ -473,6 +638,7 @@ namespace BinGames.Sim.Combat
                 Stuck = 0,
             };
             _d.Set(i, CombatUnitFlags.PendingCommand, pending);
+            ResetNav(i);
             return true;
         }
 
@@ -485,6 +651,10 @@ namespace BinGames.Sim.Combat
             }
             bool had = _d.Cmd[i].Kind != CombatCommandKind.None;
             _d.Cmd[i] = default;
+            if (_d.Behavior[i] != (byte)CombatBehavior.Raider)
+            {
+                ResetNav(i);
+            }
             _d.Set(i, CombatUnitFlags.PendingCommand, false);
             return had;
         }
@@ -747,6 +917,19 @@ namespace BinGames.Sim.Combat
                 Mix(ref h, c.ProgTimer);
                 Mix(ref h, c.LastDist);
                 Mix(ref h, c.Stuck);
+                Mix(ref h, _d.NavSt[i]);
+                Mix(ref h, _d.NavSerial[i]);
+                Mix(ref h, _d.NavFail[i]);
+                Mix(ref h, _d.RouteIdx[i]);
+                Mix(ref h, _d.RouteLen[i]);
+                Mix(ref h, _d.RouteEnd[i].x);
+                Mix(ref h, _d.RouteEnd[i].y);
+                for (int k = 0; k < _d.RouteLen[i]; k++)
+                {
+                    int2 rp = _d.RoutePts[_d.RouteOff[i] + k];
+                    Mix(ref h, rp.x);
+                    Mix(ref h, rp.y);
+                }
             }
             for (int p = 0; p < _d.Projectiles.Length; p++)
             {
@@ -764,6 +947,16 @@ namespace BinGames.Sim.Combat
                 Mix(ref h, _d.PoiReached[q]);
             }
             Mix(ref h, _d.Gameplay.Length);
+            Mix(ref h, s.NextNavSerial);
+            Mix(ref h, _d.NavOut.Length);
+            for (int q = 0; q < _d.NavOut.Length; q++)
+            {
+                CombatNavRequest nr = _d.NavOut[q];
+                Mix(ref h, nr.UnitId);
+                Mix(ref h, nr.Serial);
+                Mix(ref h, nr.Goal.x);
+                Mix(ref h, nr.Goal.y);
+            }
             return h;
         }
 
@@ -872,6 +1065,20 @@ namespace BinGames.Sim.Combat
                 w.Write(c.LastDist);
                 w.Write(0f);
                 w.Write(0f);
+                // FG0-ARCH-06（格式 2）：寻路状态与剩余路线。
+                w.Write(_d.NavSt[i]);
+                w.Write(_d.NavSerial[i]);
+                w.Write(_d.NavFail[i]);
+                w.Write(_d.RouteIdx[i]);
+                w.Write(_d.RouteEnd[i].x);
+                w.Write(_d.RouteEnd[i].y);
+                w.Write(_d.RouteLen[i]);
+                for (int k = 0; k < _d.RouteLen[i]; k++)
+                {
+                    int2 rp = _d.RoutePts[_d.RouteOff[i] + k];
+                    w.Write(rp.x);
+                    w.Write(rp.y);
+                }
             }
 
             w.Write(_d.Projectiles.Length);
@@ -904,6 +1111,21 @@ namespace BinGames.Sim.Combat
                 w.Write(ev.Value2);
                 w.Write(ev.Pos.x);
                 w.Write(ev.Pos.y);
+            }
+            // FG0-ARCH-06（格式 2）：请求序号计数与本步还没交给寻路内核的请求。
+            w.Write(s.NextNavSerial);
+            w.Write(_d.NavOut.Length);
+            for (int q = 0; q < _d.NavOut.Length; q++)
+            {
+                CombatNavRequest nr = _d.NavOut[q];
+                w.Write(nr.UnitId);
+                w.Write(nr.Serial);
+                w.Write(nr.Start.x);
+                w.Write(nr.Start.y);
+                w.Write(nr.Goal.x);
+                w.Write(nr.Goal.y);
+                w.Write(nr.Class);
+                w.Write(nr.Flags);
             }
             w.Flush();
             byte[] body = ms.ToArray();
@@ -938,7 +1160,8 @@ namespace BinGames.Sim.Combat
             {
                 return CombatLoadResult.BadMagic;
             }
-            if (BitConverter.ToInt32(data, 4) != CombatConst.FormatVersion)
+            int format = BitConverter.ToInt32(data, 4);
+            if (format < CombatConst.MinReadableFormat || format > CombatConst.FormatVersion)
             {
                 return CombatLoadResult.UnknownFormat;
             }
@@ -952,7 +1175,7 @@ namespace BinGames.Sim.Combat
             CombatLoadResult result;
             try
             {
-                result = Parse(data, bodyLen, ref staging);
+                result = Parse(data, bodyLen, format, ref staging);
             }
             catch (EndOfStreamException)
             {
@@ -967,7 +1190,8 @@ namespace BinGames.Sim.Combat
                 staging.Dispose();
                 return result;
             }
-            // 成功：替换内核数据（障碍来自布局，由热更层随后重设，这里沿用当前的）。
+            // 成功：替换内核数据（障碍来自布局，由热更层随后重设，这里沿用当前的；寻路镜像属于寻路内核，沿用当前绑定）。
+            staging.Nav = _d.Nav;
             for (int i = 0; i < _d.Obstacles.Length; i++)
             {
                 staging.Obstacles.Add(_d.Obstacles[i]);
@@ -977,7 +1201,7 @@ namespace BinGames.Sim.Combat
             return CombatLoadResult.Ok;
         }
 
-        private CombatLoadResult Parse(byte[] data, int bodyLen, ref CombatData staging)
+        private CombatLoadResult Parse(byte[] data, int bodyLen, int format, ref CombatData staging)
         {
             using var ms = new MemoryStream(data, 0, bodyLen, false);
             using var r = new BinaryReader(ms);
@@ -1074,6 +1298,30 @@ namespace BinGames.Sim.Combat
                     LastDist = r.ReadSingle(),
                 };
                 float2 dir = new float2(r.ReadSingle(), r.ReadSingle());
+                byte navSt = 0;
+                int navSerial = 0;
+                byte navFail = 0;
+                int routeIdx = 0;
+                double2 routeEnd = sp.Position;
+                int routeOff = staging.RoutePts.Length;
+                int routeLen = 0;
+                if (format >= 2)
+                {
+                    navSt = r.ReadByte();
+                    navSerial = r.ReadInt32();
+                    navFail = r.ReadByte();
+                    routeIdx = r.ReadInt32();
+                    routeEnd = new double2(r.ReadDouble(), r.ReadDouble());
+                    routeLen = r.ReadInt32();
+                    if (navSt > (byte)CombatNavState.Failed || routeLen < 0 || routeLen > 1 << 20 || routeIdx < 0 || routeIdx > routeLen || !IsFinite(routeEnd))
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                    for (int k = 0; k < routeLen; k++)
+                    {
+                        staging.RoutePts.Add(new int2(r.ReadInt32(), r.ReadInt32()));
+                    }
+                }
                 if (id <= 0 || id >= s.NextId || !IsFinite(sp.Position) || !IsFinite(sp.Home) || float.IsNaN(sp.Health)
                     || sp.Weapon >= wn || sp.BehaviorProfile >= pn || staging.SlotOf(id) >= 0)
                 {
@@ -1084,6 +1332,13 @@ namespace BinGames.Sim.Combat
                 staging.MarkedUntil[slot] = marked;
                 staging.Cmd[slot] = cmd;
                 staging.Direct[slot] = dir;
+                staging.NavSt[slot] = navSt;
+                staging.NavSerial[slot] = navSerial;
+                staging.NavFail[slot] = navFail;
+                staging.RouteOff[slot] = routeOff;
+                staging.RouteLen[slot] = routeLen;
+                staging.RouteIdx[slot] = routeIdx;
+                staging.RouteEnd[slot] = routeEnd;
             }
 
             int prn = r.ReadInt32();
@@ -1131,6 +1386,27 @@ namespace BinGames.Sim.Combat
                     Value2 = r.ReadSingle(),
                     Pos = new double2(r.ReadDouble(), r.ReadDouble()),
                 });
+            }
+            if (format >= 2)
+            {
+                s.NextNavSerial = r.ReadInt32();
+                int nn = r.ReadInt32();
+                if (nn < 0 || nn > 1 << 20)
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
+                for (int q = 0; q < nn; q++)
+                {
+                    staging.NavOut.Add(new CombatNavRequest
+                    {
+                        UnitId = r.ReadInt32(),
+                        Serial = r.ReadInt32(),
+                        Start = new int2(r.ReadInt32(), r.ReadInt32()),
+                        Goal = new int2(r.ReadInt32(), r.ReadInt32()),
+                        Class = r.ReadByte(),
+                        Flags = r.ReadByte(),
+                    });
+                }
             }
             if (ms.Position != bodyLen)
             {
@@ -1308,6 +1584,19 @@ namespace BinGames.Sim.Combat
                     B = new float4(pr.Radius, 1f, (float)pr.Faction, 9f),
                 });
             }
+        }
+    }
+
+    /// <summary>FG0-ARCH-06：地形变化后检查全部路线（Burst，Run）。</summary>
+    [BurstCompile(CompileSynchronously = true)]
+    public struct CombatNavInvalidateJob : IJob
+    {
+        public CombatData D;
+        public NativeArray<int> Out;
+
+        public void Execute()
+        {
+            Out[0] = CombatLogic.InvalidateBlockedRoutes(ref D);
         }
     }
 }
