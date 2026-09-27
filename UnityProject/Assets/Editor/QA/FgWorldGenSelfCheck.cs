@@ -1042,7 +1042,7 @@ namespace GameLogic.EditorTools
         /// <summary>回归基准：（种子, 版本, 表面, 区块）→ 区块内容哈希。版本 0 = 原型地形（FG0-ARCH-04 存档的旧路径）。
         /// **改了生成算法或已发布版本的参数行而没有新增版本，这里会失败**——正确做法是新增 fg.TbWorldGenVersion 一行、把
         /// WorldGenVersions.Current 加 1，并为新版本补一组基准（旧版本的基准不许改）。</summary>
-        private static readonly (int seed, int version, string surface, int cx, int cy, ulong hash)[] Baseline =
+        internal static readonly (int seed, int version, string surface, int cx, int cy, ulong hash)[] Baseline =
         {
             // 2026-09-25 FG0-ARCH-05 首次生成（v1 = 生成器首版；v0 = FG0-ARCH-04 原型地形）。
             (1, 1, "earth", 0, 0, 0x06A6DE7B1AB4286DUL),

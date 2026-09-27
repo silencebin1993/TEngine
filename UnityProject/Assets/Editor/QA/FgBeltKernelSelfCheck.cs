@@ -1157,7 +1157,7 @@ namespace GameLogic.EditorTools
         // ── E 规模 / 快照 ────────────────────────────────────────────────────────
 
         /// <summary>FGR-SYS-041 规模：96 条 150 格直线（三档轮换、每条有输出与输入端口）+ 12 个 50 格的环 = 15,000 格；每格 2 件 = 30,000 件。</summary>
-        private static void BuildHuge(BeltKernel k, int ox, int oy)
+        internal static void BuildHuge(BeltKernel k, int ox, int oy)
         {
             for (int line = 0; line < 96; line++)
             {

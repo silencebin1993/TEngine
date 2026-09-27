@@ -1540,7 +1540,7 @@ namespace GameLogic.EditorTools
             return d;
         }
 
-        private static readonly Regex HexId = new Regex(@"(?<=[:_\-])[0-9a-f]{8}(?:[0-9a-f]{24})?(?![0-9a-f])", RegexOptions.Compiled);
+        internal static readonly Regex HexId = new Regex(@"(?<=[:_\-])[0-9a-f]{8}(?:[0-9a-f]{24})?(?![0-9a-f])", RegexOptions.Compiled);
 
         /// <summary>存档状态的逐字段快照（真实存档路径：写回实时状态 + 导出机器记录 → JsonUtility 序列化 → 拍平成“路径 = 值”）。
         /// 排除两类本来就按真实时间记录的内容：通知历史（FGR-UX-020 的聚合窗口按真实时间，所以只比较各类通知条数）与存档历史（写盘时间）；
@@ -1593,7 +1593,7 @@ namespace GameLogic.EditorTools
             return result;
         }
 
-        private static List<string> DiffKeys(Dictionary<string, string> a, Dictionary<string, string> b)
+        internal static List<string> DiffKeys(Dictionary<string, string> a, Dictionary<string, string> b)
         {
             var diffs = new List<string>();
             if (a == null || b == null)
@@ -1709,7 +1709,7 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>最小 JSON 拍平器（只处理 JsonUtility 的输出：对象、数组、字符串、数字、布尔）。路径形如 a.b[3].c。</summary>
-        private static class MiniJson
+        internal static class MiniJson
         {
             public static void Flatten(string json, Dictionary<string, string> into)
             {

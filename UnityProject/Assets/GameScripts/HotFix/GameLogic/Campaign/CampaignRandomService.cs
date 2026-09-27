@@ -27,11 +27,19 @@ namespace GameLogic.Campaign
     /// </summary>
     public static class CampaignRandomService
     {
+        /// <summary>FG0-QA-01 自检 / 旅程机器人专用：非空时 <see cref="GenerateSeed"/> 直接返回它（旅程在固定测试种子上运行，
+        /// 仍走主菜单“新建”的真实路径；用完置回 null）。</summary>
+        public static int? SeedOverrideForTests { get; set; }
+
         /// <summary>新建战役时调用一次，生成一颗强随机种子。返回值排除 0（与"未设置"哨兵值混淆）
         /// 与 <see cref="int.MinValue"/>（<see cref="Random"/> 的某些内部路径对它有边界处理），
         /// 命中这两个边界值时改用 1，不重试整个流程（1 也是一颗完全合法、可复现的种子）。</summary>
         public static int GenerateSeed()
         {
+            if (SeedOverrideForTests.HasValue)
+            {
+                return SeedOverrideForTests.Value;
+            }
             Span<byte> buffer = stackalloc byte[4];
             RandomNumberGenerator.Fill(buffer);
             int seed = BitConverter.ToInt32(buffer);

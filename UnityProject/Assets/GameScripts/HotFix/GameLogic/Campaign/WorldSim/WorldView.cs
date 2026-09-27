@@ -55,6 +55,8 @@ namespace GameLogic.Campaign.WorldSim
         private static string _observedId;
         private static string _lastFocusTargetId;
         private static Camera _camera;
+        /// <summary>最近一次飞去的星球表面位置：镜头范围总包含它（通知定位 / 飞到远处的己方机器时不被“已探索区域”钳回来）。</summary>
+        private static Vector2? _planetFlyPin;
 
         public static CameraDirector Director => DirectorInstance;
         public static Camera Camera => _camera;
@@ -158,6 +160,16 @@ namespace GameLogic.Campaign.WorldSim
                 return false;
             }
             FlyCount++;
+            IWorldSite site = ObservedSite;
+            if (site != null && site.SurfaceKind == WorldSurfaceKind.Planet)
+            {
+                // FGR-GEN-080“点击任意位置或通知，镜头飞过去”：目标可能在已探索区域之外（远处的己方机器、事件），先把它放进镜头范围再飞。
+                _planetFlyPin = position;
+                if (site.CameraProfile != null)
+                {
+                    ApplyBounds(site.CameraProfile);
+                }
+            }
             return DirectorInstance.FlyStrategyTo(new float2(position.x, position.y), GameClock.TuningOr("camera.fly_seconds", 0.5f));
         }
 
@@ -360,7 +372,7 @@ namespace GameLogic.Campaign.WorldSim
             DirectorInstance.SetStrategyBounds(min, max);
         }
 
-        /// <summary>星球表面的镜头可平移范围：已探索区域（外接矩形）+ camera.explored_margin_cells，并包含行进中的队伍与归还核心。
+        /// <summary>星球表面的镜头可平移范围：已探索区域（外接矩形）+ camera.explored_margin_cells，并包含行进中的队伍、归还核心与最近一次飞去的位置。
         /// 不启用浮动原点，所以同时钳在 camera.precision_safe_cells 以内（DEBT-FG0ARCH01-02）。</summary>
         public static (Vector2 Min, Vector2 Max) PlanetBounds(CampaignState state)
         {
@@ -389,6 +401,14 @@ namespace GameLogic.Campaign.WorldSim
                 maxX = Mathf.Max(maxX, (float)g.PosX);
                 maxY = Mathf.Max(maxY, (float)g.PosY);
             }
+            if (_planetFlyPin.HasValue)
+            {
+                Vector2 pin = _planetFlyPin.Value;
+                minX = Mathf.Min(minX, pin.x);
+                minY = Mathf.Min(minY, pin.y);
+                maxX = Mathf.Max(maxX, pin.x);
+                maxY = Mathf.Max(maxY, pin.y);
+            }
             float margin = GameClock.TuningOr("camera.explored_margin_cells", 24f);
             float safe = GameClock.TuningOr("camera.precision_safe_cells", 16384f);
             return (new Vector2(Mathf.Max(-safe, minX - margin), Mathf.Max(-safe, minY - margin)),
@@ -405,6 +425,7 @@ namespace GameLogic.Campaign.WorldSim
             Memory.Clear();
             _observedId = null;
             _lastFocusTargetId = null;
+            _planetFlyPin = null;
             WorldPlanetView.Shutdown();
             GameClock.SetDirectLocked(false);
         }

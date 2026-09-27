@@ -159,6 +159,9 @@ namespace GameLogic.EditorTools
                 // 快照与在飞存读档、战斗跟随与截断、家园绕路 / 工单 / 编队 / 迷雾的失败原因、放置预警、突袭路线、大量请求、
                 // 观察与倍速、休眠唤醒与持续模拟对照（FGT-GEN-010）、种子无关、2,000 格长路线性能。
                 _fail += FgNavSelfCheck.Run(Report);
+                // FG0-QA-01：旅程机器人框架的失败路径（重试、步骤超时、总超时、报错即失败、报告、域重载后续跑、旅程登记）。
+                // 旅程本身要进 Play（tools/unity-journey.sh），性能基线要搭后期大场景（tools/unity-perf-baseline.sh），都不在全量自检里。
+                _fail += JourneyRunnerSelfCheck.Run(Report);
             }
             catch (Exception e)
             {

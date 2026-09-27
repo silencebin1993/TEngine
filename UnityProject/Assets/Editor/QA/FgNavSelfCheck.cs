@@ -7,7 +7,9 @@ using System.Text;
 using BinGames.Sim.Combat;
 using BinGames.Sim.Nav;
 using GameLogic.Campaign;
+using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Combat;
+using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Grid;
 using GameLogic.Campaign.Nav;
 using GameLogic.Campaign.Regions;
@@ -19,6 +21,7 @@ using GameLogic.Notifications;
 using GameLogic.Settings;
 using GameLogic.Stage;
 using GameLogic.UI.Kit;
+using GameLogic.View;
 using Unity.Mathematics;
 using UnityEditor;
 using UnityEngine;
@@ -1031,12 +1034,12 @@ namespace GameLogic.EditorTools
                 }
                 return (min, pipe.K.StateHash(), ok, 50 - sumX / ids.Count);
             }
-            var with = RunOnce(0.5f);
+            var separated = RunOnce(0.5f);
             var again = RunOnce(0.5f);
             var without = RunOnce(0f);
-            Expect(with.minDist > 0.6 && without.minDist < 0.05 && with.hash == again.hash && with.clear && with.progress > 25,
-                $"分离（DEBT-FG0ARCH03-03）：16 个突袭者在同一点出生、同一目标，开分离后 6 秒内两两最小间距 {with.minDist:F2} 米（关掉分离 {without.minDist:F3} 米，叠在一处），" +
-                $"平均前进 {with.progress:F1} 格、全程不进不可通行格，两次运行哈希一致（确定性）");
+            Expect(separated.minDist > 0.6 && without.minDist < 0.05 && separated.hash == again.hash && separated.clear && separated.progress > 25,
+                $"分离（DEBT-FG0ARCH03-03）：16 个突袭者在同一点出生、同一目标，开分离后 6 秒内两两最小间距 {separated.minDist:F2} 米（关掉分离 {without.minDist:F3} 米，叠在一处），" +
+                $"平均前进 {separated.progress:F1} 格、全程不进不可通行格，两次运行哈希一致（确定性）");
         }
 
         // ── D 家园集成 ──────────────────────────────────────────────────────────────
