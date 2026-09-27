@@ -68,7 +68,7 @@ TEngine 基于 HybridCLR + YooAsset + UniTask + Luban 构建。
 若任务涉及 ProjectA 玩法、AI、模拟、UI 或验收，在写代码前还必须：
 
 1. 从 `DesignDocs/README.md` 找到任务对应的《地球归还》ERD、内容锁定表、基元规格与 Story 施工卡；
-2. 先在 `production/design/earth-reclamation/REQUIREMENT-TO-PLAYABLE-TRACE.md` 找到对应 ERD 覆盖，再读取 `AI-EXECUTION-PROTOCOL.md`、`DEMO-ACCEPTANCE.md` 与任务卡点名的需求 ID；
+2. FG Story 先在 `production/design/full-game/FG-STORY-CARDS.md` 找到本卡片和点名的 FGxx 需求 ID，并过 FG00 基线清单；只有 Demo 回归任务才查 `production/design/earth-reclamation/REQUIREMENT-TO-PLAYABLE-TRACE.md`、`AI-EXECUTION-PROTOCOL.md`、`DEMO-ACCEPTANCE.md`；
 3. 任务卡补齐正常旅程、负向矩阵、正式入口 E2E 和需求覆盖矩阵；
 4. 不把里程碑标题、示例、占位、深层直调或“非目标”当作省略正常玩家功能的依据；
 5. 历史 M1–M4 的返工与复验只作考古；现行功能按 ER Story 施工，不把历史 Done 视为新产品完成。
