@@ -23,7 +23,7 @@
 | 卡牌/切片包装 | `细胞肉鸽-基元卡牌包装.md` | ComposeEngine 绿后的下一窗 |
 | 遗留环境/消化/背包事实 | [现行遗留系统事实](../../../../production/design/earth-reclamation/LEGACY-SYSTEM-FACTS.md) | 仅需核对现有实现时；不派生 Demo 功能 |
 | 玩家机械文案 | [现行术语迁移表](../../../../production/design/earth-reclamation/TERM-MIGRATION.md) | 写 UI/文案时；旧白话说明书已删除 |
-| 美术出图 | `美术AI静图出图规范.md` | 美术窗；程序窗禁止读 |
+| 美术出图 | [现行美术规则](../../../../production/design/art-rules/README.md) | 旧《美术AI静图出图规范》是细胞题材，2026-09-28 已删除 |
 
 **正名（2026-08-13）**：对外权威名 = **组合引擎 / ComposeEngine**（sprint-010 story-001 **已真改符号**：库目录/命名空间/DLL/Unity Plugins 路径/规格文件名均已切换）。元素反应 ⊂ Substance 轴；变大/散射/旋转/位移等是一等能力。细胞 v1 目录不因此作废。
 
