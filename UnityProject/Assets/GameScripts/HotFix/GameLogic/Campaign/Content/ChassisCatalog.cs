@@ -28,7 +28,7 @@ namespace GameLogic.Campaign.Content
                 Slot = "底盘",
                 ScrapCost = 15,
                 Load = 4, // 容量（负载上限）
-                ValuesSummary = "HP100，带宽1，基础携带2货位（ERC-001 另带货舱结构达4货位）；可搬运/建造/拆解/建筑基础维修/编队/直控。",
+                ValuesSummary = "HP100，带宽1，基础携带2货位（ERC-001 另带货舱结构达4货位）；可搬运/建造/拆解/建筑基础维修/编队/接入。",
                 AiPermission = MechanicalContentAiPermission.PlayerAndAllyAi,
                 IconId = "icon_chassis_wheel",
                 ModelId = "primitive:capsule",

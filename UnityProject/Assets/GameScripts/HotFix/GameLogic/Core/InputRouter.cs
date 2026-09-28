@@ -185,6 +185,9 @@ namespace GameLogic.Core
             _uiPointerBlocker = blocker;
         }
 
+        /// <summary>自检：临时替换指针命中检测前取出原值，结束后原样放回。</summary>
+        public static Func<bool> DebugUiPointerBlocker => _uiPointerBlocker;
+
         /// <summary>是否有 UI 正在拖动并独占指针。拖动跨出窗口范围后仍保持 true，直到释放。</summary>
         public static bool UiPointerCaptured => UiCapturedPointers.Count > 0;
 

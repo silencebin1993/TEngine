@@ -52,6 +52,9 @@ namespace GameLogic.EditorTools
     /// 铸造前哨外围点命令栏机器列表接入 → 按接入 / 退出键离开；存档前接入、读档后核对信号位置。
     /// FG1-VFX-01：装配站换上带接入口的重炮蓝图（测试捷径）→ 真实鼠标选中 + 接入键 → 过载插入、形变态出现（0.3 秒过渡走完、部件可见）→ 接入 / 退出键离开 → 复原；
     /// 普通接入时核对表现层的形变与战斗桥接层的编译结果一致。
+    /// FG1-HUD-01：暂停菜单里点“图鉴”打开机制图鉴、点关闭回到暂停菜单，接入镜头两项设置显示；接入重炮后读接入 HUD（机体名、信号核槽位“生效”、机身状态与来源、
+    /// 热量 / 电池 / 耐久 / 链路 / 暴露 / 与信号同行）、机器列表“◇口”标记 → 点接入 HUD 的“?”打开图鉴“信号接入”→ Esc 关闭（不弹暂停菜单）→
+    /// 接入 / 退出键离开：接入 HUD 隐藏、离开音效钩子、机器详情写“与信号同行 N 次”。
     ///
     /// 用法：<c>bash tools/unity-play-smoke.sh</c>（影子工程里跑，编辑器开着也行）。进 Play 会重载域，
     /// 驱动状态存在 SessionState 里，[InitializeOnLoad] 重载后接着跑。
@@ -202,6 +205,9 @@ namespace GameLogic.EditorTools
                     case 212: StepMorphPress(inStep); break;
                     case 213: StepMorphEntered(inStep); break;
                     case 214: StepMorphLeft(inStep); break;
+                    case 215: StepHudShown(inStep); break;
+                    case 216: StepHudCodexOpened(inStep); break;
+                    case 217: StepHudCodexClosed(inStep); break;
                     case 185: StepLinkSelect(inStep); break;
                     case 186: StepLinkPress(inStep); break;
                     case 187: StepLinkEntered(inStep); break;
@@ -657,6 +663,18 @@ namespace GameLogic.EditorTools
             string clip = GUIUtility.systemCopyBuffer;
             GUIUtility.systemCopyBuffer = oldClip;
             Check(copied && clip == seed && pm != null && pm.FeedbackText.Contains(seed), $"点“复制种子”：剪贴板 = {clip}，提示“{pm?.FeedbackText}”");
+            // FG1-HUD-01：暂停菜单“图鉴”→ 机制图鉴盖在暂停菜单上面；点关闭回到暂停菜单。接入镜头两项设置显示当前值。
+            bool codexClicked = ClickUitk("[PauseMenuHost]", "PauseCodex");
+            UI.Kit.MechanicCodexPanelUIToolkit codex = UI.Kit.MechanicCodexPanelUIToolkit.Instance;
+            bool codexOpen = codex != null && UI.Kit.MechanicCodexPanelUIToolkit.IsOpen && codex.PanelVisible && codex.ItemCount >= 5
+                             && !Localization.GameText.ContainsMarker(codex.EntryTitleText + codex.EntryBodyText);
+            string codexTitle = codex?.EntryTitleText ?? string.Empty;
+            bool codexClosed = ClickUitk("[MechanicCodexHost]", "CodexClose") && !UI.Kit.MechanicCodexPanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen;
+            Check(codexClicked && codexOpen && codexClosed,
+                $"暂停菜单点“图鉴”：机制图鉴打开（{codex?.ItemCount} 条，当前“{codexTitle}”），点关闭回到暂停菜单");
+            Check(pm != null && pm.CameraZoomLabelText.Length > 0 && pm.CameraFollowLabelText.Length > 0
+                  && !Localization.GameText.ContainsMarker(pm.CameraZoomLabelText + pm.CameraFollowLabelText),
+                $"暂停菜单显示接入镜头设置：“{pm?.CameraZoomLabelText}”“{pm?.CameraFollowLabelText}”");
             Check(ClickUitk("[PauseMenuHost]", "PauseKeyBindings"), "点暂停菜单“按键设置”");
             Next(34, "点“按键设置”");
         }
@@ -1825,6 +1843,68 @@ namespace GameLogic.EditorTools
                   && View.MachineMorphView.VisibleOf(m) == want && Mathf.Approximately(View.MachineMorphView.ProgressOf(m, Campaign.Blueprint.MorphMask.Limiter), 1f)
                   && grp != null && grp.gameObject.activeInHierarchy && renderers > 0 && View.MachineMorphView.SignalBeamShownOf(m),
                 $"接入 {SigLabel(m)}：接入口插入过载 → 机身形变（{Campaign.Blueprint.MachineMorph.Describe(want)}），0.3 秒过渡已走完，{renderers} 个形变部件可见（共享材质、GPU Instancing），接入口射出信号光柱");
+            Next(215, "FG1-HUD-01：读接入 HUD");
+        }
+
+        // ── FG1-HUD-01：接入 HUD（机体名、槽位、机身状态与来源、热量 / 电池 / 耐久 / 链路 / 暴露 / 经历）、“?”图鉴、机器列表“◇口”标记 ──────
+
+        private static void StepHudShown(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            int m = SessionState.GetInt(K + "MorphM", 0);
+            UI.SignalCore.UplinkHudView v = UI.SignalCore.SignalCoreHudUIToolkit.Instance?.UplinkHud;
+            string ov = Campaign.Signal.FirmwareKinds.DisplayName(Campaign.Content.FirmwareCatalog.FwOverloadId) ?? "?";
+            string all = v == null ? string.Empty : string.Join("｜", v.TitleText, v.MorphText, v.SlotText(0), v.HeatText, v.BatteryText, v.HealthText, v.LinkText, v.ExposureText, v.ExperienceText);
+            Check(v != null && v.Visible && v.TitleText.Contains(SigLabel(m)) && v.SlotText(0).Contains(ov) && v.SlotText(0).Contains(Localization.GameText.Get("uplink.hud.state.active"))
+                  && v.MorphText.Contains(Localization.GameText.Get("morph.state.limiter")) && v.MorphText.Contains(ov)
+                  && v.HeatText.Length > 0 && v.BatteryText.Length > 0 && v.HealthText.Length > 0 && v.LinkText.Length > 0 && v.ExposureText.Length > 0
+                  && v.ExperienceText.Length > 0 && !Localization.GameText.ContainsMarker(all),
+                $"接入 HUD：{all}");
+            GameObject barHost = GameObject.Find("[RegionCommandBarHost]");
+            var bar = barHost != null ? barHost.GetComponent<UI.RegionCommand.RegionCommandBarUIToolkit>() : null;
+            Check(bar != null && bar.CandidateShowsPort(m), $"机器列表：{SigLabel(m)} 带“◇口”（带接入口）标记");
+            // FG1-HUD-01 修复轮（审查 P1）：接入 HUD 叠在接入视角的战场上方，文字 / 背景不能吞掉直控开火的点击，只有“?”挡住。
+            UnityEngine.UIElements.IPanel hudPanel = v?.HeatElement?.panel;
+            bool heatPasses = hudPanel != null && !UI.Common.UiWindowFocus.BlocksWorldPointerAt(hudPanel, v.HeatElement.worldBound.center)
+                              && !UI.Common.UiWindowFocus.BlocksWorldPointerAt(hudPanel, v.LinkElement.worldBound.center)
+                              && !UI.Common.UiWindowFocus.BlocksWorldPointerAt(hudPanel, v.SlotLabel(0).worldBound.center);
+            bool helpBlocks = hudPanel != null && UI.Common.UiWindowFocus.BlocksWorldPointerAt(hudPanel, v.HelpButton.worldBound.center);
+            Check(heatPasses && helpBlocks, $"接入 HUD 不吞世界点击：热量 / 链路 / 槽位文字处直控点击照常（{heatPasses}），“?”按钮处让位给按钮（{helpBlocks}）");
+            Check(ClickUitk("[SignalCoreHost]", "UplinkHudHelp"), "点接入 HUD 的“?”");
+            Next(216, "点接入 HUD 的“?”");
+        }
+
+        private static void StepHudCodexOpened(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            UI.Kit.MechanicCodexPanelUIToolkit codex = UI.Kit.MechanicCodexPanelUIToolkit.Instance;
+            Check(UI.Kit.MechanicCodexPanelUIToolkit.IsOpen && codex != null && codex.SelectedId == "codex.signal.uplink"
+                  && codex.EntryTitleText == Localization.GameText.Get("codex.signal.uplink.title") && codex.RelatedCount > 0,
+                $"图鉴打开到“{codex?.EntryTitleText}”，{codex?.RelatedCount} 个相关条目");
+            // 修复轮（FG00 B02）：正文 / 脚注里的按键是当前绑定，不留 {act:} 占位。
+            Check(codex != null && !codex.EntryBodyText.Contains(InputDisplay.ActionTokenPrefix) && !codex.FooterText.Contains(InputDisplay.ActionTokenPrefix)
+                  && codex.EntryBodyText.Contains(InputDisplay.ForAction(GameActionId.CycleControlTarget)) && codex.FooterText.Contains(InputDisplay.ForAction(GameActionId.Cancel)),
+                $"图鉴正文与脚注的按键随绑定：“{codex?.FooterText}”");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
+            Next(217, "按 Esc 关闭图鉴");
+        }
+
+        private static void StepHudCodexClosed(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            int m = SessionState.GetInt(K + "MorphM", 0);
+            Check(!UI.Kit.MechanicCodexPanelUIToolkit.IsOpen && !PauseMenuUIToolkit.IsOpen && Campaign.Signal.SignalPresence.CurrentMachineLogicId == m,
+                "Esc 先关闭图鉴（不弹暂停菜单），信号仍在机器里");
+            SessionState.SetInt(K + "HudLeave0", Campaign.Feedback.FeedbackCues.CountOf(Campaign.Feedback.FeedbackCueId.UplinkLeave));
             PressKey(GameSettings.KeyBindings.GetKey(GameActionId.ToggleCameraView));
             Next(214, "按接入 / 退出键离开");
         }
@@ -1840,6 +1920,15 @@ namespace GameLogic.EditorTools
                   && View.MachineMorphView.VisibleOf(m) == Campaign.Blueprint.MorphMask.None && View.MachineMorphView.AnimatingCount == 0
                   && !View.MachineMorphView.SignalBeamShownOf(m),
                 $"离开：镜头回到战略，{SigLabel(m)} 的形变收起复原、信号光柱熄灭");
+            // FG1-HUD-01：接入 HUD 隐藏、离开音效钩子、机器详情写“与信号同行 N 次”（这台仍是选中的机器）。
+            UI.SignalCore.UplinkHudView hudView = UI.SignalCore.SignalCoreHudUIToolkit.Instance?.UplinkHud;
+            GameObject woHost = GameObject.Find("[WorkOrderHudHost]");
+            string detail = woHost != null ? woHost.GetComponent<UIDocument>()?.rootVisualElement?.Q<Label>("MachineDetailLabel")?.text ?? string.Empty : string.Empty;
+            MachineRegistry.TryGetRecord(m, out MachineRecord hudRec);
+            Check(hudView != null && !hudView.Visible
+                  && Campaign.Feedback.FeedbackCues.CountOf(Campaign.Feedback.FeedbackCueId.UplinkLeave) == SessionState.GetInt(K + "HudLeave0", 0) + 1
+                  && hudRec != null && hudRec.SignalUplinkCount >= 1 && detail.Contains(Campaign.MachineSignalExperience.Describe(CampaignSession.Current, hudRec).Split('，')[0]),
+                $"离开后接入 HUD 隐藏、离开音效钩子响一次；机器详情：“{detail.Replace("\n", " / ")}”");
             string orig = SessionState.GetString(K + "MorphOrigBp", string.Empty);
             if (orig.Length > 0)
             {

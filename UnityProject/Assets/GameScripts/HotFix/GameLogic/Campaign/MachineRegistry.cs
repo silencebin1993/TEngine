@@ -808,6 +808,8 @@ namespace GameLogic.Campaign
                 JobsCompleted = src.JobsCompleted,
                 ExpeditionsCompleted = src.ExpeditionsCompleted,
                 TimesControlled = src.TimesControlled,
+                SignalUplinkCount = src.SignalUplinkCount,
+                SignalUplinkTicks = src.SignalUplinkTicks,
                 IsAlive = src.IsAlive,
                 IsInFactory = src.IsInFactory,
                 IsDeployed = src.IsDeployed,

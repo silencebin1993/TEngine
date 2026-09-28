@@ -57,6 +57,8 @@ namespace GameLogic.Core
         public const string SignalFirstFarJump = "signal.jump.first_far";
         /// <summary>FG1-VFX-01：第一次看到机器机身形变（引导内容：三类状态分别代表哪类固件、接入与离开都会切换）。</summary>
         public const string MorphFirstSeen = "firmware.morph.first_seen";
+        /// <summary>FG1-HUD-01：第一次有机器进入安全模式（引导内容在 FG15-UX-04：盾形标记、只跑本地常规固件、怎么恢复；图鉴“安全模式”随之解锁）。</summary>
+        public const string SafeModeFirstEnter = "signal.safe_mode.first_enter";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -71,7 +73,7 @@ namespace GameLogic.Core
             SignalFirstUplink,
             SignalFirstEncryptedFirmware, ExposurePanelFirstOpen,
             SignalCoverageFirstOverlay, SignalCoverageFirstLeft, SignalRelayFirstCut, SignalFirstFarJump,
-            MorphFirstSeen,
+            MorphFirstSeen, SafeModeFirstEnter,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>
@@ -80,10 +82,20 @@ namespace GameLogic.Core
         public static string LastRaised { get; private set; }
         public static int RaisedCount { get; private set; }
 
-        /// <summary>触发钩子。第一次返回 true 并广播；之后返回 false（不重复打扰）。</summary>
+        /// <summary>FG1-HUD-01：每一次触发（不只第一次）都会调用——机制图鉴按“首次接触”解锁条目（FGR-UX-051），
+        /// 图鉴文件被删除 / 换机器时，玩家下一次接触同一机制还能重新解锁，不依赖“钩子只广播一次”。</summary>
+        public static int TouchCount { get; private set; }
+
+        /// <summary>触发钩子。第一次返回 true 并广播；之后返回 false（不重复打扰）。无论第几次，都解锁以它为钩子的图鉴条目。</summary>
         public static bool Raise(string hookId)
         {
-            if (string.IsNullOrEmpty(hookId) || GameSettings.HasSeenGuidanceHook(hookId))
+            if (string.IsNullOrEmpty(hookId))
+            {
+                return false;
+            }
+            TouchCount++;
+            GameLogic.Progression.MechanicCodex.OnHook(hookId);
+            if (GameSettings.HasSeenGuidanceHook(hookId))
             {
                 return false;
             }

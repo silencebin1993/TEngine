@@ -134,8 +134,9 @@ namespace GameLogic.UI.Victory
 
             int aliveCount = snapshot.Machines.Count(m => m.IsAlive);
             int deadCount = snapshot.Machines.Length - aliveCount;
-            _summaryLabel.text = $"幸存 {aliveCount} 台｜阵亡 {deadCount} 台｜接管 {snapshot.ControlTakeovers} 次｜" +
-                $"出征 {snapshot.TotalExpeditionCount} 次｜完成时间 {snapshot.CompletionPlaySeconds:F0} 秒";
+            // FG1-HUD-01（FG-GAP-011）：“接管”改“接入”，走文本键。
+            _summaryLabel.text = Localization.GameText.Format("victory.summary", aliveCount, deadCount, snapshot.ControlTakeovers,
+                snapshot.TotalExpeditionCount, snapshot.CompletionPlaySeconds.ToString("0", System.Globalization.CultureInfo.InvariantCulture));
 
             for (int i = 0; i < MaxRows; i++)
             {
@@ -149,13 +150,14 @@ namespace GameLogic.UI.Victory
                 row.style.display = DisplayStyle.Flex;
                 ContentIcons.Apply(row.Q<VisualElement>("Icon"), m.ChassisId); // ER8-CONTENT-01：行首底盘图标。
                 Label numberLabel = row.Q<Label>("NumberLabel");
-                numberLabel.text = $"#{m.DisplayNumber}（{(m.IsAlive ? "幸存" : "阵亡")}）";
+                numberLabel.text = Localization.GameText.Format("victory.row.number", m.DisplayNumber, Localization.GameText.Get(m.IsAlive ? "victory.row.alive" : "victory.row.dead"));
                 numberLabel.RemoveFromClassList("vp-machine-alive");
                 numberLabel.RemoveFromClassList("vp-machine-dead");
                 numberLabel.AddToClassList(m.IsAlive ? "vp-machine-alive" : "vp-machine-dead");
-                row.Q<Label>("ExpLabel").text = m.ExperienceDisplayNames.Length > 0
-                    ? string.Join("、", m.ExperienceDisplayNames)
-                    : "无记录经历";
+                // FG1-HUD-01（FGR-SIG-082 机器经历在结算中可见）：经历 + “与信号同行 N 次，累计 H:MM:SS”。
+                row.Q<Label>("ExpLabel").text = (m.ExperienceDisplayNames.Length > 0
+                    ? string.Join(Localization.GameText.Get("machine.exp.sep"), m.ExperienceDisplayNames)
+                    : Localization.GameText.Get("machine.exp.none")) + Localization.GameText.Get("signal.uplink.status.sep") + m.SignalExperienceText;
             }
 
             _crossFactionLabel.text = snapshot.CrossFactionBlueprintIds.Length > 0

@@ -37,6 +37,17 @@ namespace GameLogic.Campaign.Feedback
 
         /// <summary>这一行对应的验收/债务出处，供审计核对，不给玩家看。</summary>
         public string RequirementNote;
+
+        /// <summary>FG1-HUD-01（FG-GAP-011）：标签 / 正文的文本键（fg.TbLocText）。非空且表里有这个键时优先用它（随语言），
+        /// 否则回落 <see cref="Tag"/> / <see cref="Caption"/> 的字面值（其余行的文本键化见 DEBT-FG0UX01-11 → FG15-UX-03）。</summary>
+        public string TagKey;
+        public string CaptionKey;
+
+        public string ResolvedTag => Resolve(TagKey, Tag);
+        public string ResolvedCaption => Resolve(CaptionKey, Caption);
+
+        private static string Resolve(string key, string literal) =>
+            !string.IsNullOrEmpty(key) && GameLogic.Localization.GameText.Has(key) ? GameLogic.Localization.GameText.Get(key) : literal;
     }
 
     /// <summary>ER8-CONTENT-01：反馈时刻的唯一定义表（DEBT-ER8CONTENT01-01 / DEBT-ER7CORE01-01 的落点）。
@@ -99,7 +110,8 @@ namespace GameLogic.Campaign.Feedback
             }
 
             // ── AC-AUD-001 十一类 ─────────────────────────────────────────────
-            Add(new FeedbackCueDef { Id = FeedbackCueId.Takeover, SfxId = "sfx_takeover", Tag = "接管", Caption = "已接管", Tone = FeedbackTone.Good, CaptionSeconds = 3f, RequirementNote = "AC-AUD-001 接管" });
+            // FG1-HUD-01（FG-GAP-011 / FG-GAP-044）：0.2 的玩家动作叫“接入”——接入提交的音效 + 字幕（形变随之出声）；标签 / 正文走文本键。
+            Add(new FeedbackCueDef { Id = FeedbackCueId.Takeover, SfxId = "sfx_takeover", Tag = "接入", Caption = "已接入", TagKey = "feedback.tag.uplink", CaptionKey = "feedback.caption.uplink", Tone = FeedbackTone.Good, CaptionSeconds = 3f, MinIntervalSeconds = 0.3f, RequirementNote = "AC-AUD-001 接管（0.2 = 接入）；FG-GAP-044" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.Denied, SfxId = "sfx_ui_deny", Channel = AudioType.UISound, MinIntervalSeconds = 0.25f, Tag = "拒绝", Caption = string.Empty, Tone = FeedbackTone.Warning, RequirementNote = "AC-AUD-001 拒绝" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.PowerLost, SfxId = "sfx_power_down", Tag = "断电", Caption = "电力不足", Tone = FeedbackTone.Danger, CaptionSeconds = 5f, RequirementNote = "AC-AUD-001 断电" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.PowerRestored, SfxId = "sfx_power_up", Tag = "供电", Caption = "供电恢复", Tone = FeedbackTone.Good, CaptionSeconds = 3f, RequirementNote = "AC-AUD-001 断电（恢复）" });
@@ -141,6 +153,9 @@ namespace GameLogic.Campaign.Feedback
             Add(new FeedbackCueDef { Id = FeedbackCueId.BuildComplete, SfxId = "sfx_build_complete", Tag = "建造", Caption = "完工", Tone = FeedbackTone.Good, RequirementNote = "BuildingCatalog.SfxId 消费点" });
             // FG0-SAVE-01：读档后的内容迁移通知（正文由 SaveContentReconciler.Render 走文本键生成），停留更久。
             Add(new FeedbackCueDef { Id = FeedbackCueId.SaveContentMigrated, SfxId = "sfx_objective_new", Channel = AudioType.UISound, Tag = "存档", Caption = string.Empty, Tone = FeedbackTone.Warning, CaptionSeconds = 10f, MinIntervalSeconds = 0f, RequirementNote = "FGR-SYS-004 读档后通知" });
+            // FG1-HUD-01（FG-GAP-044）：信号离开机器（玩家按接入 / 退出键离开、切到别的机器时由接入提交音覆盖）。音效沿用信号类的“恢复”短音降音量，
+            // 与断链（SignalLost）的警报区分；同类最小间隔 0.3 秒（1 秒内连按 10 次不刷屏）。字幕只在“字幕”开启时出（状态行已有“已离开 …”）。
+            Add(new FeedbackCueDef { Id = FeedbackCueId.UplinkLeave, SfxId = "sfx_signal_restore", Volume = 0.6f, MinIntervalSeconds = 0.3f, Tag = "离开", Caption = "信号离开机器", TagKey = "feedback.tag.uplink_leave", CaptionKey = "feedback.caption.uplink_leave", CaptionMode = FeedbackCaptionMode.SubtitlesOnly, Tone = FeedbackTone.Info, CaptionSeconds = 2.5f, RequirementNote = "FG-GAP-044 接入 / 离开音效钩子" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.SignalLinkWarning, SfxId = "sfx_alarm_warning", Volume = 0.7f, Tag = "信号", Caption = string.Empty, Tone = FeedbackTone.Warning, CaptionSeconds = 4f, MinIntervalSeconds = 1f, RequirementNote = "FG1-SIG-04 覆盖边缘 / 静默夜预警" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.SaveComplete, SfxId = "sfx_save_ok", Channel = AudioType.UISound, Tag = "存档", Caption = "已保存", Tone = FeedbackTone.Info, CaptionSeconds = 2.5f, MinIntervalSeconds = 1f });
             Add(new FeedbackCueDef { Id = FeedbackCueId.CommandAck, SfxId = "sfx_command_ack", Channel = AudioType.UISound, Volume = 0.7f, MinIntervalSeconds = 0.15f, CaptionMode = FeedbackCaptionMode.None, RequirementNote = "ChassisCatalog.SfxId 消费点（命令确认音按底盘区分）" });

@@ -100,6 +100,12 @@ namespace GameLogic.Campaign
         public int JobsCompleted;
         public int ExpeditionsCompleted;
         public int TimesControlled;
+        /// <summary>FG1-HUD-01（FGR-SIG-082 机器经历“与信号同行”次数）：信号进入这台机器的次数（接入完成、Tab 切换、跳转、阵亡回弹到它）。
+        /// 读档恢复“信号仍在这台机器里”不算新的一次。唯一写入口 <c>SignalUplinkService.SetUplink</c>。旧档缺字段读回 0。</summary>
+        public int SignalUplinkCount;
+        /// <summary>FG1-HUD-01（FGR-SIG-082 累计时长）：信号已离开的各段在这台机器里累计的统一时钟步数（<c>GameClock.Ticks</c>，60 步 = 1 游戏秒；
+        /// 存整数步，不存浮点秒——浮点经 JsonUtility 往返会差 1 ulp）。当前正在进行的一段不在这里，读取走 <c>MachineSignalExperience.TotalTicks</c>。</summary>
+        public long SignalUplinkTicks;
         public bool IsAlive;
         public bool IsInFactory;
         public bool IsDeployed;

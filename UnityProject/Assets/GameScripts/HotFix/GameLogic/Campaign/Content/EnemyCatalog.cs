@@ -50,7 +50,7 @@ namespace GameLogic.Campaign.Content
                 Id = JammerId,
                 Category = MechanicalContentCategory.Enemy,
                 DisplayName = "静默干扰机",
-                Description = "驻守监听节点的干扰单位，干扰半径内接管请求返回 SignalJammed。",
+                Description = "驻守监听节点的干扰单位，干扰半径内的接入请求被拒绝（信号被干扰）。",
                 Source = MechanicalContentSource.RegionEncounter,
                 SourceDetail = "破碎都市（第1次出击）监听节点驻守（DEMO-CONTENT-LOCK.md §4.1/§5）。",
                 Slot = "敌类",

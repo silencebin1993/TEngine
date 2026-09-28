@@ -193,24 +193,25 @@ namespace GameLogic.UI.WorkOrder
             }
 
             MachineRegistry.TryGetRecord(selected.Value, out MachineRecord record);
-            string status = !record.IsAlive ? "阵亡（纪念记录）"
-                : record.IsInFactory ? "厂内待驶出"
-                : GameRoot.HomeValley != null && GameRoot.HomeValley.IsMachineDirectControlled(record.LogicId) ? "直控中"
-                : string.IsNullOrEmpty(record.CurrentWorkOrderId) ? "空闲" : "工作中";
-
-            string experience = record.ExperienceFlags != null && record.ExperienceFlags.Length > 0
-                ? string.Join("、", System.Array.ConvertAll(record.ExperienceFlags, MachineExperienceFlags.DisplayName))
-                : "无";
+            CampaignState state = CampaignSession.Current;
+            // FG1-HUD-01（FGR-SIG-082 机器经历在机器详情页可见；FG-GAP-011 文案走文本键、“直控 / 接管”改“接入”）。
+            string status = GameLogic.Localization.GameText.Get(!record.IsAlive ? "machine.status.dead"
+                : record.IsInFactory ? "machine.status.in_factory"
+                : GameLogic.Campaign.Signal.SignalUplinkService.IsUplinked(state, record.LogicId) ? "machine.status.uplinked"
+                : string.IsNullOrEmpty(record.CurrentWorkOrderId) ? "machine.status.idle" : "machine.status.working");
             string injuries = record.InjuryFlags != null && record.InjuryFlags.Length > 0
-                ? string.Join("、", record.InjuryFlags)
-                : "无记录";
+                ? GameLogic.Campaign.MachineInjury.DescribeAll(record.InjuryFlags)
+                : GameLogic.Localization.GameText.Get("machine.detail.injury_none");
+            string port = GameLogic.Localization.GameText.Get(GameLogic.Campaign.Signal.UplinkHudModel.HasUplinkPort(state, record.LogicId) ? "machine.detail.port_yes" : "machine.detail.port_no");
+            string F0(float v) => v.ToString("0", System.Globalization.CultureInfo.InvariantCulture);
 
             _machineDetailLabel.text =
-                $"编号 #{record.DisplayNumber}（LogicId {record.LogicId}）｜底盘 {record.ChassisId}｜" +
-                $"装配 v{record.BlueprintVersion}｜状态 {status}\n" +
-                $"HP {record.Health:F0}/{record.MaxHealth:F0}｜电池 {record.Battery:F0}｜伤势 {injuries}\n" +
-                $"经历：{experience}\n" +
-                $"统计：工作{record.JobsCompleted}｜接管{record.TimesControlled}｜远征{record.ExpeditionsCompleted}｜击杀{record.KillCount}";
+                GameLogic.Localization.GameText.Format("machine.detail.line_id", record.DisplayNumber, record.LogicId, record.ChassisId, record.BlueprintVersion, port, status) + "\n" +
+                GameLogic.Localization.GameText.Format("machine.detail.line_vitals", F0(record.Health), F0(record.MaxHealth), F0(record.Battery), injuries) + "\n" +
+                GameLogic.Localization.GameText.Format("machine.detail.line_morph", GameLogic.Campaign.Signal.UplinkHudModel.MorphText(state, record.LogicId)) + "\n" +
+                GameLogic.Localization.GameText.Format("machine.detail.line_exp", MachineExperienceFlags.Join(record.ExperienceFlags)) + "\n" +
+                MachineSignalExperience.Describe(state, record) + "\n" +
+                GameLogic.Localization.GameText.Format("machine.detail.line_stats", record.JobsCompleted, record.ExpeditionsCompleted, record.KillCount);
         }
 
         private void RefreshOrderList(CampaignState state)

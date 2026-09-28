@@ -1157,7 +1157,7 @@ namespace GameLogic.Campaign.Signal
                     {
                         SetFeedback(GameText.Format("signal.uplink.left", SignalPresence.MachineLabel(before)));
                     }
-                    FeedbackCues.Raise(FeedbackCueId.CommandAck);
+                    FeedbackCues.Raise(FeedbackCueId.UplinkLeave, SignalPresence.MachineLabel(before)); // FG1-HUD-01（FG-GAP-044）：离开的提交音效钩子。
                 }
             }
             // 玩家把镜头拉回战略（主动退出）：这个地点里还没完成的接入一并取消，不在玩家看战略地图时突然接进去。
@@ -1217,9 +1217,17 @@ namespace GameLogic.Campaign.Signal
                 CombatSites.Get(s.SignalCore.UplinkSiteId)?.TryGetMachineHeat(old, out _, out oldOverheated);
             }
             _lastHandoffOverheated = false;
+            // FG1-HUD-01（FGR-SIG-082 机器经历“与信号同行”）：离开的那台把这一段累计进它的记录；进入的那台次数 +1、从现在开始计时。
+            // 读档恢复（old == logicId）在上面已经提前返回，不算新的一次；按统一时钟步计，与是否被观察、倍速无关（暂停不走）。
+            long nowTick = GameClock.Ticks;
+            if (old != 0)
+            {
+                MachineSignalExperience.CloseSegment(s, old, nowTick);
+            }
             if (logicId != 0)
             {
                 PushRecent(s, logicId); // FG1-SIG-07：“跳回上一台机器”的记录（最近接入过的机器，进存档）。
+                MachineSignalExperience.OpenSegment(s, logicId, nowTick);
             }
             s.SignalCore.UplinkMachineLogicId = logicId;
             s.SignalCore.UplinkSiteId = logicId == 0 ? string.Empty : siteId ?? string.Empty;
@@ -1446,6 +1454,11 @@ namespace GameLogic.Campaign.Signal
             if (id == 0)
             {
                 return false;
+            }
+            // FG1-HUD-01：FG1-HUD-01 之前的存档没有“这一段从哪一步开始”（读成 0）——从读档这一刻开始计，不把整局时长算进去。
+            if (s.SignalCore.UplinkSinceTick <= 0 || s.SignalCore.UplinkSinceTick > GameClock.Ticks)
+            {
+                s.SignalCore.UplinkSinceTick = GameClock.Ticks;
             }
             RegionControlSystem control = null;
             if (MachineRegistry.TryGetRecord(id, out MachineRecord rec) && rec != null && rec.IsAlive)

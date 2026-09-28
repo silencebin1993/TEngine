@@ -90,7 +90,7 @@ namespace GameLogic.Campaign.Regions
                 {
                     return $"未命中：{FailureReason}";
                 }
-                string source = IsAiSource ? $"AI(机器{AttackerLogicId})" : $"直控(机器{AttackerLogicId})";
+                string source = IsAiSource ? $"AI(机器{AttackerLogicId})" : $"接入(机器{AttackerLogicId})";
                 return $"{source} 命中，伤害 {DamageApplied:F1}，剩余 {RemainingHealth:F1}/{MaxHealthValue:F0}，" +
                     $"{ReactionHint}，签名 {CompileSignature}";
             }

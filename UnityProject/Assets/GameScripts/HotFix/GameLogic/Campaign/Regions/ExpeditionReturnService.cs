@@ -338,7 +338,8 @@ namespace GameLogic.Campaign.Regions
 
                 if (m.MaxHealth > 0f && m.Health < m.MaxHealth * InjuredHealthFraction)
                 {
-                    MachineRegistry.TryMarkInjury(m.LogicId, $"战斗损伤（HP {m.Health:F0}/{m.MaxHealth:F0}）");
+                    // FG1-HUD-01 修复轮：存文本键 + 参数，显示时按当前语言翻译（MachineInjury.Describe）。
+                    MachineRegistry.TryMarkInjury(m.LogicId, MachineInjury.Combat(m.Health, m.MaxHealth));
                 }
                 if (m.MaxHealth > 0f && m.Health <= m.MaxHealth * SeverelyInjuredHealthFraction)
                 {

@@ -347,12 +347,13 @@ namespace GameLogic.UI.RegionCommand
             int? possessedId = ActivePossessedLogicId();
             if (possessedId.HasValue && MachineRegistry.TryGetRecord(possessedId.Value, out MachineRecord rec))
             {
-                string prefix = control.Availability == RegionControlAvailability.Suspended ? "重连中…" : "受控";
-                _controlledUnitLabel.text = $"{prefix}：#{rec.DisplayNumber} {rec.BlueprintId}";
+                // FG1-HUD-01（FG-GAP-011）：0.2 的玩家动作叫“接入”，文案走文本键；机器标识与 HUD 同一口径（型号 + 编号）。
+                _controlledUnitLabel.text = GameText.Format(control.Availability == RegionControlAvailability.Suspended ? "signal.cmd.reconnecting" : "signal.cmd.uplinked",
+                    SignalPresence.MachineLabel(rec.LogicId));
             }
             else
             {
-                _controlledUnitLabel.text = "战略视角";
+                _controlledUnitLabel.text = GameText.Get("signal.cmd.strategy");
             }
 
             if (_controlFeedbackRemaining > 0f)
@@ -405,6 +406,16 @@ namespace GameLogic.UI.RegionCommand
             int safeKey = System.HashCode.Combine(Campaign.Signal.SignalLinkService.SafeModeRevision, (int)GameText.Language);
             // FG1-SIG-07：覆盖外标记的变化键（步首定期评估的次数 + 语言）：每 0.5 游戏秒最多改写一次，读内核标志 O(1)。
             int covKey = System.HashCode.Combine(Campaign.Signal.SignalCoverageService.EvaluateCount, (int)GameText.Language);
+            // FG1-HUD-01（FGR-SIG-081 带接入口的机器在机器列表上有专门标记；DEBT-FG1SIG05-03 交还后仍过热常驻显示）：
+            // 接入口标记按装配登记版本 + 语言变化改写；过热标记每 0.25 真实秒读一次内核标志（O(列表行数)，与敌人 / 弹体数无关）。
+            int portKey = System.HashCode.Combine(Campaign.Signal.UplinkHudModel.PortRevision, (int)GameText.Language);
+            float nowReal = Time.realtimeSinceStartup;
+            bool heatTick = nowReal >= _nextHeatAt || _heatKeyLanguage != (int)GameText.Language;
+            if (heatTick)
+            {
+                _nextHeatAt = nowReal + 0.25f;
+                _heatKeyLanguage = (int)GameText.Language;
+            }
             var seen = new HashSet<int>();
             foreach (int logicId in candidates)
             {
@@ -431,6 +442,7 @@ namespace GameLogic.UI.RegionCommand
                 }
                 RefreshSafeModeTag(btn, logicId, safeKey);
                 RefreshCoverageTag(btn, logicId, covKey);
+                RefreshPortAndHeatTags(btn, logicId, portKey, heatTick);
                 btn.RemoveFromClassList("cmd-candidate-btn-current");
                 if (possessedId.HasValue && possessedId.Value == logicId)
                 {
@@ -454,6 +466,7 @@ namespace GameLogic.UI.RegionCommand
                 _candidateButtons.Remove(logicId);
                 _safeTagKeys.Remove(logicId);
                 _covTagKeys.Remove(logicId);
+                _portTagKeys.Remove(logicId);
             }
         }
 
@@ -474,6 +487,20 @@ namespace GameLogic.UI.RegionCommand
             {
                 body = Campaign.Signal.SignalLinkService.SafeModeTooltip(s, logicId) + "\n" + body;
             }
+            // FG1-HUD-01：带不带接入口、过热、机身状态与来源（FG-GAP-045）、与信号同行的经历——显示那一刻现取（O(1) 次装配解析）。
+            var extra = new System.Text.StringBuilder();
+            extra.Append(GameText.Get(Campaign.Signal.UplinkHudModel.HasUplinkPort(s, logicId) ? "signal.list.port_line" : "signal.list.no_port_line"));
+            if (TryGetHeat(logicId, out float heat, out bool over) && over)
+            {
+                extra.Append('\n').Append(GameText.Format("signal.list.overheat_line", Mathf.RoundToInt(heat),
+                    Mathf.RoundToInt(FracturedCityLayout.WeaponHeatRecoverThreshold)));
+            }
+            extra.Append('\n').Append(GameText.Format("signal.list.morph_line", Campaign.Signal.UplinkHudModel.MorphText(s, logicId)));
+            if (MachineRegistry.TryGetRecord(logicId, out MachineRecord expRec))
+            {
+                extra.Append('\n').Append(MachineSignalExperience.Describe(s, expRec, "signal.list.experience_line"));
+            }
+            body = body + "\n" + extra;
             return new TooltipContent
             {
                 Title = SignalPresence.MachineLabel(logicId),
@@ -534,6 +561,73 @@ namespace GameLogic.UI.RegionCommand
         }
 
         private readonly Dictionary<int, int> _covTagKeys = new Dictionary<int, int>(8);
+        private readonly Dictionary<int, int> _portTagKeys = new Dictionary<int, int>(8);
+        private float _nextHeatAt;
+        private int _heatKeyLanguage = -1;
+
+        /// <summary>FG1-HUD-01：机器列表一行的“◇口”（带接入口，FGR-SIG-081）与“过热”（DEBT-FG1SIG05-03）标记（按钮外侧，文字 + 边框，不只靠颜色）。</summary>
+        private void RefreshPortAndHeatTags(Button btn, int logicId, int portKey, bool heatTick)
+        {
+            VisualElement item = ItemOf(btn);
+            if (!_portTagKeys.TryGetValue(logicId, out int seen) || seen != portKey)
+            {
+                _portTagKeys[logicId] = portKey;
+                bool port = Campaign.Signal.UplinkHudModel.HasUplinkPort(CampaignSession.Current, logicId);
+                Label tag = item.Q<Label>(className: "cmd-candidate-port-tag");
+                if (tag == null)
+                {
+                    tag = new Label { pickingMode = PickingMode.Ignore };
+                    tag.AddToClassList("cmd-candidate-port-tag");
+                    item.Add(tag);
+                }
+                tag.text = GameText.Get("signal.list.port_tag");
+                item.EnableInClassList("cmd-candidate-item-port", port);
+                btn.EnableInClassList("cmd-candidate-btn-port", port);
+            }
+            if (heatTick || item.Q<Label>(className: "cmd-candidate-heat-tag") == null)
+            {
+                bool over = TryGetHeat(logicId, out _, out bool o) && o;
+                Label heatTag = item.Q<Label>(className: "cmd-candidate-heat-tag");
+                if (heatTag == null)
+                {
+                    heatTag = new Label { pickingMode = PickingMode.Ignore };
+                    heatTag.AddToClassList("cmd-candidate-heat-tag");
+                    item.Add(heatTag);
+                }
+                heatTag.text = GameText.Get("signal.list.overheat_tag");
+                item.EnableInClassList("cmd-candidate-item-hot", over);
+                btn.EnableInClassList("cmd-candidate-btn-hot", over);
+            }
+        }
+
+        private static bool TryGetHeat(int logicId, out float heat, out bool overheated)
+        {
+            heat = 0f;
+            overheated = false;
+            if (!MachineRegistry.TryGetRecord(logicId, out MachineRecord rec) || rec == null)
+            {
+                return false;
+            }
+            Campaign.Combat.CombatSite site = Campaign.Combat.CombatSites.Get(rec.RegionId);
+            if (site != null && site.TryGetMachineHeat(logicId, out heat, out overheated))
+            {
+                return true;
+            }
+            heat = rec.WeaponHeat;
+            overheated = rec.IsWeaponOverheated;
+            return true;
+        }
+
+        /// <summary>自检：机器列表里这台机器是否带“◇口”（带接入口）标记。</summary>
+        public bool CandidateShowsPort(int logicId) =>
+            _candidateButtons.TryGetValue(logicId, out Button b) && b != null && b.ClassListContains("cmd-candidate-btn-port");
+
+        /// <summary>自检：机器列表里这台机器是否带“过热”标记。</summary>
+        public bool CandidateShowsOverheat(int logicId) =>
+            _candidateButtons.TryGetValue(logicId, out Button b) && b != null && b.ClassListContains("cmd-candidate-btn-hot");
+
+        /// <summary>自检：受控标签文字（“接入：ERC-003 #5”/“战略视角”）。</summary>
+        public string ControlledLabelText => _controlledUnitLabel?.text ?? string.Empty;
 
         /// <summary>自检：机器列表里这台机器是否带“覆盖外”标记。</summary>
         public bool CandidateShowsOutOfCoverage(int logicId) =>

@@ -112,8 +112,14 @@ namespace GameLogic.UI.SignalCore
             {
                 Title = GameText.Get("exposure.panel.title"),
                 Body = GameText.Format("exposure.panel.help_tip", F0(CampaignExposureLedger.ThresholdScoutTip),
-                    F0(CampaignExposureLedger.ThresholdAdaptationIntel), F0(CampaignExposureLedger.ThresholdCoreReinforcement)),
+                    F0(CampaignExposureLedger.ThresholdAdaptationIntel), F0(CampaignExposureLedger.ThresholdCoreReinforcement))
+                       + "\n" + GameText.Format("codex.help.tip", GameText.Get("codex.signal.exposure.title")),
             });
+            // FG1-HUD-01（DEBT-FG1SIG06-06）：“?”点开图鉴“信号暴露”条目（悬停说明照旧）。
+            if (_help != null)
+            {
+                _help.clicked += () => GameLogic.Progression.MechanicCodex.Open("codex.signal.exposure");
+            }
             _hudKey = 0;
             _panelKey = 0;
         }

@@ -355,6 +355,10 @@ namespace GameLogic.Campaign.WorldSim
             {
                 CycleFocus();
             }
+            if (InputRouter.ConsumeAction(GameActionId.FollowSelection, InputScope.Strategy))
+            {
+                ToggleFollowSelection();
+            }
             InputRouter.SetGameplayPaused(GameClock.Paused, strategic: true);
             if (observed != null && observed.CameraProfile != null)
             {
@@ -363,6 +367,90 @@ namespace GameLogic.Campaign.WorldSim
             DirectorInstance.Tick(GameClock.Paused);
             UpdatePlanetFlyPin(state, observed);
             GameClock.SetDirectLocked(DirectorInstance.IsBound && DirectorInstance.Mode == ViewMode.Direct);
+        }
+
+        // ── FG1-HUD-01：跟随选中对象（默认 F，战略上下文，可重绑）──
+
+        /// <summary>自检读点：按“跟随选中对象”开始跟随的次数。</summary>
+        public static int FollowStartCount { get; private set; }
+
+        /// <summary>
+        /// 按“跟随选中对象”：没在跟随 → 镜头跟随当前地点里选中的机器（多选时跟随它们的中心）；正在跟随 → 停止。
+        /// 选中集合每帧现取（框选改了就跟新的），选中的机器都没了 / 取消选中 → 自动停止；玩家平移镜头也停止。没有选中时说明原因（不静默）。
+        /// 每帧 O(选中数)，只在跟随中。
+        /// </summary>
+        public static bool ToggleFollowSelection()
+        {
+            if (DirectorInstance.IsFollowing)
+            {
+                DirectorInstance.StopFollow();
+                Signal.SignalUplinkService.PushFeedback(GameText.Get("camera.follow.stopped"));
+                return false;
+            }
+            string site = _observedId;
+            if (!TrySelectionCenter(site, out _, out int count, out int first))
+            {
+                Signal.SignalUplinkService.PushFeedback(GameText.Format("camera.follow.nothing", InputDisplay.ForAction(GameActionId.FollowSelection)));
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Denied, GameText.Format("camera.follow.nothing", InputDisplay.ForAction(GameActionId.FollowSelection)));
+                return false;
+            }
+            DirectorInstance.StartFollow(() =>
+            {
+                Vector2 c = Vector2.zero;
+                bool ok = site == _observedId && TrySelectionCenter(site, out c, out _, out _);
+                return (ok, ok ? new float2(c.x, c.y) : float2.zero);
+            });
+            FollowStartCount++;
+            string who = count > 1 ? GameText.Format("camera.follow.group", count) : Signal.SignalPresence.MachineLabel(first);
+            Signal.SignalUplinkService.PushFeedback(GameText.Format("camera.follow.started", who, InputDisplay.ForAction(GameActionId.FollowSelection)));
+            return true;
+        }
+
+        /// <summary>地点里选中的机器（编队框选集合优先，没有时取家园单选）的实时位置中心。</summary>
+        public static bool TrySelectionCenter(string siteId, out Vector2 center, out int count, out int firstLogicId)
+        {
+            center = Vector2.zero;
+            count = 0;
+            firstLogicId = 0;
+            IWorldSite site = WorldSimulation.FindSite(siteId);
+            if (site == null)
+            {
+                return false;
+            }
+            IReadOnlyList<int> selection = Combat.CombatSites.Get(siteId)?.Squad?.Selection;
+            Vector2 sum = Vector2.zero;
+            if (selection != null)
+            {
+                for (int i = 0; i < selection.Count; i++)
+                {
+                    Vector2? p = site.LivePosition(selection[i]);
+                    if (p.HasValue)
+                    {
+                        sum += p.Value;
+                        if (count == 0)
+                        {
+                            firstLogicId = selection[i];
+                        }
+                        count++;
+                    }
+                }
+            }
+            if (count == 0 && siteId == Regions.HomeValleyLayout.RegionId && Stage.GameRoot.HomeValley?.SelectedMachineLogicId is int single)
+            {
+                Vector2? p = site.LivePosition(single);
+                if (p.HasValue)
+                {
+                    sum = p.Value;
+                    firstLogicId = single;
+                    count = 1;
+                }
+            }
+            if (count == 0)
+            {
+                return false;
+            }
+            center = sum / count;
+            return true;
         }
 
         /// <summary>模拟推进之后：观察的地点若已卸载（撤离 / 放弃远征）就回到家园；星球表现层跟随镜头。</summary>

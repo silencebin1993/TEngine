@@ -251,8 +251,9 @@ namespace GameLogic.EditorTools
             FeedbackCues.Raise(FeedbackCueId.Takeover, "#7");
             Expect(FeedbackCues.CountOf(FeedbackCueId.Takeover) == 1 && FeedbackCues.LastSfxId == "sfx_takeover",
                 $"接管：触发 1 次、请求音效 sfx_takeover（实际 {FeedbackCues.CountOf(FeedbackCueId.Takeover)} / {FeedbackCues.LastSfxId}）");
-            Expect(FeedbackCues.ActiveCaptions.Count == 1 && FeedbackCues.LastCaptionText == "【接管】已接管：#7",
-                $"接管：字幕条出现一行“【接管】已接管：#7”（实际 {FeedbackCues.ActiveCaptions.Count} 行 / {FeedbackCues.LastCaptionText}）");
+            // FG1-HUD-01（FG-GAP-011）：0.2 的玩家动作叫“接入”，字幕随之改名（文本键 feedback.*.uplink，中文）。
+            Expect(FeedbackCues.ActiveCaptions.Count == 1 && FeedbackCues.LastCaptionText == "【接入】已接入：#7",
+                $"接入：字幕条出现一行“【接入】已接入：#7”（实际 {FeedbackCues.ActiveCaptions.Count} 行 / {FeedbackCues.LastCaptionText}）");
 
             FeedbackCues.Raise(FeedbackCueId.Takeover, "#7");
             Expect(FeedbackCues.ActiveCaptions.Count == 1 && FeedbackCues.ActiveCaptions[0].Count == 2,

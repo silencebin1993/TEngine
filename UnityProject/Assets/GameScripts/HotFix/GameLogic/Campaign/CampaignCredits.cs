@@ -22,12 +22,21 @@ namespace GameLogic.Campaign
             /// <summary>机型编号（erc_001 等），胜利页据此显示底盘图标（ER8-CONTENT-01）。</summary>
             public readonly string ChassisId;
 
-            public MachineSummary(int displayNumber, bool isAlive, string[] experienceDisplayNames, string chassisId = null)
+            /// <summary>FG1-HUD-01（FGR-SIG-082 机器经历在结算中可见）：与信号同行的次数、累计游戏秒与现成文案。</summary>
+            public readonly int SignalUplinkCount;
+            public readonly double SignalUplinkSeconds;
+            public readonly string SignalExperienceText;
+
+            public MachineSummary(int displayNumber, bool isAlive, string[] experienceDisplayNames, string chassisId = null,
+                int signalUplinkCount = 0, double signalUplinkSeconds = 0, string signalExperienceText = null)
             {
                 DisplayNumber = displayNumber;
                 IsAlive = isAlive;
                 ExperienceDisplayNames = experienceDisplayNames;
                 ChassisId = chassisId;
+                SignalUplinkCount = signalUplinkCount;
+                SignalUplinkSeconds = signalUplinkSeconds;
+                SignalExperienceText = signalExperienceText ?? string.Empty;
             }
         }
 
@@ -73,7 +82,10 @@ namespace GameLogic.Campaign
                     m.DisplayNumber,
                     m.IsAlive,
                     (m.ExperienceFlags ?? Array.Empty<string>()).Select(MachineExperienceFlags.DisplayName).ToArray(),
-                    m.ChassisId))
+                    m.ChassisId,
+                    m.SignalUplinkCount,
+                    MachineSignalExperience.TotalSeconds(state, m),
+                    MachineSignalExperience.Describe(state, m)))
                 .ToArray();
 
             // 使用过的跨派系蓝图——EventLedger 里 "exposure:cross_faction_firmware:{blueprintId}:{version}"

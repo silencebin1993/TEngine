@@ -61,6 +61,8 @@ namespace GameLogic.Campaign.Feedback
         SaveContentMigrated,
         // ── 信号链路（FG1-SIG-04：接近信号覆盖边缘、静默夜将至的预警；断链本身用 SignalLost） ──
         SignalLinkWarning,
+        // ── 接入（FG1-HUD-01 / FG-GAP-044：接入提交用 Takeover，信号离开机器用 UplinkLeave；形变随之出声，同类按最小间隔限流） ──
+        UplinkLeave,
 
         Max,
     }

@@ -29,6 +29,10 @@ namespace GameLogic.UI.Common
         public const string StateBlocked = "icon_state_blocked";
         /// <summary>FG1-SIG-04：机器安全模式（失去信号、只跑本地常规固件）——机器头顶标记与机器列表共用。</summary>
         public const string StateSafeMode = "icon_state_safe_mode";
+        /// <summary>FG1-HUD-01（FGR-SIG-081）：带接入口的机器——战略视角下机器头侧的菱形标记（与盾形安全模式、圆形 / 三角 / 八边形建筑状态外形都不同）。</summary>
+        public const string StateUplinkPort = "icon_state_uplink_port";
+        /// <summary>FG1-HUD-01（FGR-SIG-081“靠近覆盖边缘时变色并加图标”）：接入中的机器接近覆盖边缘 / 宽限中时头顶的倒三角标记。</summary>
+        public const string StateLinkEdge = "icon_state_link_edge";
 
         /// <summary>世界目标标记（定位针）：当前目标下一步要去的位置。</summary>
         public const string ObjectiveMarker = "icon_objective_marker";
@@ -92,6 +96,8 @@ namespace GameLogic.UI.Common
             ids.Add(StateUnpowered);
             ids.Add(StateBlocked);
             ids.Add(StateSafeMode);
+            ids.Add(StateUplinkPort);
+            ids.Add(StateLinkEdge);
             ids.Add(ObjectiveMarker);
             ids.Add(VfxBurst);
             ids.Add(VfxRing);

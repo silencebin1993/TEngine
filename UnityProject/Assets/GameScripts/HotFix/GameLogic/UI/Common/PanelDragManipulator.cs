@@ -97,6 +97,23 @@ namespace GameLogic.UI.Common
             return IsPointerOverPickableUi(screenTopLeft);
         }
 
+        /// <summary>
+        /// 带这个类的元素可以被拾取（收悬停提示），但<b>不算</b>“指针在 UI 上”：世界层照常收到点击、指针位置与滚轮。
+        /// 只给叠在战场上的只读 HUD 文字用；按钮、滑条等真正的控件不要加（它们先于本类命中，照样挡住世界输入）。
+        /// </summary>
+        public const string PointerPassthroughClass = "uk-pointer-passthrough";
+
+        /// <summary>自检：面板坐标 <paramref name="panelPoint"/> 处拾取到的元素是否让世界层让出鼠标（与运行时同一判定）。</summary>
+        public static bool BlocksWorldPointerAt(IPanel panel, Vector2 panelPoint)
+        {
+            if (panel?.visualTree == null)
+            {
+                return false;
+            }
+            VisualElement picked = panel.Pick(panelPoint);
+            return picked != null && BlocksWorldPointer(picked, panel.visualTree.worldBound);
+        }
+
         private static bool IsPointerOverPickableUi(Vector2 screenTopLeft)
         {
             RefreshKnownPanels();
@@ -125,6 +142,12 @@ namespace GameLogic.UI.Common
         {
             for (VisualElement current = picked; current != null; current = current.parent)
             {
+                // FG1-HUD-01 修复轮（审查 P1）：叠在战场上方的只读 HUD 文字（接入 HUD 的体征、槽位……）要能悬停看说明，
+                // 又不能吞掉接入视角的开火 / 点选。先碰到它（沿祖先链先于任何按钮等控件）就放行世界输入。
+                if (current.ClassListContains(PointerPassthroughClass))
+                {
+                    return false;
+                }
                 Rect bounds = current.worldBound;
                 if (bounds.width >= panelBounds.width * 0.9f && bounds.height >= panelBounds.height * 0.9f)
                 {

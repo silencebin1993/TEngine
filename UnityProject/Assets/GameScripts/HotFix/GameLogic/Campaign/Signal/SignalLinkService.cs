@@ -137,6 +137,8 @@ namespace GameLogic.Campaign.Signal
         public static bool InGrace => _watchLogicId != 0 && _suspendReason != SignalLinkBreakReason.None;
         public static SignalLinkBreakReason GraceReason => _watchLogicId != 0 ? _suspendReason : SignalLinkBreakReason.None;
         public static SignalCoverageSample WatchedSample => _watchSample;
+        /// <summary>FG1-HUD-01：宽限还剩多少秒（接入 HUD 的链路行“N 秒内恢复”）；不在宽限中为 0。</summary>
+        public static float GraceLeft => InGrace ? _graceLeft : 0f;
         public static int WatchedLogicId => _watchLogicId;
 
         /// <summary>HUD 状态行的链路预警（空 = 没有预警）。</summary>
@@ -424,6 +426,7 @@ namespace GameLogic.Campaign.Signal
             r.ClearSinceGameSeconds = -1;
             SafeModeEnterCount++;
             SafeModeRevision++;
+            GameLogic.Core.GuidanceHooks.Raise(GameLogic.Core.GuidanceHooks.SafeModeFirstEnter); // FG1-HUD-01：第一次进入安全模式（图鉴“安全模式”随之解锁）。
             GameEvent.Send(SafeModeChangedEvent, new SignalSafeModeChange { LogicId = logicId, InSafeMode = true, Reason = reason });
         }
 

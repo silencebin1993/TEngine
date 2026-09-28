@@ -408,6 +408,12 @@ namespace GameLogic.Campaign
         public long JumpCooldownReadyTick;
         /// <summary>最近接入过的机器（LogicId，去重、最新在前，最多 4 台）：“跳回上一台机器”取第一台不是当前这台的。</summary>
         public int[] RecentUplinks = Array.Empty<int>();
+
+        // ── FG1-HUD-01（FGR-SIG-082 机器经历“与信号同行”累计时长）── 只加字段、不升域版本：旧档读成 0 = 从读档那一刻起开始计这一段。
+
+        /// <summary>信号进入当前这台机器的统一时钟步（<c>GameClock.Ticks</c>）；信号在归还核心时无意义。离开时这一段并进那台机器的
+        /// <see cref="MachineRecord.SignalUplinkTicks"/>。唯一写入口 <c>SignalUplinkService.SetUplink</c>。</summary>
+        public long UplinkSinceTick;
     }
 
     /// <summary>FG1-SIG-04：一台处于安全模式的机器（只运行本地常规固件，接入口为空，继续执行最后一条命令或 AI 教义）。</summary>

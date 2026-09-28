@@ -310,7 +310,7 @@ namespace GameLogic.Campaign.Feedback
                 || (def.CaptionMode == FeedbackCaptionMode.SubtitlesOnly && GameSettings.SubtitlesEnabled);
             if (showCaption)
             {
-                PushCaption(def, ComposeText(def.Caption, detail), now);
+                PushCaption(def, ComposeText(def.ResolvedCaption, detail), now);
             }
 
             // FG0-UX-01（FGR-UX-020）：表里登记过的时刻同时进通知中心（分级、聚合、定位、历史）。
@@ -341,8 +341,9 @@ namespace GameLogic.Campaign.Feedback
 
         private static void PushCaption(FeedbackCueDef def, string text, float now)
         {
-            string key = def.Tag + "|" + text;
-            LastCaptionText = string.IsNullOrEmpty(text) ? "【" + def.Tag + "】" : "【" + def.Tag + "】" + text;
+            string tag = def.ResolvedTag;
+            string key = tag + "|" + text;
+            LastCaptionText = string.IsNullOrEmpty(text) ? "【" + tag + "】" : "【" + tag + "】" + text;
 
             for (int i = 0; i < Captions.Count; i++)
             {
@@ -363,7 +364,7 @@ namespace GameLogic.Campaign.Feedback
             Captions.Add(new FeedbackCaption
             {
                 Cue = def.Id,
-                Tag = def.Tag,
+                Tag = tag,
                 Text = text,
                 Tone = def.Tone,
                 Count = 1,

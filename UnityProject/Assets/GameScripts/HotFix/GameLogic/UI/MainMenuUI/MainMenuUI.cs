@@ -53,8 +53,8 @@ namespace GameLogic
         private static readonly (GameActionId Action, string RowLabel)[] RebindRows =
         {
             (GameActionId.Interact, "世界交互"),
-            (GameActionId.CycleControlTarget, "循环接管目标"),
-            (GameActionId.ToggleCameraView, "切换镜头视角"),
+            (GameActionId.CycleControlTarget, "循环切换机器"), // FG1-HUD-01（FG-GAP-011）：行名运行时取动作表文本键，这里只是代码里的注记名
+            (GameActionId.ToggleCameraView, "接入 / 退出接入"),
             (GameActionId.TogglePause, "暂停/继续"),
             (GameActionId.Cancel, "取消/返回"),
             (GameActionId.ToggleMissionLog, "任务日志与地图"),

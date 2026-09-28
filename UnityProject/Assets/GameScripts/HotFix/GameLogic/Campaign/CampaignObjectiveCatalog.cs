@@ -315,7 +315,7 @@ namespace GameLogic.Campaign
                 },
                 new ObjectiveDef
                 {
-                    Id = CampaignObjectiveTracker.Obj03, Title = "建造第一台战斗机并接管", RegionId = home,
+                    Id = CampaignObjectiveTracker.Obj03, Title = "建造第一台战斗机并接入", RegionId = home,
                     Items = new[]
                     {
                         new ObjectiveItemDef("在装配站生产战斗履带机", HasErc003, At(HomeValleyLayout.BuildingTypeAssemblyStation)),

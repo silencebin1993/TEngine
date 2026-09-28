@@ -12,6 +12,59 @@ namespace GameLogic.Core
         /// <summary>某动作当前绑定的文字；未绑定时为“未绑定”。</summary>
         public static string ForAction(GameActionId action) => Chord(Settings.GameSettings.KeyBindings.GetChord(action));
 
+        /// <summary>长文本里的按键占位前缀：<c>{act:动作名}</c>，动作名是 <see cref="GameActionId"/> 成员名。</summary>
+        public const string ActionTokenPrefix = "{act:";
+
+        /// <summary>
+        /// FG1-HUD-01 修复轮（审查 P2，FG00 B02）：把只用 <see cref="GameText.Get(string)"/> 取出的长文本（图鉴正文、脚注）里的
+        /// <c>{act:动作名}</c> 换成该动作当前绑定的按键文字，改键后提示跟着变。动作名拼错时原样保留（自检扫描全部文本兜底）。
+        /// 只在文本变化时调用（面板按键值重建），不在每帧路径上。
+        /// </summary>
+        public static string ExpandActionTokens(string text)
+        {
+            if (string.IsNullOrEmpty(text) || text.IndexOf(ActionTokenPrefix, System.StringComparison.Ordinal) < 0)
+            {
+                return text;
+            }
+            var sb = new System.Text.StringBuilder(text.Length + 16);
+            int i = 0;
+            while (i < text.Length)
+            {
+                int start = text.IndexOf(ActionTokenPrefix, i, System.StringComparison.Ordinal);
+                if (start < 0)
+                {
+                    sb.Append(text, i, text.Length - i);
+                    break;
+                }
+                int end = text.IndexOf('}', start);
+                if (end < 0)
+                {
+                    sb.Append(text, i, text.Length - i);
+                    break;
+                }
+                sb.Append(text, i, start - i);
+                string name = text.Substring(start + ActionTokenPrefix.Length, end - start - ActionTokenPrefix.Length);
+                if (TryParseAction(name, out GameActionId action))
+                {
+                    sb.Append(ForAction(action));
+                }
+                else
+                {
+                    sb.Append(text, start, end - start + 1);
+                }
+                i = end + 1;
+            }
+            return sb.ToString();
+        }
+
+        /// <summary>按成员名解析动作（大小写敏感、拒绝数字串）；自检也用它校验文本里的占位。</summary>
+        public static bool TryParseAction(string name, out GameActionId action)
+        {
+            action = default;
+            return !string.IsNullOrEmpty(name) && !char.IsDigit(name[0])
+                && System.Enum.TryParse(name, false, out action) && System.Enum.IsDefined(typeof(GameActionId), action);
+        }
+
         public static string Chord(InputChord chord)
         {
             if (!chord.IsBound)

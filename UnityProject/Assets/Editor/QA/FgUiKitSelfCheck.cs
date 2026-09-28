@@ -1438,8 +1438,8 @@ namespace GameLogic.EditorTools
                 }
             }
             // FG0-ARCH-04 新增 BuildModeHud.uxml（建造栏），FG0-ARCH-01 新增 WorldBar.uxml（世界时间条），共 7 份；
-            // FG1-SIG-01 新增 SignalCorePanel.uxml（信号位置 HUD 与信号核面板），共 8 份。
-            Expect(uxmlCount == 8 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
+            // FG1-SIG-01 新增 SignalCorePanel.uxml（信号位置 HUD 与信号核面板），共 8 份；FG1-HUD-01 新增 MechanicCodexPanel.uxml（机制图鉴），共 9 份。
+            Expect(uxmlCount == 9 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
 
             string[] codeDirs =
             {

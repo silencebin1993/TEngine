@@ -80,6 +80,8 @@ namespace GameLogic.View
         private Vector3 _followOffset;
         private float _arenaHalfExtent = 40f;
         private float _directOrthographicSize = 16f;
+        /// <summary>FG1-HUD-01：接入视野的基准正交半高（绑定时给定）；实际 = 基准 × 设置“接入时镜头距离”（<see cref="DirectTargetSize"/>）。</summary>
+        private float _directBaseSize = 16f;
 
         private ViewMode _mode = ViewMode.Direct;
         /// <summary>过渡结束后要进入的状态。过渡本身不是稳定态，一定有去处。</summary>
@@ -165,6 +167,7 @@ namespace GameLogic.View
                 // 多大视野"没有意义——显式给一个贴身尺寸；细胞阶段不传，沿用改造前"就用当前相机尺寸"
                 // 的行为（进场即直控玩家本体，此刻相机尺寸本来就是直控惯用值）。
                 _directOrthographicSize = initialDirectOrthographicSize ?? _camera.orthographicSize;
+                _directBaseSize = _directOrthographicSize;
             }
 
             _mode = startInStrategy ? ViewMode.Strategy : ViewMode.Direct;
@@ -195,6 +198,7 @@ namespace GameLogic.View
             _camera = null;
             _anchorProvider = null;
             _hasRectBounds = false;
+            _strategyFollow = null;
             if (resetInput)
             {
                 InputRouter.Reset();
@@ -383,7 +387,7 @@ namespace GameLogic.View
                 }
             }
 
-            BeginTransition(ViewMode.Direct, CameraPositionFor(anchor), _directOrthographicSize);
+            BeginTransition(ViewMode.Direct, CameraPositionFor(anchor), DirectTargetSize);
             return true;
         }
 
@@ -466,11 +470,18 @@ namespace GameLogic.View
 
             Vector3 want = CameraPositionFor(anchor);
             // 暂停时不做平滑推进——dt 照常流逝会让镜头在"冻结的世界"里继续爬。
-            _camera.transform.position = paused
-                ? want
-                : Vector3.Lerp(_camera.transform.position, want, 1f - math.exp(-DirectFollowLambda * dt));
+            // FG1-HUD-01：跟随力度 = 原平滑系数 × 设置“接入时跟随力度”；视野向“基准 × 接入时镜头距离”靠拢（设置改了立即生效，同一套平滑）。
+            float k = paused ? 1f : 1f - math.exp(-DirectFollowLambda * GameSettings.UplinkFollowStrength * dt);
+            _camera.transform.position = paused ? want : Vector3.Lerp(_camera.transform.position, want, k);
+            _camera.orthographicSize = Mathf.Lerp(_camera.orthographicSize, DirectTargetSize, k);
             _directOrthographicSize = _camera.orthographicSize;
         }
+
+        /// <summary>FG1-HUD-01：接入视野的目标正交半高 = 基准 × 设置“接入时镜头距离”（钳在 4 与战略缩放上限之间）。</summary>
+        public float DirectTargetSize => math.clamp(_directBaseSize * GameSettings.UplinkCameraZoom, 4f, MaxOrthographicSize);
+
+        /// <summary>FG1-HUD-01：跟随平滑系数（每秒；= 原手感 8 × 设置“接入时跟随力度”）。</summary>
+        public static float DirectFollowRate => DirectFollowLambda * GameSettings.UplinkFollowStrength;
 
         private void RequestStrategyFromLostTarget()
         {
@@ -480,11 +491,40 @@ namespace GameLogic.View
             BeginTransition(ViewMode.Strategy, StrategyCameraPosition(), _strategyOrthographicSize);
         }
 
+        // ── FG1-HUD-01（FG13 第 5 节“跟随选中对象 F”；DEBT-FG0QA01-01）：战略视角下镜头跟随选中的机器 ──
+        private System.Func<(bool Ok, float2 Position)> _strategyFollow;
+
+        /// <summary>战略视角是否正在跟随选中的对象。</summary>
+        public bool IsFollowing => _strategyFollow != null;
+        /// <summary>自检读点：因为玩家平移 / 目标消失而自动停止跟随的次数。</summary>
+        public int FollowStopCount { get; private set; }
+
+        /// <summary>开始跟随：每帧取 <paramref name="target"/> 的位置，镜头注视点平滑追过去（与接入跟随同一平滑，不随设置）。返回 false = 没有绑定镜头。</summary>
+        public bool StartFollow(System.Func<(bool Ok, float2 Position)> target)
+        {
+            if (_camera == null || target == null)
+            {
+                return false;
+            }
+            _strategyFollow = target;
+            return true;
+        }
+
+        public void StopFollow()
+        {
+            if (_strategyFollow != null)
+            {
+                _strategyFollow = null;
+                FollowStopCount++;
+            }
+        }
+
         private void TickStrategy(float dt)
         {
             float2 pan = ReadPanInput(out bool fromEdge);
             if (math.lengthsq(pan) > 0f)
             {
+                StopFollow(); // 玩家自己平移镜头 = 不再跟随（常规 RTS 手感）。
                 // 平移速度随视野缩放：拉得越远，同样一次推屏移动的世界距离越大，否则远景下挪不动。
                 // ER8-CONTENT-01：设置里的“镜头速度”与“边缘平移速度”此前零消费方，在这里生效。
                 float speed = StrategyPanSpeed * (_strategyOrthographicSize / 16f) * GameSettings.CameraSpeedMultiplier
@@ -502,6 +542,20 @@ namespace GameLogic.View
                     MinOrthographicSize, MaxOrthographicSize);
                 // 缩放会改变可视范围，边界要重新钳一次，否则拉远后能把镜头推出场地。
                 ClampStrategyFocus();
+            }
+
+            if (_strategyFollow != null)
+            {
+                (bool ok, float2 target) = _strategyFollow();
+                if (!ok)
+                {
+                    StopFollow(); // 选中的机器没了 / 取消选中：停止跟随，镜头停在原处。
+                }
+                else
+                {
+                    _strategyFocus = math.lerp(_strategyFocus, target, 1f - math.exp(-DirectFollowLambda * dt));
+                    ClampStrategyFocus();
+                }
             }
 
             _camera.transform.position = StrategyCameraPosition();

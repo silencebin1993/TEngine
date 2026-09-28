@@ -163,7 +163,7 @@ namespace GameLogic.Campaign.Regions
                 case "target-not-alive": return "这台机器已阵亡";
                 case "target-not-in-home-valley": return "这台机器不在归还谷地（远征中）";
                 case "target-occupying-factory-exit": return "这台机器正停在装配站出口，先让它驶离";
-                case "target-directly-controlled": return "这台机器正被你直接操控，先退出接管";
+                case "target-directly-controlled": return GameLogic.Localization.GameText.Get("factory.reason.uplinked"); // FG1-HUD-01（FG-GAP-011）
                 case "target-busy-with-work-order": return "这台机器正在执行工单，先取消或等它完成";
                 case "target-already-queued-for-retrofit": return "这台机器已经在改造队列里";
                 case "blueprint-version-not-found": return "所选蓝图版本已不存在";

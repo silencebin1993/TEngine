@@ -23,6 +23,11 @@ namespace GameLogic.Settings
         public bool EdgePanEnabled = true;
         public float EdgePanSpeedMultiplier = 1f;
         public float CameraSpeedMultiplier = 1f;
+        /// <summary>FG1-HUD-01（FG01 第 4 章“接入时镜头的缩放和跟随力度可以在设置里调”）：接入时镜头距离倍率（乘在接入视野正交半高上；
+        /// 范围 fg.TbUiTuning camera.uplink_zoom_min / max；1 = 原手感）。旧设置 JSON 没有这个字段时按默认 1 补齐。</summary>
+        public float UplinkCameraZoom = 1f;
+        /// <summary>FG1-HUD-01：接入时镜头跟随力度倍率（乘在跟随平滑系数上；范围 camera.uplink_follow_min / max；1 = 原手感）。</summary>
+        public float UplinkFollowStrength = 1f;
 
         public bool ScreenShakeEnabled = true;
         public bool FlashReductionEnabled = false; // AC-ACC-003：降低闪光。
@@ -101,6 +106,8 @@ namespace GameLogic.Settings
         public static bool EdgePanEnabled => Data.EdgePanEnabled;
         public static float EdgePanSpeedMultiplier => Data.EdgePanSpeedMultiplier;
         public static float CameraSpeedMultiplier => Data.CameraSpeedMultiplier;
+        public static float UplinkCameraZoom => Data.UplinkCameraZoom > 0f ? Data.UplinkCameraZoom : 1f;
+        public static float UplinkFollowStrength => Data.UplinkFollowStrength > 0f ? Data.UplinkFollowStrength : 1f;
         public static bool ScreenShakeEnabled => Data.ScreenShakeEnabled;
         public static bool FlashReductionEnabled => Data.FlashReductionEnabled;
         public static float MasterVolume => Data.MasterVolume;
@@ -267,6 +274,33 @@ namespace GameLogic.Settings
         public static void SetCameraSpeedMultiplier(float value)
         {
             Data.CameraSpeedMultiplier = Mathf.Clamp(value, 0.25f, 2.5f);
+            Save();
+        }
+
+        public static float UplinkCameraZoomMin => UiTuningValues.Get("camera.uplink_zoom_min");
+        public static float UplinkCameraZoomMax => UiTuningValues.Get("camera.uplink_zoom_max");
+        public static float UplinkFollowMin => UiTuningValues.Get("camera.uplink_follow_min");
+        public static float UplinkFollowMax => UiTuningValues.Get("camera.uplink_follow_max");
+
+        /// <summary>FG1-HUD-01：接入时镜头距离（倍率，钳在调参表范围内；立即生效）。</summary>
+        public static void SetUplinkCameraZoom(float value)
+        {
+            Data.UplinkCameraZoom = Mathf.Clamp(value, UplinkCameraZoomMin, UplinkCameraZoomMax);
+            Save();
+        }
+
+        /// <summary>FG1-HUD-01：接入时镜头跟随力度（倍率，钳在调参表范围内；立即生效）。</summary>
+        public static void SetUplinkFollowStrength(float value)
+        {
+            Data.UplinkFollowStrength = Mathf.Clamp(value, UplinkFollowMin, UplinkFollowMax);
+            Save();
+        }
+
+        /// <summary>FG1-HUD-01：接入镜头两项恢复默认（1 = 原手感）。</summary>
+        public static void ResetUplinkCamera()
+        {
+            Data.UplinkCameraZoom = 1f;
+            Data.UplinkFollowStrength = 1f;
             Save();
         }
 

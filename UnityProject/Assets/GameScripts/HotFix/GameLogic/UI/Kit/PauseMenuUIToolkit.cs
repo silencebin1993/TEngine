@@ -64,7 +64,10 @@ namespace GameLogic.UI.Kit
                 SetOpen(false);
                 NotificationHudUIToolkit.OpenCenter();
             });
+            // FG1-HUD-01（FGU-05）：图鉴入口——机制图鉴盖在暂停菜单上面，关掉回到暂停菜单。
+            _codexButton = Bind(root, "PauseCodex", "pause.codex", () => GameLogic.Progression.MechanicCodex.Open(null, unlock: false));
             Bind(root, "PauseSaveQuit", "ui.pause.save_and_quit", AskSaveAndQuit);
+            BindCamera(root);
             _worldSeed = root.Q<Label>("PauseWorldSeed");
             _worldSettings = root.Q<Label>("PauseWorldSettings");
             Button copy = Bind(root, "PauseCopySeed", "ui.pause.copy_seed", CopySeed);
@@ -84,6 +87,92 @@ namespace GameLogic.UI.Kit
                 }
             });
         }
+
+        // ── FG1-HUD-01：接入镜头设置（FG01 第 4 章“接入时镜头的缩放和跟随力度可以在设置里调”）──
+        private Button _codexButton;
+        private Slider _cameraZoom;
+        private Slider _cameraFollow;
+        private Label _cameraZoomLabel;
+        private Label _cameraFollowLabel;
+        private Button _cameraReset;
+
+        public Button CodexButton => _codexButton;
+        public Slider CameraZoomSlider => _cameraZoom;
+        public Slider CameraFollowSlider => _cameraFollow;
+        public Button CameraResetButton => _cameraReset;
+        public string CameraZoomLabelText => _cameraZoomLabel?.text ?? string.Empty;
+        public string CameraFollowLabelText => _cameraFollowLabel?.text ?? string.Empty;
+
+        private void BindCamera(VisualElement root)
+        {
+            Label title = root.Q<Label>("PauseCameraTitle");
+            if (title != null)
+            {
+                title.text = GameText.Get("pause.camera_title");
+            }
+            _cameraZoomLabel = root.Q<Label>("PauseCameraZoomLabel");
+            _cameraFollowLabel = root.Q<Label>("PauseCameraFollowLabel");
+            _cameraZoom = root.Q<Slider>("PauseCameraZoom");
+            _cameraFollow = root.Q<Slider>("PauseCameraFollow");
+            if (_cameraZoom != null)
+            {
+                _cameraZoom.lowValue = Settings.GameSettings.UplinkCameraZoomMin;
+                _cameraZoom.highValue = Settings.GameSettings.UplinkCameraZoomMax;
+                _cameraZoom.RegisterValueChangedCallback(evt =>
+                {
+                    Settings.GameSettings.SetUplinkCameraZoom(evt.newValue);
+                    RefreshCameraLabels();
+                });
+                UiTooltip.Attach(_cameraZoom, () => new TooltipContent
+                {
+                    Title = GameText.Get("pause.camera_title"),
+                    Body = GameText.Format("pause.camera_zoom_tip", Percent(Settings.GameSettings.UplinkCameraZoomMin), Percent(Settings.GameSettings.UplinkCameraZoomMax)),
+                });
+            }
+            if (_cameraFollow != null)
+            {
+                _cameraFollow.lowValue = Settings.GameSettings.UplinkFollowMin;
+                _cameraFollow.highValue = Settings.GameSettings.UplinkFollowMax;
+                _cameraFollow.RegisterValueChangedCallback(evt =>
+                {
+                    Settings.GameSettings.SetUplinkFollowStrength(evt.newValue);
+                    RefreshCameraLabels();
+                });
+                UiTooltip.Attach(_cameraFollow, () => new TooltipContent
+                {
+                    Title = GameText.Get("pause.camera_title"),
+                    Body = GameText.Format("pause.camera_follow_tip", Percent(Settings.GameSettings.UplinkFollowMin), Percent(Settings.GameSettings.UplinkFollowMax)),
+                });
+            }
+            _cameraReset = Bind(root, "PauseCameraReset", "pause.camera_reset", () =>
+            {
+                Settings.GameSettings.ResetUplinkCamera();
+                SyncCameraSliders();
+            });
+            SyncCameraSliders();
+        }
+
+        /// <summary>滑条与标签按当前设置同步（打开菜单、恢复默认时）。</summary>
+        public void SyncCameraSliders()
+        {
+            _cameraZoom?.SetValueWithoutNotify(Settings.GameSettings.UplinkCameraZoom);
+            _cameraFollow?.SetValueWithoutNotify(Settings.GameSettings.UplinkFollowStrength);
+            RefreshCameraLabels();
+        }
+
+        private void RefreshCameraLabels()
+        {
+            if (_cameraZoomLabel != null)
+            {
+                _cameraZoomLabel.text = GameText.Format("pause.camera_zoom", Percent(Settings.GameSettings.UplinkCameraZoom));
+            }
+            if (_cameraFollowLabel != null)
+            {
+                _cameraFollowLabel.text = GameText.Format("pause.camera_follow", Percent(Settings.GameSettings.UplinkFollowStrength));
+            }
+        }
+
+        private static string Percent(float v) => UnityEngine.Mathf.RoundToInt(v * 100f).ToString(System.Globalization.CultureInfo.InvariantCulture);
 
         private static Button Bind(VisualElement root, string name, string textKey, System.Action onClick)
         {
@@ -117,6 +206,7 @@ namespace GameLogic.UI.Kit
                     _feedback.text = string.Empty;
                 }
                 RefreshWorldInfo();
+                SyncCameraSliders();
             }
             else
             {

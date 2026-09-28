@@ -109,6 +109,10 @@ namespace GameLogic.UI.SignalCore
         private static bool _exposureOpenRequested;
 
         public ExposurePanelView Exposure => _exposure;
+
+        /// <summary>FG1-HUD-01（FGU-33）：接入 HUD（同一个 UIDocument，信号在机器里时显示）。</summary>
+        private readonly UplinkHudView _uplinkHud = new UplinkHudView();
+        public UplinkHudView UplinkHud => _uplinkHud;
         public static bool IsExposureOpen => Instance != null && Instance._exposure.IsOpen;
 
         public static void ToggleExposure()
@@ -387,6 +391,7 @@ namespace GameLogic.UI.SignalCore
                 Shortcut = GameActionId.OpenSignalCore,
             });
             _exposure.Bind(root, () => _exposure.SetOpen(!_exposure.IsOpen));
+            _uplinkHud.Bind(root);
             _hudKey = 0;
             _jumpKey = 0;
             _panelKey = 0;
@@ -521,6 +526,7 @@ namespace GameLogic.UI.SignalCore
             SetVisible(_hudBar, s != null && (inWorld || IsOpen));
             SetVisible(_jumpBar, s != null && inWorld);
             RefreshUplinkStatus(s, inWorld);
+            _uplinkHud.Refresh(s, inWorld);
             _exposure.Refresh(s, inWorld);
             if (s == null)
             {

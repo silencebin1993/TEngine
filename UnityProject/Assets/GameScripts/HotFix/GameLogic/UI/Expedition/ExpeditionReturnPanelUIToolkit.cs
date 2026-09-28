@@ -210,7 +210,10 @@ namespace GameLogic.UI.Expedition
                 row.Q<Label>("Chassis").text = string.IsNullOrEmpty(chassisLabel) || chassisLabel == m.ChassisId ? "机器" : chassisLabel;
                 ContentIcons.Apply(row.Q<VisualElement>("Icon"), m.ChassisId);
                 row.Q<Label>("Health").text = m.IsAlive ? $"HP{m.Health:F0}/{m.MaxHealth:F0}" : "—";
-                row.Q<Label>("Status").text = m.IsAlive ? "幸存，将随撤离返回家园" : "阵亡（纪念记录，黑匣子保留经历，机体不复活）";
+                // FG1-HUD-01（FGR-SIG-082 机器经历在结算中可见）：状态后接“与信号同行 N 次，累计 H:MM:SS”。
+                MachineRegistry.TryGetRecord(m.LogicId, out MachineRecord expRec);
+                string signalExp = MachineSignalExperience.Describe(CampaignSession.Current, expRec);
+                row.Q<Label>("Status").text = GameLogic.Localization.GameText.Format(m.IsAlive ? "expedition.return.row_status_alive" : "expedition.return.row_status_dead", signalExp);
             }
 
             _summaryLabel.text = snapshot.IsWipe

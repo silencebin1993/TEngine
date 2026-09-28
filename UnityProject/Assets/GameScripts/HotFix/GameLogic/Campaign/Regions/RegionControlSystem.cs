@@ -687,20 +687,21 @@ namespace GameLogic.Campaign.Regions
             });
         }
 
+        /// <summary>玩家可见的失败原因（FG1-HUD-01 / FG-GAP-011：走文本键，0.2 的玩家动作叫“接入”）。</summary>
         public static string TextFor(RegionControlFailure failure)
         {
             switch (failure)
             {
-                case RegionControlFailure.TargetNotFound: return "没有可接管的目标。";
-                case RegionControlFailure.TargetNotFriendly: return "目标不属于本区域。";
-                case RegionControlFailure.TargetDead: return "目标已阵亡。";
-                case RegionControlFailure.OutOfRange: return "目标当前不在场。";
-                case RegionControlFailure.SignalJammed: return "信号被干扰，接管失败。";
-                case RegionControlFailure.TransitionInProgress: return "镜头切换中，请稍候。";
-                case RegionControlFailure.ModalBlocked: return "请先关闭当前面板。";
-                case RegionControlFailure.AlreadyControlled: return "已经在操控这台机器。";
-                case RegionControlFailure.Ineligible: return "目标暂不可接管。";
-                default: return "接管失败。";
+                case RegionControlFailure.TargetNotFound: return GameLogic.Localization.GameText.Get("region.control.fail.not_found");
+                case RegionControlFailure.TargetNotFriendly: return GameLogic.Localization.GameText.Get("region.control.fail.not_friendly");
+                case RegionControlFailure.TargetDead: return GameLogic.Localization.GameText.Get("region.control.fail.dead");
+                case RegionControlFailure.OutOfRange: return GameLogic.Localization.GameText.Get("region.control.fail.out_of_range");
+                case RegionControlFailure.SignalJammed: return GameLogic.Localization.GameText.Get("region.control.fail.jammed");
+                case RegionControlFailure.TransitionInProgress: return GameLogic.Localization.GameText.Get("region.control.fail.transition");
+                case RegionControlFailure.ModalBlocked: return GameLogic.Localization.GameText.Get("region.control.fail.modal");
+                case RegionControlFailure.AlreadyControlled: return GameLogic.Localization.GameText.Get("region.control.fail.already");
+                case RegionControlFailure.Ineligible: return GameLogic.Localization.GameText.Get("region.control.fail.ineligible");
+                default: return GameLogic.Localization.GameText.Get("region.control.fail.other");
             }
         }
     }
