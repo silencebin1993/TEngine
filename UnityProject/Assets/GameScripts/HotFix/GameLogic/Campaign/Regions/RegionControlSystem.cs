@@ -61,6 +61,10 @@ namespace GameLogic.Campaign.Regions
         SignalRestored,
         /// <summary>区域卸载（Exit）导致的强制释放。</summary>
         RegionUnload,
+        /// <summary>FG1-SIG-04：走出与归还核心连通的信号覆盖，宽限期耗尽，信号弹回归还核心。</summary>
+        CoverageLost,
+        /// <summary>FG1-SIG-04：静默夜开始（FG07；本 Story 只留接口），信号立即弹回归还核心。</summary>
+        SilentNight,
     }
 
     /// <summary>当前控制可用性三态，同细胞阶段 <c>ControlAvailability</c> 的区域版本
@@ -139,6 +143,8 @@ namespace GameLogic.Campaign.Regions
     {
         private RegionControlContext _ctx;
         private float _jamGraceRemaining;
+        /// <summary>FG1-SIG-04：当前宽限的原因（干扰场 / 走出覆盖）；None = 不在宽限里。</summary>
+        private Signal.SignalLinkBreakReason _suspendReason;
         /// <summary>FG1-SIG-03：绑定时的战役（卸载时只改这一份的信号位置——读档流程先卸载旧世界再换会话，不会误改新档）。</summary>
         private CampaignState _boundState;
 
@@ -166,6 +172,7 @@ namespace GameLogic.Campaign.Regions
             SwitchCount = 0;
             Availability = RegionControlAvailability.None;
             _jamGraceRemaining = 0f;
+            _suspendReason = Signal.SignalLinkBreakReason.None;
             if (ctx?.RegionId != null)
             {
                 ByRegion[ctx.RegionId] = this;
@@ -394,9 +401,10 @@ namespace GameLogic.Campaign.Regions
             PublishChange(previousLogicId, 0, reason, ResolveFallbackAnchor(new Vector2(p.x, p.z)));
         }
 
-        /// <summary>每帧驱动：干扰宽限计时（AC-CTL-004 Suspended→恢复/None）+ 受控机死亡侦测
-        /// （AC-CTL-003 按距离再 LogicId 回弹）。由 Controller.Update 在暂停早退之后调用——与其余
-        /// 战斗/移动 Tick 同一节奏，暂停时不推进（暂停下也没有任何东西能让机器阵亡或离开干扰场）。</summary>
+        /// <summary>每帧驱动：受控机死亡侦测（AC-CTL-003 回弹）+ 断链判定（FG1-SIG-04 / FGR-SIG-040）：静默夜立即断；干扰场或走出信号覆盖进入宽限
+        /// （AC-CTL-004 Suspended，宽限内回来就恢复），宽限耗尽断链——信号弹回归还核心，机器进入安全模式（原因、音效、安全模式由 <c>SignalLinkService</c> 给出）。
+        /// 由 Controller.Update 在暂停早退之后调用，<paramref name="dt"/> 是按倍速缩放的游戏时间（暂停为 0）——宽限按游戏秒走，与倍速一致。
+        /// 开销 O(覆盖源数)：只看被接入的那一台。</summary>
         public void Tick(float dt)
         {
             if (_ctx == null)
@@ -407,6 +415,7 @@ namespace GameLogic.Campaign.Regions
             if (current == null)
             {
                 Availability = RegionControlAvailability.None;
+                _suspendReason = Signal.SignalLinkBreakReason.None;
                 return;
             }
 
@@ -416,47 +425,83 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
-            if (_ctx.IsPositionJammed == null)
+            Vector3 p = current.Position3;
+            var pos2 = new Vector2(p.x, p.z);
+
+            // 静默夜：不给宽限，立即弹回（FG07 负责静默夜前的预警，见 SignalLinkService.AnnounceSilentNight）。
+            if (Signal.SignalLinkService.IsSilentNight)
             {
-                Availability = RegionControlAvailability.Controlled;
+                ForceBreak(RegionControlChangeReason.SilentNight);
                 return;
             }
 
-            Vector3 p = current.Position3;
-            var pos2 = new Vector2(p.x, p.z);
-            bool jammed = _ctx.IsPositionJammed(pos2);
-            if (!jammed)
+            bool jammed = IsJammedAt(pos2);
+            Signal.SignalCoverageSample coverage = Signal.SignalCoverageService.Sample(_ctx.RegionId, pos2);
+            Signal.SignalLinkBreakReason cause = jammed ? Signal.SignalLinkBreakReason.Jammed
+                : !coverage.Covered ? Signal.SignalLinkBreakReason.OutOfCoverage
+                : Signal.SignalLinkBreakReason.None;
+
+            if (cause == Signal.SignalLinkBreakReason.None)
             {
                 bool wasSuspended = Availability == RegionControlAvailability.Suspended;
+                Signal.SignalLinkBreakReason was = _suspendReason;
                 _jamGraceRemaining = _ctx.JamGraceSeconds;
+                _suspendReason = Signal.SignalLinkBreakReason.None;
                 Availability = RegionControlAvailability.Controlled;
+                Signal.SignalLinkService.Watch(current.LogicId, pos2, coverage, Signal.SignalLinkBreakReason.None, 0f);
                 if (wasSuspended)
                 {
-                    FeedbackCues.RaiseAt(FeedbackCueId.SignalRestored, pos2, FeedbackCues.MachineLabel(current.LogicId));
+                    Signal.SignalLinkService.OnGraceRecovered(current.LogicId, pos2, was);
                     PublishChange(current.LogicId, current.LogicId, RegionControlChangeReason.SignalRestored, pos2);
                 }
                 return;
             }
 
-            if (Availability != RegionControlAvailability.Suspended)
+            float grace = cause == Signal.SignalLinkBreakReason.Jammed ? _ctx.JamGraceSeconds : Signal.SignalLinkService.GraceSeconds;
+            if (Availability != RegionControlAvailability.Suspended || _suspendReason != cause)
             {
-                // 进入干扰的第一帧：先预警（宽限期内离开干扰区即可恢复），宽限耗尽时再报一次失控。
-                FeedbackCues.RaiseAt(FeedbackCueId.SignalLost, pos2,
-                    FeedbackCues.MachineLabel(current.LogicId) + $" 受到干扰，{_ctx.JamGraceSeconds:0} 秒内离开干扰区可恢复");
+                // 进入宽限的第一帧（或原因换了）：先预警（宽限期内回来即可恢复），宽限耗尽时再断链。
+                _jamGraceRemaining = Availability == RegionControlAvailability.Suspended ? Mathf.Min(_jamGraceRemaining, grace) : grace;
+                Signal.SignalLinkService.OnGraceStarted(current.LogicId, pos2, cause, grace);
             }
+            _suspendReason = cause;
             Availability = RegionControlAvailability.Suspended;
             _jamGraceRemaining -= dt;
+            Signal.SignalLinkService.Watch(current.LogicId, pos2, coverage, cause, _jamGraceRemaining);
             if (_jamGraceRemaining > 0f)
             {
                 return;
             }
 
-            Log.Info($"[RegionControlSystem] 机器 {current.LogicId} 失联宽限期耗尽，控制权收回（{_ctx.RegionId}）。");
-            FeedbackCues.RaiseAt(FeedbackCueId.SignalLost, pos2, FeedbackCues.MachineLabel(current.LogicId) + " 失联，控制权已收回");
+            Log.Info($"[RegionControlSystem] 机器 {current.LogicId} 宽限期耗尽（{cause}），信号弹回归还核心（{_ctx.RegionId}）。");
+            ForceBreak(cause == Signal.SignalLinkBreakReason.Jammed ? RegionControlChangeReason.SignalLost : RegionControlChangeReason.CoverageLost);
+        }
+
+        /// <summary>
+        /// FG1-SIG-04：强制断链——释放受控机（沿用主动退出的释放规则：Move/Attack 取消，Guard/Retreat 继续，恢复 AI 教义），信号弹回归还核心。
+        /// <paramref name="reason"/> 只能是 <see cref="RegionControlChangeReason.SignalLost"/>（干扰）/ <see cref="RegionControlChangeReason.CoverageLost"/> /
+        /// <see cref="RegionControlChangeReason.SilentNight"/>。没有受控机时返回 false。
+        /// </summary>
+        public bool ForceBreak(RegionControlChangeReason reason)
+        {
+            if (_ctx == null)
+            {
+                return false;
+            }
+            HomeValleyMachineMarker current = _ctx.GetPossessed?.Invoke();
+            if (current == null)
+            {
+                return false;
+            }
+            Vector3 p = current.Position3;
+            var pos2 = new Vector2(p.x, p.z);
             ReleaseInternal(current);
             _ctx.SetPossessed?.Invoke(null);
             Availability = RegionControlAvailability.None;
-            PublishChange(current.LogicId, 0, RegionControlChangeReason.SignalLost, ResolveFallbackAnchor(pos2));
+            _suspendReason = Signal.SignalLinkBreakReason.None;
+            _jamGraceRemaining = _ctx.JamGraceSeconds;
+            PublishChange(current.LogicId, 0, reason, ResolveFallbackAnchor(pos2));
+            return true;
         }
 
         /// <summary>AC-CTL-003：受控机阵亡时按距离（近者优先）再 LogicId（近似并列时升序）确定性
@@ -477,7 +522,11 @@ namespace GameLogic.Campaign.Regions
                     {
                         continue;
                     }
-                    if (!MachineRegistry.TryGetRecord(m.LogicId, out MachineRecord rec) || !rec.IsAlive || rec.IsInFactory)
+                    // FG1-SIG-04（FGR-SIG-040 / FG-GAP-034）：只回弹到“合适”的目标——与发起接入同一套目标条件
+                    // （存活、不在静默夜、在与核心连通的覆盖里、不在工厂 / 维修台 / 投送途中、没被干扰；只少“地点正被观察”）；一台都没有就回到归还核心。
+                    Vector3 mp = m.Position3;
+                    var mp2 = new Vector2(mp.x, mp.z);
+                    if (Signal.SignalUplinkService.ReboundTargetFailure(this, m.LogicId, mp2) != Signal.UplinkFailure.None)
                     {
                         continue;
                     }
@@ -494,6 +543,7 @@ namespace GameLogic.Campaign.Regions
             int previousLogicId = deadMarker.LogicId;
             ReleaseInternal(deadMarker);
             _ctx.SetPossessed?.Invoke(null);
+            _suspendReason = Signal.SignalLinkBreakReason.None;
 
             if (best != null)
             {

@@ -133,11 +133,13 @@ namespace GameLogic.Campaign.Regions
             View = view;
             view?.Bind(this);
             view?.SetSelected(IsSelected);
+            GameLogic.View.SignalLinkView.OnViewAttached(this); // FG1-SIG-04：安全模式头顶图标。
         }
 
         public void DetachView()
         {
             View = null;
+            GameLogic.View.SignalLinkView.OnViewDetached(LogicId);
         }
     }
 }

@@ -22,6 +22,9 @@ namespace GameLogic.View
 
         public bool IsShowing => _renderer != null && _renderer.enabled;
 
+        /// <summary>调用方要求显示（贴图还在加载时 <see cref="IsShowing"/> 暂为 false；编辑模式自检读这个）。</summary>
+        public bool WantsVisible => _visible;
+
         /// <summary>在 <paramref name="parent"/> 下创建标记。<paramref name="parent"/> 必须是等比缩放
         /// （非等比缩放的父节点叠加朝向旋转会把贴图拉斜）；建筑这类非等比立方体请挂在区域根节点上。</summary>
         public static WorldBadge Create(Transform parent, string name, Vector3 worldPosition, float worldSize)

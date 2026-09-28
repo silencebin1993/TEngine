@@ -217,6 +217,9 @@ namespace GameLogic.Campaign.WorldSim
             BeltNetworkService.Unload();
             Combat.CombatSites.CloseAll(); // FG0-ARCH-03：保险——各地点 Exit 已各自释放内核，这里确保没有泄漏的原生容器。
             NavService.Unload(); // FG0-ARCH-06：寻路内核在战斗内核之后释放（战斗内核绑定着它的通行镜像）。
+            Signal.SignalLinkService.ClearWatch(); // FG1-SIG-04：链路预警是运行时状态，随世界卸载清掉。
+            Signal.SignalCoverageService.Clear(); // 覆盖源缓存引用着旧战役：一并清掉。
+            GameLogic.View.SignalLinkView.Clear(); // 地图预警圈用共享材质：先于材质释放。
             GameLogic.View.ViewMaterials.ReleaseAll(); // FG0-ARCH-03：地点表现对象的共享材质与世界成对释放（各地点的表现对象此时已全部销毁）。
             FracturedCity = null;
             FoundryOutpost = null;
@@ -308,6 +311,7 @@ namespace GameLogic.Campaign.WorldSim
             // FG1-SIG-03：信号接入过渡（真实时间，暂停中不走）——在模拟推进之后判定“过渡途中目标阵亡”，在被观察地点处理输入之前提交，
             // 提交后下一帧起新机器才收输入。
             Signal.SignalUplinkService.FrameTick(realDt);
+            GameLogic.View.SignalLinkView.FrameTick(); // FG1-SIG-04：安全模式头顶图标、地图上的覆盖边缘预警（纯表现）。
             IWorldSite observed = WorldView.ObservedSite;
             if (observed != null && observed.IsLoaded)
             {
@@ -414,6 +418,8 @@ namespace GameLogic.Campaign.WorldSim
                 BeltNetworkService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                 // FG1-SIG-03：核心固件冷却（信号侧，按游戏时间）到期——与观察无关，O(信号核槽位数)。
                 Signal.SignalUplinkService.SimStep(state);
+                // FG1-SIG-04：安全模式退出判定（按游戏时间每 0.5 秒，与观察无关），O(安全模式机器数)。
+                Signal.SignalLinkService.SimStep(state);
                 stepped = true;
             }
             finally

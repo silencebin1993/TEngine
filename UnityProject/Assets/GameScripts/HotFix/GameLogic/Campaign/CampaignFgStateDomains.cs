@@ -391,6 +391,24 @@ namespace GameLogic.Campaign
         /// <summary>核心固件的冷却（FGR-SIG-033：冷却属于信号，跳到别的机器不会重置）。按固件内容 ID，存“到哪个游戏秒可以再发动”
         /// （<c>GameClock.GameSeconds</c>，暂停不走、倍速按游戏时间走）；已到期的条目在下一个模拟步里清掉。</summary>
         public SignalCoreCooldownRecord[] CoreCooldowns = Array.Empty<SignalCoreCooldownRecord>();
+
+        // ── FG1-SIG-04（FGR-SIG-041 安全模式）── 只加字段、不升域版本：旧档缺这个字段读回空数组 = 没有机器在安全模式里。
+
+        /// <summary>因断链（干扰 / 走出覆盖 / 静默夜）失去信号、处于安全模式的机器（按 LogicId 升序）。唯一写入口 <c>SignalLinkService</c>。</summary>
+        public SignalSafeModeRecord[] SafeModes = Array.Empty<SignalSafeModeRecord>();
+    }
+
+    /// <summary>FG1-SIG-04：一台处于安全模式的机器（只运行本地常规固件，接入口为空，继续执行最后一条命令或 AI 教义）。</summary>
+    [Serializable]
+    public sealed class SignalSafeModeRecord
+    {
+        public int LogicId;
+        /// <summary>进入安全模式的原因（<c>SignalLinkBreakReason</c> 的数值：1 走出覆盖 / 2 干扰场 / 3 静默夜）。</summary>
+        public int Reason;
+        /// <summary>进入的游戏秒（<c>GameClock.GameSeconds</c>）。</summary>
+        public double SinceGameSeconds;
+        /// <summary>断链条件从哪个游戏秒起已经消失（持续 signal.safe_mode.exit_seconds 后退出安全模式）；-1 = 条件仍在。</summary>
+        public double ClearSinceGameSeconds = -1;
     }
 
     /// <summary>FG1-SIG-03：一条核心固件冷却（信号侧，不属于任何机体）。</summary>
@@ -646,6 +664,9 @@ namespace GameLogic.Campaign
             {
                 s.SignalCore.NextPresetSerial = 1;
             }
+            s.SignalCore.UplinkSiteId ??= string.Empty;
+            s.SignalCore.CoreCooldowns ??= Array.Empty<SignalCoreCooldownRecord>();
+            s.SignalCore.SafeModes ??= Array.Empty<SignalSafeModeRecord>();
             s.LootPackets ??= new LootPacketState();
             s.Stats ??= new StatsState();
             s.SaveHistory ??= new SaveHistoryState();

@@ -83,6 +83,7 @@ namespace GameLogic.EditorTools
             SessionState.SetFloat(K + "RepairedAt", 0f);
             SessionState.SetBool(K + "VfxRaised", false);
             SessionState.SetBool(K + "VfxChecked", false);
+            SessionState.SetBool(K + "LinkHover", false);
             SessionState.SetInt(K + "FoListPhase", 0);
             SessionState.SetFloat(K + "Start", (float)EditorApplication.timeSinceStartup);
             Next(0, "开始：打开 Assets/Scenes/main.unity 并进入 Play");
@@ -193,6 +194,17 @@ namespace GameLogic.EditorTools
                     case 174: StepSigUplinkPausedPending(inStep); break;
                     case 175: StepSigUplinkEscCancelled(inStep); break;
                     case 176: StepSigUplinkResumed(inStep); break;
+                    case 185: StepLinkSelect(inStep); break;
+                    case 186: StepLinkPress(inStep); break;
+                    case 187: StepLinkEntered(inStep); break;
+                    case 188: StepLinkSilentBroken(inStep); break;
+                    case 189: StepLinkSilentPress(inStep); break;
+                    case 190: StepLinkSilentRejected(inStep); break;
+                    case 191: StepLinkSafeExited(inStep); break;
+                    case 192: StepLinkReentered(inStep); break;
+                    case 193: StepLinkEdgeWarned(inStep); break;
+                    case 194: StepLinkCoverageBroken(inStep); break;
+                    case 195: StepLinkCoverageRecovered(inStep); break;
                     case 177: StepSigSaveSelect(inStep); break;
                     case 178: StepSigSavePress(inStep); break;
                     case 179: StepSigSaveUplinked(inStep); break;
@@ -1671,10 +1683,252 @@ namespace GameLogic.EditorTools
             }
             Check(!GameClock.Paused && !Campaign.Signal.SignalUplinkService.IsPending && Campaign.Signal.SignalPresence.AtCore,
                 "恢复运行：已取消的接入不会再自己完成");
+            Next(185, "FG1-SIG-04：断链与安全模式（静默夜预留接口 + 走出信号覆盖）");
+        }
+
+        private static void ContinueToExpeditionPrep()
+        {
             UnlockLikeDeparture(Campaign.Regions.FracturedCityRegion.Find(CampaignSession.Current),
                 Campaign.Regions.ExpeditionDepartureService.ExpeditionTarget.SilentRuins);
             GameRoot.HomeValley.SetExpeditionPrepPanelOpen(true);
             Next(158, "测试捷径：标记破碎都市可出征，打开远征准备面板（点信号塔的同一开关）");
+        }
+
+        // ── FG1-SIG-04：断链与安全模式（真实鼠标 / 按键接入；静默夜只有预留接口、机器走到覆盖边缘用测试捷径瞬移）──────────
+
+        private static Campaign.Regions.HomeValleyMachineMarker LinkMarker()
+        {
+            int id = SessionState.GetInt(K + "LinkM", 0);
+            return id != 0 && GameRoot.HomeValley?.Combat != null && GameRoot.HomeValley.Combat.TryGetMachineMarker(id, out Campaign.Regions.HomeValleyMachineMarker m) ? m : null;
+        }
+
+        private static UnityEngine.UIElements.Button MachineListButton(int logicId)
+        {
+            GameObject host = GameObject.Find("[RegionCommandBarHost]");
+            UIDocument doc = host != null ? host.GetComponent<UIDocument>() : null;
+            ScrollView strip = doc?.rootVisualElement?.Q<ScrollView>("ControlCandidateStrip");
+            return strip != null && MachineRegistry.TryGetRecord(logicId, out MachineRecord rec)
+                ? strip.Query<UnityEngine.UIElements.Button>().ToList().FirstOrDefault(x => x.text == "#" + rec.DisplayNumber) : null;
+        }
+
+        /// <summary>测试捷径：把机器瞬移到离归还核心 <paramref name="distance"/> 格处（沿核心 → 机器的方向），代替玩家开着它走一两百格。</summary>
+        private static void TeleportFromCore(int logicId, float distance)
+        {
+            Campaign.Combat.CombatSite site = GameRoot.HomeValley?.Combat;
+            Vector2 core = Campaign.Signal.SignalCoverageService.Sample(Campaign.Regions.HomeValleyLayout.RegionId, Vector2.zero).SourceCenter;
+            if (site == null || !site.TryGetMachineUnit(logicId, out int unit) || !site.TryGetMachinePosition(logicId, out Vector2 at))
+            {
+                return;
+            }
+            Vector2 dir = (at - core).sqrMagnitude > 1e-4f ? (at - core).normalized : Vector2.right;
+            Vector2 p = core + dir * distance;
+            site.Kernel.SetPosition(unit, new Unity.Mathematics.double2(p.x, p.y));
+        }
+
+        private static void StepLinkSelect(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyMachineMarker m = SigCandidate(0);
+            if (m == null)
+            {
+                Write("  - 家园里没有可以接入的机器：跳过 FG1-SIG-04 段（断链与安全模式由 FgSignalLinkSelfCheck 覆盖）");
+                ContinueToExpeditionPrep();
+                return;
+            }
+            SessionState.SetInt(K + "LinkM", m.LogicId);
+            ClickWorld(m.View.transform.position);
+            Next(186, $"左键点家园里的机器 {SigLabel(m.LogicId)}");
+        }
+
+        private static void StepLinkPress(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.ToggleCameraView));
+            Next(187, "按接入键");
+        }
+
+        private static void StepLinkEntered(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            int m = SessionState.GetInt(K + "LinkM", 0);
+            Check(Campaign.Signal.SignalPresence.CurrentMachineLogicId == m, $"接入 {SigLabel(m)}");
+            // 测试捷径：静默夜（FG07）还没有，走 FG1-SIG-04 预留的判定入口与“静默夜开始”事件入口。
+            Campaign.Signal.SignalUplinkService.SilentNightProvider = () => true;
+            Campaign.Signal.SignalLinkService.AnnounceSilentNight(0f);
+            bool broke = Campaign.Signal.SignalLinkService.OnSilentNightStarted();
+            Check(broke, "静默夜开始（预留接口）：接入中的信号被强制弹回");
+            Next(188, "测试捷径：静默夜开始");
+        }
+
+        private static void StepLinkSilentBroken(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            int m = SessionState.GetInt(K + "LinkM", 0);
+            UnityEngine.UIElements.Button listBtn = MachineListButton(m);
+            // 机器列表那一行（编号按钮 + 按钮外侧的安全模式标记）挂着运行时悬停提示。
+            VisualElement listItem = listBtn?.parent;
+            if (!SessionState.GetBool(K + "LinkHover", false))
+            {
+                UI.SignalCore.SignalCoreHudUIToolkit hud = UI.SignalCore.SignalCoreHudUIToolkit.Instance;
+                string status = hud?.UplinkStatusText ?? string.Empty;
+                View.WorldBadge badge = View.SignalLinkView.BadgeFor(m);
+                Check(Campaign.Signal.SignalPresence.AtCore && WorldView.Director.Mode == View.ViewMode.Strategy
+                      && Campaign.Signal.SignalLinkService.LastBreakReason == Campaign.Signal.SignalLinkBreakReason.SilentNight
+                      && status.Contains(SigLabel(m)),
+                    $"静默夜断链：信号回到归还核心、镜头回战略；HUD“{status}”");
+                Check(Campaign.Signal.SignalLinkService.IsInSafeMode(CampaignSession.Current, m) && badge != null && badge.IsShowing
+                      && badge.IconId == Campaign.Signal.SignalLinkService.SafeModeIconId,
+                    $"{SigLabel(m)} 进入安全模式：头顶显示安全模式图标（贴图已加载：{badge?.IsShowing}）");
+                VisualElement tag = listItem?.Q<VisualElement>(className: "cmd-candidate-safe-tag");
+                Check(listBtn != null && listBtn.ClassListContains("cmd-candidate-btn-safe") && tag != null && tag.resolvedStyle.display == DisplayStyle.Flex
+                      && tag.worldBound.xMin >= listBtn.worldBound.xMax - 0.5f,
+                    $"命令栏机器列表的 {listBtn?.text} 带安全模式标记（在编号按钮外侧，按钮 [{listBtn?.worldBound.xMin:F0}～{listBtn?.worldBound.xMax:F0}]、标记 [{tag?.worldBound.xMin:F0}～{tag?.worldBound.xMax:F0}]）");
+                // 鼠标移到那一行上：派发指针进入事件，走 UiTooltip 自己注册的回调（与 ClickUitk 走按钮自己的 Clickable 同一层级）。
+                if (listItem != null)
+                {
+                    using (PointerEnterEvent enter = PointerEnterEvent.GetPooled())
+                    {
+                        enter.target = listItem;
+                        listItem.SendEvent(enter);
+                    }
+                }
+                SessionState.SetBool(K + "LinkHover", true);
+                return;
+            }
+            // 悬停提示约 0.4 真实秒后出现（UiKitOverlay 每帧 Tick）。
+            if (inStep < 2.5)
+            {
+                return;
+            }
+            SessionState.SetBool(K + "LinkHover", false);
+            TooltipContent tip = UiTooltip.Content;
+            string tipText = tip != null ? (tip.Title ?? string.Empty) + " / " + (tip.Body ?? string.Empty).Replace("\n", " / ") : string.Empty;
+            string reason = Campaign.Signal.SignalLinkService.ReasonName(Campaign.Signal.SignalLinkBreakReason.SilentNight);
+            Check(UiTooltip.IsVisible && UiTooltip.Target == listItem && tip != null && tip.Title == SigLabel(m) && tipText.Contains(reason)
+                  && tip.Body.StartsWith(Campaign.Signal.SignalLinkService.SafeModeTooltip(CampaignSession.Current, m)),
+                $"鼠标悬停在 {listBtn?.text} 那一行：提示面板写明原因与恢复条件“{tipText}”");
+            if (listItem != null)
+            {
+                using (PointerLeaveEvent leave = PointerLeaveEvent.GetPooled())
+                {
+                    leave.target = listItem;
+                    listItem.SendEvent(leave);
+                }
+            }
+            UiTooltip.Hide();
+            CheckNoTextMarkers("断链后");
+            Campaign.Regions.HomeValleyMachineMarker mk = LinkMarker();
+            if (mk?.View != null)
+            {
+                ClickWorld(mk.View.transform.position);
+            }
+            Next(189, $"左键再点 {SigLabel(m)}");
+        }
+
+        private static void StepLinkSilentPress(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.ToggleCameraView));
+            Next(190, "静默夜中按接入键");
+        }
+
+        private static void StepLinkSilentRejected(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(Campaign.Signal.SignalPresence.AtCore && Campaign.Signal.SignalUplinkService.LastFailure == Campaign.Signal.UplinkFailure.SilentNight,
+                $"静默夜中接入被拒：“{Campaign.Signal.SignalUplinkService.LastFeedbackText}”");
+            Campaign.Signal.SignalUplinkService.SilentNightProvider = null;
+            Next(191, "测试捷径：静默夜结束");
+        }
+
+        private static void StepLinkSafeExited(double inStep)
+        {
+            if (inStep < 3.2)
+            {
+                return;
+            }
+            int m = SessionState.GetInt(K + "LinkM", 0);
+            View.WorldBadge badge = View.SignalLinkView.BadgeFor(m);
+            UnityEngine.UIElements.Button listBtn = MachineListButton(m);
+            Check(!Campaign.Signal.SignalLinkService.IsInSafeMode(CampaignSession.Current, m) && (badge == null || !badge.IsShowing)
+                  && listBtn != null && !listBtn.ClassListContains("cmd-candidate-btn-safe"),
+                $"静默夜结束 2 秒后 {SigLabel(m)} 退出安全模式：头顶图标与列表标记消失");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.ToggleCameraView));
+            Next(192, "再按接入键");
+        }
+
+        private static void StepLinkReentered(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            int m = SessionState.GetInt(K + "LinkM", 0);
+            Check(Campaign.Signal.SignalPresence.CurrentMachineLogicId == m, $"重新接入 {SigLabel(m)}");
+            TeleportFromCore(m, Campaign.Signal.SignalCoverageService.CoreRadius - 8f);
+            Next(193, "测试捷径：把接入的机器挪到离覆盖边缘 8 格处");
+        }
+
+        private static void StepLinkEdgeWarned(double inStep)
+        {
+            if (inStep < 3.5)
+            {
+                return; // 等“已接入”那条 3 秒反馈过去，HUD 状态行才轮到常驻的边缘预警。
+            }
+            int m = SessionState.GetInt(K + "LinkM", 0);
+            UI.SignalCore.SignalCoreHudUIToolkit hud = UI.SignalCore.SignalCoreHudUIToolkit.Instance;
+            string status = hud?.UplinkStatusText ?? string.Empty;
+            Check(Campaign.Signal.SignalPresence.CurrentMachineLogicId == m && View.SignalLinkView.RingVisible && !View.SignalLinkView.RingDanger
+                  && Mathf.Abs(View.SignalLinkView.RingRadius - Campaign.Signal.SignalCoverageService.CoreRadius) < 0.01f
+                  && status.Length > 0 && status == Campaign.Signal.SignalLinkService.WarningLine,
+                $"接近覆盖边缘：地图上画出覆盖圈（半径 {View.SignalLinkView.RingRadius}），HUD“{status}”");
+            TeleportFromCore(m, Campaign.Signal.SignalCoverageService.CoreRadius + 12f);
+            Next(194, "测试捷径：把它挪到覆盖外 12 格");
+        }
+
+        private static void StepLinkCoverageBroken(double inStep)
+        {
+            if (inStep < 3.2)
+            {
+                return;
+            }
+            int m = SessionState.GetInt(K + "LinkM", 0);
+            Check(Campaign.Signal.SignalPresence.AtCore && WorldView.Director.Mode == View.ViewMode.Strategy
+                  && Campaign.Signal.SignalLinkService.LastBreakReason == Campaign.Signal.SignalLinkBreakReason.OutOfCoverage
+                  && Campaign.Signal.SignalLinkService.IsInSafeMode(CampaignSession.Current, m),
+                $"走出覆盖、宽限 2 秒耗尽：信号弹回归还核心，{SigLabel(m)} 进入安全模式（“{Campaign.Signal.SignalUplinkService.LastFeedbackText}”）");
+            TeleportFromCore(m, 8f);
+            Next(195, "测试捷径：把它挪回核心附近");
+        }
+
+        private static void StepLinkCoverageRecovered(double inStep)
+        {
+            if (inStep < 3.5)
+            {
+                return;
+            }
+            int m = SessionState.GetInt(K + "LinkM", 0);
+            Check(!Campaign.Signal.SignalLinkService.IsInSafeMode(CampaignSession.Current, m) && !View.SignalLinkView.RingVisible,
+                $"回到覆盖内 2 秒后 {SigLabel(m)} 退出安全模式；地图预警圈已收起");
+            ContinueToExpeditionPrep();
         }
 
         // FG1-SIG-03（FG01 第 5 章“存档时玩家在机器里”）：暂停菜单存档前先接入一台机器，读档后信号必须还在那台里。

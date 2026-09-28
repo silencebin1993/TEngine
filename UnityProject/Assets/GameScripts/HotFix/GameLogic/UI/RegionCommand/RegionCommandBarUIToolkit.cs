@@ -7,6 +7,7 @@ using GameLogic.Core;
 using GameLogic.Localization;
 using GameLogic.Settings;
 using GameLogic.Stage;
+using GameLogic.UI.Kit;
 using TEngine;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -387,7 +388,9 @@ namespace GameLogic.UI.RegionCommand
         }
 
         /// <summary>候选条按钮数量随机器存活/在场情况变化，按钮集合与 <see cref="RegionControlSystem.GetCandidateLogicIds"/>
-        /// 对账（新增补建、消失移除），复用现有按钮避免每帧重建 VisualElement。</summary>
+        /// 对账（新增补建、消失移除），复用现有按钮避免每帧重建 VisualElement。
+        /// 每台机器一行：<c>cmd-candidate-item</c>（行容器，挂悬停提示）= 编号按钮 + 按钮外侧的安全模式标记。
+        /// 标记放在按钮外面：Button 本身是 TextElement，文字居中绘制、不参与 flex 排布，塞子元素会和“#N”压在一起。</summary>
         private void RefreshCandidateStrip(RegionControlSystem control, int? possessedId)
         {
             if (_candidateStrip == null)
@@ -396,31 +399,35 @@ namespace GameLogic.UI.RegionCommand
             }
 
             List<int> candidates = control.GetCandidateLogicIds();
-            bool retip = RefreshCandidateTooltip();
+            // 按钮说明的文字在提示显示时现取（UiTooltip 的 provider），这里只保持按键名 / 语言缓存最新。
+            RefreshCandidateTooltip();
+            // FG1-SIG-04：安全模式标记的变化键（安全模式版本 + 语言）每帧算一次，按钮逐个只比较整数。
+            int safeKey = System.HashCode.Combine(Campaign.Signal.SignalLinkService.SafeModeRevision, (int)GameText.Language);
             var seen = new HashSet<int>();
             foreach (int logicId in candidates)
             {
                 seen.Add(logicId);
                 if (!_candidateButtons.TryGetValue(logicId, out Button btn))
                 {
+                    var item = new VisualElement();
+                    item.AddToClassList("cmd-candidate-item");
                     btn = new Button { text = "#" + logicId };
                     btn.AddToClassList("cmd-candidate-btn");
-                    // FG1-SIG-03：机器列表的按钮说明（按键名随重绑、随语言；变了由 RefreshCandidateTooltip 统一改写已有按钮）。
-                    btn.tooltip = _candidateTip;
                     int capturedId = logicId;
                     btn.clicked += () => OnCandidateButtonClicked(capturedId);
-                    _candidateStrip.Add(btn);
+                    item.Add(btn);
+                    // FG1-SIG-03 / FG1-SIG-04：机器列表的说明走运行时悬停提示（VisualElement.tooltip 只在编辑器界面生效）。
+                    // 挂在整行上：鼠标在编号按钮或安全模式标记上都能看到“这台为什么进安全模式、什么时候恢复 + 怎么接入”。
+                    UiTooltip.Attach(item, () => CandidateTooltipContent(capturedId));
+                    _candidateStrip.Add(item);
                     _candidateButtons[logicId] = btn;
-                }
-                else if (retip)
-                {
-                    btn.tooltip = _candidateTip;
                 }
 
                 if (MachineRegistry.TryGetRecord(logicId, out MachineRecord rec))
                 {
                     btn.text = "#" + rec.DisplayNumber;
                 }
+                RefreshSafeModeTag(btn, logicId, safeKey);
                 btn.RemoveFromClassList("cmd-candidate-btn-current");
                 if (possessedId.HasValue && possessedId.Value == logicId)
                 {
@@ -438,10 +445,73 @@ namespace GameLogic.UI.RegionCommand
             }
             foreach (int logicId in stale)
             {
-                _candidateStrip.Remove(_candidateButtons[logicId]);
+                VisualElement item = ItemOf(_candidateButtons[logicId]);
+                UiTooltip.Detach(item);
+                item.RemoveFromHierarchy();
                 _candidateButtons.Remove(logicId);
+                _safeTagKeys.Remove(logicId);
             }
         }
+
+        private static VisualElement ItemOf(Button btn) => btn.parent ?? btn;
+
+        /// <summary>机器列表一行的悬停提示（显示那一刻现取）：标题 = 机器名；正文 = 安全模式时先写进入原因、行为与恢复条件，再写怎么接入（按键名随重绑、随语言）。</summary>
+        private TooltipContent CandidateTooltipContent(int logicId)
+        {
+            RefreshCandidateTooltip();
+            CampaignState s = CampaignSession.Current;
+            string body = _candidateTip ?? string.Empty;
+            if (Campaign.Signal.SignalLinkService.IsInSafeMode(s, logicId))
+            {
+                body = Campaign.Signal.SignalLinkService.SafeModeTooltip(s, logicId) + "\n" + body;
+            }
+            return new TooltipContent
+            {
+                Title = SignalPresence.MachineLabel(logicId),
+                Body = body,
+            };
+        }
+
+        /// <summary>FG1-SIG-04（FGR-SIG-041“机器列表中也有标记”）：安全模式的机器在列表里带盾形图标 + “安全”字样（放在编号按钮外侧），悬停提示写明原因与恢复条件。
+        /// 只在这台机器的安全模式状态 / 语言变化时改写（每帧 O(1) 查询：比较安全模式版本号）。</summary>
+        private void RefreshSafeModeTag(Button btn, int logicId, int key)
+        {
+            if (_safeTagKeys.TryGetValue(logicId, out int seen) && seen == key)
+            {
+                return;
+            }
+            _safeTagKeys[logicId] = key;
+            bool safe = Campaign.Signal.SignalLinkService.IsInSafeMode(CampaignSession.Current, logicId);
+            VisualElement item = ItemOf(btn);
+            VisualElement tag = item.Q<VisualElement>(className: "cmd-candidate-safe-tag");
+            if (tag == null)
+            {
+                tag = new VisualElement { pickingMode = PickingMode.Ignore };
+                tag.AddToClassList("cmd-candidate-safe-tag");
+                var icon = new VisualElement { pickingMode = PickingMode.Ignore };
+                icon.AddToClassList("cmd-candidate-safe-icon");
+                GameLogic.UI.Common.ContentIcons.ApplyIcon(icon, GameLogic.UI.Common.ContentIcons.StateSafeMode);
+                var label = new Label { pickingMode = PickingMode.Ignore };
+                label.AddToClassList("cmd-candidate-safe-label");
+                tag.Add(icon);
+                tag.Add(label);
+                item.Add(tag);
+            }
+            tag.Q<Label>(className: "cmd-candidate-safe-label").text = GameText.Get("signal.safe_mode.list_tag");
+            btn.EnableInClassList("cmd-candidate-btn-safe", safe);
+            item.EnableInClassList("cmd-candidate-item-safe", safe);
+        }
+
+        /// <summary>候选按钮上次刷新安全模式标记时的状态键（LogicId → 键）。</summary>
+        private readonly Dictionary<int, int> _safeTagKeys = new Dictionary<int, int>(8);
+
+        /// <summary>自检：机器列表里这台机器的按钮是否带安全模式标记。</summary>
+        public bool CandidateShowsSafeMode(int logicId) =>
+            _candidateButtons.TryGetValue(logicId, out Button b) && b != null && b.ClassListContains("cmd-candidate-btn-safe");
+
+        /// <summary>自检 / 冒烟：机器列表里这台机器那一行（挂着悬停提示的元素；模拟悬停对它派发指针进入）。</summary>
+        public VisualElement CandidateTooltipTarget(int logicId) =>
+            _candidateButtons.TryGetValue(logicId, out Button b) && b != null ? ItemOf(b) : null;
 
         /// <summary>ER5-INT-01：E 交互主候选提示（动词 + 当前按键名，随重绑动态拼接，不写死"按 E"）+
         /// 按住/点击进度条 + 完成/拒绝字幕。没有主候选或没有受控机时整块隐藏——不占战略视角的屏幕。</summary>

@@ -59,6 +59,8 @@ namespace GameLogic.Campaign.Feedback
         EmergencyRescue,
         // ── 存档（FG0-SAVE-01：读档时内容迁移的通知——已移除内容转成废料等） ──
         SaveContentMigrated,
+        // ── 信号链路（FG1-SIG-04：接近信号覆盖边缘、静默夜将至的预警；断链本身用 SignalLost） ──
+        SignalLinkWarning,
 
         Max,
     }

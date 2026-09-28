@@ -1264,7 +1264,8 @@ namespace GameLogic.EditorTools
                     $"在铸造前哨点机器列表里的 {b1?.text}：与家园同一入口（0.35 秒过渡），信号进入 #{m1}、镜头直控，列表标出当前机器");
 
                 // 按钮说明：按键名随重绑、文字随语言；已有按钮跟着改写。
-                string tip0 = b1.tooltip;
+                // 说明走运行时悬停提示（VisualElement.tooltip 只在编辑器界面生效）：模拟悬停那一行，读提示面板的内容。
+                string tip0 = HoverTip(b1.parent);
                 bool tip0Ok = tip0.Contains(InputDisplay.ForAction(GameActionId.ToggleCameraView)) && tip0.Contains(InputDisplay.ForAction(GameActionId.CycleControlTarget))
                               && !GameText.ContainsMarker(tip0);
                 KeyCode freeKey = KeyCode.None;
@@ -1277,17 +1278,17 @@ namespace GameLogic.EditorTools
                     }
                 }
                 bar.Refresh();
-                string tipRebound = b2.tooltip;
+                string tipRebound = HoverTip(b2.parent);
                 GameSettings.SetLanguage(GameLanguage.En);
                 bar.Refresh();
-                string tipEn = b1.tooltip;
+                string tipEn = HoverTip(b1.parent);
                 GameSettings.KeyBindings.ResetToDefault(GameActionId.ToggleCameraView);
                 GameSettings.SetLanguage(GameLanguage.ZhCn);
                 bar.Refresh();
-                string tipBack = b1.tooltip;
-                Expect(tip0Ok && freeKey != KeyCode.None && tipRebound != tip0 && tipRebound.Contains(InputDisplay.Key(freeKey))
+                string tipBack = HoverTip(b1.parent);
+                Expect(tip0Ok && freeKey != KeyCode.None && tipRebound.Replace(SignalPresence.MachineLabel(m2), SignalPresence.MachineLabel(m1)) != tip0 && tipRebound.Contains(InputDisplay.Key(freeKey))
                        && !Regex.IsMatch(tipEn, "[\\u4e00-\\u9fff]") && tipEn.Length > 0 && !GameText.ContainsMarker(tipEn) && tipBack == tip0,
-                    $"机器列表按钮说明：“{tip0}”→ 改绑接入键到 {freeKey} 后已有按钮变成“{tipRebound}”→ 英文“{tipEn}”→ 恢复默认与中文后还原");
+                    $"机器列表悬停提示：“{tip0.Replace("\n", " / ")}”→ 改绑接入键到 {freeKey} 后已有按钮变成“{tipRebound.Replace("\n", " / ")}”→ 英文“{tipEn.Replace("\n", " / ")}”→ 恢复默认与中文后还原");
 
                 // HUD 在接入过渡中被销毁：Esc 取消层随之移除，不会吃掉下一次 Esc。
                 // 编辑模式下 Unity 不派发 Awake / OnDestroy：按 Play 里的真实生命周期手动调它们（出生登记事件监听 → 销毁时移除监听与 Esc 层）。
@@ -1667,6 +1668,38 @@ namespace GameLogic.EditorTools
         }
 
         private static RegionEnemyRecord Enemy(CampaignState s, string id) => s.RegionEnemies.FirstOrDefault(e => e.EnemyInstanceId == id);
+
+        /// <summary>
+        /// 模拟悬停：走 UiTooltip 的正式绑定（没 Attach 过的元素 NotifyEnter 直接忽略，所以这也核对了“挂上了运行时悬停提示”），
+        /// 过了出现延迟后读提示面板要显示的内容（标题 + 正文）。VisualElement.tooltip 只在编辑器界面生效，不能拿它当玩家看到的说明。
+        /// </summary>
+        private static string HoverTip(VisualElement target)
+        {
+            Func<float> clock0 = UiTooltip.Clock;
+            Func<bool> pin0 = UiTooltip.PinHeld;
+            float t = 10000f;
+            try
+            {
+                UiTooltip.Clock = () => t;
+                UiTooltip.PinHeld = () => false;
+                UiTooltip.Hide();
+                if (target == null)
+                {
+                    return string.Empty;
+                }
+                UiTooltip.NotifyEnter(target);
+                t += 1f;
+                UiTooltip.Tick();
+                TooltipContent c = UiTooltip.Content;
+                return c == null ? string.Empty : (c.Title ?? string.Empty) + "\n" + (c.Body ?? string.Empty);
+            }
+            finally
+            {
+                UiTooltip.Hide();
+                UiTooltip.Clock = clock0;
+                UiTooltip.PinHeld = pin0;
+            }
+        }
 
         private static VisualElement Mount(out GameObject go) => MountUxml(UxmlPath, out go);
 

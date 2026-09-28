@@ -174,6 +174,9 @@ namespace GameLogic.EditorTools
                 // 离开复原；失败原因逐条；负向矩阵（过渡中阵亡、Esc、战略暂停中发起、1 秒 10 次、无接入口、信号核为空、镜头飞走、地点卸载）；
                 // 冷却跟着信号 / 热量留在机体（三台重炮真开火，FGT-SIG-004）；防刷；暂停与 0.5x～3x；真实文件存读档（FGT-SIG-009）；性能；HUD。
                 _fail += FgSignalUplinkSelfCheck.Run(Report);
+                // FG1-SIG-04：断链与安全模式——四种原因各一次（走出覆盖 / 干扰场 / 静默夜预留接口 / 阵亡回弹，FGT-SIG-006）、安全模式只跑本地常规固件、
+                // 覆盖源（核心 / 信号塔 / 断开的塔）、边缘反复进出、连续死亡回弹、没有合适回弹目标、暂停倍速、后台一致、真实文件存读档、性能、HUD 与机器列表。
+                _fail += FgSignalLinkSelfCheck.Run(Report);
             }
             catch (Exception e)
             {

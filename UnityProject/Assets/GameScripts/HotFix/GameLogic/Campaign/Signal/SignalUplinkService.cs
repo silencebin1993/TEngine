@@ -200,6 +200,8 @@ namespace GameLogic.Campaign.Signal
         /// <summary>自检注入真实时间（HUD 反馈的显示时长）；为 null 时读 <see cref="Time.unscaledTime"/>。</summary>
         public static Func<float> RealTimeForTests;
         private static float Now => RealTimeForTests?.Invoke() ?? Time.unscaledTime;
+        /// <summary>真实时间（HUD 反馈时长、预警防刷；自检可注入）。</summary>
+        public static float RealNow => Now;
 
         public static string LastFeedbackText => _feedback;
 
@@ -328,6 +330,42 @@ namespace GameLogic.Campaign.Signal
             {
                 return UplinkFailure.NotFound;
             }
+            UplinkFailure pre = TargetStateFailure(rec, logicId, null);
+            if (pre != UplinkFailure.None)
+            {
+                return pre;
+            }
+            RegionControlSystem control = RegionControlSystem.ForRegion(rec.RegionId);
+            if (control == null || !WorldView.IsObserved(rec.RegionId) || !TryGetTargetMarker(control, rec.RegionId, logicId, out marker))
+            {
+                return UplinkFailure.OtherSite;
+            }
+            Vector3 p = marker.Position3;
+            return TargetPlaceFailure(rec, logicId, control, new Vector2(p.x, p.z));
+        }
+
+        /// <summary>
+        /// FG1-SIG-04（FGR-SIG-040 / FG-GAP-034）：死亡回弹的目标条件——与发起接入<b>同一套</b>目标条件（<see cref="TargetStateFailure"/> + <see cref="TargetPlaceFailure"/>，
+        /// 以后给发起接入加条件就是加在这两处，回弹自动跟上），只少“地点正被观察 / 能找到表现对象”这一道发起门槛：
+        /// 回弹发生在目标所在地点自己的接管系统里（调用方已持有它的表现对象与位置），不要求玩家正看着那里。
+        /// </summary>
+        public static UplinkFailure ReboundTargetFailure(RegionControlSystem control, int logicId, Vector2 position)
+        {
+            if (control == null)
+            {
+                return UplinkFailure.OtherSite;
+            }
+            if (!MachineRegistry.TryGetRecord(logicId, out MachineRecord rec) || rec == null)
+            {
+                return UplinkFailure.NotFound;
+            }
+            UplinkFailure pre = TargetStateFailure(rec, logicId, position);
+            return pre != UplinkFailure.None ? pre : TargetPlaceFailure(rec, logicId, control, position);
+        }
+
+        /// <summary>目标条件前半（与地点是否被观察无关）：阵亡 → 静默夜 → 覆盖。<paramref name="position"/> 为空时取机器的实时位置。</summary>
+        private static UplinkFailure TargetStateFailure(MachineRecord rec, int logicId, Vector2? position)
+        {
             if (!rec.IsAlive)
             {
                 return UplinkFailure.Dead;
@@ -336,15 +374,16 @@ namespace GameLogic.Campaign.Signal
             {
                 return UplinkFailure.SilentNight;
             }
-            if (CoverageProvider != null && !CoverageProvider(logicId))
-            {
-                return UplinkFailure.OutOfCoverage;
-            }
-            RegionControlSystem control = RegionControlSystem.ForRegion(rec.RegionId);
-            if (control == null || !WorldView.IsObserved(rec.RegionId) || !TryGetTargetMarker(control, rec.RegionId, logicId, out marker))
-            {
-                return UplinkFailure.OtherSite;
-            }
+            // FG1-SIG-04：覆盖判定默认走信号覆盖（归还核心 + 运转且有电的信号塔，SignalCoverageService）；CoverageProvider 仍可整体替换（自检 / FG1-SIG-07）。
+            bool covered = CoverageProvider != null
+                ? CoverageProvider(logicId)
+                : (position.HasValue ? SignalCoverageService.Sample(rec.RegionId, position.Value) : SignalCoverageService.SampleMachine(logicId)).Covered;
+            return covered ? UplinkFailure.None : UplinkFailure.OutOfCoverage;
+        }
+
+        /// <summary>目标条件后半（目标在它所在地点里的处境）：在工厂 → 维修台 → 投送途中 → 干扰场。</summary>
+        private static UplinkFailure TargetPlaceFailure(MachineRecord rec, int logicId, RegionControlSystem control, Vector2 position)
+        {
             if (rec.IsInFactory)
             {
                 return UplinkFailure.InFactory;
@@ -357,12 +396,7 @@ namespace GameLogic.Campaign.Signal
             {
                 return UplinkFailure.InDelivery;
             }
-            Vector3 p = marker.Position3;
-            if (control.IsJammedAt(new Vector2(p.x, p.z)))
-            {
-                return UplinkFailure.Jammed;
-            }
-            return UplinkFailure.None;
+            return control.IsJammedAt(position) ? UplinkFailure.Jammed : UplinkFailure.None;
         }
 
         /// <summary>
@@ -626,6 +660,18 @@ namespace GameLogic.Campaign.Signal
             }
         }
 
+        /// <summary>FG1-SIG-04：断链条件出现（静默夜开始……）时取消正在进行的接入过渡，信号留在原处并说明原因。没有过渡时什么也不做。</summary>
+        public static void CancelPendingForLink(string why)
+        {
+            if (_pendingTarget != 0)
+            {
+                Cancel(UplinkCancelReason.TargetUnavailable, why);
+            }
+        }
+
+        /// <summary>FG1-SIG-04：断链 / 预警 / 安全模式的原因写进 HUD 状态行（显示 signal.uplink_feedback_seconds 秒）。</summary>
+        public static void PushFeedback(string text) => SetFeedback(text);
+
         private static void ClearPending()
         {
             if (_pendingTarget != 0)
@@ -726,11 +772,18 @@ namespace GameLogic.Campaign.Signal
             if (cur != 0)
             {
                 SetUplink(s, cur, control.RegionId, reason);
+                // FG1-SIG-04：阵亡回弹到另一台 = 一次断链（给原因、音效）。
+                if (reason == RegionControlChangeReason.DeathRebound && before != 0 && before == prev)
+                {
+                    SignalLinkService.OnControlBreak(s, control.RegionId, prev, cur, reason);
+                }
                 return;
             }
             if (before != 0 && (before == prev || s.SignalCore.UplinkSiteId == control.RegionId))
             {
                 SetUplink(s, 0, string.Empty, reason);
+                // FG1-SIG-04：干扰 / 走出覆盖 / 静默夜 / 阵亡且没有合适的回弹目标 → 弹回归还核心，给原因、音效，机器进入安全模式。
+                SignalLinkService.OnControlBreak(s, control.RegionId, before, 0, reason);
                 if (reason == RegionControlChangeReason.PlayerRequest)
                 {
                     LeaveCount++;
@@ -759,6 +812,7 @@ namespace GameLogic.Campaign.Signal
             if (bound?.SignalCore != null && bound.SignalCore.UplinkMachineLogicId != 0 && bound.SignalCore.UplinkSiteId == regionId)
             {
                 SetUplink(bound, 0, string.Empty, RegionControlChangeReason.RegionUnload);
+                SignalLinkService.ClearWatch();
             }
         }
 
@@ -786,6 +840,11 @@ namespace GameLogic.Campaign.Signal
                 RecompileNotifyCount++;
                 MachineLoadoutRegistry.NotifyChanged(logicId);
                 inserted = EffectiveInserted(s, logicId);
+                SignalLinkService.OnUplinked(s, logicId); // FG1-SIG-04：信号回到这台机器 = 它不再处于安全模式。
+            }
+            else
+            {
+                SignalLinkService.ClearWatch();
             }
             GameEvent.Send(UplinkChangedEvent, new SignalUplinkChange
             {
@@ -996,7 +1055,7 @@ namespace GameLogic.Campaign.Signal
         // ─────────────────────────────── HUD 状态行 ───────────────────────────────
 
         /// <summary>
-        /// HUD 状态行（FG1-HUD-01 会扩成完整的接入 HUD）：过渡中 → “正在接入…”；刚发生的事（3 秒）→ 那条反馈；
+        /// HUD 状态行（FG1-HUD-01 会扩成完整的接入 HUD）：过渡中 → “正在接入…”；接入中的链路预警（宽限倒计时 / 覆盖边缘）→ 预警；刚发生的事（3 秒）→ 那条反馈；
         /// 接入中 → 接入口插了什么 / 没插入的原因 / 冷却；在归还核心 → 空。每帧调用开销 O(1)（调用方按 <see cref="StatusKey"/> 变化才重建）。
         /// </summary>
         public static string StatusLine(CampaignState s)
@@ -1005,11 +1064,18 @@ namespace GameLogic.Campaign.Signal
             {
                 return GameText.Format(_pendingWaitsResume ? "signal.uplink.pending_paused" : "signal.uplink.pending", SignalPresence.MachineLabel(_pendingTarget));
             }
+            int id = CurrentMachine(s);
+            // FG1-SIG-04：链路预警（干扰 / 走出覆盖的宽限逐秒倒计时、接近覆盖边缘）关系到正在接入的这一台会不会马上失联，
+            // 优先于普通反馈（例如别的机器退出安全模式的 3 秒提示）和常驻状态。
+            string warn = id != 0 ? SignalLinkService.WarningLine : string.Empty;
+            if (warn.Length > 0)
+            {
+                return warn;
+            }
             if (_feedback.Length > 0 && Now < _feedbackUntil)
             {
                 return _feedback;
             }
-            int id = CurrentMachine(s);
             return id == 0 ? string.Empty : SteadyStatus(s, id);
         }
 
@@ -1029,7 +1095,8 @@ namespace GameLogic.Campaign.Signal
                 }
             }
             bool feedbackActive = _feedback.Length > 0 && Now < _feedbackUntil;
-            return HashCode.Combine(Revision, CurrentMachine(s), cooldownKey, feedbackActive, SignalCoreService.Revision, FirmwareKinds.Revision, (int)GameText.Language);
+            return HashCode.Combine(HashCode.Combine(Revision, CurrentMachine(s), cooldownKey, feedbackActive, SignalCoreService.Revision, FirmwareKinds.Revision, (int)GameText.Language),
+                SignalLinkService.WarningRevision);
         }
 
         /// <summary>接入中的常驻状态：插了什么（冷却中的标出剩余秒数）、没插入的逐条原因、没有接入口 / 信号核为空 / 接入口没接通。</summary>
