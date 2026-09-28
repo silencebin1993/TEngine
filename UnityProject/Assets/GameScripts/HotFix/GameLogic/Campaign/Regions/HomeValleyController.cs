@@ -1815,6 +1815,7 @@ namespace GameLogic.Campaign.Regions
                 HostileUnit = id => _combat != null && _combat.TryGetEnemyUnit(id, out int u) ? u : 0,
                 AttackRange = HomeValleyCombatTargets.EngageRange,
                 AttackCooldownSeconds = 1.2f,
+                ContextCommand = TryContextWorkForSelection,
             };
             SquadCommands.Bind(_squadCtx);
         }
@@ -1858,11 +1859,13 @@ namespace GameLogic.Campaign.Regions
 
         // ── 机器选择 / 点选移动 / 到点自动干活 / WASD 接管 ────────────────────
 
-        /// <summary>左键点机器＝选中；已选中时左键点建筑/残骸＝下令走过去、到点自动
-        /// 修复/拆解；点空地＝纯移动。这是归还谷地范围内的最小 RTS 式"选中+下令"，M 键切 Direct
-        /// 后改由 <see cref="HandleDirectControl"/> 的 WASD 接管——两者互斥：本方法走
-        /// <see cref="InputScope.Strategy"/>，Direct/Transition 期间 <see cref="InputRouter"/>
-        /// 天然读不到，不需要在这里另判一次镜头模式。</summary>
+        /// <summary>常规 RTS 手感（战略视角）：
+        /// 左键点机器＝选中（Shift＝加选 / 减选）；左键点装配站 / 已修复的信号塔 / 解析台＝开关对应面板；左键点空地或其它＝取消选中。
+        /// 右键＝情境命令，不需要先点按钮：有战略选择集时由 <see cref="SquadCommands"/> 本帧更早处理（右键敌人＝攻击，
+        /// 右键建筑 / 残骸 / 地面物品 / 建造位＝经 <see cref="TryContextWorkForSelection"/> 派工，右键地面＝移动）；
+        /// 这里只兜底“单点选中了一台还在厂内、不进战略选择集的机器”。
+        /// M 键切 Direct 后改由 <see cref="HandleDirectControl"/> 的 WASD 接管——本方法走 <see cref="InputScope.Strategy"/>，
+        /// Direct/Transition 期间 <see cref="InputRouter"/> 天然读不到。</summary>
         private void HandleSelectionClick()
         {
             if (_camera == null)
@@ -1870,31 +1873,19 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
-            // 右键＝取消选中机器当前的在办工作单（STORY-EXECUTION-CARDS.md #ER3-WRK-01 要求的
-            // "取消"矩阵列在本 Story 唯一的真实触发入口——正式取消按钮留 ER5-INT-01/UI-04）。
-            // 取消不清空选中/不影响移动指令本身，机器停在原地等待下一次点选下令。
-            // FG0-UX-01：同一次右键已用来取消“武装待命”时，不再顺带取消机器的在办工单。
-            if (_selected != null && !SquadCommands.ConsumedSecondaryThisFrame && InputRouter.GetMouseButtonDown(1, InputScope.Strategy))
+            if (_selected != null && SquadCommands.Selection.Count == 0 && !SquadCommands.ConsumedSecondaryThisFrame
+                && InputRouter.GetMouseButtonDown(1, InputScope.Strategy)
+                && InputRouter.TryGetPointer(InputScope.Strategy, out Vector3 rightPointer))
             {
-                CampaignState cancelState = CampaignSession.Current;
-                WorkOrderRecord active = cancelState != null
-                    ? HomeValleyWorkOrders.FindActiveOrderForMachine(cancelState, _selected.LogicId)
-                    : null;
-                if (active != null)
+                if (!TryContextWork(_selected, rightPointer) && TryPointerGround(rightPointer, out Vector3 moveTo))
                 {
-                    Vector3 pos = _selected.Position3;
-                    HomeValleyWorkOrders.CancelOrder(cancelState, active.WorkOrderId, new Vector2(pos.x, pos.z));
-                    _selected.CancelCommandMove();
-                    Log.Info($"[HomeValleyController] 已取消 {_selected.LogicId} 的在办订单 {active.WorkOrderId}。");
+                    CommandMachineMove(_selected, moveTo);
                 }
                 return;
             }
 
             // ER5-CMD-01：框选/武装命令确认点击由 SquadCommands.Tick（本帧更早跑过）先处理；
-            // 真发生了框选或确认了武装命令，这次释放就不该再落到下面的单点选中/工作下令分支
-            // （否则拖框松手的位置会被当成移动/修复目标点）。触发点从 GetMouseButtonDown 改成
-            // GetMouseButtonUp——与 SquadCommands 内部判断"点击还是拖拽"用的同一次抬起事件同步，
-            // 纯点击（未发生拖动）时对时序/结果没有可感知影响，逐字保留原有分支顺序。
+            // 真发生了框选或确认了武装命令，这次释放就不再落到下面的单点选中分支。
             if (SquadCommands.ConsumedClickThisFrame)
             {
                 return;
@@ -1912,21 +1903,22 @@ namespace GameLogic.Campaign.Regions
             Ray ray = _camera.ScreenPointToRay(pointer);
             if (!Physics.Raycast(ray, out RaycastHit hit, 500f))
             {
+                ClearMachineSelection();
                 return;
             }
 
+            bool additive = InputRouter.Reader.GetKey(KeyCode.LeftShift) || InputRouter.Reader.GetKey(KeyCode.RightShift);
             HomeValleyMachineMarker marker = hit.collider.GetComponent<MachineView>()?.Marker;
             if (marker != null)
             {
                 _selected?.SetSelected(false);
                 _selected = marker;
                 _selected.SetSelected(true);
-                SquadCommands.SelectSingle(marker.LogicId); // 单点选中同步进战略命令的选择集。
+                SquadCommands.SelectSingle(marker.LogicId, additive); // 单点选中同步进战略命令的选择集。
                 return;
             }
 
-            // ER4-FAC-01：装配站是管理面板入口，不是工作单目标——独立于机器选中状态拦截在最前面，
-            // 不落到下面"_selected == null 就忽略"或"Operational 非核心建筑=拆除"的通用建筑路由。
+            // ER4-FAC-01：装配站是管理面板入口，不是工作单目标。
             string earlyBuildingTypeId = BuildingTypeIdFromHit(hit);
             if (earlyBuildingTypeId == HomeValleyLayout.BuildingTypeAssemblyStation)
             {
@@ -1934,119 +1926,160 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
-            // ER5-EXP-01：信号塔已修复（Operational）时点击切换远征准备面板，不落到下面的
-            // "Operational 非核心建筑=拆除"通用分流——把信号塔拆掉会让已解锁的破碎都市重新变得
-            // 不可达，明显不是玩家点它的意图。Damaged 时不拦截，落到下面正常的"修复"下令路径。
-            if (earlyBuildingTypeId == HomeValleyLayout.BuildingTypeSignalTower)
+            // ER5-EXP-01：信号塔已修复（Operational）时点击切换远征准备面板。
+            if (earlyBuildingTypeId == HomeValleyLayout.BuildingTypeSignalTower && IsOperational(HomeValleyLayout.BuildingTypeSignalTower))
             {
-                CampaignState towerState = CampaignSession.Current;
-                BuildingRecord tower = towerState?.BuildingRecords?.FirstOrDefault(b =>
-                    b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId == HomeValleyLayout.BuildingTypeSignalTower);
-                if (tower != null && tower.ConstructionState == BuildingConstructionState.Operational)
-                {
-                    _expeditionPrepPanelOpen = !_expeditionPrepPanelOpen;
-                    return;
-                }
-            }
-
-            // ER6-ANA-01：解析台已修复（Operational）时点击切换解析面板，同信号塔先例——不落到下面
-            // "Operational 非核心建筑=拆除"通用分流，把解析台拆掉会让已带回但未解析的关键模块永久卡死
-            // （没有第二个解析入口），明显不是玩家点它的意图。
-            if (earlyBuildingTypeId == HomeValleyLayout.BuildingTypeAnalysisBench)
-            {
-                CampaignState benchState = CampaignSession.Current;
-                BuildingRecord bench = benchState?.BuildingRecords?.FirstOrDefault(b =>
-                    b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId == HomeValleyLayout.BuildingTypeAnalysisBench);
-                if (bench != null && bench.ConstructionState == BuildingConstructionState.Operational)
-                {
-                    _analysisPanelOpen = !_analysisPanelOpen;
-                    return;
-                }
-            }
-
-            if (_selected == null)
-            {
+                _expeditionPrepPanelOpen = !_expeditionPrepPanelOpen;
                 return;
             }
 
-            HomeValleyMachineMarker moving = _selected;
-            Vector3 destination = hit.point;
+            // ER6-ANA-01：解析台已修复（Operational）时点击切换解析面板。
+            if (earlyBuildingTypeId == HomeValleyLayout.BuildingTypeAnalysisBench && IsOperational(HomeValleyLayout.BuildingTypeAnalysisBench))
+            {
+                _analysisPanelOpen = !_analysisPanelOpen;
+                return;
+            }
+
+            // 左键点空地（或不带面板的建筑 / 残骸）＝取消选中；Shift 加选时不清空。派工与移动都在右键上。
+            if (!additive)
+            {
+                ClearMachineSelection();
+            }
+        }
+
+        private static bool IsOperational(string buildingTypeId)
+        {
+            CampaignState state = CampaignSession.Current;
+            BuildingRecord b = state?.BuildingRecords?.FirstOrDefault(r =>
+                r.RegionId == HomeValleyLayout.RegionId && r.BuildingTypeId == buildingTypeId);
+            return b != null && b.ConstructionState == BuildingConstructionState.Operational;
+        }
+
+        private void ClearMachineSelection()
+        {
+            _selected?.SetSelected(false);
+            _selected = null;
+            SquadCommands.ClearSelection();
+        }
+
+        private bool TryPointerGround(Vector3 pointer, out Vector3 world)
+        {
+            world = default;
+            Ray ray = _camera.ScreenPointToRay(pointer);
+            if (Physics.Raycast(ray, out RaycastHit hit, 500f))
+            {
+                world = hit.point;
+                return true;
+            }
+            var plane = new Plane(Vector3.up, Vector3.zero);
+            if (!plane.Raycast(ray, out float enter))
+            {
+                return false;
+            }
+            world = ray.GetPoint(enter);
+            return true;
+        }
+
+        /// <summary>单台机器的直接移动（厂内机器的兜底路径）：先让出它手上的工单（规则见 YieldWorkOrderForPlayerCommand）。</summary>
+        private void CommandMachineMove(HomeValleyMachineMarker moving, Vector3 destination)
+        {
             CampaignState state = CampaignSession.Current;
             if (state == null)
             {
                 return;
             }
-            // ER5-CMD-01：接下来的所有分支都会让"工作"移动系统接管这台机器的 Transform
-            // （CommandWork/CommandHaul/纯移动 fallback）；先取消它可能正在执行的战略命令，
+            SquadCommands.CancelCommandFor(moving.LogicId);
+            if (MachineRegistry.TryGetRecord(moving.LogicId, out MachineRecord rec) && rec.IsInFactory)
+            {
+                HomeValleyFactory.ReleaseFromFactory(moving.LogicId);
+            }
+            YieldWorkOrderForPlayerCommand(state, moving);
+            moving.CommandMoveTo(destination);
+        }
+
+        /// <summary><see cref="RegionSquadCommandContext.ContextCommand"/>：右键点中工作目标时，由选择集的主机器（单点选中的那台，
+        /// 否则选择集第一台）去办；工单一次只派给一台机器，其余已选机器不动。</summary>
+        private bool TryContextWorkForSelection(Vector3 pointer)
+        {
+            HomeValleyMachineMarker worker = _selected != null && SquadCommands.Selection.Contains(_selected.LogicId)
+                ? _selected
+                : (SquadCommands.Selection.Count > 0 ? FindMarker(SquadCommands.Selection[0]) : null);
+            return worker != null && TryContextWork(worker, pointer);
+        }
+
+        /// <summary>右键点中工作目标 → 派工并返回 true：核心＝充电、受损建筑＝修复、建造位＝建造、残骸＝拆解、地面物品＝搬运。
+        /// 已建成的建筑不在右键上派“拆除”（右键移动时误点就会把好好的建筑拆掉）；拆除统一走建造模式的拆除工具（带确认）。
+        /// 没点中工作目标返回 false，由调用方按“移动”处理。</summary>
+        private bool TryContextWork(HomeValleyMachineMarker moving, Vector3 pointer)
+        {
+            CampaignState state = CampaignSession.Current;
+            if (_camera == null || moving == null || state == null)
+            {
+                return false;
+            }
+            Ray ray = _camera.ScreenPointToRay(pointer);
+            if (!Physics.Raycast(ray, out RaycastHit hit, 500f))
+            {
+                return false;
+            }
+            Vector3 destination = hit.point;
+
+            // FG0-ARCH-04：点中的是哪一座（本地键 → 建筑 ID → 记录），而不是“这一类的第一座”。
+            string buildingTypeIdHit = BuildingTypeIdFromHit(hit);
+            BuildingRecord clicked = buildingTypeIdHit != null
+                ? state.BuildingRecords?.FirstOrDefault(b => b.BuildingId == HomeValleyLayout.RegionId + ":" + buildingTypeIdHit)
+                : null;
+            string buildingTypeId = clicked?.BuildingTypeId ?? buildingTypeIdHit;
+            string buildSiteId = buildingTypeId == null ? BuildSiteIdFromHit(hit) : null;
+            string wreckageNodeId = buildingTypeId == null && buildSiteId == null ? WreckageNodeIdFromHit(hit) : null;
+            string groundItemId = buildingTypeId == null && buildSiteId == null && wreckageNodeId == null ? GroundItemIdFromHit(hit) : null;
+            bool repairable = buildingTypeId != null && buildingTypeId != HomeValleyLayout.BuildingTypeCore
+                              && (clicked == null || clicked.ConstructionState != BuildingConstructionState.Operational);
+            bool isWork = buildingTypeId == HomeValleyLayout.BuildingTypeCore || repairable
+                          || buildSiteId != null || wreckageNodeId != null || groundItemId != null;
+            if (!isWork)
+            {
+                return false;
+            }
+
+            // ER5-CMD-01：接下来的所有分支都会让"工作"移动系统接管这台机器的 Transform；先取消它可能正在执行的战略命令，
             // 避免两套移动来源同一帧争抢同一个 transform.position。
             SquadCommands.CancelCommandFor(moving.LogicId);
 
-            // ER4-FAC-01：机器收到的第一条真实命令即视为"驶出工厂"——占用出口的完工机器只有在玩家
-            // 真正开始使用它之后才让位，让下一项排队机器有机会生成，见 HomeValleyFactory 类注释。
+            // ER4-FAC-01：机器收到的第一条真实命令即视为"驶出工厂"。
             if (MachineRegistry.TryGetRecord(moving.LogicId, out MachineRecord movingRecord) && movingRecord.IsInFactory)
             {
                 HomeValleyFactory.ReleaseFromFactory(moving.LogicId);
             }
 
-            // FG0-ARCH-04：点中的是哪一座（本地键 → 建筑 ID → 记录），而不是“这一类的第一座”。
-            BuildingRecord clicked = earlyBuildingTypeId != null
-                ? state.BuildingRecords?.FirstOrDefault(b => b.BuildingId == HomeValleyLayout.RegionId + ":" + earlyBuildingTypeId)
-                : null;
-            string buildingTypeId = clicked?.BuildingTypeId ?? earlyBuildingTypeId;
             if (buildingTypeId == HomeValleyLayout.BuildingTypeCore)
             {
                 CommandWork(moving, destination, "recharge:" + moving.LogicId,
                     () => HomeValleyWorkOrders.TryCreateRecharge(state, moving.LogicId), "充电");
-                return;
+                return true;
             }
-            if (buildingTypeId != null)
+            if (repairable)
             {
-                // ER3-SOFTLOCK-01 AC-ECO-012：同一次点击按建筑当前状态分流——Damaged 只能修复
-                // （原有行为不变），Operational 的非核心建筑改为拆除（50%返还实际投入）。两种状态
-                // 互斥，不需要额外输入手势区分"想修复"还是"想拆除"。Core 已在上面分流去 Recharge，
-                // 不会走到这里。
-                BuildingRecord targetBuilding = clicked;
-                if (targetBuilding != null && targetBuilding.ConstructionState == BuildingConstructionState.Operational)
-                {
-                    CommandWork(moving, destination, targetBuilding.BuildingId,
-                        () => HomeValleyWorkOrders.TryCreateDemolishBuilding(state, targetBuilding.BuildingId, moving.LogicId), "拆除 " + buildingTypeId);
-                    return;
-                }
-
                 CommandWork(moving, destination, HomeValleyLayout.RegionId + ":" + buildingTypeId,
                     () => HomeValleyWorkOrders.TryCreateRepair(state, buildingTypeId, moving.LogicId), "修复 " + buildingTypeId);
-                return;
+                return true;
             }
-
-            string buildSiteId = BuildSiteIdFromHit(hit);
             if (buildSiteId != null)
             {
                 // FG0-ARCH-04：建造位是开局布局里的“建议位置”，放置经格网校验（HomeValleyWorkOrders.TryCreateBuild → HomeGridService.TryPlace）。
                 GridContent.TryGetLayout(buildSiteId, out GameConfig.fg.StartLayout siteRow);
                 CommandWork(moving, destination, HomeValleyLayout.RegionId + ":" + (siteRow != null ? siteRow.TypeId : buildSiteId),
                     () => HomeValleyWorkOrders.TryCreateBuild(state, buildSiteId, moving.LogicId), "建造 " + buildSiteId);
-                return;
+                return true;
             }
-
-            string wreckageNodeId = WreckageNodeIdFromHit(hit);
             if (wreckageNodeId != null)
             {
                 CommandWork(moving, destination, wreckageNodeId,
                     () => HomeValleyWorkOrders.TryCreateSalvage(state, wreckageNodeId, moving.LogicId), "拆解 " + wreckageNodeId);
-                return;
+                return true;
             }
-
-            string groundItemId = GroundItemIdFromHit(hit);
-            if (groundItemId != null)
-            {
-                CommandHaul(moving, destination, groundItemId, state);
-                return;
-            }
-
-            // 右键地面 = 玩家把这台机器调去别处：先让出它手上的工单（规则见 YieldWorkOrderForPlayerCommand）。不这样做的话工单仍挂在它名下——
-            // 直接移动若到不了，失败会被记到旧工单上、发“工单无法到达”。
-            YieldWorkOrderForPlayerCommand(state, moving);
-            moving.CommandMoveTo(destination);
+            CommandHaul(moving, destination, groundItemId, state);
+            return true;
         }
 
         /// <summary>"换目标"守卫：点选新工作前，若该机器已经在办一个指向**不同**目标的订单（还在

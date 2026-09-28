@@ -377,4 +377,29 @@ namespace GameLogic.Settings
             Save();
         }
     }
+
+    /// <summary>目标帧率（本机偏好）。开发标准是最低 120 帧，默认即 120；必须同时关掉垂直同步，
+    /// 否则 Ultra 等画质档自带的 vSyncCount=1 会让 targetFrameRate 被忽略、锁在显示器刷新率。
+    /// 键名带 v2：旧键里存过的 60 不再沿用。冷启动（GameApp）与设置面板共用这里。</summary>
+    public static class FramePacing
+    {
+        public const int DefaultFps = 120;
+        private const string PrefsKey = "GameUi.TargetFps.v2";
+
+        public static int TargetFps => PlayerPrefs.GetInt(PrefsKey, DefaultFps);
+
+        public static void ApplyStored() => Apply(TargetFps);
+
+        public static void Set(int fps)
+        {
+            PlayerPrefs.SetInt(PrefsKey, fps);
+            Apply(fps);
+        }
+
+        private static void Apply(int fps)
+        {
+            QualitySettings.vSyncCount = 0;
+            Application.targetFrameRate = fps;
+        }
+    }
 }

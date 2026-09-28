@@ -988,8 +988,8 @@ namespace GameLogic.EditorTools
                 Finish("场景里找不到发电机");
                 return;
             }
-            ClickWorld(generator.position);
-            Next(11, "鼠标左键点受损的发电机（下令修复）");
+            RightClickWorld(generator.position);
+            Next(11, "鼠标右键点受损的发电机（情境命令：下令修复）");
         }
 
         private static void StepRepairOrdered(double inStep)

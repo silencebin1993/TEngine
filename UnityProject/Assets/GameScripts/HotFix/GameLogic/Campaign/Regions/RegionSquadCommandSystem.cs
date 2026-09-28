@@ -89,6 +89,9 @@ namespace GameLogic.Campaign.Regions
         public Func<Vector2, Vector2> ClampDestination;
         public Func<Vector2, float, RegionHostileInfo?> FindHostileNear;
         public Func<string, RegionHostileInfo?> ResolveHostile;
+        /// <summary>右键情境命令的宿主钩子（屏幕坐标）：点中工作目标（建筑 / 残骸 / 地面物品 / 建造位）时由宿主派工并返回 true；
+        /// 返回 false（或为 null）时右键按“地面 = 移动”处理。攻击判定在它之前（右键敌人永远是攻击）。</summary>
+        public Func<Vector3, bool> ContextCommand;
         /// <summary>FG0-ARCH-03：本地点的战斗内核（编队命令的执行在内核里：移动、避障、受阻判定、接战距离、攻击冷却、开火规则）。</summary>
         public GameLogic.Campaign.Combat.CombatSite Site;
         /// <summary>敌对目标 ID → 内核单位 ID（0 = 不存在）。</summary>
@@ -112,7 +115,12 @@ namespace GameLogic.Campaign.Regions
         private readonly Dictionary<int, List<int>> _groups = new Dictionary<int, List<int>>(9);
         private readonly List<string> _recentEvents = new List<string>(MaxRecentEvents);
         private readonly Dictionary<int, GameObject> _selectionRings = new Dictionary<int, GameObject>(32);
-        private GameObject _destinationMarkerGo;
+        /// <summary>每台执行命令中的已选机器一条路线（LineRenderer）+ 一个终点标记；只在被观察时存在。</summary>
+        private readonly Dictionary<int, LineRenderer> _routeLines = new Dictionary<int, LineRenderer>(32);
+        private readonly Dictionary<int, GameObject> _routeEnds = new Dictionary<int, GameObject>(32);
+        private readonly List<int> _visualScratch = new List<int>(32);
+        private GameObject _dragBoxGo;
+        private LineRenderer _dragBoxOutline;
 
         private bool _dragging;
         private Vector2 _dragStart;
@@ -145,12 +153,14 @@ namespace GameLogic.Campaign.Regions
             _armedKind = null;
             ClearSelectionRings();
             ClearDestinationVisual();
+            ClearDragBox();
         }
 
         public void Unbind()
         {
             ClearSelectionRings();
             ClearDestinationVisual();
+            ClearDragBox();
             _ctx = null;
             _selection.Clear();
             _groups.Clear();
@@ -164,6 +174,7 @@ namespace GameLogic.Campaign.Regions
         {
             ClearSelectionRings();
             ClearDestinationVisual();
+            ClearDragBox();
         }
 
         // ── 每帧驱动 ──────────────────────────────────────────────────────
@@ -185,6 +196,11 @@ namespace GameLogic.Campaign.Regions
             {
                 SyncSelectionVisuals();
                 UpdateDestinationVisual();
+                UpdateDragBox();
+            }
+            else
+            {
+                HideDragBox();
             }
         }
 
@@ -305,12 +321,20 @@ namespace GameLogic.Campaign.Regions
 
         /// <summary>供 Controller 现有的单点选中路径调用：普通点击选中一台机器时，squad 选择集
         /// 同步为这一台（不影响 Controller 自己的 <c>_selected</c>/高亮，那条既有路径原样不动）。</summary>
-        public void SelectSingle(int logicId)
+        public void SelectSingle(int logicId, bool additive = false)
         {
-            _selection.Clear();
+            if (additive && _selection.Contains(logicId))
+            {
+                _selection.Remove(logicId); // Shift+点已选中的机器 = 从选择集里去掉（常规 RTS 手感）。
+                return;
+            }
+            if (!additive)
+            {
+                _selection.Clear();
+            }
             if (_ctx != null && !_ctx.IsDirectControlled(logicId) && _ctx.IsEligible(logicId))
             {
-                _selection.Add(logicId);
+                AddToSelection(logicId);
             }
         }
 
@@ -448,6 +472,17 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
+            // 右键 = 情境命令，不需要先点按钮：右键敌人 = 攻击，右键工作目标 = 派工（宿主钩子），右键地面 = 移动。
+            // 按钮 / 快捷键的“移动 / 攻击”只是切换成“下一次左键确认”的待命状态（攻击移动式用法），不是下令的唯一途径。
+            if (InputRouter.GetMouseButtonDown(1, InputScope.Strategy) &&
+                InputRouter.TryGetPointer(InputScope.Strategy, out Vector3 rightScreen) &&
+                TryScreenToWorld(rightScreen, out Vector2 rightWorld))
+            {
+                _secondaryConsumedThisFrame = true;
+                IssueContextCommand(rightScreen, rightWorld, paused);
+                return;
+            }
+
             if (InputRouter.ConsumeAction(GameActionId.CommandMove, InputScope.Strategy))
             {
                 ArmCommand(RegionCommandKind.Move);
@@ -464,6 +499,27 @@ namespace GameLogic.Campaign.Regions
             {
                 IssueRetreat(paused);
             }
+        }
+
+        /// <summary>右键情境命令（也是自检入口）：敌人 → 攻击；宿主认领的工作目标 → 派工；否则 → 移动到该点。</summary>
+        public void IssueContextCommand(Vector3 screen, Vector2 world, bool paused)
+        {
+            if (_ctx == null || _selection.Count == 0)
+            {
+                return;
+            }
+            RegionHostileInfo? hostile = _ctx.FindHostileNear?.Invoke(world, ClickPickRadius);
+            if (hostile != null && hostile.Value.Alive)
+            {
+                IssueAttack(hostile.Value.HostileId, paused);
+                return;
+            }
+            if (_ctx.ContextCommand != null && _ctx.ContextCommand(screen))
+            {
+                _armedKind = null;
+                return;
+            }
+            IssueMoveTo(world, paused);
         }
 
         /// <summary>UI 按钮/热键共用入口：进入"武装"状态，下一次左键点击世界即确认目标。
@@ -649,6 +705,10 @@ namespace GameLogic.Campaign.Regions
         public void Stop()
         {
             _armedKind = null;
+            if (_ctx == null)
+            {
+                return;
+            }
             foreach (int id in _selection)
             {
                 if (TryGetActiveCommandKind(id, out _))
@@ -656,6 +716,9 @@ namespace GameLogic.Campaign.Regions
                     CancelCommandFor(id);
                     PushEvent($"机器 #{id} 已停止，交还 AI。");
                 }
+                // 右键改成情境命令后，“停止”也负责让出在办工单（原先右键取消工单的入口）；没有工单时是 no-op。
+                _ctx?.CancelWorkIfAny?.Invoke(id);
+                FindMarker(id)?.CancelCommandMove();
             }
         }
 
@@ -804,117 +867,137 @@ namespace GameLogic.Campaign.Regions
             _selectionRings.Clear();
         }
 
+        /// <summary>选择集里每台正在执行命令的机器各画一条路线（寻路地点沿内核路点折线，Demo 表面为直线）和一个终点标记。
+        /// 开销 O(选择集 × 路点)，只在被观察时；选择集超过 <see cref="MaxRingVisuals"/> 时只画前面这些。</summary>
         private void UpdateDestinationVisual()
         {
             if (_ctx?.VisualRoot == null)
             {
                 return;
             }
-            // 只展示"选择集中第一台仍在执行命令的机器"的目标点/路径，避免多目标混成一团看不清——
-            // 命令状态本身（RecentEvents/QueuedCommandCount）才是逐机精确的验收依据。命令真相在战斗内核里（O(选择集) 次查询）。
-            RegionCommandKind shownKind = default;
-            Vector2 shownTarget = default;
-            HomeValleyMachineMarker shownMarker = null;
+            _visualScratch.Clear();
             foreach (int id in _selection)
             {
-                HomeValleyMachineMarker m = FindMarker(id);
-                if (m != null && _ctx.Site != null && _ctx.Site.TryGetCommand(m.UnitId, out BinGames.Sim.Combat.CombatCommand cmd)
-                    && TryFromKernel(cmd.Kind, out RegionCommandKind k))
+                if (_visualScratch.Count >= MaxRingVisuals)
                 {
-                    shownKind = k;
-                    shownTarget = new Vector2((float)cmd.Pos.x, (float)cmd.Pos.y);
-                    shownMarker = m;
                     break;
                 }
+                HomeValleyMachineMarker m = FindMarker(id);
+                if (m == null || _ctx.Site == null || !_ctx.Site.TryGetCommand(m.UnitId, out BinGames.Sim.Combat.CombatCommand cmd)
+                    || !TryFromKernel(cmd.Kind, out RegionCommandKind kind))
+                {
+                    continue;
+                }
+                var target = new Vector2((float)cmd.Pos.x, (float)cmd.Pos.y);
+                if (float.IsNaN(target.x) || float.IsNaN(target.y))
+                {
+                    target = m.Position; // 原地守备：目标点由内核按执行者当前位置落点。
+                }
+                _visualScratch.Add(id);
+                DrawRoute(id, m, kind, target);
             }
 
-            if (shownMarker == null)
+            // 回收不再需要的路线（机器被取消选中、命令结束或死亡）。
+            _removeScratch.Clear();
+            foreach (int id in _routeLines.Keys)
             {
-                ClearDestinationVisual();
-                return;
+                if (!_visualScratch.Contains(id))
+                {
+                    _removeScratch.Add(id);
+                }
             }
-
-            if (_destinationMarkerGo == null)
+            foreach (int id in _removeScratch)
             {
-                _destinationMarkerGo = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-                _destinationMarkerGo.name = "SquadCommandDestination";
-                _destinationMarkerGo.transform.SetParent(_ctx.VisualRoot.transform, false);
-                _destinationMarkerGo.transform.localScale = new Vector3(0.6f, 0.03f, 0.6f);
-                GameLogic.View.UnityObjects.Release(_destinationMarkerGo.GetComponent<Collider>());
-                _destinationMarkerGo.GetComponent<Renderer>().sharedMaterial = ViewMaterials.Standard(Color.white);
+                ReleaseRoute(id);
             }
-            Color kindColor = KindColor(shownKind);
+        }
 
-            _destinationMarkerGo.SetActive(true);
-            _destinationMarkerGo.transform.position = new Vector3(shownTarget.x, 0.04f, shownTarget.y);
-            _destinationMarkerGo.GetComponent<Renderer>().sharedMaterial = ViewMaterials.Standard(kindColor);
+        private readonly List<int> _removeScratch = new List<int>(32);
+        private readonly List<Unity.Mathematics.double2> _routeScratch = new List<Unity.Mathematics.double2>(32);
+        private readonly List<Vector3> _pointScratch = new List<Vector3>(34);
+        /// <summary>一条路线最多画几个路点（超出的只画前面这些，终点标记照常）。</summary>
+        private const int MaxRoutePoints = 32;
+        private const float RouteHeight = 0.06f;
 
-            // FG0-ARCH-06：寻路地点（家园）沿实际路线画折线（路点来自战斗内核，O(路点数)，只在被观察时、只画选择集里的一台）；
-            // 还在规划路线时只画目标点；Demo 的独立表面仍是一根直线。
+        private void DrawRoute(int id, HomeValleyMachineMarker marker, RegionCommandKind kind, Vector2 target)
+        {
+            Color color = KindColor(kind);
+            if (!_routeLines.TryGetValue(id, out LineRenderer line) || line == null)
+            {
+                var go = new GameObject("SquadCommandPath_" + id);
+                go.transform.SetParent(_ctx.VisualRoot.transform, false);
+                go.transform.rotation = Quaternion.Euler(90f, 0f, 0f); // 线面平铺在地面上，俯视镜头下粗细稳定。
+                line = go.AddComponent<LineRenderer>();
+                line.useWorldSpace = true;
+                line.widthMultiplier = 0.15f;
+                line.numCapVertices = 2;
+                line.alignment = LineAlignment.TransformZ;
+                line.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                line.receiveShadows = false;
+                _routeLines[id] = line;
+            }
+            line.sharedMaterial = ViewMaterials.Get("Sprites/Default", new Color(color.r, color.g, color.b, 0.85f));
+
             _routeScratch.Clear();
-            Vector3 from = shownMarker.Position3;
             if (_ctx.Site != null && _ctx.Site.NavEnabled)
             {
-                _ctx.Site.CopyRoute(shownMarker.UnitId, _routeScratch);
+                _ctx.Site.CopyRoute(marker.UnitId, _routeScratch);
             }
-            else
+            if (_routeScratch.Count == 0)
             {
-                _routeScratch.Add(new Unity.Mathematics.double2(shownTarget.x, shownTarget.y));
+                _routeScratch.Add(new Unity.Mathematics.double2(target.x, target.y));
             }
-            int bars = Mathf.Min(_routeScratch.Count, MaxPathBars);
-            for (int k = 0; k < bars; k++)
+            _pointScratch.Clear();
+            Vector3 from = marker.Position3;
+            _pointScratch.Add(new Vector3(from.x, RouteHeight, from.z));
+            int n = Mathf.Min(_routeScratch.Count, MaxRoutePoints);
+            for (int k = 0; k < n; k++)
             {
-                GameObject bar = PathBar(k);
-                Unity.Mathematics.double2 q = _routeScratch[k];
-                var to = new Vector3((float)q.x, from.y, (float)q.y);
-                Vector3 mid = (from + to) * 0.5f;
-                mid.y = 0.05f;
-                float length = Vector3.Distance(new Vector3(from.x, 0f, from.z), new Vector3(to.x, 0f, to.z));
-                bar.SetActive(length > 0.01f);
-                if (length > 0.01f)
-                {
-                    bar.transform.position = mid;
-                    bar.transform.rotation = Quaternion.LookRotation(to - from, Vector3.up);
-                    bar.transform.localScale = new Vector3(0.15f, 0.02f, length);
-                    bar.GetComponent<Renderer>().sharedMaterial = ViewMaterials.Standard(kindColor);
-                }
-                from = to;
+                _pointScratch.Add(new Vector3((float)_routeScratch[k].x, RouteHeight, (float)_routeScratch[k].y));
             }
-            for (int k = bars; k < _pathBars.Count; k++)
+            line.positionCount = _pointScratch.Count;
+            for (int k = 0; k < _pointScratch.Count; k++)
             {
-                _pathBars[k].SetActive(false);
+                line.SetPosition(k, _pointScratch[k]);
             }
+
+            if (!_routeEnds.TryGetValue(id, out GameObject end) || end == null)
+            {
+                end = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                end.name = "SquadCommandDestination_" + id;
+                end.transform.SetParent(_ctx.VisualRoot.transform, false);
+                end.transform.localScale = new Vector3(0.6f, 0.03f, 0.6f);
+                GameLogic.View.UnityObjects.Release(end.GetComponent<Collider>());
+                _routeEnds[id] = end;
+            }
+            end.GetComponent<Renderer>().sharedMaterial = ViewMaterials.Standard(color);
+            Vector3 last = _pointScratch[_pointScratch.Count - 1];
+            end.transform.position = new Vector3(last.x, 0.04f, last.z);
         }
 
-        /// <summary>路线折线最多画几段（超出的只画前面这些，终点标记照常）。</summary>
-        private const int MaxPathBars = 32;
-        private readonly List<GameObject> _pathBars = new List<GameObject>(8);
-        private readonly List<Unity.Mathematics.double2> _routeScratch = new List<Unity.Mathematics.double2>(32);
-
-        /// <summary>路径指示条对象池（不用 LineRenderer：压扁拉长的 Cube，与选中环 / 目的地标记同一手法，无新依赖）。</summary>
-        private GameObject PathBar(int k)
+        private void ReleaseRoute(int id)
         {
-            while (_pathBars.Count <= k)
+            if (_routeLines.TryGetValue(id, out LineRenderer line) && line != null)
             {
-                GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                go.name = "SquadCommandPath";
-                go.transform.SetParent(_ctx.VisualRoot.transform, false);
-                GameLogic.View.UnityObjects.Release(go.GetComponent<Collider>());
-                go.GetComponent<Renderer>().sharedMaterial = ViewMaterials.Standard(Color.white);
-                _pathBars.Add(go);
+                GameLogic.View.UnityObjects.Release(line.gameObject);
             }
-            return _pathBars[k];
+            _routeLines.Remove(id);
+            if (_routeEnds.TryGetValue(id, out GameObject end) && end != null)
+            {
+                GameLogic.View.UnityObjects.Release(end);
+            }
+            _routeEnds.Remove(id);
         }
 
-        /// <summary>自检用：当前画出的路径段数（激活的指示条）。</summary>
-        public int VisiblePathBarCount
+        /// <summary>自检用：当前画出的路线条数（每台执行命令中的已选机器一条）。</summary>
+        public int VisibleRouteCount
         {
             get
             {
                 int n = 0;
-                foreach (GameObject go in _pathBars)
+                foreach (LineRenderer line in _routeLines.Values)
                 {
-                    if (go != null && go.activeSelf)
+                    if (line != null && line.positionCount >= 2)
                     {
                         n++;
                     }
@@ -925,19 +1008,87 @@ namespace GameLogic.Campaign.Regions
 
         private void ClearDestinationVisual()
         {
-            if (_destinationMarkerGo != null)
+            _removeScratch.Clear();
+            _removeScratch.AddRange(_routeLines.Keys);
+            foreach (int id in _routeEnds.Keys)
             {
-                GameLogic.View.UnityObjects.Release(_destinationMarkerGo);
-                _destinationMarkerGo = null;
-            }
-            foreach (GameObject go in _pathBars)
-            {
-                if (go != null)
+                if (!_removeScratch.Contains(id))
                 {
-                    GameLogic.View.UnityObjects.Release(go);
+                    _removeScratch.Add(id);
                 }
             }
-            _pathBars.Clear();
+            foreach (int id in _removeScratch)
+            {
+                ReleaseRoute(id);
+            }
+        }
+
+        // ── 框选指示：拖拽中在地面画出将被选中的世界矩形（半透明底 + 描边），与判定用的是同一个矩形 ──
+
+        private void UpdateDragBox()
+        {
+            float sizeX = Mathf.Abs(_dragCurrent.x - _dragStart.x);
+            float sizeY = Mathf.Abs(_dragCurrent.y - _dragStart.y);
+            if (!_dragging || _armedKind.HasValue || _ctx?.VisualRoot == null || (sizeX < MinDragWorldSize && sizeY < MinDragWorldSize))
+            {
+                HideDragBox();
+                return;
+            }
+            if (_dragBoxGo == null)
+            {
+                _dragBoxGo = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                _dragBoxGo.name = "SquadDragBox";
+                _dragBoxGo.transform.SetParent(_ctx.VisualRoot.transform, false);
+                GameLogic.View.UnityObjects.Release(_dragBoxGo.GetComponent<Collider>());
+                Renderer r = _dragBoxGo.GetComponent<Renderer>();
+                r.sharedMaterial = ViewMaterials.Get("Sprites/Default", new Color(0.35f, 0.85f, 0.45f, 0.18f));
+                r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                var outlineGo = new GameObject("Outline");
+                outlineGo.transform.SetParent(_ctx.VisualRoot.transform, false);
+                outlineGo.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+                outlineGo.transform.SetParent(_dragBoxGo.transform, true);
+                _dragBoxOutline = outlineGo.AddComponent<LineRenderer>();
+                _dragBoxOutline.useWorldSpace = true;
+                _dragBoxOutline.loop = true;
+                _dragBoxOutline.positionCount = 4;
+                _dragBoxOutline.widthMultiplier = 0.08f;
+                _dragBoxOutline.alignment = LineAlignment.TransformZ;
+                _dragBoxOutline.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                _dragBoxOutline.sharedMaterial = ViewMaterials.Get("Sprites/Default", new Color(0.45f, 1f, 0.55f, 0.95f));
+            }
+            _dragBoxGo.SetActive(true);
+            float loX = Mathf.Min(_dragStart.x, _dragCurrent.x);
+            float loY = Mathf.Min(_dragStart.y, _dragCurrent.y);
+            float hiX = Mathf.Max(_dragStart.x, _dragCurrent.x);
+            float hiY = Mathf.Max(_dragStart.y, _dragCurrent.y);
+            _dragBoxGo.transform.SetPositionAndRotation(new Vector3((loX + hiX) * 0.5f, 0.07f, (loY + hiY) * 0.5f), Quaternion.Euler(90f, 0f, 0f));
+            _dragBoxGo.transform.localScale = new Vector3(Mathf.Max(hiX - loX, 0.01f), Mathf.Max(hiY - loY, 0.01f), 1f);
+            const float y = 0.08f;
+            _dragBoxOutline.SetPosition(0, new Vector3(loX, y, loY));
+            _dragBoxOutline.SetPosition(1, new Vector3(hiX, y, loY));
+            _dragBoxOutline.SetPosition(2, new Vector3(hiX, y, hiY));
+            _dragBoxOutline.SetPosition(3, new Vector3(loX, y, hiY));
+        }
+
+        /// <summary>自检用：框选指示当前是否可见。</summary>
+        public bool DragBoxVisible => _dragBoxGo != null && _dragBoxGo.activeSelf;
+
+        private void HideDragBox()
+        {
+            if (_dragBoxGo != null && _dragBoxGo.activeSelf)
+            {
+                _dragBoxGo.SetActive(false);
+            }
+        }
+
+        private void ClearDragBox()
+        {
+            if (_dragBoxGo != null)
+            {
+                GameLogic.View.UnityObjects.Release(_dragBoxGo);
+            }
+            _dragBoxGo = null;
+            _dragBoxOutline = null;
         }
 
         private static Color KindColor(RegionCommandKind kind)

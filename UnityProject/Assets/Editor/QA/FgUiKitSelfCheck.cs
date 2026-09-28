@@ -1674,6 +1674,7 @@ namespace GameLogic.EditorTools
             CheckEscCoversDemoPanels();
             CheckTextFocusProbe();
             CheckRightClickCancelsArm();
+            CheckRightClickContextCommand();
         }
 
         /// <summary>正式流程里的触发点（机器阵亡、电网断电 / 恢复）直接产出可定位的通知，不经 NotificationCenter.Post 捷径。</summary>
@@ -1956,6 +1957,81 @@ namespace GameLogic.EditorTools
             finally
             {
                 squad.Unbind();
+                InputRouter.DebugSetReader(null);
+                InputRouter.Reset();
+            }
+        }
+
+        /// <summary>右键＝情境命令，不需要先按“移动 / 攻击”：右键敌人走攻击，右键宿主认领的工作目标走派工钩子，其余走移动；
+        /// 下令后不留“待命”状态，下一次右键照样能直接下令。</summary>
+        private static void CheckRightClickContextCommand()
+        {
+            var reader = new FakeReader();
+            InputRouter.DebugSetReader(reader);
+            var squad = new GameLogic.Campaign.Regions.RegionSquadCommandSystem();
+            var camGo = new GameObject("__fg_ctx_cam") { hideFlags = HideFlags.HideAndDontSave };
+            try
+            {
+                Camera cam = camGo.AddComponent<Camera>();
+                cam.orthographic = true;
+                cam.orthographicSize = 10f;
+                camGo.transform.SetPositionAndRotation(new Vector3(0f, 20f, 0f), Quaternion.Euler(90f, 0f, 0f));
+                InputRouter.SetScope(InputScope.Strategy);
+                InputRouter.SetUiPointerBlocker(null);
+                bool hostileHere = false;
+                bool workHere = false;
+                int workCalls = 0;
+                squad.Bind(new GameLogic.Campaign.Regions.RegionSquadCommandContext
+                {
+                    Camera = cam,
+                    IsEligible = _ => true,
+                    IsDirectControlled = _ => false,
+                    Markers = new List<GameLogic.Campaign.Regions.HomeValleyMachineMarker>(),
+                    FindHostileNear = (_, __) => hostileHere
+                        ? new GameLogic.Campaign.Regions.RegionHostileInfo("h1", Vector2.zero, true)
+                        : (GameLogic.Campaign.Regions.RegionHostileInfo?)null,
+                    ResolveHostile = _ => null,
+                    ContextCommand = _ => { workCalls++; return workHere; },
+                });
+                squad.DebugSelectMany(new[] { 1, 2 });
+
+                // ① 右键工作目标：宿主钩子认领，不走移动 / 攻击。
+                workHere = true;
+                reader.MouseDown.Add(1);
+                squad.Tick(false, 0.016f);
+                bool workRouted = workCalls == 1 && squad.ConsumedSecondaryThisFrame && squad.ArmedKind == null;
+                Frame(reader);
+
+                // ② 右键敌人：攻击优先于派工钩子（钩子不被调用）。
+                hostileHere = true;
+                reader.MouseDown.Add(1);
+                squad.Tick(false, 0.016f);
+                IReadOnlyList<string> ev = squad.RecentEvents;
+                bool attackRouted = workCalls == 1 && ev.Count > 0 && ev[ev.Count - 1].Contains("攻击");
+                Frame(reader);
+
+                // ③ 右键地面：钩子不认领、没有敌人 → 移动（不进入待命，按钮不是必经之路）。
+                hostileHere = false;
+                workHere = false;
+                reader.MouseDown.Add(1);
+                squad.Tick(false, 0.016f);
+                bool moveRouted = workCalls == 2 && squad.ArmedKind == null && squad.ConsumedSecondaryThisFrame;
+                Frame(reader);
+
+                // ④ 没有选择集时右键不下令。
+                squad.ClearSelection();
+                reader.MouseDown.Add(1);
+                squad.Tick(false, 0.016f);
+                bool idleIgnored = workCalls == 2 && !squad.ConsumedSecondaryThisFrame;
+                Frame(reader);
+
+                Expect(workRouted && attackRouted && moveRouted && idleIgnored,
+                    $"右键情境命令：工作目标走派工钩子（{workRouted}）、敌人走攻击且优先（{attackRouted}）、地面走移动且不留待命（{moveRouted}）、无选择集时不下令（{idleIgnored}）");
+            }
+            finally
+            {
+                squad.Unbind();
+                Object.DestroyImmediate(camGo);
                 InputRouter.DebugSetReader(null);
                 InputRouter.Reset();
             }

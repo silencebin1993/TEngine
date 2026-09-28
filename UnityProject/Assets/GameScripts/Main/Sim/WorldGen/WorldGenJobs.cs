@@ -57,6 +57,9 @@ namespace BinGames.Sim.WorldGen
         public int CoreMinY;
         public int CoreMaxX;
         public int CoreMaxY;
+        /// <summary>普通视角的地貌表现（非建造）：只画地貌颜色、污染染色与迷雾，不画格线 / 图案 / 核心通道框——
+        /// 地格参考线只属于建造模式，普通战斗与探索时地面不应呈现为方格。</summary>
+        public bool TerrainView;
     }
 
     /// <summary>
@@ -95,6 +98,26 @@ namespace BinGames.Sim.WorldGen
                     bool reserve = q.HasReserve
                                    && gx >= q.ReserveMinX && gx <= q.ReserveMaxX && gy >= q.ReserveMinY && gy <= q.ReserveMaxY
                                    && !(gx >= q.CoreMinX && gx <= q.CoreMaxX && gy >= q.CoreMinY && gy <= q.CoreMaxY);
+                    if (q.TerrainView)
+                    {
+                        Color32 soft = baseColor;
+                        if (pollution > 0)
+                        {
+                            soft = Lerp(soft, new Color32(150, 40, 150, 255), pollution >= q.BlockLevel ? 140 : 70);
+                        }
+                        if (!explored)
+                        {
+                            soft = Shade(soft, 64);
+                        }
+                        for (int py = 0; py < n; py++)
+                        {
+                            for (int px = 0; px < n; px++)
+                            {
+                                Pixels[(cy * n + py) * size + cx * n + px] = soft;
+                            }
+                        }
+                        continue;
+                    }
                     for (int py = 0; py < n; py++)
                     {
                         for (int px = 0; px < n; px++)
@@ -139,6 +162,9 @@ namespace BinGames.Sim.WorldGen
                 default: return false;
             }
         }
+
+        private static Color32 Lerp(Color32 a, Color32 b, int t256) =>
+            new Color32((byte)(a.r + ((b.r - a.r) * t256 >> 8)), (byte)(a.g + ((b.g - a.g) * t256 >> 8)), (byte)(a.b + ((b.b - a.b) * t256 >> 8)), a.a);
 
         private static Color32 Shade(Color32 c, int k256) =>
             new Color32((byte)(c.r * k256 >> 8), (byte)(c.g * k256 >> 8), (byte)(c.b * k256 >> 8), c.a);

@@ -284,7 +284,7 @@ namespace GameLogic.Campaign.WorldSim
             }
             _terrainRoot = new GameObject("Terrain");
             _terrainRoot.transform.SetParent(_root.transform, false);
-            _terrain = new WorldTerrainOverlay(_terrainRoot.transform, alpha: 0.4f, height: -0.05f);
+            _terrain = new WorldTerrainOverlay(_terrainRoot.transform, alpha: 0.4f, height: -0.05f, terrainView: true);
             Shader shader = Shader.Find("Standard");
             _raidMaterial = new Material(shader) { color = new Color(0.85f, 0.18f, 0.12f) };
             _arrivedMaterial = new Material(shader) { color = new Color(1f, 0.55f, 0.1f) };

@@ -87,13 +87,22 @@ namespace GameLogic.Campaign.Regions
         public Texture2D PlaceholderTexture => _placeholder;
 
         private readonly float _height;
+        /// <summary>普通视角地貌（非建造）：每格 1 像素 + 双线性过滤，只有平滑的地貌色，没有格线 / 图案。</summary>
+        private readonly bool _terrainView;
+        private readonly int _ppc;
+
+        /// <summary>本叠加层每格几个像素（建造模式 <see cref="PixelsPerCell"/>，普通视角 1）。</summary>
+        public int CellPixels => _ppc;
 
         /// <param name="alpha">贴图不透明度（建造模式 0.55；FG0-ARCH-01 普通视角的地貌表现层更淡）。</param>
         /// <param name="height">贴图离地高度（普通视角放在建筑与机器下面）。</param>
-        public WorldTerrainOverlay(Transform parent, float alpha = 0.55f, float height = 0.03f)
+        /// <param name="terrainView">true = 普通视角地貌（无地格参考线）；false = 建造模式叠加层（格线、图案、核心通道框）。</param>
+        public WorldTerrainOverlay(Transform parent, float alpha = 0.55f, float height = 0.03f, bool terrainView = false)
         {
             _parent = parent;
             _height = height;
+            _terrainView = terrainView;
+            _ppc = terrainView ? 1 : PixelsPerCell;
             _material = new Material(Shader.Find("Sprites/Default")) { color = new Color(1f, 1f, 1f, alpha) };
             _placeholder = BuildPlaceholder();
         }
@@ -172,7 +181,8 @@ namespace GameLogic.Campaign.Regions
                     var q = new TilePaintParams
                     {
                         ChunkSize = _chunkSize,
-                        PixelsPerCell = PixelsPerCell,
+                        PixelsPerCell = _ppc,
+                        TerrainView = _terrainView,
                         BaseX = t.ChunkX * _chunkSize,
                         BaseY = t.ChunkY * _chunkSize,
                         BlockLevel = blockLevel,
@@ -317,7 +327,7 @@ namespace GameLogic.Campaign.Regions
 
         private void EnsureTexture(Tile t)
         {
-            int size = _chunkSize * PixelsPerCell;
+            int size = _chunkSize * _ppc;
             if (t.Texture != null && t.Texture.width == size)
             {
                 return;
@@ -326,7 +336,12 @@ namespace GameLogic.Campaign.Regions
             {
                 SafeDestroy(t.Texture);
             }
-            t.Texture = new Texture2D(size, size, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp, name = "TerrainChunkTile" };
+            t.Texture = new Texture2D(size, size, TextureFormat.RGBA32, false)
+            {
+                filterMode = _terrainView ? FilterMode.Bilinear : FilterMode.Point,
+                wrapMode = TextureWrapMode.Clamp,
+                name = "TerrainChunkTile",
+            };
         }
 
         private void SetTexture(Tile t, Texture tex)
@@ -397,7 +412,7 @@ namespace GameLogic.Campaign.Regions
             {
                 return false;
             }
-            color = t.Texture.GetPixel(a.LocalX * PixelsPerCell + px, a.LocalY * PixelsPerCell + py);
+            color = t.Texture.GetPixel(a.LocalX * _ppc + Math.Min(px, _ppc - 1), a.LocalY * _ppc + Math.Min(py, _ppc - 1));
             return true;
         }
 

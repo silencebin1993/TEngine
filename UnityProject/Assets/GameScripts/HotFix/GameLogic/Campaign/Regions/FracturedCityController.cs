@@ -560,19 +560,24 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
+            // 常规 RTS 手感：左键点机器＝选中（Shift＝加选 / 减选），左键点空地＝取消选中；移动 / 攻击在右键上（SquadCommands）。
+            bool additive = InputRouter.Reader.GetKey(KeyCode.LeftShift) || InputRouter.Reader.GetKey(KeyCode.RightShift);
             Ray ray = _camera.ScreenPointToRay(pointer);
-            if (!Physics.Raycast(ray, out RaycastHit hit, 500f))
-            {
-                return;
-            }
-
-            HomeValleyMachineMarker marker = hit.collider.GetComponent<MachineView>()?.Marker;
+            HomeValleyMachineMarker marker = Physics.Raycast(ray, out RaycastHit hit, 500f)
+                ? hit.collider.GetComponent<MachineView>()?.Marker
+                : null;
             if (marker != null)
             {
                 _selected?.SetSelected(false);
                 _selected = marker;
                 _selected.SetSelected(true);
-                SquadCommands.SelectSingle(marker.LogicId);
+                SquadCommands.SelectSingle(marker.LogicId, additive);
+            }
+            else if (!additive)
+            {
+                _selected?.SetSelected(false);
+                _selected = null;
+                SquadCommands.ClearSelection();
             }
         }
 

@@ -16,7 +16,6 @@ namespace GameLogic.UI.GameShell
     public sealed class GameShellUIToolkit : MonoBehaviour
     {
         private const string FullscreenPreferenceKey = "GameUi.Fullscreen";
-        private const string TargetFpsPreferenceKey = "GameUi.TargetFps";
 
         private UIDocument _document;
         private VisualTreeAsset _visualTree;
@@ -260,12 +259,11 @@ namespace GameLogic.UI.GameShell
         private void ApplyStoredSettings()
         {
             bool fullscreen = PlayerPrefs.GetInt(FullscreenPreferenceKey, Screen.fullScreen ? 1 : 0) == 1;
-            int targetFps = PlayerPrefs.GetInt(TargetFpsPreferenceKey, 60);
             if (_fullscreenToggle != null)
             {
                 _fullscreenToggle.SetValueWithoutNotify(fullscreen);
             }
-            Application.targetFrameRate = targetFps;
+            GameLogic.Settings.FramePacing.ApplyStored();
         }
 
         private void SetFullscreen(bool fullscreen)
@@ -277,8 +275,7 @@ namespace GameLogic.UI.GameShell
 
         private void SetTargetFrameRate(int fps)
         {
-            Application.targetFrameRate = fps;
-            PlayerPrefs.SetInt(TargetFpsPreferenceKey, fps);
+            GameLogic.Settings.FramePacing.Set(fps);
             ShowSettingsFeedback($"目标帧率已设为 {fps} FPS。");
         }
 
