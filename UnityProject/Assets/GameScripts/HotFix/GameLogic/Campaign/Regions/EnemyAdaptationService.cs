@@ -20,7 +20,7 @@ namespace GameLogic.Campaign.Regions
     ///    "60阈值...下一次出征的adaptation情报"）未达标 → 恒 <see cref="AdaptationCatalog.None"/>（"无历史
     ///    为None"/"None安全默认"，AC-ADP-001 字面要求）。
     /// 2. 构筑摘要：现存活机器（不限区域，反映玩家当前技术投入）逐台解析已装配蓝图版本的
-    ///    <see cref="BlueprintCircuitCompiler.DetectReactionId"/>，统计"熔穿过载/标记跳转/常规配置（有
+    ///    接入就绪反应（FG1-SIG-05 起为 <see cref="UplinkReactionReadiness.MachineReadyReaction"/>），统计"熔穿过载/标记跳转/常规配置（有
     ///    主武器但未触发反应）"三类数量。玩家主力反应是敌方"现有技术树内编制变化"的唯一依据——熔穿过载
     ///    主力 → HeatResistant（针对性抵消穿甲）；标记跳转主力（点杀分散打法）→ Flanker（侧翼打乱阵型）；
     ///    无明显专精（含没有任何存活机器装配过反应）→ JammerSupport（通用压制）。
@@ -71,8 +71,8 @@ namespace GameLogic.Campaign.Regions
                 {
                     continue; // 没有主组件的半成品蓝图不计入统计。
                 }
-                BlueprintCircuitBoard board = BlueprintCircuitBoard.FromVersion(version);
-                string reactionId = BlueprintCircuitCompiler.DetectReactionId(board);
+                // FG1-SIG-05：熔穿过载 / 标记跳转只在接入时由核心固件触发——构筑按“接入时能打出”统计（与核心门灯同一判定）。
+                string reactionId = UplinkReactionReadiness.MachineReadyReaction(state, m);
                 if (reactionId == MechanicalReactionCatalog.ReactionMeltOverloadId)
                 {
                     melt++;

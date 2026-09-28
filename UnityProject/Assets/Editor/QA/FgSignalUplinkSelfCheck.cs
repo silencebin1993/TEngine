@@ -219,8 +219,8 @@ namespace GameLogic.EditorTools
             float prodCd = FirmwareKinds.CoreCooldownSeconds(FirmwareCatalog.FwOverloadId);
             Expect(rows.Count >= 6 && rows.TryGetValue(FirmwareCatalog.FwOverloadId, out float o) && Mathf.Approximately(o, 8f)
                    && rows.TryGetValue(FirmwareCatalog.FwMarkTagId, out float m) && Mathf.Approximately(m, 8f)
-                   && Mathf.Approximately(coreCd, 8f) && regularCd == 0f && prodCd == 0f,
-                $"固件种类表 cooldown 列：过载 / 标记跳转 8 秒（设计为核心，FG1-SIG-05 改种类后生效）；注入为核心时读到 {coreCd} 秒；常规固件与正式表里的过载（目前常规）冷却为 0");
+                   && Mathf.Approximately(coreCd, 8f) && regularCd == 0f && Mathf.Approximately(prodCd, 8f),
+                $"固件种类表 cooldown 列：过载 / 标记跳转 8 秒；注入为核心时读到 {coreCd} 秒；FG1-SIG-05 起正式表里过载就是核心（{prodCd} 秒）；常规固件冷却为 0");
 
             string logic = Path.Combine(Application.dataPath, "GameScripts/HotFix/GameLogic");
             string[] files = { "Campaign/Signal/SignalUplinkService.cs", "UI/RegionCommand/RegionCommandBarUIToolkit.cs", "UI/SignalCore/SignalCoreHudUIToolkit.cs" };

@@ -275,6 +275,21 @@ namespace GameLogic.Campaign.Combat
 
         public bool TryGetMachineUnit(int logicId, out int unitId) => _machineUnit.TryGetValue(logicId, out unitId);
 
+        /// <summary>FG1-SIG-05：这台机器此刻的武器热量与是否过热（内核实时状态）。过热是机体状态——谁在开都一样，
+        /// 交还 AI 时照样要等散热到恢复线以下才能开火（原 Demo OverloadSuppressionMirror 的“按身体归属”规则在正式版的落点）。</summary>
+        public bool TryGetMachineHeat(int logicId, out float heat, out bool overheated)
+        {
+            heat = 0f;
+            overheated = false;
+            if (!_machineUnit.TryGetValue(logicId, out int unit) || !Kernel.TryGetUnit(unit, out CombatUnitView v))
+            {
+                return false;
+            }
+            heat = v.Heat;
+            overheated = (v.Flags & CombatUnitFlags.Overheated) != 0;
+            return true;
+        }
+
         public bool TryGetMachineMarker(int logicId, out HomeValleyMachineMarker marker)
         {
             marker = null;

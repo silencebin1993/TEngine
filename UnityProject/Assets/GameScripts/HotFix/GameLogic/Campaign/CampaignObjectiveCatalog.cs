@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Content;
+using GameLogic.Localization;
 using GameLogic.Campaign.Regions;
 using UnityEngine;
 
@@ -13,19 +14,35 @@ namespace GameLogic.Campaign
     /// （UI-10：关键物“在地面/已装车/已带回”，null＝没有可补充的现状）。</summary>
     public sealed class ObjectiveItemDef
     {
-        public readonly string Label;
+        private readonly string _label;
+        /// <summary>FG1-SIG-05：新文案走文本键（清单在静态初始化时建好，文本在读取时才解析，不锁死语言也不依赖表的加载时机）。</summary>
+        private readonly string _labelKey;
         public readonly Func<CampaignState, bool> IsDone;
         public readonly Func<CampaignState, Vector2?> HomeLocation;
         public readonly Func<CampaignState, string> Status;
 
+        public string Label => _labelKey != null ? GameText.Get(_labelKey) : _label;
+
         public ObjectiveItemDef(string label, Func<CampaignState, bool> isDone, Func<CampaignState, Vector2?> homeLocation = null,
             Func<CampaignState, string> status = null)
         {
-            Label = label;
+            _label = label;
             IsDone = isDone;
             HomeLocation = homeLocation;
             Status = status;
         }
+
+        private ObjectiveItemDef(string label, string labelKey, Func<CampaignState, bool> isDone, Func<CampaignState, Vector2?> homeLocation,
+            Func<CampaignState, string> status)
+            : this(label, isDone, homeLocation, status)
+        {
+            _labelKey = labelKey;
+        }
+
+        /// <summary>文案用文本键（fg.TbLocText）的清单项。</summary>
+        public static ObjectiveItemDef Keyed(string labelKey, Func<CampaignState, bool> isDone, Func<CampaignState, Vector2?> homeLocation = null,
+            Func<CampaignState, string> status = null) =>
+            new ObjectiveItemDef(null, labelKey, isDone, homeLocation, status);
     }
 
     /// <summary>OBJ-01～10 的一行定义（DEMO-CONTENT-LOCK.md §4.4）。<see cref="RegionNote"/>：人在该目标区域时
@@ -339,7 +356,8 @@ namespace GameLogic.Campaign
                             At(HomeValleyLayout.BuildingTypeAnalysisBench)),
                         new ObjectiveItemDef($"在解析台解析{databox}", s => Unlocked(s, FirmwareCatalog.FwMarkTagId),
                             At(HomeValleyLayout.BuildingTypeAnalysisBench)),
-                        new ObjectiveItemDef("在蓝图编辑器保存含“标记跳转”的蓝图",
+                        // FG1-SIG-05：标记跳转是核心固件，只在接入时插进接入口——“标记跳转蓝图” = 接入时能打出标记跳转的蓝图。
+                        ObjectiveItemDef.Keyed("objective.obj06.save_markjump",
                             s => BlueprintEditorService.IsReactionCharged(s, MechanicalReactionCatalog.ReactionMarkJumpId)),
                         new ObjectiveItemDef("战斗履带机回装配站改造", Erc003Retrofitted, At(HomeValleyLayout.BuildingTypeAssemblyStation)),
                     },
@@ -363,8 +381,9 @@ namespace GameLogic.Campaign
                     {
                         new ObjectiveItemDef($"在解析台解析{cannon}", s => FoundryOutpostRegion.ComputeCoreGateLights(s).CannonAnalyzed,
                             At(HomeValleyLayout.BuildingTypeAnalysisBench)),
-                        new ObjectiveItemDef("在蓝图编辑器保存含“熔穿过载”的蓝图", s => FoundryOutpostRegion.ComputeCoreGateLights(s).OverloadBlueprintSaved),
-                        new ObjectiveItemDef("在装配站给一台现役机器实装熔穿过载", s => FoundryOutpostRegion.ComputeCoreGateLights(s).MachineEquipped,
+                        // FG1-SIG-05：过载是核心固件——保存 / 实装按“接入时能打出熔穿过载”判定（与核心门三灯同一判定）。
+                        ObjectiveItemDef.Keyed("objective.obj08.save_overload", s => FoundryOutpostRegion.ComputeCoreGateLights(s).OverloadBlueprintSaved),
+                        ObjectiveItemDef.Keyed("objective.obj08.machine_ready", s => FoundryOutpostRegion.ComputeCoreGateLights(s).MachineEquipped,
                             At(HomeValleyLayout.BuildingTypeAssemblyStation)),
                     },
                 },

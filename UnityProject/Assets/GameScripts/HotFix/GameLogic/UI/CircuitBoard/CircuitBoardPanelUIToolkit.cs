@@ -562,9 +562,12 @@ namespace GameLogic.UI.CircuitBoard
             }
 
             _draftSnapshots.Remove(result.BlueprintId);
+            // FG1-SIG-05：反应只在接入时由核心固件触发；技术数据不够时蓝图照常保存、研究延后。
             string chargeNote = result.TechDataCharged > 0
-                ? $"；首次保存跨派系反应“{ReactionDisplayName(result.ReactionId)}”，已扣技术数据 {result.TechDataCharged}"
-                : (result.ReactionId != null ? $"；触发反应“{ReactionDisplayName(result.ReactionId)}”（已在本战役扣过费，本次免费）" : string.Empty);
+                ? GameText.Format("blueprint.save.reaction_charged", ReactionDisplayName(result.ReactionId), result.TechDataCharged)
+                : result.ResearchPendingCost > 0
+                    ? GameText.Format("blueprint.save.reaction_pending", ReactionDisplayName(result.ReactionId), result.ResearchPendingCost, state.TechData)
+                    : (result.ReactionId != null ? GameText.Format("blueprint.save.reaction_free", ReactionDisplayName(result.ReactionId)) : string.Empty);
             // ER8-CONTENT-01 AC-THEME-001：此前显示 BlueprintId（bp_erc003 等内部 ID），改为蓝图展示名。
             string savedName = state.BlueprintRecords?.FirstOrDefault(b => b.BlueprintId == result.BlueprintId)?.DisplayName;
             _saveResultLabel.text = $"已保存“{(string.IsNullOrEmpty(savedName) ? "蓝图" : savedName)}”为版本 {result.Version}{chargeNote}。";
@@ -1243,7 +1246,8 @@ namespace GameLogic.UI.CircuitBoard
             int bandwidth = _board.ComputeBandwidthCost();
             float heat = _board.ComputeHeatBudget();
             string[] factions = _board.ComputeFactionTags();
-            string reactionId = BlueprintCircuitCompiler.DetectReactionId(_board);
+            // FG1-SIG-05：反应按“你接入时能打出”判定（核心固件触发，AI 不用）。
+            string reactionId = UplinkReactionReadiness.ReadyReactionId(state, _board);
 
             string factionText = factions.Length == 0 ? "无" : string.Join("+", factions);
             string crossFactionNote = factions.Length >= 2 ? "（跨派系）" : string.Empty;
@@ -1260,9 +1264,13 @@ namespace GameLogic.UI.CircuitBoard
                 MechanicalReactionCatalog.TryGet(reactionId, out MechanicalContentDef reactionDef);
                 int cost = BlueprintEditorService.ReactionTechDataCost(reactionId);
                 bool charged = BlueprintEditorService.IsReactionCharged(state, reactionId);
+                string trigger = MechanicalReactionCatalog.TriggerFirmwareOf(reactionId);
+                string reactionName = trigger != null && Campaign.Signal.FirmwareKinds.IsCore(trigger)
+                    ? GameText.Format("circuit.reaction.uplink_ready", reactionDef?.DisplayName, UplinkCompiler.FirmwareName(trigger))
+                    : reactionDef?.DisplayName;
                 reactionNote = charged
-                    ? $"{reactionDef?.DisplayName}（本战役已扣过技术数据，再次保存免费）"
-                    : $"{reactionDef?.DisplayName}（首次保存将扣技术数据 {cost}，当前 {state?.TechData ?? 0}）";
+                    ? GameText.Format("circuit.reaction.charged", reactionName)
+                    : GameText.Format("circuit.reaction.first_cost", reactionName, cost, state?.TechData ?? 0);
                 counterNote = reactionDef?.ValuesSummary ?? "-";
             }
 

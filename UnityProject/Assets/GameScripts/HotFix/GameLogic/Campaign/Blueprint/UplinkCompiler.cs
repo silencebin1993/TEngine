@@ -351,6 +351,11 @@ namespace GameLogic.Campaign.Blueprint
         private static void BuildNotes(UplinkDualPreview dual)
         {
             UplinkInsertionPlan plan = dual.Plan;
+            // FG1-SIG-05（FGR-SIG-090）：机器电路里残留的核心固件（旧草稿 / 旧档）AI 不用——说明它为什么没出现在左栏、该怎么处理。
+            foreach (string inert in dual.Ai.InertCoreFirmwareIds)
+            {
+                dual.Notes.Add(GameText.Format("circuit.uplink.note.core_inert", FirmwareName(inert)));
+            }
             if (!plan.HasUplink)
             {
                 dual.Notes.Add(GameText.Get("circuit.uplink.note.no_uplink"));

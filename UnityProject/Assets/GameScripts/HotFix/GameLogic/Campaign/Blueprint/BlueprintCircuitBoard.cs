@@ -607,14 +607,15 @@ namespace GameLogic.Campaign.Blueprint
                 // UI 下拉框的"（空）"选项落到这里——语义等同显式调用 TryClearFirmware，不当非法输入报错。
                 return TryClearFirmware(index);
             }
-            if (!FirmwareCatalog.TryGet(firmwareId, out MechanicalContentDef def) || def.LegacyFacadeId == null)
-            {
-                return CircuitOpResult.Fail("firmware_unknown", $"'{firmwareId}' 不是已知固件或无可编译等价实现。");
-            }
             // FG1-SIG-01（FGR-SIG-012）：核心固件放不进机器电路。种类只读 fg.TbFirmwareKind（Signal.FirmwareKinds），不按 ID 写特例。
+            // FG1-SIG-05：先判核心——标记跳转这类没有 gene 等价实现的核心固件也给“只能由信号携带”，而不是“无可编译等价实现”。
             if (FirmwareKinds.IsCore(firmwareId))
             {
                 return CircuitOpResult.Fail(CoreSignalOnlyCode, GameText.Get("signal.reason.core_signal_only"));
+            }
+            if (!FirmwareCatalog.TryGet(firmwareId, out MechanicalContentDef def) || def.LegacyFacadeId == null)
+            {
+                return CircuitOpResult.Fail("firmware_unknown", $"'{firmwareId}' 不是已知固件或无可编译等价实现。");
             }
             if (!MechanicalContentUnlock.IsUnlocked(state, firmwareId))
             {
@@ -894,8 +895,9 @@ namespace GameLogic.Campaign.Blueprint
 
         /// <summary>DEMO-CONTENT-LOCK.md §2.4/§5 字面数字："一般主武器基础伤害+15%、额外热量+15"；
         /// "与重炮组合时改为熔穿过载：……在重炮基础热量40上再加25，不再叠加一般+15热量"。公开方法供 UI
-        /// 实时预览（不落盘也复算），<see cref="ToVersion"/> 落盘同一结果——不能各算一套。</summary>
-        public float ComputeHeatBudget() => ComputeHeatBudget(PrimaryId, FirmwareSlots);
+        /// 实时预览（不落盘也复算），<see cref="ToVersion"/> 落盘同一结果——不能各算一套。
+        /// FG1-SIG-05：机器电路里的核心固件 AI 不用（FGR-SIG-090），不计入 AI 驾驶时的热量。</summary>
+        public float ComputeHeatBudget() => ComputeHeatBudget(PrimaryId, FirmwareKinds.AiUsable(FirmwareSlots));
 
         /// <summary>FG1-SIG-02：热量预算的纯函数版本——“你接入时”把插入接入口的固件并进 <paramref name="firmwareIds"/>，
         /// 与机器电路自己的固件走同一条规则（预览与正式结算同一套计算，IC-REQ-010）。</summary>

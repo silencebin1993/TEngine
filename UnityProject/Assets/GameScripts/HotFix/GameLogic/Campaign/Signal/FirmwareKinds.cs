@@ -84,6 +84,70 @@ namespace GameLogic.Campaign.Signal
 
         public static bool IsCore(string contentId) => KindOf(contentId) == FirmwareKind.Core;
 
+        /// <summary>
+        /// FG1-SIG-05（FGR-SIG-090）：AI 永远不使用核心固件。机器电路自己的固件里，只有这里返回 true 的才参与 AI 驾驶时的编译
+        /// （反应、热量、伤害）；核心固件只能经信号带进接入口。空串 / null 返回 false。
+        /// </summary>
+        public static bool IsAiUsable(string contentId) => !string.IsNullOrEmpty(contentId) && !IsCore(contentId);
+
+        /// <summary>FG1-SIG-05：从机器电路的固件里剔掉核心固件（顺序不变，空位丢弃）——AI 驾驶时真正生效的那几枚。</summary>
+        public static string[] AiUsable(IEnumerable<string> firmwareIds)
+        {
+            if (firmwareIds == null)
+            {
+                return Array.Empty<string>();
+            }
+            var list = new List<string>(2);
+            foreach (string id in firmwareIds)
+            {
+                if (IsAiUsable(id))
+                {
+                    list.Add(id);
+                }
+            }
+            return list.ToArray();
+        }
+
+        /// <summary>FG1-SIG-05：机器电路里残留的核心固件（旧草稿 / 旧档）——AI 不用它们，界面据此说明原因。</summary>
+        public static string[] InertCore(IEnumerable<string> firmwareIds)
+        {
+            if (firmwareIds == null)
+            {
+                return Array.Empty<string>();
+            }
+            var list = new List<string>(1);
+            foreach (string id in firmwareIds)
+            {
+                if (!string.IsNullOrEmpty(id) && IsCore(id))
+                {
+                    list.Add(id);
+                }
+            }
+            return list.ToArray();
+        }
+
+        /// <summary>FG1-SIG-05（FGR-FW-003）：表里种类为核心的全部固件 ID（含固件本体尚未进目录、由 FG2-FW-01 补上的 4 条）。
+        /// 表不可用时为空。check_luban R22 保证它恰好是 6 条核心固件名单。</summary>
+        public static IReadOnlyList<string> CoreRosterIds
+        {
+            get
+            {
+                EnsureLoaded();
+                var ids = new List<string>(6);
+                if (_table != null)
+                {
+                    foreach (GameConfig.fg.FirmwareKind row in _table.DataList)
+                    {
+                        if (row != null && row.Kind == "core")
+                        {
+                            ids.Add(row.Id);
+                        }
+                    }
+                }
+                return ids;
+            }
+        }
+
         /// <summary>FG1-SIG-03（FGR-SIG-033）：核心固件发动后的冷却秒数（表 cooldown 列，按游戏时间）。不是核心固件、表里没有这一行时为 0
         /// （常规固件没有“发动”，也就没有冷却）。测试注入种类时冷却仍读正式表，改表不需要改代码。</summary>
         public static float CoreCooldownSeconds(string contentId)
@@ -140,8 +204,7 @@ namespace GameLogic.Campaign.Signal
         }
 
         /// <summary>测试注入：用给定的“固件 ID → 种类”替换表（没列出的固件按常规）。用完必须 <see cref="ResetForTests"/>。
-        /// 与 FG0-SAVE-01 “已移除内容”机制的验证方式相同：正式表里 Demo 的 6 条固件目前都是常规（DEBT-FG1SIG01-01），
-        /// 规则本身靠注入核心固件来证明。</summary>
+        /// FG1-SIG-05 起正式表里过载、标记跳转已是核心；注入只用于“种类改变时规则跟着变”的对照与内核机制回归。</summary>
         public static void OverrideForTests(IReadOnlyDictionary<string, FirmwareKind> kinds)
         {
             _override = kinds == null ? null : new Dictionary<string, FirmwareKind>(kinds, StringComparer.Ordinal);

@@ -1583,6 +1583,22 @@ namespace GameLogic.EditorTools
                   && !string.IsNullOrEmpty(hud.UplinkStatusText),
                 $"0.35 秒过渡后接入 {SigLabel(a)}：镜头直控；HUD“{hud?.LocationText}”，状态行“{hud?.UplinkStatusText}”");
             CheckNoTextMarkers("接入后");
+            // FG1-SIG-05（FGR-SIG-090，真实游玩中）：过载是核心固件；信号核带着它，但没被接入的家园机器都由 AI 驾驶——接入口按空槽、武器没有具名反应。
+            Campaign.Combat.CombatSite homeCombat = GameRoot.HomeValley.Combat;
+            int aiMachines = 0;
+            bool aiClean = true;
+            foreach (int id in homeCombat.MachineLogicIds)
+            {
+                if (id == a || !homeCombat.TryGetMachineWeapon(id, out Campaign.Combat.MachineWeaponInfo info) || info.WeaponIndex < 0)
+                {
+                    continue;
+                }
+                aiMachines++;
+                aiClean &= !info.Uplinked && !info.ReactionGated && homeCombat.Kernel.TryGetWeapon(info.WeaponIndex, out BinGames.Sim.Combat.CombatWeapon w)
+                           && w.Reaction == BinGames.Sim.Combat.CombatReaction.None;
+            }
+            Check(Campaign.Signal.FirmwareKinds.IsCore(Campaign.Content.FirmwareCatalog.FwOverloadId) && aiMachines > 0 && aiClean,
+                $"AI 边界：过载是核心固件；另外 {aiMachines} 台家园机器由 AI 驾驶，接入口是空槽、武器没有具名反应（AI 永远不用核心固件）");
             Campaign.Regions.HomeValleyMachineMarker b = SigCandidate(a);
             if (b == null)
             {

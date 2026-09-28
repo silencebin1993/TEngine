@@ -47,6 +47,17 @@ namespace GameLogic.Control
     /// 可见后果只有 HUD 状态条上多一枚"过载"标记（<c>BattleHudToolkit</c> 按中性标记默认样式画），
     /// 与三个量面板上的过载提示说的是同一件事。
     /// 为此开一条"本体不写"的特例，只会多出一条将来必然漂移的分支。
+    ///
+    /// ── FG1-SIG-05：与正式版“核心固件与 AI 边界”对齐（本类只服务细胞阶段旧战斗，正式版不绑定它）──
+    /// 正式版（战役 / 战斗内核 <c>BinGames.Sim.Combat</c>）里同一条规则拆成两半，各有唯一落点：
+    /// 1. **AI 永远不用核心固件**（FGR-SIG-090）：过载、标记跳转等 6 条核心固件放不进机器电路，AI 驾驶时编译直接剔除残留的核心固件
+    ///    （<c>FirmwareKinds.AiUsable</c> → <c>BlueprintCircuitCompiler.Compile</c>）；只有信号接入时插进接入口才生效。
+    ///    GDD 旧表里“AI 只在安全阈值内使用蓄力 / 过载”在正式版收紧为“AI 根本不用”。
+    /// 2. **过热按机体归属**：热量与 <c>CombatUnitFlags.Overheated</c> 是内核单位的状态，谁在开都一样——
+    ///    玩家接入打到过热再离开，交还给 AI 的机器照样要散热到恢复线以下才能开火（<c>CombatLogic.FireCannon</c>），
+    ///    离开瞬间武器重编译为本地配置、不再带熔穿过载（<c>CombatSite.RefreshMachineWeapon</c>）；HUD 提示“交还 AI 时仍在过热”。
+    /// 本类要堵的“过载后换一具身体、AI 照常全速攻击”漏洞，在正式版由第 2 条在内核里结构性堵住，不需要镜像位。
+    /// 自检：<c>FgCoreFirmwareBoundarySelfCheck</c>。
     /// </summary>
     public sealed class OverloadSuppressionMirror
     {

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 using GameLogic.Campaign.Blueprint;
+using GameLogic.Campaign.Combat;
 using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Feedback;
 using GameLogic.Campaign.Grid;
@@ -630,8 +631,12 @@ namespace GameLogic.Campaign.Signal
             CampaignState s = CampaignSession.Current;
             string status = SteadyStatus(s, target);
             string label = SignalPresence.MachineLabel(target);
-            SetFeedback(string.IsNullOrEmpty(status) ? GameText.Format("signal.uplink.entered", label)
-                : GameText.Format("signal.uplink.entered", label) + GameText.Get("signal.uplink.status.sep") + status);
+            string entered = string.IsNullOrEmpty(status) ? GameText.Format("signal.uplink.entered", label)
+                : GameText.Format("signal.uplink.entered", label) + GameText.Get("signal.uplink.status.sep") + status;
+            // FG1-SIG-05：从一台过热的机器直接跳到这台——那台交还 AI 时仍在过热，提示一起给出（不被“已接入”盖掉）。
+            SetFeedback(_lastHandoffOverheated && !string.IsNullOrEmpty(_lastHandoffText)
+                ? entered + GameText.Get("signal.uplink.status.sep") + _lastHandoffText
+                : entered);
             FeedbackCues.Raise(FeedbackCueId.Takeover, string.IsNullOrEmpty(status) ? label : label + GameText.Get("signal.uplink.status.sep") + status);
         }
 
@@ -787,7 +792,10 @@ namespace GameLogic.Campaign.Signal
                 if (reason == RegionControlChangeReason.PlayerRequest)
                 {
                     LeaveCount++;
-                    SetFeedback(GameText.Format("signal.uplink.left", SignalPresence.MachineLabel(before)));
+                    if (!_lastHandoffOverheated)
+                    {
+                        SetFeedback(GameText.Format("signal.uplink.left", SignalPresence.MachineLabel(before)));
+                    }
                     FeedbackCues.Raise(FeedbackCueId.CommandAck);
                 }
             }
@@ -824,6 +832,14 @@ namespace GameLogic.Campaign.Signal
                 s.SignalCore.UplinkSiteId = logicId == 0 ? string.Empty : siteId ?? string.Empty;
                 return;
             }
+            // FG1-SIG-05（负向：交还 AI 时正处在过载状态）：过热留在机体上（内核 Overheated 位 + 热量），AI 同样要等散热到恢复线以下才开火，
+            // 也不会再打熔穿过载（过载随信号离开）。这里只负责告诉玩家——离开的那台还在过热。
+            bool oldOverheated = false;
+            if (old != 0)
+            {
+                CombatSites.Get(s.SignalCore.UplinkSiteId)?.TryGetMachineHeat(old, out _, out oldOverheated);
+            }
+            _lastHandoffOverheated = false;
             s.SignalCore.UplinkMachineLogicId = logicId;
             s.SignalCore.UplinkSiteId = logicId == 0 ? string.Empty : siteId ?? string.Empty;
             _coreRevisionSeen = SignalCoreService.Revision;
@@ -855,7 +871,22 @@ namespace GameLogic.Campaign.Signal
                 InsertedFirmwareIds = inserted,
                 MorphActive = inserted.Length > 0,
             });
+            if (oldOverheated)
+            {
+                _lastHandoffOverheated = true;
+                HandoffOverheatedCount++;
+                _lastHandoffText = GameText.Format("signal.uplink.handoff_overheated", SignalPresence.MachineLabel(old),
+                    FracturedCityLayout.WeaponHeatRecoverThreshold.ToString("0", CultureInfo.InvariantCulture));
+                SetFeedback(_lastHandoffText);
+            }
         }
+
+        /// <summary>FG1-SIG-05：刚离开的那台机器交还 AI 时还在过热（本次变更的反馈已写成“散热后才开火”，不再被“已离开”覆盖）。</summary>
+        private static bool _lastHandoffOverheated;
+        private static string _lastHandoffText;
+
+        /// <summary>FG1-SIG-05：交还 AI 时机器仍在过热的次数（自检读点）。</summary>
+        public static int HandoffOverheatedCount { get; private set; }
 
         // ─────────────────────────────── 核心固件冷却（FGR-SIG-033）───────────────────────────────
 
@@ -1197,6 +1228,9 @@ namespace GameLogic.Campaign.Signal
             CancelCount = 0;
             RecompileNotifyCount = 0;
             CoreFiredCount = 0;
+            HandoffOverheatedCount = 0;
+            _lastHandoffOverheated = false;
+            _lastHandoffText = null;
             LastFailure = UplinkFailure.None;
             LastCancel = UplinkCancelReason.None;
             LastCooldownExpiryGameSeconds = -1;

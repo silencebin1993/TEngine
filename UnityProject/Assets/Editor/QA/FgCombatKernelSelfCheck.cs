@@ -11,6 +11,7 @@ using GameLogic.Campaign.Combat;
 using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Grid;
 using GameLogic.Campaign.Regions;
+using GameLogic.Campaign.Signal;
 using GameLogic.Campaign.WorldGen;
 using GameLogic.Campaign.WorldSim;
 using GameLogic.Core;
@@ -117,8 +118,8 @@ namespace GameLogic.EditorTools
                 Step(CheckDemoSquadCommands);
                 Step(CheckDemoTakeover);
                 Step(CheckDemoFracturedCityAi);
-                Step(CheckDemoMarkJump);
-                Step(CheckDemoFoundryAiAndOverload);
+                StepDemoFirmwareRegular(CheckDemoMarkJump);
+                StepDemoFirmwareRegular(CheckDemoFoundryAiAndOverload);
                 Step(CheckDemoBoss);
                 Step(CheckHomeAutoEngage);
                 Step(CheckSaveLoadCommandsContinue);
@@ -813,6 +814,8 @@ namespace GameLogic.EditorTools
         private const string BpMarkJump = "bp_selfcheck_markjump";
         private const string BpCannon = "bp_selfcheck_cannon";
         private const string BpOverload = "bp_selfcheck_overload";
+        /// <summary>FG1-SIG-05：重炮 + 接通的接入口（2 号格）——正式版的“熔穿过载蓝图”（接入时插过载才打得出，AI 驾驶时没有反应）。</summary>
+        private const string BpCannonUplink = "bp_selfcheck_cannon_uplink";
 
         private static void MakeBlueprints(CampaignState s)
         {
@@ -841,6 +844,36 @@ namespace GameLogic.EditorTools
             Add(BpMarkJump, ComponentCatalog.CompGunId, ComponentCatalog.FuncMarkerId, null, FirmwareCatalog.FwMarkTagId);
             Add(BpCannon, ComponentCatalog.CompCannonId, null, null);
             Add(BpOverload, ComponentCatalog.CompCannonId, null, null, FirmwareCatalog.FwOverloadId);
+            if (s.BlueprintRecords.All(b => b.BlueprintId != BpCannonUplink))
+            {
+                BlueprintCircuitBoard up = BlueprintCircuitBoard.CreateDefault(HomeValleyLayout.Erc003ChassisId, ComponentCatalog.CompCannonId, null, null, Array.Empty<string>());
+                up.TrySetUplink(2);
+                s.BlueprintRecords = s.BlueprintRecords.Append(new BlueprintRecord
+                {
+                    BlueprintId = BpCannonUplink, DisplayName = BpCannonUplink, ActiveVersion = 1, Versions = new[] { up.ToVersion(1, 0f) },
+                }).ToArray();
+            }
+        }
+
+        /// <summary>
+        /// FG1-SIG-05：Demo 内核机制回归（标记跳转跳几个、熔穿过载穿甲多少、耐热反制）用 Demo 的机器电路配方验证内核公式，
+        /// 所以这几段把过载 / 标记跳转注入为常规固件；正式版“只有接入时才打得出、AI 永远不用”的边界由 FgCoreFirmwareBoundarySelfCheck 验证。
+        /// </summary>
+        private static void StepDemoFirmwareRegular(Action check)
+        {
+            FirmwareKinds.OverrideForTests(new Dictionary<string, FirmwareKind>
+            {
+                [FirmwareCatalog.FwOverloadId] = FirmwareKind.Regular,
+                [FirmwareCatalog.FwMarkTagId] = FirmwareKind.Regular,
+            });
+            try
+            {
+                Step(check);
+            }
+            finally
+            {
+                FirmwareKinds.ResetForTests();
+            }
         }
 
         private static int Spawn(string region, string bp, Vector2 at, float hp = 120f)
@@ -1245,7 +1278,7 @@ namespace GameLogic.EditorTools
         {
             CampaignState s = NewCampaign(7107);
             MakeBlueprints(s);
-            int mo = Spawn(FoundryOutpostLayout.RegionId, BpOverload, new Vector2(-2f, -20f), 2000f);
+            int mo = Spawn(FoundryOutpostLayout.RegionId, BpCannonUplink, new Vector2(-2f, -20f), 2000f);
             int mg = Spawn(FoundryOutpostLayout.RegionId, BpGun, new Vector2(2f, -20f), 2000f);
             UnlockCoreGate(s, mo);
             FoundryOutpostController fo = OpenFoundry(s, mo, mg);
@@ -1627,7 +1660,8 @@ namespace GameLogic.EditorTools
             // 铸造前哨核心门三灯：输入不变不重算；解锁（解析 + 充能）后亮、唯一的熔穿过载机阵亡后灭——每一步都与整套重算一致。
             CampaignState f = NewCampaign(7207);
             MakeBlueprints(f);
-            int mo = Spawn(FoundryOutpostLayout.RegionId, BpOverload, new Vector2(-2f, -20f), 400f);
+            // FG1-SIG-05：灯 3 = 现役机的蓝图接入时能打出熔穿过载（重炮 + 接通的接入口）。
+            int mo = Spawn(FoundryOutpostLayout.RegionId, BpCannonUplink, new Vector2(-2f, -20f), 400f);
             int mg = Spawn(FoundryOutpostLayout.RegionId, BpGun, new Vector2(2f, -20f), 400f);
             FoundryOutpostController fo = OpenFoundry(f, mo, mg);
             RegionRecord region = FoundryOutpostRegion.Find(f);

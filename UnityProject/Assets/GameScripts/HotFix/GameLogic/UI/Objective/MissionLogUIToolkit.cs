@@ -3,6 +3,7 @@ using System.Linq;
 using Cysharp.Threading.Tasks;
 using GameLogic.Campaign;
 using GameLogic.Campaign.Regions;
+using GameLogic.Localization;
 using GameLogic.Core;
 using GameLogic.UI.Common;
 using TEngine;
@@ -273,15 +274,17 @@ namespace GameLogic.UI.Objective
             detail = string.Join("｜", parts);
         }
 
-        /// <summary>UI-14：三灯分别写明缺什么（“重炮未解析”“未保存熔穿过载蓝图”“没有现役机实装”），完成的打勾。</summary>
+        /// <summary>UI-14：三灯分别写明缺什么，完成的打勾（形状 + 文字，不只靠颜色）。FG1-SIG-05：灯 2 / 3 改为“接入就绪”（过载是核心固件，
+        /// 熔穿过载只在你接入重炮机、信号核带上过载时打得出），文案走文本键。</summary>
         public static string ComposeGateText(CampaignState state)
         {
             FoundryOutpostRegion.CoreGateLights lights = FoundryOutpostRegion.ComputeCoreGateLights(state);
-            return "核心分区封锁门：" +
-                   (lights.CannonAnalyzed ? "√ 重炮已解析" : "○ 重炮未解析") + "｜" +
-                   (lights.OverloadBlueprintSaved ? "√ 已保存熔穿过载蓝图" : "○ 未保存熔穿过载蓝图") + "｜" +
-                   (lights.MachineEquipped ? "√ 已有现役机实装熔穿过载" : "○ 没有现役机实装熔穿过载") +
-                   (lights.AllReady ? "——三灯全亮，核心分区已开放" : "——三灯全亮才能进入核心分区");
+            string Lamp(bool on, string key) => GameText.Format(on ? "foundry.gate.log.done" : "foundry.gate.log.todo", GameText.Get(key));
+            return GameText.Get("foundry.gate.log.title") +
+                   Lamp(lights.CannonAnalyzed, "foundry.gate.lamp.cannon") + "｜" +
+                   Lamp(lights.OverloadBlueprintSaved, "foundry.gate.lamp.overload_saved") + "｜" +
+                   Lamp(lights.MachineEquipped, "foundry.gate.lamp.machine_ready") +
+                   GameText.Get(lights.AllReady ? "foundry.gate.log.all_ready" : "foundry.gate.log.need_all");
         }
 
         /// <summary>区域状态。Active 只表示“出征过、还没肃清”，人不在那里时不写“远征中”；铸造前哨外围肃清的

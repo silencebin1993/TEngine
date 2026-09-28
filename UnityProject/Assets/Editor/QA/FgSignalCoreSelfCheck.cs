@@ -377,11 +377,26 @@ namespace GameLogic.EditorTools
             string regularChip = Print(s, FirmwareCatalog.FwHomingId);
             string reason = GameText.Get("signal.reason.core_signal_only");
 
-            // 对照（正式表）：本 Story 不迁移 Demo 的 6 条固件（FG1-SIG-05 标核心），过载目前是常规，能装机器电路。
-            BlueprintCircuitBoard control = BlueprintCircuitBoard.CreateDefault("chassis_wheel", null, null, null, Array.Empty<string>());
-            CircuitOpResult controlSet = control.TrySetFirmware(s, 0, FirmwareCatalog.FwOverloadId);
-            Expect(FirmwareKinds.KindOf(FirmwareCatalog.FwOverloadId) == FirmwareKind.Regular && controlSet.Success,
-                "对照：正式种类表里过载目前是常规（迁移在 FG1-SIG-05，DEBT-FG1SIG01-01），可以装进机器电路——规则按种类判断，不按 ID");
+            // 正式表（FG1-SIG-05 已迁移，DEBT-FG1SIG01-01 关闭）：过载、标记跳转是核心，装不进机器电路。
+            BlueprintCircuitBoard prod = BlueprintCircuitBoard.CreateDefault("chassis_wheel", null, null, null, Array.Empty<string>());
+            CircuitOpResult prodOverload = prod.TrySetFirmware(s, 0, FirmwareCatalog.FwOverloadId);
+            CircuitOpResult prodMark = prod.TrySetFirmware(s, 1, FirmwareCatalog.FwMarkTagId);
+            Expect(FirmwareKinds.KindOf(FirmwareCatalog.FwOverloadId) == FirmwareKind.Core && FirmwareKinds.KindOf(FirmwareCatalog.FwMarkTagId) == FirmwareKind.Core
+                   && !prodOverload.Success && prodOverload.Code == BlueprintCircuitBoard.CoreSignalOnlyCode
+                   && !prodMark.Success && prodMark.Code == BlueprintCircuitBoard.CoreSignalOnlyCode && prod.FirmwareSlots.All(string.IsNullOrEmpty),
+                "正式种类表：过载、标记跳转是核心固件（FG1-SIG-05），装进机器电路被拒");
+            // 对照：把过载注入为常规，同一个入口就能装——规则只按种类判断，不按 ID。
+            FirmwareKinds.OverrideForTests(new Dictionary<string, FirmwareKind> { [FirmwareCatalog.FwOverloadId] = FirmwareKind.Regular });
+            try
+            {
+                BlueprintCircuitBoard control = BlueprintCircuitBoard.CreateDefault("chassis_wheel", null, null, null, Array.Empty<string>());
+                Expect(control.TrySetFirmware(s, 0, FirmwareCatalog.FwOverloadId).Success,
+                    "对照：注入“过载 = 常规”后同一入口可以装进机器电路——规则按种类判断，不按 ID");
+            }
+            finally
+            {
+                FirmwareKinds.ResetForTests();
+            }
 
             FirmwareKinds.OverrideForTests(new Dictionary<string, FirmwareKind> { [FirmwareCatalog.FwOverloadId] = FirmwareKind.Core });
             try

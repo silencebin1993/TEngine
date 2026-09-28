@@ -393,10 +393,11 @@ namespace GameLogic.EditorTools
             Expect(md.Plan.InsertedIds.SequenceEqual(new[] { FirmwareCatalog.FwMarkTagId, FirmwareCatalog.FwArmorPierceId })
                    && md.Plan.Skipped.Count == 1 && md.Plan.Skipped[0].FirmwareId == FirmwareCatalog.FwHomingId && md.Plan.Skipped[0].Skip == UplinkSkipReason.OverQuota
                    && md.Ai.ReactionId == null && md.Uplinked.ReactionId == MechanicalReactionCatalog.ReactionMarkJumpId
-                   && BlueprintCircuitCompiler.CompilePreview(ownSlot).ReactionId == MechanicalReactionCatalog.ReactionMarkJumpId
+                   && BlueprintCircuitCompiler.CompilePreview(ownSlot).ReactionId == null
+                   && BlueprintCircuitCompiler.CompilePreview(ownSlot).InertCoreFirmwareIds.SequenceEqual(new[] { FirmwareCatalog.FwMarkTagId })
                    && md.Diff.Any(x => x.Kind == UplinkDiffKind.ReactionAdded && x.Text.Contains("标记跳转"))
                    && md.Notes.All(n => !n.Contains("不是已知的固件")),
-                $"连射器 + 标记器，信号核放标记跳转、装甲击穿、寻的：前两枚插入（没有 gene 模块也占配额），你接入时判出“标记跳转”，与装在机器固件槽时一致；寻的超配额。差异：{string.Join(" / ", md.Diff.Select(x => x.Text))}");
+                $"连射器 + 标记器，信号核放标记跳转、装甲击穿、寻的：前两枚插入（没有 gene 模块也占配额），你接入时判出“标记跳转”；旧草稿把它装在机器自己的固件槽里时 AI 不用（FG1-SIG-05，核心固件不生效）；寻的超配额。差异：{string.Join(" / ", md.Diff.Select(x => x.Text))}");
 
             // D5：AI 永远不填接入口（FGR-SIG-090）：AI 出口不接受信号核参数，结构上只走空槽编译。
             MethodInfo ai = typeof(MachineLoadoutRegistry).GetMethod(nameof(MachineLoadoutRegistry.ResolveForAi));

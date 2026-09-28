@@ -17,9 +17,12 @@ namespace GameLogic.Campaign.Blueprint
         public readonly int Version;
         public readonly string ReactionId;
         public readonly int TechDataCharged;
+        /// <summary>FG1-SIG-05：这张蓝图接入时能打出 <see cref="ReactionId"/>，但本战役还没研究、技术数据又不够——蓝图照样保存，
+        /// 这里是还差的研究费（0 = 没有待研究）。攒够技术数据后再保存一次即完成研究。</summary>
+        public readonly int ResearchPendingCost;
 
         private BlueprintSaveResult(bool success, string failureReason, string blueprintId, int version,
-            string reactionId, int techDataCharged)
+            string reactionId, int techDataCharged, int researchPendingCost)
         {
             Success = success;
             FailureReason = failureReason;
@@ -27,13 +30,14 @@ namespace GameLogic.Campaign.Blueprint
             Version = version;
             ReactionId = reactionId;
             TechDataCharged = techDataCharged;
+            ResearchPendingCost = researchPendingCost;
         }
 
-        public static BlueprintSaveResult Ok(string blueprintId, int version, string reactionId, int techDataCharged) =>
-            new BlueprintSaveResult(true, null, blueprintId, version, reactionId, techDataCharged);
+        public static BlueprintSaveResult Ok(string blueprintId, int version, string reactionId, int techDataCharged, int researchPendingCost = 0) =>
+            new BlueprintSaveResult(true, null, blueprintId, version, reactionId, techDataCharged, researchPendingCost);
 
         public static BlueprintSaveResult Fail(string reason) =>
-            new BlueprintSaveResult(false, reason, null, 0, null, 0);
+            new BlueprintSaveResult(false, reason, null, 0, null, 0, 0);
     }
 
     public static class BlueprintEditorService
@@ -125,7 +129,8 @@ namespace GameLogic.Campaign.Blueprint
         }
 
         /// <summary>反应对应的一次性技术数据成本——DEMO-CONTENT-LOCK.md §2.5："首次成功保存标记跳转
-        /// 蓝图 −10；首次成功保存熔穿过载蓝图 −15"。</summary>
+        /// 蓝图 −10；首次成功保存熔穿过载蓝图 −15"。FG1-SIG-05 起“标记跳转 / 熔穿过载蓝图”= 接入时能打出该反应的蓝图
+        /// （<see cref="UplinkReactionReadiness"/>）。</summary>
         public static int ReactionTechDataCost(string reactionId)
         {
             if (reactionId == MechanicalReactionCatalog.ReactionMarkJumpId)
@@ -265,10 +270,15 @@ namespace GameLogic.Campaign.Blueprint
                 return BlueprintSaveResult.Fail(reason);
             }
 
-            string reactionId = BlueprintCircuitCompiler.DetectReactionId(board);
+            // FG1-SIG-05：熔穿过载 / 标记跳转由核心固件触发，只在你接入时插进接入口才打得出（AI 永远不用，FGR-SIG-090）。
+            // 反应研究费按“这张蓝图接入时能打出这条反应”判定（UplinkReactionReadiness，与接入后的正式结算同一个编译入口）。
+            // 技术数据不够时不再拒绝保存（蓝图里没有“为了反应才加的固件”可删，拒绝只会逼玩家拆掉接入口）：照样保存，
+            // 研究记为待办、结果里写明还差多少；攒够后再保存一次即研究（同一反应本战役只扣一次）。
+            string reactionId = UplinkReactionReadiness.ReadyReactionId(state, board);
             int techCost = ReactionTechDataCost(reactionId);
             bool needsCharge = reactionId != null && techCost > 0 && !IsReactionCharged(state, reactionId);
             string chargeTxId = null;
+            int researchPending = 0;
 
             if (needsCharge)
             {
@@ -284,8 +294,10 @@ namespace GameLogic.Campaign.Blueprint
                 if (!reserve.Success)
                 {
                     CampaignEconomyLedger.Cancel(state, chargeTxId);
-                    TEngine.Log.Info($"[BlueprintEditorService] 反应技术数据预留失败：{reserve.FailureReason}");
-                    return BlueprintSaveResult.Fail($"技术数据不足：首次保存该跨派系反应需要 {techCost} 技术数据。");
+                    TEngine.Log.Info($"[BlueprintEditorService] 反应技术数据预留失败（研究延后，蓝图照常保存）：{reserve.FailureReason}");
+                    chargeTxId = null;
+                    needsCharge = false;
+                    researchPending = techCost;
                 }
             }
 
@@ -339,7 +351,7 @@ namespace GameLogic.Campaign.Blueprint
             // 不必等玩家回到家园下一帧或下一次远征触发才反映。
             CampaignObjectiveTracker.Recompute(state);
 
-            return BlueprintSaveResult.Ok(record.BlueprintId, nextVersion, reactionId, needsCharge ? techCost : 0);
+            return BlueprintSaveResult.Ok(record.BlueprintId, nextVersion, reactionId, needsCharge ? techCost : 0, researchPending);
         }
     }
 }

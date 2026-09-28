@@ -435,7 +435,11 @@ namespace GameLogic.EditorTools
             CampaignState s = CampaignState.CreateNew("neg-gate", "Standard", 37);
             FoundryOutpostRegion.EnsureRegionRecordSeeded(s);
             FoundryOutpostRegion.ActionResult gate = FoundryOutpostRegion.CanEnterCoreZone(s);
-            Expect(!gate.Success && gate.FailureReason.Contains("重炮解析") && gate.FailureReason.Contains("熔穿过载蓝图保存") && gate.FailureReason.Contains("现役机实装"),
+            // FG1-SIG-05：灯 2 / 3 改为“接入就绪”（文案走文本键 foundry.gate.lamp.*）。
+            Expect(!gate.Success && gate.FailureReason.Contains(GameLogic.Localization.GameText.Get("foundry.gate.lamp.cannon"))
+                   && gate.FailureReason.Contains(GameLogic.Localization.GameText.Get("foundry.gate.lamp.overload_saved"))
+                   && gate.FailureReason.Contains(GameLogic.Localization.GameText.Get("foundry.gate.lamp.machine_ready"))
+                   && !GameLogic.Localization.GameText.ContainsMarker(gate.FailureReason),
                 $"核心门三灯未亮：拒绝进入并逐项写明缺什么（“{gate.FailureReason}”）");
             Expect(FoundryOutpostRegion.IsBeyondCoreGateLine(new Vector2(0f, FoundryOutpostLayout.CoreGateBlockLineY + 0.5f))
                    && FoundryOutpostRegion.IsBeyondCoreGateLine(new Vector2(40f, FoundryOutpostLayout.CoreGateBlockLineY + 0.5f)),

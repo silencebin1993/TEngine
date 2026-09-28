@@ -343,8 +343,11 @@ namespace GameLogic.EditorTools
                 $"地图：出征次数与带回内容、家园行（实际“{cityState}”“{cityDetail}”）");
 
             string gate = MissionLogUIToolkit.ComposeGateText(state);
-            Expect(gate.Contains("○ 重炮未解析") && gate.Contains("○ 未保存熔穿过载蓝图") && gate.Contains("○ 没有现役机实装")
-                   && gate.Contains("三灯全亮才能进入"),
+            // FG1-SIG-05：灯 2 / 3 改为“接入就绪”，文案走文本键 foundry.gate.*（每盏灯“○ 缺什么”）。
+            string Todo(string key) => GameLogic.Localization.GameText.Format("foundry.gate.log.todo", GameLogic.Localization.GameText.Get(key));
+            Expect(gate.Contains(Todo("foundry.gate.lamp.cannon")) && gate.Contains(Todo("foundry.gate.lamp.overload_saved"))
+                   && gate.Contains(Todo("foundry.gate.lamp.machine_ready")) && gate.Contains("三灯全亮才能进入")
+                   && !GameLogic.Localization.GameText.ContainsMarker(gate),
                 $"核心门三灯分别写明缺什么（UI-14，实际“{gate}”）");
 
             // 所有合成出来的文字：无内部 ID、无禁用词。

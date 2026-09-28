@@ -4,6 +4,7 @@ using System.Linq;
 using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Combat;
 using GameLogic.Campaign.Content;
+using GameLogic.Localization;
 using TEngine;
 using UnityEngine;
 
@@ -746,13 +747,16 @@ namespace GameLogic.Campaign.Regions
             /// <see cref="CampaignState.UnlockedContentIds"/>（<see cref="HomeValleyAnalysis.Complete"/>
             /// 解析铸造重炮模块后写入，唯一权威来源）。</summary>
             public readonly bool CannonAnalyzed;
-            /// <summary>灯2："熔穿过载蓝图保存"——<see cref="MechanicalReactionCatalog.ReactionMeltOverloadId"/>
+            /// <summary>灯2："熔穿过载接入蓝图保存"——<see cref="MechanicalReactionCatalog.ReactionMeltOverloadId"/>
             /// 已被 <see cref="BlueprintEditorService.TrySave"/> 充过一次技术数据（
             /// <see cref="BlueprintEditorService.IsReactionCharged"/>，与 ER6-EXPOSE-01 跨派系判定同一
-            /// EventLedger 结构性判定手法）——只要求"保存过"，不要求当前仍装在任何机器上。</summary>
+            /// EventLedger 结构性判定手法）——只要求"保存过"，不要求当前仍装在任何机器上。
+            /// FG1-SIG-05：过载是核心固件，放不进机器电路；“熔穿过载蓝图” = 接入时插过载能打出熔穿过载的蓝图（重炮 + 接通的接入口）。</summary>
             public readonly bool OverloadBlueprintSaved;
             /// <summary>灯3："现役机实装"——存在至少一台存活机器，其当前蓝图版本编译出的 ReactionId
-            /// 恰为熔穿过载（不是"保存过某个版本"，是"现在真的挂在某台活着的机器上"）。</summary>
+            /// 恰为熔穿过载（不是"保存过某个版本"，是"现在真的挂在某台活着的机器上"）。
+            /// FG1-SIG-05：改为“这台机器的当前版本在你接入时能打出熔穿过载”（<see cref="UplinkReactionReadiness.MachineReadyReaction"/>）——
+            /// AI 驾驶时它不会打熔穿过载（FGR-SIG-090），要你接入、信号核带上过载。</summary>
             public readonly bool MachineEquipped;
 
             public bool AllReady => CannonAnalyzed && OverloadBlueprintSaved && MachineEquipped;
@@ -779,19 +783,8 @@ namespace GameLogic.Campaign.Regions
             bool machineEquipped = false;
             foreach (MachineRecord m in MachineRegistry.AllRecords)
             {
-                if (m == null || !m.IsAlive || string.IsNullOrEmpty(m.BlueprintId))
-                {
-                    continue;
-                }
-                BlueprintRecord record = BlueprintEditorService.Find(state, m.BlueprintId);
-                BlueprintVersionRecord version = record?.Versions?.FirstOrDefault(v => v.Version == m.BlueprintVersion);
-                if (version == null)
-                {
-                    continue;
-                }
-                BlueprintCircuitBoard board = BlueprintCircuitBoard.FromVersion(version);
-                string reactionId = BlueprintCircuitCompiler.DetectReactionId(board);
-                if (reactionId == MechanicalReactionCatalog.ReactionMeltOverloadId)
+                // FG1-SIG-05：接入就绪（重炮 + 接通的接入口，过载已解锁），与接入后的正式结算同一个编译入口；按蓝图签名缓存。
+                if (UplinkReactionReadiness.MachineReadyReaction(state, m) == MechanicalReactionCatalog.ReactionMeltOverloadId)
                 {
                     machineEquipped = true;
                     break;
@@ -834,17 +827,17 @@ namespace GameLogic.Campaign.Regions
             var missing = new List<string>();
             if (!lights.CannonAnalyzed)
             {
-                missing.Add("重炮解析");
+                missing.Add(GameText.Get("foundry.gate.lamp.cannon"));
             }
             if (!lights.OverloadBlueprintSaved)
             {
-                missing.Add("熔穿过载蓝图保存");
+                missing.Add(GameText.Get("foundry.gate.lamp.overload_saved"));
             }
             if (!lights.MachineEquipped)
             {
-                missing.Add("现役机实装");
+                missing.Add(GameText.Get("foundry.gate.lamp.machine_ready"));
             }
-            return ActionResult.Fail("核心分区封锁：缺少 " + string.Join("、", missing) + "。");
+            return ActionResult.Fail(GameText.Format("foundry.gate.blocked", string.Join(GameText.Get("signal.core.summary_sep"), missing)));
         }
 
         /// <summary>某坐标是否已越过核心分区封锁线——与 X 坐标无关（不给"绕路"留任何有限宽度缺口）。

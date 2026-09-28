@@ -5,6 +5,7 @@ using ComposeEngine;
 using ComposeEngine.Builtin.Catalog;
 using ComposeEngine.Core;
 using GameLogic.Campaign.Content;
+using GameLogic.Campaign.Signal;
 using GameLogic.MetabolicSlice.ContentCatalog;
 using GameLogic.MetabolicSlice.Graph;
 using GameLogic.MetabolicSlice.Grid;
@@ -84,6 +85,10 @@ namespace GameLogic.Campaign.Blueprint
 
         /// <summary>FG1-SIG-02：插进接入口并**生效**的固件（AI 驾驶时永远为空，FGR-SIG-021、FGR-SIG-090）。</summary>
         public string[] UplinkFirmwareIds = Array.Empty<string>();
+
+        /// <summary>FG1-SIG-05（FGR-SIG-090）：机器电路自己的固件槽里残留的核心固件（旧草稿 / 旧档）。AI 永远不用核心固件，
+        /// 所以它们不进 <see cref="FirmwareIds"/>、不产生反应与热量；界面据此说明（保存校验也会拒绝）。</summary>
+        public string[] InertCoreFirmwareIds = Array.Empty<string>();
     }
 
     /// <summary>ER4-PRIM-02 STORY-EXECUTION-CARDS.md 第2条正式电路板"通用预览"的编译入口——
@@ -131,7 +136,11 @@ namespace GameLogic.Campaign.Blueprint
                 ? uplinkFirmwareIds.Where(id => !string.IsNullOrEmpty(id)).ToArray()
                 : Array.Empty<string>();
             preview.UplinkFirmwareIds = uplinkEffective;
-            preview.FirmwareIds = board.FirmwareSlots.Where(id => !string.IsNullOrEmpty(id)).Concat(uplinkEffective).ToArray();
+            // FG1-SIG-05（FGR-SIG-090）：机器电路自己的固件里只有常规固件生效——核心固件（旧草稿 / 旧档残留）AI 永远不用；
+            // 核心固件只能经信号插进接入口（uplinkEffective）。
+            string[] localEffective = FirmwareKinds.AiUsable(board.FirmwareSlots);
+            preview.InertCoreFirmwareIds = FirmwareKinds.InertCore(board.FirmwareSlots);
+            preview.FirmwareIds = localEffective.Concat(uplinkEffective).ToArray();
             preview.HeatBudget = BlueprintCircuitBoard.ComputeHeatBudget(board.PrimaryId, preview.FirmwareIds);
 
             // ER6-REACT-01/02：反应/标记/重炮/散热鳍这几个标志只是"电路板外层槽装了什么"的直接读取，
@@ -164,7 +173,7 @@ namespace GameLogic.Campaign.Blueprint
                 return preview;
             }
 
-            (List<IContract> contracts, List<Func<IModule>> moduleGeneFactories) = ResolveFirmware(board.FirmwareSlots);
+            (List<IContract> contracts, List<Func<IModule>> moduleGeneFactories) = ResolveFirmware(localEffective);
             (List<IContract> uplinkContracts, List<Func<IModule>> uplinkModuleFactories) = ResolveFirmware(uplinkEffective);
 
             var engine = new Engine();
@@ -276,9 +285,11 @@ namespace GameLogic.Campaign.Blueprint
         /// ER4-CONTENT-01 已实现）——单一判定入口，供预览（<see cref="ResolveReactionHint"/>）与保存期扣费
         /// （<c>BlueprintEditorService.TrySave</c>）共用同一结果（STORY-EXECUTION-CARDS.md ER4-BLP-01
         /// 第2条"预览与实际编译共用同一结果"）。返回 null 表示当前组合未触发任何具名反应（合法状态，不是
-        /// 错误——合法组合仍按通用正交组合结算）。</summary>
+        /// 错误——合法组合仍按通用正交组合结算）。
+        /// FG1-SIG-05：这是“AI 驾驶时”的反应——机器电路里的核心固件不算（AI 永远不用核心固件，FGR-SIG-090）；
+        /// “你接入时能打出”的反应见 <see cref="UplinkReactionReadiness"/>。</summary>
         public static string DetectReactionId(BlueprintCircuitBoard board) =>
-            DetectReactionId(board.PrimaryId, board.UtilityId, board.FirmwareSlots);
+            DetectReactionId(board.PrimaryId, board.UtilityId, FirmwareKinds.AiUsable(board.FirmwareSlots));
 
         /// <summary>FG1-SIG-02：同一判定的纯函数版本——“你接入时”把接入口里生效的固件并进 <paramref name="firmwareIdsIn"/>。</summary>
         public static string DetectReactionId(string primaryId, string utilityId, IEnumerable<string> firmwareIdsIn)

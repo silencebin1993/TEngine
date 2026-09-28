@@ -177,6 +177,10 @@ namespace GameLogic.EditorTools
                 // FG1-SIG-04：断链与安全模式——四种原因各一次（走出覆盖 / 干扰场 / 静默夜预留接口 / 阵亡回弹，FGT-SIG-006）、安全模式只跑本地常规固件、
                 // 覆盖源（核心 / 信号塔 / 断开的塔）、边缘反复进出、连续死亡回弹、没有合适回弹目标、暂停倍速、后台一致、真实文件存读档、性能、HUD 与机器列表。
                 _fail += FgSignalLinkSelfCheck.Run(Report);
+                // FG1-SIG-05：核心固件迁移与 AI 边界——6 条核心名单（正式表）、AI 驾驶带接入口的机器 / 旧档电路里的核心固件 / 敌方 AI 都不打反应（FGT-SIG-011），
+                // 玩家接入触发熔穿过载与标记跳转、正式表冷却（FGT-SIG-010）、交还 AI 时正处在过载（过热 / 瞄准中 / 刚发动）、Demo 内容迁移（研究费、OBJ-06/08、
+                // 核心门三灯、敌方适应）与可通关（AI 编队不靠熔穿过载打掉护甲机）、暂停倍速、真实文件存读档、观察无关、性能、文本键。
+                _fail += FgCoreFirmwareBoundarySelfCheck.Run(Report);
             }
             catch (Exception e)
             {
