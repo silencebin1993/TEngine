@@ -64,8 +64,14 @@ namespace GameLogic.Campaign
             {
                 return _isLiveOverride(cardDefId);
             }
-            return !string.IsNullOrEmpty(cardDefId) && CardCatalog.Get(cardDefId) != null;
+            // FG1-SIG-01：固件芯片（fw_*，刻印进基元仓 / 装进信号核）的内容在固件目录里，不在基元卡目录里——同样是现存内容。
+            return !string.IsNullOrEmpty(cardDefId)
+                   && (CardCatalog.Get(cardDefId) != null || Content.FirmwareCatalog.TryGet(cardDefId, out _));
         }
+
+        /// <summary>已装载（装进蓝图草稿或信号核）的实例：内容被移除时保留并通知，不转废料。</summary>
+        private static bool IsInstalled(PrimitiveChipRecord c) =>
+            c.State == PrimitiveChipState.Draft || c.State == PrimitiveChipState.SignalCore;
 
         public static bool TryGetRemoved(string id, out RemovedContent row)
         {
@@ -101,7 +107,8 @@ namespace GameLogic.Campaign
             var notices = new List<SaveNoticeRecord>();
 
             // 1) 已装进蓝图的：保留，按内容 ID 各通知一次。
-            foreach (IGrouping<string, PrimitiveChipRecord> g in dead.Where(c => c.State == PrimitiveChipState.Draft)
+            // FG1-SIG-01：装在信号核里的（SignalCore）与装进蓝图的一样按“已装载”保留。
+            foreach (IGrouping<string, PrimitiveChipRecord> g in dead.Where(c => IsInstalled(c))
                          .GroupBy(c => c.CardDefId ?? string.Empty).OrderBy(g => g.Key, StringComparer.Ordinal))
             {
                 notices.Add(NewNotice($"content-installed:{g.Key}:{g.OrderBy(c => c.PartId, StringComparer.Ordinal).First().PartId}",
@@ -110,7 +117,7 @@ namespace GameLogic.Campaign
 
             // 2) 被合成队列预留的：先取消任务（材料解锁、废料全额退还）。
             var cancelledQueues = new HashSet<string>(StringComparer.Ordinal);
-            foreach (PrimitiveChipRecord chip in dead.Where(c => c.State != PrimitiveChipState.Draft
+            foreach (PrimitiveChipRecord chip in dead.Where(c => !IsInstalled(c)
                                                                  && !string.IsNullOrEmpty(c.ReservedByTransactionId)))
             {
                 string queueId = chip.ReservedByTransactionId;
@@ -138,7 +145,7 @@ namespace GameLogic.Campaign
             }
 
             // 3) 仓中 / 待领取的：转换成废料。
-            foreach (IGrouping<string, PrimitiveChipRecord> g in dead.Where(c => c.State != PrimitiveChipState.Draft)
+            foreach (IGrouping<string, PrimitiveChipRecord> g in dead.Where(c => !IsInstalled(c))
                          .GroupBy(c => c.CardDefId ?? string.Empty).OrderBy(g => g.Key, StringComparer.Ordinal))
             {
                 List<PrimitiveChipRecord> items = g.OrderBy(c => c.PartId, StringComparer.Ordinal).ToList();

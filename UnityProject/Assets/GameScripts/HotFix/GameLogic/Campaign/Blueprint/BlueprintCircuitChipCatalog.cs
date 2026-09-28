@@ -121,6 +121,13 @@ namespace GameLogic.Campaign.Blueprint
             // 本来就是机械化文案）。三者都未命中时（54 条未覆盖的旧 org_* 条目）说明
             // <see cref="IsValidChipContent"/> 本不应放行——这里返回 contentId 兜底只是防御性收尾，
             // 正常路径不会走到。
+            // FG1-SIG-01：基元仓里的固件芯片（fw_*）按固件名显示（文本键 firmware.<id>.name），不回退成内容 ID。
+            string firmwareName = Signal.FirmwareKinds.DisplayName(contentId);
+            if (!string.IsNullOrEmpty(firmwareName))
+            {
+                return firmwareName;
+            }
+
             MechanicalContentDef facadeDef = MechanicalContentFacade.All.Values
                 .FirstOrDefault(d => d.LegacyFacadeId == contentId);
             if (facadeDef != null)

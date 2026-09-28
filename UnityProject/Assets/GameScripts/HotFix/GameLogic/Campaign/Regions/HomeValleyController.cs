@@ -133,6 +133,7 @@ namespace GameLogic.Campaign.Regions
             // 指向真实 BlueprintRecord（bp_erc001/bp_hauler），不再是占位字符串，见 EnsureMachinesSeeded。
             HomeValleyFactory.EnsureBlueprintsSeeded(state); // ER4-FAC-01：装配站默认三条生产蓝图 + ER4-PRIM-02 电路板数据。
             PrimitiveInventory.EnsureSeeded(state); // ER4-PRIM-03：战役唯一基元仓，开局8格+1件聚焦镜，幂等。
+            Signal.SignalCoreService.EnsureInitialized(state); // FG1-SIG-01：信号核槽位数组与实例账一致性，幂等。
             HomeValleyCombatTargets.EnsureSeeded(state); // ER4-PRIM-05：低威胁残骸靶，幂等。
             HomeValleySignal.EnsureSeeded(state); // ER5-SIG-01：破碎都市 Locked 区域记录，幂等。
             FoundryOutpostRegion.EnsureRegionRecordSeeded(state); // ER6-FOUNDRY-01：铸造前哨外围 Locked 区域记录，幂等。
@@ -1937,6 +1938,13 @@ namespace GameLogic.Campaign.Regions
             if (earlyBuildingTypeId == HomeValleyLayout.BuildingTypeAnalysisBench && IsOperational(HomeValleyLayout.BuildingTypeAnalysisBench))
             {
                 _analysisPanelOpen = !_analysisPanelOpen;
+                return;
+            }
+
+            // FG1-SIG-01（FGR-SIG-010“在归还核心面板能编辑槽位”）：左键点归还核心 = 开关信号核面板（跨模块事件，界面层订阅）。
+            if (earlyBuildingTypeId == HomeValleyLayout.BuildingTypeCore)
+            {
+                Signal.SignalCoreService.RequestPanelToggle();
                 return;
             }
 

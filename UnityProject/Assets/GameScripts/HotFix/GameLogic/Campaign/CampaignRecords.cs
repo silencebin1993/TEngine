@@ -280,6 +280,9 @@ namespace GameLogic.Campaign
         Draft,
         /// <summary>仓满时新生成的实例排队等待玩家腾格领取，不丢失、不阻断来源事件。</summary>
         Pending,
+        /// <summary>FG1-SIG-01：装在信号核的某个槽位里（槽位真相是 <see cref="SignalCoreState.SlotPartIds"/>，
+        /// 唯一写入口 <c>Signal.SignalCoreService</c>）。不占基元仓格子；只追加在末尾（存档里按整数保存）。</summary>
+        SignalCore,
     }
 
     /// <summary>ERD-PRM-003 战役唯一基元芯片实例账，`Campaign.Primitive.PrimitiveInventory` 的唯一

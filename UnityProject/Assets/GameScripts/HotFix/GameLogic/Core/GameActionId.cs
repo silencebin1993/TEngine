@@ -103,5 +103,7 @@ namespace GameLogic.Core
         QuickLoad = 94,
         /// <summary>FG0-ARCH-01（FGR-ARC-002）：在家园、远征地点、行进中的突袭之间依次飞跃镜头（战略上下文，默认 Tab）。</summary>
         CycleWorldFocus = 95,
+        /// <summary>FG1-SIG-01（FGU-19）：打开 / 关闭信号核面板（战略与接入上下文，默认 P）。</summary>
+        OpenSignalCore = 96,
     }
 }

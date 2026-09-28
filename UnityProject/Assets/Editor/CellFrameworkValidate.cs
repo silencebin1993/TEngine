@@ -162,6 +162,10 @@ namespace GameLogic.EditorTools
                 // FG0-QA-01：旅程机器人框架的失败路径（重试、步骤超时、总超时、报错即失败、报告、域重载后续跑、旅程登记）。
                 // 旅程本身要进 Play（tools/unity-journey.sh），性能基线要搭后期大场景（tools/unity-perf-baseline.sh），都不在全量自检里。
                 _fail += JourneyRunnerSelfCheck.Run(Report);
+                // FG1-SIG-01：信号核与槽位——种类表与源数据、初始 2 / 最多 5 槽与超控阵列解锁、原子装卸与实例守恒、负向矩阵（满仓卸下等）、
+                // 核心固件放不进机器电路（蓝图固件槽 / 3×3 电路格 / 保存校验）、远征锁、预设、真实文件存读档与篡改修复、暂停倍速种子无关、
+                // HUD 与面板（点选 / 拖放 / 锁定横幅 / 预设按钮）与布局探针、P 键开关、性能与连按。
+                _fail += FgSignalCoreSelfCheck.Run(Report);
             }
             catch (Exception e)
             {

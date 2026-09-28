@@ -682,6 +682,15 @@ namespace GameLogic.Campaign
                 notices = Array.Empty<SaveNoticeRecord>();
             }
             state.ContentVersion = CurrentContentVersion;
+            try
+            {
+                // FG1-SIG-01（FG01 第 6 章：读档后不复制、不丢失固件实例）：修复信号核槽位与实例账的悬空引用。
+                Signal.SignalCoreService.EnsureConsistent(state);
+            }
+            catch (Exception e)
+            {
+                TEngine.Log.Error($"[CampaignSaveService] 槽位 {slotIndex} 信号核一致性修复异常，原样保留：{e}");
+            }
             if (envelope.SchemaVersion == chain.TargetVersion)
             {
                 MarkKnownGoodMain(mainPath); // 完整校验过的当前格式主档：之后的常规存档不必再整份校验它

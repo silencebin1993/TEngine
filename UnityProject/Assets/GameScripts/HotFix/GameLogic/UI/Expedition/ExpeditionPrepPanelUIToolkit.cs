@@ -39,6 +39,10 @@ namespace GameLogic.UI.Expedition
         private Label _adaptationLabel;
         private Label _reinforcementForecastLabel;
         private Label _exposureLabel;
+        // FG1-SIG-01：信号核摘要、“编辑信号核”入口与远征途中不能修改的提醒。
+        private Label _signalCoreSummaryLabel;
+        private Button _signalCoreEditButton;
+        private Label _signalCoreReminderLabel;
         private Toggle _towerBroadcastOffToggle;
         private ScrollView _list;
         private Label _summaryLabel;
@@ -109,6 +113,10 @@ namespace GameLogic.UI.Expedition
             _cancelInterruptButton = _root.Q<Button>("CancelInterruptButton");
             _departButton = _root.Q<Button>("DepartButton");
             _closeButton = _root.Q<Button>("CloseButton");
+            _signalCoreSummaryLabel = _root.Q<Label>("SignalCoreSummaryLabel");
+            _signalCoreEditButton = _root.Q<Button>("SignalCoreEditButton");
+            _signalCoreReminderLabel = _root.Q<Label>("SignalCoreReminderLabel");
+            _signalCoreEditButton.clicked += GameLogic.Campaign.Signal.SignalCoreService.RequestPanelOpen;
 
             for (int i = 0; i < MaxRows; i++)
             {
@@ -219,6 +227,11 @@ namespace GameLogic.UI.Expedition
             _exposureLabel.text = $"信号暴露 {state.SignalExposure:F0}/100｜带宽 {state.SignalBandwidth:F0}" +
                 (state.SignalTowerBroadcastOff ? "（广播已关闭，−3带宽）" : string.Empty);
             _towerBroadcastOffToggle.SetValueWithoutNotify(state.SignalTowerBroadcastOff);
+
+            // FG1-SIG-01：出发前看得到带的是哪些固件，能直接去改，并被提醒“出发后远征途中不能改”。
+            _signalCoreSummaryLabel.text = GameLogic.Campaign.Signal.SignalCoreService.SummaryText(state);
+            _signalCoreEditButton.text = GameLogic.Localization.GameText.Get("signal.core.edit");
+            _signalCoreReminderLabel.text = GameLogic.Localization.GameText.Get("signal.core.expedition_reminder");
 
             // 勾选集里已经不再存在/不再合法的 LogicId 清掉（机器阵亡/被移出家园等）。
             var validIds = new HashSet<int>(snapshot.Machines.Where(m => m.Eligible).Select(m => m.LogicId));

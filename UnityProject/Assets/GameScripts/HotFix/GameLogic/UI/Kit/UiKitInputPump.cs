@@ -63,6 +63,20 @@ namespace GameLogic.UI.Kit
                 NotificationHudUIToolkit.ToggleCenter();
             }
 
+            // FG1-SIG-01（FGU-19）：信号核面板开关。关着时按上下文（战略 / 接入）读；开着时面板是模态（上下文 = 界面），
+            // 同一个键再按一次关闭——确认框在最上面时不抢（先处理确认框）。
+            if (SignalCore.SignalCoreHudUIToolkit.IsOpen)
+            {
+                if (!UiConfirmDialog.IsOpen && InputRouter.ConsumeGlobalAction(GameActionId.OpenSignalCore, allowDuringModal: true))
+                {
+                    SignalCore.SignalCoreHudUIToolkit.Close();
+                }
+            }
+            else if (InputRouter.ConsumeContextAction(GameActionId.OpenSignalCore))
+            {
+                SignalCore.SignalCoreHudUIToolkit.Open();
+            }
+
             if (InputRouter.ConsumeAction(GameActionId.SpeedHalf, InputScope.Strategy))
             {
                 StrategyClock.SetSpeed(0.5f);

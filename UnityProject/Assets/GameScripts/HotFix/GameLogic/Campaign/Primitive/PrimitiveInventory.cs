@@ -315,6 +315,125 @@ namespace GameLogic.Campaign.Primitive
             }
         }
 
+        // ── FG1-SIG-01：信号核（FGR-SIG-011 原子装卸）──────────────────────────────
+        // 信号核槽位的真相在 SignalCoreState.SlotPartIds（唯一写入口 Signal.SignalCoreService）；这里只做实例状态的
+        // 原子转移，保证“仓 / 草稿 / 待领取 / 信号核”四态恰一，实例不复制、不丢失。
+
+        /// <summary>仓内实例 → 信号核。只校验实例本身（在仓、未被合成预留）；是不是固件、槽位与远征锁由调用方
+        /// <c>Signal.SignalCoreService</c> 在调用前校验。</summary>
+        public static CircuitOpResult TryMoveToSignalCore(CampaignState state, string partId)
+        {
+            PrimitiveChipRecord record = Find(state, partId);
+            if (record == null)
+            {
+                return CircuitOpResult.Fail("part-not-found", $"找不到实例 '{partId}'。");
+            }
+            if (record.State != PrimitiveChipState.Bag)
+            {
+                return CircuitOpResult.Fail("not-in-bag", "该实例不在仓中（可能已装在别处或待领取）。");
+            }
+            if (!string.IsNullOrEmpty(record.ReservedByTransactionId))
+            {
+                return CircuitOpResult.Fail("reserved-for-craft", "该实例已被合成台预留为材料，暂不可装卸。");
+            }
+            record.State = PrimitiveChipState.SignalCore;
+            record.DraftBlueprintId = null;
+            record.DraftSlot = -1;
+            return CircuitOpResult.Ok();
+        }
+
+        /// <summary>信号核 → 仓。仓满时拒绝（AC-PRM-006 同一纪律：卸下前先查容量，原槽保持不动），
+        /// 除非 <paramref name="pendingIfFull"/>（只给读档修复用：宁可进待领取也不能丢）。</summary>
+        public static CircuitOpResult TryReturnFromSignalCore(CampaignState state, string partId, bool pendingIfFull = false)
+        {
+            PrimitiveChipRecord record = Find(state, partId);
+            if (record == null)
+            {
+                return CircuitOpResult.Fail("part-not-found", $"找不到实例 '{partId}'。");
+            }
+            if (record.State != PrimitiveChipState.SignalCore)
+            {
+                return CircuitOpResult.Fail("not-in-signal-core", "该实例不在信号核里。");
+            }
+            if (BagCount(state) >= Capacity)
+            {
+                if (!pendingIfFull)
+                {
+                    return CircuitOpResult.Fail("bag-full", "基元仓已满，无法卸回，请先腾格（该实例保留在信号核里）。");
+                }
+                record.State = PrimitiveChipState.Pending;
+                return CircuitOpResult.Ok();
+            }
+            record.State = PrimitiveChipState.Bag;
+            return CircuitOpResult.Ok();
+        }
+
+        /// <summary>FG1-SIG-01 过渡渠道：供电装配站刻印一枚固件芯片（已解锁的固件，<paramref name="scrapCost"/> 废料 / 枚，
+        /// 数值在 fg.TbHomeTuning signal.firmware_chip.print_scrap）。正式的“固件刻录台”（FG04）落地前由装配站承担，
+        /// 见 DEBT-FG1SIG01-02。与 <see cref="TryPrintChip"/> 同一纪律：未解锁 / 仓满 / 装配站没电 / 废料不足都在扣款前拒绝、
+        /// 零扣款；失败码互斥。<paramref name="isFirmware"/> 由调用方传入（固件目录在 Content 层，本类不反向依赖）。</summary>
+        public static CircuitOpResult TryPrintFirmwareChip(CampaignState state, string firmwareId, bool isFirmware, bool unlocked,
+            int scrapCost, out string partId)
+        {
+            partId = null;
+            if (state == null)
+            {
+                return CircuitOpResult.Fail("no-campaign", "没有活动战役。");
+            }
+            if (!isFirmware)
+            {
+                return CircuitOpResult.Fail("not-firmware", $"'{firmwareId}' 不是固件。");
+            }
+            if (!unlocked)
+            {
+                return CircuitOpResult.Fail("not-unlocked", $"'{firmwareId}' 尚未解锁，不能刻印。");
+            }
+            if (BagCount(state) >= Capacity)
+            {
+                return CircuitOpResult.Fail("bag-full", "基元仓已满，无法刻印。");
+            }
+            if (!AssemblyStationReady(state))
+            {
+                return CircuitOpResult.Fail("no-power", "装配站未供电或未完工，无法刻印。");
+            }
+            string txId = "firmware-print:" + Guid.NewGuid().ToString("N");
+            CampaignEconomyLedger.LedgerResult propose = CampaignEconomyLedger.ProposeConsume(
+                state, txId, "PrimitiveInventory", CampaignEconomyLedger.ResourceScrap, Math.Max(0, scrapCost));
+            if (!propose.Success)
+            {
+                return CircuitOpResult.Fail("propose-failed", propose.FailureReason);
+            }
+            CampaignEconomyLedger.LedgerResult reserve = CampaignEconomyLedger.Reserve(state, txId);
+            if (!reserve.Success)
+            {
+                CampaignEconomyLedger.Fail(state, txId, reserve.FailureReason);
+                return CircuitOpResult.Fail("insufficient-scrap", "废料不足，无法刻印。");
+            }
+            CampaignEconomyLedger.Commit(state, txId);
+
+            var record = new PrimitiveChipRecord
+            {
+                PartId = NewPartId(),
+                CardDefId = firmwareId,
+                State = PrimitiveChipState.Bag,
+                DraftSlot = -1,
+            };
+            state.PrimitiveChips = (state.PrimitiveChips ?? Array.Empty<PrimitiveChipRecord>()).Append(record).ToArray();
+            AppendLedger(state, "FirmwareChipPrint", record.PartId, firmwareId);
+            partId = record.PartId;
+            return CircuitOpResult.Ok();
+        }
+
+        /// <summary>装配站已完工且有电（补印基元芯片与刻印固件芯片共用的前提）。</summary>
+        public static bool AssemblyStationReady(CampaignState state)
+        {
+            BuildingRecord station = state?.BuildingRecords?.FirstOrDefault(b =>
+                b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId == HomeValleyLayout.BuildingTypeAssemblyStation);
+            return station != null
+                   && station.ConstructionState == BuildingConstructionState.Operational
+                   && station.PowerState == BuildingPowerState.Powered;
+        }
+
         // ── ER4-PRIM-04：合成台材料预留 ──────────────────────────────────────────
 
         /// <summary>把一个 Bag 态实例预留给某个合成/拆解事务（<paramref name="transactionId"/> 即
@@ -381,8 +500,10 @@ namespace GameLogic.Campaign.Primitive
             }
             var targets = new HashSet<string>(partIds.Where(id => !string.IsNullOrEmpty(id)), StringComparer.Ordinal);
             int before = state.PrimitiveChips.Length;
+            // FG1-SIG-01：装在信号核里的与装进蓝图的一样属于“已装载”，一律保留（槽位还指着它，删掉会留下悬空引用）。
             state.PrimitiveChips = state.PrimitiveChips.Where(p => !(targets.Contains(p.PartId)
                                                                      && p.State != PrimitiveChipState.Draft
+                                                                     && p.State != PrimitiveChipState.SignalCore
                                                                      && string.IsNullOrEmpty(p.ReservedByTransactionId))).ToArray();
             return before - state.PrimitiveChips.Length;
         }

@@ -1049,17 +1049,18 @@ namespace GameLogic.EditorTools
 
             // 改键后新键生效、旧键不再生效（可重绑）。
             var conflicts = new List<GameActionId>();
-            RebindResult rebind = GameSettings.TryRebind(GameActionId.CycleWorldFocus, new InputChord(KeyCode.P), conflicts);
+            // FG1-SIG-01 起 P 是“信号核”（战略 + 接入），改用任何上下文都空闲的分号键。
+            RebindResult rebind = GameSettings.TryRebind(GameActionId.CycleWorldFocus, new InputChord(KeyCode.Semicolon), conflicts);
             string beforeLast = WorldView.LastFocusTargetId;
             _reader.Press(KeyCode.Tab);
             FrameOnce(0.05f);
             bool tabIgnored = WorldView.LastFocusTargetId == beforeLast;
-            _reader.Press(KeyCode.P);
+            _reader.Press(KeyCode.Semicolon);
             FrameOnce(0.05f);
             bool jWorks = WorldView.LastFocusTargetId != beforeLast;
             GameSettings.ResetKeyBinding(GameActionId.CycleWorldFocus);
             Expect(tabIgnored && jWorks && GameSettings.KeyBindings.GetKey(GameActionId.CycleWorldFocus) == KeyCode.Tab,
-                $"“切换关注点”改绑到 P（结果 {rebind}，冲突 {conflicts.Count}）后：Tab 不再触发、P 触发；恢复默认回到 Tab");
+                $"“切换关注点”改绑到分号（结果 {rebind}，冲突 {conflicts.Count}）后：Tab 不再触发、分号触发；恢复默认回到 Tab");
             WorldSimulation.UnloadAll();
         }
 

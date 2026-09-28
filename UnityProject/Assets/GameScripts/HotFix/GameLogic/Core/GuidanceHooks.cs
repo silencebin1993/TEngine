@@ -34,6 +34,8 @@ namespace GameLogic.Core
         public const string LogisticsFirstBelt = "logistics.belt.first_placed";
         /// <summary>FG0-ARCH-02：第一次出现堵塞的传送带（FGR-LOG-025“下游满了就停下”的首次说明时机）。</summary>
         public const string LogisticsFirstBlocked = "logistics.belt.first_blocked";
+        /// <summary>FG1-SIG-01：第一次打开信号核面板（引导内容在 FG15-UX-04：你是信号、固件放进槽位、只能在家园改）。</summary>
+        public const string SignalCoreFirstOpen = "signal.core.first_open";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -44,6 +46,7 @@ namespace GameLogic.Core
             WorldFirstGenerating,
             WorldFirstFocusSwitch, WorldFirstDispatch, WorldFirstRaidInTransit,
             LogisticsFirstBelt, LogisticsFirstBlocked,
+            SignalCoreFirstOpen,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

@@ -186,7 +186,7 @@ namespace GameLogic.EditorTools
             var enumMembers = ((GameActionId[])Enum.GetValues(typeof(GameActionId))).Distinct().ToList();
             var missing = enumMembers.Where(a => !InputActionCatalog.TryGet(a, out _)).ToList();
             var extra = InputActionCatalog.All.Where(d => !enumMembers.Contains(d.Action)).ToList();
-            Expect(missing.Count == 0 && extra.Count == 0 && InputActionCatalog.All.Count == enumMembers.Count && enumMembers.Count == 86, // FG0-ARCH-01 新增“切换关注点”（85 → 86）
+            Expect(missing.Count == 0 && extra.Count == 0 && InputActionCatalog.All.Count == enumMembers.Count && enumMembers.Count == 87, // FG0-ARCH-01 新增“切换关注点”（85 → 86）；FG1-SIG-01 新增“信号核”（86 → 87）
                 $"GameActionId 的 {enumMembers.Count} 个成员与表里 {InputActionCatalog.All.Count} 行一一对应（缺：{string.Join(",", missing)}；多：{string.Join(",", extra.Select(d => d.Action))}）");
 
             InputBindingSet defaults = InputBindingSet.CreateDefault();
@@ -434,12 +434,13 @@ namespace GameLogic.EditorTools
 
             // 不冲突：直接生效并落盘，重新读盘后仍在（存读档）。
             // FG0-ARCH-01 起 Tab 在战略上下文是“切换关注点”，改用战略里空闲的 P 键验证“不冲突直接生效”。
-            RebindResult ok = GameSettings.TryRebind(GameActionId.CommandGuard, new InputChord(KeyCode.P), conflicts);
+            // FG1-SIG-01 起 P 是“信号核”（战略 + 接入），改用任何上下文都空闲的分号键。
+            RebindResult ok = GameSettings.TryRebind(GameActionId.CommandGuard, new InputChord(KeyCode.Semicolon), conflicts);
             string json = PlayerPrefs.GetString(SettingsPrefsKey, string.Empty);
             GameSettings.Load();
-            Expect(ok == RebindResult.Ok && GameSettings.KeyBindings.GetChord(GameActionId.CommandGuard).Key == KeyCode.P
+            Expect(ok == RebindResult.Ok && GameSettings.KeyBindings.GetChord(GameActionId.CommandGuard).Key == KeyCode.Semicolon
                    && json.Contains("\"KeyBindingsFormat\":2"),
-                "守备命令改到 P（战略里空闲）→ 直接生效、写盘（格式 2），重新读盘后仍是 P");
+                "守备命令改到分号（任何上下文都空闲）→ 直接生效、写盘（格式 2），重新读盘后仍是分号");
 
             // 冲突：R 已是移动命令（战略）。不落地，走确认框；取消 → 不变。
             GameSettings.ResetKeyBindingsToDefault();
@@ -1436,8 +1437,9 @@ namespace GameLogic.EditorTools
                     hard.Add(Path.GetFileName(f) + ":" + m.Groups[1].Value);
                 }
             }
-            // FG0-ARCH-04 新增 BuildModeHud.uxml（建造栏），FG0-ARCH-01 新增 WorldBar.uxml（世界时间条），共 7 份。
-            Expect(uxmlCount == 7 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
+            // FG0-ARCH-04 新增 BuildModeHud.uxml（建造栏），FG0-ARCH-01 新增 WorldBar.uxml（世界时间条），共 7 份；
+            // FG1-SIG-01 新增 SignalCorePanel.uxml（信号位置 HUD 与信号核面板），共 8 份。
+            Expect(uxmlCount == 8 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
 
             string[] codeDirs =
             {

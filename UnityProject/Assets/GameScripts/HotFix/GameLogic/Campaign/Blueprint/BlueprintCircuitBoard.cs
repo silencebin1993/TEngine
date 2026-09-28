@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using GameLogic.Campaign.Content;
+using GameLogic.Campaign.Signal;
+using GameLogic.Localization;
 using GameLogic.MetabolicSlice.Bag;
 using GameLogic.MetabolicSlice.CardDefs;
 using GameLogic.MetabolicSlice.Grid;
@@ -40,6 +42,8 @@ namespace GameLogic.Campaign.Blueprint
         FirmwareTooMany,
         FirmwareUnknown,
         UnknownOrIllegalChip,
+        /// <summary>FG1-SIG-01（FGR-SIG-012）：机器电路里装了核心固件——核心固件只能由信号携带。</summary>
+        FirmwareCoreSignalOnly,
     }
 
     public sealed class CircuitIssue
@@ -70,6 +74,9 @@ namespace GameLogic.Campaign.Blueprint
     /// 显式调用才落成新版本，不改场上机器（PRIMITIVE-FULL-DEMO-SPEC.md §3.2 第2条）。</summary>
     public sealed class BlueprintCircuitBoard
     {
+        /// <summary>FG1-SIG-01：核心固件被拒绝放进机器电路时的原因码（文本 signal.reason.core_signal_only）。</summary>
+        public const string CoreSignalOnlyCode = "core_signal_only";
+
         public string ChassisId;
         public string PrimaryId;
         public string UtilityId;
@@ -370,6 +377,16 @@ namespace GameLogic.Campaign.Blueprint
             {
                 return CircuitOpResult.Fail("slot_out_of_range", $"槽位 {slot} 越界。");
             }
+            // FG1-SIG-01（FGR-SIG-012）：固件芯片不是 3×3 电路格的内容；核心固件给出专门原因（只能由信号携带）。
+            FirmwareKind kind = FirmwareKinds.KindOf(contentId);
+            if (kind == FirmwareKind.Core)
+            {
+                return CircuitOpResult.Fail(CoreSignalOnlyCode, GameText.Get("signal.reason.core_signal_only"));
+            }
+            if (kind == FirmwareKind.Regular)
+            {
+                return CircuitOpResult.Fail("illegal_chip", GameText.Get("signal.reason.firmware_not_chip"));
+            }
             SlotType slotType = BlueprintCircuitLayout.SlotTypeAt(slot);
             if (!BlueprintCircuitChipCatalog.IsValidChipContent(contentId, slotType))
             {
@@ -477,6 +494,11 @@ namespace GameLogic.Campaign.Blueprint
             if (!FirmwareCatalog.TryGet(firmwareId, out MechanicalContentDef def) || def.LegacyFacadeId == null)
             {
                 return CircuitOpResult.Fail("firmware_unknown", $"'{firmwareId}' 不是已知固件或无可编译等价实现。");
+            }
+            // FG1-SIG-01（FGR-SIG-012）：核心固件放不进机器电路。种类只读 fg.TbFirmwareKind（Signal.FirmwareKinds），不按 ID 写特例。
+            if (FirmwareKinds.IsCore(firmwareId))
+            {
+                return CircuitOpResult.Fail(CoreSignalOnlyCode, GameText.Get("signal.reason.core_signal_only"));
             }
             if (!MechanicalContentUnlock.IsUnlocked(state, firmwareId))
             {
@@ -643,6 +665,16 @@ namespace GameLogic.Campaign.Blueprint
             if (!string.IsNullOrEmpty(FirmwareSlots[1]) && !FirmwareCatalog.TryGet(FirmwareSlots[1], out _))
             {
                 result.Add(CircuitIssueCode.FirmwareUnknown, $"固件槽1 内容 '{FirmwareSlots[1]}' 未知。");
+            }
+
+            // FG1-SIG-01（FGR-SIG-012）：保存校验兜底——草稿里残留的核心固件（例如种类表改了之后的旧草稿）不能保存进机器电路。
+            for (int i = 0; i < FirmwareSlots.Length; i++)
+            {
+                if (!string.IsNullOrEmpty(FirmwareSlots[i]) && FirmwareKinds.IsCore(FirmwareSlots[i]))
+                {
+                    result.Add(CircuitIssueCode.FirmwareCoreSignalOnly,
+                        GameText.Format("signal.reason.core_in_circuit", FirmwareKinds.DisplayName(FirmwareSlots[i]) ?? FirmwareSlots[i]));
+                }
             }
 
             if (TryComputeLoad(out int totalLoad, out int? capacity) && capacity.HasValue && totalLoad > capacity.Value)

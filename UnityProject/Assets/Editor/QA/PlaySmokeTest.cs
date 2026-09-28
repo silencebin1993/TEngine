@@ -166,6 +166,17 @@ namespace GameLogic.EditorTools
                     case 132: StepBeltsNear(inStep); break;
                     case 133: StepBeltsDone(inStep); break;
                     case 129: StepRuinsCombat(inStep); break;
+                    case 150: StepSignalOpened(inStep); break;
+                    case 151: StepSignalPrinted(inStep); break;
+                    case 152: StepSignalEquipped(inStep); break;
+                    case 153: StepSignalPresetSaved(inStep); break;
+                    case 154: StepSignalClosed(inStep); break;
+                    case 158: StepSignalPrepPanel(inStep); break;
+                    case 159: StepSignalFromPrep(inStep); break;
+                    case 160: StepSignalPrepDone(inStep); break;
+                    case 155: StepSignalExpeditionOpened(inStep); break;
+                    case 156: StepSignalExpeditionDenied(inStep); break;
+                    case 157: StepSignalExpeditionClosed(inStep); break;
                     case 140: StepRaidStart(inStep); break;
                     case 141: StepRaidRunning(inStep); break;
                     case 142: StepRaidCleared(inStep); break;
@@ -1217,6 +1228,145 @@ namespace GameLogic.EditorTools
             }
             Check(GameRoot.HomeValley != null && !GameRoot.HomeValley.IsCircuitBoardPanelOpen && !PauseMenuUIToolkit.IsOpen && !InputRouter.TextInputFocused,
                 "失焦后快捷键恢复；Esc 先关电路板面板，暂停菜单没有打开");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.OpenSignalCore));
+            Next(150, "FG1-SIG-01：按信号核键（默认 P）打开信号核面板");
+        }
+
+        // ── FG1-SIG-01：信号核（HUD 信号位置、刻印、装入、预设、远征准备入口、远征途中锁定）──────────────────
+
+        private static UIDocument SignalDoc()
+        {
+            GameObject host = GameObject.Find("[SignalCoreHost]");
+            return host != null ? host.GetComponent<UIDocument>() : null;
+        }
+
+        private static void StepSignalOpened(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            UI.SignalCore.SignalCoreHudUIToolkit hud = UI.SignalCore.SignalCoreHudUIToolkit.Instance;
+            Check(hud != null && UI.SignalCore.SignalCoreHudUIToolkit.IsOpen && hud.PanelVisible && hud.HudVisible && InputRouter.IsModalOwner(hud),
+                $"按 P 打开信号核面板（模态）；HUD“{hud?.LocationText}”“{hud?.EntryText}”");
+            Check(hud != null && hud.LocationText == Localization.GameText.Get("signal.hud.at_core") && hud.EntryText.EndsWith("0/2", StringComparison.Ordinal)
+                  && hud.SlotText(0).Contains("1") && hud.SlotText(2).Contains("T1"),
+                $"信号在归还核心；初始 2 槽（1 号槽“{hud?.SlotText(0)}”，3 号槽“{hud?.SlotText(2).Replace('\n', ' ')}”）");
+            CheckNoTextMarkers("信号核面板");
+            DropdownField print = SignalDoc()?.rootVisualElement?.Q<DropdownField>("SignalPrintChoice");
+            string overload = Localization.GameText.Get("firmware.fw_overload.name");
+            string choice = print?.choices?.FirstOrDefault(c => c.Contains(overload));
+            Check(choice != null, $"刻印下拉里有过载（{string.Join("／", print?.choices ?? new System.Collections.Generic.List<string>())}）");
+            if (print != null && choice != null)
+            {
+                print.value = choice;
+            }
+            SessionState.SetInt(K + "SigScrap", CampaignSession.Current.Scrap);
+            Check(ClickUitk("[SignalCoreHost]", "SignalPrint"), "点“刻印”");
+            Next(151, "选中过载并点“刻印”（装配站刻印一枚固件芯片）");
+        }
+
+        private static void StepSignalPrinted(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            UI.SignalCore.SignalCoreHudUIToolkit hud = UI.SignalCore.SignalCoreHudUIToolkit.Instance;
+            CampaignState st = CampaignSession.Current;
+            PrimitiveChipRecord chip = Campaign.Primitive.PrimitiveInventory.Find(st, hud?.SelectedPartId);
+            Check(chip != null && chip.CardDefId == Campaign.Content.FirmwareCatalog.FwOverloadId && chip.State == PrimitiveChipState.Bag
+                  && st.Scrap == SessionState.GetInt(K + "SigScrap", 0) - Campaign.Signal.SignalCoreService.FirmwareChipPrintScrap && !hud.FeedbackIsError,
+                $"刻印成功：过载芯片进基元仓并被选中，扣 {Campaign.Signal.SignalCoreService.FirmwareChipPrintScrap} 废料（“{hud?.FeedbackText}”）");
+            Check(ClickUitk("[SignalCoreHost]", "SignalEquip"), "点“装入 1 号槽”");
+            Next(152, "点“装入 1 号槽”（FGJ-M1 第 2 步：给信号核装上过载）");
+        }
+
+        private static void StepSignalEquipped(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            UI.SignalCore.SignalCoreHudUIToolkit hud = UI.SignalCore.SignalCoreHudUIToolkit.Instance;
+            CampaignState st = CampaignSession.Current;
+            Check(Campaign.Signal.SignalCoreService.SlotContentId(st, 0) == Campaign.Content.FirmwareCatalog.FwOverloadId
+                  && Campaign.Signal.SignalCoreService.SlotChip(st, 0).State == PrimitiveChipState.SignalCore
+                  && hud.EntryText.EndsWith("1/2", StringComparison.Ordinal) && hud.SlotText(0).Contains(Localization.GameText.Get("firmware.fw_overload.name")),
+                $"过载装进 1 号槽：实例状态 = 信号核；HUD“{hud.EntryText}”；槽位“{hud.SlotText(0)}”");
+            TextField name = SignalDoc()?.rootVisualElement?.Q<TextField>("SignalPresetName");
+            if (name != null)
+            {
+                name.value = "攻坚";
+            }
+            Check(ClickUitk("[SignalCoreHost]", "SignalPresetSave"), "点“另存为新预设”");
+            Next(153, "预设名填“攻坚”，点“另存为新预设”");
+        }
+
+        private static void StepSignalPresetSaved(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            UI.SignalCore.SignalCoreHudUIToolkit hud = UI.SignalCore.SignalCoreHudUIToolkit.Instance;
+            CampaignState st = CampaignSession.Current;
+            Check(st.SignalCore.Presets.Length == 1 && st.SignalCore.Presets[0].Name == "攻坚" && st.SignalCore.ActivePresetId == st.SignalCore.Presets[0].PresetId
+                  && hud.PresetActiveText.Contains("攻坚"), $"预设已保存并成为当前预设：“{hud.PresetActiveText}”");
+            SignalDoc()?.rootVisualElement?.Q<TextField>("SignalPresetName")?.Blur();
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.OpenSignalCore));
+            Next(154, "再按 P 关闭信号核面板");
+        }
+
+        private static void StepSignalClosed(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            UI.SignalCore.SignalCoreHudUIToolkit hud = UI.SignalCore.SignalCoreHudUIToolkit.Instance;
+            Check(!UI.SignalCore.SignalCoreHudUIToolkit.IsOpen && hud != null && !hud.PanelVisible && !InputRouter.IsModalOwner(hud) && !PauseMenuUIToolkit.IsOpen,
+                "再按 P 关闭信号核面板（模态释放、暂停菜单没开）");
+            UnlockLikeDeparture(Campaign.Regions.FracturedCityRegion.Find(CampaignSession.Current),
+                Campaign.Regions.ExpeditionDepartureService.ExpeditionTarget.SilentRuins);
+            GameRoot.HomeValley.SetExpeditionPrepPanelOpen(true);
+            Next(158, "测试捷径：标记破碎都市可出征，打开远征准备面板（点信号塔的同一开关）");
+        }
+
+        private static void StepSignalPrepPanel(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            string summary = LabelText("[HomeValleyExpeditionPrepHost]", "SignalCoreSummaryLabel");
+            string reminder = LabelText("[HomeValleyExpeditionPrepHost]", "SignalCoreReminderLabel");
+            Check(summary.Contains(Localization.GameText.Get("firmware.fw_overload.name")) && reminder == Localization.GameText.Get("signal.core.expedition_reminder"),
+                $"远征准备面板显示“{summary}”并提前提醒“{reminder}”");
+            Check(ClickUitk("[HomeValleyExpeditionPrepHost]", "SignalCoreEditButton"), "点远征准备面板的“编辑信号核”");
+            Next(159, "点“编辑信号核”");
+        }
+
+        private static void StepSignalFromPrep(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(UI.SignalCore.SignalCoreHudUIToolkit.IsOpen, "从远征准备面板打开了信号核面板");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
+            Next(160, "按 Esc（先关最上层的信号核面板）");
+        }
+
+        private static void StepSignalPrepDone(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(!UI.SignalCore.SignalCoreHudUIToolkit.IsOpen && GameRoot.HomeValley.IsExpeditionPrepPanelOpen && !PauseMenuUIToolkit.IsOpen,
+                "Esc 逐层返回：信号核面板关闭，远征准备面板还开着");
+            GameRoot.HomeValley.SetExpeditionPrepPanelOpen(false);
             InputRouter.DebugSetReader(null);
 
             int[] roster = HomeMachines();
@@ -1289,6 +1439,49 @@ namespace GameLogic.EditorTools
                 }
             }
             Check(maxGap < 0.5f, $"机器表现对象跟随内核位置插值（最大偏差 {maxGap:F3} 米 < 一步位移）");
+            PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.OpenSignalCore));
+            Next(155, "FG1-SIG-01：远征途中按信号核键");
+        }
+
+        private static void StepSignalExpeditionOpened(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            UI.SignalCore.SignalCoreHudUIToolkit hud = UI.SignalCore.SignalCoreHudUIToolkit.Instance;
+            string lockedWord = Localization.GameText.Get("signal.hud.core_button_locked").Split('·').Last().Trim();
+            Check(UI.SignalCore.SignalCoreHudUIToolkit.IsOpen && hud.LockVisible && hud.LockText == Localization.GameText.Get("signal.reason.expedition")
+                  && hud.EntryText.Contains(lockedWord) && Campaign.Signal.SignalCoreService.ExpeditionUnderway,
+                $"真实派遣的远征在外：面板顶部“{hud?.LockText}”，HUD“{hud?.EntryText}”");
+            Check(ClickUitk("[SignalCoreHost]", "SignalSlot0") && ClickUitk("[SignalCoreHost]", "SignalUnequip"), "点 1 号槽再点“卸下”");
+            Next(156, "远征途中尝试卸下 1 号槽的过载");
+        }
+
+        private static void StepSignalExpeditionDenied(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            UI.SignalCore.SignalCoreHudUIToolkit hud = UI.SignalCore.SignalCoreHudUIToolkit.Instance;
+            CampaignState st = CampaignSession.Current;
+            string reason = Localization.GameText.Get("signal.reason.expedition");
+            bool caption = FeedbackCues.ActiveCaptions.Any(c => c.Cue == FeedbackCueId.Denied && c.Text.Contains(reason));
+            Check(hud.FeedbackIsError && hud.FeedbackText == reason && caption
+                  && Campaign.Signal.SignalCoreService.SlotContentId(st, 0) == Campaign.Content.FirmwareCatalog.FwOverloadId,
+                $"远征途中修改被拒绝：面板写“{hud.FeedbackText}”，拒绝音字幕 {caption}，过载仍在 1 号槽");
+            PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
+            Next(157, "按 Esc 关闭信号核面板");
+        }
+
+        private static void StepSignalExpeditionClosed(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(!UI.SignalCore.SignalCoreHudUIToolkit.IsOpen && !PauseMenuUIToolkit.IsOpen, "Esc 关闭信号核面板（没有打开暂停菜单）");
             Next(120, "FG0-ARCH-01：整个世界同时运行——远征进行中，家园没有退出");
         }
 
@@ -2001,6 +2194,11 @@ namespace GameLogic.EditorTools
             Check(st != null && st.PrimitiveChips.All(c => c.CardDefId != SmokeRemovedId) && st.Scrap == before + 9,
                 $"读档进入游戏：已移除内容转换为废料（{before}→{st?.Scrap}）");
             Check(captions.Any(c => c.Contains("静默侦察机") && c.Contains("9 废料")), "进入游戏后弹出迁移字幕");
+            // FG1-SIG-01：真实“保存并返回主菜单 → 读取”后，信号核（槽位里的过载实例、预设）完全一致。
+            Check(st != null && Campaign.Signal.SignalCoreService.SlotContentId(st, 0) == Campaign.Content.FirmwareCatalog.FwOverloadId
+                  && Campaign.Signal.SignalCoreService.SlotChip(st, 0)?.State == PrimitiveChipState.SignalCore
+                  && st.SignalCore.Presets.Length == 1 && st.SignalCore.Presets[0].Name == "攻坚",
+                $"读档后信号核仍装着过载、预设“攻坚”还在（{Campaign.Signal.SignalCoreService.SummaryText(st)}）");
             CheckNoTextMarkers("读档进入游戏");
             BeltKernel bk = BeltNetworkService.Kernel;
             int bx = SessionState.GetInt(K + "BeltX", 0);

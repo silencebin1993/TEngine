@@ -103,6 +103,10 @@ public partial class Tables
     /// </summary>
     public fg.TbBuildingPort TbBuildingPort {get; }
     /// <summary>
+    /// 固件种类
+    /// </summary>
+    public fg.TbFirmwareKind TbFirmwareKind {get; }
+    /// <summary>
     /// 地形类型
     /// </summary>
     public fg.TbGridTerrain TbGridTerrain {get; }
@@ -224,6 +228,7 @@ public partial class Tables
         TbBuilding = new fg.TbBuilding(loader("fg_tbbuilding"));
         TbBuildingGrid = new fg.TbBuildingGrid(loader("fg_tbbuildinggrid"));
         TbBuildingPort = new fg.TbBuildingPort(loader("fg_tbbuildingport"));
+        TbFirmwareKind = new fg.TbFirmwareKind(loader("fg_tbfirmwarekind"));
         TbGridTerrain = new fg.TbGridTerrain(loader("fg_tbgridterrain"));
         TbHomeTuning = new fg.TbHomeTuning(loader("fg_tbhometuning"));
         TbInputAction = new fg.TbInputAction(loader("fg_tbinputaction"));
@@ -276,6 +281,7 @@ public partial class Tables
         TbBuilding.ResolveRef(this);
         TbBuildingGrid.ResolveRef(this);
         TbBuildingPort.ResolveRef(this);
+        TbFirmwareKind.ResolveRef(this);
         TbGridTerrain.ResolveRef(this);
         TbHomeTuning.ResolveRef(this);
         TbInputAction.ResolveRef(this);

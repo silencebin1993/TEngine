@@ -891,7 +891,13 @@ namespace GameLogic.UI.CircuitBoard
                     continue;
                 }
                 // 选项文本里不能出现 "/"：下拉菜单会把它当子菜单分隔符，把一项拆成两级菜单。
-                choices.Add($"{def.DisplayName}（{def.ScrapCost} 废料 · 负载 {def.Load}）".Replace('/', '／'));
+                string label = $"{def.DisplayName}（{def.ScrapCost} 废料 · 负载 {def.Load}）";
+                // FG1-SIG-01（FGR-SIG-012）：核心固件照样列出但标明“只能由信号携带”（形状 + 文字），选了会被拒绝并给原因，不静默消失。
+                if (Campaign.Signal.FirmwareKinds.IsCore(def.Id))
+                {
+                    label = Localization.GameText.Format("signal.core.circuit_core_option", label);
+                }
+                choices.Add(label.Replace('/', '／'));
                 idsByIndex.Add(def.Id);
             }
             dropdown.choices = choices;

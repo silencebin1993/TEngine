@@ -5,7 +5,7 @@ namespace GameLogic.UI.Kit
     /// <summary>
     /// FG0-UX-01：UI 基础件的挂载入口（由 <c>GameRoot.Startup</c> 调用，进程内只挂一次）。
     /// 每个面板一个 DontDestroyOnLoad 宿主、一个 UIDocument；分层（sortingOrder）见各面板的 Order 常量与
-    /// UI_WORKFLOW_GUIDE.md 第 4 节：建造栏 30030 &lt; 通知 30040 &lt; 暂停菜单 30070 &lt; 按键面板 30080 &lt; 样例页 30090 &lt; 浮层 30200。
+    /// UI_WORKFLOW_GUIDE.md 第 4 节：建造栏 30030 &lt; 信号核 30035 &lt; 通知 30040 &lt; 暂停菜单 30070 &lt; 按键面板 30080 &lt; 样例页 30090 &lt; 浮层 30200。
     /// </summary>
     public static class UiKitRuntime
     {
@@ -25,6 +25,7 @@ namespace GameLogic.UI.Kit
             Create<NotificationHudUIToolkit>("[NotificationHudHost]");
             Create<BuildModeHudUIToolkit>("[BuildModeHudHost]"); // FG0-ARCH-04：家园建造模式入口与建造栏（30030，低于通知）。
             Create<WorldBarHudUIToolkit>("[WorldBarHost]"); // FG0-ARCH-01：世界时间条（游戏日、0.5x～3x、暂停、关注点），右上角 HUD 层 3。
+            Create<SignalCore.SignalCoreHudUIToolkit>("[SignalCoreHost]"); // FG1-SIG-01：信号位置 HUD（顶部居中）与信号核面板（30035）。
             Create<PauseMenuUIToolkit>("[PauseMenuHost]");
             Create<KeyBindingsPanelUIToolkit>("[KeyBindingsHost]");
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -44,6 +45,7 @@ namespace GameLogic.UI.Kit
             UiTooltip.Hide();
             UiConfirmDialog.DiscardAll();
             KeyBindingsPanelUIToolkit.Close();
+            SignalCore.SignalCoreHudUIToolkit.Close();
             UiKitGalleryUIToolkit.Close();
             NotificationHudUIToolkit.CloseCenter();
             PauseMenuUIToolkit.CloseForExit();

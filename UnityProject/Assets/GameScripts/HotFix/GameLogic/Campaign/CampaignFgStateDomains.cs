@@ -361,11 +361,35 @@ namespace GameLogic.Campaign
         public int DomainVersion = 1;
     }
 
-    /// <summary>信号核（FG1-SIG-01 / FG01）。</summary>
+    /// <summary>信号核（FG1-SIG-01 / FG01 FGR-SIG-010～012、第 6 章存档）。唯一写入口 <c>Signal.SignalCoreService</c>。
+    /// 本 Story 只存槽位与预设；后续 Story 在本域追加：各槽核心固件冷却（FG1-SIG-03）、信号位置与“存档时在机器里”
+    /// （FG1-SIG-03）、远距离跳转冷却（FG1-SIG-07）。只加字段不升版本（ADR FG0-SAVE-01）。</summary>
     [Serializable]
     public sealed class SignalCoreState
     {
         public int DomainVersion = 1;
+        /// <summary>按槽位顺序（下标 0 = 1 号槽，优先插入接入口）记录装着的固件实例
+        /// （<see cref="PrimitiveChipRecord.PartId"/>，该实例 <see cref="PrimitiveChipRecord.State"/> = SignalCore）；
+        /// 空槽为空串（不用 null：JsonUtility 会把数组里的 null 读回成空串，两种写法混用会让指纹在第一次存读档后漂移）。
+        /// 长度 = 最多槽位数（fg.TbHomeTuning signal.core.max_slots），未解锁的槽位也占位。</summary>
+        public string[] SlotPartIds = Array.Empty<string>();
+        /// <summary>玩家保存的预设（按 <see cref="SignalCorePresetRecord.PresetId"/> 排序 = 创建顺序）。</summary>
+        public SignalCorePresetRecord[] Presets = Array.Empty<SignalCorePresetRecord>();
+        /// <summary>最近一次切换 / 保存 / 覆盖的预设；空串 = 当前配置没有对应预设。</summary>
+        public string ActivePresetId = string.Empty;
+        /// <summary>下一个预设的序号（预设 ID 与默认名称“配置 N”都用它，删除后不复用）。</summary>
+        public int NextPresetSerial = 1;
+    }
+
+    /// <summary>信号核预设（FG01 第 4 章“保存为预设、一键切换（只能在家园切换）”）。按槽位记固件内容 ID，
+    /// 不记实例：实例会被消耗、拆解或换位置，切换时按内容从信号核与基元仓里找实例。</summary>
+    [Serializable]
+    public sealed class SignalCorePresetRecord
+    {
+        public string PresetId = string.Empty;
+        public string Name = string.Empty;
+        /// <summary>按槽位顺序的固件内容 ID（<see cref="PrimitiveChipRecord.CardDefId"/>），空槽为空串。</summary>
+        public string[] SlotContentIds = Array.Empty<string>();
     }
 
     /// <summary>掉落数据包（FG08）。</summary>
@@ -577,6 +601,30 @@ namespace GameLogic.Campaign
             s.Quests ??= new QuestState();
             s.StandingRules ??= new StandingRuleState();
             s.SignalCore ??= new SignalCoreState();
+            s.SignalCore.SlotPartIds ??= Array.Empty<string>();
+            for (int i = 0; i < s.SignalCore.SlotPartIds.Length; i++)
+            {
+                s.SignalCore.SlotPartIds[i] ??= string.Empty;
+            }
+            s.SignalCore.Presets ??= Array.Empty<SignalCorePresetRecord>();
+            foreach (SignalCorePresetRecord p in s.SignalCore.Presets)
+            {
+                if (p != null)
+                {
+                    p.PresetId ??= string.Empty;
+                    p.Name ??= string.Empty;
+                    p.SlotContentIds ??= Array.Empty<string>();
+                    for (int i = 0; i < p.SlotContentIds.Length; i++)
+                    {
+                        p.SlotContentIds[i] ??= string.Empty;
+                    }
+                }
+            }
+            s.SignalCore.ActivePresetId ??= string.Empty;
+            if (s.SignalCore.NextPresetSerial < 1)
+            {
+                s.SignalCore.NextPresetSerial = 1;
+            }
             s.LootPackets ??= new LootPacketState();
             s.Stats ??= new StatsState();
             s.SaveHistory ??= new SaveHistoryState();
