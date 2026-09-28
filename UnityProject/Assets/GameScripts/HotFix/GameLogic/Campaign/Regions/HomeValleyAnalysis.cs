@@ -388,6 +388,13 @@ namespace GameLogic.Campaign.Regions
                 + $"，技术数据 +{techYield}",
                 Feedback.FeedbackCues.BuildingTypeSfx(HomeValleyLayout.BuildingTypeAnalysisBench));
 
+            // FG1-SIG-06（FGR-SIG-062）：破解敌方加密固件——同一种固件的所有实例去掉“未破解”标记（按内容记），
+            // 已装在信号核里的那件自动更新（接入中的机器立刻按已破解重编译：积热回到 1 倍、不再计裸跑暴露），冷却不变。
+            if (!alreadyUnlocked)
+            {
+                Signal.RawFirmwareService.OnCracked(state, info.UnlockContentId);
+            }
+
             // ER6-LOOP-01：解析完成是 OBJ-06/08"解析"子条件的唯一真实写入口。
             CampaignObjectiveTracker.Recompute(state);
         }

@@ -186,7 +186,7 @@ namespace GameLogic.EditorTools
             var enumMembers = ((GameActionId[])Enum.GetValues(typeof(GameActionId))).Distinct().ToList();
             var missing = enumMembers.Where(a => !InputActionCatalog.TryGet(a, out _)).ToList();
             var extra = InputActionCatalog.All.Where(d => !enumMembers.Contains(d.Action)).ToList();
-            Expect(missing.Count == 0 && extra.Count == 0 && InputActionCatalog.All.Count == enumMembers.Count && enumMembers.Count == 87, // FG0-ARCH-01 新增“切换关注点”（85 → 86）；FG1-SIG-01 新增“信号核”（86 → 87）
+            Expect(missing.Count == 0 && extra.Count == 0 && InputActionCatalog.All.Count == enumMembers.Count && enumMembers.Count == 88, // FG0-ARCH-01 新增“切换关注点”（85 → 86）；FG1-SIG-01 新增“信号核”（86 → 87）；FG1-SIG-06 新增“暴露面板”（87 → 88）
                 $"GameActionId 的 {enumMembers.Count} 个成员与表里 {InputActionCatalog.All.Count} 行一一对应（缺：{string.Join(",", missing)}；多：{string.Join(",", extra.Select(d => d.Action))}）");
 
             InputBindingSet defaults = InputBindingSet.CreateDefault();

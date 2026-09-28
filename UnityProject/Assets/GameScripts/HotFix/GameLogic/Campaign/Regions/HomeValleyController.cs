@@ -310,6 +310,7 @@ namespace GameLogic.Campaign.Regions
             HomeValleySignal.RecomputeUnlock(state); // ER5-SIG-01：破碎都市解锁判定。
             FoundryOutpostRegion.RecomputeUnlock(state); // ER6-FOUNDRY-01：铸造前哨外围解锁判定。
             CampaignExposureLedger.TickTowerBroadcastOff(state, dt); // ER6-EXPOSE-01：塔关广播每10秒-2。
+            CampaignExposureLedger.SimStepHighPower(state, dt); // FG1-SIG-06：高功率生产按游戏时间累计（与观察无关），每游戏小时最多 +3。
             HomeValleyBeacon.Tick(state, dt); // ER7-BEACON-01：信标启动10秒不可取消演出计时。
             HomeValleySoftlockGuard.Tick(state, dt, BeginAutoAssignedMovement);
         }

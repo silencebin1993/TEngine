@@ -328,7 +328,8 @@ namespace GameLogic.UI.PrimitiveCraft
         {
             string source = string.IsNullOrEmpty(item.SourceSalvageId) ? "补印/合成" : "解析";
             string reserved = string.IsNullOrEmpty(item.ReservedByTransactionId) ? string.Empty : " · 已预留";
-            return $"{BlueprintCircuitChipCatalog.DisplayNameFor(item.CardDefId)}（{source} #{DropdownChoices.ShortId(item.PartId)}{reserved}）";
+            // FG1-SIG-06（FGR-SIG-060）：未破解的敌方固件带“▲未破解”标记。
+            return $"{BlueprintCircuitChipCatalog.DisplayNameFor(item.CardDefId)}{Campaign.Signal.FirmwareKinds.RawTagSuffix(CampaignSession.Current, item.CardDefId)}（{source} #{DropdownChoices.ShortId(item.PartId)}{reserved}）";
         }
 
         private static string MaterialChipContentId(CampaignState state, CraftQueueItemRecord q)

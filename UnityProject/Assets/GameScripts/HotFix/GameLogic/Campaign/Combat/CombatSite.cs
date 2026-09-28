@@ -53,6 +53,8 @@ namespace GameLogic.Campaign.Combat
         public bool ReactionSuppressed;
         /// <summary>FG1-SIG-03：这组参数的具名反应来自信号带进来的核心固件（冷却 &gt; 0）——内核发动一次后当场压住（<see cref="CombatUnitFlags.ReactionGated"/>）。</summary>
         public bool ReactionGated;
+        /// <summary>FG1-SIG-06（FGR-SIG-061）：接入口里插着信号裸跑的未破解常规固件、信号上的计次间隔已过——下一发算一次“发动”（<see cref="CombatUnitFlags.RawGated"/>）。</summary>
+        public bool RawGated;
     }
 
     /// <summary>
@@ -199,6 +201,10 @@ namespace GameLogic.Campaign.Combat
             if (info.ReactionGated)
             {
                 flags |= CombatUnitFlags.ReactionGated;
+            }
+            if (info.RawGated)
+            {
+                flags |= CombatUnitFlags.RawGated;
             }
             if (!rec.IsAlive)
             {
@@ -396,6 +402,12 @@ namespace GameLogic.Campaign.Combat
             {
                 Kernel.SetFlag(unit, CombatUnitFlags.ReactionSpent, false);
             }
+            // FG1-SIG-06：裸跑计次同一套“门控 / 已发动”：计次间隔内下发不带门控的参数时清掉“已发动”，间隔到了重新带上门控。
+            Kernel.SetFlag(unit, CombatUnitFlags.RawGated, info.RawGated);
+            if (!info.RawGated)
+            {
+                Kernel.SetFlag(unit, CombatUnitFlags.RawSpent, false);
+            }
         }
 
         private MachineWeaponInfo ResolveMachineWeapon(CampaignState state, int logicId)
@@ -422,6 +434,8 @@ namespace GameLogic.Campaign.Combat
             info.ReactionSuppressed = SignalUplinkService.IsReactionSuppressed(state, logicId, p.ReactionId);
             info.ReactionGated = !info.ReactionSuppressed && info.Uplinked
                                  && SignalUplinkService.IsCoreGatedReaction(p.ReactionId, p.UplinkFirmwareIds);
+            // FG1-SIG-06（FGR-SIG-061）：接入口里有信号裸跑的未破解常规固件、且信号上的计次间隔已过——下一发计一次暴露。
+            info.RawGated = info.Uplinked && RawFirmwareService.ShouldArmCharge(state, p.RawFirmwareIds);
             CombatWeapon w = MachineWeaponFrom(p, info.ReactionSuppressed);
             info.WeaponIndex = WeaponIndex(w);
             _machineWeapons[logicId] = info;
@@ -464,8 +478,10 @@ namespace GameLogic.Campaign.Combat
                 w.Damage = FracturedCityLayout.CannonBaseDamage;
                 w.Cooldown = FracturedCityLayout.CannonCooldownSeconds;
                 w.AimSeconds = FracturedCityLayout.CannonAimSeconds;
-                w.HeatPerShot = FracturedCityLayout.CannonBaseHeatPerShot;
-                w.OverloadExtraHeat = FracturedCityLayout.OverloadExtraHeatPerShot;
+                // FG1-SIG-06（FGR-SIG-061）：信号裸跑未破解固件时积热 ×1.5（编译结果里的倍率，与双态预览的热量预算同一个数）。
+                float rawHeat = p.RawHeatMultiplier > 0f ? p.RawHeatMultiplier : 1f;
+                w.HeatPerShot = FracturedCityLayout.CannonBaseHeatPerShot * rawHeat;
+                w.OverloadExtraHeat = FracturedCityLayout.OverloadExtraHeatPerShot * rawHeat;
                 w.PierceBonus = FracturedCityLayout.OverloadArmorPierceBonus;
                 w.Reaction = !suppressReaction && p.ReactionId == MechanicalReactionCatalog.ReactionMeltOverloadId ? CombatReaction.MeltOverload : CombatReaction.None;
                 return w;
@@ -1019,6 +1035,15 @@ namespace GameLogic.Campaign.Combat
                     if (_unitMachine.TryGetValue(e.Unit, out int logicId))
                     {
                         Rules?.OnEngageRequest(this, logicId);
+                    }
+                    return;
+                }
+                case CombatEventKind.RawFirmwareFired:
+                {
+                    // FG1-SIG-06（FGR-SIG-061）：信号裸跑的未破解常规固件发动一次——暴露按它结算（不丢的玩法事件）。
+                    if (_unitMachine.TryGetValue(e.Unit, out int rawLogicId) && state != null)
+                    {
+                        RawFirmwareService.OnRawFired(state, rawLogicId);
                     }
                     return;
                 }

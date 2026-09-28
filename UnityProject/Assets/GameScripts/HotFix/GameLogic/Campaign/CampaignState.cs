@@ -118,6 +118,22 @@ namespace GameLogic.Campaign
         /// 存在的直接原因。新战役为空数组。</summary>
         public SignalExposureEventRecord[] SignalExposureEvents = Array.Empty<SignalExposureEventRecord>();
 
+        /// <summary>FG1-SIG-06：暴露来源规则版本。0 = Demo 规则（直控时长、重型机生产、首次异派固件计暴露）；1 = 正式版（FGR-SIG-070）。
+        /// 读档时 <see cref="CampaignExposureLedger.MigrateLegacy"/> 把 0 迁到 1（暴露值原样保留、旧明细补来源种类、直控累计停用）。</summary>
+        public int ExposureRulesVersion;
+
+        /// <summary>FG1-SIG-06：暴露明细的登记序号（单调递增，<see cref="SignalExposureEventRecord.Seq"/>）。</summary>
+        public int ExposureEventSeq;
+
+        /// <summary>FG1-SIG-06（FGU-44）：按（来源种类，阵营）累计的暴露增减——“各阵营贡献”读这里，明细截断不影响。唯一写入口 <see cref="CampaignExposureLedger"/>。</summary>
+        public SignalExposureTotalRecord[] SignalExposureTotals = Array.Empty<SignalExposureTotalRecord>();
+
+        /// <summary>FG1-SIG-06：高功率生产——本结算窗口已累计的游戏秒与暴露（按游戏时间，与观察无关；每满一个游戏小时记一笔来源）。</summary>
+        public double HighPowerElapsedSeconds;
+        public float HighPowerAccrued;
+        /// <summary>FG1-SIG-06：本结算窗口里的最高用电需求（来源名里显示“用电 N”）。</summary>
+        public float HighPowerPeakDemand;
+
         /// <summary>ER6-EXPOSE-01：家园信号塔"主动关闭广播"玩家开关（与断电/未修复的
         /// <see cref="BuildingConstructionState"/>/<see cref="BuildingPowerState"/> 是完全独立的另一维度——
         /// 塔本身可以是 Operational+Powered，玩家仍可以主动选择不广播换取暴露下降）。唯一写入口
@@ -128,10 +144,7 @@ namespace GameLogic.Campaign
         /// 为0并结算一笔暴露事件，唯一写入口 <see cref="CampaignExposureLedger.TickTowerBroadcastOff"/>。</summary>
         public float TowerBroadcastOffElapsedSeconds;
 
-        /// <summary>ER6-EXPOSE-01："一次远征中每累计30秒直控+5"的累计计时器——按区域/当前远征次数
-        /// 归零（见 <see cref="RegionRecord.DirectControlAccumulatedSeconds"/>），这里只是全局递增
-        /// 序号，为每次跨越30秒生成不重复的 eventId（"重复规则"不依赖这个序号本身的值，只依赖它
-        /// 单调递增，供 <see cref="CampaignExposureLedger.TickDirectControlExposure"/> 使用）。</summary>
+        /// <summary>ER6-EXPOSE-01 旧字段（Demo“远征直控每 30 秒 +5”的事件序号）。FG1-SIG-06 起直控不再计入暴露，只为旧档兼容保留、不再递增。</summary>
         public int DirectControlExposureGrantCount;
 
         /// <summary>ER6-EXPOSE-01：暴露30阈值"静默侦察提示"允许重复触发（降到阈值下再升高可再次
@@ -216,6 +229,8 @@ namespace GameLogic.Campaign
                 RegionQuestItems = Array.Empty<RegionQuestItemRecord>(),
                 AnalysisQueues = Array.Empty<AnalysisQueueItemRecord>(),
                 SignalExposureEvents = Array.Empty<SignalExposureEventRecord>(),
+                SignalExposureTotals = Array.Empty<SignalExposureTotalRecord>(),
+                ExposureRulesVersion = CampaignExposureLedger.CurrentRulesVersion,
                 SignalTowerBroadcastOff = false,
                 TowerBroadcastOffElapsedSeconds = 0f,
                 DirectControlExposureGrantCount = 0,
@@ -298,6 +313,8 @@ namespace GameLogic.Campaign
                 .OrderBy(r => r.QueueItemId, StringComparer.Ordinal).ToArray();
             SignalExposureEvents = (SignalExposureEvents ?? Array.Empty<SignalExposureEventRecord>())
                 .OrderBy(r => r.EventId, StringComparer.Ordinal).ToArray();
+            SignalExposureTotals = (SignalExposureTotals ?? Array.Empty<SignalExposureTotalRecord>())
+                .OrderBy(r => r.Kind, StringComparer.Ordinal).ThenBy(r => r.Faction, StringComparer.Ordinal).ToArray();
 
             // FG0-SAVE-01：新状态域不得为 null；区块差异与读档通知按稳定键排序。
             CampaignFgStateDomains.EnsureAll(this);

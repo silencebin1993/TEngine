@@ -292,6 +292,12 @@ namespace GameLogic.Campaign.Blueprint
                 ? GameText.Format("circuit.uplink.line.reaction", ReactionName(p.ReactionId))
                 : GameText.Get("circuit.uplink.line.reaction_none"));
             lines.Add(GameText.Format("circuit.uplink.line.firmware", Names(p.FirmwareIds)));
+            // FG1-SIG-06（FGR-SIG-060、061）：接入时裸跑的未破解固件单独一行，写明代价。
+            if (uplinked && p.RawFirmwareIds.Length > 0)
+            {
+                lines.Add(GameText.Format("circuit.uplink.line.raw", Names(p.RawFirmwareIds), RawFirmwareService.ExposurePerFire.ToString("0.#", CultureInfo.InvariantCulture),
+                    p.RawHeatMultiplier.ToString("0.#", CultureInfo.InvariantCulture)));
+            }
             return lines;
         }
 
@@ -355,6 +361,12 @@ namespace GameLogic.Campaign.Blueprint
             foreach (string inert in dual.Ai.InertCoreFirmwareIds)
             {
                 dual.Notes.Add(GameText.Format("circuit.uplink.note.core_inert", FirmwareName(inert)));
+            }
+            // FG1-SIG-06：未破解固件接入时照样生效，但有暴露与积热代价（破解后没有）。
+            foreach (string raw in dual.Uplinked.RawFirmwareIds)
+            {
+                dual.Notes.Add(GameText.Format("circuit.uplink.note.raw", FirmwareName(raw), RawFirmwareService.ExposurePerFire.ToString("0.#", CultureInfo.InvariantCulture),
+                    dual.Uplinked.RawHeatMultiplier.ToString("0.#", CultureInfo.InvariantCulture)));
             }
             if (!plan.HasUplink)
             {

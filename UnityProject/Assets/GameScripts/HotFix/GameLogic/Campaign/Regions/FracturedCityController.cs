@@ -294,15 +294,7 @@ namespace GameLogic.Campaign.Regions
             }
             if (!paused)
             {
-                if (_possessed != null)
-                {
-                    // ER6-EXPOSE-01："一次远征中每累计30秒直控+5"——只在真正接入且未暂停时累计（接入是玩家本帧的操作，世界锁 1x）。
-                    RegionRecord region = FracturedCityRegion.Find(state);
-                    if (region != null)
-                    {
-                        CampaignExposureLedger.TickDirectControlExposure(state, region, frameScaledDt);
-                    }
-                }
+                // FG1-SIG-06（FGR-SIG-070）：接入本身与接入时长不再计入暴露（Demo“远征直控每 30 秒 +5”已删除）。
                 // ER5-CTL-01：干扰宽限与受控机死亡回弹（在本帧全部模拟步之后，敌人本帧打死受控机能在同一帧被侦测到）。
                 Control.Tick(frameScaledDt);
             }

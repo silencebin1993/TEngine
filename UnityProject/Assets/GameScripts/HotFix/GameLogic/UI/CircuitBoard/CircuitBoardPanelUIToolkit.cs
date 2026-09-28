@@ -977,6 +977,13 @@ namespace GameLogic.UI.CircuitBoard
                 {
                     label = Localization.GameText.Format("signal.core.circuit_core_option", label);
                 }
+                // FG1-SIG-06 修复轮：同一判定 FirmwareKinds.CanInstall——未破解（解锁过滤后本来就不会列出）或没有机器电路实现的固件
+                // 照样列出但标明“暂时只能放进信号核”，选了会被拒绝并给原因。
+                else if (Campaign.Signal.FirmwareKinds.IsFirmware(def.Id)
+                         && !Campaign.Signal.FirmwareKinds.CanInstall(state, def.Id, Campaign.Signal.FirmwareHost.MachineCircuit, out _))
+                {
+                    label = Localization.GameText.Format("signal.core.circuit_signal_only_option", label + Campaign.Signal.FirmwareKinds.RawTagSuffix(state, def.Id));
+                }
                 choices.Add(label.Replace('/', '／'));
                 idsByIndex.Add(def.Id);
             }
@@ -1122,7 +1129,8 @@ namespace GameLogic.UI.CircuitBoard
             foreach (PrimitiveChipRecord item in PrimitiveInventory.BagItems(state))
             {
                 string source = string.IsNullOrEmpty(item.SourceSalvageId) ? "补印" : "解析";
-                bagChoices.Add($"{BlueprintCircuitChipCatalog.DisplayNameFor(item.CardDefId)}（{source} #{DropdownChoices.ShortId(item.PartId)}）");
+                // FG1-SIG-06（FGR-SIG-060）：未破解的敌方固件在每个列表里都带“▲未破解”标记，不只在信号核面板。
+                bagChoices.Add($"{BlueprintCircuitChipCatalog.DisplayNameFor(item.CardDefId)}{Campaign.Signal.FirmwareKinds.RawTagSuffix(state, item.CardDefId)}（{source} #{DropdownChoices.ShortId(item.PartId)}）");
                 _bagPartIdsByDropdownIndex.Add(item.PartId);
             }
             DropdownChoices.Apply(_bagChipDropdown, bagChoices, "仓内没有芯片");
@@ -1135,7 +1143,7 @@ namespace GameLogic.UI.CircuitBoard
             var pendingChoices = new List<string>();
             foreach (PrimitiveChipRecord item in pending)
             {
-                pendingChoices.Add($"{BlueprintCircuitChipCatalog.DisplayNameFor(item.CardDefId)} #{DropdownChoices.ShortId(item.PartId)}");
+                pendingChoices.Add($"{BlueprintCircuitChipCatalog.DisplayNameFor(item.CardDefId)}{Campaign.Signal.FirmwareKinds.RawTagSuffix(state, item.CardDefId)} #{DropdownChoices.ShortId(item.PartId)}");
                 _pendingPartIdsByDropdownIndex.Add(item.PartId);
             }
             DropdownChoices.Apply(_pendingChipDropdown, pendingChoices, "无");

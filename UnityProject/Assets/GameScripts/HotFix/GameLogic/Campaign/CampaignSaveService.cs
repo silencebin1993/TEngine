@@ -691,6 +691,17 @@ namespace GameLogic.Campaign
             {
                 TEngine.Log.Error($"[CampaignSaveService] 槽位 {slotIndex} 信号核一致性修复异常，原样保留：{e}");
             }
+            try
+            {
+                // FG1-SIG-06：旧档暴露来源按正式版规则迁移（暴露值原样保留、旧明细补来源种类、直控累计停用）；
+                // 旧档里已带回、还没发放的敌方加密固件补发到基元仓（幂等，不响提示）。
+                CampaignExposureLedger.MigrateLegacy(state);
+                Signal.RawFirmwareService.GrantRecovered(state, notify: false);
+            }
+            catch (Exception e)
+            {
+                TEngine.Log.Error($"[CampaignSaveService] 槽位 {slotIndex} 暴露规则迁移 / 加密固件补发异常，原样保留：{e}");
+            }
             if (envelope.SchemaVersion == chain.TargetVersion)
             {
                 MarkKnownGoodMain(mainPath); // 完整校验过的当前格式主档：之后的常规存档不必再整份校验它

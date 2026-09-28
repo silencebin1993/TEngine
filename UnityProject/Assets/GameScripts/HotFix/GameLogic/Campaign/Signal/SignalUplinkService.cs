@@ -940,6 +940,9 @@ namespace GameLogic.Campaign.Signal
             }
             s.SignalCore.CoreCooldowns = list.ToArray();
             CoreFiredCount++;
+            // FG1-SIG-06（FGR-SIG-070 / 061）：核心固件发动计暴露（+0.5）；这枚核心固件未破解（信号裸跑）时按裸跑计（+2）。
+            // 与冷却同一时刻、同一次冷却只计一次（冷却中的回声在上面已经返回）。
+            CampaignExposureLedger.GrantCoreFire(s, fw, FirmwareKinds.IsRaw(s, fw));
             Revision++;
             NotifyCooldownHolders(s, logicId);
             SetFeedback(GameText.Format("signal.uplink.core_fired", UplinkCompiler.FirmwareName(fw), cd.ToString("0.#", CultureInfo.InvariantCulture)));

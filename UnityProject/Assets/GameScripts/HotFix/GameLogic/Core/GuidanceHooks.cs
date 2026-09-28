@@ -42,6 +42,11 @@ namespace GameLogic.Core
         /// <summary>FG1-SIG-03：第一次接入一台机器（过渡完成、插入固件）。</summary>
         public const string SignalFirstUplink = "signal.uplink.first_commit";
 
+        /// <summary>FG1-SIG-06：第一次带回加密固件（FG13 引导表“第一次拿到加密固件 → 解析台、裸跑”；内容在 FG15-UX-04）。</summary>
+        public const string SignalFirstEncryptedFirmware = "signal.raw.first_encrypted";
+        /// <summary>FG1-SIG-06：第一次打开暴露面板（引导内容在 FG15-UX-04：暴露从哪来、怎么降）。</summary>
+        public const string ExposurePanelFirstOpen = "signal.exposure.first_open";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -53,6 +58,7 @@ namespace GameLogic.Core
             LogisticsFirstBelt, LogisticsFirstBlocked,
             SignalCoreFirstOpen, CircuitUplinkFirstSeen,
             SignalFirstUplink,
+            SignalFirstEncryptedFirmware, ExposurePanelFirstOpen,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

@@ -81,6 +81,19 @@ namespace GameLogic.UI.Kit
                 SignalCore.SignalCoreHudUIToolkit.Open();
             }
 
+            // FG1-SIG-06（FGU-44）：暴露面板开关（默认 Alt+P）。开着时是模态，同一个键再按一次关闭。
+            if (SignalCore.SignalCoreHudUIToolkit.IsExposureOpen)
+            {
+                if (!UiConfirmDialog.IsOpen && InputRouter.ConsumeGlobalAction(GameActionId.OpenExposure, allowDuringModal: true))
+                {
+                    SignalCore.SignalCoreHudUIToolkit.CloseExposure();
+                }
+            }
+            else if (InputRouter.ConsumeContextAction(GameActionId.OpenExposure))
+            {
+                SignalCore.SignalCoreHudUIToolkit.OpenExposure();
+            }
+
             if (InputRouter.ConsumeAction(GameActionId.SpeedHalf, InputScope.Strategy))
             {
                 StrategyClock.SetSpeed(0.5f);

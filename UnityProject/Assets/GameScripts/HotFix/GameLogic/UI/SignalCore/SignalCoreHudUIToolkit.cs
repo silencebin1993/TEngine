@@ -96,6 +96,40 @@ namespace GameLogic.UI.SignalCore
         private int _uiSerial;
         private int _hudKey;
         private int _panelKey;
+        /// <summary>FG1-SIG-06（FGU-44）：暴露面板与 HUD“暴露 N”按钮（同一个 UIDocument）。模态 / Esc 用自己的令牌，与信号核面板互不干扰。</summary>
+        private readonly ExposurePanelView _exposure = new ExposurePanelView(new object());
+        private static bool _exposureOpenRequested;
+
+        public ExposurePanelView Exposure => _exposure;
+        public static bool IsExposureOpen => Instance != null && Instance._exposure.IsOpen;
+
+        public static void ToggleExposure()
+        {
+            if (IsExposureOpen)
+            {
+                CloseExposure();
+            }
+            else
+            {
+                OpenExposure();
+            }
+        }
+
+        public static void OpenExposure()
+        {
+            if (Instance == null || !Instance._exposure.IsBound)
+            {
+                _exposureOpenRequested = true;
+                return;
+            }
+            Instance._exposure.SetOpen(true);
+        }
+
+        public static void CloseExposure()
+        {
+            _exposureOpenRequested = false;
+            Instance?._exposure.SetOpen(false);
+        }
 
         protected override string UxmlLocation => "SignalCorePanel";
         protected override int SortingOrder => Order;
@@ -140,6 +174,7 @@ namespace GameLogic.UI.SignalCore
             {
                 SetOpen(false);
             }
+            _exposure.OnDestroy();
             // FG1-SIG-03：接入过渡中 HUD 被销毁（卸载界面、回主菜单）时，别把“Esc 取消接入”这一层留在静态 Esc 栈里吃掉下一次 Esc。
             UiEscapeStack.Remove(UplinkEscToken);
             if (Instance == this)
@@ -187,6 +222,11 @@ namespace GameLogic.UI.SignalCore
             {
                 _openRequested = false;
                 SetOpen(true);
+            }
+            if (_exposureOpenRequested)
+            {
+                _exposureOpenRequested = false;
+                _exposure.SetOpen(true);
             }
         }
 
@@ -321,6 +361,7 @@ namespace GameLogic.UI.SignalCore
                 Body = GameText.Format("signal.hud.tip", InputDisplay.ForAction(GameActionId.OpenSignalCore)),
                 Shortcut = GameActionId.OpenSignalCore,
             });
+            _exposure.Bind(root, () => _exposure.SetOpen(!_exposure.IsOpen));
             _hudKey = 0;
             _panelKey = 0;
         }
@@ -382,6 +423,7 @@ namespace GameLogic.UI.SignalCore
             }
             SetVisible(_hudBar, s != null && (inWorld || IsOpen));
             RefreshUplinkStatus(s, inWorld);
+            _exposure.Refresh(s, inWorld);
             if (s == null)
             {
                 _hudKey = 0;
@@ -443,7 +485,10 @@ namespace GameLogic.UI.SignalCore
                 if (content.Length > 0)
                 {
                     FirmwareKind kind = FirmwareKinds.KindOf(content);
-                    body = FirmwareKinds.KindLabel(kind) + " " + (FirmwareKinds.DisplayName(content) ?? content);
+                    bool raw = FirmwareKinds.IsRaw(s, content);
+                    body = FirmwareKinds.KindLabel(kind) + " " + (FirmwareKinds.DisplayName(content) ?? content)
+                           + (raw ? "  " + GameText.Get("signal.core.raw_tag") : string.Empty);
+                    b.EnableInClassList("sc-item-raw", raw);
                     if (!open)
                     {
                         body += "\n" + GameText.Format("signal.core.slot_locked", SignalCoreService.TierForSlot(i));
@@ -454,6 +499,7 @@ namespace GameLogic.UI.SignalCore
                 {
                     body = open ? GameText.Get("signal.core.slot_empty") : GameText.Format("signal.core.slot_locked", SignalCoreService.TierForSlot(i));
                     b.EnableInClassList("sc-item-core", false);
+                    b.EnableInClassList("sc-item-raw", false);
                 }
                 b.text = GameText.Format("signal.core.slot_index", i + 1) + "  " + body;
                 b.EnableInClassList("sc-item-locked", !open);
@@ -485,9 +531,12 @@ namespace GameLogic.UI.SignalCore
                 PrimitiveChipRecord chip = _bagScratch[i];
                 FirmwareKind kind = FirmwareKinds.KindOf(chip.CardDefId);
                 string reserved = string.IsNullOrEmpty(chip.ReservedByTransactionId) ? string.Empty : "  " + GameText.Get("signal.core.reserved");
+                bool rawChip = FirmwareKinds.IsRaw(s, chip.CardDefId);
                 b.text = FirmwareKinds.KindLabel(kind) + " " + (FirmwareKinds.DisplayName(chip.CardDefId) ?? chip.CardDefId)
+                         + (rawChip ? "  " + GameText.Get("signal.core.raw_tag") : string.Empty)
                          + "  #" + ShortId(chip.PartId) + reserved;
                 b.EnableInClassList("sc-item-core", kind == FirmwareKind.Core);
+                b.EnableInClassList("sc-item-raw", rawChip);
                 b.EnableInClassList("sc-item-selected", chip.PartId == _selectedPartId);
             }
             SetVisible(_bagEmpty, _bagPartIds.Count == 0);
@@ -708,7 +757,7 @@ namespace GameLogic.UI.SignalCore
             {
                 Title = GameText.Format("signal.core.slot_index", index + 1),
                 Body = content.Length > 0
-                    ? (FirmwareKinds.DisplayName(content) ?? content) + "\n" + FirmwareKinds.KindTip(kind)
+                    ? (FirmwareKinds.DisplayName(content) ?? content) + "\n" + FirmwareKinds.KindTip(kind) + RawTip(s, content)
                     : SignalCoreService.IsSlotUnlocked(s, index)
                         ? GameText.Get("signal.core.hint")
                         : GameText.Format("signal.core.slot_locked", SignalCoreService.TierForSlot(index)),
@@ -725,9 +774,18 @@ namespace GameLogic.UI.SignalCore
             return new TooltipContent
             {
                 Title = FirmwareKinds.DisplayName(chip.CardDefId) ?? chip.CardDefId,
-                Body = FirmwareKinds.KindTip(FirmwareKinds.KindOf(chip.CardDefId)),
+                Body = FirmwareKinds.KindTip(FirmwareKinds.KindOf(chip.CardDefId)) + RawTip(CampaignSession.Current, chip.CardDefId),
             };
         }
+
+        /// <summary>FG1-SIG-06：未破解固件的悬停说明（裸跑代价与破解后的变化，数值读调参表）；已破解 / 己方固件为空。</summary>
+        public static string RawTip(CampaignState s, string contentId) =>
+            FirmwareKinds.IsRaw(s, contentId)
+                ? "\n" + GameText.Get("signal.core.raw_tip_title") + "：" + GameText.Format("signal.core.raw_tip",
+                    RawFirmwareService.ExposurePerFire.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture),
+                    RawFirmwareService.HeatMultiplier.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture),
+                    GameText.Get(FirmwareKinds.AfterCrackKey(contentId))) // 破解后能装到哪里按种类说（核心 / 无机器实现 / 可装机器），不给假承诺
+                : string.Empty;
 
         // ── 工具 ─────────────────────────────────────────────────────────────────
 

@@ -393,6 +393,28 @@ namespace GameLogic.Campaign
         public float AtPlaySeconds;
         /// <summary>本笔结算后的暴露值（钳制后），供 HUD 直接展示"当时到了多少"而不必重放全部历史。</summary>
         public float ResultingExposure;
+        /// <summary>FG1-SIG-06：来源种类（<see cref="ExposureSourceKind"/> 的常量）——暴露面板按它 + <see cref="Detail"/> 用当前语言显示来源名。
+        /// 旧档（规则改写前）为空，读档时由 <see cref="CampaignExposureLedger.MigrateLegacy"/> 按 <see cref="EventId"/> 前缀补上。</summary>
+        public string Kind;
+        /// <summary>FG1-SIG-06：来源细节（固件 ID、用电量等），显示时代入来源名。</summary>
+        public string Detail;
+        /// <summary>FG1-SIG-06：来源阵营键（reclaim / silent / foundry / none），暴露面板“各阵营贡献”按它汇总。</summary>
+        public string Faction;
+        /// <summary>FG1-SIG-06：登记序号（单调递增）——“最近的来源”按它倒序（同一游戏时刻的几笔也有确定顺序）。</summary>
+        public int Seq;
+    }
+
+    /// <summary>FG1-SIG-06（FGU-44“各阵营贡献”）：按（来源种类，阵营）累计的暴露增减——明细只保留最近若干条，汇总不随明细截断丢失。</summary>
+    [Serializable]
+    public sealed class SignalExposureTotalRecord
+    {
+        public string Kind;
+        public string Faction;
+        /// <summary>累计增加（正数部分）。</summary>
+        public float Added;
+        /// <summary>累计降低（负数部分的绝对值）。</summary>
+        public float Removed;
+        public int Count;
     }
 
     /// <summary>ERD-WRK-001 WorkOrder。</summary>
@@ -484,9 +506,8 @@ namespace GameLogic.Campaign
         public float CoreLockoutWarnAtPlaySeconds;
         public bool CoreLockoutActive;
 
-        /// <summary>ER6-EXPOSE-01："一次远征中每累计30秒直控+5"——按本区域当次远征累计直控秒数，
-        /// 在 <see cref="Regions.ExpeditionDepartureService.TryDepart"/> 每次真正出发时清零（"一次
-        /// 远征"的边界），唯一写入口 <see cref="CampaignExposureLedger.TickDirectControlExposure"/>。</summary>
+        /// <summary>ER6-EXPOSE-01 旧字段（Demo“一次远征中每累计30秒直控+5”）。FG1-SIG-06 起接入时长不再计入暴露：
+        /// 不再累计，出发与旧档迁移（<see cref="CampaignExposureLedger.MigrateLegacy"/>）时清零；只为旧档兼容保留。</summary>
         public float DirectControlAccumulatedSeconds;
         /// <summary>ER5-SILENT-01：静默侦察机在玩家机器身上留下的检测标记，唯一写入口
         /// <see cref="Regions.FracturedCityRegion.TryMarkMachine"/>/<see cref="Regions.FracturedCityRegion.TryClearMark"/>。

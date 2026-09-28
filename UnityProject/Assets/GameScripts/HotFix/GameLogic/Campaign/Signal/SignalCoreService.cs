@@ -163,6 +163,8 @@ namespace GameLogic.Campaign.Signal
             CampaignFgStateDomains.EnsureAll(s);
             EnsureConsistent(s);
             EnsureSlotArray(s);
+            // FG1-SIG-06：进入家园时补发已带回、还没发放的敌方加密固件（幂等，不响提示；正常情况下撤离结算时已经发过）。
+            RawFirmwareService.GrantRecovered(s, notify: false);
         }
 
         /// <summary>读档后 / 进入家园时修复信号核与实例账的一致性，返回修复条数（0 = 本来就一致）。

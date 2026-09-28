@@ -649,9 +649,11 @@ namespace GameLogic.Campaign.Regions
                 if (regionAfter != null)
                 {
                     regionAfter.ExpeditionCount += 1;
-                    // ER6-EXPOSE-01："一次远征中每累计30秒直控"——"一次远征"的边界就是这里，新的
-                    // 出发必须从0开始累计，不带着上一次远征剩下的零头。
+                    // FG1-SIG-06：直控时长不再计入暴露（字段只为旧档兼容保留，恒 0）。
                     regionAfter.DirectControlAccumulatedSeconds = 0f;
+                    // FG1-SIG-06（FGR-SIG-070，FG16“使用异派技术：每次远征 +2”）：远征队里有机器装着跨阵营蓝图时记一笔，
+                    // 同一次远征（地点 + 第几次出发）只记一次。
+                    CampaignExposureLedger.GrantAlienTechForExpedition(state, manifest, regionAfter.RegionId, regionAfter.ExpeditionCount);
                 }
 
                 // ── 控制恢复：新区域固定以战略视角开场、无遗留直控目标（见

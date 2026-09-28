@@ -231,6 +231,12 @@ namespace GameLogic.Campaign.Blueprint
                 {
                     return CircuitOpResult.Fail("firmware_unknown", $"'{firmwareId}' 不是已知固件。");
                 }
+                // FG1-SIG-06（FGR-SIG-060）：未破解的敌方固件给专门原因（只能由信号裸跑 / 送解析台破解），不当普通“尚未解锁”。
+                if (Signal.FirmwareKinds.IsRaw(state, firmwareId))
+                {
+                    return CircuitOpResult.Fail(BlueprintCircuitBoard.RawSignalOnlyCode,
+                        Localization.GameText.Format("signal.reason.raw_in_circuit", Signal.FirmwareKinds.DisplayName(firmwareId) ?? firmwareId));
+                }
                 if (!MechanicalContentUnlock.IsUnlocked(state, firmwareId))
                 {
                     return CircuitOpResult.Fail("firmware_locked", $"固件“{fwDef.DisplayName}”尚未解锁。");
@@ -339,13 +345,8 @@ namespace GameLogic.Campaign.Blueprint
                 }).ToArray();
             }
 
-            // ER6-EXPOSE-01："首次使用异派固件 +10"——"异派"＝跨派系组合，board.ComputeFactionTags()
-            // 已经是"跨派系"的唯一权威判定（Length>=2，见该方法类注释），不重新发明第二套判据。
-            // 按 blueprintId+version 记账：同一蓝图的每个版本号只会被保存一次，天然满足"首次"语义。
-            if (board.ComputeFactionTags().Length >= 2)
-            {
-                CampaignExposureLedger.GrantCrossFactionFirmwareFirstUse(state, record.BlueprintId, nextVersion);
-            }
+            // FG1-SIG-06（FGR-SIG-070）：Demo 的“首次保存跨派系蓝图 +10”不再计入——“使用异派技术”改为出发时按远征队计
+            // （CampaignExposureLedger.GrantAlienTechForExpedition，每次远征 +2，FG16 初值）。保存蓝图本身不产生暴露。
 
             // ER6-LOOP-01：蓝图保存是 OBJ-06/08"蓝图保存"子条件的唯一真实写入口，保存成功后立即重算，
             // 不必等玩家回到家园下一帧或下一次远征触发才反映。

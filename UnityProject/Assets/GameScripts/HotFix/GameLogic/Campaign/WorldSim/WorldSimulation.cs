@@ -418,6 +418,8 @@ namespace GameLogic.Campaign.WorldSim
                 BeltNetworkService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                 // FG1-SIG-03：核心固件冷却（信号侧，按游戏时间）到期——与观察无关，O(信号核槽位数)。
                 Signal.SignalUplinkService.SimStep(state);
+                // FG1-SIG-06：常规裸跑固件的计次间隔到期（信号侧，按游戏时间，与观察无关），O(1)。
+                Signal.RawFirmwareService.SimStep(state);
                 // FG1-SIG-04：安全模式退出判定（按游戏时间每 0.5 秒，与观察无关），O(安全模式机器数)。
                 Signal.SignalLinkService.SimStep(state);
                 stepped = true;

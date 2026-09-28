@@ -181,6 +181,10 @@ namespace GameLogic.EditorTools
                 // 玩家接入触发熔穿过载与标记跳转、正式表冷却（FGT-SIG-010）、交还 AI 时正处在过载（过热 / 瞄准中 / 刚发动）、Demo 内容迁移（研究费、OBJ-06/08、
                 // 核心门三灯、敌方适应）与可通关（AI 编队不靠熔穿过载打掉护甲机）、暂停倍速、真实文件存读档、观察无关、性能、文本键。
                 _fail += FgCoreFirmwareBoundarySelfCheck.Run(Report);
+                // FG1-SIG-06：裸跑敌方固件与暴露改写——宿主规则（FGT-SIG-003：未破解只进信号核，机器 / 炮塔 / 保存 / 刻印拒绝）、带回即得未破解固件、
+                // 裸跑代价（FGT-SIG-008：积热 ×1.5、每次发动 +2、计次间隔；核心裸跑按 +2）、破解时正插在信号核里（自动更新、冷却不重置）、
+                // 暴露改写（接入不计、各来源、异派、节点、塔关、高功率、阈值、截断）、旧档迁移与真实文件存读档、暂停倍速、后台一致、性能、界面与布局探针。
+                _fail += FgRawFirmwareExposureSelfCheck.Run(Report);
             }
             catch (Exception e)
             {

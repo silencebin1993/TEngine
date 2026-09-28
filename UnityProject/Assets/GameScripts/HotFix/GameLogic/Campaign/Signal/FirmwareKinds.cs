@@ -18,6 +18,17 @@ namespace GameLogic.Campaign.Signal
         Core = 2,
     }
 
+    /// <summary>FG1-SIG-06（FGT-SIG-003）：固件能装进去的宿主。</summary>
+    public enum FirmwareHost : byte
+    {
+        /// <summary>信号核（接入时插在接入口）。</summary>
+        SignalCore = 0,
+        /// <summary>机器电路（蓝图固件槽 / 3×3 电路格 / 保存校验）。</summary>
+        MachineCircuit = 1,
+        /// <summary>炮塔（FG6-DEF-02 做炮塔固件槽时调 <see cref="FirmwareKinds.CanInstall"/>）。</summary>
+        Turret = 2,
+    }
+
     /// <summary>
     /// FG1-SIG-01：固件种类的唯一真相——fg.TbFirmwareKind（数据源 tools/cell_tables/fgdata_signal.py）。
     /// 机器电路的两个入口（蓝图固件槽 <see cref="Blueprint.BlueprintCircuitBoard.TrySetFirmware"/>、3×3 电路格
@@ -83,6 +94,143 @@ namespace GameLogic.Campaign.Signal
         }
 
         public static bool IsCore(string contentId) => KindOf(contentId) == FirmwareKind.Core;
+
+        // ── FG1-SIG-06：协议、来源阵营、未破解（裸跑）──────────────────────────────────
+
+        /// <summary>来源阵营键（fg.TbFirmwareKind faction：reclaim / silent / foundry）。不是固件或表里没有时为 reclaim。</summary>
+        public const string FactionReclaim = "reclaim";
+
+        /// <summary>FGR-FW-001“协议：敌方加密”——解析台破解前只能由信号裸跑（FGR-SIG-060）。不是固件时 false。</summary>
+        public static bool IsEnemyProtocol(string contentId)
+        {
+            if (!IsFirmware(contentId))
+            {
+                return false;
+            }
+            if (_protocolOverride != null)
+            {
+                return _protocolOverride.Contains(contentId);
+            }
+            EnsureLoaded();
+            return _table != null && _table.DataMap.TryGetValue(contentId, out GameConfig.fg.FirmwareKind row) && row != null && row.Protocol == "enemy";
+        }
+
+        /// <summary>来源阵营键（暴露面板“各阵营贡献”、异派技术判定）。</summary>
+        public static string FactionOf(string contentId)
+        {
+            EnsureLoaded();
+            return _table != null && !string.IsNullOrEmpty(contentId) && _table.DataMap.TryGetValue(contentId, out GameConfig.fg.FirmwareKind row)
+                   && row != null && !string.IsNullOrEmpty(row.Faction)
+                ? row.Faction
+                : FactionReclaim;
+        }
+
+        /// <summary>
+        /// FGR-SIG-060：这枚固件在 <paramref name="state"/> 这个战役里是不是“未破解”——敌方加密协议、且解析台还没破解（内容没解锁）。
+        /// 破解是按内容记的（<see cref="CampaignState.UnlockedContentIds"/>，解析台完成时写入）：同一种固件的所有实例一起去掉标记，
+        /// 已经装在信号核里的那件自动更新（FGR-SIG-062），冷却不受影响（冷却按固件种类记在信号上）。
+        /// </summary>
+        public static bool IsRaw(CampaignState state, string contentId) =>
+            IsEnemyProtocol(contentId) && !MechanicalContentUnlock.IsUnlocked(state, contentId);
+
+        /// <summary>按当前战役（<see cref="CampaignSession.Current"/>）判定未破解——编译器等不带战役参数的纯计算用它（与接入结算同一个战役）。</summary>
+        public static bool IsRaw(string contentId) => IsRaw(CampaignSession.Current, contentId);
+
+        /// <summary>从 <paramref name="firmwareIds"/> 里挑出未破解的（顺序不变）。</summary>
+        public static string[] RawOf(CampaignState state, IEnumerable<string> firmwareIds)
+        {
+            if (firmwareIds == null)
+            {
+                return Array.Empty<string>();
+            }
+            var list = new List<string>(1);
+            foreach (string id in firmwareIds)
+            {
+                if (!string.IsNullOrEmpty(id) && IsRaw(state, id))
+                {
+                    list.Add(id);
+                }
+            }
+            return list.ToArray();
+        }
+
+        /// <summary>
+        /// FGR-SIG-012 / 060、FGT-SIG-003：某枚固件能不能装进 <paramref name="host"/>。唯一判定——信号核、机器电路、炮塔的入口都问这里。
+        /// 信号核：任何固件都行（核心、常规、未破解）；机器电路：只有已破解、且有机器电路可编译实现的常规固件；炮塔：同机器电路（核心固件只属于信号，未破解的只能裸跑）。
+        /// 失败时 <paramref name="reasonKey"/> 是文本键（带一个参数：固件名）。
+        /// </summary>
+        public static bool CanInstall(CampaignState state, string contentId, FirmwareHost host, out string reasonKey)
+        {
+            reasonKey = null;
+            if (!IsFirmware(contentId))
+            {
+                reasonKey = "signal.reason.not_firmware_host";
+                return false;
+            }
+            if (host == FirmwareHost.SignalCore)
+            {
+                return true;
+            }
+            if (IsCore(contentId))
+            {
+                reasonKey = host == FirmwareHost.Turret ? "signal.reason.core_turret" : "signal.reason.core_signal_only";
+                return false;
+            }
+            if (IsRaw(state, contentId))
+            {
+                reasonKey = host == FirmwareHost.Turret ? "signal.reason.raw_turret" : "signal.reason.raw_signal_only";
+                return false;
+            }
+            // FG1-SIG-06 修复轮：机器电路 / 炮塔要能把固件编译成真实效果；没有可编译实现的（装甲击穿，DEBT-FG1SIG06-07 → FG2-FW-01）
+            // 破解后也只能放进信号核——判定与 BlueprintCircuitBoard.TrySetFirmware 一致，不给“能装”的假承诺。
+            if (!HasMachineImplementation(contentId))
+            {
+                reasonKey = "signal.reason.no_machine_impl";
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>这枚固件有没有机器电路可编译的实现（FirmwareCatalog 条目带 gene 等价实现 LegacyFacadeId）。核心固件、不是固件时 false。</summary>
+        public static bool HasMachineImplementation(string contentId) =>
+            !IsCore(contentId) && FirmwareCatalog.TryGet(contentId, out MechanicalContentDef def) && !string.IsNullOrEmpty(def.LegacyFacadeId);
+
+        /// <summary>稳定原因码（<c>CircuitOpResult.Code</c>）：由 <see cref="CanInstall"/> 的文本键映射，调用方按码分支时不会把“不是固件”误判成“未破解”。</summary>
+        public static string InstallFailureCode(string reasonKey)
+        {
+            switch (reasonKey)
+            {
+                case "signal.reason.not_firmware_host": return "firmware_unknown";
+                case "signal.reason.raw_signal_only":
+                case "signal.reason.raw_turret": return "raw_signal_only";
+                case "signal.reason.core_signal_only":
+                case "signal.reason.core_turret": return "core_signal_only";
+                case "signal.reason.no_machine_impl": return "firmware_no_machine_impl";
+                default: return "firmware_rejected";
+            }
+        }
+
+        /// <summary>破解后这枚固件能装到哪里（文本键，按种类区分，FGR-SIG-012 / 062）：核心 → 仍只属于信号；没有机器实现 → 仍只能进信号核；否则可刻印、可装机器。</summary>
+        public static string AfterCrackKey(string contentId) =>
+            IsCore(contentId) ? "signal.raw.after_crack.core"
+            : HasMachineImplementation(contentId) ? "signal.raw.after_crack.machine"
+            : "signal.raw.after_crack.signal_only";
+
+        /// <summary>FGR-SIG-060：列表 / 下拉项里跟在名字后面的“ ▲未破解”标记（形状 + 文字）；已破解、己方固件、不是固件时为空串。</summary>
+        public static string RawTagSuffix(CampaignState state, string contentId) =>
+            IsRaw(state, contentId) ? " " + GameText.Get("signal.core.raw_tag") : string.Empty;
+
+        /// <summary>破解状态变了（解析台完成一件敌方固件）：界面按 <see cref="Revision"/> 刷新“未破解”标记。</summary>
+        public static void NotifyCrackStateChanged() => Revision++;
+
+        /// <summary>测试注入：只把列出的固件当“敌方加密协议”（其余己方）。用完 <see cref="ResetForTests"/>。</summary>
+        public static void OverrideProtocolForTests(IEnumerable<string> enemyProtocolIds)
+        {
+            _protocolOverride = enemyProtocolIds == null ? null : new HashSet<string>(enemyProtocolIds, StringComparer.Ordinal);
+            Revision++;
+        }
+
+        private static HashSet<string> _protocolOverride;
 
         /// <summary>
         /// FG1-SIG-05（FGR-SIG-090）：AI 永远不使用核心固件。机器电路自己的固件里，只有这里返回 true 的才参与 AI 驾驶时的编译
@@ -214,6 +362,7 @@ namespace GameLogic.Campaign.Signal
         public static void ResetForTests()
         {
             _override = null;
+            _protocolOverride = null;
             Reload();
         }
 

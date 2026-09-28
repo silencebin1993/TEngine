@@ -44,6 +44,10 @@ namespace GameLogic.Campaign.Blueprint
         UnknownOrIllegalChip,
         /// <summary>FG1-SIG-01（FGR-SIG-012）：机器电路里装了核心固件——核心固件只能由信号携带。</summary>
         FirmwareCoreSignalOnly,
+        /// <summary>FG1-SIG-06（FGR-SIG-060）：机器电路里装了未破解的敌方固件——破解前只能由信号裸跑。</summary>
+        FirmwareRawSignalOnly,
+        /// <summary>FG1-SIG-06 修复轮：机器电路里装了没有机器电路实现的固件（破解后的装甲击穿，DEBT-FG1SIG06-07）——只能放进信号核。</summary>
+        FirmwareNoMachineImpl,
     }
 
     public sealed class CircuitIssue
@@ -76,6 +80,12 @@ namespace GameLogic.Campaign.Blueprint
     {
         /// <summary>FG1-SIG-01：核心固件被拒绝放进机器电路时的原因码（文本 signal.reason.core_signal_only）。</summary>
         public const string CoreSignalOnlyCode = "core_signal_only";
+
+        /// <summary>FG1-SIG-06：未破解的敌方固件被拒绝放进机器电路时的原因码（文本 signal.reason.raw_signal_only）。</summary>
+        public const string RawSignalOnlyCode = "raw_signal_only";
+
+        /// <summary>FG1-SIG-06 修复轮：没有机器电路可编译实现的固件（破解后的装甲击穿）被固件槽拒绝时的原因码（文本 signal.reason.no_machine_impl）。</summary>
+        public const string NoMachineImplCode = "firmware_no_machine_impl";
 
         public string ChassisId;
         public string PrimaryId;
@@ -402,6 +412,11 @@ namespace GameLogic.Campaign.Blueprint
             {
                 return CircuitOpResult.Fail(CoreSignalOnlyCode, GameText.Get("signal.reason.core_signal_only"));
             }
+            // FG1-SIG-06（FGR-SIG-060）：未破解的敌方固件给专门原因（只能由信号裸跑），不当普通“固件不是芯片”。
+            if (kind == FirmwareKind.Regular && FirmwareKinds.IsRaw(CampaignSession.Current, contentId))
+            {
+                return CircuitOpResult.Fail(RawSignalOnlyCode, GameText.Format("signal.reason.raw_signal_only", FirmwareKinds.DisplayName(contentId) ?? contentId));
+            }
             if (kind == FirmwareKind.Regular)
             {
                 return CircuitOpResult.Fail("illegal_chip", GameText.Get("signal.reason.firmware_not_chip"));
@@ -613,9 +628,15 @@ namespace GameLogic.Campaign.Blueprint
             {
                 return CircuitOpResult.Fail(CoreSignalOnlyCode, GameText.Get("signal.reason.core_signal_only"));
             }
-            if (!FirmwareCatalog.TryGet(firmwareId, out MechanicalContentDef def) || def.LegacyFacadeId == null)
+            // FG1-SIG-06（FGR-SIG-060、FGT-SIG-003）：未破解的敌方固件、没有机器电路实现的固件放不进机器电路——同一判定 FirmwareKinds.CanInstall
+            // （信号核 / 机器 / 炮塔）；原因码按失败原因映射（不是固件 → firmware_unknown，未破解 → raw_signal_only，无机器实现 → firmware_no_machine_impl）。
+            if (!FirmwareKinds.CanInstall(state, firmwareId, FirmwareHost.MachineCircuit, out string reasonKey))
             {
-                return CircuitOpResult.Fail("firmware_unknown", $"'{firmwareId}' 不是已知固件或无可编译等价实现。");
+                return CircuitOpResult.Fail(FirmwareKinds.InstallFailureCode(reasonKey), GameText.Format(reasonKey, FirmwareKinds.DisplayName(firmwareId) ?? firmwareId));
+            }
+            if (!FirmwareCatalog.TryGet(firmwareId, out MechanicalContentDef def))
+            {
+                return CircuitOpResult.Fail("firmware_unknown", $"'{firmwareId}' 不是已知固件。");
             }
             if (!MechanicalContentUnlock.IsUnlocked(state, firmwareId))
             {
@@ -796,6 +817,18 @@ namespace GameLogic.Campaign.Blueprint
                 {
                     result.Add(CircuitIssueCode.FirmwareCoreSignalOnly,
                         GameText.Format("signal.reason.core_in_circuit", FirmwareKinds.DisplayName(FirmwareSlots[i]) ?? FirmwareSlots[i]));
+                }
+                // FG1-SIG-06（FGR-SIG-060）：保存校验兜底——未破解的敌方固件（例如旧草稿）不能保存进机器电路。
+                else if (!string.IsNullOrEmpty(FirmwareSlots[i]) && FirmwareKinds.IsRaw(FirmwareSlots[i]))
+                {
+                    result.Add(CircuitIssueCode.FirmwareRawSignalOnly,
+                        GameText.Format("signal.reason.raw_in_circuit", FirmwareKinds.DisplayName(FirmwareSlots[i]) ?? FirmwareSlots[i]));
+                }
+                // FG1-SIG-06 修复轮：与固件槽入口同一判定（FirmwareKinds.CanInstall）——没有机器电路实现的固件（旧草稿）也不能保存进机器电路。
+                else if (!string.IsNullOrEmpty(FirmwareSlots[i]) && FirmwareKinds.IsFirmware(FirmwareSlots[i]) && !FirmwareKinds.HasMachineImplementation(FirmwareSlots[i]))
+                {
+                    result.Add(CircuitIssueCode.FirmwareNoMachineImpl,
+                        GameText.Format("signal.reason.no_machine_impl", FirmwareKinds.DisplayName(FirmwareSlots[i]) ?? FirmwareSlots[i]));
                 }
             }
 

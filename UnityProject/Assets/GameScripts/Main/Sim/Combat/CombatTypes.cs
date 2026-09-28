@@ -123,6 +123,12 @@ namespace BinGames.Sim.Combat
         /// <summary>FG1-SIG-03：门控反应已经发动、正等热更层按信号上的冷却重新下发武器参数；期间反应不发动（熔穿过载不额外积热、不穿甲；标记跳转不跳）。
         /// 热更层下发不带门控反应的武器参数时（冷却中压住的行、离开后的本地配置）清掉。</summary>
         ReactionSpent = 1 << 17,
+        /// <summary>FG1-SIG-06（FGR-SIG-061）：这台单位接入口里插着信号裸跑的未破解常规固件，且信号上的裸跑计次间隔已过——下一次开火算一次“发动”：
+        /// 内核当场置 <see cref="RawSpent"/> 并发不丢的玩法事件 <see cref="CombatEventKind.RawFirmwareFired"/>（暴露按它结算）。热更层按接入结算写。</summary>
+        RawGated = 1 << 18,
+        /// <summary>FG1-SIG-06：裸跑已计过一次、正等热更层按计次间隔重新下发（期间开火照常、固件照常生效，只是不再重复计暴露）。
+        /// 热更层下发不带 <see cref="RawGated"/> 的参数时清掉。</summary>
+        RawSpent = 1 << 19,
     }
 
     /// <summary>己方机器的命令。与 Demo RegionSquadCommandSystem / HomeValleyMachineMarker 的语义逐条一致。</summary>
@@ -221,6 +227,9 @@ namespace BinGames.Sim.Combat
         /// Code=<see cref="CombatReaction"/>，Code2=1 表示发动时这台单位带 <see cref="CombatUnitFlags.ReactionGated"/>（信号带进来的核心固件）。
         /// 核心固件冷却、暴露都按它结算，所以走玩法事件（不丢）；同名的提示事件（<see cref="MeltOverload"/> / <see cref="MarkJump"/>）只管反馈，超出上限可以丢。</summary>
         ReactionFired = 16,
+        /// <summary>FG1-SIG-06（FGR-SIG-061）：带 <see cref="CombatUnitFlags.RawGated"/> 的单位开火了——信号裸跑的未破解固件“发动”一次（暴露按它结算，走玩法事件，不丢）。
+        /// Unit=攻击者，Other=目标。</summary>
+        RawFirmwareFired = 17,
 
         // ── 提示事件（有上限，可丢弃）──
         /// <summary>己方普通武器开火（Unit=攻击者，Other=目标）。</summary>

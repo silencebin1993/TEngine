@@ -178,6 +178,8 @@ namespace GameLogic.EditorTools
                     case 152: StepSignalEquipped(inStep); break;
                     case 153: StepSignalPresetSaved(inStep); break;
                     case 154: StepSignalClosed(inStep); break;
+                    case 196: StepExposureOpened(inStep); break;
+                    case 197: StepExposureClosed(inStep); break;
                     case 161: StepUplinkEditorOpened(inStep); break;
                     case 162: StepUplinkSlotPicked(inStep); break;
                     case 163: StepUplinkMarked(inStep); break;
@@ -1371,6 +1373,42 @@ namespace GameLogic.EditorTools
             UI.SignalCore.SignalCoreHudUIToolkit hud = UI.SignalCore.SignalCoreHudUIToolkit.Instance;
             Check(!UI.SignalCore.SignalCoreHudUIToolkit.IsOpen && hud != null && !hud.PanelVisible && !InputRouter.IsModalOwner(hud) && !PauseMenuUIToolkit.IsOpen,
                 "再按 P 关闭信号核面板（模态释放、暂停菜单没开）");
+            Check(hud != null && hud.Exposure.EntryText.StartsWith(Localization.GameText.Get("exposure.hud.button").Split('{')[0], StringComparison.Ordinal),
+                $"HUD 常驻暴露值“{hud?.Exposure.EntryText}”（FGU-44 入口）");
+            PressChord(GameSettings.KeyBindings.GetChord(GameActionId.OpenExposure));
+            Next(196, "FG1-SIG-06：按暴露面板键（默认 Alt+P）打开暴露面板");
+        }
+
+        // ── FG1-SIG-06：暴露面板（Alt+P 打开、来源与规则说明、点 HUD 按钮关闭）──────────────────
+
+        private static void StepExposureOpened(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            UI.SignalCore.SignalCoreHudUIToolkit hud = UI.SignalCore.SignalCoreHudUIToolkit.Instance;
+            UI.SignalCore.ExposurePanelView ex = hud?.Exposure;
+            CampaignState st = CampaignSession.Current;
+            Check(ex != null && ex.IsOpen && ex.PanelVisible && !UI.SignalCore.SignalCoreHudUIToolkit.IsOpen && !PauseMenuUIToolkit.IsOpen,
+                "按 Alt+P 打开暴露面板（信号核面板没被误开、暂停菜单没开）");
+            Check(ex != null && ex.RulesText.Contains(Localization.GameText.Get("exposure.panel.rules").Split('（')[0]) && ex.NextText.Length > 0
+                  && (ex.RecentCount > 0 || ex.RecentEmptyVisible) && ex.RecentCount == Math.Min(UI.SignalCore.ExposurePanelView.RecentShown, st.SignalExposureEvents.Length),
+                $"暴露面板：“{ex?.ValueText}”“{ex?.NextText}”；最近来源 {ex?.RecentCount} 条（存档里 {st.SignalExposureEvents.Length} 条）；规则说明“{ex?.RulesText}”");
+            CheckNoTextMarkers("暴露面板");
+            Check(ClickUitk("[SignalCoreHost]", "SignalExposureEntry"), "再点 HUD 上的“暴露”按钮");
+            Next(197, "再点 HUD“暴露”按钮关闭面板");
+        }
+
+        private static void StepExposureClosed(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            UI.SignalCore.SignalCoreHudUIToolkit hud = UI.SignalCore.SignalCoreHudUIToolkit.Instance;
+            Check(hud != null && !hud.Exposure.IsOpen && !hud.Exposure.PanelVisible && !PauseMenuUIToolkit.IsOpen,
+                "点 HUD“暴露”按钮关闭暴露面板（模态释放）");
             Check(ClickUitk("[HomeValleyCircuitBoardHost]", "EntryToggleButton"), "点“蓝图编辑器”入口");
             Next(161, "FG1-SIG-02：再打开蓝图编辑器（FGJ-M1 第 1 步：标出接入口，看双态预览）");
         }

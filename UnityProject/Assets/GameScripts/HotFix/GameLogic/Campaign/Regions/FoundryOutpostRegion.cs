@@ -696,6 +696,8 @@ namespace GameLogic.Campaign.Regions
                 }
             }
             region.LostQuestSalvageIds = lost.ToArray();
+            // FG1-SIG-06（FGR-SIG-060）：带回的敌方加密固件变成一枚未破解固件芯片（可以放进信号核裸跑；数据盒照旧送解析台破解）。
+            Signal.RawFirmwareService.GrantRecovered(state);
 
             bool cannonRecovered = state.RegionQuestItems.Any(q =>
                 q.ContentId == FoundryOutpostLayout.CannonModuleContentId && q.State == RegionQuestItemState.Recovered);

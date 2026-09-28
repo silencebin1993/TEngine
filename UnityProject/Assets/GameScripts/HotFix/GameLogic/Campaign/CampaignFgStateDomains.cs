@@ -396,6 +396,10 @@ namespace GameLogic.Campaign
 
         /// <summary>因断链（干扰 / 走出覆盖 / 静默夜）失去信号、处于安全模式的机器（按 LogicId 升序）。唯一写入口 <c>SignalLinkService</c>。</summary>
         public SignalSafeModeRecord[] SafeModes = Array.Empty<SignalSafeModeRecord>();
+
+        /// <summary>FG1-SIG-06（FGR-SIG-061）：常规裸跑固件下一次“发动”能计暴露的游戏时刻（0 = 随时）。记在信号上：跳到别的机器不重置（防刷）。
+        /// 只加字段不升域版本（旧档读成 0）。唯一写入口 <see cref="Signal.RawFirmwareService"/>。</summary>
+        public double RawChargeReadyAtGameSeconds;
     }
 
     /// <summary>FG1-SIG-04：一台处于安全模式的机器（只运行本地常规固件，接入口为空，继续执行最后一条命令或 AI 教义）。</summary>

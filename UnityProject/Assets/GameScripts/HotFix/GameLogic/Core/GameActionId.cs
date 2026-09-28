@@ -1,4 +1,4 @@
-namespace GameLogic.Core
+﻿namespace GameLogic.Core
 {
     /// <summary>
     /// ER2-INPUT-01：统一输入域表的逻辑动作 ID。ERD 要求的物理键（WASD/方向键、左右键、E、
@@ -105,5 +105,7 @@ namespace GameLogic.Core
         CycleWorldFocus = 95,
         /// <summary>FG1-SIG-01（FGU-19）：打开 / 关闭信号核面板（战略与接入上下文，默认 P）。</summary>
         OpenSignalCore = 96,
+        /// <summary>FG1-SIG-06（FGU-44）：打开 / 关闭暴露面板（战略与接入上下文，默认 Alt+P）。</summary>
+        OpenExposure = 97,
     }
 }

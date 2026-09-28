@@ -527,6 +527,37 @@ namespace GameLogic.Campaign.Primitive
             state.EventLedger = state.EventLedger.Append(entry).ToArray();
         }
 
+        /// <summary>
+        /// FG1-SIG-06（FGR-SIG-060，FG05“加密固件解析后不被消耗”）：带回的敌方加密固件变成一枚固件芯片（未破解，只能放进信号核裸跑）。
+        /// 同一 <paramref name="salvageInstanceId"/> 只生成一次（幂等：读档补发、重复结算都安全）；仓满进待领取，不静默丢件。
+        /// 返回新实例的 PartId；已经发过返回 null。
+        /// </summary>
+        public static string TryGrantEncryptedFirmware(CampaignState state, string salvageInstanceId, string firmwareId, out bool pending)
+        {
+            pending = false;
+            if (state == null || string.IsNullOrEmpty(salvageInstanceId) || string.IsNullOrEmpty(firmwareId))
+            {
+                return null;
+            }
+            state.PrimitiveChips ??= Array.Empty<PrimitiveChipRecord>();
+            if (state.PrimitiveChips.Any(p => p.SourceSalvageId == salvageInstanceId))
+            {
+                return null;
+            }
+            var record = new PrimitiveChipRecord
+            {
+                PartId = NewPartId(),
+                CardDefId = firmwareId,
+                SourceSalvageId = salvageInstanceId,
+                DraftSlot = -1,
+                State = BagCount(state) < Capacity ? PrimitiveChipState.Bag : PrimitiveChipState.Pending,
+            };
+            pending = record.State == PrimitiveChipState.Pending;
+            state.PrimitiveChips = state.PrimitiveChips.Append(record).ToArray();
+            AppendLedger(state, "EncryptedFirmwareGrant", record.PartId, firmwareId);
+            return record.PartId;
+        }
+
         /// <summary>ER4-PRIM-04：合成台升级配方产物（"精校聚焦镜"等）直接进仓的唯一入口，不经解析/
         /// 补印两条既有渠道（后两者都要求内容在 <see cref="PrimitiveChipSourceIds"/> 白名单里，合成
         /// 产物故意不在白名单——只有合成台自己能创造它）。仓满时自动落 Pending，行为与

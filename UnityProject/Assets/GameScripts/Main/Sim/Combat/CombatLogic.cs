@@ -817,6 +817,7 @@ namespace BinGames.Sim.Combat
             CombatCounters c = d.Counters[0];
             c.ShotsFired++;
             d.Counters[0] = c;
+            RawFired(ref d, a, t);
 
             if (wp.Mode == CombatWeaponMode.Projectile)
             {
@@ -891,6 +892,7 @@ namespace BinGames.Sim.Combat
             CombatCounters c = d.Counters[0];
             c.ShotsFired++;
             d.Counters[0] = c;
+            RawFired(ref d, a, t);
             Cue(ref d, CombatEventKind.CannonFire, a, d.Id[t], 0f, d.Pos[t], 0);
             if (overload)
             {
@@ -1018,6 +1020,20 @@ namespace BinGames.Sim.Combat
                 d.Set(a, CombatUnitFlags.ReactionSpent, true);
             }
             Gameplay(ref d, CombatEventKind.ReactionFired, a, d.Id[t], 0f, 0f, d.Pos[t], (byte)reaction, (byte)(gated ? 1 : 0));
+        }
+
+        /// <summary>
+        /// FG1-SIG-06（FGR-SIG-061）：开火的单位带 <see cref="CombatUnitFlags.RawGated"/>（接入口里插着信号裸跑的未破解常规固件、计次间隔已过）时，
+        /// 这一发算一次“发动”：当场置 <see cref="CombatUnitFlags.RawSpent"/>（等热更层按间隔重新下发之前不再计），发不丢的玩法事件。O(1)，只有被接入的那一台可能带这个标志。
+        /// </summary>
+        private static void RawFired(ref CombatData d, int a, int t)
+        {
+            if (!d.Has(a, CombatUnitFlags.RawGated) || d.Has(a, CombatUnitFlags.RawSpent))
+            {
+                return;
+            }
+            d.Set(a, CombatUnitFlags.RawSpent, true);
+            Gameplay(ref d, CombatEventKind.RawFirmwareFired, a, d.Id[t], 0f, 0f, d.Pos[t], 0, 0);
         }
 
         /// <summary>唯一扣血入口。血量在热更层的单位只发伤害请求（护甲 / 加成已算好），其余在内核扣血、按需报告、归零即阵亡。</summary>

@@ -89,6 +89,14 @@ namespace GameLogic.Campaign.Blueprint
         /// <summary>FG1-SIG-05（FGR-SIG-090）：机器电路自己的固件槽里残留的核心固件（旧草稿 / 旧档）。AI 永远不用核心固件，
         /// 所以它们不进 <see cref="FirmwareIds"/>、不产生反应与热量；界面据此说明（保存校验也会拒绝）。</summary>
         public string[] InertCoreFirmwareIds = Array.Empty<string>();
+
+        /// <summary>FG1-SIG-06（FGR-SIG-060、061）：插进接入口并生效的固件里“未破解”的（敌方加密、解析台还没破解）——信号裸跑。
+        /// AI 驾驶时永远为空（接入口是空槽；机器电路装不进未破解固件）。</summary>
+        public string[] RawFirmwareIds = Array.Empty<string>();
+
+        /// <summary>FG1-SIG-06（FGR-SIG-061）：裸跑时这台机器武器的积热倍率（同类已破解固件的 1.5 倍，fg.TbHomeTuning signal.raw.heat_multiplier）；
+        /// 没有裸跑为 1。<see cref="HeatBudget"/> 已乘上；战斗内核的每发积热（CombatSite.MachineWeaponFrom）读这里，预览与实战同一个数。</summary>
+        public float RawHeatMultiplier = 1f;
     }
 
     /// <summary>ER4-PRIM-02 STORY-EXECUTION-CARDS.md 第2条正式电路板"通用预览"的编译入口——
@@ -141,7 +149,11 @@ namespace GameLogic.Campaign.Blueprint
             string[] localEffective = FirmwareKinds.AiUsable(board.FirmwareSlots);
             preview.InertCoreFirmwareIds = FirmwareKinds.InertCore(board.FirmwareSlots);
             preview.FirmwareIds = localEffective.Concat(uplinkEffective).ToArray();
-            preview.HeatBudget = BlueprintCircuitBoard.ComputeHeatBudget(board.PrimaryId, preview.FirmwareIds);
+            // FG1-SIG-06（FGR-SIG-061）：信号裸跑未破解的敌方固件——热量增长是同类已破解固件的 1.5 倍（确定性，不靠随机）。
+            // 破解状态按当前战役判定（与接入结算同一个战役）；破解后下一次编译自动回到 1 倍。
+            preview.RawFirmwareIds = FirmwareKinds.RawOf(CampaignSession.Current, uplinkEffective);
+            preview.RawHeatMultiplier = preview.RawFirmwareIds.Length > 0 ? RawFirmwareService.HeatMultiplier : 1f;
+            preview.HeatBudget = BlueprintCircuitBoard.ComputeHeatBudget(board.PrimaryId, preview.FirmwareIds) * preview.RawHeatMultiplier;
 
             // ER6-REACT-01/02：反应/标记/重炮/散热鳍这几个标志只是"电路板外层槽装了什么"的直接读取，
             // 与下面"ComposeEngine 能不能真的编出一条 source→sink 路径"完全无关，必须放在任何早退

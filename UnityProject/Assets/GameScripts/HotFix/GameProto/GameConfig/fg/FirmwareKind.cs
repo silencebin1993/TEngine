@@ -23,6 +23,8 @@ public sealed partial class FirmwareKind : Luban.BeanBase
         Kind = _buf.ReadString();
         NameKey = _buf.ReadString();
         Cooldown = _buf.ReadFloat();
+        Protocol = _buf.ReadString();
+        Faction = _buf.ReadString();
     }
 
     public static FirmwareKind DeserializeFirmwareKind(ByteBuf _buf)
@@ -46,6 +48,14 @@ public sealed partial class FirmwareKind : Luban.BeanBase
     /// 核心固件发动后的冷却秒数(FGR-SIG-033:冷却属于信号,跳到别的机器不重置;按游戏时间计,暂停不走);只在 kind=core 时生效,常规固件填 0
     /// </summary>
     public readonly float Cooldown;
+    /// <summary>
+    /// 协议:own=己方/中立(无需破解),enemy=敌方加密(解析台破解前只能放进信号核裸跑,不能装进机器电路或炮塔)
+    /// </summary>
+    public readonly string Protocol;
+    /// <summary>
+    /// 来源阵营:reclaim=归还,silent=静默,foundry=铸造;暴露面板“各阵营贡献”与异派技术判定读这里,名称走文本键 faction.&lt;值&gt;
+    /// </summary>
+    public readonly string Faction;
    
     public const int __ID__ = -1131444196;
     public override int GetTypeId() => __ID__;
@@ -61,6 +71,8 @@ public sealed partial class FirmwareKind : Luban.BeanBase
         + "kind:" + Kind + ","
         + "nameKey:" + NameKey + ","
         + "cooldown:" + Cooldown + ","
+        + "protocol:" + Protocol + ","
+        + "faction:" + Faction + ","
         + "}";
     }
 }
