@@ -2073,6 +2073,13 @@ namespace GameLogic.Campaign.Regions
                 return false;
             }
 
+            // FG1-SIG-07（FGR-SIG-053）：覆盖外的机器收不到派工（也是远程命令），继续执行最后的命令；点中的是工作目标所以不再按“移动”处理。
+            if (!Signal.SignalCoverageService.CanReceiveCommand(moving.LogicId))
+            {
+                SquadCommands.ReportOutOfCoverage(new[] { moving.LogicId });
+                return true;
+            }
+
             // ER5-CMD-01：接下来的所有分支都会让"工作"移动系统接管这台机器的 Transform；先取消它可能正在执行的战略命令，
             // 避免两套移动来源同一帧争抢同一个 transform.position。
             SquadCommands.CancelCommandFor(moving.LogicId);

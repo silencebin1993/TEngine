@@ -37,6 +37,26 @@ namespace GameLogic.Campaign.WorldSim
         /// <summary>正在执行模拟步的地点 ID（只在某个地点的 SimStep 期间非空）——通知与反馈时刻据此记下“发生在哪个地点”。</summary>
         public static string CurrentSiteId { get; private set; }
 
+        /// <summary>FG1-SIG-07：在模拟步里、但不在某个地点的 SimStep 之内（覆盖评估在步首统一做）时，把通知 / 反馈记到事件真正发生的地点。
+        /// 执行完恢复原值；可嵌套。</summary>
+        public static void RunAsSite(string siteId, Action action)
+        {
+            if (action == null)
+            {
+                return;
+            }
+            string prev = CurrentSiteId;
+            CurrentSiteId = siteId;
+            try
+            {
+                action();
+            }
+            finally
+            {
+                CurrentSiteId = prev;
+            }
+        }
+
         /// <summary>本会话执行过的模拟步数、单步耗时（性能证据）。</summary>
         public static long StepsExecuted { get; private set; }
         public static double LastStepMs { get; private set; }
@@ -218,8 +238,10 @@ namespace GameLogic.Campaign.WorldSim
             Combat.CombatSites.CloseAll(); // FG0-ARCH-03：保险——各地点 Exit 已各自释放内核，这里确保没有泄漏的原生容器。
             NavService.Unload(); // FG0-ARCH-06：寻路内核在战斗内核之后释放（战斗内核绑定着它的通行镜像）。
             Signal.SignalLinkService.ClearWatch(); // FG1-SIG-04：链路预警是运行时状态，随世界卸载清掉。
+            Signal.SignalUplinkService.OnWorldUnloaded(); // FG1-SIG-07 审查修复：接入 / 跳回家园的过渡是运行时状态，不带进下一局或读档后的对局。
             Signal.SignalCoverageService.Clear(); // 覆盖源缓存引用着旧战役：一并清掉。
             GameLogic.View.SignalLinkView.Clear(); // 地图预警圈用共享材质：先于材质释放。
+            GameLogic.View.SignalCoverageOverlayView.Clear(); // FG1-SIG-07：覆盖网络叠加层同样用共享材质。
             GameLogic.View.ViewMaterials.ReleaseAll(); // FG0-ARCH-03：地点表现对象的共享材质与世界成对释放（各地点的表现对象此时已全部销毁）。
             FracturedCity = null;
             FoundryOutpost = null;
@@ -312,6 +334,7 @@ namespace GameLogic.Campaign.WorldSim
             // 提交后下一帧起新机器才收输入。
             Signal.SignalUplinkService.FrameTick(realDt);
             GameLogic.View.SignalLinkView.FrameTick(); // FG1-SIG-04：安全模式头顶图标、地图上的覆盖边缘预警（纯表现）。
+            GameLogic.View.SignalCoverageOverlayView.FrameTick(); // FG1-SIG-07：覆盖网络叠加层（纯表现，网络变了才重画）。
             IWorldSite observed = WorldView.ObservedSite;
             if (observed != null && observed.IsLoaded)
             {
@@ -394,6 +417,9 @@ namespace GameLogic.Campaign.WorldSim
             {
                 // FG0-ARCH-06：寻路流水线（格网变化推进镜像 → 到期批次采纳 → 被截断的路线重规划 → 调度下一批），只看步序号。
                 NavService.BeginStep(state);
+                // FG1-SIG-07：覆盖网络按游戏时间分桶（每 signal.coverage.refresh_seconds）在步首统一重建连通、评估每台机器在不在覆盖里
+                // （逐单位在内核 Burst 作业里）——与是否被观察无关；同一步里后面的安全模式判定读的就是这次的结果。
+                Signal.SignalCoverageService.BeginStep(state);
                 if (Home != null && Home.IsLoaded)
                 {
                     CurrentSiteId = Home.SiteId;

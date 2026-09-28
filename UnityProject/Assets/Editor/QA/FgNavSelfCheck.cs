@@ -102,6 +102,10 @@ namespace GameLogic.EditorTools
                 CameraDirector.RealDeltaTime = () => 0.05f;
                 NotificationCenter.AutoPauseHandler = null;
                 GameRoot.BindWorldProviders();
+                // FG1-SIG-07：寻路自检不测信号覆盖——注入“全图都在与核心连通的覆盖里”，编队走到几百格外之后的命令不会因“覆盖外收不到命令”被拒
+                // （覆盖规则本身见 FgSignalNetworkSelfCheck）。
+                GameLogic.Campaign.Signal.SignalCoverageService.OverrideForTests = (site, pos) =>
+                    new GameLogic.Campaign.Signal.SignalCoverageSample(true, true, float.PositiveInfinity, Vector2.zero, 0f, GameLogic.Campaign.Signal.SignalCoverageSourceKind.None);
                 Line($"  · 环境：Unity {Application.unityVersion}，batchmode={Application.isBatchMode}，处理器 {SystemInfo.processorType}（{SystemInfo.processorCount} 线程），" +
                      $"Burst 编译={(Unity.Burst.BurstCompiler.IsEnabled ? "开" : "关")}（作业声明同步编译）。寻路批次在工作线程（Schedule），" +
                      "耗时是 Editor 下的 Burst 作业；真机 IL2CPP 下内核同为 Burst AOT（相同或更快），热更层走 HybridCLR 解释执行另测（FG15-SYS-02）");
@@ -153,6 +157,7 @@ namespace GameLogic.EditorTools
                 {
                     Fail("收尾 UnloadAll 抛异常：" + e.Message);
                 }
+                GameLogic.Campaign.Signal.SignalCoverageService.ResetForTests();
                 GameClock.ResetSession();
                 CameraDirector.RealDeltaTime = originalDelta;
                 NotificationCenter.AutoPauseHandler = originalAutoPause;

@@ -176,6 +176,47 @@ namespace GameLogic.Campaign.WorldSim
             return DirectorInstance.FlyStrategyTo(new float2(position.x, position.y), GameClock.TuningOr("camera.fly_seconds", 0.5f));
         }
 
+        /// <summary>
+        /// FG1-SIG-07（FGR-SIG-051 跨地点的远距离跳转）：把镜头切到 <paramref name="siteId"/>，战略焦点直接放在 <paramref name="position"/>（不走飞行过渡）——
+        /// 调用方随后让镜头进直控对准目标机器（战略飞行落地会被地点当成“玩家退出接入”）。星球表面上先把落点放进可平移范围。
+        /// </summary>
+        public static bool ObserveAt(string siteId, Vector2 position)
+        {
+            IWorldSite site = WorldSimulation.FindSite(siteId);
+            if (site == null || !site.IsLoaded)
+            {
+                return false;
+            }
+            if (site.SurfaceKind == WorldSurfaceKind.Planet)
+            {
+                _planetFlyPin = position;
+                _planetFlyPinReached = false;
+            }
+            if (!Observe(siteId))
+            {
+                return false;
+            }
+            if (site.CameraProfile != null)
+            {
+                ApplyBounds(site.CameraProfile);
+            }
+            DirectorInstance.SetStrategyView(new float2(position.x, position.y), DirectorInstance.StrategyOrthographicSize);
+            FlyCount++;
+            return true;
+        }
+
+        /// <summary>FG1-SIG-07：星球表面上的远距离跳转——落点先放进镜头可平移范围（离开接入回到战略时不被“已探索区域”钳回去）。</summary>
+        public static void PinPlanet(Vector2 position)
+        {
+            _planetFlyPin = position;
+            _planetFlyPinReached = false;
+            IWorldSite observed = ObservedSite;
+            if (observed != null && observed.SurfaceKind == WorldSurfaceKind.Planet && observed.CameraProfile != null)
+            {
+                ApplyBounds(observed.CameraProfile);
+            }
+        }
+
         public static bool FocusHomeCore()
         {
             CampaignState state = CampaignSession.Current;

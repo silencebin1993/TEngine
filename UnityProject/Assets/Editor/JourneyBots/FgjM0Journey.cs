@@ -41,6 +41,8 @@ namespace GameLogic.EditorTools.JourneyBots
     /// 测试捷径（登记在 FG-GAP-REGISTER，DEBT-FG0QA01-*）：
     /// - 远征队用家园的机器编队代替：正式的“远征队在星球表面行进”属于 FG8-EXP-02（现在的远征出发只载入固定地点，不沿地形行进）。
     /// - “再飞回远征队”用 WorldView.FlyTo 飞到编队位置：家园编队还不是关注点（Tab 只轮换家园 / 远征地点 / 突袭），“跟随选中”键还没有实现。
+    /// - FG1-SIG-07 起覆盖外的机器收不到命令（FGR-SIG-053）：选好目标后沿预检路线预置一串已建成的信号中继塔（场景夹具，出发档 S1 之前放好，
+    ///   观察组与对照组完全一样），编队全程在覆盖里，到达后的“撤退”命令才收得到。玩家亲手铺中继的流程由 [覆盖网络] 自检与冒烟覆盖。
     /// </summary>
     public static class FgjM0Journey
     {
@@ -608,6 +610,8 @@ namespace GameLogic.EditorTools.JourneyBots
                     c.SetInt("targetY", g.Y);
                     c.SetInt("targetFound", 1);
                     c.Log($"目标 {g}：直线 {r} 格，预检路线长 {res.Length:F0} 格（独立内核 {ms:F1} ms，试了 {tried} 个候选）");
+                    int relays = PlaceRelayChain(s, k, from, pts);
+                    c.Log($"场景夹具（FG1-SIG-07 覆盖外收不到命令）：沿预检路线预置 {relays} 座已建成的信号中继塔，编队全程在与核心连通的覆盖里");
                     break;
                 }
             }
@@ -615,6 +619,92 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 WorldView.FlyTo(GameRoot.HomeValley.SiteId, TargetPos(c));
             }
+        }
+
+        /// <summary>
+        /// FG1-SIG-07 场景夹具：沿预检路线每 150 格放一座已建成的信号中继塔（离路线 6～14 格、2×2 都能通行的空地，不挡路），
+        /// 第一座离起点 140 格（在归还核心的 150 格覆盖里），相邻两座都在彼此的 200 格覆盖里——整条链与核心连通。返回放了几座。
+        /// </summary>
+        private static int PlaceRelayChain(CampaignState s, NavKernel k, GridCell from, List<int2> route)
+        {
+            var poly = new List<Vector2> { new Vector2(from.X, from.Y) };
+            foreach (int2 p in route)
+            {
+                poly.Add(new Vector2(p.x, p.y));
+            }
+            var spots = new List<Vector2>();
+            float next = 140f;
+            float walked = 0f;
+            for (int i = 1; i < poly.Count; i++)
+            {
+                float len = Vector2.Distance(poly[i - 1], poly[i]);
+                while (len > 1e-3f && walked + len >= next)
+                {
+                    spots.Add(Vector2.Lerp(poly[i - 1], poly[i], (next - walked) / len));
+                    next += 150f;
+                }
+                walked += len;
+            }
+            spots.Add(poly[poly.Count - 1]);
+            var records = new List<BuildingRecord>(s.BuildingRecords ?? Array.Empty<BuildingRecord>());
+            int placed = 0;
+            foreach (Vector2 spot in spots)
+            {
+                if (!TryRelayCell(k, spot, poly, out GridCell cell))
+                {
+                    continue;
+                }
+                records.Add(new BuildingRecord
+                {
+                    BuildingId = HomeValleyLayout.RegionId + ":journey_relay_" + placed,
+                    BuildingTypeId = HomeValleyLayout.BuildingTypeSignalRelay,
+                    RegionId = HomeValleyLayout.RegionId,
+                    GridX = cell.X,
+                    GridY = cell.Y,
+                    Position = GridMath.FootprintCenter(cell, 2, 2, 0),
+                    Health = 100f,
+                    ConstructionState = BuildingConstructionState.Operational,
+                    PowerState = BuildingPowerState.NotApplicable,
+                });
+                placed++;
+            }
+            s.BuildingRecords = records.ToArray();
+            GameLogic.Campaign.Signal.SignalCoverageService.Invalidate();
+            return placed;
+        }
+
+        private static bool TryRelayCell(NavKernel k, Vector2 spot, List<Vector2> poly, out GridCell cell)
+        {
+            for (int ring = 6; ring <= 14; ring += 2)
+            {
+                for (int a = 0; a < 8; a++)
+                {
+                    double ang = a * Math.PI / 4;
+                    var c = new GridCell((int)Math.Round(spot.x + Math.Cos(ang) * ring), (int)Math.Round(spot.y + Math.Sin(ang) * ring));
+                    if (!AreaPassable(k, c, 1) || DistanceToPolyline(new Vector2(c.X, c.Y), poly) < 4f)
+                    {
+                        continue;
+                    }
+                    cell = c;
+                    return true;
+                }
+            }
+            cell = default;
+            return false;
+        }
+
+        private static float DistanceToPolyline(Vector2 p, List<Vector2> poly)
+        {
+            float best = float.MaxValue;
+            for (int i = 1; i < poly.Count; i++)
+            {
+                Vector2 a = poly[i - 1];
+                Vector2 b = poly[i];
+                Vector2 ab = b - a;
+                float t = ab.sqrMagnitude > 1e-6f ? Mathf.Clamp01(Vector2.Dot(p - a, ab) / ab.sqrMagnitude) : 0f;
+                best = Mathf.Min(best, Vector2.Distance(p, a + ab * t));
+            }
+            return best;
         }
 
         /// <summary>在独立的寻路内核上探测（不碰观察组的实时内核镜像：探测 1,000 格外会在镜像里多生成区块，测试探针不该改被测对象）。</summary>

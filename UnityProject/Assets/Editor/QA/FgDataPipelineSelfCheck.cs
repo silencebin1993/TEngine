@@ -100,7 +100,7 @@ namespace GameLogic.EditorTools
             Expect(FgContentTables.LoadError == null, $"fg.TbBuilding / fg.TbMechEnemy 读取成功（错误：{FgContentTables.LoadError ?? "无"}）");
             Expect(t.TbLocText.DataList.Count >= 14 && GameText.Count == t.TbLocText.DataList.Count,
                 $"文本表 {t.TbLocText.DataList.Count} 条，GameText 可查 {GameText.Count} 条");
-            Expect(FgContentTables.Buildings.Count == 9, $"建筑表 9 行（Demo 8 种建筑 + 第二座发电机），实际 {FgContentTables.Buildings.Count}");
+            Expect(FgContentTables.Buildings.Count == 10, $"建筑表 10 行（Demo 8 种建筑 + 第二座发电机 + FG1-SIG-07 信号中继塔），实际 {FgContentTables.Buildings.Count}");
             Expect(FgContentTables.Enemies.Count == 6, $"机械敌人表 6 行（Demo 6 类敌人），实际 {FgContentTables.Enemies.Count}");
         }
 

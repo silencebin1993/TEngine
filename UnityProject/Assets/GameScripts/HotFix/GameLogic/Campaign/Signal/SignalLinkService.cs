@@ -557,7 +557,7 @@ namespace GameLogic.Campaign.Signal
             {
                 return SignalLinkBreakReason.Jammed;
             }
-            if (!SignalCoverageService.Sample(rec.RegionId, pos).Covered)
+            if (!SignalCoverageService.Sample(rec.RegionId, pos, rec.LogicId).Covered)
             {
                 return SignalLinkBreakReason.OutOfCoverage;
             }

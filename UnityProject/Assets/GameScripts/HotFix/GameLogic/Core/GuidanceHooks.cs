@@ -47,6 +47,15 @@ namespace GameLogic.Core
         /// <summary>FG1-SIG-06：第一次打开暴露面板（引导内容在 FG15-UX-04：暴露从哪来、怎么降）。</summary>
         public const string ExposurePanelFirstOpen = "signal.exposure.first_open";
 
+        /// <summary>FG1-SIG-07：第一次打开覆盖网络叠加层（引导内容在 FG15-UX-04：青色 / 红色圈的含义、中继要立在已连通的覆盖里）。</summary>
+        public const string SignalCoverageFirstOverlay = "signal.coverage.first_overlay";
+        /// <summary>FG1-SIG-07：第一次有机器走出信号覆盖（引导内容：覆盖外收不到命令、怎么铺中继）。</summary>
+        public const string SignalCoverageFirstLeft = "signal.coverage.first_left";
+        /// <summary>FG1-SIG-07：第一次有中继与核心断开（引导内容：断开处高亮、怎么接上）。</summary>
+        public const string SignalRelayFirstCut = "signal.coverage.first_relay_cut";
+        /// <summary>FG1-SIG-07：第一次远距离跳转（引导内容：过渡、冷却、跳回家园 / 上一台）。</summary>
+        public const string SignalFirstFarJump = "signal.jump.first_far";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -59,6 +68,7 @@ namespace GameLogic.Core
             SignalCoreFirstOpen, CircuitUplinkFirstSeen,
             SignalFirstUplink,
             SignalFirstEncryptedFirmware, ExposurePanelFirstOpen,
+            SignalCoverageFirstOverlay, SignalCoverageFirstLeft, SignalRelayFirstCut, SignalFirstFarJump,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

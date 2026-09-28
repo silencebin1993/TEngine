@@ -207,6 +207,19 @@ namespace GameLogic.EditorTools
                     case 193: StepLinkEdgeWarned(inStep); break;
                     case 194: StepLinkCoverageBroken(inStep); break;
                     case 195: StepLinkCoverageRecovered(inStep); break;
+                    case 198: StepNetOverlayOn(inStep); break;
+                    case 199: StepNetOverlayOff(inStep); break;
+                    case 200: StepNetPrevUplinked(inStep); break;
+                    case 201: StepNetHomeDone(inStep); break;
+                    case 202: StepNetOutsideTagged(inStep); break;
+                    case 203: StepNetOutsideRejected(inStep); break;
+                    case 204: StepNetOutsideRecovered(inStep); break;
+                    case 205: StepNetPrevAgain(inStep); break;
+                    case 206: StepNetLeft(inStep); break;
+                    case 207: StepNetCrossJump(inStep); break;
+                    case 208: StepNetCrossArrived(inStep); break;
+                    case 209: StepNetCrossHome(inStep); break;
+                    case 210: StepNetBackToExpedition(inStep); break;
                     case 177: StepSigSaveSelect(inStep); break;
                     case 178: StepSigSavePress(inStep); break;
                     case 179: StepSigSaveUplinked(inStep); break;
@@ -1982,7 +1995,247 @@ namespace GameLogic.EditorTools
             int m = SessionState.GetInt(K + "LinkM", 0);
             Check(!Campaign.Signal.SignalLinkService.IsInSafeMode(CampaignSession.Current, m) && !View.SignalLinkView.RingVisible,
                 $"回到覆盖内 2 秒后 {SigLabel(m)} 退出安全模式；地图预警圈已收起");
+            SessionState.SetInt(K + "NetHome0", Campaign.Signal.SignalUplinkService.JumpHomeCount);
+            PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.ToggleOverlay));
+            Next(198, "FG1-SIG-07：按叠加层键（O）打开覆盖网络叠加层");
+        }
+
+        // ── FG1-SIG-07：覆盖网络叠加层、跳回家园 / 上一台（快捷键与 HUD 按钮）、覆盖外的机器（列表标记、点它被拒）、跨地点远距离跳转 ──────────
+
+        private static void StepNetOverlayOn(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            UI.SignalCore.SignalCoreHudUIToolkit hud = UI.SignalCore.SignalCoreHudUIToolkit.Instance;
+            string home = Campaign.Regions.HomeValleyLayout.RegionId;
+            Check(View.SignalCoverageOverlayView.Enabled && View.SignalCoverageOverlayView.Visible
+                  && View.SignalCoverageOverlayView.DrawnRings == Campaign.Signal.SignalCoverageService.SiteSourceCount(home)
+                  && View.SignalCoverageOverlayView.DrawnRings >= 1 && hud != null && hud.JumpBarVisible
+                  && hud.CoverageToggleText == Localization.GameText.Get("signal.overlay.button_on"),
+                $"叠加层打开：画出 {View.SignalCoverageOverlayView.DrawnRings} 个覆盖圈（断开 {View.SignalCoverageOverlayView.DrawnCut} 个），HUD 跳转条按钮“{hud?.CoverageToggleText}”");
+            PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.ToggleOverlay));
+            Next(199, "再按 O 关闭叠加层");
+        }
+
+        private static void StepNetOverlayOff(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            int m = SessionState.GetInt(K + "LinkM", 0);
+            Check(!View.SignalCoverageOverlayView.Enabled && !View.SignalCoverageOverlayView.Visible, "再按 O：叠加层关闭");
+            Check(Campaign.Signal.SignalUplinkService.PreviousMachine(CampaignSession.Current) == m, $"“上一台机器”= 刚才接入过的 {SigLabel(m)}");
+            SessionState.SetInt(K + "NetFar0", Campaign.Signal.SignalUplinkService.FarJumpCount);
+            Check(ClickUitk("[SignalCoreHost]", "SignalJumpPrev"), "点 HUD 跳转条的“上一台”");
+            Next(200, "点“上一台”：信号跳回上一台机器");
+        }
+
+        private static void StepNetPrevUplinked(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            int m = SessionState.GetInt(K + "LinkM", 0);
+            Check(Campaign.Signal.SignalPresence.CurrentMachineLogicId == m && WorldView.Director.Mode == View.ViewMode.Direct
+                  && Campaign.Signal.SignalUplinkService.FarJumpCount == SessionState.GetInt(K + "NetFar0", 0),
+                $"“上一台”：信号回到 {SigLabel(m)}（离核心不到 500 格，近距离，没有冷却）");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.JumpHome));
+            Next(201, "按“跳回家园”（H）");
+        }
+
+        private static void StepNetHomeDone(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            Check(Campaign.Signal.SignalPresence.AtCore && WorldView.Director.Mode == View.ViewMode.Strategy && GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive
+                  && Campaign.Signal.SignalUplinkService.JumpHomeCount == SessionState.GetInt(K + "NetHome0", 0) + 1,
+                $"按 H：信号回到归还核心、镜头回到家园（“{Campaign.Signal.SignalUplinkService.LastFeedbackText}”）");
+            int m = SessionState.GetInt(K + "LinkM", 0);
+            Campaign.Regions.HomeValleyMachineMarker other = SigCandidate(m);
+            if (other == null)
+            {
+                Write("  - 家园里没有第二台可以接入的机器：跳过“覆盖外的机器”一段（由 FgSignalNetworkSelfCheck D / L 段覆盖）");
+                PressKey(GameSettings.KeyBindings.GetKey(GameActionId.JumpPreviousMachine));
+                Next(205, "按“跳回上一台机器”（J）");
+                return;
+            }
+            SessionState.SetInt(K + "NetOut", other.LogicId);
+            SessionState.SetInt(K + "NetLeft0", Campaign.Signal.SignalCoverageService.LeftCount);
+            TeleportFromCore(other.LogicId, 420f);
+            Next(202, $"测试捷径：把 {SigLabel(other.LogicId)} 瞬移到离核心 420 格（覆盖外；代替开着它走出去）");
+        }
+
+        private static void StepNetOutsideTagged(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            int n = SessionState.GetInt(K + "NetOut", 0);
+            UnityEngine.UIElements.Button btn = MachineListButton(n);
+            Label tag = btn?.parent?.Q<Label>(className: "cmd-candidate-nolink-tag");
+            Check(Campaign.Signal.SignalCoverageService.IsMachineOutOfCoverage(n) && Campaign.Signal.SignalCoverageService.LeftCount > SessionState.GetInt(K + "NetLeft0", 0)
+                  && Notifications.NotificationCenter.History.Any(e => e.Type?.Id == "signal_coverage_left"),
+                $"{SigLabel(n)} 被标为覆盖外，发“走出覆盖”通知");
+            Check(btn != null && btn.ClassListContains("cmd-candidate-btn-nolink") && tag != null && tag.resolvedStyle.display == DisplayStyle.Flex
+                  && tag.text == Localization.GameText.Get("signal.coverage.list_tag"),
+                $"命令栏机器列表的 {btn?.text} 带“{tag?.text}”标记（橙色边框 + 文字）");
+            Check(btn != null && InvokeClickable(btn), $"点机器列表里的 {btn?.text}（它在覆盖外）");
+            Next(203, "点覆盖外机器的列表按钮：接入被拒");
+        }
+
+        private static void StepNetOutsideRejected(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            int n = SessionState.GetInt(K + "NetOut", 0);
+            Check(Campaign.Signal.SignalPresence.AtCore && Campaign.Signal.SignalUplinkService.LastFailure == Campaign.Signal.UplinkFailure.OutOfCoverage
+                  && Campaign.Signal.SignalUplinkService.LastFeedbackText.Contains(Localization.GameText.Get("signal.coverage.kind.relay_tower").Substring(2)),
+                $"覆盖外的机器不能接入：“{Campaign.Signal.SignalUplinkService.LastFeedbackText}”");
+            TeleportFromCore(n, 10f);
+            Next(204, "测试捷径：把它挪回核心附近");
+        }
+
+        private static void StepNetOutsideRecovered(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            int n = SessionState.GetInt(K + "NetOut", 0);
+            UnityEngine.UIElements.Button btn = MachineListButton(n);
+            Check(!Campaign.Signal.SignalCoverageService.IsMachineOutOfCoverage(n) && btn != null && !btn.ClassListContains("cmd-candidate-btn-nolink"),
+                $"{SigLabel(n)} 回到覆盖：列表标记撤掉（控制自动恢复）");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.JumpPreviousMachine));
+            Next(205, "按“跳回上一台机器”（J）");
+        }
+
+        private static void StepNetPrevAgain(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            int m = SessionState.GetInt(K + "LinkM", 0);
+            Check(Campaign.Signal.SignalPresence.CurrentMachineLogicId == m && WorldView.Director.Mode == View.ViewMode.Direct,
+                $"按 J：信号跳回上一台 {SigLabel(m)}");
+            CheckNoTextMarkers("覆盖网络与跳转");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.ToggleCameraView));
+            Next(206, "按接入 / 退出键离开");
+        }
+
+        private static void StepNetLeft(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            Check(Campaign.Signal.SignalPresence.AtCore && WorldView.Director.Mode == View.ViewMode.Strategy, "离开：信号回到归还核心、镜头回战略");
             ContinueToExpeditionPrep();
+        }
+
+        // 远征途中（镜头在破碎都市、信号在归还核心 = 家园）：点远征机器 = 跨地点的远距离跳转；按 H 跳回家园（远距离，不受冷却限制）；
+        // 回家后按 J 跳回远征队被冷却拒绝（FGJ-M1 第 7、8 步的前半，冷却后成功由 FgSignalNetworkSelfCheck F 段覆盖）；Tab 回到远征地点。
+        private static void StepNetCrossJump(double inStep)
+        {
+            CampaignState st = CampaignSession.Current;
+            if (Campaign.Signal.SignalUplinkService.JumpCooldownRemaining(st) > 0 || inStep < 0.5)
+            {
+                if (inStep > 20)
+                {
+                    Finish("20 秒内远距离跳转冷却没有结束");
+                }
+                return;
+            }
+            Campaign.Regions.FracturedCityController city = GameRoot.FracturedCity;
+            Campaign.Regions.HomeValleyMachineMarker target = city != null && city.IsActive
+                ? SigCandidateIn(city.Combat, Campaign.Regions.FracturedCityLayout.RegionId, 0) : null;
+            if (target == null || !Campaign.Signal.SignalPresence.AtCore)
+            {
+                Write("  - 破碎都市此刻没有可以接入的机器（都在干扰场里等）：跳过跨地点跳转（由 FgSignalNetworkSelfCheck E / F 段覆盖）");
+                Next(120, "FG0-ARCH-01：整个世界同时运行——远征进行中，家园没有退出");
+                return;
+            }
+            SessionState.SetInt(K + "NetFar0", Campaign.Signal.SignalUplinkService.FarJumpCount);
+            SessionState.SetInt(K + "NetCross", target.LogicId);
+            Check(ClickMachineList(target.LogicId), $"镜头在破碎都市、信号在归还核心：点机器列表里的 {SigLabel(target.LogicId)}");
+            Next(208, $"信号从归还核心（家园）跳到破碎都市的 {SigLabel(target.LogicId)}：跨地点 = 远距离跳转");
+        }
+
+        private static void StepNetCrossArrived(double inStep)
+        {
+            int t = SessionState.GetInt(K + "NetCross", 0);
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            if (!SessionState.GetBool(K + "NetMid", false))
+            {
+                SessionState.SetBool(K + "NetMid", true);
+                UI.SignalCore.SignalCoreHudUIToolkit hud = UI.SignalCore.SignalCoreHudUIToolkit.Instance;
+                string status = hud?.UplinkStatusText ?? string.Empty;
+                Check(Campaign.Signal.SignalUplinkService.IsPending && Campaign.Signal.SignalUplinkService.PendingIsFar && Campaign.Signal.SignalPresence.AtCore
+                      && status.Contains(Localization.GameText.Get("signal.jump.other_site")),
+                    $"跳转过渡中（1.5 秒，世界照常运行）：信号还在核心，HUD“{status}”");
+                return;
+            }
+            if (inStep < 3)
+            {
+                return;
+            }
+            SessionState.SetBool(K + "NetMid", false);
+            CampaignState st = CampaignSession.Current;
+            Check(Campaign.Signal.SignalPresence.CurrentMachineLogicId == t && GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsActive
+                  && WorldView.Director.Mode == View.ViewMode.Direct && Campaign.Signal.SignalUplinkService.FarJumpCount == SessionState.GetInt(K + "NetFar0", 0) + 1
+                  && Campaign.Signal.SignalUplinkService.JumpCooldownRemaining(st) > 0,
+                $"到达：信号在 {SigLabel(t)} 里、镜头直控；远距离跳转开始冷却（{Campaign.Signal.SignalUplinkService.JumpCooldownRemaining(st):F1} 秒）");
+            SessionState.SetInt(K + "NetHome1", Campaign.Signal.SignalUplinkService.JumpHomeCount);
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.JumpHome));
+            Next(209, "FGJ-M1 第 7 步：按 H 跳回家园（从远征地点回家 = 远距离，冷却中也能回家）");
+        }
+
+        private static void StepNetCrossHome(double inStep)
+        {
+            if (inStep < 3)
+            {
+                return;
+            }
+            if (!SessionState.GetBool(K + "NetHomeChecked", false))
+            {
+                SessionState.SetBool(K + "NetHomeChecked", true);
+                Check(Campaign.Signal.SignalPresence.AtCore && WorldView.Director.Mode == View.ViewMode.Strategy && GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive
+                      && Campaign.Signal.SignalUplinkService.JumpHomeCount == SessionState.GetInt(K + "NetHome1", 0) + 1,
+                    "按 H（1.5 秒过渡）：信号回到归还核心、镜头回到家园");
+                PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.JumpPreviousMachine));
+                return;
+            }
+            if (inStep < 3.6)
+            {
+                return;
+            }
+            SessionState.SetBool(K + "NetHomeChecked", false);
+            Check(Campaign.Signal.SignalPresence.AtCore && Campaign.Signal.SignalUplinkService.LastFailure == Campaign.Signal.UplinkFailure.JumpCooldown,
+                $"FGJ-M1 第 8 步（冷却中）：马上按 J 跳回远征队被拒——“{Campaign.Signal.SignalUplinkService.LastFeedbackText}”");
+            PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.CycleWorldFocus));
+            Next(210, "按“切换关注点”（Tab）回到远征地点");
+        }
+
+        private static void StepNetBackToExpedition(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            Check(GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsActive, "Tab：镜头回到破碎都市");
+            Next(120, "FG0-ARCH-01：整个世界同时运行——远征进行中，家园没有退出");
         }
 
         // FG1-SIG-03（FG01 第 5 章“存档时玩家在机器里”）：暂停菜单存档前先接入一台机器，读档后信号必须还在那台里。
@@ -2219,7 +2472,7 @@ namespace GameLogic.EditorTools
                 return;
             }
             Check(!UI.SignalCore.SignalCoreHudUIToolkit.IsOpen && !PauseMenuUIToolkit.IsOpen, "Esc 关闭信号核面板（没有打开暂停菜单）");
-            Next(120, "FG0-ARCH-01：整个世界同时运行——远征进行中，家园没有退出");
+            Next(207, "FG1-SIG-07：跨地点远距离跳转（等冷却结束）");
         }
 
         // ── FG0-ARCH-01：整个世界同时运行、统一时钟、全局镜头（世界时间条、Tab / Home / 4 / Space 走正式输入）─────────
@@ -2515,6 +2768,11 @@ namespace GameLogic.EditorTools
             int phase = SessionState.GetInt(K + "FoListPhase", 0);
             if (phase == 0)
             {
+                // FG1-SIG-07：信号在归还核心、目标在远征地点 = 跨地点的远距离跳转——先等上一次远距离跳转的冷却结束。
+                if (Campaign.Signal.SignalUplinkService.JumpCooldownRemaining(CampaignSession.Current) > 0 && inStep < 15)
+                {
+                    return false;
+                }
                 Campaign.Regions.HomeValleyMachineMarker m = GameRoot.FoundryOutpost != null && GameRoot.FoundryOutpost.IsActive
                     ? SigCandidateIn(GameRoot.FoundryOutpost.Combat, Campaign.Regions.FoundryOutpostLayout.RegionId, 0)
                     : null;
@@ -2538,15 +2796,121 @@ namespace GameLogic.EditorTools
             int id = SessionState.GetInt(K + "FoListId", 0);
             if (phase == 1)
             {
-                if (inStep < at + 1.5)
+                if (inStep < at + 2.6)
                 {
                     return false;
                 }
                 Check(Campaign.Signal.SignalPresence.CurrentMachineLogicId == id && GameRoot.FoundryOutpost != null
                       && GameRoot.FoundryOutpost.PossessedMachineLogicId == id && WorldView.Director.Mode == View.ViewMode.Direct,
-                    $"铸造前哨外围机器列表点一下：0.35 秒过渡后接入 {SigLabel(id)}，镜头直控");
+                    $"铸造前哨外围机器列表点一下：从归还核心跳到远征地点 = 远距离跳转（1.5 秒过渡）后接入 {SigLabel(id)}，镜头直控");
                 CheckNoTextMarkers("铸造前哨接入后");
+                // FG1-SIG-07 审查修复：先按 H 再按 Esc——跳回家园的远距离过渡能用真实 Esc 取消（不弹暂停菜单、信号留在远征队、不开始新的冷却）。
+                SessionState.SetInt(K + "FoHome0", Campaign.Signal.SignalUplinkService.JumpHomeCount);
+                SessionState.SetInt(K + "FoFar0", Campaign.Signal.SignalUplinkService.FarJumpCount);
+                SessionState.SetInt(K + "FoCancel0", Campaign.Signal.SignalUplinkService.CancelCount);
+                PressKey(GameSettings.KeyBindings.GetKey(GameActionId.JumpHome));
+                SessionState.SetFloat(K + "FoListAt", (float)inStep);
+                SessionState.SetInt(K + "FoListPhase", 7);
+                return false;
+            }
+            CampaignState st = CampaignSession.Current;
+            if (phase == 7)
+            {
+                if (inStep < at + 0.5)
+                {
+                    return false;
+                }
+                Check(Campaign.Signal.SignalUplinkService.IsJumpingHome && Campaign.Signal.SignalPresence.CurrentMachineLogicId == id,
+                    $"按 H：跳回家园过渡中（远距离 1.5 秒），信号还在 {SigLabel(id)} 里——此时按 Esc");
+                PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
+                SessionState.SetFloat(K + "FoListAt", (float)inStep);
+                SessionState.SetInt(K + "FoListPhase", 8);
+                return false;
+            }
+            if (phase == 8)
+            {
+                if (inStep < at + 2.2)
+                {
+                    return false; // 等过原本 1.5 秒的过渡：取消了就不会到点提交。
+                }
+                Check(!Campaign.Signal.SignalUplinkService.IsJumpingHome && Campaign.Signal.SignalPresence.CurrentMachineLogicId == id
+                      && GameRoot.FoundryOutpost != null && GameRoot.FoundryOutpost.PossessedMachineLogicId == id && !PauseMenuUIToolkit.IsOpen
+                      && Campaign.Signal.SignalUplinkService.JumpHomeCount == SessionState.GetInt(K + "FoHome0", 0)
+                      && Campaign.Signal.SignalUplinkService.FarJumpCount == SessionState.GetInt(K + "FoFar0", 0)
+                      && Campaign.Signal.SignalUplinkService.CancelCount == SessionState.GetInt(K + "FoCancel0", 0) + 1
+                      && Campaign.Signal.SignalUplinkService.LastCancel == Campaign.Signal.UplinkCancelReason.PlayerCancelled,
+                    $"跳回家园途中按 Esc：取消（“{Campaign.Signal.SignalUplinkService.LastFeedbackText}”），信号留在 {SigLabel(id)}，暂停菜单没弹，没开始新的冷却");
+                // FG1-SIG-07（FGJ-M1 第 7 步）：在远征地点的机器里按 H 跳回家园——远距离（1.5 秒过渡），冷却中也能回家，并开始冷却。
+                PressKey(GameSettings.KeyBindings.GetKey(GameActionId.JumpHome));
+                SessionState.SetFloat(K + "FoListAt", (float)inStep);
+                SessionState.SetInt(K + "FoListPhase", 4);
+                return false;
+            }
+            if (phase == 4)
+            {
+                if (inStep < at + 0.5)
+                {
+                    return false;
+                }
+                if (!SessionState.GetBool(K + "FoHomeMid", false))
+                {
+                    SessionState.SetBool(K + "FoHomeMid", true);
+                    Check(Campaign.Signal.SignalUplinkService.IsJumpingHome && Campaign.Signal.SignalPresence.CurrentMachineLogicId == id
+                          && GameRoot.FoundryOutpost != null && GameRoot.FoundryOutpost.IsActive,
+                        $"按 H：跳回家园过渡中（从远征地点回家 = 远距离，1.5 秒），信号还在 {SigLabel(id)} 里、镜头还在铸造前哨");
+                    return false;
+                }
+                if (inStep < at + 3.2)
+                {
+                    return false;
+                }
+                SessionState.SetBool(K + "FoHomeMid", false);
+                Check(Campaign.Signal.SignalPresence.AtCore && GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive && WorldView.Director.Mode == View.ViewMode.Strategy
+                      && Campaign.Signal.SignalUplinkService.JumpHomeCount == SessionState.GetInt(K + "FoHome0", 0) + 1
+                      && Campaign.Signal.SignalUplinkService.JumpCooldownRemaining(st) > 0,
+                    $"FGJ-M1 第 7 步：信号回到归还核心、镜头回到家园，远征继续运行；远距离跳转冷却 {Campaign.Signal.SignalUplinkService.JumpCooldownRemaining(st):F1} 秒");
+                PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.JumpPreviousMachine));
+                SessionState.SetFloat(K + "FoListAt", (float)inStep);
+                SessionState.SetInt(K + "FoListPhase", 5);
+                return false;
+            }
+            if (phase == 5)
+            {
+                if (inStep < at + 0.6)
+                {
+                    return false;
+                }
+                if (!SessionState.GetBool(K + "FoJDenied", false))
+                {
+                    SessionState.SetBool(K + "FoJDenied", true);
+                    Check(Campaign.Signal.SignalPresence.AtCore && Campaign.Signal.SignalUplinkService.LastFailure == Campaign.Signal.UplinkFailure.JumpCooldown,
+                        $"刚回家马上按 J 跳回远征队：远距离跳转冷却中被拒——“{Campaign.Signal.SignalUplinkService.LastFeedbackText}”");
+                }
+                if (Campaign.Signal.SignalUplinkService.JumpCooldownRemaining(st) > 0)
+                {
+                    if (inStep > at + 20)
+                    {
+                        Finish("20 秒内远距离跳转冷却没有结束");
+                    }
+                    return false;
+                }
+                SessionState.SetBool(K + "FoJDenied", false);
+                PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.JumpPreviousMachine));
+                SessionState.SetFloat(K + "FoListAt", (float)inStep);
+                SessionState.SetInt(K + "FoListPhase", 6);
+                return false;
+            }
+            if (phase == 6)
+            {
+                if (inStep < at + 3.0)
+                {
+                    return false;
+                }
+                Check(Campaign.Signal.SignalPresence.CurrentMachineLogicId == id && GameRoot.FoundryOutpost != null && GameRoot.FoundryOutpost.IsActive
+                      && GameRoot.FoundryOutpost.PossessedMachineLogicId == id && WorldView.Director.Mode == View.ViewMode.Direct,
+                    $"FGJ-M1 第 8 步：冷却结束后按 J，信号跳回远征队的 {SigLabel(id)}（跨地点远距离跳转，镜头切回铸造前哨并进直控）");
                 PressKey(GameSettings.KeyBindings.GetKey(GameActionId.ToggleCameraView));
+                SessionState.SetFloat(K + "FoListAt", (float)inStep);
                 SessionState.SetInt(K + "FoListPhase", 2);
                 return false;
             }

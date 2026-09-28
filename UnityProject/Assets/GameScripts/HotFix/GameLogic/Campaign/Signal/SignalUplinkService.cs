@@ -27,7 +27,7 @@ namespace GameLogic.Campaign.Signal
         NotFound,
         /// <summary>目标阵亡。</summary>
         Dead,
-        /// <summary>目标不在当前查看的地点（跨地点的远距离跳转是 FG1-SIG-07）。</summary>
+        /// <summary>目标所在的地点没有在运行（远征已结束 / 还没出发）。FG1-SIG-07 起跨地点的接入就是远距离跳转，不再要求镜头先切过去。</summary>
         OtherSite,
         /// <summary>超出与归还核心连通的信号覆盖（覆盖网络是 FG1-SIG-07；本 Story 留接口 <see cref="SignalUplinkService.CoverageProvider"/>）。</summary>
         OutOfCoverage,
@@ -52,6 +52,10 @@ namespace GameLogic.Campaign.Signal
         /// <summary>镜头正在拉回战略视角（刚按了退出键 / 点了通知飞走）：落地后再接入。否则这次接入会在镜头落地时被当成“玩家退出”取消，
         /// 低帧率下还可能先接进去、落地时又立刻离开（白白取消了目标的移动命令）。</summary>
         ViewLeaving,
+        /// <summary>FG1-SIG-07（FGR-SIG-052）：远距离跳转（超过 signal.jump.far_distance_cells 格或跨地点）还在冷却。跳回家园不受限制。</summary>
+        JumpCooldown,
+        /// <summary>FG1-SIG-07（FGR-SIG-051）：按“跳回上一台机器”时还没有上一台。</summary>
+        NoPrevious,
     }
 
     /// <summary>发起接入的入口（反馈与统计用）。</summary>
@@ -63,6 +67,8 @@ namespace GameLogic.Campaign.Signal
         Cycle = 1,
         /// <summary>在机器列表里直接点一台机器。</summary>
         MachineList = 2,
+        /// <summary>FG1-SIG-07：按“跳回上一台机器”（默认 J，可重绑）或点 HUD 的“上一台”。</summary>
+        JumpPrevious = 3,
     }
 
     /// <summary>接入过渡被取消的原因。</summary>
@@ -173,6 +179,28 @@ namespace GameLogic.Campaign.Signal
         /// <summary>接入中改了信号核（在家园按 P 装卸 / 换位 / 切预设）时，要让接入的机器重新插入——记下上次同步时的信号核版本。</summary>
         private static int _coreRevisionSeen = -1;
 
+        // ── FG1-SIG-07 远距离跳转（FGR-SIG-051、052）──
+        /// <summary>这次过渡是远距离跳转（超过门槛或跨地点）：过渡 1.5 秒、提交后开始冷却。</summary>
+        private static bool _pendingFar;
+        /// <summary>这次跳转的距离（格；跨地点为 +∞），状态行显示用。</summary>
+        private static float _pendingDistance;
+        /// <summary>“跳回家园”的远距离过渡（信号从远处的机器回到归还核心），与接入过渡互斥。</summary>
+        private static bool _pendingHome;
+        private static float _pendingHomeRemaining;
+        private static bool _pendingHomeWaitsResume;
+        /// <summary>发起“跳回家园”时信号所在的机器：到点时信号已不在它里面（按 V 离开 / 阵亡 / 断链已回到核心），只把镜头飞回家园、不开始冷却。</summary>
+        private static int _pendingHomeFrom;
+
+        /// <summary>远距离跳转次数、跳回家园次数（自检 / 冒烟读取）。</summary>
+        public static int FarJumpCount { get; private set; }
+        public static int JumpHomeCount { get; private set; }
+        public static bool IsJumpingHome => _pendingHome;
+        /// <summary>有 Esc 能取消的过渡：接入 / 远距离跳转，或“跳回家园”的远距离过渡（HUD 据此在取消栈里压一层，<see cref="CancelByPlayer"/> 两种都处理）。</summary>
+        public static bool HasCancellableTransition => _pendingTarget != 0 || _pendingHome;
+        public static float JumpHomeRemaining => _pendingHome ? _pendingHomeRemaining : 0f;
+        public static bool PendingIsFar => _pendingTarget != 0 && _pendingFar;
+        public static float PendingDistance => _pendingTarget != 0 ? _pendingDistance : 0f;
+
         // ── 过渡（运行时，不进存档：过渡没完成时存档，读回来信号在原处）──
         private static int _pendingTarget;
         private static int _pendingOrigin;
@@ -223,6 +251,82 @@ namespace GameLogic.Campaign.Signal
                 }
                 return 0.35f;
             }
+        }
+
+        /// <summary>FG1-SIG-07（FGR-SIG-051）：远距离跳转的距离门槛（格，初值 500）。</summary>
+        public static float FarDistanceCells => JumpTuning("signal.jump.far_distance_cells", 500f);
+        /// <summary>远距离跳转的过渡（真实秒，初值 1.5；战略暂停中不走）。</summary>
+        public static float FarTransitionSeconds => JumpTuning("signal.jump.far_transition_seconds", 1.5f);
+        /// <summary>远距离跳转的冷却（游戏秒，初值 10；FGR-SIG-052）。</summary>
+        public static float FarCooldownSeconds => JumpTuning("signal.jump.far_cooldown_seconds", 10f);
+
+        private static float JumpTuning(string id, float fallback)
+        {
+            if (GridContent.TryGetTuning(id, out float v) && v > 0f)
+            {
+                return v;
+            }
+            if (WarnedTuning.Add(id))
+            {
+                Log.Error($"[SignalUplinkService] fg.TbHomeTuning 缺少 {id}，暂用规格初值 {fallback}（改 tools/cell_tables/fgdata_signal.py 后重新生成）。");
+            }
+            return fallback;
+        }
+
+        /// <summary>远距离跳转冷却还剩多少游戏秒（0 = 可以跳）。冷却记在信号上并进存档（FG01 第 6 章“远距离跳转冷却”）。</summary>
+        public static double JumpCooldownRemaining(CampaignState s)
+        {
+            long ready = s?.SignalCore?.JumpCooldownReadyTick ?? 0;
+            return Math.Max(0, (ready - GameClock.Ticks) / (double)GameClock.StepHz);
+        }
+
+        /// <summary>
+        /// 信号现在在哪（跳转的起点）：在机器里 = 那台机器所在的地点与实时位置；在归还核心 = 家园所在的星球表面与核心位置（FGR-SIG-002“信号同一时刻只在一处”）。
+        /// </summary>
+        public static void SignalOrigin(CampaignState s, out string siteId, out Vector2 position)
+        {
+            int id = CurrentMachine(s);
+            if (id != 0 && MachineRegistry.TryGetRecord(id, out MachineRecord rec) && rec != null)
+            {
+                siteId = rec.RegionId;
+                position = MachineRegistry.TryGetLivePosition(id, out Vector2 live) ? live : rec.WorldPosition;
+                return;
+            }
+            siteId = HomeValleyLayout.RegionId;
+            position = CorePosition(s);
+        }
+
+        /// <summary>归还核心的位置（核心建筑记录的几何中心；没有记录时按开局布局锚点）。</summary>
+        public static Vector2 CorePosition(CampaignState s)
+        {
+            BuildingRecord[] b = s?.BuildingRecords;
+            if (b != null)
+            {
+                for (int i = 0; i < b.Length; i++)
+                {
+                    if (b[i] != null && b[i].BuildingTypeId == HomeValleyLayout.BuildingTypeCore)
+                    {
+                        return b[i].Position;
+                    }
+                }
+            }
+            return HomeValleyLayout.Core.Position;
+        }
+
+        /// <summary>
+        /// FG1-SIG-07（FGR-SIG-051）：从信号现在的位置跳到 <paramref name="toSite"/> 的 <paramref name="to"/> 算不算远距离：跨地点一律算（距离 +∞），
+        /// 同一地点按直线距离与门槛比较。
+        /// </summary>
+        public static bool IsFarJump(CampaignState s, string toSite, Vector2 to, out float distance)
+        {
+            SignalOrigin(s, out string fromSite, out Vector2 from);
+            if (fromSite != toSite)
+            {
+                distance = float.PositiveInfinity;
+                return true;
+            }
+            distance = Vector2.Distance(from, to);
+            return distance > FarDistanceCells;
         }
 
         // ─────────────────────────────── 查询 ───────────────────────────────
@@ -336,8 +440,9 @@ namespace GameLogic.Campaign.Signal
             {
                 return pre;
             }
+            // FG1-SIG-07（FGR-SIG-051）：跨地点的接入就是远距离跳转——不再要求镜头先切到目标所在的地点，只要地点在运行、目标在里面。
             RegionControlSystem control = RegionControlSystem.ForRegion(rec.RegionId);
-            if (control == null || !WorldView.IsObserved(rec.RegionId) || !TryGetTargetMarker(control, rec.RegionId, logicId, out marker))
+            if (control == null || !TryGetTargetMarker(control, rec.RegionId, logicId, out marker))
             {
                 return UplinkFailure.OtherSite;
             }
@@ -378,7 +483,7 @@ namespace GameLogic.Campaign.Signal
             // FG1-SIG-04：覆盖判定默认走信号覆盖（归还核心 + 运转且有电的信号塔，SignalCoverageService）；CoverageProvider 仍可整体替换（自检 / FG1-SIG-07）。
             bool covered = CoverageProvider != null
                 ? CoverageProvider(logicId)
-                : (position.HasValue ? SignalCoverageService.Sample(rec.RegionId, position.Value) : SignalCoverageService.SampleMachine(logicId)).Covered;
+                : (position.HasValue ? SignalCoverageService.Sample(rec.RegionId, position.Value, logicId) : SignalCoverageService.SampleMachine(logicId)).Covered;
             return covered ? UplinkFailure.None : UplinkFailure.OutOfCoverage;
         }
 
@@ -429,9 +534,9 @@ namespace GameLogic.Campaign.Signal
             {
                 return Reject(UplinkFailure.ModalBlocked, logicId, source);
             }
-            if (_pendingTarget != 0 && !_pendingWaitsResume)
+            if ((_pendingTarget != 0 && !_pendingWaitsResume) || _pendingHome)
             {
-                return Reject(UplinkFailure.Busy, _pendingTarget, source);
+                return Reject(UplinkFailure.Busy, _pendingTarget != 0 ? _pendingTarget : logicId, source);
             }
             CameraDirector view = WorldView.Director;
             if (view != null && view.IsBound && view.InTransition && view.TransitionTarget == ViewMode.Strategy)
@@ -451,12 +556,21 @@ namespace GameLogic.Campaign.Signal
             }
 
             MachineRegistry.TryGetRecord(logicId, out MachineRecord rec);
+            // FG1-SIG-07（FGR-SIG-051、052）：超过门槛或跨地点 = 远距离跳转：过渡 1.5 秒（世界照常运行）、提交后冷却 10 游戏秒；冷却中拒绝（跳回家园不受限）。
+            Vector3 targetPos3 = marker.Position3;
+            bool far = IsFarJump(s, rec.RegionId, new Vector2(targetPos3.x, targetPos3.z), out float distance);
+            if (far && JumpCooldownRemaining(s) > 0)
+            {
+                return Reject(UplinkFailure.JumpCooldown, logicId, source);
+            }
             bool paused = GameClock.Paused;
             _pendingTarget = logicId;
             _pendingMarker = marker;
             _pendingSite = rec.RegionId;
             _pendingOrigin = CurrentMachine(s);
-            _pendingRemaining = TransitionSeconds;
+            _pendingFar = far;
+            _pendingDistance = distance;
+            _pendingRemaining = far ? FarTransitionSeconds : TransitionSeconds;
             _pendingWaitsResume = paused;
             _pendingSawDirect = false;
             _pendingSource = source;
@@ -464,10 +578,14 @@ namespace GameLogic.Campaign.Signal
             LastFailure = UplinkFailure.None;
             Revision++;
             string label = SignalPresence.MachineLabel(logicId);
-            string text = GameText.Format(paused ? "signal.uplink.pending_paused" : "signal.uplink.pending", label);
+            string text = far && !paused ? PendingFarLine() : GameText.Format(paused ? "signal.uplink.pending_paused" : "signal.uplink.pending", label);
             SetFeedback(text);
             FeedbackCues.Raise(FeedbackCueId.CommandAck, null, FeedbackCues.MachineChassisSfx(logicId));
-            if (startCamera && !paused)
+            if (far && rec.RegionId == HomeValleyLayout.RegionId)
+            {
+                WorldView.PinPlanet(new Vector2(targetPos3.x, targetPos3.z)); // 星球表面的远处：镜头范围先包含目标，离开接入后不被“已探索区域”钳回去。
+            }
+            if (startCamera && !paused && WorldView.IsObserved(rec.RegionId))
             {
                 StartCamera();
             }
@@ -478,7 +596,7 @@ namespace GameLogic.Campaign.Signal
         public static UplinkRequestResult RequestCycle()
         {
             CampaignState s = CampaignSession.Current;
-            if (_pendingTarget != 0 && !_pendingWaitsResume)
+            if ((_pendingTarget != 0 && !_pendingWaitsResume) || _pendingHome)
             {
                 return Reject(UplinkFailure.Busy, _pendingTarget, UplinkSource.Cycle);
             }
@@ -527,6 +645,15 @@ namespace GameLogic.Campaign.Signal
         /// <summary>玩家取消还没完成的接入（Esc）。</summary>
         public static bool CancelByPlayer()
         {
+            if (_pendingHome)
+            {
+                ClearPendingHome();
+                CancelCount++;
+                LastCancel = UplinkCancelReason.PlayerCancelled;
+                SetFeedback(GameText.Get("signal.jump.cancelled_home"));
+                FeedbackCues.Raise(FeedbackCueId.CommandAck);
+                return true;
+            }
             if (_pendingTarget == 0)
             {
                 return false;
@@ -535,12 +662,160 @@ namespace GameLogic.Campaign.Signal
             return true;
         }
 
+        // ─────────────────────────────── FG1-SIG-07 跳回家园 / 上一台（FGR-SIG-051）───────────────────────────────
+
+        /// <summary>
+        /// “跳回家园”（默认 H，可重绑）：信号回到归还核心，镜头飞回家园。信号已在核心 → 只把镜头飞回家园。
+        /// 信号在离核心不超过门槛的家园机器里 → 立即离开并飞回；更远（或在远征地点）→ 1.5 秒过渡（世界照常运行），到点离开并飞回，开始远距离跳转冷却。
+        /// 跳回家园本身不受冷却限制（最稳妥：任何时候都能回家处理家园的事）。
+        /// </summary>
+        public static UplinkRequestResult RequestJumpHome()
+        {
+            CampaignState s = CampaignSession.Current;
+            if (s == null)
+            {
+                return Reject(UplinkFailure.NoCampaign, 0, UplinkSource.Hotkey);
+            }
+            if (InputRouter.PanelModalOpen)
+            {
+                return Reject(UplinkFailure.ModalBlocked, 0, UplinkSource.Hotkey);
+            }
+            if ((_pendingTarget != 0 && !_pendingWaitsResume) || _pendingHome)
+            {
+                return Reject(UplinkFailure.Busy, _pendingTarget, UplinkSource.Hotkey);
+            }
+            if (_pendingTarget != 0)
+            {
+                Cancel(UplinkCancelReason.PlayerCancelled, null); // 暂停中排着的接入：玩家改主意回家。
+            }
+            int id = CurrentMachine(s);
+            if (id == 0)
+            {
+                WorldView.FocusHomeCore();
+                JumpHomeCount++;
+                string at = GameText.Get("signal.jump.home_camera");
+                SetFeedback(at);
+                FeedbackCues.Raise(FeedbackCueId.CommandAck);
+                return new UplinkRequestResult(true, UplinkFailure.None, 0, at, false);
+            }
+            SignalOrigin(s, out string site, out Vector2 from);
+            bool far = site != HomeValleyLayout.RegionId || Vector2.Distance(from, CorePosition(s)) > FarDistanceCells;
+            if (!far)
+            {
+                CommitJumpHome(s, false);
+                return new UplinkRequestResult(true, UplinkFailure.None, 0, _feedback, false);
+            }
+            _pendingHome = true;
+            _pendingHomeFrom = id;
+            _pendingHomeRemaining = FarTransitionSeconds;
+            _pendingHomeWaitsResume = GameClock.Paused;
+            AcceptedCount++;
+            Revision++;
+            string text = GameText.Format("signal.jump.pending_home", Seconds(_pendingHomeRemaining));
+            SetFeedback(text);
+            FeedbackCues.Raise(FeedbackCueId.CommandAck);
+            return new UplinkRequestResult(true, UplinkFailure.None, 0, text, _pendingHomeWaitsResume);
+        }
+
+        /// <summary>“跳回上一台机器”（默认 J，可重绑）：跳回最近接入过、不是当前这台的机器（与发起接入同一套条件、远距离时同样过渡与冷却）。</summary>
+        public static UplinkRequestResult RequestJumpPrevious()
+        {
+            CampaignState s = CampaignSession.Current;
+            int prev = PreviousMachine(s);
+            if (prev == 0)
+            {
+                return Reject(UplinkFailure.NoPrevious, 0, UplinkSource.JumpPrevious);
+            }
+            return Request(prev, UplinkSource.JumpPrevious);
+        }
+
+        /// <summary>“上一台机器”：最近接入过的机器里第一台不是当前这台的（信号在核心时 = 最后接入的那台）。没有为 0。</summary>
+        public static int PreviousMachine(CampaignState s)
+        {
+            int[] recent = s?.SignalCore?.RecentUplinks;
+            int cur = CurrentMachine(s);
+            if (recent == null)
+            {
+                return 0;
+            }
+            for (int i = 0; i < recent.Length; i++)
+            {
+                if (recent[i] > 0 && recent[i] != cur)
+                {
+                    return recent[i];
+                }
+            }
+            return 0;
+        }
+
+        private static void CommitJumpHome(CampaignState s, bool far)
+        {
+            int id = CurrentMachine(s);
+            string site = s.SignalCore.UplinkSiteId;
+            if (id != 0)
+            {
+                RegionControlSystem control = RegionControlSystem.ForRegion(site);
+                if (control != null && control.PossessedLogicId == id)
+                {
+                    control.ReleaseToStrategy(RegionControlChangeReason.PlayerRequest);
+                }
+                if (CurrentMachine(s) == id)
+                {
+                    SetUplink(s, 0, string.Empty, RegionControlChangeReason.PlayerRequest); // 地点接管系统不在（防御）：信号也要回到核心。
+                }
+            }
+            WorldView.FocusHomeCore();
+            JumpHomeCount++;
+            if (far)
+            {
+                StartJumpCooldown(s);
+            }
+            SetFeedback(GameText.Get("signal.jump.home_done"));
+            FeedbackCues.Raise(FeedbackCueId.CommandAck);
+        }
+
+        private static void StartJumpCooldown(CampaignState s)
+        {
+            EnsureState(s);
+            s.SignalCore.JumpCooldownReadyTick = GameClock.Ticks + (long)Math.Round(FarCooldownSeconds * GameClock.StepHz);
+            FarJumpCount++;
+            Revision++;
+            GuidanceHooks.Raise(GuidanceHooks.SignalFirstFarJump);
+        }
+
+        private static void ClearPendingHome()
+        {
+            if (_pendingHome)
+            {
+                Revision++;
+            }
+            _pendingHome = false;
+            _pendingHomeFrom = 0;
+            _pendingHomeRemaining = 0f;
+            _pendingHomeWaitsResume = false;
+        }
+
+        private static string Seconds(float v) => Mathf.Max(0f, v).ToString("0.0", CultureInfo.InvariantCulture);
+
+        private static string PendingFarLine()
+        {
+            string dist = float.IsInfinity(_pendingDistance)
+                ? GameText.Get("signal.jump.other_site")
+                : GameText.Format("signal.jump.distance_cells", Mathf.RoundToInt(_pendingDistance).ToString(CultureInfo.InvariantCulture));
+            return GameText.Format("signal.jump.pending_far", SignalPresence.MachineLabel(_pendingTarget), dist, Seconds(_pendingRemaining));
+        }
+
         // ─────────────────────────────── 过渡推进与提交（FGR-SIG-031）───────────────────────────────
 
         /// <summary>每帧（世界模拟推进之后、被观察地点处理输入之前）调用：推进过渡、过渡途中目标失效就取消、到点提交。</summary>
         public static void FrameTick(float realDt)
         {
             SyncCoreEdits(CampaignSession.Current);
+            if (_pendingHome)
+            {
+                TickJumpHome(realDt);
+                return;
+            }
             if (_pendingTarget == 0)
             {
                 return;
@@ -571,12 +846,16 @@ namespace GameLogic.Campaign.Signal
                 // 战略暂停中发起的接入：恢复运行后才开始过渡（第 5 章）。
                 _pendingWaitsResume = false;
                 Revision++;
-                SetFeedback(GameText.Format("signal.uplink.pending", SignalPresence.MachineLabel(_pendingTarget)));
-                StartCamera();
+                SetFeedback(_pendingFar ? PendingFarLine() : GameText.Format("signal.uplink.pending", SignalPresence.MachineLabel(_pendingTarget)));
+                if (WorldView.IsObserved(_pendingSite))
+                {
+                    StartCamera();
+                }
                 return;
             }
             CameraDirector d = WorldView.Director;
-            if (d != null && d.IsBound)
+            // FG1-SIG-07：目标在镜头没看着的地点（跨地点的远距离跳转）——过渡期间镜头留在原处（信号还在原来的机器里），提交时再切过去。
+            if (d != null && d.IsBound && WorldView.IsObserved(_pendingSite))
             {
                 if (d.HeadingDirect)
                 {
@@ -597,38 +876,101 @@ namespace GameLogic.Campaign.Signal
             {
                 return; // 过渡在暂停中不走（恢复运行后完成）。
             }
+            float before = _pendingRemaining;
             _pendingRemaining -= Mathf.Max(0f, realDt);
             if (_pendingRemaining > 0f)
             {
+                if (_pendingFar && Mathf.Ceil(before * 10f) != Mathf.Ceil(_pendingRemaining * 10f))
+                {
+                    Revision++; // 状态行的倒计时按 0.1 秒刷新。
+                }
                 return;
             }
             Commit();
+        }
+
+        private static void TickJumpHome(float realDt)
+        {
+            CampaignState s = CampaignSession.Current;
+            if (s == null)
+            {
+                ClearPendingHome();
+                return;
+            }
+            if (_pendingHomeWaitsResume)
+            {
+                if (GameClock.Paused)
+                {
+                    return;
+                }
+                _pendingHomeWaitsResume = false;
+                Revision++;
+            }
+            if (GameClock.Paused)
+            {
+                return; // 过渡在暂停中不走（恢复运行后完成）。
+            }
+            float before = _pendingHomeRemaining;
+            _pendingHomeRemaining -= Mathf.Max(0f, realDt);
+            if (_pendingHomeRemaining > 0f)
+            {
+                if (Mathf.Ceil(before * 10f) != Mathf.Ceil(_pendingHomeRemaining * 10f))
+                {
+                    Revision++;
+                }
+                return;
+            }
+            // 审查修复：过渡途中信号已经自己离开了发起时那台机器（按 V 离开 / 阵亡 / 断链回到核心）——这次跳回家园不再是远距离跳转：
+            // 只把镜头飞回家园（与信号在核心时按 H 同一口径），不开始冷却。
+            bool stillFar = CurrentMachine(s) == _pendingHomeFrom;
+            ClearPendingHome();
+            CommitJumpHome(s, far: stillFar);
         }
 
         private static void Commit()
         {
             int target = _pendingTarget;
             string site = _pendingSite;
+            bool far = _pendingFar;
+            HomeValleyMachineMarker marker = _pendingMarker;
             ClearPending();
+            // FG1-SIG-07（FGR-SIG-051）：目标在镜头没看着的地点——先把镜头切过去（离开原来的地点会按“主动离开”释放原来那台，
+            // 它按最后的命令和 AI 教义继续），再接管目标，最后镜头进直控对准它（不走战略飞行：落在战略视角会被当成“玩家退出”）。
             RegionControlSystem control = RegionControlSystem.ForRegion(site);
+            bool switched = false;
+            if (!WorldView.IsObserved(site))
+            {
+                // 审查修复：先在目标地点校验接管能不能成功，通过了再切镜头——失败时镜头留在原处、原来那台不被释放、信号留在原处。
+                RegionControlFailure pre = RegionControlFailure.OutOfRange;
+                if (control == null || !control.CanCommitUplink(target, out pre))
+                {
+                    FailCommit(target, pre);
+                    return;
+                }
+                Vector3 p = marker != null && marker.IsValid ? marker.Position3 : Vector3.zero;
+                switched = WorldView.ObserveAt(site, new Vector2(p.x, p.z));
+                control = RegionControlSystem.ForRegion(site); // 防御：切镜头后按地点重新取一次（地点接管系统是 O(1) 字典查询）。
+            }
             RegionControlSwitchResult r = control != null
                 ? control.CommitUplink(target)
                 : RegionControlSwitchResult.Fail(RegionControlFailure.OutOfRange);
             if (!r.Success && r.Failure != RegionControlFailure.AlreadyControlled)
             {
-                CancelCount++;
-                LastCancel = r.Failure == RegionControlFailure.TargetDead ? UplinkCancelReason.TargetDead : UplinkCancelReason.TargetUnavailable;
-                string why = LastCancel == UplinkCancelReason.TargetDead
-                    ? GameText.Format("signal.uplink.cancel.dead", SignalPresence.MachineLabel(target))
-                    : GameText.Format("signal.uplink.cancel.gone", SignalPresence.MachineLabel(target), FailureText(FromControlFailure(r.Failure), target));
-                SetFeedback(why);
-                FeedbackCues.Raise(FeedbackCueId.Denied, why);
+                FailCommit(target, r.Failure);
                 return;
             }
             CommitCount++;
             Revision++;
             GuidanceHooks.Raise(GuidanceHooks.SignalFirstUplink); // 第一次接入完成（引导内容在 FG15-UX-04）。
             CampaignState s = CampaignSession.Current;
+            if (far)
+            {
+                StartJumpCooldown(s); // FGR-SIG-052：远距离跳转完成后冷却（记在信号上，按游戏时间）。
+            }
+            if (switched)
+            {
+                StartCamera();
+            }
             string status = SteadyStatus(s, target);
             string label = SignalPresence.MachineLabel(target);
             string entered = string.IsNullOrEmpty(status) ? GameText.Format("signal.uplink.entered", label)
@@ -638,6 +980,18 @@ namespace GameLogic.Campaign.Signal
                 ? entered + GameText.Get("signal.uplink.status.sep") + _lastHandoffText
                 : entered);
             FeedbackCues.Raise(FeedbackCueId.Takeover, string.IsNullOrEmpty(status) ? label : label + GameText.Get("signal.uplink.status.sep") + status);
+        }
+
+        /// <summary>到点提交接管失败：取消这次接入并说明原因（信号留在原处）。</summary>
+        private static void FailCommit(int target, RegionControlFailure failure)
+        {
+            CancelCount++;
+            LastCancel = failure == RegionControlFailure.TargetDead ? UplinkCancelReason.TargetDead : UplinkCancelReason.TargetUnavailable;
+            string why = LastCancel == UplinkCancelReason.TargetDead
+                ? GameText.Format("signal.uplink.cancel.dead", SignalPresence.MachineLabel(target))
+                : GameText.Format("signal.uplink.cancel.gone", SignalPresence.MachineLabel(target), FailureText(FromControlFailure(failure), target));
+            SetFeedback(why);
+            FeedbackCues.Raise(FeedbackCueId.Denied, why);
         }
 
         private static void Cancel(UplinkCancelReason reason, string detail)
@@ -687,6 +1041,8 @@ namespace GameLogic.Campaign.Signal
             _pendingMarker = null;
             _pendingOrigin = 0;
             _pendingSite = null;
+            _pendingFar = false;
+            _pendingDistance = 0f;
             _pendingRemaining = 0f;
             _pendingWaitsResume = false;
             _pendingSawDirect = false;
@@ -751,6 +1107,11 @@ namespace GameLogic.Campaign.Signal
                 case UplinkFailure.AlreadyUplinked: return GameText.Format("signal.uplink.reason.already", label);
                 case UplinkFailure.NoCandidate: return GameText.Get("signal.uplink.reason.no_candidate");
                 case UplinkFailure.ViewLeaving: return GameText.Get("signal.uplink.reason.view_leaving");
+                case UplinkFailure.JumpCooldown:
+                    return GameText.Format("signal.uplink.reason.jump_cooldown",
+                        Math.Ceiling(JumpCooldownRemaining(CampaignSession.Current)).ToString("0", CultureInfo.InvariantCulture),
+                        FarDistanceCells.ToString("0", CultureInfo.InvariantCulture));
+                case UplinkFailure.NoPrevious: return GameText.Get("signal.uplink.reason.no_previous");
                 default: return GameText.Get("signal.uplink.reason.not_found");
             }
         }
@@ -819,9 +1180,25 @@ namespace GameLogic.Campaign.Signal
             }
             if (bound?.SignalCore != null && bound.SignalCore.UplinkMachineLogicId != 0 && bound.SignalCore.UplinkSiteId == regionId)
             {
+                // FG1-SIG-07 审查修复：信号所在的地点卸载了——从这里发起的“跳回家园”过渡随之作废（信号已经回到核心，不再到点提交、不开始冷却）。
+                ClearPendingHome();
                 SetUplink(bound, 0, string.Empty, RegionControlChangeReason.RegionUnload);
                 SignalLinkService.ClearWatch();
             }
+        }
+
+        /// <summary>
+        /// FG1-SIG-07 审查修复：整个世界卸载（回主菜单 / 读档 / 回滚，<c>WorldSimulation.UnloadAll</c>）时清掉全部运行时过渡——
+        /// 接入 / 远距离跳转过渡与“跳回家园”过渡都不进存档（过渡没完成时存档，读回来信号在原处），不能带进下一局或读档后的对局；
+        /// 状态行上一条反馈也属于旧世界，一并清掉。存档数据（冷却、最近接入）不动。
+        /// </summary>
+        public static void OnWorldUnloaded()
+        {
+            ClearPending();
+            ClearPendingHome();
+            _feedback = string.Empty;
+            _feedbackUntil = 0f;
+            Revision++;
         }
 
         private static void SetUplink(CampaignState s, int logicId, string siteId, RegionControlChangeReason reason)
@@ -840,6 +1217,10 @@ namespace GameLogic.Campaign.Signal
                 CombatSites.Get(s.SignalCore.UplinkSiteId)?.TryGetMachineHeat(old, out _, out oldOverheated);
             }
             _lastHandoffOverheated = false;
+            if (logicId != 0)
+            {
+                PushRecent(s, logicId); // FG1-SIG-07：“跳回上一台机器”的记录（最近接入过的机器，进存档）。
+            }
             s.SignalCore.UplinkMachineLogicId = logicId;
             s.SignalCore.UplinkSiteId = logicId == 0 ? string.Empty : siteId ?? string.Empty;
             _coreRevisionSeen = SignalCoreService.Revision;
@@ -879,6 +1260,21 @@ namespace GameLogic.Campaign.Signal
                     FracturedCityLayout.WeaponHeatRecoverThreshold.ToString("0", CultureInfo.InvariantCulture));
                 SetFeedback(_lastHandoffText);
             }
+        }
+
+        /// <summary>FG1-SIG-07：最近接入过的机器（去重、最新在前，最多 4 台）。</summary>
+        private static void PushRecent(CampaignState s, int logicId)
+        {
+            int[] old = s.SignalCore.RecentUplinks ?? Array.Empty<int>();
+            var next = new List<int>(4) { logicId };
+            for (int i = 0; i < old.Length && next.Count < 4; i++)
+            {
+                if (old[i] > 0 && old[i] != logicId)
+                {
+                    next.Add(old[i]);
+                }
+            }
+            s.SignalCore.RecentUplinks = next.ToArray();
         }
 
         /// <summary>FG1-SIG-05：刚离开的那台机器交还 AI 时还在过热（本次变更的反馈已写成“散热后才开火”，不再被“已离开”覆盖）。</summary>
@@ -1094,8 +1490,16 @@ namespace GameLogic.Campaign.Signal
         /// </summary>
         public static string StatusLine(CampaignState s)
         {
+            if (_pendingHome)
+            {
+                return GameText.Format("signal.jump.pending_home", Seconds(_pendingHomeRemaining));
+            }
             if (_pendingTarget != 0)
             {
+                if (_pendingFar && !_pendingWaitsResume)
+                {
+                    return PendingFarLine();
+                }
                 return GameText.Format(_pendingWaitsResume ? "signal.uplink.pending_paused" : "signal.uplink.pending", SignalPresence.MachineLabel(_pendingTarget));
             }
             int id = CurrentMachine(s);
@@ -1129,8 +1533,9 @@ namespace GameLogic.Campaign.Signal
                 }
             }
             bool feedbackActive = _feedback.Length > 0 && Now < _feedbackUntil;
+            int jumpKey = (int)Math.Ceiling(JumpCooldownRemaining(s));
             return HashCode.Combine(HashCode.Combine(Revision, CurrentMachine(s), cooldownKey, feedbackActive, SignalCoreService.Revision, FirmwareKinds.Revision, (int)GameText.Language),
-                SignalLinkService.WarningRevision);
+                SignalLinkService.WarningRevision, jumpKey);
         }
 
         /// <summary>接入中的常驻状态：插了什么（冷却中的标出剩余秒数）、没插入的逐条原因、没有接入口 / 信号核为空 / 接入口没接通。</summary>
@@ -1213,12 +1618,16 @@ namespace GameLogic.Campaign.Signal
             }
             s.SignalCore.UplinkSiteId ??= string.Empty;
             s.SignalCore.CoreCooldowns ??= Array.Empty<SignalCoreCooldownRecord>();
+            s.SignalCore.RecentUplinks ??= Array.Empty<int>();
         }
 
         /// <summary>自检之间复位（不动存档数据）。</summary>
         public static void ResetForTests()
         {
             ClearPending();
+            ClearPendingHome();
+            FarJumpCount = 0;
+            JumpHomeCount = 0;
             CoverageProvider = null;
             SilentNightProvider = null;
             OnRepairBayProvider = null;

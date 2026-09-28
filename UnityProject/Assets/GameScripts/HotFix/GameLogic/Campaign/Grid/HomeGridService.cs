@@ -252,6 +252,50 @@ namespace GameLogic.Campaign.Grid
             state.Grid.LayoutVersion = LayoutVersion;
         }
 
+        /// <summary>
+        /// FG1-SIG-07（FG03 FGR-LOG-013“探索靠信号塔覆盖范围扩张”；DEBT-FG0ARCH04-06 的信号覆盖部分）：把一个圆记为已探索（只增不减，进存档）。
+        /// 已经有一个完全罩住它的已探索圆时什么也不做（返回 false）。开销 O(已探索圆数)，只在覆盖源新接上网络时调用。
+        /// </summary>
+        public static bool RevealArea(CampaignState state, Vector2 center, float radius)
+        {
+            if (state == null || radius <= 0f)
+            {
+                return false;
+            }
+            CampaignFgStateDomains.EnsureAll(state);
+            int cx = Mathf.RoundToInt(center.x);
+            int cy = Mathf.RoundToInt(center.y);
+            int r = Mathf.FloorToInt(radius);
+            ExploredAreaRecord[] areas = state.Grid.Explored ?? Array.Empty<ExploredAreaRecord>();
+            foreach (ExploredAreaRecord a in areas)
+            {
+                if (a == null)
+                {
+                    continue;
+                }
+                long dx = cx - a.CenterX;
+                long dy = cy - a.CenterY;
+                double d = Math.Sqrt(dx * dx + dy * dy);
+                if (d + r <= a.Radius)
+                {
+                    return false;
+                }
+            }
+            var next = new ExploredAreaRecord[areas.Length + 1];
+            Array.Copy(areas, next, areas.Length);
+            next[areas.Length] = new ExploredAreaRecord { CenterX = cx, CenterY = cy, Radius = r };
+            state.Grid.Explored = next;
+            if (ReferenceEquals(state, _state) && _map != null)
+            {
+                _map.SetExplored(state.Grid.Explored);
+            }
+            RevealCount++;
+            return true;
+        }
+
+        /// <summary>FG1-SIG-07：信号覆盖扩张探索的次数（自检读取）。</summary>
+        public static int RevealCount { get; private set; }
+
         private static void EnsureStartExplored(CampaignState state)
         {
             if (state.Grid.Explored != null && state.Grid.Explored.Length > 0)

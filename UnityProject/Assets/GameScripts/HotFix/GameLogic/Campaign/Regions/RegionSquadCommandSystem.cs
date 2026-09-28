@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using GameLogic.Campaign.Feedback;
+using GameLogic.Campaign.Signal;
 using GameLogic.Core;
+using GameLogic.Localization;
 using TEngine;
 using GameLogic.View;
 using UnityEngine;
@@ -132,6 +134,13 @@ namespace GameLogic.Campaign.Regions
 
         public IReadOnlyList<int> Selection => _selection;
         public int QueuedCommandCount => _pendingIssues;
+
+        /// <summary>FG1-SIG-07（FGR-SIG-053）：因在信号覆盖外而没收到命令的机器累计台次（自检 / 冒烟读取）。</summary>
+        public static int OutOfCoverageRejects { get; private set; }
+        /// <summary>FG1-SIG-07：最近一次“目标 / 路线走出覆盖”的提醒次数（自检读取）。</summary>
+        public static int RouteWarnings { get; private set; }
+        private readonly List<int> _outScratch = new List<int>(8);
+        private readonly List<Vector2> _coverageRouteScratch = new List<Vector2>(2);
         public IReadOnlyList<string> RecentEvents => _recentEvents;
         public RegionCommandKind? ArmedKind => _armedKind;
         public bool ConsumedClickThisFrame => _clickConsumedThisFrame;
@@ -623,6 +632,10 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             int started = StartCommandForTargets(kind, targetPosition, hostileId, _selection, paused);
+            if (started > 0 && kind == RegionCommandKind.Move)
+            {
+                WarnIfRouteLeavesCoverage(targetPosition);
+            }
             if (paused)
             {
                 if (started > 0)
@@ -662,12 +675,19 @@ namespace GameLogic.Campaign.Regions
             int firstStarted = 0;
             int started = 0;
             int targetUnit = kind == RegionCommandKind.Attack && _ctx.HostileUnit != null ? _ctx.HostileUnit(hostileId) : 0;
+            _outScratch.Clear();
             for (int i = 0; i < targets.Count; i++)
             {
                 int logicId = targets[i];
                 if (_ctx.IsDirectControlled(logicId) || !_ctx.IsEligible(logicId))
                 {
                     continue; // 受控机排除在编队接管之外。
+                }
+                // FG1-SIG-07（FGR-SIG-053）：覆盖外的机器收不到远程命令，继续执行最后的命令和 AI 教义（下令这一刻逐台现采样，O(选中数 × 覆盖源数)）。
+                if (!SignalCoverageService.CanReceiveCommand(logicId))
+                {
+                    _outScratch.Add(logicId);
+                    continue;
                 }
                 HomeValleyMachineMarker marker = FindMarker(logicId);
                 if (marker == null || _ctx.Site == null)
@@ -689,6 +709,7 @@ namespace GameLogic.Campaign.Regions
                     firstStarted = logicId;
                 }
             }
+            ReportOutOfCoverage(_outScratch);
             if (!pending)
             {
                 PushEvent($"{KindLabel(kind)} 已下达（{started} 台）。");
@@ -701,7 +722,73 @@ namespace GameLogic.Campaign.Regions
             return started;
         }
 
-        /// <summary>停止：清除选择集内所有机器的当前编队命令，交还 AI（Guard 的"取消"落点）。</summary>
+        /// <summary>FG1-SIG-07（FGR-SIG-053）：有机器因为在覆盖外没收到命令——命令栏事件行 + 拒绝音 + 字幕写明几台、是哪几台（B06 / B07）。</summary>
+        public void ReportOutOfCoverage(IReadOnlyList<int> logicIds)
+        {
+            if (logicIds == null || logicIds.Count == 0)
+            {
+                return;
+            }
+            OutOfCoverageRejects += logicIds.Count;
+            var names = new System.Text.StringBuilder();
+            for (int i = 0; i < logicIds.Count && i < 3; i++)
+            {
+                if (i > 0)
+                {
+                    names.Append(GameText.Get("signal.uplink.status.list_sep"));
+                }
+                names.Append(Signal.SignalPresence.MachineLabel(logicIds[i]));
+            }
+            if (logicIds.Count > 3)
+            {
+                names.Append("…");
+            }
+            string text = GameText.Format("signal.command.out_of_coverage", logicIds.Count.ToString(), names.ToString());
+            PushEvent(text);
+            FeedbackCues.Raise(FeedbackCueId.Denied, text);
+        }
+
+        /// <summary>FG1-SIG-07：移动命令的目标点 / 从编队中心到目标的直线走出信号覆盖时提醒（命令照样下达：玩家可以有意派机器去覆盖外，到了之后收不到新命令）。
+        /// 用的是派遣检查单同一个提醒接口 <see cref="SignalCoverageService.RouteOutsideLength"/>。</summary>
+        private void WarnIfRouteLeavesCoverage(Vector2 target)
+        {
+            if (_ctx?.Site == null || !SignalCoverageService.IsBoundedSite(_ctx.Site.SiteId))
+            {
+                return;
+            }
+            Vector2 sum = Vector2.zero;
+            int n = 0;
+            foreach (int id in _selection)
+            {
+                HomeValleyMachineMarker m = FindMarker(id);
+                if (m != null)
+                {
+                    sum += m.Position;
+                    n++;
+                }
+            }
+            if (n == 0)
+            {
+                return;
+            }
+            _coverageRouteScratch.Clear();
+            _coverageRouteScratch.Add(sum / n);
+            _coverageRouteScratch.Add(target);
+            float outside = SignalCoverageService.RouteOutsideLength(_ctx.Site.SiteId, _coverageRouteScratch, out _);
+            if (outside <= 0f)
+            {
+                return;
+            }
+            RouteWarnings++;
+            string text = SignalCoverageService.Sample(_ctx.Site.SiteId, target).Covered
+                ? GameText.Format("signal.route.leaves_coverage", Mathf.RoundToInt(outside).ToString())
+                : GameText.Get("signal.command.target_outside");
+            PushEvent(text);
+            FeedbackCues.Raise(FeedbackCueId.SignalLinkWarning, text);
+        }
+
+        /// <summary>停止：清除选择集内所有机器的当前编队命令，交还 AI（Guard 的"取消"落点）。
+        /// FG1-SIG-07：覆盖外的机器收不到“停止”（它也是远程命令），继续执行最后的命令。</summary>
         public void Stop()
         {
             _armedKind = null;
@@ -709,8 +796,14 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
+            _outScratch.Clear();
             foreach (int id in _selection)
             {
+                if (!SignalCoverageService.CanReceiveCommand(id))
+                {
+                    _outScratch.Add(id);
+                    continue;
+                }
                 if (TryGetActiveCommandKind(id, out _))
                 {
                     CancelCommandFor(id);
@@ -720,6 +813,7 @@ namespace GameLogic.Campaign.Regions
                 _ctx?.CancelWorkIfAny?.Invoke(id);
                 FindMarker(id)?.CancelCommandMove();
             }
+            ReportOutOfCoverage(_outScratch);
         }
 
         /// <summary>ER5-CTL-01：接管/释放一台机器时查询它当前的编队命令种类（工作赶路不算编队命令）。纯只读查询。</summary>

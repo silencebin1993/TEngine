@@ -111,6 +111,20 @@ namespace GameLogic.UI.Kit
                 StrategyClock.SetSpeed(3f); // FG0-ARCH-01（FGR-ARC-009）：统一时钟加 3x 档。
             }
 
+            // FG1-SIG-07（FGR-SIG-051、FG01 第 4 章快捷键）：跳回家园 / 跳回上一台机器（战略与接入上下文），覆盖网络叠加层（战略与建造上下文）。全部可重绑。
+            if (InputRouter.ConsumeContextAction(GameActionId.JumpHome))
+            {
+                Campaign.Signal.SignalUplinkService.RequestJumpHome();
+            }
+            if (InputRouter.ConsumeContextAction(GameActionId.JumpPreviousMachine))
+            {
+                Campaign.Signal.SignalUplinkService.RequestJumpPrevious();
+            }
+            if (InputRouter.ConsumeContextAction(GameActionId.ToggleOverlay))
+            {
+                GameLogic.View.SignalCoverageOverlayView.Toggle();
+            }
+
             var all = InputActionCatalog.All;
             for (int i = 0; i < all.Count; i++)
             {

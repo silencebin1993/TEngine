@@ -102,6 +102,7 @@ namespace BinGames.Sim.Combat
             {
                 _dummyNav.Dispose();
             }
+            DisposeCoverage();
             _navBound = false;
         }
 
@@ -823,6 +824,70 @@ namespace BinGames.Sim.Combat
             job.Run();
             Watch.Stop();
             LastStepMs = (Watch.ElapsedTicks - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+        }
+
+        // ─────────────────────────────── 信号覆盖（FG1-SIG-07）───────────────────────────────
+
+        private NativeList<float3> _coverageSources;
+        private NativeList<int2> _coverageChanges;
+
+        /// <summary>
+        /// FG1-SIG-07（FGR-SIG-053）：按热更层给出的“与归还核心连通的覆盖圆”（x, y = 圆心格坐标，z = 半径格数）评估每台己方机器在不在覆盖里，
+        /// 写 <see cref="CombatUnitFlags.OutOfCoverage"/>；状态变了的机器追加到 <paramref name="changes"/>（x = 单位 ID，y = 1 回到覆盖 / 0 走出覆盖）。
+        /// 逐单位 O(机器数 × 覆盖源数) 在 Burst 作业里做（CLAUDE.md 架构 4：逐单位 O(N) 只在 AOT）；世界模拟按游戏时间定期调用，与是否被观察无关。
+        /// 已阵亡的单位不评估（保持原标志）。返回变化条数。
+        /// </summary>
+        public int EvaluateCoverage(IReadOnlyList<float3> sources, List<int2> changes)
+        {
+            changes?.Clear();
+            if (!_d.IsCreated)
+            {
+                return 0;
+            }
+            if (!_coverageSources.IsCreated)
+            {
+                _coverageSources = new NativeList<float3>(16, Allocator.Persistent);
+                _coverageChanges = new NativeList<int2>(16, Allocator.Persistent);
+            }
+            _coverageSources.Clear();
+            if (sources != null)
+            {
+                for (int i = 0; i < sources.Count; i++)
+                {
+                    _coverageSources.Add(sources[i]);
+                }
+            }
+            _coverageChanges.Clear();
+            var job = new CombatCoverageJob { D = _d, Sources = _coverageSources, Changes = _coverageChanges };
+            job.Run();
+            int n = _coverageChanges.Length;
+            if (changes != null)
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    changes.Add(_coverageChanges[i]);
+                }
+            }
+            return n;
+        }
+
+        /// <summary>FG1-SIG-07：这台单位是否被标为在信号覆盖之外（最近一次 <see cref="EvaluateCoverage"/> 的结果）。</summary>
+        public bool IsOutOfCoverage(int id)
+        {
+            int slot = _d.SlotOf(id);
+            return slot >= 0 && _d.Has(slot, CombatUnitFlags.OutOfCoverage);
+        }
+
+        private void DisposeCoverage()
+        {
+            if (_coverageSources.IsCreated)
+            {
+                _coverageSources.Dispose();
+            }
+            if (_coverageChanges.IsCreated)
+            {
+                _coverageChanges.Dispose();
+            }
         }
 
         // ─────────────────────────────── 事件 ───────────────────────────────
@@ -1583,6 +1648,46 @@ namespace BinGames.Sim.Combat
                     A = new float4((float)p.x, (float)p.y, (float)q.x, (float)q.y),
                     B = new float4(pr.Radius, 1f, (float)pr.Faction, 9f),
                 });
+            }
+        }
+    }
+
+    /// <summary>FG1-SIG-07：己方机器在不在信号覆盖里（Burst，Run）。只写 <see cref="CombatUnitFlags.OutOfCoverage"/>，状态变了才记一条。</summary>
+    [BurstCompile(CompileSynchronously = true)]
+    internal struct CombatCoverageJob : IJob
+    {
+        public CombatData D;
+        [ReadOnly] public NativeList<float3> Sources;
+        public NativeList<int2> Changes;
+
+        public void Execute()
+        {
+            int n = Sources.Length;
+            for (int i = 0; i < D.Count; i++)
+            {
+                if (!D.IsAlive(i) || D.Faction[i] != (byte)CombatFaction.Player || D.Kind[i] != (byte)CombatUnitKind.Machine)
+                {
+                    continue;
+                }
+                double2 p = D.Pos[i];
+                bool covered = false;
+                for (int k = 0; k < n; k++)
+                {
+                    float3 s = Sources[k];
+                    double dx = p.x - s.x;
+                    double dy = p.y - s.y;
+                    if (dx * dx + dy * dy <= (double)s.z * s.z)
+                    {
+                        covered = true;
+                        break;
+                    }
+                }
+                bool wasOut = (D.Flags[i] & (uint)CombatUnitFlags.OutOfCoverage) != 0;
+                if (covered == wasOut)
+                {
+                    D.Flags[i] = covered ? D.Flags[i] & ~(uint)CombatUnitFlags.OutOfCoverage : D.Flags[i] | (uint)CombatUnitFlags.OutOfCoverage;
+                    Changes.Add(new int2(D.Id[i], covered ? 1 : 0));
+                }
             }
         }
     }

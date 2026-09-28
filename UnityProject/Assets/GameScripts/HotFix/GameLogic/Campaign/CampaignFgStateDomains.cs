@@ -400,6 +400,14 @@ namespace GameLogic.Campaign
         /// <summary>FG1-SIG-06（FGR-SIG-061）：常规裸跑固件下一次“发动”能计暴露的游戏时刻（0 = 随时）。记在信号上：跳到别的机器不重置（防刷）。
         /// 只加字段不升域版本（旧档读成 0）。唯一写入口 <see cref="Signal.RawFirmwareService"/>。</summary>
         public double RawChargeReadyAtGameSeconds;
+
+        // ── FG1-SIG-07（FGR-SIG-051、052；FG01 第 6 章“远距离跳转冷却”）── 只加字段、不升域版本：旧档读成 0 / 空数组 = 没有冷却、没有上一台。
+
+        /// <summary>远距离跳转冷却到统一时钟的哪一步结束（<c>GameClock.Ticks</c>；0 = 没有冷却）。存整数步而不是游戏秒：
+        /// 游戏秒是 1/60 的倍数，存成浮点经 JsonUtility 读回会差 1 ulp，存读档往返逐字段对照就会不一致。唯一写入口 <c>SignalUplinkService</c>。</summary>
+        public long JumpCooldownReadyTick;
+        /// <summary>最近接入过的机器（LogicId，去重、最新在前，最多 4 台）：“跳回上一台机器”取第一台不是当前这台的。</summary>
+        public int[] RecentUplinks = Array.Empty<int>();
     }
 
     /// <summary>FG1-SIG-04：一台处于安全模式的机器（只运行本地常规固件，接入口为空，继续执行最后一条命令或 AI 教义）。</summary>
@@ -671,6 +679,7 @@ namespace GameLogic.Campaign
             s.SignalCore.UplinkSiteId ??= string.Empty;
             s.SignalCore.CoreCooldowns ??= Array.Empty<SignalCoreCooldownRecord>();
             s.SignalCore.SafeModes ??= Array.Empty<SignalSafeModeRecord>();
+            s.SignalCore.RecentUplinks ??= Array.Empty<int>();
             s.LootPackets ??= new LootPacketState();
             s.Stats ??= new StatsState();
             s.SaveHistory ??= new SaveHistoryState();

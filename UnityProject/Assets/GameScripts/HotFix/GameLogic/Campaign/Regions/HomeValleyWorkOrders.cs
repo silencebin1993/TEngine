@@ -1052,6 +1052,11 @@ namespace GameLogic.Campaign.Regions
                 {
                     continue;
                 }
+                // FG1-SIG-07（FGR-SIG-053）：覆盖外的机器收不到家园派工（远程命令）；回到覆盖后覆盖服务标脏，下一轮自动恢复。读内核标志，O(1)。
+                if (Signal.SignalCoverageService.IsMachineOutOfCoverage(machine.LogicId))
+                {
+                    continue;
+                }
                 (idleMachines ??= new List<MachineRecord>()).Add(machine);
             }
             if (idleMachines == null)

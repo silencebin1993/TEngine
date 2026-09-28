@@ -240,7 +240,7 @@ namespace GameLogic.EditorTools
 
         private static void CheckData()
         {
-            Expect(GridContent.LoadError == null && GridContent.Buildings.Count == 9 && GridContent.StartLayout.Count == 17
+            Expect(GridContent.LoadError == null && GridContent.Buildings.Count == 10 && GridContent.StartLayout.Count == 17
                    && GridContent.Terrains.Count == 7, $"五张格网表已加载：建筑格网属性 {GridContent.Buildings.Count}、开局布局 {GridContent.StartLayout.Count}、地形 {GridContent.Terrains.Count}");
             var missing = FgContentTables.Buildings.Where(b => !GridContent.TryGetBuilding(b.TypeId, out _)).Select(b => b.TypeId).ToList();
             Expect(missing.Count == 0, $"fg.TbBuilding 的每座建筑都有占地（缺：{string.Join(",", missing)}）");
@@ -1170,7 +1170,7 @@ namespace GameLogic.EditorTools
                 mode.RefreshPreview(s);
                 hud.Refresh();
                 string status = hud.StatusLabelText;
-                bool itemsOk = hud.ItemCount == 2 && hud.PanelVisible && !hud.EntryVisible;
+                bool itemsOk = hud.ItemCount == 3 && hud.PanelVisible && !hud.EntryVisible; // 第二座发电机、导航信标、信号中继塔（FG1-SIG-07）
                 string beaconItem = root.Q<Button>("BuildItem1")?.text ?? string.Empty;
                 string generatorItem = root.Q<Button>("BuildItem0")?.text ?? string.Empty;
                 bool inScroll = root.Q<ScrollView>("BuildList") != null && root.Q<ScrollView>("BuildList").Q<Button>("BuildItem0") != null;

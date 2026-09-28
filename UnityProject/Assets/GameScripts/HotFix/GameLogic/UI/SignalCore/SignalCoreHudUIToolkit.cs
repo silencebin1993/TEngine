@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using GameLogic.Campaign;
 using GameLogic.Campaign.Feedback;
 using GameLogic.Campaign.Primitive;
 using GameLogic.Campaign.Signal;
+using GameLogic.Campaign.WorldSim;
 using GameLogic.Core;
 using GameLogic.Localization;
 using GameLogic.Settings;
@@ -51,6 +53,12 @@ namespace GameLogic.UI.SignalCore
         private static readonly object UplinkEscToken = new object();
         private static readonly Action CancelUplink = () => SignalUplinkService.CancelByPlayer();
         private Button _entry;
+        // FG1-SIG-07（FGR-SIG-050、051）：跳回家园 / 上一台 / 覆盖网络叠加层开关。
+        private VisualElement _jumpBar;
+        private Button _jumpHome;
+        private Button _jumpPrev;
+        private Button _coverageToggle;
+        private int _jumpKey;
         private VisualElement _panel;
         private Label _title;
         private Label _status;
@@ -136,11 +144,17 @@ namespace GameLogic.UI.SignalCore
 
         // ── 自检可读 ─────────────────────────────────────────────────────────────
         public bool HudVisible => _hudBar != null && !_hudBar.ClassListContains("uk-hidden");
+        /// <summary>FG1-SIG-07：跳转条（跳回家园 / 上一台 / 覆盖网络）是否显示。</summary>
+        public bool JumpBarVisible => _jumpBar != null && !_jumpBar.ClassListContains("uk-hidden");
         public bool PanelVisible => _panel != null && !_panel.ClassListContains("uk-hidden");
         public string LocationText => _location?.text ?? string.Empty;
         /// <summary>FG1-SIG-03：接入状态行的文字（隐藏时为空）。</summary>
         public string UplinkStatusText => _uplinkStatus != null && !_uplinkStatus.ClassListContains("uk-hidden") ? _uplinkStatus.text ?? string.Empty : string.Empty;
         public string EntryText => _entry?.text ?? string.Empty;
+        /// <summary>FG1-SIG-07：HUD 上的跳转与叠加层按钮（自检 / 冒烟点它们，走按钮自己的 Clickable）。</summary>
+        public Button JumpHomeButton => _jumpHome;
+        public Button JumpPrevButton => _jumpPrev;
+        public Button CoverageToggleButton => _coverageToggle;
         public string FeedbackText => _feedback?.text ?? string.Empty;
         public bool FeedbackIsError => _feedbackError;
         public bool LockVisible => _lock != null && !_lock.ClassListContains("uk-hidden");
@@ -237,6 +251,10 @@ namespace GameLogic.UI.SignalCore
             _location = root.Q<Label>("SignalLocation");
             _uplinkStatus = root.Q<Label>("SignalUplinkStatus");
             _entry = root.Q<Button>("SignalCoreEntry");
+            _jumpBar = root.Q<VisualElement>("SignalJumpBar");
+            _jumpHome = root.Q<Button>("SignalJumpHome");
+            _jumpPrev = root.Q<Button>("SignalJumpPrev");
+            _coverageToggle = root.Q<Button>("SignalCoverageToggle");
             _panel = root.Q<VisualElement>("SignalCorePanel");
             _title = root.Q<Label>("SignalCoreTitle");
             _status = root.Q<Label>("SignalCoreStatus");
@@ -267,6 +285,13 @@ namespace GameLogic.UI.SignalCore
             _feedback = root.Q<Label>("SignalCoreFeedback");
 
             _entry.clicked += Toggle;
+            // FG1-SIG-07：鼠标与键盘都能完成（B02）；按钮与快捷键走同一个入口。
+            _jumpHome.clicked += () => SignalUplinkService.RequestJumpHome();
+            _jumpPrev.clicked += () => SignalUplinkService.RequestJumpPrevious();
+            _coverageToggle.clicked += GameLogic.View.SignalCoverageOverlayView.Toggle;
+            UiTooltip.Attach(_jumpHome, JumpHomeTooltip);
+            UiTooltip.Attach(_jumpPrev, JumpPrevTooltip);
+            UiTooltip.Attach(_coverageToggle, CoverageTooltip);
             _close.clicked += () => SetOpen(false);
             _unequip.clicked += () => Apply(SignalCoreService.TryUnequip(CampaignSession.Current, _selectedSlot));
             _moveUp.clicked += () => Apply(SignalCoreService.TrySwapSlots(CampaignSession.Current, _selectedSlot, _selectedSlot - 1), _selectedSlot - 1);
@@ -363,7 +388,79 @@ namespace GameLogic.UI.SignalCore
             });
             _exposure.Bind(root, () => _exposure.SetOpen(!_exposure.IsOpen));
             _hudKey = 0;
+            _jumpKey = 0;
             _panelKey = 0;
+        }
+
+        /// <summary>FG1-SIG-07：跳转与叠加层按钮的文字 / 状态（只在上一台、冷却整秒、叠加层开关、语言或键位变化时改写；每帧 O(1)）。</summary>
+        private void RefreshJumpButtons(CampaignState s)
+        {
+            if (_jumpHome == null || _jumpPrev == null || _coverageToggle == null)
+            {
+                return;
+            }
+            int prev = SignalUplinkService.PreviousMachine(s);
+            int cooldown = (int)Math.Ceiling(SignalUplinkService.JumpCooldownRemaining(s));
+            bool overlay = GameLogic.View.SignalCoverageOverlayView.Enabled;
+            int key = HashCode.Combine(prev, cooldown, overlay, (int)GameText.Language, GameSettings.Revision, SignalUplinkService.IsJumpingHome);
+            if (key == _jumpKey)
+            {
+                return;
+            }
+            _jumpKey = key;
+            _jumpHome.text = GameText.Get("signal.jump.home_button");
+            _jumpPrev.text = cooldown > 0
+                ? GameText.Get("signal.jump.prev_button") + GameText.Format("signal.jump.cooldown_suffix", cooldown.ToString(CultureInfo.InvariantCulture))
+                : GameText.Get("signal.jump.prev_button");
+            _jumpPrev.EnableInClassList("sc-hud-jump-cooling", cooldown > 0);
+            _jumpPrev.SetEnabled(prev != 0);
+            _coverageToggle.text = GameText.Get(overlay ? "signal.overlay.button_on" : "signal.overlay.button_off");
+            _coverageToggle.EnableInClassList("sc-hud-coverage-on", overlay);
+        }
+
+        /// <summary>自检：跳转 / 叠加层按钮当前的文字。</summary>
+        public string JumpHomeText => _jumpHome?.text ?? string.Empty;
+        public string JumpPrevText => _jumpPrev?.text ?? string.Empty;
+        public string CoverageToggleText => _coverageToggle?.text ?? string.Empty;
+
+        private TooltipContent JumpHomeTooltip() => new TooltipContent
+        {
+            Title = GameText.Get("signal.jump.home_tip_title"),
+            Body = GameText.Format("signal.jump.home_tip", InputDisplay.ForAction(GameActionId.JumpHome),
+                SignalUplinkService.FarDistanceCells.ToString("0", CultureInfo.InvariantCulture),
+                SignalUplinkService.FarTransitionSeconds.ToString("0.#", CultureInfo.InvariantCulture),
+                SignalUplinkService.FarCooldownSeconds.ToString("0", CultureInfo.InvariantCulture)),
+            Shortcut = GameActionId.JumpHome,
+        };
+
+        private TooltipContent JumpPrevTooltip()
+        {
+            CampaignState s = CampaignSession.Current;
+            int prev = SignalUplinkService.PreviousMachine(s);
+            string body = GameText.Format("signal.jump.prev_tip", InputDisplay.ForAction(GameActionId.JumpPreviousMachine),
+                prev != 0 ? SignalPresence.MachineLabel(prev) : GameText.Get("signal.jump.prev_none_name"),
+                SignalUplinkService.FarDistanceCells.ToString("0", CultureInfo.InvariantCulture),
+                SignalUplinkService.FarTransitionSeconds.ToString("0.#", CultureInfo.InvariantCulture),
+                SignalUplinkService.FarCooldownSeconds.ToString("0", CultureInfo.InvariantCulture));
+            double cd = SignalUplinkService.JumpCooldownRemaining(s);
+            if (cd > 0)
+            {
+                body += "\n" + GameText.Format("signal.jump.cooldown_line", Math.Ceiling(cd).ToString("0", CultureInfo.InvariantCulture));
+            }
+            return new TooltipContent { Title = GameText.Get("signal.jump.prev_tip_title"), Body = body, Shortcut = GameActionId.JumpPreviousMachine };
+        }
+
+        private TooltipContent CoverageTooltip()
+        {
+            string site = WorldView.ObservedSiteId;
+            return new TooltipContent
+            {
+                Title = GameText.Get("signal.overlay.tip_title"),
+                Body = GameText.Format("signal.overlay.tip", InputDisplay.ForAction(GameActionId.ToggleOverlay),
+                    SignalCoverageService.SiteSourceCount(site).ToString(CultureInfo.InvariantCulture),
+                    SignalCoverageService.DisconnectedCount(site).ToString(CultureInfo.InvariantCulture)),
+                Shortcut = GameActionId.ToggleOverlay,
+            };
         }
 
         private void Update()
@@ -422,6 +519,7 @@ namespace GameLogic.UI.SignalCore
                 SetOpen(false);
             }
             SetVisible(_hudBar, s != null && (inWorld || IsOpen));
+            SetVisible(_jumpBar, s != null && inWorld);
             RefreshUplinkStatus(s, inWorld);
             _exposure.Refresh(s, inWorld);
             if (s == null)
@@ -443,6 +541,7 @@ namespace GameLogic.UI.SignalCore
                     ? GameText.Format("signal.hud.core_button_locked", equipped, unlocked)
                     : GameText.Format("signal.hud.core_button", equipped, unlocked);
             }
+            RefreshJumpButtons(s);
             if (!IsOpen)
             {
                 return;
@@ -808,7 +907,7 @@ namespace GameLogic.UI.SignalCore
         /// <summary>FG1-SIG-03：接入状态行 + 过渡中 Esc 取消。每帧 O(1)（键不变不重建文字）。</summary>
         private void RefreshUplinkStatus(CampaignState s, bool inWorld)
         {
-            UiEscapeStack.Sync(UplinkEscToken, inWorld && SignalUplinkService.IsPending, CancelUplink);
+            UiEscapeStack.Sync(UplinkEscToken, inWorld && SignalUplinkService.HasCancellableTransition, CancelUplink); // FG1-SIG-07 审查修复：跳回家园的远距离过渡也能 Esc 取消。
             if (_uplinkStatus == null)
             {
                 return;

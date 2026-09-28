@@ -364,7 +364,7 @@ namespace GameLogic.EditorTools
 
         private static void CheckCoverageSources()
         {
-            Line("  · B'. 覆盖源（FGR-SIG-050 本 Story 部分）：信号塔修好并通电后 300 格覆盖；与核心不连通的信号塔不提供覆盖；远征地点暂按连通处理");
+            Line("  · B'. 覆盖源（FGR-SIG-050 本 Story 部分）：信号塔修好并通电后 300 格覆盖；与核心不连通的信号塔不提供覆盖；远征地点以接入点为根（FG1-SIG-07）");
             CampaignState s = NewHome(8402);
             BuildingRecord tower = s.BuildingRecords.FirstOrDefault(b => b.BuildingTypeId == HomeValleyLayout.BuildingTypeSignalTower);
             Vector2 core = SignalCoverageService.Sample(HomeValleyLayout.RegionId, Vector2.zero).SourceCenter;
@@ -409,8 +409,11 @@ namespace GameLogic.EditorTools
             }
             Expect(!atLonely.Covered && connected == 2 && disconnected == 1,
                 $"离核心 2000 格的信号塔与核心不连通（覆盖源 {connected} 个连通、{disconnected} 个断开）：它脚下也在覆盖外");
-            SignalCoverageSample city = SignalCoverageService.Sample(FracturedCityLayout.RegionId, new Vector2(9999f, 9999f));
-            Expect(city.Covered && !city.Bounded, "远征地点（破碎都市）暂按与核心连通处理（覆盖网络在 FG1-SIG-07，DEBT-FG1SIG04-01）");
+            // FG1-SIG-07 改了规则（DEBT-FG1SIG04-01 关闭）：远征地点有覆盖边界——以远征接入点为根（150 格罩住整个 Demo 地点），离得太远就在覆盖外。
+            SignalCoverageSample cityFar = SignalCoverageService.Sample(FracturedCityLayout.RegionId, new Vector2(9999f, 9999f));
+            SignalCoverageSample cityIn = SignalCoverageService.Sample(FracturedCityLayout.RegionId, FracturedCityLayout.EntryEvac.Position + new Vector2(0f, 20f));
+            Expect(!cityFar.Covered && cityFar.Bounded && cityIn.Covered && cityIn.SourceKind == SignalCoverageSourceKind.ExpeditionUplink,
+                "远征地点（破碎都市）有覆盖边界（FG1-SIG-07）：接入点附近在覆盖里，远处（9999, 9999）在覆盖外");
         }
 
         // ── B2. 干扰场（FGT-SIG-006 ②）───────────────────────────────────────────

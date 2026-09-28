@@ -129,6 +129,9 @@ namespace BinGames.Sim.Combat
         /// <summary>FG1-SIG-06：裸跑已计过一次、正等热更层按计次间隔重新下发（期间开火照常、固件照常生效，只是不再重复计暴露）。
         /// 热更层下发不带 <see cref="RawGated"/> 的参数时清掉。</summary>
         RawSpent = 1 << 19,
+        /// <summary>FG1-SIG-07（FGR-SIG-053）：这台己方机器在与归还核心连通的信号覆盖之外（收不到远程命令、不能接入）。
+        /// 只由 <see cref="CombatKernel.EvaluateCoverage"/> 按热更层下发的覆盖源写（世界模拟步里按游戏时间定期评估，与是否被观察无关），随快照进存档。</summary>
+        OutOfCoverage = 1 << 20,
     }
 
     /// <summary>己方机器的命令。与 Demo RegionSquadCommandSystem / HomeValleyMachineMarker 的语义逐条一致。</summary>

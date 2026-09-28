@@ -186,6 +186,27 @@ namespace GameLogic.Campaign.Blueprint
             }
         }
 
+        /// <summary>FG1-SIG-07（FGR-SIG-050 信号中继模块）：这台机器登记的装配里结构槽装的是什么（没登记 / 蓝图不可解析时返回 false）。
+        /// O(该蓝图的版本数)，只在装配登记变化时（<see cref="Changed"/>）由中继模块索引调用，不按帧。</summary>
+        public static bool TryGetStructureId(CampaignState state, int machineLogicId, out string structureId)
+        {
+            structureId = null;
+            if (!_entries.TryGetValue(machineLogicId, out Entry entry))
+            {
+                return false;
+            }
+            BlueprintVersionRecord versionRecord = BlueprintEditorService.Find(state, entry.BlueprintId)?.Versions?.FirstOrDefault(v => v.Version == entry.Version);
+            if (versionRecord == null)
+            {
+                return false;
+            }
+            structureId = versionRecord.StructureId;
+            return true;
+        }
+
+        /// <summary>FG1-SIG-07：当前登记了装配的全部机器（中继模块索引在整表清空后重建时用；只在登记表整体变化时调用）。</summary>
+        public static IEnumerable<int> RegisteredMachines => _entries.Keys;
+
         /// <summary>FG1-SIG-03：信号核怎样插进这台机器的接入口（HUD 的“接入口：… / 未插入：…”读这里）。没登记 / 蓝图不可解析时返回 null。</summary>
         public static UplinkInsertionPlan PlanForUplink(CampaignState state, int machineLogicId, IReadOnlyList<string> signalCoreContentIds)
         {

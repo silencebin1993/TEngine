@@ -304,6 +304,36 @@ namespace GameLogic.Campaign.Combat
 
         public bool TryGetMachineOfUnit(int unitId, out int logicId) => _unitMachine.TryGetValue(unitId, out logicId);
 
+        private readonly List<int2> _coverageChanges = new List<int2>(8);
+
+        /// <summary>
+        /// FG1-SIG-07（FGR-SIG-053）：按“与归还核心连通的覆盖圆”评估本地点每台己方机器在不在覆盖里（逐单位在内核 Burst 作业里做），
+        /// 把状态变了的机器（LogicId，true = 回到覆盖）追加到 <paramref name="changes"/>。世界模拟按游戏时间定期调用，与是否被观察无关。
+        /// </summary>
+        public int EvaluateCoverage(IReadOnlyList<float3> sources, List<(int LogicId, bool Covered)> changes)
+        {
+            if (IsDisposed)
+            {
+                return 0;
+            }
+            Kernel.EvaluateCoverage(sources, _coverageChanges);
+            int n = 0;
+            for (int i = 0; i < _coverageChanges.Count; i++)
+            {
+                int2 c = _coverageChanges[i];
+                if (_unitMachine.TryGetValue(c.x, out int logicId))
+                {
+                    changes?.Add((logicId, c.y != 0));
+                    n++;
+                }
+            }
+            return n;
+        }
+
+        /// <summary>FG1-SIG-07：这台机器是否被标为在信号覆盖之外（最近一次定期评估的结果；O(1)，机器列表与冒烟读取）。</summary>
+        public bool IsMachineOutOfCoverage(int logicId) =>
+            !IsDisposed && _machineUnit.TryGetValue(logicId, out int unit) && Kernel.IsOutOfCoverage(unit);
+
         public IEnumerable<int> MachineLogicIds => _machineUnit.Keys;
         public int MachineCount => _machineUnit.Count;
 

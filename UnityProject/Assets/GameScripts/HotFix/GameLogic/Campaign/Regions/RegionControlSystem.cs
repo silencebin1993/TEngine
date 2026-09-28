@@ -226,6 +226,25 @@ namespace GameLogic.Campaign.Regions
             return CommitSwitch(target, restoring);
         }
 
+        /// <summary>
+        /// FG1-SIG-07 审查修复：只校验、不提交——<see cref="CommitUplink"/> 现在会不会成功（与它同一套目标校验；目标已是本地点受控机也算能提交）。
+        /// 跨地点的远距离跳转先在目标地点校验通过、再切镜头，避免“镜头已切走、原来那台已释放、接管却失败”。
+        /// </summary>
+        public bool CanCommitUplink(int logicId, out RegionControlFailure failure)
+        {
+            if (_ctx == null)
+            {
+                failure = RegionControlFailure.Ineligible;
+                return false;
+            }
+            if (TryResolveExplicitTarget(logicId, out _, out failure) || failure == RegionControlFailure.AlreadyControlled)
+            {
+                failure = RegionControlFailure.None;
+                return true;
+            }
+            return false;
+        }
+
         /// <summary>FG1-SIG-03：读档恢复接入的提交过程中为 true——宿主的“接管完成”回调据此不补记接管统计 / 机器经历（那是存档里已有的）。</summary>
         public static bool IsRestoringUplink { get; private set; }
 
@@ -436,7 +455,7 @@ namespace GameLogic.Campaign.Regions
             }
 
             bool jammed = IsJammedAt(pos2);
-            Signal.SignalCoverageSample coverage = Signal.SignalCoverageService.Sample(_ctx.RegionId, pos2);
+            Signal.SignalCoverageSample coverage = Signal.SignalCoverageService.Sample(_ctx.RegionId, pos2, current.LogicId); // 中继机器自己的覆盖圈不算（FG1-SIG-07 审查修复）。
             Signal.SignalLinkBreakReason cause = jammed ? Signal.SignalLinkBreakReason.Jammed
                 : !coverage.Covered ? Signal.SignalLinkBreakReason.OutOfCoverage
                 : Signal.SignalLinkBreakReason.None;

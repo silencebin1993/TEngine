@@ -35,6 +35,8 @@ namespace GameLogic.Campaign.Regions
         /// 建造流程与 <see cref="BuildingTypeGenerator2"/> 共用同一 <see cref="HomeValleyWorkOrders.TryCreateBuild"/>
         /// Build 工作单管线，不新造第二套建造系统。</summary>
         public const string BuildingTypeBeacon = "beacon";
+        /// <summary>FG1-SIG-07（FG04 建筑表；FGR-SIG-050）：信号中继塔，2×2，建成后延伸信号覆盖（半径 200 格），必须立在已与核心连通的覆盖里。</summary>
+        public const string BuildingTypeSignalRelay = "signal_relay";
 
         // ── 机器 ID（DEMO-CONTENT-LOCK.md §2.1，与旧细胞阶段 chassis_ally_* 占位彻底区分）──
         public const string Erc001ChassisId = "erc_001";

@@ -403,6 +403,8 @@ namespace GameLogic.UI.RegionCommand
             RefreshCandidateTooltip();
             // FG1-SIG-04：安全模式标记的变化键（安全模式版本 + 语言）每帧算一次，按钮逐个只比较整数。
             int safeKey = System.HashCode.Combine(Campaign.Signal.SignalLinkService.SafeModeRevision, (int)GameText.Language);
+            // FG1-SIG-07：覆盖外标记的变化键（步首定期评估的次数 + 语言）：每 0.5 游戏秒最多改写一次，读内核标志 O(1)。
+            int covKey = System.HashCode.Combine(Campaign.Signal.SignalCoverageService.EvaluateCount, (int)GameText.Language);
             var seen = new HashSet<int>();
             foreach (int logicId in candidates)
             {
@@ -428,6 +430,7 @@ namespace GameLogic.UI.RegionCommand
                     btn.text = "#" + rec.DisplayNumber;
                 }
                 RefreshSafeModeTag(btn, logicId, safeKey);
+                RefreshCoverageTag(btn, logicId, covKey);
                 btn.RemoveFromClassList("cmd-candidate-btn-current");
                 if (possessedId.HasValue && possessedId.Value == logicId)
                 {
@@ -450,6 +453,7 @@ namespace GameLogic.UI.RegionCommand
                 item.RemoveFromHierarchy();
                 _candidateButtons.Remove(logicId);
                 _safeTagKeys.Remove(logicId);
+                _covTagKeys.Remove(logicId);
             }
         }
 
@@ -461,6 +465,11 @@ namespace GameLogic.UI.RegionCommand
             RefreshCandidateTooltip();
             CampaignState s = CampaignSession.Current;
             string body = _candidateTip ?? string.Empty;
+            // FG1-SIG-07：在覆盖外时，“收不到命令、怎么恢复”排在接入说明前面（安全模式那一段仍排最前）。
+            if (Campaign.Signal.SignalCoverageService.IsMachineOutOfCoverage(logicId))
+            {
+                body = GameText.Format("signal.coverage.list_tooltip", SignalPresence.MachineLabel(logicId)) + "\n" + body;
+            }
             if (Campaign.Signal.SignalLinkService.IsInSafeMode(s, logicId))
             {
                 body = Campaign.Signal.SignalLinkService.SafeModeTooltip(s, logicId) + "\n" + body;
@@ -501,6 +510,34 @@ namespace GameLogic.UI.RegionCommand
             btn.EnableInClassList("cmd-candidate-btn-safe", safe);
             item.EnableInClassList("cmd-candidate-item-safe", safe);
         }
+
+        /// <summary>FG1-SIG-07（FGR-SIG-053）：在信号覆盖外的机器在列表里带“覆盖外”字样（按钮外侧）与橙色边框，悬停提示写明收不到命令、怎么恢复。</summary>
+        private void RefreshCoverageTag(Button btn, int logicId, int key)
+        {
+            if (_covTagKeys.TryGetValue(logicId, out int seen) && seen == key)
+            {
+                return;
+            }
+            _covTagKeys[logicId] = key;
+            bool outside = Campaign.Signal.SignalCoverageService.IsMachineOutOfCoverage(logicId);
+            VisualElement item = ItemOf(btn);
+            Label tag = item.Q<Label>(className: "cmd-candidate-nolink-tag");
+            if (tag == null)
+            {
+                tag = new Label { pickingMode = PickingMode.Ignore };
+                tag.AddToClassList("cmd-candidate-nolink-tag");
+                item.Add(tag);
+            }
+            tag.text = GameText.Get("signal.coverage.list_tag");
+            btn.EnableInClassList("cmd-candidate-btn-nolink", outside);
+            item.EnableInClassList("cmd-candidate-item-nolink", outside);
+        }
+
+        private readonly Dictionary<int, int> _covTagKeys = new Dictionary<int, int>(8);
+
+        /// <summary>自检：机器列表里这台机器是否带“覆盖外”标记。</summary>
+        public bool CandidateShowsOutOfCoverage(int logicId) =>
+            _candidateButtons.TryGetValue(logicId, out Button b) && b != null && b.ClassListContains("cmd-candidate-btn-nolink");
 
         /// <summary>候选按钮上次刷新安全模式标记时的状态键（LogicId → 键）。</summary>
         private readonly Dictionary<int, int> _safeTagKeys = new Dictionary<int, int>(8);

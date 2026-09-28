@@ -449,7 +449,7 @@ namespace GameLogic.EditorTools
                    && factory.Failure == UplinkFailure.InFactory && repair.Failure == UplinkFailure.OnRepairBay && delivery.Failure == UplinkFailure.InDelivery
                    && modal.Failure == UplinkFailure.ModalBlocked && !noSelection && noSelectionCode == UplinkFailure.NoSelection
                    && texts[UplinkFailure.NoSelection].Contains(InputDisplay.ForAction(GameActionId.ToggleCameraView)),
-                $"逐条拒绝：阵亡“{dead.Text}”、不在当前地点“{other.Text}”、超出覆盖“{coverage.Text}”、静默夜“{night.Text}”、在装配站“{factory.Text}”、" +
+                $"逐条拒绝：阵亡“{dead.Text}”、所在地点没在运行“{other.Text}”（FG1-SIG-07 起跨地点接入 = 远距离跳转，见 [覆盖网络] 段）、超出覆盖“{coverage.Text}”、静默夜“{night.Text}”、在装配站“{factory.Text}”、" +
                 $"维修台“{repair.Text}”、投送途中“{delivery.Text}”、面板挡着“{modal.Text}”、没选中“{texts[UplinkFailure.NoSelection]}”");
             Expect(texts.Values.Distinct().Count() == texts.Count && texts.Values.All(x => x.Length > 0 && !GameText.ContainsMarker(x))
                    && deniedAfterLoud - deniedBefore == 9 && !SignalUplinkService.IsPending && SignalPresence.AtCore,
@@ -1257,11 +1257,18 @@ namespace GameLogic.EditorTools
                 bool clicked = InvokeClickable(b1);
                 bool pendingFromList = SignalUplinkService.IsPending && SignalUplinkService.PendingTargetLogicId == m1
                                        && SignalUplinkService.PendingSource == UplinkSource.MachineList;
-                Frames(10);
+                // FG1-SIG-07（FGR-SIG-051）：信号在归还核心（家园），目标在远征地点 = 跨地点的远距离跳转：过渡 1.5 秒（不是 0.35 秒）。
+                bool far = SignalUplinkService.PendingIsFar;
+                int waited = 0;
+                while (SignalUplinkService.IsPending && waited++ < 60)
+                {
+                    Frames(1);
+                }
+                Frames(4);
                 bar.Refresh();
-                Expect(clicked && pendingFromList && SignalPresence.CurrentMachineLogicId == m1 && fo.PossessedMachineLogicId == m1
+                Expect(clicked && pendingFromList && far && waited >= 25 && SignalPresence.CurrentMachineLogicId == m1 && fo.PossessedMachineLogicId == m1
                        && WorldView.Director.Mode == ViewMode.Direct && b1.ClassListContains("cmd-candidate-btn-current"),
-                    $"在铸造前哨点机器列表里的 {b1?.text}：与家园同一入口（0.35 秒过渡），信号进入 #{m1}、镜头直控，列表标出当前机器");
+                    $"在铸造前哨点机器列表里的 {b1?.text}：与家园同一入口；信号从归还核心跳到远征地点算远距离跳转（过渡 {waited} 帧 ≈ 1.5 秒），信号进入 #{m1}、镜头直控，列表标出当前机器");
 
                 // 按钮说明：按键名随重绑、文字随语言；已有按钮跟着改写。
                 // 说明走运行时悬停提示（VisualElement.tooltip 只在编辑器界面生效）：模拟悬停那一行，读提示面板的内容。
