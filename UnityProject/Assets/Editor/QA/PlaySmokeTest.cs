@@ -50,6 +50,8 @@ namespace GameLogic.EditorTools
     /// 0 号格标接入口被拒并给原因 → Esc 关编辑器（草稿不保存）→ 远征准备面板的信号核入口与远征锁。
     /// FG1-SIG-03：家园里鼠标选中 → 按接入键 → 机器列表切机 → Tab → 离开 → 战略暂停中发起 → Esc 取消 → 恢复；
     /// 铸造前哨外围点命令栏机器列表接入 → 按接入 / 退出键离开；存档前接入、读档后核对信号位置。
+    /// FG1-VFX-01：装配站换上带接入口的重炮蓝图（测试捷径）→ 真实鼠标选中 + 接入键 → 过载插入、形变态出现（0.3 秒过渡走完、部件可见）→ 接入 / 退出键离开 → 复原；
+    /// 普通接入时核对表现层的形变与战斗桥接层的编译结果一致。
     ///
     /// 用法：<c>bash tools/unity-play-smoke.sh</c>（影子工程里跑，编辑器开着也行）。进 Play 会重载域，
     /// 驱动状态存在 SessionState 里，[InitializeOnLoad] 重载后接着跑。
@@ -196,6 +198,10 @@ namespace GameLogic.EditorTools
                     case 174: StepSigUplinkPausedPending(inStep); break;
                     case 175: StepSigUplinkEscCancelled(inStep); break;
                     case 176: StepSigUplinkResumed(inStep); break;
+                    case 211: StepMorphPrepare(inStep); break;
+                    case 212: StepMorphPress(inStep); break;
+                    case 213: StepMorphEntered(inStep); break;
+                    case 214: StepMorphLeft(inStep); break;
                     case 185: StepLinkSelect(inStep); break;
                     case 186: StepLinkPress(inStep); break;
                     case 187: StepLinkEntered(inStep); break;
@@ -1634,6 +1640,10 @@ namespace GameLogic.EditorTools
                   && !string.IsNullOrEmpty(hud.UplinkStatusText),
                 $"0.35 秒过渡后接入 {SigLabel(a)}：镜头直控；HUD“{hud?.LocationText}”，状态行“{hud?.UplinkStatusText}”");
             CheckNoTextMarkers("接入后");
+            // FG1-VFX-01：机身形变只读编译结果——表现层的状态与战斗桥接层这台机器的 Morph 一致（这台的蓝图有没有接入口都成立）。
+            GameRoot.HomeValley.Combat.TryGetMachineWeapon(a, out Campaign.Combat.MachineWeaponInfo morphInfo);
+            Check(View.MachineMorphView.IsRegistered(a) && View.MachineMorphView.TargetOf(a) == morphInfo.Morph && View.MachineMorphView.VisibleOf(a) == morphInfo.Morph,
+                $"机身形变与编译结果一致：{Campaign.Blueprint.MachineMorph.Describe(morphInfo.Morph)}");
             // FG1-SIG-05（FGR-SIG-090，真实游玩中）：过载是核心固件；信号核带着它，但没被接入的家园机器都由 AI 驾驶——接入口按空槽、武器没有具名反应。
             Campaign.Combat.CombatSite homeCombat = GameRoot.HomeValley.Combat;
             int aiMachines = 0;
@@ -1750,6 +1760,91 @@ namespace GameLogic.EditorTools
             }
             Check(!GameClock.Paused && !Campaign.Signal.SignalUplinkService.IsPending && Campaign.Signal.SignalPresence.AtCore,
                 "恢复运行：已取消的接入不会再自己完成");
+            Next(211, "FG1-VFX-01：机身形变（接入 → 形变出现 → 离开 → 复原）");
+        }
+
+        // ── FG1-VFX-01：机身形变（装配站换上带接入口的重炮蓝图 → 真实鼠标选中 + 接入键 → 形变态出现 → 接入 / 退出键离开 → 复原）──────
+
+        private static void StepMorphPrepare(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            CampaignState st = CampaignSession.Current;
+            Campaign.Regions.HomeValleyMachineMarker m = SigCandidate(0);
+            if (m == null || !MachineRegistry.TryGetRecord(m.LogicId, out MachineRecord rec))
+            {
+                Write("  - 家园里没有可以接入的机器：跳过 FG1-VFX-01 段（机身形变由 FgMachineMorphSelfCheck 覆盖）");
+                Next(185, "FG1-SIG-04：断链与安全模式（静默夜预留接口 + 走出信号覆盖）");
+                return;
+            }
+            // 测试捷径（代替玩家在蓝图编辑器保存带接入口的重炮蓝图、再到装配站回厂换装）：同一个装配登记入口。
+            var board = Campaign.Blueprint.BlueprintCircuitBoard.CreateDefault(rec.ChassisId, Campaign.Content.ComponentCatalog.CompCannonId, null, null, System.Array.Empty<string>());
+            bool uplinkOk = board.TrySetUplink(2).Success;
+            const string bpId = "bp_smoke_vfx01_cannon_up";
+            BlueprintVersionRecord version = board.ToVersion(1, 0f);
+            st.BlueprintRecords = (st.BlueprintRecords ?? System.Array.Empty<BlueprintRecord>()).Where(r => r.BlueprintId != bpId)
+                .Append(new BlueprintRecord { BlueprintId = bpId, DisplayName = bpId, ActiveVersion = 1, Versions = new[] { version } }).ToArray();
+            SessionState.SetString(K + "MorphOrigBp", rec.BlueprintId ?? string.Empty);
+            SessionState.SetInt(K + "MorphOrigVer", rec.BlueprintVersion);
+            bool registered = Campaign.Blueprint.MachineLoadoutRegistry.Register(st, m.LogicId, bpId, 1).Success;
+            string core0 = Campaign.Signal.SignalCoreService.SlotContentId(st, 0);
+            Check(uplinkOk && registered && View.MachineMorphView.IsRegistered(m.LogicId) && View.MachineMorphView.VisibleOf(m.LogicId) == Campaign.Blueprint.MorphMask.None,
+                $"{SigLabel(m.LogicId)} 换上带接入口的重炮蓝图：AI 驾驶时接入口是空槽，机身不变形（信号核 1 号槽：{core0}）");
+            SessionState.SetInt(K + "MorphM", m.LogicId);
+            ClickWorld(m.View.transform.position);
+            Next(212, $"左键点 {SigLabel(m.LogicId)}");
+        }
+
+        private static void StepMorphPress(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            int m = SessionState.GetInt(K + "MorphM", 0);
+            Check(GameRoot.HomeValley.SelectedMachineLogicId == m, $"左键选中了 {SigLabel(m)}");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.ToggleCameraView));
+            Next(213, "按接入键");
+        }
+
+        private static void StepMorphEntered(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            int m = SessionState.GetInt(K + "MorphM", 0);
+            Campaign.Combat.CombatSite site = GameRoot.HomeValley.Combat;
+            site.TryGetMachineWeapon(m, out Campaign.Combat.MachineWeaponInfo info);
+            Campaign.Blueprint.MorphMask want = info.Morph;
+            Transform grp = View.MachineMorphView.GroupOf(m, Campaign.Blueprint.MorphMask.Limiter);
+            int renderers = grp != null ? grp.GetComponentsInChildren<MeshRenderer>(false).Count(r => r.enabled && r.sharedMaterial != null && r.sharedMaterial.enableInstancing) : 0;
+            Check(Campaign.Signal.SignalPresence.CurrentMachineLogicId == m && info.Uplinked && (want & Campaign.Blueprint.MorphMask.Limiter) != 0
+                  && View.MachineMorphView.VisibleOf(m) == want && Mathf.Approximately(View.MachineMorphView.ProgressOf(m, Campaign.Blueprint.MorphMask.Limiter), 1f)
+                  && grp != null && grp.gameObject.activeInHierarchy && renderers > 0 && View.MachineMorphView.SignalBeamShownOf(m),
+                $"接入 {SigLabel(m)}：接入口插入过载 → 机身形变（{Campaign.Blueprint.MachineMorph.Describe(want)}），0.3 秒过渡已走完，{renderers} 个形变部件可见（共享材质、GPU Instancing），接入口射出信号光柱");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.ToggleCameraView));
+            Next(214, "按接入 / 退出键离开");
+        }
+
+        private static void StepMorphLeft(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            int m = SessionState.GetInt(K + "MorphM", 0);
+            Check(Campaign.Signal.SignalPresence.AtCore && WorldView.Director.Mode == View.ViewMode.Strategy
+                  && View.MachineMorphView.VisibleOf(m) == Campaign.Blueprint.MorphMask.None && View.MachineMorphView.AnimatingCount == 0
+                  && !View.MachineMorphView.SignalBeamShownOf(m),
+                $"离开：镜头回到战略，{SigLabel(m)} 的形变收起复原、信号光柱熄灭");
+            string orig = SessionState.GetString(K + "MorphOrigBp", string.Empty);
+            if (orig.Length > 0)
+            {
+                Campaign.Blueprint.MachineLoadoutRegistry.Register(CampaignSession.Current, m, orig, SessionState.GetInt(K + "MorphOrigVer", 1));
+            }
             Next(185, "FG1-SIG-04：断链与安全模式（静默夜预留接口 + 走出信号覆盖）");
         }
 

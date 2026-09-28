@@ -64,6 +64,9 @@ namespace GameLogic.Campaign.Blueprint
         /// 从电路板外层槽读出。战斗反馈据此播放该武器在 ComponentCatalog 里登记的专属开火音。</summary>
         public string PrimaryId;
 
+        /// <summary>FG1-VFX-01：功能组件内容 ID（func_dash / func_marker，没有为 null）。机身形变按“装了哪些作战组件”挑形变部件（FGR-FW-020：每个作战组件三套状态）。</summary>
+        public string UtilityId;
+
         /// <summary>ER6-REACT-02：结构槽是否装了散热鳍（<see cref="Content.ComponentCatalog.StructFinId"/>）——
         /// 额外 +5/秒散热（DEMO-CONTENT-LOCK.md §2.4）。</summary>
         public bool HasHeatSinkStructure;
@@ -168,6 +171,7 @@ namespace GameLogic.Campaign.Blueprint
             preview.HasMarkerFunction = board.UtilityId == ComponentCatalog.FuncMarkerId;
             preview.HasCannonPrimary = board.PrimaryId == ComponentCatalog.CompCannonId;
             preview.PrimaryId = board.PrimaryId;
+            preview.UtilityId = string.IsNullOrEmpty(board.UtilityId) ? null : board.UtilityId; // 存读档后空槽可能是 ""：统一成 null，编译结果逐字段稳定
             preview.HasHeatSinkStructure = board.StructureId == ComponentCatalog.StructFinId;
 
             if (string.IsNullOrEmpty(board.SlotContentIds[BlueprintCircuitLayout.SinkSlot]))

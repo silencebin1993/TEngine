@@ -55,6 +55,11 @@ namespace GameLogic.Campaign.Combat
         public bool ReactionGated;
         /// <summary>FG1-SIG-06（FGR-SIG-061）：接入口里插着信号裸跑的未破解常规固件、信号上的计次间隔已过——下一发算一次“发动”（<see cref="CombatUnitFlags.RawGated"/>）。</summary>
         public bool RawGated;
+        /// <summary>FG1-VFX-01：功能组件（func_dash / func_marker，没有为 null）——机身形变挑形变部件用。</summary>
+        public string UtilityId;
+        /// <summary>FG1-VFX-01（FGR-FW-021）：这组参数的编译结果里生效固件的类别集合 → 机身状态（<see cref="Blueprint.MachineMorph.MaskOf(Blueprint.BlueprintCircuitPreview)"/>）。
+        /// 与武器参数同一次解析得出，表现层（<c>MachineMorphView</c>）只读这里，不另算。</summary>
+        public Blueprint.MorphMask Morph;
     }
 
     /// <summary>
@@ -438,7 +443,12 @@ namespace GameLogic.Campaign.Combat
             {
                 Kernel.SetFlag(unit, CombatUnitFlags.RawSpent, false);
             }
+            MachineWeaponRefreshed?.Invoke(this, logicId);
         }
+
+        /// <summary>FG1-VFX-01：某台机器按新的编译结果重算了武器参数（接入 / 离开 / 装配变更 / 冷却起止）之后触发——参数是地点与 LogicId，
+        /// 新的 <see cref="MachineWeaponInfo.Morph"/> 已写好。机身形变表现订阅它（O(1)，不按帧、不扫机器表）。</summary>
+        public static event Action<CombatSite, int> MachineWeaponRefreshed;
 
         private MachineWeaponInfo ResolveMachineWeapon(CampaignState state, int logicId)
         {
@@ -459,6 +469,8 @@ namespace GameLogic.Campaign.Combat
             }
             BlueprintCircuitPreview p = resolution.Preview;
             info.PrimaryId = p.PrimaryId;
+            info.UtilityId = p.UtilityId;
+            info.Morph = MachineMorph.MaskOf(p); // FG1-VFX-01：机身状态 = 本次编译结果里生效固件的类别集合。
             info.Uplinked = SignalUplinkService.IsUplinked(state, logicId);
             // FGR-SIG-033：信号带进来的核心固件正在冷却（冷却属于信号）时，这条反应暂不发动；固件照样插着。
             info.ReactionSuppressed = SignalUplinkService.IsReactionSuppressed(state, logicId, p.ReactionId);

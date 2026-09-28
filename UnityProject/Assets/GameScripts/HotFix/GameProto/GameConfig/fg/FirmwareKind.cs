@@ -25,6 +25,7 @@ public sealed partial class FirmwareKind : Luban.BeanBase
         Cooldown = _buf.ReadFloat();
         Protocol = _buf.ReadString();
         Faction = _buf.ReadString();
+        Category = _buf.ReadString();
     }
 
     public static FirmwareKind DeserializeFirmwareKind(ByteBuf _buf)
@@ -56,6 +57,10 @@ public sealed partial class FirmwareKind : Luban.BeanBase
     /// 来源阵营:reclaim=归还,silent=静默,foundry=铸造;暴露面板“各阵营贡献”与异派技术判定读这里,名称走文本键 faction.&lt;值&gt;
     /// </summary>
     public readonly string Faction;
+    /// <summary>
+    /// 类别:fuse=引信与弹芯,limiter=限制器与击发逻辑,fluid=流体改道,em=电磁场控;机身形变按类别切换(引信类不改机身),核心固件必须是 limiter(设计案 5.3)
+    /// </summary>
+    public readonly string Category;
    
     public const int __ID__ = -1131444196;
     public override int GetTypeId() => __ID__;
@@ -73,6 +78,7 @@ public sealed partial class FirmwareKind : Luban.BeanBase
         + "cooldown:" + Cooldown + ","
         + "protocol:" + Protocol + ","
         + "faction:" + Faction + ","
+        + "category:" + Category + ","
         + "}";
     }
 }

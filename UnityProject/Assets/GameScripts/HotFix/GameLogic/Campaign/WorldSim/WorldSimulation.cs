@@ -242,6 +242,7 @@ namespace GameLogic.Campaign.WorldSim
             Signal.SignalCoverageService.Clear(); // 覆盖源缓存引用着旧战役：一并清掉。
             GameLogic.View.SignalLinkView.Clear(); // 地图预警圈用共享材质：先于材质释放。
             GameLogic.View.SignalCoverageOverlayView.Clear(); // FG1-SIG-07：覆盖网络叠加层同样用共享材质。
+            GameLogic.View.MachineMorphView.Clear(); // FG1-VFX-01：形变部件的共享网格与材质随世界成对释放（部件已随各地点表现对象销毁）。
             GameLogic.View.ViewMaterials.ReleaseAll(); // FG0-ARCH-03：地点表现对象的共享材质与世界成对释放（各地点的表现对象此时已全部销毁）。
             FracturedCity = null;
             FoundryOutpost = null;
@@ -335,6 +336,7 @@ namespace GameLogic.Campaign.WorldSim
             Signal.SignalUplinkService.FrameTick(realDt);
             GameLogic.View.SignalLinkView.FrameTick(); // FG1-SIG-04：安全模式头顶图标、地图上的覆盖边缘预警（纯表现）。
             GameLogic.View.SignalCoverageOverlayView.FrameTick(); // FG1-SIG-07：覆盖网络叠加层（纯表现，网络变了才重画）。
+            GameLogic.View.MachineMorphView.FrameTick(realDt); // FG1-VFX-01：机身形变过渡（真实时间、暂停不走；只推进正在过渡的机器）。
             IWorldSite observed = WorldView.ObservedSite;
             if (observed != null && observed.IsLoaded)
             {

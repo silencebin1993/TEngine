@@ -189,6 +189,10 @@ namespace GameLogic.EditorTools
                 // 覆盖之外（命令 / 派工 / 接入被拒、只执行最后的命令、回到覆盖自动恢复）、远距离跳转（过渡 1.5 秒、冷却 10 秒、跨地点）、跳回家园 / 上一台（快捷键与 HUD，
                 // FGJ-M1 第 7、8 步）、负向矩阵、暂停倍速、后台一致、真实文件存读档、覆盖扩张探索、派遣检查单提醒接口、真实建造 / 拆除、远征地点、性能、界面与布局探针。
                 _fail += FgSignalNetworkSelfCheck.Run(Report);
+                // FG1-VFX-01：机身形变首批——类别入表、6 个作战组件 × 3 状态的部件库（三角面预算、单 MeshFilter、共享网格 / 材质、GPU Instancing）、
+                // 默认战略缩放下俯视栅格化可辨认（FGR-FW-022）、FGT-FW-004 接入 → 出现 → 离开 → 复原与多类叠加、装配变更、负向（形变中阵亡、快速反复接入离开、
+                // 表现中途卸载、没有作战组件、引信类）、暂停倍速、真实文件存读档（直接到位）、观察无关、性能与零分配。
+                _fail += FgMachineMorphSelfCheck.Run(Report);
             }
             catch (Exception e)
             {

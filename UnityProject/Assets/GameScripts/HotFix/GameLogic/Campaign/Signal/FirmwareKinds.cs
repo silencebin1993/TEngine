@@ -18,6 +18,21 @@ namespace GameLogic.Campaign.Signal
         Core = 2,
     }
 
+    /// <summary>FG1-VFX-01（FG02 FGR-FW-001“类别”、设计案 5.3 四类物理包装）：机身形变按类别切换（FGR-FW-020），引信类只改弹体特效、不改机身。</summary>
+    public enum FirmwareCategory : byte
+    {
+        /// <summary>不是固件，或表里没有类别（漏登记是开发错误，记 Error，不产生形变）。</summary>
+        Unknown = 0,
+        /// <summary>引信与弹芯：炮管不变、弹芯自己变——不改机身（弹体特效变体归 FG2-FW-04）。</summary>
+        Fuse = 1,
+        /// <summary>限制器与击发逻辑：散热鳍展开、枪管发红、天线升起（形变态）。核心固件全部在这一类。</summary>
+        Limiter = 2,
+        /// <summary>流体改道：机身开出喷口、管线外露（喷口态）。</summary>
+        Fluid = 3,
+        /// <summary>电磁场控：线圈发光（线圈态）。</summary>
+        Electromagnetic = 4,
+    }
+
     /// <summary>FG1-SIG-06（FGT-SIG-003）：固件能装进去的宿主。</summary>
     public enum FirmwareHost : byte
     {
@@ -94,6 +109,49 @@ namespace GameLogic.Campaign.Signal
         }
 
         public static bool IsCore(string contentId) => KindOf(contentId) == FirmwareKind.Core;
+
+        // ── FG1-VFX-01：类别（机身形变）────────────────────────────────────────────
+
+        private static Dictionary<string, FirmwareCategory> _categoryOverride;
+        private static readonly HashSet<string> WarnedCategory = new HashSet<string>(StringComparer.Ordinal);
+
+        /// <summary>固件的类别（fg.TbFirmwareKind category：fuse / limiter / fluid / em）。不是固件时 <see cref="FirmwareCategory.Unknown"/>；
+        /// 表里查不到或拼错时记一次 Error 并返回 Unknown（不产生形变，不让玩家卡住；check_luban R22 保证正式表不会出现）。O(1)。</summary>
+        public static FirmwareCategory CategoryOf(string contentId)
+        {
+            if (!IsFirmware(contentId))
+            {
+                return FirmwareCategory.Unknown;
+            }
+            if (_categoryOverride != null && _categoryOverride.TryGetValue(contentId, out FirmwareCategory forced))
+            {
+                return forced;
+            }
+            EnsureLoaded();
+            if (_table != null && _table.DataMap.TryGetValue(contentId, out GameConfig.fg.FirmwareKind row) && row != null)
+            {
+                switch (row.Category)
+                {
+                    case "fuse": return FirmwareCategory.Fuse;
+                    case "limiter": return FirmwareCategory.Limiter;
+                    case "fluid": return FirmwareCategory.Fluid;
+                    case "em": return FirmwareCategory.Electromagnetic;
+                }
+            }
+            if (WarnedCategory.Add(contentId))
+            {
+                Log.Error($"[FirmwareKinds] 固件 {contentId} 在 fg.TbFirmwareKind 里没有合法类别（改 tools/cell_tables/fgdata_signal.py 后重新生成），不产生机身形变。");
+            }
+            return FirmwareCategory.Unknown;
+        }
+
+        /// <summary>测试注入：把列出的固件改成指定类别（其余仍读表）。正式内容里还没有电磁类固件（FG2-FW-01 迁入），
+        /// 线圈态的完整链路靠它验证。用完 <see cref="ResetForTests"/>。</summary>
+        public static void OverrideCategoryForTests(IReadOnlyDictionary<string, FirmwareCategory> categories)
+        {
+            _categoryOverride = categories == null ? null : new Dictionary<string, FirmwareCategory>(categories, StringComparer.Ordinal);
+            Revision++;
+        }
 
         // ── FG1-SIG-06：协议、来源阵营、未破解（裸跑）──────────────────────────────────
 
@@ -347,6 +405,7 @@ namespace GameLogic.Campaign.Signal
             _table = null;
             _loadError = null;
             WarnedMissing.Clear();
+            WarnedCategory.Clear();
             Revision++;
             EnsureLoaded();
         }
@@ -363,6 +422,7 @@ namespace GameLogic.Campaign.Signal
         {
             _override = null;
             _protocolOverride = null;
+            _categoryOverride = null;
             Reload();
         }
 

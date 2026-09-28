@@ -55,6 +55,8 @@ namespace GameLogic.Core
         public const string SignalRelayFirstCut = "signal.coverage.first_relay_cut";
         /// <summary>FG1-SIG-07：第一次远距离跳转（引导内容：过渡、冷却、跳回家园 / 上一台）。</summary>
         public const string SignalFirstFarJump = "signal.jump.first_far";
+        /// <summary>FG1-VFX-01：第一次看到机器机身形变（引导内容：三类状态分别代表哪类固件、接入与离开都会切换）。</summary>
+        public const string MorphFirstSeen = "firmware.morph.first_seen";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -69,6 +71,7 @@ namespace GameLogic.Core
             SignalFirstUplink,
             SignalFirstEncryptedFirmware, ExposurePanelFirstOpen,
             SignalCoverageFirstOverlay, SignalCoverageFirstLeft, SignalRelayFirstCut, SignalFirstFarJump,
+            MorphFirstSeen,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>
