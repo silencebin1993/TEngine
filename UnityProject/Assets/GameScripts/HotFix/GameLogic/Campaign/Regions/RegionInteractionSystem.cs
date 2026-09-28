@@ -65,6 +65,9 @@ namespace GameLogic.Campaign.Regions
         /// <summary>ER6-REGION-01：封锁门三灯未全亮，交互拒绝（"重炮解析/熔穿过载蓝图保存/现役机
         /// 实装"缺项文案随 <see cref="RegionInteractResult.PlayerText"/> 一并给出）。</summary>
         GateLocked,
+        /// <summary>FG1-SIG-03（FGR-SIG-031“过渡期间冻结冲突输入”）：信号正在切往另一台机器（Tab / 机器列表）：
+        /// 旧机器不再发起、推进或完成交互，进度清零（与模态一样不出提示、不出拒绝音）。</summary>
+        UplinkTransition,
     }
 
     public readonly struct RegionInteractResult
@@ -218,6 +221,11 @@ namespace GameLogic.Campaign.Regions
             }
 
             RegionInteractFailure gate = _ctx.GateCheck?.Invoke() ?? RegionInteractFailure.None;
+            if (gate == RegionInteractFailure.None && Signal.SignalUplinkService.IsPending)
+            {
+                // 直控 → 直控的接入过渡（0.35 秒）里受控机还是旧机器：按下或按住交互键不能让它发起、推进、完成拆解 / 装载。
+                gate = RegionInteractFailure.UplinkTransition;
+            }
             if (gate != RegionInteractFailure.None)
             {
                 PrimaryCandidate = null;

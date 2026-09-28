@@ -84,6 +84,20 @@ namespace GameLogic.Campaign.Signal
 
         public static bool IsCore(string contentId) => KindOf(contentId) == FirmwareKind.Core;
 
+        /// <summary>FG1-SIG-03（FGR-SIG-033）：核心固件发动后的冷却秒数（表 cooldown 列，按游戏时间）。不是核心固件、表里没有这一行时为 0
+        /// （常规固件没有“发动”，也就没有冷却）。测试注入种类时冷却仍读正式表，改表不需要改代码。</summary>
+        public static float CoreCooldownSeconds(string contentId)
+        {
+            if (!IsCore(contentId))
+            {
+                return 0f;
+            }
+            EnsureLoaded();
+            return _table != null && _table.DataMap.TryGetValue(contentId, out GameConfig.fg.FirmwareKind row) && row != null
+                ? Math.Max(0f, row.Cooldown)
+                : 0f;
+        }
+
         /// <summary>玩家可见的固件名（文本键）；不是固件时返回 null。</summary>
         public static string DisplayName(string contentId)
         {

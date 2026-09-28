@@ -379,6 +379,27 @@ namespace GameLogic.Campaign
         public string ActivePresetId = string.Empty;
         /// <summary>下一个预设的序号（预设 ID 与默认名称“配置 N”都用它，删除后不复用）。</summary>
         public int NextPresetSerial = 1;
+
+        // ── FG1-SIG-03（FGR-SIG-002、030～033；FG01 第 6 章“存档内容：信号位置……核心固件冷却”）──
+        // 只加字段、不升域版本：旧档缺这些字段时读回 0 / 空串 / 空数组 = “信号在归还核心、没有冷却”，正是旧档的真实含义。
+
+        /// <summary>信号现在在哪台机器里（<see cref="MachineRecord.LogicId"/>）；0 = 在归还核心。唯一写入口是
+        /// <c>SignalUplinkService</c>（接入完成、离开、阵亡回弹、断链、地点卸载都经它）。接入过渡中的“目标”不写这里（过渡没完成，信号还在原处）。</summary>
+        public int UplinkMachineLogicId;
+        /// <summary>接入的机器所在的地点（区域 ID）；在归还核心时为空串。</summary>
+        public string UplinkSiteId = string.Empty;
+        /// <summary>核心固件的冷却（FGR-SIG-033：冷却属于信号，跳到别的机器不会重置）。按固件内容 ID，存“到哪个游戏秒可以再发动”
+        /// （<c>GameClock.GameSeconds</c>，暂停不走、倍速按游戏时间走）；已到期的条目在下一个模拟步里清掉。</summary>
+        public SignalCoreCooldownRecord[] CoreCooldowns = Array.Empty<SignalCoreCooldownRecord>();
+    }
+
+    /// <summary>FG1-SIG-03：一条核心固件冷却（信号侧，不属于任何机体）。</summary>
+    [Serializable]
+    public sealed class SignalCoreCooldownRecord
+    {
+        public string ContentId = string.Empty;
+        /// <summary>到这个游戏秒（<c>GameClock.GameSeconds</c>）冷却结束。</summary>
+        public double ReadyAtGameSeconds;
     }
 
     /// <summary>信号核预设（FG01 第 4 章“保存为预设、一键切换（只能在家园切换）”）。按槽位记固件内容 ID，

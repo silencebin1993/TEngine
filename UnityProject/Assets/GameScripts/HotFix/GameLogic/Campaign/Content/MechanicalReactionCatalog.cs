@@ -102,5 +102,20 @@ namespace GameLogic.Campaign.Content
             return mainComponentIds.Contains(ComponentCatalog.CompCannonId)
                 && firmwareIds.Contains(FirmwareCatalog.FwOverloadId);
         }
+
+        /// <summary>FG1-SIG-03（FGR-SIG-033）：这条反应由哪条固件“发动”——与上面两个判定函数同一份配方（熔穿过载 ← 过载，标记跳转 ← 标记跳转固件）。
+        /// 核心固件的冷却按这条固件记在信号上；不是具名反应时返回 null。FG2-FW-03 反应全量命名时在这里接入新配方。</summary>
+        public static string TriggerFirmwareOf(string reactionId)
+        {
+            if (reactionId == ReactionMeltOverloadId)
+            {
+                return FirmwareCatalog.FwOverloadId;
+            }
+            if (reactionId == ReactionMarkJumpId)
+            {
+                return FirmwareCatalog.FwMarkTagId;
+            }
+            return null;
+        }
     }
 }

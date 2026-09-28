@@ -7,6 +7,7 @@ using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Feedback;
 using GameLogic.Campaign.Grid;
 using GameLogic.Campaign.Regions;
+using GameLogic.Campaign.Signal;
 using GameLogic.Core;
 using GameLogic.Localization;
 using TEngine;
@@ -46,6 +47,12 @@ namespace GameLogic.Campaign.Combat
         public string PrimaryId;
         public string FailureReason;
         public int WeaponIndex;
+        /// <summary>FG1-SIG-03：这组参数是按“信号接入”结算的（插入了信号核固件）。</summary>
+        public bool Uplinked;
+        /// <summary>FG1-SIG-03：核心固件冷却中，本该有的反应暂不发动。</summary>
+        public bool ReactionSuppressed;
+        /// <summary>FG1-SIG-03：这组参数的具名反应来自信号带进来的核心固件（冷却 &gt; 0）——内核发动一次后当场压住（<see cref="CombatUnitFlags.ReactionGated"/>）。</summary>
+        public bool ReactionGated;
     }
 
     /// <summary>
@@ -188,6 +195,10 @@ namespace GameLogic.Campaign.Combat
             if (rec.IsInFactory)
             {
                 flags |= CombatUnitFlags.EngageHold;
+            }
+            if (info.ReactionGated)
+            {
+                flags |= CombatUnitFlags.ReactionGated;
             }
             if (!rec.IsAlive)
             {
@@ -363,6 +374,13 @@ namespace GameLogic.Campaign.Combat
             MachineWeaponInfo info = ResolveMachineWeapon(state, logicId);
             Kernel.SetUnitWeapon(unit, info.WeaponIndex);
             Kernel.SetFlag(unit, CombatUnitFlags.HeatSink, HasHeatSink(state, logicId));
+            // FG1-SIG-03：门控只跟着“信号带进来的核心固件反应”走。新参数不带门控反应（冷却中压住的行、离开后的本地配置）时，
+            // 内核里“已发动、等冷却下发”的标记一并清掉；仍是门控行时保留（发动事件还没被处理的那几步里不能再发动）。
+            Kernel.SetFlag(unit, CombatUnitFlags.ReactionGated, info.ReactionGated);
+            if (!info.ReactionGated)
+            {
+                Kernel.SetFlag(unit, CombatUnitFlags.ReactionSpent, false);
+            }
         }
 
         private MachineWeaponInfo ResolveMachineWeapon(CampaignState state, int logicId)
@@ -374,7 +392,8 @@ namespace GameLogic.Campaign.Combat
                 _machineWeapons[logicId] = info;
                 return info;
             }
-            MachineCombatResolution resolution = MachineLoadoutRegistry.ResolveForAi(state, logicId, state.RandomSeed);
+            // FG1-SIG-03：信号接入这台机器时按接入结算（信号核固件插进接入口），否则是 AI 驾驶的本地配置——离开时自动回到本地配置。
+            MachineCombatResolution resolution = MachineLoadoutRegistry.ResolveForPilot(state, logicId, state.RandomSeed);
             if (!resolution.Success)
             {
                 info.FailureReason = resolution.FailureReason;
@@ -383,7 +402,12 @@ namespace GameLogic.Campaign.Combat
             }
             BlueprintCircuitPreview p = resolution.Preview;
             info.PrimaryId = p.PrimaryId;
-            CombatWeapon w = MachineWeaponFrom(p);
+            info.Uplinked = SignalUplinkService.IsUplinked(state, logicId);
+            // FGR-SIG-033：信号带进来的核心固件正在冷却（冷却属于信号）时，这条反应暂不发动；固件照样插着。
+            info.ReactionSuppressed = SignalUplinkService.IsReactionSuppressed(state, logicId, p.ReactionId);
+            info.ReactionGated = !info.ReactionSuppressed && info.Uplinked
+                                 && SignalUplinkService.IsCoreGatedReaction(p.ReactionId, p.UplinkFirmwareIds);
+            CombatWeapon w = MachineWeaponFrom(p, info.ReactionSuppressed);
             info.WeaponIndex = WeaponIndex(w);
             _machineWeapons[logicId] = info;
             return info;
@@ -395,7 +419,7 @@ namespace GameLogic.Campaign.Combat
             {
                 return false;
             }
-            MachineCombatResolution r = MachineLoadoutRegistry.ResolveForAi(state, logicId, state.RandomSeed);
+            MachineCombatResolution r = MachineLoadoutRegistry.ResolveForPilot(state, logicId, state.RandomSeed);
             return r.Success && r.Preview.HasHeatSinkStructure;
         }
 
@@ -404,7 +428,10 @@ namespace GameLogic.Campaign.Combat
         /// 铸造重炮 = 两段式（1 秒瞄准线、3 秒冷却、55 基础伤害、积热 40、熔穿过载 +25 积热与 30% 穿甲、100 过热 / 60 恢复、散热 10（散热鳍 +5））；
         /// 其余 = 即时命中，伤害 = 装配编译出的 TotalNormalizedDamage；装了标记器命中打 10 秒标记；标记跳转 8 米内至多 2 个、每跳 ×0.6。
         /// </summary>
-        public static CombatWeapon MachineWeaponFrom(BlueprintCircuitPreview p)
+        public static CombatWeapon MachineWeaponFrom(BlueprintCircuitPreview p) => MachineWeaponFrom(p, false);
+
+        /// <summary><paramref name="suppressReaction"/>：FG1-SIG-03 核心固件冷却中——反应不发动（熔穿过载不额外积热、不穿甲；标记跳转不跳），其余参数不变。</summary>
+        public static CombatWeapon MachineWeaponFrom(BlueprintCircuitPreview p, bool suppressReaction)
         {
             var w = new CombatWeapon
             {
@@ -425,14 +452,14 @@ namespace GameLogic.Campaign.Combat
                 w.HeatPerShot = FracturedCityLayout.CannonBaseHeatPerShot;
                 w.OverloadExtraHeat = FracturedCityLayout.OverloadExtraHeatPerShot;
                 w.PierceBonus = FracturedCityLayout.OverloadArmorPierceBonus;
-                w.Reaction = p.ReactionId == MechanicalReactionCatalog.ReactionMeltOverloadId ? CombatReaction.MeltOverload : CombatReaction.None;
+                w.Reaction = !suppressReaction && p.ReactionId == MechanicalReactionCatalog.ReactionMeltOverloadId ? CombatReaction.MeltOverload : CombatReaction.None;
                 return w;
             }
             w.Mode = CombatWeaponMode.Instant;
             w.Damage = Mathf.Max(0f, p.TotalNormalizedDamage);
             w.Range = FracturedCityLayout.DirectAttackRange;
             w.MarkSeconds = p.HasMarkerFunction ? FracturedCityLayout.EnemyMarkDurationSeconds : 0f;
-            if (p.ReactionId == MechanicalReactionCatalog.ReactionMarkJumpId)
+            if (!suppressReaction && p.ReactionId == MechanicalReactionCatalog.ReactionMarkJumpId)
             {
                 w.Reaction = CombatReaction.MarkJump;
                 w.JumpRange = FracturedCityLayout.MarkJumpRange;
@@ -980,6 +1007,16 @@ namespace GameLogic.Campaign.Combat
                     }
                     return;
                 }
+                case CombatEventKind.ReactionFired:
+                {
+                    // FG1-SIG-03：反应发动走不丢的玩法事件（同名提示事件只管声音 / 特效，打满每步上限时可以丢，冷却不能跟着丢）。
+                    string reactionId = ReactionIdOf((CombatReaction)e.Code);
+                    if (reactionId != null)
+                    {
+                        NotifyReactionFired(state, e.Unit, reactionId, e.Code2 != 0);
+                    }
+                    return;
+                }
                 default:
                     HandleCue(state, e);
                     return;
@@ -1053,6 +1090,24 @@ namespace GameLogic.Campaign.Combat
                 }
             }
         }
+
+        /// <summary>FG1-SIG-03（FGR-SIG-033）：己方机器打出了一条反应（玩法事件 <see cref="CombatEventKind.ReactionFired"/>）——交给信号接入服务判断是不是
+        /// 信号带进来的核心固件发动（是就开始冷却，冷却记在信号上）。<paramref name="gatedAtFire"/> = 发动那一刻内核认定它是门控反应。O(1)。</summary>
+        private void NotifyReactionFired(CampaignState state, int unit, string reactionId, bool gatedAtFire)
+        {
+            if (state != null && _unitMachine.TryGetValue(unit, out int logicId))
+            {
+                SignalUplinkService.OnReactionFired(state, logicId, reactionId, gatedAtFire);
+            }
+        }
+
+        /// <summary>内核反应码 → 反应内容 ID（与 <see cref="MachineWeaponFrom(BlueprintCircuitPreview, bool)"/> 的翻译互逆）。</summary>
+        public static string ReactionIdOf(CombatReaction r) => r switch
+        {
+            CombatReaction.MeltOverload => MechanicalReactionCatalog.ReactionMeltOverloadId,
+            CombatReaction.MarkJump => MechanicalReactionCatalog.ReactionMarkJumpId,
+            _ => null,
+        };
 
         // ─────────────────────────────── 开火 ───────────────────────────────
 

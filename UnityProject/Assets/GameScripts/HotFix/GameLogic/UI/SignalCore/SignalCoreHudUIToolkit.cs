@@ -45,6 +45,11 @@ namespace GameLogic.UI.SignalCore
 
         private VisualElement _hudBar;
         private Label _location;
+        private Label _uplinkStatus;
+        private int _uplinkKey;
+        /// <summary>FG1-SIG-03：接入过渡中 Esc = 取消接入（取消栈里的一层）。</summary>
+        private static readonly object UplinkEscToken = new object();
+        private static readonly Action CancelUplink = () => SignalUplinkService.CancelByPlayer();
         private Button _entry;
         private VisualElement _panel;
         private Label _title;
@@ -99,6 +104,8 @@ namespace GameLogic.UI.SignalCore
         public bool HudVisible => _hudBar != null && !_hudBar.ClassListContains("uk-hidden");
         public bool PanelVisible => _panel != null && !_panel.ClassListContains("uk-hidden");
         public string LocationText => _location?.text ?? string.Empty;
+        /// <summary>FG1-SIG-03：接入状态行的文字（隐藏时为空）。</summary>
+        public string UplinkStatusText => _uplinkStatus != null && !_uplinkStatus.ClassListContains("uk-hidden") ? _uplinkStatus.text ?? string.Empty : string.Empty;
         public string EntryText => _entry?.text ?? string.Empty;
         public string FeedbackText => _feedback?.text ?? string.Empty;
         public bool FeedbackIsError => _feedbackError;
@@ -133,6 +140,8 @@ namespace GameLogic.UI.SignalCore
             {
                 SetOpen(false);
             }
+            // FG1-SIG-03：接入过渡中 HUD 被销毁（卸载界面、回主菜单）时，别把“Esc 取消接入”这一层留在静态 Esc 栈里吃掉下一次 Esc。
+            UiEscapeStack.Remove(UplinkEscToken);
             if (Instance == this)
             {
                 Instance = null;
@@ -186,6 +195,7 @@ namespace GameLogic.UI.SignalCore
         {
             _hudBar = root.Q<VisualElement>("SignalHudBar");
             _location = root.Q<Label>("SignalLocation");
+            _uplinkStatus = root.Q<Label>("SignalUplinkStatus");
             _entry = root.Q<Button>("SignalCoreEntry");
             _panel = root.Q<VisualElement>("SignalCorePanel");
             _title = root.Q<Label>("SignalCoreTitle");
@@ -371,6 +381,7 @@ namespace GameLogic.UI.SignalCore
                 SetOpen(false);
             }
             SetVisible(_hudBar, s != null && (inWorld || IsOpen));
+            RefreshUplinkStatus(s, inWorld);
             if (s == null)
             {
                 _hudKey = 0;
@@ -735,6 +746,31 @@ namespace GameLogic.UI.SignalCore
 
         private static string ShortId(string partId) =>
             string.IsNullOrEmpty(partId) ? string.Empty : partId.Length <= 4 ? partId : partId.Substring(partId.Length - 4);
+
+        /// <summary>FG1-SIG-03：接入状态行 + 过渡中 Esc 取消。每帧 O(1)（键不变不重建文字）。</summary>
+        private void RefreshUplinkStatus(CampaignState s, bool inWorld)
+        {
+            UiEscapeStack.Sync(UplinkEscToken, inWorld && SignalUplinkService.IsPending, CancelUplink);
+            if (_uplinkStatus == null)
+            {
+                return;
+            }
+            if (s == null || !inWorld)
+            {
+                SetVisible(_uplinkStatus, false);
+                _uplinkKey = 0;
+                return;
+            }
+            int key = SignalUplinkService.StatusKey(s);
+            if (key == _uplinkKey)
+            {
+                return;
+            }
+            _uplinkKey = key;
+            string text = SignalUplinkService.StatusLine(s);
+            _uplinkStatus.text = text;
+            SetVisible(_uplinkStatus, !string.IsNullOrEmpty(text));
+        }
 
         private static void SetVisible(VisualElement e, bool visible)
         {

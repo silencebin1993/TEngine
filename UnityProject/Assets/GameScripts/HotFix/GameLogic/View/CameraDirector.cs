@@ -42,8 +42,12 @@ namespace GameLogic.View
         /// <summary>直控跟随的指数平滑系数。沿用改造前 FollowCamera 的手感，不借机改数值。</summary>
         private const float DirectFollowLambda = 8f;
 
-        /// <summary>过渡时长。够看清"镜头在移动"，又不至于让人等——M2-01 非目标里写明不做电影级轨迹。</summary>
-        private const float TransitionSeconds = 0.35f;
+        /// <summary>过渡时长。够看清"镜头在移动"，又不至于让人等——M2-01 非目标里写明不做电影级轨迹。
+        /// FG1-SIG-03：与信号接入的过渡是同一个 0.35 秒（FGR-SIG-031），读同一行调参（fg.TbHomeTuning signal.uplink.transition_seconds），
+        /// 调表后镜头与接入提交不会分叉；没加载 fg 表的场合（旧细胞阶段）用初值。</summary>
+        public static float TransitionSeconds => math.max(0f, Tune("signal.uplink.transition_seconds", DefaultTransitionSeconds));
+
+        private const float DefaultTransitionSeconds = 0.35f;
 
         /// <summary>单帧步长上限（约 20fps 的一帧）。见 <see cref="Tick"/> 里的说明。</summary>
         private const float MaxStepSeconds = 0.05f;
@@ -86,7 +90,7 @@ namespace GameLogic.View
         private float _transitionFromSize;
         private float _transitionToSize;
         /// <summary>FG0-ARCH-01：本次过渡的时长（视角切换 0.35 秒；镜头飞跃 camera.fly_seconds）。</summary>
-        private float _transitionDuration = TransitionSeconds;
+        private float _transitionDuration = DefaultTransitionSeconds;
 
         /// <summary>FG0-ARCH-01：矩形平移边界（星球表面按已探索范围给出）。未设置时沿用以原点为中心的方形 <see cref="_arenaHalfExtent"/>。</summary>
         private bool _hasRectBounds;
@@ -102,6 +106,10 @@ namespace GameLogic.View
 
         public ViewMode Mode => _mode;
         public bool InTransition => _mode == ViewMode.Transition;
+        /// <summary>FG1-SIG-03：过渡结束后要进入的视角（不在过渡中时等于 <see cref="Mode"/>）。信号接入服务据此判断玩家是不是在接入途中又拉回了战略。</summary>
+        public ViewMode TransitionTarget => _mode == ViewMode.Transition ? _pendingMode : _mode;
+        /// <summary>FG1-SIG-03：镜头是否停在 / 正在去直控视角。</summary>
+        public bool HeadingDirect => _mode == ViewMode.Direct || (_mode == ViewMode.Transition && _pendingMode == ViewMode.Direct);
         public float2 StrategyFocus => _strategyFocus;
         public float OrthographicSize => _camera != null ? _camera.orthographicSize : 0f;
         /// <summary>FG0-ARCH-01：战略视角的缩放（全局镜头按地点记忆 / 恢复）。</summary>
@@ -304,7 +312,10 @@ namespace GameLogic.View
                 return;
             }
 
-            if (InputRouter.ConsumeGlobalAction(GameActionId.ToggleCameraView))
+            // FG1-SIG-03（FG01 第 5 章“战略暂停中发起接入：可以选择目标并确认，恢复运行后完成过渡”）：战略暂停本身不挡接入 / 退出键，
+            // 只有真正的面板模态（确认框、暂停菜单……）才挡。暂停中发起的接入由信号接入服务挂起，恢复运行后才开始过渡。
+            if (InputRouter.ConsumeGlobalAction(GameActionId.ToggleCameraView,
+                    allowDuringModal: InputRouter.StrategicPause && !InputRouter.PanelModalOpen))
             {
                 if (_mode == ViewMode.Direct)
                 {
@@ -388,8 +399,12 @@ namespace GameLogic.View
             }
         }
 
-        private void BeginTransition(ViewMode target, Vector3 targetPosition, float targetSize, float duration = TransitionSeconds)
+        private void BeginTransition(ViewMode target, Vector3 targetPosition, float targetSize, float duration = -1f)
         {
+            if (duration < 0f)
+            {
+                duration = TransitionSeconds;
+            }
             _pendingMode = target;
             _mode = ViewMode.Transition;
             _transitionDuration = duration;

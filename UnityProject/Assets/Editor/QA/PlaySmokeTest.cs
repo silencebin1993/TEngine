@@ -48,6 +48,8 @@ namespace GameLogic.EditorTools
     /// FG1-SIG-01 / 02：按 P 开信号核 → 刻印过载、装入 1 号槽、存预设 → 再开蓝图编辑器 → 点选导线经过的空格 → 点“标为接入口”→
     /// 格子上图标 + 文字、双态预览两栏（你接入时插入过载、高亮）与差异 → Ctrl+Z 撤销 / Ctrl+Y 重做（不弹“尚未开放”）→
     /// 0 号格标接入口被拒并给原因 → Esc 关编辑器（草稿不保存）→ 远征准备面板的信号核入口与远征锁。
+    /// FG1-SIG-03：家园里鼠标选中 → 按接入键 → 机器列表切机 → Tab → 离开 → 战略暂停中发起 → Esc 取消 → 恢复；
+    /// 铸造前哨外围点命令栏机器列表接入 → 按接入 / 退出键离开；存档前接入、读档后核对信号位置。
     ///
     /// 用法：<c>bash tools/unity-play-smoke.sh</c>（影子工程里跑，编辑器开着也行）。进 Play 会重载域，
     /// 驱动状态存在 SessionState 里，[InitializeOnLoad] 重载后接着跑。
@@ -81,6 +83,7 @@ namespace GameLogic.EditorTools
             SessionState.SetFloat(K + "RepairedAt", 0f);
             SessionState.SetBool(K + "VfxRaised", false);
             SessionState.SetBool(K + "VfxChecked", false);
+            SessionState.SetInt(K + "FoListPhase", 0);
             SessionState.SetFloat(K + "Start", (float)EditorApplication.timeSinceStartup);
             Next(0, "开始：打开 Assets/Scenes/main.unity 并进入 Play");
             EditorSceneManager.OpenScene("Assets/Scenes/main.unity", OpenSceneMode.Single);
@@ -180,6 +183,21 @@ namespace GameLogic.EditorTools
                     case 164: StepUplinkUndone(inStep); break;
                     case 165: StepUplinkRedone(inStep); break;
                     case 166: StepUplinkEditorClosed(inStep); break;
+                    case 167: StepSigUplinkSelect(inStep); break;
+                    case 168: StepSigUplinkPress(inStep); break;
+                    case 169: StepSigUplinkEntered(inStep); break;
+                    case 170: StepSigUplinkListSwitched(inStep); break;
+                    case 171: StepSigUplinkTabbed(inStep); break;
+                    case 172: StepSigUplinkLeft(inStep); break;
+                    case 173: StepSigUplinkPaused(inStep); break;
+                    case 174: StepSigUplinkPausedPending(inStep); break;
+                    case 175: StepSigUplinkEscCancelled(inStep); break;
+                    case 176: StepSigUplinkResumed(inStep); break;
+                    case 177: StepSigSaveSelect(inStep); break;
+                    case 178: StepSigSavePress(inStep); break;
+                    case 179: StepSigSaveUplinked(inStep); break;
+                    case 29: StepSigLeftAfterLoad(inStep); break;
+                    case 19: StepSigHomeAfterLoad(inStep); break;
                     case 158: StepSignalPrepPanel(inStep); break;
                     case 159: StepSignalFromPrep(inStep); break;
                     case 160: StepSignalPrepDone(inStep); break;
@@ -977,6 +995,11 @@ namespace GameLogic.EditorTools
             GameObject host = GameObject.Find(hostName);
             UIDocument doc = host != null ? host.GetComponent<UIDocument>() : null;
             UnityEngine.UIElements.Button b = doc?.rootVisualElement?.Q<UnityEngine.UIElements.Button>(buttonName);
+            return InvokeClickable(b);
+        }
+
+        private static bool InvokeClickable(UnityEngine.UIElements.Button b)
+        {
             if (b == null || b.clickable == null)
             {
                 return false;
@@ -1457,10 +1480,286 @@ namespace GameLogic.EditorTools
             }
             Check(GameRoot.HomeValley != null && !GameRoot.HomeValley.IsCircuitBoardPanelOpen && !PauseMenuUIToolkit.IsOpen && !UI.Kit.UiUndoRouter.HasTarget,
                 "Esc 关闭蓝图编辑器（暂停菜单没开，撤销快捷键交还）");
+            Next(167, "FG1-SIG-03 接入旅程：真实鼠标选中家园机器");
+        }
+
+        // ── FG1-SIG-03：接入、机器列表 / Tab 切换、离开；战略暂停中发起、Esc 取消（真实鼠标 / 按键）────────────
+
+        /// <summary>家园里可以接入的机器（存活、不在装配站、有表现对象），按编号取第一台（不写死编号）。</summary>
+        private static Campaign.Regions.HomeValleyMachineMarker SigCandidate(int exclude) =>
+            SigCandidateIn(GameRoot.HomeValley?.Combat, Campaign.Regions.HomeValleyLayout.RegionId, exclude);
+
+        /// <summary>某地点里现在就能接入的机器（存活、不在装配站、有表现对象、接入校验通过——不在干扰场等），按编号取第一台。</summary>
+        private static Campaign.Regions.HomeValleyMachineMarker SigCandidateIn(Campaign.Combat.CombatSite site, string regionId, int exclude)
+        {
+            if (site == null)
+            {
+                return null;
+            }
+            foreach (MachineRecord m in MachineRegistry.AllRecords.Where(r => r != null && r.IsAlive && !r.IsInFactory
+                         && r.RegionId == regionId && r.LogicId != exclude).OrderBy(r => r.LogicId))
+            {
+                if (site.TryGetMachineMarker(m.LogicId, out Campaign.Regions.HomeValleyMachineMarker mk) && mk.View != null
+                    && Campaign.Signal.SignalUplinkService.Validate(CampaignSession.Current, m.LogicId, out _) == Campaign.Signal.UplinkFailure.None)
+                {
+                    return mk;
+                }
+            }
+            return null;
+        }
+
+        private static bool SigSiteActive(string regionId) =>
+            regionId == Campaign.Regions.FracturedCityLayout.RegionId ? GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsActive
+            : regionId == Campaign.Regions.FoundryOutpostLayout.RegionId ? GameRoot.FoundryOutpost != null && GameRoot.FoundryOutpost.IsActive
+            : GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive;
+
+        private static string SigLabel(int logicId) => Campaign.Signal.SignalPresence.MachineLabel(logicId);
+
+        /// <summary>命令栏机器列表（候选条）里点一台：按按钮文字“#编号”找到按钮，走按钮自己的 Clickable（与鼠标点击同一回调）。</summary>
+        private static bool ClickMachineList(int logicId)
+        {
+            GameObject host = GameObject.Find("[RegionCommandBarHost]");
+            UIDocument doc = host != null ? host.GetComponent<UIDocument>() : null;
+            ScrollView strip = doc?.rootVisualElement?.Q<ScrollView>("ControlCandidateStrip");
+            if (strip == null || !MachineRegistry.TryGetRecord(logicId, out MachineRecord rec))
+            {
+                return false;
+            }
+            UnityEngine.UIElements.Button b = strip.Query<UnityEngine.UIElements.Button>().ToList().FirstOrDefault(x => x.text == "#" + rec.DisplayNumber);
+            return b != null && InvokeClickable(b);
+        }
+
+        private static void StepSigUplinkSelect(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyMachineMarker m = SigCandidate(0);
+            if (m == null)
+            {
+                Finish("家园里没有可以接入的机器");
+                return;
+            }
+            SessionState.SetInt(K + "SigA", m.LogicId);
+            ClickWorld(m.View.transform.position);
+            Next(168, $"左键点家园里的机器 {SigLabel(m.LogicId)}");
+        }
+
+        private static void StepSigUplinkPress(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            int a = SessionState.GetInt(K + "SigA", 0);
+            Check(GameRoot.HomeValley.SelectedMachineLogicId == a, $"左键选中了 {SigLabel(a)}（实际选中 {GameRoot.HomeValley.SelectedMachineLogicId}）");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.ToggleCameraView));
+            Next(169, $"按接入键（{GameSettings.KeyBindings.GetKey(GameActionId.ToggleCameraView)}，可重绑）");
+        }
+
+        private static void StepSigUplinkEntered(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            int a = SessionState.GetInt(K + "SigA", 0);
+            UI.SignalCore.SignalCoreHudUIToolkit hud = UI.SignalCore.SignalCoreHudUIToolkit.Instance;
+            Check(Campaign.Signal.SignalPresence.CurrentMachineLogicId == a && GameRoot.HomeValley.PossessedMachineLogicId == a
+                  && WorldView.Director.Mode == View.ViewMode.Direct && hud != null && hud.LocationText.Contains(SigLabel(a))
+                  && !string.IsNullOrEmpty(hud.UplinkStatusText),
+                $"0.35 秒过渡后接入 {SigLabel(a)}：镜头直控；HUD“{hud?.LocationText}”，状态行“{hud?.UplinkStatusText}”");
+            CheckNoTextMarkers("接入后");
+            Campaign.Regions.HomeValleyMachineMarker b = SigCandidate(a);
+            if (b == null)
+            {
+                Write("  - 家园只有一台可接入的机器：跳过机器列表与 Tab 切换");
+                PressKey(GameSettings.KeyBindings.GetKey(GameActionId.ToggleCameraView));
+                Next(172, "按接入 / 退出键离开");
+                return;
+            }
+            SessionState.SetInt(K + "SigB", b.LogicId);
+            Check(ClickMachineList(b.LogicId), $"命令栏机器列表里点 {SigLabel(b.LogicId)}");
+            Next(170, $"机器列表直接接入 {SigLabel(b.LogicId)}");
+        }
+
+        private static void StepSigUplinkListSwitched(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            int a = SessionState.GetInt(K + "SigA", 0);
+            int b = SessionState.GetInt(K + "SigB", 0);
+            Check(Campaign.Signal.SignalPresence.CurrentMachineLogicId == b && GameRoot.HomeValley.PossessedMachineLogicId == b,
+                $"机器列表点一下：信号从 {SigLabel(a)} 切到 {SigLabel(b)}");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.CycleControlTarget));
+            Next(171, "接入中按 Tab 循环切换");
+        }
+
+        private static void StepSigUplinkTabbed(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            int b = SessionState.GetInt(K + "SigB", 0);
+            int now = Campaign.Signal.SignalPresence.CurrentMachineLogicId;
+            Check(now != 0 && now != b && GameRoot.HomeValley.PossessedMachineLogicId == now, $"Tab：信号从 {SigLabel(b)} 切到下一台 {SigLabel(now)}");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.ToggleCameraView));
+            Next(172, "按接入 / 退出键离开");
+        }
+
+        private static void StepSigUplinkLeft(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            UI.SignalCore.SignalCoreHudUIToolkit hud = UI.SignalCore.SignalCoreHudUIToolkit.Instance;
+            Check(Campaign.Signal.SignalPresence.AtCore && GameRoot.HomeValley.PossessedMachineLogicId == null && WorldView.Director.Mode == View.ViewMode.Strategy
+                  && hud != null && hud.LocationText == Localization.GameText.Get("signal.hud.at_core"),
+                $"离开：镜头回到战略，信号回到归还核心（HUD“{hud?.LocationText}”，状态行“{hud?.UplinkStatusText}”）");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.TogglePause));
+            Next(173, "按空格战略暂停");
+        }
+
+        private static void StepSigUplinkPaused(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(GameClock.Paused, "战略暂停中");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.ToggleCameraView));
+            Next(174, "战略暂停中按接入键（选中保留在刚离开的机器上）");
+        }
+
+        private static void StepSigUplinkPausedPending(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            UI.SignalCore.SignalCoreHudUIToolkit hud = UI.SignalCore.SignalCoreHudUIToolkit.Instance;
+            string status = hud?.UplinkStatusText ?? string.Empty;
+            Check(Campaign.Signal.SignalUplinkService.PendingWaitsForResume && Campaign.Signal.SignalPresence.AtCore
+                  && WorldView.Director.Mode == View.ViewMode.Strategy && status.Contains(SigLabel(Campaign.Signal.SignalUplinkService.PendingTargetLogicId)),
+                $"暂停中发起：目标已确认、镜头不动、1 秒后仍未插入；HUD“{status}”");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
+            Next(175, "按 Esc 取消这次接入");
+        }
+
+        private static void StepSigUplinkEscCancelled(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(!Campaign.Signal.SignalUplinkService.IsPending && !PauseMenuUIToolkit.IsOpen && Campaign.Signal.SignalPresence.AtCore,
+                $"Esc 先取消接入（“{Campaign.Signal.SignalUplinkService.LastFeedbackText}”），没有弹出暂停菜单");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.TogglePause));
+            Next(176, "按空格恢复运行");
+        }
+
+        private static void StepSigUplinkResumed(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(!GameClock.Paused && !Campaign.Signal.SignalUplinkService.IsPending && Campaign.Signal.SignalPresence.AtCore,
+                "恢复运行：已取消的接入不会再自己完成");
             UnlockLikeDeparture(Campaign.Regions.FracturedCityRegion.Find(CampaignSession.Current),
                 Campaign.Regions.ExpeditionDepartureService.ExpeditionTarget.SilentRuins);
             GameRoot.HomeValley.SetExpeditionPrepPanelOpen(true);
             Next(158, "测试捷径：标记破碎都市可出征，打开远征准备面板（点信号塔的同一开关）");
+        }
+
+        // FG1-SIG-03（FG01 第 5 章“存档时玩家在机器里”）：暂停菜单存档前先接入一台机器，读档后信号必须还在那台里。
+        private static void StepSigSaveSelect(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyMachineMarker m = SigCandidate(0)
+                ?? (GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsActive
+                    ? SigCandidateIn(GameRoot.FracturedCity.Combat, Campaign.Regions.FracturedCityLayout.RegionId, 0) : null);
+            if (m == null)
+            {
+                // 这条旅程走到这里时，机器都停在暂离的远征地点（地点未载入），世界里没有可接入的机器：如实记录并照常存档。
+                // “存档时信号在机器里 → 读档后仍在那台机器里”由 FgSignalUplinkSelfCheck H 段用真实存档文件、按主菜单“继续”同一顺序覆盖。
+                Write($"  - 家园与已载入的地点此刻没有可接入的机器（家园 {HomeMachines().Length} 台，其余在暂离的远征地点）：本次存档信号在归还核心");
+                SessionState.SetInt(K + "SigSaved", 0);
+                SessionState.SetString(K + "SigSavedSite", Campaign.Regions.HomeValleyLayout.RegionId);
+                BeginPauseSave();
+                return;
+            }
+            SessionState.SetInt(K + "SigSaved", m.LogicId);
+            SessionState.SetString(K + "SigSavedSite", Campaign.Regions.HomeValleyLayout.RegionId);
+            ClickWorld(m.View.transform.position);
+            Next(178, $"存档前左键点 {SigLabel(m.LogicId)}");
+        }
+
+        private static void StepSigSavePress(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.ToggleCameraView));
+            Next(179, "按接入键");
+        }
+
+        private static void StepSigSaveUplinked(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            int id = SessionState.GetInt(K + "SigSaved", 0);
+            Check(Campaign.Signal.SignalPresence.CurrentMachineLogicId == id && CampaignSession.Current.SignalCore.UplinkMachineLogicId == id
+                  && WorldView.Director.Mode == View.ViewMode.Direct,
+                $"存档前信号在 {SigLabel(id)} 里（{SessionState.GetString(K + "SigSavedSite", string.Empty)}，镜头直控）");
+            BeginPauseSave();
+        }
+
+        private static void StepSigLeftAfterLoad(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            Check(Campaign.Signal.SignalPresence.AtCore && WorldView.Director.Mode == View.ViewMode.Strategy,
+                "读档后按接入 / 退出键离开：信号回到归还核心、镜头回到战略");
+            if (!(GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive))
+            {
+                PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.FocusHomeCore));
+                Next(19, "按回家园键，镜头回到归还核心");
+                return;
+            }
+            Campaign.Regions.HomeValleySoftlockGuard.DebugDestroyCore(CampaignSession.Current);
+            Next(80, "测试捷径：核心被毁（HomeValleySoftlockGuard.DebugDestroyCore），等失败页出现");
+        }
+
+        private static void StepSigHomeAfterLoad(double inStep)
+        {
+            if (!(GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive))
+            {
+                if (inStep > 6)
+                {
+                    Finish("6 秒内镜头没回到归还谷地");
+                }
+                return;
+            }
+            if (inStep < 1)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleySoftlockGuard.DebugDestroyCore(CampaignSession.Current);
+            Next(80, "测试捷径：核心被毁（HomeValleySoftlockGuard.DebugDestroyCore），等失败页出现");
         }
 
         private static void StepSignalPrepPanel(double inStep)
@@ -1888,6 +2187,11 @@ namespace GameLogic.EditorTools
             {
                 return;
             }
+            // FG1-SIG-03：铸造前哨外围也能从命令栏机器列表直接接入（FG-GAP-029 关闭）——真实按钮点击 → 0.35 秒过渡 → 直控 → 按接入 / 退出键离开。
+            if (!StepFoundryMachineList(inStep))
+            {
+                return;
+            }
             bool active = GameRoot.FoundryOutpost != null && GameRoot.FoundryOutpost.IsActive;
             Write($"  - 铸造前哨激活：{active}；目标条：{ObjectiveTitle()}；剪影 {CountNamed("Silhouette")} 个；世界特效活动中 {VfxActive()} 个");
             CheckEnemiesFromTable(Campaign.Regions.FoundryOutpostLayout.RegionId, Campaign.Content.EnemyCatalog.ArmorBotId);
@@ -1895,6 +2199,61 @@ namespace GameLogic.EditorTools
             GameRoot.FoundryOutpost?.Exit(evacuateSuccess: false);
             GameRoot.ResumeHomeValley();
             Next(9, "回到归还谷地");
+        }
+
+        /// <summary>FG1-SIG-03：铸造前哨外围的机器列表接入（命令栏候选条，真实按钮回调）。返回 true = 这段已走完（或此刻没有可接入的机器、已如实记录）。</summary>
+        private static bool StepFoundryMachineList(double inStep)
+        {
+            int phase = SessionState.GetInt(K + "FoListPhase", 0);
+            if (phase == 0)
+            {
+                Campaign.Regions.HomeValleyMachineMarker m = GameRoot.FoundryOutpost != null && GameRoot.FoundryOutpost.IsActive
+                    ? SigCandidateIn(GameRoot.FoundryOutpost.Combat, Campaign.Regions.FoundryOutpostLayout.RegionId, 0)
+                    : null;
+                if (m == null)
+                {
+                    Write("  - 铸造前哨外围此刻没有可以接入的机器：跳过机器列表接入");
+                    SessionState.SetInt(K + "FoListPhase", 3);
+                    return true;
+                }
+                GameObject host = GameObject.Find("[RegionCommandBarHost]");
+                UIDocument doc = host != null ? host.GetComponent<UIDocument>() : null;
+                VisualElement bar = doc?.rootVisualElement?.Q<VisualElement>("RegionCommandBarRoot");
+                Check(bar != null && bar.style.display == DisplayStyle.Flex, "铸造前哨外围：命令栏（机器列表）显示");
+                SessionState.SetInt(K + "FoListId", m.LogicId);
+                SessionState.SetFloat(K + "FoListAt", (float)inStep);
+                Check(ClickMachineList(m.LogicId), $"铸造前哨外围：命令栏机器列表里点 {SigLabel(m.LogicId)}");
+                SessionState.SetInt(K + "FoListPhase", 1);
+                return false;
+            }
+            float at = SessionState.GetFloat(K + "FoListAt", 0f);
+            int id = SessionState.GetInt(K + "FoListId", 0);
+            if (phase == 1)
+            {
+                if (inStep < at + 1.5)
+                {
+                    return false;
+                }
+                Check(Campaign.Signal.SignalPresence.CurrentMachineLogicId == id && GameRoot.FoundryOutpost != null
+                      && GameRoot.FoundryOutpost.PossessedMachineLogicId == id && WorldView.Director.Mode == View.ViewMode.Direct,
+                    $"铸造前哨外围机器列表点一下：0.35 秒过渡后接入 {SigLabel(id)}，镜头直控");
+                CheckNoTextMarkers("铸造前哨接入后");
+                PressKey(GameSettings.KeyBindings.GetKey(GameActionId.ToggleCameraView));
+                SessionState.SetInt(K + "FoListPhase", 2);
+                return false;
+            }
+            if (phase == 2)
+            {
+                if (inStep < at + 3.0)
+                {
+                    return false;
+                }
+                Check(Campaign.Signal.SignalPresence.AtCore && GameRoot.FoundryOutpost != null && GameRoot.FoundryOutpost.PossessedMachineLogicId == null
+                      && WorldView.Director.Mode == View.ViewMode.Strategy,
+                    "铸造前哨外围按接入 / 退出键离开：信号回到归还核心、镜头回到战略");
+                SessionState.SetInt(K + "FoListPhase", 3);
+            }
+            return true;
         }
 
         private static void StepBackHome(double inStep)
@@ -2186,7 +2545,7 @@ namespace GameLogic.EditorTools
                   && home.Kernel.CountAlive(BinGames.Sim.Combat.CombatFaction.Player, BinGames.Sim.Combat.CombatUnitKind.Turret) == 0
                   && GameRoot.HomeValley?.LiveMachineCount == machinesBefore,
                 $"原型单位清场后弹体飞完消失（剩 {home?.Kernel.ProjectileCount} 枚），家园机器数不变（{machinesBefore} → {GameRoot.HomeValley?.LiveMachineCount} 台；此时远征队仍在外）");
-            BeginPauseSave();
+            Next(177, "FG1-SIG-03：存档前先接入一台家园机器");
         }
 
         private static void BeginPauseSave()
@@ -2305,11 +2664,13 @@ namespace GameLogic.EditorTools
 
         private static void StepLoadedIntoGame(double inStep)
         {
-            if (!(GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive))
+            // FG1-SIG-03：存档时信号在某台机器里，读档恢复接入会把镜头放到那台机器所在的地点（可能是远征地点）。
+            string sigSite = SessionState.GetString(K + "SigSavedSite", Campaign.Regions.HomeValleyLayout.RegionId);
+            if (!SigSiteActive(sigSite))
             {
                 if (inStep > 120)
                 {
-                    Finish("120 秒内读档没进入归还谷地");
+                    Finish($"120 秒内读档没进入 {sigSite}");
                 }
                 return;
             }
@@ -2337,8 +2698,24 @@ namespace GameLogic.EditorTools
                   && bk.StepIndex >= long.Parse(SessionState.GetString(K + "BeltSavedSteps", "0"))
                   && HomeGridService.MapFor(st).GetBelt(new GridCell(bx, by)) != 0 && BeltNetworkService.LastLoadError == null,
                 $"读档恢复传送带：{bk?.CellCount} 格、{bk?.ItemCount} 件（存档时 {SessionState.GetInt(K + "BeltSavedItems", -1)} 件，读档后已继续运行），账本平衡，格网传送带层恢复");
-            Campaign.Regions.HomeValleySoftlockGuard.DebugDestroyCore(st);
-            Next(80, "测试捷径：核心被毁（HomeValleySoftlockGuard.DebugDestroyCore），等失败页出现");
+            // FG1-SIG-03：存档时信号在机器里 → 真实“保存并返回主菜单 → 读取”后信号仍在那台机器里（接管恢复、镜头进直控、HUD）。
+            int sigSaved = SessionState.GetInt(K + "SigSaved", 0);
+            if (sigSaved == 0)
+            {
+                Check(Campaign.Signal.SignalPresence.AtCore && !Campaign.Signal.SignalUplinkService.IsPending,
+                    "存档时信号在归还核心：读档后仍在归还核心");
+                Campaign.Regions.HomeValleySoftlockGuard.DebugDestroyCore(st);
+                Next(80, "测试捷径：核心被毁（HomeValleySoftlockGuard.DebugDestroyCore），等失败页出现");
+                return;
+            }
+            UI.SignalCore.SignalCoreHudUIToolkit sigHud = UI.SignalCore.SignalCoreHudUIToolkit.Instance;
+            int possessedAfterLoad = GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive ? GameRoot.HomeValley.PossessedMachineLogicId ?? 0
+                : GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsActive ? GameRoot.FracturedCity.PossessedMachineLogicId ?? 0 : 0;
+            Check(sigSaved != 0 && Campaign.Signal.SignalPresence.CurrentMachineLogicId == sigSaved && possessedAfterLoad == sigSaved
+                  && WorldView.Director.HeadingDirect && sigHud != null && sigHud.LocationText.Contains(SigLabel(sigSaved)),
+                $"读档后信号仍在 {SigLabel(sigSaved)} 里（{sigSite}；接管恢复、镜头直控；HUD“{sigHud?.LocationText}”）");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.ToggleCameraView));
+            Next(29, "读档后按接入 / 退出键离开");
         }
 
         // ── FG0-UX-01 审查修复：胜负页上的 Esc 与回主菜单收尾 ───────────────────

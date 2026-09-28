@@ -614,11 +614,15 @@ namespace GameLogic.Campaign.Regions
 
             if (InputRouter.ConsumeAction(GameActionId.CycleControlTarget, InputScope.Direct))
             {
-                RegionControlSwitchResult tabResult = Control.TrySwitchControlledUnit(null);
-                if (!tabResult.Success && tabResult.Failure != RegionControlFailure.AlreadyControlled)
-                {
-                    Log.Info($"[FoundryOutpostController] Tab 切换接管目标失败：{tabResult.PlayerText}");
-                }
+                // FG1-SIG-03：Tab（可重绑）= 把信号切到下一台能接入的机器——同样走 0.35 秒过渡、离开的机器回到本地配置；
+                // 被干扰等不可接入的机器跳过，全都不行时给出第一条原因。
+                Signal.SignalUplinkService.RequestCycle();
+            }
+            if (Signal.SignalUplinkService.IsPending)
+            {
+                // FGR-SIG-031：接入过渡期间冻结冲突输入——当前机器原地待命，不带着上一帧的移动输入滑走，也不开火。
+                _possessed.SetDirectInput(Vector2.zero);
+                return;
             }
 
             float x = 0f, z = 0f;
@@ -693,22 +697,36 @@ namespace GameLogic.Campaign.Regions
 
         private bool EnsureDirectTarget()
         {
-            if (_selected == null)
+            // FG1-SIG-03（FGR-SIG-030 / 031）：选中机器后按“接入 / 退出接入”键（默认 V，可重绑）= 发起接入——校验逐条给原因，
+            // 通过后进入 0.35 秒过渡，过渡结束才插入固件、重编译。点选优先；框选时取选择集里编号最小的一台；没选中时说明怎么做（不静默）。
+            return Signal.SignalUplinkService.RequestFromSelection(UplinkCandidateFromSelection());
+        }
+
+        /// <summary>FG1-SIG-03：按接入键时要接入的那台（点选的；没有点选就取框选集合里编号最小的，稳定可预测）。</summary>
+        private int UplinkCandidateFromSelection()
+        {
+            if (_selected != null)
             {
-                return false;
+                return _selected.LogicId;
             }
-            RegionControlSwitchResult result = Control.TrySwitchControlledUnit(_selected.LogicId);
-            if (!result.Success)
+            int best = 0;
+            foreach (int id in SquadCommands.Selection)
             {
-                Log.Info($"[FoundryOutpostController] 接管请求被拒绝：{result.PlayerText}");
+                if (id > 0 && (best == 0 || id < best))
+                {
+                    best = id;
+                }
             }
-            return result.Success;
+            return best;
         }
 
         private void OnControlPossessCommitted(int logicId)
         {
-            MachineRegistry.RecordControlled(logicId);
-            MachineRegistry.TryMarkExperience(logicId, MachineExperienceFlags.Controlled);
+            if (!RegionControlSystem.IsRestoringUplink) // FG1-SIG-03：读档恢复“信号在这台机器里”不是一次新的接入，不补记统计。
+            {
+                MachineRegistry.RecordControlled(logicId);
+                MachineRegistry.TryMarkExperience(logicId, MachineExperienceFlags.Controlled);
+            }
 
             HomeValleyMachineMarker marker = FindMarker(logicId);
             if (marker != null)
@@ -753,6 +771,13 @@ namespace GameLogic.Campaign.Regions
 
         private bool TryGetPossessedAnchor(out float2 anchor)
         {
+            // FG1-SIG-03：接入过渡中镜头飞向要接入的那台（信号还在原处，过渡结束才提交）。
+            if (Signal.SignalUplinkService.TryGetPendingAnchorTarget(SiteId, out int pendingId) && FindMarker(pendingId) is HomeValleyMachineMarker pending)
+            {
+                Vector3 pv = pending.View != null ? pending.View.transform.position : pending.Position3;
+                anchor = new float2(pv.x, pv.z);
+                return true;
+            }
             if (_possessed != null)
             {
                 // 镜头跟随插值后的画面位置（有表现对象时），60 Hz 模拟在高帧率下镜头也不一顿一顿；没有表现对象时读内核位置。

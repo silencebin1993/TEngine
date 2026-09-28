@@ -117,6 +117,12 @@ namespace BinGames.Sim.Combat
         /// <summary>暂不自动交战（家园里仍占用工厂出口的机器）：自动交战的冷却照常走，但不发交战请求、不消耗冷却
         /// （Demo TickAutoEngage 对厂内机器直接跳过）；热更层在机器进出工厂时写。</summary>
         EngageHold = 1 << 15,
+        /// <summary>FG1-SIG-03（FGR-SIG-033）：这台单位当前武器的具名反应来自信号带进来的核心固件（热更层按接入结算写，冷却值 &gt; 0 才写）。
+        /// 反应一发动，内核当场置 <see cref="ReactionSpent"/> 把它压住——压住不依赖玩法事件什么时候被热更层处理（大规模战斗里事件可能顺延几步）。</summary>
+        ReactionGated = 1 << 16,
+        /// <summary>FG1-SIG-03：门控反应已经发动、正等热更层按信号上的冷却重新下发武器参数；期间反应不发动（熔穿过载不额外积热、不穿甲；标记跳转不跳）。
+        /// 热更层下发不带门控反应的武器参数时（冷却中压住的行、离开后的本地配置）清掉。</summary>
+        ReactionSpent = 1 << 17,
     }
 
     /// <summary>己方机器的命令。与 Demo RegionSquadCommandSystem / HomeValleyMachineMarker 的语义逐条一致。</summary>
@@ -211,6 +217,10 @@ namespace BinGames.Sim.Combat
         MarkCleared = 14,
         /// <summary>FG0-ARCH-06：工作赶路寻路失败（目标无法到达）。Unit=机器，Code=<see cref="BinGames.Sim.Nav.NavFailReason"/>，Pos=机器位置。</summary>
         WorkBlocked = 15,
+        /// <summary>FG1-SIG-03（FGR-SIG-033）：具名反应真正发动了一次（熔穿过载这一发 / 标记跳转真的跳出去）。Unit=攻击者，Other=主目标，
+        /// Code=<see cref="CombatReaction"/>，Code2=1 表示发动时这台单位带 <see cref="CombatUnitFlags.ReactionGated"/>（信号带进来的核心固件）。
+        /// 核心固件冷却、暴露都按它结算，所以走玩法事件（不丢）；同名的提示事件（<see cref="MeltOverload"/> / <see cref="MarkJump"/>）只管反馈，超出上限可以丢。</summary>
+        ReactionFired = 16,
 
         // ── 提示事件（有上限，可丢弃）──
         /// <summary>己方普通武器开火（Unit=攻击者，Other=目标）。</summary>

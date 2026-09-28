@@ -170,6 +170,10 @@ namespace GameLogic.EditorTools
                 // AI 按空槽 / 你接入时只作用于经过接入口的路径 / 重炮 + 过载出熔穿过载、配额与路径截断（FGT-SIG-005）、
                 // 预览与实际结算逐字段一致（FGT-SIG-002）、真实文件存读档 / 旧档 / 篡改、暂停倍速种子无关、真 UXML 界面与布局探针、性能。
                 _fail += FgUplinkPreviewSelfCheck.Run(Report);
+                // FG1-SIG-03：接入、重编译、离开与防刷——正式输入（选中 + 接入键 / 机器列表 / Tab）经 0.35 秒过渡插入固件、重编译、形变事件、HUD，
+                // 离开复原；失败原因逐条；负向矩阵（过渡中阵亡、Esc、战略暂停中发起、1 秒 10 次、无接入口、信号核为空、镜头飞走、地点卸载）；
+                // 冷却跟着信号 / 热量留在机体（三台重炮真开火，FGT-SIG-004）；防刷；暂停与 0.5x～3x；真实文件存读档（FGT-SIG-009）；性能；HUD。
+                _fail += FgSignalUplinkSelfCheck.Run(Report);
             }
             catch (Exception e)
             {

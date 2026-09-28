@@ -305,6 +305,9 @@ namespace GameLogic.Campaign.WorldSim
             LastFrameSimMs = StepWatch.Elapsed.TotalMilliseconds - before;
             // 目标重算只跟随游戏时间（StepOnce 里按 clock.objective_recompute_seconds）：暂停中不重算，继续后 0.5 游戏秒内补上——
             // 这样“暂停过几次”不会改变目标在哪一步完成（暂停 / 倍速结果与 1x 逐字段一致）。
+            // FG1-SIG-03：信号接入过渡（真实时间，暂停中不走）——在模拟推进之后判定“过渡途中目标阵亡”，在被观察地点处理输入之前提交，
+            // 提交后下一帧起新机器才收输入。
+            Signal.SignalUplinkService.FrameTick(realDt);
             IWorldSite observed = WorldView.ObservedSite;
             if (observed != null && observed.IsLoaded)
             {
@@ -409,6 +412,8 @@ namespace GameLogic.Campaign.WorldSim
                 WorldOutpostSystem.Step(state, GameClock.Ticks);
                 // FG0-ARCH-02：传送带内核（星球表面）按游戏时间累计推进到自己的 20 Hz（只看步序号，与镜头 / 帧率 / 倍速无关）。
                 BeltNetworkService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
+                // FG1-SIG-03：核心固件冷却（信号侧，按游戏时间）到期——与观察无关，O(信号核槽位数)。
+                Signal.SignalUplinkService.SimStep(state);
                 stepped = true;
             }
             finally

@@ -2,6 +2,10 @@ using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
 using GameLogic.Campaign;
 using GameLogic.Campaign.Regions;
+using GameLogic.Campaign.Signal;
+using GameLogic.Core;
+using GameLogic.Localization;
+using GameLogic.Settings;
 using GameLogic.Stage;
 using TEngine;
 using UnityEngine;
@@ -14,8 +18,9 @@ namespace GameLogic.UI.RegionCommand
     /// 落点。结构落在 UXML/USS（<c>unity-ui-toolkit.md</c> 硬规则），C# 只做数据绑定与事件——
     /// 全部命令/选择/编组逻辑都在 <see cref="RegionSquadCommandSystem"/>，本类不重新实现任何规则。
     ///
-    /// 归还谷地与破碎都市共用同一个实例（两区域互斥运行，谁在跑就显示谁的
-    /// <see cref="RegionSquadCommandSystem"/>），同 <c>StrategyClockHudToolkit</c> 的常驻单例写法。</summary>
+    /// 归还谷地、破碎都市、铸造前哨外围共用同一个实例（镜头同一时刻只看一个地点，看着哪个就显示哪个的
+    /// <see cref="RegionSquadCommandSystem"/>），同 <c>StrategyClockHudToolkit</c> 的常驻单例写法。
+    /// FG1-SIG-03：机器候选条 = 卡片“可以从机器列表直接接入”的机器列表，三个地点都有（铸造前哨原先漏接，FG-GAP-029 关闭）。</summary>
     public sealed class RegionCommandBarUIToolkit : MonoBehaviour
     {
         private const int MaxEventLines = 6;
@@ -43,6 +48,12 @@ namespace GameLogic.UI.RegionCommand
         private ScrollView _candidateStrip;
         private readonly Dictionary<int, Button> _candidateButtons = new Dictionary<int, Button>(8);
         private float _controlFeedbackRemaining;
+
+        // FG1-SIG-03：机器列表按钮说明的缓存键（按键绑定对象 + 版本 + 语言）：重绑接入 / 切换键或切换语言后改写已有按钮。
+        private InputBindingSet _tipBindings;
+        private int _tipBindingsRevision = -1;
+        private GameLanguage _tipLanguage;
+        private string _candidateTip;
 
         // ── ER5-INT-01：E 交互提示 + 进度条 + 字幕 ───────────────────────────
         private Label _interactPromptLabel;
@@ -78,6 +89,13 @@ namespace GameLogic.UI.RegionCommand
                 return;
             }
 
+            BindElements();
+        }
+
+        /// <summary>自检入口：把已经载入的视觉树交给本类绑定（正式流程在 <see cref="Start"/> 里经资源系统载入后调同一个绑定）。</summary>
+        public void BindView(VisualElement root)
+        {
+            _root = root;
             BindElements();
         }
 
@@ -141,8 +159,8 @@ namespace GameLogic.UI.RegionCommand
             }
         }
 
-        /// <summary>当前哪个区域在跑，就读它的 <see cref="RegionSquadCommandSystem"/>——两区域互斥，
-        /// 不会同时 Active。</summary>
+        /// <summary>镜头看着哪个地点，就读它的 <see cref="RegionSquadCommandSystem"/>——IsActive = 已载入且被观察，
+        /// 同一时刻只有一个地点被观察（归还谷地、破碎都市、铸造前哨外围）。</summary>
         private static RegionSquadCommandSystem ActiveSquadCommands()
         {
             if (GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive)
@@ -152,6 +170,10 @@ namespace GameLogic.UI.RegionCommand
             if (GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsActive)
             {
                 return GameRoot.FracturedCity.SquadCommands;
+            }
+            if (GameRoot.FoundryOutpost != null && GameRoot.FoundryOutpost.IsActive)
+            {
+                return GameRoot.FoundryOutpost.SquadCommands;
             }
             return null;
         }
@@ -165,6 +187,10 @@ namespace GameLogic.UI.RegionCommand
             if (GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsActive)
             {
                 return GameRoot.FracturedCity.IsPaused;
+            }
+            if (GameRoot.FoundryOutpost != null && GameRoot.FoundryOutpost.IsActive)
+            {
+                return GameRoot.FoundryOutpost.IsPaused;
             }
             return false;
         }
@@ -181,6 +207,10 @@ namespace GameLogic.UI.RegionCommand
             {
                 return GameRoot.FracturedCity.Control;
             }
+            if (GameRoot.FoundryOutpost != null && GameRoot.FoundryOutpost.IsActive)
+            {
+                return GameRoot.FoundryOutpost.Control;
+            }
             return null;
         }
 
@@ -196,6 +226,10 @@ namespace GameLogic.UI.RegionCommand
             {
                 return GameRoot.FracturedCity.Interact;
             }
+            if (GameRoot.FoundryOutpost != null && GameRoot.FoundryOutpost.IsActive)
+            {
+                return GameRoot.FoundryOutpost.Interact;
+            }
             return null;
         }
 
@@ -209,39 +243,33 @@ namespace GameLogic.UI.RegionCommand
             {
                 return GameRoot.FracturedCity.PossessedMachineLogicId;
             }
+            if (GameRoot.FoundryOutpost != null && GameRoot.FoundryOutpost.IsActive)
+            {
+                return GameRoot.FoundryOutpost.PossessedMachineLogicId;
+            }
             return null;
         }
 
-        /// <summary>候选条点击一台合法机器后，若镜头尚未处于 Direct，补一次正式过渡请求。</summary>
-        private static void ActiveRequestDirectView()
-        {
-            if (GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive)
-            {
-                GameRoot.HomeValley.RequestDirectView();
-                return;
-            }
-            if (GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsActive)
-            {
-                GameRoot.FracturedCity.RequestDirectView();
-            }
-        }
-
+        /// <summary>FG1-SIG-03（FG01 第 4 章“从机器列表可以直接接入”）：点一下 = 发起接入（与选中后按接入键同一个入口：逐条校验、0.35 秒过渡、
+        /// 过渡结束才插入固件）。战略视角下镜头随之过渡到直控；战略暂停中点击 = 目标已确认，恢复运行后完成。拒绝时这里与 HUD 状态行都写原因。</summary>
         private void OnCandidateButtonClicked(int logicId)
         {
-            RegionControlSwitchResult result = ActiveControl()?.TrySwitchControlledUnit(logicId) ?? RegionControlSwitchResult.Fail(RegionControlFailure.Ineligible);
-            if (result.Success)
+            UplinkRequestResult result = SignalUplinkService.Request(logicId, UplinkSource.MachineList);
+            if (result.Accepted)
             {
-                ActiveRequestDirectView();
                 _controlFeedbackLabel.text = string.Empty;
             }
             else
             {
-                _controlFeedbackLabel.text = "拒绝：" + result.PlayerText;
+                _controlFeedbackLabel.text = result.Text;
                 _controlFeedbackRemaining = 3f;
             }
         }
 
-        private void Update()
+        private void Update() => Refresh();
+
+        /// <summary>每帧刷新（自检直接调用，与 <see cref="Update"/> 同一段）。</summary>
+        public void Refresh()
         {
             if (_panel == null)
             {
@@ -338,6 +366,26 @@ namespace GameLogic.UI.RegionCommand
             RefreshCandidateStrip(control, possessedId);
         }
 
+        /// <summary>FG1-SIG-03：机器列表按钮说明（“点一下直接接入；选中后按 V 也可以；接入后按 Tab 切换”）。按键绑定或语言变了才重建文本，
+        /// 返回 true = 变了（已有按钮要改写）。每帧 O(1)：只比较引用、版本号与语言。</summary>
+        private bool RefreshCandidateTooltip()
+        {
+            InputBindingSet bindings = GameSettings.KeyBindings;
+            int revision = bindings != null ? bindings.Revision : -1;
+            GameLanguage language = GameText.Language;
+            if (_candidateTip != null && ReferenceEquals(bindings, _tipBindings) && revision == _tipBindingsRevision && language == _tipLanguage)
+            {
+                return false;
+            }
+            _tipBindings = bindings;
+            _tipBindingsRevision = revision;
+            _tipLanguage = language;
+            _candidateTip = GameText.Format("signal.uplink.list_tip",
+                InputDisplay.ForAction(GameActionId.ToggleCameraView),
+                InputDisplay.ForAction(GameActionId.CycleControlTarget));
+            return true;
+        }
+
         /// <summary>候选条按钮数量随机器存活/在场情况变化，按钮集合与 <see cref="RegionControlSystem.GetCandidateLogicIds"/>
         /// 对账（新增补建、消失移除），复用现有按钮避免每帧重建 VisualElement。</summary>
         private void RefreshCandidateStrip(RegionControlSystem control, int? possessedId)
@@ -348,6 +396,7 @@ namespace GameLogic.UI.RegionCommand
             }
 
             List<int> candidates = control.GetCandidateLogicIds();
+            bool retip = RefreshCandidateTooltip();
             var seen = new HashSet<int>();
             foreach (int logicId in candidates)
             {
@@ -356,10 +405,16 @@ namespace GameLogic.UI.RegionCommand
                 {
                     btn = new Button { text = "#" + logicId };
                     btn.AddToClassList("cmd-candidate-btn");
+                    // FG1-SIG-03：机器列表的按钮说明（按键名随重绑、随语言；变了由 RefreshCandidateTooltip 统一改写已有按钮）。
+                    btn.tooltip = _candidateTip;
                     int capturedId = logicId;
                     btn.clicked += () => OnCandidateButtonClicked(capturedId);
                     _candidateStrip.Add(btn);
                     _candidateButtons[logicId] = btn;
+                }
+                else if (retip)
+                {
+                    btn.tooltip = _candidateTip;
                 }
 
                 if (MachineRegistry.TryGetRecord(logicId, out MachineRecord rec))

@@ -54,6 +54,10 @@ namespace GameLogic.Core
         /// </summary>
         public static bool ModalUiOpen => _modalUi || ModalOwners.Count > 0 || _gameplayPaused;
 
+        /// <summary>FG1-SIG-03：只看面板模态（确认框、暂停菜单、信号核面板……），不含战略暂停。战略暂停下仍允许选择目标并发起接入
+        /// （FG01 第 5 章），真正打开的面板仍然挡住世界输入。</summary>
+        public static bool PanelModalOpen => _modalUi || ModalOwners.Count > 0;
+
         private static bool _modalUi;
         /// <summary>FG0-UX-01：UI 基础件（确认框、按键面板、暂停菜单、通知中心）各自登记的模态占用。
         /// 与旧的单个布尔 <see cref="_modalUi"/> 分开存：多个面板叠开时，关掉上面一个不会把下面那个的占用抹掉。</summary>

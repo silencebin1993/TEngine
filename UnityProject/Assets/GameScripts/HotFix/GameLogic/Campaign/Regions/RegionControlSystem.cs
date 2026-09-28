@@ -139,6 +139,21 @@ namespace GameLogic.Campaign.Regions
     {
         private RegionControlContext _ctx;
         private float _jamGraceRemaining;
+        /// <summary>FG1-SIG-03：绑定时的战役（卸载时只改这一份的信号位置——读档流程先卸载旧世界再换会话，不会误改新档）。</summary>
+        private CampaignState _boundState;
+
+        /// <summary>FG1-SIG-03：已绑定的区域接管系统（区域 ID → 系统）。信号接入服务按目标机器所在区域找到它（O(1)），
+        /// 不经过任何具体的区域控制器类型。</summary>
+        private static readonly Dictionary<string, RegionControlSystem> ByRegion = new Dictionary<string, RegionControlSystem>();
+
+        public static RegionControlSystem ForRegion(string regionId) =>
+            regionId != null && ByRegion.TryGetValue(regionId, out RegionControlSystem c) && c._ctx != null ? c : null;
+
+        public string RegionId => _ctx?.RegionId;
+        public CampaignState BoundState => _boundState;
+
+        /// <summary>当前受控（信号接入）的机器；没有为 0。</summary>
+        public int PossessedLogicId => _ctx?.GetPossessed?.Invoke()?.LogicId ?? 0;
 
         /// <summary>AC-CTL-008 验收用：本局累计成功切换次数（含死亡回弹）。</summary>
         public int SwitchCount { get; private set; }
@@ -147,15 +162,65 @@ namespace GameLogic.Campaign.Regions
         public void Bind(RegionControlContext ctx)
         {
             _ctx = ctx;
+            _boundState = CampaignSession.Current;
             SwitchCount = 0;
             Availability = RegionControlAvailability.None;
             _jamGraceRemaining = 0f;
+            if (ctx?.RegionId != null)
+            {
+                ByRegion[ctx.RegionId] = this;
+            }
         }
 
         public void Unbind()
         {
+            string regionId = _ctx?.RegionId;
+            CampaignState bound = _boundState;
             _ctx = null;
+            _boundState = null;
+            if (regionId != null && ByRegion.TryGetValue(regionId, out RegionControlSystem c) && c == this)
+            {
+                ByRegion.Remove(regionId);
+            }
+            // FG1-SIG-03：地点卸载（撤离 / 放弃远征 / 回主菜单）时，信号若在这里的机器里，回到归还核心。
+            Signal.SignalUplinkService.OnRegionUnbound(regionId, bound);
         }
+
+        /// <summary>本区域里某台机器的句柄（在场才有）。</summary>
+        public bool TryGetMarker(int logicId, out HomeValleyMachineMarker marker)
+        {
+            marker = _ctx != null ? FindMarker(logicId) : null;
+            return marker != null;
+        }
+
+        /// <summary>FG1-SIG-03：这个位置在不在干扰场里（本区域没有干扰机制时恒为 false）。</summary>
+        public bool IsJammedAt(Vector2 position) => _ctx?.IsPositionJammed != null && _ctx.IsPositionJammed(position);
+
+        /// <summary>FG1-SIG-03：Tab 循环的下一台候选（按 LogicId 稳定顺序，与 <see cref="TrySwitchControlledUnit"/>(null) 同一规则）；没有候选为 0。</summary>
+        public int NextCandidateAfter(int? afterLogicId) => _ctx == null ? 0 : NextCandidate(afterLogicId)?.LogicId ?? 0;
+
+        /// <summary>
+        /// FG1-SIG-03（FGR-SIG-031）：信号接入过渡结束时提交接管。与 <see cref="TrySwitchControlledUnit"/> 同一套目标校验与提交
+        /// （存活、本区域、在场、不在工厂、干扰场），区别只是不拦“镜头过渡中 / 面板打开”——那两条是**发起**接入时的门槛，
+        /// 由 <c>SignalUplinkService.Request</c> 在发起时判定；过渡本身就是镜头在动，提交时再拦会让每次接入都失败。
+        /// 不出接管音（接入服务自己给“已接入”反馈，避免一件事两条字幕）。
+        /// <paramref name="restoring"/>：读档恢复“存档时信号在这台机器里”——不是一次新的接入，不计接管次数与机器经历（读档后状态逐字段一致）。
+        /// </summary>
+        public RegionControlSwitchResult CommitUplink(int logicId, bool restoring = false)
+        {
+            if (_ctx == null)
+            {
+                return RegionControlSwitchResult.Fail(RegionControlFailure.Ineligible);
+            }
+            if (!TryResolveExplicitTarget(logicId, out HomeValleyMachineMarker target, out RegionControlFailure failure))
+            {
+                return RegionControlSwitchResult.Fail(failure);
+            }
+            return CommitSwitch(target, restoring);
+        }
+
+        /// <summary>FG1-SIG-03：读档恢复接入的提交过程中为 true——宿主的“接管完成”回调据此不补记接管统计 / 机器经历（那是存档里已有的）。</summary>
+        public static bool IsRestoringUplink { get; private set; }
 
         /// <summary>唯一的接管请求入口。<paramref name="explicitLogicId"/> 为 null 时走 Tab 循环
         /// （按 LogicId 稳定顺序挑下一个合法候选）；给出具体值时供候选条按钮/程序化调用。
@@ -199,27 +264,9 @@ namespace GameLogic.Campaign.Regions
 
             if (explicitLogicId.HasValue)
             {
-                int logicId = explicitLogicId.Value;
-                if (!MachineRegistry.TryGetRecord(logicId, out MachineRecord rec))
+                if (!TryResolveExplicitTarget(explicitLogicId.Value, out target, out RegionControlFailure failure))
                 {
-                    return RegionControlSwitchResult.Fail(RegionControlFailure.TargetNotFound);
-                }
-                if (!rec.IsAlive)
-                {
-                    return RegionControlSwitchResult.Fail(RegionControlFailure.TargetDead);
-                }
-                if (rec.RegionId != _ctx.RegionId)
-                {
-                    return RegionControlSwitchResult.Fail(RegionControlFailure.TargetNotFriendly);
-                }
-                target = FindMarker(logicId);
-                if (target == null)
-                {
-                    return RegionControlSwitchResult.Fail(RegionControlFailure.OutOfRange);
-                }
-                if (rec.IsInFactory)
-                {
-                    return RegionControlSwitchResult.Fail(RegionControlFailure.Ineligible);
+                    return RegionControlSwitchResult.Fail(failure);
                 }
             }
             else
@@ -229,35 +276,97 @@ namespace GameLogic.Campaign.Regions
                 {
                     return RegionControlSwitchResult.Fail(RegionControlFailure.TargetNotFound);
                 }
+                if (current != null && current.LogicId == target.LogicId)
+                {
+                    return RegionControlSwitchResult.Fail(RegionControlFailure.AlreadyControlled);
+                }
+                Vector3 p = target.Position3;
+                if (IsJammedAt(new Vector2(p.x, p.z)))
+                {
+                    return RegionControlSwitchResult.Fail(RegionControlFailure.SignalJammed);
+                }
             }
+            return CommitSwitch(target);
+        }
 
+        /// <summary>显式目标的校验（接管请求与接入提交共用）：存在、存活、本区域、在场、不在工厂、不是当前受控、不在干扰场。</summary>
+        private bool TryResolveExplicitTarget(int logicId, out HomeValleyMachineMarker target, out RegionControlFailure failure)
+        {
+            target = null;
+            if (!MachineRegistry.TryGetRecord(logicId, out MachineRecord rec))
+            {
+                failure = RegionControlFailure.TargetNotFound;
+                return false;
+            }
+            if (!rec.IsAlive)
+            {
+                failure = RegionControlFailure.TargetDead;
+                return false;
+            }
+            if (rec.RegionId != _ctx.RegionId)
+            {
+                failure = RegionControlFailure.TargetNotFriendly;
+                return false;
+            }
+            target = FindMarker(logicId);
+            if (target == null)
+            {
+                failure = RegionControlFailure.OutOfRange;
+                return false;
+            }
+            if (rec.IsInFactory)
+            {
+                failure = RegionControlFailure.Ineligible;
+                return false;
+            }
+            HomeValleyMachineMarker current = _ctx.GetPossessed?.Invoke();
             if (current != null && current.LogicId == target.LogicId)
             {
-                return RegionControlSwitchResult.Fail(RegionControlFailure.AlreadyControlled);
+                failure = RegionControlFailure.AlreadyControlled;
+                return false;
             }
+            Vector3 p = target.Position3;
+            if (IsJammedAt(new Vector2(p.x, p.z)))
+            {
+                failure = RegionControlFailure.SignalJammed;
+                return false;
+            }
+            failure = RegionControlFailure.None;
+            return true;
+        }
 
+        /// <summary>提交一次接管：释放旧的、占用新的、统计、发布变更（接入服务据此移动信号、重编译两台机器）。</summary>
+        private RegionControlSwitchResult CommitSwitch(HomeValleyMachineMarker target, bool restoring = false)
+        {
+            HomeValleyMachineMarker current = _ctx.GetPossessed?.Invoke();
             Vector3 targetPos = target.Position3;
             var targetPos2 = new Vector2(targetPos.x, targetPos.z);
-            if (_ctx.IsPositionJammed != null && _ctx.IsPositionJammed(targetPos2))
-            {
-                return RegionControlSwitchResult.Fail(RegionControlFailure.SignalJammed);
-            }
-
             int previousLogicId = current != null ? current.LogicId : 0;
             ReleaseInternal(current);
 
             target.CancelCommandMove();
             _ctx.SetPossessed?.Invoke(target);
-            _ctx.OnPossessCommitted?.Invoke(target.LogicId);
+            IsRestoringUplink = restoring;
+            try
+            {
+                _ctx.OnPossessCommitted?.Invoke(target.LogicId);
+            }
+            finally
+            {
+                IsRestoringUplink = false;
+            }
             _jamGraceRemaining = _ctx.JamGraceSeconds;
             Availability = RegionControlAvailability.Controlled;
-            SwitchCount++;
-            // ER7-CREDITS-01：战役级"接管次数"统计——唯一写入口，见 CampaignState.TotalControlTakeovers
-            // 类注释（与本类自己的 SwitchCount 是两件独立的事，不要合并）。
-            CampaignState state = CampaignSession.Current;
-            if (state != null)
+            if (!restoring)
             {
-                state.TotalControlTakeovers++;
+                SwitchCount++;
+                // ER7-CREDITS-01：战役级"接管次数"统计——唯一写入口，见 CampaignState.TotalControlTakeovers
+                // 类注释（与本类自己的 SwitchCount 是两件独立的事，不要合并）。
+                CampaignState state = CampaignSession.Current;
+                if (state != null)
+                {
+                    state.TotalControlTakeovers++;
+                }
             }
 
             PublishChange(previousLogicId, target.LogicId, RegionControlChangeReason.PlayerRequest, targetPos2);
@@ -496,6 +605,9 @@ namespace GameLogic.Campaign.Regions
 
         private void PublishChange(int previousLogicId, int currentLogicId, RegionControlChangeReason reason, Vector2 fallbackAnchor)
         {
+            // FG1-SIG-03：信号位置的唯一真相在信号核状态域（存档）里——每一次接管变更（接入、切换、离开、阵亡回弹、失联）都经这里同步过去，
+            // 并通知两台机器重编译（离开的回到本地配置，接入的插入信号核固件）。
+            Signal.SignalUplinkService.OnControlChanged(this, previousLogicId, currentLogicId, reason);
             Signals.Publish(new RegionControlledUnitChangedSignal
             {
                 RegionId = _ctx.RegionId,

@@ -219,6 +219,8 @@ namespace GameLogic.Stage
                     CampaignSession.Current.CurrentRegionId = HomeValleyLayout.RegionId;
                 }
                 WorldView.Observe(home.SiteId);
+                // FG1-SIG-03：出发失败回滚到出发前档（读档）后也经这里重进家园——存档时信号在家园机器里就回到那台（幂等，平时是空操作）。
+                Campaign.Signal.SignalUplinkService.RestoreAfterLoad();
             }
         }
 
@@ -253,6 +255,7 @@ namespace GameLogic.Stage
                 ResumeFracturedCity();
                 if (WorldSimulation.FracturedCity != null && WorldSimulation.FracturedCity.IsLoaded)
                 {
+                    Campaign.Signal.SignalUplinkService.RestoreAfterLoad();
                     return;
                 }
                 Log.Warning("[GameRoot] 读档恢复破碎都市未能载入，镜头回到归还谷地。");
@@ -262,6 +265,7 @@ namespace GameLogic.Stage
                 ResumeFoundryOutpost();
                 if (WorldSimulation.FoundryOutpost != null && WorldSimulation.FoundryOutpost.IsLoaded)
                 {
+                    Campaign.Signal.SignalUplinkService.RestoreAfterLoad();
                     return;
                 }
                 Log.Warning("[GameRoot] 读档恢复铸造前哨外围未能载入，镜头回到归还谷地。");
@@ -270,6 +274,8 @@ namespace GameLogic.Stage
             {
                 WorldView.Observe(home.SiteId);
             }
+            // FG1-SIG-03（FG01 第 5 章“存档时玩家在机器里 → 读档后信号仍在那台机器里”）：世界与镜头就位后恢复接入。
+            Campaign.Signal.SignalUplinkService.RestoreAfterLoad();
         }
 
         /// <summary>ER5-REGION-01 / FG0-ARCH-01：派遣入口——把 <paramref name="expeditionLogicIds"/> 指定的家园存活机器派到破碎都市。

@@ -22,6 +22,7 @@ public sealed partial class FirmwareKind : Luban.BeanBase
         Id = _buf.ReadString();
         Kind = _buf.ReadString();
         NameKey = _buf.ReadString();
+        Cooldown = _buf.ReadFloat();
     }
 
     public static FirmwareKind DeserializeFirmwareKind(ByteBuf _buf)
@@ -41,6 +42,10 @@ public sealed partial class FirmwareKind : Luban.BeanBase
     /// 名称文本键(fg.TbLocText)
     /// </summary>
     public readonly string NameKey;
+    /// <summary>
+    /// 核心固件发动后的冷却秒数(FGR-SIG-033:冷却属于信号,跳到别的机器不重置;按游戏时间计,暂停不走);只在 kind=core 时生效,常规固件填 0
+    /// </summary>
+    public readonly float Cooldown;
    
     public const int __ID__ = -1131444196;
     public override int GetTypeId() => __ID__;
@@ -55,6 +60,7 @@ public sealed partial class FirmwareKind : Luban.BeanBase
         + "id:" + Id + ","
         + "kind:" + Kind + ","
         + "nameKey:" + NameKey + ","
+        + "cooldown:" + Cooldown + ","
         + "}";
     }
 }

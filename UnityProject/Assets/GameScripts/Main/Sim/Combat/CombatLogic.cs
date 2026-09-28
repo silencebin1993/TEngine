@@ -845,7 +845,7 @@ namespace BinGames.Sim.Combat
             {
                 d.MarkedUntil[t] = now + wp.MarkSeconds;
             }
-            if (wp.Reaction == CombatReaction.MarkJump && wasMarked)
+            if (wp.Reaction == CombatReaction.MarkJump && wasMarked && !d.Has(a, CombatUnitFlags.ReactionSpent))
             {
                 MarkJump(ref d, a, t, primaryPos, damage, wp);
             }
@@ -884,7 +884,8 @@ namespace BinGames.Sim.Combat
             }
             d.AimReadyAt[a] = 0;
             d.NextFireAt[a] = now + wp.Cooldown;
-            bool overload = wp.Reaction == CombatReaction.MeltOverload;
+            // FG1-SIG-03：门控反应（信号带进来的核心固件）发动过一次后就被压住，直到热更层按冷却重新下发武器参数。
+            bool overload = wp.Reaction == CombatReaction.MeltOverload && !d.Has(a, CombatUnitFlags.ReactionSpent);
             float heat = d.Heat[a] + wp.HeatPerShot + (overload ? wp.OverloadExtraHeat : 0f);
             d.Heat[a] = heat;
             CombatCounters c = d.Counters[0];
@@ -894,6 +895,7 @@ namespace BinGames.Sim.Combat
             if (overload)
             {
                 Cue(ref d, CombatEventKind.MeltOverload, a, d.Id[t], 0f, d.Pos[t], 0);
+                ReactionFired(ref d, a, t, CombatReaction.MeltOverload);
             }
             if (heat >= wp.OverheatAt)
             {
@@ -999,7 +1001,23 @@ namespace BinGames.Sim.Combat
             if (picked.Length > 0)
             {
                 Cue(ref d, CombatEventKind.MarkJump, a, d.Id[primary], picked.Length, primaryPos, 0);
+                ReactionFired(ref d, a, primary, CombatReaction.MarkJump);
             }
+        }
+
+        /// <summary>
+        /// FG1-SIG-03（FGR-SIG-033）：具名反应真正发动了一次。发不丢的玩法事件（核心固件冷却、暴露按它结算，不受提示事件每步上限影响）；
+        /// 这台单位的反应若来自信号带进来的核心固件（<see cref="CombatUnitFlags.ReactionGated"/>），当场压住（<see cref="CombatUnitFlags.ReactionSpent"/>），
+        /// 事件被顺延处理的那几步里也不会再发动。
+        /// </summary>
+        private static void ReactionFired(ref CombatData d, int a, int t, CombatReaction reaction)
+        {
+            bool gated = d.Has(a, CombatUnitFlags.ReactionGated);
+            if (gated)
+            {
+                d.Set(a, CombatUnitFlags.ReactionSpent, true);
+            }
+            Gameplay(ref d, CombatEventKind.ReactionFired, a, d.Id[t], 0f, 0f, d.Pos[t], (byte)reaction, (byte)(gated ? 1 : 0));
         }
 
         /// <summary>唯一扣血入口。血量在热更层的单位只发伤害请求（护甲 / 加成已算好），其余在内核扣血、按需报告、归零即阵亡。</summary>

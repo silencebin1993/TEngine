@@ -163,8 +163,38 @@ namespace GameLogic.Campaign.Blueprint
         public static MachineCombatResolution ResolveForAi(CampaignState state, int machineLogicId, int seed) =>
             Resolve(state, machineLogicId, seed);
 
-        /// <summary>玩家直控出口——同上。</summary>
+        /// <summary>玩家直控出口。FG1-SIG-03 起 = <see cref="ResolveForPilot"/>：信号在这台机器里时按接入结算（插入信号核固件），
+        /// 否则与 AI 完全相同（机器电路自己的装配）。</summary>
         public static MachineCombatResolution ResolveForDirectControl(CampaignState state, int machineLogicId, int seed) =>
-            Resolve(state, machineLogicId, seed);
+            ResolveForPilot(state, machineLogicId, seed);
+
+        /// <summary>FG1-SIG-03（FGR-SIG-031、032）：“现在是谁在开这台机器”的结算出口——战斗内核的武器参数、直控开火都读这里。
+        /// 信号接入这台机器时 = <see cref="ResolveForUplink"/>（信号核按槽位顺序插进接入口，与双态预览同一套计算，FGT-SIG-002）；
+        /// 信号不在这台机器里 = <see cref="Resolve"/>（AI 驾驶，接入口按空槽，FGR-SIG-021 / 090）。离开时自动回到本地配置，不需要另存“接入前的状态”。
+        /// 开销：O(1) 次装配解析，只在接入 / 离开 / 冷却开始与结束时调用（<see cref="NotifyChanged"/>），不按帧、不按开火。</summary>
+        public static MachineCombatResolution ResolveForPilot(CampaignState state, int machineLogicId, int seed) =>
+            Signal.SignalUplinkService.IsUplinked(state, machineLogicId)
+                ? ResolveForUplink(state, machineLogicId, seed, Signal.SignalCoreService.CurrentContentIds(state))
+                : Resolve(state, machineLogicId, seed);
+
+        /// <summary>FG1-SIG-03：这台机器的装配没变、但“谁在开”变了（接入 / 离开 / 核心固件冷却开始或结束）——通知订阅方（战斗内核）只重算这一台。</summary>
+        public static void NotifyChanged(int machineLogicId)
+        {
+            if (machineLogicId > 0 && _entries.ContainsKey(machineLogicId))
+            {
+                Changed?.Invoke(machineLogicId);
+            }
+        }
+
+        /// <summary>FG1-SIG-03：信号核怎样插进这台机器的接入口（HUD 的“接入口：… / 未插入：…”读这里）。没登记 / 蓝图不可解析时返回 null。</summary>
+        public static UplinkInsertionPlan PlanForUplink(CampaignState state, int machineLogicId, IReadOnlyList<string> signalCoreContentIds)
+        {
+            if (!_entries.TryGetValue(machineLogicId, out Entry entry))
+            {
+                return null;
+            }
+            BlueprintVersionRecord versionRecord = BlueprintEditorService.Find(state, entry.BlueprintId)?.Versions?.FirstOrDefault(v => v.Version == entry.Version);
+            return versionRecord == null ? null : UplinkCompiler.Plan(BlueprintCircuitBoard.FromVersion(versionRecord), signalCoreContentIds);
+        }
     }
 }
