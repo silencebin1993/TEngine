@@ -130,6 +130,12 @@ namespace GameLogic.EditorTools.JourneyBots
             c.Set("saves", Path.Combine(Path.GetTempPath(), "bingames-journey-saves-" + Guid.NewGuid().ToString("N")));
             if (!EditorApplication.isPlaying)
             {
+                // 从菜单跑时：先问要不要保存当前场景的修改（取消 = 不开旅程），别直接丢掉用户没保存的编辑。
+                if (!Application.isBatchMode && !EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
+                {
+                    c.Set("aborted", "1");
+                    return;
+                }
                 EditorSceneManager.OpenScene("Assets/Scenes/main.unity", OpenSceneMode.Single);
                 EditorApplication.EnterPlaymode();
             }
@@ -137,6 +143,10 @@ namespace GameLogic.EditorTools.JourneyBots
 
         private static StepOutcome TickPlay(JourneyContext c)
         {
+            if (c.Get("aborted") == "1")
+            {
+                return StepOutcome.Fail("当前场景有未保存的修改、保存被取消：旅程不开（不替你丢掉修改）");
+            }
             if (!EditorApplication.isPlaying)
             {
                 return StepOutcome.Wait;
@@ -204,7 +214,12 @@ namespace GameLogic.EditorTools.JourneyBots
                 return StepOutcome.Fail($"新档的种子 / 生成器版本 / 世界设置不对：战役种子 {s.RandomSeed}、世界种子 {s.World.WorldSeed}、" +
                                         $"版本 v{version}（当前 v{WorldGenVersions.Current}）、世界设置 {s.World.WorldSettingsId}");
             }
-            IGridTerrainSource live = WorldGenService.CreateSource(s, WorldGenContent.EarthSurfaceId);
+            // 核对的是游戏此刻真正在用的地形源（家园格网装着的那一个），不是按存档参数新建一个：装错了源（版本 / 表面不对）这一步要能发现。
+            IGridTerrainSource live = HomeGridService.MapFor(s)?.TerrainSource;
+            if (live == null)
+            {
+                return StepOutcome.Fail("家园格网没有地形源");
+            }
             var checkedChunks = new List<string>();
             foreach (var b in FgWorldGenSelfCheck.Baseline)
             {
@@ -294,6 +309,9 @@ namespace GameLogic.EditorTools.JourneyBots
             CampaignState s = CampaignSession.Current;
             GridCell core = HomeGridService.CorePivot(s);
             string type = HomeValleyLayout.BuildingTypeGenerator2;
+            int offScreen = 0;
+            int invalid = 0;
+            var reasons = new Dictionary<string, int>();
             for (int r = 5; r <= 16; r++)
             {
                 for (int dy = -r; dy <= r; dy++)
@@ -305,25 +323,40 @@ namespace GameLogic.EditorTools.JourneyBots
                             continue;
                         }
                         var cell = new GridCell(core.X + dx, core.Y + dy);
-                        if (JourneyInput.OnScreen(new Vector2(cell.X, cell.Y), 0.15f) && HomeGridService.ValidatePlacement(s, type, cell, 0).Ok)
+                        if (!JourneyInput.OnScreen(new Vector2(cell.X, cell.Y), 0.15f))
                         {
-                            c.SetInt("cell" + tag + "X", cell.X);
-                            c.SetInt("cell" + tag + "Y", cell.Y);
-                            c.SetInt("cell" + tag + "Found", 1);
-                            JourneyInput.Hover(new Vector2(cell.X, cell.Y));
-                            return;
+                            offScreen++;
+                            continue;
                         }
+                        // A 要转 90° 再放：两个朝向都要能放（非方形占地转过去可能压到障碍）。
+                        GridPlacementResult v0 = HomeGridService.ValidatePlacement(s, type, cell, 0);
+                        GridPlacementResult v90 = v0.Ok ? HomeGridService.ValidatePlacement(s, type, cell, 90) : v0;
+                        if (!v0.Ok || !v90.Ok)
+                        {
+                            invalid++;
+                            string why = (v0.Ok ? v90 : v0).Reasons.Count > 0 ? (v0.Ok ? v90 : v0).Reasons[0].Code.ToString() : "?";
+                            reasons[why] = reasons.TryGetValue(why, out int n) ? n + 1 : 1;
+                            continue;
+                        }
+                        c.SetInt("cell" + tag + "X", cell.X);
+                        c.SetInt("cell" + tag + "Y", cell.Y);
+                        c.SetInt("cell" + tag + "Found", 1);
+                        JourneyInput.Hover(new Vector2(cell.X, cell.Y));
+                        return;
                     }
                 }
             }
             c.SetInt("cell" + tag + "Found", 0);
+            Camera cam = JourneyInput.Cam;
+            c.Set("cell" + tag + "Miss", $"画面外 {offScreen}、不能放 {invalid}（{string.Join("，", reasons.Select(kv => kv.Key + " " + kv.Value))}）；" +
+                                        $"镜头 {(cam == null ? "无" : $"{cam.pixelWidth}×{cam.pixelHeight} 正交 {cam.orthographicSize:F1} 位置 {cam.transform.position}")}");
         }
 
         private static StepOutcome TickHover(JourneyContext c, string tag)
         {
             if (c.GetInt("cell" + tag + "Found") == 0)
             {
-                return StepOutcome.Fail("核心附近、画面内找不到能放发电机的空地");
+                return StepOutcome.Fail("核心附近、画面内找不到能放发电机的空地：" + c.Get("cell" + tag + "Miss", string.Empty));
             }
             if (c.StepElapsed < 0.5)
             {
@@ -390,9 +423,16 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 return StepOutcome.Fail($"放下的建筑状态 {b.ConstructionState}、朝向 {b.Rotation}°（期望规划中、{rotation}°）");
             }
+            // 放置时按建造配置预留废料（取消时全额退回）：否则“取消后废料 == 放第一座后的废料”恒成立，退款断言形同虚设。
+            int before = tag == "A" ? c.GetInt("scrap0") : c.GetInt("scrapAfterA");
+            int cost = HomeValleyLayout.BuildProfile.TryGetValue(HomeValleyLayout.BuildingTypeGenerator2, out (int ScrapCost, float Seconds) profile) ? profile.ScrapCost : 0;
+            if (cost <= 0 || s.Scrap != before - cost)
+            {
+                return StepOutcome.Fail($"放置发电机应预留废料 {cost}：放置前 {before}、放置后 {s.Scrap}");
+            }
             c.Set("building" + tag, b.BuildingId);
             c.SetInt("scrapAfter" + tag, s.Scrap);
-            return StepOutcome.Done($"放下规划中的发电机（朝向 {b.Rotation}°），废料 {s.Scrap}");
+            return StepOutcome.Done($"放下规划中的发电机（朝向 {b.Rotation}°），预留废料 {cost}（{before} → {s.Scrap}）");
         }
 
         private static StepOutcome TickDemolishMode(JourneyContext c)
@@ -544,7 +584,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 {
                     double ang = a * Math.PI / 8;
                     var g = new GridCell(from.X + (int)Math.Round(Math.Cos(ang) * r), from.Y + (int)Math.Round(Math.Sin(ang) * r));
-                    if (!AreaPassable(g, 2))
+                    if (!AreaPassable(k, g, 2))
                     {
                         continue;
                     }
@@ -577,9 +617,9 @@ namespace GameLogic.EditorTools.JourneyBots
             }
         }
 
-        private static bool AreaPassable(GridCell g, int half)
+        /// <summary>在独立的寻路内核上探测（不碰观察组的实时内核镜像：探测 1,000 格外会在镜像里多生成区块，测试探针不该改被测对象）。</summary>
+        private static bool AreaPassable(NavKernel k, GridCell g, int half)
         {
-            NavKernel k = NavService.Kernel;
             for (int y = -half; y <= half; y++)
             {
                 for (int x = -half; x <= half; x++)
@@ -806,7 +846,10 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             _o2 = Snapshot(_cue1, _note1);
             c.SetLong("t2", GameClock.Ticks);
-            LogHome(c);
+            if (!LogHome(c))
+            {
+                return StepOutcome.Fail("第一座发电机的规划在玩家没有取消的情况下消失了（编队命令 / 自动分配不应撤销建筑规划）");
+            }
             return StepOutcome.Done($"第 {GameClock.Ticks} 步暂停，拍观察组快照（{_o2.Count} 个字段）");
         }
 
@@ -880,17 +923,24 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             _o3 = Snapshot(_cue2, _note2);
             c.SetLong("t3", GameClock.Ticks);
-            LogHome(c);
+            if (!LogHome(c))
+            {
+                return StepOutcome.Fail("第一座发电机的规划在玩家没有取消的情况下消失了（撤退命令 / 自动分配不应撤销建筑规划）");
+            }
             return StepOutcome.Done($"第 {GameClock.Ticks} 步暂停，拍观察组快照（{_o3.Count} 个字段）");
         }
 
-        /// <summary>家园那边在编队离开期间的情况（记录用，不断言：有没有空闲的工人去建第一座发电机取决于开局机器数）。</summary>
-        private static void LogHome(JourneyContext c)
+        /// <summary>
+        /// 家园那边在编队离开期间的情况。施工进度只记录、不断言（有没有空闲的工人去建第一座发电机取决于开局机器数与命令）；
+        /// 但第一座发电机的规划必须还在（规划中 / 施工中 / 已建成都行）：玩家没有取消它，编队命令与自动分配都不能把它撤掉。
+        /// </summary>
+        private static bool LogHome(JourneyContext c)
         {
             CampaignState s = CampaignSession.Current;
             BuildingRecord a = s.BuildingRecords.FirstOrDefault(b => b.BuildingId == c.Get("buildingA"));
             int orders = s.WorkOrders?.Count(o => o != null && o.State != WorkOrderState.Completed && o.State != WorkOrderState.Cancelled) ?? 0;
-            c.Log($"家园：第一座发电机 {a?.ConstructionState}；未完成工单 {orders} 张；家园机器 {GameRoot.HomeValley.LiveMachineCount} 台；统一时钟第 {GameClock.Ticks} 步");
+            c.Log($"家园：第一座发电机 {(a == null ? "（记录不在了）" : a.ConstructionState.ToString())}；未完成工单 {orders} 张；家园机器 {GameRoot.HomeValley.LiveMachineCount} 台；统一时钟第 {GameClock.Ticks} 步");
+            return a != null;
         }
 
         // ── 不观察时的对照 ───────────────────────────────────────────────────────────

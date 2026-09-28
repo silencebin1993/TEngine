@@ -113,6 +113,7 @@ namespace GameLogic.EditorTools
                 Step(CheckSharing);
                 Step(CheckIncrementalAndRequeue);
                 Step(CheckDetourAndRecheck);
+                Step(CheckIslandUnreachable);
                 Step(CheckPendingSnapshot);
                 Step(CheckCombatFollow);
                 Step(CheckCombatRouteCutAndSnapshot);
@@ -120,6 +121,8 @@ namespace GameLogic.EditorTools
                 Step(CheckHomeDetourAndCut);
                 Step(CheckWorkOrderUnreachable);
                 Step(CheckSquadUnreachableAndFog);
+                Step(CheckSquadCommandNotHijacked);
+                Step(CheckSquadCommandDropsHaulCargo);
                 Step(CheckBuildPreviewWarning);
                 Step(CheckRaidRoute);
                 Step(CheckRaidBlockedCore);
@@ -479,7 +482,12 @@ namespace GameLogic.EditorTools
             const int hc = 4;
             int w = wc * 32;
             int h = hc * 32;
-            Func<int, int, bool> map = RandomMap(4242, w, h, 70);
+            Func<int, int, bool> randomMap = RandomMap(4242, w, h, 70);
+            // 随机障碍不一定围出封闭区域：加一圈封死的悬崖围栏，保证对照里有“真不可达”的起终点对。
+            const int penX = 20;
+            const int penY = 100;
+            const int penR = 6;
+            Func<int, int, bool> map = (x, y) => randomMap(x, y) || Ring(x, y, penX, penY, penR);
             using NavKernel k = Synth(wc, hc, map);
             var rnd = new System.Random(99);
             var pts = new List<int2>();
@@ -489,17 +497,45 @@ namespace GameLogic.EditorTools
             int allClear = 0;
             double worstRatio = 0;
             double sumRatio = 0;
-            const int pairs = 160;
-            int tried = 0;
-            while (tried < pairs)
+            const int randomPairs = 160;
+            var pairList = new List<(int2 s, int2 t)>();
+            while (pairList.Count < randomPairs)
             {
                 var s = new int2(rnd.Next(0, w), rnd.Next(0, h));
                 var t = new int2(rnd.Next(0, w), rnd.Next(0, h));
-                if (map(s.x, s.y) || map(t.x, t.y))
+                if (!map(s.x, s.y) && !map(t.x, t.y))
                 {
-                    continue;
+                    pairList.Add((s, t));
                 }
-                tried++;
+            }
+            var inside = new List<int2>();
+            for (int y = penY - penR + 1; y < penY + penR; y++)
+            {
+                for (int x = penX - penR + 1; x < penX + penR; x++)
+                {
+                    if (!map(x, y))
+                    {
+                        inside.Add(new int2(x, y));
+                    }
+                }
+            }
+            if (inside.Count < 2)
+            {
+                Fail($"暴力对照：围栏里只剩 {inside.Count} 格空地，凑不出不可达对");
+                return;
+            }
+            // 强制对：起点在围栏外、目标在里面（不可达，两个方向各 4 条）；起终点都在里面（可达）。
+            for (int i = 0; i < 4; i++)
+            {
+                int2 outside = pairList[i * 7].s;
+                int2 pen = inside[(i * 5) % inside.Count];
+                pairList.Add((outside, pen));
+                pairList.Add((pen, outside));
+            }
+            pairList.Add((inside[0], inside[inside.Count - 1]));
+            int pairs = pairList.Count;
+            foreach ((int2 s, int2 t) in pairList)
+            {
                 bool bf = BruteForce(map, w, h, s, t, out float best);
                 NavResult r = k.FindNow(Req(s.x, s.y, t.x, t.y), pts, false, out _);
                 bool hpa = r.Status == NavStatus.Ok;
@@ -528,7 +564,7 @@ namespace GameLogic.EditorTools
             }
             double avg = reachable > 0 ? sumRatio / reachable : 0;
             Expect(agree == pairs && allClear == reachable && reachable > 20 && unreachable > 0 && worstRatio <= 1.2 && avg <= 1.06,
-                $"与整图暴力 Dijkstra 对照（128×128 随机障碍，{pairs} 对起终点）：可达性一致 {agree}/{pairs}（可达 {reachable}、不可达 {unreachable}）；" +
+                $"与整图暴力 Dijkstra 对照（128×128 随机障碍 + 一圈封死的围栏，{pairs} 对起终点）：可达性一致 {agree}/{pairs}（可达 {reachable}、不可达 {unreachable}）；" +
                 $"全部路线每段不穿障碍、终点就是目标；路线长度 / 最优格路径长度 平均 {avg:F3}、最差 {worstRatio:F3}（门槛 1.2，拉直后常比格路径更短）");
         }
 
@@ -697,6 +733,29 @@ namespace GameLogic.EditorTools
                 Expect(held && reached && firstHeld && delivered,
                     "批次在飞时屏障被拆：旧地形上的“无法到达”不交出、重算后给出通路；地形持续变化时同一请求只重算一次，第二次如实报“被完全阻断”");
             }
+        }
+
+        private static void CheckIslandUnreachable()
+        {
+            // 湖心岛：起点所在的陆地很大、伸出搜索框（前向搜索“被框挡住”），目标在一圈 4 格宽的水域（悬崖码）中间的小岛上；
+            // 岛跨区块边界，目标能走到本区块入口（旧的“起终点被困在自己区块里”判定兜不住）。放大边距之前从目标一侧泛洪，
+            // 判定岛自成封闭 → 如实报“被完全阻断”，一轮就结束。展开上限压到 700：不做封闭判定、照常重搜三轮会超，被报成“超出寻路范围”。
+            NavConfig cfg = NavService.ConfigFromTuning();
+            cfg.MaxExpansions = 700;
+            Func<int, int, bool> lake = (x, y) =>
+            {
+                int d = Math.Max(Math.Abs(x - 128), Math.Abs(y - 48));
+                return d >= 7 && d <= 10;
+            };
+            using NavKernel k = Synth(16, 3, lake, cfg);
+            var pts = new List<int2>();
+            NavResult island = k.FindNow(Req(40, 48, 128, 48), pts, false, out _);
+            // 对照：同一片陆地上绕过湖的远点照样能到（封闭判定没有误伤可达的目标）。
+            NavResult shore = k.FindNow(Req(40, 48, 300, 48), pts, false, out _);
+            bool shoreClear = shore.Status == NavStatus.Ok && k.RouteClear(new int2(40, 48), pts, 0, NavConst.ClassPlayer) && pts.Last().Equals(new int2(300, 48));
+            Expect(island.Status == NavStatus.Failed && island.Reason == NavFailReason.Unreachable && island.Expanded < cfg.MaxExpansions && shoreClear,
+                $"湖心岛：目标在水域围住的小岛上 → 如实报“被完全阻断”（{island.Reason}，展开 {island.Expanded} < 上限 {cfg.MaxExpansions}，没有因为重搜累计被报成“超出寻路范围”）；" +
+                $"同一片陆地上绕过湖的 260 格外的点照样能到（{shore.Status}，每段不穿障碍）");
         }
 
         private static void CheckPendingSnapshot()
@@ -1037,9 +1096,11 @@ namespace GameLogic.EditorTools
             var separated = RunOnce(0.5f);
             var again = RunOnce(0.5f);
             var without = RunOnce(0f);
-            Expect(separated.minDist > 0.6 && without.minDist < 0.05 && separated.hash == again.hash && separated.clear && separated.progress > 25,
+            // 满速上限：速度 3.5 × (360 步 − 等路线的固定延迟) / 60。分离不该把队伍拖慢（至少走到上限的 85%）。
+            double maxProgress = 3.5 * (360 - NavService.ConfigFromTuning().LatencySteps) / 60.0;
+            Expect(separated.minDist > 0.6 && without.minDist < 0.05 && separated.hash == again.hash && separated.clear && separated.progress > maxProgress * 0.85,
                 $"分离（DEBT-FG0ARCH03-03）：16 个突袭者在同一点出生、同一目标，开分离后 6 秒内两两最小间距 {separated.minDist:F2} 米（关掉分离 {without.minDist:F3} 米，叠在一处），" +
-                $"平均前进 {separated.progress:F1} 格、全程不进不可通行格，两次运行哈希一致（确定性）");
+                $"平均前进 {separated.progress:F1} 格（满速上限 {maxProgress:F1} 格）、全程不进不可通行格，两次运行哈希一致（确定性）");
         }
 
         // ── D 家园集成 ──────────────────────────────────────────────────────────────
@@ -1058,13 +1119,19 @@ namespace GameLogic.EditorTools
             return s;
         }
 
-        private static int SpawnHomeMachine(CampaignState s, Vector2 at, bool noAutoWork = true)
+        private static int SpawnHomeMachine(CampaignState s, Vector2 at, bool noAutoWork = true, int settleSteps = 2)
         {
             MachineOpResult r = MachineRegistry.SpawnMachine(HomeValleyLayout.Erc001ChassisId, HomeValleyLayout.BlueprintErc001Id, HomeValleyLayout.RegionId, at, 100f, 100f);
             if (!r.Success)
             {
                 Fail("登记测试机器失败：" + r.Message);
                 return 0;
+            }
+            // 与正式生成路径一致（工厂出厂 / 进家园时 RegisterAllRegionMachineLoadouts）：登记装配。否则这台机器在内核里是“没武器”，
+            // 读档后家园按蓝图补登记、刷新武器，存读档对照就会在武器序号上分叉——那是测试造出了游戏里不存在的状态。
+            if (MachineRegistry.TryGetRecord(r.LogicId, out MachineRecord spawned) && !string.IsNullOrEmpty(spawned.BlueprintId))
+            {
+                MachineLoadoutRegistry.Register(s, r.LogicId, spawned.BlueprintId, spawned.BlueprintVersion);
             }
             if (noAutoWork && MachineRegistry.TryGetRecord(r.LogicId, out MachineRecord rec))
             {
@@ -1075,7 +1142,10 @@ namespace GameLogic.EditorTools
                     rec.WorkPriorities.Set(kind, 0);
                 }
             }
-            WorldSimulation.StepMany(2);
+            if (settleSteps > 0)
+            {
+                WorldSimulation.StepMany(settleSteps);
+            }
             return r.LogicId;
         }
 
@@ -1089,11 +1159,46 @@ namespace GameLogic.EditorTools
             return marker != null && marker.Site != null && marker.Site.TryGetUnitPosition(marker.UnitId, out p);
         }
 
-        /// <summary>找一块全部可走、没有建筑、已探索的方形空地（核心周围按环由近及远，确定性）。</summary>
+        private static string _openAreaMiss = string.Empty;
+
+        /// <summary>
+        /// 找一块全部可走、没有建筑、不压开局障碍（残骸 / 靶 / 出口的净空）、已探索的方形平地（核心周围按环由近及远，确定性）。
+        /// 开局只探明核心附近、地形起伏按种子而定，有的种子附近没有够大的天然平地：这时退而找一块已探索、没有建筑与障碍的方形区域，
+        /// 把里面的地形整平成空地（测试布景，同 <see cref="CliffRing"/>），不让用例依赖某个种子恰好有平地。
+        /// </summary>
         private static GridCell? FindOpenArea(CampaignState s, int half, int minR, int maxR)
+        {
+            GridCell? natural = FindOpenAreaCore(s, half, minR, maxR, flatten: false);
+            if (natural != null)
+            {
+                return natural;
+            }
+            string naturalMiss = _openAreaMiss;
+            GridCell? made = FindOpenAreaCore(s, half, minR, maxR, flatten: true);
+            if (made == null)
+            {
+                _openAreaMiss = naturalMiss + "；整平也找不到：" + _openAreaMiss;
+            }
+            return made;
+        }
+
+        private static GridCell? FindOpenAreaCore(CampaignState s, int half, int minR, int maxR, bool flatten)
         {
             HomeGridMap map = HomeGridService.MapFor(s);
             GridCell core = HomeGridService.CorePivot(s);
+            var obstacles = new List<(GridCell cell, int radius)>();
+            foreach (var row in GridContent.StartLayout)
+            {
+                if (row.Kind == "wreckage" || row.Kind == "target" || row.Kind == "exit")
+                {
+                    obstacles.Add((new GridCell(core.X + row.OffsetX, core.Y + row.OffsetY), Mathf.FloorToInt(row.Clearance)));
+                }
+            }
+            int centers = 0;
+            int fog = 0;
+            int occupied = 0;
+            int blocked = 0;
+            int rough = 0;
             for (int r = minR; r <= maxR; r++)
             {
                 for (int dy = -r; dy <= r; dy++)
@@ -1104,6 +1209,7 @@ namespace GameLogic.EditorTools
                         {
                             continue;
                         }
+                        centers++;
                         var c = new GridCell(core.X + dx, core.Y + dy);
                         bool ok = true;
                         for (int y = -half; y <= half && ok; y++)
@@ -1111,16 +1217,55 @@ namespace GameLogic.EditorTools
                             for (int x = -half; x <= half && ok; x++)
                             {
                                 var q = new GridCell(c.X + x, c.Y + y);
-                                ok = Passable(q) && map.OccupantAt(q) == null && map.IsExplored(q) && map.GetTerrain(q) == 0;
+                                bool explored = map.IsExplored(q);
+                                bool free = map.OccupantAt(q) == null
+                                            && !obstacles.Any(o => Math.Max(Math.Abs(q.X - o.cell.X), Math.Abs(q.Y - o.cell.Y)) <= o.radius);
+                                bool pass = flatten || Passable(q);
+                                bool plain = flatten || map.GetTerrain(q) == 0;
+                                ok = pass && free && explored && plain;
+                                if (!ok)
+                                {
+                                    if (!explored)
+                                    {
+                                        fog++;
+                                    }
+                                    else if (!free)
+                                    {
+                                        occupied++;
+                                    }
+                                    else if (!pass)
+                                    {
+                                        blocked++;
+                                    }
+                                    else
+                                    {
+                                        rough++;
+                                    }
+                                }
                             }
                         }
                         if (ok)
                         {
+                            if (flatten)
+                            {
+                                for (int y = -half; y <= half; y++)
+                                {
+                                    for (int x = -half; x <= half; x++)
+                                    {
+                                        var q = new GridCell(c.X + x, c.Y + y);
+                                        if (map.GetTerrain(q) != 0)
+                                        {
+                                            map.SetTerrain(q, 0);
+                                        }
+                                    }
+                                }
+                            }
                             return c;
                         }
                     }
                 }
             }
+            _openAreaMiss = $"（核心外 {minR}～{maxR} 格的 {centers} 个候选中心：碰到未探索 {fog}、建筑或开局障碍 {occupied}、不可走 {blocked}、非平地 {rough}）";
             return null;
         }
 
@@ -1196,17 +1341,24 @@ namespace GameLogic.EditorTools
 
             // 路线中途被新建筑截断：赶路途中在前方放一座建筑（正式放置入口），机器重新规划后到达。
             s.Scrap = 5000;
-            GridCell? open = FindOpenArea(s, 6, 12, 40);
+            // 开局只探明核心附近：先找 13×13 的平地，没有就退到 11×11（起终点跟着收一格；3×3 的发电机仍横在正中）。
+            int half = 6;
+            GridCell? open = FindOpenArea(s, half, 12, 40);
             if (open == null)
             {
-                Fail("找不到空地做“中途截断”");
+                half = 5;
+                open = FindOpenArea(s, half, 12, 40);
+            }
+            if (open == null)
+            {
+                Fail("找不到空地做“中途截断”" + _openAreaMiss);
                 return;
             }
             GridCell o = open.Value;
-            marker.SetPosition(new Vector2(o.X - 6, o.Y));
+            marker.SetPosition(new Vector2(o.X - half, o.Y));
             WorldSimulation.StepMany(1);
             arrived = false;
-            marker.CommandMoveTo(new Vector3(o.X + 6, 1f, o.Y), () => arrived = true);
+            marker.CommandMoveTo(new Vector3(o.X + half, 1f, o.Y), () => arrived = true);
             WorldSimulation.StepMany(NavService.ConfigFromTuning().LatencySteps + 4);
             GridOpResult placed = HomeGridService.TryPlace(s, "generator_2", new GridCell(o.X + 1, o.Y), 0);
             long invalidBefore = NavService.Kernel.Invalidated;
@@ -1221,7 +1373,8 @@ namespace GameLogic.EditorTools
                 }
             }
             Expect(placed.Success && arrived && neverBlocked && NavService.Kernel.Invalidated > invalidBefore,
-                $"赶路途中前方新放了一座建筑（{placed.Outcome}）：路线被截断 → 重新规划（失效 {NavService.Kernel.Invalidated - invalidBefore} 次），第 {steps} 步绕过去到达，不穿过新建筑");
+                $"赶路途中前方新放了一座建筑（{placed.Outcome}）：路线被截断 → 重新规划（失效 {NavService.Kernel.Invalidated - invalidBefore} 次），第 {steps} 步绕过去到达，不穿过新建筑" +
+                Why((placed.Success, "放置失败：" + placed.Describe()), (arrived, "没到达"), (neverBlocked, "踏进了不可通行格"), (NavService.Kernel.Invalidated > invalidBefore, "路线没失效重算")));
         }
 
         private static void CheckWorkOrderUnreachable()
@@ -1232,7 +1385,7 @@ namespace GameLogic.EditorTools
             GridCell? open = FindOpenArea(s, 5, 12, 40);
             if (open == null)
             {
-                Fail("找不到空地做“工单目标被围死”");
+                Fail("找不到空地做“工单目标被围死”" + _openAreaMiss);
                 return;
             }
             GridCell p = open.Value;
@@ -1274,10 +1427,15 @@ namespace GameLogic.EditorTools
                 }
             }
             string panelText = GameText.Format("nav.work.reason", GameText.Get("nav.fail.unreachable"));
+            string why = Why((placed.Success, $"放置失败（{placed.Describe()}，放在 {p.X},{p.Y}）"), (order != null, "没有建造工单"),
+                (waiting, $"工单状态 {order?.State} 原因 {order?.FailureReason} 指派 {order?.AssignedMachineLogicId} 已通知 {order?.UnreachableNotified}（等了 {steps} 步）"),
+                (notesAfter == notesBefore + 1, $"通知 {notesBefore}→{notesAfter}"), (located, "通知无定位"),
+                (detail.Contains(GameText.Get("nav.fail.unreachable")), "通知正文无原因"), (retries > 0, "30 秒后没有重试"),
+                (notesRetry == notesAfter, $"重试后通知 {notesRetry}"), (memberCount == 1, $"通知成员 {memberCount}"), (reached > 0, $"解围后工单状态 {order?.State} 原因 {order?.FailureReason}"));
             Expect(placed.Success && order != null && waiting && notesAfter == notesBefore + 1 && located && detail.Contains(GameText.Get("nav.fail.unreachable"))
                    && retries > 0 && notesRetry == notesAfter && memberCount == 1 && reached > 0,
                 $"工单目标被悬崖围死：机器寻路失败 → 工单立即转为等待（原因“{panelText}”），机器空出来，发一条可定位的“无法到达”通知（{detail}）；" +
-                $"30 秒后重试仍到不了不再刷屏（通知仍 1 条）；解围后下一次重试第 {reached} 步到达开工（不原地发呆、不永远卡住）");
+                $"30 秒后重试仍到不了不再刷屏（通知仍 1 条）；解围后下一次重试第 {reached} 步到达开工（不原地发呆、不永远卡住）{why}");
         }
 
         private static void CheckSquadUnreachableAndFog()
@@ -1287,7 +1445,7 @@ namespace GameLogic.EditorTools
             GridCell? open = FindOpenArea(s, 5, 12, 40);
             if (open == null)
             {
-                Fail("找不到空地做编队命令无法到达");
+                Fail("找不到空地做编队命令无法到达" + _openAreaMiss);
                 return;
             }
             GridCell p = open.Value;
@@ -1342,16 +1500,141 @@ namespace GameLogic.EditorTools
                 $"目标在未探索区域（约 {Math.Round(Math.Sqrt((far.X - core.X) * (far.X - core.X) + (far.Y - core.Y) * (far.Y - core.Y)))} 格外，区块还没生成）：" +
                 $"寻路按种子就地生成地形规划路线，第 {steps} 步走到，全程不踏进不可通行格");
 
-            // 迷雾里的目标被围死：原因文本写明“目标在未探索区域”。
-            CliffRing(s, far, 3);
+            // 迷雾里的目标被围死：原因文本写明“目标在未探索区域”。机器此刻就站在上一个目标旁（那里已被它探明），
+            // 所以另找一个离它很远、仍未探索的可走点，用悬崖围死后再下令（机器在围栏外）。
+            // 围栏放在区块正中（整圈落在一个区块里）：目标一侧够不着任何区块入口，内核一轮就能判“被完全阻断”。
+            GridCell pen = default;
+            bool penFound = false;
+            int cs = NavService.ConfigFromTuning().ChunkSize;
+            for (int r = 0; r < 60 && !penFound; r++)
+            {
+                for (int a = 0; a < 8 && !penFound; a++)
+                {
+                    double ang = a * Math.PI / 4 + Math.PI / 8;
+                    int px = core.X + (int)Math.Round(Math.Cos(ang) * (200 + r));
+                    int py = core.Y + (int)Math.Round(Math.Sin(ang) * (200 + r));
+                    var c = new GridCell((int)Math.Floor(px / (double)cs) * cs + cs / 2, (int)Math.Floor(py / (double)cs) * cs + cs / 2);
+                    if (Math.Abs(c.X - far.X) + Math.Abs(c.Y - far.Y) > 120 && !map.IsExploredNoLoad(c) && Passable(c))
+                    {
+                        pen = c;
+                        penFound = true;
+                    }
+                }
+            }
+            CliffRing(s, pen, 3);
+            bool penFogged = penFound && !map.IsExploredNoLoad(pen);
+            string lastBefore = home.SquadCommands.RecentEvents.LastOrDefault();
             home.SquadCommands.DebugSelectMany(new[] { id });
-            home.SquadCommands.IssueMoveTo(new Vector2(far.X + 40, far.Y), paused: false);
-            WorldSimulation.StepMany(5);
-            home.SquadCommands.IssueMoveTo(new Vector2(far.X, far.Y), paused: false);
+            home.SquadCommands.IssueMoveTo(new Vector2(pen.X, pen.Y), paused: false);
+            string ev2 = string.Empty;
+            string failMark = GameText.Get("nav.fail.unreachable");
+            string limitMark = GameText.Get("nav.fail.search_limit");
+            for (int i = 0; i < 900 && ev2.Length == 0; i++)
+            {
+                WorldSimulation.StepMany(1);
+                // 下令之后出现的失败事件（“移动已下达”那条不算）。
+                IReadOnlyList<string> evs = home.SquadCommands.RecentEvents;
+                for (int e = evs.Count - 1; e >= 0 && ev2.Length == 0; e--)
+                {
+                    if (ReferenceEquals(evs[e], lastBefore))
+                    {
+                        break;
+                    }
+                    if (evs[e].Contains(failMark) || evs[e].Contains(limitMark))
+                    {
+                        ev2 = evs[e];
+                    }
+                }
+            }
+            Expect(penFound && penFogged && ev2.Contains(GameText.Get("nav.fail.unreachable")) && ev2.Contains(GameText.Get("nav.fail.in_fog").Trim()),
+                $"未探索区域里的目标被围死：命令以“无法到达”结束，原因里写明目标在未探索区域（“{ev2}”）" +
+                Why((penFound, "找不到未探索的可走点"), (penFogged, "目标点已被探索")));
+        }
+
+        private static void CheckSquadCommandNotHijacked()
+        {
+            // FGR-BASE-020：机器在执行玩家的命令（编队移动）时，工单分配引擎不能把它当成空闲机器派去施工。
+            // FGJ-M0 旅程实测发现：编队行军途中一台机器被自动派去建刚规划的发电机，玩家的移动命令被静默覆盖。
+            CampaignState s = NewCampaign(8830);
+            HomeValleyController home = WorldSimulation.LoadHome(resume: false);
+            s.Scrap = 5000;
+            GridCell? open = FindOpenArea(s, 5, 12, 40);
+            if (open == null)
+            {
+                Fail("找不到空地做“编队命令不被工单抢走”" + _openAreaMiss);
+                return;
+            }
+            List<int> ids = MachineRegistry.AllRecords.Where(m => m.RegionId == HomeValleyLayout.RegionId && m.IsAlive).Select(m => m.LogicId).OrderBy(x => x).ToList();
+            GridCell core = HomeGridService.CorePivot(s);
+            home.SquadCommands.DebugSelectMany(ids);
+            home.SquadCommands.IssueMoveTo(new Vector2(core.X + 200, core.Y), paused: false);
             WorldSimulation.StepMany(30);
-            string ev2 = home.SquadCommands.RecentEvents.LastOrDefault() ?? string.Empty;
-            Expect(ev2.Contains(GameText.Get("nav.fail.in_fog").Trim()),
-                $"未探索区域里的目标无法到达：原因里写明目标在未探索区域（“{ev2}”）");
+            // 编队走着的时候规划一座发电机：出现一张待分配的建造单，家园里没有别的空闲机器。
+            GridOpResult placed = HomeGridService.TryPlace(s, "generator_2", open.Value, 0);
+            WorkOrderRecord order = s.WorkOrders?.LastOrDefault(w => w.Kind == WorkOrderKind.Build);
+            bool allStillMoving = true;
+            for (int i = 0; i < 60 * 5; i++)
+            {
+                WorldSimulation.StepMany(1);
+                foreach (int id in ids)
+                {
+                    allStillMoving &= home.Combat.TryGetMachineMarker(id, out HomeValleyMachineMarker mk)
+                                      && home.Combat.TryGetCommand(mk.UnitId, out CombatCommand cmd) && cmd.Kind == CombatCommandKind.Move;
+                }
+            }
+            bool notTaken = order != null && order.State == WorkOrderState.Ready && order.AssignedMachineLogicId == 0;
+            // 反向：玩家让其中一台停下（命令结束 = 交还 AI），下一次分配就轮到它——规则没有把机器永久锁住。
+            int freed = ids[0];
+            home.Combat.TryGetMachineMarker(freed, out HomeValleyMachineMarker fm);
+            home.Combat.ClearCommand(fm.UnitId);
+            for (int i = 0; i < 90 && order != null && order.AssignedMachineLogicId == 0; i++)
+            {
+                WorldSimulation.StepMany(1);
+            }
+            bool takenAfterFree = order != null && order.AssignedMachineLogicId == freed;
+            // 再给接了建造单的这台机器下一道编队命令：工单交还分配池（Ready、解除绑定），玩家规划的建筑保留——编队命令不是“取消建造”。
+            home.SquadCommands.DebugSelectMany(new[] { freed });
+            home.SquadCommands.IssueMoveTo(new Vector2(core.X - 120, core.Y), paused: false);
+            WorldSimulation.StepMany(2);
+            string plannedId = placed.BuildingId;
+            bool planKept = s.BuildingRecords.Any(b => b.BuildingId == plannedId);
+            bool released = order != null && order.State == WorkOrderState.Ready && order.AssignedMachineLogicId == 0;
+            Expect(placed.Success && ids.Count >= 2 && allStillMoving && notTaken && takenAfterFree && planKept && released,
+                $"编队行军途中规划一座发电机：{ids.Count} 台编队机器 5 秒里一直执行玩家的移动命令，建造单留在待分配（不抢正在执行命令的机器）；" +
+                $"其中一台的命令结束后，下一次分配就把建造单交给它（#{freed}）；再给它下编队命令：建造单交还分配池、规划的发电机保留（不当成取消建造）" +
+                Why((placed.Success, "放置失败：" + placed.Describe()), (ids.Count >= 2, $"只有 {ids.Count} 台机器"), (allStillMoving, "有机器的移动命令被换掉了"),
+                    (notTaken, "编队行军时建造单被派出去了"), (takenAfterFree, "命令结束后建造单没派给空出来的机器"),
+                    (planKept, "下编队命令后规划的发电机被撤掉了"), (released, $"下编队命令后建造单状态 {order?.State}、指派 #{order?.AssignedMachineLogicId}")));
+        }
+
+        private static void CheckSquadCommandDropsHaulCargo()
+        {
+            // 搬运单的货已在货舱里时，玩家给这台机器下编队命令：搬运单按取消处理，货放回机器脚下的地面。
+            // 不能像其他工单那样交还分配池——货已从地面拿起、只挂在这台机器身上，交还后接单的机器去原处取不到货，货就永久丢了。
+            CampaignState s = NewCampaign(8831);
+            HomeValleyController home = WorldSimulation.LoadHome(resume: false);
+            GridCell core = HomeGridService.CorePivot(s);
+            HomeGridService.TryGetCoreBounds(s, out GridCell cmin, out _);
+            int id = SpawnHomeMachine(s, new Vector2(cmin.X - 4, core.Y));
+            GroundItemRecord pile = HomeValleyCargo.SpawnGroundItem(s, HomeValleyLayout.RegionId, new Vector2(cmin.X - 6, core.Y),
+                CampaignEconomyLedger.ResourceScrap, 7, "fgnav-haul-pile");
+            HomeValleyWorkOrders.WorkOrderOpResult created = HomeValleyWorkOrders.TryCreateHaul(s, pile.GroundItemId, id);
+            WorkOrderRecord order = created.Success ? s.WorkOrders?.FirstOrDefault(w => w.WorkOrderId == created.WorkOrderId) : null;
+            // 取货那一腿到达（测试直接调到达回调：这里测的是“下命令时怎么处理手上的货”，不是赶路）。
+            bool picked = order != null && HomeValleyWorkOrders.OnArrivedAtHaulSource(s, order.WorkOrderId);
+            MachineRegistry.TryGetRecord(id, out MachineRecord rec);
+            bool inHold = rec?.Cargo != null && rec.Cargo.Length == 1 && rec.Cargo[0].Amount == 7;
+            home.SquadCommands.DebugSelectMany(new[] { id });
+            home.SquadCommands.IssueMoveTo(new Vector2(core.X - 40, core.Y + 20), paused: false);
+            WorldSimulation.StepMany(2);
+            bool cancelled = order != null && order.State == WorkOrderState.Cancelled;
+            bool holdEmpty = rec != null && (rec.Cargo == null || rec.Cargo.Length == 0);
+            GroundItemRecord dropped = order == null ? null : HomeValleyCargo.FindGroundItemBySalvageId(s, order.SourceId + ":redrop:" + order.WorkOrderId);
+            bool onGround = dropped != null && dropped.Amount == 7;
+            Expect(created.Success && picked && inHold && cancelled && holdEmpty && onGround,
+                "货在货舱里的搬运机器接到编队命令：搬运单按取消处理，7 份废料放回它脚下的地面（不交还分配池、不凭空消失）" +
+                Why((created.Success, "建搬运单失败：" + created.FailureReason), (picked, "取货失败"), (inHold, "货没进货舱"),
+                    (cancelled, $"搬运单状态 {order?.State}"), (holdEmpty, "货还在货舱里"), (onGround, dropped == null ? "地上没有放回的货" : $"地上的货 {dropped.Amount} 份")));
         }
 
         private static void CheckBuildPreviewWarning()
@@ -1362,7 +1645,7 @@ namespace GameLogic.EditorTools
             GridCell? open = FindOpenArea(s, 7, 12, 40);
             if (open == null)
             {
-                Fail("找不到空地做放置预览");
+                Fail("找不到空地做放置预览" + _openAreaMiss);
                 return;
             }
             GridCell p = open.Value;
@@ -1470,7 +1753,10 @@ namespace GameLogic.EditorTools
             CampaignState s = NewCampaign(8807);
             HomeValleyController home = WorldSimulation.LoadHome(resume: false);
             GridCell core = HomeGridService.CorePivot(s);
-            // 在核心约 150 格外找一块可走的出生点（按种子的地形，不写死坐标）。
+            // 在核心约 150 格外找一个可走的出生点（按种子的地形，不写死坐标）。200 个突袭者按每圈 16 个排开，
+            // 最外圈半径约 16 格（CombatBench.SpawnRaidGroup）：把出生区整平成空地（测试布景），否则“出生就站在悬崖里”会被算成踏进不可通行格；
+            // 出生区以外的一路上仍是种子生成的真实地形。
+            const int spawnHalf = 17;
             GridCell spawn = default;
             bool found = false;
             for (int r = 0; r < 60 && !found; r++)
@@ -1479,20 +1765,28 @@ namespace GameLogic.EditorTools
                 {
                     double ang = a * Math.PI / 8;
                     var c = new GridCell(core.X + (int)Math.Round(Math.Cos(ang) * (150 + r)), core.Y + (int)Math.Round(Math.Sin(ang) * (150 + r)));
-                    bool ok = true;
-                    for (int y = -5; y <= 5 && ok; y++)
-                    {
-                        for (int x = -5; x <= 5 && ok; x++)
-                        {
-                            ok = Passable(new GridCell(c.X + x, c.Y + y), NavConst.ClassHostile);
-                        }
-                    }
-                    if (ok)
+                    if (Passable(c, NavConst.ClassHostile))
                     {
                         spawn = c;
                         found = true;
                     }
                 }
+            }
+            if (found)
+            {
+                HomeGridMap spawnMap = HomeGridService.MapFor(s);
+                for (int y = -spawnHalf; y <= spawnHalf; y++)
+                {
+                    for (int x = -spawnHalf; x <= spawnHalf; x++)
+                    {
+                        var q = new GridCell(spawn.X + x, spawn.Y + y);
+                        if (spawnMap.GetTerrain(q) != 0)
+                        {
+                            spawnMap.SetTerrain(q, 0);
+                        }
+                    }
+                }
+                NavService.SyncGridChanges();
             }
             int count = (int)Math.Round(NavService.Tuning("nav.perf.mass_requests", 200f));
             CombatBench.Spec spec = CombatBench.FromTuning();
@@ -1504,8 +1798,17 @@ namespace GameLogic.EditorTools
             double sumBegin = 0;
             int stepsToAll = -1;
             bool neverBlocked = true;
+            string firstBlocked = string.Empty;
+            // 按游戏里最快的 3 倍速真实节奏推进（每步 1/180 秒墙钟；固定延迟 6 步 = 2 帧 ≈ 33 毫秒留给工作线程）。
+            // 不控节奏时一步只要零点几毫秒，6 步延迟几乎不给工作线程时间，采纳步只能硬等——量到的是“自检跑得比游戏快”，不是主线程开销。
+            const double stepWallMs = 1000.0 / (60.0 * 3.0);
+            var pace = Stopwatch.StartNew();
             for (int i = 0; i < 600 && stepsToAll < 0; i++)
             {
+                while (pace.Elapsed.TotalMilliseconds < i * stepWallMs)
+                {
+                    System.Threading.Thread.SpinWait(64);
+                }
                 WorldSimulation.StepMany(1);
                 maxBegin = Math.Max(maxBegin, NavService.LastBeginStepMs);
                 sumBegin += NavService.LastBeginStepMs;
@@ -1516,9 +1819,14 @@ namespace GameLogic.EditorTools
                     {
                         following++;
                     }
-                    if (home.Combat.TryGetUnitPosition(id, out double2 p))
+                    if (home.Combat.TryGetUnitPosition(id, out double2 p) && !Passable(CellOf(p), NavConst.ClassHostile))
                     {
-                        neverBlocked &= Passable(CellOf(p), NavConst.ClassHostile);
+                        if (neverBlocked)
+                        {
+                            home.Combat.TryGetNavState(id, out CombatNavState bst, out _);
+                            firstBlocked = $"第 {i + 1} 步单位 {id} 在 ({p.x:F2},{p.y:F2}) 格 {CellOf(p).X},{CellOf(p).Y}（寻路状态 {bst}；出生中心 {spawn.X},{spawn.Y}）";
+                        }
+                        neverBlocked = false;
                     }
                 }
                 if (following == ids.Count)
@@ -1531,11 +1839,13 @@ namespace GameLogic.EditorTools
             long shared = after.Shared - before.Shared;
             long late = NavService.Kernel.LateCompletes - lateBefore;
             CombatBench.ClearPrototypeUnits(home.Combat);
-            PerfLines.Add($"{count} 个单位同一步请求 ~150 格长路线：{stepsToAll} 步内全部拿到路线；实际抽象搜索 {searches} 次、共享 {shared} 条；" +
+            PerfLines.Add($"{count} 个单位同一步请求 ~150 格长路线（按 3 倍速真实节奏推进）：{stepsToAll} 步内全部拿到路线；实际抽象搜索 {searches} 次、共享 {shared} 条；" +
                           $"主线程寻路流水线每步平均 {sumBegin / Math.Max(1, stepsToAll):F3} ms、最大 {maxBegin:F3} ms；采纳步被迫等工作线程 {late} 次");
             Expect(found && ids.Count == count && stepsToAll > 0 && stepsToAll <= 60 && searches < count / 4 && neverBlocked && maxBegin < 4.0,
                 $"负向：{count} 个单位同时请求长路线——分批（每批条数上限 + 距离预算，共享的只计一次）在 {stepsToAll} 步（{stepsToAll / 60f:F2} 游戏秒）内全部拿到路线，" +
-                $"抽象搜索只有 {searches} 次；主线程每步开销最大 {maxBegin:F3} ms（< 4 ms），全程不踏进不可通行格");
+                $"抽象搜索只有 {searches} 次；主线程每步开销最大 {maxBegin:F3} ms（< 4 ms，3 倍速节奏下采纳步等工作线程 {late} 次），全程不踏进不可通行格" +
+                Why((found, "找不到出生点"), (ids.Count == count, $"只生成 {ids.Count} 个"), (stepsToAll > 0 && stepsToAll <= 60, $"拿到路线用了 {stepsToAll} 步"),
+                    (searches < count / 4, $"抽象搜索 {searches} 次"), (neverBlocked, "踏进了不可通行格：" + firstBlocked), (maxBegin < 4.0, $"主线程最大 {maxBegin:F3} ms")));
         }
 
         // ── 存读档 / 观察 / 倍速（家园 + 突袭 + 巡逻一起）────────────────────────────────
@@ -1586,10 +1896,17 @@ namespace GameLogic.EditorTools
             CombatBench.Spec spec = CombatBench.FromTuning();
             spec.RaiderSense = 0f;
             CombatBench.SpawnRaidGroup(home.Combat, new Vector2(core.X + 60, core.Y + 60), new Vector2(core.X, core.Y), 12, spec);
-            // 走到有批次在飞、且有单位在沿路线走的时刻存档。
+            int c = SpawnHomeMachine(s, new Vector2(cmin.X - 3, core.Y - 3));
+            home.Combat.TryGetMachineMarker(c, out HomeValleyMachineMarker mc);
+            // 走到有批次在飞、且有单位在沿路线走的时刻存档：开局那批路线早就交回了，第 30 步再给第三台机器下一道移动命令，
+            // 它的请求进下一批，批次在飞（还没到采纳步）时存档。
             int guard = 0;
             do
             {
+                if (guard == 30)
+                {
+                    mc.CommandMoveTo(new Vector3(cmax.X + 22, 1f, core.Y - 8));
+                }
                 WorldSimulation.StepMany(1);
             } while (guard++ < 400 && !(guard > 30 && NavService.Kernel.BatchActive && !NavService.Kernel.IsDue(GameClock.Ticks + 1)));
             SaveResult r = CampaignAutoSaveService.SaveWithExport(Slot, SaveReason.Manual);
@@ -1627,17 +1944,94 @@ namespace GameLogic.EditorTools
             CampaignState s0 = CampaignSession.Current;
             bool payload = !string.IsNullOrEmpty(s0.Nav?.Payload);
             bool inFlightAtSave = NavService.Kernel.BatchActive;
-            // A：不存档接着跑（存档就是 A 的“现在”）。
-            WorldSimulation.StepMany(900);
+            const int steps = 900;
+            // A：不存档接着跑（存档就是 A 的“现在”）。逐步记下家园内核的逐单位状态：不一致时指出第一处分叉在哪一步、哪个单位。
+            var trace = new List<string>(steps + 1) { StepTrace() };
+            for (int i = 0; i < steps; i++)
+            {
+                WorldSimulation.StepMany(1);
+                trace.Add(StepTrace());
+            }
             string a = Digest(s0);
             // B：读档接着跑同样的步数。
             RestoreSave(Slot);
             CampaignState s1 = CampaignSession.Current;
-            WorldSimulation.StepMany(900);
+            string fork = string.Empty;
+            string now0 = StepTrace();
+            if (now0 != trace[0])
+            {
+                fork = Fork(0, trace[0], now0);
+            }
+            for (int i = 0; i < steps; i++)
+            {
+                WorldSimulation.StepMany(1);
+                if (fork.Length == 0)
+                {
+                    string now = StepTrace();
+                    if (now != trace[i + 1])
+                    {
+                        fork = Fork(i + 1, trace[i + 1], now);
+                    }
+                }
+            }
             string b = Digest(s1);
             Expect(payload && inFlightAtSave && a == b,
                 "有寻路批次在飞、机器沿路线赶路、突袭沿路线行进、据点巡逻、12 个突袭者要路线时存档：读档接着跑 900 步与不存档逐字段一致" +
-                $"（家园内核哈希、寻路待处理状态、队伍 / 据点 / 巡逻记录）{(a == b ? string.Empty : "\n    A=" + a + "\n    B=" + b)}");
+                $"（家园内核哈希、寻路待处理状态、队伍 / 据点 / 巡逻记录）{(a == b ? string.Empty : "\n    A=" + a + "\n    B=" + b)}" +
+                (fork.Length == 0 ? string.Empty : "\n    第一处分叉：" + fork) + Why((payload, "存档里没有寻路快照"), (inFlightAtSave, "存档时没有批次在飞")));
+        }
+
+        /// <summary>家园战斗内核此刻的逐单位状态（位置、命令、寻路状态、剩余路线），一单位一行；首行是步序号与整体哈希。</summary>
+        private static string StepTrace()
+        {
+            CombatSite home = CombatSites.Get(HomeValleyLayout.RegionId);
+            CombatKernel k = home?.Kernel;
+            var sb = new StringBuilder();
+            sb.Append("tick=").Append(GameClock.Ticks).Append(" hash=").Append(k?.StateHash().ToString("X16") ?? "-").Append('\n');
+            if (k == null)
+            {
+                return sb.ToString();
+            }
+            sb.Append("steps=").Append(k.Steps).Append(" time=").Append(k.Time.ToString("R")).Append(" slots=").Append(k.SlotCount)
+              .Append(" proj=").Append(k.ProjectileCount).Append(" events=").Append(k.GameplayPending)
+              .Append(" weapons=").Append(k.WeaponCount).Append(" profiles=").Append(k.ProfileCount).Append('\n');
+            for (int i = 0; i < k.SlotCount; i++)
+            {
+                CombatUnitView v = k.ViewAt(i);
+                k.TryGetNavState(v.Id, out CombatNavState ns, out NavFailReason nf);
+                k.TryGetCommand(v.Id, out CombatCommand c);
+                sb.Append('#').Append(v.Id).Append(" ext=").Append(v.ExtKey).Append(' ').Append(v.Kind).Append(" f=").Append((uint)v.Flags)
+                  .Append(" p=").Append(v.Position.x.ToString("R")).Append(',').Append(v.Position.y.ToString("R"))
+                  .Append(" hp=").Append(v.Health.ToString("R")).Append('/').Append(v.MaxHealth.ToString("R")).Append(" b=").Append(v.Behavior)
+                  .Append(" w=").Append(v.Weapon).Append(" heat=").Append(v.Heat.ToString("R")).Append(" aim=").Append(v.AimReadyAt.ToString("R"))
+                  .Append(" fire=").Append(v.NextFireAt.ToString("R")).Append(" cyc=").Append(v.Cycle.ToString("R")).Append('/').Append(v.Secondary.ToString("R"))
+                  .Append(" mark=").Append(v.MarkedUntil.ToString("R")).Append(" tgt=").Append(v.CommandTarget)
+                  .Append(" cmd=").Append(c.Kind).Append('@').Append(c.Pos.x.ToString("R")).Append(',').Append(c.Pos.y.ToString("R"))
+                  .Append(" atk=").Append(c.AtkCd.ToString("R"))
+                  .Append(" prog=").Append(c.ProgTimer.ToString("R")).Append(" last=").Append(c.LastDist.ToString("R")).Append('/').Append(c.HasLast)
+                  .Append(" stuck=").Append(c.Stuck).Append(" nav=").Append(ns).Append('/').Append(nf)
+                  .Append(" rem=").Append(k.RemainingRoute(v.Id).ToString("R")).Append('\n');
+            }
+            return sb.ToString();
+        }
+
+        private static string Fork(int step, string a, string b)
+        {
+            string[] la = a.Split('\n');
+            string[] lb = b.Split('\n');
+            var sb = new StringBuilder().Append("读档后第 ").Append(step).Append(" 步");
+            int shown = 0;
+            for (int i = 0; i < Math.Max(la.Length, lb.Length) && shown < 5; i++)
+            {
+                string x = i < la.Length ? la[i] : "（无）";
+                string y = i < lb.Length ? lb[i] : "（无）";
+                if (x != y)
+                {
+                    sb.Append("\n      A: ").Append(x).Append("\n      B: ").Append(y);
+                    shown++;
+                }
+            }
+            return sb.ToString();
         }
 
         private sealed class SilentReader : IInputReader
@@ -1759,9 +2153,16 @@ namespace GameLogic.EditorTools
             WorldSimulation.StepMany(dormantSteps - dormantSteps / 2);
             long reinforcePointsCrossed = (GameClock.Ticks - 1 - (simTickFrozen - 1)) / interval;
             bool frozenWhileDormant = od.Dormant && od.SimTick == simTickFrozen && od.Garrison == garrisonFrozen;
+            string frozenInfo = $"Dormant={od.Dormant} SimTick {od.SimTick} vs {simTickFrozen}，驻军 {od.Garrison} vs {garrisonFrozen}";
             WorldOutpostSystem.WakeNow(s2, od.OutpostId, WorldOutpostSystem.WakeEvent);
             string dormantAtWake = SimFields(od) + "#" + SimFields(pd);
+            int wakesAfterEvent = od.WakeCount;
+            string reasonAfterEvent = od.LastWakeReason;
             WorldSimulation.StepMany(60 * 20);
+            // 事件唤醒后它仍离所有己方实体很远：下一次休眠判定就按 FGR-GEN-052 回到休眠（冻结，不参与每步模拟）。
+            // 20 秒后再用事件唤醒补算一次，补算结果要与一直在模拟的对照组逐字段一致。
+            bool resleptAfterEvent = od.Dormant;
+            WorldOutpostSystem.WakeNow(s2, od.OutpostId, WorldOutpostSystem.WakeEvent);
             string dormantLater = SimFields(od) + "#" + SimFields(pd);
 
             // Peek 的值 = 对照组在同一步的真实值：再跑一遍对照组到同一步取值。
@@ -1770,11 +2171,18 @@ namespace GameLogic.EditorTools
             controlGarrisonMid = oc2.Garrison;
             bool peekMatches = peekGarrison == oc2.Garrison && peekNext == oc2.NextReinforceTick
                                && Vector2.Distance(peekPatrol, new Vector2((float)pc2.PosX, (float)pc2.PosY)) < 1e-3f;
-            Expect(dormantMid && stillDormant && frozenWhileDormant && sr.Success && controlAtWake == dormantAtWake && controlLater == dormantLater
-                   && od.WakeCount == 1 && od.LastWakeReason == WorldOutpostSystem.WakeEvent && reinforcePointsCrossed >= 7 && oc.Garrison == cap,
+            Expect(dormantMid && stillDormant && frozenWhileDormant && sr.Success && controlAtWake == dormantAtWake && controlLater == dormantLater && resleptAfterEvent
+                   && wakesAfterEvent == 1 && reasonAfterEvent == WorldOutpostSystem.WakeEvent && reinforcePointsCrossed >= 7 && oc.Garrison == cap,
                 $"FGT-GEN-010 休眠与唤醒：据点离家园很远 → 休眠（{dormantSteps} 步里不推进，SimTick 冻结在 {simTickFrozen}），期间跨过 {reinforcePointsCrossed} 个增援点、中途存读档一次；" +
-                $"事件唤醒后按确定性规则补算，与“一直在模拟”的对照组逐字段一致（驻军 {oc.Garrison}/{cap}、下次增援、累计增援、巡逻进度与位置），再跑 20 游戏秒仍一致" +
-                $"{(controlAtWake == dormantAtWake ? string.Empty : "\n    对照=" + controlAtWake + "\n    休眠=" + dormantAtWake)}");
+                $"事件唤醒后按确定性规则补算，与“一直在模拟”的对照组逐字段一致（驻军 {oc.Garrison}/{cap}、下次增援、累计增援、巡逻进度与位置）；" +
+                "仍离家园很远，下一次判定回到休眠，20 游戏秒后再唤醒补算仍与对照组一致" +
+                $"{(controlAtWake == dormantAtWake ? string.Empty : "\n    对照=" + controlAtWake + "\n    休眠=" + dormantAtWake)}" +
+                $"{(controlLater == dormantLater ? string.Empty : "\n    20 秒后对照=" + controlLater + "\n    20 秒后休眠=" + dormantLater)}" +
+                Why((dormantMid, $"半程没休眠（Dormant={od.Dormant} DormantSince={od.DormantSinceTick}）"), (stillDormant, "读档后不再休眠"),
+                    (frozenWhileDormant, $"休眠期间被推进（{frozenInfo}）"), (sr.Success, "存档失败 " + sr.Message),
+                    (wakesAfterEvent == 1, $"唤醒次数 {wakesAfterEvent}"), (reasonAfterEvent == WorldOutpostSystem.WakeEvent, "唤醒原因 " + reasonAfterEvent),
+                    (resleptAfterEvent, "事件唤醒 20 秒后没有回到休眠"),
+                    (reinforcePointsCrossed >= 7, $"跨过增援点 {reinforcePointsCrossed}"), (oc.Garrison == cap, $"对照组驻军 {oc.Garrison}")));
             Expect(peekPure && peekMatches,
                 $"只读查看休眠据点（表现层用）：不改任何状态，现算的驻军 {peekGarrison}（对照组同一步 {controlGarrisonMid}）、巡逻位置与对照组相同——观察不改变结果");
         }
@@ -1856,8 +2264,10 @@ namespace GameLogic.EditorTools
             WorldSimulation.StepMany(60 * 3);
             bool allDormant = ids.All(o => o.Dormant);
             // 一台机器出现在据点群中间（远征回来的机器落点）：10 个据点同时符合唤醒条件。
-            SpawnHomeMachine(s, new Vector2(p.X + 16, p.Y + 4));
+            // 登记后不预走步（settleSteps: 0）：唤醒可能就发生在紧接着的那几步里，逐步计数要从登记后的第一步开始。
+            int evalBefore = WorldOutpostSystem.Evaluations;
             int start = WorldOutpostSystem.WakesProcessed;
+            int machineId = SpawnHomeMachine(s, new Vector2(p.X + 16, p.Y + 4), settleSteps: 0);
             var perStep = new List<int>();
             int last = start;
             for (int i = 0; i < 200 && WorldOutpostSystem.WakesProcessed - start < 10; i++)
@@ -1874,7 +2284,13 @@ namespace GameLogic.EditorTools
             double budget = NavService.Tuning("outpost.wake_budget_ms", 2f);
             PerfLines.Add($"据点唤醒：单个唤醒（补算增援 + 巡逻）最长 {WorldOutpostSystem.MaxWakeMs:F4} ms（预算 {budget} ms）；10 个同时符合条件分 {perStep.Count} 步处理（{string.Join("+", perStep)}）");
             Expect(allDormant && perStep.Sum() == 10 && perStep.All(n => n <= perStepCap) && perStep.Count >= 3 && WorldOutpostSystem.MaxWakeMs <= budget && ids.All(o => !o.Dormant),
-                $"唤醒分帧：10 个据点同时符合唤醒条件，每步至多 {perStepCap} 个（{string.Join("+", perStep)}），单个唤醒最长 {WorldOutpostSystem.MaxWakeMs:F4} ms ≤ {budget} ms（FG17 休眠唤醒行）");
+                $"唤醒分帧：10 个据点同时符合唤醒条件，每步至多 {perStepCap} 个（{string.Join("+", perStep)}），单个唤醒最长 {WorldOutpostSystem.MaxWakeMs:F4} ms ≤ {budget} ms（FG17 休眠唤醒行）" +
+                Why((allDormant, "机器出现前并非全部休眠"),
+                    (perStep.Sum() == 10 && ids.All(o => !o.Dormant),
+                        $"只唤醒 {perStep.Sum()} 个、仍休眠 {ids.Count(o => o.Dormant)} 个；机器实时位置 " +
+                        (MachineRegistry.TryGetLivePosition(machineId, out Vector2 mp) ? $"({mp.x:F1},{mp.y:F1})" : "无") + $"（下令落点 ({p.X + 16},{p.Y + 4})）；" +
+                        $"休眠判定 {WorldOutpostSystem.Evaluations - evalBefore} 次；排队 {s.Raids?.PendingWakeIds?.Length}；据点唤醒次数 {string.Join(",", ids.Select(o => o.WakeCount))}"),
+                    (perStep.Count >= 3, $"只分了 {perStep.Count} 步")));
         }
 
         private static void CheckSeedIndependence()
@@ -1958,6 +2374,13 @@ namespace GameLogic.EditorTools
             {
                 Fail($"{check.Method.Name} 抛异常：{e}");
             }
+        }
+
+        /// <summary>失败时点名没满足的子条件（全满足时返回空串），接在断言文字后面。</summary>
+        private static string Why(params (bool ok, string what)[] conds)
+        {
+            List<string> bad = conds.Where(c => !c.ok).Select(c => c.what).ToList();
+            return bad.Count == 0 ? string.Empty : "【未满足：" + string.Join("；", bad) + "】";
         }
 
         private static void Expect(bool condition, string message)

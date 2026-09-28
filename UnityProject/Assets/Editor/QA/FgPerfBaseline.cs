@@ -258,6 +258,20 @@ namespace GameLogic.EditorTools
             var cold = new List<double>();
             float minLen = float.MaxValue;
             bool allOk = true;
+            // 先用一条很短的请求把寻路作业编译好（Editor 下 Burst 首次调度是同步编译）：否则第一条“冷启动”量到的是编译时间，随 Burst 缓存冷热跳变。
+            using (var burstWarm = new NavKernel(NavService.ConfigFromTuning(), NavService.TerrainTable(), true, src.Params, src.Rects, src.Zones))
+            {
+                burstWarm.FindNow(new NavRequest
+                {
+                    OwnerTag = 9,
+                    OwnerKey = 99,
+                    Serial = 1,
+                    Class = NavConst.ClassPlayer,
+                    Flags = NavRequestFlags.None,
+                    Start = new int2(core.X + 8, core.Y + 8),
+                    Goal = new int2(core.X + 14, core.Y + 8),
+                }, new List<int2>(), onWorker: true, out _);
+            }
             foreach (int dir in new[] { 0, 1 })
             {
                 using var k = new NavKernel(NavService.ConfigFromTuning(), NavService.TerrainTable(), true, src.Params, src.Rects, src.Zones);
@@ -600,6 +614,7 @@ namespace GameLogic.EditorTools
             double navSum = 0;
             int peakProj = 0;
             var step = new Stopwatch();
+            GC.Collect(); // 计时轮之前先收一次：别让前面搭场景留下的垃圾在测量中途触发 GC，把 p95 打穿。
             for (int round = 0; round < Rounds; round++)
             {
                 double sum = 0;
@@ -637,17 +652,34 @@ namespace GameLogic.EditorTools
             double beltPerStep = beltSum / n;
             double hotfixPerStep = Math.Max(0, samples.Average() - combatPerStep - beltPerStep);
 
-            // 托管分配：稳态 600 步的托管堆增量（Unity Mono 不实现按线程分配计数，用托管堆已用字节，同传送带 / 数据管线自检）。
-            GC.Collect();
-            int gc0 = GC.CollectionCount(0);
-            long heap0 = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong();
-            for (int i = 0; i < AllocSteps; i++)
+            // 托管分配：稳态步的托管堆增量（Unity Mono 不实现按线程分配计数，用托管堆已用字节，同传送带 / 数据管线自检）。
+            // 堆增量只在窗口里没有发生 GC 时才有意义（GC 会把增量吃掉，分配越多越容易触发、读数反而越小——假绿）：
+            // 切成若干个窗口，丢掉发生过 GC 的窗口，只用干净窗口；干净窗口太少 = 分配多到频繁触发 GC，判失败而不是拿偏低的数去比基线。
+            const int allocWindows = 6;
+            int windowSteps = Math.Max(1, AllocSteps / allocWindows);
+            long cleanBytes = 0;
+            int cleanSteps = 0;
+            int dirtyWindows = 0;
+            for (int wnd = 0; wnd < allocWindows; wnd++)
             {
-                WorldSimulation.StepMany(1);
+                GC.Collect();
+                int gc0 = GC.CollectionCount(0);
+                long heap0 = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong();
+                for (int i = 0; i < windowSteps; i++)
+                {
+                    WorldSimulation.StepMany(1);
+                }
+                long heap1 = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong();
+                if (GC.CollectionCount(0) != gc0)
+                {
+                    dirtyWindows++;
+                    continue;
+                }
+                cleanBytes += Math.Max(0, heap1 - heap0);
+                cleanSteps += windowSteps;
             }
-            long heap1 = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong();
-            bool collected = GC.CollectionCount(0) != gc0;
-            double allocPerStep = Math.Max(0, heap1 - heap0) / (double)AllocSteps;
+            bool allocValid = allocWindows - dirtyWindows >= allocWindows / 2;
+            double allocPerStep = cleanSteps > 0 ? cleanBytes / (double)cleanSteps : 0;
             GC.Collect();
             double monoMb = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong() / (1024.0 * 1024.0);
 
@@ -657,7 +689,8 @@ namespace GameLogic.EditorTools
             Add(cur, "combat_kernel_ms", "战斗内核每步", "ms", combatSteps > 0 ? combatSum / combatSteps : 0, true, 0.2);
             Add(cur, "belt_kernel_ms", "传送带内核每个内核步（20 Hz）", "ms", beltSteps > 0 ? beltSum / beltSteps : 0, true, 0.2);
             Add(cur, "nav_main_ms", "寻路主线程流水线每步", "ms", navSum / n, true, 0.1);
-            Add(cur, "alloc_bytes_per_step", "每步托管堆增量", "B", allocPerStep, true, 64);
+            Add(cur, "alloc_bytes_per_step", "每步托管堆增量（不含发生 GC 的窗口）", "B", allocPerStep, true, 64);
+            Add(cur, "alloc_gc_windows", $"分配测量中发生 GC 的窗口（共 {allocWindows} 个）", "个", dirtyWindows, true, 1);
             Add(cur, "mono_used_mb", "托管堆已用（GC 后，含编辑器）", "MB", monoMb, true, 32);
             Add(cur, "scale_buildings", "建筑", "座", buildings, false, 0);
             Add(cur, "scale_machines", "机器（战斗内核里活着的）", "台", machines, false, 0);
@@ -672,7 +705,8 @@ namespace GameLogic.EditorTools
             Line($"  · 读回的局面：建筑 {buildings}、机器 {machines}、传送带 {beltCells:N0} 格 / {beltItems:N0} 件、炮塔 {turrets}、敌人 {enemies}、弹体峰值 {peakProj:N0}、" +
                  $"区块 {chunks}、行进中的突袭 {transit} 支");
             Line($"  · 世界步：平均 {worldAvg:F3} ms / p95 {worldP95:F3} ms；其中战斗内核 {combatPerStep:F3}、传送带内核 {beltPerStep:F3}（折到每世界步）、" +
-                 $"寻路主线程 {navSum / n:F3}、热更层其余 {hotfixPerStep:F3} ms；每步托管堆增量 {allocPerStep:F1} B{(collected ? "（期间发生过 GC，读数偏低）" : string.Empty)}；托管堆 {monoMb:F0} MB");
+                 $"寻路主线程 {navSum / n:F3}、热更层其余 {hotfixPerStep:F3} ms；每步托管堆增量 {allocPerStep:F1} B" +
+                 $"{(dirtyWindows > 0 ? $"（{allocWindows} 个窗口里 {dirtyWindows} 个发生过 GC，不计入）" : string.Empty)}；托管堆 {monoMb:F0} MB");
             Line($"  · 预算参照（FGR-SYS-042，推荐配置 60 帧、1x 一帧一步；Editor 数字不等于真机，不判定）：热更层 {hotfixPerStep:F2} / 4 ms{Over(hotfixPerStep, 4)}；" +
                  $"内核（物流 + 战斗）{combatPerStep + beltPerStep:F2} / 6 ms{Over(combatPerStep + beltPerStep, 6)}；每帧托管分配 {allocPerStep:F0} B（目标接近 0）");
             Line("  · 场景里还没有的（不判定，见 DEBT-FG0QA01-*）：管线 3,000 格（FG3-LOG-05）；沙暴、静默夜（FG7-ENV-03 / 02）；远征队（FG8-EXP-02，行进队伍目前只有突袭）；GPU 帧时间（-nographics）");
@@ -682,6 +716,8 @@ namespace GameLogic.EditorTools
                 $"读档后规模不丢：建筑 {buildings}、机器 {machines}、传送带 {beltCells:N0} 格、炮塔 {turrets}、区块 {chunks}、行进中的突袭 {transit} 支（都达到 FGR-SYS-041）");
             Expect(enemies >= EnemyTarget * 3 / 4 && peakProj >= ProjectileTarget,
                 $"战斗在持续：测量开始时敌人 {enemies}（开打后会有伤亡，≥ {EnemyTarget * 3 / 4}），测量期间弹体峰值 {peakProj:N0}（≥ {ProjectileTarget:N0}）");
+            Expect(allocValid,
+                $"托管分配读数有效：{allocWindows} 个 {windowSteps} 步的窗口里 {allocWindows - dirtyWindows} 个没有发生 GC（至少一半；否则分配多到频繁触发 GC，堆增量读数偏低不能拿去比基线）");
             return true;
         }
 
@@ -704,8 +740,15 @@ namespace GameLogic.EditorTools
                 Fail($"基线文件读不了（{e.Message}）：修好或删掉后重跑（删掉 = 本次写为首个基线）");
                 return;
             }
+            // 本次测量已有失败（规模没达标、寻路没找到、战斗没打起来……）：这份数字不能当基线——写进去以后所有对比都建立在坏基线上。
+            int failedBeforeCompare = _fail;
             if (old == null || old.metrics == null || old.metrics.Count == 0)
             {
+                if (failedBeforeCompare > 0)
+                {
+                    Fail($"没有基线，但本次测量有 {failedBeforeCompare} 项失败：不写首个基线（修好场景后重跑）");
+                    return;
+                }
                 WriteBaseline(cur, path);
                 Line("  · 没有基线：本次结果已写为首个基线。把它提交进仓库，下一个里程碑出口与它对比");
                 return;
@@ -740,9 +783,22 @@ namespace GameLogic.EditorTools
                     bool regressed = m.value > b.value * (1 + RegressionLimit) && m.value - b.value > m.floor;
                     Expect(!regressed, text + (regressed ? $"，退化超过 {RegressionLimit:P0}" : string.Empty));
                 }
+                // 基线里有、这次却没有的指标（例如这次没生成新区块，区块生成耗时就没量）：静默跳过等于少比一项。
+                foreach (Metric b in old.metrics)
+                {
+                    if (!cur.metrics.Any(x => x.id == b.id))
+                    {
+                        Fail($"基线里的指标这次没有量到：{b.name}（{b.id}）——场景或测量流程变了，确认后用 --update 重写基线");
+                    }
+                }
             }
             if (update)
             {
+                if (_fail > 0)
+                {
+                    Fail($"本次有 {_fail} 项失败：不按 --update 写入新基线");
+                    return;
+                }
                 WriteBaseline(cur, path);
                 Line("  · 已按要求写入新基线（提交进仓库，下一个里程碑出口与它对比）");
             }
@@ -780,7 +836,8 @@ namespace GameLogic.EditorTools
             f.metrics.Add(new Metric { id = id, name = name, unit = unit, value = Math.Round(value, 4), gated = gated, floor = floor });
 
         private static string MachineKey() =>
-            $"{SystemInfo.processorType.Trim()} × {SystemInfo.processorCount} 线程 | Unity {Application.unityVersion} | Burst {(Unity.Burst.BurstCompiler.IsEnabled ? "开" : "关")}";
+            $"{SystemInfo.processorType.Trim()} × {SystemInfo.processorCount} 线程 | Unity {Application.unityVersion} | Burst {(Unity.Burst.BurstCompiler.IsEnabled ? "开" : "关")}" +
+            $" | {(Application.isBatchMode ? "batchmode" : "编辑器菜单")}";
 
         private static string Env(string name)
         {

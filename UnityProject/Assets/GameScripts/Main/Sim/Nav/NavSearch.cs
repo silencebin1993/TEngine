@@ -122,9 +122,14 @@ namespace BinGames.Sim.Nav
         public NativeList<int> AbsPath;
         public NativeList<int2> Cells;
         public NativeList<int2> Tmp;
+        /// <summary>目标一侧封闭判断的泛洪（见 NavSearch.GoalEnclosedInBox；与 A* 的 G / From / Closed 分开，部分路线还要用它们）。</summary>
+        public NativeHashSet<int> FloodSeen;
+        public NativeList<int> FloodQueue;
 
         public static NavScratch Create(int cells, Allocator a) => new NavScratch
         {
+            FloodSeen = new NativeHashSet<int>(256, a),
+            FloodQueue = new NativeList<int>(256, a),
             Dist = new NativeArray<int>(cells, a),
             Parent = new NativeArray<int>(cells, a),
             StartDist = new NativeArray<int>(cells, a),
@@ -153,6 +158,8 @@ namespace BinGames.Sim.Nav
             AbsPath.Dispose();
             Cells.Dispose();
             Tmp.Dispose();
+            FloodSeen.Dispose();
+            FloodQueue.Dispose();
         }
     }
 
@@ -695,11 +702,17 @@ namespace BinGames.Sim.Nav
             return true;
         }
 
-        /// <summary>把逐格路线（首项 = 起点）拉直成路点（不含起点）。贪心：从锚点向前延伸到第一处视线被挡的前一格。</summary>
+        /// <summary>
+        /// 把逐格路线（首项 = 起点）拉直成路点（不含起点）。贪心：从锚点向前延伸到第一处视线被挡的前一格。
+        /// 前后两段同向共线时并成一段：前瞻上限只为限制视线检测的开销，不该在空地上切出多余的共线路点
+        /// （中间点是格心、正好在连线上，两段经过的格子之并 = 整段经过的格子，视线结论不变）。
+        /// </summary>
         public static void Smooth(ref NavGrid g, NativeList<int2> cells, int cls, int lookahead, NativeList<int2> into)
         {
             int last = cells.Length - 1;
             int anchor = 0;
+            int first = into.Length;
+            int2 segStart = cells[0];
             while (anchor < last)
             {
                 int j = anchor + 1;
@@ -707,9 +720,29 @@ namespace BinGames.Sim.Nav
                 {
                     j++;
                 }
-                into.Add(cells[j]);
+                int2 a = cells[anchor];
+                int2 p = cells[j];
+                if (into.Length > first && SameDirection(segStart, a, p))
+                {
+                    into[into.Length - 1] = p;
+                }
+                else
+                {
+                    into.Add(p);
+                    segStart = a;
+                }
                 anchor = j;
             }
+        }
+
+        /// <summary>s→a 与 a→p 共线且同向（a 在 s、p 之间）。</summary>
+        private static bool SameDirection(int2 s, int2 a, int2 p)
+        {
+            long ux = a.x - s.x;
+            long uy = a.y - s.y;
+            long vx = p.x - a.x;
+            long vy = p.y - a.y;
+            return ux * vy - uy * vx == 0 && ux * vx + uy * vy > 0;
         }
 
         public static float PolyLength(int2 start, NativeList<int2> pts, int from, int count)
@@ -742,6 +775,75 @@ namespace BinGames.Sim.Nav
                 }
             }
             return false;
+        }
+
+        /// <summary>
+        /// 目标一侧在搜索框里是否自成封闭区域：从目标能走到的本区块入口出发，沿抽象图（区块内边 + 跨区块相邻入口）泛洪；
+        /// 走完都没碰到框外的可走格 = 目标所在的连通区域整个在框里。前向搜索已把起点一侧在框里的部分搜空却没碰到目标，
+        /// 说明两边不连通，放大搜索框也找不到路（湖心岛、悬崖围死的高台）。超出 <paramref name="budget"/> 或碰到框外可走格 = 下不了结论。
+        /// </summary>
+        private static bool GoalEnclosedInBox(ref NavWork w, ref NavScratch sc, int tSlot, int cls, int2 tc0, int size,
+            int minCx, int maxCx, int minCy, int maxCy, int budget)
+        {
+            sc.FloodSeen.Clear();
+            sc.FloodQueue.Clear();
+            NavChunkGraph tg = w.Graphs[tSlot * NavConst.MaxClasses + cls];
+            int2 cb = tc0 * size;
+            for (int k = tg.NodeStart; k < tg.NodeStart + tg.NodeCount; k++)
+            {
+                int2 lc = w.Nodes[k].Cell - cb;
+                if (sc.GoalDist[lc.y * size + lc.x] < NavConst.Infinity && sc.FloodSeen.Add(k))
+                {
+                    sc.FloodQueue.Add(k);
+                }
+            }
+            for (int head = 0; head < sc.FloodQueue.Length; head++)
+            {
+                if (head >= budget)
+                {
+                    return false;
+                }
+                int id = sc.FloodQueue[head];
+                EnsureEdges(ref w, ref sc, id);
+                NavNode node = w.Nodes[id];
+                for (int e = node.EdgeStart; e < node.EdgeStart + node.EdgeCount; e++)
+                {
+                    int to = w.Edges[e].To;
+                    if (sc.FloodSeen.Add(to))
+                    {
+                        sc.FloodQueue.Add(to);
+                    }
+                }
+                int2 myChunk = ChunkOf(node.Cell, size);
+                for (int k = 0; k < 4; k++)
+                {
+                    int2 c2 = node.Cell + Dir8(k);
+                    int2 ch2 = ChunkOf(c2, size);
+                    if (ch2.x == myChunk.x && ch2.y == myChunk.y)
+                    {
+                        continue;
+                    }
+                    if (ch2.x < minCx || ch2.x > maxCx || ch2.y < minCy || ch2.y > maxCy)
+                    {
+                        if (NavGridOps.Passable(ref w.Grid, c2, cls))
+                        {
+                            return false;
+                        }
+                        continue;
+                    }
+                    int slot2 = EnsureChunkGraph(ref w, ch2.x, ch2.y, cls);
+                    if (slot2 < 0)
+                    {
+                        continue;
+                    }
+                    int m = FindNode(ref w, slot2, cls, c2);
+                    if (m >= 0 && sc.FloodSeen.Add(m))
+                    {
+                        sc.FloodQueue.Add(m);
+                    }
+                }
+            }
+            return true;
         }
 
         /// <summary>
@@ -938,6 +1040,12 @@ namespace BinGames.Sim.Nav
                     }
                 }
                 if (found || limit || !clipped || !canRetry || attempt >= NavConst.MaxMarginRetries)
+                {
+                    break;
+                }
+                // 放大框之前：目标一侧若在框里自成封闭（湖心岛、围死的高台），就是真不可达——不白搜几轮，
+                // 也不会因为展开数跨轮累计而把“被完全阻断”报成“超出寻路范围”。
+                if (goalOk && GoalEnclosedInBox(ref w, ref sc, tSlot, cls, tc0, size, minCx, maxCx, minCy, maxCy, NavConst.EnclosureFloodBudget))
                 {
                     break;
                 }

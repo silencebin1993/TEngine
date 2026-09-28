@@ -40,6 +40,9 @@ namespace BinGames.Sim.Nav
         /// <summary>抽象搜索框挡掉了邻居却没搜到目标时，放大边距重搜的次数（边距 m → 2m + 4）。</summary>
         public const int MaxMarginRetries = 2;
 
+        /// <summary>放大边距之前，从目标一侧在框里泛洪判断“目标区域是否自成封闭”的节点上限（湖心岛、围死的高台一般很小；超了就照常重搜）。</summary>
+        public const int EnclosureFloodBudget = 4096;
+
         public const int NodeStart = -2;
         public const int NodeGoal = -3;
         public const int Infinity = int.MaxValue / 4;

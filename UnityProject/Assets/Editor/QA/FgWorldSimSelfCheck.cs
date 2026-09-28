@@ -1198,20 +1198,31 @@ namespace GameLogic.EditorTools
             PerfLines.Add($"单个模拟步（家园 + 远征 + 1 支突袭）平均 {perStep:F3} ms、最大 {WorldSimulation.MaxStepMs:F2} ms；3x 下每渲染帧（60 fps）约 3 步 ≈ {perStep * 3:F2} ms（Editor 托管代码）");
 
             // 热更层每帧开销与行进中的队伍数量无关（队伍是聚合体，远离镜头的不生成表现对象）：1 支 vs 200 支，镜头在远征地点。
+            // FG0-ARCH-06 起队伍按地形寻路：新派出的队伍先拿路线（一次性的寻路开销归 [层级寻路] 的性能项量），拿到后再量“行进中”的每帧开销。
+            // 出发点在家园约 1,000 格外（规划层领地的量级；远超镜头窗口）。
             WorldView.FocusOn("site:" + FracturedCityLayout.RegionId);
             FrameOnce(0.05f);
             double one = MeasureFrames(200);
             for (int i = 0; i < 199; i++)
             {
-                WorldTransitSystem.Dispatch(s, TransitGroupKind.Raid, "test", 1, 5000 + i, 5000, 0, 0);
+                WorldTransitSystem.Dispatch(s, TransitGroupKind.Raid, "test", 1, 700 + i, 700, 0, 0);
             }
+            var warmWatch = Stopwatch.StartNew();
+            int warmFrames = 0;
+            for (; warmFrames < 3600 && WorldTransitSystem.Groups(s).Any(g => g != null && g.State == TransitGroupState.Marching && g.RouteState != WorldTransitSystem.RouteFollowing); warmFrames++)
+            {
+                FrameOnce(1f / 60f);
+            }
+            double warmMs = warmWatch.Elapsed.TotalMilliseconds;
+            int marching = WorldTransitSystem.Groups(s).Count(g => g != null && g.State == TransitGroupState.Marching);
             double many = MeasureFrames(200);
             WorldView.FocusOn("home");
             FrameOnce(0.05f);
             int visibleMarkers = WorldPlanetView.VisibleMarkerCount;
-            PerfLines.Add($"世界每帧（镜头在远征地点，1x）：1 支队伍 {one:F3} ms / 帧，200 支队伍 {many:F3} ms / 帧（含 200 支队伍的逐步推进）；镜头回家园时只为窗口附近的队伍生成标记（{visibleMarkers} 个）");
-            Expect(visibleMarkers <= 2 && many < one + 2.0,
-                $"200 支远处的队伍：镜头附近才有表现对象（可见标记 {visibleMarkers}）；每帧开销增加 {many - one:F3} ms（队伍逐步推进是 O(队伍数) 的纯数据运算，逐单位模拟在 FG0-ARCH-03 内核）");
+            PerfLines.Add($"世界每帧（镜头在远征地点，1x）：1 支队伍 {one:F3} ms / 帧，200 支队伍 {many:F3} ms / 帧（{marching} 支沿路线行进中的逐步推进）；" +
+                          $"199 支新队伍拿路线用了 {warmFrames} 帧（墙钟 {warmMs:F0} ms，一次性）；镜头回家园时只为窗口附近的队伍生成标记（{visibleMarkers} 个）");
+            Expect(visibleMarkers <= 2 && many < one + 2.0 && marching >= 190,
+                $"200 支远处的队伍：镜头附近才有表现对象（可见标记 {visibleMarkers}）；沿路线行进中每帧开销增加 {many - one:F3} ms（{marching} 支；队伍逐步推进是 O(队伍数) 的纯数据运算，逐单位模拟在 FG0-ARCH-03 内核）");
             // 正向：镜头飞到远处那一簇队伍旁边，标记确实生成（避免“标记逻辑整个坏掉、数量 0 也通过”）。
             TransitGroupRecord far = WorldTransitSystem.Groups(s).Last();
             WorldView.FocusOn(far.GroupId);

@@ -300,7 +300,7 @@ namespace GameLogic.Campaign.Regions
             // 全部在家园战斗内核的一步里（Burst）；到达回调、对机器 / 训练靶的伤害结算作为事件交回，每步有上限。
             _combat?.Step(dt, GameClock.GameSeconds);
             HomeValleyWorkOrders.Tick(state, dt, GetMachinePosition, ReleaseMachineMovement,
-                IsMachineDirectControlled, BeginAutoAssignedMovement, GetRemainingRoute, ResumeHaulDelivery);
+                IsMachineTakenByPlayer, BeginAutoAssignedMovement, GetRemainingRoute, ResumeHaulDelivery);
             HomeValleyFactory.Tick(state, dt); // ER4-FAC-01：装配站生产队列。
             PrimitiveCraftStation.Tick(state, dt); // ER4-PRIM-04：合成台升级/拆解队列。
             HomeValleyAnalysis.Tick(state, dt); // ER6-ANA-01：解析台队列。
@@ -432,6 +432,49 @@ namespace GameLogic.Campaign.Regions
         public bool IsMachineDirectControlled(int logicId)
         {
             return _possessed != null && _possessed.LogicId == logicId;
+        }
+
+        /// <summary>
+        /// 工单分配引擎的“不要动它”判定（FGR-BASE-020：只执行玩家显式设定的命令和规则）：直控中，或正在执行玩家下达的命令
+        /// （编队的移动 / 攻击 / 守卫 / 撤退，右键地面的直接移动）。自己在办工单的机器由分配引擎另行排除；
+        /// 命令做完（到达、结束）后内核里没有命令，才重新算空闲机器、按工作优先级接单。
+        /// 不这样做的话，编队行军途中会有机器被自动派去施工，玩家的命令被静默覆盖（FGJ-M0 旅程实测）。
+        /// </summary>
+        private bool IsMachineTakenByPlayer(int logicId)
+        {
+            if (IsMachineDirectControlled(logicId))
+            {
+                return true;
+            }
+            if (_combat == null || !_combat.TryGetMachineMarker(logicId, out HomeValleyMachineMarker m) || m.Site == null
+                || !m.Site.TryGetCommand(m.UnitId, out BinGames.Sim.Combat.CombatCommand cmd) || cmd.Kind == BinGames.Sim.Combat.CombatCommandKind.None)
+            {
+                return false;
+            }
+            // 带到达回调的工作赶路是工单系统自己下的（不是玩家的命令）：工单还在办时分配引擎另行排除；工单已被撤销（例如在建造模式里撤掉规划）
+            // 而机器还在往旧工地走时，要能立刻改派，不能空跑到底。右键地面的直接移动不带回调（Target = 0），算玩家的命令。
+            return !(cmd.Kind == BinGames.Sim.Combat.CombatCommandKind.WorkMove && cmd.Target == CombatSite.WorkMoveArrivalTag);
+        }
+
+        /// <summary>
+        /// 玩家把机器调去做别的（编队命令、右键地面移动）之前，处理它手上的工单：
+        /// 搬运单 → 按取消处理（货舱里的货放回地面、资源事务退回）：搬运的货已从地面拿起、只挂在这台机器身上，交还分配池会让货没人负责；
+        /// 其余工单 → 交还分配池（回 Ready、解除绑定；建造规划、已扣资源保留），不撤掉玩家的规划。
+        /// </summary>
+        private static void YieldWorkOrderForPlayerCommand(CampaignState state, HomeValleyMachineMarker marker)
+        {
+            WorkOrderRecord active = HomeValleyWorkOrders.FindActiveOrderForMachine(state, marker.LogicId);
+            if (active == null)
+            {
+                return;
+            }
+            if (active.Kind == WorkOrderKind.Haul)
+            {
+                Vector3 pos = marker.Position3;
+                HomeValleyWorkOrders.CancelOrder(state, active.WorkOrderId, new Vector2(pos.x, pos.z));
+                return;
+            }
+            HomeValleyWorkOrders.OnMachinePossessed(state, marker.LogicId);
         }
 
         /// <summary>ER3-WRK-02 分配引擎选中一台空闲机器后的回调：与玩家点选下令
@@ -1776,9 +1819,12 @@ namespace GameLogic.Campaign.Regions
             SquadCommands.Bind(_squadCtx);
         }
 
-        /// <summary>ER5-CMD-01 下令前置："换目标"式的既有纪律——下一条军事命令视同玩家显式取消
-        /// 当前在办工作单（同右键取消/CommandWork 换目标同一条规矩），不能一边被战略命令牵着走、
-        /// 一边工作单状态机还在推进同一台机器。</summary>
+        /// <summary>
+        /// ER5-CMD-01 下令前置：不能一边被战略命令牵着走、一边工作单状态机还在推进同一台机器。
+        /// FG0-ARCH-06 本机验收改为“交还分配池”而不是“取消工单”（与 WASD 接管同一条规则：订单回 Ready、解除绑定、保留已搬货物与已扣资源）：
+        /// FG 起工单多半是分配引擎按工作优先级自动派的，建造单还带着玩家在建造模式里规划的建筑——取消会把规划一并撤掉，
+        /// 玩家只是给编队下了一道撤退 / 移动命令，建筑规划却没了（FGJ-M0 旅程实测）。工单留在池里，别的空闲机器或这台机器命令结束后再接。
+        /// </summary>
         private void CancelActiveWorkOrderIfAny(int logicId)
         {
             CampaignState state = CampaignSession.Current;
@@ -1787,13 +1833,7 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
-            WorkOrderRecord active = HomeValleyWorkOrders.FindActiveOrderForMachine(state, logicId);
-            if (active == null)
-            {
-                return;
-            }
-            Vector3 pos = marker.Position3;
-            HomeValleyWorkOrders.CancelOrder(state, active.WorkOrderId, new Vector2(pos.x, pos.z));
+            YieldWorkOrderForPlayerCommand(state, marker);
         }
 
         /// <summary>归还谷地目前只有唯一一个低威胁残骸靶可当 Attack 目标——武装攻击点击/命中判定
@@ -2003,6 +2043,9 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
+            // 右键地面 = 玩家把这台机器调去别处：先让出它手上的工单（规则见 YieldWorkOrderForPlayerCommand）。不这样做的话工单仍挂在它名下——
+            // 直接移动若到不了，失败会被记到旧工单上、发“工单无法到达”。
+            YieldWorkOrderForPlayerCommand(state, moving);
             moving.CommandMoveTo(destination);
         }
 

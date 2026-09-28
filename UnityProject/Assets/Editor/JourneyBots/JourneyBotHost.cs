@@ -90,17 +90,38 @@ namespace GameLogic.EditorTools.JourneyBots
         {
             EditorApplication.update -= Tick;
             EditorApplication.update += Tick;
-            Application.logMessageReceived -= OnLog;
-            Application.logMessageReceived += OnLog;
+            Application.logMessageReceivedThreaded -= OnLogThreaded;
+            Application.logMessageReceivedThreaded += OnLogThreaded;
         }
 
         private static void Unhook()
         {
             EditorApplication.update -= Tick;
-            Application.logMessageReceived -= OnLog;
+            Application.logMessageReceivedThreaded -= OnLogThreaded;
         }
 
-        private static void OnLog(string condition, string stackTrace, LogType type) => _runner?.OnLog(condition, stackTrace, type);
+        /// <summary>
+        /// 任何线程的报错都算（作业、线程池里的异常只走 Threaded 回调）。回调可能在工作线程上：先进线程安全的队列，
+        /// 主线程每帧取出再交给运行器（运行器读写 SessionState / 报告文件，只能在主线程）。
+        /// </summary>
+        private static readonly System.Collections.Concurrent.ConcurrentQueue<(string condition, string stack, LogType type)> PendingLogs =
+            new System.Collections.Concurrent.ConcurrentQueue<(string, string, LogType)>();
+
+        private static void OnLogThreaded(string condition, string stackTrace, LogType type)
+        {
+            if (type == LogType.Error || type == LogType.Exception || type == LogType.Assert)
+            {
+                PendingLogs.Enqueue((condition, stackTrace, type));
+            }
+        }
+
+        private static void DrainLogs()
+        {
+            while (PendingLogs.TryDequeue(out (string condition, string stack, LogType type) e))
+            {
+                _runner?.OnLog(e.condition, e.stack, e.type);
+            }
+        }
 
         private static void Tick()
         {
@@ -108,6 +129,11 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 Unhook();
                 return;
+            }
+            DrainLogs();
+            if (EditorApplication.isPlaying)
+            {
+                JourneyInput.KeepScripted();
             }
             if (_runner.Tick())
             {

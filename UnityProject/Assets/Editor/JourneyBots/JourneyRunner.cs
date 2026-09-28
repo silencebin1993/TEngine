@@ -71,6 +71,8 @@ namespace GameLogic.EditorTools.JourneyBots
     {
         string GetString(string key, string fallback);
         void SetString(string key, string value);
+        /// <summary>删掉一个键（之后 GetString 返回 fallback，而不是空串）。</summary>
+        void Erase(string key);
     }
 
     public interface IJourneyClock
@@ -90,6 +92,7 @@ namespace GameLogic.EditorTools.JourneyBots
 
         public string GetString(string key, string fallback) => SessionState.GetString(_prefix + key, fallback);
         public void SetString(string key, string value) => SessionState.SetString(_prefix + key, value ?? string.Empty);
+        public void Erase(string key) => SessionState.EraseString(_prefix + key);
     }
 
     public sealed class MemoryJourneyStore : IJourneyStore
@@ -98,6 +101,7 @@ namespace GameLogic.EditorTools.JourneyBots
 
         public string GetString(string key, string fallback) => Values.TryGetValue(key, out string v) ? v : fallback;
         public void SetString(string key, string value) => Values[key] = value ?? string.Empty;
+        public void Erase(string key) => Values.Remove(key);
     }
 
     public sealed class EditorJourneyClock : IJourneyClock
@@ -122,7 +126,12 @@ namespace GameLogic.EditorTools.JourneyBots
         public int Seed => _runner.Journey.Seed;
 
         public string Get(string key, string fallback = null) => _runner.Store.GetString("v." + key, fallback);
-        public void Set(string key, string value) => _runner.Store.SetString("v." + key, value);
+
+        public void Set(string key, string value)
+        {
+            _runner.Store.SetString("v." + key, value);
+            _runner.RememberVar(key);
+        }
         public int GetInt(string key, int fallback = 0) => int.TryParse(Get(key), NumberStyles.Integer, CultureInfo.InvariantCulture, out int v) ? v : fallback;
         public void SetInt(string key, int value) => Set(key, value.ToString(CultureInfo.InvariantCulture));
         public long GetLong(string key, long fallback = 0) => long.TryParse(Get(key), NumberStyles.Integer, CultureInfo.InvariantCulture, out long v) ? v : fallback;
@@ -182,13 +191,35 @@ namespace GameLogic.EditorTools.JourneyBots
         public double StepElapsed => _clock.Now - GetDouble("stepStart", _clock.Now);
         public double TotalElapsed => _clock.Now - GetDouble("start", _clock.Now);
 
-        /// <summary>开始（清掉上一次的状态）。</summary>
+        /// <summary>
+        /// 记下步骤写过的变量名（“v.”键）：SessionState 不能列举键，开新一趟时靠这份名单把上一趟的变量全部删掉——
+        /// 否则同一编辑器会话里第二次从菜单跑，“已点过存档槽”“到达记录”之类的残留会让步骤跳过或误判。
+        /// </summary>
+        internal void RememberVar(string key)
+        {
+            string keys = Store.GetString("vkeys", string.Empty);
+            if (("\n" + keys + "\n").Contains("\n" + key + "\n"))
+            {
+                return;
+            }
+            Store.SetString("vkeys", keys.Length == 0 ? key : keys + "\n" + key);
+        }
+
+        /// <summary>开始（清掉上一次的状态，包括上一趟步骤写下的全部变量）。</summary>
         public void Start()
         {
             foreach (string k in new[] { "result", "failStep", "failReason", "durations", "retries", "entered" })
             {
                 Store.SetString(k, string.Empty);
             }
+            foreach (string v in Store.GetString("vkeys", string.Empty).Split('\n'))
+            {
+                if (v.Length > 0)
+                {
+                    Store.Erase("v." + v);
+                }
+            }
+            Store.Erase("vkeys");
             SetInt("step", 0);
             SetInt("attempt", 0);
             SetInt("errors", 0);

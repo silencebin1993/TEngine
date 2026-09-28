@@ -477,6 +477,9 @@ namespace BinGames.Sim.Nav
             }
             _adopting = false;
             _batchActive = false;
+            // 标志只描述“在飞的这一批”：采纳完就清掉。否则批次结束后它还留着，写进存档与 PendingHash，
+            // 读档（只在有批次在飞时恢复它）却是 false——存读档往返不一致。
+            _changedInFlight = false;
             _results.Clear();
             _points.Clear();
             _batchCount = 0;

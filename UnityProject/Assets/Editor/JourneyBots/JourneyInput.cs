@@ -46,6 +46,18 @@ namespace GameLogic.EditorTools.JourneyBots
         /// <summary>交还真键盘 / 鼠标。</summary>
         public static void Release() => InputRouter.DebugSetReader(null);
 
+        /// <summary>
+        /// 旅程进行中，输入后端始终是旅程自己的（没有按键时光标在窗口外）。载入 / 离开世界会 InputRouter.Reset() 把后端复位成真键盘鼠标：
+        /// batchmode 下真鼠标停在 (0,0) = 窗口左下角，战略镜头会被边缘推屏一路推到可平移范围的左下角，核心就不在画面里了。宿主每帧调用。
+        /// </summary>
+        public static void KeepScripted()
+        {
+            if (!(InputRouter.Reader is ScriptReader))
+            {
+                InputRouter.DebugSetReader(new ScriptReader());
+            }
+        }
+
         /// <summary>光标停在地面一点（不按键）。</summary>
         public static void Hover(Vector2 ground)
         {
@@ -56,6 +68,12 @@ namespace GameLogic.EditorTools.JourneyBots
         /// <summary>按一次键：只在下一帧报告按下。光标默认在窗口外；建造模式里旋转要让光标留在虚影上，传 <paramref name="mouse"/>。</summary>
         public static void PressKey(KeyCode key, Vector3? mouse = null)
         {
+            if (key == KeyCode.None)
+            {
+                // 动作没有绑定按键：按“无”会让所有没绑定的动作在同一帧一起触发。当作旅程失败报出来（宿主会把 Error 计入报错）。
+                Debug.LogError("[Journey] 要按的动作没有绑定按键（KeyCode.None）");
+                return;
+            }
             Vector3 m = mouse ?? OffScreen;
             InputRouter.DebugSetReader(new ScriptReader { Key = key, KeyFrame = Time.frameCount + 1, MouseA = m, MouseB = m });
         }
@@ -98,8 +116,9 @@ namespace GameLogic.EditorTools.JourneyBots
             GameObject host = GameObject.Find(hostName);
             var doc = host != null ? host.GetComponent<UnityEngine.UIElements.UIDocument>() : null;
             UnityEngine.UIElements.Button b = doc?.rootVisualElement?.Q<UnityEngine.UIElements.Button>(buttonName);
-            if (b == null || b.clickable == null)
+            if (b == null || b.clickable == null || !IsClickable(b))
             {
+                // 按钮被禁用、隐藏或不在面板上：玩家点不了，旅程也不能“点”。
                 return false;
             }
             MethodInfo invoke = typeof(UnityEngine.UIElements.Clickable).GetMethod("Invoke",
@@ -117,6 +136,23 @@ namespace GameLogic.EditorTools.JourneyBots
             return true;
         }
 
+        /// <summary>玩家此刻能不能点到它：在面板上、启用（含祖先）、自己和祖先都没有 display:none / visibility:hidden。遮挡不判（batchmode 无可靠拾取）。</summary>
+        private static bool IsClickable(VisualElement e)
+        {
+            if (e.panel == null || !e.enabledInHierarchy || !e.visible)
+            {
+                return false;
+            }
+            for (VisualElement p = e; p != null; p = p.parent)
+            {
+                if (p.resolvedStyle.display == DisplayStyle.None || p.resolvedStyle.visibility == Visibility.Hidden)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
         private sealed class ScriptReader : IInputReader
         {
             public KeyCode Key = KeyCode.None;
@@ -129,7 +165,7 @@ namespace GameLogic.EditorTools.JourneyBots
             public int MouseButton;
 
             public bool GetKey(KeyCode key) => false;
-            public bool GetKeyDown(KeyCode key) => key == Key && Time.frameCount == KeyFrame;
+            public bool GetKeyDown(KeyCode key) => key != KeyCode.None && key == Key && Time.frameCount == KeyFrame;
             public bool GetMouseButtonDown(int button) => button == MouseButton && Time.frameCount == DownFrame;
             public bool GetMouseButtonUp(int button) => button == MouseButton && Time.frameCount == UpFrame;
             public Vector3 MousePosition => SwitchFrame >= 0 && Time.frameCount >= SwitchFrame ? MouseB : MouseA;

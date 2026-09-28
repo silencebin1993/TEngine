@@ -944,7 +944,7 @@ namespace GameLogic.Campaign.Regions
             {
                 // 没有工单的直接移动命令（右键地面）：命令已结束，也要告诉玩家为什么没动（<paramref name="at"/> = 目标点）。
                 string text = GameLogic.Localization.GameText.Format("nav.squad.unreachable", logicId.ToString(),
-                    Nav.NavService.FailText(reason, new Grid.GridCell(Mathf.RoundToInt(at.x), Mathf.RoundToInt(at.y))));
+                    Nav.NavService.FailText(reason, Nav.NavService.CellOf(at.x, at.y)));
                 Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Denied, text);
                 GameLogic.Notifications.NotificationCenter.Post("unreachable", text, new Vector3(at.x, 0f, at.y));
                 return;
@@ -971,7 +971,7 @@ namespace GameLogic.Campaign.Regions
             if (!order.UnreachableNotified)
             {
                 order.UnreachableNotified = true;
-                string reasonText = Nav.NavService.FailText(reason, new Grid.GridCell(Mathf.RoundToInt(target.x), Mathf.RoundToInt(target.y)));
+                string reasonText = Nav.NavService.FailText(reason, Nav.NavService.CellOf(target.x, target.y));
                 string detail = GameLogic.Localization.GameText.Format("nav.work.unreachable", Feedback.FeedbackCues.MachineLabel(logicId),
                     DescribeTarget(state, order), reasonText, GameLogic.Localization.GameText.Get("nav.fail.fix"));
                 GameLogic.Notifications.NotificationCenter.Post("unreachable", detail, new Vector3(target.x, 0f, target.y));

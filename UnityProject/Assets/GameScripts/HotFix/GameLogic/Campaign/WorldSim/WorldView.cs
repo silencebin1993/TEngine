@@ -57,6 +57,8 @@ namespace GameLogic.Campaign.WorldSim
         private static Camera _camera;
         /// <summary>最近一次飞去的星球表面位置：镜头范围总包含它（通知定位 / 飞到远处的己方机器时不被“已探索区域”钳回来）。</summary>
         private static Vector2? _planetFlyPin;
+        /// <summary>镜头焦点已经到过飞去的位置（飞之前的边界计算不算“回到已探索范围”，否则一飞就被清掉）。</summary>
+        private static bool _planetFlyPinReached;
 
         public static CameraDirector Director => DirectorInstance;
         public static Camera Camera => _camera;
@@ -165,6 +167,7 @@ namespace GameLogic.Campaign.WorldSim
             {
                 // FGR-GEN-080“点击任意位置或通知，镜头飞过去”：目标可能在已探索区域之外（远处的己方机器、事件），先把它放进镜头范围再飞。
                 _planetFlyPin = position;
+                _planetFlyPinReached = false;
                 if (site.CameraProfile != null)
                 {
                     ApplyBounds(site.CameraProfile);
@@ -317,6 +320,7 @@ namespace GameLogic.Campaign.WorldSim
                 ApplyBounds(observed.CameraProfile);
             }
             DirectorInstance.Tick(GameClock.Paused);
+            UpdatePlanetFlyPin(state, observed);
             GameClock.SetDirectLocked(DirectorInstance.IsBound && DirectorInstance.Mode == ViewMode.Direct);
         }
 
@@ -374,7 +378,9 @@ namespace GameLogic.Campaign.WorldSim
 
         /// <summary>星球表面的镜头可平移范围：已探索区域（外接矩形）+ camera.explored_margin_cells，并包含行进中的队伍、归还核心与最近一次飞去的位置。
         /// 不启用浮动原点，所以同时钳在 camera.precision_safe_cells 以内（DEBT-FG0ARCH01-02）。</summary>
-        public static (Vector2 Min, Vector2 Max) PlanetBounds(CampaignState state)
+        public static (Vector2 Min, Vector2 Max) PlanetBounds(CampaignState state) => PlanetBoundsCore(state, includePin: true);
+
+        private static (Vector2 Min, Vector2 Max) PlanetBoundsCore(CampaignState state, bool includePin)
         {
             GridCell core = HomeGridService.CorePivot(state);
             float minX = core.X, minY = core.Y, maxX = core.X, maxY = core.Y;
@@ -401,7 +407,7 @@ namespace GameLogic.Campaign.WorldSim
                 maxX = Mathf.Max(maxX, (float)g.PosX);
                 maxY = Mathf.Max(maxY, (float)g.PosY);
             }
-            if (_planetFlyPin.HasValue)
+            if (includePin && _planetFlyPin.HasValue)
             {
                 Vector2 pin = _planetFlyPin.Value;
                 minX = Mathf.Min(minX, pin.x);
@@ -415,6 +421,31 @@ namespace GameLogic.Campaign.WorldSim
                 new Vector2(Mathf.Min(safe, maxX + margin), Mathf.Min(safe, maxY + margin)));
         }
 
+        /// <summary>
+        /// 飞跃落点的去留（每帧镜头推进之后判断；<see cref="PlanetBounds"/> 只做查询、不改状态）：焦点到过落点之后，
+        /// 一旦回到“已探索范围 + 边距”（不算落点）就清掉——否则可平移范围一直是“核心到那一点”的大矩形，能一路平移到未探索区域上空。
+        /// 换地点时 Bind 会把焦点临时清零，所以不能在边界计算里顺手判断（会把刚恢复的远处焦点钳回来）。
+        /// </summary>
+        private static void UpdatePlanetFlyPin(CampaignState state, IWorldSite observed)
+        {
+            if (!_planetFlyPin.HasValue || observed == null || observed.SurfaceKind != WorldSurfaceKind.Planet || !DirectorInstance.IsBound)
+            {
+                return;
+            }
+            Vector2 pin = _planetFlyPin.Value;
+            float2 focus = DirectorInstance.StrategyFocus;
+            if (!_planetFlyPinReached)
+            {
+                _planetFlyPinReached = math.distance(focus, new float2(pin.x, pin.y)) < 1f;
+                return;
+            }
+            (Vector2 min, Vector2 max) = PlanetBoundsCore(state, includePin: false);
+            if (focus.x >= min.x && focus.x <= max.x && focus.y >= min.y && focus.y <= max.y)
+            {
+                _planetFlyPin = null;
+            }
+        }
+
         /// <summary>离开世界（回主菜单 / 自检之间）：解绑镜头并复位输入，清空地点记忆，销毁星球表现层。</summary>
         public static void Reset()
         {
@@ -426,6 +457,7 @@ namespace GameLogic.Campaign.WorldSim
             _observedId = null;
             _lastFocusTargetId = null;
             _planetFlyPin = null;
+            _planetFlyPinReached = false;
             WorldPlanetView.Shutdown();
             GameClock.SetDirectLocked(false);
         }
