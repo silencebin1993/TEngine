@@ -166,6 +166,10 @@ namespace GameLogic.EditorTools
                 // 核心固件放不进机器电路（蓝图固件槽 / 3×3 电路格 / 保存校验）、远征锁、预设、真实文件存读档与篡改修复、暂停倍速种子无关、
                 // HUD 与面板（点选 / 拖放 / 锁定横幅 / 预设按钮）与布局探针、P 键开关、性能与连按。
                 _fail += FgSignalCoreSelfCheck.Run(Report);
+                // FG1-SIG-02：接入口与双态编译预览——标记规则与负向矩阵（0 / 8 号格、第二个、有芯片的格）、撤销重做与 Ctrl+Z / Ctrl+Y、
+                // AI 按空槽 / 你接入时只作用于经过接入口的路径 / 重炮 + 过载出熔穿过载、配额与路径截断（FGT-SIG-005）、
+                // 预览与实际结算逐字段一致（FGT-SIG-002）、真实文件存读档 / 旧档 / 篡改、暂停倍速种子无关、真 UXML 界面与布局探针、性能。
+                _fail += FgUplinkPreviewSelfCheck.Run(Report);
             }
             catch (Exception e)
             {

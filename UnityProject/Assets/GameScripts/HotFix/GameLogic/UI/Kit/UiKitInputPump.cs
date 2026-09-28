@@ -58,6 +58,10 @@ namespace GameLogic.UI.Kit
         /// <summary>只在游戏世界里生效的键：通知中心、速度、尚未开放动作的提示。拆出来给自检直接驱动。</summary>
         public static void ProcessWorldKeys()
         {
+            // FG1-SIG-02：撤销 / 重做交给当前打开的编辑器（电路编辑器）；必须在下面“尚未开放动作”提示之前消费，
+            // 否则 Ctrl+Z 会被当成建造撤销（FG3-LOG-07，尚未开放）弹提示。没有编辑器打开时不消费，提示照旧。
+            UiUndoRouter.Process();
+
             if (InputRouter.ConsumeGlobalAction(GameActionId.ToggleNotificationCenter, allowDuringModal: true))
             {
                 NotificationHudUIToolkit.ToggleCenter();

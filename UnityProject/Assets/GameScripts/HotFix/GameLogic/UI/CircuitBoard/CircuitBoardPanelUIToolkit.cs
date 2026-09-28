@@ -7,6 +7,8 @@ using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Primitive;
 using GameLogic.Campaign.Regions;
+using GameLogic.Core;
+using GameLogic.Localization;
 using GameLogic.MetabolicSlice.Grid;
 using GameLogic.Stage;
 using GameLogic.UI.Common;
@@ -118,6 +120,17 @@ namespace GameLogic.UI.CircuitBoard
         private Button _closeButton;
         private Label _saveResultLabel;
         private VisualElement _pendingRow;
+
+        /// <summary>FG1-SIG-02：接入口标记与双态编译预览（FGR-SIG-020、022；FGU-18）。</summary>
+        private readonly CircuitUplinkView _uplinkView = new CircuitUplinkView();
+
+        /// <summary>自检 / 冒烟读：界面上正在显示的双态预览与接入口标记。</summary>
+        public CircuitUplinkView UplinkView => _uplinkView;
+
+        public BlueprintCircuitBoard Board => _board;
+
+        private Func<bool> _undoFromShortcut;
+        private Func<bool> _redoFromShortcut;
 
         private readonly List<TemplateContainer> _issueRowPool = new List<TemplateContainer>(MaxIssueRows);
         private readonly List<TemplateContainer> _pathRowPool = new List<TemplateContainer>(MaxPathRows);
@@ -249,6 +262,12 @@ namespace GameLogic.UI.CircuitBoard
             _closeButton = _root.Q<Button>("CloseButton");
             _saveResultLabel = _root.Q<Label>("SaveResultLabel");
 
+            List<string> missingUplink = _uplinkView.Bind(_root);
+            if (missingUplink.Count > 0)
+            {
+                Log.Error($"[CircuitBoardPanelUIToolkit] 接入口 / 双态预览元素缺失：{string.Join(",", missingUplink)}");
+            }
+
             for (int i = 0; i < MaxIssueRows; i++)
             {
                 TemplateContainer row = _issueRowTemplate.CloneTree();
@@ -365,18 +384,63 @@ namespace GameLogic.UI.CircuitBoard
             _firmware1Dropdown.RegisterValueChangedCallback(_ => RunOp(() =>
                 _board.TrySetFirmware(CampaignSession.Current, 1, IdAt(_firmware1IdsByIndex, _firmware1Dropdown.index))));
 
-            _undoButton.clicked += () =>
+            _undoButton.clicked += () => DoUndo();
+            _redoButton.clicked += () => DoRedo();
+            // FG1-SIG-02：撤销 / 重做快捷键（Ctrl+Z / Ctrl+Y，可重绑）与按钮同一个入口。
+            _undoFromShortcut = DoUndo;
+            _redoFromShortcut = DoRedo;
+            if (_uplinkView.ToggleButton != null)
             {
-                _board?.Undo();
-                RefreshAll();
-            };
-            _redoButton.clicked += () =>
-            {
-                _board?.Redo();
-                RefreshAll();
-            };
+                _uplinkView.ToggleButton.clicked += OnUplinkToggleClicked;
+            }
 
             _closeButton.clicked += () => SetPanelOpen(false);
+        }
+
+        private bool DoUndo()
+        {
+            bool done = _board != null && _board.Undo();
+            RefreshAll();
+            return done;
+        }
+
+        private bool DoRedo()
+        {
+            bool done = _board != null && _board.Redo();
+            RefreshAll();
+            return done;
+        }
+
+        /// <summary>FG1-SIG-02（FGR-SIG-020）：检查器里的“标为接入口 / 取消接入口”。选中的格正是接入口时取消，否则标记；
+        /// 失败给原因文字 + 拒绝音 + 字幕（B06 / B07），成功只刷新（可逆操作不弹确认框，B04；可撤销，B03）。</summary>
+        private void OnUplinkToggleClicked()
+        {
+            if (_board == null)
+            {
+                return;
+            }
+            CircuitOpResult r;
+            bool clearing = _selectedSlot.HasValue && _board.HasUplink && _board.UplinkSlot == _selectedSlot.Value;
+            if (!_selectedSlot.HasValue)
+            {
+                r = CircuitOpResult.Fail("uplink_no_slot", GameText.Get("circuit.uplink.reason.no_slot"));
+            }
+            else
+            {
+                r = clearing ? _board.TryClearUplink() : _board.TrySetUplink(_selectedSlot.Value);
+            }
+            if (r.Success)
+            {
+                _saveResultLabel.text = clearing
+                    ? GameText.Get("circuit.uplink.cleared")
+                    : GameText.Format("circuit.uplink.marked", _selectedSlot.Value);
+            }
+            else
+            {
+                _saveResultLabel.text = r.Message;
+                Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.Denied, r.Message);
+            }
+            RefreshAll();
         }
 
         private void OnBlueprintRowClicked(int rowIndex)
@@ -723,6 +787,7 @@ namespace GameLogic.UI.CircuitBoard
             {
                 _panel.EnableInClassList("cb-hidden", true);
                 UiEscapeStack.Sync(this, false, null);
+                UiUndoRouter.Release(this);
                 return;
             }
 
@@ -731,7 +796,13 @@ namespace GameLogic.UI.CircuitBoard
             UiEscapeStack.Sync(this, open, _escClose ??= () => SetPanelOpen(false));
             if (!open)
             {
+                UiUndoRouter.Release(this);
                 return;
+            }
+            // FG1-SIG-02：面板开着时撤销 / 重做快捷键归电路编辑器（委托已缓存，不每帧分配）。
+            if (_undoFromShortcut != null && !ReferenceEquals(UiUndoRouter.Owner, this))
+            {
+                UiUndoRouter.Claim(this, _undoFromShortcut, _redoFromShortcut);
             }
 
             // 面板开关状态是公开字段，不保证只有本类自己的 EntryToggleButton 会翻它——默认蓝图的懒加载
@@ -778,6 +849,12 @@ namespace GameLogic.UI.CircuitBoard
             RefreshPreview();
             RefreshCostSummary();
             RefreshLastCombat();
+            // FG1-SIG-02：双态编译预览按当前信号核重算（同一套纯计算，预览与实际一致）。
+            _uplinkView.Render(_board, CampaignSession.Current);
+            if (_board != null && _board.HasUplink)
+            {
+                GuidanceHooks.Raise(GuidanceHooks.CircuitUplinkFirstSeen);
+            }
         }
 
         /// <summary>ER4-PRIM-05：显示最近一次真实命中/未命中事件——与 <see cref="RefreshPreview"/>
@@ -964,7 +1041,10 @@ namespace GameLogic.UI.CircuitBoard
                 string head = i == BlueprintCircuitLayout.SourceSlot ? $"{i} · 源"
                     : i == BlueprintCircuitLayout.SinkSlot ? $"{i} · 汇"
                     : $"{i} · {BlueprintCircuitLayout.SlotTypeDisplayName(BlueprintCircuitLayout.SlotTypeAt(i))}";
-                string body = string.IsNullOrEmpty(content) ? "（空）" : BlueprintCircuitChipCatalog.DisplayNameFor(content);
+                bool uplinkCell = _board != null && _board.HasUplink && _board.UplinkSlot == i;
+                // FG1-SIG-02：接入口格的正文让给左下角的“接入口”标注（图标 + 文字另由 CircuitUplinkView 显示）。
+                string body = uplinkCell ? string.Empty
+                    : string.IsNullOrEmpty(content) ? "（空）" : BlueprintCircuitChipCatalog.DisplayNameFor(content);
                 btn.text = $"{head}\n{body}";
                 ContentIcons.Apply(_slotIcons[i], content); // ER8-CONTENT-01：槽内内容图标（外形区分类别）。
                 btn.EnableInClassList("cb-slot-filled", !string.IsNullOrEmpty(content));
@@ -988,6 +1068,7 @@ namespace GameLogic.UI.CircuitBoard
                 button.tooltip = $"{a} 号与 {b} 号之间的导线";
             }
 
+            _uplinkView.ApplySlots(_board);
             RefreshSlotInspector();
         }
 
@@ -1004,6 +1085,7 @@ namespace GameLogic.UI.CircuitBoard
                 _selectedSlotDetailLabel.text = "点击左侧电路板上的格子查看和装配。";
                 _equipChipButton.SetEnabled(false);
                 _removeChipButton.SetEnabled(false);
+                _uplinkView.ApplyToggle(_board, null);
                 return;
             }
 
@@ -1016,8 +1098,14 @@ namespace GameLogic.UI.CircuitBoard
             _selectedSlotDetailLabel.text = fixedSlot
                 ? $"当前：{contentName}\n{(slot == BlueprintCircuitLayout.SourceSlot ? "源槽" : "汇槽")}固定，不可拆装。"
                 : $"当前：{contentName}\n{BlueprintCircuitLayout.SlotPassiveDisplay(slotType)}";
-            _equipChipButton.SetEnabled(!fixedSlot);
+            bool isUplink = _board != null && _board.HasUplink && _board.UplinkSlot == slot;
+            if (isUplink)
+            {
+                _selectedSlotDetailLabel.text += "\n" + GameText.Format("circuit.uplink.slot_detail", UplinkCompiler.Quota);
+            }
+            _equipChipButton.SetEnabled(!fixedSlot && !isUplink);
             _removeChipButton.SetEnabled(!fixedSlot && !string.IsNullOrEmpty(content));
+            _uplinkView.ApplyToggle(_board, slot);
         }
 
         private void RefreshBag()
@@ -1186,6 +1274,7 @@ namespace GameLogic.UI.CircuitBoard
 
         private void OnDestroy()
         {
+            UiUndoRouter.Release(this);
             if (_visualTree != null)
             {
                 GameModule.Resource.UnloadAsset(_visualTree);

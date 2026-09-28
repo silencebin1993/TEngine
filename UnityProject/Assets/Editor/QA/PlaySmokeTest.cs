@@ -45,6 +45,9 @@ namespace GameLogic.EditorTools
     /// FG0-UX-01 审查修复：生产面板开着按 Esc → 面板关闭、暂停菜单不开；电路板蓝图命名框打字时 Space / C 不触发，失焦后 Esc 关电路板；
     /// 回家园后改一台机器的记录 → Esc → 暂停菜单“保存并返回主菜单”→ 确认（真实存档路径，不再走 EndRun 捷径）→ 读档核对机器记录；
     /// 读档进游戏后核心被毁 → 失败页上按 Esc 不开暂停菜单 → 点失败页“返回主菜单”→ 暂停菜单、Esc 栈、模态都不残留。
+    /// FG1-SIG-01 / 02：按 P 开信号核 → 刻印过载、装入 1 号槽、存预设 → 再开蓝图编辑器 → 点选导线经过的空格 → 点“标为接入口”→
+    /// 格子上图标 + 文字、双态预览两栏（你接入时插入过载、高亮）与差异 → Ctrl+Z 撤销 / Ctrl+Y 重做（不弹“尚未开放”）→
+    /// 0 号格标接入口被拒并给原因 → Esc 关编辑器（草稿不保存）→ 远征准备面板的信号核入口与远征锁。
     ///
     /// 用法：<c>bash tools/unity-play-smoke.sh</c>（影子工程里跑，编辑器开着也行）。进 Play 会重载域，
     /// 驱动状态存在 SessionState 里，[InitializeOnLoad] 重载后接着跑。
@@ -171,6 +174,12 @@ namespace GameLogic.EditorTools
                     case 152: StepSignalEquipped(inStep); break;
                     case 153: StepSignalPresetSaved(inStep); break;
                     case 154: StepSignalClosed(inStep); break;
+                    case 161: StepUplinkEditorOpened(inStep); break;
+                    case 162: StepUplinkSlotPicked(inStep); break;
+                    case 163: StepUplinkMarked(inStep); break;
+                    case 164: StepUplinkUndone(inStep); break;
+                    case 165: StepUplinkRedone(inStep); break;
+                    case 166: StepUplinkEditorClosed(inStep); break;
                     case 158: StepSignalPrepPanel(inStep); break;
                     case 159: StepSignalFromPrep(inStep); break;
                     case 160: StepSignalPrepDone(inStep); break;
@@ -1327,6 +1336,127 @@ namespace GameLogic.EditorTools
             UI.SignalCore.SignalCoreHudUIToolkit hud = UI.SignalCore.SignalCoreHudUIToolkit.Instance;
             Check(!UI.SignalCore.SignalCoreHudUIToolkit.IsOpen && hud != null && !hud.PanelVisible && !InputRouter.IsModalOwner(hud) && !PauseMenuUIToolkit.IsOpen,
                 "再按 P 关闭信号核面板（模态释放、暂停菜单没开）");
+            Check(ClickUitk("[HomeValleyCircuitBoardHost]", "EntryToggleButton"), "点“蓝图编辑器”入口");
+            Next(161, "FG1-SIG-02：再打开蓝图编辑器（FGJ-M1 第 1 步：标出接入口，看双态预览）");
+        }
+
+        // ── FG1-SIG-02：接入口与双态编译预览（点选空格 → 标为接入口 → 两栏 + 差异 → Ctrl+Z / Ctrl+Y → 0 号格被拒 → Esc）──────
+
+        private static UI.CircuitBoard.CircuitBoardPanelUIToolkit CircuitPanel()
+        {
+            GameObject host = GameObject.Find("[HomeValleyCircuitBoardHost]");
+            return host != null ? host.GetComponent<UI.CircuitBoard.CircuitBoardPanelUIToolkit>() : null;
+        }
+
+        private static void StepUplinkEditorOpened(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            UI.CircuitBoard.CircuitBoardPanelUIToolkit panel = CircuitPanel();
+            Campaign.Blueprint.BlueprintCircuitBoard board = panel != null ? panel.Board : null;
+            Check(GameRoot.HomeValley != null && GameRoot.HomeValley.IsCircuitBoardPanelOpen && board != null && !board.HasUplink
+                  && ReferenceEquals(UI.Kit.UiUndoRouter.Owner, panel),
+                "蓝图编辑器打开（撤销 / 重做快捷键归电路编辑器）；当前蓝图还没有接入口");
+            int target = -1;
+            for (int i = 1; board != null && i < Campaign.Blueprint.BlueprintCircuitLayout.SlotCount - 1; i++)
+            {
+                if (string.IsNullOrEmpty(board.SlotContentIds[i]) && board.IsOnSourceSinkPath(i))
+                {
+                    target = i;
+                    break;
+                }
+            }
+            Check(target > 0, $"找到导线经过的空格 {target} 号（按当前蓝图的导线找，不写死格号）");
+            SessionState.SetInt(K + "UplinkSlot", target);
+            Check(ClickUitk("[HomeValleyCircuitBoardHost]", "Slot" + target), $"点选 {target} 号格");
+            Next(162, $"点选 {target} 号空格");
+        }
+
+        private static void StepUplinkSlotPicked(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            UI.CircuitBoard.CircuitBoardPanelUIToolkit panel = CircuitPanel();
+            Check(panel != null && panel.UplinkView.ToggleButton != null
+                  && panel.UplinkView.ToggleButton.text == Localization.GameText.Get("circuit.uplink.mark"),
+                $"检查器显示“{panel?.UplinkView.ToggleButton?.text}”按钮");
+            Check(ClickUitk("[HomeValleyCircuitBoardHost]", "UplinkToggleButton"), "点“标为接入口”");
+            Next(163, "点“标为接入口”");
+        }
+
+        private static void StepUplinkMarked(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            int target = SessionState.GetInt(K + "UplinkSlot", -1);
+            UI.CircuitBoard.CircuitBoardPanelUIToolkit panel = CircuitPanel();
+            UI.CircuitBoard.CircuitUplinkView view = panel?.UplinkView;
+            Campaign.Blueprint.BlueprintCircuitBoard board = panel?.Board;
+            Check(board != null && board.HasUplink && board.UplinkSlot == target && view.SlotShowsUplink(target)
+                  && view.SlotTagText(target) == Localization.GameText.Get("circuit.uplink.tag"),
+                $"{target} 号格成为接入口：格子上有菱形图标与“{view?.SlotTagText(target)}”文字标注");
+            Check(view != null && view.Last != null && view.AiLine(0).Contains("空") && view.UplinkedLine(0).Contains("过载")
+                  && view.UplinkedLineHighlighted(0) && !view.UplinkedLineHighlighted(1) && view.DiffHighlighted
+                  && view.Last.Uplinked.UplinkFirmwareIds.Contains(Campaign.Content.FirmwareCatalog.FwOverloadId)
+                  && view.Last.Ai.UplinkFirmwareIds.Length == 0,
+                $"双态预览：AI 驾驶时“{view?.AiLine(0)}”｜你接入时“{view?.UplinkedLine(0)}”（高亮）；差异“{view?.DiffText.Replace("\n", " / ")}”");
+            CheckNoTextMarkers("电路编辑器双态预览");
+            SessionState.SetInt(K + "LockedBefore", Notifications.NotificationCenter.Toasts.Count(e => e.Type.Id == "feature_locked"));
+            PressChord(GameSettings.KeyBindings.GetChord(GameActionId.Undo));
+            Next(164, "按撤销键（默认 Ctrl+Z）撤销标记");
+        }
+
+        private static void StepUplinkUndone(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            int target = SessionState.GetInt(K + "UplinkSlot", -1);
+            UI.CircuitBoard.CircuitBoardPanelUIToolkit panel = CircuitPanel();
+            int lockedNow = Notifications.NotificationCenter.Toasts.Count(e => e.Type.Id == "feature_locked");
+            Check(panel?.Board != null && !panel.Board.HasUplink && !panel.UplinkView.SlotShowsUplink(target) && UI.Kit.UiUndoRouter.LastResult == 1
+                  && lockedNow == SessionState.GetInt(K + "LockedBefore", 0),
+                "Ctrl+Z 撤销了接入口（格子标记消失），没有弹“后续版本开放”");
+            PressChord(GameSettings.KeyBindings.GetChord(GameActionId.Redo));
+            Next(165, "按重做键（默认 Ctrl+Y）");
+        }
+
+        private static void StepUplinkRedone(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            int target = SessionState.GetInt(K + "UplinkSlot", -1);
+            UI.CircuitBoard.CircuitBoardPanelUIToolkit panel = CircuitPanel();
+            Check(panel?.Board != null && panel.Board.HasUplink && panel.Board.UplinkSlot == target && panel.UplinkView.SlotShowsUplink(target)
+                  && UI.Kit.UiUndoRouter.LastResult == 2,
+                "Ctrl+Y 重做：接入口回来");
+            // 负向：0 号格（电源源点）不能标为接入口——点选 0 号格再点按钮，给原因，原接入口不动。
+            Check(ClickUitk("[HomeValleyCircuitBoardHost]", "Slot0") && ClickUitk("[HomeValleyCircuitBoardHost]", "UplinkToggleButton"),
+                "点选 0 号格，再点“标为接入口”");
+            string reason = LabelText("[HomeValleyCircuitBoardHost]", "SaveResultLabel");
+            Check(reason == Localization.GameText.Get("circuit.uplink.reason.source_slot") && panel.Board.UplinkSlot == target,
+                $"0 号格被拒：“{reason}”，{target} 号格仍是接入口");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
+            Next(166, "按 Esc 关闭蓝图编辑器（草稿不保存）");
+        }
+
+        private static void StepUplinkEditorClosed(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            Check(GameRoot.HomeValley != null && !GameRoot.HomeValley.IsCircuitBoardPanelOpen && !PauseMenuUIToolkit.IsOpen && !UI.Kit.UiUndoRouter.HasTarget,
+                "Esc 关闭蓝图编辑器（暂停菜单没开，撤销快捷键交还）");
             UnlockLikeDeparture(Campaign.Regions.FracturedCityRegion.Find(CampaignSession.Current),
                 Campaign.Regions.ExpeditionDepartureService.ExpeditionTarget.SilentRuins);
             GameRoot.HomeValley.SetExpeditionPrepPanelOpen(true);
@@ -2448,6 +2578,16 @@ namespace GameLogic.EditorTools
             InputRouter.DebugSetReader(new ScriptedReader { Key = key, KeyFrame = Time.frameCount + 1 });
         }
 
+        /// <summary>FG1-SIG-02：模拟按一次组合键（例如 Ctrl+Z）：下一帧修饰键按住、主键按下。</summary>
+        private static void PressChord(InputChord chord)
+        {
+            KeyCode held = (chord.Mods & InputModifier.Ctrl) != 0 ? KeyCode.LeftControl
+                : (chord.Mods & InputModifier.Alt) != 0 ? KeyCode.LeftAlt
+                : (chord.Mods & InputModifier.Shift) != 0 ? KeyCode.LeftShift
+                : KeyCode.None;
+            InputRouter.DebugSetReader(new ScriptedReader { Key = chord.Key, KeyFrame = Time.frameCount + 1, Held = held });
+        }
+
         /// <summary>模拟鼠标右键点世界里一点（下一帧按下、再下一帧抬起）。</summary>
         private static void RightClickWorld(Vector3 world)
         {
@@ -2483,8 +2623,10 @@ namespace GameLogic.EditorTools
             public int DownFrame = -1;
             public int UpFrame = -1;
             public int Button;
+            /// <summary>与 <see cref="Key"/> 同一帧按住的修饰键（组合键用）。</summary>
+            public KeyCode Held = KeyCode.None;
 
-            public bool GetKey(KeyCode key) => false;
+            public bool GetKey(KeyCode key) => Held != KeyCode.None && key == Held && Time.frameCount == KeyFrame;
             public bool GetKeyDown(KeyCode key) => key == Key && Time.frameCount == KeyFrame;
             public bool GetMouseButtonDown(int button) => button == Button && Time.frameCount == DownFrame;
             public bool GetMouseButtonUp(int button) => button == Button && Time.frameCount == UpFrame;

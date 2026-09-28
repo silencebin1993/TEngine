@@ -124,7 +124,19 @@ namespace GameLogic.Campaign.Blueprint
         /// （<see cref="Blueprint.BlueprintCircuitDefaults.EnsureCircuitDataSeeded"/>）就地重写
         /// 同一 Version 号的记录字段时，下一次调用本方法会自动读到迁移后的最新内容——不需要额外的
         /// "内容版本迁移时刷新登记表"步骤，结构上不会读到过期数据。</summary>
-        public static MachineCombatResolution Resolve(CampaignState state, int machineLogicId, int seed)
+        public static MachineCombatResolution Resolve(CampaignState state, int machineLogicId, int seed) =>
+            ResolveInternal(state, machineLogicId, seed, null);
+
+        /// <summary>FG1-SIG-02（FGR-SIG-022 / FGT-SIG-002）：信号接入这台机器时的结算入口——把 <paramref name="signalCoreContentIds"/>
+        /// （按信号核槽位顺序）经 <see cref="UplinkCompiler.Plan"/> 插进蓝图的接入口再编译。与电路编辑器的双态预览
+        /// （<see cref="UplinkCompiler.CompileDual"/>）是同一套纯计算，结构上不会“预览一套、实际一套”。
+        /// FG1-SIG-03 做真实接入时调这里；AI 驾驶永远走 <see cref="ResolveForAi"/>（不填接入口，FGR-SIG-090）。</summary>
+        public static MachineCombatResolution ResolveForUplink(CampaignState state, int machineLogicId, int seed,
+            IReadOnlyList<string> signalCoreContentIds) =>
+            ResolveInternal(state, machineLogicId, seed, signalCoreContentIds ?? System.Array.Empty<string>());
+
+        private static MachineCombatResolution ResolveInternal(CampaignState state, int machineLogicId, int seed,
+            IReadOnlyList<string> signalCoreContentIds)
         {
             if (!_entries.TryGetValue(machineLogicId, out Entry entry))
             {
@@ -140,7 +152,9 @@ namespace GameLogic.Campaign.Blueprint
             }
 
             BlueprintCircuitBoard board = BlueprintCircuitBoard.FromVersion(versionRecord);
-            BlueprintCircuitPreview preview = BlueprintCircuitCompiler.CompilePreview(board, seed);
+            BlueprintCircuitPreview preview = signalCoreContentIds == null
+                ? BlueprintCircuitCompiler.CompilePreview(board, seed)
+                : UplinkCompiler.CompileUplinked(board, signalCoreContentIds, seed);
             return MachineCombatResolution.Ok(versionRecord.CompileSignature, preview);
         }
 

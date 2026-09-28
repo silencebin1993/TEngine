@@ -18,10 +18,15 @@ namespace GameLogic.MetabolicSlice.Graph
             public IReadOnlyList<int> SlotPath { get; }
             public IReadOnlyList<IModule> Modules { get; }
 
-            public CompiledPath(IReadOnlyList<int> slotPath, IReadOnlyList<IModule> modules)
+            /// <summary>FG1-SIG-02：<see cref="SlotPath"/> 第 i 格的模块在 <see cref="Modules"/> 里从哪个下标开始
+            /// （每格先放槽被动，再放芯片模块）。接入口插入固件时按它定位，不在外面重算一遍装配规则。旧调用方不传时为 null。</summary>
+            public IReadOnlyList<int> SlotModuleStart { get; }
+
+            public CompiledPath(IReadOnlyList<int> slotPath, IReadOnlyList<IModule> modules, IReadOnlyList<int> slotModuleStart = null)
             {
                 SlotPath = slotPath;
                 Modules = modules;
+                SlotModuleStart = slotModuleStart;
             }
         }
 
@@ -93,8 +98,10 @@ namespace GameLogic.MetabolicSlice.Graph
         private static CompiledPath BuildPath(SlotGrid grid, List<int> slotPath)
         {
             var modules = new List<IModule>(slotPath.Count * 2);
+            var starts = new List<int>(slotPath.Count);
             foreach (var slotId in slotPath)
             {
+                starts.Add(modules.Count);
                 var node = grid.Slots[slotId];
                 modules.Add(new SlotPassiveModule(node.SlotType));
                 if (!node.IsEmpty)
@@ -103,7 +110,7 @@ namespace GameLogic.MetabolicSlice.Graph
                     if (def?.CreateModule != null) modules.Add(def.CreateModule());
                 }
             }
-            return new CompiledPath(new List<int>(slotPath), modules);
+            return new CompiledPath(new List<int>(slotPath), modules, starts);
         }
     }
 }

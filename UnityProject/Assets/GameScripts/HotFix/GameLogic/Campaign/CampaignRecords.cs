@@ -173,6 +173,10 @@ namespace GameLogic.Campaign
         /// <see cref="BlueprintCircuitBoard"/> 的 <c>ComputeSignature</c>：签名描述"内容"而非"哪个实例"，
         /// 两个物理实例只要 CardDefId 相同就应产出同一签名，不能让实例更替误判蓝图内容变化。</summary>
         public string[] CircuitSlotPartIds;
+
+        /// <summary>FG1-SIG-02（FGR-SIG-020）：接入口所在的格（1～7）。0 = 没有接入口——0 号是源点，永远不能标，
+        /// 所以旧档缺这个字段时读回的 0 正好就是“没有接入口”，不用升存档版本。参与签名（有接入口时）。</summary>
+        public int CircuitUplinkSlot;
     }
 
     /// <summary>ER4-PRIM-02：<see cref="BlueprintVersionRecord.CircuitEdges"/> 的单条有向边。

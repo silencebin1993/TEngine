@@ -96,6 +96,13 @@ namespace GameLogic.Campaign.Blueprint
         /// 在装/卸成功后显式赋值的职责。</summary>
         public string[] SlotPartIds = new string[BlueprintCircuitLayout.SlotCount];
 
+        /// <summary>FG1-SIG-02（FGR-SIG-020）：接入口所在的格（1～7）；<see cref="BlueprintCircuitLayout.NoUplink"/>（0）= 没有接入口。
+        /// 接入口是一个**空格**：AI 驾驶时按空槽处理（照样传导、不产生芯片效果，FGR-SIG-021）；
+        /// 你接入时信号核的固件插在这一格（<see cref="UplinkCompiler"/>）。只经 <see cref="TrySetUplink"/> / <see cref="TryClearUplink"/> 改，参与撤销重做。</summary>
+        public int UplinkSlot = BlueprintCircuitLayout.NoUplink;
+
+        public bool HasUplink => BlueprintCircuitLayout.IsUplinkCandidate(UplinkSlot);
+
         private readonly List<(int From, int To)> _edges = new List<(int, int)>();
         public IReadOnlyList<(int From, int To)> Edges => _edges;
 
@@ -194,6 +201,12 @@ namespace GameLogic.Campaign.Blueprint
                 }
             }
 
+            // FG1-SIG-02：接入口只能在空的 1～7 号格；存档被改坏（指向 0/8、越界或已装芯片的格）时按“没有接入口”读，不臆造。
+            int uplink = version.CircuitUplinkSlot;
+            board.UplinkSlot = BlueprintCircuitLayout.IsUplinkCandidate(uplink) && string.IsNullOrEmpty(board.SlotContentIds[uplink])
+                ? uplink
+                : BlueprintCircuitLayout.NoUplink;
+
             board.SyncFixedSlots();
             return board;
         }
@@ -226,6 +239,7 @@ namespace GameLogic.Campaign.Blueprint
                 CircuitSlotContentIds = (string[])SlotContentIds.Clone(),
                 CircuitSlotPartIds = (string[])SlotPartIds.Clone(),
                 CircuitEdges = sortedEdges,
+                CircuitUplinkSlot = HasUplink ? UplinkSlot : BlueprintCircuitLayout.NoUplink,
                 ContentVersionAtCompile = CampaignSaveService.CurrentContentVersion,
                 CompileSignature = ComputeSignature(),
                 CreatedAtPlaySeconds = createdAtPlaySeconds,
@@ -377,6 +391,11 @@ namespace GameLogic.Campaign.Blueprint
             {
                 return CircuitOpResult.Fail("slot_out_of_range", $"槽位 {slot} 越界。");
             }
+            // FG1-SIG-02（FGR-SIG-020）：接入口必须是空格——先取消接入口才能在这一格装芯片。
+            if (HasUplink && slot == UplinkSlot)
+            {
+                return CircuitOpResult.Fail(UplinkCellCode, GameText.Format("circuit.uplink.reason.cell_is_uplink", slot));
+            }
             // FG1-SIG-01（FGR-SIG-012）：固件芯片不是 3×3 电路格的内容；核心固件给出专门原因（只能由信号携带）。
             FirmwareKind kind = FirmwareKinds.KindOf(contentId);
             if (kind == FirmwareKind.Core)
@@ -478,6 +497,103 @@ namespace GameLogic.Campaign.Blueprint
             return "已达到边数软帽（非空槽数×2），请先移除一条边或装更多芯片。";
         }
 
+        // ── 接入口（FG1-SIG-02，FGR-SIG-020）───────────────────────────────────────
+
+        public const string UplinkFixedSlotCode = "uplink_fixed_slot";
+        public const string UplinkOutOfRangeCode = "uplink_out_of_range";
+        public const string UplinkOccupiedCode = "uplink_slot_occupied";
+        public const string UplinkSecondCode = "uplink_already_marked";
+        public const string UplinkSameCode = "uplink_same_slot";
+        public const string UplinkNoneCode = "uplink_none";
+        public const string UplinkCellCode = "uplink_cell";
+
+        /// <summary>把 <paramref name="slot"/> 标为接入口。只能标空的 1～7 号格；每张蓝图最多 1 个（已有时拒绝并说明，
+        /// 不偷偷搬走——玩家要换位置就先取消再标，两步都能撤销）。失败不改任何字段、不进撤销栈。</summary>
+        public CircuitOpResult TrySetUplink(int slot)
+        {
+            if (BlueprintCircuitLayout.IsFixedSlot(slot))
+            {
+                return CircuitOpResult.Fail(UplinkFixedSlotCode, GameText.Get(slot == BlueprintCircuitLayout.SourceSlot
+                    ? "circuit.uplink.reason.source_slot"
+                    : "circuit.uplink.reason.sink_slot"));
+            }
+            if (slot < 0 || slot >= BlueprintCircuitLayout.SlotCount)
+            {
+                return CircuitOpResult.Fail(UplinkOutOfRangeCode, GameText.Format("circuit.uplink.reason.out_of_range", slot));
+            }
+            if (HasUplink && UplinkSlot == slot)
+            {
+                return CircuitOpResult.Fail(UplinkSameCode, GameText.Format("circuit.uplink.reason.same_slot", slot));
+            }
+            if (HasUplink)
+            {
+                return CircuitOpResult.Fail(UplinkSecondCode, GameText.Format("circuit.uplink.reason.second", UplinkSlot));
+            }
+            if (!string.IsNullOrEmpty(SlotContentIds[slot]))
+            {
+                return CircuitOpResult.Fail(UplinkOccupiedCode, GameText.Format("circuit.uplink.reason.occupied", slot));
+            }
+            CaptureUndo();
+            UplinkSlot = slot;
+            CommitUndo();
+            return CircuitOpResult.Ok();
+        }
+
+        /// <summary>FG1-SIG-02：<paramref name="slot"/> 是否在某条“0 号源 → 8 号汇”的<b>简单路径</b>（不重复经过格）上——
+        /// 只看导线拓扑，不看格里装了什么；口径与 <see cref="GameLogic.MetabolicSlice.Graph.PathCompiler"/> 枚举路径相同
+        /// （DFS、visited 防环），所以双向回边挂出来的“可达但不在任何简单路径上”的格不算接通。
+        /// 接入口不在路径上时，插进去的固件不接通、不生效。9 格电路，DFS 规模固定。</summary>
+        public bool IsOnSourceSinkPath(int slot)
+        {
+            if (slot < 0 || slot >= BlueprintCircuitLayout.SlotCount)
+            {
+                return false;
+            }
+            var visited = new bool[BlueprintCircuitLayout.SlotCount];
+            var stack = new List<int>(BlueprintCircuitLayout.SlotCount);
+            visited[BlueprintCircuitLayout.SourceSlot] = true;
+            stack.Add(BlueprintCircuitLayout.SourceSlot);
+            return WalkSimplePaths(BlueprintCircuitLayout.SourceSlot, slot, visited, stack);
+        }
+
+        /// <summary>与 PathCompiler.Walk 同构：走到汇（且不是起点）时记一条路径，然后继续沿导线走。</summary>
+        private bool WalkSimplePaths(int current, int target, bool[] visited, List<int> stack)
+        {
+            if (stack.Count > 1 && current == BlueprintCircuitLayout.SinkSlot && stack.Contains(target))
+            {
+                return true;
+            }
+            foreach ((int from, int to) in _edges)
+            {
+                if (from != current || to < 0 || to >= visited.Length || visited[to])
+                {
+                    continue;
+                }
+                visited[to] = true;
+                stack.Add(to);
+                bool hit = WalkSimplePaths(to, target, visited, stack);
+                stack.RemoveAt(stack.Count - 1);
+                visited[to] = false;
+                if (hit)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public CircuitOpResult TryClearUplink()
+        {
+            if (!HasUplink)
+            {
+                return CircuitOpResult.Fail(UplinkNoneCode, GameText.Get("circuit.uplink.reason.none"));
+            }
+            CaptureUndo();
+            UplinkSlot = BlueprintCircuitLayout.NoUplink;
+            CommitUndo();
+            return CircuitOpResult.Ok();
+        }
+
         // ── 固件 ─────────────────────────────────────────────────────────────────
 
         public CircuitOpResult TrySetFirmware(CampaignState state, int index, string firmwareId)
@@ -530,6 +646,7 @@ namespace GameLogic.Campaign.Blueprint
             public string[] PartIds;
             public List<(int, int)> Edges;
             public string[] Firmware;
+            public int Uplink;
         }
 
         private Snapshot _pendingUndo;
@@ -542,6 +659,7 @@ namespace GameLogic.Campaign.Blueprint
                 PartIds = (string[])SlotPartIds.Clone(),
                 Edges = new List<(int, int)>(_edges),
                 Firmware = (string[])FirmwareSlots.Clone(),
+                Uplink = UplinkSlot,
             };
         }
 
@@ -575,6 +693,7 @@ namespace GameLogic.Campaign.Blueprint
                 PartIds = (string[])SlotPartIds.Clone(),
                 Edges = new List<(int, int)>(_edges),
                 Firmware = (string[])FirmwareSlots.Clone(),
+                Uplink = UplinkSlot,
             };
             Snapshot prev = _undo.Pop();
             Apply(prev);
@@ -600,6 +719,7 @@ namespace GameLogic.Campaign.Blueprint
                 PartIds = (string[])SlotPartIds.Clone(),
                 Edges = new List<(int, int)>(_edges),
                 Firmware = (string[])FirmwareSlots.Clone(),
+                Uplink = UplinkSlot,
             };
             Snapshot next = _redo.Pop();
             Apply(next);
@@ -614,6 +734,7 @@ namespace GameLogic.Campaign.Blueprint
             _edges.Clear();
             _edges.AddRange(s.Edges);
             FirmwareSlots = (string[])s.Firmware.Clone();
+            UplinkSlot = s.Uplink;
         }
 
         // ── 校验 ─────────────────────────────────────────────────────────────────
@@ -774,10 +895,14 @@ namespace GameLogic.Campaign.Blueprint
         /// <summary>DEMO-CONTENT-LOCK.md §2.4/§5 字面数字："一般主武器基础伤害+15%、额外热量+15"；
         /// "与重炮组合时改为熔穿过载：……在重炮基础热量40上再加25，不再叠加一般+15热量"。公开方法供 UI
         /// 实时预览（不落盘也复算），<see cref="ToVersion"/> 落盘同一结果——不能各算一套。</summary>
-        public float ComputeHeatBudget()
+        public float ComputeHeatBudget() => ComputeHeatBudget(PrimaryId, FirmwareSlots);
+
+        /// <summary>FG1-SIG-02：热量预算的纯函数版本——“你接入时”把插入接入口的固件并进 <paramref name="firmwareIds"/>，
+        /// 与机器电路自己的固件走同一条规则（预览与正式结算同一套计算，IC-REQ-010）。</summary>
+        public static float ComputeHeatBudget(string primaryId, IEnumerable<string> firmwareIds)
         {
-            bool hasCannon = PrimaryId == ComponentCatalog.CompCannonId;
-            bool hasOverload = FirmwareSlots[0] == FirmwareCatalog.FwOverloadId || FirmwareSlots[1] == FirmwareCatalog.FwOverloadId;
+            bool hasCannon = primaryId == ComponentCatalog.CompCannonId;
+            bool hasOverload = firmwareIds != null && firmwareIds.Any(id => id == FirmwareCatalog.FwOverloadId);
             if (hasCannon && hasOverload)
             {
                 return 65f; // 熔穿过载：基础40 + 25
@@ -855,6 +980,11 @@ namespace GameLogic.Campaign.Blueprint
             foreach ((int from, int to) in _edges.OrderBy(e => e.From).ThenBy(e => e.To))
             {
                 sb.Append(from).Append('-').Append(to).Append(';');
+            }
+            // FG1-SIG-02：接入口改变“你接入时”的编译结果，进签名；没有接入口的蓝图签名与以前逐字相同（旧存档不漂移）。
+            if (HasUplink)
+            {
+                sb.Append("|UP:").Append(UplinkSlot);
             }
             sb.Append("|CV").Append(CampaignSaveService.CurrentContentVersion);
             return sb.ToString();

@@ -36,6 +36,8 @@ namespace GameLogic.Core
         public const string LogisticsFirstBlocked = "logistics.belt.first_blocked";
         /// <summary>FG1-SIG-01：第一次打开信号核面板（引导内容在 FG15-UX-04：你是信号、固件放进槽位、只能在家园改）。</summary>
         public const string SignalCoreFirstOpen = "signal.core.first_open";
+        /// <summary>FG1-SIG-02：第一次在电路编辑器里遇到接入口（标出接入口，或打开带接入口的蓝图）。引导内容在 FG15-UX-04：指向双态预览，“接入后会变成这样”。</summary>
+        public const string CircuitUplinkFirstSeen = "circuit.uplink.first_seen";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -46,7 +48,7 @@ namespace GameLogic.Core
             WorldFirstGenerating,
             WorldFirstFocusSwitch, WorldFirstDispatch, WorldFirstRaidInTransit,
             LogisticsFirstBelt, LogisticsFirstBlocked,
-            SignalCoreFirstOpen,
+            SignalCoreFirstOpen, CircuitUplinkFirstSeen,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

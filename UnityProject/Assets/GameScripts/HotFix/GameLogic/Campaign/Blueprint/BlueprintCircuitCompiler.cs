@@ -17,6 +17,9 @@ namespace GameLogic.Campaign.Blueprint
         public int[] SlotPath;
         public float Damage;
         public HashSet<string> Tags = new HashSet<string>();
+
+        /// <summary>FG1-SIG-02：这条路径经过接入口，且接入口里插了固件（只有“你接入时”的编译会是 true）。</summary>
+        public bool ThroughUplink;
     }
 
     /// <summary>PRIMITIVE-FULL-DEMO-SPEC.md §3.6/§3.7：电路板的通用预览结果。即使当前组合不触发任何
@@ -65,6 +68,22 @@ namespace GameLogic.Campaign.Blueprint
         public bool HasHeatSinkStructure;
 
         public string NoteText;
+
+        /// <summary>FG1-SIG-02：热量预算（与 <see cref="BlueprintCircuitBoard.ComputeHeatBudget(string, IEnumerable{string})"/> 同一规则），
+        /// 按本次编译实际生效的固件算——双态预览对比“热量的变化”读这里。</summary>
+        public float HeatBudget;
+
+        /// <summary>FG1-SIG-02：本次编译实际生效的固件（机器电路自己的固件在前，接入口插入的在后）。</summary>
+        public string[] FirmwareIds = Array.Empty<string>();
+
+        /// <summary>FG1-SIG-02：接入口所在格（没有接入口为 0）。AI 驾驶与你接入时相同。</summary>
+        public int UplinkSlot;
+
+        /// <summary>FG1-SIG-02：接入口在不在任何一条源→汇路径上（不在时插进去的固件不生效）。</summary>
+        public bool UplinkOnPath;
+
+        /// <summary>FG1-SIG-02：插进接入口并**生效**的固件（AI 驾驶时永远为空，FGR-SIG-021、FGR-SIG-090）。</summary>
+        public string[] UplinkFirmwareIds = Array.Empty<string>();
     }
 
     /// <summary>ER4-PRIM-02 STORY-EXECUTION-CARDS.md 第2条正式电路板"通用预览"的编译入口——
@@ -82,10 +101,38 @@ namespace GameLogic.Campaign.Blueprint
     /// "AC-PRM-002～004/014；正式战斗接线由 ER4-BLP-02 续接"），本 Story 只需保证编译出的结构自洽、可测。</summary>
     public static class BlueprintCircuitCompiler
     {
-        public static BlueprintCircuitPreview CompilePreview(BlueprintCircuitBoard board, int seed = 1)
+        /// <summary>机器电路自己的编译结果 = AI 驾驶时（接入口按空槽处理：照样传导、不产生芯片效果，FGR-SIG-021）。</summary>
+        public static BlueprintCircuitPreview CompilePreview(BlueprintCircuitBoard board, int seed = 1) =>
+            Compile(board, seed, null);
+
+        /// <summary>唯一的编译实现。<paramref name="uplinkFirmwareIds"/> 为 null 或空 = 接入口是空槽（AI 驾驶时）；
+        /// 非空 = 你接入时插进接入口的固件（已按配额与路径上限截断，见 <see cref="UplinkCompiler.Plan"/>）。
+        /// 插入的固件只作用于**经过接入口的路径**：模块插在接入口那一格的位置，契约并进这些路径的规则；
+        /// 不经过接入口的路径与 AI 驾驶时逐字相同。双态预览与正式结算（<see cref="MachineLoadoutRegistry"/>）都只调这里（IC-REQ-010）。</summary>
+        internal static BlueprintCircuitPreview Compile(BlueprintCircuitBoard board, int seed, IReadOnlyList<string> uplinkFirmwareIds)
         {
             board.SyncFixedSlots();
             var preview = new BlueprintCircuitPreview();
+            preview.UplinkSlot = board.HasUplink ? board.UplinkSlot : BlueprintCircuitLayout.NoUplink;
+            bool hasInsertion = board.HasUplink && uplinkFirmwareIds != null && uplinkFirmwareIds.Count > 0;
+            List<PathCompiler.CompiledPath> compiled = null;
+            if (!string.IsNullOrEmpty(board.SlotContentIds[BlueprintCircuitLayout.SinkSlot]))
+            {
+                compiled = PathCompiler.Compile(board.ToSlotGrid());
+            }
+            // “接通” = 有一条源→汇简单路径经过接入口（与下面 ThroughUplink 同一口径）。编得出路径时直接看编出的路径；
+            // 编不出时（铸造重炮这类主组件没有接入组合装配链）按同一套简单路径 DFS 只看导线——接入口插进去的固件
+            // 照样要参与反应与热量（熔穿过载 = 重炮 + 过载）。
+            preview.UplinkOnPath = board.HasUplink && (compiled != null && compiled.Count > 0
+                ? compiled.Any(p => IndexOf(p.SlotPath, board.UplinkSlot) >= 0)
+                : board.IsOnSourceSinkPath(board.UplinkSlot));
+            // 接入口不在任何一条源→汇路径上：插进去的固件不接通，不生效（面板会说明）。
+            string[] uplinkEffective = hasInsertion && preview.UplinkOnPath
+                ? uplinkFirmwareIds.Where(id => !string.IsNullOrEmpty(id)).ToArray()
+                : Array.Empty<string>();
+            preview.UplinkFirmwareIds = uplinkEffective;
+            preview.FirmwareIds = board.FirmwareSlots.Where(id => !string.IsNullOrEmpty(id)).Concat(uplinkEffective).ToArray();
+            preview.HeatBudget = BlueprintCircuitBoard.ComputeHeatBudget(board.PrimaryId, preview.FirmwareIds);
 
             // ER6-REACT-01/02：反应/标记/重炮/散热鳍这几个标志只是"电路板外层槽装了什么"的直接读取，
             // 与下面"ComposeEngine 能不能真的编出一条 source→sink 路径"完全无关，必须放在任何早退
@@ -96,7 +143,7 @@ namespace GameLogic.Campaign.Blueprint
             // ER6-REACT-02 的整条战斗链会在第一步就被误判"没有武器"拒绝（execute_code 实测复现过
             // 这个问题）。铸造重炮的伤害本来就是 CannonCombat 里的固定设计常量、不读
             // TotalNormalizedDamage，不依赖这里的 ComposeEngine 编译结果，所以提前计算完全安全。
-            preview.ReactionId = DetectReactionId(board);
+            preview.ReactionId = DetectReactionId(board.PrimaryId, board.UtilityId, preview.FirmwareIds);
             preview.HasMarkerFunction = board.UtilityId == ComponentCatalog.FuncMarkerId;
             preview.HasCannonPrimary = board.PrimaryId == ComponentCatalog.CompCannonId;
             preview.PrimaryId = board.PrimaryId;
@@ -110,8 +157,6 @@ namespace GameLogic.Campaign.Blueprint
             }
 
             preview.HasCombatOutput = true;
-            SlotGrid grid = board.ToSlotGrid();
-            List<PathCompiler.CompiledPath> compiled = PathCompiler.Compile(grid);
             preview.PathCount = compiled.Count;
             if (compiled.Count == 0)
             {
@@ -119,12 +164,16 @@ namespace GameLogic.Campaign.Blueprint
                 return preview;
             }
 
-            (List<IContract> contracts, List<Func<IModule>> moduleGeneFactories) = ResolveFirmware(board);
+            (List<IContract> contracts, List<Func<IModule>> moduleGeneFactories) = ResolveFirmware(board.FirmwareSlots);
+            (List<IContract> uplinkContracts, List<Func<IModule>> uplinkModuleFactories) = ResolveFirmware(uplinkEffective);
 
             var engine = new Engine();
             ReactionCatalog.RegisterDefaults(engine);
             var world = new WorldState();
             RuleVector rules = engine.NormalizeContracts(contracts);
+            RuleVector uplinkRules = uplinkEffective.Length > 0
+                ? engine.NormalizeContracts(contracts.Concat(uplinkContracts).ToList())
+                : rules;
 
             float totalDamage = 0f;
             var aggregatedTags = new HashSet<string>();
@@ -136,6 +185,17 @@ namespace GameLogic.Campaign.Blueprint
                 {
                     continue;
                 }
+                // 接入口插入：模块放在接入口那一格（空格只有一个槽被动模块）之后，按信号核槽位顺序。
+                int uplinkIndex = uplinkEffective.Length > 0 ? IndexOf(path.SlotPath, board.UplinkSlot) : -1;
+                bool throughUplink = uplinkIndex >= 0 && path.SlotModuleStart != null;
+                if (throughUplink)
+                {
+                    int insertAt = path.SlotModuleStart[uplinkIndex] + 1;
+                    for (int i = 0; i < uplinkModuleFactories.Count; i++)
+                    {
+                        chain.Insert(insertAt + i, uplinkModuleFactories[i]());
+                    }
+                }
                 IModule tail = chain[chain.Count - 1];
                 chain.RemoveAt(chain.Count - 1);
                 foreach (Func<IModule> factory in moduleGeneFactories)
@@ -145,10 +205,11 @@ namespace GameLogic.Campaign.Blueprint
                 chain.Add(tail);
 
                 IReadOnlyList<HitEvent> raw = engine.RunAssembly(chain, ticks: 1, seed: seed);
-                var pathPreview = new BlueprintCircuitPathPreview { SlotPath = path.SlotPath.ToArray() };
+                var pathPreview = new BlueprintCircuitPathPreview { SlotPath = path.SlotPath.ToArray(), ThroughUplink = throughUplink };
+                RuleVector pathRules = throughUplink ? uplinkRules : rules;
                 foreach (HitEvent evt in raw)
                 {
-                    HitEvent final = engine.ApplyPipeline(evt, rules, world);
+                    HitEvent final = engine.ApplyPipeline(evt, pathRules, world);
                     pathPreview.Damage += final.Damage;
                     foreach (string tag in final.Tags)
                     {
@@ -161,16 +222,28 @@ namespace GameLogic.Campaign.Blueprint
             }
 
             preview.TotalNormalizedDamage = compiled.Count > 0 ? totalDamage / compiled.Count : 0f;
-            preview.ReactionHint = ResolveReactionHint(board);
+            preview.ReactionHint = ResolveReactionHint(preview.ReactionId);
             return preview;
         }
 
-        private static (List<IContract>, List<Func<IModule>>) ResolveFirmware(BlueprintCircuitBoard board)
+        private static int IndexOf(IReadOnlyList<int> path, int slot)
+        {
+            for (int i = 0; i < path.Count; i++)
+            {
+                if (path[i] == slot)
+                {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        private static (List<IContract>, List<Func<IModule>>) ResolveFirmware(IEnumerable<string> firmwareIds)
         {
             var contracts = new List<IContract>();
             var moduleGeneFactories = new List<Func<IModule>>();
 
-            foreach (string firmwareId in board.FirmwareSlots)
+            foreach (string firmwareId in firmwareIds)
             {
                 if (string.IsNullOrEmpty(firmwareId))
                 {
@@ -204,11 +277,15 @@ namespace GameLogic.Campaign.Blueprint
         /// （<c>BlueprintEditorService.TrySave</c>）共用同一结果（STORY-EXECUTION-CARDS.md ER4-BLP-01
         /// 第2条"预览与实际编译共用同一结果"）。返回 null 表示当前组合未触发任何具名反应（合法状态，不是
         /// 错误——合法组合仍按通用正交组合结算）。</summary>
-        public static string DetectReactionId(BlueprintCircuitBoard board)
+        public static string DetectReactionId(BlueprintCircuitBoard board) =>
+            DetectReactionId(board.PrimaryId, board.UtilityId, board.FirmwareSlots);
+
+        /// <summary>FG1-SIG-02：同一判定的纯函数版本——“你接入时”把接入口里生效的固件并进 <paramref name="firmwareIdsIn"/>。</summary>
+        public static string DetectReactionId(string primaryId, string utilityId, IEnumerable<string> firmwareIdsIn)
         {
-            var mainComponentIds = new[] { board.PrimaryId }.Where(id => !string.IsNullOrEmpty(id)).ToList();
-            var functionComponentIds = new[] { board.UtilityId }.Where(id => !string.IsNullOrEmpty(id)).ToList();
-            var firmwareIds = board.FirmwareSlots.Where(id => !string.IsNullOrEmpty(id)).ToList();
+            var mainComponentIds = new[] { primaryId }.Where(id => !string.IsNullOrEmpty(id)).ToList();
+            var functionComponentIds = new[] { utilityId }.Where(id => !string.IsNullOrEmpty(id)).ToList();
+            var firmwareIds = (firmwareIdsIn ?? Array.Empty<string>()).Where(id => !string.IsNullOrEmpty(id)).ToList();
 
             if (MechanicalReactionCatalog.DetectMarkJump(mainComponentIds, functionComponentIds, firmwareIds))
             {
@@ -223,9 +300,8 @@ namespace GameLogic.Campaign.Blueprint
 
         /// <summary>不存在具名反应时返回中性说明，不是错误——满足 STORY-EXECUTION-CARDS.md ER4-PRIM-02
         /// 第2条"不存在具名反应的合法组合必须有通用预览，不提示缺反应"。</summary>
-        private static string ResolveReactionHint(BlueprintCircuitBoard board)
+        private static string ResolveReactionHint(string reactionId)
         {
-            string reactionId = DetectReactionId(board);
             if (reactionId != null && MechanicalReactionCatalog.TryGet(reactionId, out MechanicalContentDef def))
             {
                 return $"触发具名反应：{def.DisplayName}。";

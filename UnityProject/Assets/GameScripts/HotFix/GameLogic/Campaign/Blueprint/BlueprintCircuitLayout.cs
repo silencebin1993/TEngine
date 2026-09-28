@@ -54,6 +54,12 @@ namespace GameLogic.Campaign.Blueprint
 
         public static bool IsFixedSlot(int slotIndex) => slotIndex == SourceSlot || slotIndex == SinkSlot;
 
+        /// <summary>FG1-SIG-02：没有接入口时记 0（0 号是源点，永远不能标为接入口）。</summary>
+        public const int NoUplink = 0;
+
+        /// <summary>FG1-SIG-02（FGR-SIG-020）：能标为接入口的格——1～7（0 号源点、8 号主组件不能标）。</summary>
+        public static bool IsUplinkCandidate(int slotIndex) => slotIndex > 0 && slotIndex < SlotCount && !IsFixedSlot(slotIndex);
+
         /// <summary>STORY-EXECUTION-CARDS.md ER4-PRIM-02 第2条："显示空槽被动"；
         /// PRIMITIVE-FULL-DEMO-SPEC.md §3.3 第3条："机械 UI 用绝缘/散热/损耗文案"（不得显示原
         /// Cytoplasm/Membrane/Lattice 生物学细胞质/膜/晶格内部键名，也不得显示 <c>SlotPassiveModule</c>
