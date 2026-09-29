@@ -635,8 +635,8 @@ namespace GameLogic.EditorTools
             {
                 LogicId = b,
                 Reason = (int)SignalLinkBreakReason.OutOfCoverage,
-                SinceGameSeconds = GameClock.GameSeconds,
-                ClearSinceGameSeconds = -1,
+                SinceTick = GameClock.Ticks,
+                ClearSinceTick = -1,
             }).ToArray();
             int guard = 0;
             while (SignalLinkService.IsInSafeMode(s, b) && guard++ < 20 * 6)
@@ -912,17 +912,17 @@ namespace GameLogic.EditorTools
             Place(ls, a, core + new Vector2(20f, 0f));
             double back = GameClock.GameSeconds;
             WorldSimulation.StepMany(60);
-            double clearSince = l.SignalCore.SafeModes.Single().ClearSinceGameSeconds;
+            long clearSince = l.SignalCore.SafeModes.Single().ClearSinceTick;
             SaveNow();
             CampaignState l2 = LoadLikeMenu();
-            double clearSince2 = l2.SignalCore.SafeModes.Single().ClearSinceGameSeconds;
+            long clearSince2 = l2.SignalCore.SafeModes.Single().ClearSinceTick;
             g = 0;
             while (SignalLinkService.IsInSafeMode(l2, a) && g++ < 60 * 6)
             {
                 WorldSimulation.StepMany(1);
             }
             double took = GameClock.GameSeconds - back;
-            Expect(clearSince >= 0 && Math.Abs(clearSince - clearSince2) < 1e-9 && took >= 2.0 - 1e-6 && took <= 2.0 + SignalLinkService.SafeModeCheckSeconds + 1e-6,
+            Expect(clearSince >= 0 && clearSince == clearSince2 && took >= 2.0 - 1e-6 && took <= 2.0 + SignalLinkService.SafeModeCheckSeconds + 1e-6,
                 $"回到覆盖 1 秒时存档，读档后接着计时：共 {took:F2} 游戏秒退出（条件消失时刻 {clearSince:F2} 原样读回）");
 
             SignalCoreState old = JsonUtility.FromJson<SignalCoreState>("{\"DomainVersion\":1,\"SlotPartIds\":[\"\",\"\"],\"UplinkMachineLogicId\":0}");
@@ -963,14 +963,14 @@ namespace GameLogic.EditorTools
             for (int i = 0; i < 200; i++)
             {
                 int id = SpawnRegion(FoundryOutpostLayout.RegionId, BpGunPlain, new Vector2(i, -20f));
-                records.Add(new SignalSafeModeRecord { LogicId = id, Reason = (int)SignalLinkBreakReason.Jammed, SinceGameSeconds = 0, ClearSinceGameSeconds = -1 });
+                records.Add(new SignalSafeModeRecord { LogicId = id, Reason = (int)SignalLinkBreakReason.Jammed, SinceTick = 0, ClearSinceTick = -1 });
             }
             var perCheck = new List<double>();
             int checks0 = SignalLinkService.SafeModeChecks;
             long every = (long)Math.Round(SignalLinkService.SafeModeCheckSeconds * GameClock.StepHz);
             for (int rep = 0; rep < 20; rep++)
             {
-                s.SignalCore.SafeModes = records.Select(r => new SignalSafeModeRecord { LogicId = r.LogicId, Reason = r.Reason, ClearSinceGameSeconds = -1 }).ToArray();
+                s.SignalCore.SafeModes = records.Select(r => new SignalSafeModeRecord { LogicId = r.LogicId, Reason = r.Reason, ClearSinceTick = -1 }).ToArray();
                 while (GameClock.Ticks % every != 0)
                 {
                     WorldSimulation.StepMany(1);

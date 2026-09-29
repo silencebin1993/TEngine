@@ -71,8 +71,7 @@ namespace GameLogic.Campaign.Signal
         /// <summary>下一次开火还要多少游戏秒才会再计一次暴露（0 = 下一发就计）。</summary>
         public static double ChargeRemaining(CampaignState s)
         {
-            double ready = s?.SignalCore?.RawChargeReadyAtGameSeconds ?? 0;
-            return ready <= 0 ? 0 : Math.Max(0, ready - GameClock.GameSeconds);
+            return GameClock.SecondsUntil(s?.SignalCore?.RawChargeReadyTick ?? 0);
         }
 
         /// <summary>
@@ -120,7 +119,7 @@ namespace GameLogic.Campaign.Signal
                     RawFiredCount++;
                 }
                 CampaignFgStateDomains.EnsureAll(s);
-                s.SignalCore.RawChargeReadyAtGameSeconds = GameClock.GameSeconds + ChargeIntervalSeconds;
+                s.SignalCore.RawChargeReadyTick = GameClock.TickAfter(ChargeIntervalSeconds); // 整数步（DEBT-FG1SIG07-05）
                 SignalUplinkService.PushFeedback(GameText.Format("signal.raw.fired",
                     string.Join(GameText.Get("signal.core.summary_sep"), raws.Select(id => FirmwareKinds.DisplayName(id) ?? id)),
                     total.ToString("0.#", CultureInfo.InvariantCulture)));
@@ -137,11 +136,11 @@ namespace GameLogic.Campaign.Signal
         public static void SimStep(CampaignState s)
         {
             SignalCoreState core = s?.SignalCore;
-            if (core == null || core.RawChargeReadyAtGameSeconds <= 0 || GameClock.GameSeconds < core.RawChargeReadyAtGameSeconds)
+            if (core == null || core.RawChargeReadyTick <= 0 || GameClock.Ticks < core.RawChargeReadyTick)
             {
                 return;
             }
-            core.RawChargeReadyAtGameSeconds = 0;
+            core.RawChargeReadyTick = 0;
             RearmCount++;
             int id = SignalUplinkService.CurrentMachine(s);
             if (id != 0)

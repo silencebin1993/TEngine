@@ -322,14 +322,15 @@ namespace GameLogic.Campaign
             float demand = state.PowerDemand;
             state.HighPowerAccrued += HighPowerRatePerHour(demand) * dt / hour;
             state.HighPowerPeakDemand = Math.Max(state.HighPowerPeakDemand, demand);
-            // 窗口计时用 double：一个游戏小时 3000 个固定步的 float 累加会差出一步，结算时刻就不再与步数对齐。
-            state.HighPowerElapsedSeconds += dt;
-            double window = HighPowerSettleSeconds;
-            if (state.HighPowerElapsedSeconds + 1e-6 < window)
+            // 窗口计时存整数步（FG1-E2E-01，DEBT-FG1SIG07-05）：float / double 累加一个游戏小时会差出一步，存成浮点读回还会差 1 ulp；
+            // 整数步与统一时钟一一对应，结算时刻永远落在同一步，存读档逐位一致。
+            state.HighPowerElapsedTicks += Math.Max(1L, GameClock.TicksFor(dt));
+            long window = Math.Max(1L, GameClock.TicksFor(HighPowerSettleSeconds));
+            if (state.HighPowerElapsedTicks < window)
             {
                 return;
             }
-            state.HighPowerElapsedSeconds -= window;
+            state.HighPowerElapsedTicks -= window;
             float amount = state.HighPowerAccrued;
             float peak = state.HighPowerPeakDemand;
             state.HighPowerAccrued = 0f;

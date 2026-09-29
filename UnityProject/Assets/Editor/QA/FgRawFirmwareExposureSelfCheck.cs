@@ -672,9 +672,9 @@ namespace GameLogic.EditorTools
                 "直控累计清零停用；各来源累计由旧明细重建；已带回的静默协议数据盒补发一枚未破解标记跳转");
 
             // 再存再读：幂等（不重复迁移、不重复补发），新状态逐字段往返。
-            l.SignalCore.RawChargeReadyAtGameSeconds = GameClock.GameSeconds + 5.5;
+            l.SignalCore.RawChargeReadyTick = GameClock.TickAfter(5.5);
             l.HighPowerAccrued = 0.75f;
-            l.HighPowerElapsedSeconds = 12.5f;
+            l.HighPowerElapsedTicks = GameClock.TicksFor(12.5);
             CampaignExposureLedger.GrantRawFire(l, FirmwareCatalog.FwMarkTagId);
             string before = ExposureSnapshot(l);
             int chips = l.PrimitiveChips.Length;
@@ -682,7 +682,7 @@ namespace GameLogic.EditorTools
             CampaignState l2 = LoadLikeMenu();
             string after = l2 != null ? ExposureSnapshot(l2) : "(读档失败)";
             Expect(l2 != null && before == after && l2.PrimitiveChips.Length == chips
-                   && Math.Abs(l2.SignalCore.RawChargeReadyAtGameSeconds - l.SignalCore.RawChargeReadyAtGameSeconds) < 1e-6,
+                   && l2.SignalCore.RawChargeReadyTick == l.SignalCore.RawChargeReadyTick,
                 $"再存再读：暴露值、明细（种类 / 细节 / 阵营 / 序号）、各来源累计、高功率窗口、裸跑计次时刻逐字段一致，芯片数不变（{chips}，不重复补发）");
             string zh = CampaignExposureLedger.SourceText(ev.First(e => e.EventId == "exposure:direct_control_30s:1"));
             GameSettings.SetLanguage(GameLanguage.En);
@@ -698,8 +698,8 @@ namespace GameLogic.EditorTools
         {
             var sb = new StringBuilder();
             sb.Append(s.SignalExposure.ToString("R")).Append('|').Append(s.ExposureRulesVersion).Append('|').Append(s.ExposureEventSeq)
-                .Append('|').Append(s.HighPowerAccrued.ToString("R")).Append('|').Append(s.HighPowerElapsedSeconds.ToString("R"))
-                .Append('|').Append(s.SignalCore.RawChargeReadyAtGameSeconds.ToString("R"));
+                .Append('|').Append(s.HighPowerAccrued.ToString("R")).Append('|').Append(s.HighPowerElapsedTicks)
+                .Append('|').Append(s.SignalCore.RawChargeReadyTick);
             foreach (SignalExposureEventRecord e in s.SignalExposureEvents.OrderBy(e => e.Seq))
             {
                 sb.Append('|').Append(e.EventId).Append(':').Append(e.Kind).Append(':').Append(e.Detail).Append(':').Append(e.Faction).Append(':').Append(e.Seq)
@@ -726,10 +726,10 @@ namespace GameLogic.EditorTools
                 CampaignState s = NewHome(8660 + (int)(speed * 10));
                 s.PowerDemand = 200f;
                 int rearm0 = RawFirmwareService.RearmCount;
-                s.SignalCore.RawChargeReadyAtGameSeconds = GameClock.GameSeconds + 8.0;
+                s.SignalCore.RawChargeReadyTick = GameClock.TickAfter(8.0);
                 GameClock.SetPaused(true);
                 Frames(40);
-                pauseOk &= RawFirmwareService.RearmCount == rearm0 && s.SignalExposureEvents.Length == 0 && s.HighPowerElapsedSeconds == 0.0;
+                pauseOk &= RawFirmwareService.RearmCount == rearm0 && s.SignalExposureEvents.Length == 0 && s.HighPowerElapsedTicks == 0;
                 GameClock.SetPaused(false);
                 GameClock.SetSpeed(speed);
                 double start = GameClock.GameSeconds;

@@ -139,9 +139,19 @@ namespace GameLogic.Campaign.Regions
 
         public void DetachView()
         {
+            // FG1-E2E-01（FGJ-M1 旅程发现）：同一台机器可能同时有两份标记——出征时远征地点先挂上新表现，家园随后才摘掉旧表现。
+            // 摘除时把“摘的是哪一份表现”传过去，只清这一份的登记；否则家园晚到的摘除会把远征地点刚挂上的形变 / 安全模式图标登记一起清掉，
+            // 远征地点里接入的机器看不到形变、断链后头顶没有安全模式图标。
+            // 常见顺序：镜头离开家园（家园摘掉全部表现）→ 远征地点挂上新表现 → 家园模拟步把出征的机器标记移走，又调一次 DetachView。
+            // 这时本标记早就没有表现了：什么也不做，不能按编号把远征地点那份登记清掉。
+            MachineView old = View;
             View = null;
-            GameLogic.View.SignalLinkView.OnViewDetached(LogicId);
-            GameLogic.View.MachineMorphView.OnViewDetached(LogicId);
+            if (ReferenceEquals(old, null))
+            {
+                return;
+            }
+            GameLogic.View.SignalLinkView.OnViewDetached(LogicId, old);
+            GameLogic.View.MachineMorphView.OnViewDetached(LogicId, old);
         }
     }
 }

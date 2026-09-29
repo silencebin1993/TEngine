@@ -407,7 +407,7 @@ namespace GameLogic.EditorTools
                 CommitVia(a);
                 Frames(2);
                 // 冷却中（冷却属于信号，按游戏时间）：写进正式冷却表，HUD 标“冷却 N 秒”，到点回到“生效”。
-                s.SignalCore.CoreCooldowns = new[] { new SignalCoreCooldownRecord { ContentId = FirmwareCatalog.FwOverloadId, ReadyAtGameSeconds = GameClock.GameSeconds + 5.0 } };
+                s.SignalCore.CoreCooldowns = new[] { new SignalCoreCooldownRecord { ContentId = FirmwareCatalog.FwOverloadId, ReadyTick = GameClock.TickAfter(5.0) } };
                 hud.Refresh();
                 string cooling = v.SlotText(0);
                 WorldSimulation.StepMany(60 * 6);
@@ -980,8 +980,19 @@ namespace GameLogic.EditorTools
             Press(Key(GameActionId.FollowSelection));
             bool again = WorldView.Director.IsFollowing;
             Press(Key(GameActionId.FollowSelection));
-            Expect(deniedNoSel && following && dist < 1.5f && stoppedByPan && again && !WorldView.Director.IsFollowing,
+            bool toggledOff = !WorldView.Director.IsFollowing;
+            Expect(deniedNoSel && following && dist < 1.5f && stoppedByPan && again && toggledOff,
                 $"没有选中：拒绝并说明；选中后按 F → 跟随（机器移到别处，镜头注视点跟到 {dist:0.00} 格内）；按平移键停止；再按 F 开、再按一次停");
+            // FG1-E2E-01（FGJ-M1 旅程发现）：跟随中按“回到归还核心”——镜头飞回核心并停止跟随，不会在飞到之后又被跟随拽回机器。
+            Press(Key(GameActionId.FollowSelection));
+            bool followingAgain = WorldView.Director.IsFollowing;
+            int stops1 = WorldView.Director.FollowStopCount;
+            Press(Key(GameActionId.FocusHomeCore));
+            Frames(90);
+            Vector2 home = WorldSimulation.Home.DefaultFocus;
+            float homeDist = math.distance(WorldView.Director.StrategyFocus, new float2(home.x, home.y));
+            Expect(followingAgain && !WorldView.Director.IsFollowing && WorldView.Director.FollowStopCount == stops1 + 1 && homeDist < 1.5f,
+                $"跟随中按“回到归还核心”：停止跟随，1.5 秒后镜头停在核心（离核心 {homeDist:0.00} 格），没有被拽回机器");
         }
 
         // ── K. 机器列表与地图标记 ─────────────────────────────────────────────────

@@ -128,8 +128,11 @@ namespace GameLogic.Campaign
         /// <summary>FG1-SIG-06（FGU-44）：按（来源种类，阵营）累计的暴露增减——“各阵营贡献”读这里，明细截断不影响。唯一写入口 <see cref="CampaignExposureLedger"/>。</summary>
         public SignalExposureTotalRecord[] SignalExposureTotals = Array.Empty<SignalExposureTotalRecord>();
 
-        /// <summary>FG1-SIG-06：高功率生产——本结算窗口已累计的游戏秒与暴露（按游戏时间，与观察无关；每满一个游戏小时记一笔来源）。</summary>
+        /// <summary>旧档字段（FG1-SIG-06 起存游戏秒）：只在读档迁移时读一次，换成 <see cref="HighPowerElapsedTicks"/> 后清零；新代码不读写。</summary>
         public double HighPowerElapsedSeconds;
+        /// <summary>FG1-SIG-06：高功率生产——本结算窗口已累计的统一时钟步（按游戏时间，与观察无关；每满一个游戏小时记一笔来源）。
+        /// FG1-E2E-01 起存整数步（DEBT-FG1SIG07-05：浮点累计经 JsonUtility 读回会差 1 ulp）。</summary>
+        public long HighPowerElapsedTicks;
         public float HighPowerAccrued;
         /// <summary>FG1-SIG-06：本结算窗口里的最高用电需求（来源名里显示“用电 N”）。</summary>
         public float HighPowerPeakDemand;

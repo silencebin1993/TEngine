@@ -40,7 +40,8 @@ namespace GameLogic.EditorTools.JourneyBots
     ///
     /// 测试捷径（登记在 FG-GAP-REGISTER，DEBT-FG0QA01-*）：
     /// - 远征队用家园的机器编队代替：正式的“远征队在星球表面行进”属于 FG8-EXP-02（现在的远征出发只载入固定地点，不沿地形行进）。
-    /// - “再飞回远征队”用 WorldView.FlyTo 飞到编队位置：家园编队还不是关注点（Tab 只轮换家园 / 远征地点 / 突袭），“跟随选中”键还没有实现。
+    /// - 选目标时镜头用 WorldView.FlyTo 飞到 1,000 格外的目标点（让目标出现在画面里好点击；玩家会平移过去）。
+    /// - （FG1-E2E-01 起取消）“再飞回远征队”原先用 FlyTo 捷径：现在按“跟随选中对象”键（默认 F，FG1-HUD-01），镜头跟着编队走完全程（DEBT-FG1HUD01-06）。
     /// - FG1-SIG-07 起覆盖外的机器收不到命令（FGR-SIG-053）：选好目标后沿预检路线预置一串已建成的信号中继塔（场景夹具，出发档 S1 之前放好，
     ///   观察组与对照组完全一样），编队全程在覆盖里，到达后的“撤退”命令才收得到。玩家亲手铺中继的流程由 [覆盖网络] 自检与冒烟覆盖。
     /// </summary>
@@ -77,37 +78,64 @@ namespace GameLogic.EditorTools.JourneyBots
             OnFinish = Cleanup,
             Steps = new List<JourneyStep>
             {
-                S("play", "打开 main.unity 并进入 Play", 90, EnterPlay, TickPlay),
-                S("menu_new", "主菜单点“新建”（固定测试种子）", 150, null, TickMenuNew),
-                S("new_game", "进入归还谷地", 120, null, TickNewGame),
-                S("seed", "生成结果与该种子的基准一致", 30, null, TickSeed),
+                S("play", "打开 main.unity 并进入 Play", 90, JourneyCommon.EnterPlay, c => JourneyCommon.TickPlay(c, TestSeed, () => { _o1 = _o2 = _o2b = _o3 = null; })),
+                S("menu_new", "主菜单点“新建”（固定测试种子）", 150, null, JourneyCommon.TickMenuNew, retries: 1),
+                S("new_game", "进入归还谷地", 120, null, JourneyCommon.TickNewGame),
+                S("seed", "生成结果与该种子的基准一致", 30, null, c => JourneyCommon.TickSeed(c, TestSeed)),
 
-                S("b_pause", "按暂停键（战略暂停中规划建造）", 10, c => PressAction(GameActionId.TogglePause), TickPaused, retries: 1),
-                S("b_open", "按建造菜单键打开建造模式，点建造栏第一项", 10, c => PressAction(GameActionId.OpenBuildMenu), TickBuildOpen, retries: 1),
+                // FG1-E2E-01（DEBT-FG0QA01-07）：切换类按键先读状态再决定按不按——重试时第一次按键已经生效也不会被切回去。
+                S("b_pause", "按暂停键（战略暂停中规划建造）", 10, c => JourneyInput.PressToggleTo(GameActionId.TogglePause, () => GameClock.Paused, true), TickPaused, retries: 1),
+                S("b_open", "按建造菜单键打开建造模式，点建造栏第一项", 10,
+                    c => JourneyInput.PressToggleTo(GameActionId.OpenBuildMenu, () => HomeValleyBuildMode.Current != null && HomeValleyBuildMode.Current.IsOpen, true), TickBuildOpen, retries: 1),
                 S("b_hover_a", "鼠标移到空地 A（虚影跟随）", 10, c => HoverBuildCell(c, "A"), c => TickHover(c, "A")),
-                S("b_rotate_a", "按旋转键", 10, c => PressAction(GameActionId.Rotate, JourneyInput.ScreenOf(CellPos(c, "A"))), TickRotated, retries: 1),
+                S("b_rotate_a", "按旋转键", 10, c =>
+                {
+                    if (HomeValleyBuildMode.Current == null || HomeValleyBuildMode.Current.GhostRotation != 90)
+                    {
+                        PressAction(GameActionId.Rotate, JourneyInput.ScreenOf(CellPos(c, "A")));
+                    }
+                }, TickRotated, retries: 1),
                 S("b_place_a", "左键放置（旋转 90° 的发电机）", 10, c => JourneyInput.Click(CellPos(c, "A")), c => TickPlaced(c, "A", 90f), retries: 1),
                 S("b_hover_b", "鼠标移到空地 B", 10, c => HoverBuildCell(c, "B"), c => TickHover(c, "B")),
                 S("b_rotate_b", "按旋转键转回 0°", 10, null, TickRotateBack),
                 S("b_place_b", "左键放置第二座", 10, c => JourneyInput.Click(CellPos(c, "B")), c => TickPlaced(c, "B", 0f), retries: 1),
-                S("b_demolish", "按拆除模式键", 10, c => PressAction(GameActionId.DemolishMode), TickDemolishMode, retries: 1),
+                S("b_demolish", "按拆除模式键", 10,
+                    c => JourneyInput.PressToggleTo(GameActionId.DemolishMode, () => HomeValleyBuildMode.Current != null && HomeValleyBuildMode.Current.DemolishMode, true), TickDemolishMode, retries: 1),
                 S("b_cancel_b", "拆除模式点第二座的虚影（取消规划，全额退款）", 10, c => JourneyInput.Click(CellPos(c, "B")), TickCancelled, retries: 1),
-                S("b_esc", "Esc 退出建造模式", 10, c => PressAction(GameActionId.Cancel), TickBuildClosed, retries: 1),
+                S("b_esc", "Esc 退出建造模式", 10, c =>
+                {
+                    if (HomeValleyBuildMode.Current != null && HomeValleyBuildMode.Current.IsOpen)
+                    {
+                        PressAction(GameActionId.Cancel);
+                    }
+                }, TickBuildClosed, retries: 1),
 
                 S("squad_select", "框选两台以上的机器组成编队", 15, BoxSelectSquad, TickSquadSelected, retries: 2),
                 S("target", "按种子地形找 1,000 格外能走到的目标，镜头飞过去", 60, PickTargetAndFly, TickTargetView),
-                S("arm_move", "按“移动”命令键（等点击选目标）", 10, c => PressAction(GameActionId.CommandMove), TickArmed, retries: 1),
+                S("arm_move", "按“移动”命令键（等点击选目标）", 10, c =>
+                {
+                    if (GameRoot.HomeValley.SquadCommands.ArmedKind != RegionCommandKind.Move)
+                    {
+                        PressAction(GameActionId.CommandMove);
+                    }
+                }, TickArmed, retries: 1),
                 S("click_target", "左键点目标：编队接令（暂停中排队）；存出发档 S1", 10, c => JourneyInput.Click(TargetPos(c)), TickMoveIssued, retries: 1),
                 S("cam_home", "按“回到归还核心”键：镜头飞回家园", 10, c => PressAction(GameActionId.FocusHomeCore), TickCameraHome, retries: 1),
-                S("resume", "按暂停键继续", 10, c => PressAction(GameActionId.TogglePause), TickRunning, retries: 1),
-                S("speed", "按 3 倍速键", 10, c => PressAction(GameActionId.SpeedTriple), TickSpeed, retries: 1),
+                S("resume", "按暂停键继续", 10, c => JourneyInput.PressToggleTo(GameActionId.TogglePause, () => !GameClock.Paused, true), TickRunning, retries: 1),
+                S("speed", "按 3 倍速键", 10, c =>
+                {
+                    if (!Mathf.Approximately(GameClock.Speed, 3f))
+                    {
+                        PressAction(GameActionId.SpeedTriple);
+                    }
+                }, TickSpeed, retries: 1),
                 S("look_home", "镜头留在家园：家园继续运行，编队在视野外走远", 120, null, TickLookHome),
-                S("fly_back", "镜头飞回编队（测试捷径：FlyTo）", 10, FlyToSquad, TickFlownToSquad),
-                S("march", "编队沿地形走完 1,000 格（镜头每 15 秒跟上一次）", 480, null, TickMarch),
+                S("fly_back", "按“跟随选中对象”键（默认 F）：镜头飞回编队并跟随", 10, PressFollow, TickFlownToSquad, retries: 1),
+                S("march", "编队沿地形走完 1,000 格（镜头全程跟随编队）", 480, null, TickMarch),
                 S("pause_arrived", "到达后暂停，拍观察组快照（T2）", 10, PauseIfRunning, TickPausedAtArrival, retries: 1),
                 S("retreat", "按“撤退”命令键：编队返回家园；存返程档 S2", 10, c => PressAction(GameActionId.CommandRetreat), TickRetreatIssued, retries: 1),
                 S("cam_home_2", "按“回到归还核心”键", 10, c => PressAction(GameActionId.FocusHomeCore), TickCameraHome, retries: 1),
-                S("resume_2", "按暂停键继续", 10, c => PressAction(GameActionId.TogglePause), TickRunning, retries: 1),
+                S("resume_2", "按暂停键继续", 10, c => JourneyInput.PressToggleTo(GameActionId.TogglePause, () => !GameClock.Paused, true), TickRunning, retries: 1),
                 S("return", "编队回到归还核心附近", 480, null, TickReturn),
                 S("pause_home", "暂停，拍观察组快照（T3）", 10, PauseIfRunning, TickPausedAtHome, retries: 1),
                 S("compare", "读 S1 / S2 无头推进到 T2 / T3：与观察组逐字段比较", 180, null, TickCompare),
@@ -115,153 +143,11 @@ namespace GameLogic.EditorTools.JourneyBots
         };
 
         private static JourneyStep S(string id, string title, double timeout, Action<JourneyContext> enter, Func<JourneyContext, StepOutcome> tick,
-            int retries = 0) => new JourneyStep
-        {
-            Id = id,
-            Title = title,
-            TimeoutSeconds = timeout,
-            MaxRetries = retries,
-            OnEnter = enter,
-            Tick = tick,
-        };
-
-        // ── 进入游戏 ────────────────────────────────────────────────────────────────
-
-        private static void EnterPlay(JourneyContext c)
-        {
-            c.Set("saves", Path.Combine(Path.GetTempPath(), "bingames-journey-saves-" + Guid.NewGuid().ToString("N")));
-            if (!EditorApplication.isPlaying)
-            {
-                // 从菜单跑时：先问要不要保存当前场景的修改（取消 = 不开旅程），别直接丢掉用户没保存的编辑。
-                if (!Application.isBatchMode && !EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
-                {
-                    c.Set("aborted", "1");
-                    return;
-                }
-                EditorSceneManager.OpenScene("Assets/Scenes/main.unity", OpenSceneMode.Single);
-                EditorApplication.EnterPlaymode();
-            }
-        }
-
-        private static StepOutcome TickPlay(JourneyContext c)
-        {
-            if (c.Get("aborted") == "1")
-            {
-                return StepOutcome.Fail("当前场景有未保存的修改、保存被取消：旅程不开（不替你丢掉修改）");
-            }
-            if (!EditorApplication.isPlaying)
-            {
-                return StepOutcome.Wait;
-            }
-            // 进 Play 重载了域：测试用的静态开关在这里（重载之后）设置。
-            string saves = c.Get("saves");
-            Directory.CreateDirectory(saves);
-            CampaignSaveService.SaveDirectoryOverrideForTests = saves;
-            CampaignRandomService.SeedOverrideForTests = TestSeed;
-            _o1 = _o2 = _o2b = _o3 = null;
-            return StepOutcome.Done($"已进入 Play；存档目录改到临时目录 {saves}；新建战役的种子固定为 {TestSeed}");
-        }
-
-        private static StepOutcome TickMenuNew(JourneyContext c)
-        {
-            UnityEngine.UI.Button button = JourneyInput.FindActiveButton("m_btn_New");
-            if (button == null || c.StepElapsed < 2)
-            {
-                return StepOutcome.Wait; // 等主菜单出现并稳定。
-            }
-            button.onClick.Invoke();
-            return StepOutcome.Done($"主菜单出现，点“新建”（{c.StepElapsed:F0} 秒）");
-        }
-
-        private static StepOutcome TickNewGame(JourneyContext c)
-        {
-            if (GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive)
-            {
-                return c.StepElapsed < 3 ? StepOutcome.Wait : StepOutcome.Done("进入归还谷地");
-            }
-            UnityEngine.UI.Button confirm = JourneyInput.FindActiveButton("m_btn_ConfirmYes");
-            if (confirm != null)
-            {
-                confirm.onClick.Invoke();
-                c.Log("出现覆盖确认，点“是”");
-                return StepOutcome.Wait;
-            }
-            UnityEngine.UI.Button slot = JourneyInput.FindActiveButton("m_btn_Slot0Action");
-            if (slot != null && c.GetInt("slotClicked") == 0)
-            {
-                c.SetInt("slotClicked", 1);
-                slot.onClick.Invoke();
-                c.Log("出现存档槽列表，点槽位 0");
-            }
-            return StepOutcome.Wait;
-        }
-
-        /// <summary>生成结果与该种子的基准一致：种子 / 生成器版本 / 世界设置经主菜单“新建”原样进了存档；区块内容哈希等于
-        /// FgWorldGenSelfCheck 的回归基准（同一算法，基准写死在那里，改生成器不升版本就会失败）；规划层与按种子独立重算的一致。</summary>
-        private static StepOutcome TickSeed(JourneyContext c)
-        {
-            if (c.StepElapsed < 1)
-            {
-                return StepOutcome.Wait;
-            }
-            CampaignState s = CampaignSession.Current;
-            if (s?.World == null)
-            {
-                return StepOutcome.Fail("没有活动战役");
-            }
-            int version = s.World.GeneratorVersion;
-            if (s.RandomSeed != TestSeed || s.World.WorldSeed != TestSeed || version != WorldGenVersions.Current
-                || s.World.WorldSettingsId != WorldGenContent.DefaultPresetId)
-            {
-                return StepOutcome.Fail($"新档的种子 / 生成器版本 / 世界设置不对：战役种子 {s.RandomSeed}、世界种子 {s.World.WorldSeed}、" +
-                                        $"版本 v{version}（当前 v{WorldGenVersions.Current}）、世界设置 {s.World.WorldSettingsId}");
-            }
-            // 核对的是游戏此刻真正在用的地形源（家园格网装着的那一个），不是按存档参数新建一个：装错了源（版本 / 表面不对）这一步要能发现。
-            IGridTerrainSource live = HomeGridService.MapFor(s)?.TerrainSource;
-            if (live == null)
-            {
-                return StepOutcome.Fail("家园格网没有地形源");
-            }
-            var checkedChunks = new List<string>();
-            foreach (var b in FgWorldGenSelfCheck.Baseline)
-            {
-                if (b.seed != TestSeed || b.version != version || b.surface != WorldGenContent.EarthSurfaceId)
-                {
-                    continue;
-                }
-                ulong h = HashOf(live, b.cx, b.cy);
-                if (h != b.hash)
-                {
-                    return StepOutcome.Fail($"区块 ({b.cx},{b.cy}) 内容哈希 {h:X16} ≠ 种子 {TestSeed} 的基准 {b.hash:X16}");
-                }
-                checkedChunks.Add($"({b.cx},{b.cy})={h:X16}");
-            }
-            if (checkedChunks.Count == 0)
-            {
-                return StepOutcome.Fail($"FgWorldGenSelfCheck.Baseline 里没有种子 {TestSeed}、v{version} 的地球表面基准（换测试种子时要同时补基准）");
-            }
-            GridCell core = HomeGridService.CorePivot(s);
-            string reference = WorldPlan.Compute(TestSeed, WorldGenContent.Version(version), WorldGenContent.Preset(version, WorldGenContent.DefaultPresetId), core.X, core.Y).Fingerprint();
-            string actual = WorldGenService.PlanFor(s)?.Fingerprint();
-            if (!string.Equals(reference, actual, StringComparison.Ordinal))
-            {
-                return StepOutcome.Fail("规划层指纹与按种子独立重算的不一致");
-            }
-            return StepOutcome.Done($"种子 {TestSeed}、v{version}、世界设置 {s.World.WorldSettingsId}；区块哈希与基准一致 {string.Join(" ", checkedChunks)}；规划层指纹一致");
-        }
-
-        private static ulong HashOf(IGridTerrainSource src, int cx, int cy)
-        {
-            int n = GridContent.TuningInt("grid.chunk_size");
-            var t = new byte[n * n];
-            var p = new byte[n * n];
-            src.FillChunk(cx, cy, n, t, p);
-            return WorldGenKernel.Hash64(t, p);
-        }
+            int retries = 0) => JourneyCommon.S(id, title, timeout, enter, tick, retries);
 
         // ── 建造（正式输入：B 打开、点建造栏、悬停、R 旋转、左键放置、X 拆除模式点虚影取消、Esc 退出；全程战略暂停）──────────
 
-        private static void PressAction(GameActionId action, Vector3? mouse = null) => JourneyInput.PressKey(GameSettings.KeyBindings.GetKey(action), mouse);
+        private static void PressAction(GameActionId action, Vector3? mouse = null) => JourneyInput.PressAction(action, mouse);
 
         private static StepOutcome TickPaused(JourneyContext c)
         {
@@ -804,22 +690,7 @@ namespace GameLogic.EditorTools.JourneyBots
         }
 
         /// <summary>行进中遇到紧急通知自动暂停（FGR-UX-020）：像玩家一样按暂停键继续（暂停只是停在触发的那一步，不改变结果）。</summary>
-        private static void ResumeIfAutoPaused(JourneyContext c)
-        {
-            if (!GameClock.Paused)
-            {
-                return;
-            }
-            double last = c.GetLong("unpauseAtMs") / 1000.0;
-            if (c.StepElapsed - last < 1.0 && c.GetLong("unpauseAtMs") > 0)
-            {
-                return;
-            }
-            c.SetLong("unpauseAtMs", Math.Max(1, (long)(c.StepElapsed * 1000)));
-            c.SetInt("autoPauses", c.GetInt("autoPauses") + 1);
-            c.Log($"第 {GameClock.Ticks} 步自动暂停（{NotificationCenter.History.LastOrDefault()?.Type?.Id}），按暂停键继续");
-            PressAction(GameActionId.TogglePause);
-        }
+        private static void ResumeIfAutoPaused(JourneyContext c) => JourneyCommon.ResumeIfAutoPaused(c);
 
         private static StepOutcome TickLookHome(JourneyContext c)
         {
@@ -839,26 +710,35 @@ namespace GameLogic.EditorTools.JourneyBots
                 : StepOutcome.Fail($"看家园时状态不对：镜头在家园 {homeView}、编队在视野外 {squadOffScreen}、推进 {ticks} 步、地貌层 {WorldPlanetView.TerrainShown}");
         }
 
-        private static void FlyToSquad(JourneyContext c)
+        /// <summary>FG1-E2E-01（DEBT-FG1HUD01-06）：按“跟随选中对象”键（默认 F，可重绑）——编队仍是选中集合，镜头飞回编队中心并一路跟随。
+        /// 先读状态再按（已经在跟随就不按，重试不会把跟随切掉）。</summary>
+        private static void PressFollow(JourneyContext c)
         {
-            Vector2 p = Centroid(Squad(c));
-            c.Set("flyX", p.x.ToString("R", CultureInfo.InvariantCulture));
-            c.Set("flyY", p.y.ToString("R", CultureInfo.InvariantCulture));
-            WorldView.FlyTo(GameRoot.HomeValley.SiteId, p);
+            if (!WorldView.Director.IsFollowing)
+            {
+                c.SetInt("followPresses", c.GetInt("followPresses") + 1);
+                PressAction(GameActionId.FollowSelection);
+            }
         }
 
         private static StepOutcome TickFlownToSquad(JourneyContext c)
         {
             ResumeIfAutoPaused(c);
-            if (c.StepElapsed < 1.2)
+            if (c.StepElapsed < 1.5)
             {
                 return StepOutcome.Wait;
             }
-            var fly = new Vector2(float.Parse(c.Get("flyX"), CultureInfo.InvariantCulture), float.Parse(c.Get("flyY"), CultureInfo.InvariantCulture));
-            float d = Vector2.Distance(CameraFocus(), fly);
-            return d < 1.5f
-                ? StepOutcome.Done($"镜头飞到编队（焦点 {CameraFocus()}，离家园 {Vector2.Distance(fly, HomeValleyLayout.Core.Position):F0} 格）")
-                : StepOutcome.Fail($"镜头没能飞到编队：焦点离编队 {d:F1} 格");
+            if (!WorldView.Director.IsFollowing)
+            {
+                return StepOutcome.Retry($"按了跟随键，镜头没有进入跟随（{GameLogic.Campaign.Signal.SignalUplinkService.LastFeedbackText}）");
+            }
+            Vector2 p = Centroid(Squad(c));
+            float d = Vector2.Distance(CameraFocus(), p);
+            if (d >= 3f)
+            {
+                return c.StepElapsed < 6 ? StepOutcome.Wait : StepOutcome.Fail($"跟随中，镜头焦点离编队中心仍有 {d:F1} 格（镜头范围把它钳住了？）");
+            }
+            return StepOutcome.Done($"跟随键：镜头飞回编队并跟随（焦点离编队中心 {d:F1} 格，离家园 {Vector2.Distance(p, HomeValleyLayout.Core.Position):F0} 格）");
         }
 
         private static StepOutcome TickMarch(JourneyContext c)
@@ -899,26 +779,19 @@ namespace GameLogic.EditorTools.JourneyBots
                     return StepOutcome.Fail($"编队到达，但离出发点只有 {marched:F0} 格");
                 }
                 return StepOutcome.Done($"编队 {squad.Count} 台全部到达：离出发点 {marched:F0} 格，用时 {(GameClock.Ticks - c.GetLong("t1")) / (double)GameClock.StepHz:F0} 游戏秒；" +
-                                        $"途中自动暂停 {c.GetInt("autoPauses")} 次；镜头跟随 {c.GetInt("follows")} 次");
+                                        $"途中自动暂停 {c.GetInt("autoPauses")} 次；跟随中断后重按跟随键 {c.GetInt("follows")} 次");
             }
-            // 镜头每 15 秒跟上编队一次（远处区块随镜头流式生成，FG0-ARCH-05）。
-            double lastFollow = c.GetLong("followAtMs") / 1000.0;
-            if (c.StepElapsed - lastFollow >= 15)
+            // 镜头全程跟随编队（远处区块随镜头流式生成，FG0-ARCH-05）。跟随意外断了（不该发生）就像玩家一样再按一次跟随键，并计数写进报告。
+            if (!WorldView.Director.IsFollowing && c.StepElapsed - c.GetLong("refollowAtMs") / 1000.0 >= 2)
             {
-                c.SetLong("followAtMs", (long)(c.StepElapsed * 1000));
+                c.SetLong("refollowAtMs", (long)(c.StepElapsed * 1000));
                 c.SetInt("follows", c.GetInt("follows") + 1);
-                WorldView.FlyTo(GameRoot.HomeValley.SiteId, Centroid(squad));
+                PressAction(GameActionId.FollowSelection);
             }
             return StepOutcome.Wait;
         }
 
-        private static void PauseIfRunning(JourneyContext c)
-        {
-            if (!GameClock.Paused)
-            {
-                PressAction(GameActionId.TogglePause);
-            }
-        }
+        private static void PauseIfRunning(JourneyContext c) => JourneyInput.PressToggleTo(GameActionId.TogglePause, () => GameClock.Paused, true);
 
         private static StepOutcome TickPausedAtArrival(JourneyContext c)
         {
@@ -1183,22 +1056,9 @@ namespace GameLogic.EditorTools.JourneyBots
 
         private static void Cleanup(JourneyContext c, bool pass)
         {
-            JourneyInput.Release();
-            CampaignRandomService.SeedOverrideForTests = null;
-            CampaignSaveService.SaveDirectoryOverrideForTests = null;
+            c.Log(JourneyCommon.UiStats());
             _o1 = _o2 = _o2b = _o3 = null;
-            string saves = c.Get("saves");
-            try
-            {
-                if (!string.IsNullOrEmpty(saves) && Directory.Exists(saves))
-                {
-                    Directory.Delete(saves, true);
-                }
-            }
-            catch (Exception)
-            {
-                // 临时目录删不掉不影响结论。
-            }
+            JourneyCommon.Cleanup(c);
         }
     }
 }

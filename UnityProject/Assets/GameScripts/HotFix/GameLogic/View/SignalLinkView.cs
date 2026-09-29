@@ -95,8 +95,13 @@ namespace GameLogic.View
             RefreshPort(marker.LogicId, CampaignSession.Current);
         }
 
-        public static void OnViewDetached(int logicId)
+        /// <summary>摘掉一台机器的表现。<paramref name="view"/> = 被摘的那份表现：登记的已经是别处新挂上的表现（机器去了别的地点）时什么也不做。</summary>
+        public static void OnViewDetached(int logicId, MachineView view = null)
         {
+            if (view != null && Views.TryGetValue(logicId, out MachineView current) && current != null && current != view)
+            {
+                return;
+            }
             Views.Remove(logicId);
             Badges.Remove(logicId);
             PortBadges.Remove(logicId);

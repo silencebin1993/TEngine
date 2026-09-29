@@ -397,9 +397,12 @@ namespace GameLogic.Campaign
         /// <summary>因断链（干扰 / 走出覆盖 / 静默夜）失去信号、处于安全模式的机器（按 LogicId 升序）。唯一写入口 <c>SignalLinkService</c>。</summary>
         public SignalSafeModeRecord[] SafeModes = Array.Empty<SignalSafeModeRecord>();
 
-        /// <summary>FG1-SIG-06（FGR-SIG-061）：常规裸跑固件下一次“发动”能计暴露的游戏时刻（0 = 随时）。记在信号上：跳到别的机器不重置（防刷）。
-        /// 只加字段不升域版本（旧档读成 0）。唯一写入口 <see cref="Signal.RawFirmwareService"/>。</summary>
+        /// <summary>旧档字段（FG1-SIG-06 起存游戏秒）：只在读档迁移时读一次，换成 <see cref="RawChargeReadyTick"/> 后清零；新代码不读写。</summary>
         public double RawChargeReadyAtGameSeconds;
+
+        /// <summary>FG1-SIG-06（FGR-SIG-061）：常规裸跑固件下一次“发动”能计暴露的统一时钟步（0 = 随时）。记在信号上：跳到别的机器不重置（防刷）。
+        /// FG1-E2E-01（DEBT-FG1SIG07-05）起存整数步（旧档的游戏秒由 <c>SignalTimeMigration</c> 换算）。唯一写入口 <see cref="Signal.RawFirmwareService"/>。</summary>
+        public long RawChargeReadyTick;
 
         // ── FG1-SIG-07（FGR-SIG-051、052；FG01 第 6 章“远距离跳转冷却”）── 只加字段、不升域版本：旧档读成 0 / 空数组 = 没有冷却、没有上一台。
 
@@ -423,10 +426,14 @@ namespace GameLogic.Campaign
         public int LogicId;
         /// <summary>进入安全模式的原因（<c>SignalLinkBreakReason</c> 的数值：1 走出覆盖 / 2 干扰场 / 3 静默夜）。</summary>
         public int Reason;
-        /// <summary>进入的游戏秒（<c>GameClock.GameSeconds</c>）。</summary>
+        /// <summary>旧档字段（存游戏秒）：只在读档迁移时读一次，换成 <see cref="SinceTick"/> 后清零；新代码不读写。</summary>
         public double SinceGameSeconds;
-        /// <summary>断链条件从哪个游戏秒起已经消失（持续 signal.safe_mode.exit_seconds 后退出安全模式）；-1 = 条件仍在。</summary>
+        /// <summary>旧档字段（存游戏秒，-1 = 条件仍在）：只在读档迁移时读一次，换成 <see cref="ClearSinceTick"/> 后置 -1；新代码不读写。</summary>
         public double ClearSinceGameSeconds = -1;
+        /// <summary>进入安全模式的统一时钟步（FG1-E2E-01 起存整数步，DEBT-FG1SIG07-05）。</summary>
+        public long SinceTick;
+        /// <summary>断链条件从哪一步起已经消失（持续 signal.safe_mode.exit_seconds 后退出安全模式）；-1 = 条件仍在。</summary>
+        public long ClearSinceTick = -1;
     }
 
     /// <summary>FG1-SIG-03：一条核心固件冷却（信号侧，不属于任何机体）。</summary>
@@ -434,8 +441,10 @@ namespace GameLogic.Campaign
     public sealed class SignalCoreCooldownRecord
     {
         public string ContentId = string.Empty;
-        /// <summary>到这个游戏秒（<c>GameClock.GameSeconds</c>）冷却结束。</summary>
+        /// <summary>旧档字段（存游戏秒）：只在读档迁移时读一次，换成 <see cref="ReadyTick"/> 后清零；新代码不读写。</summary>
         public double ReadyAtGameSeconds;
+        /// <summary>到统一时钟的这一步（<c>GameClock.Ticks</c>）冷却结束。FG1-E2E-01 起存整数步（DEBT-FG1SIG07-05）。</summary>
+        public long ReadyTick;
     }
 
     /// <summary>信号核预设（FG01 第 4 章“保存为预设、一键切换（只能在家园切换）”）。按槽位记固件内容 ID，

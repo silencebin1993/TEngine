@@ -208,6 +208,8 @@ namespace GameLogic.EditorTools
                     case 215: StepHudShown(inStep); break;
                     case 216: StepHudCodexOpened(inStep); break;
                     case 217: StepHudCodexClosed(inStep); break;
+                    case 218: StepFollowStarted(inStep); break;
+                    case 219: StepFollowStoppedByHome(inStep); break;
                     case 185: StepLinkSelect(inStep); break;
                     case 186: StepLinkPress(inStep); break;
                     case 187: StepLinkEntered(inStep); break;
@@ -1934,6 +1936,33 @@ namespace GameLogic.EditorTools
             {
                 Campaign.Blueprint.MachineLoadoutRegistry.Register(CampaignSession.Current, m, orig, SessionState.GetInt(K + "MorphOrigVer", 1));
             }
+            // FG1-E2E-01：这台机器仍是选中的——按“跟随选中对象”（默认 F），接着按“回到归还核心”要停止跟随、镜头停在核心。
+            PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.FollowSelection));
+            Next(218, "FG1-E2E-01：按“跟随选中对象”键（默认 F）跟随这台机器");
+        }
+
+        private static void StepFollowStarted(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            Check(WorldView.Director.IsFollowing, $"按 F：镜头跟随选中的机器（“{Campaign.Signal.SignalUplinkService.LastFeedbackText}”）");
+            SessionState.SetInt(K + "FollowStops0", WorldView.Director.FollowStopCount);
+            PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.FocusHomeCore));
+            Next(219, "跟随中按“回到归还核心”键（默认 Home）");
+        }
+
+        private static void StepFollowStoppedByHome(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            Vector2 home = GameRoot.HomeValley != null ? GameRoot.HomeValley.DefaultFocus : Vector2.zero;
+            float d = Vector2.Distance(CameraFocus(), home);
+            Check(!WorldView.Director.IsFollowing && WorldView.Director.FollowStopCount == SessionState.GetInt(K + "FollowStops0", 0) + 1 && d < 1.5f,
+                $"FG1-E2E-01（FGJ-M1 发现）：跟随中按“回到归还核心”——停止跟随，镜头停在核心（离核心 {d:F2} 格），没有被拽回机器");
             Next(185, "FG1-SIG-04：断链与安全模式（静默夜预留接口 + 走出信号覆盖）");
         }
 
@@ -2381,6 +2410,9 @@ namespace GameLogic.EditorTools
                   && WorldView.Director.Mode == View.ViewMode.Direct && Campaign.Signal.SignalUplinkService.FarJumpCount == SessionState.GetInt(K + "NetFar0", 0) + 1
                   && Campaign.Signal.SignalUplinkService.JumpCooldownRemaining(st) > 0,
                 $"到达：信号在 {SigLabel(t)} 里、镜头直控；远距离跳转开始冷却（{Campaign.Signal.SignalUplinkService.JumpCooldownRemaining(st):F1} 秒）");
+            // FG1-E2E-01（FGJ-M1 发现）：出征时家园晚到的摘除不能清掉远征地点的表现登记——远征地点接入的机器照样有形变 / 安全模式图标的挂点。
+            Check(View.MachineMorphView.IsRegistered(t),
+                $"远征地点的 {SigLabel(t)} 形变表现已登记（出征时家园晚到的摘除没有把它清掉）");
             SessionState.SetInt(K + "NetHome1", Campaign.Signal.SignalUplinkService.JumpHomeCount);
             PressKey(GameSettings.KeyBindings.GetKey(GameActionId.JumpHome));
             Next(209, "FGJ-M1 第 7 步：按 H 跳回家园（从远征地点回家 = 远距离，冷却中也能回家）");
@@ -2987,6 +3019,9 @@ namespace GameLogic.EditorTools
                 Check(Campaign.Signal.SignalPresence.CurrentMachineLogicId == id && GameRoot.FoundryOutpost != null
                       && GameRoot.FoundryOutpost.PossessedMachineLogicId == id && WorldView.Director.Mode == View.ViewMode.Direct,
                     $"铸造前哨外围机器列表点一下：从归还核心跳到远征地点 = 远距离跳转（1.5 秒过渡）后接入 {SigLabel(id)}，镜头直控");
+                // FG1-E2E-01（FGJ-M1 发现）：出征时家园晚到的摘除不能清掉远征地点的表现登记——远征地点接入的机器照样有形变 / 安全模式图标的挂点。
+                Check(View.MachineMorphView.IsRegistered(id),
+                    $"远征地点的 {SigLabel(id)} 形变表现已登记（出征时家园晚到的摘除没有把它清掉）");
                 CheckNoTextMarkers("铸造前哨接入后");
                 // FG1-SIG-07 审查修复：先按 H 再按 Esc——跳回家园的远距离过渡能用真实 Esc 取消（不弹暂停菜单、信号留在远征队、不开始新的冷却）。
                 SessionState.SetInt(K + "FoHome0", Campaign.Signal.SignalUplinkService.JumpHomeCount);

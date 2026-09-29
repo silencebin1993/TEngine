@@ -422,8 +422,8 @@ namespace GameLogic.Campaign.Signal
                 r = Find(s, logicId);
             }
             r.Reason = (int)reason;
-            r.SinceGameSeconds = GameClock.GameSeconds;
-            r.ClearSinceGameSeconds = -1;
+            r.SinceTick = GameClock.Ticks; // 整数步（DEBT-FG1SIG07-05）
+            r.ClearSinceTick = -1;
             SafeModeEnterCount++;
             SafeModeRevision++;
             GameLogic.Core.GuidanceHooks.Raise(GameLogic.Core.GuidanceHooks.SafeModeFirstEnter); // FG1-HUD-01：第一次进入安全模式（图鉴“安全模式”随之解锁）。
@@ -503,8 +503,8 @@ namespace GameLogic.Campaign.Signal
                 return;
             }
             SafeModeChecks++;
-            double now = GameClock.GameSeconds;
-            double exitAfter = SafeModeExitSeconds;
+            long now = GameClock.Ticks;
+            long exitAfter = GameClock.TicksFor(SafeModeExitSeconds);
             bool night = IsSilentNight;
             int uplinked = SignalUplinkService.CurrentMachine(s);
             List<int> toRemove = null;
@@ -523,15 +523,15 @@ namespace GameLogic.Campaign.Signal
                 }
                 if (night || CauseAt(s, rec) != SignalLinkBreakReason.None)
                 {
-                    r.ClearSinceGameSeconds = -1;
+                    r.ClearSinceTick = -1;
                     continue;
                 }
-                if (r.ClearSinceGameSeconds < 0)
+                if (r.ClearSinceTick < 0)
                 {
-                    r.ClearSinceGameSeconds = now;
+                    r.ClearSinceTick = now;
                     continue;
                 }
-                if (now - r.ClearSinceGameSeconds >= exitAfter - 1e-9)
+                if (now - r.ClearSinceTick >= exitAfter)
                 {
                     (toExit ??= new List<int>(2)).Add(r.LogicId);
                 }

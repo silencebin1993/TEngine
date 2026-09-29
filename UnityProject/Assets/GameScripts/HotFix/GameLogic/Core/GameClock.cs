@@ -40,6 +40,18 @@ namespace GameLogic.Core
         /// <summary>已模拟的游戏秒数（1x 下等于真实秒数）。</summary>
         public static double GameSeconds => Ticks / (double)StepHz;
 
+        /// <summary>
+        /// FG1-E2E-01（DEBT-FG1SIG07-05）：一段游戏秒换成统一时钟步数（四舍五入到整步）。进存档的“到哪一刻 / 累计多久”一律存整数步：
+        /// 游戏秒是 1/StepHz 的倍数，存成浮点经 JsonUtility 读回偶尔差 1 ulp，存读档往返逐字段对照就会不一致。
+        /// </summary>
+        public static long TicksFor(double seconds) => (long)Math.Round(seconds * StepHz);
+
+        /// <summary>从现在起再过 <paramref name="seconds"/> 游戏秒是第几步（存档里“到期步”的写法）。</summary>
+        public static long TickAfter(double seconds) => Ticks + TicksFor(seconds);
+
+        /// <summary>到期步 <paramref name="readyTick"/> 还剩多少游戏秒（0 = 已到期；readyTick ≤ 0 视为没有计时）。</summary>
+        public static double SecondsUntil(long readyTick) => readyTick <= 0 ? 0 : Math.Max(0, (readyTick - Ticks) / (double)StepHz);
+
         /// <summary>本帧按倍率缩放后的游戏时间（暂停为 0）。只给"玩家本帧的实时输入"（接入移动、交互进度）用；
         /// 一切会被观察影响的模拟都必须走固定步（<see cref="Campaign.WorldSim.WorldSimulation"/>）。</summary>
         public static float FrameScaledDt { get; private set; }

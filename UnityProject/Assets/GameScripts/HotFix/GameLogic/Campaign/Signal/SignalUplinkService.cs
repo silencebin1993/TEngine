@@ -356,12 +356,11 @@ namespace GameLogic.Campaign.Signal
             {
                 return 0;
             }
-            double now = GameClock.GameSeconds;
             for (int i = 0; i < cds.Length; i++)
             {
                 if (cds[i] != null && cds[i].ContentId == firmwareId)
                 {
-                    return Math.Max(0, cds[i].ReadyAtGameSeconds - now);
+                    return GameClock.SecondsUntil(cds[i].ReadyTick);
                 }
             }
             return 0;
@@ -1330,17 +1329,19 @@ namespace GameLogic.Campaign.Signal
                 NotifyCooldownHolders(s, logicId);
                 return;
             }
-            double ready = GameClock.GameSeconds + cd;
+            // 冷却到期存整数步（FG1-E2E-01，DEBT-FG1SIG07-05：游戏秒存浮点读回会差 1 ulp）。
+            long readyTick = GameClock.TickAfter(cd);
+            double ready = readyTick / (double)GameClock.StepHz;
             EnsureState(s);
             var list = new List<SignalCoreCooldownRecord>(s.SignalCore.CoreCooldowns);
             SignalCoreCooldownRecord rec = list.Find(c => c != null && c.ContentId == fw);
             if (rec == null)
             {
-                list.Add(new SignalCoreCooldownRecord { ContentId = fw, ReadyAtGameSeconds = ready });
+                list.Add(new SignalCoreCooldownRecord { ContentId = fw, ReadyTick = readyTick });
             }
             else
             {
-                rec.ReadyAtGameSeconds = ready;
+                rec.ReadyTick = readyTick;
             }
             s.SignalCore.CoreCooldowns = list.ToArray();
             CoreFiredCount++;
@@ -1407,11 +1408,12 @@ namespace GameLogic.Campaign.Signal
             {
                 return;
             }
+            long nowTick = GameClock.Ticks;
             double now = GameClock.GameSeconds;
             int keep = 0;
             for (int i = 0; i < cds.Length; i++)
             {
-                if (cds[i] != null && cds[i].ReadyAtGameSeconds > now)
+                if (cds[i] != null && cds[i].ReadyTick > nowTick)
                 {
                     keep++;
                 }
@@ -1424,7 +1426,7 @@ namespace GameLogic.Campaign.Signal
             int k = 0;
             for (int i = 0; i < cds.Length; i++)
             {
-                if (cds[i] != null && cds[i].ReadyAtGameSeconds > now)
+                if (cds[i] != null && cds[i].ReadyTick > nowTick)
                 {
                     next[k++] = cds[i];
                 }
@@ -1541,7 +1543,7 @@ namespace GameLogic.Campaign.Signal
                 {
                     if (cds[i] != null)
                     {
-                        cooldownKey = cooldownKey * 31 + (int)Math.Ceiling(Math.Max(0, cds[i].ReadyAtGameSeconds - GameClock.GameSeconds));
+                        cooldownKey = cooldownKey * 31 + (int)Math.Ceiling(GameClock.SecondsUntil(cds[i].ReadyTick));
                     }
                 }
             }

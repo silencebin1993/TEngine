@@ -136,9 +136,10 @@ namespace GameLogic.View
             Apply(e, instant: true);
         }
 
-        public static void OnViewDetached(int logicId)
+        /// <summary>摘掉一台机器的表现。<paramref name="view"/> = 被摘的那份表现：登记的已经是别处新挂上的表现（机器去了别的地点）时什么也不做。</summary>
+        public static void OnViewDetached(int logicId, MachineView view = null)
         {
-            if (Entries.TryGetValue(logicId, out Entry e))
+            if (Entries.TryGetValue(logicId, out Entry e) && (view == null || e.View == null || e.View == view))
             {
                 Animating.Remove(e);
                 Entries.Remove(logicId);

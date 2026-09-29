@@ -696,6 +696,8 @@ namespace GameLogic.Campaign
                 // FG1-SIG-06：旧档暴露来源按正式版规则迁移（暴露值原样保留、旧明细补来源种类、直控累计停用）；
                 // 旧档里已带回、还没发放的敌方加密固件补发到基元仓（幂等，不响提示）。
                 CampaignExposureLedger.MigrateLegacy(state);
+                // FG1-E2E-01（DEBT-FG1SIG07-05）：旧档里按游戏秒存的信号计时字段换成整数步（幂等）。
+                Signal.SignalTimeMigration.Migrate(state);
                 Signal.RawFirmwareService.GrantRecovered(state, notify: false);
             }
             catch (Exception e)

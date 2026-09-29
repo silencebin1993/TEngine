@@ -162,6 +162,9 @@ namespace GameLogic.Campaign.WorldSim
                 return false;
             }
             FlyCount++;
+            // FG1-E2E-01（FGJ-M1 旅程发现）：镜头被明确送去别处（回到核心、Tab 换关注点、点通知定位、信号跳转……）= 不再跟随选中对象，
+            // 与“玩家自己平移镜头 = 停止跟随”同一手感；否则跟随会在飞到之后把镜头又拽回编队，“回到核心”键看起来失灵。
+            DirectorInstance.StopFollow();
             IWorldSite site = ObservedSite;
             if (site != null && site.SurfaceKind == WorldSurfaceKind.Planet)
             {
@@ -196,6 +199,7 @@ namespace GameLogic.Campaign.WorldSim
             {
                 return false;
             }
+            DirectorInstance.StopFollow(); // 同 FlyTo：镜头被送去别处就不再跟随选中对象。
             if (site.CameraProfile != null)
             {
                 ApplyBounds(site.CameraProfile);
