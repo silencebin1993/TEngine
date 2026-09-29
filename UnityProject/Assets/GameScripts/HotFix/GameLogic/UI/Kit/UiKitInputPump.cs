@@ -94,6 +94,8 @@ namespace GameLogic.UI.Kit
                 SignalCore.SignalCoreHudUIToolkit.OpenExposure();
             }
 
+            ProcessLibraryKeys();
+
             if (InputRouter.ConsumeAction(GameActionId.SpeedHalf, InputScope.Strategy))
             {
                 StrategyClock.SetSpeed(0.5f);
@@ -134,6 +136,31 @@ namespace GameLogic.UI.Kit
                     NotificationCenter.Post("feature_locked", def.NameKey);
                     GuidanceHooks.Raise(GuidanceHooks.FirstReservedAction);
                 }
+            }
+        }
+
+        /// <summary>
+        /// FG2-FW-05：固件库键（默认 I）与图鉴键（默认 C）。两者登记在全部上下文（含“界面”），所以面板开着（模态）时也能读到；确认框在最上面时一律不抢。
+        /// - 固件库键：开着再按一次关闭；关着就打开。
+        /// - 图鉴键：鼠标正悬停在带图鉴链接的提示目标上 → 跳到那条条目（<see cref="CodexHoverLink.TryJump"/>，FGR-UX-030 / 051）；否则开关图鉴。
+        /// - 按当前最上层决定：层级更高的面板（图鉴盖着固件库；统计 / 反应记录 / 按键面板盖着图鉴……）开着时，这个键不起作用——
+        ///   不在它们下面开出一个看不见的模态（Esc 会先关掉看不见的那个），也不关掉被盖住的那个。
+        /// </summary>
+        public static void ProcessLibraryKeys()
+        {
+            if (UiConfirmDialog.IsOpen)
+            {
+                return;
+            }
+            if (InputRouter.ConsumeContextAction(GameActionId.OpenFirmware)
+                && !MechanicCodexPanelUIToolkit.IsOpen && !UiKitPanelHost.AnyModalAbove(FirmwareLibraryPanelUIToolkit.Order))
+            {
+                FirmwareLibraryPanelUIToolkit.Toggle();
+            }
+            if (InputRouter.ConsumeContextAction(GameActionId.OpenCodex)
+                && !UiKitPanelHost.AnyModalAbove(MechanicCodexPanelUIToolkit.Order) && !CodexHoverLink.TryJump())
+            {
+                MechanicCodexPanelUIToolkit.Toggle();
             }
         }
     }

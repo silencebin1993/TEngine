@@ -276,6 +276,7 @@ namespace GameLogic.UI.SignalCore
             {
                 Title = GameText.Format("uplink.hud.slot_tip", (slot.Index + 1).ToString(CultureInfo.InvariantCulture), name),
                 Body = UplinkHudModel.SlotStateText(slot) + "\n" + detail,
+                CodexEntryId = GameLogic.Progression.MechanicCodex.FirmwareEntryId(slot.FirmwareId), // FG2-FW-05：悬停按图鉴键跳到固件条目
             };
         }
 

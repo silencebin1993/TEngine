@@ -66,6 +66,8 @@ namespace GameLogic.UI.Kit
             });
             // FG1-HUD-01（FGU-05）：图鉴入口——机制图鉴盖在暂停菜单上面，关掉回到暂停菜单。
             _codexButton = Bind(root, "PauseCodex", "pause.codex", () => GameLogic.Progression.MechanicCodex.Open(null, unlock: false));
+            // FG2-FW-05（FGU-20）：固件库入口——盖在暂停菜单上面，关掉回到暂停菜单。
+            FirmwareButton = Bind(root, "PauseFirmware", "pause.firmware", FirmwareLibraryPanelUIToolkit.Open);
             // FG2-FW-04（卡片“伤害归因进入统计面板”）：统计面板盖在暂停菜单上面，关掉回到暂停菜单。
             StatsButton = Bind(root, "PauseStats", "pause.stats", StatsPanelUIToolkit.Open);
             Bind(root, "PauseSaveQuit", "ui.pause.save_and_quit", AskSaveAndQuit);
@@ -101,6 +103,7 @@ namespace GameLogic.UI.Kit
 
         public Button CodexButton => _codexButton;
         public Button StatsButton { get; private set; }
+        public Button FirmwareButton { get; private set; }
         public Slider CameraZoomSlider => _cameraZoom;
         public Slider CameraFollowSlider => _cameraFollow;
         public Button CameraResetButton => _cameraReset;

@@ -101,6 +101,9 @@ namespace GameLogic.Core
 
         public static bool IsModalOwner(object owner) => owner != null && ModalOwners.Contains(owner);
 
+        /// <summary>当前登记的全部模态占用者（只读；UI 层按层级判断“上面是否还盖着别的面板”，只在按键当下读）。</summary>
+        public static IReadOnlyCollection<object> ModalOwnerList => ModalOwners;
+
         /// <summary>FG0-UX-01（FGR-ARC-012）：建造模式开关。战略视角下开着建造模式时，生效上下文是“建造”。
         /// 建造模式本身由格网建造（FG3-LOG-01 / FG0-ARCH-04）进入；本 Story 只提供上下文切换点。</summary>
         public static void SetBuildMode(bool on)

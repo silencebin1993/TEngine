@@ -327,6 +327,17 @@ namespace GameLogic.Campaign
         /// <c>TryClaimPending</c> 必须拒绝对被预留实例的操作，防止同一实例被合成台与电路板面板同时
         /// 拿走。</summary>
         public string ReservedByTransactionId;
+
+        /// <summary>FG2-FW-05（FGR-FW-061）：玩家锁定了这枚芯片——批量分解一律跳过它（装进信号核不受影响）。
+        /// 唯一写入口 <c>PrimitiveInventory.TrySetLocked</c>。旧存档没有这个字段 = 未锁定。</summary>
+        public bool Locked;
+
+        /// <summary>FG2-FW-05（FG02 第 6 章“固件实例：来源”）：这枚芯片从哪来——seed 开局 / print 刻印 / salvage 解析 /
+        /// encrypted 带回的加密固件 / craft 合成台。创建时由 <c>PrimitiveInventory</c> 写入；旧存档为空（显示“来源未记录”）。</summary>
+        public string Origin;
+
+        /// <summary>FG2-FW-05：获得时刻（战役时间毫秒，与工厂队列同一换算），固件库“最新获得”排序用。旧存档为 0。</summary>
+        public long AcquiredTick;
     }
 
     /// <summary>ER4-PRIM-04 STORY-EXECUTION-CARDS.md：合成台唯一队列项。<c>PrimitiveCraftStation</c>

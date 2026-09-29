@@ -285,11 +285,14 @@ namespace GameLogic.EditorTools
             string[] required = { "codex.signal.uplink", "codex.signal.uplink_port", "codex.signal.core_firmware", "codex.signal.safe_mode", "codex.signal.raw" };
             var missing = required.Where(id => MechanicCodex.Find(id) == null).ToList();
             Expect(missing.Count == 0, $"卡片点名的图鉴条目齐全（信号接入 / 接入口 / 核心固件 / 安全模式 / 裸跑）{(missing.Count > 0 ? "；缺：" + string.Join("、", missing) : "")}");
-            var badHooks = MechanicCodex.Entries.SelectMany(e => e.Hooks.Where(h => !GuidanceHooks.Known.Contains(h)).Select(h => e.Id + ":" + h)).ToList();
-            var badLinks = MechanicCodex.Entries.SelectMany(e => e.Links.Where(l => MechanicCodex.Find(l) == null).Select(l => e.Id + ":" + l)).ToList();
-            var badText = MechanicCodex.Entries.SelectMany(e => new[] { e.TitleKey, e.BodyKey, e.HintKey }).Where(k => !GameText.Has(k)).ToList();
-            Expect(badHooks.Count == 0 && badLinks.Count == 0 && badText.Count == 0 && MechanicCodex.Entries.All(e => e.Hooks.Length > 0 && e.Links.Length > 0),
-                $"{MechanicCodex.Entries.Count} 条都有解锁钩子（都是 GuidanceHooks.Known 里的真钩子）、相关条目都存在、标题 / 正文 / 获取提示文本键都在" +
+            // FG2-FW-05：固件 / 反应页签的条目由各自的表派生（解锁靠拿到芯片 / 首次打出，不走引导钩子），本段只核对系统说明表（fg.TbCodexEntry）的条目；
+            // 派生条目的完整性由 FgFirmwareLibrarySelfCheck 核对。
+            var systemEntries = MechanicCodex.Entries.Where(e => e.Kind == MechanicCodexKind.System).ToList();
+            var badHooks = systemEntries.SelectMany(e => e.Hooks.Where(h => !GuidanceHooks.Known.Contains(h)).Select(h => e.Id + ":" + h)).ToList();
+            var badLinks = systemEntries.SelectMany(e => e.Links.Where(l => MechanicCodex.Find(l) == null).Select(l => e.Id + ":" + l)).ToList();
+            var badText = systemEntries.SelectMany(e => new[] { e.TitleKey, e.BodyKey, e.HintKey }).Where(k => !GameText.Has(k)).ToList();
+            Expect(badHooks.Count == 0 && badLinks.Count == 0 && badText.Count == 0 && systemEntries.All(e => e.Hooks.Length > 0 && e.Links.Length > 0),
+                $"系统说明 {systemEntries.Count} 条都有解锁钩子（都是 GuidanceHooks.Known 里的真钩子）、相关条目都存在、标题 / 正文 / 获取提示文本键都在" +
                 $"{(badHooks.Count + badLinks.Count + badText.Count > 0 ? "；问题：" + string.Join("、", badHooks.Concat(badLinks).Concat(badText).Take(5)) : "")}");
             bool t1 = GridContent.TryGetTuning("signal.link.strength_full_cells", out float full);
             bool t2 = GridContent.TryGetTuning("signal.link.strength_strong_percent", out float strong);
@@ -707,7 +710,7 @@ namespace GameLogic.EditorTools
                 int lockedItems = Enumerable.Range(0, panel.ItemCount).Count(i => panel.ItemText(i) == GameText.Get("codex.panel.locked_title"));
                 bool modal = InputRouter.IsModalOwner(panel);
                 UiEscapeStack.CloseTop();
-                Expect(lockedShown && open && jumped && lockedItems == panel.ItemCount - MechanicCodex.UnlockedCount && modal && !panel.PanelVisible && !MechanicCodexPanelUIToolkit.IsOpen,
+                Expect(lockedShown && open && jumped && lockedItems == panel.ItemCount - MechanicCodex.UnlockedCountIn(MechanicCodex.TabSystem) && modal && !panel.PanelVisible && !MechanicCodexPanelUIToolkit.IsOpen,
                     $"面板：未解锁条目显示“？？？”与获取途径、不剧透链接；已解锁显示正文与 {MechanicCodex.Find("codex.signal.uplink").Links.Length} 个相关条目（点击跳转）；{lockedItems} 条剪影；模态，Esc 关闭");
 
                 // 错误态：配置表不可用（模拟：条目为空）由 LoadError 驱动——这里核对正常时没有错误条
@@ -1303,19 +1306,20 @@ namespace GameLogic.EditorTools
             var list = root.Q<ScrollView>("CodexList");
             foreach (MechanicCodexEntry e in MechanicCodex.Entries)
             {
-                var b = new Button { text = GameText.Get(e.TitleKey) };
+                var b = new Button { text = MechanicCodex.Title(e) };
                 b.AddToClassList("mw-btn");
                 b.AddToClassList("cx-item");
                 list?.Add(b);
             }
-            MechanicCodexEntry longest = MechanicCodex.Entries.OrderByDescending(e => GameText.Get(e.BodyKey).Length).First();
-            Set(root, "CodexEntryTitle", GameText.Get(longest.TitleKey));
-            Set(root, "CodexEntryBody", GameText.Get(longest.BodyKey));
+            // FG2-FW-05：正文按条目来源取（固件条目是完整详情页，最长），压测最长的那条。
+            MechanicCodexEntry longest = MechanicCodex.Entries.OrderByDescending(e => MechanicCodex.Body(e, CampaignSession.Current).Length).First();
+            Set(root, "CodexEntryTitle", MechanicCodex.Title(longest));
+            Set(root, "CodexEntryBody", MechanicCodex.Body(longest, CampaignSession.Current));
             Set(root, "CodexRelatedTitle", GameText.Get("codex.panel.related"));
             VisualElement related = root.Q<VisualElement>("CodexRelated");
             foreach (string link in longest.Links)
             {
-                var b = new Button { text = GameText.Get(MechanicCodex.Find(link).TitleKey) };
+                var b = new Button { text = MechanicCodex.Title(MechanicCodex.Find(link)) };
                 b.AddToClassList("mw-btn");
                 b.AddToClassList("cx-link");
                 related?.Add(b);
@@ -1329,7 +1333,7 @@ namespace GameLogic.EditorTools
             Unhide(root);
             Set(root, "PauseMenuTitle", GameText.Get("ui.pause.title"));
             foreach ((string name, string key) in new[] { ("PauseResume", "ui.pause.resume"), ("PauseKeyBindings", "ui.pause.keybinds"), ("PauseNotifications", "ui.pause.notifications"),
-                         ("PauseCodex", "pause.codex"), ("PauseSaveQuit", "ui.pause.save_and_quit"), ("PauseCopySeed", "ui.pause.copy_seed"), ("PauseCameraReset", "pause.camera_reset") })
+                         ("PauseCodex", "pause.codex"), ("PauseFirmware", "pause.firmware"), ("PauseSaveQuit", "ui.pause.save_and_quit"), ("PauseCopySeed", "ui.pause.copy_seed"), ("PauseCameraReset", "pause.camera_reset") })
             {
                 Button b = root.Q<Button>(name);
                 if (b != null)

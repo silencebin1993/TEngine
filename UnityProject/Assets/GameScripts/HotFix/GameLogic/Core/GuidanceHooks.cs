@@ -67,6 +67,8 @@ namespace GameLogic.Core
         public const string ReactionLogFirstOpen = "firmware.reaction_log.first_open";
         /// <summary>FG2-FW-04：第一次打开统计面板（引导内容在 FG15-UX-04：伤害归因的累计与每场明细怎么读、只统计远征与突袭）。</summary>
         public const string StatsPanelFirstOpen = "stats.panel.first_open";
+        /// <summary>FG2-FW-05：第一次打开固件库（引导内容在 FG15-UX-04：筛选 / 比较怎么用、锁定防误拆、批量分解会先确认；图鉴“固件库”系统说明随之解锁）。</summary>
+        public const string FirmwareLibraryFirstOpen = "firmware.library.first_open";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -84,6 +86,7 @@ namespace GameLogic.Core
             MorphFirstSeen, SafeModeFirstEnter,
             StatusTagFirstSeen, ReactionFirstNamed,
             ReactionLogFirstOpen, StatsPanelFirstOpen,
+            FirmwareLibraryFirstOpen,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

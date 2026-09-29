@@ -1152,7 +1152,7 @@ namespace GameLogic.UI.CircuitBoard
         {
             CampaignState state = CampaignSession.Current;
             int bagCount = PrimitiveInventory.BagCount(state);
-            _bagCapacityLabel.text = $"仓 {bagCount}/{PrimitiveInventory.Capacity}";
+            _bagCapacityLabel.text = $"仓 {bagCount}/{PrimitiveInventory.CapacityOf(state)}";
 
             _bagPartIdsByDropdownIndex.Clear();
             var bagChoices = new List<string>();
@@ -1271,7 +1271,8 @@ namespace GameLogic.UI.CircuitBoard
                 : CarrierReadings.TryGetCarrier(_board.PrimaryId, out Campaign.Signal.FirmwareCarrier carrier)
                     ? Localization.GameText.Format("reading.detail.line", CarrierReadings.CarrierName(carrier), CarrierReadings.Reading(fw, carrier))
                     : Localization.GameText.Get("reading.circuit.none");
-            return new TooltipContent { Title = title, Body = body };
+            // FG2-FW-05：悬停按图鉴键跳到这条固件的图鉴条目（FG02 第 4 章）。
+            return new TooltipContent { Title = title, Body = body, CodexEntryId = Progression.MechanicCodex.FirmwareEntryId(fw) };
         }
 
         /// <summary>悬停主组件：载体与（固定底盘上的）炮塔读法。</summary>

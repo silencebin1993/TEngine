@@ -712,6 +712,7 @@ namespace GameLogic.Campaign.Regions
             }
 
             CampaignSession.Set(slotIndex, restore.State);
+            GameLogic.Campaign.Signal.FirmwareLibrary.OnCampaignEntered(restore.State); // FG2-FW-05：与读档一致，补解锁图鉴
             GameRoot.ResumeHomeValley();
             Log.Info("[ExpeditionDepartureService] 已回滚到出发前档并重新进入归还谷地，未复制任何机器/货物/奖励。");
             return true;

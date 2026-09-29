@@ -235,7 +235,7 @@ namespace GameLogic.UI.PrimitiveCraft
             CampaignState state = CampaignSession.Current;
 
             int bagCount = PrimitiveInventory.BagCount(state);
-            _bagCapacityLabel.text = $"仓 {bagCount}/{PrimitiveInventory.Capacity}";
+            _bagCapacityLabel.text = $"仓 {bagCount}/{PrimitiveInventory.CapacityOf(state)}";
 
             // 升级材料下拉：只列 CardDefId==DefaultChipContentId（聚焦镜）且未被预留的仓内实例——
             // TryEnqueueUpgrade 本身也会校验内容/预留，这里预先过滤是"合法目标"UI 要求的具体落点。

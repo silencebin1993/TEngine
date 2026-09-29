@@ -185,6 +185,10 @@ namespace GameLogic.EditorTools
                     case 152: StepSignalEquipped(inStep); break;
                     case 153: StepSignalPresetSaved(inStep); break;
                     case 154: StepSignalClosed(inStep); break;
+                    case 180: StepFwLibOpened(inStep); break;
+                    case 181: StepFwLibCodexJumped(inStep); break;
+                    case 182: StepFwLibCodexClosed(inStep); break;
+                    case 183: StepFwLibClosed(inStep); break;
                     case 196: StepExposureOpened(inStep); break;
                     case 197: StepExposureClosed(inStep); break;
                     case 161: StepUplinkEditorOpened(inStep); break;
@@ -629,8 +633,9 @@ namespace GameLogic.EditorTools
                 return;
             }
             Check(!NotificationHudUIToolkit.CenterOpen, "再按一次关闭通知中心");
-            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.OpenCodex));
-            Next(32, "按图鉴键（图鉴由 FG2-FW-05 承接，尚未开放）");
+            // FG2-FW-05 起图鉴键已接通（打开图鉴），“尚未开放”提示改用研发树键（FG5-RND-01 承接）。
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.OpenResearch));
+            Next(32, "按研发树键（研发树由 FG5-RND-01 承接，尚未开放）");
         }
 
         private static void StepReservedKeyHint(double inStep)
@@ -642,7 +647,7 @@ namespace GameLogic.EditorTools
             var toast = Notifications.NotificationCenter.Toasts.FirstOrDefault(e => e.Type.Id == "feature_locked");
             string shown = string.Join("／", (NotificationHudUIToolkit.Instance?.Root?.Q<VisualElement>("ToastList")?.Query<Label>().ToList()
                 ?? new System.Collections.Generic.List<Label>()).Where(l => l.resolvedStyle.display == DisplayStyle.Flex && !string.IsNullOrEmpty(l.text)).Select(l => l.text));
-            Check(toast != null && shown.Contains(Localization.GameText.Get("input.action.open_codex.name")),
+            Check(toast != null && shown.Contains(Localization.GameText.Get("input.action.open_research.name")),
                 $"按尚未开放的键给出提示，不静默：弹出条“{shown}”");
             PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
             Next(33, "按 Esc（没有打开的面板 → 暂停菜单）");
@@ -676,6 +681,16 @@ namespace GameLogic.EditorTools
             bool codexClosed = ClickUitk("[MechanicCodexHost]", "CodexClose") && !UI.Kit.MechanicCodexPanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen;
             Check(codexClicked && codexOpen && codexClosed,
                 $"暂停菜单点“图鉴”：机制图鉴打开（{codex?.ItemCount} 条，当前“{codexTitle}”），点关闭回到暂停菜单");
+            // FG2-FW-05（FGU-20）：暂停菜单“固件库”→ 固件库盖在暂停菜单上面；此时还没有固件芯片时显示空状态说明；点关闭回到暂停菜单。
+            bool fwClicked = ClickUitk("[PauseMenuHost]", "PauseFirmware");
+            UI.Kit.FirmwareLibraryPanelUIToolkit fwlib = UI.Kit.FirmwareLibraryPanelUIToolkit.Instance;
+            bool fwOpen = fwlib != null && UI.Kit.FirmwareLibraryPanelUIToolkit.IsOpen && fwlib.PanelVisible && fwlib.CountText.Length > 0
+                          && (fwlib.RowCount > 0 || fwlib.EmptyText.Length > 0) && !Localization.GameText.ContainsMarker(fwlib.CountText + fwlib.EmptyText + fwlib.FooterText)
+                          // FG00 B14：打开固件库发出首次打开钩子，图鉴“固件库”系统说明随之解锁。
+                          && GameSettings.HasSeenGuidanceHook(GuidanceHooks.FirmwareLibraryFirstOpen) && Progression.MechanicCodex.IsUnlocked("codex.firmware.library");
+            string fwState = fwlib == null ? string.Empty : fwlib.RowCount > 0 ? fwlib.RowText(0) : fwlib.EmptyText;
+            bool fwClosed = ClickUitk("[FirmwareLibraryHost]", "FwLibClose") && !UI.Kit.FirmwareLibraryPanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen;
+            Check(fwClicked && fwOpen && fwClosed, $"暂停菜单点“固件库”：固件库打开（{fwlib?.CountText}；“{fwState}”），首次打开钩子已发、图鉴“固件库”条目已解锁；点关闭回到暂停菜单");
             // FG2-FW-04（FGR-FW-043 / FGR-SYS-020）：暂停菜单“战斗反馈”三个开关（勾选立即生效）与“反应记录”（日志 / 伤害归因 / 反应图鉴）。
             bool togglesShown = pm != null && pm.ReactionPopupsToggle != null && pm.ReactionSlowMotionToggle != null && pm.ReactionNudgeToggle != null
                                 && pm.ReactionPopupsToggle.label == Localization.GameText.Get("pause.reaction_popups")
@@ -1389,8 +1404,8 @@ namespace GameLogic.EditorTools
             }
             SessionState.SetInt(K + "TypeSub", 0);
             Check(!GameRoot.IsWorldPaused, "在命名框里按 Space（暂停键）不会暂停世界");
-            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.OpenCodex));
-            Next(62, "在命名框里按图鉴键（尚未开放的动作）");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.OpenResearch));
+            Next(62, "在命名框里按研发树键（尚未开放的动作）");
         }
 
         private static void StepTypingReserved(double inStep)
@@ -1524,6 +1539,135 @@ namespace GameLogic.EditorTools
                 "再按 P 关闭信号核面板（模态释放、暂停菜单没开）");
             Check(hud != null && hud.Exposure.EntryText.StartsWith(Localization.GameText.Get("exposure.hud.button").Split('{')[0], StringComparison.Ordinal),
                 $"HUD 常驻暴露值“{hud?.Exposure.EntryText}”（FGU-44 入口）");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.OpenFirmware));
+            Next(180, "FG2-FW-05：按固件库键（默认 I）打开固件库");
+        }
+
+        // ── FG2-FW-05：固件库（I 键开关、行悬停按 C 跳图鉴、批量分解跳过在用芯片）──────────────────
+
+        private static VisualElement FwLibRow(int index)
+        {
+            UI.Kit.FirmwareLibraryPanelUIToolkit lib = UI.Kit.FirmwareLibraryPanelUIToolkit.Instance;
+            VisualElement found = null;
+            lib?.ListView?.Query<VisualElement>(className: "fl-row").ForEach(r =>
+            {
+                if (found == null && r.userData is int i && i == index)
+                {
+                    found = r;
+                }
+            });
+            return found;
+        }
+
+        private static void StepFwLibOpened(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            UI.Kit.FirmwareLibraryPanelUIToolkit lib = UI.Kit.FirmwareLibraryPanelUIToolkit.Instance;
+            string fw = Campaign.Content.FirmwareCatalog.FwOverloadId;
+            int row = -1;
+            for (int i = 0; lib != null && i < lib.RowCount; i++)
+            {
+                if (lib.Row(i).FirmwareId == fw)
+                {
+                    row = i;
+                    break;
+                }
+            }
+            if (row >= 0)
+            {
+                lib.Select(lib.Row(row).Chip.PartId);
+            }
+            string detail = lib?.DetailBodyText ?? string.Empty;
+            Check(UI.Kit.FirmwareLibraryPanelUIToolkit.IsOpen && lib != null && lib.PanelVisible && InputRouter.IsModalOwner(lib) && row >= 0
+                  && lib.RowText(row).Contains(Localization.GameText.Format("fwlib.loc.signal", 1))
+                  && detail.Contains(Localization.GameText.Format("fwlib.detail.acquire", Campaign.Signal.FirmwareKinds.AcquireText(fw))) && lib.RouteText.Length > 0 && lib.CountText.Length > 0,
+                $"按 I 打开固件库：{lib?.CountText}；过载那一行“{(row >= 0 ? lib.RowText(row) : "（没找到）")}”；取用路线“{lib?.RouteText}”");
+            CheckNoTextMarkers("固件库");
+            // 鼠标移到过载那一行上（派发指针进入事件，走 UiTooltip 自己注册的回调），再按图鉴键。
+            VisualElement r = FwLibRow(row);
+            Check(r != null, "固件库列表里过载那一行已经按需建出（虚拟化列表）");
+            if (r != null)
+            {
+                using (PointerEnterEvent enter = PointerEnterEvent.GetPooled())
+                {
+                    enter.target = r;
+                    r.SendEvent(enter);
+                }
+            }
+            SessionState.SetInt(K + "FwLibRow", row);
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.OpenCodex));
+            Next(181, "悬停过载那一行，按图鉴键（默认 C）");
+        }
+
+        private static void StepFwLibCodexJumped(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            UI.Kit.MechanicCodexPanelUIToolkit codex = UI.Kit.MechanicCodexPanelUIToolkit.Instance;
+            string id = Progression.MechanicCodex.FirmwareEntryId(Campaign.Content.FirmwareCatalog.FwOverloadId);
+            Check(UI.Kit.MechanicCodexPanelUIToolkit.IsOpen && codex != null && codex.SelectedId == id && codex.CurrentTab == Progression.MechanicCodex.TabFirmware
+                  && codex.EntryTitleText == Localization.GameText.Get("firmware.fw_overload.name")
+                  && codex.EntryBodyText.Contains(Localization.GameText.Format("fwlib.detail.acquire", Campaign.Signal.FirmwareKinds.AcquireText(Campaign.Content.FirmwareCatalog.FwOverloadId)))
+                  && UI.Kit.CodexHoverLink.LastJumpId == id && UI.Kit.FirmwareLibraryPanelUIToolkit.IsOpen,
+                $"悬停按 C 跳到图鉴固件页签的“{codex?.EntryTitleText}”（{codex?.CountText}），固件库仍在下面");
+            CheckNoTextMarkers("图鉴固件页签");
+            VisualElement r = FwLibRow(SessionState.GetInt(K + "FwLibRow", 0));
+            if (r != null)
+            {
+                using (PointerLeaveEvent leave = PointerLeaveEvent.GetPooled())
+                {
+                    leave.target = r;
+                    r.SendEvent(leave);
+                }
+            }
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.OpenCodex));
+            Next(182, "鼠标移开，再按 C 关闭图鉴");
+        }
+
+        private static void StepFwLibCodexClosed(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            UI.Kit.FirmwareLibraryPanelUIToolkit lib = UI.Kit.FirmwareLibraryPanelUIToolkit.Instance;
+            Check(!UI.Kit.MechanicCodexPanelUIToolkit.IsOpen && UI.Kit.FirmwareLibraryPanelUIToolkit.IsOpen && lib != null && lib.PanelVisible,
+                "再按 C 关闭图鉴，回到固件库");
+            // 负向：装在信号核里的芯片勾选后点“分解所选”——在用的跳过，不弹确认框、不删实例，写明原因。
+            CampaignState st = CampaignSession.Current;
+            string partId = Campaign.Signal.SignalCoreService.SlotChip(st, 0)?.PartId;
+            int before = st.PrimitiveChips.Length;
+            int scrap0 = Mathf.FloorToInt(st.Scrap);
+            VisualElement r = FwLibRow(SessionState.GetInt(K + "FwLibRow", 0));
+            bool picked = InvokeClickable(r?.Q<UnityEngine.UIElements.Button>("FwLibRowPick")) && lib != null && lib.IsPicked(partId);
+            bool clicked = ClickUitk("[FirmwareLibraryHost]", "FwLibDisassemble");
+            Check(picked && clicked && !UiConfirmDialog.IsOpen && st.PrimitiveChips.Length == before && Mathf.FloorToInt(st.Scrap) == scrap0
+                  && Campaign.Signal.SignalCoreService.SlotChip(st, 0)?.PartId == partId && lib.FeedbackText == Localization.GameText.Get("fwlib.result.nothing"),
+                $"勾选信号核里的过载、点“分解所选”：在用的跳过，不弹确认框、芯片还在 1 号槽，提示“{lib?.FeedbackText}”");
+            // 搜索：搜不到时显示空状态说明。
+            lib?.SetSearchText("不存在的固件名zz");
+            bool emptyShown = lib != null && lib.RowCount == 0 && lib.EmptyText == Localization.GameText.Get("fwlib.empty_filtered");
+            lib?.SetSearchText(string.Empty);
+            Check(emptyShown && lib.RowCount >= 1, $"搜索无结果时显示“{Localization.GameText.Get("fwlib.empty_filtered")}”，清空搜索后列表复原（{lib?.RowCount} 行）");
+            lib?.ClearPicks();
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.OpenFirmware));
+            Next(183, "再按 I 关闭固件库");
+        }
+
+        private static void StepFwLibClosed(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            UI.Kit.FirmwareLibraryPanelUIToolkit lib = UI.Kit.FirmwareLibraryPanelUIToolkit.Instance;
+            Check(!UI.Kit.FirmwareLibraryPanelUIToolkit.IsOpen && lib != null && !lib.PanelVisible && !InputRouter.IsModalOwner(lib) && !PauseMenuUIToolkit.IsOpen,
+                "再按 I 关闭固件库（模态释放、暂停菜单没开）");
             PressChord(GameSettings.KeyBindings.GetChord(GameActionId.OpenExposure));
             Next(196, "FG1-SIG-06：按暴露面板键（默认 Alt+P）打开暴露面板");
         }

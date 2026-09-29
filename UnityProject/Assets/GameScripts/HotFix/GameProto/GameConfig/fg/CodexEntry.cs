@@ -39,7 +39,7 @@ public sealed partial class CodexEntry : Luban.BeanBase
     /// </summary>
     public readonly string Id;
     /// <summary>
-    /// 页签:system=系统说明(FG13 FGR-UX-050);其余页签由 FG2-FW-05 扩
+    /// 页签:system=系统说明(FG13 FGR-UX-050);固件 / 反应页签的条目由 fg.TbFirmwareKind / fg.TbReaction 生成(FG2-FW-05),不在本表
     /// </summary>
     public readonly string Tab;
     /// <summary>

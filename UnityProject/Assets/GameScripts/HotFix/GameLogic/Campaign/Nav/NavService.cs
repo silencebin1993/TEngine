@@ -495,6 +495,96 @@ namespace GameLogic.Campaign.Nav
             return n;
         }
 
+        /// <summary>FG2-FW-05：两座建筑之间能不能走通（机器搬运的路线）。</summary>
+        public enum BuildingReach : byte
+        {
+            /// <summary>寻路镜像没绑定（家园没载入）或建筑不在格网里：无法判断。</summary>
+            Unknown = 0,
+            Connected = 1,
+            /// <summary>出发建筑四周一圈都走不了（被建筑 / 地形围住）。</summary>
+            FromEnclosed = 2,
+            /// <summary>目标建筑四周一圈都走不了。</summary>
+            ToEnclosed = 3,
+            /// <summary>两边四周都有空地，但彼此之间没有通路（被隔断）。</summary>
+            Disconnected = 4,
+        }
+
+        private static readonly List<int2> ReachSources = new List<int2>(64);
+        private static readonly List<int2> ReachProbes = new List<int2>(64);
+        private static readonly List<int> ReachOwner = new List<int>(64);
+        private static readonly bool[] ReachResult = new bool[1];
+
+        /// <summary>
+        /// FG2-FW-05（FG02 第 5 章“固件在仓库里，但搬运路线被堵 → 说明被什么堵住”）：从 <paramref name="from"/> 外一圈可走的格出发做泛洪，
+        /// 看能不能到达 <paramref name="to"/> 外一圈的任意可走格（玩家机器的通行类别，与放置预览同一个 Burst 泛洪）。
+        /// 围住某一边的建筑显示名 / “地形”写进对应的 blockers（去重）。区域 = 两座建筑外接矩形 + nav.preview_margin_cells。
+        /// 只在界面按间隔检查或事件触发时调用（O(区域格数)，Burst），不按帧。
+        /// </summary>
+        public static BuildingReach ReachBetween(CampaignState state, BuildingRecord from, BuildingRecord to, List<string> fromBlockers, List<string> toBlockers, string terrainLabel)
+        {
+            fromBlockers?.Clear();
+            toBlockers?.Clear();
+            if (!IsBound || state == null || !ReferenceEquals(state, BoundState) || from == null || to == null
+                || !GridContent.TryGetBuilding(from.BuildingTypeId, out BuildingGrid fg) || !GridContent.TryGetBuilding(to.BuildingTypeId, out BuildingGrid tg))
+            {
+                return BuildingReach.Unknown;
+            }
+            SyncGridChanges();
+            GridMath.FootprintBounds(new GridCell(from.GridX, from.GridY), fg.FootprintW, fg.FootprintH, GridMath.NormalizeRotation(from.Rotation), out GridCell fmin, out GridCell fmax);
+            GridMath.FootprintBounds(new GridCell(to.GridX, to.GridY), tg.FootprintW, tg.FootprintH, GridMath.NormalizeRotation(to.Rotation), out GridCell tmin, out GridCell tmax);
+            ReachSources.Clear();
+            ReachProbes.Clear();
+            ReachOwner.Clear();
+            PassableRing(state, from, fmin, fmax, ReachSources, null, fromBlockers, terrainLabel);
+            PassableRing(state, to, tmin, tmax, ReachProbes, ReachOwner, toBlockers, terrainLabel);
+            if (ReachSources.Count == 0)
+            {
+                return BuildingReach.FromEnclosed;
+            }
+            if (ReachProbes.Count == 0)
+            {
+                return BuildingReach.ToEnclosed;
+            }
+            int margin = Math.Max(2, (int)Math.Round(Tuning("nav.preview_margin_cells", 16f)));
+            var min = new int2(Math.Min(fmin.X, tmin.X) - margin, Math.Min(fmin.Y, tmin.Y) - margin);
+            var max = new int2(Math.Max(fmax.X, tmax.X) + margin, Math.Max(fmax.Y, tmax.Y) + margin);
+            ReachResult[0] = false;
+            Kernel.Reachability(NavConst.ClassPlayer, min, max, ReachSources, null, ReachProbes, ReachOwner, ReachResult);
+            return ReachResult[0] ? BuildingReach.Connected : BuildingReach.Disconnected;
+        }
+
+        /// <summary>建筑外一圈：可走的格进 <paramref name="into"/>；走不了的格上压着的建筑名（不含自己）或“地形”进 <paramref name="blockers"/>。</summary>
+        private static void PassableRing(CampaignState state, BuildingRecord self, GridCell bmin, GridCell bmax, List<int2> into, List<int> owner, List<string> blockers, string terrainLabel)
+        {
+            for (int x = bmin.X - 1; x <= bmax.X + 1; x++)
+            {
+                for (int y = bmin.Y - 1; y <= bmax.Y + 1; y++)
+                {
+                    bool edge = x == bmin.X - 1 || x == bmax.X + 1 || y == bmin.Y - 1 || y == bmax.Y + 1;
+                    if (!edge)
+                    {
+                        continue;
+                    }
+                    if (Kernel.Passable(x, y, NavConst.ClassPlayer))
+                    {
+                        into.Add(new int2(x, y));
+                        owner?.Add(0);
+                        continue;
+                    }
+                    if (blockers == null)
+                    {
+                        continue;
+                    }
+                    BuildingRecord b = HomeGridService.BuildingAt(state, new GridCell(x, y));
+                    string name = b != null && !ReferenceEquals(b, self) ? HomeGridService.DisplayName(b.BuildingTypeId) : terrainLabel;
+                    if (!string.IsNullOrEmpty(name) && !blockers.Contains(name))
+                    {
+                        blockers.Add(name);
+                    }
+                }
+            }
+        }
+
         private static void AddRing(GridCell bmin, GridCell bmax, int owner)
         {
             for (int x = bmin.X; x <= bmax.X; x++)

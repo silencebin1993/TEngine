@@ -17,9 +17,21 @@ namespace GameLogic.Progression
         public string[] Unlocked = Array.Empty<string>();
     }
 
-    /// <summary>一条机制图鉴条目（fg.TbCodexEntry 的运行时视图；links / hooks 已拆好）。</summary>
+    /// <summary>条目来源：系统说明（fg.TbCodexEntry）/ 固件（fg.TbFirmwareKind 生成）/ 反应（fg.TbReaction 生成）。</summary>
+    public enum MechanicCodexKind : byte
+    {
+        System = 0,
+        Firmware = 1,
+        Reaction = 2,
+    }
+
+    /// <summary>一条机制图鉴条目（fg.TbCodexEntry 的运行时视图；links / hooks 已拆好）。FG2-FW-05：固件 / 反应条目由各自的表生成，
+    /// 标题 / 正文 / 获取途径按 <see cref="Kind"/> 取（<see cref="MechanicCodex.Title"/> 等），不在 fg.TbCodexEntry 重复一份。</summary>
     public sealed class MechanicCodexEntry
     {
+        public MechanicCodexKind Kind;
+        /// <summary>固件 / 反应条目对应的内容 ID（fw_* / reaction_*）；系统说明条目为空。</summary>
+        public string ContentId;
         public string Id;
         public string Tab;
         public string TitleKey;
@@ -37,13 +49,32 @@ namespace GameLogic.Progression
     ///   所以图鉴文件丢失后，下一次接触同一机制仍会解锁。载入时把本机设置里已经见过的钩子补解锁（老玩家不会面对一片剪影）。
     ///   “?”按钮打开某条目 = 玩家正在这个机制的界面上，直接解锁（<see cref="Open"/>）。
     /// - 持久化：机制条目跨存档共享（沿用 <see cref="CodexPersistence"/> 的方式：独立 JSON 文件、整份覆盖写、读失败回落空集合不抛异常）。
-    /// - 完整图鉴（固件 / 反应 / 敌人页签、搜索、从悬停提示按键跳转）是 FG2-FW-05 / FG9-UX-01 的交付，沿用本表扩行、本类扩页签。
-    /// 开销：只在钩子触发 / 打开面板时工作，O(条目数)；不按帧。
+    /// - FG2-FW-05（FGU-38 固件 / 反应页签、FGR-UX-051 搜索与互链、FGR-UX-030 悬停跳转）：固件条目（44 条，“fw:”前缀）按 fg.TbFirmwareKind 生成，
+    ///   第一次拿到芯片或内容解锁时解锁；反应条目（“reaction:”前缀）按 fg.TbReaction 生成，第一次打出时解锁；二者都跨存档（同一个图鉴文件）。
+    ///   敌人 / 阵营等其余页签是 FG9-UX-01 的交付。
+    /// 开销：只在钩子触发 / 解锁 / 打开面板时工作，O(条目数)；不按帧。
     /// </summary>
     public static class MechanicCodex
     {
         public const int FileVersion = 1;
         private const string FileName = "codex_mechanics.json";
+
+        public const string TabSystem = "system";
+        public const string TabFirmware = "firmware";
+        public const string TabReaction = "reaction";
+
+        /// <summary>页签顺序（界面按这个顺序画标签）。</summary>
+        public static readonly string[] Tabs = { TabSystem, TabFirmware, TabReaction };
+
+        public const string FirmwarePrefix = "fw:";
+        public const string ReactionPrefix = "reaction:";
+
+        public static string FirmwareEntryId(string firmwareId) => string.IsNullOrEmpty(firmwareId) ? null : FirmwarePrefix + firmwareId;
+
+        public static string ReactionEntryId(string reactionId) => string.IsNullOrEmpty(reactionId) ? null : ReactionPrefix + reactionId;
+
+        /// <summary>条目属于哪个页签（查不到时 system）。</summary>
+        public static string TabOf(string id) => Find(id)?.Tab ?? TabSystem;
 
         /// <summary>“打开某条目”的请求（界面订阅；参数为条目 ID）。</summary>
         public static event Action<string> OpenRequested;
@@ -81,6 +112,168 @@ namespace GameLogic.Progression
                 EnsureEntries();
                 return _entries;
             }
+        }
+
+        /// <summary>某页签的条目（按 sortOrder）；<paramref name="search"/> 非空时只留匹配的：已解锁的按标题与正文、未解锁的按获取途径（不剧透名字）。</summary>
+        public static void EntriesIn(string tab, string search, List<MechanicCodexEntry> into, Campaign.CampaignState state = null)
+        {
+            into.Clear();
+            EnsureEntries();
+            EnsureUnlocked();
+            string q = string.IsNullOrWhiteSpace(search) ? null : search.Trim().ToLowerInvariant();
+            foreach (MechanicCodexEntry e in _entries)
+            {
+                if (e.Tab != tab)
+                {
+                    continue;
+                }
+                if (q != null)
+                {
+                    bool open = _unlocked.Contains(e.Id);
+                    string hay = open ? Title(e) + "\n" + Body(e, state) : Hint(e, state);
+                    if ((hay ?? string.Empty).ToLowerInvariant().IndexOf(q, StringComparison.Ordinal) < 0)
+                    {
+                        continue;
+                    }
+                }
+                into.Add(e);
+            }
+        }
+
+        public static int CountIn(string tab)
+        {
+            EnsureEntries();
+            int n = 0;
+            foreach (MechanicCodexEntry e in _entries)
+            {
+                if (e.Tab == tab)
+                {
+                    n++;
+                }
+            }
+            return n;
+        }
+
+        public static int UnlockedCountIn(string tab)
+        {
+            EnsureEntries();
+            EnsureUnlocked();
+            int n = 0;
+            foreach (MechanicCodexEntry e in _entries)
+            {
+                if (e.Tab == tab && _unlocked.Contains(e.Id))
+                {
+                    n++;
+                }
+            }
+            return n;
+        }
+
+        // ── 条目文字（按来源取；全部走文本键）─────────────────────────────────────
+
+        public static string Title(MechanicCodexEntry e)
+        {
+            if (e == null)
+            {
+                return string.Empty;
+            }
+            switch (e.Kind)
+            {
+                case MechanicCodexKind.Firmware:
+                    return Campaign.Signal.FirmwareKinds.DisplayName(e.ContentId) ?? e.ContentId;
+                case MechanicCodexKind.Reaction:
+                    return Campaign.Content.NamedReactionCatalog.NameOf(e.ContentId) ?? e.ContentId;
+                default:
+                    return GameLogic.Localization.GameText.Get(e.TitleKey);
+            }
+        }
+
+        /// <summary>已解锁时的正文。固件：与固件库详情页同一份（各载体读法、标签、参与的反应、获取途径、持有数量）；反应：说明、配料、能提供配料的固件、本存档首次触发。</summary>
+        public static string Body(MechanicCodexEntry e, Campaign.CampaignState state)
+        {
+            if (e == null)
+            {
+                return string.Empty;
+            }
+            switch (e.Kind)
+            {
+                case MechanicCodexKind.Firmware:
+                    return Campaign.Signal.FirmwareLibrary.BuildDetail(state, e.ContentId);
+                case MechanicCodexKind.Reaction:
+                    return ReactionBody(e.ContentId, state);
+                default:
+                    return GameLogic.Localization.GameText.Get(e.BodyKey);
+            }
+        }
+
+        /// <summary>未解锁时的获取提示（剪影下面那一行）。</summary>
+        public static string Hint(MechanicCodexEntry e, Campaign.CampaignState state)
+        {
+            if (e == null)
+            {
+                return string.Empty;
+            }
+            switch (e.Kind)
+            {
+                case MechanicCodexKind.Firmware:
+                    return GameLogic.Localization.GameText.Format("codex.firmware.locked_body", Campaign.Signal.FirmwareKinds.AcquireText(e.ContentId));
+                case MechanicCodexKind.Reaction:
+                    if (!Campaign.Content.NamedReactionCatalog.TryGet(e.ContentId, out GameConfig.fg.Reaction row))
+                    {
+                        return string.Empty;
+                    }
+                    if (row.Reach != Campaign.Content.NamedReactionCatalog.Reachable)
+                    {
+                        return GameLogic.Localization.GameText.Get("reaction.codex.unreachable");
+                    }
+                    if (state != null && !Campaign.Content.NamedReactionCatalog.IsBatchOpen(state, row.Batch))
+                    {
+                        return GameLogic.Localization.GameText.Format("reaction.codex.closed", GameLogic.Localization.GameText.Get("reaction.batch." + row.Batch));
+                    }
+                    return GameLogic.Localization.GameText.Get("reaction.codex.locked");
+                default:
+                    return GameLogic.Localization.GameText.Format("codex.panel.locked_body", GameLogic.Localization.GameText.Get(e.HintKey));
+            }
+        }
+
+        /// <summary>固件条目的图标 ID（剪影 = 同一张图标着黑色，不另出资源）；其它条目为空。</summary>
+        public static string IconOf(MechanicCodexEntry e) =>
+            e != null && e.Kind == MechanicCodexKind.Firmware && Campaign.Content.FirmwareCatalog.TryGet(e.ContentId, out Campaign.Content.MechanicalContentDef def) ? def.IconId : null;
+
+        private static string ReactionBody(string reactionId, Campaign.CampaignState state)
+        {
+            if (!Campaign.Content.NamedReactionCatalog.TryGet(reactionId, out GameConfig.fg.Reaction row))
+            {
+                return string.Empty;
+            }
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine(GameLogic.Localization.GameText.Get(row.DescKey));
+            if (row.Kind == Campaign.Content.NamedReactionCatalog.KindAssembly)
+            {
+                string fw = Campaign.Content.MechanicalReactionCatalog.TriggerFirmwareOf(reactionId);
+                sb.AppendLine(GameLogic.Localization.GameText.Format("codex.reaction.recipe_assembly", Campaign.Signal.FirmwareKinds.DisplayName(fw) ?? fw));
+            }
+            else
+            {
+                sb.AppendLine(GameLogic.Localization.GameText.Format("codex.reaction.recipe",
+                    Campaign.Content.StatusTagCatalog.NameOf(row.TagA) ?? row.TagA, Campaign.Content.StatusTagCatalog.NameOf(row.TagB) ?? row.TagB));
+            }
+            var names = new List<string>();
+            foreach (string fw in Campaign.Signal.FirmwareLibrary.FirmwareForReaction(reactionId))
+            {
+                // 没拿到的固件不剧透名字（与固件页签的剪影一致）。
+                names.Add(IsUnlocked(FirmwareEntryId(fw)) ? Campaign.Signal.FirmwareKinds.DisplayName(fw) : GameLogic.Localization.GameText.Get("codex.panel.locked_title"));
+            }
+            if (names.Count > 0)
+            {
+                sb.AppendLine(GameLogic.Localization.GameText.Format("codex.reaction.firmware", string.Join(Campaign.Signal.FirmwareLibrary.Sep, names)));
+            }
+            Campaign.ReactionFirstTriggerRecord first = Campaign.Combat.ReactionFeedback.FirstRecordOf(state, reactionId);
+            sb.AppendLine(first != null
+                ? GameLogic.Localization.GameText.Format("reaction.codex.first", GameLogic.UI.Kit.ReactionAttributionView.TickText(first.Tick),
+                    Campaign.Combat.CombatSites.SiteName(first.SiteId))
+                : GameLogic.Localization.GameText.Get("codex.reaction.elsewhere"));
+            return sb.ToString().TrimEnd();
         }
 
         public static MechanicCodexEntry Find(string id)
@@ -190,13 +383,23 @@ namespace GameLogic.Progression
 
         private static bool _loggedError;
 
+        private static int _derivedKey;
+
         private static void EnsureEntries()
         {
             // 读表失败（配置还没载入 / 表缺失）时不缓存失败结果：下一次访问再试，配置载入后自动恢复。
-            if (_entries != null && _loadError == null)
+            // FG2-FW-05：固件 / 反应表重载（或测试注入）后重建派生条目。
+            int derivedKey = HashCode.Combine(Campaign.Content.FirmwareCatalog.Revision, Campaign.Content.NamedReactionCatalog.Revision);
+            if (_entries != null && _loadError == null && derivedKey == _derivedKey)
             {
                 return;
             }
+            if (_entries != null && _loadError == null)
+            {
+                _unlocked = null; // 条目集合变了：解锁集合按新条目重新过滤
+                Revision++;
+            }
+            _derivedKey = derivedKey;
             _loadError = null;
             _unlocked = null;
             _entries = new List<MechanicCodexEntry>();
@@ -226,6 +429,7 @@ namespace GameLogic.Progression
                         _entries.Add(e);
                         _byId[e.Id] = e;
                     }
+                    AddDerivedEntries();
                     _entries.Sort((a, b) => a.SortOrder != b.SortOrder ? a.SortOrder.CompareTo(b.SortOrder) : string.CompareOrdinal(a.Id, b.Id));
                 }
             }
@@ -237,6 +441,69 @@ namespace GameLogic.Progression
             {
                 _loggedError = true;
                 Log.Error($"[MechanicCodex] {_loadError}（改 tools/cell_tables/fgdata_hud.py 后重新生成）");
+            }
+        }
+
+        /// <summary>FG2-FW-05：按固件表与反应表生成固件 / 反应页签的条目（排序沿用表顺序），并建立固件 ↔ 反应的互链。</summary>
+        private static void AddDerivedEntries()
+        {
+            int order = 100000;
+            var fwIds = new List<string>();
+            foreach (GameConfig.fg.FirmwareKind row in Campaign.Signal.FirmwareKinds.Rows)
+            {
+                if (row == null || string.IsNullOrEmpty(row.Id) || _byId.ContainsKey(FirmwareEntryId(row.Id)))
+                {
+                    continue;
+                }
+                List<string> reactions = Campaign.Signal.FirmwareLibrary.ReactionsOf(row.Id);
+                var links = new string[reactions.Count];
+                for (int i = 0; i < reactions.Count; i++)
+                {
+                    links[i] = ReactionEntryId(reactions[i]);
+                }
+                var e = new MechanicCodexEntry
+                {
+                    Kind = MechanicCodexKind.Firmware,
+                    ContentId = row.Id,
+                    Id = FirmwareEntryId(row.Id),
+                    Tab = TabFirmware,
+                    TitleKey = row.NameKey,
+                    BodyKey = row.DescKey,
+                    HintKey = row.AcquireKey,
+                    SortOrder = order++,
+                    Links = links,
+                };
+                _entries.Add(e);
+                _byId[e.Id] = e;
+                fwIds.Add(row.Id);
+            }
+            order = 200000;
+            foreach (GameConfig.fg.Reaction row in Campaign.Content.NamedReactionCatalog.Rows)
+            {
+                if (row == null || string.IsNullOrEmpty(row.Id) || _byId.ContainsKey(ReactionEntryId(row.Id)))
+                {
+                    continue;
+                }
+                List<string> providers = Campaign.Signal.FirmwareLibrary.FirmwareForReaction(row.Id);
+                var links = new string[providers.Count];
+                for (int i = 0; i < providers.Count; i++)
+                {
+                    links[i] = FirmwareEntryId(providers[i]);
+                }
+                var e = new MechanicCodexEntry
+                {
+                    Kind = MechanicCodexKind.Reaction,
+                    ContentId = row.Id,
+                    Id = ReactionEntryId(row.Id),
+                    Tab = TabReaction,
+                    TitleKey = row.NameKey,
+                    BodyKey = row.DescKey,
+                    HintKey = "reaction.codex.locked",
+                    SortOrder = order++,
+                    Links = links,
+                };
+                _entries.Add(e);
+                _byId[e.Id] = e;
             }
         }
 

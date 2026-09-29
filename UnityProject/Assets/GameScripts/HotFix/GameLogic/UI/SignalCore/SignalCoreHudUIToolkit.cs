@@ -104,6 +104,10 @@ namespace GameLogic.UI.SignalCore
         private int _uiSerial;
         private int _hudKey;
         private int _panelKey;
+        /// <summary>“仓 x/y”的容量缓存（随仓库变化；按 <see cref="CapacityReadSeconds"/> 真实秒重读）。</summary>
+        private int _capacity = -1;
+        private float _nextCapacityReadAt = float.NegativeInfinity;
+        private const float CapacityReadSeconds = 0.5f;
         /// <summary>FG1-SIG-06（FGU-44）：暴露面板与 HUD“暴露 N”按钮（同一个 UIDocument）。模态 / Esc 用自己的令牌，与信号核面板互不干扰。</summary>
         private readonly ExposurePanelView _exposure = new ExposurePanelView(new object());
         private static bool _exposureOpenRequested;
@@ -364,7 +368,26 @@ namespace GameLogic.UI.SignalCore
             }
             _bagList.Clear();
             _bagButtons.Clear();
-            for (int i = 0; i < PrimitiveInventory.Capacity; i++)
+            EnsureBagButtons(PrimitiveInventory.Capacity);
+            UiDragDrop.MakeTarget(_bagList, JudgeBagDrop, OnBagDrop);
+
+            UiTooltip.Attach(_entry, () => new TooltipContent
+            {
+                Title = GameText.Get("signal.hud.tip_title"),
+                Body = GameText.Format("signal.hud.tip", InputDisplay.ForAction(GameActionId.OpenSignalCore)),
+                Shortcut = GameActionId.OpenSignalCore,
+            });
+            _exposure.Bind(root, () => _exposure.SetOpen(!_exposure.IsOpen));
+            _uplinkHud.Bind(root);
+            _hudKey = 0;
+            _jumpKey = 0;
+            _panelKey = 0;
+        }
+
+        /// <summary>FG2-FW-05（FGR-FW-060）：存放容量不再固定 8 格，基元仓按钮池随在仓固件芯片数按需增长（只增不减）。</summary>
+        private void EnsureBagButtons(int count)
+        {
+            for (int i = _bagButtons.Count; i < count; i++)
             {
                 int index = i;
                 var b = new Button { name = "SignalBagItem" + i };
@@ -382,19 +405,6 @@ namespace GameLogic.UI.SignalCore
                 _bagList.Add(b);
                 _bagButtons.Add(b);
             }
-            UiDragDrop.MakeTarget(_bagList, JudgeBagDrop, OnBagDrop);
-
-            UiTooltip.Attach(_entry, () => new TooltipContent
-            {
-                Title = GameText.Get("signal.hud.tip_title"),
-                Body = GameText.Format("signal.hud.tip", InputDisplay.ForAction(GameActionId.OpenSignalCore)),
-                Shortcut = GameActionId.OpenSignalCore,
-            });
-            _exposure.Bind(root, () => _exposure.SetOpen(!_exposure.IsOpen));
-            _uplinkHud.Bind(root);
-            _hudKey = 0;
-            _jumpKey = 0;
-            _panelKey = 0;
         }
 
         /// <summary>FG1-SIG-07：跳转与叠加层按钮的文字 / 状态（只在上一台、冷却整秒、叠加层开关、语言或键位变化时改写；每帧 O(1)）。</summary>
@@ -554,9 +564,16 @@ namespace GameLogic.UI.SignalCore
             }
 
             PrimitiveChipRecord[] chips = s.PrimitiveChips ?? Array.Empty<PrimitiveChipRecord>();
-            int panelKey = HashCode.Combine(SignalCoreService.Revision, chips.Length, PrimitiveInventory.BagCount(s), Mathf.FloorToInt(s.Scrap), locked,
+            // FG2-FW-05：存放容量随运转中的仓库数变化（建成 / 损毁 / 停用），不在芯片版本号里：按间隔重读一次（O(建筑数)，不按帧），变了就重建“仓 x/y”。
+            float nowCap = Time.unscaledTime;
+            if (_panelKey == 0 || nowCap >= _nextCapacityReadAt)
+            {
+                _nextCapacityReadAt = nowCap + CapacityReadSeconds;
+                _capacity = PrimitiveInventory.CapacityOf(s);
+            }
+            int panelKey = HashCode.Combine(SignalCoreService.Revision ^ (PrimitiveInventory.Revision << 12), chips.Length, PrimitiveInventory.BagCount(s), Mathf.FloorToInt(s.Scrap), locked,
                 (int)GameText.Language, GameSettings.Revision, HashCode.Combine(_uiSerial, _selectedSlot, _selectedPartId, s.SignalCore?.Presets?.Length ?? 0,
-                    FirmwareKinds.Revision, SignalCoreService.OverrideArrayTier(s)));
+                    FirmwareKinds.Revision, SignalCoreService.OverrideArrayTier(s), _capacity));
             if (panelKey == _panelKey)
             {
                 return;
@@ -614,6 +631,7 @@ namespace GameLogic.UI.SignalCore
             _moveUp.text = GameText.Get("signal.core.move_up");
 
             SignalCoreService.BagFirmware(s, _bagScratch);
+            EnsureBagButtons(_bagScratch.Count);
             _bagPartIds.Clear();
             for (int i = 0; i < _bagScratch.Count && i < _bagButtons.Count; i++)
             {
@@ -623,7 +641,7 @@ namespace GameLogic.UI.SignalCore
             {
                 _selectedPartId = null;
             }
-            _bagTitle.text = GameText.Format("signal.core.bag_title", PrimitiveInventory.BagCount(s), PrimitiveInventory.Capacity);
+            _bagTitle.text = GameText.Format("signal.core.bag_title", PrimitiveInventory.BagCount(s), PrimitiveInventory.CapacityOf(s));
             for (int i = 0; i < _bagButtons.Count; i++)
             {
                 Button b = _bagButtons[i];
@@ -835,7 +853,7 @@ namespace GameLogic.UI.SignalCore
             {
                 return new DropVerdict(false, denial.Message);
             }
-            if (PrimitiveInventory.BagCount(s) >= PrimitiveInventory.Capacity)
+            if (PrimitiveInventory.IsFull(s))
             {
                 return new DropVerdict(false, GameText.Get("signal.reason.bag_full"));
             }
@@ -866,6 +884,7 @@ namespace GameLogic.UI.SignalCore
                     : SignalCoreService.IsSlotUnlocked(s, index)
                         ? GameText.Get("signal.core.hint")
                         : GameText.Format("signal.core.slot_locked", SignalCoreService.TierForSlot(index)),
+                CodexEntryId = GameLogic.Progression.MechanicCodex.FirmwareEntryId(content), // FG2-FW-05：悬停按图鉴键跳到固件条目
             };
         }
 
@@ -880,6 +899,7 @@ namespace GameLogic.UI.SignalCore
             {
                 Title = FirmwareKinds.DisplayName(chip.CardDefId) ?? chip.CardDefId,
                 Body = FirmwareKinds.KindTip(FirmwareKinds.KindOf(chip.CardDefId)) + RawTip(CampaignSession.Current, chip.CardDefId) + ReadingTip(chip.CardDefId),
+                CodexEntryId = GameLogic.Progression.MechanicCodex.FirmwareEntryId(chip.CardDefId), // FG2-FW-05
             };
         }
 

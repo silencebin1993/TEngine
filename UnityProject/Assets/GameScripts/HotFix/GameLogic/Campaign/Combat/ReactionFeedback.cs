@@ -336,6 +336,8 @@ namespace GameLogic.Campaign.Combat
             state.ReactionFirstTriggers = list.ToArray();
             FirstTriggersRecorded++;
             Revision++;
+            // FG2-FW-05（FGR-UX-051）：统一图鉴的反应条目在第一次打出时解锁（机制条目跨存档；本存档的首次触发时刻仍记在上面）。
+            Progression.MechanicCodex.Unlock(Progression.MechanicCodex.ReactionEntryId(reactionId));
             return true;
         }
 

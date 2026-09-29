@@ -420,7 +420,7 @@ namespace GameLogic.Campaign.Signal
             {
                 return SignalCoreResult.Fail(CodeSlotEmpty, GameText.Format("signal.reason.slot_empty", slotIndex + 1));
             }
-            if (PrimitiveInventory.BagCount(s) >= PrimitiveInventory.Capacity)
+            if (PrimitiveInventory.IsFull(s))
             {
                 return SignalCoreResult.Fail(CodeBagFull, GameText.Get("signal.reason.bag_full"));
             }
@@ -702,7 +702,7 @@ namespace GameLogic.Campaign.Signal
 
             var fromBag = result.Where(id => id.Length > 0 && PrimitiveInventory.Find(s, id)?.State == PrimitiveChipState.Bag).ToList();
             var toReturn = current.Where(id => id.Length > 0 && !used.Contains(id)).ToList();
-            int free = PrimitiveInventory.Capacity - PrimitiveInventory.BagCount(s);
+            int free = PrimitiveInventory.CapacityOf(s) - PrimitiveInventory.BagCount(s);
             int net = toReturn.Count - fromBag.Count;
             if (net > free)
             {

@@ -18,7 +18,136 @@ namespace GameLogic.Campaign.Primitive
     /// 状态+归属，要么整体失败不留下半个中间态）。</summary>
     public static class PrimitiveInventory
     {
+        /// <summary>Demo 的“有限仓 8 格”：现在只是没有调参表时的基础格数兜底。实际容量见 <see cref="CapacityOf"/>
+        /// （FG2-FW-05，FGR-FW-060：取消 8 格硬上限，改为受仓库约束——基础格数 + 每座运转中的仓库追加格数）。</summary>
         public const int Capacity = 8;
+
+        /// <summary>芯片来源（<see cref="PrimitiveChipRecord.Origin"/>）。</summary>
+        public const string OriginSeed = "seed";
+        public const string OriginPrint = "print";
+        public const string OriginSalvage = "salvage";
+        public const string OriginEncrypted = "encrypted";
+        public const string OriginCraft = "craft";
+
+        /// <summary>任何实例的“锁定 / 移除 / 新增”都会让它加一（固件库面板据此立即刷新；存档不记）。</summary>
+        public static int Revision { get; private set; } = 1;
+
+        /// <summary>新实例入账（任何来源：开局播种 / 刻印 / 拆解 / 加密固件 / 合成）。参数：战役、内容 ID。
+        /// 本类只发事件、不认识固件目录和图鉴；<see cref="Signal.FirmwareLibrary.Install"/> 订阅它，第一次拿到某条固件时解锁图鉴条目（FGR-UX-051）。</summary>
+        public static event Action<CampaignState, string> ChipAcquired;
+
+        /// <summary>
+        /// FG2-FW-05（FGR-FW-060）：芯片存放的实际格数 = 基础格数（fg.TbHomeTuning firmware.storage.base_slots，初值沿用 Demo 的 8）
+        /// + 每座运转中的仓库 × firmware.storage.per_warehouse。仓库损毁 / 停用后容量回落，已经放着的芯片不丢（只是再放新的会进待领取）。
+        /// 只在装卸 / 入账 / 界面按间隔刷新时调用，O(建筑数)；不按帧。
+        /// </summary>
+        public static int CapacityOf(CampaignState state)
+        {
+            int baseSlots = Math.Max(1, TuningInt("firmware.storage.base_slots", Capacity));
+            int per = Math.Max(0, TuningInt("firmware.storage.per_warehouse", 16));
+            return baseSlots + per * OperationalWarehouses(state);
+        }
+
+        /// <summary>家园里运转中的仓库座数（施工完成且没有停用 / 损毁）。</summary>
+        public static int OperationalWarehouses(CampaignState state)
+        {
+            BuildingRecord[] all = state?.BuildingRecords;
+            if (all == null)
+            {
+                return 0;
+            }
+            int n = 0;
+            foreach (BuildingRecord b in all)
+            {
+                if (b != null && b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId == HomeValleyLayout.BuildingTypeWarehouse
+                    && b.ConstructionState == BuildingConstructionState.Operational)
+                {
+                    n++;
+                }
+            }
+            return n;
+        }
+
+        /// <summary>存放已满（再入账的芯片进待领取，卸下 / 领取被拒绝）。</summary>
+        public static bool IsFull(CampaignState state) => BagCount(state) >= CapacityOf(state);
+
+        private static readonly HashSet<string> WarnedTuning = new HashSet<string>(StringComparer.Ordinal);
+
+        private static int TuningInt(string id, int fallback)
+        {
+            if (Grid.GridContent.TryGetTuning(id, out float v))
+            {
+                return (int)Math.Round(v);
+            }
+            if (WarnedTuning.Add(id))
+            {
+                TEngine.Log.Error($"[PrimitiveInventory] fg.TbHomeTuning 缺少 {id}，暂用初值 {fallback}（改 tools/cell_tables/fgdata_fwlib.py 后重新生成）。");
+            }
+            return fallback;
+        }
+
+        private static long NowTick(CampaignState state) => (long)((state?.PlaySeconds ?? 0f) * 1000f);
+
+        private static void Acquired(CampaignState state, string contentId)
+        {
+            Revision++;
+            ChipAcquired?.Invoke(state, contentId);
+        }
+
+        /// <summary>FG2-FW-05（FGR-FW-061）：锁定 / 解除锁定一枚芯片（任何状态都可以锁：锁定只影响批量分解）。返回 false = 找不到实例。</summary>
+        public static bool TrySetLocked(CampaignState state, string partId, bool locked)
+        {
+            PrimitiveChipRecord record = Find(state, partId);
+            if (record == null)
+            {
+                return false;
+            }
+            if (record.Locked != locked)
+            {
+                record.Locked = locked;
+                Revision++;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// FG2-FW-05（FGR-FW-061 批量分解）：把已经确认要分解的实例移出战役。只移除“在仓或待领取、没有锁定、没有被合成台预留”的；
+        /// 装在信号核 / 蓝图电路里的、锁定的一律保留（调用方已经跳过，这里是第二道防线）。返回实际移除的实例（调用方按件数返还废料）。
+        /// </summary>
+        public static List<PrimitiveChipRecord> RemoveForDisassembly(CampaignState state, IEnumerable<string> partIds)
+        {
+            var removed = new List<PrimitiveChipRecord>();
+            if (state?.PrimitiveChips == null || partIds == null)
+            {
+                return removed;
+            }
+            var targets = new HashSet<string>(partIds.Where(id => !string.IsNullOrEmpty(id)), StringComparer.Ordinal);
+            var keep = new List<PrimitiveChipRecord>(state.PrimitiveChips.Length);
+            foreach (PrimitiveChipRecord p in state.PrimitiveChips)
+            {
+                if (p != null && targets.Contains(p.PartId) && IsDisassemblable(p))
+                {
+                    removed.Add(p);
+                    continue;
+                }
+                keep.Add(p);
+            }
+            if (removed.Count > 0)
+            {
+                state.PrimitiveChips = keep.ToArray();
+                Revision++;
+                foreach (PrimitiveChipRecord p in removed)
+                {
+                    AppendLedger(state, "FirmwareChipDisassemble", p.PartId, p.CardDefId);
+                }
+            }
+            return removed;
+        }
+
+        /// <summary>这枚芯片现在能不能被分解：在仓或待领取、没锁、没被合成台预留。</summary>
+        public static bool IsDisassemblable(PrimitiveChipRecord p) =>
+            p != null && !p.Locked && string.IsNullOrEmpty(p.ReservedByTransactionId)
+            && (p.State == PrimitiveChipState.Bag || p.State == PrimitiveChipState.Pending);
 
         /// <summary>Demo 唯一开局基础芯片——CardCatalog "organ_focus"="聚焦镜"
         /// （PRIMITIVE-FULL-DEMO-SPEC.md §4.1 点名的两镜之一）。</summary>
@@ -78,8 +207,11 @@ namespace GameLogic.Campaign.Primitive
                 CardDefId = DefaultChipContentId,
                 State = PrimitiveChipState.Bag,
                 DraftSlot = -1,
+                Origin = OriginSeed,
+                AcquiredTick = NowTick(state),
             };
             state.PrimitiveChips = new[] { seed };
+            Acquired(state, seed.CardDefId);
         }
 
         // ── 解析发放 / 补印 ──────────────────────────────────────────────────────
@@ -118,10 +250,13 @@ namespace GameLogic.Campaign.Primitive
                 CardDefId = contentId,
                 SourceSalvageId = salvageInstanceId,
                 DraftSlot = -1,
-                State = BagCount(state) < Capacity ? PrimitiveChipState.Bag : PrimitiveChipState.Pending,
+                State = IsFull(state) ? PrimitiveChipState.Pending : PrimitiveChipState.Bag,
+                Origin = OriginSalvage,
+                AcquiredTick = NowTick(state),
             };
             state.PrimitiveChips = state.PrimitiveChips.Append(record).ToArray();
             AppendLedger(state, "PrimitiveChipGrant", record.PartId, contentId);
+            Acquired(state, contentId);
             return CircuitOpResult.Ok();
         }
 
@@ -139,7 +274,7 @@ namespace GameLogic.Campaign.Primitive
             {
                 return CircuitOpResult.Fail("not-unlocked", $"'{contentId}' 尚未解锁，不能补印。");
             }
-            if (BagCount(state) >= Capacity)
+            if (IsFull(state))
             {
                 return CircuitOpResult.Fail("bag-full", "基元仓已满，无法补印新芯片（请先腾格或领取待领取实例）。");
             }
@@ -175,9 +310,12 @@ namespace GameLogic.Campaign.Primitive
                 CardDefId = contentId,
                 State = PrimitiveChipState.Bag,
                 DraftSlot = -1,
+                Origin = OriginPrint,
+                AcquiredTick = NowTick(state),
             };
             state.PrimitiveChips = (state.PrimitiveChips ?? Array.Empty<PrimitiveChipRecord>()).Append(record).ToArray();
             AppendLedger(state, "PrimitiveChipPrint", record.PartId, contentId);
+            Acquired(state, contentId);
             return CircuitOpResult.Ok();
         }
 
@@ -195,11 +333,12 @@ namespace GameLogic.Campaign.Primitive
             }
             // Pending 实例结构上不可能被合成台预留（预留只发生在 Bag 态实例上，见
             // TryReserveForCraft），此处不需要额外校验 ReservedByTransactionId。
-            if (BagCount(state) >= Capacity)
+            if (IsFull(state))
             {
                 return CircuitOpResult.Fail("bag-full", "基元仓已满，无法领取，请先腾格。");
             }
             record.State = PrimitiveChipState.Bag;
+            Revision++;
             return CircuitOpResult.Ok();
         }
 
@@ -239,6 +378,7 @@ namespace GameLogic.Campaign.Primitive
             }
 
             record.State = PrimitiveChipState.Draft;
+            Revision++;
             record.DraftBlueprintId = blueprintId;
             record.DraftSlot = slot;
             board.SlotPartIds[slot] = partId;
@@ -259,7 +399,7 @@ namespace GameLogic.Campaign.Primitive
             }
             string partId = (slot >= 0 && slot < board.SlotPartIds.Length) ? board.SlotPartIds[slot] : null;
 
-            if (!string.IsNullOrEmpty(partId) && BagCount(state) >= Capacity)
+            if (!string.IsNullOrEmpty(partId) && IsFull(state))
             {
                 return CircuitOpResult.Fail("bag-full", "基元仓已满，无法卸回，请先腾格（该实例保留在原槽）。");
             }
@@ -276,6 +416,7 @@ namespace GameLogic.Campaign.Primitive
                 if (record != null)
                 {
                     record.State = PrimitiveChipState.Bag;
+                    Revision++;
                     record.DraftBlueprintId = null;
                     record.DraftSlot = -1;
                 }
@@ -310,6 +451,7 @@ namespace GameLogic.Campaign.Primitive
                     continue; // 这是已保存版本真实持有的实例，保留 Draft 态。
                 }
                 record.State = PrimitiveChipState.Bag;
+                Revision++;
                 record.DraftBlueprintId = null;
                 record.DraftSlot = -1;
             }
@@ -337,6 +479,7 @@ namespace GameLogic.Campaign.Primitive
                 return CircuitOpResult.Fail("reserved-for-craft", "该实例已被合成台预留为材料，暂不可装卸。");
             }
             record.State = PrimitiveChipState.SignalCore;
+            Revision++;
             record.DraftBlueprintId = null;
             record.DraftSlot = -1;
             return CircuitOpResult.Ok();
@@ -355,16 +498,18 @@ namespace GameLogic.Campaign.Primitive
             {
                 return CircuitOpResult.Fail("not-in-signal-core", "该实例不在信号核里。");
             }
-            if (BagCount(state) >= Capacity)
+            if (IsFull(state))
             {
                 if (!pendingIfFull)
                 {
                     return CircuitOpResult.Fail("bag-full", "基元仓已满，无法卸回，请先腾格（该实例保留在信号核里）。");
                 }
                 record.State = PrimitiveChipState.Pending;
+                Revision++;
                 return CircuitOpResult.Ok();
             }
             record.State = PrimitiveChipState.Bag;
+            Revision++;
             return CircuitOpResult.Ok();
         }
 
@@ -388,7 +533,7 @@ namespace GameLogic.Campaign.Primitive
             {
                 return CircuitOpResult.Fail("not-unlocked", $"'{firmwareId}' 尚未解锁，不能刻印。");
             }
-            if (BagCount(state) >= Capacity)
+            if (IsFull(state))
             {
                 return CircuitOpResult.Fail("bag-full", "基元仓已满，无法刻印。");
             }
@@ -417,9 +562,12 @@ namespace GameLogic.Campaign.Primitive
                 CardDefId = firmwareId,
                 State = PrimitiveChipState.Bag,
                 DraftSlot = -1,
+                Origin = OriginPrint,
+                AcquiredTick = NowTick(state),
             };
             state.PrimitiveChips = (state.PrimitiveChips ?? Array.Empty<PrimitiveChipRecord>()).Append(record).ToArray();
             AppendLedger(state, "FirmwareChipPrint", record.PartId, firmwareId);
+            Acquired(state, firmwareId);
             partId = record.PartId;
             return CircuitOpResult.Ok();
         }
@@ -457,6 +605,7 @@ namespace GameLogic.Campaign.Primitive
                 return CircuitOpResult.Fail("already-reserved", "该实例已被另一个合成/拆解事务预留。");
             }
             record.ReservedByTransactionId = transactionId;
+            Revision++;
             return CircuitOpResult.Ok();
         }
 
@@ -468,6 +617,7 @@ namespace GameLogic.Campaign.Primitive
             if (record != null && record.ReservedByTransactionId == transactionId)
             {
                 record.ReservedByTransactionId = null;
+                Revision++;
             }
         }
 
@@ -486,6 +636,7 @@ namespace GameLogic.Campaign.Primitive
                 return CircuitOpResult.Fail("material-mismatch", $"实例 '{partId}' 状态与预留不一致，无法消耗。");
             }
             state.PrimitiveChips = state.PrimitiveChips.Where(p => p.PartId != partId).ToArray();
+            Revision++;
             return CircuitOpResult.Ok();
         }
 
@@ -505,6 +656,10 @@ namespace GameLogic.Campaign.Primitive
                                                                      && p.State != PrimitiveChipState.Draft
                                                                      && p.State != PrimitiveChipState.SignalCore
                                                                      && string.IsNullOrEmpty(p.ReservedByTransactionId))).ToArray();
+            if (before != state.PrimitiveChips.Length)
+            {
+                Revision++;
+            }
             return before - state.PrimitiveChips.Length;
         }
 
@@ -550,11 +705,14 @@ namespace GameLogic.Campaign.Primitive
                 CardDefId = firmwareId,
                 SourceSalvageId = salvageInstanceId,
                 DraftSlot = -1,
-                State = BagCount(state) < Capacity ? PrimitiveChipState.Bag : PrimitiveChipState.Pending,
+                State = IsFull(state) ? PrimitiveChipState.Pending : PrimitiveChipState.Bag,
+                Origin = OriginEncrypted,
+                AcquiredTick = NowTick(state),
             };
             pending = record.State == PrimitiveChipState.Pending;
             state.PrimitiveChips = state.PrimitiveChips.Append(record).ToArray();
             AppendLedger(state, "EncryptedFirmwareGrant", record.PartId, firmwareId);
+            Acquired(state, firmwareId);
             return record.PartId;
         }
 
@@ -574,10 +732,13 @@ namespace GameLogic.Campaign.Primitive
                 PartId = NewPartId(),
                 CardDefId = contentId,
                 DraftSlot = -1,
-                State = BagCount(state) < Capacity ? PrimitiveChipState.Bag : PrimitiveChipState.Pending,
+                State = IsFull(state) ? PrimitiveChipState.Pending : PrimitiveChipState.Bag,
+                Origin = OriginCraft,
+                AcquiredTick = NowTick(state),
             };
             state.PrimitiveChips = (state.PrimitiveChips ?? Array.Empty<PrimitiveChipRecord>()).Append(record).ToArray();
             AppendLedger(state, "PrimitiveChipCraft", record.PartId, contentId);
+            Acquired(state, contentId);
             return record.PartId;
         }
     }

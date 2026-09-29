@@ -22,6 +22,26 @@ namespace GameLogic.UI.Kit
 
         public VisualElement Root { get; private set; }
         public bool IsReady => Root != null;
+
+        /// <summary>本面板的分层（sortingOrder）。</summary>
+        public int Layer => SortingOrder;
+
+        /// <summary>
+        /// 有没有层级高于 <paramref name="order"/> 的 UI 基础件面板正以模态开着（例如图鉴 30075、统计 30076、反应记录 30077、按键 30080）。
+        /// 全局开关键（固件库键、图鉴键）据此判断：上面盖着更高层的面板时不在它下面开 / 关一个看不见的模态（否则 Esc 先关掉的是看不见的那个）。
+        /// 只在按键当下调用，O(模态数)。
+        /// </summary>
+        public static bool AnyModalAbove(int order)
+        {
+            foreach (object owner in GameLogic.Core.InputRouter.ModalOwnerList)
+            {
+                if (owner is UiKitPanelHost host && host != null && host.Layer > order)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
         public UIDocument Document => _document;
 
         private async void Start()
