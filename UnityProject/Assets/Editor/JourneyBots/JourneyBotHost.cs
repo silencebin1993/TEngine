@@ -17,6 +17,8 @@ namespace GameLogic.EditorTools.JourneyBots
             { FgjM0Journey.Id, FgjM0Journey.Build },
             { FgjM1Journey.Id, FgjM1Journey.Build },
             { FgjM1ReverseJourney.Id, FgjM1ReverseJourney.Build },
+            { FgjM2Journey.Id, FgjM2Journey.Build },
+            { FgjM2ReverseJourney.Id, FgjM2ReverseJourney.Build },
         };
 
         public static IEnumerable<string> Ids => Builders.Keys;
@@ -74,6 +76,12 @@ namespace GameLogic.EditorTools.JourneyBots
 
         [MenuItem("BinGames/旅程机器人/FGJ-M1R（M1 反向旅程）")]
         public static void RunFgjM1ReverseFromMenu() => Run(FgjM1ReverseJourney.Id, null);
+
+        [MenuItem("BinGames/旅程机器人/FGJ-M2（M2 出口旅程）")]
+        public static void RunFgjM2FromMenu() => Run(FgjM2Journey.Id, null);
+
+        [MenuItem("BinGames/旅程机器人/FGJ-M2R（M2 反向旅程）")]
+        public static void RunFgjM2ReverseFromMenu() => Run(FgjM2ReverseJourney.Id, null);
 
         public static bool Run(string id, string reportPath)
         {

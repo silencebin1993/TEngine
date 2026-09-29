@@ -185,6 +185,9 @@ namespace GameLogic.EditorTools
                     case 152: StepSignalEquipped(inStep); break;
                     case 153: StepSignalPresetSaved(inStep); break;
                     case 154: StepSignalClosed(inStep); break;
+                    case 233: StepRestoreOpened(inStep); break;
+                    case 234: StepRestoreAsked(inStep); break;
+                    case 235: StepRestoreClosed(inStep); break;
                     case 180: StepFwLibOpened(inStep); break;
                     case 181: StepFwLibCodexJumped(inStep); break;
                     case 182: StepFwLibCodexClosed(inStep); break;
@@ -1547,6 +1550,83 @@ namespace GameLogic.EditorTools
                 "再按 P 关闭信号核面板（模态释放、暂停菜单没开）");
             Check(hud != null && hud.Exposure.EntryText.StartsWith(Localization.GameText.Get("exposure.hud.button").Split('{')[0], StringComparison.Ordinal),
                 $"HUD 常驻暴露值“{hud?.Exposure.EntryText}”（FGU-44 入口）");
+            Transform bench = FindNamed("Building_" + Campaign.Regions.HomeValleyLayout.BuildingTypeAnalysisBench);
+            if (bench == null)
+            {
+                Finish("场景里找不到解析台");
+                return;
+            }
+            ClickWorld(bench.position);
+            Next(233, "FG2-E2E-01：鼠标左键点解析台（“数据复原”栏，FG-GAP-050 的固件临时来源）");
+        }
+
+        // ── FG2-E2E-01：解析台“数据复原”（点解析台 → 栏目与候选 → 选冷却液点“复原”：按此刻状态拒绝写原因 / 弹确认框点取消 → 关闭）──────────
+
+        private static void StepRestoreOpened(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            UI.Analysis.AnalysisPanelUIToolkit panel = UI.Analysis.AnalysisPanelUIToolkit.Instance;
+            CampaignState st = CampaignSession.Current;
+            System.Collections.Generic.List<string> expect = Campaign.Signal.FirmwareRestoreService.Candidates(st);
+            bool open = GameRoot.HomeValley != null && GameRoot.HomeValley.IsAnalysisPanelOpen && panel != null;
+            Check(open && panel.RestoreChoiceIds.Count == expect.Count && expect.Count > 0 && panel.RestoreChoiceIds.SequenceEqual(expect)
+                  && LabelText("[HomeValleyAnalysisHost]", "RestoreTitle") == Localization.GameText.Get("analysis.restore.title")
+                  && panel.RestoreDetailText.Length > 0,
+                $"点解析台打开解析面板：“数据复原”栏列出 {panel?.RestoreChoiceIds.Count} 条可复原固件（= 服务层候选 {expect.Count} 条）；说明“{panel?.RestoreDetailText.Replace("\n", " / ")}”");
+            CheckNoTextMarkers("解析台数据复原");
+            GameObject host = GameObject.Find("[HomeValleyAnalysisHost]");
+            DropdownField dd = host?.GetComponent<UIDocument>()?.rootVisualElement?.Q<DropdownField>("RestoreDropdown");
+            int idx = panel != null ? panel.RestoreChoiceIds.ToList().IndexOf("fw_coolant") : -1;
+            if (dd != null && idx >= 0 && idx < dd.choices.Count)
+            {
+                dd.value = dd.choices[idx];
+            }
+            Campaign.Signal.FirmwareRestoreService.Result pre = Campaign.Signal.FirmwareRestoreService.Check(st, "fw_coolant");
+            SessionState.SetString(K + "RestorePre", pre.Success ? "ok" : pre.Code);
+            SessionState.SetInt(K + "RestoreTech", st.TechData);
+            SessionState.SetInt(K + "RestoreDenied", Campaign.Feedback.FeedbackCues.CountOf(Campaign.Feedback.FeedbackCueId.Denied));
+            Check(idx >= 0 && ClickUitk("[HomeValleyAnalysisHost]", "RestoreButton"), $"下拉选冷却液、点“复原”（此刻预检：{(pre.Success ? "可复原" : pre.Message)}）");
+            Next(234, "看“复原”的结果");
+        }
+
+        private static void StepRestoreAsked(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            CampaignState st = CampaignSession.Current;
+            UI.Analysis.AnalysisPanelUIToolkit panel = UI.Analysis.AnalysisPanelUIToolkit.Instance;
+            string pre = SessionState.GetString(K + "RestorePre", string.Empty);
+            bool unchanged = st.TechData == SessionState.GetInt(K + "RestoreTech", -1) && !Campaign.Content.MechanicalContentUnlock.IsUnlocked(st, "fw_coolant");
+            if (pre == "ok")
+            {
+                // 有电、技术数据够：弹出不可撤销的确认框；冒烟点“取消”，什么都不变（真复原由旅程 FGJ-M2 走）。
+                bool asked = UiConfirmDialog.IsOpen && UiConfirmDialog.Current.Title == Localization.GameText.Get("analysis.restore.confirm.title") && UiConfirmDialog.Current.Irreversible;
+                bool cancelled = ClickUitk("[UiKitOverlayHost]", "ConfirmCancel") && !UiConfirmDialog.IsOpen;
+                Check(asked && cancelled && unchanged, "点“复原”弹出不可撤销的确认框，点“取消”后技术数据与解锁都不变");
+            }
+            else
+            {
+                string result = panel?.ResultText ?? string.Empty;
+                Check(!UiConfirmDialog.IsOpen && unchanged && result == Campaign.Signal.FirmwareRestoreService.Check(st, "fw_coolant").Message
+                      && Campaign.Feedback.FeedbackCues.CountOf(Campaign.Feedback.FeedbackCueId.Denied) > SessionState.GetInt(K + "RestoreDenied", 0),
+                    $"此刻不能复原（{pre}）：不弹确认框，结果行写明原因“{result}”+ 拒绝音，技术数据与解锁都不变");
+            }
+            Check(ClickUitk("[HomeValleyAnalysisHost]", "CloseButton"), "点“关闭”");
+            Next(235, "关闭解析面板");
+        }
+
+        private static void StepRestoreClosed(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(GameRoot.HomeValley != null && !GameRoot.HomeValley.IsAnalysisPanelOpen && !PauseMenuUIToolkit.IsOpen, "解析面板关闭（暂停菜单没开）");
             PressKey(GameSettings.KeyBindings.GetKey(GameActionId.OpenFirmware));
             Next(180, "FG2-FW-05：按固件库键（默认 I）打开固件库");
         }

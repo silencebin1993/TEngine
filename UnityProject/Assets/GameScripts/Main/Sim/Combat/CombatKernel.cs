@@ -87,6 +87,20 @@ namespace BinGames.Sim.Combat
         /// <summary>FG2-FW-02：读法生成的区域 / 待结算回波 / 无人机的当前数量。</summary>
         public int ZoneCount => _d.Zones.Length;
         public int EchoCount => _d.Echoes.Length;
+
+        /// <summary>FG2-E2E-01（FG-GAP-043）：当前留在画面上的引信弹迹条数与第 <paramref name="index"/> 条（自检核对）。</summary>
+        public int TraceCount => _d.Traces.Length;
+
+        public bool TryGetTrace(int index, out CombatShotTrace trace)
+        {
+            if (index < 0 || index >= _d.Traces.Length)
+            {
+                trace = default;
+                return false;
+            }
+            trace = _d.Traces[index];
+            return true;
+        }
         public int DroneCount => _d.Drones.Length;
         public int GameplayPending => _d.Gameplay.Length;
         public int WeaponCount => _d.Weapons.Length;
@@ -2317,6 +2331,11 @@ namespace BinGames.Sim.Combat
                 w.Write(x.Reading.ThornsFlat);
                 w.Write(x.Reading.ThornsReach);
             }
+            // FG2-E2E-01（格式 8，FG-GAP-043）：引信弹迹标记。
+            if (format >= 8)
+            {
+                w.Write(x.FuseTrace);
+            }
         }
 
         /// <summary>FG2-FW-02：武器的读法参数（格式 3；逐字段，顺序即格式）。</summary>
@@ -2473,6 +2492,10 @@ namespace BinGames.Sim.Combat
                 w.Reading.ThornsFlat = r.ReadSingle();
                 w.Reading.ThornsReach = r.ReadSingle();
             }
+            if (format >= 8)
+            {
+                w.FuseTrace = r.ReadByte();
+            }
             return w;
         }
 
@@ -2570,6 +2593,26 @@ namespace BinGames.Sim.Combat
                     B = new float4(pr.Radius, 1f, (float)pr.Faction, 9f),
                 });
             }
+            // FG2-E2E-01（FG-GAP-043）：引信弹迹 = 弹体这一路里 B.w = 10 的实例：A = (命中点, 炮口)，着色器按两端画一条不插值的亮线；
+            // B.y = 剩余比例（按游戏时间淡出）。只闪光的（两端重合）不画线，由区域那一路的炮口闪光画。
+            double now = D.Scalars[0].Time;
+            float life = math.max(1e-3f, D.Config.FuseTraceSeconds);
+            for (int k = 0; k < D.Traces.Length; k++)
+            {
+                CombatShotTrace tr = D.Traces[k];
+                if (tr.Line == 0 || math.lengthsq(tr.To - tr.From) < 1e-6)
+                {
+                    continue;
+                }
+                double2 to = tr.To - Origin;
+                double2 from = tr.From - Origin;
+                float left = math.saturate((float)(1.0 - (now - tr.Born) / life));
+                Projectiles.Add(new CombatInstance
+                {
+                    A = new float4((float)to.x, (float)to.y, (float)from.x, (float)from.y),
+                    B = new float4(0.08f, left, tr.Faction, CombatConst.TraceInstanceKind),
+                });
+            }
         }
     }
 
@@ -2623,6 +2666,22 @@ namespace BinGames.Sim.Combat
                 {
                     A = new float4((float)p.x, (float)p.y, (float)pv.x, (float)pv.y),
                     B = new float4(post ? 0.45f : 0.3f, (float)math.saturate((dr.Until - now) / 8.0), FactionColor(dr.Faction), post ? CombatConst.EffectKindPost : CombatConst.EffectKindDrone),
+                });
+            }
+            // FG2-E2E-01（FG-GAP-043）：炮口装定闪光——弹迹起点朝目标前推一点（落在炮口，不被机身盖住），按游戏时间淡出。
+            float life = math.max(1e-3f, D.Config.FuseTraceSeconds);
+            for (int k = 0; k < D.Traces.Length; k++)
+            {
+                CombatShotTrace tr = D.Traces[k];
+                double2 dir = tr.To - tr.From;
+                double len = math.length(dir);
+                double2 muzzle = len > 1e-3 ? tr.From + dir / len * math.min(0.9, len * 0.5) : tr.From;
+                double2 p = muzzle - Origin;
+                float left = math.saturate((float)(1.0 - (now - tr.Born) / life));
+                Effects.Add(new CombatInstance
+                {
+                    A = new float4((float)p.x, (float)p.y, (float)p.x, (float)p.y),
+                    B = new float4(0.45f, left, CombatConst.MuzzleFlashColor, CombatConst.MuzzleFlashKind),
                 });
             }
         }

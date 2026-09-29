@@ -37,6 +37,13 @@ namespace GameLogic.UI.Analysis
         private Button _cancelButton;
         private Label _resultLabel;
         private Button _closeButton;
+        // FG2-E2E-01（FG-GAP-050）：数据复原栏
+        private Label _restoreTitle;
+        private Label _restoreHint;
+        private DropdownField _restoreDropdown;
+        private Button _restoreButton;
+        private Label _restoreDetail;
+        private readonly List<string> _restoreChoiceIds = new List<string>();
 
         private readonly List<TemplateContainer> _rowPool = new List<TemplateContainer>(MaxQueueRows);
         private readonly List<string> _warehouseChoiceSalvageIds = new List<string>();
@@ -82,6 +89,21 @@ namespace GameLogic.UI.Analysis
             _cancelButton = _root.Q<Button>("CancelButton");
             _resultLabel = _root.Q<Label>("ResultLabel");
             _closeButton = _root.Q<Button>("CloseButton");
+            _restoreTitle = _root.Q<Label>("RestoreTitle");
+            _restoreHint = _root.Q<Label>("RestoreHint");
+            _restoreDropdown = _root.Q<DropdownField>("RestoreDropdown");
+            _restoreButton = _root.Q<Button>("RestoreButton");
+            _restoreDetail = _root.Q<Label>("RestoreDetail");
+            if (_restoreTitle != null)
+            {
+                _restoreTitle.text = Localization.GameText.Get("analysis.restore.title");
+            }
+            if (_restoreButton != null)
+            {
+                _restoreButton.text = Localization.GameText.Get("analysis.restore.button");
+                _restoreButton.clicked += OnRestoreClicked;
+            }
+            _restoreDropdown?.RegisterValueChangedCallback(_ => RefreshRestoreDetail());
 
             for (int i = 0; i < MaxQueueRows; i++)
             {
@@ -185,6 +207,107 @@ namespace GameLogic.UI.Analysis
             }
             _cancelDropdown.choices = cancelChoices;
             ClampIndex(_cancelDropdown, cancelChoices.Count);
+            RefreshRestore(state);
+        }
+
+        // ── FG2-E2E-01（FG-GAP-050）：数据复原 ─────────────────────────────────────────────
+
+        /// <summary>数据复原栏当前的候选固件（与下拉同序；自检 / 旅程按固件 ID 找行）。</summary>
+        public IReadOnlyList<string> RestoreChoiceIds => _restoreChoiceIds;
+
+        /// <summary>数据复原栏的说明行（技术数据 + 选中固件的正式来源 / 标签 / 反应）。</summary>
+        public string RestoreDetailText => _restoreDetail?.text ?? string.Empty;
+
+        public string ResultText => _resultLabel?.text ?? string.Empty;
+
+        public static AnalysisPanelUIToolkit Instance { get; private set; }
+
+        private void Awake() => Instance = this;
+
+        private void RefreshRestore(CampaignState state)
+        {
+            if (_restoreDropdown == null)
+            {
+                return;
+            }
+            string selected = _restoreDropdown.index >= 0 && _restoreDropdown.index < _restoreChoiceIds.Count ? _restoreChoiceIds[_restoreDropdown.index] : null;
+            _restoreChoiceIds.Clear();
+            var choices = new List<string>();
+            foreach (string id in Campaign.Signal.FirmwareRestoreService.Candidates(state))
+            {
+                _restoreChoiceIds.Add(id);
+                choices.Add(Campaign.Signal.FirmwareRestoreService.ChoiceText(id));
+            }
+            _restoreDropdown.choices = choices;
+            int keep = selected != null ? _restoreChoiceIds.IndexOf(selected) : -1;
+            if (keep >= 0)
+            {
+                _restoreDropdown.SetValueWithoutNotify(choices[keep]);
+            }
+            else
+            {
+                ClampIndex(_restoreDropdown, choices.Count);
+            }
+            _restoreButton?.SetEnabled(choices.Count > 0);
+            if (_restoreHint != null)
+            {
+                _restoreHint.text = Localization.GameText.Get("analysis.restore.hint") + " " +
+                                    Localization.GameText.Format("analysis.restore.tech", state?.TechData ?? 0);
+            }
+            RefreshRestoreDetail();
+        }
+
+        private void RefreshRestoreDetail()
+        {
+            if (_restoreDetail == null)
+            {
+                return;
+            }
+            int i = _restoreDropdown != null ? _restoreDropdown.index : -1;
+            _restoreDetail.text = _restoreChoiceIds.Count == 0
+                ? Localization.GameText.Get("analysis.restore.empty")
+                : i >= 0 && i < _restoreChoiceIds.Count
+                    ? Campaign.Signal.FirmwareRestoreService.DetailText(CampaignSession.Current, _restoreChoiceIds[i])
+                    : string.Empty;
+        }
+
+        /// <summary>点“复原”：先按此刻状态预检（不改状态），通过才弹确认框（B04：花技术数据不可撤销）；确认时服务层再检查一遍。</summary>
+        private void OnRestoreClicked()
+        {
+            CampaignState state = CampaignSession.Current;
+            int i = _restoreDropdown != null ? _restoreDropdown.index : -1;
+            if (i < 0 || i >= _restoreChoiceIds.Count)
+            {
+                Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.Denied);
+                _resultLabel.text = Localization.GameText.Get("analysis.restore.reason.none_selected");
+                return;
+            }
+            string id = _restoreChoiceIds[i];
+            Campaign.Signal.FirmwareRestoreService.Result check = Campaign.Signal.FirmwareRestoreService.Check(state, id);
+            if (!check.Success)
+            {
+                Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.Denied);
+                _resultLabel.text = check.Message;
+                return;
+            }
+            var req = new ConfirmRequest
+            {
+                Title = Localization.GameText.Get("analysis.restore.confirm.title"),
+                Irreversible = true,
+                ConfirmText = Localization.GameText.Get("analysis.restore.confirm.ok"),
+                CancelText = Localization.GameText.Get("fwlib.confirm.cancel"),
+                OnConfirm = () =>
+                {
+                    Campaign.Signal.FirmwareRestoreService.Result r = Campaign.Signal.FirmwareRestoreService.TryRestore(CampaignSession.Current, id);
+                    if (_resultLabel != null)
+                    {
+                        _resultLabel.text = r.Message;
+                    }
+                    _refreshTimer = 0f;
+                },
+            };
+            req.Lines.Add(check.Message);
+            UiConfirmDialog.Show(req);
         }
 
         private static string DescribeState(AnalysisQueueState state)
@@ -246,6 +369,10 @@ namespace GameLogic.UI.Analysis
 
         private void OnDestroy()
         {
+            if (Instance == this)
+            {
+                Instance = null;
+            }
             if (_visualTree != null)
             {
                 GameModule.Resource.UnloadAsset(_visualTree);

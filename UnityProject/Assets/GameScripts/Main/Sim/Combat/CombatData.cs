@@ -153,6 +153,8 @@ namespace BinGames.Sim.Combat
         /// <summary>FG2-FW-02：读法生成的区域、待结算回波、无人机（都随快照进存档）。</summary>
         public NativeList<CombatZone> Zones;
         public NativeList<CombatEcho> Echoes;
+        /// <summary>FG2-E2E-01（FG-GAP-043）：引信弹迹（表现数据，按游戏时间到期；不进快照与哈希）。</summary>
+        public NativeList<CombatShotTrace> Traces;
         public NativeList<CombatDrone> Drones;
 
         /// <summary>FG2-FW-03：具名标签反应规则（热更层按 fg.TbReaction 在建地点时写入，按 priority 排好序；不进存档——规则是内容，不是状态）。</summary>
@@ -248,6 +250,7 @@ namespace BinGames.Sim.Combat
                 Projectiles = new NativeList<CombatProjectile>(math.max(16, config.ProjectileCapacity), Allocator.Persistent),
                 Zones = new NativeList<CombatZone>(16, Allocator.Persistent),
                 Echoes = new NativeList<CombatEcho>(16, Allocator.Persistent),
+                Traces = new NativeList<CombatShotTrace>(16, Allocator.Persistent),
                 Drones = new NativeList<CombatDrone>(16, Allocator.Persistent),
                 Reactions = new NativeList<CombatReactionRule>(CombatConst.MaxReactions, Allocator.Persistent),
                 StatusFx = new NativeArray<CombatStatusFx>(32, Allocator.Persistent),
@@ -336,6 +339,7 @@ namespace BinGames.Sim.Combat
             Projectiles.Dispose();
             Zones.Dispose();
             Echoes.Dispose();
+            Traces.Dispose();
             Drones.Dispose();
             Reactions.Dispose();
             StatusFx.Dispose();
@@ -541,6 +545,7 @@ namespace BinGames.Sim.Combat
             Projectiles.Clear();
             Zones.Clear();
             Echoes.Clear();
+            Traces.Clear();
             Drones.Clear();
             Gameplay.Clear();
             Cues.Clear();

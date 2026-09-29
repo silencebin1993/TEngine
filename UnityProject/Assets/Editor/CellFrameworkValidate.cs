@@ -223,6 +223,10 @@ namespace GameLogic.EditorTools
                 // （一整圈、定点插桩不随母机走、脚下脉冲要贴近、夹住后持续拆解、近身反伤且不连锁）、区域 / 无人机外观种类与状态色、内核快照格式 7 与格式 6 兼容、
                 // 倍速 / 暂停只改步数不改结果、负向与性能。三套机身状态本身在 FgMachineMorphSelfCheck（J～M 段）。
                 _fail += FgCombatComponentRosterSelfCheck.Run(Report);
+                // FG2-E2E-01：M2 出口——解析台“数据复原”（FG-GAP-050 的固件临时来源：候选 = 表、拒绝顺序与原因、账本、破解、刻印 / 装配、存读档、44 条全部拿得到）、
+                // 引信弹迹（FG-GAP-043：类别映射、内核记录 / 渲染实例 / 按游戏时间到期 / 上限、快照格式 8 与 7 兼容、不进哈希）、FGJ-M2 / FGJ-M2R 登记覆盖出口旅程与 IC-REQ-022 六类、
+                // 缺口清零门禁、解析面板 UXML 与文本键。
+                _fail += FgMilestoneM2SelfCheck.Run(Report);
             }
             catch (Exception e)
             {

@@ -214,17 +214,17 @@ namespace GameLogic.EditorTools.JourneyBots
 
         // ── 2. 路径失败 ──────────────────────────────────────────────────────────────
 
-        private static Vector2 Target(JourneyContext c, string tag) =>
+        internal static Vector2 Target(JourneyContext c, string tag) =>
             new Vector2(float.Parse(c.Get(tag + "X", "0"), CultureInfo.InvariantCulture), float.Parse(c.Get(tag + "Y", "0"), CultureInfo.InvariantCulture));
 
-        private static void SetTarget(JourneyContext c, string tag, Vector2 p)
+        internal static void SetTarget(JourneyContext c, string tag, Vector2 p)
         {
             c.Set(tag + "X", p.x.ToString("R", CultureInfo.InvariantCulture));
             c.Set(tag + "Y", p.y.ToString("R", CultureInfo.InvariantCulture));
             c.SetInt(tag + "Found", 1);
         }
 
-        private static NavKernel NewProbe(out string why)
+        internal static NavKernel NewProbe(out string why)
         {
             why = null;
             var src = HomeGridService.MapFor(St)?.TerrainSource as WorldTerrainSource;
@@ -236,7 +236,7 @@ namespace GameLogic.EditorTools.JourneyBots
             return new NavKernel(NavService.ConfigFromTuning(), NavService.TerrainTable(), true, src.Params, src.Rects, src.Zones);
         }
 
-        private static bool Probe(NavKernel k, GridCell from, GridCell to, int serial, out NavResult res)
+        internal static bool Probe(NavKernel k, GridCell from, GridCell to, int serial, out NavResult res)
         {
             var pts = new List<int2>();
             var req = new NavRequest
@@ -253,7 +253,7 @@ namespace GameLogic.EditorTools.JourneyBots
             return res.Status == NavStatus.Ok;
         }
 
-        private static bool LivePos(int logicId, out Vector2 p)
+        internal static bool LivePos(int logicId, out Vector2 p)
         {
             p = default;
             return GameRoot.HomeValley?.Combat != null && GameRoot.HomeValley.Combat.TryGetMachinePosition(logicId, out p);
@@ -264,7 +264,7 @@ namespace GameLogic.EditorTools.JourneyBots
         /// ① 目标格周围（正式寻路的目标吸附半径 +1 以内）全都不可通行 → 吸附不到（GoalBlocked）；② 或者目标格能走、却被围死（Unreachable）。
         /// 只在已探索的范围内找（镜头平移得过去）。找到后用独立内核从工程机所在格实际寻一次路确认失败。
         /// </summary>
-        private static void FindUnreachable(JourneyContext c)
+        internal static void FindUnreachable(JourneyContext c)
         {
             c.SetInt("badFound", 0);
             int w = c.GetInt("workerB");
@@ -459,7 +459,7 @@ namespace GameLogic.EditorTools.JourneyBots
         }
 
         /// <summary>镜头平移到目标（按住方向键，玩家的平移方式），直到目标在画面里。</summary>
-        private static StepOutcome TickPannedTo(JourneyContext c, string tag)
+        internal static StepOutcome TickPannedTo(JourneyContext c, string tag)
         {
             if (c.GetInt(tag + "Found") == 0)
             {
@@ -495,14 +495,14 @@ namespace GameLogic.EditorTools.JourneyBots
             return StepOutcome.Wait;
         }
 
-        private static void RightClickTarget(JourneyContext c, string tag)
+        internal static void RightClickTarget(JourneyContext c, string tag)
         {
             c.SetInt("unreach0", NotificationCenter.History.Where(e => e?.Type?.Id == "unreachable").Sum(e => e.Count));
             c.SetInt("denied0", FeedbackCues.CountOf(FeedbackCueId.Denied));
             JourneyInput.Click(Target(c, tag), button: 1);
         }
 
-        private static StepOutcome TickUnreachableReported(JourneyContext c)
+        internal static StepOutcome TickUnreachableReported(JourneyContext c)
         {
             JourneyCommon.ResumeIfAutoPaused(c);
             int w = c.GetInt("workerB");
@@ -521,7 +521,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 : StepOutcome.Fail($"走不到时反馈不全：命令已结束 {ended}、通知可定位 {located}、拒绝音 {FeedbackCues.CountOf(FeedbackCueId.Denied) - c.GetInt("denied0")}");
         }
 
-        private static void RightClickReachable(JourneyContext c)
+        internal static void RightClickReachable(JourneyContext c)
         {
             int w = c.GetInt("workerB");
             if (!LivePos(w, out Vector2 me))
@@ -547,7 +547,7 @@ namespace GameLogic.EditorTools.JourneyBots
             }
         }
 
-        private static StepOutcome TickArrived(JourneyContext c)
+        internal static StepOutcome TickArrived(JourneyContext c)
         {
             JourneyCommon.ResumeIfAutoPaused(c);
             if (c.GetInt("okFound") == 0)
@@ -569,7 +569,7 @@ namespace GameLogic.EditorTools.JourneyBots
 
         // ── 3. 暂停与倍速 ────────────────────────────────────────────────────────────
 
-        private static StepOutcome TickPausedNow(JourneyContext c)
+        internal static StepOutcome TickPausedNow(JourneyContext c)
         {
             if (c.StepElapsed < 0.5)
             {
@@ -984,7 +984,7 @@ namespace GameLogic.EditorTools.JourneyBots
 
         // ── 6. 恢复 ──────────────────────────────────────────────────────────────────
 
-        private static StepOutcome TickCameraHome(JourneyContext c)
+        internal static StepOutcome TickCameraHome(JourneyContext c)
         {
             if (c.StepElapsed < 1.2)
             {

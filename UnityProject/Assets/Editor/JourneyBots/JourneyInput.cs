@@ -207,6 +207,24 @@ namespace GameLogic.EditorTools.JourneyBots
             });
         }
 
+        /// <summary>FG2-E2E-01：按住 Shift 左键点世界里一点（加选 / 减选：Shift 从按下那一帧起按住 0.4 真实秒，覆盖按下与抬起两帧）。</summary>
+        public static void ShiftClickWorld(Vector3 world)
+        {
+            Vector3 m = ScreenOfWorld(world);
+            var r = new ScriptReader
+            {
+                MouseA = m,
+                MouseB = m,
+                MouseButton = 0,
+                DownFrame = Time.frameCount + 1,
+                UpFrame = Time.frameCount + 2,
+                HoldUntil = Time.realtimeSinceStartup + 0.4f,
+                HeldDownFrame = Time.frameCount + 1,
+            };
+            r.Held.Add(KeyCode.LeftShift);
+            InputRouter.DebugSetReader(r);
+        }
+
         /// <summary>左键从 <paramref name="a"/> 拖到 <paramref name="b"/>（框选）：下一帧在 a 按下，再下一帧光标移到 b，第三帧在 b 抬起。</summary>
         public static void Drag(Vector2 a, Vector2 b)
         {

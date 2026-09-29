@@ -1450,6 +1450,39 @@ namespace BinGames.Sim.Combat
             return picked.Length;
         }
 
+        /// <summary>FG2-E2E-01（FG-GAP-043）：记一条引信弹迹（开火那一刻：炮口 → 命中点；<paramref name="flashOnly"/> 时只有炮口装定闪光，弹体自己会飞）。
+        /// 只在武器带引信弹迹标记、且配置的停留时间 &gt; 0 时记；满了挤掉最老的一条。O(1) 摊还（挤掉时整体前移 ≤ 容量）。</summary>
+        internal static void PushTrace(ref CombatData d, int a, int t, in CombatWeapon wp, bool flashOnly)
+        {
+            if (wp.FuseTrace == 0 || !(d.Config.FuseTraceSeconds > 0f) || a < 0 || a >= d.Count)
+            {
+                return;
+            }
+            if (d.Traces.Length >= CombatConst.TraceCapacity)
+            {
+                d.Traces.RemoveAt(0);
+            }
+            double2 from = d.Pos[a];
+            double2 to = t >= 0 && t < d.Count ? d.Pos[t] : from;
+            d.Traces.Add(new CombatShotTrace { From = from, To = to, Born = d.Scalars[0].Time, Faction = d.Faction[a], Line = (byte)(flashOnly ? 0 : 1) });
+        }
+
+        /// <summary>FG2-E2E-01：弹迹按游戏时间到期（暂停不推进内核 = 不消失；倍速多推进几步 = 同步加快）。</summary>
+        private static void StepTraces(ref CombatData d)
+        {
+            double cut = d.Scalars[0].Time - d.Config.FuseTraceSeconds;
+            int write = 0;
+            for (int i = 0; i < d.Traces.Length; i++)
+            {
+                CombatShotTrace tr = d.Traces[i];
+                if (tr.Born > cut)
+                {
+                    d.Traces[write++] = tr;
+                }
+            }
+            d.Traces.ResizeUninitialized(write);
+        }
+
         /// <summary>FG2-FW-02：读法相关的逐步推进（在弹体之后、兴趣点之前）：无人机 → 区域 → 回波 → 状态。</summary>
         private static void StepReadings(ref CombatData d, float dt)
         {
@@ -1464,6 +1497,10 @@ namespace BinGames.Sim.Combat
             if (d.Echoes.Length > 0)
             {
                 StepEchoes(ref d);
+            }
+            if (d.Traces.Length > 0)
+            {
+                StepTraces(ref d);
             }
             StepStatus(ref d, dt);
         }

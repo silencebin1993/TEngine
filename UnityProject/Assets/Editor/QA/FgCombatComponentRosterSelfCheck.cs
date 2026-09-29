@@ -569,9 +569,10 @@ namespace GameLogic.EditorTools
             bool zonesSame = k.ZoneCount == b.ZoneCount && Enumerable.Range(0, k.ZoneCount).All(i => k.TryGetZone(i, out CombatZone x) && b.TryGetZone(i, out CombatZone y) && x.Look == y.Look);
             bool weaponsSame = k.WeaponCount == b.WeaponCount && Enumerable.Range(0, k.WeaponCount).All(i =>
                 k.TryGetWeapon(i, out CombatWeapon x) && b.TryGetWeapon(i, out CombatWeapon y) && CombatKernel.WeaponKey(x) == CombatKernel.WeaponKey(y));
-            Expect(CombatKernel.PeekFormat(snap) == 7 && lr == CombatLoadResult.Ok && b.StateHash() == k.StateHash() && d0.Anchored == 1 && e0.Anchored == 1
-                   && math.distance(d0.Anchor, e0.Anchor) < 1e-12 && zonesSame && weaponsSame && k.ZoneCount > 0,
-                $"格式 7 往返：状态哈希一致、桩锚点 / 区域外观 / 武器读法逐位一致（桩 {k.DroneCount}、区域 {k.ZoneCount}）");
+            // FG2-E2E-01 起当前格式是 8（武器追加引信弹迹标记）；格式 7 的内容（桩锚点 / 区域外观 / 反伤）照样在当前格式里往返——这里断言“当前格式 ≥ 7 的往返”，7 → 8 的兼容由 [M2 出口] B3 断言。
+            Expect(CombatKernel.PeekFormat(snap) == CombatConst.FormatVersion && CombatConst.FormatVersion >= 7 && lr == CombatLoadResult.Ok && b.StateHash() == k.StateHash()
+                   && d0.Anchored == 1 && e0.Anchored == 1 && math.distance(d0.Anchor, e0.Anchor) < 1e-12 && zonesSame && weaponsSame && k.ZoneCount > 0,
+                $"当前格式（{CombatConst.FormatVersion}）往返：状态哈希一致、桩锚点 / 区域外观 / 武器读法逐位一致（桩 {k.DroneCount}、区域 {k.ZoneCount}）");
             Run(k, 3f);
             Run(b, 3f);
             Expect(k.StateHash() == b.StateHash(), "读档后续跑 3 秒：与不读档逐位相同");

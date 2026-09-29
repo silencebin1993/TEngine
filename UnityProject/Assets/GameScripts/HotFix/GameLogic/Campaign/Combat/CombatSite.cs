@@ -204,6 +204,8 @@ namespace GameLogic.Campaign.Combat
             c.WeaveMargin = Tuning("reading.weave.margin", 0.6f);
             // FG2-FW-03：状态标签叠层上限（fg.TbHomeTuning status.stack_cap）。
             c.StatusStackCap = (int)Math.Round(Tuning("status.stack_cap", 3f));
+            // FG2-E2E-01（FG-GAP-043）：引信弹迹 / 炮口装定闪光停留的游戏秒。
+            c.FuseTraceSeconds = Math.Max(0f, Tuning("combat.fuse_trace_seconds", c.FuseTraceSeconds));
             return c;
         }
 
@@ -592,6 +594,7 @@ namespace GameLogic.Campaign.Combat
                 w.Reaction = !suppressReaction && p.ReactionId == MechanicalReactionCatalog.ReactionMeltOverloadId ? CombatReaction.MeltOverload : CombatReaction.None;
                 // FG2-FW-02：重炮是射弹载体；伤害是固定值（不经电路编译），“伤害倍率”读法（电容蓄力）按表乘上。
                 w.Reading = CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), damageFromCompile: false);
+                w.FuseTrace = FuseTraceOf(p);
                 return w;
             }
             w.Mode = CombatWeaponMode.Instant;
@@ -613,7 +616,26 @@ namespace GameLogic.Campaign.Combat
                 w.JumpFalloff = FracturedCityLayout.MarkJumpDamageFalloff;
                 w.JumpMax = FracturedCityLayout.MarkJumpMaxTargets;
             }
+            w.FuseTrace = FuseTraceOf(p);
             return w;
+        }
+
+        /// <summary>FG2-E2E-01（FG-GAP-043）：这套装配的生效固件里有引信类（按表 category 列，不按 ID 写特例）→ 开火带引信弹迹与炮口装定闪光。
+        /// 与机身形变同一个“生效固件”集合（<see cref="BlueprintCircuitPreview.FirmwareIds"/>：AI 本地配置或接入时插进接入口的都算）。</summary>
+        public static byte FuseTraceOf(BlueprintCircuitPreview p)
+        {
+            if (p?.FirmwareIds == null)
+            {
+                return 0;
+            }
+            foreach (string fw in p.FirmwareIds)
+            {
+                if (!string.IsNullOrEmpty(fw) && FirmwareKinds.CategoryOf(fw) == FirmwareCategory.Fuse)
+                {
+                    return 1;
+                }
+            }
+            return 0;
         }
 
         /// <summary>FG2-FW-02：参与普通读法的固件——具名反应的触发固件（熔穿过载 ← 过载、标记跳转 ← 标记跳转）在这套装配上由反应取代它的普通读法

@@ -198,21 +198,21 @@ namespace GameLogic.EditorTools.JourneyBots
             return GameRoot.HomeValley?.Combat != null && GameRoot.HomeValley.Combat.TryGetMachineMarker(logicId, out m) && m != null && m.View != null;
         }
 
-        private static bool FcMarker(int logicId, out HomeValleyMachineMarker m)
+        internal static bool FcMarker(int logicId, out HomeValleyMachineMarker m)
         {
             m = null;
             CombatSite site = GameRoot.FracturedCity?.Combat;
             return site != null && site.TryGetMachineMarker(logicId, out m) && m != null;
         }
 
-        private static bool FcPos(int logicId, out Vector2 p)
+        internal static bool FcPos(int logicId, out Vector2 p)
         {
             p = default;
             CombatSite site = GameRoot.FracturedCity?.Combat;
             return site != null && site.TryGetMachinePosition(logicId, out p);
         }
 
-        private static bool FcActive => GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsActive;
+        internal static bool FcActive => GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsActive;
 
         // ── 进度夹具 ────────────────────────────────────────────────────────────────
 
@@ -345,7 +345,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 : StepOutcome.Retry($"右键后没有 {typeId} 的修复工单（{GameRoot.HomeValley.SquadCommands.RecentEvents.LastOrDefault()}）");
         }
 
-        private static StepOutcome TickRepairsDone(JourneyContext c)
+        internal static StepOutcome TickRepairsDone(JourneyContext c)
         {
             JourneyCommon.ResumeIfAutoPaused(c);
             BuildingRecord g = Building(HomeValleyLayout.BuildingTypeGenerator);
@@ -370,13 +370,13 @@ namespace GameLogic.EditorTools.JourneyBots
 
         // ── 第 1 步：电路编辑器 ────────────────────────────────────────────────────────
 
-        private static CircuitBoardPanelUIToolkit Panel()
+        internal static CircuitBoardPanelUIToolkit Panel()
         {
             GameObject host = GameObject.Find("[HomeValleyCircuitBoardHost]");
             return host != null ? host.GetComponent<CircuitBoardPanelUIToolkit>() : null;
         }
 
-        private static StepOutcome TickEditorOpen(JourneyContext c)
+        internal static StepOutcome TickEditorOpen(JourneyContext c)
         {
             if (c.StepElapsed < 0.8)
             {
@@ -388,9 +388,9 @@ namespace GameLogic.EditorTools.JourneyBots
                 : StepOutcome.Retry("点入口后蓝图编辑器没有打开：" + UiFail(c));
         }
 
-        private static BlueprintRecord Erc003Record() => St?.BlueprintRecords?.FirstOrDefault(b => b.BlueprintId == HomeValleyLayout.BlueprintErc003Id);
+        internal static BlueprintRecord Erc003Record() => St?.BlueprintRecords?.FirstOrDefault(b => b.BlueprintId == HomeValleyLayout.BlueprintErc003Id);
 
-        private static void ClickErc003Row(JourneyContext c)
+        internal static void ClickErc003Row(JourneyContext c)
         {
             BlueprintRecord r = Erc003Record();
             ScrollView list = JourneyInput.FindUitk<ScrollView>("[HomeValleyCircuitBoardHost]", "BlueprintList");
@@ -400,7 +400,7 @@ namespace GameLogic.EditorTools.JourneyBots
             c.Set("uiFail", row != null && JourneyInput.ClickElement(row) ? string.Empty : row == null ? "列表里找不到 ERC-003 蓝图" : JourneyInput.LastUiFailure);
         }
 
-        private static StepOutcome TickErc003Open(JourneyContext c)
+        internal static StepOutcome TickErc003Open(JourneyContext c)
         {
             if (c.StepElapsed < 0.5)
             {
@@ -518,7 +518,7 @@ namespace GameLogic.EditorTools.JourneyBots
             return StepOutcome.Done($"保存成功：ERC-003 蓝图现役 v{v.Version}（铸造重炮、{saved.UplinkSlot} 号格接入口，造价 {v.ScrapCost} 废料）；“{label}”");
         }
 
-        private static StepOutcome TickEditorClosed(JourneyContext c)
+        internal static StepOutcome TickEditorClosed(JourneyContext c)
         {
             if (c.StepElapsed < 0.6)
             {
@@ -634,7 +634,7 @@ namespace GameLogic.EditorTools.JourneyBots
 
         // ── 生产重炮机 ──────────────────────────────────────────────────────────────
 
-        private static StepOutcome TickFactoryOpen(JourneyContext c)
+        internal static StepOutcome TickFactoryOpen(JourneyContext c)
         {
             if (c.StepElapsed < 0.6)
             {
@@ -662,7 +662,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 : StepOutcome.Retry($"点“生产”后队列里没有 ERC-003 v{c.GetInt("bpVersion")}（{UiFail(c)}；{JourneyInput.FindUitk<Label>("[HomeValleyFactoryHost]", "ProduceHintLabel")?.text}）");
         }
 
-        private static StepOutcome TickFactoryClosed(JourneyContext c)
+        internal static StepOutcome TickFactoryClosed(JourneyContext c)
         {
             if (c.StepElapsed < 0.6)
             {
@@ -733,7 +733,7 @@ namespace GameLogic.EditorTools.JourneyBots
 
         // ── 第 3 步：远征 ──────────────────────────────────────────────────────────
 
-        private static StepOutcome TickPrepOpen(JourneyContext c)
+        internal static StepOutcome TickPrepOpen(JourneyContext c)
         {
             JourneyCommon.ResumeIfAutoPaused(c);
             if (c.StepElapsed < 0.8)
@@ -815,7 +815,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 : StepOutcome.Fail($"勾选后名单不对：全部勾上 {allOn}；“{summary}”“{reasons}”");
         }
 
-        private static IEnumerable<IEnumerable<int>> Combos(List<int> items, int k)
+        internal static IEnumerable<IEnumerable<int>> Combos(List<int> items, int k)
         {
             if (k == 0)
             {
@@ -831,10 +831,10 @@ namespace GameLogic.EditorTools.JourneyBots
             }
         }
 
-        private static List<int> Roster(JourneyContext c) =>
+        internal static List<int> Roster(JourneyContext c) =>
             c.Get("roster", string.Empty).Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries).Select(x => int.Parse(x, CultureInfo.InvariantCulture)).ToList();
 
-        private static Toggle RowToggle(int logicId)
+        internal static Toggle RowToggle(int logicId)
         {
             if (!MachineRegistry.TryGetRecord(logicId, out MachineRecord rec))
             {
@@ -846,7 +846,7 @@ namespace GameLogic.EditorTools.JourneyBots
             return row?.Q<Toggle>("Select");
         }
 
-        private static StepOutcome TickDeparted(JourneyContext c)
+        internal static StepOutcome TickDeparted(JourneyContext c)
         {
             if (FcActive)
             {
@@ -1155,7 +1155,7 @@ namespace GameLogic.EditorTools.JourneyBots
                    $"｜重炮热量={heatA.ToString("R", CultureInfo.InvariantCulture)}";
         }
 
-        private static StepOutcome TickSaveConfirm(JourneyContext c)
+        internal static StepOutcome TickSaveConfirm(JourneyContext c)
         {
             if (c.StepElapsed < 0.8)
             {
@@ -1203,7 +1203,7 @@ namespace GameLogic.EditorTools.JourneyBots
             return StepOutcome.Done($"回到主菜单；存档（槽位 {slot + 1}）里信号在 {Label(c.GetInt("other"))}、固件 / 冷却到期步 / 跳转冷却 / 重炮热量与存档那一刻逐字段一致");
         }
 
-        private static StepOutcome TickLoadSlot(JourneyContext c)
+        internal static StepOutcome TickLoadSlot(JourneyContext c)
         {
             if (c.StepElapsed < 1)
             {
@@ -1314,7 +1314,7 @@ namespace GameLogic.EditorTools.JourneyBots
             return StepOutcome.Wait;
         }
 
-        private static void ClickFcMachine(JourneyContext c, int logicId)
+        internal static void ClickFcMachine(JourneyContext c, int logicId)
         {
             if (FcMarker(logicId, out HomeValleyMachineMarker m) && m.View != null)
             {
@@ -1405,7 +1405,7 @@ namespace GameLogic.EditorTools.JourneyBots
 
         // ── 第 9 步：返回家园 ──────────────────────────────────────────────────────────
 
-        private static StepOutcome TickEvacPanel(JourneyContext c)
+        internal static StepOutcome TickEvacPanel(JourneyContext c)
         {
             int b = c.GetInt("other");
             if (GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsEvacPanelOpen)
@@ -1432,7 +1432,7 @@ namespace GameLogic.EditorTools.JourneyBots
             return StepOutcome.Retry($"在撤离点按住交互键后撤离清单没有打开（离撤离点 {d:F1} 格；{GameRoot.FracturedCity?.Interact?.GetType().Name}）");
         }
 
-        private static StepOutcome TickReturnedHome(JourneyContext c)
+        internal static StepOutcome TickReturnedHome(JourneyContext c)
         {
             JourneyCommon.ResumeIfAutoPaused(c);
             if (GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsLoaded)

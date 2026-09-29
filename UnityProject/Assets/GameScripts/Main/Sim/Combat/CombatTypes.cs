@@ -21,8 +21,9 @@ namespace BinGames.Sim.Combat
         /// 5 = FG2-FW-04（DEBT-FG2FW03-02）：每个单位追加每个已挂状态位自己的到期时间（读取仍认 1～4：各位的到期 = 整组到期）。
         /// 6 = FG2-FW-04 修复：每个单位追加区域减速位自己的减速值（读取仍认 1～5：有区域减速位时取整组减速值，否则 0）。
         /// 7 = FG2-VFX-02：武器读法追加布区落点、无人机定点、反伤（比例 / 固定值 / 触及）；区域追加外观种类；无人机追加定点锚点
-        /// （读取仍认 1～6：布区落在命中点、无人机伴飞、没有反伤、区域外观按“液池”、无人机无锚点）。</summary>
-        public const int FormatVersion = 7;
+        /// （读取仍认 1～6：布区落在命中点、无人机伴飞、没有反伤、区域外观按“液池”、无人机无锚点）。
+        /// 8 = FG2-E2E-01（FG-GAP-043）：武器追加“引信弹迹”标记（读取仍认 1～7：没有弹迹）。弹迹本身是表现，不进快照。</summary>
+        public const int FormatVersion = 8;
 
         /// <summary>仍能读取的最老格式版本。</summary>
         public const int MinReadableFormat = 1;
@@ -44,6 +45,13 @@ namespace BinGames.Sim.Combat
         /// <summary>FG2-FW-02：配置里没填（0）时的区域 / 回波 / 无人机容量（超出的不生成并计数，不抛异常）。</summary>
         public const int DefaultZoneCapacity = 512;
         public const int DefaultEchoCapacity = 1024;
+
+        /// <summary>FG2-E2E-01（FG-GAP-043）：同时留在画面上的引信弹迹上限（满了挤掉最老的一条；每条只活零点几游戏秒）。</summary>
+        public const int TraceCapacity = 128;
+
+        /// <summary>FG2-E2E-01（FG-GAP-043）：弹迹在弹体渲染缓冲里的种类（B.w）；炮口装定闪光在区域渲染缓冲里的种类。</summary>
+        public const float TraceInstanceKind = 10f;
+        public const float MuzzleFlashKind = 26f;
         public const int DefaultDroneCapacity = 512;
 
         /// <summary>FG2-FW-02：一次命中的读法里“额外目标 / 连锁 / 穿透”每种最多几个（存储与耗时上限；表里的值超过按此截断）。</summary>
@@ -80,6 +88,8 @@ namespace BinGames.Sim.Combat
         public const float EffectKindPost = 25f;
         /// <summary>区域 / 无人机没有状态色时的阵营默认色（打包 0xRRGGBB）：己方青、敌方橙红、中立灰。</summary>
         public const int EffectFriendColor = 0x40D9F2;
+        /// <summary>FG2-E2E-01（FG-GAP-043）：引信弹迹 / 炮口装定闪光的颜色（琥珀白，与阵营色和状态色都区分开）。</summary>
+        public const int MuzzleFlashColor = 0xFFD27A;
         public const int EffectFoeColor = 0xFA7330;
         public const int EffectNeutralColor = 0xB0B0B0;
     }
@@ -663,6 +673,22 @@ namespace BinGames.Sim.Combat
         /// <summary>FG2-FW-02：载体与固件读法（全 0 = 射弹载体、没有读法；Demo 的敌人武器、炮塔原型都是这样）。
         /// FG2-FW-02 起 <see cref="HeatPerShot"/> 对所有开火方式生效（DEBT-FG1SIG06-02：即时命中武器也按固件积热、过热停火）。</summary>
         public CombatReading Reading;
+        /// <summary>FG2-E2E-01（FG-GAP-043，设计案 5.3“引信与弹芯类主要体现在弹体特效上，炮口有一下装定闪光”）：
+        /// 1 = 这套装配里有生效的引信类固件——每次开火在内核里记一条弹迹（炮口 → 命中点）与炮口装定闪光，渲染缓冲画出来；0 = 没有。只影响表现，不影响结算。</summary>
+        public byte FuseTrace;
+    }
+
+    /// <summary>FG2-E2E-01（FG-GAP-043）：一条引信弹迹（表现数据：不进快照、不进状态哈希；按游戏时间到期，暂停时不消失）。</summary>
+    [Serializable]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CombatShotTrace
+    {
+        public double2 From;
+        public double2 To;
+        public double Born;
+        public byte Faction;
+        /// <summary>1 = 画弹迹线（即时命中 / 重炮）；0 = 只有炮口闪光（弹体武器：弹体自己飞）。</summary>
+        public byte Line;
     }
 
     /// <summary>行为参数（一种敌人一份）。</summary>
@@ -807,6 +833,8 @@ namespace BinGames.Sim.Combat
         public float WeaveMargin;
         /// <summary>FG2-FW-03：同一状态标签最多叠几层（fg.TbHomeTuning status.stack_cap，1～3）。0 = 不叠层（按 1 层）。</summary>
         public int StatusStackCap;
+        /// <summary>FG2-E2E-01（FG-GAP-043）：引信弹迹 / 炮口装定闪光在画面上停留的游戏秒（fg.TbHomeTuning combat.fuse_trace_seconds）。0 = 不记弹迹。</summary>
+        public float FuseTraceSeconds;
 
         public static CombatConfig Default => new CombatConfig
         {
@@ -823,6 +851,7 @@ namespace BinGames.Sim.Combat
             AvoidWeight = 1.35f,
             NavEnabled = 0,
             SeparationFactor = 0.5f,
+            FuseTraceSeconds = 0.15f,
         };
     }
 

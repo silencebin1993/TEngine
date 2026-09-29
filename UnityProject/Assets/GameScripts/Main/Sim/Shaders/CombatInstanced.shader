@@ -132,7 +132,15 @@ Shader "BinGames/CombatInstanced"
                     float2 dir = len > 1e-4 ? d / len : float2(0, 1);
                     float2 perp = float2(-dir.y, dir.x);
                     float w = max(0.08, it.b.x * 1.6);
-                    p = c + dir * (local.y * max(0.35, len * 2.0)) + perp * (local.x * w);
+                    if (abs(it.b.w - 10.0) < 0.5)
+                    {
+                        // FG2-E2E-01（FG-GAP-043）：引信弹迹——A = (命中点, 炮口)，按两端画一条不插值的细亮线。
+                        p = (cur + prev) * 0.5 + dir * (local.y * len) + perp * (local.x * 0.12);
+                    }
+                    else
+                    {
+                        p = c + dir * (local.y * max(0.35, len * 2.0)) + perp * (local.x * w);
+                    }
                 }
                 v2f o;
                 o.pos = mul(UNITY_MATRIX_VP, float4(p.x, _Height, p.y, 1.0));
@@ -162,6 +170,17 @@ Shader "BinGames/CombatInstanced"
                 float3 col = unpackRgb(d.z);
                 float t = _GameTime;
                 int kind = (int)round(d.w);
+                if (kind == 26)
+                {
+                    // FG2-E2E-01（FG-GAP-043）：炮口装定闪光——四角星芒 + 亮心，按剩余比例收缩淡出。
+                    float fade = saturate(d.y);
+                    float2 a2 = abs(q);
+                    float star = min(a2.x, a2.y) * 6.0 + max(a2.x, a2.y);
+                    if (r < 0.35 * fade + 0.1) return fixed4(lerp(col, float3(1, 1, 1), 0.6), 1);
+                    if (star < 0.9 * fade) return fixed4(col, 1);
+                    discard;
+                    return 0;
+                }
                 if (kind >= 24)
                 {
                     if (kind == 24)
@@ -283,6 +302,16 @@ Shader "BinGames/CombatInstanced"
                 float3 friendCol = float3(0.25, 0.85, 0.95);
                 float3 foeCol = float3(0.98, 0.45, 0.18);
                 float3 col = faction < 0.5 ? friendCol : foeCol;
+                if (_Kind > 0.5 && abs(i.data.w - 10.0) < 0.5)
+                {
+                    // FG2-E2E-01（FG-GAP-043）：引信弹迹——琥珀白亮线，按剩余比例变细变暗。
+                    float edgeT = abs(i.uv.x - 0.5) * 2.0;
+                    if (edgeT > saturate(i.data.y) + 0.05)
+                    {
+                        discard;
+                    }
+                    return fixed4(lerp(float3(1, 0.95, 0.8), float3(1, 0.82, 0.48), edgeT), 1);
+                }
                 if (_Kind > 0.5)
                 {
                     float edge = abs(i.uv.x - 0.5) * 2.0;

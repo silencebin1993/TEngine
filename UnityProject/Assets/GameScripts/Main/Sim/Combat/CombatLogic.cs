@@ -884,6 +884,8 @@ namespace BinGames.Sim.Combat
             d.Counters[0] = c;
             RawFired(ref d, a, t);
             AddShotHeat(ref d, a, wp);
+            // FG2-E2E-01（FG-GAP-043）：引信类固件的弹迹与炮口装定闪光（弹体武器只闪光，弹体自己飞）。
+            PushTrace(ref d, a, t, wp, wp.Mode == CombatWeaponMode.Projectile);
             if (IsCharged(wp))
             {
                 // FG2-FW-02：蓄力读法（出手间隔倍率 > 1）记下这一发之后多久才蓄满；直控点击按它拦（FireDirect），编队攻击的冷却本身已乘同一倍率。
@@ -946,6 +948,7 @@ namespace BinGames.Sim.Combat
             d.Counters[0] = c;
             RawFired(ref d, a, t);
             Cue(ref d, CombatEventKind.CannonFire, a, d.Id[t], 0f, d.Pos[t], 0);
+            PushTrace(ref d, a, t, wp, false); // FG2-E2E-01（FG-GAP-043）
             if (overload)
             {
                 Cue(ref d, CombatEventKind.MeltOverload, a, d.Id[t], 0f, d.Pos[t], 0);
