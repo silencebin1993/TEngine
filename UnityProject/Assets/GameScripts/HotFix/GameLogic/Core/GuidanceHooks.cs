@@ -59,6 +59,10 @@ namespace GameLogic.Core
         public const string MorphFirstSeen = "firmware.morph.first_seen";
         /// <summary>FG1-HUD-01：第一次有机器进入安全模式（引导内容在 FG15-UX-04：盾形标记、只跑本地常规固件、怎么恢复；图鉴“安全模式”随之解锁）。</summary>
         public const string SafeModeFirstEnter = "signal.safe_mode.first_enter";
+        /// <summary>FG2-FW-03：第一次看到单位头顶的状态标签图标（引导内容在 FG15-UX-04：标签是什么、悬停看名称 / 剩余时间 / 叠层）。</summary>
+        public const string StatusTagFirstSeen = "firmware.status_tag.first_seen";
+        /// <summary>FG2-FW-03：第一次打出一条已开放命名的具名反应（引导内容：两种标签凑在一起会反应、去图鉴查配方；首次慢放与图鉴解锁归 FG2-FW-04）。</summary>
+        public const string ReactionFirstNamed = "firmware.reaction.first_named";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -74,6 +78,7 @@ namespace GameLogic.Core
             SignalFirstEncryptedFirmware, ExposurePanelFirstOpen,
             SignalCoverageFirstOverlay, SignalCoverageFirstLeft, SignalRelayFirstCut, SignalFirstFarJump,
             MorphFirstSeen, SafeModeFirstEnter,
+            StatusTagFirstSeen, ReactionFirstNamed,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

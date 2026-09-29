@@ -67,6 +67,7 @@ namespace BinGames.Sim.Combat
             {
                 c.MaxStuckStrikes = 3;
             }
+            c.StatusStackCap = Math.Max(0, Math.Min(CombatConst.MaxStatusStacks, c.StatusStackCap));
             _d = CombatData.Create(c, capacity);
             _dummyNav = NavGrid.Create(8, null, false, default, null, null, 0, 1);
             _d.Nav = _dummyNav;
@@ -1010,6 +1011,157 @@ namespace BinGames.Sim.Combat
             return true;
         }
 
+        // ─────────────────────────────── FG2-FW-03 反应与叠层 ───────────────────────────────
+
+        /// <summary>登记本地点的具名标签反应规则（热更层按 fg.TbReaction 的 priority 排好序；最多 <see cref="CombatConst.MaxReactions"/> 条，多出的丢弃并返回 false）。
+        /// 规则是内容不是状态：不进快照，读档后沿用当前登记的。</summary>
+        public bool SetReactionRules(CombatReactionRule[] rules)
+        {
+            // 已有的触发次数 / 伤害按反应的稳定键挪到新下标（表里 priority 顺序改了、表重载了，计数仍记在同一条反应上）。
+            int n = CombatConst.MaxReactions;
+            var keys = new int[n];
+            var counts = new int[n];
+            var dmgs = new float[n];
+            for (int i = 0; i < n; i++)
+            {
+                keys[i] = _d.ReactionKey[i];
+                counts[i] = _d.ReactionCount[i];
+                dmgs[i] = _d.ReactionDamage[i];
+            }
+            _d.Reactions.Clear();
+            if (rules != null)
+            {
+                for (int i = 0; i < rules.Length && i < CombatConst.MaxReactions; i++)
+                {
+                    _d.Reactions.Add(rules[i]);
+                }
+            }
+            RemapReactionCounters(ref _d, keys, counts, dmgs, n);
+            return rules == null || rules.Length <= CombatConst.MaxReactions;
+        }
+
+        /// <summary>快照里每条反应计数占的字节数（稳定键 int + 次数 int + 伤害 float；自检改坏值时按它算偏移）。</summary>
+        public const int ReactionCounterEntryBytes = 12;
+
+        /// <summary>快照反应计数块条数的合理上限（超出视为坏值）。</summary>
+        private const int MaxSnapshotReactionEntries = 4096;
+
+        /// <summary>把一组（键, 次数, 伤害）按 <paramref name="d"/> 当前登记的规则放进计数槽：有键的按键找，无键（0）的按同一下标；
+        /// 没有登记规则时原样放（规则稍后登记时再按键挪）。当前规则里没有的反应，计数丢弃。</summary>
+        private static void RemapReactionCounters(ref CombatData d, int[] keys, int[] counts, float[] dmgs, int n)
+        {
+            int max = CombatConst.MaxReactions;
+            for (int i = 0; i < max; i++)
+            {
+                d.ReactionKey[i] = 0;
+                d.ReactionCount[i] = 0;
+                d.ReactionDamage[i] = 0f;
+            }
+            int rules = d.Reactions.Length;
+            if (rules == 0)
+            {
+                for (int j = 0; j < n && j < max; j++)
+                {
+                    d.ReactionKey[j] = keys[j];
+                    d.ReactionCount[j] = counts[j];
+                    d.ReactionDamage[j] = dmgs[j];
+                }
+                return;
+            }
+            for (int i = 0; i < rules && i < max; i++)
+            {
+                int key = d.Reactions[i].Key;
+                d.ReactionKey[i] = key;
+                int src = -1;
+                if (key != 0)
+                {
+                    for (int j = 0; j < n; j++)
+                    {
+                        if (keys[j] == key)
+                        {
+                            src = j;
+                            break;
+                        }
+                    }
+                }
+                else if (i < n && keys[i] == 0)
+                {
+                    src = i;
+                }
+                if (src >= 0)
+                {
+                    d.ReactionCount[i] = counts[src];
+                    d.ReactionDamage[i] = dmgs[src];
+                }
+            }
+        }
+
+        /// <summary>登记每个状态位的效果（32 格，fg.TbStatusTag 的 effect / amount）。</summary>
+        public void SetStatusFx(CombatStatusFx[] fx)
+        {
+            for (int b = 0; b < 32; b++)
+            {
+                _d.StatusFx[b] = fx != null && b < fx.Length ? fx[b] : default;
+            }
+        }
+
+        public int ReactionRuleCount => _d.Reactions.Length;
+
+        public CombatReactionRule ReactionRule(int index) => index >= 0 && index < _d.Reactions.Length ? _d.Reactions[index] : default;
+
+        public CombatStatusFx StatusFxOf(int bit) => bit >= 0 && bit < 32 ? _d.StatusFx[bit] : default;
+
+        /// <summary>第 <paramref name="index"/> 条反应累计触发次数 / 反应额外伤害（进存档）。</summary>
+        public int ReactionCountOf(int index) => index >= 0 && index < CombatConst.MaxReactions ? _d.ReactionCount[index] : 0;
+
+        public float ReactionDamageOf(int index) => index >= 0 && index < CombatConst.MaxReactions ? _d.ReactionDamage[index] : 0f;
+
+        /// <summary>单位身上某个状态位此刻的叠层数（没有 / 已到期 = 0）。</summary>
+        public int StatusStacksOf(int id, int bit)
+        {
+            int slot = _d.SlotOf(id);
+            if (slot < 0 || bit < 0 || bit > 30 || !_d.StatusActive(slot, _d.Scalars[0].Time) || (_d.Status[slot] & (1u << bit)) == 0u)
+            {
+                return 0;
+            }
+            return (int)((_d.StatusStacks[slot] >> (bit * 2)) & 3UL);
+        }
+
+        /// <summary>离 <paramref name="pos"/> 最近、在 <paramref name="radius"/>（另加单位半径）内的活单位 ID（悬停读数用）；<paramref name="withStatus"/> 时只找身上有标签的。没有返回 0。O(单位数)，在 AOT 内核里。</summary>
+        public int PickUnit(double2 pos, float radius, bool withStatus)
+        {
+            double now = _d.Scalars[0].Time;
+            int best = 0;
+            double bestDist = double.MaxValue;
+            for (int i = 0; i < _d.Count; i++)
+            {
+                if (!_d.IsAlive(i))
+                {
+                    continue;
+                }
+                if (withStatus && (!_d.StatusActive(i, now) || (_d.Status[i] & ~CombatConst.StatusBitZoneSlow) == 0u))
+                {
+                    continue;
+                }
+                double dist = math.distance(_d.Pos[i], pos);
+                if (dist > radius + _d.Radius[i] || dist >= bestDist)
+                {
+                    continue;
+                }
+                bestDist = dist;
+                best = _d.Id[i];
+            }
+            return best;
+        }
+
+        /// <summary>FGR-FW-031 头顶状态标签图标的实例化缓冲（Burst）：每个带标签的活单位按位序排出前 <paramref name="maxPerUnit"/> 个图标，
+        /// 摆在单位上方一排。<paramref name="visuals"/> 32 格：x = 形状序号（&lt;0 = 这一位不画），y = 打包颜色 0xRRGGBB。</summary>
+        public void PrepareStatusIcons(NativeList<CombatInstance> icons, NativeArray<float2> visuals, double2 origin, int maxPerUnit, float iconSize)
+        {
+            var job = new CombatStatusIconJob { D = _d, Icons = icons, Visuals = visuals, Origin = origin, MaxPerUnit = math.max(1, maxPerUnit), Size = iconSize };
+            job.Run();
+        }
+
         /// <summary>这台单位当前挂着几架无人机。</summary>
         public int DronesOf(int ownerId)
         {
@@ -1072,6 +1224,7 @@ namespace BinGames.Sim.Combat
                 Mix(ref h, _d.StatusDps[i]);
                 Mix(ref h, _d.StatusSlow[i]);
                 Mix(ref h, _d.StatusVuln[i]);
+                Mix(ref h, (long)_d.StatusStacks[i]);
                 CombatCommand c = _d.Cmd[i];
                 Mix(ref h, (int)c.Kind);
                 Mix(ref h, c.Target);
@@ -1135,6 +1288,11 @@ namespace BinGames.Sim.Combat
                 Mix(ref h, dr.Until);
                 Mix(ref h, dr.NextHit);
                 Mix(ref h, dr.Owner);
+            }
+            for (int i = 0; i < CombatConst.MaxReactions; i++)
+            {
+                Mix(ref h, _d.ReactionCount[i]);
+                Mix(ref h, _d.ReactionDamage[i]);
             }
             Mix(ref h, _d.Gameplay.Length);
             Mix(ref h, s.NextNavSerial);
@@ -1284,6 +1442,11 @@ namespace BinGames.Sim.Combat
                     w.Write(_d.StatusVuln[i]);
                     w.Write(_d.StatusSource[i]);
                 }
+                // FG2-FW-03（格式 4）：状态标签叠层。
+                if (format >= 4)
+                {
+                    w.Write(_d.StatusStacks[i]);
+                }
             }
 
             w.Write(_d.Projectiles.Length);
@@ -1336,6 +1499,17 @@ namespace BinGames.Sim.Combat
             if (format >= 3)
             {
                 WriteReadings(w);
+            }
+            // FG2-FW-03（格式 4）：每条反应的稳定键、触发次数与反应额外伤害（条数 + 每条 ReactionCounterEntryBytes 字节；读档按键对应，不按下标）。
+            if (format >= 4)
+            {
+                w.Write(CombatConst.MaxReactions);
+                for (int i = 0; i < CombatConst.MaxReactions; i++)
+                {
+                    w.Write(_d.ReactionKey[i]);
+                    w.Write(_d.ReactionCount[i]);
+                    w.Write(_d.ReactionDamage[i]);
+                }
             }
             w.Flush();
             byte[] body = ms.ToArray();
@@ -1436,6 +1610,12 @@ namespace BinGames.Sim.Combat
                 return CombatLoadResult.BadChecksum;
             }
             var staging = CombatData.Create(_d.Config, 16);
+            // FG2-FW-03：反应规则与状态位效果是内容（热更层建地点时按表写入），读档沿用当前的；先放进 staging，反应计数按当前规则的键对应。
+            for (int i = 0; i < _d.Reactions.Length; i++)
+            {
+                staging.Reactions.Add(_d.Reactions[i]);
+            }
+            staging.StatusFx.CopyFrom(_d.StatusFx);
             CombatLoadResult result;
             try
             {
@@ -1453,6 +1633,11 @@ namespace BinGames.Sim.Combat
             {
                 staging.Dispose();
                 return result;
+            }
+            if (format < 4)
+            {
+                // 格式 3 及更早没有反应计数：计数为 0，计数槽的键对齐当前登记的规则（之后触发的次数按键进存档）。
+                RemapReactionCounters(ref staging, Array.Empty<int>(), Array.Empty<int>(), Array.Empty<float>(), 0);
             }
             // 成功：替换内核数据（障碍来自布局，由热更层随后重设，这里沿用当前的；寻路镜像属于寻路内核，沿用当前绑定）。
             staging.Nav = _d.Nav;
@@ -1604,6 +1789,12 @@ namespace BinGames.Sim.Combat
                         return CombatLoadResult.InvalidValue;
                     }
                 }
+                // FG2-FW-03（格式 4）：叠层；更老的快照按已有标签各 1 层。
+                ulong stacks = format >= 4 ? r.ReadUInt64() : OneStackPerBit(status);
+                if ((stacks & ~StackMaskOf(status)) != 0UL)
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
                 if (id <= 0 || id >= s.NextId || !IsFinite(sp.Position) || !IsFinite(sp.Home) || float.IsNaN(sp.Health)
                     || sp.Weapon >= wn || sp.BehaviorProfile >= pn || staging.SlotOf(id) >= 0)
                 {
@@ -1627,6 +1818,7 @@ namespace BinGames.Sim.Combat
                 staging.StatusSlow[slot] = statusSlow;
                 staging.StatusVuln[slot] = statusVuln;
                 staging.StatusSource[slot] = statusSource;
+                staging.StatusStacks[slot] = stacks;
             }
 
             int prn = r.ReadInt32();
@@ -1703,6 +1895,32 @@ namespace BinGames.Sim.Combat
                 {
                     return rr;
                 }
+            }
+            if (format >= 4)
+            {
+                // 条数不必等于当前的 MaxReactions（以后调大 / 调小都能读）：全部读进来，按键放进当前登记的规则，多出的丢弃。
+                int rn = r.ReadInt32();
+                if (rn < 0 || rn > MaxSnapshotReactionEntries)
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
+                var keys = new int[rn];
+                var counts = new int[rn];
+                var dmgs = new float[rn];
+                for (int i = 0; i < rn; i++)
+                {
+                    int key = r.ReadInt32();
+                    int count = r.ReadInt32();
+                    float dmg = r.ReadSingle();
+                    if (count < 0 || float.IsNaN(dmg) || float.IsInfinity(dmg))
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                    keys[i] = key;
+                    counts[i] = count;
+                    dmgs[i] = dmg;
+                }
+                RemapReactionCounters(ref staging, keys, counts, dmgs, rn);
             }
             if (ms.Position != bodyLen)
             {
@@ -1803,6 +2021,34 @@ namespace BinGames.Sim.Combat
             return CombatLoadResult.Ok;
         }
 
+        /// <summary>每个已挂标签 1 层（读格式 1～3 的旧快照）。</summary>
+        private static ulong OneStackPerBit(uint status)
+        {
+            ulong st = 0UL;
+            for (int b = 0; b < 31; b++)
+            {
+                if ((status & (1u << b)) != 0u)
+                {
+                    st |= 1UL << (b * 2);
+                }
+            }
+            return st;
+        }
+
+        /// <summary>这组标签允许出现叠层的比特位（每个已挂标签两位）。</summary>
+        private static ulong StackMaskOf(uint status)
+        {
+            ulong m = 0UL;
+            for (int b = 0; b < 31; b++)
+            {
+                if ((status & (1u << b)) != 0u)
+                {
+                    m |= 3UL << (b * 2);
+                }
+            }
+            return m;
+        }
+
         private static bool IsFinite(double2 v) => !(double.IsNaN(v.x) || double.IsNaN(v.y) || double.IsInfinity(v.x) || double.IsInfinity(v.y));
 
         private static uint Fnv32(byte[] data, int length)
@@ -1838,6 +2084,10 @@ namespace BinGames.Sim.Combat
                 w.Write(c.DronesLaunched);
                 w.Write(c.ReadingRefused);
             }
+            if (format >= 4)
+            {
+                w.Write(c.ReactionsFired);
+            }
         }
 
         private static CombatCounters ReadCounters(BinaryReader r, int format)
@@ -1849,6 +2099,10 @@ namespace BinGames.Sim.Combat
                 c.EchoesQueued = r.ReadInt64();
                 c.DronesLaunched = r.ReadInt64();
                 c.ReadingRefused = r.ReadInt64();
+            }
+            if (format >= 4)
+            {
+                c.ReactionsFired = r.ReadInt64();
             }
             return c;
         }
@@ -2179,6 +2433,57 @@ namespace BinGames.Sim.Combat
                     A = new float4((float)p.x, (float)p.y, (float)pv.x, (float)pv.y),
                     B = new float4(0.3f, 1f, (float)dr.Faction, 21f),
                 });
+            }
+        }
+    }
+
+    /// <summary>FG2-FW-03（FGR-FW-031）：头顶状态标签图标（Burst）。B = (边长, 形状序号, 打包颜色, 30 + 叠层)；A = 图标中心（当前 / 上一步，已按单位头顶偏移）。</summary>
+    [BurstCompile(CompileSynchronously = true)]
+    internal struct CombatStatusIconJob : IJob
+    {
+        public CombatData D;
+        public NativeList<CombatInstance> Icons;
+        [ReadOnly] public NativeArray<float2> Visuals;
+        public double2 Origin;
+        public int MaxPerUnit;
+        public float Size;
+
+        public void Execute()
+        {
+            Icons.Clear();
+            double now = D.Scalars[0].Time;
+            for (int i = 0; i < D.Count; i++)
+            {
+                if (!D.IsAlive(i) || !D.StatusActive(i, now))
+                {
+                    continue;
+                }
+                uint bits = D.Status[i] & ~CombatConst.StatusBitZoneSlow;
+                int shown = 0;
+                int total = math.countbits(bits);
+                int row = math.min(total, MaxPerUnit);
+                double2 p = D.Pos[i] - Origin;
+                double2 q = D.Prev[i] - Origin;
+                float lift = D.Radius[i] + Size * 0.9f;
+                float left = -(row - 1) * Size * 0.55f;
+                while (bits != 0u && shown < MaxPerUnit)
+                {
+                    int b = math.tzcnt(bits);
+                    bits &= bits - 1u;
+                    float2 v = Visuals[b];
+                    if (v.x < 0f)
+                    {
+                        continue;
+                    }
+                    int stacks = (int)((D.StatusStacks[i] >> (b * 2)) & 3UL);
+                    float dx = left + shown * Size * 1.1f;
+                    Icons.Add(new CombatInstance
+                    {
+                        A = new float4((float)p.x + dx, (float)p.y + lift, (float)q.x + dx, (float)q.y + lift),
+                        B = new float4(Size, v.x, v.y, 30f + math.max(1, stacks)),
+                    });
+                    shown++;
+                }
             }
         }
     }

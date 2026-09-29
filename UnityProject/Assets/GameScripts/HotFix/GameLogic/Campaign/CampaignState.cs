@@ -56,6 +56,9 @@ namespace GameLogic.Campaign
 
         public string[] CompletedObjectiveIds = Array.Empty<string>();
         public string[] UnlockedContentIds = Array.Empty<string>();
+        /// <summary>FG2-FW-03（FG02 FGR-FW-042）：已开放命名的具名反应批次（第一幕 act1 开局即开放，不记在这里；其余由阵营推进时
+        /// <see cref="Content.NamedReactionCatalog.OpenBatch"/> 写入）。旧存档没有这个字段时为空 = 只开放第一幕。</summary>
+        public string[] OpenReactionBatches = Array.Empty<string>();
 
         public BuildingRecord[] BuildingRecords = Array.Empty<BuildingRecord>();
         public MachineRecord[] MachineRecords = Array.Empty<MachineRecord>();
@@ -282,6 +285,8 @@ namespace GameLogic.Campaign
                 .OrderBy(id => id, StringComparer.Ordinal).ToArray();
             UnlockedContentIds = (UnlockedContentIds ?? Array.Empty<string>())
                 .OrderBy(id => id, StringComparer.Ordinal).ToArray();
+            OpenReactionBatches = (OpenReactionBatches ?? Array.Empty<string>())
+                .Distinct(StringComparer.Ordinal).OrderBy(id => id, StringComparer.Ordinal).ToArray();
             BuildingRecords = (BuildingRecords ?? Array.Empty<BuildingRecord>())
                 .OrderBy(r => r.BuildingId, StringComparer.Ordinal).ToArray();
             MachineRecords = (MachineRecords ?? Array.Empty<MachineRecord>())

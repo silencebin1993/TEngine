@@ -147,6 +147,10 @@ public partial class Tables
     /// </summary>
     public fg.TbNotifyType TbNotifyType {get; }
     /// <summary>
+    /// 具名反应
+    /// </summary>
+    public fg.TbReaction TbReaction {get; }
+    /// <summary>
     /// 已移除内容
     /// </summary>
     public fg.TbRemovedContent TbRemovedContent {get; }
@@ -255,6 +259,7 @@ public partial class Tables
         TbMechEnemy = new fg.TbMechEnemy(loader("fg_tbmechenemy"));
         TbNotifyTier = new fg.TbNotifyTier(loader("fg_tbnotifytier"));
         TbNotifyType = new fg.TbNotifyType(loader("fg_tbnotifytype"));
+        TbReaction = new fg.TbReaction(loader("fg_tbreaction"));
         TbRemovedContent = new fg.TbRemovedContent(loader("fg_tbremovedcontent"));
         TbStartLayout = new fg.TbStartLayout(loader("fg_tbstartlayout"));
         TbStatusTag = new fg.TbStatusTag(loader("fg_tbstatustag"));
@@ -312,6 +317,7 @@ public partial class Tables
         TbMechEnemy.ResolveRef(this);
         TbNotifyTier.ResolveRef(this);
         TbNotifyType.ResolveRef(this);
+        TbReaction.ResolveRef(this);
         TbRemovedContent.ResolveRef(this);
         TbStartLayout.ResolveRef(this);
         TbStatusTag.ResolveRef(this);

@@ -71,6 +71,16 @@ namespace GameLogic.UI.Kit
         private static bool _expanded;
         private static TooltipContent _content;
 
+        // FG2-FW-03（FGR-FW-031）：世界里的对象（单位头顶的状态标签）悬停。用一个不拦截点击的代理元素摆在光标处，
+        // 与界面元素走同一套“延迟出现 / 宽限隐藏 / 固定 / 摆放”规则。
+        private static VisualElement _worldProxy;
+        private static Func<TooltipContent> _worldProvider;
+        private static int _worldKey;
+        private static float _worldRefreshAt;
+        private const float WorldProxySize = 24f;
+        /// <summary>世界对象的提示内容刷新间隔（真实秒）：读数按 0.1 秒粒度走，不必每帧重拼文字。</summary>
+        public const float WorldRefreshSeconds = 0.1f;
+
         /// <summary>真实时间来源，测试可注入。</summary>
         public static Func<float> Clock = () => Time.realtimeSinceStartup;
 
@@ -135,7 +145,87 @@ namespace GameLogic.UI.Kit
                 _view.RegisterCallback<PointerEnterEvent>(_ => _pointerOnTooltip = true);
                 _view.RegisterCallback<PointerLeaveEvent>(_ => _pointerOnTooltip = false);
             }
+            _worldProxy = null;
             Render();
+        }
+
+        /// <summary>FG2-FW-03：光标停在世界里的对象上（<paramref name="screenPosition"/> = 屏幕像素，左下原点）。
+        /// <paramref name="key"/> 区分对象：换了对象就重新计时（已显示的先收起，“固定”期间不被别的对象抢走）；
+        /// 同一对象悬停期间按 <see cref="WorldRefreshSeconds"/> 的间隔刷新内容（剩余时间在走）。</summary>
+        public static void HoverWorld(int key, Vector2 screenPosition, Func<TooltipContent> provider)
+        {
+            if (_view?.parent == null || _view.panel == null || provider == null)
+            {
+                return;
+            }
+            EnsureWorldProxy();
+            bool onWorld = _hoverTarget == _worldProxy;
+            bool sameObject = onWorld && _worldKey == key;
+            if (!sameObject && onWorld)
+            {
+                if (IsPinned)
+                {
+                    return; // 固定期间保持原来那个对象的读数。
+                }
+                // 换了对象：已显示的收起，没显示的放弃原来的计时——下面 NotifyEnter 重新开始延迟。
+                if (IsVisible)
+                {
+                    Hide();
+                }
+                else
+                {
+                    _hoverTarget = null;
+                }
+            }
+            Vector2 panelPoint = RuntimePanelUtils.ScreenToPanel(_view.panel, new Vector2(screenPosition.x, Screen.height - screenPosition.y));
+            Vector2 origin = _view.parent.worldBound.position;
+            _worldProxy.style.left = panelPoint.x - origin.x - WorldProxySize * 0.5f;
+            _worldProxy.style.top = panelPoint.y - origin.y - WorldProxySize * 0.5f;
+            _worldProvider = provider;
+            _worldKey = key;
+            NotifyEnter(_worldProxy);
+            if (sameObject && IsVisible)
+            {
+                float now = Clock();
+                if (now >= _worldRefreshAt)
+                {
+                    _worldRefreshAt = now + WorldRefreshSeconds;
+                    _content = provider() ?? _content;
+                    Render();
+                }
+            }
+            else
+            {
+                _worldRefreshAt = 0f;
+            }
+        }
+
+        /// <summary>光标离开世界里的对象。</summary>
+        public static void LeaveWorld()
+        {
+            if (_worldProxy != null)
+            {
+                NotifyLeave(_worldProxy);
+            }
+        }
+
+        /// <summary>当前悬停 / 显示的是不是世界对象（自检用）。</summary>
+        public static bool HoveringWorld => _worldProxy != null && _hoverTarget == _worldProxy;
+
+        public static int WorldKey => _worldKey;
+
+        private static void EnsureWorldProxy()
+        {
+            if (_worldProxy != null && _worldProxy.parent == _view.parent)
+            {
+                return;
+            }
+            _worldProxy = new VisualElement { name = "TooltipWorldProxy", pickingMode = PickingMode.Ignore };
+            _worldProxy.style.position = Position.Absolute;
+            _worldProxy.style.width = WorldProxySize;
+            _worldProxy.style.height = WorldProxySize;
+            _view.parent.Insert(0, _worldProxy);
+            Attach(_worldProxy, () => _worldProvider?.Invoke());
         }
 
         public static void UnbindView()
@@ -353,6 +443,7 @@ namespace GameLogic.UI.Kit
         public static void ResetForTests()
         {
             Hide();
+            _worldRefreshAt = 0f;
             Clock = () => Time.realtimeSinceStartup;
             PinHeld = () => InputRouter.IsActionHeld(GameActionId.PinTooltip);
         }

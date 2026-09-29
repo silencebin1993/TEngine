@@ -179,6 +179,7 @@ namespace GameLogic.EditorTools
                     case 132: StepBeltsNear(inStep); break;
                     case 133: StepBeltsDone(inStep); break;
                     case 129: StepRuinsCombat(inStep); break;
+                    case 230: StepRuinsTagHover(inStep); break;
                     case 150: StepSignalOpened(inStep); break;
                     case 151: StepSignalPrinted(inStep); break;
                     case 152: StepSignalEquipped(inStep); break;
@@ -2746,6 +2747,55 @@ namespace GameLogic.EditorTools
             bool gpu = site?.Renderer != null && site.Renderer.GpuAvailable;
             Check(zoneReading && zonesSpawned > 0 && (!gpu || zonesNow == 0 || fx >= zonesNow),
                 $"真实 Play 里带拖尾读法的机器打出区域（共 {zonesSpawned} 块，当前 {zonesNow} 块，画面实例 {fx}{(gpu ? "" : "，无 GPU 不画")}）");
+            Next(230, "FG2-FW-03：光标移到带状态标签的单位上（头顶图标 + 悬停读数）");
+        }
+
+        /// <summary>FG2-FW-03（FGR-FW-031）：真实 Play 里带“拖尾”读法的机器打出的状态标签画在单位头顶，光标停上去弹出悬停读数（名称 / 剩余时间 / 叠层）。
+        /// 光标每帧跟着这个单位的画面位置（单位在动），走正式的输入读取 → 内核拾取 → 世界悬停提示。</summary>
+        private static void StepRuinsTagHover(double inStep)
+        {
+            Campaign.Regions.FracturedCityController city = GameRoot.FracturedCity;
+            Campaign.Combat.CombatSite site = city?.Combat;
+            Camera cam = WorldView.Camera != null ? WorldView.Camera : Camera.main;
+            int unit = 0;
+            string tagName = null;
+            if (site != null && !site.IsDisposed)
+            {
+                foreach (RegionEnemyRecord e in CampaignSession.Current?.RegionEnemies ?? Array.Empty<RegionEnemyRecord>())
+                {
+                    if (e == null || !e.IsAlive || !site.TryGetEnemyUnit(e.EnemyInstanceId, out int u))
+                    {
+                        continue;
+                    }
+                    List<(string Glyph, string Name, float Seconds, int Stacks)> tags = Campaign.Combat.StatusTagHover.Describe(site.Kernel, u);
+                    if (tags != null && tags.Count > 0)
+                    {
+                        unit = u;
+                        tagName = tags[0].Name;
+                        break;
+                    }
+                }
+            }
+            if (unit != 0 && cam != null && site.Kernel.TryGetUnit(unit, out BinGames.Sim.Combat.CombatUnitView view))
+            {
+                Vector3 screen = cam.WorldToScreenPoint(new Vector3((float)view.Position.x, 0f, (float)view.Position.y));
+                InputRouter.DebugSetReader(new ScriptedReader { Mouse = screen });
+            }
+            bool shown = UiTooltip.IsVisible && UiTooltip.HoveringWorld && UiTooltip.Content != null && tagName != null
+                         && UiTooltip.Content.Body.Contains(tagName) && UiTooltip.Content.Title == Localization.GameText.Get("tag.hover.title");
+            if (!shown && inStep < 8)
+            {
+                return;
+            }
+            int icons = site?.Renderer?.LastIconInstances ?? -1;
+            bool gpu = site?.Renderer != null && site.Renderer.GpuAvailable;
+            Write($"  - 状态标签：光标下单位 {unit}（{tagName}），头顶图标实例 {icons}，悬停读数“{UiTooltip.Content?.Body?.Replace('\n', '/')}”");
+            Check(site != null && site.Kernel.ReactionRuleCount == Campaign.Content.NamedReactionCatalog.TagRules.Count && site.Kernel.ReactionRuleCount == 16,
+                $"破碎都市的地点内核登记了 {site?.Kernel.ReactionRuleCount} 条具名标签反应规则（fg.TbReaction）");
+            Check(GameSettings.HasSeenGuidanceHook(GuidanceHooks.StatusTagFirstSeen), "第一次看到头顶状态标签时发出引导钩子（内容在 FG15-UX-04）");
+            Check(unit != 0 && icons > 0 && shown,
+                $"真实 Play：带标签的敌人头顶画出图标（{icons} 个{(gpu ? "" : "，无 GPU 只备缓冲")}），光标停上去弹出悬停读数（{tagName}，含剩余时间与叠层）");
+            InputRouter.DebugSetReader(new ScriptedReader { Mouse = OffScreen });
             PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.OpenSignalCore));
             Next(155, "FG1-SIG-01：远征途中按信号核键");
         }

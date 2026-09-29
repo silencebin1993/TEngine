@@ -67,7 +67,7 @@ namespace BinGames.Sim.Combat
             }
             else if (r.Carrier == CombatCarrier.Field && r.FieldSeconds > 0f && r.Area > 0f)
             {
-                SpawnZone(ref d, a, primaryPos, r.Area, r.FieldSeconds, baseDamage * math.max(0f, r.FieldDpsRatio), r.ZoneGrowth, r.ZoneTickScale,
+                SpawnZone(ref d, a, FactionOfSlot(ref d, a), primaryPos, r.Area, r.FieldSeconds, baseDamage * math.max(0f, r.FieldDpsRatio), r.ZoneGrowth, r.ZoneTickScale,
                     r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln);
             }
 
@@ -210,7 +210,7 @@ namespace BinGames.Sim.Combat
         {
             if (r.StatusMask != 0u)
             {
-                ApplyStatus(ref d, t, r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln, a);
+                ApplyStatus(ref d, t, r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln, a, dealt);
             }
             if (r.ExecuteBelow > 0f && d.IsAlive(t) && d.MaxHp[t] > 0f && d.Hp[t] / d.MaxHp[t] <= r.ExecuteBelow && !d.Has(t, CombatUnitFlags.Invulnerable))
             {
@@ -282,7 +282,7 @@ namespace BinGames.Sim.Combat
                     DamageUnit(ref d, k, dmg, a);
                     if (r.StatusMask != 0u)
                     {
-                        ApplyStatus(ref d, k, r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln, a);
+                        ApplyStatus(ref d, k, r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln, a, dmg);
                     }
                     at = d.Pos[k];
                 }
@@ -334,7 +334,7 @@ namespace BinGames.Sim.Combat
                 double2 at = r.ZonePlacement == CombatZonePlacement.Attacker && hasSelf ? self
                     : r.ZonePlacement == CombatZonePlacement.Midpoint && hasSelf ? (self + hitPos) * 0.5
                     : hitPos;
-                SpawnZone(ref d, a, at, r.ZoneRadius, r.ZoneSeconds, r.ZoneDps, r.ZoneGrowth, r.ZoneTickScale,
+                SpawnZone(ref d, a, FactionOfSlot(ref d, a), at, r.ZoneRadius, r.ZoneSeconds, r.ZoneDps, r.ZoneGrowth, r.ZoneTickScale,
                     r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln);
             }
             // 连网：主目标与最近的另一个敌对单位之间拉一块减速网。
@@ -347,7 +347,7 @@ namespace BinGames.Sim.Combat
                 {
                     double2 mid = (hitPos + d.Pos[k]) * 0.5;
                     float half = (float)math.distance(hitPos, d.Pos[k]) * 0.5f + WeaveMarginOf(ref d);
-                    SpawnZone(ref d, a, mid, half, r.WeaveSeconds, r.ZoneDps > 0f ? r.ZoneDps : dealt * math.max(0f, r.WeaveDpsRatio), 0f, 1f,
+                    SpawnZone(ref d, a, FactionOfSlot(ref d, a), mid, half, r.WeaveSeconds, r.ZoneDps > 0f ? r.ZoneDps : dealt * math.max(0f, r.WeaveDpsRatio), 0f, 1f,
                         r.StatusMask | CombatConst.StatusBitZoneSlow, r.StatusSeconds, r.StatusDps, math.max(r.StatusSlow, r.WeaveSlow), r.StatusVuln);
                 }
             }
@@ -404,7 +404,7 @@ namespace BinGames.Sim.Combat
             float dealt = StrikeDamage(ref d, a, k, damage, r, from, false, 0f);
             if (DamageUnit(ref d, k, dealt, a) && r.StatusMask != 0u)
             {
-                ApplyStatus(ref d, k, r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln, a);
+                ApplyStatus(ref d, k, r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln, a, dealt);
             }
         }
 
@@ -548,8 +548,17 @@ namespace BinGames.Sim.Combat
 
         // ─────────────────────────────── 状态 ───────────────────────────────
 
-        /// <summary>挂状态：标签位并入、到期取晚、效果同类取大（已到期的整组先清空）。<paramref name="source"/> = 挂上它的单位槽位（持续伤害归属）。</summary>
-        internal static void ApplyStatus(ref CombatData d, int k, uint mask, float seconds, float dps, float slow, float vuln, int source)
+        /// <summary>挂状态（没有这一击伤害的场合：外部 API、测试）。</summary>
+        internal static void ApplyStatus(ref CombatData d, int k, uint mask, float seconds, float dps, float slow, float vuln, int source) =>
+            ApplyStatus(ref d, k, mask, seconds, dps, slow, vuln, source, 0f);
+
+        /// <summary>挂状态：标签位并入、到期取晚、效果同类取大（已到期的整组先清空）。<paramref name="source"/> = 挂上它的单位槽位（持续伤害归属）。
+        /// FG2-FW-03：
+        /// - 反应读标签：单位身上已有的标签 ∪ 这一次的标签含某条具名反应的两个配料、且这一次至少带来其中一个时，按规则顺序只结算一条
+        ///   （这一击伤害 <paramref name="hit"/> × (倍率 − 1) 的额外伤害或克制返还、消耗配料、附加标签、残留区域），剩下的标签留给下一击；
+        ///   这一次没有伤害（<paramref name="hit"/> ≤ 0）时，只有带附加标签或残留区域的规则会结算；
+        /// - 叠层：这一次带来的每个标签层数 +1（上限 <see cref="CombatConfig.StatusStackCap"/>）；持续伤害逐位按“该标签每秒伤害 × 该位层数”取大（与 <see cref="RecomputeStatusFx"/> 同一算法），减速 / 易伤不随层数增强。</summary>
+        internal static void ApplyStatus(ref CombatData d, int k, uint mask, float seconds, float dps, float slow, float vuln, int source, float hit)
         {
             if (mask == 0u || !d.IsAlive(k))
             {
@@ -558,10 +567,33 @@ namespace BinGames.Sim.Combat
             double now = d.Scalars[0].Time;
             if (!d.StatusActive(k, now))
             {
-                d.Status[k] = 0u;
-                d.StatusDps[k] = 0f;
-                d.StatusSlow[k] = 0f;
-                d.StatusVuln[k] = 0f;
+                ClearStatus(ref d, k);
+            }
+            if (d.Reactions.Length > 0)
+            {
+                uint have = d.Status[k] & ~CombatConst.StatusBitZoneSlow;
+                uint incoming = mask & ~CombatConst.StatusBitZoneSlow;
+                uint combined = have | incoming;
+                for (int i = 0; i < d.Reactions.Length; i++)
+                {
+                    CombatReactionRule rule = d.Reactions[i];
+                    if (rule.Pair == 0u || (combined & rule.Pair) != rule.Pair || (incoming & rule.Pair) == 0u)
+                    {
+                        continue;
+                    }
+                    // 这一次没有伤害（纯状态区域的节拍、外部挂状态）时，只靠“这一击 × 倍率”起作用的反应什么也做不了：
+                    // 不结算、不消耗配料、不报名字，让给下一条有附加标签 / 残留区域的规则（都没有就原样挂上标签）。
+                    if (hit <= 0f && !HasNonDamageEffect(rule))
+                    {
+                        continue;
+                    }
+                    mask = FireReaction(ref d, k, i, rule, mask, hit, source, ref dps, ref slow, ref vuln);
+                    break;
+                }
+                if (mask == 0u || !d.IsAlive(k))
+                {
+                    return;
+                }
             }
             d.Status[k] |= mask;
             double until = now + math.max(0.1f, seconds > 0f ? seconds : 3f);
@@ -569,10 +601,194 @@ namespace BinGames.Sim.Combat
             {
                 d.StatusUntil[k] = until;
             }
-            d.StatusDps[k] = math.max(d.StatusDps[k], math.max(0f, dps));
+            int cap = StackCapOf(ref d);
+            ulong stacks = d.StatusStacks[k];
+            uint dotMask = DotMaskOf(ref d);
+            int dotStack = 1;
+            float dotDps = 0f;
+            uint bits = mask & ~CombatConst.StatusBitZoneSlow;
+            while (bits != 0u)
+            {
+                int b = math.tzcnt(bits);
+                bits &= bits - 1u;
+                int shift = b * 2;
+                int cur = (int)((stacks >> shift) & 3UL);
+                int next = math.min(cap, cur + 1);
+                stacks = (stacks & ~(3UL << shift)) | ((ulong)next << shift);
+                if (dotMask == 0u)
+                {
+                    dotStack = math.max(dotStack, next);
+                }
+                else if ((dotMask & (1u << b)) != 0u)
+                {
+                    // 与 RecomputeStatusFx 同一算法：逐位 该标签每秒伤害 × 该位层数，再取大。
+                    dotDps = math.max(dotDps, d.StatusFx[b].Amount * next);
+                }
+            }
+            d.StatusStacks[k] = stacks;
+            // 状态位表没配置（旧地点 / 测试内核）：这一次的持续伤害 × 带来的位里最高的层数；配置了：逐位算，这一次的持续伤害只作不叠层的下限。
+            float newDps = dotMask == 0u ? math.max(0f, dps) * dotStack : math.max(dotDps, math.max(0f, dps));
+            d.StatusDps[k] = math.max(d.StatusDps[k], newDps);
             d.StatusSlow[k] = math.max(d.StatusSlow[k], math.saturate(slow));
             d.StatusVuln[k] = math.max(d.StatusVuln[k], math.max(0f, vuln));
             d.StatusSource[k] = source >= 0 && source < d.Count ? d.Id[source] : 0;
+        }
+
+        private static void ClearStatus(ref CombatData d, int k)
+        {
+            d.Status[k] = 0u;
+            d.StatusStacks[k] = 0UL;
+            d.StatusDps[k] = 0f;
+            d.StatusSlow[k] = 0f;
+            d.StatusVuln[k] = 0f;
+        }
+
+        private static int StackCapOf(ref CombatData d) =>
+            d.Config.StatusStackCap <= 0 ? 1 : math.min(CombatConst.MaxStatusStacks, d.Config.StatusStackCap);
+
+        /// <summary>持续伤害效果的状态位（按 <see cref="CombatData.StatusFx"/>；没配置时返回 0 = 不区分）。</summary>
+        private static uint DotMaskOf(ref CombatData d)
+        {
+            uint m = 0u;
+            for (int b = 0; b < 31; b++)
+            {
+                if (d.StatusFx[b].Effect == CombatStatusFx.Dot)
+                {
+                    m |= 1u << b;
+                }
+            }
+            return m;
+        }
+
+        /// <summary>FG2-FW-03：结算一条具名标签反应（<see cref="ApplyStatus(ref CombatData,int,uint,float,float,float,float,int,float)"/> 内调用）。返回这一次还要挂上的标签位。</summary>
+        private static uint FireReaction(ref CombatData d, int k, int ri, in CombatReactionRule rule, uint mask, float hit, int source,
+            ref float dps, ref float slow, ref float vuln)
+        {
+            // 消耗：目标身上的与这一次带来的配料都去掉（含叠层）。
+            if (rule.Consume != 0u)
+            {
+                d.Status[k] &= ~rule.Consume;
+                ulong stacks = d.StatusStacks[k];
+                uint c = rule.Consume;
+                while (c != 0u)
+                {
+                    int b = math.tzcnt(c);
+                    c &= c - 1u;
+                    stacks &= ~(3UL << (b * 2));
+                }
+                d.StatusStacks[k] = stacks;
+                mask &= ~rule.Consume;
+                RecomputeStatusFx(ref d, k);
+            }
+            float bonus = hit * (rule.DamageMult - 1f);
+            d.ReactionCount[ri] = d.ReactionCount[ri] + 1;
+            d.ReactionDamage[ri] = d.ReactionDamage[ri] + bonus;
+            CombatCounters counters = d.Counters[0];
+            counters.ReactionsFired++;
+            d.Counters[0] = counters;
+            Cue(ref d, CombatEventKind.TagReaction, source, d.Id[k], bonus, d.Pos[k], (byte)ri);
+            if (bonus > 0f)
+            {
+                DamageUnit(ref d, k, bonus, source);
+            }
+            else if (bonus < 0f)
+            {
+                Heal(ref d, k, -bonus, -1);
+            }
+            // 附加标签：效果按状态位表。
+            uint g = rule.Grant;
+            while (g != 0u)
+            {
+                int b = math.tzcnt(g);
+                g &= g - 1u;
+                mask |= 1u << b;
+                MergeFx(d.StatusFx[b], ref dps, ref slow, ref vuln);
+            }
+            // 残留区域：目标脚下一块挂残留标签的区域（与布区同一套区域结算，暂停不走、倍速按游戏时间、进存档）。
+            if (rule.ResidueBit != 0u && rule.ResidueSeconds > 0f && rule.ResidueRadius > 0f)
+            {
+                float rd = 0f, rs = 0f, rv = 0f;
+                uint rb = rule.ResidueBit;
+                while (rb != 0u)
+                {
+                    int b = math.tzcnt(rb);
+                    rb &= rb - 1u;
+                    MergeFx(d.StatusFx[b], ref rd, ref rs, ref rv);
+                }
+                // 阵营显式按目标定：残留区域打的是目标这一边（出手者已死、区域节拍里的槽位为 -1 时也不会落到己方头上）。
+                CombatFaction residueFaction = d.Faction[k] == (byte)CombatFaction.Player ? CombatFaction.Hostile : CombatFaction.Player;
+                SpawnZone(ref d, source, residueFaction, d.Pos[k], rule.ResidueRadius, rule.ResidueSeconds, 0f, 0f, 1f, rule.ResidueBit, 0f, rd, rs, rv);
+            }
+            return mask;
+        }
+
+        /// <summary>规则除了“这一击 × 倍率”以外还有没有别的效果（附加标签 / 残留区域）。</summary>
+        private static bool HasNonDamageEffect(in CombatReactionRule rule) =>
+            rule.Grant != 0u || (rule.ResidueBit != 0u && rule.ResidueSeconds > 0f && rule.ResidueRadius > 0f);
+
+        /// <summary>槽位的阵营（无效槽位 = 己方，沿用旧的区域默认）。</summary>
+        private static CombatFaction FactionOfSlot(ref CombatData d, int slot) =>
+            slot >= 0 && slot < d.Count ? (CombatFaction)d.Faction[slot] : CombatFaction.Player;
+
+        private static void MergeFx(in CombatStatusFx fx, ref float dps, ref float slow, ref float vuln)
+        {
+            switch (fx.Effect)
+            {
+                case CombatStatusFx.Dot: dps = math.max(dps, fx.Amount); break;
+                case CombatStatusFx.Slow: slow = math.max(slow, fx.Amount); break;
+                case CombatStatusFx.Vuln: vuln = math.max(vuln, fx.Amount); break;
+            }
+        }
+
+        /// <summary>消耗标签后按剩下的标签重算效果（持续伤害 = 剩下的持续伤害标签 × 层数取大；减速 / 易伤取大）。状态位表没配置时只在标签全清空时归零。</summary>
+        private static void RecomputeStatusFx(ref CombatData d, int k)
+        {
+            uint left = d.Status[k] & ~CombatConst.StatusBitZoneSlow;
+            if (left == 0u && (d.Status[k] & CombatConst.StatusBitZoneSlow) == 0u)
+            {
+                ClearStatus(ref d, k);
+                return;
+            }
+            if (DotMaskOf(ref d) == 0u && !AnyFx(ref d))
+            {
+                return;
+            }
+            float dps = 0f, slow = (d.Status[k] & CombatConst.StatusBitZoneSlow) != 0u ? d.StatusSlow[k] : 0f, vuln = 0f;
+            ulong stacks = d.StatusStacks[k];
+            while (left != 0u)
+            {
+                int b = math.tzcnt(left);
+                left &= left - 1u;
+                CombatStatusFx fx = d.StatusFx[b];
+                int n = math.max(1, (int)((stacks >> (b * 2)) & 3UL));
+                if (fx.Effect == CombatStatusFx.Dot)
+                {
+                    dps = math.max(dps, fx.Amount * n);
+                }
+                else if (fx.Effect == CombatStatusFx.Slow)
+                {
+                    slow = math.max(slow, fx.Amount);
+                }
+                else if (fx.Effect == CombatStatusFx.Vuln)
+                {
+                    vuln = math.max(vuln, fx.Amount);
+                }
+            }
+            d.StatusDps[k] = dps;
+            d.StatusSlow[k] = math.saturate(slow);
+            d.StatusVuln[k] = vuln;
+        }
+
+        private static bool AnyFx(ref CombatData d)
+        {
+            for (int b = 0; b < 31; b++)
+            {
+                if (d.StatusFx[b].Effect != CombatStatusFx.None)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         /// <summary>减速后的移动速度（状态到期后恢复）。</summary>
@@ -611,6 +827,7 @@ namespace BinGames.Sim.Combat
                 if (!d.IsAlive(k) || d.StatusUntil[k] <= now)
                 {
                     d.Status[k] = 0u;
+                    d.StatusStacks[k] = 0UL;
                     d.StatusDps[k] = 0f;
                     d.StatusSlow[k] = 0f;
                     d.StatusVuln[k] = 0f;
@@ -625,7 +842,8 @@ namespace BinGames.Sim.Combat
 
         // ─────────────────────────────── 区域 ───────────────────────────────
 
-        private static void SpawnZone(ref CombatData d, int owner, double2 pos, float radius, float seconds, float dps, float growth, float tickScale,
+        /// <summary>生成一块区域。<paramref name="faction"/> = 区域属于哪一边（打另一边），由调用方显式给出，不从槽位推断。</summary>
+        private static void SpawnZone(ref CombatData d, int owner, CombatFaction faction, double2 pos, float radius, float seconds, float dps, float growth, float tickScale,
             uint mask, float statusSeconds, float statusDps, float slow, float vuln)
         {
             if (radius <= 0f || seconds <= 0f)
@@ -655,7 +873,7 @@ namespace BinGames.Sim.Combat
                 StatusSlow = slow,
                 StatusVuln = vuln,
                 Owner = owner >= 0 && owner < d.Count ? d.Id[owner] : 0,
-                Faction = owner >= 0 && owner < d.Count ? (CombatFaction)d.Faction[owner] : CombatFaction.Player,
+                Faction = faction,
             });
             CombatCounters c = d.Counters[0];
             c.ZonesSpawned++;
@@ -696,15 +914,25 @@ namespace BinGames.Sim.Combat
                         {
                             continue;
                         }
-                        if (zone.Dps > 0f)
+                        float tickDamage = zone.Dps > 0f ? zone.Dps * zone.TickInterval : 0f;
+                        if (tickDamage > 0f)
                         {
-                            DamageUnit(ref d, k, zone.Dps * zone.TickInterval, owner);
+                            DamageUnit(ref d, k, tickDamage, owner);
                         }
                         uint mask = zone.StatusMask != 0u ? zone.StatusMask : (zone.StatusSlow > 0f ? CombatConst.StatusBitZoneSlow : 0u);
-                        ApplyStatus(ref d, k, mask, zone.StatusSeconds, zone.StatusDps, zone.StatusSlow, zone.StatusVuln, owner);
+                        // 区域节拍的“这一击”：区域自己的节拍伤害；没有直接伤害的纯状态区域取它挂的持续伤害一个节拍的量（如爆燃残留的燃烧区）；
+                        // 两者都没有（减速网之类）= 0，只靠倍率的反应不结算（见 ApplyStatus）。
+                        float reactionHit = tickDamage > 0f ? tickDamage : math.max(0f, zone.StatusDps) * zone.TickInterval;
+                        ApplyStatus(ref d, k, mask, zone.StatusSeconds, zone.StatusDps, zone.StatusSlow, zone.StatusVuln, owner, reactionHit);
                     }
                 }
                 d.Zones[write++] = zone;
+            }
+            // 节拍里结算的反应（爆燃 → 燃烧区）会在循环中往列表尾部追加新区域（下标 ≥ m）：搬到压缩后的尾部保留下来，不能被截掉。
+            int end = d.Zones.Length;
+            for (int z = m; z < end; z++)
+            {
+                d.Zones[write++] = d.Zones[z];
             }
             d.Zones.ResizeUninitialized(write);
         }
@@ -760,7 +988,7 @@ namespace BinGames.Sim.Combat
                 int owner = d.SlotOf(echo.Owner);
                 if (DamageUnit(ref d, t, echo.Damage, owner))
                 {
-                    ApplyStatus(ref d, t, echo.StatusMask, echo.StatusSeconds, echo.StatusDps, echo.StatusSlow, echo.StatusVuln, owner);
+                    ApplyStatus(ref d, t, echo.StatusMask, echo.StatusSeconds, echo.StatusDps, echo.StatusSlow, echo.StatusVuln, owner, echo.Damage);
                 }
             }
             d.Echoes.ResizeUninitialized(write);

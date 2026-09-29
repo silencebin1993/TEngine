@@ -95,7 +95,7 @@ namespace GameLogic.Campaign.Feedback
             new KeyValuePair<string, FeedbackCueId[]>("生产", new[] { FeedbackCueId.ProductionComplete }),
             new KeyValuePair<string, FeedbackCueId[]>("失败", new[] { FeedbackCueId.Failure, FeedbackCueId.ExpeditionWiped, FeedbackCueId.CoreDestroyed }),
             new KeyValuePair<string, FeedbackCueId[]>("解析", new[] { FeedbackCueId.AnalysisComplete }),
-            new KeyValuePair<string, FeedbackCueId[]>("反应", new[] { FeedbackCueId.ReactionMarkJump, FeedbackCueId.ReactionMeltOverload }),
+            new KeyValuePair<string, FeedbackCueId[]>("反应", new[] { FeedbackCueId.ReactionMarkJump, FeedbackCueId.ReactionMeltOverload, FeedbackCueId.TagReaction }),
             new KeyValuePair<string, FeedbackCueId[]>("Boss 阶段", new[] { FeedbackCueId.BossPhase, FeedbackCueId.BossLockoutWarning, FeedbackCueId.BossLockoutActive, FeedbackCueId.BossDestroyed }),
             new KeyValuePair<string, FeedbackCueId[]>("信标", new[] { FeedbackCueId.BeaconLaunch, FeedbackCueId.Victory }),
         };
@@ -155,6 +155,8 @@ namespace GameLogic.Campaign.Feedback
             Add(new FeedbackCueDef { Id = FeedbackCueId.SaveContentMigrated, SfxId = "sfx_objective_new", Channel = AudioType.UISound, Tag = "存档", Caption = string.Empty, Tone = FeedbackTone.Warning, CaptionSeconds = 10f, MinIntervalSeconds = 0f, RequirementNote = "FGR-SYS-004 读档后通知" });
             // FG1-HUD-01（FG-GAP-044）：信号离开机器（玩家按接入 / 退出键离开、切到别的机器时由接入提交音覆盖）。音效沿用信号类的“恢复”短音降音量，
             // 与断链（SignalLost）的警报区分；同类最小间隔 0.3 秒（1 秒内连按 10 次不刷屏）。字幕只在“字幕”开启时出（状态行已有“已离开 …”）。
+            // FG2-FW-03：具名标签反应（短路、热震……）触发时报出机械名（detail = 名字）；音效借用标记跳转的，正式音效与聚合弹字归 FG2-FW-04。
+            Add(new FeedbackCueDef { Id = FeedbackCueId.TagReaction, SfxId = "sfx_reaction_markjump", Volume = 0.7f, MinIntervalSeconds = 0.3f, Tag = "反应", Caption = string.Empty, TagKey = "feedback.tag.reaction", Tone = FeedbackTone.Info, CaptionSeconds = 2.5f, RequirementNote = "FG2-FW-03 具名反应命名（FGR-FW-041）" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.UplinkLeave, SfxId = "sfx_signal_restore", Volume = 0.6f, MinIntervalSeconds = 0.3f, Tag = "离开", Caption = "信号离开机器", TagKey = "feedback.tag.uplink_leave", CaptionKey = "feedback.caption.uplink_leave", CaptionMode = FeedbackCaptionMode.SubtitlesOnly, Tone = FeedbackTone.Info, CaptionSeconds = 2.5f, RequirementNote = "FG-GAP-044 接入 / 离开音效钩子" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.SignalLinkWarning, SfxId = "sfx_alarm_warning", Volume = 0.7f, Tag = "信号", Caption = string.Empty, Tone = FeedbackTone.Warning, CaptionSeconds = 4f, MinIntervalSeconds = 1f, RequirementNote = "FG1-SIG-04 覆盖边缘 / 静默夜预警" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.SaveComplete, SfxId = "sfx_save_ok", Channel = AudioType.UISound, Tag = "存档", Caption = "已保存", Tone = FeedbackTone.Info, CaptionSeconds = 2.5f, MinIntervalSeconds = 1f });

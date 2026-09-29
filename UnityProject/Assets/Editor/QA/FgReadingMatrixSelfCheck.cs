@@ -709,7 +709,7 @@ namespace GameLogic.EditorTools
 
         private static void CheckSaveLoad()
         {
-            Line("  · G. 存读档：内核快照格式 3 带区域 / 回波 / 无人机 / 状态标签往返逐位一致，续跑与不存档连续跑一致；格式 2 旧快照照样读（读法与三张表为空）；坏值整份拒绝");
+            Line("  · G. 存读档：内核快照（当前格式；FG2-FW-03 起为格式 4，另带叠层与反应计数）带区域 / 回波 / 无人机 / 状态标签往返逐位一致，续跑与不存档连续跑一致；格式 2 旧快照照样读（读法与三张表为空）；坏值整份拒绝");
             NewState(9107, unlockAll: true);
             CombatWeapon w = WeaponFor(ComponentCatalog.CompDroneBayId, HomeValleyLayout.Erc003ChassisId, FirmwareCatalog.FwTrailId, "fw_echo");
             using (Arena a = Arena.Build(w, prepared: true))
@@ -723,7 +723,7 @@ namespace GameLogic.EditorTools
                 CombatLoadResult lr = b.Load(snap);
                 bool same = lr == CombatLoadResult.Ok && b.StateHash() == k.StateHash() && b.ZoneCount == k.ZoneCount && b.DroneCount == k.DroneCount
                             && b.EchoCount == k.EchoCount && b.TryGetStatus(a.Ids[ArenaP], out uint mask1, out _, out _, out _, out _) && mask1 == mask0
-                            && CombatKernel.PeekFormat(snap) == 3;
+                            && CombatKernel.PeekFormat(snap) == CombatConst.FormatVersion;
                 for (int i = 0; i < 90; i++)
                 {
                     double t = k.Time + Dt;
@@ -1339,7 +1339,9 @@ namespace GameLogic.EditorTools
         private static bool CorruptLastDroneCooldown(byte[] data)
         {
             int body = data.Length - 4;
-            int at = body - 1 - 4;
+            // 无人机表是格式 3 快照正文的最后一段；格式 4（FG2-FW-03）在它后面追加反应计数块（条数 + 每条 稳定键 int / 次数 int / 伤害 float）。
+            int tail = CombatKernel.PeekFormat(data) >= 4 ? 4 + CombatConst.MaxReactions * CombatKernel.ReactionCounterEntryBytes : 0;
+            int at = body - tail - 1 - 4;
             if (at < 12)
             {
                 return false;

@@ -111,6 +111,8 @@ namespace BinGames.Sim.Combat
         public NativeList<float> StatusSlow;
         public NativeList<float> StatusVuln;
         public NativeList<int> StatusSource;
+        /// <summary>FG2-FW-03：每个状态位的叠层数（2 位一格，位 i 的层数 = (StatusStacks &gt;&gt; 2i) &amp; 3；上限 <see cref="CombatConfig.StatusStackCap"/>，最多 3）。</summary>
+        public NativeList<ulong> StatusStacks;
         public NativeList<CombatCommand> Cmd;
         public NativeList<float2> Direct;
 
@@ -146,6 +148,16 @@ namespace BinGames.Sim.Combat
         public NativeList<CombatZone> Zones;
         public NativeList<CombatEcho> Echoes;
         public NativeList<CombatDrone> Drones;
+
+        /// <summary>FG2-FW-03：具名标签反应规则（热更层按 fg.TbReaction 在建地点时写入，按 priority 排好序；不进存档——规则是内容，不是状态）。</summary>
+        public NativeList<CombatReactionRule> Reactions;
+        /// <summary>FG2-FW-03：每个状态位的效果（反应附加 / 残留区域挂标签时用；按 fg.TbStatusTag 的 effect / amount 写入，32 格）。</summary>
+        public NativeArray<CombatStatusFx> StatusFx;
+        /// <summary>FG2-FW-03：每条反应（规则下标）累计触发次数与反应额外伤害（随快照进存档；伤害归因与统计面板由 FG2-FW-04 读）。</summary>
+        public NativeArray<int> ReactionCount;
+        public NativeArray<float> ReactionDamage;
+        /// <summary>FG2-FW-03：计数槽 i 属于哪条反应（<see cref="CombatReactionRule.Key"/>；0 = 无键 / 空槽）。登记规则与读档时按键把计数挪到新下标。</summary>
+        public NativeArray<int> ReactionKey;
 
         /// <summary>玩法事件队列（永不丢弃；热更层每步至多取 MaxGameplayEventsPerStep 条，剩下的留到下一步，进存档）。</summary>
         public NativeList<CombatEvent> Gameplay;
@@ -193,6 +205,7 @@ namespace BinGames.Sim.Combat
                 StatusSlow = new NativeList<float>(capacity, Allocator.Persistent),
                 StatusVuln = new NativeList<float>(capacity, Allocator.Persistent),
                 StatusSource = new NativeList<int>(capacity, Allocator.Persistent),
+                StatusStacks = new NativeList<ulong>(capacity, Allocator.Persistent),
                 Cmd = new NativeList<CombatCommand>(capacity, Allocator.Persistent),
                 Direct = new NativeList<float2>(capacity, Allocator.Persistent),
                 NavSt = new NativeList<byte>(capacity, Allocator.Persistent),
@@ -214,6 +227,11 @@ namespace BinGames.Sim.Combat
                 Zones = new NativeList<CombatZone>(16, Allocator.Persistent),
                 Echoes = new NativeList<CombatEcho>(16, Allocator.Persistent),
                 Drones = new NativeList<CombatDrone>(16, Allocator.Persistent),
+                Reactions = new NativeList<CombatReactionRule>(CombatConst.MaxReactions, Allocator.Persistent),
+                StatusFx = new NativeArray<CombatStatusFx>(32, Allocator.Persistent),
+                ReactionCount = new NativeArray<int>(CombatConst.MaxReactions, Allocator.Persistent),
+                ReactionDamage = new NativeArray<float>(CombatConst.MaxReactions, Allocator.Persistent),
+                ReactionKey = new NativeArray<int>(CombatConst.MaxReactions, Allocator.Persistent),
                 Gameplay = new NativeList<CombatEvent>(64, Allocator.Persistent),
                 Cues = new NativeList<CombatEvent>(64, Allocator.Persistent),
                 Scalars = new NativeArray<CombatScalars>(1, Allocator.Persistent),
@@ -265,6 +283,7 @@ namespace BinGames.Sim.Combat
             StatusSlow.Dispose();
             StatusVuln.Dispose();
             StatusSource.Dispose();
+            StatusStacks.Dispose();
             Cmd.Dispose();
             Direct.Dispose();
             NavSt.Dispose();
@@ -286,6 +305,11 @@ namespace BinGames.Sim.Combat
             Zones.Dispose();
             Echoes.Dispose();
             Drones.Dispose();
+            Reactions.Dispose();
+            StatusFx.Dispose();
+            ReactionCount.Dispose();
+            ReactionDamage.Dispose();
+            ReactionKey.Dispose();
             Gameplay.Dispose();
             Cues.Dispose();
             Scalars.Dispose();
@@ -349,6 +373,7 @@ namespace BinGames.Sim.Combat
             StatusSlow.Add(0f);
             StatusVuln.Add(0f);
             StatusSource.Add(0);
+            StatusStacks.Add(0UL);
             Cmd.Add(default);
             Direct.Add(float2.zero);
             NavSt.Add(0);
@@ -399,6 +424,7 @@ namespace BinGames.Sim.Combat
             StatusSlow[to] = StatusSlow[from];
             StatusVuln[to] = StatusVuln[from];
             StatusSource[to] = StatusSource[from];
+            StatusStacks[to] = StatusStacks[from];
             Cmd[to] = Cmd[from];
             Direct[to] = Direct[from];
             NavSt[to] = NavSt[from];
@@ -442,6 +468,7 @@ namespace BinGames.Sim.Combat
             StatusSlow.ResizeUninitialized(length);
             StatusVuln.ResizeUninitialized(length);
             StatusSource.ResizeUninitialized(length);
+            StatusStacks.ResizeUninitialized(length);
             Cmd.ResizeUninitialized(length);
             Direct.ResizeUninitialized(length);
             NavSt.ResizeUninitialized(length);

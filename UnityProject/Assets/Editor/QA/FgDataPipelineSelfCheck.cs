@@ -477,8 +477,9 @@ namespace GameLogic.EditorTools
                 // FG1-HUD-01 的机制图鉴条目表（CX）由 FgUplinkHudSelfCheck A 段逐字段比对。
                 // FG2-FW-01 的状态标签表（ST）与 44 条固件主表（FK 全部 26 列）由 FgFirmwareMigrationSelfCheck A 段逐字段比对。
                 // FG2-FW-02 的读法矩阵（CR）与作战组件表（CC）由 FgReadingMatrixSelfCheck A 段逐字段比对。
+                // FG2-FW-03 的具名反应表（RX）由 FgReactionProbeSelfCheck A 段逐字段比对。
                 if (f[0] == "G" || f[0] == "P" || f[0] == "L" || f[0] == "X" || f[0] == "H" || f[0] == "FK" || f[0] == "CX" || f[0] == "ST"
-                    || f[0] == "CR" || f[0] == "CC" || f[0].StartsWith("W", StringComparison.Ordinal))
+                    || f[0] == "CR" || f[0] == "CC" || f[0] == "RX" || f[0].StartsWith("W", StringComparison.Ordinal))
                 {
                     continue;
                 }

@@ -113,12 +113,36 @@ namespace GameLogic.Campaign.Combat
         {
             SiteId = siteId;
             Kernel = new CombatKernel(config, 64);
+            ConfigureReactions();
             Sync = new CombatTransformSync(16);
             MaxEventsPerStep = Math.Max(1, config.MaxGameplayEventsPerStep);
             _unitHeight = Tuning("combat.render.unit_height", 0.6f);
         }
 
         private readonly float _unitHeight;
+
+        /// <summary>FG2-FW-03：把具名标签反应规则（fg.TbReaction，按 priority）与状态位效果（fg.TbStatusTag）登记进内核。
+        /// 规则是内容：建地点时登记一次；表重载（<see cref="NamedReactionCatalog.Revision"/> 变了）后由 <see cref="Step"/> 自动重新登记（计数按反应的稳定键保留）；读档沿用。</summary>
+        public void ConfigureReactions()
+        {
+            if (IsDisposed)
+            {
+                return;
+            }
+            Kernel.SetReactionRules(NamedReactionCatalog.BuildKernelRules());
+            Kernel.SetStatusFx(NamedReactionCatalog.BuildStatusFx());
+            ReactionRevision = NamedReactionCatalog.Revision;
+        }
+
+        /// <summary>最近一次登记时反应表的版本号（与 <see cref="NamedReactionCatalog.Revision"/> 不同 = 表重载过，下一步重新登记）。</summary>
+        public int ReactionRevision { get; private set; }
+
+        private bool _statusTagHookRaised;
+
+        /// <summary>FG2-FW-03：最近一次具名标签反应（自检 / 冒烟读）：反应 ID、是否报出了名字、累计处理的次数（提示事件，超上限会丢）。</summary>
+        public string LastTagReactionId { get; private set; }
+        public bool LastTagReactionNamed { get; private set; }
+        public int TagReactionCuesHandled { get; private set; }
 
         public bool IsDisposed => Kernel == null || Kernel.IsDisposed;
 
@@ -138,6 +162,7 @@ namespace GameLogic.Campaign.Combat
 
         public void Dispose()
         {
+            StatusTagHover.Leave(this);
             Renderer?.Dispose();
             Renderer = null;
             Sync?.Dispose();
@@ -173,6 +198,8 @@ namespace GameLogic.Campaign.Combat
             c.ZoneTick = Tuning("reading.tick.zone", 0.5f);
             c.ZoneStatusSeconds = Tuning("reading.zone.status_seconds", 2f);
             c.WeaveMargin = Tuning("reading.weave.margin", 0.6f);
+            // FG2-FW-03：状态标签叠层上限（fg.TbHomeTuning status.stack_cap）。
+            c.StatusStackCap = (int)Math.Round(Tuning("status.stack_cap", 3f));
             return c;
         }
 
@@ -889,6 +916,10 @@ namespace GameLogic.Campaign.Combat
             {
                 return;
             }
+            if (ReactionRevision != NamedReactionCatalog.Revision)
+            {
+                ConfigureReactions();
+            }
             Kernel.Step(dt, time);
             ProcessEvents();
         }
@@ -1212,6 +1243,21 @@ namespace GameLogic.Campaign.Combat
                 case CombatEventKind.ArmorHit:
                     FeedbackCues.RaiseAt(FeedbackCueId.ArmorHit, at);
                     return;
+                case CombatEventKind.TagReaction:
+                {
+                    // FG2-FW-03（FGR-FW-041 / 042）：开放命名的反应报出机械名；未开放的照样生效，只是不显示名字。
+                    string rid = NamedReactionCatalog.IdOfRule(e.Code);
+                    bool named = rid != null && NamedReactionCatalog.IsNamed(state, rid);
+                    LastTagReactionId = rid;
+                    LastTagReactionNamed = named;
+                    TagReactionCuesHandled++;
+                    if (named)
+                    {
+                        FeedbackCues.RaiseAt(FeedbackCueId.TagReaction, at, GameText.Format("reaction.cue", NamedReactionCatalog.NameOf(rid)));
+                        GuidanceHooks.Raise(GuidanceHooks.ReactionFirstNamed);
+                    }
+                    return;
+                }
                 case CombatEventKind.MarkJump:
                     FeedbackCues.RaiseAt(FeedbackCueId.ReactionMarkJump, at, $"跳转 {(int)e.Value} 个目标",
                         FeedbackCues.ContentSfx(MechanicalReactionCatalog.ReactionMarkJumpId));
@@ -1499,13 +1545,26 @@ namespace GameLogic.Campaign.Combat
                 return;
             }
             Sync?.Apply(Kernel, alpha, double2.zero);
-            Renderer ??= new CombatRenderer();
+            if (Renderer == null)
+            {
+                Renderer = new CombatRenderer();
+                // FG2-FW-03（FGR-FW-031）：头顶状态标签图标的形状 / 颜色来自 fg.TbStatusTag。
+                Renderer.SetStatusVisuals(NamedReactionCatalog.BuildStatusVisuals());
+            }
             Renderer.Draw(Kernel, camera, alpha, double2.zero, _unitHeight);
+            if (!_statusTagHookRaised && Renderer.LastIconInstances > 0)
+            {
+                _statusTagHookRaised = true;
+                GuidanceHooks.Raise(GuidanceHooks.StatusTagFirstSeen);
+            }
+            // FG2-FW-03（FGR-FW-031）：光标下带标签的单位 → 悬停读数（名称 / 剩余时间 / 叠层）。
+            StatusTagHover.Tick(this, camera);
         }
 
         /// <summary>离开观察：释放 GPU 资源（表现对象由地点自己销毁）。</summary>
         public void ReleaseRender()
         {
+            StatusTagHover.Leave(this);
             Sync?.Clear();
             Renderer?.Dispose();
             Renderer = null;

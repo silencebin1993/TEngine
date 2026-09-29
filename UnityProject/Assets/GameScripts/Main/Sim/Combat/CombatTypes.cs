@@ -16,8 +16,9 @@ namespace BinGames.Sim.Combat
         /// <summary>存档快照格式版本（<see cref="CombatKernel.Serialize"/>）。不认识的版本整块不读、原样保留。
         /// 2 = FG0-ARCH-06：每个单位追加寻路状态与路线路点、待交给寻路内核的请求（读取仍认 1：寻路字段取默认）。
         /// 3 = FG2-FW-02：武器追加载体与读法参数；每个单位追加状态标签（掩码 / 到期 / 持续伤害 / 减速 / 易伤 / 来源）；
-        /// 追加区域、回波、无人机三张表与三个计数（读取仍认 1、2：读法取“无”，状态与三张表为空）。</summary>
-        public const int FormatVersion = 3;
+        /// 追加区域、回波、无人机三张表与三个计数（读取仍认 1、2：读法取“无”，状态与三张表为空）。
+        /// 4 = FG2-FW-03：每个单位追加状态标签叠层；追加每条反应的触发次数 / 反应额外伤害与“反应总次数”计数（读取仍认 1～3：叠层按已有标签各 1 层，反应计数为 0）。</summary>
+        public const int FormatVersion = 4;
 
         /// <summary>仍能读取的最老格式版本。</summary>
         public const int MinReadableFormat = 1;
@@ -49,6 +50,57 @@ namespace BinGames.Sim.Combat
         public const int MaxEchoesPerHit = 4;
         /// <summary>状态位 31 保留给“区域减速”（连网 / 没有标签的减速区域）：固件标签的状态位是 fg.TbStatusTag 的 bit 列（0～30）。</summary>
         public const uint StatusBitZoneSlow = 1u << 31;
+
+        /// <summary>FG2-FW-03：一个地点最多登记几条具名标签反应（fg.TbReaction 标签反应行；快照里反应计数按此定长）。</summary>
+        public const int MaxReactions = 32;
+
+        /// <summary>FG2-FW-03：状态标签叠层的存储上限（每位 2 比特）。</summary>
+        public const int MaxStatusStacks = 3;
+    }
+
+    /// <summary>
+    /// FG2-FW-03（FG02 FGR-FW-040～042，反应读标签）：一条具名标签反应在内核里的规则。热更层按 fg.TbReaction（探针核实的触发配对与效果）翻译，
+    /// 内核不认识反应名：只认“两个配料位、消耗位、附加位、伤害倍率、残留”。
+    /// 触发：单位身上已有的标签 ∪ 这一次挂上的标签含 <see cref="Pair"/> 的两位，且这一次至少带来其中一位（同一次满足多条时只结算排在前面的一条）。
+    /// </summary>
+    [Serializable]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CombatReactionRule
+    {
+        /// <summary>两个配料的状态位（恰好两位）。</summary>
+        public uint Pair;
+        /// <summary>反应消耗的位（目标身上的与这一次带来的都去掉，含叠层）。</summary>
+        public uint Consume;
+        /// <summary>反应附加的位（按 <see cref="CombatData.StatusFx"/> 的效果挂上）。</summary>
+        public uint Grant;
+        /// <summary>这一击的伤害倍率：&gt;1 = 额外伤害 = 这一击伤害 × (倍率 − 1)；&lt;1 = 克制类，少掉的那部分算回给目标。</summary>
+        public float DamageMult;
+        /// <summary>残留区域挂的位（0 = 不留）、持续游戏秒、半径（米）。</summary>
+        public uint ResidueBit;
+        public float ResidueSeconds;
+        public float ResidueRadius;
+        /// <summary>稳定键（热更层按反应 ID 算的非零哈希；0 = 没有键，计数按规则下标对应）。触发次数 / 伤害按它进存档，表里 priority 顺序改了也记在同一条反应上。</summary>
+        public int Key;
+    }
+
+    /// <summary>FG2-FW-03：一个状态位的效果（fg.TbStatusTag 的 effect / amount；反应附加标签、残留区域用）。</summary>
+    [Serializable]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CombatStatusFx
+    {
+        /// <summary>0 = 无（反应底料），1 = 持续伤害（每秒），2 = 减速比例，3 = 易伤比例，4 = 回收，5 = 处决。</summary>
+        public byte Effect;
+        public byte Pad0;
+        public byte Pad1;
+        public byte Pad2;
+        public float Amount;
+
+        public const byte None = 0;
+        public const byte Dot = 1;
+        public const byte Slow = 2;
+        public const byte Vuln = 3;
+        public const byte Leech = 4;
+        public const byte Execute = 5;
     }
 
     /// <summary>FG2-FW-02（FG02 FGR-FW-010，设计案 5.1）：作战组件的载体——固件在不同载体上有不同读法。
@@ -469,6 +521,9 @@ namespace BinGames.Sim.Combat
         ProjectileHit = 40,
         /// <summary>步进炮开始瞄准线 / 瞄准线结束落空（Code：0 开始，1 落空，2 命中）。</summary>
         Telegraph = 41,
+        /// <summary>FG2-FW-03：具名标签反应触发（Unit=挂上标签的单位，Other=被反应的单位 ID，Code=反应规则下标，Value=反应额外伤害（克制类为负），Pos=被反应的单位）。
+        /// 反馈用，超出上限可以丢；可靠的计数在 <see cref="CombatData.ReactionCount"/>（进存档）。</summary>
+        TagReaction = 42,
     }
 
     /// <summary>一次开火尝试的结果（编队攻击、直控点击都走 <see cref="CombatKernel.FireAt"/>；热更层映射成 Demo 同一套原因文本）。</summary>
@@ -699,6 +754,8 @@ namespace BinGames.Sim.Combat
         public float ZoneStatusSeconds;
         /// <summary>FG2-FW-02：连网的减速网比两端之间的半距再宽多少米（fg.TbHomeTuning reading.weave.margin）。0 = 内核默认值。</summary>
         public float WeaveMargin;
+        /// <summary>FG2-FW-03：同一状态标签最多叠几层（fg.TbHomeTuning status.stack_cap，1～3）。0 = 不叠层（按 1 层）。</summary>
+        public int StatusStackCap;
 
         public static CombatConfig Default => new CombatConfig
         {
@@ -741,6 +798,8 @@ namespace BinGames.Sim.Combat
         public long EchoesQueued;
         public long DronesLaunched;
         public long ReadingRefused;
+        /// <summary>FG2-FW-03（格式 4）：具名标签反应触发总次数。</summary>
+        public long ReactionsFired;
     }
 
     /// <summary>渲染实例（32 字节，与 CombatInstanced.shader 一致）：A = (当前 x, 当前 z, 上一步 x, 上一步 z)，B = (半径, 血量比例, 阵营, 种类)。</summary>

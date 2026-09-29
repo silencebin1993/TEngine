@@ -63,6 +63,8 @@ namespace GameLogic.Campaign.Feedback
         SignalLinkWarning,
         // ── 接入（FG1-HUD-01 / FG-GAP-044：接入提交用 Takeover，信号离开机器用 UplinkLeave；形变随之出声，同类按最小间隔限流） ──
         UplinkLeave,
+        // ── 具名标签反应（FG2-FW-03：开放命名的反应触发时报出机械名；聚合 / 每秒上限 / 慢放归 FG2-FW-04） ──
+        TagReaction,
 
         Max,
     }
