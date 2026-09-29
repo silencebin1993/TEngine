@@ -29,6 +29,7 @@ public sealed partial class BuildingGrid : Luban.BeanBase
         RequiredTerrain = _buf.ReadString();
         DescKey = _buf.ReadString();
         UnlockHintKey = _buf.ReadString();
+        Category = _buf.ReadString();
     }
 
     public static BuildingGrid DeserializeBuildingGrid(ByteBuf _buf)
@@ -76,6 +77,10 @@ public sealed partial class BuildingGrid : Luban.BeanBase
     /// 未解锁时的解锁条件文本键(fg.TbLocText)
     /// </summary>
     public readonly string UnlockHintKey;
+    /// <summary>
+    /// 建造菜单分类(fg.TbBuildCategory.id,FG3-LOG-01)
+    /// </summary>
+    public readonly string Category;
    
     public const int __ID__ = 1483377735;
     public override int GetTypeId() => __ID__;
@@ -97,6 +102,7 @@ public sealed partial class BuildingGrid : Luban.BeanBase
         + "requiredTerrain:" + RequiredTerrain + ","
         + "descKey:" + DescKey + ","
         + "unlockHintKey:" + UnlockHintKey + ","
+        + "category:" + Category + ","
         + "}";
     }
 }

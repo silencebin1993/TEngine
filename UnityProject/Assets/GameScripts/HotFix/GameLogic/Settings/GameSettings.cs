@@ -46,6 +46,9 @@ namespace GameLogic.Settings
         public bool SubtitlesEnabled = true;
         public bool ColorblindSafeIconsEnabled = false; // AC-ACC-002。
 
+        /// <summary>FG3-LOG-01：建造模式叠加层的格线开关（默认开；旧设置 JSON 没有这个字段时按默认补齐）。</summary>
+        public bool BuildGridLinesEnabled = true;
+
         /// <summary>FG0-DATA-01（FGR-ARC-006）：界面语言代码，见 <see cref="GameLogic.Localization.GameLanguageCodes"/>。
         /// 存语言代码而不是枚举整数——以后加语言、调整枚举顺序都不会把老玩家的设置读成别的语言；
         /// 读不懂的代码回落简体中文（<see cref="GameSettings.Language"/>）。旧设置 JSON 没有这个字段时按默认值补齐。</summary>
@@ -361,6 +364,19 @@ namespace GameLogic.Settings
         public static void SetFlashReductionEnabled(bool enabled)
         {
             Data.FlashReductionEnabled = enabled;
+            Save();
+        }
+
+        /// <summary>FG3-LOG-01（FG03 第 4 节“可以开关格线显示”）：建造模式叠加层画不画格线。本机偏好，跨战役保留。</summary>
+        public static bool BuildGridLinesEnabled => Data.BuildGridLinesEnabled;
+
+        public static void SetBuildGridLinesEnabled(bool enabled)
+        {
+            if (Data.BuildGridLinesEnabled == enabled)
+            {
+                return;
+            }
+            Data.BuildGridLinesEnabled = enabled;
             Save();
         }
 

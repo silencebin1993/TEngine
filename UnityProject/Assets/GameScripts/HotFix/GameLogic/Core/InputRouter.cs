@@ -113,6 +113,10 @@ namespace GameLogic.Core
 
         public static bool BuildMode => _buildMode;
 
+        /// <summary>FG3-LOG-01（FGR-LOG-004“拖拽时镜头贴边会自动平移”）：建造模式正在拖拽（铺传送带 / 框选 / 拖着搬迁）。
+        /// 拖拽期间镜头贴边平移总是生效（即使设置里关了“边缘平移”——那个开关防的是鼠标闲置在屏幕边上时镜头乱飘，拖拽是玩家有意为之）。</summary>
+        public static bool BuildDragActive { get; set; }
+
         /// <summary>FG0-UX-01：文本框（搜索框、改名框）获得键盘焦点时，所有快捷键让位，打字不会触发玩法动作。
         /// 由 UI 基础件的搜索框在 FocusIn / FocusOut 时写。</summary>
         public static void SetTextInputFocused(bool focused)
@@ -237,6 +241,7 @@ namespace GameLogic.Core
             _modalUi = false;
             ModalOwners.Clear();
             _buildMode = false;
+            BuildDragActive = false;
             _textInputFocused = false;
             _captureActive = false;
             _captureReleasedFrame = -1;

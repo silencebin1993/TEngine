@@ -60,6 +60,9 @@ namespace GameLogic.Campaign.Grid
             /// <summary>1 = 已探索。</summary>
             public readonly byte[] Explored;
             public int ExploredRevision = -1;
+            /// <summary>本区块迷雾遮罩<b>内容</b>的版本：重算后与上次逐字节不同才 +1（FG3-LOG-01）。
+            /// 叠加层按它决定重画哪些区块——远处追加一个探索圆时，窗口里没被圆碰到的区块不重画。</summary>
+            public int ExploredMaskRevision;
             /// <summary>地形 / 污染内容的版本（每次修改 +1；叠加层据此重画）。</summary>
             public int ContentRevision;
             /// <summary>已修改（与生成基线不同的可能性）；基线在第一次修改时保存。</summary>
@@ -416,30 +419,53 @@ namespace GameLogic.Campaign.Grid
 
         public bool IsExplored(GridCell cell) => ChunkAt(cell, out int i).Explored[i] != 0;
 
-        /// <summary>与 <see cref="IsExplored"/> 同一判定，但不生成区块（直接按已探索区域算）：模拟步里查询用，不留生成区块的副作用。</summary>
+        /// <summary>与 <see cref="IsExplored"/> 同一判定，但不生成区块（直接按已探索区域算）：模拟步里查询用，不留生成区块的副作用。
+        /// 先查上次命中的那个圆（机器连续走在同一片已探索区里时 O(1)），不中再遍历全部圆——最坏 O(已探索圆数)。
+        /// 缓存只是查找顺序，判定结果与逐个遍历完全相同（圆数组被替换后下标越界或指向别的圆都只是少一次捷径）。</summary>
         public bool IsExploredNoLoad(GridCell cell)
         {
-            foreach (ExploredAreaRecord a in _explored)
+            ExploredAreaRecord[] areas = _explored;
+            int hint = _exploredHitHint;
+            if (hint >= 0 && hint < areas.Length && Inside(areas[hint], cell))
             {
-                if (a == null || a.Radius < 0)
+                return true;
+            }
+            for (int i = 0; i < areas.Length; i++)
+            {
+                if (i != hint && Inside(areas[i], cell))
                 {
-                    continue;
-                }
-                long dx = cell.X - a.CenterX;
-                long dy = cell.Y - a.CenterY;
-                if (dx * dx + dy * dy <= (long)a.Radius * a.Radius)
-                {
+                    _exploredHitHint = i;
                     return true;
                 }
             }
             return false;
         }
 
+        private static bool Inside(ExploredAreaRecord a, GridCell cell)
+        {
+            if (a == null || a.Radius < 0)
+            {
+                return false;
+            }
+            long dx = cell.X - a.CenterX;
+            long dy = cell.Y - a.CenterY;
+            return dx * dx + dy * dy <= (long)a.Radius * a.Radius;
+        }
+
+        private int _exploredHitHint = -1;
+        private byte[] _exploredScratch;
+
         private void RefreshExplored(Chunk chunk)
         {
             int baseX = chunk.ChunkX * ChunkSize;
             int baseY = chunk.ChunkY * ChunkSize;
-            Array.Clear(chunk.Explored, 0, chunk.Explored.Length);
+            // 先算到临时缓冲里，与现有遮罩逐字节比较：没变就不动版本（叠加层不重画这一块）。
+            if (_exploredScratch == null || _exploredScratch.Length != chunk.Explored.Length)
+            {
+                _exploredScratch = new byte[chunk.Explored.Length];
+            }
+            byte[] mask = _exploredScratch;
+            Array.Clear(mask, 0, mask.Length);
             foreach (ExploredAreaRecord a in _explored)
             {
                 if (a == null || a.Radius < 0)
@@ -459,10 +485,24 @@ namespace GameLogic.Campaign.Grid
                         long dy = y - a.CenterY;
                         if (dx * dx + dy * dy <= r2)
                         {
-                            chunk.Explored[(y - baseY) * ChunkSize + (x - baseX)] = 1;
+                            mask[(y - baseY) * ChunkSize + (x - baseX)] = 1;
                         }
                     }
                 }
+            }
+            bool changed = false;
+            for (int i = 0; i < mask.Length; i++)
+            {
+                if (mask[i] != chunk.Explored[i])
+                {
+                    changed = true;
+                    break;
+                }
+            }
+            if (changed)
+            {
+                Buffer.BlockCopy(mask, 0, chunk.Explored, 0, mask.Length);
+                chunk.ExploredMaskRevision++;
             }
             chunk.ExploredRevision = _exploredRevision;
         }

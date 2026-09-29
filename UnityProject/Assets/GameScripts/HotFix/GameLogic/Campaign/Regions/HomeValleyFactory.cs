@@ -654,7 +654,8 @@ namespace GameLogic.Campaign.Regions
                 chassisId: def.ChassisId,
                 blueprintId: item.BlueprintId,
                 regionId: HomeValleyLayout.RegionId,
-                position: HomeValleyLayout.AssemblyExit.Position,
+                // FG3-LOG-01（DEBT-FG0ARCH04-03）：出口随装配站旋转 / 搬迁——出厂位置与端口箭头、放置障碍同一个来源。
+                position: Grid.HomeGridService.ExitPosition(state, "assembly_exit"),
                 health: 100f,
                 maxHealth: 100f,
                 blueprintVersion: item.BlueprintVersion,

@@ -250,6 +250,21 @@ namespace GameLogic.EditorTools
                 reader.Mouse = new Vector3(1f, Screen.height * 0.5f, 0f); // 贴左边缘
                 GameSettings.SetEdgePanEnabled(false);
                 float off = Move();
+                // FG3-LOG-01（FGR-LOG-004）：拖拽铺设 / 框选 / 搬迁期间贴边总是推屏，不受“边缘平移”开关影响；松手后恢复按开关。
+                float dragging;
+                float afterDrag;
+                InputRouter.BuildDragActive = true;
+                try
+                {
+                    dragging = Move();
+                }
+                finally
+                {
+                    InputRouter.BuildDragActive = false;
+                }
+                afterDrag = Move();
+                Expect(dragging < 0f && Mathf.Abs(afterDrag) < 1e-5f,
+                    $"边缘平移关闭但正在建造拖拽 → 贴边照样向左推屏（位移 {dragging:F3}）；松手后恢复不推（位移 {afterDrag:F4}）（FGR-LOG-004）");
                 GameSettings.SetEdgePanEnabled(true);
                 GameSettings.SetEdgePanSpeedMultiplier(1f);
                 float edge = Move();

@@ -28,6 +28,7 @@ public sealed partial class StartLayout : Luban.BeanBase
         State = _buf.ReadString();
         Health = _buf.ReadFloat();
         Clearance = _buf.ReadFloat();
+        OwnerAnchor = _buf.ReadString();
     }
 
     public static StartLayout DeserializeStartLayout(ByteBuf _buf)
@@ -71,6 +72,10 @@ public sealed partial class StartLayout : Luban.BeanBase
     /// 净空半径(米),不重叠自检用
     /// </summary>
     public readonly float Clearance;
+    /// <summary>
+    /// 出口所属建筑的锚点ID:出口随该建筑旋转 / 搬迁(FG3-LOG-01);其它行填none
+    /// </summary>
+    public readonly string OwnerAnchor;
    
     public const int __ID__ = 1043704927;
     public override int GetTypeId() => __ID__;
@@ -91,6 +96,7 @@ public sealed partial class StartLayout : Luban.BeanBase
         + "state:" + State + ","
         + "health:" + Health + ","
         + "clearance:" + Clearance + ","
+        + "ownerAnchor:" + OwnerAnchor + ","
         + "}";
     }
 }

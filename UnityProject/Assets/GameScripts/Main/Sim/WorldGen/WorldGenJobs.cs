@@ -60,6 +60,8 @@ namespace BinGames.Sim.WorldGen
         /// <summary>普通视角的地貌表现（非建造）：只画地貌颜色、污染染色与迷雾，不画格线 / 图案 / 核心通道框——
         /// 地格参考线只属于建造模式，普通战斗与探索时地面不应呈现为方格。</summary>
         public bool TerrainView;
+        /// <summary>FG3-LOG-01（FG03 第 4 节“可以开关格线显示”）：建造模式叠加层是否画格线。关掉时地形颜色、图案、污染、核心通道、迷雾照画。</summary>
+        public bool GridLines;
     }
 
     /// <summary>
@@ -135,9 +137,9 @@ namespace BinGames.Sim.WorldGen
                             {
                                 col = new Color32(230, 200, 40, 255);
                             }
-                            else if (px == 0 || py == 0)
+                            else if (q.GridLines && (px == 0 || py == 0))
                             {
-                                col = Shade(col, 204); // ≈0.8 格线
+                                col = Shade(col, 204); // ≈0.8 格线（FG3-LOG-01：可关）
                             }
                             if (!explored)
                             {

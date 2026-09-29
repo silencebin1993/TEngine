@@ -625,7 +625,7 @@ namespace GameLogic.View
 
             // 屏幕边缘推屏。只在指针确实在窗口内时生效，否则 Alt-Tab 出去镜头会自己一直飘。
             // 设置“边缘平移”关闭时完全不推（此前该开关无人读取，边缘平移永远开着）。
-            if (!GameSettings.EdgePanEnabled ||
+            if (!(GameSettings.EdgePanEnabled || InputRouter.BuildDragActive) ||
                 !InputRouter.TryGetPointer(InputScope.Strategy, out Vector3 pointer) ||
                 pointer.x < 0f || pointer.y < 0f ||
                 pointer.x > Screen.width || pointer.y > Screen.height)

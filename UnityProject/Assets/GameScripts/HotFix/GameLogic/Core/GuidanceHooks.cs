@@ -77,6 +77,14 @@ namespace GameLogic.Core
         public const string NewGameSetupFirstOpen = "world.newgame.first_open";
         /// <summary>FG3-GEN-01：第一次在战略地图上加玩家标记。</summary>
         public const string MapMarkerFirstAdded = "world.map.first_marker";
+        /// <summary>FG3-LOG-01：第一次规划搬迁（FGR-LOG-008）。</summary>
+        public const string BuildFirstRelocate = "build.relocate.first";
+        /// <summary>FG3-LOG-01：第一次框选批量拆除（FGR-LOG-007）。</summary>
+        public const string BuildFirstBatchDemolish = "build.demolish.first_batch";
+        /// <summary>FG3-LOG-01：第一次把条目放进快捷栏（FGR-LOG-002）。</summary>
+        public const string BuildFirstHotbar = "build.hotbar.first_assign";
+        /// <summary>FG3-LOG-01：第一次拖拽铺设（两格以上，FGR-LOG-004）。</summary>
+        public const string BuildFirstDrag = "build.drag.first";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -97,6 +105,7 @@ namespace GameLogic.Core
             FirmwareLibraryFirstOpen,
             FirmwareRestoreFirstDone,
             StrategicMapFirstOpen, NewGameSetupFirstOpen, MapMarkerFirstAdded,
+            BuildFirstRelocate, BuildFirstBatchDemolish, BuildFirstHotbar, BuildFirstDrag,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

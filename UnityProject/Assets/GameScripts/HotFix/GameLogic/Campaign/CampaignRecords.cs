@@ -244,6 +244,11 @@ namespace GameLogic.Campaign
         /// 是忠于卡片原文的设计取舍，不是遗漏。旧存档缺该字段时 JsonUtility 按 int 默认值 0 迁移，
         /// 效果等同于"从未真正花过钱"，安全。</summary>
         public int InvestedScrap;
+        /// <summary>FG3-LOG-01（FGR-LOG-008 搬迁）：不为空时，这条记录是“搬迁目标”虚影——机器在这里施工完成后，
+        /// 原建筑（本字段指向它的 BuildingId）从原位置移除，本记录接过原建筑的 ID、生命、库存、队列、电力优先级与投入，
+        /// 变成原建筑本身（设置保留）。施工完成前原建筑照常运转；取消虚影 = 取消搬迁，原建筑不受影响。
+        /// 旧存档没有这个字段时 JsonUtility 补 null（= 普通建筑），无需迁移。唯一写入口是 <see cref="Grid.HomeGridService.TryRelocate"/>。</summary>
+        public string RelocateFromId;
     }
 
     /// <summary>ER3-STO-01：ERD-ECO-003 地面物——独立于仓库/核心缓存/机器货舱的第三类存放位置。

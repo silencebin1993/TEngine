@@ -91,6 +91,10 @@ public partial class Tables
     /// </summary>
     public cell.TbStructuralTriggerHookParams TbStructuralTriggerHookParams {get; }
     /// <summary>
+    /// 建造菜单分类
+    /// </summary>
+    public fg.TbBuildCategory TbBuildCategory {get; }
+    /// <summary>
     /// 建筑
     /// </summary>
     public fg.TbBuilding TbBuilding {get; }
@@ -102,6 +106,10 @@ public partial class Tables
     /// 建筑端口
     /// </summary>
     public fg.TbBuildingPort TbBuildingPort {get; }
+    /// <summary>
+    /// 建造菜单工具
+    /// </summary>
+    public fg.TbBuildTool TbBuildTool {get; }
     /// <summary>
     /// 载体读法
     /// </summary>
@@ -257,9 +265,11 @@ public partial class Tables
         TbStatusEffect = new cell.TbStatusEffect(loader("cell_tbstatuseffect"));
         TbStructuralEffectParams = new cell.TbStructuralEffectParams(loader("cell_tbstructuraleffectparams"));
         TbStructuralTriggerHookParams = new cell.TbStructuralTriggerHookParams(loader("cell_tbstructuraltriggerhookparams"));
+        TbBuildCategory = new fg.TbBuildCategory(loader("fg_tbbuildcategory"));
         TbBuilding = new fg.TbBuilding(loader("fg_tbbuilding"));
         TbBuildingGrid = new fg.TbBuildingGrid(loader("fg_tbbuildinggrid"));
         TbBuildingPort = new fg.TbBuildingPort(loader("fg_tbbuildingport"));
+        TbBuildTool = new fg.TbBuildTool(loader("fg_tbbuildtool"));
         TbCarrierReading = new fg.TbCarrierReading(loader("fg_tbcarrierreading"));
         TbCodexEntry = new fg.TbCodexEntry(loader("fg_tbcodexentry"));
         TbCombatComponent = new fg.TbCombatComponent(loader("fg_tbcombatcomponent"));
@@ -318,9 +328,11 @@ public partial class Tables
         TbStatusEffect.ResolveRef(this);
         TbStructuralEffectParams.ResolveRef(this);
         TbStructuralTriggerHookParams.ResolveRef(this);
+        TbBuildCategory.ResolveRef(this);
         TbBuilding.ResolveRef(this);
         TbBuildingGrid.ResolveRef(this);
         TbBuildingPort.ResolveRef(this);
+        TbBuildTool.ResolveRef(this);
         TbCarrierReading.ResolveRef(this);
         TbCodexEntry.ResolveRef(this);
         TbCombatComponent.ResolveRef(this);

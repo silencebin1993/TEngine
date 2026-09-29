@@ -107,5 +107,9 @@
         OpenSignalCore = 96,
         /// <summary>FG1-SIG-06（FGU-44）：打开 / 关闭暴露面板（战略与接入上下文，默认 Alt+P）。</summary>
         OpenExposure = 97,
+        /// <summary>FG3-LOG-01（FG03 第 4 节“可以开关格线显示”）：建造模式里开关半透明格线（建造上下文，默认 G）。</summary>
+        ToggleGridLines = 98,
+        /// <summary>FG3-LOG-01（FGR-LOG-008）：搬迁模式——点一座建筑、再点新位置（战略与建造上下文，默认 E）。</summary>
+        RelocateMode = 99,
     }
 }

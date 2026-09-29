@@ -267,7 +267,7 @@ namespace GameLogic.EditorTools
                         rows++;
                         if (!GridContent.TryGetBuilding(f[1], out BuildingGrid g) || g.FootprintW != int.Parse(f[2]) || g.FootprintH != int.Parse(f[3])
                             || g.Placeable != int.Parse(f[4]) || g.MaxCount != int.Parse(f[5]) || g.UnlockRule != f[6] || g.Critical != int.Parse(f[7])
-                            || g.RequiredTerrain != f[8] || g.DescKey != f[9] || g.UnlockHintKey != f[10])
+                            || g.RequiredTerrain != f[8] || g.DescKey != f[9] || g.UnlockHintKey != f[10] || f.Length < 12 || g.Category != f[11])
                         {
                             diffs.Add("建筑格网 " + f[1]);
                         }
@@ -283,7 +283,8 @@ namespace GameLogic.EditorTools
                     case "L":
                         rows++;
                         if (!GridContent.TryGetLayout(f[1], out StartLayout l) || l.Kind != f[2] || l.TypeId != f[3] || l.OffsetX != int.Parse(f[4])
-                            || l.OffsetY != int.Parse(f[5]) || l.Rotation != int.Parse(f[6]) || l.State != f[7] || !Eq(l.Health, f[8]) || !Eq(l.Clearance, f[9]))
+                            || l.OffsetY != int.Parse(f[5]) || l.Rotation != int.Parse(f[6]) || l.State != f[7] || !Eq(l.Health, f[8]) || !Eq(l.Clearance, f[9])
+                            || f.Length < 11 || l.OwnerAnchor != f[10])
                         {
                             diffs.Add("开局布局 " + f[1]);
                         }
@@ -622,6 +623,20 @@ namespace GameLogic.EditorTools
             var ports = new List<PortPlacement>();
             HomeGridService.PortsOf(wh, ports);
             GridDir before = ports.First(p => p.IsOutput).Dir;
+            // FG3-LOG-01 起仓库出口随仓库旋转，出口落在悬崖 / 水上时拒绝旋转（该规则由 FgBuildFormalSelfCheck 断言）。
+            // 本段只测“旋转移动占格与端口 / 被挡时拒绝”：把出口会转到的位置整平（夹具），不让种子地形干扰这里的断言。
+            HomeGridMap flatMap = HomeGridService.MapFor(s);
+            byte flat = GridContent.TerrainCode("buildable");
+            foreach (GridCell exitAt in new[] { new GridCell(wh.GridX + 8, wh.GridY), new GridCell(wh.GridX, wh.GridY - 8) })
+            {
+                for (int dy = -1; dy <= 1; dy++)
+                {
+                    for (int dx = -1; dx <= 1; dx++)
+                    {
+                        flatMap.SetTerrain(new GridCell(exitAt.X + dx, exitAt.Y + dy), flat);
+                    }
+                }
+            }
             GridOpResult rot = HomeGridService.TryRotate(s, warehouseId);
             HomeGridService.PortsOf(wh, ports);
             GridDir after = ports.First(p => p.IsOutput).Dir;
@@ -1170,15 +1185,22 @@ namespace GameLogic.EditorTools
                 mode.RefreshPreview(s);
                 hud.Refresh();
                 string status = hud.StatusLabelText;
-                bool itemsOk = hud.ItemCount == 3 && hud.PanelVisible && !hud.EntryVisible; // 第二座发电机、导航信标、信号中继塔（FG1-SIG-07）
-                string beaconItem = root.Q<Button>("BuildItem1")?.text ?? string.Empty;
+                // FG3-LOG-01 起建造栏按分类列出（物流 / 能源 / 信号 / 终局……）：三种可放置建筑分在各自的分类里，逐类核对。
+                bool panelOk = hud.PanelVisible && !hud.EntryVisible;
+                hud.SelectCategory("energy");
                 string generatorItem = root.Q<Button>("BuildItem0")?.text ?? string.Empty;
+                int energyCount = hud.ItemCount;
                 bool inScroll = root.Q<ScrollView>("BuildList") != null && root.Q<ScrollView>("BuildList").Q<Button>("BuildItem0") != null;
+                hud.SelectCategory("endgame");
+                string beaconItem = root.Q<Button>("BuildItem0")?.text ?? string.Empty;
+                hud.SelectCategory("signal");
+                bool relayListed = hud.ItemId(0) == "signal_relay";
+                int placeableBuildings = GridContent.Buildings.Count(b => b.Placeable == 1);
                 Object.DestroyImmediate(go);
-                Expect(generatorItem.Contains("60 废料") && generatorItem.Contains("40 秒") && generatorItem.Contains("已有") && inScroll,
+                Expect(generatorItem.Contains("60 废料") && generatorItem.Contains("40 秒") && generatorItem.Contains("已有") && inScroll && energyCount == 1,
                     $"建造栏条目写明成本、工期与已有数量：“{generatorItem.Replace("\n", " ")}”；条目在可滚动列表里（数量可变，UI Toolkit 红线 5）");
-                Expect(itemsOk && status.Contains("不能放置") && status.Contains("通道") && beaconItem.Contains("尚未解锁"),
-                    $"建造栏：列出 {hud.ItemCount} 种可放置建筑（信标未解锁时写明条件：“{beaconItem.Replace("\n", " ")}”），状态行“{status.Replace("\n", " ")}”");
+                Expect(panelOk && placeableBuildings == 3 && relayListed && status.Contains("不能放置") && status.Contains("通道") && beaconItem.Contains("尚未解锁"),
+                    $"建造栏：3 种可放置建筑分在能源 / 终局 / 信号分类（信标未解锁时写明条件：“{beaconItem.Replace("\n", " ")}”），状态行“{status.Replace("\n", " ")}”");
 
                 // 布局探针：中英文、UI 缩放极值、四种分辨率（面板默认隐藏，探针会移除隐藏类）。
                 foreach (GameLanguage lang in new[] { GameLanguage.ZhCn, GameLanguage.En })
@@ -1297,6 +1319,7 @@ namespace GameLogic.EditorTools
             public string RequiredTerrain;
             public string DescKey;
             public string UnlockHintKey;
+            public string Category;
         }
 
         private static GridRow WithTerrain(GridRow r, string terrain)
@@ -1315,6 +1338,7 @@ namespace GameLogic.EditorTools
                 {
                     TypeId = g.TypeId, W = g.FootprintW, H = g.FootprintH, Placeable = g.Placeable, MaxCount = g.MaxCount, UnlockRule = g.UnlockRule,
                     Critical = g.Critical, RequiredTerrain = g.RequiredTerrain, DescKey = g.DescKey, UnlockHintKey = g.UnlockHintKey,
+                    Category = g.Category,
                 });
                 buf.WriteString(r.TypeId);
                 buf.WriteInt(r.W);
@@ -1326,6 +1350,7 @@ namespace GameLogic.EditorTools
                 buf.WriteString(r.RequiredTerrain);
                 buf.WriteString(r.DescKey);
                 buf.WriteString(r.UnlockHintKey);
+                buf.WriteString(r.Category); // FG3-LOG-01：建造菜单分类
             }
             return buf;
         }

@@ -667,7 +667,11 @@ namespace GameLogic.Campaign.Signal
                 }
                 if (b.BuildingTypeId == HomeValleyLayout.BuildingTypeAssemblyStation)
                 {
-                    station = b;
+                    // FG3-LOG-01：搬迁目标虚影还没建成，路线按现在运转的那座装配站算；多座时取第一座（与其它按类型查找一致）。
+                    if (string.IsNullOrEmpty(b.RelocateFromId) && station == null)
+                    {
+                        station = b;
+                    }
                 }
                 else if (b.BuildingTypeId == HomeValleyLayout.BuildingTypeCore)
                 {

@@ -33,6 +33,22 @@ namespace GameLogic.Campaign.Grid
         NotRebuildable,
         /// <summary>FG0-ARCH-05（FGR-GEN-051）：超出世界坐标上限（world.coord_limit）。</summary>
         WorldLimit,
+        // ── FG3-LOG-01（只追加：数值不进存档，但排在后面 = 显示优先级靠后）──
+        /// <summary>装配站 / 仓库的出口通道（机器出厂、卸货的地方）会被别的建筑挡住。</summary>
+        ExitBlocked,
+        /// <summary>出口通道落在机器走不了的地形上（悬崖、水）。</summary>
+        ExitTerrain,
+        CannotRelocateCore,
+        RelocateDamaged,
+        RelocateSame,
+        /// <summary>这座建筑已经在搬迁中（先取消新位置的虚影）。</summary>
+        Relocating,
+        /// <summary>正在施工的规划不能搬迁（取消后重新放置）。</summary>
+        RelocateUnderConstruction,
+        RelocateSourceGone,
+        DragTooLong,
+        BeltHasItems,
+        ToolLocked,
     }
 
     /// <summary>一条原因：原因码 + 文本键 + 参数（参数本身若是文本键，显示时按当前语言解析）。</summary>
@@ -81,6 +97,12 @@ namespace GameLogic.Campaign.Grid
                 case GridBlockReason.Busy: return new GridReason(code, "grid.reason.busy");
                 case GridBlockReason.CannotRotateCore: return new GridReason(code, "grid.reason.cannot_rotate_core");
                 case GridBlockReason.NotRebuildable: return new GridReason(code, "grid.reason.not_rebuildable");
+                case GridBlockReason.CannotRelocateCore: return new GridReason(code, "grid.reason.cannot_relocate_core");
+                case GridBlockReason.RelocateDamaged: return new GridReason(code, "grid.reason.relocate_damaged");
+                case GridBlockReason.RelocateSame: return new GridReason(code, "grid.reason.relocate_same");
+                case GridBlockReason.Relocating: return new GridReason(code, "grid.reason.relocating");
+                case GridBlockReason.RelocateUnderConstruction: return new GridReason(code, "grid.reason.relocate_building");
+                case GridBlockReason.RelocateSourceGone: return new GridReason(code, "grid.reason.relocate_source_gone");
                 default: return new GridReason(code, "grid.reason.unknown_type");
             }
         }
@@ -157,6 +179,14 @@ namespace GameLogic.Campaign.Grid
             DemolishMarked,
             DemolishUnmarked,
             PlanCancelled,
+            // ── FG3-LOG-01 ──
+            /// <summary>已建成的建筑：生成了“搬迁目标”虚影与施工工作单（完工后原建筑拆走）。</summary>
+            RelocationPlanned,
+            /// <summary>还没开工的规划（含搬迁目标虚影）：直接挪到新位置。</summary>
+            PlanMoved,
+            BeltsPlaced,
+            BeltsRemoved,
+            BatchDemolished,
         }
 
         public readonly Kind Outcome;

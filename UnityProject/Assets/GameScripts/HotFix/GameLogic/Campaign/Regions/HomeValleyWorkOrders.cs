@@ -431,6 +431,94 @@ namespace GameLogic.Campaign.Regions
             return WorkOrderOpResult.Ok(workOrderId);
         }
 
+        /// <summary>
+        /// FG3-LOG-01（FGR-LOG-008 搬迁）：在新位置生成“搬迁目标”虚影与一张施工工作单（唯一调用方 <see cref="Grid.HomeGridService.TryRelocate"/>）。
+        /// 不花材料（材料就是原建筑本身），工期 <paramref name="seconds"/>；工作单进入待分配池，由空闲机器领取。
+        /// 虚影带上原建筑的电力优先级；完工时由 <see cref="CompleteBuild"/> 把原建筑换到新位置（见 <see cref="CompleteRelocation"/>）。
+        /// </summary>
+        public static WorkOrderOpResult TryCreateRelocationAt(CampaignState state, BuildingRecord source, string ghostId,
+            Grid.GridCell pivot, int rotation, Vector2 center, float seconds)
+        {
+            if (source == null)
+            {
+                return WorkOrderOpResult.Fail("building-not-found");
+            }
+            if (state.BuildingRecords?.Any(b => b.BuildingId == ghostId) ?? false)
+            {
+                return WorkOrderOpResult.Fail("already-relocating");
+            }
+            var ghost = new BuildingRecord
+            {
+                BuildingId = ghostId,
+                BuildingTypeId = source.BuildingTypeId,
+                RegionId = HomeValleyLayout.RegionId,
+                Position = center,
+                Rotation = Grid.GridMath.NormalizeRotation(rotation),
+                GridX = pivot.X,
+                GridY = pivot.Y,
+                Health = source.Health,
+                ConstructionState = BuildingConstructionState.Planned,
+                PowerPriority = source.PowerPriority,
+                PowerState = BuildingPowerState.NotApplicable,
+                Inventory = Array.Empty<CargoEntry>(),
+                QueueIds = Array.Empty<string>(),
+                BlockedReason = null,
+                RelocateFromId = source.BuildingId,
+            };
+            state.BuildingRecords = (state.BuildingRecords ?? Array.Empty<BuildingRecord>()).Append(ghost).ToArray();
+            string workOrderId = ghostId + ":build:" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            var order = NewOrder(state, workOrderId, WorkOrderKind.Build, ghostId, 0, resourceTransactionId: null, duration: Mathf.Max(0.1f, seconds));
+            order.State = WorkOrderState.Ready;
+            Append(state, order);
+            MarkAssignmentDirty();
+            return WorkOrderOpResult.Ok(workOrderId);
+        }
+
+        /// <summary>FG3-LOG-01：还没开工的规划被挪到新位置——正在赶路的机器放下这单（回待分配池），按新位置重新分配；
+        /// 旧的到达回调因为工单不再是“已分配”而失效（<see cref="OnArrivedAtWork"/> 只认 Reserved）。
+        /// 原先领单的机器同时收到停止移动（与路径受阻放单一致）：本方法由格网服务调用、拿不到调用方的移动委托，
+        /// 所以先记下机器，下一次 <see cref="Tick"/> 开头、分配之前统一发停止——免得它白跑到已经空了的旧位置。</summary>
+        public static void OnPlanMoved(CampaignState state, WorkOrderRecord order)
+        {
+            if (order == null || order.State != WorkOrderState.Reserved)
+            {
+                return;
+            }
+            PathWatch.Remove(order.WorkOrderId);
+            if (order.AssignedMachineLogicId > 0 && !PendingMovementRelease.Contains(order.AssignedMachineLogicId))
+            {
+                PendingMovementRelease.Add(order.AssignedMachineLogicId);
+            }
+            order.State = WorkOrderState.Ready;
+            order.AssignedMachineLogicId = 0;
+            MarkAssignmentDirty();
+        }
+
+        /// <summary>规划被挪走后待停下的机器（上限 = 同一帧内被挪动的已分配规划数，个位数；每次 Tick 开头清空）。</summary>
+        private static readonly List<int> PendingMovementRelease = new List<int>(4);
+
+        /// <summary>对 <see cref="OnPlanMoved"/> 记下的机器发停止移动：只停此刻没有别的活跃工单的机器
+        /// （同一帧里已被重新分配或被玩家接管的不动）。</summary>
+        private static void DrainPendingMovementRelease(CampaignState state, Action<int> releaseMachineMovement)
+        {
+            if (PendingMovementRelease.Count == 0)
+            {
+                return;
+            }
+            for (int i = 0; i < PendingMovementRelease.Count; i++)
+            {
+                int id = PendingMovementRelease[i];
+                if (FindActiveOrderForMachine(state, id) == null)
+                {
+                    releaseMachineMovement?.Invoke(id);
+                }
+            }
+            PendingMovementRelease.Clear();
+        }
+
+        /// <summary>自检用：还有多少台机器等着被停下。</summary>
+        public static int PendingMovementReleaseCount => PendingMovementRelease.Count;
+
         // ── Salvage（拆解残骸，保持 ER3-STO-01 已验证的落地/收货行为）────────────────
 
         public static WorkOrderOpResult TryCreateSalvage(CampaignState state, string nodeId, int machineLogicId)
@@ -860,6 +948,7 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
+            DrainPendingMovementRelease(state, releaseMachineMovement);
 
             if (state.WorkOrders != null && state.WorkOrders.Length > 0)
             {
@@ -985,7 +1074,10 @@ namespace GameLogic.Campaign.Regions
             BuildingRecord b = state?.BuildingRecords?.FirstOrDefault(x => x.BuildingId == order.TargetId);
             if (b != null)
             {
-                return Grid.HomeGridService.DisplayName(b.BuildingTypeId);
+                // FG3-LOG-01：搬迁目标虚影的施工单写明是搬迁（“维修台（搬迁）”），不与新建混淆。
+                return !string.IsNullOrEmpty(b.RelocateFromId)
+                    ? GameLogic.Localization.GameText.Format("ui.build.relocate_order", Grid.HomeGridService.DisplayName(b.BuildingTypeId))
+                    : Grid.HomeGridService.DisplayName(b.BuildingTypeId);
             }
             if (order.Kind == WorkOrderKind.Recharge || order.Kind == WorkOrderKind.Haul)
             {
@@ -1002,6 +1094,7 @@ namespace GameLogic.Campaign.Regions
             _assignTimer = 0f;
             PathWatch.Clear();
             WaitingWatch.Clear();
+            PendingMovementRelease.Clear();
         }
 
         /// <summary>ERD-WRK-002："空闲机器每 0.5 秒或收到脏事件时评估一次"——本方法就是那次评估，
@@ -1378,6 +1471,11 @@ namespace GameLogic.Campaign.Regions
         private static void CompleteBuild(CampaignState state, WorkOrderRecord order)
         {
             BuildingRecord building = state.BuildingRecords?.FirstOrDefault(b => b.BuildingId == order.TargetId);
+            if (building != null && !string.IsNullOrEmpty(building.RelocateFromId))
+            {
+                CompleteRelocation(state, order, building);
+                return;
+            }
             if (building == null)
             {
                 order.State = WorkOrderState.Failed;
@@ -1401,6 +1499,73 @@ namespace GameLogic.Campaign.Regions
             Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.BuildComplete, building.Position,
                 Feedback.FeedbackCues.BuildingLabel(building.BuildingId) + "已建成",
                 Feedback.FeedbackCues.BuildingTypeSfx(building.BuildingTypeId));
+        }
+
+        /// <summary>
+        /// FG3-LOG-01（FGR-LOG-008）：搬迁施工完成——原建筑从原位置移除，搬迁目标虚影接过原建筑的 ID、类型、生命、施工状态、库存、队列、
+        /// 电力优先级与投入（“保留原设置”），放在原建筑在记录数组里的位置（按类型查找的旧代码拿到的仍是同一座）。
+        /// 原建筑在施工期间已经不在了（被突袭摧毁等）：搬迁作废，虚影移除，工单失败并提示（没有材料要退：搬迁不花材料）。
+        /// </summary>
+        private static void CompleteRelocation(CampaignState state, WorkOrderRecord order, BuildingRecord ghost)
+        {
+            BuildingRecord[] records = state.BuildingRecords;
+            int sourceIndex = Array.FindIndex(records, b => b != null && b.BuildingId == ghost.RelocateFromId);
+            if (sourceIndex < 0)
+            {
+                state.BuildingRecords = records.Where(b => b.BuildingId != ghost.BuildingId).ToArray();
+                order.State = WorkOrderState.Failed;
+                order.FailureReason = "relocate-source-gone";
+                MarkAssignmentDirty();
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Failure,
+                    GameLogic.Localization.GameText.Get("grid.reason.relocate_source_gone"));
+                return;
+            }
+            BuildingRecord source = records[sourceIndex];
+            var moved = new BuildingRecord
+            {
+                BuildingId = source.BuildingId,
+                BuildingTypeId = source.BuildingTypeId,
+                RegionId = source.RegionId,
+                Position = ghost.Position,
+                Rotation = ghost.Rotation,
+                GridX = ghost.GridX,
+                GridY = ghost.GridY,
+                Health = source.Health,
+                // 原样带过原建筑的运行状态（运转 / 玩家关停 / 受损），不替玩家重新启用（FGR-BASE-020）；
+                // 其它状态（搬迁期间不该出现）按运转处理。
+                ConstructionState = source.ConstructionState == BuildingConstructionState.Damaged
+                                    || source.ConstructionState == BuildingConstructionState.Disabled
+                    ? source.ConstructionState
+                    : BuildingConstructionState.Operational,
+                PowerPriority = source.PowerPriority,
+                PowerState = source.PowerState,
+                Inventory = source.Inventory ?? Array.Empty<CargoEntry>(),
+                QueueIds = source.QueueIds ?? Array.Empty<string>(),
+                BlockedReason = source.BlockedReason,
+                InvestedScrap = source.InvestedScrap,
+                RelocateFromId = null,
+            };
+            var next = new List<BuildingRecord>(records.Length);
+            for (int i = 0; i < records.Length; i++)
+            {
+                if (i == sourceIndex)
+                {
+                    next.Add(moved);
+                }
+                else if (records[i] == null || records[i].BuildingId != ghost.BuildingId)
+                {
+                    next.Add(records[i]);
+                }
+            }
+            state.BuildingRecords = next.ToArray();
+            HomeValleyPowerGrid.Recompute(state);
+            order.State = WorkOrderState.Completed;
+            MachineRegistry.RecordJobCompleted(order.AssignedMachineLogicId);
+            MarkAssignmentDirty();
+            Grid.HomeGridService.OnRelocationCompleted(state, moved);
+            Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.BuildComplete, moved.Position,
+                GameLogic.Localization.GameText.Format("ui.build.relocated_done", Grid.HomeGridService.DisplayName(moved.BuildingTypeId)),
+                Feedback.FeedbackCues.BuildingTypeSfx(moved.BuildingTypeId));
         }
 
         /// <summary>Salvage 的完成分支路由：残骸节点走既有 ER3-STO-01 逻辑，建筑（ER3-SOFTLOCK-01

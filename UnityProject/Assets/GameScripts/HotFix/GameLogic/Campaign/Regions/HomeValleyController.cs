@@ -157,6 +157,8 @@ namespace GameLogic.Campaign.Regions
 
             IsLoaded = true;
             HomeValleyBuildMode.Bind(BuildMode);
+            Grid.HomeGridService.FootprintClaimed -= OnFootprintClaimed;
+            Grid.HomeGridService.FootprintClaimed += OnFootprintClaimed; // FG-GAP-015：新建筑压住的机器挪开。
             // FG0-UX-01（FGR-UX-020 定位）：机器实时位置由 WorldSimulation.LivePosition 统一向各地点查询。
 
             SaveResult saveResult = CampaignAutoSaveService.SaveAuto(SaveReason.HomeEntryComplete);
@@ -313,6 +315,33 @@ namespace GameLogic.Campaign.Regions
             CampaignExposureLedger.SimStepHighPower(state, dt); // FG1-SIG-06：高功率生产按游戏时间累计（与观察无关），每游戏小时最多 +3。
             HomeValleyBeacon.Tick(state, dt); // ER7-BEACON-01：信标启动10秒不可取消演出计时。
             HomeValleySoftlockGuard.Tick(state, dt, BeginAutoAssignedMovement);
+            // FG3-LOG-01（FGR-LOG-013）：机器走进迷雾就把周围记为已探索——每步轮流查一台（O(1)），与观察无关。
+            Grid.MachineExploration.Step(state, _machineMarkers, GameClock.Ticks);
+        }
+
+        /// <summary>FG-GAP-015：新占地落定时，站在上面的家园机器挪到最近的空格（O(机器数)，只在放置 / 旋转 / 搬迁这类玩家操作时发生）。</summary>
+        private void OnFootprintClaimed(CampaignState state, List<Grid.GridCell> cells)
+        {
+            if (state == null || cells == null || cells.Count == 0 || !ReferenceEquals(state, CampaignSession.Current))
+            {
+                return;
+            }
+            var set = new HashSet<Grid.GridCell>(cells);
+            int pushed = 0;
+            foreach (HomeValleyMachineMarker m in _machineMarkers)
+            {
+                if (m == null || !m.IsValid)
+                {
+                    continue;
+                }
+                Grid.GridCell at = Grid.GridCell.FromWorld(m.Position);
+                if (set.Contains(at) && Grid.HomeGridService.TryFindFreeCellNear(state, at, set, 12, out Grid.GridCell free))
+                {
+                    m.SetPosition(new Vector2(free.X, free.Y));
+                    pushed++;
+                }
+            }
+            Grid.HomeGridService.LastMachinesPushed = pushed;
         }
 
         private readonly HashSet<int> _markerIds = new HashSet<int>();
@@ -1040,6 +1069,7 @@ namespace GameLogic.Campaign.Regions
             CombatSites.Close(SiteId, CampaignSession.Current, dropRecord: true);
             _combat = null;
             BuildMode.Shutdown(); // FG0-ARCH-04：建造模式的虚影 / 叠加层 / 输入上下文与区域成对释放。
+            Grid.HomeGridService.FootprintClaimed -= OnFootprintClaimed;
             HomeGridService.ShutdownStreaming(); // FG0-ARCH-05：在飞的区块生成任务与区域成对释放（格网本身保留）。
             HomeValleyBuildMode.Unbind(BuildMode);
             SquadCommands.PointerSuppressed = false;

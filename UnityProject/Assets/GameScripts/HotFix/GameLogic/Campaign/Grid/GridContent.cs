@@ -20,6 +20,8 @@ namespace GameLogic.Campaign.Grid
         private static TbStartLayout _layout;
         private static TbGridTerrain _terrain;
         private static TbHomeTuning _tuning;
+        private static TbBuildCategory _categories;
+        private static TbBuildTool _tools;
         private static bool _loaded;
         private static bool _overridden;
         private static string _loadError;
@@ -27,6 +29,8 @@ namespace GameLogic.Campaign.Grid
         private static Dictionary<string, List<BuildingPort>> _portsByType;
         private static BuildingTerrainRow[] _terrainByCode;
         private static Dictionary<string, byte> _terrainCodeById;
+        private static List<BuildCategory> _sortedCategories;
+        private static List<BuildTool> _sortedTools;
         private static int _derivedRevision;
 
         public static int Revision { get; private set; } = 1;
@@ -65,6 +69,40 @@ namespace GameLogic.Campaign.Grid
                 RequireLoaded();
                 return _terrain.DataList;
             }
+        }
+
+        /// <summary>FG3-LOG-01（FGR-LOG-002）：建造菜单的十二个分类，按 sortOrder 排好。</summary>
+        public static IReadOnlyList<BuildCategory> Categories
+        {
+            get
+            {
+                EnsureDerived();
+                return _sortedCategories;
+            }
+        }
+
+        /// <summary>FG3-LOG-01：建造菜单里的非建筑工具（传送带），按 sortOrder 排好。</summary>
+        public static IReadOnlyList<BuildTool> Tools
+        {
+            get
+            {
+                EnsureDerived();
+                return _sortedTools;
+            }
+        }
+
+        public static bool TryGetTool(string toolId, out BuildTool row)
+        {
+            EnsureLoaded();
+            row = null;
+            return toolId != null && _tools != null && _tools.DataMap.TryGetValue(toolId, out row) && row != null;
+        }
+
+        public static bool TryGetCategory(string categoryId, out BuildCategory row)
+        {
+            EnsureLoaded();
+            row = null;
+            return categoryId != null && _categories != null && _categories.DataMap.TryGetValue(categoryId, out row) && row != null;
         }
 
         public static bool TryGetBuilding(string typeId, out BuildingGrid row)
@@ -172,6 +210,8 @@ namespace GameLogic.Campaign.Grid
             _layout = null;
             _terrain = null;
             _tuning = null;
+            _categories = null;
+            _tools = null;
             _loadError = null;
             Revision++;
             EnsureLoaded();
@@ -180,7 +220,7 @@ namespace GameLogic.Campaign.Grid
         /// <summary>测试注入：用构造出来的表替换真实表（改表 → 行为跟着变）。传 null 的表沿用真实表。
         /// 用完必须 <see cref="ResetForTests"/>。</summary>
         public static void OverrideForTests(TbBuildingGrid grid = null, TbBuildingPort ports = null, TbStartLayout layout = null,
-            TbGridTerrain terrain = null, TbHomeTuning tuning = null)
+            TbGridTerrain terrain = null, TbHomeTuning tuning = null, TbBuildTool tools = null)
         {
             Reload();
             _overridden = true;
@@ -189,6 +229,7 @@ namespace GameLogic.Campaign.Grid
             _layout = layout ?? _layout;
             _terrain = terrain ?? _terrain;
             _tuning = tuning ?? _tuning;
+            _tools = tools ?? _tools;
             Revision++;
         }
 
@@ -200,7 +241,8 @@ namespace GameLogic.Campaign.Grid
         private static void RequireLoaded()
         {
             EnsureLoaded();
-            if (_loadError != null || _grid == null || _ports == null || _layout == null || _terrain == null || _tuning == null)
+            if (_loadError != null || _grid == null || _ports == null || _layout == null || _terrain == null || _tuning == null
+                || _categories == null || _tools == null)
             {
                 throw new InvalidOperationException($"格网建造表不可用：{_loadError ?? "未知原因"}");
             }
@@ -221,9 +263,11 @@ namespace GameLogic.Campaign.Grid
                 _layout = tables?.TbStartLayout;
                 _terrain = tables?.TbGridTerrain;
                 _tuning = tables?.TbHomeTuning;
-                if (_grid == null || _ports == null || _layout == null || _terrain == null || _tuning == null)
+                _categories = tables?.TbBuildCategory;
+                _tools = tables?.TbBuildTool;
+                if (_grid == null || _ports == null || _layout == null || _terrain == null || _tuning == null || _categories == null || _tools == null)
                 {
-                    _loadError = "配置表 fg.TbBuildingGrid / TbBuildingPort / TbStartLayout / TbGridTerrain / TbHomeTuning 不存在";
+                    _loadError = "配置表 fg.TbBuildingGrid / TbBuildingPort / TbStartLayout / TbGridTerrain / TbHomeTuning / TbBuildCategory / TbBuildTool 不存在";
                 }
             }
             catch (Exception ex)
@@ -267,9 +311,15 @@ namespace GameLogic.Campaign.Grid
                     codeById[t.Id] = (byte)t.Code;
                 }
             }
+            var cats = new List<BuildCategory>(_categories.DataList);
+            cats.Sort((a, b) => a.SortOrder.CompareTo(b.SortOrder));
+            var tools = new List<BuildTool>(_tools.DataList);
+            tools.Sort((a, b) => a.SortOrder.CompareTo(b.SortOrder));
             _portsByType = ports;
             _terrainByCode = byCode;
             _terrainCodeById = codeById;
+            _sortedCategories = cats;
+            _sortedTools = tools;
             _derivedRevision = Revision;
         }
     }

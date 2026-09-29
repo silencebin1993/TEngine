@@ -39,7 +39,7 @@ namespace GameLogic.Campaign.Grid
     /// 性能：每次查询 O(1)（区块字典 + 数组下标）；放置校验 O(占地格数)；占用重建只在建筑记录变化时发生，O(建筑数 × 占地)，
     /// 不在每帧发生。同类数量用计数表维护，校验“数量上限”O(1)。
     /// </summary>
-    public static class HomeGridService
+    public static partial class HomeGridService
     {
         /// <summary>当前开局布局 / 迁移版本。写入 GridState.LayoutVersion。</summary>
         public const int LayoutVersion = 1;
@@ -195,7 +195,11 @@ namespace GameLogic.Campaign.Grid
                     continue;
                 }
                 ById[b.BuildingId] = b;
-                TypeCounts[b.BuildingTypeId] = (TypeCounts.TryGetValue(b.BuildingTypeId, out int n) ? n : 0) + 1;
+                if (string.IsNullOrEmpty(b.RelocateFromId))
+                {
+                    // 搬迁目标虚影不是新建筑（完工时换掉原建筑，总数不变）：不计入“已有 N”与数量上限。
+                    TypeCounts[b.BuildingTypeId] = (TypeCounts.TryGetValue(b.BuildingTypeId, out int n) ? n : 0) + 1;
+                }
                 if (!GridContent.TryGetBuilding(b.BuildingTypeId, out BuildingGrid g))
                 {
                     // 已从内容里移除的建筑类型（DEBT-FG0SAVE01-07）：记录保留、不占格（不报错，读档不失败）。
@@ -203,6 +207,11 @@ namespace GameLogic.Campaign.Grid
                 }
                 int rot = GridMath.NormalizeRotation(b.Rotation);
                 GridMath.FootprintCells(new GridCell(b.GridX, b.GridY), g.FootprintW, g.FootprintH, rot, Scratch);
+                if (!string.IsNullOrEmpty(b.RelocateFromId))
+                {
+                    // FG3-LOG-01：搬迁目标虚影与原建筑重叠的格子让给原建筑（原建筑在完工前照常运转、实实在在地占着）。
+                    RemoveCellsOccupiedBy(b.RelocateFromId, Scratch);
+                }
                 _map.Occupy(b.BuildingId, Scratch);
                 if (b.BuildingTypeId == HomeValleyLayout.BuildingTypeCore && !_hasCore)
                 {
@@ -210,6 +219,7 @@ namespace GameLogic.Campaign.Grid
                     _hasCore = true;
                 }
             }
+            IndexRelocationGhosts(records); // FG3-LOG-01：搬迁中的原建筑 → 目标虚影（O(1) 查询）。
             _recordsRef = state.BuildingRecords;
         }
 
@@ -423,15 +433,7 @@ namespace GameLogic.Campaign.Grid
             return typeId != null && TypeCounts.TryGetValue(typeId, out int n) ? n : 0;
         }
 
-        public static bool IsUnlocked(CampaignState state, BuildingGrid row)
-        {
-            switch (row.UnlockRule)
-            {
-                case "always": return true;
-                case "beacon": return HomeValleyBeacon.IsUnlocked(state);
-                default: return false;
-            }
-        }
+        public static bool IsUnlocked(CampaignState state, BuildingGrid row) => BuildCatalog.IsUnlocked(state, row.UnlockRule);
 
         /// <summary>玩家可以在建造模式里选的建筑（按表顺序）。</summary>
         public static void PlaceableTypes(List<BuildingGrid> into)
@@ -480,7 +482,8 @@ namespace GameLogic.Campaign.Grid
         /// <paramref name="checkCost"/>：是否校验废料够不够（旋转不花钱）。
         /// </summary>
         public static GridPlacementResult ValidatePlacement(CampaignState state, string typeId, GridCell pivot, int rotation,
-            bool asPlayerPlacement = true, string ignoreBuildingId = null, bool checkCost = true, GridPlacementResult into = null)
+            bool asPlayerPlacement = true, string ignoreBuildingId = null, bool checkCost = true, GridPlacementResult into = null,
+            string ignoreBuildingId2 = null)
         {
             GridPlacementResult r = into ?? new GridPlacementResult();
             r.TypeId = typeId;
@@ -489,6 +492,7 @@ namespace GameLogic.Campaign.Grid
             r.Cells.Clear();
             r.CellOk.Clear();
             r.Reasons.Clear();
+            r.Warnings.Clear();
             r.ScrapCost = 0;
             r.BuildSeconds = 0f;
 
@@ -531,9 +535,12 @@ namespace GameLogic.Campaign.Grid
                 GridContent.TryTerrainCode(g.RequiredTerrain, out requiredCode);
             }
 
-            CollectObstacles(state);
+            CollectObstacles(state, ignoreBuildingId, ignoreBuildingId2);
             GridMath.FootprintCells(pivot, g.FootprintW, g.FootprintH, r.Rotation, r.Cells);
             int worldLimit = GridContent.TuningInt("world.coord_limit");
+            int warnLevel = GridContent.TuningInt("grid.pollution_warn_level");
+            int lightPolluted = 0;
+            int lightLevel = 0;
             for (int i = 0; i < r.Cells.Count; i++)
             {
                 GridCell c = r.Cells[i];
@@ -573,11 +580,16 @@ namespace GameLogic.Campaign.Grid
                     r.Add(new GridReason(GridBlockReason.Pollution, "grid.reason.pollution", p.ToString()));
                     ok = false;
                 }
+                else if (warnLevel > 0 && p >= warnLevel)
+                {
+                    lightPolluted++;
+                    lightLevel = Math.Max(lightLevel, p);
+                }
                 int occ = chunk.Occupancy[idx];
                 if (occ != 0)
                 {
                     string other = map.OccupantId(occ);
-                    if (other != ignoreBuildingId)
+                    if (other != ignoreBuildingId && other != ignoreBuildingId2)
                     {
                         string otherType = other != null && ById.TryGetValue(other, out BuildingRecord ob) ? ob.BuildingTypeId : null;
                         r.Add(new GridReason(GridBlockReason.Occupied, "grid.reason.occupied", otherType != null ? DisplayName(otherType) : other ?? string.Empty));
@@ -613,6 +625,19 @@ namespace GameLogic.Campaign.Grid
                 r.Add(new GridReason(GridBlockReason.NeedsTerrain, "grid.reason.needs_terrain", req != null ? req.NameKey : g.RequiredTerrain));
             }
 
+            // FG3-LOG-01：装配站 / 仓库的出口通道随建筑旋转 / 搬迁——新姿态下出口不能被别的建筑压住、不能落在机器走不了的地形上。
+            string exitOwner = ExitOwnerFor(typeId, ignoreBuildingId, ignoreBuildingId2);
+            if (exitOwner != null)
+            {
+                ValidateExitAt(map, exitOwner, pivot, r.Rotation, ignoreBuildingId, ignoreBuildingId2, r);
+            }
+
+            // FGR-LOG-012：污染 1 级的格子可以建造，但建筑受天气损伤加倍——只警告，不阻止。
+            if (lightPolluted > 0)
+            {
+                r.Warnings.Add(Localization.GameText.Format("grid.warn.pollution", lightPolluted, lightLevel));
+            }
+
             if (checkCost && r.ScrapCost > 0 && state.Scrap < r.ScrapCost)
             {
                 r.Add(new GridReason(GridBlockReason.InsufficientScrap, "grid.reason.insufficient_scrap",
@@ -622,9 +647,11 @@ namespace GameLogic.Campaign.Grid
         }
 
         /// <summary>
-        /// FG0-ARCH-02：一格传送带能不能放。与建筑放置同一套逐格规则：世界坐标上限、迷雾、地形可建、污染、建筑占用、
-        /// 已有传送带 / 管线、开局锚点障碍（残骸、靶、出口）。与建筑不同的一条：传送带**可以**放在归还核心外的保留通道上——
+        /// FG0-ARCH-02：一格传送带能不能放。与建筑放置同一套逐格规则：世界坐标上限、迷雾、地形可建、建筑占用、
+        /// 已有传送带 / 管线、开局锚点障碍（残骸、靶、出口）。与建筑不同的两条：① 传送带**可以**放在归还核心外的保留通道上——
         /// 通道留给机器通行，地面传送带不挡路；否则核心的输入端口（在通道里）永远接不上带（FG00 B11 软锁）。
+        /// ② 污染不拦传送带：FGR-LOG-012 / FGR-ENV-040 原文“2 级及以上不能建造（净化塔和传送带除外）”——带子要能穿过污染带把
+        /// 远处资源运回家；1 级的“天气损伤加倍”只针对建筑，传送带没有这条警告。
         /// </summary>
         public static GridPlacementResult ValidateBeltCell(CampaignState state, GridCell cell, GridPlacementResult into = null)
         {
@@ -652,8 +679,7 @@ namespace GameLogic.Campaign.Grid
                 r.CellOk.Add(false);
                 return r;
             }
-            CollectObstacles(state);
-            int blockLevel = GridContent.TuningInt("grid.pollution_block_level");
+            CollectObstacles(state, null, null);
             HomeGridMap.Chunk chunk = map.ChunkAt(cell, out int idx);
             bool ok = true;
             if (chunk.Explored[idx] == 0)
@@ -668,12 +694,7 @@ namespace GameLogic.Campaign.Grid
                 r.Add(new GridReason(GridBlockReason.Terrain, "grid.reason.terrain", terrain != null ? terrain.NameKey : t.ToString()));
                 ok = false;
             }
-            byte p = chunk.Pollution[idx];
-            if (p >= blockLevel)
-            {
-                r.Add(new GridReason(GridBlockReason.Pollution, "grid.reason.pollution", p.ToString()));
-                ok = false;
-            }
+            // 污染不检查：传送带豁免（FGR-LOG-012，见上方说明）。
             int occ = chunk.Occupancy[idx];
             if (occ != 0)
             {
@@ -725,7 +746,8 @@ namespace GameLogic.Campaign.Grid
 
         private static readonly List<Obstacle> Obstacles = new List<Obstacle>(8);
 
-        private static void CollectObstacles(CampaignState state)
+        /// <param name="ignoreOwner">正在旋转 / 搬迁的建筑：它自己的出口不挡它自己（出口会跟着它走，新位置的出口另行校验）。</param>
+        private static void CollectObstacles(CampaignState state, string ignoreOwner, string ignoreOwner2)
         {
             Obstacles.Clear();
             RegionRecord region = null;
@@ -757,8 +779,9 @@ namespace GameLogic.Campaign.Grid
                         nameKey = "grid.obstacle.target";
                         break;
                     case "exit":
-                        nameKey = "grid.obstacle.exit";
-                        break;
+                        // FG3-LOG-01：出口挂在所属建筑上（随它旋转 / 搬迁，DEBT-FG0ARCH04-03）；搬迁中的目标位置的出口同样预留。
+                        AddExitObstacles(state, row, ignoreOwner, ignoreOwner2);
+                        continue;
                     default:
                         continue;
                 }
@@ -798,6 +821,7 @@ namespace GameLogic.Campaign.Grid
                 return GridOpResult.Fail(reason, check);
             }
             MapFor(state); // 记录数组已替换 → 立即重建占用（下一次查询就能看到新建筑）。
+            ClaimFootprint(state, check.Cells); // FG-GAP-015：压在新建筑占地上的地面物、机器挪到最近的空格。
             Core.GuidanceHooks.Raise(Core.GuidanceHooks.FirstPlacement);
             return new GridOpResult(GridOpResult.Kind.Placed, buildingId, check);
         }
@@ -839,6 +863,10 @@ namespace GameLogic.Campaign.Grid
             {
                 return GridOpResult.Fail(GridReason.Of(GridBlockReason.Busy));
             }
+            if (FindRelocationGhost(state, b.BuildingId) != null)
+            {
+                return GridOpResult.Fail(GridReason.Of(GridBlockReason.Relocating));
+            }
             int oldRot = GridMath.NormalizeRotation(b.Rotation);
             int newRot = GridMath.NormalizeRotation(oldRot + 90);
             var pivot = new GridCell(b.GridX, b.GridY);
@@ -854,6 +882,7 @@ namespace GameLogic.Campaign.Grid
             b.Rotation = newRot;
             b.Position = GridMath.FootprintCenter(pivot, g.FootprintW, g.FootprintH, newRot);
             _map.Occupy(b.BuildingId, check.Cells);
+            ClaimFootprint(state, check.Cells);
             return new GridOpResult(GridOpResult.Kind.Rotated, b.BuildingId, check);
         }
 
@@ -925,6 +954,10 @@ namespace GameLogic.Campaign.Grid
             {
                 return GridOpResult.Fail(GridReason.Of(GridBlockReason.NotRebuildable));
             }
+            if (FindRelocationGhost(state, b.BuildingId) != null)
+            {
+                return GridOpResult.Fail(GridReason.Of(GridBlockReason.Relocating));
+            }
             if (b.ConstructionState == BuildingConstructionState.Damaged)
             {
                 return GridOpResult.Fail(GridReason.Of(GridBlockReason.DemolishDamaged));
@@ -984,6 +1017,11 @@ namespace GameLogic.Campaign.Grid
                 FootprintOf(b, cells);
                 foreach (GridCell c in cells)
                 {
+                    // FG3-LOG-01：搬迁目标虚影与原建筑重叠的格子归原建筑（与占用重建同一规则）。
+                    if (!string.IsNullOrEmpty(b.RelocateFromId) && snap.TryGetValue(c, out string owner) && owner == b.RelocateFromId)
+                    {
+                        continue;
+                    }
                     snap[c] = b.BuildingId;
                 }
             }

@@ -295,6 +295,14 @@ namespace GameLogic.EditorTools
                     case 96: StepBuildDemolishMode(inStep); break;
                     case 97: StepBuildCancelled(inStep); break;
                     case 100: StepBuildDemolishRefused(inStep); break;
+                    case 101: StepBuildMenuSearchHotbar(inStep); break;
+                    case 102: StepBuildHotbarKey(inStep); break;
+                    case 103: StepBuildBeltDragged(inStep); break;
+                    case 104: StepBuildBoxDemolished(inStep); break;
+                    case 105: StepBuildRelocatePicked(inStep); break;
+                    case 106: StepBuildRelocatePlanned(inStep); break;
+                    case 107: StepBuildRelocateCancelled(inStep); break;
+                    case 108: StepBuildGridToggled(inStep); break;
                     case 98: StepBuildEsc(inStep); break;
                     case 110: StepWorldPanStart(inStep); break;
                     case 111: StepWorldPanMoved(inStep); break;
@@ -1165,6 +1173,11 @@ namespace GameLogic.EditorTools
             Check(mode != null && mode.IsOpen && InputRouter.ActiveContext == InputContext.Build && hud != null && hud.PanelVisible && hud.ItemCount >= 1,
                 $"建造模式打开：输入上下文 = 建造，建造栏显示 {hud?.ItemCount} 种可放置建筑");
             CheckNoTextMarkers("建造栏");
+            // FG3-LOG-01：建造菜单按十二个分类列出（默认第一个有条目的分类 = 物流）；点“能源”页签再点第一项。
+            int energyTab = Campaign.Grid.GridContent.Categories.ToList().FindIndex(c => c.Id == "energy");
+            Check(hud != null && hud.CategoryCount == 12 && hud.SelectedCategoryId == "logistics" && hud.HotbarVisible,
+                $"建造菜单有 {hud?.CategoryCount} 个分类页签，默认“{hud?.SelectedCategoryId}”；底部快捷栏可见");
+            Check(ClickUitk("[BuildModeHudHost]", "BuildCat" + energyTab) && hud.SelectedCategoryId == "energy", "点“能源”分类页签");
             Check(ClickUitk("[BuildModeHudHost]", "BuildItem0") && mode != null && mode.SelectedTypeId == Campaign.Regions.HomeValleyLayout.BuildingTypeGenerator2,
                 $"点建造栏第一项选中发电机（{mode?.SelectedTypeId}）");
             CampaignState state = CampaignSession.Current;
@@ -1293,7 +1306,328 @@ namespace GameLogic.EditorTools
             Check(mode != null && mode.IsOpen && mode.DemolishMode && mode.HoverBuildingId == WarehouseBuildingId && !mode.LastResult.Success
                   && mode.StatusIsError && mode.StatusText.Contains("无法重建") && !mode.StatusText.StartsWith("不能放置") && !UiConfirmDialog.IsOpen && kept,
                 $"拆除模式点仓库：不弹确认框，直接拒绝（“{mode?.StatusText}”），仓库保留、未标记拆除（防软锁）");
+            // FG3-LOG-01：退出拆除模式（点按钮），接着走建造菜单的搜索、快捷栏、拖拽铺设、框选拆除、搬迁、格线开关。
+            Check(ClickUitk("[BuildModeHudHost]", "BuildDemolish") && mode != null && !mode.DemolishMode, "点“拆除模式”按钮退出拆除模式");
+            InputRouter.DebugSetReader(null);
+            Next(101, "FG3-LOG-01：建造菜单搜索与快捷栏");
+        }
+
+        // ── FG3-LOG-01：建造菜单搜索、快捷栏（点选放入 + F1 选取）、拖拽铺设传送带（长度与成本）、框选拆除、搬迁（搬迁键 + 两次点击 + 取消）、格线开关 ──
+
+        private static UIDocument BuildHudDoc() => GameObject.Find("[BuildModeHudHost]")?.GetComponent<UIDocument>();
+
+        private static void StepBuildMenuSearchHotbar(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            BuildModeHudUIToolkit hud = BuildModeHudUIToolkit.Instance;
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            TextField search = BuildHudDoc()?.rootVisualElement?.Q<TextField>("BuildSearch");
+            if (search != null)
+            {
+                search.value = "中继"; // 与在框里打字同一个值变化回调
+            }
+            hud?.Refresh();
+            Check(search != null && hud.ItemCount == 1 && hud.ItemId(0) == "signal_relay" && hud.CaptionText.Contains("搜索"),
+                $"搜索框输入“中继”：跨分类只剩信号中继塔（“{hud?.CaptionText}”）");
+            Check(ClickUitk("[BuildModeHudHost]", "BuildSearchClear") && string.IsNullOrEmpty(search?.value), "点“清除”清空搜索");
+            int logisticsTab = Campaign.Grid.GridContent.Categories.ToList().FindIndex(c => c.Id == "logistics");
+            Check(ClickUitk("[BuildModeHudHost]", "BuildCat" + logisticsTab) && ClickUitk("[BuildModeHudHost]", "BuildItem0") && mode != null && mode.SelectedToolId == "belt_t1",
+                $"点“物流”页签再点第一项：选中传送带 T1（{mode?.SelectedToolId}）");
+            Check(ClickUitk("[BuildModeHudHost]", "HotbarSlot0") && Campaign.Grid.BuildCatalog.HotbarId(state, 0) == "belt_t1",
+                "选中传送带后点空的快捷栏第 1 格：放进快捷栏（存档里记下）");
+            // FGR-LOG-002 真实拖放：在条目上按下左键 → 指针移到快捷栏第 2 格 → 松开（UI Toolkit 指针事件，走 HUD 自己注册的回调与 SlotAt 命中）；
+            // 再在第 2 格上按右键清空。
+            VisualElement hudRoot = BuildHudDoc()?.rootVisualElement;
+            UnityEngine.UIElements.Button dragItem = hudRoot?.Q<UnityEngine.UIElements.Button>("BuildItem0");
+            UnityEngine.UIElements.Button slot1 = hudRoot?.Q<UnityEngine.UIElements.Button>("HotbarSlot1");
+            bool dropped = false;
+            bool cleared = false;
+            if (dragItem != null && slot1 != null && Campaign.Grid.BuildCatalog.HotbarId(state, 1) == null)
+            {
+                SendUitkPointer<PointerDownEvent>(dragItem, dragItem.worldBound.center, EventType.MouseDown, 0);
+                SendUitkPointer<PointerMoveEvent>(slot1, slot1.worldBound.center, EventType.MouseDrag, 0);
+                SendUitkPointer<PointerUpEvent>(slot1, slot1.worldBound.center, EventType.MouseUp, 0);
+                dropped = Campaign.Grid.BuildCatalog.HotbarId(state, 1) == "belt_t1";
+                SendUitkPointer<PointerDownEvent>(slot1, slot1.worldBound.center, EventType.MouseDown, 1);
+                SendUitkPointer<PointerUpEvent>(slot1, slot1.worldBound.center, EventType.MouseUp, 1);
+                cleared = Campaign.Grid.BuildCatalog.HotbarId(state, 1) == null;
+            }
+            Check(dropped && cleared,
+                $"按住“物流”第一项拖到快捷栏第 2 格再松开：放进去（{dropped}）；在第 2 格上按右键：清空（{cleared}）（FGR-LOG-002 真实指针事件）");
+            Check(ClickUitk("[BuildModeHudHost]", "BuildRotate") && mode.SelectedToolId == "belt_t1", "点“旋转”按钮（传送带单格方向）");
+            mode.ClearSelection();
+            PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.Hotbar1));
+            Next(102, "按快捷栏 1（默认 F1）");
+        }
+
+        private static void StepBuildHotbarKey(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            Check(mode != null && mode.SelectedToolId == "belt_t1", $"按 F1：选中快捷栏里的传送带（{mode?.SelectedToolId}）");
+            Campaign.Grid.GridCell? row = null;
+            Campaign.Grid.GridCell corePivot = Campaign.Grid.HomeGridService.CorePivot(state);
+            for (int r = 0; r <= 8 && row == null; r++)
+            {
+                for (int dy = -r; dy <= r && row == null; dy++)
+                {
+                    for (int dx = -r; dx <= r && row == null; dx++)
+                    {
+                        var start = new Campaign.Grid.GridCell(corePivot.X - 6 + dx, corePivot.Y + 10 + dy);
+                        bool ok = true;
+                        for (int k = 0; k < 6 && ok; k++)
+                        {
+                            ok = Campaign.Grid.HomeGridService.ValidateBeltCell(state, new Campaign.Grid.GridCell(start.X + k, start.Y)).Ok
+                                 && Campaign.Grid.HomeGridService.ValidateBeltCell(state, new Campaign.Grid.GridCell(start.X + k, start.Y - 1)).Ok;
+                        }
+                        if (ok)
+                        {
+                            row = start;
+                        }
+                    }
+                }
+            }
+            if (row == null)
+            {
+                Finish("镜头附近找不到能铺 6 格传送带的空地");
+                return;
+            }
+            SessionState.SetInt(K + "BeltX", row.Value.X);
+            SessionState.SetInt(K + "BeltY", row.Value.Y);
+            SessionState.SetInt(K + "BeltScrap", state.Scrap);
+            SessionState.SetString(K + "BeltDragInfo", string.Empty);
+            DragWorld(new Vector3(row.Value.X, 0f, row.Value.Y), new Vector3(row.Value.X + 5, 0f, row.Value.Y), 0);
+            Next(103, $"从 {row.Value} 按住左键向东拖 6 格再松开");
+        }
+
+        private static void StepBuildBeltDragged(double inStep)
+        {
+            BuildModeHudUIToolkit hud = BuildModeHudUIToolkit.Instance;
+            string info = hud?.DragInfoText ?? string.Empty;
+            if (!string.IsNullOrEmpty(info))
+            {
+                SessionState.SetString(K + "BeltDragInfo", info); // 拖的过程中 HUD 显示的长度与成本
+            }
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            int x = SessionState.GetInt(K + "BeltX", 0);
+            int y = SessionState.GetInt(K + "BeltY", 0);
+            bool all = Enumerable.Range(0, 6).All(i => Campaign.Logistics.BeltNetworkService.Kernel.HasCell(x + i, y));
+            string seen = SessionState.GetString(K + "BeltDragInfo", string.Empty);
+            Check(all && state.Scrap == SessionState.GetInt(K + "BeltScrap", -1) - 6 && seen.Contains("长度") && seen.Contains("成本"),
+                $"真实鼠标拖拽铺下 6 格传送带、扣 6 废料（剩 {state.Scrap}）；拖的时候 HUD 显示“{seen}”");
+            PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.DemolishMode));
+            SessionState.SetInt(K + "BeltScrap", state.Scrap + GroundScrap(state));
+            Next(104, "按拆除模式键，在空地上按住左键把刚铺的传送带框起来");
+        }
+
+        private static void StepBuildBoxDemolished(double inStep)
+        {
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            int x = SessionState.GetInt(K + "BeltX", 0);
+            int y = SessionState.GetInt(K + "BeltY", 0);
+            if (inStep < 0.3)
+            {
+                return;
+            }
+            if (SessionState.GetInt(K + "BoxDragged", 0) == 0)
+            {
+                Check(mode != null && mode.DemolishMode, "进入拆除模式");
+                SessionState.SetInt(K + "BoxDragged", 1);
+                DragWorld(new Vector3(x, 0f, y - 1), new Vector3(x + 5, 0f, y), 0);
+                return;
+            }
+            if (inStep < 1.2)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            bool gone = Enumerable.Range(0, 6).All(i => !Campaign.Logistics.BeltNetworkService.Kernel.HasCell(x + i, y));
+            Check(gone && state.Scrap + GroundScrap(state) == SessionState.GetInt(K + "BeltScrap", -1) + 6 && !UiConfirmDialog.IsOpen,
+                $"框选拆除：6 格传送带拆掉、全额返还 6 废料（库存 {state.Scrap}，仓满时返还留在地上），少量且不含关键建筑不弹确认；状态行“{mode?.StatusText}”");
+            PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.RelocateMode));
+            Next(105, "按搬迁键（默认 E）");
+        }
+
+        private const string RepairBayId = Campaign.Regions.HomeValleyLayout.RegionId + ":repair_bay";
+
+        private static int GroundScrap(CampaignState state) =>
+            state?.GroundItems?.Where(g => g != null && g.RegionId == Campaign.Regions.HomeValleyLayout.RegionId && g.ResourceType == "Scrap").Sum(g => g.Amount) ?? 0;
+
+        private static void StepBuildRelocatePicked(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            BuildingRecord bay = state?.BuildingRecords?.FirstOrDefault(b => b.BuildingId == RepairBayId);
+            Check(mode != null && mode.RelocateMode && bay != null, "进入搬迁模式");
+            if (bay == null)
+            {
+                Finish("找不到维修台");
+                return;
+            }
+            ClickWorld(new Vector3(bay.GridX, 0f, bay.GridY));
+            Next(106, "左键点维修台（点起来跟着鼠标）");
+        }
+
+        private static void StepBuildRelocatePlanned(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            if (SessionState.GetInt(K + "RelocateClicked", 0) == 0)
+            {
+                Check(mode != null && mode.CarryBuildingId == RepairBayId, $"维修台被点起来（{mode?.StatusText}）");
+                BuildingRecord bay = state.BuildingRecords.First(b => b.BuildingId == RepairBayId);
+                Campaign.Grid.GridCell? to = null;
+                for (int r = 0; r <= 8 && to == null; r++)
+                {
+                    for (int dy = -r; dy <= r && to == null; dy++)
+                    {
+                        for (int dx = -r; dx <= r && to == null; dx++)
+                        {
+                            var c = new Campaign.Grid.GridCell(bay.GridX - 6 + dx, bay.GridY + 4 + dy);
+                            if (Campaign.Grid.HomeGridService.ValidatePlacement(state, "repair_bay", c, (int)bay.Rotation, asPlayerPlacement: false,
+                                    ignoreBuildingId: RepairBayId, checkCost: false).Ok)
+                            {
+                                to = c;
+                            }
+                        }
+                    }
+                }
+                if (to == null)
+                {
+                    Finish("维修台附近找不到能搬去的位置");
+                    return;
+                }
+                SessionState.SetInt(K + "RelocateClicked", 1);
+                SessionState.SetInt(K + "RelocX", to.Value.X);
+                SessionState.SetInt(K + "RelocY", to.Value.Y);
+                ClickWorld(new Vector3(to.Value.X, 0f, to.Value.Y));
+                return;
+            }
+            if (inStep < 1.2)
+            {
+                return;
+            }
+            BuildingRecord ghost = Campaign.Grid.HomeGridService.FindRelocationGhost(state, RepairBayId);
+            BuildingRecord original = state.BuildingRecords.First(b => b.BuildingId == RepairBayId);
+            Check(ghost != null && ghost.GridX == SessionState.GetInt(K + "RelocX", 0) && ghost.GridY == SessionState.GetInt(K + "RelocY", 0)
+                  && original.ConstructionState == BuildingConstructionState.Operational && GhostVisual(ghost) != null,
+                $"左键点新位置：出现搬迁目标虚影（画面上有扁平方块），维修台在完工前照常在原地；状态行“{mode?.StatusText}”");
+            PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.DemolishMode));
+            SessionState.SetString(K + "GhostId", ghost?.BuildingId ?? string.Empty);
+            Next(107, "按拆除模式键，左键点搬迁虚影（取消搬迁）");
+        }
+
+        private static void StepBuildRelocateCancelled(double inStep)
+        {
+            if (inStep < 0.3)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            if (SessionState.GetInt(K + "GhostClicked", 0) == 0)
+            {
+                SessionState.SetInt(K + "GhostClicked", 1);
+                ClickWorld(new Vector3(SessionState.GetInt(K + "RelocX", 0), 0f, SessionState.GetInt(K + "RelocY", 0)));
+                return;
+            }
+            if (inStep < 1.0)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Check(Campaign.Grid.HomeGridService.FindRelocationGhost(state, RepairBayId) == null
+                  && state.BuildingRecords.Any(b => b.BuildingId == RepairBayId && b.ConstructionState == BuildingConstructionState.Operational)
+                  && mode.StatusText.Contains("已取消搬迁"),
+                $"拆除模式点搬迁虚影：取消搬迁，维修台留在原处（“{mode?.StatusText}”）");
+            Check(ClickUitk("[BuildModeHudHost]", "BuildDemolish") && !mode.DemolishMode, "点“拆除模式”按钮退出拆除模式");
+            SessionState.SetInt(K + "GridBefore", GameSettings.BuildGridLinesEnabled ? 1 : 0);
+            PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.ToggleGridLines));
+            Next(108, "按格线开关（默认 G）");
+        }
+
+        private static void StepBuildGridToggled(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            bool before = SessionState.GetInt(K + "GridBefore", 1) == 1;
+            if (SessionState.GetInt(K + "GridToggledBack", 0) == 0)
+            {
+                Check(GameSettings.BuildGridLinesEnabled == !before && BuildModeHudUIToolkit.Instance.GridToggleText.Contains(before ? "关" : "开"),
+                    $"按 G：格线{(before ? "关掉" : "打开")}，按钮写“{BuildModeHudUIToolkit.Instance?.GridToggleText}”");
+                SessionState.SetInt(K + "GridToggledBack", 1);
+                PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.ToggleGridLines));
+                return;
+            }
+            if (inStep < 1.0)
+            {
+                return;
+            }
+            Check(GameSettings.BuildGridLinesEnabled == before, "再按 G：格线恢复");
+            _buildMouse = Vector3.zero;
+            InputRouter.DebugSetReader(null);
             Next(110, "FG0-ARCH-05：检查地形叠加层（按区块跟随镜头）");
+        }
+
+        /// <summary>FG3-LOG-01：模拟按住左键从 <paramref name="from"/> 拖到 <paramref name="to"/>（下一帧按下，鼠标分几帧移过去，再松开）。</summary>
+        private static void DragWorld(Vector3 from, Vector3 to, int button)
+        {
+            Camera cam = Camera.main;
+            Vector3 a = cam != null ? cam.WorldToScreenPoint(from) : Vector3.zero;
+            Vector3 b = cam != null ? cam.WorldToScreenPoint(to) : Vector3.zero;
+            InputRouter.DebugSetReader(new DragReader
+            {
+                From = new Vector3(a.x, a.y, 0f),
+                To = new Vector3(b.x, b.y, 0f),
+                Button = button,
+                DownFrame = Time.frameCount + 1,
+                UpFrame = Time.frameCount + 6,
+            });
+        }
+
+        /// <summary>拖拽输入替身：按下那一帧在起点，之后几帧线性移到终点，松开那一帧在终点。</summary>
+        private sealed class DragReader : IInputReader
+        {
+            public Vector3 From;
+            public Vector3 To;
+            public int Button;
+            public int DownFrame;
+            public int UpFrame;
+
+            public bool GetKey(KeyCode key) => false;
+            public bool GetKeyDown(KeyCode key) => false;
+            public bool GetMouseButtonDown(int button) => button == Button && Time.frameCount == DownFrame;
+            public bool GetMouseButtonUp(int button) => button == Button && Time.frameCount == UpFrame;
+            public Vector3 MousePosition
+            {
+                get
+                {
+                    float t = Mathf.Clamp01((Time.frameCount - DownFrame) / (float)Mathf.Max(1, UpFrame - 1 - DownFrame));
+                    return Vector3.Lerp(From, To, t);
+                }
+            }
+            public float MouseScrollDelta => 0f;
         }
 
         // ── FG0-ARCH-05：地形叠加层按区块跟随镜头；区块由工作线程流式生成，主线程不卡；镜头平移跨过区块边界后新露出的区块补齐 ──
@@ -1405,6 +1739,24 @@ namespace GameLogic.EditorTools
             UIDocument doc = host != null ? host.GetComponent<UIDocument>() : null;
             UnityEngine.UIElements.Button b = doc?.rootVisualElement?.Q<UnityEngine.UIElements.Button>(buttonName);
             return InvokeClickable(b);
+        }
+
+        /// <summary>向 UI Toolkit 元素派发一次指针事件（位置为面板坐标），与真实鼠标经过同一条派发链（含根上的 TrickleDown 回调）；
+        /// 派发后释放该元素可能持有的指针捕获，免得影响后续真实鼠标步骤。</summary>
+        private static void SendUitkPointer<T>(VisualElement target, Vector2 panelPosition, EventType type, int button)
+            where T : PointerEventBase<T>, new()
+        {
+            var ev = new Event { type = type, mousePosition = panelPosition, button = button, clickCount = 1 };
+            using (T e = PointerEventBase<T>.GetPooled(ev))
+            {
+                e.target = target;
+                target.SendEvent(e);
+            }
+            if (type == EventType.MouseUp)
+            {
+                IEventHandler capturing = target.panel?.GetCapturingElement(PointerId.mousePointerId);
+                capturing?.ReleasePointer(PointerId.mousePointerId);
+            }
         }
 
         private static bool InvokeClickable(UnityEngine.UIElements.Button b)

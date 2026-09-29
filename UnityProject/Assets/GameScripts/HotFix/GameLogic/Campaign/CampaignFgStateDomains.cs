@@ -107,6 +107,9 @@ namespace GameLogic.Campaign
         /// <summary>迷雾层：已探索的圆形区域（FGR-LOG-013）。开局 = 核心周围 grid.explored_radius_start 格；
         /// 信号塔覆盖、机器探索扩张由 FG3-LOG-01 / FG1-SIG-07 追加。</summary>
         public ExploredAreaRecord[] Explored = Array.Empty<ExploredAreaRecord>();
+        /// <summary>FG3-LOG-01（FGR-LOG-002 快捷栏）：10 个快捷栏格子里放的条目 ID（建筑类型 ID 或建造菜单工具 ID，空串 = 空格子）。
+        /// 跟着存档走（每局解锁的东西不同）；旧存档没有这个字段时为 null，读取时按全空处理（<see cref="Grid.BuildCatalog"/>）。</summary>
+        public string[] Hotbar;
     }
 
     /// <summary>一块已探索的圆形区域（格网坐标）。</summary>
