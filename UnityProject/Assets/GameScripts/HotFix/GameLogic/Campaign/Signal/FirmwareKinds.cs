@@ -383,9 +383,11 @@ namespace GameLogic.Campaign.Signal
             return true;
         }
 
-        /// <summary>这枚固件有没有机器电路可编译的实现（FirmwareCatalog 条目带 gene 等价实现 LegacyFacadeId）。核心固件、不是固件时 false。</summary>
+        /// <summary>这枚固件有没有机器电路可结算的实现：带旧基因等价实现（LegacyFacadeId），或者有读法字段（FG2-FW-02：装甲击穿的原生读法“破甲”，
+        /// DEBT-FG1SIG06-07 关闭）。核心固件、不是固件时 false。</summary>
         public static bool HasMachineImplementation(string contentId) =>
-            !IsCore(contentId) && FirmwareCatalog.TryGet(contentId, out MechanicalContentDef def) && !string.IsNullOrEmpty(def.LegacyFacadeId);
+            !IsCore(contentId) && FirmwareCatalog.TryGet(contentId, out MechanicalContentDef def)
+            && (!string.IsNullOrEmpty(def.LegacyFacadeId) || CarrierReadings.HasReading(contentId));
 
         /// <summary>稳定原因码（<c>CircuitOpResult.Code</c>）：由 <see cref="CanInstall"/> 的文本键映射，调用方按码分支时不会把“不是固件”误判成“未破解”。</summary>
         public static string InstallFailureCode(string reasonKey)

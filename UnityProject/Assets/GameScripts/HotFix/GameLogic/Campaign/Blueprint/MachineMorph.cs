@@ -49,6 +49,18 @@ namespace GameLogic.Campaign.Blueprint
             ComponentCatalog.FuncMarkerId,
         };
 
+        /// <summary>FG2-FW-02 新建的作战组件（每种载体至少一个）：三套机身状态由 FG2-VFX-02“形变全量”补（DEBT-FG2FW02-01）。
+        /// 在那之前它们装上形变类固件时不显示机身状态（引信类本来就不改机身），其余表现照常；形变自检要求“组件目录 = 有机身状态的 + 这里登记的”，
+        /// 新增组件忘了登记会被拦下。</summary>
+        public static readonly IReadOnlyList<string> PendingMorphComponents = new[]
+        {
+            ComponentCatalog.CompRamId,
+            ComponentCatalog.CompShovelId,
+            ComponentCatalog.CompDroneBayId,
+            ComponentCatalog.CompCoronaId,
+            ComponentCatalog.CompSprayerId,
+        };
+
         private static bool _warnedTuning;
 
         public static bool IsMorphComponent(string componentId)

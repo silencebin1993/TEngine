@@ -288,10 +288,12 @@ namespace GameLogic.EditorTools
             Expect(GridContent.TryGetTuning("morph.transition_seconds", out float t) && Mathf.Approximately(t, 0.3f) && Mathf.Approximately(MachineMorph.TransitionSeconds, 0.3f),
                 $"过渡秒数读表 morph.transition_seconds = {t}（FGR-FW-021 初值 0.3）");
             // “Demo 已有的作战组件”= 组件目录里主组件与功能组件槽的全部条目：必须与有机身状态的组件完全一致（新增组件而忘了做形变会被这里拦下）。
+            // FG2-FW-02：新建的 5 个作战组件的三套机身状态归 FG2-VFX-02（DEBT-FG2FW02-01），登记在 MachineMorph.PendingMorphComponents；
+            // 组件目录必须 = 有机身状态的 6 个 + 登记待补的，新增组件两边都没登记会被这里拦下。
             var catalogCombat = ComponentCatalog.All.Values.Where(c => c.Slot == "主组件" || c.Slot == "功能组件").Select(c => c.Id).OrderBy(x => x).ToList();
-            var morphComps = MachineMorph.MorphComponents.OrderBy(x => x).ToList();
-            Expect(catalogCombat.Count == 6 && catalogCombat.SequenceEqual(morphComps),
-                $"作战组件 {catalogCombat.Count} 个（{string.Join("、", catalogCombat)}）与有机身状态的组件逐一对应");
+            var morphComps = MachineMorph.MorphComponents.Concat(MachineMorph.PendingMorphComponents).OrderBy(x => x).ToList();
+            Expect(MachineMorph.MorphComponents.Count == 6 && catalogCombat.SequenceEqual(morphComps) && !MachineMorph.PendingMorphComponents.Intersect(MachineMorph.MorphComponents).Any(),
+                $"作战组件 {catalogCombat.Count} 个（{string.Join("、", catalogCombat)}）= 有机身状态的 {MachineMorph.MorphComponents.Count} 个 + 登记待 FG2-VFX-02 补的 {MachineMorph.PendingMorphComponents.Count} 个");
             var fuseOnly = new BlueprintCircuitPreview { PrimaryId = ComponentCatalog.CompGunId, FirmwareIds = new[] { FirmwareCatalog.FwHomingId, FirmwareCatalog.FwSplitId } };
             var mixed = new BlueprintCircuitPreview { PrimaryId = ComponentCatalog.CompGunId, FirmwareIds = new[] { FirmwareCatalog.FwHomingId, FirmwareCatalog.FwTrailId, FirmwareCatalog.FwOverloadId } };
             var noComp = new BlueprintCircuitPreview { PrimaryId = null, UtilityId = null, FirmwareIds = new[] { FirmwareCatalog.FwTrailId } };

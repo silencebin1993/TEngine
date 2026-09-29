@@ -204,6 +204,10 @@ namespace GameLogic.EditorTools
                 // 机器电路装配（FGT-FW-002 核心装不进机器与炮塔、37 条常规真实装配编译）、接入口插入与路径数不变、热量与能耗（预览 = 版本 = 内核重炮积热、双态预览能耗行）、
                 // 状态标签（表 = FG02 3.4、模块真实贴的标签 = 表）、旧存档按新表显示与退役对账、FGT-FW-008 题材审计扩展到全部 FG 文本键、负向、暂停倍速、性能。
                 _fail += FgFirmwareMigrationSelfCheck.Run(Report);
+                // FG2-FW-02：读法矩阵与固定底盘兼容——源 = 表；旧引擎 42 条 × 5 载体零死对（扩展 ChassisPrimitiveMatrixSmokeReport）与声明字段 = 模块真实字段；
+                // 正式战斗内核 44 条 × 5 载体零死对（FGT-FW-001，读法开 / 关对照）与逐条实证；固定底盘兼容表（冲刺器拒绝并说明、推铲读作击退铲）；
+                // 读法说明对玩家可见（信号核 5 条、电路编辑器当前载体一条）；内核快照格式 3 存读档与格式 2 兼容；破碎都市正式流程的倍速 / 暂停 / 观察 / 存读档一致；负向；性能。
+                _fail += FgReadingMatrixSelfCheck.Run(Report);
             }
             catch (Exception e)
             {

@@ -46,8 +46,10 @@ namespace GameLogic.Campaign.Blueprint
         FirmwareCoreSignalOnly,
         /// <summary>FG1-SIG-06（FGR-SIG-060）：机器电路里装了未破解的敌方固件——破解前只能由信号裸跑。</summary>
         FirmwareRawSignalOnly,
-        /// <summary>FG1-SIG-06 修复轮：机器电路里装了没有机器电路实现的固件（破解后的装甲击穿，DEBT-FG1SIG06-07）——只能放进信号核。</summary>
+        /// <summary>FG1-SIG-06 修复轮：机器电路里装了没有机器电路实现的固件——只能放进信号核（FG2-FW-02 起装甲击穿有原生读法，已可装）。</summary>
         FirmwareNoMachineImpl,
+        /// <summary>FG2-FW-02（FGR-FW-012）：固定底盘（炮塔）上装了不兼容的作战组件（冲刺器：依赖机体位移）。</summary>
+        ComponentNotOnFixedChassis,
     }
 
     public sealed class CircuitIssue
@@ -310,6 +312,12 @@ namespace GameLogic.Campaign.Blueprint
             {
                 return CircuitOpResult.Fail("chassis_locked", $"底盘“{def.DisplayName}”尚未解锁：{def.LockedHintText}");
             }
+            // FG2-FW-02（FGR-FW-012）：换成固定底盘（炮塔）前，已装的不兼容组件要先卸下（不偷偷替玩家拆），给出原因。
+            string blocked = IncompatibleComponentNames(chassisId);
+            if (blocked != null)
+            {
+                return CircuitOpResult.Fail(TurretIncompatibleCode, GameText.Format("component.turret.reason.chassis_switch", blocked));
+            }
             CaptureUndo();
             ChassisId = chassisId;
             CommitUndo();
@@ -331,6 +339,10 @@ namespace GameLogic.Campaign.Blueprint
             if (!MechanicalContentUnlock.IsUnlocked(state, primaryId))
             {
                 return CircuitOpResult.Fail("primary_locked", $"主组件“{def.DisplayName}”尚未解锁：{def.LockedHintText}");
+            }
+            if (!CarrierReadings.CanMount(ChassisId, primaryId, out string turretReason, out _))
+            {
+                return CircuitOpResult.Fail(TurretIncompatibleCode, GameText.Format(turretReason, def.DisplayName));
             }
             CaptureUndo();
             PrimaryId = primaryId;
@@ -357,6 +369,10 @@ namespace GameLogic.Campaign.Blueprint
             if (!MechanicalContentUnlock.IsUnlocked(state, utilityId))
             {
                 return CircuitOpResult.Fail("utility_locked", $"功能组件“{def.DisplayName}”尚未解锁：{def.LockedHintText}");
+            }
+            if (!CarrierReadings.CanMount(ChassisId, utilityId, out string turretReason, out _))
+            {
+                return CircuitOpResult.Fail(TurretIncompatibleCode, GameText.Format(turretReason, def.DisplayName));
             }
             CaptureUndo();
             UtilityId = utilityId;
@@ -669,20 +685,31 @@ namespace GameLogic.Campaign.Blueprint
             public List<(int, int)> Edges;
             public string[] Firmware;
             public int Uplink;
+            // FG2-FW-02：外层槽也进撤销（此前换底盘 / 主组件 / 功能 / 结构会推一条撤销，但撤销只还原内层，主组件原样不动——B03）。
+            public string Chassis;
+            public string Primary;
+            public string Utility;
+            public string Structure;
         }
+
+        private Snapshot TakeSnapshot() => new Snapshot
+        {
+            Slots = (string[])SlotContentIds.Clone(),
+            PartIds = (string[])SlotPartIds.Clone(),
+            Edges = new List<(int, int)>(_edges),
+            Firmware = (string[])FirmwareSlots.Clone(),
+            Uplink = UplinkSlot,
+            Chassis = ChassisId,
+            Primary = PrimaryId,
+            Utility = UtilityId,
+            Structure = StructureId,
+        };
 
         private Snapshot _pendingUndo;
 
         private void CaptureUndo()
         {
-            _pendingUndo = new Snapshot
-            {
-                Slots = (string[])SlotContentIds.Clone(),
-                PartIds = (string[])SlotPartIds.Clone(),
-                Edges = new List<(int, int)>(_edges),
-                Firmware = (string[])FirmwareSlots.Clone(),
-                Uplink = UplinkSlot,
-            };
+            _pendingUndo = TakeSnapshot();
         }
 
         private void CommitUndo()
@@ -709,14 +736,7 @@ namespace GameLogic.Campaign.Blueprint
             {
                 return false;
             }
-            var redoSnap = new Snapshot
-            {
-                Slots = (string[])SlotContentIds.Clone(),
-                PartIds = (string[])SlotPartIds.Clone(),
-                Edges = new List<(int, int)>(_edges),
-                Firmware = (string[])FirmwareSlots.Clone(),
-                Uplink = UplinkSlot,
-            };
+            Snapshot redoSnap = TakeSnapshot();
             Snapshot prev = _undo.Pop();
             Apply(prev);
             _redo.Push(redoSnap);
@@ -735,14 +755,7 @@ namespace GameLogic.Campaign.Blueprint
             {
                 return false;
             }
-            var undoSnap = new Snapshot
-            {
-                Slots = (string[])SlotContentIds.Clone(),
-                PartIds = (string[])SlotPartIds.Clone(),
-                Edges = new List<(int, int)>(_edges),
-                Firmware = (string[])FirmwareSlots.Clone(),
-                Uplink = UplinkSlot,
-            };
+            Snapshot undoSnap = TakeSnapshot();
             Snapshot next = _redo.Pop();
             Apply(next);
             _undo.Push(undoSnap);
@@ -757,6 +770,10 @@ namespace GameLogic.Campaign.Blueprint
             _edges.AddRange(s.Edges);
             FirmwareSlots = (string[])s.Firmware.Clone();
             UplinkSlot = s.Uplink;
+            ChassisId = s.Chassis;
+            PrimaryId = s.Primary;
+            UtilityId = s.Utility;
+            StructureId = s.Structure;
         }
 
         // ── 校验 ─────────────────────────────────────────────────────────────────
@@ -837,7 +854,34 @@ namespace GameLogic.Campaign.Blueprint
                 result.Add(CircuitIssueCode.LoadExceeded, $"负载 {totalLoad} 超过底盘容量 {capacity.Value}。");
             }
 
+            // FG2-FW-02（FGR-FW-012）：保存校验兜底——固定底盘（炮塔）上的不兼容组件（旧草稿、换表后）不能保存，原因与装配入口一致。
+            foreach (string comp in new[] { PrimaryId, UtilityId })
+            {
+                if (!string.IsNullOrEmpty(comp) && !CarrierReadings.CanMount(ChassisId, comp, out string reason, out _))
+                {
+                    string name = MechanicalContentFacade.TryGet(comp, out MechanicalContentDef d) ? d.DisplayName : comp;
+                    result.Add(CircuitIssueCode.ComponentNotOnFixedChassis, GameText.Format(reason, name));
+                }
+            }
+
             return result;
+        }
+
+        /// <summary>FG2-FW-02：失败码——组件与固定底盘（炮塔）不兼容。</summary>
+        public const string TurretIncompatibleCode = "turret_incompatible";
+
+        /// <summary>把底盘换成 <paramref name="chassisId"/> 时，已装组件里与它不兼容的（名称，顿号分隔）；都兼容时 null。</summary>
+        public string IncompatibleComponentNames(string chassisId)
+        {
+            var names = new List<string>();
+            foreach (string comp in new[] { PrimaryId, UtilityId })
+            {
+                if (!string.IsNullOrEmpty(comp) && !CarrierReadings.CanMount(chassisId, comp, out _, out _))
+                {
+                    names.Add(MechanicalContentFacade.TryGet(comp, out MechanicalContentDef d) ? d.DisplayName : comp);
+                }
+            }
+            return names.Count > 0 ? string.Join(GameText.Get("component.turret.list_sep"), names) : null;
         }
 
         private bool HasCycle(out int[] cycleSlots)

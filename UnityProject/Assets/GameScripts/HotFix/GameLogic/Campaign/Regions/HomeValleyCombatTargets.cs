@@ -293,7 +293,8 @@ namespace GameLogic.Campaign.Regions
                 return fail;
             }
 
-            float damage = Mathf.Max(0f, resolution.Preview.TotalNormalizedDamage);
+            // FG2-FW-02（B13）：每发伤害与内核同源（CombatSite.MachineHitDamage）；低威胁靶的直接结算不经载体 / 固件读法——登记 DEBT-FG2FW02-07。
+            float damage = Combat.CombatSite.MachineHitDamage(resolution.Preview);
             target.Health = Mathf.Max(0f, target.Health - damage);
             if (target.Health <= 0f)
             {

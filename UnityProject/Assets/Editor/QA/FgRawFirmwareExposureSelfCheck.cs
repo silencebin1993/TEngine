@@ -434,7 +434,9 @@ namespace GameLogic.EditorTools
                    && Mathf.Approximately(WeaponOf(site, a).HeatPerShot, 40f) && !infoAfter.RawGated && (Unit(site, a).Flags & CombatUnitFlags.RawGated) == 0
                    && SignalUplinkService.LastFeedbackText == GameText.Format("signal.raw.cracked", FirmwareKinds.DisplayName(FirmwareCatalog.FwArmorPierceId),
                        GameText.Get(FirmwareKinds.AfterCrackKey(FirmwareCatalog.FwArmorPierceId)))
-                   && SignalUplinkService.LastFeedbackText.Contains(GameText.Get("signal.raw.after_crack.signal_only")),
+                   // FG2-FW-02（DEBT-FG1SIG06-07 关闭）：装甲击穿有了原生读法，破解后“也能装进机器”（不再是“仍只能放进信号核”）。
+                   && FirmwareKinds.HasMachineImplementation(FirmwareCatalog.FwArmorPierceId)
+                   && SignalUplinkService.LastFeedbackText.Contains(GameText.Get("signal.raw.after_crack.machine")),
                 $"破解完成时固件正插在信号核里（解析台真实队列）：同一件（{ShortId(partBefore)}）留在 1 号槽、信号仍在机器里，接入的机器立刻按已破解重编译（每发积热 40、没有裸跑门控）；HUD“{SignalUplinkService.LastFeedbackText}”");
             float e3 = s.SignalExposure;
             SetHeat(site, a, 0f);

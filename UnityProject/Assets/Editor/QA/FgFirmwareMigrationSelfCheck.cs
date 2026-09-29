@@ -36,7 +36,7 @@ namespace GameLogic.EditorTools
     /// FG2-FW-01 44 条固件数据迁移的自动验收（FG02 FGR-FW-001～003、FGR-FW-030；FGT-FW-002（部分）、FGT-FW-008；卡片负向“旧存档里的固件实例按新表显示”）。
     /// 全部读正式表（fg.TbFirmwareKind / fg.TbStatusTag / fg.TbLocText），起真实系统——行为坏了会失败：
     /// A 源数据 = 运行时表（逐字段）；B 名表 = 设计案 5.4（名称 / 类别 / 种类 / 旧 ID 与 42 条旧基因一一对应）；C 目录由表生成（改表 → 目录跟着变、切语言、表坏了）；
-    /// D 机器电路装配（FGT-FW-002：6 条核心装不进机器与炮塔；37 条常规真实装配 + 保存 + 编译；未解锁 / 未破解的拒绝与原因）；
+    /// D 机器电路装配（FGT-FW-002：6 条核心装不进机器与炮塔；38 条常规真实装配 + 保存 + 编译（FG2-FW-02 起含装甲击穿）；未解锁 / 未破解的拒绝与原因）；
     /// E 接入口插入（44 条都能插、路径数不变 → DEBT-FG1SIG02-02 关闭；形变按形变列）；F 热量与能耗（预览 = 蓝图版本 = 内核重炮积热；双态预览能耗行，FG-GAP-028）；
     /// G 状态标签（表 = FG02 3.4；等价实现模块真实贴上的标签 = 表；编译产出的标签都能叫出名字或是反应产物）；
     /// H 旧存档按新表显示（真实文件存读档、换语言名字跟着表走；表里退役一条固件时的对账；表坏了不把固件当已移除内容转废料）；
@@ -200,7 +200,7 @@ namespace GameLogic.EditorTools
                 }
             }
             Expect(code == 0 && fk.Count == FirmwareCatalog.ExpectedCount && rows.Count == FirmwareCatalog.ExpectedCount && diffs.Count == 0,
-                $"fg.TbFirmwareKind {rows.Count} 行 × 25 列与源 {fk.Count} 行逐字段一致{Detail(diffs)}");
+                $"fg.TbFirmwareKind {rows.Count} 行 × 26 列与源 {fk.Count} 行逐字段一致{Detail(diffs)}");
 
             IReadOnlyList<StatusTag> tags = StatusTagCatalog.Rows;
             var tdiff = st.Where(f => f.Length < 7 || tags.All(t => !(t.Id == f[1] && t.NameKey == f[2] && t.AliasOf == f[3] && t.Shape == f[4] && t.Color == f[5] && t.Kind == f[6])))
@@ -215,6 +215,7 @@ namespace GameLogic.EditorTools
             r.Load.ToString(CultureInfo.InvariantCulture), r.Power.ToString(CultureInfo.InvariantCulture), F(r.Heat),
             r.ReadProjectileKey, r.ReadMeleeKey, r.ReadSummonKey, r.ReadAuraKey, r.ReadFieldKey,
             r.Tags, r.Morph, r.Icon, r.Source, r.AcquireKey, r.Cracked ? "True" : "False", r.Scrap.ToString(CultureInfo.InvariantCulture),
+            r.ReadFields, // FG2-FW-02：读法字段
         };
 
         private static string F(float v) => v.ToString("0.0###", CultureInfo.InvariantCulture);
@@ -372,7 +373,7 @@ namespace GameLogic.EditorTools
 
         private static void CheckMachineCircuit()
         {
-            Line("  · D. 机器电路：6 条核心固件装不进机器电路与炮塔、只能进信号核（FGT-FW-002）；37 条常规固件经正式固件槽入口装上、校验通过、落盘、编译生效；装甲击穿暂只能进信号核（DEBT-FG1SIG06-07 → FG2-FW-02）");
+            Line("  · D. 机器电路：6 条核心固件装不进机器电路与炮塔、只能进信号核（FGT-FW-002）；38 条常规固件（FG2-FW-02 起含装甲击穿）经正式固件槽入口装上、校验通过、落盘、编译生效");
             CampaignState s = NewState(8802, unlockAll: true);
             var coreBad = new List<string>();
             var regularBad = new List<string>();
@@ -386,11 +387,6 @@ namespace GameLogic.EditorTools
                     bool turret = !FirmwareKinds.CanInstall(s, r.Id, FirmwareHost.Turret, out string tk) && tk == "signal.reason.core_turret";
                     bool signal = FirmwareKinds.CanInstall(s, r.Id, FirmwareHost.SignalCore, out _);
                     if (set.Success || set.Code != BlueprintCircuitBoard.CoreSignalOnlyCode || !turret || !signal) coreBad.Add(r.Id);
-                    continue;
-                }
-                if (r.Id == FirmwareCatalog.FwArmorPierceId)
-                {
-                    if (set.Success || set.Code != "firmware_no_machine_impl") regularBad.Add(r.Id + "（应暂只能进信号核）");
                     continue;
                 }
                 if (!set.Success)
@@ -410,8 +406,9 @@ namespace GameLogic.EditorTools
                 installed++;
             }
             Expect(coreBad.Count == 0, $"6 条核心固件：固件槽拒绝（{BlueprintCircuitBoard.CoreSignalOnlyCode}）、炮塔拒绝（core_turret）、信号核接受{Detail(coreBad)}");
-            Expect(regularBad.Count == 0 && installed == 37,
-                $"常规固件 {installed} / 37 条经 TrySetFirmware → Validate → ToVersion → CompilePreview 真实装上并生效；炮塔判定同样放行；装甲击穿给“暂时只能放进信号核”{Detail(regularBad)}");
+            // FG2-FW-02：装甲击穿有了原生读法（破甲，DEBT-FG1SIG06-07 关闭），与其余 37 条一样经正式入口装上。
+            Expect(regularBad.Count == 0 && installed == 38,
+                $"常规固件 {installed} / 38 条（含 FG2-FW-02 起可装的装甲击穿）经 TrySetFirmware → Validate → ToVersion → CompilePreview 真实装上并生效；炮塔判定同样放行{Detail(regularBad)}");
 
             CampaignState fresh = NewState(8803);
             BlueprintCircuitBoard g = GunBoard(null);
@@ -969,6 +966,7 @@ namespace GameLogic.EditorTools
                 buf.WriteString(r.AcquireKey);
                 buf.WriteBool(r.Cracked);
                 buf.WriteInt(scrap ?? r.Scrap);
+                buf.WriteString(r.ReadFields); // FG2-FW-02：读法字段
             }
             return new TbFirmwareKind(buf);
         }

@@ -288,7 +288,8 @@ namespace GameLogic.Campaign.Blueprint
             lines.Add(p.HasCombatOutput
                 ? GameText.Format("circuit.uplink.line.paths", p.PathCount)
                 : GameText.Get("circuit.uplink.line.no_output"));
-            lines.Add(GameText.Format("circuit.uplink.line.damage", F1(p.TotalNormalizedDamage)));
+            // FG2-FW-02（B13）：显示内核实际每发伤害（与 CombatSite.MachineWeaponFrom 同源），不是旧器官的编译伤害。
+            lines.Add(GameText.Format("circuit.uplink.line.damage", F1(Combat.CombatSite.MachineHitDamage(p))));
             // FG2-FW-01（FG-GAP-028，FGR-SIG-022“热量和能耗的变化”）：热量行带上固件的每发耗电（同一行，栏的行数与界面标签数不变）。
             lines.Add(GameText.Format("circuit.uplink.line.heat_power", F1(p.HeatBudget), p.PowerCost.ToString(CultureInfo.InvariantCulture)));
             lines.Add(p.ReactionId != null
@@ -355,10 +356,11 @@ namespace GameLogic.Campaign.Blueprint
                 dual.Diff.Add(new UplinkDiffLine(UplinkDiffKind.PowerChanged, GameText.Format("circuit.uplink.diff.power",
                     a.PowerCost.ToString(CultureInfo.InvariantCulture), u.PowerCost.ToString(CultureInfo.InvariantCulture))));
             }
-            if (Math.Abs(u.TotalNormalizedDamage - a.TotalNormalizedDamage) > 0.0001f)
+            float aHit = Combat.CombatSite.MachineHitDamage(a), uHit = Combat.CombatSite.MachineHitDamage(u);
+            if (Math.Abs(uHit - aHit) > 0.0001f)
             {
                 dual.Diff.Add(new UplinkDiffLine(UplinkDiffKind.DamageChanged,
-                    GameText.Format("circuit.uplink.diff.damage", F1(a.TotalNormalizedDamage), F1(u.TotalNormalizedDamage))));
+                    GameText.Format("circuit.uplink.diff.damage", F1(aHit), F1(uHit))));
             }
         }
 

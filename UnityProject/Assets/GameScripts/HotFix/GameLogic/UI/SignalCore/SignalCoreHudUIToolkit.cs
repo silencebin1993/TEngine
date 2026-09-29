@@ -862,7 +862,7 @@ namespace GameLogic.UI.SignalCore
             {
                 Title = GameText.Format("signal.core.slot_index", index + 1),
                 Body = content.Length > 0
-                    ? (FirmwareKinds.DisplayName(content) ?? content) + "\n" + FirmwareKinds.KindTip(kind) + RawTip(s, content)
+                    ? (FirmwareKinds.DisplayName(content) ?? content) + "\n" + FirmwareKinds.KindTip(kind) + RawTip(s, content) + ReadingTip(content)
                     : SignalCoreService.IsSlotUnlocked(s, index)
                         ? GameText.Get("signal.core.hint")
                         : GameText.Format("signal.core.slot_locked", SignalCoreService.TierForSlot(index)),
@@ -879,8 +879,15 @@ namespace GameLogic.UI.SignalCore
             return new TooltipContent
             {
                 Title = FirmwareKinds.DisplayName(chip.CardDefId) ?? chip.CardDefId,
-                Body = FirmwareKinds.KindTip(FirmwareKinds.KindOf(chip.CardDefId)) + RawTip(CampaignSession.Current, chip.CardDefId),
+                Body = FirmwareKinds.KindTip(FirmwareKinds.KindOf(chip.CardDefId)) + RawTip(CampaignSession.Current, chip.CardDefId) + ReadingTip(chip.CardDefId),
             };
+        }
+
+        /// <summary>FG2-FW-02（FGR-FW-011）：固件详情逐条列出 5 种载体上的读法（“装在射弹上：……”）；不是固件时为空串。</summary>
+        public static string ReadingTip(string contentId)
+        {
+            string lines = Campaign.Content.CarrierReadings.DetailLines(contentId);
+            return lines == null ? string.Empty : "\n" + GameText.Get("reading.detail.title") + "\n" + lines;
         }
 
         /// <summary>FG1-SIG-06：未破解固件的悬停说明（裸跑代价与破解后的变化，数值读调参表）；已破解 / 己方固件为空。</summary>

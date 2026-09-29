@@ -1,4 +1,7 @@
+using System;
 using System.Collections.Generic;
+using System.Globalization;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Content
 {
@@ -22,6 +25,13 @@ namespace GameLogic.Campaign.Content
         public const string StructRelayId = "struct_relay";
         public const string StructArmorId = "struct_armor";
         public const string StructFinId = "struct_fin";
+
+        // ── FG2-FW-02 新建作战组件（设计案 5.6；每种载体至少一个；名称 / 说明 / 数值来自 fg.TbCombatComponent）──
+        public const string CompRamId = "comp_ram";
+        public const string CompShovelId = "comp_shovel";
+        public const string CompDroneBayId = "comp_dronebay";
+        public const string CompCoronaId = "comp_corona";
+        public const string CompSprayerId = "comp_sprayer";
 
         private static readonly Dictionary<string, MechanicalContentDef> _defs = new Dictionary<string, MechanicalContentDef>
         {
@@ -282,8 +292,100 @@ namespace GameLogic.Campaign.Content
             },
         };
 
-        public static IReadOnlyDictionary<string, MechanicalContentDef> All => _defs;
+        private static Dictionary<string, MechanicalContentDef> _merged;
+        private static int _mergedRevision = -1;
+        private static GameLanguage _mergedLanguage;
+        private static int _mergedTextRevision = -1;
+        private static int _buildCount;
 
-        public static bool TryGet(string id, out MechanicalContentDef def) => _defs.TryGetValue(id, out def);
+        /// <summary>Demo 的 10 条（上面手写）+ FG2-FW-02 起由 fg.TbCombatComponent 生成的新作战组件（有名称键的行）。
+        /// 按表版本与语言缓存（O(组件数)，不按帧）。</summary>
+        public static IReadOnlyDictionary<string, MechanicalContentDef> All
+        {
+            get
+            {
+                EnsureBuilt();
+                return _merged;
+            }
+        }
+
+        /// <summary>目录内容版本（表重载 / 切换语言 / 文本表重载后变化），聚合目录 <see cref="MechanicalContentFacade"/> 据此重建。</summary>
+        public static int Revision
+        {
+            get
+            {
+                EnsureBuilt();
+                return _buildCount;
+            }
+        }
+
+        public static bool TryGet(string id, out MechanicalContentDef def)
+        {
+            if (string.IsNullOrEmpty(id))
+            {
+                def = null;
+                return false;
+            }
+            EnsureBuilt();
+            return _merged.TryGetValue(id, out def);
+        }
+
+        private static void EnsureBuilt()
+        {
+            int rev = CarrierReadings.Revision;
+            GameLanguage lang = GameText.Language;
+            int textRev = GameText.Revision;
+            if (_merged != null && _mergedRevision == rev && _mergedLanguage == lang && _mergedTextRevision == textRev)
+            {
+                return;
+            }
+            var merged = new Dictionary<string, MechanicalContentDef>(_defs, StringComparer.Ordinal);
+            foreach (GameConfig.fg.CombatComponent row in CarrierReadings.Components)
+            {
+                if (row == null || string.IsNullOrEmpty(row.NameKey) || row.NameKey == "none" || merged.ContainsKey(row.Id))
+                {
+                    continue;
+                }
+                merged[row.Id] = Build(row);
+            }
+            _merged = merged;
+            _mergedRevision = rev;
+            _mergedLanguage = lang;
+            _mergedTextRevision = textRev;
+            _buildCount++;
+        }
+
+        private static MechanicalContentDef Build(GameConfig.fg.CombatComponent row)
+        {
+            string carrier = CarrierReadings.TryParseCarrier(row.Carrier, out Signal.FirmwareCarrier c) ? CarrierReadings.CarrierName(c) : row.Carrier;
+            string subtype = CarrierReadings.SubtypeName(row.Id) ?? carrier;
+            bool main = row.Slot == "main";
+            return new MechanicalContentDef
+            {
+                Id = row.Id,
+                Category = main ? MechanicalContentCategory.MainComponent : MechanicalContentCategory.FunctionComponent,
+                DisplayName = GameText.Get(row.NameKey),
+                Description = GameText.Get(row.DescKey),
+                Source = MechanicalContentSource.BaseBlueprint,
+                SourceDetail = GameText.Get("component.source.base"),
+                Slot = main ? "主组件" : "功能组件", // 槽位识别串（与 Demo 条目同一取值，代码按它分组；界面显示走载体名）
+                ScrapCost = Math.Max(0, row.Scrap),
+                Load = Math.Max(1, row.Load),
+                ValuesSummary = GameText.Format("component.values_summary", subtype, row.Damage.ToString("0.#", CultureInfo.InvariantCulture),
+                    row.Scrap.ToString(CultureInfo.InvariantCulture), row.Load.ToString(CultureInfo.InvariantCulture)),
+                AiPermission = MechanicalContentAiPermission.PlayerAndAllyAi,
+                IconId = row.Icon,
+                ModelId = "primitive:capsule",
+                ActionId = $"CombatSite.MachineWeaponFrom → CarrierReadings.Build（载体 {row.Carrier}，内核 CombatLogic.DeliverInstant）",
+                VfxId = "vfx_projectile_placeholder",
+                SfxId = "sfx_weapon_fire",
+                PreviewId = "preview_" + row.Id,
+                SaveCompatible = true,
+                LockedHintText = GameText.Get("component.source.base"),
+                SilhouetteNote = $"载体 {row.Carrier}；机身状态随 FG2-VFX-02（DEBT-FG2FW02-01）。",
+                LegacyFacadeId = row.LegacyOrgan == "none" ? null : row.LegacyOrgan,
+                DebtId = "DEBT-FG2FW02-01",
+            };
+        }
     }
 }

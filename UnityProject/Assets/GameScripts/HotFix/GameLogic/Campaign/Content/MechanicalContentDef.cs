@@ -44,6 +44,8 @@ namespace GameLogic.Campaign.Content
         EliteDrop,
         /// <summary>FG2-FW-01：阵营首领固定掉落（核心固件，敌方加密）。</summary>
         FactionBoss,
+        /// <summary>FG2-FW-02：炮塔（固定底盘）——家园防御开放（FG6-DEF-01）后写入解锁记录才可用；之前不在基础蓝图库里。</summary>
+        TurretProgram,
     }
 
     /// <summary>谁可以真正使用/装配/触发这条内容（对照验收卡"AI 权限"列）。</summary>

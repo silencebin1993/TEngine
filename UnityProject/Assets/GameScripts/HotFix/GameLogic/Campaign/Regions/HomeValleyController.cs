@@ -1838,7 +1838,7 @@ namespace GameLogic.Campaign.Regions
                 Site = _combat,
                 HostileUnit = id => _combat != null && _combat.TryGetEnemyUnit(id, out int u) ? u : 0,
                 AttackRange = HomeValleyCombatTargets.EngageRange,
-                AttackCooldownSeconds = 1.2f,
+                AttackCooldownSeconds = CombatSite.MachineAttackInterval, // fg.TbHomeTuning combat.machine.attack_interval（与即时命中武器的冷却同一个数）
                 ContextCommand = TryContextWorkForSelection,
             };
             SquadCommands.Bind(_squadCtx);

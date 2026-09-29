@@ -33,7 +33,7 @@ namespace BinGames.Sim.Combat
     /// 6. 兴趣点发现；计数。
     /// Demo 的即时命中按执行顺序立刻生效（先打死的目标，同一步后面的单位就看不到它），与 Demo 逐调用结算一致。
     /// </summary>
-    public static class CombatLogic
+    public static partial class CombatLogic
     {
         /// <summary>网格查询的额外余量（米）：覆盖步内移动造成的“格子过期”。</summary>
         private const double GridSlack = 2.0;
@@ -100,6 +100,9 @@ namespace BinGames.Sim.Combat
                 StepProjectiles(ref d, ref grid2, dt);
                 grid2.Dispose();
             }
+
+            // 5b. FG2-FW-02：读法生成的无人机、区域、回波与状态标签（统一时钟，暂停不走、倍速按游戏时间）。
+            StepReadings(ref d, dt);
 
             // 6. 兴趣点
             StepPois(ref d);
@@ -231,7 +234,23 @@ namespace BinGames.Sim.Combat
                 }
                 cmd.Pos = d.Pos[t];
                 double distA = math.distance(pos, cmd.Pos);
-                bool inRangeA = distA <= cmd.AttackRange;
+                // FG2-FW-02：格斗 / 力场这类要贴近的载体按武器的接近距离收紧命令射程（目标半径算进去）；固件读法的出手间隔倍率（电容蓄力）乘在冷却上。
+                float attackRange = cmd.AttackRange;
+                int wi = d.Weapon[i];
+                float cdScale = 1f;
+                if (wi >= 0 && wi < d.Weapons.Length)
+                {
+                    CombatReading rd = d.Weapons[wi].Reading;
+                    if (rd.Approach > 0f)
+                    {
+                        attackRange = math.min(attackRange, rd.Approach + d.Radius[t]);
+                    }
+                    if (rd.CooldownScale > 0f)
+                    {
+                        cdScale = rd.CooldownScale;
+                    }
+                }
+                bool inRangeA = distA <= attackRange;
                 if (!inRangeA)
                 {
                     StepTowards(ref d, i, pos, cmd.Pos, dt);
@@ -239,7 +258,7 @@ namespace BinGames.Sim.Combat
                 cmd.AtkCd -= dt;
                 if (inRangeA && cmd.AtkCd <= 0f)
                 {
-                    cmd.AtkCd = cmd.AttackCooldown;
+                    cmd.AtkCd = cmd.AttackCooldown * cdScale;
                     CombatFireResult r = FireAt(ref d, i, t);
                     bool destroyed = r == CombatFireResult.Ok && !d.IsAlive(t);
                     Gameplay(ref d, CombatEventKind.AttackOutcome, i, cmd.Target, 0f, 0f, d.Pos[t], (byte)r, (byte)(destroyed ? 1 : 0));
@@ -437,12 +456,12 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
-            int t = FindTarget(ref d, ref grid, i, wp.Range, d.Has(i, CombatUnitFlags.NeedsLos), wp.TargetMode);
+            int t = FindTarget(ref d, ref grid, i, EngageRange(ref d, i, wp), d.Has(i, CombatUnitFlags.NeedsLos), wp.TargetMode);
             if (t < 0)
             {
                 return;
             }
-            d.Cycle[i] = wp.Cooldown;
+            d.Cycle[i] = EffectiveCooldown(wp);
             UnitAttack(ref d, i, t, wp);
         }
 
@@ -464,8 +483,8 @@ namespace BinGames.Sim.Combat
                 {
                     return;
                 }
-                int locked = FindTarget(ref d, ref grid, i, wp.Range, los, wp.TargetMode);
-                d.Cycle[i] = wp.Cooldown;
+                int locked = FindTarget(ref d, ref grid, i, EngageRange(ref d, i, wp), los, wp.TargetMode);
+                d.Cycle[i] = EffectiveCooldown(wp);
                 if (locked >= 0)
                 {
                     Cue(ref d, CombatEventKind.Telegraph, i, d.Id[locked], 0f, d.Pos[i], 2);
@@ -483,7 +502,7 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
-            int t = FindTarget(ref d, ref grid, i, wp.Range, los, wp.TargetMode);
+            int t = FindTarget(ref d, ref grid, i, EngageRange(ref d, i, wp), los, wp.TargetMode);
             if (t < 0)
             {
                 return;
@@ -510,7 +529,7 @@ namespace BinGames.Sim.Combat
                 double2 away = pos - d.Pos[nearest];
                 if (math.lengthsq(away) > 0.0001)
                 {
-                    double2 proposed = pos + math.normalize(away) * (p.Speed * dt);
+                    double2 proposed = pos + math.normalize(away) * (SlowedSpeed(ref d, i, p.Speed) * dt);
                     if (math.distance(proposed, spawn) <= p.Leash)
                     {
                         d.Pos[i] = proposed;
@@ -526,7 +545,7 @@ namespace BinGames.Sim.Combat
                 if (math.lengthsq(to) > 0.01)
                 {
                     double len = math.length(to);
-                    d.Pos[i] = pos + to / len * math.min(p.Speed * dt, len);
+                    d.Pos[i] = pos + to / len * math.min(SlowedSpeed(ref d, i, p.Speed) * dt, len);
                 }
             }
 
@@ -589,6 +608,7 @@ namespace BinGames.Sim.Combat
                 return;
             }
             CombatBehaviorProfile p = d.Profiles[bp];
+            p.Speed = SlowedSpeed(ref d, i, p.Speed); // FG2-FW-02：减速状态
             double2 pos = d.Pos[i];
             // 威胁：最近的敌对单位（不看视线），进入触发距离就后撤，本步不救援。
             int threat = FindTarget(ref d, ref grid, i, p.FleeTrigger, false, CombatTargetMode.Nearest);
@@ -662,6 +682,7 @@ namespace BinGames.Sim.Combat
             }
             CombatWeapon wp = d.Weapons[w];
             CombatBehaviorProfile p = d.Profiles[bp];
+            p.Speed = SlowedSpeed(ref d, i, p.Speed); // FG2-FW-02：减速状态
             CombatCommand cmd = d.Cmd[i];
             int t = d.SlotOf(cmd.Target);
             float retarget = d.Secondary[i] - dt;
@@ -697,9 +718,10 @@ namespace BinGames.Sim.Combat
                 d.NavSt[i] = (byte)CombatNavState.NeedRoute;
             }
             double dist = math.distance(pos, d.Pos[t]);
-            if (dist > wp.Range)
+            float engage = EngageRange(ref d, i, wp);
+            if (dist > engage)
             {
-                MoveToward(ref d, i, pos, d.Pos[t], p.Speed * dt, wp.Range * 0.9);
+                MoveToward(ref d, i, pos, d.Pos[t], p.Speed * dt, engage * 0.9);
                 Separate(ref d, ref grid, i, p.Speed, dt);
                 return;
             }
@@ -707,7 +729,7 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
-            d.Cycle[i] = wp.Cooldown;
+            d.Cycle[i] = EffectiveCooldown(wp);
             UnitAttack(ref d, i, t, wp);
         }
 
@@ -725,12 +747,24 @@ namespace BinGames.Sim.Combat
         /// <summary>单位主动攻击（驻守开火 / 瞄准线 / 突袭者 / 炮塔）：弹体武器生成弹体，其余即时命中。</summary>
         private static void UnitAttack(ref CombatData d, int i, int t, in CombatWeapon wp)
         {
+            // FG2-FW-02：与编队攻击 / 直控同一道开火门槛（格斗 / 力场的触及、过热迟滞）与同一份积热——驻守开火的炮塔也不例外。
+            if (PreFireGate(ref d, i, t, wp) != CombatFireResult.Ok)
+            {
+                return;
+            }
             CombatCounters c = d.Counters[0];
             c.ShotsFired++;
             d.Counters[0] = c;
+            AddShotHeat(ref d, i, wp);
             if (wp.Mode == CombatWeaponMode.Projectile)
             {
                 SpawnProjectile(ref d, i, t, d.Weapon[i], wp);
+                return;
+            }
+            if (wp.Reading.Carrier != CombatCarrier.Projectile || wp.Reading.HasFirmwareReading)
+            {
+                // FG2-FW-02：带载体 / 读法的即时武器（炮塔用的推铲、带固件的炮塔）走与机器开火同一套投送。
+                DeliverInstant(ref d, i, t, wp, false);
                 return;
             }
             if (!d.Has(i, CombatUnitFlags.SilentFire))
@@ -774,6 +808,27 @@ namespace BinGames.Sim.Combat
         // ─────────────────────────────── 开火与结算 ───────────────────────────────
 
         /// <summary>
+        /// 直控点击的开火入口：非重炮武器一次点击一发（Demo 语义，没有出手间隔）；带蓄力读法（出手间隔倍率 &gt; 1，电容蓄力）的武器
+        /// 要等上一发之后蓄满（基础出手间隔 × 倍率）才能再点出——否则直控会白拿“单发伤害 ×”而不付“出手间隔 ×”。重炮的冷却在 <see cref="FireCannon"/>。
+        /// </summary>
+        public static CombatFireResult FireDirect(ref CombatData d, int a, int t)
+        {
+            if (a >= 0 && a < d.Count && d.IsAlive(a))
+            {
+                int w = d.Weapon[a];
+                if (w >= 0 && w < d.Weapons.Length)
+                {
+                    CombatWeapon wp = d.Weapons[w];
+                    if (wp.Mode != CombatWeaponMode.Cannon && IsCharged(wp) && d.Scalars[0].Time < d.NextFireAt[a])
+                    {
+                        return CombatFireResult.Cooldown;
+                    }
+                }
+            }
+            return FireAt(ref d, a, t);
+        }
+
+        /// <summary>
         /// 己方一次开火尝试（编队攻击命令与直控点击的唯一结算入口；Demo FracturedCityRegion / FoundryOutpostRegion.TryAttackEnemy + CannonCombat.TryFire 逐条翻译）：
         /// 目标检查 → 重炮两段式（过热迟滞、冷却、1 秒瞄准线、积热、熔穿过载穿甲）或普通武器（正面装甲减伤、侧后加成、标记、标记跳转）。
         /// </summary>
@@ -814,43 +869,36 @@ namespace BinGames.Sim.Combat
                 return CombatFireResult.NoCombatOutput;
             }
 
+            CombatFireResult gate = PreFireGate(ref d, a, t, wp);
+            if (gate != CombatFireResult.Ok)
+            {
+                return gate;
+            }
+
             CombatCounters c = d.Counters[0];
             c.ShotsFired++;
             d.Counters[0] = c;
             RawFired(ref d, a, t);
+            AddShotHeat(ref d, a, wp);
+            if (IsCharged(wp))
+            {
+                // FG2-FW-02：蓄力读法（出手间隔倍率 > 1）记下这一发之后多久才蓄满；直控点击按它拦（FireDirect），编队攻击的冷却本身已乘同一倍率。
+                d.NextFireAt[a] = d.Scalars[0].Time + EffectiveCooldown(wp);
+            }
 
             if (wp.Mode == CombatWeaponMode.Projectile)
             {
-                // 弹体武器：护甲 / 侧后在命中那一刻按飞行方向结算（弹道唯一真相在内核）。
+                // 弹体武器：护甲 / 侧后在命中那一刻按飞行方向结算（弹道唯一真相在内核）；读法在命中时结算。
                 SpawnProjectile(ref d, a, t, w, wp);
+                if (wp.Reading.EscortDrones > 0)
+                {
+                    LaunchDrones(ref d, a, wp, wp.Reading.EscortDrones);
+                }
                 return CombatFireResult.Ok;
             }
 
-            float damage = math.max(0f, wp.Damage);
-            if (IsFrontalArmored(ref d, t, d.Pos[a]))
-            {
-                damage *= math.max(0f, 1f - d.Armor[t].x);
-                Cue(ref d, CombatEventKind.ArmorHit, t, d.Id[a], 0f, d.Pos[t], 0);
-            }
-            damage *= BackMultiplier(ref d, t, d.Pos[a]);
-
-            Cue(ref d, CombatEventKind.Fired, a, d.Id[t], 0f, d.Pos[t], 0);
-            double now = d.Scalars[0].Time;
-            bool wasMarked = d.MarkedUntil[t] > now;
-            double2 primaryPos = d.Pos[t];
-            if (!DamageUnit(ref d, t, damage, a))
-            {
-                return CombatFireResult.Invulnerable; // Demo：首领阶段不可伤时结算失败，不打标记、不跳转。
-            }
-            if (wp.MarkSeconds > 0f && d.IsAlive(t))
-            {
-                d.MarkedUntil[t] = now + wp.MarkSeconds;
-            }
-            if (wp.Reaction == CombatReaction.MarkJump && wasMarked && !d.Has(a, CombatUnitFlags.ReactionSpent))
-            {
-                MarkJump(ref d, a, t, primaryPos, damage, wp);
-            }
-            return CombatFireResult.Ok;
+            // FG2-FW-02：载体投送 + 读法（射弹 / 格斗 / 无人机 / 力场 / 布区）；没有读法的射弹载体与 Demo 逐字同一结算（正面装甲、侧后、标记、标记跳转）。
+            return DeliverInstant(ref d, a, t, wp, true);
         }
 
         private static CombatFireResult FireCannon(ref CombatData d, int a, int t, in CombatWeapon wp)
@@ -884,7 +932,7 @@ namespace BinGames.Sim.Combat
                 return CombatFireResult.TargetDead;
             }
             d.AimReadyAt[a] = 0;
-            d.NextFireAt[a] = now + wp.Cooldown;
+            d.NextFireAt[a] = now + EffectiveCooldown(wp);
             // FG1-SIG-03：门控反应（信号带进来的核心固件）发动过一次后就被压住，直到热更层按冷却重新下发武器参数。
             bool overload = wp.Reaction == CombatReaction.MeltOverload && !d.Has(a, CombatUnitFlags.ReactionSpent);
             float heat = d.Heat[a] + wp.HeatPerShot + (overload ? wp.OverloadExtraHeat : 0f);
@@ -904,17 +952,21 @@ namespace BinGames.Sim.Combat
                 d.Set(a, CombatUnitFlags.Overheated, true);
                 Cue(ref d, CombatEventKind.Overheat, a, 0, heat, d.Pos[a], 0);
             }
-            // 基础伤害不受过载影响；过载只改积热与穿甲（Demo CannonCombat 类注释）。
-            float damage = wp.Damage;
-            if (IsFrontalArmored(ref d, t, d.Pos[a]))
+            // 基础伤害不受过载影响；过载只改积热与穿甲（Demo CannonCombat 类注释）。FG2-FW-02：固件读法（穿甲、伤害倍率、增幅……）同一处结算。
+            float pierce = (!overload || d.Has(t, CombatUnitFlags.HeatResistant)) ? 0f : wp.PierceBonus;
+            bool wasMarked = d.MarkedUntil[t] > now;
+            double2 hitPos = d.Pos[t];
+            float damage = StrikeDamage(ref d, a, t, wp.Damage, wp.Reading, d.Pos[a], true, pierce);
+            if (!DamageUnit(ref d, t, damage, a))
             {
-                float frac = d.Armor[t].x;
-                float reduction = (!overload || d.Has(t, CombatUnitFlags.HeatResistant)) ? frac : math.max(0f, frac - wp.PierceBonus);
-                damage *= math.max(0f, 1f - reduction);
-                Cue(ref d, CombatEventKind.ArmorHit, t, d.Id[a], 0f, d.Pos[t], 0);
+                return CombatFireResult.Invulnerable;
             }
-            damage *= BackMultiplier(ref d, t, d.Pos[a]);
-            return DamageUnit(ref d, t, damage, a) ? CombatFireResult.Ok : CombatFireResult.Invulnerable;
+            CannonReadingHit(ref d, a, t, hitPos, damage, wp, wasMarked);
+            if (wp.Reading.EscortDrones > 0)
+            {
+                LaunchDrones(ref d, a, wp, wp.Reading.EscortDrones);
+            }
+            return CombatFireResult.Ok;
         }
 
         /// <summary>命中方向是否落在目标的正面装甲锥内（Demo FoundryOutpostRegion.IsFrontalHit；贴脸算正面）。</summary>
@@ -955,54 +1007,10 @@ namespace BinGames.Sim.Combat
         /// <summary>标记跳转（Demo ApplyMarkJump）：主目标附近已标记、视线可达的存活敌人，按距离升序至多跳 JumpMax 个，每跳伤害 × 衰减。</summary>
         private static void MarkJump(ref CombatData d, int a, int primary, double2 primaryPos, float primaryDamage, in CombatWeapon wp)
         {
-            double now = d.Scalars[0].Time;
-            int max = math.min(wp.JumpMax, CombatConst.MaxJumpTargets);
-            var picked = new FixedList64Bytes<int>();
-            var pickedDist = new FixedList64Bytes<float>();
-            int n = d.Count;
-            byte hostile = d.Faction[primary];
-            for (int k = 0; k < n; k++)
+            int jumped = MarkJumpCore(ref d, a, primary, primaryPos, primaryDamage, wp.JumpRange, wp.JumpFalloff, wp.JumpMax);
+            if (jumped > 0)
             {
-                if (k == primary || !d.IsAlive(k) || d.Faction[k] != hostile || d.MarkedUntil[k] <= now)
-                {
-                    continue;
-                }
-                float dist = (float)math.distance(primaryPos, d.Pos[k]);
-                if (dist > wp.JumpRange || !LineOfSight(ref d, primaryPos, d.Pos[k]))
-                {
-                    continue;
-                }
-                // 按 (距离, 槽位) 升序插入，只留前 max 个。
-                int at = pickedDist.Length;
-                for (int q = 0; q < pickedDist.Length; q++)
-                {
-                    if (dist < pickedDist[q])
-                    {
-                        at = q;
-                        break;
-                    }
-                }
-                if (at >= max)
-                {
-                    continue;
-                }
-                pickedDist.Insert(at, dist);
-                picked.Insert(at, k);
-                if (picked.Length > max)
-                {
-                    picked.RemoveAt(picked.Length - 1);
-                    pickedDist.RemoveAt(pickedDist.Length - 1);
-                }
-            }
-            float jump = primaryDamage;
-            for (int q = 0; q < picked.Length; q++)
-            {
-                jump *= wp.JumpFalloff;
-                DamageUnit(ref d, picked[q], jump, a);
-            }
-            if (picked.Length > 0)
-            {
-                Cue(ref d, CombatEventKind.MarkJump, a, d.Id[primary], picked.Length, primaryPos, 0);
+                Cue(ref d, CombatEventKind.MarkJump, a, d.Id[primary], jumped, primaryPos, 0);
                 ReactionFired(ref d, a, primary, CombatReaction.MarkJump);
             }
         }
@@ -1043,7 +1051,8 @@ namespace BinGames.Sim.Combat
             {
                 return false;
             }
-            damage = math.max(0f, damage);
+            // FG2-FW-02：易伤状态（冻结等）统一在这里乘上——任何来源的伤害都吃。
+            damage = math.max(0f, damage) * VulnMultiplier(ref d, t);
             CombatCounters c = d.Counters[0];
             if (d.Faction[t] == (byte)CombatFaction.Player)
             {
@@ -1307,8 +1316,13 @@ namespace BinGames.Sim.Combat
                         dmg *= math.max(0f, 1f - d.Armor[hit].x);
                     }
                     dmg *= BackMultiplier(ref d, hit, fromSide);
-                    DamageUnit(ref d, hit, dmg, owner);
+                    bool landed = DamageUnit(ref d, hit, dmg, owner);
                     Cue(ref d, CombatEventKind.ProjectileHit, hit, pr.Owner, dmg, hitPos, 0);
+                    if (landed && pr.Weapon >= 0 && pr.Weapon < d.Weapons.Length)
+                    {
+                        // FG2-FW-02：弹体武器的读法在命中那一刻结算（开火者阵亡后照常，回收修复 / 跃击跳过）。
+                        ProjectileReadingHit(ref d, owner, hit, hitPos, dmg, d.Weapons[pr.Weapon], fromSide);
+                    }
                     CombatCounters c = d.Counters[0];
                     c.ProjectilesHit++;
                     d.Counters[0] = c;

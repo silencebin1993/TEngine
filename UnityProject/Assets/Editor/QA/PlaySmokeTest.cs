@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using GameConfig.fg;
@@ -1283,6 +1284,51 @@ namespace GameLogic.EditorTools
                 Check(factionLine.Length > 0 && !factionKeys.Any(k => factionLine.Contains(k)) && !Localization.GameText.ContainsMarker(factionLine)
                       && (factionLine.Contains("无") || factionKeys.Any(k => factionLine.Contains(Localization.GameText.Get("faction." + k)))),
                     $"电路面板派系行显示阵营名而不是内部键（“{factionLine}”）");
+                // FG2-FW-02（FGR-FW-010 / 011）：主组件下拉带载体、5 种载体的作战组件都能选；固件区写出已装固件在当前主组件载体上的读法。
+                DropdownField primary = circuitRoot?.Q<DropdownField>("PrimaryDropdown");
+                List<string> choices = primary?.choices ?? new List<string>();
+                string[] carrierComps = { Campaign.Content.ComponentCatalog.CompRamId, Campaign.Content.ComponentCatalog.CompDroneBayId,
+                    Campaign.Content.ComponentCatalog.CompCoronaId, Campaign.Content.ComponentCatalog.CompSprayerId };
+                bool allCarriers = carrierComps.All(id => choices.Any(c => c.Contains(Campaign.Content.ComponentCatalog.All[id].DisplayName)
+                                                                          && c.Contains(Campaign.Content.CarrierReadings.SubtypeName(id))));
+                UI.CircuitBoard.CircuitBoardPanelUIToolkit panel = CircuitPanel();
+                string readingLabel = circuitRoot?.Q<Label>("FirmwareReadingLabel")?.text ?? "(无标签)";
+                string expected = panel?.Board != null ? UI.CircuitBoard.CircuitBoardPanelUIToolkit.FirmwareReadingText(panel.Board) : null;
+                bool hasFw = panel?.Board != null && panel.Board.FirmwareSlots.Any(f => !string.IsNullOrEmpty(f));
+                Check(allCarriers && expected != null && readingLabel == expected && (!hasFw || readingLabel.Length > 0) && !Localization.GameText.ContainsMarker(readingLabel)
+                      && !FgFirmwareMigrationSelfCheck.InternalContentId.IsMatch(readingLabel),
+                    $"电路面板：主组件下拉有格斗 / 无人机 / 力场 / 布区组件并标出载体；固件读法行“{readingLabel}”");
+                // 走正式下拉：主组件换成液压刺锤、第 1 位固件选寻的 → 读法行只写格斗上的读法；再点两次“撤销”回到原样。
+                DropdownField fw0 = circuitRoot?.Q<DropdownField>("Firmware0Dropdown");
+                string ramName = Campaign.Content.ComponentCatalog.All[Campaign.Content.ComponentCatalog.CompRamId].DisplayName;
+                string homingName = Campaign.Signal.FirmwareKinds.DisplayName(Campaign.Content.FirmwareCatalog.FwHomingId);
+                string primaryBefore = panel?.Board?.PrimaryId;
+                string fwBefore = panel?.Board?.FirmwareSlots[0];
+                string ramChoice = choices.FirstOrDefault(c => c.StartsWith(ramName, StringComparison.Ordinal));
+                if (primary != null && ramChoice != null)
+                {
+                    primary.value = ramChoice;
+                }
+                string homingChoice = fw0?.choices?.FirstOrDefault(c => c.StartsWith(homingName, StringComparison.Ordinal));
+                if (fw0 != null && homingChoice != null)
+                {
+                    fw0.value = homingChoice;
+                }
+                string meleeLine = circuitRoot?.Q<Label>("FirmwareReadingLabel")?.text ?? string.Empty;
+                string meleeReading = Campaign.Signal.FirmwareKinds.Reading(Campaign.Content.FirmwareCatalog.FwHomingId, Campaign.Signal.FirmwareCarrier.Melee);
+                string projReading = Campaign.Signal.FirmwareKinds.Reading(Campaign.Content.FirmwareCatalog.FwHomingId, Campaign.Signal.FirmwareCarrier.Projectile);
+                bool changed = panel?.Board?.PrimaryId == Campaign.Content.ComponentCatalog.CompRamId && panel.Board.FirmwareSlots[0] == Campaign.Content.FirmwareCatalog.FwHomingId;
+                Check(changed && meleeLine.Contains(meleeReading) && !meleeLine.Contains(projReading),
+                    $"正式下拉换成液压刺锤 + 寻的：读法行只写格斗上的读法（“{meleeLine}”）");
+                // FG2-FW-02 修复轮（B13）：预览摘要写的是内核实际每发伤害（液压刺锤 = 表里的伤害），不是旧器官编译的归一化总伤害。
+                string previewSummary = circuitRoot?.Q<Label>("PreviewSummaryLabel")?.text ?? string.Empty;
+                Campaign.Content.CarrierReadings.TryGetComponent(Campaign.Content.ComponentCatalog.CompRamId, out GameConfig.fg.CombatComponent ramRow);
+                string ramHit = (ramRow?.Damage ?? -1f).ToString("F1", System.Globalization.CultureInfo.InvariantCulture);
+                Check(changed && ramRow != null && previewSummary.Contains(ramHit) && !Localization.GameText.ContainsMarker(previewSummary),
+                    $"电路面板预览摘要写内核实际每发伤害（液压刺锤 {ramHit}）：“{previewSummary.Replace('\n', ' ')}”");
+                bool undone = ClickUitk("[HomeValleyCircuitBoardHost]", "UndoButton") & ClickUitk("[HomeValleyCircuitBoardHost]", "UndoButton");
+                Check(undone && panel?.Board?.PrimaryId == primaryBefore && panel?.Board?.FirmwareSlots[0] == fwBefore,
+                    $"点两次“撤销”：第 1 位固件与主组件都回到打开面板时的样子（主组件 {panel?.Board?.PrimaryId ?? "无"}）");
             }
             TextField field = CircuitNameField();
             field?.Focus();
@@ -2636,6 +2682,23 @@ namespace GameLogic.EditorTools
                 .Count(v => v.Marker != null && v.Marker.Site == site);
             Check(site != null && site.MachineCount == ids.Length && views == ids.Length && GameObject.Find("[FracturedCityRoot]") != null,
                 $"破碎都市战斗内核：{site?.MachineCount} 台机器、{site?.EnemyIds.Count()} 个敌人在内核里；被观察时每台机器都有表现对象（{views} 个）");
+            // FG2-FW-02 测试捷径（等同回厂改造：正式保存入口存一版新蓝图 + 装配登记）：出征的搬运机换成“切割束 + 拖尾 + 寻的”，
+            // 看固件读法在真实 Play 帧的地点内核里生效、画面画出区域。
+            CampaignState st = CampaignSession.Current;
+            int refit = ids.FirstOrDefault(id => MachineRegistry.TryGetRecord(id, out MachineRecord r) && r.ChassisId == Campaign.Regions.HomeValleyLayout.Erc002ChassisId);
+            if (refit > 0 && MachineRegistry.TryGetRecord(refit, out MachineRecord refitRec))
+            {
+                Campaign.Blueprint.BlueprintCircuitBoard trailBoard = Campaign.Blueprint.BlueprintCircuitBoard.CreateDefault(refitRec.ChassisId,
+                    Campaign.Content.ComponentCatalog.CompBeamId, null, null, new[] { Campaign.Content.FirmwareCatalog.FwTrailId, Campaign.Content.FirmwareCatalog.FwHomingId });
+                int scrap0 = st.Scrap;
+                st.Scrap = Math.Max(st.Scrap, 500);
+                Campaign.Blueprint.BlueprintSaveResult saved = Campaign.Blueprint.BlueprintEditorService.TrySave(st, trailBoard, "bp_smoke_fw02_trail", "smoke trail", saveAsNewRecord: true);
+                st.Scrap = Math.Max(st.Scrap, scrap0);
+                Campaign.Blueprint.CircuitOpResult reg = saved.Success
+                    ? Campaign.Blueprint.MachineLoadoutRegistry.Register(st, refit, saved.BlueprintId, saved.Version)
+                    : Campaign.Blueprint.CircuitOpResult.Fail("save_failed", saved.FailureReason);
+                Check(saved.Success && reg.Success, $"测试捷径：搬运机回厂改造为“切割束 + 拖尾 + 寻的”（保存 {saved.Success}，登记 {reg.Success}{(reg.Success ? "" : "：" + reg.Message)}）");
+            }
             SessionState.SetFloat(K + "JammerHp", jammer != null ? jammer.Health : -1f);
             SessionState.SetString(K + "RuinsTicks", GameClock.Ticks.ToString());
             city?.SquadCommands.DebugSelectMany(ids);
@@ -2672,6 +2735,17 @@ namespace GameLogic.EditorTools
                 }
             }
             Check(maxGap < 0.5f, $"机器表现对象跟随内核位置插值（最大偏差 {maxGap:F3} 米 < 一步位移）");
+            // FG2-FW-02（DEBT-FG2FW01-01）：固件读法在真实 Play 的地点内核里生效——带驻留 / 拖尾读法的机器开过火就留下区域，画面上画出来。
+            bool zoneReading = site != null && MachineRegistry.AllRecords.Any(m => m != null && m.IsAlive && m.RegionId == Campaign.Regions.FracturedCityLayout.RegionId
+                && site.TryGetMachineWeapon(m.LogicId, out Campaign.Combat.MachineWeaponInfo mw) && mw.WeaponIndex >= 0
+                && site.Kernel.TryGetWeapon(mw.WeaponIndex, out BinGames.Sim.Combat.CombatWeapon kw) && kw.Reading.ZoneSeconds > 0f);
+            long zonesSpawned = site?.Kernel.Counters.ZonesSpawned ?? 0;
+            int fx = site?.Renderer?.LastEffectInstances ?? -1;
+            Write($"  - 读法：生成区域 {zonesSpawned} 块，当前 {site?.Kernel.ZoneCount} 块，画面区域 / 无人机实例 {fx}");
+            int zonesNow = site?.Kernel.ZoneCount ?? 0;
+            bool gpu = site?.Renderer != null && site.Renderer.GpuAvailable;
+            Check(zoneReading && zonesSpawned > 0 && (!gpu || zonesNow == 0 || fx >= zonesNow),
+                $"真实 Play 里带拖尾读法的机器打出区域（共 {zonesSpawned} 块，当前 {zonesNow} 块，画面实例 {fx}{(gpu ? "" : "，无 GPU 不画")}）");
             PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.OpenSignalCore));
             Next(155, "FG1-SIG-01：远征途中按信号核键");
         }

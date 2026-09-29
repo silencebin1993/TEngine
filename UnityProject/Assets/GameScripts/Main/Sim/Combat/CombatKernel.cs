@@ -83,6 +83,10 @@ namespace BinGames.Sim.Combat
         public int Revision => _d.Scalars[0].Revision;
         public int SlotCount => _d.Count;
         public int ProjectileCount => _d.Projectiles.Length;
+        /// <summary>FG2-FW-02：读法生成的区域 / 待结算回波 / 无人机的当前数量。</summary>
+        public int ZoneCount => _d.Zones.Length;
+        public int EchoCount => _d.Echoes.Length;
+        public int DroneCount => _d.Drones.Length;
         public int GameplayPending => _d.Gameplay.Length;
         public int WeaponCount => _d.Weapons.Length;
         public int ProfileCount => _d.Profiles.Length;
@@ -674,14 +678,14 @@ namespace BinGames.Sim.Combat
 
         // ─────────────────────────────── 即时开火与查询 ───────────────────────────────
 
-        /// <summary>一次开火尝试（编队攻击以外的正式入口：直控点击）。<paramref name="now"/> = 当前游戏秒。</summary>
+        /// <summary>一次开火尝试（编队攻击以外的正式入口：直控点击；蓄力读法要等蓄满，见 <see cref="CombatLogic.FireDirect"/>）。<paramref name="now"/> = 当前游戏秒。</summary>
         public CombatFireResult FireAt(int attackerId, int targetId, double now)
         {
             CombatScalars s = _d.Scalars[0];
             s.Time = now;
             s.Revision++;
             _d.Scalars[0] = s;
-            return CombatLogic.FireAt(ref _d, _d.SlotOf(attackerId), _d.SlotOf(targetId));
+            return CombatLogic.FireDirect(ref _d, _d.SlotOf(attackerId), _d.SlotOf(targetId));
         }
 
         /// <summary>瞄准锥内按槽位顺序第一个存活的指定阵营单位（Demo TryFindEnemyInAim：返回第一个满足条件的，不是最近的）。</summary>
@@ -937,6 +941,96 @@ namespace BinGames.Sim.Combat
             _d.Scalars[0] = s;
         }
 
+        // ─────────────────────────────── FG2-FW-02 读法查询 ───────────────────────────────
+
+        public bool TryGetZone(int index, out CombatZone zone)
+        {
+            if (index < 0 || index >= _d.Zones.Length)
+            {
+                zone = default;
+                return false;
+            }
+            zone = _d.Zones[index];
+            return true;
+        }
+
+        public bool TryGetDrone(int index, out CombatDrone drone)
+        {
+            if (index < 0 || index >= _d.Drones.Length)
+            {
+                drone = default;
+                return false;
+            }
+            drone = _d.Drones[index];
+            return true;
+        }
+
+        public bool TryGetEcho(int index, out CombatEcho echo)
+        {
+            if (index < 0 || index >= _d.Echoes.Length)
+            {
+                echo = default;
+                return false;
+            }
+            echo = _d.Echoes[index];
+            return true;
+        }
+
+        /// <summary>单位此刻身上的状态标签（已到期的返回 0）与各效果。</summary>
+        public bool TryGetStatus(int id, out uint mask, out double until, out float dps, out float slow, out float vuln)
+        {
+            int slot = _d.SlotOf(id);
+            mask = 0u;
+            until = 0;
+            dps = slow = vuln = 0f;
+            if (slot < 0)
+            {
+                return false;
+            }
+            if (_d.StatusActive(slot, _d.Scalars[0].Time))
+            {
+                mask = _d.Status[slot];
+                until = _d.StatusUntil[slot];
+                dps = _d.StatusDps[slot];
+                slow = _d.StatusSlow[slot];
+                vuln = _d.StatusVuln[slot];
+            }
+            return true;
+        }
+
+        /// <summary>测试 / 读档修复用：直接给单位挂状态（与读法挂的是同一条规则）。</summary>
+        public bool ApplyStatus(int id, uint mask, float seconds, float dps, float slow, float vuln, int sourceId)
+        {
+            int slot = _d.SlotOf(id);
+            if (slot < 0)
+            {
+                return false;
+            }
+            CombatLogic.ApplyStatus(ref _d, slot, mask, seconds, dps, slow, vuln, _d.SlotOf(sourceId));
+            return true;
+        }
+
+        /// <summary>这台单位当前挂着几架无人机。</summary>
+        public int DronesOf(int ownerId)
+        {
+            int n = 0;
+            for (int q = 0; q < _d.Drones.Length; q++)
+            {
+                if (_d.Drones[q].Owner == ownerId)
+                {
+                    n++;
+                }
+            }
+            return n;
+        }
+
+        /// <summary>FG2-FW-02：区域与无人机的实例化渲染缓冲（Burst）：区域 = 半径圆片（外圈是剩余时间），无人机 = 小圆片。</summary>
+        public void PrepareEffects(NativeList<CombatInstance> effects, double2 origin)
+        {
+            var job = new CombatEffectsRenderJob { D = _d, Effects = effects, Origin = origin };
+            job.Run();
+        }
+
         // ─────────────────────────────── 渲染缓冲 ───────────────────────────────
 
         /// <summary>重填实例化渲染缓冲（Burst）：带 <see cref="CombatUnitFlags.Instanced"/> 的存活单位与全部弹体，坐标相对 <paramref name="origin"/>。</summary>
@@ -973,6 +1067,11 @@ namespace BinGames.Sim.Combat
                 Mix(ref h, _d.Secondary[i]);
                 Mix(ref h, _d.MarkedUntil[i]);
                 Mix(ref h, _d.BackHit[i]);
+                Mix(ref h, _d.Status[i]);
+                Mix(ref h, _d.StatusUntil[i]);
+                Mix(ref h, _d.StatusDps[i]);
+                Mix(ref h, _d.StatusSlow[i]);
+                Mix(ref h, _d.StatusVuln[i]);
                 CombatCommand c = _d.Cmd[i];
                 Mix(ref h, (int)c.Kind);
                 Mix(ref h, c.Target);
@@ -1011,6 +1110,32 @@ namespace BinGames.Sim.Combat
             {
                 Mix(ref h, _d.PoiReached[q]);
             }
+            for (int z = 0; z < _d.Zones.Length; z++)
+            {
+                CombatZone zn = _d.Zones[z];
+                Mix(ref h, zn.Pos.x);
+                Mix(ref h, zn.Pos.y);
+                Mix(ref h, zn.Radius);
+                Mix(ref h, zn.Until);
+                Mix(ref h, zn.NextTick);
+                Mix(ref h, zn.Owner);
+            }
+            for (int e = 0; e < _d.Echoes.Length; e++)
+            {
+                CombatEcho ec = _d.Echoes[e];
+                Mix(ref h, ec.At);
+                Mix(ref h, ec.Target);
+                Mix(ref h, ec.Damage);
+            }
+            for (int q = 0; q < _d.Drones.Length; q++)
+            {
+                CombatDrone dr = _d.Drones[q];
+                Mix(ref h, dr.Pos.x);
+                Mix(ref h, dr.Pos.y);
+                Mix(ref h, dr.Until);
+                Mix(ref h, dr.NextHit);
+                Mix(ref h, dr.Owner);
+            }
             Mix(ref h, _d.Gameplay.Length);
             Mix(ref h, s.NextNavSerial);
             Mix(ref h, _d.NavOut.Length);
@@ -1043,13 +1168,18 @@ namespace BinGames.Sim.Combat
         // ─────────────────────────────── 快照 ───────────────────────────────
 
         /// <summary>整份内核状态的二进制快照（格式版本 <see cref="CombatConst.FormatVersion"/>，末尾 FNV-1a 32 校验和）。</summary>
-        public byte[] Serialize()
+        public byte[] Serialize() => SerializeFormat(CombatConst.FormatVersion);
+
+        /// <summary>测试用：按较老的格式写快照（2 = FG2-FW-02 之前：没有读法、状态、区域 / 回波 / 无人机），用来验证旧档能读。</summary>
+        public byte[] SerializeFormatForTests(int format) => SerializeFormat(Math.Max(2, Math.Min(format, CombatConst.FormatVersion)));
+
+        private byte[] SerializeFormat(int format)
         {
             using var ms = new MemoryStream(256 + _d.Count * 220 + _d.Projectiles.Length * 64);
             using var w = new BinaryWriter(ms);
             CombatScalars s = _d.Scalars[0];
             w.Write(CombatConst.Magic);
-            w.Write(CombatConst.FormatVersion);
+            w.Write(format);
             w.Write(s.Steps);
             w.Write(s.Time);
             w.Write(s.NextId);
@@ -1061,12 +1191,12 @@ namespace BinGames.Sim.Combat
             w.Write(s.EngageRange);
             w.Write(s.EngageInterval);
             w.Write(s.EventSeq);
-            WriteCounters(w, _d.Counters[0]);
+            WriteCounters(w, _d.Counters[0], format);
 
             w.Write(_d.Weapons.Length);
             for (int i = 0; i < _d.Weapons.Length; i++)
             {
-                WriteWeapon(w, _d.Weapons[i]);
+                WriteWeapon(w, _d.Weapons[i], format);
             }
             w.Write(_d.Profiles.Length);
             for (int i = 0; i < _d.Profiles.Length; i++)
@@ -1144,6 +1274,16 @@ namespace BinGames.Sim.Combat
                     w.Write(rp.x);
                     w.Write(rp.y);
                 }
+                // FG2-FW-02（格式 3）：状态标签。
+                if (format >= 3)
+                {
+                    w.Write(_d.Status[i]);
+                    w.Write(_d.StatusUntil[i]);
+                    w.Write(_d.StatusDps[i]);
+                    w.Write(_d.StatusSlow[i]);
+                    w.Write(_d.StatusVuln[i]);
+                    w.Write(_d.StatusSource[i]);
+                }
             }
 
             w.Write(_d.Projectiles.Length);
@@ -1192,6 +1332,11 @@ namespace BinGames.Sim.Combat
                 w.Write(nr.Class);
                 w.Write(nr.Flags);
             }
+            // FG2-FW-02（格式 3）：区域、回波、无人机。
+            if (format >= 3)
+            {
+                WriteReadings(w);
+            }
             w.Flush();
             byte[] body = ms.ToArray();
             uint sum = Fnv32(body, body.Length);
@@ -1202,6 +1347,60 @@ namespace BinGames.Sim.Combat
             result[body.Length + 2] = (byte)(sum >> 16);
             result[body.Length + 3] = (byte)(sum >> 24);
             return result;
+        }
+
+        private void WriteReadings(BinaryWriter w)
+        {
+            w.Write(_d.Zones.Length);
+            for (int z = 0; z < _d.Zones.Length; z++)
+            {
+                CombatZone zn = _d.Zones[z];
+                w.Write(zn.Pos.x);
+                w.Write(zn.Pos.y);
+                w.Write(zn.Radius);
+                w.Write(zn.Growth);
+                w.Write(zn.Born);
+                w.Write(zn.Until);
+                w.Write(zn.NextTick);
+                w.Write(zn.TickInterval);
+                w.Write(zn.Dps);
+                w.Write(zn.StatusMask);
+                w.Write(zn.StatusSeconds);
+                w.Write(zn.StatusDps);
+                w.Write(zn.StatusSlow);
+                w.Write(zn.StatusVuln);
+                w.Write(zn.Owner);
+                w.Write((byte)zn.Faction);
+            }
+            w.Write(_d.Echoes.Length);
+            for (int e = 0; e < _d.Echoes.Length; e++)
+            {
+                CombatEcho ec = _d.Echoes[e];
+                w.Write(ec.At);
+                w.Write(ec.Target);
+                w.Write(ec.Owner);
+                w.Write(ec.Damage);
+                w.Write(ec.StatusMask);
+                w.Write(ec.StatusSeconds);
+                w.Write(ec.StatusDps);
+                w.Write(ec.StatusSlow);
+                w.Write(ec.StatusVuln);
+            }
+            w.Write(_d.Drones.Length);
+            for (int q = 0; q < _d.Drones.Length; q++)
+            {
+                CombatDrone dr = _d.Drones[q];
+                w.Write(dr.Pos.x);
+                w.Write(dr.Pos.y);
+                w.Write(dr.Until);
+                w.Write(dr.NextHit);
+                w.Write(dr.Owner);
+                w.Write(dr.Weapon);
+                w.Write(dr.Damage);
+                w.Write(dr.Leash);
+                w.Write(dr.Cooldown);
+                w.Write((byte)dr.Faction);
+            }
         }
 
         /// <summary>读格式版本（不校验其余部分）：-1 = 不是内核快照。</summary>
@@ -1286,7 +1485,7 @@ namespace BinGames.Sim.Combat
             {
                 return CombatLoadResult.InvalidValue;
             }
-            staging.Counters[0] = ReadCounters(r);
+            staging.Counters[0] = ReadCounters(r, format);
 
             int wn = r.ReadInt32();
             if (wn < 0 || wn > 1 << 16)
@@ -1295,7 +1494,7 @@ namespace BinGames.Sim.Combat
             }
             for (int i = 0; i < wn; i++)
             {
-                staging.Weapons.Add(ReadWeapon(r));
+                staging.Weapons.Add(ReadWeapon(r, format));
             }
             int pn = r.ReadInt32();
             if (pn < 0 || pn > 1 << 16)
@@ -1387,6 +1586,24 @@ namespace BinGames.Sim.Combat
                         staging.RoutePts.Add(new int2(r.ReadInt32(), r.ReadInt32()));
                     }
                 }
+                uint status = 0u;
+                double statusUntil = 0;
+                float statusDps = 0f, statusSlow = 0f, statusVuln = 0f;
+                int statusSource = 0;
+                if (format >= 3)
+                {
+                    status = r.ReadUInt32();
+                    statusUntil = r.ReadDouble();
+                    statusDps = r.ReadSingle();
+                    statusSlow = r.ReadSingle();
+                    statusVuln = r.ReadSingle();
+                    statusSource = r.ReadInt32();
+                    if (double.IsNaN(statusUntil) || float.IsNaN(statusDps) || statusDps < 0f || float.IsNaN(statusSlow) || statusSlow < 0f || statusSlow > 1f
+                        || float.IsNaN(statusVuln) || statusVuln < 0f)
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                }
                 if (id <= 0 || id >= s.NextId || !IsFinite(sp.Position) || !IsFinite(sp.Home) || float.IsNaN(sp.Health)
                     || sp.Weapon >= wn || sp.BehaviorProfile >= pn || staging.SlotOf(id) >= 0)
                 {
@@ -1404,6 +1621,12 @@ namespace BinGames.Sim.Combat
                 staging.RouteLen[slot] = routeLen;
                 staging.RouteIdx[slot] = routeIdx;
                 staging.RouteEnd[slot] = routeEnd;
+                staging.Status[slot] = status;
+                staging.StatusUntil[slot] = statusUntil;
+                staging.StatusDps[slot] = statusDps;
+                staging.StatusSlow[slot] = statusSlow;
+                staging.StatusVuln[slot] = statusVuln;
+                staging.StatusSource[slot] = statusSource;
             }
 
             int prn = r.ReadInt32();
@@ -1473,12 +1696,110 @@ namespace BinGames.Sim.Combat
                     });
                 }
             }
+            if (format >= 3)
+            {
+                CombatLoadResult rr = ParseReadings(r, ref staging, wn);
+                if (rr != CombatLoadResult.Ok)
+                {
+                    return rr;
+                }
+            }
             if (ms.Position != bodyLen)
             {
                 return CombatLoadResult.Truncated;
             }
             s.Revision = _d.Scalars[0].Revision + 1;
             staging.Scalars[0] = s;
+            return CombatLoadResult.Ok;
+        }
+
+        /// <summary>FG2-FW-02（格式 3）：区域、回波、无人机三张表。任何数值不合理整份拒绝（内核保持原样）。</summary>
+        private static CombatLoadResult ParseReadings(BinaryReader r, ref CombatData staging, int weaponCount)
+        {
+            int zn = r.ReadInt32();
+            if (zn < 0 || zn > 1 << 20)
+            {
+                return CombatLoadResult.InvalidValue;
+            }
+            for (int z = 0; z < zn; z++)
+            {
+                var zone = new CombatZone
+                {
+                    Pos = new double2(r.ReadDouble(), r.ReadDouble()),
+                    Radius = r.ReadSingle(),
+                    Growth = r.ReadSingle(),
+                    Born = r.ReadDouble(),
+                    Until = r.ReadDouble(),
+                    NextTick = r.ReadDouble(),
+                    TickInterval = r.ReadSingle(),
+                    Dps = r.ReadSingle(),
+                    StatusMask = r.ReadUInt32(),
+                    StatusSeconds = r.ReadSingle(),
+                    StatusDps = r.ReadSingle(),
+                    StatusSlow = r.ReadSingle(),
+                    StatusVuln = r.ReadSingle(),
+                    Owner = r.ReadInt32(),
+                    Faction = (CombatFaction)r.ReadByte(),
+                };
+                if (!IsFinite(zone.Pos) || !(zone.Radius >= 0f) || float.IsInfinity(zone.Radius) || !(zone.TickInterval > 0f) || float.IsNaN(zone.Dps)
+                    || double.IsNaN(zone.Until) || double.IsNaN(zone.NextTick) || double.IsNaN(zone.Born) || zone.Born > zone.Until || (byte)zone.Faction > (byte)CombatFaction.Neutral)
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
+                staging.Zones.Add(zone);
+            }
+            int en = r.ReadInt32();
+            if (en < 0 || en > 1 << 20)
+            {
+                return CombatLoadResult.InvalidValue;
+            }
+            for (int e = 0; e < en; e++)
+            {
+                var echo = new CombatEcho
+                {
+                    At = r.ReadDouble(),
+                    Target = r.ReadInt32(),
+                    Owner = r.ReadInt32(),
+                    Damage = r.ReadSingle(),
+                    StatusMask = r.ReadUInt32(),
+                    StatusSeconds = r.ReadSingle(),
+                    StatusDps = r.ReadSingle(),
+                    StatusSlow = r.ReadSingle(),
+                    StatusVuln = r.ReadSingle(),
+                };
+                if (double.IsNaN(echo.At) || float.IsNaN(echo.Damage) || echo.Damage < 0f)
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
+                staging.Echoes.Add(echo);
+            }
+            int dn = r.ReadInt32();
+            if (dn < 0 || dn > 1 << 20)
+            {
+                return CombatLoadResult.InvalidValue;
+            }
+            for (int q = 0; q < dn; q++)
+            {
+                var drone = new CombatDrone
+                {
+                    Pos = new double2(r.ReadDouble(), r.ReadDouble()),
+                    Until = r.ReadDouble(),
+                    NextHit = r.ReadDouble(),
+                    Owner = r.ReadInt32(),
+                    Weapon = r.ReadInt32(),
+                    Damage = r.ReadSingle(),
+                    Leash = r.ReadSingle(),
+                    Cooldown = r.ReadSingle(),
+                    Faction = (CombatFaction)r.ReadByte(),
+                };
+                drone.Prev = drone.Pos;
+                if (!IsFinite(drone.Pos) || double.IsNaN(drone.Until) || drone.Weapon >= weaponCount || float.IsNaN(drone.Damage) || drone.Damage < 0f
+                    || !(drone.Cooldown > 0f) || (byte)drone.Faction > (byte)CombatFaction.Neutral)
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
+                staging.Drones.Add(drone);
+            }
             return CombatLoadResult.Ok;
         }
 
@@ -1495,7 +1816,7 @@ namespace BinGames.Sim.Combat
             return h;
         }
 
-        private static void WriteCounters(BinaryWriter w, in CombatCounters c)
+        private static void WriteCounters(BinaryWriter w, in CombatCounters c, int format)
         {
             w.Write(c.Steps);
             w.Write(c.ShotsFired);
@@ -1510,9 +1831,29 @@ namespace BinGames.Sim.Combat
             w.Write(c.CuesDropped);
             w.Write(c.GameplayEventsDeferred);
             w.Write(c.Compactions);
+            if (format >= 3)
+            {
+                w.Write(c.ZonesSpawned);
+                w.Write(c.EchoesQueued);
+                w.Write(c.DronesLaunched);
+                w.Write(c.ReadingRefused);
+            }
         }
 
-        private static CombatCounters ReadCounters(BinaryReader r) => new CombatCounters
+        private static CombatCounters ReadCounters(BinaryReader r, int format)
+        {
+            CombatCounters c = ReadCountersV1(r);
+            if (format >= 3)
+            {
+                c.ZonesSpawned = r.ReadInt64();
+                c.EchoesQueued = r.ReadInt64();
+                c.DronesLaunched = r.ReadInt64();
+                c.ReadingRefused = r.ReadInt64();
+            }
+            return c;
+        }
+
+        private static CombatCounters ReadCountersV1(BinaryReader r) => new CombatCounters
         {
             Steps = r.ReadInt64(),
             ShotsFired = r.ReadInt64(),
@@ -1529,7 +1870,7 @@ namespace BinGames.Sim.Combat
             Compactions = r.ReadInt64(),
         };
 
-        private static void WriteWeapon(BinaryWriter w, in CombatWeapon x)
+        private static void WriteWeapon(BinaryWriter w, in CombatWeapon x, int format = CombatConst.FormatVersion)
         {
             w.Write((byte)x.Mode);
             w.Write((byte)x.Reaction);
@@ -1553,9 +1894,162 @@ namespace BinGames.Sim.Combat
             w.Write(x.JumpRange);
             w.Write(x.JumpFalloff);
             w.Write(x.JumpMax);
+            if (format >= 3)
+            {
+                WriteReading(w, x.Reading);
+            }
         }
 
-        private static CombatWeapon ReadWeapon(BinaryReader r) => new CombatWeapon
+        /// <summary>FG2-FW-02：武器的读法参数（格式 3；逐字段，顺序即格式）。</summary>
+        private static void WriteReading(BinaryWriter w, in CombatReading x)
+        {
+            w.Write((byte)x.Carrier);
+            w.Write((byte)x.ZonePlacement);
+            w.Write(x.Approach);
+            w.Write(x.Cone);
+            w.Write(x.Area);
+            w.Write(x.FieldSeconds);
+            w.Write(x.FieldDpsRatio);
+            w.Write(x.Drones);
+            w.Write(x.DroneSeconds);
+            w.Write(x.DroneRatio);
+            w.Write(x.DroneCooldown);
+            w.Write(x.DroneLeash);
+            w.Write(x.DamageScale);
+            w.Write(x.CooldownScale);
+            w.Write(x.ExtraHits);
+            w.Write(x.ExtraRatio);
+            w.Write(x.ExtraRadius);
+            w.Write(x.PierceHits);
+            w.Write(x.PierceRange);
+            w.Write(x.PierceRatio);
+            w.Write(x.ChainHits);
+            w.Write(x.ChainRange);
+            w.Write(x.ChainFalloff);
+            w.Write(x.BlastRadius);
+            w.Write(x.BlastRatio);
+            w.Write(x.SweepRadius);
+            w.Write(x.SweepRatio);
+            w.Write(x.EchoCount);
+            w.Write(x.EchoDelay);
+            w.Write(x.EchoRatio);
+            w.Write(x.PullStrength);
+            w.Write(x.PullRadius);
+            w.Write(x.PullToAttacker);
+            w.Write(x.Knockback);
+            w.Write(x.Lunge);
+            w.Write(x.ArmorPierce);
+            w.Write(x.ExecuteBelow);
+            w.Write(x.Lifesteal);
+            w.Write(x.StatusAmp);
+            w.Write(x.StatusMask);
+            w.Write(x.StatusSeconds);
+            w.Write(x.StatusDps);
+            w.Write(x.StatusSlow);
+            w.Write(x.StatusVuln);
+            w.Write(x.ZoneRadius);
+            w.Write(x.ZoneSeconds);
+            w.Write(x.ZoneDps);
+            w.Write(x.ZoneGrowth);
+            w.Write(x.ZoneTickScale);
+            w.Write(x.WeaveRadius);
+            w.Write(x.WeaveSeconds);
+            w.Write(x.WeaveSlow);
+            w.Write(x.WeaveDpsRatio);
+            w.Write(x.EscortDrones);
+            w.Write(x.HeatBurstAt);
+            w.Write(x.HeatBurstRadius);
+            w.Write(x.HeatBurstRatio);
+            w.Write(x.JumpRange);
+            w.Write(x.JumpFalloff);
+            w.Write(x.JumpMax);
+        }
+
+        private static CombatReading ReadReading(BinaryReader r) => new CombatReading
+        {
+            Carrier = (CombatCarrier)r.ReadByte(),
+            ZonePlacement = (CombatZonePlacement)r.ReadByte(),
+            Approach = r.ReadSingle(),
+            Cone = r.ReadSingle(),
+            Area = r.ReadSingle(),
+            FieldSeconds = r.ReadSingle(),
+            FieldDpsRatio = r.ReadSingle(),
+            Drones = r.ReadInt32(),
+            DroneSeconds = r.ReadSingle(),
+            DroneRatio = r.ReadSingle(),
+            DroneCooldown = r.ReadSingle(),
+            DroneLeash = r.ReadSingle(),
+            DamageScale = r.ReadSingle(),
+            CooldownScale = r.ReadSingle(),
+            ExtraHits = r.ReadInt32(),
+            ExtraRatio = r.ReadSingle(),
+            ExtraRadius = r.ReadSingle(),
+            PierceHits = r.ReadInt32(),
+            PierceRange = r.ReadSingle(),
+            PierceRatio = r.ReadSingle(),
+            ChainHits = r.ReadInt32(),
+            ChainRange = r.ReadSingle(),
+            ChainFalloff = r.ReadSingle(),
+            BlastRadius = r.ReadSingle(),
+            BlastRatio = r.ReadSingle(),
+            SweepRadius = r.ReadSingle(),
+            SweepRatio = r.ReadSingle(),
+            EchoCount = r.ReadInt32(),
+            EchoDelay = r.ReadSingle(),
+            EchoRatio = r.ReadSingle(),
+            PullStrength = r.ReadSingle(),
+            PullRadius = r.ReadSingle(),
+            PullToAttacker = r.ReadByte(),
+            Knockback = r.ReadSingle(),
+            Lunge = r.ReadSingle(),
+            ArmorPierce = r.ReadSingle(),
+            ExecuteBelow = r.ReadSingle(),
+            Lifesteal = r.ReadSingle(),
+            StatusAmp = r.ReadSingle(),
+            StatusMask = r.ReadUInt32(),
+            StatusSeconds = r.ReadSingle(),
+            StatusDps = r.ReadSingle(),
+            StatusSlow = r.ReadSingle(),
+            StatusVuln = r.ReadSingle(),
+            ZoneRadius = r.ReadSingle(),
+            ZoneSeconds = r.ReadSingle(),
+            ZoneDps = r.ReadSingle(),
+            ZoneGrowth = r.ReadSingle(),
+            ZoneTickScale = r.ReadSingle(),
+            WeaveRadius = r.ReadSingle(),
+            WeaveSeconds = r.ReadSingle(),
+            WeaveSlow = r.ReadSingle(),
+            WeaveDpsRatio = r.ReadSingle(),
+            EscortDrones = r.ReadInt32(),
+            HeatBurstAt = r.ReadSingle(),
+            HeatBurstRadius = r.ReadSingle(),
+            HeatBurstRatio = r.ReadSingle(),
+            JumpRange = r.ReadSingle(),
+            JumpFalloff = r.ReadSingle(),
+            JumpMax = r.ReadInt32(),
+        };
+
+        /// <summary>FG2-FW-02：武器参数的完整字节键（武器表去重用：新增字段自动算进去，不会因为漏写某个字段把两套不同的读法并成一行）。</summary>
+        public static string WeaponKey(in CombatWeapon w)
+        {
+            using var ms = new MemoryStream(256);
+            using var bw = new BinaryWriter(ms);
+            WriteWeapon(bw, w);
+            bw.Flush();
+            return Convert.ToBase64String(ms.GetBuffer(), 0, (int)ms.Length);
+        }
+
+        private static CombatWeapon ReadWeapon(BinaryReader r, int format)
+        {
+            CombatWeapon w = ReadWeaponV1(r);
+            if (format >= 3)
+            {
+                w.Reading = ReadReading(r);
+            }
+            return w;
+        }
+
+        private static CombatWeapon ReadWeaponV1(BinaryReader r) => new CombatWeapon
         {
             Mode = (CombatWeaponMode)r.ReadByte(),
             Reaction = (CombatReaction)r.ReadByte(),
@@ -1647,6 +2141,43 @@ namespace BinGames.Sim.Combat
                 {
                     A = new float4((float)p.x, (float)p.y, (float)q.x, (float)q.y),
                     B = new float4(pr.Radius, 1f, (float)pr.Faction, 9f),
+                });
+            }
+        }
+    }
+
+    /// <summary>FG2-FW-02：区域与无人机的渲染缓冲（Burst）。B = (半径, 剩余比例, 阵营, 种类 20 = 区域 / 21 = 无人机)。</summary>
+    [BurstCompile(CompileSynchronously = true)]
+    internal struct CombatEffectsRenderJob : IJob
+    {
+        public CombatData D;
+        public NativeList<CombatInstance> Effects;
+        public double2 Origin;
+
+        public void Execute()
+        {
+            Effects.Clear();
+            double now = D.Scalars[0].Time;
+            for (int z = 0; z < D.Zones.Length; z++)
+            {
+                CombatZone zn = D.Zones[z];
+                double2 p = zn.Pos - Origin;
+                float left = (float)math.saturate((zn.Until - now) / math.max(0.001, zn.Until - zn.Born));
+                Effects.Add(new CombatInstance
+                {
+                    A = new float4((float)p.x, (float)p.y, (float)p.x, (float)p.y),
+                    B = new float4(zn.Radius, left, (float)zn.Faction, 20f),
+                });
+            }
+            for (int q = 0; q < D.Drones.Length; q++)
+            {
+                CombatDrone dr = D.Drones[q];
+                double2 p = dr.Pos - Origin;
+                double2 pv = dr.Prev - Origin;
+                Effects.Add(new CombatInstance
+                {
+                    A = new float4((float)p.x, (float)p.y, (float)pv.x, (float)pv.y),
+                    B = new float4(0.3f, 1f, (float)dr.Faction, 21f),
                 });
             }
         }

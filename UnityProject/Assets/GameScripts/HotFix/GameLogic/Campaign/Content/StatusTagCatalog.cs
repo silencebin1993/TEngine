@@ -22,6 +22,9 @@ namespace GameLogic.Campaign.Content
         private static bool _loaded;
         private static string _loadError;
 
+        /// <summary>FG2-FW-02：重载时 +1（读法翻译缓存的标签位 / 效果据此重建）。</summary>
+        public static int Revision { get; private set; } = 1;
+
         public static string LoadError
         {
             get
@@ -100,6 +103,7 @@ namespace GameLogic.Campaign.Content
             _loaded = false;
             _table = null;
             _loadError = null;
+            Revision++;
             EnsureLoaded();
         }
 

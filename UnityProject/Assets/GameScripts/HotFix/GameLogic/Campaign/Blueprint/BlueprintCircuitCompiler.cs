@@ -107,6 +107,9 @@ namespace GameLogic.Campaign.Blueprint
 
         /// <summary>FG2-FW-01（FGR-FW-001“能耗”、FG-GAP-028）：生效固件每发耗电之和（表 power 列）。双态预览两栏与差异各有一行。</summary>
         public int PowerCost;
+
+        /// <summary>FG2-FW-02（FGR-FW-012）：底盘 ID——固定底盘（炮塔）上“兼容但读法调整”的组件（推铲 → 击退铲）按它换读法。</summary>
+        public string ChassisId;
     }
 
     /// <summary>ER4-PRIM-02 STORY-EXECUTION-CARDS.md 第2条正式电路板"通用预览"的编译入口——
@@ -180,6 +183,7 @@ namespace GameLogic.Campaign.Blueprint
             preview.HasMarkerFunction = board.UtilityId == ComponentCatalog.FuncMarkerId;
             preview.HasCannonPrimary = board.PrimaryId == ComponentCatalog.CompCannonId;
             preview.PrimaryId = board.PrimaryId;
+            preview.ChassisId = board.ChassisId;
             preview.UtilityId = string.IsNullOrEmpty(board.UtilityId) ? null : board.UtilityId; // 存读档后空槽可能是 ""：统一成 null，编译结果逐字段稳定
             preview.HasHeatSinkStructure = board.StructureId == ComponentCatalog.StructFinId;
 

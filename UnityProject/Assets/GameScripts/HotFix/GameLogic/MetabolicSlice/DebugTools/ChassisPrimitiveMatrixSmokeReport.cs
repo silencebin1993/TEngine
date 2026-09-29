@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using BinGames.Sim;
 using ComposeEngine;
@@ -81,12 +82,32 @@ namespace GameLogic.MetabolicSlice.DebugTools
             CorrodedDiscount = 0.85f,
         };
 
-        public static (bool Pass, string Reason) Run()
+        /// <summary>5 种载体对应的旧器官（FG2-FW-02：射弹 = 连射器 org_emitter、格斗 = 液压刺锤 org_cilia、布区 = 喷洒器 org_enzyme、
+        /// 力场 = 电晕场 org_osmotic、无人机 = 蜂群无人机舱 org_bud；与设计案 5.6 一致）。</summary>
+        public static IReadOnlyList<string> CarrierOrgans => ChassisOrgans;
+
+        public static IReadOnlyList<string> CarrierNames => ChassisNames;
+
+        /// <summary>这条基因的效果是条件触发的（空场景里没有可观察差异，由命名实证单独证明）。</summary>
+        public static bool IsConditionalGene(string geneId) => ConditionalGenes.Contains(geneId);
+
+        public static (bool Pass, string Reason) Run() => Run(GeneCatalog.AllModuleIds);
+
+        /// <summary>
+        /// FG2-FW-02（FGT-FW-001 扩展现有断言）：只跑给定的基因（固件表里 42 条带旧基因的固件的 legacyId），矩阵与命名实证不变。
+        /// 装甲击穿、标记跳转没有旧基因，它们的读法在正式版战斗内核里由 FgReadingMatrixSelfCheck 的 44 × 5 内核矩阵证明。
+        /// </summary>
+        public static (bool Pass, string Reason) Run(IEnumerable<string> ids)
         {
-            string[] geneIds = GeneCatalog.AllModuleIds.OrderBy(x => x).ToArray();
+            string[] geneIds = (ids ?? GeneCatalog.AllModuleIds).Distinct().OrderBy(x => x).ToArray();
             if (geneIds.Length < 42)
             {
-                return (false, $"GeneCatalog.AllModuleIds 应至少 42 条，实际 {geneIds.Length}");
+                return (false, $"应至少 42 条旧基因，实际 {geneIds.Length}");
+            }
+            string unknown = geneIds.FirstOrDefault(g => GeneCatalog.GetModule(g) == null && GeneCatalog.Get(g) == null);
+            if (unknown != null)
+            {
+                return (false, $"{unknown} 不是旧引擎里的基因");
             }
 
             var engine = new Engine();
@@ -329,6 +350,85 @@ namespace GameLogic.MetabolicSlice.DebugTools
                 sim.End();
                 sim.OnDispose();
             }
+        }
+
+        private static readonly PropertyInfo[] ScalarProps = typeof(HitEvent)
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(p => p.PropertyType == typeof(float) || p.PropertyType == typeof(bool) || p.PropertyType == typeof(int))
+            .ToArray();
+
+        /// <summary>
+        /// FG2-FW-02：这条基因装在 <paramref name="organId"/> 上，旧引擎编译结果（第一条 HitEvent）与只有器官时相比改了哪些一等字段。
+        /// 返回 字段名 → (基线值, 装上后的值)；标签用 “tag:名字” → (0, 1)。<paramref name="heatPrimer"/> 时在基因前插一个产热模块
+        /// （过载这类只在过热时分岔的基因）。与 <see cref="CarrierCompiler"/> 同一条链（EnergyCore → 基因 → 器官）。
+        /// </summary>
+        public static Dictionary<string, (float Base, float With)> ProbeFieldDeltas(string organId, string geneId, bool heatPrimer)
+        {
+            var engine = new Engine();
+            var world = new WorldState();
+            HitEvent baseEvt = CompileChain(engine, world, organId, null, heatPrimer);
+            HitEvent evt = CompileChain(engine, world, organId, geneId, heatPrimer);
+            var result = new Dictionary<string, (float, float)>();
+            if (baseEvt == null || evt == null)
+            {
+                return result;
+            }
+            foreach (PropertyInfo prop in ScalarProps)
+            {
+                float a = ToFloat(prop.GetValue(baseEvt));
+                float b = ToFloat(prop.GetValue(evt));
+                if (System.Math.Abs(a - b) > 1e-4f)
+                {
+                    result[prop.Name] = (a, b);
+                }
+            }
+            if (evt.Payload.TryGetValue("Delay", out object delay) && !baseEvt.Payload.ContainsKey("Delay"))
+            {
+                result["Payload.Delay"] = (0f, ToFloat(delay));
+            }
+            foreach (string tag in evt.Tags)
+            {
+                if (!baseEvt.Tags.Contains(tag))
+                {
+                    result["tag:" + tag] = (0f, 1f);
+                }
+            }
+            return result;
+        }
+
+        private static float ToFloat(object v) => v switch
+        {
+            float f => f,
+            bool b => b ? 1f : 0f,
+            int i => i,
+            double d => (float)d,
+            _ => 0f,
+        };
+
+        private static HitEvent CompileChain(Engine engine, WorldState world, string organId, string geneId, bool heatPrimer)
+        {
+            var chain = new List<IModule> { new ComposeEngine.Builtin.Modules.EnergyCore(10f) };
+            if (heatPrimer)
+            {
+                chain.Add(new ComposeEngine.Builtin.Modules.FocusLens(focusMult: 1f, heatPerFocus: 10f));
+            }
+            if (geneId != null)
+            {
+                System.Func<IModule> create = GeneCatalog.GetModule(geneId);
+                if (create == null)
+                {
+                    return null;
+                }
+                chain.Add(create());
+            }
+            chain.Add(OrganelleCatalog.Get(organId).CreateModule());
+            IReadOnlyList<HitEvent> raw = engine.RunAssembly(chain, ticks: 1, seed: 1);
+            if (raw.Count == 0)
+            {
+                return null;
+            }
+            RuleVector rules = engine.NormalizeContracts(new List<IContract>());
+            return engine.ApplyPipeline(raw[0], rules, world);
         }
 
         /// <summary>指纹里的浮点一律定点两位——避免不同机器上的末位噪声造成假差异。</summary>

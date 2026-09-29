@@ -103,6 +103,14 @@ namespace BinGames.Sim.Combat
         public NativeList<float> Cycle;
         public NativeList<float> Secondary;
         public NativeList<double> MarkedUntil;
+        /// <summary>FG2-FW-02：状态标签（固件读法挂上的）——标签位掩码、统一到期时间、持续伤害（每秒）、减速比例、易伤比例、最后挂上的单位 ID（持续伤害归属）。
+        /// 到期后整组清掉；同类效果取大、到期取晚（不叠层，叠层与反应归 FG2-FW-03）。</summary>
+        public NativeList<uint> Status;
+        public NativeList<double> StatusUntil;
+        public NativeList<float> StatusDps;
+        public NativeList<float> StatusSlow;
+        public NativeList<float> StatusVuln;
+        public NativeList<int> StatusSource;
         public NativeList<CombatCommand> Cmd;
         public NativeList<float2> Direct;
 
@@ -134,6 +142,10 @@ namespace BinGames.Sim.Combat
         public NativeList<byte> PoiReached;
 
         public NativeList<CombatProjectile> Projectiles;
+        /// <summary>FG2-FW-02：读法生成的区域、待结算回波、无人机（都随快照进存档）。</summary>
+        public NativeList<CombatZone> Zones;
+        public NativeList<CombatEcho> Echoes;
+        public NativeList<CombatDrone> Drones;
 
         /// <summary>玩法事件队列（永不丢弃；热更层每步至多取 MaxGameplayEventsPerStep 条，剩下的留到下一步，进存档）。</summary>
         public NativeList<CombatEvent> Gameplay;
@@ -175,6 +187,12 @@ namespace BinGames.Sim.Combat
                 Cycle = new NativeList<float>(capacity, Allocator.Persistent),
                 Secondary = new NativeList<float>(capacity, Allocator.Persistent),
                 MarkedUntil = new NativeList<double>(capacity, Allocator.Persistent),
+                Status = new NativeList<uint>(capacity, Allocator.Persistent),
+                StatusUntil = new NativeList<double>(capacity, Allocator.Persistent),
+                StatusDps = new NativeList<float>(capacity, Allocator.Persistent),
+                StatusSlow = new NativeList<float>(capacity, Allocator.Persistent),
+                StatusVuln = new NativeList<float>(capacity, Allocator.Persistent),
+                StatusSource = new NativeList<int>(capacity, Allocator.Persistent),
                 Cmd = new NativeList<CombatCommand>(capacity, Allocator.Persistent),
                 Direct = new NativeList<float2>(capacity, Allocator.Persistent),
                 NavSt = new NativeList<byte>(capacity, Allocator.Persistent),
@@ -193,6 +211,9 @@ namespace BinGames.Sim.Combat
                 Pois = new NativeList<float3>(8, Allocator.Persistent),
                 PoiReached = new NativeList<byte>(8, Allocator.Persistent),
                 Projectiles = new NativeList<CombatProjectile>(math.max(16, config.ProjectileCapacity), Allocator.Persistent),
+                Zones = new NativeList<CombatZone>(16, Allocator.Persistent),
+                Echoes = new NativeList<CombatEcho>(16, Allocator.Persistent),
+                Drones = new NativeList<CombatDrone>(16, Allocator.Persistent),
                 Gameplay = new NativeList<CombatEvent>(64, Allocator.Persistent),
                 Cues = new NativeList<CombatEvent>(64, Allocator.Persistent),
                 Scalars = new NativeArray<CombatScalars>(1, Allocator.Persistent),
@@ -238,6 +259,12 @@ namespace BinGames.Sim.Combat
             Cycle.Dispose();
             Secondary.Dispose();
             MarkedUntil.Dispose();
+            Status.Dispose();
+            StatusUntil.Dispose();
+            StatusDps.Dispose();
+            StatusSlow.Dispose();
+            StatusVuln.Dispose();
+            StatusSource.Dispose();
             Cmd.Dispose();
             Direct.Dispose();
             NavSt.Dispose();
@@ -256,6 +283,9 @@ namespace BinGames.Sim.Combat
             Pois.Dispose();
             PoiReached.Dispose();
             Projectiles.Dispose();
+            Zones.Dispose();
+            Echoes.Dispose();
+            Drones.Dispose();
             Gameplay.Dispose();
             Cues.Dispose();
             Scalars.Dispose();
@@ -263,6 +293,13 @@ namespace BinGames.Sim.Combat
         }
 
         public int Count => Id.Length;
+
+        public int ZoneCap => Config.ZoneCapacity > 0 ? Config.ZoneCapacity : CombatConst.DefaultZoneCapacity;
+        public int EchoCap => Config.EchoCapacity > 0 ? Config.EchoCapacity : CombatConst.DefaultEchoCapacity;
+        public int DroneCap => Config.DroneCapacity > 0 ? Config.DroneCapacity : CombatConst.DefaultDroneCapacity;
+
+        /// <summary>FG2-FW-02：这个单位此刻身上的状态标签（已到期的算没有）。</summary>
+        public bool StatusActive(int slot, double now) => Status[slot] != 0u && StatusUntil[slot] > now;
 
         public int SlotOf(int id) => id > 0 && id < SlotOfId.Length ? SlotOfId[id] : -1;
 
@@ -306,6 +343,12 @@ namespace BinGames.Sim.Combat
             Cycle.Add(s.Cycle);
             Secondary.Add(s.Secondary);
             MarkedUntil.Add(0);
+            Status.Add(0u);
+            StatusUntil.Add(0);
+            StatusDps.Add(0f);
+            StatusSlow.Add(0f);
+            StatusVuln.Add(0f);
+            StatusSource.Add(0);
             Cmd.Add(default);
             Direct.Add(float2.zero);
             NavSt.Add(0);
@@ -350,6 +393,12 @@ namespace BinGames.Sim.Combat
             Cycle[to] = Cycle[from];
             Secondary[to] = Secondary[from];
             MarkedUntil[to] = MarkedUntil[from];
+            Status[to] = Status[from];
+            StatusUntil[to] = StatusUntil[from];
+            StatusDps[to] = StatusDps[from];
+            StatusSlow[to] = StatusSlow[from];
+            StatusVuln[to] = StatusVuln[from];
+            StatusSource[to] = StatusSource[from];
             Cmd[to] = Cmd[from];
             Direct[to] = Direct[from];
             NavSt[to] = NavSt[from];
@@ -387,6 +436,12 @@ namespace BinGames.Sim.Combat
             Cycle.ResizeUninitialized(length);
             Secondary.ResizeUninitialized(length);
             MarkedUntil.ResizeUninitialized(length);
+            Status.ResizeUninitialized(length);
+            StatusUntil.ResizeUninitialized(length);
+            StatusDps.ResizeUninitialized(length);
+            StatusSlow.ResizeUninitialized(length);
+            StatusVuln.ResizeUninitialized(length);
+            StatusSource.ResizeUninitialized(length);
             Cmd.ResizeUninitialized(length);
             Direct.ResizeUninitialized(length);
             NavSt.ResizeUninitialized(length);
@@ -405,6 +460,9 @@ namespace BinGames.Sim.Combat
             SlotOfId.Clear();
             SlotOfId.Add(-1);
             Projectiles.Clear();
+            Zones.Clear();
+            Echoes.Clear();
+            Drones.Clear();
             Gameplay.Clear();
             Cues.Clear();
             RoutePts.Clear();

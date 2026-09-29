@@ -50,8 +50,8 @@ namespace GameLogic.Campaign.Content
                     "过热红光表现。", "DEBT-ER4CONTENT01-09"),
                 [FwMarkTagId] = ("CombatLogic.MarkJump（内核标记跳转，接入口插入）", "vfx_chain_placeholder",
                     "跳跃弧线表现（全新内容，无旧基因参照）。", "DEBT-ER4CONTENT01-06"),
-                [FwArmorPierceId] = ("目标护甲减伤结算未接内核（DEBT-FG1SIG06-03 → FG2-FW-02）", "vfx_none_placeholder",
-                    "无独立几何体（全新内容，无旧基因参照）。", "DEBT-ER4CONTENT01-10"),
+                [FwArmorPierceId] = ("CarrierReadings.Build（原生读法字段 armor）→ CombatLogic.StrikeDamage 从正面装甲减伤里扣掉（FG2-FW-02，DEBT-FG1SIG06-03 关闭）", "vfx_none_placeholder",
+                    "无独立几何体（全新内容，无旧基因参照）。", null),
             };
 
         private static Dictionary<string, MechanicalContentDef> _defs = new Dictionary<string, MechanicalContentDef>(StringComparer.Ordinal);
@@ -163,8 +163,8 @@ namespace GameLogic.Campaign.Content
                 IconId = row.Icon,
                 ModelId = "primitive:capsule",
                 ActionId = demo.ActionId ?? (hasLegacy
-                    ? $"BlueprintCircuitCompiler.ResolveFirmware → GeneCatalog.GetModule(\"{row.LegacyId}\")（机器电路 / 接入口编译；各载体读法由 FG2-FW-02 行为探针核对）"
-                    : "无等价实现"),
+                    ? $"CarrierReadings.Build（读法字段 {row.ReadFields}，载体 × 字段查 fg.TbCarrierReading）→ 战斗内核 CombatLogic；伤害另经 GeneCatalog.GetModule(\"{row.LegacyId}\") 编译"
+                    : $"CarrierReadings.Build（原生读法字段 {row.ReadFields}）→ 战斗内核 CombatLogic"),
                 VfxId = demo.VfxId ?? "vfx_none_placeholder",
                 SfxId = string.Empty, // 固件本身不发声，声音由所属武器或反应发出（FeedbackCueSelfCheck 约定）
                 PreviewId = "preview_" + row.Id,
@@ -172,7 +172,7 @@ namespace GameLogic.Campaign.Content
                 LockedHintText = acquire,
                 SilhouetteNote = demo.SilhouetteNote ?? $"机身形变：{row.Morph}（类别 {row.Category}，FGR-FW-020）；引信类只改弹体特效。",
                 LegacyFacadeId = hasLegacy ? row.LegacyId : null,
-                DebtId = demo.DebtId ?? (hasLegacy ? "DEBT-FG2FW01-01" : null),
+                DebtId = demo.DebtId,
             };
         }
 

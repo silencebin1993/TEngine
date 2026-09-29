@@ -19,7 +19,8 @@ namespace GameLogic.Campaign.Content
         {
             get
             {
-                int rev = FirmwareCatalog.Revision;
+                // FG2-FW-02：组件 / 底盘子表也按表与语言生成（新作战组件、固定底盘），版本合在一起。
+                int rev = FirmwareCatalog.Revision * 7919 + ComponentCatalog.Revision * 131 + ChassisCatalog.Revision;
                 if (_all == null || rev != _allRevision)
                 {
                     _all = BuildAll();

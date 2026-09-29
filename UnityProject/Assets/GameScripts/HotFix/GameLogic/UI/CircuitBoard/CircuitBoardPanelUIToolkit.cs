@@ -98,6 +98,8 @@ namespace GameLogic.UI.CircuitBoard
 
         private DropdownField _firmware0Dropdown;
         private DropdownField _firmware1Dropdown;
+        /// <summary>FG2-FW-02（FGR-FW-011）：已装固件在当前主组件载体上的读法（每条一行；没有主组件时说明原因）。</summary>
+        private Label _firmwareReadingLabel;
         private readonly List<string> _firmware0IdsByIndex = new List<string>();
         private readonly List<string> _firmware1IdsByIndex = new List<string>();
 
@@ -246,6 +248,11 @@ namespace GameLogic.UI.CircuitBoard
 
             _firmware0Dropdown = _root.Q<DropdownField>("Firmware0Dropdown");
             _firmware1Dropdown = _root.Q<DropdownField>("Firmware1Dropdown");
+            _firmwareReadingLabel = _root.Q<Label>("FirmwareReadingLabel");
+            // FG2-FW-02（FGR-FW-011）：悬停固件槽只显示与当前主组件载体对应的那一条读法。
+            UiTooltip.Attach(_firmware0Dropdown, () => FirmwareSlotTooltip(0));
+            UiTooltip.Attach(_firmware1Dropdown, () => FirmwareSlotTooltip(1));
+            UiTooltip.Attach(_primaryDropdown, PrimaryTooltip);
 
             _undoButton = _root.Q<Button>("UndoButton");
             _redoButton = _root.Q<Button>("RedoButton");
@@ -931,13 +938,14 @@ namespace GameLogic.UI.CircuitBoard
                 _board != null ? (ChassisCatalog.ResolveArchetype(_board.ChassisId) ?? _board.ChassisId) : null,
                 includeEmptyOption: false);
 
+            // FG2-FW-02：主组件 / 功能组件的选项带载体（射弹 / 格斗·扇形……）；固定底盘上不兼容的照样列出但标明，选了给原因（FGR-FW-012）。
             PopulateDropdown(_primaryDropdown, _primaryIdsByIndex,
                 ComponentCatalog.All.Values.Where(d => d.Category == MechanicalContentCategory.MainComponent), state,
-                _board?.PrimaryId, includeEmptyOption: false);
+                _board?.PrimaryId, includeEmptyOption: false, chassisId: _board?.ChassisId);
 
             PopulateDropdown(_utilityDropdown, _utilityIdsByIndex,
                 ComponentCatalog.All.Values.Where(d => d.Category == MechanicalContentCategory.FunctionComponent), state,
-                _board?.UtilityId, includeEmptyOption: true);
+                _board?.UtilityId, includeEmptyOption: true, chassisId: _board?.ChassisId);
 
             PopulateDropdown(_structureDropdown, _structureIdsByIndex,
                 ComponentCatalog.All.Values.Where(d => d.Category == MechanicalContentCategory.Structure), state,
@@ -947,7 +955,7 @@ namespace GameLogic.UI.CircuitBoard
         }
 
         private static void PopulateDropdown(DropdownField dropdown, List<string> idsByIndex,
-            IEnumerable<MechanicalContentDef> candidates, CampaignState state, string currentSelectedId, bool includeEmptyOption)
+            IEnumerable<MechanicalContentDef> candidates, CampaignState state, string currentSelectedId, bool includeEmptyOption, string chassisId = null)
         {
             idsByIndex.Clear();
             var choices = new List<string>();
@@ -972,6 +980,15 @@ namespace GameLogic.UI.CircuitBoard
                 }
                 // 选项文本里不能出现 "/"：下拉菜单会把它当子菜单分隔符，把一项拆成两级菜单。
                 string label = $"{def.DisplayName}（{def.ScrapCost} 废料 · 负载 {def.Load}）";
+                string subtype = CarrierReadings.SubtypeName(def.Id);
+                if (subtype != null)
+                {
+                    label = Localization.GameText.Format("reading.circuit.primary_carrier", label, subtype);
+                }
+                if (chassisId != null && !CarrierReadings.CanMount(chassisId, def.Id, out _, out _))
+                {
+                    label = Localization.GameText.Format("component.turret.option_blocked", label);
+                }
                 // FG1-SIG-01（FGR-SIG-012）：核心固件照样列出但标明“只能由信号携带”（形状 + 文字），选了会被拒绝并给原因，不静默消失。
                 if (Campaign.Signal.FirmwareKinds.IsCore(def.Id))
                 {
@@ -1182,6 +1199,99 @@ namespace GameLogic.UI.CircuitBoard
                 _board.FirmwareSlots[0], includeEmptyOption: true);
             PopulateDropdown(_firmware1Dropdown, _firmware1IdsByIndex, FirmwareCatalog.All.Values, state,
                 _board.FirmwareSlots[1], includeEmptyOption: true);
+            if (_firmwareReadingLabel != null)
+            {
+                _firmwareReadingLabel.text = FirmwareReadingText(_board);
+            }
+        }
+
+        /// <summary>FG2-FW-02（FGR-FW-011）：已装固件在当前主组件载体上的读法（每条一行）；固定底盘上“兼容但读法调整”的组件另起一行。
+        /// 与 <see cref="CarrierReadings.Build"/> 同源（固件表的读法文本由同一套短语生成）。自检与冒烟直接调它核对。</summary>
+        public static string FirmwareReadingText(BlueprintCircuitBoard board)
+        {
+            if (board == null)
+            {
+                return string.Empty;
+            }
+            var lines = new List<string>();
+            if (board.PrimaryId != null && CarrierReadings.CanMount(board.ChassisId, board.PrimaryId, out _, out string turretKey) && turretKey != null)
+            {
+                lines.Add(Localization.GameText.Format("reading.turret_adjusted_line", Localization.GameText.Get("reading.turret_adjusted_prefix"), Localization.GameText.Get(turretKey)));
+            }
+            bool anyFirmware = board.FirmwareSlots.Any(f => !string.IsNullOrEmpty(f));
+            if (!anyFirmware)
+            {
+                return string.Join("\n", lines);
+            }
+            if (!CarrierReadings.TryGetCarrier(board.PrimaryId, out Campaign.Signal.FirmwareCarrier carrier))
+            {
+                lines.Add(Localization.GameText.Get("reading.circuit.none"));
+                return string.Join("\n", lines);
+            }
+            foreach (string fw in board.FirmwareSlots)
+            {
+                if (string.IsNullOrEmpty(fw) || !Campaign.Signal.FirmwareKinds.IsFirmware(fw))
+                {
+                    continue;
+                }
+                string name = Campaign.Signal.FirmwareKinds.DisplayName(fw) ?? fw;
+                string named = NamedReactionReplacing(board, fw);
+                lines.Add(named != null
+                    ? Localization.GameText.Format("reading.circuit.named", name, named)
+                    : Localization.GameText.Format("reading.circuit.line", name, CarrierReadings.CarrierName(carrier), CarrierReadings.Reading(fw, carrier)));
+            }
+            return string.Join("\n", lines);
+        }
+
+        /// <summary>具名反应的触发固件在这套装配上由反应取代普通读法（与 CombatSite.ReadingFirmware 同一规则）：是就返回反应名，否则 null。
+        /// 读法行与固件槽悬停共用，两处不会说法不一。</summary>
+        public static string NamedReactionReplacing(BlueprintCircuitBoard board, string firmwareId)
+        {
+            if (board == null || string.IsNullOrEmpty(firmwareId))
+            {
+                return null;
+            }
+            string reaction = BlueprintCircuitCompiler.DetectReactionId(board.PrimaryId, board.UtilityId, board.FirmwareSlots);
+            return firmwareId == MechanicalReactionCatalog.TriggerFirmwareOf(reaction) && MechanicalReactionCatalog.TryGet(reaction, out MechanicalContentDef rdef)
+                ? rdef.DisplayName : null;
+        }
+
+        /// <summary>悬停固件槽：只显示当前主组件载体的那一条读法（FGR-FW-011）；空槽不弹。</summary>
+        private TooltipContent FirmwareSlotTooltip(int slot)
+        {
+            string fw = _board != null && slot < _board.FirmwareSlots.Length ? _board.FirmwareSlots[slot] : null;
+            if (string.IsNullOrEmpty(fw) || !Campaign.Signal.FirmwareKinds.IsFirmware(fw))
+            {
+                return null;
+            }
+            string title = Campaign.Signal.FirmwareKinds.DisplayName(fw) ?? fw;
+            string named = NamedReactionReplacing(_board, fw);
+            string body = named != null
+                ? Localization.GameText.Format("reading.circuit.named", title, named)
+                : CarrierReadings.TryGetCarrier(_board.PrimaryId, out Campaign.Signal.FirmwareCarrier carrier)
+                    ? Localization.GameText.Format("reading.detail.line", CarrierReadings.CarrierName(carrier), CarrierReadings.Reading(fw, carrier))
+                    : Localization.GameText.Get("reading.circuit.none");
+            return new TooltipContent { Title = title, Body = body };
+        }
+
+        /// <summary>悬停主组件：载体与（固定底盘上的）炮塔读法。</summary>
+        private TooltipContent PrimaryTooltip()
+        {
+            if (_board == null || string.IsNullOrEmpty(_board.PrimaryId) || !MechanicalContentFacade.TryGet(_board.PrimaryId, out MechanicalContentDef def))
+            {
+                return null;
+            }
+            string body = def.Description;
+            string subtype = CarrierReadings.SubtypeName(def.Id);
+            if (subtype != null)
+            {
+                body = subtype + "\n" + body;
+            }
+            if (CarrierReadings.CanMount(_board.ChassisId, def.Id, out _, out string turretKey) && turretKey != null)
+            {
+                body += "\n" + Localization.GameText.Get(turretKey);
+            }
+            return new TooltipContent { Title = def.DisplayName, Body = body };
         }
 
         private void RefreshHistoryLabel()
@@ -1229,8 +1339,10 @@ namespace GameLogic.UI.CircuitBoard
             }
             else
             {
-                _previewSummaryLabel.text =
-                    $"有效路径 {_lastPreview.PathCount} 条 · 归一化总伤害 {_lastPreview.TotalNormalizedDamage:F1}\n{_lastPreview.ReactionHint}";
+                // FG2-FW-02（B13）：写内核实际每发伤害（与 CombatSite.MachineWeaponFrom 同源）；旧器官的编译伤害不再对玩家显示。
+                _previewSummaryLabel.text = Localization.GameText.Format("circuit.preview.summary", _lastPreview.PathCount,
+                    Campaign.Combat.CombatSite.MachineHitDamage(_lastPreview).ToString("F1", System.Globalization.CultureInfo.InvariantCulture))
+                    + "\n" + _lastPreview.ReactionHint;
             }
 
             for (int i = 0; i < MaxPathRows; i++)

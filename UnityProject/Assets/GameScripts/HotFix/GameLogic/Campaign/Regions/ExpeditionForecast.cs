@@ -81,14 +81,8 @@ namespace GameLogic.Campaign.Regions
                         repairUnits++;
                         continue;
                     }
-                    if (resolution.Preview.HasCannonPrimary)
-                    {
-                        firepower += FracturedCityLayout.CannonBaseDamage;
-                    }
-                    else if (resolution.Preview.HasCombatOutput)
-                    {
-                        firepower += Mathf.Max(0f, resolution.Preview.TotalNormalizedDamage);
-                    }
+                    // FG2-FW-02（B13）：与内核同源的每发伤害（重炮 55、新作战组件用表里的伤害、读法的伤害倍率都算进去）。
+                    firepower += Combat.CombatSite.MachineHitDamage(resolution.Preview);
                 }
             }
 

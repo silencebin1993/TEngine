@@ -14,8 +14,10 @@ namespace BinGames.Sim.Combat
     public static class CombatConst
     {
         /// <summary>存档快照格式版本（<see cref="CombatKernel.Serialize"/>）。不认识的版本整块不读、原样保留。
-        /// 2 = FG0-ARCH-06：每个单位追加寻路状态与路线路点、待交给寻路内核的请求（读取仍认 1：寻路字段取默认）。</summary>
-        public const int FormatVersion = 2;
+        /// 2 = FG0-ARCH-06：每个单位追加寻路状态与路线路点、待交给寻路内核的请求（读取仍认 1：寻路字段取默认）。
+        /// 3 = FG2-FW-02：武器追加载体与读法参数；每个单位追加状态标签（掩码 / 到期 / 持续伤害 / 减速 / 易伤 / 来源）；
+        /// 追加区域、回波、无人机三张表与三个计数（读取仍认 1、2：读法取“无”，状态与三张表为空）。</summary>
+        public const int FormatVersion = 3;
 
         /// <summary>仍能读取的最老格式版本。</summary>
         public const int MinReadableFormat = 1;
@@ -33,6 +35,218 @@ namespace BinGames.Sim.Combat
 
         /// <summary>直控移动的坐标钳制“不限”。</summary>
         public const double NoClamp = 1e30;
+
+        /// <summary>FG2-FW-02：配置里没填（0）时的区域 / 回波 / 无人机容量（超出的不生成并计数，不抛异常）。</summary>
+        public const int DefaultZoneCapacity = 512;
+        public const int DefaultEchoCapacity = 1024;
+        public const int DefaultDroneCapacity = 512;
+
+        /// <summary>FG2-FW-02：一次命中的读法里“额外目标 / 连锁 / 穿透”每种最多几个（存储与耗时上限；表里的值超过按此截断）。</summary>
+        public const int MaxReadingTargets = 6;
+        /// <summary>一台单位同时最多挂几架无人机（蜂群舱 + 集群协议伴飞；表里的值超过按此截断）。</summary>
+        public const int MaxDronesPerOwner = 8;
+        /// <summary>一次命中最多排几次回波（残影 / 节拍 / 追射 / 回旋叠加时的上限）。</summary>
+        public const int MaxEchoesPerHit = 4;
+        /// <summary>状态位 31 保留给“区域减速”（连网 / 没有标签的减速区域）：固件标签的状态位是 fg.TbStatusTag 的 bit 列（0～30）。</summary>
+        public const uint StatusBitZoneSlow = 1u << 31;
+    }
+
+    /// <summary>FG2-FW-02（FG02 FGR-FW-010，设计案 5.1）：作战组件的载体——固件在不同载体上有不同读法。
+    /// 取值与热更层 GameLogic.Campaign.Signal.FirmwareCarrier 一一对应：射弹 / 格斗 / 无人机 / 力场 / 布区。</summary>
+    public enum CombatCarrier : byte
+    {
+        /// <summary>射弹：一次命中一个目标（即时命中 / 重炮 / 弹体）。</summary>
+        Projectile = 0,
+        /// <summary>格斗：命中攻击者前方扇形内、触及范围内的全部敌对单位。</summary>
+        Melee = 1,
+        /// <summary>无人机：开火时补足伴飞无人机，无人机自己索敌、命中时带读法。</summary>
+        Summon = 2,
+        /// <summary>力场：以攻击者为中心的一圈脉冲，命中圈内全部敌对单位。</summary>
+        Aura = 3,
+        /// <summary>布区：在目标脚下铺一块区域，区域按节拍对区域内的敌对单位造成伤害并挂状态。</summary>
+        Field = 4,
+    }
+
+    /// <summary>FG2-FW-02：区域（布区载体、驻留 / 拖尾 / 连网读法留下的）放在哪。</summary>
+    public enum CombatZonePlacement : byte
+    {
+        /// <summary>命中点（目标脚下）。</summary>
+        HitPoint = 0,
+        /// <summary>攻击者与命中点的中点（拖尾：飞行路径上）。</summary>
+        Midpoint = 1,
+        /// <summary>攻击者脚下。</summary>
+        Attacker = 2,
+    }
+
+    /// <summary>
+    /// FG2-FW-02（FGR-FW-010 读法按载体分类和字段实现）：一套武器的读法参数。热更层按“作战组件的载体 × 生效固件的读法字段”查表
+    /// （fg.TbCarrierReading）累加出这些数，内核只认这些数，不认识任何固件 ID。全 0 = 没有读法（Demo 的基础武器、敌人武器）。
+    /// 命中结算顺序见 <see cref="CombatLogic"/> 的 ApplyReadingHit：伤害（×增幅 / 易伤）→ 处决 → 状态 → 回收修复 → 额外目标 / 穿透 / 连锁 / 溅射 / 环扫（只结算伤害与状态，
+    /// 不再触发读法，防止连锁爆炸）→ 牵引 / 击退 / 跃击 → 区域 / 连网 → 回波 → 标记跳转 → 过热爆发。
+    /// </summary>
+    [Serializable]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CombatReading
+    {
+        // ── 载体投送（来自作战组件表；固件的“触及 / 扇角”读法加在上面）──
+        public CombatCarrier Carrier;
+        public CombatZonePlacement ZonePlacement;
+        public byte Pad0;
+        public byte Pad1;
+        /// <summary>接近距离：&gt;0 时编队攻击命令按 min(命令射程, 本值) 接近（格斗 / 力场要贴近）。</summary>
+        public float Approach;
+        /// <summary>格斗：扇形半角（度）；&gt;=180 = 一整圈。</summary>
+        public float Cone;
+        /// <summary>格斗触及 / 力场半径 / 布区半径（米）。</summary>
+        public float Area;
+        /// <summary>布区：区域持续秒数；区域每秒伤害 = 武器伤害 × <see cref="FieldDpsRatio"/>。</summary>
+        public float FieldSeconds;
+        public float FieldDpsRatio;
+        /// <summary>无人机：同时挂几架、每架存活秒数、每架伤害占武器伤害的比例、出手间隔、离母机最远多远（牵引绳）。</summary>
+        public int Drones;
+        public float DroneSeconds;
+        public float DroneRatio;
+        public float DroneCooldown;
+        public float DroneLeash;
+
+        // ── 固件读法（按字段累加）──
+        /// <summary>伤害倍率（1 = 不变；0 视为 1）与出手间隔倍率（编队攻击的冷却 × 本值；0 视为 1）。</summary>
+        public float DamageScale;
+        public float CooldownScale;
+        /// <summary>额外目标：离命中点 <see cref="ExtraRadius"/> 内最近的几个其他敌对单位，各吃 伤害 × <see cref="ExtraRatio"/>。</summary>
+        public int ExtraHits;
+        public float ExtraRatio;
+        public float ExtraRadius;
+        /// <summary>穿透：攻击者→目标方向、目标身后 <see cref="PierceRange"/> 米内的几个敌对单位。</summary>
+        public int PierceHits;
+        public float PierceRange;
+        public float PierceRatio;
+        /// <summary>连锁：从命中点依次跳向最近的未命中敌对单位（每跳 × 衰减）。</summary>
+        public int ChainHits;
+        public float ChainRange;
+        public float ChainFalloff;
+        /// <summary>溅射：命中点周围半径内的其他敌对单位吃 伤害 × 比例。</summary>
+        public float BlastRadius;
+        public float BlastRatio;
+        /// <summary>环扫：攻击者周围半径内的其他敌对单位吃 伤害 × 比例（绕轨 / 旋风）。</summary>
+        public float SweepRadius;
+        public float SweepRatio;
+        /// <summary>回波：命中后隔 <see cref="EchoDelay"/> 秒对同一目标再结算几次（伤害 × 比例）。</summary>
+        public int EchoCount;
+        public float EchoDelay;
+        public float EchoRatio;
+        /// <summary>牵引：把命中点（或攻击者，<see cref="PullToAttacker"/>）周围半径内的敌对单位拉近若干米。</summary>
+        public float PullStrength;
+        public float PullRadius;
+        public byte PullToAttacker;
+        public byte Pad2;
+        public short Pad3;
+        /// <summary>击退：把被命中的单位沿攻击方向推开若干米。</summary>
+        public float Knockback;
+        /// <summary>跃击：攻击者朝目标扑近若干米（不越过目标）。</summary>
+        public float Lunge;
+        /// <summary>穿甲：正面装甲减伤比例减去本值。</summary>
+        public float ArmorPierce;
+        /// <summary>处决：目标剩余血量比例 ≤ 本值时一击击毁。</summary>
+        public float ExecuteBelow;
+        /// <summary>回收修复：造成伤害 × 本值 修复攻击者。</summary>
+        public float Lifesteal;
+        /// <summary>增幅：对带任何状态标签的目标伤害 × (1 + 本值)。</summary>
+        public float StatusAmp;
+        /// <summary>状态：命中时挂的状态标签位、持续秒数，以及持续伤害（每秒）/ 减速比例 / 易伤比例（同类取大）。</summary>
+        public uint StatusMask;
+        public float StatusSeconds;
+        public float StatusDps;
+        public float StatusSlow;
+        public float StatusVuln;
+        /// <summary>区域：命中后留下的区域（半径、秒数、每秒伤害、随时间扩张速度、放在哪）；区域里的敌对单位挂 <see cref="StatusMask"/>。</summary>
+        public float ZoneRadius;
+        public float ZoneSeconds;
+        public float ZoneDps;
+        public float ZoneGrowth;
+        /// <summary>区域结算节拍倍率（乱流：节拍更密；0 视为 1）。</summary>
+        public float ZoneTickScale;
+        /// <summary>连网：命中目标与 <see cref="WeaveRadius"/> 内最近的其他敌对单位之间拉一块减速网（区域）：持续 <see cref="WeaveSeconds"/> 秒、
+        /// 减速 <see cref="WeaveSlow"/>（与状态减速取大）、没有别的区域伤害时每秒伤害 = 命中伤害 × <see cref="WeaveDpsRatio"/>（都来自 fg.TbCarrierReading weave 行 / fg.TbHomeTuning reading.weave.*）。</summary>
+        public float WeaveRadius;
+        public float WeaveSeconds;
+        public float WeaveSlow;
+        public float WeaveDpsRatio;
+        /// <summary>集群协议伴飞：非无人机载体开火时补足这么多架继承读法的伴飞无人机（无人机载体则直接加进 <see cref="Drones"/>）。</summary>
+        public int EscortDrones;
+        /// <summary>过热爆发：攻击者积热 ≥ 过热阈值 × <see cref="HeatBurstAt"/> 时，这一发在命中点再爆一圈。</summary>
+        public float HeatBurstAt;
+        public float HeatBurstRadius;
+        public float HeatBurstRatio;
+        /// <summary>通用标记跳转（不需要标记器；只在目标已被标记时跳）：范围、衰减、最多几个。</summary>
+        public float JumpRange;
+        public float JumpFalloff;
+        public int JumpMax;
+
+        /// <summary>有没有任何固件读法（投送参数不算）。</summary>
+        public bool HasFirmwareReading =>
+            (DamageScale != 0f && DamageScale != 1f) || (CooldownScale != 0f && CooldownScale != 1f) || ExtraHits > 0 || PierceHits > 0 || ChainHits > 0
+            || BlastRadius > 0f || SweepRadius > 0f || EchoCount > 0 || PullStrength > 0f || Knockback > 0f || Lunge > 0f || ArmorPierce > 0f
+            || ExecuteBelow > 0f || Lifesteal > 0f || StatusAmp > 0f || StatusMask != 0u || ZoneSeconds > 0f || WeaveRadius > 0f || EscortDrones > 0
+            || HeatBurstAt > 0f || JumpMax > 0;
+    }
+
+    /// <summary>FG2-FW-02：一块区域（布区 / 驻留 / 拖尾 / 连网）。按节拍对区域内的敌对阵营单位造成伤害并挂状态；到期消失。</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CombatZone
+    {
+        public double2 Pos;
+        public float Radius;
+        public float Growth;
+        /// <summary>生成时刻（画面上外圈的剩余时间比例 = (到期 - 现在) / (到期 - 生成)）。</summary>
+        public double Born;
+        public double Until;
+        public double NextTick;
+        public float TickInterval;
+        public float Dps;
+        public uint StatusMask;
+        public float StatusSeconds;
+        public float StatusDps;
+        public float StatusSlow;
+        public float StatusVuln;
+        /// <summary>留下区域的单位 ID（伤害归属；单位阵亡后区域照常到期）。</summary>
+        public int Owner;
+        public CombatFaction Faction;
+        public byte Pad0;
+        public short Pad1;
+    }
+
+    /// <summary>FG2-FW-02：一次待结算的回波（残影 / 节拍 / 追射 / 回旋）：到点后对同一目标再结算一次伤害与状态。</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CombatEcho
+    {
+        public double At;
+        public int Target;
+        public int Owner;
+        public float Damage;
+        public uint StatusMask;
+        public float StatusSeconds;
+        public float StatusDps;
+        public float StatusSlow;
+        public float StatusVuln;
+    }
+
+    /// <summary>FG2-FW-02：一架无人机（蜂群舱 / 集群协议伴飞）：在母机牵引绳范围内追最近的敌对单位，按间隔命中，命中带母机武器的读法（<see cref="Weapon"/>）。</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CombatDrone
+    {
+        public double2 Pos;
+        public double2 Prev;
+        public double Until;
+        public double NextHit;
+        public int Owner;
+        public int Weapon;
+        public float Damage;
+        public float Leash;
+        public float Cooldown;
+        public CombatFaction Faction;
+        public byte Pad0;
+        public short Pad1;
     }
 
     /// <summary>阵营。己方（玩家）与敌方互为目标；中立单位（训练靶）只接受显式指向它的攻击。</summary>
@@ -340,6 +554,9 @@ namespace BinGames.Sim.Combat
         public float JumpRange;
         public float JumpFalloff;
         public int JumpMax;
+        /// <summary>FG2-FW-02：载体与固件读法（全 0 = 射弹载体、没有读法；Demo 的敌人武器、炮塔原型都是这样）。
+        /// FG2-FW-02 起 <see cref="HeatPerShot"/> 对所有开火方式生效（DEBT-FG1SIG06-02：即时命中武器也按固件积热、过热停火）。</summary>
+        public CombatReading Reading;
     }
 
     /// <summary>行为参数（一种敌人一份）。</summary>
@@ -469,6 +686,19 @@ namespace BinGames.Sim.Combat
         public byte NavEnabled;
         /// <summary>FG0-ARCH-06：分离（同阵营移动单位互相推开，不叠在同一处）的最大推开速度占移动速度的比例；0 = 关。</summary>
         public float SeparationFactor;
+        /// <summary>FG2-FW-02：同时存在的区域 / 待结算回波 / 无人机上限（0 = 用 <see cref="CombatConst"/> 的默认值；超出的不生成并计数）。</summary>
+        public int ZoneCapacity;
+        public int EchoCapacity;
+        public int DroneCapacity;
+        /// <summary>FG2-FW-02：无人机移动速度（米 / 秒）、触及距离（米，另加目标半径）、状态持续伤害节拍与区域节拍（游戏秒）。0 = 内核默认值。</summary>
+        public float DroneSpeed;
+        public float DroneReach;
+        public float StatusTick;
+        public float ZoneTick;
+        /// <summary>FG2-FW-02：区域给站在里面的单位挂状态时，读法没带状态时长（没有状态标签固件）用的时长（游戏秒，fg.TbHomeTuning reading.zone.status_seconds）。0 = 内核默认值。</summary>
+        public float ZoneStatusSeconds;
+        /// <summary>FG2-FW-02：连网的减速网比两端之间的半距再宽多少米（fg.TbHomeTuning reading.weave.margin）。0 = 内核默认值。</summary>
+        public float WeaveMargin;
 
         public static CombatConfig Default => new CombatConfig
         {
@@ -506,6 +736,11 @@ namespace BinGames.Sim.Combat
         public long CuesDropped;
         public long GameplayEventsDeferred;
         public long Compactions;
+        /// <summary>FG2-FW-02（格式 3）：读法生成的区域 / 回波 / 无人机，以及因容量满没生成的次数（三类合计）。</summary>
+        public long ZonesSpawned;
+        public long EchoesQueued;
+        public long DronesLaunched;
+        public long ReadingRefused;
     }
 
     /// <summary>渲染实例（32 字节，与 CombatInstanced.shader 一致）：A = (当前 x, 当前 z, 上一步 x, 上一步 z)，B = (半径, 血量比例, 阵营, 种类)。</summary>

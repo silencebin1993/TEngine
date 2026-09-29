@@ -220,6 +220,14 @@ namespace GameLogic.MetabolicSlice.Combat
                 float orbitR = evt.Orbit > 0f ? evt.Orbit : 0.8f;
                 weaveAmp = orbitR * math.radians(math.abs(evt.Spin));
             }
+            else if (evt.TickRate > 0f && evt.Tags.Contains("Drifting"))
+            {
+                // FG2-FW-02（扩展零死对断言后发现的死对 Projectile/gene_drift）：乱流 = 按节拍（TickRate）重算的侧偏。
+                // 弹道底盘上此前只剩一个单发时读不到的扇角，装上去什么也不变；这里按节拍给弹体蛇行（与鞭毛绕同一内核参数），
+                // 侧偏幅度取扇角的一半，轨迹真的飘忽不定。
+                weaveRate = evt.TickRate * 120f;
+                weaveAmp = 0.8f * math.radians(math.max(10f, evt.SpreadAngle) * 0.5f) * evt.TickRate;
+            }
 
             SimStatus applyStatus = SimStatus.None;
             if (evt.Pull > 0f)

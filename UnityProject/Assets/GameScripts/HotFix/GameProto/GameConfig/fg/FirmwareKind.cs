@@ -44,6 +44,7 @@ public sealed partial class FirmwareKind : Luban.BeanBase
         AcquireKey = _buf.ReadString();
         Cracked = _buf.ReadBool();
         Scrap = _buf.ReadInt();
+        ReadFields = _buf.ReadString();
     }
 
     public static FirmwareKind DeserializeFirmwareKind(ByteBuf _buf)
@@ -151,6 +152,10 @@ public sealed partial class FirmwareKind : Luban.BeanBase
     /// 装进蓝图的废料成本(蓝图版本成本;刻印芯片的废料另见 signal.firmware_chip.print_scrap)
     /// </summary>
     public readonly int Scrap;
+    /// <summary>
+    /// 读法字段(FG2-FW-02):字段:幅度;…,字段见 fgdata_reading.READING_FIELDS;内核按 载体 &#215; 字段 查 fg.TbCarrierReading
+    /// </summary>
+    public readonly string ReadFields;
    
     public const int __ID__ = -1131444196;
     public override int GetTypeId() => __ID__;
@@ -187,6 +192,7 @@ public sealed partial class FirmwareKind : Luban.BeanBase
         + "acquireKey:" + AcquireKey + ","
         + "cracked:" + Cracked + ","
         + "scrap:" + Scrap + ","
+        + "readFields:" + ReadFields + ","
         + "}";
     }
 }

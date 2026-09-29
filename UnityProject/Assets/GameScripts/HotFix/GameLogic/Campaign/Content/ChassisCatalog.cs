@@ -1,5 +1,7 @@
+using System;
 using System.Collections.Generic;
 using GameLogic.Campaign.Regions;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Content
 {
@@ -14,6 +16,9 @@ namespace GameLogic.Campaign.Content
         public const string ChassisWheelId = "chassis_wheel";
         public const string ChassisTrackId = "chassis_track";
         public const string ChassisHoverId = "chassis_hover";
+        /// <summary>FG2-FW-02（FGR-FW-012、FG06 FGR-DEF-001）：炮塔的固定底盘。兼容表（冲刺器装不上、推铲读作击退铲）从本 Story 起生效；
+        /// 炮塔的放置 / 施工 / 目标模式由 FG6-DEF-01 做——在那之前它不在基础蓝图库里（来源 <see cref="MechanicalContentSource.TurretProgram"/>，需要解锁记录）。</summary>
+        public const string ChassisFixedId = CarrierReadings.FixedChassisId;
 
         private static readonly Dictionary<string, MechanicalContentDef> _defs = new Dictionary<string, MechanicalContentDef>
         {
@@ -94,9 +99,82 @@ namespace GameLogic.Campaign.Content
             },
         };
 
-        public static IReadOnlyDictionary<string, MechanicalContentDef> All => _defs;
+        private static Dictionary<string, MechanicalContentDef> _merged;
+        private static GameLanguage _mergedLanguage;
+        private static int _mergedTextRevision = -1;
+        private static int _buildCount;
 
-        public static bool TryGet(string id, out MechanicalContentDef def) => _defs.TryGetValue(id, out def);
+        /// <summary>Demo 的 3 个底盘 + 固定底盘（名称走文本键，按语言缓存）。</summary>
+        public static IReadOnlyDictionary<string, MechanicalContentDef> All
+        {
+            get
+            {
+                EnsureBuilt();
+                return _merged;
+            }
+        }
+
+        public static int Revision
+        {
+            get
+            {
+                EnsureBuilt();
+                return _buildCount;
+            }
+        }
+
+        public static bool TryGet(string id, out MechanicalContentDef def)
+        {
+            if (string.IsNullOrEmpty(id))
+            {
+                def = null;
+                return false;
+            }
+            EnsureBuilt();
+            return _merged.TryGetValue(id, out def);
+        }
+
+        private static void EnsureBuilt()
+        {
+            GameLanguage lang = GameText.Language;
+            int textRev = GameText.Revision;
+            if (_merged != null && _mergedLanguage == lang && _mergedTextRevision == textRev)
+            {
+                return;
+            }
+            var merged = new Dictionary<string, MechanicalContentDef>(_defs, StringComparer.Ordinal)
+            {
+                [ChassisFixedId] = new MechanicalContentDef
+                {
+                    Id = ChassisFixedId,
+                    Category = MechanicalContentCategory.Chassis,
+                    DisplayName = GameText.Get("chassis.fixed.name"),
+                    Description = GameText.Get("chassis.fixed.desc"),
+                    Source = MechanicalContentSource.TurretProgram,
+                    SourceDetail = GameText.Get("chassis.fixed.locked"),
+                    Slot = "底盘",
+                    ScrapCost = 0,
+                    Load = 6,
+                    ValuesSummary = GameText.Get("chassis.fixed.desc"),
+                    AiPermission = MechanicalContentAiPermission.PlayerAndAllyAi,
+                    IconId = "icon_chassis_fixed",
+                    ModelId = "primitive:capsule",
+                    ActionId = "CarrierReadings.CanMount（固定底盘兼容表 fg.TbCombatComponent.turret）；炮塔放置与施工 → FG6-DEF-01",
+                    VfxId = "vfx_none_placeholder",
+                    SfxId = "sfx_move_track", // 占位：炮塔转向音随 FG6-DEF-01
+                    PreviewId = "preview_chassis_fixed",
+                    SaveCompatible = true,
+                    LockedHintText = GameText.Get("chassis.fixed.locked"),
+                    SilhouetteNote = "炮塔基座（FG6-DEF-01 出模型）。",
+                    LegacyFacadeId = null,
+                    DebtId = "FG6-DEF-01",
+                },
+            };
+            _merged = merged;
+            _mergedLanguage = lang;
+            _mergedTextRevision = textRev;
+            _buildCount++;
+        }
 
         /// <summary>把 <see cref="MachineRecord.ChassisId"/> 实际取值（erc_001/002/003/chassis_hover 等）
         /// 翻译成本类的底盘内容 ID——两套 ID 语义不同（见类注释），UI/图鉴显示底盘信息时必须经这个
@@ -112,6 +190,8 @@ namespace GameLogic.Campaign.Content
                     return ChassisTrackId;
                 case ChassisHoverId:
                     return ChassisHoverId;
+                case ChassisFixedId:
+                    return ChassisFixedId;
                 default:
                     return null; // erc_rescue 等系统占位机不是玩家可见内容目录条目，返回 null 由调用方决定回退文案。
             }

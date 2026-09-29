@@ -26,6 +26,9 @@ namespace BinGames.Sim.Combat
         private Mesh _quad;
         private GraphicsBuffer _unitBuf;
         private GraphicsBuffer _projBuf;
+        private GraphicsBuffer _fxBuf;
+        private MaterialPropertyBlock _fxProps;
+        private NativeList<CombatInstance> _effects;
         private MaterialPropertyBlock _unitProps;
         private MaterialPropertyBlock _projProps;
         private NativeList<CombatInstance> _units;
@@ -35,6 +38,9 @@ namespace BinGames.Sim.Combat
 
         public int LastUnitInstances { get; private set; }
         public int LastProjectileInstances { get; private set; }
+        /// <summary>FG2-FW-02：读法生成的区域与无人机（第三次绘制调用，只在有的时候画；画在单位下面一层）。</summary>
+        public int LastEffectInstances { get; private set; }
+        public NativeArray<CombatInstance> EffectInstances => _effects.AsArray();
         public int LastDrawCalls { get; private set; }
         public int Uploads { get; private set; }
         public bool GpuAvailable { get; private set; }
@@ -46,6 +52,7 @@ namespace BinGames.Sim.Combat
         {
             _units = new NativeList<CombatInstance>(64, Allocator.Persistent);
             _projectiles = new NativeList<CombatInstance>(256, Allocator.Persistent);
+            _effects = new NativeList<CombatInstance>(32, Allocator.Persistent);
             if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null)
             {
                 GpuUnavailableReason = "无图形设备（-nographics / batchmode）";
@@ -66,6 +73,7 @@ namespace BinGames.Sim.Combat
             _quad = BuildQuad();
             _unitProps = new MaterialPropertyBlock();
             _projProps = new MaterialPropertyBlock();
+            _fxProps = new MaterialPropertyBlock();
             GpuAvailable = true;
         }
 
@@ -83,10 +91,12 @@ namespace BinGames.Sim.Combat
             if (changed)
             {
                 kernel.PrepareRender(_units, _projectiles, origin);
+                kernel.PrepareEffects(_effects, origin);
                 _preparedRevision = kernel.Revision;
             }
             LastUnitInstances = _units.Length;
             LastProjectileInstances = _projectiles.Length;
+            LastEffectInstances = _effects.Length;
             if (!GpuAvailable)
             {
                 return;
@@ -95,10 +105,18 @@ namespace BinGames.Sim.Combat
             {
                 Upload(ref _unitBuf, _units);
                 Upload(ref _projBuf, _projectiles);
+                if (_effects.Length > 0)
+                {
+                    Upload(ref _fxBuf, _effects);
+                }
                 Uploads++;
             }
             var bounds = new Bounds(Vector3.zero, new Vector3(1e7f, 1e3f, 1e7f));
             float a = Mathf.Clamp01(alpha);
+            if (_effects.Length > 0)
+            {
+                Submit(_fxBuf, _fxProps, 0f, a, height - 0.05f, camera, bounds, _effects.Length);
+            }
             if (_units.Length > 0)
             {
                 Submit(_unitBuf, _unitProps, 0f, a, height, camera, bounds, _units.Length);
@@ -162,8 +180,10 @@ namespace BinGames.Sim.Combat
             _disposed = true;
             _unitBuf?.Release();
             _projBuf?.Release();
+            _fxBuf?.Release();
             _unitBuf = null;
             _projBuf = null;
+            _fxBuf = null;
             if (_units.IsCreated)
             {
                 _units.Dispose();
@@ -171,6 +191,10 @@ namespace BinGames.Sim.Combat
             if (_projectiles.IsCreated)
             {
                 _projectiles.Dispose();
+            }
+            if (_effects.IsCreated)
+            {
+                _effects.Dispose();
             }
             if (_material != null)
             {

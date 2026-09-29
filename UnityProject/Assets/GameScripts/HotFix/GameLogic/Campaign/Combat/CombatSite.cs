@@ -163,6 +163,16 @@ namespace GameLogic.Campaign.Combat
             c.MaxCueEventsPerStep = (int)Math.Round(Tuning("combat.events.cues_per_step", c.MaxCueEventsPerStep));
             c.ProjectileCapacity = (int)Math.Round(Tuning("combat.projectile_capacity", c.ProjectileCapacity));
             c.CompactRatio = Tuning("combat.compact_ratio", c.CompactRatio);
+            // FG2-FW-02：读法生成的区域 / 回波 / 无人机容量与节拍（fg.TbHomeTuning reading.*）。
+            c.ZoneCapacity = (int)Math.Round(Tuning("reading.capacity.zones", CombatConst.DefaultZoneCapacity));
+            c.EchoCapacity = (int)Math.Round(Tuning("reading.capacity.echoes", CombatConst.DefaultEchoCapacity));
+            c.DroneCapacity = (int)Math.Round(Tuning("reading.capacity.drones", CombatConst.DefaultDroneCapacity));
+            c.DroneSpeed = Tuning("reading.drone.speed", 9f);
+            c.DroneReach = Tuning("reading.drone.reach", 1.2f);
+            c.StatusTick = Tuning("reading.tick.status", 0.5f);
+            c.ZoneTick = Tuning("reading.tick.zone", 0.5f);
+            c.ZoneStatusSeconds = Tuning("reading.zone.status_seconds", 2f);
+            c.WeaveMargin = Tuning("reading.weave.margin", 0.6f);
             return c;
         }
 
@@ -498,8 +508,29 @@ namespace GameLogic.Campaign.Combat
         /// 装配预览 → 内核武器参数（Demo 规则的唯一翻译处）：
         /// 铸造重炮 = 两段式（1 秒瞄准线、3 秒冷却、55 基础伤害、积热 40、熔穿过载 +25 积热与 30% 穿甲、100 过热 / 60 恢复、散热 10（散热鳍 +5））；
         /// 其余 = 即时命中，伤害 = 装配编译出的 TotalNormalizedDamage；装了标记器命中打 10 秒标记；标记跳转 8 米内至多 2 个、每跳 ×0.6。
+        /// FG2-FW-02：载体与固件读法由 <see cref="CarrierReadings.Build"/> 按“主组件的载体 × 生效固件的读法字段”查表翻译（<see cref="CombatWeapon.Reading"/>）；
+        /// FG2-FW-02 新建的作战组件（格斗 / 无人机 / 力场 / 布区）用表里的基础伤害；即时命中武器也按固件积热（DEBT-FG1SIG06-02）。
         /// </summary>
         public static CombatWeapon MachineWeaponFrom(BlueprintCircuitPreview p) => MachineWeaponFrom(p, false);
+
+        /// <summary>FG2-FW-02：机器的基础出手间隔（游戏秒，fg.TbHomeTuning combat.machine.attack_interval）——编队攻击命令的攻击间隔与即时命中武器的冷却同一个数
+        /// （驻守开火的炮塔、直控蓄力门槛都按它 × 读法的出手间隔倍率）。</summary>
+        public static float MachineAttackInterval => Tuning("combat.machine.attack_interval", 1.2f);
+
+        /// <summary>FG2-FW-02（B13）：这套装配每发实际打出的基础伤害（与 <see cref="MachineWeaponFrom(BlueprintCircuitPreview)"/> 同源：新作战组件用表里的伤害、
+        /// 重炮 55、连射器 / 切割束按电路编译伤害，再乘读法的伤害倍率；不含装甲 / 侧后 / 状态这些按目标结算的部分）。
+        /// 电路编辑器、双态预览、远征预测、家园低威胁靶都读它，玩家看到的数就是内核打出的数。没有攻击出口为 0。</summary>
+        public static float MachineHitDamage(BlueprintCircuitPreview p)
+        {
+            // 重炮不看电路出口（内核 FireCannon 也不看 HasOutput，与 Demo 一致）；其余武器没有攻击出口就打不出伤害。
+            if (p == null || (!p.HasCannonPrimary && !p.HasCombatOutput))
+            {
+                return 0f;
+            }
+            CombatWeapon w = MachineWeaponFrom(p);
+            float scale = w.Reading.DamageScale > 0f ? w.Reading.DamageScale : 1f;
+            return Mathf.Max(0f, w.Damage) * scale;
+        }
 
         /// <summary><paramref name="suppressReaction"/>：FG1-SIG-03 核心固件冷却中——反应不发动（熔穿过载不额外积热、不穿甲；标记跳转不跳），其余参数不变。</summary>
         public static CombatWeapon MachineWeaponFrom(BlueprintCircuitPreview p, bool suppressReaction)
@@ -527,12 +558,22 @@ namespace GameLogic.Campaign.Combat
                 w.OverloadExtraHeat = FracturedCityLayout.OverloadExtraHeatPerShot * rawHeat;
                 w.PierceBonus = FracturedCityLayout.OverloadArmorPierceBonus;
                 w.Reaction = !suppressReaction && p.ReactionId == MechanicalReactionCatalog.ReactionMeltOverloadId ? CombatReaction.MeltOverload : CombatReaction.None;
+                // FG2-FW-02：重炮是射弹载体；伤害是固定值（不经电路编译），“伤害倍率”读法（电容蓄力）按表乘上。
+                w.Reading = CarrierReadings.Build(p.PrimaryId, p.ChassisId, ReadingFirmware(p), damageFromCompile: false);
                 return w;
             }
             w.Mode = CombatWeaponMode.Instant;
-            w.Damage = Mathf.Max(0f, p.TotalNormalizedDamage);
+            // FG2-FW-02：新建作战组件用表里的基础伤害；Demo 的连射器 / 切割束仍按电路编译伤害（固件的能量改动已经算在里面）。
+            bool fixedDamage = CarrierReadings.TryGetComponent(p.PrimaryId, out GameConfig.fg.CombatComponent comp) && comp.Damage > 0f;
+            w.Damage = fixedDamage ? comp.Damage : Mathf.Max(0f, p.TotalNormalizedDamage);
             w.Range = FracturedCityLayout.DirectAttackRange;
+            // FG2-FW-02：即时命中武器也有自己的冷却（与编队攻击间隔同一个数）——驻守开火的炮塔按它出手，蓄力读法（电容蓄力）按它 × 倍率蓄满。
+            w.Cooldown = MachineAttackInterval;
             w.MarkSeconds = p.HasMarkerFunction ? FracturedCityLayout.EnemyMarkDurationSeconds : 0f;
+            // DEBT-FG1SIG06-02：即时命中武器也按生效固件积热（与热量预算同一个数；裸跑 ×1.5），过热停火、降到恢复线以下再开火。
+            float rawHeatI = p.RawHeatMultiplier > 0f ? p.RawHeatMultiplier : 1f;
+            w.HeatPerShot = Mathf.Max(0f, p.FirmwareHeatPerShot) * rawHeatI;
+            w.Reading = CarrierReadings.Build(p.PrimaryId, p.ChassisId, ReadingFirmware(p), damageFromCompile: !fixedDamage);
             if (!suppressReaction && p.ReactionId == MechanicalReactionCatalog.ReactionMarkJumpId)
             {
                 w.Reaction = CombatReaction.MarkJump;
@@ -543,12 +584,31 @@ namespace GameLogic.Campaign.Combat
             return w;
         }
 
+        /// <summary>FG2-FW-02：参与普通读法的固件——具名反应的触发固件（熔穿过载 ← 过载、标记跳转 ← 标记跳转）在这套装配上由反应取代它的普通读法
+        /// （反应冷却中也不回退成普通读法，与“冷却中不发动”一致）。</summary>
+        public static IReadOnlyList<string> ReadingFirmware(BlueprintCircuitPreview p)
+        {
+            string trigger = MechanicalReactionCatalog.TriggerFirmwareOf(p.ReactionId);
+            if (trigger == null || p.FirmwareIds == null)
+            {
+                return p.FirmwareIds;
+            }
+            var list = new List<string>(p.FirmwareIds.Length);
+            foreach (string f in p.FirmwareIds)
+            {
+                if (f != trigger)
+                {
+                    list.Add(f);
+                }
+            }
+            return list;
+        }
+
         /// <summary>武器表去重：同样的参数只占一行（机器反复进出、装配反复刷新不会让表无限增长）。</summary>
         public int WeaponIndex(in CombatWeapon w)
         {
-            string key = string.Join("|", (int)w.Mode, (int)w.Reaction, w.HasOutput, (int)w.TargetMode, w.Range, w.Damage, w.Cooldown, w.AimSeconds,
-                w.ProjectileSpeed, w.ProjectileRadius, w.ProjectileLife, w.HeatPerShot, w.OverloadExtraHeat, w.OverheatAt, w.RecoverBelow, w.Dissipation,
-                w.HeatSinkBonus, w.PierceBonus, w.MarkSeconds, w.JumpRange, w.JumpFalloff, w.JumpMax);
+            // FG2-FW-02：键取武器参数的完整字节（含读法），新增字段自动算进去——不会把两套不同读法的武器并成一行。
+            string key = CombatKernel.WeaponKey(w);
             if (_weaponIndex.TryGetValue(key, out int idx) && Kernel.TryGetWeapon(idx, out CombatWeapon existing) && existing.Equals(w))
             {
                 return idx;
@@ -1142,8 +1202,10 @@ namespace GameLogic.Campaign.Combat
                 {
                     if (_unitMachine.TryGetValue(e.Unit, out int logicId) && MachineRegistry.TryGetRecord(logicId, out MachineRecord rec))
                     {
-                        Log.Info($"[CombatSite] 机器 {logicId} 重炮过热（{e.Value:F0}），停火直到降到 {FracturedCityLayout.WeaponHeatRecoverThreshold:F0} 以下。");
-                        FeedbackCues.Raise(FeedbackCueId.WeaponOverheat, "#" + rec.DisplayNumber + $"，降到 {FracturedCityLayout.WeaponHeatRecoverThreshold:F0} 以下才能再开火");
+                        Log.Info($"[CombatSite] 机器 {logicId} 武器过热（{e.Value:F0}），停火直到降到 {FracturedCityLayout.WeaponHeatRecoverThreshold:F0} 以下。");
+                        // DEBT-FG1SIG06-02：即时命中武器也会过热，提示不再写死“重炮”，走文本键。
+                        FeedbackCues.Raise(FeedbackCueId.WeaponOverheat, GameText.Format("combat.overheat.notice", "#" + rec.DisplayNumber,
+                            FracturedCityLayout.WeaponHeatRecoverThreshold.ToString("0", System.Globalization.CultureInfo.InvariantCulture)));
                     }
                     return;
                 }
@@ -1524,10 +1586,8 @@ namespace GameLogic.Campaign.Combat
             {
                 if (Kernel.TryGetWeapon(w, out CombatWeapon cw))
                 {
-                    string key = string.Join("|", (int)cw.Mode, (int)cw.Reaction, cw.HasOutput, (int)cw.TargetMode, cw.Range, cw.Damage, cw.Cooldown, cw.AimSeconds,
-                        cw.ProjectileSpeed, cw.ProjectileRadius, cw.ProjectileLife, cw.HeatPerShot, cw.OverloadExtraHeat, cw.OverheatAt, cw.RecoverBelow, cw.Dissipation,
-                        cw.HeatSinkBonus, cw.PierceBonus, cw.MarkSeconds, cw.JumpRange, cw.JumpFalloff, cw.JumpMax);
-                    _weaponIndex[key] = w;
+                    // FG2-FW-02：与 WeaponIndex 同一把键（武器参数的完整字节，含读法）——两边不一致时读档后会给同一把武器再开一行，单位的武器下标跟着变。
+                    _weaponIndex[CombatKernel.WeaponKey(cw)] = w;
                 }
             }
             _profileIndex.Clear();

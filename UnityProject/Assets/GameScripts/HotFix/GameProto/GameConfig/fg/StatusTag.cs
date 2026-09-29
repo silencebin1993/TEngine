@@ -25,6 +25,9 @@ public sealed partial class StatusTag : Luban.BeanBase
         Shape = _buf.ReadString();
         Color = _buf.ReadString();
         Kind = _buf.ReadString();
+        Bit = _buf.ReadInt();
+        Effect = _buf.ReadString();
+        Amount = _buf.ReadFloat();
     }
 
     public static StatusTag DeserializeStatusTag(ByteBuf _buf)
@@ -56,6 +59,18 @@ public sealed partial class StatusTag : Luban.BeanBase
     /// status=状态标签(单位头顶显示,FGR-FW-031);marker=机制标记(旧引擎模块给能量包打的行为记号,只给反应判定/伤害归因/调试用,不在头顶显示)
     /// </summary>
     public readonly string Kind;
+    /// <summary>
+    /// 战斗内核状态位 0～30(31 保留给区域减速);同义标签与主标签相同;机制标记 -1
+    /// </summary>
+    public readonly int Bit;
+    /// <summary>
+    /// 内核效果:none/dot/slow/vuln/leech/execute(dot=每秒伤害,slow=减速比例,vuln=易伤比例,leech=回收修复比例,execute=处决阈值,none=只是反应用的标签)
+    /// </summary>
+    public readonly string Effect;
+    /// <summary>
+    /// 效果数值(见 effect)
+    /// </summary>
+    public readonly float Amount;
    
     public const int __ID__ = -636789445;
     public override int GetTypeId() => __ID__;
@@ -73,6 +88,9 @@ public sealed partial class StatusTag : Luban.BeanBase
         + "shape:" + Shape + ","
         + "color:" + Color + ","
         + "kind:" + Kind + ","
+        + "bit:" + Bit + ","
+        + "effect:" + Effect + ","
+        + "amount:" + Amount + ","
         + "}";
     }
 }

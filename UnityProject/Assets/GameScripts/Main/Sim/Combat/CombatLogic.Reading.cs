@@ -1,0 +1,982 @@
+using Unity.Collections;
+using Unity.Mathematics;
+
+namespace BinGames.Sim.Combat
+{
+    /// <summary>
+    /// FG2-FW-02（FG02 FGR-FW-010 读法矩阵零死对；设计案 5.1 载体、5.3 四类包装；ADR-FW-002）：载体投送与固件读法的内核实现。
+    ///
+    /// 规则只认 <see cref="CombatReading"/> 里的数（载体 + 字段），不认识任何固件 ID——热更层按“作战组件的载体 × 生效固件的读法字段”查表累加
+    /// （fg.TbCarrierReading），不写两两特例。一次开火分三段：
+    /// 1. 载体投送：射弹 = 主目标一个；格斗 = 前方扇形内触及的全部敌对单位；力场 = 攻击者周围一圈；布区 = 主目标 + 目标脚下一块区域；
+    ///    无人机 = 补足伴飞无人机（无人机自己索敌、命中）。
+    /// 2. 逐目标读法（每个被投送命中的目标）：伤害（增幅 / 穿甲 / 侧后）→ 状态 → 处决 → 回收修复 → 击退。
+    /// 3. 锚定读法（只围绕主目标结算一次）：额外目标 / 穿透 / 连锁 / 溅射 / 环扫（这些二次命中只结算伤害与状态，不再触发读法）→ 牵引 → 跃击 →
+    ///    区域 / 连网 → 回波 → 通用标记跳转 → 过热爆发。
+    /// 区域、回波、无人机、状态都在内核里按统一时钟逐步推进（暂停不走、倍速按游戏时间），随快照进存档；与是否被观察无关。
+    /// 全部在 Burst 作业里跑（编队攻击命令），直控点击走托管的同一份代码。
+    /// </summary>
+    public static partial class CombatLogic
+    {
+        /// <summary>配置没填（0）时的默认值（热更层按 fg.TbHomeTuning reading.* 填进 <see cref="CombatConfig"/>）：
+        /// 无人机移动速度（米 / 秒）与触及距离（米，另加目标半径）；状态持续伤害按节拍结算（不是每步扣血，报告单位不会每步发一条受伤事件）；区域节拍。</summary>
+        private const float DefaultDroneSpeed = 9f;
+        private const float DefaultDroneReach = 1.2f;
+        private const float DefaultStatusTick = 0.5f;
+        private const float DefaultZoneTick = 0.5f;
+        private const float DefaultZoneStatusSeconds = 2f;
+        private const float DefaultWeaveMargin = 0.6f;
+
+        private static float DroneSpeedOf(ref CombatData d) => d.Config.DroneSpeed > 0f ? d.Config.DroneSpeed : DefaultDroneSpeed;
+        private static float DroneReachOf(ref CombatData d) => d.Config.DroneReach > 0f ? d.Config.DroneReach : DefaultDroneReach;
+        private static float StatusTickOf(ref CombatData d) => d.Config.StatusTick > 0f ? d.Config.StatusTick : DefaultStatusTick;
+        private static float ZoneTickOf(ref CombatData d) => d.Config.ZoneTick > 0f ? d.Config.ZoneTick : DefaultZoneTick;
+        private static float ZoneStatusSecondsOf(ref CombatData d) => d.Config.ZoneStatusSeconds > 0f ? d.Config.ZoneStatusSeconds : DefaultZoneStatusSeconds;
+        private static float WeaveMarginOf(ref CombatData d) => d.Config.WeaveMargin > 0f ? d.Config.WeaveMargin : DefaultWeaveMargin;
+
+        // ─────────────────────────────── 投送 ───────────────────────────────
+
+        /// <summary>即时命中武器的一次投送（编队攻击 / 直控点击的 <see cref="FireAt"/> 与驻守开火的 <see cref="UnitAttack"/> 共用）。
+        /// 返回 Ok / Invulnerable（主目标当前无法被击伤时不打标记、不跳转、不触发读法，与 Demo 一致）。</summary>
+        internal static CombatFireResult DeliverInstant(ref CombatData d, int a, int t, in CombatWeapon wp, bool namedReactions)
+        {
+            CombatReading r = wp.Reading;
+            double now = d.Scalars[0].Time;
+            if (r.Carrier == CombatCarrier.Summon)
+            {
+                Cue(ref d, CombatEventKind.Fired, a, d.Id[t], 0f, d.Pos[t], 0);
+                LaunchDrones(ref d, a, wp, r.Drones + r.EscortDrones);
+                return CombatFireResult.Ok;
+            }
+
+            bool wasMarked = d.MarkedUntil[t] > now;
+            double2 primaryPos = d.Pos[t];
+            float baseDamage = math.max(0f, wp.Damage);
+            float dealt = StrikeDamage(ref d, a, t, baseDamage, r, d.Pos[a], true, 0f);
+            Cue(ref d, CombatEventKind.Fired, a, d.Id[t], 0f, d.Pos[t], 0);
+            if (!DamageUnit(ref d, t, dealt, a))
+            {
+                return CombatFireResult.Invulnerable; // Demo：首领阶段不可伤时结算失败，不打标记、不跳转。
+            }
+            PerTarget(ref d, a, t, dealt, r, d.Pos[a]);
+
+            // 载体投送的其余目标（格斗扇形 / 力场一圈）：逐目标读法，不锚定。
+            if (r.Carrier == CombatCarrier.Melee || r.Carrier == CombatCarrier.Aura)
+            {
+                StrikeCarrierArea(ref d, a, t, baseDamage, r);
+            }
+            else if (r.Carrier == CombatCarrier.Field && r.FieldSeconds > 0f && r.Area > 0f)
+            {
+                SpawnZone(ref d, a, primaryPos, r.Area, r.FieldSeconds, baseDamage * math.max(0f, r.FieldDpsRatio), r.ZoneGrowth, r.ZoneTickScale,
+                    r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln);
+            }
+
+            if (wp.MarkSeconds > 0f && d.IsAlive(t))
+            {
+                d.MarkedUntil[t] = now + wp.MarkSeconds;
+            }
+            if (namedReactions && wp.Reaction == CombatReaction.MarkJump && wasMarked && !d.Has(a, CombatUnitFlags.ReactionSpent))
+            {
+                MarkJump(ref d, a, t, primaryPos, dealt, wp);
+            }
+            Anchored(ref d, a, t, primaryPos, dealt, baseDamage, wp, wasMarked, d.Pos[a], false);
+            if (r.EscortDrones > 0)
+            {
+                LaunchDrones(ref d, a, wp, r.EscortDrones);
+            }
+            return CombatFireResult.Ok;
+        }
+
+        /// <summary>出手间隔 = 武器冷却 × 读法的出手间隔倍率（电容蓄力 / 乱流 · 力场；0 视为 1）。重炮冷却、驻守开火 / 瞄准线 / 突袭者、直控蓄力门槛共用
+        /// （编队攻击命令的冷却在 TickCommand 里乘同一倍率）。</summary>
+        internal static float EffectiveCooldown(in CombatWeapon wp) => wp.Cooldown * (wp.Reading.CooldownScale > 0f ? wp.Reading.CooldownScale : 1f);
+
+        /// <summary>蓄力读法：出手间隔倍率 &gt; 1（少发高伤）。直控点击据此等蓄满。</summary>
+        internal static bool IsCharged(in CombatWeapon wp) => wp.Reading.CooldownScale > 1f && wp.Cooldown > 0f;
+
+        /// <summary>找目标 / 追击用的交战距离：格斗 / 力场按触及（区域半径 + 自身半径）收紧，其余是武器射程。驻守开火的炮塔据此只打够得着的敌人。</summary>
+        internal static float EngageRange(ref CombatData d, int i, in CombatWeapon wp)
+        {
+            CombatCarrier c = wp.Reading.Carrier;
+            if ((c == CombatCarrier.Melee || c == CombatCarrier.Aura) && wp.Reading.Area > 0f)
+            {
+                float reach = wp.Reading.Area + d.Radius[i];
+                return wp.Range > 0f ? math.min(wp.Range, reach) : reach;
+            }
+            return wp.Range;
+        }
+
+        /// <summary>非重炮武器一次开火的共同门槛（编队攻击 / 直控的 <see cref="FireAt"/> 与驻守开火的 <see cref="UnitAttack"/> 共用）：
+        /// 格斗 / 力场要贴近（触及 = 区域半径 + 双方半径），过热迟滞（过热后降到恢复线以下才再开火）。不通过时不算开火、不积热。</summary>
+        internal static CombatFireResult PreFireGate(ref CombatData d, int a, int t, in CombatWeapon wp)
+        {
+            CombatCarrier carrier = wp.Reading.Carrier;
+            if ((carrier == CombatCarrier.Melee || carrier == CombatCarrier.Aura) && wp.Reading.Area > 0f
+                && math.distance(d.Pos[a], d.Pos[t]) > wp.Reading.Area + d.Radius[a] + d.Radius[t])
+            {
+                return CombatFireResult.OutOfRange;
+            }
+            if (d.Has(a, CombatUnitFlags.Overheated))
+            {
+                if (d.Heat[a] > wp.RecoverBelow)
+                {
+                    return CombatFireResult.Overheated;
+                }
+                d.Set(a, CombatUnitFlags.Overheated, false);
+            }
+            return CombatFireResult.Ok;
+        }
+
+        /// <summary>一发（任何开火方式）的积热（DEBT-FG1SIG06-02：即时命中武器也按固件积热）。重炮在 <see cref="FireCannon"/> 里自己算（含熔穿过载）。</summary>
+        internal static void AddShotHeat(ref CombatData d, int a, in CombatWeapon wp)
+        {
+            if (wp.HeatPerShot <= 0f)
+            {
+                return;
+            }
+            float heat = d.Heat[a] + wp.HeatPerShot;
+            d.Heat[a] = heat;
+            if (wp.OverheatAt > 0f && heat >= wp.OverheatAt && !d.Has(a, CombatUnitFlags.Overheated))
+            {
+                d.Set(a, CombatUnitFlags.Overheated, true);
+                Cue(ref d, CombatEventKind.Overheat, a, 0, heat, d.Pos[a], 0);
+            }
+        }
+
+        /// <summary>格斗扇形 / 力场一圈里除主目标以外的敌对单位：逐目标读法。</summary>
+        private static void StrikeCarrierArea(ref CombatData d, int a, int t, float baseDamage, in CombatReading r)
+        {
+            byte want = WantOf(ref d, a);
+            double2 origin = d.Pos[a];
+            bool melee = r.Carrier == CombatCarrier.Melee;
+            double2 toT = d.Pos[t] - origin;
+            float2 dir = math.lengthsq(toT) > 1e-12 ? (float2)math.normalize(toT) : new float2(0f, 1f);
+            float reach = melee ? math.max(r.Area, (float)math.length(toT)) : r.Area;
+            float cosHalf = r.Cone >= 180f ? -2f : math.cos(math.radians(math.max(0f, r.Cone)));
+            int n = d.Count;
+            for (int k = 0; k < n; k++)
+            {
+                if (k == t || k == a || d.Faction[k] != want || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable))
+                {
+                    continue;
+                }
+                double2 to = d.Pos[k] - origin;
+                double dist = math.length(to);
+                if (dist > reach + d.Radius[k])
+                {
+                    continue;
+                }
+                if (melee && dist > 1e-6 && math.dot(dir, (float2)(to / dist)) < cosHalf)
+                {
+                    continue;
+                }
+                float dealt = StrikeDamage(ref d, a, k, baseDamage, r, origin, false, 0f);
+                if (DamageUnit(ref d, k, dealt, a))
+                {
+                    PerTarget(ref d, a, k, dealt, r, origin);
+                }
+            }
+        }
+
+        // ─────────────────────────────── 命中结算 ───────────────────────────────
+
+        /// <summary>对一个目标的一次伤害（未落地）：× 伤害倍率 × 增幅（目标带状态）→ 正面装甲（减去穿甲）→ 侧后加成。<paramref name="extraPierce"/> 给重炮熔穿过载。</summary>
+        internal static float StrikeDamage(ref CombatData d, int a, int t, float baseDamage, in CombatReading r, double2 from, bool cueArmor, float extraPierce)
+        {
+            float dmg = math.max(0f, baseDamage);
+            if (r.DamageScale > 0f)
+            {
+                dmg *= r.DamageScale;
+            }
+            if (r.StatusAmp > 0f && d.StatusActive(t, d.Scalars[0].Time))
+            {
+                dmg *= 1f + r.StatusAmp;
+            }
+            if (IsFrontalArmored(ref d, t, from))
+            {
+                float frac = math.max(0f, d.Armor[t].x - math.max(0f, r.ArmorPierce) - math.max(0f, extraPierce));
+                dmg *= math.max(0f, 1f - frac);
+                if (cueArmor)
+                {
+                    Cue(ref d, CombatEventKind.ArmorHit, t, a >= 0 ? d.Id[a] : 0, 0f, d.Pos[t], 0);
+                }
+            }
+            dmg *= BackMultiplier(ref d, t, from);
+            return dmg;
+        }
+
+        /// <summary>逐目标读法（伤害已落地之后）：状态 → 处决 → 回收修复 → 击退。击退从 <paramref name="origin"/>（出手的那个身体：机器本身，或无人机）推开。</summary>
+        private static void PerTarget(ref CombatData d, int a, int t, float dealt, in CombatReading r, double2 origin)
+        {
+            if (r.StatusMask != 0u)
+            {
+                ApplyStatus(ref d, t, r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln, a);
+            }
+            if (r.ExecuteBelow > 0f && d.IsAlive(t) && d.MaxHp[t] > 0f && d.Hp[t] / d.MaxHp[t] <= r.ExecuteBelow && !d.Has(t, CombatUnitFlags.Invulnerable))
+            {
+                DamageUnit(ref d, t, d.Hp[t] + 1f, a);
+            }
+            if (r.Lifesteal > 0f && a >= 0 && d.IsAlive(a) && dealt > 0f)
+            {
+                Heal(ref d, a, dealt * r.Lifesteal, a);
+            }
+            if (r.Knockback > 0f && a >= 0 && d.IsAlive(t))
+            {
+                Displace(ref d, t, origin, -r.Knockback, 0.0);
+            }
+        }
+
+        /// <summary>锚定读法（围绕主目标结算一次）。二次命中只结算伤害与状态，不再触发读法。
+        /// <paramref name="viaDrone"/>：这一击是无人机打的（<paramref name="from"/> = 无人机位置）——“以出手者为中心”的读法（牵引回拉、脚下区域、中点拖尾）以无人机为锚，
+        /// 会移动出手者的读法（跃击）不结算：母机只做玩家让它做的事，不被自己的无人机拖向玩家没指定的敌人（FGR-BASE-020）。
+        /// 环扫仍以母机为中心（无人机 · 绕轨的短语就是“扫过母机身边”），它只结算伤害、不移动任何己方单位。</summary>
+        private static void Anchored(ref CombatData d, int a, int t, double2 hitPos, float dealt, float baseDamage, in CombatWeapon wp, bool wasMarked, double2 from, bool viaDrone)
+        {
+            CombatReading r = wp.Reading;
+            if (!r.HasFirmwareReading)
+            {
+                return;
+            }
+            bool hasSelf = viaDrone || a >= 0;
+            double2 self = viaDrone ? from : a >= 0 ? d.Pos[a] : hitPos;
+            double now = d.Scalars[0].Time;
+            byte want = WantOf(ref d, a);
+            var hit = new FixedList128Bytes<int>();
+            hit.Add(t);
+
+            // 额外目标（霰射 / 分裂 / 分叉 / 广角……）：命中点附近最近的几个。
+            if (r.ExtraHits > 0 && r.ExtraRadius > 0f)
+            {
+                int max = math.min(r.ExtraHits, CombatConst.MaxReadingTargets);
+                for (int q = 0; q < max; q++)
+                {
+                    int k = NearestExcept(ref d, hitPos, r.ExtraRadius, want, ref hit);
+                    if (k < 0)
+                    {
+                        break;
+                    }
+                    hit.Add(k);
+                    SecondaryStrike(ref d, a, k, baseDamage * r.ExtraRatio, r, from);
+                }
+            }
+            // 穿透：攻击方向上、目标身后的几个。
+            if (r.PierceHits > 0 && r.PierceRange > 0f)
+            {
+                PierceBehind(ref d, a, t, from, hitPos, baseDamage * (r.PierceRatio > 0f ? r.PierceRatio : 1f), r, want, ref hit);
+            }
+            // 连锁：从命中点依次跳向最近的未命中目标。
+            if (r.ChainHits > 0 && r.ChainRange > 0f)
+            {
+                int max = math.min(r.ChainHits, CombatConst.MaxReadingTargets);
+                double2 at = hitPos;
+                float dmg = dealt;
+                for (int q = 0; q < max; q++)
+                {
+                    int k = NearestExcept(ref d, at, r.ChainRange, want, ref hit);
+                    if (k < 0)
+                    {
+                        break;
+                    }
+                    hit.Add(k);
+                    dmg *= r.ChainFalloff > 0f ? r.ChainFalloff : 1f;
+                    DamageUnit(ref d, k, dmg, a);
+                    if (r.StatusMask != 0u)
+                    {
+                        ApplyStatus(ref d, k, r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln, a);
+                    }
+                    at = d.Pos[k];
+                }
+            }
+            // 溅射：命中点周围。
+            if (r.BlastRadius > 0f && r.BlastRatio > 0f)
+            {
+                AreaStrike(ref d, a, hitPos, r.BlastRadius, baseDamage * r.BlastRatio, r, from, t);
+            }
+            // 环扫：攻击者周围。
+            if (r.SweepRadius > 0f && r.SweepRatio > 0f && a >= 0)
+            {
+                AreaStrike(ref d, a, d.Pos[a], r.SweepRadius, baseDamage * r.SweepRatio, r, from, t);
+            }
+            // 牵引：拉向命中点或攻击者。
+            if (r.PullStrength > 0f)
+            {
+                double2 center = r.PullToAttacker != 0 && hasSelf ? self : hitPos;
+                float radius = r.PullRadius > 0f ? r.PullRadius : 4f;
+                int n = d.Count;
+                for (int k = 0; k < n; k++)
+                {
+                    if (d.Faction[k] != want || !d.IsAlive(k))
+                    {
+                        continue;
+                    }
+                    double dist = math.distance(d.Pos[k], center);
+                    if (dist > radius || dist < 0.6)
+                    {
+                        continue;
+                    }
+                    Displace(ref d, k, center, math.min(r.PullStrength, (float)dist - 0.5f), 0.5);
+                }
+            }
+            // 跃击：攻击者扑近。
+            if (r.Lunge > 0f && !viaDrone && a >= 0 && d.IsAlive(a) && d.IsAlive(t))
+            {
+                double gap = math.distance(d.Pos[a], d.Pos[t]) - d.Radius[a] - d.Radius[t] - 0.2;
+                if (gap > 0.05)
+                {
+                    double2 dir = math.normalize(d.Pos[t] - d.Pos[a]);
+                    double step = math.min(r.Lunge, gap);
+                    d.Pos[a] = MoveCollide(ref d, a, d.Pos[a], d.Pos[a] + dir * step);
+                }
+            }
+            // 区域（驻留 / 拖尾）。
+            if (r.ZoneSeconds > 0f && r.ZoneRadius > 0f)
+            {
+                double2 at = r.ZonePlacement == CombatZonePlacement.Attacker && hasSelf ? self
+                    : r.ZonePlacement == CombatZonePlacement.Midpoint && hasSelf ? (self + hitPos) * 0.5
+                    : hitPos;
+                SpawnZone(ref d, a, at, r.ZoneRadius, r.ZoneSeconds, r.ZoneDps, r.ZoneGrowth, r.ZoneTickScale,
+                    r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln);
+            }
+            // 连网：主目标与最近的另一个敌对单位之间拉一块减速网。
+            if (r.WeaveRadius > 0f && r.WeaveSeconds > 0f)
+            {
+                var only = new FixedList128Bytes<int>();
+                only.Add(t);
+                int k = NearestExcept(ref d, hitPos, r.WeaveRadius, want, ref only);
+                if (k >= 0)
+                {
+                    double2 mid = (hitPos + d.Pos[k]) * 0.5;
+                    float half = (float)math.distance(hitPos, d.Pos[k]) * 0.5f + WeaveMarginOf(ref d);
+                    SpawnZone(ref d, a, mid, half, r.WeaveSeconds, r.ZoneDps > 0f ? r.ZoneDps : dealt * math.max(0f, r.WeaveDpsRatio), 0f, 1f,
+                        r.StatusMask | CombatConst.StatusBitZoneSlow, r.StatusSeconds, r.StatusDps, math.max(r.StatusSlow, r.WeaveSlow), r.StatusVuln);
+                }
+            }
+            // 回波：对同一目标隔几秒再结算。
+            if (r.EchoCount > 0 && r.EchoRatio > 0f)
+            {
+                int cnt = math.min(r.EchoCount, CombatConst.MaxEchoesPerHit);
+                float delay = r.EchoDelay > 0f ? r.EchoDelay : 0.4f;
+                for (int q = 0; q < cnt; q++)
+                {
+                    QueueEcho(ref d, a, t, now + delay * (q + 1), dealt * r.EchoRatio, r);
+                }
+            }
+            // 通用标记跳转（只在目标已被标记时跳；具名反应“标记跳转”另走 MarkJump）。
+            if (r.JumpMax > 0 && wasMarked && wp.Reaction != CombatReaction.MarkJump)
+            {
+                int jumped = MarkJumpCore(ref d, a, t, hitPos, dealt, r.JumpRange, r.JumpFalloff, r.JumpMax);
+                if (jumped > 0)
+                {
+                    Cue(ref d, CombatEventKind.MarkJump, a, d.Id[t], jumped, hitPos, 1);
+                }
+            }
+            // 过热爆发：攻击者积热过了阈值，这一发在命中点再爆一圈（含主目标）。
+            if (r.HeatBurstAt > 0f && a >= 0 && wp.OverheatAt > 0f && d.Heat[a] >= wp.OverheatAt * r.HeatBurstAt && r.HeatBurstRadius > 0f)
+            {
+                AreaStrike(ref d, a, hitPos, r.HeatBurstRadius, baseDamage * r.HeatBurstRatio, r, from, -1);
+            }
+        }
+
+        /// <summary>弹体（驻守开火的弹体武器）命中后的读法：逐目标 + 锚定。开火者可能已阵亡（<paramref name="owner"/> = -1）。</summary>
+        internal static void ProjectileReadingHit(ref CombatData d, int owner, int hit, double2 hitPos, float dealt, in CombatWeapon wp, double2 from)
+        {
+            if (!wp.Reading.HasFirmwareReading)
+            {
+                return;
+            }
+            PerTarget(ref d, owner, hit, dealt, wp.Reading, owner >= 0 ? d.Pos[owner] : from);
+            Anchored(ref d, owner, hit, hitPos, dealt, wp.Damage, wp, false, from, false);
+        }
+
+        /// <summary>重炮命中后的读法（逐目标 + 锚定；投送固定是射弹）。</summary>
+        internal static void CannonReadingHit(ref CombatData d, int a, int t, double2 hitPos, float dealt, in CombatWeapon wp, bool wasMarked)
+        {
+            if (!wp.Reading.HasFirmwareReading)
+            {
+                return;
+            }
+            PerTarget(ref d, a, t, dealt, wp.Reading, d.Pos[a]);
+            Anchored(ref d, a, t, hitPos, dealt, wp.Damage, wp, wasMarked, d.Pos[a], false);
+        }
+
+        private static void SecondaryStrike(ref CombatData d, int a, int k, float damage, in CombatReading r, double2 from)
+        {
+            float dealt = StrikeDamage(ref d, a, k, damage, r, from, false, 0f);
+            if (DamageUnit(ref d, k, dealt, a) && r.StatusMask != 0u)
+            {
+                ApplyStatus(ref d, k, r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln, a);
+            }
+        }
+
+        /// <summary>圆内（不含 <paramref name="exclude"/>）的敌对单位各吃一次二次命中。</summary>
+        private static void AreaStrike(ref CombatData d, int a, double2 center, float radius, float damage, in CombatReading r, double2 from, int exclude)
+        {
+            byte want = WantOf(ref d, a);
+            int n = d.Count;
+            for (int k = 0; k < n; k++)
+            {
+                if (k == exclude || d.Faction[k] != want || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable))
+                {
+                    continue;
+                }
+                if (math.distance(d.Pos[k], center) > radius + d.Radius[k])
+                {
+                    continue;
+                }
+                SecondaryStrike(ref d, a, k, damage, r, from);
+            }
+        }
+
+        private static void PierceBehind(ref CombatData d, int a, int t, double2 from, double2 hitPos, float damage, in CombatReading r, byte want, ref FixedList128Bytes<int> hit)
+        {
+            double2 axis = hitPos - from;
+            double len = math.length(axis);
+            if (len < 1e-6)
+            {
+                return;
+            }
+            double2 dir = axis / len;
+            int max = math.min(r.PierceHits, CombatConst.MaxReadingTargets);
+            for (int q = 0; q < max; q++)
+            {
+                int best = -1;
+                double bestAlong = double.MaxValue;
+                int n = d.Count;
+                for (int k = 0; k < n; k++)
+                {
+                    if (d.Faction[k] != want || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable) || Contains(ref hit, k))
+                    {
+                        continue;
+                    }
+                    double2 rel = d.Pos[k] - hitPos;
+                    double along = math.dot(rel, dir);
+                    if (along <= 0.0 || along > r.PierceRange)
+                    {
+                        continue;
+                    }
+                    double lateral = math.length(rel - dir * along);
+                    if (lateral > d.Radius[k] + 0.6)
+                    {
+                        continue;
+                    }
+                    if (along < bestAlong)
+                    {
+                        bestAlong = along;
+                        best = k;
+                    }
+                }
+                if (best < 0)
+                {
+                    return;
+                }
+                hit.Add(best);
+                SecondaryStrike(ref d, a, best, damage, r, from);
+            }
+        }
+
+        /// <summary>离 <paramref name="p"/> 最近、在半径内、没在 <paramref name="hit"/> 里的敌对单位；并列取槽位小者。</summary>
+        private static int NearestExcept(ref CombatData d, double2 p, float radius, byte want, ref FixedList128Bytes<int> hit)
+        {
+            int best = -1;
+            double bestDist = double.MaxValue;
+            int n = d.Count;
+            for (int k = 0; k < n; k++)
+            {
+                if (d.Faction[k] != want || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable) || Contains(ref hit, k))
+                {
+                    continue;
+                }
+                double dist = math.distance(p, d.Pos[k]);
+                if (dist > radius + d.Radius[k] || dist >= bestDist)
+                {
+                    continue;
+                }
+                bestDist = dist;
+                best = k;
+            }
+            return best;
+        }
+
+        private static bool Contains(ref FixedList128Bytes<int> list, int v)
+        {
+            for (int i = 0; i < list.Length; i++)
+            {
+                if (list[i] == v)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static byte WantOf(ref CombatData d, int a) =>
+            a >= 0 && a < d.Count && d.Faction[a] == (byte)CombatFaction.Hostile ? (byte)CombatFaction.Player : (byte)CombatFaction.Hostile;
+
+        /// <summary>把单位朝 <paramref name="center"/> 移动 <paramref name="meters"/> 米（负数 = 推开），不越过 <paramref name="keep"/> 米。
+        /// 结构物、炮塔、主核心（优先级 0）不被推动；星球格网上走碰撞（不穿越悬崖 / 建筑）。</summary>
+        private static void Displace(ref CombatData d, int k, double2 center, float meters, double keep)
+        {
+            if (math.abs(meters) < 1e-4f || !CanDisplace(ref d, k))
+            {
+                return;
+            }
+            double2 to = center - d.Pos[k];
+            double len = math.length(to);
+            double2 dir = len > 1e-6 ? to / len : new double2(0, 1);
+            double step = meters;
+            if (step > 0 && len - step < keep)
+            {
+                step = math.max(0.0, len - keep);
+            }
+            if (math.abs(step) < 1e-4)
+            {
+                return;
+            }
+            double2 from = d.Pos[k];
+            d.Pos[k] = MoveCollide(ref d, k, from, from + dir * step);
+        }
+
+        private static bool CanDisplace(ref CombatData d, int k)
+        {
+            byte kind = d.Kind[k];
+            if (kind == (byte)CombatUnitKind.Structure || kind == (byte)CombatUnitKind.Turret)
+            {
+                return false;
+            }
+            return !(d.Faction[k] == (byte)CombatFaction.Hostile && d.Priority[k] == 0);
+        }
+
+        // ─────────────────────────────── 状态 ───────────────────────────────
+
+        /// <summary>挂状态：标签位并入、到期取晚、效果同类取大（已到期的整组先清空）。<paramref name="source"/> = 挂上它的单位槽位（持续伤害归属）。</summary>
+        internal static void ApplyStatus(ref CombatData d, int k, uint mask, float seconds, float dps, float slow, float vuln, int source)
+        {
+            if (mask == 0u || !d.IsAlive(k))
+            {
+                return;
+            }
+            double now = d.Scalars[0].Time;
+            if (!d.StatusActive(k, now))
+            {
+                d.Status[k] = 0u;
+                d.StatusDps[k] = 0f;
+                d.StatusSlow[k] = 0f;
+                d.StatusVuln[k] = 0f;
+            }
+            d.Status[k] |= mask;
+            double until = now + math.max(0.1f, seconds > 0f ? seconds : 3f);
+            if (until > d.StatusUntil[k])
+            {
+                d.StatusUntil[k] = until;
+            }
+            d.StatusDps[k] = math.max(d.StatusDps[k], math.max(0f, dps));
+            d.StatusSlow[k] = math.max(d.StatusSlow[k], math.saturate(slow));
+            d.StatusVuln[k] = math.max(d.StatusVuln[k], math.max(0f, vuln));
+            d.StatusSource[k] = source >= 0 && source < d.Count ? d.Id[source] : 0;
+        }
+
+        /// <summary>减速后的移动速度（状态到期后恢复）。</summary>
+        internal static float SlowedSpeed(ref CombatData d, int i, float speed)
+        {
+            if (d.StatusSlow[i] <= 0f || !d.StatusActive(i, d.Scalars[0].Time))
+            {
+                return speed;
+            }
+            return speed * (1f - math.min(0.9f, d.StatusSlow[i]));
+        }
+
+        /// <summary>易伤倍率（<see cref="DamageUnit"/> 统一乘上）。</summary>
+        internal static float VulnMultiplier(ref CombatData d, int t)
+        {
+            if (d.StatusVuln[t] <= 0f || !d.StatusActive(t, d.Scalars[0].Time))
+            {
+                return 1f;
+            }
+            return 1f + d.StatusVuln[t];
+        }
+
+        /// <summary>状态推进：到期清掉；持续伤害按 0.5 游戏秒节拍结算（节拍按统一时钟对齐，暂停不走、倍速一致）。</summary>
+        private static void StepStatus(ref CombatData d, float dt)
+        {
+            double now = d.Scalars[0].Time;
+            float statusTick = StatusTickOf(ref d);
+            bool tick = math.floor(now / statusTick) != math.floor((now - dt) / statusTick);
+            int n = d.Count;
+            for (int k = 0; k < n; k++)
+            {
+                if (d.Status[k] == 0u)
+                {
+                    continue;
+                }
+                if (!d.IsAlive(k) || d.StatusUntil[k] <= now)
+                {
+                    d.Status[k] = 0u;
+                    d.StatusDps[k] = 0f;
+                    d.StatusSlow[k] = 0f;
+                    d.StatusVuln[k] = 0f;
+                    continue;
+                }
+                if (tick && d.StatusDps[k] > 0f)
+                {
+                    DamageUnit(ref d, k, d.StatusDps[k] * statusTick, d.SlotOf(d.StatusSource[k]));
+                }
+            }
+        }
+
+        // ─────────────────────────────── 区域 ───────────────────────────────
+
+        private static void SpawnZone(ref CombatData d, int owner, double2 pos, float radius, float seconds, float dps, float growth, float tickScale,
+            uint mask, float statusSeconds, float statusDps, float slow, float vuln)
+        {
+            if (radius <= 0f || seconds <= 0f)
+            {
+                return;
+            }
+            if (d.Zones.Length >= d.ZoneCap)
+            {
+                RefuseReading(ref d);
+                return;
+            }
+            double now = d.Scalars[0].Time;
+            float interval = ZoneTickOf(ref d) / (tickScale > 0f ? tickScale : 1f);
+            d.Zones.Add(new CombatZone
+            {
+                Pos = pos,
+                Radius = radius,
+                Growth = growth,
+                Born = now,
+                Until = now + seconds,
+                NextTick = now + interval,
+                TickInterval = interval,
+                Dps = math.max(0f, dps),
+                StatusMask = mask,
+                StatusSeconds = statusSeconds > 0f ? statusSeconds : ZoneStatusSecondsOf(ref d),
+                StatusDps = statusDps,
+                StatusSlow = slow,
+                StatusVuln = vuln,
+                Owner = owner >= 0 && owner < d.Count ? d.Id[owner] : 0,
+                Faction = owner >= 0 && owner < d.Count ? (CombatFaction)d.Faction[owner] : CombatFaction.Player,
+            });
+            CombatCounters c = d.Counters[0];
+            c.ZonesSpawned++;
+            d.Counters[0] = c;
+        }
+
+        /// <summary>区域推进：到期移除；按节拍对区域内的敌对阵营单位造成伤害并挂状态（区域的“减速”只要站在里面就挂上）。O(区域 × 单位)。</summary>
+        private static void StepZones(ref CombatData d, float dt)
+        {
+            double now = d.Scalars[0].Time;
+            int m = d.Zones.Length;
+            int write = 0;
+            for (int z = 0; z < m; z++)
+            {
+                CombatZone zone = d.Zones[z];
+                if (zone.Until <= now)
+                {
+                    continue;
+                }
+                zone.Radius += zone.Growth * dt;
+                if (now >= zone.NextTick)
+                {
+                    zone.NextTick += zone.TickInterval;
+                    if (zone.NextTick <= now)
+                    {
+                        zone.NextTick = now + zone.TickInterval;
+                    }
+                    int owner = d.SlotOf(zone.Owner);
+                    byte want = zone.Faction == CombatFaction.Hostile ? (byte)CombatFaction.Player : (byte)CombatFaction.Hostile;
+                    int n = d.Count;
+                    for (int k = 0; k < n; k++)
+                    {
+                        if (d.Faction[k] != want || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable))
+                        {
+                            continue;
+                        }
+                        if (math.distance(d.Pos[k], zone.Pos) > zone.Radius + d.Radius[k])
+                        {
+                            continue;
+                        }
+                        if (zone.Dps > 0f)
+                        {
+                            DamageUnit(ref d, k, zone.Dps * zone.TickInterval, owner);
+                        }
+                        uint mask = zone.StatusMask != 0u ? zone.StatusMask : (zone.StatusSlow > 0f ? CombatConst.StatusBitZoneSlow : 0u);
+                        ApplyStatus(ref d, k, mask, zone.StatusSeconds, zone.StatusDps, zone.StatusSlow, zone.StatusVuln, owner);
+                    }
+                }
+                d.Zones[write++] = zone;
+            }
+            d.Zones.ResizeUninitialized(write);
+        }
+
+        // ─────────────────────────────── 回波 ───────────────────────────────
+
+        private static void QueueEcho(ref CombatData d, int a, int t, double at, float damage, in CombatReading r)
+        {
+            if (damage <= 0f)
+            {
+                return;
+            }
+            if (d.Echoes.Length >= d.EchoCap)
+            {
+                RefuseReading(ref d);
+                return;
+            }
+            d.Echoes.Add(new CombatEcho
+            {
+                At = at,
+                Target = d.Id[t],
+                Owner = a >= 0 && a < d.Count ? d.Id[a] : 0,
+                Damage = damage,
+                StatusMask = r.StatusMask,
+                StatusSeconds = r.StatusSeconds,
+                StatusDps = r.StatusDps,
+                StatusSlow = r.StatusSlow,
+                StatusVuln = r.StatusVuln,
+            });
+            CombatCounters c = d.Counters[0];
+            c.EchoesQueued++;
+            d.Counters[0] = c;
+        }
+
+        private static void StepEchoes(ref CombatData d)
+        {
+            double now = d.Scalars[0].Time;
+            int m = d.Echoes.Length;
+            int write = 0;
+            for (int e = 0; e < m; e++)
+            {
+                CombatEcho echo = d.Echoes[e];
+                if (echo.At > now)
+                {
+                    d.Echoes[write++] = echo;
+                    continue;
+                }
+                int t = d.SlotOf(echo.Target);
+                if (t < 0 || !d.IsAlive(t) || !d.Has(t, CombatUnitFlags.Targetable))
+                {
+                    continue;
+                }
+                int owner = d.SlotOf(echo.Owner);
+                if (DamageUnit(ref d, t, echo.Damage, owner))
+                {
+                    ApplyStatus(ref d, t, echo.StatusMask, echo.StatusSeconds, echo.StatusDps, echo.StatusSlow, echo.StatusVuln, owner);
+                }
+            }
+            d.Echoes.ResizeUninitialized(write);
+        }
+
+        // ─────────────────────────────── 无人机 ───────────────────────────────
+
+        /// <summary>补足这台单位的无人机到 <paramref name="want"/> 架（已有的刷新存活时间；上限 <see cref="CombatConst.MaxDronesPerOwner"/>）。</summary>
+        private static void LaunchDrones(ref CombatData d, int a, in CombatWeapon wp, int want)
+        {
+            CombatReading r = wp.Reading;
+            want = math.min(want, CombatConst.MaxDronesPerOwner);
+            if (want <= 0 || a < 0)
+            {
+                return;
+            }
+            double now = d.Scalars[0].Time;
+            int ownerId = d.Id[a];
+            float seconds = r.DroneSeconds > 0f ? r.DroneSeconds : 8f;
+            int have = 0;
+            for (int k = 0; k < d.Drones.Length; k++)
+            {
+                CombatDrone dr = d.Drones[k];
+                if (dr.Owner != ownerId)
+                {
+                    continue;
+                }
+                have++;
+                dr.Until = now + seconds;
+                d.Drones[k] = dr;
+            }
+            for (int q = have; q < want; q++)
+            {
+                if (d.Drones.Length >= d.DroneCap)
+                {
+                    RefuseReading(ref d);
+                    return;
+                }
+                float ang = q * 2.399963f; // 黄金角，几架无人机不叠在一处
+                double2 at = d.Pos[a] + new double2(math.cos(ang), math.sin(ang)) * (d.Radius[a] + 0.8);
+                d.Drones.Add(new CombatDrone
+                {
+                    Pos = at,
+                    Prev = at,
+                    Until = now + seconds,
+                    NextHit = now + 0.2 * (q + 1),
+                    Owner = ownerId,
+                    Weapon = d.Weapon[a],
+                    Damage = math.max(0f, wp.Damage) * (r.DroneRatio > 0f ? r.DroneRatio : 0.4f),
+                    Leash = r.DroneLeash > 0f ? r.DroneLeash : 10f,
+                    Cooldown = r.DroneCooldown > 0f ? r.DroneCooldown : 0.8f,
+                    Faction = (CombatFaction)d.Faction[a],
+                });
+                CombatCounters c = d.Counters[0];
+                c.DronesLaunched++;
+                d.Counters[0] = c;
+            }
+        }
+
+        /// <summary>无人机推进：母机阵亡 / 到期即消失；在母机牵引绳内追最近的敌对单位，按间隔命中（命中带母机武器的读法）；没有目标时回到母机身边。</summary>
+        private static void StepDrones(ref CombatData d, float dt)
+        {
+            double now = d.Scalars[0].Time;
+            int m = d.Drones.Length;
+            int write = 0;
+            for (int q = 0; q < m; q++)
+            {
+                CombatDrone dr = d.Drones[q];
+                int owner = d.SlotOf(dr.Owner);
+                if (owner < 0 || !d.IsAlive(owner) || dr.Until <= now)
+                {
+                    continue;
+                }
+                dr.Prev = dr.Pos;
+                byte want = dr.Faction == CombatFaction.Hostile ? (byte)CombatFaction.Player : (byte)CombatFaction.Hostile;
+                double2 home = d.Pos[owner];
+                int target = -1;
+                double bestDist = double.MaxValue;
+                int n = d.Count;
+                for (int k = 0; k < n; k++)
+                {
+                    if (d.Faction[k] != want || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable))
+                    {
+                        continue;
+                    }
+                    if (math.distance(d.Pos[k], home) > dr.Leash + d.Radius[k])
+                    {
+                        continue;
+                    }
+                    double dist = math.distance(d.Pos[k], dr.Pos);
+                    if (dist < bestDist)
+                    {
+                        bestDist = dist;
+                        target = k;
+                    }
+                }
+                double2 goal;
+                double stop;
+                if (target >= 0)
+                {
+                    goal = d.Pos[target];
+                    stop = DroneReachOf(ref d) * 0.8 + d.Radius[target];
+                }
+                else
+                {
+                    float ang = (q % CombatConst.MaxDronesPerOwner) * 2.399963f + (float)now * 1.5f;
+                    goal = home + new double2(math.cos(ang), math.sin(ang)) * (d.Radius[owner] + 1.2);
+                    stop = 0.05;
+                }
+                double2 to = goal - dr.Pos;
+                double len = math.length(to);
+                if (len > stop)
+                {
+                    dr.Pos += to / len * math.min(DroneSpeedOf(ref d) * dt, len - stop);
+                }
+                if (target >= 0 && now >= dr.NextHit && math.distance(dr.Pos, d.Pos[target]) <= DroneReachOf(ref d) + d.Radius[target])
+                {
+                    dr.NextHit = now + dr.Cooldown;
+                    if (dr.Weapon >= 0 && dr.Weapon < d.Weapons.Length)
+                    {
+                        CombatWeapon wp = d.Weapons[dr.Weapon];
+                        CombatReading r = wp.Reading;
+                        double tNow = now;
+                        bool wasMarked = d.MarkedUntil[target] > tNow;
+                        double2 hitPos = d.Pos[target];
+                        float dealt = StrikeDamage(ref d, owner, target, dr.Damage, r, dr.Pos, false, 0f);
+                        if (DamageUnit(ref d, target, dealt, owner))
+                        {
+                            PerTarget(ref d, owner, target, dealt, r, dr.Pos);
+                            // 无人机命中的锚定读法：伤害基数是无人机自己的伤害；不再补无人机（伴飞只在母机开火时补）；
+                            // 以无人机为锚（viaDrone）——跃击不把母机拖向无人机自己挑的目标，回拉 / 脚下区域以无人机为中心（FGR-BASE-020）。
+                            CombatWeapon droneWp = wp;
+                            droneWp.Damage = dr.Damage;
+                            droneWp.Reading.EscortDrones = 0;
+                            Anchored(ref d, owner, target, hitPos, dealt, dr.Damage, droneWp, wasMarked, dr.Pos, true);
+                        }
+                    }
+                }
+                d.Drones[write++] = dr;
+            }
+            d.Drones.ResizeUninitialized(write);
+        }
+
+        private static void RefuseReading(ref CombatData d)
+        {
+            CombatCounters c = d.Counters[0];
+            c.ReadingRefused++;
+            d.Counters[0] = c;
+        }
+
+        /// <summary>标记跳转的核心（具名反应与通用读法共用）：主目标附近已标记、视线可达的存活敌对单位，按距离升序至多跳 <paramref name="jumpMax"/> 个，每跳 × 衰减。返回跳了几个。</summary>
+        private static int MarkJumpCore(ref CombatData d, int a, int primary, double2 primaryPos, float primaryDamage, float jumpRange, float jumpFalloff, int jumpMax)
+        {
+            double now = d.Scalars[0].Time;
+            int max = math.min(jumpMax, CombatConst.MaxJumpTargets);
+            var picked = new FixedList64Bytes<int>();
+            var pickedDist = new FixedList64Bytes<float>();
+            int n = d.Count;
+            byte hostile = d.Faction[primary];
+            for (int k = 0; k < n; k++)
+            {
+                if (k == primary || !d.IsAlive(k) || d.Faction[k] != hostile || d.MarkedUntil[k] <= now)
+                {
+                    continue;
+                }
+                float dist = (float)math.distance(primaryPos, d.Pos[k]);
+                if (dist > jumpRange || !LineOfSight(ref d, primaryPos, d.Pos[k]))
+                {
+                    continue;
+                }
+                int at = pickedDist.Length;
+                for (int q = 0; q < pickedDist.Length; q++)
+                {
+                    if (dist < pickedDist[q])
+                    {
+                        at = q;
+                        break;
+                    }
+                }
+                if (at >= max)
+                {
+                    continue;
+                }
+                pickedDist.Insert(at, dist);
+                picked.Insert(at, k);
+                if (picked.Length > max)
+                {
+                    picked.RemoveAt(picked.Length - 1);
+                    pickedDist.RemoveAt(pickedDist.Length - 1);
+                }
+            }
+            float jump = primaryDamage;
+            for (int q = 0; q < picked.Length; q++)
+            {
+                jump *= jumpFalloff;
+                DamageUnit(ref d, picked[q], jump, a);
+            }
+            return picked.Length;
+        }
+
+        /// <summary>FG2-FW-02：读法相关的逐步推进（在弹体之后、兴趣点之前）：无人机 → 区域 → 回波 → 状态。</summary>
+        private static void StepReadings(ref CombatData d, float dt)
+        {
+            if (d.Drones.Length > 0)
+            {
+                StepDrones(ref d, dt);
+            }
+            if (d.Zones.Length > 0)
+            {
+                StepZones(ref d, dt);
+            }
+            if (d.Echoes.Length > 0)
+            {
+                StepEchoes(ref d);
+            }
+            StepStatus(ref d, dt);
+        }
+    }
+}
