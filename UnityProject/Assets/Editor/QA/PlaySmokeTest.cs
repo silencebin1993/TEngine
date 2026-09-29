@@ -676,6 +676,42 @@ namespace GameLogic.EditorTools
             bool codexClosed = ClickUitk("[MechanicCodexHost]", "CodexClose") && !UI.Kit.MechanicCodexPanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen;
             Check(codexClicked && codexOpen && codexClosed,
                 $"暂停菜单点“图鉴”：机制图鉴打开（{codex?.ItemCount} 条，当前“{codexTitle}”），点关闭回到暂停菜单");
+            // FG2-FW-04（FGR-FW-043 / FGR-SYS-020）：暂停菜单“战斗反馈”三个开关（勾选立即生效）与“反应记录”（日志 / 伤害归因 / 反应图鉴）。
+            bool togglesShown = pm != null && pm.ReactionPopupsToggle != null && pm.ReactionSlowMotionToggle != null && pm.ReactionNudgeToggle != null
+                                && pm.ReactionPopupsToggle.label == Localization.GameText.Get("pause.reaction_popups")
+                                && pm.ReactionPopupsToggle.value == GameSettings.ReactionPopupsEnabled && pm.ReactionSlowMotionToggle.value == GameSettings.ReactionSlowMotionEnabled
+                                && pm.ReactionNudgeToggle.value == GameSettings.ReactionCameraNudgeEnabled;
+            if (pm?.ReactionPopupsToggle != null && !pm.ReactionPopupsToggle.value)
+            {
+                pm.ReactionPopupsToggle.value = true; // 本机设置里是关着的：先打开，再验证“关掉立即生效”。
+            }
+            if (pm?.ReactionPopupsToggle != null)
+            {
+                pm.ReactionPopupsToggle.value = false;
+            }
+            bool toggledOff = !GameSettings.ReactionPopupsEnabled;
+            bool reset = ClickUitk("[PauseMenuHost]", "PauseReactionReset") && GameSettings.ReactionPopupsEnabled && pm != null && pm.ReactionPopupsToggle.value;
+            Check(togglesShown && toggledOff && reset, "暂停菜单“战斗反馈”：反应弹字 / 首次反应慢放 / 首次反应镜头推动三个开关，取消勾选立即生效，“恢复默认”全部打开");
+            bool logClicked = ClickUitk("[PauseMenuHost]", "PauseReactionLog");
+            UI.Kit.ReactionLogPanelUIToolkit rlog = UI.Kit.ReactionLogPanelUIToolkit.Instance;
+            bool logOpen = rlog != null && UI.Kit.ReactionLogPanelUIToolkit.IsOpen && rlog.PanelVisible;
+            bool codexTab = ClickUitk("[ReactionLogHost]", "ReactionTabCodex") && rlog != null && rlog.CurrentTab == UI.Kit.ReactionLogPanelUIToolkit.Tab.Codex
+                            && rlog.VisibleRowCount >= 18 && rlog.RowText(0).Length > 0 && !Localization.GameText.ContainsMarker(rlog.FooterText + rlog.RowText(0));
+            string codexFooter = rlog?.FooterText ?? string.Empty;
+            bool logClosed = ClickUitk("[ReactionLogHost]", "ReactionLogClose") && !UI.Kit.ReactionLogPanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen;
+            Check(logClicked && logOpen && codexTab && logClosed, $"暂停菜单点“反应记录”：面板打开，“反应图鉴”页签列出全部反应（“{codexFooter}”），点关闭回到暂停菜单");
+            // FG2-FW-04（卡片“伤害归因进入统计面板”）：暂停菜单“统计”→ 统计面板（战斗 · 反应伤害归因）打开，有累计 / 明细或空状态说明；筛选可切；点关闭回到暂停菜单。
+            bool statsClicked = ClickUitk("[PauseMenuHost]", "PauseStats");
+            UI.Kit.StatsPanelUIToolkit stats = UI.Kit.StatsPanelUIToolkit.Instance;
+            bool statsOpen = stats != null && UI.Kit.StatsPanelUIToolkit.IsOpen && stats.PanelVisible && stats.SectionText.Length > 0
+                             && (stats.VisibleRowCount > 0 ? stats.RowText(0).Length > 0 : stats.EmptyText.Length > 0)
+                             && !Localization.GameText.ContainsMarker(stats.SectionText + stats.FooterText + stats.CountText + stats.RowText(0) + stats.EmptyText);
+            string statsFirst = stats == null ? string.Empty : stats.VisibleRowCount > 0 ? stats.RowText(0) : stats.EmptyText;
+            bool statsFilter = ClickUitk("[StatsPanelHost]", "StatsFilterRaid") && stats != null && stats.CurrentFilter == Campaign.Combat.ReactionLogFilter.Raid
+                               && ClickUitk("[StatsPanelHost]", "StatsFilterAll") && stats.CurrentFilter == Campaign.Combat.ReactionLogFilter.All;
+            bool statsClosed = ClickUitk("[StatsPanelHost]", "StatsPanelClose") && !UI.Kit.StatsPanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen;
+            Check(statsClicked && statsOpen && statsFilter && statsClosed,
+                $"暂停菜单点“统计”：统计面板打开（“{stats?.SectionText}”，{stats?.CountText}，首行“{statsFirst}”），“突袭 / 全部”筛选可切，点关闭回到暂停菜单");
             Check(pm != null && pm.CameraZoomLabelText.Length > 0 && pm.CameraFollowLabelText.Length > 0
                   && !Localization.GameText.ContainsMarker(pm.CameraZoomLabelText + pm.CameraFollowLabelText),
                 $"暂停菜单显示接入镜头设置：“{pm?.CameraZoomLabelText}”“{pm?.CameraFollowLabelText}”");
@@ -2793,6 +2829,37 @@ namespace GameLogic.EditorTools
             Check(site != null && site.Kernel.ReactionRuleCount == Campaign.Content.NamedReactionCatalog.TagRules.Count && site.Kernel.ReactionRuleCount == 16,
                 $"破碎都市的地点内核登记了 {site?.Kernel.ReactionRuleCount} 条具名标签反应规则（fg.TbReaction）");
             Check(GameSettings.HasSeenGuidanceHook(GuidanceHooks.StatusTagFirstSeen), "第一次看到头顶状态标签时发出引导钩子（内容在 FG15-UX-04）");
+            // FG2-FW-04：真实 Play 里读法生成区域时出声、镜头正看着的地点弹出读法弹字（承接 DEBT-FG2FW02-02）；远征的伤害归因场次在记敌方受到的伤害。
+            CampaignState rs = CampaignSession.Current;
+            ReactionSessionRecord sess = Campaign.Combat.ReactionAttribution.Current(rs, Campaign.Regions.FracturedCityLayout.RegionId, create: false);
+            Write($"  - 反应反馈：读法音效 {Campaign.Feedback.FeedbackCues.CountOf(Campaign.Feedback.FeedbackCueId.ReadingZone)} 次，弹字新开 {Campaign.Feedback.ReactionPopups.SpawnedCount} 条，" +
+                  $"远征归因“{Campaign.Combat.ReactionAttribution.Title(sess)}”敌方受伤 {sess?.TotalDamage:0.0}");
+            Check(Campaign.Feedback.FeedbackCues.CountOf(Campaign.Feedback.FeedbackCueId.ReadingZone) > 0 && Campaign.Feedback.ReactionPopups.SpawnedCount > 0
+                  && UI.Kit.ReactionPopupHudUIToolkit.Instance != null,
+                "真实 Play：拖尾读法生成区域时出声、弹出“区域展开”读法弹字（观察中的地点）");
+            Check(sess != null && sess.Kind == Campaign.Combat.ReactionAttribution.KindExpedition && sess.TotalDamage > 0 && sess.EndTick < 0,
+                $"真实 Play：这次远征的伤害归因场次在记账（{Campaign.Combat.ReactionAttribution.Title(sess)}，敌方受伤 {sess?.TotalDamage:0.0}）");
+            // 卡片“伤害归因进入统计面板”：同一份数据在统计面板里出现（累计段 + 这一场的明细），“远征”筛选下仍在；点关闭收起。
+            UI.Kit.StatsPanelUIToolkit.Open();
+            UI.Kit.StatsPanelUIToolkit sp = UI.Kit.StatsPanelUIToolkit.Instance;
+            string sessTitle = Campaign.Combat.ReactionAttribution.Title(sess);
+            System.Func<bool> hasSession = () =>
+            {
+                for (int i = 0; sp != null && i < sp.VisibleRowCount; i++)
+                {
+                    if (sp.RowText(i).StartsWith(sessTitle, StringComparison.Ordinal))
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            };
+            bool spAll = sp != null && UI.Kit.StatsPanelUIToolkit.IsOpen && sp.VisibleRowCount >= 3 && sess != null && hasSession()
+                         && sp.RowText(0) == Localization.GameText.Format("stats.panel.totals_title", rs.Stats.ReactionSessions.Length);
+            bool spExp = ClickUitk("[StatsPanelHost]", "StatsFilterExpedition") && sp != null && sp.CurrentFilter == Campaign.Combat.ReactionLogFilter.Expedition && hasSession();
+            string spRow1 = sp?.RowText(1) ?? string.Empty;
+            bool spClosed = ClickUitk("[StatsPanelHost]", "StatsPanelClose") && !UI.Kit.StatsPanelUIToolkit.IsOpen;
+            Check(spAll && spExp && spClosed, $"真实 Play：统计面板“战斗 · 反应伤害归因”列出累计（“{spRow1}”）与这一场“{sessTitle}”的明细，“远征”筛选下仍在，点关闭收起");
             Check(unit != 0 && icons > 0 && shown,
                 $"真实 Play：带标签的敌人头顶画出图标（{icons} 个{(gpu ? "" : "，无 GPU 只备缓冲")}），光标停上去弹出悬停读数（{tagName}，含剩余时间与叠层）");
             InputRouter.DebugSetReader(new ScriptedReader { Mouse = OffScreen });

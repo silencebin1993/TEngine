@@ -60,6 +60,8 @@ namespace GameLogic.Campaign.Combat
         /// <summary>FG1-VFX-01（FGR-FW-021）：这组参数的编译结果里生效固件的类别集合 → 机身状态（<see cref="Blueprint.MachineMorph.MaskOf(Blueprint.BlueprintCircuitPreview)"/>）。
         /// 与武器参数同一次解析得出，表现层（<c>MachineMorphView</c>）只读这里，不另算。</summary>
         public Blueprint.MorphMask Morph;
+        /// <summary>FG2-FW-04：这组参数的编译结果里生效的固件（反应日志“参与的固件”从这里按反应配料筛）。</summary>
+        public string[] FirmwareIds;
     }
 
     /// <summary>
@@ -132,6 +134,8 @@ namespace GameLogic.Campaign.Combat
             Kernel.SetReactionRules(NamedReactionCatalog.BuildKernelRules());
             Kernel.SetStatusFx(NamedReactionCatalog.BuildStatusFx());
             ReactionRevision = NamedReactionCatalog.Revision;
+            // FG2-FW-04：规则下标变了（纪元 +1）→ 当场重取反馈基线，下一步起的反应照常进日志 / 归因（不把第一步吞成基线）。
+            ReactionFeedback.Prime(Kernel, FeedCursor);
         }
 
         /// <summary>最近一次登记时反应表的版本号（与 <see cref="NamedReactionCatalog.Revision"/> 不同 = 表重载过，下一步重新登记）。</summary>
@@ -508,6 +512,7 @@ namespace GameLogic.Campaign.Combat
             info.PrimaryId = p.PrimaryId;
             info.UtilityId = p.UtilityId;
             info.Morph = MachineMorph.MaskOf(p); // FG1-VFX-01：机身状态 = 本次编译结果里生效固件的类别集合。
+            info.FirmwareIds = p.FirmwareIds ?? Array.Empty<string>();
             info.Uplinked = SignalUplinkService.IsUplinked(state, logicId);
             // FGR-SIG-033：信号带进来的核心固件正在冷却（冷却属于信号）时，这条反应暂不发动；固件照样插着。
             info.ReactionSuppressed = SignalUplinkService.IsReactionSuppressed(state, logicId, p.ReactionId);
@@ -922,6 +927,21 @@ namespace GameLogic.Campaign.Combat
             }
             Kernel.Step(dt, time);
             ProcessEvents();
+            // FG2-FW-04：反应反馈与伤害归因（按内核累计计数的增量，O(反应条数)；与是否观察无关的部分照常结算）。
+            ReactionFeedback.Process(this, CampaignSession.Current);
+        }
+
+        /// <summary>FG2-FW-04：反馈进给的基线（<see cref="ReactionFeedback"/> 专用）。</summary>
+        public ReactionFeedCursor FeedCursor { get; } = new ReactionFeedCursor();
+
+        /// <summary>FG2-FW-04：具名敌人的类型内容 ID（反应日志显示敌人名）；查不到返回 null。</summary>
+        public string EnemyTypeOf(CampaignState state, string enemyInstanceId)
+        {
+            if (!TryGetEnemyUnit(enemyInstanceId, out int unit))
+            {
+                return null;
+            }
+            return FindEnemyRecord(state, unit)?.EnemyTypeId;
         }
 
         /// <summary>排空至多 <see cref="MaxEventsPerStep"/> 条玩法事件与本批提示事件，按序号合并后逐条结算。即时开火之后也调用。</summary>
@@ -1188,6 +1208,8 @@ namespace GameLogic.Campaign.Combat
                     if (reactionId != null)
                     {
                         NotifyReactionFired(state, e.Unit, reactionId, e.Code2 != 0);
+                        // FG2-FW-04：装配反应（标记跳转 / 熔穿过载）同样进反应日志、伤害归因的次数与首次触发（慢放 / 图鉴 / 弹字）。
+                        ReactionFeedback.OnAssemblyReaction(this, state, reactionId, e.Unit, e.Other, new Vector2((float)e.Pos.x, (float)e.Pos.y));
                     }
                     return;
                 }
@@ -1253,7 +1275,7 @@ namespace GameLogic.Campaign.Combat
                     TagReactionCuesHandled++;
                     if (named)
                     {
-                        FeedbackCues.RaiseAt(FeedbackCueId.TagReaction, at, GameText.Format("reaction.cue", NamedReactionCatalog.NameOf(rid)));
+                        // FG2-FW-04：音效 / 声音字幕 / 弹字改由 ReactionFeedback 按内核计数的增量每步聚合发出（提示事件超上限会丢，计数不会）；这里只留引导钩子。
                         GuidanceHooks.Raise(GuidanceHooks.ReactionFirstNamed);
                     }
                     return;
@@ -1679,6 +1701,8 @@ namespace GameLogic.Campaign.Combat
             {
                 Kernel.Despawn(id);
             }
+            // FG2-FW-04：读档后内核的累计值换了一份（纪元 +1）→ 当场重取反馈基线：读档前后的差不算新触发，读档后的第一步照常结算。
+            ReactionFeedback.Prime(Kernel, FeedCursor);
             return true;
         }
 

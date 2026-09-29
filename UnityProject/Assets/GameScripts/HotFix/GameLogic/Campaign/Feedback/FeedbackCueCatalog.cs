@@ -156,7 +156,14 @@ namespace GameLogic.Campaign.Feedback
             // FG1-HUD-01（FG-GAP-044）：信号离开机器（玩家按接入 / 退出键离开、切到别的机器时由接入提交音覆盖）。音效沿用信号类的“恢复”短音降音量，
             // 与断链（SignalLost）的警报区分；同类最小间隔 0.3 秒（1 秒内连按 10 次不刷屏）。字幕只在“字幕”开启时出（状态行已有“已离开 …”）。
             // FG2-FW-03：具名标签反应（短路、热震……）触发时报出机械名（detail = 名字）；音效借用标记跳转的，正式音效与聚合弹字归 FG2-FW-04。
-            Add(new FeedbackCueDef { Id = FeedbackCueId.TagReaction, SfxId = "sfx_reaction_markjump", Volume = 0.7f, MinIntervalSeconds = 0.3f, Tag = "反应", Caption = string.Empty, TagKey = "feedback.tag.reaction", Tone = FeedbackTone.Info, CaptionSeconds = 2.5f, RequirementNote = "FG2-FW-03 具名反应命名（FGR-FW-041）" });
+            // FG2-FW-04：反应名另有打在目标头上的弹字（ReactionPopups，聚合 + 每秒上限，可在设置里关）；这里的声音 + 常显字幕（AC-AUD-001“反应”类的非声音反馈，
+            // 弹字关掉时仍在）改为每步每条反应一次（“短路 ×12”），同类 0.3 秒限流。音效仍借用标记跳转的（正式音效随 FG2-VFX-02 美术替换，DEBT-FG2FW04-02）。
+            Add(new FeedbackCueDef { Id = FeedbackCueId.TagReaction, SfxId = "sfx_reaction_markjump", Volume = 0.7f, MinIntervalSeconds = 0.3f, Tag = "反应", Caption = string.Empty, TagKey = "feedback.tag.reaction", Tone = FeedbackTone.Info, CaptionSeconds = 2.5f, RequirementNote = "FG2-FW-03 具名反应命名（FGR-FW-041）；FG2-FW-04 聚合（FGR-FW-043）" });
+            // FG2-FW-04（承接 DEBT-FG2FW02-02 读法音效）：读法生成区域 / 回波 / 无人机时出声（每步聚合一次、同类 0.25 秒限流）；画面上有区域圆片 / 无人机与弹字，不出字幕。
+            // 音效借用已有的短音（区域 = 熔穿、回波 = 命中、无人机 = 命令确认），正式音效随 FG2-VFX-02（DEBT-FG2FW04-02）。
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ReadingZone, SfxId = "sfx_reaction_melt", Volume = 0.45f, MinIntervalSeconds = 0.25f, CaptionMode = FeedbackCaptionMode.None, RequirementNote = "FG2-FW-04 读法音效（区域）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ReadingEcho, SfxId = "sfx_hit", Volume = 0.4f, MinIntervalSeconds = 0.25f, CaptionMode = FeedbackCaptionMode.None, RequirementNote = "FG2-FW-04 读法音效（回波）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ReadingDrone, SfxId = "sfx_command_ack", Volume = 0.45f, MinIntervalSeconds = 0.25f, CaptionMode = FeedbackCaptionMode.None, RequirementNote = "FG2-FW-04 读法音效（无人机）" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.UplinkLeave, SfxId = "sfx_signal_restore", Volume = 0.6f, MinIntervalSeconds = 0.3f, Tag = "离开", Caption = "信号离开机器", TagKey = "feedback.tag.uplink_leave", CaptionKey = "feedback.caption.uplink_leave", CaptionMode = FeedbackCaptionMode.SubtitlesOnly, Tone = FeedbackTone.Info, CaptionSeconds = 2.5f, RequirementNote = "FG-GAP-044 接入 / 离开音效钩子" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.SignalLinkWarning, SfxId = "sfx_alarm_warning", Volume = 0.7f, Tag = "信号", Caption = string.Empty, Tone = FeedbackTone.Warning, CaptionSeconds = 4f, MinIntervalSeconds = 1f, RequirementNote = "FG1-SIG-04 覆盖边缘 / 静默夜预警" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.SaveComplete, SfxId = "sfx_save_ok", Channel = AudioType.UISound, Tag = "存档", Caption = "已保存", Tone = FeedbackTone.Info, CaptionSeconds = 2.5f, MinIntervalSeconds = 1f });

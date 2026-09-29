@@ -65,6 +65,10 @@ namespace GameLogic.Campaign.Feedback
         UplinkLeave,
         // ── 具名标签反应（FG2-FW-03：开放命名的反应触发时报出机械名；聚合 / 每秒上限 / 慢放归 FG2-FW-04） ──
         TagReaction,
+        // ── 读法生成（FG2-FW-04 承接 DEBT-FG2FW02-02：区域展开 / 回波 / 无人机出动的音效，每步聚合、同类限流） ──
+        ReadingZone,
+        ReadingEcho,
+        ReadingDrone,
 
         Max,
     }

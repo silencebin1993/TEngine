@@ -113,6 +113,12 @@ namespace BinGames.Sim.Combat
         public NativeList<int> StatusSource;
         /// <summary>FG2-FW-03：每个状态位的叠层数（2 位一格，位 i 的层数 = (StatusStacks &gt;&gt; 2i) &amp; 3；上限 <see cref="CombatConfig.StatusStackCap"/>，最多 3）。</summary>
         public NativeList<ulong> StatusStacks;
+        /// <summary>FG2-FW-04（DEBT-FG2FW03-02，格式 5）：每个状态位自己的到期时间（每单位 <see cref="CombatConst.StatusBitStride"/> 格，槽位 i 的位 b 在 i × 32 + b）。
+        /// <see cref="StatusUntil"/> 仍是这些时间里最晚的一个（“这个单位还有没有标签”的快速判断）；先挂的标签先到期，到期只清那一位并按剩下的位重算效果。</summary>
+        public NativeList<double> StatusBitUntil;
+        /// <summary>FG2-FW-04 修复（格式 6）：区域减速位（<see cref="CombatConst.StatusBitZoneSlow"/>）自己的减速值。<see cref="StatusSlow"/> 是所有来源取大后的结果；
+        /// 减速标签逐位到期后按剩下的位重算时，区域减速从这里取起点，不再沿用混合最大值（否则已到期的减速标签的数值会残留到区域减速位到期）。</summary>
+        public NativeList<float> StatusZoneSlow;
         public NativeList<CombatCommand> Cmd;
         public NativeList<float2> Direct;
 
@@ -158,6 +164,20 @@ namespace BinGames.Sim.Combat
         public NativeArray<float> ReactionDamage;
         /// <summary>FG2-FW-03：计数槽 i 属于哪条反应（<see cref="CombatReactionRule.Key"/>；0 = 无键 / 空槽）。登记规则与读档时按键把计数挪到新下标。</summary>
         public NativeArray<int> ReactionKey;
+
+        // ── FG2-FW-04 反馈与伤害归因的“进给”（不进快照、不进状态哈希：只给热更层按步读增量；读档 / 重新登记规则后热更层重取基线）──
+        /// <summary>每条反应最后一次触发的位置、出手者单位 ID、目标单位 ID（弹字定位、反应日志的触发者与目标）。</summary>
+        public NativeArray<double2> ReactionLastPos;
+        public NativeArray<int> ReactionLastSource;
+        public NativeArray<int> ReactionLastTarget;
+        /// <summary>每条反应打在敌对阵营单位身上的额外伤害（伤害归因：玩家这一边的反应伤害；克制类的返还不计）。</summary>
+        public NativeArray<double> ReactionHostileDamage;
+        /// <summary>[0] = 敌对阵营单位累计受到的伤害（精确值，<see cref="CombatCounters.DamageToHostile"/> 是逐次四舍五入的整数）。</summary>
+        public NativeArray<double> DamageDealtHostile;
+        /// <summary>读法生成的区域 / 回波 / 无人机（下标见 <see cref="CombatConst.ReadingFeedZone"/> 等）：累计次数、最后的位置与出手者（读法弹字与音效）。</summary>
+        public NativeArray<long> ReadingFeedCount;
+        public NativeArray<double2> ReadingFeedPos;
+        public NativeArray<int> ReadingFeedOwner;
 
         /// <summary>玩法事件队列（永不丢弃；热更层每步至多取 MaxGameplayEventsPerStep 条，剩下的留到下一步，进存档）。</summary>
         public NativeList<CombatEvent> Gameplay;
@@ -206,6 +226,8 @@ namespace BinGames.Sim.Combat
                 StatusVuln = new NativeList<float>(capacity, Allocator.Persistent),
                 StatusSource = new NativeList<int>(capacity, Allocator.Persistent),
                 StatusStacks = new NativeList<ulong>(capacity, Allocator.Persistent),
+                StatusBitUntil = new NativeList<double>(capacity * CombatConst.StatusBitStride, Allocator.Persistent),
+                StatusZoneSlow = new NativeList<float>(capacity, Allocator.Persistent),
                 Cmd = new NativeList<CombatCommand>(capacity, Allocator.Persistent),
                 Direct = new NativeList<float2>(capacity, Allocator.Persistent),
                 NavSt = new NativeList<byte>(capacity, Allocator.Persistent),
@@ -232,6 +254,14 @@ namespace BinGames.Sim.Combat
                 ReactionCount = new NativeArray<int>(CombatConst.MaxReactions, Allocator.Persistent),
                 ReactionDamage = new NativeArray<float>(CombatConst.MaxReactions, Allocator.Persistent),
                 ReactionKey = new NativeArray<int>(CombatConst.MaxReactions, Allocator.Persistent),
+                ReactionLastPos = new NativeArray<double2>(CombatConst.MaxReactions, Allocator.Persistent),
+                ReactionLastSource = new NativeArray<int>(CombatConst.MaxReactions, Allocator.Persistent),
+                ReactionLastTarget = new NativeArray<int>(CombatConst.MaxReactions, Allocator.Persistent),
+                ReactionHostileDamage = new NativeArray<double>(CombatConst.MaxReactions, Allocator.Persistent),
+                DamageDealtHostile = new NativeArray<double>(1, Allocator.Persistent),
+                ReadingFeedCount = new NativeArray<long>(CombatConst.ReadingFeedKinds, Allocator.Persistent),
+                ReadingFeedPos = new NativeArray<double2>(CombatConst.ReadingFeedKinds, Allocator.Persistent),
+                ReadingFeedOwner = new NativeArray<int>(CombatConst.ReadingFeedKinds, Allocator.Persistent),
                 Gameplay = new NativeList<CombatEvent>(64, Allocator.Persistent),
                 Cues = new NativeList<CombatEvent>(64, Allocator.Persistent),
                 Scalars = new NativeArray<CombatScalars>(1, Allocator.Persistent),
@@ -284,6 +314,8 @@ namespace BinGames.Sim.Combat
             StatusVuln.Dispose();
             StatusSource.Dispose();
             StatusStacks.Dispose();
+            StatusBitUntil.Dispose();
+            StatusZoneSlow.Dispose();
             Cmd.Dispose();
             Direct.Dispose();
             NavSt.Dispose();
@@ -310,6 +342,14 @@ namespace BinGames.Sim.Combat
             ReactionCount.Dispose();
             ReactionDamage.Dispose();
             ReactionKey.Dispose();
+            ReactionLastPos.Dispose();
+            ReactionLastSource.Dispose();
+            ReactionLastTarget.Dispose();
+            ReactionHostileDamage.Dispose();
+            DamageDealtHostile.Dispose();
+            ReadingFeedCount.Dispose();
+            ReadingFeedPos.Dispose();
+            ReadingFeedOwner.Dispose();
             Gameplay.Dispose();
             Cues.Dispose();
             Scalars.Dispose();
@@ -374,6 +414,11 @@ namespace BinGames.Sim.Combat
             StatusVuln.Add(0f);
             StatusSource.Add(0);
             StatusStacks.Add(0UL);
+            for (int b = 0; b < CombatConst.StatusBitStride; b++)
+            {
+                StatusBitUntil.Add(0);
+            }
+            StatusZoneSlow.Add(0f);
             Cmd.Add(default);
             Direct.Add(float2.zero);
             NavSt.Add(0);
@@ -425,6 +470,11 @@ namespace BinGames.Sim.Combat
             StatusVuln[to] = StatusVuln[from];
             StatusSource[to] = StatusSource[from];
             StatusStacks[to] = StatusStacks[from];
+            for (int b = 0; b < CombatConst.StatusBitStride; b++)
+            {
+                StatusBitUntil[to * CombatConst.StatusBitStride + b] = StatusBitUntil[from * CombatConst.StatusBitStride + b];
+            }
+            StatusZoneSlow[to] = StatusZoneSlow[from];
             Cmd[to] = Cmd[from];
             Direct[to] = Direct[from];
             NavSt[to] = NavSt[from];
@@ -469,6 +519,8 @@ namespace BinGames.Sim.Combat
             StatusVuln.ResizeUninitialized(length);
             StatusSource.ResizeUninitialized(length);
             StatusStacks.ResizeUninitialized(length);
+            StatusBitUntil.ResizeUninitialized(length * CombatConst.StatusBitStride);
+            StatusZoneSlow.ResizeUninitialized(length);
             Cmd.ResizeUninitialized(length);
             Direct.ResizeUninitialized(length);
             NavSt.ResizeUninitialized(length);

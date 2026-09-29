@@ -110,6 +110,46 @@ namespace GameLogic.Core
 
         public static void TogglePause() => SetPaused(!Paused);
 
+        // ── FG2-FW-04 反应首次触发的慢放（FGR-FW-043）──────────────────────────
+        // 慢放只改变“每一帧跑几步”（真实时间里的节奏），不改变每步的 dt：模拟结果与不慢放逐字段一致（观察与否一致）。
+        // 慢放时长按真实秒计、只在世界不暂停时流逝（暂停时冻结，继续后接着慢完）；倍率乘在当前倍速上（0.5x～3x 都成比例变慢）。
+
+        private static float _slowLeft;
+        private static float _slowFactor = 1f;
+
+        /// <summary>此刻的慢放倍率（没有慢放 = 1）。</summary>
+        public static float SlowMotionFactor => _slowLeft > 0f ? _slowFactor : 1f;
+
+        /// <summary>慢放还剩多少真实秒（暂停时不减）。</summary>
+        public static float SlowMotionSecondsLeft => _slowLeft;
+
+        /// <summary>本进程累计开始慢放的次数（自检断言“只发生一次”）。</summary>
+        public static int SlowMotionStarts { get; private set; }
+
+        /// <summary>开始一段慢放：<paramref name="realSeconds"/> 真实秒内世界按 <paramref name="factor"/>（0～1）倍的节奏推进。已在慢放时取较长的剩余与较慢的倍率。</summary>
+        public static void BeginSlowMotion(float realSeconds, float factor)
+        {
+            if (!(realSeconds > 0f) || !(factor > 0f) || factor >= 1f)
+            {
+                return;
+            }
+            _slowFactor = _slowLeft > 0f ? Math.Min(_slowFactor, factor) : factor;
+            _slowLeft = Math.Max(_slowLeft, realSeconds);
+            SlowMotionStarts++;
+            Revision++;
+        }
+
+        /// <summary>立即结束慢放（设置关掉、离开世界）。</summary>
+        public static void CancelSlowMotion()
+        {
+            if (_slowLeft > 0f)
+            {
+                _slowLeft = 0f;
+                _slowFactor = 1f;
+                Revision++;
+            }
+        }
+
         public static void SetDirectLocked(bool locked)
         {
             if (DirectLocked != locked)
@@ -133,7 +173,23 @@ namespace GameLogic.Core
                 return 0;
             }
             float dt = realDt < 0f ? 0f : (realDt > _maxFrameSeconds ? _maxFrameSeconds : realDt);
-            FrameScaledDt = dt * EffectiveSpeed;
+            if (_slowLeft > 0f)
+            {
+                // FG2-FW-04：这一帧里还在慢放的那一段按慢放倍率算，其余照常（慢放结束的那一帧不整帧变慢）。
+                float slowPart = Math.Min(dt, _slowLeft);
+                _slowLeft -= slowPart;
+                FrameScaledDt = (slowPart * _slowFactor + (dt - slowPart)) * EffectiveSpeed;
+                if (_slowLeft <= 0f)
+                {
+                    _slowLeft = 0f;
+                    _slowFactor = 1f;
+                    Revision++;
+                }
+            }
+            else
+            {
+                FrameScaledDt = dt * EffectiveSpeed;
+            }
             _accumulator += FrameScaledDt;
             double step = 1.0 / StepHz;
             int n = (int)Math.Floor(_accumulator / step + 1e-9);
@@ -223,6 +279,8 @@ namespace GameLogic.Core
             Speed = 1f;
             Paused = false;
             DirectLocked = false;
+            _slowLeft = 0f;
+            _slowFactor = 1f;
             _accumulator = 0;
             FrameScaledDt = 0f;
             LastFrameSteps = 0;

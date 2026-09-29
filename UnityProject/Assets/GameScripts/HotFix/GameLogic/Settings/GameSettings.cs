@@ -32,6 +32,12 @@ namespace GameLogic.Settings
         public bool ScreenShakeEnabled = true;
         public bool FlashReductionEnabled = false; // AC-ACC-003：降低闪光。
 
+        /// <summary>FG2-FW-04（FGR-FW-043 / FGR-SYS-020“游戏性：反应弹字、慢放、镜头推动”）：三个开关，默认开。
+        /// 关掉弹字：反应名不再打在目标头上（字幕 / 日志 / 统计照常）；关掉慢放 / 镜头推动：首次触发仍解锁图鉴、记首次触发，只是不慢放 / 不推镜头。</summary>
+        public bool ReactionPopupsEnabled = true;
+        public bool ReactionSlowMotionEnabled = true;
+        public bool ReactionCameraNudgeEnabled = true;
+
         public float MasterVolume = 1f;
         public float MusicVolume = 1f;
         public float SfxVolume = 1f;
@@ -109,6 +115,9 @@ namespace GameLogic.Settings
         public static float UplinkCameraZoom => Data.UplinkCameraZoom > 0f ? Data.UplinkCameraZoom : 1f;
         public static float UplinkFollowStrength => Data.UplinkFollowStrength > 0f ? Data.UplinkFollowStrength : 1f;
         public static bool ScreenShakeEnabled => Data.ScreenShakeEnabled;
+        public static bool ReactionPopupsEnabled => Data.ReactionPopupsEnabled;
+        public static bool ReactionSlowMotionEnabled => Data.ReactionSlowMotionEnabled;
+        public static bool ReactionCameraNudgeEnabled => Data.ReactionCameraNudgeEnabled;
         public static bool FlashReductionEnabled => Data.FlashReductionEnabled;
         public static float MasterVolume => Data.MasterVolume;
         public static float MusicVolume => Data.MusicVolume;
@@ -307,6 +316,45 @@ namespace GameLogic.Settings
         public static void SetScreenShakeEnabled(bool enabled)
         {
             Data.ScreenShakeEnabled = enabled;
+            Save();
+        }
+
+        public static void SetReactionPopupsEnabled(bool enabled)
+        {
+            Data.ReactionPopupsEnabled = enabled;
+            if (!enabled)
+            {
+                GameLogic.Campaign.Feedback.ReactionPopups.Clear(); // 关掉时屏幕上已有的弹字也立刻收起。
+            }
+            Save();
+        }
+
+        public static void SetReactionSlowMotionEnabled(bool enabled)
+        {
+            Data.ReactionSlowMotionEnabled = enabled;
+            if (!enabled)
+            {
+                GameLogic.Core.GameClock.CancelSlowMotion(); // 关掉时正在慢放的也立刻恢复。
+            }
+            Save();
+        }
+
+        public static void SetReactionCameraNudgeEnabled(bool enabled)
+        {
+            Data.ReactionCameraNudgeEnabled = enabled;
+            if (!enabled)
+            {
+                GameLogic.Campaign.Feedback.CameraNudge.Reset();
+            }
+            Save();
+        }
+
+        /// <summary>FG2-FW-04：三个反应反馈开关恢复默认（全开）。</summary>
+        public static void ResetReactionFeedback()
+        {
+            Data.ReactionPopupsEnabled = true;
+            Data.ReactionSlowMotionEnabled = true;
+            Data.ReactionCameraNudgeEnabled = true;
             Save();
         }
 

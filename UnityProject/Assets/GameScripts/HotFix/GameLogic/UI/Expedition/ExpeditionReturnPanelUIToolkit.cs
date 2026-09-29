@@ -40,6 +40,7 @@ namespace GameLogic.UI.Expedition
         private Label _groundLabel;
         private ScrollView _list;
         private Label _summaryLabel;
+        private Label _reactionShareLabel;
         private VisualElement _evacButtons;
         private VisualElement _abandonButtons;
         private Button _confirmButton;
@@ -84,6 +85,7 @@ namespace GameLogic.UI.Expedition
             _groundLabel = _root.Q<Label>("GroundLabel");
             _list = _root.Q<ScrollView>("RosterList");
             _summaryLabel = _root.Q<Label>("SummaryLabel");
+            _reactionShareLabel = _root.Q<Label>("ReactionShareLabel");
             _evacButtons = _root.Q<VisualElement>("EvacButtons");
             _abandonButtons = _root.Q<VisualElement>("AbandonButtons");
             _confirmButton = _root.Q<Button>("ConfirmButton");
@@ -185,6 +187,11 @@ namespace GameLogic.UI.Expedition
             {
                 _objectiveLabel.text = snapshot.ObjectivesComplete ? "任务目标：已完成" : "任务目标：尚未完成（撤离后保持\"待补回收\"）";
             }
+            // FG2-FW-04（FGR-FW-043）：本次远征的反应伤害占比（伤害归因的这一场）。
+            if (_reactionShareLabel != null)
+            {
+                _reactionShareLabel.text = ReactionShareText(state, snapshot.RegionId);
+            }
             _groundLabel.text = snapshot.GroundScrapItemCount > 0
                 ? $"遗留货物：地面仍有 {snapshot.GroundScrapItemCount} 处未装载物资（撤离后不自动入账）"
                 : "遗留货物：无";
@@ -220,6 +227,12 @@ namespace GameLogic.UI.Expedition
                 ? $"全队 {snapshot.Roster.Length} 台机器全部失去战斗/移动能力，已无法继续远征。已装车关键物随全灭结算为丢失，已归档的技术与家园不受影响。"
                 : $"幸存 {aliveCount} 台，阵亡 {deadCount} 台。确认撤离后，幸存机器携带的关键物视为已带回，未装车的物资留在原地。";
         }
+
+        /// <summary>FG2-FW-04：撤离报告里这一场远征的反应伤害占比（自检直接调，与面板同一段文字）。</summary>
+        public static string ReactionShareText(CampaignState state, string regionId) =>
+            Campaign.Combat.ReactionAttribution.Summary(state, Campaign.Combat.ReactionAttribution.Current(state, regionId, create: false));
+
+        public string ReactionShareLabelText => _reactionShareLabel?.text ?? string.Empty;
 
         /// <summary>ER8：核心进攻的撤离用语（此前沿用外围侦察的“侦察成功……核心区仍封锁”）。主核心没打完就撤离，
         /// 本次尝试作废（ER7-FAIL-01 <c>ResetToPreBossState</c>）；打完但核心数据没装车，要先装车。</summary>

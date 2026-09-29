@@ -1037,7 +1037,53 @@ namespace BinGames.Sim.Combat
                 }
             }
             RemapReactionCounters(ref _d, keys, counts, dmgs, n);
+            // FG2-FW-04：规则下标变了，按下标记的进给（最后位置 / 出手者 / 目标 / 敌方身上的反应伤害）清零，热更层按新的纪元重取基线。
+            for (int i = 0; i < n; i++)
+            {
+                _d.ReactionLastPos[i] = double2.zero;
+                _d.ReactionLastSource[i] = 0;
+                _d.ReactionLastTarget[i] = 0;
+                _d.ReactionHostileDamage[i] = 0;
+            }
+            FeedEpoch++;
             return rules == null || rules.Length <= CombatConst.MaxReactions;
+        }
+
+        // ─────────────────────────────── FG2-FW-04 反馈与伤害归因进给 ───────────────────────────────
+
+        /// <summary>进给纪元：读档成功、重新登记反应规则时 +1。进给数组不进快照，热更层看到纪元变了就把当前值当新基线（不把读档前后的差当成新触发）。</summary>
+        public int FeedEpoch { get; private set; }
+
+        /// <summary>第 <paramref name="index"/> 条反应最后一次触发的位置 / 出手者单位 ID / 目标单位 ID。</summary>
+        public double2 ReactionLastPosOf(int index) => index >= 0 && index < CombatConst.MaxReactions ? _d.ReactionLastPos[index] : double2.zero;
+
+        public int ReactionLastSourceOf(int index) => index >= 0 && index < CombatConst.MaxReactions ? _d.ReactionLastSource[index] : 0;
+
+        public int ReactionLastTargetOf(int index) => index >= 0 && index < CombatConst.MaxReactions ? _d.ReactionLastTarget[index] : 0;
+
+        /// <summary>第 <paramref name="index"/> 条反应打在敌对阵营身上的累计额外伤害（伤害归因的分子；不进快照）。</summary>
+        public double ReactionHostileDamageOf(int index) => index >= 0 && index < CombatConst.MaxReactions ? _d.ReactionHostileDamage[index] : 0;
+
+        /// <summary>敌对阵营累计受到的伤害（精确值；伤害归因的分母；不进快照）。</summary>
+        public double DamageDealtToHostile => _d.DamageDealtHostile[0];
+
+        /// <summary>读法进给（<see cref="CombatConst.ReadingFeedZone"/> / Echo / Drone）：累计次数、最后的位置与出手者单位 ID。</summary>
+        public long ReadingFeedCountOf(int kind) => kind >= 0 && kind < CombatConst.ReadingFeedKinds ? _d.ReadingFeedCount[kind] : 0;
+
+        public double2 ReadingFeedPosOf(int kind) => kind >= 0 && kind < CombatConst.ReadingFeedKinds ? _d.ReadingFeedPos[kind] : double2.zero;
+
+        public int ReadingFeedOwnerOf(int kind) => kind >= 0 && kind < CombatConst.ReadingFeedKinds ? _d.ReadingFeedOwner[kind] : 0;
+
+        /// <summary>FG2-FW-04（DEBT-FG2FW03-02）：单位身上某个状态位还剩多少游戏秒（没挂 / 已到期 = 0）。悬停读数逐标签显示。</summary>
+        public double StatusBitSecondsLeft(int id, int bit)
+        {
+            int slot = _d.SlotOf(id);
+            double now = _d.Scalars[0].Time;
+            if (slot < 0 || bit < 0 || bit > 31 || !_d.StatusActive(slot, now) || (_d.Status[slot] & (1u << bit)) == 0u)
+            {
+                return 0;
+            }
+            return math.max(0, _d.StatusBitUntil[slot * CombatConst.StatusBitStride + bit] - now);
         }
 
         /// <summary>快照里每条反应计数占的字节数（稳定键 int + 次数 int + 伤害 float；自检改坏值时按它算偏移）。</summary>
@@ -1225,6 +1271,15 @@ namespace BinGames.Sim.Combat
                 Mix(ref h, _d.StatusSlow[i]);
                 Mix(ref h, _d.StatusVuln[i]);
                 Mix(ref h, (long)_d.StatusStacks[i]);
+                // FG2-FW-04（格式 5）：已挂各位自己的到期时间（没挂的位不参与，残留的旧值不影响哈希）。
+                uint hb = _d.Status[i];
+                while (hb != 0u)
+                {
+                    int b = math.tzcnt(hb);
+                    hb &= hb - 1u;
+                    Mix(ref h, _d.StatusBitUntil[i * CombatConst.StatusBitStride + b]);
+                }
+                Mix(ref h, _d.StatusZoneSlow[i]); // FG2-FW-04 修复（格式 6）
                 CombatCommand c = _d.Cmd[i];
                 Mix(ref h, (int)c.Kind);
                 Mix(ref h, c.Target);
@@ -1447,6 +1502,22 @@ namespace BinGames.Sim.Combat
                 {
                     w.Write(_d.StatusStacks[i]);
                 }
+                // FG2-FW-04（格式 5）：每个已挂状态位自己的到期时间（按位序，条数 = 掩码里的位数）。
+                if (format >= 5)
+                {
+                    uint wb = _d.Status[i];
+                    while (wb != 0u)
+                    {
+                        int b = math.tzcnt(wb);
+                        wb &= wb - 1u;
+                        w.Write(_d.StatusBitUntil[i * CombatConst.StatusBitStride + b]);
+                    }
+                }
+                // FG2-FW-04 修复（格式 6）：区域减速位自己的减速值。
+                if (format >= 6)
+                {
+                    w.Write(_d.StatusZoneSlow[i]);
+                }
             }
 
             w.Write(_d.Projectiles.Length);
@@ -1647,6 +1718,7 @@ namespace BinGames.Sim.Combat
             }
             _d.Dispose();
             _d = staging;
+            FeedEpoch++;
             return CombatLoadResult.Ok;
         }
 
@@ -1706,6 +1778,7 @@ namespace BinGames.Sim.Combat
             {
                 return CombatLoadResult.InvalidValue;
             }
+            var bitUntil = new System.Collections.Generic.List<double>(CombatConst.StatusBitStride);
             for (int i = 0; i < un; i++)
             {
                 var sp = new CombatSpawn();
@@ -1795,6 +1868,27 @@ namespace BinGames.Sim.Combat
                 {
                     return CombatLoadResult.InvalidValue;
                 }
+                // FG2-FW-04（格式 5）：各位自己的到期；更老的快照各位 = 整组到期。任何一位晚于整组到期（整组 = 最晚的一位）或不是数都拒绝。
+                bitUntil.Clear();
+                uint rb = status;
+                while (rb != 0u)
+                {
+                    int b = math.tzcnt(rb);
+                    rb &= rb - 1u;
+                    double bu = format >= 5 ? r.ReadDouble() : statusUntil;
+                    if (double.IsNaN(bu) || double.IsInfinity(bu) || bu > statusUntil)
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                    bitUntil.Add(bu);
+                }
+                // FG2-FW-04 修复（格式 6）：区域减速位自己的减速值；更老的快照按原来的算法取 StatusSlow（没有区域减速位 = 0）。
+                bool hasZoneSlow = (status & CombatConst.StatusBitZoneSlow) != 0u;
+                float zoneSlow = format >= 6 ? r.ReadSingle() : hasZoneSlow ? statusSlow : 0f;
+                if (float.IsNaN(zoneSlow) || zoneSlow < 0f || zoneSlow > 1f || (!hasZoneSlow && zoneSlow != 0f))
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
                 if (id <= 0 || id >= s.NextId || !IsFinite(sp.Position) || !IsFinite(sp.Home) || float.IsNaN(sp.Health)
                     || sp.Weapon >= wn || sp.BehaviorProfile >= pn || staging.SlotOf(id) >= 0)
                 {
@@ -1819,6 +1913,15 @@ namespace BinGames.Sim.Combat
                 staging.StatusVuln[slot] = statusVuln;
                 staging.StatusSource[slot] = statusSource;
                 staging.StatusStacks[slot] = stacks;
+                staging.StatusZoneSlow[slot] = zoneSlow;
+                uint sb = status;
+                int bi = 0;
+                while (sb != 0u)
+                {
+                    int b = math.tzcnt(sb);
+                    sb &= sb - 1u;
+                    staging.StatusBitUntil[slot * CombatConst.StatusBitStride + b] = bitUntil[bi++];
+                }
             }
 
             int prn = r.ReadInt32();

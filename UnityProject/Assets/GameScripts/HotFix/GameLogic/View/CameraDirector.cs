@@ -287,6 +287,8 @@ namespace GameLogic.View
 
             // 最后统一叠加本帧震屏偏移（设置关闭时恒为零）。
             _appliedShake = ScreenShake.Sample(dt, _camera.orthographicSize, _camera.transform);
+            // FG2-FW-04（FGR-FW-043）：反应首次触发的镜头轻推，与震屏同一套“撤掉上一帧、叠上本帧”的偏移（设置关闭时恒为零）。
+            _appliedShake += CameraNudge.Sample(dt, _camera.orthographicSize, _camera.transform);
             _camera.transform.position += _appliedShake;
         }
 

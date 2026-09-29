@@ -235,6 +235,8 @@ namespace GameLogic.Campaign.Regions
             try
             {
                 MarkExperienceAndInjuryBeforeExit(state, active.RegionId);
+                // FG2-FW-04：这一场远征的反应伤害归因到此结束（存档；统计 / 离家报告读它）。
+                Combat.ReactionAttribution.CloseExpedition(state, active.RegionId);
                 active.Exit(true);
                 // ER6-LOOP-01：撤离事务已提交（active.Exit 内部完成 ResolveExtraction），OBJ-05/07 的
                 // "战利品判定发生在撤离事务提交时"字面要求就是这一刻，不等回到家园下一帧。
@@ -287,6 +289,8 @@ namespace GameLogic.Campaign.Regions
             try
             {
                 MarkExperienceAndInjuryBeforeExit(state, active.RegionId);
+                // FG2-FW-04：这一场远征的反应伤害归因到此结束（存档；统计 / 离家报告读它）。
+                Combat.ReactionAttribution.CloseExpedition(state, active.RegionId);
                 active.Exit(true); // _wipeResolved 已真，内部跳过重复结算，见类注释。
                 // ER6-LOOP-01：同 TryConfirmEvacuation——全灭放弃同样是一次"撤离事务提交"（结算为全
                 // Lost），Recompute 幂等，即使本次不会推进任何 OBJ 也不会产生副作用。

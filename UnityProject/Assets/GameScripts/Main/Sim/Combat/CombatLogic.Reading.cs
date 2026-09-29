@@ -67,8 +67,11 @@ namespace BinGames.Sim.Combat
             }
             else if (r.Carrier == CombatCarrier.Field && r.FieldSeconds > 0f && r.Area > 0f)
             {
-                SpawnZone(ref d, a, FactionOfSlot(ref d, a), primaryPos, r.Area, r.FieldSeconds, baseDamage * math.max(0f, r.FieldDpsRatio), r.ZoneGrowth, r.ZoneTickScale,
-                    r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln);
+                if (SpawnZone(ref d, a, FactionOfSlot(ref d, a), primaryPos, r.Area, r.FieldSeconds, baseDamage * math.max(0f, r.FieldDpsRatio), r.ZoneGrowth, r.ZoneTickScale,
+                    r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln))
+                {
+                    NoteReading(ref d, CombatConst.ReadingFeedZone, primaryPos, a);
+                }
             }
 
             if (wp.MarkSeconds > 0f && d.IsAlive(t))
@@ -334,8 +337,11 @@ namespace BinGames.Sim.Combat
                 double2 at = r.ZonePlacement == CombatZonePlacement.Attacker && hasSelf ? self
                     : r.ZonePlacement == CombatZonePlacement.Midpoint && hasSelf ? (self + hitPos) * 0.5
                     : hitPos;
-                SpawnZone(ref d, a, FactionOfSlot(ref d, a), at, r.ZoneRadius, r.ZoneSeconds, r.ZoneDps, r.ZoneGrowth, r.ZoneTickScale,
-                    r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln);
+                if (SpawnZone(ref d, a, FactionOfSlot(ref d, a), at, r.ZoneRadius, r.ZoneSeconds, r.ZoneDps, r.ZoneGrowth, r.ZoneTickScale,
+                    r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln))
+                {
+                    NoteReading(ref d, CombatConst.ReadingFeedZone, at, a);
+                }
             }
             // 连网：主目标与最近的另一个敌对单位之间拉一块减速网。
             if (r.WeaveRadius > 0f && r.WeaveSeconds > 0f)
@@ -347,8 +353,11 @@ namespace BinGames.Sim.Combat
                 {
                     double2 mid = (hitPos + d.Pos[k]) * 0.5;
                     float half = (float)math.distance(hitPos, d.Pos[k]) * 0.5f + WeaveMarginOf(ref d);
-                    SpawnZone(ref d, a, FactionOfSlot(ref d, a), mid, half, r.WeaveSeconds, r.ZoneDps > 0f ? r.ZoneDps : dealt * math.max(0f, r.WeaveDpsRatio), 0f, 1f,
-                        r.StatusMask | CombatConst.StatusBitZoneSlow, r.StatusSeconds, r.StatusDps, math.max(r.StatusSlow, r.WeaveSlow), r.StatusVuln);
+                    if (SpawnZone(ref d, a, FactionOfSlot(ref d, a), mid, half, r.WeaveSeconds, r.ZoneDps > 0f ? r.ZoneDps : dealt * math.max(0f, r.WeaveDpsRatio), 0f, 1f,
+                        r.StatusMask | CombatConst.StatusBitZoneSlow, r.StatusSeconds, r.StatusDps, math.max(r.StatusSlow, r.WeaveSlow), r.StatusVuln))
+                    {
+                        NoteReading(ref d, CombatConst.ReadingFeedZone, mid, a);
+                    }
                 }
             }
             // 回波：对同一目标隔几秒再结算。
@@ -569,6 +578,8 @@ namespace BinGames.Sim.Combat
             {
                 ClearStatus(ref d, k);
             }
+            // 区域减速位带来的减速值单独记（在反应附加标签把别的减速并进 slow 之前取）。
+            float zoneSlowIn = (mask & CombatConst.StatusBitZoneSlow) != 0u ? math.saturate(slow) : 0f;
             if (d.Reactions.Length > 0)
             {
                 uint have = d.Status[k] & ~CombatConst.StatusBitZoneSlow;
@@ -595,11 +606,23 @@ namespace BinGames.Sim.Combat
                     return;
                 }
             }
+            uint before = d.Status[k];
             d.Status[k] |= mask;
             double until = now + math.max(0.1f, seconds > 0f ? seconds : 3f);
             if (until > d.StatusUntil[k])
             {
                 d.StatusUntil[k] = until;
+            }
+            // FG2-FW-04（DEBT-FG2FW03-02）：逐位到期——这一次带来的每一位各自续到这一次的到期（已有的位取晚、新挂的位直接取这一次，
+            // 不会继承之前被消耗 / 到期清掉时残留的旧时间）；别的位不跟着续。
+            int baseIdx = k * CombatConst.StatusBitStride;
+            uint touched = mask;
+            while (touched != 0u)
+            {
+                int b = math.tzcnt(touched);
+                touched &= touched - 1u;
+                int idx = baseIdx + b;
+                d.StatusBitUntil[idx] = (before & (1u << b)) != 0u ? math.max(d.StatusBitUntil[idx], until) : until;
             }
             int cap = StackCapOf(ref d);
             ulong stacks = d.StatusStacks[k];
@@ -630,6 +653,10 @@ namespace BinGames.Sim.Combat
             float newDps = dotMask == 0u ? math.max(0f, dps) * dotStack : math.max(dotDps, math.max(0f, dps));
             d.StatusDps[k] = math.max(d.StatusDps[k], newDps);
             d.StatusSlow[k] = math.max(d.StatusSlow[k], math.saturate(slow));
+            if ((mask & CombatConst.StatusBitZoneSlow) != 0u)
+            {
+                d.StatusZoneSlow[k] = (before & CombatConst.StatusBitZoneSlow) != 0u ? math.max(d.StatusZoneSlow[k], zoneSlowIn) : zoneSlowIn;
+            }
             d.StatusVuln[k] = math.max(d.StatusVuln[k], math.max(0f, vuln));
             d.StatusSource[k] = source >= 0 && source < d.Count ? d.Id[source] : 0;
         }
@@ -641,6 +668,7 @@ namespace BinGames.Sim.Combat
             d.StatusDps[k] = 0f;
             d.StatusSlow[k] = 0f;
             d.StatusVuln[k] = 0f;
+            d.StatusZoneSlow[k] = 0f;
         }
 
         private static int StackCapOf(ref CombatData d) =>
@@ -679,10 +707,19 @@ namespace BinGames.Sim.Combat
                 d.StatusStacks[k] = stacks;
                 mask &= ~rule.Consume;
                 RecomputeStatusFx(ref d, k);
+                RecomputeStatusUntil(ref d, k);
             }
             float bonus = hit * (rule.DamageMult - 1f);
             d.ReactionCount[ri] = d.ReactionCount[ri] + 1;
             d.ReactionDamage[ri] = d.ReactionDamage[ri] + bonus;
+            // FG2-FW-04：反馈与伤害归因的进给（不进快照）：最后一次的位置 / 出手者 / 目标；打在敌对阵营身上的额外伤害（易伤照样乘，与实际掉血一致）。
+            d.ReactionLastPos[ri] = d.Pos[k];
+            d.ReactionLastSource[ri] = source >= 0 && source < d.Count ? d.Id[source] : 0;
+            d.ReactionLastTarget[ri] = d.Id[k];
+            if (bonus > 0f && d.Faction[k] != (byte)CombatFaction.Player && d.IsAlive(k) && !d.Has(k, CombatUnitFlags.Invulnerable))
+            {
+                d.ReactionHostileDamage[ri] = d.ReactionHostileDamage[ri] + bonus * VulnMultiplier(ref d, k);
+            }
             CombatCounters counters = d.Counters[0];
             counters.ReactionsFired++;
             d.Counters[0] = counters;
@@ -753,7 +790,8 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
-            float dps = 0f, slow = (d.Status[k] & CombatConst.StatusBitZoneSlow) != 0u ? d.StatusSlow[k] : 0f, vuln = 0f;
+            // 区域减速位的起点取它自己的值（不是 StatusSlow 这个混合最大值：那里面可能还算着刚到期 / 被消耗的减速标签）。
+            float dps = 0f, slow = (d.Status[k] & CombatConst.StatusBitZoneSlow) != 0u ? d.StatusZoneSlow[k] : 0f, vuln = 0f;
             ulong stacks = d.StatusStacks[k];
             while (left != 0u)
             {
@@ -777,6 +815,21 @@ namespace BinGames.Sim.Combat
             d.StatusDps[k] = dps;
             d.StatusSlow[k] = math.saturate(slow);
             d.StatusVuln[k] = vuln;
+        }
+
+        /// <summary>FG2-FW-04：整组到期时间 = 还挂着的各位里最晚的一个（消耗 / 逐位到期之后重算）。</summary>
+        private static void RecomputeStatusUntil(ref CombatData d, int k)
+        {
+            uint bits = d.Status[k];
+            double latest = 0;
+            int baseIdx = k * CombatConst.StatusBitStride;
+            while (bits != 0u)
+            {
+                int b = math.tzcnt(bits);
+                bits &= bits - 1u;
+                latest = math.max(latest, d.StatusBitUntil[baseIdx + b]);
+            }
+            d.StatusUntil[k] = latest;
         }
 
         private static bool AnyFx(ref CombatData d)
@@ -818,6 +871,8 @@ namespace BinGames.Sim.Combat
             float statusTick = StatusTickOf(ref d);
             bool tick = math.floor(now / statusTick) != math.floor((now - dt) / statusTick);
             int n = d.Count;
+            // 状态位效果表配置了（正式地点）才逐位到期：没配置的旧地点 / 测试内核不知道哪份效果属于哪一位，沿用整组到期。
+            bool perBit = DotMaskOf(ref d) != 0u || AnyFx(ref d);
             for (int k = 0; k < n; k++)
             {
                 if (d.Status[k] == 0u)
@@ -831,7 +886,47 @@ namespace BinGames.Sim.Combat
                     d.StatusDps[k] = 0f;
                     d.StatusSlow[k] = 0f;
                     d.StatusVuln[k] = 0f;
+                    d.StatusZoneSlow[k] = 0f;
                     continue;
+                }
+                if (perBit)
+                {
+                    // FG2-FW-04（DEBT-FG2FW03-02）：先挂的标签先到期——只清到期的那几位（含叠层），按剩下的位重算效果与整组到期。
+                    uint bits = d.Status[k];
+                    uint expired = 0u;
+                    int baseIdx = k * CombatConst.StatusBitStride;
+                    while (bits != 0u)
+                    {
+                        int b = math.tzcnt(bits);
+                        bits &= bits - 1u;
+                        if (d.StatusBitUntil[baseIdx + b] <= now)
+                        {
+                            expired |= 1u << b;
+                        }
+                    }
+                    if (expired != 0u)
+                    {
+                        d.Status[k] &= ~expired;
+                        ulong stacks = d.StatusStacks[k];
+                        uint e = expired;
+                        while (e != 0u)
+                        {
+                            int b = math.tzcnt(e);
+                            e &= e - 1u;
+                            stacks &= ~(3UL << (b * 2));
+                        }
+                        d.StatusStacks[k] = stacks;
+                        if ((expired & CombatConst.StatusBitZoneSlow) != 0u)
+                        {
+                            d.StatusZoneSlow[k] = 0f; // 区域减速到期：减速按剩下的标签重算（下一行）。
+                        }
+                        RecomputeStatusFx(ref d, k);
+                        if (d.Status[k] == 0u)
+                        {
+                            continue;
+                        }
+                        RecomputeStatusUntil(ref d, k);
+                    }
                 }
                 if (tick && d.StatusDps[k] > 0f)
                 {
@@ -843,17 +938,17 @@ namespace BinGames.Sim.Combat
         // ─────────────────────────────── 区域 ───────────────────────────────
 
         /// <summary>生成一块区域。<paramref name="faction"/> = 区域属于哪一边（打另一边），由调用方显式给出，不从槽位推断。</summary>
-        private static void SpawnZone(ref CombatData d, int owner, CombatFaction faction, double2 pos, float radius, float seconds, float dps, float growth, float tickScale,
+        private static bool SpawnZone(ref CombatData d, int owner, CombatFaction faction, double2 pos, float radius, float seconds, float dps, float growth, float tickScale,
             uint mask, float statusSeconds, float statusDps, float slow, float vuln)
         {
             if (radius <= 0f || seconds <= 0f)
             {
-                return;
+                return false;
             }
             if (d.Zones.Length >= d.ZoneCap)
             {
                 RefuseReading(ref d);
-                return;
+                return false;
             }
             double now = d.Scalars[0].Time;
             float interval = ZoneTickOf(ref d) / (tickScale > 0f ? tickScale : 1f);
@@ -878,6 +973,15 @@ namespace BinGames.Sim.Combat
             CombatCounters c = d.Counters[0];
             c.ZonesSpawned++;
             d.Counters[0] = c;
+            return true;
+        }
+
+        /// <summary>FG2-FW-04（DEBT-FG2FW02-02 读法弹字与音效）：读法生成了一块区域 / 一次回波 / 一架无人机——记进给（累计次数、最后的位置与出手者；不进快照）。</summary>
+        private static void NoteReading(ref CombatData d, int kind, double2 pos, int ownerSlot)
+        {
+            d.ReadingFeedCount[kind] = d.ReadingFeedCount[kind] + 1;
+            d.ReadingFeedPos[kind] = pos;
+            d.ReadingFeedOwner[kind] = ownerSlot >= 0 && ownerSlot < d.Count ? d.Id[ownerSlot] : 0;
         }
 
         /// <summary>区域推进：到期移除；按节拍对区域内的敌对阵营单位造成伤害并挂状态（区域的“减速”只要站在里面就挂上）。O(区域 × 单位)。</summary>
@@ -965,6 +1069,7 @@ namespace BinGames.Sim.Combat
             CombatCounters c = d.Counters[0];
             c.EchoesQueued++;
             d.Counters[0] = c;
+            NoteReading(ref d, CombatConst.ReadingFeedEcho, t >= 0 && t < d.Count ? d.Pos[t] : double2.zero, a);
         }
 
         private static void StepEchoes(ref CombatData d)
@@ -1045,6 +1150,7 @@ namespace BinGames.Sim.Combat
                 CombatCounters c = d.Counters[0];
                 c.DronesLaunched++;
                 d.Counters[0] = c;
+                NoteReading(ref d, CombatConst.ReadingFeedDrone, at, a);
             }
         }
 

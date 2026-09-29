@@ -9,7 +9,7 @@ namespace GameLogic.UI.Kit
     /// <summary>
     /// FG0-UX-01（FGR-UX-001）：Esc 逐层返回的最后一层——暂停菜单。
     /// 打开：世界暂停（记下打开前是否已暂停，关闭时恢复原状）、输入上下文切到“界面”、压一层 Esc 栈；
-    /// 入口：继续游戏、按键设置、通知中心、保存并返回主菜单（二次确认，写明会先保存到哪个槽位；保存失败留在游戏里并说明原因）；
+    /// 入口：继续游戏、按键设置、通知中心、图鉴、统计、保存并返回主菜单（二次确认，写明会先保存到哪个槽位；保存失败留在游戏里并说明原因）；
     /// 开发构建另有“界面基础件样例”。
     /// </summary>
     public sealed class PauseMenuUIToolkit : UiKitPanelHost
@@ -66,8 +66,11 @@ namespace GameLogic.UI.Kit
             });
             // FG1-HUD-01（FGU-05）：图鉴入口——机制图鉴盖在暂停菜单上面，关掉回到暂停菜单。
             _codexButton = Bind(root, "PauseCodex", "pause.codex", () => GameLogic.Progression.MechanicCodex.Open(null, unlock: false));
+            // FG2-FW-04（卡片“伤害归因进入统计面板”）：统计面板盖在暂停菜单上面，关掉回到暂停菜单。
+            StatsButton = Bind(root, "PauseStats", "pause.stats", StatsPanelUIToolkit.Open);
             Bind(root, "PauseSaveQuit", "ui.pause.save_and_quit", AskSaveAndQuit);
             BindCamera(root);
+            BindReactionFeedback(root);
             _worldSeed = root.Q<Label>("PauseWorldSeed");
             _worldSettings = root.Q<Label>("PauseWorldSettings");
             Button copy = Bind(root, "PauseCopySeed", "ui.pause.copy_seed", CopySeed);
@@ -97,6 +100,7 @@ namespace GameLogic.UI.Kit
         private Button _cameraReset;
 
         public Button CodexButton => _codexButton;
+        public Button StatsButton { get; private set; }
         public Slider CameraZoomSlider => _cameraZoom;
         public Slider CameraFollowSlider => _cameraFollow;
         public Button CameraResetButton => _cameraReset;
@@ -150,6 +154,60 @@ namespace GameLogic.UI.Kit
                 SyncCameraSliders();
             });
             SyncCameraSliders();
+        }
+
+        // ── FG2-FW-04：战斗反馈（FGR-FW-043“慢放和镜头推动都可以在设置里关闭”；卡片“慢放、镜头推动、弹字三个设置开关”；FGR-SYS-020 游戏性）──
+        private Toggle _reactionPopups;
+        private Toggle _reactionSlowMotion;
+        private Toggle _reactionNudge;
+
+        public Toggle ReactionPopupsToggle => _reactionPopups;
+        public Toggle ReactionSlowMotionToggle => _reactionSlowMotion;
+        public Toggle ReactionNudgeToggle => _reactionNudge;
+        public Button ReactionResetButton { get; private set; }
+        public Button ReactionLogButton { get; private set; }
+
+        private void BindReactionFeedback(VisualElement root)
+        {
+            Label title = root.Q<Label>("PauseReactionTitle");
+            if (title != null)
+            {
+                title.text = GameText.Get("pause.reaction_title");
+            }
+            _reactionPopups = BindToggle(root, "PauseReactionPopups", "pause.reaction_popups", Settings.GameSettings.SetReactionPopupsEnabled,
+                () => GameText.Format("pause.reaction_popups_tip", GameLogic.Campaign.Feedback.ReactionPopups.PerSecondCap));
+            _reactionSlowMotion = BindToggle(root, "PauseReactionSlowMotion", "pause.reaction_slowmo", Settings.GameSettings.SetReactionSlowMotionEnabled,
+                () => GameText.Format("pause.reaction_slowmo_tip", GameLogic.Campaign.Combat.ReactionFeedback.SlowMotionSeconds.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)));
+            _reactionNudge = BindToggle(root, "PauseReactionNudge", "pause.reaction_nudge", Settings.GameSettings.SetReactionCameraNudgeEnabled,
+                () => GameText.Get("pause.reaction_nudge_tip"));
+            ReactionResetButton = Bind(root, "PauseReactionReset", "pause.reaction_reset", () =>
+            {
+                Settings.GameSettings.ResetReactionFeedback();
+                SyncReactionToggles();
+            });
+            ReactionLogButton = Bind(root, "PauseReactionLog", "pause.reaction_log", ReactionLogPanelUIToolkit.Open);
+            SyncReactionToggles();
+        }
+
+        private static Toggle BindToggle(VisualElement root, string name, string labelKey, System.Action<bool> setter, System.Func<string> tip)
+        {
+            Toggle t = root.Q<Toggle>(name);
+            if (t == null)
+            {
+                return null;
+            }
+            t.label = GameText.Get(labelKey);
+            t.RegisterValueChangedCallback(evt => setter(evt.newValue));
+            UiTooltip.Attach(t, () => new TooltipContent { Title = GameText.Get(labelKey), Body = tip() });
+            return t;
+        }
+
+        /// <summary>三个开关按当前设置同步（打开菜单、恢复默认时）。</summary>
+        public void SyncReactionToggles()
+        {
+            _reactionPopups?.SetValueWithoutNotify(Settings.GameSettings.ReactionPopupsEnabled);
+            _reactionSlowMotion?.SetValueWithoutNotify(Settings.GameSettings.ReactionSlowMotionEnabled);
+            _reactionNudge?.SetValueWithoutNotify(Settings.GameSettings.ReactionCameraNudgeEnabled);
         }
 
         /// <summary>滑条与标签按当前设置同步（打开菜单、恢复默认时）。</summary>
@@ -207,6 +265,7 @@ namespace GameLogic.UI.Kit
                 }
                 RefreshWorldInfo();
                 SyncCameraSliders();
+                SyncReactionToggles();
             }
             else
             {

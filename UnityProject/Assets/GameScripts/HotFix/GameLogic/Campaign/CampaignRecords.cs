@@ -370,6 +370,17 @@ namespace GameLogic.Campaign
         public string FailureReason;
     }
 
+    /// <summary>FG2-FW-04（FGR-FW-043）：一条具名反应在本存档里第一次报出名字的触发。</summary>
+    [Serializable]
+    public sealed class ReactionFirstTriggerRecord
+    {
+        public string ReactionId = string.Empty;
+        /// <summary>统一时钟第几步（整数步，存读档逐字段一致）。</summary>
+        public long Tick;
+        /// <summary>发生在哪个地点（图鉴“首次触发于……”）。</summary>
+        public string SiteId = string.Empty;
+    }
+
     /// <summary>ERD-DAT-006 EventLedger 的单条一次性事件记录。
     /// 事件键由 <c>campaignId</c>（CampaignState 自身持有）+ <see cref="EventId"/> 唯一；
     /// 读档重放通过 <see cref="CampaignSaveService"/> 之外的消费方按此键判重，不在本 Story 实现消费方。</summary>

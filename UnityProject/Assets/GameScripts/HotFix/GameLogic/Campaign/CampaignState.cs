@@ -59,6 +59,9 @@ namespace GameLogic.Campaign
         /// <summary>FG2-FW-03（FG02 FGR-FW-042）：已开放命名的具名反应批次（第一幕 act1 开局即开放，不记在这里；其余由阵营推进时
         /// <see cref="Content.NamedReactionCatalog.OpenBatch"/> 写入）。旧存档没有这个字段时为空 = 只开放第一幕。</summary>
         public string[] OpenReactionBatches = Array.Empty<string>();
+        /// <summary>FG2-FW-04（FG02 FGR-FW-043 / 第 6 节“每个存档里各反应的首次触发记录，以及图鉴解锁状态”）：本存档里每条具名反应第一次报出名字的触发
+        /// （唯一写入口 <see cref="Combat.ReactionFeedback"/>）。有记录 = 反应图鉴条目已解锁；慢放与镜头推动只在记录新写入的那一次发生。</summary>
+        public ReactionFirstTriggerRecord[] ReactionFirstTriggers = Array.Empty<ReactionFirstTriggerRecord>();
 
         public BuildingRecord[] BuildingRecords = Array.Empty<BuildingRecord>();
         public MachineRecord[] MachineRecords = Array.Empty<MachineRecord>();
@@ -287,6 +290,10 @@ namespace GameLogic.Campaign
                 .OrderBy(id => id, StringComparer.Ordinal).ToArray();
             OpenReactionBatches = (OpenReactionBatches ?? Array.Empty<string>())
                 .Distinct(StringComparer.Ordinal).OrderBy(id => id, StringComparer.Ordinal).ToArray();
+            ReactionFirstTriggers = (ReactionFirstTriggers ?? Array.Empty<ReactionFirstTriggerRecord>())
+                .Where(r => r != null && !string.IsNullOrEmpty(r.ReactionId))
+                .GroupBy(r => r.ReactionId, StringComparer.Ordinal).Select(g => g.OrderBy(r => r.Tick).First())
+                .OrderBy(r => r.ReactionId, StringComparer.Ordinal).ToArray();
             BuildingRecords = (BuildingRecords ?? Array.Empty<BuildingRecord>())
                 .OrderBy(r => r.BuildingId, StringComparer.Ordinal).ToArray();
             MachineRecords = (MachineRecords ?? Array.Empty<MachineRecord>())

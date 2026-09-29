@@ -114,7 +114,7 @@ namespace GameLogic.Campaign.Combat
                 return false;
             }
             uint bits = mask & ~CombatConst.StatusBitZoneSlow;
-            float left = (float)System.Math.Max(0.0, until - kernel.Time);
+            _ = until;
             for (int b = 0; b < 31; b++)
             {
                 if ((bits & (1u << b)) == 0u)
@@ -127,6 +127,8 @@ namespace GameLogic.Campaign.Combat
                 {
                     continue;
                 }
+                // FG2-FW-04（DEBT-FG2FW03-02）：每个标签显示它自己的剩余时间（逐位到期），不再是整组的。
+                float left = (float)kernel.StatusBitSecondsLeft(unitId, b);
                 list.Add((StatusTagCatalog.ShapeOf(tag) ?? string.Empty, name, left, System.Math.Max(1, kernel.StatusStacksOf(unitId, b))));
             }
             return true;

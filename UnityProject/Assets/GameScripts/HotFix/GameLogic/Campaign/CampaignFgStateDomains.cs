@@ -470,6 +470,40 @@ namespace GameLogic.Campaign
     public sealed class StatsState
     {
         public int DomainVersion = 1;
+        /// <summary>FG2-FW-04（FGR-FW-043“伤害归因：按反应统计每次远征和每次突袭的伤害占比”）：最近若干场远征 / 突袭的反应伤害归因
+        /// （唯一写入口 <see cref="Combat.ReactionAttribution"/>；条数上限 fg.TbUiTuning reaction.attribution_sessions，超出丢最旧的已结束场次）。
+        /// 统计面板（FG4-ECO-08）与离家报告（FG4-ECO-09 / FG6-DEF-08）读这里。</summary>
+        public ReactionSessionRecord[] ReactionSessions = Array.Empty<ReactionSessionRecord>();
+        /// <summary>下一场归因的序号（场次 ID = "rs-" + 序号，确定性、读档后接着编）。</summary>
+        public int NextReactionSessionSerial = 1;
+    }
+
+    /// <summary>FG2-FW-04：一场远征或一次突袭的反应伤害归因。</summary>
+    [Serializable]
+    public sealed class ReactionSessionRecord
+    {
+        public string SessionId = string.Empty;
+        /// <summary>expedition = 远征（地点 = 远征区域）；raid = 突袭（地点 = 家园）。</summary>
+        public string Kind = string.Empty;
+        public string SiteId = string.Empty;
+        /// <summary>远征：该区域第几次出击（RegionRecord.ExpeditionCount）；突袭：突袭的外部键（队伍 ID 等）。</summary>
+        public int Ordinal;
+        public string RaidKey = string.Empty;
+        /// <summary>开始 / 结束于统一时钟第几步（结束 -1 = 进行中）。</summary>
+        public long StartTick;
+        public long EndTick = -1;
+        /// <summary>这一场里敌对阵营受到的全部伤害（占比的分母）。</summary>
+        public double TotalDamage;
+        public ReactionShareRecord[] Reactions = Array.Empty<ReactionShareRecord>();
+    }
+
+    /// <summary>FG2-FW-04：一场里某条反应的触发次数与额外伤害（打在敌对阵营身上的）。未开放命名的反应记在自己的 ID 下，显示时不报名字。</summary>
+    [Serializable]
+    public sealed class ReactionShareRecord
+    {
+        public string ReactionId = string.Empty;
+        public int Count;
+        public double Damage;
     }
 
     /// <summary>存档自身的历史（本 Story）：读档时的内容迁移通知，供通知中心历史（FG0-UX-01）回看。</summary>
@@ -697,6 +731,22 @@ namespace GameLogic.Campaign
             s.SignalCore.RecentUplinks ??= Array.Empty<int>();
             s.LootPackets ??= new LootPacketState();
             s.Stats ??= new StatsState();
+            s.Stats.ReactionSessions ??= Array.Empty<ReactionSessionRecord>();
+            foreach (ReactionSessionRecord r in s.Stats.ReactionSessions)
+            {
+                if (r != null)
+                {
+                    r.SessionId ??= string.Empty;
+                    r.Kind ??= string.Empty;
+                    r.SiteId ??= string.Empty;
+                    r.RaidKey ??= string.Empty;
+                    r.Reactions ??= Array.Empty<ReactionShareRecord>();
+                }
+            }
+            if (s.Stats.NextReactionSessionSerial < 1)
+            {
+                s.Stats.NextReactionSessionSerial = 1;
+            }
             s.SaveHistory ??= new SaveHistoryState();
             s.SaveHistory.Notices ??= Array.Empty<SaveNoticeRecord>();
             s.Notifications ??= new NotificationHistoryState();

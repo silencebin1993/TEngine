@@ -17,8 +17,10 @@ namespace BinGames.Sim.Combat
         /// 2 = FG0-ARCH-06：每个单位追加寻路状态与路线路点、待交给寻路内核的请求（读取仍认 1：寻路字段取默认）。
         /// 3 = FG2-FW-02：武器追加载体与读法参数；每个单位追加状态标签（掩码 / 到期 / 持续伤害 / 减速 / 易伤 / 来源）；
         /// 追加区域、回波、无人机三张表与三个计数（读取仍认 1、2：读法取“无”，状态与三张表为空）。
-        /// 4 = FG2-FW-03：每个单位追加状态标签叠层；追加每条反应的触发次数 / 反应额外伤害与“反应总次数”计数（读取仍认 1～3：叠层按已有标签各 1 层，反应计数为 0）。</summary>
-        public const int FormatVersion = 4;
+        /// 4 = FG2-FW-03：每个单位追加状态标签叠层；追加每条反应的触发次数 / 反应额外伤害与“反应总次数”计数（读取仍认 1～3：叠层按已有标签各 1 层，反应计数为 0）。
+        /// 5 = FG2-FW-04（DEBT-FG2FW03-02）：每个单位追加每个已挂状态位自己的到期时间（读取仍认 1～4：各位的到期 = 整组到期）。
+        /// 6 = FG2-FW-04 修复：每个单位追加区域减速位自己的减速值（读取仍认 1～5：有区域减速位时取整组减速值，否则 0）。</summary>
+        public const int FormatVersion = 6;
 
         /// <summary>仍能读取的最老格式版本。</summary>
         public const int MinReadableFormat = 1;
@@ -56,6 +58,15 @@ namespace BinGames.Sim.Combat
 
         /// <summary>FG2-FW-03：状态标签叠层的存储上限（每位 2 比特）。</summary>
         public const int MaxStatusStacks = 3;
+
+        /// <summary>FG2-FW-04：每个单位逐状态位到期时间的格数（位 0～30 固件标签 + 位 31 区域减速）。</summary>
+        public const int StatusBitStride = 32;
+
+        /// <summary>FG2-FW-04：读法进给的种类（<see cref="CombatData.ReadingFeedCount"/> 的下标）：区域 / 回波 / 无人机。</summary>
+        public const int ReadingFeedZone = 0;
+        public const int ReadingFeedEcho = 1;
+        public const int ReadingFeedDrone = 2;
+        public const int ReadingFeedKinds = 3;
     }
 
     /// <summary>

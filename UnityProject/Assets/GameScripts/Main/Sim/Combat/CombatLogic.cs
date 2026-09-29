@@ -1061,6 +1061,7 @@ namespace BinGames.Sim.Combat
             else
             {
                 c.DamageToHostile += (long)math.round(damage);
+                d.DamageDealtHostile[0] = d.DamageDealtHostile[0] + damage; // FG2-FW-04：伤害归因的分母（精确值，不进快照）。
             }
             d.Counters[0] = c;
             int attackerId = attacker >= 0 && attacker < d.Count ? d.Id[attacker] : 0;

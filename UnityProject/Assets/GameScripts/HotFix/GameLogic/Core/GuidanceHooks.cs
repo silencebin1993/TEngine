@@ -63,6 +63,10 @@ namespace GameLogic.Core
         public const string StatusTagFirstSeen = "firmware.status_tag.first_seen";
         /// <summary>FG2-FW-03：第一次打出一条已开放命名的具名反应（引导内容：两种标签凑在一起会反应、去图鉴查配方；首次慢放与图鉴解锁归 FG2-FW-04）。</summary>
         public const string ReactionFirstNamed = "firmware.reaction.first_named";
+        /// <summary>FG2-FW-04：第一次打开反应记录面板（引导内容在 FG15-UX-04：日志怎么读、伤害归因的占比是什么、反应图鉴怎么解锁）。</summary>
+        public const string ReactionLogFirstOpen = "firmware.reaction_log.first_open";
+        /// <summary>FG2-FW-04：第一次打开统计面板（引导内容在 FG15-UX-04：伤害归因的累计与每场明细怎么读、只统计远征与突袭）。</summary>
+        public const string StatsPanelFirstOpen = "stats.panel.first_open";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -79,6 +83,7 @@ namespace GameLogic.Core
             SignalCoverageFirstOverlay, SignalCoverageFirstLeft, SignalRelayFirstCut, SignalFirstFarJump,
             MorphFirstSeen, SafeModeFirstEnter,
             StatusTagFirstSeen, ReactionFirstNamed,
+            ReactionLogFirstOpen, StatsPanelFirstOpen,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>
