@@ -272,7 +272,7 @@ namespace GameLogic.Campaign.Combat
         }
 
         private static readonly Dictionary<string, string> PopupKeys = new Dictionary<string, string>(StringComparer.Ordinal);
-        private static readonly string[] ReadingKeys = { "reading:0", "reading:1", "reading:2" };
+        private static readonly string[] ReadingKeys = { "reading:0", "reading:1", "reading:2", "reading:3" };
 
         /// <summary>弹字的聚合键（按反应 ID 缓存，不每步拼字符串）。</summary>
         public static string PopupKey(string reactionId)
@@ -289,6 +289,7 @@ namespace GameLogic.Campaign.Combat
         {
             CombatConst.ReadingFeedZone => FeedbackCueId.ReadingZone,
             CombatConst.ReadingFeedEcho => FeedbackCueId.ReadingEcho,
+            CombatConst.ReadingFeedThorns => FeedbackCueId.ReadingThorns,
             _ => FeedbackCueId.ReadingDrone,
         };
 
@@ -296,6 +297,7 @@ namespace GameLogic.Campaign.Combat
         {
             CombatConst.ReadingFeedZone => "reading.popup.zone",
             CombatConst.ReadingFeedEcho => "reading.popup.echo",
+            CombatConst.ReadingFeedThorns => "reading.popup.thorns",
             _ => "reading.popup.drone",
         };
 

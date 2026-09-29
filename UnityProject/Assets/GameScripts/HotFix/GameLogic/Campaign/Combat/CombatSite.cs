@@ -591,7 +591,7 @@ namespace GameLogic.Campaign.Combat
                 w.PierceBonus = FracturedCityLayout.OverloadArmorPierceBonus;
                 w.Reaction = !suppressReaction && p.ReactionId == MechanicalReactionCatalog.ReactionMeltOverloadId ? CombatReaction.MeltOverload : CombatReaction.None;
                 // FG2-FW-02：重炮是射弹载体；伤害是固定值（不经电路编译），“伤害倍率”读法（电容蓄力）按表乘上。
-                w.Reading = CarrierReadings.Build(p.PrimaryId, p.ChassisId, ReadingFirmware(p), damageFromCompile: false);
+                w.Reading = CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), damageFromCompile: false);
                 return w;
             }
             w.Mode = CombatWeaponMode.Instant;
@@ -605,7 +605,7 @@ namespace GameLogic.Campaign.Combat
             // DEBT-FG1SIG06-02：即时命中武器也按生效固件积热（与热量预算同一个数；裸跑 ×1.5），过热停火、降到恢复线以下再开火。
             float rawHeatI = p.RawHeatMultiplier > 0f ? p.RawHeatMultiplier : 1f;
             w.HeatPerShot = Mathf.Max(0f, p.FirmwareHeatPerShot) * rawHeatI;
-            w.Reading = CarrierReadings.Build(p.PrimaryId, p.ChassisId, ReadingFirmware(p), damageFromCompile: !fixedDamage);
+            w.Reading = CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), damageFromCompile: !fixedDamage);
             if (!suppressReaction && p.ReactionId == MechanicalReactionCatalog.ReactionMarkJumpId)
             {
                 w.Reaction = CombatReaction.MarkJump;

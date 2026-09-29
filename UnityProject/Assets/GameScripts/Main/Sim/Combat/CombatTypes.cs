@@ -19,8 +19,10 @@ namespace BinGames.Sim.Combat
         /// 追加区域、回波、无人机三张表与三个计数（读取仍认 1、2：读法取“无”，状态与三张表为空）。
         /// 4 = FG2-FW-03：每个单位追加状态标签叠层；追加每条反应的触发次数 / 反应额外伤害与“反应总次数”计数（读取仍认 1～3：叠层按已有标签各 1 层，反应计数为 0）。
         /// 5 = FG2-FW-04（DEBT-FG2FW03-02）：每个单位追加每个已挂状态位自己的到期时间（读取仍认 1～4：各位的到期 = 整组到期）。
-        /// 6 = FG2-FW-04 修复：每个单位追加区域减速位自己的减速值（读取仍认 1～5：有区域减速位时取整组减速值，否则 0）。</summary>
-        public const int FormatVersion = 6;
+        /// 6 = FG2-FW-04 修复：每个单位追加区域减速位自己的减速值（读取仍认 1～5：有区域减速位时取整组减速值，否则 0）。
+        /// 7 = FG2-VFX-02：武器读法追加布区落点、无人机定点、反伤（比例 / 固定值 / 触及）；区域追加外观种类；无人机追加定点锚点
+        /// （读取仍认 1～6：布区落在命中点、无人机伴飞、没有反伤、区域外观按“液池”、无人机无锚点）。</summary>
+        public const int FormatVersion = 7;
 
         /// <summary>仍能读取的最老格式版本。</summary>
         public const int MinReadableFormat = 1;
@@ -66,7 +68,20 @@ namespace BinGames.Sim.Combat
         public const int ReadingFeedZone = 0;
         public const int ReadingFeedEcho = 1;
         public const int ReadingFeedDrone = 2;
-        public const int ReadingFeedKinds = 3;
+        /// <summary>FG2-VFX-02：尖刺外装反伤（被近身攻击时把伤害反弹给攻击者）。</summary>
+        public const int ReadingFeedThorns = 3;
+        public const int ReadingFeedKinds = 4;
+
+        /// <summary>FG2-VFX-02（DEBT-FG2FW02-02）：区域 / 无人机渲染实例的种类（<see cref="CombatInstance"/> B.w）：区域 = 本值 + <see cref="CombatZoneLook"/>。</summary>
+        public const float EffectKindZone = 20f;
+        /// <summary>伴飞无人机（蜂群舱 / 集群协议）。</summary>
+        public const float EffectKindDrone = 24f;
+        /// <summary>定点哨戒桩。</summary>
+        public const float EffectKindPost = 25f;
+        /// <summary>区域 / 无人机没有状态色时的阵营默认色（打包 0xRRGGBB）：己方青、敌方橙红、中立灰。</summary>
+        public const int EffectFriendColor = 0x40D9F2;
+        public const int EffectFoeColor = 0xFA7330;
+        public const int EffectNeutralColor = 0xB0B0B0;
     }
 
     /// <summary>
@@ -130,6 +145,19 @@ namespace BinGames.Sim.Combat
         Field = 4,
     }
 
+    /// <summary>FG2-VFX-02（DEBT-FG2FW02-02）：区域画成什么样（只影响画面，不影响结算）。颜色取区域挂的第一个状态标签的图标色（表 fg.TbStatusTag），没有标签取阵营色。</summary>
+    public enum CombatZoneLook : byte
+    {
+        /// <summary>液池：布区 / 驻留 / 拖尾——一圈圈向外的波纹。</summary>
+        Pool = 0,
+        /// <summary>冲击波：震荡脉冲器落在自己脚下的脉冲区——外扩的冲击环。</summary>
+        Pulse = 1,
+        /// <summary>减速网：连网读法——网格。</summary>
+        Web = 2,
+        /// <summary>反应残留（蒸汽残留等）——稀疏的斑点。</summary>
+        Residue = 3,
+    }
+
     /// <summary>FG2-FW-02：区域（布区载体、驻留 / 拖尾 / 连网读法留下的）放在哪。</summary>
     public enum CombatZonePlacement : byte
     {
@@ -154,8 +182,10 @@ namespace BinGames.Sim.Combat
         // ── 载体投送（来自作战组件表；固件的“触及 / 扇角”读法加在上面）──
         public CombatCarrier Carrier;
         public CombatZonePlacement ZonePlacement;
-        public byte Pad0;
-        public byte Pad1;
+        /// <summary>FG2-VFX-02：布区载体的区域放在哪（震荡脉冲器 = 攻击者脚下；其余 = 命中点）。落在自己脚下的布区像力场一样要贴近才出手。</summary>
+        public CombatZonePlacement FieldPlacement;
+        /// <summary>FG2-VFX-02：无人机载体是定点的（哨戒桩）：无人机插在母机身前不动，只打锚点周围 <see cref="DroneLeash"/> 米内的敌人。</summary>
+        public byte DroneAnchored;
         /// <summary>接近距离：&gt;0 时编队攻击命令按 min(命令射程, 本值) 接近（格斗 / 力场要贴近）。</summary>
         public float Approach;
         /// <summary>格斗：扇形半角（度）；&gt;=180 = 一整圈。</summary>
@@ -246,6 +276,13 @@ namespace BinGames.Sim.Combat
         public float JumpFalloff;
         public int JumpMax;
 
+        // ── FG2-VFX-02：功能组件“尖刺外装”（格斗·反伤，被动）──
+        /// <summary>反伤：这台单位被近身即时攻击（攻击者在触及 <see cref="ThornsReach"/> + 双方半径以内，不含弹体 / 重炮 / 区域 / 无人机）时，
+        /// 攻击者吃 <see cref="ThornsFlat"/> + 这一击伤害 × <see cref="Thorns"/>。反伤本身不再触发反伤。</summary>
+        public float Thorns;
+        public float ThornsFlat;
+        public float ThornsReach;
+
         /// <summary>有没有任何固件读法（投送参数不算）。</summary>
         public bool HasFirmwareReading =>
             (DamageScale != 0f && DamageScale != 1f) || (CooldownScale != 0f && CooldownScale != 1f) || ExtraHits > 0 || PierceHits > 0 || ChainHits > 0
@@ -275,7 +312,8 @@ namespace BinGames.Sim.Combat
         /// <summary>留下区域的单位 ID（伤害归属；单位阵亡后区域照常到期）。</summary>
         public int Owner;
         public CombatFaction Faction;
-        public byte Pad0;
+        /// <summary>FG2-VFX-02：画成什么样（只影响画面）。</summary>
+        public CombatZoneLook Look;
         public short Pad1;
     }
 
@@ -308,8 +346,10 @@ namespace BinGames.Sim.Combat
         public float Leash;
         public float Cooldown;
         public CombatFaction Faction;
-        public byte Pad0;
+        /// <summary>FG2-VFX-02：定点无人机（哨戒桩）：不移动，只打 <see cref="Anchor"/> 周围 <see cref="Leash"/> 米内的敌人。</summary>
+        public byte Anchored;
         public short Pad1;
+        public double2 Anchor;
     }
 
     /// <summary>阵营。己方（玩家）与敌方互为目标；中立单位（训练靶）只接受显式指向它的攻击。</summary>

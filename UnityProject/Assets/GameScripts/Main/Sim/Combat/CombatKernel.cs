@@ -1225,7 +1225,22 @@ namespace BinGames.Sim.Combat
         /// <summary>FG2-FW-02：区域与无人机的实例化渲染缓冲（Burst）：区域 = 半径圆片（外圈是剩余时间），无人机 = 小圆片。</summary>
         public void PrepareEffects(NativeList<CombatInstance> effects, double2 origin)
         {
-            var job = new CombatEffectsRenderJob { D = _d, Effects = effects, Origin = origin };
+            var none = new NativeArray<float2>(0, Allocator.TempJob);
+            try
+            {
+                PrepareEffects(effects, origin, none);
+            }
+            finally
+            {
+                none.Dispose();
+            }
+        }
+
+        /// <summary>FG2-VFX-02（DEBT-FG2FW02-02）：区域与无人机的实例（Burst）。<paramref name="statusVisuals"/> = 每个状态位的（图标形状, 打包颜色），
+        /// 区域颜色取它挂的第一个有外观的状态位的颜色（与头顶图标同源，fg.TbStatusTag）；空数组 = 一律用阵营色。</summary>
+        public void PrepareEffects(NativeList<CombatInstance> effects, double2 origin, NativeArray<float2> statusVisuals)
+        {
+            var job = new CombatEffectsRenderJob { D = _d, Effects = effects, Origin = origin, Visuals = statusVisuals };
             job.Run();
         }
 
@@ -1343,6 +1358,9 @@ namespace BinGames.Sim.Combat
                 Mix(ref h, dr.Until);
                 Mix(ref h, dr.NextHit);
                 Mix(ref h, dr.Owner);
+                Mix(ref h, (int)dr.Anchored); // FG2-VFX-02（格式 7）：定点无人机的锚点
+                Mix(ref h, dr.Anchor.x);
+                Mix(ref h, dr.Anchor.y);
             }
             for (int i = 0; i < CombatConst.MaxReactions; i++)
             {
@@ -1569,7 +1587,7 @@ namespace BinGames.Sim.Combat
             // FG2-FW-02（格式 3）：区域、回波、无人机。
             if (format >= 3)
             {
-                WriteReadings(w);
+                WriteReadings(w, format);
             }
             // FG2-FW-03（格式 4）：每条反应的稳定键、触发次数与反应额外伤害（条数 + 每条 ReactionCounterEntryBytes 字节；读档按键对应，不按下标）。
             if (format >= 4)
@@ -1594,7 +1612,7 @@ namespace BinGames.Sim.Combat
             return result;
         }
 
-        private void WriteReadings(BinaryWriter w)
+        private void WriteReadings(BinaryWriter w, int format)
         {
             w.Write(_d.Zones.Length);
             for (int z = 0; z < _d.Zones.Length; z++)
@@ -1616,6 +1634,10 @@ namespace BinGames.Sim.Combat
                 w.Write(zn.StatusVuln);
                 w.Write(zn.Owner);
                 w.Write((byte)zn.Faction);
+                if (format >= 7)
+                {
+                    w.Write((byte)zn.Look);
+                }
             }
             w.Write(_d.Echoes.Length);
             for (int e = 0; e < _d.Echoes.Length; e++)
@@ -1645,6 +1667,12 @@ namespace BinGames.Sim.Combat
                 w.Write(dr.Leash);
                 w.Write(dr.Cooldown);
                 w.Write((byte)dr.Faction);
+                if (format >= 7)
+                {
+                    w.Write(dr.Anchored);
+                    w.Write(dr.Anchor.x);
+                    w.Write(dr.Anchor.y);
+                }
             }
         }
 
@@ -1751,7 +1779,16 @@ namespace BinGames.Sim.Combat
             }
             for (int i = 0; i < wn; i++)
             {
-                staging.Weapons.Add(ReadWeapon(r, format));
+                CombatWeapon rw = ReadWeapon(r, format);
+                // FG2-VFX-02（格式 7）：布区落点 / 定点 / 反伤的取值不合理整份拒绝。
+                CombatReading rr7 = rw.Reading;
+                if ((byte)rr7.FieldPlacement > (byte)CombatZonePlacement.Attacker || rr7.DroneAnchored > 1
+                    || !(rr7.Thorns >= 0f) || !(rr7.ThornsFlat >= 0f) || !(rr7.ThornsReach >= 0f)
+                    || float.IsInfinity(rr7.Thorns) || float.IsInfinity(rr7.ThornsFlat) || float.IsInfinity(rr7.ThornsReach))
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
+                staging.Weapons.Add(rw);
             }
             int pn = r.ReadInt32();
             if (pn < 0 || pn > 1 << 16)
@@ -1993,7 +2030,7 @@ namespace BinGames.Sim.Combat
             }
             if (format >= 3)
             {
-                CombatLoadResult rr = ParseReadings(r, ref staging, wn);
+                CombatLoadResult rr = ParseReadings(r, ref staging, wn, format);
                 if (rr != CombatLoadResult.Ok)
                 {
                     return rr;
@@ -2035,7 +2072,7 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>FG2-FW-02（格式 3）：区域、回波、无人机三张表。任何数值不合理整份拒绝（内核保持原样）。</summary>
-        private static CombatLoadResult ParseReadings(BinaryReader r, ref CombatData staging, int weaponCount)
+        private static CombatLoadResult ParseReadings(BinaryReader r, ref CombatData staging, int weaponCount, int format)
         {
             int zn = r.ReadInt32();
             if (zn < 0 || zn > 1 << 20)
@@ -2062,6 +2099,12 @@ namespace BinGames.Sim.Combat
                     Owner = r.ReadInt32(),
                     Faction = (CombatFaction)r.ReadByte(),
                 };
+                // FG2-VFX-02（格式 7）：区域外观（旧格式 = 液池）。
+                zone.Look = format >= 7 ? (CombatZoneLook)r.ReadByte() : CombatZoneLook.Pool;
+                if ((byte)zone.Look > (byte)CombatZoneLook.Residue)
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
                 if (!IsFinite(zone.Pos) || !(zone.Radius >= 0f) || float.IsInfinity(zone.Radius) || !(zone.TickInterval > 0f) || float.IsNaN(zone.Dps)
                     || double.IsNaN(zone.Until) || double.IsNaN(zone.NextTick) || double.IsNaN(zone.Born) || zone.Born > zone.Until || (byte)zone.Faction > (byte)CombatFaction.Neutral)
                 {
@@ -2114,6 +2157,16 @@ namespace BinGames.Sim.Combat
                     Faction = (CombatFaction)r.ReadByte(),
                 };
                 drone.Prev = drone.Pos;
+                // FG2-VFX-02（格式 7）：定点无人机（哨戒桩）的锚点（旧格式 = 伴飞、无锚点）。
+                if (format >= 7)
+                {
+                    drone.Anchored = r.ReadByte();
+                    drone.Anchor = new double2(r.ReadDouble(), r.ReadDouble());
+                    if (drone.Anchored > 1 || !IsFinite(drone.Anchor))
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                }
                 if (!IsFinite(drone.Pos) || double.IsNaN(drone.Until) || drone.Weapon >= weaponCount || float.IsNaN(drone.Damage) || drone.Damage < 0f
                     || !(drone.Cooldown > 0f) || (byte)drone.Faction > (byte)CombatFaction.Neutral)
                 {
@@ -2254,6 +2307,15 @@ namespace BinGames.Sim.Combat
             if (format >= 3)
             {
                 WriteReading(w, x.Reading);
+            }
+            // FG2-VFX-02（格式 7）：布区落点、无人机定点、反伤。
+            if (format >= 7)
+            {
+                w.Write((byte)x.Reading.FieldPlacement);
+                w.Write(x.Reading.DroneAnchored);
+                w.Write(x.Reading.Thorns);
+                w.Write(x.Reading.ThornsFlat);
+                w.Write(x.Reading.ThornsReach);
             }
         }
 
@@ -2403,6 +2465,14 @@ namespace BinGames.Sim.Combat
             {
                 w.Reading = ReadReading(r);
             }
+            if (format >= 7)
+            {
+                w.Reading.FieldPlacement = (CombatZonePlacement)r.ReadByte();
+                w.Reading.DroneAnchored = r.ReadByte();
+                w.Reading.Thorns = r.ReadSingle();
+                w.Reading.ThornsFlat = r.ReadSingle();
+                w.Reading.ThornsReach = r.ReadSingle();
+            }
             return w;
         }
 
@@ -2510,6 +2580,10 @@ namespace BinGames.Sim.Combat
         public CombatData D;
         public NativeList<CombatInstance> Effects;
         public double2 Origin;
+        [ReadOnly] public NativeArray<float2> Visuals;
+
+        private static int FactionColor(CombatFaction f) =>
+            f == CombatFaction.Player ? CombatConst.EffectFriendColor : f == CombatFaction.Hostile ? CombatConst.EffectFoeColor : CombatConst.EffectNeutralColor;
 
         public void Execute()
         {
@@ -2520,10 +2594,23 @@ namespace BinGames.Sim.Combat
                 CombatZone zn = D.Zones[z];
                 double2 p = zn.Pos - Origin;
                 float left = (float)math.saturate((zn.Until - now) / math.max(0.001, zn.Until - zn.Born));
+                // 颜色：区域挂的第一个有外观的状态位（燃烧 = 火色、腐蚀 = 酸绿……与头顶图标同源）；没有就用阵营色。
+                int color = FactionColor(zn.Faction);
+                uint bits = zn.StatusMask;
+                while (bits != 0u)
+                {
+                    int b = math.tzcnt(bits);
+                    bits &= bits - 1u;
+                    if (b < Visuals.Length && Visuals[b].x >= 0f)
+                    {
+                        color = (int)Visuals[b].y;
+                        break;
+                    }
+                }
                 Effects.Add(new CombatInstance
                 {
                     A = new float4((float)p.x, (float)p.y, (float)p.x, (float)p.y),
-                    B = new float4(zn.Radius, left, (float)zn.Faction, 20f),
+                    B = new float4(zn.Radius, left, color, CombatConst.EffectKindZone + (float)zn.Look),
                 });
             }
             for (int q = 0; q < D.Drones.Length; q++)
@@ -2531,10 +2618,11 @@ namespace BinGames.Sim.Combat
                 CombatDrone dr = D.Drones[q];
                 double2 p = dr.Pos - Origin;
                 double2 pv = dr.Prev - Origin;
+                bool post = dr.Anchored != 0;
                 Effects.Add(new CombatInstance
                 {
                     A = new float4((float)p.x, (float)p.y, (float)pv.x, (float)pv.y),
-                    B = new float4(0.3f, 1f, (float)dr.Faction, 21f),
+                    B = new float4(post ? 0.45f : 0.3f, (float)math.saturate((dr.Until - now) / 8.0), FactionColor(dr.Faction), post ? CombatConst.EffectKindPost : CombatConst.EffectKindDrone),
                 });
             }
         }

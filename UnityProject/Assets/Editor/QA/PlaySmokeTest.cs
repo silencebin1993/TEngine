@@ -214,6 +214,8 @@ namespace GameLogic.EditorTools
                     case 215: StepHudShown(inStep); break;
                     case 216: StepHudCodexOpened(inStep); break;
                     case 217: StepHudCodexClosed(inStep); break;
+                    case 231: StepRosterMorphShown(inStep); break;
+                    case 232: StepRosterMorphNext(inStep); break;
                     case 218: StepFollowStarted(inStep); break;
                     case 219: StepFollowStoppedByHome(inStep); break;
                     case 185: StepLinkSelect(inStep); break;
@@ -1339,10 +1341,16 @@ namespace GameLogic.EditorTools
                 // FG2-FW-02（FGR-FW-010 / 011）：主组件下拉带载体、5 种载体的作战组件都能选；固件区写出已装固件在当前主组件载体上的读法。
                 DropdownField primary = circuitRoot?.Q<DropdownField>("PrimaryDropdown");
                 List<string> choices = primary?.choices ?? new List<string>();
+                // FG2-VFX-02（FG-GAP-051）：设计案 5.6 其余 5 个组件也在正式下拉里（旋刃环 / 哨戒桩 / 震荡脉冲器 / 拆解钳；尖刺外装在功能组件下拉）。
                 string[] carrierComps = { Campaign.Content.ComponentCatalog.CompRamId, Campaign.Content.ComponentCatalog.CompDroneBayId,
-                    Campaign.Content.ComponentCatalog.CompCoronaId, Campaign.Content.ComponentCatalog.CompSprayerId };
+                    Campaign.Content.ComponentCatalog.CompCoronaId, Campaign.Content.ComponentCatalog.CompSprayerId,
+                    Campaign.Content.ComponentCatalog.CompOrbitId, Campaign.Content.ComponentCatalog.CompSentryId,
+                    Campaign.Content.ComponentCatalog.CompPulserId, Campaign.Content.ComponentCatalog.CompClawId };
                 bool allCarriers = carrierComps.All(id => choices.Any(c => c.Contains(Campaign.Content.ComponentCatalog.All[id].DisplayName)
                                                                           && c.Contains(Campaign.Content.CarrierReadings.SubtypeName(id))));
+                List<string> utilChoices = circuitRoot?.Q<DropdownField>("UtilityDropdown")?.choices ?? new List<string>();
+                string spikesName = Campaign.Content.ComponentCatalog.All[Campaign.Content.ComponentCatalog.FuncSpikesId].DisplayName;
+                Check(utilChoices.Any(c => c.Contains(spikesName)), $"电路面板：功能组件下拉有尖刺外装（{string.Join(" / ", utilChoices)}）");
                 UI.CircuitBoard.CircuitBoardPanelUIToolkit panel = CircuitPanel();
                 string readingLabel = circuitRoot?.Q<Label>("FirmwareReadingLabel")?.text ?? "(无标签)";
                 string expected = panel?.Board != null ? UI.CircuitBoard.CircuitBoardPanelUIToolkit.FirmwareReadingText(panel.Board) : null;
@@ -2185,6 +2193,101 @@ namespace GameLogic.EditorTools
                   && Campaign.Feedback.FeedbackCues.CountOf(Campaign.Feedback.FeedbackCueId.UplinkLeave) == SessionState.GetInt(K + "HudLeave0", 0) + 1
                   && hudRec != null && hudRec.SignalUplinkCount >= 1 && detail.Contains(Campaign.MachineSignalExperience.Describe(CampaignSession.Current, hudRec).Split('，')[0]),
                 $"离开后接入 HUD 隐藏、离开音效钩子响一次；机器详情：“{detail.Replace("\n", " / ")}”");
+            // FG2-VFX-02：同一台机器换上新作战组件（旋刃环 + 尖刺外装，电路自带拖尾）——真实场景里按 0.3 秒展开喷口态，两个新组件的部件都建出来、可见。
+            // 测试捷径同 211 步（代替蓝图编辑器保存 + 装配站回厂），装配登记走同一入口。
+            CampaignState st = CampaignSession.Current;
+            var board = Campaign.Blueprint.BlueprintCircuitBoard.CreateDefault(hudRec?.ChassisId ?? Campaign.Regions.HomeValleyLayout.Erc003ChassisId, Campaign.Content.ComponentCatalog.CompOrbitId,
+                Campaign.Content.ComponentCatalog.FuncSpikesId, null, new[] { Campaign.Content.FirmwareCatalog.FwTrailId });
+            const string bpRoster = "bp_smoke_vfx02_orbit_spikes";
+            BlueprintVersionRecord version = board.ToVersion(1, 0f);
+            st.BlueprintRecords = (st.BlueprintRecords ?? System.Array.Empty<BlueprintRecord>()).Where(r => r.BlueprintId != bpRoster)
+                .Append(new BlueprintRecord { BlueprintId = bpRoster, DisplayName = bpRoster, ActiveVersion = 1, Versions = new[] { version } }).ToArray();
+            bool reg = Campaign.Blueprint.MachineLoadoutRegistry.Register(st, m, bpRoster, 1).Success;
+            Check(reg && board.FirmwareSlots.Contains(Campaign.Content.FirmwareCatalog.FwTrailId), $"{SigLabel(m)} 换上旋刃环 + 尖刺外装（电路自带拖尾）的蓝图");
+            Next(231, "FG2-VFX-02：等新组件的机身状态展开");
+        }
+
+        private static void StepRosterMorphShown(double inStep)
+        {
+            if (inStep < 1.0)
+            {
+                return;
+            }
+            int m = SessionState.GetInt(K + "MorphM", 0);
+            Campaign.Combat.CombatSite site = GameRoot.HomeValley.Combat;
+            site.TryGetMachineWeapon(m, out Campaign.Combat.MachineWeaponInfo info);
+            site.Kernel.TryGetWeapon(info.WeaponIndex, out BinGames.Sim.Combat.CombatWeapon w);
+            Transform grp = View.MachineMorphView.GroupOf(m, Campaign.Blueprint.MorphMask.Fluid);
+            bool orbitParts = grp != null && grp.Cast<Transform>().Any(t => t.name.StartsWith(Campaign.Content.ComponentCatalog.CompOrbitId + ".", StringComparison.Ordinal) && t.gameObject.activeInHierarchy);
+            bool spikeParts = grp != null && grp.Cast<Transform>().Any(t => t.name.StartsWith(Campaign.Content.ComponentCatalog.FuncSpikesId + ".", StringComparison.Ordinal) && t.gameObject.activeInHierarchy);
+            int renderers = grp != null ? grp.GetComponentsInChildren<MeshRenderer>(false).Count(r => r.enabled && r.sharedMaterial != null && r.sharedMaterial.enableInstancing) : 0;
+            Check(info.Morph == Campaign.Blueprint.MorphMask.Fluid && View.MachineMorphView.VisibleOf(m) == Campaign.Blueprint.MorphMask.Fluid
+                  && Mathf.Approximately(View.MachineMorphView.ProgressOf(m, Campaign.Blueprint.MorphMask.Fluid), 1f) && orbitParts && spikeParts && renderers > 0
+                  && w.Reading.Carrier == BinGames.Sim.Combat.CombatCarrier.Melee && w.Reading.Cone >= 180f && w.Reading.Thorns > 0f,
+                $"{SigLabel(m)}：旋刃环 + 尖刺外装 + 拖尾 → 喷口态展开（{renderers} 个部件可见，两个新组件各有部件）；内核武器 = 一整圈格斗 + 反伤");
+            // FG2-VFX-02 修复轮（审查 P0）：其余 3 个新组件（哨戒桩 / 震荡脉冲器 / 拆解钳）也在真实场景里逐个换装、展开喷口态、核对部件与内核武器。
+            SessionState.SetInt(K + "RosterIdx", 0);
+            RegisterRosterMorph(m, RosterMorphRest[0]);
+            Next(232, "FG2-VFX-02：换上哨戒桩，等机身状态重建");
+        }
+
+        /// <summary>231 步之后逐个换装的新组件（旋刃环 / 尖刺外装已在 231 步核对）。</summary>
+        private static readonly string[] RosterMorphRest =
+        {
+            Campaign.Content.ComponentCatalog.CompSentryId,
+            Campaign.Content.ComponentCatalog.CompPulserId,
+            Campaign.Content.ComponentCatalog.CompClawId,
+        };
+
+        /// <summary>测试捷径同 211 / 230 步（代替蓝图编辑器保存 + 装配站回厂）：同一台机器换上“新组件 + 电路自带拖尾”的蓝图，装配登记走同一入口。</summary>
+        private static void RegisterRosterMorph(int m, string comp)
+        {
+            CampaignState st = CampaignSession.Current;
+            MachineRegistry.TryGetRecord(m, out MachineRecord rec);
+            var board = Campaign.Blueprint.BlueprintCircuitBoard.CreateDefault(rec?.ChassisId ?? Campaign.Regions.HomeValleyLayout.Erc003ChassisId, comp,
+                null, null, new[] { Campaign.Content.FirmwareCatalog.FwTrailId });
+            string bp = "bp_smoke_vfx02_" + comp;
+            BlueprintVersionRecord version = board.ToVersion(1, 0f);
+            st.BlueprintRecords = (st.BlueprintRecords ?? System.Array.Empty<BlueprintRecord>()).Where(r => r.BlueprintId != bp)
+                .Append(new BlueprintRecord { BlueprintId = bp, DisplayName = bp, ActiveVersion = 1, Versions = new[] { version } }).ToArray();
+            bool reg = Campaign.Blueprint.MachineLoadoutRegistry.Register(st, m, bp, 1).Success;
+            Check(reg && board.FirmwareSlots.Contains(Campaign.Content.FirmwareCatalog.FwTrailId), $"{SigLabel(m)} 换上 {comp} + 拖尾的蓝图");
+        }
+
+        private static void StepRosterMorphNext(double inStep)
+        {
+            if (inStep < 1.0)
+            {
+                return;
+            }
+            int m = SessionState.GetInt(K + "MorphM", 0);
+            int idx = SessionState.GetInt(K + "RosterIdx", 0);
+            string comp = RosterMorphRest[Mathf.Clamp(idx, 0, RosterMorphRest.Length - 1)];
+            Campaign.Combat.CombatSite site = GameRoot.HomeValley.Combat;
+            site.TryGetMachineWeapon(m, out Campaign.Combat.MachineWeaponInfo info);
+            site.Kernel.TryGetWeapon(info.WeaponIndex, out BinGames.Sim.Combat.CombatWeapon w);
+            Transform grp = View.MachineMorphView.GroupOf(m, Campaign.Blueprint.MorphMask.Fluid);
+            int compParts = grp != null ? grp.Cast<Transform>().Count(t => t.name.StartsWith(comp + ".", StringComparison.Ordinal) && t.gameObject.activeInHierarchy) : 0;
+            bool staleParts = grp != null && grp.Cast<Transform>().Any(t => t.gameObject.activeInHierarchy
+                && (t.name.StartsWith(Campaign.Content.ComponentCatalog.CompOrbitId + ".", StringComparison.Ordinal)
+                    || RosterMorphRest.Any(o => o != comp && t.name.StartsWith(o + ".", StringComparison.Ordinal))));
+            int renderers = grp != null ? grp.GetComponentsInChildren<MeshRenderer>(false).Count(r => r.enabled && r.sharedMaterial != null && r.sharedMaterial.enableInstancing) : 0;
+            BinGames.Sim.Combat.CombatReading rd = w.Reading;
+            bool kernelOk = comp == Campaign.Content.ComponentCatalog.CompSentryId
+                ? rd.Carrier == BinGames.Sim.Combat.CombatCarrier.Summon && rd.DroneAnchored != 0
+                : comp == Campaign.Content.ComponentCatalog.CompPulserId
+                    ? rd.Carrier == BinGames.Sim.Combat.CombatCarrier.Field && rd.FieldPlacement == BinGames.Sim.Combat.CombatZonePlacement.Attacker
+                    : rd.Carrier == BinGames.Sim.Combat.CombatCarrier.Melee && rd.EchoCount > 0;
+            Check(info.Morph == Campaign.Blueprint.MorphMask.Fluid && View.MachineMorphView.VisibleOf(m) == Campaign.Blueprint.MorphMask.Fluid
+                  && Mathf.Approximately(View.MachineMorphView.ProgressOf(m, Campaign.Blueprint.MorphMask.Fluid), 1f) && compParts > 0 && !staleParts && renderers > 0 && kernelOk,
+                $"{SigLabel(m)}：{comp} + 拖尾 → 喷口态重建展开（{comp} 部件 {compParts} 个、共 {renderers} 个部件可见，没有上一个组件的残留部件）；内核武器载体 = {rd.Carrier}");
+            if (idx + 1 < RosterMorphRest.Length)
+            {
+                SessionState.SetInt(K + "RosterIdx", idx + 1);
+                RegisterRosterMorph(m, RosterMorphRest[idx + 1]);
+                Next(232, $"FG2-VFX-02：换上 {RosterMorphRest[idx + 1]}，等机身状态重建");
+                return;
+            }
             string orig = SessionState.GetString(K + "MorphOrigBp", string.Empty);
             if (orig.Length > 0)
             {

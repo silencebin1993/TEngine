@@ -33,6 +33,18 @@ namespace GameLogic.Campaign.Content
         public const string CompCoronaId = "comp_corona";
         public const string CompSprayerId = "comp_sprayer";
 
+        // ── FG2-VFX-02 新建作战组件（设计案 5.6 其余 5 个，FG-GAP-051；名表 16 个至此全部可装配）──
+        /// <summary>旋刃环（格斗·环绕：一整圈）。</summary>
+        public const string CompOrbitId = "comp_orbit";
+        /// <summary>哨戒桩（无人机·定点：插在身前不动）。</summary>
+        public const string CompSentryId = "comp_sentry";
+        /// <summary>震荡脉冲器（布区·脉冲：落在自己脚下，要贴近）。</summary>
+        public const string CompPulserId = "comp_pulser";
+        /// <summary>拆解钳（格斗·拆解：夹住后持续拆解 = 组件自带回波；击毁多回收废料随 FG8-LOOT-01）。</summary>
+        public const string CompClawId = "comp_claw";
+        /// <summary>尖刺外装（功能组件，格斗·反伤：被动，被近身攻击时反伤）。</summary>
+        public const string FuncSpikesId = "func_spikes";
+
         private static readonly Dictionary<string, MechanicalContentDef> _defs = new Dictionary<string, MechanicalContentDef>
         {
             // ═══ 主组件 ═══
@@ -382,9 +394,9 @@ namespace GameLogic.Campaign.Content
                 PreviewId = "preview_" + row.Id,
                 SaveCompatible = true,
                 LockedHintText = GameText.Get("component.source.base"),
-                SilhouetteNote = $"载体 {row.Carrier}；机身状态随 FG2-VFX-02（DEBT-FG2FW02-01）。",
+                SilhouetteNote = $"载体 {row.Carrier}；三套机身状态由 FG2-VFX-02 交付（MachineMorphLibrary，占位低模 → DEBT-FG2VFX02-01）。",
                 LegacyFacadeId = row.LegacyOrgan == "none" ? null : row.LegacyOrgan,
-                DebtId = "DEBT-FG2FW02-01",
+                DebtId = "DEBT-FG2VFX02-01",
             };
         }
     }

@@ -201,6 +201,8 @@ namespace GameLogic.EditorTools
                     F(c.Approach), F(c.Cone), F(c.Area), F(c.FieldSeconds), F(c.FieldDpsRatio), c.Drones.ToString(CultureInfo.InvariantCulture), F(c.DroneSeconds),
                     F(c.DroneRatio), F(c.DroneCooldown), F(c.DroneLeash), F(c.Knockback), F(c.TurretKnockback), c.Scrap.ToString(CultureInfo.InvariantCulture),
                     c.Load.ToString(CultureInfo.InvariantCulture), c.Source, c.Icon,
+                    // FG2-VFX-02：布区落点 / 无人机方式 / 组件自带回波 / 反伤
+                    c.FieldPlace, c.DroneMode, c.EchoCount.ToString(CultureInfo.InvariantCulture), F(c.EchoDelay), F(c.EchoRatio), F(c.Thorns), F(c.ThornsReach),
                 };
                 Compare(f, mine, cdiff);
             }
@@ -1341,7 +1343,9 @@ namespace GameLogic.EditorTools
             int body = data.Length - 4;
             // 无人机表是格式 3 快照正文的最后一段；格式 4（FG2-FW-03）在它后面追加反应计数块（条数 + 每条 稳定键 int / 次数 int / 伤害 float）。
             int tail = CombatKernel.PeekFormat(data) >= 4 ? 4 + CombatConst.MaxReactions * CombatKernel.ReactionCounterEntryBytes : 0;
-            int at = body - tail - 1 - 4;
+            // 格式 7（FG2-VFX-02）：每架无人机在阵营后面追加 定点(1) + 锚点(16)。
+            int anchor = CombatKernel.PeekFormat(data) >= 7 ? 1 + 16 : 0;
+            int at = body - tail - anchor - 1 - 4;
             if (at < 12)
             {
                 return false;

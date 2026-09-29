@@ -228,7 +228,11 @@ namespace GameLogic.Campaign.Content
         /// <paramref name="damageFromCompile"/>：武器伤害已经来自电路编译（连射器 / 切割束——电容蓄力等能量改动已经算进去），
         /// 这时“伤害倍率”读法不再乘第二遍。
         /// </summary>
-        public static CombatReading Build(string primaryId, string chassisId, IReadOnlyList<string> firmwareIds, bool damageFromCompile)
+        public static CombatReading Build(string primaryId, string chassisId, IReadOnlyList<string> firmwareIds, bool damageFromCompile) =>
+            Build(primaryId, null, chassisId, firmwareIds, damageFromCompile);
+
+        /// <summary>FG2-VFX-02：同上，另读功能组件的被动参数（尖刺外装的反伤）。武器载体与投送仍只由主组件决定。</summary>
+        public static CombatReading Build(string primaryId, string utilityId, string chassisId, IReadOnlyList<string> firmwareIds, bool damageFromCompile)
         {
             var r = new CombatReading();
             FirmwareCarrier carrier = FirmwareCarrier.Projectile;
@@ -247,6 +251,22 @@ namespace GameLogic.Campaign.Content
                 r.DroneLeash = Math.Max(0f, comp.DroneLeash);
                 bool turretAdjusted = IsFixedChassis(chassisId) && comp.Turret == "adjusted";
                 r.Knockback = Math.Max(0f, turretAdjusted && comp.TurretKnockback > 0f ? comp.TurretKnockback : comp.Knockback);
+                // FG2-VFX-02（FG-GAP-051）：布区·脉冲落在自己脚下；无人机·定点（哨戒桩）；拆解钳自带回波（夹住后持续拆解）。
+                r.FieldPlacement = comp.FieldPlace == "self" ? CombatZonePlacement.Attacker : CombatZonePlacement.HitPoint;
+                r.DroneAnchored = (byte)(comp.DroneMode == "post" ? 1 : 0);
+                if (comp.EchoCount > 0 && comp.EchoDelay > 0f && comp.EchoRatio > 0f)
+                {
+                    r.EchoCount = comp.EchoCount;
+                    r.EchoDelay = comp.EchoDelay;
+                    r.EchoRatio = comp.EchoRatio;
+                }
+            }
+            // FG2-VFX-02：功能组件的被动反伤（尖刺外装）：固定值 = 表 damage 列，比例 = thorns，触及 = thornsReach。
+            if (TryGetComponent(utilityId, out CombatComponent util) && util.Slot == "function" && util.Thorns > 0f)
+            {
+                r.Thorns = Math.Max(0f, util.Thorns);
+                r.ThornsFlat = Math.Max(0f, util.Damage);
+                r.ThornsReach = Math.Max(0f, util.ThornsReach);
             }
             r.Carrier = (CombatCarrier)(byte)carrier;
 

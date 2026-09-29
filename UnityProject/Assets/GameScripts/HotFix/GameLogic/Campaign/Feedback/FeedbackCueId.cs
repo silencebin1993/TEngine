@@ -69,6 +69,8 @@ namespace GameLogic.Campaign.Feedback
         ReadingZone,
         ReadingEcho,
         ReadingDrone,
+        // ── FG2-VFX-02：尖刺外装反伤（被近身攻击时把伤害反弹给攻击者） ──
+        ReadingThorns,
 
         Max,
     }

@@ -38,9 +38,11 @@ namespace GameLogic.EditorTools
     /// D FGT-FW-004 正式链路（接入 → 状态出现 → 离开 → 复原；AI 自带固件的常驻状态；多类叠加；Tab 切机两台同时过渡；装配变更）；
     /// E 负向（形变过程中阵亡、快速反复接入离开就地折返、表现中途被卸载、没有作战组件、引信类不改机身）；
     /// F 暂停与 0.5x～3x；G 真实文件存读档（读档直接到位不重播）；H 观察无关（后台一致、重新观察直接到位）；I 性能与零分配。
+    /// FG2-VFX-02 形变全量（FgMachineMorphSelfCheck.Full.cs）：J 名表 16 个作战组件逐个真实接入 / 离开（FGT-FW-004 扩展）；K 多类叠加的遮挡（深度栅格化 + 优先级）；
+    /// L 美术预算（作战组件 ≤ 1,000、整机 / 炮塔 ≤ 4,000、零骨骼）；M 新组件装配的真实文件存读档与观察无关。
     /// 已并入 <c>CellFrameworkValidate.RunAll</c>。
     /// </summary>
-    public static class FgMachineMorphSelfCheck
+    public static partial class FgMachineMorphSelfCheck
     {
         private const string SettingsPrefsKey = "BinGames.GameSettings.v1";
         private const int Slot = 0;
@@ -99,6 +101,11 @@ namespace GameLogic.EditorTools
                 Step(CheckSaveLoad);
                 Step(CheckObservation);
                 Step(CheckPerformance);
+                // FG2-VFX-02 形变全量
+                Step(CheckFullRoster);
+                Step(CheckOcclusion);
+                Step(CheckArtBudget);
+                Step(CheckRosterSaveAndObservation);
                 foreach (string p in PerfLines)
                 {
                     Line("  · 性能：" + p);
@@ -267,7 +274,7 @@ namespace GameLogic.EditorTools
 
         private static void CheckData()
         {
-            Line("  · A. 数据：固件类别入表（核心全是限制器）、过渡 0.3 秒入表、Demo 的 6 个作战组件都有三套状态");
+            Line("  · A. 数据：固件类别入表（核心全是限制器）、过渡 0.3 秒入表、设计案 5.6 名表 16 个作战组件都有三套状态（FG2-VFX-02）");
             var expected = new Dictionary<string, FirmwareCategory>
             {
                 { FirmwareCatalog.FwHomingId, FirmwareCategory.Fuse },
@@ -292,8 +299,9 @@ namespace GameLogic.EditorTools
             // 组件目录必须 = 有机身状态的 6 个 + 登记待补的，新增组件两边都没登记会被这里拦下。
             var catalogCombat = ComponentCatalog.All.Values.Where(c => c.Slot == "主组件" || c.Slot == "功能组件").Select(c => c.Id).OrderBy(x => x).ToList();
             var morphComps = MachineMorph.MorphComponents.Concat(MachineMorph.PendingMorphComponents).OrderBy(x => x).ToList();
-            Expect(MachineMorph.MorphComponents.Count == 6 && catalogCombat.SequenceEqual(morphComps) && !MachineMorph.PendingMorphComponents.Intersect(MachineMorph.MorphComponents).Any(),
-                $"作战组件 {catalogCombat.Count} 个（{string.Join("、", catalogCombat)}）= 有机身状态的 {MachineMorph.MorphComponents.Count} 个 + 登记待 FG2-VFX-02 补的 {MachineMorph.PendingMorphComponents.Count} 个");
+            Expect(MachineMorph.MorphComponents.Count == 16 && MachineMorph.PendingMorphComponents.Count == 0 && catalogCombat.SequenceEqual(morphComps)
+                   && MachineMorph.MorphComponents.Distinct().Count() == 16,
+                $"作战组件 {catalogCombat.Count} 个（{string.Join("、", catalogCombat)}）= 有机身状态的 {MachineMorph.MorphComponents.Count} 个（名表 16 个全部；登记待补 {MachineMorph.PendingMorphComponents.Count} 个）");
             var fuseOnly = new BlueprintCircuitPreview { PrimaryId = ComponentCatalog.CompGunId, FirmwareIds = new[] { FirmwareCatalog.FwHomingId, FirmwareCatalog.FwSplitId } };
             var mixed = new BlueprintCircuitPreview { PrimaryId = ComponentCatalog.CompGunId, FirmwareIds = new[] { FirmwareCatalog.FwHomingId, FirmwareCatalog.FwTrailId, FirmwareCatalog.FwOverloadId } };
             var noComp = new BlueprintCircuitPreview { PrimaryId = null, UtilityId = null, FirmwareIds = new[] { FirmwareCatalog.FwTrailId } };
@@ -307,7 +315,7 @@ namespace GameLogic.EditorTools
 
         private static void CheckLibrary()
         {
-            Line("  · B. 部件库：6 组件 × 3 状态、三角面 ≤ 1,000、每件一个 MeshFilter、网格 / 材质全机共用、GPU Instancing");
+            Line($"  · B. 部件库：{MachineMorph.MorphComponents.Count} 组件 × 3 状态、三角面 ≤ 1,000、每件一个 MeshFilter、网格 / 材质全机共用、GPU Instancing");
             MachineMorphView.ResetForTests();
             var tris = new List<string>();
             bool budgetOk = true;
@@ -329,7 +337,7 @@ namespace GameLogic.EditorTools
             }
             Expect(budgetOk, $"每个组件每套状态都有几何、三角面 ≤ {MachineMorphLibrary.TriangleBudgetPerState}（美术规则 02 §2）：{string.Join("，", tris)}");
             Expect(signatures.Values.All(set => set.Count == MachineMorph.MorphComponents.Count),
-                "每个组件在每类状态下都有自己的组件件（不是全组件共用一套）：6 × 3 = 18 套不同的组件网格");
+                $"每个组件在每类状态下都有自己的组件件（不是全组件共用一套）：{MachineMorph.MorphComponents.Count} × 3 = {MachineMorph.MorphComponents.Count * 3} 套不同的组件网格");
 
             var hostA = new GameObject("MorphLibA").transform;
             var hostB = new GameObject("MorphLibB").transform;

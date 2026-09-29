@@ -21,6 +21,13 @@ namespace BinGames.Sim.Combat
         private static readonly int KindId = Shader.PropertyToID("_Kind");
         private static readonly int AlphaId = Shader.PropertyToID("_Alpha");
         private static readonly int HeightId = Shader.PropertyToID("_Height");
+        private static readonly int GameTimeId = Shader.PropertyToID("_GameTime");
+
+        /// <summary>区域 / 无人机着色器动画的时钟 = 内核（游戏）时间，按一小时取模防浮点精度损失：战略暂停时画面静止、倍速时同步加快（B09）。</summary>
+        private float _gameTime;
+
+        /// <summary>着色器动画时钟（秒）：内核时间按一小时取模。暂停不推进内核 → 不变；倍速多推进几步 → 同步加快。</summary>
+        public static float AnimationClock(CombatKernel kernel) => kernel == null || kernel.IsDisposed ? 0f : (float)(kernel.Time % 3600.0);
 
         private Material _material;
         private Mesh _quad;
@@ -126,11 +133,12 @@ namespace BinGames.Sim.Combat
                 LastProjectileInstances = 0;
                 return;
             }
+            _gameTime = AnimationClock(kernel);
             bool changed = _preparedRevision != kernel.Revision;
             if (changed)
             {
                 kernel.PrepareRender(_units, _projectiles, origin);
-                kernel.PrepareEffects(_effects, origin);
+                kernel.PrepareEffects(_effects, origin, _statusVisuals);
                 if (_hasStatusVisuals)
                 {
                     kernel.PrepareStatusIcons(_icons, _statusVisuals, origin, MaxIconsPerUnit, IconSize);
@@ -189,6 +197,7 @@ namespace BinGames.Sim.Combat
             props.SetFloat(KindId, kind);
             props.SetFloat(AlphaId, alpha);
             props.SetFloat(HeightId, height);
+            props.SetFloat(GameTimeId, _gameTime);
             var rp = new RenderParams(_material)
             {
                 worldBounds = bounds,

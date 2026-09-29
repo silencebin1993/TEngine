@@ -381,6 +381,8 @@ namespace GameLogic.View
                 MorphMask cat = MachineMorph.Categories[i];
                 var group = new GameObject(GroupNames[i]).transform;
                 group.SetParent(rig, false);
+                // FG2-VFX-02：多类叠加的遮挡按优先级——高优先级的挂点组整体抬高几厘米，俯视下重叠处它在上面（MachineMorph.OverlayPriority）。
+                group.localPosition = Vector3.up * (MachineMorph.OverlayPriority(cat) * MachineMorph.OverlayLiftPerLevel);
                 group.gameObject.SetActive(false);
                 if (groupsOut != null)
                 {

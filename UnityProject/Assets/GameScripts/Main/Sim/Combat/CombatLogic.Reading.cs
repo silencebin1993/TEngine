@@ -45,7 +45,7 @@ namespace BinGames.Sim.Combat
             if (r.Carrier == CombatCarrier.Summon)
             {
                 Cue(ref d, CombatEventKind.Fired, a, d.Id[t], 0f, d.Pos[t], 0);
-                LaunchDrones(ref d, a, wp, r.Drones + r.EscortDrones);
+                LaunchDrones(ref d, a, wp, r.Drones + r.EscortDrones, t);
                 return CombatFireResult.Ok;
             }
 
@@ -58,6 +58,7 @@ namespace BinGames.Sim.Combat
             {
                 return CombatFireResult.Invulnerable; // Demo：首领阶段不可伤时结算失败，不打标记、不跳转。
             }
+            ReflectMelee(ref d, a, t, dealt);
             PerTarget(ref d, a, t, dealt, r, d.Pos[a]);
 
             // 载体投送的其余目标（格斗扇形 / 力场一圈）：逐目标读法，不锚定。
@@ -67,10 +68,14 @@ namespace BinGames.Sim.Combat
             }
             else if (r.Carrier == CombatCarrier.Field && r.FieldSeconds > 0f && r.Area > 0f)
             {
-                if (SpawnZone(ref d, a, FactionOfSlot(ref d, a), primaryPos, r.Area, r.FieldSeconds, baseDamage * math.max(0f, r.FieldDpsRatio), r.ZoneGrowth, r.ZoneTickScale,
+                // FG2-VFX-02：震荡脉冲器（布区·脉冲）的区域落在自己脚下（画成冲击波）；其余布区落在目标脚下（液池）。
+                bool atSelf = r.FieldPlacement == CombatZonePlacement.Attacker;
+                double2 fieldPos = atSelf ? d.Pos[a] : primaryPos;
+                if (SpawnZone(ref d, a, FactionOfSlot(ref d, a), fieldPos, r.Area, r.FieldSeconds, baseDamage * math.max(0f, r.FieldDpsRatio), r.ZoneGrowth, r.ZoneTickScale,
                     r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln))
                 {
-                    NoteReading(ref d, CombatConst.ReadingFeedZone, primaryPos, a);
+                    SetLastZoneLook(ref d, atSelf ? CombatZoneLook.Pulse : CombatZoneLook.Pool);
+                    NoteReading(ref d, CombatConst.ReadingFeedZone, fieldPos, a);
                 }
             }
 
@@ -100,10 +105,15 @@ namespace BinGames.Sim.Combat
         /// <summary>找目标 / 追击用的交战距离：格斗 / 力场按触及（区域半径 + 自身半径）收紧，其余是武器射程。驻守开火的炮塔据此只打够得着的敌人。</summary>
         internal static float EngageRange(ref CombatData d, int i, in CombatWeapon wp)
         {
-            CombatCarrier c = wp.Reading.Carrier;
-            if ((c == CombatCarrier.Melee || c == CombatCarrier.Aura) && wp.Reading.Area > 0f)
+            if (IsContactCarrier(wp.Reading))
             {
                 float reach = wp.Reading.Area + d.Radius[i];
+                return wp.Range > 0f ? math.min(wp.Range, reach) : reach;
+            }
+            if (IsAnchoredSummon(wp.Reading))
+            {
+                // 哨戒桩（FG2-VFX-02 修复）：插下的桩打得到的距离才算交战距离（目标半径另算，这里取 0 偏保守），驻守开火 / 突袭者据此找目标、靠近。
+                float reach = SentryReach(ref d, i, wp.Reading, 0f);
                 return wp.Range > 0f ? math.min(wp.Range, reach) : reach;
             }
             return wp.Range;
@@ -113,10 +123,15 @@ namespace BinGames.Sim.Combat
         /// 格斗 / 力场要贴近（触及 = 区域半径 + 双方半径），过热迟滞（过热后降到恢复线以下才再开火）。不通过时不算开火、不积热。</summary>
         internal static CombatFireResult PreFireGate(ref CombatData d, int a, int t, in CombatWeapon wp)
         {
-            CombatCarrier carrier = wp.Reading.Carrier;
-            if ((carrier == CombatCarrier.Melee || carrier == CombatCarrier.Aura) && wp.Reading.Area > 0f
+            if (IsContactCarrier(wp.Reading)
                 && math.distance(d.Pos[a], d.Pos[t]) > wp.Reading.Area + d.Radius[a] + d.Radius[t])
             {
+                return CombatFireResult.OutOfRange;
+            }
+            if (IsAnchoredSummon(wp.Reading)
+                && math.distance(d.Pos[a], d.Pos[t]) > SentryReach(ref d, a, wp.Reading, d.Radius[t]))
+            {
+                // FG2-VFX-02 修复：目标在插下的桩够不着的地方——不算开火（不插桩、不发开火提示、不积热），与格斗 / 力场同一口径。
                 return CombatFireResult.OutOfRange;
             }
             if (d.Has(a, CombatUnitFlags.Overheated))
@@ -128,6 +143,69 @@ namespace BinGames.Sim.Combat
                 d.Set(a, CombatUnitFlags.Overheated, false);
             }
             return CombatFireResult.Ok;
+        }
+
+        /// <summary>要贴近才出手的载体：格斗、力场，以及落在自己脚下的布区（震荡脉冲器，FG2-VFX-02）。触及 = 区域半径。</summary>
+        internal static bool IsContactCarrier(in CombatReading r) =>
+            r.Area > 0f && (r.Carrier == CombatCarrier.Melee || r.Carrier == CombatCarrier.Aura
+                            || (r.Carrier == CombatCarrier.Field && r.FieldPlacement == CombatZonePlacement.Attacker));
+
+        /// <summary>定点无人机（哨戒桩）：插在母机朝目标方向身前 <see cref="SentryPlantAhead"/> 米、左右错开（第 q 根错开 <see cref="SentrySpread"/>），之后不动。</summary>
+        internal static bool IsAnchoredSummon(in CombatReading r) => r.Carrier == CombatCarrier.Summon && r.DroneAnchored != 0;
+
+        private const float SentryPlantAhead = 1.5f;
+
+        /// <summary>第 q 根桩相对朝向的横向错开（米，左右交替、逐对外扩）。</summary>
+        private static float SentrySpread(int q) => ((q % 2 == 0) ? 1f : -1f) * (0.9f + 0.6f * (q / 2));
+
+        private static float DroneLeashOf(in CombatReading r) => r.DroneLeash > 0f ? r.DroneLeash : 10f;
+
+        /// <summary>
+        /// 哨戒桩从母机中心量起的打击距离：目标在母机正前方这么远时，插下的每一根桩（含错开最多的那根）都在“牵引绳 + 目标半径”以内。
+        /// = 母机半径 + 身前插桩距离 + √((牵引绳 + 目标半径)² − 最大错开²)。开火门槛与交战距离共用，保证“开火了就打得到”。
+        /// </summary>
+        internal static float SentryReach(ref CombatData d, int a, in CombatReading r, float targetRadius)
+        {
+            int want = math.clamp(r.Drones + r.EscortDrones, 1, CombatConst.MaxDronesPerOwner);
+            float spread = math.abs(SentrySpread(want - 1));
+            float l = DroneLeashOf(r) + math.max(0f, targetRadius);
+            return d.Radius[a] + SentryPlantAhead + math.sqrt(math.max(0f, l * l - spread * spread));
+        }
+
+        /// <summary>
+        /// FG2-VFX-02（设计案 5.6 尖刺外装：被近战攻击时反伤）：目标 <paramref name="t"/> 装着反伤、攻击者 <paramref name="a"/> 是敌对阵营、
+        /// 且站在触及范围内（反伤触及 + 双方半径）时，攻击者吃 固定值 + 这一击伤害 × 比例。只由即时近身攻击调用（弹体、重炮、区域、无人机、回波都不算近战）；
+        /// 反伤本身不再触发反伤。O(1)。
+        /// </summary>
+        internal static void ReflectMelee(ref CombatData d, int a, int t, float dealt)
+        {
+            if (a < 0 || t < 0 || a >= d.Count || t >= d.Count || a == t || !d.IsAlive(a) || d.Faction[a] == d.Faction[t])
+            {
+                return;
+            }
+            int w = d.Weapon[t];
+            if (w < 0 || w >= d.Weapons.Length)
+            {
+                return;
+            }
+            CombatReading tr = d.Weapons[w].Reading;
+            if (tr.Thorns <= 0f && tr.ThornsFlat <= 0f)
+            {
+                return;
+            }
+            if (math.distance(d.Pos[a], d.Pos[t]) > tr.ThornsReach + d.Radius[a] + d.Radius[t])
+            {
+                return;
+            }
+            float reflect = math.max(0f, tr.ThornsFlat) + math.max(0f, dealt) * math.max(0f, tr.Thorns);
+            if (reflect <= 0f)
+            {
+                return;
+            }
+            if (DamageUnit(ref d, a, reflect, t))
+            {
+                NoteReading(ref d, CombatConst.ReadingFeedThorns, d.Pos[t], t);
+            }
         }
 
         /// <summary>一发（任何开火方式）的积热（DEBT-FG1SIG06-02：即时命中武器也按固件积热）。重炮在 <see cref="FireCannon"/> 里自己算（含熔穿过载）。</summary>
@@ -176,6 +254,10 @@ namespace BinGames.Sim.Combat
                 float dealt = StrikeDamage(ref d, a, k, baseDamage, r, origin, false, 0f);
                 if (DamageUnit(ref d, k, dealt, a))
                 {
+                    if (melee)
+                    {
+                        ReflectMelee(ref d, a, k, dealt);
+                    }
                     PerTarget(ref d, a, k, dealt, r, origin);
                 }
             }
@@ -356,6 +438,7 @@ namespace BinGames.Sim.Combat
                     if (SpawnZone(ref d, a, FactionOfSlot(ref d, a), mid, half, r.WeaveSeconds, r.ZoneDps > 0f ? r.ZoneDps : dealt * math.max(0f, r.WeaveDpsRatio), 0f, 1f,
                         r.StatusMask | CombatConst.StatusBitZoneSlow, r.StatusSeconds, r.StatusDps, math.max(r.StatusSlow, r.WeaveSlow), r.StatusVuln))
                     {
+                        SetLastZoneLook(ref d, CombatZoneLook.Web);
                         NoteReading(ref d, CombatConst.ReadingFeedZone, mid, a);
                     }
                 }
@@ -754,7 +837,10 @@ namespace BinGames.Sim.Combat
                 }
                 // 阵营显式按目标定：残留区域打的是目标这一边（出手者已死、区域节拍里的槽位为 -1 时也不会落到己方头上）。
                 CombatFaction residueFaction = d.Faction[k] == (byte)CombatFaction.Player ? CombatFaction.Hostile : CombatFaction.Player;
-                SpawnZone(ref d, source, residueFaction, d.Pos[k], rule.ResidueRadius, rule.ResidueSeconds, 0f, 0f, 1f, rule.ResidueBit, 0f, rd, rs, rv);
+                if (SpawnZone(ref d, source, residueFaction, d.Pos[k], rule.ResidueRadius, rule.ResidueSeconds, 0f, 0f, 1f, rule.ResidueBit, 0f, rd, rs, rv))
+                {
+                    SetLastZoneLook(ref d, CombatZoneLook.Residue);
+                }
             }
             return mask;
         }
@@ -976,6 +1062,18 @@ namespace BinGames.Sim.Combat
             return true;
         }
 
+        /// <summary>FG2-VFX-02：刚生成的那块区域画成什么样（只影响画面）。</summary>
+        private static void SetLastZoneLook(ref CombatData d, CombatZoneLook look)
+        {
+            int last = d.Zones.Length - 1;
+            if (last >= 0)
+            {
+                CombatZone z = d.Zones[last];
+                z.Look = look;
+                d.Zones[last] = z;
+            }
+        }
+
         /// <summary>FG2-FW-04（DEBT-FG2FW02-02 读法弹字与音效）：读法生成了一块区域 / 一次回波 / 一架无人机——记进给（累计次数、最后的位置与出手者；不进快照）。</summary>
         private static void NoteReading(ref CombatData d, int kind, double2 pos, int ownerSlot)
         {
@@ -1101,8 +1199,11 @@ namespace BinGames.Sim.Combat
 
         // ─────────────────────────────── 无人机 ───────────────────────────────
 
-        /// <summary>补足这台单位的无人机到 <paramref name="want"/> 架（已有的刷新存活时间；上限 <see cref="CombatConst.MaxDronesPerOwner"/>）。</summary>
-        private static void LaunchDrones(ref CombatData d, int a, in CombatWeapon wp, int want)
+        /// <summary>补足这台单位的无人机到 <paramref name="want"/> 架（已有的刷新存活时间；上限 <see cref="CombatConst.MaxDronesPerOwner"/>）。
+        /// FG2-VFX-02：定点无人机（哨戒桩，<see cref="CombatReading.DroneAnchored"/>）插在母机朝目标方向的身前、之后不动。
+        /// 再开火时，够不着的旧桩（母机离锚点超过两倍牵引绳，或这次的目标不在它“牵引绳 + 目标半径”内）当场拔掉、在身前补插新桩——
+        /// 同一台母机任何时刻最多 <paramref name="want"/> 根桩（修复轮：原先旧桩不计数、可以越插越多）。母机不再开火时，已插的桩原地打到到期。</summary>
+        private static void LaunchDrones(ref CombatData d, int a, in CombatWeapon wp, int want, int targetSlot = -1)
         {
             CombatReading r = wp.Reading;
             want = math.min(want, CombatConst.MaxDronesPerOwner);
@@ -1113,40 +1214,84 @@ namespace BinGames.Sim.Combat
             double now = d.Scalars[0].Time;
             int ownerId = d.Id[a];
             float seconds = r.DroneSeconds > 0f ? r.DroneSeconds : 8f;
+            bool anchored = r.DroneAnchored != 0;
+            float leash = DroneLeashOf(r);
+            // 插桩方向 = 母机朝当前目标（没有目标时朝 +Y）。
+            float2 face = new float2(0f, 1f);
+            int tgt = targetSlot >= 0 && targetSlot < d.Count ? targetSlot : (d.Cmd[a].Target > 0 ? d.SlotOf(d.Cmd[a].Target) : -1);
+            if (tgt >= 0 && math.lengthsq(d.Pos[tgt] - d.Pos[a]) > 1e-8)
+            {
+                face = (float2)math.normalize(d.Pos[tgt] - d.Pos[a]);
+            }
             int have = 0;
+            var stale = new FixedList128Bytes<int>();
             for (int k = 0; k < d.Drones.Length; k++)
             {
                 CombatDrone dr = d.Drones[k];
-                if (dr.Owner != ownerId)
+                if (dr.Owner != ownerId || dr.Until <= now)
                 {
+                    continue;
+                }
+                // 跟飞无人机照旧全部刷新；定点桩只留够得着的、且不超过 want 根。
+                bool keep = dr.Anchored == 0
+                            || (have < want
+                                && math.distance(dr.Anchor, d.Pos[a]) <= leash * 2f
+                                && (tgt < 0 || math.distance(dr.Anchor, d.Pos[tgt]) <= dr.Leash + d.Radius[tgt]));
+                if (!keep)
+                {
+                    // 够不着的旧桩 / 超出上限的桩：拔掉（槽位留给新桩复用；用不上的当场到期，下一步推进时移除）。
+                    if (stale.Length < stale.Capacity)
+                    {
+                        stale.Add(k);
+                    }
+                    dr.Until = now;
+                    d.Drones[k] = dr;
                     continue;
                 }
                 have++;
                 dr.Until = now + seconds;
                 d.Drones[k] = dr;
             }
+            int reuse = 0;
             for (int q = have; q < want; q++)
             {
-                if (d.Drones.Length >= d.DroneCap)
+                bool recycled = reuse < stale.Length;
+                if (!recycled && d.Drones.Length >= d.DroneCap)
                 {
                     RefuseReading(ref d);
                     return;
                 }
                 float ang = q * 2.399963f; // 黄金角，几架无人机不叠在一处
                 double2 at = d.Pos[a] + new double2(math.cos(ang), math.sin(ang)) * (d.Radius[a] + 0.8);
-                d.Drones.Add(new CombatDrone
+                if (anchored)
+                {
+                    // 哨戒桩：插在母机身前 1.5 米、左右错开（第 q 根桩），不叠在一处。
+                    float2 side = new float2(-face.y, face.x);
+                    at = d.Pos[a] + (double2)(face * (d.Radius[a] + SentryPlantAhead) + side * SentrySpread(q));
+                }
+                var fresh = new CombatDrone
                 {
                     Pos = at,
                     Prev = at,
+                    Anchored = (byte)(anchored ? 1 : 0),
+                    Anchor = at,
                     Until = now + seconds,
                     NextHit = now + 0.2 * (q + 1),
                     Owner = ownerId,
                     Weapon = d.Weapon[a],
                     Damage = math.max(0f, wp.Damage) * (r.DroneRatio > 0f ? r.DroneRatio : 0.4f),
-                    Leash = r.DroneLeash > 0f ? r.DroneLeash : 10f,
+                    Leash = leash,
                     Cooldown = r.DroneCooldown > 0f ? r.DroneCooldown : 0.8f,
                     Faction = (CombatFaction)d.Faction[a],
-                });
+                };
+                if (recycled)
+                {
+                    d.Drones[stale[reuse++]] = fresh;
+                }
+                else
+                {
+                    d.Drones.Add(fresh);
+                }
                 CombatCounters c = d.Counters[0];
                 c.DronesLaunched++;
                 d.Counters[0] = c;
@@ -1170,7 +1315,8 @@ namespace BinGames.Sim.Combat
                 }
                 dr.Prev = dr.Pos;
                 byte want = dr.Faction == CombatFaction.Hostile ? (byte)CombatFaction.Player : (byte)CombatFaction.Hostile;
-                double2 home = d.Pos[owner];
+                bool post = dr.Anchored != 0;
+                double2 home = post ? dr.Anchor : d.Pos[owner];
                 int target = -1;
                 double bestDist = double.MaxValue;
                 int n = d.Count;
@@ -1193,7 +1339,13 @@ namespace BinGames.Sim.Combat
                 }
                 double2 goal;
                 double stop;
-                if (target >= 0)
+                if (post)
+                {
+                    // 哨戒桩不移动：射程 = 牵引绳（锚点周围），够得着就按间隔打。
+                    goal = dr.Anchor;
+                    stop = 0.0;
+                }
+                else if (target >= 0)
                 {
                     goal = d.Pos[target];
                     stop = DroneReachOf(ref d) * 0.8 + d.Radius[target];
@@ -1210,7 +1362,10 @@ namespace BinGames.Sim.Combat
                 {
                     dr.Pos += to / len * math.min(DroneSpeedOf(ref d) * dt, len - stop);
                 }
-                if (target >= 0 && now >= dr.NextHit && math.distance(dr.Pos, d.Pos[target]) <= DroneReachOf(ref d) + d.Radius[target])
+                bool inReach = target >= 0 && (post
+                    ? math.distance(dr.Anchor, d.Pos[target]) <= dr.Leash + d.Radius[target]
+                    : math.distance(dr.Pos, d.Pos[target]) <= DroneReachOf(ref d) + d.Radius[target]);
+                if (inReach && now >= dr.NextHit)
                 {
                     dr.NextHit = now + dr.Cooldown;
                     if (dr.Weapon >= 0 && dr.Weapon < d.Weapons.Length)

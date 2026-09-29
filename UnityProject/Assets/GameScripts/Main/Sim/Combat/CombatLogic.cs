@@ -771,7 +771,11 @@ namespace BinGames.Sim.Combat
             {
                 Cue(ref d, d.Faction[i] == (byte)CombatFaction.Hostile ? CombatEventKind.EnemyFired : CombatEventKind.Fired, i, d.Id[t], 0f, d.Pos[i], 0);
             }
-            DamageUnit(ref d, t, wp.Damage, i);
+            if (DamageUnit(ref d, t, wp.Damage, i))
+            {
+                // FG2-VFX-02：敌人（或任何没有载体读法的即时武器）贴身打到装着尖刺外装的单位——反伤（远处的即时命中不算近战，ReflectMelee 按触及判定）。
+                ReflectMelee(ref d, i, t, wp.Damage);
+            }
         }
 
         private static void SpawnProjectile(ref CombatData d, int i, int t, int weapon, in CombatWeapon wp)

@@ -7,18 +7,18 @@ using UnityEngine;
 namespace GameLogic.View
 {
     /// <summary>
-    /// FG1-VFX-01 机身形变部件库（FGR-FW-020、022；美术规则 02 §3、05 §4）——占位低模，程序生成，**正式美术到位前的占位**（B22，DEBT-FG1VFX01-01）。
+    /// FG1-VFX-01 机身形变部件库（FGR-FW-020、022；美术规则 02 §3、05 §4）——占位低模，程序生成，**正式美术到位前的占位**（B22，DEBT-FG2VFX02-01；FG2-VFX-02 扩到名表 16 个组件）。
     ///
     /// ── 结构 ──
     /// 每类状态（形变态 / 喷口态 / 线圈态）一个独立挂点组，组里两类部件：
     /// - 底盘件：与组件无关的整机轮廓变化（形变态＝两侧散热鳍扇形展开；喷口态＝尾部两具喷口 + 两侧外露管线；线圈态＝环绕机身的电磁线圈环）；
-    /// - 组件件：每个作战组件在这一类状态下自己的变化（连射器炮管发红 / 重炮长管发红 / 冲刺器撞角发红 / 标记器天线升起……共 6 组件 × 3 状态）。
+    /// - 组件件：每个作战组件在这一类状态下自己的变化（连射器炮管发红 / 重炮长管发红 / 冲刺器撞角发红 / 标记器天线升起 / 旋刃环刀片外伸 / 拆解钳钳颚张开……共 16 组件 × 3 状态）。
     /// 每个部件又分“实体”（金属，Standard）与“发光”（自发光色，无光照）两件，上帝视角下靠轮廓变化 + 自发光辨认（FGR-FW-022）。
     ///
     /// ── 实例化（FGR-FW-022 / FG02 第 7 章）──
     /// 每个部件 = **一个 GameObject、一个 MeshFilter、一张网格、一份材质**（外形槽只取第一个 MeshFilter 的已知坑不会踩：每件本来就只有一个）。
     /// 网格按（组件, 类别, 件）缓存、所有机器共用同一个 Mesh 实例；材质按（类别, 件）共用、全部开 GPU Instancing——同屏 N 台机器的同一部件
-    /// 由引擎合批为实例化绘制，不给每台机器生成独立网格或材质。数量上限：网格 ≤ 3 类 × (1 底盘 + 6 组件) × 2 件 + 1 信号光柱 = 43，材质 = 1 实体 + 3 发光（光柱共用线圈态的青蓝发光材质）。
+    /// 由引擎合批为实例化绘制，不给每台机器生成独立网格或材质。数量上限：网格 ≤ 3 类 × (1 底盘 + 16 组件) × 2 件 + 1 信号光柱 = 103，材质 = 1 实体 + 3 发光（光柱共用线圈态的青蓝发光材质）。
     ///
     /// ── 坐标 ──
     /// 部件挂在机器命中盒（胶囊，中心在原点、高 2、半径 0.5）下面，与 <see cref="PlaceholderSilhouette"/> 同一局部坐标：+Z 朝前、地面 y = -1。
@@ -222,6 +222,16 @@ namespace GameLogic.View
                 case ComponentCatalog.CompCannonId: BuildCannon(b, cat, solid); break;
                 case ComponentCatalog.FuncDashId: BuildDash(b, cat, solid); break;
                 case ComponentCatalog.FuncMarkerId: BuildMarker(b, cat, solid); break;
+                case ComponentCatalog.CompRamId: BuildRam(b, cat, solid); break;
+                case ComponentCatalog.CompShovelId: BuildShovel(b, cat, solid); break;
+                case ComponentCatalog.CompDroneBayId: BuildDroneBay(b, cat, solid); break;
+                case ComponentCatalog.CompCoronaId: BuildCorona(b, cat, solid); break;
+                case ComponentCatalog.CompSprayerId: BuildSprayer(b, cat, solid); break;
+                case ComponentCatalog.CompOrbitId: BuildOrbit(b, cat, solid); break;
+                case ComponentCatalog.CompSentryId: BuildSentry(b, cat, solid); break;
+                case ComponentCatalog.CompPulserId: BuildPulser(b, cat, solid); break;
+                case ComponentCatalog.CompClawId: BuildClaw(b, cat, solid); break;
+                case ComponentCatalog.FuncSpikesId: BuildSpikes(b, cat, solid); break;
             }
         }
 
@@ -544,6 +554,419 @@ namespace GameLogic.View
             }
         }
 
+        // ── FG2-VFX-02：其余 10 个作战组件的三套状态（占位低模，一件一网格；正式模型按“整件换网格变体”替换，DEBT-FG2VFX02-01）──
+        // 每个组件三类状态各占自己的方位：形变态 = 自身部件展开 / 前伸 + 红热，喷口态 = 管线 / 排口 + 橙色热光，线圈态 = 绕着自身关键部位的青蓝线圈。
+
+        /// <summary>液压刺锤（格斗）：车头一根液压刺杆。</summary>
+        private static void BuildRam(Builder b, MorphMask cat, bool solid)
+        {
+            switch (cat)
+            {
+                case MorphMask.Limiter:
+                    if (solid)
+                    {
+                        b.Box(new Vector3(0f, -0.2f, 1.3f), new Vector3(0.16f, 0.16f, 0.8f), 0f);  // 刺杆伸出
+                        b.Box(new Vector3(0f, -0.2f, 1.75f), new Vector3(0.3f, 0.3f, 0.12f), 0f);  // 锤头
+                    }
+                    else
+                    {
+                        b.Box(new Vector3(0f, -0.2f, 1.86f), new Vector3(0.22f, 0.22f, 0.1f), 0f); // 锤头红热
+                    }
+                    break;
+                case MorphMask.Fluid:
+                    foreach (float side in new[] { -1f, 1f })
+                    {
+                        if (solid)
+                        {
+                            b.Cylinder(new Vector3(side * 0.24f, -0.2f, 1.05f), Vector3.forward, 0.08f, 0.6f, 8); // 两侧液压缸
+                        }
+                        else
+                        {
+                            b.Box(new Vector3(side * 0.24f, -0.2f, 0.7f), new Vector3(0.1f, 0.1f, 0.12f), 0f);  // 缸尾泄压热光
+                        }
+                    }
+                    break;
+                case MorphMask.Electromagnetic:
+                    if (!solid)
+                    {
+                        b.Ring(new Vector3(0f, -0.2f, 1.1f), 0.14f, 0.24f, 0.04f, 12, Vector3.forward);
+                        b.Ring(new Vector3(0f, -0.2f, 1.45f), 0.14f, 0.24f, 0.04f, 12, Vector3.forward);
+                    }
+                    break;
+            }
+        }
+
+        /// <summary>推铲（格斗·扇形）：车头一面宽铲。</summary>
+        private static void BuildShovel(Builder b, MorphMask cat, bool solid)
+        {
+            switch (cat)
+            {
+                case MorphMask.Limiter:
+                    foreach (float side in new[] { -1f, 1f })
+                    {
+                        if (solid)
+                        {
+                            b.Box(new Vector3(side * 0.62f, -0.55f, BodyHalfZ + 0.3f), new Vector3(0.6f, 0.26f, 0.08f), side * -25f); // 铲翼向两侧展开
+                        }
+                        else
+                        {
+                            b.Box(new Vector3(side * 0.66f, -0.66f, BodyHalfZ + 0.4f), new Vector3(0.62f, 0.05f, 0.06f), side * -25f); // 铲刃红热
+                        }
+                    }
+                    if (solid)
+                    {
+                        b.Box(new Vector3(0f, -0.55f, BodyHalfZ + 0.2f), new Vector3(0.7f, 0.26f, 0.08f), 0f);
+                    }
+                    break;
+                case MorphMask.Fluid:
+                    if (solid)
+                    {
+                        b.Box(new Vector3(0f, -0.38f, BodyHalfZ + 0.1f), new Vector3(1.1f, 0.08f, 0.08f), 0f); // 铲背横管
+                    }
+                    else
+                    {
+                        foreach (float side in new[] { -1f, 1f })
+                        {
+                            b.Box(new Vector3(side * 0.6f, -0.38f, BodyHalfZ + 0.1f), new Vector3(0.1f, 0.1f, 0.1f), 0f); // 横管两端喷口
+                        }
+                    }
+                    break;
+                case MorphMask.Electromagnetic:
+                    if (!solid)
+                    {
+                        b.Box(new Vector3(0f, -0.45f, BodyHalfZ + 0.26f), new Vector3(0.9f, 0.05f, 0.05f), 0f); // 铲面电磁吸附条
+                        b.Ring(new Vector3(0f, -0.45f, BodyHalfZ + 0.3f), 0.42f, 0.5f, 0.03f, 16);
+                    }
+                    break;
+            }
+        }
+
+        /// <summary>蜂群无人机舱（无人机）：车顶一个舱。</summary>
+        private static void BuildDroneBay(Builder b, MorphMask cat, bool solid)
+        {
+            switch (cat)
+            {
+                case MorphMask.Limiter:
+                    foreach (float side in new[] { -1f, 1f })
+                    {
+                        if (solid)
+                        {
+                            b.Box(new Vector3(side * 0.5f, -0.2f, -0.05f), new Vector3(0.36f, 0.04f, 0.8f), 0f); // 舱门向两侧打开
+                        }
+                        else
+                        {
+                            b.Box(new Vector3(side * 0.18f, -0.2f, -0.05f), new Vector3(0.05f, 0.05f, 0.8f), 0f); // 弹射导轨红热
+                        }
+                    }
+                    break;
+                case MorphMask.Fluid:
+                    if (solid)
+                    {
+                        b.Cylinder(new Vector3(0f, -0.18f, -0.62f), Vector3.forward, 0.1f, 0.35f, 8); // 舱尾排气管
+                    }
+                    else
+                    {
+                        b.Box(new Vector3(0f, -0.18f, -0.88f), new Vector3(0.16f, 0.1f, 0.2f), 0f);
+                    }
+                    break;
+                case MorphMask.Electromagnetic:
+                    if (!solid)
+                    {
+                        b.Ring(new Vector3(0f, -0.1f, -0.05f), 0.26f, 0.34f, 0.03f, 16);  // 舱口导引线圈
+                        b.Ring(new Vector3(0f, -0.02f, -0.05f), 0.14f, 0.2f, 0.03f, 12);
+                    }
+                    break;
+            }
+        }
+
+        /// <summary>电晕场（力场）：车身四角的放电极。</summary>
+        private static void BuildCorona(Builder b, MorphMask cat, bool solid)
+        {
+            switch (cat)
+            {
+                case MorphMask.Limiter:
+                    for (int i = 0; i < 4; i++)
+                    {
+                        float x = (i % 2 == 0 ? -1f : 1f) * (BodyHalfX - 0.1f);
+                        float z = (i < 2 ? -1f : 1f) * (BodyHalfZ - 0.15f);
+                        if (solid)
+                        {
+                            b.Box(new Vector3(x, 0.0f, z), new Vector3(0.1f, 0.7f, 0.1f), 0f); // 放电极升起
+                        }
+                        else
+                        {
+                            b.Box(new Vector3(x, 0.38f, z), new Vector3(0.16f, 0.1f, 0.16f), 0f); // 极尖红热
+                        }
+                    }
+                    break;
+                case MorphMask.Fluid:
+                    if (solid)
+                    {
+                        b.Cylinder(new Vector3(0f, -0.15f, -0.45f), Vector3.up, 0.18f, 0.4f, 10); // 背部冷却罐
+                    }
+                    else
+                    {
+                        b.Cylinder(new Vector3(0f, 0.07f, -0.45f), Vector3.up, 0.12f, 0.05f, 10);
+                    }
+                    break;
+                case MorphMask.Electromagnetic:
+                    if (!solid)
+                    {
+                        b.Ring(new Vector3(0f, -0.3f, 0f), 0.88f, 1.0f, 0.04f, 24); // 贴着车身的一圈电晕
+                    }
+                    break;
+            }
+        }
+
+        /// <summary>喷洒器（布区·池）：车顶一支喷杆。</summary>
+        private static void BuildSprayer(Builder b, MorphMask cat, bool solid)
+        {
+            switch (cat)
+            {
+                case MorphMask.Limiter:
+                    if (solid)
+                    {
+                        b.Box(new Vector3(0f, -0.05f, 1.1f), new Vector3(0.1f, 0.1f, 0.9f), 0f, -12f); // 喷杆前伸上扬
+                    }
+                    else
+                    {
+                        b.Box(new Vector3(0f, 0.05f, 1.56f), new Vector3(0.2f, 0.12f, 0.1f), 0f);        // 喷嘴红热
+                    }
+                    break;
+                case MorphMask.Fluid:
+                    if (solid)
+                    {
+                        b.Cylinder(new Vector3(0f, -0.2f, -0.2f), Vector3.forward, 0.2f, 0.7f, 10); // 车顶药罐
+                    }
+                    else
+                    {
+                        foreach (float x in new[] { -0.12f, 0.12f })
+                        {
+                            b.Box(new Vector3(x, -0.1f, 1.72f), new Vector3(0.08f, 0.08f, 0.24f), 0f); // 喷出的液柱
+                        }
+                    }
+                    break;
+                case MorphMask.Electromagnetic:
+                    if (!solid)
+                    {
+                        b.Ring(new Vector3(0f, -0.02f, 1.3f), 0.1f, 0.2f, 0.04f, 12, Vector3.forward); // 喷嘴雾化线圈
+                        b.Ring(new Vector3(0f, -0.2f, -0.2f), 0.22f, 0.3f, 0.03f, 14, Vector3.forward);
+                    }
+                    break;
+            }
+        }
+
+        /// <summary>旋刃环（格斗·环绕）：绕车身的一圈旋刃。</summary>
+        private static void BuildOrbit(Builder b, MorphMask cat, bool solid)
+        {
+            switch (cat)
+            {
+                case MorphMask.Limiter:
+                    for (int i = 0; i < 4; i++)
+                    {
+                        float a = (i * 90f) * Mathf.Deg2Rad;
+                        var dir = new Vector3(Mathf.Sin(a), 0f, Mathf.Cos(a));
+                        if (solid)
+                        {
+                            b.Box(dir * 1.0f + Vector3.up * -0.3f, new Vector3(0.5f, 0.04f, 0.12f), i * 90f + 30f); // 刀片外伸
+                        }
+                        else
+                        {
+                            b.Box(dir * 1.22f + Vector3.up * -0.27f, new Vector3(0.22f, 0.04f, 0.1f), i * 90f + 30f); // 刃尖红热
+                        }
+                    }
+                    break;
+                case MorphMask.Fluid:
+                    for (int i = 0; i < 4; i++)
+                    {
+                        float a = (45f + i * 90f) * Mathf.Deg2Rad;
+                        var dir = new Vector3(Mathf.Sin(a), 0f, Mathf.Cos(a));
+                        if (solid)
+                        {
+                            b.Cylinder(dir * 0.9f + Vector3.up * -0.45f, Vector3.up, 0.07f, 0.2f, 8); // 刃轴润滑喷嘴
+                        }
+                        else
+                        {
+                            b.Box(dir * 1.02f + Vector3.up * -0.4f, new Vector3(0.1f, 0.06f, 0.1f), 0f);
+                        }
+                    }
+                    break;
+                case MorphMask.Electromagnetic:
+                    if (!solid)
+                    {
+                        b.Ring(new Vector3(0f, -0.32f, 0f), 0.92f, 1.02f, 0.03f, 24); // 刀盘电磁驱动环
+                    }
+                    break;
+            }
+        }
+
+        /// <summary>哨戒桩（无人机·定点）：车尾一排待插的桩。</summary>
+        private static void BuildSentry(Builder b, MorphMask cat, bool solid)
+        {
+            switch (cat)
+            {
+                case MorphMask.Limiter:
+                    foreach (float x in new[] { -0.3f, 0f, 0.3f })
+                    {
+                        if (solid)
+                        {
+                            b.Box(new Vector3(x, 0.05f, -0.6f), new Vector3(0.08f, 0.8f, 0.08f), 0f); // 桩架竖起
+                        }
+                        else
+                        {
+                            b.Box(new Vector3(x, 0.5f, -0.6f), new Vector3(0.14f, 0.1f, 0.14f), 0f);  // 桩顶信标红
+                        }
+                    }
+                    break;
+                case MorphMask.Fluid:
+                    foreach (float side in new[] { -1f, 1f })
+                    {
+                        if (solid)
+                        {
+                            b.Cylinder(new Vector3(side * (BodyHalfX + 0.08f), -0.45f, -0.55f), Vector3.forward, 0.09f, 0.4f, 8); // 侧挂打桩气罐
+                        }
+                        else
+                        {
+                            b.Box(new Vector3(side * (BodyHalfX + 0.08f), -0.45f, -0.85f), new Vector3(0.1f, 0.08f, 0.16f), 0f);
+                        }
+                    }
+                    break;
+                case MorphMask.Electromagnetic:
+                    if (!solid)
+                    {
+                        foreach (float x in new[] { -0.3f, 0f, 0.3f })
+                        {
+                            b.Ring(new Vector3(x, 0.2f, -0.6f), 0.08f, 0.14f, 0.02f, 10); // 桩身线圈
+                        }
+                    }
+                    break;
+            }
+        }
+
+        /// <summary>震荡脉冲器（布区·脉冲）：车底的震荡盘。</summary>
+        private static void BuildPulser(Builder b, MorphMask cat, bool solid)
+        {
+            switch (cat)
+            {
+                case MorphMask.Limiter:
+                    if (solid)
+                    {
+                        b.Cylinder(new Vector3(0f, -0.1f, 0.35f), Vector3.up, 0.3f, 0.3f, 12); // 电容柱升起
+                    }
+                    else
+                    {
+                        b.Ring(new Vector3(0f, -0.72f, 0f), 0.75f, 0.9f, 0.03f, 20);            // 车底震荡盘外沿红热
+                    }
+                    break;
+                case MorphMask.Fluid:
+                    foreach (float side in new[] { -1f, 1f })
+                    {
+                        if (solid)
+                        {
+                            b.Box(new Vector3(side * (BodyHalfX + 0.12f), -0.6f, 0.2f), new Vector3(0.14f, 0.2f, 0.5f), 0f); // 侧面泄压口
+                        }
+                        else
+                        {
+                            b.Box(new Vector3(side * (BodyHalfX + 0.24f), -0.6f, 0.2f), new Vector3(0.1f, 0.1f, 0.4f), 0f);
+                        }
+                    }
+                    break;
+                case MorphMask.Electromagnetic:
+                    if (!solid)
+                    {
+                        b.Ring(new Vector3(0f, 0.08f, 0.35f), 0.34f, 0.44f, 0.03f, 16); // 电容柱顶部线圈
+                        b.Ring(new Vector3(0f, -0.1f, 0.35f), 0.34f, 0.44f, 0.03f, 16);
+                    }
+                    break;
+            }
+        }
+
+        /// <summary>拆解钳（格斗·拆解）：车头一对钳颚。</summary>
+        private static void BuildClaw(Builder b, MorphMask cat, bool solid)
+        {
+            switch (cat)
+            {
+                case MorphMask.Limiter:
+                    foreach (float side in new[] { -1f, 1f })
+                    {
+                        if (solid)
+                        {
+                            b.Box(new Vector3(side * 0.3f, -0.3f, 1.25f), new Vector3(0.12f, 0.14f, 0.75f), side * 18f); // 钳颚张开
+                        }
+                        else
+                        {
+                            b.Box(new Vector3(side * 0.42f, -0.3f, 1.6f), new Vector3(0.1f, 0.12f, 0.14f), side * 18f);  // 颚尖红热
+                        }
+                    }
+                    break;
+                case MorphMask.Fluid:
+                    foreach (float side in new[] { -1f, 1f })
+                    {
+                        if (solid)
+                        {
+                            b.Box(new Vector3(side * 0.2f, -0.12f, 1.0f), new Vector3(0.06f, 0.06f, 0.6f), 0f); // 钳臂液压管
+                        }
+                        else
+                        {
+                            b.Box(new Vector3(side * 0.2f, -0.12f, 0.66f), new Vector3(0.1f, 0.1f, 0.1f), 0f);
+                        }
+                    }
+                    break;
+                case MorphMask.Electromagnetic:
+                    if (!solid)
+                    {
+                        b.Ring(new Vector3(0f, -0.3f, 1.35f), 0.16f, 0.26f, 0.03f, 14, Vector3.forward); // 钳口磁吸线圈
+                    }
+                    break;
+            }
+        }
+
+        /// <summary>尖刺外装（功能·反伤）：车身两侧的尖刺板。</summary>
+        private static void BuildSpikes(Builder b, MorphMask cat, bool solid)
+        {
+            switch (cat)
+            {
+                case MorphMask.Limiter:
+                    foreach (float side in new[] { -1f, 1f })
+                    {
+                        foreach (float z in new[] { -0.45f, 0.05f, 0.55f })
+                        {
+                            if (solid)
+                            {
+                                b.Box(new Vector3(side * (BodyHalfX + 0.2f), -0.5f, z), new Vector3(0.4f, 0.06f, 0.06f), 0f); // 尖刺外伸
+                            }
+                            else
+                            {
+                                b.Box(new Vector3(side * (BodyHalfX + 0.42f), -0.5f, z), new Vector3(0.1f, 0.07f, 0.07f), 0f); // 刺尖红热
+                            }
+                        }
+                    }
+                    break;
+                case MorphMask.Fluid:
+                    foreach (float side in new[] { -1f, 1f })
+                    {
+                        if (solid)
+                        {
+                            b.Box(new Vector3(side * (BodyHalfX + 0.05f), -0.28f, -0.2f), new Vector3(0.08f, 0.1f, 0.6f), 0f); // 侧板冷却管
+                        }
+                        else
+                        {
+                            b.Box(new Vector3(side * (BodyHalfX + 0.05f), -0.28f, -0.56f), new Vector3(0.1f, 0.1f, 0.1f), 0f);
+                        }
+                    }
+                    break;
+                case MorphMask.Electromagnetic:
+                    if (!solid)
+                    {
+                        foreach (float side in new[] { -1f, 1f })
+                        {
+                            b.Box(new Vector3(side * (BodyHalfX + 0.02f), -0.42f, 0.05f), new Vector3(0.05f, 0.05f, 1.3f), 0f); // 侧板放电条
+                        }
+                    }
+                    break;
+            }
+        }
+
         /// <summary>程序网格拼装：长方体、圆柱、圆环（每面独立法线）。只在第一次用到某件时构建一次。</summary>
         private sealed class Builder
         {
@@ -583,10 +1006,10 @@ namespace GameLogic.View
                 _t.Add(i); _t.Add(i + 1); _t.Add(i + 2);
             }
 
-            /// <summary>长方体：中心、尺寸（局部 X 宽 / Y 高 / Z 长）、绕 Y 轴偏航角。</summary>
-            public void Box(Vector3 c, Vector3 size, float yawDeg)
+            /// <summary>长方体：中心、尺寸（局部 X 宽 / Y 高 / Z 长）、绕 Y 轴偏航角、绕 X 轴俯仰角（负 = 抬头）。</summary>
+            public void Box(Vector3 c, Vector3 size, float yawDeg, float pitchDeg = 0f)
             {
-                Quaternion q = Quaternion.Euler(0f, yawDeg, 0f);
+                Quaternion q = Quaternion.Euler(pitchDeg, yawDeg, 0f);
                 Vector3 h = size * 0.5f;
                 Vector3 P(float x, float y, float z) => c + q * new Vector3(x * h.x, y * h.y, z * h.z);
                 Quad(P(-1, -1, 1), P(1, -1, 1), P(1, 1, 1), P(-1, 1, 1));     // 前

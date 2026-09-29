@@ -257,7 +257,7 @@ namespace GameLogic.EditorTools
                 a.K.ApplyStatus(e, ob, 3.0f, 0f, 0f, 0f, 0);
                 byte[] snap = a.K.Serialize();
                 CombatLoadResult r = b.K.Load(snap);
-                bool same = a.K.StateHash() == b.K.StateHash() && CombatKernel.PeekFormat(snap) == CombatConst.FormatVersion && CombatConst.FormatVersion == 6;
+                bool same = a.K.StateHash() == b.K.StateHash() && CombatKernel.PeekFormat(snap) == CombatConst.FormatVersion && CombatConst.FormatVersion >= 6; // 格式 6 起带逐位到期 / 区域减速值（FG2-VFX-02 升到 7 仍包含）
                 a.Run(1.0f);
                 b.Run(1.0f);
                 bool cont = a.K.StateHash() == b.K.StateHash() && !b.Has(e, "Fire") && b.Has(e, other);

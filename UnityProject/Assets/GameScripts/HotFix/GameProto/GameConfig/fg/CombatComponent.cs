@@ -46,6 +46,13 @@ public sealed partial class CombatComponent : Luban.BeanBase
         Load = _buf.ReadInt();
         Source = _buf.ReadString();
         Icon = _buf.ReadString();
+        FieldPlace = _buf.ReadString();
+        DroneMode = _buf.ReadString();
+        EchoCount = _buf.ReadInt();
+        EchoDelay = _buf.ReadFloat();
+        EchoRatio = _buf.ReadFloat();
+        Thorns = _buf.ReadFloat();
+        ThornsReach = _buf.ReadFloat();
     }
 
     public static CombatComponent DeserializeCombatComponent(ByteBuf _buf)
@@ -82,7 +89,7 @@ public sealed partial class CombatComponent : Luban.BeanBase
     /// </summary>
     public readonly string LegacyOrgan;
     /// <summary>
-    /// 基础伤害:&gt;0 时用本值(新组件);0 = 沿用 Demo 规则(连射器 / 切割束按电路编译伤害,重炮 55)
+    /// 基础伤害:&gt;0 时用本值(新组件);0 = 沿用 Demo 规则(连射器 / 切割束按电路编译伤害,重炮 55);反伤功能组件 = 反伤固定值
     /// </summary>
     public readonly float Damage;
     /// <summary>
@@ -161,6 +168,34 @@ public sealed partial class CombatComponent : Luban.BeanBase
     /// 图标ID
     /// </summary>
     public readonly string Icon;
+    /// <summary>
+    /// 布区落点:hit=目标脚下,self=自己脚下(布区&#183;脉冲,要贴近才出手)
+    /// </summary>
+    public readonly string FieldPlace;
+    /// <summary>
+    /// 无人机方式:follow=伴飞母机,post=定点(哨戒桩:插在身前不动,射程=droneLeash)
+    /// </summary>
+    public readonly string DroneMode;
+    /// <summary>
+    /// 组件自带回波次数(拆解钳:夹住后持续拆解)
+    /// </summary>
+    public readonly int EchoCount;
+    /// <summary>
+    /// 组件自带回波间隔(游戏秒)
+    /// </summary>
+    public readonly float EchoDelay;
+    /// <summary>
+    /// 组件自带回波每次伤害 = 基础伤害 &#215; 本值
+    /// </summary>
+    public readonly float EchoRatio;
+    /// <summary>
+    /// 反伤比例(功能组件尖刺外装:被近身即时攻击时,攻击者吃 damage 列的固定值 + 这一击伤害 &#215; 本值)
+    /// </summary>
+    public readonly float Thorns;
+    /// <summary>
+    /// 反伤触及(米,另加双方半径):攻击者在这个距离内才算近战
+    /// </summary>
+    public readonly float ThornsReach;
    
     public const int __ID__ = -2113875684;
     public override int GetTypeId() => __ID__;
@@ -199,6 +234,13 @@ public sealed partial class CombatComponent : Luban.BeanBase
         + "load:" + Load + ","
         + "source:" + Source + ","
         + "icon:" + Icon + ","
+        + "fieldPlace:" + FieldPlace + ","
+        + "droneMode:" + DroneMode + ","
+        + "echoCount:" + EchoCount + ","
+        + "echoDelay:" + EchoDelay + ","
+        + "echoRatio:" + EchoRatio + ","
+        + "thorns:" + Thorns + ","
+        + "thornsReach:" + ThornsReach + ","
         + "}";
     }
 }
