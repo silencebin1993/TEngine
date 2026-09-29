@@ -146,6 +146,23 @@ namespace GameLogic.Campaign.WorldSim
             return o;
         }
 
+        /// <summary>
+        /// FG3-GEN-01（FGR-GEN-030、032、034）：把生成器分布的一个家园区侦察巢登记成据点。据点 ID = 点位 ID（按分布格，确定）；
+        /// 驻军与上限按等级放大（outpost.nest_garrison_per_tier），离核心越远越强。侦察巢不派巡逻：巡逻与己方交战、摧毁掉落属于 FG8 / FG6（DEBT-FG3GEN01-05）。
+        /// </summary>
+        public static OutpostRecord SpawnScoutNest(CampaignState state, WorldGen.WorldFeature nest)
+        {
+            OutpostRecord o = SpawnOutpost(state, "home_zone", new GridCell(nest.X, nest.Y), withPatrol: false);
+            int tier = Math.Max(1, nest.Tier);
+            int per = Math.Max(1, (int)Math.Round(Tuning("outpost.nest_garrison_per_tier", 2f)));
+            o.OutpostId = nest.Id;
+            o.Kind = "scout_nest";
+            o.Tier = tier;
+            o.GarrisonCap = Math.Max(1, per * tier + 2);
+            o.Garrison = Math.Min(o.GarrisonCap, per * tier);
+            return o;
+        }
+
         /// <summary>在某个领地里（规划层按种子给出的领地中心）放一个据点（测试捷径；B25：位置来自种子，不是固定坐标）。</summary>
         public static OutpostRecord SpawnOutpostInTerritory(CampaignState state, string territoryId, bool withPatrol, long reinforceIntervalTicks = 0)
         {

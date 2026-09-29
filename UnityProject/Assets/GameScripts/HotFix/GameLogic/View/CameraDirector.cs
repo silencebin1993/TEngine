@@ -57,6 +57,17 @@ namespace GameLogic.View
         private const float StrategyEdgePanMargin = 8f;
         // FG0-ARCH-01 修复：战略缩放范围入表（fg.TbHomeTuning camera.zoom_*），缺表时回落 Demo 初值。
         // 旧细胞阶段等没加载 fg 表的场合静默用初值（不刷告警；表内有没有这三行由 FgWorldSimSelfCheck A 段断言）。
+        /// <summary>FG3-GEN-01：战略视角已缩到最远时继续拉远（跨模块事件，战略地图订阅后打开——连续缩放到世界地图，FGR-GEN-080）。</summary>
+        public const string ZoomOutOverflowEvent = "Camera.ZoomOutOverflow";
+        /// <summary>自检读点：发出“缩到最远后继续拉远”的次数。</summary>
+        public static int ZoomOverflowCount { get; private set; }
+        private int _zoomOverflow;
+        private float _lastZoomAt = -10f;
+        private bool _gestureReachedMax;
+
+        /// <summary>战略缩放上限（战略地图打开时据此选初始比例）。</summary>
+        public static float MaxStrategyOrthographicSize => MaxOrthographicSize;
+
         private static float MinOrthographicSize => Tune("camera.zoom_min_ortho", 8f);
         private static float MaxOrthographicSize => math.max(MinOrthographicSize, Tune("camera.zoom_max_ortho", 46f));
         private static float ZoomStep => Tune("camera.zoom_step", 3.5f);
@@ -539,9 +550,37 @@ namespace GameLogic.View
             float scroll = InputRouter.GetZoomDelta(InputScope.Strategy);
             if (math.abs(scroll) > 0.001f)
             {
+                // FG3-GEN-01（FGR-GEN-080 连续缩放）：已经停在最远缩放时，新的一次拉远（与上一次滚轮间隔 ≥ map.zoom_gesture_gap_seconds = 0.35 真实秒，即新的一次手势）
+                // 累计 map.open_zoom_steps 次 → 切到战略地图（地图拉近到底再回到这里）。同一串连续滚动里刚刚滚到最远的，不会顺势冲进地图。
+                float now = Time.unscaledTime;
+                bool sameGesture = now - _lastZoomAt < Tune("map.zoom_gesture_gap_seconds", 0.35f);
+                _lastZoomAt = now;
+                if (!sameGesture)
+                {
+                    _gestureReachedMax = false;
+                }
+                bool atMaxBefore = _strategyOrthographicSize >= MaxOrthographicSize - 0.01f;
+                if (scroll < 0f && atMaxBefore && !_gestureReachedMax)
+                {
+                    _zoomOverflow++;
+                    if (_zoomOverflow >= math.max(1f, Tune("map.open_zoom_steps", 1f)))
+                    {
+                        _zoomOverflow = 0;
+                        ZoomOverflowCount++;
+                        TEngine.GameEvent.Send(ZoomOutOverflowEvent);
+                    }
+                }
+                else if (scroll > 0f)
+                {
+                    _zoomOverflow = 0;
+                }
                 _strategyOrthographicSize = math.clamp(
                     _strategyOrthographicSize - scroll * ZoomStep,
                     MinOrthographicSize, MaxOrthographicSize);
+                if (scroll < 0f && !atMaxBefore && _strategyOrthographicSize >= MaxOrthographicSize - 0.01f)
+                {
+                    _gestureReachedMax = true; // 这一下刚滚到最远：同一串手势里接下来的拉远不冲进地图。
+                }
                 // 缩放会改变可视范围，边界要重新钳一次，否则拉远后能把镜头推出场地。
                 ClampStrategyFocus();
             }

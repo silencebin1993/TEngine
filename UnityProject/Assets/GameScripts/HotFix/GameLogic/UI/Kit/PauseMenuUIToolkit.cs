@@ -80,6 +80,15 @@ namespace GameLogic.UI.Kit
             {
                 UiTooltip.Attach(copy, () => new TooltipContent { Title = GameText.Get("ui.pause.copy_seed"), Body = SeedText() });
             }
+            Button share = Bind(root, "PauseCopyShare", "ui.pause.copy_share", CopyShareCode);
+            if (share != null)
+            {
+                UiTooltip.Attach(share, () => new TooltipContent
+                {
+                    Title = GameText.Get("ui.pause.copy_share"),
+                    Body = (Campaign.WorldGen.WorldGenService.ShareCode(CampaignSession.Current) ?? string.Empty) + "\n" + GameText.Get("ui.newgame.share_hint"),
+                });
+            }
             Button gallery = Bind(root, "PauseGallery", "ui.pause.gallery", UiKitGalleryUIToolkit.Open);
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             gallery?.RemoveFromClassList("uk-hidden");
@@ -316,6 +325,21 @@ namespace GameLogic.UI.Kit
             if (_feedback != null)
             {
                 _feedback.text = GameText.Format("ui.pause.seed_copied", seed);
+            }
+        }
+
+        /// <summary>FG3-GEN-01（FGR-GEN-071）：把分享短码复制到系统剪贴板（按钮与自检同一入口）。原型地形的旧存档没有短码，按钮什么也不做。</summary>
+        public void CopyShareCode()
+        {
+            string code = Campaign.WorldGen.WorldGenService.ShareCode(CampaignSession.Current);
+            if (string.IsNullOrEmpty(code))
+            {
+                return;
+            }
+            UnityEngine.GUIUtility.systemCopyBuffer = code;
+            if (_feedback != null)
+            {
+                _feedback.text = GameText.Format("ui.pause.share_copied", code);
             }
         }
 

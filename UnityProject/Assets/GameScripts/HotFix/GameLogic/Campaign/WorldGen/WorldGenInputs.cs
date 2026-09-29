@@ -13,7 +13,8 @@ namespace GameLogic.Campaign.WorldGen
     /// FGR-GEN-061 要求“任何会改变生成结果的改动都必须升版本”。生成结果除了算法本身，还取决于以下数据（ADR-ARC-013 第 4 节）：
     /// - A 类，随版本走：版本行整行（含规划层参数）、版本行引用的领地集合（含行序）、版本行引用的世界设置集合；
     /// - B 类，永久冻结：已发布的表面行（kind / salt / 室内宽高）、区块边长 grid.chunk_size、生成器用到的地形码；
-    /// - C 类，冻结待版本化：开局布局与其建筑占地算出的起始区保护矩形（DEBT-FG0ARCH05-09，FG3-GEN-01 改为版本自带）。
+    /// - 原 C 类（开局布局与其建筑占地算出的起始区保护矩形）已于 FG3-GEN-01 并入 A 类：版本行 startClearSet 引用字面快照 fg.TbWorldStartClear
+    ///   （关闭 DEBT-FG0ARCH05-09）；v2 起还有保证集合 guaranteeSet、分项设置 settingSet 与版本行新增列（清单部分 v2.version.fg3 / guarantees / settings）。
     /// 这里把每一部分规范化成一段文本（浮点一律按生成时实际使用的 16.16 定点值写出），<see cref="Digest"/> 求 64 位摘要。
     /// FgWorldGenSelfCheck 为已发布版本保存各部分的摘要基准：不升版本就改了其中任何一项，自检失败并打印新旧文本。
     /// 只在自检 / 工具里调用，不在每帧路径上。
@@ -55,6 +56,32 @@ namespace GameLogic.Campaign.WorldGen
 
             parts.Add(Part(pre + "start_protection.standard", Rects(WorldTerrainSource.StartProtection(v, false, new GridCell(0, 0)))));
             parts.Add(Part(pre + "start_protection.relaxed", Rects(WorldTerrainSource.StartProtection(v, true, new GridCell(0, 0)))));
+
+            // FG3-GEN-01（生成器 v2 起）：版本行新增列、起始区资源保证集合、分项世界设置集合也是生成输入（A 类，随版本走）。
+            // v1 行这些列不生效（没有保证集合），不列出——v1 的清单与 FG0-ARCH-05 的基准逐字相同。
+            if (WorldGenContent.HasSet(v.GuaranteeSet) || WorldGenContent.HasSet(v.SettingSet))
+            {
+                parts.Add(Part(pre + "version.fg3", Join(v.StartClearSet, v.SettingSet, v.GuaranteeSet, v.StartFlatRadius, v.StartFlatPollution, v.StartNoOutpostRadius,
+                    v.StartStampAttempts, v.RiverCount, v.RiverStartDistance, v.RiverSegments, v.RiverSegmentLength, v.RiverTurnMax, v.RiverHalfWidth,
+                    v.RiverHalfWidthMax, v.RiverFordPeriod, v.RiverFordWidth, v.BeltCount, v.BeltRareEvery, v.BeltMinDistance, v.BeltMaxDistance,
+                    v.BeltLength, v.BeltRadius, Q(v.BeltOreBonus), v.PoiCellSize, Q(v.RelicChance), Q(v.NestChance), v.NestTierDistance, v.NestMaxTier,
+                    v.PoiEdgeMargin, v.PoiShiftRadius, v.RiverOutwardMaxAngle, v.RiverWidenTotal, v.RelicCoreExclusion)));
+                sb.Clear();
+                foreach (WorldStartGuarantee g in WorldGenContent.GuaranteesFor(v))
+                {
+                    sb.Append(Join(g.Item, g.Terrain, g.Radius, g.MinCells, g.MinSquare, g.StampRadius)).Append(';');
+                }
+                parts.Add(Part(pre + "guarantees[" + v.GuaranteeSet + "]", sb.ToString()));
+                sb.Clear();
+                foreach (string axis in WorldSettings.Axes)
+                {
+                    foreach (WorldSettingAxis a in WorldGenContent.AxisLevels(v, axis))
+                    {
+                        sb.Append(Join(a.Axis, a.Level, a.IsDefault, Q(a.Value))).Append(';');
+                    }
+                }
+                parts.Add(Part(pre + "settings[" + v.SettingSet + "]", sb.ToString()));
+            }
 
             parts.Add(Part("grid.chunk_size", GridContent.TuningInt("grid.chunk_size").ToString(CultureInfo.InvariantCulture)));
             sb.Clear();

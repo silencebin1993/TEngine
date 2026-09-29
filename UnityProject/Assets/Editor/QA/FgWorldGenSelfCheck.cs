@@ -241,7 +241,8 @@ namespace GameLogic.EditorTools
         private static void CheckData()
         {
             Expect(WorldGenContent.LoadError == null && WorldGenContent.Versions.Count >= 1 && WorldGenContent.TryGetVersion(WorldGenVersions.Current, out _)
-                   && WorldGenContent.TryGetPreset(WorldGenVersions.Current, WorldGenContent.DefaultPresetId, out _) && WorldGenContent.TryGetSurface(WorldGenContent.EarthSurfaceId, out _)
+                   && WorldSettings.TryResolve(WorldGenVersions.Current, WorldGenContent.DefaultPresetId, out _, out _) && WorldGenContent.TryGetPreset(1, WorldGenContent.DefaultPresetId, out _)
+                   && WorldGenContent.TryGetSurface(WorldGenContent.EarthSurfaceId, out _)
                    && WorldGenContent.Territories.Count == 5,
                 $"四张世界生成表已加载：生成器版本 {WorldGenContent.Versions.Count}（当前 v{WorldGenVersions.Current}）、世界设置 {WorldGenContent.Presets.Count}、表面 {WorldGenContent.Surfaces.Count}、领地 {WorldGenContent.Territories.Count}");
             Expect(WorldGenContent.Versions.Select(v => v.Version).OrderBy(v => v).SequenceEqual(Enumerable.Range(1, WorldGenContent.Versions.Count))
@@ -444,10 +445,8 @@ namespace GameLogic.EditorTools
             }
             Expect(twinBad == 0 && otherDiff >= 15, $"两个战役用同一个种子：20 个区块全部相同（不同 {twinBad}）；换种子后 {otherDiff}/20 个区块不同");
 
-            // 世界设置是生成身份的一部分：注入一个资源丰富的预设，结果不同；default 不受影响。
-            WorldGenContent.OverrideForTests(presets: new TbWorldPreset(PresetBuf(("default", "world.preset.default.name", 1f, 1f, 1f, "standard"),
-                ("rich", "world.preset.default.name", 2.5f, 1f, 1f, "standard"))));
-            HomeGridMap rich = FreshMap(WorldState(424242, "rich"));
+            // 世界设置是生成身份的一部分：资源丰度“高”（生成器 v2 的分项设置，FG3-GEN-01），结果不同；default 不受影响。
+            HomeGridMap rich = FreshMap(WorldState(424242, "R2O1P1D1S0"));
             HomeGridMap stillDefault = FreshMap(WorldState(424242));
             int richDiff = 0;
             int defaultSame = 0;
@@ -465,7 +464,7 @@ namespace GameLogic.EditorTools
             }
             WorldGenContent.ResetForTests();
             Expect(richDiff > 20 && defaultSame == 49 && oreRich > oreDefault,
-                $"世界设置属于生成身份：资源丰度 2.5 的预设改变了 {richDiff}/49 个区块、金属矿脉 {oreDefault} → {oreRich} 格；default 预设 49 个区块不变（{defaultSame}）");
+                $"世界设置属于生成身份：资源丰度“高”（分项代码 R2O1P1D1S0）改变了 {richDiff}/49 个区块、金属矿脉 {oreDefault} → {oreRich} 格；default 49 个区块不变（{defaultSame}）");
         }
 
         // ── C. 随机流分离（FGT-GEN-002）──────────────────────────────────────────────
@@ -723,7 +722,7 @@ namespace GameLogic.EditorTools
             PlannedTerritory silent = plan.Find("silent");
             HomeGridMap map = HomeGridService.MapFor(s);
             // 对照：同一种子 / 版本 / 设置，但不给规划层（没有领地与危害带）。
-            var noPlan = new WorldTerrainSource(s.World.WorldSeed, s.World.GeneratorVersion, WorldGenContent.Preset(s.World.GeneratorVersion, s.World.WorldSettingsId),
+            var noPlan = new WorldTerrainSource(s.World.WorldSeed, s.World.GeneratorVersion, WorldSettings.Resolve(s.World.GeneratorVersion, s.World.WorldSettingsId),
                 WorldGenContent.Surface(WorldGenContent.EarthSurfaceId), HomeGridService.CorePivot(s), 32, null);
             int ringAll3 = 0;
             int ringRaised = 0;
@@ -1098,6 +1097,16 @@ namespace GameLogic.EditorTools
             // 2026-09-25 FG0-ARCH-05 修复轮：种子 1 的静默领地内部（中心 (179,-423)）与澄净外圈酸沼带（整块落在带内）。
             (1, 1, "earth", 5, -14, 0xC0219FE70C8A0F15UL),
             (1, 1, "earth", -27, 21, 0xEB805D1D83145FF1UL),
+            // 2026-09-29 FG3-GEN-01 发布生成器 v2（起始区四级保证与局部重生成、河流、矿带）。(1,2,3,-2) 与 v1 相同：离起始区、河流、矿带都远；
+            // 室内表面不受 v2 影响（与 v1 同一哈希）。
+            (1, 2, "earth", 0, 0, 0x321C6D2380672B29UL),
+            (1, 2, "earth", -1, -1, 0x3FD7FE7335FDF84CUL),
+            (1, 2, "earth", 3, -2, 0x63B9D218DA763939UL),
+            (42, 2, "earth", 0, 0, 0x48C70F151F70AAB7UL),
+            (42, 2, "earth", 3, -2, 0xDD3B8007C1F7214BUL),
+            (42, 2, "earth", -4, 4, 0xF73CC064910E6A81UL),
+            (-7, 2, "earth", 2, 2, 0xB128A2DC30D1189EUL),
+            (1, 2, "relay_hall", 0, 0, 0x24A001E3D9968BA1UL),
         };
 
         private static readonly (int seed, int version, string surface, int cx, int cy)[] BaselineKeys =
@@ -1107,6 +1116,9 @@ namespace GameLogic.EditorTools
             (1, 1, "relay_hall", 0, 0), (1, 1, "relay_hall", 2, 1), (42, 1, "data_center", 1, 2),
             (1, 0, "earth", 0, 0), (1, 0, "earth", 5, -3), (42, 0, "earth", -2, 7),
             (1, 1, "earth", 5, -14), (1, 1, "earth", -27, 21),
+            // FG3-GEN-01：生成器 v2（起始区保证点、河流、矿带）。含旅程用的种子 1 / 42 的核心区块。
+            (1, 2, "earth", 0, 0), (1, 2, "earth", -1, -1), (1, 2, "earth", 3, -2), (42, 2, "earth", 0, 0), (42, 2, "earth", 3, -2),
+            (42, 2, "earth", -4, 4), (-7, 2, "earth", 2, 2), (1, 2, "relay_hall", 0, 0),
         };
 
         private static ulong BaselineHash(int seed, int version, string surface, int cx, int cy)
@@ -1340,9 +1352,11 @@ namespace GameLogic.EditorTools
             GridContent.ResetForTests();
             Expect(csManifest, "负向：区块边长 grid.chunk_size 32 → 16 → 生成输入清单基准失败（B 类永久冻结；出表时 check_luban R21 也会拦下）");
 
-            // e) 正确做法：新增 v2 版本行 + 新领地集合 t2 → v1 一字不变（旧存档不受影响），v2 按新集合生成。
+            // e) 正确做法：新增版本行 + 新领地集合 t2 → v1 一字不变（旧存档不受影响），新版本按新集合生成。
+            //    FG3-GEN-01 起 v2 已发布，这里的“新版本”是 v{Current+1}（复制 v1 行、换领地集合）。
+            int extra = WorldGenVersions.Current + 1;
             WorldGenContent.OverrideForTests(
-                versions: new TbWorldGenVersion(VersionBufPlus(WorldGenContent.Versions.ToList(), 2, new (string, object)[] { ("territorySet", "t2"), ("note", "selfcheck v2") })),
+                versions: new TbWorldGenVersion(VersionBufPlus(WorldGenContent.Versions.ToList(), extra, new (string, object)[] { ("territorySet", "t2"), ("note", "selfcheck next") })),
                 territories: new TbTerritory(TerritoryBuf(cloneToSet: "t2", cloneMutate: r =>
                 {
                     if (r.Id == "clarity")
@@ -1354,8 +1368,8 @@ namespace GameLogic.EditorTools
             bool v1Manifest = ManifestDiff(1).Count == 0;
             bool v1Plan = PlanFp(1) == fp1;
             bool v1Hash = BaselineHash(1, 1, "earth", -27, 21) == sBand && BaselineHash(1, 1, "earth", 5, -14) == sTer;
-            string fp2 = WorldPlan.Compute(1, WorldGenContent.Version(2), WorldGenContent.Preset(2, WorldGenContent.DefaultPresetId), 0, 0).Fingerprint();
-            bool v2Differs = fp2 != fp1 && BaselineHash(1, 2, "earth", -27, 21) != sBand;
+            string fp2 = WorldPlan.Compute(1, WorldGenContent.Version(extra), WorldGenContent.Preset(extra, WorldGenContent.DefaultPresetId), 0, 0).Fingerprint();
+            bool v2Differs = fp2 != fp1 && BaselineHash(1, extra, "earth", -27, 21) != sBand;
             WorldGenContent.ResetForTests();
             Expect(v1Manifest && v1Plan && v1Hash && v2Differs,
                 $"正确做法：新增 v2 版本行引用新领地集合 t2（澄净危害带 100 → 20）→ v1 的生成输入清单（{v1Manifest}）、规划层指纹（{v1Plan}）、样本哈希（{v1Hash}）一字不变，" +
@@ -1815,8 +1829,46 @@ namespace GameLogic.EditorTools
             buf.WriteInt(P("planMaxAttempts", v.PlanMaxAttempts));
             buf.WriteString(P("territorySet", v.TerritorySet));
             buf.WriteString(P("presetSet", v.PresetSet));
+            // FG3-GEN-01 新增列（顺序 = 表列顺序）。
+            buf.WriteString(P("startClearSet", v.StartClearSet));
+            buf.WriteString(P("settingSet", v.SettingSet));
+            buf.WriteString(P("guaranteeSet", v.GuaranteeSet));
+            buf.WriteInt(P("startFlatRadius", v.StartFlatRadius));
+            buf.WriteInt(P("startFlatPollution", v.StartFlatPollution));
+            buf.WriteInt(P("startNoOutpostRadius", v.StartNoOutpostRadius));
+            buf.WriteInt(P("startStampAttempts", v.StartStampAttempts));
+            buf.WriteInt(P("riverCount", v.RiverCount));
+            buf.WriteInt(P("riverStartDistance", v.RiverStartDistance));
+            buf.WriteInt(P("riverSegments", v.RiverSegments));
+            buf.WriteInt(P("riverSegmentLength", v.RiverSegmentLength));
+            buf.WriteInt(P("riverTurnMax", v.RiverTurnMax));
+            buf.WriteInt(P("riverHalfWidth", v.RiverHalfWidth));
+            buf.WriteInt(P("riverHalfWidthMax", v.RiverHalfWidthMax));
+            buf.WriteInt(P("riverFordPeriod", v.RiverFordPeriod));
+            buf.WriteInt(P("riverFordWidth", v.RiverFordWidth));
+            buf.WriteInt(P("beltCount", v.BeltCount));
+            buf.WriteInt(P("beltRareEvery", v.BeltRareEvery));
+            buf.WriteInt(P("beltMinDistance", v.BeltMinDistance));
+            buf.WriteInt(P("beltMaxDistance", v.BeltMaxDistance));
+            buf.WriteInt(P("beltLength", v.BeltLength));
+            buf.WriteInt(P("beltRadius", v.BeltRadius));
+            buf.WriteFloat(P("beltOreBonus", v.BeltOreBonus));
+            buf.WriteInt(P("poiCellSize", v.PoiCellSize));
+            buf.WriteFloat(P("relicChance", v.RelicChance));
+            buf.WriteFloat(P("nestChance", v.NestChance));
+            buf.WriteInt(P("nestTierDistance", v.NestTierDistance));
+            buf.WriteInt(P("nestMaxTier", v.NestMaxTier));
+            buf.WriteInt(P("poiEdgeMargin", v.PoiEdgeMargin));
+            buf.WriteInt(P("poiShiftRadius", v.PoiShiftRadius));
+            // FG3-GEN-01 修复轮：原写死在代码里的三个生成常数移入版本行。
+            buf.WriteInt(P("riverOutwardMaxAngle", v.RiverOutwardMaxAngle));
+            buf.WriteInt(P("riverWidenTotal", v.RiverWidenTotal));
+            buf.WriteInt(P("relicCoreExclusion", v.RelicCoreExclusion));
             buf.WriteString(P("note", v.Note));
         }
+
+        /// <summary>FG3-GEN-01：生成器版本表的一行按表列写进 ByteBuf（<see cref="FgWorldGenHomeSelfCheck"/> 构造测试表共用）。</summary>
+        internal static void WriteVersionRow(ByteBuf buf, WorldGenVersion v, int version, (string field, object value)[] patch) => WriteVersion(buf, v, version, patch);
 
         /// <summary>领地表：真实表的全部行，外加 <paramref name="extra"/>（例如把 t1 复制成 t2 集合再改某一行）。
         /// <paramref name="mutate"/> 可以就地改 t1 的行（模拟“不升版本直接改已发布集合”）。</summary>

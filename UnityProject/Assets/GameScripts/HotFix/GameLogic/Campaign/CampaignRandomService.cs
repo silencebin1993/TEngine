@@ -40,6 +40,12 @@ namespace GameLogic.Campaign
             {
                 return SeedOverrideForTests.Value;
             }
+            return GenerateFreshSeed();
+        }
+
+        /// <summary>FG3-GEN-01：新游戏界面的“随机种子”按钮——总是生成一颗新的强随机种子（不看测试覆盖值：点了就要换）。</summary>
+        public static int GenerateFreshSeed()
+        {
             Span<byte> buffer = stackalloc byte[4];
             RandomNumberGenerator.Fill(buffer);
             int seed = BitConverter.ToInt32(buffer);

@@ -252,6 +252,140 @@ namespace BinGames.Sim.WorldGen
             return job;
         }
 
+        /// <summary>
+        /// FG3-GEN-01（FGR-GEN-031、090）：起始区校验（Burst，当前线程 Run）。在核心周围 <paramref name="maxRadius"/> 的圆里逐格采样，
+        /// 返回每项保证的结果与第 1 级统计（[0] 第 1 级半径内悬崖格数、[1] 最高污染、[2] 采样格数）。只在开局 / 读档重算规划时调用。
+        /// </summary>
+        public static void AnalyzeStart(in WorldGenParams p, WorldGenRect[] rects, WorldGenZone[] zones, int maxRadius, int flatRadius,
+            WorldStartQuery[] queries, WorldStartResult[] results, int[] stats)
+        {
+            var r = ToNative(rects, Allocator.TempJob);
+            var z = ToNative(zones, Allocator.TempJob);
+            var q = ToNative(queries, Allocator.TempJob);
+            var res = new NativeArray<WorldStartResult>(Math.Max(1, queries?.Length ?? 0), Allocator.TempJob);
+            var st = new NativeArray<int>(3, Allocator.TempJob);
+            try
+            {
+                new JobAnalyzeStart
+                {
+                    Params = p,
+                    Rects = r,
+                    RectCount = rects?.Length ?? 0,
+                    Zones = z,
+                    ZoneCount = zones?.Length ?? 0,
+                    MaxRadius = maxRadius,
+                    FlatRadius = flatRadius,
+                    Queries = q,
+                    QueryCount = queries?.Length ?? 0,
+                    Results = res,
+                    Stats = st,
+                }.Run();
+                for (int i = 0; i < (queries?.Length ?? 0); i++)
+                {
+                    results[i] = res[i];
+                }
+                for (int i = 0; i < 3 && i < (stats?.Length ?? 0); i++)
+                {
+                    stats[i] = st[i];
+                }
+            }
+            finally
+            {
+                r.Dispose();
+                z.Dispose();
+                q.Dispose();
+                res.Dispose();
+                st.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// FG3-GEN-01（FGR-GEN-031，修复轮）：起始区保证点落位（Burst，当前线程 Run）。按 <paramref name="tryX"/>/<paramref name="tryY"/> 的顺序试探，
+        /// 都不合法时逐格枚举全部合法候选、取第 <paramref name="pickHash"/> % 候选数 个。返回 k ≥ 0（第 k 个试探点）、-1（候选兜底）或 -2（没有合法位置）；
+        /// <paramref name="candidates"/> = 兜底时的候选数。只在开局 / 读档重算规划时调用。
+        /// </summary>
+        public static int PlaceStamp(int coreX, int coreY, int stampRadius, int maxOffset, WorldGenRect[] rects, WorldGenZone[] placed,
+            int[] tryX, int[] tryY, int tryCount, uint pickHash, out int x, out int y, out int candidates)
+        {
+            var r = ToNative(rects, Allocator.TempJob);
+            var z = ToNative(placed, Allocator.TempJob);
+            var tx = ToNative(tryX, Allocator.TempJob);
+            var ty = ToNative(tryY, Allocator.TempJob);
+            var res = new NativeArray<int>(4, Allocator.TempJob);
+            try
+            {
+                new JobPlaceStamp
+                {
+                    CoreX = coreX,
+                    CoreY = coreY,
+                    StampRadius = stampRadius,
+                    MaxOffset = maxOffset,
+                    PickHash = pickHash,
+                    Rects = r,
+                    RectCount = rects?.Length ?? 0,
+                    Placed = z,
+                    PlacedCount = placed?.Length ?? 0,
+                    TryX = tx,
+                    TryY = ty,
+                    TryCount = Math.Min(tryCount, Math.Min(tryX?.Length ?? 0, tryY?.Length ?? 0)),
+                    Result = res,
+                }.Run();
+                x = res[1];
+                y = res[2];
+                candidates = res[3];
+                return res[0];
+            }
+            finally
+            {
+                r.Dispose();
+                z.Dispose();
+                tx.Dispose();
+                ty.Dispose();
+                res.Dispose();
+            }
+        }
+
+        /// <summary>FG3-GEN-01：一批格子的地形（遗迹点 / 侦察巢落位就近挪位时用；与区块生成同一个纯函数）。</summary>
+        public static void SampleCells(in WorldGenParams p, WorldGenRect[] rects, WorldGenZone[] zones, int[] xs, int[] ys, int count, byte[] terrain)
+        {
+            var r = ToNative(rects, Allocator.Temp);
+            var z = ToNative(zones, Allocator.Temp);
+            try
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    WorldGenMath.Sample(in p, xs[i], ys[i], r, rects?.Length ?? 0, z, zones?.Length ?? 0, out byte t, out _);
+                    terrain[i] = t;
+                }
+            }
+            finally
+            {
+                r.Dispose();
+                z.Dispose();
+            }
+        }
+
+        /// <summary>FG3-GEN-01（FG-GAP-021）：在工作线程上调度一个区块的地貌起伏网格（Burst）。<paramref name="window"/> = (S+2)² 含一圈邻格的地形。</summary>
+        public static WorldReliefJob ScheduleRelief(in ReliefParams q, int chunkX, int chunkY, int stamp, byte[] window)
+        {
+            Hook();
+            var job = new WorldReliefJob();
+            job.Start(in q, chunkX, chunkY, stamp, window);
+            Live.Add(job);
+            return job;
+        }
+
+        /// <summary>FG3-GEN-01（FGR-GEN-080、081）：在工作线程上调度一张地图底图（Burst）。</summary>
+        public static WorldMapPaintJob ScheduleMapPaint(in MapPaintParams m, in WorldGenParams gen, WorldGenRect[] rects, WorldGenZone[] zones,
+            Unity.Mathematics.int3[] explored, Color32[] palette, int stamp)
+        {
+            Hook();
+            var job = new WorldMapPaintJob();
+            job.Start(in m, in gen, rects, zones, explored, palette, stamp);
+            Live.Add(job);
+            return job;
+        }
+
         /// <summary>单个格子（自检抽查用）。</summary>
         public static void SampleCell(in WorldGenParams p, int x, int y, WorldGenRect[] rects, WorldGenZone[] zones, out byte terrain, out byte pollution)
         {
@@ -300,6 +434,8 @@ namespace BinGames.Sim.WorldGen
                 {
                     case WorldGenJob g: g.Release(); break;
                     case WorldPaintJob p: p.Release(); break;
+                    case WorldReliefJob r: r.Release(); break;
+                    case WorldMapPaintJob m: m.Release(); break;
                 }
             }
             Live.Clear();

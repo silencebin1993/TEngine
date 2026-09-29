@@ -31,6 +31,8 @@ namespace GameLogic
             SlotList,
             ConfirmOverwrite,
             Settings,
+            /// <summary>FG3-GEN-01：新游戏设置面板（UI Toolkit）盖在上面时，uGUI 菜单全部收起（不让点击穿透到下面的按钮）。</summary>
+            NewGameSetup,
         }
 
         #region 脚本工具生成的代码
@@ -717,6 +719,10 @@ namespace GameLogic
             _tfSlotList.gameObject.SetActive(view == MenuView.SlotList);
             _tfConfirmOverwrite.gameObject.SetActive(view == MenuView.ConfirmOverwrite);
             _tfSettings.gameObject.SetActive(view == MenuView.Settings);
+            if (view != MenuView.NewGameSetup && UI.Kit.NewGamePanelUIToolkit.IsOpen)
+            {
+                UI.Kit.NewGamePanelUIToolkit.Close();
+            }
 
             if (view == MenuView.Root)
             {
@@ -1033,14 +1039,26 @@ namespace GameLogic
             return -1;
         }
 
+        /// <summary>
+        /// FG3-GEN-01（FGR-GEN-001、070、071）：选好存档槽后先打开新游戏设置（种子、随机种子、世界设置、分享短码），
+        /// 玩家点“开始”才创建战役；“返回” / Esc 回到主菜单，不写任何文件。
+        /// </summary>
         private void StartNewCampaign(int slotIndex)
         {
+            SetView(MenuView.NewGameSetup);
+            UI.Kit.NewGamePanelUIToolkit.Open(
+                (seed, settings) => CreateNewCampaign(slotIndex, seed, settings),
+                () => SetView(MenuView.Root));
+        }
+
+        private void CreateNewCampaign(int slotIndex, int seed, Campaign.WorldGen.WorldSettings settings)
+        {
             string campaignId = Guid.NewGuid().ToString("N");
-            // ER1-SAVE-02：不再用 Environment.TickCount 占位（DEBT-ER1SAVE01-05，精度约 15ms，
-            // 连续快速新建可能撞种子）；CampaignRandomService.GenerateSeed() 用 CSPRNG 生成一次性种子，
+            // ER1-SAVE-02：种子由新游戏设置给出（默认一颗 CSPRNG 一次性种子，DEBT-ER1SAVE01-05）；
             // 之后全部确定性消费统一走 CampaignRandomService.CreateRng(state)。
-            int seed = CampaignRandomService.GenerateSeed();
             CampaignState state = CampaignState.CreateNew(campaignId, "Standard", seed);
+            // FG3-GEN-01：世界设置与生成器版本（导入旧版本短码时 = 短码里的版本，保证世界相同）。
+            Campaign.WorldGen.WorldGenService.ApplyNewGameWorld(state, seed, settings);
 
             SaveResult result = CampaignSaveService.Save(slotIndex, state, SaveReason.NewCampaign);
             if (!result.Success)

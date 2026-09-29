@@ -242,7 +242,7 @@ namespace GameLogic.Campaign.Grid
             // FG0-ARCH-05：新战役（WorldGenState.GeneratorVersion >= 1）的地形来自世界生成器；版本 0 的战役沿用原型来源。
             if (state.World != null && state.World.GeneratorVersion >= 1)
             {
-                WorldGenService.PresetFor(state); // 世界设置不存在时回退 default（只可能发生在从没生成过地形的战役上）
+                WorldGenService.SettingsFor(state); // 世界设置不存在时回退 default（只可能发生在从没生成过地形的战役上）
                 state.Grid.TerrainSourceId = WorldTerrainSource.Id;
             }
             else
@@ -250,6 +250,8 @@ namespace GameLogic.Campaign.Grid
                 state.Grid.TerrainSourceId = GridTerrainPrototype.Id;
             }
             state.Grid.LayoutVersion = LayoutVersion;
+            // FG3-GEN-01（FGR-GEN-030、034）：家园区的零散侦察巢登记成据点（v2 世界；幂等）。
+            WorldGenService.SeedHomeZoneOutposts(state);
         }
 
         /// <summary>

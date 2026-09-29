@@ -71,6 +71,12 @@ namespace GameLogic.Core
         public const string FirmwareLibraryFirstOpen = "firmware.library.first_open";
         /// <summary>FG2-E2E-01（FG-GAP-050）：第一次在解析台用技术数据复原一条固件（引导内容在 FG15-UX-04：复原的是刻录数据、之后去信号核刻印 / 蓝图里选用；图鉴“数据复原”系统说明随之解锁）。</summary>
         public const string FirmwareRestoreFirstDone = "firmware.restore.first_done";
+        /// <summary>FG3-GEN-01：第一次打开战略地图（引导内容在 FG15-UX-04：连续缩放、筛选、点哪飞哪、右键加标记）。</summary>
+        public const string StrategicMapFirstOpen = "world.map.first_open";
+        /// <summary>FG3-GEN-01：第一次打开新游戏设置（引导内容在 FG15-UX-04：种子、世界设置各项的含义、分享短码）。</summary>
+        public const string NewGameSetupFirstOpen = "world.newgame.first_open";
+        /// <summary>FG3-GEN-01：第一次在战略地图上加玩家标记。</summary>
+        public const string MapMarkerFirstAdded = "world.map.first_marker";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -90,6 +96,7 @@ namespace GameLogic.Core
             ReactionLogFirstOpen, StatsPanelFirstOpen,
             FirmwareLibraryFirstOpen,
             FirmwareRestoreFirstDone,
+            StrategicMapFirstOpen, NewGameSetupFirstOpen, MapMarkerFirstAdded,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

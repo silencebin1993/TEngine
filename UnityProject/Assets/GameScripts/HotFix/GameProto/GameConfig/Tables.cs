@@ -183,6 +183,18 @@ public partial class Tables
     /// </summary>
     public fg.TbWorldPreset TbWorldPreset {get; }
     /// <summary>
+    /// 分项世界设置
+    /// </summary>
+    public fg.TbWorldSettingAxis TbWorldSettingAxis {get; }
+    /// <summary>
+    /// 起始区平地快照
+    /// </summary>
+    public fg.TbWorldStartClear TbWorldStartClear {get; }
+    /// <summary>
+    /// 起始区资源保证
+    /// </summary>
+    public fg.TbWorldStartGuarantee TbWorldStartGuarantee {get; }
+    /// <summary>
     /// 细胞阶段场地与时间轴
     /// </summary>
     public fp.TbCellArena TbCellArena {get; }
@@ -268,6 +280,9 @@ public partial class Tables
         TbUiTuning = new fg.TbUiTuning(loader("fg_tbuituning"));
         TbWorldGenVersion = new fg.TbWorldGenVersion(loader("fg_tbworldgenversion"));
         TbWorldPreset = new fg.TbWorldPreset(loader("fg_tbworldpreset"));
+        TbWorldSettingAxis = new fg.TbWorldSettingAxis(loader("fg_tbworldsettingaxis"));
+        TbWorldStartClear = new fg.TbWorldStartClear(loader("fg_tbworldstartclear"));
+        TbWorldStartGuarantee = new fg.TbWorldStartGuarantee(loader("fg_tbworldstartguarantee"));
         TbCellArena = new fp.TbCellArena(loader("fp_tbcellarena"));
         TbCreatureArena = new fp.TbCreatureArena(loader("fp_tbcreaturearena"));
         TbEnemy = new fp.TbEnemy(loader("fp_tbenemy"));
@@ -326,6 +341,9 @@ public partial class Tables
         TbUiTuning.ResolveRef(this);
         TbWorldGenVersion.ResolveRef(this);
         TbWorldPreset.ResolveRef(this);
+        TbWorldSettingAxis.ResolveRef(this);
+        TbWorldStartClear.ResolveRef(this);
+        TbWorldStartGuarantee.ResolveRef(this);
         TbCellArena.ResolveRef(this);
         TbCreatureArena.ResolveRef(this);
         TbEnemy.ResolveRef(this);

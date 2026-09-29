@@ -45,6 +45,39 @@ public sealed partial class WorldGenVersion : Luban.BeanBase
         PlanMaxAttempts = _buf.ReadInt();
         TerritorySet = _buf.ReadString();
         PresetSet = _buf.ReadString();
+        StartClearSet = _buf.ReadString();
+        SettingSet = _buf.ReadString();
+        GuaranteeSet = _buf.ReadString();
+        StartFlatRadius = _buf.ReadInt();
+        StartFlatPollution = _buf.ReadInt();
+        StartNoOutpostRadius = _buf.ReadInt();
+        StartStampAttempts = _buf.ReadInt();
+        RiverCount = _buf.ReadInt();
+        RiverStartDistance = _buf.ReadInt();
+        RiverSegments = _buf.ReadInt();
+        RiverSegmentLength = _buf.ReadInt();
+        RiverTurnMax = _buf.ReadInt();
+        RiverHalfWidth = _buf.ReadInt();
+        RiverHalfWidthMax = _buf.ReadInt();
+        RiverFordPeriod = _buf.ReadInt();
+        RiverFordWidth = _buf.ReadInt();
+        BeltCount = _buf.ReadInt();
+        BeltRareEvery = _buf.ReadInt();
+        BeltMinDistance = _buf.ReadInt();
+        BeltMaxDistance = _buf.ReadInt();
+        BeltLength = _buf.ReadInt();
+        BeltRadius = _buf.ReadInt();
+        BeltOreBonus = _buf.ReadFloat();
+        PoiCellSize = _buf.ReadInt();
+        RelicChance = _buf.ReadFloat();
+        NestChance = _buf.ReadFloat();
+        NestTierDistance = _buf.ReadInt();
+        NestMaxTier = _buf.ReadInt();
+        PoiEdgeMargin = _buf.ReadInt();
+        PoiShiftRadius = _buf.ReadInt();
+        RiverOutwardMaxAngle = _buf.ReadInt();
+        RiverWidenTotal = _buf.ReadInt();
+        RelicCoreExclusion = _buf.ReadInt();
         Note = _buf.ReadString();
     }
 
@@ -154,9 +187,141 @@ public sealed partial class WorldGenVersion : Luban.BeanBase
     /// </summary>
     public readonly string TerritorySet;
     /// <summary>
-    /// 本版本使用的世界设置集合(fg.TbWorldPreset 的 set);已发布集合禁止改
+    /// 本版本使用的世界设置预设集合(fg.TbWorldPreset 的 set);v2 起世界设置改为分项(settingSet),填 none
     /// </summary>
     public readonly string PresetSet;
+    /// <summary>
+    /// 起始区平地快照集合(fg.TbWorldStartClear 的 set):开局布局占地+外圈的矩形,相对核心;已发布集合禁止改
+    /// </summary>
+    public readonly string StartClearSet;
+    /// <summary>
+    /// 分项世界设置集合(fg.TbWorldSettingAxis 的 set);none=用 presetSet 的整套预设(v1)
+    /// </summary>
+    public readonly string SettingSet;
+    /// <summary>
+    /// 起始区资源保证集合(fg.TbWorldStartGuarantee 的 set);none=没有保证(v1)
+    /// </summary>
+    public readonly string GuaranteeSet;
+    /// <summary>
+    /// 起始区第1级:核心半径内没有悬崖、污染&lt;=startFlatPollution(格,欧氏);0=不启用
+    /// </summary>
+    public readonly int StartFlatRadius;
+    /// <summary>
+    /// 起始区第1级的污染上限(0~3)
+    /// </summary>
+    public readonly int StartFlatPollution;
+    /// <summary>
+    /// 起始区第3级:核心半径内没有敌方建筑(格);据点生成避开
+    /// </summary>
+    public readonly int StartNoOutpostRadius;
+    /// <summary>
+    /// 某项保证不满足时,派生子种子确定性重试放置的次数上限(之后逐个候选兜底)
+    /// </summary>
+    public readonly int StartStampAttempts;
+    /// <summary>
+    /// 规划层主要河流条数(FGR-GEN-020)
+    /// </summary>
+    public readonly int RiverCount;
+    /// <summary>
+    /// 河流起点离核心的距离(格),向外流
+    /// </summary>
+    public readonly int RiverStartDistance;
+    /// <summary>
+    /// 每条河的折线段数
+    /// </summary>
+    public readonly int RiverSegments;
+    /// <summary>
+    /// 每段长度(格)
+    /// </summary>
+    public readonly int RiverSegmentLength;
+    /// <summary>
+    /// 每段方向最大偏转(度);方向与离心方向的夹角不超过 75 度(不回流进家园)
+    /// </summary>
+    public readonly int RiverTurnMax;
+    /// <summary>
+    /// 河道半宽起始值(格),沿河逐段加宽
+    /// </summary>
+    public readonly int RiverHalfWidth;
+    /// <summary>
+    /// 河道半宽上限(格)
+    /// </summary>
+    public readonly int RiverHalfWidthMax;
+    /// <summary>
+    /// 每隔多少格有一处浅滩(可通行,保证领地可达)
+    /// </summary>
+    public readonly int RiverFordPeriod;
+    /// <summary>
+    /// 浅滩宽度(格)
+    /// </summary>
+    public readonly int RiverFordWidth;
+    /// <summary>
+    /// 规划层矿带条数(FGR-GEN-020)
+    /// </summary>
+    public readonly int BeltCount;
+    /// <summary>
+    /// 每几条矿带有一条是稀土矿带(其余金属)
+    /// </summary>
+    public readonly int BeltRareEvery;
+    /// <summary>
+    /// 矿带起点离核心最近(格)
+    /// </summary>
+    public readonly int BeltMinDistance;
+    /// <summary>
+    /// 矿带起点离核心最远(格)
+    /// </summary>
+    public readonly int BeltMaxDistance;
+    /// <summary>
+    /// 矿带长度(格)
+    /// </summary>
+    public readonly int BeltLength;
+    /// <summary>
+    /// 矿带半宽(格)
+    /// </summary>
+    public readonly int BeltRadius;
+    /// <summary>
+    /// 矿带内矿阈值下降量(越大矿越密)
+    /// </summary>
+    public readonly float BeltOreBonus;
+    /// <summary>
+    /// 遗迹点/据点的分布格边长(格);每个分布格按(种子,格坐标)独立决定,与访问顺序无关
+    /// </summary>
+    public readonly int PoiCellSize;
+    /// <summary>
+    /// 每个分布格出现遗迹点的概率(0~1)
+    /// </summary>
+    public readonly float RelicChance;
+    /// <summary>
+    /// 家园区每个分布格出现侦察巢的概率(0~1,再乘世界设置“据点密度”)
+    /// </summary>
+    public readonly float NestChance;
+    /// <summary>
+    /// 侦察巢离核心每远这么多格强一级(FGR-GEN-032)
+    /// </summary>
+    public readonly int NestTierDistance;
+    /// <summary>
+    /// 侦察巢最高等级
+    /// </summary>
+    public readonly int NestMaxTier;
+    /// <summary>
+    /// 点位离分布格边缘至少多少格
+    /// </summary>
+    public readonly int PoiEdgeMargin;
+    /// <summary>
+    /// 点位落在悬崖/水面上时就近挪位的最大半径(格);挪不动就不生成
+    /// </summary>
+    public readonly int PoiShiftRadius;
+    /// <summary>
+    /// 河流每段方向与离心方向的最大夹角(度);&lt;=90,河不会流回家园
+    /// </summary>
+    public readonly int RiverOutwardMaxAngle;
+    /// <summary>
+    /// 河道沿河总共加宽多少格(逐段线性,再受 riverHalfWidthMax 限制)
+    /// </summary>
+    public readonly int RiverWidenTotal;
+    /// <summary>
+    /// 遗迹点离核心至少多少格(格,欧氏);起始区里不放遗迹点
+    /// </summary>
+    public readonly int RelicCoreExclusion;
     /// <summary>
     /// 这一版改了什么
     /// </summary>
@@ -198,6 +363,39 @@ public sealed partial class WorldGenVersion : Luban.BeanBase
         + "planMaxAttempts:" + PlanMaxAttempts + ","
         + "territorySet:" + TerritorySet + ","
         + "presetSet:" + PresetSet + ","
+        + "startClearSet:" + StartClearSet + ","
+        + "settingSet:" + SettingSet + ","
+        + "guaranteeSet:" + GuaranteeSet + ","
+        + "startFlatRadius:" + StartFlatRadius + ","
+        + "startFlatPollution:" + StartFlatPollution + ","
+        + "startNoOutpostRadius:" + StartNoOutpostRadius + ","
+        + "startStampAttempts:" + StartStampAttempts + ","
+        + "riverCount:" + RiverCount + ","
+        + "riverStartDistance:" + RiverStartDistance + ","
+        + "riverSegments:" + RiverSegments + ","
+        + "riverSegmentLength:" + RiverSegmentLength + ","
+        + "riverTurnMax:" + RiverTurnMax + ","
+        + "riverHalfWidth:" + RiverHalfWidth + ","
+        + "riverHalfWidthMax:" + RiverHalfWidthMax + ","
+        + "riverFordPeriod:" + RiverFordPeriod + ","
+        + "riverFordWidth:" + RiverFordWidth + ","
+        + "beltCount:" + BeltCount + ","
+        + "beltRareEvery:" + BeltRareEvery + ","
+        + "beltMinDistance:" + BeltMinDistance + ","
+        + "beltMaxDistance:" + BeltMaxDistance + ","
+        + "beltLength:" + BeltLength + ","
+        + "beltRadius:" + BeltRadius + ","
+        + "beltOreBonus:" + BeltOreBonus + ","
+        + "poiCellSize:" + PoiCellSize + ","
+        + "relicChance:" + RelicChance + ","
+        + "nestChance:" + NestChance + ","
+        + "nestTierDistance:" + NestTierDistance + ","
+        + "nestMaxTier:" + NestMaxTier + ","
+        + "poiEdgeMargin:" + PoiEdgeMargin + ","
+        + "poiShiftRadius:" + PoiShiftRadius + ","
+        + "riverOutwardMaxAngle:" + RiverOutwardMaxAngle + ","
+        + "riverWidenTotal:" + RiverWidenTotal + ","
+        + "relicCoreExclusion:" + RelicCoreExclusion + ","
         + "note:" + Note + ","
         + "}";
     }

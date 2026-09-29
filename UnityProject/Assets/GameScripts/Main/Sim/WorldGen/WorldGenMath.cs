@@ -59,6 +59,10 @@ namespace BinGames.Sim.WorldGen
         public int HazardPollution;
         public int PillarSpacing;
 
+        /// <summary>FG3-GEN-01（FGR-GEN-031 第 1 级）：核心欧氏半径内没有悬崖、污染不超过 <see cref="FlatPollutionCap"/>。0 = 不启用（v1）。</summary>
+        public int FlatRadius;
+        public int FlatPollutionCap;
+
         // 地形字节值（fg.TbGridTerrain.code）
         public byte CodeBuildable;
         public byte CodeCliff;
@@ -69,13 +73,46 @@ namespace BinGames.Sim.WorldGen
         public byte CodeRuin;
     }
 
-    /// <summary>规划层给出的一块领地（圆 + 外圈危害带），格网坐标。</summary>
+    /// <summary>
+    /// 规划层给出的一个形状（格网坐标）。<see cref="Kind"/> = 0 是 FG0-ARCH-05 的领地（圆 + 外圈危害带）；
+    /// FG3-GEN-01（生成器 v2）起还有河流段、矿带、起始区保证点（见 <see cref="WorldGenZoneKind"/>）。v1 世界只有领地，采样结果不变。
+    /// </summary>
     public struct WorldGenZone
     {
         public int CenterX;
         public int CenterY;
         public int Radius;
         public int HazardWidth;
+
+        /// <summary>形状种类（<see cref="WorldGenZoneKind"/>）；默认 0 = 领地。</summary>
+        public int Kind;
+        /// <summary>线段形状（河流段、矿带）的终点；起点是 (CenterX, CenterY)。</summary>
+        public int X1;
+        public int Y1;
+        /// <summary>矿带 / 保证点的地形码。</summary>
+        public int Code;
+        /// <summary>矿带：阈值下降量（16.16）；河流：浅滩周期（格）。</summary>
+        public int ValueQ;
+        /// <summary>河流：本段起点之前的累计河长（格，浅滩沿整条河连续）；浅滩宽度写在 <see cref="HazardWidth"/>。</summary>
+        public int Extra;
+        /// <summary>包围盒（非领地形状的快速排除，闭区间）。</summary>
+        public int BoxMinX;
+        public int BoxMinY;
+        public int BoxMaxX;
+        public int BoxMaxY;
+    }
+
+    /// <summary>规划层形状种类（FG3-GEN-01）。</summary>
+    public static class WorldGenZoneKind
+    {
+        /// <summary>阵营领地 / 白潮滩头预留区（圆 + 外圈危害带）：只影响污染。</summary>
+        public const int Territory = 0;
+        /// <summary>河流的一段（胶囊体，半宽 = Radius）：水面，每隔 ValueQ 格有 HazardWidth 宽的浅滩（可建可走）。</summary>
+        public const int River = 1;
+        /// <summary>矿带（胶囊体，半宽 = Radius）：对应矿种的噪声阈值下降 ValueQ。</summary>
+        public const int Belt = 2;
+        /// <summary>起始区保证点（圆盘）：强制为 Code 地形（FGR-GEN-031 局部重生成）。</summary>
+        public const int Stamp = 3;
     }
 
     /// <summary>强制为可建空地的矩形（起始区保护），闭区间。</summary>
@@ -211,7 +248,58 @@ namespace BinGames.Sim.WorldGen
             int rareT = oreT + (int)(((long)(One - oreT) * p.RareBiasQ) >> 16);
             int oilT = oreT + (int)(((long)(One - oreT) * p.OilBiasQ) >> 16);
 
-            if (Noise(seed, x, y, 1u, p.ScaleCliffQ) > p.CliffT)
+            // FG3-GEN-01：规划层的矿带（金属 / 稀土各自的阈值下降）、河流、保证点。v1 世界没有这些形状，以下全部是空操作。
+            int metalT = oreT;
+            int rareBeltT = rareT;
+            bool river = false;
+            bool ford = false;
+            int stampCode = -1;
+            for (int i = 0; i < zoneCount; i++)
+            {
+                WorldGenZone z = zones[i];
+                if (z.Kind == WorldGenZoneKind.Territory || x < z.BoxMinX || x > z.BoxMaxX || y < z.BoxMinY || y > z.BoxMaxY)
+                {
+                    continue;
+                }
+                if (z.Kind == WorldGenZoneKind.Stamp)
+                {
+                    long sx = x - z.CenterX;
+                    long sy = y - z.CenterY;
+                    if (sx * sx + sy * sy <= (long)z.Radius * z.Radius)
+                    {
+                        stampCode = z.Code;
+                    }
+                    continue;
+                }
+                if (!InCapsule(x, y, in z, out long along))
+                {
+                    continue;
+                }
+                if (z.Kind == WorldGenZoneKind.Belt)
+                {
+                    if (z.Code == p.CodeOreRare)
+                    {
+                        rareBeltT = math.max(One / 2, rareBeltT - z.ValueQ);
+                    }
+                    else
+                    {
+                        metalT = math.max(One / 2, metalT - z.ValueQ);
+                    }
+                }
+                else if (z.Kind == WorldGenZoneKind.River)
+                {
+                    river = true;
+                    int period = math.max(2, z.ValueQ);
+                    long s = along + z.Extra;
+                    if (s >= 0 && s % period < z.HazardWidth)
+                    {
+                        ford = true;
+                    }
+                }
+            }
+            bool flat = p.FlatRadius > 0 && dist <= p.FlatRadius;
+
+            if (!flat && Noise(seed, x, y, 1u, p.ScaleCliffQ) > p.CliffT)
             {
                 terrain = p.CodeCliff;
             }
@@ -219,11 +307,11 @@ namespace BinGames.Sim.WorldGen
             {
                 terrain = p.CodeWater;
             }
-            else if (Noise(seed, x, y, 3u, p.ScaleOreQ) > oreT)
+            else if (Noise(seed, x, y, 3u, p.ScaleOreQ) > metalT)
             {
                 terrain = p.CodeOreMetal;
             }
-            else if (Noise(seed, x, y, 4u, p.ScaleRareQ) > rareT)
+            else if (Noise(seed, x, y, 4u, p.ScaleRareQ) > rareBeltT)
             {
                 terrain = p.CodeOreRare;
             }
@@ -234,6 +322,15 @@ namespace BinGames.Sim.WorldGen
             else if (Noise(seed, x, y, 6u, p.ScaleOilQ) > oilT)
             {
                 terrain = p.CodeOil;
+            }
+            if (river)
+            {
+                // 河道是水面；浅滩是可走可建的河床（保证领地之间可达，FGT-GEN-004）。浅滩也清掉河道里的悬崖。
+                terrain = ford ? p.CodeBuildable : p.CodeWater;
+            }
+            if (stampCode >= 0)
+            {
+                terrain = (byte)stampCode; // 起始区保证点（FGR-GEN-031 局部重生成）：只覆盖这一项的圆盘。
             }
 
             // 污染：局部浓淡（噪声）+ 离核心越远越高 + 阵营领地内部加重 + 外圈危害带（FGR-GEN-030、021）。
@@ -252,6 +349,10 @@ namespace BinGames.Sim.WorldGen
             for (int i = 0; i < zoneCount; i++)
             {
                 WorldGenZone z = zones[i];
+                if (z.Kind != WorldGenZoneKind.Territory)
+                {
+                    continue;
+                }
                 long zx = x - z.CenterX;
                 long zy = y - z.CenterY;
                 long d2 = zx * zx + zy * zy;
@@ -269,7 +370,49 @@ namespace BinGames.Sim.WorldGen
                     }
                 }
             }
+            if (flat)
+            {
+                level = math.min(level, p.FlatPollutionCap); // FGR-GEN-031 第 1 级：起始区核心附近污染不超过上限。
+            }
             pollution = (byte)math.clamp(level, 0, 3);
+        }
+
+        /// <summary>
+        /// 点到线段（(CenterX, CenterY) → (X1, Y1)）的距离是否 ≤ 半宽 Radius（胶囊体），全整数运算。
+        /// <paramref name="along"/> = 点在线段上的投影长度（格，向下取整，可能为负 / 超过段长），河流浅滩用。
+        /// </summary>
+        public static bool InCapsule(int x, int y, in WorldGenZone z, out long along)
+        {
+            long ax = z.CenterX;
+            long ay = z.CenterY;
+            long vx = z.X1 - ax;
+            long vy = z.Y1 - ay;
+            long px = x - ax;
+            long py = y - ay;
+            long len2 = vx * vx + vy * vy;
+            long r2 = (long)z.Radius * z.Radius;
+            long dot = px * vx + py * vy;
+            long len = len2 > 0 ? Isqrt(len2) : 0;
+            along = len > 0 ? FloorDiv(dot, len) : 0;
+            if (len2 == 0 || dot <= 0)
+            {
+                return px * px + py * py <= r2;
+            }
+            if (dot >= len2)
+            {
+                long ex = x - z.X1;
+                long ey = y - z.Y1;
+                return ex * ex + ey * ey <= r2;
+            }
+            long cross = px * vy - py * vx;
+            // 垂距² = cross² / len2 ≤ r² ⇔ cross² ≤ r² × len2（坐标在 ±1,000,000 以内、段长 ≤ 几千格时不溢出：cross ≤ 2e6 × 5e3 = 1e10，平方 1e20 会溢出 long，
+            // 所以先比较 |cross| 与 r × len 的上界，再精确比较）。
+            long bound = z.Radius * (len + 1);
+            if (cross > bound || cross < -bound)
+            {
+                return false;
+            }
+            return cross * cross <= r2 * len2;
         }
 
         private static void SampleInterior(in WorldGenParams p, int x, int y, out byte terrain)

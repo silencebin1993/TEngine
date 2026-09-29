@@ -1226,7 +1226,8 @@ namespace GameLogic.EditorTools
                                 bool free = map.OccupantAt(q) == null
                                             && !obstacles.Any(o => Math.Max(Math.Abs(q.X - o.cell.X), Math.Abs(q.Y - o.cell.Y)) <= o.radius);
                                 bool pass = flatten || Passable(q);
-                                bool plain = flatten || map.GetTerrain(q) == 0;
+                                // 平地 = 可建空地且污染低于不可建等级（FG3-GEN-01 起家园区外圈的污染随种子更常见，只看地形会挑到放不了建筑的空地）。
+                                bool plain = flatten || (map.GetTerrain(q) == 0 && map.GetPollution(q) < GridContent.TuningInt("grid.pollution_block_level"));
                                 ok = pass && free && explored && plain;
                                 if (!ok)
                                 {
@@ -1261,6 +1262,10 @@ namespace GameLogic.EditorTools
                                         if (map.GetTerrain(q) != 0)
                                         {
                                             map.SetTerrain(q, 0);
+                                        }
+                                        if (map.GetPollution(q) != 0)
+                                        {
+                                            map.SetPollution(q, 0);
                                         }
                                     }
                                 }
@@ -1672,7 +1677,9 @@ namespace GameLogic.EditorTools
             home.BuildMode.Close();
             Expect(g1.Success && cut == 1 && names.Count == 1 && notCut == 0 && warned && g2.Success,
                 $"放置预览：放在缺口上会让“{string.Join("、", names)}”机器无法到达 → 预览给出警告“{(preview != null && preview.Warnings.Count > 0 ? preview.Warnings[0] : "无")}”，" +
-                "但仍可放置（FGR-LOG-012 只警告不阻止）；放在别处没有警告");
+                "但仍可放置（FGR-LOG-012 只警告不阻止）；放在别处没有警告" +
+                (g1.Success && cut == 1 && names.Count == 1 && notCut == 0 && warned && g2.Success ? string.Empty
+                    : $"〔空地 {p}，G1 {g1.Success}（{g1.Reason}），缺口处断开 {cut}、别处 {notCut}，预览 {preview?.Ok}，G2 {g2.Success}（{g2.Reason}）〕"));
         }
 
         private static void CheckRaidRoute()

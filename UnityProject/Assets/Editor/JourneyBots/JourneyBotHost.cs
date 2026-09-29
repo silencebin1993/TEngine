@@ -19,6 +19,7 @@ namespace GameLogic.EditorTools.JourneyBots
             { FgjM1ReverseJourney.Id, FgjM1ReverseJourney.Build },
             { FgjM2Journey.Id, FgjM2Journey.Build },
             { FgjM2ReverseJourney.Id, FgjM2ReverseJourney.Build },
+            { FgjGenExtremeJourney.Id, FgjGenExtremeJourney.Build }, // FG3-GEN-01：FGT-GEN-009 极端世界设置下的第一幕旅程
         };
 
         public static IEnumerable<string> Ids => Builders.Keys;
@@ -82,6 +83,9 @@ namespace GameLogic.EditorTools.JourneyBots
 
         [MenuItem("BinGames/旅程机器人/FGJ-M2R（M2 反向旅程）")]
         public static void RunFgjM2ReverseFromMenu() => Run(FgjM2ReverseJourney.Id, null);
+
+        [MenuItem("BinGames/旅程机器人/FGJ-GEN9（极端世界设置下的第一幕旅程）")]
+        public static void RunFgjGenExtremeFromMenu() => Run(FgjGenExtremeJourney.Id, null);
 
         public static bool Run(string id, string reportPath)
         {

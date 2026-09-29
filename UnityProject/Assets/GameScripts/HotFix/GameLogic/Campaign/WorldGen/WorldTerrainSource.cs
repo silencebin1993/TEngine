@@ -33,7 +33,13 @@ namespace GameLogic.Campaign.WorldGen
         public readonly WorldGenRect[] Rects;
         public readonly WorldGenZone[] Zones;
 
+        /// <summary>v1 写法（整套预设）；等价于按预设解析的 <see cref="WorldSettings"/>。</summary>
         public WorldTerrainSource(int worldSeed, int version, WorldPreset preset, Surface surface, GridCell core, int chunkSize, WorldPlan plan)
+            : this(worldSeed, version, preset != null ? WorldSettings.FromPreset(preset, version) : null, surface, core, chunkSize, plan)
+        {
+        }
+
+        public WorldTerrainSource(int worldSeed, int version, WorldSettings preset, Surface surface, GridCell core, int chunkSize, WorldPlan plan)
         {
             if (preset == null)
             {
@@ -97,6 +103,9 @@ namespace GameLogic.Campaign.WorldGen
                 CodeOreMetal = Code("ore_metal"),
                 CodeOreRare = Code("ore_rare"),
                 CodeRuin = Code("ruin"),
+                // FG3-GEN-01（FGR-GEN-031 第 1 级）：v1 版本行为 0，不启用。
+                FlatRadius = IsInterior ? 0 : ScaledRadius(v.StartFlatRadius, preset),
+                FlatPollutionCap = v.StartFlatPollution,
             };
 
             if (IsInterior)
@@ -106,7 +115,7 @@ namespace GameLogic.Campaign.WorldGen
             }
             else
             {
-                Rects = StartProtection(v, preset.StartZone == "relaxed", core);
+                Rects = StartProtection(v, preset.LegacyRelaxed, core);
                 Zones = plan?.Zones ?? Array.Empty<WorldGenZone>();
             }
             SourceKey = string.Concat(Id, "|", surface.Id, "|", worldSeed.ToString(), "|v", version.ToString(), "|", preset.Id, "|", core.ToString());
@@ -115,34 +124,31 @@ namespace GameLogic.Campaign.WorldGen
         /// <summary>浮点表值 → 16.16 定点（round(x × 65536)，同一个 float 永远得到同一个整数）。</summary>
         public static int Q(float x) => (int)Math.Round(x * 65536.0);
 
+        /// <summary>起始区半径按世界设置“起始区”缩放（定点，四舍五入；宽松 1.5 → 12 格变 18 格）。</summary>
+        public static int ScaledRadius(int radius, WorldSettings settings) =>
+            radius <= 0 ? 0 : (int)(((long)radius * Q(settings?.StartScale ?? 1f) + 32768) >> 16);
+
         private static byte Code(string terrainId) => GridContent.TerrainCode(terrainId);
 
-        /// <summary>起始区保护矩形（沿用 FG0-ARCH-04 原型规则）：核心周围 protectRadius 格（切比雪夫）、开局布局建筑与建造位占地外
-        /// protectMargin 圈、非建筑锚点周围 anchorProtectRadius 格强制为可建空地，所以开局布局在任意种子下都合法（FG00 B25）。
-        /// “宽松”起始区把三个半径放大 1.5 倍（FGR-GEN-070）。
-        /// 注意：开局布局与这些建筑的占地目前不随版本走（C 类生成输入，冻结待版本化，DEBT-FG0ARCH05-09）；
-        /// <see cref="WorldGenInputs"/> 把这里算出的矩形纳入生成输入清单，改布局 / 占地而不升版本时自检失败。</summary>
+        /// <summary>起始区保护矩形：核心周围 protectRadius 格（切比雪夫）、开局布局建筑与建造位占地外 protectMargin 圈、非建筑锚点周围
+        /// anchorProtectRadius 格强制为可建空地、无污染，所以开局布局在任意种子下都合法（FG00 B25；FGR-GEN-031 第 2 级“开局预置建筑的平地”）。
+        /// FG3-GEN-01 起读版本行 startClearSet 引用的**字面快照**（fg.TbWorldStartClear，相对核心），不再按当前开局布局现算（关闭 DEBT-FG0ARCH05-09）：
+        /// 改开局布局不会改变任何已发布版本的世界。c1 快照与 FG0-ARCH-05 起按布局现算的矩形逐个相同（生成输入清单基准守护）。
+        /// v1 的“宽松”起始区用快照的 relaxed 变体（三个半径 ×1.5）；v2 两种起始区都用 standard，宽松改为放大第 1、3 级半径（<see cref="ScaledRadius"/>）。</summary>
         public static WorldGenRect[] StartProtection(WorldGenVersion v, bool relaxed, GridCell core)
         {
-            int Scale(int r) => relaxed ? r * 3 / 2 : r;
-            int radius = Scale(v.ProtectRadius);
-            int margin = Scale(v.ProtectMargin);
-            int anchor = Scale(v.AnchorProtectRadius);
-            var rects = new List<WorldGenRect> { new WorldGenRect(core.X - radius, core.Y - radius, core.X + radius, core.Y + radius) };
-            foreach (StartLayout row in GridContent.StartLayout)
+            List<WorldStartClear> rows = WorldGenContent.StartClearFor(v, relaxed ? "relaxed" : "standard");
+            if (rows.Count == 0)
             {
-                var at = new GridCell(core.X + row.OffsetX, core.Y + row.OffsetY);
-                if ((row.Kind == "building" || row.Kind == "site") && GridContent.TryGetBuilding(row.TypeId, out BuildingGrid g))
-                {
-                    GridMath.FootprintBounds(at, g.FootprintW, g.FootprintH, GridMath.NormalizeRotation(row.Rotation), out GridCell min, out GridCell max);
-                    rects.Add(new WorldGenRect(min.X - margin, min.Y - margin, max.X + margin, max.Y + margin));
-                }
-                else
-                {
-                    rects.Add(new WorldGenRect(at.X - anchor, at.Y - anchor, at.X + anchor, at.Y + anchor));
-                }
+                throw new KeyNotFoundException($"起始区平地快照 fg.TbWorldStartClear 缺少生成器 v{v.Version} 引用的 {v.StartClearSet}.{(relaxed ? "relaxed" : "standard")}");
             }
-            return rects.ToArray();
+            var rects = new WorldGenRect[rows.Count];
+            for (int i = 0; i < rows.Count; i++)
+            {
+                WorldStartClear r = rows[i];
+                rects[i] = new WorldGenRect(core.X + r.MinX, core.Y + r.MinY, core.X + r.MaxX, core.Y + r.MaxY);
+            }
+            return rects;
         }
 
         public bool IsProtected(int x, int y)

@@ -33,6 +33,9 @@ namespace GameLogic.UI.Kit
             Create<StatsPanelUIToolkit>("[StatsPanelHost]"); // FG2-FW-04：统计面板（战斗 · 反应伤害归因；FG4-ECO-08 加生产段，30076，暂停菜单之上）。
             Create<ReactionLogPanelUIToolkit>("[ReactionLogHost]"); // FG2-FW-04：反应记录（日志 / 伤害归因 / 反应图鉴，30077，暂停菜单之上）。
             Create<KeyBindingsPanelUIToolkit>("[KeyBindingsHost]");
+            Create<NewGamePanelUIToolkit>("[NewGameHost]"); // FG3-GEN-01：新游戏设置（30082，主菜单“新建”选好存档槽后打开）。
+            Create<StrategicMapUIToolkit>("[StrategicMapHost]"); // FG3-GEN-01：战略地图（30050，HUD 之上、暂停菜单之下）。
+            Create<MinimapHudUIToolkit>("[MinimapHost]"); // FG3-GEN-01：小地图（右下角 HUD，-2 层，不挡面板）。
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Create<UiKitGalleryUIToolkit>("[UiKitGalleryHost]");
 #endif
@@ -54,6 +57,8 @@ namespace GameLogic.UI.Kit
             FirmwareLibraryPanelUIToolkit.Close();
             ReactionLogPanelUIToolkit.Close();
             StatsPanelUIToolkit.Close();
+            StrategicMapUIToolkit.Close();
+            NewGamePanelUIToolkit.Close();
             GameLogic.Campaign.Feedback.ReactionPopups.Clear();
             GameLogic.Campaign.Feedback.CameraNudge.Reset();
             SignalCore.SignalCoreHudUIToolkit.Close();

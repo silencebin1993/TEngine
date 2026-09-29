@@ -188,6 +188,17 @@ namespace GameLogic.EditorTools
                     case 233: StepRestoreOpened(inStep); break;
                     case 234: StepRestoreAsked(inStep); break;
                     case 235: StepRestoreClosed(inStep); break;
+                    // FG3-GEN-01：新游戏设置（种子 / 随机种子 / 分项设置 / 分享短码）与战略地图、小地图、连续缩放。
+                    case 236: StepNewGameSetup(inStep); break;
+                    case 237: StepMapOpened(inStep); break;
+                    case 238: StepMapClosedZoomBurst(inStep); break;
+                    case 239: StepMapZoomGesture(inStep); break;
+                    case 240: StepMapFlyClick(inStep); break;
+                    case 241: StepMinimapClick(inStep); break;
+                    case 242: StepMinimapFlown(inStep); break;
+                    case 243: StepMapZoomBack(inStep); break;
+                    case 244: StepMapHome(inStep); break;
+                    case 245: StepMapReopenedByZoom(inStep); break;
                     case 180: StepFwLibOpened(inStep); break;
                     case 181: StepFwLibCodexJumped(inStep); break;
                     case 182: StepFwLibCodexClosed(inStep); break;
@@ -530,6 +541,12 @@ namespace GameLogic.EditorTools
 
         private static void StepPickSlot(double inStep)
         {
+            // FG3-GEN-01：选好存档槽后先出现新游戏设置（种子 / 世界设置 / 分享短码），点“开始”才建战役。
+            if (NewGamePanelUIToolkit.IsOpen)
+            {
+                Next(236, $"新游戏设置出现（{inStep:F0} 秒）");
+                return;
+            }
             // 有空槽时“新建”直接开新战役（不经过槽位列表）；三槽全满才弹覆盖确认。
             if (GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive)
             {
@@ -556,6 +573,56 @@ namespace GameLogic.EditorTools
             Next(3, "点存档槽 0");
         }
 
+        public const string SmokeSeedText = "20260929";
+        public const string SmokeSettings = "R2O1P1D1S0";
+
+        /// <summary>
+        /// FG3-GEN-01（FGR-GEN-001、070、071）：新游戏设置——默认种子、“随机种子”、输入文字种子的换算提示、点分项按钮（资源丰度 高）、
+        /// 复制短码、导入别人的短码再导回自己的，最后点“开始”。按钮都走 UI Toolkit 按钮自己的 Clickable（与鼠标点击同一回调）。
+        /// </summary>
+        private static void StepNewGameSetup(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            NewGamePanelUIToolkit p = NewGamePanelUIToolkit.Instance;
+            if (p == null || !p.PanelVisible)
+            {
+                Finish("新游戏设置面板没有显示");
+                return;
+            }
+            string first = p.SeedFieldText;
+            bool decoded = Campaign.WorldGen.WorldSettings.TryDecodeShareCode(p.ShareFieldText, out int ds, out Campaign.WorldGen.WorldSettings dset, out int dv)
+                           == Campaign.WorldGen.WorldSettings.ShareError.None;
+            Check(first.Length > 0 && decoded && ds.ToString(System.Globalization.CultureInfo.InvariantCulture) == first && dv == Campaign.WorldGen.WorldGenVersions.Current
+                  && dset.Id == Campaign.WorldGen.WorldGenContent.DefaultPresetId && p.AxisRowCount == 5,
+                $"新游戏设置：默认随机种子 {first}、五个分项全部标准、分享短码 {p.ShareFieldText}、{p.GeneratorText}");
+            CheckNoTextMarkers("新游戏设置");
+            bool rnd = ClickUitk("[NewGameHost]", "NewGameRandom");
+            Check(rnd && p.SeedFieldText != first, $"点“随机种子”：{first} → {p.SeedFieldText}");
+            p.SeedField.value = "归还之地";
+            Campaign.WorldGen.WorldSettings.TryParseSeed("归还之地", out int textSeed, out _);
+            Check(p.SeedHintText.Contains(textSeed.ToString(System.Globalization.CultureInfo.InvariantCulture)), $"输入文字种子：提示“{p.SeedHintText}”");
+            p.SeedField.value = SmokeSeedText;
+            bool level = ClickUitk("[NewGameHost]", "NewGameLevel_resource_2");
+            Check(level && p.CurrentSettings().Id == SmokeSettings && p.LevelButton(0, 2).text.StartsWith("▸", StringComparison.Ordinal),
+                $"点分项按钮“资源丰度 高”：当前档换成“▸ {p.LevelButton(0, 2).text.TrimStart('▸', ' ')}”，设置 {p.CurrentSettings().Id}");
+            string mine = p.ShareFieldText;
+            string oldClip = GUIUtility.systemCopyBuffer;
+            bool copied = ClickUitk("[NewGameHost]", "NewGameCopyCode") && GUIUtility.systemCopyBuffer == mine;
+            GUIUtility.systemCopyBuffer = oldClip;
+            string other = Campaign.WorldGen.WorldSettings.EncodeShareCode(12345, Campaign.WorldGen.WorldSettings.Resolve(Campaign.WorldGen.WorldGenVersions.Current, "R1O1P1D1S1"));
+            p.ShareField.value = other;
+            bool importedOther = ClickUitk("[NewGameHost]", "NewGameImportCode") && p.SeedFieldText == "12345" && p.CurrentSettings().Id == "R1O1P1D1S1";
+            p.ShareField.value = mine;
+            bool importedMine = ClickUitk("[NewGameHost]", "NewGameImportCode") && p.SeedFieldText == SmokeSeedText && p.CurrentSettings().Id == SmokeSettings;
+            Check(copied && importedOther && importedMine, $"复制短码 {mine}；导入别人的短码（种子 12345 + 宽松起始区）再导回自己的，种子与设置一起换");
+            bool started = ClickUitk("[NewGameHost]", "NewGameStart");
+            Check(started && !NewGamePanelUIToolkit.IsOpen, "点“开始”：新游戏设置关闭，开新战役");
+            Next(3, $"新游戏：种子 {SmokeSeedText}、世界设置 {SmokeSettings}");
+        }
+
         private static void StepWaitHome(double inStep)
         {
             if (GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive)
@@ -575,6 +642,10 @@ namespace GameLogic.EditorTools
             {
                 return;
             }
+            CampaignState ws = CampaignSession.Current;
+            Check(ws?.World != null && ws.World.WorldSeed.ToString(System.Globalization.CultureInfo.InvariantCulture) == SmokeSeedText && ws.World.WorldSettingsId == SmokeSettings
+                  && ws.World.GeneratorVersion == Campaign.WorldGen.WorldGenVersions.Current && Campaign.WorldGen.WorldGenService.PlanFor(ws)?.StartReport?.AllSatisfied == true,
+                $"新游戏设置进了存档：世界种子 {ws?.World?.WorldSeed}、设置 {ws?.World?.WorldSettingsId}、生成器 v{ws?.World?.GeneratorVersion}，起始区四级保证满足");
             Write("  - 目标条：" + ObjectiveTitle());
             Write($"  - 当前目标：{CampaignObjectiveTracker.CurrentObjectiveId(CampaignSession.Current) ?? "无"}；场景里剪影 {CountNamed("Silhouette")} 个");
             Transform pin = FindNamed("Badge_Objective");
@@ -612,6 +683,225 @@ namespace GameLogic.EditorTools
             {
                 SessionState.SetInt(K + "Errors", SessionState.GetInt(K + "Errors", 0) + 1);
             }
+            PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.OpenMap));
+            Next(237, "按地图键（默认 M）");
+        }
+
+        // ── FG3-GEN-01：战略地图（连续缩放）与小地图 ─────────────────────────────────────
+
+        private static void StepMapOpened(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            StrategicMapUIToolkit map = StrategicMapUIToolkit.Instance;
+            bool open = StrategicMapUIToolkit.IsOpen && map != null && map.PanelVisible;
+            Check(open, "按地图键打开战略地图（任务日志仍是自己的键）");
+            if (!open)
+            {
+                Finish("战略地图没有打开");
+                return;
+            }
+            map.Tick(force: true);
+            bool home = map.Model.Items.Any(i => i.Kind == WorldMapItemKind.Home);
+            bool territories = map.Model.Circles.Any(c => c.Layer == WorldMapLayer.Territory) || map.View.HalfWidth < 300;
+            Check(home && GameSettings.HasSeenGuidanceHook(GuidanceHooks.StrategicMapFirstOpen) && map.VisibleIconCount > 0,
+                $"战略地图：归还核心图标、{map.VisibleIconCount} 个图标、{map.Model.Circles.Count} 个范围圈（领地 / 信号覆盖），首次打开钩子已发（{territories}）");
+            bool off = ClickUitk("[StrategicMapHost]", "MapFilter4");
+            map.Tick(force: true);
+            bool homeHidden = !map.Model.Items.Any(i => i.Kind == WorldMapItemKind.Home);
+            bool on = ClickUitk("[StrategicMapHost]", "MapFilter4");
+            map.Tick(force: true);
+            Check(off && homeHidden && on && map.Model.Items.Any(i => i.Kind == WorldMapItemKind.Home), "点“己方”筛选按钮：归还核心图标隐藏，再点恢复");
+            // 己方建筑群与前哨（FGR-GEN-080）：核心以外的每个建筑群，在视野里就有图标（核心那一群由核心图标代表）。
+            var clusters = WorldMapOwnClusters.For(CampaignSession.Current);
+            int ownInView = clusters.Count(c => !c.ContainsCore && map.View.Contains(c.X, c.Y, map.View.HalfWidth * 0.1));
+            int ownIcons = map.Model.Items.Count(i => i.Kind == WorldMapItemKind.OwnCluster);
+            Check(clusters.Count(c => c.ContainsCore) == 1 && ownIcons == ownInView,
+                $"己方建筑群：{clusters.Count} 群（核心所在 1 群由核心图标代表），视野里另有 {ownInView} 群、地图上 {ownIcons} 个建筑群 / 前哨站图标");
+            // 右键点在地图画布里（画布中心偏右上）：地图按镜头最远的比例打开，看到的是镜头附近，不能用固定格坐标（可能在视野外）。
+            Campaign.MapMarkerRecord mk = map.AddMarkerAt(new Vector2(map.View.CanvasWidth * 0.5f + 40f, map.View.CanvasHeight * 0.5f - 30f));
+            // 真实输入框逐段输入：先“冒烟 ”（末尾空格），刷新后空格不能被吃掉；再接着输入“标记”= “冒烟 标记”（多词备注，B16）。
+            map.MarkerNoteField.value = "冒烟 ";
+            map.Tick(force: true);
+            bool spaceKept = map.MarkerNoteField.value == "冒烟 ";
+            map.MarkerNoteField.value = map.MarkerNoteField.value + "标记";
+            map.Tick(force: true);
+            string storedNote = mk != null ? Campaign.WorldGen.WorldMapMarkers.Find(CampaignSession.Current, mk.MarkerId)?.Note : null;
+            string markerLabel = map.Model.Items.Where(i => i.Kind == WorldMapItemKind.Marker).Select(i => i.Label).FirstOrDefault();
+            Check(mk != null && spaceKept && storedNote == "冒烟 标记" && markerLabel != null && markerLabel.Contains("冒烟 标记"),
+                $"右键加标记并逐段输入备注：标记 {mk?.Serial}，末尾空格没被吃掉（{spaceKept}），存档域里是“{storedNote}”、输入框“{map.MarkerNoteField.value}”、地图标签“{markerLabel}”（应为“冒烟 标记”）");
+            CheckNoTextMarkers("战略地图");
+            PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.OpenMap));
+            Next(238, "再按地图键关闭");
+        }
+
+        private static void StepMapClosedZoomBurst(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            Check(!StrategicMapUIToolkit.IsOpen, "再按地图键关闭战略地图");
+            SessionState.SetInt(K + "ZoomOverflow", View.CameraDirector.ZoomOverflowCount);
+            SessionState.SetFloat(K + "OrthoBeforeMap", WorldView.Camera != null ? WorldView.Camera.orthographicSize : 0f);
+            // 一串连续的滚轮拉远（真实“拉远”动作）：一路拉到最远，同一串里不冲进地图。
+            InputRouter.DebugSetReader(new ScriptedReader { Mouse = OffScreen, Scroll = -1f, ScrollFrom = Time.frameCount + 1, ScrollTo = Time.frameCount + 24 });
+            Next(239, "连续滚轮拉远镜头到最远");
+        }
+
+        private static void StepMapZoomGesture(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            float ortho = WorldView.Camera != null ? WorldView.Camera.orthographicSize : 0f;
+            Check(!StrategicMapUIToolkit.IsOpen && ortho >= View.CameraDirector.MaxStrategyOrthographicSize - 0.05f,
+                $"一串连续滚动拉到最远（正交半高 {ortho:F1} = 上限 {View.CameraDirector.MaxStrategyOrthographicSize:F1}），同一串手势里不会顺势冲进地图");
+            // 停顿之后再拉远一下 = 新的手势 → 连续缩放切到战略地图（FGR-GEN-080）。
+            InputRouter.DebugSetReader(new ScriptedReader { Mouse = OffScreen, Scroll = -1f, ScrollFrom = Time.frameCount + 1, ScrollTo = Time.frameCount + 1 });
+            Next(240, "停顿后再拉远一下");
+        }
+
+        private static void StepMapFlyClick(double inStep)
+        {
+            StrategicMapUIToolkit map = StrategicMapUIToolkit.Instance;
+            if (!StrategicMapUIToolkit.IsOpen || map == null || (!map.MapTexture.Painted && inStep < 4))
+            {
+                if (inStep > 4)
+                {
+                    Check(false, "最远缩放后再拉远没有打开战略地图");
+                    Finish("连续缩放没有切到战略地图");
+                }
+                return;
+            }
+            double ratio = MapToCameraScaleRatio(map, out double mapCpp, out double camCpp);
+            Check(View.CameraDirector.ZoomOverflowCount > SessionState.GetInt(K + "ZoomOverflow", 0) && map.MapTexture.Painted && ratio >= 1.0 / 1.5 && ratio <= 1.5,
+                $"镜头最远时再拉远 → 连续切到战略地图：比例衔接（地图 {mapCpp:F3} 格 / 屏幕像素，镜头最远 {camCpp:F3}，相差 {ratio:F2} 倍 ≤ 1.5），" +
+                $"底图已由工作线程画好（{map.MapTexture.LastJobMs:F1} ms）");
+            // 地图里拉近一格（与滚轮同一入口）：回到镜头，镜头仍停在最远缩放——从地图到镜头也是连续的。
+            SessionState.SetInt(K + "ZoomOverflow", View.CameraDirector.ZoomOverflowCount);
+            map.ZoomAt(new Vector2(map.View.CanvasWidth * 0.5f, map.View.CanvasHeight * 0.5f), -1);
+            float orthoAfter = WorldView.Camera != null ? WorldView.Camera.orthographicSize : 0f;
+            Check(!StrategicMapUIToolkit.IsOpen && orthoAfter >= View.CameraDirector.MaxStrategyOrthographicSize - 0.05f,
+                $"在地图里拉近一格 → 地图关掉、回到镜头（镜头正交半高 {orthoAfter:F1} = 最远 {View.CameraDirector.MaxStrategyOrthographicSize:F1}，比例首尾相接）");
+            // 停顿之后再拉远一下（新的手势）= 再次切到战略地图。
+            InputRouter.DebugSetReader(new ScriptedReader { Mouse = OffScreen, Scroll = -1f, ScrollFrom = Time.frameCount + 60, ScrollTo = Time.frameCount + 60 });
+            Next(245, "地图里拉近一格回到镜头，停顿后再拉远一下");
+        }
+
+        /// <summary>地图比例（每个屏幕像素多少格）÷ 镜头最远缩放时的比例。屏幕像素 ↔ 画布像素按面板根节点宽度换算。</summary>
+        private static double MapToCameraScaleRatio(StrategicMapUIToolkit map, out double mapCpp, out double camCpp)
+        {
+            mapCpp = 0;
+            camCpp = 0;
+            Camera cam = WorldView.Camera;
+            var quad = new Vector2[4];
+            float panelWidth = map.Canvas?.panel?.visualTree?.layout.width ?? 0f;
+            if (cam == null || panelWidth < 1f || !WorldMapVectorLayer.CameraGroundQuad(cam, quad))
+            {
+                return 0;
+            }
+            double far = Vector2.Distance(quad[0], quad[1]) * (View.CameraDirector.MaxStrategyOrthographicSize / Mathf.Max(0.01f, cam.orthographicSize));
+            camCpp = far / cam.pixelWidth;
+            mapCpp = map.View.CellsPerCanvasPixel * panelWidth / cam.pixelWidth;
+            return camCpp > 0 ? mapCpp / camCpp : 0;
+        }
+
+        private static void StepMapReopenedByZoom(double inStep)
+        {
+            StrategicMapUIToolkit map = StrategicMapUIToolkit.Instance;
+            if (!StrategicMapUIToolkit.IsOpen || map == null || (!map.MapTexture.Painted && inStep < 5))
+            {
+                if (inStep > 5)
+                {
+                    Check(false, "回到镜头后再拉远没有再次打开战略地图");
+                    Finish("连续缩放没有再次切到战略地图");
+                }
+                return;
+            }
+            double ratio = MapToCameraScaleRatio(map, out double mapCpp, out double camCpp);
+            Check(View.CameraDirector.ZoomOverflowCount > SessionState.GetInt(K + "ZoomOverflow", 0) && ratio >= 1.0 / 1.5 && ratio <= 1.5,
+                $"停顿后再拉远 → 再次切到战略地图（地图 {mapCpp:F3} / 镜头最远 {camCpp:F3} 格每屏幕像素，相差 {ratio:F2} 倍）");
+            // 批处理下真实鼠标在 (0,0)（窗口角落），会触发边缘推屏：换成屏外的脚本读取器，镜头只按飞跃移动。
+            InputRouter.DebugSetReader(new ScriptedReader { Mouse = OffScreen });
+            // 点在地图画布里的一处（画布 60% / 40%）：真实玩家只能点到画布上看得见的地方。
+            Vector2 at = new Vector2(map.View.CanvasWidth * 0.6f, map.View.CanvasHeight * 0.4f);
+            Vector2 target = map.View.ToCell(at);
+            SessionState.SetFloat(K + "FlyX", target.x);
+            SessionState.SetFloat(K + "FlyY", target.y);
+            SessionState.SetInt(K + "MapFly", StrategicMapUIToolkit.FlyCount);
+            map.ClickAt(at);
+            Next(241, "在战略地图上点一处：镜头飞过去（0.5 秒）");
+        }
+
+        private static void StepMinimapClick(double inStep)
+        {
+            if (inStep < 1.2)
+            {
+                return;
+            }
+            var target = new Vector2(SessionState.GetFloat(K + "FlyX", 0f), SessionState.GetFloat(K + "FlyY", 0f));
+            Check(!StrategicMapUIToolkit.IsOpen && StrategicMapUIToolkit.FlyCount == SessionState.GetInt(K + "MapFly", 0) + 1 && Vector2.Distance(CameraFocus(), target) < 2.5f,
+                $"点地图：地图关闭、镜头飞到 {CameraFocus()}（目标 {target}）");
+            MinimapHudUIToolkit mini = MinimapHudUIToolkit.Instance;
+            bool shown = mini != null && mini.Visible;
+            Check(shown && mini.Model.Items.Any(i => i.Kind == WorldMapItemKind.Home) && WorldPlanetView.Terrain != null && WorldPlanetView.Terrain.IsRelief
+                  && WorldPlanetView.Terrain.ReliefTileCount > 0,
+                $"小地图显示（右下角，{mini?.VisibleIconCount} 个图标）；普通视角地貌是起伏网格（{WorldPlanetView.Terrain?.ReliefTileCount}/{WorldPlanetView.Terrain?.TileCount} 块）");
+            if (!shown)
+            {
+                Finish("小地图没有显示");
+                return;
+            }
+            SessionState.SetInt(K + "MiniFly", MinimapHudUIToolkit.FlyCount);
+            Vector2 at = mini.View.ToCanvas(target.x - 20f, target.y + 6f);
+            SessionState.SetFloat(K + "MiniX", mini.View.ToCell(at).x);
+            SessionState.SetFloat(K + "MiniY", mini.View.ToCell(at).y);
+            mini.ClickAt(at);
+            Next(242, "在小地图上点一处：镜头飞过去");
+        }
+
+        private static void StepMinimapFlown(double inStep)
+        {
+            if (inStep < 1.2)
+            {
+                return;
+            }
+            var target = new Vector2(SessionState.GetFloat(K + "MiniX", 0f), SessionState.GetFloat(K + "MiniY", 0f));
+            Check(MinimapHudUIToolkit.FlyCount == SessionState.GetInt(K + "MiniFly", 0) + 1 && Vector2.Distance(CameraFocus(), target) < 2.5f,
+                $"点小地图：镜头飞到 {CameraFocus()}（目标 {target}）");
+            // 拉回打开地图前的缩放（后续步骤按原来的镜头比例点世界里的东西）：按滚轮步长算要滚几下。
+            float before = SessionState.GetFloat(K + "OrthoBeforeMap", 0f);
+            float step = Mathf.Max(0.5f, Campaign.Grid.GridContent.Tuning("camera.zoom_step"));
+            int frames = Mathf.Clamp(Mathf.RoundToInt((View.CameraDirector.MaxStrategyOrthographicSize - before) / step), 0, 40);
+            if (frames > 0)
+            {
+                InputRouter.DebugSetReader(new ScriptedReader { Mouse = OffScreen, Scroll = 1f, ScrollFrom = Time.frameCount + 1, ScrollTo = Time.frameCount + frames });
+            }
+            Next(243, $"滚轮拉近镜头 {frames} 下（回到打开地图前的缩放 {before:F1}）");
+        }
+
+        private static void StepMapZoomBack(double inStep)
+        {
+            if (inStep < 1.2)
+            {
+                return;
+            }
+            PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.FocusHomeCore));
+            Next(244, "按回到归还核心键");
+        }
+
+        private static void StepMapHome(double inStep)
+        {
+            if (inStep < 1.2)
+            {
+                return;
+            }
+            GridCell core = Campaign.Grid.HomeGridService.CorePivot(CampaignSession.Current);
+            Write($"  - 回到归还核心：镜头焦点 {CameraFocus()}（核心 {core}）");
             PressKey(GameSettings.KeyBindings.GetKey(GameActionId.ToggleNotificationCenter));
             Next(30, "按通知中心键");
         }
@@ -677,6 +967,14 @@ namespace GameLogic.EditorTools
             string clip = GUIUtility.systemCopyBuffer;
             GUIUtility.systemCopyBuffer = oldClip;
             Check(copied && clip == seed && pm != null && pm.FeedbackText.Contains(seed), $"点“复制种子”：剪贴板 = {clip}，提示“{pm?.FeedbackText}”");
+            // FG3-GEN-01（FGR-GEN-071）：暂停菜单“复制分享短码”——短码导入后世界相同。
+            string oldClip2 = GUIUtility.systemCopyBuffer;
+            bool shareCopied = ClickUitk("[PauseMenuHost]", "PauseCopyShare");
+            string share = GUIUtility.systemCopyBuffer;
+            GUIUtility.systemCopyBuffer = oldClip2;
+            bool shareOk = Campaign.WorldGen.WorldSettings.TryDecodeShareCode(share, out int shareSeed, out Campaign.WorldGen.WorldSettings shareSet, out _)
+                           == Campaign.WorldGen.WorldSettings.ShareError.None && st != null && shareSeed == st.World.WorldSeed && shareSet.Id == st.World.WorldSettingsId;
+            Check(shareCopied && shareOk && pm.FeedbackText.Contains(share), $"点“复制分享短码”：剪贴板 = {share}（种子 {shareSeed} + 设置 {shareSet?.Id}）");
             // FG1-HUD-01：暂停菜单“图鉴”→ 机制图鉴盖在暂停菜单上面；点关闭回到暂停菜单。接入镜头两项设置显示当前值。
             bool codexClicked = ClickUitk("[PauseMenuHost]", "PauseCodex");
             UI.Kit.MechanicCodexPanelUIToolkit codex = UI.Kit.MechanicCodexPanelUIToolkit.Instance;
@@ -1188,6 +1486,8 @@ namespace GameLogic.EditorTools
             }
             Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
             Check(mode != null && mode.IsOpen && mode.SelectedTypeId == null && !mode.DemolishMode, "建造模式打开（未选建筑、不在拆除模式）");
+            Check(WorldPlanetView.TerrainShown && WorldPlanetView.Terrain != null && WorldPlanetView.Terrain.IsRelief,
+                "建造模式里地貌起伏网格照常显示（半透明地格参考线叠在它上面，FG-GAP-021）");
             Transform core = FindNamed("Building_" + Campaign.Regions.HomeValleyLayout.BuildingTypeCore);
             RightClickWorld(core != null ? core.position + new Vector3(6f, 0f, 6f) : Vector3.zero);
             Next(18, "右键（没有选中建筑时右键 = 退出建造模式）");

@@ -9,8 +9,8 @@ namespace GameLogic.Campaign.WorldGen
     public static class WorldGenVersions
     {
         /// <summary>新战役使用的生成器版本。**任何会改变生成结果的改动都必须新增 fg.TbWorldGenVersion 的一行并把它加 1**；
-        /// 旧行不许改（FgWorldGenSelfCheck 的回归哈希守护）。</summary>
-        public const int Current = 1;
+        /// 旧行不许改（FgWorldGenSelfCheck 的回归哈希守护）。v2 = FG3-GEN-01（起始区四级保证、河流与矿带、分项世界设置、遗迹点与侦察巢）。</summary>
+        public const int Current = 2;
 
         /// <summary>0 = 尚未启用程序生成：FG0-ARCH-05 之前的存档，地形来自 FG0-ARCH-04 的原型来源（GridTerrainPrototype，保留为旧版本路径）。</summary>
         public const int LegacyPrototype = 0;
@@ -22,6 +22,7 @@ namespace GameLogic.Campaign.WorldGen
     /// <summary>
     /// FG0-ARCH-05：世界生成四张表的入口——生成器版本 fg.TbWorldGenVersion、世界设置预设 fg.TbWorldPreset、
     /// 表面 fg.TbSurface、区域规划层的领地 fg.TbTerritory（数据源 tools/cell_tables/fgdata_world.py）；
+    /// FG3-GEN-01 再加三张：起始区平地快照 fg.TbWorldStartClear、起始区资源保证 fg.TbWorldStartGuarantee、分项世界设置 fg.TbWorldSettingAxis；
     /// 世界调参（world.*）在 fg.TbHomeTuning，经 <see cref="Grid.GridContent.Tuning"/> 读取。
     /// 生成输入随版本走（FGR-GEN-061，ADR-ARC-013 第 4 节）：规划层参数在版本行；领地与世界设置按版本行引用的集合
     /// （territorySet / presetSet）取，旧存档永远读自己那个版本的集合；全部生成输入的清单见 <see cref="WorldGenInputs"/>。
@@ -31,11 +32,16 @@ namespace GameLogic.Campaign.WorldGen
     {
         public const string EarthSurfaceId = "earth";
         public const string DefaultPresetId = "default";
+        /// <summary>表里“没有这个集合”的写法（fg 表不许留空格子）。</summary>
+        public const string NoSet = "none";
 
         private static TbWorldGenVersion _versions;
         private static TbWorldPreset _presets;
         private static TbSurface _surfaces;
         private static TbTerritory _territories;
+        private static TbWorldStartClear _startClear;
+        private static TbWorldStartGuarantee _guarantees;
+        private static TbWorldSettingAxis _axes;
         private static bool _loaded;
         private static bool _overridden;
         private static string _loadError;
@@ -88,6 +94,97 @@ namespace GameLogic.Campaign.WorldGen
             }
         }
 
+        /// <summary>FG3-GEN-01：起始区平地快照（版本行 startClearSet 引用）。</summary>
+        public static IReadOnlyList<WorldStartClear> StartClearRows
+        {
+            get
+            {
+                RequireLoaded();
+                return _startClear.DataList;
+            }
+        }
+
+        /// <summary>FG3-GEN-01：起始区资源保证（版本行 guaranteeSet 引用）。</summary>
+        public static IReadOnlyList<WorldStartGuarantee> GuaranteeRows
+        {
+            get
+            {
+                RequireLoaded();
+                return _guarantees.DataList;
+            }
+        }
+
+        /// <summary>FG3-GEN-01：分项世界设置（版本行 settingSet 引用）。</summary>
+        public static IReadOnlyList<WorldSettingAxis> AxisRows
+        {
+            get
+            {
+                RequireLoaded();
+                return _axes.DataList;
+            }
+        }
+
+        public static bool HasSet(string set) => !string.IsNullOrEmpty(set) && set != NoSet;
+
+        /// <summary>版本行引用的起始区平地快照矩形（相对核心，按序号）；<paramref name="variant"/> = standard / relaxed。</summary>
+        public static List<WorldStartClear> StartClearFor(WorldGenVersion v, string variant)
+        {
+            RequireLoaded();
+            var list = new List<WorldStartClear>();
+            if (v == null)
+            {
+                return list;
+            }
+            foreach (WorldStartClear r in _startClear.DataList)
+            {
+                if (r.Set == v.StartClearSet && r.Variant == variant)
+                {
+                    list.Add(r);
+                }
+            }
+            list.Sort((a, b) => a.Idx.CompareTo(b.Idx));
+            return list;
+        }
+
+        /// <summary>版本行引用的起始区资源保证（表顺序 = 检查与放置顺序）；v1 没有保证，返回空表。</summary>
+        public static List<WorldStartGuarantee> GuaranteesFor(WorldGenVersion v)
+        {
+            RequireLoaded();
+            var list = new List<WorldStartGuarantee>();
+            if (v == null || !HasSet(v.GuaranteeSet))
+            {
+                return list;
+            }
+            foreach (WorldStartGuarantee g in _guarantees.DataList)
+            {
+                if (g.Set == v.GuaranteeSet)
+                {
+                    list.Add(g);
+                }
+            }
+            return list;
+        }
+
+        /// <summary>版本行引用的一个分项的全部档（按档排序）；v1 没有分项设置，返回空表。</summary>
+        public static List<WorldSettingAxis> AxisLevels(WorldGenVersion v, string axis)
+        {
+            RequireLoaded();
+            var list = new List<WorldSettingAxis>();
+            if (v == null || !HasSet(v.SettingSet))
+            {
+                return list;
+            }
+            foreach (WorldSettingAxis a in _axes.DataList)
+            {
+                if (a.Set == v.SettingSet && a.Axis == axis)
+                {
+                    list.Add(a);
+                }
+            }
+            list.Sort((a, b) => a.Level.CompareTo(b.Level));
+            return list;
+        }
+
         public static bool TryGetVersion(int version, out WorldGenVersion row)
         {
             EnsureLoaded();
@@ -111,7 +208,7 @@ namespace GameLogic.Campaign.WorldGen
         public static bool TryGetPreset(int version, string id, out WorldPreset row)
         {
             row = null;
-            if (id == null || !TryGetVersion(version < 1 ? WorldGenVersions.Current : version, out WorldGenVersion v))
+            if (id == null || !TryGetVersion(version < 1 ? 1 : version, out WorldGenVersion v) || !HasSet(v.PresetSet))
             {
                 return false;
             }
@@ -133,7 +230,7 @@ namespace GameLogic.Campaign.WorldGen
         {
             RequireLoaded();
             var list = new List<WorldPreset>();
-            if (!TryGetVersion(version, out WorldGenVersion v))
+            if (!TryGetVersion(version, out WorldGenVersion v) || !HasSet(v.PresetSet))
             {
                 return list;
             }
@@ -193,6 +290,9 @@ namespace GameLogic.Campaign.WorldGen
             _presets = null;
             _surfaces = null;
             _territories = null;
+            _startClear = null;
+            _guarantees = null;
+            _axes = null;
             _loadError = null;
             Revision++;
             EnsureLoaded();
@@ -200,7 +300,7 @@ namespace GameLogic.Campaign.WorldGen
 
         /// <summary>测试注入：用构造出来的表替换真实表（传 null 的沿用真实表）。用完必须 <see cref="ResetForTests"/>。</summary>
         public static void OverrideForTests(TbWorldGenVersion versions = null, TbWorldPreset presets = null, TbSurface surfaces = null,
-            TbTerritory territories = null)
+            TbTerritory territories = null, TbWorldStartGuarantee guarantees = null, TbWorldSettingAxis axes = null, TbWorldStartClear startClear = null)
         {
             Reload();
             _overridden = true;
@@ -208,6 +308,9 @@ namespace GameLogic.Campaign.WorldGen
             _presets = presets ?? _presets;
             _surfaces = surfaces ?? _surfaces;
             _territories = territories ?? _territories;
+            _guarantees = guarantees ?? _guarantees;
+            _axes = axes ?? _axes;
+            _startClear = startClear ?? _startClear;
             Revision++;
         }
 
@@ -216,7 +319,8 @@ namespace GameLogic.Campaign.WorldGen
         private static void RequireLoaded()
         {
             EnsureLoaded();
-            if (_loadError != null || _versions == null || _presets == null || _surfaces == null || _territories == null)
+            if (_loadError != null || _versions == null || _presets == null || _surfaces == null || _territories == null
+                || _startClear == null || _guarantees == null || _axes == null)
             {
                 throw new InvalidOperationException($"世界生成表不可用：{_loadError ?? "未知原因"}");
             }
@@ -236,9 +340,13 @@ namespace GameLogic.Campaign.WorldGen
                 _presets = tables?.TbWorldPreset;
                 _surfaces = tables?.TbSurface;
                 _territories = tables?.TbTerritory;
-                if (_versions == null || _presets == null || _surfaces == null || _territories == null)
+                _startClear = tables?.TbWorldStartClear;
+                _guarantees = tables?.TbWorldStartGuarantee;
+                _axes = tables?.TbWorldSettingAxis;
+                if (_versions == null || _presets == null || _surfaces == null || _territories == null
+                    || _startClear == null || _guarantees == null || _axes == null)
                 {
-                    _loadError = "配置表 fg.TbWorldGenVersion / TbWorldPreset / TbSurface / TbTerritory 不存在";
+                    _loadError = "配置表 fg.TbWorldGenVersion / TbWorldPreset / TbSurface / TbTerritory / TbWorldStartClear / TbWorldStartGuarantee / TbWorldSettingAxis 不存在";
                 }
             }
             catch (Exception ex)

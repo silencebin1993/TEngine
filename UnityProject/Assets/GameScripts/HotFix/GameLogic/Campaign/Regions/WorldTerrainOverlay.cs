@@ -19,6 +19,9 @@ namespace GameLogic.Campaign.Regions
     /// - 区块还没生成：显示“生成中”占位贴图（灰底 + 斜条纹，颜色之外有图案），并计入 <see cref="PendingCount"/>（建造栏显示“正在生成地形”）。
     ///   这里**从不**同步生成区块——生成由 <see cref="WorldChunkStreamer"/> 在工作线程完成。
     /// 每帧开销 O(贴图块数)，与建筑数、世界大小无关；贴图、材质、占位图成对创建 / 销毁。
+    /// FG3-GEN-01（FG-GAP-021）：普通视角（terrainView）的贴图块不再是平面方片，而是 Burst 工作线程生成的**地貌起伏网格**
+    /// （<see cref="JobBuildRelief"/>：悬崖隆起成山脊、水面下陷；可走的地面恒在 0 高度，单位 / 建筑 / 拾取仍按 0 高度平面），
+    /// 不透明、受光照（Standard），贴图照旧按格网数据画（每格 1 像素 + 双线性过滤，没有地格线）。建造模式的叠加层仍是半透明平面方片（地格参考线）。
     /// </summary>
     public sealed class WorldTerrainOverlay : IDisposable
     {
@@ -37,6 +40,14 @@ namespace GameLogic.Campaign.Regions
             public WorldPaintJob Job;
             /// <summary>当前经 MaterialPropertyBlock 设给渲染器的贴图。</summary>
             public Texture Shown;
+            // FG3-GEN-01：地貌起伏网格（只在普通视角）。
+            public MeshFilter Filter;
+            public Mesh Mesh;
+            public int ReliefStamp = int.MinValue;
+            public WorldReliefJob ReliefJob;
+            public bool ReliefBuilt;
+            public float ReliefMin;
+            public float ReliefMax;
         }
 
         private readonly Transform _parent;
@@ -90,6 +101,56 @@ namespace GameLogic.Campaign.Regions
         /// <summary>普通视角地貌（非建造）：每格 1 像素 + 双线性过滤，只有平滑的地貌色，没有格线 / 图案。</summary>
         private readonly bool _terrainView;
         private readonly int _ppc;
+        /// <summary>FG3-GEN-01：普通视角用起伏网格（不透明、受光照）。</summary>
+        private readonly bool _relief;
+        private Mesh _flatMesh;
+        private byte[] _reliefWindow;
+        private int _reliefWindowSize;
+        private const int MaxReliefSchedulesPerFrame = 6;
+
+        /// <summary>已经换成起伏网格的贴图块数（自检）。</summary>
+        public int ReliefTileCount
+        {
+            get
+            {
+                int n = 0;
+                foreach (Tile t in _tiles.Values)
+                {
+                    n += t.ReliefBuilt ? 1 : 0;
+                }
+                return n;
+            }
+        }
+
+        /// <summary>某区块起伏网格的高度范围（米）；还没建好返回 false。</summary>
+        public bool TryGetReliefRange(int cx, int cy, out float min, out float max)
+        {
+            min = max = 0f;
+            if (!_tiles.TryGetValue(HomeGridMap.Key(cx, cy), out Tile t) || !t.ReliefBuilt)
+            {
+                return false;
+            }
+            min = t.ReliefMin;
+            max = t.ReliefMax;
+            return true;
+        }
+
+        /// <summary>某区块的起伏网格（自检读顶点；还没建好返回 null）。</summary>
+        public Mesh ReliefMesh(int cx, int cy) => _tiles.TryGetValue(HomeGridMap.Key(cx, cy), out Tile t) && t.ReliefBuilt ? t.Mesh : null;
+
+        /// <summary>某区块贴图块的世界位置（起伏网格的原点 = 区块左下角格的左下角）。</summary>
+        public bool TryGetTileTransform(int cx, int cy, out Vector3 position)
+        {
+            position = default;
+            if (!_tiles.TryGetValue(HomeGridMap.Key(cx, cy), out Tile t) || t.Go == null)
+            {
+                return false;
+            }
+            position = t.Go.transform.position;
+            return true;
+        }
+
+        public bool IsRelief => _relief;
 
         /// <summary>本叠加层每格几个像素（建造模式 <see cref="PixelsPerCell"/>，普通视角 1）。</summary>
         public int CellPixels => _ppc;
@@ -102,9 +163,43 @@ namespace GameLogic.Campaign.Regions
             _parent = parent;
             _height = height;
             _terrainView = terrainView;
+            _relief = terrainView;
             _ppc = terrainView ? 1 : PixelsPerCell;
-            _material = new Material(Shader.Find("Sprites/Default")) { color = new Color(1f, 1f, 1f, alpha) };
+            if (_relief)
+            {
+                // 不透明、受光照：起伏靠明暗读出来（颜色之外的形状信息，B15）。
+                Shader standard = Shader.Find("Standard");
+                _material = new Material(standard != null ? standard : Shader.Find("Sprites/Default")) { color = Color.white, name = "TerrainRelief" };
+                if (_material.HasProperty("_Glossiness"))
+                {
+                    _material.SetFloat("_Glossiness", 0.08f);
+                }
+            }
+            else
+            {
+                _material = new Material(Shader.Find("Sprites/Default")) { color = new Color(1f, 1f, 1f, alpha) };
+            }
             _placeholder = BuildPlaceholder();
+        }
+
+        /// <summary>占位用的平面网格（区块边长 × 区块边长，原点在区块左下角格的左下角，与起伏网格同一坐标系）。</summary>
+        private Mesh FlatMesh(int size)
+        {
+            if (_flatMesh != null && Math.Abs(_flatMesh.bounds.size.x - size) < 0.01f)
+            {
+                return _flatMesh;
+            }
+            if (_flatMesh != null)
+            {
+                SafeDestroy(_flatMesh);
+            }
+            _flatMesh = new Mesh { name = "TerrainFlat" };
+            _flatMesh.vertices = new[] { new Vector3(0, 0, 0), new Vector3(0, 0, size), new Vector3(size, 0, size), new Vector3(size, 0, 0) };
+            _flatMesh.uv = new[] { new Vector2(0, 0), new Vector2(0, 1), new Vector2(1, 1), new Vector2(1, 0) };
+            _flatMesh.normals = new[] { Vector3.up, Vector3.up, Vector3.up, Vector3.up };
+            _flatMesh.triangles = new[] { 0, 1, 2, 0, 2, 3 };
+            _flatMesh.RecalculateBounds();
+            return _flatMesh;
         }
 
         private static Texture2D BuildPlaceholder()
@@ -205,6 +300,10 @@ namespace GameLogic.Campaign.Regions
                     }
                 }
             }
+            if (_relief)
+            {
+                scheduled += UpdateRelief(map, completeNow);
+            }
             if (scheduled > 0 && !completeNow)
             {
                 WorldGenKernel.Kick();
@@ -214,6 +313,167 @@ namespace GameLogic.Campaign.Regions
                 PendingCount = pending;
                 Revision++;
             }
+        }
+
+        /// <summary>
+        /// FG3-GEN-01：起伏网格——区块内容或邻区块（边上的格角要看隔壁）变化时在工作线程重建；完成的上传到网格。
+        /// 窗口 = 本区块 + 一圈邻格，邻区块没加载时那一圈按可走地面算（格角在 0 高度），邻区块加载后重建一次补齐，不会留下裂缝。
+        /// 主线程每帧 O(贴图块数)；重建只在变化时，O(区块格数) 的拼窗口 + 上传。
+        /// </summary>
+        private int UpdateRelief(HomeGridMap map, bool completeNow)
+        {
+            int size = _chunkSize;
+            int w = size + 2;
+            if (_reliefWindowSize != w || _reliefWindow == null)
+            {
+                _reliefWindowSize = w;
+                _reliefWindow = new byte[w * w];
+            }
+            byte ground = GridContent.TerrainCode("buildable");
+            int scheduled = 0;
+            foreach (Tile t in _tiles.Values)
+            {
+                if (t.ReliefJob != null)
+                {
+                    if (completeNow)
+                    {
+                        t.ReliefJob.Complete();
+                    }
+                    if (t.ReliefJob.IsCompleted)
+                    {
+                        FinishRelief(t);
+                    }
+                    else
+                    {
+                        continue;
+                    }
+                }
+                HomeGridMap.Chunk chunk = map.TryGetLoaded(t.ChunkX, t.ChunkY);
+                if (chunk == null)
+                {
+                    if (t.ReliefBuilt)
+                    {
+                        t.ReliefBuilt = false;
+                        t.ReliefStamp = int.MinValue;
+                        t.Filter.sharedMesh = FlatMesh(size);
+                    }
+                    continue;
+                }
+                int stamp = chunk.ContentRevision * 31;
+                int neighborMask = 0;
+                int bit = 0;
+                for (int dy = -1; dy <= 1; dy++)
+                {
+                    for (int dx = -1; dx <= 1; dx++)
+                    {
+                        if (dx == 0 && dy == 0)
+                        {
+                            continue;
+                        }
+                        HomeGridMap.Chunk n = map.TryGetLoaded(t.ChunkX + dx, t.ChunkY + dy);
+                        if (n != null)
+                        {
+                            neighborMask |= 1 << bit;
+                            stamp = unchecked(stamp * 397 + n.ContentRevision);
+                        }
+                        bit++;
+                    }
+                }
+                stamp = unchecked(stamp * 397 + neighborMask);
+                if (t.ReliefStamp == stamp || (!completeNow && scheduled >= MaxReliefSchedulesPerFrame))
+                {
+                    continue;
+                }
+                for (int j = -1; j <= size; j++)
+                {
+                    for (int i = -1; i <= size; i++)
+                    {
+                        byte code = ground;
+                        if (i >= 0 && j >= 0 && i < size && j < size)
+                        {
+                            code = chunk.Terrain[j * size + i];
+                        }
+                        else
+                        {
+                            int nx = t.ChunkX + (i < 0 ? -1 : i >= size ? 1 : 0);
+                            int ny = t.ChunkY + (j < 0 ? -1 : j >= size ? 1 : 0);
+                            HomeGridMap.Chunk n = map.TryGetLoaded(nx, ny);
+                            if (n != null)
+                            {
+                                int li = i < 0 ? size - 1 : i >= size ? 0 : i;
+                                int lj = j < 0 ? size - 1 : j >= size ? 0 : j;
+                                code = n.Terrain[lj * size + li];
+                            }
+                        }
+                        _reliefWindow[(j + 1) * w + i + 1] = code;
+                    }
+                }
+                ReliefParams q = ReliefParamsFor(ReliefSeed(), size, t.ChunkX * size, t.ChunkY * size);
+                t.ReliefJob = WorldGenKernel.ScheduleRelief(in q, t.ChunkX, t.ChunkY, stamp, _reliefWindow);
+                scheduled++;
+                if (completeNow)
+                {
+                    t.ReliefJob.Complete();
+                    FinishRelief(t);
+                }
+            }
+            return scheduled;
+        }
+
+        /// <summary>起伏网格参数（地形码、高度调参 world.relief.*）。WorldGenQuery.ReliefHeight 用同一份参数，保证查询与画面一致。</summary>
+        public static ReliefParams ReliefParamsFor(uint seed, int size, int baseX, int baseY) => new ReliefParams
+        {
+            ChunkSize = size,
+            BaseX = baseX,
+            BaseY = baseY,
+            Seed = seed,
+            CodeCliff = GridContent.TerrainCode("cliff"),
+            CodeWater = GridContent.TerrainCode("water"),
+            CliffHeight = GridContent.Tuning("world.relief.cliff_height"),
+            CliffNoise = GridContent.Tuning("world.relief.cliff_noise"),
+            WaterDepth = GridContent.Tuning("world.relief.water_depth"),
+            NoiseScaleQ = WorldTerrainSource.Q(GridContent.Tuning("world.relief.noise_scale") * 2f),
+        };
+
+        /// <summary>起伏噪声的种子：取地形来源的表面种子（同一世界同一起伏；只是表现）。</summary>
+        public uint ReliefSeed() => _reliefSeed;
+
+        private uint _reliefSeed;
+
+        /// <summary>设起伏噪声种子（WorldPlanetView 按战役设置；换战役时重建全部网格）。</summary>
+        public void SetReliefSeed(uint seed)
+        {
+            if (_reliefSeed == seed)
+            {
+                return;
+            }
+            _reliefSeed = seed;
+            foreach (Tile t in _tiles.Values)
+            {
+                t.ReliefStamp = int.MinValue;
+            }
+        }
+
+        private void FinishRelief(Tile t)
+        {
+            WorldReliefJob job = t.ReliefJob;
+            t.ReliefJob = null;
+            if (t.Mesh == null)
+            {
+                t.Mesh = new Mesh { name = "TerrainRelief" };
+                t.Mesh.MarkDynamic();
+            }
+            job.Upload(t.Mesh);
+            t.ReliefMin = job.MinHeight;
+            t.ReliefMax = job.MaxHeight;
+            t.ReliefStamp = job.Stamp;
+            job.Release();
+            t.ReliefBuilt = true;
+            if (t.Filter != null)
+            {
+                t.Filter.sharedMesh = t.Mesh;
+            }
+            Revision++;
         }
 
         private void FinishPaint(Tile t)
@@ -284,22 +544,47 @@ namespace GameLogic.Campaign.Regions
             t.Placeholder = true;
             if (t.Go == null)
             {
-                t.Go = GameObject.CreatePrimitive(PrimitiveType.Quad);
-                Collider c = t.Go.GetComponent<Collider>();
-                if (c != null)
+                if (_relief)
                 {
-                    SafeDestroy(c); // 不挡选中射线。
+                    t.Go = new GameObject();
+                    t.Go.transform.SetParent(_parent, false);
+                    t.Filter = t.Go.AddComponent<MeshFilter>();
+                    t.Renderer = t.Go.AddComponent<MeshRenderer>();
+                    t.Renderer.sharedMaterial = _material;
+                    t.Renderer.receiveShadows = true;
+                    t.Renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
                 }
-                t.Go.transform.SetParent(_parent, false);
-                t.Go.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
-                t.Renderer = t.Go.GetComponent<MeshRenderer>();
-                t.Renderer.sharedMaterial = _material;
+                else
+                {
+                    t.Go = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                    Collider c = t.Go.GetComponent<Collider>();
+                    if (c != null)
+                    {
+                        SafeDestroy(c); // 不挡选中射线。
+                    }
+                    t.Go.transform.SetParent(_parent, false);
+                    t.Go.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+                    t.Renderer = t.Go.GetComponent<MeshRenderer>();
+                    t.Renderer.sharedMaterial = _material;
+                }
             }
             t.Go.name = $"TerrainChunk_{cx}_{cy}";
             t.Go.SetActive(true);
-            float half = (_chunkSize - 1) * 0.5f;
-            t.Go.transform.position = new Vector3(cx * _chunkSize + half, _height, cy * _chunkSize + half);
-            t.Go.transform.localScale = new Vector3(_chunkSize, _chunkSize, 1f);
+            if (_relief)
+            {
+                // 起伏网格的原点 = 区块左下角格的左下角（格心在整数坐标，格角在 ±0.5）。
+                t.Go.transform.position = new Vector3(cx * _chunkSize - 0.5f, _height, cy * _chunkSize - 0.5f);
+                t.Go.transform.localScale = Vector3.one;
+                t.Filter.sharedMesh = FlatMesh(_chunkSize);
+                t.ReliefBuilt = false;
+                t.ReliefStamp = int.MinValue;
+            }
+            else
+            {
+                float half = (_chunkSize - 1) * 0.5f;
+                t.Go.transform.position = new Vector3(cx * _chunkSize + half, _height, cy * _chunkSize + half);
+                t.Go.transform.localScale = new Vector3(_chunkSize, _chunkSize, 1f);
+            }
             SetTexture(t, _placeholder);
             return t;
         }
@@ -318,6 +603,20 @@ namespace GameLogic.Campaign.Regions
                 }
                 t.Job = null;
             }
+            if (t.ReliefJob != null)
+            {
+                if (t.ReliefJob.IsCompleted)
+                {
+                    t.ReliefJob.Release();
+                }
+                else
+                {
+                    _retiringRelief.Add(t.ReliefJob);
+                }
+                t.ReliefJob = null;
+            }
+            t.ReliefBuilt = false;
+            t.ReliefStamp = int.MinValue;
             if (t.Go != null)
             {
                 t.Go.SetActive(false);
@@ -427,9 +726,20 @@ namespace GameLogic.Campaign.Regions
             return _tiles.TryGetValue(HomeGridMap.Key(cx, cy), out Tile t) ? t.Shown : null;
         }
 
+        private readonly List<WorldReliefJob> _retiringRelief = new List<WorldReliefJob>();
+
         /// <summary>释放已经画完的退役贴图任务；<paramref name="all"/>=true 时（关停 / 自检）等全部完成后释放。</summary>
         private void ReleaseRetired(bool all)
         {
+            for (int i = _retiringRelief.Count - 1; i >= 0; i--)
+            {
+                WorldReliefJob job = _retiringRelief[i];
+                if (all || job.IsCompleted)
+                {
+                    job.Release();
+                    _retiringRelief.RemoveAt(i);
+                }
+            }
             for (int i = _retiring.Count - 1; i >= 0; i--)
             {
                 WorldPaintJob job = _retiring[i];
@@ -466,6 +776,11 @@ namespace GameLogic.Campaign.Regions
             {
                 SafeDestroy(_placeholder);
             }
+            if (_flatMesh != null)
+            {
+                SafeDestroy(_flatMesh);
+                _flatMesh = null;
+            }
         }
 
         /// <summary>运行时用 Destroy；编辑模式（自检）用 DestroyImmediate，避免“edit mode 不能 Destroy”的报错。</summary>
@@ -489,6 +804,13 @@ namespace GameLogic.Campaign.Regions
         {
             t.Job?.Release();
             t.Job = null;
+            t.ReliefJob?.Release();
+            t.ReliefJob = null;
+            if (t.Mesh != null)
+            {
+                SafeDestroy(t.Mesh);
+                t.Mesh = null;
+            }
             if (t.Texture != null)
             {
                 SafeDestroy(t.Texture);

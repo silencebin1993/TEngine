@@ -110,9 +110,11 @@ namespace GameLogic.UI.Objective
                 return;
             }
 
-            // FG0-UX-01：FG13 第 5 节把“任务日志”（L）与“地图”（M）分成两个键；Demo 的任务日志窗口同时就是战役地图，
-            // 两个键都打开它（世界地图由后续 Story 单独做时再把 OpenMap 改接新窗口）。
-            if (InputRouter.ConsumeGlobalAction(GameActionId.ToggleMissionLog) || InputRouter.ConsumeGlobalAction(GameActionId.OpenMap))
+            // FG0-UX-01：FG13 第 5 节把“任务日志”（L）与“地图”（M）分成两个键。FG3-GEN-01 起地图键打开战略地图（StrategicMapUIToolkit），
+            // 这里只认任务日志键；例外：旧版本原型地形的存档（生成器版本 0）没有战略地图，地图键照旧打开任务日志（兼战役地图），
+            // 不让按键静默无反应（FG00 B06）。战略地图那边对这类存档不读地图键，两边不会抢。
+            if (InputRouter.ConsumeGlobalAction(GameActionId.ToggleMissionLog)
+                || (!StrategicMapUIToolkit.HasWorldMap(state) && InputRouter.ConsumeGlobalAction(GameActionId.OpenMap)))
             {
                 SetOpen(!_open);
             }

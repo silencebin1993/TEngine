@@ -86,9 +86,19 @@ namespace GameLogic.EditorTools.JourneyBots
             return StepOutcome.Done($"主菜单出现，点“新建”（{c.StepElapsed:F0} 秒）");
         }
 
-        /// <summary>存档槽列表点空槽（有覆盖确认就点“是”），直到进入归还谷地。</summary>
+        /// <summary>
+        /// FG3-GEN-01：旅程新建战役时在新游戏设置里选的世界设置（分项代码）；null = 不改（全部标准档）。
+        /// 例如 FGT-GEN-009 的极端设置旅程设为 R0O2P2D0S0（资源低 + 据点高 + 污染高 + 领地近）。
+        /// </summary>
+        public static string WorldSettingsForNewGame { get; set; }
+
+        /// <summary>存档槽列表点空槽（有覆盖确认就点“是”）；新游戏设置出现时按 <see cref="WorldSettingsForNewGame"/> 点分项按钮、点“开始”；直到进入归还谷地。</summary>
         public static StepOutcome TickNewGame(JourneyContext c)
         {
+            if (UI.Kit.NewGamePanelUIToolkit.IsOpen)
+            {
+                return TickNewGameSetup(c);
+            }
             if (GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive)
             {
                 if (c.StepElapsed < 3)
@@ -115,8 +125,48 @@ namespace GameLogic.EditorTools.JourneyBots
             return StepOutcome.Wait;
         }
 
+        /// <summary>新游戏设置面板（UI Toolkit，真实点击）：按旅程要求点分项按钮，再点“开始”。</summary>
+        private static StepOutcome TickNewGameSetup(JourneyContext c)
+        {
+            if (c.GetInt("setupDone") == 1)
+            {
+                return StepOutcome.Wait;
+            }
+            // 面板刚显示的那一帧还没排版（控件没有几何，点不到）：像玩家一样等它出来再点。
+            long seen = c.GetLong("setupSeenMs");
+            if (seen <= 0)
+            {
+                c.SetLong("setupSeenMs", Math.Max(1, (long)(c.StepElapsed * 1000)));
+                return StepOutcome.Wait;
+            }
+            if (c.StepElapsed * 1000 - seen < 800)
+            {
+                return StepOutcome.Wait;
+            }
+            string want = WorldSettingsForNewGame;
+            if (!string.IsNullOrEmpty(want) && want != WorldGenContent.DefaultPresetId)
+            {
+                for (int a = 0; a < WorldSettings.Axes.Length; a++)
+                {
+                    int level = want[a * 2 + 1] - '0';
+                    if (!JourneyInput.ClickUitk("[NewGameHost]", $"NewGameLevel_{WorldSettings.Axes[a]}_{level}"))
+                    {
+                        return StepOutcome.Retry($"新游戏设置里点不到分项按钮 {WorldSettings.Axes[a]} 第 {level} 档：" + JourneyInput.LastUiFailure);
+                    }
+                }
+                c.Log($"新游戏设置：点分项按钮选 {want}（{UI.Kit.NewGamePanelUIToolkit.Instance?.CurrentSettings().DisplayName()}）");
+            }
+            if (!JourneyInput.ClickUitk("[NewGameHost]", "NewGameStart"))
+            {
+                return StepOutcome.Retry("新游戏设置里点不到“开始”：" + JourneyInput.LastUiFailure);
+            }
+            c.SetInt("setupDone", 1);
+            c.Log("新游戏设置出现（种子 = 固定测试种子），点“开始”");
+            return StepOutcome.Wait;
+        }
+
         /// <summary>生成结果与该种子的基准一致：种子 / 生成器版本 / 世界设置经主菜单“新建”原样进了存档；区块内容哈希等于
-        /// FgWorldGenSelfCheck 的回归基准；规划层与按种子独立重算的一致。</summary>
+        /// FgWorldGenSelfCheck 的回归基准（标准设置时）并与按（种子, 版本, 设置）独立重算的世界逐块相同；规划层完整指纹一致。</summary>
         public static StepOutcome TickSeed(JourneyContext c, int seed)
         {
             if (c.StepElapsed < 1)
@@ -129,8 +179,9 @@ namespace GameLogic.EditorTools.JourneyBots
                 return StepOutcome.Fail("没有活动战役");
             }
             int version = s.World.GeneratorVersion;
+            string wantSettings = string.IsNullOrEmpty(WorldSettingsForNewGame) ? WorldGenContent.DefaultPresetId : WorldSettingsForNewGame;
             if (s.RandomSeed != seed || s.World.WorldSeed != seed || version != WorldGenVersions.Current
-                || s.World.WorldSettingsId != WorldGenContent.DefaultPresetId)
+                || s.World.WorldSettingsId != wantSettings)
             {
                 return StepOutcome.Fail($"新档的种子 / 生成器版本 / 世界设置不对：战役种子 {s.RandomSeed}、世界种子 {s.World.WorldSeed}、" +
                                         $"版本 v{version}（当前 v{WorldGenVersions.Current}）、世界设置 {s.World.WorldSettingsId}");
@@ -141,9 +192,19 @@ namespace GameLogic.EditorTools.JourneyBots
                 return StepOutcome.Fail("家园格网没有地形源");
             }
             var checkedChunks = new List<string>();
+            GridCell core = HomeGridService.CorePivot(s);
+            WorldGenContext reference = WorldGenContext.Build(seed, version, WorldSettings.Resolve(version, wantSettings), core, GridContent.TuningInt("grid.chunk_size"));
+            foreach ((int cx, int cy) in new[] { (0, 0), (-1, -1), (2, -3), (-4, 3) })
+            {
+                ulong hl = HashOf(live, cx, cy);
+                if (hl != HashOf(reference.Source, cx, cy))
+                {
+                    return StepOutcome.Fail($"区块 ({cx},{cy}) 与按（种子, v{version}, {wantSettings}）独立重算的世界不同");
+                }
+            }
             foreach (var b in FgWorldGenSelfCheck.Baseline)
             {
-                if (b.seed != seed || b.version != version || b.surface != WorldGenContent.EarthSurfaceId)
+                if (b.seed != seed || b.version != version || b.surface != WorldGenContent.EarthSurfaceId || wantSettings != WorldGenContent.DefaultPresetId)
                 {
                     continue;
                 }
@@ -154,18 +215,22 @@ namespace GameLogic.EditorTools.JourneyBots
                 }
                 checkedChunks.Add($"({b.cx},{b.cy})={h:X16}");
             }
-            if (checkedChunks.Count == 0)
+            if (checkedChunks.Count == 0 && wantSettings == WorldGenContent.DefaultPresetId)
             {
                 return StepOutcome.Fail($"FgWorldGenSelfCheck.Baseline 里没有种子 {seed}、v{version} 的地球表面基准（换测试种子时要同时补基准）");
             }
-            GridCell core = HomeGridService.CorePivot(s);
-            string reference = WorldPlan.Compute(seed, WorldGenContent.Version(version), WorldGenContent.Preset(version, WorldGenContent.DefaultPresetId), core.X, core.Y).Fingerprint();
-            string actual = WorldGenService.PlanFor(s)?.Fingerprint();
-            if (!string.Equals(reference, actual, StringComparison.Ordinal))
+            string actual = WorldGenService.PlanFor(s)?.FullFingerprint();
+            if (!string.Equals(reference.Plan.FullFingerprint(), actual, StringComparison.Ordinal))
             {
-                return StepOutcome.Fail("规划层指纹与按种子独立重算的不一致");
+                return StepOutcome.Fail("规划层完整指纹（领地 / 河流 / 矿带 / 起始区保证点）与按种子独立重算的不一致");
             }
-            return StepOutcome.Done($"种子 {seed}、v{version}、世界设置 {s.World.WorldSettingsId}；区块哈希与基准一致 {string.Join(" ", checkedChunks)}；规划层指纹一致");
+            StartGuaranteeReport rep = WorldGenService.PlanFor(s)?.StartReport;
+            if (rep != null && !rep.AllSatisfied)
+            {
+                return StepOutcome.Fail("起始区保证不满足：" + string.Join("；", rep.Failures));
+            }
+            return StepOutcome.Done($"种子 {seed}、v{version}、世界设置 {s.World.WorldSettingsId}；与独立重算的世界逐块相同；区块哈希与基准一致 {string.Join(" ", checkedChunks)}；" +
+                                    $"规划层完整指纹一致；起始区四级保证满足（局部重生成 {rep?.StampCount ?? 0} 项）");
         }
 
         private static ulong HashOf(IGridTerrainSource src, int cx, int cy)
@@ -245,6 +310,7 @@ namespace GameLogic.EditorTools.JourneyBots
             JourneyInput.Release();
             CampaignRandomService.SeedOverrideForTests = null;
             CampaignSaveService.SaveDirectoryOverrideForTests = null;
+            WorldSettingsForNewGame = null;
             string saves = c.Get("saves");
             try
             {

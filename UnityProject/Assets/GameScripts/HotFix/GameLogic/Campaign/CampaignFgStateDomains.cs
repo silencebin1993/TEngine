@@ -29,6 +29,24 @@ namespace GameLogic.Campaign
         public string WorldSettingsId = "default";
         /// <summary>被修改过的区块差异（FGR-GEN-060）。未修改的区块不进存档。</summary>
         public ChunkDiffRecord[] ChunkDiffs = Array.Empty<ChunkDiffRecord>();
+        /// <summary>FG3-GEN-01：家园区的侦察巢已经登记成据点（新战役一次，幂等；之后据点状态在 RaidState 里）。</summary>
+        public bool HomeOutpostsSeeded;
+        /// <summary>FG3-GEN-01（FG17 第 4、6 节）：玩家在战略地图上加的标记与备注。唯一写入口 <c>WorldGen.WorldMapMarkers</c>。</summary>
+        public MapMarkerRecord[] MapMarkers = Array.Empty<MapMarkerRecord>();
+        public int NextMapMarkerSerial = 1;
+    }
+
+    /// <summary>FG3-GEN-01：战略地图上的一个玩家标记（表面 + 格网坐标 + 备注）。</summary>
+    [Serializable]
+    public sealed class MapMarkerRecord
+    {
+        public string MarkerId;
+        public string SurfaceId;
+        public int CellX;
+        public int CellY;
+        /// <summary>序号（显示“标记 N”）。</summary>
+        public int Serial;
+        public string Note = string.Empty;
     }
 
     /// <summary>一个被玩家或事件修改过的区块。<see cref="DiffPayload"/> 的编码由 FG0-ARCH-05 定义。</summary>
@@ -247,6 +265,10 @@ namespace GameLogic.Campaign
         public string LastWakeReason = string.Empty;
         /// <summary>始终完整模拟、不休眠（“一直在模拟”的对照组；也留给以后不能休眠的特殊据点）。</summary>
         public bool AlwaysSimulate;
+        /// <summary>FG3-GEN-01：据点种类（scout_nest = 家园区侦察巢；空 = FG0-ARCH-06 的测试捷径据点）。</summary>
+        public string Kind = string.Empty;
+        /// <summary>FG3-GEN-01：等级（侦察巢离核心越远越高，FGR-GEN-032）；0 = 未分级。</summary>
+        public int Tier;
     }
 
     /// <summary>
@@ -623,6 +645,7 @@ namespace GameLogic.Campaign
             }
             s.World ??= new WorldGenState();
             s.World.ChunkDiffs ??= Array.Empty<ChunkDiffRecord>();
+            s.World.MapMarkers ??= Array.Empty<MapMarkerRecord>();
             s.Progress ??= new CampaignProgressState();
             s.Clock ??= new GameClockState();
             s.Grid ??= new GridState();

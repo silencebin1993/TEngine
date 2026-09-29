@@ -25,8 +25,16 @@ namespace GameLogic.Campaign.WorldGen
     public static class WorldGenService
     {
         private static CampaignState _planState;
-        private static WorldPlan _plan;
-        private static string _planKey;
+        private static WorldGenContext _context;
+        // 生成身份缓存键（逐字段比较：小地图 / 地图底图每帧都会调 ContextFor，热路径上不拼字符串、不分配）。
+        private static bool _hasPlanKey;
+        private static int _keySeed;
+        private static int _keyVersion;
+        private static string _keySettings;
+        private static int _keyCoreX;
+        private static int _keyCoreY;
+        private static int _keyWorldRevision;
+        private static int _keyGridRevision;
 
         private static CampaignState _interiorState;
         private static readonly Dictionary<string, HomeGridMap> InteriorMaps = new Dictionary<string, HomeGridMap>(StringComparer.Ordinal);
@@ -49,52 +57,112 @@ namespace GameLogic.Campaign.WorldGen
             }
         }
 
+        /// <summary>
+        /// FG3-GEN-01（FGR-GEN-001、070、071）：新游戏界面选好的世界——种子、世界设置、生成器版本（导入旧版本的分享短码时 = 短码里的版本，
+        /// 保证世界完全相同）。在还没生成过任何地形的新战役上调用（CampaignState.CreateNew 之后、第一次进家园之前）。
+        /// </summary>
+        public static void ApplyNewGameWorld(CampaignState state, int seed, WorldSettings settings)
+        {
+            CampaignFgStateDomains.EnsureAll(state);
+            if (settings == null)
+            {
+                throw new ArgumentNullException(nameof(settings));
+            }
+            if (!WorldGenVersions.IsSupported(settings.Version) || settings.Version < 1)
+            {
+                throw new ArgumentOutOfRangeException(nameof(settings), $"生成器 v{settings.Version} 不能用于新战役");
+            }
+            state.RandomSeed = seed;
+            state.World.WorldSeed = seed;
+            state.World.GeneratorVersion = settings.Version;
+            state.World.WorldSettingsId = settings.Id;
+            Invalidate();
+        }
+
+        /// <summary>战役的世界设置（按存档记录的版本解析）；解析不了时（只可能发生在从没生成过地形的战役上）回退 default 并写回。</summary>
+        public static WorldSettings SettingsFor(CampaignState state)
+        {
+            WorldGenState w = state.World;
+            if (WorldSettings.TryResolve(w.GeneratorVersion < 1 ? 1 : w.GeneratorVersion, w.WorldSettingsId, out WorldSettings s, out string error))
+            {
+                return s;
+            }
+            Log.Warning($"[WorldGenService] {error}，改用 default（这份战役还没有生成过地形）。");
+            w.WorldSettingsId = WorldGenContent.DefaultPresetId;
+            return WorldSettings.Resolve(w.GeneratorVersion < 1 ? 1 : w.GeneratorVersion, WorldGenContent.DefaultPresetId);
+        }
+
+        /// <summary>分享短码（FGR-GEN-071）：种子 + 世界设置 + 生成器版本。旧版本原型地形没有短码（返回 null）。</summary>
+        public static string ShareCode(CampaignState state)
+        {
+            if (state?.World == null || state.World.GeneratorVersion < 1)
+            {
+                return null;
+            }
+            return WorldSettings.EncodeShareCode(state.World.WorldSeed, SettingsFor(state));
+        }
+
         /// <summary>这份战役的格网是否用世界生成器（而不是旧版本原型地形）。</summary>
         public static bool UsesWorldGen(CampaignState state) =>
             state?.Grid != null && state.Grid.TerrainSourceId == WorldTerrainSource.Id;
 
-        /// <summary>取战役的世界设置预设；查不到时（只可能发生在从没生成过地形的战役上）回退 default 并写回。</summary>
-        public static WorldPreset PresetFor(CampaignState state)
-        {
-            WorldGenState w = state.World;
-            // 预设数值随生成器版本走：按存档记录的版本的集合取（FGR-GEN-061），不是按当前表的同名行。
-            if (WorldGenContent.TryGetPreset(w.GeneratorVersion, w.WorldSettingsId, out WorldPreset p))
-            {
-                return p;
-            }
-            Log.Warning($"[WorldGenService] 生成器 v{w.GeneratorVersion} 没有世界设置 {w.WorldSettingsId ?? "null"}，改用 default（这份战役还没有生成过地形）。");
-            w.WorldSettingsId = WorldGenContent.DefaultPresetId;
-            return WorldGenContent.Preset(w.GeneratorVersion, WorldGenContent.DefaultPresetId);
-        }
+        /// <summary>v1 战役的世界设置预设（v2 起是分项设置，返回 null——用 <see cref="SettingsFor"/>）。</summary>
+        public static WorldPreset PresetFor(CampaignState state) => SettingsFor(state).Preset;
 
         // ── 规划层 ─────────────────────────────────────────────────────────────
 
         /// <summary>战役的区域规划层（按种子、存档记录的生成器版本与世界设置计算、缓存；旧版本原型地形没有规划层，返回 null）。</summary>
-        public static WorldPlan PlanFor(CampaignState state)
+        public static WorldPlan PlanFor(CampaignState state) => ContextFor(state)?.Plan;
+
+        /// <summary>
+        /// FG3-GEN-01：战役的世界生成上下文（规划层 + 起始区保证 + 地形来源 + 点位），按（种子, 版本, 设置, 核心, 表版本）缓存；
+        /// 读档时重算（规划层不存档，FGR-GEN-020）。旧版本原型地形返回 null。
+        /// </summary>
+        public static WorldGenContext ContextFor(CampaignState state)
         {
             if (state?.World == null || state.World.GeneratorVersion < 1)
             {
                 return null;
             }
             GridCell core = HomeGridService.CorePivot(state);
-            string key = string.Concat(state.World.WorldSeed.ToString(CultureInfo.InvariantCulture), "|", state.World.GeneratorVersion.ToString(CultureInfo.InvariantCulture),
-                "|", state.World.WorldSettingsId, "|", core.ToString(), "|", WorldGenContent.Revision.ToString(CultureInfo.InvariantCulture),
-                "|", GridContent.Revision.ToString(CultureInfo.InvariantCulture));
-            if (!ReferenceEquals(state, _planState) || _plan == null || key != _planKey)
+            WorldGenState w = state.World;
+            bool same = _hasPlanKey && ReferenceEquals(state, _planState) && _context != null
+                        && _keySeed == w.WorldSeed && _keyVersion == w.GeneratorVersion && string.Equals(_keySettings, w.WorldSettingsId, StringComparison.Ordinal)
+                        && _keyCoreX == core.X && _keyCoreY == core.Y && _keyWorldRevision == WorldGenContent.Revision && _keyGridRevision == GridContent.Revision;
+            if (!same)
             {
                 _planState = state;
-                _planKey = key;
-                _plan = WorldPlan.Compute(state.World.WorldSeed, WorldGenContent.Version(state.World.GeneratorVersion), PresetFor(state), core.X, core.Y);
-                foreach (string line in _plan.Log)
+                _hasPlanKey = true;
+                _keySeed = w.WorldSeed;
+                _keyVersion = w.GeneratorVersion;
+                _keySettings = w.WorldSettingsId;
+                _keyCoreX = core.X;
+                _keyCoreY = core.Y;
+                _keyWorldRevision = WorldGenContent.Revision;
+                _keyGridRevision = GridContent.Revision;
+                _context = WorldGenContext.Build(state.World.WorldSeed, state.World.GeneratorVersion, SettingsFor(state), core, GridContent.TuningInt("grid.chunk_size"));
+                WorldPlan plan = _context.Plan;
+                foreach (string line in plan.Log)
                 {
                     Log.Info($"[WorldPlan] 种子 {state.World.WorldSeed}：{line}");
                 }
-                foreach (string line in _plan.Failures)
+                foreach (string line in plan.Failures)
                 {
                     Log.Error($"[WorldPlan] 种子 {state.World.WorldSeed}：{line}");
                 }
+                if (plan.StartReport != null)
+                {
+                    foreach (string line in plan.StartReport.Log)
+                    {
+                        Log.Info($"[StartZone] 种子 {state.World.WorldSeed}：{line}");
+                    }
+                    foreach (string line in plan.StartReport.Failures)
+                    {
+                        Log.Error($"[StartZone] 种子 {state.World.WorldSeed}：{line}");
+                    }
+                }
             }
-            return _plan;
+            return _context;
         }
 
         // ── 地形来源与表面 ─────────────────────────────────────────────────────────
@@ -104,8 +172,12 @@ namespace GameLogic.Campaign.WorldGen
         {
             Surface surface = WorldGenContent.Surface(surfaceId);
             bool interior = WorldGenContent.IsInterior(surface);
+            if (!interior && surfaceId == WorldGenContent.EarthSurfaceId)
+            {
+                return ContextFor(state).Source;
+            }
             GridCell core = interior ? new GridCell(0, 0) : HomeGridService.CorePivot(state);
-            return new WorldTerrainSource(state.World.WorldSeed, state.World.GeneratorVersion, PresetFor(state), surface, core,
+            return new WorldTerrainSource(state.World.WorldSeed, state.World.GeneratorVersion, SettingsFor(state), surface, core,
                 GridContent.TuningInt("grid.chunk_size"), interior ? null : PlanFor(state));
         }
 
@@ -178,9 +250,10 @@ namespace GameLogic.Campaign.WorldGen
             InteriorMaps.Clear();
             InteriorKeys.Clear();
             _interiorState = null;
-            _plan = null;
+            _context = null;
             _planState = null;
-            _planKey = null;
+            _hasPlanKey = false;
+            _keySettings = null;
         }
 
         // ── 存档（FGR-GEN-060～062）─────────────────────────────────────────────────
@@ -267,7 +340,7 @@ namespace GameLogic.Campaign.WorldGen
                 message = $"生成器版本表缺少 v{w.GeneratorVersion}，无法重建这份存档的地形。";
                 return false;
             }
-            if (UsesWorldGen(state) && !WorldGenContent.TryGetPreset(w.GeneratorVersion, w.WorldSettingsId, out _))
+            if (UsesWorldGen(state) && !WorldSettings.TryResolve(w.GeneratorVersion, w.WorldSettingsId, out _, out _))
             {
                 reason = SaveFailureReason.Payload;
                 message = $"存档的世界设置 {w.WorldSettingsId ?? "null"} 在生成器 v{w.GeneratorVersion} 的世界设置集合里不存在，无法重建地形。";
@@ -323,7 +396,40 @@ namespace GameLogic.Campaign.WorldGen
             {
                 return GameText.Get("world.legacy_terrain");
             }
-            return WorldGenContent.TryGetPreset(generatorVersion, presetId, out WorldPreset p) ? GameText.Get(p.NameKey) : presetId ?? string.Empty;
+            return WorldSettings.TryResolve(generatorVersion, presetId, out WorldSettings s, out _)
+                ? s.DisplayName()
+                : GameText.Format("world.setting.unknown", presetId ?? string.Empty);
+        }
+
+        // ── 家园区侦察巢（FGR-GEN-030、034；DEBT-FG0ARCH06-01 的家园区部分）─────────────────────
+
+        /// <summary>
+        /// 新战役：把生成器分布在家园区里的侦察巢登记成敌方据点（<see cref="WorldSim.WorldOutpostSystem"/>，据点 ID = 点位 ID，等级越高驻军越多）。
+        /// 幂等（WorldGenState.HomeOutpostsSeeded）；v1 世界没有点位分布，什么也不做。据点从此是存档里的正式状态（休眠 / 唤醒 / 补算照常）。
+        /// </summary>
+        public static int SeedHomeZoneOutposts(CampaignState state)
+        {
+            if (state?.World == null || state.World.HomeOutpostsSeeded || !UsesWorldGen(state))
+            {
+                return 0;
+            }
+            state.World.HomeOutpostsSeeded = true;
+            WorldGenContext ctx = ContextFor(state);
+            if (ctx == null || !WorldFeatures.Enabled(ctx.Row))
+            {
+                return 0;
+            }
+            int n = 0;
+            foreach (WorldFeature f in WorldFeatures.HomeZoneNests(ctx))
+            {
+                if (WorldSim.WorldOutpostSystem.Find(state, f.Id) != null)
+                {
+                    continue;
+                }
+                WorldSim.WorldOutpostSystem.SpawnScoutNest(state, f);
+                n++;
+            }
+            return n;
         }
     }
 }

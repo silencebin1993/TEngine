@@ -34,6 +34,7 @@ namespace GameLogic.Campaign.WorldSim
         private static Material _arrivedMaterial;
         private static Material _outpostMaterial;
         private static Material _patrolMaterial;
+        private static Material _relicMaterial;
         private static bool _placeholderLogged;
 
         /// <summary>FG0-ARCH-06：当前画出来的据点 / 巡逻标记数（自检：迷雾外不画、休眠的也按“此刻”位置画）。</summary>
@@ -93,18 +94,19 @@ namespace GameLogic.Campaign.WorldSim
             EnsureRoot();
             HomeGridService.Streamer(state).Tick(focus);
 
-            HomeValleyController home = WorldSimulation.Home;
-            bool buildOverlay = home != null && home.IsLoaded && home.BuildMode.IsOpen;
             if (_terrain != null)
             {
-                if (_terrainRoot.activeSelf == buildOverlay)
+                // FG3-GEN-01（FG-GAP-021）：地貌是不透明的起伏网格，建造模式也保留（建造叠加层是它上面的半透明地格参考线），
+                // 不再让位——否则一开建造模式山脊就被压平。
+                if (!_terrainRoot.activeSelf)
                 {
-                    _terrainRoot.SetActive(!buildOverlay);
+                    _terrainRoot.SetActive(true);
                 }
-                if (!buildOverlay)
+                if (HomeGridService.MapFor(state).TerrainSource is WorldGen.WorldTerrainSource src)
                 {
-                    _terrain.Update(state, focus);
+                    _terrain.SetReliefSeed(src.Params.SurfaceSeed);
                 }
+                _terrain.Update(state, focus);
             }
             TickMarkers(state, focus);
             // FG0-ARCH-02：传送带（近景逐物品实例化 / 远景流动贴图），每帧一次 O(1) 调用，逐物品工作在 AOT。
@@ -156,6 +158,7 @@ namespace GameLogic.Campaign.WorldSim
                 RendererScratch.Clear();
             }
             TickOutpostMarkers(state, focus, radius);
+            TickRelicMarkers(state, focus, radius);
             GoneScratch.Clear();
             foreach (KeyValuePair<string, GameObject> kv in Markers)
             {
@@ -201,6 +204,88 @@ namespace GameLogic.Campaign.WorldSim
                 PlaceOutpostMarker(p.PatrolId, at.x, at.y, focus, radius, map, isPatrol: true);
             }
         }
+
+        private static readonly List<WorldGen.WorldFeature> FeatureScratch = new List<WorldGen.WorldFeature>(16);
+
+        /// <summary>FG3-GEN-01：已探索区域里、镜头附近的遗迹点（生成器点位，纯函数查询，不改状态）。占位外形：细高方尖碑（B22）。</summary>
+        private static readonly List<string> RelicIds = new List<string>(8);
+        private static GridCell _relicFocus = new GridCell(int.MinValue, int.MinValue);
+        private static int _relicExploredRevision = -1;
+        private static CampaignState _relicState;
+
+        private static void TickRelicMarkers(CampaignState state, GridCell focus, float radius)
+        {
+            HomeGridMap map = HomeGridService.BoundMap(state);
+            if (map == null)
+            {
+                VisibleRelicMarkerCount = 0;
+                return;
+            }
+            // 只在镜头移动超过 8 格、探索范围变化或换战役时重查（点位查询按分布格缓存；这里连查询本身也不每帧做）。
+            if (ReferenceEquals(state, _relicState) && map.ExploredRevision == _relicExploredRevision
+                && Math.Abs(focus.X - _relicFocus.X) < 8 && Math.Abs(focus.Y - _relicFocus.Y) < 8)
+            {
+                foreach (string id in RelicIds)
+                {
+                    LiveScratch.Add(id);
+                }
+                return;
+            }
+            _relicState = state;
+            _relicFocus = focus;
+            _relicExploredRevision = map.ExploredRevision;
+            RelicIds.Clear();
+            VisibleRelicMarkerCount = 0;
+            if (WorldGen.WorldGenService.ContextFor(state) == null)
+            {
+                return;
+            }
+            FeatureScratch.Clear();
+            int r = (int)radius;
+            WorldGen.WorldGenQuery.FeaturesIn(state, focus.X - r, focus.Y - r, focus.X + r, focus.Y + r, FeatureScratch);
+            foreach (WorldGen.WorldFeature f in FeatureScratch)
+            {
+                if (f.Kind != WorldGen.WorldFeatureKind.Relic)
+                {
+                    continue;
+                }
+                LiveScratch.Add(f.Id);
+                RelicIds.Add(f.Id);
+                Markers.TryGetValue(f.Id, out GameObject go);
+                bool explored = map.IsExploredNoLoad(new GridCell(f.X, f.Y));
+                if (!explored)
+                {
+                    if (go != null && go.activeSelf)
+                    {
+                        go.SetActive(false);
+                    }
+                    continue;
+                }
+                if (go == null)
+                {
+                    go = new GameObject("RelicMarker_" + f.Id);
+                    go.transform.SetParent(_root.transform, false);
+                    GameObject body = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    UnityObjects.Release(body.GetComponent<Collider>());
+                    body.name = "Obelisk";
+                    body.transform.SetParent(go.transform, false);
+                    body.transform.localPosition = new Vector3(0f, 2f, 0f);
+                    body.transform.localRotation = Quaternion.Euler(0f, 45f, 0f);
+                    body.transform.localScale = new Vector3(0.9f, 4f, 0.9f);
+                    body.GetComponent<Renderer>().sharedMaterial = _relicMaterial;
+                    Markers[f.Id] = go;
+                }
+                if (!go.activeSelf)
+                {
+                    go.SetActive(true);
+                }
+                go.transform.position = new Vector3(f.X, 0f, f.Y);
+                VisibleRelicMarkerCount++;
+            }
+        }
+
+        /// <summary>FG3-GEN-01：当前画出来的遗迹点标记数（自检：迷雾外不画）。</summary>
+        public static int VisibleRelicMarkerCount { get; private set; }
 
         private static void PlaceOutpostMarker(string id, float x, float y, GridCell focus, float radius, HomeGridMap map, bool isPatrol)
         {
@@ -290,6 +375,7 @@ namespace GameLogic.Campaign.WorldSim
             _arrivedMaterial = new Material(shader) { color = new Color(1f, 0.55f, 0.1f) };
             _outpostMaterial = new Material(shader) { color = new Color(0.45f, 0.12f, 0.35f) };
             _patrolMaterial = new Material(shader) { color = new Color(0.72f, 0.22f, 0.55f) };
+            _relicMaterial = new Material(shader) { color = new Color(0.86f, 0.78f, 0.45f) };
         }
 
         /// <summary>离开世界：销毁全部表现对象与材质、释放贴图任务（成对释放）。</summary>
@@ -324,6 +410,14 @@ namespace GameLogic.Campaign.WorldSim
                 UnityObjects.Release(_patrolMaterial);
                 _patrolMaterial = null;
             }
+            if (_relicMaterial != null)
+            {
+                UnityObjects.Release(_relicMaterial);
+                _relicMaterial = null;
+            }
+            VisibleRelicMarkerCount = 0;
+            RelicIds.Clear();
+            _relicState = null;
             VisibleOutpostMarkerCount = 0;
         }
     }
