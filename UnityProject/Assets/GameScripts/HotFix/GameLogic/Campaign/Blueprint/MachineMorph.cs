@@ -78,14 +78,15 @@ namespace GameLogic.Campaign.Blueprint
             }
         }
 
-        /// <summary>单个固件对应的形变位（引信类、未知类别、不是固件时为 None）。</summary>
+        /// <summary>单个固件对应的形变位（引信类、未知类别、不是固件时为 None）。FG2-FW-01：读固件表的“形变状态”列（FGR-FW-001），
+        /// check_luban R24 保证它与类别对应（引信 = none、限制器 = limiter、流体 = fluid、电磁 = em）。</summary>
         public static MorphMask BitOf(string firmwareId)
         {
-            switch (FirmwareKinds.CategoryOf(firmwareId))
+            switch (FirmwareKinds.MorphOf(firmwareId))
             {
-                case FirmwareCategory.Limiter: return MorphMask.Limiter;
-                case FirmwareCategory.Fluid: return MorphMask.Fluid;
-                case FirmwareCategory.Electromagnetic: return MorphMask.Electromagnetic;
+                case "limiter": return MorphMask.Limiter;
+                case "fluid": return MorphMask.Fluid;
+                case "em": return MorphMask.Electromagnetic;
                 default: return MorphMask.None;
             }
         }

@@ -91,6 +91,16 @@ namespace GameLogic.Campaign
             CampaignFgStateDomains.EnsureAll(state);
             PrimitiveChipRecord[] chips = state.PrimitiveChips ?? Array.Empty<PrimitiveChipRecord>();
             List<PrimitiveChipRecord> dead = chips.Where(c => c != null && !IsLivePrimitive(c.CardDefId)).ToList();
+            // FG2-FW-01：固件目录改由 fg.TbFirmwareKind 生成。固件表读不出来时目录是空的——这时 fw_* 芯片“查不到”是表坏了，
+            // 不是内容被移除，不能把玩家的固件换成废料：原样保留，只记 Error（与已移除内容表读不出来时同一失败策略）。
+            if (_isLiveOverride == null && Content.FirmwareCatalog.LoadError != null)
+            {
+                int kept = dead.RemoveAll(c => (c.CardDefId ?? string.Empty).StartsWith("fw_", StringComparison.Ordinal));
+                if (kept > 0)
+                {
+                    Log.Error($"[SaveContentReconciler] 固件表不可用（{Content.FirmwareCatalog.LoadError}），{kept} 枚固件芯片暂不对账，原样保留。");
+                }
+            }
             if (dead.Count == 0)
             {
                 return Array.Empty<SaveNoticeRecord>();

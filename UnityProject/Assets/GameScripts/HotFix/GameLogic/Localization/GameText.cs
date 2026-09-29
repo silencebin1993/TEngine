@@ -144,9 +144,13 @@ namespace GameLogic.Localization
             }
         }
 
+        /// <summary>文本表版本：每次 <see cref="Reload"/> / <see cref="OverrideForTests"/> +1。按文本缓存的目录（如 FirmwareCatalog）据此重建。</summary>
+        public static int Revision { get; private set; }
+
         /// <summary>重新从 <see cref="ConfigSystem"/> 读表（热更新了配置包之后调用）。</summary>
         public static void Reload()
         {
+            Revision++;
             _overridden = false;
             _loaded = false;
             _map = null;
@@ -159,6 +163,7 @@ namespace GameLogic.Localization
         /// 传 null 模拟"表没加载上"。用完必须 <see cref="ResetForTests"/>。</summary>
         public static void OverrideForTests(TbLocText table, string loadError = null)
         {
+            Revision++;
             _overridden = true;
             _loaded = true;
             _map = table?.DataMap;

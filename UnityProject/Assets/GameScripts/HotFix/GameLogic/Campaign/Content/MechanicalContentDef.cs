@@ -36,6 +36,14 @@ namespace GameLogic.Campaign.Content
         UnlockedLateBuilding,
         /// <summary>敌类内容：出现在具体区域遭遇战中，不是玩家拾取/建造对象。</summary>
         RegionEncounter,
+        /// <summary>FG2-FW-01：遗迹终端里的人类遗产（中立协议固件，带回即可用，需要解锁记录）。</summary>
+        RelicTerminal,
+        /// <summary>FG2-FW-01：区域杂兵残骸回收（常见固件，敌方加密，解析台破解后解锁）。</summary>
+        RegionSalvage,
+        /// <summary>FG2-FW-01：精英三选一数据包（稀有固件，敌方加密）。</summary>
+        EliteDrop,
+        /// <summary>FG2-FW-01：阵营首领固定掉落（核心固件，敌方加密）。</summary>
+        FactionBoss,
     }
 
     /// <summary>谁可以真正使用/装配/触发这条内容（对照验收卡"AI 权限"列）。</summary>

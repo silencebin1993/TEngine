@@ -94,14 +94,34 @@
 
 | 旧标签 | 新名 | 旧标签 | 新名 |
 |---|---|---|---|
-| Fire | 燃烧 | Oil | 油污 |
+| Fire / Burning | 燃烧 | Oil / Oiled | 油污 |
 | Wet | 浸湿 | Frozen | 冻结 |
-| Shock | 电击 | Slow | 减速 |
+| Shock / Shocked | 电击 | Slow | 减速 |
 | Acid | 腐蚀 | Charged | 充能 |
 | Magnet | 磁化 | Blood | 回收 |
-| Dark | 处决 | Mirror / Light | 偏折 |
+| Dark / Apoptosis | 处决 | Mirror / Light | 偏折 |
+| Earth | 扬尘 | Poison | 污染 |
+| SugarFilm | 胶膜 | Capillary | 渗流 |
+| Haste | 加速 | Drifting | 侧偏 |
+| WallImpact | 撞壁 | ReceptorMemory | 锁定 |
+| InheritPattern | 协同 | Marked | 标记 |
+| Physical | 动能 | Shield | 护盾 |
+| Displace | 位移 | Catalyst | 增幅 |
 
-未列出的标签（Earth、Poison、SugarFilm、Capillary、Haste、Drifting 等），在 FG-M2 的迁移 Story 里补齐名称，并写入本表。
+未列出的标签（Earth、Poison、SugarFilm、Capillary、Haste、Drifting 等）已由 FG-M2 的迁移 Story（FG2-FW-01）补齐名称并写入本表（第 7 行起），旧引擎里同义的两种写法（Burning / Fire 等）并到同一个新名。运行时以 Luban 表 fg.TbStatusTag 为准（名称文本键 + 头顶图标的形状与颜色，形状为主、颜色为辅），自检 FgFirmwareMigrationSelfCheck 核对本表与表逐条一致。
+
+旧引擎的模块还会给能量包贴一类**机制标记**：它们描述“这一发会怎样”（命中爆开、正在绕行……），不是作用在单位身上的状态，**不在头顶显示**，名字只给反应日志、伤害归因和调试层用（FG2-FW-04）。FG2-FW-01 的行为探针发现固件模块会贴这些记号，全部登记在 fg.TbStatusTag（kind = marker），保证引擎产出的每个标签都叫得出名字：
+
+| 机制标记 | 名称 | 机制标记 | 名称 |
+|---|---|---|---|
+| ExplodeOnHit | 命中爆开 | Growing | 扩张 |
+| Catalyzed | 放大中 | Rhythmic | 节拍 |
+| FeedbackHit | 追击 | Woven | 连网 |
+| Orbiting | 绕行 | Rippling | 波动 |
+| Valved | 限流 | Thorns | 反伤 |
+| Overheat | 过热 | Merged | 合流 |
+| Insulated | 隔离 | FuseTripped | 熔断 |
+| Filtered | 过滤 | | |
 
 **FGR-FW-031 标签可见**
 - 敌人和己方单位头顶显示当前标签图标（形状加颜色），悬停能看到名称、剩余时间和叠层数。

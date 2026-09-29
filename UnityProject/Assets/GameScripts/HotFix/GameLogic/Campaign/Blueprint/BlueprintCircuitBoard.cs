@@ -241,7 +241,7 @@ namespace GameLogic.Campaign.Blueprint
                 WorkPriorityTemplate = null,
                 DoctrineId = null,
                 ScrapCost = ComputeScrapCost(),
-                PowerCost = 0,
+                PowerCost = ComputePowerCost(FirmwareKinds.AiUsable(FirmwareSlots)), // FG2-FW-01（FG-GAP-028）：AI 驾驶时生效固件的每发耗电之和
                 BandwidthCost = ComputeBandwidthCost(),
                 HeatBudget = ComputeHeatBudget(),
                 FactionTags = ComputeFactionTags(),
@@ -933,30 +933,71 @@ namespace GameLogic.Campaign.Blueprint
         public float ComputeHeatBudget() => ComputeHeatBudget(PrimaryId, FirmwareKinds.AiUsable(FirmwareSlots));
 
         /// <summary>FG1-SIG-02：热量预算的纯函数版本——“你接入时”把插入接入口的固件并进 <paramref name="firmwareIds"/>，
-        /// 与机器电路自己的固件走同一条规则（预览与正式结算同一套计算，IC-REQ-010）。</summary>
+        /// 与机器电路自己的固件走同一条规则（预览与正式结算同一套计算，IC-REQ-010）。
+        /// FG2-FW-01（FGR-FW-001“热量”）：每条固件的每发积热来自 fg.TbFirmwareKind 的 heat 列（过载 15 = Demo“一般主武器额外热量 +15”），
+        /// 规则 = 重炮基础积热 40 + 熔穿过载 25（重炮 + 过载时由反应取代过载自己那一项）+ 其余生效固件的积热之和。Demo 的 6 条除过载外都是 0，
+        /// 既有数字（0 / 15 / 40 / 65）不变。</summary>
         public static float ComputeHeatBudget(string primaryId, IEnumerable<string> firmwareIds)
         {
             bool hasCannon = primaryId == ComponentCatalog.CompCannonId;
-            bool hasOverload = firmwareIds != null && firmwareIds.Any(id => id == FirmwareCatalog.FwOverloadId);
-            if (hasCannon && hasOverload)
-            {
-                return 65f; // 熔穿过载：基础40 + 25
-            }
+            List<string> ids = firmwareIds?.Where(id => !string.IsNullOrEmpty(id)).ToList() ?? new List<string>();
+            bool melt = hasCannon && ids.Contains(FirmwareCatalog.FwOverloadId);
+            float heat = ComputeFirmwareHeat(primaryId, ids);
             if (hasCannon)
             {
-                return 40f;
+                heat += Regions.FracturedCityLayout.CannonBaseHeatPerShot;
             }
-            if (hasOverload)
+            if (melt)
             {
-                return 15f; // 一般主武器额外热量+15
+                heat += Regions.FracturedCityLayout.OverloadExtraHeatPerShot;
             }
-            return 0f;
+            return heat;
         }
 
-        /// <summary>装配来源派系映射：基础蓝图库＝"归还"，破碎都市＝"静默"，铸造前哨（含可选缓存）＝"铸造"。
+        /// <summary>FG2-FW-01：固件自己带来的每发积热（表 heat 列之和）。重炮 + 过载时过载这一项由熔穿过载反应的积热取代，不重复计。
+        /// 重炮的内核每发积热 = 基础 + 本值（CombatSite.MachineWeaponFrom），与热量预算同一套数（IC-REQ-010）。</summary>
+        public static float ComputeFirmwareHeat(string primaryId, IEnumerable<string> firmwareIds)
+        {
+            if (firmwareIds == null)
+            {
+                return 0f;
+            }
+            bool hasCannon = primaryId == ComponentCatalog.CompCannonId;
+            float heat = 0f;
+            foreach (string id in firmwareIds)
+            {
+                if (string.IsNullOrEmpty(id) || (hasCannon && id == FirmwareCatalog.FwOverloadId))
+                {
+                    continue;
+                }
+                heat += FirmwareKinds.HeatOf(id);
+            }
+            return heat;
+        }
+
+        /// <summary>FG2-FW-01（FGR-FW-001“能耗”，FG-GAP-028）：生效固件每发耗电之和（表 power 列）。双态预览与蓝图版本的 PowerCost 都读它。</summary>
+        public static int ComputePowerCost(IEnumerable<string> firmwareIds)
+        {
+            int power = 0;
+            if (firmwareIds == null)
+            {
+                return 0;
+            }
+            foreach (string id in firmwareIds)
+            {
+                power += FirmwareKinds.PowerOf(id);
+            }
+            return power;
+        }
+
+        /// <summary>装配来源派系映射：基础蓝图库＝归还（reclaim），破碎都市＝静默（silent），铸造前哨（含可选缓存）＝铸造（foundry）；
+        /// 固件按表里的来源阵营（另有澄净 clarity、超频 overclock）。
         /// 两个具名跨派系反应（标记跳转＝归还+静默，熔穿过载＝归还+铸造）天然对应这里产出 2 个不同标签
         /// 的场景——"跨派系"不是独立字段，是 <c>FactionTags.Length &gt;= 2</c> 这一结果。公开方法供 UI
-        /// 实时预览，<see cref="ToVersion"/> 落盘同一结果。</summary>
+        /// 实时预览，<see cref="ToVersion"/> 落盘同一结果。
+        /// FG2-FW-01 修复轮：标签存<b>阵营键</b>（与 <see cref="FirmwareKinds.FactionOf"/>、暴露账本的阵营同一套键），显示时走
+        /// <c>faction.&lt;key&gt;</c> 文本键（<see cref="FactionDisplayName"/>）；旧存档里的中文标签由
+        /// <see cref="CampaignExposureLedger.FactionKeyOfTag"/> 归一，不需要迁移。</summary>
         public string[] ComputeFactionTags()
         {
             var tags = new List<string>();
@@ -966,7 +1007,7 @@ namespace GameLogic.Campaign.Blueprint
                 {
                     return;
                 }
-                string tag = FactionTagFor(def.Source);
+                string tag = def.Category == MechanicalContentCategory.Firmware ? FactionTagForFirmware(contentId) : FactionTagFor(def.Source);
                 if (tag != null && !tags.Contains(tag))
                 {
                     tags.Add(tag);
@@ -984,14 +1025,25 @@ namespace GameLogic.Campaign.Blueprint
             return tags.ToArray();
         }
 
+        /// <summary>FG2-FW-01：固件的派系按表里的来源阵营（44 条固件的来源不再只有 Demo 三种）；人类遗产（中立协议）不算派系。</summary>
+        private static string FactionTagForFirmware(string contentId)
+        {
+            string key = CampaignExposureLedger.FactionKeyOfTag(FirmwareKinds.FactionOf(contentId));
+            return key == CampaignExposureLedger.FactionNone ? null : key;
+        }
+
         private static string FactionTagFor(MechanicalContentSource source) => source switch
         {
-            MechanicalContentSource.BaseBlueprint => "归还",
-            MechanicalContentSource.SilentRuinsSalvage => "静默",
-            MechanicalContentSource.FoundryMandatory => "铸造",
-            MechanicalContentSource.FoundryOptionalCache => "铸造",
+            MechanicalContentSource.BaseBlueprint => FirmwareKinds.FactionReclaim,
+            MechanicalContentSource.SilentRuinsSalvage => CampaignExposureLedger.FactionSilent,
+            MechanicalContentSource.FoundryMandatory => CampaignExposureLedger.FactionFoundry,
+            MechanicalContentSource.FoundryOptionalCache => CampaignExposureLedger.FactionFoundry,
             _ => null,
         };
+
+        /// <summary>派系标签（阵营键，或旧存档里的中文标签）的玩家可见名：<c>faction.&lt;key&gt;</c> 文本键，随语言切换。</summary>
+        public static string FactionDisplayName(string tag) =>
+            GameText.Get("faction." + CampaignExposureLedger.FactionKeyOfTag(tag));
 
         // ── 签名 ─────────────────────────────────────────────────────────────────
 

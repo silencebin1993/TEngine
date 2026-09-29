@@ -147,6 +147,10 @@ public partial class Tables
     /// </summary>
     public fg.TbStartLayout TbStartLayout {get; }
     /// <summary>
+    /// 状态标签
+    /// </summary>
+    public fg.TbStatusTag TbStatusTag {get; }
+    /// <summary>
     /// 表面
     /// </summary>
     public fg.TbSurface TbSurface {get; }
@@ -243,6 +247,7 @@ public partial class Tables
         TbNotifyType = new fg.TbNotifyType(loader("fg_tbnotifytype"));
         TbRemovedContent = new fg.TbRemovedContent(loader("fg_tbremovedcontent"));
         TbStartLayout = new fg.TbStartLayout(loader("fg_tbstartlayout"));
+        TbStatusTag = new fg.TbStatusTag(loader("fg_tbstatustag"));
         TbSurface = new fg.TbSurface(loader("fg_tbsurface"));
         TbTerritory = new fg.TbTerritory(loader("fg_tbterritory"));
         TbUiTuning = new fg.TbUiTuning(loader("fg_tbuituning"));
@@ -297,6 +302,7 @@ public partial class Tables
         TbNotifyType.ResolveRef(this);
         TbRemovedContent.ResolveRef(this);
         TbStartLayout.ResolveRef(this);
+        TbStatusTag.ResolveRef(this);
         TbSurface.ResolveRef(this);
         TbTerritory.ResolveRef(this);
         TbUiTuning.ResolveRef(this);

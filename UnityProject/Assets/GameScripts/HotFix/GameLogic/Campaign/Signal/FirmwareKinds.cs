@@ -33,6 +33,17 @@ namespace GameLogic.Campaign.Signal
         Electromagnetic = 4,
     }
 
+    /// <summary>FG2-FW-01（FGR-FW-001“每种载体的读法说明”，设计案 5.1）：固件装在哪种载体上。与作战组件的载体一一对应：
+    /// 射弹 = Projectile，格斗 = Melee，无人机 = Summon，力场 = Aura，布区 = Field。</summary>
+    public enum FirmwareCarrier : byte
+    {
+        Projectile = 0,
+        Melee = 1,
+        Summon = 2,
+        Aura = 3,
+        Field = 4,
+    }
+
     /// <summary>FG1-SIG-06（FGT-SIG-003）：固件能装进去的宿主。</summary>
     public enum FirmwareHost : byte
     {
@@ -56,6 +67,9 @@ namespace GameLogic.Campaign.Signal
     public static class FirmwareKinds
     {
         private static TbFirmwareKind _table;
+        private static TbFirmwareKind _tableOverride;
+        private static string _tableOverrideError;
+        private static int _catalogRevision = 1;
         private static bool _loaded;
         private static string _loadError;
         private static Dictionary<string, FirmwareKind> _override;
@@ -82,6 +96,126 @@ namespace GameLogic.Campaign.Signal
                 return _table?.DataList ?? (IReadOnlyList<GameConfig.fg.FirmwareKind>)Array.Empty<GameConfig.fg.FirmwareKind>();
             }
         }
+
+        /// <summary>FG2-FW-01：固件目录（<see cref="FirmwareCatalog"/>）据此判断要不要按表重建——表重载、表注入、种类注入时 +1
+        /// （破解状态变化不影响目录内容，不 +1）。</summary>
+        internal static int CatalogRevision => _catalogRevision;
+
+        /// <summary>FG2-FW-01：按固件 ID 取表里的一行（FGR-FW-001 全部字段）。表不可用或查不到时 false。O(1)。</summary>
+        public static bool TryGetRow(string contentId, out GameConfig.fg.FirmwareKind row)
+        {
+            row = null;
+            if (string.IsNullOrEmpty(contentId))
+            {
+                return false;
+            }
+            EnsureLoaded();
+            return _table != null && _table.DataMap.TryGetValue(contentId, out row) && row != null;
+        }
+
+        /// <summary>目录构建用：一行的种类（尊重测试注入），不经过 <see cref="IsFirmware"/>（避免目录构建时递归）。</summary>
+        internal static FirmwareKind KindOfRow(GameConfig.fg.FirmwareKind row)
+        {
+            if (row == null)
+            {
+                return FirmwareKind.NotFirmware;
+            }
+            if (_override != null)
+            {
+                return _override.TryGetValue(row.Id, out FirmwareKind forced) ? forced : FirmwareKind.Regular;
+            }
+            return row.Kind == "core" ? FirmwareKind.Core : FirmwareKind.Regular;
+        }
+
+        private static bool TryGetFirmwareRow(string contentId, out GameConfig.fg.FirmwareKind row)
+        {
+            row = null;
+            return FirmwareCatalog.TryGet(contentId, out _) && TryGetRow(contentId, out row);
+        }
+
+        /// <summary>每发耗电（FGR-FW-001“能耗”）。不是固件时 0。</summary>
+        public static int PowerOf(string contentId) =>
+            TryGetFirmwareRow(contentId, out GameConfig.fg.FirmwareKind row) ? Math.Max(0, row.Power) : 0;
+
+        /// <summary>每发积热（FGR-FW-001“热量”）。不是固件时 0。热量预算与重炮内核积热都读它（BlueprintCircuitBoard.ComputeHeatBudget）。</summary>
+        public static float HeatOf(string contentId) =>
+            TryGetFirmwareRow(contentId, out GameConfig.fg.FirmwareKind row) ? Math.Max(0f, row.Heat) : 0f;
+
+        /// <summary>稀有度键（common / rare / epic）；名称走文本键 firmware.rarity.&lt;值&gt;。不是固件时 null。</summary>
+        public static string RarityOf(string contentId) =>
+            TryGetFirmwareRow(contentId, out GameConfig.fg.FirmwareKind row) ? row.Rarity : null;
+
+        /// <summary>获取途径键（base / terminal / cache / relic / salvage / elite / boss）。不是固件时 null。</summary>
+        public static string SourceOf(string contentId) =>
+            TryGetFirmwareRow(contentId, out GameConfig.fg.FirmwareKind row) ? row.Source : null;
+
+        /// <summary>获取途径说明（当前语言，图鉴与锁定提示用）。不是固件时 null。</summary>
+        public static string AcquireText(string contentId) =>
+            TryGetFirmwareRow(contentId, out GameConfig.fg.FirmwareKind row) ? GameText.Get(row.AcquireKey) : null;
+
+        /// <summary>旧基因 ID（只用于追溯与调试层，玩家可见文本里不出现；设计案“新建”的两条为 none）。不是固件时 null。</summary>
+        public static string LegacyIdOf(string contentId) =>
+            TryGetFirmwareRow(contentId, out GameConfig.fg.FirmwareKind row) ? row.LegacyId : null;
+
+        /// <summary>产生的状态标签（旧引擎标签字符串 = fg.TbStatusTag 的 ID；显示名见 <see cref="StatusTagCatalog"/>）。不是固件或不产生时为空。</summary>
+        public static string[] TagsOf(string contentId)
+        {
+            if (!TryGetFirmwareRow(contentId, out GameConfig.fg.FirmwareKind row) || string.IsNullOrEmpty(row.Tags) || row.Tags == "none")
+            {
+                return Array.Empty<string>();
+            }
+            return row.Tags.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+        }
+
+        /// <summary>FGR-FW-011：这条固件装在 <paramref name="carrier"/> 上会怎样（文本键）。不是固件时 null。</summary>
+        public static string ReadingKey(string contentId, FirmwareCarrier carrier)
+        {
+            if (!TryGetFirmwareRow(contentId, out GameConfig.fg.FirmwareKind row))
+            {
+                return null;
+            }
+            switch (carrier)
+            {
+                case FirmwareCarrier.Projectile: return row.ReadProjectileKey;
+                case FirmwareCarrier.Melee: return row.ReadMeleeKey;
+                case FirmwareCarrier.Summon: return row.ReadSummonKey;
+                case FirmwareCarrier.Aura: return row.ReadAuraKey;
+                case FirmwareCarrier.Field: return row.ReadFieldKey;
+                default: return null;
+            }
+        }
+
+        /// <summary>FGR-FW-011：读法说明（当前语言）。不是固件时 null。</summary>
+        public static string Reading(string contentId, FirmwareCarrier carrier)
+        {
+            string key = ReadingKey(contentId, carrier);
+            return key == null ? null : GameText.Get(key);
+        }
+
+        /// <summary>FGR-FW-020 / 021：机身形变状态键（none / limiter / fluid / em，表 morph 列；check_luban R24 保证与类别对应）。
+        /// 类别被测试注入时跟着注入走（形变自检靠它验证叠加规则）。不是固件时 none。</summary>
+        public static string MorphOf(string contentId)
+        {
+            if (!IsFirmware(contentId))
+            {
+                return "none";
+            }
+            if (_categoryOverride != null && _categoryOverride.ContainsKey(contentId))
+            {
+                switch (CategoryOf(contentId))
+                {
+                    case FirmwareCategory.Limiter: return "limiter";
+                    case FirmwareCategory.Fluid: return "fluid";
+                    case FirmwareCategory.Electromagnetic: return "em";
+                    default: return "none";
+                }
+            }
+            return TryGetRow(contentId, out GameConfig.fg.FirmwareKind row) && !string.IsNullOrEmpty(row.Morph) ? row.Morph : "none";
+        }
+
+        /// <summary>出厂即已破解（表 cracked 列：己方 / 中立 = true；敌方加密 = false）。战役里的破解状态见 <see cref="IsRaw(CampaignState, string)"/>。</summary>
+        public static bool IsCrackedByDefault(string contentId) =>
+            TryGetFirmwareRow(contentId, out GameConfig.fg.FirmwareKind row) && row.Cracked;
 
         public static bool IsFirmware(string contentId) =>
             !string.IsNullOrEmpty(contentId) && FirmwareCatalog.TryGet(contentId, out _);
@@ -407,7 +541,17 @@ namespace GameLogic.Campaign.Signal
             WarnedMissing.Clear();
             WarnedCategory.Clear();
             Revision++;
+            _catalogRevision++;
             EnsureLoaded();
+        }
+
+        /// <summary>FG2-FW-01 测试注入：用构造出来的表替换真实固件表（证明固件目录、名称、数值都经表取得：改表 → 行为跟着变）。
+        /// <paramref name="table"/> 为 null 表示模拟“表没加载上”。用完必须 <see cref="ResetForTests"/>。</summary>
+        public static void OverrideTableForTests(TbFirmwareKind table, string loadError = null)
+        {
+            _tableOverride = table;
+            _tableOverrideError = loadError ?? (table == null ? "测试注入：固件表为空" : null);
+            Reload();
         }
 
         /// <summary>测试注入：用给定的“固件 ID → 种类”替换表（没列出的固件按常规）。用完必须 <see cref="ResetForTests"/>。
@@ -416,6 +560,7 @@ namespace GameLogic.Campaign.Signal
         {
             _override = kinds == null ? null : new Dictionary<string, FirmwareKind>(kinds, StringComparer.Ordinal);
             Revision++;
+            _catalogRevision++; // 目录的 AI 许可跟着种类走
         }
 
         public static void ResetForTests()
@@ -423,6 +568,8 @@ namespace GameLogic.Campaign.Signal
             _override = null;
             _protocolOverride = null;
             _categoryOverride = null;
+            _tableOverride = null;
+            _tableOverrideError = null;
             Reload();
         }
 
@@ -433,6 +580,16 @@ namespace GameLogic.Campaign.Signal
                 return;
             }
             _loaded = true;
+            if (_tableOverride != null || _tableOverrideError != null)
+            {
+                _table = _tableOverride;
+                _loadError = _tableOverrideError;
+                if (_loadError != null)
+                {
+                    Log.Error($"[FirmwareKinds] {_loadError}");
+                }
+                return;
+            }
             try
             {
                 _table = ConfigSystem.Instance.Tables?.TbFirmwareKind;

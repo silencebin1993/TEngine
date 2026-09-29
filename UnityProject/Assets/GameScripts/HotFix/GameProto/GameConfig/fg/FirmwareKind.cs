@@ -26,6 +26,24 @@ public sealed partial class FirmwareKind : Luban.BeanBase
         Protocol = _buf.ReadString();
         Faction = _buf.ReadString();
         Category = _buf.ReadString();
+        LegacyId = _buf.ReadString();
+        DescKey = _buf.ReadString();
+        Rarity = _buf.ReadString();
+        Load = _buf.ReadInt();
+        Power = _buf.ReadInt();
+        Heat = _buf.ReadFloat();
+        ReadProjectileKey = _buf.ReadString();
+        ReadMeleeKey = _buf.ReadString();
+        ReadSummonKey = _buf.ReadString();
+        ReadAuraKey = _buf.ReadString();
+        ReadFieldKey = _buf.ReadString();
+        Tags = _buf.ReadString();
+        Morph = _buf.ReadString();
+        Icon = _buf.ReadString();
+        Source = _buf.ReadString();
+        AcquireKey = _buf.ReadString();
+        Cracked = _buf.ReadBool();
+        Scrap = _buf.ReadInt();
     }
 
     public static FirmwareKind DeserializeFirmwareKind(ByteBuf _buf)
@@ -61,6 +79,78 @@ public sealed partial class FirmwareKind : Luban.BeanBase
     /// 类别:fuse=引信与弹芯,limiter=限制器与击发逻辑,fluid=流体改道,em=电磁场控;机身形变按类别切换(引信类不改机身),核心固件必须是 limiter(设计案 5.3)
     /// </summary>
     public readonly string Category;
+    /// <summary>
+    /// 旧基因ID(gene_*,仅追溯与调试层;设计案 5.4“新建”的两条填 none)
+    /// </summary>
+    public readonly string LegacyId;
+    /// <summary>
+    /// 描述文本键
+    /// </summary>
+    public readonly string DescKey;
+    /// <summary>
+    /// 稀有度:common=普通,rare=稀有,epic=精良(文本键 firmware.rarity.&lt;值&gt;)
+    /// </summary>
+    public readonly string Rarity;
+    /// <summary>
+    /// 负载(装进机器电路时占用底盘负载;接入口插入不占,FGR-SIG-023)
+    /// </summary>
+    public readonly int Load;
+    /// <summary>
+    /// 能耗:每发耗电(机器电池;FG2-FW-01 起进双态预览与蓝图版本,战斗内耗电见 DEBT-FG2FW01-02)
+    /// </summary>
+    public readonly int Power;
+    /// <summary>
+    /// 热量:每发积热(热量预算与重炮内核积热都读它;熔穿过载时过载这一项由反应的 +25 取代)
+    /// </summary>
+    public readonly float Heat;
+    /// <summary>
+    /// 读法文本键:装在射弹上
+    /// </summary>
+    public readonly string ReadProjectileKey;
+    /// <summary>
+    /// 读法文本键:装在格斗上
+    /// </summary>
+    public readonly string ReadMeleeKey;
+    /// <summary>
+    /// 读法文本键:装在无人机上
+    /// </summary>
+    public readonly string ReadSummonKey;
+    /// <summary>
+    /// 读法文本键:装在力场上
+    /// </summary>
+    public readonly string ReadAuraKey;
+    /// <summary>
+    /// 读法文本键:装在布区上
+    /// </summary>
+    public readonly string ReadFieldKey;
+    /// <summary>
+    /// 产生的状态标签(fg.TbStatusTag 的ID,分号分隔;none=不产生)
+    /// </summary>
+    public readonly string Tags;
+    /// <summary>
+    /// 机身形变状态:none=常态(引信类只改弹体特效),limiter=形变态,fluid=喷口态,em=线圈态(文本键 morph.state.&lt;值&gt;,须与类别对应)
+    /// </summary>
+    public readonly string Morph;
+    /// <summary>
+    /// 图标ID(GameRes/Raw/UI/Icons/&lt;icon&gt;.png;芯片外形 + 类别角标,tools/icons/gen_placeholder_icons.py)
+    /// </summary>
+    public readonly string Icon;
+    /// <summary>
+    /// 获取途径:base=基础蓝图库,terminal=遗迹终端数据盒,cache=技术缓存,relic=人类遗产,salvage=杂兵残骸,elite=精英三选一,boss=阵营首领
+    /// </summary>
+    public readonly string Source;
+    /// <summary>
+    /// 获取途径说明文本键(图鉴与锁定提示)
+    /// </summary>
+    public readonly string AcquireKey;
+    /// <summary>
+    /// 出厂即已破解(己方/中立=True;敌方加密=False,解析台破解后才能装进机器,FGR-SIG-060)
+    /// </summary>
+    public readonly bool Cracked;
+    /// <summary>
+    /// 装进蓝图的废料成本(蓝图版本成本;刻印芯片的废料另见 signal.firmware_chip.print_scrap)
+    /// </summary>
+    public readonly int Scrap;
    
     public const int __ID__ = -1131444196;
     public override int GetTypeId() => __ID__;
@@ -79,6 +169,24 @@ public sealed partial class FirmwareKind : Luban.BeanBase
         + "protocol:" + Protocol + ","
         + "faction:" + Faction + ","
         + "category:" + Category + ","
+        + "legacyId:" + LegacyId + ","
+        + "descKey:" + DescKey + ","
+        + "rarity:" + Rarity + ","
+        + "load:" + Load + ","
+        + "power:" + Power + ","
+        + "heat:" + Heat + ","
+        + "readProjectileKey:" + ReadProjectileKey + ","
+        + "readMeleeKey:" + ReadMeleeKey + ","
+        + "readSummonKey:" + ReadSummonKey + ","
+        + "readAuraKey:" + ReadAuraKey + ","
+        + "readFieldKey:" + ReadFieldKey + ","
+        + "tags:" + Tags + ","
+        + "morph:" + Morph + ","
+        + "icon:" + Icon + ","
+        + "source:" + Source + ","
+        + "acquireKey:" + AcquireKey + ","
+        + "cracked:" + Cracked + ","
+        + "scrap:" + Scrap + ","
         + "}";
     }
 }

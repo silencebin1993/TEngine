@@ -546,17 +546,22 @@ namespace GameLogic.EditorTools
 
         private static void CheckOverlayAndSwitch()
         {
-            Line("  · D2. 多类叠加：信号核带过载（限制器）+ 电磁类固件，接进自带拖尾（流体）的机器 → 三类同时显示、各在自己的挂点组；Tab 切机时两台同时过渡");
+            Line("  · D2. 多类叠加：信号核带过载（限制器）+ 正式电磁类固件“回旋”，接进自带拖尾（流体）的机器 → 三类同时显示、各在自己的挂点组；Tab 切机时两台同时过渡");
             CampaignState s = NewHome(9102);
-            // 正式内容里还没有电磁类固件（FG2-FW-01 迁入 44 条）：把寻的临时注入为电磁类，验证线圈态的完整链路。
-            FirmwareKinds.OverrideCategoryForTests(new Dictionary<string, FirmwareCategory> { { FirmwareCatalog.FwHomingId, FirmwareCategory.Electromagnetic } });
+            // FG2-FW-01 起正式表里有电磁场控类固件（DEBT-FG1VFX01-02 关闭）：用正式的“回旋”（中立协议、遗迹人类遗产），不再注入类别。
+            // 它不是开局蓝图库内容：按正常游戏记一条解锁（带回遗迹终端的人类遗产）后刻印。
+            const string EmFirmware = "fw_boomerang";
+            s.UnlockedContentIds = (s.UnlockedContentIds ?? Array.Empty<string>()).Append(EmFirmware).ToArray();
+            Expect(FirmwareKinds.CategoryOf(EmFirmware) == FirmwareCategory.Electromagnetic && FirmwareKinds.MorphOf(EmFirmware) == "em"
+                   && !FirmwareKinds.IsCore(EmFirmware) && !FirmwareKinds.IsRaw(s, EmFirmware),
+                "正式表：回旋 = 电磁场控类、形变状态 = 线圈态，常规、中立协议（不裸跑）");
             try
             {
                 int g = SpawnHome(BpGunMarkerUp, new Vector2(4f, -4f));
                 int a = SpawnHome(BpCannonUp, new Vector2(8f, -4f));
                 WorldSimulation.StepMany(2);
                 CombatSite site = WorldSimulation.Home.Combat;
-                EquipCore(s, FirmwareCatalog.FwOverloadId, FirmwareCatalog.FwHomingId);
+                EquipCore(s, FirmwareCatalog.FwOverloadId, EmFirmware);
                 Expect(MachineMorphView.VisibleOf(g) == MorphMask.Fluid, "接入前：连射器 + 标记器 + 接入口，自带拖尾 → 喷口态");
                 CommitVia(g);
                 Frames(8);

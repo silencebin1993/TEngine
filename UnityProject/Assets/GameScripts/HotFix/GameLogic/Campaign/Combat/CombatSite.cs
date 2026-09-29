@@ -522,7 +522,8 @@ namespace GameLogic.Campaign.Combat
                 w.AimSeconds = FracturedCityLayout.CannonAimSeconds;
                 // FG1-SIG-06（FGR-SIG-061）：信号裸跑未破解固件时积热 ×1.5（编译结果里的倍率，与双态预览的热量预算同一个数）。
                 float rawHeat = p.RawHeatMultiplier > 0f ? p.RawHeatMultiplier : 1f;
-                w.HeatPerShot = FracturedCityLayout.CannonBaseHeatPerShot * rawHeat;
+                // FG2-FW-01（FGR-FW-001“热量”）：生效固件自己的每发积热（表 heat 列）叠在基础积热上，与热量预算同一规则（熔穿过载时过载一项由 OverloadExtraHeat 取代）。
+                w.HeatPerShot = (FracturedCityLayout.CannonBaseHeatPerShot + Mathf.Max(0f, p.FirmwareHeatPerShot)) * rawHeat;
                 w.OverloadExtraHeat = FracturedCityLayout.OverloadExtraHeatPerShot * rawHeat;
                 w.PierceBonus = FracturedCityLayout.OverloadArmorPierceBonus;
                 w.Reaction = !suppressReaction && p.ReactionId == MechanicalReactionCatalog.ReactionMeltOverloadId ? CombatReaction.MeltOverload : CombatReaction.None;

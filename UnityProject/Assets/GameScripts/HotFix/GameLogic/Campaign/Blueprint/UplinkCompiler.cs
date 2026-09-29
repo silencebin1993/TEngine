@@ -81,6 +81,8 @@ namespace GameLogic.Campaign.Blueprint
         ReactionChanged,
         HeatChanged,
         DamageChanged,
+        /// <summary>FG2-FW-01（FG-GAP-028）：每发耗电变化。</summary>
+        PowerChanged,
     }
 
     public readonly struct UplinkDiffLine
@@ -287,7 +289,8 @@ namespace GameLogic.Campaign.Blueprint
                 ? GameText.Format("circuit.uplink.line.paths", p.PathCount)
                 : GameText.Get("circuit.uplink.line.no_output"));
             lines.Add(GameText.Format("circuit.uplink.line.damage", F1(p.TotalNormalizedDamage)));
-            lines.Add(GameText.Format("circuit.uplink.line.heat", F1(p.HeatBudget)));
+            // FG2-FW-01（FG-GAP-028，FGR-SIG-022“热量和能耗的变化”）：热量行带上固件的每发耗电（同一行，栏的行数与界面标签数不变）。
+            lines.Add(GameText.Format("circuit.uplink.line.heat_power", F1(p.HeatBudget), p.PowerCost.ToString(CultureInfo.InvariantCulture)));
             lines.Add(p.ReactionId != null
                 ? GameText.Format("circuit.uplink.line.reaction", ReactionName(p.ReactionId))
                 : GameText.Get("circuit.uplink.line.reaction_none"));
@@ -346,6 +349,11 @@ namespace GameLogic.Campaign.Blueprint
             if (Math.Abs(u.HeatBudget - a.HeatBudget) > 0.0001f)
             {
                 dual.Diff.Add(new UplinkDiffLine(UplinkDiffKind.HeatChanged, GameText.Format("circuit.uplink.diff.heat", F1(a.HeatBudget), F1(u.HeatBudget))));
+            }
+            if (u.PowerCost != a.PowerCost)
+            {
+                dual.Diff.Add(new UplinkDiffLine(UplinkDiffKind.PowerChanged, GameText.Format("circuit.uplink.diff.power",
+                    a.PowerCost.ToString(CultureInfo.InvariantCulture), u.PowerCost.ToString(CultureInfo.InvariantCulture))));
             }
             if (Math.Abs(u.TotalNormalizedDamage - a.TotalNormalizedDamage) > 0.0001f)
             {

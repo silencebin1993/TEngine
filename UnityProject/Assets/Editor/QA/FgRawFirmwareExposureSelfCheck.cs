@@ -121,6 +121,7 @@ namespace GameLogic.EditorTools
                 Step(CheckRawCost);
                 Step(CheckRawCore);
                 Step(CheckExposureRewrite);
+                Step(CheckAlienTechNewFactions);
                 Step(CheckMigrationAndSave);
                 Step(CheckPauseSpeed);
                 Step(CheckObservationIndependence);
@@ -207,12 +208,19 @@ namespace GameLogic.EditorTools
         private static void CheckData()
         {
             Line("  · A. 数据：fg.TbFirmwareKind 协议 / 来源阵营；裸跑与暴露来源的调参（FG16 初值）；快捷键登记");
+            // FG2-FW-01：44 条固件按设计案 10 章的阵营技术类别分配协议与来源（己方 = 基础蓝图库、中立 = 人类遗产、其余敌方加密）；
+            // Demo 的两条敌方固件（标记跳转 = 静默、装甲击穿 = 铸造）不变。
             var enemy = FirmwareCatalog.All.Keys.Where(FirmwareKinds.IsEnemyProtocol).OrderBy(x => x, StringComparer.Ordinal).ToList();
-            Expect(enemy.SequenceEqual(new[] { FirmwareCatalog.FwArmorPierceId, FirmwareCatalog.FwMarkTagId })
+            var enemyRows = FirmwareKinds.Rows.Where(r => r.Protocol == "enemy").Select(r => r.Id).OrderBy(x => x, StringComparer.Ordinal).ToList();
+            var own = FirmwareKinds.Rows.Where(r => r.Protocol == "own").Select(r => r.Id).OrderBy(x => x, StringComparer.Ordinal).ToList();
+            Expect(enemy.SequenceEqual(enemyRows) && enemy.Contains(FirmwareCatalog.FwArmorPierceId) && enemy.Contains(FirmwareCatalog.FwMarkTagId)
                    && FirmwareKinds.FactionOf(FirmwareCatalog.FwMarkTagId) == "silent" && FirmwareKinds.FactionOf(FirmwareCatalog.FwArmorPierceId) == "foundry"
                    && FirmwareKinds.FactionOf(FirmwareCatalog.FwOverloadId) == "reclaim"
-                   && FirmwareKinds.Rows.All(r => (r.Protocol == "own" || r.Protocol == "enemy") && new[] { "reclaim", "silent", "foundry" }.Contains(r.Faction)),
-                $"敌方加密协议的固件 = {string.Join("、", enemy)}（静默协议数据盒 → 标记跳转、铸造技术缓存 → 装甲击穿），其余己方；阵营键都已登记");
+                   && own.SequenceEqual(new[] { FirmwareCatalog.FwHomingId, FirmwareCatalog.FwOverloadId, FirmwareCatalog.FwSplitId, FirmwareCatalog.FwTrailId })
+                   && FirmwareKinds.Rows.All(r => new[] { "own", "neutral", "enemy" }.Contains(r.Protocol)
+                                                  && new[] { "reclaim", "relic", "silent", "foundry", "clarity", "overclock" }.Contains(r.Faction)
+                                                  && GameText.Has("faction." + r.Faction)),
+                $"敌方加密协议的固件 {enemy.Count} 条（含静默协议数据盒 → 标记跳转、铸造技术缓存 → 装甲击穿），己方 = 寻的 / 过载 / 分裂 / 拖尾，其余中立；阵营键都已登记且有名称");
             Expect(Mathf.Approximately(RawFirmwareService.ExposurePerFire, 2f) && Mathf.Approximately(RawFirmwareService.HeatMultiplier, 1.5f)
                    && Mathf.Approximately(RawFirmwareService.ChargeIntervalSeconds, 8f)
                    && Mathf.Approximately(CampaignExposureLedger.CoreFireDelta, 0.5f) && Mathf.Approximately(CampaignExposureLedger.AlienTechDelta, 2f)
@@ -497,6 +505,107 @@ namespace GameLogic.EditorTools
             FracturedCityRegion.TryAttackEnemy(s, m, s1, s.RandomSeed, isAiSource: false);
             WorldSimulation.StepMany(1);
             return FeedbackCues.CountOf(FeedbackCueId.ReactionMarkJump) > jump0;
+        }
+
+        // ── F2. FG2-FW-01 修复轮：新来源阵营（澄净 / 超频）也计“使用异派技术”────────────────────────
+
+        /// <summary>
+        /// FG2-FW-01 修复轮（审查 P1）：44 条固件带来了澄净（clarity）/ 超频（overclock）两个来源阵营。蓝图版本的派系标签改存阵营键，
+        /// 暴露账本 FactionKeyOfTag 认全 5 个阵营（兼容旧存档的中文标签）。真实保存蓝图 → 登记机器 → 出发事务同一入口
+        /// （GrantAlienTechForExpedition）逐一核对：归还底盘 + 澄净固件计 +2 且阵营 = clarity；归还 + 人类遗产（中立）不计；
+        /// 澄净 + 超频（两个异族）计；旧存档中文标签（归还+超频）照样计；派系显示名走 faction.&lt;key&gt; 文本键随语言切换。
+        /// </summary>
+        private static void CheckAlienTechNewFactions()
+        {
+            Line("  · F2. 新来源阵营的异派技术（FG2-FW-01 修复轮）：派系标签存阵营键；澄净 / 超频固件与归还底盘同装计 +2；中立人类遗产不计；旧中文标签兼容；显示走文本键");
+            CampaignState s = NewState(8642);
+            const string oil = "fw_oilleak";   // 澄净（clarity），流体常规
+            const string clock = "fw_clock";   // 超频（overclock），限制器常规
+            const string pierce = "fw_pierce"; // 人类遗产（relic），中立协议
+            Expect(FirmwareKinds.FactionOf(oil) == CampaignExposureLedger.FactionClarity && FirmwareKinds.FactionOf(clock) == CampaignExposureLedger.FactionOverclock
+                   && FirmwareKinds.FactionOf(pierce) == "relic",
+                $"测试前提：{oil} 阵营 {FirmwareKinds.FactionOf(oil)}、{clock} 阵营 {FirmwareKinds.FactionOf(clock)}、{pierce} 阵营 {FirmwareKinds.FactionOf(pierce)}");
+            foreach (string id in new[] { oil, clock, pierce })
+            {
+                Unlock(s, id); // 已破解 / 已获得（敌方协议破解后才能进机器电路）
+            }
+
+            BlueprintVersionRecord SaveAndSpawn(string name, string[] firmware, out int logicId)
+            {
+                BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(HomeValleyLayout.Erc003ChassisId, ComponentCatalog.CompGunId, null, null, firmware);
+                BlueprintSaveResult save = BlueprintEditorService.TrySave(s, board, "bp_selfcheck_fw01_" + name, name, saveAsNewRecord: true);
+                if (!save.Success)
+                {
+                    Fail($"测试准备：保存蓝图 {name}（{string.Join("+", firmware)}）失败：{save.FailureReason}");
+                }
+                BlueprintRecord rec = s.BlueprintRecords.FirstOrDefault(b => b.DisplayName == name);
+                BlueprintVersionRecord ver = rec?.Versions?.LastOrDefault();
+                logicId = SpawnRegion(HomeValleyLayout.RegionId, rec?.BlueprintId, new Vector2(3f, 1f));
+                if (MachineRegistry.TryGetRecord(logicId, out MachineRecord mr) && mr != null && ver != null)
+                {
+                    mr.BlueprintVersion = ver.Version;
+                }
+                return ver;
+            }
+
+            string Tags(BlueprintVersionRecord v) => v?.FactionTags == null ? "（无版本）" : string.Join("+", v.FactionTags);
+
+            // 1. 归还底盘 + 澄净固件：跨派系，出发计 +2，阵营 = clarity。
+            BlueprintVersionRecord vOil = SaveAndSpawn("fw01_oil", new[] { oil }, out int mOil);
+            float x0 = s.SignalExposure;
+            bool oilGranted = CampaignExposureLedger.GrantAlienTechForExpedition(s, new[] { mOil }, FoundryOutpostLayout.RegionId, 21);
+            SignalExposureEventRecord oilEvent = CampaignExposureLedger.RecentEvents(s, 1).FirstOrDefault();
+            Expect(vOil != null && vOil.FactionTags.SequenceEqual(new[] { CampaignExposureLedger.FactionClarity, FirmwareKinds.FactionReclaim })
+                   && oilGranted && Mathf.Abs(s.SignalExposure - x0 - 2f) < 1e-3f
+                   && oilEvent != null && oilEvent.Kind == ExposureSourceKind.AlienTech && oilEvent.Faction == CampaignExposureLedger.FactionClarity,
+                $"归还底盘 + 澄净固件 {oil}：版本派系标签 [{Tags(vOil)}]（阵营键）；出远征 → 使用异派技术 +2、记在澄净名下（{oilEvent?.Faction}）：{x0:0.#} → {s.SignalExposure:0.#}");
+
+            // 2. 对照：归还底盘 + 人类遗产（中立）固件：只有一个派系，不计。
+            BlueprintVersionRecord vPierce = SaveAndSpawn("fw01_pierce", new[] { pierce }, out int mPierce);
+            float x1 = s.SignalExposure;
+            bool pierceGranted = CampaignExposureLedger.GrantAlienTechForExpedition(s, new[] { mPierce }, FoundryOutpostLayout.RegionId, 22);
+            Expect(vPierce != null && vPierce.FactionTags.SequenceEqual(new[] { FirmwareKinds.FactionReclaim }) && !pierceGranted
+                   && Mathf.Approximately(s.SignalExposure, x1),
+                $"对照：归还底盘 + 人类遗产 {pierce}（中立协议）：派系 [{Tags(vPierce)}]，不算跨派系，出远征不计（暴露 {x1:0.#} → {s.SignalExposure:0.#}）");
+
+            // 3. 澄净 + 超频（两个异族阵营）：计，阵营取键序最小（clarity），与既有取值规则一致。
+            BlueprintVersionRecord vMix = SaveAndSpawn("fw01_mix", new[] { oil, clock }, out int mMix);
+            float x2 = s.SignalExposure;
+            bool mixGranted = CampaignExposureLedger.GrantAlienTechForExpedition(s, new[] { mMix }, FoundryOutpostLayout.RegionId, 23);
+            SignalExposureEventRecord mixEvent = CampaignExposureLedger.RecentEvents(s, 1).FirstOrDefault();
+            Expect(vMix != null && vMix.FactionTags.Contains(CampaignExposureLedger.FactionOverclock) && vMix.FactionTags.Contains(CampaignExposureLedger.FactionClarity)
+                   && mixGranted && Mathf.Abs(s.SignalExposure - x2 - 2f) < 1e-3f && mixEvent?.Faction == CampaignExposureLedger.FactionClarity,
+                $"归还底盘 + 澄净 {oil} + 超频 {clock}：派系 [{Tags(vMix)}]；出远征 +2（阵营 {mixEvent?.Faction}）");
+
+            // 4. 旧存档（修复前的版本存中文标签）：归还+超频 仍计，记在 overclock 名下。
+            if (vPierce != null)
+            {
+                vPierce.FactionTags = new[] { "归还", "超频" };
+            }
+            float x3 = s.SignalExposure;
+            bool legacyGranted = CampaignExposureLedger.GrantAlienTechForExpedition(s, new[] { mPierce }, FoundryOutpostLayout.RegionId, 24);
+            SignalExposureEventRecord legacyEvent = CampaignExposureLedger.RecentEvents(s, 1).FirstOrDefault();
+            Expect(legacyGranted && Mathf.Abs(s.SignalExposure - x3 - 2f) < 1e-3f && legacyEvent?.Faction == CampaignExposureLedger.FactionOverclock
+                   && CampaignExposureLedger.FactionKeyOfTag("澄净") == CampaignExposureLedger.FactionClarity
+                   && CampaignExposureLedger.FactionKeyOfTag("relic") == CampaignExposureLedger.FactionNone,
+                $"旧存档版本的中文派系标签（归还+超频）：照样计 +2、阵营 {legacyEvent?.Faction}；“澄净”→clarity，人类遗产 relic → none");
+
+            // 5. 与裸跑路径同一套阵营键：同一条澄净固件裸跑记在 clarity 名下（GrantRawFire 走 FactionOf）。
+            CampaignExposureLedger.GrantRawFire(s, oil);
+            SignalExposureEventRecord rawEvent = CampaignExposureLedger.RecentEvents(s, 1).FirstOrDefault();
+            Expect(rawEvent?.Kind == ExposureSourceKind.RawFire && rawEvent.Faction == oilEvent?.Faction,
+                $"同一条 {oil}：裸跑明细阵营（{rawEvent?.Faction}）与异派技术明细阵营（{oilEvent?.Faction}）一致");
+
+            // 6. 显示名走 faction.<key> 文本键，随语言切换；旧中文标签也按当前语言显示。
+            GameSettings.SetLanguage(GameLanguage.En);
+            string enClarity = BlueprintCircuitBoard.FactionDisplayName(CampaignExposureLedger.FactionClarity);
+            string enLegacy = BlueprintCircuitBoard.FactionDisplayName("超频");
+            GameSettings.SetLanguage(GameLanguage.ZhCn);
+            string zhClarity = BlueprintCircuitBoard.FactionDisplayName(CampaignExposureLedger.FactionClarity);
+            Expect(zhClarity == GameText.Get("faction.clarity", GameLanguage.ZhCn) && enClarity == GameText.Get("faction.clarity", GameLanguage.En)
+                   && enLegacy == GameText.Get("faction.overclock", GameLanguage.En) && zhClarity != enClarity && !GameText.ContainsMarker(enClarity)
+                   && !GameText.ContainsMarker(enLegacy),
+                $"派系显示名走文本键：澄净 中文“{zhClarity}” / 英文“{enClarity}”；旧标签“超频”在英文下显示“{enLegacy}”");
         }
 
         // ── F. 暴露改写（FGR-SIG-070）────────────────────────────────────────────

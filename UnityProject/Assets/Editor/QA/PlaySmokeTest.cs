@@ -1265,6 +1265,25 @@ namespace GameLogic.EditorTools
                 return;
             }
             Check(GameRoot.HomeValley != null && GameRoot.HomeValley.IsCircuitBoardPanelOpen, "电路板面板打开");
+            // FG2-FW-01：44 条固件入表后，电路面板的“未解锁”行只数没拿到的固件（不逐条列 40 个名字），固件下拉只列已解锁的、名字来自文本键。
+            {
+                GameObject circuitHost = GameObject.Find("[HomeValleyCircuitBoardHost]");
+                VisualElement circuitRoot = circuitHost != null ? circuitHost.GetComponent<UIDocument>()?.rootVisualElement : null;
+                string locked = circuitRoot?.Q<Label>("LockedContentHintLabel")?.text ?? string.Empty;
+                int lockedFw = Campaign.Content.FirmwareCatalog.All.Keys.Count(id => !Campaign.Content.MechanicalContentUnlock.IsUnlocked(CampaignSession.Current, id));
+                string coolant = Localization.GameText.Get("firmware.fw_coolant.name");
+                Check(Campaign.Content.FirmwareCatalog.All.Count == Campaign.Content.FirmwareCatalog.ExpectedCount && lockedFw > 0
+                      && locked.Contains(Localization.GameText.Format("circuit.locked_firmware_count", lockedFw)) && !locked.Contains(coolant)
+                      && !Localization.GameText.ContainsMarker(locked) && !FgFirmwareMigrationSelfCheck.InternalContentId.IsMatch(locked),
+                    $"电路面板“未解锁”行：{lockedFw} 条没拿到的固件只计数（“{locked}”），不列内部 ID");
+                // FG2-FW-01 修复轮：蓝图派系标签存阵营键，面板上显示 faction.<key> 文本（不漏出 reclaim / clarity 这类内部键）。
+                string summary = circuitRoot?.Q<Label>("CostSummaryLabel")?.text ?? string.Empty;
+                string factionLine = summary.Split('\n').FirstOrDefault(l => l.StartsWith("派系：")) ?? string.Empty;
+                string[] factionKeys = { "reclaim", "silent", "foundry", "clarity", "overclock" };
+                Check(factionLine.Length > 0 && !factionKeys.Any(k => factionLine.Contains(k)) && !Localization.GameText.ContainsMarker(factionLine)
+                      && (factionLine.Contains("无") || factionKeys.Any(k => factionLine.Contains(Localization.GameText.Get("faction." + k)))),
+                    $"电路面板派系行显示阵营名而不是内部键（“{factionLine}”）");
+            }
             TextField field = CircuitNameField();
             field?.Focus();
             SessionState.SetInt(K + "NotifyBefore", Notifications.NotificationCenter.History.Count);
@@ -1342,6 +1361,14 @@ namespace GameLogic.EditorTools
             string overload = Localization.GameText.Get("firmware.fw_overload.name");
             string choice = print?.choices?.FirstOrDefault(c => c.Contains(overload));
             Check(choice != null, $"刻印下拉里有过载（{string.Join("／", print?.choices ?? new System.Collections.Generic.List<string>())}）");
+            // FG2-FW-01：刻印下拉 = 当前可刻印的固件（至少基础蓝图库 4 条，没拿到的不列），每项是“种类标注 + 表里的名字”，不漏内部 ID 与缺失标记。
+            System.Collections.Generic.List<string> printable = Campaign.Signal.SignalCoreService.PrintableFirmware(CampaignSession.Current);
+            System.Collections.Generic.List<string> printChoices = print?.choices ?? new System.Collections.Generic.List<string>();
+            Check(printable.Count >= 4 && new[] { Campaign.Content.FirmwareCatalog.FwHomingId, Campaign.Content.FirmwareCatalog.FwOverloadId, Campaign.Content.FirmwareCatalog.FwSplitId, Campaign.Content.FirmwareCatalog.FwTrailId }.All(printable.Contains)
+                  && printable.Count < Campaign.Content.FirmwareCatalog.ExpectedCount && printChoices.Count == printable.Count
+                  && printable.All(id => printChoices.Any(c => c.EndsWith(" " + Campaign.Signal.FirmwareKinds.DisplayName(id), StringComparison.Ordinal)))
+                  && printChoices.All(c => !Localization.GameText.ContainsMarker(c) && !FgFirmwareMigrationSelfCheck.InternalContentId.IsMatch(c)),
+                $"刻印下拉只列可刻印的 {printable.Count} 条固件（{string.Join("、", printable.Select(Campaign.Signal.FirmwareKinds.DisplayName))}），名字来自文本键，没有内部 ID");
             if (print != null && choice != null)
             {
                 print.value = choice;

@@ -1004,6 +1004,7 @@ namespace GameLogic.UI.CircuitBoard
         private void RefreshLockedContentHint(CampaignState state)
         {
             var lines = new List<string>();
+            int lockedFirmware = 0;
             foreach (MechanicalContentDef def in MechanicalContentFacade.All.Values)
             {
                 if (!IsEquipCategory(def.Category) || MechanicalContentUnlock.IsUnlocked(state, def.Id))
@@ -1011,12 +1012,24 @@ namespace GameLogic.UI.CircuitBoard
                     continue;
                 }
                 ContentUnlockState cls = MechanicalContentUnlock.Classify(state, def.Id);
+                // FG2-FW-01（FG00 B12）：固件扩到 44 条后，没拿到的固件不逐条列名（一长串名字会把这行挤爆），
+                // 只数条数；已携回待解析的仍逐条列出（玩家下一步能做的事）。获取途径随 FG2-FW-05 固件库与图鉴显示。
+                if (def.Category == MechanicalContentCategory.Firmware && cls != ContentUnlockState.RetrievedPendingAnalysis)
+                {
+                    lockedFirmware++;
+                    continue;
+                }
                 string tag = cls == ContentUnlockState.RetrievedPendingAnalysis ? "已携回待解析" : "未知";
                 lines.Add($"{def.DisplayName}[{tag}]");
             }
-            _lockedContentHintLabel.text = lines.Count == 0
-                ? "全部外层内容已解锁。"
+            string text = lines.Count == 0
+                ? (lockedFirmware == 0 ? "全部外层内容已解锁。" : string.Empty)
                 : $"未解锁（不可选）：{string.Join("、", lines.OrderBy(s => s, StringComparer.Ordinal))}";
+            if (lockedFirmware > 0)
+            {
+                text = (text.Length > 0 ? text + " " : string.Empty) + Localization.GameText.Format("circuit.locked_firmware_count", lockedFirmware);
+            }
+            _lockedContentHintLabel.text = text;
         }
 
         private static bool IsEquipCategory(MechanicalContentCategory category) =>
@@ -1257,7 +1270,8 @@ namespace GameLogic.UI.CircuitBoard
             // FG1-SIG-05：反应按“你接入时能打出”判定（核心固件触发，AI 不用）。
             string reactionId = UplinkReactionReadiness.ReadyReactionId(state, _board);
 
-            string factionText = factions.Length == 0 ? "无" : string.Join("+", factions);
+            // FG2-FW-01 修复轮：派系标签是阵营键，显示走 faction.<key> 文本键（随语言切换）。
+            string factionText = factions.Length == 0 ? "无" : string.Join("+", factions.Select(BlueprintCircuitBoard.FactionDisplayName));
             string crossFactionNote = factions.Length >= 2 ? "（跨派系）" : string.Empty;
 
             string reactionNote;

@@ -475,7 +475,8 @@ namespace GameLogic.EditorTools
                 // FG0-ARCH-05 的世界生成四张表（WV/WP/WS/WT）由 FgWorldGenSelfCheck 逐字段比对。
                 // FG1-SIG-01 的固件种类表（FK）由 FgSignalCoreSelfCheck 逐字段比对。
                 // FG1-HUD-01 的机制图鉴条目表（CX）由 FgUplinkHudSelfCheck A 段逐字段比对。
-                if (f[0] == "G" || f[0] == "P" || f[0] == "L" || f[0] == "X" || f[0] == "H" || f[0] == "FK" || f[0] == "CX" || f[0].StartsWith("W", StringComparison.Ordinal))
+                // FG2-FW-01 的状态标签表（ST）与 44 条固件主表（FK 全部 25 列）由 FgFirmwareMigrationSelfCheck A 段逐字段比对。
+                if (f[0] == "G" || f[0] == "P" || f[0] == "L" || f[0] == "X" || f[0] == "H" || f[0] == "FK" || f[0] == "CX" || f[0] == "ST" || f[0].StartsWith("W", StringComparison.Ordinal))
                 {
                     continue;
                 }

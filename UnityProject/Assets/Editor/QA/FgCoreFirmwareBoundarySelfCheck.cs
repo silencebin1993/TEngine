@@ -220,15 +220,18 @@ namespace GameLogic.EditorTools
             bool aiPermission = FirmwareCatalog.All.All(kv => FirmwareKinds.IsCore(kv.Key)
                 ? kv.Value.AiPermission == MechanicalContentAiPermission.PlayerOnly
                 : kv.Value.AiPermission != MechanicalContentAiPermission.PlayerOnly);
-            Expect(catalogCore.SequenceEqual(new[] { FirmwareCatalog.FwMarkTagId, FirmwareCatalog.FwOverloadId }) && aiPermission
-                   && FirmwareKinds.CoreCooldownSeconds(FirmwareCatalog.FwOverloadId) > 0f && FirmwareKinds.CoreCooldownSeconds(FirmwareCatalog.FwMarkTagId) > 0f,
-                $"固件目录里的核心固件 = 过载、标记跳转（正式表，不注入），冷却 {FirmwareKinds.CoreCooldownSeconds(FirmwareCatalog.FwOverloadId)} / {FirmwareKinds.CoreCooldownSeconds(FirmwareCatalog.FwMarkTagId)} 秒；" +
+            // FG2-FW-01：44 条固件全部迁入目录，6 条核心固件的本体都在目录里（DEBT-FG1SIG05-01 关闭）。
+            Expect(new HashSet<string>(catalogCore).SetEquals(expected.Keys) && catalogCore.Count == 6 && aiPermission
+                   && catalogCore.All(id => FirmwareKinds.CoreCooldownSeconds(id) > 0f),
+                $"固件目录里的核心固件 = 6 条（正式表，不注入）：{string.Join("、", catalogCore.Select(FirmwareKinds.DisplayName))}，冷却都 > 0 秒；" +
                 "目录的 AI 许可与种类一致（核心 = 仅玩家，常规 ≠ 仅玩家）");
 
-            string[] future = { "fw_capacitor", "fw_swarm", "fw_amplify", "fw_execute" };
-            Expect(future.All(id => !FirmwareCatalog.TryGet(id, out _) && FirmwareKinds.KindOf(id) == FirmwareKind.NotFirmware
-                                    && FirmwareKinds.Rows.Any(r => r.Id == id && r.Kind == "core")),
-                "另外 4 条（电容蓄力、集群协议、反应增幅、处决）的种类行已就位、固件本体还不在目录里（FG2-FW-01 加进目录即是核心，现在不影响任何玩法）");
+            string[] migrated = { FirmwareCatalog.FwCapacitorId, FirmwareCatalog.FwSwarmId, FirmwareCatalog.FwAmplifyId, FirmwareCatalog.FwExecuteId };
+            Expect(migrated.All(id => FirmwareCatalog.TryGet(id, out _) && FirmwareKinds.KindOf(id) == FirmwareKind.Core
+                                      && !FirmwareKinds.CanInstall(CampaignSession.Current, id, FirmwareHost.MachineCircuit, out _)
+                                      && !FirmwareKinds.CanInstall(CampaignSession.Current, id, FirmwareHost.Turret, out _)
+                                      && FirmwareKinds.CanInstall(CampaignSession.Current, id, FirmwareHost.SignalCore, out _)),
+                "FG2-FW-01 迁入的 4 条（电容蓄力、集群协议、反应增幅、处决）在目录里即是核心：装不进机器电路和炮塔，只能放进信号核（FGT-FW-002）");
         }
 
         // ── B. AI 边界（FGR-SIG-090，FGT-SIG-011 对照）──────────────────────────

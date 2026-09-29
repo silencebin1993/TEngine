@@ -68,6 +68,10 @@ namespace GameLogic.Campaign
         public const string FactionNone = "none";
         public const string FactionSilent = "silent";
         public const string FactionFoundry = "foundry";
+        /// <summary>FG2-FW-01：流体类敌方固件的来源阵营（fg.TbFirmwareKind faction）。</summary>
+        public const string FactionClarity = "clarity";
+        /// <summary>FG2-FW-01：限制器类敌方固件的来源阵营（fg.TbFirmwareKind faction）。</summary>
+        public const string FactionOverclock = "overclock";
 
         // ── 调参（fg.TbHomeTuning，数据源 tools/cell_tables/fgdata_signal.py）──────────────
 
@@ -258,12 +262,18 @@ namespace GameLogic.Campaign
             return TryApplyOnce(state, $"exposure:alien_tech:{regionId}:{expeditionCount}", ExposureSourceKind.AlienTech, alien, alien, AlienTechDelta);
         }
 
-        /// <summary>蓝图版本的派系标签（中文，<c>BlueprintCircuitBoard.ComputeFactionTags</c>）→ 阵营键。</summary>
+        /// <summary>
+        /// 蓝图版本的派系标签 → 阵营键。FG2-FW-01 修复轮起 <c>BlueprintCircuitBoard.ComputeFactionTags</c> 直接存阵营键
+        /// （reclaim / silent / foundry / clarity / overclock）；此前的版本存的是中文标签（归还 / 静默 / 铸造 / 澄净 / 超频），
+        /// 旧存档照样读——两种写法都归一到同一个键。人类遗产（relic，中立协议）与未知值不算派系（none）。
+        /// </summary>
         public static string FactionKeyOfTag(string tag) => tag switch
         {
-            "归还" => FirmwareKinds.FactionReclaim,
-            "静默" => FactionSilent,
-            "铸造" => FactionFoundry,
+            FirmwareKinds.FactionReclaim or "归还" => FirmwareKinds.FactionReclaim,
+            FactionSilent or "静默" => FactionSilent,
+            FactionFoundry or "铸造" => FactionFoundry,
+            FactionClarity or "澄净" => FactionClarity,
+            FactionOverclock or "超频" => FactionOverclock,
             _ => FactionNone,
         };
 

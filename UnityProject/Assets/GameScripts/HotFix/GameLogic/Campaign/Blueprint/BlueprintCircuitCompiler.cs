@@ -100,6 +100,13 @@ namespace GameLogic.Campaign.Blueprint
         /// <summary>FG1-SIG-06（FGR-SIG-061）：裸跑时这台机器武器的积热倍率（同类已破解固件的 1.5 倍，fg.TbHomeTuning signal.raw.heat_multiplier）；
         /// 没有裸跑为 1。<see cref="HeatBudget"/> 已乘上；战斗内核的每发积热（CombatSite.MachineWeaponFrom）读这里，预览与实战同一个数。</summary>
         public float RawHeatMultiplier = 1f;
+
+        /// <summary>FG2-FW-01（FGR-FW-001“热量”）：生效固件自己带来的每发积热（表 heat 列之和，未乘裸跑倍率；重炮 + 过载时过载一项由熔穿过载取代）。
+        /// 重炮的内核每发积热 = (基础 40 + 本值) × <see cref="RawHeatMultiplier"/>（CombatSite.MachineWeaponFrom），与 <see cref="HeatBudget"/> 同一规则。</summary>
+        public float FirmwareHeatPerShot;
+
+        /// <summary>FG2-FW-01（FGR-FW-001“能耗”、FG-GAP-028）：生效固件每发耗电之和（表 power 列）。双态预览两栏与差异各有一行。</summary>
+        public int PowerCost;
     }
 
     /// <summary>ER4-PRIM-02 STORY-EXECUTION-CARDS.md 第2条正式电路板"通用预览"的编译入口——
@@ -157,6 +164,8 @@ namespace GameLogic.Campaign.Blueprint
             preview.RawFirmwareIds = FirmwareKinds.RawOf(CampaignSession.Current, uplinkEffective);
             preview.RawHeatMultiplier = preview.RawFirmwareIds.Length > 0 ? RawFirmwareService.HeatMultiplier : 1f;
             preview.HeatBudget = BlueprintCircuitBoard.ComputeHeatBudget(board.PrimaryId, preview.FirmwareIds) * preview.RawHeatMultiplier;
+            preview.FirmwareHeatPerShot = BlueprintCircuitBoard.ComputeFirmwareHeat(board.PrimaryId, preview.FirmwareIds);
+            preview.PowerCost = BlueprintCircuitBoard.ComputePowerCost(preview.FirmwareIds);
 
             // ER6-REACT-01/02：反应/标记/重炮/散热鳍这几个标志只是"电路板外层槽装了什么"的直接读取，
             // 与下面"ComposeEngine 能不能真的编出一条 source→sink 路径"完全无关，必须放在任何早退

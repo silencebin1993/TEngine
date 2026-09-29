@@ -12,9 +12,25 @@ namespace GameLogic.Campaign.Content
     /// 并提供真实生产代码（<c>WorkOrderPanelUIToolkit</c> 等）可以直接调用的展示名解析。</summary>
     public static class MechanicalContentFacade
     {
-        /// <summary>全部 35 条内容目录条目，按 Id 唯一索引。静态构造期一次性合并，若任意两张子表出现
-        /// 重复 Id 会抛异常——这是本 Story 明确要求的"封闭目录"完整性自检，不应该被静默吞掉。</summary>
-        public static readonly IReadOnlyDictionary<string, MechanicalContentDef> All = BuildAll();
+        /// <summary>全部内容目录条目，按 Id 唯一索引。若任意两张子表出现重复 Id 会抛异常——这是"封闭目录"完整性自检，
+        /// 不应该被静默吞掉。FG2-FW-01：固件子表改由 Luban 表生成（44 条），固件目录版本变化（表重载 / 测试注入 / 切换语言）时
+        /// 下一次访问重新合并，其余子表是静态的。</summary>
+        public static IReadOnlyDictionary<string, MechanicalContentDef> All
+        {
+            get
+            {
+                int rev = FirmwareCatalog.Revision;
+                if (_all == null || rev != _allRevision)
+                {
+                    _all = BuildAll();
+                    _allRevision = rev;
+                }
+                return _all;
+            }
+        }
+
+        private static Dictionary<string, MechanicalContentDef> _all;
+        private static int _allRevision = int.MinValue;
 
         private static Dictionary<string, MechanicalContentDef> BuildAll()
         {
@@ -43,7 +59,7 @@ namespace GameLogic.Campaign.Content
 
         public static bool TryGet(string id, out MechanicalContentDef def) => All.TryGetValue(id, out def);
 
-        /// <summary>供审计用：按类别统计条数，供 execute_code 一次性断言 3/4/2/4/6/2/6/8 齐全。</summary>
+        /// <summary>供审计用：按类别统计条数（FG2-FW-01 起固件 44 条）。</summary>
         public static int CountByCategory(MechanicalContentCategory category) =>
             All.Values.Count(d => d.Category == category);
 
