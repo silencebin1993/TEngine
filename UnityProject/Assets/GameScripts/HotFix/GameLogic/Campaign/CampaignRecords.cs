@@ -249,6 +249,12 @@ namespace GameLogic.Campaign
         /// 变成原建筑本身（设置保留）。施工完成前原建筑照常运转；取消虚影 = 取消搬迁，原建筑不受影响。
         /// 旧存档没有这个字段时 JsonUtility 补 null（= 普通建筑），无需迁移。唯一写入口是 <see cref="Grid.HomeGridService.TryRelocate"/>。</summary>
         public string RelocateFromId;
+        /// <summary>FG3-LOG-02（FGR-LOG-006 虚影施工）：这座虚影施工一共要多少材料（废料）。放置时按建造表写入；搬迁虚影为 0（材料就是原建筑本身）。
+        /// 建成后清零（投入记在 <see cref="InvestedScrap"/>）。旧存档没有这个字段时为 0，读档时由 <see cref="Regions.HomeValleyConstruction.MigrateLegacyBuildOrder"/> 按旧的“放置即预留”补齐。</summary>
+        public int ConstructionRequired;
+        /// <summary>FG3-LOG-02：机器已经从仓库运到现场、放进这座虚影的材料（累计）。施工进度不能超过“已到材料 / 所需材料”；
+        /// 取消虚影时这部分全额退回（仓库满了就变成地面物，机器之后搬走）；施工中被摧毁时已消耗部分按比例掉落为地面物。</summary>
+        public int ConstructionDelivered;
     }
 
     /// <summary>ER3-STO-01：ERD-ECO-003 地面物——独立于仓库/核心缓存/机器货舱的第三类存放位置。
@@ -480,6 +486,11 @@ namespace GameLogic.Campaign
         public float Duration;
         /// <summary>FG0-ARCH-06：这张工单已经发过一次“无法到达”通知（之后 30 秒一次的重试不再刷屏；随存档保留，读档后也不重复发）。</summary>
         public bool UnreachableNotified;
+        /// <summary>FG3-LOG-02（FGR-LOG-006 机器取料施工）：施工单当前这一腿。0 = 去现场施工（旧存档与搬迁虚影恒为 0）；
+        /// 1 = 先去仓库取材料（到了仓库装货后转为 0，再去现场）。随存档保留，读档后机器按这一腿续走。</summary>
+        public int Leg;
+        /// <summary>FG3-LOG-02：这张施工单已经从仓库取过几趟材料（取料的资源事务 ID 按它编号，读档重放也不重号）。</summary>
+        public int FetchCount;
     }
 
     /// <summary>ERD-FAC-001 工厂队列项。</summary>

@@ -110,6 +110,28 @@ namespace GameLogic.Campaign
         /// <summary>FG3-LOG-01（FGR-LOG-002 快捷栏）：10 个快捷栏格子里放的条目 ID（建筑类型 ID 或建造菜单工具 ID，空串 = 空格子）。
         /// 跟着存档走（每局解锁的东西不同）；旧存档没有这个字段时为 null，读取时按全空处理（<see cref="Grid.BuildCatalog"/>）。</summary>
         public string[] Hotbar;
+        /// <summary>FG3-LOG-02（FGR-LOG-006；DEBT-FG3LOG01-01）：规划中的传送带（虚影）。一次拖拽 = 一份规划 + 一张施工单；
+        /// 机器取料施工，按路径顺序一格一格建成、进传送带内核。旧存档没有这个字段时为 null（= 没有规划）。唯一写入口 <see cref="Regions.HomeValleyConstruction"/>。</summary>
+        public PlannedBeltRecord[] PlannedBelts;
+        /// <summary>传送带规划的编号（单调递增，读档后继续往后编）。</summary>
+        public int NextBeltPlanSerial = 1;
+    }
+
+    /// <summary>FG3-LOG-02：一份规划中的传送带（一次拖拽铺设）。格按路径顺序；<see cref="CellState"/>：0 = 规划中，1 = 已建成（已进内核），2 = 已取消。
+    /// 材料按格计价（<see cref="ScrapPerCell"/>）：还没建成的格子要的材料 = 未建格数 × 单价；<see cref="Delivered"/> 是运到现场、还没被建成的格子用掉的材料。</summary>
+    [Serializable]
+    public sealed class PlannedBeltRecord
+    {
+        public string PlanId;
+        public int Tier;
+        public int ScrapPerCell;
+        public int[] Xs = Array.Empty<int>();
+        public int[] Ys = Array.Empty<int>();
+        /// <summary>每格朝向（BeltDir：0 北 1 东 2 南 3 西）。</summary>
+        public int[] Dirs = Array.Empty<int>();
+        public int[] CellState = Array.Empty<int>();
+        /// <summary>已运到现场、尚未被建成格子用掉的材料（废料）。</summary>
+        public int Delivered;
     }
 
     /// <summary>一块已探索的圆形区域（格网坐标）。</summary>

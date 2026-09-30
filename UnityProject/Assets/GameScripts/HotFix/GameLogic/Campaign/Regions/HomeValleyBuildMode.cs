@@ -46,6 +46,8 @@ namespace GameLogic.Campaign.Regions
             DemolishBox,
             /// <summary>空闲状态下按住一座建筑拖到新位置（搬迁）。</summary>
             Relocate,
+            /// <summary>FG3-LOG-02：“优先建造这一片”模式下拉框。</summary>
+            PrioritizeBox,
         }
 
         private static readonly GameActionId[] HotbarActions =
@@ -60,6 +62,12 @@ namespace GameLogic.Campaign.Regions
         public bool RelocateMode { get; private set; }
         /// <summary>搬迁模式里已经点起来、正跟着鼠标的建筑（还没放下时为 null）。</summary>
         public string CarryBuildingId { get; private set; }
+        /// <summary>FG3-LOG-02（FG03 第 4 节“优先建造这一片”）：拖框把框里的施工改成最高优先级。</summary>
+        public bool PrioritizeMode { get; private set; }
+        /// <summary>“优先建造这一片”拉框时框里的施工现场数（没在拉框时为 -1）。</summary>
+        public int PrioritizeBoxCount { get; private set; } = -1;
+        public GridCell PrioritizeBoxMin { get; private set; }
+        public GridCell PrioritizeBoxMax { get; private set; }
         public string SelectedTypeId { get; private set; }
         /// <summary>FG3-LOG-01：选中的建造菜单工具（传送带）。与 <see cref="SelectedTypeId"/> 互斥。</summary>
         public string SelectedToolId { get; private set; }
@@ -139,6 +147,7 @@ namespace GameLogic.Campaign.Regions
             IsOpen = true;
             DemolishMode = false;
             RelocateMode = false;
+            PrioritizeMode = false;
             CarryBuildingId = null;
             SelectedTypeId = null;
             SelectedToolId = null;
@@ -163,6 +172,7 @@ namespace GameLogic.Campaign.Regions
             IsOpen = false;
             DemolishMode = false;
             RelocateMode = false;
+            PrioritizeMode = false;
             CarryBuildingId = null;
             SelectedTypeId = null;
             SelectedToolId = null;
@@ -187,6 +197,7 @@ namespace GameLogic.Campaign.Regions
             SelectedToolId = tool ? entryId : null;
             DemolishMode = false;
             RelocateMode = false;
+            PrioritizeMode = false;
             CarryBuildingId = null;
             CancelDrag();
             _previewKey = int.MinValue;
@@ -218,6 +229,7 @@ namespace GameLogic.Campaign.Regions
                 SelectedTypeId = null;
                 SelectedToolId = null;
                 RelocateMode = false;
+                PrioritizeMode = false;
                 CarryBuildingId = null;
                 Preview = null;
             }
@@ -240,8 +252,32 @@ namespace GameLogic.Campaign.Regions
                 SelectedTypeId = null;
                 SelectedToolId = null;
                 DemolishMode = false;
+                PrioritizeMode = false;
             }
             Preview = null;
+            CancelDrag();
+            _previewKey = int.MinValue;
+            Revision++;
+        }
+
+        /// <summary>FG3-LOG-02：“优先建造这一片”模式开关（按钮与快捷键同一路径）。进入时退出放置 / 拆除 / 搬迁。</summary>
+        public void SetPrioritizeMode(bool on)
+        {
+            if (on && !IsOpen)
+            {
+                Open();
+            }
+            PrioritizeMode = on;
+            if (on)
+            {
+                SelectedTypeId = null;
+                SelectedToolId = null;
+                DemolishMode = false;
+                RelocateMode = false;
+                CarryBuildingId = null;
+                Preview = null;
+                SetStatus(GameText.Get("ui.build.prioritize_mode"), false);
+            }
             CancelDrag();
             _previewKey = int.MinValue;
             Revision++;
@@ -359,7 +395,7 @@ namespace GameLogic.Campaign.Regions
                         CancelText = GameText.Get("ui.build.confirm_cancel"),
                         OnConfirm = () => Report(HomeGridService.TryToggleDemolish(CampaignSession.Current, id), CampaignSession.Current, DemolishFailKey),
                     };
-                    req.Consequences.Add(GameText.Format("ui.build.confirm_refund", target.InvestedScrap / 2));
+                    req.Consequences.Add(GameText.Format("ui.build.confirm_refund", target.InvestedScrap)); // FG3-LOG-02：全额返还。
                     if (GridContent.TryGetBuilding(target.BuildingTypeId, out BuildingGrid tg) && tg.Critical == 1)
                     {
                         req.Lines.Add(GameText.Get("ui.build.confirm_critical"));
@@ -444,6 +480,11 @@ namespace GameLogic.Campaign.Regions
                 BeginDrag(DragKind.Belt, cell, state);
                 return;
             }
+            if (PrioritizeMode)
+            {
+                BeginDrag(DragKind.PrioritizeBox, cell, state);
+                return;
+            }
             if (DemolishMode && HomeGridService.BuildingAt(state, cell) == null)
             {
                 BeginDrag(DragKind.DemolishBox, cell, state);
@@ -494,6 +535,9 @@ namespace GameLogic.Campaign.Regions
                     }
                     CommitDemolishBox(state, HomeGridService.PlanDemolishBox(state, start, cell));
                     break;
+                case DragKind.PrioritizeBox:
+                    CommitPrioritize(state, start, cell);
+                    break;
                 case DragKind.Relocate:
                     // 空闲状态下拖着搬迁至少要拖出 2 格（切比雪夫距离）：点一下时手抖跨了一格边界不会误搬（要挪 1 格用搬迁模式）。
                     if (dragBuilding != null && Math.Max(Math.Abs(cell.X - start.X), Math.Abs(cell.Y - start.Y)) >= IdleDragMinCells)
@@ -520,13 +564,14 @@ namespace GameLogic.Campaign.Regions
 
         private void CancelDrag()
         {
-            if (Drag == DragKind.None && BeltPlan == null && BoxPlan == null)
+            if (Drag == DragKind.None && BeltPlan == null && BoxPlan == null && PrioritizeBoxCount < 0)
             {
                 return;
             }
             Drag = DragKind.None;
             BeltPlan = null;
             BoxPlan = null;
+            PrioritizeBoxCount = -1;
             _dragBuildingId = null;
             InputRouter.BuildDragActive = false;
             Revision++;
@@ -544,6 +589,11 @@ namespace GameLogic.Campaign.Regions
                     break;
                 case DragKind.DemolishBox:
                     BoxPlan = HomeGridService.PlanDemolishBox(state, DragStart, end, _boxBuffer);
+                    break;
+                case DragKind.PrioritizeBox:
+                    PrioritizeBoxMin = new GridCell(Math.Min(DragStart.X, end.X), Math.Min(DragStart.Y, end.Y));
+                    PrioritizeBoxMax = new GridCell(Math.Max(DragStart.X, end.X), Math.Max(DragStart.Y, end.Y));
+                    PrioritizeBoxCount = HomeValleyConstruction.CountSitesInBox(state, DragStart, end);
                     break;
                 case DragKind.Relocate:
                     if (_dragBuildingId != null && Math.Max(Math.Abs(end.X - DragStart.X), Math.Abs(end.Y - DragStart.Y)) >= IdleDragMinCells)
@@ -565,6 +615,23 @@ namespace GameLogic.Campaign.Regions
                     break;
             }
             Revision++;
+        }
+
+        /// <summary>FG3-LOG-02：“优先建造这一片”收尾——框（起点 = 终点时就是这一格）里的施工改成最高优先级，状态行写明改了几处。</summary>
+        private void CommitPrioritize(CampaignState state, GridCell a, GridCell b)
+        {
+            int changed = HomeValleyConstruction.PrioritizeArea(state, a, b);
+            LastResult = changed > 0 ? new GridOpResult(GridOpResult.Kind.Prioritized, null) : GridOpResult.Fail(GridReason.Of(GridBlockReason.NoBuilding));
+            if (changed > 0)
+            {
+                SetStatus(GameText.Format("ui.build.prioritize_done", changed), false);
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.CommandAck, StatusText);
+            }
+            else
+            {
+                SetStatus(GameText.Get("ui.build.prioritize_none"), true);
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Denied, StatusText);
+            }
         }
 
         /// <summary>框选拆除收尾：空框给提示；超过 grid.batch_demolish_confirm 座或含关键建筑时先确认（写明数量与关键建筑名），否则直接执行。</summary>
@@ -659,6 +726,10 @@ namespace GameLogic.Campaign.Regions
             {
                 ClearSelection();
             }
+            else if (PrioritizeMode)
+            {
+                SetPrioritizeMode(false);
+            }
             else if (RelocateMode)
             {
                 SetRelocateMode(false);
@@ -693,6 +764,10 @@ namespace GameLogic.Campaign.Regions
                     {
                         SetRelocateMode(true);
                     }
+                    else if (InputRouter.ConsumeAction(GameActionId.ConstructionQueue, InputScope.Strategy))
+                    {
+                        ConstructionQueuePanelUIToolkit.Toggle(); // FG3-LOG-02：战略视角也能打开施工队列。
+                    }
                     else
                     {
                         ConsumeHotbarKeys(state);
@@ -725,6 +800,14 @@ namespace GameLogic.Campaign.Regions
             if (InputRouter.ConsumeAction(GameActionId.ToggleGridLines, InputScope.Strategy))
             {
                 ToggleGridLines();
+            }
+            if (InputRouter.ConsumeAction(GameActionId.PrioritizeArea, InputScope.Strategy))
+            {
+                SetPrioritizeMode(!PrioritizeMode);
+            }
+            if (InputRouter.ConsumeAction(GameActionId.ConstructionQueue, InputScope.Strategy))
+            {
+                ConstructionQueuePanelUIToolkit.Toggle();
             }
             ConsumeHotbarKeys(state);
             if (InputRouter.ConsumeAction(GameActionId.Rotate, InputScope.Strategy))
@@ -915,7 +998,7 @@ namespace GameLogic.Campaign.Regions
             switch (r.Outcome)
             {
                 case GridOpResult.Kind.Placed:
-                    SetStatus(GameText.Format("ui.build.placed", name), false);
+                    SetStatus(GameText.Format("ui.build.placed_ghost", name), false);
                     Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.CommandAck, StatusText);
                     break;
                 case GridOpResult.Kind.Rotated:
@@ -948,11 +1031,12 @@ namespace GameLogic.Campaign.Regions
                     Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.CommandAck, StatusText);
                     break;
                 case GridOpResult.Kind.BeltsPlaced:
-                    SetStatus(GameText.Format("ui.build.belts_placed", HomeGridService.LastBeltCount, HomeGridService.LastBeltScrap), false);
+                    SetStatus(GameText.Format("ui.build.belts_planned", HomeGridService.LastBeltCount, HomeGridService.LastBeltScrap), false);
                     Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.CommandAck, StatusText);
                     break;
                 case GridOpResult.Kind.BeltsRemoved:
-                    SetStatus(GameText.Format("ui.build.belts_removed", HomeGridService.LastBeltCount, HomeGridService.LastBeltScrap), false);
+                    SetStatus(GameText.Format("ui.build.belts_removed_full", HomeGridService.LastBeltCount, HomeGridService.LastBeltScrap,
+                        HomeGridService.LastBeltItemsReturned, HomeGridService.LastPlannedBeltsCancelled), false);
                     Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.UiClick);
                     break;
                 default:
@@ -1148,6 +1232,11 @@ namespace GameLogic.Campaign.Regions
             {
                 showBox = true;
                 PlaceBox(BoxPlan.Min, BoxPlan.Max);
+            }
+            else if (Drag == DragKind.PrioritizeBox && PrioritizeBoxCount >= 0)
+            {
+                showBox = true;
+                PlaceBox(PrioritizeBoxMin, PrioritizeBoxMax);
             }
             else if (Preview != null)
             {

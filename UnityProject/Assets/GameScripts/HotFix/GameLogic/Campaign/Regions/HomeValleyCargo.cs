@@ -95,6 +95,10 @@ namespace GameLogic.Campaign.Regions
             return state?.GroundItems?.FirstOrDefault(g => g.GroundItemId == groundItemId);
         }
 
+        /// <summary>家园仓库能不能存这种资源（目前只有废料；物品表接入在 FG4-ECO-01，见 DEBT-FG3LOG02-01）。
+        /// 与 <see cref="CommitHaul"/> 的拒绝条件同源，搬运下令与交付前都先问这里。</summary>
+        public static bool CanStore(string resourceType) => resourceType == CampaignEconomyLedger.ResourceScrap;
+
         public static GroundItemRecord FindGroundItemBySalvageId(CampaignState state, string salvageInstanceId)
         {
             return state?.GroundItems?.FirstOrDefault(g => g.SalvageInstanceId == salvageInstanceId);
@@ -172,8 +176,11 @@ namespace GameLogic.Campaign.Regions
             {
                 return StoreResult.Fail("invalid-ticket");
             }
-            if (ticket.ResourceType != CampaignEconomyLedger.ResourceScrap)
+            if (!CanStore(ticket.ResourceType))
             {
+                // FG3-LOG-02：与仓满同样放回地面（票据预留时已从地面移除，直接返回失败会让物品凭空消失）。
+                SpawnGroundItem(state, ticket.RegionId ?? HomeValleyLayout.RegionId, ticket.SourcePosition,
+                    ticket.ResourceType, ticket.Amount, ticket.SalvageInstanceId);
                 return StoreResult.Fail($"unsupported-resource-type:{ticket.ResourceType}");
             }
 

@@ -85,6 +85,16 @@ namespace GameLogic.Core
         public const string BuildFirstHotbar = "build.hotbar.first_assign";
         /// <summary>FG3-LOG-01：第一次拖拽铺设（两格以上，FGR-LOG-004）。</summary>
         public const string BuildFirstDrag = "build.drag.first";
+        /// <summary>FG3-LOG-02：第一次放下施工虚影（建筑或传送带，FGR-LOG-006）。</summary>
+        public const string BuildFirstGhost = "build.ghost.first";
+        /// <summary>FG3-LOG-02：第一次有虚影在等材料（FGR-LOG-006“等待材料”）。</summary>
+        public const string BuildFirstWaitingMaterials = "build.ghost.first_waiting";
+        /// <summary>FG3-LOG-02：第一次出现“有施工单却没有劳动力”（FG04 负向“家园没有劳动力”）。</summary>
+        public const string BuildFirstNoLabor = "build.labor.first_none";
+        /// <summary>FG3-LOG-02：第一次打开施工队列。</summary>
+        public const string BuildQueueFirstOpen = "build.queue.first_open";
+        /// <summary>FG3-LOG-02：第一次“优先建造这一片” / 在队列里调整优先级。</summary>
+        public const string BuildFirstPrioritize = "build.priority.first";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -106,6 +116,7 @@ namespace GameLogic.Core
             FirmwareRestoreFirstDone,
             StrategicMapFirstOpen, NewGameSetupFirstOpen, MapMarkerFirstAdded,
             BuildFirstRelocate, BuildFirstBatchDemolish, BuildFirstHotbar, BuildFirstDrag,
+            BuildFirstGhost, BuildFirstWaitingMaterials, BuildFirstNoLabor, BuildQueueFirstOpen, BuildFirstPrioritize,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

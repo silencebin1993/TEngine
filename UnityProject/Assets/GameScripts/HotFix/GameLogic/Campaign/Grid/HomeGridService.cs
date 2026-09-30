@@ -102,6 +102,8 @@ namespace GameLogic.Campaign.Grid
                 _recordsRef = null;
                 // FG0-ARCH-02：传送带层是派生缓存（真相在传送带内核），新图建好就套回去——否则换图后建筑能压到带上、有带的区块会被回收。
                 Logistics.BeltNetworkService.ApplyGridLayer(state, _map);
+                // FG3-LOG-02：规划中的传送带（虚影）同样占着传送带层（标记值带“规划”位），换图后一并套回。
+                HomeValleyConstruction.ApplyPlannedBelts(state, _map);
             }
             if (!ReferenceEquals(_recordsRef, state.BuildingRecords))
             {
@@ -638,10 +640,11 @@ namespace GameLogic.Campaign.Grid
                 r.Warnings.Add(Localization.GameText.Format("grid.warn.pollution", lightPolluted, lightLevel));
             }
 
+            // FG3-LOG-02（FGR-LOG-003“不足也允许放置虚影”、FGR-LOG-006）：库存不够不再拦截——只警告，放下后虚影等材料，有货自动开工。
             if (checkCost && r.ScrapCost > 0 && state.Scrap < r.ScrapCost)
             {
-                r.Add(new GridReason(GridBlockReason.InsufficientScrap, "grid.reason.insufficient_scrap",
-                    r.ScrapCost.ToString(), Mathf.FloorToInt(state.Scrap).ToString()));
+                r.Warnings.Add(Localization.GameText.Format("grid.warn.short_materials", r.ScrapCost.ToString(),
+                    Mathf.FloorToInt(state.Scrap).ToString(), (r.ScrapCost - Mathf.FloorToInt(state.Scrap)).ToString()));
             }
             return r;
         }
@@ -823,6 +826,7 @@ namespace GameLogic.Campaign.Grid
             MapFor(state); // 记录数组已替换 → 立即重建占用（下一次查询就能看到新建筑）。
             ClaimFootprint(state, check.Cells); // FG-GAP-015：压在新建筑占地上的地面物、机器挪到最近的空格。
             Core.GuidanceHooks.Raise(Core.GuidanceHooks.FirstPlacement);
+            Core.GuidanceHooks.Raise(Core.GuidanceHooks.BuildFirstGhost); // FG3-LOG-02：放下的是施工虚影。
             return new GridOpResult(GridOpResult.Kind.Placed, buildingId, check);
         }
 

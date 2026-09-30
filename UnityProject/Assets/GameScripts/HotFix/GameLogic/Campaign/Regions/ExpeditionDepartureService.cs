@@ -526,6 +526,35 @@ namespace GameLogic.Campaign.Regions
             public bool Success => Outcome == DepartureOutcome.Success;
         }
 
+        /// <summary>
+        /// 出发确认后中断名单里机器手上的工单（<see cref="TryDepart"/> 唯一调用，拆出来给自检直接驱动）：
+        /// 施工单 → 只让出（FG3-LOG-02，FGR-BASE-020 / FG-GAP-063：货舱材料退回仓库、施工单回到待分配池由留守的机器接着干，不撤销玩家的虚影）；
+        /// 其余工单 → 按玩家取消处理（资源退款、货舱落地，既有规则）。
+        /// </summary>
+        public static void InterruptWorkForDeparture(CampaignState state, IReadOnlyList<int> logicIds)
+        {
+            if (state == null || logicIds == null)
+            {
+                return;
+            }
+            foreach (int logicId in logicIds)
+            {
+                WorkOrderRecord order = HomeValleyWorkOrders.FindActiveOrderForMachine(state, logicId);
+                if (order == null)
+                {
+                    continue;
+                }
+                if (order.Kind == WorkOrderKind.Build)
+                {
+                    HomeValleyWorkOrders.YieldToPool(state, logicId);
+                    continue;
+                }
+                Vector2 dropPos = MachineRegistry.TryGetRecord(logicId, out MachineRecord busyRecord)
+                    ? busyRecord.WorldPosition : Vector2.zero;
+                HomeValleyWorkOrders.CancelOrder(state, order.WorkOrderId, dropPos);
+            }
+        }
+
         /// <summary>唯一出发事务入口。<paramref name="interruptConfirmed"/>＝false 且存在可中断在办工作时，
         /// 不做任何改动，返回 <see cref="DepartureOutcome.NeedsInterruptConfirmation"/> 连同将被中断的
         /// LogicId 列表，供 UI 弹确认框；玩家确认后调用方带 true 重新调用本方法。
@@ -577,17 +606,7 @@ namespace GameLogic.Campaign.Regions
                 CampaignState state = CampaignSession.Current;
 
                 // ── 中断已确认的在办工作（交还货物/退款，见 CancelOrder 类注释）──────────
-                foreach (int logicId in validation.BusyInterruptibleLogicIds)
-                {
-                    WorkOrderRecord order = HomeValleyWorkOrders.FindActiveOrderForMachine(state, logicId);
-                    if (order == null)
-                    {
-                        continue;
-                    }
-                    Vector2 dropPos = MachineRegistry.TryGetRecord(logicId, out MachineRecord busyRecord)
-                        ? busyRecord.WorldPosition : Vector2.zero;
-                    HomeValleyWorkOrders.CancelOrder(state, order.WorkOrderId, dropPos);
-                }
+                InterruptWorkForDeparture(state, validation.BusyInterruptibleLogicIds);
 
                 // ── 自动安全存档＝出发前档（回滚基线）───────────────────────────────
                 SaveResult saveResult = CampaignAutoSaveService.SaveAuto(SaveReason.ExpeditionDepartConfirm);

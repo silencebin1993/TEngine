@@ -187,6 +187,9 @@ namespace GameLogic.Campaign.Grid
             BeltsPlaced,
             BeltsRemoved,
             BatchDemolished,
+            // ── FG3-LOG-02 ──
+            /// <summary>“优先建造这一片”：框里的施工改成了最高优先级。</summary>
+            Prioritized,
         }
 
         public readonly Kind Outcome;

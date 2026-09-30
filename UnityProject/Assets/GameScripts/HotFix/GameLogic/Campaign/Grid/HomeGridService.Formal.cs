@@ -554,17 +554,14 @@ namespace GameLogic.Campaign.Grid
                     plan.Reason = cellCheck.Reasons[0];
                 }
             }
-            if (plan.Reason == null && state.Scrap < plan.TotalCost)
-            {
-                plan.Reason = new GridReason(GridBlockReason.InsufficientScrap, "grid.reason.insufficient_scrap",
-                    plan.TotalCost.ToString(), state.Scrap.ToString());
-            }
+            // FG3-LOG-02（FGR-LOG-003 / 006）：库存不够不再拦截拖拽——放下的是虚影，机器取料施工，缺料就等（HUD 仍写“还差 Z”）。
             return plan;
         }
 
         /// <summary>
-        /// 按规划铺设（全有或全无：任何一格不合法、缺料、超长就一格都不铺，状态不变）。成本经资源账本一次扣清；
-        /// 同一帧铺多少格，传送带内核都只在下一步前重建一次（编辑只标脏，DEBT-FG0ARCH02-09）。
+        /// 按规划放下传送带虚影（全有或全无：任何一格不合法、超长、未解锁就一格都不放，状态不变）。
+        /// FG3-LOG-02（DEBT-FG3LOG01-01 关闭）：不再“放下即成、一次扣清”——生成一份传送带规划与一张施工单，机器从仓库取料、走到现场，
+        /// 按路径顺序一格一格建成进内核；材料不够也能放，虚影等材料。战略暂停中照样可以规划，恢复后才施工。
         /// </summary>
         public static GridOpResult TryPlaceBeltPath(CampaignState state, string toolId, GridCell from, GridCell to, BeltDir singleDir)
         {
@@ -577,37 +574,13 @@ namespace GameLogic.Campaign.Grid
             {
                 return GridOpResult.Fail(new GridReason(GridBlockReason.Busy, "logistics.reason.not_running"));
             }
-            string tx = "belt:" + Guid.NewGuid().ToString("N").Substring(0, 12) + ":tx";
-            CampaignEconomyLedger.ProposeConsume(state, tx, "belt", CampaignEconomyLedger.ResourceScrap, plan.TotalCost);
-            if (!CampaignEconomyLedger.Reserve(state, tx).Success)
-            {
-                CampaignEconomyLedger.Cancel(state, tx);
-                return GridOpResult.Fail(new GridReason(GridBlockReason.InsufficientScrap, "grid.reason.insufficient_scrap",
-                    plan.TotalCost.ToString(), state.Scrap.ToString()));
-            }
-            int placed = 0;
-            for (int i = 0; i < plan.Cells.Count; i++)
-            {
-                BeltOpResult r = BeltNetworkService.TryPlace(state, plan.Cells[i], plan.Dirs[i], plan.Tier);
-                if (!r.Ok)
-                {
-                    // 校验过仍被内核拒绝（不应发生）：撤掉本次已铺的格子、全额退款，状态回到操作前。
-                    var ignored = new List<ushort>();
-                    for (int k = 0; k < placed; k++)
-                    {
-                        BeltNetworkService.TryRemove(state, plan.Cells[k], ignored);
-                    }
-                    CampaignEconomyLedger.Cancel(state, tx);
-                    return GridOpResult.Fail(new GridReason(GridBlockReason.Busy, r.ReasonKey ?? "grid.reason.busy", r.Args));
-                }
-                placed++;
-            }
-            CampaignEconomyLedger.Commit(state, tx);
+            HomeValleyConstruction.PlanBelts(state, plan);
             if (plan.Cells.Count > 1)
             {
                 Core.GuidanceHooks.Raise(Core.GuidanceHooks.BuildFirstDrag);
             }
-            LastBeltCount = placed;
+            Core.GuidanceHooks.Raise(Core.GuidanceHooks.BuildFirstGhost);
+            LastBeltCount = plan.Cells.Count;
             LastBeltScrap = plan.TotalCost;
             return new GridOpResult(GridOpResult.Kind.BeltsPlaced, null);
         }
@@ -629,8 +602,13 @@ namespace GameLogic.Campaign.Grid
             return 0;
         }
 
-        /// <summary>拆一批传送带格（全额返还造价，FGR-LOG-007）：带上还有物品的格子不拆、给原因（物品返还仓库属于 FG3-LOG-02）。
-        /// 返还走“地面物 + 搬运票据”：仓库有空间直接入库，满了就留在拆除处的地面等机器搬（与建筑拆除同一套诚实处理）。</summary>
+        /// <summary>
+        /// 拆一批传送带格（FGR-LOG-007 全额返还）：
+        /// - 规划中（虚影）的格子：取消规划（<see cref="HomeValleyConstruction.CancelPlannedCells"/>），运到现场多出来的材料退回；
+        /// - 已建成的格子：造价全额返还；FG3-LOG-02（DEBT-FG3LOG01-02 / DEBT-FG0ARCH02-03 的返还部分）起**带上的物品一并返还**，不再拒拆——
+        ///   物品按种类落在拆除处（家园仓库暂时只存废料，其它物品留在地上，FG4-ECO-01 物品表接入库，见 DEBT-FG3LOG02-01）。
+        /// 返还走 <see cref="HomeValleyConstruction.ReturnMaterials"/>：仓库有空间直接入库，放不下的变成地面物、生成搬运单等机器搬。
+        /// </summary>
         public static GridOpResult TryRemoveBelts(CampaignState state, List<GridCell> cells)
         {
             if (state == null || cells == null || cells.Count == 0)
@@ -644,19 +622,21 @@ namespace GameLogic.Campaign.Grid
             int removed = 0;
             int refund = 0;
             int withItems = 0;
-            int firstItems = 0;
+            int itemsReturned = 0;
             var returned = new List<ushort>();
+            var planned = new List<GridCell>();
+            var itemCounts = new SortedDictionary<ushort, int>();
             Vector2 at = Vector2.zero;
+            HomeGridMap map = MapFor(state);
             foreach (GridCell c in cells)
             {
-                if (!BeltNetworkService.Kernel.TryGetCellInfo(c.X, c.Y, out BeltCellInfo info))
+                if (HomeValleyConstruction.IsPlannedMarker(map.GetBelt(c)))
                 {
+                    planned.Add(c);
                     continue;
                 }
-                if (info.Count > 0)
+                if (!BeltNetworkService.Kernel.TryGetCellInfo(c.X, c.Y, out BeltCellInfo info))
                 {
-                    withItems++;
-                    firstItems = firstItems == 0 ? info.Count : firstItems;
                     continue;
                 }
                 returned.Clear();
@@ -665,31 +645,47 @@ namespace GameLogic.Campaign.Grid
                     removed++;
                     refund += BeltCostPerCell(info.Tier);
                     at = new Vector2(c.X, c.Y);
+                    if (returned.Count > 0)
+                    {
+                        withItems++;
+                        foreach (ushort item in returned)
+                        {
+                            itemCounts[item] = itemCounts.TryGetValue(item, out int n) ? n + 1 : 1;
+                            itemsReturned++;
+                        }
+                    }
                 }
             }
-            if (removed == 0)
+            int cancelled = HomeValleyConstruction.CancelPlannedCells(state, planned);
+            if (removed == 0 && cancelled == 0)
             {
-                return GridOpResult.Fail(withItems > 0
-                    ? new GridReason(GridBlockReason.BeltHasItems, "grid.reason.belt_has_items", firstItems.ToString())
-                    : GridReason.Of(GridBlockReason.NoBuilding));
+                return GridOpResult.Fail(GridReason.Of(GridBlockReason.NoBuilding));
             }
+            string stamp = at.x.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + "," + at.y.ToString("0", System.Globalization.CultureInfo.InvariantCulture)
+                           + ":" + Core.GameClock.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + (state.WorkOrders?.Length ?? 0);
             if (refund > 0)
             {
-                string dropId = "belt-refund:" + Guid.NewGuid().ToString("N").Substring(0, 12);
-                GroundItemRecord drop = HomeValleyCargo.SpawnGroundItem(state, HomeValleyLayout.RegionId, at, CampaignEconomyLedger.ResourceScrap, refund, dropId);
-                if (drop != null)
-                {
-                    HomeValleyCargo.CommitHaul(state, HomeValleyCargo.TryReserveHaul(state, drop.GroundItemId));
-                }
+                HomeValleyConstruction.ReturnMaterials(state, at, CampaignEconomyLedger.ResourceScrap, refund, "belt-refund:" + stamp);
+            }
+            foreach (KeyValuePair<ushort, int> kv in itemCounts)
+            {
+                HomeValleyConstruction.ReturnMaterials(state, at, BeltItemResource(kv.Key), kv.Value, "belt-items:" + kv.Key + ":" + stamp);
             }
             LastBeltCount = removed;
             LastBeltScrap = refund;
             LastBeltsWithItems = withItems;
+            LastBeltItemsReturned = itemsReturned;
+            LastPlannedBeltsCancelled = cancelled;
             return new GridOpResult(GridOpResult.Kind.BeltsRemoved, null);
         }
 
-        /// <summary>最近一次拆传送带时因为带上有物品而跳过的格数。</summary>
+        /// <summary>传送带物品 → 地面物的资源类型。家园仓库目前只存废料；物品表（FG4-ECO-01）之前按物品编号记（"item:&lt;编号&gt;"），落在地上不消失。</summary>
+        public static string BeltItemResource(ushort item) => "item:" + item.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        /// <summary>最近一次拆传送带时带着物品的格数 / 一并返还的物品件数 / 取消的规划格数。</summary>
         public static int LastBeltsWithItems { get; private set; }
+        public static int LastBeltItemsReturned { get; private set; }
+        public static int LastPlannedBeltsCancelled { get; private set; }
 
         // ── 框选批量拆除（FGR-LOG-007；DEBT-FG0ARCH04-12）───────────────────────────────
 
@@ -739,18 +735,25 @@ namespace GameLogic.Campaign.Grid
                     for (int x = min.X; x <= mx.X; x++)
                     {
                         var c = new GridCell(x, y);
-                        if (map.GetBelt(c) == 0 || !BeltNetworkService.Kernel.TryGetCellInfo(x, y, out BeltCellInfo info))
+                        ushort layer = map.GetBelt(c);
+                        if (layer == 0)
+                        {
+                            continue;
+                        }
+                        if (HomeValleyConstruction.IsPlannedMarker(layer))
+                        {
+                            plan.Belts.Add(c); // FG3-LOG-02：规划中的传送带虚影——拆除 = 取消规划。
+                            continue;
+                        }
+                        if (!BeltNetworkService.Kernel.TryGetCellInfo(x, y, out BeltCellInfo info))
                         {
                             continue;
                         }
                         if (info.Count > 0)
                         {
-                            plan.BeltsWithItems++;
+                            plan.BeltsWithItems++; // 带着物品的也拆（物品一并返还），这里只计数给 HUD 写明。
                         }
-                        else
-                        {
-                            plan.Belts.Add(c);
-                        }
+                        plan.Belts.Add(c);
                     }
                 }
             }
@@ -838,7 +841,7 @@ namespace GameLogic.Campaign.Grid
             int belts = 0;
             if (plan.Belts.Count > 0 && TryRemoveBelts(state, plan.Belts).Outcome == GridOpResult.Kind.BeltsRemoved)
             {
-                belts = LastBeltCount;
+                belts = LastBeltCount + LastPlannedBeltsCancelled; // FG3-LOG-02：取消的传送带虚影格也算这次框选处理掉的传送带
             }
             LastBatchMarked = marked;
             LastBatchCancelled = cancelled;

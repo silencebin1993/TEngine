@@ -404,7 +404,15 @@ namespace GameLogic.UI.WorkOrder
             {
                 return string.Empty;
             }
-            if (reason.StartsWith("storage-full", System.StringComparison.Ordinal))
+            if (reason.StartsWith(HomeValleyConstruction.MaterialsReasonPrefix, System.StringComparison.Ordinal))
+            {
+                // FG3-LOG-02：施工等待材料（materials:还差:库存），与施工队列同一文本键。
+                string[] parts = reason.Split(':');
+                return GameLogic.Localization.GameText.Format("build.status.waiting_materials",
+                    HomeValleyConstruction.MaterialName(CampaignEconomyLedger.ResourceScrap),
+                    parts.Length > 1 ? parts[1] : "?", parts.Length > 2 ? parts[2] : "?");
+            }
+            if (reason == HomeValleyConstruction.ReturnWaitReason || reason.StartsWith("storage-full", System.StringComparison.Ordinal))
             {
                 return "仓库已满，腾出仓位后自动继续";
             }

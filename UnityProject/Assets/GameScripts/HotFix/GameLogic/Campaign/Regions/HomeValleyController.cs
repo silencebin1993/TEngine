@@ -53,6 +53,11 @@ namespace GameLogic.Campaign.Regions
         public CombatSite Combat => _combat;
         /// <summary>ER8-CONTENT-01：建筑状态悬浮标记，按 BuildingTypeId 索引。</summary>
         private readonly Dictionary<string, WorldBadge> _buildingBadges = new Dictionary<string, WorldBadge>();
+        /// <summary>FG3-LOG-02：施工现场的画面（虚影随进度长高、受阻标记、规划中的传送带、悬停读数）。纯表现。</summary>
+        private readonly ConstructionSiteView _siteView = new ConstructionSiteView();
+
+        /// <summary>自检读：施工现场画面。</summary>
+        public ConstructionSiteView SiteView => _siteView;
         /// <summary>FG0-ARCH-04：本帧仍存在的建筑本地键（对账时移除已拆除建筑的可视化）。复用同一个集合，不每帧分配。</summary>
         private readonly HashSet<string> _liveBuildingKeys = new HashSet<string>(StringComparer.Ordinal);
         // FG0-ARCH-04 复审：建筑占位方块按本地键缓存（替代逐帧 Transform.Find 线性扫子节点，对账从 O(N²) 降到 O(N)）；
@@ -277,6 +282,9 @@ namespace GameLogic.Campaign.Regions
             {
                 // 画面对账（纯表现：建筑、残骸、地面物、靶子）；暂停中规划的建筑也要立即显示。
                 SyncWorldVisuals(state);
+                // FG3-LOG-02：规划中的传送带虚影（规划变化时才重摆）与施工现场悬停读数（建造模式开着时由建造栏状态行显示）。
+                _siteView.SyncPlannedBelts(state, _root != null ? _root.transform : null);
+                _siteView.TickHover(state, _camera, !buildModeOwnsPointer && _cameraDirector != null && _cameraDirector.Mode == ViewMode.Strategy);
             }
             // FG0-ARCH-03：机器表现对象按内核位置插值 + 突袭者 / 炮塔 / 弹体实例化绘制（常数次调用，与单位数无关）。
             _combat?.FrameRender(_camera, GameClock.StepAlpha);
@@ -1307,14 +1315,16 @@ namespace GameLogic.Campaign.Regions
             string key = LocalKey(building.BuildingId);
             Transform go = _buildingVisuals.TryGetValue(key, out Transform cached) && cached != null ? cached : null;
             Renderer renderer = go != null ? go.GetComponent<Renderer>() : null;
+            bool ghost = IsPlannedGhost(building);
+            float fraction = ghost ? _siteView.FractionOf(CampaignSession.Current, building.BuildingId) : 0f;
             if (renderer != null)
             {
                 renderer.sharedMaterial = ViewMaterials.Standard(ColorForBuilding(building));
-                PlaceBuildingTransform(go, building); // FG0-ARCH-04：旋转后占地 / 朝向跟着变（格网是唯一真相）。
+                PlaceBuildingTransform(go, building, fraction); // FG0-ARCH-04：旋转后占地 / 朝向跟着变（格网是唯一真相）。
             }
             if (_buildingBadges.TryGetValue(key, out WorldBadge badge) && badge != null)
             {
-                badge.SetIcon(StateIconFor(building));
+                badge.SetIcon(ghost ? _siteView.IconOf(building) : StateIconFor(building));
             }
         }
 
@@ -1327,14 +1337,15 @@ namespace GameLogic.Campaign.Regions
         }
 
         /// <summary>占位方块按格网占地摆放：中心 = 占地中心，尺寸 = 占地格数（略缩一圈留出格线），绕 Y 轴按朝向旋转。</summary>
-        private static void PlaceBuildingTransform(Transform t, BuildingRecord building)
+        private static void PlaceBuildingTransform(Transform t, BuildingRecord building, float ghostFraction = 0f)
         {
             Vector2Int size = GridContent.TryGetBuilding(building.BuildingTypeId, out GameConfig.fg.BuildingGrid g)
                 ? new Vector2Int(g.FootprintW, g.FootprintH)
                 : new Vector2Int(3, 3);
             // 规划中 / 施工中（还没建成）：扁平的“虚影”方块，与完工建筑明显不同（FGR-LOG-006 原型）。
             bool ghost = IsPlannedGhost(building);
-            float height = ghost ? 0.5f : 2f;
+            // FG3-LOG-02：虚影随施工进度从扁平长到接近完工高度（进度可见，不只靠文字）。
+            float height = ghost ? Mathf.Lerp(0.5f, 1.8f, Mathf.Clamp01(ghostFraction)) : 2f;
             t.position = new Vector3(building.Position.x, height * 0.5f, building.Position.y);
             t.rotation = Quaternion.Euler(0f, GridMath.NormalizeRotation(building.Rotation), 0f);
             t.localScale = new Vector3(Mathf.Max(0.5f, size.x - 0.2f), height, Mathf.Max(0.5f, size.y - 0.2f));
@@ -1421,6 +1432,7 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
+            _siteView.BeginFrame(state); // FG3-LOG-02：现场 → 施工单索引（O(工单数)），下面逐座刷新虚影进度 O(1)。
             bool recordsChanged = !ReferenceEquals(_visualsRecordsRef, state.BuildingRecords);
             _visualsRecordsRef = state.BuildingRecords;
             if (recordsChanged)
@@ -2068,7 +2080,8 @@ namespace GameLogic.Campaign.Regions
             return worker != null && TryContextWork(worker, pointer);
         }
 
-        /// <summary>右键点中工作目标 → 派工并返回 true：核心＝充电、受损建筑＝修复、建造位＝建造、残骸＝拆解、地面物品＝搬运。
+        /// <summary>右键点中工作目标 → 派工并返回 true：核心＝充电、受损建筑＝修复、还没建成的虚影＝把它的施工单交给这台机器（FG3-LOG-02）、
+        /// 建造位＝建造、残骸＝拆解、地面物品＝搬运。
         /// 已建成的建筑不在右键上派“拆除”（右键移动时误点就会把好好的建筑拆掉）；拆除统一走建造模式的拆除工具（带确认）。
         /// 没点中工作目标返回 false，由调用方按“移动”处理。</summary>
         private bool TryContextWork(HomeValleyMachineMarker moving, Vector3 pointer)
@@ -2094,9 +2107,11 @@ namespace GameLogic.Campaign.Regions
             string buildSiteId = buildingTypeId == null ? BuildSiteIdFromHit(hit) : null;
             string wreckageNodeId = buildingTypeId == null && buildSiteId == null ? WreckageNodeIdFromHit(hit) : null;
             string groundItemId = buildingTypeId == null && buildSiteId == null && wreckageNodeId == null ? GroundItemIdFromHit(hit) : null;
-            bool repairable = buildingTypeId != null && buildingTypeId != HomeValleyLayout.BuildingTypeCore
+            // FG3-LOG-02：点中的是还没建成的虚影 = “去建这个”（交给这台机器现有的施工单），不是“修复”。
+            bool ghostSite = clicked != null && IsPlannedGhost(clicked);
+            bool repairable = buildingTypeId != null && buildingTypeId != HomeValleyLayout.BuildingTypeCore && !ghostSite
                               && (clicked == null || clicked.ConstructionState != BuildingConstructionState.Operational);
-            bool isWork = buildingTypeId == HomeValleyLayout.BuildingTypeCore || repairable
+            bool isWork = buildingTypeId == HomeValleyLayout.BuildingTypeCore || repairable || ghostSite
                           || buildSiteId != null || wreckageNodeId != null || groundItemId != null;
             if (!isWork)
             {
@@ -2120,6 +2135,13 @@ namespace GameLogic.Campaign.Regions
                 HomeValleyFactory.ReleaseFromFactory(moving.LogicId);
             }
 
+            if (ghostSite)
+            {
+                string siteId = clicked.BuildingId;
+                CommandWork(moving, destination, siteId,
+                    () => HomeValleyWorkOrders.TryAssignConstruction(state, siteId, moving.LogicId), "施工 " + siteId);
+                return true;
+            }
             if (buildingTypeId == HomeValleyLayout.BuildingTypeCore)
             {
                 CommandWork(moving, destination, "recharge:" + moving.LogicId,
@@ -2160,6 +2182,13 @@ namespace GameLogic.Campaign.Regions
             WorkOrderRecord active = HomeValleyWorkOrders.FindActiveOrderForMachine(state, moving.LogicId);
             if (active == null || active.TargetId == newTargetId)
             {
+                return;
+            }
+            if (active.Kind == WorkOrderKind.Build)
+            {
+                // FG3-LOG-02（FGR-BASE-020 / FG-GAP-063）：施工单背后是玩家放下的虚影——换目标只让这台机器放下这张单
+                // （货舱里这一趟的材料退回仓库、施工单回到待分配池），不撤销玩家的规划、不退掉已运到现场的材料。
+                HomeValleyWorkOrders.YieldToPool(state, moving.LogicId);
                 return;
             }
             Vector3 pos = moving.Position3;
@@ -2222,7 +2251,21 @@ namespace GameLogic.Campaign.Regions
 
             if (order.Kind == WorkOrderKind.Haul)
             {
+                if (order.State == WorkOrderState.InProgress)
+                {
+                    // 货已在货舱（通用到达入口拾取后排的下一腿）：直接送回核心。
+                    Vector3 core = new Vector3(HomeValleyLayout.Core.Position.x, 1f, HomeValleyLayout.Core.Position.y);
+                    moving.CommandMoveTo(core, HaulDestinationArrival(workOrderId));
+                    return;
+                }
                 moving.CommandMoveTo(destination, HaulSourceArrival(moving, workOrderId));
+                return;
+            }
+            if (order.Kind == WorkOrderKind.Build)
+            {
+                // FG3-LOG-02：施工单分两腿（先去仓库取料、再去现场），目的地按当前这一腿算，不用点击落点。
+                Vector2 leg = HomeValleyWorkOrders.ResolveWorkPosition(CampaignSession.Current, order);
+                moving.CommandMoveTo(new Vector3(leg.x, 1f, leg.y), WorkArrival(workOrderId));
                 return;
             }
 
@@ -2259,10 +2302,25 @@ namespace GameLogic.Campaign.Regions
             {
                 return 0;
             }
+            LastResumedPendingLegs = 0;
             foreach (HomeValleyMachineMarker marker in markers)
             {
-                if (marker == null || !marker.AwaitsArrivalAction)
+                if (marker == null)
                 {
+                    continue;
+                }
+                if (!marker.AwaitsArrivalAction)
+                {
+                    // FG3-LOG-02（审查修复）：“下一腿”（施工单取完料去现场 / 传送带走到下一格；搬运单拾取后送回核心）在两次 Tick 之间只记在内存里。
+                    // 存档恰好落在这个空档时，读档后机器原地不动、工单却是已分配——按当前这一腿重新下达移动，而不是等停滞看门狗误报“路径受阻”。
+                    WorkOrderRecord pending = HomeValleyWorkOrders.FindActiveOrderForMachine(state, marker.LogicId);
+                    bool buildLeg = pending != null && pending.Kind == WorkOrderKind.Build && pending.State == WorkOrderState.Reserved;
+                    bool haulLeg = pending != null && pending.Kind == WorkOrderKind.Haul && pending.State == WorkOrderState.InProgress;
+                    if (buildLeg || haulLeg)
+                    {
+                        BeginMovementForOrder(marker, marker.Position3, pending);
+                        LastResumedPendingLegs++;
+                    }
                     continue;
                 }
                 WorkOrderRecord order = HomeValleyWorkOrders.FindActiveOrderForMachine(state, marker.LogicId);
@@ -2288,6 +2346,9 @@ namespace GameLogic.Campaign.Regions
 
         /// <summary>最近一次载入时重挂的工作赶路回调数（自检读）。</summary>
         public int LastResumedWorkArrivals { get; private set; }
+
+        /// <summary>最近一次载入时按当前这一腿重新下达移动的工单数（存档落在“取料后、下一腿发出前”的空档，自检读）。</summary>
+        public static int LastResumedPendingLegs { get; private set; }
 
         private static string BuildingTypeIdFromHit(RaycastHit hit)
         {
@@ -2334,6 +2395,7 @@ namespace GameLogic.Campaign.Regions
             _buildingVisuals.Clear();
             _buildingBadges.Clear();
             _visualsRecordsRef = null;
+            _siteView.Release(); // 规划传送带的表现对象挂在 _root 下（已随之销毁），这里清池、释放材质与悬停。
             if (_squadCtx != null)
             {
                 _squadCtx.VisualRoot = null;

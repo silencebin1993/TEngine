@@ -111,5 +111,9 @@
         ToggleGridLines = 98,
         /// <summary>FG3-LOG-01（FGR-LOG-008）：搬迁模式——点一座建筑、再点新位置（战略与建造上下文，默认 E）。</summary>
         RelocateMode = 99,
+        /// <summary>FG3-LOG-02（FGR-LOG-006）：打开 / 关闭施工队列（战略与建造上下文，默认 Alt+B；面板开着时同一个键再按一次关闭）。</summary>
+        ConstructionQueue = 100,
+        /// <summary>FG3-LOG-02（FG03 第 4 节“优先建造这一片”）：建造模式里拖框，框里的施工改成最高优先级（建造上下文，默认 P）。</summary>
+        PrioritizeArea = 101,
     }
 }

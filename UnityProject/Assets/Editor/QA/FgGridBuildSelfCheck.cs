@@ -474,8 +474,9 @@ namespace GameLogic.EditorTools
             WorkOrderRecord order = s.WorkOrders.FirstOrDefault(o => o.Kind == WorkOrderKind.Build && o.TargetId == placed.BuildingId);
             Expect(placed.Outcome == GridOpResult.Kind.Placed && rec != null && rec.ConstructionState == BuildingConstructionState.Planned
                    && rec.GridX == spot.Value.X && rec.GridY == spot.Value.Y && Mathf.Approximately(rec.Rotation, 90f) && rec.Position == spot.Value.ToWorld()
-                   && Mathf.Approximately(s.Scrap, scrapBefore - 60f) && order != null && order.State == WorkOrderState.Ready && order.AssignedMachineLogicId == 0,
-                $"合法放置 {spot.Value}：规划中的格网建筑（朝向 90、中心 = 枢轴格），预留 60 废料，新建工单进入待分配池");
+                   && Mathf.Approximately(s.Scrap, scrapBefore) && rec.ConstructionRequired == 60 && rec.ConstructionDelivered == 0
+                   && order != null && order.State == WorkOrderState.Ready && order.AssignedMachineLogicId == 0 && order.Leg == 1,
+                $"合法放置 {spot.Value}：规划中的格网建筑（朝向 90、中心 = 枢轴格），不扣材料、虚影记下所需 60 废料（FG3-LOG-02：机器取料施工），施工单进入待分配池、第一腿去仓库取料");
             Expect(HomeGridService.BuildingAt(s, spot.Value)?.BuildingId == placed.BuildingId && SnapshotMatches(s) && placed.BuildingId == "home_valley:generator_2",
                 "放置后立即占格（查询即可见），占用 = 按记录重建；每类第一座沿用 Demo 的建筑 ID");
 
@@ -532,7 +533,9 @@ namespace GameLogic.EditorTools
             AssertBlocked(s, HomeValleyLayout.BuildingTypeBeacon, free, 0, GridBlockReason.Locked, "信标未解锁", "主核心");
             AssertBlocked(s, "no_such_building", free, 0, GridBlockReason.UnknownType, "未知类型", "未知");
             s.Scrap = 10;
-            AssertBlocked(s, "generator_2", free, 0, GridBlockReason.InsufficientScrap, "废料不足", "需要 60，现有 10");
+            GridPlacementResult shortCheck = HomeGridService.ValidatePlacement(s, "generator_2", free, 0);
+            Expect(shortCheck.Ok && !shortCheck.Has(GridBlockReason.InsufficientScrap) && shortCheck.Warnings.Any(w => w.Contains("还差 50")),
+                $"废料不足（10 < 60）：FG3-LOG-02 起不再拦截（FGR-LOG-003“不足也允许放置虚影”），只警告“{shortCheck.Warnings.FirstOrDefault()}”");
             s.Scrap = 500;
             // 数量上限：解锁信标（完成 OBJ-09）后能放 1 座，第 2 座被拒。
             s.ObjectiveRecords = (s.ObjectiveRecords ?? Array.Empty<ObjectiveRecord>())
@@ -659,8 +662,8 @@ namespace GameLogic.EditorTools
             float scrap0 = s.Scrap;
             GridOpResult cancel = HomeGridService.TryToggleDemolish(s, g.BuildingId);
             Expect(cancel.Outcome == GridOpResult.Kind.PlanCancelled && HomeGridService.FindBuilding(s, g.BuildingId) == null
-                   && Mathf.Approximately(s.Scrap, scrap0 + 60f) && HomeGridService.BuildingAt(s, blocker) == null && SnapshotMatches(s),
-                $"拆除模式点规划中的虚影 = 取消规划：废料全额退回（{scrap0}→{s.Scrap}），记录与占格一并移除");
+                   && Mathf.Approximately(s.Scrap, scrap0) && HomeGridService.BuildingAt(s, blocker) == null && SnapshotMatches(s),
+                $"拆除模式点规划中的虚影 = 取消规划：还没有机器取过料，库存不变（{scrap0}→{s.Scrap}；已到现场材料的全额退回由 FgConstructionSelfCheck 断言），记录与占格一并移除");
 
             // 建成后拆除：标记 → 撤回 → 再标记 → 机器完成 → 记录消失、占格释放、按实际投入的一半返还。
             GridOpResult g2 = HomeGridService.TryPlace(s, "generator_2", blocker, 0);
@@ -678,11 +681,14 @@ namespace GameLogic.EditorTools
             HomeGridService.TryToggleDemolish(s, g2.BuildingId);
             WorkOrderRecord demolish2 = s.WorkOrders.LastOrDefault(o => o.Kind == WorkOrderKind.Salvage && o.TargetId == g2.BuildingId);
             TickOrders(s, 20f);
-            bool refunded = s.Scrap >= scrap1 + 30f - 0.01f
-                            || (s.GroundItems ?? Array.Empty<GroundItemRecord>()).Any(gi => demolish2 != null
-                                && gi.SalvageInstanceId == HomeValleyWorkOrders.DemolishDropId(demolish2) && gi.Amount == 30);
+            // FG3-LOG-02 审查第 1 轮：仓满时落地的返还按每趟搬运量拆成几份（同一标识 + “/序号”），合计仍是 60。
+            string dropBase = demolish2 != null ? HomeValleyWorkOrders.DemolishDropId(demolish2) : null;
+            int groundedRefund = dropBase == null ? 0 : (s.GroundItems ?? Array.Empty<GroundItemRecord>())
+                .Where(gi => gi.SalvageInstanceId == dropBase || gi.SalvageInstanceId.StartsWith(dropBase + "/", StringComparison.Ordinal))
+                .Sum(gi => gi.Amount);
+            bool refunded = s.Scrap >= scrap1 + 60f - 0.01f || (s.Scrap - scrap1) + groundedRefund == 60;
             Expect(HomeGridService.FindBuilding(s, g2.BuildingId) == null && HomeGridService.BuildingAt(s, blocker) == null && SnapshotMatches(s) && refunded,
-                $"拆除完成：记录消失、占格释放，返还实际投入的一半 30（进仓或仓满时落地待搬，{scrap1}→{s.Scrap}）");
+                $"拆除完成：记录消失、占格释放，全额返还实际投入 60（FG3-LOG-02 / FGR-LOG-007；进仓或仓满时落地待搬，{scrap1}→{s.Scrap}）");
 
             GridOpResult coreDemolish = HomeGridService.TryToggleDemolish(s, HomeValleyLayout.RegionId + ":core");
             Expect(coreDemolish.FirstReason == GridBlockReason.CannotDemolishCore, $"核心不能拆（“{coreDemolish.Describe()}”）");
@@ -967,7 +973,9 @@ namespace GameLogic.EditorTools
                     HomeValleyWorkOrders.Tick(s, 0f, _ => null, _ => { }, _ => false, o => HomeValleyWorkOrders.OnArrivedAtWork(s, o.WorkOrderId));
                 }
                 WorkOrderRecord order = s.WorkOrders.First(o => o.TargetId == r.BuildingId);
-                bool pausedNoProgress = order.Progress <= 0f && HomeGridService.FindBuilding(s, r.BuildingId).ConstructionState == BuildingConstructionState.Planned;
+                // FG3-LOG-02：本段用“dt = 0 的 Tick + 瞬时到达”模拟暂停，取料 / 卸料是到达回调里的瞬时动作可能已经发生（真实暂停时统一时钟不走步、
+                // 施工单根本不 Tick，见 FgConstructionSelfCheck L 段），这里只断言施工进度不推进、没有建成。
+                bool pausedNoProgress = order.Progress <= 0f && HomeGridService.FindBuilding(s, r.BuildingId).ConstructionState != BuildingConstructionState.Operational;
                 float game = 0f;
                 int frames = 0;
                 while (HomeGridService.FindBuilding(s, r.BuildingId).ConstructionState != BuildingConstructionState.Operational && frames < 60 * 200)
@@ -1095,7 +1103,8 @@ namespace GameLogic.EditorTools
                 }
                 TickOrders(s, 30f);
                 return BuildingsJson(s) + "\nscrap=" + s.Scrap + "\nserial=" + s.Grid.NextInstanceSerial
-                       + "\norders=" + string.Join(",", s.WorkOrders.Select(o => o.Kind + ":" + o.TargetId + ":" + o.State));
+                       // FG3-LOG-02：返还搬运单的目标是地面物 ID（含拆除工单 ID 里的随机段），按来源 + 状态比较。
+                       + "\norders=" + string.Join(",", s.WorkOrders.Select(o => o.Kind + ":" + (o.IssuerId == "return" ? "return" : o.TargetId) + ":" + o.State));
             }
 
             string seen = RunOps(true);

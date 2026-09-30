@@ -586,7 +586,14 @@ namespace GameLogic.EditorTools
 
             s.Scrap = 5;
             GridCell spot2 = FindValid(s, "generator_2", new GridCell(core.X + 20, core.Y + 26), 10, asPlayer: false) ?? new GridCell(10, 30);
-            AssertRejected(s, () => HomeGridService.TryPlace(s, "generator_2", spot2, 0), GridBlockReason.InsufficientScrap, "废料不够", "废料不足：需要 60，现有 5");
+            // FG3-LOG-02（FGR-LOG-003“不足也允许放置虚影”）：废料不够不再是非法原因——放下虚影、只警告还差多少，库存不变。
+            GridOpResult shortPlace = HomeGridService.TryPlace(s, "generator_2", spot2, 0);
+            bool shortOk = shortPlace.Success && s.Scrap == 5 && shortPlace.Placement != null && shortPlace.Placement.Warnings.Any(w => w.Contains("还差 55"));
+            Expect(shortOk, $"废料不够（5 < 60）：照样放下虚影、库存不变，只警告“{shortPlace.Placement?.Warnings.FirstOrDefault()}”");
+            if (shortPlace.Success)
+            {
+                HomeGridService.TryToggleDemolish(s, shortPlace.BuildingId); // 取消规划，后面不受影响
+            }
             s.Scrap = 500;
 
             // 每个原因码都有中英文本。
@@ -693,11 +700,16 @@ namespace GameLogic.EditorTools
                 bool tiles = mode.ActiveTileCount == 7;
                 Expect(corner && plan.Ok && info.Contains("长度 7 格") && info.Contains("成本 7 废料") && tiles,
                     $"按住左键从 {a} 拖到 {b}：先走长的一边再转角（第 6 格朝北），7 格逐格预览，HUD 显示“{info}”");
+                List<GridCell> pathCells = plan.Cells.ToList();
                 mode.PointerUp(s, b);
-                bool placed = plan.Cells.All(c => BeltNetworkService.Kernel.HasCell(c.X, c.Y)) && s.Scrap == scrap0 - 7
-                              && mode.LastResult.Outcome == GridOpResult.Kind.BeltsPlaced && mode.StatusText.Contains("7 格");
+                // FG3-LOG-02（DEBT-FG3LOG01-01）：松开后放下的是 7 格传送带虚影（规划），不扣材料；机器取料后按路径一格一格建成。
+                bool placed = pathCells.All(c => HomeValleyConstruction.TryFindPlannedCell(s, c, out _, out _) && !BeltNetworkService.Kernel.HasCell(c.X, c.Y))
+                              && s.Scrap == scrap0 && mode.LastResult.Outcome == GridOpResult.Kind.BeltsPlaced && mode.StatusText.Contains("7 格");
                 Expect(placed && mode.BeltPlan == null && GameSettings.HasSeenGuidanceHook(GuidanceHooks.BuildFirstDrag),
-                    $"松开：7 格一次铺下，扣 7 废料（{scrap0}→{s.Scrap}），状态行“{mode.StatusText}”；发出“首次拖拽”钩子");
+                    $"松开：7 格一次放下虚影（不扣材料，{scrap0}→{s.Scrap}），状态行“{mode.StatusText}”；发出“首次拖拽”钩子");
+                bool built = StepUntil(() => pathCells.All(c => BeltNetworkService.Kernel.HasCell(c.X, c.Y)), 240);
+                Expect(built && s.Scrap == scrap0 - 7 && !pathCells.Any(c => HomeValleyConstruction.TryFindPlannedCell(s, c, out _, out _)),
+                    $"机器取料施工：7 格全部建成进传送带内核，共扣 7 废料（{scrap0}→{s.Scrap}）");
 
                 // 全有或全无：路径穿过刚铺好的带 → 一格都不铺，写明第几格。
                 int cells0 = BeltNetworkService.Kernel.CellCount;
@@ -710,10 +722,12 @@ namespace GameLogic.EditorTools
 
                 s.Scrap = 3;
                 BeltPathPlan poor = HomeGridService.PlanBeltPath(s, "belt_t1", new GridCell(a.X, a.Y + 3), new GridCell(a.X + 5, a.Y + 3), BeltDir.East);
+                int plannedBefore = HomeValleyConstruction.PlannedCellCount(s);
                 GridOpResult poorR = HomeGridService.TryPlaceBeltPath(s, "belt_t1", new GridCell(a.X, a.Y + 3), new GridCell(a.X + 5, a.Y + 3), BeltDir.East);
-                Expect(!poorR.Success && poorR.FirstReason == GridBlockReason.InsufficientScrap && BeltNetworkService.Kernel.CellCount == cells0 && s.Scrap == 3
-                       && poor.Describe().Contains("需要 6"),
-                    $"缺料：拒绝（“{poor.Describe()}”），状态不变");
+                Expect(poor.Ok && poorR.Success && BeltNetworkService.Kernel.CellCount == cells0 && s.Scrap == 3 && poor.TotalCost == 6 && poor.Stock == 3
+                       && HomeValleyConstruction.PlannedCellCount(s) == plannedBefore + 6,
+                    "缺料（需要 6，库存 3）：FG3-LOG-02 起照样放下 6 格虚影（HUD 写还差 3），不扣材料、内核不变");
+                HomeGridService.TryRemoveBelts(s, Enumerable.Range(0, 6).Select(k => new GridCell(a.X + k, a.Y + 3)).ToList()); // 取消这份规划
                 s.Scrap = 500;
 
                 // 污染豁免（FGR-LOG-012 / FGR-ENV-040 原文“2 级及以上不能建造（净化塔和传送带除外）”）：
@@ -738,8 +752,8 @@ namespace GameLogic.EditorTools
                     int cellsP = BeltNetworkService.Kernel.CellCount;
                     int scrapP = s.Scrap;
                     GridOpResult laid = HomeGridService.TryPlaceBeltPath(s, "belt_t1", dirty[0], dirty[5], BeltDir.East);
-                    bool allLaid = laid.Success && dirty.All(c => BeltNetworkService.Kernel.HasCell(c.X, c.Y))
-                                   && BeltNetworkService.Kernel.CellCount == cellsP + 6 && s.Scrap == scrapP - 6;
+                    bool allLaid = laid.Success && dirty.All(c => HomeValleyConstruction.TryFindPlannedCell(s, c, out _, out _))
+                                   && BeltNetworkService.Kernel.CellCount == cellsP && s.Scrap == scrapP; // FG3-LOG-02：放下的是虚影，施工后才进内核
                     Expect(oneCell.Ok && !oneCell.Has(GridBlockReason.Pollution) && oneCell.Warnings.Count == 0 && dirtyPlan.Ok
                            && building.Has(GridBlockReason.Pollution) && allLaid,
                         $"传送带污染豁免：3 格 2 级 + 3 格 3 级污染上一笔铺下 6 格（{laid.Outcome}，扣 6 废料），单格校验无污染原因；同一格放发电机仍被拒（“{building.Describe()}”）（FGR-LOG-012）");
@@ -763,8 +777,9 @@ namespace GameLogic.EditorTools
                 mode.RotateGhost(); // 0 → 90（朝东）
                 mode.PointerDown(s, single);
                 mode.PointerUp(s, single);
-                bool one = BeltNetworkService.Kernel.TryGetCellInfo(single.X, single.Y, out BeltCellInfo info1) && info1.Dir == BeltDir.East;
-                Expect(one, $"选中传送带单击一格：铺一格，方向按旋转键（朝东）");
+                bool oneBuilt = StepUntil(() => BeltNetworkService.Kernel.HasCell(single.X, single.Y), 240);
+                bool one = oneBuilt && BeltNetworkService.Kernel.TryGetCellInfo(single.X, single.Y, out BeltCellInfo info1) && info1.Dir == BeltDir.East;
+                Expect(one, $"选中传送带单击一格：放一格虚影，机器建成后方向按旋转键（朝东）");
 
                 // 未解锁的工具：注入一张 beacon 解锁规则的工具表。
                 var tools = new TbBuildTool(ToolBuf(("belt_t1", "belt", 0, "logistics", "logistics.tier.t1", "build.tool.belt_t1.desc", 1, "beacon", "grid.unlock.beacon", 10)));
@@ -815,6 +830,7 @@ namespace GameLogic.EditorTools
             }
             GridCell a = rowStart.Value;
             HomeGridService.TryPlaceBeltPath(s, "belt_t1", a, new GridCell(a.X + 5, a.Y), BeltDir.East);
+            StepUntil(() => Enumerable.Range(0, 6).All(k => BeltNetworkService.Kernel.HasCell(a.X + k, a.Y)), 240); // FG3-LOG-02：机器施工建成
             WorldSimulation.StepMany(2);
             s.Scrap = 50; // 开局仓库受损，只有核心缓存 180：留出空位，返还才能直接入库（满仓的情况下面单独断言）。
             int scrap = s.Scrap;
@@ -826,12 +842,14 @@ namespace GameLogic.EditorTools
 
             GridCell busy = new GridCell(a.X + 3, a.Y);
             BeltResult ins = BeltNetworkService.Kernel.InsertItem(busy.X, busy.Y, 1);
-            WorldSimulation.StepMany(1);
+            BeltNetworkService.Kernel.TryGetCellInfo(busy.X, busy.Y, out BeltCellInfo busyInfo);
+            int onBelt = busyInfo.Count;
             int scrap2 = s.Scrap;
-            GridOpResult refused = HomeGridService.TryRemoveBelts(s, new List<GridCell> { busy });
-            bool kept = ins == BeltResult.Ok && !refused.Success && refused.FirstReason == GridBlockReason.BeltHasItems && BeltNetworkService.Kernel.HasCell(busy.X, busy.Y)
-                        && s.Scrap == scrap2 && refused.Describe().Contains("件物品");
-            Expect(kept, $"带上还有物品的传送带不拆（物品返还仓库属于 FG3-LOG-02）：“{refused.Describe()}”，传送带与废料都不变");
+            GridOpResult withItems = HomeGridService.TryRemoveBelts(s, new List<GridCell> { busy });
+            int itemGround = (s.GroundItems ?? Array.Empty<GroundItemRecord>()).Where(g => g.ResourceType == HomeGridService.BeltItemResource(1)).Sum(g => g.Amount);
+            bool returned = ins == BeltResult.Ok && onBelt >= 1 && withItems.Outcome == GridOpResult.Kind.BeltsRemoved && !BeltNetworkService.Kernel.HasCell(busy.X, busy.Y)
+                            && s.Scrap == scrap2 + 1 && HomeGridService.LastBeltItemsReturned == onBelt && itemGround == onBelt;
+            Expect(returned, $"FG3-LOG-02（DEBT-FG3LOG01-02）：带上有 {onBelt} 件物品的传送带照样拆，造价全额返还、物品按种类落在拆除处（{itemGround} 件，物品表之前家园仓库只存废料）");
 
             // 仓库满时返还变成地面物（不消失）。
             s.Scrap = HomeValleyCargo.GetStorageCapacity(s, CampaignEconomyLedger.ResourceScrap);
@@ -899,10 +917,11 @@ namespace GameLogic.EditorTools
                 mode.SetHover(s, boxMax);
                 mode.PointerUp(s, boxMax);
                 UiConfirmDialog.Confirm();
-                bool allCancelled = placed.All(id => HomeGridService.FindBuilding(s, id) == null) && s.Scrap == scrap + placed.Count * 60;
+                // FG3-LOG-02：规划放下时不扣材料（还没有机器取过料），取消后库存不变；已到现场材料的全额退回由 FgConstructionSelfCheck 断言。
+                bool allCancelled = placed.All(id => HomeGridService.FindBuilding(s, id) == null) && s.Scrap == scrap;
                 Expect(allCancelled && mode.LastResult.Outcome == GridOpResult.Kind.BatchDemolished && mode.StatusText.Contains("取消规划 " + placed.Count)
                        && GameSettings.HasSeenGuidanceHook(GuidanceHooks.BuildFirstBatchDemolish),
-                    $"确认后：{placed.Count} 座规划全部取消、废料全额退回（{scrap}→{s.Scrap}），状态行“{mode.StatusText}”");
+                    $"确认后：{placed.Count} 座规划全部取消、库存不变（还没取料，{scrap}→{s.Scrap}），状态行“{mode.StatusText}”");
 
                 // 少量、不含关键建筑：直接执行不打扰（B04 可逆操作不弹确认）。
                 GridCell? g1 = FindValid(s, "generator_2", new GridCell(core.X - 20, core.Y + 26), 8);
@@ -1053,7 +1072,8 @@ namespace GameLogic.EditorTools
             HomeGridService.TryRelocate(s, bench.BuildingId, bt.Value, 0);
             BuildingRecord benchGhost = HomeGridService.FindRelocationGhost(s, bench.BuildingId);
             s.BuildingRecords = s.BuildingRecords.Where(b => b.BuildingId != bench.BuildingId).ToArray();
-            TickOrders(s, 40f);
+            // FG3-LOG-02：上面挪过的发电机规划也在待分配池里（取料腿目的地是仓库，可能比搬迁虚影近，机器先去建它），跑够两张单的时间。
+            TickOrders(s, 150f);
             WorkOrderRecord failed = s.WorkOrders.First(o => o.TargetId == benchGhost.BuildingId);
             Expect(failed.State == WorkOrderState.Failed && failed.FailureReason == "relocate-source-gone" && HomeGridService.FindBuilding(s, benchGhost.BuildingId) == null
                    && s.BuildingRecords.All(b => b.RelocateFromId != bench.BuildingId),

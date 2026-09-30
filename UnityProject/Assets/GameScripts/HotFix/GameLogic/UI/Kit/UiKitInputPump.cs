@@ -94,6 +94,13 @@ namespace GameLogic.UI.Kit
                 SignalCore.SignalCoreHudUIToolkit.OpenExposure();
             }
 
+            // FG3-LOG-02：施工队列开着时是模态（上下文 = 界面），同一个键（默认 Alt+B）再按一次关闭；关着时由家园建造模式按战略 / 建造上下文打开。
+            if (ConstructionQueuePanelUIToolkit.IsOpen && !UiConfirmDialog.IsOpen
+                && InputRouter.ConsumeGlobalAction(GameActionId.ConstructionQueue, allowDuringModal: true))
+            {
+                ConstructionQueuePanelUIToolkit.Close();
+            }
+
             ProcessLibraryKeys();
 
             if (InputRouter.ConsumeAction(GameActionId.SpeedHalf, InputScope.Strategy))

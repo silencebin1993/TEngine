@@ -299,6 +299,12 @@ namespace GameLogic.EditorTools
                     case 102: StepBuildHotbarKey(inStep); break;
                     case 103: StepBuildBeltDragged(inStep); break;
                     case 104: StepBuildBoxDemolished(inStep); break;
+                    case 113: StepConstructionQueueOpened(inStep); break;
+                    case 114: StepConstructionQueueClosed(inStep); break;
+                    case 115: StepPrioritizeArea(inStep); break;
+                    case 116: StepPrioritizeExited(inStep); break;
+                    case 117: StepConstructionQueueReopened(inStep); break;
+                    case 118: StepConstructionQueueToggledShut(inStep); break;
                     case 105: StepBuildRelocatePicked(inStep); break;
                     case 106: StepBuildRelocatePlanned(inStep); break;
                     case 107: StepBuildRelocateCancelled(inStep); break;
@@ -1284,7 +1290,7 @@ namespace GameLogic.EditorTools
             bool gone = state != null && state.BuildingRecords.All(b => b.BuildingId != id);
             Check(gone && Mathf.Approximately(state.Scrap, SessionState.GetFloat(K + "BuildScrap", -1f)) && Campaign.Grid.HomeGridService.BuildingAt(state, BuildCell()) == null
                   && FindNamed("Building_" + Campaign.Regions.HomeValleyController.LocalKey(id)) == null,
-                $"取消规划：虚影方块消失、占格释放、废料全额退回（{state?.Scrap}）");
+                $"取消规划：虚影方块消失、占格释放、库存不变（FG3-LOG-02：放下虚影不扣料，还没取料；{state?.Scrap}）");
             BuildingRecord warehouse = state?.BuildingRecords?.FirstOrDefault(b => b.BuildingId == WarehouseBuildingId);
             Vector2 wp = warehouse != null ? warehouse.Position : Vector2.zero;
             ClickWorld(new Vector3(wp.x, 0f, wp.y));
@@ -1423,13 +1429,114 @@ namespace GameLogic.EditorTools
             CampaignState state = CampaignSession.Current;
             int x = SessionState.GetInt(K + "BeltX", 0);
             int y = SessionState.GetInt(K + "BeltY", 0);
-            bool all = Enumerable.Range(0, 6).All(i => Campaign.Logistics.BeltNetworkService.Kernel.HasCell(x + i, y));
+            // FG3-LOG-02（DEBT-FG3LOG01-01）：拖出来的是 6 格传送带虚影（规划 + 施工单），不扣材料；暂停中不施工。
+            bool all = Enumerable.Range(0, 6).All(i => Campaign.Regions.HomeValleyConstruction.TryFindPlannedCell(state, new Campaign.Grid.GridCell(x + i, y), out _, out _)
+                                                       && !Campaign.Logistics.BeltNetworkService.Kernel.HasCell(x + i, y));
             string seen = SessionState.GetString(K + "BeltDragInfo", string.Empty);
-            Check(all && state.Scrap == SessionState.GetInt(K + "BeltScrap", -1) - 6 && seen.Contains("长度") && seen.Contains("成本"),
-                $"真实鼠标拖拽铺下 6 格传送带、扣 6 废料（剩 {state.Scrap}）；拖的时候 HUD 显示“{seen}”");
+            Transform ghostTiles = FindNamed("[PlannedBelts]");
+            int shownTiles = ghostTiles != null ? ghostTiles.Cast<Transform>().Count(t => t.gameObject.activeSelf) : 0;
+            Check(all && state.Scrap == SessionState.GetInt(K + "BeltScrap", -1) && seen.Contains("长度") && seen.Contains("成本") && shownTiles >= 6,
+                $"真实鼠标拖拽放下 6 格传送带虚影（不扣材料，库存 {state.Scrap}；画面上 {shownTiles} 块半透明虚影条）；拖的时候 HUD 显示“{seen}”");
+            PressChord(GameSettings.KeyBindings.GetChord(GameActionId.ConstructionQueue));
+            Next(113, "FG3-LOG-02：按施工队列键（默认 Alt+B）打开施工队列");
+        }
+
+        // ── FG3-LOG-02：施工队列（真 UXML、真实按键 / 点击）、“优先建造这一片”（真实按键 + 鼠标拖框）─────────────────────────
+
+        private static void StepConstructionQueueOpened(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            ConstructionQueuePanelUIToolkit panel = ConstructionQueuePanelUIToolkit.Instance;
+            bool open = ConstructionQueuePanelUIToolkit.IsOpen && panel != null && panel.PanelVisible;
+            bool row = panel != null && panel.VisibleRowCount >= 1 && panel.RowName(0).Contains("传送带") && !string.IsNullOrEmpty(panel.RowStatus(0));
+            Check(open && row, $"施工队列打开：{panel?.VisibleRowCount} 行，第一行“{panel?.RowName(0)}：{panel?.RowStatus(0)}”（{panel?.RowPriority(0)}）");
+            CheckNoTextMarkers("施工队列");
+            bool raised = ClickUitk("[ConstructionQueueHost]", "CqUp");
+            panel?.Refresh();
+            Check(raised && panel != null && panel.RowPriority(0).Contains("高"), $"点行内“提高”：优先级变成“{panel?.RowPriority(0)}”");
+            PressKeyKeepMouse(KeyCode.Escape);
+            Next(114, "Esc 关闭施工队列（建造模式仍开着）");
+        }
+
+        private static void StepConstructionQueueClosed(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Check(!ConstructionQueuePanelUIToolkit.IsOpen && mode != null && mode.IsOpen, "Esc 只关掉施工队列，建造模式还开着");
+            PressChord(GameSettings.KeyBindings.GetChord(GameActionId.ConstructionQueue));
+            Next(117, "再按施工队列键（默认 Alt+B）重新打开施工队列");
+        }
+
+        private static void StepConstructionQueueReopened(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(ConstructionQueuePanelUIToolkit.IsOpen, "施工队列键重新打开施工队列");
+            PressChord(GameSettings.KeyBindings.GetChord(GameActionId.ConstructionQueue));
+            Next(118, "面板开着时再按一次同一个键（默认 Alt+B）关闭施工队列");
+        }
+
+        private static void StepConstructionQueueToggledShut(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Check(!ConstructionQueuePanelUIToolkit.IsOpen && mode != null && mode.IsOpen, "施工队列开着时再按同一个键关闭（模态面板走全局键），建造模式还开着");
+            PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.PrioritizeArea));
+            Next(115, "按“优先建造这一片”键（默认 P）并拖框框住传送带虚影");
+        }
+
+        private static void StepPrioritizeArea(double inStep)
+        {
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            int x = SessionState.GetInt(K + "BeltX", 0);
+            int y = SessionState.GetInt(K + "BeltY", 0);
+            if (inStep < 0.4)
+            {
+                return;
+            }
+            if (SessionState.GetInt(K + "PrioDragged", 0) == 0)
+            {
+                Check(mode != null && mode.PrioritizeMode, "进入“优先建造这一片”模式");
+                SessionState.SetInt(K + "PrioDragged", 1);
+                DragWorld(new Vector3(x, 0f, y - 1), new Vector3(x + 5, 0f, y), 0);
+                return;
+            }
+            if (inStep < 1.3)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            Campaign.Regions.HomeValleyConstruction.TryFindPlannedCell(state, new Campaign.Grid.GridCell(x, y), out PlannedBeltRecord plan, out _);
+            WorkOrderRecord order = plan != null ? Campaign.Regions.HomeValleyWorkOrders.FindActiveBuild(state, Campaign.Regions.HomeValleyConstruction.BeltPlanPrefix + plan.PlanId) : null;
+            Check(order != null && order.Priority == Campaign.Regions.HomeValleyConstruction.PriorityMax && mode != null && mode.StatusText.Contains("最高优先级"),
+                $"拖框框住传送带虚影：它的施工改成最高优先级；状态行“{mode?.StatusText}”");
+            RightClickWorld(new Vector3(x + 2, 0f, y + 3));
+            Next(116, "右键退出“优先建造这一片”");
+        }
+
+        private static void StepPrioritizeExited(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Check(mode != null && mode.IsOpen && !mode.PrioritizeMode, "右键退出“优先建造这一片”，建造模式仍开着");
+            CampaignState state = CampaignSession.Current;
             PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.DemolishMode));
             SessionState.SetInt(K + "BeltScrap", state.Scrap + GroundScrap(state));
-            Next(104, "按拆除模式键，在空地上按住左键把刚铺的传送带框起来");
+            Next(104, "按拆除模式键，在空地上按住左键把刚放的传送带虚影框起来");
         }
 
         private static void StepBuildBoxDemolished(double inStep)
@@ -1453,9 +1560,11 @@ namespace GameLogic.EditorTools
                 return;
             }
             CampaignState state = CampaignSession.Current;
-            bool gone = Enumerable.Range(0, 6).All(i => !Campaign.Logistics.BeltNetworkService.Kernel.HasCell(x + i, y));
-            Check(gone && state.Scrap + GroundScrap(state) == SessionState.GetInt(K + "BeltScrap", -1) + 6 && !UiConfirmDialog.IsOpen,
-                $"框选拆除：6 格传送带拆掉、全额返还 6 废料（库存 {state.Scrap}，仓满时返还留在地上），少量且不含关键建筑不弹确认；状态行“{mode?.StatusText}”");
+            bool gone = Enumerable.Range(0, 6).All(i => !Campaign.Logistics.BeltNetworkService.Kernel.HasCell(x + i, y)
+                                                        && !Campaign.Regions.HomeValleyConstruction.TryFindPlannedCell(state, new Campaign.Grid.GridCell(x + i, y), out _, out _));
+            Check(gone && state.Scrap + GroundScrap(state) == SessionState.GetInt(K + "BeltScrap", -1) && !UiConfirmDialog.IsOpen && (state.Grid.PlannedBelts?.Length ?? 0) == 0
+                  && mode != null && mode.LastResult.Outcome == Campaign.Grid.GridOpResult.Kind.BatchDemolished && mode.StatusText.Contains("传送带 6 格"),
+                $"框选拆除：6 格传送带虚影取消规划（没取过料，库存 {state.Scrap} 不变），少量且不含关键建筑不弹确认；状态行“{mode?.StatusText}”");
             PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.RelocateMode));
             Next(105, "按搬迁键（默认 E）");
         }

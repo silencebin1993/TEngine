@@ -89,6 +89,30 @@ namespace GameLogic.Campaign.Regions
         private static bool IsTerminal(WorkOrderState s) =>
             s == WorkOrderState.Completed || s == WorkOrderState.Cancelled || s == WorkOrderState.Failed;
 
+        /// <summary>工单还没结束（待分配 / 已分配 / 进行中 / 等待）。</summary>
+        public static bool IsActive(WorkOrderRecord o) => o != null && !IsTerminal(o.State);
+
+        /// <summary>这种底盘能不能做这一类工作（能力表）。</summary>
+        public static bool CanDoKind(string chassisId, WorkOrderKind kind) => IsCapable(chassisId, kind);
+
+        /// <summary>FG3-LOG-02：这个现场（建筑 ID 或 "beltplan:…"）还没结束的施工单。</summary>
+        public static WorkOrderRecord FindActiveBuild(CampaignState state, string targetId) =>
+            state?.WorkOrders == null ? null : FindActiveByTarget(state, WorkOrderKind.Build, targetId);
+
+        /// <summary>还没结束的施工单数（劳动力提示用，O(工单数)）。</summary>
+        public static int CountActiveConstruction(CampaignState state)
+        {
+            int n = 0;
+            foreach (WorkOrderRecord o in state?.WorkOrders ?? Array.Empty<WorkOrderRecord>())
+            {
+                if (o != null && o.Kind == WorkOrderKind.Build && !IsTerminal(o.State))
+                {
+                    n++;
+                }
+            }
+            return n;
+        }
+
         private static WorkOrderRecord FindActiveByTarget(CampaignState state, WorkOrderKind kind, string targetId)
         {
             return state.WorkOrders?.LastOrDefault(o => o.Kind == kind && o.TargetId == targetId && !IsTerminal(o.State));
@@ -141,6 +165,11 @@ namespace GameLogic.Campaign.Regions
                 return $"这台机器不能{KindVerb(kind)}，换一台搬运机试试";
             }
             if (reason.StartsWith(GridFailurePrefix, StringComparison.Ordinal)) return reason.Substring(GridFailurePrefix.Length);
+            if (reason.StartsWith(HomeValleyConstruction.MaterialsReasonPrefix, StringComparison.Ordinal)) return HomeValleyConstruction.DescribeMaterialsReason(reason);
+            if (reason.StartsWith(UnsupportedResourcePrefix, StringComparison.Ordinal))
+            {
+                return Localization.GameText.Format("build.return.cannot_store", HomeValleyConstruction.MaterialName(reason.Substring(UnsupportedResourcePrefix.Length)));
+            }
             if (reason.StartsWith("order-already-active", StringComparison.Ordinal)) return "这项工作已经有机器在做";
             if (reason.StartsWith("not-damaged", StringComparison.Ordinal)) return "这座建筑没有损坏，不需要修复";
             if (reason.StartsWith("no-repair-profile", StringComparison.Ordinal)) return "这座建筑不能修复";
@@ -340,6 +369,9 @@ namespace GameLogic.Campaign.Regions
         /// <summary>格网放置被拒时的原因码前缀；后面跟当前语言的原因文本，<see cref="DescribeCommandFailure"/> 原样显示。</summary>
         public const string GridFailurePrefix = "grid:";
 
+        /// <summary>FG3-LOG-02：家园仓库存不了的资源类型（后面跟资源类型），搬运被拒 / 失败时的原因码前缀。</summary>
+        public const string UnsupportedResourcePrefix = "unsupported-resource-type:";
+
         private static bool TryResolveSite(string siteOrTypeId, out GameConfig.fg.StartLayout site)
         {
             site = null;
@@ -364,8 +396,9 @@ namespace GameLogic.Campaign.Regions
         }
 
         /// <summary>
-        /// FG0-ARCH-04：在格网上已经校验过的位置生成“规划中”的建筑记录与新建工作单（唯一调用方 <see cref="Grid.HomeGridService.TryPlace"/>）。
-        /// 废料在此预留（Propose → Reserve，完工 Commit，取消 Cancel 全额退回）。
+        /// FG0-ARCH-04：在格网上已经校验过的位置生成“规划中”的建筑记录（虚影）与施工单（唯一调用方 <see cref="Grid.HomeGridService.TryPlace"/>）。
+        /// FG3-LOG-02（FGR-LOG-006）：放置时**不扣材料**（库存不够也能放）——虚影记下所需材料，施工单第一腿是“去仓库取料”，
+        /// 机器取到多少运多少，进度不超过已到的材料（<see cref="HomeValleyConstruction"/>）；取消时已到现场的材料全额退回。
         /// <paramref name="machineLogicId"/> = 0 时工作单进入待分配池（Ready），由空闲机器按 ERD-WRK-002 自动领取。
         /// </summary>
         public static WorkOrderOpResult TryCreateBuildAt(CampaignState state, string buildingTypeId, string buildingId,
@@ -389,14 +422,6 @@ namespace GameLogic.Campaign.Regions
             }
 
             string workOrderId = buildingId + ":build:" + Guid.NewGuid().ToString("N").Substring(0, 8);
-            string txId = workOrderId + ":tx";
-            CampaignEconomyLedger.ProposeConsume(state, txId, buildingId, CampaignEconomyLedger.ResourceScrap, profile.ScrapCost);
-            CampaignEconomyLedger.LedgerResult reserve = CampaignEconomyLedger.Reserve(state, txId);
-            if (!reserve.Success)
-            {
-                CampaignEconomyLedger.Cancel(state, txId);
-                return WorkOrderOpResult.Fail($"insufficient-scrap:{reserve.FailureReason}");
-            }
 
             var planned = new BuildingRecord
             {
@@ -417,15 +442,97 @@ namespace GameLogic.Campaign.Regions
                 Inventory = Array.Empty<CargoEntry>(),
                 QueueIds = Array.Empty<string>(),
                 BlockedReason = null,
+                ConstructionRequired = Math.Max(0, profile.ScrapCost),
+                ConstructionDelivered = 0,
             };
             state.BuildingRecords = (state.BuildingRecords ?? Array.Empty<BuildingRecord>()).Append(planned).ToArray();
 
             var order = NewOrder(state, workOrderId, WorkOrderKind.Build, buildingId, machineLogicId,
-                resourceTransactionId: txId, duration: profile.Seconds);
+                resourceTransactionId: null, duration: profile.Seconds);
+            order.Leg = planned.ConstructionRequired > 0 ? 1 : 0;
             if (machineLogicId == 0)
             {
                 order.State = WorkOrderState.Ready; // 待分配池：空闲机器 0.5 秒内领取（ERD-WRK-002）。
             }
+            Append(state, order);
+            MarkAssignmentDirty();
+            HomeValleyConstruction.Touch();
+            return WorkOrderOpResult.Ok(workOrderId);
+        }
+
+        /// <summary>FG3-LOG-02：传送带规划的施工单（<see cref="HomeValleyConstruction.PlanBelts"/> 调用）：待分配池，第一腿去仓库取料（单价为 0 时直接去现场）。</summary>
+        internal static WorkOrderRecord CreateConstructionOrder(CampaignState state, string targetId, int required, float duration)
+        {
+            string workOrderId = targetId + ":build:" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            WorkOrderRecord order = NewOrder(state, workOrderId, WorkOrderKind.Build, targetId, 0, resourceTransactionId: null, duration: duration);
+            order.Leg = required > 0 ? 1 : 0;
+            order.State = WorkOrderState.Ready;
+            Append(state, order);
+            MarkAssignmentDirty();
+            return order;
+        }
+
+        /// <summary>FG3-LOG-02：施工现场被摧毁后，施工单回到待分配池、进度归零（正在干活的机器放下这单，货舱里的材料退回仓库）。</summary>
+        internal static void ResetForRebuild(CampaignState state, WorkOrderRecord order)
+        {
+            if (order == null || IsTerminal(order.State))
+            {
+                return;
+            }
+            PathWatch.Remove(order.WorkOrderId);
+            WaitingWatch.Remove(order.WorkOrderId);
+            ReleaseBuildMachine(state, order, dropOnly: false);
+            order.Progress = 0f;
+            order.Leg = HomeValleyConstruction.MaterialsStillNeeded(state, order) > 0 ? 1 : 0;
+            order.State = WorkOrderState.Ready;
+            order.FailureReason = null;
+            order.AssignedMachineLogicId = 0;
+            MarkAssignmentDirty();
+        }
+
+        /// <summary>FG3-LOG-02：施工单放掉机器前，把机器货舱里这一趟的施工材料退回（机器阵亡时就地落地）。</summary>
+        private static void ReleaseBuildMachine(CampaignState state, WorkOrderRecord order, bool dropOnly)
+        {
+            if (order.Kind != WorkOrderKind.Build || order.AssignedMachineLogicId <= 0
+                || !MachineRegistry.TryGetRecord(order.AssignedMachineLogicId, out MachineRecord m))
+            {
+                return;
+            }
+            HomeValleyConstruction.ReleaseCargo(state, order, m, dropOnly);
+        }
+
+        // ── FG3-LOG-02：返还物的搬运单（仓库满时返还变成地面物，“由机器之后搬运”，FGR-LOG-007）──────────────────
+
+        /// <summary>
+        /// 给一份返还的地面物生成搬运单，进入待分配池：仓库有空间时由空闲机器（搬运偏好 &gt; 0）领取，搬回归还核心；
+        /// 仓库满时搬运单等待（<see cref="HomeValleyConstruction.ReturnWaitReason"/>，不占机器），腾出空间自动回到待分配池。
+        /// 同一份地面物只生成一张。只用于本系统产生的返还（拆除、取消、被摧毁），不会替玩家去搬别的地面物（FGR-BASE-020）。
+        /// </summary>
+        public static WorkOrderOpResult TryCreateHaulPool(CampaignState state, string groundItemId)
+        {
+            if (state == null || string.IsNullOrEmpty(groundItemId))
+            {
+                return WorkOrderOpResult.Fail("invalid-args");
+            }
+            WorkOrderRecord existing = FindActiveByTarget(state, WorkOrderKind.Haul, groundItemId);
+            if (existing != null)
+            {
+                return WorkOrderOpResult.Ok(existing.WorkOrderId);
+            }
+            if (HomeValleyCargo.FindGroundItem(state, groundItemId) == null)
+            {
+                return WorkOrderOpResult.Fail($"ground-item-not-found:{groundItemId}");
+            }
+            string workOrderId = groundItemId + ":haul:auto";
+            if (Find(state, workOrderId) != null)
+            {
+                workOrderId += ":" + (state.WorkOrders?.Length ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+            var order = NewOrder(state, workOrderId, WorkOrderKind.Haul, groundItemId, 0, resourceTransactionId: null, duration: 0f);
+            order.SourceId = groundItemId;
+            order.DestinationId = DestinationCore;
+            order.IssuerId = "return";
+            order.State = WorkOrderState.Ready;
             Append(state, order);
             MarkAssignmentDirty();
             return WorkOrderOpResult.Ok(workOrderId);
@@ -489,6 +596,8 @@ namespace GameLogic.Campaign.Regions
             {
                 PendingMovementRelease.Add(order.AssignedMachineLogicId);
             }
+            ReleaseBuildMachine(state, order, dropOnly: false); // FG3-LOG-02：货舱里正运往旧位置的材料退回仓库。
+            order.Leg = HomeValleyConstruction.MaterialsStillNeeded(state, order) > 0 ? 1 : 0;
             order.State = WorkOrderState.Ready;
             order.AssignedMachineLogicId = 0;
             MarkAssignmentDirty();
@@ -634,13 +743,10 @@ namespace GameLogic.Campaign.Regions
             }
 
             string workOrderId = building.BuildingId + ":demolish:" + Guid.NewGuid().ToString("N").Substring(0, 8);
-            string txId = workOrderId + ":tx";
-            int refund = building.InvestedScrap / 2; // 向下取整；0 投入（开局即 Operational 的建筑）返还 0，忠于字面。
-            CampaignEconomyLedger.ProposeProduce(state, txId, building.BuildingId, CampaignEconomyLedger.ResourceScrap, refund);
-            CampaignEconomyLedger.Reserve(state, txId);
-
+            // FG3-LOG-02（FGR-LOG-007“全额返还”；DEBT-FG0ARCH04-02 关闭）：返还在完工那一刻按建筑实际投入的全额 + 内部缓存结算
+            // （<see cref="CompleteDemolish"/>），不再预登记“一半”的生产事务。开局即运转、从没花过材料的建筑投入为 0，返还 0（忠于“实际投入”）。
             var order = NewOrder(state, workOrderId, WorkOrderKind.Salvage, building.BuildingId, machineLogicId,
-                resourceTransactionId: txId, duration: HomeValleyLayout.DemolishSeconds);
+                resourceTransactionId: null, duration: HomeValleyLayout.DemolishSeconds);
             if (machineLogicId == 0)
             {
                 order.State = WorkOrderState.Ready;
@@ -668,6 +774,12 @@ namespace GameLogic.Campaign.Regions
             if (item == null)
             {
                 return WorkOrderOpResult.Fail($"ground-item-not-found:{groundItemId}");
+            }
+            if (!HomeValleyCargo.CanStore(item.ResourceType))
+            {
+                // FG3-LOG-02（DEBT-FG3LOG02-01）：家园仓库目前只存废料；返还落地的物品（传送带物品、建筑缓存）搬回去也放不进，
+                // 不派一趟必然失败的搬运（此前交付时物品会从货舱里消失）。物品表接入（FG4-ECO-01）后这里放开。
+                return WorkOrderOpResult.Fail(UnsupportedResourcePrefix + item.ResourceType);
             }
 
             MachineCheck check = CheckMachine(machineLogicId, WorkOrderKind.Haul);
@@ -746,6 +858,17 @@ namespace GameLogic.Campaign.Regions
             }
 
             CargoEntry cargo = machine.Cargo[0];
+            if (!HomeValleyCargo.CanStore(cargo.ResourceType))
+            {
+                // 仓库存不了的物品（旧存档或别的入口带进货舱的）：放回机器脚下的地面，不从货舱里凭空消失。
+                HomeValleyCargo.SpawnGroundItem(state, HomeValleyLayout.RegionId, machine.WorldPosition, cargo.ResourceType, cargo.Amount,
+                    order.SourceId + ":redrop:" + order.WorkOrderId);
+                machine.Cargo = Array.Empty<CargoEntry>();
+                order.State = WorkOrderState.Failed;
+                order.FailureReason = UnsupportedResourcePrefix + cargo.ResourceType;
+                MarkAssignmentDirty();
+                return;
+            }
             int available = HomeValleyCargo.GetAvailableSpace(state, cargo.ResourceType);
             if (available < cargo.Amount)
             {
@@ -818,7 +941,32 @@ namespace GameLogic.Campaign.Regions
         public static void OnArrivedAtWork(CampaignState state, string workOrderId)
         {
             WorkOrderRecord order = Find(state, workOrderId);
-            if (order == null || order.State != WorkOrderState.Reserved)
+            if (order == null)
+            {
+                return;
+            }
+            if (order.Kind == WorkOrderKind.Haul)
+            {
+                // 通用到达入口也接搬运单（自检与瞬时到达的调用方统一走这里）：取货那一腿到了 → 拾取，下一次 Tick 发起送货那一腿；
+                // 送货那一腿到了 → 交付。正式的家园控制器仍按两腿各自的回调走（HaulSourceArrival / HaulDestinationArrival），行为相同。
+                if (order.State == WorkOrderState.Reserved)
+                {
+                    if (OnArrivedAtHaulSource(state, workOrderId))
+                    {
+                        QueueNextLeg(order);
+                    }
+                }
+                else if (order.State == WorkOrderState.InProgress)
+                {
+                    OnArrivedAtHaulDestination(state, workOrderId);
+                }
+                return;
+            }
+            if (order.State != WorkOrderState.Reserved)
+            {
+                return;
+            }
+            if (order.Kind == WorkOrderKind.Build && ArriveBuildLeg(state, order))
             {
                 return;
             }
@@ -834,6 +982,99 @@ namespace GameLogic.Campaign.Regions
             // 续工的订单，Progress 是"已经干了多少"的真实进度（ERD-WRK-003"机器受控...保留已搬货物"
             // 同一条纪律延伸到工作进度本身，不是只保货物），这里清零会让续工的人白干一次已完成的部分。
         }
+
+        /// <summary>
+        /// FG3-LOG-02：施工单的到达。返回 true = 本方法已处理完（取料那一腿）。
+        /// - 取料腿（Leg=1，机器在仓库）：取这一趟的材料进货舱，转为去现场那一腿，下一次 Tick 发起移动；仓库里没有货 → 等待材料、放掉机器（不扣料）。
+        /// - 现场腿（Leg=0）：货舱里的材料放进虚影，然后由调用方转为施工中（与其它工单同一段）。
+        /// </summary>
+        private static bool ArriveBuildLeg(CampaignState state, WorkOrderRecord order)
+        {
+            MachineRegistry.TryGetRecord(order.AssignedMachineLogicId, out MachineRecord machine);
+            if (order.Leg == 1)
+            {
+                PathWatch.Remove(order.WorkOrderId);
+                int got = HomeValleyConstruction.TryFetch(state, order, machine);
+                if (got <= 0)
+                {
+                    int need = HomeValleyConstruction.MaterialsStillNeeded(state, order);
+                    if (need <= 0)
+                    {
+                        order.Leg = 0; // 已经不缺料（材料在别处被补齐 / 规划缩短）：直接去现场。
+                        QueueNextLeg(order);
+                        return true;
+                    }
+                    EnterWaitingMaterials(state, order);
+                    return true;
+                }
+                order.Leg = 0; // “无法到达”通知的防刷屏标记只在真正到了现场时清（取料不算），否则去不了现场时每次重试都会再发一条。
+                QueueNextLeg(order);
+                return true;
+            }
+            HomeValleyConstruction.Deposit(state, order, machine);
+            return false;
+        }
+
+        /// <summary>施工单转为“等待材料”：放掉机器（机器空闲，可以去做别的），原因写明还差多少；库存有货后回到待分配池。</summary>
+        private static void EnterWaitingMaterials(CampaignState state, WorkOrderRecord order)
+        {
+            PathWatch.Remove(order.WorkOrderId);
+            ReleaseBuildMachine(state, order, dropOnly: false);
+            int need = HomeValleyConstruction.MaterialsStillNeeded(state, order);
+            // 每张施工单只在第一次缺料时发通知（之后“有一点货 → 取完 → 又缺”的来回不刷屏；状态一直写在队列与悬停里）。
+            bool first = WaitingNotified.Add(order.WorkOrderId);
+            order.State = WorkOrderState.Waiting;
+            order.Leg = 1;
+            order.FailureReason = HomeValleyConstruction.MaterialsReasonPrefix + need.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                                  + ":" + Mathf.FloorToInt(state.Scrap).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            order.AssignedMachineLogicId = 0;
+            MarkAssignmentDirty();
+            if (first)
+            {
+                HomeValleyConstruction.NotifyWaitingMaterials(state, order, need);
+            }
+        }
+
+        /// <summary>已经发过“等待材料”通知的施工单（瞬态；读档后同一张单最多再提醒一次）。</summary>
+        private static readonly HashSet<string> WaitingNotified = new HashSet<string>(StringComparer.Ordinal);
+
+        /// <summary>取料 / 取货之后要发起的下一腿（下一次 <see cref="Tick"/> 开头统一调 beginAssignedMovement；上限 = 同一步到达的机器数）。</summary>
+        private static readonly List<string> PendingLeg = new List<string>(4);
+
+        private static void QueueNextLeg(WorkOrderRecord order)
+        {
+            if (!PendingLeg.Contains(order.WorkOrderId))
+            {
+                PendingLeg.Add(order.WorkOrderId);
+            }
+        }
+
+        private static void DrainPendingLegs(CampaignState state, Action<WorkOrderRecord> beginAssignedMovement)
+        {
+            if (PendingLeg.Count == 0)
+            {
+                return;
+            }
+            var ids = PendingLeg.ToArray();
+            PendingLeg.Clear();
+            foreach (string id in ids)
+            {
+                WorkOrderRecord o = Find(state, id);
+                if (o == null || o.AssignedMachineLogicId <= 0)
+                {
+                    continue;
+                }
+                bool buildLeg = o.Kind == WorkOrderKind.Build && o.State == WorkOrderState.Reserved;
+                bool haulLeg = o.Kind == WorkOrderKind.Haul && o.State == WorkOrderState.InProgress;
+                if (buildLeg || haulLeg)
+                {
+                    beginAssignedMovement?.Invoke(o);
+                }
+            }
+        }
+
+        /// <summary>自检用：等着发起下一腿的工单数。</summary>
+        public static int PendingLegCount => PendingLeg.Count;
 
         // ── 通用创建辅助 ─────────────────────────────────────────────────────────
 
@@ -904,6 +1145,7 @@ namespace GameLogic.Campaign.Regions
             order.State = WorkOrderState.Cancelled;
             order.AssignedMachineLogicId = 0;
             MarkAssignmentDirty();
+            HomeValleyConstruction.Touch();
         }
 
         // ── 中断：机器受控（WASD 接管）────────────────────────────────────────────
@@ -920,9 +1162,59 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             PathWatch.Remove(order.WorkOrderId);
+            // FG3-LOG-02：施工单被接入打断时，货舱里这一趟的材料退回仓库（机器不带着施工材料去打仗；订单回池后别的机器重新取料）。
+            ReleaseBuildMachine(state, order, dropOnly: false);
+            if (order.Kind == WorkOrderKind.Build)
+            {
+                order.Leg = HomeValleyConstruction.MaterialsStillNeeded(state, order) > 0 && order.State != WorkOrderState.InProgress ? 1 : order.Leg;
+            }
             order.State = WorkOrderState.Ready;
             order.AssignedMachineLogicId = 0;
             MarkAssignmentDirty(); // 订单立即回到分配池，另一台空闲机器不必等满 0.5 秒窗口。
+        }
+
+        /// <summary>FG3-LOG-02（FGR-BASE-020 / FG-GAP-063）：玩家把机器调去做别的（右键另一个工作目标、派去远征）时，
+        /// 让出它手上的工单——与接入打断同一套处理（施工单：货舱材料退回仓库、回待分配池，虚影与已到现场的材料保留）。</summary>
+        public static void YieldToPool(CampaignState state, int machineLogicId) => OnMachinePossessed(state, machineLogicId);
+
+        /// <summary>
+        /// FG3-LOG-02（FGR-LOG-006 / FGR-BASE-020）：玩家选中机器、右键点中还没建成的虚影 = “去建这个”。
+        /// 不新建施工单、不撤销规划、不扣料：把这座虚影现有的施工单交给这台机器（按当前这一腿走：缺料先去仓库取）。
+        /// 施工单已经在别的机器手上 → 拒绝（与别的工单“已有机器在做”一致）；缺料且仓库没货 → 拒绝并写明缺什么（不白跑一趟）。
+        /// </summary>
+        public static WorkOrderOpResult TryAssignConstruction(CampaignState state, string siteId, int machineLogicId)
+        {
+            WorkOrderRecord order = state == null ? null : FindActiveBuild(state, siteId);
+            if (order == null)
+            {
+                return WorkOrderOpResult.Fail("building-not-found");
+            }
+            if (order.AssignedMachineLogicId == machineLogicId)
+            {
+                return WorkOrderOpResult.Ok(order.WorkOrderId);
+            }
+            if (order.AssignedMachineLogicId > 0)
+            {
+                return WorkOrderOpResult.Fail($"order-already-active:{order.State}");
+            }
+            int need = HomeValleyConstruction.MaterialsStillNeeded(state, order);
+            int stock = Mathf.FloorToInt(state.Scrap);
+            if (need > 0 && stock <= 0)
+            {
+                return WorkOrderOpResult.Fail(HomeValleyConstruction.MaterialsReasonPrefix + need.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                                              + ":" + stock.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+            PathWatch.Remove(order.WorkOrderId);
+            WaitingWatch.Remove(order.WorkOrderId);
+            order.Leg = need > 0 ? 1 : 0;
+            order.FailureReason = null;
+            WorkOrderOpResult r = ReassignExisting(state, order, machineLogicId);
+            if (r.Success)
+            {
+                MarkAssignmentDirty();
+                HomeValleyConstruction.Touch();
+            }
+            return r;
         }
 
         // ── 每帧驱动 ─────────────────────────────────────────────────────────────
@@ -949,6 +1241,8 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             DrainPendingMovementRelease(state, releaseMachineMovement);
+            DrainPendingLegs(state, beginAssignedMovement);
+            AllocateFetchStock(state, dt);
 
             if (state.WorkOrders != null && state.WorkOrders.Length > 0)
             {
@@ -957,6 +1251,27 @@ namespace GameLogic.Campaign.Regions
                     if (IsTerminal(order.State))
                     {
                         continue;
+                    }
+                    if (order.Kind == WorkOrderKind.Build && order.ResourceTransactionId != null)
+                    {
+                        HomeValleyConstruction.MigrateLegacyBuildOrder(state, order); // FG3-LOG-02：旧存档“放置即预留”的施工单，只迁移一次。
+                    }
+                    if (order.State == WorkOrderState.Ready && order.AssignedMachineLogicId == 0)
+                    {
+                        // FG3-LOG-02：取料腿的施工单在库存为 0 时不派机器（派过去也是空跑），转为等待材料；
+                        // 返还物的搬运单在仓库放不下时同样等待，不让机器扛着货在核心门口干等。
+                        if (order.Kind == WorkOrderKind.Build && order.Leg == 1 && Mathf.FloorToInt(state.Scrap) <= 0
+                            && HomeValleyConstruction.MaterialsStillNeeded(state, order) > 0)
+                        {
+                            EnterWaitingMaterials(state, order);
+                            continue;
+                        }
+                        if (order.Kind == WorkOrderKind.Haul && order.IssuerId == "return" && !ReturnHaulHasSpace(state, order))
+                        {
+                            order.State = WorkOrderState.Waiting;
+                            order.FailureReason = HomeValleyConstruction.ReturnWaitReason;
+                            continue;
+                        }
                     }
 
                     // 机器死亡检查：对当前仍绑定机器的订单统一检查存活状态，覆盖 Reserved/InProgress 两态。
@@ -984,6 +1299,136 @@ namespace GameLogic.Campaign.Regions
 
             TickBatteryRegen(state, dt);
             TickAssignment(state, dt, getMachinePosition, isDirectControlled, beginAssignedMovement);
+            HomeValleyConstruction.TickLabor(state, dt, isDirectControlled);
+        }
+
+        private static bool IsWaitingMaterials(WorkOrderRecord order) =>
+            order.Kind == WorkOrderKind.Build && order.State == WorkOrderState.Waiting && order.FailureReason != null
+            && order.FailureReason.StartsWith(HomeValleyConstruction.MaterialsReasonPrefix, StringComparison.Ordinal);
+
+        /// <summary>取料库存分配的脏标记与节流计时（瞬态；读档后第一次 Tick 必跑一次）。</summary>
+        private static bool _fetchDirty = true;
+        private static float _fetchTimer;
+        private static int _fetchLastStock = int.MinValue;
+        private static readonly List<WorkOrderRecord> FetchCandidates = new List<WorkOrderRecord>(16);
+
+        /// <summary>
+        /// FG3-LOG-02（审查修复：库存不够分时多台机器空跑、优先级失效）：把仓库里的材料按“施工优先级高 → 放下得早”分给要取料的施工单。
+        /// 预算 = 库存 − 正在去仓库取料的施工单这一趟要拿的量；排在前面、预算够的施工单留在 / 回到待分配池，
+        /// 排不上的转为“等待材料”（放掉机器、写明缺什么，每张单只通知一次），预算腾出来后按同一顺序放回。
+        /// 已经不缺料的等待单直接回池去现场。只在库存变化、工单状态变化（<see cref="MarkAssignmentDirty"/>）或每 0.5 秒时跑，
+        /// O(工单数)；候选按优先级做稳定插入排序（候选 = 等料 / 待取料的虚影数）。
+        /// </summary>
+        private static void AllocateFetchStock(CampaignState state, float dt)
+        {
+            WorkOrderRecord[] orders = state.WorkOrders;
+            if (orders == null || orders.Length == 0)
+            {
+                return;
+            }
+            int stock = Mathf.FloorToInt(state.Scrap);
+            _fetchTimer += dt;
+            if (!_fetchDirty && stock == _fetchLastStock && _fetchTimer < AssignIntervalSeconds)
+            {
+                return;
+            }
+            _fetchDirty = false;
+            _fetchTimer = 0f;
+            _fetchLastStock = stock;
+
+            FetchCandidates.Clear();
+            int committed = 0;
+            for (int i = 0; i < orders.Length; i++)
+            {
+                WorkOrderRecord o = orders[i];
+                if (o == null || o.Kind != WorkOrderKind.Build || IsTerminal(o.State))
+                {
+                    continue;
+                }
+                if (IsWaitingMaterials(o))
+                {
+                    FetchCandidates.Add(o);
+                    continue;
+                }
+                if (o.Leg != 1)
+                {
+                    continue;
+                }
+                if (o.State == WorkOrderState.Reserved && o.AssignedMachineLogicId > 0)
+                {
+                    committed += Math.Min(HomeValleyConstruction.CarryPerTrip, HomeValleyConstruction.MaterialsStillNeeded(state, o));
+                }
+                else if (o.State == WorkOrderState.Ready && o.AssignedMachineLogicId == 0)
+                {
+                    FetchCandidates.Add(o);
+                }
+            }
+            if (FetchCandidates.Count == 0)
+            {
+                return;
+            }
+            // 稳定插入排序：优先级高的在前，同优先级保持工单数组顺序（= 放下先后，与施工队列同一顺序）。
+            for (int i = 1; i < FetchCandidates.Count; i++)
+            {
+                WorkOrderRecord cur = FetchCandidates[i];
+                int j = i - 1;
+                while (j >= 0 && FetchCandidates[j].Priority < cur.Priority)
+                {
+                    FetchCandidates[j + 1] = FetchCandidates[j];
+                    j--;
+                }
+                FetchCandidates[j + 1] = cur;
+            }
+
+            int budget = stock - committed;
+            bool changed = false;
+            foreach (WorkOrderRecord o in FetchCandidates)
+            {
+                int need = HomeValleyConstruction.MaterialsStillNeeded(state, o);
+                bool waiting = o.State == WorkOrderState.Waiting;
+                if (need <= 0)
+                {
+                    if (waiting || o.Leg != 0)
+                    {
+                        o.Leg = 0; // 已经不缺料（材料在别处被补齐 / 规划缩短）：直接去现场。
+                        o.State = WorkOrderState.Ready;
+                        o.FailureReason = null;
+                        changed = true;
+                    }
+                    continue;
+                }
+                if (budget > 0)
+                {
+                    budget -= Math.Min(HomeValleyConstruction.CarryPerTrip, need);
+                    if (waiting)
+                    {
+                        o.Leg = 1;
+                        o.State = WorkOrderState.Ready;
+                        o.FailureReason = null;
+                        changed = true;
+                    }
+                    continue;
+                }
+                if (!waiting)
+                {
+                    EnterWaitingMaterials(state, o); // 排不上：等待材料（不派机器空跑）。
+                    changed = true;
+                }
+            }
+            FetchCandidates.Clear();
+            if (changed)
+            {
+                _assignDirty = true;
+                HomeValleyConstruction.Touch();
+            }
+        }
+
+        /// <summary>返还物搬运单：地面物还在、仓库放得下它（废料以外的物品家园仓库存不了，一直等）。</summary>
+        private static bool ReturnHaulHasSpace(CampaignState state, WorkOrderRecord order)
+        {
+            GroundItemRecord item = HomeValleyCargo.FindGroundItem(state, order.SourceId);
+            return item != null && item.ResourceType == CampaignEconomyLedger.ResourceScrap
+                   && HomeValleyCargo.GetAvailableSpace(state, item.ResourceType) >= item.Amount;
         }
 
         // ── ER3-WRK-02：确定性自动分配 ───────────────────────────────────────────
@@ -999,6 +1444,7 @@ namespace GameLogic.Campaign.Regions
         public static void MarkAssignmentDirty()
         {
             _assignDirty = true;
+            _fetchDirty = true;
         }
 
         // ── FG0-ARCH-06：工作地点无法到达 ─────────────────────────────────────────────
@@ -1043,6 +1489,11 @@ namespace GameLogic.Campaign.Regions
             if (order.State == WorkOrderState.Reserved)
             {
                 PathWatch.Remove(order.WorkOrderId);
+                ReleaseBuildMachine(state, order, dropOnly: false); // FG3-LOG-02：去不了现场，货舱里的材料退回仓库。
+                if (order.Kind == WorkOrderKind.Build && HomeValleyConstruction.MaterialsStillNeeded(state, order) > 0)
+                {
+                    order.Leg = 1;
+                }
                 order.State = WorkOrderState.Waiting;
                 order.FailureReason = code;
                 order.AssignedMachineLogicId = 0;
@@ -1071,6 +1522,15 @@ namespace GameLogic.Campaign.Regions
         /// <summary>工单目标的显示名（建筑名；其它按目标 ID）。</summary>
         public static string DescribeTarget(CampaignState state, WorkOrderRecord order)
         {
+            if (HomeValleyConstruction.IsBeltPlan(order.TargetId))
+            {
+                PlannedBeltRecord plan = HomeValleyConstruction.FindPlan(state, order.TargetId);
+                int built = HomeValleyConstruction.BuiltCells(plan);
+                int total = built + HomeValleyConstruction.UnbuiltCells(plan);
+                return GameLogic.Localization.GameText.Format("build.queue.belt_name",
+                    Logistics.BeltNetworkService.TierName(plan?.Tier ?? 0), total.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    built.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
             BuildingRecord b = state?.BuildingRecords?.FirstOrDefault(x => x.BuildingId == order.TargetId);
             if (b != null)
             {
@@ -1092,9 +1552,16 @@ namespace GameLogic.Campaign.Regions
         {
             _assignDirty = true;
             _assignTimer = 0f;
+            _fetchDirty = true;
+            _fetchTimer = 0f;
+            _fetchLastStock = int.MinValue;
+            FetchCandidates.Clear();
             PathWatch.Clear();
             WaitingWatch.Clear();
             PendingMovementRelease.Clear();
+            PendingLeg.Clear();
+            WaitingNotified.Clear();
+            HomeValleyConstruction.ResetSessionState();
         }
 
         /// <summary>ERD-WRK-002："空闲机器每 0.5 秒或收到脏事件时评估一次"——本方法就是那次评估，
@@ -1175,6 +1642,10 @@ namespace GameLogic.Campaign.Regions
                     {
                         continue;
                     }
+                    if (order.Kind == WorkOrderKind.Haul && order.IssuerId == "return" && !ReturnHaulHasSpace(state, order))
+                    {
+                        continue; // FG3-LOG-02：返还物搬运单在仓库放不下时不派机器（本步新生成、还没被转为等待的也在这里拦住）。
+                    }
                     int categoryPriority = machine.WorkPriorities?.Get(order.Kind) ?? 0;
                     if (categoryPriority <= 0)
                     {
@@ -1204,9 +1675,10 @@ namespace GameLogic.Campaign.Regions
         }
 
         /// <summary>ERD-WRK-002 排序键，从高到低：机器对该类工作的优先级(1～4) → 订单自身 Priority →
-        /// createdTick 小者优先 → 估算路径短者优先 → workOrderId 字典序小者优先（最终稳定平局判定）。
-        /// 全部输入都是落盘字段或本帧计算的确定值，不含墙上时间或容器枚举顺序，保证 AC-WRK-001
-        /// "同一订单集分配一致"。</summary>
+        /// createdTick 小者优先 → 估算路径短者优先 → 在工单数组里靠前者优先（最终稳定平局判定：调用方按数组顺序遍历，
+        /// 完全平局时返回 false 保留先遇到的那张）。FG3-LOG-02：此前最后按 workOrderId 字典序，而施工单 ID 带随机段，
+        /// 同一时刻放下的虚影谁先建每局不同、也和施工队列（同优先级按数组顺序）对不上。数组顺序随存档落盘，
+        /// 全部输入都是落盘字段或本帧计算的确定值，不含墙上时间或随机数，保证 AC-WRK-001"同一订单集分配一致"。</summary>
         private static bool IsBetterCandidate(int candidateCategoryPriority, WorkOrderRecord candidate, float candidateDistance,
             int bestCategoryPriority, WorkOrderRecord best, float bestDistance)
         {
@@ -1226,7 +1698,7 @@ namespace GameLogic.Campaign.Regions
             {
                 return candidateDistance < bestDistance;
             }
-            return string.CompareOrdinal(candidate.WorkOrderId, best.WorkOrderId) < 0;
+            return false;
         }
 
         /// <summary>赶路阶段停滞看门狗的瞬态记忆——不落盘，不需要落盘：真实进程重启后最多重新起算
@@ -1280,6 +1752,11 @@ namespace GameLogic.Campaign.Regions
             {
                 PathWatch.Remove(order.WorkOrderId);
                 int releasedMachine = order.AssignedMachineLogicId;
+                ReleaseBuildMachine(state, order, dropOnly: false); // FG3-LOG-02：运料途中受阻，这一趟的材料退回仓库，重试时重新取。
+                if (order.Kind == WorkOrderKind.Build && HomeValleyConstruction.MaterialsStillNeeded(state, order) > 0)
+                {
+                    order.Leg = 1;
+                }
                 order.State = WorkOrderState.Waiting;
                 order.FailureReason = "path-blocked";
                 order.AssignedMachineLogicId = 0;
@@ -1311,8 +1788,9 @@ namespace GameLogic.Campaign.Regions
                 case WorkOrderKind.Build:
                     // FG0-ARCH-04：建造位由格网决定（规划中的建筑记录的占地中心）。此前恒返回发电机2 的坑位，
                     // 信标与自由放置的建筑会让机器走错地方。
-                    BuildingRecord buildTarget = state.BuildingRecords?.FirstOrDefault(b => b.BuildingId == order.TargetId);
-                    return buildTarget?.Position ?? HomeValleyLayout.Generator2Site.Position;
+                    // FG3-LOG-02：取料腿先去离现场最近的仓库（归还核心 / 运转中的仓库）；传送带规划的现场 = 下一格还没建成的格子。
+                    Vector2 site = HomeValleyConstruction.SitePosition(state, order);
+                    return order.Leg == 1 ? HomeValleyConstruction.StoragePosition(state, site) : site;
                 case WorkOrderKind.Salvage:
                     if (order.TargetId == HomeValleyLayout.Wreckage1NodeId)
                     {
@@ -1393,6 +1871,30 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
+            // FG3-LOG-02：等待材料的施工单由 AllocateFetchStock 按“优先级 → 放下先后”在库存够用的范围内放回待分配池
+            // （FGR-LOG-006“一旦有货就自动继续”；库存不够分时只放出够用的几张，不让多台机器一起空跑）。
+            if (IsWaitingMaterials(order))
+            {
+                return;
+            }
+
+            // FG3-LOG-02：返还物搬运单等仓库腾出空间（地面物被玩家亲手搬走了就取消）。
+            if (order.Kind == WorkOrderKind.Haul && order.FailureReason == HomeValleyConstruction.ReturnWaitReason)
+            {
+                if (HomeValleyCargo.FindGroundItem(state, order.SourceId) == null)
+                {
+                    order.State = WorkOrderState.Cancelled;
+                    order.FailureReason = "source-vanished";
+                }
+                else if (ReturnHaulHasSpace(state, order))
+                {
+                    order.State = WorkOrderState.Ready;
+                    order.FailureReason = null;
+                    MarkAssignmentDirty();
+                }
+                return;
+            }
+
             // "no-power" 分支不在本 Story 落地——见 TickTimedWork 上方注释，当前没有真实触发源。
         }
 
@@ -1408,6 +1910,11 @@ namespace GameLogic.Campaign.Regions
         /// 届时补齐即可，不影响本 Story 已实现规则的正确性。</summary>
         private static void TickTimedWork(CampaignState state, WorkOrderRecord order, float dt)
         {
+            if (order.Kind == WorkOrderKind.Build)
+            {
+                TickBuildWork(state, order, dt);
+                return;
+            }
             order.Progress += dt;
             if (order.Progress < order.Duration)
             {
@@ -1419,11 +1926,61 @@ namespace GameLogic.Campaign.Regions
                 case WorkOrderKind.Repair:
                     CompleteRepair(state, order);
                     break;
-                case WorkOrderKind.Build:
-                    CompleteBuild(state, order);
-                    break;
                 case WorkOrderKind.Salvage:
                     CompleteSalvage(state, order);
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// FG3-LOG-02：施工单的施工进度——不超过已到现场的材料允许的上限（<see cref="HomeValleyConstruction.TickProgress"/>）。
+        /// 材料用完还没建完：同一台机器回仓库再取一趟；库存为 0 就等待材料并放掉机器（“施工暂停，显示缺料，不重复扣料”）。
+        /// </summary>
+        private static void TickBuildWork(CampaignState state, WorkOrderRecord order, float dt)
+        {
+            if (order.ResourceTransactionId != null)
+            {
+                HomeValleyConstruction.MigrateLegacyBuildOrder(state, order);
+            }
+            BuildingRecord relocation = state.BuildingRecords?.FirstOrDefault(b => b.BuildingId == order.TargetId);
+            if (relocation != null && !string.IsNullOrEmpty(relocation.RelocateFromId))
+            {
+                order.Progress += dt; // 搬迁不花材料（材料就是原建筑本身），按工期施工。
+                if (order.Progress >= order.Duration)
+                {
+                    CompleteBuild(state, order);
+                }
+                return;
+            }
+            switch (HomeValleyConstruction.TickProgress(state, order, dt))
+            {
+                case HomeValleyConstruction.ProgressResult.Complete:
+                    CompleteBuild(state, order);
+                    break;
+                case HomeValleyConstruction.ProgressResult.SiteGone:
+                    order.State = WorkOrderState.Failed;
+                    order.FailureReason = "target-destroyed";
+                    MarkAssignmentDirty();
+                    break;
+                case HomeValleyConstruction.ProgressResult.MoveOn:
+                    // 传送带：身边的格子建完了，走到下一格接着建（同一台机器、同一张单，材料已在现场）。
+                    order.Leg = 0;
+                    order.State = WorkOrderState.Reserved;
+                    PathWatch.Remove(order.WorkOrderId);
+                    QueueNextLeg(order);
+                    HomeValleyConstruction.Touch();
+                    break;
+                case HomeValleyConstruction.ProgressResult.NeedMaterials:
+                    order.Leg = 1;
+                    if (Mathf.FloorToInt(state.Scrap) > 0 && order.AssignedMachineLogicId > 0)
+                    {
+                        order.State = WorkOrderState.Reserved; // 同一台机器回仓库再取一趟（下一次 Tick 发起移动）。
+                        QueueNextLeg(order);
+                    }
+                    else
+                    {
+                        EnterWaitingMaterials(state, order);
+                    }
                     break;
             }
         }
@@ -1476,22 +2033,31 @@ namespace GameLogic.Campaign.Regions
                 CompleteRelocation(state, order, building);
                 return;
             }
+            if (HomeValleyConstruction.IsBeltPlan(order.TargetId))
+            {
+                // FG3-LOG-02：传送带规划的格子已在施工中逐格进了内核，这里只收尾（规划从存档移除）。
+                int cells = HomeValleyConstruction.BuiltCells(HomeValleyConstruction.FindPlan(state, order.TargetId));
+                Vector2 at = HomeValleyConstruction.SitePosition(state, order);
+                HomeValleyConstruction.OnSiteCompleted(state, order, null);
+                order.State = WorkOrderState.Completed;
+                MachineRegistry.RecordJobCompleted(order.AssignedMachineLogicId);
+                MarkAssignmentDirty();
+                Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.BuildComplete, at,
+                    GameLogic.Localization.GameText.Format("build.belt.done", cells.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+                return;
+            }
             if (building == null)
             {
                 order.State = WorkOrderState.Failed;
                 order.FailureReason = "target-destroyed";
-                CampaignEconomyLedger.Cancel(state, order.ResourceTransactionId);
                 MarkAssignmentDirty();
-                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Failure, "建造工单失败：规划地块已不存在，废料已退还");
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Failure, GameLogic.Localization.GameText.Get("build.site.gone"));
                 return;
             }
 
             building.ConstructionState = BuildingConstructionState.Operational;
-            if (HomeValleyLayout.BuildProfile.TryGetValue(building.BuildingTypeId, out (int ScrapCost, float Seconds) buildProfile))
-            {
-                building.InvestedScrap = buildProfile.ScrapCost;
-            }
-            CampaignEconomyLedger.Commit(state, order.ResourceTransactionId);
+            // FG3-LOG-02：投入 = 运到现场、建进去的材料（= 所需材料）；拆除时全额返还这么多。
+            HomeValleyConstruction.OnSiteCompleted(state, order, building);
             HomeValleyPowerGrid.Recompute(state);
             order.State = WorkOrderState.Completed;
             MachineRegistry.RecordJobCompleted(order.AssignedMachineLogicId); // ER4-MCH-01：统计与经历唯一写入口。
@@ -1619,6 +2185,10 @@ namespace GameLogic.Campaign.Regions
         /// <summary>拆除返还地面物的 salvage ID（每张拆除工单唯一）。</summary>
         public static string DemolishDropId(WorkOrderRecord order) => order.WorkOrderId + ":demolish-drop"; // 工单 ID 已含目标建筑 ID
 
+        /// <summary>最近一次拆除返还的建筑材料与内部缓存数量（自检读）。</summary>
+        public static int LastDemolishRefund { get; private set; }
+        public static int LastDemolishCacheReturned { get; private set; }
+
         private static void CompleteDemolish(CampaignState state, WorkOrderRecord order)
         {
             BuildingRecord building = state.BuildingRecords?.FirstOrDefault(b => b.BuildingId == order.TargetId);
@@ -1633,16 +2203,30 @@ namespace GameLogic.Campaign.Regions
 
             state.BuildingRecords = state.BuildingRecords.Where(b => b.BuildingId != building.BuildingId).ToArray();
 
+            // FG3-LOG-02（FGR-LOG-007 全额返还）：建筑本身的材料（实际投入的全额）+ 建筑内部缓存的物品，送回仓库；放不下的变成地面物，
+            // 生成搬运单等仓库有空间时由机器搬走。旧存档里预登记的“一半返还”生产事务作废（空退款），按全额结算。
+            if (!string.IsNullOrEmpty(order.ResourceTransactionId))
+            {
+                CampaignEconomyLedger.Cancel(state, order.ResourceTransactionId);
+            }
             // 地面物按 salvage ID 去重：带上工单 ID，同一建筑 ID 被重建再拆时，第二份返还不会被旧的地面物吞掉。
             string dropId = DemolishDropId(order);
-            HomeValleyCargo.SpawnGroundItem(state, HomeValleyLayout.RegionId, building.Position,
-                CampaignEconomyLedger.ResourceScrap, building.InvestedScrap / 2, dropId);
-
-            GroundItemRecord dropped = HomeValleyCargo.FindGroundItemBySalvageId(state, dropId);
-            if (dropped != null)
+            HomeValleyConstruction.ReturnMaterials(state, building.Position, CampaignEconomyLedger.ResourceScrap, building.InvestedScrap, dropId);
+            LastDemolishRefund = building.InvestedScrap;
+            LastDemolishCacheReturned = 0;
+            if (building.Inventory != null)
             {
-                HomeValleyCargo.HaulTicket ticket = HomeValleyCargo.TryReserveHaul(state, dropped.GroundItemId);
-                HomeValleyCargo.CommitHaul(state, ticket, order.ResourceTransactionId);
+                for (int i = 0; i < building.Inventory.Length; i++)
+                {
+                    CargoEntry c = building.Inventory[i];
+                    if (c.Amount <= 0 || string.IsNullOrEmpty(c.ResourceType))
+                    {
+                        continue;
+                    }
+                    HomeValleyConstruction.ReturnMaterials(state, building.Position, c.ResourceType, c.Amount,
+                        dropId + ":cache:" + i.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    LastDemolishCacheReturned += c.Amount;
+                }
             }
 
             HomeValleyPowerGrid.Recompute(state); // 拆掉一个电力消费者/供给者，电网必须重算。
@@ -1717,6 +2301,20 @@ namespace GameLogic.Campaign.Regions
                 ? dead.WorldPosition
                 : Vector2.zero;
 
+            if (order.Kind == WorkOrderKind.Build)
+            {
+                // FG3-LOG-02：施工的机器阵亡不作废玩家的虚影——货舱里这一趟的材料就地落地（生成搬运单），已到现场的材料与进度保留，
+                // 施工单回到待分配池由别的机器接着干（施工单没有长期挂着的资源事务，不存在“复活旧事务”的漏洞）。
+                ReleaseBuildMachine(state, order, dropOnly: true);
+                order.Leg = HomeValleyConstruction.MaterialsStillNeeded(state, order) > 0 && order.State != WorkOrderState.InProgress ? 1 : order.Leg;
+                order.State = WorkOrderState.Ready;
+                order.FailureReason = null;
+                order.AssignedMachineLogicId = 0;
+                MarkAssignmentDirty();
+                HomeValleyConstruction.Touch();
+                return;
+            }
+
             ReleaseResourcesAndCargo(state, order, dropPosition, refund: true);
             order.State = WorkOrderState.Failed;
             order.FailureReason = "machine-died";
@@ -1747,6 +2345,10 @@ namespace GameLogic.Campaign.Regions
 
             if (order.Kind == WorkOrderKind.Build)
             {
+                // FG3-LOG-02（FGR-LOG-006“取消虚影时，已经预留的材料全额退回”）：机器货舱里的这一趟与已运到现场的材料全部退回
+                // （仓库放不下的变成地面物，机器之后搬走）；传送带规划里没建成的格子一并取消。
+                ReleaseBuildMachine(state, order, dropOnly: false);
+                HomeValleyConstruction.OnSiteCancelled(state, order);
                 // 未建成的规划建筑一并撤销，不留"永久 Planned 幽灵建筑"。
                 state.BuildingRecords = (state.BuildingRecords ?? Array.Empty<BuildingRecord>())
                     .Where(b => b.BuildingId != order.TargetId)

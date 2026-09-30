@@ -41,6 +41,8 @@ namespace GameLogic.UI.Kit
         private Button _demolish;
         private Button _relocate;
         private Button _gridToggle;
+        private Button _prioritize;
+        private Button _queue;
         private Label _hint;
         private Label _cost;
         private Label _dragInfo;
@@ -114,6 +116,8 @@ namespace GameLogic.UI.Kit
             _demolish = root.Q<Button>("BuildDemolish");
             _relocate = root.Q<Button>("BuildRelocate");
             _gridToggle = root.Q<Button>("BuildGridToggle");
+            _prioritize = root.Q<Button>("BuildPrioritize");
+            _queue = root.Q<Button>("BuildQueue");
             _hint = root.Q<Label>("BuildHint");
             _cost = root.Q<Label>("BuildCost");
             _dragInfo = root.Q<Label>("BuildDragInfo");
@@ -157,6 +161,12 @@ namespace GameLogic.UI.Kit
                 m?.SetRelocateMode(!m.RelocateMode);
             };
             _gridToggle.clicked += () => HomeValleyBuildMode.Current?.ToggleGridLines();
+            _prioritize.clicked += () =>
+            {
+                HomeValleyBuildMode m = HomeValleyBuildMode.Current;
+                m?.SetPrioritizeMode(!m.PrioritizeMode);
+            };
+            _queue.clicked += ConstructionQueuePanelUIToolkit.Toggle;
             _search = new UiSearchBox(root.Q<TextField>("BuildSearch"), root.Q<Label>("BuildSearchPlaceholder"), root.Q<Button>("BuildSearchClear"),
                 "ui.build.search_placeholder", text =>
                 {
@@ -199,6 +209,9 @@ namespace GameLogic.UI.Kit
             UiTooltip.Attach(_demolish, () => new TooltipContent { Title = GameText.Get("input.action.demolish_mode.name"), Body = GameText.Get("ui.build.hint_demolish_box"), Shortcut = GameActionId.DemolishMode });
             UiTooltip.Attach(_relocate, () => new TooltipContent { Title = GameText.Get("input.action.relocate_mode.name"), Body = GameText.Format("ui.build.hint_relocate", InputDisplay.ForAction(GameActionId.Rotate)), Shortcut = GameActionId.RelocateMode });
             UiTooltip.Attach(_gridToggle, () => new TooltipContent { Title = GameText.Get("input.action.toggle_grid_lines.name"), Shortcut = GameActionId.ToggleGridLines });
+            UiTooltip.Attach(_prioritize, () => new TooltipContent { Title = GameText.Get("input.action.prioritize_area.name"), Body = GameText.Get("ui.build.prioritize_mode"), Shortcut = GameActionId.PrioritizeArea });
+            UiTooltip.Attach(_queue, () => new TooltipContent { Title = GameText.Get("input.action.construction_queue.name"),
+                Body = InputDisplay.ExpandActionTokens(GameText.Get("build.queue.hint")), Shortcut = GameActionId.ConstructionQueue, CodexEntryId = "codex.build.construction" });
             _lastKey = null;
         }
 
@@ -367,7 +380,9 @@ namespace GameLogic.UI.Kit
 
             string key = string.Concat(mode.Revision.ToString(), "|", Mathf.FloorToInt(state.Scrap).ToString(), "|",
                 (state.BuildingRecords?.Length ?? 0).ToString(), "|", ((int)GameText.Language).ToString(), "|", GameSettings.Revision.ToString(),
-                "|", open ? "1" : "0", "|", BuildCatalog.Revision.ToString(), "|", _viewRevision.ToString(), "|", available ? "1" : "0");
+                "|", open ? "1" : "0", "|", BuildCatalog.Revision.ToString(), "|", _viewRevision.ToString(), "|", available ? "1" : "0",
+                // FG3-LOG-02：施工状态（虚影进度、缺料）变化时也刷新；每 0.25 秒一档，状态行的“施工中 N%”跟得上。
+                "|", HomeValleyConstruction.Revision.ToString(), "|", open ? Mathf.FloorToInt(Time.unscaledTime * 4f).ToString() : "0");
             if (key == _lastKey)
             {
                 return;
@@ -383,6 +398,7 @@ namespace GameLogic.UI.Kit
             _title.text = GameText.Get("ui.build.title");
             _mode.text = mode.DemolishMode ? GameText.Format("ui.build.demolish", InputDisplay.ForAction(GameActionId.DemolishMode))
                 : mode.RelocateMode ? GameText.Get("ui.build.relocate_mode")
+                : mode.PrioritizeMode ? GameText.Get("ui.build.prioritize_mode")
                 : string.Empty;
             _close.text = GameText.Get("ui.build.exit");
             _rotate.text = GameText.Format("ui.build.rotate", InputDisplay.ForAction(GameActionId.Rotate));
@@ -393,6 +409,9 @@ namespace GameLogic.UI.Kit
             _gridToggle.text = GameText.Format(GameSettings.BuildGridLinesEnabled ? "ui.build.grid_on" : "ui.build.grid_off",
                 InputDisplay.ForAction(GameActionId.ToggleGridLines));
             _gridToggle.EnableInClassList("bm-tool-active", GameSettings.BuildGridLinesEnabled);
+            _prioritize.text = GameText.Format("ui.build.btn_prioritize", InputDisplay.ForAction(GameActionId.PrioritizeArea));
+            _prioritize.EnableInClassList("bm-tool-active", mode.PrioritizeMode);
+            _queue.text = GameText.Format("ui.build.btn_queue", InputDisplay.ForAction(GameActionId.ConstructionQueue));
             _placeholder.text = GameText.Get("ui.build.placeholder_note");
             _undoHint.text = GameText.Format("ui.build.undo_hint", InputDisplay.ForAction(GameActionId.Undo), InputDisplay.ForAction(GameActionId.Redo));
 
@@ -432,6 +451,10 @@ namespace GameLogic.UI.Kit
             if (mode.RelocateMode)
             {
                 return GameText.Format("ui.build.hint_relocate", rotate);
+            }
+            if (mode.PrioritizeMode)
+            {
+                return GameText.Get("ui.build.prioritize_mode");
             }
             if (mode.SelectedToolId != null)
             {
@@ -484,6 +507,12 @@ namespace GameLogic.UI.Kit
                 SetVisible(_dragInfo, true);
                 _dragInfo.text = GameText.Format("ui.build.box_info", box.Max.X - box.Min.X + 1, box.Max.Y - box.Min.Y + 1, box.BuildingCount, box.Belts.Count);
             }
+            else if (mode.Drag == HomeValleyBuildMode.DragKind.PrioritizeBox && mode.PrioritizeBoxCount >= 0)
+            {
+                SetVisible(_dragInfo, true);
+                _dragInfo.text = GameText.Format("ui.build.prioritize_box", mode.PrioritizeBoxMax.X - mode.PrioritizeBoxMin.X + 1,
+                    mode.PrioritizeBoxMax.Y - mode.PrioritizeBoxMin.Y + 1, mode.PrioritizeBoxCount);
+            }
             else
             {
                 SetVisible(_dragInfo, false);
@@ -526,6 +555,15 @@ namespace GameLogic.UI.Kit
             {
                 BuildingRecord hovered = HomeGridService.FindBuilding(state, mode.HoverBuildingId);
                 status = hovered != null ? HomeValleyBuildMode.DescribeBuilding(state, hovered) : string.Empty;
+                // FG3-LOG-02：指着施工虚影时，另起两行写施工状态（缺什么、进度、优先级），与悬停提示同一写法。
+                if (mode.HasHover && HomeValleyConstruction.TryDescribeSite(state, mode.HoverCell, out _, out string site))
+                {
+                    status += "\n" + site;
+                }
+            }
+            else if (string.IsNullOrEmpty(status) && mode.HasHover && HomeValleyConstruction.TryDescribeSite(state, mode.HoverCell, out string beltTitle, out string beltSite))
+            {
+                status = beltTitle + "\n" + beltSite; // 规划中的传送带格。
             }
             _status.text = status;
             _status.EnableInClassList("bm-status-error", error);

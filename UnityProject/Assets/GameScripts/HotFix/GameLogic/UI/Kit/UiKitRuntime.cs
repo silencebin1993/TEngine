@@ -36,6 +36,7 @@ namespace GameLogic.UI.Kit
             Create<NewGamePanelUIToolkit>("[NewGameHost]"); // FG3-GEN-01：新游戏设置（30082，主菜单“新建”选好存档槽后打开）。
             Create<StrategicMapUIToolkit>("[StrategicMapHost]"); // FG3-GEN-01：战略地图（30050，HUD 之上、暂停菜单之下）。
             Create<MinimapHudUIToolkit>("[MinimapHost]"); // FG3-GEN-01：小地图（右下角 HUD，-2 层，不挡面板）。
+            Create<ConstructionQueuePanelUIToolkit>("[ConstructionQueueHost]"); // FG3-LOG-02：施工队列（30045，通知之上、字幕之下）。
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Create<UiKitGalleryUIToolkit>("[UiKitGalleryHost]");
 #endif
@@ -57,6 +58,7 @@ namespace GameLogic.UI.Kit
             FirmwareLibraryPanelUIToolkit.Close();
             ReactionLogPanelUIToolkit.Close();
             StatsPanelUIToolkit.Close();
+            ConstructionQueuePanelUIToolkit.Close();
             StrategicMapUIToolkit.Close();
             NewGamePanelUIToolkit.Close();
             GameLogic.Campaign.Feedback.ReactionPopups.Clear();
