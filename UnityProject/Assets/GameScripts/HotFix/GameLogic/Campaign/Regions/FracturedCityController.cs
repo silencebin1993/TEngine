@@ -285,7 +285,7 @@ namespace GameLogic.Campaign.Regions
             SquadCommands.TickInput(paused);
             HandleSelectionClick();
             HandleDirectControl(frameScaledDt);
-            Interact.Tick(frameScaledDt); // ER5-INT-01：候选/进度推进——暂停时为 0，进度天然冻结。
+            Interact.Tick(GameClock.FrameStepSeconds); // FG3-LOG-09（DEBT-FG0ARCH01-09）：按本帧实际模拟的步推进，与帧率无关；ER5-INT-01：候选/进度推进——暂停时为 0，进度天然冻结。
 
             CampaignState state = CampaignSession.Current;
             if (state == null)
@@ -296,7 +296,7 @@ namespace GameLogic.Campaign.Regions
             {
                 // FG1-SIG-06（FGR-SIG-070）：接入本身与接入时长不再计入暴露（Demo“远征直控每 30 秒 +5”已删除）。
                 // ER5-CTL-01：干扰宽限与受控机死亡回弹（在本帧全部模拟步之后，敌人本帧打死受控机能在同一帧被侦测到）。
-                Control.Tick(frameScaledDt);
+                Control.Tick(GameClock.FrameStepSeconds); // FG3-LOG-09：失联宽限按模拟步推进（与帧率无关）
             }
             // FG0-ARCH-03：表现对象按内核位置插值（一次 Burst 作业）+ 实例化绘制（常数次调用，与单位数无关）。
             _combat?.FrameRender(_camera, GameClock.StepAlpha);

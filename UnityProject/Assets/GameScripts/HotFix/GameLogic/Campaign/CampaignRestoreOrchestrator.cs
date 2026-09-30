@@ -196,6 +196,24 @@ namespace GameLogic.Campaign
                 warnings.Add($"[MachineRecords] {machineResult.Message}");
             }
 
+            // ── 5b. 已移除的建筑类型（FG3-LOG-09 / DEBT-FG0SAVE01-07）──
+            // 要取消以它为目标的工单、退回机器货舱里的施工材料，所以放在机器名册载入之后；尽力而为，失败时原样保留。
+            // （判定只看“这个类型在不在格网建筑表里”，与内容版本号无关；Load 已把 ContentVersion 升到当前版本，通知的来源版本记当前版本。）
+            SaveNoticeRecord[] notices = loadResult.Notices ?? Array.Empty<SaveNoticeRecord>();
+            try
+            {
+                SaveNoticeRecord[] buildingNotices = SaveContentReconciler.ReconcileBuildings(state, state.ContentVersion, CampaignSaveService.CurrentContentVersion);
+                if (buildingNotices.Length > 0)
+                {
+                    MachineRegistry.ExportToCampaignState(state); // 货舱退回改的是名册里的机器记录
+                    notices = notices.Concat(buildingNotices).ToArray();
+                }
+            }
+            catch (Exception e)
+            {
+                TEngine.Log.Error($"[CampaignRestoreOrchestrator] 槽位 {slotIndex} 已移除建筑对账异常，原样保留：{e}");
+            }
+
             // ── 6. RegionSimWorld ─────────────────────────────
             try
             {
@@ -238,7 +256,7 @@ namespace GameLogic.Campaign
             // 主档刚通过完整读档：这里只需要知道备份文件在不在，不必再整份读一遍（大存档省几百毫秒）。
             bool hasBackup = CampaignSaveService.BackupFileExists(slotIndex);
             return new RestoreResult(RestoreOutcome.Success, RestoreStep.None, null, state, hasBackup,
-                warnings.ToArray(), LoadOutcome.Success, SaveFailureReason.None, loadResult.FileSchemaVersion, loadResult.Notices);
+                warnings.ToArray(), LoadOutcome.Success, SaveFailureReason.None, loadResult.FileSchemaVersion, notices);
         }
 
         /// <summary>ControlRestore 步骤的实现：<see cref="CampaignState.ControlHandoff"/> 指向的

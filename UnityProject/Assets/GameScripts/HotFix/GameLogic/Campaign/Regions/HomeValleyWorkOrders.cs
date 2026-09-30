@@ -1488,6 +1488,7 @@ namespace GameLogic.Campaign.Regions
         /// 由本类各终止路径自行标记；玩家改动机器工作偏好由调用方（UI）在写入
         /// <see cref="MachineRegistry.TrySetWorkPriority"/> 成功后调用本方法。</summary>
         private static bool _assignDirty = true;
+        private static readonly List<Vector2> ReadyPositions = new List<Vector2>(16);
         private static float _assignTimer;
         private const float AssignIntervalSeconds = 0.5f;
 
@@ -1682,6 +1683,13 @@ namespace GameLogic.Campaign.Regions
             }
             idleMachines.Sort((a, b) => a.LogicId.CompareTo(b.LogicId));
 
+            // FG3-LOG-09：工作地点与机器无关，每张待派工单每轮只解析一次（改前每台空闲机器 × 每张工单各解析一次）。
+            ReadyPositions.Clear();
+            foreach (WorkOrderRecord order in readyOrders)
+            {
+                ReadyPositions.Add(ResolveWorkPosition(state, order));
+            }
+
             foreach (MachineRecord machine in idleMachines)
             {
                 WorkOrderRecord best = null;
@@ -1689,8 +1697,9 @@ namespace GameLogic.Campaign.Regions
                 float bestDistance = 0f;
                 Vector2 fromPos = getMachinePosition?.Invoke(machine.LogicId) ?? machine.WorldPosition;
 
-                foreach (WorkOrderRecord order in readyOrders)
+                for (int oi = 0; oi < readyOrders.Count; oi++)
                 {
+                    WorkOrderRecord order = readyOrders[oi];
                     if (order.AssignedMachineLogicId != 0)
                     {
                         continue; // 本轮已被排在前面（LogicId 更小）的机器领走。
@@ -1709,7 +1718,7 @@ namespace GameLogic.Campaign.Regions
                         continue; // 0＝该机器对这一类工作永久禁用（不影响玩家直接点选下令）。
                     }
 
-                    float distance = Vector2.Distance(fromPos, ResolveWorkPosition(state, order));
+                    float distance = Vector2.Distance(fromPos, ReadyPositions[oi]);
                     if (best == null || IsBetterCandidate(categoryPriority, order, distance, bestCategoryPriority, best, bestDistance))
                     {
                         best = order;
@@ -1840,7 +1849,7 @@ namespace GameLogic.Campaign.Regions
             switch (order.Kind)
             {
                 case WorkOrderKind.Repair:
-                    BuildingRecord repairTarget = state.BuildingRecords?.FirstOrDefault(b => b.BuildingId == order.TargetId);
+                    BuildingRecord repairTarget = HomeValleyConstruction.FindBuildingFast(state, order.TargetId); // FG3-LOG-09：O(1)，派工每轮每台机器都要算
                     return repairTarget?.Position ?? Vector2.zero;
                 case WorkOrderKind.Build:
                     // FG0-ARCH-04：建造位由格网决定（规划中的建筑记录的占地中心）。此前恒返回发电机2 的坑位，
@@ -1858,7 +1867,7 @@ namespace GameLogic.Campaign.Regions
                         return HomeValleyLayout.Wreckage2.Position;
                     }
                     // FG0-ARCH-04：拆除建筑走到建筑本身（此前落到残骸 2 的位置）。
-                    BuildingRecord demolishTarget = state.BuildingRecords?.FirstOrDefault(b => b.BuildingId == order.TargetId);
+                    BuildingRecord demolishTarget = HomeValleyConstruction.FindBuildingFast(state, order.TargetId);
                     return demolishTarget?.Position ?? HomeValleyLayout.Wreckage2.Position;
                 case WorkOrderKind.Haul:
                     GroundItemRecord item = HomeValleyCargo.FindGroundItem(state, order.SourceId);
@@ -1999,7 +2008,7 @@ namespace GameLogic.Campaign.Regions
             {
                 HomeValleyConstruction.MigrateLegacyBuildOrder(state, order);
             }
-            BuildingRecord relocation = state.BuildingRecords?.FirstOrDefault(b => b.BuildingId == order.TargetId);
+            BuildingRecord relocation = HomeValleyConstruction.FindBuildingFast(state, order.TargetId); // FG3-LOG-09：每步每张施工单，O(1)
             // FG3-LOG-07：升级虚影要材料（新旧差额），走下面的取料 / 施工进度；搬迁不花材料，按工期施工。
             if (relocation != null && !string.IsNullOrEmpty(relocation.RelocateFromId) && relocation.ConstructionRequired <= 0)
             {
@@ -2060,6 +2069,7 @@ namespace GameLogic.Campaign.Regions
             }
 
             building.ConstructionState = BuildingConstructionState.Operational;
+            BuildingVisualFeed.Mark(building); // FG3-LOG-09：修复完成，画面重画这一座
             // ER3-SOFTLOCK-01：紧急救援机的免费修复（见 TryCreateEmergencyRepair）没有事务 id，
             // 玩家没有真正花过废料，InvestedScrap 保持 0——日后拆这栋楼返还 0，忠于"实际投入"字面。
             if (!string.IsNullOrEmpty(order.ResourceTransactionId))
@@ -2118,6 +2128,7 @@ namespace GameLogic.Campaign.Regions
             }
 
             building.ConstructionState = BuildingConstructionState.Operational;
+            BuildingVisualFeed.Mark(building); // FG3-LOG-09：完工，画面重画这一座（虚影 → 建筑）
             // FG3-LOG-02：投入 = 运到现场、建进去的材料（= 所需材料）；拆除时全额返还这么多。
             HomeValleyConstruction.OnSiteCompleted(state, order, building);
             HomeValleyPowerGrid.Recompute(state);

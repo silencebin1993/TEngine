@@ -19,6 +19,7 @@ namespace GameLogic.Campaign
     /// 同样转换，但退还 0 并记 Error（开发删内容时漏登记，自检与日志会暴露）。
     ///
     /// 本 Story 覆盖的物品域：基元芯片（<see cref="CampaignState.PrimitiveChips"/>，ID = CardDefId）。
+    /// FG3-LOG-09 起加建筑类型（<see cref="ReconcileBuildings"/>，在恢复编排载入机器名册之后执行）。
     /// - 仓中 / 待领取：直接转换。
     /// - 被合成队列预留：先经 <see cref="PrimitiveCraftStation.TryCancel"/> 取消该任务（材料解锁、废料全额退还），再转换。
     /// - 已装进蓝图（Draft）：**不转换**，保留在蓝图里并通知玩家重新编辑（蓝图版本里还记着内容 ID，
@@ -31,6 +32,8 @@ namespace GameLogic.Campaign
     public static class SaveContentReconciler
     {
         public const string KindPrimitiveChip = "primitive_chip";
+        /// <summary>FG3-LOG-09（DEBT-FG0SAVE01-07）：建筑类型（ID = BuildingRecord.BuildingTypeId）。</summary>
+        public const string KindBuilding = "building";
         public const string LedgerOwner = "save-migration";
 
         private static TbRemovedContent _table;
@@ -38,6 +41,7 @@ namespace GameLogic.Campaign
         private static bool _overridden;
         private static string _loadError;
         private static Func<string, bool> _isLiveOverride;
+        private static Func<string, bool> _isLiveBuildingOverride;
 
         public static string LoadError
         {
@@ -201,6 +205,126 @@ namespace GameLogic.Campaign
             return fresh;
         }
 
+        /// <summary>该建筑类型在当前游戏里是否存在（格网建筑表里查得到）。</summary>
+        public static bool IsLiveBuilding(string typeId)
+        {
+            if (_isLiveBuildingOverride != null)
+            {
+                return _isLiveBuildingOverride(typeId);
+            }
+            return !string.IsNullOrEmpty(typeId) && Grid.GridContent.TryGetBuilding(typeId, out _);
+        }
+
+        /// <summary>
+        /// FG3-LOG-09（DEBT-FG0SAVE01-07；FGR-SYS-004“表内容变更时，已经被删除的物品转换为废料，并在读档后通知玩家”）：
+        /// 存档里的建筑类型已从游戏移除 → 拆掉它并全额返还，按类型各通知一次。必须在机器名册载入（恢复编排第 5 步）之后调用：
+        /// 以它为目标的进行中工单要经 <see cref="Regions.HomeValleyWorkOrders.CancelOrder"/> 取消，机器货舱里这一趟的材料要退回。
+        /// - 规划中 / 施工中的虚影：取消施工单（货舱与已运到现场的材料全额退回、虚影撤销，与玩家取消规划同一规则）。
+        /// - 已建成（运转 / 受损 / 关停）的：以它为目标的修复 / 拆除等工单取消（资源事务作废）；返还实际投入的材料（<see cref="BuildingRecord.InvestedScrap"/>；
+        ///   没有投入记录的旧记录按 fg.TbRemovedContent 登记的退还数），内部缓存的物品一并退回；仓库放不下的变成地面物，由机器搬回。
+        /// - 端口、电网、格网占用都由建筑记录推导：记录移除后，读档后的第一次对账把端口里的物品退回、电网重算、格子放开。
+        /// 表里没登记的未知类型同样转换（按实际投入返还）并记 Error；已移除内容表或格网建筑表读不出来时什么都不转换（原样保留，只记 Error）。
+        /// 返回本次新产生的通知（同时追加进 <see cref="SaveHistoryState.Notices"/>）。
+        /// </summary>
+        public static SaveNoticeRecord[] ReconcileBuildings(CampaignState state, int fromContentVersion, int toContentVersion)
+        {
+            if (state?.BuildingRecords == null)
+            {
+                return Array.Empty<SaveNoticeRecord>();
+            }
+            CampaignFgStateDomains.EnsureAll(state);
+            List<BuildingRecord> dead = state.BuildingRecords.Where(b => b != null && !IsLiveBuilding(b.BuildingTypeId)).ToList();
+            if (dead.Count == 0)
+            {
+                return Array.Empty<SaveNoticeRecord>();
+            }
+            if (_isLiveBuildingOverride == null && Grid.GridContent.LoadError != null)
+            {
+                Log.Error($"[SaveContentReconciler] 格网建筑表不可用（{Grid.GridContent.LoadError}），{dead.Count} 座建筑暂不对账，原样保留。");
+                return Array.Empty<SaveNoticeRecord>();
+            }
+            EnsureLoaded();
+            if (_loadError != null)
+            {
+                Log.Error($"[SaveContentReconciler] 已移除内容表不可用（{_loadError}），{dead.Count} 座已移除类型的建筑暂不转换，原样保留。");
+                return Array.Empty<SaveNoticeRecord>();
+            }
+            string now = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
+            var notices = new List<SaveNoticeRecord>();
+            foreach (IGrouping<string, BuildingRecord> g in dead.GroupBy(b => b.BuildingTypeId ?? string.Empty).OrderBy(g => g.Key, StringComparer.Ordinal))
+            {
+                int perItem = 0;
+                if (TryGetRemoved(g.Key, out RemovedContent row) && row.Kind == KindBuilding)
+                {
+                    perItem = Math.Max(0, row.ScrapRefund);
+                }
+                else
+                {
+                    Log.Error($"[SaveContentReconciler] 建筑类型 '{g.Key}' 已不在游戏里，但 fg.TbRemovedContent 没有登记它（改 tools/cell_tables/fgdata.py 的 REMOVED_CONTENT）；按实际投入返还。");
+                }
+                List<BuildingRecord> items = g.OrderBy(b => b.BuildingId, StringComparer.Ordinal).ToList();
+                int refunded = 0;
+                foreach (BuildingRecord b in items)
+                {
+                    refunded += RemoveDeadBuilding(state, b, perItem);
+                }
+                notices.Add(NewNotice($"content-removed:building:{g.Key}:{items[0].BuildingId}", "save.notice.building_removed",
+                    new[] { NameKeyOf(g.Key), items.Count.ToString(CultureInfo.InvariantCulture), refunded.ToString(CultureInfo.InvariantCulture) },
+                    fromContentVersion, toContentVersion, now));
+            }
+            SaveHistoryState history = state.SaveHistory;
+            var existing = new HashSet<string>(history.Notices.Select(n => n.NoticeId), StringComparer.Ordinal);
+            SaveNoticeRecord[] fresh = notices.Where(n => existing.Add(n.NoticeId)).ToArray();
+            history.Notices = history.Notices.Concat(fresh).ToArray();
+            return fresh;
+        }
+
+        /// <summary>拆掉一座已移除类型的建筑，返回退还的废料数（含已到现场 / 货舱里的施工材料与内部缓存）。</summary>
+        private static int RemoveDeadBuilding(CampaignState state, BuildingRecord b, int perItem)
+        {
+            int refunded = 0;
+            // 1) 以它为目标的进行中工单：取消。施工单（虚影）取消时把货舱与已到现场的材料退回并撤销虚影记录；其余工单只作废资源事务。
+            foreach (WorkOrderRecord o in (state.WorkOrders ?? Array.Empty<WorkOrderRecord>()).Where(o => Regions.HomeValleyWorkOrders.IsActive(o) && o.TargetId == b.BuildingId).ToList())
+            {
+                if (o.Kind == WorkOrderKind.Build)
+                {
+                    refunded += b.ConstructionDelivered;
+                    if (MachineRegistry.TryGetRecord(o.AssignedMachineLogicId, out MachineRecord m))
+                    {
+                        refunded += Regions.HomeValleyConstruction.CargoScrap(m);
+                    }
+                }
+                Regions.HomeValleyWorkOrders.CancelOrder(state, o.WorkOrderId, b.Position);
+            }
+            if (!state.BuildingRecords.Any(x => x != null && x.BuildingId == b.BuildingId))
+            {
+                return refunded; // 施工单取消时已经撤销了虚影并退回材料。
+            }
+            // 2) 没有进行中施工单的记录：已建成的返还投入，虚影返还已到现场的材料；内部缓存一并退回。
+            bool built = b.ConstructionState == BuildingConstructionState.Operational || b.ConstructionState == BuildingConstructionState.Damaged
+                         || b.ConstructionState == BuildingConstructionState.Disabled;
+            int material = built ? (b.InvestedScrap > 0 ? b.InvestedScrap : perItem) : Math.Max(0, b.ConstructionDelivered);
+            if (material > 0)
+            {
+                Regions.HomeValleyConstruction.ReturnMaterials(state, b.Position, CampaignEconomyLedger.ResourceScrap, material, "content-removed:" + b.BuildingId);
+                refunded += material;
+            }
+            foreach (CargoEntry c in b.Inventory ?? Array.Empty<CargoEntry>())
+            {
+                if (c.Amount <= 0 || string.IsNullOrEmpty(c.ResourceType))
+                {
+                    continue;
+                }
+                Regions.HomeValleyConstruction.ReturnMaterials(state, b.Position, c.ResourceType, c.Amount, "content-removed:" + b.BuildingId + ":" + c.ResourceType);
+                if (c.ResourceType == CampaignEconomyLedger.ResourceScrap)
+                {
+                    refunded += c.Amount;
+                }
+            }
+            state.BuildingRecords = state.BuildingRecords.Where(x => x != null && x.BuildingId != b.BuildingId).ToArray();
+            return refunded;
+        }
+
         /// <summary>通知里"内容名称"参数存文本键：登记过的用表里的 nameKey，没登记的用"未知内容"。</summary>
         private static string NameKeyOf(string contentId) =>
             TryGetRemoved(contentId, out RemovedContent row) && !string.IsNullOrEmpty(row.NameKey)
@@ -262,12 +386,14 @@ namespace GameLogic.Campaign
 
         // ── 表加载与测试注入 ──────────────────────────────────────────────
 
-        public static void OverrideForTests(TbRemovedContent table, Func<string, bool> isLivePrimitive = null, string loadError = null)
+        public static void OverrideForTests(TbRemovedContent table, Func<string, bool> isLivePrimitive = null, string loadError = null,
+            Func<string, bool> isLiveBuilding = null)
         {
             _overridden = true;
             _loaded = true;
             _table = table;
             _isLiveOverride = isLivePrimitive;
+            _isLiveBuildingOverride = isLiveBuilding;
             _loadError = loadError ?? (table == null ? "测试注入：已移除内容表为空" : null);
         }
 
@@ -277,6 +403,7 @@ namespace GameLogic.Campaign
             _loaded = false;
             _table = null;
             _isLiveOverride = null;
+            _isLiveBuildingOverride = null;
             _loadError = null;
         }
 

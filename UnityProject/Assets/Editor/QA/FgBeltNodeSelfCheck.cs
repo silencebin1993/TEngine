@@ -970,7 +970,7 @@ namespace GameLogic.EditorTools
                 diff = FirstDiff(a, b);
                 BeltNodeInfo na = Node(a, 5, 0);
                 BeltNodeInfo nb = Node(b, 5, 0);
-                settings = ok && loadErr == null && snap.FormatVersion == 3 && a.ComputeStateHash() == b.ComputeStateHash()
+                settings = ok && loadErr == null && snap.FormatVersion == BeltKernel.FormatVersion && a.ComputeStateHash() == b.ComputeStateHash()
                            && nb.RatioL == 3 && nb.RatioR == 1 && nb.FilterL == 2 && nb.SentL == na.SentL && nb.SentR == na.SentR && nb.SentL > 0
                            && Node(b, 5, -4).PriorityIn == BeltSide.Right && Node(b, 8, -4).Distance == 6 && Node(b, 14, -4).Kind == BeltNodeKind.UndergroundOut;
                 a.StepMany(1500);
@@ -979,7 +979,7 @@ namespace GameLogic.EditorTools
                 resumed = b.ComputeStateHash();
             }
             Expect(hashes.Distinct().Count() == 1 && settings && direct == resumed,
-                $"K12 确定性（三种顺序哈希相同 {hashes.Distinct().Count() == 1}、往返设置 {settings}、续跑一致 {direct == resumed}；往返差别：{diff ?? "无"}）：含分流器 / 合流器 / 地下传送带的组合场景按三种放置顺序各跑 3,000 步，状态哈希相同；格式 3 往返后节点设置（3:1、左口只放 2、合流器右口优先、地下距离 6）与" +
+                $"K12 确定性（三种顺序哈希相同 {hashes.Distinct().Count() == 1}、往返设置 {settings}、续跑一致 {direct == resumed}；往返差别：{diff ?? "无"}）：含分流器 / 合流器 / 地下传送带的组合场景按三种放置顺序各跑 3,000 步，状态哈希相同；当前格式（{BeltKernel.FormatVersion}）往返后节点设置（3:1、左口只放 2、合流器右口优先、地下距离 6）与" +
                 $"状态（比例轮次、累计分出件数）逐字段一致，接着跑 1,500 步与不存档一直跑哈希相同（{loadErr ?? "无问题"}）");
 
             // 格式 2 的旧网络块（FG3-LOG-03 存档：每格没有种类字节）照常读成普通传送带。
@@ -1295,7 +1295,7 @@ namespace GameLogic.EditorTools
         private static bool Free(CampaignState s, GridCell c) => HomeGridService.ValidateBeltCell(s, c).Ok;
 
         /// <summary>从 <paramref name="from"/> 附近按圈找一块 w×h 全部能铺带的空地（左下角）。</summary>
-        private static GridCell? FindArea(CampaignState s, GridCell from, int w, int h, int radius)
+        internal static GridCell? FindArea(CampaignState s, GridCell from, int w, int h, int radius)
         {
             for (int r = 0; r <= radius; r++)
             {
@@ -1423,7 +1423,7 @@ namespace GameLogic.EditorTools
         /// 家园里一组测试用的节点（测试捷径，经正式入口 TryPlace / TryPlaceNode / TryPlaceUnderground 含格网校验）：在 <paramref name="o"/> 起的 16×9 空地上
         /// 放一个分流器（左右各 3 格）、一个合流器（两路各 2 格进）、一条地下传送带（跨 3 格）。返回分流器 / 合流器 / 地下入口的格。
         /// </summary>
-        private static bool LayNodeSet(CampaignState s, GridCell o, out GridCell splitter, out GridCell merger, out GridCell under, out string failure)
+        internal static bool LayNodeSet(CampaignState s, GridCell o, out GridCell splitter, out GridCell merger, out GridCell under, out string failure)
         {
             failure = null;
             splitter = new GridCell(o.X + 3, o.Y + 4);

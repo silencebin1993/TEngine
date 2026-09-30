@@ -103,6 +103,8 @@ namespace BinGames.Sim.Logistics
         private long[] _pFill = new long[16];
         private long[] _pUnmet = new long[16];
         private byte[] _pValid = new byte[16];
+        /// <summary>FG3-LOG-09：已发布的窗口实际累计了几步（按绝对步序号对齐整秒发布，重建后的第一个窗口可能不满一秒）。</summary>
+        private int[] _pCount = new int[16];
         // CSR：每个网络的格 / 泵 / 储罐 / 上游阀门（阀门前方 = 本网络）/ 下游阀门（阀门后方 = 本网络）/ 消费者
         private readonly Csr _cellsOf = new Csr();
         private readonly Csr _pumpsOf = new Csr();
@@ -850,6 +852,7 @@ namespace BinGames.Sim.Logistics
                 _aSupply[n] = _aDemand[n] = _aMoved[n] = _aFill[n] = _aUnmet[n] = 0;
                 _aCount[n] = 0;
                 _pValid[n] = 0;
+                _pCount[n] = 0;
             }
             for (int n = 0; n < nets; n++)
             {
@@ -1371,8 +1374,12 @@ namespace BinGames.Sim.Logistics
             _aMoved[n] += moved;
             _aFill[n] += fill;
             _aUnmet[n] += D - moved + mismatched;
-            if (++_aCount[n] >= _config.StepHz)
+            // FG3-LOG-09：窗口按绝对步序号对齐整秒发布（此前按“自上次重建起每满一秒”发布：读档 / 改线重建后相位跟着变，
+            // 同一时刻的实测读数与不存档一直跑的不同）。重建后的第一个窗口可能不满一秒，读数按实际步数折算。
+            ++_aCount[n];
+            if ((s + 1) % _config.StepHz == 0)
             {
+                _pCount[n] = _aCount[n];
                 _pSupply[n] = _aSupply[n];
                 _pDemand[n] = _aDemand[n];
                 _pMoved[n] = _aMoved[n];
@@ -1560,12 +1567,12 @@ namespace BinGames.Sim.Logistics
 
         private double Lpm(long mlPerStep) => mlPerStep * 60.0 * _config.StepHz / 1000.0;
 
-        /// <summary>读数：最近一整秒（StepHz 步）的合计换算成升 / 分钟；窗口还没走满时按已走的步数折算；一步都没走时用最近一步。</summary>
+        /// <summary>读数：最近一个已发布的整秒窗口（按绝对步序号对齐；重建后的第一个窗口按实际累计的步数折算）换算成升 / 分钟；还没发布过时按已走的步数折算；一步都没走时用最近一步。</summary>
         private double WindowLpm(int net, long[] published, long[] acc, long[] lastStep)
         {
             if (_pValid[net] != 0)
             {
-                return published[net] * 60.0 / 1000.0;
+                return published[net] * 60.0 * _config.StepHz / (1000.0 * Math.Max(1, _pCount[net]));
             }
             if (_aCount[net] > 0)
             {
@@ -2010,6 +2017,7 @@ namespace BinGames.Sim.Logistics
             Array.Resize(ref _pFill, cap);
             Array.Resize(ref _pUnmet, cap);
             Array.Resize(ref _pValid, cap);
+            Array.Resize(ref _pCount, cap);
         }
 
         private void EnsureQueue(int need)

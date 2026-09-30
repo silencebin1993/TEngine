@@ -65,6 +65,25 @@ namespace GameLogic.Campaign.Regions
         private readonly Dictionary<string, Transform> _buildingVisuals = new Dictionary<string, Transform>(StringComparer.Ordinal);
         private readonly List<string> _goneBuildingKeys = new List<string>(4);
         private BuildingRecord[] _visualsRecordsRef;
+        // FG3-LOG-09（DEBT-FG0ARCH04-09）：画面对账改为变化驱动 + 分帧轮询（见 SyncWorldVisuals），下面是它的缓存（纯表现，随表现对象一起清空）。
+        private readonly Dictionary<string, Renderer> _buildingRenderers = new Dictionary<string, Renderer>(StringComparer.Ordinal);
+        private readonly Dictionary<string, int> _buildingVisualSig = new Dictionary<string, int>(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _localKeyById = new Dictionary<string, string>(StringComparer.Ordinal);
+        private readonly Dictionary<string, BuildingRecord> _visualRecordById = new Dictionary<string, BuildingRecord>(StringComparer.Ordinal);
+        private readonly Dictionary<string, Transform> _groundVisuals = new Dictionary<string, Transform>(StringComparer.Ordinal);
+        private readonly HashSet<string> _liveGroundIds = new HashSet<string>(StringComparer.Ordinal);
+        private readonly List<string> _goneGroundIds = new List<string>(4);
+        private GroundItemRecord[] _groundRef;
+        /// <summary>按名字缓存的固定表现对象（残骸、建议建造位、信标预留位、靶子）：不再逐帧 Transform.Find 线性扫根节点下的全部子节点。</summary>
+        private readonly Dictionary<string, Transform> _namedVisuals = new Dictionary<string, Transform>(StringComparer.Ordinal);
+        private int _visualCursor;
+        private bool _visualCvd;
+        private bool _visualBeaconExists;
+        private int _anchorCheckCountdown;
+        /// <summary>自检读：画面真正写了几次（外观签名变了才写）、整份对账次数、最近一帧重画（含轮询）的建筑数。</summary>
+        public long VisualWrites { get; private set; }
+        public int VisualFullPasses { get; private set; }
+        public int LastVisualRefreshCount { get; private set; }
         private float _objectiveRecomputeTimer;
         /// <summary>ER8 收尾（UI-14“世界标记使用同一目标状态”）：当前目标下一步所在位置的定位针，唯一一个。</summary>
         private WorldBadge _objectiveMarker;
@@ -273,11 +292,11 @@ namespace GameLogic.Campaign.Regions
             }
 
             HandleDirectControl(frameScaledDt);
-            Interact.Tick(frameScaledDt); // ER5-INT-01：候选/进度推进——暂停时为 0，进度天然冻结。
+            Interact.Tick(GameClock.FrameStepSeconds); // FG3-LOG-09（DEBT-FG0ARCH01-09）：按本帧实际模拟的步推进，与帧率无关；ER5-INT-01：候选/进度推进——暂停时为 0，进度天然冻结。
             if (!paused && state != null)
             {
                 TickDirectSalvageRangeGuard(state); // ER5-INT-01：直控拆解离开3米即取消并恢复原状。
-                Control.Tick(frameScaledDt); // ER5-CTL-01：受控机死亡回弹侦测。
+                Control.Tick(GameClock.FrameStepSeconds); // FG3-LOG-09：失联宽限按模拟步推进；ER5-CTL-01：受控机死亡回弹侦测。
             }
             if (state != null)
             {
@@ -1232,6 +1251,14 @@ namespace GameLogic.Campaign.Regions
         {
             if (IsLoaded)
             {
+                // FG3-LOG-09（FGT-LOG-010“任意时刻存读档”）：这一步刚登记 / 派走的机器（装配站出厂、紧急救援、派遣远征）要到下一步开头的
+                // 名册对账才进出战斗内核。存档前先把这次对账做掉（与下一步开头要做的是同一件事），存档里的内核单位与机器记录一致——
+                // 否则恰好在出厂那一步存档，读档时对账会当场补建，与不存档一直跑差一步。
+                CampaignState state = CampaignSession.Current;
+                if (state != null && !HomeValleySoftlockGuard.IsCoreDestroyed(state))
+                {
+                    SyncSimEntities(state);
+                }
                 SyncLiveStateBackToRecords();
             }
         }
@@ -1313,11 +1340,28 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
-            string key = LocalKey(building.BuildingId);
-            Transform go = _buildingVisuals.TryGetValue(key, out Transform cached) && cached != null ? cached : null;
-            Renderer renderer = go != null ? go.GetComponent<Renderer>() : null;
+            string key = KeyOf(building.BuildingId);
+            if (!_buildingVisuals.TryGetValue(key, out Transform go) || go == null)
+            {
+                return;
+            }
             bool ghost = IsPlannedGhost(building);
             float fraction = ghost ? _siteView.FractionOf(CampaignSession.Current, building.BuildingId) : 0f;
+            string icon = ghost ? _siteView.IconOf(building) : StateIconFor(building);
+            // FG3-LOG-09（DEBT-FG0ARCH04-09）：外观签名没变就什么都不写（颜色 / 朝向 / 位置 / 虚影高度 / 状态标记 / 色盲配色）。
+            int sig = HashCode.Combine((int)building.ConstructionState, (int)building.PowerState, building.Rotation, building.GridX, building.GridY,
+                Mathf.RoundToInt(fraction * 64f), icon, _visualCvd);
+            if (_buildingVisualSig.TryGetValue(key, out int seen) && seen == sig)
+            {
+                return;
+            }
+            _buildingVisualSig[key] = sig;
+            VisualWrites++;
+            if (!_buildingRenderers.TryGetValue(key, out Renderer renderer) || renderer == null)
+            {
+                renderer = go.GetComponent<Renderer>();
+                _buildingRenderers[key] = renderer;
+            }
             if (renderer != null)
             {
                 renderer.sharedMaterial = ViewMaterials.Standard(ColorForBuilding(building));
@@ -1325,8 +1369,23 @@ namespace GameLogic.Campaign.Regions
             }
             if (_buildingBadges.TryGetValue(key, out WorldBadge badge) && badge != null)
             {
-                badge.SetIcon(ghost ? _siteView.IconOf(building) : StateIconFor(building));
+                badge.SetIcon(icon);
             }
+        }
+
+        /// <summary>FG3-LOG-09：建筑 ID → 本地键（缓存，不在每次重画时截字符串）。</summary>
+        private string KeyOf(string buildingId)
+        {
+            if (buildingId == null)
+            {
+                return null;
+            }
+            if (!_localKeyById.TryGetValue(buildingId, out string key))
+            {
+                key = LocalKey(buildingId);
+                _localKeyById[buildingId] = key;
+            }
+            return key;
         }
 
         /// <summary>FG0-ARCH-04：建筑 ID → 可视化节点名里的本地键（"home_valley:generator_2#2" → "generator_2#2"）。
@@ -1360,6 +1419,7 @@ namespace GameLogic.Campaign.Regions
             _buildingBadges.Clear();
             _buildingVisuals.Clear();
             _visualsRecordsRef = null;
+            ClearVisualCaches();
 
             foreach (BuildingRecord building in state.BuildingRecords.Where(b => b.RegionId == HomeValleyLayout.RegionId))
             {
@@ -1407,6 +1467,7 @@ namespace GameLogic.Campaign.Regions
                     BuildGroundItemVisual(item);
                 }
             }
+            _groundRef = state.GroundItems;
 
             foreach (HomeValleyMachineMarker marker in _machineMarkers)
             {
@@ -1422,10 +1483,15 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        /// <summary>ER3-WRK-01：把当前 <see cref="CampaignState"/> 与已生成的占位可视化对账，覆盖
-        /// "订单在游玩过程中完工/产生新地面物"这些 <see cref="BuildVisuals"/>（只在 Enter 时跑一次）
-        /// 覆盖不到的场景。个位数量级的建筑/地面物，逐帧对账开销可忽略，不违反热更层性能纪律
-        /// （那条规则约束的是战斗热路径，参见 <see cref="HomeValleyWorkOrders"/> 类注释同一处说明）。</summary>
+        /// <summary>
+        /// 家园画面对账（纯表现：建筑、残骸、建议建造位、地面物、靶子）。镜头在家园时每帧调用；暂停中规划的建筑也要立即显示。
+        /// FG3-LOG-09（DEBT-FG0ARCH04-09；FGR-LOG-090 / FGR-SYS-042“热更层每帧开销与数量无关”）改为变化驱动 + 分帧轮询：
+        /// - 建筑记录数组换了（新增 / 移除 / 搬迁都会换数组）或色盲配色切换 → 整份对账一次（补建、移除、全部重画）；
+        /// - 模拟改了某座建筑的外观字段 → 经 <see cref="BuildingVisualFeed"/> 进变化集，这一帧只重画这些（O(变化数)）；
+        /// - 施工中的现场每帧重画（虚影随进度长高；O(施工中的现场数)）；
+        /// - 其余每帧轮询 home.visual_slice_buildings 座兜底（漏报的改动最迟 建筑数 ÷ 本值 帧内画出来）；外观签名没变的不写。
+        /// - 地面物数组换了才对账（按 ID 缓存表现对象）；残骸 / 建议建造位 / 信标位每 30 帧与整份对账时核对一次（节点按名字缓存，不再逐帧 Find）。
+        /// </summary>
         private void SyncWorldVisuals(CampaignState state)
         {
             if (_root == null)
@@ -1433,23 +1499,104 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
-            _siteView.BeginFrame(state); // FG3-LOG-02：现场 → 施工单索引（O(工单数)），下面逐座刷新虚影进度 O(1)。
+            _siteView.BeginFrame(state); // FG3-LOG-02：现场 → 施工单索引（工单数组或施工修订号变了才重建），下面逐座刷新虚影进度 O(1)。
+            bool cvd = GameSettings.ColorblindSafeIconsEnabled;
             bool recordsChanged = !ReferenceEquals(_visualsRecordsRef, state.BuildingRecords);
+            if (recordsChanged || cvd != _visualCvd)
+            {
+                _visualCvd = cvd;
+                FullBuildingPass(state, recordsChanged);
+                BuildingVisualFeed.Clear();
+                _anchorCheckCountdown = 0;
+            }
+            else
+            {
+                int refreshed = 0;
+                if (BuildingVisualFeed.Count > 0)
+                {
+                    foreach (string id in BuildingVisualFeed.Pending)
+                    {
+                        if (_visualRecordById.TryGetValue(id, out BuildingRecord b))
+                        {
+                            RefreshBuildingVisual(b);
+                            refreshed++;
+                        }
+                    }
+                    BuildingVisualFeed.Clear();
+                }
+                foreach (string id in _siteView.ActiveSiteIds)
+                {
+                    if (_visualRecordById.TryGetValue(id, out BuildingRecord b))
+                    {
+                        RefreshBuildingVisual(b);
+                        refreshed++;
+                    }
+                }
+                BuildingRecord[] records = state.BuildingRecords;
+                int n = records.Length;
+                int slice = Math.Min(n, VisualSliceBuildings);
+                for (int i = 0; i < slice; i++)
+                {
+                    _visualCursor = _visualCursor + 1 >= n ? 0 : _visualCursor + 1;
+                    BuildingRecord b = records[_visualCursor];
+                    if (b != null && b.RegionId == HomeValleyLayout.RegionId)
+                    {
+                        RefreshBuildingVisual(b);
+                        refreshed++;
+                    }
+                }
+                LastVisualRefreshCount = refreshed;
+            }
+
+            if (--_anchorCheckCountdown <= 0)
+            {
+                _anchorCheckCountdown = 30;
+                SyncAnchorVisuals(state);
+            }
+
+            // FG0-ARCH-01：运行时新出现的机器（紧急救援、出厂、远征归来）改由 SyncSimEntities 在每个模拟步补上表现对象——
+            // 机器位置记在表现对象上，属于模拟；放在画面对账里会让“有没有人在看家园”改变结果（FGR-BASE-021）。
+
+            foreach (CombatTargetRecord target in state.CombatTargets ?? Array.Empty<CombatTargetRecord>())
+            {
+                if (target.RegionId == HomeValleyLayout.RegionId)
+                {
+                    RefreshCombatTargetVisual(target);
+                }
+            }
+
+            if (!ReferenceEquals(_groundRef, state.GroundItems))
+            {
+                SyncGroundItemVisuals(state);
+            }
+        }
+
+        private static int VisualSliceBuildings => Math.Max(8, GridContent.TuningInt("home.visual_slice_buildings"));
+
+        /// <summary>整份对账：补建缺的、移除已消失的、全部重画（O(建筑数)，只在记录数组换了 / 配色切换时）。</summary>
+        private void FullBuildingPass(CampaignState state, bool recordsChanged)
+        {
+            VisualFullPasses++;
             _visualsRecordsRef = state.BuildingRecords;
             if (recordsChanged)
             {
                 _liveBuildingKeys.Clear();
+                _visualRecordById.Clear();
+                _visualBeaconExists = false;
             }
+            int refreshed = 0;
             foreach (BuildingRecord building in state.BuildingRecords)
             {
                 if (building == null || building.RegionId != HomeValleyLayout.RegionId)
                 {
                     continue;
                 }
-                string key = LocalKey(building.BuildingId);
+                string key = KeyOf(building.BuildingId);
                 if (recordsChanged)
                 {
                     _liveBuildingKeys.Add(key);
+                    _visualRecordById[building.BuildingId] = building;
+                    _visualBeaconExists |= building.BuildingTypeId == HomeValleyLayout.BuildingTypeBeacon;
                 }
                 if (!_buildingVisuals.TryGetValue(key, out Transform go) || go == null)
                 {
@@ -1468,9 +1615,11 @@ namespace GameLogic.Campaign.Regions
                 {
                     RefreshBuildingVisual(building);
                 }
+                refreshed++;
             }
+            LastVisualRefreshCount = refreshed;
             // FG0-ARCH-04：拆除完成 / 取消规划后建筑记录消失，占位方块与状态标记一并移除（此前拆掉的建筑会一直留在画面上）。
-            // 只在记录数组被替换时扫描（记录的增删都会换数组；旋转 / 状态变化是原地改字段，由上面的逐座刷新处理）。
+            // 只在记录数组被替换时扫描（记录的增删都会换数组；旋转 / 状态变化是原地改字段，由变化集与轮询处理）。
             if (recordsChanged)
             {
                 _goneBuildingKeys.Clear();
@@ -1488,45 +1637,50 @@ namespace GameLogic.Campaign.Regions
                         GameLogic.View.UnityObjects.Release(t.gameObject);
                     }
                     _buildingVisuals.Remove(gone);
-                    DestroyChild("Badge_" + gone);
+                    _buildingRenderers.Remove(gone);
+                    _buildingVisualSig.Remove(gone);
+                    if (_buildingBadges.TryGetValue(gone, out WorldBadge badge) && badge != null)
+                    {
+                        GameLogic.View.UnityObjects.Release(badge.gameObject);
+                    }
                     _buildingBadges.Remove(gone);
                 }
-            }
-            // 取消了规划、类型又回到 0 座时，Demo 的建议建造位重新出现。
-            if (!state.BuildingRecords.Any(b => b.BuildingId == HomeValleyLayout.RegionId + ":" + HomeValleyLayout.BuildingTypeGenerator2)
-                && _root.transform.Find("BuildSite_" + HomeValleyLayout.Generator2Site.Id) == null)
-            {
-                BuildBuildSiteVisual(HomeValleyLayout.Generator2Site, HomeValleyLayout.BuildingTypeGenerator2);
-            }
-
-            // ER7-BEACON-01：OBJ-09 可能在玩家已经站在归还谷地期间完成（远征回城撤离那一刻）——
-            // BuildVisuals 的"锁定预留位 vs 可点选建造位"判断只在 Enter 时跑一次，这里补一次逐帧对账，
-            // 把还没来得及切换的锁定预留位换成真正可建造的 BuildSite。
-            bool beaconBuiltNow = HomeValleyBeacon.Exists(state);
-            if (!beaconBuiltNow && HomeValleyBeacon.IsUnlocked(state) && _root.transform.Find("BeaconSlot_Reserved") != null)
-            {
-                DestroyChild("BeaconSlot_Reserved");
-                BuildBuildSiteVisual(HomeValleyLayout.BeaconSlot, HomeValleyLayout.BuildingTypeBeacon);
-            }
-            else if (!beaconBuiltNow && HomeValleyBeacon.IsUnlocked(state) && _root.transform.Find("BuildSite_" + HomeValleyLayout.BeaconSlot.Id) == null)
-            {
-                BuildBuildSiteVisual(HomeValleyLayout.BeaconSlot, HomeValleyLayout.BuildingTypeBeacon); // 取消了信标规划后建造位回来。
-            }
-
-            // FG0-ARCH-01：运行时新出现的机器（紧急救援、出厂、远征归来）改由 SyncSimEntities 在每个模拟步补上表现对象——
-            // 机器位置记在表现对象上，属于模拟；放在画面对账里会让“有没有人在看家园”改变结果（FGR-BASE-021）。
-
-            foreach (CombatTargetRecord target in state.CombatTargets ?? Array.Empty<CombatTargetRecord>())
-            {
-                if (target.RegionId == HomeValleyLayout.RegionId)
+                // 取消了规划、类型又回到 0 座时，Demo 的建议建造位重新出现。
+                if (!_visualRecordById.ContainsKey(HomeValleyLayout.RegionId + ":" + HomeValleyLayout.BuildingTypeGenerator2)
+                    && !HasNamed("BuildSite_" + HomeValleyLayout.Generator2Site.Id))
                 {
-                    RefreshCombatTargetVisual(target);
+                    BuildBuildSiteVisual(HomeValleyLayout.Generator2Site, HomeValleyLayout.BuildingTypeGenerator2);
+                }
+            }
+        }
+
+        /// <summary>残骸拆完、信标解锁 / 建成 / 取消：每 30 帧与整份对账后核对一次（O(区域数)，节点按名字缓存）。</summary>
+        private void SyncAnchorVisuals(CampaignState state)
+        {
+            // ER7-BEACON-01：OBJ-09 可能在玩家已经站在归还谷地期间完成（远征回城撤离那一刻）——
+            // BuildVisuals 的"锁定预留位 vs 可点选建造位"判断只在 Enter 时跑一次，这里补一次对账，
+            // 把还没来得及切换的锁定预留位换成真正可建造的 BuildSite。
+            if (!_visualBeaconExists && HomeValleyBeacon.IsUnlocked(state))
+            {
+                if (HasNamed("BeaconSlot_Reserved"))
+                {
+                    DestroyChild("BeaconSlot_Reserved");
+                    BuildBuildSiteVisual(HomeValleyLayout.BeaconSlot, HomeValleyLayout.BuildingTypeBeacon);
+                }
+                else if (!HasNamed("BuildSite_" + HomeValleyLayout.BeaconSlot.Id))
+                {
+                    BuildBuildSiteVisual(HomeValleyLayout.BeaconSlot, HomeValleyLayout.BuildingTypeBeacon); // 取消了信标规划后建造位回来。
                 }
             }
 
-            RegionRecord region = state.RegionRecords?.FirstOrDefault(r => r.RegionId == HomeValleyLayout.RegionId);
-            if (region != null)
+            RegionRecord[] regions = state.RegionRecords ?? Array.Empty<RegionRecord>();
+            for (int i = 0; i < regions.Length; i++)
             {
+                RegionRecord region = regions[i];
+                if (region == null || region.RegionId != HomeValleyLayout.RegionId || region.DestroyedNodeIds == null)
+                {
+                    continue;
+                }
                 if (region.DestroyedNodeIds.Contains(HomeValleyLayout.Wreckage1NodeId))
                 {
                     DestroyChild("Wreckage_" + HomeValleyLayout.Wreckage1NodeId);
@@ -1536,35 +1690,61 @@ namespace GameLogic.Campaign.Regions
                     DestroyChild("Wreckage_" + HomeValleyLayout.Wreckage2NodeId);
                 }
             }
+        }
 
-            var liveGroundItemIds = new HashSet<string>();
+        /// <summary>地面物对账：只在地面物数组换了时（生成 / 搬走都会换数组）做，按 ID 缓存表现对象。</summary>
+        private void SyncGroundItemVisuals(CampaignState state)
+        {
+            _groundRef = state.GroundItems;
+            _liveGroundIds.Clear();
             foreach (GroundItemRecord item in state.GroundItems ?? Array.Empty<GroundItemRecord>())
             {
-                if (item.RegionId != HomeValleyLayout.RegionId)
+                if (item == null || item.RegionId != HomeValleyLayout.RegionId)
                 {
                     continue;
                 }
-                liveGroundItemIds.Add(item.GroundItemId);
-                if (_root.transform.Find("GroundItem_" + item.GroundItemId) == null)
+                _liveGroundIds.Add(item.GroundItemId);
+                if (!_groundVisuals.TryGetValue(item.GroundItemId, out Transform t) || t == null)
                 {
                     BuildGroundItemVisual(item);
                 }
             }
-            for (int i = _root.transform.childCount - 1; i >= 0; i--)
+            _goneGroundIds.Clear();
+            foreach (KeyValuePair<string, Transform> kv in _groundVisuals)
             {
-                Transform child = _root.transform.GetChild(i);
-                const string prefix = "GroundItem_";
-                if (child.name.StartsWith(prefix, StringComparison.Ordinal)
-                    && !liveGroundItemIds.Contains(child.name.Substring(prefix.Length)))
+                if (!_liveGroundIds.Contains(kv.Key))
                 {
-                    GameLogic.View.UnityObjects.Release(child.gameObject);
+                    _goneGroundIds.Add(kv.Key);
                 }
+            }
+            foreach (string gone in _goneGroundIds)
+            {
+                if (_groundVisuals.TryGetValue(gone, out Transform t) && t != null)
+                {
+                    GameLogic.View.UnityObjects.Release(t.gameObject);
+                }
+                _groundVisuals.Remove(gone);
             }
         }
 
+        private bool HasNamed(string childName) => _namedVisuals.TryGetValue(childName, out Transform t) && t != null;
+
+        private void RememberNamed(GameObject go)
+        {
+            if (go != null)
+            {
+                _namedVisuals[go.name] = go.transform;
+            }
+        }
+
+        /// <summary>移除一个按名字登记的固定表现对象（残骸、建议建造位、信标位）。只按缓存查，不再线性扫根节点下的全部子节点。</summary>
         private void DestroyChild(string childName)
         {
-            Transform child = _root != null ? _root.transform.Find(childName) : null;
+            if (!_namedVisuals.TryGetValue(childName, out Transform child))
+            {
+                return;
+            }
+            _namedVisuals.Remove(childName);
             if (child != null)
             {
                 GameLogic.View.UnityObjects.Release(child.gameObject);
@@ -1581,6 +1761,9 @@ namespace GameLogic.Campaign.Regions
             PlaceBuildingTransform(go.transform, building);
             Renderer renderer = go.GetComponent<Renderer>();
             renderer.sharedMaterial = ViewMaterials.Standard(ColorForBuilding(building));
+            _buildingRenderers[key] = renderer;
+            _buildingVisualSig.Remove(key);
+            VisualWrites++;
 
             // ER8-CONTENT-01 AC-ACC-002：状态标记挂在区域根节点、悬在建筑正上方（建筑立方体是非等比缩放，
             // 挂在它下面会把贴图拉斜）。没有碰撞体，不影响点选建筑的射线。
@@ -1588,6 +1771,8 @@ namespace GameLogic.Campaign.Regions
                 new Vector3(building.Position.x, 2.9f, building.Position.y), 1.3f);
             _buildingBadges[key] = badge;
             badge.SetIcon(StateIconFor(building));
+            // FG3-LOG-09：建好就按当前状态（虚影进度、施工标记）重画一次并记下外观签名——之后状态不变的轮询一次都不写。
+            RefreshBuildingVisual(building);
         }
 
         /// <summary>建筑状态 → 悬浮标记（外形区分：损坏✕圆 / 欠电闪电三角 / 出口堵塞横杠八边形 /
@@ -1625,6 +1810,7 @@ namespace GameLogic.Campaign.Regions
             GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             go.name = "Wreckage_" + wreckage.Id;
             go.transform.SetParent(_root.transform, false);
+            RememberNamed(go);
             go.transform.position = new Vector3(wreckage.Position.x, 0.5f, wreckage.Position.y);
             go.transform.localScale = new Vector3(2.5f, 0.5f, 2.5f);
             Renderer renderer = go.GetComponent<Renderer>();
@@ -1638,6 +1824,7 @@ namespace GameLogic.Campaign.Regions
             GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
             go.name = "BuildSite_" + site.Id;
             go.transform.SetParent(_root.transform, false);
+            RememberNamed(go);
             go.transform.position = new Vector3(site.Position.x, 0.1f, site.Position.y);
             Vector2Int size = GridContent.TryGetBuilding(typeId, out GameConfig.fg.BuildingGrid g) ? new Vector2Int(g.FootprintW, g.FootprintH) : new Vector2Int(3, 3);
             go.transform.localScale = new Vector3(size.x, 0.2f, size.y);
@@ -1652,6 +1839,7 @@ namespace GameLogic.Campaign.Regions
             GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
             go.name = "GroundItem_" + item.GroundItemId;
             go.transform.SetParent(_root.transform, false);
+            _groundVisuals[item.GroundItemId] = go.transform;
             go.transform.position = new Vector3(item.Position.x, 0.35f, item.Position.y);
             go.transform.localScale = new Vector3(0.9f, 0.7f, 0.9f);
             Renderer renderer = go.GetComponent<Renderer>();
@@ -1669,6 +1857,7 @@ namespace GameLogic.Campaign.Regions
             GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             go.name = "CombatTarget_" + HomeValleyCombatTargets.LowThreatTargetId;
             go.transform.SetParent(_root.transform, false);
+            RememberNamed(go);
             Vector2 pos = HomeValleyLayout.LowThreatTargetPosition;
             go.transform.position = new Vector3(pos.x, 0.6f, pos.y);
             go.transform.localScale = new Vector3(1.6f, 0.6f, 1.6f);
@@ -1684,7 +1873,8 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
-            Transform go = _root.transform.Find("CombatTarget_" + target.TargetId);
+            // FG3-LOG-09：按名字缓存取（不再逐帧 Find 线性扫根节点下的全部子节点）。
+            _namedVisuals.TryGetValue("CombatTarget_" + target.TargetId, out Transform go);
             Renderer renderer = go != null ? go.GetComponent<Renderer>() : null;
             if (renderer == null)
             {
@@ -1701,6 +1891,7 @@ namespace GameLogic.Campaign.Regions
             GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             go.name = "BeaconSlot_Reserved";
             go.transform.SetParent(_root.transform, false);
+            RememberNamed(go);
             go.transform.position = new Vector3(HomeValleyLayout.BeaconSlot.Position.x, 0.05f,
                 HomeValleyLayout.BeaconSlot.Position.y);
             go.transform.localScale = new Vector3(HomeValleyLayout.BeaconSlot.ClearanceRadius * 2f, 0.1f,
@@ -2379,6 +2570,20 @@ namespace GameLogic.Campaign.Regions
             return name.StartsWith(prefix, StringComparison.Ordinal) ? name.Substring(prefix.Length) : null;
         }
 
+        /// <summary>FG3-LOG-09：画面对账的缓存（纯表现），随表现对象一起清空。</summary>
+        private void ClearVisualCaches()
+        {
+            _buildingRenderers.Clear();
+            _buildingVisualSig.Clear();
+            _visualRecordById.Clear();
+            _groundVisuals.Clear();
+            _namedVisuals.Clear();
+            _groundRef = null;
+            _visualCursor = 0;
+            _anchorCheckCountdown = 0;
+            BuildingVisualFeed.Clear();
+        }
+
         private void DestroyVisuals()
         {
             if (_root != null)
@@ -2396,6 +2601,7 @@ namespace GameLogic.Campaign.Regions
             _buildingVisuals.Clear();
             _buildingBadges.Clear();
             _visualsRecordsRef = null;
+            ClearVisualCaches();
             _siteView.Release(); // 规划传送带的表现对象挂在 _root 下（已随之销毁），这里清池、释放材质与悬停。
             if (_squadCtx != null)
             {

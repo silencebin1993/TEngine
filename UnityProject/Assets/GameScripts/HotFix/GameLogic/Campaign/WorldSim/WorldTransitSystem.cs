@@ -279,7 +279,7 @@ namespace GameLogic.Campaign.WorldSim
         }
 
         /// <summary>寻路服务交回一条结果：队伍还在等这条（序号一致）才采纳。</summary>
-        public static bool DeliverRoute(CampaignState state, in NavResult r, NavKernel kernel)
+        public static bool DeliverRoute(CampaignState state, in NavResult r)
         {
             TransitGroupRecord g = FindByKey(state, r.Request.OwnerKey);
             if (g == null || g.State != TransitGroupState.Marching || g.RouteState != RouteAwaiting || g.NavSerial != r.Request.Serial)
@@ -292,7 +292,7 @@ namespace GameLogic.Campaign.WorldSim
                 var ys = new int[r.PointCount];
                 for (int k = 0; k < r.PointCount; k++)
                 {
-                    int2 p = kernel.ResultPoint(r.PointStart + k);
+                    int2 p = NavService.ResultPoint(r.PointStart + k);
                     xs[k] = p.x;
                     ys[k] = p.y;
                 }
@@ -313,7 +313,7 @@ namespace GameLogic.Campaign.WorldSim
         private static readonly List<int2> RouteScratch = new List<int2>(64);
 
         /// <summary>地形变化后：剩余路线被挡的队伍从当前位置重新要路线。返回失效条数。</summary>
-        public static int InvalidateRoutes(CampaignState state, NavKernel kernel)
+        public static int InvalidateRoutes(CampaignState state)
         {
             int n = 0;
             foreach (TransitGroupRecord g in Groups(state))
@@ -328,7 +328,7 @@ namespace GameLogic.Campaign.WorldSim
                     RouteScratch.Add(new int2(g.RouteX[k], g.RouteY[k]));
                 }
                 GridCell c = NavService.CellOf(g.PosX, g.PosY);
-                if (!kernel.RouteClear(new int2(c.X, c.Y), RouteScratch, 0, NavConst.ClassHostile))
+                if (!NavService.RouteClear(new int2(c.X, c.Y), RouteScratch, 0, NavConst.ClassHostile))
                 {
                     g.RouteState = RouteNeed;
                     n++;

@@ -325,11 +325,11 @@ namespace GameLogic.Campaign.Nav
                     }
                     if (r.Request.OwnerTag == OwnerTransit)
                     {
-                        LastDelivered += WorldTransitSystem.DeliverRoute(state, r, Kernel) ? 1 : 0;
+                        LastDelivered += WorldTransitSystem.DeliverRoute(state, r) ? 1 : 0;
                     }
                     else if (r.Request.OwnerTag == OwnerPatrol)
                     {
-                        LastDelivered += WorldOutpostSystem.DeliverRoute(state, r, Kernel, tick) ? 1 : 0;
+                        LastDelivered += WorldOutpostSystem.DeliverRoute(state, r, tick) ? 1 : 0;
                     }
                 }
                 Kernel.EndAdoption();
@@ -343,8 +343,8 @@ namespace GameLogic.Campaign.Nav
                 {
                     invalid += home.InvalidateBlockedRoutes();
                 }
-                invalid += WorldTransitSystem.InvalidateRoutes(state, Kernel);
-                invalid += WorldOutpostSystem.InvalidateRoutes(state, Kernel);
+                invalid += WorldTransitSystem.InvalidateRoutes(state);
+                invalid += WorldOutpostSystem.InvalidateRoutes(state);
                 Kernel.Invalidated += invalid;
                 Kernel.ClearChanged();
                 InvalidationPasses++;
@@ -362,6 +362,16 @@ namespace GameLogic.Campaign.Nav
                 MaxBeginStepMs = LastBeginStepMs;
             }
         }
+
+        /// <summary>
+        /// FG3-LOG-09（DEBT-FG0ARCH06-07）：热更层读采纳窗口里的一条路线的第 <paramref name="index"/> 个路点——队伍 / 巡逻交付路线只经本服务，不直接碰寻路内核。
+        /// 只在 <see cref="BeginStep"/> 的采纳窗口里有效（内核在窗口外返回 default）。
+        /// </summary>
+        public static int2 ResultPoint(int index) => Kernel != null ? Kernel.ResultPoint(index) : default;
+
+        /// <summary>FG3-LOG-09（DEBT-FG0ARCH06-07）：地形变化后查一条剩余路线是否还走得通（按当前格网；热更层只经本服务查）。没绑定时按“挡住”处理（重新要路线）。</summary>
+        public static bool RouteClear(int2 start, IReadOnlyList<int2> points, int from, int cls) =>
+            Kernel != null && Kernel.RouteClear(start, points, from, cls);
 
         /// <summary>热更层的请求方（队伍、巡逻）发一条请求。</summary>
         public static void Request(int ownerTag, int ownerKey, int serial, byte cls, GridCell start, GridCell goal, bool allowPartial)

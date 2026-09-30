@@ -264,7 +264,7 @@ namespace GameLogic.EditorTools
         /// 从 <paramref name="from"/> 到 <paramref name="to"/> 的传送带路线（广度优先，只走格网规则允许铺带的格，按 N/E/S/W 固定顺序展开，同一地图同一路线）。
         /// 每格朝向指向下一格，最后一格朝 <paramref name="lastDir"/>。找不到返回 null。
         /// </summary>
-        private static List<(GridCell cell, BeltDir dir)> Route(CampaignState s, GridCell from, GridCell to, BeltDir lastDir, int margin = 14)
+        internal static List<(GridCell cell, BeltDir dir)> Route(CampaignState s, GridCell from, GridCell to, BeltDir lastDir, int margin = 14)
         {
             bool Ok(GridCell c) => HomeGridService.ValidateBeltCell(s, c).Ok;
             if (!Ok(from) || !Ok(to))
@@ -319,7 +319,7 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>经内核入口 <see cref="BeltNetworkService.TryPlace"/> 铺路线（含格网校验；传送带虚影施工由 FG3-LOG-02 验证，这里是测试捷径）。</summary>
-        private static bool Lay(CampaignState s, List<(GridCell cell, BeltDir dir)> path, int tier, out string failure)
+        internal static bool Lay(CampaignState s, List<(GridCell cell, BeltDir dir)> path, int tier, out string failure)
         {
             failure = null;
             if (path == null)
@@ -340,7 +340,7 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>仓库输出口 → 路线 → 仓库输入口 的闭环（绕着仓库走），返回路线。</summary>
-        private static List<(GridCell cell, BeltDir dir)> WarehouseLoop(CampaignState s, int tier, out string failure)
+        internal static List<(GridCell cell, BeltDir dir)> WarehouseLoop(CampaignState s, int tier, out string failure)
         {
             BeltPortService.Binding outP = Port(s, "warehouse", "warehouse.out0");
             BeltPortService.Binding inP = Port(s, "warehouse", "warehouse.in0");

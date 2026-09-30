@@ -16,7 +16,7 @@ using Object = UnityEngine.Object;
 namespace GameLogic.EditorTools
 {
     /// <summary>
-    /// FG3-LOG-03：满载传送带的真实 GPU 帧时间探针（120 帧最低标准；FG03 第 7 节 15,000 格 / 30,000 件）。需要图形设备：
+    /// FG3-LOG-03：满载传送带的真实 GPU 帧时间探针（120 帧最低标准；FG03 第 7 节 15,000 格 / 30,000 件；FG3-LOG-09 起场景含 340 个物流节点）。需要图形设备：
     /// 不带 -nographics 的 batchmode（tools/unity-gpu-probes.sh）或编辑器菜单运行，不在 unity-validate / 冒烟链路里（两者都是 -nographics）。
     /// 每一帧 = 按 120 帧 × 3x 倍速的节奏推进内核（每 2 帧 1 个内核步，最坏的常用倍速）+ 渲染缓冲重填 + 实例化绘制提交 + 1920×1080 渲染 + 等 GPU 做完（读回 1 个像素强制同步）。
     /// 近景（正交半高 30，逐物品实例）与远景（46，流动贴图）各测 600 帧；另读回一帧画面断言带面与物品真的画出来了。画面存 production/qa/evidence/（整夹 gitignore）。
@@ -78,7 +78,8 @@ namespace GameLogic.EditorTools
                 cam.enabled = false;
 
                 kernel = new BeltKernel(BeltNetworkService.ReadConfig());
-                FgBeltKernelSelfCheck.BuildHuge(kernel, 0, 0);
+                // FG3-LOG-09（DEBT-FG3LOG04-07 的 GPU 部分）：换成含 340 个物流节点（分流器 / 合流器 / 地下传送带）的规模场景（15,045 格）。
+                FgBeltNodeSelfCheck.BuildHugeWithNodes(kernel, 0, 0);
                 kernel.StepMany(200);
                 renderer = new BeltRenderer();
                 BeltRenderer.Settings settings = BeltNetworkService.ReadRenderSettings();
@@ -121,7 +122,7 @@ namespace GameLogic.EditorTools
                     report.AppendLine("  · " + r);
                 }
                 Expect(renderer.GpuAvailable, $"实例化绘制可用（{renderer.GpuUnavailableReason ?? "GPU 可用"}）");
-                Expect(kernel.CellCount == 15000 && kernel.ItemCount >= 30000, $"规模：{kernel.CellCount:N0} 格 / {kernel.ItemCount:N0} 件");
+                Expect(kernel.CellCount >= 15000 && kernel.ItemCount >= 30000 && kernel.NodeCount >= 300, $"规模：{kernel.CellCount:N0} 格 / {kernel.ItemCount:N0} 件 / 物流节点 {kernel.NodeCount}");
                 Expect(allOk, "近景与远景 p95 帧时间都 ≤ 8.33 ms（120 帧/秒；帧内含 3x 倍速的内核步、缓冲重填与上传、渲染与等 GPU）");
 
                 // 画面：近景读回一帧，数带面与物品像素。

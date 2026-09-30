@@ -689,6 +689,7 @@ namespace GameLogic.Campaign.Regions
             }
             b.ConstructionState = BuildingConstructionState.Damaged;
             b.Health = 0f;
+            BuildingVisualFeed.Mark(b);
             Recompute(state);
             return true;
         }

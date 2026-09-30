@@ -23,9 +23,14 @@ namespace BinGames.Sim.Logistics
     /// </summary>
     public sealed class BeltKernel : IDisposable
     {
-        /// <summary>存档格式版本。3 = FG3-LOG-04（网络块每格多了种类与节点设置：分流器 / 合流器 / 地下传送带）；
-        /// 2 = FG3-LOG-03（端口块多了朝向与收货过滤）；1 = FG0-ARCH-02。读档三种都认。</summary>
-        public const int FormatVersion = 3;
+        /// <summary>存档格式版本。4 = FG3-LOG-09（DEBT-FG0ARCH02-10：统计窗口进存档——网络块与端口块各多一段“统计尾段”，快照头多了已完成桶数；
+        /// 读档后“实测吞吐 / 实测比例 / 端口实测”与存档前逐位一致，不再从零重新累计）；
+        /// 3 = FG3-LOG-04（网络块每格多了种类与节点设置：分流器 / 合流器 / 地下传送带）；
+        /// 2 = FG3-LOG-03（端口块多了朝向与收货过滤）；1 = FG0-ARCH-02。读档四种都认。</summary>
+        public const int FormatVersion = 4;
+
+        /// <summary>统计尾段的标记字节（格式 4 起，在网络块 / 端口块的正文末尾、校验和之前）。</summary>
+        private const byte StatsMarker = (byte)'S';
 
         /// <summary>读档仍认的最老版本。</summary>
         public const int OldestReadableVersion = 1;
@@ -1320,6 +1325,13 @@ namespace BinGames.Sim.Logistics
             RebuildCount++;
             IndexPorts();
             IndexNodes();
+            // FG3-LOG-09：全局堵塞格数与网络汇总同一口径（O(网络数)）。
+            long blocked = 0;
+            for (int k = 0; k < _nets.Length; k++)
+            {
+                blocked += _nets[k].Blocked;
+            }
+            _counters[BeltCounters.BlockedCells] = blocked;
             Revision++;
         }
 
@@ -1717,19 +1729,28 @@ namespace BinGames.Sim.Logistics
         /// <summary>
         /// 序列化：每个网络一块（格：坐标、朝向、等级、轮次、种类与节点设置、物品位置 / 种类 / 上一步位移），外加端口块与账本。
         /// 块格式（3）：'B''N' 版本 保留 | 格数 | 物品数 | 每格 (x, y, 朝向, 等级, 轮次, 种类, [节点设置], 件数, 件数 ×(位置, 种类, 上一步位移)) | FNV-32 校验和。
+        /// 格式 4（FG3-LOG-09）在校验和之前追加统计尾段：'S' | 网络的本桶累计与 4 个桶（收下 / 推上，10 个变长整数）| 每格按块内顺序（本桶通过数 + 4 个桶 + 上一步的堵塞原因）|
+        /// 每个分流器按块内顺序（左右口本桶累计 + 左右口各 4 个桶）。只逐格解析的旧工具看不到尾段，照常可用。
         /// 格式 1 / 2 没有种类、节点设置与上一步位移。
+        /// <paramref name="formatVersion"/>：只认 3 与 4（当前）；写 3 只供兼容测试造旧存档，游戏里一律写当前格式。
         /// </summary>
-        public BeltSnapshot Serialize()
+        public BeltSnapshot Serialize(int formatVersion = FormatVersion)
         {
             EnsureTopology();
+            if (formatVersion != FormatVersion && formatVersion != 3)
+            {
+                throw new ArgumentOutOfRangeException(nameof(formatVersion), "只能写格式 3 或当前格式 " + FormatVersion);
+            }
+            bool stats = formatVersion >= 4;
             var snap = new BeltSnapshot
             {
-                FormatVersion = FormatVersion,
+                FormatVersion = formatVersion,
                 StepIndex = _counters[BeltCounters.StepIndex],
                 Emitted = _counters[BeltCounters.Emitted],
                 Inserted = _counters[BeltCounters.Inserted],
                 Delivered = _counters[BeltCounters.Delivered],
                 Removed = _counters[BeltCounters.Removed],
+                CompletedBuckets = stats ? _counters[BeltCounters.CompletedBuckets] : 0,
             };
             int netCount = _nets.Length;
             var cellsOfNet = new List<int>[netCount];
@@ -1747,7 +1768,7 @@ namespace BinGames.Sim.Logistics
                 w.Reset();
                 w.U8((byte)'B');
                 w.U8((byte)'N');
-                w.U8(FormatVersion);
+                w.U8((byte)formatVersion);
                 w.U8(0);
                 List<int> list = cellsOfNet[k];
                 int items = 0;
@@ -1777,13 +1798,17 @@ namespace BinGames.Sim.Logistics
                         w.U16((ushort)Math.Min(ushort.MaxValue, Math.Max(0, _delta[i * S + s])));
                     }
                 }
+                if (stats)
+                {
+                    WriteChunkStats(w, k, list);
+                }
                 w.U32(w.Checksum());
                 snap.Networks.Add(new BeltSnapshot.Chunk { Cells = list.Count, Items = items, Bytes = w.ToArray() });
             }
             w.Reset();
             w.U8((byte)'B');
             w.U8((byte)'P');
-            w.U8(FormatVersion);
+            w.U8((byte)formatVersion);
             w.U8(0);
             int alivePorts = PortCount;
             w.I32(alivePorts);
@@ -1811,9 +1836,73 @@ namespace BinGames.Sim.Logistics
                 w.I64(bp.Consumed);
                 w.I64(bp.BlockedSteps);
             }
+            if (stats)
+            {
+                // 格式 4 端口统计尾段：按上面的端口顺序，每个端口本桶累计 + 4 个桶（悬停 / 面板“实测 N 件/分钟”）。
+                w.U8(StatsMarker);
+                for (int p = 0; p < _ports.Length; p++)
+                {
+                    BeltPort bp = _ports[p];
+                    if (bp.Alive == 0)
+                    {
+                        continue;
+                    }
+                    w.VarU(bp.WindowAcc);
+                    w.VarU(bp.W0);
+                    w.VarU(bp.W1);
+                    w.VarU(bp.W2);
+                    w.VarU(bp.W3);
+                }
+            }
             w.U32(w.Checksum());
             snap.Ports = w.ToArray();
             return snap;
+        }
+
+        /// <summary>格式 4 网络块的统计尾段（见 <see cref="Serialize"/>）。<paramref name="list"/> = 块内的格（与上面写格的顺序相同）。</summary>
+        private void WriteChunkStats(BeltByteWriter w, int net, List<int> list)
+        {
+            w.U8(StatsMarker);
+            BeltNetAgg a = _nets[net];
+            w.VarU(a.DelAcc);
+            w.VarU(a.EmitAcc);
+            w.VarU(a.D0);
+            w.VarU(a.D1);
+            w.VarU(a.D2);
+            w.VarU(a.D3);
+            w.VarU(a.E0);
+            w.VarU(a.E1);
+            w.VarU(a.E2);
+            w.VarU(a.E3);
+            foreach (int i in list)
+            {
+                w.VarU(_flow[i]);
+                int b = i * BeltConst.Buckets;
+                for (int k = 0; k < BeltConst.Buckets; k++)
+                {
+                    w.VarU(_flowB[b + k]);
+                }
+                w.VarU(_block[i]); // 上一步的堵塞原因（派生量，存下来是为了读档瞬间的“堵塞格”读数与存档前一致）
+            }
+            foreach (int i in list)
+            {
+                int ni = _nodeOf[i];
+                if (ni < 0 || _kind[i] != (byte)BeltNodeKind.Splitter)
+                {
+                    continue;
+                }
+                BeltNode nd = _nodes[ni];
+                w.VarU(nd.AccL);
+                w.VarU(nd.AccR);
+                w.VarU(nd.WL0);
+                w.VarU(nd.WL1);
+                w.VarU(nd.WL2);
+                w.VarU(nd.WL3);
+                w.VarU(nd.WR0);
+                w.VarU(nd.WR1);
+                w.VarU(nd.WR2);
+                w.VarU(nd.WR3);
+            }
         }
 
         private void WriteNode(BeltByteWriter w, int i)
@@ -1878,8 +1967,12 @@ namespace BinGames.Sim.Logistics
             _counters[BeltCounters.Inserted] = snap.Inserted;
             _counters[BeltCounters.Delivered] = snap.Delivered;
             _counters[BeltCounters.Removed] = snap.Removed;
+            // 格式 4：统计窗口的时间轴（旧格式为 0：读档后窗口从头累计，与格式 4 之前的行为一样）。
+            _counters[BeltCounters.CompletedBuckets] = snap.FormatVersion >= 4 ? Math.Max(0, snap.CompletedBuckets) : 0;
             CorruptChunksDropped = 0;
             CorruptItemsDropped = 0;
+            StatsDroppedOnLoad = 0;
+            _pendingNetStats.Clear();
             var tmpItems = new List<(int pos, ushort item)>(S);
             var addedCells = new List<(int x, int y)>(64);
             foreach (BeltSnapshot.Chunk chunk in snap.Networks)
@@ -1914,8 +2007,116 @@ namespace BinGames.Sim.Logistics
             }
             _dirty = true;
             EnsureTopology();
+            ApplyPendingNetStats();
             _counters[BeltCounters.ItemsOnBelts] = CountItemsSlow();
             return true;
+        }
+
+        /// <summary>FG3-LOG-09：读档时统计尾段读不了（数值越界 / 长度不符）的网络块或端口块数——这些窗口从零累计（统计只影响读数，不影响物品与状态）。</summary>
+        public int StatsDroppedOnLoad { get; private set; }
+
+        /// <summary>格式 4：每个网络块的网络级窗口，按块里第一格的坐标暂存；拓扑重建（会清空网络汇总）之后再按那一格现在所属的网络写回。</summary>
+        private readonly List<(long key, BeltNetAgg agg)> _pendingNetStats = new List<(long key, BeltNetAgg agg)>();
+
+        private void ApplyPendingNetStats()
+        {
+            foreach ((long key, BeltNetAgg saved) in _pendingNetStats)
+            {
+                if (!_lookup.TryGetValue(key, out int i) || _net[i] < 0 || _net[i] >= _nets.Length)
+                {
+                    continue;
+                }
+                BeltNetAgg a = _nets[_net[i]];
+                a.DelAcc = saved.DelAcc;
+                a.EmitAcc = saved.EmitAcc;
+                a.D0 = saved.D0;
+                a.D1 = saved.D1;
+                a.D2 = saved.D2;
+                a.D3 = saved.D3;
+                a.E0 = saved.E0;
+                a.E1 = saved.E1;
+                a.E2 = saved.E2;
+                a.E3 = saved.E3;
+                _nets[_net[i]] = a;
+            }
+            _pendingNetStats.Clear();
+        }
+
+        /// <summary>
+        /// 格式 4 网络块的统计尾段（见 <see cref="Serialize"/>）：格与分流器按块内顺序对应 <paramref name="added"/>。
+        /// 读不了（标记不对、数值读不出、长度对不上）→ 这一块的窗口全部清零并计数，不丢弃网络（统计是读数，不是状态）。
+        /// </summary>
+        private void ReadChunkStats(BeltByteReader r, List<(int x, int y)> added)
+        {
+            int n = added.Count;
+            const int perCell = 2 + BeltConst.Buckets; // 本桶通过数 + 4 个桶 + 堵塞原因
+            var flows = new int[n * perCell];
+            var splitters = new List<(int node, int[] v)>();
+            var net = new int[10];
+            bool ok = r.U8() == StatsMarker;
+            for (int k = 0; ok && k < net.Length; k++)
+            {
+                ok = r.TryVarU(out net[k]);
+            }
+            for (int k = 0; ok && k < flows.Length; k++)
+            {
+                ok = r.TryVarU(out flows[k]);
+            }
+            for (int c = 0; ok && c < n; c++)
+            {
+                long key = BeltDirs.Key(added[c].x, added[c].y);
+                if (!_nodeIndex.TryGetValue(key, out int ni) || _nodes[ni].Kind != (byte)BeltNodeKind.Splitter)
+                {
+                    continue;
+                }
+                var v = new int[10];
+                for (int k = 0; ok && k < v.Length; k++)
+                {
+                    ok = r.TryVarU(out v[k]);
+                }
+                splitters.Add((ni, v));
+            }
+            if (!ok || !r.AtEnd)
+            {
+                StatsDroppedOnLoad++;
+                return;
+            }
+            for (int c = 0; c < n; c++)
+            {
+                if (!_lookup.TryGetValue(BeltDirs.Key(added[c].x, added[c].y), out int i))
+                {
+                    continue;
+                }
+                int f = c * perCell;
+                _flow[i] = flows[f];
+                for (int k = 0; k < BeltConst.Buckets; k++)
+                {
+                    _flowB[i * BeltConst.Buckets + k] = flows[f + 1 + k];
+                }
+                _block[i] = (byte)Math.Min(255, flows[f + 1 + BeltConst.Buckets]);
+            }
+            foreach ((int ni, int[] v) in splitters)
+            {
+                BeltNode nd = _nodes[ni];
+                nd.AccL = v[0];
+                nd.AccR = v[1];
+                nd.WL0 = v[2];
+                nd.WL1 = v[3];
+                nd.WL2 = v[4];
+                nd.WL3 = v[5];
+                nd.WR0 = v[6];
+                nd.WR1 = v[7];
+                nd.WR2 = v[8];
+                nd.WR3 = v[9];
+                _nodes[ni] = nd;
+            }
+            if (n > 0)
+            {
+                _pendingNetStats.Add((BeltDirs.Key(added[0].x, added[0].y), new BeltNetAgg
+                {
+                    DelAcc = net[0], EmitAcc = net[1], D0 = net[2], D1 = net[3], D2 = net[4], D3 = net[5], E0 = net[6], E1 = net[7], E2 = net[8], E3 = net[9],
+                }));
+            }
         }
 
         /// <summary>读档问题的稳定原因码（逗号分隔、去重）；热更层映射成文本键 logistics.load.reason.&lt;码&gt;（内核不带玩家可见文本）。</summary>
@@ -2061,6 +2262,10 @@ namespace BinGames.Sim.Logistics
                 why = "chunk_node";
                 return false;
             }
+            if (chunkVersion >= 4)
+            {
+                ReadChunkStats(r, added);
+            }
             return true;
         }
 
@@ -2175,15 +2380,21 @@ namespace BinGames.Sim.Logistics
             }
             r.U8();
             int n = r.I32();
-            // 每个端口的字节数：格式 1 = 63；格式 2 多了朝向（1）与收货过滤（2）= 66。
+            // 每个端口的字节数：格式 1 = 63；格式 2 多了朝向（1）与收货过滤（2）= 66。格式 4 的统计在全部记录之后的尾段里。
             int record = version >= 2 ? 66 : 63;
             if (n < 0 || !r.Has(n * record))
             {
                 why = "ports_corrupt";
                 return false;
             }
+            // 格式 4：记录第 k 个端口在 _ports 里的下标（跳过的记录为 -1），读完记录再按同一顺序读统计尾段。
+            var loaded = version >= 4 ? new int[n] : null;
             for (int k = 0; k < n; k++)
             {
+                if (loaded != null)
+                {
+                    loaded[k] = -1;
+                }
                 int id = r.I32();
                 byte kind = r.U8();
                 int px = r.I32();
@@ -2220,8 +2431,47 @@ namespace BinGames.Sim.Logistics
                 }
                 _ports.Add(bp);
                 _portIndex[bp.Id] = _ports.Length - 1;
+                if (loaded != null)
+                {
+                    loaded[k] = _ports.Length - 1;
+                }
+            }
+            if (loaded != null)
+            {
+                ReadPortStats(r, loaded);
             }
             return true;
+        }
+
+        /// <summary>格式 4 端口块的统计尾段：每个端口本桶累计 + 4 个桶。读不了 → 端口窗口从零累计并计数（端口状态照常恢复）。</summary>
+        private void ReadPortStats(BeltByteReader r, int[] loaded)
+        {
+            var v = new int[loaded.Length * 5];
+            bool ok = r.U8() == StatsMarker;
+            for (int k = 0; ok && k < v.Length; k++)
+            {
+                ok = r.TryVarU(out v[k]);
+            }
+            if (!ok || !r.AtEnd)
+            {
+                StatsDroppedOnLoad++;
+                return;
+            }
+            for (int k = 0; k < loaded.Length; k++)
+            {
+                int p = loaded[k];
+                if (p < 0)
+                {
+                    continue;
+                }
+                BeltPort bp = _ports[p];
+                bp.WindowAcc = v[k * 5];
+                bp.W0 = v[k * 5 + 1];
+                bp.W1 = v[k * 5 + 2];
+                bp.W2 = v[k * 5 + 3];
+                bp.W3 = v[k * 5 + 4];
+                _ports[p] = bp;
+            }
         }
 
         // ── 释放 ───────────────────────────────────────────────────────────────
@@ -2298,6 +2548,8 @@ namespace BinGames.Sim.Logistics
         public long Inserted;
         public long Delivered;
         public long Removed;
+        /// <summary>FG3-LOG-09（格式 4）：已经走满的统计桶数（统计窗口的“时间轴”；0 = 旧格式，读档后窗口从头累计）。</summary>
+        public long CompletedBuckets;
         public readonly List<Chunk> Networks = new List<Chunk>();
         public byte[] Ports;
 
@@ -2375,6 +2627,18 @@ namespace BinGames.Sim.Logistics
             U32((uint)(v >> 32));
         }
 
+        /// <summary>FG3-LOG-09：非负整数的变长编码（每字节 7 位，高位 = 还有下一字节）。统计窗口多数是很小的数，1 字节就够；负数按 0 写。</summary>
+        public void VarU(int v)
+        {
+            uint u = (uint)Math.Max(0, v);
+            while (u >= 0x80)
+            {
+                U8((byte)(u | 0x80));
+                u >>= 7;
+            }
+            U8((byte)u);
+        }
+
         /// <summary>FNV-1a 32 位（覆盖到目前为止写入的全部字节）。</summary>
         public uint Checksum() => BeltByteReader.Fnv32(_buf, 0, _len);
 
@@ -2435,5 +2699,34 @@ namespace BinGames.Sim.Logistics
             uint hi = U32();
             return (long)(((ulong)hi << 32) | lo);
         }
+
+        /// <summary>FG3-LOG-09：读 <see cref="BeltByteWriter.VarU"/> 写的变长整数。越过结尾或超过 5 字节 / int 范围 → false（整块按坏块处理）。</summary>
+        public bool TryVarU(out int v)
+        {
+            v = 0;
+            uint u = 0;
+            for (int shift = 0; shift < 35; shift += 7)
+            {
+                if (_at >= _end)
+                {
+                    return false;
+                }
+                byte b = _b[_at++];
+                u |= (uint)(b & 0x7F) << shift;
+                if ((b & 0x80) == 0)
+                {
+                    if (u > int.MaxValue)
+                    {
+                        return false;
+                    }
+                    v = (int)u;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>读到了正文结尾（校验和之前）。</summary>
+        public bool AtEnd => _at == _end;
     }
 }

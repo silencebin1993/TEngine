@@ -63,6 +63,8 @@ namespace GameLogic.Campaign.Grid
         private static int _occupancyRebuilds;
         private static readonly Dictionary<string, int> TypeCounts = new Dictionary<string, int>(StringComparer.Ordinal);
         private static readonly Dictionary<string, BuildingRecord> ById = new Dictionary<string, BuildingRecord>(StringComparer.Ordinal);
+        /// <summary>FG3-LOG-09：取料点候选（归还核心 + 仓库，不论状态；按记录数组顺序），与 <see cref="ById"/> 同时重建。</summary>
+        private static readonly List<BuildingRecord> StorageCandidates = new List<BuildingRecord>(8);
         private static readonly List<GridCell> Scratch = new List<GridCell>(64);
         private static bool _hasCore;
         private static GridCell _coreMin;
@@ -189,6 +191,7 @@ namespace GameLogic.Campaign.Grid
             _map.ClearOccupancy();
             TypeCounts.Clear();
             ById.Clear();
+            StorageCandidates.Clear();
             _hasCore = false;
             BuildingRecord[] records = state.BuildingRecords ?? Array.Empty<BuildingRecord>();
             foreach (BuildingRecord b in records)
@@ -198,6 +201,10 @@ namespace GameLogic.Campaign.Grid
                     continue;
                 }
                 ById[b.BuildingId] = b;
+                if (b.BuildingTypeId == HomeValleyLayout.BuildingTypeCore || b.BuildingTypeId == HomeValleyLayout.BuildingTypeWarehouse)
+                {
+                    StorageCandidates.Add(b);
+                }
                 if (string.IsNullOrEmpty(b.RelocateFromId))
                 {
                     // 搬迁目标虚影不是新建筑（完工时换掉原建筑，总数不变）：不计入“已有 N”与数量上限。
@@ -415,6 +422,31 @@ namespace GameLogic.Campaign.Grid
             max = _coreMax;
             return _hasCore;
         }
+
+        /// <summary>
+        /// FG3-LOG-09（FGR-SYS-042 热更层与建筑数无关）：只在“索引已经为这份战役、这份建筑记录数组建好”时用 ID 索引查（O(1)），
+        /// 否则返回 false 让调用方自己线性查——查询里不顺带换绑格网或重建索引（调用方可能拿着克隆 / 刚读出来还没绑定的战役）。
+        /// 索引只含家园的建筑记录；返回 true 但 <paramref name="building"/> 为 null = 家园里没有这个 ID。
+        /// </summary>
+        public static bool TryFindIndexed(CampaignState state, string buildingId, out BuildingRecord building)
+        {
+            building = null;
+            if (!IndexBoundTo(state))
+            {
+                return false;
+            }
+            if (buildingId != null)
+            {
+                ById.TryGetValue(buildingId, out building);
+            }
+            return true;
+        }
+
+        /// <summary>FG3-LOG-09：取料点候选（归还核心 + 所有仓库，调用方自己判断是否运转中）。索引没绑到这份战役时返回 null。</summary>
+        public static IReadOnlyList<BuildingRecord> IndexedStorageCandidates(CampaignState state) => IndexBoundTo(state) ? StorageCandidates : null;
+
+        private static bool IndexBoundTo(CampaignState state) =>
+            state != null && _map != null && ReferenceEquals(state, _state) && ReferenceEquals(_recordsRef, state.BuildingRecords);
 
         public static BuildingRecord FindBuilding(CampaignState state, string buildingId)
         {
@@ -986,6 +1018,7 @@ namespace GameLogic.Campaign.Grid
             _map.Release(b.BuildingId, Scratch);
             b.Rotation = newRot;
             b.Position = GridMath.FootprintCenter(pivot, g.FootprintW, g.FootprintH, newRot);
+            BuildingVisualFeed.Mark(b); // FG3-LOG-09：原地旋转，画面重画这一座
             _map.Occupy(b.BuildingId, check.Cells);
             ClaimFootprint(state, check.Cells);
             if (b.ConstructionState == BuildingConstructionState.Operational && HomeValleyPowerGrid.IsPowerRelevantType(b.BuildingTypeId))

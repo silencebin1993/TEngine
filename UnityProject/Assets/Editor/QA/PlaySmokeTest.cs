@@ -6242,6 +6242,8 @@ namespace GameLogic.EditorTools
         }
 
         private const string SmokeRemovedId = "organ_removed_smoke";
+        /// <summary>FG3-LOG-09（DEBT-FG0SAVE01-07）：冒烟往存档里放一座“被游戏更新移除”的建筑类型（格网建筑表里没有），投入 11 废料。</summary>
+        private const string SmokeRemovedBuilding = "smoke_removed_building";
 
         /// <summary>FG0-SAVE-01：主菜单出现后，在刚玩过的存档里放一件已移除内容（测试表，不改正式表），然后从“读取”进游戏。</summary>
         private static void StepMenuAfterRun(double inStep)
@@ -6278,21 +6280,51 @@ namespace GameLogic.EditorTools
                 $"暂停菜单存档带上传送带：{s.Belts?.CellCount} 格、{s.Belts?.ItemCount} 件、{s.Belts?.Networks.Length} 个网络块（按网络分块）");
             SessionState.SetInt(K + "BeltSavedItems", s.Belts?.ItemCount ?? -1);
             SessionState.SetString(K + "BeltSavedSteps", (s.Belts?.KernelSteps ?? -1).ToString());
+            // FG3-LOG-09（DEBT-FG0ARCH02-10）：统计窗口随存档走——存档里记着已走满的统计桶数，读档后“实测吞吐”不从零累计。
+            Check(s.Belts != null && s.Belts.CompletedBuckets > 0,
+                $"暂停菜单存档带上传送带统计窗口（已走满 {s.Belts?.CompletedBuckets} 个统计桶，传送带格式 {s.Belts?.FormatVersion}）");
+            SessionState.SetString(K + "BeltSavedBuckets", (s.Belts?.CompletedBuckets ?? 0).ToString());
             SessionState.SetInt(K + "ScrapBefore", s.Scrap);
+            SessionState.SetInt(K + "GroundBefore", (s.GroundItems ?? Array.Empty<GroundItemRecord>()).Where(g => g.ResourceType == CampaignEconomyLedger.ResourceScrap).Sum(g => g.Amount));
             s.PrimitiveChips = (s.PrimitiveChips ?? Array.Empty<PrimitiveChipRecord>())
                 .Concat(new[] { new PrimitiveChipRecord { PartId = "pchip_smoke_removed", CardDefId = SmokeRemovedId, State = PrimitiveChipState.Bag } })
                 .ToArray();
+            // FG3-LOG-09（DEBT-FG0SAVE01-07）：再放一座“被游戏更新移除”的建筑（类型不在格网建筑表里，投入 11 废料）；读档时走真表判定、拆掉并返还。
+            s.BuildingRecords = (s.BuildingRecords ?? Array.Empty<BuildingRecord>())
+                .Concat(new[]
+                {
+                    new BuildingRecord
+                    {
+                        BuildingId = Campaign.Regions.HomeValleyLayout.RegionId + ":" + SmokeRemovedBuilding + "#1",
+                        BuildingTypeId = SmokeRemovedBuilding,
+                        RegionId = Campaign.Regions.HomeValleyLayout.RegionId,
+                        Position = new Vector2(3f, -9f),
+                        GridX = 3,
+                        GridY = -9,
+                        Health = 100f,
+                        ConstructionState = BuildingConstructionState.Operational,
+                        InvestedScrap = 11,
+                        Inventory = Array.Empty<CargoEntry>(),
+                        QueueIds = Array.Empty<string>(),
+                    },
+                })
+                .ToArray();
             CampaignSaveService.Save(slot, s, SaveReason.Manual);
             var buf = new ByteBuf();
-            buf.WriteSize(1);
+            buf.WriteSize(2);
             buf.WriteString(SmokeRemovedId);
             buf.WriteString("primitive_chip");
             buf.WriteString("enemy.scout.name");
             buf.WriteInt(9);
             buf.WriteInt(2);
+            buf.WriteString(SmokeRemovedBuilding);
+            buf.WriteString(SaveContentReconciler.KindBuilding);
+            buf.WriteString("building.warehouse.name");
+            buf.WriteInt(25);
+            buf.WriteInt(2);
             SaveContentReconciler.OverrideForTests(new TbRemovedContent(buf), id => id != SmokeRemovedId);
             load.onClick.Invoke();
-            Next(27, $"回到主菜单；测试捷径：槽位 {slot + 1} 存档里放一件已移除内容（测试表：退还 9 废料），点“读取”");
+            Next(27, $"回到主菜单；测试捷径：槽位 {slot + 1} 存档里放一件已移除内容（测试表：退还 9 废料）与一座已移除类型的建筑（投入 11 废料），点“读取”");
         }
 
         private static void StepLoadSlotList(double inStep)
@@ -6334,9 +6366,14 @@ namespace GameLogic.EditorTools
             string[] captions = FeedbackCues.ActiveCaptions.Where(c => c.Cue == FeedbackCueId.SaveContentMigrated).Select(c => c.Text).ToArray();
             Write($"  - 读档字幕：{string.Join("／", captions)}");
             int before = SessionState.GetInt(K + "ScrapBefore", 0);
-            Check(st != null && st.PrimitiveChips.All(c => c.CardDefId != SmokeRemovedId) && st.Scrap == before + 9,
-                $"读档进入游戏：已移除内容转换为废料（{before}→{st?.Scrap}）");
+            int groundBefore = SessionState.GetInt(K + "GroundBefore", 0);
+            int groundNow = st?.GroundItems?.Where(g => g.ResourceType == CampaignEconomyLedger.ResourceScrap).Sum(g => g.Amount) ?? 0;
+            // 建筑的返还走仓库（放不下的变成地面物，机器之后搬回），所以核对“库存 + 地面废料”。
+            Check(st != null && st.PrimitiveChips.All(c => c.CardDefId != SmokeRemovedId) && st.BuildingRecords.All(b => b.BuildingTypeId != SmokeRemovedBuilding)
+                  && st.Scrap + groundNow == before + groundBefore + 9 + 11,
+                $"读档进入游戏：已移除内容转换为废料、已移除类型的建筑拆掉并全额返还（库存 + 地面废料 {before + groundBefore}→{st?.Scrap + groundNow}，+9 +11）");
             Check(captions.Any(c => c.Contains("静默侦察机") && c.Contains("9 废料")), "进入游戏后弹出迁移字幕");
+            Check(captions.Any(c => c.Contains("仓库") && c.Contains("×1") && c.Contains("11 废料")), "进入游戏后弹出“建筑已移除、已拆除并返还”的字幕（FG3-LOG-09）");
             // FG1-SIG-01：真实“保存并返回主菜单 → 读取”后，信号核（槽位里的过载实例、预设）完全一致。
             Check(st != null && Campaign.Signal.SignalCoreService.SlotContentId(st, 0) == Campaign.Content.FirmwareCatalog.FwOverloadId
                   && Campaign.Signal.SignalCoreService.SlotChip(st, 0)?.State == PrimitiveChipState.SignalCore
@@ -6350,6 +6387,12 @@ namespace GameLogic.EditorTools
                   && bk.StepIndex >= long.Parse(SessionState.GetString(K + "BeltSavedSteps", "0"))
                   && HomeGridService.MapFor(st).GetBelt(new GridCell(bx, by)) != 0 && BeltNetworkService.LastLoadError == null,
                 $"读档恢复传送带：{bk?.CellCount} 格、{bk?.ItemCount} 件（存档时 {SessionState.GetInt(K + "BeltSavedItems", -1)} 件，读档后已继续运行），账本平衡，格网传送带层恢复");
+            // FG3-LOG-09（DEBT-FG0ARCH02-10）：读档后马上看这段传送带的“实测吞吐”，统计窗口接着存档前的（不是从 0 秒重新累计）。
+            BeltNetworkStats loadedStats = default;
+            bool statsOk = bk != null && bk.TryGetNetworkStats(bk.NetworkOf(bx, by), out loadedStats);
+            long savedBuckets = long.Parse(SessionState.GetString(K + "BeltSavedBuckets", "0"));
+            Check(statsOk && savedBuckets > 0 && loadedStats.WindowSeconds >= 15f,
+                $"读档后实测吞吐接着存档前的统计窗口：窗口 {loadedStats.WindowSeconds:F0} 游戏秒（存档时已走满 {savedBuckets} 桶；改前读档后从 0 秒重新累计）");
             // FG1-SIG-03：存档时信号在机器里 → 真实“保存并返回主菜单 → 读取”后信号仍在那台机器里（接管恢复、镜头进直控、HUD）。
             int sigSaved = SessionState.GetInt(K + "SigSaved", 0);
             if (sigSaved == 0)

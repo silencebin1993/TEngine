@@ -42,12 +42,15 @@ namespace GameLogic.EditorTools
     /// 基线：production/qa/perf-baseline/FG-PERF-LATE.json（入库；没有时本次结果写为首个基线）。基线来自另一台机器 / 另一 Unity 版本时只报告不判定。
     /// 用法：<c>bash tools/unity-perf-baseline.sh</c>（对比）/ <c>bash tools/unity-perf-baseline.sh --update</c>（对比后写入新基线）；或菜单“BinGames/性能基线/…”。
     /// 场景里还没有的（静默夜 FG7-ENV-02、沙暴 FG7-ENV-03）在报告里逐项写明，见 ADR-ARC-016 与 DEBT-FG0QA01-*（管线已于 FG3-LOG-05 加入，场景 v2）。
+    /// 场景 v3（FG3-LOG-09 性能门禁）：传送带换成含 340 个物流节点（分流器 / 合流器 / 地下传送带）的 15,045 格；800 座建筑里混入电塔与用电建筑（多个电网子网）；
+    /// 家园里 30 座虚影在施工队列里；新增物流内核单步 p95（FG03 第 7 节 ≤ 2 ms，绝对门槛）、家园画面每帧、3x 120 帧每帧、电网重算、改线重建、
+    /// 不可达目标冷启动寻路（DEBT-FG0ARCH06-04）与按真实节奏的冷长路线“采纳步硬等”次数（DEBT-FG0ARCH06-09，只报告）；存档体积 / 存读时长加 FGR-SYS-005 绝对门槛。
     /// </summary>
     public static class FgPerfBaseline
     {
         public const string SceneId = "FG-PERF-LATE";
         /// <summary>场景搭法的版本：改了场景内容（数量、布局、种子）就 +1，旧基线只报告不判定。</summary>
-        public const int SceneVersion = 2;
+        public const int SceneVersion = 3;
         public const int Seed = 42;
         public const double RegressionLimit = 0.10;
 
@@ -63,8 +66,20 @@ namespace GameLogic.EditorTools
         public const int ProjectileTarget = 1500;
         public const int ChunkTarget = 400;
         public const int TransitTarget = 12;
+        /// <summary>v3（FG3-LOG-09）：施工队列里的虚影数。</summary>
+        public const int GhostTarget = 30;
+        /// <summary>施工高峰最多量这么多步（30 秒游戏时间）；虚影清空就停。</summary>
+        private const int BurstMaxSteps = 1800;
+        /// <summary>FG03 第 7 节：物流内核单步 ≤ 2 ms（推荐配置）——绝对门槛（传送带 p95 + 管线 p95）。</summary>
+        public const double LogisticsStepBudgetMs = 2.0;
+        /// <summary>FGR-SYS-005：后期存档 ≤ 50 MB、存档 ≤ 2 秒、读档 ≤ 15 秒——绝对门槛。</summary>
+        public const double SaveMbBudget = 50.0;
+        public const double SaveMsBudget = 2000.0;
+        public const double RestoreMsBudget = 15000.0;
 
         private const string PerfBuildingType = "generator_2";
+        /// <summary>v3：建筑按这个顺序轮流铺（发电 / 电塔 / 用电），电网有多个子网、供需要结算。</summary>
+        private static readonly string[] PerfBuildingMix = { "generator_2", "power_pole", "repair_bay", "power_pole", "analysis_bench" };
         private const int Slot = 0;
         private const int RunSlot = 1;
         private const int WarmSteps = 300;
@@ -187,8 +202,10 @@ namespace GameLogic.EditorTools
                 Line($"  · 基线文件：{baselinePath}");
 
                 MeasureLongRoutes(cur);
+                MeasureUnreachable(cur);
                 if (BuildAndSave(cur) && RestoreAndMeasure(cur))
                 {
+                    MeasureRealPaceLateCompletes(cur, CampaignSession.Current);
                     Compare(cur, baselinePath, update);
                 }
             }
@@ -342,9 +359,12 @@ namespace GameLogic.EditorTools
             // 机器：核心周围由近及远找空地，补到 120 台（含开局机器），正常参与工单引擎。
             int machines = SpawnMachines(s, core, MachineTarget);
 
-            // 传送带：正式传送带内核（随存档保存），北面约 15,000 格 / 30,000 件，布局同传送带自检的规模测试。
+            // v3：30 座虚影（电塔，走正式放置入口；库存为 0 = 缺料等待，施工队列与工单引擎每步都要看它们）。
+            int ghosts = FgLogisticsGateSelfCheck.PlaceGhostRing(s, core, GhostTarget);
+
+            // 传送带：正式传送带内核（随存档保存），北面 15,045 格 / 约 34,000 件，含 340 个物流节点（v3，布局同分流节点自检的规模测试）。
             BeltKernel belts = BeltNetworkService.Kernel;
-            FgBeltKernelSelfCheck.BuildHuge(belts, core.X - 160, core.Y + 48);
+            FgBeltNodeSelfCheck.BuildHugeWithNodes(belts, core.X - 160, core.Y + 48);
             belts.EnsureTopology();
             BeltNetworkService.ApplyGridLayer(s, HomeGridService.MapFor(s));
             int beltCells = belts.CellCount;
@@ -387,8 +407,8 @@ namespace GameLogic.EditorTools
             build.Stop();
 
             Expect(buildings >= BuildingTarget && machines >= MachineTarget && beltCells >= BeltCellTarget && beltItems >= BeltItemTarget && pipeCells >= PipeCellTarget
-                   && turrets >= TurretTarget && enemies >= EnemyTarget && raids >= TransitTarget,
-                $"场景规模达到 FGR-SYS-041：建筑 +{buildings}（共 {s.BuildingRecords.Length}）、机器 {machines}、传送带 {beltCells:N0} 格 / {beltItems:N0} 件、管线 {pipeCells:N0} 格、" +
+                   && turrets >= TurretTarget && enemies >= EnemyTarget && raids >= TransitTarget && ghosts >= GhostTarget && belts.NodeCount >= 300,
+                $"场景规模达到 FGR-SYS-041：建筑 +{buildings}（共 {s.BuildingRecords.Length}，虚影 {ghosts}）、机器 {machines}、传送带 {beltCells:N0} 格 / {beltItems:N0} 件（节点 {belts.NodeCount}）、管线 {pipeCells:N0} 格、" +
                 $"炮塔 {turrets}、突袭者 {enemies}、行进中的突袭 {raids} 支{(raidFailure != null && raids < TransitTarget ? "（派遣失败：" + raidFailure + "）" : string.Empty)}；搭建 {build.Elapsed.TotalSeconds:F1} 秒");
 
             // 预热：让战斗打起来、工单引擎与寻路进入稳态，再写存档（性能测试存档是“正在打”的局面）。
@@ -405,26 +425,29 @@ namespace GameLogic.EditorTools
             long bytes = new FileInfo(CampaignSaveService.SlotPath(Slot)).Length;
             Add(cur, "save_ms", "写性能测试存档（整局同步 + 序列化 + 写盘）", "ms", sw.Elapsed.TotalMilliseconds, true, 20);
             Add(cur, "save_kb", "性能测试存档大小", "KB", bytes / 1024.0, true, 16);
+            Expect(bytes / 1024.0 / 1024.0 <= SaveMbBudget && sw.Elapsed.TotalMilliseconds <= SaveMsBudget,
+                $"FGR-SYS-005 绝对门槛：后期存档 {bytes / 1024.0 / 1024.0:F2} MB ≤ {SaveMbBudget} MB，写存档 {sw.Elapsed.TotalMilliseconds:F0} ms ≤ {SaveMsBudget} ms（Editor）");
             return true;
         }
 
         private static int AddBuildings(CampaignState s, GridCell core, int target)
         {
             HomeGridMap map = HomeGridService.MapFor(s);
-            BuildingGrid g = GridContent.Building(PerfBuildingType);
-            if (g == null)
+            if (PerfBuildingMix.Any(t => GridContent.Building(t) == null))
             {
-                Fail("性能场景：建筑表里没有 " + PerfBuildingType);
+                Fail("性能场景：建筑表里缺 " + string.Join("、", PerfBuildingMix.Where(t => GridContent.Building(t) == null)));
                 return 0;
             }
-            HomeValleyLayout.PowerProfile.TryGetValue(PerfBuildingType, out (float, int) power);
-            HomeValleyLayout.BuildProfile.TryGetValue(PerfBuildingType, out (int ScrapCost, float Seconds) profile);
-            var cells = new List<GridCell>(g.FootprintW * g.FootprintH);
+            var cells = new List<GridCell>(9);
             var extra = new List<BuildingRecord>(target);
             for (int row = 0; row < 120 && extra.Count < target; row++)
             {
                 for (int col = 0; col < 60 && extra.Count < target; col++)
                 {
+                    string type = PerfBuildingMix[extra.Count % PerfBuildingMix.Length];
+                    BuildingGrid g = GridContent.Building(type);
+                    HomeValleyLayout.PowerProfile.TryGetValue(type, out (float, int) power);
+                    HomeValleyLayout.BuildProfile.TryGetValue(type, out (int ScrapCost, float Seconds) profile);
                     var pivot = new GridCell(core.X - 118 + col * 4, core.Y - 44 - row * 4);
                     cells.Clear();
                     GridMath.FootprintCells(pivot, g.FootprintW, g.FootprintH, 0, cells);
@@ -443,8 +466,8 @@ namespace GameLogic.EditorTools
                     }
                     extra.Add(new BuildingRecord
                     {
-                        BuildingId = HomeGridService.Prefix + PerfBuildingType + "#" + s.Grid.NextInstanceSerial++,
-                        BuildingTypeId = PerfBuildingType,
+                        BuildingId = HomeGridService.Prefix + type + "#" + s.Grid.NextInstanceSerial++,
+                        BuildingTypeId = type,
                         RegionId = HomeValleyLayout.RegionId,
                         Position = GridMath.FootprintCenter(pivot, g.FootprintW, g.FootprintH, 0),
                         Rotation = 0f,
@@ -580,6 +603,7 @@ namespace GameLogic.EditorTools
             }
             WorldView.Observe(HomeValleyLayout.RegionId);
             Add(cur, "restore_ms", "读性能测试存档（恢复 + 载入家园）", "ms", sw.Elapsed.TotalMilliseconds, true, 50);
+            Expect(sw.Elapsed.TotalMilliseconds <= RestoreMsBudget, $"FGR-SYS-005 绝对门槛：读档（恢复 + 载入家园）{sw.Elapsed.TotalMilliseconds:F0} ms ≤ {RestoreMsBudget} ms（Editor）");
 
             // 每个表面 400 个区块（FG17 第 7 节）：核心周围 20×20 区块同步生成（读档后的格网是新建的）。
             CampaignState s = CampaignSession.Current;
@@ -624,13 +648,19 @@ namespace GameLogic.EditorTools
             int beltSteps = 0;
             double pipeSum = 0;
             int pipeSteps = 0;
+            var beltSamples = new List<double>(Rounds * StepsPerRound / 3 + 8);
+            var pipeSamples = new List<double>(Rounds * StepsPerRound / 3 + 8);
             double navSum = 0;
             int peakProj = 0;
             var step = new Stopwatch();
+            int ghostsAtStart = s.BuildingRecords.Count(HomeValleyController.IsPlannedGhost);
+            MeasureConstructionBurst(cur, s, ghostsAtStart);
+            var roundNotes = new List<string>(Rounds);
             GC.Collect(); // 计时轮之前先收一次：别让前面搭场景留下的垃圾在测量中途触发 GC，把 p95 打穿。
             for (int round = 0; round < Rounds; round++)
             {
                 double sum = 0;
+                int roundFrom = samples.Count;
                 for (int i = 0; i < StepsPerRound; i++)
                 {
                     long c0 = ck.Steps;
@@ -651,16 +681,21 @@ namespace GameLogic.EditorTools
                     {
                         beltSum += bk.LastStepMs;
                         beltSteps++;
+                        beltSamples.Add(bk.LastStepMs);
                     }
                     if (pk != null && PipeNetworkService.KernelStepsThisSession > p0)
                     {
                         pipeSum += pk.LastStepMs;
                         pipeSteps++;
+                        pipeSamples.Add(pk.LastStepMs);
                     }
                     navSum += NavService.LastBeginStepMs;
                     peakProj = Math.Max(peakProj, ck.ProjectileCount);
                 }
                 roundAvg.Add(sum / StepsPerRound);
+                List<double> rs = samples.GetRange(roundFrom, samples.Count - roundFrom);
+                rs.Sort();
+                roundNotes.Add($"平均 {sum / StepsPerRound:F3} / p95 {rs[(int)(rs.Count * 0.95)]:F3} / 最慢 {rs[rs.Count - 1]:F2} ms，轮末虚影 {s.BuildingRecords.Count(HomeValleyController.IsPlannedGhost)}");
             }
             int n = samples.Count;
             roundAvg.Sort();
@@ -710,6 +745,15 @@ namespace GameLogic.EditorTools
             Add(cur, "belt_kernel_ms", "传送带内核每个内核步（20 Hz）", "ms", beltSteps > 0 ? beltSum / beltSteps : 0, true, 0.2);
             Add(cur, "pipe_kernel_ms", "管线内核每个内核步（20 Hz）", "ms", pipeSteps > 0 ? pipeSum / pipeSteps : 0, true, 0.1);
             Add(cur, "nav_main_ms", "寻路主线程流水线每步", "ms", navSum / n, true, 0.1);
+            beltSamples.Sort();
+            pipeSamples.Sort();
+            double beltP95 = beltSamples.Count > 0 ? beltSamples[(int)(beltSamples.Count * 0.95)] : 0;
+            double pipeP95 = pipeSamples.Count > 0 ? pipeSamples[(int)(pipeSamples.Count * 0.95)] : 0;
+            Add(cur, "belt_kernel_p95_ms", "传送带内核每个内核步 p95", "ms", beltP95, true, 0.3);
+            Add(cur, "pipe_kernel_p95_ms", "管线内核每个内核步 p95", "ms", pipeP95, true, 0.1);
+            Expect(beltP95 + pipeP95 <= LogisticsStepBudgetMs,
+                $"FG03 第 7 节绝对门槛：物流内核单步 p95（传送带 {beltP95:F3} + 管线 {pipeP95:F4}）= {beltP95 + pipeP95:F3} ms ≤ {LogisticsStepBudgetMs} ms（传送带是 Burst，与真机同为原生；管线 Editor 下 Mono JIT）");
+            MeasureHomeFrames(cur, s);
             Add(cur, "alloc_bytes_per_step", "每步托管堆增量（不含发生 GC 的窗口）", "B", allocPerStep, true, 64);
             Add(cur, "alloc_gc_windows", $"分配测量中发生 GC 的窗口（共 {allocWindows} 个）", "个", dirtyWindows, true, 1);
             Add(cur, "mono_used_mb", "托管堆已用（GC 后，含编辑器）", "MB", monoMb, true, 32);
@@ -723,9 +767,12 @@ namespace GameLogic.EditorTools
             Add(cur, "scale_projectiles_peak", "同时存在的弹体（测量期间峰值）", "枚", peakProj, false, 0);
             Add(cur, "scale_chunks", "表面已加载区块", "块", chunks, false, 0);
             Add(cur, "scale_transit", "行进中的突袭", "支", transit, false, 0);
+            Add(cur, "scale_belt_nodes", "物流节点（分流器 / 合流器 / 地下）", "个", bk.NodeCount, false, 0);
+            Add(cur, "scale_ghosts", "测量开始时施工队列里的虚影", "座", ghostsAtStart, false, 0);
 
             Line($"  · 读回的局面：建筑 {buildings}、机器 {machines}、传送带 {beltCells:N0} 格 / {beltItems:N0} 件、炮塔 {turrets}、敌人 {enemies}、弹体峰值 {peakProj:N0}、" +
-                 $"区块 {chunks}、行进中的突袭 {transit} 支");
+                 $"区块 {chunks}、行进中的突袭 {transit} 支、测量开始时的虚影 {ghostsAtStart} 座");
+            Line($"  · 每轮 {StepsPerRound} 步：{string.Join("；", roundNotes)}");
             Line($"  · 世界步：平均 {worldAvg:F3} ms / p95 {worldP95:F3} ms；其中战斗内核 {combatPerStep:F3}、传送带内核 {beltPerStep:F3}、管线内核 {pipePerStep:F4}（折到每世界步）、" +
                  $"寻路主线程 {navSum / n:F3}、热更层其余 {hotfixPerStep:F3} ms；每步托管堆增量 {allocPerStep:F1} B" +
                  $"{(dirtyWindows > 0 ? $"（{allocWindows} 个窗口里 {dirtyWindows} 个发生过 GC，不计入）" : string.Empty)}；托管堆 {monoMb:F0} MB");
@@ -741,6 +788,196 @@ namespace GameLogic.EditorTools
             Expect(allocValid,
                 $"托管分配读数有效：{allocWindows} 个 {windowSteps} 步的窗口里 {allocWindows - dirtyWindows} 个没有发生 GC（至少一半；否则分配多到频繁触发 GC，堆增量读数偏低不能拿去比基线）");
             return true;
+        }
+
+        /// <summary>
+        /// v3（FG3-LOG-09）：家园画面每帧（暂停中：只有画面对账、叠加层与界面，没有模拟步）、3x / 120 帧每帧（1.5 个模拟步 + 画面）、
+        /// 电网重算（一座电塔被毁 → 断网重算）、改线重建（大网络上改一格后的整图重建）。
+        /// </summary>
+        private static void MeasureHomeFrames(BaselineFile cur, CampaignState s)
+        {
+            var sw = new Stopwatch();
+            GameClock.SetPaused(true);
+            for (int i = 0; i < 30; i++)
+            {
+                WorldSimulation.Frame(1f / 60f);
+            }
+            var paused = new List<double>(300);
+            for (int i = 0; i < 300; i++)
+            {
+                sw.Restart();
+                WorldSimulation.Frame(1f / 60f);
+                sw.Stop();
+                paused.Add(sw.Elapsed.TotalMilliseconds);
+            }
+            GameClock.SetPaused(false);
+            paused.Sort();
+            Add(cur, "home_frame_ms", "家园画面每帧（暂停中：对账 + 叠加层 + 界面）", "ms", paused.Average(), true, 0.1);
+            Add(cur, "home_frame_p95_ms", "家园画面每帧 p95", "ms", paused[(int)(paused.Count * 0.95)], true, 0.2);
+
+            GameClock.SetSpeed(3f);
+            var frames = new List<double>(600);
+            for (int i = 0; i < 600; i++)
+            {
+                sw.Restart();
+                WorldSimulation.Frame(1f / 120f);
+                sw.Stop();
+                frames.Add(sw.Elapsed.TotalMilliseconds);
+            }
+            GameClock.SetSpeed(1f);
+            frames.Sort();
+            double f95 = frames[(int)(frames.Count * 0.95)];
+            Add(cur, "frame_3x_120_p95_ms", "3x、120 帧下每帧 p95（1.5 个模拟步 + 画面）", "ms", f95, true, 0.5);
+            Line($"  · 预算参照：3x、120 帧每帧 p95 {f95:F2} / 8.33 ms{Over(f95, 1000.0 / 120.0)}（Editor；真机 FG15-SYS-02）");
+
+            BuildingRecord pole = s.BuildingRecords.FirstOrDefault(b => b.BuildingTypeId == "power_pole" && b.ConstructionState == BuildingConstructionState.Operational);
+            if (pole != null)
+            {
+                sw.Restart();
+                HomeValleyPowerGrid.ApplyBuildingDestroyed(s, pole.BuildingId);
+                sw.Stop();
+                Add(cur, "power_recompute_ms", "电网重算（一座电塔被毁，800 座建筑）", "ms", sw.Elapsed.TotalMilliseconds, true, 0.5);
+            }
+            else
+            {
+                Fail("性能场景：找不到运转中的电塔（电网重算没量）");
+            }
+
+            BeltKernel bk = BeltNetworkService.Kernel;
+            GridCell core = HomeGridService.CorePivot(s);
+            var edits = new List<double>(5);
+            for (int i = 0; i < 5; i++)
+            {
+                bk.AddCell(core.X - 170, core.Y + 48 + i * 5, BeltDir.East, 0);
+                sw.Restart();
+                bk.EnsureTopology();
+                sw.Stop();
+                edits.Add(sw.Elapsed.TotalMilliseconds);
+            }
+            Add(cur, "belt_edit_rebuild_ms", "改线重建（15,045 格上改一格后整图重建一次，5 次取最大）", "ms", edits.Max(), true, 0.5);
+        }
+
+        /// <summary>
+        /// v3（FG3-LOG-09）：DEBT-FG0ARCH06-04——真不可达（起点与目标两侧都伸出搜索框：一道贯穿整片地图的悬崖把世界分成两半）的抽象搜索冷 / 热耗时与展开数；
+        /// DEBT-FG0ARCH06-09——按真实节奏（每帧真实睡到 1/60 秒）请求冷的 2,000 格长路线，采纳步主线程硬等工作线程的次数（只报告：承接 FG6-DEF-04）。
+        /// </summary>
+        private static void MeasureUnreachable(BaselineFile cur)
+        {
+            NavConfig cfg = NavService.ConfigFromTuning();
+            int size = cfg.ChunkSize;
+            byte cliff = GridContent.TerrainCode("cliff");
+            const int wChunks = 24;
+            const int hChunks = 8;
+            int wall = wChunks * size / 2;
+            // 没有生成器：推进去的区块之外 = 未知 = 完全不能走（与 FgNavSelfCheck 的合成地图同一写法），两侧都是封闭但远大于泛洪预算的大区域。
+            using var k = new NavKernel(cfg, NavService.TerrainTable(), false, default, null, null);
+            var terrain = new byte[size * size];
+            var occ = new int[size * size];
+            for (int cy = 0; cy < hChunks; cy++)
+            {
+                for (int cx = 0; cx < wChunks; cx++)
+                {
+                    for (int i = 0; i < size * size; i++)
+                    {
+                        int x = cx * size + i % size;
+                        terrain[i] = x == wall || x == wall + 1 ? cliff : (byte)0;
+                    }
+                    k.PushChunk(cx, cy, terrain, occ, null, 0, false);
+                }
+            }
+            var pts = new List<int2>();
+            var req = new NavRequest
+            {
+                OwnerTag = 9,
+                OwnerKey = 1,
+                Serial = 1,
+                Class = NavConst.ClassPlayer,
+                Flags = NavRequestFlags.None,
+                Start = new int2(wall - 40, hChunks * size / 2),
+                Goal = new int2(wall + 40, hChunks * size / 2),
+            };
+            NavResult cold = k.FindNow(req, pts, onWorker: true, out double coldMs);
+            NavResult warm = k.FindNow(req, pts, onWorker: true, out double warmMs);
+            Expect(cold.Status == NavStatus.Failed && warm.Status == NavStatus.Failed && cold.Expanded <= cfg.MaxExpansions + NavConst.EnclosureFloodBudget,
+                $"真不可达（两侧都伸出搜索框）：报失败（{cold.Reason}），展开 {cold.Expanded}（上限 {cfg.MaxExpansions}），冷 {coldMs:F1} ms / 热 {warmMs:F1} ms（DEBT-FG0ARCH06-04）");
+            Add(cur, "nav_unreachable_cold_ms", "真不可达寻路（两侧伸出搜索框，冷缓存）", "ms", coldMs, true, 5);
+            Add(cur, "nav_unreachable_warm_ms", "真不可达寻路（热缓存）", "ms", warmMs, true, 2);
+        }
+
+        /// <summary>
+        /// v3（FG3-LOG-09）：施工高峰单独量——读档后施工队列里的虚影由搬运机取料、施工、完工（每座完工改格网占用、电网、寻路区块），
+        /// 一直跑到队列清空（最多 <see cref="BurstMaxSteps"/> 步）。之后的稳态轮里没有施工，稳态数字与 v2 可比、各轮之间稳定。
+        /// </summary>
+        private static void MeasureConstructionBurst(BaselineFile cur, CampaignState s, int ghostsAtStart)
+        {
+            var times = new List<double>(BurstMaxSteps);
+            var sw = new Stopwatch();
+            int occ0 = HomeGridService.OccupancyRebuildCount;
+            GC.Collect();
+            while (times.Count < BurstMaxSteps
+                   && (s.BuildingRecords.Any(HomeValleyController.IsPlannedGhost) || HomeValleyWorkOrders.CountActiveConstruction(s) > 0))
+            {
+                sw.Restart();
+                WorldSimulation.StepMany(1);
+                sw.Stop();
+                times.Add(sw.Elapsed.TotalMilliseconds);
+            }
+            int left = s.BuildingRecords.Count(HomeValleyController.IsPlannedGhost);
+            int built = ghostsAtStart - left;
+            if (times.Count == 0)
+            {
+                Fail($"施工高峰没有量到：读档后施工队列里没有虚影（{ghostsAtStart} 座）");
+                return;
+            }
+            var sorted = new List<double>(times);
+            sorted.Sort();
+            double avg = times.Average();
+            double p95 = sorted[(int)(sorted.Count * 0.95)];
+            double worst = sorted[sorted.Count - 1];
+            int over4 = times.Count(t => t > 4.0);
+            int occ = HomeGridService.OccupancyRebuildCount - occ0;
+            Line($"  · 施工高峰：读档时队列里 {ghostsAtStart} 座虚影，{times.Count} 步（{times.Count / 60.0:F1} 游戏秒）里完工 {built} 座、剩 {left} 座；" +
+                 $"每步平均 {avg:F3} / p95 {p95:F3} / 最慢 {worst:F2} ms，超过 4 ms 的步 {over4} 个；格网占用整体重建 {occ} 次（Editor；只报告，基线对比跟踪）");
+            Expect(built >= ghostsAtStart * 9 / 10,
+                $"施工高峰真的在施工：{times.Count} 步里完工 {built} / {ghostsAtStart} 座（搬运机取料 → 施工 → 完工）");
+            Add(cur, "construction_burst_avg_ms", $"施工高峰每步平均（{ghostsAtStart} 座虚影同时施工到清空）", "ms", avg, true, 0.2);
+            Add(cur, "construction_burst_p95_ms", "施工高峰每步 p95", "ms", p95, true, 0.5);
+            Add(cur, "construction_burst_worst_ms", "施工高峰最慢一步", "ms", worst, true, 3);
+        }
+
+        private static void MeasureRealPaceLateCompletes(BaselineFile cur, CampaignState s)
+        {
+            if (NavService.Kernel == null)
+            {
+                Fail("寻路服务没有绑定（真实节奏的冷长路线没量）");
+                return;
+            }
+            GridCell core = HomeGridService.CorePivot(s);
+            long late0 = NavService.Kernel.Counters.LateCompletes;
+            var sw = new Stopwatch();
+            double worstFrame = 0;
+            for (int q = 0; q < 3; q++)
+            {
+                // 朝没去过的方向 2,000 格：途经区块是冷的，工作线程要当场按种子生成。
+                var goal = new GridCell(core.X - 2000 + q * 90, core.Y - 1800 + q * 700);
+                NavService.Request(9, 700 + q, 1, NavConst.ClassPlayer, new GridCell(core.X + 6, core.Y + 6), goal, allowPartial: true);
+                for (int f = 0; f < 60; f++)
+                {
+                    sw.Restart();
+                    WorldSimulation.Frame(1f / 60f);
+                    sw.Stop();
+                    worstFrame = Math.Max(worstFrame, sw.Elapsed.TotalMilliseconds);
+                    int sleep = (int)Math.Max(0, 1000.0 / 60.0 - sw.Elapsed.TotalMilliseconds);
+                    if (sleep > 0)
+                    {
+                        System.Threading.Thread.Sleep(sleep);
+                    }
+                }
+            }
+            long late = NavService.Kernel.Counters.LateCompletes - late0;
+            Line($"  · 按真实节奏请求 3 条冷的 2,000 格长路线：采纳步硬等工作线程 {late} 次，最慢一帧 {worstFrame:F1} ms（DEBT-FG0ARCH06-09，只报告；预热途经区块由 FG6-DEF-04 承接）");
+            Add(cur, "nav_realpace_late_completes", "真实节奏下冷长路线采纳步硬等次数（3 条）", "次", late, true, 1);
+            Add(cur, "nav_realpace_worst_frame_ms", "真实节奏下冷长路线期间最慢一帧", "ms", worstFrame, true, 50);
         }
 
         private static string Over(double v, double budget) => v > budget ? "（⚠ 超出）" : string.Empty;

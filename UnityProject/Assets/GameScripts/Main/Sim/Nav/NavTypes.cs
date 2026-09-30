@@ -174,6 +174,8 @@ namespace BinGames.Sim.Nav
         public long ChunkGraphsBuilt;
         public long EdgeSetsBuilt;
         public long Expanded;
+        /// <summary>FG3-LOG-09（DEBT-FG0ARCH06-11 ①）：目标一侧封闭判定泛洪访问过的抽象节点数（已计入 <see cref="Expanded"/>，这里单列供性能基线与自检核对）。</summary>
+        public long FloodVisited;
         public long LateCompletes;
         public long Invalidated;
         public long Requeued;

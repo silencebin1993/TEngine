@@ -722,7 +722,7 @@ namespace GameLogic.EditorTools
             return r.Ok || r.Reasons.All(x => x.Code == GridBlockReason.Fog);
         }
 
-        private struct Chain
+        internal struct Chain
         {
             public GridCell P1;
             public GridCell P2;
@@ -757,7 +757,7 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>场景夹具：一座已建成的建筑（真实建造路径见 F3）。</summary>
-        private static BuildingRecord AddBuilt(CampaignState s, string typeId, string key, GridCell pivot)
+        internal static BuildingRecord AddBuilt(CampaignState s, string typeId, string key, GridCell pivot)
         {
             BuildingGrid g = GridContent.Building(typeId);
             HomeValleyLayout.PowerProfile.TryGetValue(typeId, out (float PowerDemand, int PowerPriority) prof);
@@ -795,7 +795,7 @@ namespace GameLogic.EditorTools
         private static BuildingRecord Rec(CampaignState s, string anchor) => HomeGridService.FindBuilding(s, HomeValleyLayout.RegionId + ":" + anchor);
 
         /// <summary>链式场景：P1、P2、P3 三座电塔 + P3 旁一座发电机 2（80），维修台挪到 P3 旁（测试捷径：真实搬迁由 FG3-LOG-01 覆盖）。</summary>
-        private static bool LayChain(CampaignState s, out Chain c, out BuildingRecord p1, out BuildingRecord p2, out BuildingRecord p3, out BuildingRecord gen)
+        internal static bool LayChain(CampaignState s, out Chain c, out BuildingRecord p1, out BuildingRecord p2, out BuildingRecord p3, out BuildingRecord gen)
         {
             p1 = p2 = p3 = gen = null;
             BuildingRecord bay = Rec(s, "repair_bay");

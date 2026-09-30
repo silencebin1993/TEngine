@@ -783,8 +783,10 @@ namespace BinGames.Sim.Nav
         /// 说明两边不连通，放大搜索框也找不到路（湖心岛、悬崖围死的高台）。超出 <paramref name="budget"/> 或碰到框外可走格 = 下不了结论。
         /// </summary>
         private static bool GoalEnclosedInBox(ref NavWork w, ref NavScratch sc, int tSlot, int cls, int2 tc0, int size,
-            int minCx, int maxCx, int minCy, int maxCy, int budget)
+            int minCx, int maxCx, int minCy, int maxCy, int budget, out int visited)
         {
+            // FG3-LOG-09（DEBT-FG0ARCH06-11 ①）：泛洪处理过的节点数交给调用方计入展开数（受 nav.max_expansions 总量约束，也进计数器与性能基线）。
+            visited = 0;
             sc.FloodSeen.Clear();
             sc.FloodQueue.Clear();
             NavChunkGraph tg = w.Graphs[tSlot * NavConst.MaxClasses + cls];
@@ -803,6 +805,7 @@ namespace BinGames.Sim.Nav
                 {
                     return false;
                 }
+                visited = head + 1;
                 int id = sc.FloodQueue[head];
                 EnsureEdges(ref w, ref sc, id);
                 NavNode node = w.Nodes[id];
@@ -939,6 +942,7 @@ namespace BinGames.Sim.Nav
             int best = NavConst.NodeStart;
             int bestH = hs;
             int expanded = 0;
+            int floodedTotal = 0;
             bool found = false;
             bool limit = false;
             // 搜索框只是剪枝：框里搜空了但有邻居被框挡掉（clipped），说明可能要绕出框（长河、悬崖），
@@ -1045,7 +1049,12 @@ namespace BinGames.Sim.Nav
                 }
                 // 放大框之前：目标一侧若在框里自成封闭（湖心岛、围死的高台），就是真不可达——不白搜几轮，
                 // 也不会因为展开数跨轮累计而把“被完全阻断”报成“超出寻路范围”。
-                if (goalOk && GoalEnclosedInBox(ref w, ref sc, tSlot, cls, tc0, size, minCx, maxCx, minCy, maxCy, NavConst.EnclosureFloodBudget))
+                // FG3-LOG-09（DEBT-FG0ARCH06-11 ①）：泛洪访问的节点计入展开数——“其实可达、要绕出框”时白付的泛洪也受 nav.max_expansions 约束并进计数器。
+                int flooded = 0;
+                bool enclosed = goalOk && GoalEnclosedInBox(ref w, ref sc, tSlot, cls, tc0, size, minCx, maxCx, minCy, maxCy, NavConst.EnclosureFloodBudget, out flooded);
+                expanded += flooded;
+                floodedTotal += flooded;
+                if (enclosed)
                 {
                     break;
                 }
@@ -1058,6 +1067,7 @@ namespace BinGames.Sim.Nav
             res.Expanded = expanded;
             NavCounters cn = w.Counters[0];
             cn.Expanded += expanded;
+            cn.FloodVisited += floodedTotal;
             w.Counters[0] = cn;
 
             int endId;
@@ -1422,7 +1432,12 @@ namespace BinGames.Sim.Nav
                 int2 p = pts[i];
                 if (startInside && i == from)
                 {
-                    // 起点在障碍里（机器站在建筑占地里）：第一段是“走出来”，不检查。
+                    // 起点在障碍里（机器站在建筑占地里 / 新障碍刚好放在脚下）：第一段只豁免“走出来”的那几格——
+                    // FG3-LOG-09（DEBT-FG0ARCH06-11 ②）：从脚下第一个可走格起照常检查，同一段前方的新障碍这次就触发重规划，不再等撞上后靠卡住检测。
+                    if (!LineClearAfterExit(ref g, prev, p, cls))
+                    {
+                        return false;
+                    }
                     prev = p;
                     continue;
                 }
@@ -1431,6 +1446,60 @@ namespace BinGames.Sim.Nav
                     return false;
                 }
                 prev = p;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// FG3-LOG-09（DEBT-FG0ARCH06-11 ②）：与 <see cref="LineClear"/> 同一走法，但起点所在的障碍（及紧接着的障碍格）不算挡——
+        /// 一旦走到第一个可走格，之后的每一格（含穿格角的两侧）都要能走。一直没走出障碍就到了终点：按“走出来”处理（下一段从终点起照常检查）。
+        /// </summary>
+        public static bool LineClearAfterExit(ref NavGrid g, int2 a, int2 b, int cls)
+        {
+            int dx = math.abs(b.x - a.x);
+            int dy = math.abs(b.y - a.y);
+            int sx = b.x > a.x ? 1 : -1;
+            int sy = b.y > a.y ? 1 : -1;
+            int x = a.x;
+            int y = a.y;
+            int n = 1 + dx + dy;
+            int err = dx - dy;
+            dx *= 2;
+            dy *= 2;
+            bool outside = false;
+            for (; n > 0; n--)
+            {
+                bool passable = NavGridOps.Passable(ref g, x, y, cls);
+                if (outside && !passable)
+                {
+                    return false;
+                }
+                outside |= passable;
+                if (n == 1)
+                {
+                    break;
+                }
+                if (err > 0)
+                {
+                    x += sx;
+                    err -= dy;
+                }
+                else if (err < 0)
+                {
+                    y += sy;
+                    err += dx;
+                }
+                else
+                {
+                    if (outside && (!NavGridOps.Passable(ref g, x + sx, y, cls) || !NavGridOps.Passable(ref g, x, y + sy, cls)))
+                    {
+                        return false;
+                    }
+                    x += sx;
+                    y += sy;
+                    err += dx - dy;
+                    n--;
+                }
             }
             return true;
         }

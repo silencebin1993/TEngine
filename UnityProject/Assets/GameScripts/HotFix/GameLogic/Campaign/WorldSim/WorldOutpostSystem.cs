@@ -501,7 +501,7 @@ namespace GameLogic.Campaign.WorldSim
         }
 
         /// <summary>寻路服务交回巡逻路线：去程 = 据点格 + 路点；来回长度按千分之一格取整；进度从这一步起为 0。</summary>
-        public static bool DeliverRoute(CampaignState state, in NavResult r, NavKernel kernel, long tick)
+        public static bool DeliverRoute(CampaignState state, in NavResult r, long tick)
         {
             PatrolRecord p = null;
             foreach (PatrolRecord q in Patrols(state))
@@ -525,7 +525,7 @@ namespace GameLogic.Campaign.WorldSim
                 ys[0] = r.Request.Start.y;
                 for (int k = 0; k < r.PointCount; k++)
                 {
-                    int2 pt = kernel.ResultPoint(r.PointStart + k);
+                    int2 pt = NavService.ResultPoint(r.PointStart + k);
                     xs[k + 1] = pt.x;
                     ys[k + 1] = pt.y;
                 }
@@ -569,7 +569,7 @@ namespace GameLogic.Campaign.WorldSim
         }
 
         /// <summary>地形变化后：路线被新障碍截断的巡逻重新要路线（进度归零，回到据点重新出发——与是否休眠无关，两边一致）。</summary>
-        public static int InvalidateRoutes(CampaignState state, NavKernel kernel)
+        public static int InvalidateRoutes(CampaignState state)
         {
             int n = 0;
             var pts = new List<int2>(32);
@@ -584,7 +584,7 @@ namespace GameLogic.Campaign.WorldSim
                 {
                     pts.Add(new int2(p.RouteX[k], p.RouteY[k]));
                 }
-                if (!kernel.RouteClear(new int2(p.RouteX[0], p.RouteY[0]), pts, 0, NavConst.ClassHostile))
+                if (!NavService.RouteClear(new int2(p.RouteX[0], p.RouteY[0]), pts, 0, NavConst.ClassHostile))
                 {
                     p.RouteState = RouteNeed;
                     p.ProgressMilli = 0;

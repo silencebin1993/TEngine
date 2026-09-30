@@ -943,7 +943,7 @@ namespace GameLogic.EditorTools
             return false;
         }
 
-        private static GridCell Along(GridCell c, int dir, int i) => new GridCell(c.X + BeltDirs.Dx(dir) * i, c.Y + BeltDirs.Dy(dir) * i);
+        internal static GridCell Along(GridCell c, int dir, int i) => new GridCell(c.X + BeltDirs.Dx(dir) * i, c.Y + BeltDirs.Dy(dir) * i);
 
         /// <summary>测试捷径（经正式入口 PipeNetworkService.TryPlace，含格网与流体规则）：水源上一台泵 + 朝 dir 的 len 格管线 + 末端储罐。</summary>
         private static bool LayWaterLine(CampaignState s, GridCell water, int dir, int len, int tier, out string failure)
@@ -1330,7 +1330,14 @@ namespace GameLogic.EditorTools
             return k == null ? "无内核" : $"{k.Hash():X16}|{k.CellCount}|{k.StepIndex}|{k.TotalDeliveredMl}|{k.TotalPumpedMl}|冷潮{s.Pipes?.ColdSnap}";
         }
 
-        private static bool LayScenario(CampaignState s, out GridCell water, out int dir)
+        /// <summary>FG3-LOG-09：别的自检复用管线场景前先取流体编号（本自检的 Run 里也是这样初始化的）。</summary>
+        internal static void PrepareFluidIds()
+        {
+            W = PipeNetworkService.FluidId("water");
+            C = PipeNetworkService.FluidId("crude");
+        }
+
+        internal static bool LayScenario(CampaignState s, out GridCell water, out int dir)
         {
             if (!FindWaterSite(s, 9, out water, out dir) || !LayWaterLine(s, water, dir, 6, 0, out _))
             {

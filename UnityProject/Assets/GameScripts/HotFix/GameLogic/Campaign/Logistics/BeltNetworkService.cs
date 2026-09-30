@@ -184,6 +184,11 @@ namespace GameLogic.Campaign.Logistics
                 else
                 {
                     RestoreSinkNames(saved);
+                    if (_kernel.StatsDroppedOnLoad > 0)
+                    {
+                        // 统计窗口只影响“实测”读数：读不了就从零累计（与格式 4 之前一样），物品与状态照常恢复，不打扰玩家。
+                        Log.Warning($"[BeltNetworkService] 传送带存档有 {_kernel.StatsDroppedOnLoad} 段统计窗口读不了，已从零累计");
+                    }
                     if (_kernel.CorruptChunksDropped > 0 || err != null)
                     {
                         LastLoadError = DescribeLoadIssues(err);
@@ -351,6 +356,7 @@ namespace GameLogic.Campaign.Logistics
             b.Inserted = snap.Inserted;
             b.Delivered = snap.Delivered;
             b.Removed = snap.Removed;
+            b.CompletedBuckets = snap.CompletedBuckets;
             b.CellCount = snap.TotalCells;
             b.ItemCount = _kernel.ItemCount;
             var records = new BeltNetworkRecord[snap.Networks.Count];
@@ -384,6 +390,7 @@ namespace GameLogic.Campaign.Logistics
                 Inserted = b.Inserted,
                 Delivered = b.Delivered,
                 Removed = b.Removed,
+                CompletedBuckets = b.CompletedBuckets,
                 Ports = FromBase64(b.Ports),
             };
             if (b.Networks != null)

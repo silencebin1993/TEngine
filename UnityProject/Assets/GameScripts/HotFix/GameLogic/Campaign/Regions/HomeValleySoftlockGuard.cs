@@ -68,6 +68,7 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             core.ConstructionState = BuildingConstructionState.Destroyed;
+            BuildingVisualFeed.Mark(core);
         }
 
         private static void Evaluate(CampaignState state, Action<WorkOrderRecord> beginMovement)

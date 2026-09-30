@@ -846,15 +846,22 @@ namespace GameLogic.EditorTools
             Expect(pr.Success && pr.Notices.Length == 0 && pr.State.PrimitiveChips.Length == plainChips && plainChips > 0,
                 $"正式内容下读档（{plainChips} 件开局基元）：没有通知，物品不变");
 
-            // 基元芯片以外的内容 ID（建筑类型等）本 Story 只保证不崩、不丢：记录原样保留，转换属于 DEBT-FG0SAVE01-07。
+            // 建筑类型已不在格网建筑表里（FG3-LOG-09 关闭 DEBT-FG0SAVE01-07 建筑类）：经正式恢复入口读档不失败，
+            // 这座建筑被拆掉并按实际投入退还废料、产生一条按类型的读档通知（表里没登记的类型另记 Error）。
             CampaignState unk = CampaignState.CreateNew("fgsave-unknown-building", "Standard", 4);
             unk.BuildingRecords = (unk.BuildingRecords ?? Array.Empty<BuildingRecord>())
-                .Concat(new[] { new BuildingRecord { BuildingId = "bld_selfcheck_unknown", BuildingTypeId = "building_removed_selfcheck", RegionId = unk.CurrentRegionId } })
+                .Concat(new[] { new BuildingRecord { BuildingId = "bld_selfcheck_unknown", BuildingTypeId = "building_removed_selfcheck", RegionId = unk.CurrentRegionId, ConstructionState = BuildingConstructionState.Operational, InvestedScrap = 7 } })
                 .ToArray();
+            int unkBefore = unk.Scrap + (unk.GroundItems ?? Array.Empty<GroundItemRecord>()).Where(g => g != null && g.ResourceType == CampaignEconomyLedger.ResourceScrap).Sum(g => g.Amount);
             CampaignSaveService.Save(slot, unk, SaveReason.Manual);
             RestoreResult ur = CampaignRestoreOrchestrator.Restore(slot);
-            Expect(ur.Success && ur.State.BuildingRecords.Any(b => b.BuildingId == "bld_selfcheck_unknown" && b.BuildingTypeId == "building_removed_selfcheck"),
-                "存档里有表中不存在的建筑类型：经正式恢复入口读档不失败，记录原样保留（不静默丢失）");
+            int unkAfter = ur.Success
+                ? ur.State.Scrap + (ur.State.GroundItems ?? Array.Empty<GroundItemRecord>()).Where(g => g != null && g.ResourceType == CampaignEconomyLedger.ResourceScrap).Sum(g => g.Amount)
+                : -1;
+            SaveNoticeRecord un = ur.Notices?.FirstOrDefault(n => n.TextKey == "save.notice.building_removed");
+            Expect(ur.Success && !ur.State.BuildingRecords.Any(b => b.BuildingId == "bld_selfcheck_unknown")
+                   && un != null && un.Args.Length == 3 && un.Args[1] == "1" && un.Args[2] == "7" && unkAfter == unkBefore + 7,
+                $"存档里有表中不存在的建筑类型：经正式恢复入口读档不失败，建筑拆掉、按实际投入退还 7 废料（{unkBefore}→{unkAfter}）、产生按类型的读档通知");
             MachineRegistry.ResetForNewCampaign();
             Clear(slot);
         }

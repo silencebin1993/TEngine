@@ -79,6 +79,9 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
+        /// <summary>FG3-LOG-09：当前有未结束施工单的现场 ID（家园画面对账每帧只重画这些虚影；foreach 不分配）。</summary>
+        public Dictionary<string, WorkOrderRecord>.KeyCollection ActiveSiteIds => _byTarget.Keys;
+
         private bool TryActive(string targetId, out WorkOrderRecord o) =>
             _byTarget.TryGetValue(targetId, out o) && HomeValleyWorkOrders.IsActive(o);
 

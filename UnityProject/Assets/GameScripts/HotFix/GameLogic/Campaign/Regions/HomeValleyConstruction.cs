@@ -109,15 +109,26 @@ namespace GameLogic.Campaign.Regions
             return null;
         }
 
-        private static BuildingRecord FindSiteBuilding(CampaignState state, string targetId)
+        private static BuildingRecord FindSiteBuilding(CampaignState state, string targetId) => FindBuildingFast(state, targetId);
+
+        /// <summary>
+        /// FG3-LOG-09（FGR-SYS-042 热更层与建筑数无关）：施工、派工、赶路每步都要按 ID 找建筑。先查格网服务的建筑 ID 索引（O(1)），
+        /// 索引没绑到这份战役、或家园里没有这个 ID 时才线性查（现场刚被拆掉的那一步、还没绑定的战役）。
+        /// 改前每步按建筑数线性查：800 座建筑时 28 座虚影同时施工，每步平均 2.2 ms、最慢 6.4 ms（117 座时 0.55 ms）。
+        /// </summary>
+        internal static BuildingRecord FindBuildingFast(CampaignState state, string buildingId)
         {
-            if (state?.BuildingRecords == null || targetId == null)
+            if (state?.BuildingRecords == null || buildingId == null)
             {
                 return null;
             }
+            if (HomeGridService.TryFindIndexed(state, buildingId, out BuildingRecord hit) && hit != null)
+            {
+                return hit;
+            }
             foreach (BuildingRecord b in state.BuildingRecords)
             {
-                if (b != null && b.BuildingId == targetId)
+                if (b != null && b.BuildingId == buildingId)
                 {
                     return b;
                 }
@@ -232,29 +243,43 @@ namespace GameLogic.Campaign.Regions
         {
             Vector2 best = HomeValleyLayout.Core.Position;
             float bestD = float.MaxValue;
-            if (state?.BuildingRecords != null)
+            // FG3-LOG-09：取料点只在核心与仓库里挑——索引已绑定时只看这几座（按记录数组顺序，结果与线性查完全相同），否则线性查。
+            IReadOnlyList<BuildingRecord> indexed = state != null ? HomeGridService.IndexedStorageCandidates(state) : null;
+            if (indexed != null)
+            {
+                for (int i = 0; i < indexed.Count; i++)
+                {
+                    ConsiderStorage(indexed[i], near, ref best, ref bestD);
+                }
+            }
+            else if (state?.BuildingRecords != null)
             {
                 foreach (BuildingRecord b in state.BuildingRecords)
                 {
-                    if (b == null || b.RegionId != HomeValleyLayout.RegionId)
-                    {
-                        continue;
-                    }
-                    bool storage = b.BuildingTypeId == HomeValleyLayout.BuildingTypeCore
-                                   || (b.BuildingTypeId == HomeValleyLayout.BuildingTypeWarehouse && b.ConstructionState == BuildingConstructionState.Operational);
-                    if (!storage)
-                    {
-                        continue;
-                    }
-                    float d = (b.Position - near).sqrMagnitude;
-                    if (d < bestD || (Mathf.Approximately(d, bestD) && string.CompareOrdinal(b.BuildingTypeId, HomeValleyLayout.BuildingTypeCore) == 0))
-                    {
-                        bestD = d;
-                        best = b.Position;
-                    }
+                    ConsiderStorage(b, near, ref best, ref bestD);
                 }
             }
             return best;
+        }
+
+        private static void ConsiderStorage(BuildingRecord b, Vector2 near, ref Vector2 best, ref float bestD)
+        {
+            if (b == null || b.RegionId != HomeValleyLayout.RegionId)
+            {
+                return;
+            }
+            bool storage = b.BuildingTypeId == HomeValleyLayout.BuildingTypeCore
+                           || (b.BuildingTypeId == HomeValleyLayout.BuildingTypeWarehouse && b.ConstructionState == BuildingConstructionState.Operational);
+            if (!storage)
+            {
+                return;
+            }
+            float d = (b.Position - near).sqrMagnitude;
+            if (d < bestD || (Mathf.Approximately(d, bestD) && string.CompareOrdinal(b.BuildingTypeId, HomeValleyLayout.BuildingTypeCore) == 0))
+            {
+                bestD = d;
+                best = b.Position;
+            }
         }
 
         // ── 取料与卸料（由施工单的到达回调调用）──────────────────────────────────────
@@ -321,6 +346,7 @@ namespace GameLogic.Campaign.Regions
                 if (b.ConstructionState == BuildingConstructionState.Planned)
                 {
                     b.ConstructionState = BuildingConstructionState.Building;
+                    BuildingVisualFeed.Mark(b);
                 }
             }
             Revision++;
@@ -919,6 +945,7 @@ namespace GameLogic.Campaign.Regions
             }
             b.ConstructionDelivered -= consumed;
             b.ConstructionState = b.ConstructionDelivered > 0 ? BuildingConstructionState.Building : BuildingConstructionState.Planned;
+            BuildingVisualFeed.Mark(b);
             LastDestroyedDropped = consumed;
             LastDestroyedKept = b.ConstructionDelivered;
             if (order != null)

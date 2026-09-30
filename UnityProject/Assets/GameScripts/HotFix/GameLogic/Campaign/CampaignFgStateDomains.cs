@@ -253,6 +253,9 @@ namespace GameLogic.Campaign
         public long Inserted;
         public long Delivered;
         public long Removed;
+        /// <summary>FG3-LOG-09（内核格式 4，DEBT-FG0ARCH02-10）：统计窗口已走满的桶数。窗口本身在各网络块 / 端口块的统计尾段里；
+        /// 旧存档（格式 3 及更早）为 0，读档后窗口从头累计。</summary>
+        public long CompletedBuckets;
         /// <summary>存档卡与自检用的摘要（真相在 <see cref="Networks"/>）。</summary>
         public int CellCount;
         public int ItemCount;

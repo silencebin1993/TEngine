@@ -149,6 +149,10 @@ namespace GameLogic.Campaign.Regions
                     : use == PowerUse.Brownout ? BuildingPowerState.Brownout
                     : BuildingPowerState.Unpowered;
                 building.PowerState = now;
+                if (before != now)
+                {
+                    BuildingVisualFeed.Mark(building); // FG3-LOG-09：画面只重画供电状态变了的建筑
+                }
                 if (now == BuildingPowerState.Powered)
                 {
                     if (building.BuildingTypeId == HomeValleyLayout.BuildingTypeSignalTower)
@@ -390,10 +394,12 @@ namespace GameLogic.Campaign.Regions
             if (building.ConstructionState == BuildingConstructionState.Operational)
             {
                 building.ConstructionState = BuildingConstructionState.Disabled;
+                BuildingVisualFeed.Mark(building);
             }
             else if (building.ConstructionState == BuildingConstructionState.Disabled)
             {
                 building.ConstructionState = BuildingConstructionState.Operational;
+                BuildingVisualFeed.Mark(building);
             }
             else
             {

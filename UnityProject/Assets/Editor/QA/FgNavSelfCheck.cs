@@ -118,6 +118,7 @@ namespace GameLogic.EditorTools
                 Step(CheckIncrementalAndRequeue);
                 Step(CheckDetourAndRecheck);
                 Step(CheckIslandUnreachable);
+                Step(CheckRouteClearAfterExit);
                 Step(CheckPendingSnapshot);
                 Step(CheckCombatFollow);
                 Step(CheckCombatRouteCutAndSnapshot);
@@ -754,13 +755,43 @@ namespace GameLogic.EditorTools
             };
             using NavKernel k = Synth(16, 3, lake, cfg);
             var pts = new List<int2>();
+            long flood0 = k.Counters.FloodVisited;
+            long exp0 = k.Counters.Expanded;
             NavResult island = k.FindNow(Req(40, 48, 128, 48), pts, false, out _);
+            long flooded = k.Counters.FloodVisited - flood0;
+            long expanded = k.Counters.Expanded - exp0;
             // 对照：同一片陆地上绕过湖的远点照样能到（封闭判定没有误伤可达的目标）。
             NavResult shore = k.FindNow(Req(40, 48, 300, 48), pts, false, out _);
             bool shoreClear = shore.Status == NavStatus.Ok && k.RouteClear(new int2(40, 48), pts, 0, NavConst.ClassPlayer) && pts.Last().Equals(new int2(300, 48));
             Expect(island.Status == NavStatus.Failed && island.Reason == NavFailReason.Unreachable && island.Expanded < cfg.MaxExpansions && shoreClear,
                 $"湖心岛：目标在水域围住的小岛上 → 如实报“被完全阻断”（{island.Reason}，展开 {island.Expanded} < 上限 {cfg.MaxExpansions}，没有因为重搜累计被报成“超出寻路范围”）；" +
                 $"同一片陆地上绕过湖的 260 格外的点照样能到（{shore.Status}，每段不穿障碍）");
+            // FG3-LOG-09（DEBT-FG0ARCH06-11 ①）：封闭判定的泛洪计入展开数与计数器（受 nav.max_expansions 总量约束，性能基线看得到）。
+            Expect(flooded > 0 && island.Expanded >= flooded && expanded == island.Expanded,
+                $"湖心岛：封闭判定泛洪访问 {flooded} 个抽象节点，已计入这条请求的展开数 {island.Expanded}（计数器 Expanded 增加 {expanded}、FloodVisited 增加 {flooded}；DEBT-FG0ARCH06-11 ①）");
+        }
+
+        /// <summary>
+        /// FG3-LOG-09（DEBT-FG0ARCH06-11 ②）：单位恰好站在新障碍里时，路线检查只豁免“走出来”的那几格，从脚下第一个可走格起照常检查——
+        /// 同一段前方的新障碍这次就判“被挡”触发重规划（修复前整段跳过，要等撞上后靠卡住检测）。
+        /// </summary>
+        private static void CheckRouteClearAfterExit()
+        {
+            // 起点 (10,10) 在一块 3×3 的障碍里（新建筑刚好压在脚下），路线直线向东到 (40,10)。
+            Func<int, int, bool> start = (x, y) => Math.Abs(x - 10) <= 1 && Math.Abs(y - 10) <= 1;
+            using NavKernel clear = Synth(2, 2, start);
+            using NavKernel ahead = Synth(2, 2, (x, y) => start(x, y) || (x == 25 && y == 10));
+            using NavKernel onlyInside = Synth(2, 2, (x, y) => start(x, y) || (x == 12 && y == 10));
+            var pts = new List<int2> { new int2(40, 10) };
+            bool a = clear.RouteClear(new int2(10, 10), pts, 0, NavConst.ClassPlayer);
+            bool b = ahead.RouteClear(new int2(10, 10), pts, 0, NavConst.ClassPlayer);
+            bool c = onlyInside.RouteClear(new int2(10, 10), pts, 0, NavConst.ClassPlayer);
+            // 第二段照旧全程检查：起点不在障碍里时，第一段前方的障碍一样判挡。
+            using NavKernel plain = Synth(2, 2, (x, y) => x == 25 && y == 10);
+            bool d = plain.RouteClear(new int2(10, 10), pts, 0, NavConst.ClassPlayer);
+            Expect(a && !b && c && !d,
+                $"路线检查从脚下第一个可走格起查（DEBT-FG0ARCH06-11 ②）：起点在障碍里、前方同一段没有障碍 → 畅通 {a}；同一段前方 15 格有新障碍 → 被挡 {!b}（修复前整段跳过判畅通）；" +
+                $"障碍只是起点所在那块的延伸（还没走出来）→ 畅通 {c}；起点不在障碍里时前方障碍照样被挡 {!d}");
         }
 
         private static void CheckPendingSnapshot()

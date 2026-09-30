@@ -529,10 +529,17 @@ namespace BinGames.Sim.Logistics
             queue.Dispose();
             ringOf.Dispose();
 
+            // FG3-LOG-09：网络汇总的件数 / 堵塞格数在重建时就按当前每格件数与上一步的堵塞标记算好（此前要等下一步末尾才有，
+            // 改线后或读档后的这一小段悬停 / 面板显示 0）。之后每步末尾照常重算。
             for (int i = 0; i < m; i++)
             {
                 BeltNetAgg a = Nets[Net[i]];
                 a.Cells++;
+                a.Items += Count[i];
+                if (Block[i] != 0)
+                {
+                    a.Blocked++;
+                }
                 Nets[Net[i]] = a;
             }
 

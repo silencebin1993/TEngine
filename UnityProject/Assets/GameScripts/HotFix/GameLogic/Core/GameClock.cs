@@ -60,6 +60,12 @@ namespace GameLogic.Core
         /// （60 Hz 模拟在任意帧率、任意倍速下画面连续）；只影响画面，不影响模拟。</summary>
         public static float StepAlpha => (float)Math.Min(1.0, Math.Max(0.0, _accumulator * StepHz));
         public static int LastFrameSteps { get; private set; }
+
+        /// <summary>
+        /// FG3-LOG-09（DEBT-FG0ARCH01-09）：本帧实际模拟的游戏时间（= 本帧执行的模拟步数 × 步长；暂停为 0，步内触发暂停后按实际执行的步数）。
+        /// 接入 / 交互的计时（交互读条、失联宽限）按它推进而不是按帧时间：同一输入在同一批模拟步里按住，结果与帧率无关（按步量化，1 步 = 1/StepHz 游戏秒）。
+        /// </summary>
+        public static float FrameStepSeconds => LastFrameSteps / (float)StepHz;
         /// <summary>因单帧步数上限而丢弃的步数累计（世界短暂变慢，不跳步；性能证据用）。</summary>
         public static long DroppedSteps { get; private set; }
         /// <summary>暂停 / 倍速变化计数（HUD 与自检用）。</summary>
