@@ -135,6 +135,17 @@ namespace GameLogic.Campaign
         /// <summary>FG3-LOG-03（FGR-LOG-027）：这份规划是传送带被摧毁后留下的虚影（保留原朝向与等级）。
         /// 在玩家确认重建之前没有施工单、机器不会去建（自动重建规则在 FG6-DEF-03）；拆除模式点它 = 移除虚影。</summary>
         public bool Destroyed;
+        /// <summary>FG3-LOG-04（FGR-LOG-022 / 023）：这份规划放的是什么——0 = 传送带（旧存档没有这个字段也是 0）；1 = 分流器；2 = 合流器（各一格）；
+        /// 3 = 地下传送带（Xs / Ys = [入口, 出口]，两端一起建成、一起取消；<see cref="ScrapPerCell"/> 是每端造价）。值同 BinGames.Sim.Logistics.BeltNodeKind。</summary>
+        public int NodeKind;
+        /// <summary>FG3-LOG-04：分流器 / 合流器的设置（被摧毁留下的虚影保留原设置，重建时按它恢复；新放的 = 默认 1:1、不设优先口、全部物品）。
+        /// 比例 0 按 1 处理；过滤同内核（0 = 全部物品，65535 = 关闭，其余 = 只放这种物品）；优先口 0 不设 / 1 左 / 2 右。</summary>
+        public int RatioL;
+        public int RatioR;
+        public int PriorityOut;
+        public int FilterL;
+        public int FilterR;
+        public int PriorityIn;
     }
 
     /// <summary>一块已探索的圆形区域（格网坐标）。</summary>
@@ -182,6 +193,23 @@ namespace GameLogic.Campaign
         /// <summary>FG3-LOG-03（FGR-LOG-026）：清带送进仓库 / 玩家确认丢弃的累计件数（统计与守恒核对）。</summary>
         public long ClearedToStorage;
         public long Discarded;
+        /// <summary>FG3-LOG-04（卡片“过滤器预设”）：玩家在分流器节点面板里“存为自定义预设”的设置，按保存先后；最多 logistics.splitter.custom_presets_max 个。
+        /// 跟着存档走（每局能放的物品不同）；唯一写入口 <see cref="Logistics.BeltNodeService"/>。旧存档没有这个字段时补空。</summary>
+        public BeltFilterPresetRecord[] FilterPresets = Array.Empty<BeltFilterPresetRecord>();
+        /// <summary>下一个自定义预设的编号（单调递增，“自定义 N”的 N；删掉的编号不复用）。</summary>
+        public int NextFilterPresetSerial = 1;
+    }
+
+    /// <summary>FG3-LOG-04：一个自定义过滤器预设（分流器设置：比例、优先输出口 0 / 1 左 / 2 右、左右口过滤 0 全部 / 65535 关闭 / 物品编号）。</summary>
+    [Serializable]
+    public sealed class BeltFilterPresetRecord
+    {
+        public int Serial;
+        public int RatioL = 1;
+        public int RatioR = 1;
+        public int Priority;
+        public int FilterL;
+        public int FilterR;
     }
 
     /// <summary>FG3-LOG-03：一个建筑端口的绑定。</summary>
@@ -720,6 +748,11 @@ namespace GameLogic.Campaign
             s.Belts.SinkNames ??= Array.Empty<BeltSinkNameRecord>();
             s.Belts.PortBindings ??= Array.Empty<BeltPortBindingRecord>();
             s.Belts.Damage ??= Array.Empty<BeltDamageRecord>();
+            s.Belts.FilterPresets ??= Array.Empty<BeltFilterPresetRecord>();
+            if (s.Belts.NextFilterPresetSerial < 1)
+            {
+                s.Belts.NextFilterPresetSerial = 1;
+            }
             s.Combat ??= new CombatState();
             s.Combat.Sites ??= Array.Empty<CombatSiteRecord>();
             foreach (CombatSiteRecord r in s.Combat.Sites)

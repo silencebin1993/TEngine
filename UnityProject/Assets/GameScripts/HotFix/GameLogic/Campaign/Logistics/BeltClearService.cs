@@ -11,8 +11,10 @@ namespace GameLogic.Campaign.Logistics
     /// <summary>一次清带的规划（选中哪些格、上面有什么、仓库放得下多少）。</summary>
     public sealed class BeltClearPlan
     {
-        /// <summary>选中的传送带格（只含已建成的格）。</summary>
+        /// <summary>选中的传送带格（只含已建成的格；FG3-LOG-04：含选中范围下面的地下段，地下的物品一并清走）。</summary>
         public readonly List<int2> Cells = new List<int2>(64);
+        /// <summary>FG3-LOG-04：其中地面上的格数（界面“N 格传送带”按它写，不把看不见的地下段算进去）。</summary>
+        public int SurfaceCells;
         /// <summary>这些格上的物品，按种类。</summary>
         public readonly SortedDictionary<ushort, int> Counts = new SortedDictionary<ushort, int>();
         /// <summary>放不下（仓库满 / 家园仓库还存不了这种物品）的部分，按种类。</summary>
@@ -41,6 +43,7 @@ namespace GameLogic.Campaign.Logistics
             OverflowItems = 0;
             FreeSpace = 0;
             WholeNetwork = false;
+            SurfaceCells = 0;
         }
     }
 
@@ -79,7 +82,7 @@ namespace GameLogic.Campaign.Logistics
             {
                 return plan;
             }
-            k.CollectNetworkCells(net, plan.Cells);
+            k.CollectNetworkCells(net, plan.Cells, out plan.SurfaceCells);
             Fill(state, plan);
             return plan;
         }
@@ -101,7 +104,7 @@ namespace GameLogic.Campaign.Logistics
                 return plan;
             }
             // 框里的格由内核收集（逐格循环在 AOT，热更层不逐格）。
-            BeltNetworkService.Kernel.CollectCellsInBox(minX, minY, maxX, maxY, plan.Cells);
+            BeltNetworkService.Kernel.CollectCellsInBox(minX, minY, maxX, maxY, plan.Cells, out plan.SurfaceCells);
             Fill(state, plan);
             return plan;
         }
@@ -157,8 +160,10 @@ namespace GameLogic.Campaign.Logistics
             }
             // 重新数（保留选中的格）。
             var cells = new List<int2>(plan.Cells);
+            int surface = plan.SurfaceCells;
             plan.Reset();
             plan.Cells.AddRange(cells);
+            plan.SurfaceCells = surface;
             Fill(state, plan);
             if (plan.Items == 0)
             {
@@ -187,7 +192,7 @@ namespace GameLogic.Campaign.Logistics
             state.Scrap += stored; // 目前只有废料可存（BeltItems.IsStorable）：送进家园仓库（核心缓存与仓库共用库存）。
             state.Belts.ClearedToStorage += stored;
             state.Belts.Discarded += discarded;
-            LastClearedCells = plan.Cells.Count;
+            LastClearedCells = plan.SurfaceCells;
             LastStored = stored;
             LastDiscarded = discarded;
             GuidanceHooks.Raise(GuidanceHooks.LogisticsFirstClear);

@@ -103,6 +103,16 @@ namespace GameLogic.Core
         public const string LogisticsFirstClear = "logistics.belt.first_cleared";
         /// <summary>FG3-LOG-03：第一次有传送带被摧毁（FGR-LOG-027：物品落地、原位置留虚影、在施工队列里重建）。</summary>
         public const string LogisticsFirstDestroyed = "logistics.belt.first_destroyed";
+        /// <summary>FG3-LOG-04：第一次建成分流器（引导内容：一进两出、比例 / 优先口 / 过滤在哪设）。</summary>
+        public const string LogisticsFirstSplitter = "logistics.splitter.first_placed";
+        /// <summary>FG3-LOG-04：第一次建成合流器。</summary>
+        public const string LogisticsFirstMerger = "logistics.merger.first_placed";
+        /// <summary>FG3-LOG-04：第一次建成地下传送带（引导内容：从入口拖到出口、跨度按等级、同方向不能重叠）。</summary>
+        public const string LogisticsFirstUnderground = "logistics.underground.first_placed";
+        /// <summary>FG3-LOG-04：第一次有分流器停下（能出的口都满了 / 没有口收，FG03 第 5 节“分流器两个输出口都堵”）。</summary>
+        public const string LogisticsSplitterFirstBlocked = "logistics.splitter.first_blocked";
+        /// <summary>FG3-LOG-04：第一次打开节点面板（分流器 / 合流器 / 地下传送带的设置）。</summary>
+        public const string LogisticsNodePanelFirstOpen = "logistics.node.first_panel_open";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -126,6 +136,7 @@ namespace GameLogic.Core
             BuildFirstRelocate, BuildFirstBatchDemolish, BuildFirstHotbar, BuildFirstDrag,
             BuildFirstGhost, BuildFirstWaitingMaterials, BuildFirstNoLabor, BuildQueueFirstOpen, BuildFirstPrioritize,
             LogisticsFirstPortConnected, LogisticsPortPanelFirstOpen, LogisticsFirstClear, LogisticsFirstDestroyed,
+            LogisticsFirstSplitter, LogisticsFirstMerger, LogisticsFirstUnderground, LogisticsSplitterFirstBlocked, LogisticsNodePanelFirstOpen,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

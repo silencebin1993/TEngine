@@ -135,7 +135,11 @@ namespace GameLogic.Campaign.Regions
                     tile.transform.position = new Vector3(p.Xs[i], 0.06f, p.Ys[i]);
                     tile.transform.rotation = Quaternion.Euler(0f, p.Dirs[i] * 90f, 0f);
                     // FG3-LOG-03：被摧毁的虚影更窄更短（“断条”），红色调；普通规划是淡蓝长条。
-                    tile.transform.localScale = p.Destroyed ? new Vector3(0.3f, 0.08f, 0.6f) : new Vector3(0.55f, 0.08f, 0.9f);
+                    // FG3-LOG-04：分流器 / 合流器的虚影是方块，地下传送带两端是横着的短条（形状区分，不只靠颜色；占位 B22）。
+                    tile.transform.localScale = p.Destroyed ? new Vector3(0.3f, 0.08f, 0.6f)
+                        : p.NodeKind == 1 || p.NodeKind == 2 ? new Vector3(0.85f, 0.08f, 0.85f)
+                        : p.NodeKind == 3 ? new Vector3(0.9f, 0.08f, 0.35f)
+                        : new Vector3(0.55f, 0.08f, 0.9f);
                     tile.GetComponent<Renderer>().sharedMaterial = p.Destroyed ? _destroyedMaterial : _beltMaterial;
                     if (p.Destroyed)
                     {
@@ -247,7 +251,9 @@ namespace GameLogic.Campaign.Regions
             {
                 return null;
             }
-            return new TooltipContent { Title = title, Body = body, Shortcut = GameActionId.ClearBeltMode, CodexEntryId = "codex.logistics.belt" };
+            // FG3-LOG-04：分流器 / 合流器 / 地下传送带的悬停链接到它们自己的图鉴条目。
+            bool node = BeltNetworkService.TryGetPiece(_hoverCell, out BinGames.Sim.Logistics.BeltNodeKind kind, out _) && kind != BinGames.Sim.Logistics.BeltNodeKind.Belt;
+            return new TooltipContent { Title = title, Body = body, Shortcut = GameActionId.ClearBeltMode, CodexEntryId = node ? "codex.logistics.splitter" : "codex.logistics.belt" };
         }
 
         /// <summary>悬停提示当前是否挂在已建成的传送带上（自检读）。</summary>

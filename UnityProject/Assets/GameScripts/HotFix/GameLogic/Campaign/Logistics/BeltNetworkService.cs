@@ -44,6 +44,9 @@ namespace GameLogic.Campaign.Logistics
         /// <summary>传送带存档来自不认识的格式版本、原数据正原样保留：这局不能改传送带（改了也存不进去）。</summary>
         public static BeltOpResult SavePreserved => new BeltOpResult(false, BeltResult.InvalidArgument, null, "logistics.reason.save_preserved", null);
 
+        /// <summary>FG3-LOG-04：热更层规则拒绝（例如地下传送带跨度超限），给文本键与参数。</summary>
+        public static BeltOpResult Reason(BeltResult code, string key, params string[] args) => new BeltOpResult(false, code, null, key, args);
+
         /// <summary>当前语言的原因文本（成功时为空串）。</summary>
         public string Describe()
         {
@@ -79,6 +82,7 @@ namespace GameLogic.Campaign.Logistics
         private static BeltRenderer.Settings _renderSettings;
         private static bool _preserveSaved;
         private static bool _blockedHookChecked;
+        private static bool _splitterBlockedHookChecked;
         private static long _lastBeltTick;
         private static readonly List<int3> CellScratch = new List<int3>(256);
         private static readonly Dictionary<int, string> SinkOwnerNameKeys = new Dictionary<int, string>();
@@ -160,6 +164,7 @@ namespace GameLogic.Campaign.Logistics
             _renderSettings = ReadRenderSettings();
             _preserveSaved = false;
             _blockedHookChecked = false;
+            _splitterBlockedHookChecked = false;
             _lastBeltTick = GameClock.Ticks;
             LastLoadError = null;
             KernelStepsThisSession = 0;
@@ -320,6 +325,12 @@ namespace GameLogic.Campaign.Logistics
                 _blockedHookChecked = true;
                 GuidanceHooks.Raise(GuidanceHooks.LogisticsFirstBlocked);
             }
+            // FG3-LOG-04（FG03 第 5 节“分流器两个输出口都堵”）：第一次有分流器停下时发引导钩子（O(1) 读内核计数；引导内容在 FG15-UX-04）。
+            if (!_splitterBlockedHookChecked && _kernel.BlockedSplitters > 0)
+            {
+                _splitterBlockedHookChecked = true;
+                GuidanceHooks.Raise(GuidanceHooks.LogisticsSplitterFirstBlocked);
+            }
         }
 
         // ── 存档 ─────────────────────────────────────────────────────────────────
@@ -462,16 +473,198 @@ namespace GameLogic.Campaign.Logistics
             {
                 return refuse;
             }
+            // FG3-LOG-04（FGR-LOG-023）：拆地下传送带的任意一端 = 拆掉整条——两端的格网与耐久记录一起清掉，地下的物品一并交还。
+            bool under = _kernel.TryGetUndergroundEnds(cell.X, cell.Y, out int2 ent, out int2 exi, out _);
             BeltResult r = _kernel.RemoveCell(cell.X, cell.Y, returned);
             if (r == BeltResult.Ok)
             {
-                HomeGridService.MapFor(state).SetBelt(cell, 0);
-                if (DamageLost.ContainsKey(cell))
+                if (under)
                 {
-                    SetDamage(state, cell, 0); // FG3-LOG-03：格没了，耐久记录一并删掉（同一格重铺是新带、满耐久）。
+                    ClearCellRecords(state, new GridCell(ent.x, ent.y));
+                    ClearCellRecords(state, new GridCell(exi.x, exi.y));
+                }
+                else
+                {
+                    ClearCellRecords(state, cell);
                 }
             }
             return BeltOpResult.Kernel(r);
+        }
+
+        private static void ClearCellRecords(CampaignState state, GridCell cell)
+        {
+            HomeGridService.MapFor(state).SetBelt(cell, 0);
+            if (DamageLost.ContainsKey(cell))
+            {
+                SetDamage(state, cell, 0); // FG3-LOG-03：格没了，耐久记录一并删掉（同一格重铺是新带、满耐久）。
+            }
+        }
+
+        // ── FG3-LOG-04：分流器 / 合流器 / 地下传送带（FGR-LOG-022 / 023）──────────────────────────────────
+
+        /// <summary>某一等级地下传送带的最大跨度（入口与出口之间隔着的格数；表 logistics.underground.span_t1～t3，初值 4 / 6 / 8）。</summary>
+        public static int UndergroundSpan(int tier) =>
+            Math.Max(1, GridContent.TuningInt(tier <= 0 ? "logistics.underground.span_t1" : tier == 1 ? "logistics.underground.span_t2" : "logistics.underground.span_t3"));
+
+        /// <summary>物流件的玩家名：传送带 T1～T3 / 分流器 / 合流器 / 地下传送带 T1～T3。</summary>
+        public static string PieceName(BeltNodeKind kind, int tier)
+        {
+            switch (kind)
+            {
+                case BeltNodeKind.Splitter:
+                    return GameText.Get("logistics.node.splitter");
+                case BeltNodeKind.Merger:
+                    return GameText.Get("logistics.node.merger");
+                case BeltNodeKind.UndergroundIn:
+                case BeltNodeKind.UndergroundOut:
+                case BeltNodeKind.Underground:
+                    return GameText.Get(tier <= 0 ? "logistics.underground.t1" : tier == 1 ? "logistics.underground.t2" : "logistics.underground.t3");
+                default:
+                    return TierName(tier);
+            }
+        }
+
+        /// <summary>(cell) 上已建成的物流件种类与等级（没有时返回 false）。O(1)。</summary>
+        public static bool TryGetPiece(GridCell cell, out BeltNodeKind kind, out int tier)
+        {
+            kind = BeltNodeKind.Belt;
+            tier = 0;
+            if (!IsRunning || !_kernel.TryGetKind(cell.X, cell.Y, out kind) || !_kernel.TryGetCellInfo(cell.X, cell.Y, out BeltCellInfo info))
+            {
+                return false;
+            }
+            tier = info.Tier;
+            return true;
+        }
+
+        /// <summary>
+        /// FG3-LOG-04（FGR-LOG-022）：放一个分流器 / 合流器：先过格网规则（与传送带同一套：迷雾、地形、污染、占用、开局锚点），再进内核；成功后写格网传送带层并发首次钩子。
+        /// 新放的分流器默认 1:1、不设优先口、两口放全部物品；合流器默认两路交替。
+        /// </summary>
+        public static BeltOpResult TryPlaceNode(CampaignState state, GridCell cell, BeltDir dir, int tier, BeltNodeKind kind)
+        {
+            if (!CanEdit(state, out BeltOpResult refuse))
+            {
+                return refuse;
+            }
+            if (kind != BeltNodeKind.Splitter && kind != BeltNodeKind.Merger)
+            {
+                return BeltOpResult.Kernel(BeltResult.InvalidArgument);
+            }
+            if (tier < 0 || tier >= BeltConst.TierCount)
+            {
+                return BeltOpResult.Kernel(BeltResult.InvalidTier);
+            }
+            if ((byte)dir > 3)
+            {
+                return BeltOpResult.Kernel(BeltResult.InvalidDirection);
+            }
+            GridPlacementResult check = HomeGridService.ValidateBeltCell(state, cell);
+            if (!check.Ok)
+            {
+                return BeltOpResult.FromGrid(check);
+            }
+            BeltResult r = _kernel.AddNode(cell.X, cell.Y, dir, tier, kind);
+            if (r != BeltResult.Ok)
+            {
+                return BeltOpResult.Kernel(r);
+            }
+            HomeGridService.MapFor(state).SetBelt(cell, (ushort)(tier + 1));
+            GuidanceHooks.Raise(kind == BeltNodeKind.Splitter ? GuidanceHooks.LogisticsFirstSplitter : GuidanceHooks.LogisticsFirstMerger);
+            return BeltOpResult.Success;
+        }
+
+        /// <summary>地下传送带跨度校验（热更层读表）：距离 = 出口与入口相差的格数，跨度 = 距离 − 1，不能超过这一等级的上限。</summary>
+        public static BeltOpResult CheckUndergroundSpan(int tier, int distance)
+        {
+            if (distance < 1)
+            {
+                return BeltOpResult.Reason(BeltResult.InvalidArgument, "grid.reason.under_same_cell");
+            }
+            int max = UndergroundSpan(tier);
+            if (distance - 1 > max)
+            {
+                return BeltOpResult.Reason(BeltResult.TooFar, "logistics.reason.span_too_far", PieceName(BeltNodeKind.UndergroundIn, tier),
+                    max.ToString(System.Globalization.CultureInfo.InvariantCulture), (distance - 1).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+            return BeltOpResult.Success;
+        }
+
+        /// <summary>
+        /// FG3-LOG-04（FGR-LOG-023）：放一条地下传送带：入口在 <paramref name="entrance"/>、朝 <paramref name="dir"/>，出口在 <paramref name="distance"/> 格外。
+        /// 跨度（距离 − 1）按等级读表校验；入口与出口两格都过格网规则（中间的格子地面上有什么都不管——地下段不占地面）；同方向的地下段不能重叠（内核校验）。
+        /// </summary>
+        public static BeltOpResult TryPlaceUnderground(CampaignState state, GridCell entrance, BeltDir dir, int tier, int distance)
+        {
+            if (!CanEdit(state, out BeltOpResult refuse))
+            {
+                return refuse;
+            }
+            if (tier < 0 || tier >= BeltConst.TierCount)
+            {
+                return BeltOpResult.Kernel(BeltResult.InvalidTier);
+            }
+            if ((byte)dir > 3)
+            {
+                return BeltOpResult.Kernel(BeltResult.InvalidDirection);
+            }
+            BeltOpResult span = CheckUndergroundSpan(tier, distance);
+            if (!span.Ok)
+            {
+                return span;
+            }
+            var exit = new GridCell(entrance.X + BeltDirs.Dx((int)dir) * distance, entrance.Y + BeltDirs.Dy((int)dir) * distance);
+            foreach (GridCell end in new[] { entrance, exit })
+            {
+                GridPlacementResult check = HomeGridService.ValidateBeltCell(state, end);
+                if (!check.Ok)
+                {
+                    return BeltOpResult.FromGrid(check);
+                }
+            }
+            BeltResult r = _kernel.AddUnderground(entrance.X, entrance.Y, dir, tier, distance);
+            if (r != BeltResult.Ok)
+            {
+                return BeltOpResult.Kernel(r);
+            }
+            HomeGridMap map = HomeGridService.MapFor(state);
+            map.SetBelt(entrance, (ushort)(tier + 1));
+            map.SetBelt(exit, (ushort)(tier + 1));
+            GuidanceHooks.Raise(GuidanceHooks.LogisticsFirstUnderground);
+            return BeltOpResult.Success;
+        }
+
+        /// <summary>FG3-LOG-04：原地转分流器 / 合流器（顺时针 90°；格里的物品不丢不增，合流器的优先口按左右跟着转）。</summary>
+        public static BeltOpResult TryRotateNode(CampaignState state, GridCell cell)
+        {
+            if (!CanEdit(state, out BeltOpResult refuse))
+            {
+                return refuse;
+            }
+            if (!_kernel.TryGetKind(cell.X, cell.Y, out BeltNodeKind kind) || !_kernel.TryGetCellInfo(cell.X, cell.Y, out BeltCellInfo info))
+            {
+                return BeltOpResult.Kernel(BeltResult.NotFound);
+            }
+            if (kind == BeltNodeKind.UndergroundIn || kind == BeltNodeKind.UndergroundOut)
+            {
+                return BeltOpResult.Reason(BeltResult.NotSupported, "logistics.reason.under_no_rotate");
+            }
+            return BeltOpResult.Kernel(_kernel.SetDirection(cell.X, cell.Y, (BeltDir)BeltDirs.Right((int)info.Dir)));
+        }
+
+        /// <summary>FG3-LOG-04（FGR-LOG-022）：设分流器的比例、优先输出口、左右口过滤（节点面板、预设、重建时恢复原设置都走这里）。</summary>
+        public static BeltOpResult TrySetSplitter(CampaignState state, GridCell cell, int ratioL, int ratioR, BeltSide priority, ushort filterL, ushort filterR) =>
+            CanEdit(state, out BeltOpResult refuse) ? BeltOpResult.Kernel(_kernel.SetSplitter(cell.X, cell.Y, ratioL, ratioR, priority, filterL, filterR)) : refuse;
+
+        /// <summary>FG3-LOG-04（FGR-LOG-022）：设合流器的优先输入口。</summary>
+        public static BeltOpResult TrySetMergerPriority(CampaignState state, GridCell cell, BeltSide priority) =>
+            CanEdit(state, out BeltOpResult refuse) ? BeltOpResult.Kernel(_kernel.SetMergerPriority(cell.X, cell.Y, priority)) : refuse;
+
+        /// <summary>节点读数（O(1)；地下传送带另加 O(距离)）。</summary>
+        public static bool TryGetNode(GridCell cell, out BeltNodeInfo info)
+        {
+            info = default;
+            return IsRunning && _kernel.TryGetNodeInfo(cell.X, cell.Y, out info);
         }
 
         /// <summary>原地反转方向（FGR-LOG-020）。</summary>
@@ -663,6 +856,10 @@ namespace GameLogic.Campaign.Logistics
 
         private static void DestroyCell(CampaignState state, GridCell cell, BeltCellInfo info)
         {
+            // FG3-LOG-04：分流器 / 合流器被摧毁时虚影保留原设置（比例、优先口、过滤）；地下传送带整条摧毁，两端留一份虚影，地下的物品一并落地。
+            _kernel.TryGetKind(cell.X, cell.Y, out BeltNodeKind kind);
+            BeltNodeInfo node = default;
+            bool isNode = kind != BeltNodeKind.Belt && _kernel.TryGetNodeInfo(cell.X, cell.Y, out node);
             var items = new List<ushort>(BeltConst.MaxSlots);
             if (!TryRemove(state, cell, items).Ok)
             {
@@ -680,11 +877,20 @@ namespace GameLogic.Campaign.Logistics
                     "belt-wreck:" + cell.X.ToString(System.Globalization.CultureInfo.InvariantCulture) + "," + cell.Y.ToString(System.Globalization.CultureInfo.InvariantCulture)
                     + ":" + kv.Key.ToString(System.Globalization.CultureInfo.InvariantCulture));
             }
-            Regions.HomeValleyConstruction.AddDestroyedBeltGhost(state, cell, info.Dir, info.Tier);
+            if (isNode)
+            {
+                Regions.HomeValleyConstruction.AddDestroyedNodeGhost(state, node);
+            }
+            else
+            {
+                Regions.HomeValleyConstruction.AddDestroyedBeltGhost(state, cell, info.Dir, info.Tier);
+            }
             LastDestroyedItems = items.Count;
             DestroyedCount++;
             GuidanceHooks.Raise(GuidanceHooks.LogisticsFirstDestroyed);
-            NotificationCenter.Post("failure", GameText.Format("logistics.destroyed.notify", cell.X, cell.Y, items.Count), new Vector3(cell.X, 0f, cell.Y));
+            NotificationCenter.Post("failure", isNode
+                ? GameText.Format("logistics.destroyed.notify_piece", PieceName(kind, info.Tier), cell.X, cell.Y, items.Count)
+                : GameText.Format("logistics.destroyed.notify", cell.X, cell.Y, items.Count), new Vector3(cell.X, 0f, cell.Y));
         }
 
         // ── 天气（FGR-LOG-028）───────────────────────────────────────────────────
@@ -721,6 +927,9 @@ namespace GameLogic.Campaign.Logistics
                 case BeltResult.PortOccupied: return "logistics.reason.port_occupied";
                 case BeltResult.PortNotFound: return "logistics.reason.port_not_found";
                 case BeltResult.OutOfRange: return "logistics.reason.out_of_range";
+                case BeltResult.NotSupported: return "logistics.reason.not_supported";
+                case BeltResult.UndergroundOccupied: return "logistics.reason.underground_occupied";
+                case BeltResult.TooFar: return "logistics.reason.too_far";
                 default: return "logistics.reason.invalid_argument";
             }
         }
@@ -733,7 +942,15 @@ namespace GameLogic.Campaign.Logistics
                 case BeltBlock.EndOfBelt:
                     return GameText.Get("logistics.block.end_of_belt");
                 case BeltBlock.DownstreamFull:
-                    return GameText.Format("logistics.block.downstream_full", info.NextX, info.NextY);
+                    // FG3-LOG-04：地下入口的下游是地下段——写“地下段已满（通往出口 X）”，不写地下层坐标。
+                    return info.NextUnderground
+                        ? GameText.Format("logistics.block.under_full", info.NextX, info.NextY)
+                        : GameText.Format("logistics.block.downstream_full", info.NextX, info.NextY);
+                case BeltBlock.WrongSide:
+                    return GameText.Format("logistics.block.wrong_side", RoleName(info.FrontKind), info.FrontX, info.FrontY, SideRule(info.FrontKind));
+                case BeltBlock.SplitterFull:
+                case BeltBlock.SplitterNoOutlet:
+                    return DescribeSplitterBlock(info);
                 case BeltBlock.SinkFull:
                 {
                     string owner = SinkOwnerName(info.SinkPortId);
@@ -759,6 +976,84 @@ namespace GameLogic.Campaign.Logistics
                     return GameText.Format("logistics.block.merge_wait", info.NextX, info.NextY);
                 default:
                     return GameText.Get("logistics.block.none");
+            }
+        }
+
+        /// <summary>FG3-LOG-04：节点的角色名（堵塞原因“正前方的 X 不从这一侧进料”用）：分流器 / 合流器 / 地下传送带入口 / 地下传送带出口。</summary>
+        public static string RoleName(BeltNodeKind kind)
+        {
+            switch (kind)
+            {
+                case BeltNodeKind.Splitter:
+                    return GameText.Get("logistics.node.splitter");
+                case BeltNodeKind.Merger:
+                    return GameText.Get("logistics.node.merger");
+                case BeltNodeKind.UndergroundIn:
+                    return GameText.Get("logistics.underground.entrance_name");
+                case BeltNodeKind.UndergroundOut:
+                    return GameText.Get("logistics.underground.exit_name");
+                default:
+                    return TierName(0);
+            }
+        }
+
+        /// <summary>FG3-LOG-04：节点从哪一侧进料（堵塞原因后半句，给出办法）。</summary>
+        public static string SideRule(BeltNodeKind kind)
+        {
+            switch (kind)
+            {
+                case BeltNodeKind.Splitter:
+                    return GameText.Get("logistics.side_rule.splitter");
+                case BeltNodeKind.Merger:
+                    return GameText.Get("logistics.side_rule.merger");
+                case BeltNodeKind.UndergroundIn:
+                    return GameText.Get("logistics.side_rule.under_in");
+                default:
+                    return GameText.Get("logistics.side_rule.under_out");
+            }
+        }
+
+        /// <summary>
+        /// FG3-LOG-04（FG03 第 5 节“分流器两个输出口都堵：分流器停止，上游堵塞，给出原因”）：分流器为什么停着——逐口写明（哪个口在哪一格满了 / 没接 / 不收 / 关闭）。
+        /// </summary>
+        private static string DescribeSplitterBlock(in BeltCellInfo cell)
+        {
+            if (!IsRunning || !_kernel.TryGetNodeInfo(cell.X, cell.Y, out BeltNodeInfo n))
+            {
+                return GameText.Get("logistics.block.none");
+            }
+            string detail = OutletText(n, true) + GameText.Get("logistics.outlet.separator") + OutletText(n, false);
+            return cell.Block == BeltBlock.SplitterFull
+                ? GameText.Format("logistics.block.splitter_full", detail)
+                : GameText.Format("logistics.block.splitter_no_outlet", BeltItems.Name(n.HeadItem), detail);
+        }
+
+        /// <summary>FG3-LOG-04：分流器一个输出口此刻的状态文字（左 / 右）。</summary>
+        public static string OutletText(in BeltNodeInfo n, bool left)
+        {
+            string side = GameText.Get(left ? "logistics.side.left" : "logistics.side.right");
+            BeltOutletState st = left ? n.OutLState : n.OutRState;
+            int x = left ? n.OutLX : n.OutRX;
+            int y = left ? n.OutLY : n.OutRY;
+            ushort filter = left ? n.FilterL : n.FilterR;
+            switch (st)
+            {
+                case BeltOutletState.Disconnected:
+                    int d = left ? BeltDirs.Left((int)n.Dir) : BeltDirs.Right((int)n.Dir);
+                    return GameText.Format("logistics.outlet.disconnected", side, x, y, GameText.Get(GridMath.DirTextKey((GridDir)d)));
+                case BeltOutletState.Full:
+                    return GameText.Format("logistics.outlet.full", side, x, y);
+                case BeltOutletState.Filtered:
+                    if (filter == BeltConst.FilterNone)
+                    {
+                        return GameText.Format("logistics.outlet.closed", side);
+                    }
+                    // 这个口放全部物品，但头一件被另一个口“只放这种”专门收着（严格分拣）：写明是被另一口专收，而不是“不收”。
+                    return filter == BeltConst.FilterAny
+                        ? GameText.Format("logistics.outlet.reserved", side, BeltItems.Name(n.HeadItem))
+                        : GameText.Format("logistics.outlet.filtered", side, BeltNodeService.FilterName(filter));
+                default:
+                    return GameText.Format("logistics.outlet.ok", side);
             }
         }
 
@@ -799,7 +1094,28 @@ namespace GameLogic.Campaign.Logistics
                 return false;
             }
             var ci = System.Globalization.CultureInfo.InvariantCulture;
-            title = GameText.Format("logistics.hover.title", TierName(info.Tier), GameText.Get(GridMath.DirTextKey((GridDir)info.Dir)));
+            // FG3-LOG-04：节点的标题写种类（分流器 / 合流器 / 地下传送带入口或出口），正文多出节点读数（比例、优先口、过滤、输出口、实测分出；跨度等）。
+            BeltNodeKind kind = info.Kind;
+            BeltNodeInfo node = default;
+            bool isNode = kind != BeltNodeKind.Belt && _kernel.TryGetNodeInfo(cell.X, cell.Y, out node);
+            string dirText = GameText.Get(GridMath.DirTextKey((GridDir)info.Dir));
+            switch (kind)
+            {
+                case BeltNodeKind.Splitter:
+                    title = GameText.Format("logistics.hover.splitter_title", dirText);
+                    break;
+                case BeltNodeKind.Merger:
+                    title = GameText.Format("logistics.hover.merger_title", dirText);
+                    break;
+                case BeltNodeKind.UndergroundIn:
+                case BeltNodeKind.UndergroundOut:
+                    title = GameText.Format("logistics.hover.under_title", PieceName(kind, info.Tier),
+                        GameText.Get(kind == BeltNodeKind.UndergroundIn ? "logistics.underground.entrance" : "logistics.underground.exit"), dirText);
+                    break;
+                default:
+                    title = GameText.Format("logistics.hover.title", TierName(info.Tier), dirText);
+                    break;
+            }
             var sb = new System.Text.StringBuilder(256);
             if (info.Count == 0)
             {
@@ -834,6 +1150,10 @@ namespace GameLogic.Campaign.Logistics
                 sb.Append(GameText.Format("logistics.hover.throughput_measuring", windowSec.ToString("0", ci)));
             }
             sb.Append('\n').Append(GameText.Format("logistics.hover.state", DescribeBlock(info) + (info.InLoop ? GameText.Get("logistics.hover.loop") : string.Empty)));
+            if (isNode)
+            {
+                AppendNodeLines(sb, node);
+            }
             sb.Append('\n').Append(GameText.Format("logistics.hover.hp", HpOf(cell), MaxHp(info.Tier)));
             if (BeltPortService.TryFindSourceAt(cell, out BeltPortService.Binding src))
             {
@@ -852,9 +1172,79 @@ namespace GameLogic.Campaign.Logistics
             {
                 sb.Append('\n').Append(GameText.Get("logistics.hover.placeholder_item"));
             }
-            sb.Append('\n').Append(InputDisplay.ExpandActionTokens(GameText.Get("logistics.hover.actions")));
+            if (isNode)
+            {
+                sb.Append('\n').Append(GameText.Get("logistics.hover.placeholder_node"));
+            }
+            string actions = !isNode ? "logistics.hover.actions"
+                : kind == BeltNodeKind.UndergroundIn || kind == BeltNodeKind.UndergroundOut ? "logistics.hover.under_actions" : "logistics.hover.node_actions";
+            sb.Append('\n').Append(InputDisplay.ExpandActionTokens(GameText.Get(actions)));
             body = sb.ToString();
             return true;
+        }
+
+        /// <summary>
+        /// FG3-LOG-04（FGR-LOG-081；卡片“分流比例在悬停中显示”）：节点读数的悬停行——
+        /// 分流器：比例（设了优先口时写明比例不起作用）、优先输出口、左右口过滤、两个输出口此刻的状态、实测分出（最近窗口与累计）、进料；
+        /// 合流器：优先输入口与规则、两侧进料是否接上；地下传送带：跨度 / 上限、入口 → 出口、两端与地下段上的件数。
+        /// </summary>
+        public static void AppendNodeLines(System.Text.StringBuilder sb, in BeltNodeInfo n)
+        {
+            var ci = System.Globalization.CultureInfo.InvariantCulture;
+            switch (n.Kind)
+            {
+                case BeltNodeKind.Splitter:
+                {
+                    sb.Append('\n').Append(GameText.Format(n.PriorityOut != BeltSide.None ? "logistics.hover.split_ratio_ignored" : "logistics.hover.split_ratio", n.RatioL, n.RatioR));
+                    sb.Append('\n').Append(GameText.Format("logistics.hover.split_priority", BeltNodeService.SideName(n.PriorityOut)));
+                    sb.Append('\n').Append(GameText.Format("logistics.hover.split_filters", BeltNodeService.FilterName(n.FilterL), BeltNodeService.FilterName(n.FilterR)));
+                    sb.Append('\n').Append(GameText.Format("logistics.hover.split_outlets",
+                        OutletText(n, true) + GameText.Get("logistics.outlet.separator") + OutletText(n, false)));
+                    sb.Append('\n').Append(n.WindowSeconds > 0f
+                        ? GameText.Format("logistics.hover.split_measured", n.SentLPerMinute.ToString("0.#", ci), n.SentRPerMinute.ToString("0.#", ci),
+                            n.WindowSeconds.ToString("0", ci), n.SentL, n.SentR)
+                        : GameText.Format("logistics.hover.split_measuring", n.SentL, n.SentR));
+                    AppendInputLine(sb, n);
+                    break;
+                }
+                case BeltNodeKind.Merger:
+                {
+                    string rule = n.PriorityIn == BeltSide.None
+                        ? GameText.Get("logistics.hover.merge_alternate")
+                        : GameText.Format("logistics.hover.merge_first", BeltNodeService.SideName(n.PriorityIn));
+                    sb.Append('\n').Append(GameText.Format("logistics.hover.merge_priority", BeltNodeService.SideName(n.PriorityIn), rule));
+                    sb.Append('\n').Append(GameText.Format("logistics.hover.merge_inputs",
+                        GameText.Get(n.InLConnected ? "logistics.hover.connected" : "logistics.hover.not_connected"),
+                        GameText.Get(n.InRConnected ? "logistics.hover.connected" : "logistics.hover.not_connected")));
+                    break;
+                }
+                default:
+                {
+                    int max = UndergroundSpan(n.Tier);
+                    sb.Append('\n').Append(GameText.Format("logistics.hover.under_span", n.Distance - 1, PieceName(n.Kind, n.Tier), max,
+                        n.EntranceX, n.EntranceY, n.ExitX, n.ExitY));
+                    sb.Append('\n').Append(n.Intact
+                        ? GameText.Format("logistics.hover.under_inside", n.ItemsInside, n.Capacity)
+                        : GameText.Get("logistics.hover.under_broken"));
+                    if (n.Kind == BeltNodeKind.UndergroundIn)
+                    {
+                        AppendInputLine(sb, n);
+                    }
+                    break;
+                }
+            }
+        }
+
+        private static void AppendInputLine(System.Text.StringBuilder sb, in BeltNodeInfo n)
+        {
+            if (n.InputConnected)
+            {
+                sb.Append('\n').Append(GameText.Get("logistics.hover.input_ok"));
+                return;
+            }
+            int back = BeltDirs.Opposite((int)n.Dir);
+            sb.Append('\n').Append(GameText.Format("logistics.hover.input_missing", n.X + BeltDirs.Dx(back), n.Y + BeltDirs.Dy(back),
+                GameText.Get(GridMath.DirTextKey((GridDir)n.Dir))));
         }
 
         // ── 渲染（观察星球表面时每帧一次）──────────────────────────────────────────

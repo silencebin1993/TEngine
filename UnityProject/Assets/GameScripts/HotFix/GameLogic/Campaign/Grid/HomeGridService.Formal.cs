@@ -14,6 +14,11 @@ namespace GameLogic.Campaign.Grid
     {
         public string ToolId;
         public int Tier;
+        /// <summary>FG3-LOG-04：这次放的是什么——传送带（拖拽路径）、分流器 / 合流器（一格）、地下传送带（<see cref="Cells"/> = [入口, 出口]）。</summary>
+        public BeltNodeKind Kind;
+        /// <summary>FG3-LOG-04：地下传送带入口到出口的距离（跨度 = 距离 − 1）与这一等级的最大跨度。</summary>
+        public int Distance;
+        public int MaxSpan;
         public readonly List<GridCell> Cells = new List<GridCell>(64);
         public readonly List<BeltDir> Dirs = new List<BeltDir>(64);
         /// <summary>每格是否合法（与 <see cref="Cells"/> 一一对应，可视化逐格着色）。</summary>
@@ -505,6 +510,29 @@ namespace GameLogic.Campaign.Grid
         /// 规划一次拖拽铺设：逐格按格网规则校验（与单格铺设同一套：迷雾、地形、污染、建筑 / 传送带 / 管线占用、开局锚点），
         /// 再查长度上限、解锁、总成本与库存。O(路径格数)，只在拖拽终点换格时重算。
         /// </summary>
+        /// <summary>FG3-LOG-04：建造菜单工具种类 → 物流件种类（传送带 / 分流器 / 合流器 / 地下传送带；认不出来返回 false）。</summary>
+        public static bool TryToolKind(string toolKind, out BeltNodeKind kind)
+        {
+            switch (toolKind)
+            {
+                case "belt":
+                    kind = BeltNodeKind.Belt;
+                    return true;
+                case "splitter":
+                    kind = BeltNodeKind.Splitter;
+                    return true;
+                case "merger":
+                    kind = BeltNodeKind.Merger;
+                    return true;
+                case "underground":
+                    kind = BeltNodeKind.UndergroundIn;
+                    return true;
+                default:
+                    kind = BeltNodeKind.Belt;
+                    return false;
+            }
+        }
+
         public static BeltPathPlan PlanBeltPath(CampaignState state, string toolId, GridCell from, GridCell to, BeltDir singleDir, BeltPathPlan into = null)
         {
             BeltPathPlan plan = into ?? new BeltPathPlan();
@@ -513,16 +541,49 @@ namespace GameLogic.Campaign.Grid
             plan.FirstBadIndex = -1;
             plan.Reason = null;
             plan.TotalCost = 0;
+            plan.Distance = 0;
+            plan.MaxSpan = 0;
+            plan.Kind = BeltNodeKind.Belt;
             plan.Stock = state != null ? state.Scrap : 0;
-            BuildBeltPath(from, to, singleDir, plan.Cells, plan.Dirs);
-            if (!GridContent.TryGetTool(toolId, out BuildTool tool) || tool.Kind != "belt")
+            if (!GridContent.TryGetTool(toolId, out BuildTool tool) || !TryToolKind(tool.Kind, out BeltNodeKind kind))
             {
+                BuildBeltPath(from, to, singleDir, plan.Cells, plan.Dirs);
                 plan.Reason = GridReason.Of(GridBlockReason.UnknownType);
                 return plan;
             }
+            plan.Kind = kind;
+            if (kind == BeltNodeKind.Splitter || kind == BeltNodeKind.Merger)
+            {
+                // FG3-LOG-04：分流器 / 合流器一次放一座：放在松开鼠标的那一格，朝向 = 旋转键设定的方向。
+                plan.Cells.Clear();
+                plan.Dirs.Clear();
+                plan.Cells.Add(to);
+                plan.Dirs.Add(singleDir);
+            }
+            else if (kind == BeltNodeKind.UndergroundIn)
+            {
+                // FG3-LOG-04（FGR-LOG-023）：地下传送带 = 入口（按下的格）→ 出口（松开的格），沿直线，入口朝拖动方向。
+                plan.Cells.Clear();
+                plan.Dirs.Clear();
+                BeltDir d = from == to ? singleDir : DirBetween(from, to);
+                plan.Cells.Add(from);
+                plan.Dirs.Add(d);
+                if (to != from)
+                {
+                    plan.Cells.Add(to);
+                    plan.Dirs.Add(d);
+                }
+                plan.Distance = Math.Abs(to.X - from.X) + Math.Abs(to.Y - from.Y);
+                plan.MaxSpan = BeltNetworkService.UndergroundSpan(tool.Tier);
+            }
+            else
+            {
+                BuildBeltPath(from, to, singleDir, plan.Cells, plan.Dirs);
+            }
             plan.Tier = tool.Tier;
             plan.ScrapPerCell = tool.ScrapPerCell;
-            plan.TotalCost = tool.ScrapPerCell * plan.Cells.Count;
+            // 地下传送带按两端计价（每端 scrapPerCell），没拖出第二格时也按一整条（两端）显示成本。
+            plan.TotalCost = tool.ScrapPerCell * (kind == BeltNodeKind.UndergroundIn ? 2 : plan.Cells.Count);
             if (state == null)
             {
                 plan.Reason = GridReason.Of(GridBlockReason.NoRegion);
@@ -554,8 +615,88 @@ namespace GameLogic.Campaign.Grid
                     plan.Reason = cellCheck.Reasons[0];
                 }
             }
+            if (plan.Kind == BeltNodeKind.UndergroundIn && plan.Reason == null)
+            {
+                CheckUndergroundShape(state, plan, from, to);
+            }
             // FG3-LOG-02（FGR-LOG-003 / 006）：库存不够不再拦截拖拽——放下的是虚影，机器取料施工，缺料就等（HUD 仍写“还差 Z”）。
             return plan;
+        }
+
+        /// <summary>
+        /// FG3-LOG-04（FGR-LOG-023；负向“地下带跨度超限”）：地下传送带的形状——要拖出第二格、入口与出口在同一行 / 列、跨度不超过这一等级的上限、
+        /// 同方向的地下段（已建成的，或还是虚影的地下传送带规划）不能重叠。原因写明上限与这次的跨度。
+        /// </summary>
+        private static void CheckUndergroundShape(CampaignState state, BeltPathPlan plan, GridCell from, GridCell to)
+        {
+            if (from == to)
+            {
+                plan.Reason = new GridReason(GridBlockReason.UndergroundShape, "grid.reason.under_same_cell");
+                return;
+            }
+            if (from.X != to.X && from.Y != to.Y)
+            {
+                plan.Reason = new GridReason(GridBlockReason.UndergroundShape, "grid.reason.under_not_straight");
+                plan.FirstBadIndex = 1;
+                return;
+            }
+            string toolName = GridContent.TryGetTool(plan.ToolId, out BuildTool tool) ? tool.NameKey : "logistics.underground.t1";
+            if (plan.Distance - 1 > plan.MaxSpan)
+            {
+                plan.Reason = new GridReason(GridBlockReason.UndergroundSpan, "grid.reason.under_too_far", toolName,
+                    plan.MaxSpan.ToString(System.Globalization.CultureInfo.InvariantCulture), (plan.Distance - 1).ToString(System.Globalization.CultureInfo.InvariantCulture));
+                plan.FirstBadIndex = 1;
+                return;
+            }
+            if (TryFindUndergroundOverlap(state, from, plan.Dirs[0], plan.Distance, out GridCell at))
+            {
+                plan.Reason = new GridReason(GridBlockReason.UndergroundOccupied, "grid.reason.under_occupied",
+                    at.X.ToString(System.Globalization.CultureInfo.InvariantCulture), at.Y.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+        }
+
+        /// <summary>
+        /// 从入口 <paramref name="entrance"/> 朝 <paramref name="dir"/> 距离 <paramref name="distance"/> 的地下段，是否与同方向的地下段重叠——
+        /// 已建成的（内核地下层）或还是虚影的地下传送带规划（南北向与东西向互不影响）。O(跨度 + 地下规划数 × 跨度)，只在拖拽换格时。
+        /// </summary>
+        public static bool TryFindUndergroundOverlap(CampaignState state, GridCell entrance, BeltDir dir, int distance, out GridCell at)
+        {
+            at = default;
+            int d = (int)dir;
+            bool ns = (d & 1) == 0;
+            for (int s = 1; s < distance; s++)
+            {
+                int x = entrance.X + BeltDirs.Dx(d) * s;
+                int y = entrance.Y + BeltDirs.Dy(d) * s;
+                if (BeltNetworkService.IsRunning && BeltNetworkService.Kernel.HasCell(x, BeltDirs.UnderY(y, d)))
+                {
+                    at = new GridCell(x, y);
+                    return true;
+                }
+            }
+            foreach (PlannedBeltRecord p in state?.Grid?.PlannedBelts ?? Array.Empty<PlannedBeltRecord>())
+            {
+                if (p == null || p.NodeKind != (int)BeltNodeKind.UndergroundIn || p.Xs == null || p.Xs.Length < 2 || p.CellState[0] != 0
+                    || ((p.Dirs[0] & 1) == 0) != ns)
+                {
+                    continue;
+                }
+                int pd = p.Dirs[0];
+                int pdist = Math.Abs(p.Xs[1] - p.Xs[0]) + Math.Abs(p.Ys[1] - p.Ys[0]);
+                for (int s = 1; s < distance; s++)
+                {
+                    int x = entrance.X + BeltDirs.Dx(d) * s;
+                    int y = entrance.Y + BeltDirs.Dy(d) * s;
+                    // 同一条直线上、落在那份规划的地下段（1 .. 距离−1）里。
+                    int k = ns ? (x == p.Xs[0] ? (y - p.Ys[0]) * BeltDirs.Dy(pd) : -1) : (y == p.Ys[0] ? (x - p.Xs[0]) * BeltDirs.Dx(pd) : -1);
+                    if (k >= 1 && k < pdist)
+                    {
+                        at = new GridCell(x, y);
+                        return true;
+                    }
+                }
+            }
+            return false;
         }
 
         /// <summary>
@@ -582,12 +723,40 @@ namespace GameLogic.Campaign.Grid
             Core.GuidanceHooks.Raise(Core.GuidanceHooks.BuildFirstGhost);
             LastBeltCount = plan.Cells.Count;
             LastBeltScrap = plan.TotalCost;
+            LastPlanKind = plan.Kind;
+            LastPlanTier = plan.Tier;
             return new GridOpResult(GridOpResult.Kind.BeltsPlaced, null);
         }
 
         /// <summary>最近一次铺设 / 拆除传送带的格数与废料（状态行显示用）。</summary>
         public static int LastBeltCount { get; private set; }
         public static int LastBeltScrap { get; private set; }
+        /// <summary>FG3-LOG-04：最近一次放下的是什么（传送带 / 分流器 / 合流器 / 地下传送带）与等级（状态行写“已放下分流器的虚影”）。</summary>
+        public static BeltNodeKind LastPlanKind { get; private set; }
+        public static int LastPlanTier { get; private set; }
+
+        /// <summary>
+        /// FG3-LOG-04：一件物流件的造价（建造菜单里对应工具的 scrapPerCell）：传送带按等级每格；分流器 / 合流器每座；地下传送带每端（整条 = 两端）。
+        /// 菜单里没有对应工具时为 0。
+        /// </summary>
+        public static int PieceCost(BeltNodeKind kind, int tier)
+        {
+            string toolKind = kind == BeltNodeKind.Splitter ? "splitter" : kind == BeltNodeKind.Merger ? "merger"
+                : kind == BeltNodeKind.UndergroundIn || kind == BeltNodeKind.UndergroundOut ? "underground" : "belt";
+            bool byTier = toolKind == "belt" || toolKind == "underground";
+            foreach (BuildTool t in GridContent.Tools)
+            {
+                if (t.Kind == toolKind && (!byTier || t.Tier == tier))
+                {
+                    return t.ScrapPerCell;
+                }
+            }
+            return 0;
+        }
+
+        /// <summary>FG3-LOG-04：拆掉一件已建成的物流件返还多少（地下传送带拆任一端 = 整条 = 两端）。</summary>
+        public static int PieceRefund(BeltNodeKind kind, int tier) =>
+            PieceCost(kind, tier) * (kind == BeltNodeKind.UndergroundIn || kind == BeltNodeKind.UndergroundOut ? 2 : 1);
 
         /// <summary>某一等级传送带每格的造价（建造菜单里对应工具的 scrapPerCell；菜单里没有这个等级时为 0）。</summary>
         public static int BeltCostPerCell(int tier)
@@ -635,7 +804,8 @@ namespace GameLogic.Campaign.Grid
                     planned.Add(c);
                     continue;
                 }
-                if (!BeltNetworkService.Kernel.TryGetCellInfo(c.X, c.Y, out BeltCellInfo info))
+                // FG3-LOG-04：分流器 / 合流器按每座造价、地下传送带拆任一端就拆整条（两端返还）；同一条地下传送带的另一端再轮到时已经没了，跳过。
+                if (!BeltNetworkService.TryGetPiece(c, out BeltNodeKind kind, out int tier))
                 {
                     continue;
                 }
@@ -643,7 +813,7 @@ namespace GameLogic.Campaign.Grid
                 if (BeltNetworkService.TryRemove(state, c, returned).Ok)
                 {
                     removed++;
-                    refund += BeltCostPerCell(info.Tier);
+                    refund += PieceRefund(kind, tier);
                     at = new Vector2(c.X, c.Y);
                     if (returned.Count > 0)
                     {

@@ -1528,7 +1528,7 @@ namespace GameLogic.Campaign.Regions
                 int built = HomeValleyConstruction.BuiltCells(plan);
                 int total = built + HomeValleyConstruction.UnbuiltCells(plan);
                 return GameLogic.Localization.GameText.Format("build.queue.belt_name",
-                    Logistics.BeltNetworkService.TierName(plan?.Tier ?? 0), total.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    HomeValleyConstruction.PieceName(plan), total.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     built.ToString(System.Globalization.CultureInfo.InvariantCulture));
             }
             BuildingRecord b = state?.BuildingRecords?.FirstOrDefault(x => x.BuildingId == order.TargetId);
@@ -2036,14 +2036,18 @@ namespace GameLogic.Campaign.Regions
             if (HomeValleyConstruction.IsBeltPlan(order.TargetId))
             {
                 // FG3-LOG-02：传送带规划的格子已在施工中逐格进了内核，这里只收尾（规划从存档移除）。
-                int cells = HomeValleyConstruction.BuiltCells(HomeValleyConstruction.FindPlan(state, order.TargetId));
+                PlannedBeltRecord donePlan = HomeValleyConstruction.FindPlan(state, order.TargetId);
+                int cells = HomeValleyConstruction.BuiltCells(donePlan);
+                // FG3-LOG-04：分流器 / 合流器 / 地下传送带完工写它的名字，不写“传送带 N 格”。
+                string doneText = donePlan != null && donePlan.NodeKind != 0
+                    ? GameLogic.Localization.GameText.Format("build.piece.done", HomeValleyConstruction.PieceName(donePlan))
+                    : GameLogic.Localization.GameText.Format("build.belt.done", cells.ToString(System.Globalization.CultureInfo.InvariantCulture));
                 Vector2 at = HomeValleyConstruction.SitePosition(state, order);
                 HomeValleyConstruction.OnSiteCompleted(state, order, null);
                 order.State = WorkOrderState.Completed;
                 MachineRegistry.RecordJobCompleted(order.AssignedMachineLogicId);
                 MarkAssignmentDirty();
-                Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.BuildComplete, at,
-                    GameLogic.Localization.GameText.Format("build.belt.done", cells.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+                Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.BuildComplete, at, doneText);
                 return;
             }
             if (building == null)

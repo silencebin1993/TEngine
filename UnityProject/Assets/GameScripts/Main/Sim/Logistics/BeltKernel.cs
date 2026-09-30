@@ -17,12 +17,15 @@ namespace BinGames.Sim.Logistics
     /// - 编辑（放 / 拆 / 反转 / 端口）只标记脏，下一次步进或查询前统一重建一次拓扑（规范下标 = 按坐标排序），
     ///   所以同一组传送带不论放置顺序、是否经过存读档，后续演化都逐位相同。
     /// - 存档：按网络分块序列化（<see cref="Serialize"/> / <see cref="Deserialize"/>），每块自带校验和；损坏的块单独丢弃并记账。
+    /// - FG3-LOG-04：物流节点（<see cref="AddNode"/> 分流器 / 合流器、<see cref="AddUnderground"/> 地下传送带；设置 <see cref="SetSplitter"/> / <see cref="SetMergerPriority"/>；
+    ///   读数 <see cref="TryGetNodeInfo"/>）。节点也是一格传送带，设置与状态放在按坐标规范排序的节点表里；地下段用地下层坐标（<see cref="BeltDirs.UnderY"/>）。
     /// 原生内存成对释放：<see cref="Dispose"/>。
     /// </summary>
     public sealed class BeltKernel : IDisposable
     {
-        /// <summary>存档格式版本。2 = FG3-LOG-03（端口块多了朝向与收货过滤）；1 = FG0-ARCH-02。读档两种都认。</summary>
-        public const int FormatVersion = 2;
+        /// <summary>存档格式版本。3 = FG3-LOG-04（网络块每格多了种类与节点设置：分流器 / 合流器 / 地下传送带）；
+        /// 2 = FG3-LOG-03（端口块多了朝向与收货过滤）；1 = FG0-ARCH-02。读档三种都认。</summary>
+        public const int FormatVersion = 3;
 
         /// <summary>读档仍认的最老版本。</summary>
         public const int OldestReadableVersion = 1;
@@ -69,6 +72,11 @@ namespace BinGames.Sim.Logistics
         private NativeList<int> _tree;
         private NativeList<BeltNetAgg> _nets;
         private NativeList<BeltPort> _ports;
+        /// <summary>FG3-LOG-04：物流节点（分流器 / 合流器 / 地下入口 / 地下出口）与每格的派生种类、节点下标、“正前方节点不从这一侧进料”标记。</summary>
+        private NativeList<BeltNode> _nodes;
+        private NativeList<byte> _kind;
+        private NativeList<int> _nodeOf;
+        private NativeList<byte> _edge;
         private NativeArray<long> _counters;
         private NativeArray<ulong> _hashOut;
         private NativeArray<int> _renderCounts;
@@ -79,6 +87,7 @@ namespace BinGames.Sim.Logistics
         private bool _disposed;
         private int _aliveCells;
         private int _renderRevisionSeen = -1;
+        private int _renderCellsSeen = -1;
         /// <summary>物品实例缓冲是否对应 <see cref="_renderRevisionSeen"/>（远景只准备格实例时为 false）。</summary>
         private bool _renderItemsValid;
         private readonly Stopwatch _watch = new Stopwatch();
@@ -127,6 +136,10 @@ namespace BinGames.Sim.Logistics
             _tree = new NativeList<int>(cap, Allocator.Persistent);
             _nets = new NativeList<BeltNetAgg>(8, Allocator.Persistent);
             _ports = new NativeList<BeltPort>(8, Allocator.Persistent);
+            _nodes = new NativeList<BeltNode>(8, Allocator.Persistent);
+            _kind = new NativeList<byte>(cap, Allocator.Persistent);
+            _nodeOf = new NativeList<int>(cap, Allocator.Persistent);
+            _edge = new NativeList<byte>(cap, Allocator.Persistent);
             _counters = new NativeArray<long>(BeltCounters.Length, Allocator.Persistent);
             _hashOut = new NativeArray<ulong>(1, Allocator.Persistent);
             _renderCounts = new NativeArray<int>(2, Allocator.Persistent);
@@ -289,6 +302,12 @@ namespace BinGames.Sim.Logistics
             {
                 return BeltResult.OutOfRange;
             }
+            return AddCellRaw(x, y, dir, tier);
+        }
+
+        /// <summary>加一格（不查地面坐标范围：地下段的格用地下层坐标）。调用方已校验朝向与等级。</summary>
+        private BeltResult AddCellRaw(int x, int y, BeltDir dir, int tier)
+        {
             long key = BeltDirs.Key(x, y);
             if (_lookup.TryGetValue(key, out _))
             {
@@ -337,16 +356,400 @@ namespace BinGames.Sim.Logistics
         /// <summary>拆掉一格：带上的物品按顺序（头一件在前）写进 <paramref name="removed"/>，计入账本“移出”（由调用方送进仓库 / 变成地面物）。</summary>
         public BeltResult RemoveCell(int x, int y, List<ushort> removed = null)
         {
-            if (!_lookup.TryGetValue(BeltDirs.Key(x, y), out int i))
+            if (BeltDirs.IsUnderY(y))
+            {
+                return BeltResult.NotSupported; // FG3-LOG-04：地下段随入口 / 出口一起拆。
+            }
+            long key = BeltDirs.Key(x, y);
+            if (!_lookup.TryGetValue(key, out int i))
             {
                 return BeltResult.NotFound;
             }
+            if (_nodeIndex.TryGetValue(key, out int ni))
+            {
+                byte kind = _nodes[ni].Kind;
+                if (kind == (byte)BeltNodeKind.UndergroundIn || kind == (byte)BeltNodeKind.UndergroundOut)
+                {
+                    // FG3-LOG-04：拆地下传送带的任何一端 = 拆掉整条（入口、地下段、出口），物品按流向顺序交还。
+                    return RemoveUnderground(ni, removed);
+                }
+                KillNode(ni);
+            }
+            RemoveRaw(key, i, removed);
+            return BeltResult.Ok;
+        }
+
+        private void RemoveRaw(long key, int i, List<ushort> removed)
+        {
             TakeItems(i, removed);
             _alive[i] = 0;
-            _lookup.Remove(BeltDirs.Key(x, y));
+            _lookup.Remove(key);
             _aliveCells--;
             _dirty = true;
+        }
+
+        // ── FG3-LOG-04：物流节点（FGR-LOG-022 分流器 / 合流器；FGR-LOG-023 地下传送带）──────────────────────
+
+        /// <summary>坐标 → 节点下标（O(1)；加节点时登记，拓扑重建会重排节点，之后整表重建）。</summary>
+        private readonly Dictionary<long, int> _nodeIndex = new Dictionary<long, int>();
+
+        private void IndexNodes()
+        {
+            _nodeIndex.Clear();
+            for (int n = 0; n < _nodes.Length; n++)
+            {
+                if (_nodes[n].Alive != 0)
+                {
+                    _nodeIndex[BeltDirs.Key(_nodes[n].X, _nodes[n].Y)] = n;
+                }
+            }
+        }
+
+        private void AppendNode(BeltNode node)
+        {
+            node.Alive = 1;
+            node.Cell = -1;
+            node.OutL = -1;
+            node.OutR = -1;
+            _nodes.Add(node);
+            _nodeIndex[BeltDirs.Key(node.X, node.Y)] = _nodes.Length - 1;
+            _dirty = true;
+        }
+
+        private void KillNode(int ni)
+        {
+            BeltNode nd = _nodes[ni];
+            nd.Alive = 0;
+            _nodes[ni] = nd;
+            _nodeIndex.Remove(BeltDirs.Key(nd.X, nd.Y));
+            _dirty = true;
+        }
+
+        /// <summary>活着的节点数（分流器、合流器、地下入口、地下出口各算一个）。</summary>
+        public int NodeCount => _nodeIndex.Count;
+
+        /// <summary>最近一步停着的分流器数（O(1)，热更层发“第一次分流器堵住”的引导钩子）。</summary>
+        public long BlockedSplitters => _counters[BeltCounters.NodesBlocked];
+
+        /// <summary>(x, y) 这一格的种类（没有格时返回 false）。不触发拓扑重建。</summary>
+        public bool TryGetKind(int x, int y, out BeltNodeKind kind)
+        {
+            long key = BeltDirs.Key(x, y);
+            kind = BeltNodeKind.Belt;
+            if (!_lookup.TryGetValue(key, out _))
+            {
+                return false;
+            }
+            if (BeltDirs.IsUnderY(y))
+            {
+                kind = BeltNodeKind.Underground;
+            }
+            else if (_nodeIndex.TryGetValue(key, out int ni))
+            {
+                kind = (BeltNodeKind)_nodes[ni].Kind;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// FG3-LOG-04（FGR-LOG-022）：放一个分流器 / 合流器（本身也是一格传送带，有朝向与等级；默认比例 1:1、不设优先口、两口都放全部物品）。
+        /// 分流器从后方进、左右两口出；合流器从左右两侧进、从前方出。
+        /// </summary>
+        public BeltResult AddNode(int x, int y, BeltDir dir, int tier, BeltNodeKind kind)
+        {
+            if (kind != BeltNodeKind.Splitter && kind != BeltNodeKind.Merger)
+            {
+                return BeltResult.InvalidArgument;
+            }
+            BeltResult r = AddCell(x, y, dir, tier);
+            if (r != BeltResult.Ok)
+            {
+                return r;
+            }
+            AppendNode(new BeltNode { X = x, Y = y, Kind = (byte)kind, RatioL = 1, RatioR = 1 });
             return BeltResult.Ok;
+        }
+
+        /// <summary>
+        /// FG3-LOG-04（FGR-LOG-023“地下传送带用来跨越其他传送带或建筑”）：从入口 (x, y) 朝 <paramref name="dir"/> 放一条地下传送带，出口在
+        /// <paramref name="distance"/> 格外（跨度 = 距离 − 1 格；按等级的跨度上限由调用方读表校验，这里只查硬上限）。
+        /// 入口与出口占地面两格；中间的地下段在地下层，地面上有什么都不影响；同一方向（南北 / 东西）的地下段不能重叠，南北与东西可以交叉。
+        /// 全有或全无：任何一格放不下，一格都不加。
+        /// </summary>
+        public BeltResult AddUnderground(int x, int y, BeltDir dir, int tier, int distance)
+        {
+            if ((byte)dir > 3)
+            {
+                return BeltResult.InvalidDirection;
+            }
+            if (tier < 0 || tier >= BeltConst.TierCount)
+            {
+                return BeltResult.InvalidTier;
+            }
+            if (distance < 1)
+            {
+                return BeltResult.InvalidArgument;
+            }
+            if (distance > BeltConst.MaxUndergroundDistance)
+            {
+                return BeltResult.TooFar;
+            }
+            int d = (int)dir;
+            int ex = x + BeltDirs.Dx(d) * distance;
+            int ey = y + BeltDirs.Dy(d) * distance;
+            if (Math.Abs(x) > BeltConst.CoordLimit || Math.Abs(y) > BeltConst.CoordLimit || Math.Abs(ex) > BeltConst.CoordLimit || Math.Abs(ey) > BeltConst.CoordLimit)
+            {
+                return BeltResult.OutOfRange;
+            }
+            if (_lookup.TryGetValue(BeltDirs.Key(x, y), out _) || _lookup.TryGetValue(BeltDirs.Key(ex, ey), out _))
+            {
+                return BeltResult.Occupied;
+            }
+            for (int s = 1; s < distance; s++)
+            {
+                if (_lookup.TryGetValue(BeltDirs.Key(x + BeltDirs.Dx(d) * s, BeltDirs.UnderY(y + BeltDirs.Dy(d) * s, d)), out _))
+                {
+                    return BeltResult.UndergroundOccupied;
+                }
+            }
+            AddCellRaw(x, y, dir, tier);
+            for (int s = 1; s < distance; s++)
+            {
+                AddCellRaw(x + BeltDirs.Dx(d) * s, BeltDirs.UnderY(y + BeltDirs.Dy(d) * s, d), dir, tier);
+            }
+            AddCellRaw(ex, ey, dir, tier);
+            AppendNode(new BeltNode { X = x, Y = y, Kind = (byte)BeltNodeKind.UndergroundIn, Span = distance });
+            AppendNode(new BeltNode { X = ex, Y = ey, Kind = (byte)BeltNodeKind.UndergroundOut, Span = distance });
+            return BeltResult.Ok;
+        }
+
+        /// <summary>FG3-LOG-04：(x, y) 是一条地下传送带的入口或出口时，给出整条的入口、出口与距离。不触发拓扑重建。</summary>
+        public bool TryGetUndergroundEnds(int x, int y, out int2 entrance, out int2 exit, out int distance)
+        {
+            entrance = default;
+            exit = default;
+            distance = 0;
+            long key = BeltDirs.Key(x, y);
+            if (!_nodeIndex.TryGetValue(key, out int ni) || !_lookup.TryGetValue(key, out int i))
+            {
+                return false;
+            }
+            BeltNode nd = _nodes[ni];
+            if (nd.Kind != (byte)BeltNodeKind.UndergroundIn && nd.Kind != (byte)BeltNodeKind.UndergroundOut)
+            {
+                return false;
+            }
+            int d = _dir[i];
+            distance = nd.Span;
+            int sign = nd.Kind == (byte)BeltNodeKind.UndergroundIn ? 1 : -1;
+            int ox = x + sign * BeltDirs.Dx(d) * nd.Span;
+            int oy = y + sign * BeltDirs.Dy(d) * nd.Span;
+            entrance = sign > 0 ? new int2(x, y) : new int2(ox, oy);
+            exit = sign > 0 ? new int2(ox, oy) : new int2(x, y);
+            return true;
+        }
+
+        private BeltResult RemoveUnderground(int ni, List<ushort> removed)
+        {
+            BeltNode nd = _nodes[ni];
+            _lookup.TryGetValue(BeltDirs.Key(nd.X, nd.Y), out int end);
+            int d = _dir[end];
+            TryGetUndergroundEnds(nd.X, nd.Y, out int2 ent, out int2 exi, out int distance);
+            // 按流向：入口 → 地下段 → 出口（物品交还顺序与流向一致；地下段缺格时跳过）。
+            RemoveAt(ent.x, ent.y, removed);
+            for (int s = 1; s < distance; s++)
+            {
+                RemoveAt(ent.x + BeltDirs.Dx(d) * s, BeltDirs.UnderY(ent.y + BeltDirs.Dy(d) * s, d), removed);
+            }
+            RemoveAt(exi.x, exi.y, removed);
+            return BeltResult.Ok;
+        }
+
+        private void RemoveAt(int x, int y, List<ushort> removed)
+        {
+            long key = BeltDirs.Key(x, y);
+            if (_nodeIndex.TryGetValue(key, out int ni))
+            {
+                KillNode(ni);
+            }
+            if (_lookup.TryGetValue(key, out int i))
+            {
+                RemoveRaw(key, i, removed);
+            }
+        }
+
+        /// <summary>
+        /// FG3-LOG-04（FGR-LOG-022）：设分流器——比例左 : 右（各 1～<see cref="BeltConst.RatioMax"/>，默认 1:1）、优先输出口（不设 / 左 / 右）、
+        /// 每口过滤（<see cref="BeltConst.FilterAny"/> 全部 / <see cref="BeltConst.FilterNone"/> 不出 / 物品编号 = 只放这种）。立刻生效；改比例时本轮计数清零。
+        /// </summary>
+        public BeltResult SetSplitter(int x, int y, int ratioL, int ratioR, BeltSide priority, ushort filterL, ushort filterR)
+        {
+            if (ratioL < 1 || ratioR < 1 || ratioL > BeltConst.RatioMax || ratioR > BeltConst.RatioMax || (byte)priority > 2)
+            {
+                return BeltResult.InvalidArgument;
+            }
+            if (!_nodeIndex.TryGetValue(BeltDirs.Key(x, y), out int ni))
+            {
+                return BeltResult.NotFound;
+            }
+            BeltNode nd = _nodes[ni];
+            if (nd.Kind != (byte)BeltNodeKind.Splitter)
+            {
+                return BeltResult.NotSupported;
+            }
+            if (nd.RatioL != ratioL || nd.RatioR != ratioR)
+            {
+                nd.CntL = 0;
+                nd.CntR = 0;
+            }
+            nd.RatioL = (byte)ratioL;
+            nd.RatioR = (byte)ratioR;
+            nd.PrioOut = (byte)priority;
+            nd.FilterL = filterL;
+            nd.FilterR = filterR;
+            _nodes[ni] = nd;
+            Revision++;
+            return BeltResult.Ok;
+        }
+
+        /// <summary>FG3-LOG-04（FGR-LOG-022“合流器可以设置优先输入口”）：不设 = 两路交替；左 / 右 = 那一路有货时先走它。</summary>
+        public BeltResult SetMergerPriority(int x, int y, BeltSide priority)
+        {
+            if ((byte)priority > 2)
+            {
+                return BeltResult.InvalidArgument;
+            }
+            if (!_nodeIndex.TryGetValue(BeltDirs.Key(x, y), out int ni))
+            {
+                return BeltResult.NotFound;
+            }
+            BeltNode nd = _nodes[ni];
+            if (nd.Kind != (byte)BeltNodeKind.Merger)
+            {
+                return BeltResult.NotSupported;
+            }
+            nd.PrioIn = (byte)priority;
+            _nodes[ni] = nd;
+            Revision++;
+            return BeltResult.Ok;
+        }
+
+        /// <summary>
+        /// FG3-LOG-04：一个节点的读数（分流器 / 合流器 / 地下入口 / 地下出口；不是节点时返回 false）。
+        /// O(1)（地下传送带另加 O(距离) 数地下段的件数），热更层悬停与节点面板用。
+        /// </summary>
+        public bool TryGetNodeInfo(int x, int y, out BeltNodeInfo info)
+        {
+            EnsureTopology();
+            info = default;
+            long key = BeltDirs.Key(x, y);
+            if (!_nodeIndex.TryGetValue(key, out int ni) || !_lookup.TryGetValue(key, out int c))
+            {
+                return false;
+            }
+            BeltNode nd = _nodes[ni];
+            int d = _dir[c];
+            int completed = (int)Math.Min(_counters[BeltCounters.CompletedBuckets], BeltConst.Buckets);
+            info = new BeltNodeInfo
+            {
+                Kind = (BeltNodeKind)nd.Kind,
+                X = x,
+                Y = y,
+                Dir = (BeltDir)d,
+                Tier = _tier[c],
+                Count = _count[c],
+                Block = (BeltBlock)_block[c],
+                HeadItem = _count[c] > 0 ? _item[c * S] : (ushort)0,
+                WindowSeconds = completed * _config.BucketSteps / (float)_config.StepHz,
+            };
+            switch ((BeltNodeKind)nd.Kind)
+            {
+                case BeltNodeKind.Splitter:
+                {
+                    int l = BeltDirs.Left(d);
+                    int r = BeltDirs.Right(d);
+                    info.RatioL = nd.RatioL;
+                    info.RatioR = nd.RatioR;
+                    info.PriorityOut = (BeltSide)nd.PrioOut;
+                    info.FilterL = nd.FilterL;
+                    info.FilterR = nd.FilterR;
+                    info.OutLConnected = nd.OutL >= 0;
+                    info.OutRConnected = nd.OutR >= 0;
+                    info.OutLX = x + BeltDirs.Dx(l);
+                    info.OutLY = y + BeltDirs.Dy(l);
+                    info.OutRX = x + BeltDirs.Dx(r);
+                    info.OutRY = y + BeltDirs.Dy(r);
+                    info.OutLState = (BeltOutletState)nd.OutLState;
+                    info.OutRState = (BeltOutletState)nd.OutRState;
+                    info.SentL = nd.SentL;
+                    info.SentR = nd.SentR;
+                    for (int k = 0; k < completed; k++)
+                    {
+                        info.SentLInWindow += k == 0 ? nd.WL0 : k == 1 ? nd.WL1 : k == 2 ? nd.WL2 : nd.WL3;
+                        info.SentRInWindow += k == 0 ? nd.WR0 : k == 1 ? nd.WR1 : k == 2 ? nd.WR2 : nd.WR3;
+                    }
+                    info.InputConnected = _feedN[c] > 0;
+                    break;
+                }
+                case BeltNodeKind.Merger:
+                {
+                    info.PriorityIn = (BeltSide)nd.PrioIn;
+                    int b = c * BeltConst.MaxFeeders;
+                    for (int k = 0; k < _feedN[c]; k++)
+                    {
+                        int f = _feed[b + k];
+                        int side = SideOf(c, f);
+                        info.InLConnected |= side == BeltDirs.Left(d);
+                        info.InRConnected |= side == BeltDirs.Right(d);
+                    }
+                    break;
+                }
+                default:
+                {
+                    // 地下传送带：入口与出口给出整条的数据。
+                    TryGetUndergroundEnds(x, y, out int2 ent, out int2 exi, out int distance);
+                    info.Distance = distance;
+                    info.EntranceX = ent.x;
+                    info.EntranceY = ent.y;
+                    info.ExitX = exi.x;
+                    info.ExitY = exi.y;
+                    info.Capacity = (distance + 1) * _config.SlotsPerCell;
+                    bool intact = true;
+                    int inside = 0;
+                    for (int s = 0; s <= distance; s++)
+                    {
+                        int cx = ent.x + BeltDirs.Dx(d) * s;
+                        int cy = ent.y + BeltDirs.Dy(d) * s;
+                        if (s > 0 && s < distance)
+                        {
+                            cy = BeltDirs.UnderY(cy, d);
+                        }
+                        if (_lookup.TryGetValue(BeltDirs.Key(cx, cy), out int ci))
+                        {
+                            inside += _count[ci];
+                        }
+                        else
+                        {
+                            intact = false;
+                        }
+                    }
+                    info.Intact = intact;
+                    info.ItemsInside = inside;
+                    if (nd.Kind == (byte)BeltNodeKind.UndergroundIn)
+                    {
+                        info.InputConnected = _feedN[c] > 0;
+                    }
+                    break;
+                }
+            }
+            return true;
+        }
+
+        private int SideOf(int target, int feeder)
+        {
+            int dx = _x[feeder] - _x[target];
+            int dy = _y[feeder] - _y[target];
+            return dy > 0 ? 0 : dx > 0 ? 1 : dy < 0 ? 2 : 3;
         }
 
         /// <summary>清带（FGR-LOG-026 的内核部分）：清空一格上的物品，写进 <paramref name="removed"/>，计入“移出”。</summary>
@@ -448,6 +851,11 @@ namespace BinGames.Sim.Logistics
             {
                 return BeltResult.NotFound;
             }
+            // FG3-LOG-04：地下传送带（入口、出口、地下段）不能原地改方向（入口与出口的位置由方向决定）——拆掉重铺。分流器 / 合流器可以。
+            if (TryGetKind(x, y, out BeltNodeKind kind) && (kind == BeltNodeKind.UndergroundIn || kind == BeltNodeKind.UndergroundOut || kind == BeltNodeKind.Underground))
+            {
+                return BeltResult.NotSupported;
+            }
             if (_dir[i] == (byte)dir)
             {
                 return BeltResult.Ok;
@@ -486,6 +894,31 @@ namespace BinGames.Sim.Logistics
             if (!_lookup.TryGetValue(BeltDirs.Key(x, y), out int i))
             {
                 return BeltResult.NotFound;
+            }
+            if (TryGetKind(x, y, out BeltNodeKind kind) && kind != BeltNodeKind.Belt)
+            {
+                if (kind != BeltNodeKind.UndergroundIn && kind != BeltNodeKind.UndergroundOut)
+                {
+                    return BeltResult.NotSupported; // 分流器 / 合流器只有一种；地下段随两端一起改。
+                }
+                // FG3-LOG-04：地下传送带整条一起改等级（按等级的跨度上限由调用方先校验）。
+                TryGetUndergroundEnds(x, y, out int2 ent, out int2 exi, out int distance);
+                int d = _dir[i];
+                for (int s = 0; s <= distance; s++)
+                {
+                    int cx = ent.x + BeltDirs.Dx(d) * s;
+                    int cy = ent.y + BeltDirs.Dy(d) * s;
+                    if (s > 0 && s < distance)
+                    {
+                        cy = BeltDirs.UnderY(cy, d);
+                    }
+                    if (_lookup.TryGetValue(BeltDirs.Key(cx, cy), out int ci))
+                    {
+                        _tier[ci] = (byte)tier;
+                    }
+                }
+                Revision++;
+                return BeltResult.Ok;
             }
             _tier[i] = (byte)tier;
             Revision++;
@@ -766,9 +1199,15 @@ namespace BinGames.Sim.Logistics
         /// FG3-LOG-03（清带拖框）：闭区间框里已建成的传送带格（按 (y, x) 升序）。框面积不超过格数时逐格查表，否则扫全部格再筛——
         /// 两者取小，O(min(框面积, 格数))，逐格循环留在 AOT（热更层不逐格）。只在玩家拖框时调用。
         /// </summary>
-        public void CollectCellsInBox(int minX, int minY, int maxX, int maxY, List<int2> into)
+        public void CollectCellsInBox(int minX, int minY, int maxX, int maxY, List<int2> into) => CollectCellsInBox(minX, minY, maxX, maxY, into, out _);
+
+        /// <summary>
+        /// 同上；FG3-LOG-04：框下面的地下段也算进来（清带时地下的物品一并清走），<paramref name="surfaceCells"/> 是其中地面上的格数（界面显示“N 格传送带”用）。
+        /// </summary>
+        public void CollectCellsInBox(int minX, int minY, int maxX, int maxY, List<int2> into, out int surfaceCells)
         {
             into.Clear();
+            surfaceCells = 0;
             if (maxX < minX || maxY < minY)
             {
                 return;
@@ -783,6 +1222,25 @@ namespace BinGames.Sim.Logistics
                         if (_lookup.TryGetValue(BeltDirs.Key(x, y), out int i) && _alive[i] != 0)
                         {
                             into.Add(new int2(x, y));
+                            surfaceCells++;
+                        }
+                    }
+                }
+                // 地下段（南北层、东西层）：只在有节点时才查，普通场景没有额外开销。
+                if (_nodeIndex.Count > 0)
+                {
+                    for (int layer = 0; layer < 2; layer++)
+                    {
+                        for (int y = minY; y <= maxY; y++)
+                        {
+                            int uy = BeltDirs.UnderY(y, layer);
+                            for (int x = minX; x <= maxX; x++)
+                            {
+                                if (_lookup.TryGetValue(BeltDirs.Key(x, uy), out int i) && _alive[i] != 0)
+                                {
+                                    into.Add(new int2(x, uy));
+                                }
+                            }
                         }
                     }
                 }
@@ -792,19 +1250,27 @@ namespace BinGames.Sim.Logistics
             for (int i = 0; i < _x.Length; i++)
             {
                 int x = _x[i];
-                int y = _y[i];
+                int y = BeltDirs.SurfaceY(_y[i]);
                 if (x >= minX && x <= maxX && y >= minY && y <= maxY)
                 {
-                    into.Add(new int2(x, y));
+                    into.Add(new int2(x, _y[i]));
+                    if (!BeltDirs.IsUnderY(_y[i]))
+                    {
+                        surfaceCells++;
+                    }
                 }
             }
         }
 
-        /// <summary>FG3-LOG-03（清带点选一条带）：某一网络的全部格坐标（规范顺序）。O(格数)，只在玩家操作时调用。</summary>
-        public void CollectNetworkCells(int network, List<int2> into)
+        /// <summary>FG3-LOG-03（清带点选一条带）：某一网络的全部格坐标（规范顺序；FG3-LOG-04：含地下段）。O(格数)，只在玩家操作时调用。</summary>
+        public void CollectNetworkCells(int network, List<int2> into) => CollectNetworkCells(network, into, out _);
+
+        /// <summary>同上，<paramref name="surfaceCells"/> 是其中地面上的格数（不含地下段）。</summary>
+        public void CollectNetworkCells(int network, List<int2> into, out int surfaceCells)
         {
             EnsureTopology();
             into.Clear();
+            surfaceCells = 0;
             if (network < 0)
             {
                 return;
@@ -814,6 +1280,10 @@ namespace BinGames.Sim.Logistics
                 if (_net[i] == network)
                 {
                     into.Add(new int2(_x[i], _y[i]));
+                    if (_kind[i] != (byte)BeltNodeKind.Underground)
+                    {
+                        surfaceCells++;
+                    }
                 }
             }
         }
@@ -841,6 +1311,7 @@ namespace BinGames.Sim.Logistics
                 Ring = _ring, FeedN = _feedN, Next = _next, Sink = _sink, Net = _net, Flow = _flow, Feed = _feed,
                 Pos = _pos, Delta = _delta, FlowB = _flowB, Item = _item, Covered = _covered, CoveredKeys = _coveredKeys, Lookup = _lookup, RingCells = _ringCells,
                 Rings = _rings, RingOf = _ringOf, RingCount = _ringCount, Tree = _tree, Nets = _nets, Ports = _ports,
+                Nodes = _nodes, Kind = _kind, NodeOf = _nodeOf, Edge = _edge,
             }.Run();
             _watch.Stop();
             LastRebuildMs = (_watch.ElapsedTicks - t0) * 1000.0 / Stopwatch.Frequency;
@@ -848,6 +1319,7 @@ namespace BinGames.Sim.Logistics
             _dirty = false;
             RebuildCount++;
             IndexPorts();
+            IndexNodes();
             Revision++;
         }
 
@@ -870,6 +1342,7 @@ namespace BinGames.Sim.Logistics
                 Block = _block.AsArray(), Flow = _flow.AsArray(), FlowB = _flowB.AsArray(), Pos = _pos.AsArray(),
                 Delta = _delta.AsArray(), Item = _item.AsArray(), Ports = _ports.AsArray(), Nets = _nets.AsArray(),
                 Counters = _counters,
+                Kind = _kind.AsArray(), NodeOf = _nodeOf.AsArray(), Edge = _edge.AsArray(), Nodes = _nodes.AsArray(),
             }.Run();
             _watch.Stop();
             LastStepMs = (_watch.ElapsedTicks - t0) * 1000.0 / Stopwatch.Frequency;
@@ -936,7 +1409,24 @@ namespace BinGames.Sim.Logistics
                 Pos1 = cnt > 1 ? _pos[b + 1] : -1,
                 Pos2 = cnt > 2 ? _pos[b + 2] : -1,
                 Pos3 = cnt > 3 ? _pos[b + 3] : -1,
+                Kind = (BeltNodeKind)_kind[i],
+                Turn = _turn[i],
             };
+            // FG3-LOG-04：下游是地下段（地下传送带入口）时，下游坐标给这条地下传送带的出口（地面坐标），悬停写“地下段已满（通往出口 X）”。
+            if (nx >= 0 && _kind[nx] == (byte)BeltNodeKind.Underground && _kind[i] == (byte)BeltNodeKind.UndergroundIn
+                && TryGetUndergroundEnds(x, y, out _, out int2 exit, out _))
+            {
+                info.NextUnderground = true;
+                info.NextX = exit.x;
+                info.NextY = exit.y;
+            }
+            if (_edge[i] != 0)
+            {
+                int d = _dir[i];
+                info.FrontX = x + BeltDirs.Dx(d);
+                info.FrontY = y + BeltDirs.Dy(d);
+                TryGetKind(info.FrontX, info.FrontY, out info.FrontKind);
+            }
             return true;
         }
 
@@ -1027,18 +1517,24 @@ namespace BinGames.Sim.Logistics
                 WindowSeconds = completed * _config.BucketSteps / (float)_config.StepHz,
                 Face = bp.Face,
                 Accept = bp.Accept,
+                Phase = bp.Phase,
             };
             return true;
         }
 
-        /// <summary>全部格的坐标（规范顺序；读档后同步格网传送带层、测试遍历用）。</summary>
-        public void CollectCells(List<int3> into)
+        /// <summary>全部地面格的坐标（规范顺序；读档后同步格网传送带层、测试遍历用）。z = 朝向 | 等级 &lt;&lt; 8 | 种类 &lt;&lt; 16。
+        /// FG3-LOG-04：地下段不在地面上，默认不含（<paramref name="includeUnderground"/> = true 时含，坐标是地下层坐标）。</summary>
+        public void CollectCells(List<int3> into, bool includeUnderground = false)
         {
             EnsureTopology();
             into.Clear();
             for (int i = 0; i < _x.Length; i++)
             {
-                into.Add(new int3(_x[i], _y[i], _dir[i] | (_tier[i] << 8)));
+                if (!includeUnderground && _kind[i] == (byte)BeltNodeKind.Underground)
+                {
+                    continue;
+                }
+                into.Add(new int3(_x[i], _y[i], _dir[i] | (_tier[i] << 8) | (_kind[i] << 16)));
             }
         }
 
@@ -1062,7 +1558,7 @@ namespace BinGames.Sim.Logistics
             {
                 X = _x.AsArray(), Y = _y.AsArray(), Dir = _dir.AsArray(), Tier = _tier.AsArray(), Count = _count.AsArray(),
                 Turn = _turn.AsArray(), Pos = _pos.AsArray(), Item = _item.AsArray(), Ports = _ports.AsArray(),
-                Counters = _counters, Out = _hashOut,
+                Counters = _counters, Out = _hashOut, Kind = _kind.AsArray(), Nodes = _nodes.AsArray(),
             }.Run();
             return _hashOut[0];
         }
@@ -1077,7 +1573,8 @@ namespace BinGames.Sim.Logistics
             out NativeArray<BeltInstance> items, out int itemCount, bool force = false, bool includeItems = true)
         {
             EnsureTopology();
-            bool stale = force || _renderRevisionSeen != Revision || _renderCounts[0] != _x.Length;
+            // FG3-LOG-04：地下段不画，格实例数可以少于格数——“格数变了”按上一次填缓冲时的格数判断，不按实例数。
+            bool stale = force || _renderRevisionSeen != Revision || _renderCellsSeen != _x.Length;
             if (stale || (includeItems && !_renderItemsValid))
             {
                 long t0 = _watch.ElapsedTicks;
@@ -1100,12 +1597,13 @@ namespace BinGames.Sim.Logistics
                     CL = BeltConst.CellLength, CellSize = cellSize, StepHz = _config.StepHz, SlotsPerCell = _config.SlotsPerCell,
                     V0 = _v0, V1 = _v1, V2 = _v2, S0 = _s0, S1 = _s1, S2 = _s2, SlowOn = _slowPct > 0 ? 1 : 0, WriteItems = includeItems ? 1 : 0,
                     X = _x.AsArray(), Y = _y.AsArray(), Dir = _dir.AsArray(), Tier = _tier.AsArray(), Covered = _covered.AsArray(), Count = _count.AsArray(),
-                    Block = _block.AsArray(), Pos = _pos.AsArray(), Delta = _delta.AsArray(), Item = _item.AsArray(),
+                    Block = _block.AsArray(), Pos = _pos.AsArray(), Delta = _delta.AsArray(), Item = _item.AsArray(), Kind = _kind.AsArray(),
                     Cells = _renderCells, Items = _renderItems, OutCounts = _renderCounts,
                 }.Run();
                 _watch.Stop();
                 LastRenderPrepMs = (_watch.ElapsedTicks - t0) * 1000.0 / Stopwatch.Frequency;
                 _renderRevisionSeen = Revision;
+                _renderCellsSeen = n;
                 _renderItemsValid = includeItems;
                 if (includeItems)
                 {
@@ -1121,8 +1619,9 @@ namespace BinGames.Sim.Logistics
         // ── 存档（按网络分块）──────────────────────────────────────────────────
 
         /// <summary>
-        /// 序列化：每个网络一块（格：坐标、朝向、等级、轮次、物品位置与种类），外加端口块与账本。
-        /// 块格式：'B''N' 版本 保留 | 格数 | 物品数 | 每格 (x, y, 朝向, 等级, 轮次, 件数, 件数 ×(位置, 种类)) | FNV-32 校验和。
+        /// 序列化：每个网络一块（格：坐标、朝向、等级、轮次、种类与节点设置、物品位置 / 种类 / 上一步位移），外加端口块与账本。
+        /// 块格式（3）：'B''N' 版本 保留 | 格数 | 物品数 | 每格 (x, y, 朝向, 等级, 轮次, 种类, [节点设置], 件数, 件数 ×(位置, 种类, 上一步位移)) | FNV-32 校验和。
+        /// 格式 1 / 2 没有种类、节点设置与上一步位移。
         /// </summary>
         public BeltSnapshot Serialize()
         {
@@ -1169,12 +1668,17 @@ namespace BinGames.Sim.Logistics
                     w.U8(_dir[i]);
                     w.U8(_tier[i]);
                     w.U8(_turn[i]);
+                    // 格式 3（FG3-LOG-04）：种类与节点设置 / 状态（分流器 31 字节、合流器 1 字节、地下两端各 4 字节、普通传送带与地下段 0 字节）。
+                    WriteNode(w, i);
                     int cnt = _count[i];
                     w.U8((byte)cnt);
                     for (int s = 0; s < cnt; s++)
                     {
                         w.I32(_pos[i * S + s]);
                         w.U16(_item[i * S + s]);
+                        // 格式 3（FG3-LOG-04）：上一步位移。它决定“这一步中途才空出来”的入口放置位置（输出端口、分流器交给输出口），
+                        // 读档后接着跑要与不存档一直跑逐位一致就必须存；只影响后续演化，不进状态哈希（旧格式读进来为 0）。
+                        w.U16((ushort)Math.Min(ushort.MaxValue, Math.Max(0, _delta[i * S + s])));
                     }
                 }
                 w.U32(w.Checksum());
@@ -1216,6 +1720,39 @@ namespace BinGames.Sim.Logistics
             return snap;
         }
 
+        private void WriteNode(BeltByteWriter w, int i)
+        {
+            byte kind = _kind[i];
+            w.U8(kind);
+            int ni = _nodeOf[i];
+            if (ni < 0)
+            {
+                return;
+            }
+            BeltNode nd = _nodes[ni];
+            switch ((BeltNodeKind)kind)
+            {
+                case BeltNodeKind.Splitter:
+                    w.U8(nd.RatioL);
+                    w.U8(nd.RatioR);
+                    w.U8(nd.PrioOut);
+                    w.U16(nd.FilterL);
+                    w.U16(nd.FilterR);
+                    w.I32(nd.CntL);
+                    w.I32(nd.CntR);
+                    w.I64(nd.SentL);
+                    w.I64(nd.SentR);
+                    break;
+                case BeltNodeKind.Merger:
+                    w.U8(nd.PrioIn);
+                    break;
+                case BeltNodeKind.UndergroundIn:
+                case BeltNodeKind.UndergroundOut:
+                    w.I32(nd.Span);
+                    break;
+            }
+        }
+
         /// <summary>
         /// 从快照恢复到一个空内核。坏块（魔数 / 版本 / 长度 / 校验和 / 数值非法 / 坐标重复 / 物品重叠）整块丢弃，
         /// 其声明的物品数记入“移出”（账本仍平衡），并在 <see cref="CorruptChunksDropped"/> 里如实报告；其余网络照常恢复。
@@ -1253,14 +1790,19 @@ namespace BinGames.Sim.Logistics
             {
                 if (!TryLoadChunk(chunk, tmpItems, addedCells, out string why))
                 {
-                    // 回滚这一块已经加进去的格，按“移出”记账（物品不凭空消失：账本如实反映）。
+                    // 回滚这一块已经加进去的格（FG3-LOG-04：连同它们的节点），按“移出”记账（物品不凭空消失：账本如实反映）。
                     foreach ((int x, int y) in addedCells)
                     {
-                        if (_lookup.TryGetValue(BeltDirs.Key(x, y), out int i))
+                        long key = BeltDirs.Key(x, y);
+                        if (_nodeIndex.TryGetValue(key, out int ni))
+                        {
+                            KillNode(ni);
+                        }
+                        if (_lookup.TryGetValue(key, out int i))
                         {
                             _count[i] = 0;
                             _alive[i] = 0;
-                            _lookup.Remove(BeltDirs.Key(x, y));
+                            _lookup.Remove(key);
                             _aliveCells--;
                         }
                     }
@@ -1333,9 +1875,10 @@ namespace BinGames.Sim.Logistics
                 return false;
             }
             int seenItems = 0;
+            bool nodes = chunkVersion >= 3;
             for (int c = 0; c < cells; c++)
             {
-                if (!r.Has(8 + 4))
+                if (!r.Has(8 + 3 + (nodes ? 1 : 0) + 1))
                 {
                     why = "chunk_truncated";
                     return false;
@@ -1345,19 +1888,52 @@ namespace BinGames.Sim.Logistics
                 byte dir = r.U8();
                 byte tier = r.U8();
                 byte turn = r.U8();
-                int cnt = r.U8();
-                if (cnt > _config.SlotsPerCell || !r.Has(cnt * 6))
+                // 格式 3（FG3-LOG-04）：种类 + 节点设置；格式 1 / 2 全是普通传送带。
+                BeltNodeKind kind = BeltNodeKind.Belt;
+                var node = new BeltNode { X = x, Y = y };
+                if (nodes && !TryReadNode(r, ref node, out kind))
+                {
+                    why = "chunk_node";
+                    return false;
+                }
+                if (kind == BeltNodeKind.Merger)
+                {
+                    // 与 AddNode 新建时逐字段相同（合流器不存比例，新建时记 1:1）；地下两端新建时比例为 0，也不存——读回同样为 0，状态哈希一致。
+                    node.RatioL = 1;
+                    node.RatioR = 1;
+                }
+                if (!r.Has(1))
                 {
                     why = "chunk_truncated";
                     return false;
                 }
-                BeltResult add = AddCell(x, y, (BeltDir)dir, tier);
+                int cnt = r.U8();
+                int itemBytes = nodes ? 8 : 6;
+                if (cnt > _config.SlotsPerCell || !r.Has(cnt * itemBytes))
+                {
+                    why = "chunk_truncated";
+                    return false;
+                }
+                // 地下段必须在地下层坐标、其余格必须在地面坐标范围内。
+                bool under = BeltDirs.IsUnderY(y);
+                if (dir > 3 || tier >= BeltConst.TierCount || under != (kind == BeltNodeKind.Underground)
+                    || Math.Abs(x) > BeltConst.CoordLimit || (!under && Math.Abs(y) > BeltConst.CoordLimit))
+                {
+                    why = "chunk_cell";
+                    return false;
+                }
+                BeltResult add = AddCellRaw(x, y, (BeltDir)dir, tier);
                 if (add != BeltResult.Ok)
                 {
                     why = "chunk_cell";
                     return false;
                 }
                 added.Add((x, y));
+                if (kind != BeltNodeKind.Belt && kind != BeltNodeKind.Underground)
+                {
+                    node.Kind = (byte)kind;
+                    AppendNode(node);
+                }
                 _lookup.TryGetValue(BeltDirs.Key(x, y), out int i);
                 _turn[i] = turn == BeltConst.NoTurn || turn <= 3 ? turn : BeltConst.NoTurn;
                 int last = int.MaxValue;
@@ -1365,14 +1941,15 @@ namespace BinGames.Sim.Logistics
                 {
                     int pos = r.I32();
                     ushort item = r.U16();
-                    if (pos < 0 || pos >= BeltConst.CellLength || (s > 0 && last - pos < _spacing))
+                    int delta = nodes ? r.U16() : 0; // 格式 3：上一步位移（入口放置规则用）；旧格式为 0
+                    if (pos < 0 || pos >= BeltConst.CellLength || (s > 0 && last - pos < _spacing) || delta > BeltConst.CellLength)
                     {
                         why = "chunk_item";
                         return false;
                     }
                     _pos[i * S + s] = pos;
                     _item[i * S + s] = item;
-                    _delta[i * S + s] = 0;
+                    _delta[i * S + s] = delta;
                     last = pos;
                 }
                 _count[i] = (byte)cnt;
@@ -1383,7 +1960,111 @@ namespace BinGames.Sim.Logistics
                 why = "chunk_count";
                 return false;
             }
+            if (nodes && !UndergroundsIntact(added))
+            {
+                why = "chunk_node";
+                return false;
+            }
             return true;
+        }
+
+        /// <summary>FG3-LOG-04：读一格的种类与节点设置，数值非法时返回 false（整块丢弃）。</summary>
+        private static bool TryReadNode(BeltByteReader r, ref BeltNode node, out BeltNodeKind kind)
+        {
+            byte k = r.U8();
+            kind = (BeltNodeKind)k;
+            switch (kind)
+            {
+                case BeltNodeKind.Belt:
+                case BeltNodeKind.Underground:
+                    return true;
+                case BeltNodeKind.Splitter:
+                    if (!r.Has(31))
+                    {
+                        return false;
+                    }
+                    node.RatioL = r.U8();
+                    node.RatioR = r.U8();
+                    node.PrioOut = r.U8();
+                    node.FilterL = r.U16();
+                    node.FilterR = r.U16();
+                    node.CntL = r.I32();
+                    node.CntR = r.I32();
+                    node.SentL = r.I64();
+                    node.SentR = r.I64();
+                    return node.RatioL >= 1 && node.RatioL <= BeltConst.RatioMax && node.RatioR >= 1 && node.RatioR <= BeltConst.RatioMax && node.PrioOut <= 2
+                           && node.CntL >= 0 && node.CntL <= BeltConst.RatioMax && node.CntR >= 0 && node.CntR <= BeltConst.RatioMax && node.SentL >= 0 && node.SentR >= 0;
+                case BeltNodeKind.Merger:
+                    if (!r.Has(1))
+                    {
+                        return false;
+                    }
+                    node.PrioIn = r.U8();
+                    return node.PrioIn <= 2;
+                case BeltNodeKind.UndergroundIn:
+                case BeltNodeKind.UndergroundOut:
+                    if (!r.Has(4))
+                    {
+                        return false;
+                    }
+                    node.Span = r.I32();
+                    return node.Span >= 1 && node.Span <= BeltConst.MaxUndergroundDistance;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// FG3-LOG-04：一块网络里的地下传送带是否完整——每个入口的地下段与出口都在（同方向、同等级、出口记的距离相同），每个出口有对应的入口，
+        /// 每格地下段都属于某个入口（地下段数 = Σ(距离 − 1)，坐标不重复）。不完整整块丢弃（原因 chunk_node）。
+        /// </summary>
+        private bool UndergroundsIntact(List<(int x, int y)> added)
+        {
+            int hidden = 0;
+            int expectHidden = 0;
+            foreach ((int x, int y) in added)
+            {
+                long key = BeltDirs.Key(x, y);
+                _lookup.TryGetValue(key, out int i);
+                if (BeltDirs.IsUnderY(y))
+                {
+                    hidden++;
+                    continue;
+                }
+                if (!_nodeIndex.TryGetValue(key, out int ni))
+                {
+                    continue;
+                }
+                BeltNode nd = _nodes[ni];
+                int d = _dir[i];
+                if (nd.Kind == (byte)BeltNodeKind.UndergroundIn)
+                {
+                    expectHidden += nd.Span - 1;
+                    for (int s = 1; s < nd.Span; s++)
+                    {
+                        if (!_lookup.TryGetValue(BeltDirs.Key(x + BeltDirs.Dx(d) * s, BeltDirs.UnderY(y + BeltDirs.Dy(d) * s, d)), out int h)
+                            || _dir[h] != d || _tier[h] != _tier[i])
+                        {
+                            return false;
+                        }
+                    }
+                    long ek = BeltDirs.Key(x + BeltDirs.Dx(d) * nd.Span, y + BeltDirs.Dy(d) * nd.Span);
+                    if (!_lookup.TryGetValue(ek, out int e) || !_nodeIndex.TryGetValue(ek, out int en) || _nodes[en].Kind != (byte)BeltNodeKind.UndergroundOut
+                        || _nodes[en].Span != nd.Span || _dir[e] != d || _tier[e] != _tier[i])
+                    {
+                        return false;
+                    }
+                }
+                else if (nd.Kind == (byte)BeltNodeKind.UndergroundOut)
+                {
+                    long sk = BeltDirs.Key(x - BeltDirs.Dx(d) * nd.Span, y - BeltDirs.Dy(d) * nd.Span);
+                    if (!_nodeIndex.TryGetValue(sk, out int sn) || _nodes[sn].Kind != (byte)BeltNodeKind.UndergroundIn || _nodes[sn].Span != nd.Span)
+                    {
+                        return false;
+                    }
+                }
+            }
+            return hidden == expectHidden;
         }
 
         private bool TryLoadPorts(byte[] data, out string why)
@@ -1493,6 +2174,10 @@ namespace BinGames.Sim.Logistics
             _tree.Dispose();
             _nets.Dispose();
             _ports.Dispose();
+            _nodes.Dispose();
+            _kind.Dispose();
+            _nodeOf.Dispose();
+            _edge.Dispose();
             _counters.Dispose();
             _hashOut.Dispose();
             _renderCounts.Dispose();

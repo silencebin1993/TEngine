@@ -1242,7 +1242,7 @@ namespace GameLogic.EditorTools
             string first = RunFromSave(out string loaded1);
             string second = RunFromSave(out _);
             Expect(save.Success && loaded1 == before,
-                "满载中途真文件存读档：内核（格式 2）、端口绑定与过滤、端口待推 / 缓存 / 累计、朝向与收货过滤、耐久表、被摧毁的虚影逐字段往返一致"
+                $"满载中途真文件存读档：内核（格式 {BeltKernel.FormatVersion}）、端口绑定与过滤、端口待推 / 缓存 / 累计、朝向与收货过滤、耐久表、被摧毁的虚影逐字段往返一致"
                 + (loaded1 == before ? string.Empty : $"\n存档前：{before}\n读档后：{loaded1}"));
             Expect(first == continuous && second == first,
                 "读档后接着跑 30 游戏秒，与不存档一直跑逐位一致（端口对账与转移都按世界步序号）；同一存档读两次结果一致"
@@ -1299,12 +1299,13 @@ namespace GameLogic.EditorTools
                     bool fields = src.Face == BeltConst.AnyFace && sink.Accept == BeltConst.AcceptAny && src.Pending == origSrc.Pending && src.Total == origSrc.Total
                                   && sink.Buffered == origSink.Buffered && sink.Buffered > 0 && sink.BufferCap == 5;
                     ulong hd = d.ComputeStateHash();
-                    snap.FormatVersion = 3;
+                    // FG3-LOG-04：格式 3 已是当前格式（网络块多了种类与节点设置）；比当前新的格式才是“不认识”。
+                    snap.FormatVersion = BeltKernel.FormatVersion + 1;
                     using (var f = new BeltKernel(BeltNetworkService.ReadConfig()))
                     {
                         bool future = !f.Deserialize(snap, out string futureErr) && futureErr == "format_version";
                         Expect(ok && err == null && fields && src.Connected && sink.Connected && hd == h && future,
-                            $"旧格式 1 的端口块（FG0-ARCH-02 存档）照常读：朝向 = 任意、收什么 = 任何，状态哈希与原内核一致；不认识的格式 3 整体拒绝（{err ?? "无问题"}）");
+                            $"旧格式 1 的端口块（FG0-ARCH-02 存档）照常读：朝向 = 任意、收什么 = 任何，状态哈希与原内核一致；不认识的格式 {BeltKernel.FormatVersion + 1} 整体拒绝（{err ?? "无问题"}）");
                     }
                 }
             }

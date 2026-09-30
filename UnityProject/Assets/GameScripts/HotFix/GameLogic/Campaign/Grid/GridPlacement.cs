@@ -49,6 +49,13 @@ namespace GameLogic.Campaign.Grid
         DragTooLong,
         BeltHasItems,
         ToolLocked,
+        // ── FG3-LOG-04（只追加）──
+        /// <summary>地下传送带没拖（入口 = 出口）或不是直线。</summary>
+        UndergroundShape,
+        /// <summary>地下传送带跨度超过这一等级的上限（FGR-LOG-023）。</summary>
+        UndergroundSpan,
+        /// <summary>地下已经有同方向的地下段经过。</summary>
+        UndergroundOccupied,
     }
 
     /// <summary>一条原因：原因码 + 文本键 + 参数（参数本身若是文本键，显示时按当前语言解析）。</summary>
@@ -103,6 +110,8 @@ namespace GameLogic.Campaign.Grid
                 case GridBlockReason.Relocating: return new GridReason(code, "grid.reason.relocating");
                 case GridBlockReason.RelocateUnderConstruction: return new GridReason(code, "grid.reason.relocate_building");
                 case GridBlockReason.RelocateSourceGone: return new GridReason(code, "grid.reason.relocate_source_gone");
+                // FG3-LOG-04：跨度超限与地下重叠的正式原因带参数（等级名、上限、交叉格），由 HomeGridService 构造；这里只给无参兜底。
+                case GridBlockReason.UndergroundShape: return new GridReason(code, "grid.reason.under_not_straight");
                 default: return new GridReason(code, "grid.reason.unknown_type");
             }
         }

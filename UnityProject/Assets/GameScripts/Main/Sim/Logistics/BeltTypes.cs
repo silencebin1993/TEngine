@@ -47,6 +47,64 @@ namespace BinGames.Sim.Logistics
 
         /// <summary>FG3-LOG-03（FGR-LOG-028）：露天传送带减速的上限（百分比）。</summary>
         public const int MaxSlowPercent = 90;
+
+        /// <summary>FG3-LOG-04（FGR-LOG-022）：分流器每个输出口的过滤——0 = 全部物品；<see cref="FilterNone"/> = 这个口不出；其余 = 只放这一种。</summary>
+        public const ushort FilterAny = 0;
+        public const ushort FilterNone = 0xFFFF;
+
+        /// <summary>FG3-LOG-04：分流比例每一边的份数上限（1～9，默认 1:1）。</summary>
+        public const int RatioMax = 9;
+
+        /// <summary>
+        /// FG3-LOG-04（FGR-LOG-023）：地下传送带入口到出口的距离硬上限（内核防御；按等级的跨度由热更层读表校验，初值 T1 4 / T2 6 / T3 8 格）。
+        /// 距离 = 出口与入口相差的格数（跨度 + 1）。
+        /// </summary>
+        public const int MaxUndergroundDistance = 32;
+
+        /// <summary>
+        /// FG3-LOG-04：地下段所在的“地下层”坐标偏移。地下段的格与地面的格同在一张表里，但 y 坐标加上偏移（南北向 / 东西向各一层），
+        /// 于是地下段不会与地面的传送带、建筑冲突，南北向与东西向的地下段可以交叉，同一方向的地下段不能重叠。
+        /// 地面坐标 |y| ≤ <see cref="CoordLimit"/>（2^24），两层的取值范围互不相交，也都在 int 范围内。
+        /// </summary>
+        public const int UnderLayerNS = 1 << 26;
+        public const int UnderLayerEW = 1 << 27;
+    }
+
+    /// <summary>FG3-LOG-04（FGR-LOG-022 / 023）：一格的种类。普通传送带之外是物流节点；地下段（<see cref="Underground"/>）不在地面上。</summary>
+    public enum BeltNodeKind : byte
+    {
+        Belt = 0,
+        /// <summary>分流器：从后方进，左右两口出（比例 / 优先输出口 / 每口过滤）。</summary>
+        Splitter = 1,
+        /// <summary>合流器：左右两侧进，从前方出（默认交替 / 优先输入口）。</summary>
+        Merger = 2,
+        /// <summary>地下传送带入口：从后方进，物品沿朝向走地下。</summary>
+        UndergroundIn = 3,
+        /// <summary>地下传送带出口：物品从地下冒出来继续向前（不从地面进料）。</summary>
+        UndergroundOut = 4,
+        /// <summary>地下段（入口与出口之间，坐标在地下层；不画、不占地面）。</summary>
+        Underground = 5,
+    }
+
+    /// <summary>FG3-LOG-04：节点的左 / 右口（相对节点朝向；0 = 不设）。</summary>
+    public enum BeltSide : byte
+    {
+        None = 0,
+        Left = 1,
+        Right = 2,
+    }
+
+    /// <summary>FG3-LOG-04：分流器一个输出口此刻的状态（悬停与节点面板读）。</summary>
+    public enum BeltOutletState : byte
+    {
+        /// <summary>接上了、能收。</summary>
+        Ok = 0,
+        /// <summary>接上了，但下游这一格入口没有空位（满了 / 堵住了）。</summary>
+        Full = 1,
+        /// <summary>这一侧没有能接的传送带。</summary>
+        Disconnected = 2,
+        /// <summary>这个口的过滤不收分流器里头一件物品（或设成了“不出”）。</summary>
+        Filtered = 3,
     }
 
     /// <summary>传送带朝向。与 GameLogic 的 GridDir 取值一致（N=0、E=1、S=2、W=3），格网 y 轴向北。</summary>
@@ -76,6 +134,12 @@ namespace BinGames.Sim.Logistics
         InvalidArgument = 8,
         /// <summary>坐标超出内核上限。</summary>
         OutOfRange = 9,
+        /// <summary>FG3-LOG-04：这种格不支持这个操作（例如地下传送带原地反转、给分流器改等级）。</summary>
+        NotSupported = 10,
+        /// <summary>FG3-LOG-04（FGR-LOG-023）：地下已经有同一方向（南北 / 东西）的地下段经过这里。</summary>
+        UndergroundOccupied = 11,
+        /// <summary>FG3-LOG-04（FGR-LOG-023）：地下传送带入口到出口太远（超过内核硬上限）。</summary>
+        TooFar = 12,
     }
 
     /// <summary>一格传送带为什么停着（FGR-LOG-025“下游满了就停下，物品不会消失”；悬停说明原因）。</summary>
@@ -92,6 +156,12 @@ namespace BinGames.Sim.Logistics
         MergeWait = 4,
         /// <summary>FG3-LOG-03：下游输入端口不收这一件（只收指定物品，或建筑还不收物品）。</summary>
         SinkRejects = 5,
+        /// <summary>FG3-LOG-04：正前方是物流节点，但它不从这一侧进料（分流器 / 地下入口只从后方进，合流器只从左右两侧进，地下出口不从地面进）。</summary>
+        WrongSide = 6,
+        /// <summary>FG3-LOG-04（FG03 第 5 节“分流器两个输出口都堵”）：能收这件物品的输出口都满了，分流器停止，上游随之堵塞。</summary>
+        SplitterFull = 7,
+        /// <summary>FG3-LOG-04：分流器没有输出口收这件物品（过滤不收 / 两侧都没接传送带）。</summary>
+        SplitterNoOutlet = 8,
     }
 
     public enum BeltPortKind : byte
@@ -205,6 +275,16 @@ namespace BinGames.Sim.Logistics
         public bool Covered;
         /// <summary>FG3-LOG-03：这一格现在被天气减速了多少（百分比；有顶棚或没有减速天气时为 0）。</summary>
         public int SlowPercent;
+        /// <summary>FG3-LOG-04：这一格的种类（普通传送带 / 分流器 / 合流器 / 地下入口 / 地下出口 / 地下段）。</summary>
+        public BeltNodeKind Kind;
+        /// <summary>汇入点现在轮到哪一侧（0～3；255 = 未设置）。诊断 / 自检用（存读档逐字段比对）。</summary>
+        public byte Turn;
+        /// <summary>FG3-LOG-04：下游是地下段（地下传送带入口）。此时 <see cref="NextX"/>/<see cref="NextY"/> 是这条地下传送带的出口（地面坐标）。</summary>
+        public bool NextUnderground;
+        /// <summary>FG3-LOG-04：原因为 <see cref="BeltBlock.WrongSide"/> 时，正前方那个节点的种类与坐标。</summary>
+        public BeltNodeKind FrontKind;
+        public int FrontX;
+        public int FrontY;
         public ushort Item0;
         public ushort Item1;
         public ushort Item2;
@@ -269,8 +349,71 @@ namespace BinGames.Sim.Logistics
         public byte Face;
         /// <summary>FG3-LOG-03：输入端口收什么（<see cref="BeltConst.AcceptAny"/> / <see cref="BeltConst.AcceptNone"/> / 物品编号）。</summary>
         public ushort Accept;
+        /// <summary>节拍计数（输出端口：距上次推出的步数；输入端口：消耗节拍）。诊断 / 自检用。</summary>
+        public int Phase;
 
         public float PerMinute => WindowSeconds > 0f ? InWindow * 60f / WindowSeconds : 0f;
+    }
+
+    /// <summary>
+    /// FG3-LOG-04（FGR-LOG-022 / 023；FGR-LOG-081 悬停“分流比例”）：一个物流节点的读数（热更层只读，O(1)）。
+    /// 分流器：比例、优先输出口、每口过滤、两个输出口的连接与此刻状态、累计与最近窗口的分出件数；
+    /// 合流器：优先输入口、两侧输入是否接上；地下传送带：入口 / 出口、距离、另一端、地下段里的件数与容量。
+    /// </summary>
+    public struct BeltNodeInfo
+    {
+        public BeltNodeKind Kind;
+        public int X;
+        public int Y;
+        public BeltDir Dir;
+        public byte Tier;
+        /// <summary>这一格上的件数与原因（分流器的原因由节点阶段写入）。</summary>
+        public int Count;
+        public BeltBlock Block;
+        public ushort HeadItem;
+
+        // 分流器
+        public int RatioL;
+        public int RatioR;
+        public BeltSide PriorityOut;
+        public ushort FilterL;
+        public ushort FilterR;
+        public bool OutLConnected;
+        public bool OutRConnected;
+        public int OutLX;
+        public int OutLY;
+        public int OutRX;
+        public int OutRY;
+        public BeltOutletState OutLState;
+        public BeltOutletState OutRState;
+        public long SentL;
+        public long SentR;
+        public int SentLInWindow;
+        public int SentRInWindow;
+        public float WindowSeconds;
+        /// <summary>分流器 / 地下入口：后方接了传送带（能进料）。</summary>
+        public bool InputConnected;
+
+        // 合流器
+        public BeltSide PriorityIn;
+        public bool InLConnected;
+        public bool InRConnected;
+
+        // 地下传送带（入口与出口都给出整条的数据）
+        /// <summary>出口与入口相差的格数（跨度 = 距离 − 1）。</summary>
+        public int Distance;
+        public int EntranceX;
+        public int EntranceY;
+        public int ExitX;
+        public int ExitY;
+        /// <summary>入口、地下段、出口都在（读档坏块等异常下为 false）。</summary>
+        public bool Intact;
+        /// <summary>入口 + 地下段 + 出口上的件数与总容量。</summary>
+        public int ItemsInside;
+        public int Capacity;
+
+        public float SentLPerMinute => WindowSeconds > 0f ? SentLInWindow * 60f / WindowSeconds : 0f;
+        public float SentRPerMinute => WindowSeconds > 0f ? SentRInWindow * 60f / WindowSeconds : 0f;
     }
 
     /// <summary>物品守恒账（FGT-LOG-006）：在带数 = 推上 + 放入 − 收下 − 移出。</summary>
@@ -301,7 +444,29 @@ namespace BinGames.Sim.Logistics
         public static int Dy(int dir) => dir == 0 ? 1 : dir == 2 ? -1 : 0;
         public static int Opposite(int dir) => (dir + 2) & 3;
 
+        /// <summary>FG3-LOG-04：朝向 <paramref name="dir"/> 时的左手方向（N→W、E→N、S→E、W→S）。</summary>
+        public static int Left(int dir) => (dir + 3) & 3;
+
+        /// <summary>FG3-LOG-04：朝向 <paramref name="dir"/> 时的右手方向（N→E、E→S、S→W、W→N）。</summary>
+        public static int Right(int dir) => (dir + 1) & 3;
+
         /// <summary>坐标键：高 32 位 = y（有符号），低 32 位 = x 映射到无符号保序。按键升序 = 按 (y, x) 升序（内核的规范顺序）。</summary>
         public static long Key(int x, int y) => ((long)y << 32) | (uint)(x ^ int.MinValue);
+
+        /// <summary>FG3-LOG-04：y 是不是地下层坐标（地面 |y| ≤ <see cref="BeltConst.CoordLimit"/>）。</summary>
+        public static bool IsUnderY(int y) => y > BeltConst.CoordLimit;
+
+        /// <summary>FG3-LOG-04：朝向 <paramref name="dir"/> 的地下段在地面 y 下方的地下层坐标（南北向 / 东西向各一层）。</summary>
+        public static int UnderY(int y, int dir) => y + ((dir & 1) == 0 ? BeltConst.UnderLayerNS : BeltConst.UnderLayerEW);
+
+        /// <summary>FG3-LOG-04：地下层坐标 → 地面 y（地面坐标原样返回）。</summary>
+        public static int SurfaceY(int y)
+        {
+            if (!IsUnderY(y))
+            {
+                return y;
+            }
+            return y > (BeltConst.UnderLayerNS + BeltConst.UnderLayerEW) / 2 ? y - BeltConst.UnderLayerEW : y - BeltConst.UnderLayerNS;
+        }
     }
 }

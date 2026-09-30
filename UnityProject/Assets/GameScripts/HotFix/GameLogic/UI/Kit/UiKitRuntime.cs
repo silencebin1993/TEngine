@@ -5,7 +5,7 @@ namespace GameLogic.UI.Kit
     /// <summary>
     /// FG0-UX-01：UI 基础件的挂载入口（由 <c>GameRoot.Startup</c> 调用，进程内只挂一次）。
     /// 每个面板一个 DontDestroyOnLoad 宿主、一个 UIDocument；分层（sortingOrder）见各面板的 Order 常量与
-    /// UI_WORKFLOW_GUIDE.md 第 4 节：反应弹字 -1（所有 HUD 之下）&lt; 建造栏 30030 &lt; 信号核 30035 &lt; 通知 30040 &lt; 施工队列 30045 &lt; 端口面板 30046 &lt; 暂停菜单 30070 &lt; 固件库 30072 &lt; 图鉴 30075 &lt; 统计 30076 &lt; 反应记录 30077 &lt; 按键面板 30080 &lt; 样例页 30090 &lt; 浮层 30200。
+    /// UI_WORKFLOW_GUIDE.md 第 4 节：反应弹字 -1（所有 HUD 之下）&lt; 建造栏 30030 &lt; 信号核 30035 &lt; 通知 30040 &lt; 施工队列 30045 &lt; 端口面板 30046 &lt; 节点面板 30047 &lt; 暂停菜单 30070 &lt; 固件库 30072 &lt; 图鉴 30075 &lt; 统计 30076 &lt; 反应记录 30077 &lt; 按键面板 30080 &lt; 样例页 30090 &lt; 浮层 30200。
     /// </summary>
     public static class UiKitRuntime
     {
@@ -38,6 +38,7 @@ namespace GameLogic.UI.Kit
             Create<MinimapHudUIToolkit>("[MinimapHost]"); // FG3-GEN-01：小地图（右下角 HUD，-2 层，不挡面板）。
             Create<ConstructionQueuePanelUIToolkit>("[ConstructionQueueHost]"); // FG3-LOG-02：施工队列（30045，通知之上、字幕之下）。
             Create<BeltPortPanelUIToolkit>("[BeltPortHost]"); // FG3-LOG-03：建筑端口面板（30046，施工队列之上、字幕之下）。
+            Create<BeltNodePanelUIToolkit>("[BeltNodeHost]"); // FG3-LOG-04：物流节点面板（分流器 / 合流器 / 地下传送带，30047，端口面板之上、字幕之下）。
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Create<UiKitGalleryUIToolkit>("[UiKitGalleryHost]");
 #endif
@@ -61,6 +62,7 @@ namespace GameLogic.UI.Kit
             StatsPanelUIToolkit.Close();
             ConstructionQueuePanelUIToolkit.Close();
             BeltPortPanelUIToolkit.Close();
+            BeltNodePanelUIToolkit.Close();
             StrategicMapUIToolkit.Close();
             NewGamePanelUIToolkit.Close();
             GameLogic.Campaign.Feedback.ReactionPopups.Clear();

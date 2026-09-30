@@ -123,6 +123,35 @@ namespace GameLogic.EditorTools
                     Object.DestroyImmediate(far);
                     Object.DestroyImmediate(blocked);
                 }
+
+                // FG3-LOG-04：节点图案（形状区分，不只靠颜色）。分流器 (2,0)、合流器 (5,0)、地下传送带 (8,0)→(10,0)（地下段在 (9,0) 下面，不画）。
+                using (var k = new BeltKernel(BeltNetworkService.ReadConfig()))
+                {
+                    k.AddNode(2, 0, BeltDir.East, 2, BeltNodeKind.Splitter);
+                    k.AddNode(5, 0, BeltDir.East, 2, BeltNodeKind.Merger);
+                    k.AddUnderground(8, 0, BeltDir.East, 0, 2);
+                    k.Step();
+                    Texture2D nodes = Render(renderer, k, cam, rt, 12f, st);
+                    Color splitBar = Px(nodes, 2f, 0.3f);
+                    Color splitStem = Px(nodes, 1.7f, 0f);
+                    Color splitFront = Px(nodes, 2.35f, 0f);
+                    Expect(splitBar.g > splitBar.r + 0.3f && splitBar.b > splitBar.r + 0.3f && splitStem.g > splitStem.r + 0.3f && Lum(splitFront) < Lum(splitBar) - 0.2f,
+                        $"分流器：横贯左右的横条 {Fmt(splitBar)} 与后半格的竖条 {Fmt(splitStem)} 亮青色，前半格中线没有竖条 {Fmt(splitFront)}（“一进两出”的形状）");
+                    Color mergeStem = Px(nodes, 5.3f, 0f);
+                    Color mergeBack = Px(nodes, 4.7f, 0f);
+                    Color mergeBar = Px(nodes, 5f, -0.3f);
+                    Expect(mergeStem.r > mergeStem.b + 0.3f && mergeBar.r > mergeBar.b + 0.3f && Lum(mergeBack) < Lum(mergeStem) - 0.2f,
+                        $"合流器：横条 {Fmt(mergeBar)} 与前半格的竖条 {Fmt(mergeStem)} 琥珀色，后半格中线没有竖条 {Fmt(mergeBack)}（“两进一出”的形状）");
+                    Color inMouth = Px(nodes, 8.3f, 0f);
+                    Color inBack = Px(nodes, 7.7f, 0f);
+                    Color outMouth = Px(nodes, 9.7f, 0f);
+                    Color outFront = Px(nodes, 10.3f, 0f);
+                    Color hidden = Px(nodes, 9f, 0f);
+                    Expect(Max(inMouth) < 0.08f && Max(inBack) > 0.1f && Max(outMouth) < 0.08f && Max(outFront) > 0.1f && Max(hidden) < 0.03f,
+                        $"地下传送带：入口前半格是黑色洞口 {Fmt(inMouth)}（后半格 {Fmt(inBack)}），出口后半格是洞口 {Fmt(outMouth)}（前半格 {Fmt(outFront)}），中间的地下段不画（{Fmt(hidden)}）");
+                    Save(nodes, "fg3-log-04-gpu-nodes.png");
+                    Object.DestroyImmediate(nodes);
+                }
             }
             catch (Exception e)
             {

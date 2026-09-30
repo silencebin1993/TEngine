@@ -194,6 +194,15 @@ namespace GameLogic.EditorTools
                     case 261: StepBeltCoreFocused(inStep); break;
                     case 262: StepBeltBuildClosedForFly(inStep); break;
                     case 263: StepBeltBuildReopenedAtCore(inStep); break;
+                    // FG3-LOG-04：分流器 / 地下传送带（建造菜单点选、放置预览、单击放分流器虚影、拖地下传送带：跨度超限给原因、正确拖放下；节点面板改比例、Esc）。
+                    case 264: StepNodeBuildReady(inStep); break;
+                    case 265: StepNodePreview(inStep); break;
+                    case 266: StepNodeSplitterPlaced(inStep); break;
+                    case 267: StepNodeUnderTooFar(inStep); break;
+                    case 268: StepNodeUnderPlaced(inStep); break;
+                    case 269: StepNodeDeselected(inStep); break;
+                    case 270: StepNodePanelOpened(inStep); break;
+                    case 271: StepNodePanelClosed(inStep); break;
                     case 129: StepRuinsCombat(inStep); break;
                     case 230: StepRuinsTagHover(inStep); break;
                     case 150: StepSignalOpened(inStep); break;
@@ -4951,10 +4960,210 @@ namespace GameLogic.EditorTools
             }
             Check(!ConstructionQueuePanelUIToolkit.IsOpen, "施工队列关闭");
             Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
-            if (mode != null && mode.IsOpen)
+            if (mode == null || !mode.IsOpen)
             {
-                PressKeyKeepMouse(KeyCode.Escape); // 只在建造模式开着时按 Esc（否则 Esc 会打开暂停菜单、把后面的步骤一起拖垮）
+                PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.OpenBuildMenu)); // 建造模式没开时按建造菜单键打开
             }
+            Next(264, "FG3-LOG-04：建造模式里放分流器与地下传送带");
+        }
+
+        // ── FG3-LOG-04：分流器 / 地下传送带 / 节点面板（真实鼠标 / 按键；放下的是虚影，机器施工由自检覆盖；最后用测试捷径清理，保持 22 格测试带）──
+
+        private static Campaign.Grid.GridCell NodeOrigin() =>
+            new Campaign.Grid.GridCell(SessionState.GetInt(K + "NodeX", 0), SessionState.GetInt(K + "NodeY", 0));
+
+        private static int HudItemIndex(string id)
+        {
+            BuildModeHudUIToolkit hud = BuildModeHudUIToolkit.Instance;
+            hud?.Refresh();
+            for (int i = 0; hud != null && i < hud.ItemCount; i++)
+            {
+                if (hud.ItemId(i) == id)
+                {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        private static void StepNodeBuildReady(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            Check(mode != null && mode.IsOpen, "建造模式开着");
+            // 核心附近（镜头里）按规则找一块 9×3 的空地，不写死坐标（B25）。
+            GridCell core = HomeGridService.CorePivot(state);
+            GridCell? area = null;
+            for (int r = 0; r <= 12 && area == null; r++)
+            {
+                for (int dy = -r; dy <= r && area == null; dy++)
+                {
+                    for (int dx = -r; dx <= r && area == null; dx++)
+                    {
+                        if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != r)
+                        {
+                            continue;
+                        }
+                        var o = new GridCell(core.X - 4 + dx, core.Y + 8 + dy);
+                        bool ok = true;
+                        for (int y = 0; y < 3 && ok; y++)
+                        {
+                            for (int x = 0; x < 9 && ok; x++)
+                            {
+                                ok = HomeGridService.ValidateBeltCell(state, new GridCell(o.X + x, o.Y + y)).Ok;
+                            }
+                        }
+                        if (ok)
+                        {
+                            area = o;
+                        }
+                    }
+                }
+            }
+            if (area == null)
+            {
+                Finish("核心附近找不到 9×3 的空地放分流器和地下传送带");
+                return;
+            }
+            SessionState.SetInt(K + "NodeX", area.Value.X);
+            SessionState.SetInt(K + "NodeY", area.Value.Y);
+            int logisticsTab = Campaign.Grid.GridContent.Categories.ToList().FindIndex(c => c.Id == "logistics");
+            bool tab = ClickUitk("[BuildModeHudHost]", "BuildCat" + logisticsTab);
+            int idx = HudItemIndex("splitter");
+            bool picked = idx >= 0 && ClickUitk("[BuildModeHudHost]", "BuildItem" + idx) && mode.SelectedToolId == "splitter";
+            Check(tab && picked, $"点“物流”页签里的“分流器”（第 {idx + 1} 项）：选中分流器（{mode?.SelectedToolId}）");
+            HoverWorld(new Vector3(area.Value.X + 1, 0f, area.Value.Y + 1));
+            Next(265, "鼠标移到空地上（放置预览）");
+        }
+
+        private static void StepNodePreview(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            string hint = BuildModeHudUIToolkit.Instance?.HintLabelText ?? string.Empty;
+            string cost = BuildModeHudUIToolkit.Instance?.CostLabelText ?? string.Empty;
+            Check(mode != null && mode.ToolPreview != null && mode.ToolPreview.Ok && mode.ToolPreview.Kind == BeltNodeKind.Splitter && mode.ActiveArrowCount == 3
+                  && hint.Contains("左右两口出") && cost.Contains("4"),
+                $"放置预览：指着的格是可放的虚影，画出 3 个进出口箭头（后方进、左右出）；提示行“{hint}”，成本行“{cost}”");
+            GridCell o = NodeOrigin();
+            ClickWorld(new Vector3(o.X + 1, 0f, o.Y + 1));
+            Next(266, "单击放下分流器虚影");
+        }
+
+        private static void StepNodeSplitterPlaced(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            GridCell o = NodeOrigin();
+            bool planned = Campaign.Regions.HomeValleyConstruction.TryFindPlannedCell(state, new GridCell(o.X + 1, o.Y + 1), out PlannedBeltRecord plan, out _)
+                           && plan.NodeKind == (int)BeltNodeKind.Splitter;
+            Check(planned && mode.StatusText.Contains("分流器"), $"单击放下分流器虚影（状态行“{mode?.StatusText}”）");
+            int idx = HudItemIndex("underground_t1");
+            bool picked = idx >= 0 && ClickUitk("[BuildModeHudHost]", "BuildItem" + idx) && mode.SelectedToolId == "underground_t1";
+            Check(picked, $"点“地下传送带 T1”：选中（{mode?.SelectedToolId}）");
+            DragWorld(new Vector3(o.X, 0f, o.Y), new Vector3(o.X + 7, 0f, o.Y), 0);
+            Next(267, "从入口按住左键向东拖 7 格（跨 6 格，超过 T1 的 4 格）");
+        }
+
+        private static void StepNodeUnderTooFar(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            GridCell o = NodeOrigin();
+            bool none = !Campaign.Regions.HomeValleyConstruction.TryFindPlannedCell(state, o, out _, out _);
+            Check(none && mode.StatusText.Contains("跨度超限") && mode.StatusText.Contains("最多跨 4 格"),
+                $"负向“地下带跨度超限”：松开后不放，状态行写原因“{mode?.StatusText}”");
+            DragWorld(new Vector3(o.X, 0f, o.Y), new Vector3(o.X + 5, 0f, o.Y), 0);
+            Next(268, "改成向东拖 5 格（跨 4 格）");
+        }
+
+        private static void StepNodeUnderPlaced(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            GridCell o = NodeOrigin();
+            bool planned = Campaign.Regions.HomeValleyConstruction.TryFindPlannedCell(state, o, out PlannedBeltRecord plan, out _)
+                           && Campaign.Regions.HomeValleyConstruction.IsUnderground(plan) && plan.Xs.Length == 2 && plan.Xs[1] == o.X + 5;
+            Check(planned, $"拖 5 格：放下地下传送带虚影（入口 {o} → 出口 ({o.X + 5}, {o.Y})，两端一份规划；状态行“{mode?.StatusText}”）");
+            // 测试捷径：一座已建成的分流器（机器施工由 FgBeltNodeSelfCheck F2 覆盖），用来点开节点面板。
+            BeltOpResult r = BeltNetworkService.TryPlaceNode(state, new GridCell(o.X + 4, o.Y + 2), BeltDir.East, 2, BeltNodeKind.Splitter);
+            Check(r.Ok, $"测试捷径：在 ({o.X + 4}, {o.Y + 2}) 放一座已建成的分流器（{r.Describe()}）");
+            RightClickWorld(new Vector3(o.X + 4, 0f, o.Y + 2));
+            Next(269, "右键取消选择");
+        }
+
+        private static void StepNodeDeselected(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Check(mode != null && mode.IsOpen && mode.SelectedToolId == null, "右键取消选择（建造模式还开着）");
+            GridCell o = NodeOrigin();
+            ClickWorld(new Vector3(o.X + 4, 0f, o.Y + 2));
+            Next(270, "空闲时左键点已建成的分流器（打开节点面板）");
+        }
+
+        private static void StepNodePanelOpened(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            BeltNodePanelUIToolkit panel = BeltNodePanelUIToolkit.Instance;
+            GridCell o = NodeOrigin();
+            var cell = new GridCell(o.X + 4, o.Y + 2);
+            bool open = BeltNodePanelUIToolkit.IsOpen && panel != null && panel.PanelVisible && panel.TitleText.Contains("分流器") && panel.SplitterSettingsVisible;
+            if (open)
+            {
+                panel.RatioLField.value = "2"; // 与在下拉框里选“2”同一个值变化回调（选中即生效）
+            }
+            BeltNetworkService.TryGetNode(cell, out BeltNodeInfo n);
+            Check(open && n.RatioL == 2 && n.RatioR == 1 && panel.DetailText.Contains("分流比例 左 : 右 = 2 : 1"),
+                $"节点面板（真 UXML）：“{panel?.TitleText}”；左口份数选 2 → 分流器 {n.RatioL}:{n.RatioR}，读数行“{panel?.DetailText?.Split('\n')[0]}”");
+            CheckNoTextMarkers("节点面板");
+            PressKeyKeepMouse(KeyCode.Escape);
+            Next(271, "Esc 关闭节点面板");
+        }
+
+        private static void StepNodePanelClosed(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            Check(!BeltNodePanelUIToolkit.IsOpen && mode != null && mode.IsOpen, "Esc 只关掉节点面板，建造模式还开着");
+            // 测试捷径清理：取消两份虚影、拆掉测试分流器（后面的存读档步骤按 22 格核对测试带）。
+            GridCell o = NodeOrigin();
+            HomeGridService.TryRemoveBelts(state, new List<GridCell> { new GridCell(o.X + 1, o.Y + 1), o });
+            BeltNetworkService.TryRemove(state, new GridCell(o.X + 4, o.Y + 2), new List<ushort>());
+            bool clean = !Campaign.Regions.HomeValleyConstruction.TryFindPlannedCell(state, o, out _, out _)
+                         && !Campaign.Regions.HomeValleyConstruction.TryFindPlannedCell(state, new GridCell(o.X + 5, o.Y), out _, out _)
+                         && !BeltNetworkService.Kernel.HasCell(o.X + 4, o.Y + 2) && BeltNetworkService.Kernel.CellCount == SessionState.GetInt(K + "BeltCells", -1);
+            Check(clean, $"清理：两份虚影取消（地下两端一起），测试分流器拆掉（内核回到 {BeltNetworkService.Kernel.CellCount} 格）");
+            PressKeyKeepMouse(KeyCode.Escape);
             Next(140, "Esc 退出建造模式；FG0-ARCH-03：家园突袭战斗原型（测试捷径）");
         }
 

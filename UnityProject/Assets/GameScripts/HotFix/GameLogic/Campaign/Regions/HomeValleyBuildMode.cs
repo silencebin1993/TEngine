@@ -91,6 +91,8 @@ namespace GameLogic.Campaign.Regions
         public GridCell DragStart { get; private set; }
         /// <summary>拖拽传送带时的路径规划（长度、成本、逐格合法性）；没在拖传送带时为 null。</summary>
         public BeltPathPlan BeltPlan { get; private set; }
+        /// <summary>FG3-LOG-04：选中工具但没在拖时，鼠标指着那一格的放置预览（能不能放、朝向、分流器 / 合流器的进出口箭头）；没选工具时为 null。</summary>
+        public BeltPathPlan ToolPreview { get; private set; }
         /// <summary>框选拆除时的规划；没在拉框时为 null。</summary>
         public DemolishBoxPlan BoxPlan { get; private set; }
         /// <summary>最近一次操作的结果文字（当前语言）与是否为失败。</summary>
@@ -106,6 +108,8 @@ namespace GameLogic.Campaign.Regions
         private readonly List<GridCell> _cells = new List<GridCell>(32);
         private readonly GridPlacementResult _previewBuffer = new GridPlacementResult();
         private readonly BeltPathPlan _beltBuffer = new BeltPathPlan();
+        private readonly BeltPathPlan _toolPreviewBuffer = new BeltPathPlan();
+        private int _toolPreviewKey = int.MinValue;
         private readonly DemolishBoxPlan _boxBuffer = new DemolishBoxPlan();
         private readonly BeltClearPlan _clearBuffer = new BeltClearPlan();
         private GameObject _root;
@@ -190,6 +194,7 @@ namespace GameLogic.Campaign.Regions
             SelectedToolId = null;
             CancelDrag();
             Preview = null;
+            ToolPreview = null;
             InputRouter.SetBuildMode(false);
             UiEscapeStack.Remove(this);
             DestroyVisuals();
@@ -225,6 +230,7 @@ namespace GameLogic.Campaign.Regions
             SelectedTypeId = null;
             SelectedToolId = null;
             Preview = null;
+            ToolPreview = null;
             CancelDrag();
             _previewKey = int.MinValue;
             Revision++;
@@ -375,6 +381,24 @@ namespace GameLogic.Campaign.Regions
         /// <summary>FG3-LOG-03：原地反转鼠标指着的传送带（成功写“现在朝 X”，失败写原因）。</summary>
         public GridOpResult ReverseHoveredBelt(CampaignState state)
         {
+            // FG3-LOG-04：分流器 / 合流器 = 原地顺时针转 90°（物品不丢）；地下传送带不能原地转（写原因：拆掉重拖）。
+            if (BeltNetworkService.TryGetPiece(HoverCell, out BeltNodeKind kind, out int tier) && kind != BeltNodeKind.Belt)
+            {
+                BeltOpResult nr = BeltNetworkService.TryRotateNode(state, HoverCell);
+                if (!nr.Ok)
+                {
+                    LastResult = GridOpResult.Fail(new GridReason(GridBlockReason.Busy, nr.ReasonKey, nr.Args));
+                    SetStatus(nr.Describe(), true);
+                    Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Denied, StatusText);
+                    return LastResult;
+                }
+                BeltNetworkService.Kernel.TryGetCellInfo(HoverCell.X, HoverCell.Y, out BeltCellInfo turned);
+                LastResult = new GridOpResult(GridOpResult.Kind.BeltReversed, null);
+                SetStatus(GameText.Format("ui.build.node_rotated", BeltNetworkService.PieceName(kind, tier), HoverCell.X, HoverCell.Y,
+                    GameText.Get(GridMath.DirTextKey((GridDir)turned.Dir))), false);
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.CommandAck, StatusText);
+                return LastResult;
+            }
             BeltOpResult r = BeltNetworkService.TryReverse(state, HoverCell);
             if (!r.Ok)
             {
@@ -498,6 +522,11 @@ namespace GameLogic.Campaign.Regions
             }
             // 空闲状态点建筑：只显示它的信息（名字、朝向、端口、是否在搬迁），不做任何改动。
             BuildingRecord info = HomeGridService.BuildingAt(state, cell);
+            // FG3-LOG-04：空闲状态点已建成的分流器 / 合流器 / 地下传送带 = 打开它的节点面板（比例、优先口、过滤、预设）。
+            if (info == null && !DemolishMode && !RelocateMode && !PrioritizeMode && !ClearMode && OpenNodePanel(state, cell))
+            {
+                return new GridOpResult(GridOpResult.Kind.Failed, null);
+            }
             SetStatus(info != null ? DescribeBuilding(state, info) : string.Empty, false);
             return new GridOpResult(GridOpResult.Kind.Failed, info?.BuildingId);
         }
@@ -633,6 +662,17 @@ namespace GameLogic.Campaign.Regions
                     }
                     break;
             }
+        }
+
+        /// <summary>FG3-LOG-04：打开物流节点（分流器 / 合流器 / 地下传送带）的面板；这一格不是节点时返回 false。</summary>
+        public bool OpenNodePanel(CampaignState state, GridCell cell)
+        {
+            if (state == null || !BeltNetworkService.TryGetNode(cell, out _))
+            {
+                return false;
+            }
+            BeltNodePanelUIToolkit.Open(cell);
+            return true;
         }
 
         /// <summary>FG3-LOG-03：打开建筑的端口面板（没有端口的建筑不打开，状态行照旧写建筑信息）。</summary>
@@ -1105,6 +1145,7 @@ namespace GameLogic.Campaign.Regions
         /// 选中建筑：按玩家新放置校验；搬迁模式里正搬着一座建筑：按“移动已有建筑”校验（忽略它自己与它的搬迁虚影）。</summary>
         public void RefreshPreview(CampaignState state)
         {
+            RefreshToolPreview(state);
             if (Drag == DragKind.Relocate)
             {
                 return; // 拖着搬迁的预览在 RefreshDrag 里算（跟着拖拽终点）。
@@ -1157,6 +1198,69 @@ namespace GameLogic.Campaign.Regions
         }
 
         private readonly List<string> _cutOffScratch = new List<string>(4);
+
+        /// <summary>
+        /// FG3-LOG-04：选中工具、没在拖时的放置预览（鼠标换格 / 换朝向 / 换工具 / 废料变化时才重算，O(1)）。
+        /// 地下传送带还没拖出第二格时只校验入口这一格（“要拖到出口”不算错误，提示行写怎么拖）。
+        /// </summary>
+        private void RefreshToolPreview(CampaignState state)
+        {
+            if (SelectedToolId == null || Drag != DragKind.None || !HasHover || state == null)
+            {
+                if (ToolPreview != null)
+                {
+                    ToolPreview = null;
+                    _toolPreviewKey = int.MinValue;
+                    Revision++;
+                }
+                return;
+            }
+            int key = HashCode(HoverCell.X, HoverCell.Y, GhostRotation, SelectedToolId.GetHashCode() ^ state.Scrap * 7919);
+            if (key == _toolPreviewKey && ToolPreview != null)
+            {
+                return;
+            }
+            _toolPreviewKey = key;
+            ToolPreview = HomeGridService.PlanBeltPath(state, SelectedToolId, HoverCell, HoverCell, HomeGridService.BeltDirOf(GhostRotation), _toolPreviewBuffer);
+            if (ToolPreview.Kind == BeltNodeKind.UndergroundIn && ToolPreview.Reason is GridReason why && why.Code == GridBlockReason.UndergroundShape)
+            {
+                ToolPreview.Reason = null;
+            }
+            Revision++;
+        }
+
+        /// <summary>FG3-LOG-04：一个节点（或地下传送带两端）的进出口箭头（输出长箭头朝外、输入短箭头朝里，形状区分，不只靠颜色）。</summary>
+        private int PlaceNodeArrows(int arrow, BeltPathPlan plan)
+        {
+            if (plan == null || plan.Cells.Count == 0 || plan.Dirs.Count == 0)
+            {
+                return arrow;
+            }
+            GridCell p = plan.Cells[0];
+            int d = (int)plan.Dirs[0];
+            switch (plan.Kind)
+            {
+                case BeltNodeKind.Splitter:
+                    PlaceArrow(arrow++, new PortPlacement("in", p, (GridDir)BeltDirs.Opposite(d), false));
+                    PlaceArrow(arrow++, new PortPlacement("left", p, (GridDir)BeltDirs.Left(d), true));
+                    PlaceArrow(arrow++, new PortPlacement("right", p, (GridDir)BeltDirs.Right(d), true));
+                    break;
+                case BeltNodeKind.Merger:
+                    PlaceArrow(arrow++, new PortPlacement("left", p, (GridDir)BeltDirs.Left(d), false));
+                    PlaceArrow(arrow++, new PortPlacement("right", p, (GridDir)BeltDirs.Right(d), false));
+                    PlaceArrow(arrow++, new PortPlacement("out", p, (GridDir)d, true));
+                    break;
+                case BeltNodeKind.UndergroundIn:
+                    PlaceArrow(arrow++, new PortPlacement("in", p, (GridDir)BeltDirs.Opposite(d), false));
+                    GridCell exit = plan.Cells[plan.Cells.Count - 1];
+                    PlaceArrow(arrow++, new PortPlacement("out", exit, (GridDir)d, true));
+                    break;
+                default:
+                    PlaceArrow(arrow++, new PortPlacement("out", p, (GridDir)d, true));
+                    break;
+            }
+            return arrow;
+        }
 
         private static int HashCode(int a, int b, int c, int d) => unchecked(((a * 397) ^ b) * 397 ^ c) * 397 ^ d;
 
@@ -1214,7 +1318,9 @@ namespace GameLogic.Campaign.Regions
                     Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.CommandAck, StatusText);
                     break;
                 case GridOpResult.Kind.BeltsPlaced:
-                    SetStatus(GameText.Format("ui.build.belts_planned", HomeGridService.LastBeltCount, HomeGridService.LastBeltScrap), false);
+                    SetStatus(HomeGridService.LastPlanKind != BeltNodeKind.Belt
+                        ? GameText.Format("ui.build.node_planned", BeltNetworkService.PieceName(HomeGridService.LastPlanKind, HomeGridService.LastPlanTier), HomeGridService.LastBeltScrap)
+                        : GameText.Format("ui.build.belts_planned", HomeGridService.LastBeltCount, HomeGridService.LastBeltScrap), false);
                     Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.CommandAck, StatusText);
                     break;
                 case GridOpResult.Kind.BeltsRemoved:
@@ -1391,12 +1497,44 @@ namespace GameLogic.Campaign.Regions
             int arrow = 0;
             bool showCross = false;
             bool showBox = false;
-            if (BeltPlan != null)
+            BeltPathPlan shown = BeltPlan ?? ToolPreview;
+            if (shown != null && BeltPlan == null && Preview == null)
+            {
+                // FG3-LOG-04：选中工具但没在拖——指着的那一格是虚影（绿 / 红），分流器 / 合流器 / 地下入口画出进出口箭头。
+                PlaceTile(tile++, shown.Cells[0], shown.Ok ? _okMaterial : _badMaterial, 0.35f);
+                arrow = PlaceNodeArrows(arrow, shown);
+                if (!shown.Ok)
+                {
+                    showCross = true;
+                    foreach (Transform bar in _cross.transform)
+                    {
+                        bar.localScale = new Vector3(1.4f, 0.15f, 0.3f);
+                    }
+                    _cross.transform.position = new Vector3(shown.Cells[0].X, 0.6f, shown.Cells[0].Y);
+                }
+            }
+            else if (BeltPlan != null)
             {
                 for (int i = 0; i < BeltPlan.Cells.Count && tile < 512; i++)
                 {
                     bool ok = BeltPlan.Ok || (i < BeltPlan.CellOk.Count && BeltPlan.CellOk[i] && BeltPlan.FirstBadIndex != i);
                     PlaceTile(tile++, BeltPlan.Cells[i], ok && BeltPlan.Ok ? _okMaterial : _badMaterial, 0.35f);
+                }
+                if (BeltPlan.Kind == BeltNodeKind.UndergroundIn && BeltPlan.Cells.Count == 2)
+                {
+                    // FG3-LOG-04：地下段画成一串小方块（在地下，占位表现），看得出跨过哪几格。
+                    int dd = (int)BeltPlan.Dirs[0];
+                    for (int s = 1; s < BeltPlan.Distance && tile < 512; s++)
+                    {
+                        var under = new GridCell(BeltPlan.Cells[0].X + BeltDirs.Dx(dd) * s, BeltPlan.Cells[0].Y + BeltDirs.Dy(dd) * s);
+                        PlaceTile(tile, under, BeltPlan.Ok ? _okMaterial : _badMaterial, 0.2f);
+                        _tiles[tile].transform.localScale = new Vector3(0.3f, 0.05f, 0.3f);
+                        tile++;
+                    }
+                }
+                if (BeltPlan.Kind != BeltNodeKind.Belt)
+                {
+                    arrow = PlaceNodeArrows(arrow, BeltPlan);
                 }
                 if (!BeltPlan.Ok && BeltPlan.Cells.Count > 0)
                 {
@@ -1535,6 +1673,7 @@ namespace GameLogic.Campaign.Regions
             GameObject go = _tiles[index];
             go.SetActive(true);
             go.transform.position = new Vector3(cell.X, height, cell.Y);
+            go.transform.localScale = new Vector3(0.9f, 0.08f, 0.9f); // FG3-LOG-04：地下段的小方块会改尺寸，池化复用时先复原。
             Renderer r = go.GetComponent<Renderer>();
             if (r.sharedMaterial != material)
             {

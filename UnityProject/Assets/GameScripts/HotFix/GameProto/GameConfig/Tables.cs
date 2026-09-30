@@ -91,6 +91,10 @@ public partial class Tables
     /// </summary>
     public cell.TbStructuralTriggerHookParams TbStructuralTriggerHookParams {get; }
     /// <summary>
+    /// 过滤器预设
+    /// </summary>
+    public fg.TbBeltFilterPreset TbBeltFilterPreset {get; }
+    /// <summary>
     /// 建造菜单分类
     /// </summary>
     public fg.TbBuildCategory TbBuildCategory {get; }
@@ -265,6 +269,7 @@ public partial class Tables
         TbStatusEffect = new cell.TbStatusEffect(loader("cell_tbstatuseffect"));
         TbStructuralEffectParams = new cell.TbStructuralEffectParams(loader("cell_tbstructuraleffectparams"));
         TbStructuralTriggerHookParams = new cell.TbStructuralTriggerHookParams(loader("cell_tbstructuraltriggerhookparams"));
+        TbBeltFilterPreset = new fg.TbBeltFilterPreset(loader("fg_tbbeltfilterpreset"));
         TbBuildCategory = new fg.TbBuildCategory(loader("fg_tbbuildcategory"));
         TbBuilding = new fg.TbBuilding(loader("fg_tbbuilding"));
         TbBuildingGrid = new fg.TbBuildingGrid(loader("fg_tbbuildinggrid"));
@@ -328,6 +333,7 @@ public partial class Tables
         TbStatusEffect.ResolveRef(this);
         TbStructuralEffectParams.ResolveRef(this);
         TbStructuralTriggerHookParams.ResolveRef(this);
+        TbBeltFilterPreset.ResolveRef(this);
         TbBuildCategory.ResolveRef(this);
         TbBuilding.ResolveRef(this);
         TbBuildingGrid.ResolveRef(this);

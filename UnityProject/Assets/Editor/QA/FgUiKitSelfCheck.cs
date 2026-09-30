@@ -1443,8 +1443,9 @@ namespace GameLogic.EditorTools
             // FG2-FW-05 新增 FirmwareLibraryPanel.uxml（固件库），共 13 份；
             // FG3-GEN-01 新增 NewGamePanel.uxml（新游戏设置）、StrategicMap.uxml（战略地图）、Minimap.uxml（小地图），共 16 份；
             // FG3-LOG-02 新增 ConstructionQueuePanel.uxml（施工队列）与 ConstructionQueueRow.uxml（队列行模板），共 18 份；
-            // FG3-LOG-03 新增 BeltPortPanel.uxml（建筑端口面板）与 BeltPortRow.uxml（端口行模板），共 20 份。
-            Expect(uxmlCount == 20 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
+            // FG3-LOG-03 新增 BeltPortPanel.uxml（建筑端口面板）与 BeltPortRow.uxml（端口行模板），共 20 份；
+            // FG3-LOG-04 新增 BeltNodePanel.uxml（分流器 / 合流器 / 地下带设置面板），共 21 份。
+            Expect(uxmlCount == 21 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
 
             string[] codeDirs =
             {

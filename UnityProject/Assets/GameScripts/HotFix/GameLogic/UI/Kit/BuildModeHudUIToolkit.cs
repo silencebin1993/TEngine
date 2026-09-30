@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using BinGames.Sim.Logistics;
 using GameConfig.fg;
 using GameLogic.Campaign;
 using GameLogic.Campaign.Grid;
@@ -76,6 +78,8 @@ namespace GameLogic.UI.Kit
         public bool PanelVisible => _panel != null && !_panel.ClassListContains("uk-hidden");
         public bool HotbarVisible => _hotbar != null && !_hotbar.ClassListContains("uk-hidden");
         public string StatusLabelText => _status?.text ?? string.Empty;
+        /// <summary>FG3-LOG-04：提示行（选中分流器 / 合流器 / 地下传送带时各有自己的操作说明；自检读）。</summary>
+        public string HintLabelText => _hint?.text ?? string.Empty;
         public string CostLabelText => _cost != null && !_cost.ClassListContains("uk-hidden") ? _cost.text : string.Empty;
         public string DragInfoText => _dragInfo != null && !_dragInfo.ClassListContains("uk-hidden") ? _dragInfo.text : string.Empty;
         public string CaptionText => _caption?.text ?? string.Empty;
@@ -475,13 +479,45 @@ namespace GameLogic.UI.Kit
             }
             if (mode.SelectedToolId != null)
             {
-                return GameText.Format("ui.build.hint_tool", rotate);
+                // FG3-LOG-04：分流器 / 合流器单击放置、地下传送带从入口拖到出口，各有自己的提示。
+                return GridContent.TryGetTool(mode.SelectedToolId, out BuildTool selected) ? ToolHint(selected, rotate) : GameText.Format("ui.build.hint_tool", rotate);
             }
             if (mode.SelectedTypeId != null)
             {
                 return GameText.Format("ui.build.hint_place", rotate);
             }
             return GameText.Format("ui.build.hint_idle", rotate, InputDisplay.ForAction(GameActionId.DemolishMode));
+        }
+
+        /// <summary>FG3-LOG-04：选中工具时的操作提示（传送带拖拽 / 分流器、合流器单击 / 地下传送带从入口拖到出口）。</summary>
+        public static string ToolHint(BuildTool tool, string rotate)
+        {
+            switch (tool.Kind)
+            {
+                case "splitter":
+                    return GameText.Format("ui.build.hint_splitter", rotate);
+                case "merger":
+                    return GameText.Format("ui.build.hint_merger", rotate);
+                case "underground":
+                    return GameText.Format("ui.build.hint_underground", GameText.Get(tool.NameKey), BeltNetworkService.UndergroundSpan(tool.Tier));
+                default:
+                    return GameText.Format("ui.build.hint_tool", rotate);
+            }
+        }
+
+        /// <summary>FG3-LOG-04：建造菜单里工具条目的第二行（传送带每格 / 分流器、合流器每座 / 地下传送带每端与最大跨度）。</summary>
+        public static string ToolCostLine(BuildTool tool)
+        {
+            switch (tool.Kind)
+            {
+                case "splitter":
+                case "merger":
+                    return GameText.Format("ui.build.tool_cost_node", tool.ScrapPerCell);
+                case "underground":
+                    return GameText.Format("ui.build.tool_cost_under", tool.ScrapPerCell, tool.ScrapPerCell * 2, BeltNetworkService.UndergroundSpan(tool.Tier));
+                default:
+                    return GameText.Format("ui.build.tool_cost", tool.ScrapPerCell);
+            }
         }
 
         private void RefreshCost(HomeValleyBuildMode mode, CampaignState state)
@@ -493,7 +529,7 @@ namespace GameLogic.UI.Kit
             }
             else if (mode.SelectedToolId != null && GridContent.TryGetTool(mode.SelectedToolId, out BuildTool tool))
             {
-                cost = tool.ScrapPerCell;
+                cost = tool.Kind == "underground" ? tool.ScrapPerCell * 2 : tool.ScrapPerCell;
             }
             if (cost < 0)
             {
@@ -511,13 +547,27 @@ namespace GameLogic.UI.Kit
         {
             BeltPathPlan belt = mode.BeltPlan;
             DemolishBoxPlan box = mode.BoxPlan;
-            if (belt != null)
+            if (belt != null && belt.Kind == BeltNodeKind.UndergroundIn)
+            {
+                // FG3-LOG-04（FGR-LOG-023）：拖地下传送带时写这次的跨度、上限与两端的成本。
+                SetVisible(_dragInfo, true);
+                int shortBy = belt.TotalCost - belt.Stock;
+                int span = Math.Max(0, belt.Distance - 1);
+                _dragInfo.text = shortBy > 0
+                    ? GameText.Format("ui.build.drag_info_under_short", span, belt.MaxSpan, belt.TotalCost, belt.Stock, shortBy)
+                    : GameText.Format("ui.build.drag_info_under", span, belt.MaxSpan, belt.TotalCost, belt.Stock);
+            }
+            else if (belt != null && belt.Kind == BeltNodeKind.Belt)
             {
                 SetVisible(_dragInfo, true);
                 int shortBy = belt.TotalCost - belt.Stock;
                 _dragInfo.text = shortBy > 0
                     ? GameText.Format("ui.build.drag_info_short", belt.Length, belt.TotalCost, belt.Stock, shortBy)
                     : GameText.Format("ui.build.drag_info", belt.Length, belt.TotalCost, belt.Stock);
+            }
+            else if (belt != null)
+            {
+                SetVisible(_dragInfo, false); // 分流器 / 合流器一次放一座：成本在成本行。
             }
             else if (box != null)
             {
@@ -528,7 +578,7 @@ namespace GameLogic.UI.Kit
             {
                 SetVisible(_dragInfo, true);
                 BeltClearPlan cp = mode.ClearPlan;
-                _dragInfo.text = GameText.Format("ui.build.clear_box", cp.Max.X - cp.Min.X + 1, cp.Max.Y - cp.Min.Y + 1, cp.Cells.Count, cp.Items);
+                _dragInfo.text = GameText.Format("ui.build.clear_box", cp.Max.X - cp.Min.X + 1, cp.Max.Y - cp.Min.Y + 1, cp.SurfaceCells, cp.Items);
             }
             else if (mode.Drag == HomeValleyBuildMode.DragKind.PrioritizeBox && mode.PrioritizeBoxCount >= 0)
             {
@@ -548,7 +598,8 @@ namespace GameLogic.UI.Kit
             bool error = mode.StatusIsError;
             bool warning = false;
             GridPlacementResult preview = mode.Preview;
-            BeltPathPlan belt = mode.BeltPlan;
+            // FG3-LOG-04：没在拖的时候，选中的工具也有指着哪一格的预览（放置前就能看到能不能放、朝向与进出口）。
+            BeltPathPlan belt = mode.BeltPlan ?? mode.ToolPreview;
             if (belt != null)
             {
                 if (!belt.Ok)
@@ -689,7 +740,7 @@ namespace GameLogic.UI.Kit
                 }
                 else if (e.IsTool)
                 {
-                    line2 = GameText.Format("ui.build.tool_cost", e.Tool.ScrapPerCell);
+                    line2 = ToolCostLine(e.Tool);
                 }
                 else
                 {

@@ -41,11 +41,11 @@ public sealed partial class BuildTool : Luban.BeanBase
     /// </summary>
     public readonly string Id;
     /// <summary>
-    /// belt=传送带(按住拖拽铺设)
+    /// belt=传送带(按住拖拽铺设);splitter=分流器;merger=合流器(单击放置);underground=地下传送带(从入口拖到出口)
     /// </summary>
     public readonly string Kind;
     /// <summary>
-    /// 传送带等级:0=T1,1=T2,2=T3
+    /// 传送带等级:0=T1,1=T2,2=T3(分流器/合流器=内部速度档)
     /// </summary>
     public readonly int Tier;
     /// <summary>

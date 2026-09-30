@@ -432,8 +432,10 @@ namespace GameLogic.EditorTools
             CampaignState s = NewHome(3101);
             var list = new List<BuildEntry>();
             BuildCatalog.List("logistics", null, list);
-            // FG3-LOG-03：物流里有三级传送带，T1 排第一。
-            bool logistics = list.Count == 3 && list[0].Id == "belt_t1" && list[1].Id == "belt_t2" && list[2].Id == "belt_t3" && list.All(x => x.IsTool);
+            // FG3-LOG-03：物流里有三级传送带，T1 排第一。FG3-LOG-04：其后是分流器、合流器与三级地下传送带（共 8 项，全是工具）。
+            string[] logisticsOrder = { "belt_t1", "belt_t2", "belt_t3", "splitter", "merger", "underground_t1", "underground_t2", "underground_t3" };
+            bool logistics = list.Select(x => x.Id).SequenceEqual(logisticsOrder) && list.All(x => x.IsTool);
+            string logisticsIds = string.Join(",", list.Select(x => x.Id));
             BuildCatalog.List("energy", null, list);
             bool energy = list.Any(e => e.Id == "generator_2");
             BuildCatalog.List("signal", null, list);
@@ -441,7 +443,7 @@ namespace GameLogic.EditorTools
             BuildCatalog.List("defense", null, list);
             bool emptyCat = list.Count == 0;
             Expect(logistics && energy && signal && emptyCat && BuildCatalog.FirstNonEmptyCategory() == "logistics",
-                "分类：物流里有传送带 T1 / T2 / T3、能源里有发电机、信号里有信号中继塔；防御类暂时为空；默认打开第一个有条目的分类");
+                $"分类：物流里依次有传送带 T1 / T2 / T3、分流器、合流器、地下传送带 T1 / T2 / T3（实际 {logisticsIds}）、能源里有发电机、信号里有信号中继塔；防御类暂时为空；默认打开第一个有条目的分类");
 
             BuildCatalog.List("defense", "中继", list);
             bool byName = list.Count == 1 && list[0].Id == "signal_relay";
@@ -606,6 +608,8 @@ namespace GameLogic.EditorTools
                 [GridBlockReason.Occupied] = "grid.reason.occupied", [GridBlockReason.Obstacle] = "grid.reason.obstacle", [GridBlockReason.InsufficientScrap] = "grid.reason.insufficient_scrap",
                 [GridBlockReason.WorldLimit] = "grid.reason.world_limit", [GridBlockReason.ExitBlocked] = "grid.reason.exit_blocked", [GridBlockReason.ExitTerrain] = "grid.reason.exit_terrain",
                 [GridBlockReason.DragTooLong] = "grid.reason.drag_too_long", [GridBlockReason.BeltHasItems] = "grid.reason.belt_has_items", [GridBlockReason.ToolLocked] = "grid.reason.not_unlocked_tool",
+                // FG3-LOG-04：跨度超限、地下同向重叠带参数，由 HomeGridService.CheckUndergroundShape 构造（行为断言在 FgBeltNodeSelfCheck F2）。
+                [GridBlockReason.UndergroundSpan] = "grid.reason.under_too_far", [GridBlockReason.UndergroundOccupied] = "grid.reason.under_occupied",
             };
             var missing = new List<string>();
             foreach (GridBlockReason c in codes)
@@ -1584,8 +1588,8 @@ namespace GameLogic.EditorTools
                 hud.BindView(root);
                 mode.Open();
                 hud.Refresh();
-                bool tabs = hud.CategoryCount == 12 && hud.SelectedCategoryId == "logistics" && hud.CategoryText(0).Contains("物流（3）") && hud.ItemCount == 3
-                            && hud.ItemText(0).Contains("传送带 T1") && hud.ItemText(0).Contains("每格 1 废料"); // FG3-LOG-03：物流里有 T1 / T2 / T3 三级
+                bool tabs = hud.CategoryCount == 12 && hud.SelectedCategoryId == "logistics" && hud.CategoryText(0).Contains("物流（8）") && hud.ItemCount == 8
+                            && hud.ItemText(0).Contains("传送带 T1") && hud.ItemText(0).Contains("每格 1 废料"); // FG3-LOG-03：T1 / T2 / T3 三级；FG3-LOG-04：+ 分流器、合流器、三级地下带
                 Expect(tabs, $"建造菜单：12 个分类页签（“{hud.CategoryText(0)}”），默认物流，条目“{hud.ItemText(0).Replace("\n", " ")}”");
 
                 hud.SelectCategory("energy");
@@ -1601,7 +1605,7 @@ namespace GameLogic.EditorTools
                 hud.SetSearch("没有这种东西");
                 bool noMatch = hud.ItemCount == 0 && hud.EmptyText.Contains("没有找到");
                 hud.SelectCategory("logistics");
-                bool cleared = hud.ItemCount == 3 && hud.ItemId(0) == "belt_t1";
+                bool cleared = hud.ItemCount == 8 && hud.ItemId(0) == "belt_t1";
                 Expect(search && noMatch && cleared, $"搜索“中继”→ 1 项（“{hud.CaptionText}”）；查不到给说明；点分类页签清掉搜索回到分类");
 
                 mode.Select("generator_2");

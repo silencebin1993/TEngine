@@ -557,20 +557,23 @@ namespace GameLogic.Campaign.Regions
             {
                 return ProgressResult.SiteGone;
             }
-            float sec = BeltSecondsPerCell;
+            // FG3-LOG-04：地下传送带两端一起建成——一次施工单位 = 两端的材料与两格的工时；其余每格一个单位。
+            int unitCells = IsUnderground(p) ? 2 : 1;
+            int unitCost = p.ScrapPerCell * unitCells;
+            float sec = BeltSecondsPerCell * unitCells;
             order.Duration = sec;
             int next = NextUnbuilt(p);
             if (next < 0)
             {
                 return ProgressResult.Complete;
             }
-            if (p.Delivered < p.ScrapPerCell)
+            if (p.Delivered < unitCost)
             {
                 return ProgressResult.NeedMaterials;
             }
             order.Progress += dt;
             bool builtOne = false;
-            while (next >= 0 && order.Progress >= sec - 1e-4f && p.Delivered >= p.ScrapPerCell)
+            while (next >= 0 && order.Progress >= sec - 1e-4f && p.Delivered >= unitCost)
             {
                 // 审查修复：机器只在身边施工——下一格离它超过交互距离，就先走过去（已到现场的材料跟着这张施工单，不重新取料）。
                 // 每次到达至少建一格，保证即使位置查不到（服务层自检的瞬时到达）也一定有进展。
@@ -581,12 +584,16 @@ namespace GameLogic.Campaign.Regions
                 order.Progress = Mathf.Max(0f, order.Progress - sec);
                 if (!CommitBeltCell(state, p, next))
                 {
-                    // 这一格已经铺不下去（不应发生：规划格被标记占住）——这一格作废，它的材料留在现场给下一格用。
-                    p.CellState[next] = 2;
+                    // 这一格已经铺不下去（不应发生：规划格被标记占住）——这一格（地下传送带是两端）作废，它的材料留在现场给下一格用。
+                    for (int k = 0; k < unitCells && next + k < p.CellState.Length; k++)
+                    {
+                        p.CellState[next + k] = 2;
+                        ClearPlannedMarker(HomeGridService.MapFor(state), new GridCell(p.Xs[next + k], p.Ys[next + k]));
+                    }
                 }
                 else
                 {
-                    p.Delivered -= p.ScrapPerCell;
+                    p.Delivered -= unitCost;
                     builtOne = true;
                 }
                 next = NextUnbuilt(p);
@@ -595,11 +602,11 @@ namespace GameLogic.Campaign.Regions
             {
                 return ProgressResult.Complete;
             }
-            if (builtOne && p.Delivered >= p.ScrapPerCell && !WithinBuildReach(order, p, next))
+            if (builtOne && p.Delivered >= unitCost && !WithinBuildReach(order, p, next))
             {
                 return ProgressResult.MoveOn;
             }
-            if (p.Delivered < p.ScrapPerCell)
+            if (p.Delivered < unitCost)
             {
                 order.Progress = Mathf.Min(order.Progress, sec);
                 return ProgressResult.NeedMaterials;
@@ -636,15 +643,74 @@ namespace GameLogic.Campaign.Regions
         {
             var cell = new GridCell(p.Xs[i], p.Ys[i]);
             HomeGridMap map = HomeGridService.MapFor(state);
+            ushort marker = map.GetBelt(cell);
             map.SetBelt(cell, 0);
-            BeltOpResult r = BeltNetworkService.TryPlace(state, cell, (BeltDir)p.Dirs[i], p.Tier);
+            BeltOpResult r;
+            switch ((BeltNodeKind)p.NodeKind)
+            {
+                case BeltNodeKind.Splitter:
+                case BeltNodeKind.Merger:
+                    // FG3-LOG-04：分流器 / 合流器建成后按规划里的设置（新放 = 默认；被摧毁的虚影 = 原设置）。
+                    r = BeltNetworkService.TryPlaceNode(state, cell, (BeltDir)p.Dirs[i], p.Tier, (BeltNodeKind)p.NodeKind);
+                    if (r.Ok)
+                    {
+                        ApplyNodeSettings(state, p, cell);
+                    }
+                    break;
+                case BeltNodeKind.UndergroundIn:
+                {
+                    // FG3-LOG-04：地下传送带两端一起建成（Xs / Ys = [入口, 出口]）；出口格的规划标记也先放开。
+                    if (p.Xs.Length < 2 || i != 0)
+                    {
+                        r = BeltOpResult.Kernel(BeltResult.InvalidArgument);
+                        break;
+                    }
+                    var exit = new GridCell(p.Xs[1], p.Ys[1]);
+                    ushort exitMarker = map.GetBelt(exit);
+                    map.SetBelt(exit, 0);
+                    int distance = Math.Abs(p.Xs[1] - p.Xs[0]) + Math.Abs(p.Ys[1] - p.Ys[0]);
+                    r = BeltNetworkService.TryPlaceUnderground(state, cell, (BeltDir)p.Dirs[0], p.Tier, distance);
+                    if (!r.Ok)
+                    {
+                        map.SetBelt(exit, exitMarker);
+                    }
+                    else
+                    {
+                        p.CellState[1] = 1;
+                    }
+                    break;
+                }
+                default:
+                    r = BeltNetworkService.TryPlace(state, cell, (BeltDir)p.Dirs[i], p.Tier);
+                    break;
+            }
             if (!r.Ok)
             {
+                map.SetBelt(cell, marker);
                 return false;
             }
             p.CellState[i] = 1;
             Revision++;
             return true;
+        }
+
+        /// <summary>FG3-LOG-04：这份规划是不是地下传送带（两端一起建、一起取消）。</summary>
+        public static bool IsUnderground(PlannedBeltRecord p) => p != null && p.NodeKind == (int)BeltNodeKind.UndergroundIn;
+
+        /// <summary>FG3-LOG-04：把规划里记的节点设置写进刚建成的分流器 / 合流器（0 = 默认）。</summary>
+        private static void ApplyNodeSettings(CampaignState state, PlannedBeltRecord p, GridCell cell)
+        {
+            if (p.NodeKind == (int)BeltNodeKind.Splitter)
+            {
+                int rl = Math.Max(1, Math.Min(BeltConst.RatioMax, p.RatioL));
+                int rr = Math.Max(1, Math.Min(BeltConst.RatioMax, p.RatioR));
+                BeltNetworkService.TrySetSplitter(state, cell, rl, rr, (BeltSide)Math.Max(0, Math.Min(2, p.PriorityOut)),
+                    (ushort)Math.Max(0, Math.Min(ushort.MaxValue, p.FilterL)), (ushort)Math.Max(0, Math.Min(ushort.MaxValue, p.FilterR)));
+            }
+            else if (p.NodeKind == (int)BeltNodeKind.Merger && p.PriorityIn != 0)
+            {
+                BeltNetworkService.TrySetMergerPriority(state, cell, (BeltSide)Math.Max(0, Math.Min(2, p.PriorityIn)));
+            }
         }
 
         /// <summary>现场建完：建筑记下投入并清掉施工字段；传送带规划从存档移除。</summary>
@@ -779,6 +845,10 @@ namespace GameLogic.Campaign.Regions
                 Dirs = new int[n],
                 CellState = new int[n],
                 Delivered = 0,
+                // FG3-LOG-04：放的是什么（传送带 / 分流器 / 合流器 / 地下传送带）；节点的设置取默认（1:1、不设优先口、全部物品）。
+                NodeKind = (int)plan.Kind,
+                RatioL = 1,
+                RatioR = 1,
             };
             HomeGridMap map = HomeGridService.MapFor(state);
             for (int i = 0; i < n; i++)
@@ -793,7 +863,7 @@ namespace GameLogic.Campaign.Regions
             Array.Copy(old, next, old.Length);
             next[old.Length] = rec;
             grid.PlannedBelts = next;
-            HomeValleyWorkOrders.CreateConstructionOrder(state, BeltPlanPrefix + planId, rec.ScrapPerCell * n, BeltSecondsPerCell);
+            HomeValleyWorkOrders.CreateConstructionOrder(state, BeltPlanPrefix + planId, rec.ScrapPerCell * n, BeltSecondsPerCell * (IsUnderground(rec) ? 2 : 1));
             Revision++;
             return planId;
         }
@@ -875,9 +945,19 @@ namespace GameLogic.Campaign.Regions
                 {
                     continue;
                 }
-                p.CellState[i] = 2;
-                ClearPlannedMarker(map, c);
-                cancelled++;
+                // FG3-LOG-04：地下传送带的规划两端一起取消（不会只剩半条）。
+                int from = IsUnderground(p) ? 0 : i;
+                int to = IsUnderground(p) ? p.CellState.Length - 1 : i;
+                for (int k = from; k <= to; k++)
+                {
+                    if (p.CellState[k] != 0)
+                    {
+                        continue;
+                    }
+                    p.CellState[k] = 2;
+                    ClearPlannedMarker(map, new GridCell(p.Xs[k], p.Ys[k]));
+                    cancelled++;
+                }
                 if (!touched.Contains(p))
                 {
                     touched.Add(p);
@@ -1130,7 +1210,10 @@ namespace GameLogic.Campaign.Regions
         // ── 被摧毁的传送带（FGR-LOG-027）──────────────────────────────────────────────
 
         private static string DestroyedName(PlannedBeltRecord p, int i) =>
-            GameText.Format("build.queue.destroyed_name", BeltNetworkService.TierName(p.Tier), p.Xs[i].ToString(CultureInfo.InvariantCulture), p.Ys[i].ToString(CultureInfo.InvariantCulture));
+            GameText.Format("build.queue.destroyed_name", PieceName(p), p.Xs[i].ToString(CultureInfo.InvariantCulture), p.Ys[i].ToString(CultureInfo.InvariantCulture));
+
+        /// <summary>FG3-LOG-04：规划里放的物流件的玩家名（传送带 T1 / 分流器 / 合流器 / 地下传送带 T1）。</summary>
+        public static string PieceName(PlannedBeltRecord p) => p == null ? string.Empty : BeltNetworkService.PieceName((BeltNodeKind)p.NodeKind, p.Tier);
 
         private static string DestroyedStatus(PlannedBeltRecord p, int i) =>
             GameText.Format("build.queue.destroyed_status", GameText.Get(GridMath.DirTextKey((GridDir)p.Dirs[i])));
@@ -1167,6 +1250,50 @@ namespace GameLogic.Campaign.Regions
             return planId;
         }
 
+        /// <summary>
+        /// FG3-LOG-04（FGR-LOG-027 的节点版）：分流器 / 合流器 / 地下传送带被摧毁后留下保留原设置的虚影——分流器记比例、优先口、过滤，合流器记优先口，
+        /// 地下传送带两端一份（[入口, 出口]，两端一起重建）。没有施工单：玩家在施工队列里点“重建”才开工（自动重建规则在 FG6-DEF-03）。返回规划 ID。
+        /// </summary>
+        public static string AddDestroyedNodeGhost(CampaignState state, BeltNodeInfo node)
+        {
+            GridState grid = state.Grid;
+            string planId = "b" + grid.NextBeltPlanSerial.ToString(CultureInfo.InvariantCulture);
+            grid.NextBeltPlanSerial++;
+            bool under = node.Kind == BeltNodeKind.UndergroundIn || node.Kind == BeltNodeKind.UndergroundOut;
+            BeltNodeKind kind = under ? BeltNodeKind.UndergroundIn : node.Kind;
+            var rec = new PlannedBeltRecord
+            {
+                PlanId = planId,
+                Tier = node.Tier,
+                ScrapPerCell = Math.Max(0, HomeGridService.PieceCost(kind, node.Tier)),
+                Xs = under ? new[] { node.EntranceX, node.ExitX } : new[] { node.X },
+                Ys = under ? new[] { node.EntranceY, node.ExitY } : new[] { node.Y },
+                Dirs = under ? new[] { (int)node.Dir, (int)node.Dir } : new[] { (int)node.Dir },
+                CellState = under ? new[] { 0, 0 } : new[] { 0 },
+                Delivered = 0,
+                Destroyed = true,
+                NodeKind = (int)kind,
+                RatioL = Math.Max(1, node.RatioL),
+                RatioR = Math.Max(1, node.RatioR),
+                PriorityOut = (int)node.PriorityOut,
+                FilterL = node.FilterL,
+                FilterR = node.FilterR,
+                PriorityIn = (int)node.PriorityIn,
+            };
+            HomeGridMap map = HomeGridService.MapFor(state);
+            for (int i = 0; i < rec.Xs.Length; i++)
+            {
+                map.SetBelt(new GridCell(rec.Xs[i], rec.Ys[i]), (ushort)(PlannedBeltFlag | (node.Tier + 1)));
+            }
+            PlannedBeltRecord[] old = grid.PlannedBelts ?? Array.Empty<PlannedBeltRecord>();
+            var next = new PlannedBeltRecord[old.Length + 1];
+            Array.Copy(old, next, old.Length);
+            next[old.Length] = rec;
+            grid.PlannedBelts = next;
+            Revision++;
+            return planId;
+        }
+
         /// <summary>被摧毁、等待确认重建的传送带虚影格数（施工队列“全部重建（N）”）。</summary>
         public static int DestroyedGhostCount(CampaignState state)
         {
@@ -1193,7 +1320,7 @@ namespace GameLogic.Campaign.Regions
                 return false;
             }
             p.Destroyed = false;
-            HomeValleyWorkOrders.CreateConstructionOrder(state, BeltPlanPrefix + p.PlanId, p.ScrapPerCell * UnbuiltCells(p), BeltSecondsPerCell);
+            HomeValleyWorkOrders.CreateConstructionOrder(state, BeltPlanPrefix + p.PlanId, p.ScrapPerCell * UnbuiltCells(p), BeltSecondsPerCell * (IsUnderground(p) ? 2 : 1));
             Revision++;
             return true;
         }
@@ -1442,7 +1569,7 @@ namespace GameLogic.Campaign.Regions
                 {
                     // FG3-LOG-03：被摧毁的传送带虚影——写明保留的设置与怎么重建 / 移除。
                     title = DestroyedName(p, pi);
-                    body = GameText.Format("build.hover.destroyed", BeltNetworkService.TierName(p.Tier), GameText.Get(GridMath.DirTextKey((GridDir)p.Dirs[pi])),
+                    body = GameText.Format("build.hover.destroyed", PieceName(p), GameText.Get(GridMath.DirTextKey((GridDir)p.Dirs[pi])),
                         InputDisplay.ForAction(GameActionId.ConstructionQueue));
                     return true;
                 }

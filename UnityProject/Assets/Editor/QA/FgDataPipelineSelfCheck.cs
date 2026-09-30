@@ -479,8 +479,9 @@ namespace GameLogic.EditorTools
                 // FG2-FW-02 的读法矩阵（CR）与作战组件表（CC）由 FgReadingMatrixSelfCheck A 段逐字段比对。
                 // FG2-FW-03 的具名反应表（RX）由 FgReactionProbeSelfCheck A 段逐字段比对。
                 // FG3-LOG-01 的建造菜单分类（BC）与工具（BT）由 FgBuildFormalSelfCheck A 段逐字段比对。
+                // FG3-LOG-04 的过滤器预设表（FP）由 FgBeltNodeSelfCheck F1 段逐字段比对。
                 if (f[0] == "BC" || f[0] == "BT" || f[0] == "G" || f[0] == "P" || f[0] == "L" || f[0] == "X" || f[0] == "H" || f[0] == "FK" || f[0] == "CX" || f[0] == "ST"
-                    || f[0] == "CR" || f[0] == "CC" || f[0] == "RX" || f[0].StartsWith("W", StringComparison.Ordinal))
+                    || f[0] == "CR" || f[0] == "CC" || f[0] == "RX" || f[0] == "FP" || f[0].StartsWith("W", StringComparison.Ordinal))
                 {
                     continue;
                 }
