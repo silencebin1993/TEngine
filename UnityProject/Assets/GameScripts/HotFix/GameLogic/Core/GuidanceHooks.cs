@@ -123,6 +123,14 @@ namespace GameLogic.Core
         public const string LogisticsPipePanelFirstOpen = "logistics.pipe.first_panel_open";
         /// <summary>FG3-LOG-05：第一次冲洗网络（FGR-LOG-044）。</summary>
         public const string LogisticsPipeFirstFlush = "logistics.pipe.first_flush";
+        /// <summary>FG3-LOG-06：第一次建成电塔（引导内容：覆盖半径、电塔之间自动相连、互不相连的是不同电网）。</summary>
+        public const string PowerPoleFirstPlaced = "power.pole.first_placed";
+        /// <summary>FG3-LOG-06（FG13“第一次遇到缺电：电塔、子网、优先级”）：第一次有建筑因为缺电停机。</summary>
+        public const string PowerFirstBrownout = "power.first_brownout";
+        /// <summary>FG3-LOG-06：第一次打开电网面板（曲线、优先级、关停）。</summary>
+        public const string PowerPanelFirstOpen = "power.panel.first_open";
+        /// <summary>FG3-LOG-06（FG03 第 5 节“电塔被摧毁，电网断成两段”）：第一次有电网断开。</summary>
+        public const string PowerFirstSplit = "power.first_split";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -148,6 +156,7 @@ namespace GameLogic.Core
             LogisticsFirstPortConnected, LogisticsPortPanelFirstOpen, LogisticsFirstClear, LogisticsFirstDestroyed,
             LogisticsFirstSplitter, LogisticsFirstMerger, LogisticsFirstUnderground, LogisticsSplitterFirstBlocked, LogisticsNodePanelFirstOpen,
             LogisticsFirstPipe, LogisticsPipeFirstFluidConflict, LogisticsPipeFirstNoSupply, LogisticsPipePanelFirstOpen, LogisticsPipeFirstFlush,
+            PowerPoleFirstPlaced, PowerFirstBrownout, PowerPanelFirstOpen, PowerFirstSplit,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

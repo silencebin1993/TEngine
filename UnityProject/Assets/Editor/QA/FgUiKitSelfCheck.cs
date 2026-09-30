@@ -186,7 +186,7 @@ namespace GameLogic.EditorTools
             var enumMembers = ((GameActionId[])Enum.GetValues(typeof(GameActionId))).Distinct().ToList();
             var missing = enumMembers.Where(a => !InputActionCatalog.TryGet(a, out _)).ToList();
             var extra = InputActionCatalog.All.Where(d => !enumMembers.Contains(d.Action)).ToList();
-            Expect(missing.Count == 0 && extra.Count == 0 && InputActionCatalog.All.Count == enumMembers.Count && enumMembers.Count == 93, // FG0-ARCH-01 新增“切换关注点”（85 → 86）；FG1-SIG-01 新增“信号核”（86 → 87）；FG1-SIG-06 新增“暴露面板”（87 → 88）；FG3-LOG-01 新增“格线开关”“搬迁”（88 → 90）；FG3-LOG-02 新增“施工队列”“优先建造这一片”（90 → 92）；FG3-LOG-03 新增“清带”（92 → 93）
+            Expect(missing.Count == 0 && extra.Count == 0 && InputActionCatalog.All.Count == enumMembers.Count && enumMembers.Count == 94, // FG3-LOG-06 新增“电网面板”（93 → 94）；FG0-ARCH-01 新增“切换关注点”（85 → 86）；FG1-SIG-01 新增“信号核”（86 → 87）；FG1-SIG-06 新增“暴露面板”（87 → 88）；FG3-LOG-01 新增“格线开关”“搬迁”（88 → 90）；FG3-LOG-02 新增“施工队列”“优先建造这一片”（90 → 92）；FG3-LOG-03 新增“清带”（92 → 93）
                 $"GameActionId 的 {enumMembers.Count} 个成员与表里 {InputActionCatalog.All.Count} 行一一对应（缺：{string.Join(",", missing)}；多：{string.Join(",", extra.Select(d => d.Action))}）");
 
             InputBindingSet defaults = InputBindingSet.CreateDefault();
@@ -1446,7 +1446,7 @@ namespace GameLogic.EditorTools
             // FG3-LOG-03 新增 BeltPortPanel.uxml（建筑端口面板）与 BeltPortRow.uxml（端口行模板），共 20 份；
             // FG3-LOG-04 新增 BeltNodePanel.uxml（分流器 / 合流器 / 地下带设置面板），共 21 份；
             // FG3-LOG-05 新增 PipePanel.uxml（管线面板：网络读数、储罐、阀门、冲洗），共 22 份。
-            Expect(uxmlCount == 22 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
+            Expect(uxmlCount == 23 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
 
             string[] codeDirs =
             {

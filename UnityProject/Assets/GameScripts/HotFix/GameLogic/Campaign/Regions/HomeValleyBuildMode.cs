@@ -516,6 +516,7 @@ namespace GameLogic.Campaign.Regions
                     {
                         req.Lines.Add(GameText.Get("ui.build.confirm_critical"));
                     }
+                    HomeValleyPowerGrid.AppendRemovalLines(state, id, req.Consequences); // FG3-LOG-06：拆电塔会让电网断开 / 建筑失去电网连接时写明。
                     UiConfirmDialog.Show(req);
                     PendingConfirmBuildingId = id;
                     return new GridOpResult(GridOpResult.Kind.Failed, id);
@@ -967,6 +968,7 @@ namespace GameLogic.Campaign.Regions
                 // FG3-LOG-05：框里的储罐有存量——拆除会排空、不返还。
                 req.Lines.Add(GameText.Format("ui.build.box_tank_line", (plan.TankFluidMl / 1000.0).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)));
             }
+            plan.AppendPowerLines(req.Consequences); // FG3-LOG-06：拆完会断网 / 让建筑失去电网连接时写明（按整批拆完的拓扑）。
             req.Consequences.Add(GameText.Get("ui.build.batch_confirm_refund"));
             UiConfirmDialog.Show(req);
             PendingBatchConfirm = true;
@@ -1271,6 +1273,8 @@ namespace GameLogic.Campaign.Regions
                 {
                     Preview.Warnings.Add(GameText.Format("nav.build.unreachable_warning", string.Join(GameText.Language == GameLanguage.En ? ", " : "、", _cutOffScratch)));
                 }
+                // FG3-LOG-06（FGR-LOG-003“超出电力覆盖（只警告，不阻止）”；FG03 第 4 节“放置时预览电力覆盖”）：会接入哪个电网 / 超出覆盖的警告；电塔写会连起哪些电网、覆盖多少座建筑。
+                HomeValleyPowerGrid.AppendPlacementNotes(state, Preview);
             }
             Revision++;
         }
@@ -1472,6 +1476,14 @@ namespace GameLogic.Campaign.Regions
             if (HomeGridService.FindRelocationGhost(state, b.BuildingId) != null)
             {
                 return text + "\n" + GameText.Format("ui.build.pending_relocation", HomeGridService.DisplayName(b.BuildingTypeId));
+            }
+            // FG3-LOG-06：和电网有关的建筑写它在哪个电网、有没有电、优先级与电网读数。
+            if (b.ConstructionState == BuildingConstructionState.Operational || b.ConstructionState == BuildingConstructionState.Disabled)
+            {
+                if (HomeValleyPowerGrid.TryDescribeBuilding(state, b, out string power))
+                {
+                    return text + "\n" + power;
+                }
             }
             return text;
         }

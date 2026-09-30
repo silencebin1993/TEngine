@@ -81,8 +81,45 @@ namespace GameLogic.Campaign.Grid
         public int BuildingCount => ToMark.Count + ToCancel.Count;
         public bool IsEmpty => ToMark.Count == 0 && ToCancel.Count == 0 && Belts.Count == 0;
 
-        /// <summary>需要先确认：一次拆除超过 grid.batch_demolish_confirm 座，或其中有关键建筑（FGR-LOG-007；FG00 B04）。</summary>
-        public bool NeedsConfirm => BuildingCount > GridContent.TuningInt("grid.batch_demolish_confirm") || CriticalNames.Count > 0 || TankFluidMl > 0;
+        /// <summary>需要先确认：一次拆除超过 grid.batch_demolish_confirm 座，或其中有关键建筑，或储罐有存量，或拆完会让电网断开 / 建筑失去电网连接
+        /// （FGR-LOG-007；FG00 B04；FG-GAP-086）。</summary>
+        public bool NeedsConfirm => BuildingCount > GridContent.TuningInt("grid.batch_demolish_confirm") || CriticalNames.Count > 0 || TankFluidMl > 0 || PowerConsequence;
+
+        // FG3-LOG-06：电力后果按“框里要拆的全部建筑一起拆完”的整体拓扑算；第一次读时才算（拖拽预览不付这笔）。
+        private CampaignState _powerState;
+        private bool _powerDone;
+        private int _powerSplits;
+        private int _powerOrphans;
+
+        internal void ResetPower(CampaignState state)
+        {
+            _powerState = state;
+            _powerDone = false;
+            _powerSplits = 0;
+            _powerOrphans = 0;
+        }
+
+        private void EnsurePower()
+        {
+            if (_powerDone)
+            {
+                return;
+            }
+            _powerDone = true;
+            if (_powerState != null && ToMark.Count > 0)
+            {
+                HomeValleyPowerGrid.TryGetBatchRemovalImpact(_powerState, ToMark, out _powerSplits, out _powerOrphans);
+            }
+        }
+
+        /// <summary>拆完后会断开的电网个数。</summary>
+        public int PowerSplitGrids { get { EnsurePower(); return _powerSplits; } }
+        /// <summary>拆完后失去电网连接的建筑数（不含框里要拆的）。</summary>
+        public int PowerOrphans { get { EnsurePower(); return _powerOrphans; } }
+        public bool PowerConsequence => PowerSplitGrids > 0 || PowerOrphans > 0;
+
+        /// <summary>确认框里的电力后果行。</summary>
+        public void AppendPowerLines(List<string> into) => HomeValleyPowerGrid.AppendBatchRemovalLines(PowerSplitGrids, PowerOrphans, into);
     }
 
     /// <summary>
@@ -1048,6 +1085,7 @@ namespace GameLogic.Campaign.Grid
             plan.BeltsWithItems = 0;
             plan.Pipes = 0;
             plan.TankFluidMl = 0;
+            plan.ResetPower(state);
             int max = GridContent.TuningInt("grid.drag_max_cells");
             var min = new GridCell(Math.Min(a.X, b.X), Math.Min(a.Y, b.Y));
             var mx = new GridCell(Math.Max(a.X, b.X), Math.Max(a.Y, b.Y));

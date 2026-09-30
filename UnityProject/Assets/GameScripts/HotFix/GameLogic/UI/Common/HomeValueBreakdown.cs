@@ -27,6 +27,11 @@ namespace GameLogic.UI.Common
             {
                 return content;
             }
+            // FG3-LOG-06：只有接入电网的发电才算供给（没接入的写明“送不出去”、记 0）；与电网仲裁 HomeValleyPowerGrid.Recompute 同一份结果。
+            if (!ReferenceEquals(HomeValleyPowerGrid.BoundState, state))
+            {
+                HomeValleyPowerGrid.Recompute(state);
+            }
             float supply = HomeValleyLayout.BaseCoreSupply;
             content.Sources.Add(new TooltipSource(GameText.Get("tooltip.power.base_core"), Signed(HomeValleyLayout.BaseCoreSupply)));
             float demand = 0f;
@@ -40,13 +45,22 @@ namespace GameLogic.UI.Common
                 string name = FeedbackCues.BuildingLabel(b.BuildingId);
                 if (HomeValleyLayout.PowerSupplyProfile.TryGetValue(b.BuildingTypeId, out float s))
                 {
-                    supply += s;
-                    content.Sources.Add(new TooltipSource(GameText.Format("tooltip.power.supply_of", name), Signed(s)));
+                    bool connected = HomeValleyPowerGrid.TryGetBuildingPower(state, b.BuildingId, out BuildingPowerInfo info) && info.Subnet >= 0;
+                    if (connected)
+                    {
+                        supply += s;
+                        content.Sources.Add(new TooltipSource(GameText.Format("tooltip.power.supply_of", name), Signed(s)));
+                    }
+                    else
+                    {
+                        content.Sources.Add(new TooltipSource(GameText.Format("tooltip.power.supply_unconnected_of", name), Signed(0f)));
+                    }
                 }
                 if (HomeValleyLayout.PowerProfile.TryGetValue(b.BuildingTypeId, out (float PowerDemand, int PowerPriority) p))
                 {
                     demand += p.PowerDemand;
-                    string key = b.PowerState == BuildingPowerState.Brownout ? "tooltip.power.brownout_of" : "tooltip.power.demand_of";
+                    string key = b.PowerState == BuildingPowerState.Brownout ? "tooltip.power.brownout_of"
+                        : b.PowerState == BuildingPowerState.Unpowered ? "tooltip.power.unconnected_of" : "tooltip.power.demand_of";
                     consumers.Add(new TooltipSource(GameText.Format(key, name, p.PowerPriority.ToString(CultureInfo.InvariantCulture)), Signed(-p.PowerDemand)));
                 }
             }

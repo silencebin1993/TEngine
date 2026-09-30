@@ -230,8 +230,11 @@ namespace GameLogic.Campaign.Regions
 
         public static WorkOrderOpResult TryCreateRepair(CampaignState state, string buildingTypeId, int machineLogicId)
         {
+            // FG3-LOG-06：同类建筑有多座时（电塔）优先修受损的那一座（修复工单仍按类型下单；按实例指定修哪一座见 FG-GAP-084 → FG6-DEF-05）。
             BuildingRecord building = state.BuildingRecords?.FirstOrDefault(b =>
-                b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId == buildingTypeId);
+                                          b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId == buildingTypeId && b.ConstructionState == BuildingConstructionState.Damaged)
+                                      ?? state.BuildingRecords?.FirstOrDefault(b =>
+                                          b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId == buildingTypeId);
             if (building == null)
             {
                 return WorkOrderOpResult.Fail($"building-not-found:{buildingTypeId}");

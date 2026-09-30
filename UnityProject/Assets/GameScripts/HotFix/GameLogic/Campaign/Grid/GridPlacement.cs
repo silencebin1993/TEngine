@@ -142,6 +142,8 @@ namespace GameLogic.Campaign.Grid
         public float BuildSeconds;
         /// <summary>FG0-ARCH-06：只警告、不阻止的提示（当前语言，已拼好）——例如“放下后机器将无法到达某建筑”（FGR-LOG-012）。</summary>
         public readonly List<string> Warnings = new List<string>(1);
+        /// <summary>FG3-LOG-06：放置预览的说明行（不是警告；当前语言，已拼好）——例如“接入电网 2”“覆盖 5 座建筑”。</summary>
+        public readonly List<string> Notes = new List<string>(2);
 
         public bool Ok => Reasons.Count == 0;
 

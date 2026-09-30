@@ -117,5 +117,7 @@
         PrioritizeArea = 101,
         /// <summary>FG3-LOG-03（FGR-LOG-026 清带工具）：建造模式里点一格传送带或拖框，把上面的物品送到最近的仓库（建造上下文，默认 J）。</summary>
         ClearBeltMode = 102,
+        /// <summary>FG3-LOG-06（FGR-LOG-060 / 061）：打开 / 关闭电网面板（每个电网的发电、用电、储能曲线与优先级；战略与建造上下文，默认 Alt+G）。</summary>
+        OpenPowerGrid = 103,
     }
 }

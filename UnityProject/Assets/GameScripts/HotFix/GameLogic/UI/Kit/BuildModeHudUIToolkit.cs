@@ -46,6 +46,7 @@ namespace GameLogic.UI.Kit
         private Button _gridToggle;
         private Button _prioritize;
         private Button _queue;
+        private Button _power;
         private Button _clearBelt;
         private Label _hint;
         private Label _cost;
@@ -124,6 +125,7 @@ namespace GameLogic.UI.Kit
             _gridToggle = root.Q<Button>("BuildGridToggle");
             _prioritize = root.Q<Button>("BuildPrioritize");
             _queue = root.Q<Button>("BuildQueue");
+            _power = root.Q<Button>("BuildPowerGrid");
             _clearBelt = root.Q<Button>("BuildClearBelt");
             _hint = root.Q<Label>("BuildHint");
             _cost = root.Q<Label>("BuildCost");
@@ -174,6 +176,7 @@ namespace GameLogic.UI.Kit
                 m?.SetPrioritizeMode(!m.PrioritizeMode);
             };
             _queue.clicked += ConstructionQueuePanelUIToolkit.Toggle;
+            _power.clicked += PowerPanelUIToolkit.Toggle; // FG3-LOG-06：电网面板（按钮与 Alt+G 同一路径）。
             _clearBelt.clicked += () =>
             {
                 HomeValleyBuildMode m = HomeValleyBuildMode.Current;
@@ -224,6 +227,8 @@ namespace GameLogic.UI.Kit
             UiTooltip.Attach(_prioritize, () => new TooltipContent { Title = GameText.Get("input.action.prioritize_area.name"), Body = GameText.Get("ui.build.prioritize_mode"), Shortcut = GameActionId.PrioritizeArea });
             UiTooltip.Attach(_clearBelt, () => new TooltipContent { Title = GameText.Get("input.action.clear_belt_mode.name"), Body = GameText.Get("ui.build.clear_mode"),
                 Shortcut = GameActionId.ClearBeltMode, CodexEntryId = "codex.logistics.belt" });
+            UiTooltip.Attach(_power, () => new TooltipContent { Title = GameText.Get("input.action.open_power_grid.name"), Body = GameText.Get("power.overlay.legend"),
+                Shortcut = GameActionId.OpenPowerGrid, CodexEntryId = "codex.logistics.power" });
             UiTooltip.Attach(_queue, () => new TooltipContent { Title = GameText.Get("input.action.construction_queue.name"),
                 Body = InputDisplay.ExpandActionTokens(GameText.Get("build.queue.hint")), Shortcut = GameActionId.ConstructionQueue, CodexEntryId = "codex.build.construction" });
             _lastKey = null;
@@ -427,6 +432,7 @@ namespace GameLogic.UI.Kit
             _prioritize.text = GameText.Format("ui.build.btn_prioritize", InputDisplay.ForAction(GameActionId.PrioritizeArea));
             _prioritize.EnableInClassList("bm-tool-active", mode.PrioritizeMode);
             _queue.text = GameText.Format("ui.build.btn_queue", InputDisplay.ForAction(GameActionId.ConstructionQueue));
+            _power.text = GameText.Format("power.panel.hud_button", InputDisplay.ForAction(GameActionId.OpenPowerGrid));
             _clearBelt.text = GameText.Format("ui.build.btn_clear", InputDisplay.ForAction(GameActionId.ClearBeltMode));
             _clearBelt.EnableInClassList("bm-tool-active", mode.ClearMode);
             _placeholder.text = GameText.Get("ui.build.placeholder_note");
@@ -645,6 +651,11 @@ namespace GameLogic.UI.Kit
                 foreach (string w in preview.Warnings)
                 {
                     status += "\n" + w;
+                }
+                // FG3-LOG-06：放置预览的说明行（会接入哪个电网、覆盖多少座建筑），不是警告。
+                foreach (string note in preview.Notes)
+                {
+                    status += "\n" + note;
                 }
                 warning = preview.Ok && preview.Warnings.Count > 0;
             }

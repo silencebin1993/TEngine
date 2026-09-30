@@ -496,6 +496,7 @@ namespace GameLogic.Campaign.Grid
             r.CellOk.Clear();
             r.Reasons.Clear();
             r.Warnings.Clear();
+            r.Notes.Clear();
             r.ScrapCost = 0;
             r.BuildSeconds = 0f;
 
@@ -923,6 +924,10 @@ namespace GameLogic.Campaign.Grid
             b.Position = GridMath.FootprintCenter(pivot, g.FootprintW, g.FootprintH, newRot);
             _map.Occupy(b.BuildingId, check.Cells);
             ClaimFootprint(state, check.Cells);
+            if (b.ConstructionState == BuildingConstructionState.Operational && HomeValleyPowerGrid.IsPowerRelevantType(b.BuildingTypeId))
+            {
+                HomeValleyPowerGrid.Recompute(state); // FG3-LOG-06：非正方形建筑转向后占地变了，可能进出电力覆盖。
+            }
             return new GridOpResult(GridOpResult.Kind.Rotated, b.BuildingId, check);
         }
 
@@ -943,15 +948,20 @@ namespace GameLogic.Campaign.Grid
         public static bool IsDemolishForbidden(string typeId) =>
             typeId != HomeValleyLayout.BuildingTypeCore && !IsRebuildable(typeId);
 
-        /// <summary>拆除前是否需要二次确认（FGR-LOG-007；FG00 B04）：关键建筑（critical=1，目前可拆的只有信标）。
+        /// <summary>拆除前是否需要二次确认（FGR-LOG-007；FG00 B04）：关键建筑（critical=1，目前可拆的只有信标），
+        /// 以及 FG3-LOG-06 起“拆掉会让电网断开 / 让正在用电或发电的建筑失去电网连接”的电力节点（电塔）。
         /// 只对“真的会拆”的情况返回 true（禁止拆除的建筑直接拒绝，不弹确认）。</summary>
         public static bool DemolishNeedsConfirm(CampaignState state, string buildingId)
         {
             BuildingRecord b = FindBuilding(state, buildingId);
-            return b != null && b.ConstructionState == BuildingConstructionState.Operational
-                   && FindActiveDemolish(state, buildingId) == null
-                   && !IsDemolishForbidden(b.BuildingTypeId)
-                   && GridContent.TryGetBuilding(b.BuildingTypeId, out BuildingGrid g) && g.Critical == 1;
+            if (b == null || b.ConstructionState != BuildingConstructionState.Operational
+                || FindActiveDemolish(state, buildingId) != null
+                || IsDemolishForbidden(b.BuildingTypeId))
+            {
+                return false;
+            }
+            return (GridContent.TryGetBuilding(b.BuildingTypeId, out BuildingGrid g) && g.Critical == 1)
+                   || HomeValleyPowerGrid.TryGetRemovalImpact(state, buildingId, out _, out _, out _);
         }
 
         /// <summary>

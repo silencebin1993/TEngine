@@ -212,6 +212,13 @@ namespace GameLogic.EditorTools
                     case 277: StepPipeDeselected(inStep); break;
                     case 278: StepPipePanelOpened(inStep); break;
                     case 279: StepPipePanelClosed(inStep); break;
+                    // FG3-LOG-06：电力子网与电塔（建造菜单“能源”点电塔、放置预览写接入电网 + 光标处覆盖圈、单击放虚影；Alt+G 打开电网面板、叠加层按钮、
+                    // 电塔被摧毁一分为二的警告与面板刷新、Alt+G 关闭；建造模式指着电塔的状态行）。
+                    case 280: StepPowerBuildReady(inStep); break;
+                    case 281: StepPowerPreview(inStep); break;
+                    case 282: StepPowerPlaced(inStep); break;
+                    case 283: StepPowerPanelOpened(inStep); break;
+                    case 284: StepPowerPanelClosed(inStep); break;
                     case 129: StepRuinsCombat(inStep); break;
                     case 230: StepRuinsTagHover(inStep); break;
                     case 150: StepSignalOpened(inStep); break;
@@ -5385,6 +5392,184 @@ namespace GameLogic.EditorTools
             // 测试捷径清理：拆掉测试管线件（后面的步骤不受影响）。
             HomeGridService.TryRemoveBelts(state, Enumerable.Range(0, 5).Select(PipeAlong).ToList());
             Check(PipeNetworkService.Kernel.CellCount == 0, $"清理：测试管线件拆掉（内核剩 {PipeNetworkService.Kernel.CellCount} 格）");
+            Next(280, "FG3-LOG-06：建造模式里放电塔");
+        }
+
+        // ── FG3-LOG-06：电力子网与电塔（真实鼠标 / 按键；放下的是虚影，机器施工由 FgPowerGridSelfCheck F3 覆盖；面板用测试捷径建成的电塔；最后清理）──
+
+        private static Campaign.Grid.GridCell PowerCell(string key) => new Campaign.Grid.GridCell(SessionState.GetInt(K + key + "X", 0), SessionState.GetInt(K + key + "Y", 0));
+
+        private static void StepPowerBuildReady(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            Check(mode != null && mode.IsOpen, "建造模式开着");
+            // 按格网规则找位置（B25，不写死坐标）：P1 离核心 20～25 格（在核心配电里），P2 从 P1 往外 7 格（只靠 P1 接入），发电机放在 P2 外侧。
+            Campaign.Grid.GridCell core = HomeGridService.CorePivot(state);
+            bool found = false;
+            for (int a = 0; a < 72 && !found; a++)
+            {
+                float ang = a * 5f * Mathf.Deg2Rad;
+                var dir = new Vector2(Mathf.Cos(ang), Mathf.Sin(ang));
+                for (float d = 20f; d <= 25f && !found; d += 1f)
+                {
+                    var p1 = new Campaign.Grid.GridCell(core.X + Mathf.RoundToInt(dir.x * d), core.Y + Mathf.RoundToInt(dir.y * d));
+                    var p2 = new Campaign.Grid.GridCell(core.X + Mathf.RoundToInt(dir.x * (d + 7f)), core.Y + Mathf.RoundToInt(dir.y * (d + 7f)));
+                    var gen = new Campaign.Grid.GridCell(core.X + Mathf.RoundToInt(dir.x * (d + 12f)), core.Y + Mathf.RoundToInt(dir.y * (d + 12f)));
+                    if (HomeGridService.ValidatePlacement(state, "power_pole", p1, 0).Ok && HomeGridService.ValidatePlacement(state, "power_pole", p2, 0, checkCost: false).Ok
+                        && HomeGridService.ValidatePlacement(state, Campaign.Regions.HomeValleyLayout.BuildingTypeGenerator2, gen, 0, checkCost: false).Ok)
+                    {
+                        SessionState.SetInt(K + "PowerP1X", p1.X);
+                        SessionState.SetInt(K + "PowerP1Y", p1.Y);
+                        SessionState.SetInt(K + "PowerP2X", p2.X);
+                        SessionState.SetInt(K + "PowerP2Y", p2.Y);
+                        SessionState.SetInt(K + "PowerGenX", gen.X);
+                        SessionState.SetInt(K + "PowerGenY", gen.Y);
+                        found = true;
+                    }
+                }
+            }
+            if (!found)
+            {
+                Finish("核心附近找不到放电塔链的位置");
+                return;
+            }
+            int energyTab = Campaign.Grid.GridContent.Categories.ToList().FindIndex(c => c.Id == "energy");
+            bool tab = ClickUitk("[BuildModeHudHost]", "BuildCat" + energyTab);
+            int idx = HudItemIndex("power_pole");
+            bool picked = idx >= 0 && ClickUitk("[BuildModeHudHost]", "BuildItem" + idx) && mode.SelectedTypeId == "power_pole";
+            Check(tab && picked, $"点“能源”页签里的“电塔 T1”（第 {idx + 1} 项）：选中（{mode?.SelectedTypeId}）");
+            Campaign.Grid.GridCell at = PowerCell("PowerP1");
+            HoverWorld(new Vector3(at.X, 0f, at.Y));
+            Next(281, "鼠标移到核心配电边上（放置预览）");
+        }
+
+        private static void StepPowerPreview(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Campaign.Grid.GridPlacementResult pv = mode?.Preview;
+            string status = LabelText("[BuildModeHudHost]", "BuildStatus");
+            Check(pv != null && pv.Ok && pv.Notes.Any(n => n.Contains("接入 电网 1")) && status.Contains("接入 电网 1") && status.Contains("覆盖"),
+                $"放置预览写会接入哪个电网、覆盖几座建筑（状态行“{status.Replace("\n", " / ")}”）");
+            Check(GameLogic.View.PowerCoverageOverlayView.Visible && GameLogic.View.PowerCoverageOverlayView.PreviewShown
+                  && Mathf.Approximately(GameLogic.View.PowerCoverageOverlayView.PreviewRadius, 8f) && GameLogic.View.PowerCoverageOverlayView.DrawnRings >= 1,
+                $"真实帧里电力覆盖叠加层自动显示：核心的覆盖圈 {GameLogic.View.PowerCoverageOverlayView.DrawnRings} 个 + 光标处半径 {GameLogic.View.PowerCoverageOverlayView.PreviewRadius} 的预览圈");
+            Campaign.Grid.GridCell at = PowerCell("PowerP1");
+            ClickWorld(new Vector3(at.X, 0f, at.Y));
+            Next(282, "单击放下电塔");
+        }
+
+        private static void StepPowerPlaced(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            Campaign.Grid.GridCell p1 = PowerCell("PowerP1");
+            BuildingRecord ghost = HomeGridService.BuildingAt(state, p1);
+            bool planned = ghost != null && ghost.BuildingTypeId == "power_pole" && ghost.ConstructionState != BuildingConstructionState.Operational;
+            Check(planned, $"单击放下电塔虚影（{ghost?.ConstructionState}；状态行“{mode?.StatusText}”）");
+            // 测试捷径：取消虚影（全额退回），直接放两座已建成的电塔与一台发电机（机器施工由 FgPowerGridSelfCheck F3 覆盖）。
+            if (ghost != null)
+            {
+                HomeGridService.TryToggleDemolish(state, ghost.BuildingId);
+            }
+            AddSmokeBuilding(state, "power_pole", "p1", p1);
+            AddSmokeBuilding(state, "power_pole", "p2", PowerCell("PowerP2"));
+            AddSmokeBuilding(state, Campaign.Regions.HomeValleyLayout.BuildingTypeGenerator2, "gen", PowerCell("PowerGen"));
+            Campaign.Regions.HomeValleyPowerGrid.GridSummary sum = Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+            Check(sum.SubnetCount == 1 && sum.UnconnectedBuildingIds.Length == 0, $"测试捷径：两座已建成的电塔与 P2 外侧的发电机连成一个电网（发电 {sum.TotalSupply}）");
+            RightClickWorld(new Vector3(p1.X, 0f, p1.Y));
+            SessionState.SetInt(K + "PowerSplit0", Notifications.NotificationCenter.History.Where(n => n.Type?.Id == "power_split").Sum(n => n.Count));
+            Next(283, "右键取消选择后按 Alt+G 打开电网面板");
+        }
+
+        private static void AddSmokeBuilding(CampaignState state, string typeId, string key, Campaign.Grid.GridCell pivot)
+        {
+            GameConfig.fg.BuildingGrid g = Campaign.Grid.GridContent.Building(typeId);
+            var r = new BuildingRecord
+            {
+                BuildingId = Campaign.Regions.HomeValleyLayout.RegionId + ":smoke_power_" + key,
+                BuildingTypeId = typeId,
+                RegionId = Campaign.Regions.HomeValleyLayout.RegionId,
+                GridX = pivot.X,
+                GridY = pivot.Y,
+                Position = Campaign.Grid.GridMath.FootprintCenter(pivot, g.FootprintW, g.FootprintH, 0),
+                Health = 100f,
+                ConstructionState = BuildingConstructionState.Operational,
+                PowerPriority = 1,
+                PowerState = BuildingPowerState.NotApplicable,
+                Inventory = Array.Empty<CargoEntry>(),
+                QueueIds = Array.Empty<string>(),
+            };
+            state.BuildingRecords = (state.BuildingRecords ?? Array.Empty<BuildingRecord>()).Append(r).ToArray();
+            HomeGridService.MapFor(state);
+        }
+
+        private static void StepPowerPanelOpened(double inStep)
+        {
+            if (inStep < 0.3)
+            {
+                return;
+            }
+            if (!SessionState.GetBool(K + "PowerKeySent", false))
+            {
+                SessionState.SetBool(K + "PowerKeySent", true);
+                PressChord(GameSettings.KeyBindings.GetChord(GameActionId.OpenPowerGrid));
+                return;
+            }
+            if (inStep < 1.0)
+            {
+                return;
+            }
+            SessionState.SetBool(K + "PowerKeySent", false);
+            CampaignState state = CampaignSession.Current;
+            PowerPanelUIToolkit panel = PowerPanelUIToolkit.Instance;
+            bool open = PowerPanelUIToolkit.IsOpen && panel != null && panel.PanelVisible && panel.SummaryText.Contains("1 个电网") && panel.DetailText.Contains("发电")
+                        && GameLogic.View.PowerCoverageOverlayView.Visible && GameLogic.View.PowerCoverageOverlayView.DrawnRings >= 3;
+            Check(open, $"Alt+G 打开电网面板（真 UXML）：“{panel?.SummaryText}”；面板开着时叠加层显示 {GameLogic.View.PowerCoverageOverlayView.DrawnRings} 个覆盖圈（核心 + 两座电塔）");
+            bool overlayOn = ClickUitk("[PowerPanelHost]", "PwOverlay") && GameLogic.View.PowerCoverageOverlayView.Enabled;
+            Check(overlayOn, "点“显示电力覆盖”：叠加层开关打开");
+            CheckNoTextMarkers("电网面板");
+            // 测试捷径：P1 被摧毁（正式损毁来源在 FG6）→ 电网一分为二、发“电网断开”警告，面板跟着刷新。
+            BuildingRecord p1 = HomeGridService.FindBuilding(state, Campaign.Regions.HomeValleyLayout.RegionId + ":smoke_power_p1");
+            Campaign.Regions.HomeValleyPowerGrid.ApplyBuildingDestroyed(state, p1?.BuildingId);
+            panel?.Refresh(force: true);
+            int splits = Notifications.NotificationCenter.History.Where(n => n.Type?.Id == "power_split").Sum(n => n.Count);
+            Check(splits == SessionState.GetInt(K + "PowerSplit0", 0) + 1 && panel != null && panel.SummaryText.Contains("2 个电网") && panel.GridField.choices.Count == 2,
+                $"电塔被摧毁一分为二：发“电网断开”警告（共 {splits} 条），面板刷新为“{panel?.SummaryText}”");
+            PressChord(GameSettings.KeyBindings.GetChord(GameActionId.OpenPowerGrid));
+            Next(284, "再按 Alt+G 关闭电网面板");
+        }
+
+        private static void StepPowerPanelClosed(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            Check(!PowerPanelUIToolkit.IsOpen && mode != null && mode.IsOpen, "Alt+G 关掉电网面板，建造模式还开着");
+            BuildingRecord p2 = HomeGridService.FindBuilding(state, Campaign.Regions.HomeValleyLayout.RegionId + ":smoke_power_p2");
+            string hover = p2 != null ? Campaign.Regions.HomeValleyBuildMode.DescribeBuilding(state, p2) : string.Empty;
+            Check(hover.Contains("电网 2") && hover.Contains("节点"), $"建造模式指着电塔的状态行写它属于哪个电网（“{hover.Split('\n').Skip(1).FirstOrDefault()}”）");
+            // 测试捷径清理：去掉测试建筑，叠加层开关复位（后面的步骤不受影响）。
+            state.BuildingRecords = state.BuildingRecords.Where(b => !b.BuildingId.Contains(":smoke_power_")).ToArray();
+            HomeGridService.MapFor(state);
+            Campaign.Regions.HomeValleyPowerGrid.GridSummary sum = Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+            GameLogic.View.PowerCoverageOverlayView.SetEnabled(false);
+            Check(sum.SubnetCount == 1 && !GameLogic.View.PowerCoverageOverlayView.Enabled, $"清理：测试电塔与发电机拆掉（剩 {sum.SubnetCount} 个电网）");
             PressKeyKeepMouse(KeyCode.Escape);
             Next(140, "Esc 退出建造模式；FG0-ARCH-03：家园突袭战斗原型（测试捷径）");
         }

@@ -191,6 +191,7 @@ namespace GameLogic.Campaign.Regions
         public void TickHover(CampaignState state, Camera camera, bool allowed)
         {
             bool over = false;
+            bool overPower = false;
             if (allowed && state != null && camera != null && !InputRouter.IsUiPointerBlocked())
             {
                 Vector3 screen = InputRouter.Reader.MousePosition;
@@ -244,6 +245,25 @@ namespace GameLogic.Campaign.Regions
                             _hoveringBelt = true;
                             UiTooltip.HoverWorld(BeltHoverKey, new Vector2(screen.x, screen.y), _beltProvider);
                         }
+                        else if (ReferenceEquals(HomeValleyPowerGrid.BoundState, state) && HomeGridService.BuildingAt(state, cell) is BuildingRecord pb
+                                 && HomeValleyPowerGrid.IsPowerRelevantType(pb.BuildingTypeId)
+                                 && (pb.ConstructionState == BuildingConstructionState.Operational || pb.ConstructionState == BuildingConstructionState.Disabled))
+                        {
+                            // FG3-LOG-06（FGR-LOG-060 / 061）：已建成、和电网有关的建筑——在哪个电网、有没有电、优先级、电网读数。
+                            over = true;
+                            overPower = true;
+                            if (_hovering && UiTooltip.WorldKey == HoverKey)
+                            {
+                                UiTooltip.LeaveWorld();
+                            }
+                            _hovering = false;
+                            ReleaseBeltHover();
+                            _hoverState = state;
+                            _hoverCell = cell;
+                            _powerHoverId = pb.BuildingId;
+                            _hoveringPower = true;
+                            UiTooltip.HoverWorld(PowerHoverKey, new Vector2(screen.x, screen.y), _powerProvider);
+                        }
                     }
                 }
             }
@@ -259,6 +279,15 @@ namespace GameLogic.Campaign.Regions
             {
                 ReleaseBeltHover();
             }
+            if (!overPower && _hoveringPower)
+            {
+                _hoveringPower = false;
+                _powerHoverId = null;
+                if (UiTooltip.WorldKey == PowerHoverKey)
+                {
+                    UiTooltip.LeaveWorld();
+                }
+            }
             if ((!over || !_hoverOnPipeThisFrame()) && _hoveringPipe)
             {
                 _hoveringPipe = false;
@@ -273,6 +302,28 @@ namespace GameLogic.Campaign.Regions
             _hoverState != null && PipeNetworkService.IsRunning && PipeNetworkService.Kernel.HasCell(_hoverCell.X, _hoverCell.Y) && !IsSiteCell(_hoverState, _hoverCell);
 
         private const int PipeHoverKey = -733;
+        private const int PowerHoverKey = -734;
+        private bool _hoveringPower;
+        private string _powerHoverId;
+        private Func<TooltipContent> _powerProviderCache;
+        private Func<TooltipContent> _powerProvider => _powerProviderCache ??= ProvidePowerHover;
+
+        /// <summary>悬停提示当前是否挂在和电网有关的建筑上（自检读）。</summary>
+        public bool HoveringPower => _hoveringPower;
+
+        private TooltipContent ProvidePowerHover()
+        {
+            if (!_hoveringPower || _hoverState == null)
+            {
+                return null;
+            }
+            BuildingRecord b = HomeGridService.FindBuilding(_hoverState, _powerHoverId);
+            if (b == null || !HomeValleyPowerGrid.TryDescribeBuilding(_hoverState, b, out string body))
+            {
+                return null;
+            }
+            return new TooltipContent { Title = HomeGridService.DisplayName(b.BuildingTypeId), Body = body, Shortcut = GameActionId.OpenPowerGrid, CodexEntryId = "codex.logistics.power" };
+        }
         private bool _hoveringPipe;
         private Func<TooltipContent> _pipeProviderCache;
         private Func<TooltipContent> _pipeProvider => _pipeProviderCache ??= ProvidePipeHover;

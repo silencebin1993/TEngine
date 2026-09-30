@@ -325,6 +325,31 @@ namespace GameLogic.Campaign
         public bool ColdSnap;
     }
 
+    /// <summary>
+    /// FG3-LOG-06 电力子网与电塔（FG03 第 6 节“电网拓扑”；FGR-LOG-061 每个电网的曲线）：电网内核里不能从建筑记录推出来的部分。
+    /// 电网拓扑本身（哪些建筑接在哪个电网、谁供电谁断电）是派生量：读档后按建筑记录与电力节点表重算；这里存
+    /// ① 电网编号（每个电网一个锚点建筑 ID，读档后锚点所在的电网沿用这个编号），② 每个电网的曲线（发电、需要、实际用电、储能），③ 储能建筑的存量。
+    /// 唯一写入口 <see cref="Regions.HomeValleyPowerGrid.WriteTo"/>（WorldSimulation.SyncAllForSave 调它），读档时第一次重算前恢复。
+    /// DomainVersion 1 = 本 Story 之前的存档（没有这个域）；2 = 本格式。<see cref="FormatVersion"/> = 内核快照格式（不认识时原样保留不覆盖）。
+    /// </summary>
+    [Serializable]
+    public sealed class PowerGridState
+    {
+        public int DomainVersion = 1;
+        public int FormatVersion;
+        public int NextSerial = 1;
+        public int[] SubnetSerials = Array.Empty<int>();
+        /// <summary>每个电网的锚点建筑 ID（归还核心的虚拟配电中心写 “@core”）。</summary>
+        public string[] SubnetAnchors = Array.Empty<string>();
+        public int[] CurveCounts = Array.Empty<int>();
+        public float[] CurveSupply = Array.Empty<float>();
+        public float[] CurveDemand = Array.Empty<float>();
+        public float[] CurveDelivered = Array.Empty<float>();
+        public float[] CurveStored = Array.Empty<float>();
+        public string[] StorageIds = Array.Empty<string>();
+        public double[] StorageStored = Array.Empty<double>();
+    }
+
     /// <summary>研究（FG05）。</summary>
     [Serializable]
     public sealed class ResearchState
@@ -748,6 +773,7 @@ namespace GameLogic.Campaign
             new DomainInfo(nameof(CampaignState.Belts), "FG0-ARCH-02（传送带内核）", s => s.Belts),
             new DomainInfo(nameof(CampaignState.Combat), "FG0-ARCH-03（战斗内核）", s => s.Combat),
             new DomainInfo(nameof(CampaignState.Pipes), "FG03 管线与流体", s => s.Pipes),
+            new DomainInfo(nameof(CampaignState.Power), "FG3-LOG-06 电力子网与电塔", s => s.Power),
             new DomainInfo(nameof(CampaignState.Research), "FG05 研究", s => s.Research),
             new DomainInfo(nameof(CampaignState.Weather), "FG07 天气", s => s.Weather),
             new DomainInfo(nameof(CampaignState.Raids), "FG06 突袭", s => s.Raids),
@@ -803,6 +829,16 @@ namespace GameLogic.Campaign
                 }
             }
             s.Pipes ??= new PipeFluidState();
+            s.Power ??= new PowerGridState();
+            s.Power.SubnetSerials ??= Array.Empty<int>();
+            s.Power.SubnetAnchors ??= Array.Empty<string>();
+            s.Power.CurveCounts ??= Array.Empty<int>();
+            s.Power.CurveSupply ??= Array.Empty<float>();
+            s.Power.CurveDemand ??= Array.Empty<float>();
+            s.Power.CurveDelivered ??= Array.Empty<float>();
+            s.Power.CurveStored ??= Array.Empty<float>();
+            s.Power.StorageIds ??= Array.Empty<string>();
+            s.Power.StorageStored ??= Array.Empty<double>();
             s.Research ??= new ResearchState();
             s.Weather ??= new WeatherState();
             s.Raids ??= new RaidState();

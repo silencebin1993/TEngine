@@ -100,7 +100,7 @@ namespace GameLogic.EditorTools
             Expect(FgContentTables.LoadError == null, $"fg.TbBuilding / fg.TbMechEnemy 读取成功（错误：{FgContentTables.LoadError ?? "无"}）");
             Expect(t.TbLocText.DataList.Count >= 14 && GameText.Count == t.TbLocText.DataList.Count,
                 $"文本表 {t.TbLocText.DataList.Count} 条，GameText 可查 {GameText.Count} 条");
-            Expect(FgContentTables.Buildings.Count == 10, $"建筑表 10 行（Demo 8 种建筑 + 第二座发电机 + FG1-SIG-07 信号中继塔），实际 {FgContentTables.Buildings.Count}");
+            Expect(FgContentTables.Buildings.Count == 12, $"建筑表 12 行（Demo 8 种建筑 + 第二座发电机 + FG1-SIG-07 信号中继塔 + FG3-LOG-06 电塔 T1 / T2），实际 {FgContentTables.Buildings.Count}");
             Expect(FgContentTables.Enemies.Count == 6, $"机械敌人表 6 行（Demo 6 类敌人），实际 {FgContentTables.Enemies.Count}");
         }
 
@@ -163,8 +163,8 @@ namespace GameLogic.EditorTools
                 "PowerProfile 数值与 Demo 一致（信标 30/优先级 2，维修台 15/优先级 3）");
             Expect(HomeValleyLayout.PowerSupplyProfile.Count == 2 && Mathf.Approximately(HomeValleyLayout.PowerSupplyProfile["generator"], 80f),
                 "PowerSupplyProfile = 两座发电机各 80");
-            Expect(HomeValleyLayout.RepairProfile.Count == 3 && HomeValleyLayout.RepairProfile["signal_tower"] == (40, 15f),
-                "RepairProfile = 发电机/仓库/信号塔，信号塔 (40, 15)");
+            Expect(HomeValleyLayout.RepairProfile.Count == 5 && HomeValleyLayout.RepairProfile["signal_tower"] == (40, 15f) && HomeValleyLayout.RepairProfile["power_pole"] == (2, 5f),
+                "RepairProfile = 发电机/仓库/信号塔 + FG3-LOG-06 电塔 T1 / T2，信号塔 (40, 15)，电塔 T1 (2, 5)");
 
             CampaignState state = PowerState();
             HomeValleyPowerGrid.GridSummary real = HomeValleyPowerGrid.Recompute(state);
@@ -481,8 +481,9 @@ namespace GameLogic.EditorTools
                 // FG3-LOG-01 的建造菜单分类（BC）与工具（BT）由 FgBuildFormalSelfCheck A 段逐字段比对。
                 // FG3-LOG-04 的过滤器预设表（FP）由 FgBeltNodeSelfCheck F1 段逐字段比对。
                 // FG3-LOG-05 的流体表（FL）由 FgPipeSelfCheck F1 段逐字段比对。
+                // FG3-LOG-06 的电力节点表（PN）由 FgPowerGridSelfCheck F1 段逐字段比对。
                 if (f[0] == "BC" || f[0] == "BT" || f[0] == "G" || f[0] == "P" || f[0] == "L" || f[0] == "X" || f[0] == "H" || f[0] == "FK" || f[0] == "CX" || f[0] == "ST"
-                    || f[0] == "CR" || f[0] == "CC" || f[0] == "RX" || f[0] == "FP" || f[0] == "FL" || f[0].StartsWith("W", StringComparison.Ordinal))
+                    || f[0] == "CR" || f[0] == "CC" || f[0] == "RX" || f[0] == "FP" || f[0] == "FL" || f[0] == "PN" || f[0].StartsWith("W", StringComparison.Ordinal))
                 {
                     continue;
                 }

@@ -150,8 +150,8 @@ namespace GameLogic.Campaign.Regions
             // 登记，必须在这里对当前区域全部存活机器统一补一遍，否则读档/重进就会看到空注册表。
             RegisterAllRegionMachineLoadouts(state);
             state.CurrentRegionId = HomeValleyLayout.RegionId;
+            HomeGridService.MapFor(state); // FG0-ARCH-04：旧档迁移到格网 + 占用层重建（幂等）。FG3-LOG-06：先迁移——电力覆盖按格网坐标算。
             HomeValleyPowerGrid.Recompute(state); // 幂等：新建战役刚播种、或读档恢复旧存档，都用当前数据重算一次。
-            HomeGridService.MapFor(state); // FG0-ARCH-04：旧档迁移到格网 + 占用层重建（幂等）。
 
             // FG0-ARCH-03：机器进家园的战斗内核（读档时从快照恢复，含编队命令；新战役按记录建）。表现对象只在被观察时建（SetObserved）。
             OpenCombat(state, resume);

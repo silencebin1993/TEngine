@@ -1,6 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using BinGames.Sim.Logistics;
+using GameLogic.Core;
+using GameLogic.Localization;
+using GameLogic.Notifications;
 
 namespace GameLogic.Campaign.Regions
 {
@@ -12,11 +16,14 @@ namespace GameLogic.Campaign.Regions
     /// 当前所有 Operational 供给类建筑动态求和，<see cref="CampaignState.PowerCapacity"/> 变成
     /// 只读派生值，调用方不应再直接对它做 +=/-=。
     ///
-    /// 只覆盖归还谷地目前存在的建筑类型；跨区域的更完整仲裁属于后续 Story（信标区域接入等）。
-    /// 只在容量/建筑状态/优先级变化后调用（脏重算），不逐帧重算，满足"热更层每帧不得 O(建筑数)"
-    /// 的性能纪律——这条规则同样适用于本类，调用方（<see cref="HomeValleyController"/>）负责
-    /// 只在真正的状态变化点触发 <see cref="Recompute"/>。</summary>
-    public static class HomeValleyPowerGrid
+    /// FG3-LOG-06（FG03 FGR-LOG-060、061）起扩展为<b>电塔覆盖 + 子网</b>：电力节点（归还核心自带配电、电塔 T1 / T2，半径见 fg.TbPowerNode）覆盖范围内的建筑
+    /// 自动接入；节点之间在范围内自动相连；互不相连的是不同的电网，各自结算（同一套“优先级 → 建筑编号”贪心规则，只是按电网分开）；不在任何覆盖里的用电建筑
+    /// 是“未接入电网”（<see cref="BuildingPowerState.Unpowered"/>）。拓扑与分配在 AOT 内核 <see cref="PowerKernel"/> 里做（逐建筑循环只在 Main/Sim）。
+    ///
+    /// 只在容量/建筑状态/优先级/拓扑变化后调用（脏重算），不逐帧重算，满足"热更层每帧不得 O(建筑数)"
+    /// 的性能纪律——这条规则同样适用于本类，调用方（<see cref="HomeValleyController"/>、工作单完工 / 拆除 / 搬迁 / 旋转）负责
+    /// 只在真正的状态变化点触发 <see cref="Recompute"/>。按时间的部分（储能积分、曲线采样）见 <see cref="WorldStep"/>：每游戏秒 O(电网数)。</summary>
+    public static partial class HomeValleyPowerGrid
     {
         public readonly struct GridSummary
         {
@@ -31,14 +38,22 @@ namespace GameLogic.Campaign.Regions
             /// 重新排序（只读上次 Recompute 的缓存结果），本字段恒为空数组。</summary>
             public readonly string[] AllocationOrderBuildingIds;
 
+            /// <summary>FG3-LOG-06：不在任何电力覆盖里的运转中用电建筑。</summary>
+            public readonly string[] UnconnectedBuildingIds;
+
+            /// <summary>FG3-LOG-06：电网个数。</summary>
+            public readonly int SubnetCount;
+
             public GridSummary(float totalSupply, float totalDemand, float shortfall,
-                string[] brownoutBuildingIds, string[] allocationOrderBuildingIds = null)
+                string[] brownoutBuildingIds, string[] allocationOrderBuildingIds = null, string[] unconnectedBuildingIds = null, int subnetCount = 0)
             {
                 TotalSupply = totalSupply;
                 TotalDemand = totalDemand;
                 Shortfall = shortfall;
                 BrownoutBuildingIds = brownoutBuildingIds ?? Array.Empty<string>();
                 AllocationOrderBuildingIds = allocationOrderBuildingIds ?? Array.Empty<string>();
+                UnconnectedBuildingIds = unconnectedBuildingIds ?? Array.Empty<string>();
+                SubnetCount = subnetCount;
             }
         }
 
@@ -57,67 +72,97 @@ namespace GameLogic.Campaign.Regions
             public static GridResult Fail(string reason) => new GridResult(false, reason);
         }
 
-        /// <summary>ERD-ECO-002 电网仲裁：按优先级（数字小优先）+ buildingId 稳定排序（AC-ECO-004）
-        /// 确定性分配供给；分不到的 Operational 消费者进 Brownout。供给侧动态计算（见类注释），
-        /// 不依赖任何历史累加状态，天然满足"发电机损坏时基础 20 仍供核心"——核心 demand（10）
-        /// 恒小于 <see cref="HomeValleyLayout.BaseCoreSupply"/>（20），且 BuildingId
-        /// "home_valley:core" 在同优先级（1）的消费者里字典序最小，必然排在最前先分配到。
-        /// 信号塔只有在真正 Powered（不是 Brownout/Unpowered/Disabled/Damaged）时才提供
-        /// <see cref="HomeValleyLayout.SignalTowerBandwidthBonus"/> 带宽加成——断电即同步降低带宽，
-        /// 不需要额外的"扣减"步骤。</summary>
+        /// <summary>ERD-ECO-002 电网仲裁 + FG3-LOG-06 子网：先按建筑记录重建拓扑（节点连通、建筑接入、电网编号），再在每个电网里按优先级（数字小优先）+ buildingId
+        /// 稳定排序（AC-ECO-004）确定性分配供给；分不到的 Operational 消费者进 Brownout，不在任何覆盖里的进 Unpowered（未接入电网）。
+        /// 核心自带的基础供电（<see cref="HomeValleyLayout.BaseCoreSupply"/>）进核心所在的电网，不依赖核心建造状态；
+        /// 核心 demand（10）恒小于 20，且 "home_valley:core" 在同优先级（1）里字典序最小，必然先分到——“发电机损坏时基础 20 仍供核心”照旧成立。
+        /// 信号塔只有在真正 Powered 时才提供 <see cref="HomeValleyLayout.SignalTowerBandwidthBonus"/> 带宽加成。
+        /// 电网断开（一个电网的节点散到几个新电网）时发“电网断开”警告；建筑从有电网变成未接入时发“失去电网连接”警告（B05 / B08，同类聚合、可定位）。</summary>
         public static GridSummary Recompute(CampaignState state)
         {
-            float totalSupply = HomeValleyLayout.BaseCoreSupply;
-            foreach (BuildingRecord b in state.BuildingRecords)
+            if (state == null)
             {
-                if (b.RegionId == HomeValleyLayout.RegionId
-                    && b.ConstructionState == BuildingConstructionState.Operational
-                    && HomeValleyLayout.PowerSupplyProfile.TryGetValue(b.BuildingTypeId, out float supply))
-                {
-                    totalSupply += supply;
-                }
+                return new GridSummary(0f, 0f, 0f, null);
             }
+            PowerKernel kernel = EnsureKernel(state);
+            long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+            BuildEntities(state);
+            long t1 = System.Diagnostics.Stopwatch.GetTimestamp();
+            kernel.Rebuild(_entities, _entityCount);
+            long t2 = System.Diagnostics.Stopwatch.GetTimestamp();
+            GridSummary result = ApplyResults(state, topologyChanged: true);
+            long t3 = System.Diagnostics.Stopwatch.GetTimestamp();
+            double f = 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            LastAssembleMs = (t1 - t0) * f;
+            LastKernelRebuildMs = (t2 - t1) * f;
+            LastApplyMs = (t3 - t2) * f;
+            return result;
+        }
 
-            List<BuildingRecord> consumers = state.BuildingRecords
-                .Where(b => b.RegionId == HomeValleyLayout.RegionId
-                    && b.ConstructionState == BuildingConstructionState.Operational
-                    && HomeValleyLayout.PowerProfile.ContainsKey(b.BuildingTypeId))
-                .OrderBy(b => b.PowerPriority)
-                .ThenBy(b => b.BuildingId, StringComparer.Ordinal)
-                .ToList();
+        /// <summary>最近一次 <see cref="Recompute"/> 里热更层组装实体表（含排序）的耗时（毫秒）。</summary>
+        public static double LastAssembleMs { get; private set; }
+        /// <summary>最近一次 <see cref="Recompute"/> 里热更层写回结果的耗时（毫秒）。</summary>
+        public static double LastApplyMs { get; private set; }
 
-            float remaining = totalSupply;
-            float totalDemand = 0f;
-            bool signalTowerPowered = false;
+        /// <summary>最近一次 <see cref="Recompute"/> 里 AOT 内核拓扑重算的耗时（毫秒）。性能自检用它把“内核（AOT）”和“热更层组装 / 写回（真机解释执行）”分开计。</summary>
+        public static double LastKernelRebuildMs { get; private set; }
+
+        /// <summary>把内核的结算结果写回建筑记录（PowerState）、汇总到 <see cref="CampaignState"/>，并发出状态翻转的反馈。</summary>
+        private static GridSummary ApplyResults(CampaignState state, bool topologyChanged)
+        {
+            PowerKernel kernel = _kernel;
             var brownout = new List<string>();
+            var unconnected = new List<string>();
+            var order = new List<string>();
             List<string> newlyLost = null;
             List<string> newlyRestored = null;
+            List<string> newlyCut = null;
             // FG0-UX-01（FGR-UX-020 定位）：逐栋记下坐标，通知中心按楼逐条可定位（“3 处缺电”展开后每条都能点）。
             List<UnityEngine.Vector2> lostAt = null;
             List<UnityEngine.Vector2> restoredAt = null;
+            List<UnityEngine.Vector2> cutAt = null;
+            bool signalTowerPowered = false;
+            float totalDemand = 0f;
+            int poles = 0;
 
-            foreach (BuildingRecord building in consumers)
+            for (int i = 0; i < _entityCount; i++)
             {
-                float need = HomeValleyLayout.PowerProfile[building.BuildingTypeId].PowerDemand;
-                totalDemand += need;
-                BuildingPowerState before = building.PowerState;
-                if (remaining >= need)
+                BuildingRecord building = _recordAt[i];
+                if (building == null)
                 {
-                    building.PowerState = BuildingPowerState.Powered;
-                    remaining -= need;
+                    continue;
+                }
+                if (building.ConstructionState == BuildingConstructionState.Operational && IsPoleType(building.BuildingTypeId))
+                {
+                    poles++;
+                }
+                PowerEntity e = _entities[i];
+                if (!e.DemandOn)
+                {
+                    continue;
+                }
+                totalDemand += e.Demand;
+                order.Add(building.BuildingId);
+                BuildingPowerState before = building.PowerState;
+                PowerUse use = kernel.UseOf(i);
+                BuildingPowerState now = use == PowerUse.Powered ? BuildingPowerState.Powered
+                    : use == PowerUse.Brownout ? BuildingPowerState.Brownout
+                    : BuildingPowerState.Unpowered;
+                building.PowerState = now;
+                if (now == BuildingPowerState.Powered)
+                {
                     if (building.BuildingTypeId == HomeValleyLayout.BuildingTypeSignalTower)
                     {
                         signalTowerPowered = true;
                     }
-                    if (before == BuildingPowerState.Brownout)
+                    if (before == BuildingPowerState.Brownout || before == BuildingPowerState.Unpowered)
                     {
                         (newlyRestored ??= new List<string>()).Add(Feedback.FeedbackCues.BuildingLabel(building.BuildingId));
                         (restoredAt ??= new List<UnityEngine.Vector2>()).Add(building.Position);
                     }
                 }
-                else
+                else if (now == BuildingPowerState.Brownout)
                 {
-                    building.PowerState = BuildingPowerState.Brownout;
                     brownout.Add(building.BuildingId);
                     if (before != BuildingPowerState.Brownout)
                     {
@@ -125,21 +170,60 @@ namespace GameLogic.Campaign.Regions
                         (lostAt ??= new List<UnityEngine.Vector2>()).Add(building.Position);
                     }
                 }
+                else
+                {
+                    unconnected.Add(building.BuildingId);
+                    if (before != BuildingPowerState.Unpowered && !_suppressFeedback)
+                    {
+                        (newlyCut ??= new List<string>()).Add(Feedback.FeedbackCues.BuildingLabel(building.BuildingId));
+                        (cutAt ??= new List<UnityEngine.Vector2>()).Add(building.Position);
+                    }
+                }
             }
 
-            // ER8-CONTENT-01 AC-AUD-001 断电：只在状态真正翻转的那次重算出声（读档/重复重算状态不变，
-            // 不会误报）；同一次重算里多栋楼一起停机合并成一条。
-            if (newlyLost != null)
+            if (!_suppressFeedback)
             {
-                Feedback.FeedbackCues.RaiseLocatedGroup(Feedback.FeedbackCueId.PowerLost, string.Join("、", newlyLost) + " 停机",
-                    newlyLost.Select(n => n + " 停机").ToList(), lostAt);
+                // ER8-CONTENT-01 AC-AUD-001 断电：只在状态真正翻转的那次重算出声（读档/重复重算状态不变，
+                // 不会误报）；同一次重算里多栋楼一起停机合并成一条。
+                if (newlyLost != null)
+                {
+                    Feedback.FeedbackCues.RaiseLocatedGroup(Feedback.FeedbackCueId.PowerLost, string.Join("、", newlyLost) + " 停机",
+                        newlyLost.Select(n => n + " 停机").ToList(), lostAt);
+                    GuidanceHooks.Raise(GuidanceHooks.PowerFirstBrownout);
+                }
+                if (newlyRestored != null)
+                {
+                    Feedback.FeedbackCues.RaiseLocatedGroup(Feedback.FeedbackCueId.PowerRestored, string.Join("、", newlyRestored),
+                        newlyRestored, restoredAt);
+                }
+                if (newlyCut != null)
+                {
+                    for (int i = 0; i < newlyCut.Count; i++)
+                    {
+                        UnityEngine.Vector2 p = cutAt[i];
+                        NotificationCenter.Post("power_unconnected", GameText.Format("power.notify.unconnected", newlyCut[i]), new UnityEngine.Vector3(p.x, 0f, p.y));
+                    }
+                    LastUnconnectedNotices += newlyCut.Count;
+                }
+                if (topologyChanged)
+                {
+                    foreach (PowerSplit split in kernel.LastSplits)
+                    {
+                        PostSplit(split);
+                    }
+                }
             }
-            if (newlyRestored != null)
+            if (poles > _lastPoleCount && !_suppressFeedback)
             {
-                Feedback.FeedbackCues.RaiseLocatedGroup(Feedback.FeedbackCueId.PowerRestored, string.Join("、", newlyRestored),
-                    newlyRestored, restoredAt);
+                GuidanceHooks.Raise(GuidanceHooks.PowerPoleFirstPlaced);
             }
+            _lastPoleCount = poles;
 
+            float totalSupply = 0f;
+            for (int s = 0; s < kernel.SubnetCount; s++)
+            {
+                totalSupply += kernel.Subnet(s).Supply;
+            }
             state.PowerCapacity = totalSupply;
             state.PowerDemand = totalDemand;
             // ER6-EXPOSE-01："家园关闭信号塔主动广播……带宽减少3"——玩家主动开关（与本方法自己算出的
@@ -150,19 +234,79 @@ namespace GameLogic.Campaign.Regions
                 + (signalTowerPowered ? HomeValleyLayout.SignalTowerBandwidthBonus : 0f)
                 - broadcastOffPenalty);
 
+            if (_legacyCheckPending)
+            {
+                _legacyCheckPending = false;
+                if (unconnected.Count > 0 && _bindWasLegacySave)
+                {
+                    // 旧存档（本 Story 之前的电网是全局容量）：离核心太远的建筑读档后没有电——写明原因与办法，不替玩家补电塔。
+                    NotificationCenter.Post("save_migrated", GameText.Format("power.notify.legacy", unconnected.Count));
+                }
+            }
+
+            _suppressFeedback = false;
+            string[] brownoutIds = brownout.ToArray();
+            string[] unconnectedIds = unconnected.ToArray();
+            // 汇总缓存（HUD 每帧 O(1) 读，见 TryGetCachedSummary）：结果只在这里变。
+            _cachedSummary = new GridSummary(totalSupply, totalDemand, Math.Max(0f, totalDemand - totalSupply),
+                brownoutIds, null, unconnectedIds, kernel.SubnetCount);
+            _summaryValid = true;
+            SummaryVersion++;
             return new GridSummary(totalSupply, totalDemand, Math.Max(0f, totalDemand - totalSupply),
-                brownout.ToArray(), consumers.Select(b => b.BuildingId).ToArray());
+                brownoutIds, order.ToArray(), unconnectedIds, kernel.SubnetCount);
+        }
+
+        private static void PostSplit(PowerSplit split)
+        {
+            var parts = new List<string>(split.NewSerials.Length);
+            foreach (int serial in split.NewSerials)
+            {
+                parts.Add(SubnetName(serial));
+            }
+            UnityEngine.Vector3? at = null;
+            // 定位到断出去的那一段（第二段起）的第一个节点：玩家要去看的是“哪里断了”。
+            int cut = split.NewSerials.Length > 1 ? _kernel.SubnetIndexOfSerial(split.NewSerials[1]) : -1;
+            if (cut >= 0 && _kernel.Subnet(cut).FirstNode >= 0)
+            {
+                PowerEntity n = _kernel.Entity(_kernel.Subnet(cut).FirstNode);
+                at = new UnityEngine.Vector3((n.MinX + n.MaxX) * 0.5f, 0f, (n.MinY + n.MaxY) * 0.5f);
+            }
+            NotificationCenter.Post("power_split",
+                GameText.Format("power.notify.split", SubnetName(split.OldSerial), split.Parts,
+                    string.Join(GameText.Language == GameLanguage.En ? ", " : "、", parts)), at);
+            GuidanceHooks.Raise(GuidanceHooks.PowerFirstSplit);
+            LastSplitNotices++;
+        }
+
+        private static GridSummary _cachedSummary;
+        private static bool _summaryValid;
+
+        /// <summary>每次结算结果写回（<see cref="Recompute"/> / 储能步进）或解绑 +1。HUD 只在它变化时重拼文本。</summary>
+        public static int SummaryVersion { get; private set; }
+
+        /// <summary>FG3-LOG-06：O(1) 读上一次结算缓存的汇总（HUD 每帧用）。<paramref name="state"/> 不是当前绑定的战役时返回 false，
+        /// 调用方退回 <see cref="GetSummary"/>（只在没绑定时发生）。</summary>
+        public static bool TryGetCachedSummary(CampaignState state, out GridSummary summary)
+        {
+            if (_summaryValid && state != null && _kernel != null && ReferenceEquals(_state, state))
+            {
+                summary = _cachedSummary;
+                return true;
+            }
+            summary = default;
+            return false;
         }
 
         /// <summary>只读查询当前电网状态，供 HUD 轮询展示（"显示供给/需求/差额/被停建筑"）——
         /// 直接读取上一次 <see cref="Recompute"/> 缓存在 <see cref="BuildingRecord.PowerState"/>/
         /// <see cref="CampaignState.PowerCapacity"/> 里的结果，不重新仲裁、不写任何状态。查询和
-        /// 命令分离：HUD 每帧调用本方法不会违反"热更层每帧不得 O(建筑数) 触发脏重算"的性能纪律
-        /// （这里确实是每帧 O(建筑数)，但只读遍历，不是仲裁；归还谷地建筑数量级恒定个位数）。</summary>
+        /// 命令分离。本方法 O(建筑数)：FG3-LOG-06 起 HUD 每帧改读 <see cref="TryGetCachedSummary"/>（O(1)），
+        /// 只有战役还没绑定电网时才退回这里；自检用它与缓存对账。</summary>
         public static GridSummary GetSummary(CampaignState state)
         {
             float totalDemand = 0f;
             var brownout = new List<string>();
+            var unconnected = new List<string>();
             foreach (BuildingRecord b in state.BuildingRecords)
             {
                 if (b.RegionId != HomeValleyLayout.RegionId
@@ -176,14 +320,18 @@ namespace GameLogic.Campaign.Regions
                 {
                     brownout.Add(b.BuildingId);
                 }
+                else if (b.PowerState == BuildingPowerState.Unpowered)
+                {
+                    unconnected.Add(b.BuildingId);
+                }
             }
 
+            int subnets = _kernel != null && ReferenceEquals(_state, state) ? _kernel.SubnetCount : 0;
             return new GridSummary(state.PowerCapacity, totalDemand,
-                Math.Max(0f, totalDemand - state.PowerCapacity), brownout.ToArray());
+                Math.Max(0f, totalDemand - state.PowerCapacity), brownout.ToArray(), null, unconnected.ToArray(), subnets);
         }
 
-        /// <summary>玩家在建筑面板改优先级（正式 UI 交互入口留 ER5-INT-01/UI-04，见
-        /// STORY-EXECUTION-CARDS.md #ER3-PWR-01 范围裁剪说明）。1～4 范围外拒绝，成功后触发一次
+        /// <summary>玩家在电网面板改优先级（FG3-LOG-06 起的正式 UI 入口：<c>PowerPanelUIToolkit</c>）。1～4 范围外拒绝，成功后触发一次
         /// 脏重算（"所有改变只触发脏重算"——不逐帧轮询）。</summary>
         public static GridResult TrySetPriority(CampaignState state, string buildingId, int priority)
         {
@@ -200,6 +348,10 @@ namespace GameLogic.Campaign.Regions
             if (building == null)
             {
                 return GridResult.Fail($"building-not-found:{buildingId}");
+            }
+            if (!HomeValleyLayout.PowerProfile.ContainsKey(building.BuildingTypeId))
+            {
+                return GridResult.Fail($"not-a-power-consumer:{building.BuildingTypeId}");
             }
 
             building.PowerPriority = priority;

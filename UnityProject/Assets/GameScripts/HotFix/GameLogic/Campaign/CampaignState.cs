@@ -185,6 +185,8 @@ namespace GameLogic.Campaign
         /// <summary>FG0-ARCH-03：战斗内核快照（每个已载入地点一份）。唯一写入口是 <c>Combat.CombatSites.WriteTo</c>。</summary>
         public CombatState Combat = new CombatState();
         public PipeFluidState Pipes = new PipeFluidState();
+        /// <summary>FG3-LOG-06：电网编号、曲线与储能存量。唯一写入口是 <c>Regions.HomeValleyPowerGrid.WriteTo</c>。</summary>
+        public PowerGridState Power = new PowerGridState();
         public ResearchState Research = new ResearchState();
         public WeatherState Weather = new WeatherState();
         public RaidState Raids = new RaidState();
@@ -258,6 +260,7 @@ namespace GameLogic.Campaign
                 Belts = new BeltItemState(),
                 Combat = new CombatState(),
                 Pipes = new PipeFluidState(),
+                Power = new PowerGridState { DomainVersion = 2 }, // FG3-LOG-06：新战役直接是新格式；旧存档没有这个域 → 字段初值 1（据此判定“旧存档”）
                 Research = new ResearchState(),
                 Weather = new WeatherState(),
                 Raids = new RaidState(),

@@ -101,6 +101,20 @@ namespace GameLogic.UI.Kit
                 ConstructionQueuePanelUIToolkit.Close();
             }
 
+            // FG3-LOG-06：电网面板开关（默认 Alt+G）。开着时是模态（上下文 = 界面），同一个键再按一次关闭；关着时按战略 / 建造上下文打开。
+            if (PowerPanelUIToolkit.IsOpen)
+            {
+                if (!UiConfirmDialog.IsOpen && InputRouter.ConsumeGlobalAction(GameActionId.OpenPowerGrid, allowDuringModal: true))
+                {
+                    PowerPanelUIToolkit.Close();
+                }
+            }
+            else if (InputRouter.ConsumeContextAction(GameActionId.OpenPowerGrid) && GameLogic.Campaign.WorldSim.WorldSimulation.Home != null
+                     && GameLogic.Campaign.WorldSim.WorldSimulation.Home.IsLoaded)
+            {
+                PowerPanelUIToolkit.Open();
+            }
+
             ProcessLibraryKeys();
 
             if (InputRouter.ConsumeAction(GameActionId.SpeedHalf, InputScope.Strategy))

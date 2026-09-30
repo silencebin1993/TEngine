@@ -42,6 +42,12 @@ namespace GameLogic.UI.Common
         private Label _signalLabel;
         private Label _storageLabel;
         private Label _groundItemsLabel;
+        private int _powerDrawnVersion = -1;
+        private CampaignState _powerDrawnState;
+        private Localization.GameLanguage _powerDrawnLanguage;
+
+        /// <summary>电力读数真正重拼的次数（自检读：稳态下不逐帧重拼）。</summary>
+        public int PowerHudRebuilds { get; private set; }
 
         public static EconomyHudToolkit Instance { get; private set; }
 
@@ -141,6 +147,8 @@ namespace GameLogic.UI.Common
 
             // FG0-UX-01（FGR-UX-030 / FG-GAP-003）：电力与信号带宽是复合数值，悬停展开来源（与电网仲裁同一份数据）。
             Kit.UiTooltip.Attach(_powerLabel, () => HomeValueBreakdown.Power(CampaignSession.Current));
+            // FG3-LOG-06：点电力读数打开电网面板（与 Alt+G 同一路径；鼠标玩家不用记快捷键）。
+            _powerLabel.RegisterCallback<ClickEvent>(_ => Kit.PowerPanelUIToolkit.Toggle());
             Kit.UiTooltip.Attach(_signalLabel, () => HomeValueBreakdown.Signal(CampaignSession.Current));
 
             _groundItemsLabel = new Label();
@@ -192,22 +200,42 @@ namespace GameLogic.UI.Common
                 label.style.display = DisplayStyle.Flex;
             }
 
-            HomeValleyPowerGrid.GridSummary power = HomeValleyPowerGrid.GetSummary(state);
-            _powerLabel.text = power.Shortfall > 0f
-                ? $"电力：供给{power.TotalSupply:0}/需求{power.TotalDemand:0}（差额{power.Shortfall:0}）"
-                : $"电力：供给{power.TotalSupply:0}/需求{power.TotalDemand:0}";
+            // FG3-LOG-06：电网汇总读结算缓存（O(1)），只在结算版本 / 战役 / 语言变化时重拼文本——不再每帧遍历全部建筑。
+            bool cached = HomeValleyPowerGrid.TryGetCachedSummary(state, out HomeValleyPowerGrid.GridSummary power);
+            int powerVersion = HomeValleyPowerGrid.SummaryVersion;
+            if (!cached || powerVersion != _powerDrawnVersion || !ReferenceEquals(state, _powerDrawnState) || Localization.GameText.Language != _powerDrawnLanguage)
+            {
+                if (!cached)
+                {
+                    power = HomeValleyPowerGrid.GetSummary(state);
+                }
+                _powerDrawnVersion = cached ? powerVersion : -1;
+                _powerDrawnState = state;
+                _powerDrawnLanguage = Localization.GameText.Language;
+                PowerHudRebuilds++;
+                _powerLabel.text = power.Shortfall > 0f
+                    ? $"电力：供给{power.TotalSupply:0}/需求{power.TotalDemand:0}（差额{power.Shortfall:0}）"
+                    : $"电力：供给{power.TotalSupply:0}/需求{power.TotalDemand:0}";
 
-            if (power.BrownoutBuildingIds.Length > 0)
-            {
-                // ER8-CONTENT-01 AC-THEME-001：此前直接拼接 BuildingId（“home_valley:signal_tower”），
-                // 把内部 ID 显示给了玩家；改为内容目录展示名。
-                _brownoutLabel.text = "断电：" + string.Join("、",
-                    System.Array.ConvertAll(power.BrownoutBuildingIds, MechanicalContentFacade.ResolveWorkOrderTargetLabel));
-                _brownoutLabel.style.display = DisplayStyle.Flex;
-            }
-            else
-            {
-                _brownoutLabel.style.display = DisplayStyle.None;
+                // FG3-LOG-06：多个电网 / 有建筑没接入电网时补一行（文本键，点读数打开电网面板）。
+                if (power.SubnetCount > 1 || power.UnconnectedBuildingIds.Length > 0)
+                {
+                    _powerLabel.text += "\n" + Localization.GameText.Format("power.panel.summary", power.SubnetCount, HomeValleyPowerGrid.Num(power.TotalSupply),
+                        HomeValleyPowerGrid.Num(power.TotalSupply - power.Shortfall), HomeValleyPowerGrid.Num(power.TotalDemand), power.UnconnectedBuildingIds.Length);
+                }
+
+                if (power.BrownoutBuildingIds.Length > 0)
+                {
+                    // ER8-CONTENT-01 AC-THEME-001：此前直接拼接 BuildingId（“home_valley:signal_tower”），
+                    // 把内部 ID 显示给了玩家；改为内容目录展示名。
+                    _brownoutLabel.text = "断电：" + string.Join("、",
+                        System.Array.ConvertAll(power.BrownoutBuildingIds, MechanicalContentFacade.ResolveWorkOrderTargetLabel));
+                    _brownoutLabel.style.display = DisplayStyle.Flex;
+                }
+                else
+                {
+                    _brownoutLabel.style.display = DisplayStyle.None;
+                }
             }
 
             float bandwidth = HomeValleySignal.BandwidthCapacity(state);

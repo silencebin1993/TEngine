@@ -237,6 +237,7 @@ namespace GameLogic.Campaign.WorldSim
             Home?.Exit();
             BeltNetworkService.Unload();
             PipeNetworkService.Unload();
+            HomeValleyPowerGrid.Unbind(); // FG3-LOG-06：电网内核随世界卸载（先把曲线与储能写回绑定的战役）。
             Combat.CombatSites.CloseAll(); // FG0-ARCH-03：保险——各地点 Exit 已各自释放内核，这里确保没有泄漏的原生容器。
             NavService.Unload(); // FG0-ARCH-06：寻路内核在战斗内核之后释放（战斗内核绑定着它的通行镜像）。
             Signal.SignalLinkService.ClearWatch(); // FG1-SIG-04：链路预警是运行时状态，随世界卸载清掉。
@@ -244,6 +245,7 @@ namespace GameLogic.Campaign.WorldSim
             Signal.SignalCoverageService.Clear(); // 覆盖源缓存引用着旧战役：一并清掉。
             GameLogic.View.SignalLinkView.Clear(); // 地图预警圈用共享材质：先于材质释放。
             GameLogic.View.SignalCoverageOverlayView.Clear(); // FG1-SIG-07：覆盖网络叠加层同样用共享材质。
+            GameLogic.View.PowerCoverageOverlayView.Clear(); // FG3-LOG-06：电力覆盖叠加层同样用共享材质。
             GameLogic.View.MachineMorphView.Clear(); // FG1-VFX-01：形变部件的共享网格与材质随世界成对释放（部件已随各地点表现对象销毁）。
             GameLogic.View.ViewMaterials.ReleaseAll(); // FG0-ARCH-03：地点表现对象的共享材质与世界成对释放（各地点的表现对象此时已全部销毁）。
             FracturedCity = null;
@@ -265,6 +267,8 @@ namespace GameLogic.Campaign.WorldSim
             // FG0-ARCH-02：传送带内核快照（按网络分块）写进 BeltItemState。
             BeltNetworkService.WriteTo(BeltNetworkService.BoundState);
             PipeNetworkService.WriteTo(PipeNetworkService.BoundState);
+            // FG3-LOG-06：电网曲线、电网编号锚点与储能存量写进 PowerGridState（拓扑本身读档后按建筑记录重算）。
+            HomeValleyPowerGrid.WriteTo(HomeValleyPowerGrid.BoundState);
             // FG0-ARCH-03：每个已载入地点的战斗内核快照（单位、编队命令、冷却、热量、标记、飞行中的弹体）写进 CombatState。
             Combat.CombatSites.WriteTo(CampaignSession.Current);
             // FG0-ARCH-06：寻路内核的排队请求、待采纳结果、还没同步的格网变化写进 NavState（读档接着跑与不存档一致）。
@@ -339,6 +343,7 @@ namespace GameLogic.Campaign.WorldSim
             Signal.SignalUplinkService.FrameTick(realDt);
             GameLogic.View.SignalLinkView.FrameTick(); // FG1-SIG-04：安全模式头顶图标、地图上的覆盖边缘预警（纯表现）。
             GameLogic.View.SignalCoverageOverlayView.FrameTick(); // FG1-SIG-07：覆盖网络叠加层（纯表现，网络变了才重画）。
+            GameLogic.View.PowerCoverageOverlayView.FrameTick(); // FG3-LOG-06：电力覆盖叠加层（纯表现，电网拓扑变了才重画）。
             GameLogic.View.MachineMorphView.FrameTick(realDt); // FG1-VFX-01：机身形变过渡（真实时间、暂停不走；只推进正在过渡的机器）。
             IWorldSite observed = WorldView.ObservedSite;
             if (observed != null && observed.IsLoaded)
@@ -449,6 +454,11 @@ namespace GameLogic.Campaign.WorldSim
                 BeltNetworkService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                 // FG3-LOG-05：管线内核与传送带同一节拍（FGR-LOG-090）。
                 PipeNetworkService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
+                // FG3-LOG-06：电网按游戏秒积分储能（没有储能时不做事）、按 power.sample_seconds 记曲线——只看步序号，与观察无关，O(电网数)。
+                if (Home != null && Home.IsLoaded)
+                {
+                    HomeValleyPowerGrid.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
+                }
                 // FG1-SIG-03：核心固件冷却（信号侧，按游戏时间）到期——与观察无关，O(信号核槽位数)。
                 Signal.SignalUplinkService.SimStep(state);
                 // FG1-SIG-06：常规裸跑固件的计次间隔到期（信号侧，按游戏时间，与观察无关），O(1)。

@@ -1594,7 +1594,7 @@ namespace GameLogic.EditorTools
                 Expect(tabs, $"建造菜单：12 个分类页签（“{hud.CategoryText(0)}”），默认物流，条目“{hud.ItemText(0).Replace("\n", " ")}”");
 
                 hud.SelectCategory("energy");
-                bool energy = hud.ItemCount == 1 && hud.ItemText(0).Contains("60 废料") && hud.ItemText(0).Contains("40 秒") && hud.ItemText(0).Contains("已有");
+                bool energy = hud.ItemCount == 3 && hud.ItemText(0).Contains("60 废料") && hud.ItemText(0).Contains("40 秒") && hud.ItemText(0).Contains("已有"); // FG3-LOG-06：能源页签 = 发电机 2 + 电塔 T1 / T2
                 hud.SelectCategory("endgame");
                 bool locked = hud.ItemCount == 1 && hud.ItemText(0).Contains("尚未解锁");
                 hud.SelectCategory("defense");

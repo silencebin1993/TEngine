@@ -159,6 +159,7 @@ namespace GameLogic.EditorTools
                 // FG3-LOG-05：管线与流体——一网一种流体（接错拒绝）、泵、最低等级限流与瓶颈、优先级分配、储罐缓冲 / 模式、阀门单向 / 关闭 / 调头、冲洗、供给为 0、
                 // 拓扑变化才重算、确定性与存档、结冰计时接口、渲染实例、正式输入（三个种子）、家园接错流体、悬停、管线面板（真 UXML + 冲洗确认 + 布局探针）、拆除、真文件存读档、暂停与倍速、观察一致、120 帧性能。
                 _fail += FgPipeSelfCheck.Run(Report);
+                _fail += FgPowerGridSelfCheck.Run(Report); // FG3-LOG-06：电力子网与电塔（FGT-LOG-008）。
                 // FG0-ARCH-05：世界生成与区块流式加载——确定性（四种访问顺序 / 三条编译路径）、随机流分离、表面、规划层、坐标、
                 // 工作线程流式加载与性能、差异存档、生成器版本回归哈希、暂停倍速与后台一致、叠加层“生成中”占位、暂停菜单种子。
                 _fail += FgWorldGenSelfCheck.Run(Report);

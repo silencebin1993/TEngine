@@ -163,6 +163,10 @@ public partial class Tables
     /// </summary>
     public fg.TbNotifyType TbNotifyType {get; }
     /// <summary>
+    /// 电力节点
+    /// </summary>
+    public fg.TbPowerNode TbPowerNode {get; }
+    /// <summary>
     /// 具名反应
     /// </summary>
     public fg.TbReaction TbReaction {get; }
@@ -291,6 +295,7 @@ public partial class Tables
         TbMechEnemy = new fg.TbMechEnemy(loader("fg_tbmechenemy"));
         TbNotifyTier = new fg.TbNotifyTier(loader("fg_tbnotifytier"));
         TbNotifyType = new fg.TbNotifyType(loader("fg_tbnotifytype"));
+        TbPowerNode = new fg.TbPowerNode(loader("fg_tbpowernode"));
         TbReaction = new fg.TbReaction(loader("fg_tbreaction"));
         TbRemovedContent = new fg.TbRemovedContent(loader("fg_tbremovedcontent"));
         TbStartLayout = new fg.TbStartLayout(loader("fg_tbstartlayout"));
@@ -356,6 +361,7 @@ public partial class Tables
         TbMechEnemy.ResolveRef(this);
         TbNotifyTier.ResolveRef(this);
         TbNotifyType.ResolveRef(this);
+        TbPowerNode.ResolveRef(this);
         TbReaction.ResolveRef(this);
         TbRemovedContent.ResolveRef(this);
         TbStartLayout.ResolveRef(this);
