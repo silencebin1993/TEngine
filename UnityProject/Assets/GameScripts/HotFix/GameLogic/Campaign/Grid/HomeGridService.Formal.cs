@@ -679,8 +679,9 @@ namespace GameLogic.Campaign.Grid
             return new GridOpResult(GridOpResult.Kind.BeltsRemoved, null);
         }
 
-        /// <summary>传送带物品 → 地面物的资源类型。家园仓库目前只存废料；物品表（FG4-ECO-01）之前按物品编号记（"item:&lt;编号&gt;"），落在地上不消失。</summary>
-        public static string BeltItemResource(ushort item) => "item:" + item.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        /// <summary>传送带物品 → 家园资源类型。FG3-LOG-03：废料（logistics.item.scrap_id）回到仓库库存；其余物品在物品表（FG4-ECO-01）之前
+        /// 按物品编号记（"item:&lt;编号&gt;"），落在地上不消失（DEBT-FG3LOG02-01）。</summary>
+        public static string BeltItemResource(ushort item) => Logistics.BeltItems.ResourceOf(item);
 
         /// <summary>最近一次拆传送带时带着物品的格数 / 一并返还的物品件数 / 取消的规划格数。</summary>
         public static int LastBeltsWithItems { get; private set; }

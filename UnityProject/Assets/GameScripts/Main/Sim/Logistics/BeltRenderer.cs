@@ -41,6 +41,7 @@ namespace BinGames.Sim.Logistics
         private static readonly int CellSizeId = Shader.PropertyToID("_CellSize");
         private static readonly int ItemSizeId = Shader.PropertyToID("_ItemSize");
         private static readonly int HeightId = Shader.PropertyToID("_Height");
+        private static readonly int GameTimeId = Shader.PropertyToID("_GameTime");
 
         private Material _material;
         private Mesh _quad;
@@ -64,6 +65,12 @@ namespace BinGames.Sim.Logistics
         /// <summary>物品实例缓冲上传次数（远景下不增加）。</summary>
         public int ItemUploads { get; private set; }
         public bool GpuAvailable { get; private set; }
+
+        /// <summary>
+        /// FG3-LOG-03：箭头 / 流动条纹滚动用的时间（游戏秒，由调用方按游戏时钟设定）。暂停时不变 → 画面上的传送带也停住；
+        /// 倍速时跟着变快，与物品的真实移动一致（此前用 _Time.y 真实时间，暂停中箭头仍在滚动）。
+        /// </summary>
+        public float AnimationTime { get; set; }
         /// <summary>GPU 不可用的原因（null = 可用）。</summary>
         public string GpuUnavailableReason { get; private set; }
 
@@ -142,6 +149,7 @@ namespace BinGames.Sim.Logistics
             _cellProps.SetFloat(CellSizeId, settings.CellSize);
             _cellProps.SetFloat(ItemSizeId, settings.ItemSize);
             _cellProps.SetFloat(HeightId, settings.Height);
+            _cellProps.SetFloat(GameTimeId, AnimationTime);
             var rpCells = new RenderParams(_material)
             {
                 worldBounds = bounds,
@@ -162,6 +170,7 @@ namespace BinGames.Sim.Logistics
                 _itemProps.SetFloat(CellSizeId, settings.CellSize);
                 _itemProps.SetFloat(ItemSizeId, settings.ItemSize);
                 _itemProps.SetFloat(HeightId, settings.Height);
+                _itemProps.SetFloat(GameTimeId, AnimationTime);
                 var rpItems = new RenderParams(_material)
                 {
                     worldBounds = bounds,

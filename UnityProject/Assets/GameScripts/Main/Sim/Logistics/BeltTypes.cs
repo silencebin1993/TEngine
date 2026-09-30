@@ -37,6 +37,16 @@ namespace BinGames.Sim.Logistics
 
         /// <summary>坐标上限（绝对值）。与世界坐标上限 world.coord_limit 同一量级，远大于它时拒绝（防溢出）。</summary>
         public const int CoordLimit = 1 << 24;
+
+        /// <summary>FG3-LOG-03：端口朝向“任意”（FG0-ARCH-02 的测试端口与旧存档）。建筑端口的朝向是端口朝外的方向（N/E/S/W）。</summary>
+        public const byte AnyFace = 255;
+
+        /// <summary>FG3-LOG-03：输入端口收什么——0 = 任何物品；<see cref="AcceptNone"/> = 什么都不收（建筑还没有这类物品的配方）；其余 = 只收这一种。</summary>
+        public const ushort AcceptAny = 0;
+        public const ushort AcceptNone = 0xFFFF;
+
+        /// <summary>FG3-LOG-03（FGR-LOG-028）：露天传送带减速的上限（百分比）。</summary>
+        public const int MaxSlowPercent = 90;
     }
 
     /// <summary>传送带朝向。与 GameLogic 的 GridDir 取值一致（N=0、E=1、S=2、W=3），格网 y 轴向北。</summary>
@@ -80,6 +90,8 @@ namespace BinGames.Sim.Logistics
         SinkFull = 3,
         /// <summary>汇入点轮到另一路（交替汇入，FGR-LOG-021）。</summary>
         MergeWait = 4,
+        /// <summary>FG3-LOG-03：下游输入端口不收这一件（只收指定物品，或建筑还不收物品）。</summary>
+        SinkRejects = 5,
     }
 
     public enum BeltPortKind : byte
@@ -185,8 +197,14 @@ namespace BinGames.Sim.Logistics
         /// <summary>最近窗口里流出这一格的物品数与窗口长度（游戏秒）。</summary>
         public int PassedInWindow;
         public float WindowSeconds;
-        /// <summary>这一档的设计速度（件 / 分钟）。</summary>
+        /// <summary>这一格现在的满载速度（件 / 分钟）：等级速度，露天且在减速天气下再乘 (100 − 减速%)（FGR-LOG-028）。</summary>
         public int RatedItemsPerMinute;
+        /// <summary>FG3-LOG-03：这一档的设计速度（件 / 分钟，不含天气）。</summary>
+        public int TierItemsPerMinute;
+        /// <summary>FG3-LOG-03：这一格在顶棚下（不受天气减速）。</summary>
+        public bool Covered;
+        /// <summary>FG3-LOG-03：这一格现在被天气减速了多少（百分比；有顶棚或没有减速天气时为 0）。</summary>
+        public int SlowPercent;
         public ushort Item0;
         public ushort Item1;
         public ushort Item2;
@@ -247,6 +265,10 @@ namespace BinGames.Sim.Logistics
         public long BlockedSteps;
         public int InWindow;
         public float WindowSeconds;
+        /// <summary>FG3-LOG-03：端口朝外的方向（0～3；<see cref="BeltConst.AnyFace"/> = 任意）。</summary>
+        public byte Face;
+        /// <summary>FG3-LOG-03：输入端口收什么（<see cref="BeltConst.AcceptAny"/> / <see cref="BeltConst.AcceptNone"/> / 物品编号）。</summary>
+        public ushort Accept;
 
         public float PerMinute => WindowSeconds > 0f ? InWindow * 60f / WindowSeconds : 0f;
     }

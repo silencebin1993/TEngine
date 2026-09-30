@@ -44,6 +44,7 @@ Shader "BinGames/BeltInstanced"
             float _CellSize;
             float _ItemSize;
             float _Height;
+            float _GameTime; // FG3-LOG-03：游戏秒（BeltRenderer.AnimationTime）
 
             struct appdata
             {
@@ -105,7 +106,7 @@ Shader "BinGames/BeltInstanced"
                 float density = saturate(i.data.y);
                 float blocked = i.data.z;
                 float tier = i.data.w;
-                float t = blocked > 0.5 ? 0.0 : _Time.y * speed;
+                float t = blocked > 0.5 ? 0.0 : _GameTime * speed; // FG3-LOG-03：游戏时钟（暂停停住、倍速变快）
                 float3 baseCol = lerp(float3(0.16, 0.17, 0.19), float3(0.30, 0.26, 0.16), tier * 0.5);
                 float edge = step(0.42, abs(i.uv.x - 0.5));
                 float3 col;

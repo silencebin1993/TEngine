@@ -21,7 +21,11 @@ namespace BinGames.Sim.Logistics
     /// </summary>
     public sealed class BeltKernel : IDisposable
     {
-        public const int FormatVersion = 1;
+        /// <summary>存档格式版本。2 = FG3-LOG-03（端口块多了朝向与收货过滤）；1 = FG0-ARCH-02。读档两种都认。</summary>
+        public const int FormatVersion = 2;
+
+        /// <summary>读档仍认的最老版本。</summary>
+        public const int OldestReadableVersion = 1;
 
         private const int S = BeltConst.MaxSlots;
 
@@ -30,6 +34,13 @@ namespace BinGames.Sim.Logistics
         private readonly int _v0;
         private readonly int _v1;
         private readonly int _v2;
+        /// <summary>FG3-LOG-03（FGR-LOG-028）：露天减速（百分比）与三档减速后的每步位移。派生量：天气（FG7）每步由热更层设定，不进存档。</summary>
+        private int _slowPct;
+        private int _s0;
+        private int _s1;
+        private int _s2;
+        private NativeList<byte> _covered;
+        private NativeParallelHashSet<long> _coveredKeys;
 
         private NativeList<int> _x;
         private NativeList<int> _y;
@@ -83,7 +94,12 @@ namespace BinGames.Sim.Logistics
             _v0 = (int)config.UnitsPerStep(config.ItemsPerMinuteT1);
             _v1 = (int)config.UnitsPerStep(config.ItemsPerMinuteT2);
             _v2 = (int)config.UnitsPerStep(config.ItemsPerMinuteT3);
+            _s0 = _v0;
+            _s1 = _v1;
+            _s2 = _v2;
             int cap = Math.Max(16, initialCells);
+            _covered = new NativeList<byte>(cap, Allocator.Persistent);
+            _coveredKeys = new NativeParallelHashSet<long>(16, Allocator.Persistent);
             _x = new NativeList<int>(cap, Allocator.Persistent);
             _y = new NativeList<int>(cap, Allocator.Persistent);
             _dir = new NativeList<byte>(cap, Allocator.Persistent);
@@ -124,6 +140,65 @@ namespace BinGames.Sim.Logistics
         public bool IsDisposed => _disposed;
         public int Spacing => _spacing;
         public int UnitsPerStep(int tier) => tier == 0 ? _v0 : tier == 1 ? _v1 : _v2;
+
+        /// <summary>FG3-LOG-03：露天格在当前天气下的每步位移（没有减速时与 <see cref="UnitsPerStep"/> 相同）。</summary>
+        public int SlowedUnitsPerStep(int tier) => tier == 0 ? _s0 : tier == 1 ? _s1 : _s2;
+
+        /// <summary>FG3-LOG-03（FGR-LOG-028“沙暴期间露天传送带减速”）：当前露天减速百分比（0 = 不减速）。</summary>
+        public int ExposedSlowPercent => _slowPct;
+
+        /// <summary>
+        /// FG3-LOG-03（FGR-LOG-028）：设定露天传送带的减速百分比（0～<see cref="BeltConst.MaxSlowPercent"/>）。天气系统（FG7-ENV-03）在沙暴开始 / 结束时调用；
+        /// 顶棚下的格（<see cref="SetCovered"/>）不受影响。整数定点：每步位移 = 等级位移 × (100 − 百分比) / 100（向下取整，至少 1），结果仍逐位确定。
+        /// 派生量不进存档（天气状态自己进存档，读档后重新设定）。返回是否合法。
+        /// </summary>
+        public bool SetExposedSlowPercent(int percent)
+        {
+            if (percent < 0 || percent > BeltConst.MaxSlowPercent)
+            {
+                return false;
+            }
+            if (percent == _slowPct)
+            {
+                return true;
+            }
+            _slowPct = percent;
+            _s0 = Slowed(_v0, percent);
+            _s1 = Slowed(_v1, percent);
+            _s2 = Slowed(_v2, percent);
+            Revision++;
+            return true;
+        }
+
+        private static int Slowed(int v, int percent) => Math.Max(1, (int)((long)v * (100 - percent) / 100));
+
+        /// <summary>
+        /// FG3-LOG-03（FGR-LOG-028“在顶棚覆盖下不受影响”）：标记 (x, y) 在顶棚下 / 露天。按坐标记，与这一格现在有没有传送带无关
+        /// （顶棚先建、带后铺也生效）。顶棚建筑（FG7）放下 / 拆除时调用；派生量不进存档，读档后由顶棚重新登记。
+        /// </summary>
+        public void SetCovered(int x, int y, bool covered)
+        {
+            long key = BeltDirs.Key(x, y);
+            if (covered)
+            {
+                if (_coveredKeys.Count() + 1 > _coveredKeys.Capacity)
+                {
+                    _coveredKeys.Capacity = Math.Max(16, _coveredKeys.Capacity * 2);
+                }
+                _coveredKeys.Add(key);
+            }
+            else
+            {
+                _coveredKeys.Remove(key);
+            }
+            if (_lookup.TryGetValue(key, out int i))
+            {
+                _covered[i] = covered ? (byte)1 : (byte)0;
+                Revision++;
+            }
+        }
+
+        public bool IsCovered(int x, int y) => _coveredKeys.Contains(BeltDirs.Key(x, y));
         public int CellCount => _aliveCells;
         public long StepIndex => _counters[BeltCounters.StepIndex];
         public int NetworkCount
@@ -225,6 +300,7 @@ namespace BinGames.Sim.Logistics
             _dir.Add((byte)dir);
             _tier.Add((byte)tier);
             _alive.Add(1);
+            _covered.Add(_coveredKeys.Contains(key) ? (byte)1 : (byte)0);
             _count.Add(0);
             _turn.Add(BeltConst.NoTurn);
             _block.Add(0);
@@ -282,6 +358,70 @@ namespace BinGames.Sim.Logistics
             }
             TakeItems(i, removed);
             return BeltResult.Ok;
+        }
+
+        /// <summary>
+        /// FG3-LOG-03（FGR-LOG-026 清带工具）：清空一批格上的物品，按物品种类汇总进 <paramref name="counts"/>（不存在的格跳过），全部计入“移出”。
+        /// 返回清掉的件数。O(格数)，只在玩家操作时调用。
+        /// </summary>
+        public int ClearCells(IReadOnlyList<int2> cells, Dictionary<ushort, int> counts)
+        {
+            int total = 0;
+            if (cells == null)
+            {
+                return 0;
+            }
+            foreach (int2 c in cells)
+            {
+                if (!_lookup.TryGetValue(BeltDirs.Key(c.x, c.y), out int i))
+                {
+                    continue;
+                }
+                int cnt = _count[i];
+                if (cnt == 0)
+                {
+                    continue;
+                }
+                if (counts != null)
+                {
+                    for (int k = 0; k < cnt; k++)
+                    {
+                        ushort it = _item[i * S + k];
+                        counts[it] = counts.TryGetValue(it, out int n) ? n + 1 : 1;
+                    }
+                }
+                TakeItems(i, null);
+                total += cnt;
+            }
+            return total;
+        }
+
+        /// <summary>FG3-LOG-03：一批格上现有的物品按种类汇总（清带前的预览与确认框用；不改状态）。返回件数。</summary>
+        public int CountItems(IReadOnlyList<int2> cells, Dictionary<ushort, int> counts)
+        {
+            int total = 0;
+            if (cells == null)
+            {
+                return 0;
+            }
+            foreach (int2 c in cells)
+            {
+                if (!_lookup.TryGetValue(BeltDirs.Key(c.x, c.y), out int i))
+                {
+                    continue;
+                }
+                int cnt = _count[i];
+                for (int k = 0; k < cnt; k++)
+                {
+                    ushort it = _item[i * S + k];
+                    if (counts != null)
+                    {
+                        counts[it] = counts.TryGetValue(it, out int n) ? n + 1 : 1;
+                    }
+                }
+                total += cnt;
+            }
+            return total;
         }
 
         private void TakeItems(int i, List<ushort> removed)
@@ -416,9 +556,9 @@ namespace BinGames.Sim.Logistics
 
         /// <summary>输出端口：每 <paramref name="intervalSteps"/> 步往 (x,y) 这一格传送带的入口推一件 <paramref name="item"/>；
         /// <paramref name="pending"/> = -1 表示无限供货（否则推完就停，可用 <see cref="AddSourceItems"/> 补货）。</summary>
-        public BeltResult AddSource(int id, int x, int y, ushort item, int intervalSteps, int pending, int owner = 0)
+        public BeltResult AddSource(int id, int x, int y, ushort item, int intervalSteps, int pending, int owner = 0, byte face = BeltConst.AnyFace)
         {
-            if (intervalSteps < 1 || pending < -1)
+            if (intervalSteps < 1 || pending < -1 || (face > 3 && face != BeltConst.AnyFace))
             {
                 return BeltResult.InvalidArgument;
             }
@@ -436,18 +576,22 @@ namespace BinGames.Sim.Logistics
             }
             _ports.Add(new BeltPort
             {
-                Id = id, Kind = (byte)BeltPortKind.Source, Alive = 1, X = x, Y = y, Owner = owner, Item = item,
+                Id = id, Kind = (byte)BeltPortKind.Source, Alive = 1, X = x, Y = y, Owner = owner, Item = item, Face = face, Accept = BeltConst.AcceptAny,
                 Interval = intervalSteps, Phase = 0, Pending = pending, Cell = -1, Network = -1,
             });
+            _portIndex[id] = _ports.Length - 1;
             _dirty = true;
             return BeltResult.Ok;
         }
 
         /// <summary>输入端口：建筑格 (x,y)；末端朝向这一格的传送带把物品送进来。<paramref name="bufferCap"/> = -1 表示收下即消耗（不限），
-        /// 否则缓存满了就不收（上游堵塞，原因“下游 X 已满”）；<paramref name="consumeIntervalSteps"/> > 0 时每隔这么多步自动消耗一件。</summary>
-        public BeltResult AddSink(int id, int x, int y, int bufferCap, int consumeIntervalSteps, int owner = 0)
+        /// 否则缓存满了就不收（上游堵塞，原因“下游 X 已满”）；<paramref name="consumeIntervalSteps"/> > 0 时每隔这么多步自动消耗一件。
+        /// FG3-LOG-03：<paramref name="face"/> = 端口朝外的方向（只接从这一侧正对着它的带）；<paramref name="accept"/> = 只收哪种物品
+        /// （<see cref="BeltConst.AcceptAny"/> 任何 / <see cref="BeltConst.AcceptNone"/> 都不收），不收的物品让带停下（原因 <see cref="BeltBlock.SinkRejects"/>）。</summary>
+        public BeltResult AddSink(int id, int x, int y, int bufferCap, int consumeIntervalSteps, int owner = 0, byte face = BeltConst.AnyFace,
+            ushort accept = BeltConst.AcceptAny)
         {
-            if (bufferCap < -1 || consumeIntervalSteps < 0)
+            if (bufferCap < -1 || consumeIntervalSteps < 0 || (face > 3 && face != BeltConst.AnyFace))
             {
                 return BeltResult.InvalidArgument;
             }
@@ -465,24 +609,80 @@ namespace BinGames.Sim.Logistics
             }
             _ports.Add(new BeltPort
             {
-                Id = id, Kind = (byte)BeltPortKind.Sink, Alive = 1, X = x, Y = y, Owner = owner,
+                Id = id, Kind = (byte)BeltPortKind.Sink, Alive = 1, X = x, Y = y, Owner = owner, Face = face, Accept = accept,
                 Interval = consumeIntervalSteps, Cap = bufferCap, Cell = -1, Network = -1,
             });
+            _portIndex[id] = _ports.Length - 1;
             _dirty = true;
             return BeltResult.Ok;
         }
 
-        public BeltResult RemovePort(int id)
+        public BeltResult RemovePort(int id) => RemovePort(id, out _, out _);
+
+        /// <summary>
+        /// FG3-LOG-03：删掉一个端口，并交还它手里的物品——输出端口还没推上带的待推数（<paramref name="pending"/>，无限供货时为 0）、
+        /// 输入端口缓存里还没被建筑取走的件数（<paramref name="buffered"/>）。调用方把它们送回仓库（建筑被拆 / 停用 / 转向时，物品不凭空消失）。
+        /// </summary>
+        public BeltResult RemovePort(int id, out int pending, out int buffered)
         {
+            pending = 0;
+            buffered = 0;
             int p = FindPort(id);
             if (p < 0)
             {
                 return BeltResult.PortNotFound;
             }
             BeltPort bp = _ports[p];
+            pending = bp.Kind == (byte)BeltPortKind.Source ? Math.Max(0, bp.Pending) : 0;
+            buffered = bp.Kind == (byte)BeltPortKind.Sink ? Math.Max(0, bp.Buffered) : 0;
             bp.Alive = 0;
+            bp.Pending = 0;
+            bp.Buffered = 0;
             _ports[p] = bp;
             _dirty = true;
+            return BeltResult.Ok;
+        }
+
+        /// <summary>FG3-LOG-03（FGR-LOG-021 仓库输出过滤）：输出端口改推另一种物品。调用方先用 <see cref="TakeSourcePending"/> 收回旧物品的待推数。</summary>
+        public BeltResult SetSourceItem(int id, ushort item)
+        {
+            int p = FindPort(id);
+            if (p < 0 || _ports[p].Kind != (byte)BeltPortKind.Source)
+            {
+                return BeltResult.PortNotFound;
+            }
+            BeltPort bp = _ports[p];
+            bp.Item = item;
+            _ports[p] = bp;
+            return BeltResult.Ok;
+        }
+
+        /// <summary>FG3-LOG-03：收回输出端口还没推上带的待推数（返回件数，端口的待推数归 0；无限供货的端口返回 0、不变）。</summary>
+        public int TakeSourcePending(int id)
+        {
+            int p = FindPort(id);
+            if (p < 0 || _ports[p].Kind != (byte)BeltPortKind.Source || _ports[p].Pending <= 0)
+            {
+                return 0;
+            }
+            BeltPort bp = _ports[p];
+            int n = bp.Pending;
+            bp.Pending = 0;
+            _ports[p] = bp;
+            return n;
+        }
+
+        /// <summary>FG3-LOG-03：改输入端口收什么（<see cref="BeltConst.AcceptAny"/> / <see cref="BeltConst.AcceptNone"/> / 物品编号）。</summary>
+        public BeltResult SetSinkAccept(int id, ushort accept)
+        {
+            int p = FindPort(id);
+            if (p < 0 || _ports[p].Kind != (byte)BeltPortKind.Sink)
+            {
+                return BeltResult.PortNotFound;
+            }
+            BeltPort bp = _ports[p];
+            bp.Accept = accept;
+            _ports[p] = bp;
             return BeltResult.Ok;
         }
 
@@ -522,16 +722,100 @@ namespace BinGames.Sim.Logistics
             return n;
         }
 
+        /// <summary>FG3-LOG-03：端口号 → 下标（O(1)；热更层每个内核步给每个建筑端口补货 / 取料，线性查找会变成 O(端口数²)）。
+        /// 追加端口时登记；拓扑重建会重排端口，之后整表重建。</summary>
+        private readonly Dictionary<int, int> _portIndex = new Dictionary<int, int>();
+
         private int FindPort(int id)
         {
-            for (int p = 0; p < _ports.Length; p++)
+            if (_portIndex.TryGetValue(id, out int p) && p < _ports.Length && _ports[p].Alive != 0 && _ports[p].Id == id)
             {
-                if (_ports[p].Alive != 0 && _ports[p].Id == id)
-                {
-                    return p;
-                }
+                return p;
             }
             return -1;
+        }
+
+        private void IndexPorts()
+        {
+            _portIndex.Clear();
+            for (int p = 0; p < _ports.Length; p++)
+            {
+                if (_ports[p].Alive != 0)
+                {
+                    _portIndex[_ports[p].Id] = p;
+                }
+            }
+        }
+
+        /// <summary>FG3-LOG-03：端口的待推数（输出口）与缓存数（输入口），O(1)，不触发拓扑重建（热更层每个内核步补货 / 取料用）。</summary>
+        public bool TryGetPortCounts(int id, out int pending, out int buffered)
+        {
+            int p = FindPort(id);
+            if (p < 0)
+            {
+                pending = 0;
+                buffered = 0;
+                return false;
+            }
+            pending = _ports[p].Pending;
+            buffered = _ports[p].Buffered;
+            return true;
+        }
+
+        /// <summary>
+        /// FG3-LOG-03（清带拖框）：闭区间框里已建成的传送带格（按 (y, x) 升序）。框面积不超过格数时逐格查表，否则扫全部格再筛——
+        /// 两者取小，O(min(框面积, 格数))，逐格循环留在 AOT（热更层不逐格）。只在玩家拖框时调用。
+        /// </summary>
+        public void CollectCellsInBox(int minX, int minY, int maxX, int maxY, List<int2> into)
+        {
+            into.Clear();
+            if (maxX < minX || maxY < minY)
+            {
+                return;
+            }
+            long area = (long)(maxX - minX + 1) * (maxY - minY + 1);
+            if (area <= _aliveCells)
+            {
+                for (int y = minY; y <= maxY; y++)
+                {
+                    for (int x = minX; x <= maxX; x++)
+                    {
+                        if (_lookup.TryGetValue(BeltDirs.Key(x, y), out int i) && _alive[i] != 0)
+                        {
+                            into.Add(new int2(x, y));
+                        }
+                    }
+                }
+                return;
+            }
+            EnsureTopology();
+            for (int i = 0; i < _x.Length; i++)
+            {
+                int x = _x[i];
+                int y = _y[i];
+                if (x >= minX && x <= maxX && y >= minY && y <= maxY)
+                {
+                    into.Add(new int2(x, y));
+                }
+            }
+        }
+
+        /// <summary>FG3-LOG-03（清带点选一条带）：某一网络的全部格坐标（规范顺序）。O(格数)，只在玩家操作时调用。</summary>
+        public void CollectNetworkCells(int network, List<int2> into)
+        {
+            EnsureTopology();
+            into.Clear();
+            if (network < 0)
+            {
+                return;
+            }
+            for (int i = 0; i < _x.Length; i++)
+            {
+                if (_net[i] == network)
+                {
+                    into.Add(new int2(_x[i], _y[i]));
+                }
+            }
         }
 
         // ── 步进 ───────────────────────────────────────────────────────────────
@@ -555,7 +839,7 @@ namespace BinGames.Sim.Logistics
             {
                 X = _x, Y = _y, Dir = _dir, Tier = _tier, Alive = _alive, Count = _count, Turn = _turn, Block = _block,
                 Ring = _ring, FeedN = _feedN, Next = _next, Sink = _sink, Net = _net, Flow = _flow, Feed = _feed,
-                Pos = _pos, Delta = _delta, FlowB = _flowB, Item = _item, Lookup = _lookup, RingCells = _ringCells,
+                Pos = _pos, Delta = _delta, FlowB = _flowB, Item = _item, Covered = _covered, CoveredKeys = _coveredKeys, Lookup = _lookup, RingCells = _ringCells,
                 Rings = _rings, RingOf = _ringOf, RingCount = _ringCount, Tree = _tree, Nets = _nets, Ports = _ports,
             }.Run();
             _watch.Stop();
@@ -563,6 +847,7 @@ namespace BinGames.Sim.Logistics
             _aliveCells = _x.Length;
             _dirty = false;
             RebuildCount++;
+            IndexPorts();
             Revision++;
         }
 
@@ -574,9 +859,10 @@ namespace BinGames.Sim.Logistics
             _watch.Start();
             new JobBeltStep
             {
-                CL = BeltConst.CellLength, Spacing = _spacing, V0 = _v0, V1 = _v1, V2 = _v2, BucketSteps = _config.BucketSteps,
+                CL = BeltConst.CellLength, Spacing = _spacing, V0 = _v0, V1 = _v1, V2 = _v2, S0 = _s0, S1 = _s1, S2 = _s2, SlowOn = _slowPct > 0 ? 1 : 0,
+                BucketSteps = _config.BucketSteps,
                 SlotsPerCell = _config.SlotsPerCell,
-                X = _x.AsArray(), Y = _y.AsArray(), Dir = _dir.AsArray(), Ring = _ring.AsArray(), Tier = _tier.AsArray(),
+                X = _x.AsArray(), Y = _y.AsArray(), Dir = _dir.AsArray(), Ring = _ring.AsArray(), Tier = _tier.AsArray(), Covered = _covered.AsArray(),
                 FeedN = _feedN.AsArray(), Feed = _feed.AsArray(),
                 Next = _next.AsArray(), Sink = _sink.AsArray(), Net = _net.AsArray(), RingCells = _ringCells.AsArray(),
                 Rings = _rings.AsArray(), RingOf = _ringOf.AsArray(), RingCount = _ringCount.AsArray(), Tree = _tree.AsArray(),
@@ -638,7 +924,10 @@ namespace BinGames.Sim.Logistics
                 InLoop = _ring[i] != 0,
                 PassedInWindow = passed,
                 WindowSeconds = completed * _config.BucketSteps / (float)_config.StepHz,
-                RatedItemsPerMinute = _config.ItemsPerMinute(_tier[i]),
+                RatedItemsPerMinute = EffectiveItemsPerMinute(_tier[i], _covered[i] != 0),
+                TierItemsPerMinute = _config.ItemsPerMinute(_tier[i]),
+                Covered = _covered[i] != 0,
+                SlowPercent = _covered[i] != 0 ? 0 : _slowPct,
                 Item0 = cnt > 0 ? _item[b] : (ushort)0,
                 Item1 = cnt > 1 ? _item[b + 1] : (ushort)0,
                 Item2 = cnt > 2 ? _item[b + 2] : (ushort)0,
@@ -649,6 +938,17 @@ namespace BinGames.Sim.Logistics
                 Pos3 = cnt > 3 ? _pos[b + 3] : -1,
             };
             return true;
+        }
+
+        /// <summary>FG3-LOG-03：某一等级在当前天气下的满载速度（件 / 分钟，整数；露天减速时按减速后的每步位移换算）。</summary>
+        public int EffectiveItemsPerMinute(int tier, bool covered)
+        {
+            if (covered || _slowPct == 0)
+            {
+                return _config.ItemsPerMinute(tier);
+            }
+            long units = SlowedUnitsPerStep(tier);
+            return (int)(units * 60L * _config.StepHz * _config.SlotsPerCell / BeltConst.CellLength);
         }
 
         public int NetworkOf(int x, int y)
@@ -725,6 +1025,8 @@ namespace BinGames.Sim.Logistics
                 BlockedSteps = bp.BlockedSteps,
                 InWindow = win,
                 WindowSeconds = completed * _config.BucketSteps / (float)_config.StepHz,
+                Face = bp.Face,
+                Accept = bp.Accept,
             };
             return true;
         }
@@ -796,8 +1098,8 @@ namespace BinGames.Sim.Logistics
                 new JobBeltRender
                 {
                     CL = BeltConst.CellLength, CellSize = cellSize, StepHz = _config.StepHz, SlotsPerCell = _config.SlotsPerCell,
-                    V0 = _v0, V1 = _v1, V2 = _v2, WriteItems = includeItems ? 1 : 0,
-                    X = _x.AsArray(), Y = _y.AsArray(), Dir = _dir.AsArray(), Tier = _tier.AsArray(), Count = _count.AsArray(),
+                    V0 = _v0, V1 = _v1, V2 = _v2, S0 = _s0, S1 = _s1, S2 = _s2, SlowOn = _slowPct > 0 ? 1 : 0, WriteItems = includeItems ? 1 : 0,
+                    X = _x.AsArray(), Y = _y.AsArray(), Dir = _dir.AsArray(), Tier = _tier.AsArray(), Covered = _covered.AsArray(), Count = _count.AsArray(),
                     Block = _block.AsArray(), Pos = _pos.AsArray(), Delta = _delta.AsArray(), Item = _item.AsArray(),
                     Cells = _renderCells, Items = _renderItems, OutCounts = _renderCounts,
                 }.Run();
@@ -897,7 +1199,9 @@ namespace BinGames.Sim.Logistics
                 w.I32(bp.X);
                 w.I32(bp.Y);
                 w.I32(bp.Owner);
+                w.U8(bp.Face); // 格式 2（FG3-LOG-03）
                 w.U16(bp.Item);
+                w.U16(bp.Accept); // 格式 2（FG3-LOG-03）
                 w.I32(bp.Interval);
                 w.I32(bp.Phase);
                 w.I32(bp.Pending);
@@ -931,7 +1235,7 @@ namespace BinGames.Sim.Logistics
                 error = "not_empty";
                 return false;
             }
-            if (snap.FormatVersion != FormatVersion)
+            if (snap.FormatVersion < OldestReadableVersion || snap.FormatVersion > FormatVersion)
             {
                 error = "format_version";
                 return false;
@@ -1013,7 +1317,9 @@ namespace BinGames.Sim.Logistics
                 why = "chunk_checksum";
                 return false;
             }
-            if (r.U8() != 'B' || r.U8() != 'N' || r.U8() != FormatVersion)
+            // 网络块的格式在 1 → 2 之间没有变化（只有端口块变了），两种版本号都认。
+            byte chunkVersion = 0;
+            if (r.U8() != 'B' || r.U8() != 'N' || (chunkVersion = r.U8()) < OldestReadableVersion || chunkVersion > FormatVersion)
             {
                 why = "chunk_magic";
                 return false;
@@ -1084,29 +1390,42 @@ namespace BinGames.Sim.Logistics
         {
             why = null;
             var r = new BeltByteReader(data);
-            if (!r.VerifyChecksum() || r.U8() != 'B' || r.U8() != 'P' || r.U8() != FormatVersion)
+            byte version = 0;
+            if (!r.VerifyChecksum() || r.U8() != 'B' || r.U8() != 'P' || (version = r.U8()) < OldestReadableVersion || version > FormatVersion)
             {
                 why = "ports_corrupt";
                 return false;
             }
             r.U8();
             int n = r.I32();
-            if (n < 0 || !r.Has(n * 63))
+            // 每个端口的字节数：格式 1 = 63；格式 2 多了朝向（1）与收货过滤（2）= 66。
+            int record = version >= 2 ? 66 : 63;
+            if (n < 0 || !r.Has(n * record))
             {
                 why = "ports_corrupt";
                 return false;
             }
             for (int k = 0; k < n; k++)
             {
+                int id = r.I32();
+                byte kind = r.U8();
+                int px = r.I32();
+                int py = r.I32();
+                int owner = r.I32();
+                byte face = version >= 2 ? r.U8() : BeltConst.AnyFace;
+                ushort item = r.U16();
+                ushort accept = version >= 2 ? r.U16() : BeltConst.AcceptAny;
                 var bp = new BeltPort
                 {
-                    Id = r.I32(),
-                    Kind = r.U8(),
+                    Id = id,
+                    Kind = kind,
                     Alive = 1,
-                    X = r.I32(),
-                    Y = r.I32(),
-                    Owner = r.I32(),
-                    Item = r.U16(),
+                    X = px,
+                    Y = py,
+                    Owner = owner,
+                    Face = face <= 3 ? face : BeltConst.AnyFace,
+                    Item = item,
+                    Accept = accept,
                     Interval = r.I32(),
                     Phase = r.I32(),
                     Pending = r.I32(),
@@ -1123,6 +1442,7 @@ namespace BinGames.Sim.Logistics
                     continue;
                 }
                 _ports.Add(bp);
+                _portIndex[bp.Id] = _ports.Length - 1;
             }
             return true;
         }
@@ -1149,6 +1469,8 @@ namespace BinGames.Sim.Logistics
             _dir.Dispose();
             _tier.Dispose();
             _alive.Dispose();
+            _covered.Dispose();
+            _coveredKeys.Dispose();
             _count.Dispose();
             _turn.Dispose();
             _block.Dispose();

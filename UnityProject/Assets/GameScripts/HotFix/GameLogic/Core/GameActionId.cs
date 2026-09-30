@@ -115,5 +115,7 @@
         ConstructionQueue = 100,
         /// <summary>FG3-LOG-02（FG03 第 4 节“优先建造这一片”）：建造模式里拖框，框里的施工改成最高优先级（建造上下文，默认 P）。</summary>
         PrioritizeArea = 101,
+        /// <summary>FG3-LOG-03（FGR-LOG-026 清带工具）：建造模式里点一格传送带或拖框，把上面的物品送到最近的仓库（建造上下文，默认 J）。</summary>
+        ClearBeltMode = 102,
     }
 }

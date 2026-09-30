@@ -1057,20 +1057,26 @@ namespace GameLogic.Campaign.Regions
 
         public readonly struct QueueEntry
         {
+            /// <summary>施工单；被摧毁、等待确认重建的传送带虚影没有施工单（为 null，见 <see cref="DestroyedPlanId"/>）。</summary>
             public readonly WorkOrderRecord Order;
             public readonly string Name;
             public readonly string Status;
             public readonly float Fraction;
             public readonly Vector2 Position;
+            /// <summary>FG3-LOG-03（FGR-LOG-027）：被摧毁、等待确认重建的传送带虚影的规划 ID（普通施工行为 null）。</summary>
+            public readonly string DestroyedPlanId;
 
-            public QueueEntry(WorkOrderRecord order, string name, string status, float fraction, Vector2 position)
+            public QueueEntry(WorkOrderRecord order, string name, string status, float fraction, Vector2 position, string destroyedPlanId = null)
             {
                 Order = order;
                 Name = name;
                 Status = status;
                 Fraction = fraction;
                 Position = position;
+                DestroyedPlanId = destroyedPlanId;
             }
+
+            public bool IsDestroyedGhost => DestroyedPlanId != null;
         }
 
         /// <summary>
@@ -1110,6 +1116,120 @@ namespace GameLogic.Campaign.Regions
             {
                 into.Add(new QueueEntry(o, HomeValleyWorkOrders.DescribeTarget(state, o), DescribeStatus(state, o), Fraction(state, o), SitePosition(state, o)));
             }
+            // FG3-LOG-03：被摧毁的传送带留下的虚影排在最后（没有施工单，等玩家点“重建”）。
+            foreach (PlannedBeltRecord p in state.Grid?.PlannedBelts ?? Array.Empty<PlannedBeltRecord>())
+            {
+                if (p != null && p.Destroyed && UnbuiltCells(p) > 0)
+                {
+                    int i = NextUnbuilt(p);
+                    into.Add(new QueueEntry(null, DestroyedName(p, i), DestroyedStatus(p, i), 0f, new Vector2(p.Xs[i], p.Ys[i]), p.PlanId));
+                }
+            }
+        }
+
+        // ── 被摧毁的传送带（FGR-LOG-027）──────────────────────────────────────────────
+
+        private static string DestroyedName(PlannedBeltRecord p, int i) =>
+            GameText.Format("build.queue.destroyed_name", BeltNetworkService.TierName(p.Tier), p.Xs[i].ToString(CultureInfo.InvariantCulture), p.Ys[i].ToString(CultureInfo.InvariantCulture));
+
+        private static string DestroyedStatus(PlannedBeltRecord p, int i) =>
+            GameText.Format("build.queue.destroyed_status", GameText.Get(GridMath.DirTextKey((GridDir)p.Dirs[i])));
+
+        /// <summary>
+        /// FG3-LOG-03（FGR-LOG-027“被摧毁时原位置留下虚影”）：在 <paramref name="cell"/> 放一份“被摧毁”的传送带虚影（一格，保留朝向与等级、每格造价按当前菜单），
+        /// 占住格网（别的东西放不上去）。没有施工单：玩家在施工队列里点“重建”（或 FG6-DEF-03 的区域自动重建规则）才开工；拆除模式点它 = 移除虚影。
+        /// 返回规划 ID。
+        /// </summary>
+        public static string AddDestroyedBeltGhost(CampaignState state, GridCell cell, BeltDir dir, int tier)
+        {
+            GridState grid = state.Grid;
+            string planId = "b" + grid.NextBeltPlanSerial.ToString(CultureInfo.InvariantCulture);
+            grid.NextBeltPlanSerial++;
+            var rec = new PlannedBeltRecord
+            {
+                PlanId = planId,
+                Tier = tier,
+                ScrapPerCell = Math.Max(0, HomeGridService.BeltCostPerCell(tier)),
+                Xs = new[] { cell.X },
+                Ys = new[] { cell.Y },
+                Dirs = new[] { (int)dir },
+                CellState = new[] { 0 },
+                Delivered = 0,
+                Destroyed = true,
+            };
+            HomeGridService.MapFor(state).SetBelt(cell, (ushort)(PlannedBeltFlag | (tier + 1)));
+            PlannedBeltRecord[] old = grid.PlannedBelts ?? Array.Empty<PlannedBeltRecord>();
+            var next = new PlannedBeltRecord[old.Length + 1];
+            Array.Copy(old, next, old.Length);
+            next[old.Length] = rec;
+            grid.PlannedBelts = next;
+            Revision++;
+            return planId;
+        }
+
+        /// <summary>被摧毁、等待确认重建的传送带虚影格数（施工队列“全部重建（N）”）。</summary>
+        public static int DestroyedGhostCount(CampaignState state)
+        {
+            int n = 0;
+            foreach (PlannedBeltRecord p in state?.Grid?.PlannedBelts ?? Array.Empty<PlannedBeltRecord>())
+            {
+                if (p != null && p.Destroyed)
+                {
+                    n += UnbuiltCells(p);
+                }
+            }
+            return n;
+        }
+
+        /// <summary>
+        /// 玩家确认重建一份被摧毁的传送带虚影：按原设置（朝向、等级）生成施工单，之后与普通传送带虚影相同（机器取料、一格一格建成进内核）。
+        /// 返回是否安排了。
+        /// </summary>
+        public static bool RebuildDestroyed(CampaignState state, string planId)
+        {
+            PlannedBeltRecord p = FindPlan(state, planId);
+            if (p == null || !p.Destroyed || UnbuiltCells(p) == 0)
+            {
+                return false;
+            }
+            p.Destroyed = false;
+            HomeValleyWorkOrders.CreateConstructionOrder(state, BeltPlanPrefix + p.PlanId, p.ScrapPerCell * UnbuiltCells(p), BeltSecondsPerCell);
+            Revision++;
+            return true;
+        }
+
+        /// <summary>“全部重建”：每一份被摧毁的传送带虚影都生成施工单（按被摧毁的先后）。返回安排了几份。</summary>
+        public static int RebuildAllDestroyed(CampaignState state)
+        {
+            int n = 0;
+            PlannedBeltRecord[] plans = state?.Grid?.PlannedBelts ?? Array.Empty<PlannedBeltRecord>();
+            foreach (PlannedBeltRecord p in plans)
+            {
+                if (p != null && p.Destroyed && RebuildDestroyed(state, p.PlanId))
+                {
+                    n++;
+                }
+            }
+            return n;
+        }
+
+        /// <summary>移除一份被摧毁的传送带虚影（施工队列“取消”；与拆除模式点它同一结果：放开格网，没有材料要退）。</summary>
+        public static bool RemoveDestroyedGhost(CampaignState state, string planId)
+        {
+            PlannedBeltRecord p = FindPlan(state, planId);
+            if (p == null || !p.Destroyed)
+            {
+                return false;
+            }
+            var cells = new List<GridCell>(p.Xs.Length);
+            for (int i = 0; i < p.Xs.Length; i++)
+            {
+                if (p.CellState[i] == 0)
+                {
+                    cells.Add(new GridCell(p.Xs[i], p.Ys[i]));
+                }
+            }
+            return CancelPlannedCells(state, cells) > 0;
         }
 
         /// <summary>现场完成度（0～1）：建筑按施工进度；传送带按已建格数。</summary>
@@ -1316,8 +1436,16 @@ namespace GameLogic.Campaign.Regions
                 return false;
             }
             WorkOrderRecord order = null;
-            if (TryFindPlannedCell(state, cell, out PlannedBeltRecord p, out _))
+            if (TryFindPlannedCell(state, cell, out PlannedBeltRecord p, out int pi))
             {
+                if (p.Destroyed)
+                {
+                    // FG3-LOG-03：被摧毁的传送带虚影——写明保留的设置与怎么重建 / 移除。
+                    title = DestroyedName(p, pi);
+                    body = GameText.Format("build.hover.destroyed", BeltNetworkService.TierName(p.Tier), GameText.Get(GridMath.DirTextKey((GridDir)p.Dirs[pi])),
+                        InputDisplay.ForAction(GameActionId.ConstructionQueue));
+                    return true;
+                }
                 order = HomeValleyWorkOrders.FindActiveBuild(state, BeltPlanPrefix + p.PlanId);
             }
             else

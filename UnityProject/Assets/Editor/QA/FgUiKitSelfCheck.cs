@@ -186,7 +186,7 @@ namespace GameLogic.EditorTools
             var enumMembers = ((GameActionId[])Enum.GetValues(typeof(GameActionId))).Distinct().ToList();
             var missing = enumMembers.Where(a => !InputActionCatalog.TryGet(a, out _)).ToList();
             var extra = InputActionCatalog.All.Where(d => !enumMembers.Contains(d.Action)).ToList();
-            Expect(missing.Count == 0 && extra.Count == 0 && InputActionCatalog.All.Count == enumMembers.Count && enumMembers.Count == 92, // FG0-ARCH-01 新增“切换关注点”（85 → 86）；FG1-SIG-01 新增“信号核”（86 → 87）；FG1-SIG-06 新增“暴露面板”（87 → 88）；FG3-LOG-01 新增“格线开关”“搬迁”（88 → 90）；FG3-LOG-02 新增“施工队列”“优先建造这一片”（90 → 92）
+            Expect(missing.Count == 0 && extra.Count == 0 && InputActionCatalog.All.Count == enumMembers.Count && enumMembers.Count == 93, // FG0-ARCH-01 新增“切换关注点”（85 → 86）；FG1-SIG-01 新增“信号核”（86 → 87）；FG1-SIG-06 新增“暴露面板”（87 → 88）；FG3-LOG-01 新增“格线开关”“搬迁”（88 → 90）；FG3-LOG-02 新增“施工队列”“优先建造这一片”（90 → 92）；FG3-LOG-03 新增“清带”（92 → 93）
                 $"GameActionId 的 {enumMembers.Count} 个成员与表里 {InputActionCatalog.All.Count} 行一一对应（缺：{string.Join(",", missing)}；多：{string.Join(",", extra.Select(d => d.Action))}）");
 
             InputBindingSet defaults = InputBindingSet.CreateDefault();
@@ -1442,8 +1442,9 @@ namespace GameLogic.EditorTools
             // FG2-FW-04 新增 ReactionLogPanel.uxml（反应记录）、ReactionPopupHud.uxml（反应 / 读法弹字层）与 StatsPanel.uxml（统计面板），共 12 份；
             // FG2-FW-05 新增 FirmwareLibraryPanel.uxml（固件库），共 13 份；
             // FG3-GEN-01 新增 NewGamePanel.uxml（新游戏设置）、StrategicMap.uxml（战略地图）、Minimap.uxml（小地图），共 16 份；
-            // FG3-LOG-02 新增 ConstructionQueuePanel.uxml（施工队列）与 ConstructionQueueRow.uxml（队列行模板），共 18 份。
-            Expect(uxmlCount == 18 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
+            // FG3-LOG-02 新增 ConstructionQueuePanel.uxml（施工队列）与 ConstructionQueueRow.uxml（队列行模板），共 18 份；
+            // FG3-LOG-03 新增 BeltPortPanel.uxml（建筑端口面板）与 BeltPortRow.uxml（端口行模板），共 20 份。
+            Expect(uxmlCount == 20 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
 
             string[] codeDirs =
             {

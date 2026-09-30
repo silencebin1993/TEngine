@@ -190,6 +190,11 @@ namespace GameLogic.Campaign.Grid
             // ── FG3-LOG-02 ──
             /// <summary>“优先建造这一片”：框里的施工改成了最高优先级。</summary>
             Prioritized,
+            // ── FG3-LOG-03 ──
+            /// <summary>清带：选中传送带上的物品送进了仓库（放不下的经确认丢弃）。</summary>
+            BeltsCleared,
+            /// <summary>原地反转了一格传送带。</summary>
+            BeltReversed,
         }
 
         public readonly Kind Outcome;

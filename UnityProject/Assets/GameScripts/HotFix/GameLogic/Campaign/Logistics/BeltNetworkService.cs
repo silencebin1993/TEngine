@@ -82,6 +82,8 @@ namespace GameLogic.Campaign.Logistics
         private static long _lastBeltTick;
         private static readonly List<int3> CellScratch = new List<int3>(256);
         private static readonly Dictionary<int, string> SinkOwnerNameKeys = new Dictionary<int, string>();
+        /// <summary>FG3-LOG-03（FGR-LOG-027）：掉了耐久的格 → 掉了多少（存档 <see cref="BeltItemState.Damage"/> 的运行时索引，悬停 O(1)）。</summary>
+        private static readonly Dictionary<GridCell, int> DamageLost = new Dictionary<GridCell, int>();
 
         public static BeltKernel Kernel => _kernel;
         public static bool IsRunning => _kernel != null && !_kernel.IsDisposed;
@@ -187,7 +189,29 @@ namespace GameLogic.Campaign.Logistics
                 }
             }
             SyncGridLayer(state);
+            RestoreDamage(state);
+            BeltPortService.OnLoad(state);
             LoadCount++;
+        }
+
+        private static void RestoreDamage(CampaignState state)
+        {
+            DamageLost.Clear();
+            BeltDamageRecord[] recs = state.Belts?.Damage ?? Array.Empty<BeltDamageRecord>();
+            var keep = new List<BeltDamageRecord>(recs.Length);
+            foreach (BeltDamageRecord r in recs)
+            {
+                // 只恢复内核里确实存在的格（读档时坏块丢弃的格，它的耐久记录一并丢弃）。
+                if (r != null && r.Lost > 0 && _kernel.HasCell(r.X, r.Y))
+                {
+                    DamageLost[new GridCell(r.X, r.Y)] = r.Lost;
+                    keep.Add(r);
+                }
+            }
+            if (keep.Count != recs.Length && state.Belts != null)
+            {
+                state.Belts.Damage = keep.ToArray();
+            }
         }
 
         /// <summary>内核读档原因码（逗号分隔）→ 当前语言的原因文本（文本键 logistics.load.reason.&lt;码&gt;，B16）。</summary>
@@ -209,6 +233,8 @@ namespace GameLogic.Campaign.Logistics
         /// <summary>卸载（UnloadAll：回主菜单 / 回滚 / 自检之间）：原生内存与 GPU 缓冲成对释放。不写存档（存档由 SyncAllForSave 负责）。</summary>
         public static void Unload()
         {
+            BeltPortService.OnUnload();
+            DamageLost.Clear();
             _renderer?.Dispose();
             _renderer = null;
             _kernel?.Dispose();
@@ -279,12 +305,16 @@ namespace GameLogic.Campaign.Logistics
             int bh = _kernel.Config.StepHz;
             long from = ticksBefore * bh / worldHz;
             long to = (ticksBefore + 1) * bh / worldHz;
+            bool stepped = false;
             for (long k = from; k < to; k++)
             {
                 _kernel.Step();
                 KernelStepsThisSession++;
                 _lastBeltTick = ticksBefore + 1;
+                stepped = true;
             }
+            // FG3-LOG-03：建筑端口对账（按步序号每 logistics.port.sync_seconds）与仓库 ↔ 端口的转移（内核走过这一步才做），O(端口数)。
+            BeltPortService.Step(state, ticksBefore + 1, worldHz, stepped);
             if (!_blockedHookChecked && _kernel.BlockedCells > 0)
             {
                 _blockedHookChecked = true;
@@ -436,6 +466,10 @@ namespace GameLogic.Campaign.Logistics
             if (r == BeltResult.Ok)
             {
                 HomeGridService.MapFor(state).SetBelt(cell, 0);
+                if (DamageLost.ContainsKey(cell))
+                {
+                    SetDamage(state, cell, 0); // FG3-LOG-03：格没了，耐久记录一并删掉（同一格重铺是新带、满耐久）。
+                }
             }
             return BeltOpResult.Kernel(r);
         }
@@ -472,18 +506,19 @@ namespace GameLogic.Campaign.Logistics
         }
 
         /// <summary>登记建筑的输出端口（推到 <paramref name="beltCell"/> 这一格传送带上）。</summary>
-        public static BeltOpResult TryAddSource(CampaignState state, int portId, GridCell beltCell, ushort item, int intervalSteps, int pending, int owner = 0) =>
-            CanEdit(state, out BeltOpResult refuse) ? BeltOpResult.Kernel(_kernel.AddSource(portId, beltCell.X, beltCell.Y, item, intervalSteps, pending, owner)) : refuse;
+        public static BeltOpResult TryAddSource(CampaignState state, int portId, GridCell beltCell, ushort item, int intervalSteps, int pending, int owner = 0,
+            byte face = BeltConst.AnyFace) =>
+            CanEdit(state, out BeltOpResult refuse) ? BeltOpResult.Kernel(_kernel.AddSource(portId, beltCell.X, beltCell.Y, item, intervalSteps, pending, owner, face)) : refuse;
 
         /// <summary>登记建筑的输入端口（位于建筑格 <paramref name="buildingCell"/>）；<paramref name="ownerNameKey"/> 用于堵塞原因“下游 X 的输入已满”（随存档保存）。</summary>
         public static BeltOpResult TryAddSink(CampaignState state, int portId, GridCell buildingCell, int bufferCap, int consumeIntervalSteps,
-            string ownerNameKey = null, int owner = 0)
+            string ownerNameKey = null, int owner = 0, byte face = BeltConst.AnyFace, ushort accept = BeltConst.AcceptAny)
         {
             if (!CanEdit(state, out BeltOpResult refuse))
             {
                 return refuse;
             }
-            BeltResult r = _kernel.AddSink(portId, buildingCell.X, buildingCell.Y, bufferCap, consumeIntervalSteps, owner);
+            BeltResult r = _kernel.AddSink(portId, buildingCell.X, buildingCell.Y, bufferCap, consumeIntervalSteps, owner, face, accept);
             if (r == BeltResult.Ok && !string.IsNullOrEmpty(ownerNameKey))
             {
                 SinkOwnerNameKeys[portId] = ownerNameKey;
@@ -516,18 +551,160 @@ namespace GameLogic.Campaign.Logistics
             return BeltOpResult.Success;
         }
 
-        public static BeltOpResult TryRemovePort(CampaignState state, int portId)
+        public static BeltOpResult TryRemovePort(CampaignState state, int portId) => TryRemovePort(state, portId, out _, out _);
+
+        /// <summary>FG3-LOG-03：删端口并交还它手里的物品（输出口待推、输入口缓存），由调用方送回仓库。</summary>
+        public static BeltOpResult TryRemovePort(CampaignState state, int portId, out int pending, out int buffered)
         {
+            pending = 0;
+            buffered = 0;
             if (!CanEdit(state, out BeltOpResult refuse))
             {
                 return refuse;
             }
-            BeltResult r = _kernel.RemovePort(portId);
+            BeltResult r = _kernel.RemovePort(portId, out pending, out buffered);
             if (r == BeltResult.Ok)
             {
                 SinkOwnerNameKeys.Remove(portId);
             }
             return BeltOpResult.Kernel(r);
+        }
+
+        // ── 耐久与损毁（FGR-LOG-027）────────────────────────────────────────────────
+
+        /// <summary>一格传送带的最大耐久（按等级，表 logistics.belt.hp_t1～t3）。</summary>
+        public static int MaxHp(int tier) =>
+            Math.Max(1, GridContent.TuningInt(tier <= 0 ? "logistics.belt.hp_t1" : tier == 1 ? "logistics.belt.hp_t2" : "logistics.belt.hp_t3"));
+
+        /// <summary>这一格现在的耐久（没有传送带时 -1）。O(1)。</summary>
+        public static int HpOf(GridCell cell)
+        {
+            if (!IsRunning || !_kernel.TryGetCellInfo(cell.X, cell.Y, out BeltCellInfo info))
+            {
+                return -1;
+            }
+            return Math.Max(0, MaxHp(info.Tier) - (DamageLost.TryGetValue(cell, out int lost) ? lost : 0));
+        }
+
+        /// <summary>最近一次摧毁时掉在地上的物品件数（自检读）。</summary>
+        public static int LastDestroyedItems { get; private set; }
+        public static int DestroyedCount { get; private set; }
+
+        /// <summary>
+        /// FG3-LOG-03（FGR-LOG-027“传送带有耐久，可能被突袭和天气损伤；被摧毁时上面的物品变成地面物，原位置留下虚影”）：对一格传送带造成伤害。
+        /// 耐久到 0：带上的物品在原地落成地面物（废料生成搬运单，机器之后搬回仓库），传送带从内核移除，原位置留下保留朝向与等级的虚影
+        /// （在玩家确认重建前不施工；自动重建规则在 FG6-DEF-03）。返回是否摧毁了。突袭伤害（FG6-DEF-05）与天气损伤（FG7）调这里；
+        /// 目前家园还没有会打传送带的敌人和天气，由自检驱动（与 FG3-LOG-02 的施工现场摧毁同一做法）。
+        /// </summary>
+        public static bool TryDamage(CampaignState state, GridCell cell, int amount, out BeltOpResult result)
+        {
+            if (!CanEdit(state, out result))
+            {
+                return false;
+            }
+            if (amount <= 0)
+            {
+                result = BeltOpResult.Kernel(BeltResult.InvalidArgument);
+                return false;
+            }
+            if (!_kernel.TryGetCellInfo(cell.X, cell.Y, out BeltCellInfo info))
+            {
+                result = BeltOpResult.Kernel(BeltResult.NotFound);
+                return false;
+            }
+            int lost = (DamageLost.TryGetValue(cell, out int l) ? l : 0) + amount;
+            result = BeltOpResult.Success;
+            if (lost < MaxHp(info.Tier))
+            {
+                SetDamage(state, cell, lost);
+                return false;
+            }
+            DestroyCell(state, cell, info);
+            return true;
+        }
+
+        private static void SetDamage(CampaignState state, GridCell cell, int lost)
+        {
+            if (lost > 0)
+            {
+                DamageLost[cell] = lost;
+            }
+            else
+            {
+                DamageLost.Remove(cell);
+            }
+            BeltItemState b = state.Belts;
+            var list = new List<BeltDamageRecord>((b.Damage?.Length ?? 0) + 1);
+            bool found = false;
+            foreach (BeltDamageRecord r in b.Damage ?? Array.Empty<BeltDamageRecord>())
+            {
+                if (r == null)
+                {
+                    continue;
+                }
+                if (r.X == cell.X && r.Y == cell.Y)
+                {
+                    found = true;
+                    if (lost > 0)
+                    {
+                        r.Lost = lost;
+                        list.Add(r);
+                    }
+                    continue;
+                }
+                list.Add(r);
+            }
+            if (!found && lost > 0)
+            {
+                list.Add(new BeltDamageRecord { X = cell.X, Y = cell.Y, Lost = lost });
+            }
+            b.Damage = list.ToArray();
+        }
+
+        private static void DestroyCell(CampaignState state, GridCell cell, BeltCellInfo info)
+        {
+            var items = new List<ushort>(BeltConst.MaxSlots);
+            if (!TryRemove(state, cell, items).Ok)
+            {
+                return;
+            }
+            var counts = new SortedDictionary<ushort, int>();
+            foreach (ushort it in items)
+            {
+                counts[it] = counts.TryGetValue(it, out int n) ? n + 1 : 1;
+            }
+            var at = new Vector2(cell.X, cell.Y);
+            foreach (KeyValuePair<ushort, int> kv in counts)
+            {
+                Regions.HomeValleyConstruction.DropForHaul(state, at, BeltItems.ResourceOf(kv.Key), kv.Value,
+                    "belt-wreck:" + cell.X.ToString(System.Globalization.CultureInfo.InvariantCulture) + "," + cell.Y.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    + ":" + kv.Key.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+            Regions.HomeValleyConstruction.AddDestroyedBeltGhost(state, cell, info.Dir, info.Tier);
+            LastDestroyedItems = items.Count;
+            DestroyedCount++;
+            GuidanceHooks.Raise(GuidanceHooks.LogisticsFirstDestroyed);
+            NotificationCenter.Post("failure", GameText.Format("logistics.destroyed.notify", cell.X, cell.Y, items.Count), new Vector3(cell.X, 0f, cell.Y));
+        }
+
+        // ── 天气（FGR-LOG-028）───────────────────────────────────────────────────
+
+        /// <summary>沙暴时露天传送带减速多少（表 logistics.weather.sandstorm_slow_pct，初值 25%）。天气系统（FG7-ENV-03）读它传给 <see cref="SetExposedSlowdown"/>。</summary>
+        public static int SandstormSlowPercent => Mathf.Clamp(GridContent.TuningInt("logistics.weather.sandstorm_slow_pct"), 0, BeltConst.MaxSlowPercent);
+
+        /// <summary>
+        /// FG3-LOG-03（FGR-LOG-028）：设定露天传送带的减速百分比（0 = 天气正常）。天气系统（FG7-ENV-03）在沙暴开始 / 结束时调用；每步幂等。
+        /// 顶棚下的格（<see cref="SetCovered"/>）不受影响。派生量不进传送带存档（天气状态由天气域存档，读档后重新设定）。
+        /// </summary>
+        public static bool SetExposedSlowdown(int percent) => IsRunning && _kernel.SetExposedSlowPercent(Mathf.Clamp(percent, 0, BeltConst.MaxSlowPercent));
+
+        /// <summary>FG3-LOG-03（FGR-LOG-028“在顶棚覆盖下不受影响”）：顶棚建筑（FG7）放下 / 拆除时标记它覆盖的格。</summary>
+        public static void SetCovered(GridCell cell, bool covered)
+        {
+            if (IsRunning)
+            {
+                _kernel.SetCovered(cell.X, cell.Y, covered);
+            }
         }
 
         // ── 原因与悬停文本（FGR-LOG-025 / 081；B05、B06、B16）──────────────────────
@@ -558,15 +735,35 @@ namespace GameLogic.Campaign.Logistics
                 case BeltBlock.DownstreamFull:
                     return GameText.Format("logistics.block.downstream_full", info.NextX, info.NextY);
                 case BeltBlock.SinkFull:
-                    string owner = info.SinkPortId >= 0 && SinkOwnerNameKeys.TryGetValue(info.SinkPortId, out string key) ? GameText.Get(key)
-                        : GameText.Format("logistics.block.sink_unnamed", info.SinkPortId);
+                {
+                    string owner = SinkOwnerName(info.SinkPortId);
+                    // FG3-LOG-03：仓库 / 核心的输入口满了多半是家园仓库满了——写明库存与容量和办法。
+                    CampaignState st = _state;
+                    if (st != null && BeltPortService.TryGetBinding(info.SinkPortId, out BeltPortService.Binding sb) && sb.Store
+                        && Regions.HomeValleyCargo.GetAvailableSpace(st, CampaignEconomyLedger.ResourceScrap) <= 0)
+                    {
+                        return GameText.Format("logistics.block.store_full", owner, st.Scrap,
+                            Regions.HomeValleyCargo.GetStorageCapacity(st, CampaignEconomyLedger.ResourceScrap));
+                    }
                     return GameText.Format("logistics.block.sink_full", owner);
+                }
+                case BeltBlock.SinkRejects:
+                {
+                    string owner = SinkOwnerName(info.SinkPortId);
+                    ushort accept = IsRunning && _kernel.TryGetPortInfo(info.SinkPortId, out BeltPortInfo pi) ? pi.Accept : BeltConst.AcceptNone;
+                    return accept == BeltConst.AcceptNone
+                        ? GameText.Format("logistics.block.sink_rejects_all", owner)
+                        : GameText.Format("logistics.block.sink_rejects", owner, BeltItems.Name(info.Item0), BeltItems.Name(accept));
+                }
                 case BeltBlock.MergeWait:
                     return GameText.Format("logistics.block.merge_wait", info.NextX, info.NextY);
                 default:
                     return GameText.Get("logistics.block.none");
             }
         }
+
+        private static string SinkOwnerName(int portId) =>
+            portId >= 0 && SinkOwnerNameKeys.TryGetValue(portId, out string key) ? GameText.Get(key) : GameText.Format("logistics.block.sink_unnamed", portId);
 
         public static string TierName(int tier) => GameText.Get(tier == 0 ? "logistics.tier.t1" : tier == 1 ? "logistics.tier.t2" : "logistics.tier.t3");
 
@@ -586,6 +783,78 @@ namespace GameLogic.Campaign.Logistics
                 ? info.ThroughputPerMinute.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)
                 : GameText.Get("logistics.hover.measuring");
             return GameText.Format("logistics.hover.summary", TierName(info.Tier), info.Count, measured, info.RatedItemsPerMinute, state);
+        }
+
+        /// <summary>
+        /// FG3-LOG-03（FGR-LOG-081“传送带：当前物品、速度、吞吐”；FGR-LOG-025“悬停说明下游 X 已满”；FG00 B05 / B06 / B13）：悬停读数。
+        /// 标题 = 等级与朝向；正文逐行：物品（按种类）、满载速度（天气减速写明设计值与减速比例；顶棚下写明）、实测吞吐（统计窗口）、
+        /// 状态与原因（下游哪一格 / 哪座建筑）、耐久、起点 / 终点端口、所在网络、操作提示。O(1)：只读这一格的内核数据与网络汇总。
+        /// </summary>
+        public static bool TryDescribeHover(CampaignState state, GridCell cell, out string title, out string body)
+        {
+            title = null;
+            body = null;
+            if (!IsRunning || !ReferenceEquals(state, _state) || !_kernel.TryGetCellInfo(cell.X, cell.Y, out BeltCellInfo info))
+            {
+                return false;
+            }
+            var ci = System.Globalization.CultureInfo.InvariantCulture;
+            title = GameText.Format("logistics.hover.title", TierName(info.Tier), GameText.Get(GridMath.DirTextKey((GridDir)info.Dir)));
+            var sb = new System.Text.StringBuilder(256);
+            if (info.Count == 0)
+            {
+                sb.Append(GameText.Get("logistics.hover.items_empty"));
+            }
+            else
+            {
+                var counts = new SortedDictionary<ushort, int>();
+                for (int i = 0; i < info.Count; i++)
+                {
+                    ushort it = info.ItemAt(i);
+                    counts[it] = counts.TryGetValue(it, out int n) ? n + 1 : 1;
+                }
+                sb.Append(GameText.Format("logistics.hover.items", BeltItems.FormatCounts(counts)));
+            }
+            sb.Append('\n');
+            sb.Append(info.SlowPercent > 0
+                ? GameText.Format("logistics.hover.speed_slowed", info.RatedItemsPerMinute, info.TierItemsPerMinute, info.SlowPercent)
+                : GameText.Format("logistics.hover.speed", info.RatedItemsPerMinute));
+            if (info.Covered)
+            {
+                sb.Append('\n').Append(GameText.Get("logistics.hover.covered"));
+            }
+            sb.Append('\n');
+            if (info.WindowSeconds > 0f)
+            {
+                sb.Append(GameText.Format("logistics.hover.throughput", info.ThroughputPerMinute.ToString("0.#", ci), info.WindowSeconds.ToString("0", ci)));
+            }
+            else
+            {
+                float windowSec = _kernel.Config.BucketSteps / (float)Math.Max(1, _kernel.Config.StepHz);
+                sb.Append(GameText.Format("logistics.hover.throughput_measuring", windowSec.ToString("0", ci)));
+            }
+            sb.Append('\n').Append(GameText.Format("logistics.hover.state", DescribeBlock(info) + (info.InLoop ? GameText.Get("logistics.hover.loop") : string.Empty)));
+            sb.Append('\n').Append(GameText.Format("logistics.hover.hp", HpOf(cell), MaxHp(info.Tier)));
+            if (BeltPortService.TryFindSourceAt(cell, out BeltPortService.Binding src))
+            {
+                sb.Append('\n').Append(GameText.Format("logistics.hover.from_port", BeltPortService.BuildingName(src.BuildingId)));
+            }
+            if (info.SinkPortId >= 0)
+            {
+                sb.Append('\n').Append(GameText.Format("logistics.hover.to_port", SinkOwnerName(info.SinkPortId)));
+            }
+            if (_kernel.TryGetNetworkStats(info.Network, out BeltNetworkStats net))
+            {
+                sb.Append('\n').Append(GameText.Format("logistics.hover.network", net.Cells, net.Items, net.BlockedCells,
+                    net.HasCycle ? GameText.Get("logistics.hover.network_loop") : string.Empty));
+            }
+            if (info.Count > 0)
+            {
+                sb.Append('\n').Append(GameText.Get("logistics.hover.placeholder_item"));
+            }
+            sb.Append('\n').Append(InputDisplay.ExpandActionTokens(GameText.Get("logistics.hover.actions")));
+            body = sb.ToString();
+            return true;
         }
 
         // ── 渲染（观察星球表面时每帧一次）──────────────────────────────────────────
@@ -612,6 +881,8 @@ namespace GameLogic.Campaign.Logistics
             }
             long t0 = Stopwatch.GetTimestamp();
             _renderer ??= new BeltRenderer();
+            // FG3-LOG-03：箭头 / 流动条纹按游戏时钟滚动（暂停停住、倍速变快）。
+            _renderer.AnimationTime = (float)((GameClock.Ticks + GameClock.StepAlpha) / Math.Max(1, GameClock.StepHz));
             _renderer.Draw(_kernel, camera, camera.orthographic ? camera.orthographicSize : 0f, InterpolationAlpha, _renderSettings);
             LastRenderMs = (Stopwatch.GetTimestamp() - t0) * 1000.0 / Stopwatch.Frequency;
             RenderCalls++;

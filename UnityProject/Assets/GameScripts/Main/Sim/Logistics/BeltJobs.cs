@@ -28,6 +28,11 @@ namespace BinGames.Sim.Logistics
         public int Y;
         public int Owner;
         public ushort Item;
+        /// <summary>FG3-LOG-03：端口朝外的方向（0～3，<see cref="BeltConst.AnyFace"/> = 任意）。输入端口只接“末端正对着它”的带；
+        /// 输出端口不往“指回建筑”的带上推。</summary>
+        public byte Face;
+        /// <summary>FG3-LOG-03：输入端口收什么（<see cref="BeltConst.AcceptAny"/> / <see cref="BeltConst.AcceptNone"/> / 物品编号）。</summary>
+        public ushort Accept;
         /// <summary>输出端口：推一件的间隔（步）；输入端口：消耗一件的间隔（步，0 = 不自动消耗）。</summary>
         public int Interval;
         public int Phase;
@@ -138,6 +143,9 @@ namespace BinGames.Sim.Logistics
         public NativeList<int> Delta;
         public NativeList<int> FlowB;
         public NativeList<ushort> Item;
+        /// <summary>FG3-LOG-03：每格是否在顶棚下（派生：由 <see cref="CoveredKeys"/> 按坐标重算）。</summary>
+        public NativeList<byte> Covered;
+        [ReadOnly] public NativeParallelHashSet<long> CoveredKeys;
         public NativeParallelHashMap<long, int> Lookup;
         public NativeList<int> RingCells;
         public NativeList<int2> Rings;
@@ -174,6 +182,7 @@ namespace BinGames.Sim.Logistics
             Permute(Item, order, BeltConst.MaxSlots);
             Permute(FlowB, order, BeltConst.Buckets);
             Alive.Resize(m, NativeArrayOptions.UninitializedMemory);
+            Covered.Resize(m, NativeArrayOptions.UninitializedMemory);
             Ring.Resize(m, NativeArrayOptions.UninitializedMemory);
             FeedN.Resize(m, NativeArrayOptions.UninitializedMemory);
             Next.Resize(m, NativeArrayOptions.UninitializedMemory);
@@ -189,7 +198,9 @@ namespace BinGames.Sim.Logistics
                 Ring[i] = 0;
                 FeedN[i] = 0;
                 Net[i] = -1;
-                Lookup.TryAdd(BeltDirs.Key(X[i], Y[i]), i);
+                long key = BeltDirs.Key(X[i], Y[i]);
+                Covered[i] = CoveredKeys.Contains(key) ? (byte)1 : (byte)0;
+                Lookup.TryAdd(key, i);
             }
 
             // 端口：去掉已删除的，按（种类，坐标，编号）规范排序。
@@ -239,7 +250,8 @@ namespace BinGames.Sim.Logistics
                 }
                 Next[i] = nx;
                 Sink[i] = -1;
-                if (nx < 0 && sinkAt.TryGetValue(fk, out int sp))
+                // FG3-LOG-03：有朝向的输入端口只接“末端正对着它”的带（带在端口外侧一格、方向指向建筑）。
+                if (nx < 0 && sinkAt.TryGetValue(fk, out int sp) && (Ports[sp].Face == BeltConst.AnyFace || d == BeltDirs.Opposite(Ports[sp].Face)))
                 {
                     Sink[i] = sp;
                 }
@@ -414,7 +426,9 @@ namespace BinGames.Sim.Logistics
             for (int p = 0; p < Ports.Length; p++)
             {
                 BeltPort bp = Ports[p];
-                if (bp.Kind == (byte)BeltPortKind.Source && Lookup.TryGetValue(BeltDirs.Key(bp.X, bp.Y), out int c))
+                // FG3-LOG-03：有朝向的输出端口不往“指回建筑”的带上推（那条带的末端正对着建筑，物品会顶在建筑上）。
+                if (bp.Kind == (byte)BeltPortKind.Source && Lookup.TryGetValue(BeltDirs.Key(bp.X, bp.Y), out int c)
+                    && (bp.Face == BeltConst.AnyFace || Dir[c] != BeltDirs.Opposite(bp.Face)))
                 {
                     bp.Cell = c;
                     bp.Network = Net[c];
@@ -492,6 +506,11 @@ namespace BinGames.Sim.Logistics
         public int V0;
         public int V1;
         public int V2;
+        /// <summary>FG3-LOG-03（FGR-LOG-028）：露天格在减速天气下的每步位移（= 等级位移 × (100 − 减速%) / 100）；<see cref="SlowOn"/> = 0 时不用。</summary>
+        public int S0;
+        public int S1;
+        public int S2;
+        public int SlowOn;
         public int BucketSteps;
         public int SlotsPerCell;
 
@@ -500,6 +519,7 @@ namespace BinGames.Sim.Logistics
         [ReadOnly] public NativeArray<byte> Dir;
         [ReadOnly] public NativeArray<byte> Ring;
         [ReadOnly] public NativeArray<byte> Tier;
+        [ReadOnly] public NativeArray<byte> Covered;
         [ReadOnly] public NativeArray<byte> FeedN;
         [ReadOnly] public NativeArray<int> Feed;
         [ReadOnly] public NativeArray<int> Next;
@@ -586,6 +606,10 @@ namespace BinGames.Sim.Logistics
         private int Speed(int c)
         {
             byte t = Tier[c];
+            if (SlowOn != 0 && Covered[c] == 0)
+            {
+                return t == 0 ? S0 : t == 1 ? S1 : S2;
+            }
             return t == 0 ? V0 : t == 1 ? V1 : V2;
         }
 
@@ -782,9 +806,12 @@ namespace BinGames.Sim.Logistics
             {
                 sp = Sink[c];
                 BeltPort port = Ports[sp];
-                bool sinkAccepts = port.Cap < 0 || port.Buffered < port.Cap;
-                limit = sinkAccepts ? CL + CL : CL - 1;
-                reason = (byte)BeltBlock.SinkFull;
+                // FG3-LOG-03：只收指定物品的输入端口遇到别的物品就不收（带停下、物品不消失，原因写“X 不收 Y”）。
+                ushort head = Item[b];
+                bool itemOk = port.Accept == BeltConst.AcceptAny || (port.Accept != BeltConst.AcceptNone && port.Accept == head);
+                bool room = port.Cap < 0 || port.Buffered < port.Cap;
+                limit = itemOk && room ? CL + CL : CL - 1;
+                reason = itemOk ? (byte)BeltBlock.SinkFull : (byte)BeltBlock.SinkRejects;
             }
             else
             {
@@ -1076,13 +1103,26 @@ namespace BinGames.Sim.Logistics
                 if (ok)
                 {
                     int cnt = Count[c];
-                    // 入口（位置 0）要空出一个间距，且与车道上紧跟其后的那一路保持间距（环满时放不进）。
-                    ok = MaxInsertPos(c) >= 0 && MinInsertPos(c, -1) == 0;
+                    // 入口要空出一个间距，且与车道上紧跟其后的那一路保持间距（环满时放不进）。
+                    // FG3-LOG-03：最后一件是在这一步里才走过一个间距的（空位是这一步中途出现的），新的一件放在它后面正好一个间距处
+                    // （= 这一步里已经走了一段），而不是位置 0——带速不能整除间距时（天气减速、调参）输出口也能把带跑满，没有“等整步”的吞吐损失。
+                    // 带速能整除间距时（规格初值三档）这个位置恰好是 0，结果与原规则逐位相同；空位早就有了（输出口在等节拍 / 等货）时仍放在 0。
+                    int q = 0;
+                    if (cnt > 0)
+                    {
+                        int last = Pos[c * S + cnt - 1];
+                        int moved = Delta[c * S + cnt - 1];
+                        if (last >= Spacing && last - moved < Spacing)
+                        {
+                            q = last - Spacing;
+                        }
+                    }
+                    ok = MaxInsertPos(c) >= q && MinInsertPos(c, -1) <= q;
                     if (ok)
                     {
-                        Pos[c * S + cnt] = 0;
+                        Pos[c * S + cnt] = q;
                         Item[c * S + cnt] = port.Item;
-                        Delta[c * S + cnt] = 0;
+                        Delta[c * S + cnt] = q;
                         Count[c] = (byte)(cnt + 1);
                         NoteEnter(c);
                     }
@@ -1182,12 +1222,17 @@ namespace BinGames.Sim.Logistics
         public int V0;
         public int V1;
         public int V2;
+        public int S0;
+        public int S1;
+        public int S2;
+        public int SlowOn;
         /// <summary>1 = 同时写物品实例；0 = 只写格实例（远景流动贴图不画物品）。</summary>
         public int WriteItems;
         [ReadOnly] public NativeArray<int> X;
         [ReadOnly] public NativeArray<int> Y;
         [ReadOnly] public NativeArray<byte> Dir;
         [ReadOnly] public NativeArray<byte> Tier;
+        [ReadOnly] public NativeArray<byte> Covered;
         [ReadOnly] public NativeArray<byte> Count;
         [ReadOnly] public NativeArray<byte> Block;
         [ReadOnly] public NativeArray<int> Pos;
@@ -1210,7 +1255,7 @@ namespace BinGames.Sim.Logistics
                 float cx = X[i] * CellSize;
                 float cz = Y[i] * CellSize;
                 byte t = Tier[i];
-                int v = t == 0 ? V0 : t == 1 ? V1 : V2;
+                int v = SlowOn != 0 && Covered[i] == 0 ? (t == 0 ? S0 : t == 1 ? S1 : S2) : (t == 0 ? V0 : t == 1 ? V1 : V2);
                 int cnt = Count[i];
                 Cells[i] = new BeltInstance
                 {
@@ -1289,6 +1334,7 @@ namespace BinGames.Sim.Logistics
                 Mix(bp.Kind);
                 Mix(bp.X);
                 Mix(bp.Y);
+                Mix(bp.Face | (bp.Accept << 8));
                 Mix(bp.Item);
                 Mix(bp.Interval);
                 Mix(bp.Phase);

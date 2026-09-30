@@ -178,6 +178,22 @@ namespace GameLogic.EditorTools
                     case 131: StepBeltsFar(inStep); break;
                     case 132: StepBeltsNear(inStep); break;
                     case 133: StepBeltsDone(inStep); break;
+                    // FG3-LOG-03：传送带悬停读数、清带（确认框取消 / 确认）、端口面板、被摧毁的传送带在施工队列里重建（真实鼠标 / 按键）。
+                    case 249: StepBeltFocused(inStep); break;
+                    case 250: StepBeltHoverInBuild(inStep); break;
+                    case 251: StepBeltClearModeOn(inStep); break;
+                    case 252: StepBeltClearAsked(inStep); break;
+                    case 253: StepBeltClearCancelled(inStep); break;
+                    case 254: StepBeltClearAskedAgain(inStep); break;
+                    case 255: StepBeltClearConfirmed(inStep); break;
+                    case 256: StepBeltClearModeOff(inStep); break;
+                    case 257: StepBeltPortPanelOpened(inStep); break;
+                    case 258: StepBeltPortPanelClosed(inStep); break;
+                    case 259: StepBeltRebuildQueue(inStep); break;
+                    case 260: StepBeltRebuildDone(inStep); break;
+                    case 261: StepBeltCoreFocused(inStep); break;
+                    case 262: StepBeltBuildClosedForFly(inStep); break;
+                    case 263: StepBeltBuildReopenedAtCore(inStep); break;
                     case 129: StepRuinsCombat(inStep); break;
                     case 230: StepRuinsTagHover(inStep); break;
                     case 150: StepSignalOpened(inStep); break;
@@ -4658,7 +4674,288 @@ namespace GameLogic.EditorTools
             {
                 return;
             }
-            Next(140, "FG0-ARCH-03：家园突袭战斗原型（测试捷径）");
+            // FG3-LOG-03：镜头飞到测试捷径铺的直线（画面中央，不被建造栏挡住）。
+            int ox = SessionState.GetInt(K + "BeltX", 0);
+            int oy = SessionState.GetInt(K + "BeltY", 0);
+            WorldView.FlyTo(Campaign.Regions.HomeValleyLayout.RegionId, new Vector2(ox + 4, oy + 2));
+            Next(249, "FG3-LOG-03：镜头飞到传送带");
+        }
+
+        private static void StepBeltFocused(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            // 鼠标停在直线的第 4 格，按建造菜单键打开建造模式——建造栏状态行写这格传送带的悬停读数。
+            int ox = SessionState.GetInt(K + "BeltX", 0);
+            int oy = SessionState.GetInt(K + "BeltY", 0);
+            HoverWorld(new Vector3(ox + 3, 0f, oy));
+            PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.OpenBuildMenu));
+            Next(250, "鼠标停在传送带上，按建造菜单键");
+        }
+
+        // ── FG3-LOG-03：传送带正式化与端口（悬停读数、清带工具、端口面板、被摧毁的传送带重建）─────────────────────────
+
+        private static void StepBeltHoverInBuild(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            string status = BuildModeHudUIToolkit.Instance?.StatusLabelText ?? string.Empty;
+            int ox = SessionState.GetInt(K + "BeltX", 0);
+            int oy = SessionState.GetInt(K + "BeltY", 0);
+            Check(mode != null && mode.IsOpen && mode.HasHover && mode.HoverCell == new GridCell(ox + 3, oy)
+                  && status.Contains("传送带 T1") && status.Contains("满载速度") && status.Contains("实测吞吐") && status.Contains("状态") && !Localization.GameText.ContainsMarker(status),
+                $"建造模式里鼠标停在已建成的传送带上，建造栏写悬停读数（FGR-LOG-081）：{status.Replace("\n", " / ")}");
+            PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.ClearBeltMode));
+            Next(251, "按清带键（默认 J）进入清带模式");
+        }
+
+        private static GridCell SmokeRingCell() =>
+            new GridCell(SessionState.GetInt(K + "BeltX", 0) + 6, SessionState.GetInt(K + "BeltY", 0) + 2);
+
+        private static int SmokeRingItems()
+        {
+            BeltKernel k = BeltNetworkService.Kernel;
+            int n = 0;
+            int net = k.NetworkOf(SmokeRingCell().X, SmokeRingCell().Y);
+            var cells = new List<Unity.Mathematics.int2>();
+            k.CollectNetworkCells(net, cells);
+            foreach (Unity.Mathematics.int2 c in cells)
+            {
+                k.TryGetCellInfo(c.x, c.y, out BeltCellInfo info);
+                n += info.Count;
+            }
+            return n;
+        }
+
+        private static void StepBeltClearModeOn(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            string modeText = BuildModeHudUIToolkit.Instance?.ModeText ?? string.Empty;
+            Check(mode != null && mode.ClearMode && modeText.Contains("清带"), $"清带模式：建造栏模式“{modeText}”，提示“{mode?.StatusText}”");
+            SessionState.SetInt(K + "RingItems", SmokeRingItems());
+            GridCell ring = SmokeRingCell();
+            ClickWorld(new Vector3(ring.X, 0f, ring.Y));
+            Next(252, "左键点测试环上的一格（整个环：12 件家园仓库存不了的物品）");
+        }
+
+        private static void StepBeltClearAsked(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            int ringItems = SessionState.GetInt(K + "RingItems", -1);
+            Check(UiConfirmDialog.IsOpen && mode != null && mode.PendingClearConfirm && UiConfirmDialog.Current.Title.Contains(ringItems.ToString())
+                  && UiConfirmDialog.Current.Lines.Any(l => l.Contains("还存不了")),
+                $"清带时仓库放不下（FGR-LOG-026）：先弹确认框“{UiConfirmDialog.Current?.Title}”，写明原因");
+            PressKeyKeepMouse(KeyCode.Escape);
+            Next(253, "Esc 取消");
+        }
+
+        private static void StepBeltClearCancelled(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            int ringItems = SessionState.GetInt(K + "RingItems", -1);
+            Check(!UiConfirmDialog.IsOpen && SmokeRingItems() == ringItems && mode != null && mode.StatusText.Contains("已取消清带"),
+                $"取消：环上 {SmokeRingItems()} 件原样（状态行“{mode?.StatusText}”）");
+            SessionState.SetInt(K + "BeltDiscarded", (int)CampaignSession.Current.Belts.Discarded);
+            GridCell ring = SmokeRingCell();
+            ClickWorld(new Vector3(ring.X, 0f, ring.Y));
+            Next(254, "再点一次环");
+        }
+
+        private static void StepBeltClearAskedAgain(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            Check(UiConfirmDialog.IsOpen, "确认框再次询问");
+            SessionState.SetInt(K + "RingItems", SmokeRingItems());
+            PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.UiConfirm));
+            Next(255, "按确认键（默认回车）丢弃放不下的");
+        }
+
+        private static void StepBeltClearConfirmed(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            long discarded = CampaignSession.Current.Belts.Discarded - SessionState.GetInt(K + "BeltDiscarded", 0);
+            int asked = SessionState.GetInt(K + "RingItems", -1);
+            Check(!UiConfirmDialog.IsOpen && SmokeRingItems() == 0 && discarded == asked && mode != null && mode.StatusText.Contains("已丢弃")
+                  && BeltNetworkService.Kernel.Ledger.Balanced,
+                $"确认：环清空，丢弃 {discarded} 件（状态行“{mode?.StatusText}”），传送带账本平衡");
+            GridCell ring = SmokeRingCell();
+            RightClickWorld(new Vector3(ring.X, 0f, ring.Y));
+            Next(256, "右键退出清带模式");
+        }
+
+        private static void StepBeltClearModeOff(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Check(mode != null && !mode.ClearMode && mode.IsOpen, "右键退出清带模式，建造模式仍开着");
+            // 镜头飞行过渡会退出建造模式（战略视角之外建造模式不留半开，见 FG-GAP-071）：先按 Esc 退出建造模式，再飞到核心、重新打开。
+            PressKeyKeepMouse(KeyCode.Escape);
+            Next(262, "Esc 退出建造模式");
+        }
+
+        private static void StepBeltBuildClosedForFly(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Check(mode != null && !mode.IsOpen && !PauseMenuUIToolkit.IsOpen, "Esc 退出建造模式（没有打开暂停菜单）");
+            GridCell core = HomeGridService.CorePivot(CampaignSession.Current);
+            WorldView.FlyTo(Campaign.Regions.HomeValleyLayout.RegionId, new Vector2(core.X, core.Y));
+            InputRouter.DebugSetReader(new ScriptedReader { Mouse = OffScreen });
+            Next(261, "镜头飞到归还核心");
+        }
+
+        private static void StepBeltCoreFocused(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            GridCell core = HomeGridService.CorePivot(CampaignSession.Current);
+            HoverWorld(new Vector3(core.X, 0f, core.Y));
+            PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.OpenBuildMenu));
+            Next(263, "鼠标停在归还核心上，按建造菜单键");
+        }
+
+        private static void StepBeltBuildReopenedAtCore(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            string status = BuildModeHudUIToolkit.Instance?.StatusLabelText ?? string.Empty;
+            Check(mode != null && mode.IsOpen && mode.HoverBuildingId != null && status.Contains("查看它的端口"),
+                $"建造模式指着归还核心：状态行提示可以点开端口面板（{status.Replace("\n", " / ")}）");
+            GridCell core = HomeGridService.CorePivot(CampaignSession.Current);
+            ClickWorld(new Vector3(core.X, 0f, core.Y));
+            Next(257, "建造模式里左键点归还核心（打开端口面板）");
+        }
+
+        private static void StepBeltPortPanelOpened(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            BeltPortPanelUIToolkit panel = BeltPortPanelUIToolkit.Instance;
+            bool open = BeltPortPanelUIToolkit.IsOpen && panel != null && panel.PanelVisible && panel.VisibleRowCount >= 1;
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            string diag = $"（诊断：建造模式开着 {mode?.IsOpen}，指着 {mode?.HoverCell} / 建筑 {mode?.HoverBuildingId}，核心 {HomeGridService.CorePivot(CampaignSession.Current)}，" +
+                          $"面板宿主 {(panel != null ? (panel.IsReady ? "就绪" : "未就绪") : "没有")}，打开的建筑 {BeltPortPanelUIToolkit.BuildingId}，状态行“{mode?.StatusText}”）";
+            Check(open && panel.RowText(0, "BpTitle").Contains("输入口") && panel.RowText(0, "BpAccept").Contains("废料") && panel.StoreText.Contains("家园仓库"),
+                $"端口面板（FGR-LOG-021）：“{panel?.TitleText}”{panel?.VisibleRowCount} 行，“{panel?.RowText(0, "BpTitle")}：{panel?.RowText(0, "BpState")}｜{panel?.RowText(0, "BpAccept")}”"
+                + (open ? string.Empty : diag));
+            CheckNoTextMarkers("端口面板");
+            PressKeyKeepMouse(KeyCode.Escape);
+            Next(258, "Esc 关闭端口面板");
+        }
+
+        private static void StepBeltPortPanelClosed(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Check(!BeltPortPanelUIToolkit.IsOpen && mode != null && mode.IsOpen, "Esc 只关掉端口面板，建造模式还开着");
+            // 测试捷径：家园还没有会打传送带的敌人（突袭伤害在 FG6-DEF-05），经正式入口 TryDamage 把直线的第 5 格打坏到摧毁。
+            CampaignState s = CampaignSession.Current;
+            var cell = new GridCell(SessionState.GetInt(K + "BeltX", 0) + 4, SessionState.GetInt(K + "BeltY", 0));
+            bool destroyed = BeltNetworkService.TryDamage(s, cell, 10000, out BeltOpResult r);
+            bool ghost = Campaign.Regions.HomeValleyConstruction.TryFindPlannedCell(s, cell, out PlannedBeltRecord p, out _) && p.Destroyed;
+            Check(destroyed && ghost, $"测试捷径打坏一格传送带：摧毁、原位置留虚影（{r.Describe()}）");
+            PressChord(GameSettings.KeyBindings.GetChord(GameActionId.ConstructionQueue));
+            Next(259, "按施工队列键（默认 Alt+B）");
+        }
+
+        private static void StepBeltRebuildQueue(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            ConstructionQueuePanelUIToolkit panel = ConstructionQueuePanelUIToolkit.Instance;
+            int row = -1;
+            for (int i = 0; panel != null && i < panel.VisibleRowCount; i++)
+            {
+                if (panel.RowDestroyedPlanId(i) != null)
+                {
+                    row = i;
+                    break;
+                }
+            }
+            string planId = row >= 0 ? panel.RowDestroyedPlanId(row) : null;
+            Check(ConstructionQueuePanelUIToolkit.IsOpen && row >= 0 && panel.RowName(row).Contains("被摧毁") && panel.RebuildAllVisible,
+                $"施工队列列出被摧毁的传送带：“{(row >= 0 ? panel.RowName(row) + "：" + panel.RowStatus(row) : "（没有）")}”");
+            bool clicked = row >= 0 && InvokeClickable(panel.RowButton(row, "CqRebuild"));
+            CampaignState s = CampaignSession.Current;
+            bool queued = planId != null && Campaign.Regions.HomeValleyWorkOrders.FindActiveBuild(s, Campaign.Regions.HomeValleyConstruction.BeltPlanPrefix + planId) != null;
+            Check(clicked && queued, "点“重建”：按原设置生成施工单（机器之后取料建回来）");
+            // 取消这张施工单（行内“取消”，全额退回），再经正式入口把这一格铺回去——后面的存读档步骤按 22 格核对这组测试带。
+            WorkOrderRecord order = planId != null ? Campaign.Regions.HomeValleyWorkOrders.FindActiveBuild(s, Campaign.Regions.HomeValleyConstruction.BeltPlanPrefix + planId) : null;
+            panel?.Refresh();
+            int orderRow = -1;
+            for (int i = 0; panel != null && order != null && i < panel.VisibleRowCount; i++)
+            {
+                if (panel.RowOrderId(i) == order.WorkOrderId)
+                {
+                    orderRow = i;
+                    break;
+                }
+            }
+            bool cancelled = orderRow >= 0 && InvokeClickable(panel.RowButton(orderRow, "CqCancel"))
+                             && Campaign.Regions.HomeValleyConstruction.FindPlan(s, planId) == null;
+            var cell = new GridCell(SessionState.GetInt(K + "BeltX", 0) + 4, SessionState.GetInt(K + "BeltY", 0));
+            bool relaid = BeltNetworkService.TryPlace(s, cell, BeltDir.East, 0).Ok;
+            Check(cancelled && relaid && BeltNetworkService.Kernel.CellCount == SessionState.GetInt(K + "BeltCells", -1),
+                $"行内“取消”撤掉这张重建单（虚影移除）；测试捷径把这一格铺回去（{BeltNetworkService.Kernel.CellCount} 格）");
+            PressChord(GameSettings.KeyBindings.GetChord(GameActionId.ConstructionQueue));
+            Next(260, "再按施工队列键关闭");
+        }
+
+        private static void StepBeltRebuildDone(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(!ConstructionQueuePanelUIToolkit.IsOpen, "施工队列关闭");
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            if (mode != null && mode.IsOpen)
+            {
+                PressKeyKeepMouse(KeyCode.Escape); // 只在建造模式开着时按 Esc（否则 Esc 会打开暂停菜单、把后面的步骤一起拖垮）
+            }
+            Next(140, "Esc 退出建造模式；FG0-ARCH-03：家园突袭战斗原型（测试捷径）");
         }
 
         // ── FG0-ARCH-03：家园突袭的逐单位 / 逐弹体逻辑在战斗内核（测试捷径生成性能场景；正式突袭导演与到达结算属于 FG6）──

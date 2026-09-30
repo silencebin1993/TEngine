@@ -95,6 +95,14 @@ namespace GameLogic.Core
         public const string BuildQueueFirstOpen = "build.queue.first_open";
         /// <summary>FG3-LOG-02：第一次“优先建造这一片” / 在队列里调整优先级。</summary>
         public const string BuildFirstPrioritize = "build.priority.first";
+        /// <summary>FG3-LOG-03：第一次有传送带接上建筑的输入 / 输出口（引导内容：输入口的带朝着建筑、输出口的带背离建筑、仓库输出过滤在哪设）。</summary>
+        public const string LogisticsFirstPortConnected = "logistics.port.first_connected";
+        /// <summary>FG3-LOG-03：第一次打开建筑的端口面板。</summary>
+        public const string LogisticsPortPanelFirstOpen = "logistics.port.first_open";
+        /// <summary>FG3-LOG-03：第一次用清带工具（FGR-LOG-026）。</summary>
+        public const string LogisticsFirstClear = "logistics.belt.first_cleared";
+        /// <summary>FG3-LOG-03：第一次有传送带被摧毁（FGR-LOG-027：物品落地、原位置留虚影、在施工队列里重建）。</summary>
+        public const string LogisticsFirstDestroyed = "logistics.belt.first_destroyed";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -117,6 +125,7 @@ namespace GameLogic.Core
             StrategicMapFirstOpen, NewGameSetupFirstOpen, MapMarkerFirstAdded,
             BuildFirstRelocate, BuildFirstBatchDemolish, BuildFirstHotbar, BuildFirstDrag,
             BuildFirstGhost, BuildFirstWaitingMaterials, BuildFirstNoLabor, BuildQueueFirstOpen, BuildFirstPrioritize,
+            LogisticsFirstPortConnected, LogisticsPortPanelFirstOpen, LogisticsFirstClear, LogisticsFirstDestroyed,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

@@ -43,6 +43,7 @@ namespace GameLogic.UI.Kit
         private Button _close;
         private Label _labor;
         private Button _prioritize;
+        private Button _rebuildAll;
         private Label _empty;
         private ScrollView _list;
         private Label _footer;
@@ -63,7 +64,11 @@ namespace GameLogic.UI.Kit
         public string RowStatus(int i) => Row(i)?.Q<Label>("CqStatus")?.text ?? string.Empty;
         public string RowPriority(int i) => Row(i)?.Q<Label>("CqPriority")?.text ?? string.Empty;
         public Button RowButton(int i, string name) => Row(i)?.Q<Button>(name);
-        public string RowOrderId(int i) => i >= 0 && i < VisibleRowCount && i < _entries.Count ? _entries[i].Order.WorkOrderId : null;
+        public string RowOrderId(int i) => i >= 0 && i < VisibleRowCount && i < _entries.Count ? _entries[i].Order?.WorkOrderId : null;
+        /// <summary>FG3-LOG-03：这一行是被摧毁的传送带虚影时，它的规划 ID（否则 null）。</summary>
+        public string RowDestroyedPlanId(int i) => i >= 0 && i < VisibleRowCount && i < _entries.Count ? _entries[i].DestroyedPlanId : null;
+        public Button RebuildAllButton => _rebuildAll;
+        public bool RebuildAllVisible => _rebuildAll != null && !_rebuildAll.ClassListContains("uk-hidden");
         public string EmptyText => _empty != null && !_empty.ClassListContains("uk-hidden") ? _empty.text : string.Empty;
         public string LaborText => _labor?.text ?? string.Empty;
         public string CountText => _count?.text ?? string.Empty;
@@ -176,11 +181,16 @@ namespace GameLogic.UI.Kit
             _close = root.Q<Button>("ConstructionQueueClose");
             _labor = root.Q<Label>("ConstructionQueueLabor");
             _prioritize = root.Q<Button>("ConstructionQueuePrioritize");
+            _rebuildAll = root.Q<Button>("ConstructionQueueRebuildAll");
             _empty = root.Q<Label>("ConstructionQueueEmpty");
             _list = root.Q<ScrollView>("ConstructionQueueList");
             _footer = root.Q<Label>("ConstructionQueueFooter");
             _close.clicked += () => SetOpen(false);
             _prioritize.clicked += StartPrioritizeArea;
+            if (_rebuildAll != null)
+            {
+                _rebuildAll.clicked += RebuildAll;
+            }
             _root.RegisterCallback<PointerDownEvent>(evt =>
             {
                 if (evt.target == _root)
@@ -245,6 +255,12 @@ namespace GameLogic.UI.Kit
             _title.text = GameText.Get("build.queue.title");
             _close.text = GameText.Get("build.queue.close");
             _prioritize.text = GameText.Format("ui.build.btn_prioritize", InputDisplay.ForAction(GameActionId.PrioritizeArea));
+            int destroyedCells = HomeValleyConstruction.DestroyedGhostCount(state);
+            if (_rebuildAll != null)
+            {
+                _rebuildAll.EnableInClassList("uk-hidden", destroyedCells == 0);
+                _rebuildAll.text = GameText.Format("build.queue.rebuild_all", destroyedCells);
+            }
             _count.text = GameText.Format("build.queue.count", _entries.Count);
             int labor = Mathf.Max(0, HomeValleyConstruction.LaborCount);
             _labor.text = GameText.Format("build.queue.labor", labor, state != null ? Mathf.FloorToInt(state.Scrap) : 0)
@@ -266,6 +282,11 @@ namespace GameLogic.UI.Kit
                 row.Q<Button>("CqUp").clicked += () => OnRowAction(index, +1);
                 row.Q<Button>("CqDown").clicked += () => OnRowAction(index, -1);
                 row.Q<Button>("CqLocate").clicked += () => OnLocate(index);
+                Button rebuild = row.Q<Button>("CqRebuild");
+                if (rebuild != null)
+                {
+                    rebuild.clicked += () => OnRebuild(index);
+                }
                 row.Q<Button>("CqCancel").clicked += () => OnCancel(index);
                 _list.Add(row);
                 _rows.Add(row);
@@ -283,16 +304,27 @@ namespace GameLogic.UI.Kit
                 row.Q<Label>("CqName").text = e.Name;
                 Label status = row.Q<Label>("CqStatus");
                 status.text = e.Status;
-                bool warn = e.Order.State == WorkOrderState.Waiting || (HomeValleyConstruction.NoLabor && e.Order.State == WorkOrderState.Ready);
+                // FG3-LOG-03：被摧毁的传送带虚影没有施工单——不排优先级，只有“重建 / 定位 / 取消（移除虚影）”。
+                bool destroyed = e.IsDestroyedGhost;
+                bool warn = destroyed || e.Order.State == WorkOrderState.Waiting || (HomeValleyConstruction.NoLabor && e.Order.State == WorkOrderState.Ready);
                 status.EnableInClassList("cq-status-warn", warn);
                 row.Q<VisualElement>("CqBarFill").style.width = Length.Percent(Mathf.Clamp01(e.Fraction) * 100f);
-                row.Q<Label>("CqPriority").text = GameText.Format("build.queue.row_priority", HomeValleyConstruction.PriorityName(e.Order.Priority));
+                row.Q<Label>("CqPriority").text = destroyed ? string.Empty
+                    : GameText.Format("build.queue.row_priority", HomeValleyConstruction.PriorityName(e.Order.Priority));
                 Button up = row.Q<Button>("CqUp");
                 Button down = row.Q<Button>("CqDown");
                 up.text = GameText.Get("build.queue.up");
                 down.text = GameText.Get("build.queue.down");
-                up.SetEnabled(e.Order.Priority < HomeValleyConstruction.PriorityMax);
-                down.SetEnabled(e.Order.Priority > HomeValleyConstruction.PriorityMin);
+                up.EnableInClassList("uk-hidden", destroyed);
+                down.EnableInClassList("uk-hidden", destroyed);
+                up.SetEnabled(!destroyed && e.Order.Priority < HomeValleyConstruction.PriorityMax);
+                down.SetEnabled(!destroyed && e.Order.Priority > HomeValleyConstruction.PriorityMin);
+                Button rebuildBtn = row.Q<Button>("CqRebuild");
+                if (rebuildBtn != null)
+                {
+                    rebuildBtn.text = GameText.Get("build.queue.rebuild");
+                    rebuildBtn.EnableInClassList("uk-hidden", !destroyed);
+                }
                 row.Q<Button>("CqLocate").text = GameText.Get("build.queue.locate");
                 row.Q<Button>("CqCancel").text = GameText.Get("build.queue.cancel");
             }
@@ -306,6 +338,10 @@ namespace GameLogic.UI.Kit
                 return;
             }
             WorkOrderRecord o = _entries[index].Order;
+            if (o == null)
+            {
+                return;
+            }
             if (HomeValleyConstruction.SetPriority(CampaignSession.Current, o.WorkOrderId, o.Priority + delta))
             {
                 Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.UiClick);
@@ -332,9 +368,45 @@ namespace GameLogic.UI.Kit
             }
             CampaignState state = CampaignSession.Current;
             HomeValleyConstruction.QueueEntry e = _entries[index];
+            if (e.IsDestroyedGhost)
+            {
+                if (HomeValleyConstruction.RemoveDestroyedGhost(state, e.DestroyedPlanId))
+                {
+                    Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.CommandAck, GameText.Format("build.queue.ghost_removed", e.Name));
+                }
+                Refresh();
+                return;
+            }
             if (HomeValleyConstruction.CancelSite(state, e.Order))
             {
                 Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.CommandAck, GameText.Format("build.queue.cancelled", e.Name));
+            }
+            Refresh();
+        }
+
+        /// <summary>FG3-LOG-03（FGR-LOG-027）：确认重建一处被摧毁的传送带（按原设置生成施工单）。</summary>
+        private void OnRebuild(int index)
+        {
+            if (index >= _entries.Count || !_entries[index].IsDestroyedGhost)
+            {
+                return;
+            }
+            HomeValleyConstruction.QueueEntry e = _entries[index];
+            if (HomeValleyConstruction.RebuildDestroyed(CampaignSession.Current, e.DestroyedPlanId))
+            {
+                Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.CommandAck, GameText.Format("build.queue.rebuilt", e.Name));
+            }
+            Refresh();
+        }
+
+        /// <summary>FG3-LOG-03：“全部重建”——每一处被摧毁的传送带都按原设置生成施工单。</summary>
+        public void RebuildAll()
+        {
+            int n = HomeValleyConstruction.RebuildAllDestroyed(CampaignSession.Current);
+            if (n > 0)
+            {
+                Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.CommandAck,
+                    GameText.Format("build.queue.rebuilt", n.ToString(CultureInfo.InvariantCulture)));
             }
             Refresh();
         }

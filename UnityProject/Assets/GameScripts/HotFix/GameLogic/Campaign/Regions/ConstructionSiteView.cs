@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using GameLogic.Campaign.Grid;
+using GameLogic.Campaign.Logistics;
 using GameLogic.Core;
 using GameLogic.UI.Common;
 using GameLogic.UI.Kit;
@@ -19,21 +20,31 @@ namespace GameLogic.Campaign.Regions
     public sealed class ConstructionSiteView
     {
         private const int HoverKey = -731;
+        /// <summary>FG3-LOG-03：已建成传送带的悬停（FGR-LOG-081）。</summary>
+        private const int BeltHoverKey = -732;
 
         private readonly Dictionary<string, WorkOrderRecord> _byTarget = new Dictionary<string, WorkOrderRecord>(StringComparer.Ordinal);
         private readonly List<GameObject> _beltTiles = new List<GameObject>(64);
         private GameObject _beltRoot;
         private Material _beltMaterial;
+        /// <summary>FG3-LOG-03：被摧毁、等待确认重建的传送带虚影（红色调 + 更窄的断条，颜色之外有形状区分，B15）。</summary>
+        private Material _destroyedMaterial;
         private int _beltRevision = -1;
         private CampaignState _hoverState;
         private GridCell _hoverCell;
         private bool _hovering;
+        private bool _hoveringBelt;
         private readonly Func<TooltipContent> _provider;
+        private readonly Func<TooltipContent> _beltProvider;
 
         public ConstructionSiteView()
         {
             _provider = ProvideHover;
+            _beltProvider = ProvideBeltHover;
         }
+
+        /// <summary>画面上被摧毁的传送带虚影块数（自检读）。</summary>
+        public int ActiveDestroyedTiles { get; private set; }
 
         /// <summary>当前摆出来的规划传送带格数（自检读）。</summary>
         public int ActiveBeltTiles { get; private set; }
@@ -98,6 +109,7 @@ namespace GameLogic.Campaign.Regions
                 _beltRoot = new GameObject("[PlannedBelts]");
                 _beltRoot.transform.SetParent(root, false);
                 _beltMaterial = new Material(Shader.Find("Sprites/Default")) { color = new Color(0.45f, 0.65f, 0.95f, 0.55f) };
+                _destroyedMaterial = new Material(Shader.Find("Sprites/Default")) { color = new Color(0.95f, 0.35f, 0.25f, 0.6f) };
                 _beltRevision = -1;
             }
             if (_beltRevision == HomeValleyConstruction.Revision)
@@ -106,6 +118,7 @@ namespace GameLogic.Campaign.Regions
             }
             _beltRevision = HomeValleyConstruction.Revision;
             int n = 0;
+            int destroyed = 0;
             foreach (PlannedBeltRecord p in state.Grid?.PlannedBelts ?? Array.Empty<PlannedBeltRecord>())
             {
                 if (p?.Xs == null)
@@ -121,8 +134,16 @@ namespace GameLogic.Campaign.Regions
                     GameObject tile = Tile(n++);
                     tile.transform.position = new Vector3(p.Xs[i], 0.06f, p.Ys[i]);
                     tile.transform.rotation = Quaternion.Euler(0f, p.Dirs[i] * 90f, 0f);
+                    // FG3-LOG-03：被摧毁的虚影更窄更短（“断条”），红色调；普通规划是淡蓝长条。
+                    tile.transform.localScale = p.Destroyed ? new Vector3(0.3f, 0.08f, 0.6f) : new Vector3(0.55f, 0.08f, 0.9f);
+                    tile.GetComponent<Renderer>().sharedMaterial = p.Destroyed ? _destroyedMaterial : _beltMaterial;
+                    if (p.Destroyed)
+                    {
+                        destroyed++;
+                    }
                 }
             }
+            ActiveDestroyedTiles = destroyed;
             for (int i = n; i < _beltTiles.Count; i++)
             {
                 _beltTiles[i].SetActive(false);
@@ -170,10 +191,25 @@ namespace GameLogic.Campaign.Regions
                         if (IsSiteCell(state, cell))
                         {
                             over = true;
+                            ReleaseBeltHover();
                             _hoverState = state;
                             _hoverCell = cell;
                             _hovering = true;
                             UiTooltip.HoverWorld(HoverKey, new Vector2(screen.x, screen.y), _provider);
+                        }
+                        else if (BeltNetworkService.IsRunning && ReferenceEquals(BeltNetworkService.BoundState, state) && BeltNetworkService.Kernel.HasCell(cell.X, cell.Y))
+                        {
+                            // FG3-LOG-03（FGR-LOG-081）：已建成的传送带——物品、速度、吞吐、状态与原因、耐久。
+                            over = true;
+                            if (_hovering && UiTooltip.WorldKey == HoverKey)
+                            {
+                                UiTooltip.LeaveWorld();
+                            }
+                            _hovering = false;
+                            _hoverState = state;
+                            _hoverCell = cell;
+                            _hoveringBelt = true;
+                            UiTooltip.HoverWorld(BeltHoverKey, new Vector2(screen.x, screen.y), _beltProvider);
                         }
                     }
                 }
@@ -186,7 +222,36 @@ namespace GameLogic.Campaign.Regions
                     UiTooltip.LeaveWorld();
                 }
             }
+            if (!over)
+            {
+                ReleaseBeltHover();
+            }
         }
+
+        private void ReleaseBeltHover()
+        {
+            if (!_hoveringBelt)
+            {
+                return;
+            }
+            _hoveringBelt = false;
+            if (UiTooltip.WorldKey == BeltHoverKey)
+            {
+                UiTooltip.LeaveWorld();
+            }
+        }
+
+        private TooltipContent ProvideBeltHover()
+        {
+            if (!_hoveringBelt || _hoverState == null || !BeltNetworkService.TryDescribeHover(_hoverState, _hoverCell, out string title, out string body))
+            {
+                return null;
+            }
+            return new TooltipContent { Title = title, Body = body, Shortcut = GameActionId.ClearBeltMode, CodexEntryId = "codex.logistics.belt" };
+        }
+
+        /// <summary>悬停提示当前是否挂在已建成的传送带上（自检读）。</summary>
+        public bool HoveringBelt => _hoveringBelt;
 
         private static bool IsSiteCell(CampaignState state, GridCell cell)
         {
@@ -217,6 +282,7 @@ namespace GameLogic.Campaign.Regions
                 UiTooltip.LeaveWorld();
             }
             _hovering = false;
+            ReleaseBeltHover();
             if (_beltRoot != null)
             {
                 GameLogic.View.UnityObjects.Release(_beltRoot);
@@ -226,6 +292,11 @@ namespace GameLogic.Campaign.Regions
             {
                 GameLogic.View.UnityObjects.Release(_beltMaterial);
                 _beltMaterial = null;
+            }
+            if (_destroyedMaterial != null)
+            {
+                GameLogic.View.UnityObjects.Release(_destroyedMaterial);
+                _destroyedMaterial = null;
             }
             _beltTiles.Clear();
             _beltRevision = -1;

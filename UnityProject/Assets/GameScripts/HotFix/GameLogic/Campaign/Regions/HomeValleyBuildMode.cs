@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using BinGames.Sim.Logistics;
 using GameConfig.fg;
 using GameLogic.Campaign.Grid;
+using GameLogic.Campaign.Logistics;
 using GameLogic.Core;
 using GameLogic.Localization;
 using GameLogic.Settings;
@@ -48,6 +49,8 @@ namespace GameLogic.Campaign.Regions
             Relocate,
             /// <summary>FG3-LOG-02：“优先建造这一片”模式下拉框。</summary>
             PrioritizeBox,
+            /// <summary>FG3-LOG-03：清带模式下拉框（点一格 = 整条带）。</summary>
+            ClearBox,
         }
 
         private static readonly GameActionId[] HotbarActions =
@@ -68,6 +71,12 @@ namespace GameLogic.Campaign.Regions
         public int PrioritizeBoxCount { get; private set; } = -1;
         public GridCell PrioritizeBoxMin { get; private set; }
         public GridCell PrioritizeBoxMax { get; private set; }
+        /// <summary>FG3-LOG-03（FGR-LOG-026）：清带模式——点一格传送带（整条带）或拖框，把上面的物品送到最近的仓库。</summary>
+        public bool ClearMode { get; private set; }
+        /// <summary>清带拉框时的规划（格数、物品数）；没在拉框时为 null。</summary>
+        public BeltClearPlan ClearPlan { get; private set; }
+        /// <summary>清带确认框（仓库放不下，问是否丢弃）是否正在询问（自检用）。</summary>
+        public bool PendingClearConfirm { get; private set; }
         public string SelectedTypeId { get; private set; }
         /// <summary>FG3-LOG-01：选中的建造菜单工具（传送带）。与 <see cref="SelectedTypeId"/> 互斥。</summary>
         public string SelectedToolId { get; private set; }
@@ -98,6 +107,7 @@ namespace GameLogic.Campaign.Regions
         private readonly GridPlacementResult _previewBuffer = new GridPlacementResult();
         private readonly BeltPathPlan _beltBuffer = new BeltPathPlan();
         private readonly DemolishBoxPlan _boxBuffer = new DemolishBoxPlan();
+        private readonly BeltClearPlan _clearBuffer = new BeltClearPlan();
         private GameObject _root;
         private WorldTerrainOverlay _terrain;
         private int _terrainRevision = -1;
@@ -148,6 +158,7 @@ namespace GameLogic.Campaign.Regions
             DemolishMode = false;
             RelocateMode = false;
             PrioritizeMode = false;
+            ClearMode = false;
             CarryBuildingId = null;
             SelectedTypeId = null;
             SelectedToolId = null;
@@ -173,6 +184,7 @@ namespace GameLogic.Campaign.Regions
             DemolishMode = false;
             RelocateMode = false;
             PrioritizeMode = false;
+            ClearMode = false;
             CarryBuildingId = null;
             SelectedTypeId = null;
             SelectedToolId = null;
@@ -198,6 +210,7 @@ namespace GameLogic.Campaign.Regions
             DemolishMode = false;
             RelocateMode = false;
             PrioritizeMode = false;
+            ClearMode = false;
             CarryBuildingId = null;
             CancelDrag();
             _previewKey = int.MinValue;
@@ -230,6 +243,7 @@ namespace GameLogic.Campaign.Regions
                 SelectedToolId = null;
                 RelocateMode = false;
                 PrioritizeMode = false;
+                ClearMode = false;
                 CarryBuildingId = null;
                 Preview = null;
             }
@@ -253,6 +267,7 @@ namespace GameLogic.Campaign.Regions
                 SelectedToolId = null;
                 DemolishMode = false;
                 PrioritizeMode = false;
+                ClearMode = false;
             }
             Preview = null;
             CancelDrag();
@@ -274,9 +289,34 @@ namespace GameLogic.Campaign.Regions
                 SelectedToolId = null;
                 DemolishMode = false;
                 RelocateMode = false;
+                ClearMode = false;
                 CarryBuildingId = null;
                 Preview = null;
                 SetStatus(GameText.Get("ui.build.prioritize_mode"), false);
+            }
+            CancelDrag();
+            _previewKey = int.MinValue;
+            Revision++;
+        }
+
+        /// <summary>FG3-LOG-03（FGR-LOG-026）：清带模式开关（按钮与快捷键同一路径）。进入时退出放置 / 拆除 / 搬迁 / 优先建造。</summary>
+        public void SetClearMode(bool on)
+        {
+            if (on && !IsOpen)
+            {
+                Open();
+            }
+            ClearMode = on;
+            if (on)
+            {
+                SelectedTypeId = null;
+                SelectedToolId = null;
+                DemolishMode = false;
+                RelocateMode = false;
+                PrioritizeMode = false;
+                CarryBuildingId = null;
+                Preview = null;
+                SetStatus(GameText.Get("ui.build.clear_mode"), false);
             }
             CancelDrag();
             _previewKey = int.MinValue;
@@ -319,12 +359,35 @@ namespace GameLogic.Campaign.Regions
         /// <summary>旋转鼠标指着的已有建筑。</summary>
         public GridOpResult RotateHovered(CampaignState state)
         {
+            // FG3-LOG-03（FGR-LOG-020“可以原地反转方向”）：指着一格已建成的传送带按旋转键 = 原地反转（物品位置镜像，不丢不增）。
+            if (state != null && HoverBuildingId == null && HasHover && BeltNetworkService.IsRunning && BeltNetworkService.Kernel.HasCell(HoverCell.X, HoverCell.Y))
+            {
+                return ReverseHoveredBelt(state);
+            }
             if (state == null || HoverBuildingId == null)
             {
                 return Report(GridOpResult.Fail(GridReason.Of(GridBlockReason.NoBuilding)), null, RotateFailKey);
             }
             GridOpResult r = HomeGridService.TryRotate(state, HoverBuildingId);
             return Report(r, state, RotateFailKey);
+        }
+
+        /// <summary>FG3-LOG-03：原地反转鼠标指着的传送带（成功写“现在朝 X”，失败写原因）。</summary>
+        public GridOpResult ReverseHoveredBelt(CampaignState state)
+        {
+            BeltOpResult r = BeltNetworkService.TryReverse(state, HoverCell);
+            if (!r.Ok)
+            {
+                LastResult = GridOpResult.Fail(new GridReason(GridBlockReason.Busy, r.ReasonKey, r.Args));
+                SetStatus(r.Describe(), true);
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Denied, StatusText);
+                return LastResult;
+            }
+            BeltNetworkService.Kernel.TryGetCellInfo(HoverCell.X, HoverCell.Y, out BeltCellInfo info);
+            LastResult = new GridOpResult(GridOpResult.Kind.BeltReversed, null);
+            SetStatus(GameText.Format("ui.build.belt_reversed", HoverCell.X, HoverCell.Y, GameText.Get(GridMath.DirTextKey((GridDir)info.Dir))), false);
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.CommandAck, StatusText);
+            return LastResult;
         }
 
         // ── 快捷栏（FGR-LOG-002）─────────────────────────────────────────────────────
@@ -485,11 +548,17 @@ namespace GameLogic.Campaign.Regions
                 BeginDrag(DragKind.PrioritizeBox, cell, state);
                 return;
             }
+            if (ClearMode)
+            {
+                BeginDrag(DragKind.ClearBox, cell, state);
+                return;
+            }
             if (DemolishMode && HomeGridService.BuildingAt(state, cell) == null)
             {
                 BeginDrag(DragKind.DemolishBox, cell, state);
                 return;
             }
+            string portPanelFor = null;
             if (!DemolishMode && !RelocateMode && SelectedTypeId == null)
             {
                 BuildingRecord b = HomeGridService.BuildingAt(state, cell);
@@ -500,8 +569,16 @@ namespace GameLogic.Campaign.Regions
                     _dragBuildingRotation = GridMath.NormalizeRotation(b.Rotation);
                     BeginDrag(DragKind.Relocate, cell, state);
                 }
+                else if (b != null)
+                {
+                    portPanelFor = b.BuildingId; // FG3-LOG-03：核心不能拖着搬迁，点一下直接打开端口面板（其余建筑在松开且没拖动时打开）。
+                }
             }
             ClickCell(state, cell);
+            if (portPanelFor != null)
+            {
+                OpenPortPanel(state, portPanelFor);
+            }
         }
 
         /// <summary>左键松开：按拖拽种类收尾（铺传送带 / 框选拆除 / 搬迁）。起点与终点同一格时：传送带 = 一格，框 = 点这一格，搬迁 = 什么也不做（只是点了一下）。</summary>
@@ -538,6 +615,10 @@ namespace GameLogic.Campaign.Regions
                 case DragKind.PrioritizeBox:
                     CommitPrioritize(state, start, cell);
                     break;
+                case DragKind.ClearBox:
+                    // 点一格 = 这一格所在的整条带；拖框 = 框里的传送带格。
+                    CommitClear(state, start == cell ? BeltClearService.PlanNetwork(state, cell) : BeltClearService.PlanBox(state, start, cell));
+                    break;
                 case DragKind.Relocate:
                     // 空闲状态下拖着搬迁至少要拖出 2 格（切比雪夫距离）：点一下时手抖跨了一格边界不会误搬（要挪 1 格用搬迁模式）。
                     if (dragBuilding != null && Math.Max(Math.Abs(cell.X - start.X), Math.Abs(cell.Y - start.Y)) >= IdleDragMinCells)
@@ -545,8 +626,98 @@ namespace GameLogic.Campaign.Regions
                         var pivot = new GridCell(dragPivot.X + (cell.X - start.X), dragPivot.Y + (cell.Y - start.Y));
                         Report(HomeGridService.TryRelocate(state, dragBuilding, pivot, dragRot), state, RelocateFailKey);
                     }
+                    else if (dragBuilding != null)
+                    {
+                        // FG3-LOG-03：点一下（没拖动）有端口的建筑 = 打开它的端口面板（接没接上、缓存、仓库输出过滤）。
+                        OpenPortPanel(state, dragBuilding);
+                    }
                     break;
             }
+        }
+
+        /// <summary>FG3-LOG-03：打开建筑的端口面板（没有端口的建筑不打开，状态行照旧写建筑信息）。</summary>
+        public bool OpenPortPanel(CampaignState state, string buildingId)
+        {
+            BuildingRecord b = state != null ? HomeGridService.FindBuilding(state, buildingId) : null;
+            if (b == null || GridContent.PortsOf(b.BuildingTypeId).Count == 0)
+            {
+                return false;
+            }
+            BeltPortPanelUIToolkit.Open(buildingId);
+            return true;
+        }
+
+        /// <summary>
+        /// FG3-LOG-03（FGR-LOG-026）：清带收尾——没有传送带 / 没有物品给提示；仓库放得下就直接送进仓库；放不下（仓库满、或家园仓库还存不了这种物品）
+        /// 先弹确认框写明“能送进仓库 N 件、放不下什么”，确认才丢弃放不下的部分，取消则什么都不变。
+        /// </summary>
+        private void CommitClear(CampaignState state, BeltClearPlan plan)
+        {
+            if (!plan.HasBelts)
+            {
+                SetStatus(GameText.Get("ui.build.clear_no_belt"), true);
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Denied, StatusText);
+                LastResult = GridOpResult.Fail(GridReason.Of(GridBlockReason.NoBuilding));
+                return;
+            }
+            if (plan.Items == 0)
+            {
+                SetStatus(GameText.Get("ui.build.clear_nothing"), true);
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Denied, StatusText);
+                LastResult = GridOpResult.Fail(GridReason.Of(GridBlockReason.NoBuilding));
+                return;
+            }
+            if (!plan.NeedsConfirm)
+            {
+                ReportClear(state, plan, false);
+                return;
+            }
+            var req = new ConfirmRequest
+            {
+                Title = GameText.Format("ui.build.clear_confirm_title", plan.OverflowItems),
+                Irreversible = true,
+                ConfirmText = GameText.Get("ui.build.clear_confirm_ok"),
+                CancelText = GameText.Get("ui.build.confirm_cancel"),
+                OnConfirm = () =>
+                {
+                    PendingClearConfirm = false;
+                    ReportClear(CampaignSession.Current, plan, true);
+                },
+                OnCancel = () =>
+                {
+                    PendingClearConfirm = false;
+                    LastResult = GridOpResult.Fail(GridReason.Of(GridBlockReason.NoBuilding));
+                    SetStatus(GameText.Get("ui.build.clear_cancelled"), false);
+                },
+            };
+            req.Lines.Add(GameText.Format("ui.build.clear_confirm_fit", plan.Fit));
+            req.Lines.Add(GameText.Format("ui.build.clear_confirm_over", BeltItems.FormatCounts(plan.Overflow)));
+            bool unstorable = false;
+            foreach (KeyValuePair<ushort, int> kv in plan.Overflow)
+            {
+                unstorable |= !BeltItems.IsStorable(kv.Key);
+            }
+            req.Lines.Add(unstorable ? GameText.Get("ui.build.clear_confirm_reason_kind") : GameText.Format("ui.build.clear_confirm_reason_full", plan.FreeSpace));
+            req.Consequences.Add(GameText.Get("ui.build.clear_confirm_consequence"));
+            UiConfirmDialog.Show(req);
+            PendingClearConfirm = true;
+            LastResult = new GridOpResult(GridOpResult.Kind.Failed, null);
+        }
+
+        private void ReportClear(CampaignState state, BeltClearPlan plan, bool discard)
+        {
+            if (!BeltClearService.Execute(state, plan, discard, out string reasonKey))
+            {
+                LastResult = GridOpResult.Fail(new GridReason(GridBlockReason.Busy, reasonKey ?? "ui.build.clear_nothing"));
+                SetStatus(GameText.Get(reasonKey ?? "ui.build.clear_nothing"), true);
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Denied, StatusText);
+                return;
+            }
+            LastResult = new GridOpResult(GridOpResult.Kind.BeltsCleared, null);
+            SetStatus(BeltClearService.LastDiscarded > 0
+                ? GameText.Format("ui.build.clear_done_discard", BeltClearService.LastClearedCells, BeltClearService.LastStored, BeltClearService.LastDiscarded)
+                : GameText.Format("ui.build.clear_done", BeltClearService.LastClearedCells, BeltClearService.LastStored), false);
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.CommandAck, StatusText);
         }
 
         /// <summary>空闲状态下拖着搬迁的最小拖动距离（格）。</summary>
@@ -564,13 +735,14 @@ namespace GameLogic.Campaign.Regions
 
         private void CancelDrag()
         {
-            if (Drag == DragKind.None && BeltPlan == null && BoxPlan == null && PrioritizeBoxCount < 0)
+            if (Drag == DragKind.None && BeltPlan == null && BoxPlan == null && PrioritizeBoxCount < 0 && ClearPlan == null)
             {
                 return;
             }
             Drag = DragKind.None;
             BeltPlan = null;
             BoxPlan = null;
+            ClearPlan = null;
             PrioritizeBoxCount = -1;
             _dragBuildingId = null;
             InputRouter.BuildDragActive = false;
@@ -589,6 +761,9 @@ namespace GameLogic.Campaign.Regions
                     break;
                 case DragKind.DemolishBox:
                     BoxPlan = HomeGridService.PlanDemolishBox(state, DragStart, end, _boxBuffer);
+                    break;
+                case DragKind.ClearBox:
+                    ClearPlan = end == DragStart ? BeltClearService.PlanNetwork(state, end, _clearBuffer) : BeltClearService.PlanBox(state, DragStart, end, _clearBuffer);
                     break;
                 case DragKind.PrioritizeBox:
                     PrioritizeBoxMin = new GridCell(Math.Min(DragStart.X, end.X), Math.Min(DragStart.Y, end.Y));
@@ -730,6 +905,10 @@ namespace GameLogic.Campaign.Regions
             {
                 SetPrioritizeMode(false);
             }
+            else if (ClearMode)
+            {
+                SetClearMode(false);
+            }
             else if (RelocateMode)
             {
                 SetRelocateMode(false);
@@ -804,6 +983,10 @@ namespace GameLogic.Campaign.Regions
             if (InputRouter.ConsumeAction(GameActionId.PrioritizeArea, InputScope.Strategy))
             {
                 SetPrioritizeMode(!PrioritizeMode);
+            }
+            if (InputRouter.ConsumeAction(GameActionId.ClearBeltMode, InputScope.Strategy))
+            {
+                SetClearMode(!ClearMode);
             }
             if (InputRouter.ConsumeAction(GameActionId.ConstructionQueue, InputScope.Strategy))
             {
@@ -1237,6 +1420,11 @@ namespace GameLogic.Campaign.Regions
             {
                 showBox = true;
                 PlaceBox(PrioritizeBoxMin, PrioritizeBoxMax);
+            }
+            else if (ClearPlan != null && !ClearPlan.WholeNetwork)
+            {
+                showBox = true;
+                PlaceBox(ClearPlan.Min, ClearPlan.Max);
             }
             else if (Preview != null)
             {

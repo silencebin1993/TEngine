@@ -25,6 +25,7 @@ public sealed partial class BuildingPort : Luban.BeanBase
         LocalY = _buf.ReadInt();
         Dir = _buf.ReadString();
         Kind = _buf.ReadString();
+        Role = _buf.ReadString();
     }
 
     public static BuildingPort DeserializeBuildingPort(ByteBuf _buf)
@@ -56,6 +57,10 @@ public sealed partial class BuildingPort : Luban.BeanBase
     /// in=输入,out=输出
     /// </summary>
     public readonly string Kind;
+    /// <summary>
+    /// 物流角色:store=家园存量的输入/输出口,none=还没有收发物品的配方(FG3-LOG-03)
+    /// </summary>
+    public readonly string Role;
    
     public const int __ID__ = 1483643266;
     public override int GetTypeId() => __ID__;
@@ -73,6 +78,7 @@ public sealed partial class BuildingPort : Luban.BeanBase
         + "localY:" + LocalY + ","
         + "dir:" + Dir + ","
         + "kind:" + Kind + ","
+        + "role:" + Role + ","
         + "}";
     }
 }

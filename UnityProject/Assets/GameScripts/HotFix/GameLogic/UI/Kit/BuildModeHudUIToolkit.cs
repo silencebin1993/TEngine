@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using GameConfig.fg;
 using GameLogic.Campaign;
 using GameLogic.Campaign.Grid;
+using GameLogic.Campaign.Logistics;
 using GameLogic.Campaign.Regions;
 using GameLogic.Core;
 using GameLogic.Localization;
@@ -43,6 +44,7 @@ namespace GameLogic.UI.Kit
         private Button _gridToggle;
         private Button _prioritize;
         private Button _queue;
+        private Button _clearBelt;
         private Label _hint;
         private Label _cost;
         private Label _dragInfo;
@@ -118,6 +120,7 @@ namespace GameLogic.UI.Kit
             _gridToggle = root.Q<Button>("BuildGridToggle");
             _prioritize = root.Q<Button>("BuildPrioritize");
             _queue = root.Q<Button>("BuildQueue");
+            _clearBelt = root.Q<Button>("BuildClearBelt");
             _hint = root.Q<Label>("BuildHint");
             _cost = root.Q<Label>("BuildCost");
             _dragInfo = root.Q<Label>("BuildDragInfo");
@@ -167,6 +170,11 @@ namespace GameLogic.UI.Kit
                 m?.SetPrioritizeMode(!m.PrioritizeMode);
             };
             _queue.clicked += ConstructionQueuePanelUIToolkit.Toggle;
+            _clearBelt.clicked += () =>
+            {
+                HomeValleyBuildMode m = HomeValleyBuildMode.Current;
+                m?.SetClearMode(!m.ClearMode);
+            };
             _search = new UiSearchBox(root.Q<TextField>("BuildSearch"), root.Q<Label>("BuildSearchPlaceholder"), root.Q<Button>("BuildSearchClear"),
                 "ui.build.search_placeholder", text =>
                 {
@@ -210,6 +218,8 @@ namespace GameLogic.UI.Kit
             UiTooltip.Attach(_relocate, () => new TooltipContent { Title = GameText.Get("input.action.relocate_mode.name"), Body = GameText.Format("ui.build.hint_relocate", InputDisplay.ForAction(GameActionId.Rotate)), Shortcut = GameActionId.RelocateMode });
             UiTooltip.Attach(_gridToggle, () => new TooltipContent { Title = GameText.Get("input.action.toggle_grid_lines.name"), Shortcut = GameActionId.ToggleGridLines });
             UiTooltip.Attach(_prioritize, () => new TooltipContent { Title = GameText.Get("input.action.prioritize_area.name"), Body = GameText.Get("ui.build.prioritize_mode"), Shortcut = GameActionId.PrioritizeArea });
+            UiTooltip.Attach(_clearBelt, () => new TooltipContent { Title = GameText.Get("input.action.clear_belt_mode.name"), Body = GameText.Get("ui.build.clear_mode"),
+                Shortcut = GameActionId.ClearBeltMode, CodexEntryId = "codex.logistics.belt" });
             UiTooltip.Attach(_queue, () => new TooltipContent { Title = GameText.Get("input.action.construction_queue.name"),
                 Body = InputDisplay.ExpandActionTokens(GameText.Get("build.queue.hint")), Shortcut = GameActionId.ConstructionQueue, CodexEntryId = "codex.build.construction" });
             _lastKey = null;
@@ -399,6 +409,7 @@ namespace GameLogic.UI.Kit
             _mode.text = mode.DemolishMode ? GameText.Format("ui.build.demolish", InputDisplay.ForAction(GameActionId.DemolishMode))
                 : mode.RelocateMode ? GameText.Get("ui.build.relocate_mode")
                 : mode.PrioritizeMode ? GameText.Get("ui.build.prioritize_mode")
+                : mode.ClearMode ? GameText.Format("ui.build.btn_clear", InputDisplay.ForAction(GameActionId.ClearBeltMode))
                 : string.Empty;
             _close.text = GameText.Get("ui.build.exit");
             _rotate.text = GameText.Format("ui.build.rotate", InputDisplay.ForAction(GameActionId.Rotate));
@@ -412,6 +423,8 @@ namespace GameLogic.UI.Kit
             _prioritize.text = GameText.Format("ui.build.btn_prioritize", InputDisplay.ForAction(GameActionId.PrioritizeArea));
             _prioritize.EnableInClassList("bm-tool-active", mode.PrioritizeMode);
             _queue.text = GameText.Format("ui.build.btn_queue", InputDisplay.ForAction(GameActionId.ConstructionQueue));
+            _clearBelt.text = GameText.Format("ui.build.btn_clear", InputDisplay.ForAction(GameActionId.ClearBeltMode));
+            _clearBelt.EnableInClassList("bm-tool-active", mode.ClearMode);
             _placeholder.text = GameText.Get("ui.build.placeholder_note");
             _undoHint.text = GameText.Format("ui.build.undo_hint", InputDisplay.ForAction(GameActionId.Undo), InputDisplay.ForAction(GameActionId.Redo));
 
@@ -455,6 +468,10 @@ namespace GameLogic.UI.Kit
             if (mode.PrioritizeMode)
             {
                 return GameText.Get("ui.build.prioritize_mode");
+            }
+            if (mode.ClearMode)
+            {
+                return GameText.Get("ui.build.clear_mode");
             }
             if (mode.SelectedToolId != null)
             {
@@ -507,6 +524,12 @@ namespace GameLogic.UI.Kit
                 SetVisible(_dragInfo, true);
                 _dragInfo.text = GameText.Format("ui.build.box_info", box.Max.X - box.Min.X + 1, box.Max.Y - box.Min.Y + 1, box.BuildingCount, box.Belts.Count);
             }
+            else if (mode.ClearPlan != null)
+            {
+                SetVisible(_dragInfo, true);
+                BeltClearPlan cp = mode.ClearPlan;
+                _dragInfo.text = GameText.Format("ui.build.clear_box", cp.Max.X - cp.Min.X + 1, cp.Max.Y - cp.Min.Y + 1, cp.Cells.Count, cp.Items);
+            }
             else if (mode.Drag == HomeValleyBuildMode.DragKind.PrioritizeBox && mode.PrioritizeBoxCount >= 0)
             {
                 SetVisible(_dragInfo, true);
@@ -555,6 +578,11 @@ namespace GameLogic.UI.Kit
             {
                 BuildingRecord hovered = HomeGridService.FindBuilding(state, mode.HoverBuildingId);
                 status = hovered != null ? HomeValleyBuildMode.DescribeBuilding(state, hovered) : string.Empty;
+                // FG3-LOG-03：有端口的建筑提示“点一下查看端口、设置输出过滤”。
+                if (hovered != null && GridContent.PortsOf(hovered.BuildingTypeId).Count > 0 && !mode.DemolishMode && !mode.RelocateMode)
+                {
+                    status += "\n" + GameText.Get("logistics.port.open_hint");
+                }
                 // FG3-LOG-02：指着施工虚影时，另起两行写施工状态（缺什么、进度、优先级），与悬停提示同一写法。
                 if (mode.HasHover && HomeValleyConstruction.TryDescribeSite(state, mode.HoverCell, out _, out string site))
                 {
@@ -564,6 +592,12 @@ namespace GameLogic.UI.Kit
             else if (string.IsNullOrEmpty(status) && mode.HasHover && HomeValleyConstruction.TryDescribeSite(state, mode.HoverCell, out string beltTitle, out string beltSite))
             {
                 status = beltTitle + "\n" + beltSite; // 规划中的传送带格。
+            }
+            else if ((string.IsNullOrEmpty(status) || mode.ClearMode) && mode.HasHover
+                     && Campaign.Logistics.BeltNetworkService.TryDescribeHover(state, mode.HoverCell, out string hoverTitle, out string hoverBody))
+            {
+                // FG3-LOG-03（FGR-LOG-081）：建造模式里指着已建成的传送带，状态行写悬停读数（战略视角由世界悬停提示显示同一份）。
+                status = (string.IsNullOrEmpty(status) ? string.Empty : status + "\n") + hoverTitle + "\n" + hoverBody;
             }
             _status.text = status;
             _status.EnableInClassList("bm-status-error", error);

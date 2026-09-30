@@ -132,6 +132,9 @@ namespace GameLogic.Campaign
         public int[] CellState = Array.Empty<int>();
         /// <summary>已运到现场、尚未被建成格子用掉的材料（废料）。</summary>
         public int Delivered;
+        /// <summary>FG3-LOG-03（FGR-LOG-027）：这份规划是传送带被摧毁后留下的虚影（保留原朝向与等级）。
+        /// 在玩家确认重建之前没有施工单、机器不会去建（自动重建规则在 FG6-DEF-03）；拆除模式点它 = 移除虚影。</summary>
+        public bool Destroyed;
     }
 
     /// <summary>一块已探索的圆形区域（格网坐标）。</summary>
@@ -169,6 +172,37 @@ namespace GameLogic.Campaign
         public string Ports = string.Empty;
         /// <summary>输入端口所属建筑的名字文本键（堵塞原因“下游 X 的输入已满”用；端口本身在 <see cref="Ports"/>）。</summary>
         public BeltSinkNameRecord[] SinkNames = Array.Empty<BeltSinkNameRecord>();
+        /// <summary>FG3-LOG-03（FGR-LOG-021）：建筑端口（建筑 + fg.TbBuildingPort 的端口 ID）↔ 内核端口号，以及仓库输出口的过滤器。
+        /// 端口本身的状态（待推、缓存、累计）在 <see cref="Ports"/> 块里；唯一写入口 <see cref="Logistics.BeltPortService"/>。</summary>
+        public BeltPortBindingRecord[] PortBindings = Array.Empty<BeltPortBindingRecord>();
+        /// <summary>FG3-LOG-03：下一个建筑端口号（0 = 还没分配过，从 <see cref="Logistics.BeltPortService.PortIdBase"/> 开始）。</summary>
+        public int NextPortId;
+        /// <summary>FG3-LOG-03（FGR-LOG-027）：掉了耐久的传送带格（满耐久的不记）。唯一写入口 <see cref="Logistics.BeltNetworkService"/>。</summary>
+        public BeltDamageRecord[] Damage = Array.Empty<BeltDamageRecord>();
+        /// <summary>FG3-LOG-03（FGR-LOG-026）：清带送进仓库 / 玩家确认丢弃的累计件数（统计与守恒核对）。</summary>
+        public long ClearedToStorage;
+        public long Discarded;
+    }
+
+    /// <summary>FG3-LOG-03：一个建筑端口的绑定。</summary>
+    [Serializable]
+    public sealed class BeltPortBindingRecord
+    {
+        public int PortId;
+        public string BuildingId;
+        /// <summary>fg.TbBuildingPort 的端口 ID（如 "warehouse.out0"）。</summary>
+        public string PortKey;
+        /// <summary>输出口过滤：-1 = 全部可存物品，0 = 停止输出，&gt; 0 = 只输出这个物品编号。输入口不用。</summary>
+        public int Filter = -1;
+    }
+
+    /// <summary>FG3-LOG-03：一格传送带掉了多少耐久。</summary>
+    [Serializable]
+    public sealed class BeltDamageRecord
+    {
+        public int X;
+        public int Y;
+        public int Lost;
     }
 
     /// <summary>输入端口编号 → 所属建筑名字的文本键。</summary>
@@ -684,6 +718,8 @@ namespace GameLogic.Campaign
             s.Belts.Networks ??= Array.Empty<BeltNetworkRecord>();
             s.Belts.Ports ??= string.Empty;
             s.Belts.SinkNames ??= Array.Empty<BeltSinkNameRecord>();
+            s.Belts.PortBindings ??= Array.Empty<BeltPortBindingRecord>();
+            s.Belts.Damage ??= Array.Empty<BeltDamageRecord>();
             s.Combat ??= new CombatState();
             s.Combat.Sites ??= Array.Empty<CombatSiteRecord>();
             foreach (CombatSiteRecord r in s.Combat.Sites)
