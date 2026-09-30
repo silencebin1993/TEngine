@@ -238,6 +238,17 @@ namespace GameLogic.EditorTools
                     case 299: StepPlanLibraryKey(inStep); break;
                     case 300: StepPlanLibraryOpen(inStep); break;
                     case 301: StepPlanLibraryClosed(inStep); break;
+                    // FG3-LOG-08：叠加层与“为什么不工作”（Alt+O 选择器、点“堵塞”、O 关 / 重开、Ctrl+Alt+1 直达、Ctrl+O 面板、点原因镜头飞过去且建造模式不退出、Esc）。
+                    case 302: StepOverlaySelectorOpened(inStep); break;
+                    case 303: StepOverlayToggledOff(inStep); break;
+                    case 304: StepOverlayReopened(inStep); break;
+                    case 305: StepOverlayFlowKey(inStep); break;
+                    case 306: StepDiagnosisOpened(inStep); break;
+                    case 307: StepDiagnosisLocated(inStep); break;
+                    case 308: StepDiagnosisClosed(inStep); break;
+                    case 309: StepOverlayOffAgain(inStep); break;
+                    case 310: StepOverlaySelectorEsc(inStep); break;
+                    case 311: StepOverlayOffConfirmed(inStep); break;
                     case 129: StepRuinsCombat(inStep); break;
                     case 230: StepRuinsTagHover(inStep); break;
                     case 150: StepSignalOpened(inStep); break;
@@ -4859,12 +4870,31 @@ namespace GameLogic.EditorTools
             }
             Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
             Check(mode != null && !mode.ClearMode && mode.IsOpen, "右键退出清带模式，建造模式仍开着");
-            // 镜头飞行过渡会退出建造模式（战略视角之外建造模式不留半开，见 FG-GAP-071）：先按 Esc 退出建造模式，再飞到核心、重新打开。
-            PressKeyKeepMouse(KeyCode.Escape);
-            Next(262, "Esc 退出建造模式");
+            // FG3-LOG-08（FG-GAP-071）：建造模式开着时镜头做一次飞行过渡（落点仍是战略视角）——建造模式不再被退出。
+            SessionState.SetInt(K + "FlightsKept0", mode?.FlightsKept ?? 0);
+            GridCell core = HomeGridService.CorePivot(CampaignSession.Current);
+            WorldView.FlyTo(Campaign.Regions.HomeValleyLayout.RegionId, new Vector2(core.X, core.Y));
+            InputRouter.DebugSetReader(new ScriptedReader { Mouse = OffScreen });
+            Next(262, "建造模式开着时镜头飞到归还核心（FG-GAP-071）");
         }
 
         private static void StepBeltBuildClosedForFly(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            GridCell core = HomeGridService.CorePivot(CampaignSession.Current);
+            Unity.Mathematics.float2 f = WorldView.Director.StrategyFocus;
+            int kept = (mode?.FlightsKept ?? 0) - SessionState.GetInt(K + "FlightsKept0", 0);
+            Check(mode != null && mode.IsOpen && kept > 0 && WorldView.Director.Mode == View.ViewMode.Strategy && Mathf.Abs(f.x - core.X) < 1f && Mathf.Abs(f.y - core.Y) < 1f,
+                $"FG-GAP-071：镜头飞行过渡（{kept} 帧保持建造模式）落到归还核心后建造模式仍开着");
+            PressKeyKeepMouse(KeyCode.Escape);
+            Next(261, "Esc 退出建造模式");
+        }
+
+        private static void StepBeltCoreFocused(double inStep)
         {
             if (inStep < 0.5)
             {
@@ -4872,18 +4902,6 @@ namespace GameLogic.EditorTools
             }
             Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
             Check(mode != null && !mode.IsOpen && !PauseMenuUIToolkit.IsOpen, "Esc 退出建造模式（没有打开暂停菜单）");
-            GridCell core = HomeGridService.CorePivot(CampaignSession.Current);
-            WorldView.FlyTo(Campaign.Regions.HomeValleyLayout.RegionId, new Vector2(core.X, core.Y));
-            InputRouter.DebugSetReader(new ScriptedReader { Mouse = OffScreen });
-            Next(261, "镜头飞到归还核心");
-        }
-
-        private static void StepBeltCoreFocused(double inStep)
-        {
-            if (inStep < 1.5)
-            {
-                return;
-            }
             GridCell core = HomeGridService.CorePivot(CampaignSession.Current);
             HoverWorld(new Vector3(core.X, 0f, core.Y));
             PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.OpenBuildMenu));
@@ -5608,7 +5626,8 @@ namespace GameLogic.EditorTools
                 : (chord.Mods & InputModifier.Alt) != 0 ? KeyCode.LeftAlt
                 : (chord.Mods & InputModifier.Shift) != 0 ? KeyCode.LeftShift
                 : KeyCode.None;
-            InputRouter.DebugSetReader(new ScriptedReader { Key = chord.Key, KeyFrame = Time.frameCount + 1, Held = held, Mouse = _buildMouse });
+            KeyCode held2 = (chord.Mods & InputModifier.Ctrl) != 0 && (chord.Mods & InputModifier.Alt) != 0 ? KeyCode.LeftAlt : KeyCode.None;
+            InputRouter.DebugSetReader(new ScriptedReader { Key = chord.Key, KeyFrame = Time.frameCount + 1, Held = held, Held2 = held2, Mouse = _buildMouse });
         }
 
         private static bool PlanRowFree(CampaignState state, Campaign.Grid.GridCell o, int w, int h)
@@ -5921,6 +5940,178 @@ namespace GameLogic.EditorTools
             LayoutLibrary.DirectoryOverrideForTests = null;
             LayoutLibrary.Reload();
             Check(clean, $"清理：撤销 {undos} 步（升级、粘贴），拆掉测试传送带与分流器，布局库目录复位");
+            PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameActionId.OverlaySelector));
+            Next(302, "FG3-LOG-08：建造模式里按叠加层选择器键（默认 Alt+O）");
+        }
+
+        // ── FG3-LOG-08：叠加层与“为什么不工作”（真实按键 / UI Toolkit 点击；点原因条目镜头飞过去、建造模式不退出）──
+
+        private static void StepOverlaySelectorOpened(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            OverlayHudUIToolkit hud = OverlayHudUIToolkit.Instance;
+            Check(hud != null && hud.DockVisible && OverlayHudUIToolkit.SelectorOpen && hud.SelectorVisible && hud.HintText.Contains(InputDisplay.ForAction(GameActionId.ToggleOverlay)),
+                $"Alt+O 打开叠加层选择器（FGU-12）：停靠条“{hud?.ToggleText}”，8 种叠加层按钮与提示");
+            bool picked = ClickUitk("[OverlayHudHost]", "OverlayBtn2");
+            Check(picked && GameLogic.View.OverlayService.Active == GameLogic.View.OverlayKind.Blockage && GameLogic.View.OverlayService.BeltOverlayMode == 2,
+                "点“堵塞”：叠加层切到堵塞（传送带着色器模式 2）");
+            CheckNoTextMarkers("叠加层选择器");
+            PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameActionId.ToggleOverlay));
+            Next(303, "按叠加层切换键（默认 O）关闭当前叠加层");
+        }
+
+        private static void StepOverlayToggledOff(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(GameLogic.View.OverlayService.Active == GameLogic.View.OverlayKind.None && GameLogic.View.OverlayService.BeltOverlayMode == 0
+                  && OverlayHudUIToolkit.Instance != null && OverlayHudUIToolkit.Instance.ActiveText.Contains("关"), "O 关掉叠加层，停靠条写“叠加层：关”");
+            PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameActionId.ToggleOverlay));
+            Next(304, "再按 O：重开最近用过的叠加层");
+        }
+
+        private static void StepOverlayReopened(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(GameLogic.View.OverlayService.Active == GameLogic.View.OverlayKind.Blockage && GameLogic.View.OverlayService.Visible,
+                "O 重开最近用过的“堵塞”叠加层（家园被观察时在画）");
+            PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameActionId.OverlayFlow));
+            Next(305, "按物品流向直达键（默认 Ctrl+Alt+1）");
+        }
+
+        private static void StepOverlayFlowKey(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(GameLogic.View.OverlayService.Active == GameLogic.View.OverlayKind.Flow && GameLogic.View.OverlayService.BeltOverlayMode == 1
+                  && (BeltNetworkService.Renderer == null || BeltNetworkService.Renderer.OverlayMode == 1),
+                "Ctrl+Alt+1 直达“物品流向与吞吐”（两个修饰键的组合走真实按键路径），传送带渲染器按热度 + 箭头模式画");
+            // 测试捷径：玩家在电网面板里关停维修台（正式路径由 FG3-LOG-06 覆盖），制造一处“停工”。
+            CampaignState state = CampaignSession.Current;
+            BuildingRecord bay = HomeGridService.FindBuilding(state, Campaign.Regions.HomeValleyLayout.RegionId + ":repair_bay");
+            if (bay != null && bay.ConstructionState == BuildingConstructionState.Operational)
+            {
+                Campaign.Regions.HomeValleyPowerGrid.TryToggleShutdown(state, bay.BuildingId);
+            }
+            SessionState.SetBool(K + "DiagBayShut", bay != null && bay.ConstructionState == BuildingConstructionState.Disabled);
+            SessionState.SetInt(K + "DiagFly0", WorldView.FlyCount);
+            PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameActionId.OpenDiagnosis));
+            Next(306, "按“为什么不工作”键（默认 Ctrl+O）");
+        }
+
+        private static void StepDiagnosisOpened(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            DiagnosisPanelUIToolkit panel = DiagnosisPanelUIToolkit.Instance;
+            CampaignState state = CampaignSession.Current;
+            BuildingRecord bay = HomeGridService.FindBuilding(state, Campaign.Regions.HomeValleyLayout.RegionId + ":repair_bay");
+            int row = -1;
+            for (int i = 0; panel != null && i < panel.RowCount; i++)
+            {
+                if (panel.SubjectText(i).Contains(HomeGridService.DisplayName(Campaign.Regions.HomeValleyLayout.BuildingTypeRepairBay)))
+                {
+                    row = i;
+                    break;
+                }
+            }
+            int step = -1;
+            for (int i = 0; panel != null && i < panel.StepButtonCount; i++)
+            {
+                DiagStep st = panel.StepTarget(i);
+                if (st != null && st.Code == DiagCode.Disabled && st.TargetId == bay?.BuildingId)
+                {
+                    step = i;
+                    break;
+                }
+            }
+            Check(SessionState.GetBool(K + "DiagBayShut", false) && DiagnosisPanelUIToolkit.IsOpen && panel != null && panel.PanelVisible && row >= 0 && step >= 0,
+                $"Ctrl+O 打开“为什么不工作”（非模态，停靠左侧）：{panel?.RowCount} 个停工对象，列出被关停的维修台（“{panel?.SubjectText(Math.Max(0, row))}”）");
+            Check(!OverlayHudUIToolkit.SelectorOpen && panel != null && panel.OverlayText.Contains(GameLogic.View.OverlayService.Name(GameLogic.View.OverlayKind.Flow)),
+                $"左侧停靠位同一时间只放一个：面板打开时叠加层选择器收起，面板页眉下写当前叠加层（“{panel?.OverlayText}”）");
+            CheckNoTextMarkers("为什么不工作");
+            bool clicked = step >= 0 && ClickUitk("[DiagnosisPanelHost]", "DgStep" + step);
+            Check(clicked, "点维修台那一条原因（UI Toolkit 点击）");
+            Next(307, "镜头飞到维修台");
+        }
+
+        private static void StepDiagnosisLocated(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            BuildingRecord bay = HomeGridService.FindBuilding(state, Campaign.Regions.HomeValleyLayout.RegionId + ":repair_bay");
+            Unity.Mathematics.float2 f = WorldView.Director.StrategyFocus;
+            Check(bay != null && WorldView.FlyCount > SessionState.GetInt(K + "DiagFly0", 0) && Mathf.Abs(f.x - bay.Position.x) < 1f && Mathf.Abs(f.y - bay.Position.y) < 1f
+                  && mode != null && mode.IsOpen && DiagnosisPanelUIToolkit.IsOpen,
+                $"点原因条目：镜头飞到维修台（{bay?.Position}），建造模式仍开着（FG-GAP-071），面板留着接着看");
+            if (bay != null && bay.ConstructionState == BuildingConstructionState.Disabled)
+            {
+                Campaign.Regions.HomeValleyPowerGrid.TryToggleShutdown(state, bay.BuildingId);
+            }
+            PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameActionId.OpenDiagnosis));
+            Next(308, "再按 Ctrl+O 关闭“为什么不工作”");
+        }
+
+        private static void StepDiagnosisClosed(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(!DiagnosisPanelUIToolkit.IsOpen, "Ctrl+O 关闭“为什么不工作”");
+            PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameActionId.OverlaySelector));
+            Next(309, "再按 Alt+O 重新打开叠加层选择器（面板关了，停靠位还给选择器）");
+        }
+
+        private static void StepOverlayOffAgain(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(OverlayHudUIToolkit.SelectorOpen && OverlayHudUIToolkit.Instance != null && OverlayHudUIToolkit.Instance.SelectorVisible
+                  && GameLogic.View.OverlayService.Active == GameLogic.View.OverlayKind.Flow,
+                "Alt+O 重新打开叠加层选择器（物品流向还开着）");
+            PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameActionId.OverlayFlow));
+            Next(311, "再按 Ctrl+Alt+1 关闭叠加层");
+        }
+
+        private static void StepOverlayOffConfirmed(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(GameLogic.View.OverlayService.Active == GameLogic.View.OverlayKind.None && OverlayHudUIToolkit.SelectorOpen,
+                "同一个直达键再按一次关闭叠加层（选择器还开着）");
+            PressKeyKeepMouse(KeyCode.Escape);
+            Next(310, "Esc 先关叠加层选择器");
+        }
+
+        private static void StepOverlaySelectorEsc(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Check(!OverlayHudUIToolkit.SelectorOpen && mode != null && mode.IsOpen, "Esc 关掉选择器（最上层先关），建造模式还开着");
             PressKeyKeepMouse(KeyCode.Escape);
             Next(140, "Esc 退出建造模式；FG0-ARCH-03：家园突袭战斗原型（测试捷径）");
         }
@@ -6423,7 +6614,8 @@ namespace GameLogic.EditorTools
                 : (chord.Mods & InputModifier.Alt) != 0 ? KeyCode.LeftAlt
                 : (chord.Mods & InputModifier.Shift) != 0 ? KeyCode.LeftShift
                 : KeyCode.None;
-            InputRouter.DebugSetReader(new ScriptedReader { Key = chord.Key, KeyFrame = Time.frameCount + 1, Held = held });
+            KeyCode held2 = (chord.Mods & InputModifier.Ctrl) != 0 && (chord.Mods & InputModifier.Alt) != 0 ? KeyCode.LeftAlt : KeyCode.None;
+            InputRouter.DebugSetReader(new ScriptedReader { Key = chord.Key, KeyFrame = Time.frameCount + 1, Held = held, Held2 = held2 });
         }
 
         /// <summary>模拟鼠标右键点世界里一点（下一帧按下、再下一帧抬起）。</summary>
@@ -6463,8 +6655,10 @@ namespace GameLogic.EditorTools
             public int Button;
             /// <summary>与 <see cref="Key"/> 同一帧按住的修饰键（组合键用）。</summary>
             public KeyCode Held = KeyCode.None;
+            /// <summary>FG3-LOG-08：第二个修饰键（Ctrl+Alt+数字这类两个修饰的组合）。</summary>
+            public KeyCode Held2 = KeyCode.None;
 
-            public bool GetKey(KeyCode key) => Held != KeyCode.None && key == Held && Time.frameCount == KeyFrame;
+            public bool GetKey(KeyCode key) => key != KeyCode.None && (key == Held || key == Held2) && Time.frameCount == KeyFrame;
             public bool GetKeyDown(KeyCode key) => key == Key && Time.frameCount == KeyFrame;
             public bool GetMouseButtonDown(int button) => button == Button && Time.frameCount == DownFrame;
             public bool GetMouseButtonUp(int button) => button == Button && Time.frameCount == UpFrame;

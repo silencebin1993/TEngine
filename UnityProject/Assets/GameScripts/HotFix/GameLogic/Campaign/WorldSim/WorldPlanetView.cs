@@ -106,6 +106,7 @@ namespace GameLogic.Campaign.WorldSim
                 {
                     _terrain.SetReliefSeed(src.Params.SurfaceSeed);
                 }
+                _terrain.PollutionView = GameLogic.View.OverlayService.Active == GameLogic.View.OverlayKind.Pollution; // FG3-LOG-08：污染叠加层（普通视角同样按等级强调）。
                 _terrain.Update(state, focus);
             }
             TickMarkers(state, focus);

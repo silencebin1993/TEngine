@@ -262,7 +262,8 @@ namespace GameLogic.Campaign.Regions
             // ER5-CMD-01 / FG0-ARCH-04：建造模式先拿输入（B / X / R、放置与拆除的鼠标）；开着时框选与点选下令让位。战略暂停下也能规划。
             // 本帧开始时开着、或本帧刚打开的建造模式都拥有本帧的鼠标（右键退出建造模式的那一下不能再被当成“取消工单”）。
             bool buildModeWasOpen = BuildMode.IsOpen;
-            BuildMode.Tick(_camera, state, _cameraDirector != null && _cameraDirector.Mode == ViewMode.Strategy);
+            BuildMode.Tick(_camera, state, _cameraDirector != null && _cameraDirector.Mode == ViewMode.Strategy,
+                _cameraDirector != null && _cameraDirector.InTransition && _cameraDirector.TransitionTarget == ViewMode.Strategy); // FG-GAP-071
             bool buildModeOwnsPointer = buildModeWasOpen || BuildMode.IsOpen;
             SquadCommands.PointerSuppressed = buildModeOwnsPointer;
             SquadCommands.TickInput(paused);

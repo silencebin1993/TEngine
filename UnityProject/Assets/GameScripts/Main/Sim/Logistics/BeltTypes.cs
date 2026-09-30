@@ -301,6 +301,19 @@ namespace BinGames.Sim.Logistics
         public float ThroughputPerMinute => WindowSeconds > 0f ? PassedInWindow * 60f / WindowSeconds : 0f;
     }
 
+    /// <summary>FG3-LOG-08（FGR-LOG-082）：从某一格顺着下游追到堵塞源头的结果（<see cref="BeltKernel.TryTraceBlock"/>）。</summary>
+    public struct BeltBlockTrace
+    {
+        public int StartX;
+        public int StartY;
+        /// <summary>往下游走了几格（0 = 起点自己就是源头）。</summary>
+        public int Hops;
+        /// <summary>整圈都满的环形传送带：走满一圈也没找到源头。</summary>
+        public bool Looped;
+        /// <summary>源头那一格的读数（<see cref="BeltCellInfo.Block"/> = 真正的原因；None = 这一格在动，只是吞吐到顶）。</summary>
+        public BeltCellInfo End;
+    }
+
     /// <summary>一个物流网络（弱连通的一组传送带）的吞吐统计（FGR-ARC-004 热更层只读的第二类数据）。</summary>
     public struct BeltNetworkStats
     {

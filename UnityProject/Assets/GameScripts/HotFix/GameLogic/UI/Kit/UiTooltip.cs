@@ -111,6 +111,9 @@ namespace GameLogic.UI.Kit
             Bindings[target] = new Binding { Provider = provider };
         }
 
+        /// <summary>自检读点：当前挂着提示的元素数（按数量动态建行的面板重建前要 <see cref="Detach"/> 旧行，否则这里只增不减）。</summary>
+        public static int BindingCount => Bindings.Count;
+
         public static void Detach(VisualElement target)
         {
             if (target == null || !Bindings.Remove(target))

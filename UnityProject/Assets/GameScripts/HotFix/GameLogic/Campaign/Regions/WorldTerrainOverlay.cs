@@ -74,6 +74,9 @@ namespace GameLogic.Campaign.Regions
         /// <summary>FG3-LOG-01：建造叠加层画不画格线（建造模式每帧按设置写入；变化时各区块按新值重画）。普通视角恒不画。</summary>
         public bool GridLines { get; set; } = true;
 
+        /// <summary>FG3-LOG-08（FGR-LOG-080 污染叠加层）：按污染等级强调着色（每帧由 <see cref="GameLogic.View.OverlayService"/> 写入；变化时各区块按新值重画）。</summary>
+        public bool PollutionView { get; set; }
+
         /// <summary>镜头周围还没生成好（显示占位）的区块数。</summary>
         public int PendingCount { get; private set; }
         public int TileCount => _tiles.Count;
@@ -263,7 +266,7 @@ namespace GameLogic.Campaign.Regions
                     continue;
                 }
                 // 迷雾用区块自己的遮罩版本（FG3-LOG-01）：追加一个探索圆只重画被圆碰到的区块，不整窗重画。
-                int stamp = unchecked(((chunk.ContentRevision * 397) ^ chunk.ExploredMaskRevision) * 397 ^ reserveHash ^ (_paletteRevision << 20) ^ (GridLines ? 0x5A5A : 0));
+                int stamp = unchecked(((chunk.ContentRevision * 397) ^ chunk.ExploredMaskRevision) * 397 ^ reserveHash ^ (_paletteRevision << 20) ^ (GridLines ? 0x5A5A : 0) ^ (PollutionView ? 0x3C3C0000 : 0));
                 if (t.Job != null)
                 {
                     if (completeNow)
@@ -283,6 +286,7 @@ namespace GameLogic.Campaign.Regions
                         PixelsPerCell = _ppc,
                         TerrainView = _terrainView,
                         GridLines = GridLines,
+                        PollutionView = PollutionView,
                         BaseX = t.ChunkX * _chunkSize,
                         BaseY = t.ChunkY * _chunkSize,
                         BlockLevel = blockLevel,

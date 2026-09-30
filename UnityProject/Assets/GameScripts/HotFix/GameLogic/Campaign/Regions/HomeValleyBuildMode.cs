@@ -162,6 +162,9 @@ namespace GameLogic.Campaign.Regions
         private readonly List<GameObject> _marks = new List<GameObject>(16);
         private GameObject _root;
         private WorldTerrainOverlay _terrain;
+
+        /// <summary>FG3-LOG-08：建造叠加层的地形贴图（自检读它的污染视图开关）。</summary>
+        public WorldTerrainOverlay TerrainOverlayForTests => _terrain;
         private int _terrainRevision = -1;
         private Material _okMaterial;
         private Material _badMaterial;
@@ -1169,7 +1172,10 @@ namespace GameLogic.Campaign.Regions
 
         // ── 每帧（由 HomeValleyController.Update 在战略指令之前调用，战略暂停时也调用）────────────────────
 
-        public void Tick(Camera camera, CampaignState state, bool inStrategyView)
+        /// <summary>FG3-LOG-08（FG-GAP-071）：飞行过渡中保持建造模式开着的帧数（自检 / 冒烟读）。</summary>
+        public int FlightsKept { get; private set; }
+
+        public void Tick(Camera camera, CampaignState state, bool inStrategyView, bool flyingToStrategy = false)
         {
             if (!IsOpen)
             {
@@ -1197,6 +1203,13 @@ namespace GameLogic.Campaign.Regions
                     }
                 }
                 return; // 本帧刚打开：下一帧起再处理鼠标（与 FG0-ARCH-04 相同，打开的那一下不会顺带放置 / 拆除）。
+            }
+            if (state != null && !inStrategyView && flyingToStrategy)
+            {
+                // FG3-LOG-08（FG-GAP-071）：镜头在家园里做一次飞行过渡、落点仍是战略视角（施工队列 / 通知 / “为什么不工作”的定位、回到核心、战略地图点哪飞哪）——
+                // 建造模式保持开着（选中的工具、模式都保留），过渡期间不处理建造输入（过渡中本来就冻结玩法输入），落地后接着用。
+                FlightsKept++;
+                return;
             }
             if (!inStrategyView || state == null)
             {
@@ -1306,6 +1319,7 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             _terrain.GridLines = GameSettings.BuildGridLinesEnabled; // FG3-LOG-01：格线开关（变化时各区块按新值重画）。
+            _terrain.PollutionView = GameLogic.View.OverlayService.Active == GameLogic.View.OverlayKind.Pollution; // FG3-LOG-08：污染叠加层。
             _terrain.Update(state, focus, completeNow);
             if (_terrain.Revision != _terrainRevision)
             {

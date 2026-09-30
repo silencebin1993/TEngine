@@ -147,6 +147,13 @@ namespace GameLogic.Core
         public const string BuildFirstLayoutSaved = "build.plan.first_layout_saved";
         /// <summary>FG3-LOG-07：第一次打开布局库。</summary>
         public const string LayoutLibraryFirstOpen = "build.plan.library_first_open";
+        /// <summary>FG3-LOG-08：第一次打开任何一种叠加层（引导内容在 FG15-UX-04：8 种叠加层各看什么、Alt+O 选择器、O 开关）。</summary>
+        public const string OverlayFirstOpen = "logistics.overlay.first_open";
+        /// <summary>FG3-LOG-08：第一次打开“为什么不工作”面板（引导内容：原因链从症状读到根源、点条目镜头跳过去）。</summary>
+        public const string DiagnosisFirstOpen = "logistics.diagnosis.first_open";
+        /// <summary>FG3-LOG-08（卡片“第一次出现堵塞时的引导”）：建筑的输出口第一次因为下游堵住推不出去（产线第一次“堵”在建筑上；
+        /// 传送带自身第一次堵塞是 <see cref="LogisticsFirstBlocked"/>）。引导内容在 FG15-UX-04：打开堵塞叠加层 / “为什么不工作”面板追到根源。</summary>
+        public const string LogisticsFirstOutputBlocked = "logistics.port.first_output_blocked";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -174,6 +181,7 @@ namespace GameLogic.Core
             LogisticsFirstPipe, LogisticsPipeFirstFluidConflict, LogisticsPipeFirstNoSupply, LogisticsPipePanelFirstOpen, LogisticsPipeFirstFlush,
             PowerPoleFirstPlaced, PowerFirstBrownout, PowerPanelFirstOpen, PowerFirstSplit,
             BuildFirstCopy, BuildFirstPaste, BuildFirstUndo, BuildFirstUpgrade, BuildFirstEyedropper, BuildFirstCopySettings, BuildFirstLayoutSaved, LayoutLibraryFirstOpen,
+            OverlayFirstOpen, DiagnosisFirstOpen, LogisticsFirstOutputBlocked,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

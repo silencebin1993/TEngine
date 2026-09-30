@@ -477,7 +477,7 @@ namespace GameLogic.UI.Kit
         /// <summary>开关电力覆盖叠加层（按钮与自检同一入口）。返回开关后的状态。</summary>
         public bool ToggleOverlay()
         {
-            GameLogic.View.PowerCoverageOverlayView.Toggle();
+            GameLogic.View.OverlayService.Toggle(GameLogic.View.OverlayKind.Power); // FG3-LOG-08：经叠加层服务开关（同时只显示一种，跟着存档走）。
             Refresh(force: true);
             return GameLogic.View.PowerCoverageOverlayView.Enabled;
         }

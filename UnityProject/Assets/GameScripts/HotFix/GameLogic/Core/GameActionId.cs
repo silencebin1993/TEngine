@@ -123,5 +123,18 @@
         CopySettings = 104,
         /// <summary>FG3-LOG-07（FGR-LOG-011）：把记下的设置写到指着的同类 / 兼容件上（建造上下文，默认 Alt+V）。</summary>
         PasteSettings = 105,
+        /// <summary>FG3-LOG-08（FGU-12）：叠加层选择器（8 种叠加层一键切换 + 图例；战略与建造上下文，默认 Alt+O）。</summary>
+        OverlaySelector = 106,
+        /// <summary>FG3-LOG-08（FGR-LOG-082）：“为什么不工作”面板（停工清单与根因，点条目镜头跳过去；战略与建造上下文，默认 Ctrl+O）。</summary>
+        OpenDiagnosis = 107,
+        /// <summary>FG3-LOG-08（FGR-LOG-080）：8 种叠加层各自直达（战略与建造上下文，默认 Ctrl+Alt+1～8）。</summary>
+        OverlayFlow = 108,
+        OverlayBlockage = 109,
+        OverlayPower = 110,
+        OverlayFluid = 111,
+        OverlayPollution = 112,
+        OverlaySignal = 113,
+        OverlayRaid = 114,
+        OverlayConstruction = 115,
     }
 }

@@ -1489,6 +1489,28 @@ namespace BinGames.Sim.Logistics
 
         // ── 读数 ─────────────────────────────────────────────────────────────────
 
+        /// <summary>FG3-LOG-08（叠加层标签 / 诊断定位）：每个网络的锚点格（铺设顺序里这个网络的第一格），z = 网络编号。一次 O(格数)，AOT。</summary>
+        public void CollectNetworkAnchors(List<Unity.Mathematics.int3> into)
+        {
+            Rebuild();
+            into.Clear();
+            if (_netCount <= 0)
+            {
+                return;
+            }
+            var seen = new bool[_netCount];
+            for (int i = 0; i < _n; i++)
+            {
+                int net = _net[i];
+                if (net < 0 || net >= _netCount || seen[net])
+                {
+                    continue;
+                }
+                seen[net] = true;
+                into.Add(new Unity.Mathematics.int3(_x[i], _y[i], net));
+            }
+        }
+
         public int NetworkAt(int x, int y)
         {
             Rebuild();

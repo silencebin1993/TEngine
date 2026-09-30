@@ -1371,6 +1371,16 @@ namespace BinGames.Sim.Logistics
             {
                 return false;
             }
+            info = CellInfoAt(i);
+            return true;
+        }
+
+        /// <summary>第 i 格（规范下标，拓扑已整理）的读数。<see cref="TryGetCellInfo"/> 与堵塞追溯（<see cref="TryTraceBlock"/>）共用。</summary>
+        private BeltCellInfo CellInfoAt(int i)
+        {
+            int x = _x[i];
+            int y = _y[i];
+            BeltCellInfo info;
             int cnt = _count[i];
             int b = i * S;
             int nx = _next[i];
@@ -1427,7 +1437,93 @@ namespace BinGames.Sim.Logistics
                 info.FrontY = y + BeltDirs.Dy(d);
                 TryGetKind(info.FrontX, info.FrontY, out info.FrontKind);
             }
+            return info;
+        }
+
+        /// <summary>
+        /// FG3-LOG-08（FGR-LOG-082“为什么不工作”）：从 (x, y) 顺着下游追到堵塞的源头——只要这一格是“下游满了 / 等汇入轮次”就走到下游那一格，
+        /// 直到遇到真正的原因（传送带到头、输入口满 / 不收、朝向不对、分流器两口都堵……）或一格没有堵（满载运行、只是吞吐到顶）。
+        /// 环形传送带整圈都满时走满一圈就停（<see cref="BeltBlockTrace.Looped"/>）。O(追过的格数)，只在诊断刷新时调用（AOT，不在热更层逐格循环）。
+        /// </summary>
+        public bool TryTraceBlock(int x, int y, out BeltBlockTrace trace)
+        {
+            EnsureTopology();
+            trace = default;
+            if (!_lookup.TryGetValue(BeltDirs.Key(x, y), out int i))
+            {
+                return false;
+            }
+            int limit = _x.Length + 1;
+            int hops = 0;
+            while (hops < limit)
+            {
+                byte b = _block[i];
+                int nx = _next[i];
+                if ((b != (byte)BeltBlock.DownstreamFull && b != (byte)BeltBlock.MergeWait) || nx < 0)
+                {
+                    break;
+                }
+                i = nx;
+                hops++;
+            }
+            trace = new BeltBlockTrace
+            {
+                StartX = x,
+                StartY = y,
+                Hops = hops,
+                Looped = hops >= limit,
+                End = CellInfoAt(i),
+            };
             return true;
+        }
+
+        /// <summary>
+        /// FG3-LOG-08：全部“堵塞源头”格——堵塞原因不是“下游满了 / 等汇入轮次”（那两种是被下游连累的）的堵塞格，按规范顺序，最多 <paramref name="max"/> 个；
+        /// 另给出每个网络的堵塞格数都已由 <see cref="TryGetNetworkStats"/> 汇总。O(格数)，AOT；诊断每次刷新调用一次。
+        /// </summary>
+        public int CollectBlockRoots(List<BeltCellInfo> into, int max)
+        {
+            EnsureTopology();
+            into.Clear();
+            int total = 0;
+            for (int i = 0; i < _x.Length; i++)
+            {
+                byte b = _block[i];
+                if (b == (byte)BeltBlock.None || b == (byte)BeltBlock.DownstreamFull || b == (byte)BeltBlock.MergeWait)
+                {
+                    continue;
+                }
+                total++;
+                if (into.Count < max)
+                {
+                    into.Add(CellInfoAt(i));
+                }
+            }
+            return total;
+        }
+
+        /// <summary>FG3-LOG-08（叠加层标签）：每个网络的锚点格（规范顺序里这个网络的第一格地面格），z = 网络编号。一次 O(格数)，AOT。</summary>
+        public void CollectNetworkAnchors(List<int3> into)
+        {
+            EnsureTopology();
+            into.Clear();
+            int nets = _nets.Length;
+            if (nets == 0)
+            {
+                return;
+            }
+            var seen = new NativeArray<byte>(nets, Allocator.Temp);
+            for (int i = 0; i < _x.Length; i++)
+            {
+                int n = _net[i];
+                if (n < 0 || n >= nets || seen[n] != 0 || _kind[i] == (byte)BeltNodeKind.Underground)
+                {
+                    continue;
+                }
+                seen[n] = 1;
+                into.Add(new int3(_x[i], _y[i], n));
+            }
+            seen.Dispose();
         }
 
         /// <summary>FG3-LOG-03：某一等级在当前天气下的满载速度（件 / 分钟，整数；露天减速时按减速后的每步位移换算）。</summary>

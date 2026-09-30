@@ -42,6 +42,7 @@ namespace BinGames.Sim.Logistics
         private static readonly int ItemSizeId = Shader.PropertyToID("_ItemSize");
         private static readonly int HeightId = Shader.PropertyToID("_Height");
         private static readonly int GameTimeId = Shader.PropertyToID("_GameTime");
+        private static readonly int OverlayId = Shader.PropertyToID("_Overlay");
 
         private Material _material;
         private Mesh _quad;
@@ -71,6 +72,12 @@ namespace BinGames.Sim.Logistics
         /// 倍速时跟着变快，与物品的真实移动一致（此前用 _Time.y 真实时间，暂停中箭头仍在滚动）。
         /// </summary>
         public float AnimationTime { get; set; }
+
+        /// <summary>
+        /// FG3-LOG-08（FGR-LOG-080 叠加层）：传送带的叠加层画法（只改着色器参数，不重新上传实例，CPU 开销与格数无关）。
+        /// 0 = 普通；1 = 物品流向与吞吐（按占用率上色的热度 + 远景也画方向箭头）；2 = 堵塞（没堵的格压暗，堵塞格亮红斜纹）；3 = 压暗（别的叠加层开着时让位）。
+        /// </summary>
+        public int OverlayMode { get; set; }
         /// <summary>GPU 不可用的原因（null = 可用）。</summary>
         public string GpuUnavailableReason { get; private set; }
 
@@ -150,6 +157,7 @@ namespace BinGames.Sim.Logistics
             _cellProps.SetFloat(ItemSizeId, settings.ItemSize);
             _cellProps.SetFloat(HeightId, settings.Height);
             _cellProps.SetFloat(GameTimeId, AnimationTime);
+            _cellProps.SetFloat(OverlayId, OverlayMode);
             var rpCells = new RenderParams(_material)
             {
                 worldBounds = bounds,
@@ -171,6 +179,7 @@ namespace BinGames.Sim.Logistics
                 _itemProps.SetFloat(ItemSizeId, settings.ItemSize);
                 _itemProps.SetFloat(HeightId, settings.Height);
                 _itemProps.SetFloat(GameTimeId, AnimationTime);
+                _itemProps.SetFloat(OverlayId, OverlayMode);
                 var rpItems = new RenderParams(_material)
                 {
                     worldBounds = bounds,

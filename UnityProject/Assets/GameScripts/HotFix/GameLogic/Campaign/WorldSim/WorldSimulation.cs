@@ -342,6 +342,7 @@ namespace GameLogic.Campaign.WorldSim
             // 提交后下一帧起新机器才收输入。
             Signal.SignalUplinkService.FrameTick(realDt);
             GameLogic.View.SignalLinkView.FrameTick(); // FG1-SIG-04：安全模式头顶图标、地图上的覆盖边缘预警（纯表现）。
+            GameLogic.View.OverlayService.FrameTick(); // FG3-LOG-08：8 种叠加层的开关与表现（先于电力 / 信号视图，保证同帧互斥）。
             GameLogic.View.SignalCoverageOverlayView.FrameTick(); // FG1-SIG-07：覆盖网络叠加层（纯表现，网络变了才重画）。
             GameLogic.View.PowerCoverageOverlayView.FrameTick(); // FG3-LOG-06：电力覆盖叠加层（纯表现，电网拓扑变了才重画）。
             GameLogic.View.MachineMorphView.FrameTick(realDt); // FG1-VFX-01：机身形变过渡（真实时间、暂停不走；只推进正在过渡的机器）。

@@ -421,4 +421,39 @@ namespace GameLogic.UI.Kit
             }
         }
     }
+
+    /// <summary>
+    /// FG3-LOG-08 修复：界面文字依赖的“语言 / 键位 / 文本表”版本。每帧只比较几个整数（不拼字符串、不分配）；变了才重新填写文字。
+    /// </summary>
+    public sealed class UiTextVersion
+    {
+        private int _settings = int.MinValue;
+        private int _bindings = int.MinValue;
+        private int _text = int.MinValue;
+        private object _bindingSet;
+
+        /// <summary>自上次调用以来有没有变（第一次调用一定是 true）。</summary>
+        public bool Changed()
+        {
+            int settings = GameLogic.Settings.GameSettings.Revision;
+            GameLogic.Core.InputBindingSet set = GameLogic.Settings.GameSettings.KeyBindings;
+            int bindings = set?.Revision ?? 0;
+            int text = GameLogic.Localization.GameText.Revision;
+            if (settings == _settings && bindings == _bindings && text == _text && ReferenceEquals(set, _bindingSet))
+            {
+                return false;
+            }
+            _settings = settings;
+            _bindings = bindings;
+            _text = text;
+            _bindingSet = set;
+            return true;
+        }
+
+        /// <summary>下一次 <see cref="Changed"/> 一定返回 true。</summary>
+        public void Reset()
+        {
+            _settings = int.MinValue;
+        }
+    }
 }

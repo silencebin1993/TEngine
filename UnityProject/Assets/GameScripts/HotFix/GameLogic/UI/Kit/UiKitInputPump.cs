@@ -150,10 +150,7 @@ namespace GameLogic.UI.Kit
             {
                 Campaign.Signal.SignalUplinkService.RequestJumpPrevious();
             }
-            if (InputRouter.ConsumeContextAction(GameActionId.ToggleOverlay))
-            {
-                GameLogic.View.SignalCoverageOverlayView.Toggle();
-            }
+            ProcessOverlayKeys();
 
             var all = InputActionCatalog.All;
             for (int i = 0; i < all.Count; i++)
@@ -163,6 +160,42 @@ namespace GameLogic.UI.Kit
                 {
                     NotificationCenter.Post("feature_locked", def.NameKey);
                     GuidanceHooks.Raise(GuidanceHooks.FirstReservedAction);
+                }
+            }
+        }
+
+        /// <summary>
+        /// FG3-LOG-08（FGR-LOG-080 / 082；FGU-12；卡片“叠加层的快捷键”）：叠加层与“为什么不工作”的键（战略与建造上下文，全部可重绑）。
+        /// - 叠加层切换（默认 O，FG13 第 5 节）：开着就关，关着就重开最近用过的那一种（从没用过是“信号覆盖”，与 FG1-SIG-07 一致；家园以外最近那一种画不出来时开关信号覆盖）；
+        /// - 叠加层选择器（默认 Alt+O）：开关选择器（非模态，8 种一键切换 + 图例；家园以外不打开，发说明）；
+        /// - “为什么不工作”（默认 Ctrl+O）：开关停工清单（非模态，停靠左侧，点条目镜头跳过去）；
+        /// - 8 种叠加层直达（默认 Ctrl+Alt+1～8）：这一种开着就关，否则切到这一种。
+        /// 确认框在最上面时一律不抢。
+        /// </summary>
+        public static void ProcessOverlayKeys()
+        {
+            if (UiConfirmDialog.IsOpen)
+            {
+                return;
+            }
+            if (InputRouter.ConsumeContextAction(GameActionId.ToggleOverlay))
+            {
+                GameLogic.View.OverlayService.ToggleCurrent();
+            }
+            if (InputRouter.ConsumeContextAction(GameActionId.OverlaySelector))
+            {
+                OverlayHudUIToolkit.ToggleSelector();
+            }
+            if (InputRouter.ConsumeContextAction(GameActionId.OpenDiagnosis))
+            {
+                DiagnosisPanelUIToolkit.Toggle();
+            }
+            for (int i = 0; i < GameLogic.View.OverlayService.KindCount; i++)
+            {
+                var kind = (GameLogic.View.OverlayKind)(i + 1);
+                if (InputRouter.ConsumeContextAction(GameLogic.View.OverlayService.ActionOf(kind)))
+                {
+                    GameLogic.View.OverlayService.ToggleFromKey(kind); // 家园以外要打开只在家园显示的一种：不切换，发说明（不静默失效）。
                 }
             }
         }

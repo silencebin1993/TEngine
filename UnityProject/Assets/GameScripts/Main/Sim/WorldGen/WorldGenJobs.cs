@@ -62,6 +62,9 @@ namespace BinGames.Sim.WorldGen
         public bool TerrainView;
         /// <summary>FG3-LOG-01（FG03 第 4 节“可以开关格线显示”）：建造模式叠加层是否画格线。关掉时地形颜色、图案、污染、核心通道、迷雾照画。</summary>
         public bool GridLines;
+        /// <summary>FG3-LOG-08（FGR-LOG-080 污染叠加层；FG07“污染叠加层显示等级”）：强调污染——无污染的格压暗，有污染的格按等级上色（等级越高越偏红），
+        /// 并按等级画斜线（达到拦截等级的更密）：颜色之外有图案（B15）。普通视角与建造叠加层都适用。</summary>
+        public bool PollutionView;
     }
 
     /// <summary>
@@ -100,6 +103,29 @@ namespace BinGames.Sim.WorldGen
                     bool reserve = q.HasReserve
                                    && gx >= q.ReserveMinX && gx <= q.ReserveMaxX && gy >= q.ReserveMinY && gy <= q.ReserveMaxY
                                    && !(gx >= q.CoreMinX && gx <= q.CoreMaxX && gy >= q.CoreMinY && gy <= q.CoreMaxY);
+                    if (q.PollutionView)
+                    {
+                        Color32 heat = pollution <= 0 ? Shade(baseColor, 90)
+                            : pollution >= q.BlockLevel ? new Color32(215, 40, 60, 255)
+                            : Lerp(new Color32(150, 60, 190, 255), new Color32(215, 40, 60, 255), pollution * 255 / (q.BlockLevel > 1 ? q.BlockLevel : 1));
+                        for (int py = 0; py < n; py++)
+                        {
+                            for (int px = 0; px < n; px++)
+                            {
+                                Color32 col = heat;
+                                if (pollution > 0 && (px + n - 1 - py) % (pollution >= q.BlockLevel ? 2 : 3) == 0)
+                                {
+                                    col = Shade(col, 150);
+                                }
+                                if (!explored)
+                                {
+                                    col = Shade(col, 64);
+                                }
+                                Pixels[(cy * n + py) * size + cx * n + px] = col;
+                            }
+                        }
+                        continue;
+                    }
                     if (q.TerrainView)
                     {
                         Color32 soft = baseColor;

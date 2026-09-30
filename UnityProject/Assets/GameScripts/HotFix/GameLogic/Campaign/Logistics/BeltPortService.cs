@@ -85,6 +85,7 @@ namespace GameLogic.Campaign.Logistics
         private static readonly List<Binding> Scratch = new List<Binding>(16);
         private static readonly HashSet<string> DesiredKeys = new HashSet<string>(StringComparer.Ordinal);
         private static bool _connectedHookChecked;
+        private static bool _outputBlockedHookChecked;
         private static ulong _lastSignature;
         private static int _lastBindingCount = -1;
         private static bool _retryPending;
@@ -113,6 +114,7 @@ namespace GameLogic.Campaign.Logistics
         {
             _state = state;
             _connectedHookChecked = false;
+            _outputBlockedHookChecked = false;
             _lastSignature = 0;
             _lastBindingCount = -1;
             _retryPending = false;
@@ -265,6 +267,7 @@ namespace GameLogic.Campaign.Logistics
             {
                 Sync(state);
                 CheckConnectedHook();
+                CheckOutputBlockedHook();
             }
             if (kernelStepped)
             {
@@ -362,6 +365,34 @@ namespace GameLogic.Campaign.Logistics
                 {
                     _connectedHookChecked = true;
                     GuidanceHooks.Raise(GuidanceHooks.LogisticsFirstPortConnected);
+                    break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// FG3-LOG-08（卡片“第一次出现堵塞时的引导”）：建筑的输出口第一次推不出去（端口有待推物品、外侧那格传送带堵着）时发引导钩子。
+        /// 每个对账步查一次 O(端口数)；钩子发过（本机设置里记着）后不再查。引导内容在 FG15-UX-04。
+        /// </summary>
+        private static void CheckOutputBlockedHook()
+        {
+            if (_outputBlockedHookChecked || !BeltNetworkService.IsRunning)
+            {
+                return;
+            }
+            if (GameLogic.Settings.GameSettings.HasSeenGuidanceHook(GuidanceHooks.LogisticsFirstOutputBlocked))
+            {
+                _outputBlockedHookChecked = true;
+                return;
+            }
+            BeltKernel k = BeltNetworkService.Kernel;
+            foreach (Binding bind in Bindings)
+            {
+                if (bind.IsOutput && k.TryGetPortInfo(bind.PortId, out BeltPortInfo info) && info.Connected && info.Pending > 0
+                    && k.TryGetCellInfo(bind.BeltCell.X, bind.BeltCell.Y, out BeltCellInfo head) && head.Block != BeltBlock.None && head.Count > 0)
+                {
+                    _outputBlockedHookChecked = true;
+                    GuidanceHooks.Raise(GuidanceHooks.LogisticsFirstOutputBlocked);
                     break;
                 }
             }

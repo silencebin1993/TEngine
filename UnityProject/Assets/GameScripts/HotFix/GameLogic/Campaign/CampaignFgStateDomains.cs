@@ -123,6 +123,11 @@ namespace GameLogic.Campaign
         public List<PlanOpRecord> PlanRedo;
         /// <summary>下一步的编号（单调递增）。</summary>
         public int NextPlanStep = 1;
+        /// <summary>FG3-LOG-08（FGR-LOG-080；FGU-12）：当前打开的叠加层（<see cref="GameLogic.View.OverlayKind"/>，0 = 不显示）。跟着存档走（和快捷栏一样），
+        /// 读档后按存档恢复。旧存档没有这个字段时为 0。唯一写入口 <see cref="GameLogic.View.OverlayService"/>。</summary>
+        public int OverlayActive;
+        /// <summary>FG3-LOG-08：最近一次打开的叠加层（叠加层切换键 O 关着时按它重新打开）。0 = 从没打开过（按“信号覆盖”，与 FG1-SIG-07 的 O 键一致）。</summary>
+        public int OverlayLast;
     }
 
     /// <summary>

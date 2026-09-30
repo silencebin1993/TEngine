@@ -264,11 +264,14 @@ namespace GameLogic.Campaign.Regions
                             _hoveringBelt = true;
                             UiTooltip.HoverWorld(BeltHoverKey, new Vector2(screen.x, screen.y), _beltProvider);
                         }
-                        else if (ReferenceEquals(HomeValleyPowerGrid.BoundState, state) && HomeGridService.BuildingAt(state, cell) is BuildingRecord pb
-                                 && HomeValleyPowerGrid.IsPowerRelevantType(pb.BuildingTypeId)
-                                 && (pb.ConstructionState == BuildingConstructionState.Operational || pb.ConstructionState == BuildingConstructionState.Disabled))
+                        else if (HomeGridService.BuildingAt(state, cell) is BuildingRecord pb
+                                 && (pb.ConstructionState == BuildingConstructionState.Operational || pb.ConstructionState == BuildingConstructionState.Disabled
+                                     || pb.ConstructionState == BuildingConstructionState.Damaged)
+                                 && ((ReferenceEquals(HomeValleyPowerGrid.BoundState, state) && HomeValleyPowerGrid.IsPowerRelevantType(pb.BuildingTypeId))
+                                     || GridContent.PortsOf(pb.BuildingTypeId).Count > 0 || pb.ConstructionState != BuildingConstructionState.Operational))
                         {
                             // FG3-LOG-06（FGR-LOG-060 / 061）：已建成、和电网有关的建筑——在哪个电网、有没有电、优先级、电网读数。
+                            // FG3-LOG-08（FGR-LOG-081“建筑：状态和原因”/ 082）：再写“为什么不工作”的原因链（有端口的建筑、受损 / 关停的建筑也有悬停）。
                             over = true;
                             overPower = true;
                             if (_hovering && UiTooltip.WorldKey == HoverKey)
@@ -337,11 +340,29 @@ namespace GameLogic.Campaign.Regions
                 return null;
             }
             BuildingRecord b = HomeGridService.FindBuilding(_hoverState, _powerHoverId);
-            if (b == null || !HomeValleyPowerGrid.TryDescribeBuilding(_hoverState, b, out string body))
+            if (b == null)
             {
                 return null;
             }
-            return new TooltipContent { Title = HomeGridService.DisplayName(b.BuildingTypeId), Body = body, Shortcut = GameActionId.OpenPowerGrid, CodexEntryId = "codex.logistics.power" };
+            string body = null;
+            bool power = ReferenceEquals(HomeValleyPowerGrid.BoundState, _hoverState) && HomeValleyPowerGrid.TryDescribeBuilding(_hoverState, b, out body);
+            // FG3-LOG-08：停工的建筑追加“为什么不工作”的原因链（症状 → 根源），并把快捷键换成“为什么不工作”面板。
+            bool diag = Logistics.RootCauseDiagnosis.TryDescribeForHover(_hoverState, b, out string why);
+            if (!power && !diag)
+            {
+                return null;
+            }
+            if (diag)
+            {
+                body = string.IsNullOrEmpty(body) ? why : body + "\n" + why;
+            }
+            return new TooltipContent
+            {
+                Title = HomeGridService.DisplayName(b.BuildingTypeId),
+                Body = body,
+                Shortcut = diag ? GameActionId.OpenDiagnosis : GameActionId.OpenPowerGrid,
+                CodexEntryId = diag ? "codex.logistics.diagnosis" : "codex.logistics.power",
+            };
         }
         private bool _hoveringPipe;
         private Func<TooltipContent> _pipeProviderCache;

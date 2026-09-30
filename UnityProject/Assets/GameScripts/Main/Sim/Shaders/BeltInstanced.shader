@@ -5,6 +5,8 @@
 //            FG3-LOG-04：B.w = 等级 + 4 × 节点种类，分流器 / 合流器 / 地下入口 / 地下出口叠加各自的形状（地下段不画）。
 // _Kind = 1：带上的物品。位置 = 本步末位置 −（1 − _Alpha）× 上一步位移（插值，20 Hz 内核在 60 帧画面上连续）；
 //            颜色按物品种类哈希（占位，物品图标在 FG4 物品表落地后替换，B22）。
+// FG3-LOG-08（FGR-LOG-080 叠加层）：_Overlay = 1 物品流向与吞吐（格按占用率上色：蓝 = 空、绿、黄、红 = 满；远景也画滚动箭头表示方向）；
+//            2 堵塞（没堵的格压暗去色，堵塞格亮红 + 斜纹）；3 压暗（别的叠加层开着时让位）。只改参数，CPU 开销与格数无关。
 // 实例布局与 BinGames.Sim.Logistics.BeltInstance 一致：A、B 两个 float4（32 字节）。
 Shader "BinGames/BeltInstanced"
 {
@@ -16,6 +18,7 @@ Shader "BinGames/BeltInstanced"
         _CellSize ("Cell size", Float) = 1
         _ItemSize ("Item size", Float) = 0.22
         _Height ("Height", Float) = 0.04
+        _Overlay ("Overlay mode (0 none, 1 flow, 2 blockage, 3 dim)", Float) = 0
     }
 
     SubShader
@@ -46,6 +49,7 @@ Shader "BinGames/BeltInstanced"
             float _ItemSize;
             float _Height;
             float _GameTime; // FG3-LOG-03：游戏秒（BeltRenderer.AnimationTime）
+            float _Overlay;  // FG3-LOG-08：叠加层画法
 
             struct appdata
             {
@@ -100,6 +104,10 @@ Shader "BinGames/BeltInstanced"
                     }
                     float3 col = lerp(Hue(frac(i.data.x * 0.618034)), float3(1, 1, 1), 0.25);
                     col *= (max(c.x, c.y) > 0.38) ? 0.55 : 1.0;
+                    if (_Overlay > 1.5)
+                    {
+                        col *= 0.45; // 堵塞 / 压暗叠加层：物品也让位，只突出堵塞格。
+                    }
                     return fixed4(col, 1);
                 }
 
@@ -148,10 +156,32 @@ Shader "BinGames/BeltInstanced"
                     col = lerp(col, float3(0.02, 0.02, 0.03), mouth);
                     col = lerp(col, float3(0.55, 0.50, 0.42), rim * 0.6);
                 }
+                if (_Overlay > 0.5 && _Overlay < 1.5)
+                {
+                    // 物品流向与吞吐：占用率热度（颜色）+ 方向箭头（形状，远近都画，色盲也能看出往哪流）。
+                    float3 heat = density < 0.5 ? lerp(float3(0.15, 0.35, 0.85), float3(0.25, 0.80, 0.35), density * 2.0)
+                                                : lerp(float3(0.95, 0.85, 0.20), float3(0.90, 0.25, 0.15), (density - 0.5) * 2.0);
+                    float chev2 = frac(i.uv.y * 2.0 + abs(i.uv.x - 0.5) - t);
+                    float arrow2 = step(0.75, chev2) * (1.0 - edge);
+                    col = lerp(heat * 0.85, float3(0.95, 0.95, 0.95), arrow2 * 0.6);
+                    col = lerp(col, float3(0.05, 0.05, 0.06), edge * 0.6);
+                }
+                else if (_Overlay > 1.5)
+                {
+                    float grey = dot(col, float3(0.3, 0.59, 0.11));
+                    col = float3(grey, grey, grey) * 0.45;
+                }
                 if (blocked > 0.5)
                 {
                     float hatch = step(0.5, frac((i.uv.x + i.uv.y) * 3.0));
-                    col = lerp(col, float3(0.85, 0.22, 0.12), 0.35 + 0.35 * hatch);
+                    if (_Overlay > 1.5 && _Overlay < 2.5)
+                    {
+                        col = lerp(float3(1.0, 0.18, 0.10), float3(1.0, 0.85, 0.20), hatch); // 堵塞叠加层：亮红 / 黄斜纹，一眼可见。
+                    }
+                    else
+                    {
+                        col = lerp(col, float3(0.85, 0.22, 0.12), 0.35 + 0.35 * hatch);
+                    }
                 }
                 return fixed4(col, 1);
             }
