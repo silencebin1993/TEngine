@@ -500,6 +500,15 @@ namespace GameLogic.UI.Kit
                     return GameText.Format("ui.build.hint_merger", rotate);
                 case "underground":
                     return GameText.Format("ui.build.hint_underground", GameText.Get(tool.NameKey), BeltNetworkService.UndergroundSpan(tool.Tier));
+                // FG3-LOG-05：管线拖拽 / 泵放在水源或油井上 / 储罐 / 阀门（旋转定流向）。
+                case "pipe":
+                    return GameText.Get("ui.build.hint_pipe");
+                case "pump":
+                    return GameText.Get("ui.build.hint_pump");
+                case "tank":
+                    return GameText.Get("ui.build.hint_tank");
+                case "valve":
+                    return GameText.Format("ui.build.hint_valve", rotate);
                 default:
                     return GameText.Format("ui.build.hint_tool", rotate);
             }
@@ -512,6 +521,9 @@ namespace GameLogic.UI.Kit
             {
                 case "splitter":
                 case "merger":
+                case "pump":
+                case "tank":
+                case "valve":
                     return GameText.Format("ui.build.tool_cost_node", tool.ScrapPerCell);
                 case "underground":
                     return GameText.Format("ui.build.tool_cost_under", tool.ScrapPerCell, tool.ScrapPerCell * 2, BeltNetworkService.UndergroundSpan(tool.Tier));
@@ -564,6 +576,15 @@ namespace GameLogic.UI.Kit
                 _dragInfo.text = shortBy > 0
                     ? GameText.Format("ui.build.drag_info_short", belt.Length, belt.TotalCost, belt.Stock, shortBy)
                     : GameText.Format("ui.build.drag_info", belt.Length, belt.TotalCost, belt.Stock);
+                if (belt.IsPipe && belt.Ok)
+                {
+                    // FG3-LOG-05（FG03 第 4 节“放置时预览流体连接”）：放下后接入哪种流体的网络；泵写它抽的流体。
+                    _dragInfo.text += "\n" + (belt.Pipe == BinGames.Sim.Logistics.PipePieceKind.Pump
+                        ? GameText.Format("ui.build.pipe_pump_source", Campaign.Logistics.PipeNetworkService.FluidName(belt.PipeFluid))
+                        : belt.JoinFluid > 0
+                            ? GameText.Format("ui.build.pipe_joins", Campaign.Logistics.PipeNetworkService.FluidName(belt.JoinFluid))
+                            : GameText.Get("ui.build.pipe_new_network"));
+                }
             }
             else if (belt != null)
             {
@@ -572,7 +593,9 @@ namespace GameLogic.UI.Kit
             else if (box != null)
             {
                 SetVisible(_dragInfo, true);
-                _dragInfo.text = GameText.Format("ui.build.box_info", box.Max.X - box.Min.X + 1, box.Max.Y - box.Min.Y + 1, box.BuildingCount, box.Belts.Count);
+                _dragInfo.text = box.Pipes > 0
+                    ? GameText.Format("ui.build.box_info_pipes", box.Max.X - box.Min.X + 1, box.Max.Y - box.Min.Y + 1, box.BuildingCount, box.Belts.Count - box.Pipes, box.Pipes)
+                    : GameText.Format("ui.build.box_info", box.Max.X - box.Min.X + 1, box.Max.Y - box.Min.Y + 1, box.BuildingCount, box.Belts.Count);
             }
             else if (mode.ClearPlan != null)
             {
@@ -643,6 +666,12 @@ namespace GameLogic.UI.Kit
             else if (string.IsNullOrEmpty(status) && mode.HasHover && HomeValleyConstruction.TryDescribeSite(state, mode.HoverCell, out string beltTitle, out string beltSite))
             {
                 status = beltTitle + "\n" + beltSite; // 规划中的传送带格。
+            }
+            else if (string.IsNullOrEmpty(status) && mode.HasHover
+                     && Campaign.Logistics.PipeNetworkService.TryDescribeHover(state, mode.HoverCell, out string pipeTitle, out string pipeBody))
+            {
+                // FG3-LOG-05（FGR-LOG-042）：建造模式里指着已建成的管线件，状态行写网络读数（战略视角由世界悬停提示显示同一份）。
+                status = pipeTitle + "\n" + pipeBody;
             }
             else if ((string.IsNullOrEmpty(status) || mode.ClearMode) && mode.HasHover
                      && Campaign.Logistics.BeltNetworkService.TryDescribeHover(state, mode.HoverCell, out string hoverTitle, out string hoverBody))

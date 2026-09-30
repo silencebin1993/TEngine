@@ -113,6 +113,16 @@ namespace GameLogic.Core
         public const string LogisticsSplitterFirstBlocked = "logistics.splitter.first_blocked";
         /// <summary>FG3-LOG-04：第一次打开节点面板（分流器 / 合流器 / 地下传送带的设置）。</summary>
         public const string LogisticsNodePanelFirstOpen = "logistics.node.first_panel_open";
+        /// <summary>FG3-LOG-05：第一次建成管线件（管线 / 泵 / 储罐 / 阀门；引导内容：泵放在水源或油井上、一网一种流体、按最低等级限流）。</summary>
+        public const string LogisticsFirstPipe = "logistics.pipe.first_placed";
+        /// <summary>FG3-LOG-05：第一次因为“会把两种流体接在一起”被拒绝（FGR-LOG-040）。</summary>
+        public const string LogisticsPipeFirstFluidConflict = "logistics.pipe.first_fluid_conflict";
+        /// <summary>FG3-LOG-05：第一次有流体网络“有需求却没有供给”（FG03 卡片负向“网络供给为 0”）。</summary>
+        public const string LogisticsPipeFirstNoSupply = "logistics.pipe.first_no_supply";
+        /// <summary>FG3-LOG-05：第一次打开管线面板（网络读数、储罐模式、阀门、冲洗）。</summary>
+        public const string LogisticsPipePanelFirstOpen = "logistics.pipe.first_panel_open";
+        /// <summary>FG3-LOG-05：第一次冲洗网络（FGR-LOG-044）。</summary>
+        public const string LogisticsPipeFirstFlush = "logistics.pipe.first_flush";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -137,6 +147,7 @@ namespace GameLogic.Core
             BuildFirstGhost, BuildFirstWaitingMaterials, BuildFirstNoLabor, BuildQueueFirstOpen, BuildFirstPrioritize,
             LogisticsFirstPortConnected, LogisticsPortPanelFirstOpen, LogisticsFirstClear, LogisticsFirstDestroyed,
             LogisticsFirstSplitter, LogisticsFirstMerger, LogisticsFirstUnderground, LogisticsSplitterFirstBlocked, LogisticsNodePanelFirstOpen,
+            LogisticsFirstPipe, LogisticsPipeFirstFluidConflict, LogisticsPipeFirstNoSupply, LogisticsPipePanelFirstOpen, LogisticsPipeFirstFlush,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

@@ -203,6 +203,15 @@ namespace GameLogic.EditorTools
                     case 269: StepNodeDeselected(inStep); break;
                     case 270: StepNodePanelOpened(inStep); break;
                     case 271: StepNodePanelClosed(inStep); break;
+                    // FG3-LOG-05：管线与流体（建造菜单点选泵、放置预览、单击放在水源上、拖管线、放储罐；管线面板改储罐模式、冲洗先确认（取消）、Esc；悬停读数；渲染实例）。
+                    case 272: StepPipeBuildReady(inStep); break;
+                    case 273: StepPipePumpPreview(inStep); break;
+                    case 274: StepPipePumpPlaced(inStep); break;
+                    case 275: StepPipeDragged(inStep); break;
+                    case 276: StepPipeTankPlaced(inStep); break;
+                    case 277: StepPipeDeselected(inStep); break;
+                    case 278: StepPipePanelOpened(inStep); break;
+                    case 279: StepPipePanelClosed(inStep); break;
                     case 129: StepRuinsCombat(inStep); break;
                     case 230: StepRuinsTagHover(inStep); break;
                     case 150: StepSignalOpened(inStep); break;
@@ -1588,7 +1597,7 @@ namespace GameLogic.EditorTools
             bool gone = Enumerable.Range(0, 6).All(i => !Campaign.Logistics.BeltNetworkService.Kernel.HasCell(x + i, y)
                                                         && !Campaign.Regions.HomeValleyConstruction.TryFindPlannedCell(state, new Campaign.Grid.GridCell(x + i, y), out _, out _));
             Check(gone && state.Scrap + GroundScrap(state) == SessionState.GetInt(K + "BeltScrap", -1) && !UiConfirmDialog.IsOpen && (state.Grid.PlannedBelts?.Length ?? 0) == 0
-                  && mode != null && mode.LastResult.Outcome == Campaign.Grid.GridOpResult.Kind.BatchDemolished && mode.StatusText.Contains("传送带 6 格"),
+                  && mode != null && mode.LastResult.Outcome == Campaign.Grid.GridOpResult.Kind.BatchDemolished && mode.StatusText.Contains("传送带 / 管线 6 格"), // FG3-LOG-05：框选拆除也拆管线层，结果行写“传送带 / 管线”
                 $"框选拆除：6 格传送带虚影取消规划（没取过料，库存 {state.Scrap} 不变），少量且不含关键建筑不弹确认；状态行“{mode?.StatusText}”");
             PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.RelocateMode));
             Next(105, "按搬迁键（默认 E）");
@@ -5163,6 +5172,219 @@ namespace GameLogic.EditorTools
                          && !Campaign.Regions.HomeValleyConstruction.TryFindPlannedCell(state, new GridCell(o.X + 5, o.Y), out _, out _)
                          && !BeltNetworkService.Kernel.HasCell(o.X + 4, o.Y + 2) && BeltNetworkService.Kernel.CellCount == SessionState.GetInt(K + "BeltCells", -1);
             Check(clean, $"清理：两份虚影取消（地下两端一起），测试分流器拆掉（内核回到 {BeltNetworkService.Kernel.CellCount} 格）");
+            Next(272, "FG3-LOG-05：建造模式里放泵、管线、储罐");
+        }
+
+        // ── FG3-LOG-05：管线与流体（真实鼠标 / 按键；放下的是虚影，机器施工由 FgPipeSelfCheck F2 覆盖；面板用测试捷径建成的件；最后清理）──
+
+        private static GridCell PipeOrigin() => new GridCell(SessionState.GetInt(K + "PipeX", 0), SessionState.GetInt(K + "PipeY", 0));
+
+        private static GridCell PipeAlong(int i)
+        {
+            int d = SessionState.GetInt(K + "PipeDir", 0);
+            GridCell o = PipeOrigin();
+            return new GridCell(o.X + BeltDirs.Dx(d) * i, o.Y + BeltDirs.Dy(d) * i);
+        }
+
+        private static void StepPipeBuildReady(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            Check(mode != null && mode.IsOpen, "建造模式开着");
+            // 核心附近按地形找水源（泵能放）且朝某个方向能铺 4 格管线，不写死坐标（B25；起始区保证 24 格内有水源）。
+            GridCell core = HomeGridService.CorePivot(state);
+            int water = PipeNetworkService.FluidId("water");
+            GridCell? site = null;
+            int dir = 0;
+            for (int r = 3; r <= 24 && site == null; r++)
+            {
+                for (int dy = -r; dy <= r && site == null; dy++)
+                {
+                    for (int dx = -r; dx <= r && site == null; dx++)
+                    {
+                        if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != r)
+                        {
+                            continue;
+                        }
+                        var c = new GridCell(core.X + dx, core.Y + dy);
+                        if (PipeNetworkService.SourceFluidAt(state, c) != water || !HomeGridService.ValidatePipeCell(state, c, PipePieceKind.Pump).Ok)
+                        {
+                            continue;
+                        }
+                        for (int d = 0; d < 4 && site == null; d++)
+                        {
+                            bool ok = true;
+                            for (int i = 1; i <= 4 && ok; i++)
+                            {
+                                var q = new GridCell(c.X + BeltDirs.Dx(d) * i, c.Y + BeltDirs.Dy(d) * i);
+                                ok = HomeGridService.ValidatePipeCell(state, q, PipePieceKind.Pipe).Ok && PipeNetworkService.SourceFluidAt(state, q) == 0;
+                            }
+                            if (ok)
+                            {
+                                site = c;
+                                dir = d;
+                            }
+                        }
+                    }
+                }
+            }
+            if (site == null)
+            {
+                Finish("核心 24 格内找不到能放泵的水源（旁边能铺 4 格管线）");
+                return;
+            }
+            SessionState.SetInt(K + "PipeX", site.Value.X);
+            SessionState.SetInt(K + "PipeY", site.Value.Y);
+            SessionState.SetInt(K + "PipeDir", dir);
+            int logisticsTab = Campaign.Grid.GridContent.Categories.ToList().FindIndex(c => c.Id == "logistics");
+            bool tab = ClickUitk("[BuildModeHudHost]", "BuildCat" + logisticsTab);
+            int idx = HudItemIndex("pump");
+            bool picked = idx >= 0 && ClickUitk("[BuildModeHudHost]", "BuildItem" + idx) && mode.SelectedToolId == "pump";
+            Check(tab && picked, $"点“物流”页签里的“泵”（第 {idx + 1} 项）：选中泵（{mode?.SelectedToolId}）");
+            HoverWorld(new Vector3(site.Value.X, 0f, site.Value.Y));
+            Next(273, "鼠标移到水源上（放置预览）");
+        }
+
+        private static void StepPipePumpPreview(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            string hint = BuildModeHudUIToolkit.Instance?.HintLabelText ?? string.Empty;
+            Check(mode != null && mode.ToolPreview != null && mode.ToolPreview.Ok && mode.ToolPreview.IsPipe && mode.ToolPreview.Pipe == PipePieceKind.Pump
+                  && mode.ToolPreview.PipeFluid == PipeNetworkService.FluidId("water") && hint.Contains("水源或油井"),
+                $"放置预览：泵指着水源是可放的虚影（认定抽水）；提示行“{hint}”");
+            GridCell o = PipeOrigin();
+            ClickWorld(new Vector3(o.X, 0f, o.Y));
+            Next(274, "单击把泵放在水源上");
+        }
+
+        private static void StepPipePumpPlaced(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            bool planned = Campaign.Regions.HomeValleyConstruction.TryFindPlannedCell(state, PipeOrigin(), out PlannedBeltRecord plan, out _)
+                           && plan.PipePiece == (int)PipePieceKind.Pump + 1;
+            Check(planned && mode.StatusText.Contains("泵"), $"单击放下泵的虚影（状态行“{mode?.StatusText}”）");
+            int idx = HudItemIndex("pipe_t1");
+            bool picked = idx >= 0 && ClickUitk("[BuildModeHudHost]", "BuildItem" + idx) && mode.SelectedToolId == "pipe_t1";
+            Check(picked, $"点“管线 T1”：选中（{mode?.SelectedToolId}）");
+            GridCell a = PipeAlong(1);
+            GridCell b = PipeAlong(3);
+            DragWorld(new Vector3(a.X, 0f, a.Y), new Vector3(b.X, 0f, b.Y), 0);
+            Next(275, "从泵旁边按住左键拖 3 格管线");
+        }
+
+        private static void StepPipeDragged(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            bool planned = Enumerable.Range(1, 3).All(i => Campaign.Regions.HomeValleyConstruction.TryFindPlannedCell(state, PipeAlong(i), out PlannedBeltRecord q, out _) && q.PipePiece == 1);
+            Check(planned && mode.StatusText.Contains("管线 T1"), $"拖出 3 格管线虚影（状态行“{mode?.StatusText}”）");
+            int idx = HudItemIndex("tank");
+            bool picked = idx >= 0 && ClickUitk("[BuildModeHudHost]", "BuildItem" + idx) && mode.SelectedToolId == "tank";
+            Check(picked, $"点“储罐”：选中（{mode?.SelectedToolId}）");
+            GridCell t = PipeAlong(4);
+            ClickWorld(new Vector3(t.X, 0f, t.Y));
+            Next(276, "单击在管线末端放储罐");
+        }
+
+        private static void StepPipeTankPlaced(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            bool planned = Campaign.Regions.HomeValleyConstruction.TryFindPlannedCell(state, PipeAlong(4), out PlannedBeltRecord plan, out _)
+                           && plan.PipePiece == (int)PipePieceKind.Tank + 1;
+            Check(planned, "单击放下储罐虚影");
+            // 测试捷径：取消这些虚影，经正式入口直接建成（机器取料施工由 FgPipeSelfCheck F2 覆盖），用来点开管线面板。
+            var cells = Enumerable.Range(0, 5).Select(PipeAlong).ToList();
+            HomeGridService.TryRemoveBelts(state, cells);
+            bool built = PipeNetworkService.TryPlace(state, PipeAlong(0), PipePieceKind.Pump, 0, 0).Ok;
+            for (int i = 1; i <= 3; i++)
+            {
+                built &= PipeNetworkService.TryPlace(state, PipeAlong(i), PipePieceKind.Pipe, 0, 0).Ok;
+            }
+            built &= PipeNetworkService.TryPlace(state, PipeAlong(4), PipePieceKind.Tank, 0, 0).Ok;
+            Check(built, "测试捷径：虚影取消后经正式入口放下已建成的泵、3 格管线、储罐");
+            GridCell t = PipeAlong(4);
+            RightClickWorld(new Vector3(t.X, 0f, t.Y));
+            Next(277, "右键取消选择");
+        }
+
+        private static void StepPipeDeselected(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Check(mode != null && mode.IsOpen && mode.SelectedToolId == null, "右键取消选择（建造模式还开着）");
+            PipeRenderer r = PipeNetworkService.Renderer;
+            int water = PipeNetworkService.FluidId("water");
+            bool drawn = r != null && r.LastInstances == 5 && r.LastPrepared != null && r.LastPrepared.Take(5).All(i => (int)i.Bx == water);
+            Check(drawn, $"真实帧里管线被渲染：5 个实例，每个都按“水”着色（{(r != null && r.GpuAvailable ? "GPU 绘制" : "无图形设备：" + r?.GpuUnavailableReason)}）");
+            GridCell t = PipeAlong(4);
+            ClickWorld(new Vector3(t.X, 0f, t.Y));
+            Next(278, "空闲时左键点储罐（打开管线面板）");
+        }
+
+        private static void StepPipePanelOpened(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            PipePanelUIToolkit panel = PipePanelUIToolkit.Instance;
+            GridCell t = PipeAlong(4);
+            bool open = PipePanelUIToolkit.IsOpen && panel != null && panel.PanelVisible && panel.TitleText.Contains("储罐") && panel.TankSettingsVisible
+                        && panel.DetailText.Contains("网络：水");
+            if (open)
+            {
+                panel.ModeField.value = panel.ModeField.choices[1]; // 与在下拉框里选“只进”同一个值变化回调（选中即生效）
+            }
+            PipeNetworkService.Kernel.TryGetCellInfo(t.X, t.Y, out PipeCellInfo info);
+            Check(open && info.TankMode == PipeTankMode.InOnly, $"管线面板（真 UXML）：“{panel?.TitleText}”；储罐模式选“只进”→ 内核 {info.TankMode}；读数“{panel?.DetailText?.Split('\n')[0]}”");
+            bool asked = ClickUitk("[PipePanelHost]", "PpFlush") && UiConfirmDialog.IsOpen && UiConfirmDialog.Current.Title.Contains("水") && UiConfirmDialog.Current.Irreversible;
+            bool cancelled = ClickUitk("[UiKitOverlayHost]", "ConfirmCancel") && !UiConfirmDialog.IsOpen;
+            PipeNetworkService.Kernel.TryGetCellInfo(t.X, t.Y, out PipeCellInfo after);
+            Check(asked && cancelled && after.TankStockMl >= info.TankStockMl, $"点“冲洗网络”先弹确认框（不可逆），点取消后储罐存量不变（{after.TankStockMl / 1000.0} 升）");
+            CheckNoTextMarkers("管线面板");
+            PressKeyKeepMouse(KeyCode.Escape);
+            Next(279, "Esc 关闭管线面板");
+        }
+
+        private static void StepPipePanelClosed(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            Check(!PipePanelUIToolkit.IsOpen && mode != null && mode.IsOpen, "Esc 只关掉管线面板，建造模式还开着");
+            bool hover = PipeNetworkService.TryDescribeHover(state, PipeAlong(2), out string title, out string body) && title.Contains("管线 T1") && body.Contains("网络：水")
+                         && body.Contains("供给") && body.Contains("储量");
+            Check(hover, $"悬停管线：{title} / {body.Split('\n')[0]} …");
+            // 测试捷径清理：拆掉测试管线件（后面的步骤不受影响）。
+            HomeGridService.TryRemoveBelts(state, Enumerable.Range(0, 5).Select(PipeAlong).ToList());
+            Check(PipeNetworkService.Kernel.CellCount == 0, $"清理：测试管线件拆掉（内核剩 {PipeNetworkService.Kernel.CellCount} 格）");
             PressKeyKeepMouse(KeyCode.Escape);
             Next(140, "Esc 退出建造模式；FG0-ARCH-03：家园突袭战斗原型（测试捷径）");
         }

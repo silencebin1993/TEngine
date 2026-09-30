@@ -19,6 +19,13 @@ namespace GameLogic.Campaign.Grid
         /// <summary>FG3-LOG-04：地下传送带入口到出口的距离（跨度 = 距离 − 1）与这一等级的最大跨度。</summary>
         public int Distance;
         public int MaxSpan;
+        /// <summary>FG3-LOG-05：这是管线层的规划（管线 / 泵 / 储罐 / 阀门），<see cref="Kind"/> 无效，看 <see cref="Pipe"/>。</summary>
+        public bool IsPipe;
+        public PipePieceKind Pipe;
+        /// <summary>FG3-LOG-05：泵脚下的流体来源（0 = 不是泵 / 不在来源上）。</summary>
+        public int PipeFluid;
+        /// <summary>FG3-LOG-05（FG03 第 4 节“放置时预览流体连接”）：放下后会接入哪种流体的网络（0 = 新网络 / 没有流体）。</summary>
+        public int JoinFluid;
         public readonly List<GridCell> Cells = new List<GridCell>(64);
         public readonly List<BeltDir> Dirs = new List<BeltDir>(64);
         /// <summary>每格是否合法（与 <see cref="Cells"/> 一一对应，可视化逐格着色）。</summary>
@@ -65,6 +72,9 @@ namespace GameLogic.Campaign.Grid
         /// <summary>框里能拆的空传送带格与带着物品、暂时不能拆的传送带格数。</summary>
         public readonly List<GridCell> Belts = new List<GridCell>();
         public int BeltsWithItems;
+        /// <summary>FG3-LOG-05：<see cref="Belts"/> 里有几格是管线层的件（含虚影），以及框里储罐的存量合计（毫升）——有存量时拆除会排空，先确认。</summary>
+        public int Pipes;
+        public long TankFluidMl;
         /// <summary>要拆（标记 + 取消规划）的关键建筑名（当前语言）。</summary>
         public readonly List<string> CriticalNames = new List<string>();
 
@@ -72,7 +82,7 @@ namespace GameLogic.Campaign.Grid
         public bool IsEmpty => ToMark.Count == 0 && ToCancel.Count == 0 && Belts.Count == 0;
 
         /// <summary>需要先确认：一次拆除超过 grid.batch_demolish_confirm 座，或其中有关键建筑（FGR-LOG-007；FG00 B04）。</summary>
-        public bool NeedsConfirm => BuildingCount > GridContent.TuningInt("grid.batch_demolish_confirm") || CriticalNames.Count > 0;
+        public bool NeedsConfirm => BuildingCount > GridContent.TuningInt("grid.batch_demolish_confirm") || CriticalNames.Count > 0 || TankFluidMl > 0;
     }
 
     /// <summary>
@@ -545,6 +555,13 @@ namespace GameLogic.Campaign.Grid
             plan.MaxSpan = 0;
             plan.Kind = BeltNodeKind.Belt;
             plan.Stock = state != null ? state.Scrap : 0;
+            plan.IsPipe = false;
+            plan.PipeFluid = 0;
+            plan.JoinFluid = 0;
+            if (GridContent.TryGetTool(toolId, out BuildTool pipeTool) && PipeNetworkService.TryToolPiece(pipeTool.Kind, out PipePieceKind piece))
+            {
+                return PlanPipePath(state, pipeTool, piece, from, to, singleDir, plan);
+            }
             if (!GridContent.TryGetTool(toolId, out BuildTool tool) || !TryToolKind(tool.Kind, out BeltNodeKind kind))
             {
                 BuildBeltPath(from, to, singleDir, plan.Cells, plan.Dirs);
@@ -622,6 +639,110 @@ namespace GameLogic.Campaign.Grid
             // FG3-LOG-02（FGR-LOG-003 / 006）：库存不够不再拦截拖拽——放下的是虚影，机器取料施工，缺料就等（HUD 仍写“还差 Z”）。
             return plan;
         }
+
+        /// <summary>
+        /// FG3-LOG-05（FGR-LOG-040～043；DEBT-FG3LOG01-03 管线拖拽）：规划管线层的放置——管线按住拖拽（与传送带同一条自动转角路径），泵 / 储罐 / 阀门一次一件（放在松开的格，
+        /// 阀门流向 = 旋转键设定的方向）。逐格按 <see cref="ValidatePipeCell"/>（占用、迷雾、地形、污染、泵要在水源 / 油井上）校验；再查流体规则：
+        /// 这一段会相连的各网络（加上泵自己的来源）最多一种流体，阀门两侧流体相同或有一侧没有——否则整段拒绝并写明是哪两种流体（全有或全无）。
+        /// </summary>
+        private static BeltPathPlan PlanPipePath(CampaignState state, BuildTool tool, PipePieceKind piece, GridCell from, GridCell to, BeltDir singleDir, BeltPathPlan plan)
+        {
+            plan.IsPipe = true;
+            plan.Pipe = piece;
+            plan.Kind = BeltNodeKind.Belt;
+            if (piece == PipePieceKind.Pipe)
+            {
+                BuildBeltPath(from, to, singleDir, plan.Cells, plan.Dirs);
+            }
+            else
+            {
+                plan.Cells.Clear();
+                plan.Dirs.Clear();
+                plan.Cells.Add(to);
+                plan.Dirs.Add(singleDir);
+            }
+            plan.Tier = piece == PipePieceKind.Pipe ? Math.Max(0, Math.Min(PipeConst.TierCount - 1, tool.Tier)) : 0;
+            plan.ScrapPerCell = tool.ScrapPerCell;
+            plan.TotalCost = tool.ScrapPerCell * plan.Cells.Count;
+            if (state == null)
+            {
+                plan.Reason = GridReason.Of(GridBlockReason.NoRegion);
+                return plan;
+            }
+            if (!BuildCatalog.IsUnlocked(state, tool.UnlockRule))
+            {
+                plan.Reason = new GridReason(GridBlockReason.ToolLocked, "grid.reason.not_unlocked_tool", tool.UnlockHintKey);
+                return plan;
+            }
+            int max = GridContent.TuningInt("grid.drag_max_cells");
+            if (plan.Cells.Count > max)
+            {
+                plan.Reason = new GridReason(GridBlockReason.DragTooLong, "grid.reason.drag_too_long", max.ToString());
+                for (int i = 0; i < plan.Cells.Count; i++)
+                {
+                    plan.CellOk.Add(i < max);
+                }
+                return plan;
+            }
+            GridPlacementResult cellCheck = new GridPlacementResult();
+            for (int i = 0; i < plan.Cells.Count; i++)
+            {
+                ValidatePipeCell(state, plan.Cells[i], piece, cellCheck);
+                plan.CellOk.Add(cellCheck.Ok);
+                if (!cellCheck.Ok && plan.FirstBadIndex < 0)
+                {
+                    plan.FirstBadIndex = i;
+                    plan.Reason = cellCheck.Reasons[0];
+                }
+            }
+            if (plan.Reason != null || !PipeNetworkService.IsRunning)
+            {
+                return plan;
+            }
+            if (piece == PipePieceKind.Pump)
+            {
+                plan.PipeFluid = PipeNetworkService.SourceFluidAt(state, plan.Cells[0]);
+            }
+            if (piece == PipePieceKind.Valve)
+            {
+                PipeResult vr = PipeNetworkService.CheckValve(plan.Cells[0], (int)plan.Dirs[0], out int va, out int vb);
+                if (vr == PipeResult.FluidConflict)
+                {
+                    plan.Reason = new GridReason(GridBlockReason.PipeFluidConflict, "logistics.pipe.reason.valve_conflict",
+                        PipeNetworkService.FluidName(va), PipeNetworkService.FluidName(vb));
+                    plan.FirstBadIndex = 0;
+                    plan.CellOk[0] = false;
+                }
+                else if (vr == PipeResult.ValveChained)
+                {
+                    plan.Reason = GridReason.Of(GridBlockReason.PipeValveChained);
+                    plan.FirstBadIndex = 0;
+                    plan.CellOk[0] = false;
+                }
+                return plan;
+            }
+            PipeFluidScratch.Clear();
+            if (plan.PipeFluid > 0)
+            {
+                PipeFluidScratch.Add(plan.PipeFluid);
+            }
+            for (int i = 0; i < plan.Cells.Count; i++)
+            {
+                PipeNetworkService.AddAdjacentFluids(plan.Cells[i], piece, 0, PipeFluidScratch);
+                if (PipeFluidScratch.Count > 1)
+                {
+                    plan.Reason = new GridReason(GridBlockReason.PipeFluidConflict, "grid.reason.pipe_fluid_conflict",
+                        PipeNetworkService.FluidName(PipeFluidScratch[0]), PipeNetworkService.FluidName(PipeFluidScratch[1]));
+                    plan.FirstBadIndex = i;
+                    plan.CellOk[i] = false;
+                    break;
+                }
+            }
+            plan.JoinFluid = PipeFluidScratch.Count > 0 ? PipeFluidScratch[0] : 0;
+            return plan;
+        }
+
+        private static readonly List<int> PipeFluidScratch = new List<int>(4);
 
         /// <summary>
         /// FG3-LOG-04（FGR-LOG-023；负向“地下带跨度超限”）：地下传送带的形状——要拖出第二格、入口与出口在同一行 / 列、跨度不超过这一等级的上限、
@@ -709,11 +830,19 @@ namespace GameLogic.Campaign.Grid
             BeltPathPlan plan = PlanBeltPath(state, toolId, from, to, singleDir);
             if (!plan.Ok)
             {
+                if (plan.Reason.Value.Code == GridBlockReason.PipeFluidConflict)
+                {
+                    Core.GuidanceHooks.Raise(Core.GuidanceHooks.LogisticsPipeFirstFluidConflict);
+                }
                 return GridOpResult.Fail(plan.Reason.Value);
             }
-            if (!BeltNetworkService.IsRunning)
+            if (plan.IsPipe ? !PipeNetworkService.IsRunning : !BeltNetworkService.IsRunning)
             {
-                return GridOpResult.Fail(new GridReason(GridBlockReason.Busy, "logistics.reason.not_running"));
+                return GridOpResult.Fail(new GridReason(GridBlockReason.Busy, plan.IsPipe ? "logistics.pipe.reason.not_running" : "logistics.reason.not_running"));
+            }
+            if (plan.IsPipe && PipeNetworkService.SavedDataPreserved)
+            {
+                return GridOpResult.Fail(new GridReason(GridBlockReason.Busy, "logistics.pipe.reason.save_preserved"));
             }
             HomeValleyConstruction.PlanBelts(state, plan);
             if (plan.Cells.Count > 1)
@@ -725,6 +854,8 @@ namespace GameLogic.Campaign.Grid
             LastBeltScrap = plan.TotalCost;
             LastPlanKind = plan.Kind;
             LastPlanTier = plan.Tier;
+            LastPlanIsPipe = plan.IsPipe;
+            LastPlanPipe = plan.Pipe;
             return new GridOpResult(GridOpResult.Kind.BeltsPlaced, null);
         }
 
@@ -733,6 +864,9 @@ namespace GameLogic.Campaign.Grid
         public static int LastBeltScrap { get; private set; }
         /// <summary>FG3-LOG-04：最近一次放下的是什么（传送带 / 分流器 / 合流器 / 地下传送带）与等级（状态行写“已放下分流器的虚影”）。</summary>
         public static BeltNodeKind LastPlanKind { get; private set; }
+        /// <summary>FG3-LOG-05：最近一次放下的是不是管线层的件，以及是哪一种（状态行写“已放下管线 T1 的虚影 N 格”）。</summary>
+        public static bool LastPlanIsPipe { get; private set; }
+        public static PipePieceKind LastPlanPipe { get; private set; }
         public static int LastPlanTier { get; private set; }
 
         /// <summary>
@@ -747,6 +881,20 @@ namespace GameLogic.Campaign.Grid
             foreach (BuildTool t in GridContent.Tools)
             {
                 if (t.Kind == toolKind && (!byTier || t.Tier == tier))
+                {
+                    return t.ScrapPerCell;
+                }
+            }
+            return 0;
+        }
+
+        /// <summary>FG3-LOG-05：一件管线层的件的造价（建造菜单里对应工具的 scrapPerCell；管线按等级）。拆除全额返还同一个数。</summary>
+        public static int PipePieceCost(PipePieceKind kind, int tier)
+        {
+            string toolKind = kind == PipePieceKind.Pump ? "pump" : kind == PipePieceKind.Tank ? "tank" : kind == PipePieceKind.Valve ? "valve" : "pipe";
+            foreach (BuildTool t in GridContent.Tools)
+            {
+                if (t.Kind == toolKind && (toolKind != "pipe" || t.Tier == tier))
                 {
                     return t.ScrapPerCell;
                 }
@@ -784,11 +932,13 @@ namespace GameLogic.Campaign.Grid
             {
                 return GridOpResult.Fail(GridReason.Of(GridBlockReason.NoBuilding));
             }
-            if (!BeltNetworkService.IsRunning)
+            if (!BeltNetworkService.IsRunning && !PipeNetworkService.IsRunning)
             {
                 return GridOpResult.Fail(new GridReason(GridBlockReason.Busy, "logistics.reason.not_running"));
             }
             int removed = 0;
+            int pipesRemoved = 0;
+            long drained = 0;
             int refund = 0;
             int withItems = 0;
             int itemsReturned = 0;
@@ -799,9 +949,26 @@ namespace GameLogic.Campaign.Grid
             HomeGridMap map = MapFor(state);
             foreach (GridCell c in cells)
             {
-                if (HomeValleyConstruction.IsPlannedMarker(map.GetBelt(c)))
+                if (HomeValleyConstruction.IsPlannedMarker(map.GetBelt(c)) || HomeValleyConstruction.IsPlannedMarker(map.GetPipe(c)))
                 {
                     planned.Add(c);
+                    continue;
+                }
+                // FG3-LOG-05：管线层的件——造价全额返还；储罐 / 阀门里的流体随之排空（储罐有存量时调用方已先确认）。
+                if (PipeNetworkService.TryGetPiece(c, out PipePieceKind pk, out int ptier))
+                {
+                    if (PipeNetworkService.TryRemove(state, c, out long lost).Ok)
+                    {
+                        removed++;
+                        pipesRemoved++;
+                        drained += lost;
+                        refund += PipePieceCost(pk, ptier);
+                        at = new Vector2(c.X, c.Y);
+                    }
+                    continue;
+                }
+                if (!BeltNetworkService.IsRunning)
+                {
                     continue;
                 }
                 // FG3-LOG-04：分流器 / 合流器按每座造价、地下传送带拆任一端就拆整条（两端返还）；同一条地下传送带的另一端再轮到时已经没了，跳过。
@@ -846,6 +1013,8 @@ namespace GameLogic.Campaign.Grid
             LastBeltsWithItems = withItems;
             LastBeltItemsReturned = itemsReturned;
             LastPlannedBeltsCancelled = cancelled;
+            LastPipesRemoved = pipesRemoved;
+            LastPipeDrainedMl = drained;
             return new GridOpResult(GridOpResult.Kind.BeltsRemoved, null);
         }
 
@@ -857,6 +1026,9 @@ namespace GameLogic.Campaign.Grid
         public static int LastBeltsWithItems { get; private set; }
         public static int LastBeltItemsReturned { get; private set; }
         public static int LastPlannedBeltsCancelled { get; private set; }
+        /// <summary>FG3-LOG-05：最近一次拆除里有几格是管线件、随之排空了多少流体（毫升）。</summary>
+        public static int LastPipesRemoved { get; private set; }
+        public static long LastPipeDrainedMl { get; private set; }
 
         // ── 框选批量拆除（FGR-LOG-007；DEBT-FG0ARCH04-12）───────────────────────────────
 
@@ -874,6 +1046,8 @@ namespace GameLogic.Campaign.Grid
             plan.CriticalNames.Clear();
             plan.AlreadyMarked = 0;
             plan.BeltsWithItems = 0;
+            plan.Pipes = 0;
+            plan.TankFluidMl = 0;
             int max = GridContent.TuningInt("grid.drag_max_cells");
             var min = new GridCell(Math.Min(a.X, b.X), Math.Min(a.Y, b.Y));
             var mx = new GridCell(Math.Max(a.X, b.X), Math.Max(a.Y, b.Y));
@@ -925,6 +1099,24 @@ namespace GameLogic.Campaign.Grid
                             plan.BeltsWithItems++; // 带着物品的也拆（物品一并返还），这里只计数给 HUD 写明。
                         }
                         plan.Belts.Add(c);
+                    }
+                }
+            }
+            // FG3-LOG-05：框里的管线层（已建成的件与规划中的虚影）。储罐有存量时计入 TankFluidMl（拆除会排空，要先确认）。
+            for (int y = min.Y; y <= mx.Y; y++)
+            {
+                for (int x = min.X; x <= mx.X; x++)
+                {
+                    var c = new GridCell(x, y);
+                    if (map.GetPipe(c) == 0)
+                    {
+                        continue;
+                    }
+                    plan.Belts.Add(c);
+                    plan.Pipes++;
+                    if (PipeNetworkService.IsRunning && PipeNetworkService.Kernel.TryGetCellInfo(x, y, out PipeCellInfo pi) && pi.TankStockMl > 0)
+                    {
+                        plan.TankFluidMl += pi.TankStockMl;
                     }
                 }
             }

@@ -39,6 +39,7 @@ namespace GameLogic.UI.Kit
             Create<ConstructionQueuePanelUIToolkit>("[ConstructionQueueHost]"); // FG3-LOG-02：施工队列（30045，通知之上、字幕之下）。
             Create<BeltPortPanelUIToolkit>("[BeltPortHost]"); // FG3-LOG-03：建筑端口面板（30046，施工队列之上、字幕之下）。
             Create<BeltNodePanelUIToolkit>("[BeltNodeHost]"); // FG3-LOG-04：物流节点面板（分流器 / 合流器 / 地下传送带，30047，端口面板之上、字幕之下）。
+            Create<PipePanelUIToolkit>("[PipePanelHost]"); // FG3-LOG-05：管线面板（网络读数、储罐、阀门、冲洗，30048，节点面板之上、字幕之下）。
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Create<UiKitGalleryUIToolkit>("[UiKitGalleryHost]");
 #endif
@@ -63,6 +64,7 @@ namespace GameLogic.UI.Kit
             ConstructionQueuePanelUIToolkit.Close();
             BeltPortPanelUIToolkit.Close();
             BeltNodePanelUIToolkit.Close();
+            PipePanelUIToolkit.Close();
             StrategicMapUIToolkit.Close();
             NewGamePanelUIToolkit.Close();
             GameLogic.Campaign.Feedback.ReactionPopups.Clear();

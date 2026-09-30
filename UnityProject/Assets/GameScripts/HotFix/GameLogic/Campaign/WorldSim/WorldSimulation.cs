@@ -186,6 +186,7 @@ namespace GameLogic.Campaign.WorldSim
                 HomeGridService.Streamer(state).KeepResident = IsChunkActive;
                 // FG0-ARCH-02：星球表面的传送带内核随家园载入（从存档恢复），与家园同一生命周期。
                 BeltNetworkService.Load(state);
+                PipeNetworkService.Load(state);
                 RefreshActivity(state);
             }
             return Home;
@@ -235,6 +236,7 @@ namespace GameLogic.Campaign.WorldSim
             FoundryOutpost?.Exit(evacuateSuccess: false);
             Home?.Exit();
             BeltNetworkService.Unload();
+            PipeNetworkService.Unload();
             Combat.CombatSites.CloseAll(); // FG0-ARCH-03：保险——各地点 Exit 已各自释放内核，这里确保没有泄漏的原生容器。
             NavService.Unload(); // FG0-ARCH-06：寻路内核在战斗内核之后释放（战斗内核绑定着它的通行镜像）。
             Signal.SignalLinkService.ClearWatch(); // FG1-SIG-04：链路预警是运行时状态，随世界卸载清掉。
@@ -262,6 +264,7 @@ namespace GameLogic.Campaign.WorldSim
             }
             // FG0-ARCH-02：传送带内核快照（按网络分块）写进 BeltItemState。
             BeltNetworkService.WriteTo(BeltNetworkService.BoundState);
+            PipeNetworkService.WriteTo(PipeNetworkService.BoundState);
             // FG0-ARCH-03：每个已载入地点的战斗内核快照（单位、编队命令、冷却、热量、标记、飞行中的弹体）写进 CombatState。
             Combat.CombatSites.WriteTo(CampaignSession.Current);
             // FG0-ARCH-06：寻路内核的排队请求、待采纳结果、还没同步的格网变化写进 NavState（读档接着跑与不存档一致）。
@@ -444,6 +447,8 @@ namespace GameLogic.Campaign.WorldSim
                 WorldOutpostSystem.Step(state, GameClock.Ticks);
                 // FG0-ARCH-02：传送带内核（星球表面）按游戏时间累计推进到自己的 20 Hz（只看步序号，与镜头 / 帧率 / 倍速无关）。
                 BeltNetworkService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
+                // FG3-LOG-05：管线内核与传送带同一节拍（FGR-LOG-090）。
+                PipeNetworkService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                 // FG1-SIG-03：核心固件冷却（信号侧，按游戏时间）到期——与观察无关，O(信号核槽位数)。
                 Signal.SignalUplinkService.SimStep(state);
                 // FG1-SIG-06：常规裸跑固件的计次间隔到期（信号侧，按游戏时间，与观察无关），O(1)。

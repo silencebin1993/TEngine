@@ -365,6 +365,11 @@ namespace GameLogic.Campaign.Regions
         /// <summary>旋转鼠标指着的已有建筑。</summary>
         public GridOpResult RotateHovered(CampaignState state)
         {
+            // FG3-LOG-05（FGR-LOG-043）：指着已建成的阀门按旋转键 = 调头（上下游对调）；两侧流体不同时拒绝并写明原因。
+            if (state != null && HoverBuildingId == null && HasHover && PipeNetworkService.TryGetPiece(HoverCell, out PipePieceKind pk, out _) && pk == PipePieceKind.Valve)
+            {
+                return ReverseHoveredValve(state);
+            }
             // FG3-LOG-03（FGR-LOG-020“可以原地反转方向”）：指着一格已建成的传送带按旋转键 = 原地反转（物品位置镜像，不丢不增）。
             if (state != null && HoverBuildingId == null && HasHover && BeltNetworkService.IsRunning && BeltNetworkService.Kernel.HasCell(HoverCell.X, HoverCell.Y))
             {
@@ -410,6 +415,24 @@ namespace GameLogic.Campaign.Regions
             BeltNetworkService.Kernel.TryGetCellInfo(HoverCell.X, HoverCell.Y, out BeltCellInfo info);
             LastResult = new GridOpResult(GridOpResult.Kind.BeltReversed, null);
             SetStatus(GameText.Format("ui.build.belt_reversed", HoverCell.X, HoverCell.Y, GameText.Get(GridMath.DirTextKey((GridDir)info.Dir))), false);
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.CommandAck, StatusText);
+            return LastResult;
+        }
+
+        /// <summary>FG3-LOG-05：阀门原地调头（成功写“现在流向 X”，失败写原因）。</summary>
+        public GridOpResult ReverseHoveredValve(CampaignState state)
+        {
+            PipeOpResult r = PipeNetworkService.TryReverseValve(state, HoverCell);
+            if (!r.Ok)
+            {
+                LastResult = GridOpResult.Fail(new GridReason(GridBlockReason.Busy, r.ReasonKey, r.Args));
+                SetStatus(r.Describe(), true);
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Denied, StatusText);
+                return LastResult;
+            }
+            PipeNetworkService.Kernel.TryGetCellInfo(HoverCell.X, HoverCell.Y, out PipeCellInfo info);
+            LastResult = new GridOpResult(GridOpResult.Kind.BeltReversed, null);
+            SetStatus(GameText.Format("ui.build.valve_reversed", HoverCell.X, HoverCell.Y, GameText.Get(GridMath.DirTextKey((GridDir)info.Dir))), false);
             Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.CommandAck, StatusText);
             return LastResult;
         }
@@ -462,7 +485,13 @@ namespace GameLogic.Campaign.Regions
                 BuildingRecord target = HomeGridService.BuildingAt(state, cell);
                 if (target == null)
                 {
-                    if (HomeGridService.MapFor(state).GetBelt(cell) != 0)
+                    // FG3-LOG-05：储罐里还有流体时先确认（拆除会排空、不返还；FG00 B04 不可逆）。
+                    if (PipeNetworkService.IsRunning && PipeNetworkService.Kernel.TryGetCellInfo(cell.X, cell.Y, out PipeCellInfo tank) && tank.TankStockMl > 0)
+                    {
+                        AskRemoveTank(cell, tank);
+                        return new GridOpResult(GridOpResult.Kind.Failed, null);
+                    }
+                    if (HomeGridService.MapFor(state).GetBelt(cell) != 0 || HomeGridService.MapFor(state).GetPipe(cell) != 0)
                     {
                         _cells.Clear();
                         _cells.Add(cell);
@@ -527,9 +556,42 @@ namespace GameLogic.Campaign.Regions
             {
                 return new GridOpResult(GridOpResult.Kind.Failed, null);
             }
+            // FG3-LOG-05：空闲状态点已建成的管线件 = 打开管线面板（网络读数、储罐模式、阀门、冲洗）。
+            if (info == null && !DemolishMode && !RelocateMode && !PrioritizeMode && !ClearMode && OpenPipePanel(state, cell))
+            {
+                return new GridOpResult(GridOpResult.Kind.Failed, null);
+            }
             SetStatus(info != null ? DescribeBuilding(state, info) : string.Empty, false);
             return new GridOpResult(GridOpResult.Kind.Failed, info?.BuildingId);
         }
+
+        /// <summary>FG3-LOG-05：拆一座有存量的储罐前确认（写明会排空多少、什么流体；造价全额返还）。取消什么都不变。</summary>
+        private void AskRemoveTank(GridCell cell, PipeCellInfo tank)
+        {
+            var req = new ConfirmRequest
+            {
+                Title = GameText.Get("ui.build.tank_remove_title"),
+                Irreversible = true,
+                ConfirmText = GameText.Get("ui.build.tank_remove_ok"),
+                CancelText = GameText.Get("ui.build.confirm_cancel"),
+                OnConfirm = () =>
+                {
+                    PendingTankConfirm = false;
+                    _cells.Clear();
+                    _cells.Add(cell);
+                    CampaignState s = CampaignSession.Current;
+                    Report(HomeGridService.TryRemoveBelts(s, _cells), s, DemolishFailKey);
+                },
+                OnCancel = () => PendingTankConfirm = false,
+            };
+            req.Consequences.Add(GameText.Format("ui.build.tank_remove_line", (tank.TankStockMl / 1000.0).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture),
+                PipeNetworkService.FluidName(tank.Fluid), HomeGridService.PipePieceCost(PipePieceKind.Tank, 0)));
+            UiConfirmDialog.Show(req);
+            PendingTankConfirm = true;
+        }
+
+        /// <summary>FG3-LOG-05：拆储罐的确认框是否正在询问（自检用）。</summary>
+        public bool PendingTankConfirm { get; private set; }
 
         /// <summary>搬迁模式里点起一座建筑（核心、受损、正在维修 / 拆除的不能搬，直接给原因）。朝向从它现在的朝向开始。</summary>
         private GridOpResult PickForRelocation(CampaignState state, GridCell cell)
@@ -672,6 +734,17 @@ namespace GameLogic.Campaign.Regions
                 return false;
             }
             BeltNodePanelUIToolkit.Open(cell);
+            return true;
+        }
+
+        /// <summary>FG3-LOG-05：打开管线面板；这一格没有已建成的管线件时返回 false。</summary>
+        public bool OpenPipePanel(CampaignState state, GridCell cell)
+        {
+            if (state == null || !PipeNetworkService.TryGetPiece(cell, out _, out _))
+            {
+                return false;
+            }
+            PipePanelUIToolkit.Open(cell);
             return true;
         }
 
@@ -869,7 +942,7 @@ namespace GameLogic.Campaign.Regions
             int threshold = GridContent.TuningInt("grid.batch_demolish_confirm");
             var req = new ConfirmRequest
             {
-                Title = GameText.Format("ui.build.batch_confirm_title", plan.BuildingCount),
+                Title = plan.BuildingCount > 0 ? GameText.Format("ui.build.batch_confirm_title", plan.BuildingCount) : GameText.Get("ui.build.box_tank_title"),
                 Irreversible = true,
                 ConfirmText = GameText.Get("ui.build.batch_confirm_ok"),
                 CancelText = GameText.Get("ui.build.confirm_cancel"),
@@ -888,6 +961,11 @@ namespace GameLogic.Campaign.Regions
             if (plan.CriticalNames.Count > 0)
             {
                 req.Lines.Add(GameText.Format("ui.build.batch_confirm_critical", string.Join(GameText.Language == GameLanguage.En ? ", " : "、", plan.CriticalNames)));
+            }
+            if (plan.TankFluidMl > 0)
+            {
+                // FG3-LOG-05：框里的储罐有存量——拆除会排空、不返还。
+                req.Lines.Add(GameText.Format("ui.build.box_tank_line", (plan.TankFluidMl / 1000.0).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)));
             }
             req.Consequences.Add(GameText.Get("ui.build.batch_confirm_refund"));
             UiConfirmDialog.Show(req);
@@ -1238,6 +1316,16 @@ namespace GameLogic.Campaign.Regions
             }
             GridCell p = plan.Cells[0];
             int d = (int)plan.Dirs[0];
+            if (plan.IsPipe)
+            {
+                // FG3-LOG-05：阀门画出进（后方）/ 出（前方）箭头；管线 / 泵 / 储罐四面相通，不画方向。
+                if (plan.Pipe == PipePieceKind.Valve)
+                {
+                    PlaceArrow(arrow++, new PortPlacement("in", p, (GridDir)BeltDirs.Opposite(d), false));
+                    PlaceArrow(arrow++, new PortPlacement("out", p, (GridDir)d, true));
+                }
+                return arrow;
+            }
             switch (plan.Kind)
             {
                 case BeltNodeKind.Splitter:
@@ -1316,6 +1404,18 @@ namespace GameLogic.Campaign.Regions
                 case GridOpResult.Kind.PlanMoved:
                     SetStatus(GameText.Format("ui.build.relocate_moved_plan", HomeGridService.DisplayName(TypeOfId(r.BuildingId))), false);
                     Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.CommandAck, StatusText);
+                    break;
+                case GridOpResult.Kind.BeltsPlaced when HomeGridService.LastPlanIsPipe:
+                    SetStatus(GameText.Format("ui.build.pipe_planned", PipeNetworkService.PieceName(HomeGridService.LastPlanPipe, HomeGridService.LastPlanTier),
+                        HomeGridService.LastBeltCount, HomeGridService.LastBeltScrap), false);
+                    Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.CommandAck, StatusText);
+                    break;
+                case GridOpResult.Kind.BeltsRemoved when HomeGridService.LastPipesRemoved > 0 && HomeGridService.LastPipesRemoved == HomeGridService.LastBeltCount:
+                    SetStatus(HomeGridService.LastPipeDrainedMl > 0
+                        ? GameText.Format("ui.build.pipes_removed_drained", HomeGridService.LastPipesRemoved, HomeGridService.LastBeltScrap,
+                            (HomeGridService.LastPipeDrainedMl / 1000.0).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))
+                        : GameText.Format("ui.build.pipes_removed", HomeGridService.LastPipesRemoved, HomeGridService.LastBeltScrap), false);
+                    Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.UiClick);
                     break;
                 case GridOpResult.Kind.BeltsPlaced:
                     SetStatus(HomeGridService.LastPlanKind != BeltNodeKind.Belt

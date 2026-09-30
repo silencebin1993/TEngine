@@ -131,6 +131,10 @@ public partial class Tables
     /// </summary>
     public fg.TbFirmwareKind TbFirmwareKind {get; }
     /// <summary>
+    /// 流体
+    /// </summary>
+    public fg.TbFluid TbFluid {get; }
+    /// <summary>
     /// 地形类型
     /// </summary>
     public fg.TbGridTerrain TbGridTerrain {get; }
@@ -279,6 +283,7 @@ public partial class Tables
         TbCodexEntry = new fg.TbCodexEntry(loader("fg_tbcodexentry"));
         TbCombatComponent = new fg.TbCombatComponent(loader("fg_tbcombatcomponent"));
         TbFirmwareKind = new fg.TbFirmwareKind(loader("fg_tbfirmwarekind"));
+        TbFluid = new fg.TbFluid(loader("fg_tbfluid"));
         TbGridTerrain = new fg.TbGridTerrain(loader("fg_tbgridterrain"));
         TbHomeTuning = new fg.TbHomeTuning(loader("fg_tbhometuning"));
         TbInputAction = new fg.TbInputAction(loader("fg_tbinputaction"));
@@ -343,6 +348,7 @@ public partial class Tables
         TbCodexEntry.ResolveRef(this);
         TbCombatComponent.ResolveRef(this);
         TbFirmwareKind.ResolveRef(this);
+        TbFluid.ResolveRef(this);
         TbGridTerrain.ResolveRef(this);
         TbHomeTuning.ResolveRef(this);
         TbInputAction.ResolveRef(this);

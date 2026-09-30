@@ -146,6 +146,10 @@ namespace GameLogic.Campaign
         public int FilterL;
         public int FilterR;
         public int PriorityIn;
+        /// <summary>FG3-LOG-05：0 = 传送带层的规划（上面的 NodeKind 有效）；1 管线 / 2 泵 / 3 储罐 / 4 阀门（= PipePieceKind + 1，占管线层；Tier = 管线等级，Dirs = 阀门流向）。</summary>
+        public int PipePiece;
+        /// <summary>FG3-LOG-05：泵的虚影在哪种流体的来源上（规划时由地形认定，建成时再核一次）。</summary>
+        public int PipeFluid;
     }
 
     /// <summary>一块已探索的圆形区域（格网坐标）。</summary>
@@ -279,11 +283,46 @@ namespace GameLogic.Campaign
         public string[] Keys = Array.Empty<string>();
     }
 
-    /// <summary>管线与流体（FG03 管线 Story）。</summary>
+    /// <summary>
+    /// FG3-LOG-05 管线与流体（FG03 第 6 节“流体网络与储量、结冰状态”）：管线内核快照（每格一行、按铺设顺序；外部消费者一行）。
+    /// 唯一写入口 <see cref="Logistics.PipeNetworkService.WriteTo"/>（WorldSimulation.SyncAllForSave 调它），读档时 <see cref="Logistics.PipeNetworkService.Load"/> 恢复。
+    /// 网络编号、连接、网络流体是派生量，读档后按拓扑重算；每格的流体、储罐存量 / 模式 / 优先级、阀门开关 / 缓冲、“最近流动步”（结冰计时接口）进存档。
+    /// DomainVersion 1 = FG0-SAVE-01 的空骨架（没有管线）；2 = 本格式。<see cref="FormatVersion"/> = 内核快照格式（不认识时整体保留、这局不能改管线）。
+    /// </summary>
     [Serializable]
     public sealed class PipeFluidState
     {
         public int DomainVersion = 1;
+        public int FormatVersion;
+        public long KernelSteps;
+        public long TotalPumpedMl;
+        public long TotalDeliveredMl;
+        public long TotalFlushedMl;
+        public long TotalRemovedMl;
+        public int[] Xs = Array.Empty<int>();
+        public int[] Ys = Array.Empty<int>();
+        public int[] Kinds = Array.Empty<int>();
+        public int[] Tiers = Array.Empty<int>();
+        public int[] Dirs = Array.Empty<int>();
+        public int[] Fluids = Array.Empty<int>();
+        public long[] Stocks = Array.Empty<long>();
+        public int[] Modes = Array.Empty<int>();
+        public int[] Priorities = Array.Empty<int>();
+        public int[] Open = Array.Empty<int>();
+        public long[] Buffers = Array.Empty<long>();
+        public int[] BufferFluids = Array.Empty<int>();
+        public long[] LastFlow = Array.Empty<long>();
+        public long[] PumpTotals = Array.Empty<long>();
+        public int[] ConsumerIds = Array.Empty<int>();
+        public int[] ConsumerXs = Array.Empty<int>();
+        public int[] ConsumerYs = Array.Empty<int>();
+        public int[] ConsumerFluids = Array.Empty<int>();
+        public int[] ConsumerLpm = Array.Empty<int>();
+        public int[] ConsumerPriorities = Array.Empty<int>();
+        public long[] ConsumerTotals = Array.Empty<long>();
+        public int NextConsumerId = 1;
+        /// <summary>寒潮进行中（FGR-LOG-045 预留：FG7-ENV-03 的天气系统写它；本 Story 只保存，不产生结冰）。</summary>
+        public bool ColdSnap;
     }
 
     /// <summary>研究（FG05）。</summary>

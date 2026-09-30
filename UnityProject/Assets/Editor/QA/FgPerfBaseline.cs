@@ -35,18 +35,19 @@ namespace GameLogic.EditorTools
     /// <summary>
     /// FG0-QA-01：后期规模性能场景与基线对比（FG15 FGR-SYS-041 规模预算、FGR-SYS-043 性能场景：每个里程碑出口跑一次，与上一次比较，退化超过 10% 视为未通过）。
     /// 场景由固定种子确定性搭出（同一版本的代码每次搭出同一个场景，不依赖固定坐标）：
-    /// 800 座建筑、约 15,000 格传送带 / 30,000 件物品（在正式传送带内核里，随存档保存）、120 台机器、80 座炮塔 + 200 个突袭者、12 支行进中的突袭、每个表面 400 个区块。
+    /// 800 座建筑、约 15,000 格传送带 / 30,000 件物品（在正式传送带内核里，随存档保存）、3,000 格管线（30 个流体网络，泵 / 储罐 / 阀门 / 消费者，v2 起，FG3-LOG-05）、
+    /// 120 台机器、80 座炮塔 + 200 个突袭者、12 支行进中的突袭、每个表面 400 个区块。
     /// 搭好后走真实存档写入（性能测试存档），再走真实读档恢复，在读回来的局面上测量——存读档本身也是被测量的一项。
     /// 测量：世界步（热更层 + 战斗内核 + 传送带内核 + 寻路流水线）平均 / p95、各内核分项、每步托管分配、2,000 格寻路冷 / 热、存档耗时与大小、读档耗时、区块同步生成、托管堆。
     /// 基线：production/qa/perf-baseline/FG-PERF-LATE.json（入库；没有时本次结果写为首个基线）。基线来自另一台机器 / 另一 Unity 版本时只报告不判定。
     /// 用法：<c>bash tools/unity-perf-baseline.sh</c>（对比）/ <c>bash tools/unity-perf-baseline.sh --update</c>（对比后写入新基线）；或菜单“BinGames/性能基线/…”。
-    /// 场景里还没有的（静默夜 FG7-ENV-02、沙暴 FG7-ENV-03、管线 FG3-LOG-05）在报告里逐项写明，见 ADR-ARC-016 与 DEBT-FG0QA01-*。
+    /// 场景里还没有的（静默夜 FG7-ENV-02、沙暴 FG7-ENV-03）在报告里逐项写明，见 ADR-ARC-016 与 DEBT-FG0QA01-*（管线已于 FG3-LOG-05 加入，场景 v2）。
     /// </summary>
     public static class FgPerfBaseline
     {
         public const string SceneId = "FG-PERF-LATE";
         /// <summary>场景搭法的版本：改了场景内容（数量、布局、种子）就 +1，旧基线只报告不判定。</summary>
-        public const int SceneVersion = 1;
+        public const int SceneVersion = 2;
         public const int Seed = 42;
         public const double RegressionLimit = 0.10;
 
@@ -54,6 +55,8 @@ namespace GameLogic.EditorTools
         public const int BuildingTarget = 800;
         public const int BeltCellTarget = 15000;
         public const int BeltItemTarget = 30000;
+        /// <summary>FG3-LOG-05（FG03 第 7 节 / FGR-SYS-041）：管线 3,000 格。</summary>
+        public const int PipeCellTarget = 3000;
         public const int MachineTarget = 120;
         public const int TurretTarget = 80;
         public const int EnemyTarget = 200;
@@ -347,6 +350,12 @@ namespace GameLogic.EditorTools
             int beltCells = belts.CellCount;
             int beltItems = belts.ItemCount;
 
+            // 管线（FG3-LOG-05，场景 v2）：正式管线内核（随存档保存），核心西面 30 个流体网络共 3,000 格（泵、储罐、阀门、两级管线、按优先级的消费者）。
+            PipeKernel pipes = PipeNetworkService.Kernel;
+            FgPipeSelfCheck.BuildPerfNetworks(pipes, core.X - 700, core.Y + 48, 30);
+            PipeNetworkService.ApplyGridLayer(s, HomeGridService.MapFor(s));
+            int pipeCells = pipes.CellCount;
+
             // 战斗：家园东面一块开阔地，80 座炮塔一圈 + 200 个突袭者四路压上（战斗性能场景的数值）。
             Vector2? center = FindCombatCenter(core);
             if (center == null)
@@ -377,9 +386,9 @@ namespace GameLogic.EditorTools
             int enemies = home.Combat.Kernel.CountAlive(CombatFaction.Hostile, CombatUnitKind.Enemy);
             build.Stop();
 
-            Expect(buildings >= BuildingTarget && machines >= MachineTarget && beltCells >= BeltCellTarget && beltItems >= BeltItemTarget
+            Expect(buildings >= BuildingTarget && machines >= MachineTarget && beltCells >= BeltCellTarget && beltItems >= BeltItemTarget && pipeCells >= PipeCellTarget
                    && turrets >= TurretTarget && enemies >= EnemyTarget && raids >= TransitTarget,
-                $"场景规模达到 FGR-SYS-041：建筑 +{buildings}（共 {s.BuildingRecords.Length}）、机器 {machines}、传送带 {beltCells:N0} 格 / {beltItems:N0} 件、" +
+                $"场景规模达到 FGR-SYS-041：建筑 +{buildings}（共 {s.BuildingRecords.Length}）、机器 {machines}、传送带 {beltCells:N0} 格 / {beltItems:N0} 件、管线 {pipeCells:N0} 格、" +
                 $"炮塔 {turrets}、突袭者 {enemies}、行进中的突袭 {raids} 支{(raidFailure != null && raids < TransitTarget ? "（派遣失败：" + raidFailure + "）" : string.Empty)}；搭建 {build.Elapsed.TotalSeconds:F1} 秒");
 
             // 预热：让战斗打起来、工单引擎与寻路进入稳态，再写存档（性能测试存档是“正在打”的局面）。
@@ -602,6 +611,8 @@ namespace GameLogic.EditorTools
             int enemies = ck.CountAlive(CombatFaction.Hostile, CombatUnitKind.Enemy);
             int beltCells = bk.CellCount;
             int beltItems = bk.ItemCount;
+            PipeKernel pk = PipeNetworkService.Kernel;
+            int pipeCells = pk?.CellCount ?? 0;
             int chunks = map.LoadedChunkCount;
             int transit = s.Raids?.InTransit?.Count(g => g != null && g.State == TransitGroupState.Marching) ?? 0;
 
@@ -611,6 +622,8 @@ namespace GameLogic.EditorTools
             int combatSteps = 0;
             double beltSum = 0;
             int beltSteps = 0;
+            double pipeSum = 0;
+            int pipeSteps = 0;
             double navSum = 0;
             int peakProj = 0;
             var step = new Stopwatch();
@@ -622,6 +635,7 @@ namespace GameLogic.EditorTools
                 {
                     long c0 = ck.Steps;
                     long b0 = BeltNetworkService.KernelStepsThisSession;
+                    long p0 = PipeNetworkService.KernelStepsThisSession;
                     step.Restart();
                     WorldSimulation.StepMany(1);
                     step.Stop();
@@ -638,6 +652,11 @@ namespace GameLogic.EditorTools
                         beltSum += bk.LastStepMs;
                         beltSteps++;
                     }
+                    if (pk != null && PipeNetworkService.KernelStepsThisSession > p0)
+                    {
+                        pipeSum += pk.LastStepMs;
+                        pipeSteps++;
+                    }
                     navSum += NavService.LastBeginStepMs;
                     peakProj = Math.Max(peakProj, ck.ProjectileCount);
                 }
@@ -650,7 +669,8 @@ namespace GameLogic.EditorTools
             double worldP95 = samples[(int)(n * 0.95)];
             double combatPerStep = combatSum / n;
             double beltPerStep = beltSum / n;
-            double hotfixPerStep = Math.Max(0, samples.Average() - combatPerStep - beltPerStep);
+            double pipePerStep = pipeSum / n;
+            double hotfixPerStep = Math.Max(0, samples.Average() - combatPerStep - beltPerStep - pipePerStep);
 
             // 托管分配：稳态步的托管堆增量（Unity Mono 不实现按线程分配计数，用托管堆已用字节，同传送带 / 数据管线自检）。
             // 堆增量只在窗口里没有发生 GC 时才有意义（GC 会把增量吃掉，分配越多越容易触发、读数反而越小——假绿）：
@@ -685,9 +705,10 @@ namespace GameLogic.EditorTools
 
             Add(cur, "world_step_avg_ms", "世界步平均（3 轮 × 600 步取中位轮）", "ms", worldAvg, true, 0.2);
             Add(cur, "world_step_p95_ms", "世界步 p95", "ms", worldP95, true, 0.3);
-            Add(cur, "hotfix_step_ms", "热更层每步（世界步 − 战斗内核 − 传送带内核）", "ms", hotfixPerStep, true, 0.2);
+            Add(cur, "hotfix_step_ms", "热更层每步（世界步 − 战斗内核 − 传送带内核 − 管线内核）", "ms", hotfixPerStep, true, 0.2);
             Add(cur, "combat_kernel_ms", "战斗内核每步", "ms", combatSteps > 0 ? combatSum / combatSteps : 0, true, 0.2);
             Add(cur, "belt_kernel_ms", "传送带内核每个内核步（20 Hz）", "ms", beltSteps > 0 ? beltSum / beltSteps : 0, true, 0.2);
+            Add(cur, "pipe_kernel_ms", "管线内核每个内核步（20 Hz）", "ms", pipeSteps > 0 ? pipeSum / pipeSteps : 0, true, 0.1);
             Add(cur, "nav_main_ms", "寻路主线程流水线每步", "ms", navSum / n, true, 0.1);
             Add(cur, "alloc_bytes_per_step", "每步托管堆增量（不含发生 GC 的窗口）", "B", allocPerStep, true, 64);
             Add(cur, "alloc_gc_windows", $"分配测量中发生 GC 的窗口（共 {allocWindows} 个）", "个", dirtyWindows, true, 1);
@@ -696,6 +717,7 @@ namespace GameLogic.EditorTools
             Add(cur, "scale_machines", "机器（战斗内核里活着的）", "台", machines, false, 0);
             Add(cur, "scale_belt_cells", "传送带", "格", beltCells, false, 0);
             Add(cur, "scale_belt_items", "传送带上的物品", "件", beltItems, false, 0);
+            Add(cur, "scale_pipe_cells", "管线", "格", pipeCells, false, 0);
             Add(cur, "scale_turrets", "炮塔", "座", turrets, false, 0);
             Add(cur, "scale_enemies", "同时存在的敌人", "个", enemies, false, 0);
             Add(cur, "scale_projectiles_peak", "同时存在的弹体（测量期间峰值）", "枚", peakProj, false, 0);
@@ -704,16 +726,16 @@ namespace GameLogic.EditorTools
 
             Line($"  · 读回的局面：建筑 {buildings}、机器 {machines}、传送带 {beltCells:N0} 格 / {beltItems:N0} 件、炮塔 {turrets}、敌人 {enemies}、弹体峰值 {peakProj:N0}、" +
                  $"区块 {chunks}、行进中的突袭 {transit} 支");
-            Line($"  · 世界步：平均 {worldAvg:F3} ms / p95 {worldP95:F3} ms；其中战斗内核 {combatPerStep:F3}、传送带内核 {beltPerStep:F3}（折到每世界步）、" +
+            Line($"  · 世界步：平均 {worldAvg:F3} ms / p95 {worldP95:F3} ms；其中战斗内核 {combatPerStep:F3}、传送带内核 {beltPerStep:F3}、管线内核 {pipePerStep:F4}（折到每世界步）、" +
                  $"寻路主线程 {navSum / n:F3}、热更层其余 {hotfixPerStep:F3} ms；每步托管堆增量 {allocPerStep:F1} B" +
                  $"{(dirtyWindows > 0 ? $"（{allocWindows} 个窗口里 {dirtyWindows} 个发生过 GC，不计入）" : string.Empty)}；托管堆 {monoMb:F0} MB");
             Line($"  · 预算参照（FGR-SYS-042，推荐配置 60 帧、1x 一帧一步；Editor 数字不等于真机，不判定）：热更层 {hotfixPerStep:F2} / 4 ms{Over(hotfixPerStep, 4)}；" +
-                 $"内核（物流 + 战斗）{combatPerStep + beltPerStep:F2} / 6 ms{Over(combatPerStep + beltPerStep, 6)}；每帧托管分配 {allocPerStep:F0} B（目标接近 0）");
-            Line("  · 场景里还没有的（不判定，见 DEBT-FG0QA01-*）：管线 3,000 格（FG3-LOG-05）；沙暴、静默夜（FG7-ENV-03 / 02）；远征队（FG8-EXP-02，行进队伍目前只有突袭）；GPU 帧时间（-nographics）");
+                 $"内核（物流 + 战斗）{combatPerStep + beltPerStep + pipePerStep:F2} / 6 ms{Over(combatPerStep + beltPerStep + pipePerStep, 6)}；每帧托管分配 {allocPerStep:F0} B（目标接近 0）");
+            Line("  · 场景里还没有的（不判定，见 DEBT-FG0QA01-*）：沙暴、静默夜（FG7-ENV-03 / 02）；远征队（FG8-EXP-02，行进队伍目前只有突袭）；GPU 帧时间（-nographics）");
 
-            Expect(buildings >= BuildingTarget && machines >= MachineTarget && beltCells >= BeltCellTarget && turrets >= TurretTarget
+            Expect(buildings >= BuildingTarget && machines >= MachineTarget && beltCells >= BeltCellTarget && pipeCells >= PipeCellTarget && turrets >= TurretTarget
                    && chunks >= ChunkTarget && transit >= TransitTarget,
-                $"读档后规模不丢：建筑 {buildings}、机器 {machines}、传送带 {beltCells:N0} 格、炮塔 {turrets}、区块 {chunks}、行进中的突袭 {transit} 支（都达到 FGR-SYS-041）");
+                $"读档后规模不丢：建筑 {buildings}、机器 {machines}、传送带 {beltCells:N0} 格、管线 {pipeCells:N0} 格、炮塔 {turrets}、区块 {chunks}、行进中的突袭 {transit} 支（都达到 FGR-SYS-041）");
             Expect(enemies >= EnemyTarget * 3 / 4 && peakProj >= ProjectileTarget,
                 $"战斗在持续：测量开始时敌人 {enemies}（开打后会有伤亡，≥ {EnemyTarget * 3 / 4}），测量期间弹体峰值 {peakProj:N0}（≥ {ProjectileTarget:N0}）");
             Expect(allocValid,

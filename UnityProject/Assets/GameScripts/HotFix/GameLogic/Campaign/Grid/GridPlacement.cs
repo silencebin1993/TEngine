@@ -56,6 +56,13 @@ namespace GameLogic.Campaign.Grid
         UndergroundSpan,
         /// <summary>地下已经有同方向的地下段经过。</summary>
         UndergroundOccupied,
+        // ── FG3-LOG-05（只追加）──
+        /// <summary>泵不在水源 / 油井上（FGR-LOG-041）。</summary>
+        PumpNeedsSource,
+        /// <summary>这段管线会把两种不同流体的网络接在一起（FGR-LOG-040）。</summary>
+        PipeFluidConflict,
+        /// <summary>阀门前后直接接着另一个阀门（FGR-LOG-043：中间至少隔一格管线）。</summary>
+        PipeValveChained,
     }
 
     /// <summary>一条原因：原因码 + 文本键 + 参数（参数本身若是文本键，显示时按当前语言解析）。</summary>
@@ -98,6 +105,10 @@ namespace GameLogic.Campaign.Grid
                 case GridBlockReason.Fog: return new GridReason(code, "grid.reason.fog");
                 case GridBlockReason.OccupiedBelt: return new GridReason(code, "grid.reason.occupied_belt");
                 case GridBlockReason.OccupiedPipe: return new GridReason(code, "grid.reason.occupied_pipe");
+                // FG3-LOG-05：带参数的原因由 ValidatePipeCell / PlanPipePath 构造，这里给无参数时的稳定文本。
+                case GridBlockReason.PumpNeedsSource: return new GridReason(code, "grid.reason.pump_needs_source_plain");
+                case GridBlockReason.PipeFluidConflict: return new GridReason(code, "grid.reason.pipe_fluid_conflict_plain");
+                case GridBlockReason.PipeValveChained: return new GridReason(code, "logistics.pipe.reason.valve_chained");
                 case GridBlockReason.NoBuilding: return new GridReason(code, "grid.reason.no_building");
                 case GridBlockReason.CannotDemolishCore: return new GridReason(code, "grid.reason.cannot_demolish_core");
                 case GridBlockReason.DemolishDamaged: return new GridReason(code, "grid.reason.demolish_damaged");

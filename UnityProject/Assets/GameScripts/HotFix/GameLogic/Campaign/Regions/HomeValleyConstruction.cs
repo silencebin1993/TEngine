@@ -641,6 +641,10 @@ namespace GameLogic.Campaign.Regions
 
         private static bool CommitBeltCell(CampaignState state, PlannedBeltRecord p, int i)
         {
+            if (p.PipePiece > 0)
+            {
+                return CommitPipeCell(state, p, i);
+            }
             var cell = new GridCell(p.Xs[i], p.Ys[i]);
             HomeGridMap map = HomeGridService.MapFor(state);
             ushort marker = map.GetBelt(cell);
@@ -692,6 +696,61 @@ namespace GameLogic.Campaign.Regions
             p.CellState[i] = 1;
             Revision++;
             return true;
+        }
+
+        /// <summary>
+        /// FG3-LOG-05：管线层的规划一格建成——放开规划标记后走正式入口 <see cref="PipeNetworkService.TryPlace"/>（格网规则 + 流体规则）。
+        /// 规划到建成之间别处的网络可能已经换了流体（例如这段管线两头各接上了水与原油）：这时这一格建不成，发“失败”通知写明是哪两种流体，
+        /// 这一格作废（它的材料留在现场给下一格，最后多出来的全额退回，见 <see cref="OnSiteCompleted"/>）。
+        /// </summary>
+        private static bool CommitPipeCell(CampaignState state, PlannedBeltRecord p, int i)
+        {
+            var cell = new GridCell(p.Xs[i], p.Ys[i]);
+            HomeGridMap map = HomeGridService.MapFor(state);
+            ushort marker = map.GetPipe(cell);
+            map.SetPipe(cell, 0);
+            var kind = (PipePieceKind)Math.Max(0, Math.Min(3, p.PipePiece - 1));
+            PipeOpResult r = PipeNetworkService.TryPlace(state, cell, kind, p.Tier, p.Dirs[i]);
+            if (!r.Ok)
+            {
+                map.SetPipe(cell, marker);
+                if (r.Code == PipeResult.FluidConflict)
+                {
+                    GameLogic.Notifications.NotificationCenter.Post("failure",
+                        GameText.Format("logistics.pipe.commit_conflict", cell.X, cell.Y, r.Args.Length > 0 ? r.Args[0] : string.Empty, r.Args.Length > 1 ? r.Args[1] : string.Empty),
+                        new Vector3(cell.X, 0f, cell.Y));
+                }
+                else if (r.Code == PipeResult.ValveChained)
+                {
+                    GameLogic.Notifications.NotificationCenter.Post("failure",
+                        GameText.Format("logistics.pipe.commit_failed", cell.X, cell.Y, r.Describe()), new Vector3(cell.X, 0f, cell.Y));
+                }
+                LastPipeCommitFailure = r.Describe();
+                return false;
+            }
+            p.CellState[i] = 1;
+            Revision++;
+            return true;
+        }
+
+        /// <summary>FG3-LOG-05：最近一次管线虚影建不成的原因（自检读）。</summary>
+        public static string LastPipeCommitFailure { get; private set; }
+
+        /// <summary>这份规划占的是管线层（FG3-LOG-05）还是传送带层。</summary>
+        public static bool IsPipePlan(PlannedBeltRecord p) => p != null && p.PipePiece > 0;
+
+        private static ushort PlannedMarker(PlannedBeltRecord p) => (ushort)(PlannedBeltFlag | (p.Tier + 1));
+
+        private static void SetPlannedMarker(HomeGridMap map, PlannedBeltRecord p, GridCell cell)
+        {
+            if (IsPipePlan(p))
+            {
+                map.SetPipe(cell, PlannedMarker(p));
+            }
+            else
+            {
+                map.SetBelt(cell, PlannedMarker(p));
+            }
         }
 
         /// <summary>FG3-LOG-04：这份规划是不是地下传送带（两端一起建、一起取消）。</summary>
@@ -846,9 +905,12 @@ namespace GameLogic.Campaign.Regions
                 CellState = new int[n],
                 Delivered = 0,
                 // FG3-LOG-04：放的是什么（传送带 / 分流器 / 合流器 / 地下传送带）；节点的设置取默认（1:1、不设优先口、全部物品）。
-                NodeKind = (int)plan.Kind,
+                NodeKind = plan.IsPipe ? 0 : (int)plan.Kind,
                 RatioL = 1,
                 RatioR = 1,
+                // FG3-LOG-05：管线层的规划（管线 / 泵 / 储罐 / 阀门）占格网管线层。
+                PipePiece = plan.IsPipe ? (int)plan.Pipe + 1 : 0,
+                PipeFluid = plan.IsPipe ? plan.PipeFluid : 0,
             };
             HomeGridMap map = HomeGridService.MapFor(state);
             for (int i = 0; i < n; i++)
@@ -856,7 +918,7 @@ namespace GameLogic.Campaign.Regions
                 rec.Xs[i] = plan.Cells[i].X;
                 rec.Ys[i] = plan.Cells[i].Y;
                 rec.Dirs[i] = (int)plan.Dirs[i];
-                map.SetBelt(plan.Cells[i], (ushort)(PlannedBeltFlag | (plan.Tier + 1)));
+                SetPlannedMarker(map, rec, plan.Cells[i]);
             }
             PlannedBeltRecord[] old = grid.PlannedBelts ?? Array.Empty<PlannedBeltRecord>();
             var next = new PlannedBeltRecord[old.Length + 1];
@@ -923,6 +985,10 @@ namespace GameLogic.Campaign.Regions
             if (IsPlannedMarker(map.GetBelt(cell)))
             {
                 map.SetBelt(cell, 0);
+            }
+            if (IsPlannedMarker(map.GetPipe(cell)))
+            {
+                map.SetPipe(cell, 0); // FG3-LOG-05：管线层的虚影
             }
         }
 
@@ -1009,7 +1075,7 @@ namespace GameLogic.Campaign.Regions
                 {
                     if (p.CellState[i] == 0)
                     {
-                        map.SetBelt(new GridCell(p.Xs[i], p.Ys[i]), (ushort)(PlannedBeltFlag | (p.Tier + 1)));
+                        SetPlannedMarker(map, p, new GridCell(p.Xs[i], p.Ys[i]));
                     }
                 }
             }
@@ -1213,7 +1279,9 @@ namespace GameLogic.Campaign.Regions
             GameText.Format("build.queue.destroyed_name", PieceName(p), p.Xs[i].ToString(CultureInfo.InvariantCulture), p.Ys[i].ToString(CultureInfo.InvariantCulture));
 
         /// <summary>FG3-LOG-04：规划里放的物流件的玩家名（传送带 T1 / 分流器 / 合流器 / 地下传送带 T1）。</summary>
-        public static string PieceName(PlannedBeltRecord p) => p == null ? string.Empty : BeltNetworkService.PieceName((BeltNodeKind)p.NodeKind, p.Tier);
+        public static string PieceName(PlannedBeltRecord p) => p == null ? string.Empty
+            : IsPipePlan(p) ? PipeNetworkService.PieceName((PipePieceKind)Math.Max(0, Math.Min(3, p.PipePiece - 1)), p.Tier)
+            : BeltNetworkService.PieceName((BeltNodeKind)p.NodeKind, p.Tier);
 
         private static string DestroyedStatus(PlannedBeltRecord p, int i) =>
             GameText.Format("build.queue.destroyed_status", GameText.Get(GridMath.DirTextKey((GridDir)p.Dirs[i])));

@@ -136,11 +136,16 @@ namespace GameLogic.Campaign.Regions
                     tile.transform.rotation = Quaternion.Euler(0f, p.Dirs[i] * 90f, 0f);
                     // FG3-LOG-03：被摧毁的虚影更窄更短（“断条”），红色调；普通规划是淡蓝长条。
                     // FG3-LOG-04：分流器 / 合流器的虚影是方块，地下传送带两端是横着的短条（形状区分，不只靠颜色；占位 B22）。
+                    // FG3-LOG-05：管线层的虚影——管线是细方块、泵是小方块、储罐是大方块、阀门是沿流向的短条，青色调（与传送带的淡蓝区分；占位 B22）。
                     tile.transform.localScale = p.Destroyed ? new Vector3(0.3f, 0.08f, 0.6f)
+                        : p.PipePiece == 1 ? new Vector3(0.32f, 0.1f, 0.32f)
+                        : p.PipePiece == 2 ? new Vector3(0.6f, 0.1f, 0.6f)
+                        : p.PipePiece == 3 ? new Vector3(0.9f, 0.1f, 0.9f)
+                        : p.PipePiece == 4 ? new Vector3(0.35f, 0.1f, 0.8f)
                         : p.NodeKind == 1 || p.NodeKind == 2 ? new Vector3(0.85f, 0.08f, 0.85f)
                         : p.NodeKind == 3 ? new Vector3(0.9f, 0.08f, 0.35f)
                         : new Vector3(0.55f, 0.08f, 0.9f);
-                    tile.GetComponent<Renderer>().sharedMaterial = p.Destroyed ? _destroyedMaterial : _beltMaterial;
+                    tile.GetComponent<Renderer>().sharedMaterial = p.Destroyed ? _destroyedMaterial : p.PipePiece > 0 ? PipeGhostMaterial() : _beltMaterial;
                     if (p.Destroyed)
                     {
                         destroyed++;
@@ -154,6 +159,11 @@ namespace GameLogic.Campaign.Regions
             }
             ActiveBeltTiles = n;
         }
+
+        private Material _pipeGhostMaterial;
+
+        private Material PipeGhostMaterial() =>
+            _pipeGhostMaterial != null ? _pipeGhostMaterial : _pipeGhostMaterial = new Material(Shader.Find("Sprites/Default")) { color = new Color(0.25f, 0.85f, 0.8f, 0.55f) };
 
         private GameObject Tile(int index)
         {
@@ -201,6 +211,25 @@ namespace GameLogic.Campaign.Regions
                             _hovering = true;
                             UiTooltip.HoverWorld(HoverKey, new Vector2(screen.x, screen.y), _provider);
                         }
+                        else if (PipeNetworkService.IsRunning && ReferenceEquals(PipeNetworkService.BoundState, state) && PipeNetworkService.Kernel.HasCell(cell.X, cell.Y))
+                        {
+                            // FG3-LOG-05（FGR-LOG-042）：已建成的管线件——网络的供给、需求、储量、瓶颈与根因。
+                            over = true;
+                            if (_hovering && UiTooltip.WorldKey == HoverKey)
+                            {
+                                UiTooltip.LeaveWorld();
+                            }
+                            _hovering = false;
+                            if (_hoveringBelt && UiTooltip.WorldKey == BeltHoverKey)
+                            {
+                                UiTooltip.LeaveWorld();
+                            }
+                            _hoveringBelt = false;
+                            _hoverState = state;
+                            _hoverCell = cell;
+                            _hoveringPipe = true;
+                            UiTooltip.HoverWorld(PipeHoverKey, new Vector2(screen.x, screen.y), _pipeProvider);
+                        }
                         else if (BeltNetworkService.IsRunning && ReferenceEquals(BeltNetworkService.BoundState, state) && BeltNetworkService.Kernel.HasCell(cell.X, cell.Y))
                         {
                             // FG3-LOG-03（FGR-LOG-081）：已建成的传送带——物品、速度、吞吐、状态与原因、耐久。
@@ -230,6 +259,34 @@ namespace GameLogic.Campaign.Regions
             {
                 ReleaseBeltHover();
             }
+            if ((!over || !_hoverOnPipeThisFrame()) && _hoveringPipe)
+            {
+                _hoveringPipe = false;
+                if (UiTooltip.WorldKey == PipeHoverKey)
+                {
+                    UiTooltip.LeaveWorld();
+                }
+            }
+        }
+
+        private bool _hoverOnPipeThisFrame() =>
+            _hoverState != null && PipeNetworkService.IsRunning && PipeNetworkService.Kernel.HasCell(_hoverCell.X, _hoverCell.Y) && !IsSiteCell(_hoverState, _hoverCell);
+
+        private const int PipeHoverKey = -733;
+        private bool _hoveringPipe;
+        private Func<TooltipContent> _pipeProviderCache;
+        private Func<TooltipContent> _pipeProvider => _pipeProviderCache ??= ProvidePipeHover;
+
+        /// <summary>悬停提示当前是否挂在已建成的管线件上（自检读）。</summary>
+        public bool HoveringPipe => _hoveringPipe;
+
+        private TooltipContent ProvidePipeHover()
+        {
+            if (!_hoveringPipe || _hoverState == null || !PipeNetworkService.TryDescribeHover(_hoverState, _hoverCell, out string title, out string body))
+            {
+                return null;
+            }
+            return new TooltipContent { Title = title, Body = body, Shortcut = GameActionId.OpenBuildMenu, CodexEntryId = "codex.logistics.fluid" };
         }
 
         private void ReleaseBeltHover()
@@ -266,7 +323,8 @@ namespace GameLogic.Campaign.Regions
             {
                 return HomeValleyController.IsPlannedGhost(b);
             }
-            return HomeValleyConstruction.IsPlannedMarker(HomeGridService.MapFor(state).GetBelt(cell));
+            HomeGridMap map = HomeGridService.MapFor(state);
+            return HomeValleyConstruction.IsPlannedMarker(map.GetBelt(cell)) || HomeValleyConstruction.IsPlannedMarker(map.GetPipe(cell));
         }
 
         private TooltipContent ProvideHover()
@@ -303,6 +361,11 @@ namespace GameLogic.Campaign.Regions
             {
                 GameLogic.View.UnityObjects.Release(_destroyedMaterial);
                 _destroyedMaterial = null;
+            }
+            if (_pipeGhostMaterial != null)
+            {
+                GameLogic.View.UnityObjects.Release(_pipeGhostMaterial);
+                _pipeGhostMaterial = null;
             }
             _beltTiles.Clear();
             _beltRevision = -1;

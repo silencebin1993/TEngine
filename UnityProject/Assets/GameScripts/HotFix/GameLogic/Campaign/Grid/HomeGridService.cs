@@ -102,6 +102,7 @@ namespace GameLogic.Campaign.Grid
                 _recordsRef = null;
                 // FG0-ARCH-02：传送带层是派生缓存（真相在传送带内核），新图建好就套回去——否则换图后建筑能压到带上、有带的区块会被回收。
                 Logistics.BeltNetworkService.ApplyGridLayer(state, _map);
+                Logistics.PipeNetworkService.ApplyGridLayer(state, _map);
                 // FG3-LOG-02：规划中的传送带（虚影）同样占着传送带层（标记值带“规划”位），换图后一并套回。
                 HomeValleyConstruction.ApplyPlannedBelts(state, _map);
             }
@@ -727,6 +728,41 @@ namespace GameLogic.Campaign.Grid
                 }
             }
             r.CellOk.Add(ok);
+            return r;
+        }
+
+        /// <summary>
+        /// FG3-LOG-05（FGR-LOG-040～043）：一格管线件（管线 / 泵 / 储罐 / 阀门）能不能放。与传送带同一套逐格规则（世界坐标上限、迷雾、地形可建、建筑 / 传送带 / 管线占用、
+        /// 开局锚点，同样可以放进核心保留通道——通道留给机器通行，地面管线不挡路），再加两条：① 污染达到不可建等级拦管线（FGR-LOG-012 只豁免净化塔和传送带）；
+        /// ② 泵必须压在某种流体的来源地形上（水源 / 油井，fg.TbFluid.sourceTerrain；FGR-LOG-041）。
+        /// </summary>
+        public static GridPlacementResult ValidatePipeCell(CampaignState state, GridCell cell, BinGames.Sim.Logistics.PipePieceKind kind, GridPlacementResult into = null)
+        {
+            GridPlacementResult r = ValidateBeltCell(state, cell, into);
+            r.TypeId = "pipe";
+            if (state == null || r.Reasons.Count > 0 && r.Reasons[0].Code == GridBlockReason.WorldLimit)
+            {
+                return r;
+            }
+            HomeGridMap.Chunk chunk = MapFor(state).ChunkAt(cell, out int idx);
+            bool ok = r.CellOk.Count > 0 && r.CellOk[0];
+            int blockLevel = GridContent.TuningInt("grid.pollution_block_level");
+            byte p = chunk.Pollution[idx];
+            if (p >= blockLevel)
+            {
+                r.Add(new GridReason(GridBlockReason.Pollution, "grid.reason.pollution", p.ToString()));
+                ok = false;
+            }
+            if (kind == BinGames.Sim.Logistics.PipePieceKind.Pump && Logistics.PipeNetworkService.SourceFluidOfTerrain(chunk.Terrain[idx]) <= 0)
+            {
+                GridTerrain t = GridContent.TerrainByCode(chunk.Terrain[idx]);
+                r.Add(new GridReason(GridBlockReason.PumpNeedsSource, "grid.reason.pump_needs_source", t != null ? t.NameKey : chunk.Terrain[idx].ToString()));
+                ok = false;
+            }
+            if (r.CellOk.Count > 0)
+            {
+                r.CellOk[0] = ok;
+            }
             return r;
         }
 
