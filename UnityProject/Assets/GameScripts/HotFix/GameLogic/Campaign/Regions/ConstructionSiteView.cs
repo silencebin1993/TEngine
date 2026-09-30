@@ -119,6 +119,7 @@ namespace GameLogic.Campaign.Regions
             _beltRevision = HomeValleyConstruction.Revision;
             int n = 0;
             int destroyed = 0;
+            int upgrading = 0;
             foreach (PlannedBeltRecord p in state.Grid?.PlannedBelts ?? Array.Empty<PlannedBeltRecord>())
             {
                 if (p?.Xs == null)
@@ -137,7 +138,9 @@ namespace GameLogic.Campaign.Regions
                     // FG3-LOG-03：被摧毁的虚影更窄更短（“断条”），红色调；普通规划是淡蓝长条。
                     // FG3-LOG-04：分流器 / 合流器的虚影是方块，地下传送带两端是横着的短条（形状区分，不只靠颜色；占位 B22）。
                     // FG3-LOG-05：管线层的虚影——管线是细方块、泵是小方块、储罐是大方块、阀门是沿流向的短条，青色调（与传送带的淡蓝区分；占位 B22）。
-                    tile.transform.localScale = p.Destroyed ? new Vector3(0.3f, 0.08f, 0.6f)
+                    // FG3-LOG-07：升级中的件——建成的件上面一块扁平的黄色大方板（形状 + 颜色都与虚影不同；占位 B22）。
+                    tile.transform.localScale = p.Upgrade ? new Vector3(0.95f, 0.03f, 0.95f)
+                        : p.Destroyed ? new Vector3(0.3f, 0.08f, 0.6f)
                         : p.PipePiece == 1 ? new Vector3(0.32f, 0.1f, 0.32f)
                         : p.PipePiece == 2 ? new Vector3(0.6f, 0.1f, 0.6f)
                         : p.PipePiece == 3 ? new Vector3(0.9f, 0.1f, 0.9f)
@@ -145,14 +148,23 @@ namespace GameLogic.Campaign.Regions
                         : p.NodeKind == 1 || p.NodeKind == 2 ? new Vector3(0.85f, 0.08f, 0.85f)
                         : p.NodeKind == 3 ? new Vector3(0.9f, 0.08f, 0.35f)
                         : new Vector3(0.55f, 0.08f, 0.9f);
-                    tile.GetComponent<Renderer>().sharedMaterial = p.Destroyed ? _destroyedMaterial : p.PipePiece > 0 ? PipeGhostMaterial() : _beltMaterial;
+                    if (p.Upgrade)
+                    {
+                        tile.transform.position = new Vector3(p.Xs[i], 0.3f, p.Ys[i]);
+                    }
+                    tile.GetComponent<Renderer>().sharedMaterial = p.Upgrade ? UpgradeMaterial() : p.Destroyed ? _destroyedMaterial : p.PipePiece > 0 ? PipeGhostMaterial() : _beltMaterial;
                     if (p.Destroyed)
                     {
                         destroyed++;
                     }
+                    if (p.Upgrade)
+                    {
+                        upgrading++;
+                    }
                 }
             }
             ActiveDestroyedTiles = destroyed;
+            ActiveUpgradeTiles = upgrading;
             for (int i = n; i < _beltTiles.Count; i++)
             {
                 _beltTiles[i].SetActive(false);
@@ -161,6 +173,13 @@ namespace GameLogic.Campaign.Regions
         }
 
         private Material _pipeGhostMaterial;
+        private Material _upgradeMaterial;
+
+        private Material UpgradeMaterial() =>
+            _upgradeMaterial != null ? _upgradeMaterial : _upgradeMaterial = new Material(Shader.Find("Sprites/Default")) { color = new Color(0.95f, 0.8f, 0.2f, 0.5f) };
+
+        /// <summary>FG3-LOG-07：当前画着的“升级中”标记格数（自检读）。</summary>
+        public int ActiveUpgradeTiles { get; private set; }
 
         private Material PipeGhostMaterial() =>
             _pipeGhostMaterial != null ? _pipeGhostMaterial : _pipeGhostMaterial = new Material(Shader.Find("Sprites/Default")) { color = new Color(0.25f, 0.85f, 0.8f, 0.55f) };
@@ -417,6 +436,11 @@ namespace GameLogic.Campaign.Regions
             {
                 GameLogic.View.UnityObjects.Release(_pipeGhostMaterial);
                 _pipeGhostMaterial = null;
+            }
+            if (_upgradeMaterial != null)
+            {
+                GameLogic.View.UnityObjects.Release(_upgradeMaterial);
+                _upgradeMaterial = null;
             }
             _beltTiles.Clear();
             _beltRevision = -1;

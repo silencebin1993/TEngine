@@ -101,6 +101,13 @@ namespace GameLogic.UI.Kit
                 ConstructionQueuePanelUIToolkit.Close();
             }
 
+            // FG3-LOG-07：布局库开着时是模态（上下文 = 界面），同一个键（默认 Ctrl+B）再按一次关闭；关着时由家园建造模式按战略 / 建造上下文打开。
+            if (LayoutLibraryPanelUIToolkit.IsOpen && !UiConfirmDialog.IsOpen
+                && InputRouter.ConsumeGlobalAction(GameActionId.LayoutLibrary, allowDuringModal: true))
+            {
+                LayoutLibraryPanelUIToolkit.Close();
+            }
+
             // FG3-LOG-06：电网面板开关（默认 Alt+G）。开着时是模态（上下文 = 界面），同一个键再按一次关闭；关着时按战略 / 建造上下文打开。
             if (PowerPanelUIToolkit.IsOpen)
             {

@@ -160,6 +160,9 @@ namespace GameLogic.EditorTools
                 // 拓扑变化才重算、确定性与存档、结冰计时接口、渲染实例、正式输入（三个种子）、家园接错流体、悬停、管线面板（真 UXML + 冲洗确认 + 布局探针）、拆除、真文件存读档、暂停与倍速、观察一致、120 帧性能。
                 _fail += FgPipeSelfCheck.Run(Report);
                 _fail += FgPowerGridSelfCheck.Run(Report); // FG3-LOG-06：电力子网与电塔（FGT-LOG-008）。
+                // FG3-LOG-07：规划工具——框选复制粘贴（连同设置、旋转、非法部分红叉、未解锁条目）、布局库（真文件、跨存档、缩略图、导出导入、面板真 UXML + 布局探针）、
+                // 撤销重做 50 步逐步状态一致（FGT-LOG-004）与已完工建筑 → 拆除任务 + 提示、升级规划（差额收费、设置保留）、吸管与复制设置、9 个快捷键可重绑、暂停 / 倍速 / 观察一致、性能。
+                _fail += FgPlanningToolsSelfCheck.Run(Report);
                 // FG0-ARCH-05：世界生成与区块流式加载——确定性（四种访问顺序 / 三条编译路径）、随机流分离、表面、规划层、坐标、
                 // 工作线程流式加载与性能、差异存档、生成器版本回归哈希、暂停倍速与后台一致、叠加层“生成中”占位、暂停菜单种子。
                 _fail += FgWorldGenSelfCheck.Run(Report);

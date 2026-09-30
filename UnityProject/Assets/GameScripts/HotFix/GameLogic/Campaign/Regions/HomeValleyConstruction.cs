@@ -641,6 +641,10 @@ namespace GameLogic.Campaign.Regions
 
         private static bool CommitBeltCell(CampaignState state, PlannedBeltRecord p, int i)
         {
+            if (p.Upgrade)
+            {
+                return CommitUpgradeCell(state, p, i);
+            }
             if (p.PipePiece > 0)
             {
                 return CommitPipeCell(state, p, i);
@@ -727,6 +731,52 @@ namespace GameLogic.Campaign.Regions
                 }
                 LastPipeCommitFailure = r.Describe();
                 return false;
+            }
+            if (p.PipeSettings != 0 && (kind == PipePieceKind.Tank || kind == PipePieceKind.Valve))
+            {
+                // FG3-LOG-07：粘贴 / 吸管带过来的储罐模式、优先级、阀门开关，建成那一刻生效。
+                Grid.PlanSettings.ApplyToPiece(state, cell, kind == PipePieceKind.Tank ? Grid.PlanEntryKind.Tank : Grid.PlanEntryKind.Valve, p.PipeSettings, 0, 0);
+            }
+            p.CellState[i] = 1;
+            Revision++;
+            return true;
+        }
+
+        /// <summary>
+        /// FG3-LOG-07：升级规划的一格（地下传送带是整条）改成新等级。格子上已经不是升级前的那件（被拆了、换了别的、已经是新等级）时建不成：
+        /// 这一格作废，它的差额材料留在现场给下一格，最后多出来的全额退回（<see cref="OnSiteCompleted"/>）。
+        /// </summary>
+        private static bool CommitUpgradeCell(CampaignState state, PlannedBeltRecord p, int i)
+        {
+            var cell = new GridCell(p.Xs[i], p.Ys[i]);
+            if (p.PipePiece > 0)
+            {
+                if (!PipeNetworkService.TryGetPiece(cell, out PipePieceKind pk, out int pt) || pk != PipePieceKind.Pipe || pt != p.FromTier
+                    || !PipeNetworkService.TrySetTier(state, cell, p.Tier).Ok)
+                {
+                    return false;
+                }
+                p.CellState[i] = 1;
+                Revision++;
+                return true;
+            }
+            if (!BeltNetworkService.TryGetPiece(cell, out BeltNodeKind kind, out int tier) || tier != p.FromTier)
+            {
+                return false;
+            }
+            bool under = IsUnderground(p);
+            if (under ? kind != BeltNodeKind.UndergroundIn || i != 0 || p.Xs.Length < 2 : kind != BeltNodeKind.Belt)
+            {
+                return false;
+            }
+            if (!BeltNetworkService.TrySetTier(state, cell, p.Tier).Ok)
+            {
+                return false;
+            }
+            if (under)
+            {
+                HomeGridService.MapFor(state).SetBelt(new GridCell(p.Xs[1], p.Ys[1]), (ushort)(p.Tier + 1)); // 出口格的格网层也换成新等级
+                p.CellState[1] = 1;
             }
             p.CellState[i] = 1;
             Revision++;
@@ -961,7 +1011,31 @@ namespace GameLogic.Campaign.Regions
             }
             foreach (PlannedBeltRecord p in plans)
             {
-                if (p?.Xs == null)
+                if (p?.Xs == null || p.Upgrade)
+                {
+                    continue; // FG3-LOG-07：升级规划的格子上是建成的真件，不是“规划中的传送带”。
+                }
+                for (int i = 0; i < p.Xs.Length; i++)
+                {
+                    if (p.CellState[i] == 0 && p.Xs[i] == cell.X && p.Ys[i] == cell.Y)
+                    {
+                        plan = p;
+                        index = i;
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        /// <summary>FG3-LOG-07（FGR-LOG-010）：这一格是不是在一份还没做完的升级规划里（格子上是建成的件，正在等机器来升级）。</summary>
+        public static bool TryFindUpgradeCell(CampaignState state, GridCell cell, out PlannedBeltRecord plan, out int index)
+        {
+            plan = null;
+            index = -1;
+            foreach (PlannedBeltRecord p in state?.Grid?.PlannedBelts ?? Array.Empty<PlannedBeltRecord>())
+            {
+                if (p?.Xs == null || !p.Upgrade)
                 {
                     continue;
                 }
@@ -976,6 +1050,50 @@ namespace GameLogic.Campaign.Regions
                 }
             }
             return false;
+        }
+
+        /// <summary>
+        /// FG3-LOG-07（FGR-LOG-010“原地升级，保留设置；生成施工任务，按新旧材料的差额收费”）：给一组已建成的同种物流件放一份升级规划——
+        /// 格子上的件照常运转（不占“规划”标记），一张施工单：机器从仓库取差额材料、走到现场，一格一格改成新等级（物品、流体、设置都不动）。
+        /// 地下传送带一条一份（<paramref name="cells"/> = [入口, 出口]，<paramref name="diffPerUnit"/> 是每端差额）。调用方已经保证每一格都是建成的、还是旧等级。
+        /// </summary>
+        public static string PlanUpgrade(CampaignState state, IReadOnlyList<GridCell> cells, IReadOnlyList<int> dirs, BeltNodeKind nodeKind, bool pipe,
+            int fromTier, int toTier, int diffPerUnit)
+        {
+            GridState grid = state.Grid;
+            string planId = "b" + grid.NextBeltPlanSerial.ToString(CultureInfo.InvariantCulture);
+            grid.NextBeltPlanSerial++;
+            int n = cells.Count;
+            var rec = new PlannedBeltRecord
+            {
+                PlanId = planId,
+                Tier = toTier,
+                FromTier = fromTier,
+                Upgrade = true,
+                ScrapPerCell = Math.Max(0, diffPerUnit),
+                Xs = new int[n],
+                Ys = new int[n],
+                Dirs = new int[n],
+                CellState = new int[n],
+                NodeKind = pipe ? 0 : (int)nodeKind,
+                RatioL = 1,
+                RatioR = 1,
+                PipePiece = pipe ? (int)PipePieceKind.Pipe + 1 : 0,
+            };
+            for (int i = 0; i < n; i++)
+            {
+                rec.Xs[i] = cells[i].X;
+                rec.Ys[i] = cells[i].Y;
+                rec.Dirs[i] = i < dirs.Count ? dirs[i] : 0;
+            }
+            PlannedBeltRecord[] old = grid.PlannedBelts ?? Array.Empty<PlannedBeltRecord>();
+            var next = new PlannedBeltRecord[old.Length + 1];
+            Array.Copy(old, next, old.Length);
+            next[old.Length] = rec;
+            grid.PlannedBelts = next;
+            HomeValleyWorkOrders.CreateConstructionOrder(state, BeltPlanPrefix + planId, rec.ScrapPerCell * n, BeltSecondsPerCell * (IsUnderground(rec) ? 2 : 1));
+            Revision++;
+            return planId;
         }
 
         public static bool IsPlannedMarker(ushort beltLayerValue) => (beltLayerValue & PlannedBeltFlag) != 0;
@@ -1067,9 +1185,9 @@ namespace GameLogic.Campaign.Regions
             }
             foreach (PlannedBeltRecord p in plans)
             {
-                if (p?.Xs == null)
+                if (p?.Xs == null || p.Upgrade)
                 {
-                    continue;
+                    continue; // FG3-LOG-07：升级规划不占“规划”标记（格子上是建成的真件）。
                 }
                 for (int i = 0; i < p.Xs.Length; i++)
                 {
@@ -1087,7 +1205,10 @@ namespace GameLogic.Campaign.Regions
             int n = 0;
             foreach (PlannedBeltRecord p in state?.Grid?.PlannedBelts ?? Array.Empty<PlannedBeltRecord>())
             {
-                n += UnbuiltCells(p);
+                if (p != null && !p.Upgrade)
+                {
+                    n += UnbuiltCells(p);
+                }
             }
             return n;
         }
@@ -1280,8 +1401,12 @@ namespace GameLogic.Campaign.Regions
 
         /// <summary>FG3-LOG-04：规划里放的物流件的玩家名（传送带 T1 / 分流器 / 合流器 / 地下传送带 T1）。</summary>
         public static string PieceName(PlannedBeltRecord p) => p == null ? string.Empty
-            : IsPipePlan(p) ? PipeNetworkService.PieceName((PipePieceKind)Math.Max(0, Math.Min(3, p.PipePiece - 1)), p.Tier)
-            : BeltNetworkService.PieceName((BeltNodeKind)p.NodeKind, p.Tier);
+            : p.Upgrade ? GameText.Format("plan.upgrade.piece_name", BaseName(p, p.FromTier), BaseName(p, p.Tier)) // FG3-LOG-07：“传送带 T1 → 传送带 T2”
+            : BaseName(p, p.Tier);
+
+        private static string BaseName(PlannedBeltRecord p, int tier) =>
+            IsPipePlan(p) ? PipeNetworkService.PieceName((PipePieceKind)Math.Max(0, Math.Min(3, p.PipePiece - 1)), tier)
+            : BeltNetworkService.PieceName((BeltNodeKind)p.NodeKind, tier);
 
         private static string DestroyedStatus(PlannedBeltRecord p, int i) =>
             GameText.Format("build.queue.destroyed_status", GameText.Get(GridMath.DirTextKey((GridDir)p.Dirs[i])));
@@ -1642,6 +1767,10 @@ namespace GameLogic.Campaign.Regions
                     return true;
                 }
                 order = HomeValleyWorkOrders.FindActiveBuild(state, BeltPlanPrefix + p.PlanId);
+            }
+            else if (TryFindUpgradeCell(state, cell, out PlannedBeltRecord up, out _))
+            {
+                order = HomeValleyWorkOrders.FindActiveBuild(state, BeltPlanPrefix + up.PlanId); // FG3-LOG-07：升级中的件。
             }
             else
             {

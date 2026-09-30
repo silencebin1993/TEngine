@@ -590,6 +590,21 @@ namespace GameLogic.Campaign.Logistics
             return PipeOpResult.Kernel(r);
         }
 
+        /// <summary>FG3-LOG-07（FGR-LOG-010）：原地升级一格管线（改等级，格网管线层同步写新值）。</summary>
+        public static PipeOpResult TrySetTier(CampaignState state, GridCell cell, int tier)
+        {
+            if (!CanEdit(state, out PipeOpResult refuse))
+            {
+                return refuse;
+            }
+            PipeResult r = _kernel.SetTier(cell.X, cell.Y, tier);
+            if (r == PipeResult.Ok)
+            {
+                HomeGridService.MapFor(state).SetPipe(cell, LayerValue(PipePieceKind.Pipe, tier));
+            }
+            return PipeOpResult.Kernel(r);
+        }
+
         public static PipeOpResult TrySetTankMode(CampaignState state, GridCell cell, PipeTankMode mode) =>
             CanEdit(state, out PipeOpResult refuse) ? PipeOpResult.Kernel(_kernel.SetTankMode(cell.X, cell.Y, mode)) : refuse;
 

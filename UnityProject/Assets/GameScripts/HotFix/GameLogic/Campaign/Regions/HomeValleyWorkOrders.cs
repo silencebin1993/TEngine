@@ -584,6 +584,53 @@ namespace GameLogic.Campaign.Regions
             return WorkOrderOpResult.Ok(workOrderId);
         }
 
+        /// <summary>
+        /// FG3-LOG-07（FGR-LOG-010 升级规划）：在原位生成“升级目标”虚影（新类型、同一枢轴格与朝向）与一张施工单（唯一调用方 <see cref="Grid.HomeGridService.TryUpgrade"/>）。
+        /// 沿用搬迁的“完工那一刻原子换位”：虚影与原建筑占地完全重叠（占格让给原建筑），完工前原建筑照常运转；
+        /// 施工要的材料 = 新旧造价的差额（<paramref name="diff"/>），机器从仓库取料送到现场（与普通虚影同一套取料腿）；完工时原建筑换成新类型，
+        /// 保留 ID、生命、运行状态、库存、队列、电力优先级，投入 = 原投入 + 差额（拆除时全额返还）。取消 = 已到的差额材料全额退回，原建筑不受影响。
+        /// </summary>
+        public static WorkOrderOpResult TryCreateUpgradeAt(CampaignState state, BuildingRecord source, string ghostId, string toTypeId, int diff, float seconds)
+        {
+            if (source == null)
+            {
+                return WorkOrderOpResult.Fail("building-not-found");
+            }
+            if (state.BuildingRecords?.Any(b => b.BuildingId == ghostId) ?? false)
+            {
+                return WorkOrderOpResult.Fail("already-upgrading");
+            }
+            var ghost = new BuildingRecord
+            {
+                BuildingId = ghostId,
+                BuildingTypeId = toTypeId,
+                RegionId = HomeValleyLayout.RegionId,
+                Position = source.Position,
+                Rotation = source.Rotation,
+                GridX = source.GridX,
+                GridY = source.GridY,
+                Health = source.Health,
+                ConstructionState = BuildingConstructionState.Planned,
+                PowerPriority = source.PowerPriority,
+                PowerState = BuildingPowerState.NotApplicable,
+                Inventory = Array.Empty<CargoEntry>(),
+                QueueIds = Array.Empty<string>(),
+                BlockedReason = null,
+                RelocateFromId = source.BuildingId,
+                ConstructionRequired = Math.Max(0, diff),
+                ConstructionDelivered = 0,
+            };
+            state.BuildingRecords = (state.BuildingRecords ?? Array.Empty<BuildingRecord>()).Append(ghost).ToArray();
+            string workOrderId = ghostId + ":build:" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            var order = NewOrder(state, workOrderId, WorkOrderKind.Build, ghostId, 0, resourceTransactionId: null, duration: Mathf.Max(0.1f, seconds));
+            order.Leg = ghost.ConstructionRequired > 0 ? 1 : 0;
+            order.State = WorkOrderState.Ready;
+            Append(state, order);
+            MarkAssignmentDirty();
+            HomeValleyConstruction.Touch();
+            return WorkOrderOpResult.Ok(workOrderId);
+        }
+
         /// <summary>FG3-LOG-01：还没开工的规划被挪到新位置——正在赶路的机器放下这单（回待分配池），按新位置重新分配；
         /// 旧的到达回调因为工单不再是“已分配”而失效（<see cref="OnArrivedAtWork"/> 只认 Reserved）。
         /// 原先领单的机器同时收到停止移动（与路径受阻放单一致）：本方法由格网服务调用、拿不到调用方的移动委托，
@@ -1537,7 +1584,13 @@ namespace GameLogic.Campaign.Regions
             BuildingRecord b = state?.BuildingRecords?.FirstOrDefault(x => x.BuildingId == order.TargetId);
             if (b != null)
             {
-                // FG3-LOG-01：搬迁目标虚影的施工单写明是搬迁（“维修台（搬迁）”），不与新建混淆。
+                // FG3-LOG-01：搬迁目标虚影的施工单写明是搬迁（“维修台（搬迁）”），不与新建混淆。FG3-LOG-07：升级写“电塔 T1 → 电塔 T2”。
+                if (Grid.HomeGridService.IsUpgradeGhost(b))
+                {
+                    BuildingRecord from = state.BuildingRecords.FirstOrDefault(x => x.BuildingId == b.RelocateFromId);
+                    return GameLogic.Localization.GameText.Format("plan.upgrade.order", Grid.HomeGridService.DisplayName(from?.BuildingTypeId ?? b.BuildingTypeId),
+                        Grid.HomeGridService.DisplayName(b.BuildingTypeId));
+                }
                 return !string.IsNullOrEmpty(b.RelocateFromId)
                     ? GameLogic.Localization.GameText.Format("ui.build.relocate_order", Grid.HomeGridService.DisplayName(b.BuildingTypeId))
                     : Grid.HomeGridService.DisplayName(b.BuildingTypeId);
@@ -1565,6 +1618,7 @@ namespace GameLogic.Campaign.Regions
             PendingLeg.Clear();
             WaitingNotified.Clear();
             HomeValleyConstruction.ResetSessionState();
+            Grid.PlanHistory.ResetSession(); // FG3-LOG-07：撤销栈在存档里；这里只清“正在记录的一步”这类瞬态
         }
 
         /// <summary>ERD-WRK-002："空闲机器每 0.5 秒或收到脏事件时评估一次"——本方法就是那次评估，
@@ -1946,7 +2000,8 @@ namespace GameLogic.Campaign.Regions
                 HomeValleyConstruction.MigrateLegacyBuildOrder(state, order);
             }
             BuildingRecord relocation = state.BuildingRecords?.FirstOrDefault(b => b.BuildingId == order.TargetId);
-            if (relocation != null && !string.IsNullOrEmpty(relocation.RelocateFromId))
+            // FG3-LOG-07：升级虚影要材料（新旧差额），走下面的取料 / 施工进度；搬迁不花材料，按工期施工。
+            if (relocation != null && !string.IsNullOrEmpty(relocation.RelocateFromId) && relocation.ConstructionRequired <= 0)
             {
                 order.Progress += dt; // 搬迁不花材料（材料就是原建筑本身），按工期施工。
                 if (order.Progress >= order.Duration)
@@ -2085,6 +2140,13 @@ namespace GameLogic.Campaign.Regions
             int sourceIndex = Array.FindIndex(records, b => b != null && b.BuildingId == ghost.RelocateFromId);
             if (sourceIndex < 0)
             {
+                if (ghost.ConstructionDelivered > 0)
+                {
+                    // FG3-LOG-07：升级虚影已经运到现场的差额材料全额退回（原建筑在施工期间没了）。
+                    HomeValleyConstruction.ReturnMaterials(state, ghost.Position, CampaignEconomyLedger.ResourceScrap, ghost.ConstructionDelivered,
+                        order.WorkOrderId + ":refund");
+                    ghost.ConstructionDelivered = 0;
+                }
                 state.BuildingRecords = records.Where(b => b.BuildingId != ghost.BuildingId).ToArray();
                 order.State = WorkOrderState.Failed;
                 order.FailureReason = "relocate-source-gone";
@@ -2094,10 +2156,13 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             BuildingRecord source = records[sourceIndex];
+            bool upgrade = Grid.HomeGridService.IsUpgradeGhost(ghost);
+            string fromType = source.BuildingTypeId;
             var moved = new BuildingRecord
             {
                 BuildingId = source.BuildingId,
-                BuildingTypeId = source.BuildingTypeId,
+                // FG3-LOG-07：升级虚影带着新类型（搬迁虚影的类型与原建筑相同）。
+                BuildingTypeId = ghost.BuildingTypeId,
                 RegionId = source.RegionId,
                 Position = ghost.Position,
                 Rotation = ghost.Rotation,
@@ -2115,7 +2180,8 @@ namespace GameLogic.Campaign.Regions
                 Inventory = source.Inventory ?? Array.Empty<CargoEntry>(),
                 QueueIds = source.QueueIds ?? Array.Empty<string>(),
                 BlockedReason = source.BlockedReason,
-                InvestedScrap = source.InvestedScrap,
+                // FG3-LOG-07：升级把差额建了进去，拆除时连同差额全额返还。
+                InvestedScrap = source.InvestedScrap + Math.Max(0, ghost.ConstructionRequired),
                 RelocateFromId = null,
             };
             var next = new List<BuildingRecord>(records.Length);
@@ -2136,8 +2202,11 @@ namespace GameLogic.Campaign.Regions
             MachineRegistry.RecordJobCompleted(order.AssignedMachineLogicId);
             MarkAssignmentDirty();
             Grid.HomeGridService.OnRelocationCompleted(state, moved);
+            HomeValleyConstruction.Touch();
             Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.BuildComplete, moved.Position,
-                GameLogic.Localization.GameText.Format("ui.build.relocated_done", Grid.HomeGridService.DisplayName(moved.BuildingTypeId)),
+                upgrade
+                    ? GameLogic.Localization.GameText.Format("plan.upgrade.done", Grid.HomeGridService.DisplayName(fromType), Grid.HomeGridService.DisplayName(moved.BuildingTypeId))
+                    : GameLogic.Localization.GameText.Format("ui.build.relocated_done", Grid.HomeGridService.DisplayName(moved.BuildingTypeId)),
                 Feedback.FeedbackCues.BuildingTypeSfx(moved.BuildingTypeId));
         }
 

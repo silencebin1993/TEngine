@@ -472,6 +472,31 @@ namespace BinGames.Sim.Logistics
             return _lookup.TryGetValue(Key(x, y), out int i) ? i : -1;
         }
 
+        /// <summary>FG3-LOG-07（FGR-LOG-010 升级规划）：原地改一格管线的等级（只有管线分等级；流体、存量、拓扑不变，网络按最低等级限流在下次重算时更新）。</summary>
+        public PipeResult SetTier(int x, int y, int tier)
+        {
+            if (tier < 0 || tier >= PipeConst.TierCount)
+            {
+                return PipeResult.InvalidTier;
+            }
+            int i = Find(x, y);
+            if (i < 0)
+            {
+                return PipeResult.NotFound;
+            }
+            if (_kind[i] != (byte)PipePieceKind.Pipe)
+            {
+                return PipeResult.WrongKind;
+            }
+            if (_tier[i] == tier)
+            {
+                return PipeResult.Ok;
+            }
+            _tier[i] = (byte)tier;
+            MarkDirty();
+            return PipeResult.Ok;
+        }
+
         /// <summary>FGR-LOG-043：储罐模式（双向 / 只进 / 只出）。</summary>
         public PipeResult SetTankMode(int x, int y, PipeTankMode mode)
         {

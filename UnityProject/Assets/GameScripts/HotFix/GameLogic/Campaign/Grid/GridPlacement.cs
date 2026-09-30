@@ -63,6 +63,19 @@ namespace GameLogic.Campaign.Grid
         PipeFluidConflict,
         /// <summary>阀门前后直接接着另一个阀门（FGR-LOG-043：中间至少隔一格管线）。</summary>
         PipeValveChained,
+        // ── FG3-LOG-07（只追加）──
+        /// <summary>这件东西没有可以复制的设置（例如传送带、不用电的建筑）。</summary>
+        NoSettings,
+        /// <summary>复制设置：两件不是同类或兼容类型（分流器的设置不能用在储罐上）。</summary>
+        SettingsIncompatible,
+        /// <summary>升级规划：这一件已经是最高等级 / 没有升级路线。</summary>
+        NoUpgrade,
+        /// <summary>升级规划：高一级还没解锁。</summary>
+        UpgradeLocked,
+        /// <summary>升级规划：这一件已经在升级中。</summary>
+        Upgrading,
+        /// <summary>复制 / 布局：件数超过上限（plan.layout_max_entries）。</summary>
+        TooManyEntries,
     }
 
     /// <summary>一条原因：原因码 + 文本键 + 参数（参数本身若是文本键，显示时按当前语言解析）。</summary>
@@ -123,6 +136,13 @@ namespace GameLogic.Campaign.Grid
                 case GridBlockReason.RelocateSourceGone: return new GridReason(code, "grid.reason.relocate_source_gone");
                 // FG3-LOG-04：跨度超限与地下重叠的正式原因带参数（等级名、上限、交叉格），由 HomeGridService 构造；这里只给无参兜底。
                 case GridBlockReason.UndergroundShape: return new GridReason(code, "grid.reason.under_not_straight");
+                // FG3-LOG-07：规划工具的原因（带参数的由 PlanningService / PlanSettings 构造，这里给无参数时的稳定文本）。
+                case GridBlockReason.NoSettings: return new GridReason(code, "plan.reason.no_settings_plain");
+                case GridBlockReason.SettingsIncompatible: return new GridReason(code, "plan.reason.incompatible_plain");
+                case GridBlockReason.NoUpgrade: return new GridReason(code, "plan.reason.no_upgrade");
+                case GridBlockReason.UpgradeLocked: return new GridReason(code, "plan.reason.upgrade_locked_plain");
+                case GridBlockReason.Upgrading: return new GridReason(code, "plan.reason.upgrading");
+                case GridBlockReason.TooManyEntries: return new GridReason(code, "plan.reason.too_many_plain");
                 default: return new GridReason(code, "grid.reason.unknown_type");
             }
         }
@@ -217,6 +237,13 @@ namespace GameLogic.Campaign.Grid
             BeltsCleared,
             /// <summary>原地反转了一格传送带。</summary>
             BeltReversed,
+            // ── FG3-LOG-07 ──
+            /// <summary>粘贴：放下了一批虚影（合法的部分；非法的部分没放并写明原因）。</summary>
+            Pasted,
+            /// <summary>升级规划：生成了升级施工。</summary>
+            UpgradePlanned,
+            /// <summary>复制设置：写到了目标上。</summary>
+            SettingsApplied,
         }
 
         public readonly Kind Outcome;

@@ -324,6 +324,10 @@ namespace GameLogic.Campaign.Grid
             }
 
             BuildingRecord ghost = FindRelocationGhost(state, b.BuildingId);
+            if (ghost != null && IsUpgradeGhost(ghost))
+            {
+                return GridOpResult.Fail(GridReason.Of(GridBlockReason.Upgrading)); // FG3-LOG-07：升级中的建筑不能搬（先取消升级）。
+            }
             if (ghost != null)
             {
                 return MovePlan(state, ghost, pivot, rot);
@@ -834,7 +838,7 @@ namespace GameLogic.Campaign.Grid
             }
             foreach (PlannedBeltRecord p in state?.Grid?.PlannedBelts ?? Array.Empty<PlannedBeltRecord>())
             {
-                if (p == null || p.NodeKind != (int)BeltNodeKind.UndergroundIn || p.Xs == null || p.Xs.Length < 2 || p.CellState[0] != 0
+                if (p == null || p.Upgrade || p.NodeKind != (int)BeltNodeKind.UndergroundIn || p.Xs == null || p.Xs.Length < 2 || p.CellState[0] != 0
                     || ((p.Dirs[0] & 1) == 0) != ns)
                 {
                     continue;
@@ -881,7 +885,7 @@ namespace GameLogic.Campaign.Grid
             {
                 return GridOpResult.Fail(new GridReason(GridBlockReason.Busy, "logistics.pipe.reason.save_preserved"));
             }
-            HomeValleyConstruction.PlanBelts(state, plan);
+            LastPlanId = HomeValleyConstruction.PlanBelts(state, plan);
             if (plan.Cells.Count > 1)
             {
                 Core.GuidanceHooks.Raise(Core.GuidanceHooks.BuildFirstDrag);
@@ -895,6 +899,9 @@ namespace GameLogic.Campaign.Grid
             LastPlanPipe = plan.Pipe;
             return new GridOpResult(GridOpResult.Kind.BeltsPlaced, null);
         }
+
+        /// <summary>FG3-LOG-07：最近一次拖拽 / 单击放下的规划 ID（撤销栈记录、吸管带设置用）。</summary>
+        public static string LastPlanId { get; private set; }
 
         /// <summary>最近一次铺设 / 拆除传送带的格数与废料（状态行显示用）。</summary>
         public static int LastBeltCount { get; private set; }
@@ -1187,9 +1194,9 @@ namespace GameLogic.Campaign.Grid
             {
                 refuse = GridReason.Of(GridBlockReason.NotRebuildable);
             }
-            else if (FindRelocationGhost(state, b.BuildingId) != null)
+            else if (FindRelocationGhost(state, b.BuildingId) is BuildingRecord moving)
             {
-                refuse = GridReason.Of(GridBlockReason.Relocating);
+                refuse = GridReason.Of(IsUpgradeGhost(moving) ? GridBlockReason.Upgrading : GridBlockReason.Relocating);
             }
             else if (b.ConstructionState == BuildingConstructionState.Damaged)
             {

@@ -115,6 +115,10 @@ public partial class Tables
     /// </summary>
     public fg.TbBuildTool TbBuildTool {get; }
     /// <summary>
+    /// 升级路线
+    /// </summary>
+    public fg.TbBuildUpgrade TbBuildUpgrade {get; }
+    /// <summary>
     /// 载体读法
     /// </summary>
     public fg.TbCarrierReading TbCarrierReading {get; }
@@ -283,6 +287,7 @@ public partial class Tables
         TbBuildingGrid = new fg.TbBuildingGrid(loader("fg_tbbuildinggrid"));
         TbBuildingPort = new fg.TbBuildingPort(loader("fg_tbbuildingport"));
         TbBuildTool = new fg.TbBuildTool(loader("fg_tbbuildtool"));
+        TbBuildUpgrade = new fg.TbBuildUpgrade(loader("fg_tbbuildupgrade"));
         TbCarrierReading = new fg.TbCarrierReading(loader("fg_tbcarrierreading"));
         TbCodexEntry = new fg.TbCodexEntry(loader("fg_tbcodexentry"));
         TbCombatComponent = new fg.TbCombatComponent(loader("fg_tbcombatcomponent"));
@@ -349,6 +354,7 @@ public partial class Tables
         TbBuildingGrid.ResolveRef(this);
         TbBuildingPort.ResolveRef(this);
         TbBuildTool.ResolveRef(this);
+        TbBuildUpgrade.ResolveRef(this);
         TbCarrierReading.ResolveRef(this);
         TbCodexEntry.ResolveRef(this);
         TbCombatComponent.ResolveRef(this);

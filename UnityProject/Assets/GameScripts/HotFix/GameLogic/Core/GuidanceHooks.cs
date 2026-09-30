@@ -131,6 +131,22 @@ namespace GameLogic.Core
         public const string PowerPanelFirstOpen = "power.panel.first_open";
         /// <summary>FG3-LOG-06（FG03 第 5 节“电塔被摧毁，电网断成两段”）：第一次有电网断开。</summary>
         public const string PowerFirstSplit = "power.first_split";
+        /// <summary>FG3-LOG-07：第一次框选复制（引导内容：框里的建筑、传送带、管线连同设置一起复制，Ctrl+V 粘贴、R 旋转、存进布局库）。</summary>
+        public const string BuildFirstCopy = "build.plan.first_copy";
+        /// <summary>FG3-LOG-07：第一次粘贴（引导内容：红叉的部分不会放、放下的是虚影、一步就能撤销）。</summary>
+        public const string BuildFirstPaste = "build.plan.first_paste";
+        /// <summary>FG3-LOG-07：第一次撤销（引导内容：已经建成的会生成拆除任务，不会瞬间消失；Ctrl+Y 重做）。</summary>
+        public const string BuildFirstUndo = "build.plan.first_undo";
+        /// <summary>FG3-LOG-07：第一次升级规划（引导内容：原地升级、只收差额、设置保留）。</summary>
+        public const string BuildFirstUpgrade = "build.plan.first_upgrade";
+        /// <summary>FG3-LOG-07：第一次用吸管（引导内容：选中同类，带上朝向和设置）。</summary>
+        public const string BuildFirstEyedropper = "build.plan.first_eyedropper";
+        /// <summary>FG3-LOG-07：第一次复制设置（引导内容：同类或都用电的建筑之间能复制）。</summary>
+        public const string BuildFirstCopySettings = "build.plan.first_copy_settings";
+        /// <summary>FG3-LOG-07：第一次把布局存进布局库（引导内容：布局库跨存档，换一局也能用）。</summary>
+        public const string BuildFirstLayoutSaved = "build.plan.first_layout_saved";
+        /// <summary>FG3-LOG-07：第一次打开布局库。</summary>
+        public const string LayoutLibraryFirstOpen = "build.plan.library_first_open";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -157,6 +173,7 @@ namespace GameLogic.Core
             LogisticsFirstSplitter, LogisticsFirstMerger, LogisticsFirstUnderground, LogisticsSplitterFirstBlocked, LogisticsNodePanelFirstOpen,
             LogisticsFirstPipe, LogisticsPipeFirstFluidConflict, LogisticsPipeFirstNoSupply, LogisticsPipePanelFirstOpen, LogisticsPipeFirstFlush,
             PowerPoleFirstPlaced, PowerFirstBrownout, PowerPanelFirstOpen, PowerFirstSplit,
+            BuildFirstCopy, BuildFirstPaste, BuildFirstUndo, BuildFirstUpgrade, BuildFirstEyedropper, BuildFirstCopySettings, BuildFirstLayoutSaved, LayoutLibraryFirstOpen,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

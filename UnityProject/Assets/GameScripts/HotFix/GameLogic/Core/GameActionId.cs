@@ -119,5 +119,9 @@
         ClearBeltMode = 102,
         /// <summary>FG3-LOG-06（FGR-LOG-060 / 061）：打开 / 关闭电网面板（每个电网的发电、用电、储能曲线与优先级；战略与建造上下文，默认 Alt+G）。</summary>
         OpenPowerGrid = 103,
+        /// <summary>FG3-LOG-07（FGR-LOG-011）：指着建筑 / 物流件记下它的设置（建造上下文，默认 Alt+C）。</summary>
+        CopySettings = 104,
+        /// <summary>FG3-LOG-07（FGR-LOG-011）：把记下的设置写到指着的同类 / 兼容件上（建造上下文，默认 Alt+V）。</summary>
+        PasteSettings = 105,
     }
 }

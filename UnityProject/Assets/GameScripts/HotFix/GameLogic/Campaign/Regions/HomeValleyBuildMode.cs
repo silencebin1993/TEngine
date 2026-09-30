@@ -23,6 +23,10 @@ namespace GameLogic.Campaign.Regions
     /// - 拆除模式：左键点建筑标记 / 取消标记（关键建筑先确认）；在空地按住左键框选批量拆除（超过 20 座或含关键建筑先确认）；
     /// - 搬迁：搬迁模式里左键点一座建筑、再左键点新位置（旋转键转向）；空闲状态下也可以直接按住一座建筑拖到新位置；
     /// - 右键：取消拖拽 → 放下正在搬的建筑 → 取消选择 → 退出搬迁 / 拆除模式 → 退出建造模式；Esc 退出建造模式（经 <see cref="UiEscapeStack"/>）。
+    /// - FG3-LOG-07 规划工具：复制（默认 Ctrl+C，拖框复制框里的东西连同设置，复制完直接进入粘贴）、粘贴（Ctrl+V，旋转键整体转 90°，
+    ///   非法的件标红叉不放）、布局库（Ctrl+B）、升级规划（U，拖框）、吸管（Q，指着一件东西选中同类并带上朝向与设置）、
+    ///   复制设置（Alt+C 记下指着的那件的设置 / Alt+V 写到指着的那件；也可以点按钮进入“复制设置”模式用鼠标点）、撤销 / 重做（Ctrl+Z / Ctrl+Y）。
+    ///   规划操作全部经 <see cref="PlanHistory"/> 的包装入口，进撤销栈。
     /// 战略暂停下可以继续规划，施工在恢复后推进（FG03 第 4 节）。
     ///
     /// 表现（占位，FG00 B22）：虚影逐格着色（绿 = 可放、红 = 不可放），不合法时再叠一个“叉”形（色盲安全，颜色之外有形状）；
@@ -32,7 +36,7 @@ namespace GameLogic.Campaign.Regions
     /// 状态只读写 <see cref="HomeGridService"/> / <see cref="BuildCatalog"/>；本类不保存任何需要进存档的东西（选择、朝向、拖拽是界面状态；
     /// 快捷栏在存档里、格线开关在本机设置里）。每帧开销与建筑数无关：鼠标换格 / 换朝向 / 状态变化时才重算一次校验。
     /// </summary>
-    public sealed class HomeValleyBuildMode
+    public sealed partial class HomeValleyBuildMode
     {
         /// <summary>当前家园的建造模式（家园未激活时为 null）。HUD 与自检读这里。</summary>
         public static HomeValleyBuildMode Current { get; private set; }
@@ -51,6 +55,10 @@ namespace GameLogic.Campaign.Regions
             PrioritizeBox,
             /// <summary>FG3-LOG-03：清带模式下拉框（点一格 = 整条带）。</summary>
             ClearBox,
+            /// <summary>FG3-LOG-07：复制模式下拉框（松开 = 复制框里的东西）。</summary>
+            CopyBox,
+            /// <summary>FG3-LOG-07：升级规划模式下拉框。</summary>
+            UpgradeBox,
         }
 
         private static readonly GameActionId[] HotbarActions =
@@ -77,6 +85,41 @@ namespace GameLogic.Campaign.Regions
         public BeltClearPlan ClearPlan { get; private set; }
         /// <summary>清带确认框（仓库放不下，问是否丢弃）是否正在询问（自检用）。</summary>
         public bool PendingClearConfirm { get; private set; }
+        /// <summary>FG3-LOG-07：复制模式（拖框复制）。</summary>
+        public bool CopyMode { get; private set; }
+        /// <summary>FG3-LOG-07：升级规划模式（拖框升级）。</summary>
+        public bool UpgradeMode { get; private set; }
+        /// <summary>FG3-LOG-07：粘贴模式——<see cref="PasteSource"/> 跟着鼠标，左键放下，旋转键整体转 90°，右键退出。</summary>
+        public bool PasteMode { get; private set; }
+        /// <summary>FG3-LOG-07：“复制设置”模式（按钮进入：先点一件记下设置，再点别的件写上去）。</summary>
+        public bool SettingsMode { get; private set; }
+        /// <summary>FG3-LOG-07：剪贴板（最近一次复制的布局；跨地点保留，不进存档）。</summary>
+        public static PlanEntryBlock Clipboard { get; private set; }
+        /// <summary>FG3-LOG-07：复制设置的剪贴板（不进存档）。</summary>
+        public static PlanSettings.Clip SettingsClip { get; private set; }
+        /// <summary>正在粘贴的布局（剪贴板或布局库里的一个）。</summary>
+        public PlanEntryBlock PasteSource { get; private set; }
+        /// <summary>正在粘贴的布局名（布局库里的；剪贴板为空串）。</summary>
+        public string PasteName { get; private set; } = string.Empty;
+        /// <summary>粘贴的整体旋转（0～3 个 90°，顺时针）。</summary>
+        public int PasteQuarter { get; private set; }
+        /// <summary>粘贴预览（逐件能不能放）；不在粘贴或没有悬停格时为 null。</summary>
+        public PastePlan PastePreview { get; private set; }
+        /// <summary>拖复制框时的框（没在拖时无意义）。</summary>
+        public GridCell CopyBoxMin { get; private set; }
+        public GridCell CopyBoxMax { get; private set; }
+        /// <summary>拖升级框时的规划；没在拖时为 null。</summary>
+        public UpgradeBoxPlan UpgradePreview { get; private set; }
+        /// <summary>FG3-LOG-07 吸管：下一次放置要带上的设置（S0～S2；0 = 默认）。换选择时清掉。</summary>
+        public int PendingS0 { get; private set; }
+        public int PendingS1 { get; private set; }
+        public int PendingS2 { get; private set; }
+        /// <summary>最近一次撤销 / 重做的结果（自检读）。</summary>
+        public PlanStepResult LastStep { get; private set; }
+        /// <summary>最近一次粘贴的结果（自检读）。</summary>
+        public PlanApplyResult LastPaste { get; private set; }
+        /// <summary>粘贴预览因为太多被截掉没画的格子数（状态行写明）。</summary>
+        public int PasteTilesHidden { get; private set; }
         public string SelectedTypeId { get; private set; }
         /// <summary>FG3-LOG-01：选中的建造菜单工具（传送带）。与 <see cref="SelectedTypeId"/> 互斥。</summary>
         public string SelectedToolId { get; private set; }
@@ -112,6 +155,11 @@ namespace GameLogic.Campaign.Regions
         private int _toolPreviewKey = int.MinValue;
         private readonly DemolishBoxPlan _boxBuffer = new DemolishBoxPlan();
         private readonly BeltClearPlan _clearBuffer = new BeltClearPlan();
+        private readonly PastePlan _pasteBuffer = new PastePlan();
+        private readonly UpgradeBoxPlan _upgradeBuffer = new UpgradeBoxPlan();
+        private int _pasteKey = int.MinValue;
+        private BuildingRecord[] _pasteRecordsRef;
+        private readonly List<GameObject> _marks = new List<GameObject>(16);
         private GameObject _root;
         private WorldTerrainOverlay _terrain;
         private int _terrainRevision = -1;
@@ -152,6 +200,18 @@ namespace GameLogic.Campaign.Regions
 
         // ── 界面 / 自检也走这些入口（与按键同一条路径）──────────────────────────────────
 
+        /// <summary>FG3-LOG-07：退出复制 / 粘贴 / 升级 / 复制设置模式（进入别的模式或选中条目时调用）。</summary>
+        private void ExitPlanModes()
+        {
+            CopyMode = false;
+            UpgradeMode = false;
+            PasteMode = false;
+            SettingsMode = false;
+            PasteSource = null;
+            PastePreview = null;
+            _pasteKey = int.MinValue;
+        }
+
         public void Open()
         {
             if (IsOpen)
@@ -159,6 +219,7 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             IsOpen = true;
+            ExitPlanModes();
             DemolishMode = false;
             RelocateMode = false;
             PrioritizeMode = false;
@@ -185,6 +246,7 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             IsOpen = false;
+            ExitPlanModes();
             DemolishMode = false;
             RelocateMode = false;
             PrioritizeMode = false;
@@ -210,6 +272,8 @@ namespace GameLogic.Campaign.Regions
                 Open();
             }
             bool tool = BuildCatalog.TryGet(entryId, out BuildEntry e) && e.IsTool;
+            ExitPlanModes();
+            PendingS0 = PendingS1 = PendingS2 = 0; // 吸管带的设置只跟着吸出来的那一次选择
             SelectedTypeId = tool ? null : entryId;
             SelectedToolId = tool ? entryId : null;
             DemolishMode = false;
@@ -245,6 +309,7 @@ namespace GameLogic.Campaign.Regions
             DemolishMode = on;
             if (on)
             {
+                ExitPlanModes();
                 SelectedTypeId = null;
                 SelectedToolId = null;
                 RelocateMode = false;
@@ -269,6 +334,7 @@ namespace GameLogic.Campaign.Regions
             CarryBuildingId = null;
             if (on)
             {
+                ExitPlanModes();
                 SelectedTypeId = null;
                 SelectedToolId = null;
                 DemolishMode = false;
@@ -291,6 +357,7 @@ namespace GameLogic.Campaign.Regions
             PrioritizeMode = on;
             if (on)
             {
+                ExitPlanModes();
                 SelectedTypeId = null;
                 SelectedToolId = null;
                 DemolishMode = false;
@@ -315,6 +382,7 @@ namespace GameLogic.Campaign.Regions
             ClearMode = on;
             if (on)
             {
+                ExitPlanModes();
                 SelectedTypeId = null;
                 SelectedToolId = null;
                 DemolishMode = false;
@@ -332,6 +400,13 @@ namespace GameLogic.Campaign.Regions
         /// <summary>旋转虚影 90°（顺时针）。选中传送带时是单格铺设的方向；搬迁时是新位置的朝向。</summary>
         public void RotateGhost()
         {
+            if (PasteMode)
+            {
+                PasteQuarter = (PasteQuarter + 1) & 3; // FG3-LOG-07：粘贴时旋转键把整个布局顺时针转 90°
+                _pasteKey = int.MinValue;
+                Revision++;
+                return;
+            }
             GhostRotation = GridMath.NormalizeRotation(GhostRotation + 90);
             _previewKey = int.MinValue;
             Revision++;
@@ -379,7 +454,7 @@ namespace GameLogic.Campaign.Regions
             {
                 return Report(GridOpResult.Fail(GridReason.Of(GridBlockReason.NoBuilding)), null, RotateFailKey);
             }
-            GridOpResult r = HomeGridService.TryRotate(state, HoverBuildingId);
+            GridOpResult r = PlanHistory.Rotate(state, HoverBuildingId);
             return Report(r, state, RotateFailKey);
         }
 
@@ -389,7 +464,7 @@ namespace GameLogic.Campaign.Regions
             // FG3-LOG-04：分流器 / 合流器 = 原地顺时针转 90°（物品不丢）；地下传送带不能原地转（写原因：拆掉重拖）。
             if (BeltNetworkService.TryGetPiece(HoverCell, out BeltNodeKind kind, out int tier) && kind != BeltNodeKind.Belt)
             {
-                BeltOpResult nr = BeltNetworkService.TryRotateNode(state, HoverCell);
+                BeltOpResult nr = PlanHistory.RotateNode(state, HoverCell);
                 if (!nr.Ok)
                 {
                     LastResult = GridOpResult.Fail(new GridReason(GridBlockReason.Busy, nr.ReasonKey, nr.Args));
@@ -404,7 +479,7 @@ namespace GameLogic.Campaign.Regions
                 Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.CommandAck, StatusText);
                 return LastResult;
             }
-            BeltOpResult r = BeltNetworkService.TryReverse(state, HoverCell);
+            BeltOpResult r = PlanHistory.ReverseBelt(state, HoverCell);
             if (!r.Ok)
             {
                 LastResult = GridOpResult.Fail(new GridReason(GridBlockReason.Busy, r.ReasonKey, r.Args));
@@ -422,7 +497,7 @@ namespace GameLogic.Campaign.Regions
         /// <summary>FG3-LOG-05：阀门原地调头（成功写“现在流向 X”，失败写原因）。</summary>
         public GridOpResult ReverseHoveredValve(CampaignState state)
         {
-            PipeOpResult r = PipeNetworkService.TryReverseValve(state, HoverCell);
+            PipeOpResult r = PlanHistory.ReverseValve(state, HoverCell);
             if (!r.Ok)
             {
                 LastResult = GridOpResult.Fail(new GridReason(GridBlockReason.Busy, r.ReasonKey, r.Args));
@@ -495,7 +570,7 @@ namespace GameLogic.Campaign.Regions
                     {
                         _cells.Clear();
                         _cells.Add(cell);
-                        return Report(HomeGridService.TryRemoveBelts(state, _cells), state, DemolishFailKey);
+                        return Report(PlanHistory.RemoveCells(state, _cells), state, DemolishFailKey);
                     }
                     return Report(GridOpResult.Fail(GridReason.Of(GridBlockReason.NoBuilding)), state, DemolishFailKey);
                 }
@@ -509,7 +584,7 @@ namespace GameLogic.Campaign.Regions
                         Irreversible = true,
                         ConfirmText = GameText.Get("ui.build.confirm_ok"),
                         CancelText = GameText.Get("ui.build.confirm_cancel"),
-                        OnConfirm = () => Report(HomeGridService.TryToggleDemolish(CampaignSession.Current, id), CampaignSession.Current, DemolishFailKey),
+                        OnConfirm = () => Report(PlanHistory.ToggleDemolish(CampaignSession.Current, id), CampaignSession.Current, DemolishFailKey),
                     };
                     req.Consequences.Add(GameText.Format("ui.build.confirm_refund", target.InvestedScrap)); // FG3-LOG-02：全额返还。
                     if (GridContent.TryGetBuilding(target.BuildingTypeId, out BuildingGrid tg) && tg.Critical == 1)
@@ -521,7 +596,15 @@ namespace GameLogic.Campaign.Regions
                     PendingConfirmBuildingId = id;
                     return new GridOpResult(GridOpResult.Kind.Failed, id);
                 }
-                return Report(HomeGridService.TryToggleDemolish(state, target.BuildingId), state, DemolishFailKey);
+                return Report(PlanHistory.ToggleDemolish(state, target.BuildingId), state, DemolishFailKey);
+            }
+            if (PasteMode)
+            {
+                return CommitPaste(state);
+            }
+            if (SettingsMode)
+            {
+                return SettingsClip == null ? CopySettingsAt(state, cell) : PasteSettingsAt(state, cell);
             }
             if (RelocateMode)
             {
@@ -529,7 +612,7 @@ namespace GameLogic.Campaign.Regions
                 {
                     return PickForRelocation(state, cell);
                 }
-                GridOpResult moved = HomeGridService.TryRelocate(state, CarryBuildingId, cell, GhostRotation);
+                GridOpResult moved = PlanHistory.Relocate(state, CarryBuildingId, cell, GhostRotation);
                 if (moved.Success)
                 {
                     CarryBuildingId = null;
@@ -539,11 +622,11 @@ namespace GameLogic.Campaign.Regions
             }
             if (SelectedToolId != null)
             {
-                return Report(HomeGridService.TryPlaceBeltPath(state, SelectedToolId, cell, cell, HomeGridService.BeltDirOf(GhostRotation)), state);
+                return Report(PlanHistory.PlaceBeltPath(state, SelectedToolId, cell, cell, HomeGridService.BeltDirOf(GhostRotation), PendingS0, PendingS1, PendingS2), state);
             }
             if (SelectedTypeId != null)
             {
-                GridOpResult r = HomeGridService.TryPlace(state, SelectedTypeId, cell, GhostRotation);
+                GridOpResult r = PlanHistory.Place(state, SelectedTypeId, cell, GhostRotation, PendingS0);
                 if (!r.Success)
                 {
                     GuidanceHooks.Raise(GuidanceHooks.FirstBlockedPlacement);
@@ -581,7 +664,7 @@ namespace GameLogic.Campaign.Regions
                     _cells.Clear();
                     _cells.Add(cell);
                     CampaignState s = CampaignSession.Current;
-                    Report(HomeGridService.TryRemoveBelts(s, _cells), s, DemolishFailKey);
+                    Report(PlanHistory.RemoveCells(s, _cells), s, DemolishFailKey);
                 },
                 OnCancel = () => PendingTankConfirm = false,
             };
@@ -633,6 +716,21 @@ namespace GameLogic.Campaign.Regions
             if (SelectedToolId != null)
             {
                 BeginDrag(DragKind.Belt, cell, state);
+                return;
+            }
+            if (CopyMode)
+            {
+                BeginDrag(DragKind.CopyBox, cell, state);
+                return;
+            }
+            if (UpgradeMode)
+            {
+                BeginDrag(DragKind.UpgradeBox, cell, state);
+                return;
+            }
+            if (PasteMode || SettingsMode)
+            {
+                ClickCell(state, cell);
                 return;
             }
             if (PrioritizeMode)
@@ -694,7 +792,13 @@ namespace GameLogic.Campaign.Regions
             switch (kind)
             {
                 case DragKind.Belt:
-                    Report(HomeGridService.TryPlaceBeltPath(state, SelectedToolId, start, cell, HomeGridService.BeltDirOf(GhostRotation)), state);
+                    Report(PlanHistory.PlaceBeltPath(state, SelectedToolId, start, cell, HomeGridService.BeltDirOf(GhostRotation), PendingS0, PendingS1, PendingS2), state);
+                    break;
+                case DragKind.CopyBox:
+                    CommitCopy(state, start, cell);
+                    break;
+                case DragKind.UpgradeBox:
+                    CommitUpgrade(state, UpgradePlanner.Plan(state, start, cell));
                     break;
                 case DragKind.DemolishBox:
                     if (start == cell)
@@ -716,7 +820,7 @@ namespace GameLogic.Campaign.Regions
                     if (dragBuilding != null && Math.Max(Math.Abs(cell.X - start.X), Math.Abs(cell.Y - start.Y)) >= IdleDragMinCells)
                     {
                         var pivot = new GridCell(dragPivot.X + (cell.X - start.X), dragPivot.Y + (cell.Y - start.Y));
-                        Report(HomeGridService.TryRelocate(state, dragBuilding, pivot, dragRot), state, RelocateFailKey);
+                        Report(PlanHistory.Relocate(state, dragBuilding, pivot, dragRot), state, RelocateFailKey);
                     }
                     else if (dragBuilding != null)
                     {
@@ -849,7 +953,7 @@ namespace GameLogic.Campaign.Regions
 
         private void CancelDrag()
         {
-            if (Drag == DragKind.None && BeltPlan == null && BoxPlan == null && PrioritizeBoxCount < 0 && ClearPlan == null)
+            if (Drag == DragKind.None && BeltPlan == null && BoxPlan == null && PrioritizeBoxCount < 0 && ClearPlan == null && UpgradePreview == null)
             {
                 return;
             }
@@ -857,6 +961,7 @@ namespace GameLogic.Campaign.Regions
             BeltPlan = null;
             BoxPlan = null;
             ClearPlan = null;
+            UpgradePreview = null;
             PrioritizeBoxCount = -1;
             _dragBuildingId = null;
             InputRouter.BuildDragActive = false;
@@ -878,6 +983,13 @@ namespace GameLogic.Campaign.Regions
                     break;
                 case DragKind.ClearBox:
                     ClearPlan = end == DragStart ? BeltClearService.PlanNetwork(state, end, _clearBuffer) : BeltClearService.PlanBox(state, DragStart, end, _clearBuffer);
+                    break;
+                case DragKind.CopyBox:
+                    CopyBoxMin = new GridCell(Math.Min(DragStart.X, end.X), Math.Min(DragStart.Y, end.Y));
+                    CopyBoxMax = new GridCell(Math.Max(DragStart.X, end.X), Math.Max(DragStart.Y, end.Y));
+                    break;
+                case DragKind.UpgradeBox:
+                    UpgradePreview = UpgradePlanner.Plan(state, DragStart, end, _upgradeBuffer);
                     break;
                 case DragKind.PrioritizeBox:
                     PrioritizeBoxMin = new GridCell(Math.Min(DragStart.X, end.X), Math.Min(DragStart.Y, end.Y));
@@ -935,9 +1047,11 @@ namespace GameLogic.Campaign.Regions
                 LastResult = GridOpResult.Fail(plan.Refused.Count > 0 ? plan.Refused[0].Value : GridReason.Of(GridBlockReason.NoBuilding));
                 return;
             }
-            if (!plan.NeedsConfirm)
+            // FG3-LOG-07：一次拆掉的件超过撤销上限时这一步不能撤销——当作不可逆操作先确认（B04）。
+            bool tooBigToUndo = plan.Belts.Count + plan.BuildingCount > PlanHistory.StepMaxEntries;
+            if (!plan.NeedsConfirm && !tooBigToUndo)
             {
-                ReportBatch(HomeGridService.ExecuteDemolishBox(state, plan), plan, state);
+                ReportBatch(PlanHistory.ExecuteDemolishBox(state, plan), plan, state);
                 return;
             }
             int threshold = GridContent.TuningInt("grid.batch_demolish_confirm");
@@ -951,7 +1065,7 @@ namespace GameLogic.Campaign.Regions
                 {
                     PendingBatchConfirm = false;
                     CampaignState s = CampaignSession.Current;
-                    ReportBatch(HomeGridService.ExecuteDemolishBox(s, plan), plan, s);
+                    ReportBatch(PlanHistory.ExecuteDemolishBox(s, plan), plan, s);
                 },
                 OnCancel = () => PendingBatchConfirm = false,
             };
@@ -969,6 +1083,10 @@ namespace GameLogic.Campaign.Regions
                 req.Lines.Add(GameText.Format("ui.build.box_tank_line", (plan.TankFluidMl / 1000.0).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)));
             }
             plan.AppendPowerLines(req.Consequences); // FG3-LOG-06：拆完会断网 / 让建筑失去电网连接时写明（按整批拆完的拓扑）。
+            if (tooBigToUndo)
+            {
+                req.Lines.Add(GameText.Format("plan.undo.too_big_line", plan.Belts.Count + plan.BuildingCount, PlanHistory.StepMaxEntries));
+            }
             req.Consequences.Add(GameText.Get("ui.build.batch_confirm_refund"));
             UiConfirmDialog.Show(req);
             PendingBatchConfirm = true;
@@ -1016,6 +1134,12 @@ namespace GameLogic.Campaign.Regions
                 Preview = null;
                 _previewKey = int.MinValue;
                 Revision++;
+            }
+            else if (PasteMode || CopyMode || UpgradeMode || SettingsMode)
+            {
+                ExitPlanModes(); // FG3-LOG-07：右键退出粘贴 / 复制 / 升级 / 复制设置
+                Preview = null;
+                SetStatus(string.Empty, false);
             }
             else if (SelectedTypeId != null || SelectedToolId != null)
             {
@@ -1067,7 +1191,7 @@ namespace GameLogic.Campaign.Regions
                     {
                         ConstructionQueuePanelUIToolkit.Toggle(); // FG3-LOG-02：战略视角也能打开施工队列。
                     }
-                    else
+                    else if (!ConsumePlanKeysClosed(camera, state))
                     {
                         ConsumeHotbarKeys(state);
                     }
@@ -1113,9 +1237,10 @@ namespace GameLogic.Campaign.Regions
                 ConstructionQueuePanelUIToolkit.Toggle();
             }
             ConsumeHotbarKeys(state);
+            ConsumePlanKeysOpen(state);
             if (InputRouter.ConsumeAction(GameActionId.Rotate, InputScope.Strategy))
             {
-                if (SelectedTypeId != null || SelectedToolId != null || CarryBuildingId != null)
+                if (SelectedTypeId != null || SelectedToolId != null || CarryBuildingId != null || PasteMode)
                 {
                     RotateGhost();
                     if (Drag == DragKind.Belt)
@@ -1226,6 +1351,7 @@ namespace GameLogic.Campaign.Regions
         public void RefreshPreview(CampaignState state)
         {
             RefreshToolPreview(state);
+            RefreshPastePreview(state);
             if (Drag == DragKind.Relocate)
             {
                 return; // 拖着搬迁的预览在 RefreshDrag 里算（跟着拖拽终点）。
@@ -1396,7 +1522,9 @@ namespace GameLogic.Campaign.Regions
                     break;
                 case GridOpResult.Kind.PlanCancelled:
                     string cancelledType = HomeGridService.DisplayName(TypeOfId(r.BuildingId));
-                    SetStatus(r.BuildingId != null && r.BuildingId.EndsWith(HomeGridService.RelocationGhostSuffix, StringComparison.Ordinal)
+                    SetStatus(r.BuildingId != null && r.BuildingId.EndsWith(HomeGridService.UpgradeGhostSuffix, StringComparison.Ordinal)
+                        ? GameText.Format("plan.upgrade.cancelled", cancelledType)
+                        : r.BuildingId != null && r.BuildingId.EndsWith(HomeGridService.RelocationGhostSuffix, StringComparison.Ordinal)
                         ? GameText.Format("ui.build.relocate_cancelled", cancelledType)
                         : GameText.Format("ui.build.plan_cancelled", cancelledType), false);
                     Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.UiClick);
@@ -1450,6 +1578,11 @@ namespace GameLogic.Campaign.Regions
             {
                 key = key.Substring(0, move);
             }
+            int up = key.IndexOf(HomeGridService.UpgradeGhostSuffix, StringComparison.Ordinal);
+            if (up > 0)
+            {
+                key = key.Substring(0, up);
+            }
             int hash = key.IndexOf('#');
             return hash > 0 ? key.Substring(0, hash) : key;
         }
@@ -1469,13 +1602,19 @@ namespace GameLogic.Campaign.Regions
             {
                 return text;
             }
+            if (HomeGridService.IsUpgradeGhost(b))
+            {
+                return GameText.Format("plan.upgrade.ghost_line", text);
+            }
             if (HomeGridService.IsRelocationGhost(b))
             {
                 return GameText.Format("ui.build.relocate_ghost", text);
             }
-            if (HomeGridService.FindRelocationGhost(state, b.BuildingId) != null)
+            if (HomeGridService.FindRelocationGhost(state, b.BuildingId) is BuildingRecord moving)
             {
-                return text + "\n" + GameText.Format("ui.build.pending_relocation", HomeGridService.DisplayName(b.BuildingTypeId));
+                return text + "\n" + (HomeGridService.IsUpgradeGhost(moving)
+                    ? GameText.Format("plan.upgrade.pending", HomeGridService.DisplayName(b.BuildingTypeId), HomeGridService.DisplayName(moving.BuildingTypeId))
+                    : GameText.Format("ui.build.pending_relocation", HomeGridService.DisplayName(b.BuildingTypeId)));
             }
             // FG3-LOG-06：和电网有关的建筑写它在哪个电网、有没有电、优先级与电网读数。
             if (b.ConstructionState == BuildingConstructionState.Operational || b.ConstructionState == BuildingConstructionState.Disabled)
@@ -1570,6 +1709,7 @@ namespace GameLogic.Campaign.Regions
             _tiles.Clear();
             _arrows.Clear();
             _boxEdges.Clear();
+            _marks.Clear();
             _cross = null;
             _terrain?.Dispose();
             _terrain = null;
@@ -1607,6 +1747,7 @@ namespace GameLogic.Campaign.Regions
             }
             int tile = 0;
             int arrow = 0;
+            int mark = 0;
             bool showCross = false;
             bool showBox = false;
             BeltPathPlan shown = BeltPlan ?? ToolPreview;
@@ -1665,6 +1806,21 @@ namespace GameLogic.Campaign.Regions
             {
                 showBox = true;
                 PlaceBox(BoxPlan.Min, BoxPlan.Max);
+            }
+            else if (Drag == DragKind.CopyBox)
+            {
+                showBox = true;
+                PlaceBox(CopyBoxMin, CopyBoxMax);
+            }
+            else if (UpgradePreview != null)
+            {
+                showBox = true;
+                PlaceBox(UpgradePreview.Min, UpgradePreview.Max);
+                tile = PlaceUpgradeTiles(state, tile);
+            }
+            else if (PasteMode && PastePreview != null)
+            {
+                tile = PlacePasteTiles(tile, out mark);
             }
             else if (Drag == DragKind.PrioritizeBox && PrioritizeBoxCount >= 0)
             {
@@ -1730,6 +1886,11 @@ namespace GameLogic.Campaign.Regions
             {
                 _arrows[i].SetActive(false);
             }
+            for (int i = mark; i < _marks.Count; i++)
+            {
+                _marks[i].SetActive(false);
+            }
+            ActiveMarkCount = mark;
             if (!showBox)
             {
                 foreach (GameObject e in _boxEdges)

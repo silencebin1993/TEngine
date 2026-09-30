@@ -308,8 +308,11 @@ namespace GameLogic.EditorTools
                 PressChord(reader, GameSettings.KeyBindings.GetChord(GameActionId.Undo));
                 bool untouched = k.HasUplink;
                 bool locked = NotificationCenter.Toasts.Any(t => t.Type.Id == "feature_locked");
-                Expect(!UiUndoRouter.HasTarget && untouched && locked,
-                    "编辑器关闭后 Ctrl+Z 不再动电路，仍按建造撤销（FG3-LOG-07）给“后续版本开放”提示");
+                // FG3-LOG-07 起建造撤销已接入（动作表 wired）：编辑器关闭后 Ctrl+Z 交给建造规划的撤销栈（HomeValleyBuildMode 消费），不再弹“后续版本开放”；
+                // 建造撤销本身由 FgPlanningToolsSelfCheck 的真实输入路径覆盖。
+                bool wired = InputActionCatalog.TryGet(GameActionId.Undo, out InputActionDef undoNow) && undoNow.Status == InputActionStatus.Wired;
+                Expect(!UiUndoRouter.HasTarget && untouched && !locked && wired,
+                    "编辑器关闭后 Ctrl+Z 不再动电路，交还给建造撤销（FG3-LOG-07 已接入，不弹“后续版本开放”）");
             }
             finally
             {

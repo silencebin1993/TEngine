@@ -48,6 +48,15 @@ namespace GameLogic.UI.Kit
         private Button _queue;
         private Button _power;
         private Button _clearBelt;
+        // FG3-LOG-07：规划工具按钮
+        private Button _copy;
+        private Button _paste;
+        private Button _layouts;
+        private Button _upgrade;
+        private Button _eyedrop;
+        private Button _settings;
+        private Button _undo;
+        private Button _redo;
         private Label _hint;
         private Label _cost;
         private Label _dragInfo;
@@ -88,6 +97,15 @@ namespace GameLogic.UI.Kit
         public string ModeText => _mode?.text ?? string.Empty;
         public string GridToggleText => _gridToggle?.text ?? string.Empty;
         public string UndoHintText => _undoHint?.text ?? string.Empty;
+        /// <summary>FG3-LOG-07：规划工具按钮（自检 / 冒烟点它们）。</summary>
+        public Button CopyButton => _copy;
+        public Button PasteButton => _paste;
+        public Button LayoutsButton => _layouts;
+        public Button UpgradeButton => _upgrade;
+        public Button EyedropButton => _eyedrop;
+        public Button SettingsButton => _settings;
+        public Button UndoButton => _undo;
+        public Button RedoButton => _redo;
         public string SelectedCategoryId => _category;
         public int CategoryCount => _catIds.Count;
         public string ItemId(int index) => index >= 0 && index < _itemIds.Count ? _itemIds[index] : null;
@@ -127,6 +145,14 @@ namespace GameLogic.UI.Kit
             _queue = root.Q<Button>("BuildQueue");
             _power = root.Q<Button>("BuildPowerGrid");
             _clearBelt = root.Q<Button>("BuildClearBelt");
+            _copy = root.Q<Button>("BuildCopy");
+            _paste = root.Q<Button>("BuildPaste");
+            _layouts = root.Q<Button>("BuildLayouts");
+            _upgrade = root.Q<Button>("BuildUpgrade");
+            _eyedrop = root.Q<Button>("BuildEyedrop");
+            _settings = root.Q<Button>("BuildSettings");
+            _undo = root.Q<Button>("BuildUndo");
+            _redo = root.Q<Button>("BuildRedo");
             _hint = root.Q<Label>("BuildHint");
             _cost = root.Q<Label>("BuildCost");
             _dragInfo = root.Q<Label>("BuildDragInfo");
@@ -182,6 +208,50 @@ namespace GameLogic.UI.Kit
                 HomeValleyBuildMode m = HomeValleyBuildMode.Current;
                 m?.SetClearMode(!m.ClearMode);
             };
+            // FG3-LOG-07：规划工具（按钮与快捷键同一路径）。
+            _copy.clicked += () =>
+            {
+                HomeValleyBuildMode m = HomeValleyBuildMode.Current;
+                m?.SetCopyMode(!m.CopyMode);
+            };
+            _paste.clicked += () => HomeValleyBuildMode.Current?.StartPaste(CampaignSession.Current, HomeValleyBuildMode.Clipboard, null);
+            _layouts.clicked += LayoutLibraryPanelUIToolkit.Toggle;
+            _upgrade.clicked += () =>
+            {
+                HomeValleyBuildMode m = HomeValleyBuildMode.Current;
+                m?.SetUpgradeMode(!m.UpgradeMode);
+            };
+            _eyedrop.clicked += () =>
+            {
+                HomeValleyBuildMode m = HomeValleyBuildMode.Current;
+                if (m != null && m.HasHover)
+                {
+                    m.Eyedrop(CampaignSession.Current, m.HoverCell); // 按钮：吸最后指着的那一格（按键 Q 更顺手，按钮给发现性）
+                }
+            };
+            _settings.clicked += () =>
+            {
+                HomeValleyBuildMode m = HomeValleyBuildMode.Current;
+                m?.SetSettingsMode(!m.SettingsMode);
+            };
+            _undo.clicked += () => HomeValleyBuildMode.Current?.Undo(CampaignSession.Current);
+            _redo.clicked += () => HomeValleyBuildMode.Current?.Redo(CampaignSession.Current);
+            UiTooltip.Attach(_copy, () => new TooltipContent { Title = GameText.Get("input.action.copy.name"), Body = GameText.Format("plan.copy.mode", InputDisplay.ForAction(GameActionId.LayoutLibrary)),
+                Shortcut = GameActionId.Copy, CodexEntryId = "codex.build.planning" });
+            UiTooltip.Attach(_paste, () => new TooltipContent { Title = GameText.Get("input.action.paste.name"), Body = GameText.Get("plan.paste.tip"), Shortcut = GameActionId.Paste,
+                CodexEntryId = "codex.build.planning" });
+            UiTooltip.Attach(_layouts, () => new TooltipContent { Title = GameText.Get("input.action.layout_library.name"), Body = GameText.Get("plan.library.tip"),
+                Shortcut = GameActionId.LayoutLibrary, CodexEntryId = "codex.build.planning" });
+            UiTooltip.Attach(_upgrade, () => new TooltipContent { Title = GameText.Get("input.action.upgrade_plan.name"), Body = GameText.Get("plan.upgrade.mode"),
+                Shortcut = GameActionId.UpgradePlan, CodexEntryId = "codex.build.planning" });
+            UiTooltip.Attach(_eyedrop, () => new TooltipContent { Title = GameText.Get("input.action.eyedropper.name"), Body = GameText.Get("plan.eyedrop.tip"),
+                Shortcut = GameActionId.Eyedropper, CodexEntryId = "codex.build.planning" });
+            UiTooltip.Attach(_settings, () => new TooltipContent { Title = GameText.Get("input.action.copy_settings.name"),
+                Body = GameText.Format("plan.settings.tip", InputDisplay.ForAction(GameActionId.CopySettings), InputDisplay.ForAction(GameActionId.PasteSettings)),
+                Shortcut = GameActionId.CopySettings, CodexEntryId = "codex.build.planning" });
+            UiTooltip.Attach(_undo, () => new TooltipContent { Title = GameText.Get("input.action.undo.name"), Body = GameText.Get("plan.undo.tip"), Shortcut = GameActionId.Undo,
+                CodexEntryId = "codex.build.planning" });
+            UiTooltip.Attach(_redo, () => new TooltipContent { Title = GameText.Get("input.action.redo.name"), Body = GameText.Get("plan.undo.tip"), Shortcut = GameActionId.Redo });
             _search = new UiSearchBox(root.Q<TextField>("BuildSearch"), root.Q<Label>("BuildSearchPlaceholder"), root.Q<Button>("BuildSearchClear"),
                 "ui.build.search_placeholder", text =>
                 {
@@ -401,7 +471,9 @@ namespace GameLogic.UI.Kit
                 (state.BuildingRecords?.Length ?? 0).ToString(), "|", ((int)GameText.Language).ToString(), "|", GameSettings.Revision.ToString(),
                 "|", open ? "1" : "0", "|", BuildCatalog.Revision.ToString(), "|", _viewRevision.ToString(), "|", available ? "1" : "0",
                 // FG3-LOG-02：施工状态（虚影进度、缺料）变化时也刷新；每 0.25 秒一档，状态行的“施工中 N%”跟得上。
-                "|", HomeValleyConstruction.Revision.ToString(), "|", open ? Mathf.FloorToInt(Time.unscaledTime * 4f).ToString() : "0");
+                "|", HomeValleyConstruction.Revision.ToString(), "|", open ? Mathf.FloorToInt(Time.unscaledTime * 4f).ToString() : "0",
+                // FG3-LOG-07：撤销栈 / 布局库变化时也刷新（撤销按钮写下一步是什么）。
+                "|", PlanHistory.Revision.ToString(), "|", LayoutLibrary.Revision.ToString());
             if (key == _lastKey)
             {
                 return;
@@ -416,6 +488,10 @@ namespace GameLogic.UI.Kit
             }
             _title.text = GameText.Get("ui.build.title");
             _mode.text = mode.DemolishMode ? GameText.Format("ui.build.demolish", InputDisplay.ForAction(GameActionId.DemolishMode))
+                : mode.CopyMode ? GameText.Get("plan.mode.copy")
+                : mode.PasteMode ? GameText.Format("plan.mode.paste", PlanEntries.CountOf(mode.PasteSource))
+                : mode.UpgradeMode ? GameText.Get("plan.mode.upgrade")
+                : mode.SettingsMode ? GameText.Get("plan.mode.settings")
                 : mode.RelocateMode ? GameText.Get("ui.build.relocate_mode")
                 : mode.PrioritizeMode ? GameText.Get("ui.build.prioritize_mode")
                 : mode.ClearMode ? GameText.Format("ui.build.btn_clear", InputDisplay.ForAction(GameActionId.ClearBeltMode))
@@ -436,7 +512,7 @@ namespace GameLogic.UI.Kit
             _clearBelt.text = GameText.Format("ui.build.btn_clear", InputDisplay.ForAction(GameActionId.ClearBeltMode));
             _clearBelt.EnableInClassList("bm-tool-active", mode.ClearMode);
             _placeholder.text = GameText.Get("ui.build.placeholder_note");
-            _undoHint.text = GameText.Format("ui.build.undo_hint", InputDisplay.ForAction(GameActionId.Undo), InputDisplay.ForAction(GameActionId.Redo));
+            RefreshPlanTools(mode, state);
 
             if (_category == null || !GridContent.TryGetCategory(_category, out _))
             {
@@ -464,9 +540,51 @@ namespace GameLogic.UI.Kit
             }
         }
 
+        /// <summary>FG3-LOG-07：规划工具按钮（写明按键、当前模式高亮、没有可撤销 / 可重做时灰掉）与撤销提示行（下一步撤销 / 重做的是什么）。</summary>
+        private void RefreshPlanTools(HomeValleyBuildMode mode, CampaignState state)
+        {
+            _copy.text = GameText.Format("plan.btn.copy", InputDisplay.ForAction(GameActionId.Copy));
+            _copy.EnableInClassList("bm-tool-active", mode.CopyMode);
+            _paste.text = GameText.Format("plan.btn.paste", InputDisplay.ForAction(GameActionId.Paste));
+            _paste.EnableInClassList("bm-tool-active", mode.PasteMode);
+            _paste.SetEnabled(PlanEntries.CountOf(HomeValleyBuildMode.Clipboard) > 0 || mode.PasteMode);
+            _layouts.text = GameText.Format("plan.btn.layouts", InputDisplay.ForAction(GameActionId.LayoutLibrary), LayoutLibrary.Count);
+            _layouts.EnableInClassList("bm-tool-active", LayoutLibraryPanelUIToolkit.IsOpen);
+            _upgrade.text = GameText.Format("plan.btn.upgrade", InputDisplay.ForAction(GameActionId.UpgradePlan));
+            _upgrade.EnableInClassList("bm-tool-active", mode.UpgradeMode);
+            _eyedrop.text = GameText.Format("plan.btn.eyedrop", InputDisplay.ForAction(GameActionId.Eyedropper));
+            _settings.text = GameText.Format("plan.btn.settings", InputDisplay.ForAction(GameActionId.CopySettings), InputDisplay.ForAction(GameActionId.PasteSettings));
+            _settings.EnableInClassList("bm-tool-active", mode.SettingsMode);
+            PlanStepKind nextUndo = PlanHistory.PeekUndo(state);
+            PlanStepKind nextRedo = PlanHistory.PeekRedo(state);
+            _undo.text = GameText.Format("plan.btn.undo", InputDisplay.ForAction(GameActionId.Undo), PlanHistory.UndoSteps(state));
+            _undo.SetEnabled(nextUndo != PlanStepKind.None);
+            _redo.text = GameText.Format("plan.btn.redo", InputDisplay.ForAction(GameActionId.Redo), PlanHistory.RedoSteps(state));
+            _redo.SetEnabled(nextRedo != PlanStepKind.None);
+            _undoHint.text = GameText.Format("plan.undo.hint", InputDisplay.ForAction(GameActionId.Undo),
+                nextUndo != PlanStepKind.None ? PlanHistory.StepName(nextUndo) : GameText.Get("plan.undo.nothing"), InputDisplay.ForAction(GameActionId.Redo),
+                nextRedo != PlanStepKind.None ? PlanHistory.StepName(nextRedo) : GameText.Get("plan.undo.nothing"), PlanHistory.Depth);
+        }
+
         private static string HintFor(HomeValleyBuildMode mode)
         {
             string rotate = InputDisplay.ForAction(GameActionId.Rotate);
+            if (mode.PasteMode)
+            {
+                return GameText.Format("plan.hint.paste", rotate);
+            }
+            if (mode.CopyMode)
+            {
+                return GameText.Get("plan.hint.copy");
+            }
+            if (mode.UpgradeMode)
+            {
+                return GameText.Get("plan.hint.upgrade");
+            }
+            if (mode.SettingsMode)
+            {
+                return GameText.Get("plan.hint.settings");
+            }
             if (mode.DemolishMode)
             {
                 return GameText.Get("ui.build.hint_demolish_box");
@@ -565,6 +683,7 @@ namespace GameLogic.UI.Kit
         {
             BeltPathPlan belt = mode.BeltPlan;
             DemolishBoxPlan box = mode.BoxPlan;
+            _dragInfo.EnableInClassList("bm-cost-short", false);
             if (belt != null && belt.Kind == BeltNodeKind.UndergroundIn)
             {
                 // FG3-LOG-04（FGR-LOG-023）：拖地下传送带时写这次的跨度、上限与两端的成本。
@@ -602,6 +721,40 @@ namespace GameLogic.UI.Kit
                 _dragInfo.text = box.Pipes > 0
                     ? GameText.Format("ui.build.box_info_pipes", box.Max.X - box.Min.X + 1, box.Max.Y - box.Min.Y + 1, box.BuildingCount, box.Belts.Count - box.Pipes, box.Pipes)
                     : GameText.Format("ui.build.box_info", box.Max.X - box.Min.X + 1, box.Max.Y - box.Min.Y + 1, box.BuildingCount, box.Belts.Count);
+            }
+            else if (mode.Drag == HomeValleyBuildMode.DragKind.CopyBox)
+            {
+                SetVisible(_dragInfo, true);
+                _dragInfo.text = GameText.Format("plan.copy.box", mode.CopyBoxMax.X - mode.CopyBoxMin.X + 1, mode.CopyBoxMax.Y - mode.CopyBoxMin.Y + 1);
+            }
+            else if (mode.UpgradePreview != null)
+            {
+                // FG3-LOG-07：拖升级框时写能升几件、差额多少、库存多少；不能升的写第一条原因。
+                SetVisible(_dragInfo, true);
+                UpgradeBoxPlan up = mode.UpgradePreview;
+                _dragInfo.text = GameText.Format("plan.upgrade.box", up.Max.X - up.Min.X + 1, up.Max.Y - up.Min.Y + 1, up.Count, up.Cost, CampaignSession.Current?.Scrap ?? 0)
+                                 + (up.Refused > 0 && up.FirstRefusal != null ? "\n" + GameText.Format("plan.upgrade.some_refused", up.Refused, up.FirstRefusal.Value.Describe()) : string.Empty);
+            }
+            else if (mode.PasteMode && mode.PastePreview != null)
+            {
+                // FG3-LOG-07：粘贴预览——能放几件、不能放几件（红叉）与第一处原因、成本与库存。
+                SetVisible(_dragInfo, true);
+                PastePlan pp = mode.PastePreview;
+                string text = GameText.Format("plan.paste.preview", pp.OkCount, pp.BadCount, pp.Cost, pp.Stock);
+                if (pp.BadCount > 0)
+                {
+                    text += "\n" + pp.DescribeFirstBad();
+                }
+                if (pp.LockedCount + pp.UnknownCount > 0)
+                {
+                    text += "\n" + GameText.Format("plan.paste.locked_note", pp.LockedCount, pp.UnknownCount);
+                }
+                if (mode.PasteTilesHidden > 0)
+                {
+                    text += "\n" + GameText.Format("plan.paste.tiles_hidden", mode.PasteTilesHidden);
+                }
+                _dragInfo.text = text;
+                _dragInfo.EnableInClassList("bm-cost-short", pp.BadCount > 0);
             }
             else if (mode.ClearPlan != null)
             {

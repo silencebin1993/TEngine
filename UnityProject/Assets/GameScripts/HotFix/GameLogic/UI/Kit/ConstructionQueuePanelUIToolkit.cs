@@ -377,7 +377,7 @@ namespace GameLogic.UI.Kit
                 Refresh();
                 return;
             }
-            if (HomeValleyConstruction.CancelSite(state, e.Order))
+            if (PlanHistory.CancelSite(state, e.Order)) // FG3-LOG-07：取消施工也是规划操作，进撤销栈
             {
                 Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.CommandAck, GameText.Format("build.queue.cancelled", e.Name));
             }

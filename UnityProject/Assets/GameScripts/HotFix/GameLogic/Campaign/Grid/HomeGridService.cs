@@ -540,6 +540,7 @@ namespace GameLogic.Campaign.Grid
             }
 
             CollectObstacles(state, ignoreBuildingId, ignoreBuildingId2);
+            bool restoreBatch = _obstacleBatch && (ignoreBuildingId != null || ignoreBuildingId2 != null);
             GridMath.FootprintCells(pivot, g.FootprintW, g.FootprintH, r.Rotation, r.Cells);
             int worldLimit = GridContent.TuningInt("world.coord_limit");
             int warnLevel = GridContent.TuningInt("grid.pollution_warn_level");
@@ -642,6 +643,10 @@ namespace GameLogic.Campaign.Grid
                 r.Warnings.Add(Localization.GameText.Format("grid.warn.pollution", lightPolluted, lightLevel));
             }
 
+            if (restoreBatch)
+            {
+                CollectObstacles(state, null, null); // 批内：障碍表还原成“不忽略任何建筑”的口径
+            }
             // FG3-LOG-02（FGR-LOG-003“不足也允许放置虚影”、FGR-LOG-006）：库存不够不再拦截——只警告，放下后虚影等材料，有货自动开工。
             if (checkCost && r.ScrapCost > 0 && state.Scrap < r.ScrapCost)
             {
@@ -684,7 +689,10 @@ namespace GameLogic.Campaign.Grid
                 r.CellOk.Add(false);
                 return r;
             }
-            CollectObstacles(state, null, null);
+            if (!_obstacleBatch)
+            {
+                CollectObstacles(state, null, null);
+            }
             HomeGridMap.Chunk chunk = map.ChunkAt(cell, out int idx);
             bool ok = true;
             if (chunk.Explored[idx] == 0)
@@ -785,6 +793,27 @@ namespace GameLogic.Campaign.Grid
         }
 
         private static readonly List<Obstacle> Obstacles = new List<Obstacle>(8);
+
+        /// <summary>FG3-LOG-07：一批格子校验（粘贴预览一次上千格）期间开局锚点障碍只收集一次（它们在这期间不会变）。</summary>
+        private static bool _obstacleBatch;
+
+        /// <summary>开始一批传送带 / 管线格校验：收集一次开局锚点障碍，之后 <see cref="ValidateBeltCell"/> 不再逐格重收。必须与 <see cref="EndCellBatch"/> 成对。
+        /// 批内调用 <see cref="ValidatePlacement"/>（会带忽略参数重收）后障碍表按“不忽略任何建筑”重收一次，保证后面的格子口径不变。</summary>
+        public static void BeginCellBatch(CampaignState state)
+        {
+            if (state == null)
+            {
+                return;
+            }
+            MapFor(state);
+            CollectObstacles(state, null, null);
+            _obstacleBatch = true;
+        }
+
+        public static void EndCellBatch()
+        {
+            _obstacleBatch = false;
+        }
 
         /// <param name="ignoreOwner">正在旋转 / 搬迁的建筑：它自己的出口不挡它自己（出口会跟着它走，新位置的出口另行校验）。</param>
         private static void CollectObstacles(CampaignState state, string ignoreOwner, string ignoreOwner2)
@@ -904,12 +933,47 @@ namespace GameLogic.Campaign.Grid
             {
                 return GridOpResult.Fail(GridReason.Of(GridBlockReason.Busy));
             }
-            if (FindRelocationGhost(state, b.BuildingId) != null)
+            if (FindRelocationGhost(state, b.BuildingId) is BuildingRecord moving)
             {
-                return GridOpResult.Fail(GridReason.Of(GridBlockReason.Relocating));
+                return GridOpResult.Fail(GridReason.Of(IsUpgradeGhost(moving) ? GridBlockReason.Upgrading : GridBlockReason.Relocating));
             }
             int oldRot = GridMath.NormalizeRotation(b.Rotation);
-            int newRot = GridMath.NormalizeRotation(oldRot + 90);
+            return RotateTo(state, b, oldRot, GridMath.NormalizeRotation(oldRot + 90));
+        }
+
+        /// <summary>
+        /// FG3-LOG-07（撤销 / 重做原地旋转）：把一座建筑直接转到 <paramref name="rotation"/>（一次校验新姿态，不经过中间朝向）。规则同 <see cref="TryRotate"/>。
+        /// </summary>
+        public static GridOpResult TryRotateTo(CampaignState state, string buildingId, int rotation)
+        {
+            BuildingRecord b = FindBuilding(state, buildingId);
+            if (b == null)
+            {
+                return GridOpResult.Fail(GridReason.Of(GridBlockReason.NoBuilding));
+            }
+            if (b.BuildingTypeId == HomeValleyLayout.BuildingTypeCore)
+            {
+                return GridOpResult.Fail(GridReason.Of(GridBlockReason.CannotRotateCore));
+            }
+            if (HasActiveOrder(state, b.BuildingId, WorkOrderKind.Repair) || HasActiveOrder(state, b.BuildingId, WorkOrderKind.Salvage))
+            {
+                return GridOpResult.Fail(GridReason.Of(GridBlockReason.Busy));
+            }
+            if (FindRelocationGhost(state, b.BuildingId) is BuildingRecord moving)
+            {
+                return GridOpResult.Fail(GridReason.Of(IsUpgradeGhost(moving) ? GridBlockReason.Upgrading : GridBlockReason.Relocating));
+            }
+            int oldRot = GridMath.NormalizeRotation(b.Rotation);
+            int newRot = GridMath.NormalizeRotation(rotation);
+            if (oldRot == newRot)
+            {
+                return new GridOpResult(GridOpResult.Kind.Rotated, b.BuildingId);
+            }
+            return RotateTo(state, b, oldRot, newRot);
+        }
+
+        private static GridOpResult RotateTo(CampaignState state, BuildingRecord b, int oldRot, int newRot)
+        {
             var pivot = new GridCell(b.GridX, b.GridY);
             GridPlacementResult check = ValidatePlacement(state, b.BuildingTypeId, pivot, newRot, asPlayerPlacement: false,
                 ignoreBuildingId: b.BuildingId, checkCost: false);
@@ -956,7 +1020,8 @@ namespace GameLogic.Campaign.Grid
             BuildingRecord b = FindBuilding(state, buildingId);
             if (b == null || b.ConstructionState != BuildingConstructionState.Operational
                 || FindActiveDemolish(state, buildingId) != null
-                || IsDemolishForbidden(b.BuildingTypeId))
+                || IsDemolishForbidden(b.BuildingTypeId)
+                || FindRelocationGhost(state, buildingId) != null) // FG3-LOG-07：搬迁 / 升级中的建筑点拆除 = 拒绝 / 取消升级，都不是真的拆
             {
                 return false;
             }
@@ -999,6 +1064,11 @@ namespace GameLogic.Campaign.Grid
                 HomeValleyWorkOrders.CancelOrder(state, build.WorkOrderId, MachinePositionOr(build, b.Position));
                 MapFor(state);
                 return new GridOpResult(GridOpResult.Kind.PlanCancelled, buildingId);
+            }
+            if (FindRelocationGhost(state, b.BuildingId) is BuildingRecord upgrading && IsUpgradeGhost(upgrading))
+            {
+                // FG3-LOG-07：拆除模式点一座正在升级的建筑 = 取消升级（已到的差额材料全额退回，原建筑不受影响；与“在搬迁虚影上点拆除 = 取消搬迁”同理）。
+                return TryToggleDemolish(state, upgrading.BuildingId);
             }
             if (IsDemolishForbidden(b.BuildingTypeId))
             {

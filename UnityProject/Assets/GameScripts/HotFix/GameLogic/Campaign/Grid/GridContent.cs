@@ -22,6 +22,7 @@ namespace GameLogic.Campaign.Grid
         private static TbHomeTuning _tuning;
         private static TbBuildCategory _categories;
         private static TbBuildTool _tools;
+        private static TbBuildUpgrade _upgrades;
         private static bool _loaded;
         private static bool _overridden;
         private static string _loadError;
@@ -96,6 +97,29 @@ namespace GameLogic.Campaign.Grid
             EnsureLoaded();
             row = null;
             return toolId != null && _tools != null && _tools.DataMap.TryGetValue(toolId, out row) && row != null;
+        }
+
+        /// <summary>FG3-LOG-07（FGR-LOG-010）：建造菜单条目的升级路线（高一级的条目 ID）；没有路线（最高级 / 不能升级）返回 false。</summary>
+        public static bool TryGetUpgrade(string entryId, out string toId)
+        {
+            EnsureLoaded();
+            toId = null;
+            if (entryId == null || _upgrades == null || !_upgrades.DataMap.TryGetValue(entryId, out BuildUpgrade row) || row == null)
+            {
+                return false;
+            }
+            toId = row.ToId;
+            return !string.IsNullOrEmpty(toId);
+        }
+
+        /// <summary>全部升级路线（自检与说明用）。</summary>
+        public static IReadOnlyList<BuildUpgrade> Upgrades
+        {
+            get
+            {
+                RequireLoaded();
+                return _upgrades.DataList;
+            }
         }
 
         public static bool TryGetCategory(string categoryId, out BuildCategory row)
@@ -212,6 +236,7 @@ namespace GameLogic.Campaign.Grid
             _tuning = null;
             _categories = null;
             _tools = null;
+            _upgrades = null;
             _loadError = null;
             Revision++;
             EnsureLoaded();
@@ -220,7 +245,7 @@ namespace GameLogic.Campaign.Grid
         /// <summary>测试注入：用构造出来的表替换真实表（改表 → 行为跟着变）。传 null 的表沿用真实表。
         /// 用完必须 <see cref="ResetForTests"/>。</summary>
         public static void OverrideForTests(TbBuildingGrid grid = null, TbBuildingPort ports = null, TbStartLayout layout = null,
-            TbGridTerrain terrain = null, TbHomeTuning tuning = null, TbBuildTool tools = null)
+            TbGridTerrain terrain = null, TbHomeTuning tuning = null, TbBuildTool tools = null, TbBuildUpgrade upgrades = null)
         {
             Reload();
             _overridden = true;
@@ -230,6 +255,7 @@ namespace GameLogic.Campaign.Grid
             _terrain = terrain ?? _terrain;
             _tuning = tuning ?? _tuning;
             _tools = tools ?? _tools;
+            _upgrades = upgrades ?? _upgrades;
             Revision++;
         }
 
@@ -242,7 +268,7 @@ namespace GameLogic.Campaign.Grid
         {
             EnsureLoaded();
             if (_loadError != null || _grid == null || _ports == null || _layout == null || _terrain == null || _tuning == null
-                || _categories == null || _tools == null)
+                || _categories == null || _tools == null || _upgrades == null)
             {
                 throw new InvalidOperationException($"格网建造表不可用：{_loadError ?? "未知原因"}");
             }
@@ -265,9 +291,11 @@ namespace GameLogic.Campaign.Grid
                 _tuning = tables?.TbHomeTuning;
                 _categories = tables?.TbBuildCategory;
                 _tools = tables?.TbBuildTool;
-                if (_grid == null || _ports == null || _layout == null || _terrain == null || _tuning == null || _categories == null || _tools == null)
+                _upgrades = tables?.TbBuildUpgrade;
+                if (_grid == null || _ports == null || _layout == null || _terrain == null || _tuning == null || _categories == null || _tools == null
+                    || _upgrades == null)
                 {
-                    _loadError = "配置表 fg.TbBuildingGrid / TbBuildingPort / TbStartLayout / TbGridTerrain / TbHomeTuning / TbBuildCategory / TbBuildTool 不存在";
+                    _loadError = "配置表 fg.TbBuildingGrid / TbBuildingPort / TbStartLayout / TbGridTerrain / TbHomeTuning / TbBuildCategory / TbBuildTool / TbBuildUpgrade 不存在";
                 }
             }
             catch (Exception ex)

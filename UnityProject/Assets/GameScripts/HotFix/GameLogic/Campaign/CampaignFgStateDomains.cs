@@ -115,6 +115,67 @@ namespace GameLogic.Campaign
         public PlannedBeltRecord[] PlannedBelts;
         /// <summary>传送带规划的编号（单调递增，读档后继续往后编）。</summary>
         public int NextBeltPlanSerial = 1;
+        /// <summary>FG3-LOG-07（FGR-LOG-009 撤销和重做）：撤销栈（旧的在前）。同一步的操作 <see cref="PlanOpRecord.Step"/> 相同，一次撤销整步。
+        /// 保留 plan.undo_depth（50）步（更早的丢掉）；单步快照超过 plan.layout_max_entries 件的操作不进栈，存档体积有上界。
+        /// 旧存档没有这个字段时为 null（= 空栈）。唯一写入口 <see cref="Grid.PlanHistory"/>。</summary>
+        public List<PlanOpRecord> PlanUndo;
+        /// <summary>重做栈（最近撤销的在后）。任何新的规划操作都会清空它。</summary>
+        public List<PlanOpRecord> PlanRedo;
+        /// <summary>下一步的编号（单调递增）。</summary>
+        public int NextPlanStep = 1;
+    }
+
+    /// <summary>
+    /// FG3-LOG-07：一组规划条目（布局库的布局、剪贴板、撤销栈里“放下 / 拆掉了哪些件”的快照共用同一格式）。按列存（每列一个数组），
+    /// 一件 = 同一下标：条目 ID（建造菜单条目：建筑类型 ID 或工具 ID）、位置（布局里是相对坐标，撤销栈里是绝对格）、朝向、地下传送带出口、设置。
+    /// 设置编码见 <see cref="Grid.PlanSettings"/>。按列存让一千件的布局在 JSON 里只有几十 KB（件数有上限：plan.layout_max_entries）。
+    /// </summary>
+    [Serializable]
+    public sealed class PlanEntryBlock
+    {
+        public string[] Ids = Array.Empty<string>();
+        public int[] Xs = Array.Empty<int>();
+        public int[] Ys = Array.Empty<int>();
+        /// <summary>建筑：朝向（0 / 90 / 180 / 270）；传送带类与管线类：方向（BeltDir 0 北 1 东 2 南 3 西）。</summary>
+        public int[] Rots = Array.Empty<int>();
+        /// <summary>地下传送带出口（其余件为 0）。</summary>
+        public int[] X2s = Array.Empty<int>();
+        public int[] Y2s = Array.Empty<int>();
+        /// <summary>设置（0 = 默认）。建筑：S0 = 电力优先级；分流器：S0 = 左比例 | 右比例 &lt;&lt; 8 | 优先口 &lt;&lt; 16，S1 / S2 = 左 / 右过滤；
+        /// 合流器：S0 = 优先入口；储罐：S0 = 1 | 模式 &lt;&lt; 1 | 优先级 &lt;&lt; 4；阀门：S0 = 1 | 开着 &lt;&lt; 1。</summary>
+        public int[] S0 = Array.Empty<int>();
+        public int[] S1 = Array.Empty<int>();
+        public int[] S2 = Array.Empty<int>();
+
+        public int Count => Ids?.Length ?? 0;
+    }
+
+    /// <summary>
+    /// FG3-LOG-07：撤销栈里的一个操作（一步 = 编号相同的一组操作，一次撤销整步）。字段按种类使用，见 <see cref="Grid.PlanOpKind"/>。
+    /// 建筑类操作记类型、位置、朝向与当前 ID（重做放回的虚影是新 ID，会写回这里）；传送带 / 管线类操作记 <see cref="Entries"/>（绝对格）。
+    /// </summary>
+    [Serializable]
+    public sealed class PlanOpRecord
+    {
+        public int Step;
+        /// <summary>这一步是什么（整步的名字：放置 / 拆除 / 粘贴 / 升级……，<see cref="Grid.PlanStepKind"/>）。</summary>
+        public int StepKind;
+        public int Kind;
+        public string BuildingId;
+        public string TypeId;
+        public int X;
+        public int Y;
+        public int Rot;
+        public int X2;
+        public int Y2;
+        public int Rot2;
+        /// <summary>建筑的设置（电力优先级，0 = 默认）或操作的附加值（撤销时做了什么：见 <see cref="Grid.PlanHistory"/>）。</summary>
+        public int S0;
+        public int Flag;
+        public string PlanId;
+        public PlanEntryBlock Entries = new PlanEntryBlock();
+        /// <summary>复制设置：改之前的设置（<see cref="Entries"/> 是改之后的）。</summary>
+        public PlanEntryBlock Before = new PlanEntryBlock();
     }
 
     /// <summary>FG3-LOG-02：一份规划中的传送带（一次拖拽铺设）。格按路径顺序；<see cref="CellState"/>：0 = 规划中，1 = 已建成（已进内核），2 = 已取消。
@@ -150,6 +211,14 @@ namespace GameLogic.Campaign
         public int PipePiece;
         /// <summary>FG3-LOG-05：泵的虚影在哪种流体的来源上（规划时由地形认定，建成时再核一次）。</summary>
         public int PipeFluid;
+        /// <summary>FG3-LOG-07（粘贴 / 吸管带设置）：储罐 / 阀门建成时要写的设置（<see cref="Grid.PlanSettings"/> 的 S0 编码，0 = 默认）。旧存档没有这个字段 = 0。</summary>
+        public int PipeSettings;
+        /// <summary>FG3-LOG-07（FGR-LOG-010 升级规划）：这份规划是“原地升级”——格子上已经是建成的件（照常运转），机器取来新旧差额的材料，
+        /// 一格一格改成 <see cref="PlannedBeltRecord.Tier"/>（物品、流体、设置都不动）。<see cref="ScrapPerCell"/> = 每件差额。
+        /// 升级规划不占格网的“规划”标记（格子上是真件）。旧存档没有这个字段 = false。</summary>
+        public bool Upgrade;
+        /// <summary>升级前的等级（撤销 / 说明用）。</summary>
+        public int FromTier;
     }
 
     /// <summary>一块已探索的圆形区域（格网坐标）。</summary>

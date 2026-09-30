@@ -219,6 +219,25 @@ namespace GameLogic.EditorTools
                     case 282: StepPowerPlaced(inStep); break;
                     case 283: StepPowerPanelOpened(inStep); break;
                     case 284: StepPowerPanelClosed(inStep); break;
+                    // FG3-LOG-07：规划工具（真实鼠标 / 按键）：Ctrl+C 复制模式 → 拖框复制（连同分流器设置）→ 鼠标移到目标看粘贴预览 → R 整体旋转 → 左键放下 →
+                    // 右键退出 → Ctrl+Z 撤销 / Ctrl+Y 重做 → U 升级模式拖框 → Q 吸管 → Ctrl+B 布局库、点“保存剪贴板”、Ctrl+B 关闭。
+                    case 285: StepPlanReady(inStep); break;
+                    case 286: StepPlanCopyMode(inStep); break;
+                    case 287: StepPlanCopied(inStep); break;
+                    case 288: StepPlanPreview(inStep); break;
+                    case 289: StepPlanRotated(inStep); break;
+                    case 290: StepPlanPasted(inStep); break;
+                    case 291: StepPlanPasteExited(inStep); break;
+                    case 292: StepPlanUndone(inStep); break;
+                    case 293: StepPlanRedone(inStep); break;
+                    case 294: StepPlanUpgradeMode(inStep); break;
+                    case 295: StepPlanUpgraded(inStep); break;
+                    case 296: StepPlanUpgradeExited(inStep); break;
+                    case 297: StepPlanHoverSplitter(inStep); break;
+                    case 298: StepPlanEyedropped(inStep); break;
+                    case 299: StepPlanLibraryKey(inStep); break;
+                    case 300: StepPlanLibraryOpen(inStep); break;
+                    case 301: StepPlanLibraryClosed(inStep); break;
                     case 129: StepRuinsCombat(inStep); break;
                     case 230: StepRuinsTagHover(inStep); break;
                     case 150: StepSignalOpened(inStep); break;
@@ -5570,6 +5589,338 @@ namespace GameLogic.EditorTools
             Campaign.Regions.HomeValleyPowerGrid.GridSummary sum = Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
             GameLogic.View.PowerCoverageOverlayView.SetEnabled(false);
             Check(sum.SubnetCount == 1 && !GameLogic.View.PowerCoverageOverlayView.Enabled, $"清理：测试电塔与发电机拆掉（剩 {sum.SubnetCount} 个电网）");
+            Next(285, "FG3-LOG-07：规划工具（复制粘贴 / 撤销重做 / 升级 / 吸管 / 布局库）");
+        }
+
+        // ── FG3-LOG-07：规划工具（真实鼠标 / 按键；源场景用测试捷径放已建成的传送带与分流器，施工由 FgPlanningToolsSelfCheck 覆盖；最后撤销并清理）──
+
+        private static Campaign.Grid.GridCell PlanCell(string key) => new Campaign.Grid.GridCell(SessionState.GetInt(K + key + "X", 0), SessionState.GetInt(K + key + "Y", 0));
+
+        private static Vector3 PlanWorld(string key, int dx = 0, int dy = 0)
+        {
+            Campaign.Grid.GridCell c = PlanCell(key);
+            return new Vector3(c.X + dx, 0f, c.Y + dy);
+        }
+
+        private static void PressChordKeepMouse(InputChord chord)
+        {
+            KeyCode held = (chord.Mods & InputModifier.Ctrl) != 0 ? KeyCode.LeftControl
+                : (chord.Mods & InputModifier.Alt) != 0 ? KeyCode.LeftAlt
+                : (chord.Mods & InputModifier.Shift) != 0 ? KeyCode.LeftShift
+                : KeyCode.None;
+            InputRouter.DebugSetReader(new ScriptedReader { Key = chord.Key, KeyFrame = Time.frameCount + 1, Held = held, Mouse = _buildMouse });
+        }
+
+        private static bool PlanRowFree(CampaignState state, Campaign.Grid.GridCell o, int w, int h)
+        {
+            for (int y = -1; y <= h; y++)
+            {
+                for (int x = -1; x <= w; x++)
+                {
+                    var c = new Campaign.Grid.GridCell(o.X + x, o.Y + y);
+                    if (!HomeGridService.ValidateBeltCell(state, c).Ok || !HomeGridService.ValidatePlacement(state, "power_pole", c, 0, checkCost: false).Ok)
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        private static void StepPlanReady(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            Check(mode != null && mode.IsOpen, "建造模式开着");
+            // 布局库写到临时目录（不碰这台机器上玩家真实的布局库）。
+            LayoutLibrary.DirectoryOverrideForTests = Path.Combine(Path.GetTempPath(), "bingames-smoke-layouts-" + System.Diagnostics.Process.GetCurrentProcess().Id);
+            LayoutLibrary.Reload();
+            // 按格网规则找两块空地（B25）：源（4×1）在核心东边 12～20 格，目标（5×5）再往外。
+            Campaign.Grid.GridCell core = HomeGridService.CorePivot(state);
+            bool found = false;
+            for (int a = 0; a < 72 && !found; a++)
+            {
+                float ang = a * 5f * Mathf.Deg2Rad;
+                for (float d = 12f; d <= 20f && !found; d += 1f)
+                {
+                    var src = new Campaign.Grid.GridCell(core.X + Mathf.RoundToInt(Mathf.Cos(ang) * d), core.Y + Mathf.RoundToInt(Mathf.Sin(ang) * d));
+                    var dst = new Campaign.Grid.GridCell(src.X, src.Y + 5);
+                    if (PlanRowFree(state, src, 4, 1) && PlanRowFree(state, new Campaign.Grid.GridCell(dst.X - 1, dst.Y), 5, 5))
+                    {
+                        SessionState.SetInt(K + "PlanSrcX", src.X);
+                        SessionState.SetInt(K + "PlanSrcY", src.Y);
+                        SessionState.SetInt(K + "PlanDstX", dst.X + 1);
+                        SessionState.SetInt(K + "PlanDstY", dst.Y + 2);
+                        found = true;
+                    }
+                }
+            }
+            if (!found)
+            {
+                Finish("核心附近找不到放规划工具场景的空地");
+                return;
+            }
+            // 测试捷径：3 格已建成的传送带（朝东）+ 一个 3:1 的分流器（经传送带服务的正式“建成”入口）。
+            Campaign.Grid.GridCell s = PlanCell("PlanSrc");
+            bool laid = true;
+            for (int x = 0; x < 3; x++)
+            {
+                laid &= BeltNetworkService.TryPlace(state, new Campaign.Grid.GridCell(s.X + x, s.Y), BeltDir.East, 0).Ok;
+            }
+            var sp = new Campaign.Grid.GridCell(s.X + 3, s.Y);
+            laid &= BeltNetworkService.TryPlaceNode(state, sp, BeltDir.East, 2, BeltNodeKind.Splitter).Ok
+                    && BeltNetworkService.TrySetSplitter(state, sp, 3, 1, BeltSide.Left, BeltConst.FilterAny, BeltConst.FilterAny).Ok;
+            Check(laid, "测试捷径：3 格传送带 + 一个 3:1 优先左口的分流器（已建成）");
+            SessionState.SetInt(K + "PlanUndo0", PlanHistory.UndoSteps(state));
+            HoverWorld(PlanWorld("PlanSrc"));
+            PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameActionId.Copy));
+            Next(286, "按复制键（默认 Ctrl+C）进入复制模式");
+        }
+
+        private static void StepPlanCopyMode(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            string modeText = LabelText("[BuildModeHudHost]", "BuildMode");
+            Check(mode != null && mode.CopyMode && modeText.Contains("复制"), $"Ctrl+C 进入复制模式（建造栏写“{modeText}”）");
+            DragWorld(PlanWorld("PlanSrc"), PlanWorld("PlanSrc", 3, 0), 0);
+            Next(287, "按住左键拖框框住传送带与分流器");
+        }
+
+        private static void StepPlanCopied(double inStep)
+        {
+            if (inStep < 1.0)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            PlanEntryBlock clip = Campaign.Regions.HomeValleyBuildMode.Clipboard;
+            int split = clip != null ? Array.IndexOf(clip.Ids, "splitter") : -1;
+            Check(mode.PasteMode && PlanEntries.CountOf(clip) == 4 && split >= 0 && clip.S0[split] == PlanSettings.PackSplitter(3, 1, 1),
+                $"松开：复制了 {PlanEntries.CountOf(clip)} 件（连同分流器 3:1 优先左口的设置），直接进入粘贴（状态行“{mode.StatusText.Split('\n').FirstOrDefault()}”）");
+            HoverWorld(PlanWorld("PlanDst"));
+            Next(288, "鼠标移到目标处（粘贴预览跟着鼠标）");
+        }
+
+        private static void StepPlanPreview(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            PastePlan pv = mode.PastePreview;
+            string info = LabelText("[BuildModeHudHost]", "BuildDragInfo");
+            Check(pv != null && pv.OkCount == 4 && pv.BadCount == 0 && info.Contains("能放 4 件") && mode.ActiveTileCount == 4,
+                $"真实帧里粘贴预览：4 件都能放（绿格 {mode.ActiveTileCount} 个），建造栏写“{info.Split('\n').FirstOrDefault()}”");
+            PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.Rotate));
+            Next(289, "按旋转键（默认 R）整体转 90°");
+        }
+
+        private static void StepPlanRotated(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            PastePlan pv = mode.PastePreview;
+            bool vertical = pv != null && pv.Items.Select(i => i.Cell.X).Distinct().Count() == 1 && pv.Items.Select(i => i.Cell.Y).Distinct().Count() == 4
+                            && pv.Items.All(i => i.Rot == (int)BeltDir.South);
+            Check(mode.PasteQuarter == 1 && pv != null && pv.OkCount == 4 && vertical, "旋转后布局变成竖的一列、每件都朝南，4 件都能放");
+            ClickWorld(PlanWorld("PlanDst"));
+            Next(290, "左键放下");
+        }
+
+        private static void StepPlanPasted(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            PlanApplyResult r = mode.LastPaste;
+            Campaign.Grid.GridCell d = PlanCell("PlanDst");
+            int planned = Enumerable.Range(-2, 5).Count(dy => Campaign.Regions.HomeValleyConstruction.TryFindPlannedCell(state, new Campaign.Grid.GridCell(d.X, d.Y + dy), out _, out _));
+            Check(r != null && r.PlacedPieces == 4 && planned == 4 && PlanHistory.PeekUndo(state) == PlanStepKind.Paste,
+                $"左键放下 4 件虚影（竖着一列，规划 {planned} 格），整次粘贴是撤销栈里的一步（状态行“{mode.StatusText.Split('\n').FirstOrDefault()}”）");
+            SessionState.SetInt(K + "PlanPlanned", Campaign.Regions.HomeValleyConstruction.PlannedCellCount(state));
+            RightClickWorld(PlanWorld("PlanDst"));
+            Next(291, "右键退出粘贴");
+        }
+
+        private static void StepPlanPasteExited(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Check(!mode.PasteMode && mode.IsOpen, "右键退出粘贴，建造模式还开着");
+            PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameActionId.Undo));
+            Next(292, "按撤销键（默认 Ctrl+Z）");
+        }
+
+        private static void StepPlanUndone(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            int planned = Campaign.Regions.HomeValleyConstruction.PlannedCellCount(state);
+            Check(mode.LastStep != null && mode.LastStep.Done && planned == SessionState.GetInt(K + "PlanPlanned", 0) - 4 && mode.StatusText.Contains("已撤销")
+                  && LabelText("[BuildModeHudHost]", "BuildUndoHint").Contains("重做"),
+                $"Ctrl+Z 撤销整次粘贴：4 件虚影取消（状态行“{mode.StatusText}”）；撤销提示行写下一步撤销 / 重做的是什么");
+            PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameActionId.Redo));
+            Next(293, "按重做键（默认 Ctrl+Y）");
+        }
+
+        private static void StepPlanRedone(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            Check(mode.LastStep != null && mode.LastStep.Redo && Campaign.Regions.HomeValleyConstruction.PlannedCellCount(state) == SessionState.GetInt(K + "PlanPlanned", 0),
+                $"Ctrl+Y 重做：4 件虚影放回原处（状态行“{mode.StatusText}”）");
+            PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.UpgradePlan));
+            Next(294, "按升级键（默认 U）进入升级规划");
+        }
+
+        private static void StepPlanUpgradeMode(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Check(mode.UpgradeMode, $"U 进入升级规划（建造栏写“{LabelText("[BuildModeHudHost]", "BuildMode")}”）");
+            DragWorld(PlanWorld("PlanSrc"), PlanWorld("PlanSrc", 3, 0), 0);
+            Next(295, "拖框框住源传送带");
+        }
+
+        private static void StepPlanUpgraded(double inStep)
+        {
+            if (inStep < 1.0)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            Campaign.Grid.GridCell s = PlanCell("PlanSrc");
+            int upgrading = Enumerable.Range(0, 3).Count(x => Campaign.Regions.HomeValleyConstruction.TryFindUpgradeCell(state, new Campaign.Grid.GridCell(s.X + x, s.Y), out _, out _));
+            Check(upgrading == 3 && PlanHistory.PeekUndo(state) == PlanStepKind.Upgrade && mode.StatusText.Contains("升级"),
+                $"松开：3 格传送带生成升级施工（分流器没有更高等级，不参与），状态行“{mode.StatusText.Split('\n').FirstOrDefault()}”");
+            RightClickWorld(PlanWorld("PlanSrc"));
+            Next(296, "右键退出升级规划");
+        }
+
+        private static void StepPlanUpgradeExited(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Check(!mode.UpgradeMode && mode.IsOpen, "右键退出升级规划");
+            HoverWorld(PlanWorld("PlanSrc", 3, 0));
+            Next(297, "鼠标指着分流器");
+        }
+
+        private static void StepPlanHoverSplitter(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.Eyedropper));
+            Next(298, "按吸管键（默认 Q）");
+        }
+
+        private static void StepPlanEyedropped(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Check(mode.SelectedToolId == "splitter" && mode.PendingS0 == PlanSettings.PackSplitter(3, 1, 1) && mode.StatusText.Contains("吸管"),
+                $"Q 吸管：选中分流器并带上它的设置（状态行“{mode.StatusText}”）");
+            RightClickWorld(PlanWorld("PlanSrc", 3, 0));
+            Next(299, "右键取消选择");
+        }
+
+        private static void StepPlanLibraryKey(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameActionId.LayoutLibrary));
+            Next(300, "按布局库键（默认 Ctrl+B）");
+        }
+
+        private static void StepPlanLibraryOpen(double inStep)
+        {
+            if (inStep < 1.0)
+            {
+                return;
+            }
+            LayoutLibraryPanelUIToolkit panel = LayoutLibraryPanelUIToolkit.Instance;
+            Check(LayoutLibraryPanelUIToolkit.IsOpen && panel != null && panel.PanelVisible && panel.EmptyText.Contains("布局库是空的"),
+                $"Ctrl+B 打开布局库（真 UXML）：空库说明“{panel?.EmptyText}”");
+            bool saved = ClickUitk("[LayoutLibraryHost]", "LayoutLibrarySave");
+            panel?.Refresh();
+            Check(saved && LayoutLibrary.Count == 1 && panel.VisibleRowCount == 1 && panel.RowThumbnail(0) != null && panel.RowInfo(0).Contains("4 件"),
+                $"点“保存剪贴板”：布局库多一行“{panel?.RowName(0)}”（{panel?.RowInfo(0)}），带缩略图，写进玩家配置目录");
+            CheckNoTextMarkers("布局库");
+            PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameActionId.LayoutLibrary));
+            Next(301, "再按 Ctrl+B 关闭布局库");
+        }
+
+        private static void StepPlanLibraryClosed(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            Check(!LayoutLibraryPanelUIToolkit.IsOpen && mode != null && mode.IsOpen, "Ctrl+B 关闭布局库，建造模式还开着");
+            // 清理：撤销升级与粘贴（经撤销栈，两步），拆掉测试传送带与分流器，布局库目录复位。
+            int undos = 0;
+            while (PlanHistory.UndoSteps(state) > SessionState.GetInt(K + "PlanUndo0", 0) && undos < 8)
+            {
+                PlanHistory.Undo(state);
+                undos++;
+            }
+            Campaign.Grid.GridCell s = PlanCell("PlanSrc");
+            HomeGridService.TryRemoveBelts(state, Enumerable.Range(0, 4).Select(x => new Campaign.Grid.GridCell(s.X + x, s.Y)).ToList());
+            bool clean = Enumerable.Range(0, 4).All(x => !BeltNetworkService.Kernel.HasCell(s.X + x, s.Y))
+                         && !(state.Grid.PlannedBelts ?? Array.Empty<PlannedBeltRecord>()).Any(p => p.Upgrade);
+            try
+            {
+                Directory.Delete(LayoutLibrary.DirectoryOverrideForTests, true);
+            }
+            catch
+            {
+                // 临时目录清理失败不影响结论。
+            }
+            LayoutLibrary.DirectoryOverrideForTests = null;
+            LayoutLibrary.Reload();
+            Check(clean, $"清理：撤销 {undos} 步（升级、粘贴），拆掉测试传送带与分流器，布局库目录复位");
             PressKeyKeepMouse(KeyCode.Escape);
             Next(140, "Esc 退出建造模式；FG0-ARCH-03：家园突袭战斗原型（测试捷径）");
         }

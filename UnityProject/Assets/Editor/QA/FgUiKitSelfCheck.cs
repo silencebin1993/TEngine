@@ -186,7 +186,7 @@ namespace GameLogic.EditorTools
             var enumMembers = ((GameActionId[])Enum.GetValues(typeof(GameActionId))).Distinct().ToList();
             var missing = enumMembers.Where(a => !InputActionCatalog.TryGet(a, out _)).ToList();
             var extra = InputActionCatalog.All.Where(d => !enumMembers.Contains(d.Action)).ToList();
-            Expect(missing.Count == 0 && extra.Count == 0 && InputActionCatalog.All.Count == enumMembers.Count && enumMembers.Count == 94, // FG3-LOG-06 新增“电网面板”（93 → 94）；FG0-ARCH-01 新增“切换关注点”（85 → 86）；FG1-SIG-01 新增“信号核”（86 → 87）；FG1-SIG-06 新增“暴露面板”（87 → 88）；FG3-LOG-01 新增“格线开关”“搬迁”（88 → 90）；FG3-LOG-02 新增“施工队列”“优先建造这一片”（90 → 92）；FG3-LOG-03 新增“清带”（92 → 93）
+            Expect(missing.Count == 0 && extra.Count == 0 && InputActionCatalog.All.Count == enumMembers.Count && enumMembers.Count == 96, // FG3-LOG-07 新增“复制设置”“粘贴设置”（94 → 96）；FG3-LOG-06 新增“电网面板”（93 → 94）；FG0-ARCH-01 新增“切换关注点”（85 → 86）；FG1-SIG-01 新增“信号核”（86 → 87）；FG1-SIG-06 新增“暴露面板”（87 → 88）；FG3-LOG-01 新增“格线开关”“搬迁”（88 → 90）；FG3-LOG-02 新增“施工队列”“优先建造这一片”（90 → 92）；FG3-LOG-03 新增“清带”（92 → 93）
                 $"GameActionId 的 {enumMembers.Count} 个成员与表里 {InputActionCatalog.All.Count} 行一一对应（缺：{string.Join(",", missing)}；多：{string.Join(",", extra.Select(d => d.Action))}）");
 
             InputBindingSet defaults = InputBindingSet.CreateDefault();
@@ -852,11 +852,11 @@ namespace GameLogic.EditorTools
             var reader = new FakeReader();
             InputRouter.DebugSetReader(reader);
             InputRouter.SetScope(InputScope.Strategy);
-            // FG0-ARCH-04 起建造菜单（B）已接入玩法；FG3-LOG-01 起快捷栏（F1～F10）也已接入——改用仍未开放的吸管（Q，FG3-LOG-07 承接）验证“尚未开放”提示。
-            reader.Press(KeyCode.Q);
+            // FG0-ARCH-04 起建造菜单（B）已接入玩法；FG3-LOG-01 起快捷栏（F1～F10）、FG3-LOG-07 起吸管（Q）也已接入——改用仍未开放的机器名册（FG4-ECO-07 承接）验证“尚未开放”提示。
+            reader.Press(GameSettings.KeyBindings.GetKey(GameActionId.OpenRoster));
             UiKitInputPump.ProcessWorldKeys();
             Frame(reader);
-            InputActionCatalog.TryGet(GameActionId.Eyedropper, out InputActionDef hotbar1);
+            InputActionCatalog.TryGet(GameActionId.OpenRoster, out InputActionDef hotbar1);
             NotificationEntry locked = NotificationCenter.Toasts.FirstOrDefault(e => e.Type.Id == "feature_locked");
             string lockedText = locked?.Text;
             bool notInHistory = NotificationCenter.History.All(e => e.Type.Id != "feature_locked");
@@ -874,7 +874,7 @@ namespace GameLogic.EditorTools
             Expect(locked != null && hotbar1.Status == InputActionStatus.Reserved && lockedText.Contains(GameText.Get(hotbar1.NameKey)) && notInHistory
                    && Mathf.Approximately(speed2, 2f) && Mathf.Approximately(speedAfter4, 3f)
                    && !NotificationCenter.Toasts.Any(e => e.Type.Id == "feature_locked" && e.Text.Contains(GameText.Get("input.action.speed_triple.name"))),
-                $"按 Q（吸管，后续开放）→ 弹出“{lockedText}”（只弹出、不进历史）；按 3 → 2x；按 4 → 3x（FG0-ARCH-01 统一时钟），不再提示尚未开放");
+                $"按机器名册键（后续开放）→ 弹出“{lockedText}”（只弹出、不进历史）；按 3 → 2x；按 4 → 3x（FG0-ARCH-01 统一时钟），不再提示尚未开放");
         }
 
         // ── G. 存读档 ─────────────────────────────────────────────────────────
@@ -1446,7 +1446,8 @@ namespace GameLogic.EditorTools
             // FG3-LOG-03 新增 BeltPortPanel.uxml（建筑端口面板）与 BeltPortRow.uxml（端口行模板），共 20 份；
             // FG3-LOG-04 新增 BeltNodePanel.uxml（分流器 / 合流器 / 地下带设置面板），共 21 份；
             // FG3-LOG-05 新增 PipePanel.uxml（管线面板：网络读数、储罐、阀门、冲洗），共 22 份。
-            Expect(uxmlCount == 23 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
+            // FG3-LOG-07 新增 LayoutLibraryPanel.uxml（布局库）与 LayoutLibraryRow.uxml（布局行模板），共 25 份。
+            Expect(uxmlCount == 25 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
 
             string[] codeDirs =
             {
