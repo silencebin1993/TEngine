@@ -941,7 +941,7 @@ namespace GameLogic.EditorTools
             bool moving = squad.TryGetActiveCommandKind(a, out RegionCommandKind k1) && k1 == RegionCommandKind.Move;
             WorldSimulation.StepMany(90);
             site.TryGetMachinePosition(a, out Vector2 pa);
-            bool arrivedText = squad.RecentEvents.Any(e => e.Contains($"机器 #{a} 已到达目标，交还 AI"));
+            bool arrivedText = squad.RecentEvents.Any(e => e.Contains(GameText.Format("squad.ev.arrived", MachineNaming.Short(a))));
             Expect(moving && arrivedText && Vector2.Distance(pa, new Vector2(-2f, -18f)) <= 1.2f && !squad.TryGetActiveCommandKind(a, out _),
                 $"编队移动：命令在内核里执行（下达后 {k1}），1.5 秒内到达（距目标 {Vector2.Distance(pa, new Vector2(-2f, -18f)):F2} 米）、文本“已到达目标，交还 AI”、命令结束");
 
@@ -968,7 +968,7 @@ namespace GameLogic.EditorTools
             WorldSimulation.StepMany(120);
             site.TryGetMachinePosition(a, out Vector2 pr);
             Expect(guarding && Vector2.Distance(pr, FracturedCityLayout.EntryEvac.Position) <= 1.2f
-                   && squad.RecentEvents.Any(e => e.Contains($"机器 #{a} 已撤到安全点，交还 AI")),
+                   && squad.RecentEvents.Any(e => e.Contains(GameText.Format("squad.ev.retreated", MachineNaming.Short(a)))),
                 $"守备持续 2 秒仍在守备；撤退回到入口安全区（距 {Vector2.Distance(pr, FracturedCityLayout.EntryEvac.Position):F2} 米），文本“已撤到安全点”");
 
             // 攻击：追到 6 米接战距离，每 1.2 秒一次，伤害 = 装配编译出的伤害；击毁后交还并掉落。

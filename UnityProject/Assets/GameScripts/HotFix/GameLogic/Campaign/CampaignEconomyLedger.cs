@@ -374,6 +374,52 @@ namespace GameLogic.Campaign
             return LedgerResult.Ok();
         }
 
+        /// <summary>
+        /// FG4-ECO-07（承接 DEBT-FG3LOG02-09）：已结束的资源事务（已结算 / 取消 / 失败）超过 <paramref name="keep"/> 条（再多留 64 条缓冲）时，按登记顺序清掉最早的那些。
+        /// <paramref name="protectedIds"/>（在办工单引用的事务）不清——在办的事务（提议 / 预留 / 进行中）一条不动、相对顺序不变。
+        /// 被清掉的只是“很久以前已经结清”的流水：余额在资源池里，不在流水里；HUD 只读最近几条。由派工评估调用（每 0.5 秒或有脏标记），O(事务数)。
+        /// </summary>
+        public static int PruneHistory(CampaignState state, int keep, ICollection<string> protectedIds)
+        {
+            ResourceTransactionRecord[] all = state?.ResourceTransactions;
+            if (all == null || keep < 0)
+            {
+                return 0;
+            }
+            int terminal = 0;
+            foreach (ResourceTransactionRecord r in all)
+            {
+                if (r != null && IsTerminal(r.State))
+                {
+                    terminal++;
+                }
+            }
+            if (terminal <= keep + 64)
+            {
+                return 0;
+            }
+            int toRemove = terminal - keep;
+            var kept = new List<ResourceTransactionRecord>(all.Length);
+            int removed = 0;
+            foreach (ResourceTransactionRecord r in all)
+            {
+                if (r != null && removed < toRemove && IsTerminal(r.State) && (protectedIds == null || !protectedIds.Contains(r.TransactionId)))
+                {
+                    removed++;
+                    continue;
+                }
+                kept.Add(r);
+            }
+            if (removed > 0)
+            {
+                state.ResourceTransactions = kept.ToArray();
+            }
+            return removed;
+        }
+
+        private static bool IsTerminal(ResourceTransactionState s) =>
+            s == ResourceTransactionState.Committed || s == ResourceTransactionState.Cancelled || s == ResourceTransactionState.Failed;
+
         private static void AppendRecord(CampaignState state, ResourceTransactionRecord record)
         {
             var list = new List<ResourceTransactionRecord>(

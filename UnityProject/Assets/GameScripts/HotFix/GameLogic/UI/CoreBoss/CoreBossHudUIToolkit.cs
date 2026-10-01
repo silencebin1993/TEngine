@@ -125,7 +125,7 @@ namespace GameLogic.UI.CoreBoss
                 .OrderByDescending(m => m.WeaponHeat)
                 .FirstOrDefault();
             _heatLabel.text = hottest != null
-                ? $"重炮热量 #{hottest.DisplayNumber}：{hottest.WeaponHeat:F0}/{FracturedCityLayout.WeaponHeatOverheatThreshold:F0}" +
+                ? $"重炮热量 {MachineNaming.Short(hottest)}：{hottest.WeaponHeat:F0}/{FracturedCityLayout.WeaponHeatOverheatThreshold:F0}" +
                   (hottest.IsWeaponOverheated ? "（过热停火）" : string.Empty)
                 : string.Empty;
 

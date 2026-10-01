@@ -572,7 +572,7 @@ namespace GameLogic.Campaign
 
             // ER8-CONTENT-01：存活→阵亡的唯一翻转点（重复标记在上面已早退，不会重复出声）。
             // 记录里的 WorldPosition 只在存档前同步，平时可能是旧值——不按距离衰减。
-            Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.MachineDestroyed, deathPosition, "#" + record.DisplayNumber + " 被击毁");
+            Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.MachineDestroyed, deathPosition, GameLogic.Localization.GameText.Format("machine.feedback.destroyed", MachineNaming.Short(record))); // FG4-ECO-07：名字同源
             // FG0-ARCH-03：机器所在地点的战斗内核据此把单位标为阵亡（O(1)，不需要每步对账）。
             MachineDied?.Invoke(logicId);
             return MachineOpResult.Ok(logicId);
@@ -610,7 +610,8 @@ namespace GameLogic.Campaign
             }
             // ER8-CONTENT-01：受损音按时刻节流（每台机器被连续攻击也不会刷屏）；字幕仅在“字幕”开启时出。
             Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.MachineDamaged,
-                $"#{record.DisplayNumber} 耐久 {record.Health:F0}/{record.MaxHealth:F0}");
+                GameLogic.Localization.GameText.Format("machine.feedback.damaged", MachineNaming.Short(record), record.Health.ToString("F0", System.Globalization.CultureInfo.InvariantCulture),
+                    record.MaxHealth.ToString("F0", System.Globalization.CultureInfo.InvariantCulture)));
             return MachineOpResult.Ok(logicId, $"机器 {logicId} 受到 {damage:F1} 点伤害，剩余 {record.Health:F1}/{record.MaxHealth:F0}。");
         }
 
@@ -665,6 +666,16 @@ namespace GameLogic.Campaign
             if (_records.TryGetValue(logicId, out MachineRecord record))
             {
                 record.ExpeditionsCompleted++;
+            }
+        }
+
+        /// <summary>FG4-ECO-07（FGR-ECO-041 机器详情“击杀”）：<see cref="MachineRecord.KillCount"/> 的唯一写入口——此前从未被递增过（名册 / 详情 / 工单面板的“击杀”恒为 0）。
+        /// 由战斗地点在敌人阵亡事件里按致命一击的来源单位调用（<c>CombatSite.Handle</c>），每个敌人的阵亡结算恰好一次，所以每次击杀只记一次。</summary>
+        public static void RecordKill(int logicId)
+        {
+            if (_records.TryGetValue(logicId, out MachineRecord record) && record.IsAlive)
+            {
+                record.KillCount++;
             }
         }
 
@@ -810,6 +821,11 @@ namespace GameLogic.Campaign
                 TimesControlled = src.TimesControlled,
                 SignalUplinkCount = src.SignalUplinkCount,
                 SignalUplinkTicks = src.SignalUplinkTicks,
+                // FG4-ECO-07：岗位只存可设定的五种（远征中 / 维修中是算出来的；越界的整数按劳动读，旧档缺字段本来就是 0 = 劳动）。
+                Role = MachineRoster.SanitizeStoredRole(src.Role),
+                CustomName = MachineNaming.Sanitize(src.CustomName),
+                RolePointId = string.IsNullOrEmpty(src.RolePointId) ? null : src.RolePointId,
+                RoleOrderId = string.IsNullOrEmpty(src.RoleOrderId) ? null : src.RoleOrderId,
                 IsAlive = src.IsAlive,
                 IsInFactory = src.IsInFactory,
                 IsDeployed = src.IsDeployed,

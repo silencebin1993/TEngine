@@ -219,7 +219,7 @@ namespace GameLogic.Campaign.Feedback
         /// <summary>字幕里的机器称呼，与各面板一致的“#编号”；找不到记录返回空串。</summary>
         public static string MachineLabel(int logicId)
         {
-            return MachineRegistry.TryGetRecord(logicId, out MachineRecord rec) ? "#" + rec.DisplayNumber : string.Empty;
+            return MachineRegistry.TryGetRecord(logicId, out MachineRecord rec) ? MachineNaming.Short(rec) : string.Empty; // FG4-ECO-07：名字同源
         }
 
         /// <summary>这台机器底盘的专属音色（ChassisCatalog.SfxId，命令确认音按底盘区分）；找不到返回 null。</summary>

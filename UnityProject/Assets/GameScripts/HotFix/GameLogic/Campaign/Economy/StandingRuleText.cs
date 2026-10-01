@@ -64,10 +64,8 @@ namespace GameLogic.Campaign.Economy
         /// <summary>列表分隔（中文“、”，英文“, ”；B16）。</summary>
         public static string ListSeparator => GameText.Get("rules.sep_list");
 
-        public static string MachineLabel(int logicId) =>
-            MachineRegistry.TryGetRecord(logicId, out MachineRecord m)
-                ? GameText.Format("rules.machine_label", m.DisplayNumber)
-                : GameText.Format("rules.machine_label", logicId);
+        /// <summary>FG4-ECO-07（承接 DEBT-FG4ECO06-06）：规则里的机器称呼与名册同源——起了名的写“名字 #编号”。</summary>
+        public static string MachineLabel(int logicId) => MachineNaming.Short(logicId);
 
         private static string RecipeLabel(string recipeId) =>
             string.IsNullOrEmpty(recipeId) ? GameText.Get("rules.recipe_none") : ItemCatalog.TryGetRecipe(recipeId, out RecipeDef rd) ? rd.Name : recipeId;
@@ -359,6 +357,13 @@ namespace GameLogic.Campaign.Economy
         /// <summary>规则派出 / 改动过的工单：“由规则 R3 触发” / “优先级由规则 R2 提高”；不是规则的返回 null。</summary>
         public static string DescribeOrder(CampaignState state, WorkOrderRecord o)
         {
+            if (o != null && o.IssuerId == HomeValleyWorkOrders.RosterIssuer)
+            {
+                // FG4-ECO-07：名册派的送修 / 驻防也写来源（FGR-ECO-031 可追溯同一做法）。
+                return o.Kind == WorkOrderKind.MachineRepair
+                    ? GameText.Format("roster.trace.repair", BuildingLabel(state, o.TargetId), o.Duration > 0f ? Math.Min(100, (int)Math.Round(o.Progress / o.Duration * 100f)) : 0)
+                    : GameText.Format("roster.trace.garrison", BuildingLabel(state, o.TargetId));
+            }
             if (o == null || o.RuleSerial <= 0)
             {
                 return null;

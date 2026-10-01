@@ -73,6 +73,21 @@ namespace GameLogic.Campaign
         };
     }
 
+    /// <summary>FG4-ECO-07（FG04 FGR-ECO-040）：机器岗位。整数值进存档（JsonUtility 存枚举的整数），与 fg.TbRosterRole.code 一一对应（自检逐项比对），
+    /// 顺序不能改、只能在末尾追加。0 = 劳动：旧档缺字段读成劳动，与 0.2 之前“所有机器都接活”的行为一致。</summary>
+    public enum MachineRole
+    {
+        Labor = 0,
+        Garrison = 1,
+        OutpostLabor = 2,
+        ExpeditionReserve = 3,
+        Idle = 4,
+        /// <summary>只由在办的送修工单决定（名册里选它 = 送修）；不进存档字段。</summary>
+        InRepair = 5,
+        /// <summary>只由所在地点决定（机器不在家园且活着）；不能在名册里选。</summary>
+        OnExpedition = 6,
+    }
+
     /// <summary>ERD-DAT-002 MachineRecord：个体机器的长期真相。
     /// <c>LogicId</c> 跨进程稳定且永不复用；<c>SimEntityId</c> 只在当前 SimWorld 内有效，
     /// **绝不落盘**（本类型故意不含该字段——ER1-ID-01 会补唯一 MachineRegistry 时也遵守同一红线）。</summary>
@@ -107,6 +122,22 @@ namespace GameLogic.Campaign
         /// <summary>FG1-HUD-01（FGR-SIG-082 累计时长）：信号已离开的各段在这台机器里累计的统一时钟步数（<c>GameClock.Ticks</c>，60 步 = 1 游戏秒；
         /// 存整数步，不存浮点秒——浮点经 JsonUtility 往返会差 1 ulp）。当前正在进行的一段不在这里，读取走 <c>MachineSignalExperience.TotalTicks</c>。</summary>
         public long SignalUplinkTicks;
+
+        // ── FG4-ECO-07（FG04 FGR-ECO-040 / 041）：岗位与名字。只加字段、不升存档版本：旧档缺字段读成 0 = 劳动、空名字 = 默认名。
+
+        /// <summary>玩家设定的岗位（只存可设定的五种：劳动 / 驻防 / 前哨劳动 / 远征预备 / 闲置；“远征中”“维修中”是按所在地点与在办工单算出来的，
+        /// 见 <see cref="MachineRoster.EffectiveRole"/>）。唯一写入口 <see cref="MachineRoster.TrySetRole"/>。</summary>
+        public MachineRole Role;
+
+        /// <summary>玩家起的名字（空 = 默认名“型号 #编号”）。唯一写入口 <see cref="MachineNaming.TryRename"/>；显示一律走 <see cref="MachineNaming"/>。</summary>
+        public string CustomName;
+
+        /// <summary>“驻防”岗位的驻防点（建筑 ID；空 = 归还核心）。</summary>
+        public string RolePointId;
+
+        /// <summary>名册为这台机器开的最近一张驻防 / 送修工单（岗位维持器据此判断“玩家接管过就不再拉回去”）。</summary>
+        public string RoleOrderId;
+
         public bool IsAlive;
         public bool IsInFactory;
         public bool IsDeployed;

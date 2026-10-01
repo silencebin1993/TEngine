@@ -27,9 +27,13 @@ namespace GameLogic.Campaign
             public readonly double SignalUplinkSeconds;
             public readonly string SignalExperienceText;
 
+            /// <summary>FG4-ECO-07（FGR-ECO-041 名字出现在结算中）：机器称呼（起了名 = “名字 #编号”，否则 “#编号”），与名册同源。</summary>
+            public readonly string Label;
+
             public MachineSummary(int displayNumber, bool isAlive, string[] experienceDisplayNames, string chassisId = null,
-                int signalUplinkCount = 0, double signalUplinkSeconds = 0, string signalExperienceText = null)
+                int signalUplinkCount = 0, double signalUplinkSeconds = 0, string signalExperienceText = null, string label = null)
             {
+                Label = label ?? "#" + displayNumber.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 DisplayNumber = displayNumber;
                 IsAlive = isAlive;
                 ExperienceDisplayNames = experienceDisplayNames;
@@ -85,7 +89,8 @@ namespace GameLogic.Campaign
                     m.ChassisId,
                     m.SignalUplinkCount,
                     MachineSignalExperience.TotalSeconds(state, m),
-                    MachineSignalExperience.Describe(state, m)))
+                    MachineSignalExperience.Describe(state, m),
+                    MachineNaming.Short(m)))
                 .ToArray();
 
             // 使用过的跨派系蓝图——EventLedger 里 "exposure:cross_faction_firmware:{blueprintId}:{version}"

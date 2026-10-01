@@ -498,9 +498,10 @@ namespace GameLogic.EditorTools
                 // FG4-ECO-04 的发电类别表（PS）由 FgEnergySelfCheck F1 段逐字段比对。
                 // FG4-ECO-05 的建筑通用表（BS）与建筑等级表（BT2）由 FgBuildingOpsSelfCheck A1 段逐字段比对。
                 // FG4-ECO-06 的规则类型表（RK）与常用预设表（RP）由 FgStandingRulesSelfCheck A1 段逐字段比对。
+                // FG4-ECO-07 的机器岗位表（RR）由 FgMachineRosterSelfCheck A1 段逐字段比对。
                 if (f[0] == "BC" || f[0] == "BT" || f[0] == "G" || f[0] == "P" || f[0] == "L" || f[0] == "X" || f[0] == "H" || f[0] == "FK" || f[0] == "CX" || f[0] == "ST"
                     || f[0] == "CR" || f[0] == "CC" || f[0] == "RX" || f[0] == "FP" || f[0] == "FL" || f[0] == "PN" || f[0] == "BU" || f[0] == "IT" || f[0] == "RC" || f[0] == "RI" || f[0] == "PD" || f[0] == "PF" || f[0] == "AM"
-                    || f[0] == "PS" || f[0] == "BS" || f[0] == "BT2" || f[0] == "RK" || f[0] == "RP"
+                    || f[0] == "PS" || f[0] == "BS" || f[0] == "BT2" || f[0] == "RK" || f[0] == "RP" || f[0] == "RR"
                     || f[0].StartsWith("W", StringComparison.Ordinal))
                 {
                     continue;

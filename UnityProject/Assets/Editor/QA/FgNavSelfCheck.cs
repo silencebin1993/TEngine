@@ -1202,7 +1202,7 @@ namespace GameLogic.EditorTools
         /// 开局只探明核心附近、地形起伏按种子而定，有的种子附近没有够大的天然平地：这时退而找一块已探索、没有建筑与障碍的方形区域，
         /// 把里面的地形整平成空地（测试布景，同 <see cref="CliffRing"/>），不让用例依赖某个种子恰好有平地。
         /// </summary>
-        private static GridCell? FindOpenArea(CampaignState s, int half, int minR, int maxR)
+        internal static GridCell? FindOpenArea(CampaignState s, int half, int minR, int maxR)
         {
             GridCell? natural = FindOpenAreaCore(s, half, minR, maxR, flatten: false);
             if (natural != null)
@@ -1310,7 +1310,7 @@ namespace GameLogic.EditorTools
             return null;
         }
 
-        private static void CliffRing(CampaignState s, GridCell center, int r, int thickness = 1, Func<int, int, bool> keep = null)
+        internal static void CliffRing(CampaignState s, GridCell center, int r, int thickness = 1, Func<int, int, bool> keep = null)
         {
             HomeGridMap map = HomeGridService.MapFor(s);
             byte cliff = GridContent.TerrainCode("cliff");

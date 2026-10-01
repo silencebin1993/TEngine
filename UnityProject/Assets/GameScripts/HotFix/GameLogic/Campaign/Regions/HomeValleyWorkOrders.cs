@@ -132,6 +132,27 @@ namespace GameLogic.Campaign.Regions
             state.WorkOrders = (state.WorkOrders ?? Array.Empty<WorkOrderRecord>()).Append(order).ToArray();
         }
 
+        /// <summary>
+        /// FG4-ECO-07 审查修复（P0）：工单 ID 在 <c>state.WorkOrders</c> 里必须唯一——读档遇到重复 ID 会整档拒绝恢复（CampaignRestoreOrchestrator）。
+        /// <paramref name="baseId"/> 已被占用时依次追加 “~2”“~3”……，不依赖时钟（暂停中时钟不走，按时钟拼的 ID 会撞号）、不依赖数组长度（已结束工单清理后长度会回落）。
+        /// 同一状态下结果确定（观察 / 不观察、存读档一致）。O(工单数 × 撞号次数)，只在开单时调用。
+        /// </summary>
+        public static string FreshOrderId(CampaignState state, string baseId)
+        {
+            if (Find(state, baseId) == null)
+            {
+                return baseId;
+            }
+            for (int n = 2; ; n++)
+            {
+                string id = baseId + "~" + n.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                if (Find(state, id) == null)
+                {
+                    return id;
+                }
+            }
+        }
+
         private static long NowTick(CampaignState state) => (long)(state.PlaySeconds * 1000f);
 
         // ── 通用创建前置校验 ─────────────────────────────────────────────────────
@@ -657,11 +678,8 @@ namespace GameLogic.Campaign.Regions
             {
                 return WorkOrderOpResult.Fail($"ground-item-not-found:{groundItemId}");
             }
-            string workOrderId = groundItemId + ":haul:auto";
-            if (Find(state, workOrderId) != null)
-            {
-                workOrderId += ":" + (state.WorkOrders?.Length ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture);
-            }
+            // FG4-ECO-07 审查修复（P2）：原来撞号时追加数组长度——已结束工单清理（PruneHistory）后长度会回落，可能撞上还没清掉的同 ID 单。
+            string workOrderId = FreshOrderId(state, groundItemId + ":haul:auto");
             var order = NewOrder(state, workOrderId, WorkOrderKind.Haul, groundItemId, 0, resourceTransactionId: null, duration: 0f);
             order.SourceId = groundItemId;
             order.DestinationId = DestinationCore;
@@ -1352,7 +1370,7 @@ namespace GameLogic.Campaign.Regions
                 PathWatch.Remove(order.WorkOrderId);
                 WaitingWatch.Remove(order.WorkOrderId);
                 order.State = WorkOrderState.Cancelled;
-                order.FailureReason = "player-took-over";
+                order.FailureReason = PlayerTookOverReason;
                 order.AssignedMachineLogicId = 0;
                 MarkAssignmentDirty();
                 return;
@@ -1553,7 +1571,8 @@ namespace GameLogic.Campaign.Regions
                 }
                 if (o.State == WorkOrderState.Reserved && o.AssignedMachineLogicId > 0)
                 {
-                    committed += Math.Min(HomeValleyConstruction.CarryPerTrip, HomeValleyConstruction.MaterialsStillNeeded(state, o));
+                    MachineRegistry.TryGetRecord(o.AssignedMachineLogicId, out MachineRecord carrier);
+                    committed += Math.Min(HomeValleyConstruction.CarryFor(carrier), HomeValleyConstruction.MaterialsStillNeeded(state, o));
                 }
                 else if (o.State == WorkOrderState.Ready && o.AssignedMachineLogicId == 0)
                 {
@@ -1650,6 +1669,9 @@ namespace GameLogic.Campaign.Regions
         /// <summary>“无法到达”的失败原因码：unreachable:<NavFailReason 数值>。</summary>
         public const string UnreachablePrefix = "unreachable:";
 
+        /// <summary>赶路持续没有进展（路径受阻）的原因码（与 TickReserved 写入的字面值一致）。</summary>
+        public const string PathBlockedReason = "path-blocked";
+
         public static bool IsUnreachableReason(string reason) => reason != null && reason.StartsWith(UnreachablePrefix, StringComparison.Ordinal);
 
         public static BinGames.Sim.Nav.NavFailReason ParseUnreachable(string reason)
@@ -1676,7 +1698,8 @@ namespace GameLogic.Campaign.Regions
             if (order == null)
             {
                 // 没有工单的直接移动命令（右键地面）：命令已结束，也要告诉玩家为什么没动（<paramref name="at"/> = 目标点）。
-                string text = GameLogic.Localization.GameText.Format("nav.squad.unreachable", logicId.ToString(),
+                // FG4-ECO-07 审查修复（P1，FGR-ECO-041）：通知里写机器名字（MachineNaming 唯一数据源），不再写内部 LogicId。
+                string text = GameLogic.Localization.GameText.Format("nav.squad.unreachable", MachineNaming.Short(logicId),
                     Nav.NavService.FailText(reason, Nav.NavService.CellOf(at.x, at.y)));
                 Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Denied, text);
                 GameLogic.Notifications.NotificationCenter.Post("unreachable", text, new Vector3(at.x, 0f, at.y));
@@ -1684,7 +1707,20 @@ namespace GameLogic.Campaign.Regions
             }
             string code = UnreachablePrefix + ((int)reason).ToString(System.Globalization.CultureInfo.InvariantCulture);
             Vector2 target = ResolveWorkPosition(state, order);
-            if (order.State == WorkOrderState.Reserved)
+            if (order.State == WorkOrderState.Reserved && IsRuleSelfKind(order.Kind))
+            {
+                // FG4-ECO-07 审查修复（P1）：送修 / 驻防只属于这台机器，进不了待分配池（没有底盘能“接”这两类单）——转为等待会变成永远在办的孤儿单，
+                // 名册岗位维持器还会每次评估补派一张。与“路径卡住”同一做法：判失败（原因 = 无法到达），机器空出来。
+                // 名册驻防据此暂停（MachineRoster.GarrisonBlocked，详情页写原因）；规则的持有按“仍在执行”保留、不再补派（StandingRuleService.Status）。
+                PathWatch.Remove(order.WorkOrderId);
+                WaitingWatch.Remove(order.WorkOrderId);
+                order.State = WorkOrderState.Failed;
+                order.FailureReason = code;
+                order.AssignedMachineLogicId = 0;
+                MarkAssignmentDirty();
+                HomeValleyConstruction.Touch();
+            }
+            else if (order.State == WorkOrderState.Reserved)
             {
                 PathWatch.Remove(order.WorkOrderId);
                 ReleaseBuildMachine(state, order, dropOnly: false); // FG3-LOG-02：去不了现场，货舱里的材料退回仓库。
@@ -1708,13 +1744,41 @@ namespace GameLogic.Campaign.Regions
             }
             if (!order.UnreachableNotified)
             {
-                order.UnreachableNotified = true;
                 string reasonText = Nav.NavService.FailText(reason, Nav.NavService.CellOf(target.x, target.y));
-                string detail = GameLogic.Localization.GameText.Format("nav.work.unreachable", Feedback.FeedbackCues.MachineLabel(logicId),
-                    DescribeTarget(state, order), reasonText, GameLogic.Localization.GameText.Get("nav.fail.fix"));
-                GameLogic.Notifications.NotificationCenter.Post("unreachable", detail, new Vector3(target.x, 0f, target.y));
+                if (order.State == WorkOrderState.Failed)
+                {
+                    NotifySelfTripFailed(state, order, logicId, reasonText, target);
+                }
+                else
+                {
+                    order.UnreachableNotified = true;
+                    string detail = GameLogic.Localization.GameText.Format("nav.work.unreachable", Feedback.FeedbackCues.MachineLabel(logicId),
+                        DescribeTarget(state, order), reasonText, GameLogic.Localization.GameText.Get("nav.fail.fix"));
+                    GameLogic.Notifications.NotificationCenter.Post("unreachable", detail, new Vector3(target.x, 0f, target.y));
+                }
             }
-            UnityEngine.Debug.Log($"[HomeValleyWorkOrders] 工单 {order.WorkOrderId} 无法到达（{reason}），转为等待，30 秒后重试。");
+            UnityEngine.Debug.Log(order.State == WorkOrderState.Failed
+                ? $"[HomeValleyWorkOrders] 工单 {order.WorkOrderId} 无法到达（{reason}），送修 / 驻防这一趟结束（不自动重试）。"
+                : $"[HomeValleyWorkOrders] 工单 {order.WorkOrderId} 无法到达（{reason}），转为等待，30 秒后重试。");
+        }
+
+        /// <summary>
+        /// 送修 / 驻防这一趟到不了而判失败（寻路无法到达，或赶路看门狗判定路径持续受阻）：每张单只发一次可定位通知
+        /// “{机器} 去不了 {目标}：{原因}。{解决办法}。{怎么恢复}”（标记随存档保留），名册驻防写明怎么恢复，其余写“这一趟已取消，不会自动重试”。
+        /// </summary>
+        private static void NotifySelfTripFailed(CampaignState state, WorkOrderRecord order, int logicId, string reasonText, Vector2 target)
+        {
+            if (order == null || order.UnreachableNotified)
+            {
+                return;
+            }
+            order.UnreachableNotified = true;
+            string hint = order.Kind == WorkOrderKind.Garrison && order.IssuerId == RosterIssuer
+                ? GameLogic.Localization.GameText.Get("roster.garrison.resume_hint")
+                : GameLogic.Localization.GameText.Get("nav.work.self_cancelled");
+            string detail = GameLogic.Localization.GameText.Format("nav.work.unreachable_self", Feedback.FeedbackCues.MachineLabel(logicId),
+                DescribeTarget(state, order), reasonText, GameLogic.Localization.GameText.Get("nav.fail.fix"), hint);
+            GameLogic.Notifications.NotificationCenter.Post("unreachable", detail, new Vector3(target.x, 0f, target.y));
         }
 
         /// <summary>工单目标的显示名（建筑名；其它按目标 ID）。</summary>
@@ -1786,6 +1850,7 @@ namespace GameLogic.Campaign.Regions
             {
                 return WorkOrderOpResult.Fail("insufficient-items");
             }
+            workOrderId = FreshOrderId(state, workOrderId); // 调用方以返回的 ID 为准（FG4-ECO-07 审查 P0：ID 唯一）
             WorkOrderRecord order = NewOrder(state, workOrderId, WorkOrderKind.Deliver, targetBuildingId, 0, resourceTransactionId: null, duration: Mathf.Max(0.1f, seconds));
             order.IssuerId = RuleIssuer;
             order.State = WorkOrderState.Ready;
@@ -1799,15 +1864,27 @@ namespace GameLogic.Campaign.Regions
         }
 
         /// <summary>机器维修：这台机器自己去 <paramref name="bayId"/> 修理（指派给它、下一次 Tick 发起移动）。它手上原来的工单交还待分配池。</summary>
-        public static WorkOrderOpResult TryCreateMachineRepair(CampaignState state, string workOrderId, int machineLogicId, string bayId, int ruleSerial) =>
-            CreateSelfOrder(state, workOrderId, WorkOrderKind.MachineRepair, machineLogicId, bayId, ruleSerial);
+        public static WorkOrderOpResult TryCreateMachineRepair(CampaignState state, string workOrderId, int machineLogicId, string bayId, int ruleSerial,
+            string issuer = RuleIssuer) =>
+            CreateSelfOrder(state, workOrderId, WorkOrderKind.MachineRepair, machineLogicId, bayId, ruleSerial, issuer);
 
         /// <summary>静默夜预案：这台机器去驻防点（建筑 ID；空 = 归还核心）待命，直到规则收工（<see cref="EndRuleOrder"/>）。</summary>
-        public static WorkOrderOpResult TryCreateGarrison(CampaignState state, string workOrderId, int machineLogicId, string pointBuildingId, int ruleSerial) =>
+        public static WorkOrderOpResult TryCreateGarrison(CampaignState state, string workOrderId, int machineLogicId, string pointBuildingId, int ruleSerial,
+            string issuer = RuleIssuer) =>
             CreateSelfOrder(state, workOrderId, WorkOrderKind.Garrison, machineLogicId,
-                string.IsNullOrEmpty(pointBuildingId) ? HomeValleyLayout.RegionId + ":" + HomeValleyLayout.BuildingTypeCore : pointBuildingId, ruleSerial);
+                string.IsNullOrEmpty(pointBuildingId) ? HomeValleyLayout.RegionId + ":" + HomeValleyLayout.BuildingTypeCore : pointBuildingId, ruleSerial, issuer);
 
-        private static WorkOrderOpResult CreateSelfOrder(CampaignState state, string workOrderId, WorkOrderKind kind, int machineLogicId, string targetId, int ruleSerial)
+        /// <summary>FG4-ECO-07：名册派的送修 / 驻防单的发起方（工单面板写“由名册送修 / 名册岗位驻防”）。</summary>
+        public const string RosterIssuer = "roster";
+
+        /// <summary>FG4-ECO-07：名册岗位驻防单被别的显式命令（规则 / 名册送修）替下时的原因——不是玩家接管：替下它的单子结束后，岗位维持器再派它回驻防点。</summary>
+        public const string RoleYieldReason = "role-yield";
+
+        /// <summary>玩家接入 / 下别的命令接管了规则或名册派的单子（名册驻防据此暂停，直到玩家在名册里再设一次）。</summary>
+        public const string PlayerTookOverReason = "player-took-over";
+
+        private static WorkOrderOpResult CreateSelfOrder(CampaignState state, string workOrderId, WorkOrderKind kind, int machineLogicId, string targetId, int ruleSerial,
+            string issuer)
         {
             if (state == null)
             {
@@ -1825,19 +1902,27 @@ namespace GameLogic.Campaign.Regions
             {
                 return WorkOrderOpResult.Fail("building-not-found");
             }
+            // FG4-ECO-07 审查修复（P0）：调用方传入的 ID 只是基础 ID（名册按“机器 + 时钟步”拼，暂停中时钟不走会重复）——撞号时追加序号，调用方以返回的 ID 为准。
+            workOrderId = FreshOrderId(state, workOrderId);
             WorkOrderRecord current = FindActiveOrderForMachine(state, machineLogicId);
-            if (current != null && current.Kind == WorkOrderKind.Haul)
+            if (current != null && IsRuleSelfKind(current.Kind) && current.IssuerId == RosterIssuer)
+            {
+                // FG4-ECO-07：名册岗位驻防 / 送修被规则或名册新的送修替下——不算玩家接管，替下它的单子结束后岗位维持器再派它回驻防点。
+                EndSelfOrder(current, RoleYieldReason);
+            }
+            else if (current != null && current.Kind == WorkOrderKind.Haul)
             {
                 // 审查修复（P1）：搬运单与玩家命令路径（HomeValleyController.YieldWorkOrderForPlayerCommand）一致按取消处理——已拾取的货放回机器脚下的地面、资源事务退回；
                 // 交还分配池会让货留在这台机器的货舱里没人负责，之后接别的搬运 / 取料时被覆盖而凭空消失（FGT-ECO-001 物品守恒）。
-                CancelOrder(state, current.WorkOrderId, record.WorldPosition);
+                // FG4-ECO-07：系统返还物的搬运单还没拾取时交还待分配池、拾取了的放下后重新生成搬运单（见 ReleaseHaulForReassign），不让返还物没人管。
+                ReleaseHaulForReassign(state, current, machineLogicId, MachineAt(state, machineLogicId, current));
             }
             else if (current != null)
             {
                 YieldToPool(state, machineLogicId); // 规则是玩家显式设下的命令：手上的活交还待分配池（施工材料退回、虚影保留）。
             }
             WorkOrderRecord order = NewOrder(state, workOrderId, kind, targetId, machineLogicId, resourceTransactionId: null, duration: 0f);
-            order.IssuerId = RuleIssuer;
+            order.IssuerId = string.IsNullOrEmpty(issuer) ? RuleIssuer : issuer;
             order.State = WorkOrderState.Reserved;
             order.RuleSerial = ruleSerial;
             Append(state, order);
@@ -1845,6 +1930,108 @@ namespace GameLogic.Campaign.Regions
             MarkAssignmentDirty();
             HomeValleyConstruction.Touch();
             return WorkOrderOpResult.Ok(workOrderId);
+        }
+
+        /// <summary>结束一张只属于某台机器的送修 / 驻防单（取消，写原因），并让机器停下（下一次 Tick 撤掉它的移动命令）。</summary>
+        private static void EndSelfOrder(WorkOrderRecord order, string reason)
+        {
+            int machine = order.AssignedMachineLogicId;
+            PathWatch.Remove(order.WorkOrderId);
+            WaitingWatch.Remove(order.WorkOrderId);
+            order.State = WorkOrderState.Cancelled;
+            order.FailureReason = reason;
+            order.AssignedMachineLogicId = 0;
+            if (machine > 0)
+            {
+                PendingMovementRelease.Add(machine);
+            }
+            MarkAssignmentDirty();
+            HomeValleyConstruction.Touch();
+        }
+
+        /// <summary>机器当前位置（内核实时位置优先，其次存档位置，都没有时用工单目标位置）——放下货物的落点。</summary>
+        private static Vector2 MachineAt(CampaignState state, int machineLogicId, WorkOrderRecord order)
+        {
+            Vector2 at = MachineRegistry.TryGetRecord(machineLogicId, out MachineRecord rec) ? rec.WorldPosition : ResolveWorkPosition(state, order);
+            return MachineRegistry.TryGetLivePosition(machineLogicId, out Vector2 live) ? live : at;
+        }
+
+        /// <summary>
+        /// FG4-ECO-07：让一台机器放下手上的搬运单（改岗位、规则 / 名册派它去送修驻防）。物品守恒，返还物不会没人管：
+        /// - 系统返还物的搬运单（IssuerId = "return"，拆除 / 取消 / 被摧毁落地的东西）还没拾取：交还待分配池，地面物原地不动，由别的劳动机去搬；
+        /// - 已经拾取（货在货舱）：按取消处理，货放回机器脚下；返还物再为放下的那一份生成搬运单（与 HomeValleyConstruction.DropForHaul 同一入口）；
+        /// - 玩家亲自下的搬运：取消（玩家改了这台机器的安排，与玩家换目标的做法一致），拾取了的货放回脚下。
+        /// </summary>
+        private static void ReleaseHaulForReassign(CampaignState state, WorkOrderRecord order, int machineLogicId, Vector2 at)
+        {
+            bool carrying = MachineRegistry.TryGetRecord(machineLogicId, out MachineRecord m) && m.Cargo != null && m.Cargo.Length > 0;
+            bool systemReturn = order.IssuerId == "return";
+            if (systemReturn && !carrying)
+            {
+                YieldToPool(state, machineLogicId);
+                return;
+            }
+            string orderId = order.WorkOrderId;
+            string redropId = order.SourceId + ":redrop:" + orderId; // 与 ReleaseResourcesAndCargo 放下货物时的标识一致
+            CancelOrder(state, orderId, at);
+            if (systemReturn)
+            {
+                GroundItemRecord redrop = HomeValleyCargo.FindGroundItemBySalvageId(state, redropId);
+                if (redrop != null)
+                {
+                    TryCreateHaulPool(state, redrop.GroundItemId);
+                }
+            }
+        }
+
+        /// <summary>
+        /// FG4-ECO-07（FGR-ECO-040，FGR-BASE-020）：玩家在名册里改了岗位——让出这台机器手上和新岗位不符的工单，并让它停下：
+        /// - 劳动工作单（新岗位不是劳动时）：补给 / 施工 / 维修 / 拆解单交还待分配池（补给单的预留物品留在单上、施工材料退回、虚影保留），由别的劳动机接着做——
+        ///   不能取消：补给单背后是常驻规则的持有，取消会被规则记成“玩家改动过”而对那座建筑停供（审查 P1）；搬运单见 <see cref="ReleaseHaulForReassign"/>；
+        ///   充电单只属于这台机器自己，取消；
+        /// - 名册开的驻防单（新岗位不是驻防时）：取消（原因“改岗位”）；
+        /// - 名册开的送修单：改选任何别的岗位都取消（玩家在名册里改主意了）；规则开的送修 / 驻防单：只有新岗位是“闲置”时取消（闲置什么都不做），其余岗位让它做完。
+        /// 返回是否让出了工单。O(工单数)，只在玩家操作时调用。
+        /// </summary>
+        public static bool ReleaseForRoleChange(CampaignState state, int machineLogicId, MachineRole newRole)
+        {
+            WorkOrderRecord current = state == null ? null : FindActiveOrderForMachine(state, machineLogicId);
+            if (current == null)
+            {
+                return false;
+            }
+            Vector2 at = MachineAt(state, machineLogicId, current);
+            if (IsRuleSelfKind(current.Kind))
+            {
+                bool rosterGarrison = current.Kind == WorkOrderKind.Garrison && current.IssuerId == RosterIssuer;
+                bool rosterRepair = current.Kind == WorkOrderKind.MachineRepair && current.IssuerId == RosterIssuer;
+                // 名册送修 = 玩家在名册里选的“维修中”：玩家在名册里改选别的岗位就是不修了（取消）；规则派的送修只在改为闲置时取消。
+                if (newRole == MachineRole.Idle || rosterRepair || (rosterGarrison && newRole != MachineRole.Garrison))
+                {
+                    EndSelfOrder(current, "role-changed");
+                    return true;
+                }
+                return false;
+            }
+            if (newRole == MachineRole.Labor)
+            {
+                return false;
+            }
+            if (current.Kind == WorkOrderKind.Haul)
+            {
+                ReleaseHaulForReassign(state, current, machineLogicId, at);
+            }
+            else if (current.Kind == WorkOrderKind.Recharge)
+            {
+                CancelOrder(state, current.WorkOrderId, at); // 充电单只属于这台机器（目标 recharge:编号），交给别的机器没有意义。
+            }
+            else
+            {
+                YieldToPool(state, machineLogicId);
+            }
+            PendingMovementRelease.Add(machineLogicId);
+            MarkAssignmentDirty();
+            return true;
         }
 
         /// <summary>规则收工 / 撤回：驻防 = 完成（机器回到闲置）；送修 / 补给 = 取消（补给预留的物品全额退回）。已经结束的不动。</summary>
@@ -1980,6 +2167,10 @@ namespace GameLogic.Campaign.Regions
             _assignTimer = 0f;
             _assignDirty = false;
 
+            // FG4-ECO-07：岗位维持（驻防岗的机器没有在办工单时派回驻防点）与已结束工单的清理（DEBT-FG3LOG02-09），都在这次评估里做，不每帧跑。
+            MachineRoster.KeepRoles(state, isDirectControlled);
+            PruneHistory(state);
+
             if (beginAssignedMovement == null || state.WorkOrders == null || state.WorkOrders.Length == 0)
             {
                 return;
@@ -2004,6 +2195,11 @@ namespace GameLogic.Campaign.Regions
             foreach (MachineRecord machine in MachineRegistry.AllRecords)
             {
                 if (machine.RegionId != HomeValleyLayout.RegionId || !machine.IsAlive || machine.IsInFactory)
+                {
+                    continue;
+                }
+                // FG4-ECO-07（FGR-ECO-040 / FGR-BASE-020）：只有“劳动”岗的机器接工作单；驻防 / 远征预备 / 闲置……一律不接（玩家直接下的命令不受影响）。
+                if (!MachineRoster.TakesLabor(machine))
                 {
                     continue;
                 }
@@ -2084,6 +2280,110 @@ namespace GameLogic.Campaign.Regions
                 }
             }
         }
+
+        /// <summary>
+        /// FG4-ECO-07（承接 DEBT-FG3LOG02-09）：已结束的工单（完成 / 取消 / 失败）超过 work.history_keep 张（再多留 32 张缓冲，避免每次评估都动数组）时，
+        /// 按数组顺序清掉最早的那些，直到剩 work.history_keep 张。还被引用的不清：常驻规则的持有（持有记着它派出的单子，靠它的结局判断“玩家改动过”）、
+        /// 机器记录（当前工单、名册岗位单）。在办的工单一张不动、相对顺序不变（派工平局按数组顺序，见 <see cref="IsBetterCandidate"/>）。
+        /// 只在派工评估时跑（每 0.5 秒或有脏标记），O(工单数)；全部输入是存档字段，观察 / 不观察、存读档结果一致。
+        /// </summary>
+        public static int PruneHistory(CampaignState state)
+        {
+            WorkOrderRecord[] orders = state?.WorkOrders;
+            if (orders == null)
+            {
+                return 0;
+            }
+            int keep = Math.Max(20, Grid.GridContent.TryGetTuning("work.history_keep", out float k) ? (int)Math.Round(k) : 200);
+            int terminal = 0;
+            foreach (WorkOrderRecord o in orders)
+            {
+                if (o != null && IsTerminal(o.State))
+                {
+                    terminal++;
+                }
+            }
+            PruneLedger(state, orders);
+            if (terminal <= keep + 32)
+            {
+                return 0;
+            }
+            PruneProtected.Clear();
+            foreach (RuleHoldRecord h in Economy.StandingRuleService.Holds(state))
+            {
+                if (h != null && !string.IsNullOrEmpty(h.OrderId))
+                {
+                    PruneProtected.Add(h.OrderId);
+                }
+            }
+            foreach (MachineRecord m in MachineRegistry.AllRecords)
+            {
+                if (m == null)
+                {
+                    continue;
+                }
+                if (!string.IsNullOrEmpty(m.CurrentWorkOrderId))
+                {
+                    PruneProtected.Add(m.CurrentWorkOrderId);
+                }
+                if (!string.IsNullOrEmpty(m.RoleOrderId))
+                {
+                    PruneProtected.Add(m.RoleOrderId);
+                }
+            }
+            int toRemove = terminal - keep;
+            if (toRemove <= 0)
+            {
+                return 0;
+            }
+            var kept = new List<WorkOrderRecord>(orders.Length);
+            int removed = 0;
+            foreach (WorkOrderRecord o in orders)
+            {
+                if (o != null && removed < toRemove && IsTerminal(o.State) && !PruneProtected.Contains(o.WorkOrderId))
+                {
+                    removed++;
+                    continue;
+                }
+                kept.Add(o);
+            }
+            if (removed > 0)
+            {
+                state.WorkOrders = kept.ToArray();
+                PrunedTotal += removed;
+                HomeValleyConstruction.Touch();
+            }
+            return removed;
+        }
+
+        private static readonly HashSet<string> PruneProtected = new HashSet<string>(StringComparer.Ordinal);
+        private static readonly HashSet<string> LedgerProtected = new HashSet<string>(StringComparer.Ordinal);
+
+        /// <summary>资源事务的同一种清理（ledger.history_keep 条）：在办工单引用的事务不清。</summary>
+        private static void PruneLedger(CampaignState state, WorkOrderRecord[] orders)
+        {
+            int total = state.ResourceTransactions?.Length ?? 0;
+            int keep = Math.Max(50, Grid.GridContent.TryGetTuning("ledger.history_keep", out float k) ? (int)Math.Round(k) : 600);
+            if (total <= keep + 64)
+            {
+                return;
+            }
+            LedgerProtected.Clear();
+            foreach (WorkOrderRecord o in orders)
+            {
+                if (o != null && !IsTerminal(o.State) && !string.IsNullOrEmpty(o.ResourceTransactionId))
+                {
+                    LedgerProtected.Add(o.ResourceTransactionId);
+                }
+            }
+            PrunedLedgerTotal += CampaignEconomyLedger.PruneHistory(state, keep, LedgerProtected);
+        }
+
+        /// <summary>自检读：本进程累计清掉的已结束资源事务数。</summary>
+        public static int PrunedLedgerTotal { get; private set; }
+
+        /// <summary>自检读：本进程累计清掉的已结束工单数。</summary>
+        public static int PrunedTotal { get; private set; }
 
         /// <summary>ERD-WRK-002 排序键，从高到低：机器对该类工作的优先级(1～4) → 订单自身 Priority →
         /// createdTick 小者优先 → 估算路径短者优先 → 在工单数组里靠前者优先（最终稳定平局判定：调用方按数组顺序遍历，
@@ -2166,9 +2466,12 @@ namespace GameLogic.Campaign.Regions
                 if (IsRuleSelfKind(order.Kind))
                 {
                     order.State = WorkOrderState.Failed;
-                    order.FailureReason = "path-blocked";
+                    order.FailureReason = PathBlockedReason;
                     order.AssignedMachineLogicId = 0;
                     MarkAssignmentDirty();
+                    // FG4-ECO-07 复审修复：与“无法到达”同样处理——名册驻防据此暂停、规则持有按“仍在执行”保留（都不再补派），
+                    // 所以这里必须告诉玩家一次（此前路径持续受阻不发任何提示，机器停在半路没有说明）。
+                    NotifySelfTripFailed(state, order, releasedMachine, GameLogic.Localization.GameText.Get("roster.garrison.path_blocked"), targetPos);
                     releaseMachineMovement?.Invoke(releasedMachine);
                     return;
                 }

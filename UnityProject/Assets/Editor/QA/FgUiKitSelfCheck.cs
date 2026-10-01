@@ -853,11 +853,11 @@ namespace GameLogic.EditorTools
             var reader = new FakeReader();
             InputRouter.DebugSetReader(reader);
             InputRouter.SetScope(InputScope.Strategy);
-            // FG0-ARCH-04 起建造菜单（B）已接入玩法；FG3-LOG-01 起快捷栏（F1～F10）、FG3-LOG-07 起吸管（Q）也已接入——改用仍未开放的机器名册（FG4-ECO-07 承接）验证“尚未开放”提示。
-            reader.Press(GameSettings.KeyBindings.GetKey(GameActionId.OpenRoster));
+            // FG0-ARCH-04 起建造菜单（B）已接入玩法；FG3-LOG-01 起快捷栏（F1～F10）、FG3-LOG-07 起吸管（Q）、FG4-ECO-07 起机器名册（N）也已接入——改用仍未开放的研发树（FG5-RND-01 承接）验证“尚未开放”提示。
+            reader.Press(GameSettings.KeyBindings.GetKey(GameActionId.OpenResearch));
             UiKitInputPump.ProcessWorldKeys();
             Frame(reader);
-            InputActionCatalog.TryGet(GameActionId.OpenRoster, out InputActionDef hotbar1);
+            InputActionCatalog.TryGet(GameActionId.OpenResearch, out InputActionDef hotbar1);
             NotificationEntry locked = NotificationCenter.Toasts.FirstOrDefault(e => e.Type.Id == "feature_locked");
             string lockedText = locked?.Text;
             bool notInHistory = NotificationCenter.History.All(e => e.Type.Id != "feature_locked");
@@ -875,7 +875,7 @@ namespace GameLogic.EditorTools
             Expect(locked != null && hotbar1.Status == InputActionStatus.Reserved && lockedText.Contains(GameText.Get(hotbar1.NameKey)) && notInHistory
                    && Mathf.Approximately(speed2, 2f) && Mathf.Approximately(speedAfter4, 3f)
                    && !NotificationCenter.Toasts.Any(e => e.Type.Id == "feature_locked" && e.Text.Contains(GameText.Get("input.action.speed_triple.name"))),
-                $"按机器名册键（后续开放）→ 弹出“{lockedText}”（只弹出、不进历史）；按 3 → 2x；按 4 → 3x（FG0-ARCH-01 统一时钟），不再提示尚未开放");
+                $"按研发树键（后续开放）→ 弹出“{lockedText}”（只弹出、不进历史）；按 3 → 2x；按 4 → 3x（FG0-ARCH-01 统一时钟），不再提示尚未开放");
         }
 
         // ── G. 存读档 ─────────────────────────────────────────────────────────
@@ -1451,7 +1451,8 @@ namespace GameLogic.EditorTools
             // FG3-LOG-08 新增 OverlayHud.uxml（叠加层停靠条 / 选择器 / 标签层）与 DiagnosisPanel.uxml（为什么不工作），共 27 份。
             // FG4-ECO-01 新增 ItemsPanel.uxml（物资面板），共 28 份。FG4-ECO-02 新增 ProductionPanel.uxml（生产建筑通用面板），共 29 份。
             // FG4-ECO-06 新增 RulesPanel.uxml（常驻规则）与 RulesRow.uxml（规则行模板），共 31 份。
-            Expect(uxmlCount == 31 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
+            // FG4-ECO-07 新增 RosterPanel.uxml（机器名册）与 RosterRow.uxml（名册行模板），共 33 份。
+            Expect(uxmlCount == 33 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
 
             string[] codeDirs =
             {

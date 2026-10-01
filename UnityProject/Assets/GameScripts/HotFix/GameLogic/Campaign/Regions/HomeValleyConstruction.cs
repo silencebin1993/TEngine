@@ -46,6 +46,17 @@ namespace GameLogic.Campaign.Regions
         public const string ReturnWaitReason = "return-waiting-space";
 
         public static int CarryPerTrip => Math.Max(1, GridContent.TuningInt("build.carry_per_trip"));
+
+        /// <summary>FG4-ECO-07（承接 DEBT-FG3LOG02-08）：这台机器每趟取料上限——按机型查 build.carry_per_trip.&lt;机型&gt;（fg.TbHomeTuning，表驱动），
+        /// 表里没有这一机型时用统一值 <see cref="CarryPerTrip"/>。初值都是 40（与原统一值相同），按货位的平衡在 FG15-BAL-01。</summary>
+        public static int CarryFor(MachineRecord machine)
+        {
+            if (machine != null && !string.IsNullOrEmpty(machine.ChassisId) && GridContent.TryGetTuning("build.carry_per_trip." + machine.ChassisId, out float v))
+            {
+                return Math.Max(1, (int)Math.Round(v));
+            }
+            return CarryPerTrip;
+        }
         public static float BeltSecondsPerCell => Math.Max(0.05f, GridContent.Tuning("build.belt_seconds_per_cell"));
         public static int PriorityMin => -1;
         public static int PriorityMax => 2;
@@ -300,7 +311,7 @@ namespace GameLogic.Campaign.Regions
             }
             int need = MaterialsStillNeeded(state, order);
             int stock = Mathf.FloorToInt(state.Scrap);
-            int load = Math.Min(need, Math.Min(CarryPerTrip, stock));
+            int load = Math.Min(need, Math.Min(CarryFor(machine), stock));
             if (load <= 0)
             {
                 return 0;

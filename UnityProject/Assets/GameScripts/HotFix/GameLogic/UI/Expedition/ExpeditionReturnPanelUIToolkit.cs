@@ -210,7 +210,7 @@ namespace GameLogic.UI.Expedition
                 row.RemoveFromClassList("exp-row-dead");
                 row.AddToClassList(m.IsAlive ? "exp-row-alive" : "exp-row-dead");
 
-                row.Q<Label>("Number").text = $"#{m.DisplayNumber}";
+                row.Q<Label>("Number").text = MachineNaming.Short(m.LogicId); // FG4-ECO-07：结算里的机器名与名册同源
                 // ER8-CONTENT-01：m.ChassisId 是机型编号（erc_001），此前直接查底盘表必然查不到、回退成把 erc_001
                 // 原样显示给玩家——先归到底盘类别再取展示名；系统占位机（救援机等）显示“机器”。行首图标＝底盘。
                 string chassisLabel = MechanicalContentFacade.ResolveChassisLabel(m.ChassisId);

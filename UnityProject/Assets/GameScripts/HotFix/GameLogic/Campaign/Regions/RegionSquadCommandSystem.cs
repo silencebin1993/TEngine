@@ -807,7 +807,7 @@ namespace GameLogic.Campaign.Regions
                 if (TryGetActiveCommandKind(id, out _))
                 {
                     CancelCommandFor(id);
-                    PushEvent($"机器 #{id} 已停止，交还 AI。");
+                    PushEvent(GameText.Format("squad.ev.stopped", MachineNaming.Short(id))); // FG4-ECO-07：机器称呼走 MachineNaming（名字同源），文字走文本键
                 }
                 // 右键改成情境命令后，“停止”也负责让出在办工单（原先右键取消工单的入口）；没有工单时是 no-op。
                 _ctx?.CancelWorkIfAny?.Invoke(id);
@@ -849,18 +849,16 @@ namespace GameLogic.Campaign.Regions
                     bool destroyed = e.Code2 != 0;
                     if (r == BinGames.Sim.Combat.CombatFireResult.Ok || r == BinGames.Sim.Combat.CombatFireResult.StillAiming)
                     {
-                        PushEvent(destroyed
-                            ? $"机器 #{logicId} 击毁目标 {hostileId}，交还 AI。"
-                            : $"机器 #{logicId} 命中 {hostileId}。");
+                        PushEvent(GameText.Format(destroyed ? "squad.ev.destroyed" : "squad.ev.hit", MachineNaming.Short(logicId), hostileId));
                     }
                     else
                     {
-                        PushEvent($"机器 #{logicId} 攻击未命中：{site?.FireReason(r, logicId, hostileId)}");
+                        PushEvent(GameText.Format("squad.ev.miss", MachineNaming.Short(logicId), site?.FireReason(r, logicId, hostileId)));
                     }
                     return;
                 }
                 case BinGames.Sim.Combat.CombatEventKind.CommandStuckStrike:
-                    PushEvent($"机器 #{logicId} 路径受阻，正在尝试重新绕行（第 {(int)e.Value}/{(int)e.Value2} 次）。");
+                    PushEvent(GameText.Format("squad.ev.stuck_retry", MachineNaming.Short(logicId), (int)e.Value, (int)e.Value2));
                     return;
                 case BinGames.Sim.Combat.CombatEventKind.CommandEnded:
                 {
@@ -869,21 +867,21 @@ namespace GameLogic.Campaign.Regions
                     switch (reason)
                     {
                         case BinGames.Sim.Combat.CombatEndReason.Arrived:
-                            PushEvent($"机器 #{logicId} 已{(kind == BinGames.Sim.Combat.CombatCommandKind.Retreat ? "撤到安全点" : "到达目标")}，交还 AI。");
+                            PushEvent(GameText.Format(kind == BinGames.Sim.Combat.CombatCommandKind.Retreat ? "squad.ev.retreated" : "squad.ev.arrived", MachineNaming.Short(logicId)));
                             return;
                         case BinGames.Sim.Combat.CombatEndReason.TargetLost:
-                            PushEvent($"机器 #{logicId} 攻击目标已丢失，交还 AI。");
+                            PushEvent(GameText.Format("squad.ev.target_lost", MachineNaming.Short(logicId)));
                             return;
                         case BinGames.Sim.Combat.CombatEndReason.Stuck:
-                            PushEvent($"机器 #{logicId} 路径持续受阻，已放弃命令并交还 AI。");
-                            FeedbackCues.Raise(FeedbackCueId.Denied, FeedbackCues.MachineLabel(logicId) + " 路径持续受阻，已放弃命令");
+                            PushEvent(GameText.Format("squad.ev.stuck_gave_up", MachineNaming.Short(logicId)));
+                            FeedbackCues.Raise(FeedbackCueId.Denied, GameText.Format("squad.cue.stuck_gave_up", FeedbackCues.MachineLabel(logicId)));
                             return;
                         case BinGames.Sim.Combat.CombatEndReason.Unreachable:
                         {
                             // FG0-ARCH-06：寻路失败——命令结束并给出明确原因（不原地发呆）；通知可定位到目标点。
                             var fail = (BinGames.Sim.Nav.NavFailReason)(int)e.Value;
                             var target = new Vector2((float)e.Pos.x, (float)e.Pos.y); // 内核在“无法到达”时把命令目标点放在事件位置上。
-                            string text = GameLogic.Localization.GameText.Format("nav.squad.unreachable", logicId.ToString(),
+                            string text = GameLogic.Localization.GameText.Format("nav.squad.unreachable", MachineNaming.Short(logicId),
                                 GameLogic.Campaign.Nav.NavService.FailText(fail, GameLogic.Campaign.Nav.NavService.CellOf(e.Pos.x, e.Pos.y)));
                             PushEvent(text);
                             FeedbackCues.Raise(FeedbackCueId.Denied, text);

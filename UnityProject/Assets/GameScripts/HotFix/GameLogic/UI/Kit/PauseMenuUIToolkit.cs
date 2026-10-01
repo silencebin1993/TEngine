@@ -74,6 +74,7 @@ namespace GameLogic.UI.Kit
             ItemsButton = Bind(root, "PauseItems", "pause.items", ItemsPanelUIToolkit.Open);
             // FG4-ECO-06（FGU-15）：常驻规则面板盖在暂停菜单上面，关掉回到暂停菜单。
             RulesButton = Bind(root, "PauseRules", "pause.rules", RulesPanelUIToolkit.Open);
+            RosterButton = Bind(root, "PauseRoster", "pause.roster", RosterPanelUIToolkit.Open); // FG4-ECO-07
             Bind(root, "PauseSaveQuit", "ui.pause.save_and_quit", AskSaveAndQuit);
             BindCamera(root);
             BindReactionFeedback(root);
@@ -118,6 +119,7 @@ namespace GameLogic.UI.Kit
         public Button StatsButton { get; private set; }
         public Button ItemsButton { get; private set; }
         public Button RulesButton { get; private set; }
+        public Button RosterButton { get; private set; }
         public Button FirmwareButton { get; private set; }
         public Slider CameraZoomSlider => _cameraZoom;
         public Slider CameraFollowSlider => _cameraFollow;

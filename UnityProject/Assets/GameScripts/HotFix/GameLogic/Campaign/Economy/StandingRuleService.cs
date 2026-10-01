@@ -698,7 +698,7 @@ namespace GameLogic.Campaign.Economy
             }
             if (!MachineRegistry.TryGetRecord(logicId, out MachineRecord m) || !m.IsAlive)
             {
-                message = GameText.Format("rules.msg.bad_target", "#" + logicId.ToString(CultureInfo.InvariantCulture));
+                message = GameText.Format("rules.msg.bad_target", MachineNaming.Short(logicId)); // FG4-ECO-07：名字同源
                 return false;
             }
             var list = new List<int>(r.Machines) { logicId };
@@ -1381,6 +1381,19 @@ namespace GameLogic.Campaign.Economy
             return taken == null || !taken(logicId);
         }
 
+        /// <summary>
+        /// FG4-ECO-07（FGR-ECO-040 / FGR-BASE-020）：岗位为“闲置”的机器规则不派它（闲置的机器不做任何事）——规则上写明原因（可追溯，不静默跳过）。
+        /// </summary>
+        private static bool RoleBlocks(CampaignState state, StandingRuleRecord r, int logicId)
+        {
+            if (!MachineRegistry.TryGetRecord(logicId, out MachineRecord m) || m == null || MachineRoster.AllowsRuleDispatch(m))
+            {
+                return false;
+            }
+            SetIssue(state, r, "rules.issue.machine_idle", "@m:" + logicId.ToString(CultureInfo.InvariantCulture));
+            return true;
+        }
+
         /// <summary>伤势百分比（0～100）。</summary>
         public static int InjuryPercent(MachineRecord m) =>
             m == null || m.MaxHealth <= 0f ? 0 : Mathf.Clamp(Mathf.RoundToInt((1f - Mathf.Clamp01(m.Health / m.MaxHealth)) * 100f), 0, 100);
@@ -1501,10 +1514,21 @@ namespace GameLogic.Campaign.Economy
                     {
                         return HoldStatus.Applied;
                     }
-                    return o.State == WorkOrderState.Cancelled ? HoldStatus.Changed : HoldStatus.Done;
+                    if (o.State == WorkOrderState.Cancelled)
+                    {
+                        return HoldStatus.Changed;
+                    }
+                    // FG4-ECO-07 审查修复：送修 / 驻防到不了目标而失败——寻路判“无法到达”，或赶路看门狗判“路径持续受阻”
+                    // （与 MachineRoster.GarrisonBlocked 同一口径）——持有按“仍在执行”保留，条件不变时不再补派
+                    // （否则每次检查都开一张新单，机器原地“出发—卡住—失败—再出发”循环）；条件结束后照常收尾，下一次条件成立再试。
+                    return o.State == WorkOrderState.Failed && IsCannotReach(o.FailureReason) ? HoldStatus.Applied : HoldStatus.Done;
                 }
             }
         }
+
+        /// <summary>送修 / 驻防单“到不了”的两种失败码：寻路无法到达（unreachable:*）与赶路看门狗判定的路径持续受阻（path-blocked）。</summary>
+        private static bool IsCannotReach(string reason) =>
+            HomeValleyWorkOrders.IsUnreachableReason(reason) || reason == HomeValleyWorkOrders.PathBlockedReason;
 
         private static bool OrderActive(CampaignState state, string orderId) =>
             !string.IsNullOrEmpty(orderId) && HomeValleyWorkOrders.IsActive(HomeValleyWorkOrders.Find(state, orderId));
@@ -1598,7 +1622,7 @@ namespace GameLogic.Campaign.Economy
                 }
                 case HoldGarrison:
                 {
-                    if (!MachineEligible(w.Machine, out _))
+                    if (RoleBlocks(state, r, w.Machine) || !MachineEligible(w.Machine, out _))
                     {
                         return;
                     }
@@ -1607,7 +1631,7 @@ namespace GameLogic.Campaign.Economy
                     HomeValleyWorkOrders.WorkOrderOpResult res = HomeValleyWorkOrders.TryCreateGarrison(state, id, w.Machine, point, r.Serial);
                     if (res.Success)
                     {
-                        AddHold(state, r, HoldGarrison, w.Key, string.Empty, 0, id);
+                        AddHold(state, r, HoldGarrison, w.Key, string.Empty, 0, res.WorkOrderId);
                         string pointArg = string.IsNullOrEmpty(point) ? "@b:" + HomeValleyLayout.RegionId + ":" + HomeValleyLayout.BuildingTypeCore : "@b:" + point;
                         Fired(state, r, "rules.log.garrison", w.Key, LabelArg(r.Serial), "@m:" + w.Machine.ToString(CultureInfo.InvariantCulture), pointArg);
                     }
@@ -1615,7 +1639,7 @@ namespace GameLogic.Campaign.Economy
                 }
                 case HoldMachineRepair:
                 {
-                    if (!MachineEligible(w.Machine, out MachineRecord m))
+                    if (RoleBlocks(state, r, w.Machine) || !MachineEligible(w.Machine, out MachineRecord m))
                     {
                         return;
                     }
@@ -1630,7 +1654,7 @@ namespace GameLogic.Campaign.Economy
                     if (res.Success)
                     {
                         SetIssue(state, r, null, null);
-                        AddHold(state, r, HoldMachineRepair, w.Key, string.Empty, 0, id);
+                        AddHold(state, r, HoldMachineRepair, w.Key, string.Empty, 0, res.WorkOrderId);
                         Fired(state, r, "rules.log.repair_send", w.Key, LabelArg(r.Serial), "@m:" + w.Machine.ToString(CultureInfo.InvariantCulture),
                             InjuryPercent(m).ToString(CultureInfo.InvariantCulture), r.Threshold.ToString(CultureInfo.InvariantCulture), "@b:" + bay.BuildingId);
                     }
@@ -1661,7 +1685,7 @@ namespace GameLogic.Campaign.Economy
                     HomeValleyWorkOrders.WorkOrderOpResult res = HomeValleyWorkOrders.TryCreateDeliverPool(state, id, w.Target, r.ItemId, amount, UnloadSeconds, r.Serial);
                     if (res.Success)
                     {
-                        AddHold(state, r, HoldSupply, w.Key, string.Empty, amount, id);
+                        AddHold(state, r, HoldSupply, w.Key, string.Empty, amount, res.WorkOrderId);
                         Fired(state, r, "rules.log.supply_send", BuildingKey(w.Target), LabelArg(r.Serial), "@b:" + w.Target, "@item:" + r.ItemId,
                             have.ToString(CultureInfo.InvariantCulture), r.Threshold.ToString(CultureInfo.InvariantCulture), amount.ToString(CultureInfo.InvariantCulture));
                     }
@@ -1761,12 +1785,15 @@ namespace GameLogic.Campaign.Economy
                     break;
                 }
                 case HoldGarrison:
+                {
+                    bool wasActive = HomeValleyWorkOrders.IsActive(HomeValleyWorkOrders.Find(state, h.OrderId)); // 到不了而失败的驻防不写“结束驻防”
                     HomeValleyWorkOrders.EndRuleOrder(state, h.OrderId);
-                    if (log)
+                    if (log && wasActive)
                     {
                         AddLog(state, h.Rule, "rules.log.garrison_end", h.EntityId, label, "@" + h.EntityId);
                     }
                     break;
+                }
                 case HoldMachineRepair:
                 case HoldSupply:
                     HomeValleyWorkOrders.EndRuleOrder(state, h.OrderId);

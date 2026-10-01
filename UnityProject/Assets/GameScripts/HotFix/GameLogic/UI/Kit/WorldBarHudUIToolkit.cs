@@ -31,6 +31,7 @@ namespace GameLogic.UI.Kit
         private Button _pause;
         private Label _status;
         private Label _focusTitle;
+        private Button _labor;
         private ScrollView _focusList;
         private readonly List<Button> _focusButtons = new List<Button>(4);
         private readonly List<string> _focusIds = new List<string>(4);
@@ -48,6 +49,8 @@ namespace GameLogic.UI.Kit
         public IReadOnlyList<Button> FocusButtons => _focusButtons;
         public Button SpeedButton(int index) => index >= 0 && index < _speeds.Length ? _speeds[index] : null;
         public Button PauseButton => _pause;
+        public Button LaborButton => _labor;
+        public string LaborText => _labor?.text ?? string.Empty;
 
         private void Awake()
         {
@@ -67,6 +70,22 @@ namespace GameLogic.UI.Kit
             _status = root.Q<Label>("WorldStatus");
             _focusTitle = root.Q<Label>("WorldFocusTitle");
             _focusList = root.Q<ScrollView>("WorldFocusList");
+            _labor = root.Q<Button>("WorldLabor");
+            if (_labor != null)
+            {
+                // FG4-ECO-07（FGR-ECO-042）：顶栏劳动力，点一下打开机器名册。
+                _labor.clicked += RosterPanelUIToolkit.Open;
+                UiTooltip.Attach(_labor, () =>
+                {
+                    MachineRoster.LaborCount c = MachineRoster.Labor(CampaignSession.Current);
+                    return new TooltipContent
+                    {
+                        Title = MachineRoster.LaborBarText(c),
+                        Body = GameText.Format("roster.labor.tip", c.Labor, c.Busy, InputDisplay.ForAction(GameActionId.OpenRoster)),
+                        Shortcut = GameActionId.OpenRoster,
+                    };
+                });
+            }
             GameActionId[] speedActions = { GameActionId.SpeedHalf, GameActionId.SpeedNormal, GameActionId.SpeedDouble, GameActionId.SpeedTriple };
             for (int i = 0; i < _speeds.Length; i++)
             {
@@ -136,6 +155,9 @@ namespace GameLogic.UI.Kit
                 return;
             }
 
+            // FG4-ECO-07：劳动力读数（MachineRoster.Labor 自带节流：名册 / 岗位变化立刻重算，否则最多每 roster.labor_refresh_seconds 真实秒一次）。
+            RefreshLabor(state);
+
             IReadOnlyList<WorldView.FocusTarget> targets = WorldView.FocusTargets(state);
             _keyBuilder.Clear();
             _keyBuilder.Append(GameText.Language).Append('|').Append(GameClock.MinuteOfDay(GameClock.GameSeconds)).Append('|')
@@ -176,6 +198,31 @@ namespace GameLogic.UI.Kit
             _focusTitle.text = GameText.Get("ui.world.focus.title");
             RebuildFocus(targets);
         }
+
+        private void RefreshLabor(CampaignState state)
+        {
+            if (_labor == null)
+            {
+                return;
+            }
+            // 审查修复（P2）：只在台数 / 忙碌数 / 语言变化时重新格式化（每帧调用，不每帧分配字符串）。
+            MachineRoster.LaborCount c = MachineRoster.Labor(state);
+            int language = (int)GameText.Language;
+            if (_laborShown && c.Labor == _laborShownCount && c.Busy == _laborShownBusy && language == _laborShownLanguage)
+            {
+                return;
+            }
+            _laborShown = true;
+            _laborShownCount = c.Labor;
+            _laborShownBusy = c.Busy;
+            _laborShownLanguage = language;
+            _labor.text = MachineRoster.LaborBarText(c);
+        }
+
+        private bool _laborShown;
+        private int _laborShownCount;
+        private int _laborShownBusy;
+        private int _laborShownLanguage;
 
         private void RebuildFocus(IReadOnlyList<WorldView.FocusTarget> targets)
         {

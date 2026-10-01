@@ -2459,6 +2459,14 @@ namespace GameLogic.Campaign.Regions
                 HomeValleyWorkOrders.YieldToPool(state, moving.LogicId);
                 return;
             }
+            if (HomeValleyWorkOrders.IsRuleSelfKind(active.Kind))
+            {
+                // FG4-ECO-07 审查修复（P1，FGR-BASE-020）：规则 / 名册派给这台机器自己的送修、驻防被玩家右键别的工作目标替下 = 玩家接管，
+                // 与接入、右键移动同一入口（取消并记“玩家接管”）：名册驻防据此暂停、不再把它拉回驻防点；规则记为“你改动过”。
+                // 此前走普通取消，原因不是“玩家接管”，玩家的活干完后岗位维持器又把它拉回驻防点。
+                HomeValleyWorkOrders.YieldToPool(state, moving.LogicId);
+                return;
+            }
             Vector3 pos = moving.Position3;
             HomeValleyWorkOrders.CancelOrder(state, active.WorkOrderId, new Vector2(pos.x, pos.z));
         }

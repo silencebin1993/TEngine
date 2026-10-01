@@ -230,6 +230,12 @@ namespace GameLogic.UI.Kit
             {
                 RulesPanelUIToolkit.Toggle();
             }
+            // FG4-ECO-07：机器名册键（默认 N，全部上下文；名册里的文本框有焦点时快捷键自动让位）：开着再按一次关闭；更高层的面板盖在上面时不起作用（同物资键）。
+            if (InputRouter.ConsumeContextAction(GameActionId.OpenRoster)
+                && !MechanicCodexPanelUIToolkit.IsOpen && !UiKitPanelHost.AnyModalAbove(RosterPanelUIToolkit.Order))
+            {
+                RosterPanelUIToolkit.Toggle();
+            }
             if (InputRouter.ConsumeContextAction(GameActionId.OpenCodex)
                 && !UiKitPanelHost.AnyModalAbove(MechanicCodexPanelUIToolkit.Order) && !CodexHoverLink.TryJump())
             {

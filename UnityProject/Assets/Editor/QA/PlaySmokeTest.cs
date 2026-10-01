@@ -262,6 +262,10 @@ namespace GameLogic.EditorTools
                     // FG4-ECO-06：常驻规则键（Alt+R 打开、同一个键再按关闭）。
                     case 338: StepRulesKeyOpened(inStep); break;
                     case 339: StepRulesKeyClosed(inStep); break;
+                    // FG4-ECO-07：机器名册键（N 打开、同一个键再按关闭）、顶栏劳动力按钮打开名册、Esc 关闭。
+                    case 340: StepRosterKeyOpened(inStep); break;
+                    case 341: StepRosterKeyClosed(inStep); break;
+                    case 342: StepRosterBarClosed(inStep); break;
                     // FG4-ECO-02：建造菜单“采集”页签——提取钻放在空地上被拒（原因写明要压矿脉）、流体泵放在空地上被拒 / 指着水源或油井可放（预览写抽什么）、
                     // 回收站放在废墟上（预览写储量）、点虚影打开通用面板、Esc 关闭。
                     case 318: StepProdBuildReady(inStep); break;
@@ -1189,6 +1193,52 @@ namespace GameLogic.EditorTools
             Check(rulesClicked && rulesOpen && presetMade && logTab && deleted && rulesClosed,
                 $"暂停菜单点“常驻规则”：规则面板打开（{rp?.CountText}，首行“{rp?.RowText(0, "RrId")}”），从预设新建“零件保底”并进入编辑、日志页签可切、删除先确认、点关闭回到暂停菜单" +
                 $"（{rulesClicked}/{rulesOpen}/{presetMade}/{logTab}/{deleted}/{rulesClosed}）");
+            // FG4-ECO-07（FGU-16 / 17）：暂停菜单“机器名册”→ 名册（每台机器一行）；行内岗位下拉框改为闲置再改回劳动（选中即生效）；点“详情”→ 改名（空名给原因、
+            // 合法名字接入 HUD 标识同步）→ 恢复默认名 → 返回列表 → 点关闭回到暂停菜单。
+            bool rosterClicked = ClickUitk("[PauseMenuHost]", "PauseRoster");
+            UI.Kit.RosterPanelUIToolkit rop = UI.Kit.RosterPanelUIToolkit.Instance;
+            rop?.Refresh();
+            int machines = Campaign.MachineRegistry.AllRecords.Count(m => m != null && m.IsAlive);
+            bool rosterOpen = rop != null && UI.Kit.RosterPanelUIToolkit.IsOpen && rop.PanelVisible && rop.VisibleRowCount == machines && machines >= 1
+                              && !Localization.GameText.ContainsMarker(rop.CountText + rop.RowText(0, "RoName") + rop.RowText(0, "RoInfo") + rop.RowText(0, "RoStatus"));
+            // 挑一台手上没活的机器改岗位（不打断后面步骤要用的施工）；都在忙时用第一行。
+            int pickRow = 0;
+            for (int i = 0; rop != null && i < rop.VisibleRowCount; i++)
+            {
+                if (rop.RowText(i, "RoStatus") == Localization.GameText.Get("roster.status.waiting"))
+                {
+                    pickRow = i;
+                    break;
+                }
+            }
+            int firstId = rop?.RowLogicId(pickRow) ?? 0;
+            UnityEngine.UIElements.DropdownField roleField = rop?.RowRoleField(pickRow);
+            int idleAt = roleField?.choices?.FindIndex(c => c.Contains("闲置")) ?? -1;
+            int laborAt = roleField?.choices?.FindIndex(c => c.Contains("劳动")) ?? -1;
+            bool roleIdle = rop != null && UI.Kit.RosterPanelUIToolkit.PickForTests(roleField, idleAt)
+                            && Campaign.MachineRegistry.TryGetRecord(firstId, out Campaign.MachineRecord r0) && r0.Role == Campaign.MachineRole.Idle;
+            roleField = rop?.RowRoleField(rop.RowIndexOf(firstId));
+            bool roleBack = rop != null && UI.Kit.RosterPanelUIToolkit.PickForTests(roleField, laborAt)
+                            && Campaign.MachineRegistry.TryGetRecord(firstId, out Campaign.MachineRecord r1) && r1.Role == Campaign.MachineRole.Labor;
+            bool detailOpen = ClickUitk("[RosterPanelHost]", "RoDetail") && rop != null && rop.ShowingDetail && rop.DetailInfoText.Contains("接入记录");
+            int detailId = rop?.DetailLogicId ?? 0;
+            if (rop != null)
+            {
+                rop.NameField.value = "  ";
+            }
+            bool emptyName = ClickUitk("[RosterPanelHost]", "RosterRename") && rop != null && rop.DetailMessageText.Contains("不能为空");
+            if (rop != null)
+            {
+                rop.NameField.value = "冒烟一号";
+            }
+            bool renamed = ClickUitk("[RosterPanelHost]", "RosterRename") && Campaign.Signal.SignalPresence.MachineLabel(detailId).StartsWith("冒烟一号", StringComparison.Ordinal)
+                           && rop != null && rop.DetailTitleText.Contains("冒烟一号");
+            bool nameReset = ClickUitk("[RosterPanelHost]", "RosterResetName") && !Campaign.Signal.SignalPresence.MachineLabel(detailId).Contains("冒烟一号");
+            bool backToList = ClickUitk("[RosterPanelHost]", "RosterDetailBack") && rop != null && !rop.ShowingDetail;
+            bool rosterClosed = ClickUitk("[RosterPanelHost]", "RosterPanelClose") && !UI.Kit.RosterPanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen;
+            Check(rosterClicked && rosterOpen && roleIdle && roleBack && detailOpen && emptyName && renamed && nameReset && backToList && rosterClosed,
+                $"暂停菜单点“机器名册”：名册打开（{rop?.CountText}，首行“{rop?.RowText(0, "RoName")}”），行内改岗位闲置 / 劳动、详情页空名字给原因、改名后接入 HUD 标识同步、恢复默认名、返回列表、点关闭回到暂停菜单" +
+                $"（{rosterClicked}/{rosterOpen}/{roleIdle}/{roleBack}/{detailOpen}/{emptyName}/{renamed}/{nameReset}/{backToList}/{rosterClosed}）");
             Check(pm != null && pm.CameraZoomLabelText.Length > 0 && pm.CameraFollowLabelText.Length > 0
                   && !Localization.GameText.ContainsMarker(pm.CameraZoomLabelText + pm.CameraFollowLabelText),
                 $"暂停菜单显示接入镜头设置：“{pm?.CameraZoomLabelText}”“{pm?.CameraFollowLabelText}”");
@@ -3959,6 +4009,9 @@ namespace GameLogic.EditorTools
             string reminder = LabelText("[HomeValleyExpeditionPrepHost]", "SignalCoreReminderLabel");
             Check(summary.Contains(Localization.GameText.Get("firmware.fw_overload.name")) && reminder == Localization.GameText.Get("signal.core.expedition_reminder"),
                 $"远征准备面板显示“{summary}”并提前提醒“{reminder}”");
+            // FG4-ECO-07（FGR-ECO-042）：远征准备提示出发后家园劳动力的变化（没勾选机器时“劳动力不变”）。
+            string labor = LabelText("[HomeValleyExpeditionPrepHost]", "SummaryLabel");
+            Check(labor.Contains("劳动力") && !Localization.GameText.ContainsMarker(labor), $"远征准备面板写出发后家园劳动力：“{labor.Replace('\n', ' ')}”");
             Check(ClickUitk("[HomeValleyExpeditionPrepHost]", "SignalCoreEditButton"), "点远征准备面板的“编辑信号核”");
             Next(159, "点“编辑信号核”");
         }
@@ -6420,6 +6473,54 @@ namespace GameLogic.EditorTools
                 return;
             }
             Check(!UI.Kit.RulesPanelUIToolkit.IsOpen && !InputRouter.IsModalOwner(UI.Kit.RulesPanelUIToolkit.Instance), "同一个键再按一次关闭常驻规则面板");
+            PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.OpenRoster));
+            Next(340, "FG4-ECO-07：按 N（机器名册键）");
+        }
+
+        // ── FG4-ECO-07：机器名册的快捷键与顶栏劳动力路径（暂停菜单路径在暂停菜单那一步里点过）──
+
+        private static void StepRosterKeyOpened(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            UI.Kit.RosterPanelUIToolkit p = UI.Kit.RosterPanelUIToolkit.Instance;
+            p?.Refresh();
+            Check(UI.Kit.RosterPanelUIToolkit.IsOpen && p != null && p.PanelVisible && InputRouter.IsModalOwner(p) && p.VisibleRowCount >= 1
+                  && !Localization.GameText.ContainsMarker(p.CountText + p.RowText(0, "RoName") + p.RowText(0, "RoInfo")),
+                $"N 打开机器名册（{p?.CountText}，首行“{p?.RowText(0, "RoName")} {p?.RowText(0, "RoStatus")}”）");
+            PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.OpenRoster));
+            Next(341, "再按 N 关闭机器名册");
+        }
+
+        private static void StepRosterKeyClosed(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(!UI.Kit.RosterPanelUIToolkit.IsOpen && !InputRouter.IsModalOwner(UI.Kit.RosterPanelUIToolkit.Instance), "同一个键再按一次关闭机器名册");
+            // 顶栏劳动力（FGR-ECO-042）：读数与名册同源，点它打开名册。
+            UI.Kit.WorldBarHudUIToolkit bar = UI.Kit.WorldBarHudUIToolkit.Instance;
+            bar?.Refresh();
+            Campaign.MachineRoster.LaborCount lc = Campaign.MachineRoster.ComputeLabor(CampaignSession.Current);
+            string text = bar?.LaborText ?? string.Empty;
+            bool shown = text.Contains("劳动力 " + lc.Labor) && !Localization.GameText.ContainsMarker(text);
+            bool opened = ClickUitk("[WorldBarHost]", "WorldLabor") && UI.Kit.RosterPanelUIToolkit.IsOpen;
+            Check(shown && opened, $"顶栏劳动力“{text}”与名册一致（劳动 {lc.Labor}、忙碌 {lc.Busy}），点它打开机器名册（{shown}/{opened}）");
+            PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
+            Next(342, "Esc 关闭机器名册");
+        }
+
+        private static void StepRosterBarClosed(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(!UI.Kit.RosterPanelUIToolkit.IsOpen && !InputRouter.IsModalOwner(UI.Kit.RosterPanelUIToolkit.Instance) && !PauseMenuUIToolkit.IsOpen,
+                "Esc 关闭机器名册（不连带打开暂停菜单）");
             PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.OpenBuildMenu));
             Next(318, "FG4-ECO-02：按建造菜单键打开建造模式，放采集建筑");
         }

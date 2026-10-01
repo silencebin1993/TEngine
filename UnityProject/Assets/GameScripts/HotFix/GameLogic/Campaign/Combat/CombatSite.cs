@@ -1082,6 +1082,11 @@ namespace GameLogic.Campaign.Combat
                     rec.Health = 0f;
                     rec.IsAlive = false;
                     rec.Position = new Vector2((float)e.Pos.x, (float)e.Pos.y);
+                    // FG4-ECO-07（FGR-ECO-041 机器详情“击杀”）：内核的阵亡事件带着致命一击的来源单位（Other）；来源是己方机器时记一次击杀。O(1)。
+                    if (_unitMachine.TryGetValue(e.Other, out int killerLogicId))
+                    {
+                        MachineRegistry.RecordKill(killerLogicId);
+                    }
                     Rules?.OnEnemyKilled(this, rec);
                     return;
                 }
@@ -1258,7 +1263,7 @@ namespace GameLogic.Campaign.Combat
                 {
                     if (_unitMachine.TryGetValue(e.Unit, out int logicId) && MachineRegistry.TryGetRecord(logicId, out MachineRecord rec))
                     {
-                        FeedbackCues.Raise(FeedbackCueId.CannonCharge, "#" + rec.DisplayNumber);
+                        FeedbackCues.Raise(FeedbackCueId.CannonCharge, MachineNaming.Short(rec));
                     }
                     return;
                 }
@@ -1279,7 +1284,7 @@ namespace GameLogic.Campaign.Combat
                     {
                         Log.Info($"[CombatSite] 机器 {logicId} 武器过热（{e.Value:F0}），停火直到降到 {FracturedCityLayout.WeaponHeatRecoverThreshold:F0} 以下。");
                         // DEBT-FG1SIG06-02：即时命中武器也会过热，提示不再写死“重炮”，走文本键。
-                        FeedbackCues.Raise(FeedbackCueId.WeaponOverheat, GameText.Format("combat.overheat.notice", "#" + rec.DisplayNumber,
+                        FeedbackCues.Raise(FeedbackCueId.WeaponOverheat, GameText.Format("combat.overheat.notice", MachineNaming.Short(rec),
                             FracturedCityLayout.WeaponHeatRecoverThreshold.ToString("0", System.Globalization.CultureInfo.InvariantCulture)));
                     }
                     return;

@@ -200,6 +200,13 @@ namespace GameLogic.Core
         /// <summary>FG4-ECO-06：第一次出现规则冲突（两条规则要控制同一座建筑 / 同一台机器）。</summary>
         public const string RulesFirstConflict = "rules.first_conflict";
 
+        /// <summary>FG4-ECO-07：第一次打开机器名册——图鉴“机器名册与岗位”随之解锁。</summary>
+        public const string RosterPanelFirstOpen = "roster.panel_first_open";
+        /// <summary>FG4-ECO-07：第一次改机器岗位（名册行内 / 详情 / 批量）。引导内容在 FG15-UX-04：只有劳动岗接活、闲置什么都不做、远征中不能改。</summary>
+        public const string RosterFirstRoleChange = "roster.first_role_change";
+        /// <summary>FG4-ECO-07：第一次给机器改名。</summary>
+        public const string RosterFirstRename = "roster.first_rename";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -233,6 +240,7 @@ namespace GameLogic.Core
             EnergyFirstBuilt, EnergyFirstFuelOut, EnergyFirstStorageEmpty,
             BuildingPanelFirstOpen, BuildingFirstUpgrade, BuildingFirstDamaged,
             RulesPanelFirstOpen, RulesFirstCreated, RulesFirstTriggered, RulesFirstConflict,
+            RosterPanelFirstOpen, RosterFirstRoleChange, RosterFirstRename,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

@@ -424,7 +424,7 @@ namespace GameLogic.UI.RegionCommand
                 {
                     var item = new VisualElement();
                     item.AddToClassList("cmd-candidate-item");
-                    btn = new Button { text = "#" + logicId };
+                    btn = new Button { text = MachineNaming.Short(logicId) }; // FG4-ECO-07：名字同源（下面按记录再刷新）
                     btn.AddToClassList("cmd-candidate-btn");
                     int capturedId = logicId;
                     btn.clicked += () => OnCandidateButtonClicked(capturedId);
@@ -438,7 +438,7 @@ namespace GameLogic.UI.RegionCommand
 
                 if (MachineRegistry.TryGetRecord(logicId, out MachineRecord rec))
                 {
-                    btn.text = "#" + rec.DisplayNumber;
+                    btn.text = MachineNaming.Short(rec); // FG4-ECO-07：名字同源
                 }
                 RefreshSafeModeTag(btn, logicId, safeKey);
                 RefreshCoverageTag(btn, logicId, covKey);

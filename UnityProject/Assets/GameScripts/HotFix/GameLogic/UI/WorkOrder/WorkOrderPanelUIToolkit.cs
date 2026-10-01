@@ -206,7 +206,7 @@ namespace GameLogic.UI.WorkOrder
             string F0(float v) => v.ToString("0", System.Globalization.CultureInfo.InvariantCulture);
 
             _machineDetailLabel.text =
-                GameLogic.Localization.GameText.Format("machine.detail.line_id", record.DisplayNumber, record.LogicId, record.ChassisId, record.BlueprintVersion, port, status) + "\n" +
+                GameLogic.Localization.GameText.Format("machine.detail.line_id", MachineNaming.Short(record), record.LogicId, record.ChassisId, record.BlueprintVersion, port, status) + "\n" +
                 GameLogic.Localization.GameText.Format("machine.detail.line_vitals", F0(record.Health), F0(record.MaxHealth), F0(record.Battery), injuries) + "\n" +
                 GameLogic.Localization.GameText.Format("machine.detail.line_morph", GameLogic.Campaign.Signal.UplinkHudModel.MorphText(state, record.LogicId)) + "\n" +
                 GameLogic.Localization.GameText.Format("machine.detail.line_exp", MachineExperienceFlags.Join(record.ExperienceFlags)) + "\n" +

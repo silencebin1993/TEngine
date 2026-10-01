@@ -33,16 +33,8 @@ namespace GameLogic.Campaign.Signal
 
         public static bool AtCore => CurrentMachineLogicId == 0;
 
-        /// <summary>机器的玩家可见标识：型号 + 编号（“ERC-003 #5”）。</summary>
-        public static string MachineLabel(int logicId)
-        {
-            if (!MachineRegistry.TryGetRecord(logicId, out MachineRecord rec) || rec == null)
-            {
-                return "#" + logicId;
-            }
-            string model = string.IsNullOrEmpty(rec.ChassisId) ? string.Empty : rec.ChassisId.ToUpperInvariant().Replace('_', '-') + " ";
-            return model + "#" + rec.DisplayNumber;
-        }
+        /// <summary>机器的玩家可见标识：起了名 = “名字 #编号”，没起名 = 型号 + 编号（“ERC-003 #5”）。FG4-ECO-07 起与名册同源（<see cref="MachineNaming.Long(int)"/>）。</summary>
+        public static string MachineLabel(int logicId) => MachineNaming.Long(logicId);
 
         /// <summary>HUD 文字：“信号：归还核心” / “信号：ERC-003 #5”。</summary>
         public static string LocationText()

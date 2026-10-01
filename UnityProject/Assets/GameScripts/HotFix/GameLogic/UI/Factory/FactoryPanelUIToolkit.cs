@@ -370,7 +370,7 @@ namespace GameLogic.UI.Factory
                     : "\n" + GameLogic.Localization.GameText.Format("asm.panel.materials_of", ResolveBlueprintDisplayName(item.BlueprintId),
                         AssemblyMaterials.DescribeMaterials(state, item.Materials));
             string targetLine = item.Kind == FactoryQueueKind.Retrofit
-                ? MachineRegistry.TryGetRecord(item.TargetMachineLogicId, out MachineRecord tgt) ? $"\n目标：#{tgt.DisplayNumber}" : "\n目标：（已不存在）"
+                ? MachineRegistry.TryGetRecord(item.TargetMachineLogicId, out MachineRecord tgt) ? $"\n目标：{MachineNaming.Short(tgt)}" : "\n目标：（已不存在）"
                 : string.Empty;
             _detailText.text = $"{(item.Kind == FactoryQueueKind.Retrofit ? "改造" : "生产")}：{ResolveBlueprintDisplayName(item.BlueprintId)} v{item.BlueprintVersion}" +
                 $"{targetLine}\n状态：{QueueText.FactoryState(item.State)}\n进度：{item.Progress:F0}/{item.Duration:F0}秒{reasonLine}{materialLine}";
@@ -413,7 +413,7 @@ namespace GameLogic.UI.Factory
                         && !(GameRoot.HomeValley?.IsMachineDirectControlled(m.LogicId) ?? false))
                     .OrderBy(m => m.LogicId))
                 {
-                    choices.Add($"#{m.DisplayNumber} {ResolveChassisDisplayName(m.ChassisId)}（当前 v{m.BlueprintVersion}）");
+                    choices.Add($"{MachineNaming.Short(m)} {ResolveChassisDisplayName(m.ChassisId)}（当前 v{m.BlueprintVersion}）");
                     _retrofitTargetLogicIdsByIndex.Add(m.LogicId);
                 }
             }

@@ -150,7 +150,7 @@ namespace GameLogic.UI.Victory
                 row.style.display = DisplayStyle.Flex;
                 ContentIcons.Apply(row.Q<VisualElement>("Icon"), m.ChassisId); // ER8-CONTENT-01：行首底盘图标。
                 Label numberLabel = row.Q<Label>("NumberLabel");
-                numberLabel.text = Localization.GameText.Format("victory.row.number", m.DisplayNumber, Localization.GameText.Get(m.IsAlive ? "victory.row.alive" : "victory.row.dead"));
+                numberLabel.text = Localization.GameText.Format("victory.row.number", m.Label, Localization.GameText.Get(m.IsAlive ? "victory.row.alive" : "victory.row.dead"));
                 numberLabel.RemoveFromClassList("vp-machine-alive");
                 numberLabel.RemoveFromClassList("vp-machine-dead");
                 numberLabel.AddToClassList(m.IsAlive ? "vp-machine-alive" : "vp-machine-dead");

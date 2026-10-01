@@ -169,6 +169,10 @@ namespace GameLogic.UI.Expedition
                 _wasOpen = false;
                 return;
             }
+            if (!_wasOpen)
+            {
+                PreselectReserves();
+            }
             _wasOpen = true;
 
             _refreshTimer -= Time.unscaledDeltaTime;
@@ -179,6 +183,28 @@ namespace GameLogic.UI.Expedition
             _refreshTimer = RefreshIntervalSeconds;
 
             Refresh();
+        }
+
+        /// <summary>FG4-ECO-07：上次刷新时的劳动力提示（自检 / 冒烟读）。</summary>
+        public static string LastLaborForecastText { get; private set; } = string.Empty;
+
+        private bool _reservePreselected;
+
+        /// <summary>FG4-ECO-07（岗位“远征预备”）：面板打开时自动勾选远征预备的机器（不超过人数上限；不合格的不勾，Refresh 会清掉）。玩家照样可以取消勾选。</summary>
+        private void PreselectReserves()
+        {
+            _reservePreselected = false;
+            foreach (int id in MachineRoster.ReserveIds(CampaignSession.Current))
+            {
+                if (_selected.Count >= ExpeditionDepartureService.MaxRosterSize)
+                {
+                    break;
+                }
+                if (_selected.Add(id))
+                {
+                    _reservePreselected = true;
+                }
+            }
         }
 
         private void Refresh()
@@ -256,7 +282,7 @@ namespace GameLogic.UI.Expedition
                     row.AddToClassList("exp-row-ineligible");
                 }
 
-                row.Q<Label>("Number").text = $"#{m.DisplayNumber}";
+                row.Q<Label>("Number").text = MachineNaming.Short(m.LogicId); // FG4-ECO-07：名字同源
                 // ER8-CONTENT-01：m.ChassisId 是机型编号（erc_001），此前直接查底盘表必然查不到、回退成把 erc_001
                 // 原样显示给玩家——先归到底盘类别再取展示名；系统占位机（救援机等）显示“机器”。行首图标＝底盘。
                 string chassisLabel = MechanicalContentFacade.ResolveChassisLabel(m.ChassisId);
@@ -266,7 +292,9 @@ namespace GameLogic.UI.Expedition
                 row.Q<Label>("Cargo").text = $"货{m.CargoSlots}";
                 row.Q<Label>("Bandwidth").text = $"带宽{m.BandwidthCost:F0}";
                 row.Q<Label>("Weapon").text = m.HasWeapon ? "武" : "—";
-                row.Q<Label>("Status").text = DescribeStatus(m);
+                // FG4-ECO-07：状态后附岗位（远征预备的机器一眼看出来）。
+                row.Q<Label>("Status").text = DescribeStatus(m) + (MachineRegistry.TryGetRecord(m.LogicId, out MachineRecord roleRec)
+                    ? GameLogic.Localization.GameText.Get("rules.sep_dot") + MachineRoster.RoleName(MachineRoster.EffectiveRole(state, roleRec)) : string.Empty);
 
                 Toggle toggle = row.Q<Toggle>("Select");
                 toggle.SetEnabled(m.Eligible);
@@ -280,7 +308,10 @@ namespace GameLogic.UI.Expedition
             _summaryLabel.text = $"已选 {selectedArray.Length}/{ExpeditionDepartureService.MinRosterSize}～" +
                 $"{ExpeditionDepartureService.MaxRosterSize}｜货位 {validation.TotalCargoSlots}" +
                 $"（建议≥{snapshot.MinRecommendedCargoSlots}）｜带宽 {validation.TotalBandwidth:F0}/{validation.BandwidthCapacity:F0}" +
-                $"｜武器 {(validation.HasWeapon ? "有" : "无")}";
+                $"｜武器 {(validation.HasWeapon ? "有" : "无")}" +
+                // FG4-ECO-07（FGR-ECO-042）：出发后家园劳动力的变化（“5 → 2，施工速度约下降 60%”），远征预备的机器开面板时自动勾选。
+                "\n" + MachineRoster.LaborForecastText(state, selectedArray) + (_reservePreselected ? "\n" + GameLogic.Localization.GameText.Get("roster.expedition.reserve_hint") : string.Empty);
+            LastLaborForecastText = MachineRoster.LaborForecastText(state, selectedArray);
             // DEBT-ER5EXP01-01：总火力/维修能力/风险此前只有“武器 有/无”，现在按真实装配与目标区域敌情计算。
             if (_forecastLabel != null)
             {
@@ -301,7 +332,7 @@ namespace GameLogic.UI.Expedition
             {
                 _interruptSection.AddToClassList("exp-interrupt-section-visible");
                 string names = string.Join("、", _pendingInterruptLogicIds
-                    .Select(id => MachineRegistry.TryGetRecord(id, out MachineRecord r) ? $"#{r.DisplayNumber}" : $"#{id}"));
+                    .Select(id => MachineNaming.Short(id)));
                 _interruptLabel.text = $"{_pendingInterruptLogicIds.Length} 台机器正在工作（{names}），出征将中断当前任务并按规则交还/保留货物。确认出发？";
             }
 
