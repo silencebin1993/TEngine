@@ -81,7 +81,7 @@ namespace GameLogic.EditorTools
         public const string ExtremeCode = "R0O2P2D0S0";
         public const string RelaxedCode = "R1O1P1D1S1";
 
-        [MenuItem("BinGames/自检：FG 家园区生成（FG3-GEN-01）")]
+        [MenuItem("BinGames/QA/自检/FG 家园区生成（FG3-GEN-01）")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

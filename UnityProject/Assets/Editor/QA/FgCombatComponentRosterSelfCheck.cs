@@ -54,7 +54,7 @@ namespace GameLogic.EditorTools
         private static int _pass;
         private static readonly List<string> PerfLines = new List<string>();
 
-        [MenuItem("BinGames/自检：FG2-VFX-02 作战组件名表补齐")]
+        [MenuItem("BinGames/QA/自检/FG2-VFX-02 作战组件名表补齐")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

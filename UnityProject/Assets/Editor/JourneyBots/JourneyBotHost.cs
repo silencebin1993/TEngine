@@ -103,28 +103,28 @@ namespace GameLogic.EditorTools.JourneyBots
             }
         }
 
-        [MenuItem("BinGames/旅程机器人/FGJ-M0（M0 出口旅程）")]
+        [MenuItem("BinGames/QA/旅程机器人/FGJ-M0（M0 出口旅程）")]
         public static void RunFgjM0FromMenu() => Run(FgjM0Journey.Id, null);
 
-        [MenuItem("BinGames/旅程机器人/FGJ-M1（M1 出口旅程）")]
+        [MenuItem("BinGames/QA/旅程机器人/FGJ-M1（M1 出口旅程）")]
         public static void RunFgjM1FromMenu() => Run(FgjM1Journey.Id, null);
 
-        [MenuItem("BinGames/旅程机器人/FGJ-M1R（M1 反向旅程）")]
+        [MenuItem("BinGames/QA/旅程机器人/FGJ-M1R（M1 反向旅程）")]
         public static void RunFgjM1ReverseFromMenu() => Run(FgjM1ReverseJourney.Id, null);
 
-        [MenuItem("BinGames/旅程机器人/FGJ-M2（M2 出口旅程）")]
+        [MenuItem("BinGames/QA/旅程机器人/FGJ-M2（M2 出口旅程）")]
         public static void RunFgjM2FromMenu() => Run(FgjM2Journey.Id, null);
 
-        [MenuItem("BinGames/旅程机器人/FGJ-M2R（M2 反向旅程）")]
+        [MenuItem("BinGames/QA/旅程机器人/FGJ-M2R（M2 反向旅程）")]
         public static void RunFgjM2ReverseFromMenu() => Run(FgjM2ReverseJourney.Id, null);
 
-        [MenuItem("BinGames/旅程机器人/FGJ-M3（M3 出口旅程）")]
+        [MenuItem("BinGames/QA/旅程机器人/FGJ-M3（M3 出口旅程）")]
         public static void RunFgjM3FromMenu() => Run(FgjM3Journey.Id, null);
 
-        [MenuItem("BinGames/旅程机器人/FGJ-M3R（M3 反向旅程）")]
+        [MenuItem("BinGames/QA/旅程机器人/FGJ-M3R（M3 反向旅程）")]
         public static void RunFgjM3ReverseFromMenu() => Run(FgjM3ReverseJourney.Id, null);
 
-        [MenuItem("BinGames/旅程机器人/FGJ-GEN9（极端世界设置下的第一幕旅程）")]
+        [MenuItem("BinGames/QA/旅程机器人/FGJ-GEN9（极端世界设置下的第一幕旅程）")]
         public static void RunFgjGenExtremeFromMenu() => Run(FgjGenExtremeJourney.Id, null);
 
         public static bool Run(string id, string reportPath) => Run(id, reportPath, null, false, true) == 0;

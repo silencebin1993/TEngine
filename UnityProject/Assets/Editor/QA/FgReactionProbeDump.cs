@@ -19,7 +19,7 @@ namespace GameLogic.EditorTools
     /// </summary>
     public static class FgReactionProbeDump
     {
-        [MenuItem("BinGames/导出：旧反应引擎行为探针")]
+        [MenuItem("BinGames/QA/导出/旧反应引擎行为探针")]
         public static void Dump()
         {
             var sb = new StringBuilder();

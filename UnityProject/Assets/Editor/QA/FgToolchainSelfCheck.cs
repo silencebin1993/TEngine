@@ -29,7 +29,7 @@ namespace GameLogic.EditorTools
         private static int _fail;
         private static int _pass;
 
-        [MenuItem("BinGames/自检：验证提速工具链（FG-TOOL-01）")]
+        [MenuItem("BinGames/QA/自检/验证提速工具链（FG-TOOL-01）")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

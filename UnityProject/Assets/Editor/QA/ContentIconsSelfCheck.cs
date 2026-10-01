@@ -37,7 +37,7 @@ namespace GameLogic.EditorTools
         private static StringBuilder _report;
         private static int _fail;
 
-        [MenuItem("BinGames/自检：内容图标与状态标记")]
+        [MenuItem("BinGames/QA/自检/内容图标与状态标记")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

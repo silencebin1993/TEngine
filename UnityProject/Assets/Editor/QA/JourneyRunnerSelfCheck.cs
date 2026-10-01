@@ -24,7 +24,7 @@ namespace GameLogic.EditorTools
             public double Now => T;
         }
 
-        [MenuItem("BinGames/自检：旅程机器人框架")]
+        [MenuItem("BinGames/QA/自检/旅程机器人框架")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

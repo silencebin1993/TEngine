@@ -64,7 +64,7 @@ namespace GameLogic.EditorTools
         private static FakeReader _reader;
         private static readonly List<string> PerfLines = new List<string>();
 
-        [MenuItem("BinGames/自检：FG 整个世界同时运行")]
+        [MenuItem("BinGames/QA/自检/FG 整个世界同时运行")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

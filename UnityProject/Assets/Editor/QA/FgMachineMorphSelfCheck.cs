@@ -65,7 +65,7 @@ namespace GameLogic.EditorTools
         private static readonly Reader Keys = new Reader();
         private static readonly List<string> PerfLines = new List<string>();
 
-        [MenuItem("BinGames/QA/FG1-VFX-01 机身形变自检")]
+        [MenuItem("BinGames/QA/自检/FG1-VFX-01 机身形变自检")]
         public static void RunFromMenu()
         {
             var sb = new StringBuilder();

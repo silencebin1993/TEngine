@@ -55,7 +55,7 @@ namespace GameLogic.EditorTools
         private static StringBuilder _report;
         private static int _fail;
 
-        [MenuItem("BinGames/自检：设计文档 0.2 合并与 Demo 归档")]
+        [MenuItem("BinGames/QA/自检/设计文档 0.2 合并与 Demo 归档")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

@@ -60,7 +60,7 @@ namespace GameLogic.EditorTools
         private static int W;
         private static int C;
 
-        [MenuItem("BinGames/自检：FG 管线与流体")]
+        [MenuItem("BinGames/QA/自检/FG 管线与流体")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

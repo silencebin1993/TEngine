@@ -22,7 +22,7 @@ namespace GameLogic.EditorTools
         private static StringBuilder _report;
         private static int _fail;
 
-        [MenuItem("BinGames/自检：主菜单初始化")]
+        [MenuItem("BinGames/QA/自检/主菜单初始化")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

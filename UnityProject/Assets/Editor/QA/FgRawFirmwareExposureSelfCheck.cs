@@ -65,7 +65,7 @@ namespace GameLogic.EditorTools
         private static readonly Reader Keys = new Reader();
         private static readonly List<string> PerfLines = new List<string>();
 
-        [MenuItem("BinGames/自检：FG 裸跑敌方固件与暴露")]
+        [MenuItem("BinGames/QA/自检/FG 裸跑敌方固件与暴露")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

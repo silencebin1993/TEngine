@@ -80,7 +80,7 @@ namespace GameLogic.EditorTools
         private static readonly List<string> PerfLines = new List<string>();
         private static readonly Dictionary<string, LegacyReactionProbe.RuleProbe> RuleProbes = new Dictionary<string, LegacyReactionProbe.RuleProbe>();
 
-        [MenuItem("BinGames/自检：FG 反应行为探针与命名")]
+        [MenuItem("BinGames/QA/自检/FG 反应行为探针与命名")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

@@ -28,7 +28,7 @@ namespace GameLogic.EditorTools
         private const int Height = 1080;
         private const int Frames = 600;
 
-        [MenuItem("BinGames/自检：FG 满载传送带 GPU 帧时间探针")]
+        [MenuItem("BinGames/QA/自检/FG 满载传送带 GPU 帧时间探针")]
         public static void Run()
         {
             var report = new StringBuilder();

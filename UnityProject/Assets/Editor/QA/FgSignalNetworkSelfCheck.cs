@@ -69,7 +69,7 @@ namespace GameLogic.EditorTools
         private static readonly Reader Keys = new Reader();
         private static readonly List<string> PerfLines = new List<string>();
 
-        [MenuItem("BinGames/自检：FG 信号覆盖网络与远距离跳转")]
+        [MenuItem("BinGames/QA/自检/FG 信号覆盖网络与远距离跳转")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

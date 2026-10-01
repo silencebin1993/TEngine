@@ -23,7 +23,7 @@ namespace GameLogic.EditorTools
         private const float Ortho = 6f;
         private static readonly Vector3 CamPos = new Vector3(5f, 20f, 0f);
 
-        [MenuItem("BinGames/自检：FG 传送带 GPU 画面探针")]
+        [MenuItem("BinGames/QA/自检/FG 传送带 GPU 画面探针")]
         public static void Run()
         {
             var report = new StringBuilder();

@@ -62,7 +62,7 @@ namespace GameLogic.EditorTools
         private static string _dir;
         private static float _fakeNow;
 
-        [MenuItem("BinGames/Validate/FG2-FW-04 反应反馈与伤害归因")]
+        [MenuItem("BinGames/QA/Validate/FG2-FW-04 反应反馈与伤害归因")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

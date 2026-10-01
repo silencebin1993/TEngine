@@ -64,7 +64,7 @@ namespace GameLogic.EditorTools
         private static readonly List<string> PerfLines = new List<string>();
         private static FakeReader _reader;
 
-        [MenuItem("BinGames/自检：FG 存读档、后台一致性与性能门禁")]
+        [MenuItem("BinGames/QA/自检/FG 存读档、后台一致性与性能门禁")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

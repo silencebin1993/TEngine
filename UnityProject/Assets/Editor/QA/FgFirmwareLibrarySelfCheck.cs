@@ -56,7 +56,7 @@ namespace GameLogic.EditorTools
         private static string _dir;
         private static readonly Reader Keys = new Reader();
 
-        [MenuItem("BinGames/Validate/FG2-FW-05 固件库与图鉴")]
+        [MenuItem("BinGames/QA/Validate/FG2-FW-05 固件库与图鉴")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

@@ -36,7 +36,7 @@ namespace GameLogic.EditorTools
             public Bounds Bounds;
         }
 
-        [MenuItem("BinGames/自检：敌我剪影")]
+        [MenuItem("BinGames/QA/自检/敌我剪影")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

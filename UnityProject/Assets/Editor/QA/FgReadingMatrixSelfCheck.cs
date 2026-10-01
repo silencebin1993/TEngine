@@ -68,7 +68,7 @@ namespace GameLogic.EditorTools
         private static string _dir;
         private static readonly List<string> PerfLines = new List<string>();
 
-        [MenuItem("BinGames/自检：FG 读法矩阵与固定底盘兼容")]
+        [MenuItem("BinGames/QA/自检/FG 读法矩阵与固定底盘兼容")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

@@ -119,10 +119,10 @@ namespace GameLogic.EditorTools
             public List<Metric> metrics = new List<Metric>();
         }
 
-        [MenuItem("BinGames/性能基线/运行并与基线对比（FG-PERF-LATE）")]
+        [MenuItem("BinGames/QA/性能基线/运行并与基线对比（FG-PERF-LATE）")]
         public static void RunFromMenu() => RunAndReport(Env("BINGAMES_PERF_UPDATE") == "1");
 
-        [MenuItem("BinGames/性能基线/运行、对比并写入新基线")]
+        [MenuItem("BinGames/QA/性能基线/运行、对比并写入新基线")]
         public static void RunAndUpdateFromMenu() => RunAndReport(true);
 
         private static void RunAndReport(bool update)

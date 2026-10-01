@@ -55,7 +55,7 @@ namespace GameLogic.EditorTools
 
         private static readonly int[] Seeds = { 1, 7, 42, 99, 123, 2024, 31337, 65535, 777777, 1000003, -5, -123456 };
 
-        [MenuItem("BinGames/自检：FG 格网建造")]
+        [MenuItem("BinGames/QA/自检/FG 格网建造")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

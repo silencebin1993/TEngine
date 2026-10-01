@@ -60,7 +60,7 @@ namespace GameLogic.EditorTools
         private static FakeReader _reader;
         private static readonly List<string> PerfLines = new List<string>();
 
-        [MenuItem("BinGames/自检：FG 传送带内核")]
+        [MenuItem("BinGames/QA/自检/FG 传送带内核")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();
