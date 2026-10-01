@@ -215,6 +215,14 @@ public partial class Tables
     /// </summary>
     public fg.TbRemovedContent TbRemovedContent {get; }
     /// <summary>
+    /// 规则类型
+    /// </summary>
+    public fg.TbRuleKind TbRuleKind {get; }
+    /// <summary>
+    /// 规则预设
+    /// </summary>
+    public fg.TbRulePreset TbRulePreset {get; }
+    /// <summary>
     /// 开局布局
     /// </summary>
     public fg.TbStartLayout TbStartLayout {get; }
@@ -348,6 +356,8 @@ public partial class Tables
         TbRecipe = new fg.TbRecipe(loader("fg_tbrecipe"));
         TbRecipeIo = new fg.TbRecipeIo(loader("fg_tbrecipeio"));
         TbRemovedContent = new fg.TbRemovedContent(loader("fg_tbremovedcontent"));
+        TbRuleKind = new fg.TbRuleKind(loader("fg_tbrulekind"));
+        TbRulePreset = new fg.TbRulePreset(loader("fg_tbrulepreset"));
         TbStartLayout = new fg.TbStartLayout(loader("fg_tbstartlayout"));
         TbStatusTag = new fg.TbStatusTag(loader("fg_tbstatustag"));
         TbSurface = new fg.TbSurface(loader("fg_tbsurface"));
@@ -424,6 +434,8 @@ public partial class Tables
         TbRecipe.ResolveRef(this);
         TbRecipeIo.ResolveRef(this);
         TbRemovedContent.ResolveRef(this);
+        TbRuleKind.ResolveRef(this);
+        TbRulePreset.ResolveRef(this);
         TbStartLayout.ResolveRef(this);
         TbStatusTag.ResolveRef(this);
         TbSurface.ResolveRef(this);

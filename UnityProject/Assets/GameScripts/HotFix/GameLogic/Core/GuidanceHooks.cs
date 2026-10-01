@@ -191,6 +191,15 @@ namespace GameLogic.Core
         /// <summary>FG4-ECO-05：第一次有建筑受损（耐久下降）——引导内容在 FG15-UX-04：维修件从零件工坊来、面板“维修”。</summary>
         public const string BuildingFirstDamaged = "building.first_damaged";
 
+        /// <summary>FG4-ECO-06：第一次打开常驻规则面板——图鉴“常驻规则”随之解锁。</summary>
+        public const string RulesPanelFirstOpen = "rules.panel_first_open";
+        /// <summary>FG4-ECO-06（卡片“第一次设置规则时的引导”）：第一次新建一条常驻规则。引导内容在 FG15-UX-04：规则只做你设定的事、优先级与冲突、实体上的“由规则 R3 触发”。</summary>
+        public const string RulesFirstCreated = "rules.first_created";
+        /// <summary>FG4-ECO-06：第一次有常驻规则真正触发（执行了动作）。</summary>
+        public const string RulesFirstTriggered = "rules.first_triggered";
+        /// <summary>FG4-ECO-06：第一次出现规则冲突（两条规则要控制同一座建筑 / 同一台机器）。</summary>
+        public const string RulesFirstConflict = "rules.first_conflict";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -223,6 +232,7 @@ namespace GameLogic.Core
             EconomyManufacturingFirstPlaced, EconomyBurnerFirstChip, EconomyAssemblyFirstLineMachine, EconomyFirstCopyToSameType,
             EnergyFirstBuilt, EnergyFirstFuelOut, EnergyFirstStorageEmpty,
             BuildingPanelFirstOpen, BuildingFirstUpgrade, BuildingFirstDamaged,
+            RulesPanelFirstOpen, RulesFirstCreated, RulesFirstTriggered, RulesFirstConflict,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

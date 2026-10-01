@@ -2251,7 +2251,17 @@ namespace GameLogic.Campaign.Economy
         /// 选配方（多配方建筑；<paramref name="recipeId"/> 为空 = 取消配方、待机）。正在做的周期作废、已扣的料退回输入缓存；
         /// 输入缓存里新配方用不上的件、输入口缓存里的件退回仓库（放不下落地，机器之后搬走）；输入口改收新配方要的固体。
         /// </summary>
-        public static bool TrySetRecipe(CampaignState state, string buildingId, string recipeId, out string message)
+        public static bool TrySetRecipe(CampaignState state, string buildingId, string recipeId, out string message) =>
+            SetRecipeCore(state, buildingId, recipeId, remember: true, out message);
+
+        /// <summary>
+        /// FG4-ECO-06：常驻规则接管 / 恢复配方走这里——与 <see cref="TrySetRecipe"/> 同一套切换（周期作废、料退回、输入口改收），
+        /// 但不改写“这类建筑记住的上一次配方”：那是玩家的选择，规则不替玩家改（新建的同类建筑不会沿用规则临时排产的配方，FGR-BASE-020）。
+        /// </summary>
+        public static bool TrySetRecipeForRule(CampaignState state, string buildingId, string recipeId, out string message) =>
+            SetRecipeCore(state, buildingId, recipeId, remember: false, out message);
+
+        private static bool SetRecipeCore(CampaignState state, string buildingId, string recipeId, bool remember, out string message)
         {
             message = null;
             if (!TryGet(state, buildingId, out Producer p) || p.Def.Mode != ProducerMode.Recipe)
@@ -2272,6 +2282,10 @@ namespace GameLogic.Campaign.Economy
             }
             if (ReferenceEquals(next, p.Recipe))
             {
+                if (!remember)
+                {
+                    return true; // 规则要的配方已经在跑：什么都不动。
+                }
                 p.Rec.Inherited = false;
                 Remember(state, p.Def.TypeId, next?.Id ?? string.Empty, null, rememberRecipe: true);
                 message = next != null ? GameText.Format("prod.panel.recipe_changed", next.Name) : GameText.Get("prod.panel.recipe_cleared");
@@ -2284,8 +2298,11 @@ namespace GameLogic.Campaign.Economy
             r.RecipeId = next?.Id ?? string.Empty;
             r.Inherited = false;
             p.Recipe = next;
-            // FG4-ECO-03：记住这类建筑上一次的选择（新建的同类建筑沿用）。
-            Remember(state, p.Def.TypeId, r.RecipeId, null, rememberRecipe: true);
+            // FG4-ECO-03：记住这类建筑上一次的选择（新建的同类建筑沿用）。规则的接管 / 恢复不记（FG4-ECO-06）。
+            if (remember)
+            {
+                Remember(state, p.Def.TypeId, r.RecipeId, null, rememberRecipe: true);
+            }
             // 新配方用不上的输入退回仓库。
             int returned = 0;
             foreach (ItemStackRecord s in r.In)

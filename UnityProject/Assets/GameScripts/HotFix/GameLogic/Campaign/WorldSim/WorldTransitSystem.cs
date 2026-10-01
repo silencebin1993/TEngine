@@ -151,6 +151,23 @@ namespace GameLogic.Campaign.WorldSim
             }
             double arrival = Math.Max(0.0, GameClock.TuningOr("transit.arrival_radius_cells", 12f));
             bool nav = NavService.IsBound && ReferenceEquals(NavService.BoundState, state);
+            int arrivalsBefore = ArrivalCount;
+            try
+            {
+                StepGroups(state, groups, arrival, nav, dt);
+            }
+            finally
+            {
+                if (ArrivalCount != arrivalsBefore)
+                {
+                    // FG4-ECO-06：突袭部队到达家园 = 突袭开始——战时预案在下一个模拟步立刻检查（不等整分钟）。
+                    Economy.StandingRuleService.NotifyRaidArrived(state);
+                }
+            }
+        }
+
+        private static void StepGroups(CampaignState state, TransitGroupRecord[] groups, double arrival, bool nav, float dt)
+        {
             for (int i = 0; i < groups.Length; i++)
             {
                 TransitGroupRecord g = groups[i];

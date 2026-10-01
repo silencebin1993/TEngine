@@ -2584,9 +2584,17 @@ namespace GameLogic.Campaign.Regions
                     WorkOrderRecord pending = HomeValleyWorkOrders.FindActiveOrderForMachine(state, marker.LogicId);
                     bool buildLeg = pending != null && pending.Kind == WorkOrderKind.Build && pending.State == WorkOrderState.Reserved;
                     bool haulLeg = pending != null && pending.Kind == WorkOrderKind.Haul && pending.State == WorkOrderState.InProgress;
-                    if (buildLeg || haulLeg)
+                    // FG4-ECO-06（审查修复 P2）：规则在世界模拟步里刚派出的送修 / 驻防单，移动要到下一步 Tick 才发出；存档落在这个空档时同样按单子重新出发。
+                    bool selfLeg = pending != null && HomeValleyWorkOrders.IsRuleSelfKind(pending.Kind) && pending.State == WorkOrderState.Reserved;
+                    if (buildLeg || haulLeg || selfLeg)
                     {
-                        BeginMovementForOrder(marker, marker.Position3, pending);
+                        Vector3 destination = marker.Position3; // 施工 / 搬运第二腿由 BeginMovementForOrder 自己按这一腿算目的地。
+                        if (selfLeg)
+                        {
+                            Vector2 at = HomeValleyWorkOrders.ResolveWorkPosition(state, pending); // 维修台 / 驻防点，与派单时同一锚点。
+                            destination = new Vector3(at.x, 1f, at.y);
+                        }
+                        BeginMovementForOrder(marker, destination, pending);
                         LastResumedPendingLegs++;
                     }
                     continue;

@@ -49,6 +49,7 @@ namespace GameLogic.UI.Kit
         private VisualElement _statusIcon;
         private Label _state;
         private Label _reason;
+        private Label _ruleLine;
         private Label _nameLabel;
         private TextField _name;
         private Button _rename;
@@ -252,6 +253,7 @@ namespace GameLogic.UI.Kit
             _statusIcon = root.Q<VisualElement>("BpStatusIcon");
             _state = root.Q<Label>("PrState");
             _reason = root.Q<Label>("PrReason");
+            _ruleLine = root.Q<Label>("BpRuleLine");
             _nameLabel = root.Q<Label>("BpNameLabel");
             _name = root.Q<TextField>("BpName");
             _rename = root.Q<Button>("BpRename");
@@ -514,7 +516,18 @@ namespace GameLogic.UI.Kit
             bool prodText = p != null && BuildingStatusService.FromProd(p.State) == st.Kind && st.ReasonCode != null && st.ReasonCode.StartsWith("prod.", System.StringComparison.Ordinal);
             _state.text = prodText ? ProductionService.StateText(p) : GameText.Get(BuildingOps.UiStatusNameKey(st.Kind));
             _reason.text = st.Reason;
+            // FG4-ECO-06：“由规则 R3 触发：排产「维修件」”（没有规则在管它就隐藏）。
+            string rule = StandingRuleService.DescribeBuilding(state, b.BuildingId);
+            if (_ruleLine != null)
+            {
+                _ruleLine.text = rule ?? string.Empty;
+                _ruleLine.EnableInClassList("uk-hidden", rule == null);
+            }
+            RuleLineText = rule ?? string.Empty;
         }
+
+        /// <summary>自检：面板上的规则追溯行（没有 = 空）。</summary>
+        public string RuleLineText { get; private set; } = string.Empty;
 
         private void RefreshControls(CampaignState state, BuildingRecord b)
         {

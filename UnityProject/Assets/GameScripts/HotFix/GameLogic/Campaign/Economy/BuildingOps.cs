@@ -581,6 +581,7 @@ namespace GameLogic.Campaign.Economy
             Revision++;
             HomeInventory.Touch();
             NotificationCenter.Post("building_destroyed", GameText.Format("building.notify.destroyed", NameOf(b)), new Vector3(b.Position.x, 0f, b.Position.y));
+            StandingRuleService.OnBuildingDestroyed(state, b); // FG4-ECO-06：自动重建规则在下一个模拟步处理（没有玩家开的规则就只留虚影）。
         }
 
         /// <summary>升级完工（等级 / 类型已经写回）：容量、覆盖等效果立即生效；引导钩子。</summary>

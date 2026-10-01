@@ -235,9 +235,13 @@ namespace GameLogic.Campaign.Regions
             try
             {
                 MarkExperienceAndInjuryBeforeExit(state, active.RegionId);
+                // FG4-ECO-06：返回的机器（撤离前还活着、在远征地点的）——远征卸货规则在下一个模拟步卸它们的货舱。
+                List<int> returning = MachineRegistry.AllRecords.Where(m => m != null && m.RegionId == active.RegionId && m.IsAlive)
+                    .Select(m => m.LogicId).OrderBy(id => id).ToList();
                 // FG2-FW-04：这一场远征的反应伤害归因到此结束（存档；统计 / 离家报告读它）。
                 Combat.ReactionAttribution.CloseExpedition(state, active.RegionId);
                 active.Exit(true);
+                Economy.StandingRuleService.OnExpeditionReturned(state, returning);
                 // ER6-LOOP-01：撤离事务已提交（active.Exit 内部完成 ResolveExtraction），OBJ-05/07 的
                 // "战利品判定发生在撤离事务提交时"字面要求就是这一刻，不等回到家园下一帧。
                 CampaignObjectiveTracker.Recompute(state);

@@ -50,6 +50,7 @@ namespace GameLogic.Campaign
                 case WorkOrderKind.Repair: return Repair;
                 case WorkOrderKind.Salvage: return Salvage;
                 case WorkOrderKind.Recharge: return Recharge;
+                case WorkOrderKind.Deliver: return Haul; // FG4-ECO-06：补给是搬运的一种，按机器的“搬运”优先级领单。
                 default: return 0;
             }
         }
@@ -507,6 +508,8 @@ namespace GameLogic.Campaign
         /// 取消 / 目标被摧毁 / 目标被拆时全额退回仓库（放不下的放在建筑旁边）。空 = 这张单没有预留物品（重建走废料事务）。</summary>
         public string ReservedItemId;
         public int ReservedItemAmount;
+        /// <summary>FG4-ECO-06（FGR-ECO-031 可追溯）：派出 / 改动这张工单的常驻规则编号（3 = “由规则 R3 触发”；0 = 不是规则派的）。</summary>
+        public int RuleSerial;
     }
 
     /// <summary>ERD-FAC-001 工厂队列项。</summary>

@@ -493,7 +493,8 @@ namespace GameLogic.Campaign.Signal
             {
                 return UplinkFailure.InFactory;
             }
-            if (OnRepairBayProvider != null && OnRepairBayProvider(logicId))
+            // FG4-ECO-06（DEBT-FG1SIG03-01）：机器维修规则把机器送上维修台、正在修理时拒绝接入（注入的判定留给自检）。
+            if ((OnRepairBayProvider != null && OnRepairBayProvider(logicId)) || Economy.StandingRuleService.IsOnRepairBay(CampaignSession.Current, logicId))
             {
                 return UplinkFailure.OnRepairBay;
             }

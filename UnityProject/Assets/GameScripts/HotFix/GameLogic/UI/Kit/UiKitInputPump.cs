@@ -224,6 +224,12 @@ namespace GameLogic.UI.Kit
             {
                 ItemsPanelUIToolkit.Toggle();
             }
+            // FG4-ECO-06：常驻规则键（默认 Alt+R，全部上下文）：开着再按一次关闭；更高层的面板盖在上面时不起作用（同物资键）。
+            if (InputRouter.ConsumeContextAction(GameActionId.OpenRules)
+                && !MechanicCodexPanelUIToolkit.IsOpen && !UiKitPanelHost.AnyModalAbove(RulesPanelUIToolkit.Order))
+            {
+                RulesPanelUIToolkit.Toggle();
+            }
             if (InputRouter.ConsumeContextAction(GameActionId.OpenCodex)
                 && !UiKitPanelHost.AnyModalAbove(MechanicCodexPanelUIToolkit.Order) && !CodexHoverLink.TryJump())
             {

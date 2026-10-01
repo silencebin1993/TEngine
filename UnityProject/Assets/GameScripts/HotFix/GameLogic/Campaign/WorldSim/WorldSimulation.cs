@@ -474,6 +474,8 @@ namespace GameLogic.Campaign.WorldSim
                 if (Home != null && Home.IsLoaded)
                 {
                     HomeValleyPowerGrid.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
+                    // FG4-ECO-06：常驻规则——排队事件每步处理（O(事件数)），条件按 rules.check_seconds 定时检查（不每帧遍历建筑）；只看步序号，与观察无关。
+                    Economy.StandingRuleService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                 }
                 // FG1-SIG-03：核心固件冷却（信号侧，按游戏时间）到期——与观察无关，O(信号核槽位数)。
                 Signal.SignalUplinkService.SimStep(state);

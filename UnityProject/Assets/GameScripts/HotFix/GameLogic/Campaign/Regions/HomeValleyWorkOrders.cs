@@ -59,12 +59,12 @@ namespace GameLogic.Campaign.Regions
                 [HomeValleyLayout.Erc001ChassisId] = new[]
                 {
                     WorkOrderKind.Haul, WorkOrderKind.Build, WorkOrderKind.Repair,
-                    WorkOrderKind.Salvage, WorkOrderKind.Recharge,
+                    WorkOrderKind.Salvage, WorkOrderKind.Recharge, WorkOrderKind.Deliver,
                 },
                 [HomeValleyLayout.Erc002ChassisId] = new[]
                 {
                     WorkOrderKind.Haul, WorkOrderKind.Build, WorkOrderKind.Repair,
-                    WorkOrderKind.Salvage, WorkOrderKind.Recharge,
+                    WorkOrderKind.Salvage, WorkOrderKind.Recharge, WorkOrderKind.Deliver,
                 },
                 [HomeValleyLayout.Erc003ChassisId] = new[] { WorkOrderKind.Recharge },
                 // ER3-SOFTLOCK-01：紧急救援机只能 Repair——AC-ECO-011"不能战斗、没有货舱、不能拆废料
@@ -205,6 +205,7 @@ namespace GameLogic.Campaign.Regions
                 case nameof(WorkOrderKind.Repair): return "修复";
                 case nameof(WorkOrderKind.Salvage): return "拆解";
                 case nameof(WorkOrderKind.Recharge): return "给别的建筑充电";
+                case nameof(WorkOrderKind.Deliver): return Localization.GameText.Get("work.kind.deliver");
                 default: return "做这项工作";
             }
         }
@@ -340,6 +341,7 @@ namespace GameLogic.Campaign.Regions
             order.ReservedItemId = string.IsNullOrEmpty(itemId) ? null : itemId;
             order.ReservedItemAmount = Math.Max(0, itemAmount);
             Append(state, order);
+            Economy.StandingRuleService.OnRepairOrderCreated(state, order); // FG4-ECO-06：战时预案执行中时，新开的维修单立刻提到最高优先级（可追溯到规则）。
             MarkAssignmentDirty();
             HomeValleyConstruction.Touch();
             return WorkOrderOpResult.Ok(workOrderId);
@@ -1248,7 +1250,8 @@ namespace GameLogic.Campaign.Regions
                 }
                 bool buildLeg = o.Kind == WorkOrderKind.Build && o.State == WorkOrderState.Reserved;
                 bool haulLeg = o.Kind == WorkOrderKind.Haul && o.State == WorkOrderState.InProgress;
-                if (buildLeg || haulLeg)
+                bool selfLeg = IsRuleSelfKind(o.Kind) && o.State == WorkOrderState.Reserved; // FG4-ECO-06：规则派给这台机器自己的送修 / 驻防
+                if (buildLeg || haulLeg || selfLeg)
                 {
                     beginAssignedMovement?.Invoke(o);
                 }
@@ -1343,6 +1346,17 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
+            if (IsRuleSelfKind(order.Kind))
+            {
+                // FG4-ECO-06：规则派给这台机器自己的送修 / 驻防只属于它——玩家接入或下了别的命令 = 玩家接管，单子取消（规则记为“你改动过”，这次不再派）。
+                PathWatch.Remove(order.WorkOrderId);
+                WaitingWatch.Remove(order.WorkOrderId);
+                order.State = WorkOrderState.Cancelled;
+                order.FailureReason = "player-took-over";
+                order.AssignedMachineLogicId = 0;
+                MarkAssignmentDirty();
+                return;
+            }
             PathWatch.Remove(order.WorkOrderId);
             // FG3-LOG-02：施工单被接入打断时，货舱里这一趟的材料退回仓库（机器不带着施工材料去打仗；订单回池后别的机器重新取料）。
             ReleaseBuildMachine(state, order, dropOnly: false);
@@ -1422,6 +1436,7 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
+            TakenByPlayer = isDirectControlled;
             DrainPendingMovementRelease(state, releaseMachineMovement);
             DrainPendingLegs(state, beginAssignedMovement);
             AllocateFetchStock(state, dt);
@@ -1735,11 +1750,202 @@ namespace GameLogic.Campaign.Regions
                     ? GameLogic.Localization.GameText.Format("ui.build.relocate_order", Economy.BuildingOps.NameOf(b))
                     : Economy.BuildingOps.NameOf(b); // FG4-ECO-05：施工 / 维修队列显示玩家起的名字
             }
-            if (order.Kind == WorkOrderKind.Recharge || order.Kind == WorkOrderKind.Haul)
+            if (order.Kind == WorkOrderKind.Recharge || order.Kind == WorkOrderKind.Haul || order.Kind == WorkOrderKind.Garrison)
             {
                 return Grid.HomeGridService.DisplayName(HomeValleyLayout.BuildingTypeCore);
             }
             return order.TargetId ?? string.Empty;
+        }
+
+        // ── FG4-ECO-06：常驻规则派出的三类工单（补给 / 送修 / 驻防）────────────────────────────────
+
+        /// <summary>规则派的工单的发起方。</summary>
+        public const string RuleIssuer = "rule";
+
+        /// <summary>“玩家正在用这台机器”（直控 / 正在执行玩家命令）的判定——家园控制器每次 <see cref="Tick"/> 交进来；没有家园时为 null。</summary>
+        public static Func<int, bool> TakenByPlayer { get; private set; }
+
+        /// <summary>只属于某一台机器、不进待分配池的规则工单（送修 / 驻防）。</summary>
+        public static bool IsRuleSelfKind(WorkOrderKind kind) => kind == WorkOrderKind.MachineRepair || kind == WorkOrderKind.Garrison;
+
+        /// <summary>
+        /// 阈值补给：从家园库存预留 <paramref name="amount"/> 件 <paramref name="itemId"/>（与维修件同一做法：开单即预留，取消 / 失败全额退回），
+        /// 开一张待分配的补给单——有空、搬运优先级大于 0 的机器去送，到了以后 rules.supply.unload_seconds 秒放进建筑的输入缓存（放不下的退回仓库）。
+        /// </summary>
+        public static WorkOrderOpResult TryCreateDeliverPool(CampaignState state, string workOrderId, string targetBuildingId, string itemId, int amount, float seconds, int ruleSerial)
+        {
+            if (state == null || HomeValleyConstruction.FindBuildingFast(state, targetBuildingId) == null)
+            {
+                return WorkOrderOpResult.Fail("building-not-found");
+            }
+            if (amount <= 0 || !Economy.ItemCatalog.TryGet(itemId, out Economy.ItemDef item) || Economy.HomeInventory.Stock(state, item) < amount)
+            {
+                return WorkOrderOpResult.Fail("insufficient-items");
+            }
+            if (Economy.HomeInventory.RemoveUpTo(state, item, amount) != amount)
+            {
+                return WorkOrderOpResult.Fail("insufficient-items");
+            }
+            WorkOrderRecord order = NewOrder(state, workOrderId, WorkOrderKind.Deliver, targetBuildingId, 0, resourceTransactionId: null, duration: Mathf.Max(0.1f, seconds));
+            order.IssuerId = RuleIssuer;
+            order.State = WorkOrderState.Ready;
+            order.ReservedItemId = itemId;
+            order.ReservedItemAmount = amount;
+            order.RuleSerial = ruleSerial;
+            Append(state, order);
+            MarkAssignmentDirty();
+            HomeValleyConstruction.Touch();
+            return WorkOrderOpResult.Ok(workOrderId);
+        }
+
+        /// <summary>机器维修：这台机器自己去 <paramref name="bayId"/> 修理（指派给它、下一次 Tick 发起移动）。它手上原来的工单交还待分配池。</summary>
+        public static WorkOrderOpResult TryCreateMachineRepair(CampaignState state, string workOrderId, int machineLogicId, string bayId, int ruleSerial) =>
+            CreateSelfOrder(state, workOrderId, WorkOrderKind.MachineRepair, machineLogicId, bayId, ruleSerial);
+
+        /// <summary>静默夜预案：这台机器去驻防点（建筑 ID；空 = 归还核心）待命，直到规则收工（<see cref="EndRuleOrder"/>）。</summary>
+        public static WorkOrderOpResult TryCreateGarrison(CampaignState state, string workOrderId, int machineLogicId, string pointBuildingId, int ruleSerial) =>
+            CreateSelfOrder(state, workOrderId, WorkOrderKind.Garrison, machineLogicId,
+                string.IsNullOrEmpty(pointBuildingId) ? HomeValleyLayout.RegionId + ":" + HomeValleyLayout.BuildingTypeCore : pointBuildingId, ruleSerial);
+
+        private static WorkOrderOpResult CreateSelfOrder(CampaignState state, string workOrderId, WorkOrderKind kind, int machineLogicId, string targetId, int ruleSerial)
+        {
+            if (state == null)
+            {
+                return WorkOrderOpResult.Fail("no-campaign");
+            }
+            if (!MachineRegistry.TryGetRecord(machineLogicId, out MachineRecord record) || !record.IsAlive)
+            {
+                return WorkOrderOpResult.Fail("machine-not-found-or-dead");
+            }
+            if (record.RegionId != HomeValleyLayout.RegionId)
+            {
+                return WorkOrderOpResult.Fail("machine-out-of-region");
+            }
+            if (HomeValleyConstruction.FindBuildingFast(state, targetId) == null)
+            {
+                return WorkOrderOpResult.Fail("building-not-found");
+            }
+            WorkOrderRecord current = FindActiveOrderForMachine(state, machineLogicId);
+            if (current != null && current.Kind == WorkOrderKind.Haul)
+            {
+                // 审查修复（P1）：搬运单与玩家命令路径（HomeValleyController.YieldWorkOrderForPlayerCommand）一致按取消处理——已拾取的货放回机器脚下的地面、资源事务退回；
+                // 交还分配池会让货留在这台机器的货舱里没人负责，之后接别的搬运 / 取料时被覆盖而凭空消失（FGT-ECO-001 物品守恒）。
+                CancelOrder(state, current.WorkOrderId, record.WorldPosition);
+            }
+            else if (current != null)
+            {
+                YieldToPool(state, machineLogicId); // 规则是玩家显式设下的命令：手上的活交还待分配池（施工材料退回、虚影保留）。
+            }
+            WorkOrderRecord order = NewOrder(state, workOrderId, kind, targetId, machineLogicId, resourceTransactionId: null, duration: 0f);
+            order.IssuerId = RuleIssuer;
+            order.State = WorkOrderState.Reserved;
+            order.RuleSerial = ruleSerial;
+            Append(state, order);
+            QueueNextLeg(order);
+            MarkAssignmentDirty();
+            HomeValleyConstruction.Touch();
+            return WorkOrderOpResult.Ok(workOrderId);
+        }
+
+        /// <summary>规则收工 / 撤回：驻防 = 完成（机器回到闲置）；送修 / 补给 = 取消（补给预留的物品全额退回）。已经结束的不动。</summary>
+        public static void EndRuleOrder(CampaignState state, string workOrderId)
+        {
+            WorkOrderRecord order = Find(state, workOrderId);
+            if (order == null || IsTerminal(order.State))
+            {
+                return;
+            }
+            if (order.Kind == WorkOrderKind.Garrison)
+            {
+                int machine = order.AssignedMachineLogicId;
+                PathWatch.Remove(order.WorkOrderId);
+                WaitingWatch.Remove(order.WorkOrderId);
+                order.State = WorkOrderState.Completed;
+                order.AssignedMachineLogicId = 0;
+                if (machine > 0)
+                {
+                    PendingMovementRelease.Add(machine);
+                }
+                MarkAssignmentDirty();
+                HomeValleyConstruction.Touch();
+                return;
+            }
+            Vector2 at = MachineRegistry.TryGetRecord(order.AssignedMachineLogicId, out MachineRecord m) ? m.WorldPosition : ResolveWorkPosition(state, order);
+            int assigned = order.AssignedMachineLogicId;
+            CancelOrder(state, workOrderId, at);
+            if (assigned > 0)
+            {
+                PendingMovementRelease.Add(assigned);
+            }
+        }
+
+        /// <summary>机器维修进行中：维修台运转且通电时按 rules.repair_bay.heal_fraction_per_second 回耐久（写机器记录、同步战斗内核镜像）；修满完工。
+        /// 维修台没电：暂停（原因写在单子上）；维修台没了：失败（规则下一次检查另找维修台）。</summary>
+        private static void TickMachineRepair(CampaignState state, WorkOrderRecord order, float dt)
+        {
+            BuildingRecord bay = HomeValleyConstruction.FindBuildingFast(state, order.TargetId);
+            if (bay == null || bay.ConstructionState != BuildingConstructionState.Operational)
+            {
+                order.State = WorkOrderState.Failed;
+                order.FailureReason = "target-destroyed";
+                order.AssignedMachineLogicId = 0;
+                MarkAssignmentDirty();
+                return;
+            }
+            if (bay.PowerState != BuildingPowerState.Powered && bay.PowerState != BuildingPowerState.NotApplicable)
+            {
+                order.FailureReason = "no-power";
+                return;
+            }
+            order.FailureReason = null;
+            if (!MachineRegistry.TryGetRecord(order.AssignedMachineLogicId, out MachineRecord rec) || !rec.IsAlive || rec.MaxHealth <= 0f)
+            {
+                return; // 阵亡由 HandleMachineDeath 统一处理。
+            }
+            float rate = Mathf.Max(0.0001f, Economy.StandingRuleService.HealFractionPerSecond);
+            rec.Health = Mathf.Min(rec.MaxHealth, rec.Health + rec.MaxHealth * rate * dt);
+            order.Duration = rec.MaxHealth;
+            order.Progress = rec.Health;
+            Combat.CombatSites.Get(HomeValleyLayout.RegionId)?.SyncMachineHealth(rec);
+            if (rec.Health >= rec.MaxHealth - 0.0001f)
+            {
+                rec.Health = rec.MaxHealth;
+                Combat.CombatSites.Get(HomeValleyLayout.RegionId)?.SyncMachineHealth(rec);
+                order.State = WorkOrderState.Completed;
+                int machine = order.AssignedMachineLogicId;
+                order.AssignedMachineLogicId = 0;
+                MarkAssignmentDirty();
+                HomeValleyConstruction.Touch();
+                Economy.StandingRuleService.OnMachineRepaired(state, order, machine);
+            }
+        }
+
+        /// <summary>补给送到：物品放进目标建筑的输入缓存（生产建筑；放不下 / 不是生产建筑的退回仓库），单子完成。目标没了：全额退回。</summary>
+        private static void CompleteDeliver(CampaignState state, WorkOrderRecord order)
+        {
+            BuildingRecord target = HomeValleyConstruction.FindBuildingFast(state, order.TargetId);
+            int machine = order.AssignedMachineLogicId;
+            if (target == null || target.ConstructionState == BuildingConstructionState.Damaged)
+            {
+                RefundReservedItems(state, order, ResolveWorkPosition(state, order));
+                order.State = WorkOrderState.Failed;
+                order.FailureReason = "target-destroyed";
+                order.AssignedMachineLogicId = 0;
+                MarkAssignmentDirty();
+                return;
+            }
+            int put = Economy.StandingRuleService.DepositSupply(state, target, order.ReservedItemId, order.ReservedItemAmount, order.WorkOrderId);
+            int amount = order.ReservedItemAmount;
+            order.ReservedItemAmount = 0;
+            order.State = WorkOrderState.Completed;
+            order.AssignedMachineLogicId = 0;
+            if (machine > 0)
+            {
+                MachineRegistry.RecordJobCompleted(machine);
+            }
+            MarkAssignmentDirty();
+            HomeValleyConstruction.Touch();
+            Economy.StandingRuleService.OnDeliverCompleted(state, order, put, amount);
         }
 
         /// <summary>FG0-ARCH-01：接到一个战役（新建 / 读档 / 回滚）时清空本类的瞬态记忆（分配计时、赶路与等待看门狗）。
@@ -1957,6 +2163,15 @@ namespace GameLogic.Campaign.Regions
             {
                 PathWatch.Remove(order.WorkOrderId);
                 int releasedMachine = order.AssignedMachineLogicId;
+                if (IsRuleSelfKind(order.Kind))
+                {
+                    order.State = WorkOrderState.Failed;
+                    order.FailureReason = "path-blocked";
+                    order.AssignedMachineLogicId = 0;
+                    MarkAssignmentDirty();
+                    releaseMachineMovement?.Invoke(releasedMachine);
+                    return;
+                }
                 ReleaseBuildMachine(state, order, dropOnly: false); // FG3-LOG-02：运料途中受阻，这一趟的材料退回仓库，重试时重新取。
                 if (order.Kind == WorkOrderKind.Build && HomeValleyConstruction.MaterialsStillNeeded(state, order) > 0)
                 {
@@ -2013,6 +2228,12 @@ namespace GameLogic.Campaign.Regions
                     return item?.Position ?? HomeValleyLayout.Core.Position;
                 case WorkOrderKind.Recharge:
                     return HomeValleyLayout.Core.Position;
+                case WorkOrderKind.Deliver:
+                case WorkOrderKind.MachineRepair:
+                case WorkOrderKind.Garrison:
+                    // FG4-ECO-06：补给对象 / 维修台 / 驻防点（建筑；驻防点没了按归还核心）。
+                    BuildingRecord ruleTarget = HomeValleyConstruction.FindBuildingFast(state, order.TargetId);
+                    return ruleTarget?.Position ?? HomeValleyLayout.Core.Position;
                 default:
                     return Vector2.zero;
             }
@@ -2046,6 +2267,14 @@ namespace GameLogic.Campaign.Regions
                 case WorkOrderKind.Recharge:
                     TickRecharge(state, order, dt);
                     break;
+                case WorkOrderKind.Deliver:
+                    TickTimedWork(state, order, dt);
+                    break;
+                case WorkOrderKind.MachineRepair:
+                    TickMachineRepair(state, order, dt);
+                    break;
+                case WorkOrderKind.Garrison:
+                    break; // FG4-ECO-06：驻防 = 到了就待命，由规则结束时收工（EndRuleOrder）。
                 case WorkOrderKind.Haul:
                     break; // Haul 的 InProgress 是"货在货舱、正走向交付点"，由到达回调驱动，Tick 不推进。
             }
@@ -2133,6 +2362,9 @@ namespace GameLogic.Campaign.Regions
                     break;
                 case WorkOrderKind.Salvage:
                     CompleteSalvage(state, order);
+                    break;
+                case WorkOrderKind.Deliver:
+                    CompleteDeliver(state, order);
                     break;
             }
         }
@@ -2577,6 +2809,15 @@ namespace GameLogic.Campaign.Regions
                 ? dead.WorldPosition
                 : Vector2.zero;
 
+            if (order.Kind == WorkOrderKind.Deliver)
+            {
+                // FG4-ECO-06：规则派的补给单——机器阵亡不作废：预留的物品留在单子上，回待分配池由别的机器接着送。
+                order.State = WorkOrderState.Ready;
+                order.FailureReason = null;
+                order.AssignedMachineLogicId = 0;
+                MarkAssignmentDirty();
+                return;
+            }
             if (order.Kind == WorkOrderKind.Repair && order.IssuerId == PoolRepairIssuer)
             {
                 // FG4-ECO-05：建筑面板派的维修 / 重建单——机器阵亡不作废玩家的命令：预留的维修件 / 废料事务原样保留，单子回待分配池由别的机器接着修。
@@ -2628,7 +2869,7 @@ namespace GameLogic.Campaign.Regions
             {
                 CampaignEconomyLedger.Cancel(state, order.ResourceTransactionId);
             }
-            if (refund && order.Kind == WorkOrderKind.Repair)
+            if (refund && (order.Kind == WorkOrderKind.Repair || order.Kind == WorkOrderKind.Deliver))
             {
                 // FG4-ECO-05：维修单预留的维修件全额退回（仓库放得下就进仓库，放不下的放在建筑旁边）。
                 BuildingRecord target = state.BuildingRecords?.FirstOrDefault(b => b != null && b.BuildingId == order.TargetId);

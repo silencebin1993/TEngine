@@ -253,7 +253,14 @@ namespace GameLogic.UI.WorkOrder
                 // ER4-CONTENT-01：建筑类目标改显机械内容目录 DisplayName（如"发电机"），
                 // 不再直接暴露内部拼接 id（如 "home_valley:generator"）；非建筑目标按工单类型给通用称呼。
                 string targetLabel = MechanicalContentFacade.ResolveWorkOrderTargetLabel(order.TargetId);
-                row.Q<Label>("Target").text = targetLabel == order.TargetId ? FallbackTargetText(order.Kind) : targetLabel;
+                string targetText = targetLabel == order.TargetId ? FallbackTargetText(order.Kind) : targetLabel;
+                // FG4-ECO-06（FGR-ECO-031 可追溯）：规则派的补给 / 送修 / 驻防写清做什么，规则派出或改动过的单子附“由规则 R3 触发”。
+                CampaignState ruleState = CampaignSession.Current;
+                string ruleTarget = GameLogic.Campaign.Economy.StandingRuleService.DescribeRuleOrderTarget(ruleState, order);
+                string ruleTrace = GameLogic.Campaign.Economy.StandingRuleService.DescribeOrder(ruleState, order);
+                row.Q<Label>("Target").text = ruleTrace != null
+                    ? GameLogic.Localization.GameText.Format("rules.with_trace", ruleTarget ?? targetText, ruleTrace)
+                    : ruleTarget ?? targetText;
 
                 Label stateLabel = row.Q<Label>("State");
                 stateLabel.text = StateText(order.State);
@@ -377,6 +384,10 @@ namespace GameLogic.UI.WorkOrder
                 case WorkOrderKind.Repair: return "维修";
                 case WorkOrderKind.Salvage: return "拆解";
                 case WorkOrderKind.Recharge: return "充电";
+                case WorkOrderKind.Deliver:
+                case WorkOrderKind.MachineRepair:
+                case WorkOrderKind.Garrison:
+                    return GameLogic.Campaign.Economy.StandingRuleService.KindTextOf(kind);
                 default: return "工作";
             }
         }

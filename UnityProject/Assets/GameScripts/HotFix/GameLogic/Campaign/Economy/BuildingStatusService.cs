@@ -208,7 +208,18 @@ namespace GameLogic.Campaign.Economy
             }
             if (type == HomeValleyLayout.BuildingTypeRepairBay)
             {
-                return new BuildingStatus(BuildingStatusKind.Idle, "repair_bay.idle", GameText.Get("bs.reason.idle_repair_bay"));
+                // FG4-ECO-06：机器维修规则派来的机器正在修 = 工作中（写明几台）。
+                int repairing = 0;
+                foreach (WorkOrderRecord o in state?.WorkOrders ?? Array.Empty<WorkOrderRecord>())
+                {
+                    if (o != null && o.Kind == WorkOrderKind.MachineRepair && o.TargetId == b.BuildingId && o.State == WorkOrderState.InProgress)
+                    {
+                        repairing++;
+                    }
+                }
+                return repairing > 0
+                    ? new BuildingStatus(BuildingStatusKind.Working, "repair_bay.working", GameText.Format("bs.reason.working_repair_bay", repairing))
+                    : new BuildingStatus(BuildingStatusKind.Idle, "repair_bay.idle", GameText.Get("bs.reason.idle_repair_bay"));
             }
             return new BuildingStatus(BuildingStatusKind.Working, "generic", GameText.Get("bs.reason.working_generic"));
         }

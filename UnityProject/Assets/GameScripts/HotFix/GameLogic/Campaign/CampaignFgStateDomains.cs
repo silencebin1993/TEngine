@@ -764,11 +764,113 @@ namespace GameLogic.Campaign
         public int DomainVersion = 1;
     }
 
-    /// <summary>常驻规则（FG04）。</summary>
+    /// <summary>
+    /// 常驻规则（FG04 FGR-ECO-030 / 031；FG4-ECO-06）。唯一写入口 <c>Economy.StandingRuleService</c>。
+    /// 存：规则本身（七类的设置、启用、优先级、最近触发、冲突与原因）、规则正在“持有”的改动（用来恢复原样与追溯“由规则 R3 触发”）、
+    /// 触发日志（只留最近 rules.log_max 条）、等着下一个模拟步处理的事件（建筑被摧毁、远征返回、等材料的自动重建）、下一次定时检查的步。
+    /// 只加字段不升版本（ADR FG0-SAVE-01）：旧档读进来这些字段是空的，<see cref="CampaignFgStateDomains.EnsureAll"/> 补空数组并补上默认开启的“远征卸货”。
+    /// </summary>
     [Serializable]
     public sealed class StandingRuleState
     {
         public int DomainVersion = 1;
+        public StandingRuleRecord[] Rules = Array.Empty<StandingRuleRecord>();
+        /// <summary>下一条规则的编号（R1、R2……永不复用）。</summary>
+        public int NextSerial = 1;
+        public RuleHoldRecord[] Holds = Array.Empty<RuleHoldRecord>();
+        public RuleLogRecord[] Log = Array.Empty<RuleLogRecord>();
+        public int NextLogSerial = 1;
+        public RuleEventRecord[] Pending = Array.Empty<RuleEventRecord>();
+        /// <summary>下一次定时检查的统一时钟步（每 rules.check_seconds 游戏秒一次）。</summary>
+        public long NextCheckTick;
+        /// <summary>有改动（新建 / 修改 / 启停 / 突袭到达）：下一个模拟步立刻检查一次（存档里保留，读档后行为不变）。</summary>
+        public bool EvaluateNow;
+        /// <summary>新战役 / 旧档第一次读进来时已补过默认规则（“远征卸货”默认开启，FGR-ECO-030）。</summary>
+        public bool DefaultsSeeded;
+        /// <summary>规则派出的工单编号计数（工单 ID 确定性，不用 GUID）。</summary>
+        public int NextOrderSerial = 1;
+    }
+
+    /// <summary>一条常驻规则。字段按类型取用（见 <c>StandingRuleService</c> 各类说明）。</summary>
+    [Serializable]
+    public sealed class StandingRuleRecord
+    {
+        public int Serial;
+        /// <summary>类型（fg.TbRuleKind.id）：stock_keep / supply / war_plan / silent_night / machine_repair / expedition_unload / auto_rebuild。</summary>
+        public string Kind = string.Empty;
+        public bool Enabled;
+        /// <summary>优先级：1 最先执行（同一实体被两条规则要时由小的执行）。</summary>
+        public int Priority = 1;
+        public string ItemId = string.Empty;
+        /// <summary>数值：库存维持 / 阈值补给 = 件数；静默夜预案 = 提前秒数；机器维修 = 伤势百分比。</summary>
+        public int Threshold;
+        /// <summary>阈值补给：每次送几件。</summary>
+        public int Batch;
+        /// <summary>库存维持：排产的配方。</summary>
+        public string RecipeId = string.Empty;
+        /// <summary>建筑目标：库存维持 = 工厂（1 座）；阈值补给 = 补给对象；战时预案 = 要暂停的建筑；静默夜预案 = 储能站；自动重建 = 范围（建筑类型 ID，空 = 全部）。</summary>
+        public string[] Targets = Array.Empty<string>();
+        /// <summary>机器（LogicId）：静默夜预案 = 回驻防点的机器；机器维修 = 范围（空 = 全部家园机器）。</summary>
+        public int[] Machines = Array.Empty<int>();
+        /// <summary>静默夜预案 = 驻防点（建筑 ID，空 = 归还核心）；远征卸货 = 卸到哪座仓库（空 = 共用库存）。</summary>
+        public string PointId = string.Empty;
+        /// <summary>战时预案：维修工作单提到最高优先级。</summary>
+        public bool BoostRepair;
+        public long LastFiredTick = -1;
+        public int FireCount;
+        /// <summary>条件现在成立、正在执行（库存维持 / 战时 / 静默夜；用来只在开始与结束时各写一条日志）。</summary>
+        public bool Active;
+        /// <summary>最近一次冲突：赢的那条规则编号（0 = 没有冲突）与争的实体。</summary>
+        public int ConflictWith;
+        public string ConflictEntity = string.Empty;
+        /// <summary>没能执行的原因（文本键 + 参数；空 = 没有问题）。</summary>
+        public string IssueKey = string.Empty;
+        public string IssueArg = string.Empty;
+    }
+
+    /// <summary>规则正持有的一项改动：恢复原样用的旧值、规则设下的值是否被玩家改掉（被改掉 = 这次不再接管）、对应的工单。</summary>
+    [Serializable]
+    public sealed class RuleHoldRecord
+    {
+        public int Rule;
+        /// <summary>recipe / disabled / storage / repair_priority / garrison / machine_repair / supply。</summary>
+        public string Kind = string.Empty;
+        /// <summary>实体键：b:建筑 ID、m:机器 LogicId、o:工单 ID、s:规则编号:建筑 ID。</summary>
+        public string EntityId = string.Empty;
+        public string Prev = string.Empty;
+        public int PrevInt;
+        public long SinceTick;
+        public bool Overridden;
+        public string OrderId = string.Empty;
+        /// <summary>规则实际设下的值（库存维持：工厂被切到的配方 ID）。判断“玩家改掉了没有”拿它比，不拿规则现在的设置比——
+        /// 玩家在面板改了规则的配方 / 物品不是“手动改动工厂”（审查修复）。空 = 旧持有，按规则当前设置比。</summary>
+        public string Applied = string.Empty;
+    }
+
+    /// <summary>触发日志的一条（文本键 + 参数，显示时按当前语言翻译；参数里的 @item: / @b: / @m: / @recipe: / @key: 显示时换成名字）。</summary>
+    [Serializable]
+    public sealed class RuleLogRecord
+    {
+        public int Serial;
+        public long Tick;
+        public int Rule;
+        public string Key = string.Empty;
+        public string[] Args = Array.Empty<string>();
+        public string EntityId = string.Empty;
+        public bool HasPos;
+        public float X;
+        public float Y;
+    }
+
+    /// <summary>等下一个模拟步处理的事件：destroyed（建筑被摧毁）/ expedition（远征返回，带机器）/ rebuild_retry（自动重建等材料）。</summary>
+    [Serializable]
+    public sealed class RuleEventRecord
+    {
+        public string Kind = string.Empty;
+        public string EntityId = string.Empty;
+        public int[] Machines = Array.Empty<int>();
+        public long Tick;
+        public int Rule;
     }
 
     /// <summary>信号核（FG1-SIG-01 / FG01 FGR-SIG-010～012、第 6 章存档）。唯一写入口 <c>Signal.SignalCoreService</c>。
@@ -1175,6 +1277,7 @@ namespace GameLogic.Campaign
             s.DirectorEvents ??= new DirectorEventState();
             s.Quests ??= new QuestState();
             s.StandingRules ??= new StandingRuleState();
+            EnsureRules(s.StandingRules);
             s.SignalCore ??= new SignalCoreState();
             s.SignalCore.SlotPartIds ??= Array.Empty<string>();
             for (int i = 0; i < s.SignalCore.SlotPartIds.Length; i++)
@@ -1235,6 +1338,93 @@ namespace GameLogic.Campaign
                     r.SourceKey ??= string.Empty;
                     r.SourceArg ??= string.Empty;
                 }
+            }
+        }
+
+        /// <summary>FG4-ECO-06：规则域补空数组；新战役 / 旧档第一次补上默认开启的“远征卸货”（FGR-ECO-030“默认开启”）。</summary>
+        public static void EnsureRules(StandingRuleState r)
+        {
+            r.Rules ??= Array.Empty<StandingRuleRecord>();
+            r.Holds ??= Array.Empty<RuleHoldRecord>();
+            r.Log ??= Array.Empty<RuleLogRecord>();
+            r.Pending ??= Array.Empty<RuleEventRecord>();
+            if (r.NextSerial < 1)
+            {
+                r.NextSerial = 1;
+            }
+            if (r.NextLogSerial < 1)
+            {
+                r.NextLogSerial = 1;
+            }
+            if (r.NextOrderSerial < 1)
+            {
+                r.NextOrderSerial = 1;
+            }
+            foreach (StandingRuleRecord x in r.Rules)
+            {
+                if (x == null)
+                {
+                    continue;
+                }
+                x.Kind ??= string.Empty;
+                x.ItemId ??= string.Empty;
+                x.RecipeId ??= string.Empty;
+                x.Targets ??= Array.Empty<string>();
+                x.Machines ??= Array.Empty<int>();
+                x.PointId ??= string.Empty;
+                x.ConflictEntity ??= string.Empty;
+                x.IssueKey ??= string.Empty;
+                x.IssueArg ??= string.Empty;
+            }
+            foreach (RuleHoldRecord h in r.Holds)
+            {
+                if (h != null)
+                {
+                    h.Kind ??= string.Empty;
+                    h.EntityId ??= string.Empty;
+                    h.Prev ??= string.Empty;
+                    h.OrderId ??= string.Empty;
+                    h.Applied ??= string.Empty;
+                }
+            }
+            foreach (RuleLogRecord l in r.Log)
+            {
+                if (l != null)
+                {
+                    l.Key ??= string.Empty;
+                    l.Args ??= Array.Empty<string>();
+                    l.EntityId ??= string.Empty;
+                }
+            }
+            foreach (RuleEventRecord e in r.Pending)
+            {
+                if (e != null)
+                {
+                    e.Kind ??= string.Empty;
+                    e.EntityId ??= string.Empty;
+                    e.Machines ??= Array.Empty<int>();
+                }
+            }
+            if (!r.DefaultsSeeded)
+            {
+                r.DefaultsSeeded = true;
+                var unload = new StandingRuleRecord
+                {
+                    Serial = r.NextSerial++,
+                    Kind = "expedition_unload",
+                    Enabled = true,
+                    Priority = 1,
+                };
+                var list = new System.Collections.Generic.List<StandingRuleRecord>(r.Rules.Length + 1) { unload };
+                foreach (StandingRuleRecord x in r.Rules)
+                {
+                    if (x != null)
+                    {
+                        x.Priority++;
+                        list.Add(x);
+                    }
+                }
+                r.Rules = list.ToArray();
             }
         }
     }

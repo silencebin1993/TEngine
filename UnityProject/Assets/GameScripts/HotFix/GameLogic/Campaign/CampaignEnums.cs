@@ -100,6 +100,12 @@ namespace GameLogic.Campaign
         Repair = 2,
         Salvage = 3,
         Recharge = 4,
+        /// <summary>FG4-ECO-06（阈值补给）：机器把开单时从仓库预留的物品送进指定建筑（分类按“搬运”的工作优先级领单）。</summary>
+        Deliver = 5,
+        /// <summary>FG4-ECO-06（机器维修规则）：机器自己去维修台修理，修满结束（只指派给这台机器，不进待分配池）。</summary>
+        MachineRepair = 6,
+        /// <summary>FG4-ECO-06（静默夜预案）：机器去驻防点待命，规则结束时收工（只指派给这台机器，不进待分配池）。</summary>
+        Garrison = 7,
     }
 
     /// <summary>ERD-WRK-001 WorkOrder.state。</summary>

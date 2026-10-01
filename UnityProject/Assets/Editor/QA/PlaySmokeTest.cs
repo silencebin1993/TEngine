@@ -259,6 +259,9 @@ namespace GameLogic.EditorTools
                     case 315: StepItemsCodexJumped(inStep); break;
                     case 316: StepItemsCodexClosed(inStep); break;
                     case 317: StepItemsPanelClosed(inStep); break;
+                    // FG4-ECO-06：常驻规则键（Alt+R 打开、同一个键再按关闭）。
+                    case 338: StepRulesKeyOpened(inStep); break;
+                    case 339: StepRulesKeyClosed(inStep); break;
                     // FG4-ECO-02：建造菜单“采集”页签——提取钻放在空地上被拒（原因写明要压矿脉）、流体泵放在空地上被拒 / 指着水源或油井可放（预览写抽什么）、
                     // 回收站放在废墟上（预览写储量）、点虚影打开通用面板、Esc 关闭。
                     case 318: StepProdBuildReady(inStep); break;
@@ -1161,6 +1164,31 @@ namespace GameLogic.EditorTools
             bool itemsClosed = ClickUitk("[ItemsPanelHost]", "ItemsPanelClose") && !UI.Kit.ItemsPanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen;
             Check(itemsClicked && itemsOpen && heldToggle && itemsClosed,
                 $"暂停菜单点“物资”：物资面板打开（{ip?.CountText}，{allTiles} 格），“只看持有的”可切，点关闭回到暂停菜单");
+            // FG4-ECO-06（FGU-15）：暂停菜单“常驻规则”→ 规则面板（新战役默认一条“远征卸货”）；从常用预设新建（下拉框选中即生效）、点“编辑”、日志页签、
+            // 行内删除先确认、点关闭回到暂停菜单。
+            bool rulesClicked = ClickUitk("[PauseMenuHost]", "PauseRules");
+            UI.Kit.RulesPanelUIToolkit rp = UI.Kit.RulesPanelUIToolkit.Instance;
+            rp?.Refresh();
+            bool rulesOpen = rp != null && UI.Kit.RulesPanelUIToolkit.IsOpen && rp.PanelVisible && rp.VisibleRowCount >= 1 && rp.RowText(0, "RrId").Contains("R")
+                             && !Localization.GameText.ContainsMarker(rp.CountText + rp.RowText(0, "RrWhen") + rp.RowText(0, "RrThen"));
+            int rowsBefore = rp?.VisibleRowCount ?? 0;
+            int presetIndex = rp?.NewPresetField?.choices?.FindIndex(c => c.Contains("零件保底")) ?? -1;
+            bool presetMade = rp != null && UI.Kit.RulesPanelUIToolkit.PickForTests(rp.NewPresetField, presetIndex) && rp.VisibleRowCount == rowsBefore + 1
+                              && rp.SelectedSerial != 0 && rp.EditorRowVisible("RulesRowFactory") && rp.EditTitleText.Contains("R");
+            int newRow = rp == null ? -1 : Enumerable.Range(0, rp.VisibleRowCount).FirstOrDefault(i => rp.RowSerial(i) == rp.SelectedSerial);
+            bool logTab = ClickUitk("[RulesPanelHost]", "RulesTabLog") && rp != null && rp.ShowingLog && ClickUitk("[RulesPanelHost]", "RulesTabRules") && !rp.ShowingLog;
+            bool deleted = false;
+            if (rp != null && newRow >= 0)
+            {
+                rp.AskDelete(newRow);
+                deleted = UiConfirmDialog.IsOpen;
+                UiConfirmDialog.Confirm();
+                deleted &= rp.VisibleRowCount == rowsBefore;
+            }
+            bool rulesClosed = ClickUitk("[RulesPanelHost]", "RulesPanelClose") && !UI.Kit.RulesPanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen;
+            Check(rulesClicked && rulesOpen && presetMade && logTab && deleted && rulesClosed,
+                $"暂停菜单点“常驻规则”：规则面板打开（{rp?.CountText}，首行“{rp?.RowText(0, "RrId")}”），从预设新建“零件保底”并进入编辑、日志页签可切、删除先确认、点关闭回到暂停菜单" +
+                $"（{rulesClicked}/{rulesOpen}/{presetMade}/{logTab}/{deleted}/{rulesClosed}）");
             Check(pm != null && pm.CameraZoomLabelText.Length > 0 && pm.CameraFollowLabelText.Length > 0
                   && !Localization.GameText.ContainsMarker(pm.CameraZoomLabelText + pm.CameraFollowLabelText),
                 $"暂停菜单显示接入镜头设置：“{pm?.CameraZoomLabelText}”“{pm?.CameraFollowLabelText}”");
@@ -6364,6 +6392,34 @@ namespace GameLogic.EditorTools
                 return;
             }
             Check(!UI.Kit.ItemsPanelUIToolkit.IsOpen && !InputRouter.IsModalOwner(UI.Kit.ItemsPanelUIToolkit.Instance), "同一个键再按一次关闭物资面板");
+            PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameActionId.OpenRules));
+            Next(338, "FG4-ECO-06：按 Alt+R（常驻规则键）");
+        }
+
+        // ── FG4-ECO-06：常驻规则面板的快捷键路径（暂停菜单路径在暂停菜单那一步里点过）──
+
+        private static void StepRulesKeyOpened(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            UI.Kit.RulesPanelUIToolkit p = UI.Kit.RulesPanelUIToolkit.Instance;
+            p?.Refresh();
+            Check(UI.Kit.RulesPanelUIToolkit.IsOpen && p != null && p.PanelVisible && InputRouter.IsModalOwner(p) && p.VisibleRowCount >= 1
+                  && !Localization.GameText.ContainsMarker(p.CountText + p.RowText(0, "RrId") + p.RowText(0, "RrWhen")),
+                $"Alt+R 打开常驻规则面板（{p?.CountText}，首行“{p?.RowText(0, "RrId")} {p?.RowText(0, "RrWhen")}”）");
+            PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameActionId.OpenRules));
+            Next(339, "再按 Alt+R 关闭常驻规则面板");
+        }
+
+        private static void StepRulesKeyClosed(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(!UI.Kit.RulesPanelUIToolkit.IsOpen && !InputRouter.IsModalOwner(UI.Kit.RulesPanelUIToolkit.Instance), "同一个键再按一次关闭常驻规则面板");
             PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.OpenBuildMenu));
             Next(318, "FG4-ECO-02：按建造菜单键打开建造模式，放采集建筑");
         }
