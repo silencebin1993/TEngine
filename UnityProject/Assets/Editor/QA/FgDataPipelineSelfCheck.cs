@@ -48,10 +48,10 @@ namespace GameLogic.EditorTools
             }
         }
 
-        [MenuItem("BinGames/QA/语言/简体中文")]
+        [MenuItem("BinGames/语言/简体中文")]
         public static void UseChinese() => GameSettings.SetLanguage(GameLanguage.ZhCn);
 
-        [MenuItem("BinGames/QA/语言/English")]
+        [MenuItem("BinGames/语言/English")]
         public static void UseEnglish() => GameSettings.SetLanguage(GameLanguage.En);
 
         public static int Run(StringBuilder report)
