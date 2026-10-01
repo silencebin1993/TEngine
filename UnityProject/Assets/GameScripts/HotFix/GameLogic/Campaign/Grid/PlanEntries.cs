@@ -21,6 +21,8 @@ namespace GameLogic.Campaign.Grid
         Pump,
         Tank,
         Valve,
+        /// <summary>FG4-ECO-04（FG-GAP-082）：地下管线口（单击放置，旋转定朝地下的方向；与同一直线上跨度以内朝回来的另一口配对）。</summary>
+        PipeUnderground,
     }
 
     /// <summary>
@@ -137,6 +139,7 @@ namespace GameLogic.Campaign.Grid
                     case "pump": return PlanEntryKind.Pump;
                     case "tank": return PlanEntryKind.Tank;
                     case "valve": return PlanEntryKind.Valve;
+                    case "pipe_underground": return PlanEntryKind.PipeUnderground;
                     default:
                         tool = null;
                         return PlanEntryKind.Unknown;
@@ -145,12 +148,14 @@ namespace GameLogic.Campaign.Grid
             return GridContent.TryGetBuilding(id, out _) ? PlanEntryKind.Building : PlanEntryKind.Unknown;
         }
 
-        public static bool IsPipeLayer(PlanEntryKind k) => k == PlanEntryKind.Pipe || k == PlanEntryKind.Pump || k == PlanEntryKind.Tank || k == PlanEntryKind.Valve;
+        public static bool IsPipeLayer(PlanEntryKind k) => k == PlanEntryKind.Pipe || k == PlanEntryKind.Pump || k == PlanEntryKind.Tank || k == PlanEntryKind.Valve
+                                                           || k == PlanEntryKind.PipeUnderground;
 
         public static bool IsBeltLayer(PlanEntryKind k) => k == PlanEntryKind.Belt || k == PlanEntryKind.Splitter || k == PlanEntryKind.Merger || k == PlanEntryKind.Underground;
 
         public static PipePieceKind PipeKindOf(PlanEntryKind k) =>
-            k == PlanEntryKind.Pump ? PipePieceKind.Pump : k == PlanEntryKind.Tank ? PipePieceKind.Tank : k == PlanEntryKind.Valve ? PipePieceKind.Valve : PipePieceKind.Pipe;
+            k == PlanEntryKind.Pump ? PipePieceKind.Pump : k == PlanEntryKind.Tank ? PipePieceKind.Tank : k == PlanEntryKind.Valve ? PipePieceKind.Valve
+            : k == PlanEntryKind.PipeUnderground ? PipePieceKind.Underground : PipePieceKind.Pipe;
 
         public static BeltNodeKind NodeKindOf(PlanEntryKind k) =>
             k == PlanEntryKind.Splitter ? BeltNodeKind.Splitter : k == PlanEntryKind.Merger ? BeltNodeKind.Merger
@@ -159,7 +164,7 @@ namespace GameLogic.Campaign.Grid
         /// <summary>建造菜单里（kind, 等级）对应的工具 ID：传送带 / 地下传送带 / 管线按等级，其余只看 kind。找不到返回 null。</summary>
         public static string ToolIdFor(string kind, int tier)
         {
-            bool byTier = kind == "belt" || kind == "underground" || kind == "pipe";
+            bool byTier = kind == "belt" || kind == "underground" || kind == "pipe" || kind == "pipe_underground";
             foreach (BuildTool t in GridContent.Tools)
             {
                 if (t.Kind == kind && (!byTier || t.Tier == tier))
@@ -190,6 +195,7 @@ namespace GameLogic.Campaign.Grid
                 case PipePieceKind.Pump: return ToolIdFor("pump", 0);
                 case PipePieceKind.Tank: return ToolIdFor("tank", 0);
                 case PipePieceKind.Valve: return ToolIdFor("valve", 0);
+                case PipePieceKind.Underground: return ToolIdFor("pipe_underground", tier);
                 default: return ToolIdFor("pipe", tier);
             }
         }

@@ -18,6 +18,9 @@ namespace GameLogic.Campaign.Economy
         Waste = 3,
         /// <summary>流体泵（FG04 第 3.3 节，2×2 采集建筑）：抽脚下流体源（水源 / 油井）的流体推进出口的管线。</summary>
         Pump = 4,
+        /// <summary>FG4-ECO-04 燃油发电机（FG04 第 3.3 节“燃烧燃油，供电 300”）：燃油从流体输入口进来，按电网负荷烧；发电本身由电网 HomeValleyPowerGrid 结算。
+        /// <see cref="ProducerDef.FluidLpm"/> = 满负荷每分钟烧几升；<see cref="ProducerDef.InBatches"/> = 机内能存几秒满负荷的燃油。</summary>
+        Generator = 5,
     }
 
     /// <summary>一个流体端口（fg.TbBuildingFluidPort 一行的运行时视图）。</summary>
@@ -226,6 +229,7 @@ namespace GameLogic.Campaign.Economy
                 case "recipe": mode = ProducerMode.Recipe; return true;
                 case "waste": mode = ProducerMode.Waste; return true;
                 case "pump": mode = ProducerMode.Pump; return true;
+                case "generator": mode = ProducerMode.Generator; return true;
                 default: mode = ProducerMode.Recipe; return false;
             }
         }
@@ -356,6 +360,12 @@ namespace GameLogic.Campaign.Economy
                         return "流体泵要有抽取速率与出口存量（秒），不用配方";
                     }
                     break;
+                case ProducerMode.Generator:
+                    if (def.Recipes.Count > 0 || r.FluidLpm <= 0f || r.InBatches < 1)
+                    {
+                        return "燃油发电机要有满负荷烧油速率与机内存油秒数，不用配方";
+                    }
+                    break;
             }
             if (r.VibrationPerMinute < 0f)
             {
@@ -406,6 +416,10 @@ namespace GameLogic.Campaign.Economy
             if (def.Mode == ProducerMode.Pump && (def.FluidPorts.Count != 1 || !def.FluidPorts[0].FromSource))
             {
                 return "流体泵要有且只有一个 fluid = source 的输出口";
+            }
+            if (def.Mode == ProducerMode.Generator && (def.FluidPorts.Count != 1 || def.FluidPorts[0].IsOutput || def.FluidPorts[0].Fluid == null))
+            {
+                return "燃油发电机要有且只有一个收某种流体（燃油）的输入口";
             }
             return null;
         }

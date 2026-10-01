@@ -438,8 +438,9 @@ namespace GameLogic.EditorTools
             var list = new List<BuildEntry>();
             BuildCatalog.List("logistics", null, list);
             // FG3-LOG-03：物流里有三级传送带，T1 排第一。FG3-LOG-04：其后是分流器、合流器与三级地下传送带（共 8 项，全是工具）。
-            // FG3-LOG-05：+ 管线 T1 / T2、泵、储罐、阀门。
-            string[] logisticsOrder = { "belt_t1", "belt_t2", "belt_t3", "splitter", "merger", "underground_t1", "underground_t2", "underground_t3", "pipe_t1", "pipe_t2", "pump", "tank", "valve" };
+            // FG3-LOG-05：+ 管线 T1 / T2、泵、储罐、阀门。FG4-ECO-04（FG-GAP-082）：+ 地下管线 T1 / T2。
+            string[] logisticsOrder = { "belt_t1", "belt_t2", "belt_t3", "splitter", "merger", "underground_t1", "underground_t2", "underground_t3", "pipe_t1", "pipe_t2", "pump", "tank", "valve",
+                "pipe_underground_t1", "pipe_underground_t2" };
             bool logistics = list.Select(x => x.Id).SequenceEqual(logisticsOrder) && list.All(x => x.IsTool);
             string logisticsIds = string.Join(",", list.Select(x => x.Id));
             BuildCatalog.List("energy", null, list);
@@ -449,7 +450,7 @@ namespace GameLogic.EditorTools
             BuildCatalog.List("defense", null, list);
             bool emptyCat = list.Count == 0;
             Expect(logistics && energy && signal && emptyCat && BuildCatalog.FirstNonEmptyCategory() == "logistics",
-                $"分类：物流里依次有传送带 T1 / T2 / T3、分流器、合流器、地下传送带 T1 / T2 / T3、管线 T1 / T2、泵、储罐、阀门（实际 {logisticsIds}）、能源里有发电机、信号里有信号中继塔；防御类暂时为空；默认打开第一个有条目的分类");
+                $"分类：物流里依次有传送带 T1 / T2 / T3、分流器、合流器、地下传送带 T1 / T2 / T3、管线 T1 / T2、泵、储罐、阀门、地下管线 T1 / T2（实际 {logisticsIds}）、能源里有发电机、信号里有信号中继塔；防御类暂时为空；默认打开第一个有条目的分类");
 
             BuildCatalog.List("defense", "中继", list);
             bool byName = list.Count == 1 && list[0].Id == "signal_relay";
@@ -1594,12 +1595,12 @@ namespace GameLogic.EditorTools
                 hud.BindView(root);
                 mode.Open();
                 hud.Refresh();
-                bool tabs = hud.CategoryCount == 12 && hud.SelectedCategoryId == "logistics" && hud.CategoryText(0).Contains("物流（13）") && hud.ItemCount == 13
-                            && hud.ItemText(0).Contains("传送带 T1") && hud.ItemText(0).Contains("每格 1 废料"); // FG3-LOG-03：T1 / T2 / T3 三级；FG3-LOG-04：+ 分流器、合流器、三级地下带；FG3-LOG-05：+ 两级管线、泵、储罐、阀门
+                bool tabs = hud.CategoryCount == 12 && hud.SelectedCategoryId == "logistics" && hud.CategoryText(0).Contains("物流（15）") && hud.ItemCount == 15
+                            && hud.ItemText(0).Contains("传送带 T1") && hud.ItemText(0).Contains("每格 1 废料"); // FG3-LOG-03：T1 / T2 / T3 三级；FG3-LOG-04：+ 分流器、合流器、三级地下带；FG3-LOG-05：+ 两级管线、泵、储罐、阀门；FG4-ECO-04：+ 两级地下管线
                 Expect(tabs, $"建造菜单：12 个分类页签（“{hud.CategoryText(0)}”），默认物流，条目“{hud.ItemText(0).Replace("\n", " ")}”");
 
                 hud.SelectCategory("energy");
-                bool energy = hud.ItemCount == 3 && hud.ItemText(0).Contains("60 废料") && hud.ItemText(0).Contains("40 秒") && hud.ItemText(0).Contains("已有"); // FG3-LOG-06：能源页签 = 发电机 2 + 电塔 T1 / T2
+                bool energy = hud.ItemCount == 6 && hud.ItemText(0).Contains("60 废料") && hud.ItemText(0).Contains("40 秒") && hud.ItemText(0).Contains("已有"); // FG3-LOG-06：能源页签 = 发电机 2 + 电塔 T1 / T2；FG4-ECO-04：+ 燃油发电机、太阳能阵列、储能站
                 hud.SelectCategory("endgame");
                 bool locked = hud.ItemCount == 1 && hud.ItemText(0).Contains("尚未解锁");
                 hud.SelectCategory("defense");
@@ -1611,7 +1612,7 @@ namespace GameLogic.EditorTools
                 hud.SetSearch("没有这种东西");
                 bool noMatch = hud.ItemCount == 0 && hud.EmptyText.Contains("没有找到");
                 hud.SelectCategory("logistics");
-                bool cleared = hud.ItemCount == 13 && hud.ItemId(0) == "belt_t1";
+                bool cleared = hud.ItemCount == 15 && hud.ItemId(0) == "belt_t1";
                 Expect(search && noMatch && cleared, $"搜索“中继”→ 1 项（“{hud.CaptionText}”）；查不到给说明；点分类页签清掉搜索回到分类");
 
                 mode.Select("generator_2");

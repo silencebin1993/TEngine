@@ -552,7 +552,7 @@ namespace GameLogic.EditorTools
                 Fl(r.ItemSeconds), Fl(r.FluidLpm), Fl(r.VibrationPerMinute), r.PlaceHintKey, r.SortOrder)).ToArray();
             string[] rtPf = tb.TbBuildingFluidPort.DataList.Select(r => string.Join("\t", "PF", r.Id, r.TypeId, r.LocalX, r.LocalY, r.Dir, r.Kind, r.Fluid)).ToArray();
             // FG4-ECO-03 起 fg.TbProducer 另有四座制造建筑（零件工坊 / 电子组装台 / 组件工坊 / 固件刻录台，同一张表、同一份源数据）：7 + 4 = 11 行。
-            Expect(code == 0 && srcPd.Length == 11 && srcPd.SequenceEqual(rtPd) && srcPf.Length == 7 && srcPf.SequenceEqual(rtPf),
+            Expect(code == 0 && srcPd.Length == 12 && srcPd.SequenceEqual(rtPd) && srcPf.Length == 8 && srcPf.SequenceEqual(rtPf) /* FG4-ECO-04：+ 燃油发电机一行、燃油口一行 */,
                 $"A1 fg.TbProducer（{srcPd.Length} 行）/ fg.TbBuildingFluidPort（{srcPf.Length} 行）与源数据 fgdata_production.py 逐字段一致" + (code == 0 ? string.Empty : "：" + Tail(output)));
             // FGR-ECO-071 / FG16 FGR-BAL-050：回收产出（固体 > 0、流体 0）；生成端 validate() 已逐条配方断言“回收得到的 < 投入的当量”。
             bool recycle = ItemCatalog.TryGet("alloy", out ItemDef alloy) && alloy.RecycleScrap == 2 && ItemCatalog.TryGet("scrap", out ItemDef scrap) && scrap.RecycleScrap == 1

@@ -7,6 +7,7 @@ using GameLogic.Campaign.Logistics;
 using GameLogic.Campaign.Regions;
 using GameLogic.Core;
 using GameLogic.Localization;
+using GameLogic.Notifications;
 using TEngine;
 using UnityEngine;
 
@@ -74,6 +75,14 @@ namespace GameLogic.Campaign.Economy
         FirmwareStorageFull,
         /// <summary>FG4-ECO-03 固件刻录台：正在刻（配合 <see cref="ProductionService.Producer.ReasonTarget"/>）。</summary>
         WorkingBurn,
+        /// <summary>FG4-ECO-04 燃油发电机：在发电（负荷 &gt; 0）。</summary>
+        WorkingGenerator,
+        /// <summary>FG4-ECO-04 燃油发电机：有油，但电网不缺电（负荷 0，不烧油）。</summary>
+        GeneratorIdle,
+        /// <summary>FG4-ECO-04 燃油发电机：没有燃油（卡片负向“燃油耗尽”）。</summary>
+        NoFuel,
+        /// <summary>FG4-ECO-04 燃油发电机：不在任何电力覆盖里（发出的电送不出去，所以不烧油）。</summary>
+        GeneratorUnconnected,
     }
 
     /// <summary>
@@ -275,9 +284,12 @@ namespace GameLogic.Campaign.Economy
                     // FG4-ECO-03（卡片“配方选择记住上一次的设置”）：新建的同类建筑沿用玩家上一次给这类建筑选的配方 / 刻录目标（面板写明“沿用了上一次的选择”）。
                     ApplyMemory(state, def, rec);
                     // FG00 B14：第一次放下采集 / 加工 / 制造建筑（引导内容在 FG15-UX-04；图鉴“采集建筑”“加工建筑”“制造建筑”随之解锁）。
-                    GuidanceHooks.Raise(def.Mode == ProducerMode.Recycler || def.Mode == ProducerMode.Drill || def.Mode == ProducerMode.Pump
-                        ? GuidanceHooks.EconomyGatheringFirstPlaced
-                        : IsManufacturing(def.TypeId) ? GuidanceHooks.EconomyManufacturingFirstPlaced : GuidanceHooks.EconomyProcessingFirstPlaced);
+                    if (def.Mode != ProducerMode.Generator)
+                    {
+                        GuidanceHooks.Raise(def.Mode == ProducerMode.Recycler || def.Mode == ProducerMode.Drill || def.Mode == ProducerMode.Pump
+                            ? GuidanceHooks.EconomyGatheringFirstPlaced
+                            : IsManufacturing(def.TypeId) ? GuidanceHooks.EconomyManufacturingFirstPlaced : GuidanceHooks.EconomyProcessingFirstPlaced);
+                    }
                 }
                 var p = new Producer { Building = b, Def = def, Rec = rec };
                 EnsureFluidArrays(p);
@@ -691,6 +703,11 @@ namespace GameLogic.Campaign.Economy
                 // 流体泵出口存量 = outBatches 秒的抽取量（600 升/分钟 × 5 秒 = 50 升）。
                 return Math.Max(1000L, (long)Math.Round(p.Def.FluidLpm * 1000.0 * Math.Max(1, p.Def.OutBatches) / 60.0));
             }
+            if (p.Def.Mode == ProducerMode.Generator)
+            {
+                // FG4-ECO-04 燃油发电机：机内燃油 = inBatches 秒满负荷的量（120 升/分钟 × 30 秒 = 60 升）。
+                return GeneratorBufferMl(p);
+            }
             if (port.Fluid == null)
             {
                 return 0;
@@ -716,6 +733,12 @@ namespace GameLogic.Campaign.Economy
             if (p.Def.Mode == ProducerMode.Waste)
             {
                 return Powered(p.Building) ? Mathf.Max(1, Mathf.RoundToInt(p.Def.FluidLpm)) : 0;
+            }
+            if (p.Def.Mode == ProducerMode.Generator)
+            {
+                // 燃油进口按满负荷烧油速率 × eco.prod.fluid_intake_factor 取（缓存满了就不再要，不会多抽）。
+                double f = Math.Max(1.0, GridContent.Tuning("eco.prod.fluid_intake_factor"));
+                return Math.Max(1, (int)Math.Ceiling(p.Def.FluidLpm * f));
             }
             double best = 0;
             foreach (RecipeDef r in p.Def.Recipes)
@@ -930,6 +953,11 @@ namespace GameLogic.Campaign.Economy
             if (p.Def.Mode == ProducerMode.Pump)
             {
                 StepPump(p, ticks, worldHz);
+                return;
+            }
+            if (p.Def.Mode == ProducerMode.Generator)
+            {
+                StepGenerator(state, p, ticks, worldHz);
                 return;
             }
             if (!Powered(b))
@@ -1215,6 +1243,103 @@ namespace GameLogic.Campaign.Economy
             }
             Set(p, ProdState.OutputBlocked, ProdReason.PumpBlocked, p.SourceFluid, 0);
         }
+
+        // ── FG4-ECO-04：燃油发电机 ───────────────────────────────────────────────
+
+        /// <summary>机内燃油容量（毫升）= inBatches 秒满负荷的烧油量。</summary>
+        public static long GeneratorBufferMl(Producer p) =>
+            Math.Max(1000L, (long)Math.Round(p.Def.FluidLpm * 1000.0 * Math.Max(1, p.Def.InBatches) / 60.0));
+
+        /// <summary>烧空停机后重新发电要攒的燃油（毫升）= power.fuel.restart_seconds 秒满负荷的量，不超过机内容量。</summary>
+        public static long GeneratorRestartMl(Producer p)
+        {
+            float secs = GridContent.TryGetTuning("power.fuel.restart_seconds", out float v) ? v : 5f;
+            long ml = (long)Math.Round(p.Def.FluidLpm * 1000.0 * Math.Max(0.1f, secs) / 60.0);
+            return Math.Max(1L, Math.Min(GeneratorBufferMl(p), ml));
+        }
+
+        /// <summary>机内现有燃油（毫升）：口已登记 = 管线内核里的消费者缓存；没登记 = 建筑自己留着的。</summary>
+        public static long GeneratorFuelMl(Producer p)
+        {
+            if (p.Fluids.Length == 0)
+            {
+                return 0;
+            }
+            int h = p.Rec.FluidHandles[0];
+            if (h >= 0 && PipeNetworkService.IsRunning)
+            {
+                return PipeNetworkService.Kernel.ConsumerBuffer(h);
+            }
+            return p.Rec.FluidHeld[0];
+        }
+
+        /// <summary>
+        /// 燃油发电机（FG04 第 3.3 节“燃烧燃油，供电 300”；卡片负向“燃油耗尽”）：按电网给的负荷比例烧机内燃油（满负荷 fluidLpm 升 / 分钟），
+        /// 精确累计到毫升（零头记在 <see cref="ProducerRecord.Progress"/>，单位 毫升 × 60 × 世界频率），与推进粒度、倍速、观察无关。
+        /// 烧空（要烧的比机内有的多）→ 停机、电网立即重新结算（低优先级先断、储能按设置放电），发“燃油耗尽”警告；
+        /// 机内攒够 power.fuel.restart_seconds 秒满负荷的燃油 → 自动重新发电。没接入电网时发不出电，也不烧油。
+        /// </summary>
+        private static void StepGenerator(CampaignState state, Producer p, int ticks, int worldHz)
+        {
+            string id = p.Id;
+            ItemDef fuel = p.Fluids.Length > 0 ? p.Fluids[0].Fluid : null;
+            int h = p.Fluids.Length > 0 ? p.Rec.FluidHandles[0] : -1;
+            PipeKernel k = PipeNetworkService.IsRunning ? PipeNetworkService.Kernel : null;
+            long buffer = h >= 0 && k != null ? k.ConsumerBuffer(h) : 0;
+            if (!p.Rec.Fueled && buffer >= GeneratorRestartMl(p))
+            {
+                p.Rec.Fueled = true;
+                p.Rec.Progress = 0;
+                HomeValleyPowerGrid.SetGeneratorFueled(state, id, true);
+            }
+            bool connected = HomeValleyPowerGrid.IsConnected(state, id);
+            if (p.Rec.Fueled)
+            {
+                float load = connected ? HomeValleyPowerGrid.GeneratorLoad(state, id) : 0f;
+                long perMinute = (long)Math.Round(p.Def.FluidLpm * 1000.0 * load);
+                long denom = 60L * Math.Max(1, worldHz);
+                long num = p.Rec.Progress + perMinute * ticks;
+                long want = num / denom;
+                long took = want > 0 && h >= 0 && k != null ? k.TakeConsumerBuffer(h, want) : 0;
+                p.Rec.FuelBurnedMl += took;
+                if (took < want)
+                {
+                    // 烧空：停机，电网立即重新结算；警告一次（可定位），钩子。
+                    p.Rec.Progress = 0;
+                    p.Rec.Fueled = false;
+                    HomeValleyPowerGrid.SetGeneratorFueled(state, id, false);
+                    NotificationCenter.Post("power_fuel_out", GameText.Format("power.notify.fuel_out", Feedback.FeedbackCues.BuildingLabel(id)),
+                        new Vector3(p.Building.Position.x, 0f, p.Building.Position.y));
+                    GuidanceHooks.Raise(GuidanceHooks.EnergyFirstFuelOut);
+                    FuelOutCount++;
+                }
+                else
+                {
+                    p.Rec.Progress = num - want * denom;
+                    p.WorkedThisStep = took > 0;
+                }
+            }
+            if (!connected)
+            {
+                Set(p, ProdState.OutputBlocked, ProdReason.GeneratorUnconnected);
+            }
+            else if (!p.Rec.Fueled)
+            {
+                Set(p, ProdState.MissingFluid, ProdReason.NoFuel, fuel, 0, GeneratorRestartMl(p), buffer);
+            }
+            else if (HomeValleyPowerGrid.GeneratorLoad(state, id) <= 0f)
+            {
+                Set(p, ProdState.Idle, ProdReason.GeneratorIdle);
+            }
+            else
+            {
+                p.WorkedThisStep = true;
+                Set(p, ProdState.Working, ProdReason.WorkingGenerator);
+            }
+        }
+
+        /// <summary>自检读：累计发生过几次燃油耗尽。</summary>
+        public static int FuelOutCount { get; private set; }
 
         private static void StepWaste(Producer p)
         {
@@ -2586,6 +2711,15 @@ namespace GameLogic.Campaign.Economy
                     return GameText.Format("prod.reason.firmware_storage_full", p.ReasonHave, p.ReasonNeed);
                 case ProdReason.WorkingBurn:
                     return GameText.Format("prod.reason.working_burn", Signal.FirmwareKinds.DisplayName(p.ReasonTarget) ?? p.ReasonTarget ?? string.Empty);
+                case ProdReason.WorkingGenerator:
+                    return GameText.Format("prod.reason.working_generator", Mathf.RoundToInt(HomeValleyPowerGrid.GeneratorLoad(state, p.Id) * 100f),
+                        HomeValleyPowerGrid.Num(HomeValleyPowerGrid.OutputOf(state, p.Id)));
+                case ProdReason.GeneratorIdle:
+                    return GameText.Get("prod.reason.generator_idle");
+                case ProdReason.NoFuel:
+                    return GameText.Format("prod.reason.no_fuel", FluidPortHint(p, 0) ?? string.Empty);
+                case ProdReason.GeneratorUnconnected:
+                    return GameText.Get("prod.reason.generator_unconnected");
                 case ProdReason.MissingFluid:
                     return Join(GameText.Format("eco.reason.missing_input", p.ReasonItem?.Name ?? string.Empty, RecipeBook.Amount(p.ReasonItem, p.ReasonNeed),
                         RecipeBook.Amount(p.ReasonItem, p.ReasonHave)), FluidPortHint(p, p.ReasonPort));
@@ -2735,6 +2869,11 @@ namespace GameLogic.Campaign.Economy
                     else if (p.IsBurner && string.IsNullOrEmpty(p.Rec.BurnTarget))
                     {
                         Set(p, ProdState.Idle, ProdReason.NoBurnTarget);
+                    }
+                    else if (p.Def.Mode == ProducerMode.Generator)
+                    {
+                        Set(p, p.Rec.Fueled ? ProdState.Idle : ProdState.MissingFluid, p.Rec.Fueled ? ProdReason.GeneratorIdle : ProdReason.NoFuel,
+                            p.Fluids.Length > 0 ? p.Fluids[0].Fluid : null, 0);
                     }
                     else if (!Powered(b))
                     {

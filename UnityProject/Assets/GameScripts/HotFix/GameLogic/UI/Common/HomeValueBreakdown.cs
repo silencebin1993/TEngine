@@ -43,11 +43,13 @@ namespace GameLogic.UI.Common
                     continue;
                 }
                 string name = FeedbackCues.BuildingLabel(b.BuildingId);
-                if (HomeValleyLayout.PowerSupplyProfile.TryGetValue(b.BuildingTypeId, out float s))
+                if (HomeValleyLayout.PowerSupplyProfile.TryGetValue(b.BuildingTypeId, out float _))
                 {
                     bool connected = HomeValleyPowerGrid.TryGetBuildingPower(state, b.BuildingId, out BuildingPowerInfo info) && info.Subnet >= 0;
                     if (connected)
                     {
+                        // FG4-ECO-04：这一刻能发的电（太阳能乘光照、燃油没油为 0），与电网结算同一个数。
+                        float s = HomeValleyPowerGrid.AvailableSupplyOf(state, b.BuildingId);
                         supply += s;
                         content.Sources.Add(new TooltipSource(GameText.Format("tooltip.power.supply_of", name), Signed(s)));
                     }
@@ -66,6 +68,23 @@ namespace GameLogic.UI.Common
             }
             content.Sources.AddRange(consumers);
             float net = supply - demand;
+            // FG4-ECO-04：储能站这一刻的充放电（+ 放电补缺口、− 充电），逐座列出；合计 = 发电 + 放电 − 充电 − 需求。
+            foreach (BuildingRecord b in state.BuildingRecords ?? System.Array.Empty<BuildingRecord>())
+            {
+                if (b == null || b.RegionId != HomeValleyLayout.RegionId || !HomeValleyPowerGrid.IsStorageType(b.BuildingTypeId)
+                    || !HomeValleyPowerGrid.TryGetBuildingPower(state, b.BuildingId, out BuildingPowerInfo si) || si.Subnet < 0)
+                {
+                    continue;
+                }
+                float flow = HomeValleyPowerGrid.Kernel.StorageFlowOf(si.Entity);
+                if (System.Math.Abs(flow) < 0.01f)
+                {
+                    continue;
+                }
+                net -= flow;
+                content.Sources.Add(new TooltipSource(GameText.Format("tooltip.power.storage_of", FeedbackCues.BuildingLabel(b.BuildingId),
+                    HomeValleyPowerGrid.StorageStateText(state, b.BuildingId)), Signed(-flow)));
+            }
             content.Total = GameText.Format(net >= 0f ? "tooltip.power.surplus" : "tooltip.power.shortfall", UiFormat.Number(System.Math.Abs(net)));
             return content;
         }

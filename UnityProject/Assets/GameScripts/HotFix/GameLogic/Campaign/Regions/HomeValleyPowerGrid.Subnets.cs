@@ -265,7 +265,7 @@ namespace GameLogic.Campaign.Regions
             }
             PowerSnapshot s = _kernel.Serialize();
             PowerGridState p = state.Power ??= new PowerGridState();
-            p.DomainVersion = 2;
+            p.DomainVersion = 3; // FG4-ECO-04：加储能站设置、曲线的各类别发电
             p.FormatVersion = s.FormatVersion;
             p.NextSerial = s.NextSerial;
             p.SubnetSerials = s.SubnetSerials;
@@ -279,6 +279,7 @@ namespace GameLogic.Campaign.Regions
             p.CurveDemand = s.CurveDemand;
             p.CurveDelivered = s.CurveDelivered;
             p.CurveStored = s.CurveStored;
+            p.CurveClassSupply = s.CurveClassSupply;
             p.StorageIds = new string[s.StorageKeys.Length];
             for (int i = 0; i < p.StorageIds.Length; i++)
             {
@@ -299,6 +300,7 @@ namespace GameLogic.Campaign.Regions
                 CurveDemand = p.CurveDemand ?? Array.Empty<float>(),
                 CurveDelivered = p.CurveDelivered ?? Array.Empty<float>(),
                 CurveStored = p.CurveStored ?? Array.Empty<float>(),
+                CurveClassSupply = p.CurveClassSupply ?? Array.Empty<float>(),
                 StorageStored = p.StorageStored ?? Array.Empty<double>(),
             };
             string[] anchors = p.SubnetAnchors ?? Array.Empty<string>();
@@ -352,6 +354,9 @@ namespace GameLogic.Campaign.Regions
             public float Supply;
             public bool HasDemand;
             public float Demand;
+            // FG4-ECO-04：发电类别（曲线分类、太阳能系数、燃油按负荷）。
+            public byte SourceClass;
+            public PowerSourceKind SourceKind;
         }
 
         private static readonly Dictionary<string, TypePowerInfo> TypeInfoCache = new Dictionary<string, TypePowerInfo>(StringComparer.Ordinal);
@@ -374,6 +379,12 @@ namespace GameLogic.Campaign.Regions
                 t.HasSupply = HomeValleyLayout.PowerSupplyProfile.TryGetValue(typeId, out t.Supply);
                 t.HasDemand = HomeValleyLayout.PowerProfile.TryGetValue(typeId, out (float PowerDemand, int PowerPriority) prof);
                 t.Demand = prof.PowerDemand;
+                if (t.HasSupply || typeId == HomeValleyLayout.BuildingTypeCore)
+                {
+                    PowerSourceDef src = SourceOf(typeId);
+                    t.SourceClass = (byte)Math.Max(0, Math.Min(PowerKernel.MaxSourceClasses - 1, src.ClassIndex));
+                    t.SourceKind = src.Kind;
+                }
                 TypeInfoCache[typeId] = t;
             }
             return t;
@@ -564,6 +575,11 @@ namespace GameLogic.Campaign.Regions
             int w = 0;
             float baseSupply = HomeValleyLayout.BaseCoreSupply;
             float coreRadius = CoverRadiusOf(HomeValleyLayout.BuildingTypeCore);
+            // FG4-ECO-04：燃油发电机有没有油（ProducerRecord.Fueled）、储能站设置（PowerGridState）——只在组装时读一次。
+            CollectFueled(state);
+            CollectStorageSettings(state);
+            byte coreClass = TypeInfo(HomeValleyLayout.BuildingTypeCore).SourceClass;
+            int energyBuilt = 0;
             if (core == null)
             {
                 // 没有核心建筑记录（自检里的合成战役 / 极旧的存档）：在核心枢轴格放一个虚拟配电中心，承载核心自带的基础供电。
@@ -574,7 +590,7 @@ namespace GameLogic.Campaign.Regions
                     Key = PowerKernel.VirtualHubKey,
                     MinX = pivot.X, MinY = pivot.Y, MaxX = pivot.X, MaxY = pivot.Y,
                     NodeRadius = coreRadius, Conducts = true,
-                    Supply = baseSupply, SupplyOn = true,
+                    Supply = baseSupply, SupplyOn = true, SourceClass = coreClass,
                 };
             }
             foreach (BuildingRecord b in Sorted)
@@ -605,8 +621,21 @@ namespace GameLogic.Campaign.Regions
                 {
                     e.Supply = baseSupply;
                     e.SupplyOn = true;
+                    e.SourceClass = coreClass;
                 }
-                if (operational && ti.HasSupply)
+                if (ti.HasSupply && !isCore)
+                {
+                    // FG4-ECO-04：发电类别；燃油发电机按负荷出力、没油时不发电（满额照记，开关由 SetGeneratorFueled 改）。
+                    e.SourceClass = ti.SourceClass;
+                    e.Dispatchable = ti.SourceKind == PowerSourceKind.Fuel;
+                    e.Supply = ti.Supply;
+                    e.SupplyOn = operational && (!e.Dispatchable || FueledScratch.ContainsKey(b.BuildingId));
+                    if (operational && ti.SourceKind != PowerSourceKind.Fixed)
+                    {
+                        energyBuilt++;
+                    }
+                }
+                else if (operational && ti.HasSupply)
                 {
                     e.Supply += ti.Supply;
                     e.SupplyOn = true;
@@ -621,12 +650,28 @@ namespace GameLogic.Campaign.Regions
                     e.StorageCapacity = def.StorageCapacity * 60.0;
                     e.StorageRate = def.StorageRate;
                     e.StorageOn = operational;
+                    if (StorageScratch.TryGetValue(b.BuildingId, out StorageSettings ss))
+                    {
+                        e.StorageNoCharge = ss.NoCharge;
+                        e.StorageNoDischarge = ss.NoDischarge;
+                        e.StorageReserve = (byte)ss.Reserve;
+                    }
+                    if (operational)
+                    {
+                        energyBuilt++;
+                    }
                 }
                 EntityOf[b.BuildingId] = w;
                 _recordAt[w] = b;
                 _entities[w++] = e;
             }
             _entityCount = w;
+            // FG4-ECO-04（B14 引导钩子）：第一次建成能源建筑（燃油发电机 / 太阳能阵列 / 储能站）。
+            if (energyBuilt > _lastEnergyCount && !_suppressFeedback)
+            {
+                GuidanceHooks.Raise(GuidanceHooks.EnergyFirstBuilt);
+            }
+            _lastEnergyCount = energyBuilt;
         }
 
         private static void FootprintBounds(BuildingRecord b, out GridCell min, out GridCell max)
@@ -662,9 +707,23 @@ namespace GameLogic.Campaign.Regions
             }
             long second = after / worldHz;
             SecondsStepped++;
+            // FG4-ECO-04：太阳能系数（昼夜 / 天气接口，O(1)）；变了重新结算并写回（发电变了，汇总与供电结果都可能变）。
+            bool envChanged = RefreshEnvironment(state, _kernel);
+            if (envChanged)
+            {
+                _kernel.Settle();
+            }
             if (_kernel.AnyStorage && _kernel.StepSecond())
             {
                 ApplyResults(state, topologyChanged: false);
+            }
+            else if (envChanged)
+            {
+                ApplyResults(state, topologyChanged: false);
+            }
+            if (_kernel.AnyStorage)
+            {
+                CheckStorageEmpty();
             }
             long every = Math.Max(1L, (long)Math.Round(SampleSeconds));
             if (second % every == 0)
@@ -731,6 +790,15 @@ namespace GameLogic.Campaign.Regions
         {
             PowerSubnetInfo n = _kernel.Subnet(s);
             sb.Append(DescribeSubnetLine(s));
+            string sources = DescribeSources(s);
+            if (sources.Length > 0)
+            {
+                sb.Append('\n').Append(sources);
+            }
+            if (n.DispatchSupply > 0f)
+            {
+                sb.Append('\n').Append(GameText.Format("power.hover.fuel_load", Mathf.RoundToInt(n.DispatchLoad * 100f), Num(n.DispatchSupply * n.DispatchLoad), Num(n.DispatchSupply)));
+            }
             if (n.StorageUnits > 0)
             {
                 string flow = n.StorageFlow > 0f ? GameText.Format("power.hover.storage_charging", Num(n.StorageFlow))
@@ -742,6 +810,10 @@ namespace GameLogic.Campaign.Regions
             if (n.Brownouts > 0)
             {
                 sb.Append('\n').Append(GameText.Format("power.hover.short", Num(n.Demand - n.Delivered)));
+            }
+            if (n.ReserveHeld > 0)
+            {
+                sb.Append('\n').Append(GameText.Format("power.hover.reserve_held", n.ReserveHeld));
             }
         }
 
@@ -792,11 +864,29 @@ namespace GameLogic.Campaign.Regions
                 }
                 sb.Append(" · ").Append(GameText.Format("power.hover.priority", b.PowerPriority));
             }
-            else if (e.SupplyOn)
+            else if (info.IsStorage)
             {
-                sb.Append(info.Subnet >= 0
-                    ? GameText.Format("power.state.producer", SubnetName(_kernel.Subnet(info.Subnet).Serial), Num(e.Supply))
-                    : GameText.Get("power.state.producer_unconnected"));
+                // FG4-ECO-04：储能站——存量 / 容量 · 状态（充电 / 放电 / 已满 / 已空）· 设置。
+                sb.Append(DescribeStorage(state, b, info));
+            }
+            else if (e.SupplyOn || (info.IsProducer && e.Supply > 0f))
+            {
+                // FG4-ECO-04：实际送进电网的电（太阳能乘光照、燃油乘负荷；没油写明）。
+                string extra = DescribeGeneratorExtra(state, b, info);
+                if (e.SupplyOn || info.Subnet < 0)
+                {
+                    sb.Append(info.Subnet >= 0
+                        ? GameText.Format("power.state.producer", SubnetName(_kernel.Subnet(info.Subnet).Serial), Num(OutputOf(state, b.BuildingId)))
+                        : GameText.Get("power.state.producer_unconnected"));
+                }
+                if (!string.IsNullOrEmpty(extra))
+                {
+                    if (sb.Length > 0)
+                    {
+                        sb.Append('\n');
+                    }
+                    sb.Append(extra);
+                }
             }
             else if (info.Subnet < 0)
             {
@@ -1044,7 +1134,11 @@ namespace GameLogic.Campaign.Regions
             _suppressFeedback = false;
             LastSplitNotices = 0;
             LastUnconnectedNotices = 0;
+            LastStorageEmptyNotices = 0;
+            EmptyNotified.Clear();
+            _lastEnergyCount = 0;
             OverrideNodesForTests(null);
+            _sourceRevision = -1;
         }
     }
 }

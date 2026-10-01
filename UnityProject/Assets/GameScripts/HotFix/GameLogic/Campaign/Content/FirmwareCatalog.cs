@@ -155,8 +155,9 @@ namespace GameLogic.Campaign.Content
                 Slot = "固件",
                 ScrapCost = Math.Max(0, row.Scrap),
                 Load = Math.Max(1, row.Load),
+                // FG4-ECO-04（DEBT-FG2FW01-02 范围变更）：不再显示每发耗电（{1} 位置留空，能耗只在数据层）。
                 ValuesSummary = GameText.Format("firmware.values_summary",
-                    row.Load.ToString(CultureInfo.InvariantCulture), row.Power.ToString(CultureInfo.InvariantCulture),
+                    row.Load.ToString(CultureInfo.InvariantCulture), string.Empty,
                     row.Heat.ToString("0.#", CultureInfo.InvariantCulture), row.Scrap.ToString(CultureInfo.InvariantCulture)),
                 // FG1-SIG-05（FGR-SIG-090）：核心固件 AI 永远不用。
                 AiPermission = core ? MechanicalContentAiPermission.PlayerOnly : MechanicalContentAiPermission.PlayerAndAllyAi,

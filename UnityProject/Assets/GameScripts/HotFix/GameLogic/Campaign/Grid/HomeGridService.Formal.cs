@@ -702,7 +702,7 @@ namespace GameLogic.Campaign.Grid
                 plan.Cells.Add(to);
                 plan.Dirs.Add(singleDir);
             }
-            plan.Tier = piece == PipePieceKind.Pipe ? Math.Max(0, Math.Min(PipeConst.TierCount - 1, tool.Tier)) : 0;
+            plan.Tier = piece == PipePieceKind.Pipe || piece == PipePieceKind.Underground ? Math.Max(0, Math.Min(PipeConst.TierCount - 1, tool.Tier)) : 0;
             plan.ScrapPerCell = tool.ScrapPerCell;
             plan.TotalCost = tool.ScrapPerCell * plan.Cells.Count;
             if (state == null)
@@ -769,7 +769,8 @@ namespace GameLogic.Campaign.Grid
             }
             for (int i = 0; i < plan.Cells.Count; i++)
             {
-                PipeNetworkService.AddAdjacentFluids(plan.Cells[i], piece, 0, PipeFluidScratch);
+                // FG4-ECO-04：地下管线口带方向（地面一侧 + 地下配对口两边的网络都算）。
+                PipeNetworkService.AddAdjacentFluids(plan.Cells[i], piece, piece == PipePieceKind.Underground ? (int)plan.Dirs[i] : 0, PipeFluidScratch, plan.Tier);
                 if (PipeFluidScratch.Count > 1)
                 {
                     plan.Reason = new GridReason(GridBlockReason.PipeFluidConflict, "grid.reason.pipe_fluid_conflict",
@@ -935,10 +936,11 @@ namespace GameLogic.Campaign.Grid
         /// <summary>FG3-LOG-05：一件管线层的件的造价（建造菜单里对应工具的 scrapPerCell；管线按等级）。拆除全额返还同一个数。</summary>
         public static int PipePieceCost(PipePieceKind kind, int tier)
         {
-            string toolKind = kind == PipePieceKind.Pump ? "pump" : kind == PipePieceKind.Tank ? "tank" : kind == PipePieceKind.Valve ? "valve" : "pipe";
+            string toolKind = kind == PipePieceKind.Pump ? "pump" : kind == PipePieceKind.Tank ? "tank" : kind == PipePieceKind.Valve ? "valve"
+                : kind == PipePieceKind.Underground ? "pipe_underground" : "pipe";
             foreach (BuildTool t in GridContent.Tools)
             {
-                if (t.Kind == toolKind && (toolKind != "pipe" || t.Tier == tier))
+                if (t.Kind == toolKind && ((toolKind != "pipe" && toolKind != "pipe_underground") || t.Tier == tier))
                 {
                     return t.ScrapPerCell;
                 }
@@ -991,6 +993,9 @@ namespace GameLogic.Campaign.Grid
             var itemCounts = new SortedDictionary<ushort, int>();
             Vector2 at = Vector2.zero;
             HomeGridMap map = MapFor(state);
+            List<GridCell> pipeRefused = null;
+            LastPipesRefused = 0;
+            LastPipeRefusal = PipeOpResult.Success;
             foreach (GridCell c in cells)
             {
                 if (HomeValleyConstruction.IsPlannedMarker(map.GetBelt(c)) || HomeValleyConstruction.IsPlannedMarker(map.GetPipe(c)))
@@ -1001,13 +1006,21 @@ namespace GameLogic.Campaign.Grid
                 // FG3-LOG-05：管线层的件——造价全额返还；储罐 / 阀门里的流体随之排空（储罐有存量时调用方已先确认）。
                 if (PipeNetworkService.TryGetPiece(c, out PipePieceKind pk, out int ptier))
                 {
-                    if (PipeNetworkService.TryRemove(state, c, out long lost).Ok)
+                    PipeOpResult pr = PipeNetworkService.TryRemove(state, c, out long lost);
+                    if (pr.Ok)
                     {
                         removed++;
                         pipesRemoved++;
                         drained += lost;
                         refund += PipePieceCost(pk, ptier);
                         at = new Vector2(c.X, c.Y);
+                    }
+                    else if (pr.Code == PipeResult.FluidConflict)
+                    {
+                        // FG4-ECO-04 修复轮（P1）：拆这一口会让两种流体的地下口重新配对——先拆框里其余的件，最后再试一次
+                        // （框里同时拆掉了被隔开的那两口之一时，这一口就能拆了，结果与拆除顺序无关）。
+                        (pipeRefused ??= new List<GridCell>()).Add(c);
+                        LastPipeRefusal = pr;
                     }
                     continue;
                 }
@@ -1037,10 +1050,40 @@ namespace GameLogic.Campaign.Grid
                     }
                 }
             }
+            // 被拒的地下口按“还剩几口拆不掉”反复重试到不再减少（每轮 O(被拒数)，被拒数通常为 0～2）。
+            for (bool progress = pipeRefused != null; progress;)
+            {
+                progress = false;
+                for (int k = pipeRefused.Count - 1; k >= 0; k--)
+                {
+                    GridCell c = pipeRefused[k];
+                    if (!PipeNetworkService.TryGetPiece(c, out PipePieceKind pk, out int ptier))
+                    {
+                        pipeRefused.RemoveAt(k);
+                        continue;
+                    }
+                    PipeOpResult pr = PipeNetworkService.TryRemove(state, c, out long lost);
+                    if (!pr.Ok)
+                    {
+                        LastPipeRefusal = pr;
+                        continue;
+                    }
+                    pipeRefused.RemoveAt(k);
+                    progress = true;
+                    removed++;
+                    pipesRemoved++;
+                    drained += lost;
+                    refund += PipePieceCost(pk, ptier);
+                    at = new Vector2(c.X, c.Y);
+                }
+            }
+            LastPipesRefused = pipeRefused?.Count ?? 0;
             int cancelled = HomeValleyConstruction.CancelPlannedCells(state, planned);
             if (removed == 0 && cancelled == 0)
             {
-                return GridOpResult.Fail(GridReason.Of(GridBlockReason.NoBuilding));
+                return LastPipesRefused > 0
+                    ? GridOpResult.Fail(new GridReason(GridBlockReason.PipeFluidConflict, LastPipeRefusal.ReasonKey, LastPipeRefusal.Args))
+                    : GridOpResult.Fail(GridReason.Of(GridBlockReason.NoBuilding));
             }
             string stamp = at.x.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + "," + at.y.ToString("0", System.Globalization.CultureInfo.InvariantCulture)
                            + ":" + Core.GameClock.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + (state.WorkOrders?.Length ?? 0);
@@ -1073,6 +1116,9 @@ namespace GameLogic.Campaign.Grid
         /// <summary>FG3-LOG-05：最近一次拆除里有几格是管线件、随之排空了多少流体（毫升）。</summary>
         public static int LastPipesRemoved { get; private set; }
         public static long LastPipeDrainedMl { get; private set; }
+        /// <summary>FG4-ECO-04 修复轮（P1）：最近一次拆除里因“拆掉会让两种流体的地下口重新配对”而留下没拆的管线件数，与最后一条原因。</summary>
+        public static int LastPipesRefused { get; private set; }
+        public static PipeOpResult LastPipeRefusal { get; private set; } = PipeOpResult.Success;
 
         // ── 框选批量拆除（FGR-LOG-007；DEBT-FG0ARCH04-12）───────────────────────────────
 
@@ -1247,16 +1293,24 @@ namespace GameLogic.Campaign.Grid
                 }
             }
             int belts = 0;
-            if (plan.Belts.Count > 0 && TryRemoveBelts(state, plan.Belts).Outcome == GridOpResult.Kind.BeltsRemoved)
+            GridOpResult beltResult = default;
+            LastPipesRefused = 0;
+            if (plan.Belts.Count > 0)
             {
-                belts = LastBeltCount + LastPlannedBeltsCancelled; // FG3-LOG-02：取消的传送带虚影格也算这次框选处理掉的传送带
+                beltResult = TryRemoveBelts(state, plan.Belts);
+                if (beltResult.Outcome == GridOpResult.Kind.BeltsRemoved)
+                {
+                    belts = LastBeltCount + LastPlannedBeltsCancelled; // FG3-LOG-02：取消的传送带虚影格也算这次框选处理掉的传送带
+                }
             }
             LastBatchMarked = marked;
             LastBatchCancelled = cancelled;
             LastBatchBelts = belts;
             if (marked + cancelled + belts == 0)
             {
-                return GridOpResult.Fail(plan.Refused.Count > 0 ? plan.Refused[0].Value : GridReason.Of(GridBlockReason.NoBuilding));
+                // FG4-ECO-04 修复轮（P1）：框里只剩拆了会接错流体的地下口时，写明是哪两种流体，而不是“没有可拆的”。
+                return LastPipesRefused > 0 ? beltResult
+                    : GridOpResult.Fail(plan.Refused.Count > 0 ? plan.Refused[0].Value : GridReason.Of(GridBlockReason.NoBuilding));
             }
             Core.GuidanceHooks.Raise(Core.GuidanceHooks.BuildFirstBatchDemolish);
             return new GridOpResult(GridOpResult.Kind.BatchDemolished, null);

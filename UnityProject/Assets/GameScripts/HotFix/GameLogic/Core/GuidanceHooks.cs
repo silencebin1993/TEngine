@@ -177,6 +177,12 @@ namespace GameLogic.Core
         public const string EconomyAssemblyFirstLineMachine = "economy.assembly.first_line_machine";
         /// <summary>FG4-ECO-03：第一次用面板的“复制设置到同类建筑”。</summary>
         public const string EconomyFirstCopyToSameType = "economy.production.first_copy_same_type";
+        /// <summary>FG4-ECO-04：第一次建成能源建筑（燃油发电机 / 太阳能阵列 / 储能站）——引导内容在 FG15-UX-04：燃油要接管线、按负荷出力；太阳能夜里不发电；储能站的充放电设置；图鉴“能源”随之解锁。</summary>
+        public const string EnergyFirstBuilt = "energy.first_built";
+        /// <summary>FG4-ECO-04（卡片负向“燃油耗尽”）：燃油发电机第一次烧空停机——引导内容：精炼塔出燃油、管线接燃油口、储能站兜底。</summary>
+        public const string EnergyFirstFuelOut = "energy.first_fuel_out";
+        /// <summary>FG4-ECO-04（卡片负向“储能站满或空”）：一个电网的储能第一次放空。</summary>
+        public const string EnergyFirstStorageEmpty = "energy.first_storage_empty";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -208,6 +214,7 @@ namespace GameLogic.Core
             EconomyGatheringFirstPlaced, EconomyProcessingFirstPlaced, EconomyProductionPanelFirstOpen, EconomyFirstStarved, EconomyFirstByproductBlocked,
             EconomyRuinFirstDepleted,
             EconomyManufacturingFirstPlaced, EconomyBurnerFirstChip, EconomyAssemblyFirstLineMachine, EconomyFirstCopyToSameType,
+            EnergyFirstBuilt, EnergyFirstFuelOut, EnergyFirstStorageEmpty,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

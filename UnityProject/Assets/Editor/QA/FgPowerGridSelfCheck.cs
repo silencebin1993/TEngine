@@ -842,7 +842,8 @@ namespace GameLogic.EditorTools
             string[] src = output.Replace("\r", string.Empty).Split('\n').Where(l => l.StartsWith("PN\t", StringComparison.Ordinal)).ToArray();
             string[] rt = ConfigSystem.Instance.Tables.TbPowerNode.DataList
                 .Select(r => string.Join("\t", "PN", r.TypeId, Py(r.CoverRadius), Py(r.StorageCapacity), Py(r.StorageRate))).ToArray();
-            Expect(code == 0 && src.Length == 3 && src.SequenceEqual(rt), $"F1 电力节点表与源数据 fgdata_power.POWER_NODES 逐字段一致（{src.Length} 行）" + (code == 0 ? string.Empty : "：" + Tail(output)));
+            // FG4-ECO-04 起多了储能站一行（核心 / 电塔 T1 / T2 + 储能站）。
+            Expect(code == 0 && src.Length >= 4 && src.SequenceEqual(rt), $"F1 电力节点表与源数据 fgdata_power.POWER_NODES 逐字段一致（{src.Length} 行）" + (code == 0 ? string.Empty : "：" + Tail(output)));
             string[] keys =
             {
                 "building.power_pole.name", "building.power_pole.desc", "power.subnet.name", "power.preview.uncovered", "power.preview.pole_covers", "power.notify.split",
@@ -1391,7 +1392,8 @@ namespace GameLogic.EditorTools
 
                 string first = RunFromSave(out string loaded1);
                 CampaignState l = CampaignSession.Current;
-                bool domain = l.Power.DomainVersion == 2 && l.Power.SubnetSerials.Length == 2 && l.Power.StorageIds.Length == 1 && l.Power.CurveCounts.Sum() > 0;
+                bool domain = l.Power.DomainVersion >= 2 && // FG4-ECO-04 起写 v3（加储能设置与各类别曲线）
+                               l.Power.SubnetSerials.Length == 2 && l.Power.StorageIds.Length == 1 && l.Power.CurveCounts.Sum() > 0;
                 string second = RunFromSave(out _);
                 Expect(save.Success && loaded1 == before && domain,
                     "F8 真文件存读档（FG03 第 6 节“电网拓扑”）：电网编号、每个电网的曲线、储能存量写进存档；读档后按建筑记录重算拓扑，编号与结果逐字段一致" +

@@ -275,6 +275,14 @@ namespace GameLogic.EditorTools
                     case 329: StepMfgDeselected(inStep); break;
                     case 330: StepMfgPanelOpened(inStep); break;
                     case 331: StepMfgPanelClosed(inStep); break;
+                    // FG4-ECO-04：建造菜单“能源”页签——放储能站（预览写接入电网、单击放虚影）；点建成的储能站打开电网面板（选中它的电网、储能站一节）、
+                    // 放电对象下拉框选中即生效、曲线写分类发电；Esc 关面板；“物流”页签选地下管线、旋转、预览写“还没配对”、单击放一口；Esc 退出建造模式。
+                    case 332: StepEnergyPicked(inStep); break;
+                    case 333: StepEnergyPlaced(inStep); break;
+                    case 334: StepEnergyDeselected(inStep); break;
+                    case 335: StepEnergyPanelSet(inStep); break;
+                    case 336: StepEnergyPanelClosed(inStep); break;
+                    case 337: StepUndergroundPipePlaced(inStep); break;
                     case 129: StepRuinsCombat(inStep); break;
                     case 230: StepRuinsTagHover(inStep); break;
                     case 150: StepSignalOpened(inStep); break;
@@ -6611,6 +6619,218 @@ namespace GameLogic.EditorTools
             }
             Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
             Check(!ProductionPanelUIToolkit.IsOpen && mode != null && mode.IsOpen, "Esc 先关面板（建造模式还开着）");
+            // FG4-ECO-04：建造模式还开着，点“能源”页签选储能站，指着核心附近一块空地（按地形找，B25）。
+            CampaignState state = CampaignSession.Current;
+            GridCell core = HomeGridService.CorePivot(state);
+            GridCell? ghostAt = null, builtAt = null;
+            for (int r = 7; r <= 20 && builtAt == null; r++)
+            {
+                for (int dy = -r; dy <= r && builtAt == null; dy++)
+                {
+                    for (int dx = -r; dx <= r && builtAt == null; dx++)
+                    {
+                        if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != r)
+                        {
+                            continue;
+                        }
+                        var c = new GridCell(core.X + dx, core.Y + dy);
+                        if (!HomeGridService.ValidatePlacement(state, "energy_storage", c, 0, checkCost: false).Ok)
+                        {
+                            continue;
+                        }
+                        if (ghostAt == null)
+                        {
+                            ghostAt = c;
+                        }
+                        else if (Math.Abs(c.X - ghostAt.Value.X) > 3 || Math.Abs(c.Y - ghostAt.Value.Y) > 3)
+                        {
+                            builtAt = c;
+                        }
+                    }
+                }
+            }
+            SessionState.SetInt(K + "EnergyGhostX", ghostAt?.X ?? 0);
+            SessionState.SetInt(K + "EnergyGhostY", ghostAt?.Y ?? 0);
+            SessionState.SetInt(K + "EnergyBuiltX", builtAt?.X ?? 0);
+            SessionState.SetInt(K + "EnergyBuiltY", builtAt?.Y ?? 0);
+            int tab = Campaign.Grid.GridContent.Categories.ToList().FindIndex(c => c.Id == "energy");
+            bool tabClicked = ClickUitk("[BuildModeHudHost]", "BuildCat" + tab);
+            int idx = HudItemIndex("energy_storage");
+            bool picked = idx >= 0 && ClickUitk("[BuildModeHudHost]", "BuildItem" + idx) && mode.SelectedTypeId == "energy_storage";
+            Check(ghostAt.HasValue && builtAt.HasValue && tabClicked && picked,
+                $"FG4-ECO-04：点“能源”页签里的“储能站”（第 {idx + 1} 项）：选中（{mode?.SelectedTypeId}）；核心附近找到两块空地");
+            if (ghostAt.HasValue)
+            {
+                HoverWorld(new Vector3(ghostAt.Value.X, 0f, ghostAt.Value.Y));
+            }
+            Next(332, "鼠标移到空地上（储能站可以放，预览写接入电网）");
+        }
+
+        // ── FG4-ECO-04：能源扩展（储能站放置、电网面板的储能站设置与分类发电图例、地下管线口）──
+
+        private static GridCell EnergyCell(string name) => new GridCell(SessionState.GetInt(K + name + "X", 0), SessionState.GetInt(K + name + "Y", 0));
+
+        private static void StepEnergyPicked(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            GridPlacementResult pv = mode?.Preview;
+            Check(pv != null && pv.Ok && pv.Notes.Any(n => n.Contains("接入")),
+                $"放置预览：储能站指着空地可以放，写“{(pv == null ? "没有预览" : string.Join(" / ", pv.Notes))}”");
+            GridCell at = EnergyCell("EnergyGhost");
+            ClickWorld(new Vector3(at.X, 0f, at.Y));
+            Next(333, "单击放下储能站");
+        }
+
+        private static void StepEnergyPlaced(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            GridCell at = EnergyCell("EnergyGhost");
+            BuildingRecord b = HomeGridService.BuildingAt(state, at);
+            Check(b != null && b.BuildingTypeId == "energy_storage" && Campaign.Regions.HomeValleyController.IsPlannedGhost(b),
+                $"单击放下储能站的虚影（状态行“{mode?.StatusText}”）");
+            // 测试捷径：另一块空地上直接登记一座建成的储能站（机器施工由 FgEnergySelfCheck F12 覆盖），下一步点它打开电网面板。
+            AddSmokeBuilding(state, "energy_storage", "store", EnergyCell("EnergyBuilt"));
+            Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+            RightClickWorld(new Vector3(at.X, 0f, at.Y));
+            Next(334, "右键取消选择，再左键点建成的储能站（打开电网面板）");
+        }
+
+        private static void StepEnergyDeselected(double inStep)
+        {
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            GridCell built = EnergyCell("EnergyBuilt");
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            if (!PowerPanelUIToolkit.IsOpen && SessionState.GetInt(K + "EnergyPanelClicked", 0) == 0)
+            {
+                Check(mode != null && mode.IsOpen && mode.SelectedTypeId == null, "右键取消选择（建造模式还开着）");
+                SessionState.SetInt(K + "EnergyPanelClicked", 1);
+                ClickWorld(new Vector3(built.X, 0f, built.Y));
+                return;
+            }
+            if (inStep < 2.2)
+            {
+                return;
+            }
+            PowerPanelUIToolkit panel = PowerPanelUIToolkit.Instance;
+            string storeId = Campaign.Regions.HomeValleyLayout.RegionId + ":smoke_power_store";
+            bool open = PowerPanelUIToolkit.IsOpen && panel != null && panel.PanelVisible && panel.StorageBoxVisible && panel.SelectedStorageId == storeId
+                        && panel.DischargeField.choices.Count == 5;
+            // 修复轮 P2：分类发电图例真按类别写出——曲线已有采样点时必须写“分类发电：”且含归还核心（核心恒在发电）；还没采样时图例为空、标题写“还没有数据”。
+            bool hasCurve = panel != null && Campaign.Regions.HomeValleyPowerGrid.Kernel != null
+                            && Campaign.Regions.HomeValleyPowerGrid.Kernel.TryGetCurve(panel.SelectedSerial, out BinGames.Sim.Logistics.PowerCurve curve) && curve.Count > 0;
+            string coreName = Campaign.Regions.HomeValleyPowerGrid.SourceClassName(0);
+            bool legend = panel != null && (hasCurve ? panel.CurveSourcesText.StartsWith("分类发电：", StringComparison.Ordinal) && panel.CurveSourcesText.Contains(coreName)
+                                                     : panel.CurveSourcesText.Length == 0);
+            Check(open && legend, $"点建成的储能站打开电网面板（选中它的电网与这座储能站）：“{panel?.StorageTitleText}”“{panel?.StoragesText}”，放电对象 {panel?.DischargeField?.choices?.Count} 项；" +
+                                  $"分类发电图例“{panel?.CurveSourcesText}”（有采样 {hasCurve}）");
+            // UI Toolkit 红线 8：下拉框选中即生效——放电只给优先级 1～2。玩家在下拉菜单里点选项时 DropdownField 走的就是 value 赋值 → ChangeEvent
+            // （与 5467 / 6586 两处一致）；这里先确认下拉框此刻真能点（可见、可用、在面板里），再走同一个值变化回调。
+            DropdownField dd = panel?.DischargeField;
+            bool clickable = dd != null && dd.panel != null && dd.enabledInHierarchy && dd.resolvedStyle.display != DisplayStyle.None && dd.worldBound.width > 0f;
+            Check(clickable, $"放电对象下拉框可见可用（{dd?.worldBound}）");
+            if (clickable && dd.choices.Count > 2)
+            {
+                dd.value = dd.choices[2];
+            }
+            Next(335, "放电对象下拉框选“只给优先级 1～2”");
+        }
+
+        private static void StepEnergyPanelSet(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            PowerPanelUIToolkit panel = PowerPanelUIToolkit.Instance;
+            CampaignState state = CampaignSession.Current;
+            string storeId = Campaign.Regions.HomeValleyLayout.RegionId + ":smoke_power_store";
+            Campaign.Regions.StorageSettings set = Campaign.Regions.HomeValleyPowerGrid.GetStorageSettings(state, storeId);
+            Check(set.Reserve == 2 && !set.NoDischarge && panel != null && panel.MessageText.Contains("只给优先级 1～2") && panel.DetailText.Contains("发电构成"),
+                $"放电对象选中即生效（“{panel?.MessageText}”），电网读数写发电构成（“{panel?.DetailText?.Split('\n').FirstOrDefault(l => l.Contains("发电构成"))}”）");
+            CheckNoTextMarkers("电网面板储能站一节");
+            PressKeyKeepMouse(KeyCode.Escape);
+            Next(336, "Esc 关闭电网面板");
+        }
+
+        private static void StepEnergyPanelClosed(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Check(!PowerPanelUIToolkit.IsOpen && mode != null && mode.IsOpen, "Esc 先关电网面板（建造模式还开着）");
+            // FG4-ECO-04（FG-GAP-082）：“物流”页签选地下管线 T1，R 转到朝东，指着储能站虚影西边的空地。
+            int tab = Campaign.Grid.GridContent.Categories.ToList().FindIndex(c => c.Id == "logistics");
+            bool tabClicked = ClickUitk("[BuildModeHudHost]", "BuildCat" + tab);
+            int idx = HudItemIndex("pipe_underground_t1");
+            bool picked = idx >= 0 && ClickUitk("[BuildModeHudHost]", "BuildItem" + idx) && mode.SelectedToolId == "pipe_underground_t1";
+            Check(tabClicked && picked, $"点“物流”页签里的“地下管线 T1”（第 {idx + 1} 项）：选中（{mode?.SelectedToolId}）");
+            CampaignState state = CampaignSession.Current;
+            GridCell at = EnergyCell("EnergyGhost");
+            GridCell? cell = null;
+            for (int d = 3; d <= 12 && cell == null; d++)
+            {
+                var c = new GridCell(at.X - d, at.Y);
+                if (HomeGridService.ValidatePipeCell(state, c, BinGames.Sim.Logistics.PipePieceKind.Underground).Ok)
+                {
+                    cell = c;
+                }
+            }
+            SessionState.SetInt(K + "UgPipeX", cell?.X ?? 0);
+            SessionState.SetInt(K + "UgPipeY", cell?.Y ?? 0);
+            HoverWorld(new Vector3((cell ?? at).X, 0f, (cell ?? at).Y));
+            Next(337, "鼠标移到空地上（地下管线口），看预览，单击放一口");
+        }
+
+        private static void StepUndergroundPipePlaced(double inStep)
+        {
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            GridCell cell = EnergyCell("UgPipe");
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            if (SessionState.GetInt(K + "UgPipeClicked", 0) == 0)
+            {
+                Campaign.Grid.BeltPathPlan plan = mode?.ToolPreview;
+                bool previewOk = plan != null && plan.Ok && plan.IsPipe && plan.Pipe == BinGames.Sim.Logistics.PipePieceKind.Underground
+                                 && !Campaign.Logistics.PipeNetworkService.TryPreviewUnderground(cell, (int)plan.Dirs[0], plan.Tier, out _);
+                Check(previewOk, $"地下管线口预览：可以放，附近没有朝回来的另一口 → 写“还没配对”（{(plan == null ? "没有预览" : plan.Reason?.Describe() ?? "可以放")}）");
+                SessionState.SetInt(K + "UgPipeClicked", 1);
+                ClickWorld(new Vector3(cell.X, 0f, cell.Y));
+                return;
+            }
+            if (inStep < 1.2)
+            {
+                return;
+            }
+            if (SessionState.GetInt(K + "UgPipeClicked", 0) == 1)
+            {
+                bool ghost = Campaign.Regions.HomeValleyConstruction.TryFindPlannedCell(state, cell, out PlannedBeltRecord p, out _) && p.PipePiece == (int)BinGames.Sim.Logistics.PipePieceKind.Underground + 1;
+                Check(ghost, $"单击放下地下管线口的虚影（状态行“{mode?.StatusText}”）");
+                SessionState.SetInt(K + "UgPipeClicked", 2);
+                RightClickWorld(new Vector3(cell.X, 0f, cell.Y));
+                return;
+            }
+            if (inStep < 1.8)
+            {
+                return;
+            }
+            Check(mode != null && mode.SelectedToolId == null, "右键取消选择");
             PressKeyKeepMouse(KeyCode.Escape);
             Next(140, "Esc 退出建造模式；FG0-ARCH-03：家园突袭战斗原型（测试捷径）");
         }

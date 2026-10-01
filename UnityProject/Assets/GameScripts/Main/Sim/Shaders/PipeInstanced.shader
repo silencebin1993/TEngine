@@ -113,8 +113,9 @@ Shader "BinGames/PipeInstanced"
             {
                 float2 p = i.p;
                 float kindDir = i.a.z;
-                float dir = floor((kindDir + 0.5) / 4.0);
-                float kind = kindDir - dir * 4.0;
+                // FG4-ECO-04：编码 = 种类（0～7）+ 8 × 方向（地下管线口是第 5 种）。
+                float dir = floor((kindDir + 0.5) / 8.0);
+                float kind = kindDir - dir * 8.0;
                 float mask = i.a.w;
                 float fluid = i.b.x;
                 float tier = i.b.y;
@@ -149,6 +150,27 @@ Shader "BinGames/PipeInstanced"
                     float filled = step((p.y + 0.39) / 0.78, level);
                     col = lerp(float3(0.10, 0.10, 0.12), fcol, filled);
                     col = lerp(col, float3(0.55, 0.56, 0.58), wall);
+                }
+                else if (kind > 3.5)
+                {
+                    // FG4-ECO-04（FG-GAP-082）地下管线口：地面一侧伸出管臂，朝地下的一侧是带深色口沿的方形井盖 + 三道横纹（形状区分，B15）；
+                    // 没配对（flags 第 3 位）叠红色斜纹。
+                    float2 fwd = DirVec(dir);
+                    float2 side = float2(fwd.y, -fwd.x);
+                    float u = dot(p, fwd);
+                    float s = dot(p, side);
+                    float w = tier > 0.5 ? 0.2 : 0.14;
+                    float arm = step(abs(s), w) * step(u, 0.0);
+                    float hatch = step(abs(s), 0.36) * step(-0.1, u) * step(u, 0.36);
+                    inside = max(arm, hatch);
+                    col = lerp(fcol, dark, hatch * step(0.28, max(abs(s), abs(u - 0.13) + 0.05)));
+                    float bands = hatch * step(0.5, frac(u * 9.0)) * step(abs(s), 0.24);
+                    col = lerp(col, float3(0.12, 0.12, 0.14), bands * 0.8);
+                    if (Bit(flags, 3) > 0.5)
+                    {
+                        float stripe = step(0.5, frac((p.x - p.y) * 6.0));
+                        col = lerp(col, float3(0.9, 0.15, 0.1), stripe * 0.7);
+                    }
                 }
                 else
                 {

@@ -1350,7 +1350,7 @@ namespace GameLogic.Campaign.Regions
             string icon = ghost ? _siteView.IconOf(building) : StateIconFor(building);
             // FG3-LOG-09（DEBT-FG0ARCH04-09）：外观签名没变就什么都不写（颜色 / 朝向 / 位置 / 虚影高度 / 状态标记 / 色盲配色）。
             int sig = HashCode.Combine((int)building.ConstructionState, (int)building.PowerState, building.Rotation, building.GridX, building.GridY,
-                Mathf.RoundToInt(fraction * 64f), icon, _visualCvd);
+                Mathf.RoundToInt(fraction * 64f), icon, HashCode.Combine(_visualCvd, IsSupplyBuilding(building) && IsSupplying(building)));
             if (_buildingVisualSig.TryGetValue(key, out int seen) && seen == sig)
             {
                 return;
@@ -1792,6 +1792,13 @@ namespace GameLogic.Campaign.Regions
             {
                 return null;
             }
+            if (IsSupplyBuilding(building))
+            {
+                // FG4-ECO-04 修复轮（P2，B05 不只靠颜色）：发电建筑按发电状态挂标记——燃油发电机走生产状态（没油 = 缺料、不缺电 = 待机、未接入 = 堵塞），
+                // 太阳能 / 发电机此刻发不出电（夜晚、受环境影响为 0）= 待机。
+                string prod = ProductionIconFor(building);
+                return prod ?? (IsSupplying(building) ? null : ContentIcons.StateIdle);
+            }
             switch (building.PowerState)
             {
                 case BuildingPowerState.Brownout:
@@ -2011,6 +2018,20 @@ namespace GameLogic.Campaign.Regions
             || building.ConstructionState == BuildingConstructionState.MaterialReserved
             || building.ConstructionState == BuildingConstructionState.Building;
 
+        private static bool IsSupplyBuilding(BuildingRecord building) =>
+            building.BuildingTypeId != null && HomeValleyLayout.PowerSupplyProfile.ContainsKey(building.BuildingTypeId);
+
+        /// <summary>发电建筑此刻能不能向电网供电（燃油发电机有油、太阳能有光；电网没载入时按能供电算，不误报停机）。O(1)。</summary>
+        private static bool IsSupplying(BuildingRecord building)
+        {
+            CampaignState state = CampaignSession.Current;
+            if (state == null || building.BuildingId == null || !HomeValleyPowerGrid.TryGetBuildingPower(state, building.BuildingId, out _))
+            {
+                return true;
+            }
+            return HomeValleyPowerGrid.AvailableSupplyOf(state, building.BuildingId) > 0f;
+        }
+
         public static Color ColorForBuilding(BuildingRecord building)
         {
             // ER8-CONTENT-01：设置“色盲安全图标”开启时换用 Okabe-Ito 色盲友好色板（红/绿对立改为
@@ -2026,10 +2047,13 @@ namespace GameLogic.Campaign.Regions
             }
             // 电源类建筑（发电机）本身不用电，PowerState 恒为未接电；运转中应显示“在工作”，
             // 此前一直被涂成“未接电”的灰色，容易误读成停机。
-            if (building.ConstructionState == BuildingConstructionState.Operational
-                && HomeValleyLayout.PowerSupplyProfile.ContainsKey(building.BuildingTypeId))
+            // FG4-ECO-04 修复轮（P2，B05）：只有此刻真在供电（可供电量 > 0）才涂“在工作”的绿；燃油耗尽停机的燃油发电机、夜里的太阳能涂灰（停机），
+            // 与悬停 / 面板“没有燃油 / 夜晚不发电”一致；头顶另有形状标记（缺料 / 待机）。
+            if (building.ConstructionState == BuildingConstructionState.Operational && IsSupplyBuilding(building))
             {
-                return cvd ? new Color(0f, 0.62f, 0.45f) : new Color(0.25f, 0.7f, 0.3f);
+                return IsSupplying(building)
+                    ? (cvd ? new Color(0f, 0.62f, 0.45f) : new Color(0.25f, 0.7f, 0.3f))
+                    : new Color(0.5f, 0.55f, 0.6f);
             }
             switch (building.PowerState)
             {

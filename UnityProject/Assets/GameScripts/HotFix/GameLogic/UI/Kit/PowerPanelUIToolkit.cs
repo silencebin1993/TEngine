@@ -20,6 +20,8 @@ namespace GameLogic.UI.Kit
     /// - 选中电网：读数（与悬停同一来源）+ 曲线（发电粗实线、需要虚线、实际用电细线、储能方块，按游戏时间每 power.sample_seconds 秒一个点）+ 用电建筑列表（按供电先后）。
     /// - 选一座用电建筑：改优先级（下拉框选中即生效，UI Toolkit 红线 8）、关停 / 重新启用、定位；“定位”电网跳到它的第一个节点；开关电力覆盖叠加层。
     /// 入口：Alt+G（可重绑）、经济 HUD 的“电网”按钮。模态（Esc / 关闭 / 点遮罩关闭）；打开时每 0.25 秒（真实时间）按内核版本号刷新，O(选中电网)。
+    /// FG4-ECO-04：曲线另画每一类发电（带形状标记的细线：颜色之外用标记形状区分，B15），图例写类别名；“储能站”一节——选一座储能站，
+    /// 开关充电、选放电对象（所有建筑 / 只给优先级 1～N / 不放电，下拉框选中即生效）、定位；点储能站 / 太阳能阵列打开本面板并选中它所在的电网（<see cref="OpenFor"/>）。
     /// </summary>
     public sealed class PowerPanelUIToolkit : UiKitPanelHost
     {
@@ -47,6 +49,15 @@ namespace GameLogic.UI.Kit
         private Label _curveTitle;
         private VisualElement _curve;
         private Label _curveLegend;
+        private Label _curveSources;
+        private VisualElement _storageBox;
+        private Label _storageTitle;
+        private Label _storages;
+        private DropdownField _storage;
+        private DropdownField _discharge;
+        private Button _charge;
+        private Button _locateStorage;
+        private readonly List<BuildingRecord> _storageRecords = new List<BuildingRecord>(4);
         private VisualElement _membersBox;
         private Label _membersTitle;
         private Label _members;
@@ -71,6 +82,9 @@ namespace GameLogic.UI.Kit
         public int SelectedSerial { get; private set; } = -1;
         /// <summary>选中的用电建筑。</summary>
         public string SelectedBuildingId { get; private set; }
+        /// <summary>FG4-ECO-04：选中的储能站。</summary>
+        public string SelectedStorageId { get; private set; }
+        private static string _pendingFocus;
 
         protected override string UxmlLocation => "PowerPanel";
         protected override int SortingOrder => Order;
@@ -91,6 +105,16 @@ namespace GameLogic.UI.Kit
         public Button LocateMemberButton => _locateMember;
         public Button OverlayButton => _overlay;
         public Button CloseButton => _close;
+        public string CurveSourcesText => _curveSources?.text ?? string.Empty;
+        public string StorageTitleText => _storageTitle?.text ?? string.Empty;
+        public string StoragesText => _storages?.text ?? string.Empty;
+        public DropdownField StorageField => _storage;
+        public DropdownField DischargeField => _discharge;
+        public Button ChargeButton => _charge;
+        public Button LocateStorageButton => _locateStorage;
+        public bool StorageBoxVisible => _storageBox != null && !_storageBox.ClassListContains("bn-hidden");
+        /// <summary>最近一次画曲线时画了几条分类发电线（自检读：各类发电分开画了）。</summary>
+        public int SourceLinesDrawn { get; private set; }
         /// <summary>最近一次画曲线时画了几个点（自检读：曲线真的按数据画出来了）。</summary>
         public int CurvePointsDrawn { get; private set; }
         public int CurveDrawCount { get; private set; }
@@ -131,6 +155,34 @@ namespace GameLogic.UI.Kit
             Instance?.SetOpen(false);
         }
 
+        /// <summary>FG4-ECO-04：打开面板并选中这座建筑所在的电网（储能站同时选中它；点储能站 / 太阳能阵列时用）。</summary>
+        public static void OpenFor(string buildingId)
+        {
+            _pendingFocus = buildingId;
+            Open();
+            Instance?.ApplyFocus();
+        }
+
+        private void ApplyFocus()
+        {
+            string id = _pendingFocus;
+            if (id == null || _root == null || !IsOpen)
+            {
+                return;
+            }
+            _pendingFocus = null;
+            CampaignState state = CampaignSession.Current;
+            if (state != null && HomeValleyPowerGrid.TryGetBuildingPower(state, id, out BuildingPowerInfo info) && info.Subnet >= 0)
+            {
+                SelectedSerial = HomeValleyPowerGrid.Kernel.Subnet(info.Subnet).Serial;
+                if (info.IsStorage)
+                {
+                    SelectedStorageId = id;
+                }
+            }
+            Refresh(force: true);
+        }
+
         public static void Toggle()
         {
             if (IsOpen)
@@ -150,6 +202,7 @@ namespace GameLogic.UI.Kit
             {
                 _pendingOpen = false;
                 Open();
+                ApplyFocus();
             }
         }
 
@@ -168,6 +221,14 @@ namespace GameLogic.UI.Kit
             _curveTitle = root.Q<Label>("PwCurveTitle");
             _curve = root.Q<VisualElement>("PwCurve");
             _curveLegend = root.Q<Label>("PwCurveLegend");
+            _curveSources = root.Q<Label>("PwCurveSources");
+            _storageBox = root.Q<VisualElement>("PwStorageBox");
+            _storageTitle = root.Q<Label>("PwStorageTitle");
+            _storages = root.Q<Label>("PwStorages");
+            _storage = root.Q<DropdownField>("PwStorage");
+            _discharge = root.Q<DropdownField>("PwDischarge");
+            _charge = root.Q<Button>("PwCharge");
+            _locateStorage = root.Q<Button>("PwLocateStorage");
             _membersBox = root.Q<VisualElement>("PwMembersBox");
             _membersTitle = root.Q<Label>("PwMembersTitle");
             _members = root.Q<Label>("PwMembers");
@@ -211,6 +272,25 @@ namespace GameLogic.UI.Kit
                 }
             });
             _shutdown.clicked += () => ToggleShutdown();
+            _storage.RegisterValueChangedCallback(evt =>
+            {
+                int i = _storage.choices.IndexOf(evt.newValue);
+                if (i >= 0 && i < _storageRecords.Count)
+                {
+                    SelectedStorageId = _storageRecords[i].BuildingId;
+                    Refresh(force: true);
+                }
+            });
+            _discharge.RegisterValueChangedCallback(evt =>
+            {
+                int i = _discharge.choices.IndexOf(evt.newValue);
+                if (i >= 0)
+                {
+                    SetDischargeOption(i);
+                }
+            });
+            _charge.clicked += () => ToggleCharge();
+            _locateStorage.clicked += () => LocateStorage();
             _locateGrid.clicked += () => LocateGrid();
             _locateMember.clicked += () => LocateMember();
             _overlay.clicked += () => ToggleOverlay();
@@ -365,17 +445,179 @@ namespace GameLogic.UI.Kit
                     : GameText.Format("power.panel.curve_empty", HomeValleyPowerGrid.SampleSeconds.ToString("0", CultureInfo.InvariantCulture));
                 _membersTitle.text = GameText.Format("power.panel.members", HomeValleyPowerGrid.SubnetName(SelectedSerial));
                 HomeValleyPowerGrid.ConsumersOf(subnet, _memberRecords);
+                _curveSources.text = SourcesLegend(k, SelectedSerial);
+                HomeValleyPowerGrid.StoragesOf(subnet, _storageRecords);
             }
             else
             {
+                _curveSources.text = string.Empty;
+                _storageRecords.Clear();
                 _detail.text = SelectedSerial == 0 ? GameText.Get("power.state.unconnected") : string.Empty;
                 _membersTitle.text = GameText.Format("power.panel.unconnected", unconnected.Count);
                 _memberRecords.Clear();
                 _memberRecords.AddRange(unconnected);
             }
             _curve.MarkDirtyRepaint();
+            RefreshStorages(state, subnet >= 0);
             RefreshMembers(state);
         }
+
+        // ── FG4-ECO-04：分类发电图例、储能站 ─────────────────────────────────────
+
+        /// <summary>每一类发电的形状标记（颜色之外的区分，B15）；按类别下标取。</summary>
+        private static readonly string[] SourceGlyphs = { "◆", "●", "▲", "■", "+", "▼", "◆", "●" };
+
+        private static readonly Color[] SourceColors =
+        {
+            new Color(0.95f, 0.85f, 0.35f), new Color(0.55f, 0.95f, 0.55f), new Color(0.95f, 0.45f, 0.3f), new Color(1f, 0.95f, 0.55f),
+            new Color(0.5f, 0.75f, 1f), new Color(0.85f, 0.55f, 0.95f), new Color(0.6f, 0.95f, 0.9f), new Color(0.8f, 0.8f, 0.8f),
+        };
+
+        /// <summary>“分类发电：◆ 归还核心 ● 发电机 ▲ 燃油发电机”（只列这个电网曲线里出现过的类别）。</summary>
+        private string SourcesLegend(PowerKernel k, int serial)
+        {
+            if (!k.TryGetCurve(serial, out PowerCurve c) || c.Count == 0)
+            {
+                return string.Empty;
+            }
+            var parts = new List<string>(4);
+            int n = Mathf.Min(HomeValleyPowerGrid.SourceClassCount, PowerKernel.MaxSourceClasses);
+            for (int cls = 0; cls < n; cls++)
+            {
+                if (ClassPresent(c, cls))
+                {
+                    parts.Add(SourceGlyphs[cls] + " " + HomeValleyPowerGrid.SourceClassName(cls));
+                }
+            }
+            return parts.Count == 0 ? string.Empty : GameText.Format("power.panel.curve_sources", string.Join("　", parts));
+        }
+
+        private static bool ClassPresent(PowerCurve c, int cls)
+        {
+            for (int i = 0; i < c.Count; i++)
+            {
+                if (c.GetClass(i, cls) > 0f)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private void RefreshStorages(CampaignState state, bool hasGrid)
+        {
+            _storageBox.EnableInClassList("bn-hidden", !hasGrid);
+            _locateStorage.text = GameText.Get("power.panel.storage_locate");
+            if (!hasGrid)
+            {
+                return;
+            }
+            _storageTitle.text = GameText.Format("power.panel.storage_title", HomeValleyPowerGrid.SubnetName(SelectedSerial), _storageRecords.Count);
+            _sb.Clear();
+            _choices.Clear();
+            foreach (BuildingRecord b in _storageRecords)
+            {
+                string label = MemberLabel(b);
+                _choices.Add(label);
+                HomeValleyPowerGrid.TryGetStorage(state, b.BuildingId, out double st, out double cap);
+                StorageSettings set = HomeValleyPowerGrid.GetStorageSettings(state, b.BuildingId);
+                if (_sb.Length > 0)
+                {
+                    _sb.Append('\n');
+                }
+                _sb.Append(GameText.Format("power.panel.storage_row", label, st.ToString("0.#", CultureInfo.InvariantCulture), cap.ToString("0.#", CultureInfo.InvariantCulture),
+                    HomeValleyPowerGrid.StorageStateText(state, b.BuildingId), HomeValleyPowerGrid.DescribeStorageSettings(set)));
+            }
+            _storages.text = _storageRecords.Count == 0 ? GameText.Get("power.panel.storage_none") : _sb.ToString();
+            if (SelectedStorageId == null || _storageRecords.FindIndex(r => r.BuildingId == SelectedStorageId) < 0)
+            {
+                SelectedStorageId = _storageRecords.Count > 0 ? _storageRecords[0].BuildingId : null;
+            }
+            DropdownChoices.Apply(_storage, new List<string>(_choices), GameText.Get("power.panel.storage_none"));
+            int si = _storageRecords.FindIndex(r => r.BuildingId == SelectedStorageId);
+            if (si >= 0)
+            {
+                _storage.SetValueWithoutNotify(_storage.choices[si]);
+            }
+            var opts = DischargeOptions();
+            DropdownChoices.Apply(_discharge, opts, opts[0]);
+            bool any = si >= 0;
+            _discharge.SetEnabled(any);
+            _charge.SetEnabled(any);
+            _locateStorage.SetEnabled(any);
+            StorageSettings cur = any ? HomeValleyPowerGrid.GetStorageSettings(state, SelectedStorageId) : default;
+            _discharge.SetValueWithoutNotify(_discharge.choices[Mathf.Clamp(OptionOf(cur), 0, _discharge.choices.Count - 1)]);
+            _charge.text = GameText.Get(cur.NoCharge ? "power.panel.charge_toggle_on" : "power.panel.charge_toggle_off");
+        }
+
+        /// <summary>放电对象下拉框：所有建筑、只给优先级 1～N（N 从大到小）、不放电。</summary>
+        private static List<string> DischargeOptions()
+        {
+            int max = HomeValleyPowerGrid.MaxReserveLevel;
+            var opts = new List<string>(max + 2) { HomeValleyPowerGrid.DischargeText(0) };
+            for (int r = max; r >= 1; r--)
+            {
+                opts.Add(HomeValleyPowerGrid.DischargeText(r));
+            }
+            opts.Add(HomeValleyPowerGrid.DischargeText(-1));
+            return opts;
+        }
+
+        private static int OptionOf(StorageSettings s)
+        {
+            int max = HomeValleyPowerGrid.MaxReserveLevel;
+            if (s.NoDischarge)
+            {
+                return max + 1;
+            }
+            return s.Reserve <= 0 ? 0 : max - s.Reserve + 1;
+        }
+
+        /// <summary>选放电对象（下拉框与自检同一入口）：0 = 所有建筑；1..N = 只给优先级 1～(N−i+1)；N+1 = 不放电。</summary>
+        public bool SetDischargeOption(int option)
+        {
+            CampaignState state = CampaignSession.Current;
+            if (state == null || SelectedStorageId == null)
+            {
+                return Report(false, GameText.Get("power.reason.not_found"));
+            }
+            int max = HomeValleyPowerGrid.MaxReserveLevel;
+            bool off = option > max;
+            int reserve = option <= 0 || off ? (off ? HomeValleyPowerGrid.GetStorageSettings(state, SelectedStorageId).Reserve : 0) : max - option + 1;
+            HomeValleyPowerGrid.GridResult r = HomeValleyPowerGrid.TrySetStorageSettings(state, SelectedStorageId, noDischarge: off, reserve: reserve);
+            string label = StorageLabel(state);
+            return Report(r.Success, r.Success ? GameText.Format("power.panel.storage_changed", label, HomeValleyPowerGrid.DischargeText(off ? -1 : reserve)) : StorageReason(r.FailureReason));
+        }
+
+        /// <summary>开关充电（按钮与自检同一入口）。</summary>
+        public bool ToggleCharge()
+        {
+            CampaignState state = CampaignSession.Current;
+            if (state == null || SelectedStorageId == null)
+            {
+                return Report(false, GameText.Get("power.reason.not_found"));
+            }
+            bool noCharge = !HomeValleyPowerGrid.GetStorageSettings(state, SelectedStorageId).NoCharge;
+            HomeValleyPowerGrid.GridResult r = HomeValleyPowerGrid.TrySetStorageSettings(state, SelectedStorageId, noCharge: noCharge);
+            return Report(r.Success, r.Success
+                ? GameText.Format("power.panel.storage_changed", StorageLabel(state), GameText.Get(noCharge ? "power.storage.charge_off" : "power.storage.charge_on"))
+                : StorageReason(r.FailureReason));
+        }
+
+        public bool LocateStorage()
+        {
+            BuildingRecord b = SelectedStorageId != null ? Campaign.Grid.HomeGridService.FindBuilding(CampaignSession.Current, SelectedStorageId) : null;
+            return b != null && WorldView.FlyTo(HomeValleyLayout.RegionId, b.Position);
+        }
+
+        private string StorageLabel(CampaignState state)
+        {
+            BuildingRecord b = Campaign.Grid.HomeGridService.FindBuilding(state, SelectedStorageId);
+            return b != null ? MemberLabel(b) : SelectedStorageId;
+        }
+
+        private static string StorageReason(string failure) =>
+            failure != null && failure.StartsWith("not-storage", System.StringComparison.Ordinal) ? GameText.Get("power.reason.not_storage") : ReasonText(failure);
 
         private void RefreshMembers(CampaignState state)
         {
@@ -580,6 +822,18 @@ namespace GameLogic.UI.Kit
             Line(p, c, 0, max, x0, step, r.height, new Color(0.35f, 0.85f, 0.4f), 2.5f, dashed: false);
             Line(p, c, 1, max, x0, step, r.height, new Color(0.95f, 0.6f, 0.2f), 1.5f, dashed: true);
             Line(p, c, 2, max, x0, step, r.height, new Color(0.35f, 0.8f, 0.95f), 1f, dashed: false);
+            // FG4-ECO-04：每一类发电一条细线 + 形状标记（与图例的 ◆●▲■ 对应），只画出现过的类别。
+            SourceLinesDrawn = 0;
+            int classes = Mathf.Min(HomeValleyPowerGrid.SourceClassCount, PowerKernel.MaxSourceClasses);
+            for (int cls = 0; cls < classes; cls++)
+            {
+                if (!ClassPresent(c, cls))
+                {
+                    continue;
+                }
+                ClassLine(p, c, cls, max, x0, step, r.height);
+                SourceLinesDrawn++;
+            }
             if (maxStored > 0f)
             {
                 p.fillColor = new Color(0.7f, 0.5f, 0.95f, 0.9f);
@@ -598,6 +852,94 @@ namespace GameLogic.UI.Kit
                 }
             }
             CurvePointsDrawn = c.Count;
+        }
+
+        private static void ClassLine(Painter2D p, PowerCurve c, int cls, float max, float x0, float step, float h)
+        {
+            Color color = SourceColors[cls % SourceColors.Length];
+            p.strokeColor = color;
+            p.fillColor = color;
+            p.lineWidth = 1f;
+            Vector2 prev = default;
+            for (int i = 0; i < c.Count; i++)
+            {
+                var pt = new Vector2(x0 + step * i, h - Mathf.Clamp01(c.GetClass(i, cls) / max) * h);
+                if (i > 0)
+                {
+                    p.BeginPath();
+                    p.MoveTo(prev);
+                    p.LineTo(pt);
+                    p.Stroke();
+                }
+                if (i % 6 == 0 || i == c.Count - 1)
+                {
+                    Marker(p, cls, pt);
+                }
+                prev = pt;
+            }
+        }
+
+        /// <summary>形状标记：菱形 / 圆（八边形）/ 三角 / 方块 / 十字 / 倒三角（第 7、8 类循环），与 <see cref="SourceGlyphs"/> 一一对应。</summary>
+        private static void Marker(Painter2D p, int cls, Vector2 at)
+        {
+            const float r = 3f;
+            p.BeginPath();
+            switch (cls % 6)
+            {
+                case 0:
+                    p.MoveTo(at + new Vector2(0, -r));
+                    p.LineTo(at + new Vector2(r, 0));
+                    p.LineTo(at + new Vector2(0, r));
+                    p.LineTo(at + new Vector2(-r, 0));
+                    break;
+                case 1:
+                    for (int k = 0; k < 8; k++)
+                    {
+                        float a = k * Mathf.PI / 4f;
+                        var v = at + new Vector2(Mathf.Cos(a) * r, Mathf.Sin(a) * r);
+                        if (k == 0)
+                        {
+                            p.MoveTo(v);
+                        }
+                        else
+                        {
+                            p.LineTo(v);
+                        }
+                    }
+                    break;
+                case 2:
+                    p.MoveTo(at + new Vector2(0, -r));
+                    p.LineTo(at + new Vector2(r, r));
+                    p.LineTo(at + new Vector2(-r, r));
+                    break;
+                case 3:
+                    p.MoveTo(at + new Vector2(-r, -r));
+                    p.LineTo(at + new Vector2(r, -r));
+                    p.LineTo(at + new Vector2(r, r));
+                    p.LineTo(at + new Vector2(-r, r));
+                    break;
+                case 4:
+                    p.MoveTo(at + new Vector2(-r, -1));
+                    p.LineTo(at + new Vector2(-1, -1));
+                    p.LineTo(at + new Vector2(-1, -r));
+                    p.LineTo(at + new Vector2(1, -r));
+                    p.LineTo(at + new Vector2(1, -1));
+                    p.LineTo(at + new Vector2(r, -1));
+                    p.LineTo(at + new Vector2(r, 1));
+                    p.LineTo(at + new Vector2(1, 1));
+                    p.LineTo(at + new Vector2(1, r));
+                    p.LineTo(at + new Vector2(-1, r));
+                    p.LineTo(at + new Vector2(-1, 1));
+                    p.LineTo(at + new Vector2(-r, 1));
+                    break;
+                default:
+                    p.MoveTo(at + new Vector2(-r, -r));
+                    p.LineTo(at + new Vector2(r, -r));
+                    p.LineTo(at + new Vector2(0, r));
+                    break;
+            }
+            p.ClosePath();
+            p.Fill();
         }
 
         private static void Line(Painter2D p, PowerCurve c, int which, float max, float x0, float step, float h, Color color, float width, bool dashed)

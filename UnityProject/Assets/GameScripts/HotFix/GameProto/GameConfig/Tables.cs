@@ -183,6 +183,10 @@ public partial class Tables
     /// </summary>
     public fg.TbPowerNode TbPowerNode {get; }
     /// <summary>
+    /// 发电类别
+    /// </summary>
+    public fg.TbPowerSource TbPowerSource {get; }
+    /// <summary>
     /// 生产参数
     /// </summary>
     public fg.TbProducer TbProducer {get; }
@@ -328,6 +332,7 @@ public partial class Tables
         TbNotifyTier = new fg.TbNotifyTier(loader("fg_tbnotifytier"));
         TbNotifyType = new fg.TbNotifyType(loader("fg_tbnotifytype"));
         TbPowerNode = new fg.TbPowerNode(loader("fg_tbpowernode"));
+        TbPowerSource = new fg.TbPowerSource(loader("fg_tbpowersource"));
         TbProducer = new fg.TbProducer(loader("fg_tbproducer"));
         TbReaction = new fg.TbReaction(loader("fg_tbreaction"));
         TbRecipe = new fg.TbRecipe(loader("fg_tbrecipe"));
@@ -401,6 +406,7 @@ public partial class Tables
         TbNotifyTier.ResolveRef(this);
         TbNotifyType.ResolveRef(this);
         TbPowerNode.ResolveRef(this);
+        TbPowerSource.ResolveRef(this);
         TbProducer.ResolveRef(this);
         TbReaction.ResolveRef(this);
         TbRecipe.ResolveRef(this);

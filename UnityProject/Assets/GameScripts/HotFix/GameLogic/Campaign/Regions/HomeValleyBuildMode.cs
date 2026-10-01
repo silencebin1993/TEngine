@@ -870,6 +870,14 @@ namespace GameLogic.Campaign.Regions
                 ProductionPanelUIToolkit.Open(buildingId);
                 return true;
             }
+            // FG4-ECO-04：储能站 / 太阳能阵列点一下打开电网面板，选中它所在的电网（储能站同时选中它：充放电设置在那里）。
+            if ((HomeValleyPowerGrid.IsStorageType(b.BuildingTypeId) || HomeValleyPowerGrid.IsSolarType(b.BuildingTypeId)) && !HomeGridService.IsRelocationGhost(b)
+                && (b.ConstructionState == BuildingConstructionState.Operational || b.ConstructionState == BuildingConstructionState.Damaged
+                    || b.ConstructionState == BuildingConstructionState.Disabled))
+            {
+                PowerPanelUIToolkit.OpenFor(buildingId);
+                return true;
+            }
             if (GridContent.PortsOf(b.BuildingTypeId).Count == 0)
             {
                 return false;
@@ -1122,6 +1130,11 @@ namespace GameLogic.Campaign.Regions
                 ? GameText.Format("ui.build.box_result", HomeGridService.LastBatchMarked, HomeGridService.LastBatchCancelled, HomeGridService.LastBatchBelts,
                     plan.Refused.Count, plan.Refused[0].Value.Describe())
                 : GameText.Format("ui.build.box_result_ok", HomeGridService.LastBatchMarked, HomeGridService.LastBatchCancelled, HomeGridService.LastBatchBelts);
+            if (HomeGridService.LastPipesRefused > 0)
+            {
+                // FG4-ECO-04 修复轮（P1）：框里有地下口拆了会接错流体，留下没拆。
+                text += GameText.Format("ui.build.pipes_refused_suffix", HomeGridService.LastPipesRefused, HomeGridService.LastPipeRefusal.Describe());
+            }
             SetStatus(text, false);
             Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.CommandAck, StatusText);
             if (HasHover && state != null)
@@ -1565,6 +1578,12 @@ namespace GameLogic.Campaign.Regions
                     SetStatus(GameText.Format("ui.build.pipe_planned", PipeNetworkService.PieceName(HomeGridService.LastPlanPipe, HomeGridService.LastPlanTier),
                         HomeGridService.LastBeltCount, HomeGridService.LastBeltScrap), false);
                     Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.CommandAck, StatusText);
+                    break;
+                case GridOpResult.Kind.BeltsRemoved when HomeGridService.LastPipesRefused > 0:
+                    // FG4-ECO-04 修复轮（P1）：有地下口因“拆了会接错流体”留下没拆——写明几口、哪两种流体（B06 / B07）。
+                    SetStatus(GameText.Format("ui.build.pipes_removed_refused", HomeGridService.LastBeltCount, HomeGridService.LastBeltScrap,
+                        HomeGridService.LastPipesRefused, HomeGridService.LastPipeRefusal.Describe()), true);
+                    Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Denied, StatusText);
                     break;
                 case GridOpResult.Kind.BeltsRemoved when HomeGridService.LastPipesRemoved > 0 && HomeGridService.LastPipesRemoved == HomeGridService.LastBeltCount:
                     SetStatus(HomeGridService.LastPipeDrainedMl > 0

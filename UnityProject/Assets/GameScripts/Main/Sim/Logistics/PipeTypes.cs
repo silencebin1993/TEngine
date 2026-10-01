@@ -38,13 +38,16 @@ namespace BinGames.Sim.Logistics
         public const int FormatVersion = 1;
     }
 
-    /// <summary>管线层上的件：管线、泵、储罐、阀门（都占一格）。</summary>
+    /// <summary>管线层上的件：管线、泵、储罐、阀门、地下管线口（都占一格）。</summary>
     public enum PipePieceKind : byte
     {
         Pipe = 0,
         Pump = 1,
         Tank = 2,
         Valve = 3,
+        /// <summary>FG4-ECO-04（FG-GAP-082）地下管线口：只在地面一侧（方向的反面）有接口；朝方向那一侧在地下，与这个方向上跨度以内、
+        /// 第一件地下管线口相连（那一件要朝回来）——两口之间的格子随便放传送带、管线、建筑，互不影响。分 T1 / T2（跨度与吞吐按等级）。</summary>
+        Underground = 4,
     }
 
     /// <summary>FGR-LOG-043 储罐：双向（缓冲：有多余就存、不够就放）/ 只进（像消费者一样按优先级灌）/ 只出（只往外放）。</summary>
@@ -107,6 +110,9 @@ namespace BinGames.Sim.Logistics
         public int TankLiters;
         public int TankLitersPerMinute;
         public int ValveLitersPerMinute;
+        /// <summary>FG4-ECO-04（FG-GAP-082）：地下管线 T1 / T2 最多跨几格（两口之间的格数）。0 = 用默认（T1 8、T2 12）。</summary>
+        public int UndergroundSpanT1;
+        public int UndergroundSpanT2;
 
         public static PipeConfig Default => new PipeConfig
         {
@@ -117,6 +123,8 @@ namespace BinGames.Sim.Logistics
             TankLiters = 5000,
             TankLitersPerMinute = 1200,
             ValveLitersPerMinute = 1200,
+            UndergroundSpanT1 = 8,
+            UndergroundSpanT2 = 12,
         };
 
         public bool IsValid(out string reason)
@@ -136,6 +144,11 @@ namespace BinGames.Sim.Logistics
                 reason = "泵 / 储罐 / 阀门的数值须 >= 1";
                 return false;
             }
+            if (UndergroundSpanT1 < 0 || UndergroundSpanT2 < 0 || UndergroundSpanT1 > 64 || UndergroundSpanT2 > 64)
+            {
+                reason = "地下管线跨度须在 0～64（0 = 默认）";
+                return false;
+            }
             if ((long)Math.Max(Math.Max(LitersPerMinuteT2, PumpLitersPerMinute), Math.Max(TankLitersPerMinute, ValveLitersPerMinute)) > 10_000_000L)
             {
                 reason = "速率过大";
@@ -146,6 +159,9 @@ namespace BinGames.Sim.Logistics
         }
 
         public int TierLitersPerMinute(int tier) => tier <= 0 ? LitersPerMinuteT1 : LitersPerMinuteT2;
+
+        /// <summary>地下管线这一等级最多跨几格（两口之间的格数）。</summary>
+        public int UndergroundSpan(int tier) => tier <= 0 ? (UndergroundSpanT1 > 0 ? UndergroundSpanT1 : 8) : (UndergroundSpanT2 > 0 ? UndergroundSpanT2 : 12);
     }
 
     /// <summary>一格管线层上的件（悬停、面板、自检读）。</summary>
@@ -155,8 +171,12 @@ namespace BinGames.Sim.Logistics
         public int Y;
         public PipePieceKind Kind;
         public int Tier;
-        /// <summary>阀门：流动方向（0 北 1 东 2 南 3 西，与传送带同一编码）；其余件为 0。</summary>
+        /// <summary>阀门：流动方向；地下管线口：朝地下的方向（0 北 1 东 2 南 3 西，与传送带同一编码）；其余件为 0。</summary>
         public int Dir;
+        /// <summary>FG4-ECO-04（FG-GAP-082）地下管线口：配对的另一口（没配对 = false）。</summary>
+        public bool UndergroundLinked;
+        public int PartnerX;
+        public int PartnerY;
         /// <summary>这一格的流体（= 所在网络的流体；泵 = 水源的流体；阀门 = 缓冲里的流体）。</summary>
         public int Fluid;
         /// <summary>所在网络（阀门不属于任何网络，为 -1）。</summary>

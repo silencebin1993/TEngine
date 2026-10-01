@@ -221,7 +221,7 @@ namespace GameLogic.Campaign.Grid
                 }
                 if (pipeLayer)
                 {
-                    var pk = (PipePieceKind)Math.Max(0, Math.Min(3, p.PipePiece - 1));
+                    var pk = (PipePieceKind)Math.Max(0, Math.Min((int)PipePieceKind.Underground, p.PipePiece - 1));
                     string pid = PlanEntries.ToolIdForPipe(pk, p.Tier);
                     if (pid != null)
                     {
@@ -521,6 +521,47 @@ namespace GameLogic.Campaign.Grid
             }
         }
 
+        private const int TunnelNone = 0, TunnelPaste = 1, TunnelBlocked = 2, TunnelExisting = 3;
+
+        /// <summary>粘贴件的等级（工具表里的等级，夹到管线等级范围）。</summary>
+        private static int PasteTier(PasteItem it)
+        {
+            PlanEntries.KindOf(it.Id, out BuildTool tool);
+            return Math.Max(0, Math.Min(PipeConst.TierCount - 1, tool?.Tier ?? 0));
+        }
+
+        /// <summary>
+        /// 粘贴的地下管线口 <paramref name="k"/> 沿朝向、在自己的跨度以内先碰到哪一口：这次粘贴里朝回来且对方也够得着 = 配对（<see cref="TunnelPaste"/>，<paramref name="mate"/>）；
+        /// 这次粘贴里的其它口 = 被挡住（<see cref="TunnelBlocked"/>）；已有的地下口 = 交给内核按已有网络查（<see cref="TunnelExisting"/>）；都没有 = <see cref="TunnelNone"/>。O(跨度)。
+        /// </summary>
+        private static int PasteTunnel(PastePlan plan, Dictionary<long, int> byCell, int k, out int mate)
+        {
+            mate = -1;
+            PasteItem it = plan.Items[k];
+            int dir = it.Rot & 3;
+            int span = PipeNetworkService.UndergroundSpan(PasteTier(it));
+            int dx = BeltDirs.Dx(dir), dy = BeltDirs.Dy(dir);
+            for (int step = 1; step <= span + 1; step++)
+            {
+                int x = it.Cell.X + dx * step, y = it.Cell.Y + dy * step;
+                if (byCell.TryGetValue(Key(x, y), out int nb) && plan.Items[nb].Kind == PlanEntryKind.PipeUnderground)
+                {
+                    PasteItem other = plan.Items[nb];
+                    if ((other.Rot & 3) == BeltDirs.Opposite(dir) && step <= PipeNetworkService.UndergroundSpan(PasteTier(other)) + 1)
+                    {
+                        mate = nb;
+                        return TunnelPaste;
+                    }
+                    return TunnelBlocked;
+                }
+                if (PipeNetworkService.TryGetPiece(new GridCell(x, y), out PipePieceKind pk, out _) && pk == PipePieceKind.Underground)
+                {
+                    return TunnelExisting;
+                }
+            }
+            return TunnelNone;
+        }
+
         /// <summary>
         /// 流体规则（FGR-LOG-040）：这次粘贴里互相挨着的管线 / 泵 / 储罐连成一组，一组加上四周已有网络与泵的来源最多一种流体，否则这一组全部标“会接错流体”；
         /// 阀门单独查（两侧流体相同或有一侧没有、不能直接接另一个阀门）。
@@ -563,6 +604,11 @@ namespace GameLogic.Campaign.Grid
                             queue.Enqueue(nb);
                         }
                     }
+                    // FG4-ECO-04 修复轮（P2）：这次粘贴里配成一对的两个地下管线口属于同一组（地下段把两头接成一个网络）。
+                    if (plan.Items[k].Kind == PlanEntryKind.PipeUnderground && PasteTunnel(plan, byCell, k, out int mate) == TunnelPaste && visited.Add(mate))
+                    {
+                        queue.Enqueue(mate);
+                    }
                 }
                 FluidScratch.Clear();
                 foreach (int k in group)
@@ -576,7 +622,11 @@ namespace GameLogic.Campaign.Grid
                             FluidScratch.Add(src);
                         }
                     }
-                    PipeNetworkService.AddAdjacentFluids(it.Cell, PlanEntries.PipeKindOf(it.Kind), 0, FluidScratch);
+                    // FG4-ECO-04：地下管线口按它的朝向（地面一侧 + 地下配对口）查流体、按它自己的等级算跨度；地下那一侧先碰到的是这次粘贴里的口时
+                    // （配对 = 已并进同一组；同向 = 被挡住），不再按已有网络查地下那一侧（修复轮 P2：之前一对粘贴口会分成两组、T2 按 T1 跨度找）。
+                    bool under = it.Kind == PlanEntryKind.PipeUnderground;
+                    bool tunnel = !under || PasteTunnel(plan, byCell, k, out _) == TunnelExisting;
+                    PipeNetworkService.AddAdjacentFluids(it.Cell, PlanEntries.PipeKindOf(it.Kind), under ? it.Rot : 0, FluidScratch, under ? PasteTier(it) : 0, tunnel);
                 }
                 if (FluidScratch.Count > 1)
                 {
@@ -695,7 +745,8 @@ namespace GameLogic.Campaign.Grid
                 var path = new BeltPathPlan
                 {
                     ToolId = first.Id,
-                    Tier = pipe ? (first.Kind == PlanEntryKind.Pipe ? Math.Max(0, Math.Min(PipeConst.TierCount - 1, tool.Tier)) : 0) : tool.Tier,
+                    // 修复轮：地下管线口也按工具等级粘贴（之前 T2 地下口会被粘成 T1，跨度变短、造价却按 T2 扣）。
+                    Tier = pipe ? (first.Kind == PlanEntryKind.Pipe || first.Kind == PlanEntryKind.PipeUnderground ? Math.Max(0, Math.Min(PipeConst.TierCount - 1, tool.Tier)) : 0) : tool.Tier,
                     ScrapPerCell = tool.ScrapPerCell,
                     IsPipe = pipe,
                     Pipe = PlanEntries.PipeKindOf(first.Kind),

@@ -97,11 +97,11 @@ public sealed partial class FirmwareKind : Luban.BeanBase
     /// </summary>
     public readonly int Load;
     /// <summary>
-    /// 能耗:每发耗电(机器电池;FG2-FW-01 起进双态预览与蓝图版本,战斗内耗电见 DEBT-FG2FW01-02)
+    /// 能耗:数据层保留(蓝图版本照记;FG4-ECO-04 起不产生战斗效果、界面不显示,DEBT-FG2FW01-02)
     /// </summary>
     public readonly int Power;
     /// <summary>
-    /// 热量:每发积热(热量预算与重炮内核积热都读它;熔穿过载时过载这一项由反应的 +25 取代)
+    /// 热量:每发积热(热量预算与重炮内核积热都读它;熔穿过载时过载这一项由反应的 +25 取代;原本只有耗电的固件按 1 电=1 热折算,FG4-ECO-04)
     /// </summary>
     public readonly float Heat;
     /// <summary>

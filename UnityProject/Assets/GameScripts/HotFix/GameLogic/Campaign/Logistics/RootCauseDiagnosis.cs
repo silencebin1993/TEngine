@@ -68,6 +68,10 @@ namespace GameLogic.Campaign.Logistics
         ProdUpstream,
         /// <summary>输入传送带上没有能供应这种物品的建筑 / 仓库输出口。</summary>
         ProdNoSupplier,
+        /// <summary>FG4-ECO-04：缺电的根源是这个电网里的燃油发电机没有燃油。</summary>
+        SupplyNoFuel,
+        /// <summary>FG4-ECO-04：缺电的根源是这个电网里的太阳能光照不足（夜晚 / 沙暴）。</summary>
+        SupplyDark,
     }
 
     /// <summary>原因链里的一步：文字、能不能点、点了镜头去哪。</summary>
@@ -606,7 +610,17 @@ namespace GameLogic.Campaign.Logistics
             // 一次诊断里每个电网只找一遍（O(建筑数) 建表——分帧诊断时建表本身也分帧，见 Advance——之后每座缺电建筑 O(1)）。
             EnsureDownMap(p);
             p.Down.TryGetValue(info.Subnet, out BuildingRecord down);
-            if (down != null)
+            if (down != null && down.ConstructionState == BuildingConstructionState.Operational)
+            {
+                // FG4-ECO-04：运转中的发电建筑出不了力——燃油发电机没油 / 太阳能光照不足。
+                string gen = HomeGridService.DisplayName(down.BuildingTypeId);
+                bool fuel = HomeValleyPowerGrid.IsFuelGeneratorType(down.BuildingTypeId);
+                Step(chain, fuel ? DiagCode.SupplyNoFuel : DiagCode.SupplyDark,
+                    fuel ? GameText.Format("diag.step.supply_no_fuel", gen, gridName)
+                         : GameText.Format("diag.step.supply_dark", gen, gridName, HomeValleyPowerGrid.Num(HomeValleyPowerGrid.AvailableSupplyOf(state, down.BuildingId))),
+                    down.Position, down.BuildingId);
+            }
+            else if (down != null)
             {
                 string gen = HomeGridService.DisplayName(down.BuildingTypeId);
                 Step(chain, down.ConstructionState == BuildingConstructionState.Damaged ? DiagCode.SupplyDamaged : DiagCode.SupplyDisabled,
@@ -986,15 +1000,41 @@ namespace GameLogic.Campaign.Logistics
         private static void AddDown(Pass p, BuildingRecord g)
         {
             if (g == null || g.RegionId != HomeValleyLayout.RegionId || !HomeValleyLayout.PowerSupplyProfile.ContainsKey(g.BuildingTypeId)
-                || (g.ConstructionState != BuildingConstructionState.Damaged && g.ConstructionState != BuildingConstructionState.Disabled)
                 || !HomeValleyPowerGrid.TryGetBuildingPower(p.State, g.BuildingId, out BuildingPowerInfo gi) || gi.Subnet < 0)
             {
                 return;
             }
-            if (!p.Down.TryGetValue(gi.Subnet, out BuildingRecord have) || string.CompareOrdinal(g.BuildingId, have.BuildingId) < 0)
+            // 发电建筑少发的电：受损 / 关停 = 满额全丢；FG4-ECO-04：运转中但出不了满额的（燃油发电机没油、太阳能光照不足）= 满额 − 现在能发的。
+            // 每个电网取少发最多的那一座当根源（补上它最能缓解缺口）；一样多时按建筑编号取第一座（稳定）。
+            float lost = Lost(p, g);
+            if (lost <= 0.01f)
+            {
+                return;
+            }
+            if (!p.Down.TryGetValue(gi.Subnet, out BuildingRecord have))
+            {
+                p.Down[gi.Subnet] = g;
+                return;
+            }
+            float haveLost = Lost(p, have);
+            if (lost > haveLost + 0.01f || (Math.Abs(lost - haveLost) <= 0.01f && string.CompareOrdinal(g.BuildingId, have.BuildingId) < 0))
             {
                 p.Down[gi.Subnet] = g;
             }
+        }
+
+        /// <summary>这座发电建筑少发的电（满额 − 现在能发的；受损 / 关停 = 满额；运转中的燃油没油 / 太阳能光照不足按电网实际系数算）。</summary>
+        private static float Lost(Pass p, BuildingRecord g)
+        {
+            if (!HomeValleyLayout.PowerSupplyProfile.TryGetValue(g.BuildingTypeId, out float full))
+            {
+                return 0f;
+            }
+            if (g.ConstructionState == BuildingConstructionState.Damaged || g.ConstructionState == BuildingConstructionState.Disabled)
+            {
+                return full;
+            }
+            return g.ConstructionState == BuildingConstructionState.Operational ? Math.Max(0f, full - HomeValleyPowerGrid.AvailableSupplyOf(p.State, g.BuildingId)) : 0f;
         }
 
         private static long CellKey(int x, int y) => ((long)x << 32) ^ (uint)y;

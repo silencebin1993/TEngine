@@ -306,7 +306,8 @@ namespace GameLogic.EditorTools
                           && d.AiPermission == (core ? MechanicalContentAiPermission.PlayerOnly : MechanicalContentAiPermission.PlayerAndAllyAi)
                           && d.SourceDetail == GameText.Get(r.AcquireKey) && d.LockedHintText == d.SourceDetail && string.IsNullOrEmpty(d.SfxId)
                           && d.Source == ExpectedSource(r.Source) && !GameText.ContainsMarker(d.DisplayName + d.Description + d.SourceDetail + d.ValuesSummary)
-                          && d.ValuesSummary.Contains(r.Power.ToString(CultureInfo.InvariantCulture));
+                          // FG4-ECO-04：数值摘要写每发积热、不再写每发耗电（能耗只在数据层）。
+                          && d.ValuesSummary.Contains(r.Heat.ToString("0.#", CultureInfo.InvariantCulture)) && !d.ValuesSummary.Contains("耗电");
                 if (!ok) problems.Add(r.Id);
             }
             Expect(FirmwareCatalog.All.Count == FirmwareCatalog.ExpectedCount && problems.Count == 0
@@ -459,7 +460,7 @@ namespace GameLogic.EditorTools
 
         private static void CheckHeatAndPower()
         {
-            Line("  · F. 热量与能耗（FGR-FW-001）：预览 = 蓝图版本 = 表；Demo 数字不变；重炮内核每发积热 = 热量预算（IC-REQ-010）；双态预览有能耗行与差异（FG-GAP-028）");
+            Line("  · F. 热量与能耗（FGR-FW-001）：预览 = 蓝图版本 = 表；Demo 数字不变；重炮内核每发积热 = 热量预算（IC-REQ-010）；FG4-ECO-04 起双态预览只比热量（能耗只在数据层）");
             CampaignState s = NewState(8805, unlockAll: true);
             var bad = new List<string>();
             foreach (FwRow r in FirmwareKinds.Rows.Where(x => x.Kind != "core" && x.Id != FirmwareCatalog.FwArmorPierceId))
@@ -473,7 +474,7 @@ namespace GameLogic.EditorTools
                     bad.Add($"{r.Id}（热 {p.HeatBudget}/{r.Heat} 电 {p.PowerCost}/{v.PowerCost}/{r.Power}）");
                 }
             }
-            Expect(bad.Count == 0, $"37 条常规固件装在连射器上：预览热量预算、每发耗电与蓝图版本落盘的 HeatBudget / PowerCost 都等于表里的 heat / power{Detail(bad)}");
+            Expect(bad.Count == 0, $"37 条常规固件装在连射器上：预览热量预算与蓝图版本落盘的 HeatBudget 等于表里的 heat；能耗 PowerCost 只留在数据层（= 表里的 power，FG4-ECO-04 起不显示、不进战斗）{Detail(bad)}");
 
             float gun0 = BlueprintCircuitCompiler.CompilePreview(GunBoard(null)).HeatBudget;
             BlueprintCircuitBoard gunUp = GunBoard(null);
@@ -498,15 +499,17 @@ namespace GameLogic.EditorTools
                    && Mathf.Approximately(cm.HeatBudget, 69f) && Mathf.Approximately(w2.HeatPerShot + w2.OverloadExtraHeat, 69f) && Mathf.Approximately(shotMelt, 69f),
                 $"重炮 + 冷却液：预览 {cp.HeatBudget}、内核参数 {w1.HeatPerShot}、真实开火积热 {shot}；再接入过载（熔穿过载）：预览 {cm.HeatBudget}、真实开火 {shotMelt}——预览与实战同一个数");
 
-            // 双态预览：插入有能耗的固件时两栏各有“每发耗电”行，差异里有耗电变化；插入 0 能耗固件时没有耗电差异。
+            // FG4-ECO-04（DEBT-FG2FW01-02 范围变更：战斗中不扣电池）：双态预览只比热量——插入原本只有耗电的电弧（耗电 3 折算成每发积热 3）→
+            // 两栏热量行“热量预算 0.0 / 3.0”、差异只有热量变化，没有任何“耗电”行或差异；插入冷却液（积热 4）同样只有热量差异。
             UplinkDualPreview dual = UplinkCompiler.CompileDual(gunUp, new[] { "fw_arcchain" });
             UplinkDualPreview zero = UplinkCompiler.CompileDual(gunUp, new[] { "fw_coolant" });
-            string powerLineAi = GameText.Format("circuit.uplink.line.heat_power", "0.0", "0");
-            string powerLineUp = GameText.Format("circuit.uplink.line.heat_power", "0.0", "3");
-            Expect(dual.AiLines.Any(l => l.Text == powerLineAi) && dual.UplinkedLines.Any(l => l.Text == powerLineUp)
-                   && dual.Diff.Any(d => d.Kind == UplinkDiffKind.PowerChanged && d.Text == GameText.Format("circuit.uplink.diff.power", "0", "3"))
+            string heatAi = GameText.Format("circuit.uplink.line.heat", "0.0");
+            string heatUp = GameText.Format("circuit.uplink.line.heat", "3.0");
+            bool noPowerText = dual.AiLines.Concat(dual.UplinkedLines).All(l => !l.Text.Contains("耗电")) && dual.Diff.All(d => !d.Text.Contains("耗电"));
+            Expect(dual.AiLines.Any(l => l.Text == heatAi) && dual.UplinkedLines.Any(l => l.Text == heatUp) && noPowerText
+                   && !dual.Diff.Any(d => d.Kind == UplinkDiffKind.PowerChanged) && dual.Diff.Any(d => d.Kind == UplinkDiffKind.HeatChanged)
                    && !zero.Diff.Any(d => d.Kind == UplinkDiffKind.PowerChanged) && zero.Diff.Any(d => d.Kind == UplinkDiffKind.HeatChanged),
-                "双态预览（FG-GAP-028）：插入电弧 → 两栏热量行“热量预算 0.0 · 每发耗电 0 / 3”、差异“耗电 0 → 3”；插入冷却液（耗电 0、积热 4）→ 只有热量差异");
+                "双态预览只比热量（FG4-ECO-04）：插入电弧 → 两栏热量行“热量预算 0.0 / 3.0”、差异只有热量，没有“每发耗电”或“耗电 a → b”；插入冷却液（积热 4）→ 只有热量差异");
             _ = s;
         }
 

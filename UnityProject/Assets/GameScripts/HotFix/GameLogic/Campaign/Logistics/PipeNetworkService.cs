@@ -105,6 +105,9 @@ namespace GameLogic.Campaign.Logistics
                 TankLiters = TuningInt("logistics.pipe.tank_liters", 5000),
                 TankLitersPerMinute = TuningInt("logistics.pipe.tank_lpm", 1200),
                 ValveLitersPerMinute = TuningInt("logistics.pipe.valve_lpm", 1200),
+                // FG4-ECO-04（FG-GAP-082）：地下管线 T1 / T2 的跨度（两口之间最多几格）。
+                UndergroundSpanT1 = TuningInt("logistics.pipe.underground_span_t1", 8),
+                UndergroundSpanT2 = TuningInt("logistics.pipe.underground_span_t2", 12),
             };
             if (!c.IsValid(out string why))
             {
@@ -504,8 +507,24 @@ namespace GameLogic.Campaign.Logistics
                 case PipePieceKind.Pump: return GameText.Get("logistics.pipe.pump");
                 case PipePieceKind.Tank: return GameText.Get("logistics.pipe.tank");
                 case PipePieceKind.Valve: return GameText.Get("logistics.pipe.valve");
+                case PipePieceKind.Underground: return GameText.Get(tier <= 0 ? "logistics.pipe.underground_t1" : "logistics.pipe.underground_t2");
                 default: return GameText.Get(tier <= 0 ? "logistics.pipe.t1" : "logistics.pipe.t2");
             }
+        }
+
+        /// <summary>FG4-ECO-04（FG-GAP-082）：地下管线这一等级最多跨几格。</summary>
+        public static int UndergroundSpan(int tier) => IsRunning ? _kernel.Config.UndergroundSpan(tier) : ReadConfig().UndergroundSpan(tier);
+
+        /// <summary>FG4-ECO-04（FG-GAP-082）：放在 <paramref name="cell"/>、朝 <paramref name="dir"/> 的地下管线口会和哪一口配对（放置预览，不改状态）。</summary>
+        public static bool TryPreviewUnderground(GridCell cell, int dir, int tier, out GridCell partner)
+        {
+            partner = default;
+            if (!IsRunning || !_kernel.TryPreviewUnderground(cell.X, cell.Y, dir, tier, out int px, out int py))
+            {
+                return false;
+            }
+            partner = new GridCell(px, py);
+            return true;
         }
 
         /// <summary>建造菜单工具种类 → 管线件（认不出来返回 false）。</summary>
@@ -524,6 +543,9 @@ namespace GameLogic.Campaign.Logistics
                     return true;
                 case "valve":
                     kind = PipePieceKind.Valve;
+                    return true;
+                case "pipe_underground":
+                    kind = PipePieceKind.Underground;
                     return true;
                 default:
                     kind = PipePieceKind.Pipe;
@@ -581,11 +603,11 @@ namespace GameLogic.Campaign.Logistics
         }
 
         /// <summary>规划预览用：(cell) 放这件会不会接错流体（不改状态）。<paramref name="fluids"/> 累计一段路径会相连的各网络流体。</summary>
-        public static void AddAdjacentFluids(GridCell cell, PipePieceKind kind, int dir, List<int> fluids)
+        public static void AddAdjacentFluids(GridCell cell, PipePieceKind kind, int dir, List<int> fluids, int tier = 0, bool tunnel = true)
         {
             if (IsRunning)
             {
-                _kernel.AddAdjacentFluids(cell.X, cell.Y, kind, dir, fluids);
+                _kernel.AddAdjacentFluids(cell.X, cell.Y, kind, dir, fluids, tier, tunnel);
             }
         }
 
@@ -596,13 +618,21 @@ namespace GameLogic.Campaign.Logistics
             return IsRunning ? _kernel.CheckPlace(cell.X, cell.Y, PipePieceKind.Valve, 0, dir, 0, out fa, out fb) : PipeResult.Ok;
         }
 
-        /// <summary>拆一件：储罐存量 / 阀门缓冲随之排空（<paramref name="lostMl"/>）。</summary>
+        /// <summary>
+        /// 拆一件：储罐存量 / 阀门缓冲随之排空（<paramref name="lostMl"/>）。
+        /// FG4-ECO-04 修复轮（P1）：拆掉地下管线口会让被它隔开的两口重新配对、把两种流体接在一起时拒绝，原因写明是哪两种流体（FGR-LOG-047）。
+        /// </summary>
         public static PipeOpResult TryRemove(CampaignState state, GridCell cell, out long lostMl)
         {
             lostMl = 0;
             if (!CanEdit(state, out PipeOpResult refuse))
             {
                 return refuse;
+            }
+            if (_kernel.CheckRemove(cell.X, cell.Y, out int fa, out int fb) == PipeResult.FluidConflict)
+            {
+                GuidanceHooks.Raise(GuidanceHooks.LogisticsPipeFirstFluidConflict);
+                return PipeOpResult.Reason(PipeResult.FluidConflict, "logistics.pipe.reason.remove_relinks_conflict", FluidName(fa), FluidName(fb));
             }
             PipeResult r = _kernel.Remove(cell.X, cell.Y, out lostMl);
             if (r == PipeResult.Ok)
@@ -832,6 +862,13 @@ namespace GameLogic.Campaign.Logistics
                     {
                         sb.Append('\n').Append(GameText.Get("logistics.pipe.hover.valve_mismatch"));
                     }
+                    break;
+                case PipePieceKind.Underground:
+                    // FG4-ECO-04（FG-GAP-082）：地下管线口——朝哪边、连到哪一口（没配对写明怎么配）。
+                    sb.Append(c.UndergroundLinked
+                        ? GameText.Format("logistics.pipe.hover.underground", GameText.Get(GridMath.DirTextKey((GridDir)c.Dir)), c.PartnerX, c.PartnerY,
+                            Math.Abs(c.PartnerX - c.X) + Math.Abs(c.PartnerY - c.Y) - 1)
+                        : GameText.Format("logistics.pipe.hover.underground_unlinked", GameText.Get(GridMath.DirTextKey((GridDir)c.Dir)), UndergroundSpan(c.Tier)));
                     break;
             }
         }

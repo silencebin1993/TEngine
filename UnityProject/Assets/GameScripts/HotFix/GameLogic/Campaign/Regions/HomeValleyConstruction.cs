@@ -743,7 +743,7 @@ namespace GameLogic.Campaign.Regions
             HomeGridMap map = HomeGridService.MapFor(state);
             ushort marker = map.GetPipe(cell);
             map.SetPipe(cell, 0);
-            var kind = (PipePieceKind)Math.Max(0, Math.Min(3, p.PipePiece - 1));
+            var kind = (PipePieceKind)Math.Max(0, Math.Min((int)PipePieceKind.Underground, p.PipePiece - 1));
             PipeOpResult r = PipeNetworkService.TryPlace(state, cell, kind, p.Tier, p.Dirs[i]);
             if (!r.Ok)
             {
@@ -1437,7 +1437,7 @@ namespace GameLogic.Campaign.Regions
             : BaseName(p, p.Tier);
 
         private static string BaseName(PlannedBeltRecord p, int tier) =>
-            IsPipePlan(p) ? PipeNetworkService.PieceName((PipePieceKind)Math.Max(0, Math.Min(3, p.PipePiece - 1)), tier)
+            IsPipePlan(p) ? PipeNetworkService.PieceName((PipePieceKind)Math.Max(0, Math.Min((int)PipePieceKind.Underground, p.PipePiece - 1)), tier)
             : BeltNetworkService.PieceName((BeltNodeKind)p.NodeKind, tier);
 
         private static string DestroyedStatus(PlannedBeltRecord p, int i) =>

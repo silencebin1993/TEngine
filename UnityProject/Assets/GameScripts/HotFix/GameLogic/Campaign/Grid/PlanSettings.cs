@@ -161,7 +161,7 @@ namespace GameLogic.Campaign.Grid
             {
                 id = PlanEntries.ToolIdForPipe(pi.Kind, pi.Tier);
                 kind = pi.Kind == PipePieceKind.Pump ? PlanEntryKind.Pump : pi.Kind == PipePieceKind.Tank ? PlanEntryKind.Tank
-                    : pi.Kind == PipePieceKind.Valve ? PlanEntryKind.Valve : PlanEntryKind.Pipe;
+                    : pi.Kind == PipePieceKind.Valve ? PlanEntryKind.Valve : pi.Kind == PipePieceKind.Underground ? PlanEntryKind.PipeUnderground : PlanEntryKind.Pipe;
                 if (pi.Kind == PipePieceKind.Tank)
                 {
                     s0 = PackTank(pi.TankMode, pi.Priority);
@@ -176,9 +176,9 @@ namespace GameLogic.Campaign.Grid
             {
                 if (p.PipePiece > 0)
                 {
-                    var pk = (PipePieceKind)Math.Max(0, Math.Min(3, p.PipePiece - 1));
+                    var pk = (PipePieceKind)Math.Max(0, Math.Min((int)PipePieceKind.Underground, p.PipePiece - 1));
                     id = PlanEntries.ToolIdForPipe(pk, p.Tier);
-                    kind = pk == PipePieceKind.Pump ? PlanEntryKind.Pump : pk == PipePieceKind.Tank ? PlanEntryKind.Tank : pk == PipePieceKind.Valve ? PlanEntryKind.Valve : PlanEntryKind.Pipe;
+                    kind = pk == PipePieceKind.Pump ? PlanEntryKind.Pump : pk == PipePieceKind.Tank ? PlanEntryKind.Tank : pk == PipePieceKind.Valve ? PlanEntryKind.Valve : pk == PipePieceKind.Underground ? PlanEntryKind.PipeUnderground : PlanEntryKind.Pipe;
                     s0 = p.PipeSettings;
                 }
                 else

@@ -558,8 +558,9 @@ namespace GameLogic.Campaign.Signal
             }
             sb.AppendLine(GameText.Format("fwlib.detail.protocol", protocol));
             sb.AppendLine(GameText.Format("fwlib.detail.rarity", GameText.Get("firmware.rarity." + row.Rarity)));
+            // FG4-ECO-04（DEBT-FG2FW01-02 范围变更）：不再显示每发耗电（{1} 位置留空）。
             sb.AppendLine(GameText.Format("fwlib.detail.numbers", Math.Max(1, row.Load).ToString(CultureInfo.InvariantCulture),
-                FirmwareKinds.PowerOf(firmwareId).ToString(CultureInfo.InvariantCulture), FirmwareKinds.HeatOf(firmwareId).ToString("0.#", CultureInfo.InvariantCulture)));
+                string.Empty, FirmwareKinds.HeatOf(firmwareId).ToString("0.#", CultureInfo.InvariantCulture)));
             string readings = CarrierReadings.DetailLines(firmwareId);
             if (!string.IsNullOrEmpty(readings))
             {

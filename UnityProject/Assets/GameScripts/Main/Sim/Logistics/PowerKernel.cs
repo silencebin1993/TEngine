@@ -42,6 +42,20 @@ namespace BinGames.Sim.Logistics
         /// <summary>最大充放电功率（电）。</summary>
         public float StorageRate;
         public bool StorageOn;
+
+        // ── FG4-ECO-04 能源扩展（默认值 = FG3-LOG-06 的行为：一种发电、储能随充随放、给所有建筑放电）──
+        /// <summary>发电类别（0～<see cref="PowerKernel.MaxSourceClasses"/>−1，热更层按 fg.TbPowerSource 分配）：曲线按类别分开记；
+        /// 类别系数（<see cref="PowerKernel.SetClassFactor"/>，太阳能的昼夜 / 天气）乘在 <see cref="Supply"/> 上。</summary>
+        public byte SourceClass;
+        /// <summary>按负荷出力（燃油发电机）：电网先用不按负荷的发电（核心、发电机、太阳能），缺口和储能充电才由它补；
+        /// 它这一刻的负荷比例见 <see cref="PowerSubnetInfo.DispatchLoad"/>（热更层按负荷烧燃油）。</summary>
+        public bool Dispatchable;
+        /// <summary>储能：玩家关掉了充电。</summary>
+        public bool StorageNoCharge;
+        /// <summary>储能：玩家关掉了放电。</summary>
+        public bool StorageNoDischarge;
+        /// <summary>储能只给优先级 ≤ 这个数（1～3）的用电建筑放电，留着电给高优先级建筑；0 = 给所有建筑放电。</summary>
+        public byte StorageReserve;
     }
 
     /// <summary>一个电网（互相连通的一组节点及其覆盖的建筑）的汇总。</summary>
@@ -67,6 +81,16 @@ namespace BinGames.Sim.Logistics
         public int StorageUnits;
         /// <summary>这个电网里下标最小的节点（热更层用它定位 / 做存档锚点）。</summary>
         public int FirstNode;
+        /// <summary>FG4-ECO-04：按负荷出力的发电（燃油发电机）能发多少（电）。</summary>
+        public float DispatchSupply;
+        /// <summary>FG4-ECO-04：按负荷出力的发电这一刻的负荷比例（0～1）：（实际供上的用电 + 储能充电 − 不按负荷的发电）÷ <see cref="DispatchSupply"/>。</summary>
+        public float DispatchLoad;
+        /// <summary>FG4-ECO-04：这一秒储能最多能放出多少（电；不含关掉放电的储能）。</summary>
+        public float StorageDischargeAvailable;
+        /// <summary>FG4-ECO-04：这一秒储能最多能充进多少（电；不含关掉充电的储能）。</summary>
+        public float StorageChargeAvailable;
+        /// <summary>FG4-ECO-04：因为储能留给高优先级（放电对象设置）而没能从储能取电、停机的建筑数。</summary>
+        public int ReserveHeld;
     }
 
     /// <summary>一次拓扑变化里“一个电网断成几段”的记录（热更层据此发警告）。</summary>
@@ -85,7 +109,8 @@ namespace BinGames.Sim.Logistics
         }
     }
 
-    /// <summary>一个电网的曲线（环形缓冲，最旧 → 最新）。发电、需要、实际用电（电），储能（电·分钟）。</summary>
+    /// <summary>一个电网的曲线（环形缓冲，最旧 → 最新）。发电、需要、实际用电（电），储能（电·分钟）；
+    /// FG4-ECO-04 起另记每个发电类别的发电（电，<see cref="PowerKernel.MaxSourceClasses"/> 类，“各类发电设施在电力曲线里分开显示”）。</summary>
     public sealed class PowerCurve
     {
         public readonly int Capacity;
@@ -93,6 +118,7 @@ namespace BinGames.Sim.Logistics
         private readonly float[] _demand;
         private readonly float[] _delivered;
         private readonly float[] _stored;
+        private readonly float[] _classes;
         private int _head;
 
         public int Count { get; private set; }
@@ -104,14 +130,23 @@ namespace BinGames.Sim.Logistics
             _demand = new float[Capacity];
             _delivered = new float[Capacity];
             _stored = new float[Capacity];
+            _classes = new float[Capacity * PowerKernel.MaxSourceClasses];
         }
 
-        public void Add(float supply, float demand, float delivered, float storedMinutes)
+        public void Add(float supply, float demand, float delivered, float storedMinutes) => Add(supply, demand, delivered, storedMinutes, null, 0);
+
+        /// <summary>记一个点；<paramref name="classes"/> 从 <paramref name="offset"/> 起 <see cref="PowerKernel.MaxSourceClasses"/> 个数 = 各类别的发电（null = 全 0）。</summary>
+        public void Add(float supply, float demand, float delivered, float storedMinutes, float[] classes, int offset)
         {
             _supply[_head] = supply;
             _demand[_head] = demand;
             _delivered[_head] = delivered;
             _stored[_head] = storedMinutes;
+            int m = PowerKernel.MaxSourceClasses;
+            for (int c = 0; c < m; c++)
+            {
+                _classes[_head * m + c] = classes != null && offset + c < classes.Length ? classes[offset + c] : 0f;
+            }
             _head = (_head + 1) % Capacity;
             if (Count < Capacity)
             {
@@ -119,23 +154,44 @@ namespace BinGames.Sim.Logistics
             }
         }
 
+        private int At(int i) => (_head - Count + i + Capacity * 2) % Capacity;
+
         /// <summary>第 i 个点（0 = 最旧）。</summary>
         public void Get(int i, out float supply, out float demand, out float delivered, out float storedMinutes)
         {
-            int at = (_head - Count + i + Capacity * 2) % Capacity;
+            int at = At(i);
             supply = _supply[at];
             demand = _demand[at];
             delivered = _delivered[at];
             storedMinutes = _stored[at];
         }
 
+        /// <summary>第 i 个点里第 <paramref name="sourceClass"/> 类发电（电）。</summary>
+        public float GetClass(int i, int sourceClass)
+        {
+            if (sourceClass < 0 || sourceClass >= PowerKernel.MaxSourceClasses)
+            {
+                return 0f;
+            }
+            return _classes[At(i) * PowerKernel.MaxSourceClasses + sourceClass];
+        }
+
+        /// <summary>第 i 个点的各类别发电复制到 <paramref name="into"/>（从 <paramref name="offset"/> 起 <see cref="PowerKernel.MaxSourceClasses"/> 个）。</summary>
+        public void GetClasses(int i, float[] into, int offset)
+        {
+            int m = PowerKernel.MaxSourceClasses;
+            Array.Copy(_classes, At(i) * m, into, offset, m);
+        }
+
         public PowerCurve Clone()
         {
             var c = new PowerCurve(Capacity);
+            var cls = new float[PowerKernel.MaxSourceClasses];
             for (int i = 0; i < Count; i++)
             {
                 Get(i, out float a, out float b, out float d, out float s);
-                c.Add(a, b, d, s);
+                GetClasses(i, cls, 0);
+                c.Add(a, b, d, s, cls, 0);
             }
             return c;
         }
@@ -153,6 +209,8 @@ namespace BinGames.Sim.Logistics
         public float[] CurveDemand = Array.Empty<float>();
         public float[] CurveDelivered = Array.Empty<float>();
         public float[] CurveStored = Array.Empty<float>();
+        /// <summary>FG4-ECO-04（格式 2）：每个曲线点的各类别发电，按点拼接，每点 <see cref="PowerKernel.MaxSourceClasses"/> 个。格式 1 的存档没有这一列（读成全 0）。</summary>
+        public float[] CurveClassSupply = Array.Empty<float>();
         public int[] StorageKeys = Array.Empty<int>();
         public double[] StorageStored = Array.Empty<double>();
     }
@@ -166,11 +224,18 @@ namespace BinGames.Sim.Logistics
     ///   只是按电网分开；储能在缺电时按功率上限放电、盈余时充电。
     /// - 时间（<see cref="StepSecond"/>、<see cref="Sample"/>）：储能每游戏秒积分一次（没有储能的电网不做任何事），曲线按游戏时间采样；每次 O(电网数 + 储能实体)。
     /// - 电网编号跨拓扑变化保持：新电网沿用它的节点里“多数原来所在的电网”的编号；一个旧电网的节点散到几个新电网 = 断开（<see cref="LastSplits"/>）。
+    /// - FG4-ECO-04 能源扩展：发电分类别（曲线分开记；类别系数 = 太阳能的昼夜 / 天气）；按负荷出力的发电（燃油发电机）只补缺口与储能充电，报告负荷比例；
+    ///   储能可以关掉充电 / 放电，放电可以只留给高优先级建筑（放电按“优先级 1 先”的分配顺序取，先取只给高优先级的那部分，把给所有建筑的留到后面）。
     /// </summary>
     public sealed class PowerKernel
     {
-        public const int FormatVersion = 1;
+        /// <summary>存档格式：1 = FG3-LOG-06；2 = FG4-ECO-04（曲线多存各类别发电）。读档两种都认。</summary>
+        public const int FormatVersion = 2;
         public const int VirtualHubKey = -1;
+        /// <summary>发电类别上限（曲线每个点存这么多类）。</summary>
+        public const int MaxSourceClasses = 8;
+        /// <summary>优先级档数（1～4）。</summary>
+        public const int PriorityLevels = 4;
         private const int MinBucket = 16;
 
         private PowerEntity[] _e = Array.Empty<PowerEntity>();
@@ -184,6 +249,17 @@ namespace BinGames.Sim.Logistics
         private PowerSubnetInfo[] _subnets = Array.Empty<PowerSubnetInfo>();
         private float[] _remaining = Array.Empty<float>();
         private float[] _discharge = Array.Empty<float>();
+        // FG4-ECO-04：每个电网 × 发电类别的发电；每个电网 × 放电对象档（0 = 只给优先级 1 … 3 = 给所有建筑）的可放电量 / 已放电量；可充电量；从发电（非储能）供上的用电。
+        private float[] _classSupply = Array.Empty<float>();
+        private float[] _pool = Array.Empty<float>();
+        private float[] _poolUsed = Array.Empty<float>();
+        private float[] _chargeRoom = Array.Empty<float>();
+        /// <summary>每个电网每个放电档的储能这一秒还能充多少（充电只给“放电对象够不着停机建筑”的储能，见 <see cref="_chargeCut"/>）。</summary>
+        private float[] _poolRoom = Array.Empty<float>();
+        /// <summary>每个电网能充电的放电档上限（不含）：停机建筑里最高的优先级档 p（0 起）→ 只有放电只给 1～p 档的储能能充；没有停机 = 全部档。</summary>
+        private int[] _chargeCut = Array.Empty<int>();
+        private float[] _supplyUsed = Array.Empty<float>();
+        private readonly float[] _classFactor = { 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f };
         private readonly List<int> _nodes = new List<int>(64);
         // 节点空间索引：平铺的桶网格（链表头 + 下一个），桶边长随节点分布自适应（至少 16 格，网格最多约 512 × 512 桶）。
         private int _bucket = MinBucket;
@@ -250,6 +326,120 @@ namespace BinGames.Sim.Logistics
         }
 
         public bool TryGetCurve(int serial, out PowerCurve curve) => _curves.TryGetValue(serial, out curve);
+
+        // ── FG4-ECO-04：发电类别、按负荷出力、储能设置 ─────────────────────────────
+
+        /// <summary>电网 s 里第 c 类发电（电，已乘类别系数；上一次结算的结果）。</summary>
+        public float ClassSupply(int s, int c) =>
+            s >= 0 && s < SubnetCount && c >= 0 && c < MaxSourceClasses ? _classSupply[s * MaxSourceClasses + c] : 0f;
+
+        /// <summary>第 c 类发电的系数（太阳能的昼夜 / 天气；默认 1）。</summary>
+        public float ClassFactor(int c) => c >= 0 && c < MaxSourceClasses ? _classFactor[c] : 1f;
+
+        /// <summary>改第 c 类发电的系数（0～1 之外夹住）。变了返回 true——调用方随后 <see cref="Settle"/>（不重建拓扑）。</summary>
+        public bool SetClassFactor(int c, float factor)
+        {
+            if (c < 0 || c >= MaxSourceClasses || float.IsNaN(factor))
+            {
+                return false;
+            }
+            factor = Math.Max(0f, Math.Min(1f, factor));
+            if (_classFactor[c] == factor)
+            {
+                return false;
+            }
+            _classFactor[c] = factor;
+            return true;
+        }
+
+        /// <summary>实体 i 这一刻实际能发的电（SupplyOn 且乘了类别系数；不接入电网也照算，调用方看 <see cref="SubnetOf"/>）。</summary>
+        public float EffectiveSupply(int i)
+        {
+            if (i < 0 || i >= _n || !_e[i].SupplyOn || _e[i].Supply <= 0f)
+            {
+                return 0f;
+            }
+            return _e[i].Supply * _classFactor[Math.Min(_e[i].SourceClass, (byte)(MaxSourceClasses - 1))];
+        }
+
+        /// <summary>实体 i 的负荷比例：按负荷出力的发电 = 它所在电网的 <see cref="PowerSubnetInfo.DispatchLoad"/>；其余发电 = 1；没接入 / 不发电 = 0。</summary>
+        public float LoadOf(int i)
+        {
+            if (i < 0 || i >= _n || _subnetOf[i] < 0 || !_e[i].SupplyOn || _e[i].Supply <= 0f)
+            {
+                return 0f;
+            }
+            return _e[i].Dispatchable ? _subnets[_subnetOf[i]].DispatchLoad : 1f;
+        }
+
+        /// <summary>开关实体 i 的发电（燃油发电机烧完 / 来油）。变了返回 true——调用方随后 <see cref="Settle"/>（不重建拓扑）。</summary>
+        public bool SetSupplyOn(int i, bool on)
+        {
+            if (i < 0 || i >= _n || _e[i].SupplyOn == on)
+            {
+                return false;
+            }
+            _e[i].SupplyOn = on;
+            return true;
+        }
+
+        /// <summary>改实体 i 的储能设置（玩家在电网面板改）。变了返回 true——调用方随后 <see cref="Settle"/>。</summary>
+        public bool SetStorageSettings(int i, bool noCharge, bool noDischarge, byte reserve)
+        {
+            if (i < 0 || i >= _n || _e[i].StorageCapacity <= 0)
+            {
+                return false;
+            }
+            reserve = (byte)Math.Min(PriorityLevels - 1, (int)reserve);
+            if (_e[i].StorageNoCharge == noCharge && _e[i].StorageNoDischarge == noDischarge && _e[i].StorageReserve == reserve)
+            {
+                return false;
+            }
+            _e[i].StorageNoCharge = noCharge;
+            _e[i].StorageNoDischarge = noDischarge;
+            _e[i].StorageReserve = reserve;
+            return true;
+        }
+
+        /// <summary>储能实体 i 这一秒的充放电功率（+ 充电，− 放电；与 <see cref="StepSecond"/> 同一个分摊公式）。不是储能 / 没接入 = 0。</summary>
+        public float StorageFlowOf(int i)
+        {
+            if (i < 0 || i >= _n || _subnetOf[i] < 0 || !_e[i].StorageOn || _e[i].StorageCapacity <= 0)
+            {
+                return 0f;
+            }
+            int s = _subnetOf[i];
+            float flow = _subnets[s].StorageFlow;
+            if (flow < 0f && !_e[i].StorageNoDischarge)
+            {
+                int k = s * PriorityLevels + PoolOf(_e[i]);
+                float avail = (float)Math.Min(_e[i].StorageRate, _stored[i]);
+                return _pool[k] > 0f ? -_poolUsed[k] * (avail / _pool[k]) : 0f;
+            }
+            if (flow > 0f && !_e[i].StorageNoCharge && _chargeRoom[s] > 0f && PoolOf(_e[i]) < _chargeCut[s])
+            {
+                float room = (float)Math.Max(0, Math.Min(_e[i].StorageRate, _e[i].StorageCapacity - _stored[i]));
+                return flow * (room / _chargeRoom[s]);
+            }
+            return 0f;
+        }
+
+        /// <summary>
+        /// 储能实体 i 这一秒因“电网有停机建筑、它的放电对象够得着它们”而不充电（悬停 / 面板写明原因，B06）。
+        /// 放电只给更高优先级（够不着任何停机建筑）的储能照常用剩余电量充电。
+        /// </summary>
+        public bool StorageChargeHeldByBrownout(int i)
+        {
+            if (i < 0 || i >= _n || _subnetOf[i] < 0 || !_e[i].StorageOn || _e[i].StorageCapacity <= 0 || _e[i].StorageNoCharge)
+            {
+                return false;
+            }
+            int s = _subnetOf[i];
+            return _subnets[s].Brownouts > 0 && PoolOf(_e[i]) >= _chargeCut[s];
+        }
+
+        /// <summary>放电对象档：0 = 只给优先级 1 … 3 = 给所有建筑（<see cref="PowerEntity.StorageReserve"/> 0 = 所有建筑）。</summary>
+        private static int PoolOf(in PowerEntity e) => e.StorageReserve == 0 ? PriorityLevels - 1 : Math.Min(PriorityLevels - 1, e.StorageReserve - 1);
 
         private static float CenterX(in PowerEntity e) => (e.MinX + e.MaxX) * 0.5f;
         private static float CenterY(in PowerEntity e) => (e.MinY + e.MaxY) * 0.5f;
@@ -493,6 +683,13 @@ namespace BinGames.Sim.Logistics
                 _subnets = new PowerSubnetInfo[Math.Max(SubnetCount, _subnets.Length * 2)];
                 _remaining = new float[_subnets.Length];
                 _discharge = new float[_subnets.Length];
+                _classSupply = new float[_subnets.Length * MaxSourceClasses];
+                _pool = new float[_subnets.Length * PriorityLevels];
+                _poolUsed = new float[_subnets.Length * PriorityLevels];
+                _chargeRoom = new float[_subnets.Length];
+                _poolRoom = new float[_subnets.Length * PriorityLevels];
+                _chargeCut = new int[_subnets.Length];
+                _supplyUsed = new float[_subnets.Length];
             }
             for (int s = 0; s < SubnetCount; s++)
             {
@@ -780,7 +977,12 @@ namespace BinGames.Sim.Logistics
 
         // ── 结算 ─────────────────────────────────────────────────────────────
 
-        /// <summary>按当前拓扑与储能存量结算一次（不经过时间）。返回是否有实体的供电结果变了。</summary>
+        /// <summary>
+        /// 按当前拓扑、储能存量与设置结算一次（不经过时间）。返回是否有实体的供电结果变了。
+        /// 每个电网：发电（乘类别系数）先供；不够时从储能取——储能按放电对象分档（只给优先级 1 / ≤2 / ≤3 / 所有建筑），
+        /// 优先级 p 的建筑只能取“给 ≤p 及更宽”的档，先取最窄的档（宽档留给后面低优先级的建筑）。盈余充进允许充电的储能。
+        /// 按负荷出力的发电（燃油）的负荷 =（从发电供上的用电 + 充电 − 不按负荷的发电）÷ 它能发的电。
+        /// </summary>
         public bool Settle()
         {
             SettleCount++;
@@ -799,7 +1001,25 @@ namespace BinGames.Sim.Logistics
                 info.Brownouts = 0;
                 info.Producers = 0;
                 info.StorageUnits = 0;
+                info.DispatchSupply = 0f;
+                info.DispatchLoad = 0f;
+                info.StorageDischargeAvailable = 0f;
+                info.StorageChargeAvailable = 0f;
+                info.ReserveHeld = 0;
                 _subnets[s] = info;
+                _chargeRoom[s] = 0f;
+                _chargeCut[s] = PriorityLevels;
+                _supplyUsed[s] = 0f;
+                for (int c = 0; c < MaxSourceClasses; c++)
+                {
+                    _classSupply[s * MaxSourceClasses + c] = 0f;
+                }
+                for (int k = 0; k < PriorityLevels; k++)
+                {
+                    _pool[s * PriorityLevels + k] = 0f;
+                    _poolUsed[s * PriorityLevels + k] = 0f;
+                    _poolRoom[s * PriorityLevels + k] = 0f;
+                }
             }
             for (int i = 0; i < _n; i++)
             {
@@ -810,8 +1030,15 @@ namespace BinGames.Sim.Logistics
                 }
                 if (_e[i].SupplyOn && _e[i].Supply > 0f)
                 {
-                    _subnets[s].Supply += _e[i].Supply;
+                    int cls = Math.Min((int)_e[i].SourceClass, MaxSourceClasses - 1);
+                    float eff = _e[i].Supply * _classFactor[cls];
+                    _subnets[s].Supply += eff;
                     _subnets[s].Producers++;
+                    _classSupply[s * MaxSourceClasses + cls] += eff;
+                    if (_e[i].Dispatchable)
+                    {
+                        _subnets[s].DispatchSupply += eff;
+                    }
                 }
                 if (_e[i].StorageOn && _e[i].StorageCapacity > 0)
                 {
@@ -819,13 +1046,24 @@ namespace BinGames.Sim.Logistics
                     _subnets[s].Stored += _stored[i];
                     _subnets[s].StorageRate += _e[i].StorageRate;
                     _subnets[s].StorageUnits++;
+                    if (!_e[i].StorageNoDischarge)
+                    {
+                        // 一秒内最多放出存量本身。
+                        float avail = (float)Math.Min(_e[i].StorageRate, _stored[i]);
+                        _pool[s * PriorityLevels + PoolOf(_e[i])] += avail;
+                        _subnets[s].StorageDischargeAvailable += avail;
+                    }
+                    if (!_e[i].StorageNoCharge)
+                    {
+                        float room = (float)Math.Max(0, Math.Min(_e[i].StorageRate, _e[i].StorageCapacity - _stored[i]));
+                        _poolRoom[s * PriorityLevels + PoolOf(_e[i])] += room;
+                        _subnets[s].StorageChargeAvailable += room;
+                    }
                 }
             }
             for (int s = 0; s < m; s++)
             {
-                double st = _subnets[s].Stored;
-                _discharge[s] = st > 0 ? (float)Math.Min(_subnets[s].StorageRate, st) : 0f; // 一秒内最多放出存量本身
-                _remaining[s] = _subnets[s].Supply + _discharge[s];
+                _remaining[s] = _subnets[s].Supply;
             }
             bool changed = false;
             for (int i = 0; i < _n; i++)
@@ -848,15 +1086,45 @@ namespace BinGames.Sim.Logistics
                         float need = _e[i].Demand;
                         _subnets[s].Demand += need;
                         _subnets[s].Consumers++;
-                        if (_remaining[s] >= need)
+                        int p = Math.Max(1, Math.Min(PriorityLevels, _e[i].Priority)) - 1;
+                        int baseIdx = s * PriorityLevels;
+                        float avail = _remaining[s];
+                        for (int k = p; k < PriorityLevels; k++)
                         {
-                            _remaining[s] -= need;
+                            avail += _pool[baseIdx + k] - _poolUsed[baseIdx + k];
+                        }
+                        if (avail >= need)
+                        {
+                            float take = Math.Min(_remaining[s], need);
+                            _remaining[s] -= take;
+                            _supplyUsed[s] += take;
+                            float left = need - take;
+                            for (int k = p; k < PriorityLevels && left > 0f; k++)
+                            {
+                                float d = Math.Min(left, _pool[baseIdx + k] - _poolUsed[baseIdx + k]);
+                                if (d > 0f)
+                                {
+                                    _poolUsed[baseIdx + k] += d;
+                                    left -= d;
+                                }
+                            }
                             _subnets[s].Delivered += need;
                             now = PowerUse.Powered;
                         }
                         else
                         {
                             _subnets[s].Brownouts++;
+                            _chargeCut[s] = Math.Min(_chargeCut[s], p);
+                            // 储能里还有电、只是留给了更高优先级：记一笔（悬停 / 面板写明“储能留给高优先级”）。
+                            float reserved = 0f;
+                            for (int k = 0; k < p; k++)
+                            {
+                                reserved += _pool[baseIdx + k] - _poolUsed[baseIdx + k];
+                            }
+                            if (avail + reserved >= need)
+                            {
+                                _subnets[s].ReserveHeld++;
+                            }
                             now = PowerUse.Brownout;
                         }
                     }
@@ -866,15 +1134,35 @@ namespace BinGames.Sim.Logistics
             }
             for (int s = 0; s < m; s++)
             {
-                float net = _subnets[s].Supply - _subnets[s].Delivered;
-                if (net < 0f)
+                float discharged = 0f;
+                for (int k = 0; k < PriorityLevels; k++)
                 {
-                    _subnets[s].StorageFlow = -Math.Min(-net, _discharge[s]);
+                    discharged += _poolUsed[s * PriorityLevels + k];
                 }
-                else if (_subnets[s].StorageCapacity > 0)
+                float charge = 0f;
+                // 能充电的储能：放电对象够不着任何一座停机建筑的（FG4-ECO-04 修复轮 P2）。剩下的零头本来就不够任何一座停机建筑用；
+                // 若拿去充一座“能放给停机建筑”的储能，下一秒它刚够一座就放、放完又停，会每隔几秒反复启停（通知刷屏），所以这类储能缺电时不充；
+                // 但“只给优先级 1～N”的储能放不到更低优先级的停机建筑，充它不会引起启停——静默夜前电网长期满载时也能给高优先级攒电。
+                float room = 0f;
+                for (int k = 0; k < _chargeCut[s]; k++)
                 {
-                    double room = _subnets[s].StorageCapacity - _subnets[s].Stored;
-                    _subnets[s].StorageFlow = (float)Math.Max(0, Math.Min(Math.Min(net, _subnets[s].StorageRate), room));
+                    room += _poolRoom[s * PriorityLevels + k];
+                }
+                _chargeRoom[s] = room;
+                if (discharged > 0f)
+                {
+                    _subnets[s].StorageFlow = -discharged;
+                }
+                else if (_chargeRoom[s] > 0f)
+                {
+                    charge = Math.Max(0f, Math.Min(_remaining[s], _chargeRoom[s]));
+                    _subnets[s].StorageFlow = charge;
+                }
+                float disp = _subnets[s].DispatchSupply;
+                if (disp > 0f)
+                {
+                    float free = _subnets[s].Supply - disp;
+                    _subnets[s].DispatchLoad = Math.Max(0f, Math.Min(1f, (_supplyUsed[s] + charge - free) / disp));
                 }
             }
             StateVersion++;
@@ -882,7 +1170,8 @@ namespace BinGames.Sim.Logistics
         }
 
         /// <summary>
-        /// 经过一游戏秒：每个有储能的电网按上一次结算的功率充 / 放电（按容量比例分到各储能实体；放电按存量比例），再结算一次。
+        /// 经过一游戏秒：每个有储能的电网按上一次结算的功率充 / 放电，再结算一次。放电：每个放电档的已放电量按各储能这一秒能放的量（min(功率, 存量)）分摊；
+        /// 充电：按各储能这一秒能充的量（min(功率, 剩余容量)）分摊——都不会超过单个储能的上限，电量守恒。
         /// 没有储能时什么都不做（返回 false）。返回是否有实体的供电结果变了。
         /// </summary>
         public bool StepSecond()
@@ -894,32 +1183,48 @@ namespace BinGames.Sim.Logistics
             bool moved = false;
             for (int s = 0; s < SubnetCount; s++)
             {
-                float flow = _subnets[s].StorageFlow;
-                if (flow == 0f || _subnets[s].StorageUnits == 0)
+                if (_subnets[s].StorageFlow != 0f && _subnets[s].StorageUnits > 0)
                 {
-                    continue;
-                }
-                moved = true;
-                double cap = _subnets[s].StorageCapacity;
-                double stored = _subnets[s].Stored;
-                for (int i = 0; i < _n; i++)
-                {
-                    if (_subnetOf[i] != s || !_e[i].StorageOn || _e[i].StorageCapacity <= 0)
-                    {
-                        continue;
-                    }
-                    double share = flow > 0 ? flow * (_e[i].StorageCapacity / cap) : (stored > 0 ? flow * (_stored[i] / stored) : 0);
-                    _stored[i] = Math.Max(0, Math.Min(_e[i].StorageCapacity, _stored[i] + share));
+                    moved = true;
+                    break;
                 }
             }
             if (!moved)
             {
                 return false;
             }
+            for (int i = 0; i < _n; i++)
+            {
+                int s = _subnetOf[i];
+                if (s < 0 || !_e[i].StorageOn || _e[i].StorageCapacity <= 0)
+                {
+                    continue;
+                }
+                float flow = _subnets[s].StorageFlow;
+                double share = 0;
+                if (flow < 0f && !_e[i].StorageNoDischarge)
+                {
+                    int k = s * PriorityLevels + PoolOf(_e[i]);
+                    float avail = (float)Math.Min(_e[i].StorageRate, _stored[i]);
+                    if (_pool[k] > 0f && _poolUsed[k] > 0f)
+                    {
+                        share = -(double)_poolUsed[k] * (avail / _pool[k]);
+                    }
+                }
+                else if (flow > 0f && !_e[i].StorageNoCharge && _chargeRoom[s] > 0f && PoolOf(_e[i]) < _chargeCut[s])
+                {
+                    float room = (float)Math.Max(0, Math.Min(_e[i].StorageRate, _e[i].StorageCapacity - _stored[i]));
+                    share = (double)flow * (room / _chargeRoom[s]);
+                }
+                if (share != 0)
+                {
+                    _stored[i] = Math.Max(0, Math.Min(_e[i].StorageCapacity, _stored[i] + share));
+                }
+            }
             return Settle();
         }
 
-        /// <summary>给每个电网的曲线记一个点（发电、需要、实际用电、储能 电·分钟）。</summary>
+        /// <summary>给每个电网的曲线记一个点（发电、需要、实际用电、储能 电·分钟，及各类别发电）。</summary>
         public void Sample()
         {
             SampleCount++;
@@ -931,7 +1236,7 @@ namespace BinGames.Sim.Logistics
                     c = new PowerCurve(_curveCapacity);
                     _curves[info.Serial] = c;
                 }
-                c.Add(info.Supply, info.Demand, info.Delivered, (float)(info.Stored / 60.0));
+                c.Add(info.Supply, info.Demand, info.Delivered, (float)(info.Stored / 60.0), _classSupply, s * MaxSourceClasses);
             }
         }
 
@@ -1185,6 +1490,7 @@ namespace BinGames.Sim.Logistics
             snap.CurveDemand = new float[total];
             snap.CurveDelivered = new float[total];
             snap.CurveStored = new float[total];
+            snap.CurveClassSupply = new float[total * MaxSourceClasses];
             int w = 0;
             for (int s = 0; s < m; s++)
             {
@@ -1195,6 +1501,7 @@ namespace BinGames.Sim.Logistics
                 for (int i = 0; i < c.Count; i++, w++)
                 {
                     c.Get(i, out snap.CurveSupply[w], out snap.CurveDemand[w], out snap.CurveDelivered[w], out snap.CurveStored[w]);
+                    c.GetClasses(i, snap.CurveClassSupply, w * MaxSourceClasses);
                 }
             }
             var keys = new List<int>();
@@ -1225,7 +1532,8 @@ namespace BinGames.Sim.Logistics
                 error = "no-snapshot";
                 return false;
             }
-            if (snap.FormatVersion != FormatVersion)
+            // 格式 1（FG3-LOG-06，没有各类别发电）与 2 都认；更新的格式整体拒绝（调用方保留原始数据不覆盖）。
+            if (snap.FormatVersion != FormatVersion && snap.FormatVersion != 1)
             {
                 error = $"format {snap.FormatVersion} != {FormatVersion}";
                 return false;
@@ -1249,6 +1557,12 @@ namespace BinGames.Sim.Logistics
             }
             if ((snap.CurveSupply?.Length ?? 0) != total || (snap.CurveDemand?.Length ?? 0) != total
                 || (snap.CurveDelivered?.Length ?? 0) != total || (snap.CurveStored?.Length ?? 0) != total)
+            {
+                error = "shape";
+                return false;
+            }
+            float[] classes = snap.FormatVersion >= 2 ? snap.CurveClassSupply : null;
+            if (classes != null && classes.Length != total * MaxSourceClasses)
             {
                 error = "shape";
                 return false;
@@ -1279,12 +1593,12 @@ namespace BinGames.Sim.Logistics
                         continue;
                     }
                     float a = snap.CurveSupply[r], b = snap.CurveDemand[r], d = snap.CurveDelivered[r], st = snap.CurveStored[r];
-                    if (float.IsNaN(a) || float.IsNaN(b) || float.IsNaN(d) || float.IsNaN(st))
+                    if (float.IsNaN(a) || float.IsNaN(b) || float.IsNaN(d) || float.IsNaN(st) || HasNaN(classes, r * MaxSourceClasses))
                     {
                         dropped++;
                         continue;
                     }
-                    c.Add(a, b, d, st);
+                    c.Add(a, b, d, st, classes, r * MaxSourceClasses);
                 }
                 _curves[serial] = c;
             }
@@ -1302,7 +1616,23 @@ namespace BinGames.Sim.Logistics
             return true;
         }
 
-        /// <summary>确定性指纹（自检比较“存读档 / 倍速 / 观察”一致性）：电网编号、汇总、每个实体的供电结果与存量、曲线。</summary>
+        private static bool HasNaN(float[] a, int offset)
+        {
+            if (a == null)
+            {
+                return false;
+            }
+            for (int c = 0; c < MaxSourceClasses; c++)
+            {
+                if (float.IsNaN(a[offset + c]))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>确定性指纹（自检比较“存读档 / 倍速 / 观察”一致性）：电网编号、汇总、每个实体的供电结果与存量、曲线、各类别发电与负荷。</summary>
         public string Fingerprint()
         {
             var sb = new System.Text.StringBuilder(256);
@@ -1312,7 +1642,16 @@ namespace BinGames.Sim.Logistics
                 PowerSubnetInfo info = _subnets[s];
                 sb.Append(" |#").Append(info.Serial).Append(' ').Append(info.Supply.ToString("R")).Append('/').Append(info.Demand.ToString("R"))
                     .Append('/').Append(info.Delivered.ToString("R")).Append(" st=").Append(info.Stored.ToString("R"))
-                    .Append(" n").Append(info.Nodes).Append(" c").Append(info.Consumers).Append(" b").Append(info.Brownouts);
+                    .Append(" n").Append(info.Nodes).Append(" c").Append(info.Consumers).Append(" b").Append(info.Brownouts)
+                    .Append(" load=").Append(info.DispatchLoad.ToString("R")).Append(" flow=").Append(info.StorageFlow.ToString("R"));
+                for (int k = 0; k < MaxSourceClasses; k++)
+                {
+                    float v = _classSupply[s * MaxSourceClasses + k];
+                    if (v != 0f)
+                    {
+                        sb.Append(" k").Append(k).Append('=').Append(v.ToString("R"));
+                    }
+                }
                 if (_curves.TryGetValue(info.Serial, out PowerCurve c))
                 {
                     sb.Append(" curve").Append(c.Count);

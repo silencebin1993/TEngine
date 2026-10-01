@@ -648,6 +648,9 @@ namespace GameLogic.UI.Kit
                     return GameText.Get("ui.build.hint_tank");
                 case "valve":
                     return GameText.Format("ui.build.hint_valve", rotate);
+                // FG4-ECO-04（FG-GAP-082）：地下管线口单击放置，旋转定朝地下的方向。
+                case "pipe_underground":
+                    return GameText.Format("ui.build.hint_pipe_underground", rotate, GameText.Get(tool.NameKey), Campaign.Logistics.PipeNetworkService.UndergroundSpan(tool.Tier));
                 default:
                     return GameText.Format("ui.build.hint_tool", rotate);
             }
@@ -663,6 +666,7 @@ namespace GameLogic.UI.Kit
                 case "pump":
                 case "tank":
                 case "valve":
+                case "pipe_underground":
                     return GameText.Format("ui.build.tool_cost_node", tool.ScrapPerCell);
                 case "underground":
                     return GameText.Format("ui.build.tool_cost_under", tool.ScrapPerCell, tool.ScrapPerCell * 2, BeltNetworkService.UndergroundSpan(tool.Tier));
@@ -716,6 +720,13 @@ namespace GameLogic.UI.Kit
                 _dragInfo.text = shortBy > 0
                     ? GameText.Format("ui.build.drag_info_short", belt.Length, belt.TotalCost, belt.Stock, shortBy)
                     : GameText.Format("ui.build.drag_info", belt.Length, belt.TotalCost, belt.Stock);
+                if (belt.IsPipe && belt.Ok && belt.Pipe == BinGames.Sim.Logistics.PipePieceKind.Underground && belt.Cells.Count == 1)
+                {
+                    // FG4-ECO-04（FG-GAP-082）：地下管线口放下后和哪一口配对、跨几格；还没配对写明在哪放另一口。
+                    _dragInfo.text += "\n" + (Campaign.Logistics.PipeNetworkService.TryPreviewUnderground(belt.Cells[0], (int)belt.Dirs[0], belt.Tier, out Campaign.Grid.GridCell mate)
+                        ? GameText.Format("ui.build.preview_underground_linked", mate.X, mate.Y, Math.Abs(mate.X - belt.Cells[0].X) + Math.Abs(mate.Y - belt.Cells[0].Y) - 1)
+                        : GameText.Format("ui.build.preview_underground_unlinked", Campaign.Logistics.PipeNetworkService.UndergroundSpan(belt.Tier)));
+                }
                 if (belt.IsPipe && belt.Ok)
                 {
                     // FG3-LOG-05（FG03 第 4 节“放置时预览流体连接”）：放下后接入哪种流体的网络；泵写它抽的流体。

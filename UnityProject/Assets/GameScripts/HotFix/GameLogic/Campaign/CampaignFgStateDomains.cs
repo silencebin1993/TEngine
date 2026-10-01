@@ -420,7 +420,7 @@ namespace GameLogic.Campaign
     /// 电网拓扑本身（哪些建筑接在哪个电网、谁供电谁断电）是派生量：读档后按建筑记录与电力节点表重算；这里存
     /// ① 电网编号（每个电网一个锚点建筑 ID，读档后锚点所在的电网沿用这个编号），② 每个电网的曲线（发电、需要、实际用电、储能），③ 储能建筑的存量。
     /// 唯一写入口 <see cref="Regions.HomeValleyPowerGrid.WriteTo"/>（WorldSimulation.SyncAllForSave 调它），读档时第一次重算前恢复。
-    /// DomainVersion 1 = 本 Story 之前的存档（没有这个域）；2 = 本格式。<see cref="FormatVersion"/> = 内核快照格式（不认识时原样保留不覆盖）。
+    /// DomainVersion 1 = 本 Story 之前的存档（没有这个域）；2 = 本格式；3 = FG4-ECO-04（加储能站设置、曲线的各类别发电）。<see cref="FormatVersion"/> = 内核快照格式（不认识时原样保留不覆盖）。
     /// </summary>
     [Serializable]
     public sealed class PowerGridState
@@ -438,6 +438,15 @@ namespace GameLogic.Campaign
         public float[] CurveStored = Array.Empty<float>();
         public string[] StorageIds = Array.Empty<string>();
         public double[] StorageStored = Array.Empty<double>();
+        /// <summary>FG4-ECO-04（内核格式 2）：每个曲线点的各类别发电（按点拼接，每点 PowerKernel.MaxSourceClasses 个）。旧存档没有这一列 = 读成全 0。</summary>
+        public float[] CurveClassSupply = Array.Empty<float>();
+        /// <summary>FG4-ECO-04（卡片“储能站的充放电设置”）：玩家改过设置的储能站（建筑 ID）与设置。没有记录的储能站 = 默认（充电开、放电给所有建筑）。
+        /// 唯一写入口 <see cref="Regions.HomeValleyPowerGrid.TrySetStorageSettings"/>；拆掉的储能站在下一次重算时清掉。</summary>
+        public string[] StorageSettingIds = Array.Empty<string>();
+        public bool[] StorageNoCharge = Array.Empty<bool>();
+        public bool[] StorageNoDischarge = Array.Empty<bool>();
+        /// <summary>放电只给优先级 ≤ 这个数（1～3）；0 = 给所有建筑。</summary>
+        public int[] StorageReserve = Array.Empty<int>();
     }
 
     /// <summary>研究（FG05）。</summary>
@@ -534,6 +543,11 @@ namespace GameLogic.Campaign
         public string BurnTarget = string.Empty;
         /// <summary>FG4-ECO-03：这座建筑的配方 / 刻录目标是新建时沿用的“上一次的设置”（面板写明；玩家改过就清掉）。</summary>
         public bool Inherited;
+        /// <summary>FG4-ECO-04 燃油发电机：有油在发电（false = 烧空停机，机内攒够 power.fuel.restart_seconds 秒满负荷的油后重新发电）。
+        /// 电网组装实体时按它开关这座的发电（HomeValleyPowerGrid）。新建 = false（没油）。</summary>
+        public bool Fueled;
+        /// <summary>FG4-ECO-04 燃油发电机：累计烧掉的燃油（毫升；本步的零头记在 <see cref="Progress"/>，单位 毫升 × 60 × 世界频率）。</summary>
+        public long FuelBurnedMl;
     }
 
     /// <summary>FG4-ECO-02：拆到一半的废墟格。</summary>
@@ -1044,6 +1058,11 @@ namespace GameLogic.Campaign
             s.Power.CurveStored ??= Array.Empty<float>();
             s.Power.StorageIds ??= Array.Empty<string>();
             s.Power.StorageStored ??= Array.Empty<double>();
+            s.Power.CurveClassSupply ??= Array.Empty<float>();
+            s.Power.StorageSettingIds ??= Array.Empty<string>();
+            s.Power.StorageNoCharge ??= Array.Empty<bool>();
+            s.Power.StorageNoDischarge ??= Array.Empty<bool>();
+            s.Power.StorageReserve ??= Array.Empty<int>();
             s.Research ??= new ResearchState();
             s.Economy ??= new EconomyState();
             s.Economy.Items ??= Array.Empty<ItemStackRecord>();

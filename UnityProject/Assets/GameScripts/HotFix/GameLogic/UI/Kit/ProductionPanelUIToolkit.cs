@@ -388,7 +388,7 @@ namespace GameLogic.UI.Kit
         private void RefreshProgress(ProductionService.Producer p)
         {
             // 废液池、流体泵是连续工作（没有“一个周期”），不显示进度条。
-            bool show = p.Def.Mode != ProducerMode.Waste && p.Def.Mode != ProducerMode.Pump;
+            bool show = p.Def.Mode != ProducerMode.Waste && p.Def.Mode != ProducerMode.Pump && p.Def.Mode != ProducerMode.Generator;
             _progressBox.EnableInClassList("bn-hidden", !show);
             if (!show)
             {
@@ -534,6 +534,20 @@ namespace GameLogic.UI.Kit
                     _sb.Append(GameText.Format("prod.panel.waste", Mathf.RoundToInt(p.Def.FluidLpm), destroyed));
                     break;
                 }
+                case ProducerMode.Generator:
+                {
+                    // FG4-ECO-04：燃油发电机——满负荷供电、烧油速率、机内燃油、累计烧掉；下一行写电网里的发电读数（负载 / 没油 / 未接入）。
+                    float full = HomeValleyLayout.PowerSupplyProfile.TryGetValue(p.Def.TypeId, out float sup) ? sup : 0f;
+                    _sb.Append(GameText.Format("prod.panel.generator", HomeValleyPowerGrid.Num(full), Mathf.RoundToInt(p.Def.FluidLpm),
+                        (ProductionService.GeneratorFuelMl(p) / 1000).ToString(CultureInfo.InvariantCulture),
+                        (ProductionService.GeneratorBufferMl(p) / 1000).ToString(CultureInfo.InvariantCulture),
+                        (p.Rec.FuelBurnedMl / 1000).ToString(CultureInfo.InvariantCulture)));
+                    if (HomeValleyPowerGrid.TryDescribeBuilding(state, p.Building, out string power))
+                    {
+                        _sb.Append('\n').Append(power);
+                    }
+                    break;
+                }
                 case ProducerMode.Pump:
                 {
                     _sb.Append(p.SourceFluid != null
@@ -657,6 +671,11 @@ namespace GameLogic.UI.Kit
                 return;
             }
             bool gathering = p.Def.Mode == ProducerMode.Recycler || p.Def.Mode == ProducerMode.Drill || p.Def.Mode == ProducerMode.Pump;
+            if (p.Def.Mode == ProducerMode.Generator)
+            {
+                MechanicCodex.Open("codex.economy.energy", unlock: false);
+                return;
+            }
             MechanicCodex.Open(gathering ? "codex.economy.gathering"
                 : ProductionService.IsManufacturing(p.Def.TypeId) ? "codex.economy.manufacturing" : "codex.economy.processing", unlock: false);
         }

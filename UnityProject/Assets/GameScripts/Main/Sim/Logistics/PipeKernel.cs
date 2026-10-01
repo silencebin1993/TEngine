@@ -50,6 +50,8 @@ namespace BinGames.Sim.Logistics
         private int[] _mask = new int[64];
         private int[] _valA = new int[64];
         private int[] _valB = new int[64];
+        /// <summary>FG4-ECO-04（FG-GAP-082）：地下管线口配对的另一口（-1 = 没配对；重算时写）。</summary>
+        private int[] _partner = new int[64];
         // 每步读数
         private long[] _stepIn = new long[64];
         private long[] _stepOut = new long[64];
@@ -252,10 +254,84 @@ namespace BinGames.Sim.Logistics
 
         // ── 连接规则 ─────────────────────────────────────────────────────────────
 
-        /// <summary>第 i 格朝方向 d 有没有接口：管线 / 泵 / 储罐四面都有；阀门只有前后两面。</summary>
-        private bool Opens(int i, int d) => _kind[i] != (byte)PipePieceKind.Valve || d == _dir[i] || d == BeltDirs.Opposite(_dir[i]);
+        /// <summary>第 i 格朝方向 d 有没有接口：管线 / 泵 / 储罐四面都有；阀门只有前后两面；地下管线口只有地面一侧（方向的反面）。</summary>
+        private bool Opens(int i, int d) => OpensAs((PipePieceKind)_kind[i], _dir[i], d);
 
-        private static bool OpensAs(PipePieceKind kind, int dir, int d) => kind != PipePieceKind.Valve || d == dir || d == BeltDirs.Opposite(dir);
+        private static bool OpensAs(PipePieceKind kind, int dir, int d) =>
+            kind == PipePieceKind.Valve ? d == dir || d == BeltDirs.Opposite(dir)
+            : kind == PipePieceKind.Underground ? d == BeltDirs.Opposite(dir)
+            : true;
+
+        /// <summary>
+        /// FG4-ECO-04（FG-GAP-082）：(x, y) 朝 <paramref name="dir"/> 的地下管线口会和哪一件配对——沿方向跨度以内的第一件地下管线口，
+        /// 它要朝回来（方向相反）、且它往回看到的第一件也是这里（互为第一件才配对）。<paramref name="ignore"/> 下标的格当作不存在（拆除预判用）。
+        /// 返回配对件的下标；没有 = -1。O(跨度)。
+        /// </summary>
+        private int FindPartner(int x, int y, int dir, int tier, int ignore = -1)
+        {
+            int span = _config.UndergroundSpan(tier);
+            int dx = BeltDirs.Dx(dir), dy = BeltDirs.Dy(dir);
+            for (int k = 1; k <= span + 1; k++)
+            {
+                if (!_lookup.TryGetValue(Key(x + dx * k, y + dy * k), out int j) || j == ignore || _kind[j] != (byte)PipePieceKind.Underground)
+                {
+                    continue;
+                }
+                // 第一件地下管线口：朝回来才配对（朝同一方向 = 这一段被它挡住，不配对）。等级不同的也能配（跨度按这一口的等级算）。
+                return _dir[j] == BeltDirs.Opposite(dir) ? j : -1;
+            }
+            return -1;
+        }
+
+        /// <summary>重算时给每个地下管线口找配对（互为第一件）。O(地下管线口 × 跨度)。</summary>
+        private void PairUnderground()
+        {
+            for (int i = 0; i < _n; i++)
+            {
+                _partner[i] = -1;
+            }
+            for (int i = 0; i < _n; i++)
+            {
+                if (_kind[i] != (byte)PipePieceKind.Underground || _partner[i] >= 0)
+                {
+                    continue;
+                }
+                int j = FindPartner(_x[i], _y[i], _dir[i], _tier[i]);
+                if (j >= 0 && FindPartner(_x[j], _y[j], _dir[j], _tier[j]) == i)
+                {
+                    _partner[i] = j;
+                    _partner[j] = i;
+                }
+            }
+        }
+
+        /// <summary>FG4-ECO-04：放在 (x, y)、朝 <paramref name="dir"/> 的地下管线口会接上的地下那一侧网络的流体（没配对 / 没流体 = 0）。</summary>
+        /// <summary>
+        /// 还没放下的地下口（x, y）放下后真会配对的那一口（互为第一件：从它往回看第一件就是新口，且新口在它自己那一等级的跨度内）。
+        /// 新口和 j 之间没有别的地下口（j 是新口这一侧的第一件），所以只差 j 的跨度：T1 口看不到 9～12 格外的 T2 新口（修复轮 P2）。
+        /// </summary>
+        private int FindNewPartner(int x, int y, int dir, int tier)
+        {
+            int j = FindPartner(x, y, dir, tier);
+            if (j < 0)
+            {
+                return -1;
+            }
+            int dist = Math.Abs(_x[j] - x) + Math.Abs(_y[j] - y);
+            return dist <= _config.UndergroundSpan(_tier[j]) + 1 ? j : -1;
+        }
+
+        private int TunnelFluid(int x, int y, int dir, int tier)
+        {
+            int j = FindNewPartner(x, y, dir, tier);
+            if (j < 0)
+            {
+                return 0;
+            }
+            // 新口插在一对已配对的口之间时，对面那一口改和新口配对：新口接上的是对面那一口所在的网络。
+            int net = _net[j];
+            return net >= 0 && net < _netCount ? _nFluid[net] : _fluid[j];
+        }
 
         private int Neighbor(int i, int d) =>
             _lookup.TryGetValue(Key(_x[i] + BeltDirs.Dx(d), _y[i] + BeltDirs.Dy(d)), out int j) ? j : -1;
@@ -275,7 +351,7 @@ namespace BinGames.Sim.Logistics
             {
                 return PipeResult.OutOfRange;
             }
-            if (kind > PipePieceKind.Valve)
+            if (kind > PipePieceKind.Underground)
             {
                 return PipeResult.InvalidArgument;
             }
@@ -319,9 +395,11 @@ namespace BinGames.Sim.Logistics
                 return PipeResult.Ok;
             }
             int seen = sourceFluid;
-            for (int d = 0; d < 4; d++)
+            for (int d = 0; d < 5; d++)
             {
-                int f = SideFluid(x, y, d);
+                // d = 4：地下管线口地下那一侧（配对口所在的网络）。
+                int f = d == 4 ? (kind == PipePieceKind.Underground ? TunnelFluid(x, y, dir, tier) : 0)
+                    : OpensAs(kind, dir, d) ? SideFluid(x, y, d) : 0;
                 if (f == 0)
                 {
                     continue;
@@ -366,7 +444,8 @@ namespace BinGames.Sim.Logistics
         /// 规划一整段路径时的流体检查（FGR-LOG-040）：把 (x, y) 处一件新件会相连的各网络的流体加进 <paramref name="fluids"/>（去重）。
         /// 路径上各格加完后，列表里多于一种流体 = 这段路径会把不同流体接在一起。
         /// </summary>
-        public void AddAdjacentFluids(int x, int y, PipePieceKind kind, int dir, List<int> fluids)
+        /// <param name="tunnel">地下管线口：是否也查地下那一侧（配对口所在的网络）。粘贴时配对口也在这次粘贴里的，由调用方并组，传 false。</param>
+        public void AddAdjacentFluids(int x, int y, PipePieceKind kind, int dir, List<int> fluids, int tier = 0, bool tunnel = true)
         {
             Rebuild();
             for (int d = 0; d < 4; d++)
@@ -379,6 +458,14 @@ namespace BinGames.Sim.Logistics
                 if (f != 0 && !fluids.Contains(f))
                 {
                     fluids.Add(f);
+                }
+            }
+            if (kind == PipePieceKind.Underground && tunnel)
+            {
+                int t = TunnelFluid(x, y, dir, tier);
+                if (t != 0 && !fluids.Contains(t))
+                {
+                    fluids.Add(t);
                 }
             }
         }
@@ -396,8 +483,8 @@ namespace BinGames.Sim.Logistics
             _x[i] = x;
             _y[i] = y;
             _kind[i] = (byte)kind;
-            _tier[i] = (byte)(kind == PipePieceKind.Pipe ? tier : 0);
-            _dir[i] = (byte)(kind == PipePieceKind.Valve ? dir : 0);
+            _tier[i] = (byte)(kind == PipePieceKind.Pipe || kind == PipePieceKind.Underground ? tier : 0);
+            _dir[i] = (byte)(kind == PipePieceKind.Valve || kind == PipePieceKind.Underground ? dir : 0);
             _fluid[i] = (byte)sourceFluid;
             _mode[i] = (byte)PipeTankMode.Both;
             _prio[i] = (byte)PipeConst.TankDefaultPriority;
@@ -419,14 +506,172 @@ namespace BinGames.Sim.Logistics
             return PipeResult.Ok;
         }
 
-        /// <summary>拆掉 (x, y) 的件。储罐里的存量、阀门缓冲里的流体随之排空（<paramref name="lostMl"/>，热更层写明）。</summary>
-        public PipeResult Remove(int x, int y, out long lostMl)
+        /// <summary>
+        /// FG4-ECO-04 修复轮（P1，FGR-LOG-047 / FGR-LOG-040）：拆掉 (x, y) 这一件会不会把两种流体接在一起。
+        /// 只有地下管线口会挡住别的地下口配对（<see cref="FindPartner"/> 只认第一件地下口），所以拆一口可能让被它隔开的两口重新配对；
+        /// 两口所在网络的流体不同（都不为 0）时拒绝，<paramref name="fluidA"/> / <paramref name="fluidB"/> = 两边的流体。
+        /// 不是地下口：O(1) 直接放行；是地下口：沿四个方向各找第一件地下口（O(跨度)），真有新配对时才重算一次网络取流体。
+        /// </summary>
+        public PipeResult CheckRemove(int x, int y, out int fluidA, out int fluidB)
         {
-            lostMl = 0;
+            fluidA = 0;
+            fluidB = 0;
             if (!_lookup.TryGetValue(Key(x, y), out int i))
             {
                 return PipeResult.NotFound;
             }
+            if (_kind[i] != (byte)PipePieceKind.Underground || !RelinksOnRemove(i, false, out _, out _))
+            {
+                return PipeResult.Ok;
+            }
+            // 网络流体要按最新拓扑读：重算会压紧数组、平移下标，重新查一次这一格。
+            Rebuild();
+            i = _lookup[Key(x, y)];
+            return RelinksOnRemove(i, true, out fluidA, out fluidB) ? PipeResult.FluidConflict : PipeResult.Ok;
+        }
+
+        /// <summary>
+        /// 拆掉第 <paramref name="i"/> 件（地下口）后会新配对的地下口对：沿四个方向找第一件地下口 q，q 朝回来且 i 在它的跨度内（i 正挡着它）时，
+        /// 按“拆掉 i 之后”（ignore = i）重新找 q 的配对 j，并要求互为第一件。<paramref name="compareFluids"/> = false 时只回答“有没有新配对”；
+        /// = true 时把全部新配对一起看：按网络并查集合并后，同一连通块里有两种流体（都不为 0）才返回 true（十字交叉处拆口经空网络串接也算）。
+        /// </summary>
+        private bool RelinksOnRemove(int i, bool compareFluids, out int fluidA, out int fluidB)
+        {
+            fluidA = 0;
+            fluidB = 0;
+            int reach = 0;
+            for (int t = 0; t < PipeConst.TierCount; t++)
+            {
+                reach = Math.Max(reach, _config.UndergroundSpan(t) + 1);
+            }
+            // 复审 P1：拆一口最多同时放出 x 轴、y 轴两对新配对，两对可能经过同一个没有流体的网络串成“水 → 空网 → 原油”。
+            // 所以不能逐对比较：把每对新配对两端所在的网络当节点、新配对当边，做一次小并查集（最多 8 个节点），
+            // 合并后同一连通块里出现两种流体才算冲突。用拆前的网络划分是偏保守的：拆掉 i 只会让网络变小、不会变大。
+            int pairCount = 0;
+            for (int d = 0; d < 4; d++)
+            {
+                int dx = BeltDirs.Dx(d), dy = BeltDirs.Dy(d);
+                for (int k = 1; k <= reach; k++)
+                {
+                    if (!_lookup.TryGetValue(Key(_x[i] + dx * k, _y[i] + dy * k), out int q) || _kind[q] != (byte)PipePieceKind.Underground)
+                    {
+                        continue;
+                    }
+                    // 这个方向的第一件地下口：它朝 i 找、且 i 在它的跨度内，才是被 i 挡住的那一口；否则更远的口被它自己挡着，与 i 无关。
+                    if (_dir[q] == BeltDirs.Opposite(d) && k <= _config.UndergroundSpan(_tier[q]) + 1)
+                    {
+                        int j = FindPartner(_x[q], _y[q], _dir[q], _tier[q], i);
+                        if (j >= 0 && FindPartner(_x[j], _y[j], _dir[j], _tier[j], i) == q)
+                        {
+                            if (!compareFluids)
+                            {
+                                return true;
+                            }
+                            _relinkA[pairCount] = q;
+                            _relinkB[pairCount] = j;
+                            pairCount++;
+                        }
+                    }
+                    break;
+                }
+            }
+            return compareFluids && pairCount > 0 && RelinkedFluidConflict(pairCount, out fluidA, out fluidB);
+        }
+
+        // 拆一口最多 4 个方向各一对（同一对会从两头各数一次），节点最多 8 个；预分配，避免拆除路径上产生垃圾。
+        private readonly int[] _relinkA = new int[4];
+        private readonly int[] _relinkB = new int[4];
+        private readonly int[] _relinkNode = new int[8];
+        private readonly int[] _relinkParent = new int[8];
+        private readonly int[] _relinkFluid = new int[8];
+
+        /// <summary>
+        /// 新配对（<see cref="_relinkA"/>[p] ↔ <see cref="_relinkB"/>[p]）把两端所在网络连起来之后，同一连通块里是否有两种流体。
+        /// 节点 = 网络编号（还没分网络的格子用 -(格下标 + 1) 当独立节点）；O(配对数²)，配对数 ≤ 4。
+        /// </summary>
+        private bool RelinkedFluidConflict(int pairCount, out int fluidA, out int fluidB)
+        {
+            fluidA = 0;
+            fluidB = 0;
+            int nodes = 0;
+            for (int p = 0; p < pairCount; p++)
+            {
+                int a = RelinkNode(_relinkA[p], ref nodes);
+                int b = RelinkNode(_relinkB[p], ref nodes);
+                int ra = RelinkRoot(a), rb = RelinkRoot(b);
+                if (ra != rb)
+                {
+                    _relinkParent[ra] = rb;
+                }
+            }
+            for (int n = 0; n < nodes; n++)
+            {
+                int f = _relinkFluid[n];
+                if (f == 0)
+                {
+                    continue;
+                }
+                int root = RelinkRoot(n);
+                for (int m = n + 1; m < nodes; m++)
+                {
+                    int g = _relinkFluid[m];
+                    if (g != 0 && g != f && RelinkRoot(m) == root)
+                    {
+                        fluidA = f;
+                        fluidB = g;
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        private int RelinkNode(int cell, ref int nodes)
+        {
+            int net = _net[cell];
+            int id = net >= 0 && net < _netCount ? net : -(cell + 1);
+            for (int n = 0; n < nodes; n++)
+            {
+                if (_relinkNode[n] == id)
+                {
+                    return n;
+                }
+            }
+            _relinkNode[nodes] = id;
+            _relinkParent[nodes] = nodes;
+            _relinkFluid[nodes] = CellFluid(cell);
+            return nodes++;
+        }
+
+        private int RelinkRoot(int n)
+        {
+            while (_relinkParent[n] != n)
+            {
+                n = _relinkParent[n];
+            }
+            return n;
+        }
+
+        /// <summary>第 <paramref name="i"/> 格所在网络的流体（还没分网络时取这一格自己的流体）。</summary>
+        private int CellFluid(int i)
+        {
+            int net = _net[i];
+            return net >= 0 && net < _netCount ? _nFluid[net] : _fluid[i];
+        }
+
+        /// <summary>
+        /// 拆掉 (x, y) 的件。储罐里的存量、阀门缓冲里的流体随之排空（<paramref name="lostMl"/>，热更层写明）。
+        /// 拆掉地下口会让两种流体的地下口重新配对时拒绝（<see cref="PipeResult.FluidConflict"/>，见 <see cref="CheckRemove"/>）。
+        /// </summary>
+        public PipeResult Remove(int x, int y, out long lostMl)
+        {
+            lostMl = 0;
+            PipeResult check = CheckRemove(x, y, out _, out _);
+            if (check != PipeResult.Ok)
+            {
+                return check;
+            }
+            int i = _lookup[Key(x, y)];
             lostMl = _stock[i] + _buf[i];
             TotalRemovedMl += lostMl;
             // O(1)：只从查找表摘掉并打上“已拆”标记，压紧数组留到下一次重算前一次做完（<see cref="Compact"/>）。
@@ -987,6 +1232,7 @@ namespace BinGames.Sim.Logistics
             EnsureNets(_netCount + 1);
             Array.Copy(_nLastFlow, _nLastFlowOld, _netCount);
             int oldCount = _netCount;
+            PairUnderground();
             for (int i = 0; i < _n; i++)
             {
                 _oldNet[i] = _net[i] < oldCount ? _net[i] : -1;
@@ -1041,6 +1287,13 @@ namespace BinGames.Sim.Logistics
                             _queue[tail++] = j;
                         }
                     }
+                    // FG4-ECO-04（FG-GAP-082）：地下管线口与配对口同一网络（中间的格子不参与）。
+                    int pj = _partner[c];
+                    if (pj >= 0 && _net[pj] < 0)
+                    {
+                        _net[pj] = id;
+                        _queue[tail++] = pj;
+                    }
                 }
                 _cellsOf.Close();
             }
@@ -1091,8 +1344,9 @@ namespace BinGames.Sim.Logistics
                             fluid = Math.Min(fluid, f);
                         }
                     }
-                    if (_kind[c] == (byte)PipePieceKind.Pipe)
+                    if (_kind[c] == (byte)PipePieceKind.Pipe || _kind[c] == (byte)PipePieceKind.Underground)
                     {
+                        // 地下管线口按它的等级参与“最低等级限流”（地下段的吞吐与同等级管线相同）。
                         _nPipe[n]++;
                         int t = _tier[c];
                         if (firstTier < 0)
@@ -1858,7 +2112,29 @@ namespace BinGames.Sim.Logistics
                 ValveFluidMismatch = valve && _mismatch[i] != 0,
                 PumpedMl = pump ? _stepOut[i] : 0,
                 PumpTotalMl = pump ? _pumpTotal[i] : 0,
+                UndergroundLinked = _partner[i] >= 0,
+                PartnerX = _partner[i] >= 0 ? _x[_partner[i]] : 0,
+                PartnerY = _partner[i] >= 0 ? _y[_partner[i]] : 0,
             };
+            return true;
+        }
+
+        /// <summary>FG4-ECO-04（FG-GAP-082）：放在 (x, y)、朝 <paramref name="dir"/>、等级 <paramref name="tier"/> 的地下管线口会和哪一口配对（放置预览用，不改状态）。</summary>
+        public bool TryPreviewUnderground(int x, int y, int dir, int tier, out int partnerX, out int partnerY)
+        {
+            Rebuild();
+            partnerX = partnerY = 0;
+            if (dir < 0 || dir > 3)
+            {
+                return false;
+            }
+            int j = FindNewPartner(x, y, dir, tier);
+            if (j < 0)
+            {
+                return false;
+            }
+            partnerX = _x[j];
+            partnerY = _y[j];
             return true;
         }
 
@@ -2066,7 +2342,7 @@ namespace BinGames.Sim.Logistics
             {
                 int x = s.X[k], y = s.Y[k];
                 byte kind = s.Kind[k];
-                bool ok = Math.Abs(x) <= PipeConst.CoordLimit && Math.Abs(y) <= PipeConst.CoordLimit && kind <= (byte)PipePieceKind.Valve
+                bool ok = Math.Abs(x) <= PipeConst.CoordLimit && Math.Abs(y) <= PipeConst.CoordLimit && kind <= (byte)PipePieceKind.Underground
                           && s.Tier[k] < PipeConst.TierCount && s.Dir[k] <= 3 && s.Fluid[k] <= PipeConst.MaxFluid && s.BufferFluid[k] <= PipeConst.MaxFluid
                           && s.Mode[k] <= (byte)PipeTankMode.OutOnly && s.Priority[k] >= PipeConst.PriorityMin && s.Priority[k] <= PipeConst.PriorityMax
                           && s.Stock[k] >= 0 && s.Buffer[k] >= 0 && s.PumpTotal[k] >= 0
@@ -2283,11 +2559,15 @@ namespace BinGames.Sim.Logistics
                     {
                         flags |= 4;
                     }
+                    if (_kind[i] == (byte)PipePieceKind.Underground && _partner[i] < 0)
+                    {
+                        flags |= 8; // 地下管线口没配对：着色器叠红色斜纹（颜色之外有花纹，B15）
+                    }
                     _render[i] = new PipeInstance
                     {
                         Ax = _x[i],
                         Ay = _y[i],
-                        Az = _kind[i] + 4 * _dir[i],
+                        Az = _kind[i] + 8 * _dir[i], // FG4-ECO-04：种类 0～7 + 8 × 方向（着色器同步解码）
                         Aw = _mask[i],
                         Bx = fluid,
                         By = _tier[i],
@@ -2330,6 +2610,7 @@ namespace BinGames.Sim.Logistics
             Array.Resize(ref _mask, cap);
             Array.Resize(ref _valA, cap);
             Array.Resize(ref _valB, cap);
+            Array.Resize(ref _partner, cap);
             Array.Resize(ref _stepIn, cap);
             Array.Resize(ref _stepOut, cap);
             Array.Resize(ref _bufStart, cap);

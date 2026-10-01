@@ -382,11 +382,15 @@ namespace GameLogic.EditorTools
             CommitVia(a);
             MachineCombatResolution pilot = MachineLoadoutRegistry.ResolveForPilot(s, a, s.RandomSeed);
             site.TryGetMachineWeapon(a, out MachineWeaponInfo info);
+            // FG4-ECO-04：装甲击穿原本只有耗电（1），折算成每发积热 1（DEBT-FG2FW01-02 范围变更）——重炮接入它：(40 + 1) × 1.5（裸跑）；破解后 40 + 1；AI 驾驶（不带它）40。
+            float pierce = FirmwareKinds.HeatOf(FirmwareCatalog.FwArmorPierceId);
+            float rawHeat = (40f + pierce) * 1.5f;
+            float crackedHeat = 40f + pierce;
             Expect(pilot.Preview.RawFirmwareIds.SequenceEqual(new[] { FirmwareCatalog.FwArmorPierceId }) && Mathf.Approximately(pilot.Preview.RawHeatMultiplier, 1.5f)
-                   && Mathf.Approximately(pilot.Preview.HeatBudget, 60f) && Mathf.Approximately(WeaponOf(site, a).HeatPerShot, 60f) && info.RawGated
+                   && Mathf.Approximately(pilot.Preview.HeatBudget, rawHeat) && Mathf.Approximately(WeaponOf(site, a).HeatPerShot, rawHeat) && info.RawGated
                    && (Unit(site, a).Flags & CombatUnitFlags.RawGated) != 0 && Mathf.Approximately(WeaponOf(site, ai).HeatPerShot, 40f)
                    && MachineLoadoutRegistry.ResolveForAi(s, ai, s.RandomSeed).Preview.RawFirmwareIds.Length == 0,
-                "接入后：装甲击穿插在接入口（未破解，裸跑），编译热量预算 60、内核每发积热 60、带裸跑门控；同蓝图的 AI 驾驶机积热 40、没有裸跑（FGT-SIG-011 式对照）");
+                $"接入后：装甲击穿插在接入口（未破解，裸跑），编译热量预算 {rawHeat:0.#}、内核每发积热 {rawHeat:0.#}（(40 + 固件 {pierce:0.#}) × 1.5）、带裸跑门控；同蓝图的 AI 驾驶机积热 40、没有裸跑（FGT-SIG-011 式对照）");
 
             Place(site, a, armor.Position + FoundryOutpostRegion.ArmorFacingOf(armor) * 6f);
             float e0 = s.SignalExposure;
@@ -398,16 +402,16 @@ namespace GameLogic.EditorTools
             float e1 = s.SignalExposure;
             SignalExposureEventRecord last = CampaignExposureLedger.RecentEvents(s, 1).FirstOrDefault();
             double remaining = RawFirmwareService.ChargeRemaining(s);
-            Expect(shot1 && Mathf.Abs(heat1 - 60f) < 0.6f && Mathf.Abs(e1 - e0 - 2f) < 1e-3f && RawFirmwareService.RawFiredCount == fired0 + 1
+            Expect(shot1 && Mathf.Abs(heat1 - rawHeat) < 0.6f && Mathf.Abs(e1 - e0 - 2f) < 1e-3f && RawFirmwareService.RawFiredCount == fired0 + 1
                    && last != null && last.Kind == ExposureSourceKind.RawFire && last.Detail == FirmwareCatalog.FwArmorPierceId && last.Faction == "foundry"
                    && remaining > 6.0 && remaining <= 8.0 && (Unit(site, a).Flags & CombatUnitFlags.RawGated) == 0,
-                $"第一发：积热 {heat1:F1}（40 × 1.5）、暴露 {e0:0.#} → {e1:0.#}（+2，来源“{CampaignExposureLedger.SourceText(last)}”，阵营铸造）；计次间隔剩 {remaining:F2} 游戏秒，门控已撤下");
+                $"第一发：积热 {heat1:F1}（(40 + {pierce:0.#}) × 1.5）、暴露 {e0:0.#} → {e1:0.#}（+2，来源“{CampaignExposureLedger.SourceText(last)}”，阵营铸造）；计次间隔剩 {remaining:F2} 游戏秒，门控已撤下");
 
             SetHeat(site, a, 0f);
             bool shot2 = FireCannon(site, a, left);
             float heat2 = Heat(site, a);
             WorldSimulation.StepMany(1);
-            Expect(shot2 && Mathf.Abs(heat2 - 60f) < 0.6f && Mathf.Approximately(s.SignalExposure, e1) && RawFirmwareService.RawFiredCount == fired0 + 1,
+            Expect(shot2 && Mathf.Abs(heat2 - rawHeat) < 0.6f && Mathf.Approximately(s.SignalExposure, e1) && RawFirmwareService.RawFiredCount == fired0 + 1,
                 $"间隔内第二发（重炮 3 秒冷却后）：积热照样 {heat2:F1}，暴露不重复计（{s.SignalExposure:0.#}）——固件照常生效，只有暴露按次数计");
 
             int rearm0 = RawFirmwareService.RearmCount;
@@ -431,19 +435,19 @@ namespace GameLogic.EditorTools
             site.TryGetMachineWeapon(a, out MachineWeaponInfo infoAfter);
             Expect(done && !FirmwareKinds.IsRaw(s, FirmwareCatalog.FwArmorPierceId) && RawFirmwareService.CrackedCount == cracked0 + 1
                    && SignalCoreService.SlotPartId(s, 0) == partBefore && SignalUplinkService.IsUplinked(s, a)
-                   && Mathf.Approximately(WeaponOf(site, a).HeatPerShot, 40f) && !infoAfter.RawGated && (Unit(site, a).Flags & CombatUnitFlags.RawGated) == 0
+                   && Mathf.Approximately(WeaponOf(site, a).HeatPerShot, crackedHeat) && !infoAfter.RawGated && (Unit(site, a).Flags & CombatUnitFlags.RawGated) == 0
                    && SignalUplinkService.LastFeedbackText == GameText.Format("signal.raw.cracked", FirmwareKinds.DisplayName(FirmwareCatalog.FwArmorPierceId),
                        GameText.Get(FirmwareKinds.AfterCrackKey(FirmwareCatalog.FwArmorPierceId)))
                    // FG2-FW-02（DEBT-FG1SIG06-07 关闭）：装甲击穿有了原生读法，破解后“也能装进机器”（不再是“仍只能放进信号核”）。
                    && FirmwareKinds.HasMachineImplementation(FirmwareCatalog.FwArmorPierceId)
                    && SignalUplinkService.LastFeedbackText.Contains(GameText.Get("signal.raw.after_crack.machine")),
-                $"破解完成时固件正插在信号核里（解析台真实队列）：同一件（{ShortId(partBefore)}）留在 1 号槽、信号仍在机器里，接入的机器立刻按已破解重编译（每发积热 40、没有裸跑门控）；HUD“{SignalUplinkService.LastFeedbackText}”");
+                $"破解完成时固件正插在信号核里（解析台真实队列）：同一件（{ShortId(partBefore)}）留在 1 号槽、信号仍在机器里，接入的机器立刻按已破解重编译（每发积热 {crackedHeat:0.#}、没有裸跑门控）；HUD“{SignalUplinkService.LastFeedbackText}”");
             float e3 = s.SignalExposure;
             SetHeat(site, a, 0f);
             bool shot4 = FireCannon(site, a, left);
             float heat4 = Heat(site, a);
             WorldSimulation.StepMany(3);
-            Expect(shot4 && Mathf.Abs(heat4 - 40f) < 0.6f && Mathf.Approximately(s.SignalExposure, e3),
+            Expect(shot4 && Mathf.Abs(heat4 - crackedHeat) < 0.6f && Mathf.Approximately(s.SignalExposure, e3),
                 $"破解后开火：积热 {heat4:F1}、暴露不变（{s.SignalExposure:0.#}）——裸跑代价随标记一起消失");
         }
 
@@ -953,9 +957,9 @@ namespace GameLogic.EditorTools
                 UplinkDualPreview dual = UplinkCompiler.CompileDual(board, new[] { FirmwareCatalog.FwArmorPierceId });
                 string rawLine = GameText.Format("circuit.uplink.line.raw", FirmwareKinds.DisplayName(FirmwareCatalog.FwArmorPierceId), "2", "1.5");
                 Expect(dual.UplinkedLines.Any(x => x.Text == rawLine) && dual.Notes.Any(n => n.Contains(FirmwareKinds.DisplayName(FirmwareCatalog.FwArmorPierceId)) && n.Contains("1.5"))
-                       && Mathf.Approximately(dual.Ai.HeatBudget, 40f) && Mathf.Approximately(dual.Uplinked.HeatBudget, 60f)
+                       && Mathf.Approximately(dual.Ai.HeatBudget, 40f) && Mathf.Approximately(dual.Uplinked.HeatBudget, (40f + FirmwareKinds.HeatOf(FirmwareCatalog.FwArmorPierceId)) * 1.5f)
                        && dual.Diff.Any(d => d.Kind == UplinkDiffKind.HeatChanged),
-                    $"双态预览（接入前就知道代价）：接入栏“{rawLine}”，说明“{dual.Notes.FirstOrDefault(n => n.Contains("1.5"))}”，热量预算 40 → 60");
+                    $"双态预览（接入前就知道代价）：接入栏“{rawLine}”，说明“{dual.Notes.FirstOrDefault(n => n.Contains("1.5"))}”，热量预算 40 → {dual.Uplinked.HeatBudget:0.#}（装甲击穿每发积热 {FirmwareKinds.HeatOf(FirmwareCatalog.FwArmorPierceId):0.#}，FG4-ECO-04 由耗电折算）");
 
                 // HUD 暴露按钮 + 面板
                 hud.Refresh();

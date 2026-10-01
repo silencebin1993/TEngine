@@ -82,6 +82,7 @@ namespace GameLogic.Campaign.Blueprint
         HeatChanged,
         DamageChanged,
         /// <summary>FG2-FW-01（FG-GAP-028）：每发耗电变化。</summary>
+        /// <summary>FG4-ECO-04 起不再生成（耗电不进战斗、不显示）；保留枚举值免得旧引用错位。</summary>
         PowerChanged,
     }
 
@@ -290,8 +291,8 @@ namespace GameLogic.Campaign.Blueprint
                 : GameText.Get("circuit.uplink.line.no_output"));
             // FG2-FW-02（B13）：显示内核实际每发伤害（与 CombatSite.MachineWeaponFrom 同源），不是旧器官的编译伤害。
             lines.Add(GameText.Format("circuit.uplink.line.damage", F1(Combat.CombatSite.MachineHitDamage(p))));
-            // FG2-FW-01（FG-GAP-028，FGR-SIG-022“热量和能耗的变化”）：热量行带上固件的每发耗电（同一行，栏的行数与界面标签数不变）。
-            lines.Add(GameText.Format("circuit.uplink.line.heat_power", F1(p.HeatBudget), p.PowerCost.ToString(CultureInfo.InvariantCulture)));
+            // FG4-ECO-04（DEBT-FG2FW01-02 范围变更：战斗中不扣电池）：双态预览只比热量，不再显示“每发耗电”（PowerCost 只留在数据层）。
+            lines.Add(GameText.Format("circuit.uplink.line.heat", F1(p.HeatBudget)));
             lines.Add(p.ReactionId != null
                 ? GameText.Format("circuit.uplink.line.reaction", ReactionName(p.ReactionId))
                 : GameText.Get("circuit.uplink.line.reaction_none"));
@@ -351,11 +352,7 @@ namespace GameLogic.Campaign.Blueprint
             {
                 dual.Diff.Add(new UplinkDiffLine(UplinkDiffKind.HeatChanged, GameText.Format("circuit.uplink.diff.heat", F1(a.HeatBudget), F1(u.HeatBudget))));
             }
-            if (u.PowerCost != a.PowerCost)
-            {
-                dual.Diff.Add(new UplinkDiffLine(UplinkDiffKind.PowerChanged, GameText.Format("circuit.uplink.diff.power",
-                    a.PowerCost.ToString(CultureInfo.InvariantCulture), u.PowerCost.ToString(CultureInfo.InvariantCulture))));
-            }
+            // FG4-ECO-04（DEBT-FG2FW01-02 范围变更）：耗电不再是代价，差异里不列“耗电 a → b”。
             float aHit = Combat.CombatSite.MachineHitDamage(a), uHit = Combat.CombatSite.MachineHitDamage(u);
             if (Math.Abs(uHit - aHit) > 0.0001f)
             {

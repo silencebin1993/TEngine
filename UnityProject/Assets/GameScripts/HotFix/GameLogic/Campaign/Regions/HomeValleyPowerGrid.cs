@@ -87,8 +87,11 @@ namespace GameLogic.Campaign.Regions
             PowerKernel kernel = EnsureKernel(state);
             long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
             BuildEntities(state);
+            // FG4-ECO-04：太阳能系数按这一刻的环境定（与世界步同一个纯函数：读档 / 换战役后第一次结算就正确）。
+            RefreshEnvironment(state, kernel);
             long t1 = System.Diagnostics.Stopwatch.GetTimestamp();
             kernel.Rebuild(_entities, _entityCount);
+            PruneStorageSettings(state);
             long t2 = System.Diagnostics.Stopwatch.GetTimestamp();
             GridSummary result = ApplyResults(state, topologyChanged: true);
             long t3 = System.Diagnostics.Stopwatch.GetTimestamp();
