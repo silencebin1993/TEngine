@@ -71,7 +71,9 @@ namespace GameLogic.Campaign
                 case ResourceScrap: return "废料";
                 case ResourceTechData: return "技术数据";
                 case ResourcePower: return "电力";
-                default: return "资源";
+                default:
+                    // FG4-ECO-01：物品表里的物品显示表里的名字（不把内部键直接显示给玩家）。
+                    return Economy.ItemCatalog.TryGetByResource(resourceType, out Economy.ItemDef def) ? def.Name : "资源";
             }
         }
 

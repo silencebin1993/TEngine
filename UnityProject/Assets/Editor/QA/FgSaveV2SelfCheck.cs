@@ -45,7 +45,7 @@ namespace GameLogic.EditorTools
         private const string RemovedId = "organ_removed_selfcheck";
         private const string UnlistedId = "organ_unlisted_selfcheck";
 
-        [MenuItem("BinGames/自检：FG 存档 v2")]
+        [MenuItem("BinGames/QA/自检/FG 存档 v2")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();
@@ -152,7 +152,8 @@ namespace GameLogic.EditorTools
             // FG0-ARCH-03 新增第 18 个域 Combat（战斗内核快照；FGR-ARC-008 的“突袭”之外，远征战斗也要进存档）。
             // FG0-ARCH-06 新增第 19 个域 Nav（星球表面寻路内核的排队请求与待采纳结果；读档接着跑与不存档一致）。
             // FG3-LOG-06 新增第 20 个域 Power（电网编号、曲线、储能存量）。
-            Expect(fields.Length == 20 && fields.Contains("Combat") && fields.Contains("Nav") && fields.Contains("Power") && fields.SequenceEqual(registered) && CampaignFgStateDomains.All.All(d => !string.IsNullOrEmpty(d.OwnerStory)),
+            // FG4-ECO-01 新增第 21 个域 Economy（仓库物资、核心保管库、净速率采样）。
+            Expect(fields.Length == 21 && fields.Contains("Combat") && fields.Contains("Nav") && fields.Contains("Power") && fields.Contains("Economy") && fields.SequenceEqual(registered) && CampaignFgStateDomains.All.All(d => !string.IsNullOrEmpty(d.OwnerStory)),
                 $"CampaignState 上 {fields.Length} 个状态域全部登记且写明承接 Story（{string.Join("、", fields)}）");
 
             // 旧正文缺域（比如 v2 早期存档还没有某个域）：读档补空域，不是 null。

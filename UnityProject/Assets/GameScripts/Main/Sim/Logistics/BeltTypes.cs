@@ -44,6 +44,8 @@ namespace BinGames.Sim.Logistics
         /// <summary>FG3-LOG-03：输入端口收什么——0 = 任何物品；<see cref="AcceptNone"/> = 什么都不收（建筑还没有这类物品的配方）；其余 = 只收这一种。</summary>
         public const ushort AcceptAny = 0;
         public const ushort AcceptNone = 0xFFFF;
+        /// <summary>FG4-ECO-01：任何物品都收，但缓存里同一时刻只有一种（缓存种类记在端口的 Item 上）；家园仓库的输入口用它按种类入库。</summary>
+        public const ushort AcceptAnyOneKind = 0xFFFE;
 
         /// <summary>FG3-LOG-03（FGR-LOG-028）：露天传送带减速的上限（百分比）。</summary>
         public const int MaxSlowPercent = 90;

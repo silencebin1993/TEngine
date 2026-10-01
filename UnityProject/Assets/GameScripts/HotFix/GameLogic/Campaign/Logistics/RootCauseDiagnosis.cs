@@ -648,18 +648,20 @@ namespace GameLogic.Campaign.Logistics
                         AppendBeltTrace(p, k, c, v.BeltCell);
                         report.Chains.Add(c);
                     }
-                    else if (v.Filter != BeltPortService.FilterOff && v.Info.Pending <= 0 && BeltItems.Stock(state, BeltPortService.ItemForFilter(v.Filter)) <= 0)
+                    else if (v.Filter != BeltPortService.FilterOff && v.Info.Pending <= 0 && BeltPortService.OutputStockEmpty(state, v.Filter))
                     {
                         DiagChain c = NewChain(DiagCategory.Input);
-                        Step(c, DiagCode.StoreEmpty, GameText.Format("diag.step.store_empty", report.Name, BeltItems.Name(BeltPortService.ItemForFilter(v.Filter))), b.Position, b.BuildingId);
+                        string what = v.Filter == BeltPortService.FilterAll ? GameText.Get("logistics.port.filter_all") : BeltItems.Name(BeltPortService.ItemForFilter(v.Filter));
+                        Step(c, DiagCode.StoreEmpty, GameText.Format("diag.step.store_empty", report.Name, what), b.Position, b.BuildingId);
                         report.Chains.Add(c);
                     }
                 }
-                else if (HomeValleyCargo.GetAvailableSpace(state, CampaignEconomyLedger.ResourceScrap) <= 0)
+                else if (v.PortId >= 0 && BeltPortService.StoreFull(state, v.PortId, out Economy.ItemDef kind))
                 {
+                    // FG4-ECO-01：按输入口缓存里那一种判断（每种物品的容量各算各的）。
                     DiagChain c = NewChain(DiagCategory.Output);
-                    Step(c, DiagCode.StoreFull, GameText.Format("diag.step.store_full", report.Name, Mathf.FloorToInt(state.Scrap),
-                        HomeValleyCargo.GetStorageCapacity(state, CampaignEconomyLedger.ResourceScrap)), b.Position, b.BuildingId);
+                    Step(c, DiagCode.StoreFull, GameText.Format("diag.step.store_full_item", report.Name, kind.Name, Economy.HomeInventory.Stock(state, kind),
+                        Economy.HomeInventory.Capacity(state, kind)), b.Position, b.BuildingId);
                     report.Chains.Add(c);
                 }
             }
@@ -697,10 +699,10 @@ namespace GameLogic.Campaign.Logistics
             {
                 BuildingRecord owner = HomeGridService.FindBuilding(state, sink.BuildingId);
                 Vector2 at = owner?.Position ?? CellPos(endCell);
-                if (end.Block == BeltBlock.SinkFull && sink.Store && HomeValleyCargo.GetAvailableSpace(state, CampaignEconomyLedger.ResourceScrap) <= 0)
+                if (end.Block == BeltBlock.SinkFull && sink.Store && BeltPortService.StoreFull(state, sink.PortId, out Economy.ItemDef kind))
                 {
-                    Step(c, DiagCode.StoreFullRoot, GameText.Format("diag.step.store_full", BeltPortService.BuildingName(sink.BuildingId), Mathf.FloorToInt(state.Scrap),
-                        HomeValleyCargo.GetStorageCapacity(state, CampaignEconomyLedger.ResourceScrap)), at, sink.BuildingId);
+                    Step(c, DiagCode.StoreFullRoot, GameText.Format("diag.step.store_full_item", BeltPortService.BuildingName(sink.BuildingId), kind.Name,
+                        Economy.HomeInventory.Stock(state, kind), Economy.HomeInventory.Capacity(state, kind)), at, sink.BuildingId);
                     return;
                 }
                 Step(c, DiagCode.BeltTerminal, GameText.Format("diag.step.belt_terminal", end.X, end.Y, BeltNetworkService.DescribeBlock(end)), at, sink.BuildingId);

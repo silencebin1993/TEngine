@@ -80,17 +80,18 @@ namespace GameLogic.Campaign.Logistics
 
         // ── 表值解析 ─────────────────────────────────────────────────────────────
 
-        /// <summary>表里的过滤写法（any / none / scrap）→ 内核过滤值。</summary>
+        /// <summary>表里的过滤写法（any / none / scrap / 物品表里任一固体的 ID，FG4-ECO-01）→ 内核过滤值。</summary>
         public static ushort ParseFilter(string text)
         {
-            switch ((text ?? string.Empty).Trim())
+            string t = (text ?? string.Empty).Trim();
+            switch (t)
             {
                 case "none":
                     return BeltConst.FilterNone;
                 case "scrap":
                     return BeltItems.ScrapId;
                 default:
-                    return BeltConst.FilterAny;
+                    return Economy.ItemCatalog.TryGet(t, out Economy.ItemDef d) && d.BeltId != 0 ? d.BeltId : BeltConst.FilterAny;
             }
         }
 

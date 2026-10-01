@@ -147,6 +147,9 @@ namespace GameLogic.Campaign.WorldSim
         public static void ResetSessionState()
         {
             HomeValleyWorkOrders.ResetSessionState();
+            Economy.HomeInventory.ResetSessionState(); // FG4-ECO-01：物资索引按新战役重建
+            Economy.ItemFlowStats.ResetSessionState();
+            Economy.ItemDistribution.Invalidate();
             HomeValleySoftlockGuard.ResetSessionState();
             HomeValleyAlarms.ResetSessionState();
             HomeValleyCombatTargets.ResetSessionState();
@@ -455,6 +458,8 @@ namespace GameLogic.Campaign.WorldSim
                 BeltNetworkService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                 // FG3-LOG-05：管线内核与传送带同一节拍（FGR-LOG-090）。
                 PipeNetworkService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
+                // FG4-ECO-01：物品库存采样（净速率），每 eco.flow.sample_seconds 游戏秒一次、只看步序号，与观察无关，O(物品种类)。
+                Economy.ItemFlowStats.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                 // FG3-LOG-06：电网按游戏秒积分储能（没有储能时不做事）、按 power.sample_seconds 记曲线——只看步序号，与观察无关，O(电网数)。
                 if (Home != null && Home.IsLoaded)
                 {

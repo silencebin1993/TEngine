@@ -201,6 +201,8 @@ namespace GameLogic.Campaign
         public NotificationHistoryState Notifications = new NotificationHistoryState();
         /// <summary>FG0-ARCH-06：星球表面寻路内核的待处理状态。唯一写入口是 <c>Nav.NavService.WriteTo</c>。</summary>
         public NavState Nav = new NavState();
+        /// <summary>FG4-ECO-01：家园物资（废料以外的固体、核心保管库、净速率采样）。唯一写入口是 <c>Economy.HomeInventory</c> / <c>Economy.ItemFlowStats</c>。</summary>
+        public EconomyState Economy = new EconomyState();
 
         /// <summary>新建战役：ERD-ECO-001 的 Demo 初始废料基线（180）已在设计文档给出数值，
         /// 直接采用；其余经济/工作/建筑/区域集合按 Done 定义留空，等待 ER3/ER4/ER5 写入真实数据。</summary>
@@ -272,6 +274,7 @@ namespace GameLogic.Campaign
                 Stats = new StatsState(),
                 SaveHistory = new SaveHistoryState(),
                 Notifications = new NotificationHistoryState(),
+                Economy = new EconomyState(),
             };
         }
 
@@ -336,6 +339,11 @@ namespace GameLogic.Campaign
 
             // FG0-SAVE-01：新状态域不得为 null；区块差异与读档通知按稳定键排序。
             CampaignFgStateDomains.EnsureAll(this);
+            // FG4-ECO-01：物资按物品 ID 排序、去掉 0 件与空 ID（同一状态同一字节）。
+            Economy.Items = Economy.Items.Where(r => r != null && r.Amount > 0 && !string.IsNullOrEmpty(r.ItemId))
+                .OrderBy(r => r.ItemId, StringComparer.Ordinal).ToArray();
+            Economy.Vault = Economy.Vault.Where(r => r != null && r.Amount > 0 && !string.IsNullOrEmpty(r.ItemId))
+                .OrderBy(r => r.ItemId, StringComparer.Ordinal).ToArray();
             World.ChunkDiffs = World.ChunkDiffs
                 .OrderBy(r => r.SurfaceId, StringComparer.Ordinal).ThenBy(r => r.ChunkX).ThenBy(r => r.ChunkY).ToArray();
             Notifications.Entries = Notifications.Entries

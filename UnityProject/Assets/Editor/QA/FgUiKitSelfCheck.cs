@@ -48,7 +48,7 @@ namespace GameLogic.EditorTools
         private static int _fail;
         private static int _pass;
 
-        [MenuItem("BinGames/自检：FG UI 基础件与输入上下文")]
+        [MenuItem("BinGames/QA/自检/FG UI 基础件与输入上下文")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();
@@ -186,7 +186,7 @@ namespace GameLogic.EditorTools
             var enumMembers = ((GameActionId[])Enum.GetValues(typeof(GameActionId))).Distinct().ToList();
             var missing = enumMembers.Where(a => !InputActionCatalog.TryGet(a, out _)).ToList();
             var extra = InputActionCatalog.All.Where(d => !enumMembers.Contains(d.Action)).ToList();
-            Expect(missing.Count == 0 && extra.Count == 0 && InputActionCatalog.All.Count == enumMembers.Count && enumMembers.Count == 106, // FG3-LOG-08 新增“叠加层选择器”“为什么不工作”与 8 种叠加层直达（96 → 106）；FG3-LOG-07 新增“复制设置”“粘贴设置”（94 → 96）；FG3-LOG-06 新增“电网面板”（93 → 94）；FG0-ARCH-01 新增“切换关注点”（85 → 86）；FG1-SIG-01 新增“信号核”（86 → 87）；FG1-SIG-06 新增“暴露面板”（87 → 88）；FG3-LOG-01 新增“格线开关”“搬迁”（88 → 90）；FG3-LOG-02 新增“施工队列”“优先建造这一片”（90 → 92）；FG3-LOG-03 新增“清带”（92 → 93）
+            Expect(missing.Count == 0 && extra.Count == 0 && InputActionCatalog.All.Count == enumMembers.Count && enumMembers.Count == 107, // FG4-ECO-01 新增“物资面板”（106 → 107）；FG3-LOG-08 新增“叠加层选择器”“为什么不工作”与 8 种叠加层直达（96 → 106）；FG3-LOG-07 新增“复制设置”“粘贴设置”（94 → 96）；FG3-LOG-06 新增“电网面板”（93 → 94）；FG0-ARCH-01 新增“切换关注点”（85 → 86）；FG1-SIG-01 新增“信号核”（86 → 87）；FG1-SIG-06 新增“暴露面板”（87 → 88）；FG3-LOG-01 新增“格线开关”“搬迁”（88 → 90）；FG3-LOG-02 新增“施工队列”“优先建造这一片”（90 → 92）；FG3-LOG-03 新增“清带”（92 → 93）
                 $"GameActionId 的 {enumMembers.Count} 个成员与表里 {InputActionCatalog.All.Count} 行一一对应（缺：{string.Join(",", missing)}；多：{string.Join(",", extra.Select(d => d.Action))}）");
 
             InputBindingSet defaults = InputBindingSet.CreateDefault();
@@ -1449,7 +1449,8 @@ namespace GameLogic.EditorTools
             // FG3-LOG-05 新增 PipePanel.uxml（管线面板：网络读数、储罐、阀门、冲洗），共 22 份。
             // FG3-LOG-07 新增 LayoutLibraryPanel.uxml（布局库）与 LayoutLibraryRow.uxml（布局行模板），共 25 份。
             // FG3-LOG-08 新增 OverlayHud.uxml（叠加层停靠条 / 选择器 / 标签层）与 DiagnosisPanel.uxml（为什么不工作），共 27 份。
-            Expect(uxmlCount == 27 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
+            // FG4-ECO-01 新增 ItemsPanel.uxml（物资面板），共 28 份。
+            Expect(uxmlCount == 28 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
 
             string[] codeDirs =
             {

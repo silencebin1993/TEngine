@@ -250,6 +250,13 @@ namespace GameLogic.EditorTools
                     case 309: StepOverlayOffAgain(inStep); break;
                     case 310: StepOverlaySelectorEsc(inStep); break;
                     case 311: StepOverlayOffConfirmed(inStep); break;
+                    // FG4-ECO-01：物资面板（Alt+I 打开、悬停物品图标看总库存 / 分布 / 净速率、悬停按图鉴键跳到物品图鉴、Esc 关图鉴、Alt+I 关面板）。
+                    case 312: StepItemsOpenKey(inStep); break;
+                    case 313: StepItemsPanelOpened(inStep); break;
+                    case 314: StepItemsHoverShown(inStep); break;
+                    case 315: StepItemsCodexJumped(inStep); break;
+                    case 316: StepItemsCodexClosed(inStep); break;
+                    case 317: StepItemsPanelClosed(inStep); break;
                     case 129: StepRuinsCombat(inStep); break;
                     case 230: StepRuinsTagHover(inStep); break;
                     case 150: StepSignalOpened(inStep); break;
@@ -1116,6 +1123,16 @@ namespace GameLogic.EditorTools
             bool statsClosed = ClickUitk("[StatsPanelHost]", "StatsPanelClose") && !UI.Kit.StatsPanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen;
             Check(statsClicked && statsOpen && statsFilter && statsClosed,
                 $"暂停菜单点“统计”：统计面板打开（“{stats?.SectionText}”，{stats?.CountText}，首行“{statsFirst}”），“突袭 / 全部”筛选可切，点关闭回到暂停菜单");
+            // FG4-ECO-01：暂停菜单“物资”→ 物资面板；“只看持有的”可切；点关闭回到暂停菜单。
+            bool itemsClicked = ClickUitk("[PauseMenuHost]", "PauseItems");
+            UI.Kit.ItemsPanelUIToolkit ip = UI.Kit.ItemsPanelUIToolkit.Instance;
+            int allTiles = ip?.VisibleTileCount ?? 0;
+            bool itemsOpen = ip != null && UI.Kit.ItemsPanelUIToolkit.IsOpen && ip.PanelVisible && allTiles == Campaign.Economy.ItemCatalog.Items.Count;
+            bool heldToggle = ClickUitk("[ItemsPanelHost]", "ItemsPanelHeld") && ip != null && ip.HeldOnly && ip.VisibleTileCount < allTiles && ip.VisibleTileCount > 0
+                              && ClickUitk("[ItemsPanelHost]", "ItemsPanelHeld") && !ip.HeldOnly;
+            bool itemsClosed = ClickUitk("[ItemsPanelHost]", "ItemsPanelClose") && !UI.Kit.ItemsPanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen;
+            Check(itemsClicked && itemsOpen && heldToggle && itemsClosed,
+                $"暂停菜单点“物资”：物资面板打开（{ip?.CountText}，{allTiles} 格），“只看持有的”可切，点关闭回到暂停菜单");
             Check(pm != null && pm.CameraZoomLabelText.Length > 0 && pm.CameraFollowLabelText.Length > 0
                   && !Localization.GameText.ContainsMarker(pm.CameraZoomLabelText + pm.CameraFollowLabelText),
                 $"暂停菜单显示接入镜头设置：“{pm?.CameraZoomLabelText}”“{pm?.CameraFollowLabelText}”");
@@ -4937,7 +4954,7 @@ namespace GameLogic.EditorTools
             Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
             string diag = $"（诊断：建造模式开着 {mode?.IsOpen}，指着 {mode?.HoverCell} / 建筑 {mode?.HoverBuildingId}，核心 {HomeGridService.CorePivot(CampaignSession.Current)}，" +
                           $"面板宿主 {(panel != null ? (panel.IsReady ? "就绪" : "未就绪") : "没有")}，打开的建筑 {BeltPortPanelUIToolkit.BuildingId}，状态行“{mode?.StatusText}”）";
-            Check(open && panel.RowText(0, "BpTitle").Contains("输入口") && panel.RowText(0, "BpAccept").Contains("废料") && panel.StoreText.Contains("家园仓库"),
+            Check(open && panel.RowText(0, "BpTitle").Contains("输入口") && panel.RowText(0, "BpAccept").Contains(Localization.GameText.Get("logistics.port.accept_all")) && panel.StoreText.Contains("家园仓库"), // FG4-ECO-01：核心输入口收全部可存物品
                 $"端口面板（FGR-LOG-021）：“{panel?.TitleText}”{panel?.VisibleRowCount} 行，“{panel?.RowText(0, "BpTitle")}：{panel?.RowText(0, "BpState")}｜{panel?.RowText(0, "BpAccept")}”"
                 + (open ? string.Empty : diag));
             CheckNoTextMarkers("端口面板");
@@ -6116,7 +6133,114 @@ namespace GameLogic.EditorTools
             Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
             Check(!OverlayHudUIToolkit.SelectorOpen && mode != null && mode.IsOpen, "Esc 关掉选择器（最上层先关），建造模式还开着");
             PressKeyKeepMouse(KeyCode.Escape);
-            Next(140, "Esc 退出建造模式；FG0-ARCH-03：家园突袭战斗原型（测试捷径）");
+            Next(312, "Esc 退出建造模式；FG4-ECO-01：按 Alt+I 打开物资面板");
+        }
+
+        // ── FG4-ECO-01：物资面板（FG04 第 4 节“悬停物品图标显示总库存、各仓库分布、当前净速率”“物品和配方都有图鉴条目”）──
+
+        private static void StepItemsOpenKey(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Check(mode == null || !mode.IsOpen, "Esc 退出了建造模式");
+            PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameActionId.OpenItems));
+            Next(313, "按 Alt+I（物资键）");
+        }
+
+        private static void StepItemsPanelOpened(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            UI.Kit.ItemsPanelUIToolkit p = UI.Kit.ItemsPanelUIToolkit.Instance;
+            int items = Campaign.Economy.ItemCatalog.Items.Count;
+            string scrapAmount = p?.TileAmountText("scrap") ?? string.Empty;
+            Check(UI.Kit.ItemsPanelUIToolkit.IsOpen && p != null && p.PanelVisible && InputRouter.IsModalOwner(p) && p.TileCount == items && items >= 30
+                  && scrapAmount.Length > 0 && p.CountText.Length > 0 && p.ErrorText.Length == 0
+                  && !Localization.GameText.ContainsMarker(p.TitleText + p.CountText + p.FooterText + p.TileNameText("alloy")),
+                $"按 Alt+I 打开物资面板：{p?.TileCount} 种物品（{p?.CountText}），废料格“{p?.TileNameText("scrap")} {scrapAmount}”；页脚“{p?.FooterText}”");
+            CheckNoTextMarkers("物资面板");
+            // 鼠标移到废料图标上：派发指针进入事件，走 UiTooltip 自己注册的回调。
+            VisualElement tile = p?.TileOf("scrap");
+            if (tile != null)
+            {
+                using (PointerEnterEvent enter = PointerEnterEvent.GetPooled())
+                {
+                    enter.target = tile;
+                    tile.SendEvent(enter);
+                }
+            }
+            Next(314, "鼠标悬停废料图标");
+        }
+
+        private static void StepItemsHoverShown(double inStep)
+        {
+            // 悬停提示约 0.4 真实秒后出现（UiKitOverlay 每帧 Tick）。
+            if (inStep < 2.5)
+            {
+                return;
+            }
+            TooltipContent tip = UiTooltip.Content;
+            string body = tip?.Body ?? string.Empty;
+            string sources = tip == null ? string.Empty : string.Join("、", tip.Sources.Select(x => x.Label + " " + x.Value));
+            Check(UiTooltip.IsVisible && tip != null && tip.Title == Localization.GameText.Get("item.scrap.name")
+                  && body.Contains(Localization.GameText.Get("item.hover.total_cap").Split('{')[0]) && tip.Sources.Count > 0
+                  && tip.CodexEntryId == Progression.MechanicCodex.ItemEntryId("scrap") && !Localization.GameText.ContainsMarker(body + sources),
+                $"悬停废料图标：“{body.Replace("\n", " / ")}”，分布 {sources}");
+            PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.OpenCodex));
+            Next(315, "悬停时按图鉴键（默认 C）");
+        }
+
+        private static void StepItemsCodexJumped(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            UI.Kit.MechanicCodexPanelUIToolkit codex = UI.Kit.MechanicCodexPanelUIToolkit.Instance;
+            string id = Progression.MechanicCodex.ItemEntryId("scrap");
+            string body = codex?.EntryBodyText ?? string.Empty;
+            Check(UI.Kit.MechanicCodexPanelUIToolkit.IsOpen && codex != null && codex.SelectedId == id && codex.CurrentTab == Progression.MechanicCodex.TabItem
+                  && body.Contains(Localization.GameText.Get("codex.item.source_title")) && body.Contains(Localization.GameText.Get("codex.item.use_title"))
+                  && UI.Kit.ItemsPanelUIToolkit.IsOpen,
+                $"悬停按 C 跳到图鉴物品页签的“{codex?.EntryTitleText}”（写明从哪来、拿去干什么），物资面板仍在下面");
+            CheckNoTextMarkers("图鉴物品页签");
+            VisualElement tile = UI.Kit.ItemsPanelUIToolkit.Instance?.TileOf("scrap");
+            if (tile != null)
+            {
+                using (PointerLeaveEvent leave = PointerLeaveEvent.GetPooled())
+                {
+                    leave.target = tile;
+                    tile.SendEvent(leave);
+                }
+            }
+            PressKeyKeepMouse(KeyCode.Escape);
+            Next(316, "Esc 关图鉴");
+        }
+
+        private static void StepItemsCodexClosed(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(!UI.Kit.MechanicCodexPanelUIToolkit.IsOpen && UI.Kit.ItemsPanelUIToolkit.IsOpen, "Esc 先关图鉴（最上层），物资面板还开着");
+            PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameActionId.OpenItems));
+            Next(317, "再按 Alt+I 关闭物资面板");
+        }
+
+        private static void StepItemsPanelClosed(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(!UI.Kit.ItemsPanelUIToolkit.IsOpen && !InputRouter.IsModalOwner(UI.Kit.ItemsPanelUIToolkit.Instance), "同一个键再按一次关闭物资面板");
+            Next(140, "FG0-ARCH-03：家园突袭战斗原型（测试捷径）");
         }
 
         // ── FG0-ARCH-03：家园突袭的逐单位 / 逐弹体逻辑在战斗内核（测试捷径生成性能场景；正式突袭导演与到达结算属于 FG6）──

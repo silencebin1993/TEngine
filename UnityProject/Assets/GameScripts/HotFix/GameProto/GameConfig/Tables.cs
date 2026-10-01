@@ -131,6 +131,10 @@ public partial class Tables
     /// </summary>
     public fg.TbCombatComponent TbCombatComponent {get; }
     /// <summary>
+    /// 物品
+    /// </summary>
+    public fg.TbEcoItem TbEcoItem {get; }
+    /// <summary>
     /// 固件种类
     /// </summary>
     public fg.TbFirmwareKind TbFirmwareKind {get; }
@@ -174,6 +178,14 @@ public partial class Tables
     /// 具名反应
     /// </summary>
     public fg.TbReaction TbReaction {get; }
+    /// <summary>
+    /// 配方
+    /// </summary>
+    public fg.TbRecipe TbRecipe {get; }
+    /// <summary>
+    /// 配方行
+    /// </summary>
+    public fg.TbRecipeIo TbRecipeIo {get; }
     /// <summary>
     /// 已移除内容
     /// </summary>
@@ -291,6 +303,7 @@ public partial class Tables
         TbCarrierReading = new fg.TbCarrierReading(loader("fg_tbcarrierreading"));
         TbCodexEntry = new fg.TbCodexEntry(loader("fg_tbcodexentry"));
         TbCombatComponent = new fg.TbCombatComponent(loader("fg_tbcombatcomponent"));
+        TbEcoItem = new fg.TbEcoItem(loader("fg_tbecoitem"));
         TbFirmwareKind = new fg.TbFirmwareKind(loader("fg_tbfirmwarekind"));
         TbFluid = new fg.TbFluid(loader("fg_tbfluid"));
         TbGridTerrain = new fg.TbGridTerrain(loader("fg_tbgridterrain"));
@@ -302,6 +315,8 @@ public partial class Tables
         TbNotifyType = new fg.TbNotifyType(loader("fg_tbnotifytype"));
         TbPowerNode = new fg.TbPowerNode(loader("fg_tbpowernode"));
         TbReaction = new fg.TbReaction(loader("fg_tbreaction"));
+        TbRecipe = new fg.TbRecipe(loader("fg_tbrecipe"));
+        TbRecipeIo = new fg.TbRecipeIo(loader("fg_tbrecipeio"));
         TbRemovedContent = new fg.TbRemovedContent(loader("fg_tbremovedcontent"));
         TbStartLayout = new fg.TbStartLayout(loader("fg_tbstartlayout"));
         TbStatusTag = new fg.TbStatusTag(loader("fg_tbstatustag"));
@@ -358,6 +373,7 @@ public partial class Tables
         TbCarrierReading.ResolveRef(this);
         TbCodexEntry.ResolveRef(this);
         TbCombatComponent.ResolveRef(this);
+        TbEcoItem.ResolveRef(this);
         TbFirmwareKind.ResolveRef(this);
         TbFluid.ResolveRef(this);
         TbGridTerrain.ResolveRef(this);
@@ -369,6 +385,8 @@ public partial class Tables
         TbNotifyType.ResolveRef(this);
         TbPowerNode.ResolveRef(this);
         TbReaction.ResolveRef(this);
+        TbRecipe.ResolveRef(this);
+        TbRecipeIo.ResolveRef(this);
         TbRemovedContent.ResolveRef(this);
         TbStartLayout.ResolveRef(this);
         TbStatusTag.ResolveRef(this);

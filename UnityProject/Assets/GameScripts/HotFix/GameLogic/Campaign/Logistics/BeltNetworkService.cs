@@ -93,6 +93,32 @@ namespace GameLogic.Campaign.Logistics
         public static bool IsRunning => _kernel != null && !_kernel.IsDisposed;
         public static CampaignState BoundState => _state;
         public static BeltRenderer Renderer => _renderer;
+
+        private static Vector4[] _palette;
+        private static int _paletteRevision = -1;
+
+        /// <summary>
+        /// FG4-ECO-01（关闭 DEBT-FG0ARCH02-04“带上的物品是按编号着色的方块，没有物品名和图标”）：传送带物品编号 0～63 的颜色（物品表 color 列，a = 1 表示有）。
+        /// 名字在悬停里（<see cref="BeltItems.Name"/>）；正式图标在美术阶段整体替换（DEBT-FG4ECO01-02）。物品表重载时重建，否则 O(1)。
+        /// </summary>
+        public static Vector4[] ItemPalette()
+        {
+            if (_palette != null && _paletteRevision == Economy.ItemCatalog.Revision)
+            {
+                return _palette;
+            }
+            var p = new Vector4[64];
+            foreach (Economy.ItemDef d in Economy.ItemCatalog.Items)
+            {
+                if (d.BeltId > 0 && d.BeltId < 64)
+                {
+                    p[d.BeltId] = new Vector4(d.Color.r, d.Color.g, d.Color.b, 1f);
+                }
+            }
+            _palette = p;
+            _paletteRevision = Economy.ItemCatalog.Revision;
+            return _palette;
+        }
         public static BeltRenderer.Settings RenderSettings => _renderSettings;
         /// <summary>存档里的传送带数据来自不认识的格式版本，正原样保留（这局不写回、不接受编辑）。</summary>
         public static bool SavedDataPreserved => _preserveSaved;
@@ -1367,6 +1393,7 @@ namespace GameLogic.Campaign.Logistics
             }
             long t0 = Stopwatch.GetTimestamp();
             _renderer ??= new BeltRenderer();
+            _renderer.ItemPalette = ItemPalette(); // FG4-ECO-01：物品方块按物品表的颜色（表变了才重建，O(1)）
             // FG3-LOG-03：箭头 / 流动条纹按游戏时钟滚动（暂停停住、倍速变快）。
             _renderer.AnimationTime = (float)((GameClock.Ticks + GameClock.StepAlpha) / Math.Max(1, GameClock.StepHz));
             _renderer.OverlayMode = GameLogic.View.OverlayService.BeltOverlayMode; // FG3-LOG-08：叠加层只改着色器参数（O(1)）。

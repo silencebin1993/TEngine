@@ -1036,8 +1036,10 @@ namespace BinGames.Sim.Logistics
                 BeltPort port = Ports[sp];
                 // FG3-LOG-03：只收指定物品的输入端口遇到别的物品就不收（带停下、物品不消失，原因写“X 不收 Y”）。
                 ushort head = Item[b];
-                bool itemOk = port.Accept == BeltConst.AcceptAny || (port.Accept != BeltConst.AcceptNone && port.Accept == head);
-                bool room = port.Cap < 0 || port.Buffered < port.Cap;
+                // FG4-ECO-01：AcceptAnyOneKind = 任何物品都收，但缓存里同一时刻只有一种（建筑 / 仓库按种类取料）——缓存里是别的种类时先等它被取走（原因“下游已满”）。
+                bool oneKind = port.Accept == BeltConst.AcceptAnyOneKind;
+                bool itemOk = port.Accept == BeltConst.AcceptAny || oneKind || (port.Accept != BeltConst.AcceptNone && port.Accept == head);
+                bool room = (port.Cap < 0 || port.Buffered < port.Cap) && (!oneKind || port.Buffered <= 0 || port.Item == head);
                 limit = itemOk && room ? CL + CL : CL - 1;
                 reason = itemOk ? (byte)BeltBlock.SinkFull : (byte)BeltBlock.SinkRejects;
             }
@@ -1100,6 +1102,10 @@ namespace BinGames.Sim.Logistics
                     if (port.Cap >= 0)
                     {
                         port.Buffered++;
+                        if (port.Accept == BeltConst.AcceptAnyOneKind)
+                        {
+                            port.Item = it; // 缓存里现在是这一种（输入端口的 Item 只在这种收法下有意义，存档照常保存）
+                        }
                     }
                     else
                     {

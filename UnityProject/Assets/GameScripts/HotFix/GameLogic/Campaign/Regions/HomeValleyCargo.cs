@@ -55,32 +55,29 @@ namespace GameLogic.Campaign.Regions
             public string RegionId;
         }
 
-        /// <summary>家园存量总容量：核心缓存恒定 <see cref="HomeValleyLayout.CoreCacheCapacity"/>；
-        /// 仓库 Operational 时追加 <see cref="HomeValleyLayout.WarehouseCapacity"/>。ERD-ECO-003
-        /// "核心缓存不能接收远征战利品"——废料以外的资源类型（模块/数据盒等远征战利品，尚未有真实
-        /// 内容，ER4-CONTENT-01 起才会产出）只能计入仓库那一份，核心缓存对它们贡献恒为 0。</summary>
+        /// <summary>家园存量总容量。FG4-ECO-01 起按物品表（<see cref="Economy.HomeInventory.Capacity(CampaignState, Economy.ItemDef)"/>）：
+        /// 废料 = 核心缓存 + 运转中的仓库（核心缓存只收废料，ERD-ECO-003）；其余固体 = 运转中的仓库；保管库物品 = eco.vault.capacity。
+        /// 物品表里没有的资源类型沿用 Demo 口径（只算仓库那一份）。</summary>
         public static int GetStorageCapacity(CampaignState state, string resourceType)
         {
+            if (Economy.ItemCatalog.TryGetByResource(resourceType, out Economy.ItemDef def) && Economy.HomeInventory.IsStorable(def))
+            {
+                return Economy.HomeInventory.Capacity(state, def);
+            }
             bool warehouseOperational = FindBuilding(state, HomeValleyLayout.BuildingTypeWarehouse)?.ConstructionState
                 == BuildingConstructionState.Operational;
             int warehousePart = warehouseOperational ? HomeValleyLayout.WarehouseCapacity : 0;
-
-            if (resourceType == CampaignEconomyLedger.ResourceScrap)
-            {
-                return HomeValleyLayout.CoreCacheCapacity + warehousePart;
-            }
-            return warehousePart;
+            return resourceType == CampaignEconomyLedger.ResourceScrap ? HomeValleyLayout.CoreCacheCapacity + warehousePart : warehousePart;
         }
 
-        /// <summary>当前家园存量已占用数量。废料就是既有的 <see cref="CampaignState.Scrap"/> 标量；
-        /// 其余资源类型本 Story 尚无真实持有量字段（无内容可落），恒为 0。</summary>
+        /// <summary>当前家园存量已占用数量（废料 = <see cref="CampaignState.Scrap"/>；其余按 <see cref="Economy.HomeInventory"/>）。</summary>
         public static int GetStorageUsed(CampaignState state, string resourceType)
         {
             if (resourceType == CampaignEconomyLedger.ResourceScrap)
             {
                 return state.Scrap;
             }
-            return 0;
+            return Economy.ItemCatalog.TryGetByResource(resourceType, out Economy.ItemDef def) ? Economy.HomeInventory.Stock(state, def) : 0;
         }
 
         public static int GetAvailableSpace(CampaignState state, string resourceType)
@@ -95,9 +92,11 @@ namespace GameLogic.Campaign.Regions
             return state?.GroundItems?.FirstOrDefault(g => g.GroundItemId == groundItemId);
         }
 
-        /// <summary>家园仓库能不能存这种资源（目前只有废料；物品表接入在 FG4-ECO-01，见 DEBT-FG3LOG02-01）。
+        /// <summary>家园能不能存这种资源：物品表里的固体（仓库）与保管库物品（FG4-ECO-01，关闭 DEBT-FG3LOG02-01）；流体、数字资源、实体、表里没有的都不行。
         /// 与 <see cref="CommitHaul"/> 的拒绝条件同源，搬运下令与交付前都先问这里。</summary>
-        public static bool CanStore(string resourceType) => resourceType == CampaignEconomyLedger.ResourceScrap;
+        public static bool CanStore(string resourceType) =>
+            resourceType == CampaignEconomyLedger.ResourceScrap
+            || (Economy.ItemCatalog.TryGetByResource(resourceType, out Economy.ItemDef def) && Economy.HomeInventory.IsStorable(def));
 
         public static GroundItemRecord FindGroundItemBySalvageId(CampaignState state, string salvageInstanceId)
         {
@@ -199,9 +198,16 @@ namespace GameLogic.Campaign.Regions
             {
                 CampaignEconomyLedger.Commit(state, ledgerTransactionId);
             }
-            else
+            else if (ticket.ResourceType == CampaignEconomyLedger.ResourceScrap)
             {
                 state.Scrap += ticket.Amount;
+                Economy.HomeInventory.Touch();
+            }
+            else
+            {
+                // FG4-ECO-01：其余物品经家园物资唯一写入口（容量上面刚查过，照数存入）。
+                Economy.ItemCatalog.TryGetByResource(ticket.ResourceType, out Economy.ItemDef def);
+                Economy.HomeInventory.Add(state, def, ticket.Amount, clampToSpace: false);
             }
             return StoreResult.Ok();
         }

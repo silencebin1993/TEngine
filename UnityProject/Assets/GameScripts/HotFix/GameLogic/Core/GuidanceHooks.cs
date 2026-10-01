@@ -67,6 +67,8 @@ namespace GameLogic.Core
         public const string ReactionLogFirstOpen = "firmware.reaction_log.first_open";
         /// <summary>FG2-FW-04：第一次打开统计面板（引导内容在 FG15-UX-04：伤害归因的累计与每场明细怎么读、只统计远征与突袭）。</summary>
         public const string StatsPanelFirstOpen = "stats.panel.first_open";
+        /// <summary>FG4-ECO-01：第一次打开物资面板（引导内容在 FG15-UX-04：悬停看总库存 / 分布 / 净速率、在途不算库存、点图标看来源与用途；图鉴“物品、流体与数字资源”随之解锁）。</summary>
+        public const string EconomyItemsFirstOpen = "economy.items.first_open";
         /// <summary>FG2-FW-05：第一次打开固件库（引导内容在 FG15-UX-04：筛选 / 比较怎么用、锁定防误拆、批量分解会先确认；图鉴“固件库”系统说明随之解锁）。</summary>
         public const string FirmwareLibraryFirstOpen = "firmware.library.first_open";
         /// <summary>FG2-E2E-01（FG-GAP-050）：第一次在解析台用技术数据复原一条固件（引导内容在 FG15-UX-04：复原的是刻录数据、之后去信号核刻印 / 蓝图里选用；图鉴“数据复原”系统说明随之解锁）。</summary>
@@ -170,7 +172,7 @@ namespace GameLogic.Core
             SignalCoverageFirstOverlay, SignalCoverageFirstLeft, SignalRelayFirstCut, SignalFirstFarJump,
             MorphFirstSeen, SafeModeFirstEnter,
             StatusTagFirstSeen, ReactionFirstNamed,
-            ReactionLogFirstOpen, StatsPanelFirstOpen,
+            ReactionLogFirstOpen, StatsPanelFirstOpen, EconomyItemsFirstOpen,
             FirmwareLibraryFirstOpen,
             FirmwareRestoreFirstDone,
             StrategicMapFirstOpen, NewGameSetupFirstOpen, MapMarkerFirstAdded,

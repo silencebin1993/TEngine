@@ -218,6 +218,12 @@ namespace GameLogic.UI.Kit
             {
                 FirmwareLibraryPanelUIToolkit.Toggle();
             }
+            // FG4-ECO-01：物资键（默认 Alt+I）：开着再按一次关闭；图鉴盖在上面时不起作用（同固件库键）。
+            if (InputRouter.ConsumeContextAction(GameActionId.OpenItems)
+                && !MechanicCodexPanelUIToolkit.IsOpen && !UiKitPanelHost.AnyModalAbove(ItemsPanelUIToolkit.Order))
+            {
+                ItemsPanelUIToolkit.Toggle();
+            }
             if (InputRouter.ConsumeContextAction(GameActionId.OpenCodex)
                 && !UiKitPanelHost.AnyModalAbove(MechanicCodexPanelUIToolkit.Order) && !CodexHoverLink.TryJump())
             {

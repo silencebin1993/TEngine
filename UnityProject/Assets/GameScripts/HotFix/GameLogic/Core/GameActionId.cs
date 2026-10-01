@@ -136,5 +136,7 @@
         OverlaySignal = 113,
         OverlayRaid = 114,
         OverlayConstruction = 115,
+        /// <summary>FG4-ECO-01（FG04 第 4 节“悬停物品图标显示总库存、各仓库分布、当前净速率”）：打开 / 关闭物资面板（全部上下文，默认 Alt+I）。</summary>
+        OpenItems = 116,
     }
 }

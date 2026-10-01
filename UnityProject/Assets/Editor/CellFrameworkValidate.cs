@@ -53,7 +53,7 @@ namespace GameLogic.EditorTools
         /// 日志末尾输出每段耗时排行；<see cref="RunSegments"/> 按环境变量 BINGAMES_VALIDATE_SEGMENTS 只跑点名的段（迭代用，交付仍跑全量）。
         /// 段的顺序、内容与原来逐行调用完全相同；某段抛异常时与原来一样中止后面的段并记一条失败。
         /// </summary>
-        [MenuItem("BinGames/自检：细胞阶段框架")]
+        [MenuItem("BinGames/QA/自检/细胞阶段框架")]
         public static void RunAll() => RunSelected(null);
 
         /// <summary>
@@ -391,6 +391,10 @@ namespace GameLogic.EditorTools
             // 在途库存（仓库输出口推上带的件数守恒、施工等材料时写明“另有 N 件在传送带上”与办法）；缺口清零门禁与 DEBT-FG3GEN01-08 改派守护；
             // FG-M3 试玩包；FGT-LOG-001～013 / FGT-GEN-001～010 的自检映射与登记。
             Seg("FgMilestoneM3SelfCheck", FgMilestoneM3SelfCheck.Run);
+            // FG4-ECO-01：物品、流体与配方表——物品 / 配方入表与源数据逐字段、FGR-ECO-001 / 002 逐项、数字资源与核心保管库、表的负向（整条拒绝）、
+            // 从原料到机器的配方账目守恒（FGT-ECO-001 数据部分）与缺输入 / 副产品无处可去、多物品仓储与传送带（逐种守恒、按种类入库、只堵那一种、旧档迁移、清带、过滤选项）、
+            // 悬停总库存 / 分布 / 净速率与缓存、暂停倍速观察存读档、物资面板与图鉴物品 / 配方页签（布局探针）、FG-GAP-092 音效入池、性能。
+            Seg("FgEconomyItemsSelfCheck", FgEconomyItemsSelfCheck.Run);
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>

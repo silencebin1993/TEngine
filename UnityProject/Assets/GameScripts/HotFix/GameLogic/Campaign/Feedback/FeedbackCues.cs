@@ -460,8 +460,61 @@ namespace GameLogic.Campaign.Feedback
                 return;
             }
             _clipsPreloaded = true;
-            audio.PutInAudioPool(CollectAllSfxIds());
+            PreloadIntoPool(audio, CollectAllSfxIds());
         }
+
+        /// <summary>
+        /// FG-GAP-092（FG4-ECO-01 顺带修）：开局音效预热。不用框架的 <c>PutInAudioPool</c>——它在发起加载时查一次“池里没有”，
+        /// 回调里却用 <c>Dictionary.Add</c> 放进池；机器忙时玩家先点了按钮，播放路径（<c>AudioAgent</c> 用 <c>TryAdd</c>）抢先把同一个音效放进池，
+        /// 预热回调再 Add 就抛“An item with the same key has already been added”。这里改为回调时再查一次：池里已经有了就释放这份句柄（成对释放），
+        /// 没有才放进去。Assets/TEngine 视为只读，不改框架。
+        /// </summary>
+        public static int PreloadIntoPool(IAudioModule audio, List<string> ids)
+        {
+            if (audio?.AudioClipPool == null || ids == null || GameModule.Resource == null)
+            {
+                return 0;
+            }
+            // 与框架 PutInAudioPool 的“Unity 音频已禁用就不预加载”等价：框架在 _bUnityAudioDisabled 时让 Enable 恒为 false（本工程不写 Enable）。
+            if (!audio.Enable)
+            {
+                return 0;
+            }
+            int started = 0;
+            foreach (string path in ids)
+            {
+                if (string.IsNullOrEmpty(path) || audio.AudioClipPool.ContainsKey(path))
+                {
+                    continue;
+                }
+                YooAsset.AssetHandle handle = GameModule.Resource.LoadAssetAsyncHandle<AudioClip>(path);
+                if (handle == null)
+                {
+                    continue;
+                }
+                started++;
+                handle.Completed += h => AddOrRelease(audio.AudioClipPool, path, h, x => x.Dispose());
+            }
+            return started;
+        }
+
+        /// <summary>预热回调：池里还没有这个键才放进去（返回 true）；播放路径已经先放进池（或池已清空）时释放这份句柄（返回 false），不抛异常。</summary>
+        public static bool AddOrRelease<T>(Dictionary<string, T> pool, string path, T handle, System.Action<T> release)
+        {
+            if (pool != null && !pool.ContainsKey(path))
+            {
+                pool.Add(path, handle);
+                PreloadAdded++;
+                return true;
+            }
+            release?.Invoke(handle);
+            PreloadDuplicatesReleased++;
+            return false;
+        }
+
+        /// <summary>预热放进池的条数 / 撞上播放路径先放进池而释放的条数（自检与冒烟读点）。</summary>
+        public static int PreloadAdded { get; private set; }
+        public static int PreloadDuplicatesReleased { get; private set; }
 
         /// <summary>本表与六大内容目录里全部非空音效名（去重）。自检用它逐个核对音频文件存在。</summary>
         public static List<string> CollectAllSfxIds()

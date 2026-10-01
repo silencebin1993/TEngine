@@ -67,7 +67,7 @@ namespace GameLogic.EditorTools
         private static string _dir;
         private static readonly List<string> PerfLines = new List<string>();
 
-        [MenuItem("BinGames/自检：FG 虚影施工与返还")]
+        [MenuItem("BinGames/QA/自检/FG 虚影施工与返还")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();
@@ -1300,7 +1300,7 @@ namespace GameLogic.EditorTools
         private static void CheckUnsupportedHaul()
         {
             CampaignState s = NewHome(6505);
-            GroundItemRecord item = HomeValleyCargo.SpawnGroundItem(s, HomeValleyLayout.RegionId, new Vector2(-8f, -6f), HomeGridService.BeltItemResource(3), 2, "fgconstruct:item");
+            GroundItemRecord item = HomeValleyCargo.SpawnGroundItem(s, HomeValleyLayout.RegionId, new Vector2(-8f, -6f), HomeGridService.BeltItemResource(900), 2, "fgconstruct:item"); // FG4-ECO-01 起物品表里的固体都能存：用表里没有的编号
             MachineRecord m = HomeMachines().First();
             HomeValleyWorkOrders.WorkOrderOpResult r = HomeValleyWorkOrders.TryCreateHaul(s, item.GroundItemId, m.LogicId);
             string text = HomeValleyWorkOrders.DescribeCommandFailure(r.FailureReason);

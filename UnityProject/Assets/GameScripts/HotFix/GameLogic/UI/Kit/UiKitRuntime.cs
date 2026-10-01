@@ -5,7 +5,7 @@ namespace GameLogic.UI.Kit
     /// <summary>
     /// FG0-UX-01：UI 基础件的挂载入口（由 <c>GameRoot.Startup</c> 调用，进程内只挂一次）。
     /// 每个面板一个 DontDestroyOnLoad 宿主、一个 UIDocument；分层（sortingOrder）见各面板的 Order 常量与
-    /// UI_WORKFLOW_GUIDE.md 第 4 节：反应弹字 -1（所有 HUD 之下）&lt; 建造栏 30030 &lt; 信号核 30035 &lt; 通知 30040 &lt; 施工队列 30045 &lt; 端口面板 30046 &lt; 节点面板 30047 &lt; 暂停菜单 30070 &lt; 固件库 30072 &lt; 图鉴 30075 &lt; 统计 30076 &lt; 反应记录 30077 &lt; 按键面板 30080 &lt; 样例页 30090 &lt; 浮层 30200。
+    /// UI_WORKFLOW_GUIDE.md 第 4 节：反应弹字 -1（所有 HUD 之下）&lt; 建造栏 30030 &lt; 信号核 30035 &lt; 通知 30040 &lt; 施工队列 30045 &lt; 端口面板 30046 &lt; 节点面板 30047 &lt; 暂停菜单 30070 &lt; 固件库 30072 &lt; 物资 30074 &lt; 图鉴 30075 &lt; 统计 30076 &lt; 反应记录 30077 &lt; 按键面板 30080 &lt; 样例页 30090 &lt; 浮层 30200。
     /// </summary>
     public static class UiKitRuntime
     {
@@ -30,6 +30,7 @@ namespace GameLogic.UI.Kit
             Create<PauseMenuUIToolkit>("[PauseMenuHost]");
             Create<FirmwareLibraryPanelUIToolkit>("[FirmwareLibraryHost]"); // FG2-FW-05：固件库（30072，暂停菜单之上、图鉴之下）。
             Create<MechanicCodexPanelUIToolkit>("[MechanicCodexHost]"); // FG1-HUD-01：机制图鉴（30075，暂停菜单之上、按键面板之下）。
+            Create<ItemsPanelUIToolkit>("[ItemsPanelHost]"); // FG4-ECO-01：物资面板（30074，暂停菜单与固件库之上、图鉴之下：点图标打开的图鉴盖在它上面）。
             Create<StatsPanelUIToolkit>("[StatsPanelHost]"); // FG2-FW-04：统计面板（战斗 · 反应伤害归因；FG4-ECO-08 加生产段，30076，暂停菜单之上）。
             Create<ReactionLogPanelUIToolkit>("[ReactionLogHost]"); // FG2-FW-04：反应记录（日志 / 伤害归因 / 反应图鉴，30077，暂停菜单之上）。
             Create<KeyBindingsPanelUIToolkit>("[KeyBindingsHost]");
@@ -65,6 +66,7 @@ namespace GameLogic.UI.Kit
             FirmwareLibraryPanelUIToolkit.Close();
             ReactionLogPanelUIToolkit.Close();
             StatsPanelUIToolkit.Close();
+            ItemsPanelUIToolkit.Close();
             ConstructionQueuePanelUIToolkit.Close();
             BeltPortPanelUIToolkit.Close();
             BeltNodePanelUIToolkit.Close();

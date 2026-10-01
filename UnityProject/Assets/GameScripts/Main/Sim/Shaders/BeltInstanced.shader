@@ -50,6 +50,7 @@ Shader "BinGames/BeltInstanced"
             float _Height;
             float _GameTime; // FG3-LOG-03：游戏秒（BeltRenderer.AnimationTime）
             float _Overlay;  // FG3-LOG-08：叠加层画法
+            float4 _ItemPalette[64]; // FG4-ECO-01：物品编号 0～63 的颜色（a = 1 表示物品表里有这一种；没有的仍按编号着色）
 
             struct appdata
             {
@@ -103,6 +104,11 @@ Shader "BinGames/BeltInstanced"
                         discard;
                     }
                     float3 col = lerp(Hue(frac(i.data.x * 0.618034)), float3(1, 1, 1), 0.25);
+                    int pid = (int)round(i.data.x);
+                    if (pid >= 0 && pid < 64 && _ItemPalette[pid].a > 0.5)
+                    {
+                        col = _ItemPalette[pid].rgb;
+                    }
                     col *= (max(c.x, c.y) > 0.38) ? 0.55 : 1.0;
                     if (_Overlay > 1.5)
                     {

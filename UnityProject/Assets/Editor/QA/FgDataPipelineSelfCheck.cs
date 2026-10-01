@@ -35,7 +35,7 @@ namespace GameLogic.EditorTools
         private static StringBuilder _report;
         private static int _fail;
 
-        [MenuItem("BinGames/自检：FG 数据驱动与文本键")]
+        [MenuItem("BinGames/QA/自检/FG 数据驱动与文本键")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();
@@ -48,10 +48,10 @@ namespace GameLogic.EditorTools
             }
         }
 
-        [MenuItem("BinGames/语言/简体中文")]
+        [MenuItem("BinGames/QA/语言/简体中文")]
         public static void UseChinese() => GameSettings.SetLanguage(GameLanguage.ZhCn);
 
-        [MenuItem("BinGames/语言/English")]
+        [MenuItem("BinGames/QA/语言/English")]
         public static void UseEnglish() => GameSettings.SetLanguage(GameLanguage.En);
 
         public static int Run(StringBuilder report)
@@ -488,8 +488,10 @@ namespace GameLogic.EditorTools
                 // FG3-LOG-05 的流体表（FL）由 FgPipeSelfCheck F1 段逐字段比对。
                 // FG3-LOG-06 的电力节点表（PN）由 FgPowerGridSelfCheck F1 段逐字段比对。
                 // FG3-LOG-07 的升级路线表（BU）由 FgPlanningToolsSelfCheck D1 段逐字段比对。
+                // FG4-ECO-01 的物品（IT）、配方（RC）、配方行（RI）由 FgEconomyItemsSelfCheck A 段逐字段比对。
                 if (f[0] == "BC" || f[0] == "BT" || f[0] == "G" || f[0] == "P" || f[0] == "L" || f[0] == "X" || f[0] == "H" || f[0] == "FK" || f[0] == "CX" || f[0] == "ST"
-                    || f[0] == "CR" || f[0] == "CC" || f[0] == "RX" || f[0] == "FP" || f[0] == "FL" || f[0] == "PN" || f[0] == "BU" || f[0].StartsWith("W", StringComparison.Ordinal))
+                    || f[0] == "CR" || f[0] == "CC" || f[0] == "RX" || f[0] == "FP" || f[0] == "FL" || f[0] == "PN" || f[0] == "BU" || f[0] == "IT" || f[0] == "RC" || f[0] == "RI"
+                    || f[0].StartsWith("W", StringComparison.Ordinal))
                 {
                     continue;
                 }

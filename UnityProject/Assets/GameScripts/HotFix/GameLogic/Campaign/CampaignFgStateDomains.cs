@@ -432,6 +432,44 @@ namespace GameLogic.Campaign
     public sealed class ResearchState
     {
         public int DomainVersion = 1;
+        /// <summary>FG4-ECO-01（FGR-ECO-001“数字资源：技术数据、研究点”）：研究点余额（数字资源，不占物理空间、不走传送带）。
+        /// 产出与消耗由 FG5-RND-01（仿真实验室、研发树）写入；物资面板与图鉴从这里读。</summary>
+        public int Points;
+    }
+
+    /// <summary>
+    /// FG4-ECO-01（FG04 FGR-ECO-001 物品表、第 6 节“统计按时间窗口聚合保存”）：家园物资。
+    /// 废料仍是 <see cref="CampaignState.Scrap"/>（Demo 起的唯一真相，所有旧调用方照用）、技术数据仍是 <see cref="CampaignState.TechData"/>；
+    /// 本域存其余固体（仓库）与核心保管库（关键材料、人类遗产），以及净速率的库存采样。唯一写入口 <see cref="Economy.HomeInventory"/> / <see cref="Economy.ItemFlowStats"/>。
+    /// </summary>
+    [Serializable]
+    public sealed class EconomyState
+    {
+        public int DomainVersion = 1;
+        /// <summary>仓库里废料以外的固体（按物品 ID 升序，数量 &gt; 0）。</summary>
+        public ItemStackRecord[] Items = Array.Empty<ItemStackRecord>();
+        /// <summary>核心保管库（form = vault：关键材料、人类遗产；不上传送带）。</summary>
+        public ItemStackRecord[] Vault = Array.Empty<ItemStackRecord>();
+        /// <summary>净速率采样里每列对应的物品 ID（表变了就整体重采）。</summary>
+        public string[] FlowItemIds = Array.Empty<string>();
+        /// <summary>库存采样（按世界步，每 eco.flow.sample_seconds 游戏秒一条，最多 eco.flow.window_samples + 1 条，旧的在前）。</summary>
+        public ItemFlowSampleRecord[] FlowSamples = Array.Empty<ItemFlowSampleRecord>();
+    }
+
+    /// <summary>FG4-ECO-01：一种物品的持有量。</summary>
+    [Serializable]
+    public sealed class ItemStackRecord
+    {
+        public string ItemId;
+        public int Amount;
+    }
+
+    /// <summary>FG4-ECO-01：一次库存采样（<see cref="Stocks"/> 与 <see cref="EconomyState.FlowItemIds"/> 一一对应）。</summary>
+    [Serializable]
+    public sealed class ItemFlowSampleRecord
+    {
+        public long Tick;
+        public int[] Stocks = Array.Empty<int>();
     }
 
     /// <summary>天气（FG07；时间在 <see cref="GameClockState"/>）。</summary>
@@ -863,6 +901,7 @@ namespace GameLogic.Campaign
             new DomainInfo(nameof(CampaignState.SaveHistory), "FG0-SAVE-01", s => s.SaveHistory),
             new DomainInfo(nameof(CampaignState.Notifications), "FG0-UX-01（通知中心历史）", s => s.Notifications),
             new DomainInfo(nameof(CampaignState.Nav), "FG0-ARCH-06（层级寻路：排队请求与待采纳结果）", s => s.Nav),
+            new DomainInfo(nameof(CampaignState.Economy), "FG4-ECO-01（物品、流体与配方：仓库物资、核心保管库、净速率采样）", s => s.Economy),
         };
 
         /// <summary>把缺失（null）的域补成空域。读档后与存档前都会调用；已有数据的域原样保留。</summary>
@@ -917,6 +956,18 @@ namespace GameLogic.Campaign
             s.Power.StorageIds ??= Array.Empty<string>();
             s.Power.StorageStored ??= Array.Empty<double>();
             s.Research ??= new ResearchState();
+            s.Economy ??= new EconomyState();
+            s.Economy.Items ??= Array.Empty<ItemStackRecord>();
+            s.Economy.Vault ??= Array.Empty<ItemStackRecord>();
+            s.Economy.FlowItemIds ??= Array.Empty<string>();
+            s.Economy.FlowSamples ??= Array.Empty<ItemFlowSampleRecord>();
+            foreach (ItemFlowSampleRecord r in s.Economy.FlowSamples)
+            {
+                if (r != null)
+                {
+                    r.Stocks ??= Array.Empty<int>();
+                }
+            }
             s.Weather ??= new WeatherState();
             s.Raids ??= new RaidState();
             s.Raids.InTransit ??= Array.Empty<TransitGroupRecord>();

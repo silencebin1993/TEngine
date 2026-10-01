@@ -70,7 +70,7 @@ namespace GameLogic.EditorTools
         private static readonly Reader Keys = new Reader();
         private static readonly List<string> PerfLines = new List<string>();
 
-        [MenuItem("BinGames/QA/FG1-HUD-01 接入 HUD 自检")]
+        [MenuItem("BinGames/QA/自检/FG1-HUD-01 接入 HUD 自检")]
         public static void RunFromMenu()
         {
             var sb = new StringBuilder();
@@ -653,14 +653,16 @@ namespace GameLogic.EditorTools
             {
                 File.Delete(file);
             }
-            Expect(MechanicCodex.UnlockedCount == 0 && !MechanicCodex.IsUnlocked("codex.signal.uplink"), "新玩家：机制图鉴全部未解锁");
+            // FG4-ECO-01：物品 / 配方页签里规划产线要用的条目（原料、中间品、成品、流体、数字资源与全部配方）一开始就能看，不算“解锁”；其余全部未解锁。
+            int alwaysOpen = MechanicCodex.Entries.Count(e => e.AlwaysOpen);
+            Expect(MechanicCodex.UnlockedCount == alwaysOpen && !MechanicCodex.IsUnlocked("codex.signal.uplink"), $"新玩家：机制图鉴全部未解锁（物品 / 配方页签一开始就能看的 {alwaysOpen} 条除外）");
             GuidanceHooks.Raise(GuidanceHooks.SignalFirstUplink);
             bool both = MechanicCodex.IsUnlocked("codex.signal.uplink") && MechanicCodex.IsUnlocked("codex.signal.uplink_port") && !MechanicCodex.IsUnlocked("codex.signal.raw");
             int saves = MechanicCodex.SaveCount;
             GuidanceHooks.Raise(GuidanceHooks.SignalFirstUplink);
             Expect(both && File.Exists(file) && MechanicCodex.SaveCount == saves, "第一次接入（钩子）→ 解锁“信号接入”“接入口”并写图鉴文件；再触发不重复写");
             MechanicCodex.Reload();
-            Expect(MechanicCodex.IsUnlocked("codex.signal.uplink") && MechanicCodex.UnlockedCount == 2, "重新载入：从图鉴文件读回（跨存档，机制条目不按存档）");
+            Expect(MechanicCodex.IsUnlocked("codex.signal.uplink") && MechanicCodex.UnlockedCount == alwaysOpen + 2, "重新载入：从图鉴文件读回（跨存档，机制条目不按存档）");
             // 钩子已广播过、图鉴文件丢了：下一次接触照样解锁
             File.Delete(file);
             MechanicCodex.Reload();

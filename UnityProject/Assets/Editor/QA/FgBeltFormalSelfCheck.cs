@@ -65,7 +65,7 @@ namespace GameLogic.EditorTools
         private static string _dir;
         private static readonly List<string> PerfLines = new List<string>();
 
-        [MenuItem("BinGames/自检：FG 传送带正式化与端口")]
+        [MenuItem("BinGames/QA/自检/FG 传送带正式化与端口")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();
@@ -464,11 +464,11 @@ namespace GameLogic.EditorTools
             BuildingRecord core = Building(s, "core");
             GridCell expectCell = GridMath.PortCell(new GridCell(core.GridX, core.GridY), 0, -2, GridMath.NormalizeRotation(core.Rotation));
             bool coreOk = coreIn != null && coreIn.Store && !coreIn.IsOutput && coreIn.PortId >= BeltPortService.PortIdBase && ci.Kind == BeltPortKind.Sink
-                          && ci.Accept == BeltItems.ScrapId && coreIn.PortCell == expectCell && ci.X == expectCell.X && ci.Y == expectCell.Y
+                          && ci.Accept == BeltConst.AcceptAnyOneKind && coreIn.PortCell == expectCell && ci.X == expectCell.X && ci.Y == expectCell.Y
                           && ci.Face == (byte)GridMath.RotateDir(GridDir.S, GridMath.NormalizeRotation(core.Rotation)) && ci.BufferCap == 4;
             bool noneOk = asmIn != null && !asmIn.Store && ai.Accept == BeltConst.AcceptNone && asmOut != null && PortInfo(asmOut).Kind == BeltPortKind.Source;
             Expect(coreOk && noneOk && whOut == null && s.Belts.PortBindings.Length == BeltPortService.Count,
-                $"开局 1 秒内运转中的建筑自动登记端口：核心输入口 = 家园存量口（端口号 {coreIn?.PortId}，只收废料、缓存 4、朝南、位置随核心），" +
+                $"开局 1 秒内运转中的建筑自动登记端口：核心输入口 = 家园存量口（端口号 {coreIn?.PortId}，FG4-ECO-01 起收全部可存物品（缓存一次只放一种）、缓存 4、朝南、位置随核心），" +
                 $"装配站的输入口什么都不收、输出口不推（配方在 FG4）；开局受损的仓库没有端口（{BeltPortService.Count} 个绑定，与存档绑定表一致）");
 
             BuildingRecord wh = ActivateWarehouse(s);
@@ -711,13 +711,15 @@ namespace GameLogic.EditorTools
             Expect(full && held && fullText.Contains("仓库满了") && fullText.Contains(cap + " / " + cap) && PortInfo(inP).Total > before,
                 $"仓库满（FGR-LOG-025）：输入口缓存 4 满了，带停在末端、物品不消失（{onBelt} 件）；原因“{fullText}”；腾出 50 空间后自动继续");
 
-            // 输入口不收：带上混进一件物品 #7（家园仓库存不了），流到末端卡住。
+            // FG4-ECO-01：输入口收全部可存物品（物品 #7 = 电子件入库）；物品表里没有的编号（#900，旧档 / 表删掉的物品）放到仓库旁边的地上，不消失、不堵带。
+            int electronic0 = GameLogic.Campaign.Economy.HomeInventory.Stock(s, "electronic");
             BeltNetworkService.Kernel.InsertItem(path[path.Count - 3].cell.X, path[path.Count - 3].cell.Y, 7);
-            bool rejected = StepUntil(() => BeltNetworkService.Kernel.TryGetCellInfo(last.X, last.Y, out BeltCellInfo c) && c.Block == BeltBlock.SinkRejects, 30);
+            BeltNetworkService.Kernel.InsertItem(path[path.Count - 5].cell.X, path[path.Count - 5].cell.Y, 900);
+            bool rejected = StepUntil(() => GameLogic.Campaign.Economy.HomeInventory.Stock(s, "electronic") == electronic0 + 1
+                                            && (s.GroundItems ?? Array.Empty<GroundItemRecord>()).Any(g => g.ResourceType == "item:900" && g.Amount == 1), 60);
             BeltNetworkService.Kernel.TryGetCellInfo(last.X, last.Y, out BeltCellInfo rej);
-            string rejText = BeltNetworkService.DescribeBlock(rej);
-            Expect(rejected && rej.Item0 == 7 && rejText.Contains("不收") && rejText.Contains("物品 #7") && rejText.Contains("废料") && rejText.Contains(HomeGridService.DisplayName("warehouse")),
-                $"输入口只收废料：物品 #7 流到末端就停下（不消失、不硬塞进仓库），原因“{rejText}”");
+            Expect(rejected && rej.Block != BeltBlock.SinkRejects,
+                $"输入口收全部可存物品：物品 #7（电子件）进了家园仓库；物品表里没有的 #900 落在仓库旁边的地上（不消失、不堵带，末端此刻“{BeltNetworkService.DescribeBlock(rej)}”）");
 
             // 建筑还不收发物品（装配站输入口，role = none）；朝向不对不接。
             BeltPortService.Binding asmIn = Port(s, "assembly_station", "assembly_station.in0");
@@ -779,7 +781,7 @@ namespace GameLogic.EditorTools
             WorldSimulation.StepMany(GameClock.StepHz * 5);
             Expect(on && PortInfo(outP).Total > emitted && PortInfo(outP).ItemType == BeltItems.ScrapId && outP.Record.Filter == BeltItems.ScrapId && Conserved(s) == total,
                 $"改成“只输出废料”：恢复推送（累计 {PortInfo(outP).Total} 件），过滤记在绑定表里（{outP.Record.Filter}）");
-            bool bad = BeltPortService.TrySetFilter(s, wh.BuildingId, "warehouse.out0", 7, out string reason);
+            bool bad = BeltPortService.TrySetFilter(s, wh.BuildingId, "warehouse.out0", 900, out string reason); // FG4-ECO-01：物品表里没有的编号
             bool inRow = BeltPortService.TrySetFilter(s, wh.BuildingId, "warehouse.in0", BeltPortService.FilterOff, out string inReason);
             Expect(!bad && !string.IsNullOrEmpty(reason) && !inRow && !string.IsNullOrEmpty(inReason) && outP.Record.Filter == BeltItems.ScrapId,
                 $"负向：家园仓库存不了的物品不能选为过滤（“{reason}”）；输入口没有输出过滤（“{inReason}”）");
@@ -906,13 +908,13 @@ namespace GameLogic.EditorTools
                 Expect(items > 0 && asked && unchanged && discarded,
                     $"仓库满时清带（FG03 负向）：确认框写明放不下 {items} 件、剩余空间 0；取消 → 带和物品原样；确认 → 丢弃 {shown} 件（累计丢弃 {s.Belts.Discarded}），库存不超容量");
 
-                // 仓库存不了的物品：物品 #7 与废料混在一起，空间够废料 → 只问 #7。
+                // 仓库存不了的物品：物品 #900（物品表里没有）与废料混在一起，空间够废料 → 只问 #900（FG4-ECO-01 起表里的固体都能存）。
                 s.Scrap = 0;
                 GridCell c1 = path[2].cell;
-                BeltNetworkService.Kernel.InsertItem(c1.X, c1.Y, 7);
+                BeltNetworkService.Kernel.InsertItem(c1.X, c1.Y, 900);
                 BeltNetworkService.Kernel.InsertItemAt(path[4].cell.X, path[4].cell.Y, 20000, BeltItems.ScrapId);
                 BeltClearPlan plan = BeltClearService.PlanNetwork(s, c1);
-                bool kindAsk = plan.NeedsConfirm && plan.OverflowItems == 1 && plan.Overflow.ContainsKey(7) && plan.Fit == plan.Items - 1;
+                bool kindAsk = plan.NeedsConfirm && plan.OverflowItems == 1 && plan.Overflow.ContainsKey(900) && plan.Fit == plan.Items - 1;
                 mode.SetHover(s, c1);
                 reader.MouseDown.Add(0);
                 mode.Tick(null, s, true);
@@ -923,7 +925,7 @@ namespace GameLogic.EditorTools
                 bool kindLine = UiConfirmDialog.IsOpen && UiConfirmDialog.Current.Lines.Any(l => l.Contains("还存不了"));
                 UiConfirmDialog.Confirm();
                 Expect(kindAsk && kindLine && s.Scrap == plan.Fit && BeltNetworkService.Kernel.CountItemsSlow() == 0,
-                    $"家园仓库还存不了的物品（#7）算“放不下”，确认框写明原因；确认后废料 {plan.Fit} 件入库、#7 丢弃");
+                    $"家园仓库存不了的物品（#900）算“放不下”，确认框写明原因；确认后废料 {plan.Fit} 件入库、#900 丢弃");
 
                 // 拖框：只清框里的格。
                 s.Scrap = 100;
@@ -1045,23 +1047,23 @@ namespace GameLogic.EditorTools
                        && s.Belts.Damage.Any(d => d.X == target.X && d.Y == target.Y && d.Lost == 30);
             Expect(dmg, $"掉耐久（FGR-LOG-027）：T2 满耐久 90，挨 30 → 60；悬停写“耐久：60 / 90”，记进存档的耐久表");
 
-            // 摧毁：3 件物品（2 件废料 + 1 件 #7）落地，原位置留虚影。
+            // 摧毁：3 件物品（2 件废料 + 1 件 #900：物品表里没有的编号）落地，原位置留虚影。
             BeltNetworkService.Kernel.InsertItemAt(target.X, target.Y, 2000, BeltItems.ScrapId);
             BeltNetworkService.Kernel.InsertItemAt(target.X, target.Y, 20000, BeltItems.ScrapId);
-            BeltNetworkService.Kernel.InsertItemAt(target.X, target.Y, 40000, 7);
+            BeltNetworkService.Kernel.InsertItemAt(target.X, target.Y, 40000, 900);
             long removed0 = BeltNetworkService.Kernel.Ledger.Removed;
             int ground0 = GroundScrap(s);
             int hauls0 = (s.WorkOrders ?? Array.Empty<WorkOrderRecord>()).Count(o => o.Kind == WorkOrderKind.Haul);
             bool destroyed = BeltNetworkService.TryDamage(s, target, 100, out _);
             bool gone = !BeltNetworkService.Kernel.HasCell(target.X, target.Y) && !s.Belts.Damage.Any(d => d.X == target.X && d.Y == target.Y);
-            bool items = GroundScrap(s) == ground0 + 2 && (s.GroundItems ?? Array.Empty<GroundItemRecord>()).Any(g => g.ResourceType == "item:7" && g.Amount == 1)
+            bool items = GroundScrap(s) == ground0 + 2 && (s.GroundItems ?? Array.Empty<GroundItemRecord>()).Any(g => g.ResourceType == "item:900" && g.Amount == 1)
                          && (s.WorkOrders ?? Array.Empty<WorkOrderRecord>()).Count(o => o.Kind == WorkOrderKind.Haul) > hauls0
                          && BeltNetworkService.Kernel.Ledger.Removed == removed0 + 3 && BeltNetworkService.LastDestroyedItems == 3;
             bool ghost = HomeValleyConstruction.TryFindPlannedCell(s, target, out PlannedBeltRecord gp, out _) && gp.Destroyed && gp.Tier == 1 && gp.Dirs[0] == (int)BeltDir.East
                          && HomeValleyConstruction.IsPlannedMarker(HomeGridService.MapFor(s).GetBelt(target)) && HomeValleyWorkOrders.FindActiveBuild(s, HomeValleyConstruction.BeltPlanPrefix + gp.PlanId) == null;
             bool notified = NotificationCount("failure") >= 1 && GameSettings.HasSeenGuidanceHook(GuidanceHooks.LogisticsFirstDestroyed);
             Expect(destroyed && gone && items && ghost && notified,
-                "摧毁：传送带从内核移除、耐久记录删掉；带上 3 件落地（2 件废料生成搬运单，#7 按编号落地），计入内核“移出”；原位置留下保留朝向与等级（T2 朝东）的虚影、占住格网，" +
+                "摧毁：传送带从内核移除、耐久记录删掉；带上 3 件落地（2 件废料生成搬运单，#900 按编号落地），计入内核“移出”；原位置留下保留朝向与等级（T2 朝东）的虚影、占住格网，" +
                 "没有施工单（不自动重建，规则在 FG6-DEF-03）；发“失败”通知与首次钩子");
 
             HomeValleyConstruction.TryDescribeSite(s, target, out string gTitle, out string gBody);
@@ -1452,15 +1454,16 @@ namespace GameLogic.EditorTools
                               && panel.TitleText.Contains(HomeGridService.DisplayName("warehouse")) && panel.StoreText.Contains("家园仓库")
                               && panel.RowText(outRow, "BpTitle").Contains("输出口") && panel.RowText(outRow, "BpState").Contains("已接上")
                               && panel.RowText(outRow, "BpStats").Contains("已推出") && panel.RowFilterVisible(outRow) && !panel.RowFilterVisible(inRow)
-                              && panel.RowText(inRow, "BpAccept").Contains("废料") && GameSettings.HasSeenGuidanceHook(GuidanceHooks.LogisticsPortPanelFirstOpen)
+                              && panel.RowText(inRow, "BpAccept").Contains("全部可存物品") && GameSettings.HasSeenGuidanceHook(GuidanceHooks.LogisticsPortPanelFirstOpen)
                               && !GameText.ContainsMarker(panel.TitleText + panel.StoreText + panel.HintText + panel.RowText(outRow, "BpStats"));
                 Expect(opened, $"建造模式点一下仓库打开端口面板（真 UXML）：{panel.VisibleRowCount} 行，“{panel.RowText(outRow, "BpTitle")}：{panel.RowText(outRow, "BpState")}｜{panel.RowText(outRow, "BpStats")}”，" +
                                $"输入口“{panel.RowText(inRow, "BpAccept")}”；只有仓库输出口有过滤下拉框");
                 DropdownField d = panel.RowFilter(outRow);
                 d.value = d.choices[d.choices.Count - 1]; // “停止输出”：选中即生效（下拉框回调 → TrySetFilter）
                 BeltPortService.Binding outP = Port(s, "warehouse", "warehouse.out0");
-                Expect(outP.Record.Filter == BeltPortService.FilterOff && d.choices.Count == 3 && d.choices[0].Contains("全部") && d.choices[1].Contains("废料"),
-                    $"过滤下拉框（全部可存物品 / 只输出废料 / 停止输出）选中即生效：选“{d.value}”后绑定表里的过滤 = {outP.Record.Filter}");
+                    int solids = GameLogic.Campaign.Economy.ItemCatalog.Items.Count(it => it.Form == GameLogic.Campaign.Economy.ItemForm.Solid);
+                Expect(outP.Record.Filter == BeltPortService.FilterOff && d.choices.Count == solids + 2 && d.choices[0].Contains("全部") && d.choices[1].Contains("废料"),
+                    $"过滤下拉框（全部可存物品 / 物品表 {solids} 种固体各一项 / 停止输出，FG4-ECO-01）选中即生效：选“{d.value}”后绑定表里的过滤 = {outP.Record.Filter}");
                 bool esc = UiEscapeStack.CloseTop() && !BeltPortPanelUIToolkit.IsOpen;
                 GridCell core = HomeGridService.CorePivot(s);
                 mode.PointerDown(s, core);

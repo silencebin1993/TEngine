@@ -109,7 +109,7 @@ namespace GameLogic.Campaign.Logistics
             return plan;
         }
 
-        /// <summary>按种类数物品，并算出仓库放得下多少（废料按剩余空间；家园仓库存不了的种类全部“放不下”）。</summary>
+        /// <summary>按种类数物品，并算出仓库放得下多少（FG4-ECO-01：每种按各自的剩余空间；家园存不了的种类全部“放不下”）。</summary>
         private static void Fill(CampaignState state, BeltClearPlan plan)
         {
             CountScratch.Clear();
@@ -118,12 +118,12 @@ namespace GameLogic.Campaign.Logistics
             {
                 plan.Counts[kv.Key] = kv.Value;
             }
+            bool warehouse = Economy.HomeInventory.WarehouseOperational(state);
             plan.FreeSpace = HomeValleyCargo.GetAvailableSpace(state, CampaignEconomyLedger.ResourceScrap);
-            int free = plan.FreeSpace;
             foreach (KeyValuePair<ushort, int> kv in plan.Counts)
             {
-                int fit = BeltItems.IsStorable(kv.Key) ? Math.Min(kv.Value, free) : 0;
-                free -= fit;
+                Economy.ItemDef def = BeltItems.Def(kv.Key);
+                int fit = BeltItems.IsStorable(kv.Key) ? Math.Min(kv.Value, Economy.HomeInventory.Space(state, def, warehouse)) : 0;
                 plan.Fit += fit;
                 if (kv.Value > fit)
                 {
@@ -179,17 +179,17 @@ namespace GameLogic.Campaign.Logistics
             int cleared = BeltNetworkService.Kernel.ClearCells(plan.Cells, CountScratch);
             int stored = 0;
             int discarded = 0;
-            int free = Math.Max(0, HomeValleyCargo.GetAvailableSpace(state, CampaignEconomyLedger.ResourceScrap));
+            bool warehouse = Economy.HomeInventory.WarehouseOperational(state);
             var sorted = new List<KeyValuePair<ushort, int>>(CountScratch);
             sorted.Sort((x, y) => x.Key.CompareTo(y.Key));
             foreach (KeyValuePair<ushort, int> kv in sorted)
             {
-                int fit = BeltItems.IsStorable(kv.Key) ? Math.Min(kv.Value, free) : 0;
-                free -= fit;
+                // FG4-ECO-01：每种按各自的剩余空间送进家园仓库（废料 = 核心缓存 + 仓库，其余固体 = 仓库）。
+                Economy.ItemDef def = BeltItems.Def(kv.Key);
+                int fit = BeltItems.IsStorable(kv.Key) ? Economy.HomeInventory.Add(state, def, kv.Value, clampToSpace: true, warehouseOperational: warehouse, knownWarehouse: true) : 0;
                 stored += fit;
                 discarded += kv.Value - fit;
             }
-            state.Scrap += stored; // 目前只有废料可存（BeltItems.IsStorable）：送进家园仓库（核心缓存与仓库共用库存）。
             state.Belts.ClearedToStorage += stored;
             state.Belts.Discarded += discarded;
             LastClearedCells = plan.SurfaceCells;

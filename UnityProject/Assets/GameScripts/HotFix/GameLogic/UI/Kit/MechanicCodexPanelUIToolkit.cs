@@ -171,6 +171,8 @@ namespace GameLogic.UI.Kit
             _tabButtons.Add(root.Q<Button>("CodexTabSystem"));
             _tabButtons.Add(root.Q<Button>("CodexTabFirmware"));
             _tabButtons.Add(root.Q<Button>("CodexTabReaction"));
+            _tabButtons.Add(root.Q<Button>("CodexTabItem")); // FG4-ECO-01
+            _tabButtons.Add(root.Q<Button>("CodexTabRecipe"));
             _tabs = new UiTabs(_tabButtons, i => SelectTab(MechanicCodex.Tabs[i]));
             _search = new UiSearchBox(root.Q<TextField>("CodexSearch"), root.Q<Label>("CodexSearchPlaceholder"), root.Q<Button>("CodexSearchClear"),
                 "codex.panel.search", SetSearch);
@@ -374,6 +376,8 @@ namespace GameLogic.UI.Kit
         {
             MechanicCodex.TabFirmware => "codex.tab.firmware",
             MechanicCodex.TabReaction => "codex.tab.reaction",
+            MechanicCodex.TabItem => "codex.tab.item",
+            MechanicCodex.TabRecipe => "codex.tab.recipe",
             _ => "codex.tab.system",
         };
 

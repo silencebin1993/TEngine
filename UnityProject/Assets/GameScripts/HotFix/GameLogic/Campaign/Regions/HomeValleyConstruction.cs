@@ -75,12 +75,16 @@ namespace GameLogic.Campaign.Regions
 
         // ── 现场 ─────────────────────────────────────────────────────────────────
 
-        /// <summary>施工材料 / 返还物的玩家名（文本键）：废料；传送带上的物品在物品表（FG4-ECO-01）之前按编号显示。</summary>
+        /// <summary>施工材料 / 返还物的玩家名（文本键）：废料；FG4-ECO-01 起按物品表取名，表里没有的传送带编号按“物品 #编号”显示。</summary>
         public static string MaterialName(string resourceType)
         {
             if (resourceType == CampaignEconomyLedger.ResourceScrap)
             {
                 return GameText.Get("build.material.scrap");
+            }
+            if (Economy.ItemCatalog.TryGetByResource(resourceType, out Economy.ItemDef def))
+            {
+                return def.Name;
             }
             if (resourceType != null && resourceType.StartsWith("item:", StringComparison.Ordinal))
             {
@@ -430,7 +434,7 @@ namespace GameLogic.Campaign.Regions
         /// <summary>
         /// 把 <paramref name="amount"/> 放到地上等机器搬（FGR-LOG-007“仓库满时变地面物，由机器之后搬运”）：废料按每趟搬运量
         /// （<see cref="CarryPerTrip"/>）拆成几份，每份生成一张返还搬运单——整份一次搬的话，超过仓库总容量的一大份永远等不到空位。
-        /// 仓库存不了的物品整份落地、不生成搬运单（DEBT-FG3LOG02-01）。返回实际落地的数量。
+        /// 家园存不了的物品（流体 / 实体 / 表里没有的编号）整份落地、不生成搬运单；FG4-ECO-01 起物品表里的固体都能搬进仓库。返回实际落地的数量。
         /// </summary>
         public static int DropForHaul(CampaignState state, Vector2 at, string resourceType, int amount, string dropId)
         {
@@ -485,8 +489,8 @@ namespace GameLogic.Campaign.Regions
 
         /// <summary>
         /// 全额返还（FGR-LOG-007）：先入库（仓库有多少空间放多少），放不下的在 <paramref name="at"/> 变成地面物，并生成搬运单——
-        /// 仓库腾出空间后由空闲机器搬走（仓满时搬运单等待，不占机器）。废料以外的物品（传送带上的物品）目前家园仓库还存不了（FG4-ECO-01 物品表），
-        /// 一律留在地上（不消失）。<paramref name="dropId"/> 是这一份返还的唯一标识（同一标识只生成一次地面物）。
+        /// 仓库腾出空间后由空闲机器搬走（仓满时搬运单等待，不占机器）。FG4-ECO-01 起物品表里的固体按各自的容量入库；
+        /// 家园存不了的（表里没有的编号）一律留在地上（不消失）。<paramref name="dropId"/> 是这一份返还的唯一标识（同一标识只生成一次地面物）。
         /// </summary>
         public static void ReturnMaterials(CampaignState state, Vector2 at, string resourceType, int amount, string dropId)
         {

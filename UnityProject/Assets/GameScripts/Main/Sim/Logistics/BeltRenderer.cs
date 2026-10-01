@@ -43,6 +43,10 @@ namespace BinGames.Sim.Logistics
         private static readonly int HeightId = Shader.PropertyToID("_Height");
         private static readonly int GameTimeId = Shader.PropertyToID("_GameTime");
         private static readonly int OverlayId = Shader.PropertyToID("_Overlay");
+        private static readonly int ItemPaletteId = Shader.PropertyToID("_ItemPalette");
+
+        /// <summary>FG4-ECO-01：物品编号 0～63 的颜色（热更层按物品表填，a = 1 表示有；null = 全部按编号着色）。长度必须是 64。</summary>
+        public Vector4[] ItemPalette;
 
         private Material _material;
         private Mesh _quad;
@@ -180,6 +184,10 @@ namespace BinGames.Sim.Logistics
                 _itemProps.SetFloat(HeightId, settings.Height);
                 _itemProps.SetFloat(GameTimeId, AnimationTime);
                 _itemProps.SetFloat(OverlayId, OverlayMode);
+                if (ItemPalette != null && ItemPalette.Length == 64)
+                {
+                    _itemProps.SetVectorArray(ItemPaletteId, ItemPalette);
+                }
                 var rpItems = new RenderParams(_material)
                 {
                     worldBounds = bounds,

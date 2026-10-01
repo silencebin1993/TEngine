@@ -85,6 +85,7 @@ namespace GameLogic.Campaign.Logistics
         private static readonly List<Binding> Scratch = new List<Binding>(16);
         private static readonly HashSet<string> DesiredKeys = new HashSet<string>(StringComparer.Ordinal);
         private static bool _connectedHookChecked;
+        private static bool _acceptMigrated;
         private static bool _outputBlockedHookChecked;
         private static ulong _lastSignature;
         private static int _lastBindingCount = -1;
@@ -160,6 +161,7 @@ namespace GameLogic.Campaign.Logistics
         /// <summary>按存档里的绑定表重建运行时索引（只在绑定表换了时，O(端口数)）。</summary>
         private static void RebuildIndex(CampaignState state)
         {
+            _acceptMigrated = false;
             Bindings.Clear();
             ById.Clear();
             ByKey.Clear();
@@ -457,7 +459,8 @@ namespace GameLogic.Campaign.Logistics
             else
             {
                 string nameKey = FgContentTables.TryGetBuilding(b.BuildingTypeId, out GameConfig.fg.Building brow) ? brow.NameKey : null;
-                ushort accept = bind.Store ? BeltItems.ScrapId : BeltConst.AcceptNone;
+                // FG4-ECO-01：家园仓库 / 核心的输入口收全部可存物品（缓存一次只放一种，入库时按种类；关闭 DEBT-FG3LOG03-02）。
+                ushort accept = bind.Store ? BeltConst.AcceptAnyOneKind : BeltConst.AcceptNone;
                 r = BeltNetworkService.TryAddSink(state, id, bind.PortCell, SinkBuffer, 0, nameKey, 0, face, accept);
             }
             if (!r.Ok)
@@ -497,7 +500,13 @@ namespace GameLogic.Campaign.Logistics
             ushort item = 0;
             if (BeltNetworkService.Kernel.TryGetPortInfo(bind.PortId, out BeltPortInfo info))
             {
-                item = bind.IsOutput ? info.ItemType : (info.Accept != BeltConst.AcceptAny && info.Accept != BeltConst.AcceptNone ? info.Accept : BeltItems.ScrapId);
+                item = bind.IsOutput || info.Accept == BeltConst.AcceptAnyOneKind
+                    ? info.ItemType
+                    : (info.Accept != BeltConst.AcceptAny && info.Accept != BeltConst.AcceptNone ? info.Accept : BeltItems.ScrapId);
+                if (item == 0)
+                {
+                    item = BeltItems.ScrapId;
+                }
             }
             BeltNetworkService.TryRemovePort(state, bind.PortId, out int pending, out int buffered);
             int back = pending + buffered;
@@ -527,7 +536,7 @@ namespace GameLogic.Campaign.Logistics
             Revision++;
         }
 
-        /// <summary>过滤 → 输出口推哪种物品（全部 = 第一种可存物品；目前只有废料）。</summary>
+        /// <summary>过滤 → 输出口推哪种物品（指定物品 = 那一种；“全部”时登记初值为废料，之后由 <see cref="Pump"/> 按库存轮转）。</summary>
         public static ushort ItemForFilter(int filter)
         {
             if (filter > 0 && filter < ushort.MaxValue)
@@ -538,8 +547,10 @@ namespace GameLogic.Campaign.Logistics
         }
 
         /// <summary>
-        /// 转移：仓库输入口的缓存存进家园仓库；仓库输出口按过滤从库存补足待推数。O(端口数)，内核每走一步之后一次。
-        /// 按端口号升序处理（同一状态同一结果）。
+        /// 转移：仓库输入口的缓存按种类存进家园仓库；仓库输出口按过滤从库存补足待推数。O(端口数)，内核每走一步之后一次。
+        /// 按端口号升序处理（同一状态同一结果）。FG4-ECO-01：
+        /// - 输入口缓存一次只放一种（内核 <see cref="BeltConst.AcceptAnyOneKind"/>），按那一种的剩余空间入库；放不下就留在缓存里，带停下（原因“下游已满”）。
+        /// - 输出口过滤“全部可存物品”：上一批推完（待推为 0）时轮到下一种有库存的物品（按物品表顺序），一次只推一种；指定物品时只推那一种。
         /// </summary>
         public static void Pump(CampaignState state)
         {
@@ -550,12 +561,16 @@ namespace GameLogic.Campaign.Logistics
             }
             long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
             BeltKernel k = BeltNetworkService.Kernel;
+            if (!_acceptMigrated)
+            {
+                MigrateStoreAccept(k);
+            }
             int sourceBuffer = SourceBuffer;
-            // 仓库容量只查一次（容量查询要找仓库建筑，O(建筑数)），剩余空间按当前库存现算——整次转移 O(端口数)。
-            int capacity = -1;
+            // 仓库是否运转只查一次（O(建筑数)），剩余空间按当前库存现算——整次转移 O(端口数)。
+            int warehouse = -1;
             foreach (Binding bind in Bindings)
             {
-                if (!bind.Store || bind.Record == null || !k.TryGetPortCounts(bind.PortId, out int pending, out int buffered))
+                if (!bind.Store || bind.Record == null || !k.TryGetPortCounts(bind.PortId, out int pending, out int buffered, out ushort kind))
                 {
                     continue;
                 }
@@ -566,33 +581,104 @@ namespace GameLogic.Campaign.Logistics
                     {
                         continue;
                     }
-                    ushort item = ItemForFilter(filter);
-                    if (item != BeltItems.ScrapId)
+                    ushort item = filter > 0 ? ItemForFilter(filter) : kind;
+                    if (filter == FilterAll)
                     {
-                        continue; // 家园仓库目前只存废料：别的物品没有库存可取。
+                        // 一批（logistics.port.source_buffer 件）推完才补下一批、并换到下一种有库存的物品：否则一直有库存的那一种（推出去又转回仓库）会永远占着输出口。
+                        // 内核每步最多推一件、推完的那一步之后就补，入口不会空等（吞吐与只推一种时相同）。
+                        if (pending > 0)
+                        {
+                            continue;
+                        }
+                        ushort next = NextStocked(state, kind);
+                        if (next != 0 && next != kind)
+                        {
+                            k.SetSourceItem(bind.PortId, next);
+                        }
+                        item = next != 0 ? next : kind;
                     }
-                    int take = Math.Min(sourceBuffer - Math.Max(0, pending), Math.Max(0, state.Scrap));
+                    Economy.ItemDef def = BeltItems.Def(item);
+                    if (!Economy.HomeInventory.IsBeltStorable(def))
+                    {
+                        continue;
+                    }
+                    int take = Economy.HomeInventory.RemoveUpTo(state, def, sourceBuffer - Math.Max(0, pending));
                     if (take > 0)
                     {
-                        state.Scrap -= take;
                         k.AddSourceItems(bind.PortId, take);
                     }
                 }
                 else if (buffered > 0)
                 {
-                    if (capacity < 0)
+                    Economy.ItemDef def = BeltItems.Def(kind != 0 ? kind : BeltItems.ScrapId);
+                    if (!Economy.HomeInventory.IsBeltStorable(def))
                     {
-                        capacity = HomeValleyCargo.GetStorageCapacity(state, CampaignEconomyLedger.ResourceScrap);
+                        // 物品表里没有的编号（旧存档 / 表删掉了某种物品）：放到这座建筑旁边的地上（按编号落地，不消失），输入口不被它堵死。
+                        int n0 = k.TakeFromSink(bind.PortId, buffered);
+                        if (n0 > 0)
+                        {
+                            BuildingRecord owner = HomeGridService.FindBuilding(state, bind.BuildingId);
+                            HomeValleyConstruction.ReturnMaterials(state, owner?.Position ?? new Vector2(bind.PortCell.X, bind.PortCell.Y), BeltItems.ResourceOf(kind), n0,
+                                "port:" + bind.PortId.ToString(CultureInfo.InvariantCulture) + ":unknown:" + GameClock.Ticks.ToString(CultureInfo.InvariantCulture));
+                        }
+                        continue;
                     }
-                    int n = Math.Min(buffered, Math.Max(0, capacity - state.Scrap));
+                    if (warehouse < 0)
+                    {
+                        warehouse = Economy.HomeInventory.WarehouseOperational(state) ? 1 : 0;
+                    }
+                    int n = Math.Min(buffered, Economy.HomeInventory.Space(state, def, warehouse == 1));
                     if (n > 0)
                     {
-                        state.Scrap += k.TakeFromSink(bind.PortId, n);
+                        Economy.HomeInventory.Add(state, def, k.TakeFromSink(bind.PortId, n), clampToSpace: false);
                     }
                 }
             }
             PumpCount++;
             LastPumpMs = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+        }
+
+        /// <summary>“全部可存物品”的下一种：按物品表顺序，从 <paramref name="after"/> 的下一种开始找第一种有库存的（转一圈都没有返回 0）。O(物品种类)，只在一批推完时调用。</summary>
+        private static ushort NextStocked(CampaignState state, ushort after)
+        {
+            IReadOnlyList<Economy.ItemDef> items = Economy.ItemCatalog.Items;
+            int n = items.Count;
+            int start = 0;
+            for (int i = 0; i < n; i++)
+            {
+                if (items[i].BeltId == after)
+                {
+                    start = i + 1;
+                    break;
+                }
+            }
+            for (int step = 0; step < n; step++)
+            {
+                Economy.ItemDef d = items[(start + step) % n];
+                if (Economy.HomeInventory.IsBeltStorable(d) && Economy.HomeInventory.Stock(state, d) > 0)
+                {
+                    return d.BeltId;
+                }
+            }
+            return 0;
+        }
+
+        /// <summary>输出口按过滤此刻有没有可推的库存（“全部”= 任何一种可存物品都没有）。</summary>
+        public static bool OutputStockEmpty(CampaignState state, int filter) =>
+            filter == FilterAll ? NextStocked(state, 0) == 0 : BeltItems.Stock(state, ItemForFilter(filter)) <= 0;
+
+        /// <summary>FG4-ECO-01 读档迁移：FG3-LOG-03 起的存档里仓库输入口“只收废料”，改成“全部可存物品（一次一种）”；缓存里已有的件就是废料（内核迁移时记下）。
+        /// 每次重建索引后做一次，O(端口数)。</summary>
+        private static void MigrateStoreAccept(BeltKernel k)
+        {
+            _acceptMigrated = true;
+            foreach (Binding bind in Bindings)
+            {
+                if (bind.Store && !bind.IsOutput && bind.PortId >= 0 && k.TryGetPortInfo(bind.PortId, out BeltPortInfo info) && info.Accept != BeltConst.AcceptAnyOneKind)
+                {
+                    k.SetSinkAccept(bind.PortId, BeltConst.AcceptAnyOneKind);
+                }
+            }
         }
 
         // ── 玩家操作（端口面板）──────────────────────────────────────────────────
@@ -646,6 +732,7 @@ namespace GameLogic.Campaign.Logistics
         // ── 查询（悬停、端口面板、堵塞原因）───────────────────────────────────────
 
         private static readonly HashSet<int> NetScratch = new HashSet<int>();
+        private static readonly int[] KindScratch = new int[1024];
 
         /// <summary>
         /// FG3-E2E-01（M3 出口旅程抓到）：家园仓库（store）输出口推上传送带、此刻还在带上（或已从库存取出等着推上）的件数——在途不算库存。
@@ -653,9 +740,12 @@ namespace GameLogic.Campaign.Logistics
         /// 开销 O(端口绑定数)（遍历全部绑定、只取仓库输出口；每个网络的件数是内核汇总值，O(1)）；只在描述“等待材料”时调用，
         /// 施工队列一次刷新只算一次（<see cref="Regions.HomeValleyConstruction.CollectQueue"/>），不按帧、不按施工单数倍增。
         /// 先按存档对齐索引（暂停中改了端口绑定也读到新列表）。
-        /// 口径：M3 的仓库只存废料，网络件数就是在途废料；FG4-ECO-01 加入多种物品后要按物品种类过滤（FG-GAP-090 承接）。
+        /// 口径（FG4-ECO-01，FG-GAP-090）：只数 <paramref name="item"/> 这一种（默认废料 = 施工材料）——输出口待推的件只在端口此刻推的就是这种时计入，
+        /// 网络里的件按种类数（内核 <see cref="BeltKernel.CountItemsByType"/>，逐格在 AOT，O(该网络格数)），别的物品不会被算成在途废料。
         /// </summary>
-        public static int StoreItemsOnBelts(CampaignState state)
+        public static int StoreItemsOnBelts(CampaignState state) => StoreItemsOnBelts(state, BeltItems.ScrapId);
+
+        public static int StoreItemsOnBelts(CampaignState state, ushort item)
         {
             BeltKernel k = BeltNetworkService.IsRunning ? BeltNetworkService.Kernel : null;
             if (k == null || state == null || !ReferenceEquals(BeltNetworkService.BoundState, state))
@@ -674,14 +764,62 @@ namespace GameLogic.Campaign.Logistics
                 {
                     continue; // 没接带的输出口只是预取了几件等着推（在途量上限），不是“在传送带上”
                 }
-                total += Math.Max(0, info.Pending);
-                if (info.Network >= 0 && NetScratch.Add(info.Network) && k.TryGetNetworkStats(info.Network, out BeltNetworkStats st))
+                if (info.ItemType == item)
                 {
-                    total += st.Items;
+                    total += Math.Max(0, info.Pending);
+                }
+                if (info.Network >= 0 && NetScratch.Add(info.Network) && k.TryGetNetworkStats(info.Network, out BeltNetworkStats st) && st.Items > 0)
+                {
+                    Array.Clear(KindScratch, 0, KindScratch.Length);
+                    k.CountItemsByType(info.Network, KindScratch);
+                    total += item < KindScratch.Length - 1 ? KindScratch[item] : 0;
                 }
             }
             NetScratch.Clear();
             return total;
+        }
+
+        /// <summary>
+        /// FG4-ECO-01（物品悬停“分布”里的“建筑端口缓存（在途）”）：全部建筑端口手里的物品按种类累加进 <paramref name="countsByItem"/>
+        /// （输出口 = 已从库存取出、等着推上带的件；按种类收货的输入口 = 缓存里那一种）。下标 = 物品编号，超出数组的计入最后一格。O(端口绑定数)，只在悬停缓存刷新时调用。
+        /// </summary>
+        public static void CollectPortItems(CampaignState state, int[] countsByItem)
+        {
+            BeltKernel k = BeltNetworkService.IsRunning ? BeltNetworkService.Kernel : null;
+            if (k == null || state == null || countsByItem == null || countsByItem.Length == 0 || !ReferenceEquals(BeltNetworkService.BoundState, state))
+            {
+                return;
+            }
+            EnsureIndex(state);
+            int last = countsByItem.Length - 1;
+            foreach (Binding b in Bindings)
+            {
+                if (b == null || b.PortId < 0 || !k.TryGetPortCounts(b.PortId, out int pending, out int buffered, out ushort item) || item == 0)
+                {
+                    continue;
+                }
+                int n = Math.Max(0, pending) + Math.Max(0, buffered);
+                if (n > 0)
+                {
+                    countsByItem[item < last ? item : last] += n;
+                }
+            }
+        }
+
+        /// <summary>
+        /// FG4-ECO-01：家园仓库输入口此刻是不是因为“仓库放不下”而不收——按缓存里那一种（缓存空时按废料）看剩余空间。
+        /// <paramref name="kind"/> 给出那一种（端口面板、根因诊断写“放不下 X”）。O(1)（仓库是否运转 O(建筑数)，只在面板 / 诊断时调用）。
+        /// </summary>
+        public static bool StoreFull(CampaignState state, int portId, out Economy.ItemDef kind)
+        {
+            kind = null;
+            BeltKernel k = BeltNetworkService.IsRunning ? BeltNetworkService.Kernel : null;
+            if (k == null || state == null || !k.TryGetPortCounts(portId, out _, out int buffered, out ushort item))
+            {
+                return false;
+            }
+            kind = BeltItems.Def(buffered > 0 && item != 0 ? item : BeltItems.ScrapId);
+            return kind != null && Economy.HomeInventory.Space(state, kind) <= 0;
         }
 
         public static bool TryGetBinding(int portId, out Binding bind)
@@ -751,7 +889,7 @@ namespace GameLogic.Campaign.Logistics
                 }
                 else if (!v.IsOutput)
                 {
-                    v.AcceptLine = GameText.Format("logistics.port.accept", BeltItems.Name(BeltItems.ScrapId));
+                    v.AcceptLine = GameText.Get("logistics.port.accept_all");
                 }
                 if (!active)
                 {
@@ -778,14 +916,17 @@ namespace GameLogic.Campaign.Logistics
                         : GameText.Format("logistics.port.stats_in", v.Info.Total, v.Info.Buffered, v.Info.BufferCap, perMin);
                     if (v.Store && active && v.Connected)
                     {
-                        int cap = HomeValleyCargo.GetStorageCapacity(state, CampaignEconomyLedger.ResourceScrap);
-                        if (!v.IsOutput && HomeValleyCargo.GetAvailableSpace(state, CampaignEconomyLedger.ResourceScrap) <= 0)
+                        // FG4-ECO-01：输入口按缓存里那一种（没有缓存时按废料）判断仓库满不满。
+                        Economy.ItemDef inDef = BeltItems.Def(v.Info.Buffered > 0 && v.Info.ItemType != 0 ? v.Info.ItemType : BeltItems.ScrapId);
+                        if (!v.IsOutput && inDef != null && Economy.HomeInventory.Space(state, inDef) <= 0)
                         {
-                            v.IssueLine = GameText.Format("logistics.port.store_full", state.Scrap, cap);
+                            v.IssueLine = GameText.Format("logistics.port.store_full_item", inDef.Name, Economy.HomeInventory.Stock(state, inDef),
+                                Economy.HomeInventory.Capacity(state, inDef));
                         }
-                        else if (v.IsOutput && v.Filter != FilterOff && v.Info.Pending <= 0 && BeltItems.Stock(state, ItemForFilter(v.Filter)) <= 0)
+                        else if (v.IsOutput && v.Filter != FilterOff && v.Info.Pending <= 0 && OutputStockEmpty(state, v.Filter))
                         {
-                            v.IssueLine = GameText.Format("logistics.port.store_empty", BeltItems.Name(ItemForFilter(v.Filter)));
+                            v.IssueLine = GameText.Format("logistics.port.store_empty",
+                                v.Filter == FilterAll ? GameText.Get("logistics.port.filter_all") : BeltItems.Name(ItemForFilter(v.Filter)));
                         }
                         else if (v.IsOutput && v.Info.Pending > 0 && k != null && k.TryGetCellInfo(shape.BeltCell.X, shape.BeltCell.Y, out BeltCellInfo head)
                                  && head.Block != BeltBlock.None && head.Count > 0)

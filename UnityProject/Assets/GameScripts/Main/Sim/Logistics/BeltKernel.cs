@@ -832,6 +832,40 @@ namespace BinGames.Sim.Logistics
             return total;
         }
 
+        /// <summary>
+        /// FG4-ECO-01（FG04 第 4 节“悬停物品图标显示总库存、各仓库分布”；FG-GAP-090“在途按物品种类”）：带上（地面格）的物品按种类计数，
+        /// 累加进 <paramref name="countsByItem"/>（下标 = 物品编号；编号超出数组长度的计入最后一格）。<paramref name="network"/> &lt; 0 = 全部网络。
+        /// 逐格循环留在 AOT（热更层不逐格）；O(格数 × 每格件数)，只在悬停缓存刷新 / 描述“等待材料”时调用，不按帧。返回计数件数。
+        /// </summary>
+        public int CountItemsByType(int network, int[] countsByItem)
+        {
+            if (countsByItem == null || countsByItem.Length == 0)
+            {
+                return 0;
+            }
+            if (network >= 0)
+            {
+                EnsureTopology();
+            }
+            int last = countsByItem.Length - 1;
+            int total = 0;
+            for (int i = 0; i < _count.Length; i++)
+            {
+                if (_alive[i] == 0 || (network >= 0 && _net[i] != network))
+                {
+                    continue;
+                }
+                int cnt = _count[i];
+                for (int k = 0; k < cnt; k++)
+                {
+                    ushort it = _item[i * S + k];
+                    countsByItem[it < last ? it : last]++;
+                }
+                total += cnt;
+            }
+            return total;
+        }
+
         private void TakeItems(int i, List<ushort> removed)
         {
             int cnt = _count[i];
@@ -1119,6 +1153,12 @@ namespace BinGames.Sim.Logistics
                 return BeltResult.PortNotFound;
             }
             BeltPort bp = _ports[p];
+            // FG4-ECO-01：从“只收一种”改成“任何一种（一次一种）”时，缓存里已有的件就是原来那一种（旧存档的仓库输入口缓存着废料）。
+            if (accept == BeltConst.AcceptAnyOneKind && bp.Accept != BeltConst.AcceptAnyOneKind && bp.Buffered > 0
+                && bp.Accept != BeltConst.AcceptAny && bp.Accept != BeltConst.AcceptNone)
+            {
+                bp.Item = bp.Accept;
+            }
             bp.Accept = accept;
             _ports[p] = bp;
             return BeltResult.Ok;
@@ -1183,6 +1223,23 @@ namespace BinGames.Sim.Logistics
                     _portIndex[_ports[p].Id] = p;
                 }
             }
+        }
+
+        /// <summary>FG4-ECO-01：端口的待推数（输出口）与缓存数（输入口），并给出端口手里物品的种类（输出口 = 要推的种类；按种类收货的输入口 = 缓存里那一种）。O(1)，不触发拓扑重建。</summary>
+        public bool TryGetPortCounts(int id, out int pending, out int buffered, out ushort item)
+        {
+            int p = FindPort(id);
+            if (p < 0)
+            {
+                pending = 0;
+                buffered = 0;
+                item = 0;
+                return false;
+            }
+            pending = _ports[p].Pending;
+            buffered = _ports[p].Buffered;
+            item = _ports[p].Item;
+            return true;
         }
 
         /// <summary>FG3-LOG-03：端口的待推数（输出口）与缓存数（输入口），O(1)，不触发拓扑重建（热更层每个内核步补货 / 取料用）。</summary>

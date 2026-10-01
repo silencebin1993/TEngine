@@ -23,6 +23,10 @@ namespace GameLogic.Progression
         System = 0,
         Firmware = 1,
         Reaction = 2,
+        /// <summary>FG4-ECO-01：物品（fg.TbEcoItem 生成）。</summary>
+        Item = 3,
+        /// <summary>FG4-ECO-01：配方（fg.TbRecipe 生成）。</summary>
+        Recipe = 4,
     }
 
     /// <summary>一条机制图鉴条目（fg.TbCodexEntry 的运行时视图；links / hooks 已拆好）。FG2-FW-05：固件 / 反应条目由各自的表生成，
@@ -40,6 +44,8 @@ namespace GameLogic.Progression
         public int SortOrder;
         public string[] Links = Array.Empty<string>();
         public string[] Hooks = Array.Empty<string>();
+        /// <summary>FG4-ECO-01：一开始就能看（原料 / 中间品 / 成品 / 流体 / 数字资源与全部配方：规划产线要用）；远征物、关键材料、终局第一次拿到时解锁。</summary>
+        public bool AlwaysOpen;
     }
 
     /// <summary>
@@ -62,12 +68,22 @@ namespace GameLogic.Progression
         public const string TabSystem = "system";
         public const string TabFirmware = "firmware";
         public const string TabReaction = "reaction";
+        public const string TabItem = "item";
+        public const string TabRecipe = "recipe";
 
         /// <summary>页签顺序（界面按这个顺序画标签）。</summary>
-        public static readonly string[] Tabs = { TabSystem, TabFirmware, TabReaction };
+        public static readonly string[] Tabs = { TabSystem, TabFirmware, TabReaction, TabItem, TabRecipe };
 
         public const string FirmwarePrefix = "fw:";
         public const string ReactionPrefix = "reaction:";
+        public const string ItemPrefix = "item:";
+        public const string RecipePrefix = "recipe:";
+
+        /// <summary>FG4-ECO-01：物品条目 ID（“item:” + 物品 ID）。</summary>
+        public static string ItemEntryId(string itemId) => string.IsNullOrEmpty(itemId) ? null : ItemPrefix + itemId;
+
+        /// <summary>FG4-ECO-01：配方条目 ID（“recipe:” + 配方 ID）。</summary>
+        public static string RecipeEntryId(string recipeId) => string.IsNullOrEmpty(recipeId) ? null : RecipePrefix + recipeId;
 
         public static string FirmwareEntryId(string firmwareId) => string.IsNullOrEmpty(firmwareId) ? null : FirmwarePrefix + firmwareId;
 
@@ -183,6 +199,9 @@ namespace GameLogic.Progression
                     return Campaign.Signal.FirmwareKinds.DisplayName(e.ContentId) ?? e.ContentId;
                 case MechanicCodexKind.Reaction:
                     return Campaign.Content.NamedReactionCatalog.NameOf(e.ContentId) ?? e.ContentId;
+                case MechanicCodexKind.Item:
+                case MechanicCodexKind.Recipe:
+                    return GameLogic.Localization.GameText.Get(e.TitleKey);
                 default:
                     return GameLogic.Localization.GameText.Get(e.TitleKey);
             }
@@ -201,6 +220,10 @@ namespace GameLogic.Progression
                     return Campaign.Signal.FirmwareLibrary.BuildDetail(state, e.ContentId);
                 case MechanicCodexKind.Reaction:
                     return ReactionBody(e.ContentId, state);
+                case MechanicCodexKind.Item:
+                    return Campaign.Economy.EconomyCodex.ItemBody(e.ContentId, state);
+                case MechanicCodexKind.Recipe:
+                    return Campaign.Economy.EconomyCodex.RecipeBody(e.ContentId, state);
                 default:
                     return GameLogic.Localization.GameText.Get(e.BodyKey);
             }
@@ -231,6 +254,9 @@ namespace GameLogic.Progression
                         return GameLogic.Localization.GameText.Format("reaction.codex.closed", GameLogic.Localization.GameText.Get("reaction.batch." + row.Batch));
                     }
                     return GameLogic.Localization.GameText.Get("reaction.codex.locked");
+                case MechanicCodexKind.Item:
+                    // 没拿到的物品不剧透名字与用途，只写获取途径（表里的来源文字）。
+                    return GameLogic.Localization.GameText.Format("codex.item.locked_hint", GameLogic.Localization.GameText.Get(e.HintKey));
                 default:
                     return GameLogic.Localization.GameText.Format("codex.panel.locked_body", GameLogic.Localization.GameText.Get(e.HintKey));
             }
@@ -389,7 +415,7 @@ namespace GameLogic.Progression
         {
             // 读表失败（配置还没载入 / 表缺失）时不缓存失败结果：下一次访问再试，配置载入后自动恢复。
             // FG2-FW-05：固件 / 反应表重载（或测试注入）后重建派生条目。
-            int derivedKey = HashCode.Combine(Campaign.Content.FirmwareCatalog.Revision, Campaign.Content.NamedReactionCatalog.Revision);
+            int derivedKey = HashCode.Combine(Campaign.Content.FirmwareCatalog.Revision, Campaign.Content.NamedReactionCatalog.Revision, Campaign.Economy.ItemCatalog.Revision);
             if (_entries != null && _loadError == null && derivedKey == _derivedKey)
             {
                 return;
@@ -505,6 +531,88 @@ namespace GameLogic.Progression
                 _entries.Add(e);
                 _byId[e.Id] = e;
             }
+            AddEconomyEntries();
+        }
+
+        /// <summary>
+        /// FG4-ECO-01（卡片“每种物品和配方都有图鉴条目（来源和用途）”；FG04 第 4 节）：按物品表与配方表生成物品 / 配方页签的条目，
+        /// 物品 ↔ 产出它 / 用到它的配方互相链接。物品表读不到时不生成（表错误已由 ItemCatalog 记 Error），其余页签照常。
+        /// </summary>
+        private static void AddEconomyEntries()
+        {
+            // 读的是 ItemCatalog 自己的 Revision 之后的内容；访问 Items 会触发载入（第一次时 Revision 前进），这里再取一次让派生键对上。
+            IReadOnlyList<Campaign.Economy.ItemDef> items = Campaign.Economy.ItemCatalog.Items;
+            _derivedKey = HashCode.Combine(Campaign.Content.FirmwareCatalog.Revision, Campaign.Content.NamedReactionCatalog.Revision, Campaign.Economy.ItemCatalog.Revision);
+            int order = 300000;
+            foreach (Campaign.Economy.ItemDef item in items)
+            {
+                string id = ItemEntryId(item.Id);
+                if (_byId.ContainsKey(id))
+                {
+                    continue;
+                }
+                var links = new List<string>();
+                foreach (Campaign.Economy.RecipeDef r in Campaign.Economy.ItemCatalog.ProducedBy(item.Id))
+                {
+                    links.Add(RecipeEntryId(r.Id));
+                }
+                foreach (Campaign.Economy.RecipeDef r in Campaign.Economy.ItemCatalog.ConsumedBy(item.Id))
+                {
+                    string rid = RecipeEntryId(r.Id);
+                    if (!links.Contains(rid))
+                    {
+                        links.Add(rid);
+                    }
+                }
+                var e = new MechanicCodexEntry
+                {
+                    Kind = MechanicCodexKind.Item,
+                    ContentId = item.Id,
+                    Id = id,
+                    Tab = TabItem,
+                    TitleKey = item.NameKey,
+                    BodyKey = item.DescKey,
+                    HintKey = item.SourceKey,
+                    SortOrder = order + item.SortOrder,
+                    Links = links.ToArray(),
+                    AlwaysOpen = item.CodexAlwaysOpen,
+                };
+                _entries.Add(e);
+                _byId[e.Id] = e;
+            }
+            order = 400000;
+            foreach (Campaign.Economy.RecipeDef r in Campaign.Economy.ItemCatalog.Recipes)
+            {
+                string id = RecipeEntryId(r.Id);
+                if (_byId.ContainsKey(id))
+                {
+                    continue;
+                }
+                var links = new List<string>();
+                foreach (Campaign.Economy.RecipeLine l in r.Lines)
+                {
+                    string iid = ItemEntryId(l.Item.Id);
+                    if (!links.Contains(iid))
+                    {
+                        links.Add(iid);
+                    }
+                }
+                var e = new MechanicCodexEntry
+                {
+                    Kind = MechanicCodexKind.Recipe,
+                    ContentId = r.Id,
+                    Id = id,
+                    Tab = TabRecipe,
+                    TitleKey = r.NameKey,
+                    BodyKey = r.NameKey,
+                    HintKey = r.BuildingNameKey,
+                    SortOrder = order + r.SortOrder,
+                    Links = links.ToArray(),
+                    AlwaysOpen = true,
+                };
+                _entries.Add(e);
+                _byId[e.Id] = e;
+            }
         }
 
         private static void EnsureUnlocked()
@@ -523,8 +631,14 @@ namespace GameLogic.Progression
                 }
             }
             // 老玩家：本机设置里已经见过的钩子（本 Story 之前触发过的）补解锁对应条目，不写盘（下一次真正解锁时一起写）。
+            // FG4-ECO-01：一开始就能看的物品 / 配方条目直接算解锁（不写盘，也不算“新解锁”）。
             foreach (MechanicCodexEntry e in _entries)
             {
+                if (e.AlwaysOpen)
+                {
+                    _unlocked.Add(e.Id);
+                    continue;
+                }
                 foreach (string h in e.Hooks)
                 {
                     if (GameSettings.HasSeenGuidanceHook(h))

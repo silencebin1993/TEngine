@@ -70,6 +70,8 @@ namespace GameLogic.UI.Kit
             FirmwareButton = Bind(root, "PauseFirmware", "pause.firmware", FirmwareLibraryPanelUIToolkit.Open);
             // FG2-FW-04（卡片“伤害归因进入统计面板”）：统计面板盖在暂停菜单上面，关掉回到暂停菜单。
             StatsButton = Bind(root, "PauseStats", "pause.stats", StatsPanelUIToolkit.Open);
+            // FG4-ECO-01：物资面板盖在暂停菜单上面，关掉回到暂停菜单。
+            ItemsButton = Bind(root, "PauseItems", "pause.items", ItemsPanelUIToolkit.Open);
             Bind(root, "PauseSaveQuit", "ui.pause.save_and_quit", AskSaveAndQuit);
             BindCamera(root);
             BindReactionFeedback(root);
@@ -112,6 +114,7 @@ namespace GameLogic.UI.Kit
 
         public Button CodexButton => _codexButton;
         public Button StatsButton { get; private set; }
+        public Button ItemsButton { get; private set; }
         public Button FirmwareButton { get; private set; }
         public Slider CameraZoomSlider => _cameraZoom;
         public Slider CameraFollowSlider => _cameraFollow;
