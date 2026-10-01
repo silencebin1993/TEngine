@@ -68,7 +68,7 @@ namespace BinGames.EditorTools.FeatureArt
 
         static void AutoAttachOnce()
         {
-            if (EditorApplication.isPlayingOrWillChangePlaymode)
+            if (EditorApplication.isPlayingOrWillChangePlaymode || !FeatureArtWorkspaceStore.Current.autoRepairPackages)
             {
                 return;
             }
@@ -250,25 +250,22 @@ namespace BinGames.EditorTools.FeatureArt
                 SendSummary(asset) + "。模型=" + FeatureArtHunyuanSettings.SelectedModel +
                 " · " + FeatureArtHunyuanSettings.GenerateType + "。",
                 MessageType.None);
-            using (new EditorGUILayout.HorizontalScope(GUILayout.ExpandWidth(false)))
+            using (new EditorGUILayout.VerticalScope(GUILayout.Width(FeatureArtGui.Width)))
             {
                 EditorGUI.BeginDisabledGroup(reason != null);
-                if (GUILayout.Button(label, GUILayout.Width(200)))
+                if (FeatureArtGui.Button(label))
                 {
                     Begin(window, target, asset);
                 }
 
                 EditorGUI.EndDisabledGroup();
                 EditorGUI.BeginDisabledGroup(IsBusy);
-                FeatureArtHunyuanSettings.DrawModelPopup(200);
+                FeatureArtHunyuanSettings.DrawModelPopup(Mathf.FloorToInt(FeatureArtGui.Width));
                 EditorGUI.EndDisabledGroup();
-                EditorGUILayout.LabelField(
-                    FeatureArtHunyuanSettings.CreditHint(multi),
-                    EditorStyles.miniLabel,
-                    GUILayout.MinWidth(160));
+                FeatureArtGui.Label(FeatureArtHunyuanSettings.CreditHint(multi));
                 if (reason != null)
                 {
-                    EditorGUILayout.LabelField(reason, EditorStyles.miniLabel);
+                    FeatureArtGui.Label(reason);
                 }
             }
 
@@ -277,7 +274,7 @@ namespace BinGames.EditorTools.FeatureArt
             if (!IsBusy && TryCanonical(target, out var folder, out var name, out _) &&
                 File.Exists(AbsFromAsset(PackageDir(folder, name) + "/" + name + ".fbx")))
             {
-                if (GUILayout.Button("补抽贴图（不重新生成、不扣积分）", GUILayout.Width(220)))
+                if (FeatureArtGui.Button("补抽贴图（不重新生成、不扣积分）"))
                 {
                     var n = TryRepairImportedMaps(PackageDir(folder, name), name, out var log);
                     window.Log(n > 0 ? log : (log ?? "没有抽出贴图。"));
@@ -301,7 +298,7 @@ namespace BinGames.EditorTools.FeatureArt
                 EditorGUILayout.HelpBox(
                     "云端出模常要 3～15 分钟。积分是腾讯出模成功后扣的；本地超时不会退款。",
                     MessageType.Info);
-                if (GUILayout.Button("取消等待（云端任务不停、不退积分）", GUILayout.Width(260)))
+                if (FeatureArtGui.Button("取消等待（云端任务不停、不退积分）"))
                 {
                     CancelWait();
                 }
@@ -394,6 +391,21 @@ namespace BinGames.EditorTools.FeatureArt
             {
                 error = "folderHint 不在 Raw 下，拒绝落盘。";
                 return false;
+            }
+
+            try { folderHint = FeatureArtWorkspace.ValidateFolder(folderHint, "Assets/GameRes/Raw"); }
+            catch (Exception e) { error = e.Message; return false; }
+            if ((slot.id ?? "").StartsWith("custom.", StringComparison.Ordinal))
+            {
+                fileName = (slot.key ?? "").Trim();
+                if (slot.bindKind != "InstancedMesh" || string.IsNullOrEmpty(fileName) ||
+                    fileName == "." || fileName == ".." || fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+                    fileName.Contains("/") || fileName.Contains("\\") || fileName.EndsWith(".", StringComparison.Ordinal))
+                {
+                    error = "自定义模型槽需要有效资源键（文件名）和模型绑定类型。";
+                    return false;
+                }
+                return true;
             }
 
             switch (slot.domain)
@@ -1557,14 +1569,7 @@ namespace BinGames.EditorTools.FeatureArt
         {
             var moved = 0;
             var parts = new List<string>();
-            var roots = new[]
-            {
-                "Assets/GameRes/Raw/Actor/Player",
-                "Assets/GameRes/Raw/Actor/Organ",
-                "Assets/GameRes/Raw/Actor/Summon",
-                "Assets/GameRes/Raw/Actor/Enemy",
-                "Assets/GameRes/Raw/Effects/Projectile",
-            };
+            var roots = FeatureArtGamePrefabBaker.PackageRoots;
 
             foreach (var root in roots)
             {

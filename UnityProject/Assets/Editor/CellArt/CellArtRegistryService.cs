@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
+using System.Runtime.CompilerServices;
 
 namespace BinGames.EditorTools.CellArt
 {
@@ -13,10 +14,12 @@ namespace BinGames.EditorTools.CellArt
     /// </summary>
     public static class CellArtRegistryService
     {
-        public const string CellRelative = "Assets/GameRes/Art/Cell";
+        // 由美术工作区配置；独立 CellArt 程序集不反向引用主编辑器程序集。
+        public static string SourceRoot { get; set; } = "Assets/GameRes/Art/Cell";
+        public static string CellRelative => SourceRoot;
 
         public static string CellAbs =>
-            Path.GetFullPath(Path.Combine(Application.dataPath, "GameRes/Art/Cell"));
+            Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Application.dataPath), CellRelative));
 
         public static string RegistryAbs => Path.Combine(CellAbs, "registry.json");
 
@@ -35,6 +38,8 @@ namespace BinGames.EditorTools.CellArt
             { ".prefab", ".png", ".jpg", ".jpeg", ".webp", ".vfx", ".asset" };
 
         static readonly string[] SkipNames = { ".gitkeep", "registry.json", "board.html" };
+        sealed class ReadVersion { public string Path; public string Json; }
+        static readonly ConditionalWeakTable<CellArtRegistry, ReadVersion> ReadVersions = new();
 
         public static CellArtRegistry Load()
         {
@@ -43,7 +48,8 @@ namespace BinGames.EditorTools.CellArt
                 throw new FileNotFoundException("找不到美术登记表", RegistryAbs);
             }
 
-            var root = CellArtJson.AsDict(CellArtJson.Deserialize(File.ReadAllText(RegistryAbs)))
+            var json = File.ReadAllText(RegistryAbs);
+            var root = CellArtJson.AsDict(CellArtJson.Deserialize(json))
                        ?? throw new Exception("registry.json 解析失败");
             var data = FromDict(root);
             data.dirs ??= new CellArtDirs();
@@ -53,6 +59,9 @@ namespace BinGames.EditorTools.CellArt
                 Normalize(a);
             }
 
+            ValidateDirs(data.dirs);
+            ReadVersions.Add(data, new ReadVersion { Path = RegistryAbs, Json = json });
+
             return data;
         }
 
@@ -60,7 +69,20 @@ namespace BinGames.EditorTools.CellArt
         {
             data.updated = DateTime.Now.ToString("yyyy-MM-dd");
             data.dirs ??= new CellArtDirs();
-            File.WriteAllText(RegistryAbs, CellArtJson.Serialize(ToDict(data)) + "\n");
+            ValidateDirs(data.dirs);
+            var current = File.Exists(RegistryAbs) ? File.ReadAllText(RegistryAbs) : null;
+            if (ReadVersions.TryGetValue(data, out var read))
+            {
+                if (read.Path != RegistryAbs || !string.Equals(read.Json, current, StringComparison.Ordinal))
+                    throw new IOException("源登记表已被其他程序修改或目录已切换，请刷新后再保存。");
+            }
+            else if (current != null)
+                throw new IOException("源登记表已存在，不能用未加载的数据覆盖，请先刷新。");
+            Directory.CreateDirectory(CellAbs);
+            var next = CellArtJson.Serialize(ToDict(data)) + "\n";
+            File.WriteAllText(RegistryAbs, next);
+            ReadVersions.Remove(data);
+            ReadVersions.Add(data, new ReadVersion { Path = RegistryAbs, Json = next });
             AssetDatabase.Refresh();
         }
 
@@ -249,6 +271,7 @@ namespace BinGames.EditorTools.CellArt
 
         public static void EnsureFolders(CellArtRegistry data)
         {
+            ValidateDirs(data.dirs);
             foreach (var name in new[]
                      {
                          data.dirs.concepts, data.dirs.meshes, data.dirs.animations, data.dirs.vfx,
@@ -272,7 +295,20 @@ namespace BinGames.EditorTools.CellArt
                 return null;
             }
 
-            return Path.GetFullPath(Path.Combine(CellAbs, rel.Replace('/', Path.DirectorySeparatorChar)));
+            var full = Path.GetFullPath(Path.Combine(CellAbs, rel.Replace('/', Path.DirectorySeparatorChar)));
+            var root = CellAbs.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            return full.StartsWith(root, StringComparison.OrdinalIgnoreCase) ? full : null;
+        }
+
+        static void ValidateDirs(CellArtDirs dirs)
+        {
+            foreach (var dir in new[] { dirs.concepts, dirs.meshes, dirs.animations, dirs.vfx, dirs.previews })
+            {
+                if (string.IsNullOrWhiteSpace(dir) || Path.IsPathRooted(dir) ||
+                    dir.Replace('\\', '/').Split('/').Any(p => string.IsNullOrWhiteSpace(p) || p == "." || p == ".." ||
+                        p.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0))
+                    throw new ArgumentException("扫盘子目录必须是源目录内的相对路径：" + dir);
+            }
         }
 
         public static string RelOf(string absPath)
@@ -352,7 +388,8 @@ namespace BinGames.EditorTools.CellArt
         /// <summary>扫盘。apply=false 只返回将要执行的动作说明。</summary>
         public static List<string> Scan(CellArtRegistry data, bool apply)
         {
-            EnsureFolders(data);
+            if (apply) EnsureFolders(data);
+            else ValidateDirs(data.dirs);
             var actions = new List<string>();
             var refs = CollectRefs(data);
             var aliases = BuildAliases(data);

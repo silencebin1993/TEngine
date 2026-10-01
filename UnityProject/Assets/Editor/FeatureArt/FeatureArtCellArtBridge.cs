@@ -129,7 +129,7 @@ namespace BinGames.EditorTools.FeatureArt
 
             const float CardW = 92f;
             const float Gap = 6f;
-            var maxW = window.ContentMaxWidth();
+            var maxW = FeatureArtGui.Width;
             var cols = Mathf.Max(1, Mathf.FloorToInt((maxW + Gap) / (CardW + Gap)));
             var i = 0;
             while (i < items.Count)
@@ -153,22 +153,22 @@ namespace BinGames.EditorTools.FeatureArt
                 i += cols;
             }
 
-            using (new EditorGUILayout.HorizontalScope(GUILayout.ExpandWidth(false)))
+            using (new EditorGUILayout.VerticalScope(GUILayout.Width(FeatureArtGui.Width)))
             {
                 var pending = window.GetAddViewKey(cellArtId);
                 EditorGUI.BeginChangeCheck();
-                pending = EditorGUILayout.TextField(pending ?? "", GUILayout.Width(140));
+                pending = FeatureArtGui.Field("新视图名称", pending);
                 if (EditorGUI.EndChangeCheck())
                 {
                     window.SetAddViewKey(cellArtId, pending);
                 }
 
-                if (GUILayout.Button("添加视图", GUILayout.Width(72)))
+                if (FeatureArtGui.Button("添加视图"))
                 {
                     TryAddView(window, asset, cellArtId, pending);
                 }
 
-                if (GUILayout.Button("在源文件库打开", GUILayout.Width(110)))
+                if (FeatureArtGui.Button("在源文件库打开"))
                 {
                     window.JumpToSourceLibrary(cellArtId);
                 }
@@ -216,7 +216,7 @@ namespace BinGames.EditorTools.FeatureArt
                 EditorGUILayout.LabelField(label, EditorStyles.centeredGreyMiniLabel, GUILayout.Width(cardW));
                 var tex = string.IsNullOrEmpty(rel)
                     ? null
-                    : AssetDatabase.LoadAssetAtPath<Texture2D>(CellArtRegistryService.AssetPathOf(rel));
+                    : FeatureArtAssetCache.Load<Texture2D>(CellArtRegistryService.AssetPathOf(rel));
                 var thumb = GUILayoutUtility.GetRect(
                     Thumb, Thumb,
                     GUILayout.Width(Thumb),

@@ -241,7 +241,7 @@ namespace BinGames.EditorTools.FeatureArt
         public static void DrawModelPopup(int width = 200)
         {
             var idx = SelectedModelIndex;
-            var next = EditorGUILayout.Popup(idx, ModelLabels, GUILayout.Width(width));
+            var next = EditorGUILayout.Popup(idx, ModelLabels, GUILayout.Width(Mathf.Min(width, FeatureArtGui.Width)));
             if (next != idx && next >= 0 && next < ModelIds.Length)
             {
                 SetSelectedModel(ModelIds[next]);
@@ -263,17 +263,15 @@ namespace BinGames.EditorTools.FeatureArt
                 return;
             }
 
-            EditorGUI.indentLevel++;
-            EditorGUILayout.LabelField("当前模型", SelectedModel + " · " + ModelLabels[SelectedModelIndex],
-                EditorStyles.miniLabel);
+            FeatureArtGui.Label("当前模型：" + SelectedModel + " · " + ModelLabels[SelectedModelIndex]);
 
             var genIdx = IndexOf(GenerateTypeIds, GenerateType);
             var lowPolyBlocked = string.Equals(SelectedModel, Model31, StringComparison.Ordinal);
-            using (new EditorGUILayout.HorizontalScope())
+            using (new EditorGUILayout.VerticalScope(GUILayout.Width(FeatureArtGui.Width)))
             {
-                EditorGUILayout.PrefixLabel("生成类型");
+                FeatureArtGui.Label("生成类型");
                 EditorGUI.BeginDisabledGroup(lowPolyBlocked && genIdx == 1);
-                var nextGen = EditorGUILayout.Popup(genIdx, GenerateTypeLabels);
+                var nextGen = EditorGUILayout.Popup(genIdx, GenerateTypeLabels, GUILayout.Width(FeatureArtGui.Width));
                 EditorGUI.EndDisabledGroup();
                 if (nextGen != genIdx && nextGen >= 0 && nextGen < GenerateTypeIds.Length)
                 {
@@ -309,7 +307,7 @@ namespace BinGames.EditorTools.FeatureArt
             }
 
             var fmtIdx = IndexOf(ResultFormatIds, ResultFormat);
-            var nextFmt = EditorGUILayout.Popup("结果格式", fmtIdx, ResultFormatLabels);
+            var nextFmt = FeatureArtGui.Popup("结果格式", fmtIdx, ResultFormatLabels);
             if (nextFmt != fmtIdx && nextFmt >= 0 && nextFmt < ResultFormatIds.Length)
             {
                 ResultFormat = ResultFormatIds[nextFmt];
@@ -331,10 +329,11 @@ namespace BinGames.EditorTools.FeatureArt
 
                 if (useFace)
                 {
-                    FaceCount = EditorGUILayout.IntSlider("面数", FaceCount, FaceCountMin, FaceCountMax);
-                    using (new EditorGUILayout.HorizontalScope())
+                    FeatureArtGui.Label("面数");
+                    FaceCount = EditorGUILayout.IntSlider(FaceCount, FaceCountMin, FaceCountMax, GUILayout.Width(FeatureArtGui.Width));
+                    using (new EditorGUILayout.VerticalScope())
                     {
-                        EditorGUILayout.PrefixLabel("快捷");
+                        FeatureArtGui.Label("快捷");
                         for (var i = 0; i < FaceCountPresets.Length; i++)
                         {
                             if (GUILayout.Button(FaceCountPresetLabels[i], GUILayout.Width(56)))
@@ -359,14 +358,13 @@ namespace BinGames.EditorTools.FeatureArt
             if (lowPoly)
             {
                 var polyIdx = IndexOf(PolygonTypeIds, PolygonType);
-                var nextPoly = EditorGUILayout.Popup("多边形类型", polyIdx, PolygonTypeLabels);
+                var nextPoly = FeatureArtGui.Popup("多边形类型", polyIdx, PolygonTypeLabels);
                 if (nextPoly != polyIdx && nextPoly >= 0 && nextPoly < PolygonTypeIds.Length)
                 {
                     PolygonType = PolygonTypeIds[nextPoly];
                 }
             }
 
-            EditorGUI.indentLevel--;
             EditorGUI.EndDisabledGroup();
         }
 
@@ -637,12 +635,10 @@ namespace BinGames.EditorTools.FeatureArt
                 MessageType.Info);
 
             EditorGUILayout.LabelField("出模模型", EditorStyles.miniBoldLabel);
-            using (new EditorGUILayout.HorizontalScope())
+            using (new EditorGUILayout.VerticalScope())
             {
-                FeatureArtHunyuanSettings.DrawModelPopup(240);
-                EditorGUILayout.LabelField(
-                    FeatureArtHunyuanSettings.CreditHint(false),
-                    EditorStyles.miniLabel);
+                FeatureArtHunyuanSettings.DrawModelPopup(Mathf.FloorToInt(FeatureArtGui.Width));
+                FeatureArtGui.Label(FeatureArtHunyuanSettings.CreditHint(false));
             }
 
             FeatureArtHunyuanSettings.DrawGenerateParamsFoldout();
@@ -663,7 +659,8 @@ namespace BinGames.EditorTools.FeatureArt
                 EditorGUILayout.LabelField("尚未保存 API Key。");
             }
 
-            _draft = EditorGUILayout.PasswordField("API Key", _draft);
+            FeatureArtGui.Label("API Key");
+            _draft = EditorGUILayout.PasswordField(_draft, GUILayout.Width(FeatureArtGui.Width));
             using (new EditorGUILayout.HorizontalScope())
             {
                 if (GUILayout.Button("保存", GUILayout.Width(72)))
@@ -682,7 +679,7 @@ namespace BinGames.EditorTools.FeatureArt
             }
 
             EditorGUILayout.Space();
-            if (GUILayout.Button("给 Raw 下白模 FBX 补抽贴图（不重新生成、不扣积分）", GUILayout.Width(360)))
+            if (FeatureArtGui.Button("给 Raw 下白模 FBX 补抽贴图（不重新生成、不扣积分）"))
             {
                 var n = FeatureArtHunyuanGenerate.TryRepairRawEmbeddedMaps(out var log);
                 EditorUtility.DisplayDialog("混元生3D", log ?? (n > 0 ? "已补抽。" : "没有可补的。"), "好");
@@ -693,7 +690,7 @@ namespace BinGames.EditorTools.FeatureArt
                 EditorStyles.miniLabel);
 
             EditorGUILayout.Space();
-            if (GUILayout.Button("整理混元整包（不扣积分）", GUILayout.Width(240)))
+            if (FeatureArtGui.Button("整理混元整包（不扣积分）"))
             {
                 var n = FeatureArtHunyuanGenerate.TryMigrateLegacyPackages(out var log);
                 EditorUtility.DisplayDialog("混元生3D", log ?? (n > 0 ? "已整理。" : "没有可整理的。"), "好");
@@ -704,7 +701,7 @@ namespace BinGames.EditorTools.FeatureArt
                 EditorStyles.miniLabel);
 
             EditorGUILayout.Space();
-            if (GUILayout.Button("从整包重烘全部游戏 Prefab（不扣积分）", GUILayout.Width(320)))
+            if (FeatureArtGui.Button("从整包重烘全部游戏 Prefab（不扣积分）"))
             {
                 var n = FeatureArtGamePrefabBaker.FixAddressCollisionsAndBake(out var log);
                 EditorUtility.DisplayDialog("混元生3D", log ?? (n > 0 ? "已重烘。" : "没有可烘的。"), "好");
@@ -734,9 +731,9 @@ namespace BinGames.EditorTools.FeatureArt
                         .ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
                     var line = when + "  " + e.Status + "  槽=" + e.SlotId + "  文件=" + e.FileName +
                                "  id=" + e.JobId;
-                    using (new EditorGUILayout.HorizontalScope())
+                    using (new EditorGUILayout.VerticalScope())
                     {
-                        EditorGUILayout.LabelField(line, EditorStyles.wordWrappedMiniLabel);
+                        FeatureArtGui.Label(line);
                         if (GUILayout.Button("复制 id", GUILayout.Width(64)))
                         {
                             GUIUtility.systemCopyBuffer = e.JobId ?? "";
@@ -752,7 +749,7 @@ namespace BinGames.EditorTools.FeatureArt
                     $"待拉取 id={FeatureArtHunyuanSettings.LastJobId}（槽 {FeatureArtHunyuanSettings.LastSlotId}）。\n" +
                     "到对应功能页点「继续拉取上次任务」，只下载，不再提交、不再扣积分。",
                     MessageType.Warning);
-                if (GUILayout.Button("放弃待拉取（不退积分，历史仍保留）", GUILayout.Width(240)))
+                if (FeatureArtGui.Button("放弃待拉取（不退积分，历史仍保留）"))
                 {
                     FeatureArtHunyuanSettings.ClearLastJob();
                 }

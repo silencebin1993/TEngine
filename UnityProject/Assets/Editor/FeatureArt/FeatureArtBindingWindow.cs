@@ -200,6 +200,23 @@ namespace BinGames.EditorTools.FeatureArt
 
         FeatureArtCatalogData _data;
         bool _dirty;
+        bool _workspaceDirty;
+        bool _treeRebuildQueued;
+        string _selectNodeId;
+        readonly Dictionary<string, FeatureArtWorkspacePage> _workspacePages = new Dictionary<string, FeatureArtWorkspacePage>();
+        readonly Dictionary<string, OdinMenuItem> _workspaceMenuItems = new Dictionary<string, OdinMenuItem>();
+        readonly Dictionary<string, bool> _expandedNodes = new Dictionary<string, bool>();
+        FeatureArtWorkspace _pageWorkspace;
+        FeatureArtWorkspacePage _activeWorkspacePage;
+        Dictionary<string, FeatureArtSlot> _slotIndex;
+        List<FeatureArtSlot> _indexedSlots;
+        int _indexedSlotCount, _catalogRevision, _registryRevision;
+        Dictionary<string, CellArtAsset> _registryIndex;
+        List<CellArtAsset> _indexedAssets;
+        int _indexedAssetCount;
+        public int CatalogRevision { get { EnsureSlotIndex(); return _catalogRevision; } }
+        public int RegistryRevision => _registryRevision;
+        public FeatureArtWorkspace Workspace => FeatureArtWorkspaceStore.Current;
         CellArtRegistry _registry;
         bool _registryDirty;
         string _lastLog = "";
@@ -226,9 +243,14 @@ namespace BinGames.EditorTools.FeatureArt
         public static void Open()
         {
             var w = GetWindow<FeatureArtBindingWindow>();
-            w.titleContent = new GUIContent("Feature Art");
+            w.titleContent = new GUIContent("美术资源与绑定");
             w.minSize = new Vector2(980, 560);
             w.Show();
+            EditorApplication.delayCall += () =>
+            {
+                if (w == null) return;
+                w.MenuTree.EnumerateTree(false).FirstOrDefault(i => i.GetFullPath() == "资源树")?.Select(false);
+            };
         }
 
         protected override OdinMenuTree BuildMenuTree()
@@ -241,6 +263,17 @@ namespace BinGames.EditorTools.FeatureArt
             _organPages.Clear();
             _shapePages.Clear();
             _summonPages.Clear();
+            foreach (var entry in _workspaceMenuItems)
+                if (entry.Value.ChildMenuItems.Count > 0) _expandedNodes[entry.Key] = entry.Value.Toggled;
+            _workspaceMenuItems.Clear();
+            if (!ReferenceEquals(_pageWorkspace, Workspace))
+            {
+                _pageWorkspace = Workspace;
+                _workspacePages.Clear();
+            }
+            var currentIds = new HashSet<string>(Workspace.nodes.Select(n => n.id)) { "" };
+            foreach (var id in _workspacePages.Keys.ToArray()) if (!currentIds.Contains(id)) _workspacePages.Remove(id);
+            UseScrollView = true;
 
             var tree = new OdinMenuTree(false);
             tree.Config.DrawSearchToolbar = true;
@@ -248,116 +281,52 @@ namespace BinGames.EditorTools.FeatureArt
             tree.DefaultMenuStyle.SelectedColorDarkSkin = ColorSelected;
             tree.DefaultMenuStyle.SelectedColorLightSkin = ColorSelected;
 
+            if (_data == null)
+            {
+                tree.Add("使用说明", new GuidePage());
+                return tree;
+            }
+            // Odin 可能保留窗口数据，而静态工作区会在程序集重载后重新加载。
+            if (Workspace.IncludeCatalog(_data) > 0) _workspaceDirty = true;
+
             tree.Add("使用说明", new GuidePage());
             tree.Add("混元生3D", new FeatureArtHunyuanSettingsPage());
             tree.Add("健康检查", new HealthCheckPage(this));
-            _sourceLibraryPage = new FeatureArtSourceLibraryPage(this);
+            _sourceLibraryPage ??= new FeatureArtSourceLibraryPage(this);
             tree.Add(FeatureArtSourceLibraryPage.MenuPath, _sourceLibraryPage);
-            tree.Add("玩家/本体", new PlayerPage(this), StatusIcon(FindSlot("player.chassis.mesh")));
-
-            foreach (var entry in AttackMethodEntries)
+            tree.Add("资源树", WorkspacePage(null));
+            foreach (var node in Workspace.nodes)
             {
-                var summonKey = entry.OrganId == "org_bud" ? "spore" : entry.OrganId == "org_mycelium" ? "mycelium" : null;
-                var page = new OrganPage(this, entry.OrganId, entry.GroupZh, entry.ShapeKey, summonKey);
-                _organPages[entry.OrganId] = page;
-                var slot = FindSlot($"organ.{entry.OrganId}.mesh");
-                var titleZh = slot?.titleZh?.Replace(" · 本体网格", "") ?? entry.OrganId;
-                tree.Add($"结构器官/攻击器官/{entry.GroupZh}/{titleZh}", page, StatusIcon(slot));
-            }
-
-            foreach (var shape in ShapeOrder)
-            {
-                var page = new ShapePage(this, shape);
-                _shapePages[shape] = page;
-                tree.Add($"弹道语言/{ShapeZh(shape)}", page);
-            }
-
-            foreach (var s in SummonEntries)
-            {
-                var slot = FindSlot($"summon.{s.Key}.mesh");
-                SummonNotes.TryGetValue(s.Key, out var note);
-                var page = new SimpleMeshPage(this, $"summon.{s.Key}.mesh", s.TitleZh, "召唤类",
-                    FamilyColor["召唤类"], FeatureArtCellArtBridge.SummonCellArtId(s.Key), note);
-                _summonPages[s.Key] = page;
-                tree.Add($"召唤实体/{s.TitleZh}", page, StatusIcon(slot));
-            }
-
-            var families = GameLogic.ArtBinding.FeatureArtVisualBinder.EnemyVisualFamilies;
-            for (var i = 0; i < families.Length; i++)
-            {
-                var fam = families[i];
-                var group = i < 12 ? "杂兵" : i < 15 ? "精英" : "首领";
-                var slot = FindSlot($"enemy.{fam.Key}.mesh");
-                EnemyNotes.TryGetValue(fam.Key, out var note);
-                var page = new SimpleMeshPage(this, $"enemy.{fam.Key}.mesh", fam.TitleZh, null,
-                    default, FeatureArtCellArtBridge.EnemyCellArtId(fam.Key), note);
-                tree.Add($"敌人/{group}/{fam.TitleZh}", page, StatusIcon(slot));
-            }
-
-            var structuralSlots = new (string Key, string TitleZh, (string Id, string TitleZh, string Note)[] Organs)[]
-            {
-                ("armor", "装甲", new[]
+                var parent = node;
+                var hidden = false;
+                while (parent != null)
                 {
-                    ("org_carapace", "硬化甲层", "常驻：体表增生一层硬甲，减少受到的伤害 12%。"),
-                    ("org_thick_membrane", "增厚膜", "常驻：细胞膜增厚，最大生命 +32。"),
-                    ("org_calm_membrane", "静默膜", "常驻：体表分泌物让敌人不容易注意到你，仇恨倍率 −20%。"),
-                    ("org_thorn_shell", "荆棘壳", "常驻：体表长满倒刺，受到近战接触伤害时反弹 18% 伤害给攻击者。"),
-                    ("org_mucus_barrier", "粘液壁垒", "常驻：受伤时从伤口渗出粘液，在脚下铺一圈潮湿地面（半径 1.5，持续 3 秒）。"),
-                    ("org_scab_plate", "结痂甲", "常驻：受伤后伤口迅速结痂，30% 的伤害转为 2 秒内逐步回复而非立即扣除。"),
-                    ("org_oil_gland", "油腺", "常驻：体表持续分泌油脂，自身周围地面沾染油污。"),
-                    ("org_static_hide", "静电皮", "常驻：受到近战伤害时对攻击者释放静电，附带小范围连锁。"),
-                }),
-                ("motility", "运动", new[]
-                {
-                    ("org_flagellum_boost", "加速鞭毛", "常驻：额外长出一对鞭毛，移动速度 +12%。"),
-                    ("org_stamina_sac", "体力囊", "常驻：储存更多体力，体力上限 +25，回复速度 +15%。"),
-                    ("org_slime_trail", "粘液尾", "常驻：移动时在身后留下黏液场，敌人踩到减速。"),
-                    ("org_dash_spore", "冲刺孢子", "常驻：冲刺的起点和终点各留下一朵碰伤孢子云。"),
-                    ("org_echo_step", "回声步", "常驻：冲刺结束 0.4 秒后，身体残留的动能自动再触发一次短距离无敌位移。"),
-                    ("org_pull_wake", "引力尾流", "常驻：移动路径后方产生短暂牵引场，把小型敌人往你走过的路径吸。"),
-                    ("org_haste_spurt", "迅捷突发", "常驻：生命低于 30% 时触发一次瞬间提速（长冷却，一次性）。"),
-                    ("org_charged_cilia", "充能纤毛", "常驻：移动累计一定距离后自身叠一层电荷，叠满自动对周围放电。"),
-                }),
-                ("vital", "生命", new[]
-                {
-                    ("org_regen_gland", "再生腺", "常驻：持续修复受损的细胞结构，生命回复 +0.8/秒。"),
-                    ("org_efficient_gut", "高效消化道", "常驻：吸收营养的效率更高，营养质获取 +18%。"),
-                    ("org_blood_vacuole", "血液泡", "常驻：击杀敌人时回复一部分生命。"),
-                    ("org_lyso_core", "溶酶核", "常驻：生命低于 30% 时触发一次小范围净化脉冲，清除自身负面标记（长冷却，一次性）。"),
-                    ("org_spore_womb", "孢子胎", "常驻：承受致命伤害时不死一次，转化为 1.5 秒护盾（长冷却，每局限一次）。"),
-                    ("org_absorbent_gel", "吸收凝胶", "常驻：拾取营养质时按比例瞬间回复少量生命。"),
-                    ("org_toxin_sac", "毒囊", "常驻：近战攻击你的敌人会中毒，持续掉血。"),
-                    ("org_ichor_gland", "脓液腺", "常驻：受击时小概率给攻击者附加降防标记。"),
-                }),
-                ("appendage", "附肢", new[]
-                {
-                    ("org_chemoreceptor", "化学感受器", "常驻：更容易嗅到周围的营养物质，拾取半径 +30%。"),
-                    ("org_light_organ", "发光器", "常驻：自身周围持续发光，光环内敌人仇恨略微降低。"),
-                    ("org_dark_gill", "暗鳃", "常驻：分泌暗色黏液，光环外不易被远处敌人发现。"),
-                    ("org_confusion_spore", "迷乱孢子器", "常驻：周期性向周围释放孢子，给附近敌人打混乱标记（不造成伤害）。"),
-                    ("org_pheromone_gland", "信息素腺", "常驻：周期性向自己的召唤物释放信息素，提升召唤物强度。"),
-                    ("org_barrier_node", "屏障结节", "常驻：体表结出一层可回复的屏障值，先扣屏障再扣血。"),
-                    ("org_frost_tendril", "霜蔓", "常驻：受击时给攻击者附加减速（只减速，不冻死，遵守宪法冻死红线）。"),
-                    ("org_gravity_node", "引力结节", "常驻：对场上掉落物产生持续牵引，自动吸附到身边。"),
-                }),
-            };
-            foreach (var s in structuralSlots)
-            {
-                foreach (var organ in s.Organs)
-                {
-                    var slotId = $"structural.{organ.Id}.mesh";
-                    var slot = FindSlot(slotId);
-                    var page = new SimpleMeshPage(this, slotId, organ.TitleZh, null, default, null, organ.Note);
-                    tree.Add($"结构器官/{s.TitleZh}/{organ.TitleZh}", page, StatusIcon(slot));
+                    if (parent.archived) { hidden = true; break; }
+                    parent = Workspace.Find(parent.parentId);
                 }
+                if (!hidden)
+                    tree.Add(Workspace.MenuPath(node), WorkspacePage(node), StatusIcon(FindSlot(node.slotId)));
             }
+            return FinishTree(tree);
+        }
 
+        FeatureArtWorkspacePage WorkspacePage(FeatureArtNode node)
+        {
+            var id = node?.id ?? "";
+            if (!_workspacePages.TryGetValue(id, out var page)) _workspacePages[id] = page = new FeatureArtWorkspacePage(this, node);
+            return page;
+        }
+
+        OdinMenuTree FinishTree(OdinMenuTree tree)
+        {
             foreach (var item in tree.EnumerateTree(false))
             {
                 if (item.ChildMenuItems.Count > 0)
                 {
-                    item.Toggled = true;
+                    if (item.Value is FeatureArtWorkspacePage page)
+                        item.Toggled = _expandedNodes.TryGetValue(page.NodeId, out var expanded) ? expanded : page.NodeId == "";
                 }
+                if (item.Value is FeatureArtWorkspacePage workspacePage) _workspaceMenuItems[workspacePage.NodeId] = item;
             }
 
             tree.Selection.SelectionChanged += changeType =>
@@ -368,6 +337,17 @@ namespace BinGames.EditorTools.FeatureArt
                 }
 
                 var selected = tree.Selection.FirstOrDefault();
+                var selectedPage = selected?.Value as FeatureArtWorkspacePage;
+                if (!ReferenceEquals(_activeWorkspacePage, selectedPage))
+                {
+                    var inactive = _activeWorkspacePage;
+                    _activeWorkspacePage = selectedPage;
+                    // A button can select another page while the previous page is still drawing.
+                    if (inactive != null) EditorApplication.delayCall += () =>
+                    {
+                        if (this != null && !ReferenceEquals(_activeWorkspacePage, inactive)) inactive.ReleaseChoices();
+                    };
+                }
                 if (selected == null || selected.Value != null || selected.ChildMenuItems.Count == 0)
                 {
                     return;
@@ -393,7 +373,7 @@ namespace BinGames.EditorTools.FeatureArt
             {
                 if (GUILayout.Button("刷新", EditorStyles.toolbarButton, GUILayout.Width(48)))
                 {
-                    if ((_dirty || _registryDirty) && !EditorUtility.DisplayDialog("未保存", "有未保存修改，丢弃并刷新？", "丢弃", "取消"))
+                    if ((_dirty || _registryDirty || _workspaceDirty) && !EditorUtility.DisplayDialog("未保存", "有未保存修改，丢弃并刷新？", "丢弃", "取消"))
                     {
                         // keep unsaved
                     }
@@ -404,7 +384,7 @@ namespace BinGames.EditorTools.FeatureArt
                     }
                 }
 
-                GUI.enabled = _dirty || _registryDirty;
+                GUI.enabled = _dirty || _registryDirty || _workspaceDirty;
                 if (GUILayout.Button("保存", EditorStyles.toolbarButton, GUILayout.Width(48)))
                 {
                     Save();
@@ -412,9 +392,9 @@ namespace BinGames.EditorTools.FeatureArt
 
                 GUI.enabled = true;
 
-                if (GUILayout.Button("从代码同步槽位", EditorStyles.toolbarButton, GUILayout.Width(110)))
+                if (GUILayout.Button("资源树", EditorStyles.toolbarButton, GUILayout.Width(64)))
                 {
-                    RunSync();
+                    MenuTree.EnumerateTree(false).FirstOrDefault(i => i.Value is FeatureArtWorkspacePage)?.Select(false);
                 }
 
                 if (GUILayout.Button("打开源文件板", EditorStyles.toolbarButton, GUILayout.Width(90)))
@@ -423,7 +403,7 @@ namespace BinGames.EditorTools.FeatureArt
                 }
 
                 GUILayout.FlexibleSpace();
-                var label = $"{_data?.slots?.Count ?? 0} 槽" + (_dirty || _registryDirty ? " · 未保存" : "");
+                var label = $"{(_data == null ? 0 : Workspace.nodes.Count)} 节点 · {_data?.slots?.Count ?? 0} 槽" + (_dirty || _registryDirty || _workspaceDirty ? " · 未保存" : "");
                 GUILayout.Label(label, EditorStyles.miniLabel);
             }
 
@@ -433,7 +413,44 @@ namespace BinGames.EditorTools.FeatureArt
             }
         }
 
-        public FeatureArtSlot FindSlot(string id) => _data?.slots?.FirstOrDefault(s => s.id == id);
+        protected override void DrawEditors()
+        {
+            using (new FeatureArtGui.WidthScope(ContentMaxWidth()))
+            using (new EditorGUILayout.VerticalScope(GUILayout.Width(ContentMaxWidth())))
+                base.DrawEditors();
+        }
+
+        void EnsureSlotIndex()
+        {
+            var slots = _data?.slots;
+            if (_slotIndex != null && ReferenceEquals(slots, _indexedSlots) && (slots?.Count ?? 0) == _indexedSlotCount) return;
+            _slotIndex = new Dictionary<string, FeatureArtSlot>(StringComparer.Ordinal);
+            if (slots != null) foreach (var slot in slots) if (slot != null) _slotIndex[slot.id] = slot;
+            _indexedSlots = slots;
+            _indexedSlotCount = slots?.Count ?? 0;
+            _catalogRevision++;
+        }
+
+        public FeatureArtSlot FindSlot(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return null;
+            EnsureSlotIndex();
+            return _slotIndex.TryGetValue(id, out var slot) ? slot : null;
+        }
+
+        public CellArtAsset FindRegistryAsset(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return null;
+            var assets = Registry?.assets;
+            if (_registryIndex == null || !ReferenceEquals(assets, _indexedAssets) || (assets?.Count ?? 0) != _indexedAssetCount)
+            {
+                _registryIndex = new Dictionary<string, CellArtAsset>(StringComparer.Ordinal);
+                if (assets != null) foreach (var asset in assets) _registryIndex[asset.id] = asset;
+                _indexedAssets = assets;
+                _indexedAssetCount = assets?.Count ?? 0;
+            }
+            return _registryIndex.TryGetValue(id, out var found) ? found : null;
+        }
 
         public CellArtRegistry Registry
         {
@@ -450,13 +467,8 @@ namespace BinGames.EditorTools.FeatureArt
 
         public float ContentMaxWidth()
         {
-            var max = position.width - MenuWidth - 36f;
-            if (float.IsNaN(max) || float.IsInfinity(max) || max < 200f)
-            {
-                return 480f;
-            }
-
-            return max > 1600f ? 1600f : max;
+            var available = position.width - MenuWidth - 64f;
+            return float.IsNaN(available) || float.IsInfinity(available) ? 320f : Mathf.Clamp(available, 96f, 880f);
         }
 
         public string GetAddViewKey(string cellArtId) =>
@@ -473,8 +485,9 @@ namespace BinGames.EditorTools.FeatureArt
         public CellArtAsset GetWorkingAsset(string cellArtId, string titleZh)
         {
             var registry = Registry;
+            if (registry == null) throw new InvalidOperationException("源登记表加载失败，请先修复后刷新。");
             registry.assets ??= new List<CellArtAsset>();
-            var existing = registry.assets.FirstOrDefault(a => a.id == cellArtId);
+            var existing = FindRegistryAsset(cellArtId);
             if (existing != null)
             {
                 existing.views ??= new Dictionary<string, string>();
@@ -523,7 +536,7 @@ namespace BinGames.EditorTools.FeatureArt
             _workingAssets.Remove(asset.id);
         }
 
-        public void MarkRegistryDirty() => _registryDirty = true;
+        public void MarkRegistryDirty() { _registryDirty = true; _registryRevision++; }
 
         public void JumpToSourceLibrary(string cellArtId = null)
         {
@@ -658,7 +671,71 @@ namespace BinGames.EditorTools.FeatureArt
             _lastLogError = true;
         }
 
-        public void MarkDirty() => _dirty = true;
+        public void MarkDirty() { _dirty = true; _slotIndex = null; _catalogRevision++; }
+
+        public void MarkWorkspaceDirty() => _workspaceDirty = true;
+
+        public void RebuildWorkspaceTree()
+        {
+            if (_treeRebuildQueued) return;
+            _treeRebuildQueued = true;
+            EditorApplication.delayCall += () =>
+            {
+                if (this == null) return;
+                _treeRebuildQueued = false;
+                ForceMenuTreeRebuild();
+                if (!string.IsNullOrEmpty(_selectNodeId))
+                {
+                    if (_workspaceMenuItems.TryGetValue(_selectNodeId, out var item)) SelectWorkspaceItem(item);
+                    _selectNodeId = null;
+                }
+                Repaint();
+            };
+        }
+
+        public void SelectWorkspaceNode(FeatureArtNode node)
+        {
+            if (node == null) return;
+            if (!_treeRebuildQueued && _workspaceMenuItems.TryGetValue(node.id, out var item))
+            {
+                SelectWorkspaceItem(item);
+                return;
+            }
+            _selectNodeId = node.id;
+            RebuildWorkspaceTree();
+        }
+
+        void SelectWorkspaceItem(OdinMenuItem item)
+        {
+            for (var parent = item.Parent; parent != null; parent = parent.Parent) parent.Toggled = true;
+            item.Select(false);
+            Repaint();
+        }
+
+        public void ApplyWorkspaceDirectories(string sourceRoot, string outputFolder)
+        {
+            try
+            {
+                sourceRoot = FeatureArtWorkspace.ValidateFolder(sourceRoot, "Assets/GameRes/Art");
+                outputFolder = FeatureArtWorkspace.ValidateFolder(outputFolder, "Assets/GameRes/Raw");
+                if (_registryDirty)
+                    throw new InvalidOperationException("源登记表有未保存修改，请先保存再切换目录。");
+                // 先保存旧配置，避免失败后在内存里切换源目录。
+                FeatureArtWorkspaceStore.Save();
+                var oldSource = Workspace.sourceRoot;
+                var oldOutput = Workspace.outputFolder;
+                Workspace.sourceRoot = sourceRoot;
+                Workspace.outputFolder = outputFolder;
+                try { FeatureArtWorkspaceStore.Save(); }
+                catch { Workspace.sourceRoot = oldSource; Workspace.outputFolder = oldOutput; throw; }
+                _workspaceDirty = false;
+                _workingAssets.Clear();
+                LoadRegistry();
+                RebuildWorkspaceTree();
+                Log("已应用目录设置，未移动源文件或成品。");
+            }
+            catch (Exception e) { LogError(e.Message); }
+        }
 
         public void RunHealthCheck() => _healthIssues = FeatureArtHealthCheck.Run(_data);
 
@@ -814,7 +891,7 @@ namespace BinGames.EditorTools.FeatureArt
             var type = ObjectFieldType(slot.bindKind);
             var current = ResolveCurrentAsset(slot, type);
             EditorGUI.BeginChangeCheck();
-            var picked = EditorGUILayout.ObjectField(current, type, false);
+            var picked = EditorGUILayout.ObjectField(current, type, false, GUILayout.Width(FeatureArtGui.Width));
             if (EditorGUI.EndChangeCheck() && picked != null)
             {
                 TryBind(slot, picked);
@@ -846,7 +923,7 @@ namespace BinGames.EditorTools.FeatureArt
                 }
             }
 
-            using (new EditorGUILayout.HorizontalScope())
+            using (new EditorGUILayout.HorizontalScope(GUILayout.Width(FeatureArtGui.Width)))
             {
                 using (new EditorGUI.DisabledScope(locked))
                 {
@@ -861,7 +938,7 @@ namespace BinGames.EditorTools.FeatureArt
 
                 var type = InstancedMeshObjectFieldType(kind);
                 EditorGUI.BeginChangeCheck();
-                var picked = EditorGUILayout.ObjectField(current, type, false);
+                var picked = EditorGUILayout.ObjectField(current, type, false, GUILayout.Width(Mathf.Max(20f, FeatureArtGui.Width - 64f)));
                 if (EditorGUI.EndChangeCheck() && picked != null)
                 {
                     TryBind(slot, picked);
@@ -886,9 +963,9 @@ namespace BinGames.EditorTools.FeatureArt
 
             var package = FeatureArtHunyuanGenerate.PackageDir(folder, name);
             var prefabPath = FeatureArtGamePrefabBaker.PrefabAssetPath(package, name);
-            using (new EditorGUILayout.HorizontalScope())
+            using (new EditorGUILayout.VerticalScope())
             {
-                if (GUILayout.Button("从整包重烘 Prefab", GUILayout.Width(140)))
+                if (FeatureArtGui.Button("从整包重烘 Prefab"))
                 {
                     if (FeatureArtGamePrefabBaker.TryBakeOne(package, name, out var log))
                     {
@@ -907,8 +984,7 @@ namespace BinGames.EditorTools.FeatureArt
                     }
                 }
 
-                EditorGUILayout.LabelField("母带 FBX 改完后点；材质球 organ_*_runtime 会保留。",
-                    EditorStyles.miniLabel);
+                FeatureArtGui.Label("母带 FBX 改完后点；已有运行时材质会保留。");
             }
         }
 
@@ -978,6 +1054,19 @@ namespace BinGames.EditorTools.FeatureArt
 
                     reason = "InstancedMesh 需要 Mesh 或含 MeshFilter 的 GameObject。";
                     return false;
+                case "Image":
+                    if (obj is Sprite || obj is Texture2D) { reason = null; return true; }
+                    reason = "图标需要 Sprite 或 Texture2D。"; return false;
+                case "Texture":
+                    if (obj is Texture2D) { reason = null; return true; }
+                    reason = "贴图需要 Texture2D。"; return false;
+                case "AnimationClip":
+                    if (obj is AnimationClip) { reason = null; return true; }
+                    reason = "动画需要 AnimationClip。"; return false;
+                case "AudioClip":
+                    if (obj is AudioClip) { reason = null; return true; }
+                    reason = "音频需要 AudioClip。"; return false;
+                case "AssetReference": reason = null; return true;
                 case "MaterialOverride":
                     if (obj is Material)
                     {
@@ -1006,6 +1095,9 @@ namespace BinGames.EditorTools.FeatureArt
         {
             switch (bindKind)
             {
+                case "Texture": return typeof(Texture2D);
+                case "AnimationClip": return typeof(AnimationClip);
+                case "AudioClip": return typeof(AudioClip);
                 case "MaterialOverride": return typeof(Material);
                 case "PooledPrefab": return typeof(GameObject);
                 default: return typeof(UnityEngine.Object);
@@ -1020,6 +1112,8 @@ namespace BinGames.EditorTools.FeatureArt
             {
                 return null;
             }
+
+            if (FeatureArtAssetCache.TryLocation(slot.location, type, out var cached)) return cached;
 
             var guids = AssetDatabase.FindAssets(slot.location, new[] { "Assets/GameRes/Raw" });
             UnityEngine.Object best = null;
@@ -1046,6 +1140,7 @@ namespace BinGames.EditorTools.FeatureArt
                 }
             }
 
+            FeatureArtAssetCache.StoreLocation(slot.location, type, best);
             return best;
         }
 
@@ -1145,27 +1240,15 @@ namespace BinGames.EditorTools.FeatureArt
             GUI.Label(rect, text, style);
         }
 
-        void RunSync()
-        {
-            try
-            {
-                var added = FeatureArtSlotSync.Sync(_data);
-                _dirty = true;
-                _lastLog = $"同步完成：新增 {added} 槽（look/prompt 已按 LOOK-PROMPTS 覆盖；location 不动）。";
-                ForceMenuTreeRebuild();
-            }
-            catch (Exception e)
-            {
-                _lastLog = e.Message;
-                Debug.LogError(e);
-            }
-        }
-
         void Reload()
         {
+            FeatureArtAssetCache.Clear();
+            _slotIndex = null;
             try
             {
                 _data = FeatureArtCatalogIO.Load();
+                FeatureArtWorkspaceStore.Load();
+                _workspaceDirty = Workspace.IncludeCatalog(_data) > 0;
                 _dirty = false;
                 _lastLog = $"已加载 {_data.slots.Count} 槽。";
             }
@@ -1181,22 +1264,28 @@ namespace BinGames.EditorTools.FeatureArt
 
         void LoadRegistry()
         {
+            _registryIndex = null;
+            _registryRevision++;
             _workingAssets.Clear();
             _addViewKeys.Clear();
             try
             {
-                _registry = CellArtRegistryService.Load();
-                CellArtRegistryService.EnsureFolders(_registry);
+                _registry = File.Exists(CellArtRegistryService.RegistryAbs)
+                    ? CellArtRegistryService.Load()
+                    : new CellArtRegistry { dirs = new CellArtDirs(), assets = new List<CellArtAsset>() };
+                if (!File.Exists(CellArtRegistryService.RegistryAbs) && Directory.Exists(Path.Combine(CellArtRegistryService.CellAbs, "Source")))
+                {
+                    _registry.dirs.meshes = "Source";
+                    _registry.dirs.animations = "Source/Animations";
+                    _registry.dirs.vfx = "Source/VFX";
+                }
                 _registryDirty = false;
             }
             catch (Exception e)
             {
-                _registry = new CellArtRegistry
-                {
-                    assets = new List<CellArtAsset>(),
-                    dirs = new CellArtDirs(),
-                };
+                _registry = null;
                 _registryDirty = false;
+                LogError("源登记表读取失败，原文件未修改：" + e.Message);
                 Debug.LogError(e);
             }
         }
@@ -1208,6 +1297,11 @@ namespace BinGames.EditorTools.FeatureArt
                 return;
             }
 
+            if (_workspaceDirty)
+            {
+                FeatureArtWorkspaceStore.Save();
+                _workspaceDirty = false;
+            }
             FeatureArtCatalogIO.Save(_data);
             _dirty = false;
         }
@@ -1217,16 +1311,24 @@ namespace BinGames.EditorTools.FeatureArt
             try
             {
                 var parts = new List<string>();
+                if (_workspaceDirty)
+                {
+                    FeatureArtWorkspaceStore.Save();
+                    _workspaceDirty = false;
+                    parts.Add(FeatureArtWorkspaceStore.RelativePath);
+                }
                 if (_dirty && _data != null)
                 {
                     FeatureArtCatalogIO.Save(_data);
+                    _dirty = false;
                     parts.Add(FeatureArtCatalogIO.AbsolutePath);
                 }
 
                 if (_registryDirty && _registry != null)
                 {
                     CellArtRegistryService.Save(_registry);
-                    parts.Add("Art/Cell/registry.json");
+                    _registryDirty = false;
+                    parts.Add(CellArtRegistryService.RegistryAbs);
                 }
 
                 _dirty = false;
@@ -1249,16 +1351,16 @@ namespace BinGames.EditorTools.FeatureArt
             {
                 SirenixEditorGUI.Title("使用说明", null, TextAlignment.Left, true);
                 SirenixEditorGUI.MessageBox(
-                    "选攻击器官 → 看/复制外形提示词做模型（对照概念图）→ 看/复制开火提示词做特效 → 拖进同一页。\n\n" +
-                    "1. 工具栏『从代码同步槽位』补齐新功能的空槽（look/prompt 每次都会按 LOOK-PROMPTS 覆盖，location 不动）；\n" +
-                    "2. 选中左树『攻击器官』下的器官，同一页拖外形预制体、复制开火四段提示词；\n" +
+                    "在『资源树』添加任意分类、概念图和部件，再给需要交付的节点建立成品绑定槽。\n\n" +
+                    "1. 在『资源树』配置源文件目录和新成品默认目录，名称、数量和层级由你维护；\n" +
+                    "2. 选节点，添加下级部件或调整上级，填写外观、约束和提示词；需求出处、依赖和交付状态也可修改；\n" +
                     "3. 三视图下勾要发给混元的图（默认只发概念图），选模型后「用三视图生成模型并绑定」（先在左树「混元生3D」填 Key）；会落整包并自动烘焙游戏 Prefab（Unity Standard + 整包贴图，不要自定义 shader）。对象框应显示 Prefab；\n" +
                     "4. 点工具栏『保存』；\n" +
                     "5. Play 模式或『健康检查』核对。\n\n" +
-                    "源文件登记（概念图 / fbx / 扫盘 / 图板）在左树『源文件库』，与成品换皮同一扇窗。工具栏『打开源文件板』会跳到该页。各功能页也可直接改概念图/三视图，都写 registry.json，不是 catalog。",
+                    "源文件登记（概念图 / fbx / 扫盘 / 图板）在左树『源文件库』。归档节点保留文件与绑定，可在资源树管理页恢复。删除登记分支只删除需求与槽位，不删除实际图片或模型。",
                     MessageType.Info);
                 SirenixEditorGUI.MessageBox(
-                    "空槽 = 白模，游戏照常能跑；拖 Assets/GameRes/Art/ 下资源会被拒绝——Art 是源文件，不进 YooAsset 热更包。\n" +
+                    "空槽表示素材尚未交付；当前需求登记不自动接入游戏表现；拖 Assets/GameRes/Art/ 下资源会被拒绝——Art 是源文件，不进 YooAsset 热更包。\n" +
                     "location = 拖入资源文件名（去扩展名），Raw 全树文件名须全局唯一，撞名会被『健康检查』标红。\n" +
                     "成品默认绑 Prefab；FBX/OBJ 是母带。外形槽也可手拖 Mesh / Prefab / FBX；不要拖文件夹。混元整包是磁盘布局。",
                     MessageType.None);

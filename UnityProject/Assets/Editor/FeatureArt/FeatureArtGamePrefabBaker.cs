@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
@@ -20,14 +21,10 @@ namespace BinGames.EditorTools.FeatureArt
         const string RawPrefix = "Assets/GameRes/Raw/";
 
         /// <summary>story-018：改 internal 供 <see cref="FeatureArtPackageIngest"/> 判定选中目录是否为合法整包根的直接子文件夹。</summary>
-        internal static readonly string[] PackageRoots =
-        {
-            "Assets/GameRes/Raw/Actor/Player",
-            "Assets/GameRes/Raw/Actor/Organ",
-            "Assets/GameRes/Raw/Actor/Summon",
-            "Assets/GameRes/Raw/Actor/Enemy",
-            "Assets/GameRes/Raw/Effects/Projectile",
-        };
+        internal static IEnumerable<string> PackageRoots => FeatureArtCatalogIO.Load().slots
+            .Where(s => s != null && !s.retired && s.bindKind == "InstancedMesh" && !string.IsNullOrEmpty(s.folderHint))
+            .Select(s => FeatureArtWorkspace.ValidateFolder(s.folderHint, "Assets/GameRes/Raw"))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>在整包内烘焙/覆盖 <c>{canonical}.prefab</c> 与 <c>{canonical}_runtime.mat</c>。</summary>
         public static bool TryBakePackage(string packageDir, string canonical, out GameObject prefab, out string error)

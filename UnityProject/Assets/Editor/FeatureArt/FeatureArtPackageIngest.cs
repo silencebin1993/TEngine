@@ -54,7 +54,7 @@ namespace BinGames.EditorTools.FeatureArt
             if (dirs.Count == 0)
             {
                 results.Add(new Result("", false,
-                    "未选中任何合法整包（需是 Player/Organ/Summon/Enemy/Projectile 根下的直接子文件夹）。"));
+                    "未选中任何合法整包（需位于绑定槽的成品输出目录下）。"));
                 return results;
             }
 
@@ -83,13 +83,13 @@ namespace BinGames.EditorTools.FeatureArt
             if (!IsDirectChildOfPackageRoot(selectedDir))
             {
                 return new Result(selectedDir, false,
-                    $"{selectedDir}：不是合法整包（需是 Player/Organ/Summon/Enemy/Projectile 根下的直接子文件夹）。");
+                    $"{selectedDir}：不是合法整包（需位于绑定槽的成品输出目录下）。");
             }
 
             var folderName = Path.GetFileName(selectedDir);
-            if (!TryFindSlotByFolderName(data, folderName, out var matched, out var canonical))
+            if (!TryFindSlotByFolderName(data, selectedDir, folderName, out var matched, out var canonical))
             {
-                return new Result(selectedDir, false, $"{folderName}：夹名对不上任何槽 canonical。");
+                return new Result(selectedDir, false, $"{folderName}：目录和夹名未匹配到唯一的成品槽。");
             }
 
             try
@@ -133,7 +133,7 @@ namespace BinGames.EditorTools.FeatureArt
 
         /// <summary>S3：夹名（大小写不敏感）反查非 retired 槽，且必须与 <see cref="FeatureArtHunyuanGenerate.TryCanonical"/>
         /// 的 fileName 相等。禁止臆造新槽——找不到就是 FAIL，不猜。</summary>
-        static bool TryFindSlotByFolderName(FeatureArtCatalogData data, string folderName,
+        static bool TryFindSlotByFolderName(FeatureArtCatalogData data, string selectedDir, string folderName,
             out FeatureArtSlot matched, out string canonical)
         {
             matched = null;
@@ -145,7 +145,7 @@ namespace BinGames.EditorTools.FeatureArt
                     continue;
                 }
 
-                if (!FeatureArtHunyuanGenerate.TryCanonical(slot, out _, out var name, out _))
+                if (!FeatureArtHunyuanGenerate.TryCanonical(slot, out var folder, out var name, out _))
                 {
                     continue;
                 }
@@ -155,12 +155,15 @@ namespace BinGames.EditorTools.FeatureArt
                     continue;
                 }
 
+                if (!string.Equals(FeatureArtHunyuanGenerate.PackageDir(folder, name), selectedDir,
+                        StringComparison.OrdinalIgnoreCase)) continue;
+                if (matched != null) return false;
+
                 matched = slot;
                 canonical = name;
-                return true;
             }
 
-            return false;
+            return matched != null;
         }
 
         /// <summary>S4：磁盘夹名与 canonical 大小写不一致时改成精确 canonical。Windows 文件系统大小写不敏感，

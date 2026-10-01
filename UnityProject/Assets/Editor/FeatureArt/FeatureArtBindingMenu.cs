@@ -7,6 +7,7 @@ namespace BinGames.EditorTools.FeatureArt
     public static class FeatureArtBindingMenu
     {
         [MenuItem("BinGames/功能美术绑定", false, 52)]
+        [MenuItem("BinGames/美术资源与绑定", false, 51)]
         [MenuItem("Tools/Feature Art Binding", false, 2001)]
         public static void Open()
         {
