@@ -512,7 +512,7 @@ namespace GameLogic.EditorTools.JourneyBots
             string label = JourneyInput.FindUitk<Label>("[HomeValleyCircuitBoardHost]", "SaveResultLabel")?.text ?? string.Empty;
             if (saved == null || !saved.HasUplink || saved.UplinkSlot != c.GetInt("uplinkSlot") || v.PrimaryId != ComponentCatalog.CompCannonId)
             {
-                return StepOutcome.Retry($"保存后 ERC-003 蓝图的现役版本不是带接入口的重炮版（v{r?.ActiveVersion}：{v?.PrimaryId}，接入口 {saved?.UplinkSlot}；“{label}”）");
+                return StepOutcome.Retry($"保存后 ERC-003 蓝图的现役版本不是带接入口的重炮版（v{r?.ActiveVersion}：{v?.PrimaryId}，接入口 {saved?.UplinkSlot}；“{label}”；点击：{(UiFail(c).Length == 0 ? "已送达" : UiFail(c))}）");
             }
             c.SetInt("bpVersion", v.Version);
             return StepOutcome.Done($"保存成功：ERC-003 蓝图现役 v{v.Version}（铸造重炮、{saved.UplinkSlot} 号格接入口，造价 {v.ScrapCost} 废料）；“{label}”");
@@ -791,10 +791,23 @@ namespace GameLogic.EditorTools.JourneyBots
                     return StepOutcome.Fail($"名单表里找不到 {Label(roster[idx])} 这一行");
                 }
                 // 这一行不在列表可见区（被滚出去、被下面的汇总文字盖住）：像玩家一样在列表上滚一下滚轮，下一帧再看。
+                int wheels0 = JourneyInput.WheelScrolls;
                 if (!JourneyInput.ScrollIntoView(JourneyInput.FindUitk<ScrollView>("[HomeValleyExpeditionPrepHost]", "MachineList"), t))
                 {
+                    if (JourneyInput.WheelScrolls == wheels0)
+                    {
+                        // 没滚成：滚轮落点被世界悬停提示挡着，光标已移离世界，等提示收起（不计入滚轮次数；按真实时间最多等 3 秒——batchmode 不渲染，一帧不到 1 毫秒，不能按帧数算）。
+                        double since = double.TryParse(c.Get("wheelBlockedAt"), NumberStyles.Float, CultureInfo.InvariantCulture, out double b0) && b0 <= c.StepElapsed ? b0 : -1;
+                        if (since < 0)
+                        {
+                            c.Set("wheelBlockedAt", c.StepElapsed.ToString("R", CultureInfo.InvariantCulture));
+                            return StepOutcome.Wait;
+                        }
+                        return c.StepElapsed - since > 3 ? StepOutcome.Fail($"{Label(roster[idx])} 这一行滚不进可见区：{JourneyInput.LastUiFailure}") : StepOutcome.Wait;
+                    }
+                    c.Set("wheelBlockedAt", string.Empty);
                     c.SetInt("wheel", c.GetInt("wheel") + 1);
-                    return c.GetInt("wheel") > 40 ? StepOutcome.Fail($"滚了 {c.GetInt("wheel")} 次滚轮，{Label(roster[idx])} 这一行仍不在列表可见区") : StepOutcome.Wait;
+                    return c.GetInt("wheel") > 40 ? StepOutcome.Fail($"滚了 {c.GetInt("wheel")} 次滚轮，{Label(roster[idx])} 这一行仍不在列表可见区（{JourneyInput.LastUiFailure}）") : StepOutcome.Wait;
                 }
                 if (!t.value && !JourneyInput.ClickElement(t))
                 {

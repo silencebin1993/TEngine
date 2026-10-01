@@ -29,6 +29,16 @@ namespace GameLogic.UI.Kit
     {
         public const int Order = 30030;
 
+        /// <summary>
+        /// FG3-E2E-01（FGJ-M1 / FGJ-M2 旅程抓到）：建造模式关着时，这份文档里只剩入口按钮与底部快捷栏——它们是 HUD，要排在所有窗口之下
+        /// （叠加层 HUD 4 之上、家园装配站生产面板 6 / 蓝图编辑器 8 / 浮动窗口 33～30000 之下）。此前整份文档常驻 30030，
+        /// 蓝图编辑器“保存”等落在快捷栏位置的按钮被快捷栏盖住、点不到。建造模式开着时回到建造栏层 <see cref="Order"/>。
+        /// </summary>
+        public const int ClosedHudOrder = 5;
+
+        /// <summary>建造模式开 / 关时这份文档的分层（自检读）。</summary>
+        public static int LayerFor(bool buildModeOpen) => buildModeOpen ? Order : ClosedHudOrder;
+
         public static BuildModeHudUIToolkit Instance { get; private set; }
 
         private Button _entry;
@@ -458,6 +468,11 @@ namespace GameLogic.UI.Kit
             bool homeObserved = Stage.GameRoot.HomeValley != null && Stage.GameRoot.HomeValley.IsActive;
             bool available = mode != null && state != null && homeObserved && InputRouter.Scope == InputScope.Strategy && !InputRouter.ModalUiOpen;
             bool open = mode != null && mode.IsOpen;
+            int layer = LayerFor(open);
+            if (Document != null && Document.sortingOrder != layer)
+            {
+                Document.sortingOrder = layer;
+            }
             SetVisible(_entry, available && !open);
             SetVisible(_panel, open);
             SetVisible(_hotbar, (available || open) && _slots.Count > 0);

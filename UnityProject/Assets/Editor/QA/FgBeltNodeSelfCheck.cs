@@ -134,6 +134,7 @@ namespace GameLogic.EditorTools
                 Step(CheckBuildModePlacement);
                 Step(CheckHomePortsWithSplitter);
                 Step(CheckHoverTexts);
+                Step(CheckHeadOn);
                 Step(CheckNodePanel);
                 Step(CheckRemoveAndDestroy);
                 Step(CheckSaveLoad);
@@ -1801,6 +1802,27 @@ namespace GameLogic.EditorTools
             bool others = mt.Contains("合流器") && mb.Contains("优先输入口：左口") && mb.Contains("左侧进料：已接") && ut.Contains("地下传送带 T1") && ut.Contains("入口")
                           && ub.Contains("地下跨 3 格") && ub.Contains("最多跨 4 格") && ub.Contains("拆掉任意一端");
             Expect(others, $"F4 合流器悬停“{mt}：{mb.Replace("\n", " / ")}”；地下传送带悬停“{ut}：{ub.Replace("\n", " / ")}”");
+            // FG3-E2E-01（DEBT-FG3LOG04-05）：分流器的输出口直接顶着合流器的侧面（中间不隔传送带）时，两边的悬停都写明“不参与交替 / 优先、隔一格就按规则”；
+            // 节点组里分流器与合流器之间隔着传送带，不写。
+            BeltNetworkService.TryDescribeHover(s, sp, out _, out string spGap);
+            bool gapQuiet = !mb.Contains("直接贴着") && !spGap.Contains("直接贴着");
+            GridCell? pair = FindArea(s, new GridCell(core.X + 18, core.Y - 18), 6, 5, 30);
+            bool direct = false;
+            string dm = string.Empty, ds = string.Empty;
+            if (pair != null)
+            {
+                var dsp = new GridCell(pair.Value.X + 2, pair.Value.Y + 2);
+                var dmg = new GridCell(dsp.X + 1, dsp.Y); // 朝北的分流器右口 = 东边一格；朝北的合流器左口 = 西边一格 → 两者直接相贴
+                bool placed = BeltNetworkService.TryPlaceNode(s, dsp, BeltDir.North, 2, BeltNodeKind.Splitter).Ok
+                              && BeltNetworkService.TryPlaceNode(s, dmg, BeltDir.North, 2, BeltNodeKind.Merger).Ok;
+                BeltNetworkService.TryDescribeHover(s, dmg, out _, out dm);
+                BeltNetworkService.TryDescribeHover(s, dsp, out _, out ds);
+                direct = placed && dm.Contains("注意：左口直接贴着分流器") && dm.Contains($"（{dsp.X}, {dsp.Y}）") && dm.Contains("隔一格传送带")
+                         && ds.Contains("注意：右口直接贴着合流器") && ds.Contains($"（{dmg.X}, {dmg.Y}）") && !GameText.ContainsMarker(dm + ds);
+            }
+            Expect(direct && gapQuiet,
+                $"F4（DEBT-FG3LOG04-05）分流器直接顶着合流器侧面：合流器悬停“{dm.Split('\n').FirstOrDefault(l => l.Contains("直接贴着"))}”；分流器悬停“{ds.Split('\n').FirstOrDefault(l => l.Contains("直接贴着"))}”；" +
+                $"中间隔着传送带的节点组不写这行（{gapQuiet}）");
             // 错误的一侧：在分流器正上方的输出格上改成朝南（顶着分流器的侧面）。
             GridCell top = new GridCell(sp.X, sp.Y + 1);
             k.ClearCell(top.X, top.Y);
@@ -1810,6 +1832,89 @@ namespace GameLogic.EditorTools
             k.TryGetCellInfo(top.X, top.Y, out BeltCellInfo wc);
             string wrong = BeltNetworkService.DescribeBlock(wc);
             Expect(wc.Block == BeltBlock.WrongSide && wrong.Contains("分流器") && wrong.Contains("只从后方进料"), $"F4 从侧面顶着分流器的带：原因“{wrong}”");
+        }
+
+        // ── F4b 两条带顶牛（FG3-E2E-01；第 1 轮审查补：被反转的格上有货、诊断不矛盾、判断不了写中性句）────────────────
+
+        /// <summary>
+        /// 一条朝东的 4 格带，第 3 格误按旋转键反转（朝西）→ 两条带顶牛。顶牛是对称的，原因要点名真正朝反的那一格：
+        /// ① 方向对的上游格（有上游在喂）：“正前方（第 3 格）的传送带朝向相反……在建造模式（B）里不选条目，指着它按 R”（建造模式关着时 R 不转传送带）；
+        /// ② 被反转的那格上原本有货：货跟着掉头、这一格也停成末端——原因写“这一格朝向反了……指着这一格”，不能让玩家去转方向正确的上游格（第 1 轮审查 P1）；
+        /// ③ “为什么不工作”里两条根源都点名第 3 格，没有让玩家转上游格的步骤，也不写中性句；④ 转回来后两格都不再这样写；
+        /// ⑤ 两条线迎面铺到一起、两边都有上游在喂（判断不了谁错）：写中性的“指着方向错的那一格”，不替玩家猜。
+        /// </summary>
+        private static void CheckHeadOn()
+        {
+            CampaignState s = NewWorld(9302, scrap: 200);
+            GridCell core = HomeGridService.CorePivot(s);
+            BeltKernel k = BeltNetworkService.Kernel;
+            string build = InputDisplay.ForAction(GameActionId.OpenBuildMenu);
+            string rotate = InputDisplay.ForAction(GameActionId.Rotate);
+            GridCell? lane = FindArea(s, new GridCell(core.X - 18, core.Y - 18), 6, 3, 30);
+            if (lane == null)
+            {
+                Fail("F4b 家园里找不到铺 4 格传送带的空地");
+                return;
+            }
+            var a = new GridCell(lane.Value.X + 1, lane.Value.Y + 1);
+            var u = new GridCell(a.X + 1, a.Y); // 方向对的上游格
+            var x = new GridCell(a.X + 2, a.Y); // 误转的格（身后还有一格朝东的带）
+            bool laid = Enumerable.Range(0, 4).All(i => BeltNetworkService.TryPlace(s, new GridCell(a.X + i, a.Y), BeltDir.East, 0).Ok);
+            k.InsertItemAt(a.X, a.Y, 500, BeltItems.ScrapId);
+            k.InsertItemAt(x.X, x.Y, 20000, BeltItems.ScrapId); // 误转前这一格上有货
+            // 与玩家在建造模式里指着它按旋转键同一个入口（PlanHistory.ReverseBelt → BeltNetworkService.TrySetDirection → 内核原地反转、货镜像掉头）。
+            BeltNetworkService.TrySetDirection(s, x, BeltDir.West);
+            WorldSimulation.StepMany(GameClock.StepHz * 20); // T1 每游戏秒约 0.25 格：两边的货都走到各自的末端
+            k.TryGetCellInfo(u.X, u.Y, out BeltCellInfo uc);
+            k.TryGetCellInfo(x.X, x.Y, out BeltCellInfo xc);
+            string uText = BeltNetworkService.DescribeBlock(uc);
+            string xText = BeltNetworkService.DescribeBlock(xc);
+            string blameX = $"正前方（{x.X}, {x.Y}）的传送带朝向相反";
+            string blameU = $"正前方（{u.X}, {u.Y}）的传送带朝向相反";
+            Expect(laid && uc.Block == BeltBlock.EndOfBelt && uText.Contains(blameX) && uText.Contains("朝西") && uText.Contains($"建造模式（{build}）") && uText.Contains("不选条目")
+                   && uText.Contains(rotate) && !GameText.ContainsMarker(uText),
+                $"F4b 顶牛：方向对的上游格 ({u.X}, {u.Y}) 的原因“{uText}”点名误转的 ({x.X}, {x.Y})，写明在建造模式里、不选条目时按键");
+            Expect(xc.Count > 0 && xc.Block == BeltBlock.EndOfBelt && xText.Contains("这一格朝向反了") && xText.Contains($"正前方（{u.X}, {u.Y}）") && !xText.Contains(blameU)
+                   && xText.Contains($"建造模式（{build}）") && xText.Contains("指着这一格") && !GameText.ContainsMarker(xText),
+                $"F4b 顶牛（第 1 轮审查 P1）：被反转的 ({x.X}, {x.Y}) 上有 {xc.Count} 件货、自己也停在末端，原因“{xText}”让玩家转这一格，不让去转方向正确的 ({u.X}, {u.Y})");
+            var reports = new List<DiagReport>();
+            RootCauseDiagnosis.Collect(s, reports);
+            List<string> texts = reports.SelectMany(r => r.Chains).SelectMany(ch => ch.Steps).Select(st => st?.Text ?? string.Empty).Distinct().ToList();
+            bool diagNames = texts.Any(t => t.Contains(blameX)) && texts.Any(t => t.Contains($"({x.X}, {x.Y})") && t.Contains("这一格朝向反了"));
+            bool diagClean = !texts.Any(t => t.Contains(blameU)) && !texts.Any(t => t.Contains("方向错的那一格"));
+            Expect(diagNames && diagClean,
+                $"F4b “为什么不工作”：两条根源都点名 ({x.X}, {x.Y})（{diagNames}），没有让玩家去转 ({u.X}, {u.Y}) 的步骤、没有中性句（{diagClean}）：[{string.Join(" | ", texts.Where(t => t.Contains("朝向")))}]");
+            GameSettings.SetLanguage(GameLanguage.En);
+            string en = BeltNetworkService.DescribeBlock(xc) + " / " + BeltNetworkService.DescribeBlock(uc);
+            GameSettings.SetLanguage(GameLanguage.ZhCn);
+            Expect(en.Contains("This belt points the wrong way") && en.Contains("points the other way") && !GameText.ContainsMarker(en), $"F4b 英文同样两句：“{en}”");
+            BeltNetworkService.TrySetDirection(s, x, BeltDir.East);
+            WorldSimulation.StepMany(GameClock.StepHz * 2);
+            k.TryGetCellInfo(u.X, u.Y, out BeltCellInfo uc2);
+            k.TryGetCellInfo(x.X, x.Y, out BeltCellInfo xc2);
+            string after = BeltNetworkService.DescribeBlock(uc2) + " / " + BeltNetworkService.DescribeBlock(xc2);
+            Expect(!after.Contains("朝向相反") && !after.Contains("朝向反了"), $"F4b 转回来后两格都不再写顶牛：“{after}”");
+
+            // ⑤ 两条线迎面铺到一起：b0 → b1 朝东、b3 → b2 朝西，b1 与 b2 顶牛，两边都有上游在喂——判断不了谁错，写中性句。
+            GridCell? pair = FindArea(s, new GridCell(core.X + 18, core.Y + 18), 6, 3, 30);
+            string n1 = string.Empty, n2 = string.Empty;
+            bool neutral = false;
+            if (pair != null)
+            {
+                var b = new GridCell(pair.Value.X + 1, pair.Value.Y + 1);
+                bool placed = BeltNetworkService.TryPlace(s, b, BeltDir.East, 0).Ok && BeltNetworkService.TryPlace(s, new GridCell(b.X + 1, b.Y), BeltDir.East, 0).Ok
+                              && BeltNetworkService.TryPlace(s, new GridCell(b.X + 2, b.Y), BeltDir.West, 0).Ok && BeltNetworkService.TryPlace(s, new GridCell(b.X + 3, b.Y), BeltDir.West, 0).Ok;
+                k.InsertItemAt(b.X, b.Y, 500, BeltItems.ScrapId);
+                k.InsertItemAt(b.X + 3, b.Y, 500, BeltItems.ScrapId);
+                WorldSimulation.StepMany(GameClock.StepHz * 20);
+                k.TryGetCellInfo(b.X + 1, b.Y, out BeltCellInfo c1);
+                k.TryGetCellInfo(b.X + 2, b.Y, out BeltCellInfo c2);
+                n1 = BeltNetworkService.DescribeBlock(c1);
+                n2 = BeltNetworkService.DescribeBlock(c2);
+                neutral = placed && c1.Block == BeltBlock.EndOfBelt && c2.Block == BeltBlock.EndOfBelt && n1.Contains("方向错的那一格") && n1.Contains($"正前方（{b.X + 2}, {b.Y}）")
+                          && n2.Contains("方向错的那一格") && n2.Contains($"正前方（{b.X + 1}, {b.Y}）") && !GameText.ContainsMarker(n1 + n2);
+            }
+            Expect(neutral, $"F4b 两条线迎面铺到一起（两边都有上游在喂）：不替玩家猜，两格都写中性句“{n1}”/“{n2}”");
         }
 
         // ── F5 节点面板（真 UXML）──────────────────────────────────────────────────────

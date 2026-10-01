@@ -301,7 +301,7 @@ namespace GameLogic.EditorTools.JourneyBots
         /// <summary>UI 点击方式的统计行（写进报告：多少次经射线 / 拾取确认没被挡住，多少次射线打不中、未做遮挡检查）。</summary>
         public static string UiStats() =>
             $"UI 点击：UI Toolkit 面板指针事件 {JourneyInput.UitkClicks} 次（均经拾取确认没被挡住）；uGUI 经 EventSystem 射线确认最上层 {JourneyInput.UguiPickedClicks} 次、" +
-            $"射线未命中（batchmode 不渲染）按按钮自身派发 {JourneyInput.UguiUnpickedClicks} 次";
+            $"射线未命中（batchmode 不渲染）按按钮自身派发 {JourneyInput.UguiUnpickedClicks} 次；控件被世界悬停提示挡着、先把光标移离世界再点 {JourneyInput.TooltipRetreats} 次";
 
         // ── 收尾 ────────────────────────────────────────────────────────────────────
 

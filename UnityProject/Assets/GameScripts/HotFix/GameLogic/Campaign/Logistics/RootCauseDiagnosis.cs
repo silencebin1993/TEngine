@@ -932,7 +932,7 @@ namespace GameLogic.Campaign.Logistics
                 }
                 Step(c, root.Block == BeltBlock.SinkFull && owner != null && HomeValleyCargo.GetAvailableSpace(state, CampaignEconomyLedger.ResourceScrap) <= 0
                         ? DiagCode.StoreFullRoot : DiagCode.BeltTerminal,
-                    GameText.Format("diag.step.belt_terminal", root.X, root.Y, BeltNetworkService.DescribeBlock(root)), at, owner);
+                    GameText.Format("diag.step.belt_terminal", root.X, root.Y, BeltNetworkService.DescribeBlock(k, root)), at, owner);
             }
         }
 

@@ -941,13 +941,24 @@ namespace GameLogic.Campaign.Logistics
             }
         }
 
-        /// <summary>一格为什么停着（稳定文本；不只靠颜色）。</summary>
-        public static string DescribeBlock(in BeltCellInfo info)
+        /// <summary>一格为什么停着（稳定文本；不只靠颜色）。格信息来自家园内核（悬停、面板、诊断）。</summary>
+        public static string DescribeBlock(in BeltCellInfo info) => DescribeBlock(IsRunning ? _kernel : null, info);
+
+        /// <summary>
+        /// 一格为什么停着：<paramref name="kernel"/> 是 <paramref name="info"/> 所在的内核（顶牛判定、端口与分流器读数都查它，不查全局家园内核——
+        /// 自检的独立内核、将来的多表面都用同一份写法）。<paramref name="kernel"/> 为空时只按格信息本身描述。
+        /// </summary>
+        public static string DescribeBlock(BeltKernel kernel, in BeltCellInfo info)
         {
+            if (kernel != null && kernel.IsDisposed)
+            {
+                kernel = null;
+            }
+            bool home = kernel != null && ReferenceEquals(kernel, _kernel);
             switch (info.Block)
             {
                 case BeltBlock.EndOfBelt:
-                    return GameText.Get("logistics.block.end_of_belt");
+                    return DescribeHeadOn(kernel, info) ?? GameText.Get("logistics.block.end_of_belt");
                 case BeltBlock.DownstreamFull:
                     // FG3-LOG-04：地下入口的下游是地下段——写“地下段已满（通往出口 X）”，不写地下层坐标。
                     return info.NextUnderground
@@ -957,13 +968,13 @@ namespace GameLogic.Campaign.Logistics
                     return GameText.Format("logistics.block.wrong_side", RoleName(info.FrontKind), info.FrontX, info.FrontY, SideRule(info.FrontKind));
                 case BeltBlock.SplitterFull:
                 case BeltBlock.SplitterNoOutlet:
-                    return DescribeSplitterBlock(info);
+                    return DescribeSplitterBlock(kernel, info);
                 case BeltBlock.SinkFull:
                 {
                     string owner = SinkOwnerName(info.SinkPortId);
-                    // FG3-LOG-03：仓库 / 核心的输入口满了多半是家园仓库满了——写明库存与容量和办法。
+                    // FG3-LOG-03：仓库 / 核心的输入口满了多半是家园仓库满了——写明库存与容量和办法（只对家园内核：端口绑定与库存都是家园的）。
                     CampaignState st = _state;
-                    if (st != null && BeltPortService.TryGetBinding(info.SinkPortId, out BeltPortService.Binding sb) && sb.Store
+                    if (home && st != null && BeltPortService.TryGetBinding(info.SinkPortId, out BeltPortService.Binding sb) && sb.Store
                         && Regions.HomeValleyCargo.GetAvailableSpace(st, CampaignEconomyLedger.ResourceScrap) <= 0)
                     {
                         return GameText.Format("logistics.block.store_full", owner, st.Scrap,
@@ -974,7 +985,7 @@ namespace GameLogic.Campaign.Logistics
                 case BeltBlock.SinkRejects:
                 {
                     string owner = SinkOwnerName(info.SinkPortId);
-                    ushort accept = IsRunning && _kernel.TryGetPortInfo(info.SinkPortId, out BeltPortInfo pi) ? pi.Accept : BeltConst.AcceptNone;
+                    ushort accept = kernel != null && kernel.TryGetPortInfo(info.SinkPortId, out BeltPortInfo pi) ? pi.Accept : BeltConst.AcceptNone;
                     return accept == BeltConst.AcceptNone
                         ? GameText.Format("logistics.block.sink_rejects_all", owner)
                         : GameText.Format("logistics.block.sink_rejects", owner, BeltItems.Name(info.Item0), BeltItems.Name(accept));
@@ -984,6 +995,53 @@ namespace GameLogic.Campaign.Logistics
                 default:
                     return GameText.Get("logistics.block.none");
             }
+        }
+
+        /// <summary>
+        /// FG3-E2E-01（M3 出口旅程抓到；第 1 轮审查补）：两条带顶牛——这一格是末端，正前方那一格也是传送带，而且朝着这一格。内核把两格都当“末端没有下游”，
+        /// 这里写明是哪一格朝反了、怎么转回来（FGR-LOG-082、FG00 B06）。不是顶牛返回 null。
+        /// 顶牛是对称的（两格互为“正前方”），所以要判断哪一格方向错：方向“有旁证”的一格是对的——
+        /// ① 它有上游在喂它（<see cref="BeltCellInfo.Feeders"/> &gt; 0：身后 / 侧面有带朝它送料）；② 另一格身后那格带顺着另一格的反方向继续往前
+        /// （另一格原来在给它送料，是从一条线中间被转反的）。只有一边有旁证时点名朝反的那一格；两边都有或都没有（例如两条线迎面铺到一起），
+        /// 写中性的“指着方向错的那一格”，不替玩家猜。按键写明“在建造模式里、不选条目”——建造模式关着时旋转键不转传送带。O(1)：最多查四格。
+        /// </summary>
+        private static string DescribeHeadOn(BeltKernel kernel, in BeltCellInfo info)
+        {
+            if (kernel == null || info.Kind != BeltNodeKind.Belt)
+            {
+                return null;
+            }
+            int d = (int)info.Dir;
+            int fx = info.X + BeltDirs.Dx(d);
+            int fy = info.Y + BeltDirs.Dy(d);
+            if (!kernel.TryGetCellInfo(fx, fy, out BeltCellInfo front) || front.Kind != BeltNodeKind.Belt || (int)front.Dir != BeltDirs.Opposite(d))
+            {
+                return null;
+            }
+            bool selfBacked = info.Feeders > 0 || BackFlowsAway(kernel, front);
+            bool frontBacked = front.Feeders > 0 || BackFlowsAway(kernel, info);
+            string build = InputDisplay.ForAction(GameActionId.OpenBuildMenu);
+            string rotate = InputDisplay.ForAction(GameActionId.Rotate);
+            if (selfBacked && !frontBacked)
+            {
+                return GameText.Format("logistics.block.head_on", fx, fy, GameText.Get(GridMath.DirTextKey((GridDir)front.Dir)), build, rotate);
+            }
+            if (frontBacked && !selfBacked)
+            {
+                return GameText.Format("logistics.block.head_on_self", fx, fy, GameText.Get(GridMath.DirTextKey((GridDir)info.Dir)), build, rotate);
+            }
+            return GameText.Format("logistics.block.head_on_unsure", fx, fy, build, rotate);
+        }
+
+        /// <summary>
+        /// <paramref name="cell"/> 身后那一格是从后方进料的件（传送带 / 分流器 / 地下入口），并且朝着离开 <paramref name="cell"/> 的方向——
+        /// 也就是 <paramref name="cell"/> 原来在给它送料：<paramref name="cell"/> 是从一条线中间被转反的那一格。
+        /// </summary>
+        private static bool BackFlowsAway(BeltKernel kernel, in BeltCellInfo cell)
+        {
+            int back = BeltDirs.Opposite((int)cell.Dir);
+            return kernel.TryGetCellInfo(cell.X + BeltDirs.Dx(back), cell.Y + BeltDirs.Dy(back), out BeltCellInfo b) && (int)b.Dir == back
+                   && (b.Kind == BeltNodeKind.Belt || b.Kind == BeltNodeKind.Splitter || b.Kind == BeltNodeKind.UndergroundIn);
         }
 
         /// <summary>FG3-LOG-04：节点的角色名（堵塞原因“正前方的 X 不从这一侧进料”用）：分流器 / 合流器 / 地下传送带入口 / 地下传送带出口。</summary>
@@ -1023,9 +1081,9 @@ namespace GameLogic.Campaign.Logistics
         /// <summary>
         /// FG3-LOG-04（FG03 第 5 节“分流器两个输出口都堵：分流器停止，上游堵塞，给出原因”）：分流器为什么停着——逐口写明（哪个口在哪一格满了 / 没接 / 不收 / 关闭）。
         /// </summary>
-        private static string DescribeSplitterBlock(in BeltCellInfo cell)
+        private static string DescribeSplitterBlock(BeltKernel kernel, in BeltCellInfo cell)
         {
-            if (!IsRunning || !_kernel.TryGetNodeInfo(cell.X, cell.Y, out BeltNodeInfo n))
+            if (kernel == null || !kernel.TryGetNodeInfo(cell.X, cell.Y, out BeltNodeInfo n))
             {
                 return GameText.Get("logistics.block.none");
             }
@@ -1079,7 +1137,7 @@ namespace GameLogic.Campaign.Logistics
             {
                 return null;
             }
-            string state = DescribeBlock(info) + (info.InLoop ? GameText.Get("logistics.hover.loop") : string.Empty);
+            string state = DescribeBlock(kernel, info) + (info.InLoop ? GameText.Get("logistics.hover.loop") : string.Empty);
             // 第一个统计窗口（logistics.stats_bucket_steps 步）还没走完时写“统计中”，不显示误导的 0。
             string measured = info.WindowSeconds > 0f
                 ? info.ThroughputPerMinute.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)
@@ -1212,6 +1270,7 @@ namespace GameLogic.Campaign.Logistics
                             n.WindowSeconds.ToString("0", ci), n.SentL, n.SentR)
                         : GameText.Format("logistics.hover.split_measuring", n.SentL, n.SentR));
                     AppendInputLine(sb, n);
+                    AppendDirectContact(sb, n, BeltNodeKind.Merger, "logistics.hover.split_direct_merger");
                     break;
                 }
                 case BeltNodeKind.Merger:
@@ -1223,6 +1282,7 @@ namespace GameLogic.Campaign.Logistics
                     sb.Append('\n').Append(GameText.Format("logistics.hover.merge_inputs",
                         GameText.Get(n.InLConnected ? "logistics.hover.connected" : "logistics.hover.not_connected"),
                         GameText.Get(n.InRConnected ? "logistics.hover.connected" : "logistics.hover.not_connected")));
+                    AppendDirectContact(sb, n, BeltNodeKind.Splitter, "logistics.hover.merge_direct_splitter");
                     break;
                 }
                 default:
@@ -1238,6 +1298,35 @@ namespace GameLogic.Campaign.Logistics
                         AppendInputLine(sb, n);
                     }
                     break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// FG3-E2E-01（DEBT-FG3LOG04-05）：分流器的输出口直接顶着合流器的侧面（中间不隔传送带）时，分流器交过去的物品按“放上入口”的规则走，
+        /// 不参与合流器的交替 / 优先口（ADR-LOG-004）。两边的悬停各写一行说明与办法（中间隔一格传送带就按规则汇入）。O(1)：只看左右两格。
+        /// </summary>
+        private static void AppendDirectContact(System.Text.StringBuilder sb, in BeltNodeInfo n, BeltNodeKind other, string key)
+        {
+            if (_kernel == null)
+            {
+                return;
+            }
+            for (int s = 0; s < 2; s++)
+            {
+                int d = s == 0 ? BeltDirs.Left((int)n.Dir) : BeltDirs.Right((int)n.Dir);
+                int x = n.X + BeltDirs.Dx(d);
+                int y = n.Y + BeltDirs.Dy(d);
+                if (!_kernel.TryGetKind(x, y, out BeltNodeKind k) || k != other || !_kernel.TryGetNodeInfo(x, y, out BeltNodeInfo m))
+                {
+                    continue;
+                }
+                int ml = BeltDirs.Left((int)m.Dir);
+                int mr = BeltDirs.Right((int)m.Dir);
+                bool touching = (m.X + BeltDirs.Dx(ml) == n.X && m.Y + BeltDirs.Dy(ml) == n.Y) || (m.X + BeltDirs.Dx(mr) == n.X && m.Y + BeltDirs.Dy(mr) == n.Y);
+                if (touching)
+                {
+                    sb.Append('\n').Append(GameText.Format(key, BeltNodeService.SideName(s == 0 ? BeltSide.Left : BeltSide.Right), x, y));
                 }
             }
         }

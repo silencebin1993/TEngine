@@ -85,7 +85,7 @@ namespace GameLogic.EditorTools.JourneyBots
 
                 // FG1-E2E-01（DEBT-FG0QA01-07）：切换类按键先读状态再决定按不按——重试时第一次按键已经生效也不会被切回去。
                 S("b_pause", "按暂停键（战略暂停中规划建造）", 10, c => JourneyInput.PressToggleTo(GameActionId.TogglePause, () => GameClock.Paused, true), TickPaused, retries: 1),
-                S("b_open", "按建造菜单键打开建造模式，点建造栏第一项", 10,
+                S("b_open", "按建造菜单键打开建造模式，点发电机所在的分类页签、再点发电机", 12,
                     c => JourneyInput.PressToggleTo(GameActionId.OpenBuildMenu, () => HomeValleyBuildMode.Current != null && HomeValleyBuildMode.Current.IsOpen, true), TickBuildOpen, retries: 1),
                 S("b_hover_a", "鼠标移到空地 A（虚影跟随）", 10, c => HoverBuildCell(c, "A"), c => TickHover(c, "A")),
                 S("b_rotate_a", "按旋转键", 10, c =>
@@ -101,7 +101,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("b_place_b", "左键放置第二座", 10, c => JourneyInput.Click(CellPos(c, "B")), c => TickPlaced(c, "B", 0f), retries: 1),
                 S("b_demolish", "按拆除模式键", 10,
                     c => JourneyInput.PressToggleTo(GameActionId.DemolishMode, () => HomeValleyBuildMode.Current != null && HomeValleyBuildMode.Current.DemolishMode, true), TickDemolishMode, retries: 1),
-                S("b_cancel_b", "拆除模式点第二座的虚影（取消规划，全额退款）", 10, c => JourneyInput.Click(CellPos(c, "B")), TickCancelled, retries: 1),
+                S("b_cancel_b", "拆除模式点第二座的虚影（取消规划，占格释放、废料不变）", 10, c => JourneyInput.Click(CellPos(c, "B")), TickCancelled, retries: 1),
                 S("b_esc", "Esc 退出建造模式", 10, c =>
                 {
                     if (HomeValleyBuildMode.Current != null && HomeValleyBuildMode.Current.IsOpen)
@@ -179,12 +179,29 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 return StepOutcome.Retry("建造模式没有打开（或输入上下文不是建造）");
             }
-            if (!JourneyInput.ClickUitk("[BuildModeHudHost]", "BuildItem0") || mode.SelectedTypeId != HomeValleyLayout.BuildingTypeGenerator2)
+            // FG3-E2E-01：FG3-LOG-01 起建造栏按分类分页（默认停在“物流”页），发电机不再是第一项——像玩家一样先点发电机所在的分类页签，
+            // 再点列表里的发电机（列表下一帧才排好版；条目不在可见区时先滚滚轮）。
+            if (mode.SelectedTypeId != HomeValleyLayout.BuildingTypeGenerator2)
             {
-                return StepOutcome.Fail($"点建造栏第一项没有选中发电机（选中 {mode.SelectedTypeId}）");
+                // 点过条目后等半秒再看（点击下一帧才生效），不连点——连点同一项会把选中又切掉。
+                double last = double.TryParse(c.Get("genPickAt"), NumberStyles.Float, CultureInfo.InvariantCulture, out double t0) ? t0 : -1;
+                if (last >= 0 && c.StepElapsed >= last && c.StepElapsed - last < 0.5) // 重试时计时从 0 重来：比上次点击时刻还早就当作没点过
+                {
+                    return StepOutcome.Wait;
+                }
+                bool clicked = FgjM3Common.PickEntry(HomeValleyLayout.BuildingTypeGenerator2, out string why, out bool scrolling);
+                if (clicked)
+                {
+                    c.Set("genPickAt", c.StepElapsed.ToString("R", CultureInfo.InvariantCulture));
+                }
+                if (!clicked && !scrolling)
+                {
+                    return c.StepElapsed < 6 ? StepOutcome.Wait : StepOutcome.Fail($"在建造栏里选不到发电机：{why}（当前分类 {hud.SelectedCategoryId}）");
+                }
+                return c.StepElapsed < 8 ? StepOutcome.Wait : StepOutcome.Fail($"点了建造栏的发电机没有选中（选中 {mode.SelectedTypeId}；分类 {hud.SelectedCategoryId}）");
             }
             c.SetInt("scrap0", CampaignSession.Current.Scrap);
-            return StepOutcome.Done($"建造模式打开（输入上下文 = 建造，建造栏 {hud.ItemCount} 项），选中发电机");
+            return StepOutcome.Done($"建造模式打开（输入上下文 = 建造），点分类页签“{hud.SelectedCategoryId}”再点发电机（本页 {hud.ItemCount} 项），选中发电机");
         }
 
         private static Vector2 CellPos(JourneyContext c, string tag) => new Vector2(c.GetInt("cell" + tag + "X"), c.GetInt("cell" + tag + "Y"));
@@ -311,16 +328,16 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 return StepOutcome.Fail($"放下的建筑状态 {b.ConstructionState}、朝向 {b.Rotation}°（期望规划中、{rotation}°）");
             }
-            // 放置时按建造配置预留废料（取消时全额退回）：否则“取消后废料 == 放第一座后的废料”恒成立，退款断言形同虚设。
+            // FG3-LOG-02 起放下的是施工虚影：放下不扣料，材料由机器运到现场时才从库存扣（施工途中取消的退回由 FGJ-M3R r4 断言）。
+            // 暂停中放下，废料必须一件不少——放下就扣料是回退。
             int before = tag == "A" ? c.GetInt("scrap0") : c.GetInt("scrapAfterA");
-            int cost = HomeValleyLayout.BuildProfile.TryGetValue(HomeValleyLayout.BuildingTypeGenerator2, out (int ScrapCost, float Seconds) profile) ? profile.ScrapCost : 0;
-            if (cost <= 0 || s.Scrap != before - cost)
+            if (s.Scrap != before)
             {
-                return StepOutcome.Fail($"放置发电机应预留废料 {cost}：放置前 {before}、放置后 {s.Scrap}");
+                return StepOutcome.Fail($"放下施工虚影不应扣料：放置前 {before}、放置后 {s.Scrap}");
             }
             c.Set("building" + tag, b.BuildingId);
             c.SetInt("scrapAfter" + tag, s.Scrap);
-            return StepOutcome.Done($"放下规划中的发电机（朝向 {b.Rotation}°），预留废料 {cost}（{before} → {s.Scrap}）");
+            return StepOutcome.Done($"放下规划中的发电机虚影（朝向 {b.Rotation}°）；暂停中放下不扣料（废料仍是 {s.Scrap}）");
         }
 
         private static StepOutcome TickDemolishMode(JourneyContext c)
@@ -348,7 +365,7 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             int expected = c.GetInt("scrapAfterA");
             return s.Scrap == expected
-                ? StepOutcome.Done($"取消规划：占格释放、废料全额退回（{s.Scrap}）；第一座保留")
+                ? StepOutcome.Done($"取消规划：占格释放、废料不变（{s.Scrap}，虚影还没运料）；第一座保留")
                 : StepOutcome.Fail($"取消后废料 {s.Scrap}，应退回到 {expected}");
         }
 
@@ -979,6 +996,9 @@ namespace GameLogic.EditorTools.JourneyBots
                 return false;
             }
             CampaignSession.Set(ReplaySlot, r.State);
+            // 与正式读档一样：通知中心绑定到读回的战役（运行时由 GameRoot 下一帧的 NotificationCenter.Tick 重绑；无头重放在同一帧里读档、推进，
+            // 不先绑定的话“读档那一刻”的通知计数还是观察组那一局的历史，推进中第一条通知才触发重绑，增量就算错了——FG3-LOG-02 起去程会发“没有劳动力”）。
+            NotificationCenter.Bind(r.State);
             WorldSimulation.LoadHome(resume: true);
             if (GameClock.Ticks != fromTick)
             {

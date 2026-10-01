@@ -875,8 +875,10 @@ namespace GameLogic.EditorTools
                 k.StepMany(200);
                 BeltCellInfo a = Info(k, 0, 0);
                 bool inv = Invariants(k, out string why);
-                Expect(!a.HasNext && a.Block == BeltBlock.EndOfBelt && a.Count == 1 && inv,
-                    $"两条传送带头对头：不相连（各自到头，原因“{BeltNetworkService.DescribeBlock(a)}”），物品不会被推到对面{(why != null ? "；" + why : string.Empty)}");
+                // FG3-E2E-01 第 1 轮审查：原因按这条格所在的内核描述（独立内核，不去查家园内核的同坐标格）；两格都没有上游、身后也没有带，判断不了谁朝反，写中性句。
+                string reason = BeltNetworkService.DescribeBlock(k, a);
+                Expect(!a.HasNext && a.Block == BeltBlock.EndOfBelt && a.Count == 1 && inv && reason.Contains("方向错的那一格") && reason.Contains("（1, 0）"),
+                    $"两条传送带头对头：不相连（各自到头，原因“{reason}”），物品不会被推到对面{(why != null ? "；" + why : string.Empty)}");
             }
 
             using (BeltKernel k = NewKernel())

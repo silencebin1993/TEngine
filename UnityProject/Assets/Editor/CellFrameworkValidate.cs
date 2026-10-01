@@ -263,6 +263,10 @@ namespace GameLogic.EditorTools
                 // 引信弹迹（FG-GAP-043：类别映射、内核记录 / 渲染实例 / 按游戏时间到期 / 上限、快照格式 8 与 7 兼容、不进哈希）、FGJ-M2 / FGJ-M2R 登记覆盖出口旅程与 IC-REQ-022 六类、
                 // 缺口清零门禁、解析面板 UXML 与文本键。
                 _fail += FgMilestoneM2SelfCheck.Run(Report);
+                // FG3-E2E-01：M3 出口——FGJ-M3 / FGJ-M3R 登记覆盖出口旅程原文与 IC-REQ-022 六类、旅程源码只走输入通道（扫描业务方法调用）；
+                // 在途库存（仓库输出口推上带的件数守恒、施工等材料时写明“另有 N 件在传送带上”与办法）；缺口清零门禁与 DEBT-FG3GEN01-08 改派守护；
+                // FG-M3 试玩包；FGT-LOG-001～013 / FGT-GEN-001～010 的自检映射与登记。
+                _fail += FgMilestoneM3SelfCheck.Run(Report);
             }
             catch (Exception e)
             {

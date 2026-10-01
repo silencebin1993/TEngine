@@ -45,6 +45,7 @@ namespace GameLogic.EditorTools.JourneyBots
             UguiUnpickedClicks = 0;
             UguiPickedClicks = 0;
             UitkClicks = 0;
+            TooltipRetreats = 0;
             LastUiFailure = string.Empty;
         }
 
@@ -347,6 +348,14 @@ namespace GameLogic.EditorTools.JourneyBots
             VisualElement top = panel.Pick(center);
             if (top == null || (top != e && !e.Contains(top)))
             {
+                if (IsTooltip(top))
+                {
+                    // FG3-E2E-01：挡住它的是世界悬停提示——脚本光标还停在上一步点过的地面上（玩家去点按钮时光标就在按钮上，世界悬停提示不会出现）。
+                    // 把脚本光标移离世界、面板指针移离提示框，提示按离开宽限收起；这次不点，调用方下一次再点（步骤重试）。
+                    RetreatFromTooltip(panel);
+                    LastUiFailure = $"控件 {e.name} 被世界悬停提示挡着：光标移离世界，下一帧再点（{TooltipState()}）";
+                    return false;
+                }
                 LastUiFailure = $"控件 {e.name} 被同一面板上的 {Describe(top)} 挡住（面板点 {center}）";
                 return false;
             }
@@ -383,6 +392,20 @@ namespace GameLogic.EditorTools.JourneyBots
             if (inY && inX)
             {
                 return true;
+            }
+            // 滚轮落点（列表视口中心）被世界悬停提示挡着：脚本光标还停在上一步点过的地面上（玩家滚列表时光标就在列表上，不会有世界悬停提示）。
+            // 先把光标移离世界，提示收起后下一帧再滚（与 ClickElement 同一处理）；被别的东西挡着就照实报出来，不隔着它滚。
+            VisualElement at = list.panel.Pick(vp.center);
+            if (at != null && at != list && !list.Contains(at))
+            {
+                if (IsTooltip(at))
+                {
+                    RetreatFromTooltip(list.panel);
+                    LastUiFailure = $"列表 {list.name} 被世界悬停提示挡着：光标移离世界，下一帧再滚（{TooltipState()}）";
+                    return false;
+                }
+                LastUiFailure = $"列表 {list.name} 的滚轮落点被 {Describe(at)} 挡住";
+                return false;
             }
             // 在视口下方 / 右边 → 向下 / 向右滚（只能横向滚的列表，滚轮的纵向量也按横向滚）。
             float dir = !inY ? (r.yMax > vp.yMax ? 1f : -1f) : (r.xMax > vp.xMax ? 1f : -1f);
@@ -456,6 +479,31 @@ namespace GameLogic.EditorTools.JourneyBots
             return null;
         }
 
+        /// <summary>
+        /// FG3-E2E-01：屏幕点（左下角原点，与 <see cref="ScreenOf"/> 同一口径）上有没有可见的 UI Toolkit 控件 / 窗口挡住世界点击
+        /// （与世界点击拦截 <see cref="UiWindowFocus.BlocksWorldPointerAt"/> 同一判据）。挡住返回挡住它的元素描述，没挡住返回 null。
+        /// 运行时的世界点击拦截读的是真实鼠标位置（batchmode 下固定在窗口角上），旅程点地面之前用它按脚本光标的位置核对一遍：
+        /// 目标在建造栏、左侧停靠面板等界面下面时，像玩家一样先平移镜头把目标带出来再点，不“隔着界面点地面”。
+        /// </summary>
+        public static string UiCoverAt(Vector3 screen)
+        {
+            var topLeft = new Vector2(screen.x, Screen.height - screen.y);
+            foreach (UIDocument d in Object.FindObjectsByType<UIDocument>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            {
+                IPanel p = d != null ? d.rootVisualElement?.panel : null;
+                if (p == null)
+                {
+                    continue;
+                }
+                Vector2 pp = RuntimePanelUtils.ScreenToPanel(p, topLeft);
+                if (UiWindowFocus.BlocksWorldPointerAt(p, pp))
+                {
+                    return $"{d.gameObject.name}/{Describe(p.Pick(pp))}";
+                }
+            }
+            return null;
+        }
+
         /// <summary>面板坐标 → 屏幕坐标（左上角原点，与 <see cref="RuntimePanelUtils.ScreenToPanel"/> 的输入同一口径）：按两点反解线性映射。</summary>
         private static bool TryPanelToScreen(IPanel panel, Vector2 panelPoint, out Vector2 screenTopLeft)
         {
@@ -472,6 +520,53 @@ namespace GameLogic.EditorTools.JourneyBots
         }
 
         private static string Describe(VisualElement e) => e == null ? "（无）" : string.IsNullOrEmpty(e.name) ? e.GetType().Name : e.name;
+
+        /// <summary>本次会话里因为世界悬停提示挡着、先把光标移离世界再点的次数（报告里写出）。</summary>
+        public static int TooltipRetreats { get; private set; }
+
+        /// <summary>
+        /// 光标离开世界悬停提示：脚本光标移到窗口外（世界悬停源收到“离开”），面板指针也移到面板外——
+        /// 之前派发到面板上的点击会把面板指针留在那一点，提示框后来出现在那一点下面时会被当成“指针停在提示框上”而一直不收起。
+        /// 玩家的鼠标会从提示框上移开，这里补上这次移动。
+        /// </summary>
+        private static float _lastRetreat = -10f;
+
+        private static void RetreatFromTooltip(IPanel panel)
+        {
+            // 一次移开就够了：提示按离开宽限（0.25 真实秒）自己收起。限频是为了不逐帧重建脚本输入（batchmode 不渲染，一帧不到 1 毫秒）；调用方按真实时间等提示收起。
+            if (Time.realtimeSinceStartup - _lastRetreat < 0.6f)
+            {
+                return;
+            }
+            _lastRetreat = Time.realtimeSinceStartup;
+            ReleaseKeys();
+            if (panel?.visualTree != null)
+            {
+                var ime = new Event { type = EventType.MouseMove, mousePosition = new Vector2(-100f, -100f), modifiers = EventModifiers.None };
+                using (PointerMoveEvent mv = PointerMoveEvent.GetPooled(ime))
+                {
+                    panel.visualTree.SendEvent(mv);
+                }
+            }
+            TooltipRetreats++;
+        }
+
+        /// <summary>失败说明里写出挡着的是哪条提示、指针是否已离开、是否固定（诊断用，只读公开状态）。</summary>
+        private static string TooltipState() =>
+            $"提示“{GameLogic.UI.Kit.UiTooltip.Content?.Title}”，世界对象 {GameLogic.UI.Kit.UiTooltip.WorldKey}，悬停在世界上 {GameLogic.UI.Kit.UiTooltip.HoveringWorld}，固定 {GameLogic.UI.Kit.UiTooltip.IsPinned}";
+
+        /// <summary>元素属于悬停提示（UiKitOverlay 的 “Tooltip” 节点或其子节点）。</summary>
+        private static bool IsTooltip(VisualElement e)
+        {
+            for (VisualElement p = e; p != null; p = p.parent)
+            {
+                if (p.name == "Tooltip")
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
 
         /// <summary>玩家此刻能不能点到它：在面板上、启用（含祖先）、自己和祖先都没有 display:none / visibility:hidden。</summary>
         public static bool IsClickable(VisualElement e)

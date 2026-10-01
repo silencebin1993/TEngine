@@ -1406,9 +1406,10 @@ namespace GameLogic.Campaign.Regions
                 }
                 return a.Index.CompareTo(b.Index);
             });
+            int onBelts = -1; // 在途件数：一次刷新只算一次（第一张“等待材料”的施工单用到时才算）
             foreach ((WorkOrderRecord o, int _) in orders)
             {
-                into.Add(new QueueEntry(o, HomeValleyWorkOrders.DescribeTarget(state, o), DescribeStatus(state, o), Fraction(state, o), SitePosition(state, o)));
+                into.Add(new QueueEntry(o, HomeValleyWorkOrders.DescribeTarget(state, o), DescribeStatus(state, o, ref onBelts), Fraction(state, o), SitePosition(state, o)));
             }
             // FG3-LOG-03：被摧毁的传送带留下的虚影排在最后（没有施工单，等玩家点“重建”）。
             foreach (PlannedBeltRecord p in state.Grid?.PlannedBelts ?? Array.Empty<PlannedBeltRecord>())
@@ -1603,6 +1604,13 @@ namespace GameLogic.Campaign.Regions
         /// <summary>施工状态的玩家文字（队列、悬停、建造栏共用同一写法，B06：写明原因与办法）。</summary>
         public static string DescribeStatus(CampaignState state, WorkOrderRecord order)
         {
+            int onBelts = -1;
+            return DescribeStatus(state, order, ref onBelts);
+        }
+
+        /// <summary>同上；<paramref name="onBeltsCache"/> &lt; 0 时用到才算在途件数并记下（施工队列一次刷新共用一次结果）。</summary>
+        private static string DescribeStatus(CampaignState state, WorkOrderRecord order, ref int onBeltsCache)
+        {
             if (order == null)
             {
                 return string.Empty;
@@ -1611,6 +1619,18 @@ namespace GameLogic.Campaign.Regions
             if (order.State == WorkOrderState.Waiting && reason != null && reason.StartsWith(MaterialsReasonPrefix, StringComparison.Ordinal))
             {
                 int need = MaterialsStillNeeded(state, order);
+                // FG3-E2E-01：仓库输出口把库存推上了传送带（在途不算库存）——写明在带上的件数与办法（端口面板“停止输出”），B06。
+                if (onBeltsCache < 0)
+                {
+                    onBeltsCache = Logistics.BeltPortService.StoreItemsOnBelts(state);
+                }
+                int onBelts = onBeltsCache;
+                if (onBelts > 0)
+                {
+                    return GameText.Format("build.status.waiting_materials_belts", MaterialName(CampaignEconomyLedger.ResourceScrap),
+                        need.ToString(CultureInfo.InvariantCulture), Mathf.FloorToInt(state.Scrap).ToString(CultureInfo.InvariantCulture),
+                        onBelts.ToString(CultureInfo.InvariantCulture));
+                }
                 return GameText.Format("build.status.waiting_materials", MaterialName(CampaignEconomyLedger.ResourceScrap),
                     need.ToString(CultureInfo.InvariantCulture), Mathf.FloorToInt(state.Scrap).ToString(CultureInfo.InvariantCulture));
             }

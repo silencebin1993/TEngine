@@ -645,6 +645,45 @@ namespace GameLogic.Campaign.Logistics
 
         // ── 查询（悬停、端口面板、堵塞原因）───────────────────────────────────────
 
+        private static readonly HashSet<int> NetScratch = new HashSet<int>();
+
+        /// <summary>
+        /// FG3-E2E-01（M3 出口旅程抓到）：家园仓库（store）输出口推上传送带、此刻还在带上（或已从库存取出等着推上）的件数——在途不算库存。
+        /// 施工“等待材料”的原因行据此写明“另有 N 件在传送带上”与办法。按输出口所在的传送带网络去重求和。
+        /// 开销 O(端口绑定数)（遍历全部绑定、只取仓库输出口；每个网络的件数是内核汇总值，O(1)）；只在描述“等待材料”时调用，
+        /// 施工队列一次刷新只算一次（<see cref="Regions.HomeValleyConstruction.CollectQueue"/>），不按帧、不按施工单数倍增。
+        /// 先按存档对齐索引（暂停中改了端口绑定也读到新列表）。
+        /// 口径：M3 的仓库只存废料，网络件数就是在途废料；FG4-ECO-01 加入多种物品后要按物品种类过滤（FG-GAP-090 承接）。
+        /// </summary>
+        public static int StoreItemsOnBelts(CampaignState state)
+        {
+            BeltKernel k = BeltNetworkService.IsRunning ? BeltNetworkService.Kernel : null;
+            if (k == null || state == null || !ReferenceEquals(BeltNetworkService.BoundState, state))
+            {
+                return 0;
+            }
+            EnsureIndex(state);
+            int total = 0;
+            foreach (Binding b in Bindings)
+            {
+                if (b == null || !b.Store || !b.IsOutput || b.PortId < 0 || !k.TryGetPortInfo(b.PortId, out BeltPortInfo info))
+                {
+                    continue;
+                }
+                if (!info.Connected)
+                {
+                    continue; // 没接带的输出口只是预取了几件等着推（在途量上限），不是“在传送带上”
+                }
+                total += Math.Max(0, info.Pending);
+                if (info.Network >= 0 && NetScratch.Add(info.Network) && k.TryGetNetworkStats(info.Network, out BeltNetworkStats st))
+                {
+                    total += st.Items;
+                }
+            }
+            NetScratch.Clear();
+            return total;
+        }
+
         public static bool TryGetBinding(int portId, out Binding bind)
         {
             EnsureIndex(_state);

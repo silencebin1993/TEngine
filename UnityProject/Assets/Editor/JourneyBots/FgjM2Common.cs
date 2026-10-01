@@ -630,7 +630,7 @@ namespace GameLogic.EditorTools.JourneyBots
             string label = JourneyInput.FindUitk<Label>(CircuitHost, "SaveResultLabel")?.text ?? string.Empty;
             if (saved == null || saved.FirmwareSlots[0] != fwId)
             {
-                return StepOutcome.Retry($"保存后 ERC-003 蓝图的现役版本固件槽不是“{FwName(fwId)}”（v{r?.ActiveVersion}：{saved?.FirmwareSlots[0]}；“{label}”）");
+                return StepOutcome.Retry($"保存后 ERC-003 蓝图的现役版本固件槽不是“{FwName(fwId)}”（v{r?.ActiveVersion}：{saved?.FirmwareSlots[0]}；“{label}”；点击：{(FgjM1Journey.UiFail(c).Length == 0 ? "已送达" : FgjM1Journey.UiFail(c))}）");
             }
             c.SetInt(verKey, v.Version);
             return StepOutcome.Done($"保存成功：ERC-003 蓝图现役 v{v.Version}（固件槽 1 = {FwName(fwId)}，造价 {v.ScrapCost} 废料）；“{label}”");
