@@ -43,6 +43,8 @@ namespace GameLogic.Campaign.Logistics
             public string PortKey;
             public bool IsOutput;
             public bool Store;
+            /// <summary>FG4-ECO-02：生产建筑自己的输入 / 输出缓存（role = prod，转移由 <see cref="Economy.ProductionService.PumpPort"/> 做）。</summary>
+            public bool Prod;
             /// <summary>端口所在的建筑格。</summary>
             public GridCell PortCell;
             /// <summary>端口朝外的方向（随建筑旋转）。</summary>
@@ -58,6 +60,7 @@ namespace GameLogic.Campaign.Logistics
             public string PortKey;
             public bool IsOutput;
             public bool Store;
+            public bool Prod;
             public GridDir Face;
             public GridCell PortCell;
             public GridCell BeltCell;
@@ -231,6 +234,7 @@ namespace GameLogic.Campaign.Logistics
                 PortKey = row.Id,
                 IsOutput = row.Kind == "out",
                 Store = row.Role == "store",
+                Prod = row.Role == "prod",
                 PortCell = cell,
                 Face = face,
                 BeltCell = new GridCell(cell.X + v.x, cell.Y + v.y),
@@ -310,7 +314,7 @@ namespace GameLogic.Campaign.Logistics
                     Binding want = Make(b, row, null);
                     if (ByKey.TryGetValue(key, out Binding have))
                     {
-                        if (have.PortCell == want.PortCell && have.Face == want.Face && have.IsOutput == want.IsOutput && have.Store == want.Store)
+                        if (have.PortCell == want.PortCell && have.Face == want.Face && have.IsOutput == want.IsOutput && have.Store == want.Store && have.Prod == want.Prod)
                         {
                             continue;
                         }
@@ -453,14 +457,15 @@ namespace GameLogic.Campaign.Logistics
             byte face = (byte)bind.Face;
             if (bind.IsOutput)
             {
-                ushort item = bind.Store ? ItemForFilter(filter) : (ushort)0;
+                ushort item = bind.Store ? ItemForFilter(filter) : bind.Prod ? Economy.ProductionService.SourceItemFor(state, b) : (ushort)0;
                 r = BeltNetworkService.TryAddSource(state, id, bind.BeltCell, item, SourceInterval, 0, 0, face);
             }
             else
             {
                 string nameKey = FgContentTables.TryGetBuilding(b.BuildingTypeId, out GameConfig.fg.Building brow) ? brow.NameKey : null;
                 // FG4-ECO-01：家园仓库 / 核心的输入口收全部可存物品（缓存一次只放一种，入库时按种类；关闭 DEBT-FG3LOG03-02）。
-                ushort accept = bind.Store ? BeltConst.AcceptAnyOneKind : BeltConst.AcceptNone;
+                // FG4-ECO-02：生产建筑的输入口只收当前配方要的那种固体（回收站收任何固体，一次一种；没选配方 = 不收）。
+                ushort accept = bind.Store ? BeltConst.AcceptAnyOneKind : bind.Prod ? Economy.ProductionService.SinkAcceptFor(state, b) : BeltConst.AcceptNone;
                 r = BeltNetworkService.TryAddSink(state, id, bind.PortCell, SinkBuffer, 0, nameKey, 0, face, accept);
             }
             if (!r.Ok)
@@ -570,8 +575,13 @@ namespace GameLogic.Campaign.Logistics
             int warehouse = -1;
             foreach (Binding bind in Bindings)
             {
-                if (!bind.Store || bind.Record == null || !k.TryGetPortCounts(bind.PortId, out int pending, out int buffered, out ushort kind))
+                if ((!bind.Store && !bind.Prod) || bind.Record == null || !k.TryGetPortCounts(bind.PortId, out int pending, out int buffered, out ushort kind))
                 {
+                    continue;
+                }
+                if (bind.Prod)
+                {
+                    Economy.ProductionService.PumpPort(state, bind, k, pending, buffered, kind, sourceBuffer);
                     continue;
                 }
                 if (bind.IsOutput)
@@ -794,7 +804,20 @@ namespace GameLogic.Campaign.Logistics
             int last = countsByItem.Length - 1;
             foreach (Binding b in Bindings)
             {
-                if (b == null || b.PortId < 0 || !k.TryGetPortCounts(b.PortId, out int pending, out int buffered, out ushort item) || item == 0)
+                if (b == null || b.PortId < 0 || !k.TryGetPortCounts(b.PortId, out int pending, out int buffered, out ushort item))
+                {
+                    continue;
+                }
+                if (item == 0 && b.Prod && !b.IsOutput)
+                {
+                    // FG4-ECO-02：生产建筑只收一种物品的输入口，内核不记种类：就是当前配方要的那种固体。
+                    item = Economy.ProductionService.SinkAcceptFor(state, HomeGridService.FindBuilding(state, b.BuildingId));
+                    if (item == BeltConst.AcceptNone || item == BeltConst.AcceptAnyOneKind)
+                    {
+                        item = 0;
+                    }
+                }
+                if (item == 0)
                 {
                     continue;
                 }
@@ -867,6 +890,7 @@ namespace GameLogic.Campaign.Logistics
                     PortKey = row.Id,
                     IsOutput = shape.IsOutput,
                     Store = shape.Store,
+                    Prod = shape.Prod,
                     Face = shape.Face,
                     PortCell = shape.PortCell,
                     BeltCell = shape.BeltCell,
@@ -882,7 +906,12 @@ namespace GameLogic.Campaign.Logistics
                     v.Info = info;
                     v.Connected = info.Connected;
                 }
-                if (!v.Store)
+                if (v.Prod)
+                {
+                    // FG4-ECO-02：生产建筑的口——输入口写收什么（当前配方 / 回收站任何固体 / 没选配方不收），输出口写推什么。
+                    v.AcceptLine = Economy.ProductionService.PortAcceptLine(state, b, v.IsOutput);
+                }
+                else if (!v.Store)
                 {
                     v.AcceptLine = v.IsOutput ? null : GameText.Get("logistics.port.accept_none");
                     v.IssueLine = GameText.Get("logistics.port.role_none");
@@ -914,6 +943,11 @@ namespace GameLogic.Campaign.Logistics
                     v.StatsLine = v.IsOutput
                         ? GameText.Format("logistics.port.stats_out", v.Info.Total, Math.Max(0, v.Info.Pending), perMin)
                         : GameText.Format("logistics.port.stats_in", v.Info.Total, v.Info.Buffered, v.Info.BufferCap, perMin);
+                    if (v.Prod && active && v.Connected && v.IsOutput && v.Info.Pending > 0 && k != null
+                        && k.TryGetCellInfo(shape.BeltCell.X, shape.BeltCell.Y, out BeltCellInfo prodHead) && prodHead.Block != BeltBlock.None && prodHead.Count > 0)
+                    {
+                        v.IssueLine = GameText.Get("logistics.port.out_blocked");
+                    }
                     if (v.Store && active && v.Connected)
                     {
                         // FG4-ECO-01：输入口按缓存里那一种（没有缓存时按废料）判断仓库满不满。

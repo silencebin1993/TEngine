@@ -377,11 +377,11 @@ namespace BinGames.Sim.WorldGen
 
         /// <summary>FG3-GEN-01（FGR-GEN-080、081）：在工作线程上调度一张地图底图（Burst）。</summary>
         public static WorldMapPaintJob ScheduleMapPaint(in MapPaintParams m, in WorldGenParams gen, WorldGenRect[] rects, WorldGenZone[] zones,
-            Unity.Mathematics.int3[] explored, Color32[] palette, int stamp)
+            Unity.Mathematics.int3[] explored, Color32[] palette, int stamp, Unity.Mathematics.int4[] overrides = null)
         {
             Hook();
             var job = new WorldMapPaintJob();
-            job.Start(in m, in gen, rects, zones, explored, palette, stamp);
+            job.Start(in m, in gen, rects, zones, explored, palette, stamp, overrides);
             Live.Add(job);
             return job;
         }

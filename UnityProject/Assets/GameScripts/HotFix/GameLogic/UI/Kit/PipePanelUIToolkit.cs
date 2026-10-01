@@ -223,6 +223,12 @@ namespace GameLogic.UI.Kit
             int net = _cell.Kind == PipePieceKind.Valve ? (_cell.ValveFrom >= 0 ? _cell.ValveFrom : _cell.ValveTo) : _cell.Network;
             bool hasNet = PipeNetworkService.Kernel.TryGetNetworkInfo(net, out PipeNetInfo n);
             _state.text = hasNet ? PipeNetworkService.DescribeState(n) : string.Empty;
+            if (_cell.Kind == PipePieceKind.Pump)
+            {
+                // FG4-ECO-02：流体泵的通用状态行（工作中 / 待命 / 不在流体源上）放在最前面。
+                string pump = PipeNetworkService.PumpStateLine(CampaignSession.Current, _cell);
+                _state.text = string.IsNullOrEmpty(_state.text) ? pump : pump + "\n" + _state.text;
+            }
             _sb.Clear();
             if (_cell.Kind != PipePieceKind.Pipe)
             {

@@ -139,6 +139,8 @@ namespace GameLogic.Campaign.Grid
         public int LoadedChunkCount => _chunks.Count;
         /// <summary>任何区块被生成、接入、回收或地形 / 污染被修改时 +1。</summary>
         public int Revision { get; private set; }
+        /// <summary>FG4-ECO-02（DEBT-FG3GEN01-08）：地形 / 污染被改写（玩家改地形、读档套用差异）的次数——战略地图 / 小地图底图据此重画被改过的格子。</summary>
+        public int TerrainEditRevision { get; private set; }
         public int ExploredRevision => _exploredRevision;
         public ExploredAreaRecord[] ExploredAreas => _explored;
         /// <summary>同步生成的区块数（玩法查询碰到还没生成的区块；正常游戏里被预生成边距覆盖，应当很少）。</summary>
@@ -258,6 +260,7 @@ namespace GameLogic.Campaign.Grid
         public void SetSavedDiffs(IEnumerable<ChunkDiffRecord> records)
         {
             _savedDiffs.Clear();
+            TerrainEditRevision++;
             if (records == null)
             {
                 return;
@@ -304,10 +307,12 @@ namespace GameLogic.Campaign.Grid
                 }
             }
             chunk.ContentRevision++;
+            TerrainEditRevision++;
         }
 
         private void Touch(Chunk chunk)
         {
+            TerrainEditRevision++;
             if (!chunk.Modified)
             {
                 chunk.BaseTerrain = (byte[])chunk.Terrain.Clone();
@@ -362,6 +367,53 @@ namespace GameLogic.Campaign.Grid
             {
                 Unkey(kv.Key, out int cx, out int cy);
                 into.Add(new ChunkDiffRecord { SurfaceId = SurfaceId, ChunkX = cx, ChunkY = cy, DiffPayload = kv.Value });
+            }
+        }
+
+        /// <summary>
+        /// FG4-ECO-02（DEBT-FG3GEN01-08）：玩家改过的格子（与生成基线不同的地形 / 污染）：x、y、现在的地形、现在的污染。
+        /// 战略地图 / 小地图底图按生成器采样画，再把这些格子覆盖上去，地图与近景一致。已加载的已修改区块逐格比对基线，没加载的按存档差异解码。
+        /// O(已修改区块 × 区块格数)，只在底图重画时调用（<see cref="TerrainEditRevision"/> 变了才需要重新收集）。
+        /// </summary>
+        public void CollectCellOverrides(List<Unity.Mathematics.int4> into)
+        {
+            into.Clear();
+            int size = ChunkSize;
+            foreach (Chunk c in _chunks.Values)
+            {
+                if (!c.Modified || c.BaseTerrain == null || c.BasePollution == null)
+                {
+                    continue;
+                }
+                for (int i = 0; i < c.Terrain.Length; i++)
+                {
+                    if (c.Terrain[i] != c.BaseTerrain[i] || c.Pollution[i] != c.BasePollution[i])
+                    {
+                        into.Add(new Unity.Mathematics.int4(c.ChunkX * size + i % size, c.ChunkY * size + i / size, c.Terrain[i], c.Pollution[i]));
+                    }
+                }
+            }
+            foreach (KeyValuePair<long, string> kv in _savedDiffs)
+            {
+                if (_chunks.ContainsKey(kv.Key))
+                {
+                    continue;
+                }
+                Unkey(kv.Key, out int cx, out int cy);
+                if (!WorldDiffCodec.TryDecode(kv.Value, size, _diffScratch, out _))
+                {
+                    continue;
+                }
+                foreach (ChunkCellDiff d in _diffScratch)
+                {
+                    if ((d.Mask & ChunkCellDiff.TerrainBit) == 0 && (d.Mask & ChunkCellDiff.PollutionBit) == 0)
+                    {
+                        continue;
+                    }
+                    // 只改了其中一项时另一项按生成器采样（底图任务里同一个纯函数），用 255 表示“沿用采样值”。
+                    into.Add(new Unity.Mathematics.int4(cx * size + d.Index % size, cy * size + d.Index / size,
+                        (d.Mask & ChunkCellDiff.TerrainBit) != 0 ? d.Terrain : 255, (d.Mask & ChunkCellDiff.PollutionBit) != 0 ? d.Pollution : 255));
+                }
             }
         }
 

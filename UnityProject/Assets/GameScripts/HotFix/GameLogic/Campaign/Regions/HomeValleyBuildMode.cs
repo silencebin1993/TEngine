@@ -860,7 +860,17 @@ namespace GameLogic.Campaign.Regions
         public bool OpenPortPanel(CampaignState state, string buildingId)
         {
             BuildingRecord b = state != null ? HomeGridService.FindBuilding(state, buildingId) : null;
-            if (b == null || GridContent.PortsOf(b.BuildingTypeId).Count == 0)
+            if (b == null)
+            {
+                return false;
+            }
+            // FG4-ECO-02：生产建筑点一下打开它的通用面板（状态与原因、配方、进度、缓存；面板里有“端口…”按钮去端口面板）。
+            if (Economy.ProducerCatalog.IsProducer(b.BuildingTypeId) && !HomeGridService.IsRelocationGhost(b))
+            {
+                ProductionPanelUIToolkit.Open(buildingId);
+                return true;
+            }
+            if (GridContent.PortsOf(b.BuildingTypeId).Count == 0)
             {
                 return false;
             }
@@ -1629,6 +1639,11 @@ namespace GameLogic.Campaign.Regions
                 return text + "\n" + (HomeGridService.IsUpgradeGhost(moving)
                     ? GameText.Format("plan.upgrade.pending", HomeGridService.DisplayName(b.BuildingTypeId), HomeGridService.DisplayName(moving.BuildingTypeId))
                     : GameText.Format("ui.build.pending_relocation", HomeGridService.DisplayName(b.BuildingTypeId)));
+            }
+            // FG4-ECO-02：生产建筑写它的状态与原因（不只靠颜色：状态前有形状符号）。
+            if (Economy.ProductionService.TryDescribe(state, b, out string prod))
+            {
+                text += "\n" + prod;
             }
             // FG3-LOG-06：和电网有关的建筑写它在哪个电网、有没有电、优先级与电网读数。
             if (b.ConstructionState == BuildingConstructionState.Operational || b.ConstructionState == BuildingConstructionState.Disabled)

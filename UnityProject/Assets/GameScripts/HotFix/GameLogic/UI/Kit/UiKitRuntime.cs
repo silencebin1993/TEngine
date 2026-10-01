@@ -45,6 +45,7 @@ namespace GameLogic.UI.Kit
             Create<LayoutLibraryPanelUIToolkit>("[LayoutLibraryHost]"); // FG3-LOG-07：布局库（30044，通知之上、施工队列之下；跨存档）。
             Create<OverlayHudUIToolkit>("[OverlayHudHost]"); // FG3-LOG-08：叠加层停靠条 / 选择器（FGU-12）/ 世界标签（HUD 4）。
             Create<DiagnosisPanelUIToolkit>("[DiagnosisPanelHost]"); // FG3-LOG-08：“为什么不工作”（30043，非模态停靠左侧）。
+            Create<ProductionPanelUIToolkit>("[ProductionPanelHost]"); // FG4-ECO-02：生产建筑通用面板（状态与原因、配方、进度、缓存，30042，通知之上、诊断面板之下）。
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             Create<UiKitGalleryUIToolkit>("[UiKitGalleryHost]");
 #endif
@@ -74,6 +75,7 @@ namespace GameLogic.UI.Kit
             PowerPanelUIToolkit.Close();
             LayoutLibraryPanelUIToolkit.Close();
             DiagnosisPanelUIToolkit.Close();
+            ProductionPanelUIToolkit.Close();
             OverlayHudUIToolkit.CloseSelector();
             StrategicMapUIToolkit.Close();
             NewGamePanelUIToolkit.Close();

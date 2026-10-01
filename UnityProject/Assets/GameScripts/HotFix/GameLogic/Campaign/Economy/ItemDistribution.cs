@@ -41,6 +41,8 @@ namespace GameLogic.Campaign.Economy
         private static readonly int[] PortCounts = new int[BeltSlots];
         private static readonly Dictionary<string, long> Ground = new Dictionary<string, long>(StringComparer.Ordinal);
         private static readonly Dictionary<string, long> Cargo = new Dictionary<string, long>(StringComparer.Ordinal);
+        /// <summary>FG4-ECO-02：生产建筑缓存里的物品（件 / 升）。</summary>
+        private static readonly Dictionary<string, long> Production = new Dictionary<string, long>(StringComparer.Ordinal);
         private static readonly Dictionary<int, long> PipeLiters = new Dictionary<int, long>();
         private static double _builtAt = double.NegativeInfinity;
         private static int _key;
@@ -99,6 +101,9 @@ namespace GameLogic.Campaign.Economy
             Ground.Clear();
             Cargo.Clear();
             PipeLiters.Clear();
+            Production.Clear();
+            // FG4-ECO-02：生产建筑自己的输入 / 输出缓存与流体口里的流体（在途，不算库存）。
+            ProductionService.CollectBuffers(state, Production);
             if (state != null && BeltNetworkService.IsRunning && ReferenceEquals(BeltNetworkService.BoundState, state))
             {
                 BeltNetworkService.Kernel.CountItemsByType(-1, BeltCounts);
@@ -203,6 +208,7 @@ namespace GameLogic.Campaign.Economy
                         }
                         break;
                 }
+                Add(v, "item.dist.production", Production.TryGetValue(item.Id, out long pb) ? pb : 0);
                 Add(v, "item.dist.ground", Ground.TryGetValue(item.Id, out long g) ? g : 0);
                 Add(v, "item.dist.cargo", Cargo.TryGetValue(item.Id, out long c) ? c : 0);
                 Views[item.Id] = v;

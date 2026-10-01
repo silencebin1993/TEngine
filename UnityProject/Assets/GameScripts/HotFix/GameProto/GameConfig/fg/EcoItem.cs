@@ -31,6 +31,7 @@ public sealed partial class EcoItem : Luban.BeanBase
         Color = _buf.ReadString();
         Shape = _buf.ReadString();
         SortOrder = _buf.ReadInt();
+        RecycleScrap = _buf.ReadInt();
     }
 
     public static EcoItem DeserializeEcoItem(ByteBuf _buf)
@@ -86,6 +87,10 @@ public sealed partial class EcoItem : Luban.BeanBase
     /// 排序(物资面板与图鉴)
     /// </summary>
     public readonly int SortOrder;
+    /// <summary>
+    /// 回收站分解一件得到的废料(FG4-ECO-02;只有固体&gt;0;少于做它花掉的废料当量,FG16 FGR-BAL-050)
+    /// </summary>
+    public readonly int RecycleScrap;
    
     public const int __ID__ = -1736529417;
     public override int GetTypeId() => __ID__;
@@ -109,6 +114,7 @@ public sealed partial class EcoItem : Luban.BeanBase
         + "color:" + Color + ","
         + "shape:" + Shape + ","
         + "sortOrder:" + SortOrder + ","
+        + "recycleScrap:" + RecycleScrap + ","
         + "}";
     }
 }

@@ -16,6 +16,9 @@ namespace BinGames.Sim.Logistics
         /// <summary>流体编号上限（0 = 没有流体；1～<see cref="MaxFluid"/> = fg.TbFluid 的 id）。</summary>
         public const int MaxFluid = 200;
 
+        /// <summary>FG4-ECO-02：消费者的流体写 0 = 收网络里的任何流体（废液池）。</summary>
+        public const int AnyFluid = 0;
+
         /// <summary>优先级 1～4（沿用电网的优先级：1 最先得到，4 最后，FGR-LOG-042）。</summary>
         public const int PriorityMin = 1;
         public const int PriorityMax = 4;
@@ -197,6 +200,8 @@ namespace BinGames.Sim.Logistics
         public int Pumps;
         public int Tanks;
         public int Consumers;
+        /// <summary>FG4-ECO-02：挂在这个网络上的外部供给者（建筑流体出口）数。</summary>
+        public int Producers;
         public int ValvesIn;
         public int ValvesOut;
         /// <summary>网络里最低的管线等级（没有管线 = -1）。</summary>
@@ -239,6 +244,24 @@ namespace BinGames.Sim.Logistics
         public long LastDemandMl;
         public long LastDeliveredMl;
         public long TotalDeliveredMl;
+        /// <summary>FG4-ECO-02：缓存里现有 / 缓存容量（毫升；容量 0 = 不带缓存，送达即消耗）。</summary>
+        public long BufferMl;
+        public long CapacityMl;
+    }
+
+    /// <summary>FG4-ECO-02：外部供给者（建筑流体出口）的读数。</summary>
+    public struct PipeProducerInfo
+    {
+        public int Id;
+        public int X;
+        public int Y;
+        public int Fluid;
+        /// <summary>所在网络（-1 = 口外那一格没有管线件）。</summary>
+        public int Network;
+        public long StockMl;
+        public long CapacityMl;
+        public long LastDeliveredMl;
+        public long TotalDeliveredMl;
     }
 
     /// <summary>
@@ -277,6 +300,19 @@ namespace BinGames.Sim.Logistics
         public byte[] ConsumerPriority = Array.Empty<byte>();
         public long[] ConsumerTotal = Array.Empty<long>();
         public int NextConsumerId = 1;
+        /// <summary>FG4-ECO-02：消费者缓存 / 容量（旧存档没有 = 全 0，与之前的“送达即消耗”一致）。</summary>
+        public long[] ConsumerBuffer = Array.Empty<long>();
+        public long[] ConsumerCapacity = Array.Empty<long>();
+        /// <summary>FG4-ECO-02：外部供给者（建筑流体出口；旧存档没有 = 空）。</summary>
+        public int[] ProducerId = Array.Empty<int>();
+        public int[] ProducerX = Array.Empty<int>();
+        public int[] ProducerY = Array.Empty<int>();
+        public byte[] ProducerFluid = Array.Empty<byte>();
+        public long[] ProducerStock = Array.Empty<long>();
+        public long[] ProducerCapacity = Array.Empty<long>();
+        public long[] ProducerTotal = Array.Empty<long>();
+        public int NextProducerId = 1;
+        public long TotalProducedOutMl;
     }
 
     /// <summary>渲染实例（与着色器 BinGames/PipeInstanced 的布局一致：A、B 两个 float4 = 32 字节）。

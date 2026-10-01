@@ -190,6 +190,8 @@ namespace GameLogic.Campaign.WorldSim
                 // FG0-ARCH-02：星球表面的传送带内核随家园载入（从存档恢复），与家园同一生命周期。
                 BeltNetworkService.Load(state);
                 PipeNetworkService.Load(state);
+                // FG4-ECO-02：生产建筑的运行时索引随家园载入（下一次对账按存档里的句柄核对管线内核）。
+                Economy.ProductionService.OnLoad(state);
                 RefreshActivity(state);
             }
             return Home;
@@ -240,6 +242,7 @@ namespace GameLogic.Campaign.WorldSim
             Home?.Exit();
             BeltNetworkService.Unload();
             PipeNetworkService.Unload();
+            Economy.ProductionService.OnUnload();
             HomeValleyPowerGrid.Unbind(); // FG3-LOG-06：电网内核随世界卸载（先把曲线与储能写回绑定的战役）。
             Combat.CombatSites.CloseAll(); // FG0-ARCH-03：保险——各地点 Exit 已各自释放内核，这里确保没有泄漏的原生容器。
             NavService.Unload(); // FG0-ARCH-06：寻路内核在战斗内核之后释放（战斗内核绑定着它的通行镜像）。
@@ -458,6 +461,12 @@ namespace GameLogic.Campaign.WorldSim
                 BeltNetworkService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                 // FG3-LOG-05：管线内核与传送带同一节拍（FGR-LOG-090）。
                 PipeNetworkService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
+                // FG4-ECO-02：采集与加工建筑（回收站、提取钻、精炼炉、精炼塔、调配站、废液池）：每 eco.prod.step_ticks 步推进一次、按 eco.prod.sync_seconds 对账流体口；
+                // 只看步序号，与观察无关，O(生产建筑数)。放在传送带 / 管线之后：本步端口收到的料、管线送到的流体本步就能用。
+                if (Home != null && Home.IsLoaded)
+                {
+                    Economy.ProductionService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
+                }
                 // FG4-ECO-01：物品库存采样（净速率），每 eco.flow.sample_seconds 游戏秒一次、只看步序号，与观察无关，O(物品种类)。
                 Economy.ItemFlowStats.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                 // FG3-LOG-06：电网按游戏秒积分储能（没有储能时不做事）、按 power.sample_seconds 记曲线——只看步序号，与观察无关，O(电网数)。

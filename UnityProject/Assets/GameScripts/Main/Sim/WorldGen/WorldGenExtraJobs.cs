@@ -377,7 +377,8 @@ namespace BinGames.Sim.WorldGen
     /// <summary>
     /// FG3-GEN-01：战略地图 / 小地图底图——每个像素按生成器采样一格（与区块生成同一个纯函数，与访问顺序无关），按地形表颜色上色、
     /// 污染染紫；未探索的像素是迷雾色（不泄露地形）。Burst 工作线程上画，主线程只上传。
-    /// 说明：底图画的是“生成出来的样子”；玩家改过的格子（拆废墟、净化）在近景里看，地图上的建筑 / 据点用图标表示。
+    /// FG4-ECO-02（DEBT-FG3GEN01-08）：玩家改过的格子（拆废墟、净化）由热更层收集成覆盖表（x, y, 地形, 污染；255 = 沿用采样值），
+    /// 主循环画完后逐个覆盖——只改采样点正好落在这一格上的像素，O(覆盖格 × 每格像素)，与地图大小无关；地图上的建筑 / 据点用图标表示。
     /// </summary>
     [BurstCompile(CompileSynchronously = true)]
     public struct JobPaintMap : IJob
@@ -391,7 +392,9 @@ namespace BinGames.Sim.WorldGen
         /// <summary>已探索的圆（x = 中心 X，y = 中心 Y，z = 半径）。</summary>
         [ReadOnly] public NativeArray<int3> Explored;
         [ReadOnly] public NativeArray<Color32> Palette;
-        [WriteOnly] public NativeArray<Color32> Pixels;
+        [ReadOnly] public NativeArray<int4> Overrides;
+        public int OverrideCount;
+        public NativeArray<Color32> Pixels;
 
         public void Execute()
         {
@@ -413,15 +416,75 @@ namespace BinGames.Sim.WorldGen
                         continue;
                     }
                     WorldGenMath.Sample(in Gen, x, y, Rects, RectCount, Zones, ZoneCount, out byte t, out byte p);
-                    Color32 c = Palette[t];
-                    if (p > 0)
-                    {
-                        int k = p >= m.BlockLevel ? 120 : 60;
-                        c = new Color32((byte)(c.r + ((150 - c.r) * k >> 8)), (byte)(c.g + ((40 - c.g) * k >> 8)), (byte)(c.b + ((150 - c.b) * k >> 8)), 255);
-                    }
-                    Pixels[idx] = c;
+                    Pixels[idx] = Shade(t, p, m.BlockLevel);
                 }
             }
+            for (int o = 0; o < OverrideCount; o++)
+            {
+                int4 ov = Overrides[o];
+                if (!IsExplored(ov.x, ov.y))
+                {
+                    continue;
+                }
+                PixelRange(ov.x, m.OriginXQ, m.CellsPerPixelQ, m.Width, out int px0, out int px1);
+                PixelRange(ov.y, m.OriginYQ, m.CellsPerPixelQ, m.Height, out int py0, out int py1);
+                for (int py = py0; py <= py1; py++)
+                {
+                    long yq = m.OriginYQ + (long)m.CellsPerPixelQ * py + m.CellsPerPixelQ / 2;
+                    if ((int)WorldGenMath.FloorDiv(yq + 32768, 65536) != ov.y)
+                    {
+                        continue;
+                    }
+                    for (int px = px0; px <= px1; px++)
+                    {
+                        long xq = m.OriginXQ + (long)m.CellsPerPixelQ * px + m.CellsPerPixelQ / 2;
+                        if ((int)WorldGenMath.FloorDiv(xq + 32768, 65536) != ov.x)
+                        {
+                            continue;
+                        }
+                        byte t, p;
+                        if (ov.z == 255 || ov.w == 255)
+                        {
+                            WorldGenMath.Sample(in Gen, ov.x, ov.y, Rects, RectCount, Zones, ZoneCount, out t, out p);
+                        }
+                        else
+                        {
+                            t = 0;
+                            p = 0;
+                        }
+                        if (ov.z != 255)
+                        {
+                            t = (byte)ov.z;
+                        }
+                        if (ov.w != 255)
+                        {
+                            p = (byte)ov.w;
+                        }
+                        Pixels[py * m.Width + px] = Shade(t, p, m.BlockLevel);
+                    }
+                }
+            }
+        }
+
+        private Color32 Shade(byte t, byte p, int blockLevel)
+        {
+            Color32 c = Palette[t];
+            if (p > 0)
+            {
+                int k = p >= blockLevel ? 120 : 60;
+                c = new Color32((byte)(c.r + ((150 - c.r) * k >> 8)), (byte)(c.g + ((40 - c.g) * k >> 8)), (byte)(c.b + ((150 - c.b) * k >> 8)), 255);
+            }
+            return c;
+        }
+
+        /// <summary>采样点可能落在格 <paramref name="cell"/> 上的像素范围（多留一格余量，调用方逐个核对）。</summary>
+        private static void PixelRange(int cell, long originQ, int cppQ, int size, out int lo, out int hi)
+        {
+            long target = (long)cell * 65536 - 32768 - originQ - cppQ / 2;
+            long first = WorldGenMath.FloorDiv(target, cppQ) - 1;
+            long span = 65536 / Math.Max(1, cppQ) + 2;
+            lo = (int)Math.Max(0, first);
+            hi = (int)Math.Min(size - 1, first + span + 1);
         }
 
         private bool IsExplored(int x, int y)
@@ -556,9 +619,10 @@ namespace BinGames.Sim.WorldGen
         private NativeArray<int3> _explored;
         private NativeArray<Color32> _palette;
         private NativeArray<Color32> _pixels;
+        private NativeArray<int4> _overrides;
 
         internal void Start(in MapPaintParams m, in WorldGenParams gen, WorldGenRect[] rects, WorldGenZone[] zones, int3[] explored,
-            Color32[] palette, int stamp)
+            Color32[] palette, int stamp, int4[] overrides = null)
         {
             Stamp = stamp;
             Map = m;
@@ -568,6 +632,7 @@ namespace BinGames.Sim.WorldGen
             _explored = WorldGenKernel.ToNative(explored, Allocator.Persistent);
             _palette = new NativeArray<Color32>(palette, Allocator.Persistent);
             _pixels = new NativeArray<Color32>(m.Width * m.Height, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            _overrides = WorldGenKernel.ToNative(overrides, Allocator.Persistent);
             var mm = m;
             mm.ExploredCount = explored?.Length ?? 0;
             Map = mm;
@@ -581,6 +646,8 @@ namespace BinGames.Sim.WorldGen
                 ZoneCount = zones?.Length ?? 0,
                 Explored = _explored,
                 Palette = _palette,
+                Overrides = _overrides,
+                OverrideCount = overrides?.Length ?? 0,
                 Pixels = _pixels,
             }.Schedule();
         }
@@ -618,6 +685,7 @@ namespace BinGames.Sim.WorldGen
             if (_explored.IsCreated) _explored.Dispose();
             if (_palette.IsCreated) _palette.Dispose();
             if (_pixels.IsCreated) _pixels.Dispose();
+            if (_overrides.IsCreated) _overrides.Dispose();
             Released = true;
             WorldGenKernel.Untrack(this);
         }

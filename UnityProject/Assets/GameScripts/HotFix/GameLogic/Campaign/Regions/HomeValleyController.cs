@@ -1799,9 +1799,31 @@ namespace GameLogic.Campaign.Regions
                 case BuildingPowerState.OutputBlocked:
                     return ContentIcons.StateBlocked;
                 case BuildingPowerState.Powered:
-                    return null;
+                    // FG4-ECO-02（FGR-ECO-010 不只靠颜色）：有电的生产建筑按生产状态挂形状标记（输出堵塞八边形横杠 / 缺料圆角方框 / 待机六边形暂停）。
+                    return ProductionIconFor(building);
                 default:
                     return consumer ? ContentIcons.StateUnpowered : null;
+            }
+        }
+
+        private static string ProductionIconFor(BuildingRecord building)
+        {
+            if (!Economy.ProductionService.TryGet(building.BuildingId, out Economy.ProductionService.Producer p))
+            {
+                return null;
+            }
+            switch (p.State)
+            {
+                case Economy.ProdState.OutputBlocked:
+                    return ContentIcons.StateBlocked;
+                case Economy.ProdState.MissingInput:
+                case Economy.ProdState.MissingFluid:
+                case Economy.ProdState.NoResource:
+                    return ContentIcons.StateStarved;
+                case Economy.ProdState.Idle:
+                    return ContentIcons.StateIdle;
+                default:
+                    return null;
             }
         }
 

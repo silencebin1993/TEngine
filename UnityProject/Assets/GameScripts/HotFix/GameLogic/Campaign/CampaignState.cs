@@ -344,6 +344,11 @@ namespace GameLogic.Campaign
                 .OrderBy(r => r.ItemId, StringComparer.Ordinal).ToArray();
             Economy.Vault = Economy.Vault.Where(r => r != null && r.Amount > 0 && !string.IsNullOrEmpty(r.ItemId))
                 .OrderBy(r => r.ItemId, StringComparer.Ordinal).ToArray();
+            // FG4-ECO-02：生产建筑按建筑 ID、拆到一半的废墟格按坐标排序（同一状态同一字节）。
+            Economy.Producers = Economy.Producers.Where(r => r != null && !string.IsNullOrEmpty(r.BuildingId))
+                .OrderBy(r => r.BuildingId, StringComparer.Ordinal).ToArray();
+            Economy.RuinCells = Economy.RuinCells.Where(r => r != null)
+                .OrderBy(r => r.X).ThenBy(r => r.Y).ToArray();
             World.ChunkDiffs = World.ChunkDiffs
                 .OrderBy(r => r.SurfaceId, StringComparer.Ordinal).ThenBy(r => r.ChunkX).ThenBy(r => r.ChunkY).ToArray();
             Notifications.Entries = Notifications.Entries

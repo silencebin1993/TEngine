@@ -13,11 +13,11 @@ using Luban;
 namespace GameConfig.fg
 {
 /// <summary>
-/// 建筑端口
+/// 建筑流体端口
 /// </summary>
-public sealed partial class BuildingPort : Luban.BeanBase
+public sealed partial class BuildingFluidPort : Luban.BeanBase
 {
-    public BuildingPort(ByteBuf _buf) 
+    public BuildingFluidPort(ByteBuf _buf) 
     {
         Id = _buf.ReadString();
         TypeId = _buf.ReadString();
@@ -25,12 +25,12 @@ public sealed partial class BuildingPort : Luban.BeanBase
         LocalY = _buf.ReadInt();
         Dir = _buf.ReadString();
         Kind = _buf.ReadString();
-        Role = _buf.ReadString();
+        Fluid = _buf.ReadString();
     }
 
-    public static BuildingPort DeserializeBuildingPort(ByteBuf _buf)
+    public static BuildingFluidPort DeserializeBuildingFluidPort(ByteBuf _buf)
     {
-        return new fg.BuildingPort(_buf);
+        return new fg.BuildingFluidPort(_buf);
     }
 
     /// <summary>
@@ -54,15 +54,15 @@ public sealed partial class BuildingPort : Luban.BeanBase
     /// </summary>
     public readonly string Dir;
     /// <summary>
-    /// in=输入,out=输出
+    /// in=流体输入,out=流体输出
     /// </summary>
     public readonly string Kind;
     /// <summary>
-    /// 物流角色:store=家园存量的输入/输出口,none=还没有收发物品的配方(FG3-LOG-03),prod=生产建筑自己的输入/输出缓存(FG4-ECO-02)
+    /// 物品表里的流体ID;any=收任何流体(只用于输入);source=脚下流体源的流体(只用于流体泵输出)
     /// </summary>
-    public readonly string Role;
+    public readonly string Fluid;
    
-    public const int __ID__ = 1483643266;
+    public const int __ID__ = 1055115530;
     public override int GetTypeId() => __ID__;
 
     public  void ResolveRef(Tables tables)
@@ -78,7 +78,7 @@ public sealed partial class BuildingPort : Luban.BeanBase
         + "localY:" + LocalY + ","
         + "dir:" + Dir + ","
         + "kind:" + Kind + ","
-        + "role:" + Role + ","
+        + "fluid:" + Fluid + ","
         + "}";
     }
 }

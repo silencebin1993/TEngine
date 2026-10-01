@@ -506,6 +506,14 @@ namespace GameLogic.UI.Kit
         private readonly Color32[] _palette = new Color32[256];
         private int _paletteRevision = -1;
         private int _baseSize;
+        // FG4-ECO-02（DEBT-FG3GEN01-08）：玩家改过的格子（拆废墟变空地……）的覆盖表，地形改写版本变了才重新收集。
+        private readonly List<int4> _overrideScratch = new List<int4>(64);
+        private int4[] _overrides = Array.Empty<int4>();
+        private int _overrideRevision = int.MinValue;
+        private HomeGridMap _overrideMap;
+
+        /// <summary>自检：最近一次重画用了多少个覆盖格。</summary>
+        public int LastOverrideCount { get; private set; }
 
         public Texture2D Texture => _texture;
         public int PaintCount { get; private set; }
@@ -548,7 +556,7 @@ namespace GameLogic.UI.Kit
                 return;
             }
             HomeGridMap map = HomeGridService.MapFor(state);
-            long stamp = Stamp(view, map.ExploredRevision, ctx.Seed);
+            long stamp = Stamp(view, map.ExploredRevision, ctx.Seed) ^ ((long)map.TerrainEditRevision * 1000117L);
             if (_job != null || stamp == _paintedStamp || (!force && Time.realtimeSinceStartup - _lastSchedule < GridContent.Tuning("map.repaint_min_seconds")))
             {
                 return;
@@ -580,7 +588,15 @@ namespace GameLogic.UI.Kit
             {
                 Array.Resize(ref explored, n);
             }
-            _job = WorldGenKernel.ScheduleMapPaint(in m2, in ctx.Source.Params, ctx.Source.Rects, ctx.Source.Zones, explored, _palette, 0);
+            if (!ReferenceEquals(map, _overrideMap) || map.TerrainEditRevision != _overrideRevision)
+            {
+                map.CollectCellOverrides(_overrideScratch);
+                _overrides = _overrideScratch.ToArray();
+                _overrideRevision = map.TerrainEditRevision;
+                _overrideMap = map;
+            }
+            LastOverrideCount = _overrides.Length;
+            _job = WorldGenKernel.ScheduleMapPaint(in m2, in ctx.Source.Params, ctx.Source.Rects, ctx.Source.Zones, explored, _palette, 0, _overrides);
             _job.ScheduledAtMs = Time.realtimeSinceStartupAsDouble * 1000.0;
             WorldGenKernel.Kick();
             _pendingStamp = stamp;

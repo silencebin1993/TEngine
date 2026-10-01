@@ -372,6 +372,17 @@ namespace GameLogic.Campaign.Logistics
             p.ConsumerPriorities = ToInts(s.ConsumerPriority);
             p.ConsumerTotals = s.ConsumerTotal;
             p.NextConsumerId = s.NextConsumerId;
+            p.ConsumerBuffers = s.ConsumerBuffer;
+            p.ConsumerCapacities = s.ConsumerCapacity;
+            p.ProducerIds = s.ProducerId;
+            p.ProducerXs = s.ProducerX;
+            p.ProducerYs = s.ProducerY;
+            p.ProducerFluids = ToInts(s.ProducerFluid);
+            p.ProducerStocks = s.ProducerStock;
+            p.ProducerCapacities = s.ProducerCapacity;
+            p.ProducerTotals = s.ProducerTotal;
+            p.NextProducerId = s.NextProducerId;
+            p.TotalProducedOutMl = s.TotalProducedOutMl;
         }
 
         public static PipeSnapshot ToSnapshot(PipeFluidState p) => new PipeSnapshot
@@ -404,6 +415,17 @@ namespace GameLogic.Campaign.Logistics
             ConsumerPriority = ToBytes(p.ConsumerPriorities),
             ConsumerTotal = p.ConsumerTotals ?? Array.Empty<long>(),
             NextConsumerId = p.NextConsumerId,
+            ConsumerBuffer = p.ConsumerBuffers ?? Array.Empty<long>(),
+            ConsumerCapacity = p.ConsumerCapacities ?? Array.Empty<long>(),
+            ProducerId = p.ProducerIds ?? Array.Empty<int>(),
+            ProducerX = p.ProducerXs ?? Array.Empty<int>(),
+            ProducerY = p.ProducerYs ?? Array.Empty<int>(),
+            ProducerFluid = ToBytes(p.ProducerFluids),
+            ProducerStock = p.ProducerStocks ?? Array.Empty<long>(),
+            ProducerCapacity = p.ProducerCapacities ?? Array.Empty<long>(),
+            ProducerTotal = p.ProducerTotals ?? Array.Empty<long>(),
+            NextProducerId = p.NextProducerId,
+            TotalProducedOutMl = p.TotalProducedOutMl,
         };
 
         private static int[] ToInts(byte[] b)
@@ -760,6 +782,25 @@ namespace GameLogic.Campaign.Logistics
             {
                 sb.Append('\n').Append(GameText.Format("logistics.pipe.hover.idle", idle.ToString("0.##", CultureInfo.InvariantCulture)));
             }
+        }
+
+        /// <summary>
+        /// FG4-ECO-02（流体泵沿用一格泵，FG04 建筑表“流体泵”；FGR-ECO-010 状态不只靠颜色）：泵的通用状态行——
+        /// 工作中（正在抽 X）/ 待命（下游没有需要）/ 不在流体源上（脚下的地形被改过，泵抽不到东西）。管线面板与悬停共用。
+        /// </summary>
+        public static string PumpStateLine(CampaignState state, in PipeCellInfo c)
+        {
+            int source = state != null ? SourceFluidAt(state, new GridCell(c.X, c.Y)) : c.Fluid;
+            if (source <= 0 || source != c.Fluid)
+            {
+                return GameText.Format("prod.hover.line", GameText.Get("prod.state.no_resource"), GameText.Get("prod.reason.pump_no_source"));
+            }
+            if (c.PumpedMl > 0)
+            {
+                return GameText.Format("prod.hover.line", GameText.Get("prod.state.working"),
+                    GameText.Format("prod.reason.pump_working", FluidName(c.Fluid), IsRunning ? _kernel.Config.PumpLitersPerMinute : 0));
+            }
+            return GameText.Format("prod.hover.line", GameText.Get("prod.state.idle"), GameText.Format("prod.reason.pump_idle", FluidName(c.Fluid)));
         }
 
         /// <summary>一件自己的读数行（泵 / 储罐 / 阀门；管线没有）。</summary>

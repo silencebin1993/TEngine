@@ -58,6 +58,16 @@ namespace GameLogic.Campaign.Logistics
         PipeNoSource,
         PipeLimited,
         PipeShortage,
+        /// <summary>FG4-ECO-02：生产建筑待机（没选配方）/ 缺料 / 缺流体 / 输出堵塞 / 不在资源点上。</summary>
+        ProdIdle,
+        ProdStarved,
+        ProdFluid,
+        ProdBlocked,
+        ProdNoResource,
+        /// <summary>FG4-ECO-02（DEBT-FG3LOG08-03 跨生产建筑的缺料链）：顺着输入传送带找到的上游供货建筑，以及它为什么没在供货。</summary>
+        ProdUpstream,
+        /// <summary>输入传送带上没有能供应这种物品的建筑 / 仓库输出口。</summary>
+        ProdNoSupplier,
     }
 
     /// <summary>原因链里的一步：文字、能不能点、点了镜头去哪。</summary>
@@ -513,6 +523,7 @@ namespace GameLogic.Campaign.Logistics
                 }
                 AddPorts(p, b, report);
                 AddQueues(state, b, report);
+                AddProduction(p, b, report);
             }
             if (report.Chains.Count == 0)
             {
@@ -664,6 +675,167 @@ namespace GameLogic.Campaign.Logistics
                         Economy.HomeInventory.Capacity(state, kind)), b.Position, b.BuildingId);
                     report.Chains.Add(c);
                 }
+            }
+        }
+
+        /// <summary>
+        /// FG4-ECO-02：生产建筑（缺电由电力链负责，受损 / 关停由建筑链负责）：待机 / 不在资源点上 / 缺料 / 缺流体 / 输出堵塞。
+        /// 缺固体时顺着输入口的来料传送带找上游供货建筑（同一个传送带网络上、产出这种物品的建筑输出口或仓库输出口），再接上那座建筑自己的状态与原因——
+        /// 例如“精炼炉缺金属矿 → 上游提取钻没电”（DEBT-FG3LOG08-03，接口见 ADR-LOG-008“对后续 Story 的约定”）。输出堵塞时顺着输出传送带追到堵点。
+        /// O(端口数)（找上游只在缺料时），分帧诊断按建筑切片调用。
+        /// </summary>
+        private static void AddProduction(Pass p, BuildingRecord b, DiagReport report)
+        {
+            CampaignState state = p.State;
+            if (!Economy.ProductionService.TryGet(state, b.BuildingId, out Economy.ProductionService.Producer pr))
+            {
+                return;
+            }
+            string reason = Economy.ProductionService.ReasonText(state, pr).Replace("\n", " · ");
+            string head = GameText.Format("diag.step.prod_state", report.Name, Economy.ProductionService.StateText(pr), reason);
+            switch (pr.State)
+            {
+                case Economy.ProdState.Idle:
+                {
+                    DiagChain c = NewChain(DiagCategory.Input);
+                    Step(c, DiagCode.ProdIdle, head, b.Position, b.BuildingId);
+                    report.Chains.Add(c);
+                    break;
+                }
+                case Economy.ProdState.NoResource:
+                {
+                    DiagChain c = NewChain(DiagCategory.Structure);
+                    Step(c, DiagCode.ProdNoResource, head, b.Position, b.BuildingId);
+                    report.Chains.Add(c);
+                    break;
+                }
+                case Economy.ProdState.MissingFluid:
+                {
+                    DiagChain c = NewChain(DiagCategory.Input);
+                    Step(c, DiagCode.ProdFluid, head, b.Position, b.BuildingId);
+                    report.Chains.Add(c);
+                    break;
+                }
+                case Economy.ProdState.MissingInput:
+                {
+                    DiagChain c = NewChain(DiagCategory.Input);
+                    Step(c, DiagCode.ProdStarved, head, b.Position, b.BuildingId);
+                    AppendUpstream(p, pr, c);
+                    report.Chains.Add(c);
+                    break;
+                }
+                case Economy.ProdState.OutputBlocked:
+                {
+                    DiagChain c = NewChain(DiagCategory.Output);
+                    Step(c, DiagCode.ProdBlocked, head, b.Position, b.BuildingId);
+                    BeltKernel k = BeltNetworkService.IsRunning && ReferenceEquals(BeltNetworkService.BoundState, state) ? BeltNetworkService.Kernel : null;
+                    BeltPortService.Binding outBind = pr.ReasonPort < 0 ? Economy.ProductionService.FindPort(pr, true) : null;
+                    if (k != null && outBind != null && outBind.PortId >= 0 && k.TryGetPortInfo(outBind.PortId, out BeltPortInfo info) && info.Connected
+                        && k.TryGetCellInfo(outBind.BeltCell.X, outBind.BeltCell.Y, out BeltCellInfo headCell) && headCell.Block != BeltBlock.None && headCell.Count > 0)
+                    {
+                        AppendBeltTrace(p, k, c, outBind.BeltCell);
+                    }
+                    report.Chains.Add(c);
+                    break;
+                }
+            }
+        }
+
+        /// <summary>缺固体：输入传送带 → 同一网络上产出这种物品的建筑输出口 / 仓库输出口 → 那座建筑为什么没在供货（根源）。</summary>
+        private static void AppendUpstream(Pass p, Economy.ProductionService.Producer pr, DiagChain c)
+        {
+            CampaignState state = p.State;
+            Economy.ItemDef want = pr.ReasonItem;
+            BeltPortService.Binding inBind = Economy.ProductionService.FindPort(pr, false);
+            BeltKernel k = BeltNetworkService.IsRunning && ReferenceEquals(BeltNetworkService.BoundState, state) ? BeltNetworkService.Kernel : null;
+            if (want == null || inBind == null || k == null || inBind.PortId < 0 || !k.TryGetPortInfo(inBind.PortId, out BeltPortInfo info) || !info.Connected)
+            {
+                return; // 没接传送带：原因（第一步）已经写明要在哪里铺。
+            }
+            int net = k.NetworkOf(inBind.BeltCell.X, inBind.BeltCell.Y);
+            // 生产建筑按它输出口外那一格找（关停 / 受损 / 没电的建筑端口已经撤掉，不能只看端口绑定）。
+            foreach (Economy.ProductionService.Producer up in Economy.ProductionService.All)
+            {
+                if (up.Id == pr.Id || !Produces(up, want))
+                {
+                    continue;
+                }
+                HomeGridService.PortsOf(up.Building, PortPlacements);
+                bool onNet = false;
+                foreach (PortPlacement pp in PortPlacements)
+                {
+                    if (pp.IsOutput)
+                    {
+                        Vector2Int v = GridMath.DirVector(pp.Dir);
+                        onNet |= k.NetworkOf(pp.Cell.X + v.x, pp.Cell.Y + v.y) == net;
+                    }
+                }
+                if (onNet)
+                {
+                    BuildingRecord ub = up.Building;
+                    string upName = HomeGridService.DisplayName(ub.BuildingTypeId);
+                    if (up.State == Economy.ProdState.Working)
+                    {
+                        Step(c, DiagCode.ProdUpstream, GameText.Format("diag.step.prod_upstream_working", upName, ub.GridX, ub.GridY, want.Name), ub.Position, ub.BuildingId);
+                    }
+                    else
+                    {
+                        Step(c, DiagCode.ProdUpstream, GameText.Format("diag.step.prod_upstream", upName, ub.GridX, ub.GridY, Economy.ProductionService.StateText(up),
+                            Economy.ProductionService.ReasonText(state, up).Replace("\n", " · ")), ub.Position, ub.BuildingId);
+                    }
+                    return;
+                }
+            }
+            BeltPortService.Binding store = null;
+            foreach (BeltPortService.Binding s in BeltPortService.All)
+            {
+                if (s.IsOutput && s.Store && s.PortId >= 0 && s.Record != null && (s.Record.Filter == BeltPortService.FilterAll || s.Record.Filter == want.BeltId)
+                    && k.NetworkOf(s.BeltCell.X, s.BeltCell.Y) == net)
+                {
+                    store = s;
+                    break;
+                }
+            }
+            if (store != null)
+            {
+                BuildingRecord sb = HomeGridService.FindBuilding(state, store.BuildingId);
+                if (Economy.HomeInventory.Stock(state, want) <= 0)
+                {
+                    Step(c, DiagCode.StoreEmpty, GameText.Format("diag.step.prod_store_empty", BeltPortService.BuildingName(store.BuildingId), want.Name),
+                        sb?.Position ?? CellPos(store.PortCell), store.BuildingId);
+                    return;
+                }
+                Step(c, DiagCode.ProdUpstream, GameText.Format("diag.step.prod_upstream_working", BeltPortService.BuildingName(store.BuildingId),
+                    sb?.GridX ?? store.PortCell.X, sb?.GridY ?? store.PortCell.Y, want.Name), sb?.Position ?? CellPos(store.PortCell), store.BuildingId);
+                return;
+            }
+            Step(c, DiagCode.ProdNoSupplier, GameText.Format("diag.step.prod_no_supplier", want.Name), CellPos(inBind.BeltCell), null);
+        }
+
+        private static readonly List<PortPlacement> PortPlacements = new List<PortPlacement>(4);
+
+        private static bool Produces(Economy.ProductionService.Producer up, Economy.ItemDef want)
+        {
+            switch (up.Def.Mode)
+            {
+                case Economy.ProducerMode.Drill:
+                    return ReferenceEquals(up.VeinOre, want);
+                case Economy.ProducerMode.Recycler:
+                    return want.Id == Economy.ItemCatalog.ScrapId;
+                case Economy.ProducerMode.Recipe:
+                    if (up.Recipe != null)
+                    {
+                        foreach (Economy.RecipeLine l in up.Recipe.Lines)
+                        {
+                            if (l.Role != Economy.RecipeRole.In && ReferenceEquals(l.Item, want))
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                default:
+                    return false;
             }
         }
 

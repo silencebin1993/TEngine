@@ -69,7 +69,24 @@ namespace BinGames.Sim.Logistics
         private long[] _cDemand = new long[8];
         private long[] _cGot = new long[8];
         private long[] _cTotal = new long[8];
+        // FG4-ECO-02：带缓存的消费者（建筑的流体输入口）——送达的流体进缓存，缓存满了就不再要；容量 0 = 不带缓存（送达即消耗，例如废液池销毁）。
+        private long[] _cBuf = new long[8];
+        private long[] _cCap = new long[8];
         private int _nextConsumerId = 1;
+
+        // ── 外部供给者（FG4-ECO-02：建筑的流体输出口）──
+        // 挂在口外那一格的管线件上；建筑把产出的流体放进它的存量（有上限），网络按需取用（取用顺序：上游阀门 → 泵 → 供给者 → 储罐）。
+        private int _rn;
+        private int[] _rId = new int[8];
+        private int[] _rX = new int[8];
+        private int[] _rY = new int[8];
+        private byte[] _rFluid = new byte[8];
+        private long[] _rStock = new long[8];
+        private long[] _rCap = new long[8];
+        private int[] _rNet = new int[8];
+        private long[] _rOut = new long[8];
+        private long[] _rTotal = new long[8];
+        private int _nextProducerId = 1;
 
         // ── 网络（重算时写）──
         private int _netCount;
@@ -112,6 +129,7 @@ namespace BinGames.Sim.Logistics
         private readonly Csr _valveInOf = new Csr();
         private readonly Csr _valveOutOf = new Csr();
         private readonly Csr _consOf = new Csr();
+        private readonly Csr _prodOf = new Csr();
         private int[] _valves = new int[8];
         private int _valveCount;
         private int[] _tanks = new int[8];
@@ -155,6 +173,10 @@ namespace BinGames.Sim.Logistics
         /// <summary>网络重算的次数（“拓扑变化时才重算”的证据：稳态步进不增加）。</summary>
         public int RebuildCount { get; private set; }
         public int ConsumerCount => _cn;
+        /// <summary>FG4-ECO-02：外部供给者（建筑流体输出口）的个数。</summary>
+        public int ProducerCount => _rn;
+        /// <summary>FG4-ECO-02：外部供给者累计送出的流体（毫升）。</summary>
+        public long TotalProducedOutMl { get; private set; }
         public long TotalPumpedMl { get; private set; }
         public long TotalDeliveredMl { get; private set; }
         public long TotalFlushedMl { get; private set; }
@@ -653,12 +675,14 @@ namespace BinGames.Sim.Logistics
         /// <summary>在 (x, y)（一格管线件）挂一个消费者：要 <paramref name="fluid"/>，速率 <paramref name="litersPerMinute"/>，优先级 1～4。返回编号（失败 -1）。</summary>
         public int AddConsumer(int x, int y, int fluid, int litersPerMinute, int priority)
         {
-            if (fluid < 1 || fluid > PipeConst.MaxFluid || litersPerMinute < 0 || priority < PipeConst.PriorityMin || priority > PipeConst.PriorityMax)
+            // FG4-ECO-02：fluid = PipeConst.AnyFluid（0）= 收网络里的任何流体（废液池）。
+            if (fluid < PipeConst.AnyFluid || fluid > PipeConst.MaxFluid || litersPerMinute < 0 || priority < PipeConst.PriorityMin || priority > PipeConst.PriorityMax)
             {
                 return -1;
             }
             EnsureConsumers(_cn + 1);
             int k = _cn++;
+            _cIndexDirty = true;
             _cId[k] = _nextConsumerId++;
             _cX[k] = x;
             _cY[k] = y;
@@ -669,20 +693,205 @@ namespace BinGames.Sim.Logistics
             _cDemand[k] = 0;
             _cGot[k] = 0;
             _cTotal[k] = 0;
+            _cBuf[k] = 0;
+            _cCap[k] = 0;
             MarkDirty();
             return _cId[k];
         }
 
+        /// <summary>FG4-ECO-02：给消费者一个缓存（建筑的流体输入缓存）：送达的流体进缓存，每步的需求 = min(速率配额, 容量 − 缓存)，缓存满了就不再要。
+        /// 容量 0 = 不带缓存（送达即消耗）。<paramref name="initialMl"/> 夹到容量。只用于固定流体的消费者。</summary>
+        public bool SetConsumerBuffer(int id, long capacityMl, long initialMl)
+        {
+            int k = ConsumerIndex(id);
+            if (k < 0 || capacityMl < 0 || (capacityMl > 0 && _cFluid[k] == PipeConst.AnyFluid))
+            {
+                return false;
+            }
+            _cCap[k] = capacityMl;
+            _cBuf[k] = capacityMl > 0 ? Math.Max(0, Math.Min(capacityMl, initialMl)) : 0;
+            return true;
+        }
+
+        /// <summary>FG4-ECO-02：从消费者缓存里取走最多 <paramref name="ml"/> 毫升（建筑开工时扣料），返回实际取走的量。</summary>
+        public long TakeConsumerBuffer(int id, long ml)
+        {
+            int k = ConsumerIndex(id);
+            if (k < 0 || ml <= 0)
+            {
+                return 0;
+            }
+            long take = Math.Min(ml, _cBuf[k]);
+            _cBuf[k] -= take;
+            return take;
+        }
+
+        /// <summary>FG4-ECO-02：消费者缓存里现有多少（毫升；不存在 = 0）。O(消费者)。</summary>
+        public long ConsumerBuffer(int id)
+        {
+            int k = ConsumerIndex(id);
+            return k < 0 ? 0 : _cBuf[k];
+        }
+
+        /// <summary>删掉一个消费者，返回它缓存里还剩的量（调用方决定留在建筑里还是丢弃）。</summary>
+        public bool RemoveConsumer(int id, out long bufferedMl)
+        {
+            int k = ConsumerIndex(id);
+            bufferedMl = k >= 0 ? _cBuf[k] : 0;
+            return RemoveConsumer(id);
+        }
+
+        // ── 外部供给者（FG4-ECO-02：建筑的流体输出口）────────────────────────────────
+
+        /// <summary>在 (x, y)（口外那一格的管线件）挂一个供给者：只出 <paramref name="fluid"/>，存量上限 <paramref name="capacityMl"/>。返回编号（失败 -1）。</summary>
+        public int AddProducer(int x, int y, int fluid, long capacityMl, long initialMl)
+        {
+            if (fluid < 1 || fluid > PipeConst.MaxFluid || capacityMl <= 0)
+            {
+                return -1;
+            }
+            EnsureProducers(_rn + 1);
+            int k = _rn++;
+            _rIndexDirty = true;
+            _rId[k] = _nextProducerId++;
+            _rX[k] = x;
+            _rY[k] = y;
+            _rFluid[k] = (byte)fluid;
+            _rCap[k] = capacityMl;
+            _rStock[k] = Math.Max(0, Math.Min(capacityMl, initialMl));
+            _rNet[k] = -1;
+            _rOut[k] = 0;
+            _rTotal[k] = 0;
+            MarkDirty();
+            return _rId[k];
+        }
+
+        private int ProducerIndex(int id)
+        {
+            if (_rIndexDirty)
+            {
+                _rIndex.Clear();
+                for (int k = 0; k < _rn; k++)
+                {
+                    _rIndex[_rId[k]] = k;
+                }
+                _rIndexDirty = false;
+            }
+            return _rIndex.TryGetValue(id, out int i) ? i : -1;
+        }
+
+        /// <summary>删掉一个供给者，返回它还没送出的存量。</summary>
+        public bool RemoveProducer(int id, out long stockMl)
+        {
+            int k = ProducerIndex(id);
+            stockMl = k >= 0 ? _rStock[k] : 0;
+            if (k < 0)
+            {
+                return false;
+            }
+            int tail = _rn - k - 1;
+            if (tail > 0)
+            {
+                Array.Copy(_rId, k + 1, _rId, k, tail);
+                Array.Copy(_rX, k + 1, _rX, k, tail);
+                Array.Copy(_rY, k + 1, _rY, k, tail);
+                Array.Copy(_rFluid, k + 1, _rFluid, k, tail);
+                Array.Copy(_rStock, k + 1, _rStock, k, tail);
+                Array.Copy(_rCap, k + 1, _rCap, k, tail);
+                Array.Copy(_rOut, k + 1, _rOut, k, tail);
+                Array.Copy(_rTotal, k + 1, _rTotal, k, tail);
+            }
+            _rn--;
+            _rIndexDirty = true;
+            MarkDirty();
+            return true;
+        }
+
+        /// <summary>把建筑产出的流体放进供给者存量，最多放到上限，返回实际放进去的量。</summary>
+        public long AddProducerStock(int id, long ml)
+        {
+            int k = ProducerIndex(id);
+            if (k < 0 || ml <= 0)
+            {
+                return 0;
+            }
+            long put = Math.Min(ml, _rCap[k] - _rStock[k]);
+            if (put <= 0)
+            {
+                return 0;
+            }
+            _rStock[k] += put;
+            return put;
+        }
+
+        /// <summary>供给者还能放多少（毫升；不存在 = 0）。</summary>
+        public long ProducerSpace(int id)
+        {
+            int k = ProducerIndex(id);
+            return k < 0 ? 0 : Math.Max(0, _rCap[k] - _rStock[k]);
+        }
+
+        public bool TryGetProducer(int id, out PipeProducerInfo info)
+        {
+            Rebuild();
+            int k = ProducerIndex(id);
+            info = default;
+            if (k < 0)
+            {
+                return false;
+            }
+            info = new PipeProducerInfo
+            {
+                Id = _rId[k],
+                X = _rX[k],
+                Y = _rY[k],
+                Fluid = _rFluid[k],
+                Network = _rNet[k],
+                StockMl = _rStock[k],
+                CapacityMl = _rCap[k],
+                LastDeliveredMl = _rOut[k],
+                TotalDeliveredMl = _rTotal[k],
+            };
+            return true;
+        }
+
+        private void EnsureProducers(int need)
+        {
+            if (need <= _rId.Length)
+            {
+                return;
+            }
+            int cap = Math.Max(need, _rId.Length * 2);
+            Array.Resize(ref _rId, cap);
+            Array.Resize(ref _rX, cap);
+            Array.Resize(ref _rY, cap);
+            Array.Resize(ref _rFluid, cap);
+            Array.Resize(ref _rStock, cap);
+            Array.Resize(ref _rCap, cap);
+            Array.Resize(ref _rNet, cap);
+            Array.Resize(ref _rOut, cap);
+            Array.Resize(ref _rTotal, cap);
+        }
+
+        // FG4-ECO-02：编号 → 下标的索引（建筑每个生产步都按编号查自己的消费者 / 供给者，线性查找会变成 O(建筑数²)）。
+        // 增加时直接登记；删除会让后面的下标前移，标脏后下一次查找时整表重建（删除是低频编辑）。
+        private readonly Dictionary<int, int> _cIndex = new Dictionary<int, int>(8);
+        private readonly Dictionary<int, int> _rIndex = new Dictionary<int, int>(8);
+        private bool _cIndexDirty = true;
+        private bool _rIndexDirty = true;
+
         private int ConsumerIndex(int id)
         {
-            for (int k = 0; k < _cn; k++)
+            if (_cIndexDirty)
             {
-                if (_cId[k] == id)
+                _cIndex.Clear();
+                for (int k = 0; k < _cn; k++)
                 {
-                    return k;
+                    _cIndex[_cId[k]] = k;
                 }
+                _cIndexDirty = false;
             }
-            return -1;
+            return _cIndex.TryGetValue(id, out int i) ? i : -1;
         }
 
         public bool RemoveConsumer(int id)
@@ -704,8 +913,11 @@ namespace BinGames.Sim.Logistics
                 Array.Copy(_cDemand, k + 1, _cDemand, k, tail);
                 Array.Copy(_cGot, k + 1, _cGot, k, tail);
                 Array.Copy(_cTotal, k + 1, _cTotal, k, tail);
+                Array.Copy(_cBuf, k + 1, _cBuf, k, tail);
+                Array.Copy(_cCap, k + 1, _cCap, k, tail);
             }
             _cn--;
+            _cIndexDirty = true;
             MarkDirty();
             return true;
         }
@@ -746,6 +958,8 @@ namespace BinGames.Sim.Logistics
                 LastDemandMl = _cDemand[k],
                 LastDeliveredMl = _cGot[k],
                 TotalDeliveredMl = _cTotal[k],
+                BufferMl = _cBuf[k],
+                CapacityMl = _cCap[k],
             };
             return true;
         }
@@ -999,6 +1213,29 @@ namespace BinGames.Sim.Logistics
                 }
                 _consOf.Close();
             }
+            // FG4-ECO-02：外部供给者按网络分组（按编号顺序，分配确定）。
+            for (int k = 0; k < _rn; k++)
+            {
+                int c = Find(_rX[k], _rY[k]);
+                _rNet[k] = c >= 0 && _kind[c] != (byte)PipePieceKind.Valve ? _net[c] : -1;
+                if (_rNet[k] < 0)
+                {
+                    _rOut[k] = 0;
+                }
+            }
+            _prodOf.Begin(_rn);
+            for (int n = 0; n < nets; n++)
+            {
+                _prodOf.Open(n);
+                for (int k = 0; k < _rn; k++)
+                {
+                    if (_rNet[k] == n)
+                    {
+                        _prodOf.Add(k);
+                    }
+                }
+                _prodOf.Close();
+            }
             Revision++;
             _watch.Stop();
             LastRebuildMs = _watch.Elapsed.TotalMilliseconds;
@@ -1088,12 +1325,25 @@ namespace BinGames.Sim.Logistics
             int vis = _valveInOf.Start[n], vie = vis + _valveInOf.Count[n];
             int vos = _valveOutOf.Start[n], voe = vos + _valveOutOf.Count[n];
             int cs = _consOf.Start[n], ce = cs + _consOf.Count[n];
-            // 网络还没有流体：由泵的水源、或上游阀门送来的流体认定（FGR-LOG-040“一个网络只能有一种流体”）。
+            int rs = _prodOf.Start[n], re = rs + _prodOf.Count[n];
+            for (int k = rs; k < re; k++)
+            {
+                _rOut[_prodOf.Items[k]] = 0;
+            }
+            // 网络还没有流体：由泵的水源、上游阀门送来的流体、或有存量的外部供给者（建筑出口，FG4-ECO-02）认定（FGR-LOG-040“一个网络只能有一种流体”）。
             if (f == 0)
             {
                 for (int k = ps; k < pe && f == 0; k++)
                 {
                     f = _fluid[_pumpsOf.Items[k]];
+                }
+                for (int k = rs; k < re && f == 0; k++)
+                {
+                    int r = _prodOf.Items[k];
+                    if (_rStock[r] > 0)
+                    {
+                        f = _rFluid[r];
+                    }
                 }
                 for (int k = vis; k < vie && f == 0; k++)
                 {
@@ -1134,6 +1384,17 @@ namespace BinGames.Sim.Logistics
                     sources++;
                 }
             }
+            // FG4-ECO-02：外部供给者（建筑出口）按存量供给；流体不对的供给者送不出去（热更层写“接错流体”）。
+            long rS = 0;
+            for (int k = rs; k < re; k++)
+            {
+                int r = _prodOf.Items[k];
+                if (f != 0 && _rFluid[r] == f && _rStock[r] > 0)
+                {
+                    rS += _rStock[r];
+                    sources++;
+                }
+            }
             long stored = 0;
             long storeCap = 0;
             for (int k = ts; k < te; k++)
@@ -1154,13 +1415,17 @@ namespace BinGames.Sim.Logistics
             {
                 int c = _consOf.Items[k];
                 long d = Budget(_cLpm[c], s);
+                if (_cCap[c] > 0)
+                {
+                    d = Math.Min(d, _cCap[c] - _cBuf[c]); // FG4-ECO-02：带缓存的消费者，缓存满了就不再要。
+                }
                 _cDemand[c] = d;
                 _cGot[c] = 0;
                 if (d <= 0)
                 {
                     continue;
                 }
-                if (f == 0 || _cFluid[c] != f)
+                if (f == 0 || (_cFluid[c] != PipeConst.AnyFluid && _cFluid[c] != f))
                 {
                     mismatched += d;
                     continue;
@@ -1200,7 +1465,7 @@ namespace BinGames.Sim.Logistics
             {
                 D += _dAmt[k];
             }
-            long S = vS + pS + tS;
+            long S = vS + pS + rS + tS;
             long moved = Math.Min(Math.Min(D, S), cap);
             // 按优先级分配（1 最先）；同一优先级不够时按需求比例，余数按顺序一毫升一毫升补齐。
             long rem = moved;
@@ -1274,6 +1539,10 @@ namespace BinGames.Sim.Logistics
                     case 0:
                         _cGot[r] = g;
                         _cTotal[r] += g;
+                        if (_cCap[r] > 0)
+                        {
+                            _cBuf[r] += g;
+                        }
                         break;
                     case 1:
                         _stock[r] += g;
@@ -1293,6 +1562,7 @@ namespace BinGames.Sim.Logistics
             long need = moved;
             long usedV = TakeValves(vis, vie, f, valveB, ref need);
             long usedP = TakePumps(ps, pe, f, pumpB, ref need);
+            long usedR = TakeProducers(rs, re, f, ref need);
             if (need > 0)
             {
                 for (int k = ts; k < te && need > 0; k++)
@@ -1309,7 +1579,7 @@ namespace BinGames.Sim.Logistics
                 }
             }
             // 余量灌进双向储罐（缓冲，FGR-LOG-043）：只用阀门 / 泵没用完的供给，且总流量不超过吞吐上限。
-            long free = vS - usedV + pS - usedP;
+            long free = vS - usedV + pS - usedP + rS - usedR;
             long room = cap - moved;
             long fill = 0;
             if (free > 0 && room > 0 && f != 0)
@@ -1335,6 +1605,7 @@ namespace BinGames.Sim.Logistics
                 long needFill = fill;
                 TakeValves(vis, vie, f, valveB, ref needFill);
                 TakePumps(ps, pe, f, pumpB, ref needFill);
+                TakeProducers(rs, re, f, ref needFill);
             }
             // 读数与根因
             _nSupply[n] = S;
@@ -1364,7 +1635,7 @@ namespace BinGames.Sim.Logistics
             {
                 issues |= (int)PipeNetIssue.PipeLimited;
             }
-            if (D == 0 && fill == 0 && pS > 0)
+            if (D == 0 && fill == 0 && (pS > 0 || rS > 0))
             {
                 issues |= (int)PipeNetIssue.NoDemand;
             }
@@ -1452,6 +1723,32 @@ namespace BinGames.Sim.Logistics
                 _stepOut[p] += take;
                 _pumpTotal[p] += take;
                 TotalPumpedMl += take;
+                need -= take;
+                used += take;
+            }
+            return used;
+        }
+
+        /// <summary>FG4-ECO-02：从外部供给者（建筑出口）的存量里取（按编号顺序，确定）。</summary>
+        private long TakeProducers(int rs, int re, int f, ref long need)
+        {
+            long used = 0;
+            for (int k = rs; k < re && need > 0; k++)
+            {
+                int r = _prodOf.Items[k];
+                if (f == 0 || _rFluid[r] != f)
+                {
+                    continue;
+                }
+                long take = Math.Min(_rStock[r], need);
+                if (take <= 0)
+                {
+                    continue;
+                }
+                _rStock[r] -= take;
+                _rOut[r] += take;
+                _rTotal[r] += take;
+                TotalProducedOutMl += take;
                 need -= take;
                 used += take;
             }
@@ -1607,6 +1904,7 @@ namespace BinGames.Sim.Logistics
                 Pumps = _pumpsOf.Count[net],
                 Tanks = _tanksOf.Count[net],
                 Consumers = _consOf.Count[net],
+                Producers = _prodOf.Count[net],
                 ValvesIn = _valveInOf.Count[net],
                 ValvesOut = _valveOutOf.Count[net],
                 MinTier = _nMinTier[net],
@@ -1675,6 +1973,17 @@ namespace BinGames.Sim.Logistics
                 ConsumerPriority = new byte[_cn],
                 ConsumerTotal = new long[_cn],
                 NextConsumerId = _nextConsumerId,
+                ConsumerBuffer = new long[_cn],
+                ConsumerCapacity = new long[_cn],
+                ProducerId = new int[_rn],
+                ProducerX = new int[_rn],
+                ProducerY = new int[_rn],
+                ProducerFluid = new byte[_rn],
+                ProducerStock = new long[_rn],
+                ProducerCapacity = new long[_rn],
+                ProducerTotal = new long[_rn],
+                NextProducerId = _nextProducerId,
+                TotalProducedOutMl = TotalProducedOutMl,
             };
             Array.Copy(_x, s.X, _n);
             Array.Copy(_y, s.Y, _n);
@@ -1700,6 +2009,15 @@ namespace BinGames.Sim.Logistics
             Array.Copy(_cLpm, s.ConsumerLpm, _cn);
             Array.Copy(_cPrio, s.ConsumerPriority, _cn);
             Array.Copy(_cTotal, s.ConsumerTotal, _cn);
+            Array.Copy(_cBuf, s.ConsumerBuffer, _cn);
+            Array.Copy(_cCap, s.ConsumerCapacity, _cn);
+            Array.Copy(_rId, s.ProducerId, _rn);
+            Array.Copy(_rX, s.ProducerX, _rn);
+            Array.Copy(_rY, s.ProducerY, _rn);
+            Array.Copy(_rFluid, s.ProducerFluid, _rn);
+            Array.Copy(_rStock, s.ProducerStock, _rn);
+            Array.Copy(_rCap, s.ProducerCapacity, _rn);
+            Array.Copy(_rTotal, s.ProducerTotal, _rn);
             return s;
         }
 
@@ -1723,7 +2041,7 @@ namespace BinGames.Sim.Logistics
                 error = "format_version";
                 return false;
             }
-            if (_n != 0 || _cn != 0)
+            if (_n != 0 || _cn != 0 || _rn != 0)
             {
                 error = "not_empty";
                 return false;
@@ -1742,6 +2060,7 @@ namespace BinGames.Sim.Logistics
             TotalDeliveredMl = s.TotalDeliveredMl;
             TotalFlushedMl = s.TotalFlushedMl;
             TotalRemovedMl = s.TotalRemovedMl;
+            TotalProducedOutMl = Math.Max(0, s.TotalProducedOutMl);
             long tankCap = _config.TankLiters * 1000L;
             for (int k = 0; k < n; k++)
             {
@@ -1790,9 +2109,11 @@ namespace BinGames.Sim.Logistics
             if (s.ConsumerX?.Length == cn && s.ConsumerY?.Length == cn && s.ConsumerFluid?.Length == cn && s.ConsumerLpm?.Length == cn
                 && s.ConsumerPriority?.Length == cn && s.ConsumerTotal?.Length == cn)
             {
+                // FG4-ECO-02：缓存两列是新加的，旧存档没有（或长度对不上）时按 0（= 之前的“送达即消耗”）；流体 0 = 收任何流体。
+                bool buffers = s.ConsumerBuffer?.Length == cn && s.ConsumerCapacity?.Length == cn;
                 for (int k = 0; k < cn; k++)
                 {
-                    if (s.ConsumerFluid[k] < 1 || s.ConsumerFluid[k] > PipeConst.MaxFluid || s.ConsumerLpm[k] < 0
+                    if (s.ConsumerFluid[k] > PipeConst.MaxFluid || s.ConsumerLpm[k] < 0
                         || s.ConsumerPriority[k] < PipeConst.PriorityMin || s.ConsumerPriority[k] > PipeConst.PriorityMax)
                     {
                         DroppedOnLoad++;
@@ -1800,6 +2121,7 @@ namespace BinGames.Sim.Logistics
                     }
                     EnsureConsumers(_cn + 1);
                     int c = _cn++;
+                    _cIndexDirty = true;
                     _cId[c] = s.ConsumerId[k];
                     _cX[c] = s.ConsumerX[k];
                     _cY[c] = s.ConsumerY[k];
@@ -1810,6 +2132,9 @@ namespace BinGames.Sim.Logistics
                     _cDemand[c] = 0;
                     _cGot[c] = 0;
                     _cTotal[c] = s.ConsumerTotal[k];
+                    long cap = buffers ? s.ConsumerCapacity[k] : 0;
+                    _cCap[c] = cap > 0 && _cFluid[c] != PipeConst.AnyFluid ? cap : 0;
+                    _cBuf[c] = _cCap[c] > 0 ? Math.Max(0, Math.Min(_cCap[c], s.ConsumerBuffer[k])) : 0;
                 }
             }
             else if (cn > 0)
@@ -1820,6 +2145,41 @@ namespace BinGames.Sim.Logistics
             for (int c = 0; c < _cn; c++)
             {
                 _nextConsumerId = Math.Max(_nextConsumerId, _cId[c] + 1);
+            }
+            // FG4-ECO-02：外部供给者（旧存档没有这几列 = 空）。
+            int rn = s.ProducerId?.Length ?? 0;
+            if (s.ProducerX?.Length == rn && s.ProducerY?.Length == rn && s.ProducerFluid?.Length == rn && s.ProducerStock?.Length == rn
+                && s.ProducerCapacity?.Length == rn && s.ProducerTotal?.Length == rn)
+            {
+                for (int k = 0; k < rn; k++)
+                {
+                    if (s.ProducerFluid[k] < 1 || s.ProducerFluid[k] > PipeConst.MaxFluid || s.ProducerCapacity[k] <= 0 || s.ProducerStock[k] < 0)
+                    {
+                        DroppedOnLoad++;
+                        continue;
+                    }
+                    EnsureProducers(_rn + 1);
+                    int r = _rn++;
+                    _rIndexDirty = true;
+                    _rId[r] = s.ProducerId[k];
+                    _rX[r] = s.ProducerX[k];
+                    _rY[r] = s.ProducerY[k];
+                    _rFluid[r] = s.ProducerFluid[k];
+                    _rCap[r] = s.ProducerCapacity[k];
+                    _rStock[r] = Math.Min(s.ProducerStock[k], s.ProducerCapacity[k]);
+                    _rNet[r] = -1;
+                    _rOut[r] = 0;
+                    _rTotal[r] = Math.Max(0, s.ProducerTotal[k]);
+                }
+            }
+            else if (rn > 0)
+            {
+                DroppedOnLoad += rn;
+            }
+            _nextProducerId = Math.Max(1, s.NextProducerId);
+            for (int r = 0; r < _rn; r++)
+            {
+                _nextProducerId = Math.Max(_nextProducerId, _rId[r] + 1);
             }
             _netCount = 0;
             MarkDirty();
@@ -1867,6 +2227,19 @@ namespace BinGames.Sim.Logistics
                 Mix(_cId[c]);
                 Mix(_cTotal[c]);
                 Mix(_cLpm[c] | ((long)_cPrio[c] << 32));
+                Mix(_cBuf[c]);
+                Mix(_cCap[c]);
+            }
+            Mix(TotalProducedOutMl);
+            for (int r = 0; r < _rn; r++)
+            {
+                Mix(_rId[r]);
+                Mix(_rX[r]);
+                Mix(_rY[r]);
+                Mix(_rFluid[r]);
+                Mix(_rStock[r]);
+                Mix(_rCap[r]);
+                Mix(_rTotal[r]);
             }
             return h;
         }
@@ -1980,6 +2353,8 @@ namespace BinGames.Sim.Logistics
             Array.Resize(ref _cDemand, cap);
             Array.Resize(ref _cGot, cap);
             Array.Resize(ref _cTotal, cap);
+            Array.Resize(ref _cBuf, cap);
+            Array.Resize(ref _cCap, cap);
         }
 
         private void EnsureNets(int need)

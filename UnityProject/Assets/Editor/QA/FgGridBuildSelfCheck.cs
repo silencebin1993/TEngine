@@ -240,7 +240,7 @@ namespace GameLogic.EditorTools
 
         private static void CheckData()
         {
-            Expect(GridContent.LoadError == null && GridContent.Buildings.Count == 12 && GridContent.StartLayout.Count == 17
+            Expect(GridContent.LoadError == null && GridContent.Buildings.Count == 19 && GridContent.StartLayout.Count == 17
                    && GridContent.Terrains.Count == 7, $"五张格网表已加载：建筑格网属性 {GridContent.Buildings.Count}、开局布局 {GridContent.StartLayout.Count}、地形 {GridContent.Terrains.Count}");
             var missing = FgContentTables.Buildings.Where(b => !GridContent.TryGetBuilding(b.TypeId, out _)).Select(b => b.TypeId).ToList();
             Expect(missing.Count == 0, $"fg.TbBuilding 的每座建筑都有占地（缺：{string.Join(",", missing)}）");
@@ -1213,8 +1213,8 @@ namespace GameLogic.EditorTools
                 Object.DestroyImmediate(go);
                 Expect(generatorItem.Contains("60 废料") && generatorItem.Contains("40 秒") && generatorItem.Contains("已有") && inScroll && energyCount == 3, // FG3-LOG-06：能源页签 = 发电机 2 + 电塔 T1 / T2
                     $"建造栏条目写明成本、工期与已有数量：“{generatorItem.Replace("\n", " ")}”；条目在可滚动列表里（数量可变，UI Toolkit 红线 5）");
-                Expect(panelOk && placeableBuildings == 5 && relayListed && status.Contains("不能放置") && status.Contains("通道") && beaconItem.Contains("尚未解锁"),
-                    $"建造栏：5 种可放置建筑（FG3-LOG-06 加两级电塔）分在能源 / 终局 / 信号分类（信标未解锁时写明条件：“{beaconItem.Replace("\n", " ")}”），状态行“{status.Replace("\n", " ")}”");
+                Expect(panelOk && placeableBuildings == 12 && relayListed && status.Contains("不能放置") && status.Contains("通道") && beaconItem.Contains("尚未解锁"),
+                    $"建造栏：12 种可放置建筑（FG3-LOG-06 加两级电塔、FG4-ECO-02 加七座采集 / 加工建筑）分在能源 / 终局 / 信号 / 采集 / 加工分类（信标未解锁时写明条件：“{beaconItem.Replace("\n", " ")}”），状态行“{status.Replace("\n", " ")}”");
 
                 // 布局探针：中英文、UI 缩放极值、四种分辨率（面板默认隐藏，探针会移除隐藏类）。
                 foreach (GameLanguage lang in new[] { GameLanguage.ZhCn, GameLanguage.En })

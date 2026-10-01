@@ -52,6 +52,8 @@ namespace GameLogic.Campaign.Economy
         public string ResourceType;
         /// <summary>图鉴里一开始就能看（原料、中间品、成品、流体、数字资源）；远征物、关键材料、终局第一次拿到时解锁。</summary>
         public bool CodexAlwaysOpen;
+        /// <summary>FG4-ECO-02（FGR-ECO-071）：回收站分解一件得到的废料（只有固体 &gt; 0；少于做它花掉的废料当量，FG16 FGR-BAL-050）。</summary>
+        public int RecycleScrap;
 
         public bool IsBelt => BeltId != 0;
         public string Name => GameText.Get(NameKey);
@@ -122,6 +124,8 @@ namespace GameLogic.Campaign.Economy
             public string Color;
             public string Shape;
             public int SortOrder;
+            /// <summary>FG4-ECO-02：回收站分解一件得到的废料。</summary>
+            public int RecycleScrap;
         }
 
         public struct RecipeRow
@@ -340,6 +344,7 @@ namespace GameLogic.Campaign.Economy
                         {
                             Id = r.Id, BeltId = r.BeltId, Form = r.Form, Tier = r.Tier, FluidId = r.FluidId, NameKey = r.NameKey, DescKey = r.DescKey,
                             SourceKey = r.SourceKey, UseKey = r.UseKey, Color = r.Color, Shape = r.Shape, SortOrder = r.SortOrder,
+                            RecycleScrap = r.RecycleScrap,
                         });
                     }
                     foreach (GameConfig.fg.Recipe r in t.TbRecipe.DataList)
@@ -446,6 +451,8 @@ namespace GameLogic.Campaign.Economy
                     SortOrder = r.SortOrder,
                     ResourceType = ResourceTypeOf(r.Id),
                     CodexAlwaysOpen = r.Tier != "expedition" && r.Tier != "key" && r.Tier != "endgame",
+                    // FG4-ECO-02：只有固体能进回收站；表里给非固体写了数也按 0（不会把流体“分解”成废料）。
+                    RecycleScrap = form == ItemForm.Solid ? Math.Max(0, r.RecycleScrap) : 0,
                 };
                 if (!string.IsNullOrEmpty(r.Color) && ColorUtility.TryParseHtmlString(r.Color, out Color c))
                 {

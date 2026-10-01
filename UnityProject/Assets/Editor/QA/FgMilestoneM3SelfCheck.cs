@@ -426,12 +426,14 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>
-        /// DEBT-FG3GEN01-08 改派 FG4 的前提：战略地图底图不读区块差异，但 M3 的生产代码里没有任何改地形 / 污染的调用（拆废墟在 FG4-ECO-02、净化在 FG7），
-        /// 玩家在 M3 改不了地形，底图不会过期。FG4 起一旦有生产代码调 SetTerrain / SetPollution，这条就失败，提醒承接 Story 把底图同步做完。
+        /// DEBT-FG3GEN01-08（战略地图底图不读区块差异）的守护。M3 时生产代码里没有任何改地形 / 污染的调用；FG4-ECO-02 起回收站拆完废墟会把格子改成空地，
+        /// 同一 Story 让地图底图按区块差异覆盖被改过的格子（HomeGridMap.CollectCellOverrides → JobPaintMap 覆盖表），并关闭了这条 DEBT。
+        /// 守护规则改为：改地形的生产代码只允许出现在已登记的写入口里（ProductionService），而且底图覆盖仍在；新的写入口出现时这条失败，提醒那个 Story 核对底图。
+        /// 行为（拆完废墟后底图像素真的变了）由 FgProductionSelfCheck 的 M 段断言。
         /// </summary>
         private static void CheckTerrainWritersGuard()
         {
-            Line("  · C2. DEBT-FG3GEN01-08 改派守护：生产代码里没有改地形 / 污染的调用（只有自检与旅程夹具在改）");
+            Line("  · C2. DEBT-FG3GEN01-08 守护：改地形 / 污染的生产代码只在已登记的写入口（FG4-ECO-02 回收站），且地图底图覆盖被改过的格子");
             string root = RepoRoot();
             if (root == null)
             {
@@ -454,10 +456,14 @@ namespace GameLogic.EditorTools
             }
             string reg = ReadRepo("production/design/full-game/FG-GAP-REGISTER.md") ?? string.Empty;
             string row = reg.Split('\n').FirstOrDefault(l => l.StartsWith("| DEBT-FG3GEN01-08 ", StringComparison.Ordinal)) ?? string.Empty;
-            Expect(writers.Count == 0 && row.Contains("FG4-ECO-02") && row.Contains("FG-M4"),
-                writers.Count == 0
-                    ? "GameScripts 下没有生产代码调 SetTerrain / SetPollution：M3 里玩家改不了地形，地图底图不会与近景不一致；DEBT-FG3GEN01-08 承接 FG4-ECO-02、门禁 FG-M4"
-                    : $"生产代码开始改地形了（{string.Join("、", writers)}）：战略地图底图要随区块差异重画（DEBT-FG3GEN01-08）");
+            string[] allowed = { "ProductionService.cs" };
+            List<string> unknown = writers.Where(w => !allowed.Contains(w)).ToList();
+            string mapCode = ReadRepo("TEngine/UnityProject/Assets/GameScripts/HotFix/GameLogic/UI/Kit/WorldMapShared.cs") ?? string.Empty;
+            bool overlay = mapCode.Contains("CollectCellOverrides") && mapCode.Contains("TerrainEditRevision");
+            Expect(unknown.Count == 0 && overlay && row.Contains("FG4-ECO-02") && row.Contains("Closed"),
+                unknown.Count == 0
+                    ? $"改地形的生产代码只在已登记的写入口（{string.Join("、", writers)}）；地图底图按区块差异覆盖被改过的格子（{overlay}）；DEBT-FG3GEN01-08 由 FG4-ECO-02 关闭"
+                    : $"出现了新的改地形写入口（{string.Join("、", unknown)}）：核对战略地图底图是否随之重画（DEBT-FG3GEN01-08），再把它登记进 allowed");
         }
 
         // ── F. 建造栏分层（FGJ-M1 / FGJ-M2 回归抓到）────────────────────────────────

@@ -257,6 +257,17 @@ namespace GameLogic.EditorTools
                     case 315: StepItemsCodexJumped(inStep); break;
                     case 316: StepItemsCodexClosed(inStep); break;
                     case 317: StepItemsPanelClosed(inStep); break;
+                    // FG4-ECO-02：建造菜单“采集”页签——提取钻放在空地上被拒（原因写明要压矿脉）、流体泵放在空地上被拒 / 指着水源或油井可放（预览写抽什么）、
+                    // 回收站放在废墟上（预览写储量）、点虚影打开通用面板、Esc 关闭。
+                    case 318: StepProdBuildReady(inStep); break;
+                    case 319: StepProdDrillRefused(inStep); break;
+                    case 320: StepProdPumpPicked(inStep); break;
+                    case 325: StepProdPumpRefused(inStep); break;
+                    case 326: StepProdRecyclerPreview(inStep); break;
+                    case 321: StepProdRecyclerPlaced(inStep); break;
+                    case 322: StepProdDeselected(inStep); break;
+                    case 323: StepProdPanelOpened(inStep); break;
+                    case 324: StepProdPanelClosed(inStep); break;
                     case 129: StepRuinsCombat(inStep); break;
                     case 230: StepRuinsTagHover(inStep); break;
                     case 150: StepSignalOpened(inStep); break;
@@ -6240,7 +6251,238 @@ namespace GameLogic.EditorTools
                 return;
             }
             Check(!UI.Kit.ItemsPanelUIToolkit.IsOpen && !InputRouter.IsModalOwner(UI.Kit.ItemsPanelUIToolkit.Instance), "同一个键再按一次关闭物资面板");
-            Next(140, "FG0-ARCH-03：家园突袭战斗原型（测试捷径）");
+            PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.OpenBuildMenu));
+            Next(318, "FG4-ECO-02：按建造菜单键打开建造模式，放采集建筑");
+        }
+
+        // ── FG4-ECO-02：采集与加工建筑（卡片“采集建筑只能放在资源点上，并说明原因”“每座建筑的通用面板”）──
+
+        private static GridCell ProdCell(string name) => new GridCell(SessionState.GetInt(K + name + "X", 0), SessionState.GetInt(K + name + "Y", 0));
+
+        private static void StepProdBuildReady(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            Check(mode != null && mode.IsOpen, "建造模式开着");
+            // 核心附近按地形找（B25，不写死坐标）：一格能放 2×2 的空地（不是矿脉）给提取钻试错；一块能放回收站的废墟（起始区保证 24 格内有 4×4 整块废墟群）。
+            GridCell core = HomeGridService.CorePivot(state);
+            byte ruin = Campaign.Grid.GridContent.TerrainCode("ruin");
+            byte metal = Campaign.Grid.GridContent.TerrainCode("ore_metal");
+            byte rare = Campaign.Grid.GridContent.TerrainCode("ore_rare");
+            HomeGridMap map = HomeGridService.MapFor(state);
+            GridCell? plain = null, ruinAt = null, pumpAt = null;
+            for (int r = 6; r <= 22 && (plain == null || ruinAt == null); r++)
+            {
+                for (int dy = -r; dy <= r; dy++)
+                {
+                    for (int dx = -r; dx <= r; dx++)
+                    {
+                        if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != r)
+                        {
+                            continue;
+                        }
+                        var c = new GridCell(core.X + dx, core.Y + dy);
+                        if (plain == null && HomeGridService.ValidatePlacement(state, "refinery_furnace", c, 0, checkCost: false).Ok)
+                        {
+                            bool noOre = true;
+                            for (int y = -1; y <= 1 && noOre; y++)
+                            {
+                                for (int x = -1; x <= 1 && noOre; x++)
+                                {
+                                    byte t = map.GetTerrain(new GridCell(c.X + x, c.Y + y));
+                                    noOre = t != metal && t != rare;
+                                }
+                            }
+                            if (noOre)
+                            {
+                                plain = c;
+                            }
+                        }
+                        if (ruinAt == null && map.GetTerrain(c) == ruin && HomeGridService.ValidatePlacement(state, "recycler", c, 0, checkCost: false).Ok)
+                        {
+                            ruinAt = c;
+                        }
+                    }
+                }
+            }
+            // 流体泵：一块至少压到一格水源或油井、整块可放的 2×2（起始区保证 24 格内有水源）。
+            for (int r = 3; r <= 24 && pumpAt == null; r++)
+            {
+                for (int dy = -r; dy <= r && pumpAt == null; dy++)
+                {
+                    for (int dx = -r; dx <= r && pumpAt == null; dx++)
+                    {
+                        if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != r)
+                        {
+                            continue;
+                        }
+                        var c = new GridCell(core.X + dx, core.Y + dy);
+                        if (PipeNetworkService.SourceFluidAt(state, c) > 0 && HomeGridService.ValidatePlacement(state, "fluid_pump", c, 0, checkCost: false).Ok)
+                        {
+                            pumpAt = c;
+                        }
+                    }
+                }
+            }
+            if (plain == null || ruinAt == null || pumpAt == null)
+            {
+                Finish("核心 22 格内找不到试放提取钻的空地 / 能放回收站的废墟，或 24 格内找不到能放流体泵的水源 / 油井");
+                return;
+            }
+            SessionState.SetInt(K + "ProdPumpX", pumpAt.Value.X);
+            SessionState.SetInt(K + "ProdPumpY", pumpAt.Value.Y);
+            SessionState.SetInt(K + "ProdPlainX", plain.Value.X);
+            SessionState.SetInt(K + "ProdPlainY", plain.Value.Y);
+            SessionState.SetInt(K + "ProdRuinX", ruinAt.Value.X);
+            SessionState.SetInt(K + "ProdRuinY", ruinAt.Value.Y);
+            int tab = Campaign.Grid.GridContent.Categories.ToList().FindIndex(c => c.Id == "gathering");
+            bool tabClicked = ClickUitk("[BuildModeHudHost]", "BuildCat" + tab);
+            int idx = HudItemIndex("extraction_drill");
+            bool picked = idx >= 0 && ClickUitk("[BuildModeHudHost]", "BuildItem" + idx) && mode.SelectedTypeId == "extraction_drill";
+            Check(tabClicked && picked, $"点“采集”页签里的“提取钻”（第 {idx + 1} 项）：选中（{mode?.SelectedTypeId}）");
+            HoverWorld(new Vector3(plain.Value.X, 0f, plain.Value.Y));
+            Next(319, "鼠标移到一块不是矿脉的空地上");
+        }
+
+        private static void StepProdDrillRefused(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            GridPlacementResult pv = mode?.Preview;
+            string why = pv == null ? string.Empty : string.Join(" / ", pv.Reasons.Select(r => r.Describe()));
+            Check(pv != null && !pv.Ok && why.Contains("提取钻要压在金属或稀土矿脉上"), $"放置预览：提取钻指着空地不能放，写明原因（“{why}”）");
+            GridCell plain = ProdCell("ProdPlain");
+            ClickWorld(new Vector3(plain.X, 0f, plain.Y));
+            Next(320, "照样单击一下（应当放不下）");
+        }
+
+        private static void StepProdPumpPicked(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            GridCell plain = ProdCell("ProdPlain");
+            Check(HomeGridService.BuildingAt(state, plain) == null && mode.StatusText.Contains("提取钻要压在金属或稀土矿脉上"),
+                $"单击空地没有放下提取钻，状态行写原因（“{mode?.StatusText}”）");
+            int idx = HudItemIndex("fluid_pump");
+            bool picked = idx >= 0 && ClickUitk("[BuildModeHudHost]", "BuildItem" + idx) && mode.SelectedTypeId == "fluid_pump";
+            Check(picked, $"点“采集”页签里的“流体泵”（第 {idx + 1} 项）：选中（{mode?.SelectedTypeId}）");
+            HoverWorld(new Vector3(plain.X, 0f, plain.Y));
+            Next(325, "鼠标移到空地上（流体泵放不下：要压水源或油井）");
+        }
+
+        private static void StepProdPumpRefused(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            GridPlacementResult pv = mode?.Preview;
+            string why = pv == null ? string.Empty : string.Join(" / ", pv.Reasons.Select(r => r.Describe()));
+            Check(pv != null && !pv.Ok && why.Contains("流体泵要压在水源或油井上"), $"放置预览：流体泵指着空地不能放，写明原因（“{why}”）");
+            GridCell pump = ProdCell("ProdPump");
+            HoverWorld(new Vector3(pump.X, 0f, pump.Y));
+            Next(326, "鼠标移到水源 / 油井上（预览写抽什么、多快）");
+        }
+
+        private static void StepProdRecyclerPreview(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            GridPlacementResult ppv = mode?.Preview;
+            Check(ppv != null && ppv.Ok && ppv.Notes.Any(n => n.Contains("流体源不会抽干")),
+                $"放置预览：流体泵压在水源 / 油井上可放，写“{(ppv == null ? string.Empty : string.Join(" / ", ppv.Notes))}”");
+            int idx = HudItemIndex("recycler");
+            bool picked = idx >= 0 && ClickUitk("[BuildModeHudHost]", "BuildItem" + idx) && mode.SelectedTypeId == "recycler";
+            Check(picked, $"点“回收站”：选中（{mode?.SelectedTypeId}）");
+            GridCell ruin = ProdCell("ProdRuin");
+            HoverWorld(new Vector3(ruin.X, 0f, ruin.Y));
+            Next(321, "鼠标移到废墟上（放置预览写储量）");
+        }
+
+        private static void StepProdRecyclerPlaced(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            GridPlacementResult pv = mode?.Preview;
+            Check(pv != null && pv.Ok && pv.Notes.Any(n => n.Contains("脚下废墟") && n.Contains("储量")), $"放置预览：回收站压在废墟上可放，写“{(pv == null ? string.Empty : string.Join(" / ", pv.Notes))}”");
+            GridCell ruin = ProdCell("ProdRuin");
+            ClickWorld(new Vector3(ruin.X, 0f, ruin.Y));
+            Next(322, "单击放下回收站");
+        }
+
+        private static void StepProdDeselected(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            GridCell ruin = ProdCell("ProdRuin");
+            BuildingRecord b = HomeGridService.BuildingAt(state, ruin);
+            Check(b != null && b.BuildingTypeId == "recycler" && Campaign.Regions.HomeValleyController.IsPlannedGhost(b),
+                $"单击放下回收站的虚影（状态行“{mode?.StatusText}”）");
+            RightClickWorld(new Vector3(ruin.X, 0f, ruin.Y));
+            Next(323, "右键取消选择，再左键点回收站（打开通用面板）");
+        }
+
+        private static void StepProdPanelOpened(double inStep)
+        {
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            GridCell ruin = ProdCell("ProdRuin");
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            if (!ProductionPanelUIToolkit.IsOpen && SessionState.GetInt(K + "ProdPanelClicked", 0) == 0)
+            {
+                Check(mode != null && mode.IsOpen && mode.SelectedTypeId == null, "右键取消选择（建造模式还开着）");
+                SessionState.SetInt(K + "ProdPanelClicked", 1);
+                ClickWorld(new Vector3(ruin.X, 0f, ruin.Y));
+                return;
+            }
+            if (inStep < 2.2)
+            {
+                return;
+            }
+            ProductionPanelUIToolkit panel = ProductionPanelUIToolkit.Instance;
+            bool open = ProductionPanelUIToolkit.IsOpen && panel != null && panel.PanelVisible && panel.TitleText.Contains("回收站")
+                        && (panel.StateText.Contains("建造中") || panel.StateText.Contains("工作中") || panel.StateText.Contains("堵塞"))
+                        && panel.DetailText.Contains("脚下废墟");
+            Check(open, $"点回收站打开通用面板（真 UXML）：“{panel?.TitleText}”“{panel?.StateText}”“{panel?.ReasonText?.Replace("\n", " · ")}”；{panel?.DetailText?.Split('\n')[0]}");
+            CheckNoTextMarkers("生产建筑通用面板");
+            PressKeyKeepMouse(KeyCode.Escape);
+            Next(324, "Esc 关闭面板");
+        }
+
+        private static void StepProdPanelClosed(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Check(!ProductionPanelUIToolkit.IsOpen && mode != null && mode.IsOpen, "Esc 先关面板（建造模式还开着）");
+            PressKeyKeepMouse(KeyCode.Escape);
+            Next(140, "Esc 退出建造模式；FG0-ARCH-03：家园突袭战斗原型（测试捷径）");
         }
 
         // ── FG0-ARCH-03：家园突袭的逐单位 / 逐弹体逻辑在战斗内核（测试捷径生成性能场景；正式突袭导演与到达结算属于 FG6）──

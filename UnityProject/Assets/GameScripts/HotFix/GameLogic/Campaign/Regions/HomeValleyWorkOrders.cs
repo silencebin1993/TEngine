@@ -2288,6 +2288,8 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
+            // FG4-ECO-02：生产建筑的输入 / 输出缓存（含正在做的周期里已扣的固体）退回仓库，流体口撤掉——先于建筑记录移除（否则会被当成孤儿记录退到核心旁）。
+            int productionReturned = Economy.ProductionService.OnDemolished(state, building, DemolishDropId(order));
             state.BuildingRecords = state.BuildingRecords.Where(b => b.BuildingId != building.BuildingId).ToArray();
 
             // FG3-LOG-02（FGR-LOG-007 全额返还）：建筑本身的材料（实际投入的全额）+ 建筑内部缓存的物品，送回仓库；放不下的变成地面物，
@@ -2300,7 +2302,7 @@ namespace GameLogic.Campaign.Regions
             string dropId = DemolishDropId(order);
             HomeValleyConstruction.ReturnMaterials(state, building.Position, CampaignEconomyLedger.ResourceScrap, building.InvestedScrap, dropId);
             LastDemolishRefund = building.InvestedScrap;
-            LastDemolishCacheReturned = 0;
+            LastDemolishCacheReturned = productionReturned;
             if (building.Inventory != null)
             {
                 for (int i = 0; i < building.Inventory.Length; i++)

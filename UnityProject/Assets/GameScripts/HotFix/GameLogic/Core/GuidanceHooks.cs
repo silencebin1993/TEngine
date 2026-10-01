@@ -157,6 +157,19 @@ namespace GameLogic.Core
         /// 传送带自身第一次堵塞是 <see cref="LogisticsFirstBlocked"/>）。引导内容在 FG15-UX-04：打开堵塞叠加层 / “为什么不工作”面板追到根源。</summary>
         public const string LogisticsFirstOutputBlocked = "logistics.port.first_output_blocked";
 
+        /// <summary>FG4-ECO-02：第一次放下采集建筑（回收站 / 提取钻）——引导内容在 FG15-UX-04：采集建筑只能放在资源点上、废墟有储量、震动；图鉴“采集建筑”随之解锁。</summary>
+        public const string EconomyGatheringFirstPlaced = "economy.gathering.first_placed";
+        /// <summary>FG4-ECO-02：第一次放下加工建筑（精炼炉 / 精炼塔 / 调配站 / 废液池）——引导内容：选配方、流体口接管线；图鉴“加工建筑”随之解锁。</summary>
+        public const string EconomyProcessingFirstPlaced = "economy.processing.first_placed";
+        /// <summary>FG4-ECO-02：第一次打开生产建筑的面板。</summary>
+        public const string EconomyProductionPanelFirstOpen = "economy.production.panel_first_open";
+        /// <summary>FG4-ECO-02（FG04 第 4 节“第一次看到缺料”）：生产建筑第一次缺料 / 缺流体——引导内容：看原因、接传送带 / 管线、“为什么不工作”追上游。</summary>
+        public const string EconomyFirstStarved = "economy.production.first_starved";
+        /// <summary>FG4-ECO-02（FG04 第 4 节“第一次看到副产品堵塞”）：副产品第一次无处可去——引导内容：废液池、回收站、分流器。</summary>
+        public const string EconomyFirstByproductBlocked = "economy.production.first_byproduct_blocked";
+        /// <summary>FG4-ECO-02：回收站脚下的废墟第一次拆完、变成可建空地。</summary>
+        public const string EconomyRuinFirstDepleted = "economy.ruin.first_depleted";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -184,6 +197,8 @@ namespace GameLogic.Core
             PowerPoleFirstPlaced, PowerFirstBrownout, PowerPanelFirstOpen, PowerFirstSplit,
             BuildFirstCopy, BuildFirstPaste, BuildFirstUndo, BuildFirstUpgrade, BuildFirstEyedropper, BuildFirstCopySettings, BuildFirstLayoutSaved, LayoutLibraryFirstOpen,
             OverlayFirstOpen, DiagnosisFirstOpen, LogisticsFirstOutputBlocked,
+            EconomyGatheringFirstPlaced, EconomyProcessingFirstPlaced, EconomyProductionPanelFirstOpen, EconomyFirstStarved, EconomyFirstByproductBlocked,
+            EconomyRuinFirstDepleted,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

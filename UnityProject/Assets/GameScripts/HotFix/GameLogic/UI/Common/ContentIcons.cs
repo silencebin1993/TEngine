@@ -33,6 +33,9 @@ namespace GameLogic.UI.Common
         public const string StateUplinkPort = "icon_state_uplink_port";
         /// <summary>FG1-HUD-01（FGR-SIG-081“靠近覆盖边缘时变色并加图标”）：接入中的机器接近覆盖边缘 / 宽限中时头顶的倒三角标记。</summary>
         public const string StateLinkEdge = "icon_state_link_edge";
+        /// <summary>FG4-ECO-02（FGR-ECO-010）：生产建筑缺料 / 缺流体（圆角方形 + 空框）与待机（没选配方，六边形 + 暂停竖杠）。</summary>
+        public const string StateStarved = "icon_state_starved";
+        public const string StateIdle = "icon_state_idle";
 
         /// <summary>世界目标标记（定位针）：当前目标下一步要去的位置。</summary>
         public const string ObjectiveMarker = "icon_objective_marker";
@@ -98,6 +101,8 @@ namespace GameLogic.UI.Common
             ids.Add(StateSafeMode);
             ids.Add(StateUplinkPort);
             ids.Add(StateLinkEdge);
+            ids.Add(StateStarved);
+            ids.Add(StateIdle);
             ids.Add(ObjectiveMarker);
             ids.Add(VfxBurst);
             ids.Add(VfxRing);

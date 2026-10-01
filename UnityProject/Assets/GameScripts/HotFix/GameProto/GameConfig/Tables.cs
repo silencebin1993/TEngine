@@ -103,6 +103,10 @@ public partial class Tables
     /// </summary>
     public fg.TbBuilding TbBuilding {get; }
     /// <summary>
+    /// 建筑流体端口
+    /// </summary>
+    public fg.TbBuildingFluidPort TbBuildingFluidPort {get; }
+    /// <summary>
     /// 建筑格网属性
     /// </summary>
     public fg.TbBuildingGrid TbBuildingGrid {get; }
@@ -174,6 +178,10 @@ public partial class Tables
     /// 电力节点
     /// </summary>
     public fg.TbPowerNode TbPowerNode {get; }
+    /// <summary>
+    /// 生产参数
+    /// </summary>
+    public fg.TbProducer TbProducer {get; }
     /// <summary>
     /// 具名反应
     /// </summary>
@@ -296,6 +304,7 @@ public partial class Tables
         TbBeltFilterPreset = new fg.TbBeltFilterPreset(loader("fg_tbbeltfilterpreset"));
         TbBuildCategory = new fg.TbBuildCategory(loader("fg_tbbuildcategory"));
         TbBuilding = new fg.TbBuilding(loader("fg_tbbuilding"));
+        TbBuildingFluidPort = new fg.TbBuildingFluidPort(loader("fg_tbbuildingfluidport"));
         TbBuildingGrid = new fg.TbBuildingGrid(loader("fg_tbbuildinggrid"));
         TbBuildingPort = new fg.TbBuildingPort(loader("fg_tbbuildingport"));
         TbBuildTool = new fg.TbBuildTool(loader("fg_tbbuildtool"));
@@ -314,6 +323,7 @@ public partial class Tables
         TbNotifyTier = new fg.TbNotifyTier(loader("fg_tbnotifytier"));
         TbNotifyType = new fg.TbNotifyType(loader("fg_tbnotifytype"));
         TbPowerNode = new fg.TbPowerNode(loader("fg_tbpowernode"));
+        TbProducer = new fg.TbProducer(loader("fg_tbproducer"));
         TbReaction = new fg.TbReaction(loader("fg_tbreaction"));
         TbRecipe = new fg.TbRecipe(loader("fg_tbrecipe"));
         TbRecipeIo = new fg.TbRecipeIo(loader("fg_tbrecipeio"));
@@ -366,6 +376,7 @@ public partial class Tables
         TbBeltFilterPreset.ResolveRef(this);
         TbBuildCategory.ResolveRef(this);
         TbBuilding.ResolveRef(this);
+        TbBuildingFluidPort.ResolveRef(this);
         TbBuildingGrid.ResolveRef(this);
         TbBuildingPort.ResolveRef(this);
         TbBuildTool.ResolveRef(this);
@@ -384,6 +395,7 @@ public partial class Tables
         TbNotifyTier.ResolveRef(this);
         TbNotifyType.ResolveRef(this);
         TbPowerNode.ResolveRef(this);
+        TbProducer.ResolveRef(this);
         TbReaction.ResolveRef(this);
         TbRecipe.ResolveRef(this);
         TbRecipeIo.ResolveRef(this);

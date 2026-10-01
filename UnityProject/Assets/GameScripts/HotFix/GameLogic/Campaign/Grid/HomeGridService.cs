@@ -510,6 +510,42 @@ namespace GameLogic.Campaign.Grid
 
         // ── 放置校验（FGR-LOG-003、012、013）──────────────────────────────────────────
 
+        /// <summary>FG4-ECO-02：requiredTerrain（“a|b”）→ 地形编码位掩码（编码 0～31）。</summary>
+        public static int RequiredTerrainMask(string required)
+        {
+            int mask = 0;
+            if (string.IsNullOrEmpty(required) || required == "any")
+            {
+                return 0;
+            }
+            foreach (string part in required.Split('|'))
+            {
+                if (GridContent.TryTerrainCode(part.Trim(), out byte code) && code < 32)
+                {
+                    mask |= 1 << code;
+                }
+            }
+            return mask;
+        }
+
+        /// <summary>FG4-ECO-02：requiredTerrain 的地形名（当前语言，“金属矿脉或稀土矿脉”）。</summary>
+        public static string RequiredTerrainNames(string required)
+        {
+            var parts = new List<string>(2);
+            foreach (string part in (required ?? string.Empty).Split('|'))
+            {
+                if (GridContent.TryTerrainCode(part.Trim(), out byte code) && GridContent.TerrainByCode(code) is GridTerrain t)
+                {
+                    parts.Add(Localization.GameText.Get(t.NameKey));
+                }
+                else if (!string.IsNullOrEmpty(part))
+                {
+                    parts.Add(part);
+                }
+            }
+            return string.Join(Localization.GameText.Get("grid.terrain.or"), parts);
+        }
+
         /// <summary>
         /// 校验把 <paramref name="typeId"/> 以（枢轴格, 朝向）放下是否合法，逐格给出原因。
         /// <paramref name="asPlayerPlacement"/>：true = 玩家新放置（要求可放置、已解锁、未到上限）；false = 移动 / 旋转已有建筑。
@@ -563,13 +599,10 @@ namespace GameLogic.Campaign.Grid
             int blockLevel = GridContent.TuningInt("grid.pollution_block_level");
             int ring = GridContent.TuningInt("grid.core_reserve_ring");
             bool reserveApplies = typeId != HomeValleyLayout.BuildingTypeCore && _hasCore;
+            // FG4-ECO-02：requiredTerrain 可以写多种资源点地形（“|”分隔，例如提取钻 ore_metal|ore_rare）——至少一格压在其中任一种上。
             bool needsTerrain = g.RequiredTerrain != "any";
-            byte requiredCode = 0;
+            int requiredMask = needsTerrain ? RequiredTerrainMask(g.RequiredTerrain) : 0;
             bool requiredFound = false;
-            if (needsTerrain)
-            {
-                GridContent.TryTerrainCode(g.RequiredTerrain, out requiredCode);
-            }
 
             CollectObstacles(state, ignoreBuildingId, ignoreBuildingId2);
             bool restoreBatch = _obstacleBatch && (ignoreBuildingId != null || ignoreBuildingId2 != null);
@@ -607,7 +640,7 @@ namespace GameLogic.Campaign.Grid
                     r.Add(new GridReason(GridBlockReason.Terrain, "grid.reason.terrain", terrain != null ? terrain.NameKey : t.ToString()));
                     ok = false;
                 }
-                if (needsTerrain && t == requiredCode)
+                if (needsTerrain && t < 32 && (requiredMask & (1 << t)) != 0)
                 {
                     requiredFound = true;
                 }
@@ -658,8 +691,21 @@ namespace GameLogic.Campaign.Grid
 
             if (needsTerrain && !requiredFound)
             {
-                GridTerrain req = GridContent.TerrainByCode(requiredCode);
-                r.Add(new GridReason(GridBlockReason.NeedsTerrain, "grid.reason.needs_terrain", req != null ? req.NameKey : g.RequiredTerrain));
+                // 卡片“采集建筑只能放在资源点上，并说明原因”：写明要放在哪种地形上，以及为什么（生产建筑表的 placeHintKey）。
+                string names = RequiredTerrainNames(g.RequiredTerrain);
+                if (Economy.ProducerCatalog.TryGet(typeId, out Economy.ProducerDef pd) && pd.PlaceHintKey != "prod.place.any")
+                {
+                    r.Add(new GridReason(GridBlockReason.NeedsTerrain, "grid.reason.needs_terrain_why", names, pd.PlaceHintKey));
+                }
+                else
+                {
+                    r.Add(new GridReason(GridBlockReason.NeedsTerrain, "grid.reason.needs_terrain", names));
+                }
+            }
+            else if (needsTerrain || Economy.ProducerCatalog.IsProducer(typeId))
+            {
+                // FG4-ECO-02：放置预览写出脚下的资源（回收站：废墟格数与储量；提取钻：矿脉与产出）。
+                Economy.ProductionService.AddPlacementNotes(state, typeId, r.Cells, r.Notes);
             }
 
             // FG3-LOG-01：装配站 / 仓库的出口通道随建筑旋转 / 搬迁——新姿态下出口不能被别的建筑压住、不能落在机器走不了的地形上。

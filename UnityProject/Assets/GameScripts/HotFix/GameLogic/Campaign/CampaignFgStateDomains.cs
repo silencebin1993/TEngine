@@ -398,6 +398,19 @@ namespace GameLogic.Campaign
         public int[] ConsumerPriorities = Array.Empty<int>();
         public long[] ConsumerTotals = Array.Empty<long>();
         public int NextConsumerId = 1;
+        /// <summary>FG4-ECO-02：消费者缓存 / 容量（建筑的流体输入缓存；旧存档没有 = 0，即“送达即消耗”）。</summary>
+        public long[] ConsumerBuffers = Array.Empty<long>();
+        public long[] ConsumerCapacities = Array.Empty<long>();
+        /// <summary>FG4-ECO-02：外部供给者（建筑的流体出口：口外那一格、流体、存量、上限、累计送出）。</summary>
+        public int[] ProducerIds = Array.Empty<int>();
+        public int[] ProducerXs = Array.Empty<int>();
+        public int[] ProducerYs = Array.Empty<int>();
+        public int[] ProducerFluids = Array.Empty<int>();
+        public long[] ProducerStocks = Array.Empty<long>();
+        public long[] ProducerCapacities = Array.Empty<long>();
+        public long[] ProducerTotals = Array.Empty<long>();
+        public int NextProducerId = 1;
+        public long TotalProducedOutMl;
         /// <summary>寒潮进行中（FGR-LOG-045 预留：FG7-ENV-03 的天气系统写它；本 Story 只保存，不产生结冰）。</summary>
         public bool ColdSnap;
     }
@@ -454,6 +467,59 @@ namespace GameLogic.Campaign
         public string[] FlowItemIds = Array.Empty<string>();
         /// <summary>库存采样（按世界步，每 eco.flow.sample_seconds 游戏秒一条，最多 eco.flow.window_samples + 1 条，旧的在前）。</summary>
         public ItemFlowSampleRecord[] FlowSamples = Array.Empty<ItemFlowSampleRecord>();
+        /// <summary>FG4-ECO-02：每座生产建筑（采集 / 加工）的配方、进度、输入 / 输出缓存、流体口句柄（按建筑 ID 升序）。唯一写入口 <see cref="Economy.ProductionService"/>。
+        /// 旧存档没有 = 空（建筑出现后补建）。</summary>
+        public ProducerRecord[] Producers = Array.Empty<ProducerRecord>();
+        /// <summary>FG4-ECO-02：拆到一半的废墟格（剩余储量）；没拆过的格按 eco.ruin.scrap_per_cell，拆完的格已变成可建空地（区块差异）。按坐标排序。</summary>
+        public RuinCellRecord[] RuinCells = Array.Empty<RuinCellRecord>();
+        /// <summary>FG4-ECO-02（FG10 FGR-EVT-010 接口）：家园震动值 0～eco.vibration.max（提取钻工作时累积、按分钟衰减；蠕虫事件在 FG10）。</summary>
+        public double Vibration;
+    }
+
+    /// <summary>FG4-ECO-02：一座生产建筑的运行状态（建筑本身的位置 / 朝向 / 电力在 <see cref="BuildingRecord"/>）。</summary>
+    [Serializable]
+    public sealed class ProducerRecord
+    {
+        public string BuildingId;
+        /// <summary>玩家选的配方（多配方建筑；空 = 没选、待机）。只有一条配方的建筑不写（那就是它的固定功能）。</summary>
+        public string RecipeId = string.Empty;
+        /// <summary>正在做一个周期（开工时已扣料）。</summary>
+        public bool Running;
+        /// <summary>本周期已走的世界步数 / 本周期要走的世界步数（游戏时钟，倍速只改每帧跑几步）。</summary>
+        public long Progress;
+        public long Duration;
+        /// <summary>回收站 / 提取钻本周期完成时产出的物品与件数。</summary>
+        public string PendingItem = string.Empty;
+        public int PendingAmount;
+        /// <summary>本周期是在拆废墟（回收站；否则是在分解送来的物品）。</summary>
+        public bool PendingRuin;
+        /// <summary>固体输入 / 输出缓存。</summary>
+        public ItemStackRecord[] In = Array.Empty<ItemStackRecord>();
+        public ItemStackRecord[] Out = Array.Empty<ItemStackRecord>();
+        /// <summary>每个流体口（按 fg.TbBuildingFluidPort 的顺序）在管线内核里的消费者 / 供给者编号（-1 = 没登记）。</summary>
+        public int[] FluidHandles = Array.Empty<int>();
+        /// <summary>每个流体口是不是输出口（true = 句柄是供给者编号，false = 消费者编号）。管线内核里两类编号各自从 1 起、会重号，
+        /// 撤口必须按这里的类型撤对的那一类（建筑已不在时也能撤，见 ProductionService.RemoveFluidHandles）。每次建索引按建筑类型重写。</summary>
+        public bool[] FluidOut = Array.Empty<bool>();
+        /// <summary>流体口没登记（建筑没在运转）时，建筑自己留着的流体（毫升）。</summary>
+        public long[] FluidHeld = Array.Empty<long>();
+        /// <summary>累计完成的周期数；回收站累计拆出的废墟废料、分解的物品件数。</summary>
+        public long Completed;
+        public long RuinRecovered;
+        public long ItemsRecycled;
+        /// <summary>流体泵累计抽出的流体（毫升；本周期的零头记在 <see cref="Progress"/>）。</summary>
+        public long PumpedMl;
+        /// <summary>脚下废墟拆完的通知已经发过（只发一次）。</summary>
+        public bool RuinDepletedNotified;
+    }
+
+    /// <summary>FG4-ECO-02：拆到一半的废墟格。</summary>
+    [Serializable]
+    public sealed class RuinCellRecord
+    {
+        public int X;
+        public int Y;
+        public int Remaining;
     }
 
     /// <summary>FG4-ECO-01：一种物品的持有量。</summary>
@@ -901,7 +967,7 @@ namespace GameLogic.Campaign
             new DomainInfo(nameof(CampaignState.SaveHistory), "FG0-SAVE-01", s => s.SaveHistory),
             new DomainInfo(nameof(CampaignState.Notifications), "FG0-UX-01（通知中心历史）", s => s.Notifications),
             new DomainInfo(nameof(CampaignState.Nav), "FG0-ARCH-06（层级寻路：排队请求与待采纳结果）", s => s.Nav),
-            new DomainInfo(nameof(CampaignState.Economy), "FG4-ECO-01（物品、流体与配方：仓库物资、核心保管库、净速率采样）", s => s.Economy),
+            new DomainInfo(nameof(CampaignState.Economy), "FG4-ECO-01 / 02（物品、流体与配方：仓库物资、核心保管库、净速率采样；生产建筑、废墟储量、家园震动）", s => s.Economy),
         };
 
         /// <summary>把缺失（null）的域补成空域。读档后与存档前都会调用；已有数据的域原样保留。</summary>
@@ -966,6 +1032,22 @@ namespace GameLogic.Campaign
                 if (r != null)
                 {
                     r.Stocks ??= Array.Empty<int>();
+                }
+            }
+            // FG4-ECO-02：生产建筑与拆到一半的废墟格。
+            s.Economy.Producers ??= Array.Empty<ProducerRecord>();
+            s.Economy.RuinCells ??= Array.Empty<RuinCellRecord>();
+            foreach (ProducerRecord r in s.Economy.Producers)
+            {
+                if (r != null)
+                {
+                    r.RecipeId ??= string.Empty;
+                    r.PendingItem ??= string.Empty;
+                    r.In ??= Array.Empty<ItemStackRecord>();
+                    r.Out ??= Array.Empty<ItemStackRecord>();
+                    r.FluidHandles ??= Array.Empty<int>();
+                    r.FluidOut ??= Array.Empty<bool>();
+                    r.FluidHeld ??= Array.Empty<long>();
                 }
             }
             s.Weather ??= new WeatherState();

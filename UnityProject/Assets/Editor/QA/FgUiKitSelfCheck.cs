@@ -1449,8 +1449,8 @@ namespace GameLogic.EditorTools
             // FG3-LOG-05 新增 PipePanel.uxml（管线面板：网络读数、储罐、阀门、冲洗），共 22 份。
             // FG3-LOG-07 新增 LayoutLibraryPanel.uxml（布局库）与 LayoutLibraryRow.uxml（布局行模板），共 25 份。
             // FG3-LOG-08 新增 OverlayHud.uxml（叠加层停靠条 / 选择器 / 标签层）与 DiagnosisPanel.uxml（为什么不工作），共 27 份。
-            // FG4-ECO-01 新增 ItemsPanel.uxml（物资面板），共 28 份。
-            Expect(uxmlCount == 28 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
+            // FG4-ECO-01 新增 ItemsPanel.uxml（物资面板），共 28 份。FG4-ECO-02 新增 ProductionPanel.uxml（生产建筑通用面板），共 29 份。
+            Expect(uxmlCount == 29 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
 
             string[] codeDirs =
             {
