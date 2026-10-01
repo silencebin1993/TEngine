@@ -988,6 +988,8 @@ namespace GameLogic.EditorTools.JourneyBots
         // ── 端口面板（建造模式里点一下建筑）──────────────────────────────────────────────
 
         internal const string PortHost = "[BeltPortHost]";
+        /// <summary>FG4-ECO-05：建筑通用面板的宿主。</summary>
+        internal const string BuildingPanelHost = "[ProductionPanelHost]";
 
         /// <summary>建造模式里左键点一下开局建筑（不拖，拖是搬迁）：打开它的端口面板。</summary>
         internal static StepOutcome TickPortOpen(JourneyContext c, string typeId)
@@ -1003,6 +1005,16 @@ namespace GameLogic.EditorTools.JourneyBots
                 return StepOutcome.Wait;
             }
             if (SinceMs(c, "click") < 800)
+            {
+                return StepOutcome.Wait;
+            }
+            // FG4-ECO-05（FGU-09）：点建筑先打开它的通用面板，再点面板里的“端口…”进端口面板（玩家的真实路径）。
+            if (!BeltPortPanelUIToolkit.IsOpen && ProductionPanelUIToolkit.IsOpen && ProductionPanelUIToolkit.BuildingId == b.BuildingId
+                && !Once(c, "ports", () => JourneyInput.ClickUitk(BuildingPanelHost, "PrPorts")))
+            {
+                return StepOutcome.Wait;
+            }
+            if (Done(c, "ports") && SinceMs(c, "ports") < 500)
             {
                 return StepOutcome.Wait;
             }

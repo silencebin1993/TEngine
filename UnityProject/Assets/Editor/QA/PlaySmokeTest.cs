@@ -164,6 +164,8 @@ namespace GameLogic.EditorTools
                     case 81: StepFailureEsc(inStep); break;
                     case 82: StepFailureBackToMenu(inStep); break;
                     case 7: StepRuins(inStep); break;
+                    case 38: StepWornRepairOrdered(inStep); break;
+                    case 39: StepWornRepairDone(inStep); break;
                     case 120: StepWorldHomeKeepsRunning(inStep); break;
                     case 121: StepWorldFlownHome(inStep); break;
                     case 122: StepWorldTabToExpedition(inStep); break;
@@ -2115,6 +2117,55 @@ namespace GameLogic.EditorTools
             Write($"  - 修好 1.5 秒后目标条：{title}");
             Check(title.Contains("目标 2/10"), "修好发电机后目标条跳到目标 2/10");
             CheckNoTextMarkers("发电机修好后");
+            // FG4-ECO-05（FGR-ECO-013；RTS 右键情境命令）：修好的发电机又受了伤（正式伤害来源在 FG6-DEF-05，这里经同一个入口 BuildingOps.ApplyDamage 打一下）——
+            // 机器仍选中，右键这座受损（运转中、耐久未满）的建筑 = 这台机器带维修件上门维修（与面板“维修”同一张单）。维修件由测试放进仓库。
+            Campaign.Economy.ItemCatalog.TryGet(Campaign.Economy.BuildingOps.RepairKitId, out Campaign.Economy.ItemDef kit);
+            Campaign.Economy.HomeInventory.Add(state, kit, 6, clampToSpace: false);
+            Campaign.Economy.BuildingOps.ApplyDamage(state, generator.BuildingId, Campaign.Economy.BuildingOps.MaxDurability(generator.BuildingTypeId) * 0.4f);
+            Check(Campaign.Economy.BuildingOps.IsWorn(generator) && generator.ConstructionState == BuildingConstructionState.Operational,
+                $"发电机受损（耐久 {Campaign.Economy.BuildingOps.Durability(generator):0}）但照常运转");
+            Transform genView = FindNamed("Building_" + Campaign.Regions.HomeValleyLayout.BuildingTypeGenerator);
+            RightClickWorld(genView != null ? genView.position : new Vector3(generator.Position.x, 0f, generator.Position.y));
+            Next(38, "机器选中时鼠标右键点受损（运转中）的发电机（情境命令：带维修件上门维修）");
+        }
+
+        private static void StepWornRepairOrdered(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            string genId = Campaign.Regions.HomeValleyLayout.RegionId + ":" + Campaign.Regions.HomeValleyLayout.BuildingTypeGenerator;
+            WorkOrderRecord order = state != null ? Campaign.Regions.HomeValleyWorkOrders.FindActiveRepair(state, genId) : null;
+            int worker = SessionState.GetInt(K + "Worker", -1);
+            Check(order != null && order.AssignedMachineLogicId == worker && order.ReservedItemAmount > 0
+                  && order.ReservedItemId == Campaign.Economy.BuildingOps.RepairKitId,
+                $"右键受损建筑 → 选中的机器 #{worker} 接下维修单（单子 {order?.State}、机器 #{order?.AssignedMachineLogicId}、预留维修件 {order?.ReservedItemAmount}）");
+            if (order == null)
+            {
+                Finish("右键受损建筑没有派出维修单");
+                return;
+            }
+            Next(39, "等机器带维修件修好发电机");
+        }
+
+        private static void StepWornRepairDone(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            BuildingRecord generator = state?.BuildingRecords?.FirstOrDefault(b =>
+                b.RegionId == Campaign.Regions.HomeValleyLayout.RegionId && b.BuildingTypeId == Campaign.Regions.HomeValleyLayout.BuildingTypeGenerator);
+            if (generator == null || Campaign.Economy.BuildingOps.IsWorn(generator))
+            {
+                if (inStep > 120)
+                {
+                    Finish("120 秒内受损的发电机没修好");
+                }
+                return;
+            }
+            Write($"  - 受损发电机修满（下令后 {inStep:F0} 秒）");
+            Check(generator.ConstructionState == BuildingConstructionState.Operational, "右键维修完成：发电机耐久回满、照常运转");
+            CheckNoTextMarkers("右键维修后");
             Transform station = FindNamed("Building_" + Campaign.Regions.HomeValleyLayout.BuildingTypeAssemblyStation);
             if (station == null)
             {
@@ -4983,12 +5034,42 @@ namespace GameLogic.EditorTools
                 $"建造模式指着归还核心：状态行提示可以点开端口面板（{status.Replace("\n", " / ")}）");
             GridCell core = HomeGridService.CorePivot(CampaignSession.Current);
             ClickWorld(new Vector3(core.X, 0f, core.Y));
-            Next(257, "建造模式里左键点归还核心（打开端口面板）");
+            SessionState.SetBool(K + "BpPortsClicked", false);
+            Next(257, "建造模式里左键点归还核心（FG4-ECO-05 起先打开它的通用面板，再点“端口…”打开端口面板）");
         }
 
         private static void StepBeltPortPanelOpened(double inStep)
         {
             if (inStep < 0.6)
+            {
+                return;
+            }
+            if (!SessionState.GetBool(K + "BpPortsClicked", false))
+            {
+                // FG4-ECO-05（FGU-09 建筑面板通用模板）：点核心打开的是通用面板——身份行、状态（工作，形状标记）、原因、核心不能禁用（按钮置灰并写原因）。
+                ProductionPanelUIToolkit bp = ProductionPanelUIToolkit.Instance;
+                string coreId = HomeGridService.FindBuilding(CampaignSession.Current, Campaign.Regions.HomeValleyLayout.RegionId + ":" + Campaign.Regions.HomeValleyLayout.BuildingTypeCore)?.BuildingId;
+                bool bpOpen = ProductionPanelUIToolkit.IsOpen && bp != null && bp.PanelVisible && ProductionPanelUIToolkit.BuildingId == coreId;
+                Check(bpOpen && bp.IdentText.Contains(HomeGridService.DisplayName(Campaign.Regions.HomeValleyLayout.BuildingTypeCore)) && bp.ShownStatus == Campaign.Economy.BuildingStatusKind.Working
+                      && !string.IsNullOrEmpty(bp.ReasonText) && bp.EnableButton != null && !bp.EnableButton.enabledSelf && !string.IsNullOrEmpty(bp.EnableButton.tooltip)
+                      && bp.DurabilityText.Length > 0,
+                    $"点核心打开建筑通用面板（FGU-09）：“{bp?.IdentText}”，状态 {bp?.ShownStatus}（{bp?.StateText}）“{bp?.ReasonText}”，耐久“{bp?.DurabilityText}”，启用 / 禁用按钮置灰：“{bp?.EnableButton?.tooltip}”");
+                CheckNoTextMarkers("建筑通用面板");
+                // 改名（真实控件：输入框写字 → 点“改名”；再点“默认名”恢复），名字进面板标题。
+                if (bp != null && bp.NameField != null)
+                {
+                    bp.NameField.value = "冒烟核心";
+                    bool renamed = ClickUitk("[ProductionPanelHost]", "BpRename") && bp.TitleText.Contains("冒烟核心")
+                                   && HomeGridService.FindBuilding(CampaignSession.Current, coreId)?.CustomName == "冒烟核心";
+                    bool reset = ClickUitk("[ProductionPanelHost]", "BpRenameReset") && HomeGridService.FindBuilding(CampaignSession.Current, coreId)?.CustomName == null;
+                    Check(renamed && reset, $"通用面板改名：输入框写“冒烟核心”点“改名”→ 标题“{bp.TitleText}”；点“默认名”恢复");
+                }
+                bool clicked = ClickUitk("[ProductionPanelHost]", "PrPorts");
+                Check(clicked, "通用面板上点“端口…”");
+                SessionState.SetBool(K + "BpPortsClicked", true);
+                return;
+            }
+            if (inStep < 1.2)
             {
                 return;
             }
@@ -6716,6 +6797,7 @@ namespace GameLogic.EditorTools
             {
                 Check(mode != null && mode.IsOpen && mode.SelectedTypeId == null, "右键取消选择（建造模式还开着）");
                 SessionState.SetInt(K + "EnergyPanelClicked", 1);
+                SessionState.SetInt(K + "EnergyGridClicked", 0);
                 ClickWorld(new Vector3(built.X, 0f, built.Y));
                 return;
             }
@@ -6723,8 +6805,24 @@ namespace GameLogic.EditorTools
             {
                 return;
             }
-            PowerPanelUIToolkit panel = PowerPanelUIToolkit.Instance;
             string storeId = Campaign.Regions.HomeValleyLayout.RegionId + ":smoke_power_store";
+            if (SessionState.GetInt(K + "EnergyGridClicked", 0) == 0)
+            {
+                // FG4-ECO-05（FGU-09）：点储能站先打开它的通用面板（状态写储能读数），再点面板上的“电网…”打开电网面板。
+                ProductionPanelUIToolkit bp = ProductionPanelUIToolkit.Instance;
+                bool bpOpen = ProductionPanelUIToolkit.IsOpen && bp != null && bp.PanelVisible && ProductionPanelUIToolkit.BuildingId == storeId;
+                Check(bpOpen && bp.IdentText.Contains(Campaign.Grid.HomeGridService.DisplayName("energy_storage")) && !string.IsNullOrEmpty(bp.ReasonText)
+                      && bp.GridButton != null && ProductionPanelUIToolkit.Visible(bp.GridButton),
+                    $"点建成的储能站打开它的通用面板：“{bp?.IdentText}”状态 {bp?.ShownStatus}“{bp?.ReasonText}”，有“电网…”按钮");
+                SessionState.SetInt(K + "EnergyGridClicked", 1);
+                Check(ClickUitk("[ProductionPanelHost]", "BpGrid"), "通用面板上点“电网…”");
+                return;
+            }
+            if (inStep < 2.9)
+            {
+                return;
+            }
+            PowerPanelUIToolkit panel = PowerPanelUIToolkit.Instance;
             bool open = PowerPanelUIToolkit.IsOpen && panel != null && panel.PanelVisible && panel.StorageBoxVisible && panel.SelectedStorageId == storeId
                         && panel.DischargeField.choices.Count == 5;
             // 修复轮 P2：分类发电图例真按类别写出——曲线已有采样点时必须写“分类发电：”且含归还核心（核心恒在发电）；还没采样时图例为空、标题写“还没有数据”。

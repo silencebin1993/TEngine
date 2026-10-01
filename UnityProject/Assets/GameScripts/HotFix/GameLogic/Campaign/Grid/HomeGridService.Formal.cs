@@ -75,6 +75,8 @@ namespace GameLogic.Campaign.Grid
         /// <summary>FG3-LOG-05：<see cref="Belts"/> 里有几格是管线层的件（含虚影），以及框里储罐的存量合计（毫升）——有存量时拆除会排空，先确认。</summary>
         public int Pipes;
         public long TankFluidMl;
+        /// <summary>FG4-ECO-05（FG-GAP-094）：要拆的生产建筑流体口里存着的流体合计（毫升）——拆除排空、不返还，先确认。</summary>
+        public long BuildingFluidMl;
         /// <summary>要拆（标记 + 取消规划）的关键建筑名（当前语言）。</summary>
         public readonly List<string> CriticalNames = new List<string>();
 
@@ -83,7 +85,8 @@ namespace GameLogic.Campaign.Grid
 
         /// <summary>需要先确认：一次拆除超过 grid.batch_demolish_confirm 座，或其中有关键建筑，或储罐有存量，或拆完会让电网断开 / 建筑失去电网连接
         /// （FGR-LOG-007；FG00 B04；FG-GAP-086）。</summary>
-        public bool NeedsConfirm => BuildingCount > GridContent.TuningInt("grid.batch_demolish_confirm") || CriticalNames.Count > 0 || TankFluidMl > 0 || PowerConsequence;
+        public bool NeedsConfirm => BuildingCount > GridContent.TuningInt("grid.batch_demolish_confirm") || CriticalNames.Count > 0 || TankFluidMl > 0 || BuildingFluidMl > 0
+                                    || PowerConsequence;
 
         // FG3-LOG-06：电力后果按“框里要拆的全部建筑一起拆完”的整体拓扑算；第一次读时才算（拖拽预览不付这笔）。
         private CampaignState _powerState;
@@ -1138,6 +1141,7 @@ namespace GameLogic.Campaign.Grid
             plan.BeltsWithItems = 0;
             plan.Pipes = 0;
             plan.TankFluidMl = 0;
+            plan.BuildingFluidMl = 0;
             plan.ResetPower(state);
             int max = GridContent.TuningInt("grid.drag_max_cells");
             var min = new GridCell(Math.Min(a.X, b.X), Math.Min(a.Y, b.Y));
@@ -1258,6 +1262,7 @@ namespace GameLogic.Campaign.Grid
                 return;
             }
             plan.ToMark.Add(b.BuildingId);
+            plan.BuildingFluidMl += Economy.ProductionService.HeldFluidMl(state, b, null);
             if (g.Critical == 1)
             {
                 plan.CriticalNames.Add(DisplayName(b.BuildingTypeId));

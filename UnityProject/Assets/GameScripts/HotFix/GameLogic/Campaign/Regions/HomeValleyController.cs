@@ -1779,6 +1779,25 @@ namespace GameLogic.Campaign.Regions
         /// 断电电源符号圆）；正常运转不显示。电源类建筑（发电机）不参与用电，不标“断电”。</summary>
         public static string StateIconFor(BuildingRecord building)
         {
+            string icon = FunctionalIconFor(building);
+            // FG4-ECO-05（FGR-ECO-010 不只靠颜色）：升级中（七边形箭头）优先于“正常”；功能上没有别的标记、但耐久没满时挂“受损”（直角方形裂缝）。
+            if (building.ConstructionState == BuildingConstructionState.Operational || building.ConstructionState == BuildingConstructionState.Disabled)
+            {
+                CampaignState st = CampaignSession.Current;
+                if (st != null && building.BuildingId != null && HomeGridService.FindRelocationGhost(st, building.BuildingId) is BuildingRecord g && HomeGridService.IsUpgradeGhost(g))
+                {
+                    return ContentIcons.StateUpgrading;
+                }
+                if (icon == null && Economy.BuildingOps.IsWorn(building))
+                {
+                    return ContentIcons.StateWorn;
+                }
+            }
+            return icon;
+        }
+
+        private static string FunctionalIconFor(BuildingRecord building)
+        {
             if (building.ConstructionState == BuildingConstructionState.Damaged)
             {
                 return ContentIcons.StateDamaged;
@@ -1786,7 +1805,7 @@ namespace GameLogic.Campaign.Regions
             bool consumer = HomeValleyLayout.PowerProfile.ContainsKey(building.BuildingTypeId);
             if (building.ConstructionState == BuildingConstructionState.Disabled)
             {
-                return consumer ? ContentIcons.StateUnpowered : null;
+                return ContentIcons.StateDisabled; // FG4-ECO-05：禁用有自己的形状（五边形横杠），不再借用“断电”。
             }
             if (building.ConstructionState != BuildingConstructionState.Operational)
             {
@@ -2347,8 +2366,11 @@ namespace GameLogic.Campaign.Regions
             string groundItemId = buildingTypeId == null && buildSiteId == null && wreckageNodeId == null ? GroundItemIdFromHit(hit) : null;
             // FG3-LOG-02：点中的是还没建成的虚影 = “去建这个”（交给这台机器现有的施工单），不是“修复”。
             bool ghostSite = clicked != null && IsPlannedGhost(clicked);
+            // FG4-ECO-05（FGR-ECO-013；RTS 右键情境命令）：按实例判断——已摧毁的 = 重建，受损（运转 / 禁用、耐久未满）的 = 维修；
+            // 禁用但耐久满的不是“待修”（禁用是玩家的设置，右键不替玩家开机）。点不到具体记录时沿用 Demo 的按类型修复。
+            bool destroyed = clicked != null && clicked.ConstructionState == BuildingConstructionState.Damaged;
             bool repairable = buildingTypeId != null && buildingTypeId != HomeValleyLayout.BuildingTypeCore && !ghostSite
-                              && (clicked == null || clicked.ConstructionState != BuildingConstructionState.Operational);
+                              && (clicked == null || destroyed || Economy.BuildingOps.IsWorn(clicked));
             bool isWork = buildingTypeId == HomeValleyLayout.BuildingTypeCore || repairable || ghostSite
                           || buildSiteId != null || wreckageNodeId != null || groundItemId != null;
             if (!isWork)
@@ -2384,6 +2406,14 @@ namespace GameLogic.Campaign.Regions
             {
                 CommandWork(moving, destination, "recharge:" + moving.LogicId,
                     () => HomeValleyWorkOrders.TryCreateRecharge(state, moving.LogicId), "充电");
+                return true;
+            }
+            if (repairable && clicked != null && !(destroyed && HomeValleyLayout.RepairProfile.ContainsKey(clicked.BuildingTypeId)))
+            {
+                // 受损的维修（维修件）/ 没有 Demo 修复造价的重建（新建或表里的重建造价）：与面板“维修 / 重建”同一张单，指定这台机器去做。
+                string targetId = clicked.BuildingId;
+                CommandWork(moving, destination, targetId,
+                    () => HomeValleyWorkOrders.TryAssignRepair(state, targetId, moving.LogicId), "修复 " + targetId);
                 return true;
             }
             if (repairable)

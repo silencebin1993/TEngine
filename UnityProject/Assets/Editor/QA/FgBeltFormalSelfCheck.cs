@@ -1448,10 +1448,14 @@ namespace GameLogic.EditorTools
                 GridCell whCell = new GridCell(wh.GridX, wh.GridY);
                 mode.PointerDown(s, whCell);
                 mode.PointerUp(s, whCell);
+                // FG4-ECO-05（FGU-09）：点一下建筑先打开它的通用面板，面板上的“端口…”再打开端口面板（ProductionPanelUIToolkit.OpenPorts 同一调用）。
+                bool viaBuildingPanel = ProductionPanelUIToolkit.LastRequestedId == wh.BuildingId;
+                ProductionPanelUIToolkit.Close();
+                BeltPortPanelUIToolkit.Open(wh.BuildingId);
                 panel.Refresh();
                 int outRow = Enumerable.Range(0, panel.VisibleRowCount).FirstOrDefault(i => panel.RowPortKey(i) == "warehouse.out0");
                 int inRow = Enumerable.Range(0, panel.VisibleRowCount).FirstOrDefault(i => panel.RowPortKey(i) == "warehouse.in0");
-                bool opened = BeltPortPanelUIToolkit.IsOpen && panel.PanelVisible && BeltPortPanelUIToolkit.BuildingId == wh.BuildingId && panel.VisibleRowCount == 2
+                bool opened = viaBuildingPanel && BeltPortPanelUIToolkit.IsOpen && panel.PanelVisible && BeltPortPanelUIToolkit.BuildingId == wh.BuildingId && panel.VisibleRowCount == 2
                               && panel.TitleText.Contains(HomeGridService.DisplayName("warehouse")) && panel.StoreText.Contains("家园仓库")
                               && panel.RowText(outRow, "BpTitle").Contains("输出口") && panel.RowText(outRow, "BpState").Contains("已接上")
                               && panel.RowText(outRow, "BpStats").Contains("已推出") && panel.RowFilterVisible(outRow) && !panel.RowFilterVisible(inRow)
@@ -1469,9 +1473,12 @@ namespace GameLogic.EditorTools
                 GridCell core = HomeGridService.CorePivot(s);
                 mode.PointerDown(s, core);
                 mode.PointerUp(s, core);
-                bool coreOpened = BeltPortPanelUIToolkit.IsOpen && BeltPortPanelUIToolkit.BuildingId == Building(s, "core").BuildingId;
+                bool coreViaPanel = ProductionPanelUIToolkit.LastRequestedId == Building(s, "core").BuildingId;
+                ProductionPanelUIToolkit.Close();
+                BeltPortPanelUIToolkit.Open(Building(s, "core").BuildingId);
+                bool coreOpened = coreViaPanel && BeltPortPanelUIToolkit.IsOpen && BeltPortPanelUIToolkit.BuildingId == Building(s, "core").BuildingId;
                 BeltPortPanelUIToolkit.Close();
-                Expect(esc && coreOpened, "Esc 关闭端口面板；点核心（不能拖动的建筑）同样打开它的端口面板");
+                Expect(esc && coreOpened, "Esc 关闭端口面板；点核心（不能拖动的建筑）同样打开它的面板（FG4-ECO-05 起是通用面板，“端口…”进端口面板）");
 
                 // 施工队列：被摧毁的传送带行 → “重建”按钮。
                 ConstructionQueuePanelUIToolkit qpanel = qgo.AddComponent<ConstructionQueuePanelUIToolkit>();

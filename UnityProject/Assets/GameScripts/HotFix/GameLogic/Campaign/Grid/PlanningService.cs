@@ -149,8 +149,8 @@ namespace GameLogic.Campaign.Grid
                     LastSkipped++;
                     continue;
                 }
-                builder.Add(rec.BuildingTypeId, rec.GridX - min.X, rec.GridY - min.Y, GridMath.NormalizeRotation(rec.Rotation),
-                    s0: PlanSettings.FamilyOf(PlanEntryKind.Building, rec.BuildingTypeId) == PlanSettings.Family.Power ? Math.Max(1, rec.PowerPriority) : 0);
+                PlanSettings.BuildingSettings(state, rec, out int cs0, out int cs1, out int cs2); // FG4-ECO-05：复制带上配方 / 刻录目标。
+                builder.Add(rec.BuildingTypeId, rec.GridX - min.X, rec.GridY - min.Y, GridMath.NormalizeRotation(rec.Rotation), s0: cs0, s1: cs1, s2: cs2);
             }
             SeenTunnels.Clear();
             for (int y = min.Y; y <= mx.Y; y++)
@@ -684,9 +684,10 @@ namespace GameLogic.Campaign.Grid
                     continue;
                 }
                 BuildingRecord b = HomeGridService.FindBuilding(state, r.BuildingId);
-                if (b != null && it.S0 > 0 && PlanSettings.FamilyOf(PlanEntryKind.Building, b.BuildingTypeId) == PlanSettings.Family.Power)
+                if (b != null)
                 {
-                    b.PowerPriority = Math.Max(1, Math.Min(4, it.S0)); // 虚影还没进电网：直接写记录，建成接入时按它仲裁。
+                    // 虚影还没进电网：优先级直接写记录，建成接入时按它仲裁；FG4-ECO-05：配方 / 刻录目标写进这座虚影的生产记录（建成后按它工作）。
+                    PlanSettings.ApplyBuildingSettings(state, b, it.S0, it.S1, it.S2, out _);
                 }
                 result.PlacedBuildings++;
                 result.BuildingIds.Add(r.BuildingId);

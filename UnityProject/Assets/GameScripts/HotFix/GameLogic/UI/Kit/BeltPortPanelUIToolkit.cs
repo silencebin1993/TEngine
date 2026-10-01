@@ -64,6 +64,8 @@ namespace GameLogic.UI.Kit
         public string RowText(int i, string name) => Row(i)?.Q<Label>(name)?.text ?? string.Empty;
         public bool RowLineVisible(int i, string name) => Row(i)?.Q<Label>(name) is Label l && !l.ClassListContains("bp-hidden");
         public DropdownField RowFilter(int i) => Row(i)?.Q<DropdownField>("BpFilter");
+        /// <summary>FG4-ECO-05：第 i 行的“保留 N 件”下拉框。</summary>
+        public DropdownField RowKeep(int i) => Row(i)?.Q<DropdownField>("BpKeep");
         public bool RowFilterVisible(int i) => Row(i)?.Q<VisualElement>("BpFilterBox") is VisualElement f && !f.ClassListContains("bp-hidden");
         public string RowPortKey(int i) => i >= 0 && i < VisibleRowCount && i < _views.Count ? _views[i].PortKey : null;
         public Button CloseButton => _close;
@@ -262,6 +264,12 @@ namespace GameLogic.UI.Kit
                 int index = _rows.Count;
                 DropdownField filter = row.Q<DropdownField>("BpFilter");
                 filter.RegisterValueChangedCallback(evt => OnFilterChosen(index, evt.newValue));
+                DropdownField keep = row.Q<DropdownField>("BpKeep");
+                keep.RegisterValueChangedCallback(evt =>
+                {
+                    int ki = keep.choices.IndexOf(evt.newValue);
+                    SetKeep(index, ki >= 0 && ki < _keeps.Count ? _keeps[ki] : 0);
+                });
                 _list.Add(row);
                 _rows.Add(row);
             }
@@ -294,6 +302,26 @@ namespace GameLogic.UI.Kit
                     if (selected >= 0 && selected < d.choices.Count)
                     {
                         d.SetValueWithoutNotify(d.choices[selected]);
+                    }
+                    // FG4-ECO-05（FG-GAP-093）：保留 N 件。
+                    row.Q<Label>("BpKeepLabel").text = GameText.Get("logistics.port.keep_label");
+                    DropdownField kd = row.Q<DropdownField>("BpKeep");
+                    BeltPortService.KeepPresets(_keeps);
+                    if (!_keeps.Contains(v.Keep))
+                    {
+                        _keeps.Add(v.Keep);
+                    }
+                    var keepNames = new List<string>(_keeps.Count);
+                    foreach (int k in _keeps)
+                    {
+                        keepNames.Add(BeltPortService.KeepName(k));
+                    }
+                    DropdownChoices.Apply(kd, keepNames, keepNames[0]);
+                    kd.SetEnabled(v.Bound);
+                    int ks = _keeps.IndexOf(v.Keep);
+                    if (ks >= 0 && ks < kd.choices.Count)
+                    {
+                        kd.SetValueWithoutNotify(kd.choices[ks]);
                     }
                 }
             }
@@ -356,6 +384,29 @@ namespace GameLogic.UI.Kit
             DropdownField d = _rows[rowIndex].Q<DropdownField>("BpFilter");
             int index = d.choices.IndexOf(value);
             SetFilter(rowIndex, FilterAt(index));
+        }
+
+        private readonly List<int> _keeps = new List<int>(8);
+
+        /// <summary>FG4-ECO-05（FG-GAP-093）：设置第 <paramref name="rowIndex"/> 行（仓库输出口）的“保留 N 件”（下拉框与自检同一入口）。</summary>
+        public bool SetKeep(int rowIndex, int keep)
+        {
+            if (rowIndex < 0 || rowIndex >= _views.Count || BuildingId == null)
+            {
+                return false;
+            }
+            CampaignState state = CampaignSession.Current;
+            bool changed = BeltPortService.TrySetKeep(state, BuildingId, _views[rowIndex].PortKey, keep, out string reason);
+            if (changed)
+            {
+                Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.CommandAck, GameText.Format("logistics.port.keep_done", keep));
+            }
+            else if (!string.IsNullOrEmpty(reason))
+            {
+                Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.Denied, reason);
+            }
+            Refresh();
+            return changed;
         }
 
         /// <summary>设置第 <paramref name="rowIndex"/> 行（仓库输出口）的过滤（下拉框与自检同一入口）。</summary>

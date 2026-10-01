@@ -1237,7 +1237,7 @@ namespace GameLogic.EditorTools
                 panel.Refresh();
                 bool idle = panel.PanelVisible && panel.TitleText.Contains("精炼炉") && panel.StateText.Contains("○ 待机") && panel.ReasonText.Contains("没选配方") && panel.RecipeDropdownVisible
                             && panel.RecipeField.choices.Count == 3 && panel.RecipeField.value == panel.RecipeField.choices[0] && panel.ProgressText.Contains("没有在做")
-                            && panel.HintText.Contains("后续版本") && panel.PlaceholderText.Contains("占位") && GameSettings.HasSeenGuidanceHook(GuidanceHooks.EconomyProductionPanelFirstOpen);
+                            && !panel.HintText.Contains("后续版本") && panel.PlaceholderText.Contains("占位") && GameSettings.HasSeenGuidanceHook(GuidanceHooks.EconomyProductionPanelFirstOpen);
                 // 下拉框选中即生效（UI Toolkit 红线 8）：选“合金（矿）”。
                 panel.RecipeField.value = panel.RecipeField.choices[1];
                 bool chose = P(s, l.Furnace).Recipe?.Id == "alloy_ore" && panel.MessageText.Contains("配方改为");

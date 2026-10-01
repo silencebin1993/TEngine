@@ -234,6 +234,22 @@ namespace GameLogic.Campaign.Feedback
         /// <summary>家园建筑展示名（字幕用），“home_valley:generator”→“发电机”；查不到返回空串。</summary>
         public static string BuildingLabel(string buildingId)
         {
+            // FG4-ECO-05（FGR-ECO-011 改名）：玩家给建筑起了名字时，通知 / 字幕 / 报告都用它。O(建筑数)，只在发通知时。
+            BuildingRecord[] records = CampaignSession.Current?.BuildingRecords;
+            if (records != null && buildingId != null)
+            {
+                foreach (BuildingRecord b in records)
+                {
+                    if (b != null && b.BuildingId == buildingId)
+                    {
+                        if (!string.IsNullOrEmpty(b.CustomName))
+                        {
+                            return b.CustomName;
+                        }
+                        break;
+                    }
+                }
+            }
             string label = MechanicalContentFacade.ResolveWorkOrderTargetLabel(buildingId);
             return label == buildingId ? string.Empty : label;
         }

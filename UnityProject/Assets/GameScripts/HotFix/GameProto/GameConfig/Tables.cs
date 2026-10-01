@@ -119,6 +119,14 @@ public partial class Tables
     /// </summary>
     public fg.TbBuildingPort TbBuildingPort {get; }
     /// <summary>
+    /// 建筑通用
+    /// </summary>
+    public fg.TbBuildingService TbBuildingService {get; }
+    /// <summary>
+    /// 建筑等级
+    /// </summary>
+    public fg.TbBuildingTier TbBuildingTier {get; }
+    /// <summary>
     /// 建造菜单工具
     /// </summary>
     public fg.TbBuildTool TbBuildTool {get; }
@@ -316,6 +324,8 @@ public partial class Tables
         TbBuildingFluidPort = new fg.TbBuildingFluidPort(loader("fg_tbbuildingfluidport"));
         TbBuildingGrid = new fg.TbBuildingGrid(loader("fg_tbbuildinggrid"));
         TbBuildingPort = new fg.TbBuildingPort(loader("fg_tbbuildingport"));
+        TbBuildingService = new fg.TbBuildingService(loader("fg_tbbuildingservice"));
+        TbBuildingTier = new fg.TbBuildingTier(loader("fg_tbbuildingtier"));
         TbBuildTool = new fg.TbBuildTool(loader("fg_tbbuildtool"));
         TbBuildUpgrade = new fg.TbBuildUpgrade(loader("fg_tbbuildupgrade"));
         TbCarrierReading = new fg.TbCarrierReading(loader("fg_tbcarrierreading"));
@@ -390,6 +400,8 @@ public partial class Tables
         TbBuildingFluidPort.ResolveRef(this);
         TbBuildingGrid.ResolveRef(this);
         TbBuildingPort.ResolveRef(this);
+        TbBuildingService.ResolveRef(this);
+        TbBuildingTier.ResolveRef(this);
         TbBuildTool.ResolveRef(this);
         TbBuildUpgrade.ResolveRef(this);
         TbCarrierReading.ResolveRef(this);

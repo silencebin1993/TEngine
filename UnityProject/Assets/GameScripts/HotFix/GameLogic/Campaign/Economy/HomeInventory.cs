@@ -102,7 +102,8 @@ namespace GameLogic.Campaign.Economy
             switch (item.Form)
             {
                 case ItemForm.Solid:
-                    int warehouse = warehouseOperational ? HomeValleyLayout.WarehouseCapacity : 0;
+                    // FG4-ECO-05：仓库容量按每座的等级（T1 300 / T2 600 / T3 1000）与“只存哪些物品”过滤合计（DEBT-FG4ECO01-03）。
+                    int warehouse = warehouseOperational ? BuildingOps.WarehouseCapacityFor(state, item) : 0;
                     return item.Id == ItemCatalog.ScrapId ? HomeValleyLayout.CoreCacheCapacity + warehouse : warehouse;
                 case ItemForm.Vault:
                     return VaultCapacity;

@@ -36,6 +36,10 @@ namespace GameLogic.UI.Common
         /// <summary>FG4-ECO-02（FGR-ECO-010）：生产建筑缺料 / 缺流体（圆角方形 + 空框）与待机（没选配方，六边形 + 暂停竖杠）。</summary>
         public const string StateStarved = "icon_state_starved";
         public const string StateIdle = "icon_state_idle";
+        /// <summary>FG4-ECO-05（FGR-ECO-010）：禁用（五边形 + 横杠）、升级中（七边形 + 向上箭头）、受损但照常工作（直角方形 + 裂缝）。</summary>
+        public const string StateDisabled = "icon_state_disabled";
+        public const string StateUpgrading = "icon_state_upgrading";
+        public const string StateWorn = "icon_state_worn";
 
         /// <summary>世界目标标记（定位针）：当前目标下一步要去的位置。</summary>
         public const string ObjectiveMarker = "icon_objective_marker";
@@ -103,6 +107,9 @@ namespace GameLogic.UI.Common
             ids.Add(StateLinkEdge);
             ids.Add(StateStarved);
             ids.Add(StateIdle);
+            ids.Add(StateDisabled);
+            ids.Add(StateUpgrading);
+            ids.Add(StateWorn);
             ids.Add(ObjectiveMarker);
             ids.Add(VfxBurst);
             ids.Add(VfxRing);

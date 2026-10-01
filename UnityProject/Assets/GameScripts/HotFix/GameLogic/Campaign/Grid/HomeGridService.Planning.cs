@@ -48,17 +48,63 @@ namespace GameLogic.Campaign.Grid
             return 0;
         }
 
+        /// <summary>
+        /// FG4-ECO-05（FGR-ECO-012）：这座建筑升一级升到什么——有等级的建筑（fg.TbBuildingTier：仓库、信号塔）升到同类型的下一级（<paramref name="toTier"/> &gt; 0）；
+        /// 其余按升级路线换成高一级的类型（<paramref name="toTier"/> = 0，FG3-LOG-07 的电塔 T1 → T2）。只看表与解锁，不看状态。
+        /// </summary>
+        public static bool TryUpgradeTarget(CampaignState state, BuildingRecord b, out string toTypeId, out int toTier, out GridReason reason)
+        {
+            toTier = 0;
+            if (b != null && Economy.BuildingOps.HasTiers(b.BuildingTypeId))
+            {
+                toTypeId = null;
+                reason = GridReason.Of(GridBlockReason.NoUpgrade);
+                int cur = Economy.BuildingOps.TierOf(b);
+                GameConfig.fg.BuildingTier next = Economy.BuildingOps.TierRow(b.BuildingTypeId, cur + 1);
+                if (next == null)
+                {
+                    return false;
+                }
+                if (!BuildCatalog.IsUnlocked(state, next.UnlockRule))
+                {
+                    reason = new GridReason(GridBlockReason.UpgradeLocked, "plan.reason.upgrade_locked", Economy.BuildingOps.TierName(b.BuildingTypeId, next.Tier), next.UnlockHintKey);
+                    return false;
+                }
+                toTypeId = b.BuildingTypeId;
+                toTier = next.Tier;
+                return true;
+            }
+            return TryUpgradeTarget(state, b?.BuildingTypeId, out toTypeId, out reason);
+        }
+
+        /// <summary>FG4-ECO-05：一座建筑升一级的差额与工期（有等级的建筑按 fg.TbBuildingTier；其余按新旧类型造价之差）。</summary>
+        public static int UpgradeCost(BuildingRecord b, string toTypeId, int toTier, out float seconds)
+        {
+            if (toTier > 0 && b != null)
+            {
+                GameConfig.fg.BuildingTier row = Economy.BuildingOps.TierRow(b.BuildingTypeId, toTier);
+                seconds = Math.Max(0.1f, row?.Seconds ?? 1f);
+                return Math.Max(0, row?.DiffScrap ?? 0);
+            }
+            return UpgradeDiff(b?.BuildingTypeId, toTypeId, out seconds);
+        }
+
         /// <summary>这座建筑现在能不能升级（状态检查）：已建成运转 / 玩家关停，没在搬迁 / 升级 / 拆除 / 维修；返回拒绝原因。</summary>
-        public static bool CanUpgradeNow(CampaignState state, BuildingRecord b, out string toTypeId, out GridReason reason)
+        public static bool CanUpgradeNow(CampaignState state, BuildingRecord b, out string toTypeId, out GridReason reason) =>
+            CanUpgradeNow(state, b, out toTypeId, out _, out reason);
+
+        /// <summary>同上，另给出目标等级（有等级的建筑 &gt; 0）。</summary>
+        public static bool CanUpgradeNow(CampaignState state, BuildingRecord b, out string toTypeId, out int toTier, out GridReason reason)
         {
             toTypeId = null;
+            toTier = 0;
             reason = GridReason.Of(GridBlockReason.NoBuilding);
             if (b == null || b.BuildingTypeId == HomeValleyLayout.BuildingTypeCore || IsRelocationGhost(b))
             {
                 reason = GridReason.Of(GridBlockReason.NoUpgrade);
                 return false;
             }
-            if (!TryUpgradeTarget(state, b.BuildingTypeId, out toTypeId, out reason))
+            if (!TryUpgradeTarget(state, b, out toTypeId, out toTier, out reason))
             {
                 return false;
             }
@@ -82,13 +128,13 @@ namespace GameLogic.Campaign.Grid
         }
 
         /// <summary>
-        /// 原地升级一座建筑（升级规划的建筑部分）：生成升级目标虚影 + 施工单（差额取料）。返回 <see cref="GridOpResult.Kind.UpgradePlanned"/>（BuildingId = 虚影 ID）。
-        /// 占地必须仍然合法（升级路线保证新旧占地相同；出口 / 障碍按新类型再核一次）。
+        /// 原地升级一座建筑（升级规划的建筑部分、建筑面板的“升级”按钮）：生成升级目标虚影 + 施工单（差额取料）。返回 <see cref="GridOpResult.Kind.UpgradePlanned"/>（BuildingId = 虚影 ID）。
+        /// 占地必须仍然合法（升级路线保证新旧占地相同；出口 / 障碍按新类型再核一次）。FG4-ECO-05：有等级的建筑虚影类型不变、带目标等级。
         /// </summary>
         public static GridOpResult TryUpgrade(CampaignState state, string buildingId)
         {
             BuildingRecord b = FindBuilding(state, buildingId);
-            if (!CanUpgradeNow(state, b, out string toType, out GridReason why))
+            if (!CanUpgradeNow(state, b, out string toType, out int toTier, out GridReason why))
             {
                 return GridOpResult.Fail(why);
             }
@@ -98,9 +144,9 @@ namespace GameLogic.Campaign.Grid
             {
                 return GridOpResult.Fail(check.Reasons[0], check);
             }
-            int diff = UpgradeDiff(b.BuildingTypeId, toType, out float seconds);
+            int diff = UpgradeCost(b, toType, toTier, out float seconds);
             string ghostId = b.BuildingId + UpgradeGhostSuffix;
-            HomeValleyWorkOrders.WorkOrderOpResult order = HomeValleyWorkOrders.TryCreateUpgradeAt(state, b, ghostId, toType, diff, seconds);
+            HomeValleyWorkOrders.WorkOrderOpResult order = HomeValleyWorkOrders.TryCreateUpgradeAt(state, b, ghostId, toType, diff, seconds, toTier);
             if (!order.Success)
             {
                 return GridOpResult.Fail(GridReason.Of(GridBlockReason.Busy), check);

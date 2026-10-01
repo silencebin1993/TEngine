@@ -70,6 +70,8 @@ namespace GameLogic.Campaign.Logistics
             public bool Connected;
             public int PortId = -1;
             public int Filter = FilterAll;
+            /// <summary>FG4-ECO-05（FG-GAP-093）：仓库输出口“每种至少留 N 件”。</summary>
+            public int Keep;
             public BeltPortInfo Info;
             public string Title;
             public string StateLine;
@@ -592,6 +594,7 @@ namespace GameLogic.Campaign.Logistics
                     {
                         continue;
                     }
+                    int keep = Math.Max(0, bind.Record.Keep); // FG4-ECO-05（FG-GAP-093）：每种在家园库存里至少留 keep 件。
                     ushort item = filter > 0 ? ItemForFilter(filter) : kind;
                     if (filter == FilterAll)
                     {
@@ -601,7 +604,7 @@ namespace GameLogic.Campaign.Logistics
                         {
                             continue;
                         }
-                        ushort next = NextStocked(state, kind);
+                        ushort next = NextStocked(state, kind, keep);
                         if (next != 0 && next != kind)
                         {
                             k.SetSourceItem(bind.PortId, next);
@@ -613,7 +616,8 @@ namespace GameLogic.Campaign.Logistics
                     {
                         continue;
                     }
-                    int take = Economy.HomeInventory.RemoveUpTo(state, def, sourceBuffer - Math.Max(0, pending));
+                    int take = Economy.HomeInventory.RemoveUpTo(state, def, Math.Min(sourceBuffer - Math.Max(0, pending),
+                        Math.Max(0, Economy.HomeInventory.Stock(state, def) - keep)));
                     if (take > 0)
                     {
                         k.AddSourceItems(bind.PortId, take);
@@ -650,7 +654,7 @@ namespace GameLogic.Campaign.Logistics
         }
 
         /// <summary>“全部可存物品”的下一种：按物品表顺序，从 <paramref name="after"/> 的下一种开始找第一种有库存的（转一圈都没有返回 0）。O(物品种类)，只在一批推完时调用。</summary>
-        private static ushort NextStocked(CampaignState state, ushort after)
+        private static ushort NextStocked(CampaignState state, ushort after, int keep = 0)
         {
             IReadOnlyList<Economy.ItemDef> items = Economy.ItemCatalog.Items;
             int n = items.Count;
@@ -666,7 +670,7 @@ namespace GameLogic.Campaign.Logistics
             for (int step = 0; step < n; step++)
             {
                 Economy.ItemDef d = items[(start + step) % n];
-                if (Economy.HomeInventory.IsBeltStorable(d) && Economy.HomeInventory.Stock(state, d) > 0)
+                if (Economy.HomeInventory.IsBeltStorable(d) && Economy.HomeInventory.Stock(state, d) > keep)
                 {
                     return d.BeltId;
                 }
@@ -675,8 +679,52 @@ namespace GameLogic.Campaign.Logistics
         }
 
         /// <summary>输出口按过滤此刻有没有可推的库存（“全部”= 任何一种可存物品都没有）。</summary>
-        public static bool OutputStockEmpty(CampaignState state, int filter) =>
-            filter == FilterAll ? NextStocked(state, 0) == 0 : BeltItems.Stock(state, ItemForFilter(filter)) <= 0;
+        public static bool OutputStockEmpty(CampaignState state, int filter, int keep = 0) =>
+            filter == FilterAll ? NextStocked(state, 0, keep) == 0 : BeltItems.Stock(state, ItemForFilter(filter)) <= keep;
+
+        /// <summary>
+        /// FG4-ECO-05（FG-GAP-093）：设置仓库输出口“保留 N 件”——每种物品在家园库存里至少留 N 件，多出来的才推上传送带（0 = 不保留）。
+        /// 立刻生效（下一步起按新数补货；已经推上带的不收回）。返回是否改了；不能改时写明原因。
+        /// </summary>
+        public static bool TrySetKeep(CampaignState state, string buildingId, string portKey, int keep, out string reason)
+        {
+            reason = null;
+            EnsureIndex(state);
+            if (!ByKey.TryGetValue(KeyOf(buildingId, portKey), out Binding bind) || bind.Record == null)
+            {
+                reason = GameText.Get("logistics.reason.port_not_found");
+                return false;
+            }
+            if (!bind.IsOutput || !bind.Store)
+            {
+                reason = GameText.Get("logistics.port.role_none");
+                return false;
+            }
+            keep = Math.Max(0, keep);
+            if (bind.Record.Keep == keep)
+            {
+                return false;
+            }
+            bind.Record.Keep = keep;
+            Revision++;
+            return true;
+        }
+
+        /// <summary>“保留 N 件”下拉的预设（logistics.port.keep.1～6；0 = 不保留排第一）。</summary>
+        public static void KeepPresets(List<int> into)
+        {
+            into.Clear();
+            into.Add(0);
+            for (int i = 1; i <= 6; i++)
+            {
+                if (GridContent.TryGetTuning("logistics.port.keep." + i.ToString(CultureInfo.InvariantCulture), out float v) && v > 0f && !into.Contains(Mathf.RoundToInt(v)))
+                {
+                    into.Add(Mathf.RoundToInt(v));
+                }
+            }
+        }
+
+        public static string KeepName(int keep) => keep <= 0 ? GameText.Get("logistics.port.keep_none") : GameText.Format("logistics.port.keep_n", keep);
 
         /// <summary>FG4-ECO-01 读档迁移：FG3-LOG-03 起的存档里仓库输入口“只收废料”，改成“全部可存物品（一次一种）”；缓存里已有的件就是废料（内核迁移时记下）。
         /// FG4-ECO-03：装配站输入口从“什么都不收”改成收机器材料。
@@ -912,6 +960,7 @@ namespace GameLogic.Campaign.Logistics
                     v.Bound = true;
                     v.PortId = bind.PortId;
                     v.Filter = bind.Record?.Filter ?? FilterAll;
+                    v.Keep = bind.Record?.Keep ?? 0;
                     v.Info = info;
                     v.Connected = info.Connected;
                 }
@@ -965,6 +1014,13 @@ namespace GameLogic.Campaign.Logistics
                         {
                             v.IssueLine = GameText.Format("logistics.port.store_full_item", inDef.Name, Economy.HomeInventory.Stock(state, inDef),
                                 Economy.HomeInventory.Capacity(state, inDef));
+                        }
+                        else if (v.IsOutput && v.Filter != FilterOff && v.Info.Pending <= 0 && v.Keep > 0 && !OutputStockEmpty(state, v.Filter)
+                                 && OutputStockEmpty(state, v.Filter, v.Keep))
+                        {
+                            // FG4-ECO-05（FG-GAP-093）：有库存，只是没超过“保留 N 件”——写明是保留数拦住的，不是没货。
+                            ushort it = v.Filter > 0 ? ItemForFilter(v.Filter) : NextStocked(state, 0);
+                            v.IssueLine = GameText.Format("logistics.port.state.keeping", BeltItems.Name(it), BeltItems.Stock(state, it), v.Keep);
                         }
                         else if (v.IsOutput && v.Filter != FilterOff && v.Info.Pending <= 0 && OutputStockEmpty(state, v.Filter))
                         {

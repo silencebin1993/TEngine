@@ -145,6 +145,9 @@ namespace GameLogic.Campaign.Economy
             public bool InPortExists;
             public bool OutPortExists;
             public bool WorkedThisStep;
+            /// <summary>FG4-ECO-05：理论份数累加的余数（千分份 × 周期步数的零头，不在每步截断；周期变了就清零）与它对应的周期步数。运行时量，不存档（最多差 1/1000 份）。</summary>
+            public long TheoryRem;
+            public long TheoryCycle;
             /// <summary>FG4-ECO-03：原因里的固件（刻录台的刻录目标）。</summary>
             public string ReasonTarget;
             /// <summary>FG4-ECO-03：这座建筑是固件刻录台（唯一配方的种类是 firmware：产出是固件芯片，进固件库）。</summary>
@@ -866,6 +869,11 @@ namespace GameLogic.Campaign.Economy
         public static void Step(CampaignState state, int ticks, int worldHz)
         {
             EnsureIndex(state);
+            // FG4-ECO-05：效率统计的桶长、桶数、当前桶号每个生产步只算一次（逐建筑累加时不再查调参表）。
+            _statWorldHz = Math.Max(1, worldHz);
+            _statBucketTicks = StatBucketTicks(_statWorldHz);
+            _statBuckets = StatBuckets;
+            _statIndex = GameClock.Ticks / _statBucketTicks;
             _fwStorageKnown = false; // FG4-ECO-03：固件芯片存放的数量 / 容量每个生产步最多数一次（刻录台要用时才数）。
             long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
             double vibrationRate = 0;
@@ -931,6 +939,7 @@ namespace GameLogic.Campaign.Economy
         {
             p.WorkedThisStep = false;
             BuildingRecord b = p.Building;
+            AccrueTheory(p, ticks, worldHz);
             switch (b.ConstructionState)
             {
                 case BuildingConstructionState.Operational:
@@ -1187,6 +1196,7 @@ namespace GameLogic.Campaign.Economy
                     }
                 }
             }
+            RecordCompletion(p);
             r.Completed++;
             r.Running = false;
             r.Progress = 0;
@@ -2350,6 +2360,235 @@ namespace GameLogic.Campaign.Economy
                 message += "\n" + GameText.Format("prod.panel.recipe_returned", returned);
             }
             return true;
+        }
+
+        // ── FG4-ECO-05：效率与最近 10 分钟产出（FGR-ECO-011；按桶聚合，不每帧遍历）────────────────────────
+
+        /// <summary>每桶多少游戏步（building.stats.bucket_seconds × 世界频率）。</summary>
+        public static long StatBucketTicks(int worldHz) => Math.Max(1L, (long)Math.Round(Math.Max(1.0, GridContent.Tuning("building.stats.bucket_seconds")) * Math.Max(1, worldHz)));
+
+        /// <summary>窗口有几桶（building.stats.window_minutes × 60 ÷ 桶长）。</summary>
+        public static int StatBuckets => Math.Max(1, (int)Math.Round(Math.Max(1.0, GridContent.Tuning("building.stats.window_minutes")) * 60.0
+                                                                    / Math.Max(1.0, GridContent.Tuning("building.stats.bucket_seconds"))));
+
+        /// <summary>这座建筑有没有“效率”（按配方 / 周期生产的：配方建筑、提取钻、回收站；连续工作的废液池 / 流体泵 / 燃油发电机没有）。</summary>
+        public static bool HasEfficiency(Producer p) =>
+            p != null && (p.Def.Mode == ProducerMode.Recipe || p.Def.Mode == ProducerMode.Drill || p.Def.Mode == ProducerMode.Recycler);
+
+        /// <summary>满速一份要几步（没选配方 = 0：不计理论份数）。
+        /// 回收站一份的时长看它在做什么（审查 P1）：分解送来的物品按 ItemSeconds、拆脚下废墟按 CycleSeconds——正在做的那一份按它实际的时长，
+        /// 空闲时按“下一份会做什么”（输入口有物品 = 分解，否则 = 拆废墟）。</summary>
+        private static long CycleTicks(Producer p, int worldHz)
+        {
+            switch (p.Def.Mode)
+            {
+                case ProducerMode.Recipe:
+                    RecipeDef r = p.Recipe ?? p.Def.FixedRecipe;
+                    return r == null || (p.IsBurner && string.IsNullOrEmpty(p.Rec.BurnTarget)) ? 0 : Math.Max(1, r.DurationTicks(worldHz));
+                case ProducerMode.Drill:
+                    return Math.Max(1, (long)Math.Round(p.Def.CycleSeconds * Math.Max(1, worldHz)));
+                case ProducerMode.Recycler:
+                    ProducerRecord rec = p.Rec;
+                    if (rec.Running && rec.Duration > 0)
+                    {
+                        return rec.Duration;
+                    }
+                    float sec = FirstNonEmpty(rec.In) != null ? p.Def.ItemSeconds : p.Def.CycleSeconds;
+                    return Math.Max(1, (long)Math.Round(sec * Math.Max(1, worldHz)));
+                default:
+                    return 0;
+            }
+        }
+
+        private static int _statWorldHz;
+        private static long _statBucketTicks = 1;
+        private static int _statBuckets = 1;
+        private static long _statIndex;
+
+        /// <summary>当前桶（桶号由 <see cref="Step"/> 开头算好；不在生产步里调用时现算）。</summary>
+        private static ProducerStatBucket Bucket(ProducerRecord r, int worldHz)
+        {
+            if (_statWorldHz != Math.Max(1, worldHz))
+            {
+                _statWorldHz = Math.Max(1, worldHz);
+                _statBucketTicks = StatBucketTicks(_statWorldHz);
+                _statBuckets = StatBuckets;
+                _statIndex = GameClock.Ticks / _statBucketTicks;
+            }
+            int n = _statBuckets;
+            if (r.Stats == null || r.Stats.Length != n)
+            {
+                var next = new ProducerStatBucket[n];
+                for (int i = 0; i < n; i++)
+                {
+                    next[i] = new ProducerStatBucket();
+                }
+                r.Stats = next;
+            }
+            long idx = _statIndex;
+            ProducerStatBucket b = r.Stats[(int)(idx % n)] ?? (r.Stats[(int)(idx % n)] = new ProducerStatBucket());
+            if (b.Index != idx)
+            {
+                b.Index = idx;
+                b.Done = 0;
+                b.TheoryMilli = 0;
+                b.Out = Array.Empty<ItemStackRecord>();
+            }
+            return b;
+        }
+
+        /// <summary>推进时累加“理论份数”：建成了（运转 / 禁用 / 缺电……都算停工，拉低效率）就按满速计；施工中、已摧毁不计。</summary>
+        private static void AccrueTheory(Producer p, int ticks, int worldHz)
+        {
+            if (!HasEfficiency(p))
+            {
+                return;
+            }
+            BuildingConstructionState cs = p.Building.ConstructionState;
+            if (cs != BuildingConstructionState.Operational && cs != BuildingConstructionState.Disabled)
+            {
+                return;
+            }
+            long cycle = CycleTicks(p, Math.Max(1, worldHz));
+            if (cycle <= 0)
+            {
+                return;
+            }
+            // 不在每步截断（审查 P1：步长 3、20 秒配方每步应加 2.5 千分份，截断成 2 会让满速显示 125%）：余数留到下一步。
+            if (p.TheoryCycle != cycle)
+            {
+                p.TheoryCycle = cycle;
+                p.TheoryRem = 0;
+            }
+            long num = ticks * 1000L + p.TheoryRem;
+            p.TheoryRem = num % cycle;
+            Bucket(p.Rec, worldHz).TheoryMilli += num / cycle;
+        }
+
+        /// <summary>完成一份：份数与产出记进当前桶。</summary>
+        private static void RecordCompletion(Producer p)
+        {
+            if (!HasEfficiency(p))
+            {
+                return;
+            }
+            ProducerRecord r = p.Rec;
+            ProducerStatBucket b = Bucket(r, _statWorldHz);
+            b.Done++;
+            if (p.Def.Mode == ProducerMode.Recipe && p.Recipe != null)
+            {
+                foreach (RecipeLine l in p.Recipe.Lines)
+                {
+                    if (l.Role != RecipeRole.In && l.Item != null)
+                    {
+                        Add(ref b.Out, l.Item.Id, Math.Max(1, l.Amount));
+                    }
+                }
+            }
+            else if (!string.IsNullOrEmpty(r.PendingItem) && r.PendingAmount > 0)
+            {
+                Add(ref b.Out, p.Def.Mode == ProducerMode.Recycler ? ItemCatalog.ScrapId : r.PendingItem, r.PendingAmount);
+            }
+        }
+
+        /// <summary>
+        /// 最近窗口（building.stats.window_minutes）的统计：完成份数、理论份数 × 1000、各产出合计（写进 <paramref name="outputs"/>）。
+        /// 返回 false = 不适用（没有效率的建筑）。O(桶数 × 产出种类)，只在面板刷新时。
+        /// </summary>
+        public static bool TryWindowStats(Producer p, List<ItemStackRecord> outputs, out int done, out long theoryMilli)
+        {
+            done = 0;
+            theoryMilli = 0;
+            outputs?.Clear();
+            if (!HasEfficiency(p))
+            {
+                return false;
+            }
+            int n = StatBuckets;
+            long now = GameClock.Ticks / StatBucketTicks(GameClock.StepHz);
+            foreach (ProducerStatBucket b in p.Rec.Stats ?? Array.Empty<ProducerStatBucket>())
+            {
+                if (b == null || b.Index < 0 || b.Index > now || b.Index <= now - n)
+                {
+                    continue;
+                }
+                done += b.Done;
+                theoryMilli += b.TheoryMilli;
+                if (outputs == null)
+                {
+                    continue;
+                }
+                foreach (ItemStackRecord o in b.Out ?? Array.Empty<ItemStackRecord>())
+                {
+                    if (o == null || o.Amount <= 0)
+                    {
+                        continue;
+                    }
+                    ItemStackRecord into = outputs.Find(x => x.ItemId == o.ItemId);
+                    if (into == null)
+                    {
+                        outputs.Add(new ItemStackRecord { ItemId = o.ItemId, Amount = o.Amount });
+                    }
+                    else
+                    {
+                        into.Amount += o.Amount;
+                    }
+                }
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// FG4-ECO-05（FG-GAP-094）：这座建筑流体口里此刻存着的流体（输入口缓存、输出口存量、口没登记时留在建筑身上的）合计毫升；
+        /// <paramref name="describe"/> 不为空时按“燃油 12 升”逐种写进去。不是生产建筑 / 没有流体口 = 0。O(流体口数)。
+        /// </summary>
+        public static long HeldFluidMl(CampaignState state, BuildingRecord b, List<string> describe)
+        {
+            describe?.Clear();
+            if (b == null || !TryGet(state, b.BuildingId, out Producer p) || p.Fluids.Length == 0)
+            {
+                return 0;
+            }
+            PipeKernel k = PipeNetworkService.IsRunning ? PipeNetworkService.Kernel : null;
+            long total = 0;
+            for (int i = 0; i < p.Fluids.Length; i++)
+            {
+                long ml = p.Rec.FluidHeld != null && i < p.Rec.FluidHeld.Length ? Math.Max(0, p.Rec.FluidHeld[i]) : 0;
+                int h = p.Rec.FluidHandles != null && i < p.Rec.FluidHandles.Length ? p.Rec.FluidHandles[i] : -1;
+                if (k != null && h >= 0)
+                {
+                    if (p.Fluids[i].Def.IsOutput && k.TryGetProducer(h, out PipeProducerInfo pi))
+                    {
+                        ml += Math.Max(0, pi.StockMl);
+                    }
+                    else if (!p.Fluids[i].Def.IsOutput && k.TryGetConsumer(h, out PipeConsumerInfo ci))
+                    {
+                        ml += Math.Max(0, ci.BufferMl);
+                    }
+                }
+                if (ml >= 1000)
+                {
+                    total += ml;
+                    describe?.Add(GameText.Format("prod.panel.stack_fluid_held", p.Fluids[i].Fluid?.Name ?? GameText.Get("prod.panel.fluid_any"),
+                        (ml / 1000).ToString(CultureInfo.InvariantCulture)));
+                }
+            }
+            return total;
+        }
+
+        /// <summary>FG4-ECO-05（FG-GAP-095“清空缓存到仓库”）：输入 / 输出缓存送回仓库（放不下的落在建筑旁边成为地面物，机器之后搬走）；正在做的那一份不动。返回件数。</summary>
+        public static int ReturnAllBuffers(CampaignState state, Producer p, string dropId)
+        {
+            if (state == null || p == null)
+            {
+                return 0;
+            }
+            int n = ReturnBuffers(state, p.Rec, p.Building.Position, dropId);
+            if (n > 0)
+            {
+                Revision++;
+            }
+            return n;
         }
 
         // ── 拆除 / 退回 ──────────────────────────────────────────────────────────

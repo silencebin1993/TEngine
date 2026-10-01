@@ -458,6 +458,31 @@ namespace GameLogic.Campaign.Economy
 
         public static bool IsStation(BuildingRecord b) => b != null && b.BuildingTypeId == HomeValleyLayout.BuildingTypeAssemblyStation;
 
+        /// <summary>FG4-ECO-05（FG-GAP-095）：装配站的材料缓存全部送回仓库（放不下的落在装配站旁边成为地面物，机器之后搬走）。已经取走、正在装配的材料不动。返回件数。</summary>
+        public static int ReturnBuffer(CampaignState state, BuildingRecord station, string dropId)
+        {
+            ItemStackRecord[] buf = Buffer(state);
+            int n = 0;
+            int k = 0;
+            foreach (ItemStackRecord s in buf)
+            {
+                if (s == null || s.Amount <= 0 || string.IsNullOrEmpty(s.ItemId))
+                {
+                    continue;
+                }
+                HomeValleyConstruction.ReturnMaterials(state, station?.Position ?? HomeValleyLayout.CameraFocusStart, ItemCatalog.ResourceTypeOf(s.ItemId), s.Amount,
+                    dropId + ":asm:" + (k++).ToString(CultureInfo.InvariantCulture));
+                n += s.Amount;
+                s.Amount = 0;
+            }
+            if (n > 0)
+            {
+                PortJamItem = null;
+                Revision++;
+            }
+            return n;
+        }
+
         // ── 输入口（BeltPortService.Pump → ProductionService.PumpPort → 这里；每个传送带内核步一次，O(1)）────────────────────
 
         /// <summary>

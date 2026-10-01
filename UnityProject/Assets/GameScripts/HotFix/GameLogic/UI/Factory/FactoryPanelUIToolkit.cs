@@ -385,16 +385,7 @@ namespace GameLogic.UI.Factory
             return ChassisCatalog.TryGet(archetype, out MechanicalContentDef def) ? def.DisplayName : chassisId;
         }
 
-        private static string ResolveBlueprintDisplayName(string blueprintId)
-        {
-            if (HomeValleyLayout.FactoryProduceDefaults.TryGetValue(blueprintId, out HomeValleyLayout.ProduceBlueprintDefault def)
-                && !string.IsNullOrEmpty(def.DisplayName))
-            {
-                return def.DisplayName;
-            }
-            BlueprintRecord bp = BlueprintEditorService.Find(CampaignSession.Current, blueprintId);
-            return !string.IsNullOrEmpty(bp?.DisplayName) ? bp.DisplayName : blueprintId;
-        }
+        private static string ResolveBlueprintDisplayName(string blueprintId) => HomeValleyFactory.BlueprintDisplayName(CampaignSession.Current, blueprintId);
 
         private void OnCancelClicked()
         {

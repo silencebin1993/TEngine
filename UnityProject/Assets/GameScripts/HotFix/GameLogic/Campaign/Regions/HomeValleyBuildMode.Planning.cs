@@ -444,7 +444,7 @@ namespace GameLogic.Campaign.Regions
                     return LastResult;
                 }
                 rotation = GridMath.NormalizeRotation(b.Rotation);
-                s0 = PlanSettings.FamilyOf(PlanEntryKind.Building, id) == PlanSettings.Family.Power ? Math.Max(1, b.PowerPriority) : 0;
+                PlanSettings.BuildingSettings(state, b, out s0, out s1, out s2); // FG4-ECO-05：吸管带上优先级、配方、刻录目标。
             }
             else if (PlanSettings.TryReadPiece(state, cell, out _, out id, out s0, out s1, out s2))
             {

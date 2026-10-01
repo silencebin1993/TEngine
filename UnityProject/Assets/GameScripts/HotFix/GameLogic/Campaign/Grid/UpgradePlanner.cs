@@ -93,18 +93,18 @@ namespace GameLogic.Campaign.Grid
                 {
                     continue;
                 }
-                if (!GridContent.TryGetUpgrade(rec.BuildingTypeId, out _))
+                if (!GridContent.TryGetUpgrade(rec.BuildingTypeId, out _) && !Economy.BuildingOps.HasTiers(rec.BuildingTypeId))
                 {
-                    continue; // 没有升级路线的建筑（大多数）不算“不能升”，不计入原因。
+                    continue; // 没有升级路线 / 等级的建筑（大多数）不算“不能升”，不计入原因。
                 }
-                if (!HomeGridService.CanUpgradeNow(state, rec, out string to, out GridReason why))
+                if (!HomeGridService.CanUpgradeNow(state, rec, out string to, out int toTier, out GridReason why))
                 {
                     Refuse(plan, why);
                     continue;
                 }
                 plan.Buildings.Add(rec.BuildingId);
                 plan.BuildingTargets.Add(to);
-                plan.Cost += HomeGridService.UpgradeDiff(rec.BuildingTypeId, to, out _);
+                plan.Cost += HomeGridService.UpgradeCost(rec, to, toTier, out _); // FG4-ECO-05：有等级的建筑（仓库 / 信号塔）按 fg.TbBuildingTier 的差额。
             }
             var upgrading = new HashSet<long>();
             foreach (PlannedBeltRecord p in state.Grid?.PlannedBelts ?? Array.Empty<PlannedBeltRecord>())

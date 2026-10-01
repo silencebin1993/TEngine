@@ -1105,7 +1105,8 @@ namespace GameLogic.Campaign.Grid
                 return false;
             }
             return (GridContent.TryGetBuilding(b.BuildingTypeId, out BuildingGrid g) && g.Critical == 1)
-                   || HomeValleyPowerGrid.TryGetRemovalImpact(state, buildingId, out _, out _, out _);
+                   || HomeValleyPowerGrid.TryGetRemovalImpact(state, buildingId, out _, out _, out _)
+                   || Economy.ProductionService.HeldFluidMl(state, b, null) > 0; // FG4-ECO-05（FG-GAP-094）：流体口里有存量，拆除会排空。
         }
 
         /// <summary>

@@ -654,6 +654,14 @@ namespace GameLogic.EditorTools
 
         private static void Seconds(float sec) => FgProductionSelfCheck.Seconds(sec);
 
+        /// <summary>FG4-ECO-05：通用面板“电网…”按钮做的事（ProductionPanelUIToolkit.OpenGrid：收起通用面板、打开电网面板并选中这座）。</summary>
+        private static bool OpenGridFromBuildingPanel(string buildingId)
+        {
+            ProductionPanelUIToolkit.Close();
+            PowerPanelUIToolkit.OpenFor(buildingId);
+            return true;
+        }
+
         private static bool StepUntil(Func<bool> done, int maxGameSeconds) => FgProductionSelfCheck.StepUntil(done, maxGameSeconds);
 
         private static int NotifyCount(string typeId) => NotificationCenter.History.Where(n => n.Type != null && n.Type.Id == typeId).Sum(n => n.Count);
@@ -1046,9 +1054,10 @@ namespace GameLogic.EditorTools
                     $"F6 储能站一节（卡片“储能站的充放电设置”）：列出“{panel.StoragesText}”；放电对象下拉框 5 项（所有建筑 / 只给优先级 1～3 / 1～2 / 1 / 不放电），选中即生效；“关掉充电 / 打开充电”；“定位储能站”");
                 // 点太阳能阵列也打开面板并选中它的电网；没有储能的电网写“没有储能站”。
                 PowerPanelUIToolkit.Close();
-                bool viaClick = HomeValleyBuildMode.Current != null && HomeValleyBuildMode.Current.OpenPortPanel(s, sol.BuildingId) && PowerPanelUIToolkit.IsOpen
+                bool viaClick = HomeValleyBuildMode.Current != null && HomeValleyBuildMode.Current.OpenPortPanel(s, sol.BuildingId)
+                                && ProductionPanelUIToolkit.LastRequestedId == sol.BuildingId && OpenGridFromBuildingPanel(sol.BuildingId) && PowerPanelUIToolkit.IsOpen
                                 && panel.SelectedSerial == k.Subnet(HomeValleyPowerGrid.TryGetBuildingPower(s, sol.BuildingId, out BuildingPowerInfo si) ? si.Subnet : 0).Serial;
-                Expect(viaClick, "F6 建造模式里点太阳能阵列 / 储能站：打开电网面板并选中它所在的电网（同一入口 OpenPortPanel）");
+                Expect(viaClick, "F6 建造模式里点太阳能阵列 / 储能站：打开它的通用面板，面板上的“电网…”打开电网面板并选中它所在的电网（FG4-ECO-05 起经通用面板）");
                 UiEscapeStack.CloseTop();
             }
             finally

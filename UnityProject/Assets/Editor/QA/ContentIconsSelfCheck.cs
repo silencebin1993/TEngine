@@ -209,14 +209,15 @@ namespace GameLogic.EditorTools
             Case("装配站欠电", station, BuildingConstructionState.Operational, BuildingPowerState.Brownout, ContentIcons.StateBrownout);
             Case("装配站出口堵塞", station, BuildingConstructionState.Operational, BuildingPowerState.OutputBlocked, ContentIcons.StateBlocked);
             Case("装配站未接电", station, BuildingConstructionState.Operational, BuildingPowerState.Unpowered, ContentIcons.StateUnpowered);
-            Case("装配站主动关停", station, BuildingConstructionState.Disabled, BuildingPowerState.Powered, ContentIcons.StateUnpowered);
+            Case("装配站主动关停（FG4-ECO-05 起禁用有自己的形状）", station, BuildingConstructionState.Disabled, BuildingPowerState.Powered, ContentIcons.StateDisabled);
             Case("装配站正常运转", station, BuildingConstructionState.Operational, BuildingPowerState.Powered, null);
             Case("发电机运转（电源不标断电）", HomeValleyLayout.BuildingTypeGenerator, BuildingConstructionState.Operational, BuildingPowerState.NotApplicable, null);
             Case("发电机损坏", HomeValleyLayout.BuildingTypeGenerator, BuildingConstructionState.Damaged, BuildingPowerState.NotApplicable, ContentIcons.StateDamaged);
 
-            var distinct = new HashSet<string> { ContentIcons.StateDamaged, ContentIcons.StateBrownout, ContentIcons.StateBlocked, ContentIcons.StateUnpowered };
-            Expect(wrong.Count == 0 && distinct.Count == 4, wrong.Count == 0
-                ? "建筑状态 → 头顶形状标记：损坏/欠电/出口堵塞/断电四种互不相同，正常运转与电源建筑不打扰（AC-ACC-002 供电不只靠颜色）"
+            var distinct = new HashSet<string> { ContentIcons.StateDamaged, ContentIcons.StateBrownout, ContentIcons.StateBlocked, ContentIcons.StateUnpowered,
+                ContentIcons.StateDisabled, ContentIcons.StateUpgrading, ContentIcons.StateWorn, ContentIcons.StateStarved, ContentIcons.StateIdle };
+            Expect(wrong.Count == 0 && distinct.Count == 9, wrong.Count == 0
+                ? "建筑状态 → 头顶形状标记：摧毁/欠电/出口堵塞/断电/禁用/升级中/受损/缺料/待机九种互不相同，正常运转与电源建筑不打扰（AC-ACC-002 供电不只靠颜色）"
                 : "建筑状态标记错误：" + string.Join("；", wrong));
         }
 

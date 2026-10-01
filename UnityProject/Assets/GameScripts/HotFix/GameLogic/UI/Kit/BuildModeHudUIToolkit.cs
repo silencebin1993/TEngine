@@ -805,6 +805,18 @@ namespace GameLogic.UI.Kit
             string status = mode.StatusText;
             bool error = mode.StatusIsError;
             bool warning = false;
+            // FG4-ECO-05（FG-GAP-091）：鼠标已经指向别处时，状态行改写指着的对象（建筑 / 传送带 / 管线 / 施工虚影）的读数；
+            // 上一步的结果在 ui.build.result_seconds 秒内另起一行“上一步：……”，之后消失。
+            string lastResult = null;
+            if (mode.StatusIsStale && mode.Drag == HomeValleyBuildMode.DragKind.None)
+            {
+                if (Time.unscaledTime - mode.StatusSetAt < Mathf.Max(0f, GridContent.Tuning("ui.build.result_seconds")))
+                {
+                    lastResult = mode.StatusText.Split('\n')[0];
+                }
+                status = string.Empty;
+                error = false;
+            }
             GridPlacementResult preview = mode.Preview;
             // FG3-LOG-04：没在拖的时候，选中的工具也有指着哪一格的预览（放置前就能看到能不能放、朝向与进出口）。
             BeltPathPlan belt = mode.BeltPlan ?? mode.ToolPreview;
@@ -868,6 +880,10 @@ namespace GameLogic.UI.Kit
             {
                 // FG3-LOG-03（FGR-LOG-081）：建造模式里指着已建成的传送带，状态行写悬停读数（战略视角由世界悬停提示显示同一份）。
                 status = (string.IsNullOrEmpty(status) ? string.Empty : status + "\n") + hoverTitle + "\n" + hoverBody;
+            }
+            if (!string.IsNullOrEmpty(lastResult))
+            {
+                status = (string.IsNullOrEmpty(status) ? string.Empty : status + "\n") + GameText.Format("ui.build.last_result", lastResult);
             }
             _status.text = status;
             _status.EnableInClassList("bm-status-error", error);

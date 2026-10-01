@@ -184,6 +184,13 @@ namespace GameLogic.Core
         /// <summary>FG4-ECO-04（卡片负向“储能站满或空”）：一个电网的储能第一次放空。</summary>
         public const string EnergyFirstStorageEmpty = "energy.first_storage_empty";
 
+        /// <summary>FG4-ECO-05：第一次打开建筑通用面板（任何建筑）——图鉴“建筑：状态、面板、升级与维修”随之解锁。</summary>
+        public const string BuildingPanelFirstOpen = "building.panel_first_open";
+        /// <summary>FG4-ECO-05：第一次有建筑完成原地升级。</summary>
+        public const string BuildingFirstUpgrade = "building.first_upgrade";
+        /// <summary>FG4-ECO-05：第一次有建筑受损（耐久下降）——引导内容在 FG15-UX-04：维修件从零件工坊来、面板“维修”。</summary>
+        public const string BuildingFirstDamaged = "building.first_damaged";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -215,6 +222,7 @@ namespace GameLogic.Core
             EconomyRuinFirstDepleted,
             EconomyManufacturingFirstPlaced, EconomyBurnerFirstChip, EconomyAssemblyFirstLineMachine, EconomyFirstCopyToSameType,
             EnergyFirstBuilt, EnergyFirstFuelOut, EnergyFirstStorageEmpty,
+            BuildingPanelFirstOpen, BuildingFirstUpgrade, BuildingFirstDamaged,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

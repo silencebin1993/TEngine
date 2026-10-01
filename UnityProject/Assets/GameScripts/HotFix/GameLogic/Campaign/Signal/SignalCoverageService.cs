@@ -658,7 +658,7 @@ namespace GameLogic.Campaign.Signal
                         {
                             continue;
                         }
-                        int tier = TowerTierProvider?.Invoke(b) ?? 1;
+                        int tier = TowerTierProvider?.Invoke(b) ?? Economy.BuildingOps.TierOf(b); // FG4-ECO-05：信号塔原地升级后的等级（DEBT-FG1SIG04-03）。
                         net.Sources.Add(new Source { Center = b.Position, Radius = tier >= 2 ? TowerT2Radius : TowerRadius, Kind = SignalCoverageSourceKind.Tower, BuildingId = b.BuildingId, Parent = -1 });
                     }
                     for (int k = 0; k < RelayTowerIndices.Count; k++)

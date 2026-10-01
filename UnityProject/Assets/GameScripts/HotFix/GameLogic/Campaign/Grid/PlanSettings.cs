@@ -56,6 +56,153 @@ namespace GameLogic.Campaign.Grid
 
         public static int PackValve(bool open) => 1 | (open ? 2 : 0);
 
+        // ── FG4-ECO-05（DEBT-FG3LOG07-01）：建筑设置带上配方 / 刻录目标 ──────────────────────────────────
+        // 建筑：S0 = 电力优先级，S1 = 配方（多配方生产建筑）的稳定编号，S2 = 刻录目标（固件刻录台）的稳定编号；0 = 没有这项设置 / 不改，-1 = “没选”（写到目标上 = 清掉）。
+        // 稳定编号 = ID 的 FNV-1a 哈希（正数）：布局库跨存档保存，不依赖表的行顺序；读回时按当前表反查（表里没有了就当没有）。
+
+        /// <summary>ID → 稳定编号（空 = 0；结果恒为正）。</summary>
+        public static int StableId(string id)
+        {
+            if (string.IsNullOrEmpty(id))
+            {
+                return 0;
+            }
+            unchecked
+            {
+                uint h = 2166136261;
+                foreach (char c in id)
+                {
+                    h = (h ^ c) * 16777619;
+                }
+                int v = (int)(h & 0x7FFFFFFF);
+                return v == 0 ? 1 : v;
+            }
+        }
+
+        public static string RecipeIdOf(int s1)
+        {
+            if (s1 <= 0)
+            {
+                return null;
+            }
+            foreach (Economy.RecipeDef r in Economy.ItemCatalog.Recipes)
+            {
+                if (StableId(r.Id) == s1)
+                {
+                    return r.Id;
+                }
+            }
+            return null;
+        }
+
+        public static string FirmwareIdOf(int s2)
+        {
+            if (s2 <= 0)
+            {
+                return null;
+            }
+            foreach (GameConfig.fg.FirmwareKind row in Signal.FirmwareKinds.Rows)
+            {
+                if (row != null && StableId(row.Id) == s2)
+                {
+                    return row.Id;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>一座建筑（建成的或虚影）的设置：S0 优先级（用电建筑）、S1 配方、S2 刻录目标。</summary>
+        public static void BuildingSettings(CampaignState state, BuildingRecord b, out int s0, out int s1, out int s2)
+        {
+            s0 = s1 = s2 = 0;
+            if (b == null)
+            {
+                return;
+            }
+            s0 = FamilyOf(PlanEntryKind.Building, b.BuildingTypeId) == Family.Power ? Math.Max(1, b.PowerPriority) : 0;
+            if (Economy.ProductionService.TryGet(state, b.BuildingId, out Economy.ProductionService.Producer p) && Economy.ProductionService.HasCopyableSettings(p))
+            {
+                if (p.IsBurner)
+                {
+                    s2 = string.IsNullOrEmpty(p.Rec.BurnTarget) ? -1 : StableId(p.Rec.BurnTarget);
+                }
+                else
+                {
+                    s1 = p.Recipe == null ? -1 : StableId(p.Recipe.Id);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 把建筑设置写到一座建筑（建成的或虚影）上：优先级（用电建筑）、配方（目标允许这条配方时）、刻录目标（目标是刻录台时）。
+        /// 配方 / 目标对这座不适用时不写（返回 false 的 <paramref name="recipeApplied"/>），优先级照写。返回有没有任何改动。
+        /// </summary>
+        public static bool ApplyBuildingSettings(CampaignState state, BuildingRecord b, int s0, int s1, int s2, out bool recipeApplied)
+        {
+            recipeApplied = false;
+            bool changed = false;
+            if (b == null)
+            {
+                return false;
+            }
+            if (s0 > 0 && FamilyOf(PlanEntryKind.Building, b.BuildingTypeId) == Family.Power)
+            {
+                int priority = Math.Max(1, Math.Min(4, s0));
+                if (b.PowerPriority != priority)
+                {
+                    if (Regions.HomeValleyController.IsPlannedGhost(b))
+                    {
+                        b.PowerPriority = priority; // 虚影还没进电网：直接写记录，建成接入时按它仲裁。
+                    }
+                    else
+                    {
+                        HomeValleyPowerGrid.TrySetPriority(state, b.BuildingId, priority);
+                    }
+                    changed = true;
+                }
+            }
+            if ((s1 != 0 || s2 != 0) && Economy.ProductionService.TryGet(state, b.BuildingId, out Economy.ProductionService.Producer p)
+                && Economy.ProductionService.HasCopyableSettings(p))
+            {
+                if (p.IsBurner && s2 != 0)
+                {
+                    string fw = s2 < 0 ? null : FirmwareIdOf(s2);
+                    if (fw != null || s2 < 0)
+                    {
+                        recipeApplied = true;
+                        if ((p.Rec.BurnTarget ?? string.Empty) != (fw ?? string.Empty))
+                        {
+                            changed |= Economy.ProductionService.TrySetBurnTarget(state, b.BuildingId, fw, out _);
+                        }
+                    }
+                }
+                else if (!p.IsBurner && s1 != 0)
+                {
+                    if (s1 < 0)
+                    {
+                        recipeApplied = true;
+                        if (p.Recipe != null)
+                        {
+                            changed |= Economy.ProductionService.TrySetRecipe(state, b.BuildingId, null, out _);
+                        }
+                    }
+                    else
+                    {
+                        string rid = RecipeIdOf(s1);
+                        if (rid != null && Economy.ItemCatalog.TryGetRecipe(rid, out Economy.RecipeDef r) && p.Def.AllowsRecipe(r))
+                        {
+                            recipeApplied = true;
+                            if (!ReferenceEquals(p.Recipe, r))
+                            {
+                                changed |= Economy.ProductionService.TrySetRecipe(state, b.BuildingId, rid, out _);
+                            }
+                        }
+                    }
+                }
+            }
+            return changed;
+        }
+
         /// <summary>这件条目（按种类）读哪个家族的设置。建筑只有用电的才有设置。</summary>
         public static Family FamilyOf(PlanEntryKind kind, string typeId)
         {
@@ -77,7 +224,20 @@ namespace GameLogic.Campaign.Grid
             switch (f)
             {
                 case Family.Power:
-                    return GameText.Format("plan.settings.power", s0 > 0 ? s0 : 1);
+                {
+                    string line = GameText.Format("plan.settings.power", s0 > 0 ? s0 : 1);
+                    string rid = RecipeIdOf(s1);
+                    if (rid != null && Economy.ItemCatalog.TryGetRecipe(rid, out Economy.RecipeDef rd))
+                    {
+                        line += (GameText.Language == GameLanguage.En ? ", " : "，") + GameText.Format("plan.settings.recipe", rd.Name);
+                    }
+                    string fw = FirmwareIdOf(s2);
+                    if (fw != null)
+                    {
+                        line += (GameText.Language == GameLanguage.En ? ", " : "，") + GameText.Format("plan.settings.burn", Signal.FirmwareKinds.DisplayName(fw) ?? fw);
+                    }
+                    return line;
+                }
                 case Family.Splitter:
                     UnpackSplitter(s0, out int l, out int r, out int p);
                     return BeltNodeService.Summary(l, r, (BeltSide)p, (ushort)Math.Max(0, Math.Min(ushort.MaxValue, s1)), (ushort)Math.Max(0, Math.Min(ushort.MaxValue, s2)));
@@ -114,7 +274,8 @@ namespace GameLogic.Campaign.Grid
                     reason = new GridReason(GridBlockReason.NoSettings, "plan.reason.no_settings", HomeGridService.DisplayName(b.BuildingTypeId));
                     return false;
                 }
-                clip = new Clip { Family = Family.Power, SourceName = HomeGridService.DisplayName(b.BuildingTypeId), S0 = Math.Max(1, b.PowerPriority) };
+                BuildingSettings(state, b, out int bs0, out int bs1, out int bs2);
+                clip = new Clip { Family = Family.Power, SourceName = HomeGridService.DisplayName(b.BuildingTypeId), S0 = Math.Max(1, bs0), S1 = bs1, S2 = bs2 };
                 return true;
             }
             if (TryReadPiece(state, cell, out PlanEntryKind kind, out string id, out int s0, out int s1, out int s2))
@@ -226,9 +387,11 @@ namespace GameLogic.Campaign.Grid
                     reason = new GridReason(GridBlockReason.SettingsIncompatible, "plan.reason.incompatible", clip.SourceName ?? string.Empty, targetName);
                     return false;
                 }
-                before = new Clip { Family = Family.Power, SourceName = targetName, S0 = Math.Max(1, b.PowerPriority) };
+                BuildingSettings(state, b, out int os0, out int os1, out int os2);
+                before = new Clip { Family = Family.Power, SourceName = targetName, S0 = Math.Max(1, os0), S1 = os1, S2 = os2 };
                 int priority = Math.Max(1, Math.Min(4, clip.S0));
-                HomeValleyPowerGrid.TrySetPriority(state, b.BuildingId, priority);
+                // FG4-ECO-05（DEBT-FG3LOG07-01）：配方 / 刻录目标随复制设置一起写（目标不适用就只写优先级）。
+                ApplyBuildingSettings(state, b, priority, clip.S1, clip.S2, out _);
                 return b.PowerPriority == priority;
             }
             if (!TryReadPiece(state, cell, out PlanEntryKind kind, out string id, out int s0, out int s1, out int s2))

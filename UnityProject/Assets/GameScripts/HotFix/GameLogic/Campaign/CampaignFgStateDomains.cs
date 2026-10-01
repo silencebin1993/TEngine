@@ -303,6 +303,8 @@ namespace GameLogic.Campaign
         public string PortKey;
         /// <summary>输出口过滤：-1 = 全部可存物品，0 = 停止输出，&gt; 0 = 只输出这个物品编号。输入口不用。</summary>
         public int Filter = -1;
+        /// <summary>FG4-ECO-05（FG-GAP-093）：仓库输出口“保留 N 件”——每种物品在家园库存里至少留这么多，多出来的才推上传送带。0 = 不保留。</summary>
+        public int Keep;
     }
 
     /// <summary>FG3-LOG-03：一格传送带掉了多少耐久。</summary>
@@ -548,6 +550,23 @@ namespace GameLogic.Campaign
         public bool Fueled;
         /// <summary>FG4-ECO-04 燃油发电机：累计烧掉的燃油（毫升；本步的零头记在 <see cref="Progress"/>，单位 毫升 × 60 × 世界频率）。</summary>
         public long FuelBurnedMl;
+        /// <summary>FG4-ECO-05（FGR-ECO-011 效率与最近 10 分钟产出）：按 building.stats.bucket_seconds 一桶的环形统计（桶数 = 窗口 ÷ 桶长）。
+        /// 完成一份时累加产出与份数，推进时累加“理论份数”（这段时间满速能做几份）；不每帧遍历。读档后接着同一桶。</summary>
+        public ProducerStatBucket[] Stats = Array.Empty<ProducerStatBucket>();
+    }
+
+    /// <summary>FG4-ECO-05：生产统计的一桶（游戏时钟的第 <see cref="Index"/> 桶）。</summary>
+    [Serializable]
+    public sealed class ProducerStatBucket
+    {
+        /// <summary>桶序号 = 游戏步 ÷ 每桶步数；-1 = 空桶。</summary>
+        public long Index = -1;
+        /// <summary>这一桶完成的份数。</summary>
+        public int Done;
+        /// <summary>这一桶的理论份数 × 1000（满速工作能完成的份数；施工中 / 被摧毁时不计）。</summary>
+        public long TheoryMilli;
+        /// <summary>这一桶的产出（固体按件，流体按升）。</summary>
+        public ItemStackRecord[] Out = Array.Empty<ItemStackRecord>();
     }
 
     /// <summary>FG4-ECO-02：拆到一半的废墟格。</summary>

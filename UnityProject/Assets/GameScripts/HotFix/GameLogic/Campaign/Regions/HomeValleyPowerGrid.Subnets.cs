@@ -746,10 +746,13 @@ namespace GameLogic.Campaign.Regions
             {
                 return false;
             }
+            b.DisabledWhenDestroyed = b.ConstructionState == BuildingConstructionState.Disabled;
             b.ConstructionState = BuildingConstructionState.Damaged;
             b.Health = 0f;
             BuildingVisualFeed.Mark(b);
             Recompute(state);
+            // FG4-ECO-05（卡片负向“升级中被摧毁”；FGR-ECO-013）：摧毁的回调——取消升级 / 搬迁与受损维修（材料全额退回）、通知。
+            Economy.BuildingOps.OnBuildingDestroyed(state, b);
             return true;
         }
 

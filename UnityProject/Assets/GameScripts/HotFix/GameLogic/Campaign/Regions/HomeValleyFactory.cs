@@ -150,6 +150,23 @@ namespace GameLogic.Campaign.Regions
             return blueprintId == HomeValleyLayout.BlueprintErc003Id || blueprintId == HomeValleyLayout.BlueprintHaulerId;
         }
 
+        /// <summary>FG4-ECO-05（B16）：蓝图的玩家可见名字——默认量产蓝图用表里的显示名，玩家蓝图用它自己的名字；都没有时才退回 ID。
+        /// 装配站面板与建筑通用状态（“正在装配：…”）共用。</summary>
+        public static string BlueprintDisplayName(CampaignState state, string blueprintId)
+        {
+            if (string.IsNullOrEmpty(blueprintId))
+            {
+                return string.Empty;
+            }
+            if (HomeValleyLayout.FactoryProduceDefaults.TryGetValue(blueprintId, out HomeValleyLayout.ProduceBlueprintDefault def)
+                && !string.IsNullOrEmpty(def.DisplayName))
+            {
+                return def.DisplayName;
+            }
+            BlueprintRecord bp = BlueprintEditorService.Find(state, blueprintId);
+            return !string.IsNullOrEmpty(bp?.DisplayName) ? bp.DisplayName : blueprintId;
+        }
+
         /// <summary>ER8-NEG-01：生产/改造/取消排队失败的玩家文字——此前面板直接显示原因码。</summary>
         public static string DescribeFailure(string reason)
         {

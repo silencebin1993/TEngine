@@ -141,6 +141,11 @@ namespace GameLogic.Campaign.Regions
         /// <summary>最近一次操作的结果文字（当前语言）与是否为失败。</summary>
         public string StatusText { get; private set; } = string.Empty;
         public bool StatusIsError { get; private set; }
+        /// <summary>FG4-ECO-05（FG-GAP-091）：鼠标每指向一格新的格子 +1；状态行记下写入时的值——指向变了，状态行改写指着的对象的读数，
+        /// 上一步的结果在 ui.build.result_seconds 真实秒内另起一行“上一步：……”。</summary>
+        public int HoverSeq { get; private set; }
+        public int StatusHoverSeq { get; private set; }
+        public float StatusSetAt { get; private set; }
         /// <summary>任何可见状态变化时 +1（HUD 按它刷新，没变化的帧 O(1)）。</summary>
         public int Revision { get; private set; }
         /// <summary>最近一次操作的结果（自检断言用）。</summary>
@@ -431,6 +436,7 @@ namespace GameLogic.Campaign.Regions
             }
             HasHover = true;
             HoverCell = cell;
+            HoverSeq++;
             HoverBuildingId = state != null ? HomeGridService.BuildingAt(state, cell)?.BuildingId : null;
             _previewKey = int.MinValue;
             Revision++;
@@ -595,6 +601,13 @@ namespace GameLogic.Campaign.Regions
                         req.Lines.Add(GameText.Get("ui.build.confirm_critical"));
                     }
                     HomeValleyPowerGrid.AppendRemovalLines(state, id, req.Consequences); // FG3-LOG-06：拆电塔会让电网断开 / 建筑失去电网连接时写明。
+                    var held = new List<string>(3);
+                    if (Economy.ProductionService.HeldFluidMl(state, target, held) > 0)
+                    {
+                        // FG4-ECO-05（FG-GAP-094）：精炼塔 / 调配站等流体口里的燃油、酸液、冷却液随拆除排空，先写明。
+                        req.Consequences.Add(GameText.Format("ui.build.confirm_fluid_line", Economy.BuildingOps.NameOf(target),
+                            string.Join(GameText.Language == GameLanguage.En ? ", " : "、", held)));
+                    }
                     UiConfirmDialog.Show(req);
                     PendingConfirmBuildingId = id;
                     return new GridOpResult(GridOpResult.Kind.Failed, id);
@@ -629,7 +642,7 @@ namespace GameLogic.Campaign.Regions
             }
             if (SelectedTypeId != null)
             {
-                GridOpResult r = PlanHistory.Place(state, SelectedTypeId, cell, GhostRotation, PendingS0);
+                GridOpResult r = PlanHistory.Place(state, SelectedTypeId, cell, GhostRotation, PendingS0, PendingS1, PendingS2);
                 if (!r.Success)
                 {
                     GuidanceHooks.Raise(GuidanceHooks.FirstBlockedPlacement);
@@ -864,18 +877,11 @@ namespace GameLogic.Campaign.Regions
             {
                 return false;
             }
-            // FG4-ECO-02：生产建筑点一下打开它的通用面板（状态与原因、配方、进度、缓存；面板里有“端口…”按钮去端口面板）。
-            if (Economy.ProducerCatalog.IsProducer(b.BuildingTypeId) && !HomeGridService.IsRelocationGhost(b))
+            // FG4-ECO-05（FGU-09 建筑面板通用模板）：任何已建成 / 已摧毁的建筑点一下都打开它的通用面板（状态与原因、改名、启用 / 禁用、优先级、耐久与维修、
+            // 升级、上下游；面板里有“端口…”“电网…”按钮去端口面板 / 电网面板）。规划中的虚影也打开（状态“建造中”与施工原因）；搬迁 / 升级目标虚影不打开。
+            if (!HomeGridService.IsRelocationGhost(b))
             {
                 ProductionPanelUIToolkit.Open(buildingId);
-                return true;
-            }
-            // FG4-ECO-04：储能站 / 太阳能阵列点一下打开电网面板，选中它所在的电网（储能站同时选中它：充放电设置在那里）。
-            if ((HomeValleyPowerGrid.IsStorageType(b.BuildingTypeId) || HomeValleyPowerGrid.IsSolarType(b.BuildingTypeId)) && !HomeGridService.IsRelocationGhost(b)
-                && (b.ConstructionState == BuildingConstructionState.Operational || b.ConstructionState == BuildingConstructionState.Damaged
-                    || b.ConstructionState == BuildingConstructionState.Disabled))
-            {
-                PowerPanelUIToolkit.OpenFor(buildingId);
                 return true;
             }
             if (GridContent.PortsOf(b.BuildingTypeId).Count == 0)
@@ -1097,6 +1103,11 @@ namespace GameLogic.Campaign.Regions
             if (plan.CriticalNames.Count > 0)
             {
                 req.Lines.Add(GameText.Format("ui.build.batch_confirm_critical", string.Join(GameText.Language == GameLanguage.En ? ", " : "、", plan.CriticalNames)));
+            }
+            if (plan.BuildingFluidMl > 0)
+            {
+                // FG4-ECO-05（FG-GAP-094）：要拆的加工建筑流体口里有存量。
+                req.Lines.Add(GameText.Format("ui.build.box_fluid_line", (plan.BuildingFluidMl / 1000.0).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)));
             }
             if (plan.TankFluidMl > 0)
             {
@@ -1634,8 +1645,13 @@ namespace GameLogic.Campaign.Regions
         {
             StatusText = text ?? string.Empty;
             StatusIsError = isError;
+            StatusHoverSeq = HoverSeq;
+            StatusSetAt = Time.unscaledTime;
             Revision++;
         }
+
+        /// <summary>FG4-ECO-05（FG-GAP-091）：状态行写的是“上一步的结果”，而鼠标已经指向别处（状态行应改写指着的对象）。</summary>
+        public bool StatusIsStale => !string.IsNullOrEmpty(StatusText) && HoverSeq != StatusHoverSeq;
 
         /// <summary>建筑说明行：名字、朝向、端口（当前语言）；在搬迁的写明“正在搬迁”，搬迁目标虚影写明“搬迁目标”。</summary>
         public static string DescribeBuilding(CampaignState state, BuildingRecord b)
@@ -1659,11 +1675,9 @@ namespace GameLogic.Campaign.Regions
                     ? GameText.Format("plan.upgrade.pending", HomeGridService.DisplayName(b.BuildingTypeId), HomeGridService.DisplayName(moving.BuildingTypeId))
                     : GameText.Format("ui.build.pending_relocation", HomeGridService.DisplayName(b.BuildingTypeId)));
             }
-            // FG4-ECO-02：生产建筑写它的状态与原因（不只靠颜色：状态前有形状符号）。
-            if (Economy.ProductionService.TryDescribe(state, b, out string prod))
-            {
-                text += "\n" + prod;
-            }
+            // FG4-ECO-05（FGR-ECO-010）：所有建筑写通用状态与原因（生产建筑的状态也在这里；界面上另有形状标记，不只靠颜色）。
+            Economy.BuildingStatus st = Economy.BuildingStatusService.Evaluate(state, b);
+            text += "\n" + GameText.Format("prod.hover.line", GameText.Get(Economy.BuildingOps.UiStatusNameKey(st.Kind)), st.Reason.Replace("\n", " · "));
             // FG3-LOG-06：和电网有关的建筑写它在哪个电网、有没有电、优先级与电网读数。
             if (b.ConstructionState == BuildingConstructionState.Operational || b.ConstructionState == BuildingConstructionState.Disabled)
             {

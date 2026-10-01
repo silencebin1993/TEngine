@@ -17,6 +17,8 @@ namespace GameLogic.UI.Kit
         Damaged = 7,
         Destroyed = 8,
         Upgrading = 9,
+        /// <summary>FG4-ECO-05（FGR-ECO-010“建造中”）：虚影 / 施工中。</summary>
+        Building = 10,
     }
 
     /// <summary>
@@ -32,7 +34,7 @@ namespace GameLogic.UI.Kit
         private static readonly string[] ShapeClasses =
         {
             "uk-shape-circle", "uk-shape-ring", "uk-shape-hollow-square", "uk-shape-diamond", "uk-shape-hollow-diamond",
-            "uk-shape-square", "uk-shape-bar", "uk-shape-slash", "uk-shape-cross", "uk-shape-plus",
+            "uk-shape-square", "uk-shape-bar", "uk-shape-slash", "uk-shape-cross", "uk-shape-plus", "uk-shape-corner",
         };
 
         private static readonly string[] ToneClasses = { "uk-tone-good", "uk-tone-info", "uk-tone-warn", "uk-tone-danger", "uk-tone-muted" };
@@ -49,7 +51,8 @@ namespace GameLogic.UI.Kit
             {
                 case UiEntityStatus.Working: return "uk-tone-good";
                 case UiEntityStatus.Idle:
-                case UiEntityStatus.Upgrading: return "uk-tone-info";
+                case UiEntityStatus.Upgrading:
+                case UiEntityStatus.Building: return "uk-tone-info";
                 case UiEntityStatus.NoMaterial:
                 case UiEntityStatus.NoPower:
                 case UiEntityStatus.NoFluid:
@@ -73,6 +76,7 @@ namespace GameLogic.UI.Kit
                 case UiEntityStatus.Disabled: return "status.disabled.name";
                 case UiEntityStatus.Damaged: return "status.damaged.name";
                 case UiEntityStatus.Destroyed: return "status.destroyed.name";
+                case UiEntityStatus.Building: return "status.building.name";
                 default: return "status.upgrading.name";
             }
         }

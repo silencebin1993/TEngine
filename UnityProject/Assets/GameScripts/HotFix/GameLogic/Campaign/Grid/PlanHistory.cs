@@ -340,7 +340,7 @@ namespace GameLogic.Campaign.Grid
         // ── 包装入口（建造模式经这些做规划操作）────────────────────────────────────
 
         /// <summary>放下一座建筑虚影（<paramref name="s0"/> = 吸管带来的电力优先级，0 = 默认）。</summary>
-        public static GridOpResult Place(CampaignState state, string typeId, GridCell pivot, int rotation, int s0 = 0)
+        public static GridOpResult Place(CampaignState state, string typeId, GridCell pivot, int rotation, int s0 = 0, int s1 = 0, int s2 = 0)
         {
             GridOpResult r = HomeGridService.TryPlace(state, typeId, pivot, rotation);
             if (r.Success)
@@ -348,10 +348,8 @@ namespace GameLogic.Campaign.Grid
                 BuildingRecord b = HomeGridService.FindBuilding(state, r.BuildingId);
                 if (b != null)
                 {
-                    if (s0 > 0 && PlanSettings.FamilyOf(PlanEntryKind.Building, b.BuildingTypeId) == PlanSettings.Family.Power)
-                    {
-                        b.PowerPriority = Math.Max(1, Math.Min(4, s0));
-                    }
+                    // FG4-ECO-05（DEBT-FG3LOG07-01）：吸管带来的设置（优先级、配方、刻录目标）写到新放的虚影上。
+                    PlanSettings.ApplyBuildingSettings(state, b, s0, s1, s2, out _);
                     Add(state, BuildingOp(PlanOpKind.PlaceBuilding, b));
                 }
             }
@@ -364,6 +362,8 @@ namespace GameLogic.Campaign.Grid
             Snapshot before = Snap(state, buildingId);
             BuildingRecord ghost = HomeGridService.FindRelocationGhost(state, buildingId);
             Snapshot ghostSnap = ghost != null ? Snap(state, ghost.BuildingId) : null;
+            // FG4-ECO-05：取消的那次升级是升到第几级（点的可能是原建筑，也可能是升级虚影本身）——重做 / 撤销时按它判断“是不是已经升到了”。
+            int cancelledTier = (ghost ?? HomeGridService.FindBuilding(state, buildingId))?.Tier ?? 0;
             GridOpResult r = HomeGridService.TryToggleDemolish(state, buildingId);
             if (before == null || !r.Success)
             {
@@ -383,7 +383,7 @@ namespace GameLogic.Campaign.Grid
                     {
                         // 取消升级（拆除模式点升级中的建筑 / 施工队列里取消升级虚影）：撤销 = 重新升级。
                         string source = cancelled.Substring(0, cancelled.Length - HomeGridService.UpgradeGhostSuffix.Length);
-                        Add(state, new PlanOpRecord { Kind = (int)PlanOpKind.UpgradeBuilding, BuildingId = source, TypeId = ghostSnap?.Type ?? before.Type, Flag = 1 });
+                        Add(state, new PlanOpRecord { Kind = (int)PlanOpKind.UpgradeBuilding, BuildingId = source, TypeId = ghostSnap?.Type ?? before.Type, Flag = 1, Y = cancelledTier });
                     }
                     else if (cancelled.EndsWith(HomeGridService.RelocationGhostSuffix, StringComparison.Ordinal))
                     {
@@ -644,7 +644,8 @@ namespace GameLogic.Campaign.Grid
                     }
                     done++;
                     BuildingRecord ghost = HomeGridService.FindBuilding(state, r.BuildingId);
-                    Add(state, new PlanOpRecord { Kind = (int)PlanOpKind.UpgradeBuilding, BuildingId = id, TypeId = ghost?.BuildingTypeId, PlanId = from });
+                    // FG4-ECO-05：Y = 目标等级（有等级的建筑；没有等级 = 0），重做时已经到了这一级就不再多升一级。
+                    Add(state, new PlanOpRecord { Kind = (int)PlanOpKind.UpgradeBuilding, BuildingId = id, TypeId = ghost?.BuildingTypeId, PlanId = from, Y = ghost?.Tier ?? 0 });
                 }
                 foreach (UpgradeGroup g in plan.Groups)
                 {
@@ -1265,6 +1266,15 @@ namespace GameLogic.Campaign.Grid
 
         private static void UpgradeAgain(CampaignState state, PlanOpRecord op, PlanStepResult r)
         {
+            BuildingRecord cur = op.BuildingId != null ? HomeGridService.FindBuilding(state, op.BuildingId) : null;
+            // FG4-ECO-05（审查 P2 / FGR-BASE-020）：这一步要的升级已经完成了（撤销时升级已完工被跳过，重做又来到这里）——跳过，
+            // 不能从现在的等级再升一级、再扣一次料。有等级的建筑看等级（Y = 目标等级），按类型升级的看类型。
+            if (cur != null && (op.Y > 1 ? Economy.BuildingOps.TierOf(cur) >= op.Y
+                                    : !Economy.BuildingOps.HasTiers(cur.BuildingTypeId) && op.TypeId != null && op.TypeId != op.PlanId && cur.BuildingTypeId == op.TypeId))
+            {
+                SkipOp(r, GameText.Format("plan.reason.upgrade_already", Economy.BuildingOps.TierName(cur.BuildingTypeId, Economy.BuildingOps.TierOf(cur))));
+                return;
+            }
             GridOpResult u = HomeGridService.TryUpgrade(state, op.BuildingId);
             BuildingRecord b = op.BuildingId != null ? HomeGridService.FindBuilding(state, op.BuildingId) : null;
             if (u.Success)
@@ -1354,6 +1364,11 @@ namespace GameLogic.Campaign.Grid
             {
                 BuildingRecord b = op.BuildingId != null ? HomeGridService.FindBuilding(state, op.BuildingId) : null;
                 ok = b != null && HomeValleyPowerGrid.TrySetPriority(state, b.BuildingId, Math.Max(1, Math.Min(4, clip.S0))).Success;
+                if (b != null)
+                {
+                    // FG4-ECO-05（DEBT-FG3LOG07-01）：撤销 / 重做复制设置时配方 / 刻录目标一起回到那一步的值（-1 = 没选）。
+                    PlanSettings.ApplyBuildingSettings(state, b, 0, clip.S1, clip.S2, out _);
+                }
             }
             else
             {

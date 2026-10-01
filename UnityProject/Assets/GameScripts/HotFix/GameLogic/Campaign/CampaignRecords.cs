@@ -255,6 +255,18 @@ namespace GameLogic.Campaign
         /// <summary>FG3-LOG-02：机器已经从仓库运到现场、放进这座虚影的材料（累计）。施工进度不能超过“已到材料 / 所需材料”；
         /// 取消虚影时这部分全额退回（仓库满了就变成地面物，机器之后搬走）；施工中被摧毁时已消耗部分按比例掉落为地面物。</summary>
         public int ConstructionDelivered;
+        /// <summary>FG4-ECO-05（FGR-ECO-011 改名）：玩家起的名字（null / 空 = 默认名“类型名”）。面板、悬停、通知、施工队列都显示它。
+        /// 唯一写入口 <see cref="Economy.BuildingOps.TryRename"/>；搬迁 / 升级完工时跟着建筑走。旧存档没有这个字段 = 默认名。</summary>
+        public string CustomName;
+        /// <summary>FG4-ECO-05（FGR-ECO-012 原地升级）：等级（fg.TbBuildingTier；0 / 1 = T1）。只对表里有等级的建筑有意义（仓库、信号塔）。
+        /// 升级目标虚影上写“升到第几级”，完工时写回原建筑。唯一写入口 <see cref="Grid.HomeGridService.TryUpgrade"/> / 完工换位。</summary>
+        public int Tier;
+        /// <summary>FG4-ECO-05（FG04 第 4 节“仓库支持只存某些物品”）：仓库只存哪些物品——空 = 全部可存物品；“cat:类别” = 只存这一类；“item:物品ID” = 只存这一种。
+        /// 只影响这座仓库给哪些物品提供容量（已经存着的不丢）。唯一写入口 <see cref="Economy.BuildingOps.TrySetStoreFilter"/>。</summary>
+        public string StoreFilter;
+        /// <summary>FG4-ECO-05（FGR-BASE-020“设置保留”）：被摧毁那一刻是不是玩家禁用的状态——重建完工时恢复成禁用，不替玩家重新开机。
+        /// 唯一写入口 <see cref="Regions.HomeValleyPowerGrid.ApplyBuildingDestroyed"/>，重建完工时读取并清掉。旧存档没有这个字段 = false（= 重建后运转）。</summary>
+        public bool DisabledWhenDestroyed;
     }
 
     /// <summary>ER3-STO-01：ERD-ECO-003 地面物——独立于仓库/核心缓存/机器货舱的第三类存放位置。
@@ -491,6 +503,10 @@ namespace GameLogic.Campaign
         public int Leg;
         /// <summary>FG3-LOG-02：这张施工单已经从仓库取过几趟材料（取料的资源事务 ID 按它编号，读档重放也不重号）。</summary>
         public int FetchCount;
+        /// <summary>FG4-ECO-05（FGR-ECO-013 维修消耗维修件）：维修单开单时从家园库存预留的物品（维修件）与数量。完工即消耗；
+        /// 取消 / 目标被摧毁 / 目标被拆时全额退回仓库（放不下的放在建筑旁边）。空 = 这张单没有预留物品（重建走废料事务）。</summary>
+        public string ReservedItemId;
+        public int ReservedItemAmount;
     }
 
     /// <summary>ERD-FAC-001 工厂队列项。</summary>

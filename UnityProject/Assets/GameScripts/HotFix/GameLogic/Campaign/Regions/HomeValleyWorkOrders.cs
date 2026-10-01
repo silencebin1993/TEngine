@@ -281,6 +281,135 @@ namespace GameLogic.Campaign.Regions
             return WorkOrderOpResult.Ok(workOrderId);
         }
 
+        /// <summary>FG4-ECO-05：建筑面板“维修 / 重建”派的单（进待分配池，由能维修的机器接；机器阵亡时回到池里，不作废）。</summary>
+        public const string PoolRepairIssuer = "building-panel";
+
+        /// <summary>
+        /// FG4-ECO-05（FGR-ECO-013“维修由机器执行（维修工作单），消耗维修件”）：给一座建筑派一张进待分配池的维修单。
+        /// - 受损（运转 / 禁用，耐久未满）：开单时从家园库存预留 <paramref name="itemAmount"/> 件 <paramref name="itemId"/>（维修件），完工消耗、耐久回满；
+        ///   取消 / 目标被摧毁或拆除时全额退回。
+        /// - 已摧毁（<see cref="BuildingConstructionState.Damaged"/>）：重建——沿用 Demo 的修复造价（废料，走资源事务），完工恢复运转、耐久回满。
+        /// 唯一调用方 <see cref="Economy.BuildingOps.TryOrderRepair"/>（检查与原因文本在那里）。
+        /// </summary>
+        public static WorkOrderOpResult TryCreateRepairPool(CampaignState state, string buildingId, string itemId, int itemAmount, float seconds)
+        {
+            BuildingRecord building = state?.BuildingRecords?.FirstOrDefault(b => b != null && b.BuildingId == buildingId);
+            if (building == null)
+            {
+                return WorkOrderOpResult.Fail("building-not-found");
+            }
+            if (FindActiveByTarget(state, WorkOrderKind.Repair, buildingId) != null)
+            {
+                return WorkOrderOpResult.Fail("order-already-active");
+            }
+            string workOrderId = buildingId + ":repair:" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            string txId = null;
+            if (building.ConstructionState == BuildingConstructionState.Damaged)
+            {
+                int cost = Economy.BuildingOps.RebuildCost(building, out float rebuildSeconds);
+                if (cost < 0)
+                {
+                    return WorkOrderOpResult.Fail("no-repair-profile");
+                }
+                txId = workOrderId + ":tx";
+                CampaignEconomyLedger.ProposeConsume(state, txId, buildingId, CampaignEconomyLedger.ResourceScrap, cost);
+                CampaignEconomyLedger.LedgerResult reserve = CampaignEconomyLedger.Reserve(state, txId);
+                if (!reserve.Success)
+                {
+                    CampaignEconomyLedger.Cancel(state, txId);
+                    return WorkOrderOpResult.Fail("insufficient-scrap");
+                }
+                seconds = rebuildSeconds;
+                itemId = null;
+                itemAmount = 0;
+            }
+            else if (!string.IsNullOrEmpty(itemId) && itemAmount > 0)
+            {
+                if (!Economy.ItemCatalog.TryGet(itemId, out Economy.ItemDef item) || Economy.HomeInventory.Stock(state, item) < itemAmount)
+                {
+                    return WorkOrderOpResult.Fail("insufficient-items");
+                }
+                if (Economy.HomeInventory.RemoveUpTo(state, item, itemAmount) != itemAmount)
+                {
+                    return WorkOrderOpResult.Fail("insufficient-items");
+                }
+            }
+            var order = NewOrder(state, workOrderId, WorkOrderKind.Repair, buildingId, 0, resourceTransactionId: txId, duration: Mathf.Max(0.1f, seconds));
+            order.IssuerId = PoolRepairIssuer;
+            order.State = WorkOrderState.Ready;
+            order.ReservedItemId = string.IsNullOrEmpty(itemId) ? null : itemId;
+            order.ReservedItemAmount = Math.Max(0, itemAmount);
+            Append(state, order);
+            MarkAssignmentDirty();
+            HomeValleyConstruction.Touch();
+            return WorkOrderOpResult.Ok(workOrderId);
+        }
+
+        /// <summary>
+        /// FG4-ECO-05（RTS 右键情境命令）：选中的机器右键一座受损 / 已摧毁的建筑 = 让这台机器去修 / 重建这一座（按实例）。
+        /// 还没有维修单时走与面板“维修 / 重建”相同的开单（<see cref="Economy.BuildingOps.TryOrderRepair"/>：同样的检查、预留与原因文字），
+        /// 再把单子指定给这台机器；已有单子在待分配池里时直接改派给它；已经有别的机器在做时拒绝。
+        /// </summary>
+        public static WorkOrderOpResult TryAssignRepair(CampaignState state, string buildingId, int machineLogicId)
+        {
+            if (state == null || string.IsNullOrEmpty(buildingId))
+            {
+                return WorkOrderOpResult.Fail("building-not-found");
+            }
+            MachineCheck check = CheckMachine(machineLogicId, WorkOrderKind.Repair);
+            if (!check.Ok)
+            {
+                return WorkOrderOpResult.Fail(check.FailureReason);
+            }
+            WorkOrderRecord order = FindActiveRepair(state, buildingId);
+            if (order == null)
+            {
+                if (!Economy.BuildingOps.TryOrderRepair(state, buildingId, out string message))
+                {
+                    return WorkOrderOpResult.Fail(GridFailurePrefix + message);
+                }
+                order = FindActiveRepair(state, buildingId);
+                if (order == null)
+                {
+                    return WorkOrderOpResult.Fail("building-not-found");
+                }
+            }
+            if (order.AssignedMachineLogicId == machineLogicId)
+            {
+                return WorkOrderOpResult.Ok(order.WorkOrderId);
+            }
+            if (order.AssignedMachineLogicId > 0 && order.State != WorkOrderState.Ready)
+            {
+                return WorkOrderOpResult.Fail($"order-already-active:{order.State}");
+            }
+            PathWatch.Remove(order.WorkOrderId);
+            WaitingWatch.Remove(order.WorkOrderId);
+            order.FailureReason = null;
+            WorkOrderOpResult r = ReassignExisting(state, order, machineLogicId);
+            if (r.Success)
+            {
+                MarkAssignmentDirty();
+                HomeValleyConstruction.Touch();
+            }
+            return r;
+        }
+
+        /// <summary>FG4-ECO-05：这座建筑正在进行的维修单（没有 = null）。</summary>
+        public static WorkOrderRecord FindActiveRepair(CampaignState state, string buildingId) => FindActiveByTarget(state, WorkOrderKind.Repair, buildingId);
+
+        /// <summary>FG4-ECO-05：退回维修单预留的物品（取消 / 失败时；仓库放不下的放在建筑旁边）。返回退回的件数。</summary>
+        private static int RefundReservedItems(CampaignState state, WorkOrderRecord order, Vector2 at)
+        {
+            if (order == null || string.IsNullOrEmpty(order.ReservedItemId) || order.ReservedItemAmount <= 0)
+            {
+                return 0;
+            }
+            int n = order.ReservedItemAmount;
+            HomeValleyConstruction.ReturnMaterials(state, at, Economy.ItemCatalog.ResourceTypeOf(order.ReservedItemId), n, order.WorkOrderId + ":refund-items");
+            order.ReservedItemAmount = 0;
+            return n;
+        }
+
         /// <summary>ER3-SOFTLOCK-01 AC-ECO-011"核心紧急重启搬运机…执行建筑修复"——紧急救援机专属的
         /// 免费修复：不走 <see cref="CampaignEconomyLedger"/>（<c>resourceTransactionId</c> 恒为
         /// null），因为这条机制存在的唯一理由就是"玩家连废料都拿不出手"（触发阈值本身是废料&lt;35，
@@ -590,7 +719,7 @@ namespace GameLogic.Campaign.Regions
         /// 施工要的材料 = 新旧造价的差额（<paramref name="diff"/>），机器从仓库取料送到现场（与普通虚影同一套取料腿）；完工时原建筑换成新类型，
         /// 保留 ID、生命、运行状态、库存、队列、电力优先级，投入 = 原投入 + 差额（拆除时全额返还）。取消 = 已到的差额材料全额退回，原建筑不受影响。
         /// </summary>
-        public static WorkOrderOpResult TryCreateUpgradeAt(CampaignState state, BuildingRecord source, string ghostId, string toTypeId, int diff, float seconds)
+        public static WorkOrderOpResult TryCreateUpgradeAt(CampaignState state, BuildingRecord source, string ghostId, string toTypeId, int diff, float seconds, int toTier = 0)
         {
             if (source == null)
             {
@@ -619,6 +748,9 @@ namespace GameLogic.Campaign.Regions
                 RelocateFromId = source.BuildingId,
                 ConstructionRequired = Math.Max(0, diff),
                 ConstructionDelivered = 0,
+                // FG4-ECO-05：有等级的建筑（仓库 / 信号塔）升级虚影类型不变，带目标等级；名字跟着显示。
+                Tier = toTier,
+                CustomName = source.CustomName,
             };
             state.BuildingRecords = (state.BuildingRecords ?? Array.Empty<BuildingRecord>()).Append(ghost).ToArray();
             string workOrderId = ghostId + ":build:" + Guid.NewGuid().ToString("N").Substring(0, 8);
@@ -1589,12 +1721,19 @@ namespace GameLogic.Campaign.Regions
                 if (Grid.HomeGridService.IsUpgradeGhost(b))
                 {
                     BuildingRecord from = state.BuildingRecords.FirstOrDefault(x => x.BuildingId == b.RelocateFromId);
+                    if (b.Tier > 0)
+                    {
+                        // FG4-ECO-05：等级升级写“仓库 T1 → 仓库 T2”。
+                        return GameLogic.Localization.GameText.Format("plan.upgrade.order",
+                            Economy.BuildingOps.TierName(b.BuildingTypeId, from != null ? Economy.BuildingOps.TierOf(from) : b.Tier - 1),
+                            Economy.BuildingOps.TierName(b.BuildingTypeId, b.Tier));
+                    }
                     return GameLogic.Localization.GameText.Format("plan.upgrade.order", Grid.HomeGridService.DisplayName(from?.BuildingTypeId ?? b.BuildingTypeId),
                         Grid.HomeGridService.DisplayName(b.BuildingTypeId));
                 }
                 return !string.IsNullOrEmpty(b.RelocateFromId)
-                    ? GameLogic.Localization.GameText.Format("ui.build.relocate_order", Grid.HomeGridService.DisplayName(b.BuildingTypeId))
-                    : Grid.HomeGridService.DisplayName(b.BuildingTypeId);
+                    ? GameLogic.Localization.GameText.Format("ui.build.relocate_order", Economy.BuildingOps.NameOf(b))
+                    : Economy.BuildingOps.NameOf(b); // FG4-ECO-05：施工 / 维修队列显示玩家起的名字
             }
             if (order.Kind == WorkOrderKind.Recharge || order.Kind == WorkOrderKind.Haul)
             {
@@ -2063,12 +2202,47 @@ namespace GameLogic.Campaign.Regions
                 {
                     CampaignEconomyLedger.Cancel(state, order.ResourceTransactionId);
                 }
+                RefundReservedItems(state, order, ResolveWorkPosition(state, order)); // FG4-ECO-05：维修件全额退回。
                 MarkAssignmentDirty();
                 Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Failure, "修复工单失败：目标建筑已不存在，废料已退还");
                 return;
             }
 
-            building.ConstructionState = BuildingConstructionState.Operational;
+            if (!string.IsNullOrEmpty(order.ReservedItemId))
+            {
+                // FG4-ECO-05（FGR-ECO-013）：受损建筑的维修——维修件在开单时已预留，完工即消耗、耐久回满；建筑在维修期间被摧毁则失败并全额退回。
+                if (building.ConstructionState == BuildingConstructionState.Damaged)
+                {
+                    int back = RefundReservedItems(state, order, building.Position);
+                    order.State = WorkOrderState.Failed;
+                    order.FailureReason = "target-destroyed";
+                    MarkAssignmentDirty();
+                    Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.Failure, building.Position,
+                        GameLogic.Localization.GameText.Format("bp.repair_failed_destroyed", Economy.BuildingOps.NameOf(building), back));
+                    return;
+                }
+                order.ReservedItemAmount = 0;
+                building.Health = Economy.BuildingOps.MaxDurability(building.BuildingTypeId);
+                BuildingVisualFeed.Mark(building);
+                Economy.BuildingOps.Touch();
+                order.State = WorkOrderState.Completed;
+                MachineRegistry.RecordJobCompleted(order.AssignedMachineLogicId);
+                MarkAssignmentDirty();
+                HomeValleyConstruction.Touch();
+                Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.BuildComplete, building.Position,
+                    GameLogic.Localization.GameText.Format("bp.repair_done", Economy.BuildingOps.NameOf(building),
+                        Mathf.RoundToInt(building.Health), Mathf.RoundToInt(Economy.BuildingOps.MaxDurability(building.BuildingTypeId))),
+                    Feedback.FeedbackCues.BuildingTypeSfx(building.BuildingTypeId));
+                return;
+            }
+
+            // FG4-ECO-05（FGR-BASE-020）：被摧毁前是玩家禁用的，重建完仍是禁用（设置保留，不替玩家开机）。
+            building.ConstructionState = building.DisabledWhenDestroyed && Economy.BuildingOps.CanDisableType(building.BuildingTypeId)
+                ? BuildingConstructionState.Disabled
+                : BuildingConstructionState.Operational;
+            building.DisabledWhenDestroyed = false;
+            building.Health = Economy.BuildingOps.MaxDurability(building.BuildingTypeId); // FG4-ECO-05：重建 / 修复后耐久回满（摧毁时为 0）。
+            Economy.BuildingOps.Touch();
             BuildingVisualFeed.Mark(building); // FG3-LOG-09：修复完成，画面重画这一座
             // ER3-SOFTLOCK-01：紧急救援机的免费修复（见 TryCreateEmergencyRepair）没有事务 id，
             // 玩家没有真正花过废料，InvestedScrap 保持 0——日后拆这栋楼返还 0，忠于"实际投入"字面。
@@ -2077,9 +2251,12 @@ namespace GameLogic.Campaign.Regions
                 // 记下这次真正花掉的废料，供日后"拆除按实际投入50%返还"使用——从 RepairProfile
                 // 按建筑类型重新查一次（与创建订单时 Reserve 的数值来源相同的常量表，不会漂移），
                 // 不需要反查 ResourceTransactionRecord 本体。
-                if (HomeValleyLayout.RepairProfile.TryGetValue(building.BuildingTypeId, out (int ScrapCost, float Seconds) repairProfile))
+                // FG4-ECO-05：Demo 修复造价，没有时按新建造价 / 表里的重建造价，另加已升等级的差额（重建被摧毁的 FG 建筑）。
+                // 累加而不是覆盖（审查 P2）：之前建造 / 升级的投入仍是这座建筑的实际投入，拆除返还按总投入算。开局残骸投入是 0，累加 = 原来的写法。
+                int rebuildCost = Economy.BuildingOps.RebuildCost(building, out _);
+                if (rebuildCost > 0)
                 {
-                    building.InvestedScrap = repairProfile.ScrapCost;
+                    building.InvestedScrap += rebuildCost;
                 }
                 CampaignEconomyLedger.Commit(state, order.ResourceTransactionId);
             }
@@ -2194,6 +2371,10 @@ namespace GameLogic.Campaign.Regions
                 // FG3-LOG-07：升级把差额建了进去，拆除时连同差额全额返还。
                 InvestedScrap = source.InvestedScrap + Math.Max(0, ghost.ConstructionRequired),
                 RelocateFromId = null,
+                // FG4-ECO-05：名字、仓库只存哪些物品跟着建筑走；升级虚影带着目标等级（有等级的建筑），否则保留原等级。
+                CustomName = source.CustomName,
+                StoreFilter = source.StoreFilter,
+                Tier = upgrade && ghost.Tier > 0 ? ghost.Tier : source.Tier,
             };
             var next = new List<BuildingRecord>(records.Length);
             for (int i = 0; i < records.Length; i++)
@@ -2213,9 +2394,15 @@ namespace GameLogic.Campaign.Regions
             MachineRegistry.RecordJobCompleted(order.AssignedMachineLogicId);
             MarkAssignmentDirty();
             Grid.HomeGridService.OnRelocationCompleted(state, moved);
+            if (upgrade)
+            {
+                Economy.BuildingOps.OnUpgradeCompleted(state, moved); // FG4-ECO-05：容量 / 覆盖等等级效果立即生效、引导钩子。
+            }
             HomeValleyConstruction.Touch();
             Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.BuildComplete, moved.Position,
-                upgrade
+                upgrade && ghost.Tier > 0
+                    ? GameLogic.Localization.GameText.Format("building.upgrade.done", Economy.BuildingOps.NameOf(moved), moved.Tier)
+                    : upgrade
                     ? GameLogic.Localization.GameText.Format("plan.upgrade.done", Grid.HomeGridService.DisplayName(fromType), Grid.HomeGridService.DisplayName(moved.BuildingTypeId))
                     : GameLogic.Localization.GameText.Format("ui.build.relocated_done", Grid.HomeGridService.DisplayName(moved.BuildingTypeId)),
                 Feedback.FeedbackCues.BuildingTypeSfx(moved.BuildingTypeId));
@@ -2390,6 +2577,16 @@ namespace GameLogic.Campaign.Regions
                 ? dead.WorldPosition
                 : Vector2.zero;
 
+            if (order.Kind == WorkOrderKind.Repair && order.IssuerId == PoolRepairIssuer)
+            {
+                // FG4-ECO-05：建筑面板派的维修 / 重建单——机器阵亡不作废玩家的命令：预留的维修件 / 废料事务原样保留，单子回待分配池由别的机器接着修。
+                order.State = WorkOrderState.Ready;
+                order.FailureReason = null;
+                order.AssignedMachineLogicId = 0;
+                MarkAssignmentDirty();
+                HomeValleyConstruction.Touch();
+                return;
+            }
             if (order.Kind == WorkOrderKind.Build)
             {
                 // FG3-LOG-02：施工的机器阵亡不作废玩家的虚影——货舱里这一趟的材料就地落地（生成搬运单），已到现场的材料与进度保留，
@@ -2430,6 +2627,12 @@ namespace GameLogic.Campaign.Regions
             if (refund && !string.IsNullOrEmpty(order.ResourceTransactionId))
             {
                 CampaignEconomyLedger.Cancel(state, order.ResourceTransactionId);
+            }
+            if (refund && order.Kind == WorkOrderKind.Repair)
+            {
+                // FG4-ECO-05：维修单预留的维修件全额退回（仓库放得下就进仓库，放不下的放在建筑旁边）。
+                BuildingRecord target = state.BuildingRecords?.FirstOrDefault(b => b != null && b.BuildingId == order.TargetId);
+                RefundReservedItems(state, order, target?.Position ?? dropPosition);
             }
 
             if (order.Kind == WorkOrderKind.Build)
