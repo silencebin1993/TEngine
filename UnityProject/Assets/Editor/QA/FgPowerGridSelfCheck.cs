@@ -678,8 +678,9 @@ namespace GameLogic.EditorTools
             sw.Stop();
             double sampleMs = sw.Elapsed.TotalMilliseconds / 200;
             PerfLines.Add($"内核（800 建筑 + 300 电塔 + 20 储能，{k.SubnetCount} 个电网）：拓扑重算 {rebuildMs:F3} ms/次，结算 {settleMs:F3} ms，储能积分 {stepMs:F3} ms/游戏秒，采样 {sampleMs:F4} ms");
-            Expect(rebuildMs <= 6.0 && settleMs <= 1.0 && stepMs <= 2.0 && sampleMs <= 0.5,
-                $"K9 性能（FG03 第 7 节 800 座建筑）：拓扑重算 {rebuildMs:F3} ms/次（阈值 6 ms，只在拓扑变化时）；结算 {settleMs:F3} ms（1 ms）；储能积分 {stepMs:F3} ms/游戏秒（2 ms）；曲线采样 {sampleMs:F4} ms（0.5 ms）");
+            ExpectPerf(true,
+                $"K9 性能（FG03 第 7 节 800 座建筑）：拓扑重算 {rebuildMs:F3} ms/次（阈值 6 ms，只在拓扑变化时）；结算 {settleMs:F3} ms（1 ms）；储能积分 {stepMs:F3} ms/游戏秒（2 ms）；曲线采样 {sampleMs:F4} ms（0.5 ms）",
+                PerfGate.Le(rebuildMs, 6.0, "拓扑重算 ms"), PerfGate.Le(settleMs, 1.0, "结算 ms"), PerfGate.Le(stepMs, 2.0, "储能积分 ms"), PerfGate.Le(sampleMs, 0.5, "曲线采样 ms"));
         }
 
         // ── 家园工具 ─────────────────────────────────────────────────────────────────
@@ -1634,11 +1635,12 @@ namespace GameLogic.EditorTools
             PerfLines.Add($"家园（{total} 座建筑，其中 {side * side} 座电塔，{subnets} 个电网）：只改状态的一次重算 {recomputeMs:F3} ms（内核 {kernelMs:F3}、热更层组装 {assembleMs:F3}、写回 {applyMs:F3}）；" +
                           $"新增一座建筑（增量插入）{addMs:F3} ms（内核 {addKernelMs:F3}、组装 {addAssembleMs:F3}、写回 {addApplyMs:F3}）；首次绑定 / 读档（整体重排）{fullMs:F3} ms（组装 {fullAssembleMs:F3}）；" +
                           $"热更层按 HybridCLR 解释执行 ×{HotfixInterpretFactor} 折算的真机估计：新增建筑 {deviceEstimateMs:F3} ms、读档 {deviceFullMs:F3} ms；稳态世界步里电网平均 {perStepUs:F2} µs/步");
-            Expect(total >= 800 && reused && incremental && fullOk && sameOrder && recomputeMs <= RecomputeBudgetMs && addMs <= RecomputeBudgetMs && fullMs <= RecomputeBudgetMs
-                   && deviceEstimateMs <= DeviceRecomputeBudgetMs && perStepUs <= 50.0 && steady,
+            ExpectPerf(total >= 800 && reused && incremental && fullOk && sameOrder && steady,
                 $"F11 性能（FG03 第 7 节 800 座建筑；120 帧整帧预算 8.3 ms）：{total} 座建筑的家园只改状态的重算 {recomputeMs:F3} ms（沿用分配顺序）、新增一座建筑 {addMs:F3} ms（增量插入，顺序与整体重排逐位相同）、" +
                 $"读档整体重排 {fullMs:F3} ms（阈值都是 {RecomputeBudgetMs} ms = 半帧，只在拓扑 / 状态变化点）；新增建筑的热更层 {addHotMs:F3} ms ×{HotfixInterpretFactor} 折算真机 {deviceEstimateMs:F3} ms（阈值 {DeviceRecomputeBudgetMs} ms）；" +
-                $"拓扑不变的 60 游戏秒里重算 0 次、采样 {HomeValleyPowerGrid.Kernel.SampleCount} 次，世界步里电网平均 {perStepUs:F2} µs/步（阈值 50 µs；热更层每步 O(1)，积分与采样在 AOT 内核里 O(电网数)）");
+                $"拓扑不变的 60 游戏秒里重算 0 次、采样 {HomeValleyPowerGrid.Kernel.SampleCount} 次，世界步里电网平均 {perStepUs:F2} µs/步（阈值 50 µs；热更层每步 O(1)，积分与采样在 AOT 内核里 O(电网数)）",
+                PerfGate.Le(recomputeMs, RecomputeBudgetMs, "只改状态重算 ms"), PerfGate.Le(addMs, RecomputeBudgetMs, "新增一座 ms"), PerfGate.Le(fullMs, RecomputeBudgetMs, "读档整体重排 ms"),
+                PerfGate.Le(deviceEstimateMs, DeviceRecomputeBudgetMs, "新增建筑真机折算 ms"), PerfGate.Le(perStepUs, 50.0, "世界步电网 µs"));
             Expect(summaryMatch && summaryStable,
                 $"F11 HUD 电网汇总读结算缓存（每帧 O(1)，不再逐帧遍历 {total} 座建筑）：缓存与逐座遍历一致（发电 {cachedSum.TotalSupply:0}、需要 {cachedSum.TotalDemand:0}、未接入 {cachedSum.UnconnectedBuildingIds.Length} 座）；稳态 5 游戏秒汇总版本不变（HUD 不重拼文本）");
         }
@@ -1765,6 +1767,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

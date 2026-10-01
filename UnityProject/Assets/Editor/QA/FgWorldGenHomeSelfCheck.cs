@@ -512,7 +512,12 @@ namespace GameLogic.EditorTools
                 $"源数据 fgdata_world.py 与运行时三张新表（起始区快照 / 起始区保证 / 分项设置）及版本行新增列逐字段一致（{rows} 行 / 运行时 {runtime} 行）" +
                 (diffs.Count == 0 ? string.Empty : "——不一致：" + string.Join("，", diffs)));
 
-            (code, output) = RunPython(root, "tools/cell_tables/check_luban.py --selftest");
+            // FG-TOOL-01：同一轮全量自检里 check_luban 自测只真跑一次（输入 = tools/cell_tables 全部文件，指纹相同才复用），各段在同一份输出里核对自己的规则。
+            (code, output) = QaPython.RunShared(root, "tools/cell_tables/check_luban.py --selftest", out bool selftestReused);
+            if (selftestReused)
+            {
+                Line($"    · check_luban 自测：本轮前面的段已真跑过、输入指纹相同，复用同一次的输出（本轮真跑 {QaPython.SharedRuns} 次、复用 {QaPython.SharedHits} 次）");
+            }
             Expect(code == 0 && output.Contains("改了开局布局却没有新快照") && output.Contains("保证点装不下回收站整块") && output.Contains("分项设置缺一个分项")
                    && output.Contains("浅滩周期不大于宽度") && output.Contains("标准档倍率不是 1"),
                 $"check_luban 世界生成器 v2 规则（R29～R31：起始区快照罩住开局布局、保证点装得下、分项设置完整、河流浅滩可通行）自测真跑：{Tail(output)}");
@@ -653,8 +658,9 @@ namespace GameLogic.EditorTools
             sw.Stop();
             StartGuaranteeReport ir = imp.Plan.StartReport;
             WorldGenContent.ResetForTests();
-            Expect(!ir.AllSatisfied && ir.Failures.Any(f => f.Contains("ruin")) && sw.ElapsedMilliseconds < 5000,
-                $"负向：废墟群保证改成 5 格内装 60 格（放不下）→ 校验如实失败并写失败日志（“{ir.Failures.FirstOrDefault()}”），{sw.ElapsedMilliseconds} ms 内结束、不卡死");
+            ExpectPerf(!ir.AllSatisfied && ir.Failures.Any(f => f.Contains("ruin")),
+                $"负向：废墟群保证改成 5 格内装 60 格（放不下）→ 校验如实失败并写失败日志（“{ir.Failures.FirstOrDefault()}”），{sw.ElapsedMilliseconds} ms 内结束、不卡死",
+                PerfGate.Lt(sw.ElapsedMilliseconds, 5000, "放不下时校验结束 ms"));
         }
 
         // ── D. 领地布局与可达（FGT-GEN-004）──────────────────────────────────────────
@@ -1749,11 +1755,13 @@ namespace GameLogic.EditorTools
                     worstSeed = SeedSet[i];
                 }
             }
-            Expect(worstBuild < 120.0 && fallbackWorlds >= 1,
-                $"组装世界含保证点候选兜底（Burst JobPlaceStamp）：20 个种子里 {fallbackWorlds} 个走到候选兜底，最慢一个（种子 {worstSeed}）{worstBuild:F1} ms（Editor 预算 120 ms；只在开局 / 读档时一次）");
-            Expect(maxMs < 5.0 && total / Math.Max(1, n - 1) < 2.0,
+            ExpectPerf(fallbackWorlds >= 1,
+                $"组装世界含保证点候选兜底（Burst JobPlaceStamp）：20 个种子里 {fallbackWorlds} 个走到候选兜底，最慢一个（种子 {worstSeed}）{worstBuild:F1} ms（Editor 预算 120 ms；只在开局 / 读档时一次）",
+                PerfGate.Lt(worstBuild, 120.0, "最慢组装世界 ms"));
+            ExpectPerf(true,
                 $"FG17 第 7 节：生成器 v2 单区块生成（Burst，与工作线程同一份编译代码；家园区 169 块，含领地 / 河流 / 矿带 / 保证点形状）平均 {total / Math.Max(1, n - 1):F3} ms、最大 {maxMs:F3} ms（目标 ≤ 5 ms）；" +
-                $"工作线程调度到完成 {workerMs:F2} ms；开局 / 读档组装世界（规划层 + 起始区两遍校验 + 地形来源）平均 {build.Elapsed.TotalMilliseconds / 10:F1} ms / 世界（只在开局 / 读档时一次）");
+                $"工作线程调度到完成 {workerMs:F2} ms；开局 / 读档组装世界（规划层 + 起始区两遍校验 + 地形来源）平均 {build.Elapsed.TotalMilliseconds / 10:F1} ms / 世界（只在开局 / 读档时一次）",
+                PerfGate.Lt(maxMs, 5.0, "单区块最大 ms"), PerfGate.Lt(total / Math.Max(1, n - 1), 2.0, "单区块平均 ms"));
 
             // 生成与游戏时钟无关：暂停、3x、0.5x 下组装的世界完全相同（生成不读时钟与玩法随机流）。
             string fp = ctx.Plan.FullFingerprint();
@@ -1982,6 +1990,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

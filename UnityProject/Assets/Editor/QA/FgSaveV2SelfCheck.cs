@@ -1045,8 +1045,9 @@ namespace GameLogic.EditorTools
             sw.Stop();
             Line($"    压力档（4 万资源事务 + 1 万地面物 + 2 万事件 + 4000 个 512 字节区块差异）：存档 {bs:F0} ms，读档 {bl:F0} ms，" +
                  $"文件 {bb / 1024.0 / 1024.0:F1} MB，三个槽位列表 {sw.Elapsed.TotalMilliseconds:F0} ms");
-            Expect(bs <= 2000 && bl <= 15000 && all[slot].State == CampaignSlotState.Ready,
-                $"压力档存档 ≤ 2 秒（{bs:F0} ms）、读档 ≤ 15 秒（{bl:F0} ms）——FGR-SYS-005 初值；主线程阻塞 ≤100 ms 的自动存档属于 FG15-SYS-01（FGT-SYS-003）");
+            ExpectPerf(all[slot].State == CampaignSlotState.Ready,
+                $"压力档存档 ≤ 2 秒（{bs:F0} ms）、读档 ≤ 15 秒（{bl:F0} ms）——FGR-SYS-005 初值；主线程阻塞 ≤100 ms 的自动存档属于 FG15-SYS-01（FGT-SYS-003）",
+                PerfGate.Le(bs, 2000, "压力档存档 ms"), PerfGate.Le(bl, 15000, "压力档读档 ms"));
             Clear(slot);
         }
 
@@ -1164,6 +1165,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

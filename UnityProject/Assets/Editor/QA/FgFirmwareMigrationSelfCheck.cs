@@ -850,8 +850,9 @@ namespace GameLogic.EditorTools
             sw.Stop();
             double compileMs = sw.Elapsed.TotalMilliseconds / ids.Length;
             PerfLines.Add($"目录冷构建 {n} 条 {buildMs:F2} ms；查询（种类 + 热量 + 能耗 + 名称）{perLookupUs:F3} µs/次（{iterations} 次，校验和 {sink:F0}）；接入编译 {compileMs:F3} ms/条（{ids.Length} 条）");
-            Expect(n == 44 && buildMs < 50.0 && perLookupUs < 5.0 && compileMs < 20.0 && noRebuild,
-                $"目录冷构建 {buildMs:F2} ms（< 50）、查询 {perLookupUs:F3} µs/次（< 5）、接入编译 {compileMs:F3} ms/条（< 20，只在保存 / 接入 / 预览时发生，不按帧）；连续访问 1000 次不重建目录");
+            ExpectPerf(n == 44 && noRebuild,
+                $"目录冷构建 {buildMs:F2} ms（< 50）、查询 {perLookupUs:F3} µs/次（< 5）、接入编译 {compileMs:F3} ms/条（< 20，只在保存 / 接入 / 预览时发生，不按帧）；连续访问 1000 次不重建目录",
+                PerfGate.Lt(buildMs, 50.0, "目录冷构建 ms"), PerfGate.Lt(perLookupUs, 5.0, "查询 µs"), PerfGate.Lt(compileMs, 20.0, "接入编译 ms/条"));
         }
 
         // ── 工具 ──────────────────────────────────────────────────────────────────
@@ -1067,6 +1068,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

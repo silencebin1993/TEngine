@@ -431,8 +431,9 @@ namespace GameLogic.EditorTools
             double small = VisualFrameMs(60, out double smallP95);
             double large = VisualFrameMs(800, out double largeP95);
             PerfLines.Add($"家园画面每帧（暂停中，只有对账与界面；Editor）：60 座 平均 {small:F3} / p95 {smallP95:F3} ms；800 座 平均 {large:F3} / p95 {largeP95:F3} ms（改前逐帧整份对账 O(建筑数)）");
-            Expect(large <= small * 1.3 + 0.12,
-                $"V 画面对账每帧开销与建筑数无关：60 座 {small:F3} ms、800 座 {large:F3} ms（允许 30% + 0.12 ms 噪声）");
+            ExpectPerf(true,
+                $"V 画面对账每帧开销与建筑数无关：60 座 {small:F3} ms、800 座 {large:F3} ms（允许 30% + 0.12 ms 噪声）",
+                PerfGate.Le(large, small * 1.3 + 0.12, "800 座每帧 ms"));
         }
 
         private static double VisualFrameMs(int buildings, out double p95)
@@ -831,17 +832,21 @@ namespace GameLogic.EditorTools
             }
             Expect(large.Buildings >= 800 && large.BeltCells >= 15000 && large.BeltItems >= 30000 && large.PipeCells >= 3000 && large.Ghosts >= 30 && small.Ghosts >= 30,
                 $"P 场景达到 FG03 第 7 节规模：建筑 {large.Buildings}（其中施工队列里的虚影 {large.Ghosts}）、传送带 {large.BeltCells:N0} 格 / {large.BeltItems:N0} 件、管线 {large.PipeCells:N0} 格");
-            Expect(large.BeltKernelP95 + large.PipeKernelP95 <= 2.0,
-                $"P 物流内核单步 ≤ 2 ms（FG03 第 7 节）：传送带 p95 {large.BeltKernelP95:F3} + 管线 p95 {large.PipeKernelP95:F4} = {large.BeltKernelP95 + large.PipeKernelP95:F3} ms（Editor Burst，与真机同为原生）");
-            Expect(large.Hot <= small.Hot * 1.3 + 0.1,
-                $"P 热更层每步开销与数量无关（FGR-LOG-090 / FGR-SYS-042）：约十分之一规模 {small.Hot:F3} ms、FG03 第 7 节规模 {large.Hot:F3} ms（允许 30% + 0.1 ms 噪声）");
+            ExpectPerf(true,
+                $"P 物流内核单步 ≤ 2 ms（FG03 第 7 节）：传送带 p95 {large.BeltKernelP95:F3} + 管线 p95 {large.PipeKernelP95:F4} = {large.BeltKernelP95 + large.PipeKernelP95:F3} ms（Editor Burst，与真机同为原生）",
+                PerfGate.Le(large.BeltKernelP95 + large.PipeKernelP95, 2.0, "物流内核单步 p95 合计 ms"));
+            ExpectPerf(true,
+                $"P 热更层每步开销与数量无关（FGR-LOG-090 / FGR-SYS-042）：约十分之一规模 {small.Hot:F3} ms、FG03 第 7 节规模 {large.Hot:F3} ms（允许 30% + 0.1 ms 噪声）",
+                PerfGate.Le(large.Hot, small.Hot * 1.3 + 0.1, "大规模热更层每步 ms"));
             // FG3-LOG-09：施工进行中（取料 → 施工 → 完工）的热更层同样与建筑数无关。改前派工 / 施工 / 赶路每步按建筑数线性找现场与取料点，
             // 800 座建筑时 28 座虚影同时施工每步平均 2.2 ms（117 座时 0.55 ms）；完工那一步的电网 / 格网重算是按事件的 O(建筑数)，单独报告不在此比。
-            Expect(small.BurstBuilt >= 27 && large.BurstBuilt >= 27 && large.BurstHot <= small.BurstHot * 1.3 + 0.1,
+            ExpectPerf(small.BurstBuilt >= 27 && large.BurstBuilt >= 27,
                 $"P 施工进行中热更层每步开销与建筑数无关（FGR-SYS-042）：30 座虚影同时施工到完工（小 {small.BurstBuilt} / 大 {large.BurstBuilt} 座），" +
-                $"完工以外的步热更层平均 小 {small.BurstHot:F3} / 大 {large.BurstHot:F3} ms（允许 30% + 0.1 ms）；完工步另计，最慢一步 小 {small.BurstWorst:F2} / 大 {large.BurstWorst:F2} ms");
-            Expect(large.Frame3xP95 <= 1000.0 / 120.0,
-                $"P 3x 速度、120 帧下每帧（1.5 个模拟步 + 家园画面）p95 {large.Frame3xP95:F2} ms ≤ 8.33 ms（Editor；真机另测）");
+                $"完工以外的步热更层平均 小 {small.BurstHot:F3} / 大 {large.BurstHot:F3} ms（允许 30% + 0.1 ms）；完工步另计，最慢一步 小 {small.BurstWorst:F2} / 大 {large.BurstWorst:F2} ms",
+                PerfGate.Le(large.BurstHot, small.BurstHot * 1.3 + 0.1, "大规模施工中热更层每步 ms"));
+            ExpectPerf(true,
+                $"P 3x 速度、120 帧下每帧（1.5 个模拟步 + 家园画面）p95 {large.Frame3xP95:F2} ms ≤ 8.33 ms（Editor；真机另测）",
+                PerfGate.Le(large.Frame3xP95, 1000.0 / 120.0, "3x 每帧 p95 ms"));
             Expect(!double.IsNaN(large.AllocPerStep) && large.AllocPerStep <= Math.Max(small.AllocPerStep, 64) * 1.5 + 64,
                 $"P 稳态每步托管堆增量不随规模增长：小 {small.AllocPerStep:F0} B、大 {large.AllocPerStep:F0} B");
 
@@ -859,8 +864,9 @@ namespace GameLogic.EditorTools
                 edits.Add(sw.Elapsed.TotalMilliseconds);
             }
             PerfLines.Add($"改线重建（15,045 格上改一格后整图重建一次）：{string.Join(" / ", edits.Select(x => x.ToString("F2")))} ms");
-            Expect(edits.Max() <= 4.0,
-                $"P 大网络改一格后的拓扑重建 {edits.Max():F2} ms ≤ 4 ms（半个 120 帧；只在编辑后的下一步发生一次，同一帧编辑多少格都只重建一次）——整图重建保留，不做增量（DEBT-FG0ARCH02-09 关闭）");
+            ExpectPerf(true,
+                $"P 大网络改一格后的拓扑重建 {edits.Max():F2} ms ≤ 4 ms（半个 120 帧；只在编辑后的下一步发生一次，同一帧编辑多少格都只重建一次）——整图重建保留，不做增量（DEBT-FG0ARCH02-09 关闭）",
+                PerfGate.Le(edits.Max(), 4.0, "改一格拓扑重建最大 ms"));
 
             // 存档体积与存读时长（FGR-SYS-005：后期存档 ≤ 50 MB、存档 ≤ 2 秒、读档 ≤ 15 秒）。
             var sws = Stopwatch.StartNew();
@@ -875,10 +881,12 @@ namespace GameLogic.EditorTools
             swg.Stop();
             bool back = rr.Success && BeltNetworkService.Kernel.CellCount == large.BeltCells + 5 && PipeNetworkService.Kernel.CellCount == large.PipeCells;
             PerfLines.Add($"规模存档：{bytes / 1024.0 / 1024.0:F2} MB，写 {sws.Elapsed.TotalMilliseconds:F0} ms，读（恢复 + 载入家园）{swl.Elapsed.TotalMilliseconds:F0} ms；读档时格网传送带层套用 {swg.Elapsed.TotalMilliseconds:F2} ms");
-            Expect(back && bytes <= 50L * 1024 * 1024 && sws.Elapsed.TotalMilliseconds <= 2000 && swl.Elapsed.TotalMilliseconds <= 15000,
-                $"P FGR-SYS-005：FG03 第 7 节规模的存档 {bytes / 1024.0 / 1024.0:F2} MB ≤ 50 MB，存档 {sws.Elapsed.TotalMilliseconds:F0} ms ≤ 2 秒，读档 {swl.Elapsed.TotalMilliseconds:F0} ms ≤ 15 秒（Editor），读回规模不丢");
-            Expect(swg.Elapsed.TotalMilliseconds <= 50,
-                $"P 读档时热更层把 15,000 格写进格网传送带层 {swg.Elapsed.TotalMilliseconds:F2} ms ≤ 50 ms（装载期一次；DEBT-FG0ARCH02-11 的 Editor 数据，真机折算见证据）");
+            ExpectPerf(back && bytes <= 50L * 1024 * 1024,
+                $"P FGR-SYS-005：FG03 第 7 节规模的存档 {bytes / 1024.0 / 1024.0:F2} MB ≤ 50 MB，存档 {sws.Elapsed.TotalMilliseconds:F0} ms ≤ 2 秒，读档 {swl.Elapsed.TotalMilliseconds:F0} ms ≤ 15 秒（Editor），读回规模不丢",
+                PerfGate.Le(sws.Elapsed.TotalMilliseconds, 2000, "存档 ms"), PerfGate.Le(swl.Elapsed.TotalMilliseconds, 15000, "读档 ms"));
+            ExpectPerf(true,
+                $"P 读档时热更层把 15,000 格写进格网传送带层 {swg.Elapsed.TotalMilliseconds:F2} ms ≤ 50 ms（装载期一次；DEBT-FG0ARCH02-11 的 Editor 数据，真机折算见证据）",
+                PerfGate.Le(swg.Elapsed.TotalMilliseconds, 50, "格网传送带层套用 ms"));
         }
     }
 }

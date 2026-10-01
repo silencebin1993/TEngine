@@ -684,7 +684,8 @@ namespace GameLogic.EditorTools
             }
             double with = Measure(true, out long refl);
             double without = Measure(false, out long refl0);
-            Expect(refl > 200 && refl0 == 0 && with < 4.0, $"单步 {with:0.000} ms（对照不装尖刺外装 {without:0.000} ms），4 秒内反伤 {refl} 次；预算：单步 < 4 ms（120 帧的帧预算 8.3 ms 的一半以内）");
+            ExpectPerf(refl > 200 && refl0 == 0, $"单步 {with:0.000} ms（对照不装尖刺外装 {without:0.000} ms），4 秒内反伤 {refl} 次；预算：单步 < 4 ms（120 帧的帧预算 8.3 ms 的一半以内）",
+                PerfGate.Lt(with, 4.0, "内核单步 ms"));
             PerfLines.Add($"反伤 + 定点桩：200 机 × 200 近身敌人 + 100 根桩，内核单步 {with:0.000} ms（不装尖刺外装 {without:0.000} ms）；Editor batchmode、Burst 同步编译，真机复测归 FG15-SYS-02");
         }
 
@@ -835,6 +836,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

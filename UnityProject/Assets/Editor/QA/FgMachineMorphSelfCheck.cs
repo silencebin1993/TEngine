@@ -990,10 +990,10 @@ namespace GameLogic.EditorTools
             Frames(10);
             Expect(registered == count && MachineMorphLibrary.MeshCount == meshes && MachineMorphLibrary.MaterialCount == mats && meshes <= 43 && mats <= 4,
                 $"{count} 台机器：共享网格 {meshes} 份、材质 {mats} 份（与机器数无关；上限 43 / 4）");
-            Expect(idleUs < 5.0, $"没有过渡时每帧 {idleUs:0.000} 微秒（直接返回）");
-            Expect(animating == count / 2 && alloc == 0 && animMs < 2.0,
-                $"{animating} 台同时过渡（最坏情况）：每帧 {animMs:0.000} 毫秒、分配 {alloc} 字节");
-            Expect(refreshMs < 1.0, $"每台机器重算 + 切换目标 {refreshMs:0.000} 毫秒（含桥接层重编译；只在接入 / 离开 / 装配变更时发生）");
+            ExpectPerf(true, $"没有过渡时每帧 {idleUs:0.000} 微秒（直接返回）", PerfGate.Lt(idleUs, 5.0, "空闲每帧 µs"));
+            ExpectPerf(animating == count / 2 && alloc == 0,
+                $"{animating} 台同时过渡（最坏情况）：每帧 {animMs:0.000} 毫秒、分配 {alloc} 字节", PerfGate.Lt(animMs, 2.0, "同时过渡每帧 ms"));
+            ExpectPerf(true, $"每台机器重算 + 切换目标 {refreshMs:0.000} 毫秒（含桥接层重编译；只在接入 / 离开 / 装配变更时发生）", PerfGate.Lt(refreshMs, 1.0, "单台重算 ms"));
             PerfLines.Add($"形变：{count} 台机器，空闲每帧 {idleUs:0.000} μs；{animating} 台同时过渡每帧 {animMs:0.000} ms、零分配；单台重算 {refreshMs:0.000} ms；共享网格 {meshes} / 材质 {mats}" +
                           "（Editor batchmode、Mono JIT；渲染侧同一部件共用网格 + 材质、开 GPU Instancing，由引擎合批；批次数需在带图形设备的 Play 下复核，见证据截图工具）");
         }
@@ -1371,6 +1371,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

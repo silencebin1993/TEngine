@@ -48,235 +48,127 @@ namespace GameLogic.EditorTools
         private static readonly StringBuilder Report = new StringBuilder();
         private static int _fail;
 
+        /// <summary>
+        /// FG-TOOL-01：全量自检按段登记（<see cref="RunSegmentList"/>），每段计时并统计本段的通过 / 失败 / 性能警告条数，
+        /// 日志末尾输出每段耗时排行；<see cref="RunSegments"/> 按环境变量 BINGAMES_VALIDATE_SEGMENTS 只跑点名的段（迭代用，交付仍跑全量）。
+        /// 段的顺序、内容与原来逐行调用完全相同；某段抛异常时与原来一样中止后面的段并记一条失败。
+        /// </summary>
         [MenuItem("BinGames/自检：细胞阶段框架")]
-        public static void RunAll()
+        public static void RunAll() => RunSelected(null);
+
+        /// <summary>
+        /// FG-TOOL-01：只跑点名的段（逗号分隔的段名，见日志末尾的耗时排行或 <see cref="SegmentNames"/>）。
+        /// 用法：<c>bash tools/unity-validate.sh --segment FgPipeSelfCheck,FgPowerGridSelfCheck</c>。点名的段不存在 = 失败并列出全部段名。
+        /// </summary>
+        public static void RunSegments()
+        {
+            string raw = Environment.GetEnvironmentVariable("BINGAMES_VALIDATE_SEGMENTS") ?? string.Empty;
+            var only = new HashSet<string>(raw.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()), StringComparer.Ordinal);
+            RunSelected(only);
+        }
+
+        /// <summary>全部段名（按运行顺序）。</summary>
+        public static IReadOnlyList<string> SegmentNames
+        {
+            get
+            {
+                var names = new List<string>();
+                _collectNames = names;
+                try
+                {
+                    RunSegmentList();
+                }
+                finally
+                {
+                    _collectNames = null;
+                }
+                return names;
+            }
+        }
+
+        /// <summary>一段的耗时与断言条数。</summary>
+        public sealed class SegmentTiming
+        {
+            public string Name;
+            public double Seconds;
+            public int Pass;
+            public int Fail;
+            public int Warn;
+        }
+
+        private static readonly List<SegmentTiming> Timings = new List<SegmentTiming>();
+        private static readonly List<(double seconds, string text)> Profiles = new List<(double, string)>();
+        private static string _profileOut;
+        private static HashSet<string> _only;
+        private static List<string> _collectNames;
+
+        /// <summary>最近一次运行的分段耗时（运行顺序）。</summary>
+        public static IReadOnlyList<SegmentTiming> LastTimings => Timings;
+
+        private static void RunSelected(HashSet<string> only)
         {
             Report.Clear();
             _fail = 0;
+            Timings.Clear();
+            Profiles.Clear();
+            PerfGate.ResetRun();
+            QaPython.ClearShared();
+            _only = only;
+            // FG-TOOL-01：--profile 时剖析每段里最慢的行（写到单独的文件，不进报告）。
+            _profileOut = Environment.GetEnvironmentVariable("BINGAMES_VALIDATE_PROFILE_OUT");
+            if (string.IsNullOrEmpty(_profileOut))
+            {
+                _profileOut = null;
+            }
+            var total = System.Diagnostics.Stopwatch.StartNew();
 
             Line("========== 细胞阶段框架自检 ==========");
+            if (only != null)
+            {
+                Line($"（只跑点名的段：{string.Join("、", only)}——迭代用；交付验收仍跑全量 RunAll）");
+                List<string> unknown = only.Where(n => !SegmentNames.Contains(n)).ToList();
+                if (unknown.Count > 0 || only.Count == 0)
+                {
+                    Fail($"点名的段不存在：{(only.Count == 0 ? "（没有点名，环境变量 BINGAMES_VALIDATE_SEGMENTS 为空）" : string.Join("、", unknown))}；可选段：{string.Join(", ", SegmentNames)}");
+                }
+            }
 
             try
             {
-                ValidateData();
-                ValidateSimKernel();
-                ValidateControlledUnitIdentity();
-                ValidateUnifiedEntityIntents();
-                ValidateControlBridge();
-                ValidateControlledPresentation();
-                ValidateSpatialHash();
-                ValidateDevourThreshold();
-                ValidateStatusExpiry();
-                ValidateMinionCap();
-                ValidateDeathCauseKind();
-                ValidateInheritance();
-                ValidateBossPhase();
-                ValidateShop();
-                ValidateCodex();
-                ValidateControlLifecycle();
-                ValidateCameraDirector();
-                ValidateSquadCommands();
-                ValidateUnitLoadouts();
-                ValidateDirectControlActions();
-                ValidateDirectVitals();
-                ValidateAiHandoff();
-                ValidateAiOverloadSuppression();
-                ValidateSurgicalWindowBody();
-                ValidateSurgicalWindowCommandAndAim();
-                ValidateSurgicalWindowRewards();
-                ValidateConsciousnessPlaytestGate();
-                ValidateAllyParityAndControlCycle();
-                ValidateCombatTruthSourceUnified();
-                ValidateBlueprintLibrary();
-                ValidateLineagePhenotypeTemplate();
-                ValidateCompiledRecipeCache();
-                ValidateGerminationChamber();
-                ValidateHomecomingRetrofit();
-                ValidateWildOrganLoot();
-                ValidateTemplateUiQueries();
-                ValidateFormationDomainModel();
-                ValidateFormationCommandQueue();
-                ValidateFormationDoctrineProfiles();
-                ValidateFormationSharedPathing();
-                ValidateDirectControlDetachment();
-                ValidateFormationEncounter();
-                ValidateAbilityResourceLayerBoundary();
-                ValidateFriendlyGeneProjection();
-                ValidateFanDirectionUnified();
-                ValidateEmissionGeometryAndBodyForward();
-                ValidateFormationAnchorLeaderPriority();
-                ValidateFormationCommandPriorityGuard();
-                ValidateSharedCapabilityCatalog();
-                ValidateAllyDeathSignal();
-                ValidateHomecomingRealCombatExit();
-                ValidateWildOrganFieldPersistence();
-                ValidateSquadFormationBridge();
-                ValidateSquadInputTranslation();
-                ValidateCombatTransientTeardown();
-                ValidateFormationCommandQueueVisualization();
-                ValidateSquadCommandQueueRequest();
-                ValidateDirectFormationHud();
-                ValidateControlFeedbackFourPart();
-                ValidateStableKillerIdentity();
-                // ER8-CONTENT-01：《地球归还》反馈音效与字幕（AC-AUD-001），独立类，结果并入本报告。
-                _fail += FeedbackCueSelfCheck.Run(Report);
-                _fail += SettingsConsumersSelfCheck.Run(Report);
-                _fail += ContentIconsSelfCheck.Run(Report);
-                _fail += CampaignFlowSelfCheck.Run(Report);
-                _fail += ObjectiveSelfCheck.Run(Report);
-                _fail += SilhouetteSelfCheck.Run(Report);
-                _fail += FeedbackVfxSelfCheck.Run(Report);
-                _fail += NegativePathSelfCheck.Run(Report);
-                _fail += MainMenuSelfCheck.Run(Report);
-                // FG0-DOC-01：GDD 0.2 合并、Demo 文档归档冻结、TERM-MIGRATION 0.2 名表与题材审计词表、设计版本切换。
-                _fail += DesignDocsAuditSelfCheck.Run(Report);
-                // FG0-DATA-01：建筑 / 敌人 / 文本三类数据从 Luban 表到运行时、缺失键标记、负向矩阵、python 已知坑检查。
-                _fail += FgDataPipelineSelfCheck.Run(Report);
-                // FG0-SAVE-01：存档 v2 骨架——版本升级链、Demo 存档提示、写入中途强制结束与备份恢复、已移除内容转废料、存档卡新字段。
-                _fail += FgSaveV2SelfCheck.Run(Report);
-                // FG0-UX-01：UI 基础件（12 类）与输入上下文——动作登记表、上下文与组合键、重绑冲突、旧设置迁移、通知中心、
-                // 浮层基础件、面板与布局探针（四种分辨率 × 缩放极值 × 中英文）、文本键、性能。
-                _fail += FgUiKitSelfCheck.Run(Report);
-                // FG0-ARCH-04：格网建造原型与锚点迁移——开局布局表、放置 / 旋转 / 拆除 / 占地校验与负向矩阵、正式输入、
-                // 施工倍速、存读档与旧档迁移、后台一致性、叠加层与建造栏、性能。
-                _fail += FgGridBuildSelfCheck.Run(Report);
-                // FG3-LOG-01：格网建造正式化——建造菜单（分类 / 搜索 / 快捷栏）、非法原因矩阵、拖拽铺设、拆除与框选批量拆除（确认）、搬迁（机器真跑）、
-                // 出口随建筑、正式输入、机器探索迷雾、格线开关、存读档、倍速、观察一致、让位、界面与布局探针、性能。
-                _fail += FgBuildFormalSelfCheck.Run(Report);
-                // FG3-LOG-02：虚影施工与返还——机器真去仓库取料再到现场施工（一趟上限、进度不超过已到材料）、等待材料与通知、取消与拆除全额返还（含内部缓存、
-                // 仓满变地面物 + 搬运单）、材料被挪用 / 施工中被摧毁 / 没有劳动力、传送带虚影逐格建成与带物品拆除、优先级与“优先建造这一片”、机器阵亡与规划挪走、
-                // 存读档与旧档迁移、暂停与 0.5x～3x、观察一致、正式输入与施工队列面板（真 UXML + 布局探针）、性能。
-                _fail += FgConstructionSelfCheck.Run(Report);
-                // FG3-LOG-03：传送带正式化与端口——建筑 / 仓库端口自动对接（朝向、只收废料、建筑还不收发）、仓库闭环守恒与三级实测吞吐（FGT-LOG-005 正式版）、
-                // 建造菜单三级与原地反转、堵塞原因、输出过滤、建筑停用退回、清带工具（正式输入 + 确认）、损毁留虚影与重建、沙暴减速与顶棚、
-                // 存读档与旧格式、暂停与 0.5x～3x、观察一致、10 个游戏日守恒（FGT-LOG-006）、端口面板 / 施工队列真 UXML 与布局探针、120 帧节奏性能。
-                _fail += FgBeltFormalSelfCheck.Run(Report);
-                // FG3-LOG-04：分流、合流、地下带、过滤——分流比例与优先输出口 / 溢流、每口过滤（分拣、严格等待、关闭）、两个输出口都堵（停下、上游堵、原因、恢复）、
-                // 错误的一侧、合流器交替与优先输入口、地下传送带跨越与跨度负向 / 堵塞 / 环 / 回路、确定性与格式 3 / 旧格式 2 / 坏块、渲染、性能；
-                // 正式输入（放置预览、分流器 / 合流器 / 地下拖拽、跨度超限原因、穿过核心、机器施工）、家园真实端口守恒、悬停与原因、节点面板（真 UXML + 预设 + 布局探针）、
-                // 拆除返还与摧毁留虚影、真文件存读档、暂停与 0.5x～3x、观察一致、120 帧节奏性能。
-                _fail += FgBeltNodeSelfCheck.Run(Report);
-                // FG3-LOG-05：管线与流体——一网一种流体（接错拒绝）、泵、最低等级限流与瓶颈、优先级分配、储罐缓冲 / 模式、阀门单向 / 关闭 / 调头、冲洗、供给为 0、
-                // 拓扑变化才重算、确定性与存档、结冰计时接口、渲染实例、正式输入（三个种子）、家园接错流体、悬停、管线面板（真 UXML + 冲洗确认 + 布局探针）、拆除、真文件存读档、暂停与倍速、观察一致、120 帧性能。
-                _fail += FgPipeSelfCheck.Run(Report);
-                _fail += FgPowerGridSelfCheck.Run(Report); // FG3-LOG-06：电力子网与电塔（FGT-LOG-008）。
-                // FG3-LOG-07：规划工具——框选复制粘贴（连同设置、旋转、非法部分红叉、未解锁条目）、布局库（真文件、跨存档、缩略图、导出导入、面板真 UXML + 布局探针）、
-                // 撤销重做 50 步逐步状态一致（FGT-LOG-004）与已完工建筑 → 拆除任务 + 提示、升级规划（差额收费、设置保留）、吸管与复制设置、9 个快捷键可重绑、暂停 / 倍速 / 观察一致、性能。
-                _fail += FgPlanningToolsSelfCheck.Run(Report);
-                // FG3-LOG-08：叠加层与根因诊断——“为什么不工作”追溯五类以上真实根源（FGT-LOG-009：电网超载 → 发电机受损、未接入、输出口 → 下游不收 / 传送带尽头 / 仓库满、
-                // 端口登记冲突、施工缺料、流体没来源、队列缺电并入电力链）、多重根源顺序、点原因跳镜头且建造模式不退出（FG-GAP-071）、8 种叠加层开关 / 快捷键 / 互斥 / 表现、
-                // 选择器与诊断面板（真 UXML + 布局探针）、悬停、存读档、暂停与倍速、观察一致、首次钩子与图鉴、性能。
-                _fail += FgDiagnosisSelfCheck.Run(Report);
-                // FG3-LOG-09：存读档、后台一致性与性能门禁——满载产线（仓库闭环 / 分流合流地下带 / 跨区块传送带与管线 / 泵储罐阀门 / 电网链 / 虚影施工 / 排产 / 污染区块）
-                // 在 8 个时刻真文件存读档逐字段一致并续跑一致（FGT-LOG-010）、三个种子、暂停与 0.5x～3x 倍速产量按比例（3x 产量）、1 个游戏日一直看 / 离开再返回 / 无头三遍一致（FGT-LOG-011）、
-                // FG03 第 7 节规模的内核单步与热更层 / 画面每帧与数量无关、存档体积与存读时长（FGT-LOG-012 / FGR-SYS-005）、统计窗口进存档、已移除建筑类型转废料、
-                // 画面对账变化驱动、接入计时按模拟步、寻路桥接边界、存档体积与探索面积无关。
-                _fail += FgLogisticsGateSelfCheck.Run(Report);
-                // FG0-ARCH-05：世界生成与区块流式加载——确定性（四种访问顺序 / 三条编译路径）、随机流分离、表面、规划层、坐标、
-                // 工作线程流式加载与性能、差异存档、生成器版本回归哈希、暂停倍速与后台一致、叠加层“生成中”占位、暂停菜单种子。
-                _fail += FgWorldGenSelfCheck.Run(Report);
-                // FG3-GEN-01：世界生成器 v2——起始区四级保证（50 种子 × 标准 / 极端 / 宽松，托管独立重算）、局部重生成、领地布局与层级寻路可达、
-                // 家园区确定性、河流与矿带、距离与威胁、遗迹点与侦察巢、分项世界设置与分享短码、新战役存读档与负向、新游戏设置 / 战略地图 / 小地图（真 UXML）、
-                // 地貌起伏网格、性能与时钟无关、v2 冻结基准、布局探针。
-                _fail += FgWorldGenHomeSelfCheck.Run(Report);
-                // FG0-ARCH-01：整个世界同时运行（含统一时钟底座）——固定步长与 0.5x～3x、暂停、接入锁 1x、游戏日与存档；
-                // 家园 + 真实派遣的远征 + 行进中的突袭同时跑 30 分钟游戏时间，镜头飞跃 100 次 / 从不观察 / 无头三遍逐字段一致；
-                // 飞跃途中存读档、远征全灭的镜头、跨地点定位、种子无关、活跃区块、输入、世界时间条布局探针、性能。
-                _fail += FgWorldSimSelfCheck.Run(Report);
-                // FG0-ARCH-02：传送带内核原型——三档吞吐、满载整体前进、堵塞与原因、环、侧向汇入交替、确定性回放、10 个游戏日物品守恒、
-                // 15,000 格 / 30,000 件单步耗时与超大网络存读档、坏块只丢一块、20 Hz 节拍 / 暂停 / 0.5x～3x、观察不改变结果、格网规则、种子无关、
-                // 近景实例化 / 远景流动贴图（真实滚轮）、热更层开销与数量无关。
-                _fail += FgBeltKernelSelfCheck.Run(Report);
-                // FG0-ARCH-03：战斗内核接入——内核语义（弹体、重炮热量、编队命令、大量同步阵亡、网格 = 暴力扫描、确定性、快照负向、一百万格精度）、
-                // Demo 战斗回归（编队命令、接管、敌人 AI、标记跳转、熔穿过载、首领、训练靶）、存读档后命令继续（FG-GAP-018）、观察 / 不观察一致、
-                // 暂停与 0.5x～3x、区域切换不泄漏、快照损坏重建、突袭原型种子无关、性能场景（200 敌人 + 80 炮塔 + ≥1,500 弹体）。
-                _fail += FgCombatKernelSelfCheck.Run(Report);
-                // FG0-ARCH-06：层级寻路与休眠唤醒——内核语义与暴力解对照、缓存无关、同目标共享、增量更新与在飞重排队、出框绕路、
-                // 快照与在飞存读档、战斗跟随与截断、家园绕路 / 工单 / 编队 / 迷雾的失败原因、放置预警、突袭路线、大量请求、
-                // 观察与倍速、休眠唤醒与持续模拟对照（FGT-GEN-010）、种子无关、2,000 格长路线性能。
-                _fail += FgNavSelfCheck.Run(Report);
-                // FG0-QA-01：旅程机器人框架的失败路径（重试、步骤超时、总超时、报错即失败、报告、域重载后续跑、旅程登记）。
-                // 旅程本身要进 Play（tools/unity-journey.sh），性能基线要搭后期大场景（tools/unity-perf-baseline.sh），都不在全量自检里。
-                _fail += JourneyRunnerSelfCheck.Run(Report);
-                // FG1-SIG-01：信号核与槽位——种类表与源数据、初始 2 / 最多 5 槽与超控阵列解锁、原子装卸与实例守恒、负向矩阵（满仓卸下等）、
-                // 核心固件放不进机器电路（蓝图固件槽 / 3×3 电路格 / 保存校验）、远征锁、预设、真实文件存读档与篡改修复、暂停倍速种子无关、
-                // HUD 与面板（点选 / 拖放 / 锁定横幅 / 预设按钮）与布局探针、P 键开关、性能与连按。
-                _fail += FgSignalCoreSelfCheck.Run(Report);
-                // FG1-SIG-02：接入口与双态编译预览——标记规则与负向矩阵（0 / 8 号格、第二个、有芯片的格）、撤销重做与 Ctrl+Z / Ctrl+Y、
-                // AI 按空槽 / 你接入时只作用于经过接入口的路径 / 重炮 + 过载出熔穿过载、配额与路径截断（FGT-SIG-005）、
-                // 预览与实际结算逐字段一致（FGT-SIG-002）、真实文件存读档 / 旧档 / 篡改、暂停倍速种子无关、真 UXML 界面与布局探针、性能。
-                _fail += FgUplinkPreviewSelfCheck.Run(Report);
-                // FG1-SIG-03：接入、重编译、离开与防刷——正式输入（选中 + 接入键 / 机器列表 / Tab）经 0.35 秒过渡插入固件、重编译、形变事件、HUD，
-                // 离开复原；失败原因逐条；负向矩阵（过渡中阵亡、Esc、战略暂停中发起、1 秒 10 次、无接入口、信号核为空、镜头飞走、地点卸载）；
-                // 冷却跟着信号 / 热量留在机体（三台重炮真开火，FGT-SIG-004）；防刷；暂停与 0.5x～3x；真实文件存读档（FGT-SIG-009）；性能；HUD。
-                _fail += FgSignalUplinkSelfCheck.Run(Report);
-                // FG1-SIG-04：断链与安全模式——四种原因各一次（走出覆盖 / 干扰场 / 静默夜预留接口 / 阵亡回弹，FGT-SIG-006）、安全模式只跑本地常规固件、
-                // 覆盖源（核心 / 信号塔 / 断开的塔）、边缘反复进出、连续死亡回弹、没有合适回弹目标、暂停倍速、后台一致、真实文件存读档、性能、HUD 与机器列表。
-                _fail += FgSignalLinkSelfCheck.Run(Report);
-                // FG1-SIG-05：核心固件迁移与 AI 边界——6 条核心名单（正式表）、AI 驾驶带接入口的机器 / 旧档电路里的核心固件 / 敌方 AI 都不打反应（FGT-SIG-011），
-                // 玩家接入触发熔穿过载与标记跳转、正式表冷却（FGT-SIG-010）、交还 AI 时正处在过载（过热 / 瞄准中 / 刚发动）、Demo 内容迁移（研究费、OBJ-06/08、
-                // 核心门三灯、敌方适应）与可通关（AI 编队不靠熔穿过载打掉护甲机）、暂停倍速、真实文件存读档、观察无关、性能、文本键。
-                _fail += FgCoreFirmwareBoundarySelfCheck.Run(Report);
-                // FG1-SIG-06：裸跑敌方固件与暴露改写——宿主规则（FGT-SIG-003：未破解只进信号核，机器 / 炮塔 / 保存 / 刻印拒绝）、带回即得未破解固件、
-                // 裸跑代价（FGT-SIG-008：积热 ×1.5、每次发动 +2、计次间隔；核心裸跑按 +2）、破解时正插在信号核里（自动更新、冷却不重置）、
-                // 暴露改写（接入不计、各来源、异派、节点、塔关、高功率、阈值、截断）、旧档迁移与真实文件存读档、暂停倍速、后台一致、性能、界面与布局探针。
-                _fail += FgRawFirmwareExposureSelfCheck.Run(Report);
-                // FG1-SIG-07：信号覆盖网络与远距离跳转——覆盖源与连通（核心 / 信号塔 T1·T2 / 中继塔链 / 中继模块；Burst 与托管对照）、中继被摧毁时断开处高亮与通知、
-                // 覆盖之外（命令 / 派工 / 接入被拒、只执行最后的命令、回到覆盖自动恢复）、远距离跳转（过渡 1.5 秒、冷却 10 秒、跨地点）、跳回家园 / 上一台（快捷键与 HUD，
-                // FGJ-M1 第 7、8 步）、负向矩阵、暂停倍速、后台一致、真实文件存读档、覆盖扩张探索、派遣检查单提醒接口、真实建造 / 拆除、远征地点、性能、界面与布局探针。
-                _fail += FgSignalNetworkSelfCheck.Run(Report);
-                // FG1-VFX-01：机身形变首批——类别入表、6 个作战组件 × 3 状态的部件库（三角面预算、单 MeshFilter、共享网格 / 材质、GPU Instancing）、
-                // 默认战略缩放下俯视栅格化可辨认（FGR-FW-022）、FGT-FW-004 接入 → 出现 → 离开 → 复原与多类叠加、装配变更、负向（形变中阵亡、快速反复接入离开、
-                // 表现中途卸载、没有作战组件、引信类）、暂停倍速、真实文件存读档（直接到位）、观察无关、性能与零分配。
-                _fail += FgMachineMorphSelfCheck.Run(Report);
-                // FG1-HUD-01：接入 HUD、机器经历与引导钩子——图鉴表与源数据、接入 HUD 正式链路（槽位 / 机身状态与来源 / 热量 / 电池 / 耐久 / 伤势 / 链路 / 暴露 / 经历）、
-                // 负向矩阵（冷却 / 无接入口 / 信号核为空 / 裸跑 / 阵亡 / 连按）、链路强度与地图边缘标记、与信号同行（暂停倍速 / Tab / 读档）、结算文案、图鉴（解锁 / 持久化 / 面板 / “?”入口）、
-                // 引导钩子只一次、接入镜头设置、跟随选中（F）、机器列表与地图接入口标记、文案迁移与离开音效、布局探针（100% / 150% × 中英）、存读档、性能。
-                _fail += FgUplinkHudSelfCheck.Run(Report);
-                // FG1-E2E-01：M1 出口——信号计时字段存整数步（真实存档往返逐位相同、旧档迁移幂等、窗口恰好在第 N 步结算）、旅程框架切换键先读状态
-                // （对照：不读状态会把状态切回去）、FGJ-M1 / FGJ-M1R 登记覆盖出口旅程与 IC-REQ-022 六类、缺口清零门禁、试玩包齐全。
-                _fail += FgMilestoneM1SelfCheck.Run(Report);
-                // FG2-FW-01：44 条固件数据迁移——源数据 = 运行时表（逐字段）、名表 = 设计案 5.4（旧 ID 与 42 条旧基因一一对应）、目录由表生成（改表 / 切语言 / 表坏了）、
-                // 机器电路装配（FGT-FW-002 核心装不进机器与炮塔、37 条常规真实装配编译）、接入口插入与路径数不变、热量与能耗（预览 = 版本 = 内核重炮积热、双态预览能耗行）、
-                // 状态标签（表 = FG02 3.4、模块真实贴的标签 = 表）、旧存档按新表显示与退役对账、FGT-FW-008 题材审计扩展到全部 FG 文本键、负向、暂停倍速、性能。
-                _fail += FgFirmwareMigrationSelfCheck.Run(Report);
-                // FG2-FW-02：读法矩阵与固定底盘兼容——源 = 表；旧引擎 42 条 × 5 载体零死对（扩展 ChassisPrimitiveMatrixSmokeReport）与声明字段 = 模块真实字段；
-                // 正式战斗内核 44 条 × 5 载体零死对（FGT-FW-001，读法开 / 关对照）与逐条实证；固定底盘兼容表（冲刺器拒绝并说明、推铲读作击退铲）；
-                // 读法说明对玩家可见（信号核 5 条、电路编辑器当前载体一条）；内核快照格式 3 存读档与格式 2 兼容；破碎都市正式流程的倍速 / 暂停 / 观察 / 存读档一致；负向；性能。
-                _fail += FgReadingMatrixSelfCheck.Run(Report);
-                // FG2-FW-03：反应行为探针与命名。旧引擎每条规则“两个配料触发、只有一个不触发”，真实固件的旧基因在真起的 SimWorld 里兑现倍率 = 反应表；
-                // 正式内核里每条可达的反应触发 / 不触发两组对照、消耗 / 附加 / 残留、两条同时满足、叠层上限；头顶标签图标与悬停读数；命名与按阵营开放；
-                // 内核快照格式 4 / 3、开放批次存读档；破碎都市正式流程的倍速 / 暂停 / 观察 / 存读档一致；性能。
-                _fail += FgReactionProbeSelfCheck.Run(Report);
-                // FG2-FW-04：反应反馈与伤害归因。内核逐标签到期（先挂的先到期、持续伤害跟着停）与快照格式 5；FGT-FW-005 真实地点首次触发（图鉴解锁、慢放只一次、镜头推动、
-                // 设置关闭 / 不观察 / 未开放命名的对照、存读档）；慢放 × 暂停 × 0.5x～3x 与“只改节奏不改结果”；弹字聚合与每秒上限（同一帧 200 次反应）；
-                // 伤害归因（破碎都市正式流程对账、撤离报告、突袭场次、克制类、上限、存读档、观察与不观察一致）；反应日志（筛选、容量、换战役清空）；界面与布局探针。
-                _fail += FgReactionFeedbackSelfCheck.Run(Report);
-                // FG2-FW-05：固件库与图鉴。FGT-FW-007 筛选（6 个维度与按表独立算出的期望对账）/ 搜索 / 排序；锁定与批量分解（锁定 / 在用跳过、确认时重算、废料经账本、面板先弹确认框）；
-                // 容量受仓库约束；图鉴固件 / 反应页签（剪影 + 获取途径、拿到即解锁、跨存档、搜索不剧透、互链）；悬停按图鉴键跳转与固件库键；存读档；取用路线被堵；性能；界面与布局探针。
-                _fail += FgFirmwareLibrarySelfCheck.Run(Report);
-                // FG2-VFX-02：形变全量的作战组件名表——设计案 5.6 其余 5 个组件（旋刃环 / 哨戒桩 / 震荡脉冲器 / 拆解钳 / 尖刺外装）的表行、目录、装配编译与投送行为
-                // （一整圈、定点插桩不随母机走、脚下脉冲要贴近、夹住后持续拆解、近身反伤且不连锁）、区域 / 无人机外观种类与状态色、内核快照格式 7 与格式 6 兼容、
-                // 倍速 / 暂停只改步数不改结果、负向与性能。三套机身状态本身在 FgMachineMorphSelfCheck（J～M 段）。
-                _fail += FgCombatComponentRosterSelfCheck.Run(Report);
-                // FG2-E2E-01：M2 出口——解析台“数据复原”（FG-GAP-050 的固件临时来源：候选 = 表、拒绝顺序与原因、账本、破解、刻印 / 装配、存读档、44 条全部拿得到）、
-                // 引信弹迹（FG-GAP-043：类别映射、内核记录 / 渲染实例 / 按游戏时间到期 / 上限、快照格式 8 与 7 兼容、不进哈希）、FGJ-M2 / FGJ-M2R 登记覆盖出口旅程与 IC-REQ-022 六类、
-                // 缺口清零门禁、解析面板 UXML 与文本键。
-                _fail += FgMilestoneM2SelfCheck.Run(Report);
-                // FG3-E2E-01：M3 出口——FGJ-M3 / FGJ-M3R 登记覆盖出口旅程原文与 IC-REQ-022 六类、旅程源码只走输入通道（扫描业务方法调用）；
-                // 在途库存（仓库输出口推上带的件数守恒、施工等材料时写明“另有 N 件在传送带上”与办法）；缺口清零门禁与 DEBT-FG3GEN01-08 改派守护；
-                // FG-M3 试玩包；FGT-LOG-001～013 / FGT-GEN-001～010 的自检映射与登记。
-                _fail += FgMilestoneM3SelfCheck.Run(Report);
+                RunSegmentList();
             }
             catch (Exception e)
             {
                 Fail($"自检抛异常：{e}");
             }
+            finally
+            {
+                _only = null;
+                QaPython.EndShared();
+            }
 
             Line("======================================");
-            Line(_fail == 0 ? "全部通过" : $"失败 {_fail} 项");
+            // 只跑点名的段时结论写明“不是全量”：工作流以全量日志里的“全部通过”判断交付验收（FG-TOOL-01 修复）。
+            Line(_fail == 0 ? (only != null ? "点名的段全部通过（只跑了点名的段，不是全量自检）" : "全部通过") : $"失败 {_fail} 项");
+            total.Stop();
+            PerfGate.AppendSummary(Report);
+            AppendTimingRanking(Report, Timings, total.Elapsed.TotalSeconds);
 
             Debug.Log(Report.ToString());
+            WriteTimingTsv(Environment.GetEnvironmentVariable("BINGAMES_VALIDATE_TIMING_OUT"), Timings);
+            if (_profileOut != null)
+            {
+                try
+                {
+                    File.WriteAllText(_profileOut, "自检段内剖析（FG-TOOL-01；每段列出与上一行间隔最长的行，按段耗时排序）\n\n" +
+                                                   string.Join("\n", Profiles.OrderByDescending(p => p.seconds).Select(p => p.text)));
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning("[自检] 段内剖析写不了：" + e.Message);
+                }
+                _profileOut = null;
+            }
 
             if (Application.isBatchMode)
             {
@@ -284,6 +176,320 @@ namespace GameLogic.EditorTools
                 EditorApplication.Exit(_fail == 0 ? 0 : 1);
             }
         }
+
+        /// <summary>全量自检的全部段，按原来的顺序。</summary>
+        private static void RunSegmentList()
+        {
+            Seg("ValidateData", ValidateData);
+            Seg("ValidateSimKernel", ValidateSimKernel);
+            Seg("ValidateControlledUnitIdentity", ValidateControlledUnitIdentity);
+            Seg("ValidateUnifiedEntityIntents", ValidateUnifiedEntityIntents);
+            Seg("ValidateControlBridge", ValidateControlBridge);
+            Seg("ValidateControlledPresentation", ValidateControlledPresentation);
+            Seg("ValidateSpatialHash", ValidateSpatialHash);
+            Seg("ValidateDevourThreshold", ValidateDevourThreshold);
+            Seg("ValidateStatusExpiry", ValidateStatusExpiry);
+            Seg("ValidateMinionCap", ValidateMinionCap);
+            Seg("ValidateDeathCauseKind", ValidateDeathCauseKind);
+            Seg("ValidateInheritance", ValidateInheritance);
+            Seg("ValidateBossPhase", ValidateBossPhase);
+            Seg("ValidateShop", ValidateShop);
+            Seg("ValidateCodex", ValidateCodex);
+            Seg("ValidateControlLifecycle", ValidateControlLifecycle);
+            Seg("ValidateCameraDirector", ValidateCameraDirector);
+            Seg("ValidateSquadCommands", ValidateSquadCommands);
+            Seg("ValidateUnitLoadouts", ValidateUnitLoadouts);
+            Seg("ValidateDirectControlActions", ValidateDirectControlActions);
+            Seg("ValidateDirectVitals", ValidateDirectVitals);
+            Seg("ValidateAiHandoff", ValidateAiHandoff);
+            Seg("ValidateAiOverloadSuppression", ValidateAiOverloadSuppression);
+            Seg("ValidateSurgicalWindowBody", ValidateSurgicalWindowBody);
+            Seg("ValidateSurgicalWindowCommandAndAim", ValidateSurgicalWindowCommandAndAim);
+            Seg("ValidateSurgicalWindowRewards", ValidateSurgicalWindowRewards);
+            Seg("ValidateConsciousnessPlaytestGate", ValidateConsciousnessPlaytestGate);
+            Seg("ValidateAllyParityAndControlCycle", ValidateAllyParityAndControlCycle);
+            Seg("ValidateCombatTruthSourceUnified", ValidateCombatTruthSourceUnified);
+            Seg("ValidateBlueprintLibrary", ValidateBlueprintLibrary);
+            Seg("ValidateLineagePhenotypeTemplate", ValidateLineagePhenotypeTemplate);
+            Seg("ValidateCompiledRecipeCache", ValidateCompiledRecipeCache);
+            Seg("ValidateGerminationChamber", ValidateGerminationChamber);
+            Seg("ValidateHomecomingRetrofit", ValidateHomecomingRetrofit);
+            Seg("ValidateWildOrganLoot", ValidateWildOrganLoot);
+            Seg("ValidateTemplateUiQueries", ValidateTemplateUiQueries);
+            Seg("ValidateFormationDomainModel", ValidateFormationDomainModel);
+            Seg("ValidateFormationCommandQueue", ValidateFormationCommandQueue);
+            Seg("ValidateFormationDoctrineProfiles", ValidateFormationDoctrineProfiles);
+            Seg("ValidateFormationSharedPathing", ValidateFormationSharedPathing);
+            Seg("ValidateDirectControlDetachment", ValidateDirectControlDetachment);
+            Seg("ValidateFormationEncounter", ValidateFormationEncounter);
+            Seg("ValidateAbilityResourceLayerBoundary", ValidateAbilityResourceLayerBoundary);
+            Seg("ValidateFriendlyGeneProjection", ValidateFriendlyGeneProjection);
+            Seg("ValidateFanDirectionUnified", ValidateFanDirectionUnified);
+            Seg("ValidateEmissionGeometryAndBodyForward", ValidateEmissionGeometryAndBodyForward);
+            Seg("ValidateFormationAnchorLeaderPriority", ValidateFormationAnchorLeaderPriority);
+            Seg("ValidateFormationCommandPriorityGuard", ValidateFormationCommandPriorityGuard);
+            Seg("ValidateSharedCapabilityCatalog", ValidateSharedCapabilityCatalog);
+            Seg("ValidateAllyDeathSignal", ValidateAllyDeathSignal);
+            Seg("ValidateHomecomingRealCombatExit", ValidateHomecomingRealCombatExit);
+            Seg("ValidateWildOrganFieldPersistence", ValidateWildOrganFieldPersistence);
+            Seg("ValidateSquadFormationBridge", ValidateSquadFormationBridge);
+            Seg("ValidateSquadInputTranslation", ValidateSquadInputTranslation);
+            Seg("ValidateCombatTransientTeardown", ValidateCombatTransientTeardown);
+            Seg("ValidateFormationCommandQueueVisualization", ValidateFormationCommandQueueVisualization);
+            Seg("ValidateSquadCommandQueueRequest", ValidateSquadCommandQueueRequest);
+            Seg("ValidateDirectFormationHud", ValidateDirectFormationHud);
+            Seg("ValidateControlFeedbackFourPart", ValidateControlFeedbackFourPart);
+            Seg("ValidateStableKillerIdentity", ValidateStableKillerIdentity);
+            // ER8-CONTENT-01：《地球归还》反馈音效与字幕（AC-AUD-001），独立类，结果并入本报告。
+            Seg("FeedbackCueSelfCheck", FeedbackCueSelfCheck.Run);
+            Seg("SettingsConsumersSelfCheck", SettingsConsumersSelfCheck.Run);
+            Seg("ContentIconsSelfCheck", ContentIconsSelfCheck.Run);
+            Seg("CampaignFlowSelfCheck", CampaignFlowSelfCheck.Run);
+            Seg("ObjectiveSelfCheck", ObjectiveSelfCheck.Run);
+            Seg("SilhouetteSelfCheck", SilhouetteSelfCheck.Run);
+            Seg("FeedbackVfxSelfCheck", FeedbackVfxSelfCheck.Run);
+            Seg("NegativePathSelfCheck", NegativePathSelfCheck.Run);
+            Seg("MainMenuSelfCheck", MainMenuSelfCheck.Run);
+            // FG0-DOC-01：GDD 0.2 合并、Demo 文档归档冻结、TERM-MIGRATION 0.2 名表与题材审计词表、设计版本切换。
+            Seg("DesignDocsAuditSelfCheck", DesignDocsAuditSelfCheck.Run);
+            // FG0-DATA-01：建筑 / 敌人 / 文本三类数据从 Luban 表到运行时、缺失键标记、负向矩阵、python 已知坑检查。
+            Seg("FgDataPipelineSelfCheck", FgDataPipelineSelfCheck.Run);
+            // FG0-SAVE-01：存档 v2 骨架——版本升级链、Demo 存档提示、写入中途强制结束与备份恢复、已移除内容转废料、存档卡新字段。
+            Seg("FgSaveV2SelfCheck", FgSaveV2SelfCheck.Run);
+            // FG0-UX-01：UI 基础件（12 类）与输入上下文——动作登记表、上下文与组合键、重绑冲突、旧设置迁移、通知中心、
+            // 浮层基础件、面板与布局探针（四种分辨率 × 缩放极值 × 中英文）、文本键、性能。
+            Seg("FgUiKitSelfCheck", FgUiKitSelfCheck.Run);
+            // FG0-ARCH-04：格网建造原型与锚点迁移——开局布局表、放置 / 旋转 / 拆除 / 占地校验与负向矩阵、正式输入、
+            // 施工倍速、存读档与旧档迁移、后台一致性、叠加层与建造栏、性能。
+            Seg("FgGridBuildSelfCheck", FgGridBuildSelfCheck.Run);
+            // FG3-LOG-01：格网建造正式化——建造菜单（分类 / 搜索 / 快捷栏）、非法原因矩阵、拖拽铺设、拆除与框选批量拆除（确认）、搬迁（机器真跑）、
+            // 出口随建筑、正式输入、机器探索迷雾、格线开关、存读档、倍速、观察一致、让位、界面与布局探针、性能。
+            Seg("FgBuildFormalSelfCheck", FgBuildFormalSelfCheck.Run);
+            // FG3-LOG-02：虚影施工与返还——机器真去仓库取料再到现场施工（一趟上限、进度不超过已到材料）、等待材料与通知、取消与拆除全额返还（含内部缓存、
+            // 仓满变地面物 + 搬运单）、材料被挪用 / 施工中被摧毁 / 没有劳动力、传送带虚影逐格建成与带物品拆除、优先级与“优先建造这一片”、机器阵亡与规划挪走、
+            // 存读档与旧档迁移、暂停与 0.5x～3x、观察一致、正式输入与施工队列面板（真 UXML + 布局探针）、性能。
+            Seg("FgConstructionSelfCheck", FgConstructionSelfCheck.Run);
+            // FG3-LOG-03：传送带正式化与端口——建筑 / 仓库端口自动对接（朝向、只收废料、建筑还不收发）、仓库闭环守恒与三级实测吞吐（FGT-LOG-005 正式版）、
+            // 建造菜单三级与原地反转、堵塞原因、输出过滤、建筑停用退回、清带工具（正式输入 + 确认）、损毁留虚影与重建、沙暴减速与顶棚、
+            // 存读档与旧格式、暂停与 0.5x～3x、观察一致、10 个游戏日守恒（FGT-LOG-006）、端口面板 / 施工队列真 UXML 与布局探针、120 帧节奏性能。
+            Seg("FgBeltFormalSelfCheck", FgBeltFormalSelfCheck.Run);
+            // FG3-LOG-04：分流、合流、地下带、过滤——分流比例与优先输出口 / 溢流、每口过滤（分拣、严格等待、关闭）、两个输出口都堵（停下、上游堵、原因、恢复）、
+            // 错误的一侧、合流器交替与优先输入口、地下传送带跨越与跨度负向 / 堵塞 / 环 / 回路、确定性与格式 3 / 旧格式 2 / 坏块、渲染、性能；
+            // 正式输入（放置预览、分流器 / 合流器 / 地下拖拽、跨度超限原因、穿过核心、机器施工）、家园真实端口守恒、悬停与原因、节点面板（真 UXML + 预设 + 布局探针）、
+            // 拆除返还与摧毁留虚影、真文件存读档、暂停与 0.5x～3x、观察一致、120 帧节奏性能。
+            Seg("FgBeltNodeSelfCheck", FgBeltNodeSelfCheck.Run);
+            // FG3-LOG-05：管线与流体——一网一种流体（接错拒绝）、泵、最低等级限流与瓶颈、优先级分配、储罐缓冲 / 模式、阀门单向 / 关闭 / 调头、冲洗、供给为 0、
+            // 拓扑变化才重算、确定性与存档、结冰计时接口、渲染实例、正式输入（三个种子）、家园接错流体、悬停、管线面板（真 UXML + 冲洗确认 + 布局探针）、拆除、真文件存读档、暂停与倍速、观察一致、120 帧性能。
+            Seg("FgPipeSelfCheck", FgPipeSelfCheck.Run);
+            Seg("FgPowerGridSelfCheck", FgPowerGridSelfCheck.Run); // FG3-LOG-06：电力子网与电塔（FGT-LOG-008）。
+            // FG3-LOG-07：规划工具——框选复制粘贴（连同设置、旋转、非法部分红叉、未解锁条目）、布局库（真文件、跨存档、缩略图、导出导入、面板真 UXML + 布局探针）、
+            // 撤销重做 50 步逐步状态一致（FGT-LOG-004）与已完工建筑 → 拆除任务 + 提示、升级规划（差额收费、设置保留）、吸管与复制设置、9 个快捷键可重绑、暂停 / 倍速 / 观察一致、性能。
+            Seg("FgPlanningToolsSelfCheck", FgPlanningToolsSelfCheck.Run);
+            // FG3-LOG-08：叠加层与根因诊断——“为什么不工作”追溯五类以上真实根源（FGT-LOG-009：电网超载 → 发电机受损、未接入、输出口 → 下游不收 / 传送带尽头 / 仓库满、
+            // 端口登记冲突、施工缺料、流体没来源、队列缺电并入电力链）、多重根源顺序、点原因跳镜头且建造模式不退出（FG-GAP-071）、8 种叠加层开关 / 快捷键 / 互斥 / 表现、
+            // 选择器与诊断面板（真 UXML + 布局探针）、悬停、存读档、暂停与倍速、观察一致、首次钩子与图鉴、性能。
+            Seg("FgDiagnosisSelfCheck", FgDiagnosisSelfCheck.Run);
+            // FG3-LOG-09：存读档、后台一致性与性能门禁——满载产线（仓库闭环 / 分流合流地下带 / 跨区块传送带与管线 / 泵储罐阀门 / 电网链 / 虚影施工 / 排产 / 污染区块）
+            // 在 8 个时刻真文件存读档逐字段一致并续跑一致（FGT-LOG-010）、三个种子、暂停与 0.5x～3x 倍速产量按比例（3x 产量）、1 个游戏日一直看 / 离开再返回 / 无头三遍一致（FGT-LOG-011）、
+            // FG03 第 7 节规模的内核单步与热更层 / 画面每帧与数量无关、存档体积与存读时长（FGT-LOG-012 / FGR-SYS-005）、统计窗口进存档、已移除建筑类型转废料、
+            // 画面对账变化驱动、接入计时按模拟步、寻路桥接边界、存档体积与探索面积无关。
+            Seg("FgLogisticsGateSelfCheck", FgLogisticsGateSelfCheck.Run);
+            // FG0-ARCH-05：世界生成与区块流式加载——确定性（四种访问顺序 / 三条编译路径）、随机流分离、表面、规划层、坐标、
+            // 工作线程流式加载与性能、差异存档、生成器版本回归哈希、暂停倍速与后台一致、叠加层“生成中”占位、暂停菜单种子。
+            Seg("FgWorldGenSelfCheck", FgWorldGenSelfCheck.Run);
+            // FG3-GEN-01：世界生成器 v2——起始区四级保证（50 种子 × 标准 / 极端 / 宽松，托管独立重算）、局部重生成、领地布局与层级寻路可达、
+            // 家园区确定性、河流与矿带、距离与威胁、遗迹点与侦察巢、分项世界设置与分享短码、新战役存读档与负向、新游戏设置 / 战略地图 / 小地图（真 UXML）、
+            // 地貌起伏网格、性能与时钟无关、v2 冻结基准、布局探针。
+            Seg("FgWorldGenHomeSelfCheck", FgWorldGenHomeSelfCheck.Run);
+            // FG0-ARCH-01：整个世界同时运行（含统一时钟底座）——固定步长与 0.5x～3x、暂停、接入锁 1x、游戏日与存档；
+            // 家园 + 真实派遣的远征 + 行进中的突袭同时跑 30 分钟游戏时间，镜头飞跃 100 次 / 从不观察 / 无头三遍逐字段一致；
+            // 飞跃途中存读档、远征全灭的镜头、跨地点定位、种子无关、活跃区块、输入、世界时间条布局探针、性能。
+            Seg("FgWorldSimSelfCheck", FgWorldSimSelfCheck.Run);
+            // FG0-ARCH-02：传送带内核原型——三档吞吐、满载整体前进、堵塞与原因、环、侧向汇入交替、确定性回放、10 个游戏日物品守恒、
+            // 15,000 格 / 30,000 件单步耗时与超大网络存读档、坏块只丢一块、20 Hz 节拍 / 暂停 / 0.5x～3x、观察不改变结果、格网规则、种子无关、
+            // 近景实例化 / 远景流动贴图（真实滚轮）、热更层开销与数量无关。
+            Seg("FgBeltKernelSelfCheck", FgBeltKernelSelfCheck.Run);
+            // FG0-ARCH-03：战斗内核接入——内核语义（弹体、重炮热量、编队命令、大量同步阵亡、网格 = 暴力扫描、确定性、快照负向、一百万格精度）、
+            // Demo 战斗回归（编队命令、接管、敌人 AI、标记跳转、熔穿过载、首领、训练靶）、存读档后命令继续（FG-GAP-018）、观察 / 不观察一致、
+            // 暂停与 0.5x～3x、区域切换不泄漏、快照损坏重建、突袭原型种子无关、性能场景（200 敌人 + 80 炮塔 + ≥1,500 弹体）。
+            Seg("FgCombatKernelSelfCheck", FgCombatKernelSelfCheck.Run);
+            // FG0-ARCH-06：层级寻路与休眠唤醒——内核语义与暴力解对照、缓存无关、同目标共享、增量更新与在飞重排队、出框绕路、
+            // 快照与在飞存读档、战斗跟随与截断、家园绕路 / 工单 / 编队 / 迷雾的失败原因、放置预警、突袭路线、大量请求、
+            // 观察与倍速、休眠唤醒与持续模拟对照（FGT-GEN-010）、种子无关、2,000 格长路线性能。
+            Seg("FgNavSelfCheck", FgNavSelfCheck.Run);
+            // FG0-QA-01：旅程机器人框架的失败路径（重试、步骤超时、总超时、报错即失败、报告、域重载后续跑、旅程登记）。
+            // 旅程本身要进 Play（tools/unity-journey.sh），性能基线要搭后期大场景（tools/unity-perf-baseline.sh），都不在全量自检里。
+            Seg("JourneyRunnerSelfCheck", JourneyRunnerSelfCheck.Run);
+            // FG-TOOL-01：验证提速工具链——性能判定（只测一次、超线不到 2 倍记警告）、分段计时与段内剖析、旅程断点的校验负向矩阵 / 续跑组成 / 运行器挂钩 / 代码指纹。
+            Seg("FgToolchainSelfCheck", FgToolchainSelfCheck.Run);
+            // FG1-SIG-01：信号核与槽位——种类表与源数据、初始 2 / 最多 5 槽与超控阵列解锁、原子装卸与实例守恒、负向矩阵（满仓卸下等）、
+            // 核心固件放不进机器电路（蓝图固件槽 / 3×3 电路格 / 保存校验）、远征锁、预设、真实文件存读档与篡改修复、暂停倍速种子无关、
+            // HUD 与面板（点选 / 拖放 / 锁定横幅 / 预设按钮）与布局探针、P 键开关、性能与连按。
+            Seg("FgSignalCoreSelfCheck", FgSignalCoreSelfCheck.Run);
+            // FG1-SIG-02：接入口与双态编译预览——标记规则与负向矩阵（0 / 8 号格、第二个、有芯片的格）、撤销重做与 Ctrl+Z / Ctrl+Y、
+            // AI 按空槽 / 你接入时只作用于经过接入口的路径 / 重炮 + 过载出熔穿过载、配额与路径截断（FGT-SIG-005）、
+            // 预览与实际结算逐字段一致（FGT-SIG-002）、真实文件存读档 / 旧档 / 篡改、暂停倍速种子无关、真 UXML 界面与布局探针、性能。
+            Seg("FgUplinkPreviewSelfCheck", FgUplinkPreviewSelfCheck.Run);
+            // FG1-SIG-03：接入、重编译、离开与防刷——正式输入（选中 + 接入键 / 机器列表 / Tab）经 0.35 秒过渡插入固件、重编译、形变事件、HUD，
+            // 离开复原；失败原因逐条；负向矩阵（过渡中阵亡、Esc、战略暂停中发起、1 秒 10 次、无接入口、信号核为空、镜头飞走、地点卸载）；
+            // 冷却跟着信号 / 热量留在机体（三台重炮真开火，FGT-SIG-004）；防刷；暂停与 0.5x～3x；真实文件存读档（FGT-SIG-009）；性能；HUD。
+            Seg("FgSignalUplinkSelfCheck", FgSignalUplinkSelfCheck.Run);
+            // FG1-SIG-04：断链与安全模式——四种原因各一次（走出覆盖 / 干扰场 / 静默夜预留接口 / 阵亡回弹，FGT-SIG-006）、安全模式只跑本地常规固件、
+            // 覆盖源（核心 / 信号塔 / 断开的塔）、边缘反复进出、连续死亡回弹、没有合适回弹目标、暂停倍速、后台一致、真实文件存读档、性能、HUD 与机器列表。
+            Seg("FgSignalLinkSelfCheck", FgSignalLinkSelfCheck.Run);
+            // FG1-SIG-05：核心固件迁移与 AI 边界——6 条核心名单（正式表）、AI 驾驶带接入口的机器 / 旧档电路里的核心固件 / 敌方 AI 都不打反应（FGT-SIG-011），
+            // 玩家接入触发熔穿过载与标记跳转、正式表冷却（FGT-SIG-010）、交还 AI 时正处在过载（过热 / 瞄准中 / 刚发动）、Demo 内容迁移（研究费、OBJ-06/08、
+            // 核心门三灯、敌方适应）与可通关（AI 编队不靠熔穿过载打掉护甲机）、暂停倍速、真实文件存读档、观察无关、性能、文本键。
+            Seg("FgCoreFirmwareBoundarySelfCheck", FgCoreFirmwareBoundarySelfCheck.Run);
+            // FG1-SIG-06：裸跑敌方固件与暴露改写——宿主规则（FGT-SIG-003：未破解只进信号核，机器 / 炮塔 / 保存 / 刻印拒绝）、带回即得未破解固件、
+            // 裸跑代价（FGT-SIG-008：积热 ×1.5、每次发动 +2、计次间隔；核心裸跑按 +2）、破解时正插在信号核里（自动更新、冷却不重置）、
+            // 暴露改写（接入不计、各来源、异派、节点、塔关、高功率、阈值、截断）、旧档迁移与真实文件存读档、暂停倍速、后台一致、性能、界面与布局探针。
+            Seg("FgRawFirmwareExposureSelfCheck", FgRawFirmwareExposureSelfCheck.Run);
+            // FG1-SIG-07：信号覆盖网络与远距离跳转——覆盖源与连通（核心 / 信号塔 T1·T2 / 中继塔链 / 中继模块；Burst 与托管对照）、中继被摧毁时断开处高亮与通知、
+            // 覆盖之外（命令 / 派工 / 接入被拒、只执行最后的命令、回到覆盖自动恢复）、远距离跳转（过渡 1.5 秒、冷却 10 秒、跨地点）、跳回家园 / 上一台（快捷键与 HUD，
+            // FGJ-M1 第 7、8 步）、负向矩阵、暂停倍速、后台一致、真实文件存读档、覆盖扩张探索、派遣检查单提醒接口、真实建造 / 拆除、远征地点、性能、界面与布局探针。
+            Seg("FgSignalNetworkSelfCheck", FgSignalNetworkSelfCheck.Run);
+            // FG1-VFX-01：机身形变首批——类别入表、6 个作战组件 × 3 状态的部件库（三角面预算、单 MeshFilter、共享网格 / 材质、GPU Instancing）、
+            // 默认战略缩放下俯视栅格化可辨认（FGR-FW-022）、FGT-FW-004 接入 → 出现 → 离开 → 复原与多类叠加、装配变更、负向（形变中阵亡、快速反复接入离开、
+            // 表现中途卸载、没有作战组件、引信类）、暂停倍速、真实文件存读档（直接到位）、观察无关、性能与零分配。
+            Seg("FgMachineMorphSelfCheck", FgMachineMorphSelfCheck.Run);
+            // FG1-HUD-01：接入 HUD、机器经历与引导钩子——图鉴表与源数据、接入 HUD 正式链路（槽位 / 机身状态与来源 / 热量 / 电池 / 耐久 / 伤势 / 链路 / 暴露 / 经历）、
+            // 负向矩阵（冷却 / 无接入口 / 信号核为空 / 裸跑 / 阵亡 / 连按）、链路强度与地图边缘标记、与信号同行（暂停倍速 / Tab / 读档）、结算文案、图鉴（解锁 / 持久化 / 面板 / “?”入口）、
+            // 引导钩子只一次、接入镜头设置、跟随选中（F）、机器列表与地图接入口标记、文案迁移与离开音效、布局探针（100% / 150% × 中英）、存读档、性能。
+            Seg("FgUplinkHudSelfCheck", FgUplinkHudSelfCheck.Run);
+            // FG1-E2E-01：M1 出口——信号计时字段存整数步（真实存档往返逐位相同、旧档迁移幂等、窗口恰好在第 N 步结算）、旅程框架切换键先读状态
+            // （对照：不读状态会把状态切回去）、FGJ-M1 / FGJ-M1R 登记覆盖出口旅程与 IC-REQ-022 六类、缺口清零门禁、试玩包齐全。
+            Seg("FgMilestoneM1SelfCheck", FgMilestoneM1SelfCheck.Run);
+            // FG2-FW-01：44 条固件数据迁移——源数据 = 运行时表（逐字段）、名表 = 设计案 5.4（旧 ID 与 42 条旧基因一一对应）、目录由表生成（改表 / 切语言 / 表坏了）、
+            // 机器电路装配（FGT-FW-002 核心装不进机器与炮塔、37 条常规真实装配编译）、接入口插入与路径数不变、热量与能耗（预览 = 版本 = 内核重炮积热、双态预览能耗行）、
+            // 状态标签（表 = FG02 3.4、模块真实贴的标签 = 表）、旧存档按新表显示与退役对账、FGT-FW-008 题材审计扩展到全部 FG 文本键、负向、暂停倍速、性能。
+            Seg("FgFirmwareMigrationSelfCheck", FgFirmwareMigrationSelfCheck.Run);
+            // FG2-FW-02：读法矩阵与固定底盘兼容——源 = 表；旧引擎 42 条 × 5 载体零死对（扩展 ChassisPrimitiveMatrixSmokeReport）与声明字段 = 模块真实字段；
+            // 正式战斗内核 44 条 × 5 载体零死对（FGT-FW-001，读法开 / 关对照）与逐条实证；固定底盘兼容表（冲刺器拒绝并说明、推铲读作击退铲）；
+            // 读法说明对玩家可见（信号核 5 条、电路编辑器当前载体一条）；内核快照格式 3 存读档与格式 2 兼容；破碎都市正式流程的倍速 / 暂停 / 观察 / 存读档一致；负向；性能。
+            Seg("FgReadingMatrixSelfCheck", FgReadingMatrixSelfCheck.Run);
+            // FG2-FW-03：反应行为探针与命名。旧引擎每条规则“两个配料触发、只有一个不触发”，真实固件的旧基因在真起的 SimWorld 里兑现倍率 = 反应表；
+            // 正式内核里每条可达的反应触发 / 不触发两组对照、消耗 / 附加 / 残留、两条同时满足、叠层上限；头顶标签图标与悬停读数；命名与按阵营开放；
+            // 内核快照格式 4 / 3、开放批次存读档；破碎都市正式流程的倍速 / 暂停 / 观察 / 存读档一致；性能。
+            Seg("FgReactionProbeSelfCheck", FgReactionProbeSelfCheck.Run);
+            // FG2-FW-04：反应反馈与伤害归因。内核逐标签到期（先挂的先到期、持续伤害跟着停）与快照格式 5；FGT-FW-005 真实地点首次触发（图鉴解锁、慢放只一次、镜头推动、
+            // 设置关闭 / 不观察 / 未开放命名的对照、存读档）；慢放 × 暂停 × 0.5x～3x 与“只改节奏不改结果”；弹字聚合与每秒上限（同一帧 200 次反应）；
+            // 伤害归因（破碎都市正式流程对账、撤离报告、突袭场次、克制类、上限、存读档、观察与不观察一致）；反应日志（筛选、容量、换战役清空）；界面与布局探针。
+            Seg("FgReactionFeedbackSelfCheck", FgReactionFeedbackSelfCheck.Run);
+            // FG2-FW-05：固件库与图鉴。FGT-FW-007 筛选（6 个维度与按表独立算出的期望对账）/ 搜索 / 排序；锁定与批量分解（锁定 / 在用跳过、确认时重算、废料经账本、面板先弹确认框）；
+            // 容量受仓库约束；图鉴固件 / 反应页签（剪影 + 获取途径、拿到即解锁、跨存档、搜索不剧透、互链）；悬停按图鉴键跳转与固件库键；存读档；取用路线被堵；性能；界面与布局探针。
+            Seg("FgFirmwareLibrarySelfCheck", FgFirmwareLibrarySelfCheck.Run);
+            // FG2-VFX-02：形变全量的作战组件名表——设计案 5.6 其余 5 个组件（旋刃环 / 哨戒桩 / 震荡脉冲器 / 拆解钳 / 尖刺外装）的表行、目录、装配编译与投送行为
+            // （一整圈、定点插桩不随母机走、脚下脉冲要贴近、夹住后持续拆解、近身反伤且不连锁）、区域 / 无人机外观种类与状态色、内核快照格式 7 与格式 6 兼容、
+            // 倍速 / 暂停只改步数不改结果、负向与性能。三套机身状态本身在 FgMachineMorphSelfCheck（J～M 段）。
+            Seg("FgCombatComponentRosterSelfCheck", FgCombatComponentRosterSelfCheck.Run);
+            // FG2-E2E-01：M2 出口——解析台“数据复原”（FG-GAP-050 的固件临时来源：候选 = 表、拒绝顺序与原因、账本、破解、刻印 / 装配、存读档、44 条全部拿得到）、
+            // 引信弹迹（FG-GAP-043：类别映射、内核记录 / 渲染实例 / 按游戏时间到期 / 上限、快照格式 8 与 7 兼容、不进哈希）、FGJ-M2 / FGJ-M2R 登记覆盖出口旅程与 IC-REQ-022 六类、
+            // 缺口清零门禁、解析面板 UXML 与文本键。
+            Seg("FgMilestoneM2SelfCheck", FgMilestoneM2SelfCheck.Run);
+            // FG3-E2E-01：M3 出口——FGJ-M3 / FGJ-M3R 登记覆盖出口旅程原文与 IC-REQ-022 六类、旅程源码只走输入通道（扫描业务方法调用）；
+            // 在途库存（仓库输出口推上带的件数守恒、施工等材料时写明“另有 N 件在传送带上”与办法）；缺口清零门禁与 DEBT-FG3GEN01-08 改派守护；
+            // FG-M3 试玩包；FGT-LOG-001～013 / FGT-GEN-001～010 的自检映射与登记。
+            Seg("FgMilestoneM3SelfCheck", FgMilestoneM3SelfCheck.Run);
+        }
+
+        /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>
+        private static void Seg(string name, Action body)
+        {
+            if (_collectNames != null)
+            {
+                _collectNames.Add(name);
+                return;
+            }
+            if (_only != null && !_only.Contains(name))
+            {
+                return;
+            }
+            int from = Report.Length;
+            PerfGate.MarkWindow();
+            SegmentProfiler profiler = _profileOut != null ? SegmentProfiler.Start(Report) : null;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                body();
+            }
+            finally
+            {
+                sw.Stop();
+                var t = new SegmentTiming { Name = name, Seconds = sw.Elapsed.TotalSeconds };
+                CountMarks(Report.ToString(from, Report.Length - from), out t.Pass, out t.Fail, out t.Warn);
+                Timings.Add(t);
+                if (profiler != null)
+                {
+                    Profiles.Add((t.Seconds, profiler.Finish(name, t.Seconds)));
+                }
+            }
+        }
+
+        private static void Seg(string name, Func<StringBuilder, int> run) => Seg(name, () => { _fail += run(Report); });
+
+        /// <summary>数一段报告里的通过（✓）/ 失败（✗）/ 性能警告行（与 unity-validate.sh 同一口径）。</summary>
+        public static void CountMarks(string text, out int pass, out int fail, out int warn)
+        {
+            pass = 0;
+            fail = 0;
+            warn = 0;
+            foreach (string l in text.Split('\n'))
+            {
+                if (l.Contains("✓"))
+                {
+                    pass++;
+                }
+                if (l.Contains("✗"))
+                {
+                    fail++;
+                }
+                if (l.Contains(PerfGate.WarnTag + "："))
+                {
+                    warn++;
+                }
+            }
+        }
+
+        /// <summary>日志末尾的分段耗时排行（FG-TOOL-01）。不写 ✓ / ✗，不会被计成断言。</summary>
+        public static void AppendTimingRanking(StringBuilder report, IReadOnlyList<SegmentTiming> timings, double totalSeconds)
+        {
+            double sum = timings.Sum(t => t.Seconds);
+            report.AppendLine($"========== 各段耗时排行（FG-TOOL-01；共 {timings.Count} 段，段内合计 {sum:F1} 秒，整轮 {totalSeconds:F1} 秒）==========");
+            report.AppendLine("  排名 | 耗时（秒） | 占比 | 通过 / 失败 / 性能警告 | 段");
+            int rank = 0;
+            foreach (SegmentTiming t in timings.OrderByDescending(x => x.Seconds))
+            {
+                rank++;
+                report.AppendLine($"  {rank,3} | {t.Seconds,8:F2} | {(sum > 0 ? t.Seconds / sum : 0),5:P1} | {t.Pass}/{t.Fail}/{t.Warn} | {t.Name}");
+            }
+            report.AppendLine("========== 各段耗时排行结束 ==========");
+        }
+
+        private static void WriteTimingTsv(string path, IReadOnlyList<SegmentTiming> timings)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                return;
+            }
+            try
+            {
+                var sb = new StringBuilder("order\tseconds\tpass\tfail\twarn\tsegment\n");
+                for (int i = 0; i < timings.Count; i++)
+                {
+                    SegmentTiming t = timings[i];
+                    sb.Append(i + 1).Append('\t').Append(t.Seconds.ToString("F3", System.Globalization.CultureInfo.InvariantCulture)).Append('\t')
+                        .Append(t.Pass).Append('\t').Append(t.Fail).Append('\t').Append(t.Warn).Append('\t').Append(t.Name).Append('\n');
+                }
+                Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)) ?? ".");
+                File.WriteAllText(path, sb.ToString());
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[自检] 分段耗时表写不了：" + e.Message);
+            }
+        }
+
 
         // ── 配置表 ──────────────────────────────────────────
 
@@ -3682,8 +3888,9 @@ namespace GameLogic.EditorTools
                 }
                 sw.Stop();
                 double perCallMs = sw.Elapsed.TotalMilliseconds / iterations;
-                Expect(perCallMs < 1.0,
-                    $"CPU 预算：{SimConst.MaxObstacles} 障碍物最坏输入下，均摊每次 Plan 应 < 1ms（实际 {perCallMs:F4}ms）");
+                PerfGate.Expect(true,
+                    $"CPU 预算：{SimConst.MaxObstacles} 障碍物最坏输入下，均摊每次 Plan 应 < 1ms（实际 {perCallMs:F4}ms）",
+                    new[] { PerfGate.Lt(perCallMs, 1.0, "每次 Plan ms") }, Expect, Line);
             }
 
             // 验收 8：回归 [33]/[34]/[35]。本方法不改动它们的任何断言，靠 RunAll() 里三者继续跑、

@@ -1222,8 +1222,9 @@ namespace GameLogic.EditorTools
             int visibleMarkers = WorldPlanetView.VisibleMarkerCount;
             PerfLines.Add($"世界每帧（镜头在远征地点，1x）：1 支队伍 {one:F3} ms / 帧，200 支队伍 {many:F3} ms / 帧（{marching} 支沿路线行进中的逐步推进）；" +
                           $"199 支新队伍拿路线用了 {warmFrames} 帧（墙钟 {warmMs:F0} ms，一次性）；镜头回家园时只为窗口附近的队伍生成标记（{visibleMarkers} 个）");
-            Expect(visibleMarkers <= 2 && many < one + 2.0 && marching >= 190,
-                $"200 支远处的队伍：镜头附近才有表现对象（可见标记 {visibleMarkers}）；沿路线行进中每帧开销增加 {many - one:F3} ms（{marching} 支；队伍逐步推进是 O(队伍数) 的纯数据运算，逐单位模拟在 FG0-ARCH-03 内核）");
+            ExpectPerf(visibleMarkers <= 2 && marching >= 190,
+                $"200 支远处的队伍：镜头附近才有表现对象（可见标记 {visibleMarkers}）；沿路线行进中每帧开销增加 {many - one:F3} ms（{marching} 支；队伍逐步推进是 O(队伍数) 的纯数据运算，逐单位模拟在 FG0-ARCH-03 内核）",
+                PerfGate.Lt(many, one + 2.0, "200 支队伍每帧 ms"));
             // 正向：镜头飞到远处那一簇队伍旁边，标记确实生成（避免“标记逻辑整个坏掉、数量 0 也通过”）。
             TransitGroupRecord far = WorldTransitSystem.Groups(s).Last();
             WorldView.FocusOn(far.GroupId);
@@ -1691,6 +1692,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

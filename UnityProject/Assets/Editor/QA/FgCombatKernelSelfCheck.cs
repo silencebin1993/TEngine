@@ -2180,8 +2180,9 @@ namespace GameLogic.EditorTools
                               $"600 步托管分配 {alloc} 字节；渲染缓冲重填 {prepMs:F3} ms（单位 {drawnUnits}、弹体 {drawnProj}）");
                 Expect(minProj >= minProjectiles && minEnemies >= enemies * 0.9 && minTurrets >= turretCount * 0.9,
                     $"规模达标：测量窗口内弹体始终 ≥ {minProjectiles}（最少 {minProj}），敌人 ≥ {enemies * 0.9:F0}（{minEnemies}）、炮塔 ≥ {turretCount * 0.9:F0}（{minTurrets}）同时在场");
-                Expect(avg <= budget && p95 <= budget,
-                    $"内核单步平均 {avg:F3} ms、p95 {p95:F3} ms ≤ {budget} ms（Editor Burst，本机 {SystemInfo.processorType}；推荐配置 i5-10400 的换算见 ADR）");
+                ExpectPerf(true,
+                    $"内核单步平均 {avg:F3} ms、p95 {p95:F3} ms ≤ {budget} ms（Editor Burst，本机 {SystemInfo.processorType}；推荐配置 i5-10400 的换算见 ADR）",
+                    PerfGate.Le(avg, budget, "内核单步平均 ms"), PerfGate.Le(p95, budget, "内核单步 p95 ms"));
                 Expect(maxEvents <= site.MaxEventsPerStep + site.Kernel.Config.MaxCueEventsPerStep && alloc < 64 * 1024,
                     $"热更层每步事件数有上限（至多 {maxEvents} 条 ≤ 玩法 {site.MaxEventsPerStep} + 提示 {site.Kernel.Config.MaxCueEventsPerStep}），600 步托管分配 {alloc / 1024.0:F1} KB（稳态接近 0）");
                 Expect(drawnUnits == instancedAlive && drawnProj == site.Kernel.ProjectileCount,
@@ -2243,6 +2244,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

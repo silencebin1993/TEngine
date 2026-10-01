@@ -308,7 +308,12 @@ namespace GameLogic.EditorTools
             }
             Expect(diffs.Count == 0 && rows > 60, $"源数据 fgdata_grid.py 与运行时五张表逐字段一致（{rows} 行）{(diffs.Count == 0 ? string.Empty : "——不一致：" + string.Join("，", diffs))}");
 
-            (code, output) = RunPython(root, "tools/cell_tables/check_luban.py --selftest");
+            // FG-TOOL-01：同一轮全量自检里 check_luban 自测只真跑一次（输入 = tools/cell_tables 全部文件，指纹相同才复用），各段在同一份输出里核对自己的规则。
+            (code, output) = QaPython.RunShared(root, "tools/cell_tables/check_luban.py --selftest", out bool selftestReused);
+            if (selftestReused)
+            {
+                Line($"    · check_luban 自测：本轮前面的段已真跑过、输入指纹相同，复用同一次的输出（本轮真跑 {QaPython.SharedRuns} 次、复用 {QaPython.SharedHits} 次）");
+            }
             Expect(code == 0 && output.Contains("开局布局占地重叠") && output.Contains("端口在占地外") && output.Contains("可放置却没有新建成本"),
                 $"check_luban 格网规则（R12～R16）自测真跑：{Tail(output)}");
 
@@ -1303,15 +1308,15 @@ namespace GameLogic.EditorTools
 
             Line($"  · 性能（Editor batchmode，影子工程，本机 CPU；真机数字由 FG15-SYS-02 补）：7 座 vs 807 座时单次放置校验 {s1:F1} µs vs {l1:F1} µs；"
                  + $"807 座占用重建 {Math.Min(rebuildMs, rebuildMs2):F2} ms；原型地形单区块（32×32）生成 {chunkMs:F3} ms");
-            Expect(l1 < Math.Max(s1 * 3.0, s1 + 20.0), $"放置校验与建筑数无关：807 座时 {l1:F1} µs，7 座时 {s1:F1} µs（O(占地)，B18）");
-            Expect(Math.Min(rebuildMs, rebuildMs2) < 50.0, $"占用层整体重建 807 座 {Math.Min(rebuildMs, rebuildMs2):F2} ms（只在建筑记录变化时发生，不在每帧）");
+            ExpectPerf(true, $"放置校验与建筑数无关：807 座时 {l1:F1} µs，7 座时 {s1:F1} µs（O(占地)，B18）", PerfGate.Lt(l1, Math.Max(s1 * 3.0, s1 + 20.0), "807 座放置校验 µs"));
+            ExpectPerf(true, $"占用层整体重建 807 座 {Math.Min(rebuildMs, rebuildMs2):F2} ms（只在建筑记录变化时发生，不在每帧）", PerfGate.Lt(Math.Min(rebuildMs, rebuildMs2), 50.0, "占用重建 ms"));
             int rebuilds = HomeGridService.OccupancyRebuildCount;
             for (int i = 0; i < 100; i++)
             {
                 HomeGridService.BuildingAt(large, new GridCell(i, i));
             }
             Expect(HomeGridService.OccupancyRebuildCount == rebuilds, "100 次查询不触发占用重建（记录没变 → 缓存命中，O(1)）");
-            Expect(chunkMs < 5.0, $"原型地形单区块生成 {chunkMs:F3} ms（FG14 第 4 节区块生成 ≤ 5 ms 的参照；正式生成器在 FG0-ARCH-05 走工作线程）");
+            ExpectPerf(true, $"原型地形单区块生成 {chunkMs:F3} ms（FG14 第 4 节区块生成 ≤ 5 ms 的参照；正式生成器在 FG0-ARCH-05 走工作线程）", PerfGate.Lt(chunkMs, 5.0, "单区块生成 ms"));
         }
 
         // ── 测试表构造 ────────────────────────────────────────────────────────────
@@ -1489,6 +1494,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

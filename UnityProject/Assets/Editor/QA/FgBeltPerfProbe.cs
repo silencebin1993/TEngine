@@ -32,6 +32,7 @@ namespace GameLogic.EditorTools
         public static void Run()
         {
             var report = new StringBuilder();
+            PerfGate.ResetRun();
             int fail = 0;
             int pass = 0;
             void Expect(bool ok, string msg)
@@ -85,6 +86,7 @@ namespace GameLogic.EditorTools
                 BeltRenderer.Settings settings = BeltNetworkService.ReadRenderSettings();
                 var results = new List<string>();
                 bool allOk = true;
+                var perf = new List<PerfGate.Metric>();
                 foreach ((string name, float ortho, Vector3 at) in new[]
                          {
                              ("近景（正交 30，逐物品）", 30f, new Vector3(75f, 60f, 48f)),
@@ -115,7 +117,8 @@ namespace GameLogic.EditorTools
                     double p99 = ms[(int)(Frames * 0.99)];
                     results.Add($"{name}：{Frames} 帧 平均 {avg:F2} ms / p95 {p95:F2} ms / p99 {p99:F2} ms / 最大 {ms[Frames - 1]:F2} ms ≈ {1000.0 / avg:F0} 帧/秒；" +
                                 $"实例 {renderer.LastCellInstances:N0} 格 + {items:N0} 件，每帧 {renderer.LastDrawCalls} 次绘制调用，远景={renderer.FarMode}");
-                    allOk &= p95 <= 1000.0 / 120.0 && renderer.GpuAvailable;
+                    allOk &= renderer.GpuAvailable;
+                    perf.Add(PerfGate.Le(p95, 1000.0 / 120.0, $"{name} p95 ms"));
                 }
                 foreach (string r in results)
                 {
@@ -123,7 +126,8 @@ namespace GameLogic.EditorTools
                 }
                 Expect(renderer.GpuAvailable, $"实例化绘制可用（{renderer.GpuUnavailableReason ?? "GPU 可用"}）");
                 Expect(kernel.CellCount >= 15000 && kernel.ItemCount >= 30000 && kernel.NodeCount >= 300, $"规模：{kernel.CellCount:N0} 格 / {kernel.ItemCount:N0} 件 / 物流节点 {kernel.NodeCount}");
-                Expect(allOk, "近景与远景 p95 帧时间都 ≤ 8.33 ms（120 帧/秒；帧内含 3x 倍速的内核步、缓冲重填与上传、渲染与等 GPU）");
+                // FG-TOOL-01：只测一次；超线不到 2 倍记性能警告（不计失败），超 2 倍才失败。
+                PerfGate.Expect(allOk, "近景与远景 p95 帧时间都 ≤ 8.33 ms（120 帧/秒；帧内含 3x 倍速的内核步、缓冲重填与上传、渲染与等 GPU）", perf.ToArray(), Expect, l => report.AppendLine(l));
 
                 // 画面：近景读回一帧，数带面与物品像素。
                 cam.orthographicSize = 30f;

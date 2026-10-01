@@ -402,7 +402,12 @@ namespace GameLogic.EditorTools
             Expect(missingTuning.Count == 0 && GridContent.TuningInt("grid.batch_demolish_confirm") == 20 && Mathf.Approximately(GridContent.Tuning("grid.relocate_seconds"), 20f),
                 $"新调参入表（批量拆除确认阈值 20、搬迁 20 秒……）{string.Join(",", missingTuning)}");
 
-            (code, output) = RunPython(LocateRepo(), "tools/cell_tables/check_luban.py --selftest");
+            // FG-TOOL-01：同一轮全量自检里 check_luban 自测只真跑一次（输入 = tools/cell_tables 全部文件，指纹相同才复用），各段在同一份输出里核对自己的规则。
+            (code, output) = QaPython.RunShared(LocateRepo(), "tools/cell_tables/check_luban.py --selftest", out bool selftestReused);
+            if (selftestReused)
+            {
+                Line($"    · check_luban 自测：本轮前面的段已真跑过、输入指纹相同，复用同一次的输出（本轮真跑 {QaPython.SharedRuns} 次、复用 {QaPython.SharedHits} 次）");
+            }
             Expect(code == 0 && output.Contains("建筑分类拼错") && output.Contains("出口没写所属建筑") && output.Contains("工具每格废料为 0"),
                 $"check_luban R32（建造菜单）规则自测真跑：{Tail(output)}");
 
@@ -1666,7 +1671,7 @@ namespace GameLogic.EditorTools
             }
             double beltMs = sw.Elapsed.TotalMilliseconds / 50;
             PerfLines.Add($"拖拽规划 {plan.Length} 格：{beltMs:F3} ms / 次（只在拖拽终点换格时算）");
-            Expect(beltMs < 8.0, $"拖拽规划最长一笔（{plan.Length} 格）{beltMs:F3} ms < 8 ms");
+            ExpectPerf(true, $"拖拽规划最长一笔（{plan.Length} 格）{beltMs:F3} ms < 8 ms", PerfGate.Lt(beltMs, 8.0, "拖拽规划 ms"));
 
             // 框选规划：7 座 vs 807 座建筑。
             double BoxMs(CampaignState st)
@@ -1697,7 +1702,7 @@ namespace GameLogic.EditorTools
             HomeGridService.MapFor(big);
             double large = BoxMs(big);
             PerfLines.Add($"框选规划（61×61 框）：7 座建筑 {small:F3} ms，807 座建筑 {large:F3} ms（O(建筑数)，只在框的终点换格时算）");
-            Expect(large < 10.0, $"框选规划在 807 座建筑下 {large:F3} ms < 10 ms（FG03 第 7 节后期 800 座）");
+            ExpectPerf(true, $"框选规划在 807 座建筑下 {large:F3} ms < 10 ms（FG03 第 7 节后期 800 座）", PerfGate.Lt(large, 10.0, "框选规划 ms"));
 
             sw.Restart();
             var list = new List<BuildEntry>();
@@ -1707,7 +1712,7 @@ namespace GameLogic.EditorTools
             }
             double searchMs = sw.Elapsed.TotalMilliseconds / 200;
             PerfLines.Add($"建造菜单搜索：{searchMs:F4} ms / 次（{BuildCatalog.All.Count} 个条目）");
-            Expect(searchMs < 1.0, $"建造菜单搜索 {searchMs:F4} ms < 1 ms");
+            ExpectPerf(true, $"建造菜单搜索 {searchMs:F4} ms < 1 ms", PerfGate.Lt(searchMs, 1.0, "搜索 ms"));
 
             CheckExplorationPerformance();
         }
@@ -1774,8 +1779,9 @@ namespace GameLogic.EditorTools
                           $"单次揭示 + {loaded.Count} 个已装区块遮罩重算 {revealMs:F2} ms，只有 {changed} 个区块遮罩变了（叠加层只重画这几块）");
             Expect(revealed && ex.Grid.Explored.Length == areasBefore + 1 && changed >= 1 && changed <= maxTouched && changed < loaded.Count,
                 $"揭示一个半径 {radius} 的圆只让被圆碰到的 {changed} 个区块（上限 {maxTouched}）换遮罩版本，其余 {loaded.Count - changed} 个不重画");
-            Expect(steadyUs < 20.0 && worstUs < 200.0 && revealMs < 50.0,
-                $"1000 个圆下：常见一步 {steadyUs:F3} µs < 20 µs，最坏一步 {worstUs:F3} µs < 200 µs，单次揭示连重算 {revealMs:F2} ms < 50 ms（只在走进迷雾那一步发生）");
+            ExpectPerf(true,
+                $"1000 个圆下：常见一步 {steadyUs:F3} µs < 20 µs，最坏一步 {worstUs:F3} µs < 200 µs，单次揭示连重算 {revealMs:F2} ms < 50 ms（只在走进迷雾那一步发生）",
+                PerfGate.Lt(steadyUs, 20.0, "常见一步 µs"), PerfGate.Lt(worstUs, 200.0, "最坏一步 µs"), PerfGate.Lt(revealMs, 50.0, "揭示连重算 ms"));
         }
 
         // ── 小工具 ───────────────────────────────────────────────────────────────
@@ -1891,6 +1897,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

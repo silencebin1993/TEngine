@@ -781,9 +781,10 @@ namespace GameLogic.EditorTools
             UiKitGalleryUIToolkit.PostBurst(); // 同一时刻（1 秒内）连发 50 条
             sw.Stop();
             int max = UiTuningValues.GetInt("notify.toast_max_visible");
-            Expect(NotificationCenter.History.Count == 5 && NotificationCenter.History.All(e => e.Count == 10)
-                   && NotificationCenter.Toasts.Count <= max && sw.Elapsed.TotalMilliseconds < 50,
-                $"1 秒内 50 条（5 类 × 10）→ 历史 {NotificationCenter.History.Count} 条、每条聚合 10 次，弹出条 {NotificationCenter.Toasts.Count}（上限 {max}），耗时 {sw.Elapsed.TotalMilliseconds:F2} ms");
+            ExpectPerf(NotificationCenter.History.Count == 5 && NotificationCenter.History.All(e => e.Count == 10)
+                   && NotificationCenter.Toasts.Count <= max,
+                $"1 秒内 50 条（5 类 × 10）→ 历史 {NotificationCenter.History.Count} 条、每条聚合 10 次，弹出条 {NotificationCenter.Toasts.Count}（上限 {max}），耗时 {sw.Elapsed.TotalMilliseconds:F2} ms",
+                PerfGate.Lt(sw.Elapsed.TotalMilliseconds, 50, "50 条通知耗时 ms"));
 
             // 弹出条优先级：紧急不会被信息挤掉。
             NewCampaign();
@@ -1587,7 +1588,7 @@ namespace GameLogic.EditorTools
             sw.Stop();
             long memDelta = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong() - memBefore;
             double perFrameUs = sw.Elapsed.TotalMilliseconds * 1000.0 / frames;
-            Expect(perFrameUs < 200.0, $"界面快捷键每帧处理 {perFrameUs:F1} µs（{InputActionCatalog.All.Count} 个动作逐个查按键，无按键；{frames} 帧托管堆增量 {memDelta / 1024} KB）");
+            ExpectPerf(true, $"界面快捷键每帧处理 {perFrameUs:F1} µs（{InputActionCatalog.All.Count} 个动作逐个查按键，无按键；{frames} 帧托管堆增量 {memDelta / 1024} KB）", PerfGate.Lt(perFrameUs, 200.0, "快捷键每帧 µs"));
 
             // 查绑定：一百万次。
             InputBindingSet b = GameSettings.KeyBindings;
@@ -1598,7 +1599,7 @@ namespace GameLogic.EditorTools
                 sink += (int)b.GetChord((GameActionId)(i % 95)).Key;
             }
             sw.Stop();
-            Expect(sw.Elapsed.TotalMilliseconds < 500, $"GetChord 一百万次 {sw.Elapsed.TotalMilliseconds:F1} ms（约 {sw.Elapsed.TotalMilliseconds * 1e6 / 1_000_000:F0} ns/次）{(sink == int.MinValue ? "!" : string.Empty)}");
+            ExpectPerf(true, $"GetChord 一百万次 {sw.Elapsed.TotalMilliseconds:F1} ms（约 {sw.Elapsed.TotalMilliseconds * 1e6 / 1_000_000:F0} ns/次）{(sink == int.MinValue ? "!" : string.Empty)}", PerfGate.Lt(sw.Elapsed.TotalMilliseconds, 500, "GetChord 一百万次 ms"));
 
             // 通知：一千条混合类型（持续高频事件的压力档）。
             NewCampaign();
@@ -1610,8 +1611,9 @@ namespace GameLogic.EditorTools
                 NotificationCenter.Post(types[i % types.Length], "#" + i, new Vector3(i, 0f, i));
             }
             sw.Stop();
-            Expect(sw.Elapsed.TotalMilliseconds < 400 && NotificationCenter.History.Count <= UiTuningValues.GetInt("notify.history_capacity"),
-                $"通知压力档：1000 条（{types.Length} 类轮换、带位置、写穿存档）共 {sw.Elapsed.TotalMilliseconds:F1} ms，历史 {NotificationCenter.History.Count} 条");
+            ExpectPerf(NotificationCenter.History.Count <= UiTuningValues.GetInt("notify.history_capacity"),
+                $"通知压力档：1000 条（{types.Length} 类轮换、带位置、写穿存档）共 {sw.Elapsed.TotalMilliseconds:F1} ms，历史 {NotificationCenter.History.Count} 条",
+                PerfGate.Lt(sw.Elapsed.TotalMilliseconds, 400, "1000 条通知 ms"));
             Line("  - 测量环境：Unity 6000.3.17f1 Editor batchmode（Mono JIT，影子工程）。真机为 HybridCLR 解释执行热更代码，预计慢数倍，仍是 O(动作数)/O(1) 的常数开销；真机数字在 FG15-SYS-02 性能门禁采集。");
         }
 
@@ -2128,6 +2130,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

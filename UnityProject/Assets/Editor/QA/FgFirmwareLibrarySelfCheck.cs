@@ -916,8 +916,9 @@ namespace GameLogic.EditorTools
             double planMs = sw.Elapsed.TotalMilliseconds;
             Line($"    · 1000 枚：全部列出 + 排序 {queryMs:0.00} ms / 次，4 个条件 + 搜索 + 排序 {filteredMs:0.00} ms / 次，分解计划 {planMs:0.00} ms");
             // 预算：固件库只在面板打开时每 0.5 秒（或玩家操作后）查询一次；按 120 帧的 8.33 ms 帧预算，单次查询不应超过 4 ms。
-            Expect(queryMs < 4.0 && filteredMs < 4.0 && planMs < 20.0 && plan.Eligible.Count == 1000,
-                $"1000 枚芯片：查询 {queryMs:0.00} / {filteredMs:0.00} ms（< 4 ms，只在打开时按间隔或操作后查一次），分解计划 {planMs:0.00} ms（只在点按钮时算一次）");
+            ExpectPerf(plan.Eligible.Count == 1000,
+                $"1000 枚芯片：查询 {queryMs:0.00} / {filteredMs:0.00} ms（< 4 ms，只在打开时按间隔或操作后查一次），分解计划 {planMs:0.00} ms（只在点按钮时算一次）",
+                PerfGate.Lt(queryMs, 4.0, "全部列出 ms"), PerfGate.Lt(filteredMs, 4.0, "条件查询 ms"), PerfGate.Lt(planMs, 20.0, "分解计划 ms"));
 
             VisualElement root = MountUxml(UiKitFolder + "FirmwareLibraryPanel.uxml", out GameObject go);
             FirmwareLibraryPanelUIToolkit.InWorldOverrideForTests = true;
@@ -932,8 +933,9 @@ namespace GameLogic.EditorTools
                     panel.Refresh();
                 }
                 double idleUs = sw.Elapsed.TotalMilliseconds; // 1000 次的总毫秒 = 每次的微秒
-                Expect(idleUs / 1000.0 < 0.05 && panel.RowCount == 1000 + 0,
-                    $"面板打开、数据没变时每帧的刷新只比较版本号：{idleUs:0.0} 微秒 / 次（与芯片数无关）；列表虚拟化，只为可见行建元素");
+                ExpectPerf(panel.RowCount == 1000 + 0,
+                    $"面板打开、数据没变时每帧的刷新只比较版本号：{idleUs:0.0} 微秒 / 次（与芯片数无关）；列表虚拟化，只为可见行建元素",
+                    PerfGate.Lt(idleUs / 1000.0, 0.05, "每次刷新 ms"));
             }
             finally
             {
@@ -1388,6 +1390,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

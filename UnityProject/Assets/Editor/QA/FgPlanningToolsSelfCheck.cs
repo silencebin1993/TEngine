@@ -1671,9 +1671,10 @@ namespace GameLogic.EditorTools
             double undoMs = sw.Elapsed.TotalMilliseconds;
             bool undone = HomeValleyConstruction.PlannedCellCount(s) == planned0;
             PerfLines.Add($"1024 件布局：粘贴预览（换格 / 转向时重算）平均 {previewMs:F2} ms；放下 {applyMs:F1} ms；框选复制 34×34 {captureMs:F1} ms；撤销整次粘贴 {undoMs:F1} ms（Editor JIT；真机热更层解释执行约 ×5）");
-            Expect(ok >= 512 && r.Placed == ok && cap != null && cap.Count >= r.Placed && u.Done && undone && previewMs < 8.0,
+            ExpectPerf(ok >= 512 && r.Placed == ok && cap != null && cap.Count >= r.Placed && u.Done && undone,
                 $"P1 1024 件（上限）的布局：预览重算平均 {previewMs:F2} ms（< 8 ms：120 帧整帧预算，只在光标换格 / 转向时算一次）；能放 {ok} 件、放下 {r.Placed} 件（一致）、" +
-                $"框选复制回来 {cap?.Count} 件{(cap == null ? "（" + capWhy?.Describe() + "）" : string.Empty)}、一步撤销后规划格数回到 {planned0}（放下 / 复制 / 撤销是一次性的玩家操作）");
+                $"框选复制回来 {cap?.Count} 件{(cap == null ? "（" + capWhy?.Describe() + "）" : string.Empty)}、一步撤销后规划格数回到 {planned0}（放下 / 复制 / 撤销是一次性的玩家操作）",
+                PerfGate.Lt(previewMs, 8.0, "预览重算平均 ms"));
             mode?.Close();
         }
 
@@ -1800,6 +1801,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

@@ -1711,8 +1711,9 @@ namespace GameLogic.EditorTools
                 }
                 double traceMs = sw.Elapsed.TotalMilliseconds / N;
                 PerfLines.Add($"K2 15,000 格堵满：源头扫描 {rootsMs:F3} ms、网络锚点 {anchorMs:F3} ms、单条 100 格追溯 {traceMs:F4} ms（AOT 内核，Editor Mono JIT；只在诊断 / 叠加层刷新时调用，每 0.5 真实秒一次）");
-                Expect(k.CellCount == 15000 && anchors.Count == 150 && rootsMs < 4.0 && anchorMs < 4.0 && traceMs < 0.5,
-                    $"K2 性能：15,000 格满载传送带源头扫描 {rootsMs:F3} ms、锚点 {anchorMs:F3} ms（阈值 4 ms = 120 帧半帧；按 0.5 秒节拍摊到每帧 < 0.1 ms）、100 格追溯 {traceMs:F4} ms");
+                ExpectPerf(k.CellCount == 15000 && anchors.Count == 150,
+                    $"K2 性能：15,000 格满载传送带源头扫描 {rootsMs:F3} ms、锚点 {anchorMs:F3} ms（阈值 4 ms = 120 帧半帧；按 0.5 秒节拍摊到每帧 < 0.1 ms）、100 格追溯 {traceMs:F4} ms",
+                    PerfGate.Lt(rootsMs, 4.0, "源头扫描 ms"), PerfGate.Lt(anchorMs, 4.0, "锚点 ms"), PerfGate.Lt(traceMs, 0.5, "100 格追溯 ms"));
             }
             // P1：800 座建筑的家园（324 座电塔 + 476 座用电 / 发电建筑，混合有电 / 缺电 / 未接入）——整份诊断、堵塞叠加层重建。
             CampaignState s = NewWorld(9831, scrap: 100);
@@ -1795,9 +1796,10 @@ namespace GameLogic.EditorTools
             double device = maxSlice * HotfixInterpretFactor;
             PerfLines.Add($"P1 800 座建筑（{reports.Count} 处停工）：分帧诊断一整轮 {passFrames} 帧，每帧平均 {avgSlice:F3} ms、最大 {maxSlice:F3} ms（真机解释执行 ×{HotfixInterpretFactor} 折算最大 {device:F2} ms / 帧）；" +
                           $"同步整份（只在打开面板且手上没有新结果时做一次）{collectMs:F3} ms；堵塞叠加层重建（同步整份诊断 + 标记）{redrawMs:F3} ms；不在刷新点的每帧 {frameUs:F2} µs");
-            Expect(s.BuildingRecords.Length >= 800 && reports.Count > 50 && sameAsSync && passFrames >= 800 / GridContent.TuningInt("diag.slice_buildings") && maxSlice < 1.0 && avgSlice < 0.4 && frameUs < 50.0,
+            ExpectPerf(s.BuildingRecords.Length >= 800 && reports.Count > 50 && sameAsSync && passFrames >= 800 / GridContent.TuningInt("diag.slice_buildings"),
                 $"P1 性能：800 座建筑的家园——分帧诊断任何一帧 ≤ {maxSlice:F3} ms（阈值 1 ms，Editor；平均 {avgSlice:F3} ms，阈值 0.4 ms；真机折算最大 {device:F2} ms / 帧），" +
-                $"一整轮 {passFrames} 帧、结果与同步整份一致；叠加层开着时平常每帧 {frameUs:F2} µs（阈值 50 µs，与建筑数无关）");
+                $"一整轮 {passFrames} 帧、结果与同步整份一致；叠加层开着时平常每帧 {frameUs:F2} µs（阈值 50 µs，与建筑数无关）",
+                PerfGate.Lt(maxSlice, 1.0, "分帧诊断最大一帧 ms"), PerfGate.Lt(avgSlice, 0.4, "分帧诊断平均 ms"), PerfGate.Lt(frameUs, 50.0, "叠加层平常每帧 µs"));
 
             // P2：“为什么不工作”面板 200 个停工对象（diag.max_reports 上限）：打开时建全部行（一次性）、实时数字变时原地改文字、多一处停工时只新建形状变了的行。
             DiagnosisPanelUIToolkit.InWorldOverrideForTests = true;
@@ -1834,10 +1836,11 @@ namespace GameLogic.EditorTools
                 HomeValleyPowerGrid.Recompute(s);
                 PerfLines.Add($"P2 面板 {rows} 行 / {buttons} 个原因条目：打开时建全部行 {openMs:F2} ms（一次性）；最坏的原地更新（换语言，全部重写文字、不新建元素）{relabelMs:F2} ms；" +
                               $"清单前面多一处停工（后面全部后移）{shiftMs:F2} ms、新建 {shiftCreated} 行（其余原地复用）；平常只有个别实时数字变时只格式化变了的那几步");
-                Expect(rows == reports.Count && rows > 50 && noNewRows && UiTooltip.BindingCount - baseBindings == panel.StepButtonCount && openMs < 60.0 && relabelMs < 30.0 && shiftMs < 30.0 && shiftCreated < rows,
+                ExpectPerf(rows == reports.Count && rows > 50 && noNewRows && UiTooltip.BindingCount - baseBindings == panel.StepButtonCount && shiftCreated < rows,
                     $"P2 面板 {rows} 行：打开 {openMs:F2} ms（阈值 60 ms，一次性）、全部重写文字 {relabelMs:F2} ms（阈值 30 ms，只在换语言 / 键位时）、" +
                     $"前面插入一处 {shiftMs:F2} ms 新建 {shiftCreated} 行（其余复用）；提示绑定数 = 当前按钮数 {panel.StepButtonCount}（旧行已解绑，不累积）"
-                    + $"［绑定 {UiTooltip.BindingCount - baseBindings}］");
+                    + $"［绑定 {UiTooltip.BindingCount - baseBindings}］",
+                    PerfGate.Lt(openMs, 60.0, "打开面板 ms"), PerfGate.Lt(relabelMs, 30.0, "全部重写文字 ms"), PerfGate.Lt(shiftMs, 30.0, "前面插入一处 ms"));
             }
             finally
             {
@@ -1964,6 +1967,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

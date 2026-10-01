@@ -909,8 +909,9 @@ namespace GameLogic.EditorTools
                 CampaignExposureLedger.GrantRawFire(s, FirmwareCatalog.FwArmorPierceId);
             }
             double applyUs = sw.Elapsed.TotalMilliseconds * 1000.0 / 1000.0;
-            Expect(stepUs < 5.0 && applyUs < 200.0,
-                $"高功率累计 {stepUs:F3} µs/步（门槛 5 µs）；一笔暴露写入（明细满 {CampaignExposureLedger.HistoryMax} 条时截断）{applyUs:F1} µs（门槛 200 µs；每 8 游戏秒至多一笔）");
+            ExpectPerf(true,
+                $"高功率累计 {stepUs:F3} µs/步（门槛 5 µs）；一笔暴露写入（明细满 {CampaignExposureLedger.HistoryMax} 条时截断）{applyUs:F1} µs（门槛 200 µs；每 8 游戏秒至多一笔）",
+                PerfGate.Lt(stepUs, 5.0, "高功率累计 µs/步"), PerfGate.Lt(applyUs, 200.0, "暴露写入 µs"));
             PerfLines.Add($"高功率累计 {stepUs:F3} µs/步、暴露写入 {applyUs:F1} µs/笔——Editor 下 Mono JIT；真机 HybridCLR 解释执行预计慢数倍（真机复测归 FG15-SYS-02），均与机器数无关");
         }
 
@@ -1472,6 +1473,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

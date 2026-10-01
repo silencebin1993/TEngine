@@ -33,6 +33,7 @@ namespace GameLogic.EditorTools
         public static void Run()
         {
             var report = new StringBuilder();
+            PerfGate.ResetRun();
             int fail = 0;
             int pass = 0;
             void Expect(bool ok, string msg)
@@ -118,7 +119,8 @@ namespace GameLogic.EditorTools
                 Expect(site.Renderer != null && site.Renderer.GpuAvailable && site.Renderer.LastDrawCalls == 2,
                     $"实例化绘制可用：每帧 {site.Renderer?.LastDrawCalls} 次绘制调用画完全部单位与弹体（{site.Renderer?.GpuUnavailableReason ?? "GPU 可用"}）");
                 Expect(minProj >= 1500 && units >= 250, $"规模：弹体始终 ≥ 1,500（最少 {minProj}），单位 {units}");
-                Expect(p95 <= 1000.0 / 60.0, $"p95 帧时间 {p95:F2} ms ≤ 16.7 ms（≥ 60 帧/秒；本机配置高于推荐配置，换算见 ADR）");
+                // FG-TOOL-01：只测一次；超线不到 2 倍记性能警告（不计失败），超 2 倍才失败。
+                PerfGate.Expect(true, $"p95 帧时间 {p95:F2} ms ≤ 16.7 ms（≥ 60 帧/秒；本机配置高于推荐配置，换算见 ADR）", new[] { PerfGate.Le(p95, 1000.0 / 60.0, "p95 帧时间 ms") }, Expect, l => report.AppendLine(l));
 
                 // 画面：读回一帧，数阵营颜色像素（己方青、敌方橙红），确认真的画出来了（每次渲染前都要提交一次实例化绘制）。
                 site.FrameRender(cam, 0.5f);

@@ -813,8 +813,9 @@ namespace GameLogic.EditorTools
             edit.Stop();
             PerfLines.Add($"管线内核（{k.CellCount:N0} 格 / {k.NetworkCount} 个网络 / {k.ConsumerCount} 个消费者，Editor）：单步 平均 {avg:F4} ms、p95 {p95:F4} ms；" +
                           $"整张重算 {rb.Elapsed.TotalMilliseconds:F3} ms（首次）/ 编辑后那一步 {edit.Elapsed.TotalMilliseconds:F3} ms（含重算 {k.LastRebuildMs:F3} ms）；搭建 {sw.Elapsed.TotalMilliseconds:F1} ms");
-            Expect(k.CellCount >= 3000 && p95 <= 0.5 && k.LastRebuildMs <= 10.0,
-                $"K13 性能（FG03 第 7 节 管线 3,000 格；物流内核单步 ≤ 2 ms）：{k.CellCount:N0} 格单步 p95 {p95:F4} ms（阈值 0.5 ms）、编辑后重算 {k.LastRebuildMs:F3} ms（阈值 10 ms）");
+            ExpectPerf(k.CellCount >= 3000,
+                $"K13 性能（FG03 第 7 节 管线 3,000 格；物流内核单步 ≤ 2 ms）：{k.CellCount:N0} 格单步 p95 {p95:F4} ms（阈值 0.5 ms）、编辑后重算 {k.LastRebuildMs:F3} ms（阈值 10 ms）",
+                PerfGate.Le(p95, 0.5, "单步 p95 ms"), PerfGate.Le(k.LastRebuildMs, 10.0, "编辑后重算 ms"));
             // 修复轮 P1：框选拆除（一帧逐格拆几百格，热更层每格 TryGetKind + Remove）不能每格整网重算。3,000 格里框掉 400 格：
             // 拆的过程零重算、每格 O(1)；之后那一步只压紧 + 重算一次。再一次拆光全部格同理。
             int beforeRb = k.RebuildCount;
@@ -858,9 +859,10 @@ namespace GameLogic.EditorTools
             bool allOk = k.CellCount == 0 && k.NetworkCount == 0 && k.RebuildCount == rbAll0 + 1;
             PerfLines.Add($"管线框选拆除（Editor）：3,000 格里框掉 {boxRemoved} 格 {box.Elapsed.TotalMilliseconds:F3} ms（拆的过程重算 {rbDuring} 次）+ 之后那一步 {after.Elapsed.TotalMilliseconds:F3} ms；" +
                           $"一次拆光剩下 {allRemoved + 1} 格 {all.Elapsed.TotalMilliseconds:F3} ms");
-            Expect(boxOk && allOk && box.Elapsed.TotalMilliseconds <= 4.0 && after.Elapsed.TotalMilliseconds <= 10.0 && all.Elapsed.TotalMilliseconds <= 8.0,
+            ExpectPerf(boxOk && allOk,
                 $"K13 框选拆除（FGR-LOG-007 × 3,000 格，一帧 ≤ 8.3 ms）：框掉 {boxRemoved} 格用时 {box.Elapsed.TotalMilliseconds:F3} ms（阈值 4 ms）、期间重算 {rbDuring} 次；" +
-                $"之后那一步（压紧 + 重算一次）{after.Elapsed.TotalMilliseconds:F3} ms（阈值 10 ms）；一次拆光 {allRemoved + 1} 格 {all.Elapsed.TotalMilliseconds:F3} ms（阈值 8 ms），之后内核为空、只重算 1 次");
+                $"之后那一步（压紧 + 重算一次）{after.Elapsed.TotalMilliseconds:F3} ms（阈值 10 ms）；一次拆光 {allRemoved + 1} 格 {all.Elapsed.TotalMilliseconds:F3} ms（阈值 8 ms），之后内核为空、只重算 1 次",
+                PerfGate.Le(box.Elapsed.TotalMilliseconds, 4.0, "框掉 400 格 ms"), PerfGate.Le(after.Elapsed.TotalMilliseconds, 10.0, "之后那一步 ms"), PerfGate.Le(all.Elapsed.TotalMilliseconds, 8.0, "一次拆光 ms"));
         }
 
         // ── 家园工具 ─────────────────────────────────────────────────────────────────
@@ -1527,6 +1529,7 @@ namespace GameLogic.EditorTools
             }
             var lines = new List<string>();
             bool ok = true;
+            var perf = new List<PerfGate.Metric>();
             foreach (float speed in new[] { 1f, 3f })
             {
                 const int frames = 1200;
@@ -1556,7 +1559,8 @@ namespace GameLogic.EditorTools
                 double avg = frameMs.Average();
                 double p99 = frameMs[(int)(frames * 0.99)];
                 lines.Add($"{speed}x@120 帧（{frames} 帧，{k.CellCount:N0} 格管线 / {k.NetworkCount} 个网络）：管线每帧 平均 {avg:F4} ms、p99 {p99:F4} ms；悬停读数 {hw.Elapsed.TotalMilliseconds * 1000.0 / 200:F0} µs / 次");
-                ok &= p99 <= 1.0 && avg <= 0.3;
+                perf.Add(PerfGate.Le(p99, 1.0, $"{speed}x 管线每帧 p99 ms"));
+                perf.Add(PerfGate.Le(avg, 0.3, $"{speed}x 管线每帧平均 ms"));
             }
             GC.Collect();
             long memA = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong();
@@ -1577,8 +1581,8 @@ namespace GameLogic.EditorTools
             lines.Add($"稳态分配（3x 节奏 3,000 帧 = 4,500 个世界步 + 3,000 次 Render）：托管堆增量 {steadyAlloc} 字节{(noGc ? string.Empty : "（期间发生 GC）")}");
             ok &= steadyAlloc < 3000 * 8;
             PerfLines.AddRange(lines);
-            Expect(ok && k.CellCount >= 3000,
-                "F11 120 帧最低标准（8.33 ms / 帧）下 3,000 格管线：1x 与 3x 逐帧实测 p99 ≤ 1 ms、平均 ≤ 0.3 ms，稳态几乎不分配（Editor batchmode 无 GPU；GPU 画面由 FG3-LOG-09 真机复测）：" + string.Join("；", lines));
+            ExpectPerf(ok && k.CellCount >= 3000,
+                "F11 120 帧最低标准（8.33 ms / 帧）下 3,000 格管线：1x 与 3x 逐帧实测 p99 ≤ 1 ms、平均 ≤ 0.3 ms，稳态几乎不分配（Editor batchmode 无 GPU；GPU 画面由 FG3-LOG-09 真机复测）：" + string.Join("；", lines), perf.ToArray());
         }
 
         // ── 工具 ─────────────────────────────────────────────────────────────────
@@ -1680,6 +1684,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

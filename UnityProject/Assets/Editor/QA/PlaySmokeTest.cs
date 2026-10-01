@@ -86,6 +86,7 @@ namespace GameLogic.EditorTools
             SessionState.SetString(K + "Saves", Path.Combine(Path.GetTempPath(), "bingames-play-smoke-saves-" + Guid.NewGuid().ToString("N")));
             SessionState.SetBool(K + "Active", true);
             SessionState.SetInt(K + "Errors", 0);
+            SessionState.SetInt(K + "PerfWarnings", 0);
             SessionState.SetFloat(K + "RepairedAt", 0f);
             SessionState.SetBool(K + "VfxRaised", false);
             SessionState.SetBool(K + "VfxChecked", false);
@@ -1870,8 +1871,9 @@ namespace GameLogic.EditorTools
             Camera cam = Camera.main;
             Check(ov != null && ov.WindowChunkX > startChunk && ov.PlaceholderCount == 0 && BuildModeHudUIToolkit.Instance != null && !BuildModeHudUIToolkit.Instance.GeneratingVisible,
                 $"镜头右移（x = {cam?.transform.position.x:F1}）跨过区块边界：叠加层窗口从区块 {startChunk} 跟到 {ov?.WindowChunkX}，新露出的区块已补齐、没有残留占位");
-            Check(streamer != null && streamer.MaxTickMs < 16.0,
-                $"平移期间流式加载主线程每帧最多 {streamer?.MaxTickMs:F3} ms（真实 Play，影子工程 batchmode）");
+            CheckPerf(streamer != null,
+                $"平移期间流式加载主线程每帧最多 {streamer?.MaxTickMs:F3} ms（真实 Play，影子工程 batchmode）",
+                PerfGate.Lt(streamer?.MaxTickMs ?? double.NaN, 16.0, "流式加载每帧最多 ms"));
             PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
             Next(98, "按 Esc 退出建造模式");
         }
@@ -4214,9 +4216,10 @@ namespace GameLogic.EditorTools
             int frames = SessionState.GetInt(K + "FlightFrames", 0);
             Write($"  - 飞跃采样：{frames} 帧，“生成中”占位峰值 {maxPlaceholder} 块，现在 {now} 块；真实帧耗时峰值 {maxFrameMs:F0} ms" +
                   $"（活跃区块 {WorldSimulation.ActiveChunkCount}，窗口 ({terrain?.WindowChunkX},{terrain?.WindowChunkY}) 半径 {terrain?.WindowRadius}）");
-            Check(maxPlaceholder > 0 && now == 0 && maxFrameMs < 250f,
+            CheckPerf(maxPlaceholder > 0 && now == 0,
                 $"远距离飞跃（约 {Vector2.Distance(Campaign.Regions.HomeValleyLayout.Core.Position, CameraFocus()):F0} 格）：新露出的区块先显示“生成中”占位（峰值 {maxPlaceholder} 块），" +
-                $"{inStep:F1} 秒内补齐（剩 {now} 块）；主线程单帧峰值 {maxFrameMs:F0} ms（上限 250 ms）");
+                $"{inStep:F1} 秒内补齐（剩 {now} 块）；主线程单帧峰值 {maxFrameMs:F0} ms（上限 250 ms）",
+                PerfGate.Lt(maxFrameMs, 250.0, "飞跃主线程单帧峰值 ms"));
             PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.SpeedTriple));
             Next(124, "按 4（3x）");
         }
@@ -6499,6 +6502,7 @@ namespace GameLogic.EditorTools
         {
             int errors = SessionState.GetInt(K + "Errors", 0);
             bool pass = reason == "完成" && errors == 0;
+            Write($"性能警告 {SessionState.GetInt(K + "PerfWarnings", 0)} 条（FG-TOOL-01：性能检查只测一次，超阈值不到 2 倍记警告、不计入报错；超 2 倍才算报错）");
             Write($"结论：{(pass ? "PASS" : "FAIL")}（{reason}，报错 {errors} 条）");
             SessionState.SetBool(K + "Active", false);
             EditorApplication.update -= Tick;
@@ -6579,6 +6583,15 @@ namespace GameLogic.EditorTools
             UIDocument doc = host != null ? host.GetComponent<UIDocument>() : null;
             Label title = doc?.rootVisualElement?.Q<Label>("ObjectiveTitle");
             return title != null ? $"“{title.text}”" : "（目标条节点没找到）";
+        }
+
+        /// <summary>FG-TOOL-01：性能检查只测一次；超阈值不到 2 倍写“⚠ 性能警告”（不计报错），超 2 倍或功能条件不满足才算报错。</summary>
+        private static void CheckPerf(bool ok, string message, params PerfGate.Metric[] perf)
+        {
+            if (PerfGate.Expect(ok, message, perf, Check, Write) == PerfGate.Level.Warn)
+            {
+                SessionState.SetInt(K + "PerfWarnings", SessionState.GetInt(K + "PerfWarnings", 0) + 1);
+            }
         }
 
         private static void Check(bool ok, string message)

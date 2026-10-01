@@ -521,34 +521,35 @@ namespace GameLogic.EditorTools
         private static void CheckRequirementCoverage()
         {
             Line("  · E. 需求覆盖（IC-REQ-020）：FGT-LOG-001～013、FGT-GEN-001～010 各有自检段或旅程，且都登记在全量自检 / 旅程登记表里");
-            string validate = ReadRepo("TEngine/UnityProject/Assets/Editor/CellFrameworkValidate.cs") ?? string.Empty;
+            // FG-TOOL-01：全量自检改为按段登记（CellFrameworkValidate.RunSegmentList），这里读运行时的段名清单——比扫源码文本更硬：段确实在全量里跑。
+            var segments = new HashSet<string>(CellFrameworkValidate.SegmentNames, StringComparer.Ordinal);
             string qa = "TEngine/UnityProject/Assets/Editor/QA/";
             var map = new (string Test, string File, string Registered)[]
             {
-                ("FGT-LOG-001", "FgBuildFormalSelfCheck.cs", "FgBuildFormalSelfCheck.Run(Report)"), ("FGT-LOG-002", "FgConstructionSelfCheck.cs", "FgConstructionSelfCheck.Run(Report)"),
-                ("FGT-LOG-003", "FgConstructionSelfCheck.cs", "FgConstructionSelfCheck.Run(Report)"), ("FGT-LOG-004", "FgPlanningToolsSelfCheck.cs", "FgPlanningToolsSelfCheck.Run(Report)"),
-                ("FGT-LOG-005", "FgBeltNodeSelfCheck.cs", "FgBeltNodeSelfCheck.Run(Report)"), ("FGT-LOG-006", "FgBeltFormalSelfCheck.cs", "FgBeltFormalSelfCheck.Run(Report)"),
-                ("FGT-LOG-007", "FgPipeSelfCheck.cs", "FgPipeSelfCheck.Run(Report)"), ("FGT-LOG-008", "FgPowerGridSelfCheck.cs", "FgPowerGridSelfCheck.Run(Report)"),
-                ("FGT-LOG-009", "FgDiagnosisSelfCheck.cs", "FgDiagnosisSelfCheck.Run(Report)"), ("FGT-LOG-010", "FgLogisticsGateSelfCheck.cs", "FgLogisticsGateSelfCheck.Run(Report)"),
-                ("FGT-LOG-011", "FgLogisticsGateSelfCheck.Day.cs", "FgLogisticsGateSelfCheck.Run(Report)"), ("FGT-LOG-012", "FgLogisticsGateSelfCheck.Gates.cs", "FgLogisticsGateSelfCheck.Run(Report)"),
-                ("FGT-LOG-013", "FgPlanningToolsSelfCheck.cs", "FgPlanningToolsSelfCheck.Run(Report)"),
-                ("FGT-GEN-001", "FgWorldGenSelfCheck.cs", "FgWorldGenSelfCheck.Run(Report)"), ("FGT-GEN-002", "FgWorldGenSelfCheck.cs", "FgWorldGenSelfCheck.Run(Report)"),
-                ("FGT-GEN-003", "FgWorldGenHomeSelfCheck.cs", "FgWorldGenHomeSelfCheck.Run(Report)"), ("FGT-GEN-004", "FgWorldGenHomeSelfCheck.cs", "FgWorldGenHomeSelfCheck.Run(Report)"),
-                ("FGT-GEN-005", "FgWorldGenSelfCheck.cs", "FgWorldGenSelfCheck.Run(Report)"), ("FGT-GEN-006", "FgWorldGenSelfCheck.cs", "FgWorldGenSelfCheck.Run(Report)"),
-                ("FGT-GEN-007", "FgWorldGenSelfCheck.cs", "FgWorldGenSelfCheck.Run(Report)"), ("FGT-GEN-008", "FgWorldGenHomeSelfCheck.cs", "FgWorldGenHomeSelfCheck.Run(Report)"),
-                ("FGT-GEN-010", "FgNavSelfCheck.cs", "FgNavSelfCheck.Run(Report)"),
+                ("FGT-LOG-001", "FgBuildFormalSelfCheck.cs", "FgBuildFormalSelfCheck"), ("FGT-LOG-002", "FgConstructionSelfCheck.cs", "FgConstructionSelfCheck"),
+                ("FGT-LOG-003", "FgConstructionSelfCheck.cs", "FgConstructionSelfCheck"), ("FGT-LOG-004", "FgPlanningToolsSelfCheck.cs", "FgPlanningToolsSelfCheck"),
+                ("FGT-LOG-005", "FgBeltNodeSelfCheck.cs", "FgBeltNodeSelfCheck"), ("FGT-LOG-006", "FgBeltFormalSelfCheck.cs", "FgBeltFormalSelfCheck"),
+                ("FGT-LOG-007", "FgPipeSelfCheck.cs", "FgPipeSelfCheck"), ("FGT-LOG-008", "FgPowerGridSelfCheck.cs", "FgPowerGridSelfCheck"),
+                ("FGT-LOG-009", "FgDiagnosisSelfCheck.cs", "FgDiagnosisSelfCheck"), ("FGT-LOG-010", "FgLogisticsGateSelfCheck.cs", "FgLogisticsGateSelfCheck"),
+                ("FGT-LOG-011", "FgLogisticsGateSelfCheck.Day.cs", "FgLogisticsGateSelfCheck"), ("FGT-LOG-012", "FgLogisticsGateSelfCheck.Gates.cs", "FgLogisticsGateSelfCheck"),
+                ("FGT-LOG-013", "FgPlanningToolsSelfCheck.cs", "FgPlanningToolsSelfCheck"),
+                ("FGT-GEN-001", "FgWorldGenSelfCheck.cs", "FgWorldGenSelfCheck"), ("FGT-GEN-002", "FgWorldGenSelfCheck.cs", "FgWorldGenSelfCheck"),
+                ("FGT-GEN-003", "FgWorldGenHomeSelfCheck.cs", "FgWorldGenHomeSelfCheck"), ("FGT-GEN-004", "FgWorldGenHomeSelfCheck.cs", "FgWorldGenHomeSelfCheck"),
+                ("FGT-GEN-005", "FgWorldGenSelfCheck.cs", "FgWorldGenSelfCheck"), ("FGT-GEN-006", "FgWorldGenSelfCheck.cs", "FgWorldGenSelfCheck"),
+                ("FGT-GEN-007", "FgWorldGenSelfCheck.cs", "FgWorldGenSelfCheck"), ("FGT-GEN-008", "FgWorldGenHomeSelfCheck.cs", "FgWorldGenHomeSelfCheck"),
+                ("FGT-GEN-010", "FgNavSelfCheck.cs", "FgNavSelfCheck"),
             };
             var bad = new List<string>();
             foreach ((string test, string file, string registered) in map)
             {
                 string src = ReadRepo(qa + file);
-                if (src == null || !src.Contains(test) || !validate.Contains(registered))
+                if (src == null || !src.Contains(test) || !segments.Contains(registered))
                 {
                     bad.Add($"{test}（{file}）");
                 }
             }
             bool gen9 = JourneyCatalog.Ids.Contains(FgjGenExtremeJourney.Id);
-            bool m3 = validate.Contains("FgMilestoneM3SelfCheck.Run(Report)");
+            bool m3 = segments.Contains("FgMilestoneM3SelfCheck");
             Expect(bad.Count == 0 && gen9 && m3,
                 $"{map.Length} 项自动验收各有自检段且登记在全量自检；FGT-GEN-009 是旅程 {FgjGenExtremeJourney.Id}（登记 {gen9}）；[M3 出口] 本身登记在全量自检（{m3}）" +
                 (bad.Count == 0 ? string.Empty : "；缺：" + string.Join("、", bad)));

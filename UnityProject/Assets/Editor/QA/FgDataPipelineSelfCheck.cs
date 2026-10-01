@@ -434,7 +434,7 @@ namespace GameLogic.EditorTools
             Line($"  · 实测（Editor batchmode）：GameText.Get 命中 {nsPerGet:F0} ns/次、{n} 次堆增量 {hitAlloc} B（对照 20 万个串 +{ctlAlloc} B）；" +
                  $"PowerProfile 读取 {profile.Elapsed.TotalMilliseconds * 1e6 / n:F0} ns/次；全部 Luban 表重载 {load.Elapsed.TotalMilliseconds:F1} ms（校验和 {len + sum}）");
             Expect(ctlAlloc > 2 * 1024 * 1024 && hitAlloc < 2 * 1024 * 1024, $"GameText.Get 命中路径不分配（{n} 次堆增量 {hitAlloc} B，容差 2 MB 即平均每次 < 2 B；对照留住 20 万个串 +{ctlAlloc} B 证明计量有效）");
-            Expect(nsPerGet < 2000, $"GameText.Get 命中 {nsPerGet:F0} ns/次 < 2 µs（每帧上百个标签也可忽略）");
+            ExpectPerf(true, $"GameText.Get 命中 {nsPerGet:F0} ns/次 < 2 µs（每帧上百个标签也可忽略）", PerfGate.Lt(nsPerGet, 2000, "GameText.Get ns/次"));
         }
 
         // ── 工具链：python 检查与源数据快照 ──────────────────────────────────
@@ -448,7 +448,12 @@ namespace GameLogic.EditorTools
                 return;
             }
 
-            (int code, string output) = RunPython(root, "tools/cell_tables/check_luban.py --selftest");
+            // FG-TOOL-01：同一轮全量自检里 check_luban 自测只真跑一次（输入 = tools/cell_tables 全部文件，指纹相同才复用），各段在同一份输出里核对自己的规则。
+            (int code, string output) = QaPython.RunShared(root, "tools/cell_tables/check_luban.py --selftest", out bool selftestReused);
+            if (selftestReused)
+            {
+                Line($"    · check_luban 自测：本轮前面的段已真跑过、输入指纹相同，复用同一次的输出（本轮真跑 {QaPython.SharedRuns} 次、复用 {QaPython.SharedHits} 次）");
+            }
             Match m = Regex.Match(output, @"自测 (\d+)/(\d+) 通过");
             bool selftestOk = code == 0 && m.Success && m.Groups[1].Value == m.Groups[2].Value && int.Parse(m.Groups[2].Value) >= 16;
             Expect(selftestOk, $"check_luban.py 规则自测（跨模块同名表 / 主键重复 / 缺字段 / 缺中英 / 键格式 / 键悬空 / 建筑与敌人语义）：{(m.Success ? m.Value : Tail(output))}");
@@ -745,6 +750,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

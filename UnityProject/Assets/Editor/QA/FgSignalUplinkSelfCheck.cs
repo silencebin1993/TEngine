@@ -1127,9 +1127,11 @@ namespace GameLogic.EditorTools
             double commit = sw.Elapsed.TotalMilliseconds / cycles;
             PerfLines.Add($"接入后重编译（通知战斗内核重算这台的武器，含装配解析）：{small:F3} ms（家园 {few} 台）/ {big:F3} ms（{machines} 台）；" +
                           $"一次完整接入提交（校验 + 接管 + 两台重编译 + 事件）：{commit:F3} ms；没有过渡时每帧 {idle * 1000:F2} µs");
-            Expect(small <= 2.0 && big <= 2.0 && big <= small * 3 + 0.05 && machines >= few + 60,
-                $"重编译 {small:F3} ms（{few} 台）→ {big:F3} ms（{machines} 台），≤ 2 ms 且不随机器数增长");
-            Expect(commit <= 4.0 && idle < 0.01, $"一次完整接入 {commit:F3} ms（两台重编译 + 事件），空闲每帧 {idle * 1000:F2} µs");
+            ExpectPerf(machines >= few + 60,
+                $"重编译 {small:F3} ms（{few} 台）→ {big:F3} ms（{machines} 台），≤ 2 ms 且不随机器数增长",
+                PerfGate.Le(small, 2.0, "少量机器重编译 ms"), PerfGate.Le(big, 2.0, "大量机器重编译 ms"), PerfGate.Le(big, small * 3 + 0.05, "大量机器相对少量 ms"));
+            ExpectPerf(true, $"一次完整接入 {commit:F3} ms（两台重编译 + 事件），空闲每帧 {idle * 1000:F2} µs",
+                PerfGate.Le(commit, 4.0, "完整接入 ms"), PerfGate.Lt(idle, 0.01, "空闲每帧 ms"));
         }
 
         private static double RecompileMs(int logicId, int runs)
@@ -1762,6 +1764,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

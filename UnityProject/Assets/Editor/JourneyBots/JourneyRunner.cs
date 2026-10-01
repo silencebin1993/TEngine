@@ -64,6 +64,21 @@ namespace GameLogic.EditorTools.JourneyBots
         public List<JourneyStep> Steps = new List<JourneyStep>();
         /// <summary>结束（通过或失败）时的收拾，失败也会调用。</summary>
         public Action<JourneyContext, bool> OnFinish;
+
+        /// <summary>FG-TOOL-01：旅程版本号。步骤的语义或顺序变了就加 1——旧断点自动作废（断点里记着版本，不一致拒绝使用）。</summary>
+        public int Version = 1;
+
+        /// <summary>
+        /// FG-TOOL-01：完整跑到这些步骤完成时自动写断点（<see cref="JourneyCheckpoints"/>）。只登记“界面处于中性状态（没开面板、没进建造模式、在家园）、
+        /// 后面步骤需要的状态都在存档 + 旅程变量里”的步骤；写断点时还会再查一遍中性状态，不满足就不写（记一行，不改变结论）。
+        /// </summary>
+        public string[] CheckpointAfter = Array.Empty<string>();
+
+        /// <summary>FG-TOOL-01：从断点续跑、读档进家园之后调用——旅程自己在存档之外的状态（例如布局库目录）在这里重新载入。</summary>
+        public Action<JourneyContext> OnCheckpointRestored;
+
+        /// <summary>FG-TOOL-01：非空 = 这是从该步断点续跑的旅程（只用于迭代；报告结论里写明，交付验收必须完整跑）。</summary>
+        public string ResumedFrom;
     }
 
     /// <summary>跨步骤、跨 Play 模式域重载都要保留的少量状态放这里（字符串键值）。</summary>
@@ -172,6 +187,12 @@ namespace GameLogic.EditorTools.JourneyBots
 
         public IReadOnlyList<string> Lines => _memoryLines;
 
+        /// <summary>
+        /// FG-TOOL-01：登记的断点步骤（<see cref="JourneyDef.CheckpointAfter"/>）完成后调用，写断点（参数：运行器、刚完成的步骤、步骤序号）。
+        /// 为空 = 不写断点（续跑、关掉断点时）。写断点失败只记一行，不改变旅程结论。自检注入假的写入函数验证调用时机。
+        /// </summary>
+        public Action<JourneyRunner, JourneyStep, int> CheckpointWriter;
+
         public JourneyRunner(JourneyDef journey, IJourneyStore store, IJourneyClock clock)
         {
             Journey = journey ?? throw new ArgumentNullException(nameof(journey));
@@ -208,7 +229,7 @@ namespace GameLogic.EditorTools.JourneyBots
         /// <summary>开始（清掉上一次的状态，包括上一趟步骤写下的全部变量）。</summary>
         public void Start()
         {
-            foreach (string k in new[] { "result", "failStep", "failReason", "durations", "retries", "entered" })
+            foreach (string k in new[] { "result", "failStep", "failReason", "durations", "retries", "entered", "checkpoints" })
             {
                 Store.SetString(k, string.Empty);
             }
@@ -232,6 +253,10 @@ namespace GameLogic.EditorTools.JourneyBots
                 File.WriteAllText(ReportPath, string.Empty);
             }
             Write($"旅程 {Journey.Id}「{Journey.Title}」开始：种子 {Journey.Seed}，{Journey.Steps.Count} 步，总超时 {Journey.TotalTimeoutSeconds:F0} 秒");
+            if (!string.IsNullOrEmpty(Journey.ResumedFrom))
+            {
+                Write($"⚠ 断点续跑：从“{Journey.ResumedFrom}”之后接着跑（v{Journey.Version}）——只用于迭代；交付验收必须从主菜单完整跑：bash tools/unity-journey.sh {Journey.Id}");
+            }
         }
 
         /// <summary>收到一条日志（Host 把 Application.logMessageReceived 转过来）：Error / Exception / Assert 计入报错。</summary>
@@ -297,6 +322,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 case JourneyStepStatus.Done:
                     AppendList("durations", $"{step.Id}={StepElapsed.ToString("F2", CultureInfo.InvariantCulture)}");
                     Write($"  ✓ {outcome.Message ?? "完成"}（{StepElapsed:F1} 秒）");
+                    TryWriteCheckpoint(step);
                     SetInt("step", StepIndex + 1);
                     SetInt("attempt", 0);
                     // 完成一步后不在同一次驱动里连着跑下一步：给引擎一帧处理刚发出的输入。
@@ -313,6 +339,38 @@ namespace GameLogic.EditorTools.JourneyBots
                     }
                     return true;
             }
+        }
+
+        /// <summary>FG-TOOL-01：登记的断点步骤刚完成 → 写断点。失败只记一行（断点只是迭代工具，不能让验收旅程因此失败）。</summary>
+        private void TryWriteCheckpoint(JourneyStep step)
+        {
+            if (CheckpointWriter == null || Journey.CheckpointAfter == null || Array.IndexOf(Journey.CheckpointAfter, step.Id) < 0)
+            {
+                return;
+            }
+            try
+            {
+                CheckpointWriter(this, step, StepIndex);
+                AppendList("checkpoints", step.Id);
+            }
+            catch (Exception e)
+            {
+                Write($"  - 断点“{step.Id}”没写成（不影响结论）：{e.GetType().Name}: {e.Message}");
+            }
+        }
+
+        /// <summary>FG-TOOL-01：旅程步骤写过的全部变量（断点存档时一并保存）。</summary>
+        public Dictionary<string, string> SnapshotVars()
+        {
+            var d = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (string k in Store.GetString("vkeys", string.Empty).Split('\n'))
+            {
+                if (k.Length > 0)
+                {
+                    d[k] = Store.GetString("v." + k, string.Empty);
+                }
+            }
+            return d;
         }
 
         private bool RetryOrFail(JourneyStep step, string why)
@@ -361,7 +419,8 @@ namespace GameLogic.EditorTools.JourneyBots
                 JourneyStep s = Journey.Steps.FirstOrDefault(x => x.Id == stepId);
                 Write($"  ✗ 失败于 {stepId}{(s != null ? " " + s.Title : string.Empty)}：{reason}");
             }
-            Write($"结论：{(pass ? ResultPass : ResultFail)}（{(pass ? "完成" : reason)}，报错 {Errors} 条，用时 {TotalElapsed:F1} 秒）");
+            Write($"结论：{(pass ? ResultPass : ResultFail)}（{(pass ? "完成" : reason)}，报错 {Errors} 条，用时 {TotalElapsed:F1} 秒" +
+                  $"{(string.IsNullOrEmpty(Journey.ResumedFrom) ? string.Empty : $"；断点续跑：从“{Journey.ResumedFrom}”之后，只用于迭代，不是交付验收")}）");
             try
             {
                 Journey.OnFinish?.Invoke(_ctx, pass);
@@ -385,6 +444,8 @@ namespace GameLogic.EditorTools.JourneyBots
             sb.Append("\"failReason\":").Append(Quote(FailReason)).Append(',');
             sb.Append("\"errors\":").Append(Errors.ToString(CultureInfo.InvariantCulture)).Append(',');
             sb.Append("\"seconds\":").Append(TotalElapsed.ToString("F2", CultureInfo.InvariantCulture)).Append(',');
+            sb.Append("\"resumedFrom\":").Append(Quote(Journey.ResumedFrom ?? string.Empty)).Append(',');
+            sb.Append("\"checkpoints\":[").Append(string.Join(",", List("checkpoints").Select(Quote))).Append("],");
             sb.Append("\"steps\":[");
             bool first = true;
             foreach (string d in List("durations"))

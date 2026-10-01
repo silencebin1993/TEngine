@@ -1207,7 +1207,7 @@ namespace GameLogic.EditorTools
             (double withMs, long fired) = BigFight(wet, shock, true);
             (double withoutMs, _) = BigFight(wet, shock, false);
             PerfLines.Add($"200 × 200 编队攻击：内核单步平均 {withMs:0.000} 毫秒（登记反应规则）/ {withoutMs:0.000} 毫秒（不登记），6 游戏秒共触发反应 {fired} 次");
-            Expect(fired > 100 && withMs < 4.0, $"大规模反应结算：内核单步 {withMs:0.000} 毫秒（预算 4 毫秒，Editor batchmode；120 帧 = 8.3 毫秒一帧）、反应 {fired} 次");
+            ExpectPerf(fired > 100, $"大规模反应结算：内核单步 {withMs:0.000} 毫秒（预算 4 毫秒，Editor batchmode；120 帧 = 8.3 毫秒一帧）、反应 {fired} 次", PerfGate.Lt(withMs, 4.0, "内核单步 ms"));
 
             using (var arena = new ProbeArena(true, capacity: 512))
             {
@@ -1236,7 +1236,7 @@ namespace GameLogic.EditorTools
                     sw.Stop();
                     double ms = sw.Elapsed.TotalMilliseconds / 20.0;
                     PerfLines.Add($"400 个带标签单位（各 2 个图标）：内核一步 + 重填图标缓冲 平均 {ms:0.000} 毫秒/帧，图标 {renderer.LastIconInstances} 个");
-                    Expect(renderer.LastIconInstances == 800 && ms < 4.0, $"头顶图标缓冲由 Burst 作业一次填好（{renderer.LastIconInstances} 个，{ms:0.000} 毫秒/帧含内核一步）；热更层每帧只调一次 Draw");
+                    ExpectPerf(renderer.LastIconInstances == 800, $"头顶图标缓冲由 Burst 作业一次填好（{renderer.LastIconInstances} 个，{ms:0.000} 毫秒/帧含内核一步）；热更层每帧只调一次 Draw", PerfGate.Lt(ms, 4.0, "图标缓冲每帧 ms"));
                 }
                 finally
                 {
@@ -1608,6 +1608,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

@@ -1227,8 +1227,9 @@ namespace GameLogic.EditorTools
                 PerfLines.Add($"FGR-SYS-041 规模 {cells:N0} 格 / {items:N0} 件（{snap.Networks.Count} 个网络，含 12 个环）：单步平均 {avg:F3} ms、P95 {p95:F3} ms、最大 {max:F3} ms（{n} 步）；" +
                               $"拓扑重建 {rebuild:F1} ms（只在编辑后）；渲染缓冲 {prep:F2} ms（{rc:N0} 格 + {ri:N0} 件实例，只在状态变化后）；序列化 {ser.Elapsed.TotalMilliseconds:F1} ms / " +
                               $"{snap.TotalBytes / 1024.0:F0} KB，反序列化 {deMs:F1} ms");
-                Expect(cells == 15000 && items == 30000 && itemsAfter >= 30000 && netCount == 108 && avg <= 2.0 && p95 <= 2.0,
-                    $"FGR-ARC-004 / FGR-SYS-042：15,000 格、起始 30,000 件（测量期间 96 个输出端口持续补货，件数 {itemsAfter:N0} ≥ 30,000），内核单步平均 {avg:F3} ms、P95 {p95:F3} ms（预算 ≤ 2 ms）");
+                ExpectPerf(cells == 15000 && items == 30000 && itemsAfter >= 30000 && netCount == 108,
+                    $"FGR-ARC-004 / FGR-SYS-042：15,000 格、起始 30,000 件（测量期间 96 个输出端口持续补货，件数 {itemsAfter:N0} ≥ 30,000），内核单步平均 {avg:F3} ms、P95 {p95:F3} ms（预算 ≤ 2 ms）",
+                    PerfGate.Le(avg, 2.0, "单步平均 ms"), PerfGate.Le(p95, 2.0, "单步 P95 ms"));
                 Expect(h == h2 && snap.Networks.Count > 100,
                     $"超大网络按网络分块序列化（{snap.Networks.Count} 块）→ 恢复：状态哈希逐位一致");
             }
@@ -1618,8 +1619,9 @@ namespace GameLogic.EditorTools
                 applyMs = Math.Min(applyMs, aw.Elapsed.TotalMilliseconds);
             }
             PerfLines.Add($"格网传送带层重新套用（建图 / 读档时一次；热更层逐格写 {loadedCells:N0} 格）：{applyMs:F2} ms（Editor Mono，三次取最小；真机 HybridCLR 解释执行另测，FG15-SYS-02）");
-            Expect(applyMs < 50.0,
-                $"格网传送带层重新套用是装载期一次性开销（{loadedCells:N0} 格 {applyMs:F2} ms < 50 ms），不在每帧 / 每步路径上");
+            ExpectPerf(true,
+                $"格网传送带层重新套用是装载期一次性开销（{loadedCells:N0} 格 {applyMs:F2} ms < 50 ms），不在每帧 / 每步路径上",
+                PerfGate.Lt(applyMs, 50.0, "重新套用 ms"));
             WorldSimulation.StepMany(60 * 30);
             ulong hAfter = BeltNetworkService.Kernel.ComputeStateHash();
             PerfLines.Add($"超大网络经正式存档路径：{cells:N0} 格 / {items:N0} 件 → {records} 个网络块，存档文件 {fileBytes / 1024.0:F0} KB；写回 + 写盘 {saveMs:F0} ms，读档 + 恢复世界 {lw.Elapsed.TotalMilliseconds:F0} ms（Editor）");
@@ -1827,9 +1829,10 @@ namespace GameLogic.EditorTools
             (int cells, double renderUs, double stepUs, long alloc) big = results[1];
             PerfLines.Add($"热更层每帧 Render（状态未变）：{small.cells} 格 {small.renderUs:F2} µs / {big.cells:N0} 格 {big.renderUs:F2} µs；每世界步 WorldStep 托管开销 " +
                           $"{small.stepUs:F2} µs / {big.stepUs:F2} µs；3,000 次“步 + 画”托管堆增量 {small.alloc} / {big.alloc} 字节");
-            Expect(big.renderUs < small.renderUs + 20.0 && big.stepUs < small.stepUs + 20.0 && small.alloc < 3000 * 8 && big.alloc < 3000 * 8,
+            ExpectPerf(small.alloc < 3000 * 8 && big.alloc < 3000 * 8,
                 $"热更层开销与数量无关（FGR-SYS-042）：{small.cells} 格与 {big.cells:N0} 格下，每帧 Render {small.renderUs:F2} / {big.renderUs:F2} µs、每步 {small.stepUs:F2} / {big.stepUs:F2} µs（差值 < 20 µs）；" +
-                $"稳态托管分配 ≈ 0（{small.alloc} / {big.alloc} 字节 / 3,000 次）");
+                $"稳态托管分配 ≈ 0（{small.alloc} / {big.alloc} 字节 / 3,000 次）",
+                PerfGate.Lt(big.renderUs, small.renderUs + 20.0, "大网络每帧 Render µs"), PerfGate.Lt(big.stepUs, small.stepUs + 20.0, "大网络每步 µs"));
         }
 
         // ── 公共 ─────────────────────────────────────────────────────────────────
@@ -1877,6 +1880,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

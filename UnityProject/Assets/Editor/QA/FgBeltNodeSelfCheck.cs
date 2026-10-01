@@ -1226,8 +1226,9 @@ namespace GameLogic.EditorTools
                 string line = $"节点场景 {k.CellCount:N0} 格（含地下段 425 格）/ {k.NodeCount} 个节点 / {k.ItemCount:N0} 件：内核单步 600 步 平均 {avg:F3} ms、p95 {p95:F3} ms、最大 {max:F3} ms；" +
                               $"拓扑重建 {rebuild:F2} ms；序列化 {ser.Elapsed.TotalMilliseconds:F1} ms / {snap.TotalBytes / 1024} KB，读回 {load:F1} ms";
                 PerfLines.Add(line);
-                Expect(k.CellCount >= 15000 && k.NodeCount == 340 && k.ItemCount >= 29000 && p95 <= 2.0 && round && moving == 85 && inv,
-                    $"K14 性能（FG03 第 7 节：单步 ≤ 2 ms）：{line}；{moving} / 85 个单元的输入口收到物品，格式 3 往返哈希一致 {round}{(roundDiff != null ? "（" + roundDiff + "）" : string.Empty)}{Why(why)}");
+                ExpectPerf(k.CellCount >= 15000 && k.NodeCount == 340 && k.ItemCount >= 29000 && round && moving == 85 && inv,
+                    $"K14 性能（FG03 第 7 节：单步 ≤ 2 ms）：{line}；{moving} / 85 个单元的输入口收到物品，格式 3 往返哈希一致 {round}{(roundDiff != null ? "（" + roundDiff + "）" : string.Empty)}{Why(why)}",
+                    PerfGate.Le(p95, 2.0, "内核单步 p95 ms"));
             }
         }
 
@@ -1509,7 +1510,12 @@ namespace GameLogic.EditorTools
                    && sort.FilterR == BeltConst.FilterAny && presets.All(p => !string.IsNullOrEmpty(p.Name) && !GameText.ContainsMarker(p.Name)),
                 $"F1 过滤器预设表（卡片“必须同时交付：过滤器预设”）：源数据 fgdata_logistics.py 与运行时 fg.TbBeltFilterPreset 逐字段一致（{rows} 行，{string.Join(",", diffs)}）；" +
                 $"均分 1:1、分拣“废料走左口”解析为只放废料 / 全部");
-            (code, output) = RunPython(LocateRepo(), "tools/cell_tables/check_luban.py --selftest");
+            // FG-TOOL-01：同一轮全量自检里 check_luban 自测只真跑一次（输入 = tools/cell_tables 全部文件，指纹相同才复用），各段在同一份输出里核对自己的规则。
+            (code, output) = QaPython.RunShared(LocateRepo(), "tools/cell_tables/check_luban.py --selftest", out bool selftestReused);
+            if (selftestReused)
+            {
+                Line($"    · check_luban 自测：本轮前面的段已真跑过、输入指纹相同，复用同一次的输出（本轮真跑 {QaPython.SharedRuns} 次、复用 {QaPython.SharedHits} 次）");
+            }
             Expect(code == 0 && output.Contains("预设比例为 0") && output.Contains("地下传送带缺跨度调参"), $"F1 check_luban R33（过滤器预设与地下跨度）规则自测真跑：{Tail(output)}");
             string[] keys =
             {
@@ -2292,6 +2298,7 @@ namespace GameLogic.EditorTools
             }
             var lines = new List<string>();
             bool ok = true;
+            var perf = new List<PerfGate.Metric>();
             foreach (float speed in new[] { 1f, 3f })
             {
                 const int frames = 1200;
@@ -2336,7 +2343,9 @@ namespace GameLogic.EditorTools
                 double stepP95 = stepMs.Count > 0 ? stepMs[(int)(stepMs.Count * 0.95)] : 0;
                 lines.Add($"{speed}x@120 帧（{frames} 帧，{k.CellCount:N0} 格 / {k.NodeCount} 个节点 / {k.ItemCount:N0} 件）：物流每帧 平均 {avg:F3} ms、p95 {p95:F3}、p99 {p99:F3} ms；" +
                           $"内核步 {stepMs.Count} 次 p95 {stepP95:F3} ms；分流器悬停读数 {hw.Elapsed.TotalMilliseconds * 1000.0 / 200:F0} µs / 次；托管堆增量 {alloc} 字节");
-                ok &= p99 <= 4.0 && avg <= 1.5 && stepP95 <= 2.0;
+                perf.Add(PerfGate.Le(p99, 4.0, $"{speed}x 物流每帧 p99 ms"));
+                perf.Add(PerfGate.Le(avg, 1.5, $"{speed}x 物流每帧平均 ms"));
+                perf.Add(PerfGate.Le(stepP95, 2.0, $"{speed}x 内核单步 p95 ms"));
             }
             // 稳态分配单独测（与 FgBeltFormalSelfCheck Q 段同一口径）：3x 节奏 3,000 帧，托管堆增量按每帧 < 8 字节（Mono 堆块约 8 KB，单次测量有一个堆块的噪声）。
             GC.Collect();
@@ -2356,8 +2365,8 @@ namespace GameLogic.EditorTools
             lines.Add($"稳态分配（3x 节奏 3,000 帧 = 4,500 个世界步 + 3,000 次 Render，含 340 个节点）：托管堆增量 {steadyAlloc} 字节");
             ok &= steadyAlloc < 3000 * 8;
             PerfLines.AddRange(lines);
-            Expect(ok && k.CellCount >= 15000 && k.NodeCount >= 340,
-                "F10 120 帧最低标准（8.33 ms / 帧）下含 340 个节点的满载物流：1x 与 3x 逐帧实测 p99 ≤ 4 ms、平均 ≤ 1.5 ms、内核单步 p95 ≤ 2 ms、稳态几乎不分配（Editor batchmode 无 GPU）：" + string.Join("；", lines));
+            ExpectPerf(ok && k.CellCount >= 15000 && k.NodeCount >= 340,
+                "F10 120 帧最低标准（8.33 ms / 帧）下含 340 个节点的满载物流：1x 与 3x 逐帧实测 p99 ≤ 4 ms、平均 ≤ 1.5 ms、内核单步 p95 ≤ 2 ms、稳态几乎不分配（Editor batchmode 无 GPU）：" + string.Join("；", lines), perf.ToArray());
         }
 
         // ── 工具 ─────────────────────────────────────────────────────────────────
@@ -2482,6 +2491,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

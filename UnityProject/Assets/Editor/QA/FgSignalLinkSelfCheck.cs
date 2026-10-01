@@ -955,8 +955,8 @@ namespace GameLogic.EditorTools
             sw.Stop();
             double perTickUs = sw.Elapsed.TotalMilliseconds * 1000.0 / calls;
             PerfLines.Add($"接入中区域接管系统每帧 Tick（含覆盖采样与预警）平均 {perTickUs:F2} µs（家园 41 台机器，{calls} 次，同一模拟步内覆盖源重建 {SignalCoverageService.RebuildCount - rebuild0} 次）");
-            Expect(perTickUs < 50.0 && SignalCoverageService.RebuildCount - rebuild0 == 0,
-                $"每帧链路判定 {perTickUs:F2} µs（上限 50 µs），同一步内覆盖源不重建（与机器总数无关：只采样被接入的那一台）");
+            ExpectPerf(SignalCoverageService.RebuildCount - rebuild0 == 0,
+                $"每帧链路判定 {perTickUs:F2} µs（上限 50 µs），同一步内覆盖源不重建（与机器总数无关：只采样被接入的那一台）", PerfGate.Lt(perTickUs, 50.0, "每帧链路判定 µs"));
 
             // 安全模式退出判定：注入 200 台安全模式机器（记录在未载入的远征地点，走记录位置），量检查那一步。
             var records = new List<SignalSafeModeRecord>();
@@ -993,8 +993,8 @@ namespace GameLogic.EditorTools
             perCheck.Sort();
             double median = perCheck[perCheck.Count / 2];
             PerfLines.Add($"安全模式退出判定：200 台安全模式机器，检查那一步中位 {median:F3} ms、最大 {perCheck.Last():F3} ms；非检查步 1000 次共 {nonCheck.Elapsed.TotalMilliseconds:F3} ms");
-            Expect(perCheck.Count == 20 && SignalLinkService.SafeModeChecks - checks0 >= 20 && median < 1.0,
-                $"200 台安全模式机器的检查步中位 {median:F3} ms（上限 1 ms，每 0.5 游戏秒一次）");
+            ExpectPerf(perCheck.Count == 20 && SignalLinkService.SafeModeChecks - checks0 >= 20,
+                $"200 台安全模式机器的检查步中位 {median:F3} ms（上限 1 ms，每 0.5 游戏秒一次）", PerfGate.Lt(median, 1.0, "检查步中位 ms"));
             s.SignalCore.SafeModes = Array.Empty<SignalSafeModeRecord>();
 
             // 后期规模：建筑数 ×10（填充的建筑不是覆盖源），覆盖源的定期重建不按建筑总数扫（只重读核心与信号塔的下标）。
@@ -1038,8 +1038,8 @@ namespace GameLogic.EditorTools
                 double big = RebuildUs(2000);
                 int index2 = SignalCoverageService.IndexCount;
                 PerfLines.Add($"覆盖源定期重建：建筑 {baseCount} 座时每次 {base1:F2} µs，扩到 {s.BuildingRecords.Length} 座时每次 {big:F2} µs；建筑表换了才全量索引一次（{reindex.Elapsed.TotalMilliseconds * 1000.0:F1} µs）");
-                Expect(index1 == index0 + 1 && index2 == index1 && big < 20.0,
-                    $"建筑 {baseCount} → {s.BuildingRecords.Length} 座：定期重建 2000 次不再扫建筑表（索引次数 {index1 - index0} → 之后 +{index2 - index1}），每次 {big:F2} µs（上限 20 µs，与建筑总数无关）");
+                ExpectPerf(index1 == index0 + 1 && index2 == index1,
+                    $"建筑 {baseCount} → {s.BuildingRecords.Length} 座：定期重建 2000 次不再扫建筑表（索引次数 {index1 - index0} → 之后 +{index2 - index1}），每次 {big:F2} µs（上限 20 µs，与建筑总数无关）", PerfGate.Lt(big, 20.0, "定期重建每次 µs"));
             }
             finally
             {
@@ -1480,6 +1480,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

@@ -1884,11 +1884,12 @@ namespace GameLogic.EditorTools
             CombatBench.ClearPrototypeUnits(home.Combat);
             PerfLines.Add($"{count} 个单位同一步请求 ~150 格长路线（按 3 倍速真实节奏推进）：{stepsToAll} 步内全部拿到路线；实际抽象搜索 {searches} 次、共享 {shared} 条；" +
                           $"主线程寻路流水线每步平均 {sumBegin / Math.Max(1, stepsToAll):F3} ms、最大 {maxBegin:F3} ms；采纳步被迫等工作线程 {late} 次");
-            Expect(found && ids.Count == count && stepsToAll > 0 && stepsToAll <= 60 && searches < count / 4 && neverBlocked && maxBegin < 4.0,
+            ExpectPerf(found && ids.Count == count && stepsToAll > 0 && stepsToAll <= 60 && searches < count / 4 && neverBlocked,
                 $"负向：{count} 个单位同时请求长路线——分批（每批条数上限 + 距离预算，共享的只计一次）在 {stepsToAll} 步（{stepsToAll / 60f:F2} 游戏秒）内全部拿到路线，" +
                 $"抽象搜索只有 {searches} 次；主线程每步开销最大 {maxBegin:F3} ms（< 4 ms，3 倍速节奏下采纳步等工作线程 {late} 次），全程不踏进不可通行格" +
                 Why((found, "找不到出生点"), (ids.Count == count, $"只生成 {ids.Count} 个"), (stepsToAll > 0 && stepsToAll <= 60, $"拿到路线用了 {stepsToAll} 步"),
-                    (searches < count / 4, $"抽象搜索 {searches} 次"), (neverBlocked, "踏进了不可通行格：" + firstBlocked), (maxBegin < 4.0, $"主线程最大 {maxBegin:F3} ms")));
+                    (searches < count / 4, $"抽象搜索 {searches} 次"), (neverBlocked, "踏进了不可通行格：" + firstBlocked), (maxBegin < 4.0, $"主线程最大 {maxBegin:F3} ms")),
+                PerfGate.Lt(maxBegin, 4.0, "主线程每步最大 ms"));
         }
 
         // ── 存读档 / 观察 / 倍速（家园 + 突袭 + 巡逻一起）────────────────────────────────
@@ -2326,14 +2327,15 @@ namespace GameLogic.EditorTools
             int perStepCap = WorldOutpostSystem.WakesPerStep;
             double budget = NavService.Tuning("outpost.wake_budget_ms", 2f);
             PerfLines.Add($"据点唤醒：单个唤醒（补算增援 + 巡逻）最长 {WorldOutpostSystem.MaxWakeMs:F4} ms（预算 {budget} ms）；10 个同时符合条件分 {perStep.Count} 步处理（{string.Join("+", perStep)}）");
-            Expect(allDormant && perStep.Sum() == 10 && perStep.All(n => n <= perStepCap) && perStep.Count >= 3 && WorldOutpostSystem.MaxWakeMs <= budget && ids.All(o => !o.Dormant),
+            ExpectPerf(allDormant && perStep.Sum() == 10 && perStep.All(n => n <= perStepCap) && perStep.Count >= 3 && ids.All(o => !o.Dormant),
                 $"唤醒分帧：10 个据点同时符合唤醒条件，每步至多 {perStepCap} 个（{string.Join("+", perStep)}），单个唤醒最长 {WorldOutpostSystem.MaxWakeMs:F4} ms ≤ {budget} ms（FG17 休眠唤醒行）" +
                 Why((allDormant, "机器出现前并非全部休眠"),
                     (perStep.Sum() == 10 && ids.All(o => !o.Dormant),
                         $"只唤醒 {perStep.Sum()} 个、仍休眠 {ids.Count(o => o.Dormant)} 个；机器实时位置 " +
                         (MachineRegistry.TryGetLivePosition(machineId, out Vector2 mp) ? $"({mp.x:F1},{mp.y:F1})" : "无") + $"（下令落点 ({p.X + 16},{p.Y + 4})）；" +
                         $"休眠判定 {WorldOutpostSystem.Evaluations - evalBefore} 次；排队 {s.Raids?.PendingWakeIds?.Length}；据点唤醒次数 {string.Join(",", ids.Select(o => o.WakeCount))}"),
-                    (perStep.Count >= 3, $"只分了 {perStep.Count} 步")));
+                    (perStep.Count >= 3, $"只分了 {perStep.Count} 步")),
+                PerfGate.Le(WorldOutpostSystem.MaxWakeMs, budget, "单个唤醒最长 ms"));
         }
 
         private static void CheckSeedIndependence()
@@ -2400,9 +2402,10 @@ namespace GameLogic.EditorTools
             }
             PerfLines.Add($"长距离寻路（3 个种子 × 2 个方向，路线长 {lens.Min():F0}～{lens.Max():F0} 格）：热缓存（区块已生成、抽象图已建）工作线程耗时 平均 {warm.Average():F2} / 最大 {warm.Max():F2} ms；" +
                           $"冷启动（途经区块当场按种子生成 + 建抽象图）平均 {cold.Average():F2} / 最大 {cold.Max():F2} ms（预算 {budget} ms）");
-            Expect(allOk && warm.Max() <= budget,
+            ExpectPerf(allOk,
                 $"FG15 长距离寻路：{cells} 格以上的路线（实测 {lens.Min():F0}～{lens.Max():F0} 格）在工作线程上 {warm.Max():F2} ms ≤ {budget} ms（热缓存）；冷启动最大 {cold.Max():F2} ms" +
-                "（途经的区块第一次要按种子生成地形，见证据文件与 ADR）；路线每段都畅通");
+                "（途经的区块第一次要按种子生成地形，见证据文件与 ADR）；路线每段都畅通",
+                PerfGate.Le(warm.Max(), budget, "热缓存长路线最大 ms"));
         }
 
         // ── 工具 ────────────────────────────────────────────────────────────────────
@@ -2438,6 +2441,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

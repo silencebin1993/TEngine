@@ -53,6 +53,12 @@ namespace GameLogic.EditorTools.JourneyBots
             Seed = TestSeed,
             TotalTimeoutSeconds = 1500,
             OnFinish = Cleanup,
+            // FG-TOOL-01：旅程断点。版本号在步骤语义 / 顺序变化时加 1；断点只登记界面中性（建造模式已关、没有面板开着、在家园）的步骤。
+            // 迭代：bash tools/unity-journey.sh FGJ-M3 --from rate_t1；交付验收仍从主菜单完整跑。
+            Version = 1,
+            CheckpointAfter = new[] { "fac_close", "rate_t1", "build_close2", "loaded" },
+            // 布局库在旅程临时目录里（不是存档的一部分）：断点把它连同存档一起放回后，重新载入。
+            OnCheckpointRestored = c => LayoutLibrary.Reload(),
             Steps = new List<JourneyStep>
             {
                 S("play", "打开 main.unity 并进入 Play", 90, JourneyCommon.EnterPlay, TickPlay),

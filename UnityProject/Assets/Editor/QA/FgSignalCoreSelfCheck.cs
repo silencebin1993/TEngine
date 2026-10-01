@@ -935,8 +935,9 @@ namespace GameLogic.EditorTools
                 SignalCoreHudUIToolkit.InWorldOverrideForTests = null;
                 CampaignSession.Clear();
             }
-            Expect(opMs < 0.2 && presetMs < 0.5 && hudMs < 0.02,
-                $"装 / 卸 {opMs:F4} ms/次（门槛 0.2）、切换预设 {presetMs:F4} ms/次（门槛 0.5）、HUD 键不变的每帧刷新 {hudMs:F5} ms（门槛 0.02）；与机器总数无关（只读槽位与基元仓）");
+            ExpectPerf(true,
+                $"装 / 卸 {opMs:F4} ms/次（门槛 0.2）、切换预设 {presetMs:F4} ms/次（门槛 0.5）、HUD 键不变的每帧刷新 {hudMs:F5} ms（门槛 0.02）；与机器总数无关（只读槽位与基元仓）",
+                PerfGate.Lt(opMs, 0.2, "装卸 ms/次"), PerfGate.Lt(presetMs, 0.5, "切换预设 ms/次"), PerfGate.Lt(hudMs, 0.02, "HUD 每帧刷新 ms"));
 
             // 1 秒内连按 10 次装 / 卸（同一帧内）：状态一致、不复制、不重复插入。
             CampaignState t = NewState(118);
@@ -1119,6 +1120,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

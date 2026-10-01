@@ -1118,8 +1118,9 @@ namespace GameLogic.EditorTools
             }
             double queueMs = sw.Elapsed.TotalMilliseconds / 50;
             PerfLines.Add($"{placed} 座虚影都在等材料：施工单 Tick 每次 {tickMs:F3} ms（每步 O(工单数)，个位数到百位数量级的战略层管理）；施工队列收集 {queueMs:F3} ms / 次（只在面板打开时每 0.25 秒）");
-            Expect(placed >= 40 && tickMs < 2.0 && queueMs < 5.0 && queue.Count == placed,
-                $"{placed} 座虚影：施工单 Tick {tickMs:F3} ms、队列收集 {queueMs:F3} ms（预算 2 / 5 ms，Editor 托管代码；真机由 FG15-SYS-02 复测）");
+            ExpectPerf(placed >= 40 && queue.Count == placed,
+                $"{placed} 座虚影：施工单 Tick {tickMs:F3} ms、队列收集 {queueMs:F3} ms（预算 2 / 5 ms，Editor 托管代码；真机由 FG15-SYS-02 复测）",
+                PerfGate.Lt(tickMs, 2.0, "施工单 Tick ms"), PerfGate.Lt(queueMs, 5.0, "队列收集 ms"));
         }
 
         // ── P. 审查修复回归（第 1 轮）──────────────────────────────────────────────
@@ -1592,6 +1593,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

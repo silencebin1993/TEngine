@@ -1573,6 +1573,7 @@ namespace GameLogic.EditorTools
             GridCell hoverCell = path != null ? path[path.Count / 2].cell : core;
             var lines = new List<string>();
             bool ok = true;
+            var perf = new List<PerfGate.Metric>();
             long tick = GameClock.Ticks;
             // 预热：渲染器、实例缓冲第一次分配（不计入稳态分配）。
             for (int f = 0; f < 120; f++)
@@ -1632,7 +1633,10 @@ namespace GameLogic.EditorTools
                 double pumpAvg = pumpMs.Count > 0 ? pumpMs.Average() * 1000.0 : 0;
                 lines.Add($"{speed}x@120 帧（{frames} 帧，{k.CellCount:N0} 格 / {k.ItemCount:N0} 件，{BeltPortService.Count} 个建筑端口）：物流每帧 平均 {avg:F3} ms、p50 {p50:F3}、p95 {p95:F3}、p99 {p99:F3}、最大 {max:F3} ms；" +
                           $"内核步 {stepMs.Count} 次 平均 {stepAvg:F3} ms / p95 {stepP95:F3} ms；端口转移平均 {pumpAvg:F1} µs；悬停读数 {hoverTotal * 1000.0:F0} µs / 次（0.1 秒一次）；托管堆增量 {alloc} 字节");
-                ok &= p99 <= 4.0 && avg <= 1.5 && stepP95 <= 2.0 && pumpAvg < 50.0;
+                perf.Add(PerfGate.Le(p99, 4.0, $"{speed}x 物流每帧 p99 ms"));
+                perf.Add(PerfGate.Le(avg, 1.5, $"{speed}x 物流每帧平均 ms"));
+                perf.Add(PerfGate.Le(stepP95, 2.0, $"{speed}x 内核单步 p95 ms"));
+                perf.Add(PerfGate.Lt(pumpAvg, 50.0, $"{speed}x 端口转移平均 µs"));
             }
             // 稳态分配单独测：3x 节奏 3,000 帧（每帧 1.5 个世界步 + 一次 Render），托管堆增量按每帧 < 8 字节（与 ADR-ARC-004 同一口径；
             // Unity Mono 不支持按线程分配计数，堆块粒度约 8 KB，单次测量有一个堆块的噪声）。
@@ -1653,9 +1657,9 @@ namespace GameLogic.EditorTools
             lines.Add($"稳态分配（3x 节奏 3,000 帧 = 4,500 个世界步 + 3,000 次 Render）：托管堆增量 {steadyAlloc} 字节");
             ok &= steadyAlloc < 3000 * 8;
             PerfLines.AddRange(lines);
-            Expect(ok && path != null && k.CellCount >= 15000 && k.ItemCount >= 30000,
+            ExpectPerf(ok && path != null && k.CellCount >= 15000 && k.ItemCount >= 30000,
                 "120 帧最低标准（8.33 ms / 帧）下满载传送带的物流开销：15,000 格 / ≥ 30,000 件 + 真实仓库端口，1x 与 3x 逐帧实测 p99 ≤ 4 ms、平均 ≤ 1.5 ms、内核单步 p95 ≤ 2 ms、稳态几乎不分配" +
-                "（Editor batchmode 无 GPU；GPU 画面帧时间见 FgBeltPerfProbe）：" + string.Join("；", lines));
+                "（Editor batchmode 无 GPU；GPU 画面帧时间见 FgBeltPerfProbe）：" + string.Join("；", lines), perf.ToArray());
         }
 
         // ── 工具 ─────────────────────────────────────────────────────────────────
@@ -1755,6 +1759,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

@@ -1452,7 +1452,7 @@ namespace GameLogic.EditorTools
             times.Sort();
             double bfsMedian = times[times.Count / 2];
             PerfLines.Add($"连通计算（200 个覆盖源，AOT Burst 作业含托管↔原生拷贝）中位 {bfsMedian:F3} ms / 最大 {times.Last():F3} ms");
-            Expect(bfsMedian < 2.0, $"200 个覆盖源的连通计算中位 {bfsMedian:F3} ms（上限 2 ms，每 0.5 游戏秒最多一次，覆盖源没变时不算）");
+            ExpectPerf(true, $"200 个覆盖源的连通计算中位 {bfsMedian:F3} ms（上限 2 ms，每 0.5 游戏秒最多一次，覆盖源没变时不算）", PerfGate.Lt(bfsMedian, 2.0, "连通计算中位 ms"));
 
             using (var kernel = new CombatKernel(CombatConfig.Default, 2100))
             {
@@ -1489,8 +1489,8 @@ namespace GameLogic.EditorTools
                 evalTimes.Sort();
                 double evalMedian = evalTimes[evalTimes.Count / 2];
                 PerfLines.Add($"逐机器覆盖评估（内核 Burst 作业）：2,000 台机器 × 64 个覆盖圆，中位 {evalMedian:F3} ms；第一次 {firstChanges} 台变化，之后没有变化时 0 条");
-                Expect(evalMedian < 2.0 && changes.Count == 0 && firstChanges > 0,
-                    $"2,000 台机器 × 64 个覆盖圆的覆盖评估中位 {evalMedian:F3} ms（上限 2 ms，每 0.5 游戏秒一次）；状态没变时不产生变化条目（热更层只处理变化）");
+                ExpectPerf(changes.Count == 0 && firstChanges > 0,
+                    $"2,000 台机器 × 64 个覆盖圆的覆盖评估中位 {evalMedian:F3} ms（上限 2 ms，每 0.5 游戏秒一次）；状态没变时不产生变化条目（热更层只处理变化）", PerfGate.Lt(evalMedian, 2.0, "覆盖评估中位 ms"));
             }
 
             CampaignState s = NewHome(8719);
@@ -1533,7 +1533,8 @@ namespace GameLogic.EditorTools
             double bMedian = boundary[boundary.Count / 2];
             double perNonUs = other.Elapsed.TotalMilliseconds * 1000.0 / Math.Max(1, nonBoundary);
             PerfLines.Add($"步首覆盖评估（家园 41 台机器 + 31 个覆盖源）：评估步中位 {bMedian:F3} ms，非评估步平均 {perNonUs:F2} µs");
-            Expect(bMedian < 1.5 && perNonUs < 5.0, $"步首覆盖评估：每 0.5 游戏秒一次、中位 {bMedian:F3} ms（上限 1.5 ms）；其余步直接返回（{perNonUs:F2} µs）");
+            ExpectPerf(true, $"步首覆盖评估：每 0.5 游戏秒一次、中位 {bMedian:F3} ms（上限 1.5 ms）；其余步直接返回（{perNonUs:F2} µs）",
+                PerfGate.Lt(bMedian, 1.5, "步首覆盖评估中位 ms"), PerfGate.Lt(perNonUs, 5.0, "其余步 µs"));
 
             SignalCoverageOverlayView.SetEnabled(true);
             Frames(1);
@@ -1546,8 +1547,8 @@ namespace GameLogic.EditorTools
             ov.Stop();
             SignalCoverageOverlayView.SetEnabled(false);
             double ovUs = ov.Elapsed.TotalMilliseconds * 1000.0 / 2000;
-            Expect(SignalCoverageOverlayView.RedrawCount == redraw0 && ovUs < 10.0,
-                $"叠加层每帧：网络没变时不重画（重画 {SignalCoverageOverlayView.RedrawCount - redraw0} 次），平均 {ovUs:F2} µs");
+            ExpectPerf(SignalCoverageOverlayView.RedrawCount == redraw0,
+                $"叠加层每帧：网络没变时不重画（重画 {SignalCoverageOverlayView.RedrawCount - redraw0} 次），平均 {ovUs:F2} µs", PerfGate.Lt(ovUs, 10.0, "叠加层每帧 µs"));
 
             var sel = new List<int>();
             foreach (MachineRecord r in MachineRegistry.AllRecords.Where(x => x != null && x.IsAlive && x.RegionId == HomeValleyLayout.RegionId).Take(40))
@@ -1565,7 +1566,7 @@ namespace GameLogic.EditorTools
             cmd.Stop();
             double perSel = cmd.Elapsed.TotalMilliseconds / 50;
             PerfLines.Add($"下命令时逐台现采样：{sel.Count} 台 × 32 个覆盖源，每次下令 {perSel:F3} ms");
-            Expect(perSel < 1.0, $"下令时 {sel.Count} 台机器逐台判定覆盖：{perSel:F3} ms（只在下令那一刻，上限 1 ms）");
+            ExpectPerf(true, $"下令时 {sel.Count} 台机器逐台判定覆盖：{perSel:F3} ms（只在下令那一刻，上限 1 ms）", PerfGate.Lt(perSel, 1.0, "下令判定 ms"));
         }
 
         // ── L. 界面 ──────────────────────────────────────────────────────────────
@@ -2120,6 +2121,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

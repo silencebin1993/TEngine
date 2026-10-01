@@ -1268,6 +1268,9 @@ namespace GameLogic.EditorTools
             }
         }
 
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
+
         private static void Fail(string message)
         {
             _fail++;

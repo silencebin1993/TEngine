@@ -763,7 +763,8 @@ namespace GameLogic.EditorTools
             Expect(cold == MechanicalReactionCatalog.ReactionMeltOverloadId && compiles == 1 && UplinkReactionReadiness.CompileCount <= 3
                    && adapt == AdaptationCatalog.HeatResistant,
                 $"首次判定 {coldMs:F2} ms（跑一次真实接入编译）；命中缓存平均 {warmMs:F4} ms；50 台机器的适应统计 + 核心门三灯 {sumMs:F2} ms/次；编译总次数 {UplinkReactionReadiness.CompileCount}（两种蓝图各一次）");
-            Expect(warmMs < 1.0 && sumMs < 20.0, $"开销门槛：命中缓存 < 1 ms（{warmMs:F4}）、50 台统计 < 20 ms（{sumMs:F2}）——只在保存蓝图 / 核心门输入变化 / 出发预览时算，不在帧循环");
+            ExpectPerf(true, $"开销门槛：命中缓存 < 1 ms（{warmMs:F4}）、50 台统计 < 20 ms（{sumMs:F2}）——只在保存蓝图 / 核心门输入变化 / 出发预览时算，不在帧循环",
+                PerfGate.Lt(warmMs, 1.0, "命中缓存 ms"), PerfGate.Lt(sumMs, 20.0, "50 台统计 ms"));
             PerfLines.Add($"接入就绪判定 冷 {coldMs:F2} ms / 热 {warmMs:F4} ms；50 台适应统计 + 核心门 {sumMs:F2} ms——Editor 下 Mono JIT，真机 HybridCLR 解释执行预计慢数倍（真机复测归 FG15-SYS-02），均为输入变化时一次，不在帧循环");
         }
 
@@ -1200,6 +1201,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

@@ -193,35 +193,6 @@ namespace GameLogic.EditorTools
         private static HomeGridMap FreshMap(CampaignState s, string surface = WorldGenContent.EarthSurfaceId) =>
             new HomeGridMap(GridContent.TuningInt("grid.chunk_size"), WorldGenService.CreateSource(s, surface), surface);
 
-        /// <summary>与“快速平移”同一场景（新格网、同样的 240 帧平移与补齐）再跑一遍，只取单区块主线程接入的最大值（超线重测用）。</summary>
-        private static double PanMaxIntegrate(CampaignState s)
-        {
-            HomeGridMap map = FreshMap(s);
-            map.SetExplored(new[] { new ExploredAreaRecord { CenterX = 0, CenterY = 0, Radius = 40 } });
-            var streamer = new WorldChunkStreamer(map);
-            try
-            {
-                streamer.DrainForTests(new GridCell(0, 0));
-                streamer.ResetMetrics();
-                for (int f = 0; f < 240; f++)
-                {
-                    streamer.Tick(new GridCell(f * 24, (f * 24) / 3));
-                    System.Threading.Thread.Sleep(4);
-                }
-                var endFocus = new GridCell(239 * 24, 239 * 24 / 3);
-                for (int settle = 0; streamer.PendingAround(endFocus, 2) > 0 && settle < 400; settle++)
-                {
-                    streamer.Tick(endFocus);
-                    System.Threading.Thread.Sleep(2);
-                }
-                return streamer.MaxIntegrateChunkMs;
-            }
-            finally
-            {
-                streamer.Dispose();
-            }
-        }
-
         private static ulong HashOf(IGridTerrainSource src, int cx, int cy)
         {
             int n = GridContent.TuningInt("grid.chunk_size");
@@ -315,7 +286,12 @@ namespace GameLogic.EditorTools
             Expect(diffs.Count == 0 && rows == runtimeRows && rows >= 10,
                 $"源数据 fgdata_world.py 与运行时四张表逐字段一致（{rows} 行 / 运行时 {runtimeRows} 行）{(diffs.Count == 0 ? string.Empty : "——不一致：" + string.Join("，", diffs))}");
 
-            (code, output) = RunPython(root, "tools/cell_tables/check_luban.py --selftest");
+            // FG-TOOL-01：同一轮全量自检里 check_luban 自测只真跑一次（输入 = tools/cell_tables 全部文件，指纹相同才复用），各段在同一份输出里核对自己的规则。
+            (code, output) = QaPython.RunShared(root, "tools/cell_tables/check_luban.py --selftest", out bool selftestReused);
+            if (selftestReused)
+            {
+                Line($"    · check_luban 自测：本轮前面的段已真跑过、输入指纹相同，复用同一次的输出（本轮真跑 {QaPython.SharedRuns} 次、复用 {QaPython.SharedHits} 次）");
+            }
             Expect(code == 0 && output.Contains("生成器版本不连续") && output.Contains("领地必然压进家园区") && output.Contains("表面种子盐重复")
                    && output.Contains("缺默认世界设置") && output.Contains("版本引用的领地集合不存在") && output.Contains("区块边长被改（已冻结）"),
                 $"check_luban 世界生成规则（R17～R21，含版本引用集合与区块边长冻结）自测真跑：{Tail(output)}");
@@ -849,7 +825,7 @@ namespace GameLogic.EditorTools
             }
             Line($"  · 性能（Editor batchmode，影子工程，本机；真机 IL2CPP + Burst AOT 数字由 FG15-SYS-02 补）：单区块 32×32 生成 Burst {burstMs:F3} ms、托管 {managedMs:F3} ms；" +
                  $"16 个区块在工作线程后台完成用时 {backgroundMs:F1} ms（主线程只轮询）");
-            Expect(burstMs <= 5.0, $"FG17 第 7 节：单个区块生成（Burst，与工作线程同一份编译代码）{burstMs:F3} ms ≤ 5 ms");
+            ExpectPerf(true, $"FG17 第 7 节：单个区块生成（Burst，与工作线程同一份编译代码）{burstMs:F3} ms ≤ 5 ms", PerfGate.Le(burstMs, 5.0, "单区块生成 ms"));
             Expect(allDone, $"生成任务在工作线程上完成：主线程不调用 Complete、只轮询，16 个任务 {backgroundMs:F1} ms 内全部完成");
 
             // 快速平移：镜头每帧移动 24 格（60 帧 ≈ 每秒 1,440 格），每帧 Tick 一次，帧间留 4 ms 给工作线程。
@@ -884,14 +860,12 @@ namespace GameLogic.EditorTools
                 double max = frameMs[frameMs.Count - 1];
                 Line($"  · 快速平移 240 帧（每帧 24 格）：流式加载主线程每帧 p95 {p95:F3} ms、最大 {max:F3} ms；单区块主线程接入最大 {streamer.MaxIntegrateChunkMs:F3} ms、" +
                      $"平均 {(streamer.TotalIntegrated > 0 ? streamer.TotalIntegrateMs / streamer.TotalIntegrated : 0):F3} ms；接入 {streamer.TotalIntegrated} 块；停下后 {settle} 帧补齐");
-                // DEBT-FG0ARCH03-08 定口径：仍按规格的单次最大值判（不改分位数），但单次最大值对系统调度 / GC 停顿敏感——
-                // 首测超线时同一场景重测一次，两次都超才算退化（真退化两次都会超）；两次数字都写进报告，退化趋势由性能基线另行比较。
+                // DEBT-FG0ARCH03-08 定口径：仍按规格的单次最大值判（不改分位数）。单次最大值对系统调度 / GC 停顿敏感——
+                // FG-TOOL-01（用户 2026-09-30）：只测一次、不再“首测超线重测一次”；超线不到 2 倍记性能警告（不计失败），超 2 倍才失败；退化趋势由性能基线另行比较。
                 double integrateMax = streamer.MaxIntegrateChunkMs;
-                double integrateRetry = integrateMax > 0.5 ? PanMaxIntegrate(s) : -1;
-                bool integrateOk = integrateMax <= 0.5 || (integrateRetry >= 0 && integrateRetry <= 0.5);
-                Expect(integrateOk, $"FG17 第 7 节：主线程接入一个区块最大 {integrateMax:F3} ms ≤ 0.5 ms" +
-                                    (integrateRetry >= 0 ? $"（首测超线，同一场景重测一次：{integrateRetry:F3} ms）" : string.Empty));
-                Expect(p95 <= 2.0 && max <= 8.0, $"快速平移不卡顿：流式加载主线程每帧 p95 {p95:F3} ms ≤ 2 ms、最大 {max:F3} ms ≤ 8 ms（半帧）");
+                ExpectPerf(true, $"FG17 第 7 节：主线程接入一个区块最大 {integrateMax:F3} ms ≤ 0.5 ms", PerfGate.Le(integrateMax, 0.5, "单区块主线程接入最大 ms"));
+                ExpectPerf(true, $"快速平移不卡顿：流式加载主线程每帧 p95 {p95:F3} ms ≤ 2 ms、最大 {max:F3} ms ≤ 8 ms（半帧）",
+                    PerfGate.Le(p95, 2.0, "平移每帧 p95 ms"), PerfGate.Le(max, 8.0, "平移每帧最大 ms"));
                 Expect(pendingSeen > 0 && streamer.PendingAround(endFocus, 2) == 0 && map.SyncGeneratedCount == syncBefore,
                     $"平移中镜头周围出现过“生成中”的区块（最多 {pendingSeen} 块），停下后 {settle} 帧内全部补齐；流式路径从不在主线程同步生成（同步生成 {map.SyncGeneratedCount - syncBefore} 块）");
 
@@ -908,8 +882,9 @@ namespace GameLogic.EditorTools
                     streamer.Tick(flight);
                     ticks++;
                 }
-                Expect(flightTick <= 8.0 && pendingAfterJump > 0 && streamer.PendingAround(flight, 2) == 0 && streamer.MaxTickMs <= 8.0,
-                    $"远距离飞跃（一帧跳 60 万格）：跳的那一帧主线程 {flightTick:F3} ms，落点 {pendingAfterJump} 个区块先显示“生成中”，{ticks} 帧后全部补齐（期间每帧最大 {streamer.MaxTickMs:F3} ms）");
+                ExpectPerf(pendingAfterJump > 0 && streamer.PendingAround(flight, 2) == 0,
+                    $"远距离飞跃（一帧跳 60 万格）：跳的那一帧主线程 {flightTick:F3} ms，落点 {pendingAfterJump} 个区块先显示“生成中”，{ticks} 帧后全部补齐（期间每帧最大 {streamer.MaxTickMs:F3} ms）",
+                    PerfGate.Le(flightTick, 8.0, "跳的那一帧 ms"), PerfGate.Le(streamer.MaxTickMs, 8.0, "补齐期间每帧最大 ms"));
             }
             finally
             {
@@ -1461,9 +1436,10 @@ namespace GameLogic.EditorTools
                 int margin = GridContent.TuningInt("world.pregen_margin_chunks");
                 int expectAdded = (5 + 2 * margin) * (5 + 2 * margin);
                 Line($"  · 大面积探索（半径 3200 格，预生成触发 {triggered} 个区块）：首次处理 {firstMs:F1} ms（只在探索范围变化时）；之后每帧跨一个区块最多 {maxCross:F3} ms；新增一条探索记录 {addMs:F3} ms、只触发 {added} 个区块");
-                Expect(desiredIsWindow && triggered > 30000 && maxCross <= 2.0 && evicted > 0 && resident <= 64 + 64 + window + 16 && added == expectAdded,
+                ExpectPerf(desiredIsWindow && triggered > 30000 && evicted > 0 && resident <= 64 + 64 + window + 16 && added == expectAdded,
                     $"FG17 第 7 节：已探索 {triggered} 个区块时，常驻不可回收的只有镜头窗口 {window} 块；每帧跨区块不重算探索范围（最多 {maxCross:F3} ms）；预生成区的纯地形区块照常回收（回收 {evicted}、常驻 {resident}）；" +
-                    $"再加一条探索记录只增量触发 {added} 个区块（应为 {expectAdded}），已触发过的不重复生成");
+                    $"再加一条探索记录只增量触发 {added} 个区块（应为 {expectAdded}），已触发过的不重复生成",
+                    PerfGate.Le(maxCross, 2.0, "每帧跨区块最多 ms"));
 
                 // 同一条探索记录半径变大（3200 → 3232 格，外扩一个区块）：只扫新增环带。
                 int beforeGrow = streamer.PregenTriggeredCount;
@@ -1478,8 +1454,8 @@ namespace GameLogic.EditorTools
                 int ring = streamer.PregenTriggeredCount - beforeGrow;
                 int side = 2 * 101 + 1 + 2 * margin;           // 半径 3232 → 区块 -101～101，外扩边距
                 int expectRing = side * side - (side - 2) * (side - 2);
-                Expect(ring == expectRing && growMs <= 5.0,
-                    $"探索记录半径 3200 → 3232 格：只处理新增环带，触发 {ring} 个区块（应为 {expectRing}），用时 {growMs:F3} ms（首次处理整片 {firstMs:F1} ms）");
+                ExpectPerf(ring == expectRing,
+                    $"探索记录半径 3200 → 3232 格：只处理新增环带，触发 {ring} 个区块（应为 {expectRing}），用时 {growMs:F3} ms（首次处理整片 {firstMs:F1} ms）", PerfGate.Le(growMs, 5.0, "新增环带 ms"));
             }
             finally
             {
@@ -2056,6 +2032,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

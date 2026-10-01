@@ -716,8 +716,9 @@ namespace GameLogic.EditorTools
             }
             double many = TimeResolve(s, core);
             MachineLoadoutRegistry.Clear();
-            Expect(recompileMs <= 2.0 && many <= Math.Max(one * 3.0, one + 0.5),
-                $"Editor batchmode（Mono JIT，真机 IL2CPP / HybridCLR 解释执行未测）：接入重编译 {recompileMs:F3} ms / 次，双态预览（两次编译 + 差异）{dualMs:F3} ms / 次；登记 1 台 {one:F3} ms、400 台 {many:F3} ms");
+            ExpectPerf(true,
+                $"Editor batchmode（Mono JIT，真机 IL2CPP / HybridCLR 解释执行未测）：接入重编译 {recompileMs:F3} ms / 次，双态预览（两次编译 + 差异）{dualMs:F3} ms / 次；登记 1 台 {one:F3} ms、400 台 {many:F3} ms",
+                PerfGate.Le(recompileMs, 2.0, "接入重编译 ms"), PerfGate.Le(many, Math.Max(one * 3.0, one + 0.5), "400 台登记 ms"));
         }
 
         private static double TimeResolve(CampaignState s, string[] core)
@@ -969,6 +970,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

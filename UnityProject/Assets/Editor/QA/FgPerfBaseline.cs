@@ -90,6 +90,7 @@ namespace GameLogic.EditorTools
         private static StringBuilder _report;
         private static int _fail;
         private static int _pass;
+        private static int _warn;
         private static string _dir;
         private static BaselineFile _last;
 
@@ -134,6 +135,7 @@ namespace GameLogic.EditorTools
             }
             int fail = Run(report, update, baseline, Env("BINGAMES_PERF_LABEL") ?? string.Empty);
             report.AppendLine(fail == 0 ? "全部通过" : $"失败 {fail} 项");
+            PerfGate.AppendSummary(report);
             string text = report.ToString();
             Debug.Log(text);
             string outPath = Env("BINGAMES_PERF_OUT");
@@ -165,7 +167,9 @@ namespace GameLogic.EditorTools
             _report = report;
             _fail = 0;
             _pass = 0;
+            _warn = 0;
             _last = null;
+            PerfGate.ResetRun();
             Line($"\n[性能基线] 后期规模性能场景 {SceneId} v{SceneVersion}（FG0-QA-01；FG15 FGR-SYS-041 / 042 / 043）");
             CampaignState originalSession = CampaignSession.Current;
             int originalSlot = CampaignSession.ActiveSlotIndex;
@@ -425,8 +429,9 @@ namespace GameLogic.EditorTools
             long bytes = new FileInfo(CampaignSaveService.SlotPath(Slot)).Length;
             Add(cur, "save_ms", "写性能测试存档（整局同步 + 序列化 + 写盘）", "ms", sw.Elapsed.TotalMilliseconds, true, 20);
             Add(cur, "save_kb", "性能测试存档大小", "KB", bytes / 1024.0, true, 16);
-            Expect(bytes / 1024.0 / 1024.0 <= SaveMbBudget && sw.Elapsed.TotalMilliseconds <= SaveMsBudget,
-                $"FGR-SYS-005 绝对门槛：后期存档 {bytes / 1024.0 / 1024.0:F2} MB ≤ {SaveMbBudget} MB，写存档 {sw.Elapsed.TotalMilliseconds:F0} ms ≤ {SaveMsBudget} ms（Editor）");
+            ExpectPerf(bytes / 1024.0 / 1024.0 <= SaveMbBudget,
+                $"FGR-SYS-005 绝对门槛：后期存档 {bytes / 1024.0 / 1024.0:F2} MB ≤ {SaveMbBudget} MB，写存档 {sw.Elapsed.TotalMilliseconds:F0} ms ≤ {SaveMsBudget} ms（Editor）",
+                PerfGate.Le(sw.Elapsed.TotalMilliseconds, SaveMsBudget, "写存档 ms"));
             return true;
         }
 
@@ -603,7 +608,8 @@ namespace GameLogic.EditorTools
             }
             WorldView.Observe(HomeValleyLayout.RegionId);
             Add(cur, "restore_ms", "读性能测试存档（恢复 + 载入家园）", "ms", sw.Elapsed.TotalMilliseconds, true, 50);
-            Expect(sw.Elapsed.TotalMilliseconds <= RestoreMsBudget, $"FGR-SYS-005 绝对门槛：读档（恢复 + 载入家园）{sw.Elapsed.TotalMilliseconds:F0} ms ≤ {RestoreMsBudget} ms（Editor）");
+            ExpectPerf(true, $"FGR-SYS-005 绝对门槛：读档（恢复 + 载入家园）{sw.Elapsed.TotalMilliseconds:F0} ms ≤ {RestoreMsBudget} ms（Editor）",
+                PerfGate.Le(sw.Elapsed.TotalMilliseconds, RestoreMsBudget, "读档 ms"));
 
             // 每个表面 400 个区块（FG17 第 7 节）：核心周围 20×20 区块同步生成（读档后的格网是新建的）。
             CampaignState s = CampaignSession.Current;
@@ -751,8 +757,9 @@ namespace GameLogic.EditorTools
             double pipeP95 = pipeSamples.Count > 0 ? pipeSamples[(int)(pipeSamples.Count * 0.95)] : 0;
             Add(cur, "belt_kernel_p95_ms", "传送带内核每个内核步 p95", "ms", beltP95, true, 0.3);
             Add(cur, "pipe_kernel_p95_ms", "管线内核每个内核步 p95", "ms", pipeP95, true, 0.1);
-            Expect(beltP95 + pipeP95 <= LogisticsStepBudgetMs,
-                $"FG03 第 7 节绝对门槛：物流内核单步 p95（传送带 {beltP95:F3} + 管线 {pipeP95:F4}）= {beltP95 + pipeP95:F3} ms ≤ {LogisticsStepBudgetMs} ms（传送带是 Burst，与真机同为原生；管线 Editor 下 Mono JIT）");
+            ExpectPerf(true,
+                $"FG03 第 7 节绝对门槛：物流内核单步 p95（传送带 {beltP95:F3} + 管线 {pipeP95:F4}）= {beltP95 + pipeP95:F3} ms ≤ {LogisticsStepBudgetMs} ms（传送带是 Burst，与真机同为原生；管线 Editor 下 Mono JIT）",
+                PerfGate.Le(beltP95 + pipeP95, LogisticsStepBudgetMs, "物流内核单步 p95 合计 ms"));
             MeasureHomeFrames(cur, s);
             Add(cur, "alloc_bytes_per_step", "每步托管堆增量（不含发生 GC 的窗口）", "B", allocPerStep, true, 64);
             Add(cur, "alloc_gc_windows", $"分配测量中发生 GC 的窗口（共 {allocWindows} 个）", "个", dirtyWindows, true, 1);
@@ -1024,7 +1031,8 @@ namespace GameLogic.EditorTools
             }
             else
             {
-                Line($"  · 对比基线（{old.createdUtc}{(string.IsNullOrEmpty(old.label) ? string.Empty : "，" + old.label)}）：退化超过 {RegressionLimit:P0} 且超出绝对容差即未通过");
+                Line($"  · 对比基线（{old.createdUtc}{(string.IsNullOrEmpty(old.label) ? string.Empty : "，" + old.label)}）：退化超过 {RegressionLimit:P0} 且超出绝对容差即超线；" +
+                     $"FG-TOOL-01：只测一次，超线不到判定线 {PerfGate.FailFactor:0} 倍记性能警告（不判 FAIL），超 {PerfGate.FailFactor:0} 倍才未通过");
                 foreach (Metric m in cur.metrics)
                 {
                     Metric b = old.metrics.FirstOrDefault(x => x.id == m.id);
@@ -1039,8 +1047,14 @@ namespace GameLogic.EditorTools
                         Expect(m.value >= b.value * 0.9, "规模 " + text);
                         continue;
                     }
-                    bool regressed = m.value > b.value * (1 + RegressionLimit) && m.value - b.value > m.floor;
-                    Expect(!regressed, text + (regressed ? $"，退化超过 {RegressionLimit:P0}" : string.Empty));
+                    // 原判定：m > b × 1.1 且 m − b > 容差 ⇔ m > max(b × 1.1, b + 容差)。判定线本身不改，超线后按 PerfGate 分警告 / 失败。
+                    double line = RegressionLine(b.value, m.floor);
+                    bool regressed = m.value > line;
+                    PerfGate.Level lv = ExpectPerf(true, text + (regressed ? $"，退化超过 {RegressionLimit:P0}" : string.Empty), PerfGate.Le(m.value, line, m.id));
+                    if (lv == PerfGate.Level.Warn)
+                    {
+                        _warn++;
+                    }
                 }
                 // 基线里有、这次却没有的指标（例如这次没生成新区块，区块生成耗时就没量）：静默跳过等于少比一项。
                 foreach (Metric b in old.metrics)
@@ -1058,6 +1072,17 @@ namespace GameLogic.EditorTools
                     Fail($"本次有 {_fail} 项失败：不按 --update 写入新基线");
                     return;
                 }
+                // 退化记成了警告：把它写成新基线等于把退化当成新常态，以后再也比不出来。
+                // FG-TOOL-01 修复：除了与基线逐项对比的警告（_warn），写存档 / 读档 / 物流内核单步这类绝对门槛超线也只记警告，
+                // 这次偏慢的数值同样会被写成新基线——按本轮全部性能警告（PerfGate.Warnings，ResetRun 后只含本轮）拒写。
+                int allWarn = PerfGate.Warnings.Count;
+                if (allWarn > 0 || _warn > 0)
+                {
+                    int absWarn = Math.Max(0, allWarn - _warn);
+                    Line($"  · 本次有 {Math.Max(allWarn, _warn)} 条性能警告（与基线对比 {_warn} 条、绝对门槛 {absWarn} 条）：不按 --update 写入新基线" +
+                         "（警告交 FG15-SYS-02 性能门禁处理；机器空闲时确认不是退化后再写）");
+                    return;
+                }
                 WriteBaseline(cur, path);
                 Line("  · 已按要求写入新基线（提交进仓库，下一个里程碑出口与它对比）");
             }
@@ -1073,6 +1098,9 @@ namespace GameLogic.EditorTools
                     : $"    {m.name}：{b.value:0.###} → {m.value:0.###} {m.unit}（{Delta(m.value, b.value)}）");
             }
         }
+
+        /// <summary>FG-TOOL-01：退化判定线。原判定“m > b × 1.1 且 m − b > 容差”等价于 m > max(b × 1.1, b + 容差)；超线后按 PerfGate 分警告 / 失败。</summary>
+        public static double RegressionLine(double baseline, double floor) => Math.Max(baseline * (1 + RegressionLimit), baseline + floor);
 
         private static string Delta(double v, double b) => b > 0 ? ((v - b) / b).ToString("+0.0%;-0.0%;0%") : "基线为 0";
 
@@ -1119,6 +1147,9 @@ namespace GameLogic.EditorTools
             }
             return Path.Combine(Path.GetTempPath(), "bingames-" + SceneId + ".json");
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static PerfGate.Level ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Expect(bool condition, string message)
         {

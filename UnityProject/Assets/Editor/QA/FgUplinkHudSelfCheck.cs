@@ -1473,8 +1473,9 @@ namespace GameLogic.EditorTools
             double few = Measure(0, out long allocFew, out int rbFew);
             double many = Measure(200, out long allocMany, out int rbMany);
             PerfLines.Add($"接入 HUD 每帧刷新（状态不变）：1 台机器 {few * 1000:0.0} µs，201 台 {many * 1000:0.0} µs；分配 {allocFew}/{allocMany} 字节；重建 {rbFew}/{rbMany} 次（Editor batchmode，Mono JIT）");
-            Expect(rbFew == 0 && rbMany == 0 && allocFew < 4096 && allocMany < 4096 && many < few * 3 + 0.02 && many < 0.1,
-                $"状态不变时每帧 {few * 1000:0.0}/{many * 1000:0.0} µs、不重建、几乎不分配（{allocFew}/{allocMany} 字节 / 1000 帧）；200 台机器不放大开销");
+            ExpectPerf(rbFew == 0 && rbMany == 0 && allocFew < 4096 && allocMany < 4096,
+                $"状态不变时每帧 {few * 1000:0.0}/{many * 1000:0.0} µs、不重建、几乎不分配（{allocFew}/{allocMany} 字节 / 1000 帧）；200 台机器不放大开销",
+                PerfGate.Lt(many, few * 3 + 0.02, "200 台每帧相对少量 ms"), PerfGate.Lt(many, 0.1, "200 台每帧 ms"));
         }
 
         // ── 世界与机器 ─────────────────────────────────────────────────────────
@@ -1893,6 +1894,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {

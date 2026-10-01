@@ -1040,7 +1040,7 @@ namespace GameLogic.EditorTools
             double p95 = samples[(int)(samples.Count * 0.95)];
             double budget = CombatSite.Tuning("combat.perf.step_budget_ms", 6f);
             PerfLines.Add($"内核单步 200 读法机器 + 200 敌人：平均 {avg:0.000} 毫秒、p95 {p95:0.000} 毫秒（区域 {k.ZoneCount}、无人机 {k.DroneCount}、回波 {k.EchoCount}；预算 {budget} 毫秒，Editor batchmode、同步 Burst）");
-            Expect(avg < budget && k.Counters.ZonesSpawned > 0 && k.DroneCount > 0, $"单步平均 {avg:0.000} 毫秒 < 预算 {budget} 毫秒（读法确实在跑：区域 {k.Counters.ZonesSpawned} 块、无人机 {k.DroneCount} 架）");
+            ExpectPerf(k.Counters.ZonesSpawned > 0 && k.DroneCount > 0, $"单步平均 {avg:0.000} 毫秒 < 预算 {budget} 毫秒（读法确实在跑：区域 {k.Counters.ZonesSpawned} 块、无人机 {k.DroneCount} 架）", PerfGate.Lt(avg, budget, "单步平均 ms"));
 
             var swb = Stopwatch.StartNew();
             int builds = 0;
@@ -1055,7 +1055,7 @@ namespace GameLogic.EditorTools
             swb.Stop();
             double per = swb.Elapsed.TotalMilliseconds / builds;
             PerfLines.Add($"读法翻译 CarrierReadings.Build：{builds} 次共 {swb.Elapsed.TotalMilliseconds:0.0} 毫秒，每次 {per * 1000:0.0} 微秒（只在接入 / 离开 / 装配变更时调用，不按帧；Editor Mono JIT）");
-            Expect(per < 0.5, $"读法翻译每次 {per * 1000:0.0} 微秒（装配结算时一次，不按帧）");
+            ExpectPerf(true, $"读法翻译每次 {per * 1000:0.0} 微秒（装配结算时一次，不按帧）", PerfGate.Lt(per, 0.5, "读法翻译每次 ms"));
         }
 
         // ── 场地与工具 ─────────────────────────────────────────────────────────
@@ -1499,6 +1499,9 @@ namespace GameLogic.EditorTools
                 Fail(message);
             }
         }
+
+        /// <summary>FG-TOOL-01：性能断言只测一次；超阈值不到 2 倍记性能警告（不计失败），超 2 倍才失败。功能条件放 <paramref name="ok"/>。</summary>
+        private static void ExpectPerf(bool ok, string message, params PerfGate.Metric[] perf) => PerfGate.Expect(ok, message, perf, Expect, Line);
 
         private static void Fail(string message)
         {
