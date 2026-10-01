@@ -28,6 +28,8 @@ namespace GameLogic.Campaign.Primitive
         public const string OriginSalvage = "salvage";
         public const string OriginEncrypted = "encrypted";
         public const string OriginCraft = "craft";
+        /// <summary>FG4-ECO-03：固件刻录台刻出来的（FGR-FW-060 的正式来源）。</summary>
+        public const string OriginBurn = "burn";
 
         /// <summary>任何实例的“锁定 / 移除 / 新增”都会让它加一（固件库面板据此立即刷新；存档不记）。</summary>
         public static int Revision { get; private set; } = 1;
@@ -570,6 +572,31 @@ namespace GameLogic.Campaign.Primitive
             Acquired(state, firmwareId);
             partId = record.PartId;
             return CircuitOpResult.Ok();
+        }
+
+        /// <summary>
+        /// FG4-ECO-03：固件刻录台刻好一枚固件芯片（芯片基板已在开工时扣掉，ProductionService 开工前已确认存放没满）。
+        /// 存放满了（开工后被别的来源占满）就进“待领取”，不丢。返回新芯片的实例 ID。
+        /// </summary>
+        public static string AddBurnedChip(CampaignState state, string firmwareId)
+        {
+            if (state == null || string.IsNullOrEmpty(firmwareId))
+            {
+                return null;
+            }
+            var record = new PrimitiveChipRecord
+            {
+                PartId = NewPartId(),
+                CardDefId = firmwareId,
+                State = IsFull(state) ? PrimitiveChipState.Pending : PrimitiveChipState.Bag,
+                DraftSlot = -1,
+                Origin = OriginBurn,
+                AcquiredTick = NowTick(state),
+            };
+            state.PrimitiveChips = (state.PrimitiveChips ?? Array.Empty<PrimitiveChipRecord>()).Append(record).ToArray();
+            AppendLedger(state, "FirmwareChipBurn", record.PartId, firmwareId);
+            Acquired(state, firmwareId);
+            return record.PartId;
         }
 
         /// <summary>装配站已完工且有电（补印基元芯片与刻印固件芯片共用的前提）。</summary>

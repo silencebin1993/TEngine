@@ -746,7 +746,7 @@ namespace GameLogic.Campaign.Logistics
         {
             CampaignState state = p.State;
             Economy.ItemDef want = pr.ReasonItem;
-            BeltPortService.Binding inBind = Economy.ProductionService.FindPort(pr, false);
+            BeltPortService.Binding inBind = Economy.ProductionService.FindInPortFor(pr, want); // FG4-ECO-03：多输入口建筑追“收这种物品的那个口”的来料带
             BeltKernel k = BeltNetworkService.IsRunning && ReferenceEquals(BeltNetworkService.BoundState, state) ? BeltNetworkService.Kernel : null;
             if (want == null || inBind == null || k == null || inBind.PortId < 0 || !k.TryGetPortInfo(inBind.PortId, out BeltPortInfo info) || !info.Connected)
             {
@@ -916,7 +916,8 @@ namespace GameLogic.Campaign.Logistics
                             resources |= res;
                             target |= !res;
                             DiagChain c = NewChain(res ? DiagCategory.Input : DiagCategory.Structure);
-                            Step(c, DiagCode.QueueBlocked, GameText.Format("diag.step.queue_blocked", report.Name, HomeValleyFactory.DescribeFailure(it.BlockedReason)), b.Position, b.BuildingId);
+                            Step(c, DiagCode.QueueBlocked, GameText.Format("diag.step.queue_blocked", report.Name,
+                                HomeValleyFactory.DescribeWait(it) ?? HomeValleyFactory.DescribeFailure(it.BlockedReason)), b.Position, b.BuildingId);
                             report.Chains.Add(c);
                             break;
                         }

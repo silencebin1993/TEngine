@@ -139,8 +139,10 @@ namespace GameLogic.EditorTools
             string waitText = QueueText.Reason(head.BlockedReason);
             Expect(first.Success && head.State == FactoryQueueState.WaitingResources && s.Scrap == 0 && head.Progress == 0f,
                 $"缺料·生产：排队成功但停在“缺材料”，不扣废料、不前进（状态 {head.State}）");
-            Expect(waitText.StartsWith("废料不足：需要 60，现有 0", StringComparison.Ordinal) && Readable(waitText),
-                $"缺料·生产：队列写明“{waitText}”");
+            // FG4-ECO-03：装配站按材料造机器；家园里没有任何材料、“缺材料时用废料代付”默认开着——全部代付 60 废料（= 蓝图废料价），现有 0。
+            string matText = HomeValleyFactory.DescribeWait(head) ?? waitText;
+            Expect(matText.Contains("缺材料") && matText.Contains("用废料代付要 60 废料，现有 0") && Readable(matText),
+                $"缺料·生产：队列写明“{matText}”");
 
             s.Scrap = 200;
             HomeValleyFactory.Tick(s, 1f);

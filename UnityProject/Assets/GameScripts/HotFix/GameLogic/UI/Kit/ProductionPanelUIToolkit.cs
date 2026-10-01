@@ -49,6 +49,12 @@ namespace GameLogic.UI.Kit
         private Label _recipeLabel;
         private DropdownField _recipe;
         private Label _recipeLine;
+        private VisualElement _burnRow;
+        private Label _burnLabel;
+        private DropdownField _burn;
+        private Label _memory;
+        private Button _copy;
+        private readonly List<string> _burnChoices = new List<string>(16);
         private VisualElement _progressBox;
         private Label _progress;
         private VisualElement _fill;
@@ -88,6 +94,11 @@ namespace GameLogic.UI.Kit
         public bool RecipeDropdownVisible => _recipeRow != null && !_recipeRow.ClassListContains("bn-hidden");
         public bool RecipeBoxVisible => _recipeBox != null && !_recipeBox.ClassListContains("bn-hidden");
         public DropdownField RecipeField => _recipe;
+        public DropdownField BurnField => _burn;
+        public bool BurnRowVisible => _burnRow != null && !_burnRow.ClassListContains("bn-hidden");
+        public string MemoryText => _memory?.text ?? string.Empty;
+        public Button CopyButton => _copy;
+        public bool CopyVisible => _copy != null && _copy.style.display != DisplayStyle.None;
         public float ProgressFillPercent { get; private set; }
         public Button PortsButton => _ports;
         public Button DiagnoseButton => _diagnose;
@@ -160,6 +171,11 @@ namespace GameLogic.UI.Kit
             _recipeLabel = root.Q<Label>("PrRecipeLabel");
             _recipe = root.Q<DropdownField>("PrRecipe");
             _recipeLine = root.Q<Label>("PrRecipeLine");
+            _burnRow = root.Q<VisualElement>("PrBurnRow");
+            _burnLabel = root.Q<Label>("PrBurnLabel");
+            _burn = root.Q<DropdownField>("PrBurn");
+            _memory = root.Q<Label>("PrMemory");
+            _copy = root.Q<Button>("PrCopy");
             _progressBox = root.Q<VisualElement>("PrProgressBox");
             _progress = root.Q<Label>("PrProgress");
             _fill = root.Q<VisualElement>("PrProgressFill");
@@ -177,6 +193,7 @@ namespace GameLogic.UI.Kit
             _help.clicked += OpenCodex;
             _ports.clicked += OpenPorts;
             _diagnose.clicked += OpenDiagnosis;
+            _copy.clicked += AskCopySettings;
             _root.RegisterCallback<PointerDownEvent>(evt =>
             {
                 if (evt.target == _root)
@@ -189,6 +206,12 @@ namespace GameLogic.UI.Kit
             {
                 int i = _recipe.choices.IndexOf(evt.newValue);
                 SelectRecipe(i <= 0 || i - 1 >= _recipeChoices.Count ? null : _recipeChoices[i - 1].Id);
+            });
+            // FG4-ECO-03：刻录目标下拉框选中即生效。
+            _burn.RegisterValueChangedCallback(evt =>
+            {
+                int i = _burn.choices.IndexOf(evt.newValue);
+                SelectBurnTarget(i <= 0 || i - 1 >= _burnChoices.Count ? null : _burnChoices[i - 1]);
             });
         }
 
@@ -264,11 +287,58 @@ namespace GameLogic.UI.Kit
             _state.text = ProductionService.StateText(p);
             _reason.text = ProductionService.ReasonText(state, p);
             RefreshRecipe(p);
+            RefreshBurnAndMemory(state, p);
             RefreshProgress(p);
             RefreshBuffers(state, p);
             RefreshDetail(state, p);
             RefreshPower(p);
             _ports.SetEnabled(GridContent.PortsOf(b.BuildingTypeId).Count > 0);
+        }
+
+        /// <summary>FG4-ECO-03：刻录台的刻录目标下拉框；配方记忆说明（新建的同类建筑沿用 / 这座是沿用来的）；“复制设置到同类建筑”按钮。</summary>
+        private void RefreshBurnAndMemory(CampaignState state, ProductionService.Producer p)
+        {
+            bool burner = p.IsBurner;
+            _burnRow.EnableInClassList("bn-hidden", !burner);
+            if (burner)
+            {
+                _burnLabel.text = GameText.Get("prod.panel.burn_target");
+                _burnChoices.Clear();
+                var names = new List<string>(16) { GameText.Get("prod.panel.burn_none") };
+                foreach (string id in Campaign.Signal.SignalCoreService.PrintableFirmware(state))
+                {
+                    _burnChoices.Add(id);
+                    names.Add(Campaign.Signal.FirmwareKinds.DisplayName(id) ?? id);
+                }
+                // 选中的目标已经不能刻（例如读档后内容变了）：仍列出来，原因行写明为什么不刻。
+                string cur = p.Rec.BurnTarget;
+                if (!string.IsNullOrEmpty(cur) && !_burnChoices.Contains(cur))
+                {
+                    _burnChoices.Add(cur);
+                    names.Add(Campaign.Signal.FirmwareKinds.DisplayName(cur) ?? cur);
+                }
+                DropdownChoices.Apply(_burn, names, names[0]);
+                int sel = string.IsNullOrEmpty(cur) ? 0 : _burnChoices.IndexOf(cur) + 1;
+                _burn.SetValueWithoutNotify(_burn.choices[Mathf.Clamp(sel, 0, _burn.choices.Count - 1)]);
+                string target = string.IsNullOrEmpty(cur) ? GameText.Get("prod.panel.setting_none") : Campaign.Signal.FirmwareKinds.DisplayName(cur) ?? cur;
+                _recipeLine.text = GameText.Format("prod.panel.burn_line", target, p.Def.FixedRecipe.Seconds.ToString("0.#", CultureInfo.InvariantCulture));
+            }
+            bool copyable = ProductionService.HasCopyableSettings(p);
+            string typeName = HomeGridService.DisplayName(p.Building.BuildingTypeId);
+            if (copyable)
+            {
+                string setting = ProductionService.SettingText(p);
+                _memory.text = p.Rec.Inherited
+                    ? GameText.Format("prod.panel.inherited", typeName, setting)
+                    : GameText.Format("prod.panel.remembered", typeName, setting);
+            }
+            else
+            {
+                _memory.text = string.Empty;
+            }
+            _memory.EnableInClassList("bn-hidden", !copyable);
+            _copy.text = GameText.Get("prod.panel.copy");
+            _copy.style.display = copyable ? DisplayStyle.Flex : DisplayStyle.None;
         }
 
         private void RefreshRecipe(ProductionService.Producer p)
@@ -473,6 +543,16 @@ namespace GameLogic.UI.Kit
                     break;
                 }
             }
+            if (p.IsBurner)
+            {
+                // FG4-ECO-03：刻好的芯片进固件库：写明存放了多少 / 能放多少（满了刻录台会停下）。
+                if (_sb.Length > 0)
+                {
+                    _sb.Append('\n');
+                }
+                _sb.Append(GameText.Format("prod.panel.burn_storage", Campaign.Primitive.PrimitiveInventory.BagCount(state),
+                    Campaign.Primitive.PrimitiveInventory.CapacityOf(state)));
+            }
             if (p.Rec.Completed > 0 && p.Def.Mode != ProducerMode.Waste)
             {
                 if (_sb.Length > 0)
@@ -507,6 +587,56 @@ namespace GameLogic.UI.Kit
             return ok;
         }
 
+        /// <summary>FG4-ECO-03：选刻录目标（控件与自检同一入口）。</summary>
+        public bool SelectBurnTarget(string firmwareId)
+        {
+            bool ok = ProductionService.TrySetBurnTarget(CampaignSession.Current, BuildingId, firmwareId, out string message);
+            _message.text = message ?? string.Empty;
+            Campaign.Feedback.FeedbackCues.Raise(ok ? Campaign.Feedback.FeedbackCueId.CommandAck : Campaign.Feedback.FeedbackCueId.Denied, message);
+            Refresh();
+            return ok;
+        }
+
+        /// <summary>FG4-ECO-03（卡片“复制设置到同类建筑”）：先确认（写明会改几座、正在做的那份作废料退回），再应用。没有别的同类建筑时直接说明。</summary>
+        public void AskCopySettings()
+        {
+            CampaignState state = CampaignSession.Current;
+            if (state == null || !ProductionService.TryGet(state, BuildingId, out ProductionService.Producer p))
+            {
+                return;
+            }
+            var others = new List<ProductionService.Producer>(8);
+            ProductionService.CollectSameType(state, p, others);
+            string typeName = HomeGridService.DisplayName(p.Building.BuildingTypeId);
+            if (others.Count == 0)
+            {
+                _message.text = GameText.Format("prod.panel.copy_none", typeName);
+                Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.Denied, _message.text);
+                return;
+            }
+            string id = BuildingId;
+            var req = new ConfirmRequest
+            {
+                Title = GameText.Get("prod.panel.copy_confirm_title"),
+                ConfirmText = GameText.Get("prod.panel.copy_confirm_ok"),
+                CancelText = GameText.Get("ui.build.confirm_cancel"),
+                OnConfirm = () => CopySettingsNow(id),
+                OnCancel = () => Refresh(),
+            };
+            req.Consequences.Add(GameText.Format("prod.panel.copy_confirm_body", typeName, ProductionService.SettingText(p), others.Count));
+            UiConfirmDialog.Show(req);
+        }
+
+        /// <summary>确认后应用（自检也直接调它）。</summary>
+        public int CopySettingsNow(string buildingId)
+        {
+            int n = ProductionService.CopySettingsToSameType(CampaignSession.Current, buildingId, out _, out string message);
+            _message.text = message ?? string.Empty;
+            Campaign.Feedback.FeedbackCues.Raise(n >= 0 ? Campaign.Feedback.FeedbackCueId.CommandAck : Campaign.Feedback.FeedbackCueId.Denied, message);
+            Refresh();
+            return n;
+        }
+
         public void OpenPorts()
         {
             string id = BuildingId;
@@ -527,7 +657,8 @@ namespace GameLogic.UI.Kit
                 return;
             }
             bool gathering = p.Def.Mode == ProducerMode.Recycler || p.Def.Mode == ProducerMode.Drill || p.Def.Mode == ProducerMode.Pump;
-            MechanicCodex.Open(gathering ? "codex.economy.gathering" : "codex.economy.processing", unlock: false);
+            MechanicCodex.Open(gathering ? "codex.economy.gathering"
+                : ProductionService.IsManufacturing(p.Def.TypeId) ? "codex.economy.manufacturing" : "codex.economy.processing", unlock: false);
         }
     }
 }

@@ -143,6 +143,8 @@ namespace GameLogic.Campaign.Logistics
                 ItemsPerMinuteT2 = TuningInt("logistics.items_per_minute_t2", 120),
                 ItemsPerMinuteT3 = TuningInt("logistics.items_per_minute_t3", 240),
                 BucketSteps = TuningInt("logistics.stats_bucket_steps", 300),
+                // FG4-ECO-03：装配站输入口的收货集合 = 机器材料（内容决定，建内核时写进配置，不进存档：读档前后同一个集合）。
+                AcceptSetMask = Economy.AssemblyMaterials.BeltMask,
             };
             if (!c.IsValid(out string why))
             {
@@ -1012,6 +1014,12 @@ namespace GameLogic.Campaign.Logistics
                 {
                     string owner = SinkOwnerName(info.SinkPortId);
                     ushort accept = kernel != null && kernel.TryGetPortInfo(info.SinkPortId, out BeltPortInfo pi) ? pi.Accept : BeltConst.AcceptNone;
+                    if (accept == BeltConst.AcceptSet)
+                    {
+                        // FG4-ECO-03：装配站只收机器材料。
+                        return GameText.Format("logistics.block.sink_rejects_set", owner, BeltItems.Name(info.Item0),
+                            Economy.AssemblyMaterials.NamesOf(Economy.AssemblyMaterials.MaterialItems));
+                    }
                     return accept == BeltConst.AcceptNone
                         ? GameText.Format("logistics.block.sink_rejects_all", owner)
                         : GameText.Format("logistics.block.sink_rejects", owner, BeltItems.Name(info.Item0), BeltItems.Name(accept));

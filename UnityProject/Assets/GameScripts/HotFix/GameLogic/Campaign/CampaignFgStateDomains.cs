@@ -474,6 +474,25 @@ namespace GameLogic.Campaign
         public RuinCellRecord[] RuinCells = Array.Empty<RuinCellRecord>();
         /// <summary>FG4-ECO-02（FG10 FGR-EVT-010 接口）：家园震动值 0～eco.vibration.max（提取钻工作时累积、按分钟衰减；蠕虫事件在 FG10）。</summary>
         public double Vibration;
+        /// <summary>FG4-ECO-03：装配站的材料缓存（西侧输入口用传送带送来的机器材料，每种最多 eco.assembly.buffer_per_item）。唯一写入口 <see cref="Economy.AssemblyMaterials"/>。</summary>
+        public ItemStackRecord[] AssemblyBuffer = Array.Empty<ItemStackRecord>();
+        /// <summary>FG4-ECO-03：装配站“缺材料时用废料代付”：0 = 玩家没设置过（用 eco.assembly.scrap_substitute_default）、1 = 开、2 = 关。</summary>
+        public int AssemblyScrapSubstitute;
+        /// <summary>FG4-ECO-03（卡片“配方选择记住上一次的设置”）：玩家最近一次给每类生产建筑选的配方 / 刻录目标；新建的同类建筑沿用（按建筑类型 ID 升序）。</summary>
+        public RecipeMemoryRecord[] RecipeMemory = Array.Empty<RecipeMemoryRecord>();
+        /// <summary>FG4-ECO-03：装配站用产线材料（没有废料代付）造出的机器累计台数（图鉴“装配站”与引导钩子）。</summary>
+        public long MachinesFromLine;
+    }
+
+    /// <summary>FG4-ECO-03：一类生产建筑“上一次的设置”（新建的同类建筑沿用）。</summary>
+    [Serializable]
+    public sealed class RecipeMemoryRecord
+    {
+        public string TypeId;
+        /// <summary>配方（空 = 玩家上一次选的是“不选：待机”）。</summary>
+        public string RecipeId = string.Empty;
+        /// <summary>固件刻录台：刻哪条固件（空 = 不选）。</summary>
+        public string BurnTarget = string.Empty;
     }
 
     /// <summary>FG4-ECO-02：一座生产建筑的运行状态（建筑本身的位置 / 朝向 / 电力在 <see cref="BuildingRecord"/>）。</summary>
@@ -511,6 +530,10 @@ namespace GameLogic.Campaign
         public long PumpedMl;
         /// <summary>脚下废墟拆完的通知已经发过（只发一次）。</summary>
         public bool RuinDepletedNotified;
+        /// <summary>FG4-ECO-03：固件刻录台要刻的固件（空 = 没选、待机）。</summary>
+        public string BurnTarget = string.Empty;
+        /// <summary>FG4-ECO-03：这座建筑的配方 / 刻录目标是新建时沿用的“上一次的设置”（面板写明；玩家改过就清掉）。</summary>
+        public bool Inherited;
     }
 
     /// <summary>FG4-ECO-02：拆到一半的废墟格。</summary>
@@ -1048,6 +1071,18 @@ namespace GameLogic.Campaign
                     r.FluidHandles ??= Array.Empty<int>();
                     r.FluidOut ??= Array.Empty<bool>();
                     r.FluidHeld ??= Array.Empty<long>();
+                    r.BurnTarget ??= string.Empty;
+                }
+            }
+            // FG4-ECO-03：装配站材料缓存、废料代付开关、配方记忆（旧存档没有 = 空 / 未设置）。
+            s.Economy.AssemblyBuffer ??= Array.Empty<ItemStackRecord>();
+            s.Economy.RecipeMemory ??= Array.Empty<RecipeMemoryRecord>();
+            foreach (RecipeMemoryRecord m in s.Economy.RecipeMemory)
+            {
+                if (m != null)
+                {
+                    m.RecipeId ??= string.Empty;
+                    m.BurnTarget ??= string.Empty;
                 }
             }
             s.Weather ??= new WeatherState();

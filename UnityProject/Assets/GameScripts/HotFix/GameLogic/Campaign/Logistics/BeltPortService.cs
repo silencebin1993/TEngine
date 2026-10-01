@@ -465,7 +465,8 @@ namespace GameLogic.Campaign.Logistics
                 string nameKey = FgContentTables.TryGetBuilding(b.BuildingTypeId, out GameConfig.fg.Building brow) ? brow.NameKey : null;
                 // FG4-ECO-01：家园仓库 / 核心的输入口收全部可存物品（缓存一次只放一种，入库时按种类；关闭 DEBT-FG3LOG03-02）。
                 // FG4-ECO-02：生产建筑的输入口只收当前配方要的那种固体（回收站收任何固体，一次一种；没选配方 = 不收）。
-                ushort accept = bind.Store ? BeltConst.AcceptAnyOneKind : bind.Prod ? Economy.ProductionService.SinkAcceptFor(state, b) : BeltConst.AcceptNone;
+                // FG4-ECO-03：多输入口的生产建筑按口分配配方里的固体；装配站的输入口收机器材料（收货集合）。
+                ushort accept = bind.Store ? BeltConst.AcceptAnyOneKind : bind.Prod ? Economy.ProductionService.SinkAcceptFor(state, b, row.Id) : BeltConst.AcceptNone;
                 r = BeltNetworkService.TryAddSink(state, id, bind.PortCell, SinkBuffer, 0, nameKey, 0, face, accept);
             }
             if (!r.Ok)
@@ -505,7 +506,7 @@ namespace GameLogic.Campaign.Logistics
             ushort item = 0;
             if (BeltNetworkService.Kernel.TryGetPortInfo(bind.PortId, out BeltPortInfo info))
             {
-                item = bind.IsOutput || info.Accept == BeltConst.AcceptAnyOneKind
+                item = bind.IsOutput || info.Accept == BeltConst.AcceptAnyOneKind || info.Accept == BeltConst.AcceptSet
                     ? info.ItemType
                     : (info.Accept != BeltConst.AcceptAny && info.Accept != BeltConst.AcceptNone ? info.Accept : BeltItems.ScrapId);
                 if (item == 0)
@@ -678,6 +679,7 @@ namespace GameLogic.Campaign.Logistics
             filter == FilterAll ? NextStocked(state, 0) == 0 : BeltItems.Stock(state, ItemForFilter(filter)) <= 0;
 
         /// <summary>FG4-ECO-01 读档迁移：FG3-LOG-03 起的存档里仓库输入口“只收废料”，改成“全部可存物品（一次一种）”；缓存里已有的件就是废料（内核迁移时记下）。
+        /// FG4-ECO-03：装配站输入口从“什么都不收”改成收机器材料。
         /// 每次重建索引后做一次，O(端口数)。</summary>
         private static void MigrateStoreAccept(BeltKernel k)
         {
@@ -687,6 +689,13 @@ namespace GameLogic.Campaign.Logistics
                 if (bind.Store && !bind.IsOutput && bind.PortId >= 0 && k.TryGetPortInfo(bind.PortId, out BeltPortInfo info) && info.Accept != BeltConst.AcceptAnyOneKind)
                 {
                     k.SetSinkAccept(bind.PortId, BeltConst.AcceptAnyOneKind);
+                }
+                // FG4-ECO-03 读档迁移：FG3-LOG-03 起的存档里装配站输入口“什么都不收”，改成收机器材料（收货集合）。
+                else if (bind.Prod && !bind.IsOutput && bind.PortId >= 0 && bind.PortKey != null
+                         && bind.PortKey.StartsWith(HomeValleyLayout.BuildingTypeAssemblyStation + ".", StringComparison.Ordinal)
+                         && k.TryGetPortInfo(bind.PortId, out BeltPortInfo ai) && ai.Accept != BeltConst.AcceptSet)
+                {
+                    k.SetSinkAccept(bind.PortId, BeltConst.AcceptSet);
                 }
             }
         }
@@ -811,8 +820,8 @@ namespace GameLogic.Campaign.Logistics
                 if (item == 0 && b.Prod && !b.IsOutput)
                 {
                     // FG4-ECO-02：生产建筑只收一种物品的输入口，内核不记种类：就是当前配方要的那种固体。
-                    item = Economy.ProductionService.SinkAcceptFor(state, HomeGridService.FindBuilding(state, b.BuildingId));
-                    if (item == BeltConst.AcceptNone || item == BeltConst.AcceptAnyOneKind)
+                    item = Economy.ProductionService.SinkAcceptFor(state, HomeGridService.FindBuilding(state, b.BuildingId), b.PortKey);
+                    if (item == BeltConst.AcceptNone || item == BeltConst.AcceptAnyOneKind || item == BeltConst.AcceptSet)
                     {
                         item = 0;
                     }
@@ -909,7 +918,7 @@ namespace GameLogic.Campaign.Logistics
                 if (v.Prod)
                 {
                     // FG4-ECO-02：生产建筑的口——输入口写收什么（当前配方 / 回收站任何固体 / 没选配方不收），输出口写推什么。
-                    v.AcceptLine = Economy.ProductionService.PortAcceptLine(state, b, v.IsOutput);
+                    v.AcceptLine = Economy.ProductionService.PortAcceptLine(state, b, v.IsOutput, row.Id);
                 }
                 else if (!v.Store)
                 {

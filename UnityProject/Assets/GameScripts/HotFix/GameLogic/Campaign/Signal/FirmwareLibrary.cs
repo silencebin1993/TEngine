@@ -604,6 +604,7 @@ namespace GameLogic.Campaign.Signal
             PrimitiveInventory.OriginSalvage => "fwlib.origin.salvage",
             PrimitiveInventory.OriginEncrypted => "fwlib.origin.encrypted",
             PrimitiveInventory.OriginCraft => "fwlib.origin.craft",
+            PrimitiveInventory.OriginBurn => "fwlib.origin.burn",
             _ => "fwlib.origin.unknown",
         });
 
@@ -645,12 +646,13 @@ namespace GameLogic.Campaign.Signal
         /// 出发点：离装配站最近的运转中的仓库；没有运转中的仓库时是归还核心（应急库）。结果按 firmware.library.route_cache_seconds 缓存（格网改动立即失效）。
         /// 装配工作单按它进入“等待物料”由 FG4-ECO-03 接入（DEBT-FG2FW05-01）。
         /// </summary>
-        public static FirmwareRouteInfo EvaluateRoute(CampaignState s, bool forceFresh = false)
+        public static FirmwareRouteInfo EvaluateRoute(CampaignState s, bool forceFresh = false, bool sim = false)
         {
-            long gridKey = HomeGridService.OccupancyRebuildCount + ((long)(s?.BuildingRecords?.Length ?? 0) << 32);
+            long gridKey = RouteKey(s);
             double now = Clock();
+            // sim = 模拟决策（装配站开工取料，FG4-ECO-03）：缓存只按格网 / 地形 / 施工版本失效，不看真实时钟——倍速下“路线通了”的判定与 1x 一致（FGR-BASE-021）。
             if (!forceFresh && _routeCache != null && ReferenceEquals(_routeState, s) && gridKey == _routeGridKey
-                && now - _routeAt < Math.Max(0.05, TuningFloat("firmware.library.route_cache_seconds", 1f)))
+                && (sim || now - _routeAt < Math.Max(0.05, TuningFloat("firmware.library.route_cache_seconds", 1f))))
             {
                 return _routeCache;
             }
@@ -706,6 +708,19 @@ namespace GameLogic.Campaign.Signal
             }
             info.Reach = NavService.ReachBetween(s, storage, station, info.StorageBlockers, info.StationBlockers, GameText.Get("fwlib.route.terrain"));
             return Remember(s, info, now, gridKey);
+        }
+
+        /// <summary>路线结果依赖的状态版本：格网占用重建、建筑数、地形改写（拆废墟 / 改地形）、施工状态（建成 / 规划）。任何一项变了缓存立即失效。</summary>
+        public static long RouteKey(CampaignState s)
+        {
+            unchecked
+            {
+                long h = HomeGridService.OccupancyRebuildCount;
+                h = h * 1000003L + (s?.BuildingRecords?.Length ?? 0);
+                h = h * 1000003L + (HomeGridService.BoundMap(s)?.TerrainEditRevision ?? 0);
+                h = h * 1000003L + Regions.HomeValleyConstruction.Revision;
+                return h;
+            }
         }
 
         private static FirmwareRouteInfo Remember(CampaignState s, FirmwareRouteInfo info, double now, long gridKey)

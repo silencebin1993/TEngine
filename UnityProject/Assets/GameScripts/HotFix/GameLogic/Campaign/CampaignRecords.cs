@@ -511,6 +511,28 @@ namespace GameLogic.Campaign
         /// 补齐先例）——"多订单按稳定队列顺序执行"需要一个不受 <see cref="CampaignState.NormalizeForSave"/>
         /// 按 <see cref="QueueItemId"/> 字典序排序影响的真实创建顺序，落盘保证读档后 FIFO 顺序不变。</summary>
         public long CreatedTick;
+
+        // ── FG4-ECO-03：装配站从产线取料（FG04“机器 | 装配站 | 按蓝图（底盘、组件、模块、电子件）”）。旧存档的队列项 MaterialMode = false，照旧按废料事务结算。──
+        /// <summary>按材料结算（入队时锁定材料清单；开工时从装配站材料缓存 → 仓库取，缺的按设置用废料代付）。</summary>
+        public bool MaterialMode;
+        /// <summary>入队时锁定的材料清单（生产 = 蓝图全部材料；改造 = 新蓝图比旧蓝图多出来的材料）。</summary>
+        public ItemStackRecord[] Materials;
+        /// <summary>全部用废料代付时的废料价（生产 = 蓝图版本的废料价；改造 = 新旧废料价差额）。缺一部分材料时按废料当量比例折算。</summary>
+        public int ScrapPrice;
+        /// <summary>开工时实际取走的材料（取消 / 装配站被毁 / 出厂失败时退回仓库；完工时消耗）。</summary>
+        public ItemStackRecord[] Taken;
+        /// <summary>已经取过料（开工）。不能用 <see cref="Taken"/> 是否为 null 判断：存档往返后空数组与 null 不分。</summary>
+        public bool MaterialsTaken;
+        /// <summary>开工时用废料代付的数量（消费型事务 <see cref="SubstituteTxId"/>，退款同上）。</summary>
+        public int SubstituteScrap;
+        public string SubstituteTxId;
+        /// <summary>等待材料时各物品还差多少（面板 / 诊断显示；开工后清空）。</summary>
+        public ItemStackRecord[] Shortfall;
+        /// <summary>等待材料且废料代付也不够时：需要 / 现有的废料。</summary>
+        public int ScrapShortNeed;
+        public int ScrapShortHave;
+        /// <summary>路线被堵时那一句原因（与固件库详情页同一个判定与文字；开工后清空）。</summary>
+        public string RouteText;
     }
 
     /// <summary>ERD-EXP-001 RegionRecord。铸造外围和核心共用一条记录（同一 RegionId）。</summary>

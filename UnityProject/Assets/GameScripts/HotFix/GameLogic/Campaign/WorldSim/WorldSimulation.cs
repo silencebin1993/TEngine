@@ -153,6 +153,7 @@ namespace GameLogic.Campaign.WorldSim
             HomeValleySoftlockGuard.ResetSessionState();
             HomeValleyAlarms.ResetSessionState();
             HomeValleyCombatTargets.ResetSessionState();
+            HomeValleyFactory.ResetSessionState(); // FG4-ECO-03：装配站等料指纹与输入口堵塞提示按新会话重算
             WorldOutpostSystem.ResetSession();
             NavService.ResetCounters();
             ActiveChunkSet.Clear();

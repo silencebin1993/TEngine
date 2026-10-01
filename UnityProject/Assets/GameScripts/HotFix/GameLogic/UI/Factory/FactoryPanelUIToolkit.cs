@@ -5,6 +5,7 @@ using GameLogic.UI.Common;
 using GameLogic.Campaign;
 using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Content;
+using GameLogic.Campaign.Economy;
 using GameLogic.Campaign.Regions;
 using GameLogic.Stage;
 using TEngine;
@@ -40,6 +41,10 @@ namespace GameLogic.UI.Factory
         private Button _produceHauler;
         private Button _produceHover;
         private Label _produceHint;
+        private Label _materialsLabel;
+        private Toggle _substituteToggle;
+        private Label _substituteNote;
+        private Label _bufferLabel;
         private ScrollView _list;
         private Label _emptyLabel;
         private Label _detailText;
@@ -99,6 +104,10 @@ namespace GameLogic.UI.Factory
             _produceHauler = _root.Q<Button>("ProduceBtn_Hauler");
             _produceHover = _root.Q<Button>("ProduceBtn_Hover");
             _produceHint = _root.Q<Label>("ProduceHintLabel");
+            _materialsLabel = _root.Q<Label>("MaterialsLabel");
+            _substituteToggle = _root.Q<Toggle>("SubstituteToggle");
+            _substituteNote = _root.Q<Label>("SubstituteNote");
+            _bufferLabel = _root.Q<Label>("BufferLabel");
             _list = _root.Q<ScrollView>("QueueList");
             _emptyLabel = _root.Q<Label>("QueueEmptyLabel");
             _detailText = _root.Q<Label>("DetailText");
@@ -118,6 +127,8 @@ namespace GameLogic.UI.Factory
             _produceHauler.clicked += () => OnProduceClicked(HomeValleyLayout.BlueprintHaulerId);
             _produceHover.clicked += () => OnProduceClicked(HomeValleyLayout.BlueprintHoverId);
             _cancelButton.clicked += OnCancelClicked;
+            // FG4-ECO-03：“缺材料时用废料代付”（勾选即生效，跟存档走）。
+            _substituteToggle.RegisterValueChangedCallback(evt => SetScrapSubstitute(evt.newValue));
             _closeButton.clicked += () => GameRoot.HomeValley?.SetFactoryPanelOpen(false);
 
             _retrofitTargetDropdown.RegisterValueChangedCallback(_ => RefreshRetrofitVersions(CampaignSession.Current));
@@ -178,6 +189,7 @@ namespace GameLogic.UI.Factory
 
             CampaignState state = CampaignSession.Current;
             RefreshProduceButtons(state);
+            RefreshMaterials(state);
             RefreshQueueList(state);
             RefreshDetail(state);
             RefreshExitStatus(state);
@@ -211,9 +223,58 @@ namespace GameLogic.UI.Factory
         {
             HomeValleyLayout.FactoryProduceDefaults.TryGetValue(blueprintId, out HomeValleyLayout.ProduceBlueprintDefault def);
             bool unlocked = state != null && HomeValleyFactory.IsBlueprintUnlocked(state, blueprintId);
-            button.text = $"{def.DisplayName}｜{def.ScrapCost}废料/{def.Seconds:F0}秒";
+            // FG4-ECO-03：机器按蓝图的材料造（材料清单写在按钮下面），按钮只写名字与时间。
+            button.text = GameLogic.Localization.GameText.Format("asm.panel.produce_btn", def.DisplayName, def.Seconds.ToString("0"));
             button.SetEnabled(unlocked);
         }
+
+        /// <summary>FG4-ECO-03：三张蓝图（当前版本）要的材料、装配站缓存与仓库各有多少；全部代付的废料价；代付开关与材料缓存。</summary>
+        private void RefreshMaterials(CampaignState state)
+        {
+            if (state == null || _materialsLabel == null)
+            {
+                return;
+            }
+            HomeValleyFactory.EnsureBlueprintsSeeded(state);
+            var sb = new System.Text.StringBuilder(256);
+            foreach (string id in new[] { HomeValleyLayout.BlueprintErc003Id, HomeValleyLayout.BlueprintHaulerId, HomeValleyLayout.BlueprintHoverId })
+            {
+                BlueprintRecord bp = BlueprintEditorService.Find(state, id);
+                BlueprintVersionRecord v = bp?.Versions?.FirstOrDefault(x => x.Version == bp.ActiveVersion);
+                if (v == null)
+                {
+                    continue;
+                }
+                if (sb.Length > 0)
+                {
+                    sb.Append('\n');
+                }
+                sb.Append(GameLogic.Localization.GameText.Format("asm.panel.materials_of", ResolveBlueprintDisplayName(id),
+                    AssemblyMaterials.DescribeMaterials(state, AssemblyMaterials.For(v))));
+                sb.Append(' ').Append(GameLogic.Localization.GameText.Format("asm.panel.all_scrap", v.ScrapCost));
+            }
+            _materialsLabel.text = sb.ToString();
+            bool on = AssemblyMaterials.ScrapSubstitute(state);
+            _substituteToggle.label = GameLogic.Localization.GameText.Get("asm.panel.sub_toggle");
+            _substituteToggle.SetValueWithoutNotify(on);
+            _substituteNote.text = GameLogic.Localization.GameText.Get(on ? "asm.panel.sub_on" : "asm.panel.sub_off");
+            _bufferLabel.text = GameLogic.Localization.GameText.Format("asm.panel.buffer", AssemblyMaterials.DescribeStacks(AssemblyMaterials.Buffer(state)));
+        }
+
+        /// <summary>FG4-ECO-03：改“缺材料时用废料代付”（控件与自检同一入口）。</summary>
+        public void SetScrapSubstitute(bool on)
+        {
+            AssemblyMaterials.SetScrapSubstitute(CampaignSession.Current, on);
+            Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.CommandAck, GameLogic.Localization.GameText.Get(on ? "asm.panel.sub_on" : "asm.panel.sub_off"));
+            RefreshMaterials(CampaignSession.Current);
+        }
+
+        // ── 自检读点（FG4-ECO-03）──
+        public string MaterialsText => _materialsLabel?.text ?? string.Empty;
+        public string SubstituteNoteText => _substituteNote?.text ?? string.Empty;
+        public string BufferText => _bufferLabel?.text ?? string.Empty;
+        public Toggle SubstituteToggle => _substituteToggle;
+        public string DetailTextValue => _detailText?.text ?? string.Empty;
 
         private void OnProduceClicked(string blueprintId)
         {
@@ -264,7 +325,7 @@ namespace GameLogic.UI.Factory
                 ContentIcons.Apply(row.Q<VisualElement>("Icon"), ResolveRowChassisId(item));
                 row.Q<Label>("State").text = QueueText.FactoryState(item.State);
                 row.Q<Label>("Progress").text = item.Duration > 0f ? $"{item.Progress:F0}/{item.Duration:F0}s" : string.Empty;
-                row.Q<Label>("Reason").text = QueueText.Reason(item.BlockedReason);
+                row.Q<Label>("Reason").text = HomeValleyFactory.DescribeWait(item) ?? QueueText.Reason(item.BlockedReason);
             }
         }
 
@@ -300,12 +361,19 @@ namespace GameLogic.UI.Factory
                 return;
             }
 
-            string reasonLine = string.IsNullOrEmpty(item.BlockedReason) ? string.Empty : $"\n原因：{item.BlockedReason}";
+            string reasonLine = string.IsNullOrEmpty(item.BlockedReason) ? string.Empty
+                : $"\n原因：{HomeValleyFactory.DescribeWait(item) ?? QueueText.Reason(item.BlockedReason)}";
+            // FG4-ECO-03：这一项的材料（已取 / 代付的废料），缺什么写在原因里。
+            string materialLine = !item.MaterialMode ? string.Empty
+                : item.MaterialsTaken
+                    ? "\n" + GameLogic.Localization.GameText.Format("asm.panel.taken", AssemblyMaterials.DescribeStacks(item.Taken), item.SubstituteScrap)
+                    : "\n" + GameLogic.Localization.GameText.Format("asm.panel.materials_of", ResolveBlueprintDisplayName(item.BlueprintId),
+                        AssemblyMaterials.DescribeMaterials(state, item.Materials));
             string targetLine = item.Kind == FactoryQueueKind.Retrofit
                 ? MachineRegistry.TryGetRecord(item.TargetMachineLogicId, out MachineRecord tgt) ? $"\n目标：#{tgt.DisplayNumber}" : "\n目标：（已不存在）"
                 : string.Empty;
             _detailText.text = $"{(item.Kind == FactoryQueueKind.Retrofit ? "改造" : "生产")}：{ResolveBlueprintDisplayName(item.BlueprintId)} v{item.BlueprintVersion}" +
-                $"{targetLine}\n状态：{item.State}\n进度：{item.Progress:F0}/{item.Duration:F0}秒{reasonLine}";
+                $"{targetLine}\n状态：{QueueText.FactoryState(item.State)}\n进度：{item.Progress:F0}/{item.Duration:F0}秒{reasonLine}{materialLine}";
             _cancelButton.SetEnabled(item.State == FactoryQueueState.Queued || item.State == FactoryQueueState.WaitingResources
                 || item.State == FactoryQueueState.WaitingPower || item.State == FactoryQueueState.WaitingTarget
                 || item.State == FactoryQueueState.Running);
@@ -412,9 +480,8 @@ namespace GameLogic.UI.Factory
             RefreshRetrofitPreview(state);
         }
 
-        /// <summary>"显示旧/新装配及资源差额"——与 <see cref="HomeValleyFactory.TryEnqueueRetrofit"/> 内部
-        /// 计算成本的公式完全一致（正差额且下限 <see cref="HomeValleyFactory.RetrofitMinScrapCost"/>），
-        /// 预览与实际扣费不能是两套数字。</summary>
+        /// <summary>"显示旧/新装配及资源差额"——与 <see cref="HomeValleyFactory.TryEnqueueRetrofit"/> 共用
+        /// <see cref="HomeValleyFactory.PriceRetrofit"/>（全部用废料总价 = max(最低改造费, 差额)），预览与实际扣费不能是两套数字。</summary>
         private void RefreshRetrofitPreview(CampaignState state)
         {
             int targetIndex = _retrofitTargetDropdown.index;
@@ -446,10 +513,14 @@ namespace GameLogic.UI.Factory
                 return;
             }
 
-            int cost = System.Math.Max(HomeValleyFactory.RetrofitMinScrapCost, newVersion.ScrapCost - oldVersion.ScrapCost);
-            _retrofitPreviewLabel.text = $"旧装配 v{oldVersion.Version}（{oldVersion.ScrapCost}废料｜热量{oldVersion.HeatBudget:F0}）→ " +
-                $"新装配 v{newVersion.Version}（{newVersion.ScrapCost}废料｜热量{newVersion.HeatBudget:F0}）\n" +
-                $"改造费用：{cost}废料｜{HomeValleyFactory.RetrofitDurationSeconds:F0}秒";
+            // FG4-ECO-03：改造补新旧蓝图之间多出来的材料 + 工时费；与入队同一个定价函数（预览与实际扣费不会是两套数字）。
+            HomeValleyFactory.RetrofitPrice price = HomeValleyFactory.PriceRetrofit(oldVersion, newVersion);
+            _retrofitPreviewLabel.text = GameLogic.Localization.GameText.Format("asm.panel.retrofit_versions",
+                    oldVersion.Version, oldVersion.ScrapCost, oldVersion.HeatBudget.ToString("F0"),
+                    newVersion.Version, newVersion.ScrapCost, newVersion.HeatBudget.ToString("F0")) + "\n" +
+                GameLogic.Localization.GameText.Format("asm.panel.retrofit_materials",
+                    AssemblyMaterials.DescribeMaterials(state, price.Materials), price.Fee) + "\n" +
+                GameLogic.Localization.GameText.Format("asm.panel.retrofit_total", price.Total, HomeValleyFactory.RetrofitDurationSeconds.ToString("F0"));
             _retrofitConfirmButton.SetEnabled(true);
         }
 

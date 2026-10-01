@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Content;
+using GameLogic.Campaign.Economy;
 
 namespace GameLogic.Campaign.Regions
 {
@@ -32,7 +33,15 @@ namespace GameLogic.Campaign.Regions
     /// 时，先查是否已有占用者——占用中则转 <see cref="FactoryQueueState.OutputBlocked"/>，**不**在此刻
     /// 生成机器（避免同时并存两个"完成体"）；占用者被玩家实际给出第一条命令后
     /// （<see cref="ReleaseFromFactory"/>，由 <see cref="HomeValleyController"/> 的移动下令入口调用）
-    /// 视为"驶出"，出口转空，<see cref="Tick"/> 下一帧即让本项真正生成机器、转 Completed。</summary>
+    /// 视为"驶出"，出口转空，<see cref="Tick"/> 下一帧即让本项真正生成机器、转 Completed。
+    ///
+    /// ── FG4-ECO-03：从产线取料（改造而非重写本状态机）──
+    /// 新排的生产 / 改造项 <see cref="FactoryQueueItemRecord.MaterialMode"/> = true：入队时锁定材料清单（蓝图的底盘、组件、模块、电子件，
+    /// <see cref="AssemblyMaterials.For"/>；改造 = 新旧差额）与废料价，不再在入队时登记废料事务。成为队首、装配站有电时调用
+    /// <see cref="AssemblyMaterials.TryTake"/>：先从装配站材料缓存（西侧输入口的传送带送来）、再从仓库（路线通畅时）取，全有或全无；
+    /// 缺的按“缺材料时用废料代付”设置用废料补（全部代付 = 废料价，与 Demo 的价格一致），否则停在“缺材料”并写明缺什么、差多少。
+    /// 取走的材料记在队列项上：取消 / 装配站被毁 / 出厂失败退回仓库，完工时消耗。旧存档里的队列项（MaterialMode = false）照旧按废料事务结算。
+    /// 断电、出口独占、FIFO、改造的目标核验都沿用原来的状态与转移。</summary>
     public static class HomeValleyFactory
     {
         public readonly struct FactoryOpResult
@@ -160,6 +169,8 @@ namespace GameLogic.Campaign.Regions
             if (reason.StartsWith("cannot-cancel-from:", StringComparison.Ordinal)) return "这一项已经完成或出厂，不能取消";
             switch (reason)
             {
+                case ReasonMaterials: return GameLogic.Localization.GameText.Get("asm.state.waiting_materials");
+                case ReasonRoute: return GameLogic.Localization.GameText.Get("asm.state.waiting_materials");
                 case "target-not-alive": return "这台机器已阵亡";
                 case "target-not-in-home-valley": return "这台机器不在归还谷地（远征中）";
                 case "target-occupying-factory-exit": return "这台机器正停在装配站出口，先让它驶离";
@@ -240,9 +251,8 @@ namespace GameLogic.Campaign.Regions
             }
 
             string queueItemId = blueprintId + ":produce:" + Guid.NewGuid().ToString("N").Substring(0, 8);
-            string txId = queueItemId + ":tx";
-            CampaignEconomyLedger.ProposeConsume(state, txId, queueItemId, CampaignEconomyLedger.ResourceScrap, version.ScrapCost);
 
+            // FG4-ECO-03：按材料结算——入队时锁定这个版本的材料清单与废料价（全部代付 = 废料价），开工时从装配站材料缓存 / 仓库取料（AssemblyMaterials.TryTake）。
             var item = new FactoryQueueItemRecord
             {
                 QueueItemId = queueItemId,
@@ -250,12 +260,15 @@ namespace GameLogic.Campaign.Regions
                 BlueprintId = blueprintId,
                 BlueprintVersion = version.Version,
                 TargetMachineLogicId = 0,
-                TransactionId = txId,
+                TransactionId = null,
                 Duration = def.Seconds,
                 Progress = 0f,
                 State = FactoryQueueState.Queued,
                 BlockedReason = null,
                 CreatedTick = NextCreatedTick(state),
+                MaterialMode = true,
+                Materials = AssemblyMaterials.For(version),
+                ScrapPrice = Math.Max(0, version.ScrapCost),
             };
             Append(state, item);
             return FactoryOpResult.Ok(queueItemId);
@@ -332,12 +345,17 @@ namespace GameLogic.Campaign.Regions
 
             BlueprintRecord currentBp = state.BlueprintRecords?.FirstOrDefault(b => b.BlueprintId == machine.BlueprintId);
             BlueprintVersionRecord currentVersion = currentBp?.Versions?.FirstOrDefault(v => v.Version == machine.BlueprintVersion);
-            int currentCost = currentVersion?.ScrapCost ?? 0;
-            int cost = Math.Max(RetrofitMinScrapCost, newVersion.ScrapCost - currentCost);
+            // FG4-ECO-03：改造只补新蓝图比旧蓝图多出来的材料（材料那一份的废料价 = 全部代付的价），其余按工时费收废料；
+            // 全部用废料时总价恒为 Demo 的 max(最低改造费, 新旧废料价差额)——见 PriceRetrofit（预览与入队同一函数）。
+            RetrofitPrice price = PriceRetrofit(currentVersion, newVersion);
+            int cost = price.Fee;
 
             string queueItemId = blueprintId + ":retrofit:" + Guid.NewGuid().ToString("N").Substring(0, 8);
-            string txId = queueItemId + ":tx";
-            CampaignEconomyLedger.ProposeConsume(state, txId, queueItemId, CampaignEconomyLedger.ResourceScrap, cost);
+            string txId = cost > 0 ? queueItemId + ":tx" : null;
+            if (txId != null)
+            {
+                CampaignEconomyLedger.ProposeConsume(state, txId, queueItemId, CampaignEconomyLedger.ResourceScrap, cost);
+            }
 
             var item = new FactoryQueueItemRecord
             {
@@ -352,6 +370,9 @@ namespace GameLogic.Campaign.Regions
                 State = FactoryQueueState.Queued,
                 BlockedReason = null,
                 CreatedTick = NextCreatedTick(state),
+                MaterialMode = true,
+                Materials = price.Materials,
+                ScrapPrice = price.MaterialPrice,
             };
             Append(state, item);
             return FactoryOpResult.Ok(queueItemId);
@@ -381,8 +402,11 @@ namespace GameLogic.Campaign.Regions
             {
                 CampaignEconomyLedger.Cancel(state, item.TransactionId);
             }
+            // FG4-ECO-03：已开工的那一项取走的材料退回仓库、代付的废料退回。
+            AssemblyMaterials.Refund(state, item, "cancel");
             item.State = FactoryQueueState.Cancelled;
             item.BlockedReason = null;
+            item.Shortfall = null;
             return FactoryOpResult.Ok(queueItemId);
         }
 
@@ -394,6 +418,125 @@ namespace GameLogic.Campaign.Regions
             {
                 record.IsInFactory = false;
                 Combat.CombatSites.SyncFactoryState(record); // FG0-ARCH-03：驶出工厂后才参与自动交战（内核标志）。
+            }
+        }
+
+        /// <summary>FG4-ECO-03：等待材料（材料不齐、代付关着或废料不够）的原因码；详情在 <see cref="FactoryQueueItemRecord.Shortfall"/>。</summary>
+        public const string ReasonMaterials = "assembly-materials";
+        /// <summary>FG4-ECO-03：材料在仓库里，但仓库到装配站的路线被堵（DEBT-FG2FW05-01）；详情在 <see cref="FactoryQueueItemRecord.RouteText"/>。</summary>
+        public const string ReasonRoute = "assembly-route";
+
+        /// <summary>一次回厂改造的价钱（<see cref="PriceRetrofit"/>）。</summary>
+        public struct RetrofitPrice
+        {
+            /// <summary>要补的材料（新蓝图比旧蓝图多出来的部分；同部位换组件、只换固件时为空）。</summary>
+            public ItemStackRecord[] Materials;
+            /// <summary>这些材料那一份的废料价（缺料全部代付时付这么多；材料从产线来就不付）。</summary>
+            public int MaterialPrice;
+            /// <summary>工时费（废料，入队时登记事务）= <see cref="Total"/> − <see cref="MaterialPrice"/>。</summary>
+            public int Fee;
+            /// <summary>全部用废料时的总价 = max(最低改造费, 新旧废料价差额)，与 Demo 一致。</summary>
+            public int Total;
+            public int PriceDiff;
+        }
+
+        /// <summary>
+        /// FG4-ECO-03 回厂改造定价（入队与面板预览共用，不会是两套数字）：
+        /// 总价 = max(<see cref="RetrofitMinScrapCost"/>, 新旧废料价差额)；其中材料差额那一份的废料价按“差额材料的废料当量 ÷ 新蓝图全部材料的废料当量 × 新蓝图废料价”折算
+        /// （向下取整，不超过差额），其余（同部位换更贵的组件、换固件这类材料表不区分的差价，以及最低工时）都算工时费。
+        /// 所以材料从产线来时只省下材料那一份；材料差额为空时整笔按废料收。
+        /// </summary>
+        public static RetrofitPrice PriceRetrofit(BlueprintVersionRecord from, BlueprintVersionRecord to)
+        {
+            int toCost = Math.Max(0, to?.ScrapCost ?? 0);
+            int priceDiff = Math.Max(0, toCost - Math.Max(0, from?.ScrapCost ?? 0));
+            ItemStackRecord[] mats = AssemblyMaterials.RetrofitDiff(from, to);
+            int matPrice = AssemblyMaterials.PriceShare(AssemblyMaterials.For(to), mats, toCost, priceDiff);
+            int total = Math.Max(RetrofitMinScrapCost, priceDiff);
+            return new RetrofitPrice { Materials = mats, MaterialPrice = matPrice, Fee = Math.Max(0, total - matPrice), Total = total, PriceDiff = priceDiff };
+        }
+
+        /// <summary>等待材料 / 路线被堵的玩家文字（队列行、详情、“为什么不工作”共用）；不是这两种原因时返回 null（走 <see cref="DescribeFailure"/>）。</summary>
+        public static string DescribeWait(FactoryQueueItemRecord item)
+        {
+            if (item == null)
+            {
+                return null;
+            }
+            if (item.BlockedReason == ReasonMaterials)
+            {
+                return AssemblyMaterials.DescribeShortfall(item);
+            }
+            if (item.BlockedReason == ReasonRoute)
+            {
+                return GameLogic.Localization.GameText.Format("asm.reason.route", item.RouteText ?? string.Empty);
+            }
+            return null;
+        }
+
+        private static string _waitSigItem;
+        private static long _waitSig;
+
+        /// <summary>
+        /// 取料结果依赖的状态的指纹（相同 = 取料结果必然相同，跳过；零分配，O(材料种类)）：本项要的每种材料在装配站缓存 / 仓库里各有多少、
+        /// 代付开关与“够不够代付”（废料只看到废料价为止）、路线版本（格网占用、建筑数、地形改写、施工状态，<see cref="Signal.FirmwareLibrary.RouteKey"/>）、废料价、材料表版本。
+        /// 只看本项要的材料：产线往仓库交别的货不会让等料的队首每帧重新取料一遍（审查 P2）。
+        /// </summary>
+        private static long WaitSignature(CampaignState state, FactoryQueueItemRecord item)
+        {
+            unchecked
+            {
+                long h = 17;
+                ItemStackRecord[] need = item.Materials;
+                if (need != null)
+                {
+                    ItemStackRecord[] buf = state.Economy?.AssemblyBuffer;
+                    for (int i = 0; i < need.Length; i++)
+                    {
+                        string id = need[i]?.ItemId;
+                        if (id == null)
+                        {
+                            continue;
+                        }
+                        h = h * 31 + Economy.ProductionService.Count(buf, id);
+                        h = h * 31 + Economy.HomeInventory.Stock(state, id);
+                    }
+                }
+                bool substitute = AssemblyMaterials.ScrapSubstitute(state);
+                h = h * 31 + (substitute ? 1 : 2);
+                h = h * 31 + (substitute ? Math.Min(Math.Max(0, state.Scrap), item.ScrapPrice + 1) : 0);
+                h = h * 31 + Signal.FirmwareLibrary.RouteKey(state);
+                h = h * 31 + item.ScrapPrice;
+                h = h * 31 + AssemblyMaterials.Revision;
+                return h;
+            }
+        }
+
+        /// <summary>换战役 / 读档时清掉等待指纹（下一步照常重试一次取料）；由 <see cref="WorldSim.WorldSimulation.ResetSessionState"/> 调用。</summary>
+        public static void ResetSessionState()
+        {
+            _waitSigItem = null;
+            _waitSig = 0;
+            AssemblyMaterials.ResetSessionState();
+        }
+
+        private static void CancelLedger(CampaignState state, FactoryQueueItemRecord item)
+        {
+            if (!string.IsNullOrEmpty(item.TransactionId))
+            {
+                CampaignEconomyLedger.Cancel(state, item.TransactionId);
+            }
+        }
+
+        private static void CommitLedger(CampaignState state, FactoryQueueItemRecord item)
+        {
+            if (!string.IsNullOrEmpty(item.TransactionId))
+            {
+                CampaignEconomyLedger.Commit(state, item.TransactionId);
+            }
+            if (item.MaterialMode)
+            {
+                AssemblyMaterials.Consume(state, item);
             }
         }
 
@@ -427,6 +570,7 @@ namespace GameLogic.Campaign.Regions
                     {
                         CampaignEconomyLedger.Cancel(state, it.TransactionId);
                     }
+                    AssemblyMaterials.Refund(state, it, "destroyed"); // FG4-ECO-03：取走的材料退回仓库（放不下落地），不丢、不复制。
                     it.State = FactoryQueueState.Failed;
                     it.BlockedReason = "assembly-station-destroyed";
                 }
@@ -477,7 +621,8 @@ namespace GameLogic.Campaign.Regions
                 {
                     item.State = FactoryQueueState.Failed;
                     item.BlockedReason = "target-lost";
-                    CampaignEconomyLedger.Cancel(state, item.TransactionId);
+                    CancelLedger(state, item);
+                    AssemblyMaterials.Refund(state, item, "target-lost");
                     return;
                 }
                 if (target.RegionId != HomeValleyLayout.RegionId)
@@ -522,15 +667,60 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
-            CampaignEconomyLedger.LedgerResult reserve = CampaignEconomyLedger.Reserve(state, item.TransactionId);
-            if (!reserve.Success)
+            if (item.MaterialMode && item.MaterialsTaken)
             {
-                item.State = FactoryQueueState.WaitingResources;
-                item.BlockedReason = reserve.FailureReason;
+                // FG4-ECO-03：已经取过料（开工后断电又来电）：直接接着做，不重复取料。
+                item.State = FactoryQueueState.Running;
+                item.BlockedReason = null;
                 return;
             }
 
-            CampaignEconomyLedger.MarkRunning(state, item.TransactionId);
+            if (!string.IsNullOrEmpty(item.TransactionId))
+            {
+                CampaignEconomyLedger.LedgerResult reserve = CampaignEconomyLedger.Reserve(state, item.TransactionId);
+                if (!reserve.Success)
+                {
+                    item.State = FactoryQueueState.WaitingResources;
+                    item.BlockedReason = reserve.FailureReason;
+                    return;
+                }
+            }
+
+            if (item.MaterialMode)
+            {
+                // FG4-ECO-03：从装配站材料缓存 → 仓库取料（全有或全无；路线被堵时不从仓库取），缺的按设置用废料代付。
+                // 等待中的项每个模拟步都会来这里：取料涉及的状态（库存版本、废料、代付开关、格网占用、电力）都没变时结果必然相同，直接跳过（零分配）。
+                long sig = WaitSignature(state, item);
+                if (item.State == FactoryQueueState.WaitingResources && _waitSigItem == item.QueueItemId && _waitSig == sig)
+                {
+                    return;
+                }
+                AssemblyMaterials.TakeResult take = AssemblyMaterials.TryTake(state, item, out string routeText);
+                if (take != AssemblyMaterials.TakeResult.Taken)
+                {
+                    string reason = take == AssemblyMaterials.TakeResult.RouteBlocked ? ReasonRoute : ReasonMaterials;
+                    bool newlyRouteBlocked = reason == ReasonRoute && item.BlockedReason != ReasonRoute;
+                    item.State = FactoryQueueState.WaitingResources;
+                    item.BlockedReason = reason;
+                    item.RouteText = routeText;
+                    if (newlyRouteBlocked)
+                    {
+                        // DEBT-FG2FW05-01：路线被堵时，队列与通知写同一句原因（可定位到装配站）。
+                        Feedback.FeedbackCues.RaiseLocatedIfKnown(Feedback.FeedbackCueId.Denied,
+                            Feedback.FeedbackCues.BuildingPositionOfType(state, HomeValleyLayout.BuildingTypeAssemblyStation), DescribeWait(item));
+                    }
+                    _waitSigItem = item.QueueItemId;
+                    _waitSig = sig;
+                    return;
+                }
+                item.RouteText = null;
+                _waitSigItem = null;
+            }
+
+            if (!string.IsNullOrEmpty(item.TransactionId))
+            {
+                CampaignEconomyLedger.MarkRunning(state, item.TransactionId);
+            }
             item.State = FactoryQueueState.Running;
             item.BlockedReason = null;
         }
@@ -574,7 +764,8 @@ namespace GameLogic.Campaign.Regions
             {
                 item.State = FactoryQueueState.Failed;
                 item.BlockedReason = "target-lost";
-                CampaignEconomyLedger.Cancel(state, item.TransactionId);
+                CancelLedger(state, item);
+                AssemblyMaterials.Refund(state, item, "target-lost");
                 Feedback.FeedbackCues.RaiseLocatedIfKnown(Feedback.FeedbackCueId.Failure,
                     Feedback.FeedbackCues.BuildingPositionOfType(state, HomeValleyLayout.BuildingTypeAssemblyStation), "改造失败：目标机器已不在场，已退还材料");
                 return;
@@ -586,7 +777,8 @@ namespace GameLogic.Campaign.Regions
             {
                 item.State = FactoryQueueState.Failed;
                 item.BlockedReason = "blueprint-version-missing";
-                CampaignEconomyLedger.Cancel(state, item.TransactionId);
+                CancelLedger(state, item);
+                AssemblyMaterials.Refund(state, item, "version-missing");
                 return;
             }
 
@@ -601,7 +793,7 @@ namespace GameLogic.Campaign.Regions
                 TEngine.Log.Warning($"[HomeValleyFactory] 机器 {machine.LogicId} 改造后装配登记失败：{loadoutRegister.Message}");
             }
 
-            CampaignEconomyLedger.Commit(state, item.TransactionId);
+            CommitLedger(state, item);
             item.State = FactoryQueueState.Completed;
             item.BlockedReason = null;
 
@@ -634,7 +826,8 @@ namespace GameLogic.Campaign.Regions
             {
                 item.State = FactoryQueueState.Failed;
                 item.BlockedReason = "unknown-blueprint";
-                CampaignEconomyLedger.Cancel(state, item.TransactionId);
+                CancelLedger(state, item);
+                AssemblyMaterials.Refund(state, item, "unknown-blueprint");
                 return;
             }
 
@@ -664,7 +857,8 @@ namespace GameLogic.Campaign.Regions
             {
                 item.State = FactoryQueueState.Failed;
                 item.BlockedReason = $"spawn-failed:{spawn.Error}";
-                CampaignEconomyLedger.Cancel(state, item.TransactionId);
+                CancelLedger(state, item);
+                AssemblyMaterials.Refund(state, item, "spawn-failed");
                 Feedback.FeedbackCues.RaiseLocatedIfKnown(Feedback.FeedbackCueId.Failure,
                     Feedback.FeedbackCues.BuildingPositionOfType(state, HomeValleyLayout.BuildingTypeAssemblyStation), "生产失败，已退还材料");
                 return;
@@ -692,10 +886,16 @@ namespace GameLogic.Campaign.Regions
                 TEngine.Log.Warning($"[HomeValleyFactory] 机器 {spawn.LogicId} 装配登记失败：{loadoutRegister.Message}");
             }
 
-            CampaignEconomyLedger.Commit(state, item.TransactionId);
+            bool fromLine = item.MaterialMode && item.SubstituteScrap <= 0;
+            CommitLedger(state, item);
             item.TargetMachineLogicId = spawn.LogicId;
             item.State = FactoryQueueState.Completed;
             item.BlockedReason = null;
+            if (fromLine)
+            {
+                // FG4-ECO-03：第一次完全用产线材料（没有废料代付）造出机器——图鉴“装配站”解锁 + 引导钩子（内容在 FG15-UX-04）。
+                Core.GuidanceHooks.Raise(Core.GuidanceHooks.EconomyAssemblyFirstLineMachine);
+            }
 
             // ER8-CONTENT-01 AC-AUD-001 生产：出厂那一刻（唯一完成点）出声与字幕，音色取装配站
             // BuildingCatalog.SfxId。

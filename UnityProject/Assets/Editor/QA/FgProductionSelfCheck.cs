@@ -219,7 +219,7 @@ namespace GameLogic.EditorTools
 
         // ── 家园工具 ─────────────────────────────────────────────────────────────────
 
-        private static CampaignState NewWorld(int seed, bool observe = true, int scrap = 300)
+        internal static CampaignState NewWorld(int seed, bool observe = true, int scrap = 300)
         {
             WorldSimulation.UnloadAll();
             GameClock.ResetSession();
@@ -240,7 +240,7 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>每 1/4 游戏秒走一次，并记下每座生产建筑此刻的状态（P 段核对“每座建筑的各个状态都触发过”）。</summary>
-        private static bool StepUntil(Func<bool> done, int maxGameSeconds)
+        internal static bool StepUntil(Func<bool> done, int maxGameSeconds)
         {
             for (int i = 0; i < maxGameSeconds * 4; i++)
             {
@@ -255,7 +255,7 @@ namespace GameLogic.EditorTools
             return done();
         }
 
-        private static void Seconds(float s)
+        internal static void Seconds(float s)
         {
             int total = Mathf.RoundToInt(GameClock.StepHz * s);
             int quarter = Math.Max(1, GameClock.StepHz / 4);
@@ -277,7 +277,7 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>测试捷径：开局的发电机修好 + 核心旁一座发电机 2，保证测试用的生产建筑有电（电网本身由 FG3-LOG-06 覆盖）。</summary>
-        private static void PowerUp(CampaignState s)
+        internal static void PowerUp(CampaignState s)
         {
             if (HomeGridService.FindBuilding(s, HomeValleyLayout.RegionId + ":fgprod_gen2") != null)
             {
@@ -299,7 +299,7 @@ namespace GameLogic.EditorTools
             HomeValleyPowerGrid.Recompute(s);
         }
 
-        private static GridCell? FindFree(CampaignState s, string typeId, float fromCore, float toCore)
+        internal static GridCell? FindFree(CampaignState s, string typeId, float fromCore, float toCore)
         {
             GridCell core = HomeGridService.CorePivot(s);
             for (int a = 0; a < 72; a++)
@@ -318,7 +318,7 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>核心附近一块 w×h 的空地（每格都能放一座 1×1 建筑、能铺传送带 / 管线），返回左下角。按种子地形找，不写死坐标（B25）。</summary>
-        private static GridCell? FindArea(CampaignState s, int w, int h, float fromCore = 9f, float toCore = 24f)
+        internal static GridCell? FindArea(CampaignState s, int w, int h, float fromCore = 9f, float toCore = 24f)
         {
             GridCell core = HomeGridService.CorePivot(s);
             for (int r = (int)fromCore; r <= (int)toCore; r++)
@@ -354,7 +354,7 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>测试捷径：直接登记一座已建成的建筑（施工流程由 FG3-LOG-02 与本段 N 的真实入口覆盖），然后让电网 / 端口 / 生产对账跟上。</summary>
-        private static BuildingRecord Built(CampaignState s, string typeId, string key, GridCell pivot, int rotation = 0)
+        internal static BuildingRecord Built(CampaignState s, string typeId, string key, GridCell pivot, int rotation = 0)
         {
             BuildingGrid g = GridContent.Building(typeId);
             HomeValleyLayout.PowerProfile.TryGetValue(typeId, out (float PowerDemand, int PowerPriority) prof);
@@ -381,15 +381,15 @@ namespace GameLogic.EditorTools
             return r;
         }
 
-        private static void Resync(CampaignState s)
+        internal static void Resync(CampaignState s)
         {
             BeltPortService.Sync(s);
             ProductionService.Sync(s, force: true);
         }
 
-        private static void SetTerrain(CampaignState s, GridCell c, string terrain) => HomeGridService.MapFor(s).SetTerrain(c, GridContent.TerrainCode(terrain));
+        internal static void SetTerrain(CampaignState s, GridCell c, string terrain) => HomeGridService.MapFor(s).SetTerrain(c, GridContent.TerrainCode(terrain));
 
-        private static void SetFootprint(CampaignState s, string typeId, GridCell pivot, string terrain)
+        internal static void SetFootprint(CampaignState s, string typeId, GridCell pivot, string terrain)
         {
             BuildingGrid g = GridContent.Building(typeId);
             var cells = new List<GridCell>();
@@ -400,7 +400,7 @@ namespace GameLogic.EditorTools
             }
         }
 
-        private static bool Belts(CampaignState s, GridCell from, BeltDir dir, int len)
+        internal static bool Belts(CampaignState s, GridCell from, BeltDir dir, int len)
         {
             int dx = dir == BeltDir.East ? 1 : dir == BeltDir.West ? -1 : 0;
             int dy = dir == BeltDir.North ? 1 : dir == BeltDir.South ? -1 : 0;
@@ -413,14 +413,14 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>测试夹具：传送带格 <paramref name="cell"/> 末端正对的格上挂一个会自己消耗的输入端口（当作“下游的仓库”，物品一到就收走）。</summary>
-        private static int TestSink(CampaignState s, GridCell cell)
+        internal static int TestSink(CampaignState s, GridCell cell)
         {
             int id = ++_testPort;
             BeltNetworkService.TryAddSink(s, id, cell, 4, 1);
             return id;
         }
 
-        private static int TestSource(CampaignState s, GridCell beltCell, string itemId, int count)
+        internal static int TestSource(CampaignState s, GridCell beltCell, string itemId, int count)
         {
             int id = ++_testPort;
             ItemCatalog.TryGet(itemId, out ItemDef d);
@@ -431,9 +431,9 @@ namespace GameLogic.EditorTools
 
         private static bool Pipe(CampaignState s, GridCell c, PipePieceKind kind = PipePieceKind.Pipe) => PipeNetworkService.TryPlace(s, c, kind, 0, 0).Ok;
 
-        private static GridCell At(GridCell o, int dx, int dy) => new GridCell(o.X + dx, o.Y + dy);
+        internal static GridCell At(GridCell o, int dx, int dy) => new GridCell(o.X + dx, o.Y + dy);
 
-        private static ProductionService.Producer P(CampaignState s, BuildingRecord b) =>
+        internal static ProductionService.Producer P(CampaignState s, BuildingRecord b) =>
             ProductionService.TryGet(s, b.BuildingId, out ProductionService.Producer p) ? p : null;
 
         private static void Seen(ProductionService.Producer p)
@@ -444,14 +444,14 @@ namespace GameLogic.EditorTools
             }
         }
 
-        private static string Reason(CampaignState s, ProductionService.Producer p) => p == null ? "（不是生产建筑）" : ProductionService.ReasonText(s, p);
+        internal static string Reason(CampaignState s, ProductionService.Producer p) => p == null ? "（不是生产建筑）" : ProductionService.ReasonText(s, p);
 
-        private static int OnBelt(int x, int y)
+        internal static int OnBelt(int x, int y)
         {
             return BeltNetworkService.Kernel.TryGetCellInfo(x, y, out BeltCellInfo c) ? c.Count : 0;
         }
 
-        private static int OnBelts(GridCell from, BeltDir dir, int len)
+        internal static int OnBelts(GridCell from, BeltDir dir, int len)
         {
             int dx = dir == BeltDir.East ? 1 : dir == BeltDir.West ? -1 : 0;
             int dy = dir == BeltDir.North ? 1 : dir == BeltDir.South ? -1 : 0;
@@ -463,7 +463,7 @@ namespace GameLogic.EditorTools
             return n;
         }
 
-        private static int PortPending(CampaignState s, BuildingRecord b, string portKey)
+        internal static int PortPending(CampaignState s, BuildingRecord b, string portKey)
         {
             BeltPortService.Binding bind = BeltPortService.Find(b.BuildingId, portKey);
             return bind != null && BeltNetworkService.Kernel.TryGetPortCounts(bind.PortId, out int pending, out int buffered) ? pending + buffered : 0;
@@ -551,7 +551,8 @@ namespace GameLogic.EditorTools
             string[] rtPd = tb.TbProducer.DataList.Select(r => string.Join("\t", "PD", r.TypeId, r.Mode, r.Recipes, r.InBatches, r.OutBatches, Fl(r.CycleSeconds), r.CycleAmount,
                 Fl(r.ItemSeconds), Fl(r.FluidLpm), Fl(r.VibrationPerMinute), r.PlaceHintKey, r.SortOrder)).ToArray();
             string[] rtPf = tb.TbBuildingFluidPort.DataList.Select(r => string.Join("\t", "PF", r.Id, r.TypeId, r.LocalX, r.LocalY, r.Dir, r.Kind, r.Fluid)).ToArray();
-            Expect(code == 0 && srcPd.Length == 7 && srcPd.SequenceEqual(rtPd) && srcPf.Length == 7 && srcPf.SequenceEqual(rtPf),
+            // FG4-ECO-03 起 fg.TbProducer 另有四座制造建筑（零件工坊 / 电子组装台 / 组件工坊 / 固件刻录台，同一张表、同一份源数据）：7 + 4 = 11 行。
+            Expect(code == 0 && srcPd.Length == 11 && srcPd.SequenceEqual(rtPd) && srcPf.Length == 7 && srcPf.SequenceEqual(rtPf),
                 $"A1 fg.TbProducer（{srcPd.Length} 行）/ fg.TbBuildingFluidPort（{srcPf.Length} 行）与源数据 fgdata_production.py 逐字段一致" + (code == 0 ? string.Empty : "：" + Tail(output)));
             // FGR-ECO-071 / FG16 FGR-BAL-050：回收产出（固体 > 0、流体 0）；生成端 validate() 已逐条配方断言“回收得到的 < 投入的当量”。
             bool recycle = ItemCatalog.TryGet("alloy", out ItemDef alloy) && alloy.RecycleScrap == 2 && ItemCatalog.TryGet("scrap", out ItemDef scrap) && scrap.RecycleScrap == 1
@@ -577,7 +578,7 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>与 Python repr(float) 对齐：整数值写成“3.0”，其余按往返格式。</summary>
-        private static string Fl(float v)
+        internal static string Fl(float v)
         {
             double d = v;
             return d == Math.Floor(d) ? d.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) : d.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
@@ -1323,7 +1324,7 @@ namespace GameLogic.EditorTools
             }
         }
 
-        private static VisualElement MountUxml(string uxmlPath, out GameObject go)
+        internal static VisualElement MountUxml(string uxmlPath, out GameObject go)
         {
             var vta = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(uxmlPath);
             var settings = Object.Instantiate(AssetDatabase.LoadAssetAtPath<PanelSettings>(UiToolkitLayoutProbe.DefaultPanelSettingsPath));
@@ -2192,7 +2193,7 @@ namespace GameLogic.EditorTools
 
         // ── 基础 ─────────────────────────────────────────────────────────────────
 
-        private static string LocateRepo()
+        internal static string LocateRepo()
         {
             string dir = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
             for (int i = 0; i < 6 && dir != null; i++)
@@ -2206,7 +2207,7 @@ namespace GameLogic.EditorTools
             return Path.GetFullPath(Path.Combine(Application.dataPath, "..", "..", ".."));
         }
 
-        private static (int code, string output) RunPython(string root, string args)
+        internal static (int code, string output) RunPython(string root, string args)
         {
             try
             {
@@ -2234,7 +2235,7 @@ namespace GameLogic.EditorTools
             }
         }
 
-        private static string Tail(string s)
+        internal static string Tail(string s)
         {
             string[] lines = (s ?? string.Empty).Replace("\r", string.Empty).Split('\n').Where(l => l.Trim().Length > 0).ToArray();
             return string.Join(" / ", lines.Skip(Math.Max(0, lines.Length - 2)));

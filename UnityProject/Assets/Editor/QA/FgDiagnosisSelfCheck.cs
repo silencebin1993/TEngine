@@ -643,8 +643,8 @@ namespace GameLogic.EditorTools
             DiagChain c = ChainOf(r, DiagCategory.Output);
             GridCell last = path[path.Count - 1].cell;
             Expect(blocked && c != null && c.Symptom.Code == DiagCode.OutputBlocked && c.Root.Code == DiagCode.BeltTerminal && c.Root.TargetId == asm.BuildingId
-                   && c.Root.Text.Contains("暂不接收物品") && c.Steps.Any(x => x.Code == DiagCode.BeltDownstream) && c.Root.Position == asm.Position,
-                $"R3 仓库输出口 → 传送带（{path.Count} 格）→ 装配站还不收物品（FG-GAP-020：输出口推不上去追溯到下游）：原因链 {Codes(c)}，根源指向装配站（“{c?.Root?.Text}”）");
+                   && c.Root.Text.Contains("只收机器材料") && c.Steps.Any(x => x.Code == DiagCode.BeltDownstream) && c.Root.Position == asm.Position,
+                $"R3 仓库输出口 → 传送带（{path.Count} 格）→ 装配站不收废料（只收机器材料，FG4-ECO-03；FG-GAP-020：输出口推不上去追溯到下游）：原因链 {Codes(c)}，根源指向装配站（“{c?.Root?.Text}”）");
             Expect(!hookBefore && GameSettings.HasSeenGuidanceHook(GuidanceHooks.LogisticsFirstOutputBlocked),
                 "H 卡片“第一次出现堵塞时的引导”：建筑输出口第一次因为下游堵住推不出去时，端口对账发出引导钩子 logistics.port.first_output_blocked（内容在 FG15-UX-04）");
             // 负向：传送带没有接到任何建筑的末端格（最后一格）不是“停工的建筑”，但会作为传送带网络的源头之一出现在清单里——同一个源头不重复列。

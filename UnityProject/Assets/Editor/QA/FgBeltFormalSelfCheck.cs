@@ -445,8 +445,8 @@ namespace GameLogic.EditorTools
                 "建造菜单“物流”有三级传送带（T1 / T2 / T3，每格 1 / 2 / 3 废料），拆除返还按对应造价");
             var roles = GridContent.PortsOf("warehouse").Select(p => p.Id + "=" + p.Role).ToList();
             bool rolesOk = GridContent.PortsOf("core").All(p => p.Role == "store") && GridContent.PortsOf("warehouse").All(p => p.Role == "store")
-                           && GridContent.PortsOf("assembly_station").All(p => p.Role == "none") && GridContent.PortsOf("repair_bay").All(p => p.Role == "none");
-            Expect(rolesOk, $"端口表的物流角色：核心 / 仓库是家园存量的输入输出口，装配站 / 维修台 / 解析台还没有收发物品的配方（{string.Join("，", roles)}）");
+                           && GridContent.PortsOf("assembly_station").All(p => p.Role == (p.Kind == "in" ? "prod" : "none")) && GridContent.PortsOf("repair_bay").All(p => p.Role == "none");
+            Expect(rolesOk, $"端口表的物流角色：核心 / 仓库是家园存量的输入输出口；装配站输入口收机器材料（FG4-ECO-03）、输出口不推；维修台 / 解析台还没有收发物品的配方（{string.Join("，", roles)}）");
         }
 
         // ── B. 端口绑定生命周期 ─────────────────────────────────────────────────────
@@ -466,10 +466,11 @@ namespace GameLogic.EditorTools
             bool coreOk = coreIn != null && coreIn.Store && !coreIn.IsOutput && coreIn.PortId >= BeltPortService.PortIdBase && ci.Kind == BeltPortKind.Sink
                           && ci.Accept == BeltConst.AcceptAnyOneKind && coreIn.PortCell == expectCell && ci.X == expectCell.X && ci.Y == expectCell.Y
                           && ci.Face == (byte)GridMath.RotateDir(GridDir.S, GridMath.NormalizeRotation(core.Rotation)) && ci.BufferCap == 4;
-            bool noneOk = asmIn != null && !asmIn.Store && ai.Accept == BeltConst.AcceptNone && asmOut != null && PortInfo(asmOut).Kind == BeltPortKind.Source;
+            // FG4-ECO-03（DEBT-FG3LOG03-01）：装配站输入口改为收机器材料（收货集合）；输出口仍然不推（机器从出口驶出）。
+            bool noneOk = asmIn != null && !asmIn.Store && ai.Accept == BeltConst.AcceptSet && asmOut != null && PortInfo(asmOut).Kind == BeltPortKind.Source;
             Expect(coreOk && noneOk && whOut == null && s.Belts.PortBindings.Length == BeltPortService.Count,
                 $"开局 1 秒内运转中的建筑自动登记端口：核心输入口 = 家园存量口（端口号 {coreIn?.PortId}，FG4-ECO-01 起收全部可存物品（缓存一次只放一种）、缓存 4、朝南、位置随核心），" +
-                $"装配站的输入口什么都不收、输出口不推（配方在 FG4）；开局受损的仓库没有端口（{BeltPortService.Count} 个绑定，与存档绑定表一致）");
+                $"装配站的输入口只收机器材料（FG4-ECO-03）、输出口不推；开局受损的仓库没有端口（{BeltPortService.Count} 个绑定，与存档绑定表一致）");
 
             BuildingRecord wh = ActivateWarehouse(s);
             whOut = Port(s, "warehouse", "warehouse.out0");
@@ -721,7 +722,7 @@ namespace GameLogic.EditorTools
             Expect(rejected && rej.Block != BeltBlock.SinkRejects,
                 $"输入口收全部可存物品：物品 #7（电子件）进了家园仓库；物品表里没有的 #900 落在仓库旁边的地上（不消失、不堵带，末端此刻“{BeltNetworkService.DescribeBlock(rej)}”）");
 
-            // 建筑还不收发物品（装配站输入口，role = none）；朝向不对不接。
+            // 建筑不收这种物品（装配站输入口只收机器材料，FG4-ECO-03；废料不是机器材料）；朝向不对不接。
             BeltPortService.Binding asmIn = Port(s, "assembly_station", "assembly_station.in0");
             BeltDir into = (BeltDir)(((int)asmIn.Face + 2) & 3);
             BeltDir side = (BeltDir)(((int)asmIn.Face + 1) & 3);
@@ -734,8 +735,8 @@ namespace GameLogic.EditorTools
             bool none = StepUntil(() => BeltNetworkService.Kernel.TryGetCellInfo(c0.X, c0.Y, out BeltCellInfo c) && c.Block == BeltBlock.SinkRejects, 20);
             BeltNetworkService.Kernel.TryGetCellInfo(c0.X, c0.Y, out BeltCellInfo asmCell);
             string noneText = BeltNetworkService.DescribeBlock(asmCell);
-            Expect(notLinked && PortInfo(asmIn).Connected && none && noneText.Contains("暂不接收物品") && noneText.Contains(HomeGridService.DisplayName("assembly_station")),
-                $"输入口只接“末端正对着它”的带：侧着放不接（没接上），转成朝着建筑才接上；装配站还没有配方，废料到末端停下，原因“{noneText}”");
+            Expect(notLinked && PortInfo(asmIn).Connected && none && noneText.Contains("只收机器材料") && noneText.Contains(HomeGridService.DisplayName("assembly_station")),
+                $"输入口只接“末端正对着它”的带：侧着放不接（没接上），转成朝着建筑才接上；装配站只收机器材料，废料到末端停下，原因“{noneText}”");
 
             // 输出口不往“指回建筑”的带上推。
             CampaignState s2 = NewWorld(7402, scrap: 60);

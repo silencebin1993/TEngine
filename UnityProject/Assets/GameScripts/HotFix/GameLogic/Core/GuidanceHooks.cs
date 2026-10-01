@@ -169,6 +169,14 @@ namespace GameLogic.Core
         public const string EconomyFirstByproductBlocked = "economy.production.first_byproduct_blocked";
         /// <summary>FG4-ECO-02：回收站脚下的废墟第一次拆完、变成可建空地。</summary>
         public const string EconomyRuinFirstDepleted = "economy.ruin.first_depleted";
+        /// <summary>FG4-ECO-03：第一次放下制造建筑（零件工坊 / 电子组装台 / 组件工坊 / 固件刻录台）——引导内容：选配方、两种材料各走一个输入口；图鉴“制造建筑”随之解锁。</summary>
+        public const string EconomyManufacturingFirstPlaced = "economy.manufacturing.first_placed";
+        /// <summary>FG4-ECO-03：固件刻录台第一次刻出芯片（进固件库）。</summary>
+        public const string EconomyBurnerFirstChip = "economy.burner.first_chip";
+        /// <summary>FG4-ECO-03：装配站第一次完全用产线材料（没有废料代付）造出机器——图鉴“装配站”随之解锁。</summary>
+        public const string EconomyAssemblyFirstLineMachine = "economy.assembly.first_line_machine";
+        /// <summary>FG4-ECO-03：第一次用面板的“复制设置到同类建筑”。</summary>
+        public const string EconomyFirstCopyToSameType = "economy.production.first_copy_same_type";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -199,6 +207,7 @@ namespace GameLogic.Core
             OverlayFirstOpen, DiagnosisFirstOpen, LogisticsFirstOutputBlocked,
             EconomyGatheringFirstPlaced, EconomyProcessingFirstPlaced, EconomyProductionPanelFirstOpen, EconomyFirstStarved, EconomyFirstByproductBlocked,
             EconomyRuinFirstDepleted,
+            EconomyManufacturingFirstPlaced, EconomyBurnerFirstChip, EconomyAssemblyFirstLineMachine, EconomyFirstCopyToSameType,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

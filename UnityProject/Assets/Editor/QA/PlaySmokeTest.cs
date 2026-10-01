@@ -268,6 +268,13 @@ namespace GameLogic.EditorTools
                     case 322: StepProdDeselected(inStep); break;
                     case 323: StepProdPanelOpened(inStep); break;
                     case 324: StepProdPanelClosed(inStep); break;
+                    // FG4-ECO-03：建造菜单“制造”页签——放电子组装台（虚影）、点它打开通用面板（配方下拉 4 项、配方记忆说明、“复制设置到同类建筑”按钮）、
+                    // 下拉框选“电子件”即生效（两个输入口改收合金 / 稀土矿）、Esc 关面板、Esc 退出建造模式。
+                    case 327: StepMfgPicked(inStep); break;
+                    case 328: StepMfgPlaced(inStep); break;
+                    case 329: StepMfgDeselected(inStep); break;
+                    case 330: StepMfgPanelOpened(inStep); break;
+                    case 331: StepMfgPanelClosed(inStep); break;
                     case 129: StepRuinsCombat(inStep); break;
                     case 230: StepRuinsTagHover(inStep); break;
                     case 150: StepSignalOpened(inStep); break;
@@ -2124,6 +2131,23 @@ namespace GameLogic.EditorTools
                 Campaign.Regions.HomeValleyLayout.BlueprintHoverId);
             Check(!open || (hoverUnlocked ? !hint.Contains("先让解析台通电") : hint.Contains("先让解析台通电")),
                 hoverUnlocked ? "维修机已解锁：提示行不再显示解锁条件" : "维修机未解锁：提示行写明解锁条件");
+            // FG4-ECO-03：装配站按蓝图的材料造机器——面板写每张蓝图要的材料（装配站缓存 / 仓库各有多少、全部代付多少废料），“缺材料时用废料代付”开关勾选即生效。
+            string mats = LabelText("[HomeValleyFactoryHost]", "MaterialsLabel");
+            string noteOn = LabelText("[HomeValleyFactoryHost]", "SubstituteNote");
+            GameObject fhost = GameObject.Find("[HomeValleyFactoryHost]");
+            Toggle sub = fhost != null ? fhost.GetComponent<UIDocument>()?.rootVisualElement?.Q<Toggle>("SubstituteToggle") : null;
+            bool flipped = false;
+            string noteOff = string.Empty;
+            if (sub != null)
+            {
+                sub.value = !sub.value;
+                noteOff = LabelText("[HomeValleyFactoryHost]", "SubstituteNote");
+                flipped = !Campaign.Economy.AssemblyMaterials.ScrapSubstitute(CampaignSession.Current) && noteOff.Contains("已关");
+                sub.value = !sub.value;
+            }
+            Check(!open || (mats.Contains("的材料") && mats.Contains("结构材") && mats.Contains("全部用废料代付") && noteOn.Contains("已开") && flipped
+                            && Campaign.Economy.AssemblyMaterials.ScrapSubstitute(CampaignSession.Current)),
+                $"FG4-ECO-03 装配站面板写材料清单（“{mats.Split('\n')[0]}”）；代付开关默认开（“{noteOn}”），点一下关（“{noteOff}”）再点回来");
             PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
             Next(15, "生产面板开着时按 Esc");
         }
@@ -6474,6 +6498,112 @@ namespace GameLogic.EditorTools
         }
 
         private static void StepProdPanelClosed(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Check(!ProductionPanelUIToolkit.IsOpen && mode != null && mode.IsOpen, "Esc 先关面板（建造模式还开着）");
+            // FG4-ECO-03：建造模式还开着，点“制造”页签选电子组装台，指着刚才那块空地（提取钻放不下的那块）。
+            int tab = Campaign.Grid.GridContent.Categories.ToList().FindIndex(c => c.Id == "manufacturing");
+            bool tabClicked = ClickUitk("[BuildModeHudHost]", "BuildCat" + tab);
+            int idx = HudItemIndex("electronics_bench");
+            bool picked = idx >= 0 && ClickUitk("[BuildModeHudHost]", "BuildItem" + idx) && mode.SelectedTypeId == "electronics_bench";
+            Check(tabClicked && picked, $"FG4-ECO-03：点“制造”页签里的“电子组装台”（第 {idx + 1} 项）：选中（{mode?.SelectedTypeId}）");
+            GridCell plain = ProdCell("ProdPlain");
+            HoverWorld(new Vector3(plain.X, 0f, plain.Y));
+            Next(327, "鼠标移到空地上（电子组装台可以放）");
+        }
+
+        // ── FG4-ECO-03：制造建筑（卡片“配方选择记住上一次的设置”“复制设置到同类建筑”；两种材料各走一个输入口）──
+
+        private static void StepMfgPicked(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            GridPlacementResult pv = mode?.Preview;
+            Check(pv != null && pv.Ok, $"放置预览：电子组装台指着空地可以放（{(pv == null ? "没有预览" : string.Join(" / ", pv.Reasons.Select(r => r.Describe())))}）");
+            GridCell plain = ProdCell("ProdPlain");
+            ClickWorld(new Vector3(plain.X, 0f, plain.Y));
+            Next(328, "单击放下电子组装台");
+        }
+
+        private static void StepMfgPlaced(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            GridCell plain = ProdCell("ProdPlain");
+            BuildingRecord b = HomeGridService.BuildingAt(state, plain);
+            Check(b != null && b.BuildingTypeId == "electronics_bench" && Campaign.Regions.HomeValleyController.IsPlannedGhost(b)
+                  && GameSettings.HasSeenGuidanceHook(GuidanceHooks.EconomyManufacturingFirstPlaced),
+                $"单击放下电子组装台的虚影，第一次放下制造建筑发引导钩子（状态行“{mode?.StatusText}”）");
+            RightClickWorld(new Vector3(plain.X, 0f, plain.Y));
+            Next(329, "右键取消选择，再左键点电子组装台（打开通用面板）");
+        }
+
+        private static void StepMfgDeselected(double inStep)
+        {
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            GridCell plain = ProdCell("ProdPlain");
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            if (!ProductionPanelUIToolkit.IsOpen && SessionState.GetInt(K + "MfgPanelClicked", 0) == 0)
+            {
+                Check(mode != null && mode.IsOpen && mode.SelectedTypeId == null, "右键取消选择（建造模式还开着）");
+                SessionState.SetInt(K + "MfgPanelClicked", 1);
+                ClickWorld(new Vector3(plain.X, 0f, plain.Y));
+                return;
+            }
+            if (inStep < 2.2)
+            {
+                return;
+            }
+            ProductionPanelUIToolkit panel = ProductionPanelUIToolkit.Instance;
+            bool open = ProductionPanelUIToolkit.IsOpen && panel != null && panel.PanelVisible && panel.TitleText.Contains("电子组装台") && panel.RecipeDropdownVisible
+                        && panel.RecipeField.choices.Count == 4 && panel.CopyVisible && panel.MemoryText.Contains("新建的电子组装台会沿用");
+            Check(open, $"点电子组装台打开通用面板：“{panel?.TitleText}”“{panel?.StateText}”，配方下拉 {panel?.RecipeField?.choices?.Count} 项，“{panel?.MemoryText}”，复制设置按钮 {panel?.CopyVisible}");
+            // UI Toolkit 红线 8：下拉框选中即生效。
+            if (panel != null && panel.RecipeField.choices.Count > 1)
+            {
+                panel.RecipeField.value = panel.RecipeField.choices[1];
+            }
+            Next(330, "配方下拉框选“电子件”");
+        }
+
+        private static void StepMfgPanelOpened(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            ProductionPanelUIToolkit panel = ProductionPanelUIToolkit.Instance;
+            CampaignState state = CampaignSession.Current;
+            GridCell plain = ProdCell("ProdPlain");
+            BuildingRecord b = HomeGridService.BuildingAt(state, plain);
+            bool set = b != null && Campaign.Economy.ProductionService.TryGet(state, b.BuildingId, out Campaign.Economy.ProductionService.Producer p) && p.Recipe?.Id == "electronic"
+                       && panel != null && panel.MessageText.Contains("配方改为") && panel.MemoryText.Contains("电子件")
+                       && Campaign.Economy.ProductionService.MemoryOf(state, "electronics_bench")?.RecipeId == "electronic";
+            Check(set, $"下拉框选“电子件”即生效（“{panel?.MessageText}”），记住这类建筑的选择（“{panel?.MemoryText}”）");
+            var views = new List<BeltPortService.PortView>();
+            BeltPortService.CollectViews(state, b, views);
+            Check(views.Count(v => !v.IsOutput && v.AcceptLine != null && (v.AcceptLine.Contains("合金") || v.AcceptLine.Contains("稀土矿"))) == 2,
+                $"电子组装台两个输入口各收一种材料：{string.Join(" / ", views.Select(v => v.AcceptLine))}");
+            CheckNoTextMarkers("制造建筑通用面板");
+            PressKeyKeepMouse(KeyCode.Escape);
+            Next(331, "Esc 关闭面板");
+        }
+
+        private static void StepMfgPanelClosed(double inStep)
         {
             if (inStep < 0.5)
             {

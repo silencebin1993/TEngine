@@ -66,6 +66,14 @@ namespace GameLogic.Campaign.Economy
         NoSource,
         /// <summary>流体泵：出口送不出去（没接管线 / 网络里是别的流体 / 下游用不完、储罐满了）。</summary>
         PumpBlocked,
+        /// <summary>FG4-ECO-03 固件刻录台：没选要刻的固件（待机）。</summary>
+        NoBurnTarget,
+        /// <summary>FG4-ECO-03 固件刻录台：选的固件还没破解 / 不是固件（待机，配合 <see cref="ProductionService.Producer.ReasonTarget"/>）。</summary>
+        BurnTargetLocked,
+        /// <summary>FG4-ECO-03 固件刻录台：固件芯片存放满了（输出堵塞）。</summary>
+        FirmwareStorageFull,
+        /// <summary>FG4-ECO-03 固件刻录台：正在刻（配合 <see cref="ProductionService.Producer.ReasonTarget"/>）。</summary>
+        WorkingBurn,
     }
 
     /// <summary>
@@ -128,8 +136,15 @@ namespace GameLogic.Campaign.Economy
             public bool InPortExists;
             public bool OutPortExists;
             public bool WorkedThisStep;
+            /// <summary>FG4-ECO-03：原因里的固件（刻录台的刻录目标）。</summary>
+            public string ReasonTarget;
+            /// <summary>FG4-ECO-03：这座建筑是固件刻录台（唯一配方的种类是 firmware：产出是固件芯片，进固件库）。</summary>
+            public bool IsBurner => Def.FixedRecipe != null && Def.FixedRecipe.Kind == RecipeKindFirmware;
             public string Id => Building?.BuildingId;
         }
+
+        /// <summary>FG4-ECO-01 配方表 kind = firmware：产出是指定的已破解固件的芯片（固件刻录台）。</summary>
+        public const string RecipeKindFirmware = "firmware";
 
         private static CampaignState _state;
         private static ProducerRecord[] _indexedRecords;
@@ -257,9 +272,12 @@ namespace GameLogic.Campaign.Economy
                     rec = new ProducerRecord { BuildingId = b.BuildingId };
                     byId[b.BuildingId] = rec;
                     added = true;
-                    // FG00 B14：第一次放下采集 / 加工建筑（引导内容在 FG15-UX-04；图鉴“采集建筑”“加工建筑”随之解锁）。
+                    // FG4-ECO-03（卡片“配方选择记住上一次的设置”）：新建的同类建筑沿用玩家上一次给这类建筑选的配方 / 刻录目标（面板写明“沿用了上一次的选择”）。
+                    ApplyMemory(state, def, rec);
+                    // FG00 B14：第一次放下采集 / 加工 / 制造建筑（引导内容在 FG15-UX-04；图鉴“采集建筑”“加工建筑”“制造建筑”随之解锁）。
                     GuidanceHooks.Raise(def.Mode == ProducerMode.Recycler || def.Mode == ProducerMode.Drill || def.Mode == ProducerMode.Pump
-                        ? GuidanceHooks.EconomyGatheringFirstPlaced : GuidanceHooks.EconomyProcessingFirstPlaced);
+                        ? GuidanceHooks.EconomyGatheringFirstPlaced
+                        : IsManufacturing(def.TypeId) ? GuidanceHooks.EconomyManufacturingFirstPlaced : GuidanceHooks.EconomyProcessingFirstPlaced);
                 }
                 var p = new Producer { Building = b, Def = def, Rec = rec };
                 EnsureFluidArrays(p);
@@ -825,6 +843,7 @@ namespace GameLogic.Campaign.Economy
         public static void Step(CampaignState state, int ticks, int worldHz)
         {
             EnsureIndex(state);
+            _fwStorageKnown = false; // FG4-ECO-03：固件芯片存放的数量 / 容量每个生产步最多数一次（刻录台要用时才数）。
             long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
             double vibrationRate = 0;
             foreach (Producer p in Ordered)
@@ -859,6 +878,9 @@ namespace GameLogic.Campaign.Economy
         private static bool Powered(BuildingRecord b) => !NeedsPower(b) || b.PowerState == BuildingPowerState.Powered;
 
         private static bool _starvedHooked;
+        private static bool _fwStorageKnown;
+        private static int _fwStorageHave;
+        private static int _fwStorageCap;
         private static bool _byproductHooked;
 
         private static void Set(Producer p, ProdState s, ProdReason r, ItemDef item = null, int port = -1, long need = 0, long have = 0)
@@ -942,6 +964,12 @@ namespace GameLogic.Campaign.Economy
             switch (p.Def.Mode)
             {
                 case ProducerMode.Recipe:
+                    if (p.IsBurner)
+                    {
+                        Set(p, ProdState.Working, ProdReason.WorkingBurn);
+                        p.ReasonTarget = p.Rec.BurnTarget;
+                        break;
+                    }
                     Set(p, ProdState.Working, ProdReason.WorkingRecipe);
                     break;
                 case ProducerMode.Drill:
@@ -968,9 +996,18 @@ namespace GameLogic.Campaign.Economy
                         Set(p, ProdState.Idle, ProdReason.NoRecipe);
                         return false;
                     }
-                    if (!CheckRecipe(p, recipe))
+                    if (p.IsBurner && !CheckBurnTarget(state, p))
                     {
                         return false;
+                    }
+                    if (!CheckRecipe(state, p, recipe))
+                    {
+                        return false;
+                    }
+                    if (p.IsBurner && _fwStorageKnown)
+                    {
+                        // 审查 P2：这一周期要刻的芯片先占住存放位置——同一步里别的刻录台不会再按“还剩 1 格”一起开工。
+                        _fwStorageHave += ChipsPerCycle(recipe);
                     }
                     var stock = new BuildingStock(p);
                     foreach (RecipeLine l in recipe.Lines)
@@ -1083,10 +1120,27 @@ namespace GameLogic.Campaign.Economy
                 var stock = new BuildingStock(p);
                 foreach (RecipeLine l in p.Recipe.Lines)
                 {
-                    if (l.Role != RecipeRole.In)
+                    if (l.Role == RecipeRole.In)
                     {
-                        stock.Add(l.Item, l.Amount);
+                        continue;
                     }
+                    if (l.Item.Form == ItemForm.Entity && p.IsBurner)
+                    {
+                        // FG4-ECO-03：刻好的固件芯片直接进固件库（芯片存放；开工时已确认放得下，万一期间被别的来源占满就进“待领取”，不丢）。
+                        for (int n = 0; n < Math.Max(1, l.Amount); n++)
+                        {
+                            Primitive.PrimitiveInventory.AddBurnedChip(state, r.BurnTarget);
+                        }
+                        _fwStorageKnown = false;
+                        if (r.Completed == 0)
+                        {
+                            GuidanceHooks.Raise(GuidanceHooks.EconomyBurnerFirstChip);
+                            Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.ProductionComplete, p.Building.Position,
+                                GameText.Format("prod.notify.first_chip", HomeGridService.DisplayName(p.Building.BuildingTypeId), Signal.FirmwareKinds.DisplayName(r.BurnTarget) ?? r.BurnTarget));
+                        }
+                        continue;
+                    }
+                    stock.Add(l.Item, l.Amount);
                 }
             }
             else if (!string.IsNullOrEmpty(r.PendingItem) && r.PendingAmount > 0)
@@ -1198,10 +1252,326 @@ namespace GameLogic.Campaign.Economy
             Set(p, ProdState.MissingFluid, ProdReason.WasteIdle, null, 0);
         }
 
+        // ── FG4-ECO-03：固件刻录台 ────────────────────────────────────────────────
+
+        /// <summary>刻录目标能不能刻：没选 = 待机；选的不是固件或还没破解 = 待机并写明。</summary>
+        private static bool CheckBurnTarget(CampaignState state, Producer p)
+        {
+            string t = p.Rec.BurnTarget;
+            if (string.IsNullOrEmpty(t))
+            {
+                Set(p, ProdState.Idle, ProdReason.NoBurnTarget);
+                return false;
+            }
+            if (!IsBurnable(state, t))
+            {
+                Set(p, ProdState.Idle, ProdReason.BurnTargetLocked);
+                p.ReasonTarget = t;
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>能刻录的固件：已破解（已解锁）的固件（与信号核“刻印”同一张清单，<see cref="Signal.SignalCoreService.PrintableFirmware"/>）。</summary>
+        public static bool IsBurnable(CampaignState state, string firmwareId) =>
+            !string.IsNullOrEmpty(firmwareId) && Signal.FirmwareKinds.IsFirmware(firmwareId)
+            && (Content.MechanicalContentUnlock.IsUnlocked(state, firmwareId) || Primitive.FusionHooks.IsBurnableFusion(state, firmwareId)); // 熔合配方的量产入口留给 FG5-RND-04
+
+        /// <summary>
+        /// 选刻录目标（<paramref name="firmwareId"/> 为空 = 取消、待机）。正在刻的那份作废、已扣的芯片基板退回输入缓存（不丢料）；记进“上一次的设置”。
+        /// </summary>
+        public static bool TrySetBurnTarget(CampaignState state, string buildingId, string firmwareId, out string message)
+        {
+            message = null;
+            if (!TryGet(state, buildingId, out Producer p) || !p.IsBurner)
+            {
+                message = GameText.Get("grid.reason.no_building");
+                return false;
+            }
+            firmwareId ??= string.Empty;
+            if (firmwareId.Length > 0 && !Signal.FirmwareKinds.IsFirmware(firmwareId))
+            {
+                message = GameText.Format("prod.reason.burn_unknown", firmwareId);
+                return false;
+            }
+            if (firmwareId.Length > 0 && !IsBurnable(state, firmwareId))
+            {
+                message = GameText.Format("prod.reason.burn_target_locked", Signal.FirmwareKinds.DisplayName(firmwareId) ?? firmwareId);
+                return false;
+            }
+            ProducerRecord r = p.Rec;
+            if (r.BurnTarget != firmwareId)
+            {
+                VoidRunningCycle(p);
+                r.BurnTarget = firmwareId;
+                Revision++;
+            }
+            r.Inherited = false;
+            Remember(state, p.Def.TypeId, null, firmwareId, rememberRecipe: false);
+            message = firmwareId.Length > 0
+                ? GameText.Format("prod.panel.burn_changed", Signal.FirmwareKinds.DisplayName(firmwareId) ?? firmwareId)
+                : GameText.Get("prod.panel.burn_cleared");
+            return true;
+        }
+
+        /// <summary>正在做的周期作废：已扣的固体退回输入缓存、流体退回口里的缓存（换配方 / 换刻录目标 / 复制设置共用）。</summary>
+        private static void VoidRunningCycle(Producer p)
+        {
+            ProducerRecord r = p.Rec;
+            if (r.Running && p.Recipe != null)
+            {
+                foreach (RecipeLine l in p.Recipe.Lines)
+                {
+                    if (l.Role != RecipeRole.In)
+                    {
+                        continue;
+                    }
+                    if (l.Item.Form == ItemForm.Fluid)
+                    {
+                        int i = FluidPortIndex(p, l.Item, false);
+                        if (i >= 0)
+                        {
+                            p.Rec.FluidHeld[i] += l.Amount * 1000L;
+                            _heldPending = true;
+                        }
+                    }
+                    else
+                    {
+                        Add(ref r.In, l.Item.Id, l.Amount);
+                    }
+                }
+            }
+            r.Running = false;
+            r.Progress = 0;
+            r.Duration = 0;
+        }
+
+        // ── FG4-ECO-03：配方记忆（卡片“配方选择记住上一次的设置”）──────────────────────────
+
+        /// <summary>建筑格网分类是“制造”。</summary>
+        public static bool IsManufacturing(string typeId) =>
+            GridContent.TryGetBuilding(typeId, out GameConfig.fg.BuildingGrid g) && g.Category == "manufacturing";
+
+        /// <summary>这类建筑“上一次的设置”（没有 = null）。</summary>
+        public static RecipeMemoryRecord MemoryOf(CampaignState state, string typeId)
+        {
+            foreach (RecipeMemoryRecord m in state?.Economy?.RecipeMemory ?? Array.Empty<RecipeMemoryRecord>())
+            {
+                if (m != null && m.TypeId == typeId)
+                {
+                    return m;
+                }
+            }
+            return null;
+        }
+
+        private static void Remember(CampaignState state, string typeId, string recipeId, string burnTarget, bool rememberRecipe)
+        {
+            if (state?.Economy == null || string.IsNullOrEmpty(typeId))
+            {
+                return;
+            }
+            RecipeMemoryRecord m = MemoryOf(state, typeId);
+            if (m == null)
+            {
+                m = new RecipeMemoryRecord { TypeId = typeId };
+                var list = new List<RecipeMemoryRecord>(state.Economy.RecipeMemory ?? Array.Empty<RecipeMemoryRecord>()) { m };
+                list.Sort((a, b) => string.CompareOrdinal(a.TypeId, b.TypeId));
+                state.Economy.RecipeMemory = list.ToArray();
+            }
+            if (rememberRecipe)
+            {
+                m.RecipeId = recipeId ?? string.Empty;
+            }
+            if (burnTarget != null)
+            {
+                m.BurnTarget = burnTarget;
+            }
+        }
+
+        /// <summary>新建的生产建筑沿用这类建筑的“上一次的设置”（多配方建筑的配方、刻录台的目标）；配方已经不属于这座建筑时不沿用。</summary>
+        private static void ApplyMemory(CampaignState state, ProducerDef def, ProducerRecord rec)
+        {
+            RecipeMemoryRecord m = MemoryOf(state, def.TypeId);
+            if (m == null)
+            {
+                return;
+            }
+            bool any = false;
+            if (def.Mode == ProducerMode.Recipe && def.FixedRecipe == null && !string.IsNullOrEmpty(m.RecipeId)
+                && ItemCatalog.TryGetRecipe(m.RecipeId, out RecipeDef r) && def.AllowsRecipe(r))
+            {
+                rec.RecipeId = m.RecipeId;
+                any = true;
+            }
+            if (def.FixedRecipe != null && def.FixedRecipe.Kind == RecipeKindFirmware && !string.IsNullOrEmpty(m.BurnTarget))
+            {
+                rec.BurnTarget = m.BurnTarget;
+                any = true;
+            }
+            rec.Inherited = any;
+        }
+
+        /// <summary>这座建筑现在的“设置”（配方或刻录目标）的一行说明。</summary>
+        public static string SettingText(Producer p)
+        {
+            if (p.IsBurner)
+            {
+                string t = p.Rec.BurnTarget;
+                return GameText.Format("prod.panel.setting_target", string.IsNullOrEmpty(t) ? GameText.Get("prod.panel.setting_none") : Signal.FirmwareKinds.DisplayName(t) ?? t);
+            }
+            return GameText.Format("prod.panel.setting_recipe", p.Recipe != null ? p.Recipe.Name : GameText.Get("prod.panel.setting_none"));
+        }
+
+        /// <summary>这类建筑有没有可复制的设置（多配方建筑、刻录台）。</summary>
+        public static bool HasCopyableSettings(Producer p) =>
+            p != null && p.Def.Mode == ProducerMode.Recipe && (p.Def.FixedRecipe == null || p.IsBurner);
+
+        /// <summary>同类的其它生产建筑（按建筑 ID 顺序）。</summary>
+        public static void CollectSameType(CampaignState state, Producer p, List<Producer> into)
+        {
+            into.Clear();
+            EnsureIndex(state);
+            foreach (Producer o in Ordered)
+            {
+                if (!ReferenceEquals(o, p) && o.Def.TypeId == p.Def.TypeId)
+                {
+                    into.Add(o);
+                }
+            }
+        }
+
+        private static readonly List<Producer> SameTypeScratch = new List<Producer>(8);
+
+        /// <summary>
+        /// 卡片“复制设置到同类建筑”：把这座建筑的配方（多配方建筑）/ 刻录目标（刻录台）写到家园里其余同类建筑上（规划中 / 施工中 / 关停的也写：建好、恢复后按它工作）。
+        /// 换了配方的建筑走 <see cref="TrySetRecipe"/>（正在做的那份作废、料退回）。返回实际改了几座；<paramref name="same"/> = 本来就是这个设置的座数。
+        /// </summary>
+        public static int CopySettingsToSameType(CampaignState state, string buildingId, out int same, out string message)
+        {
+            same = 0;
+            message = null;
+            if (!TryGet(state, buildingId, out Producer p))
+            {
+                message = GameText.Get("grid.reason.no_building");
+                return -1;
+            }
+            string name = HomeGridService.DisplayName(p.Building.BuildingTypeId);
+            if (!HasCopyableSettings(p))
+            {
+                message = GameText.Format("prod.panel.copy_fixed", name);
+                return -1;
+            }
+            CollectSameType(state, p, SameTypeScratch);
+            if (SameTypeScratch.Count == 0)
+            {
+                message = GameText.Format("prod.panel.copy_none", name);
+                return 0;
+            }
+            var targets = new List<Producer>(SameTypeScratch);
+            int changed = 0;
+            foreach (Producer o in targets)
+            {
+                bool did;
+                if (p.IsBurner)
+                {
+                    did = o.Rec.BurnTarget != p.Rec.BurnTarget;
+                    if (did)
+                    {
+                        TrySetBurnTarget(state, o.Id, p.Rec.BurnTarget, out _);
+                    }
+                }
+                else
+                {
+                    did = !ReferenceEquals(o.Recipe, p.Recipe);
+                    if (did)
+                    {
+                        TrySetRecipe(state, o.Id, p.Recipe?.Id, out _);
+                    }
+                }
+                if (did)
+                {
+                    changed++;
+                }
+                else
+                {
+                    same++;
+                }
+            }
+            GuidanceHooks.Raise(GuidanceHooks.EconomyFirstCopyToSameType);
+            message = GameText.Format("prod.panel.copy_done", SettingText(p), changed, name, same);
+            return changed;
+        }
+
+        // ── FG4-ECO-03：多个输入口（两种固体材料的配方：第 1 个输入口收第 1 种、第 2 个收第 2 种）────────────────────
+
+        /// <summary>role = prod 的输入口在这类建筑里是第几个（按端口表顺序，从 0 起；不是输入口 = -1）。</summary>
+        public static int InPortIndex(string typeId, string portKey)
+        {
+            int i = 0;
+            foreach (GameConfig.fg.BuildingPort row in GridContent.PortsOf(typeId))
+            {
+                if (row.Role != "prod" || row.Kind == "out")
+                {
+                    continue;
+                }
+                if (row.Id == portKey)
+                {
+                    return i;
+                }
+                i++;
+            }
+            return -1;
+        }
+
+        /// <summary>当前配方的第 <paramref name="index"/> 种固体输入（没有 = null）。</summary>
+        public static ItemDef SolidInputAt(Producer p, int index)
+        {
+            if (p?.Recipe == null || index < 0)
+            {
+                return null;
+            }
+            int i = 0;
+            foreach (RecipeLine l in p.Recipe.Lines)
+            {
+                if (l.Role == RecipeRole.In && l.Item.Form == ItemForm.Solid)
+                {
+                    if (i == index)
+                    {
+                        return l.Item;
+                    }
+                    i++;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>收 <paramref name="item"/> 的那个输入口（多输入口建筑按配方里的顺序；只有一个输入口时就是它）。</summary>
+        public static BeltPortService.Binding FindInPortFor(Producer p, ItemDef item)
+        {
+            BeltPortService.Binding first = null;
+            int i = 0;
+            foreach (GameConfig.fg.BuildingPort row in GridContent.PortsOf(p.Building.BuildingTypeId))
+            {
+                if (row.Role != "prod" || row.Kind == "out")
+                {
+                    continue;
+                }
+                BeltPortService.Binding bind = BeltPortService.Find(p.Id, row.Id);
+                first ??= bind;
+                if (item != null && ReferenceEquals(SolidInputAt(p, i), item))
+                {
+                    return bind;
+                }
+                i++;
+            }
+            return first;
+        }
+
         // ── 配方检查（不分配：原因文字由界面按种类现拼）──────────────────────────────
 
         /// <summary>按 <see cref="RecipeBook.Check"/> 的顺序（先输入、再主产出、再副产品）查一遍；不行就把原因写进 <paramref name="p"/>。</summary>
-        private static bool CheckRecipe(Producer p, RecipeDef recipe)
+        private static bool CheckRecipe(CampaignState state, Producer p, RecipeDef recipe)
         {
             var stock = new BuildingStock(p);
             foreach (RecipeLine l in recipe.Lines)
@@ -1225,6 +1595,26 @@ namespace GameLogic.Campaign.Economy
                 {
                     continue;
                 }
+                if (l.Item.Form == ItemForm.Entity && p.IsBurner)
+                {
+                    // FG4-ECO-03：固件芯片进固件库：存放满了就“输出堵塞”，写明存放数量与办法（不刻出来放进“待领取”堆着）。
+                    if (!_fwStorageKnown)
+                    {
+                        // O(芯片数 + 建筑数 + 生产建筑数)：每个生产步最多一次（堵着的刻录台每步都会重试开工，不能每座都数一遍）。
+                        // 已占用 = 存放里的芯片 + 正在刻的芯片（多座刻录台同时开工不会超出上限，刻好的芯片不会进“待领取”）。
+                        _fwStorageHave = Primitive.PrimitiveInventory.BagCount(state) + BurningChips();
+                        _fwStorageCap = Primitive.PrimitiveInventory.CapacityOf(state);
+                        _fwStorageKnown = true;
+                    }
+                    int have = _fwStorageHave;
+                    int cap = _fwStorageCap;
+                    if (have + Math.Max(1, l.Amount) > cap)
+                    {
+                        Set(p, ProdState.OutputBlocked, ProdReason.FirmwareStorageFull, l.Item, -1, cap, have);
+                        return false;
+                    }
+                    continue;
+                }
                 long space = stock.Space(l.Item);
                 if (space < l.Amount)
                 {
@@ -1235,6 +1625,38 @@ namespace GameLogic.Campaign.Economy
                 }
             }
             return true;
+        }
+
+        /// <summary>一个刻录周期刻出几枚芯片（配方里实体产出行之和，每行至少 1）。</summary>
+        private static int ChipsPerCycle(RecipeDef recipe)
+        {
+            int n = 0;
+            if (recipe == null)
+            {
+                return 0;
+            }
+            foreach (RecipeLine l in recipe.Lines)
+            {
+                if (l.Role != RecipeRole.In && l.Item.Form == ItemForm.Entity)
+                {
+                    n += Math.Max(1, l.Amount);
+                }
+            }
+            return n;
+        }
+
+        /// <summary>正在刻的芯片数（运转中的刻录台本周期的产出）。</summary>
+        private static int BurningChips()
+        {
+            int n = 0;
+            foreach (Producer q in Ordered)
+            {
+                if (q.IsBurner && q.Rec != null && q.Rec.Running)
+                {
+                    n += ChipsPerCycle(q.Recipe);
+                }
+            }
+            return n;
         }
 
         public static int FluidPortIndex(Producer p, ItemDef fluid, bool output)
@@ -1459,9 +1881,16 @@ namespace GameLogic.Campaign.Economy
 
         // ── 物品口（BeltPortService.Pump 每个传送带内核步调用，O(1)）────────────────────────────
 
-        /// <summary>输入口登记时收什么：配方建筑 = 当前配方的固体输入（没有配方 / 配方没有固体输入 = 什么都不收）；回收站 = 任何固体（缓存一次一种）。</summary>
-        public static ushort SinkAcceptFor(CampaignState state, BuildingRecord b)
+        /// <summary>
+        /// 输入口登记时收什么：配方建筑 = 当前配方里分给这个口的固体（第 1 个输入口收第 1 种……；没有配方 / 用不到这个口 = 什么都不收）；回收站 = 任何固体（缓存一次一种）；
+        /// 装配站（FG4-ECO-03）= 机器材料收货集合（<see cref="BeltConst.AcceptSet"/>）。<paramref name="portKey"/> 为空 = 第一个输入口。
+        /// </summary>
+        public static ushort SinkAcceptFor(CampaignState state, BuildingRecord b, string portKey = null)
         {
+            if (AssemblyMaterials.IsStation(b))
+            {
+                return BeltConst.AcceptSet;
+            }
             if (!TryGet(state, b?.BuildingId, out Producer p))
             {
                 return BeltConst.AcceptNone;
@@ -1470,8 +1899,30 @@ namespace GameLogic.Campaign.Economy
             {
                 return BeltConst.AcceptAnyOneKind;
             }
-            ItemDef solid = SolidInput(p);
+            int idx = portKey == null ? 0 : Math.Max(0, InPortIndex(b.BuildingTypeId, portKey));
+            ItemDef solid = SolidInputAt(p, idx);
             return solid != null && solid.BeltId != 0 ? solid.BeltId : BeltConst.AcceptNone;
+        }
+
+        private static ItemDef SolidInputAtRecipe(RecipeDef recipe, int index)
+        {
+            if (recipe == null || index < 0)
+            {
+                return null;
+            }
+            int i = 0;
+            foreach (RecipeLine l in recipe.Lines)
+            {
+                if (l.Role == RecipeRole.In && l.Item.Form == ItemForm.Solid)
+                {
+                    if (i == index)
+                    {
+                        return l.Item;
+                    }
+                    i++;
+                }
+            }
+            return null;
         }
 
         public static ItemDef SolidInput(Producer p)
@@ -1512,11 +1963,20 @@ namespace GameLogic.Campaign.Economy
         }
 
         /// <summary>端口面板：生产建筑的物品口收什么 / 推什么。</summary>
-        public static string PortAcceptLine(CampaignState state, BuildingRecord b, bool output)
+        public static string PortAcceptLine(CampaignState state, BuildingRecord b, bool output, string portKey = null)
         {
+            if (AssemblyMaterials.IsStation(b))
+            {
+                return AssemblyMaterials.PortAcceptLine(output);
+            }
             if (!TryGet(state, b?.BuildingId, out Producer p))
             {
                 return null;
+            }
+            if (p.IsBurner && !output)
+            {
+                string t = p.Rec.BurnTarget;
+                return GameText.Format("prod.port.accept_burner", string.IsNullOrEmpty(t) ? GameText.Get("prod.panel.setting_none") : Signal.FirmwareKinds.DisplayName(t) ?? t);
             }
             if (output)
             {
@@ -1533,7 +1993,12 @@ namespace GameLogic.Campaign.Economy
             {
                 return GameText.Get("prod.port.accept_no_recipe");
             }
-            ItemDef solid = SolidInput(p);
+            int idx = portKey == null ? 0 : Math.Max(0, InPortIndex(b.BuildingTypeId, portKey));
+            ItemDef solid = SolidInputAt(p, idx);
+            if (solid == null && idx > 0 && SolidInput(p) != null)
+            {
+                return GameText.Get("prod.port.accept_unused");
+            }
             return solid != null ? GameText.Format("prod.port.accept_item", solid.Name, p.Recipe.Name) : GameText.Get("prod.port.accept_no_solid");
         }
 
@@ -1560,6 +2025,11 @@ namespace GameLogic.Campaign.Economy
         {
             if (!TryGet(state, bind.BuildingId, out Producer p))
             {
+                // FG4-ECO-03：装配站的输入口（role = prod，但它不是生产建筑）：机器材料进装配站材料缓存。
+                if (!bind.IsOutput && bind.PortKey != null && bind.PortKey.StartsWith(HomeValleyLayout.BuildingTypeAssemblyStation + ".", StringComparison.Ordinal))
+                {
+                    AssemblyMaterials.PumpPort(state, bind, k, buffered, kind);
+                }
                 return;
             }
             if (bind.IsOutput)
@@ -1600,7 +2070,7 @@ namespace GameLogic.Campaign.Economy
             // 只收一种物品的输入口（配方建筑）内核不记缓存里是哪一种（ItemType = 0）：就是当前配方要的那种固体；回收站（一次一种）内核记着种类。
             if (kind == 0 && p.Def.Mode == ProducerMode.Recipe)
             {
-                ItemDef solid = SolidInput(p);
+                ItemDef solid = SolidInputAt(p, Math.Max(0, InPortIndex(p.Building.BuildingTypeId, bind.PortKey)));
                 kind = solid != null ? solid.BeltId : (ushort)0;
             }
             ItemDef item = BeltItems.Def(kind);
@@ -1667,41 +2137,20 @@ namespace GameLogic.Campaign.Economy
             }
             if (ReferenceEquals(next, p.Recipe))
             {
+                p.Rec.Inherited = false;
+                Remember(state, p.Def.TypeId, next?.Id ?? string.Empty, null, rememberRecipe: true);
                 message = next != null ? GameText.Format("prod.panel.recipe_changed", next.Name) : GameText.Get("prod.panel.recipe_cleared");
                 return true;
             }
             ProducerRecord r = p.Rec;
-            ItemDef oldSolid = SolidInput(p);
-            if (r.Running && p.Recipe != null)
-            {
-                // 正在做的周期作废：已扣的固体退回输入缓存（流体退回口里的缓存），不丢料。
-                var stock = new BuildingStock(p);
-                foreach (RecipeLine l in p.Recipe.Lines)
-                {
-                    if (l.Role != RecipeRole.In)
-                    {
-                        continue;
-                    }
-                    if (l.Item.Form == ItemForm.Fluid)
-                    {
-                        int i = FluidPortIndex(p, l.Item, false);
-                        if (i >= 0)
-                        {
-                            p.Rec.FluidHeld[i] += l.Amount * 1000L;
-                            _heldPending = true;
-                        }
-                    }
-                    else
-                    {
-                        Add(ref r.In, l.Item.Id, l.Amount);
-                    }
-                }
-            }
-            r.Running = false;
-            r.Progress = 0;
-            r.Duration = 0;
+            RecipeDef oldRecipe = p.Recipe;
+            // 正在做的周期作废：已扣的固体退回输入缓存（流体退回口里的缓存），不丢料。
+            VoidRunningCycle(p);
             r.RecipeId = next?.Id ?? string.Empty;
+            r.Inherited = false;
             p.Recipe = next;
+            // FG4-ECO-03：记住这类建筑上一次的选择（新建的同类建筑沿用）。
+            Remember(state, p.Def.TypeId, r.RecipeId, null, rememberRecipe: true);
             // 新配方用不上的输入退回仓库。
             int returned = 0;
             foreach (ItemStackRecord s in r.In)
@@ -1744,19 +2193,29 @@ namespace GameLogic.Campaign.Economy
                         continue;
                     }
                     BeltKernel k = BeltNetworkService.Kernel;
+                    ushort nextAccept = SinkAcceptFor(state, p.Building, row.Id);
                     if (k.TryGetPortCounts(bind.PortId, out _, out int buffered, out ushort kind) && buffered > 0)
                     {
-                        // 只收一种物品的输入口内核不记种类（0）：缓存里的就是旧配方要的那种固体。
+                        // 只收一种物品的输入口内核不记种类（0）：缓存里的就是旧配方给这个口的那种固体（多输入口按口的顺序）。
+                        ItemDef oldSolid = SolidInputAtRecipe(oldRecipe, InPortIndex(p.Building.BuildingTypeId, row.Id));
                         if (kind == 0 && oldSolid != null)
                         {
                             kind = oldSolid.BeltId;
                         }
+                    }
+                    if (buffered > 0 && kind != 0 && kind == nextAccept)
+                    {
+                        // FG4-ECO-03：新配方这个口收的还是同一种（例如零件工坊“零件”↔“结构材”都用合金）：端口缓存原样留着，不来回搬运。
+                        buffered = 0;
+                    }
+                    if (buffered > 0)
+                    {
                         int n = k.TakeFromSink(bind.PortId, buffered);
                         HomeValleyConstruction.ReturnMaterials(state, p.Building.Position, BeltItems.ResourceOf(kind), n,
                             "prod-recipe-port:" + bind.PortId.ToString(CultureInfo.InvariantCulture) + ":" + GameClock.Ticks.ToString(CultureInfo.InvariantCulture));
                         returned += n;
                     }
-                    k.SetSinkAccept(bind.PortId, SinkAcceptFor(state, p.Building));
+                    k.SetSinkAccept(bind.PortId, nextAccept);
                 }
             }
             Revision++;
@@ -2030,6 +2489,14 @@ namespace GameLogic.Campaign.Economy
                     }
                 }
             }
+            // FG4-ECO-03：装配站的材料缓存（西侧输入口送来、还没装进机器的材料）同样算“生产建筑缓存（在途）”。
+            foreach (ItemStackRecord st in state.Economy.AssemblyBuffer ?? Array.Empty<ItemStackRecord>())
+            {
+                if (st != null && st.Amount > 0 && !string.IsNullOrEmpty(st.ItemId))
+                {
+                    into[st.ItemId] = (into.TryGetValue(st.ItemId, out long n) ? n : 0) + st.Amount;
+                }
+            }
         }
 
         // ── 震动（FG10 接口）────────────────────────────────────────────────────
@@ -2111,6 +2578,14 @@ namespace GameLogic.Campaign.Economy
                     return Join(GameText.Get("prod.reason.ruin_depleted"), InPortHint(p, null, GameText.Get("prod.panel.any_solid")));
                 case ProdReason.MissingItem:
                     return Join(GameText.Format("eco.reason.missing_input", p.ReasonItem?.Name ?? string.Empty, p.ReasonNeed, p.ReasonHave), InPortHint(p, p.ReasonItem));
+                case ProdReason.NoBurnTarget:
+                    return GameText.Get("prod.reason.no_burn_target");
+                case ProdReason.BurnTargetLocked:
+                    return GameText.Format("prod.reason.burn_target_locked", Signal.FirmwareKinds.DisplayName(p.ReasonTarget) ?? p.ReasonTarget ?? string.Empty);
+                case ProdReason.FirmwareStorageFull:
+                    return GameText.Format("prod.reason.firmware_storage_full", p.ReasonHave, p.ReasonNeed);
+                case ProdReason.WorkingBurn:
+                    return GameText.Format("prod.reason.working_burn", Signal.FirmwareKinds.DisplayName(p.ReasonTarget) ?? p.ReasonTarget ?? string.Empty);
                 case ProdReason.MissingFluid:
                     return Join(GameText.Format("eco.reason.missing_input", p.ReasonItem?.Name ?? string.Empty, RecipeBook.Amount(p.ReasonItem, p.ReasonNeed),
                         RecipeBook.Amount(p.ReasonItem, p.ReasonHave)), FluidPortHint(p, p.ReasonPort));
@@ -2132,18 +2607,37 @@ namespace GameLogic.Campaign.Economy
         /// <summary>输入口为什么没有料：没接传送带（写出要铺在哪、朝哪）/ 带上没有这种物品送来。</summary>
         public static string InPortHint(Producer p, ItemDef item, string whatOverride = null)
         {
-            BeltPortService.Binding bind = FindPort(p, false);
+            BeltPortService.Binding bind = FindInPortFor(p, item);
             if (bind == null)
             {
                 return null;
             }
             BeltKernel k = BeltNetworkService.IsRunning ? BeltNetworkService.Kernel : null;
             string what = whatOverride ?? item?.Name ?? GameText.Get("prod.panel.any_solid");
+            // FG4-ECO-03：有两个输入口的建筑写明是哪个方向的口（西 / 南……，随建筑朝向转）。
+            bool multi = InPortIndex(p.Building.BuildingTypeId, bind.PortKey) > 0 || InPortCount(p.Building.BuildingTypeId) > 1;
+            string dir = GameText.Get(GridMath.DirTextKey(bind.Face));
             if (k == null || bind.PortId < 0 || !k.TryGetPortInfo(bind.PortId, out BeltPortInfo info) || !info.Connected)
             {
-                return GameText.Format("prod.reason.in_port_unconnected", bind.BeltCell.X, bind.BeltCell.Y, what);
+                return multi
+                    ? GameText.Format("prod.reason.in_port_unconnected_at", bind.BeltCell.X, bind.BeltCell.Y, what, dir)
+                    : GameText.Format("prod.reason.in_port_unconnected", bind.BeltCell.X, bind.BeltCell.Y, what);
             }
-            return GameText.Format("prod.reason.in_port_empty", what);
+            return multi ? GameText.Format("prod.reason.in_port_empty_at", what, dir) : GameText.Format("prod.reason.in_port_empty", what);
+        }
+
+        /// <summary>这类建筑有几个 role = prod 的输入口。</summary>
+        public static int InPortCount(string typeId)
+        {
+            int n = 0;
+            foreach (GameConfig.fg.BuildingPort row in GridContent.PortsOf(typeId))
+            {
+                if (row.Role == "prod" && row.Kind != "out")
+                {
+                    n++;
+                }
+            }
+            return n;
         }
 
         public static string OutPortHint(Producer p)
@@ -2237,6 +2731,10 @@ namespace GameLogic.Campaign.Economy
                     if (p.Def.Mode == ProducerMode.Recipe && p.Recipe == null)
                     {
                         Set(p, ProdState.Idle, ProdReason.NoRecipe);
+                    }
+                    else if (p.IsBurner && string.IsNullOrEmpty(p.Rec.BurnTarget))
+                    {
+                        Set(p, ProdState.Idle, ProdReason.NoBurnTarget);
                     }
                     else if (!Powered(b))
                     {

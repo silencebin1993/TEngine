@@ -1154,7 +1154,8 @@ namespace BinGames.Sim.Logistics
             }
             BeltPort bp = _ports[p];
             // FG4-ECO-01：从“只收一种”改成“任何一种（一次一种）”时，缓存里已有的件就是原来那一种（旧存档的仓库输入口缓存着废料）。
-            if (accept == BeltConst.AcceptAnyOneKind && bp.Accept != BeltConst.AcceptAnyOneKind && bp.Buffered > 0
+            bool oneKindNow = bp.Accept == BeltConst.AcceptAnyOneKind || bp.Accept == BeltConst.AcceptSet;
+            if ((accept == BeltConst.AcceptAnyOneKind || accept == BeltConst.AcceptSet) && !oneKindNow && bp.Buffered > 0
                 && bp.Accept != BeltConst.AcceptAny && bp.Accept != BeltConst.AcceptNone)
             {
                 bp.Item = bp.Accept;
@@ -1401,7 +1402,7 @@ namespace BinGames.Sim.Logistics
             new JobBeltStep
             {
                 CL = BeltConst.CellLength, Spacing = _spacing, V0 = _v0, V1 = _v1, V2 = _v2, S0 = _s0, S1 = _s1, S2 = _s2, SlowOn = _slowPct > 0 ? 1 : 0,
-                BucketSteps = _config.BucketSteps,
+                BucketSteps = _config.BucketSteps, AcceptSetMask = _config.AcceptSetMask,
                 SlotsPerCell = _config.SlotsPerCell,
                 X = _x.AsArray(), Y = _y.AsArray(), Dir = _dir.AsArray(), Ring = _ring.AsArray(), Tier = _tier.AsArray(), Covered = _covered.AsArray(),
                 FeedN = _feedN.AsArray(), Feed = _feed.AsArray(),
