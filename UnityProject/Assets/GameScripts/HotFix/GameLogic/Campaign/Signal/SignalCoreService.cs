@@ -35,7 +35,8 @@ namespace GameLogic.Campaign.Signal
     /// <summary>
     /// FG1-SIG-01（FG01 FGR-SIG-010～012、第 4 章预设、第 6 章存档；FG13 FGU-19）：信号核的唯一写入口。
     ///
-    /// - 槽位：初始 2 槽、最多 5 槽（fg.TbHomeTuning signal.core.*），第 3～5 槽由超控阵列 T1～T3 解锁（FG4-ECO-11 落地前等级恒 0）；
+    /// - 槽位：初始 2 槽、最多 5 槽（fg.TbHomeTuning signal.core.*），第 3～5 槽由超控阵列 T1～T3 解锁（FG4-ECO-11，<see cref="OverrideArrayService"/>）：
+    ///   “已解锁”= 已建成阵列的等级（可以装卸）；“生效”= 运转中且有电的阵列的等级（只有生效的槽插进接入口，<see cref="ActiveContentIds"/>）；
     ///   槽位有顺序（下标 0 = 1 号槽，后续接入口按此顺序插入，FG1-SIG-03）。
     /// - 装卸：固件芯片在基元仓与槽位之间原子转移（实例状态经 <see cref="PrimitiveInventory"/> 的唯一写入口改写，
     ///   “仓 / 草稿 / 待领取 / 信号核”四态恰一，不复制、不丢失）。常规与核心固件都能放进信号核；基元芯片不能。
@@ -110,16 +111,64 @@ namespace GameLogic.Campaign.Signal
 
         // ── 槽位解锁（超控阵列，FG4-ECO-11）────────────────────────────────────────
 
-        /// <summary>超控阵列等级来源。FG4-ECO-11（超控阵列建筑）落地前没有这座建筑，等级恒 0；那条 Story 在这里接上真实来源。
-        /// 自检用它注入等级验证第 3～5 槽的解锁规则。</summary>
+        /// <summary>自检注入“已建成的超控阵列等级”；为 null 时读家园里真实的超控阵列（<see cref="OverrideArrayService.BuiltTier"/>）。</summary>
         public static Func<CampaignState, int> OverrideArrayTierProvider;
 
-        public static int OverrideArrayTier(CampaignState s) => Math.Max(0, OverrideArrayTierProvider?.Invoke(s) ?? 0);
+        /// <summary>自检注入“生效的超控阵列等级”；为 null 时：注入了已建成等级就按它（视为有电），否则读真实阵列（<see cref="OverrideArrayService.ActiveTier"/>）。</summary>
+        public static Func<CampaignState, int> OverrideArrayActiveTierProvider;
 
-        /// <summary>已解锁的槽位数 = 初始槽位 + 超控阵列等级，不超过最多槽位。</summary>
+        /// <summary>已建成的超控阵列等级（= 已解锁的多出槽数）。</summary>
+        public static int OverrideArrayTier(CampaignState s) => Math.Max(0, OverrideArrayTierProvider?.Invoke(s) ?? OverrideArrayService.BuiltTier(s));
+
+        /// <summary>生效的超控阵列等级（运转中且有电；不超过已建成等级）。</summary>
+        public static int OverrideArrayActiveTier(CampaignState s)
+        {
+            int built = OverrideArrayTier(s);
+            int active = OverrideArrayActiveTierProvider != null ? OverrideArrayActiveTierProvider(s)
+                : OverrideArrayTierProvider != null ? built
+                : OverrideArrayService.ActiveTier(s);
+            return Math.Max(0, Math.Min(built, active));
+        }
+
+        /// <summary>已解锁的槽位数 = 初始槽位 + 超控阵列等级，不超过最多槽位。已解锁的槽可以装卸（断电时也可以）。</summary>
         public static int UnlockedSlots(CampaignState s) => Math.Max(1, Math.Min(MaxSlots, InitialSlots + OverrideArrayTier(s)));
 
         public static bool IsSlotUnlocked(CampaignState s, int index) => index >= 0 && index < UnlockedSlots(s);
+
+        /// <summary>生效的槽位数 = 初始槽位 + 生效的超控阵列等级（FGR-ECO-020：断电时对应槽位失效，固件保留但不生效）。</summary>
+        public static int ActiveSlots(CampaignState s) => Math.Max(1, Math.Min(UnlockedSlots(s), InitialSlots + OverrideArrayActiveTier(s)));
+
+        public static bool IsSlotActive(CampaignState s, int index) => index >= 0 && index < ActiveSlots(s);
+
+        /// <summary>按槽位顺序、只含生效槽位的固件内容 ID（长度 = 最多槽位数；失效 / 未解锁的槽为空串）。接入结算、预览、接入 HUD 都读它。</summary>
+        public static string[] ActiveContentIds(CampaignState s)
+        {
+            string[] ids = CurrentContentIds(s);
+            int active = ActiveSlots(s);
+            for (int i = active; i < ids.Length; i++)
+            {
+                ids[i] = string.Empty;
+            }
+            return ids;
+        }
+
+        /// <summary>这个槽现在为什么不生效（生效的槽返回空串）：失效（已解锁但阵列断电 / 禁用 / 被摧毁）写原因，未解锁写要什么、从哪里获得。</summary>
+        public static string SlotStatusLine(CampaignState s, int index)
+        {
+            if (IsSlotActive(s, index))
+            {
+                return string.Empty;
+            }
+            if (IsSlotUnlocked(s, index))
+            {
+                return GameText.Format("signal.core.slot_offline", OverrideArrayService.ReasonText(OverrideArrayService.OfflineReason(s)));
+            }
+            int tier = TierForSlot(index);
+            return GameText.Format("signal.core.slot_locked_how", tier, OverrideArrayService.RequirementText(s, tier));
+        }
+
+        /// <summary>FG4-ECO-11：超控阵列的已解锁 / 生效等级变了（<see cref="OverrideArrayService.OnPowerApplied"/>）：版本 +1，接入中的机器按新的生效槽重编译。</summary>
+        public static void NotifyOverrideChanged() => Revision++;
 
         /// <summary>解锁第 <paramref name="index"/>（0 起）号槽需要的超控阵列等级（初始槽为 0）。</summary>
         public static int TierForSlot(int index) => Math.Max(0, index + 1 - InitialSlots);
@@ -318,8 +367,10 @@ namespace GameLogic.Campaign.Signal
         public static string SummaryText(CampaignState s)
         {
             string[] ids = CurrentContentIds(s);
+            // FG4-ECO-11：超控阵列断电等原因有槽失效时，摘要后面写“（N 槽失效）”（远征准备面板等处看得到，失效槽里的固件不会插入）。
+            int offline = UnlockedSlots(s) - ActiveSlots(s);
             return ids.Any(id => id.Length > 0)
-                ? GameText.Format("signal.core.summary", DescribeLoadout(ids))
+                ? GameText.Format("signal.core.summary", DescribeLoadout(ids)) + (offline > 0 ? GameText.Format("signal.hud.core_offline", offline) : string.Empty)
                 : GameText.Get("signal.core.summary_empty");
         }
 
@@ -808,6 +859,7 @@ namespace GameLogic.Campaign.Signal
         public static void ResetForTests()
         {
             OverrideArrayTierProvider = null;
+            OverrideArrayActiveTierProvider = null;
             ExpeditionUnderwayOverrideForTests = null;
             WarnedTuning.Clear();
             Revision++;

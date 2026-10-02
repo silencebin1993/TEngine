@@ -60,10 +60,11 @@ namespace GameLogic.UI.Common
                 }
                 if (HomeValleyLayout.PowerProfile.TryGetValue(b.BuildingTypeId, out (float PowerDemand, int PowerPriority) p))
                 {
-                    demand += p.PowerDemand;
+                    float bd = HomeValleyPowerGrid.DemandOf(b); // FG4-ECO-11：有等级的建筑按等级耗电（超控阵列 80 / 120 / 160）。
+                    demand += bd;
                     string key = b.PowerState == BuildingPowerState.Brownout ? "tooltip.power.brownout_of"
                         : b.PowerState == BuildingPowerState.Unpowered ? "tooltip.power.unconnected_of" : "tooltip.power.demand_of";
-                    consumers.Add(new TooltipSource(GameText.Format(key, name, p.PowerPriority.ToString(CultureInfo.InvariantCulture)), Signed(-p.PowerDemand)));
+                    consumers.Add(new TooltipSource(GameText.Format(key, name, p.PowerPriority.ToString(CultureInfo.InvariantCulture)), Signed(-bd)));
                 }
             }
             content.Sources.AddRange(consumers);

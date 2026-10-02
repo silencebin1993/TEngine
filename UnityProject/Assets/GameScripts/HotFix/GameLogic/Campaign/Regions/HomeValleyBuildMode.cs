@@ -596,6 +596,18 @@ namespace GameLogic.Campaign.Regions
                         OnConfirm = () => Report(PlanHistory.ToggleDemolish(CampaignSession.Current, id), CampaignSession.Current, DemolishFailKey),
                     };
                     req.Consequences.Add(GameText.Format("ui.build.confirm_refund", target.InvestedScrap)); // FG3-LOG-02：全额返还。
+                    if (Economy.BuildMaterials.InvestedCount(target) > 0)
+                    {
+                        // FG4-ECO-11：建进去的关键材料等非废料投入同样全额退回（关键材料回核心保管库）。
+                        req.Consequences.Add(GameText.Format("ui.build.confirm_refund_extra", Economy.BuildMaterials.DescribeInvested(target)));
+                    }
+                    if (target.BuildingTypeId == Signal.OverrideArrayService.TypeId && Signal.OverrideArrayService.IsBuilt(target))
+                    {
+                        // FG4-ECO-11：拆掉超控阵列后多出的信号核槽位锁回去，里面的固件不生效（不会丢，可以卸回基元仓）。
+                        int initial = Signal.SignalCoreService.InitialSlots;
+                        req.Consequences.Add(GameText.Format("ui.build.confirm_override",
+                            Signal.OverrideArrayService.SlotsText(initial + 1, initial + Economy.BuildingOps.TierOf(target))));
+                    }
                     if (GridContent.TryGetBuilding(target.BuildingTypeId, out BuildingGrid tg) && tg.Critical == 1)
                     {
                         req.Lines.Add(GameText.Get("ui.build.confirm_critical"));

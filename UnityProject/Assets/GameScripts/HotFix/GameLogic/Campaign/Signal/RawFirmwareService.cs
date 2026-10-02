@@ -105,7 +105,7 @@ namespace GameLogic.Campaign.Signal
             {
                 return;
             }
-            MachineCombatResolution r = MachineLoadoutRegistry.ResolveForUplink(s, logicId, s.RandomSeed, SignalCoreService.CurrentContentIds(s));
+            MachineCombatResolution r = MachineLoadoutRegistry.ResolveForUplink(s, logicId, s.RandomSeed, SignalCoreService.ActiveContentIds(s));
             string[] raws = r.Success && r.Preview?.RawFirmwareIds != null
                 ? r.Preview.RawFirmwareIds.Where(id => !FirmwareKinds.IsCore(id)).ToArray()
                 : Array.Empty<string>();

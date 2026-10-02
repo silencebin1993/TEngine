@@ -28,6 +28,7 @@ public sealed partial class BuildingTier : Luban.BeanBase
         UnlockHintKey = _buf.ReadString();
         Value = _buf.ReadFloat();
         ValueKey = _buf.ReadString();
+        PowerDemand = _buf.ReadFloat();
     }
 
     public static BuildingTier DeserializeBuildingTier(ByteBuf _buf)
@@ -71,6 +72,10 @@ public sealed partial class BuildingTier : Luban.BeanBase
     /// 效果的说明文本键,{0}=效果值
     /// </summary>
     public readonly string ValueKey;
+    /// <summary>
+    /// FG4-ECO-11:这一级的耗电(0=按 fg.TbBuilding.powerDemand;超控阵列 80/120/160)
+    /// </summary>
+    public readonly float PowerDemand;
    
     public const int __ID__ = 1483756259;
     public override int GetTypeId() => __ID__;
@@ -91,6 +96,7 @@ public sealed partial class BuildingTier : Luban.BeanBase
         + "unlockHintKey:" + UnlockHintKey + ","
         + "value:" + Value + ","
         + "valueKey:" + ValueKey + ","
+        + "powerDemand:" + PowerDemand + ","
         + "}";
     }
 }

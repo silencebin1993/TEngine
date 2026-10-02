@@ -547,15 +547,18 @@ namespace GameLogic.UI.SignalCore
             bool locked = SignalCoreService.ExpeditionUnderway;
             int equipped = SignalCoreService.EquippedCount(s);
             int unlocked = SignalCoreService.UnlockedSlots(s);
+            int offline = unlocked - SignalCoreService.ActiveSlots(s);
             int hudKey = HashCode.Combine(SignalPresence.CurrentMachineLogicId, equipped, unlocked, locked,
-                (int)GameText.Language, GameSettings.Revision, SignalCoreService.Revision);
+                (int)GameText.Language, GameSettings.Revision, SignalCoreService.Revision, offline);
             if (hudKey != _hudKey)
             {
                 _hudKey = hudKey;
                 _location.text = SignalPresence.LocationText();
-                _entry.text = locked
+                _entry.text = (locked
                     ? GameText.Format("signal.hud.core_button_locked", equipped, unlocked)
-                    : GameText.Format("signal.hud.core_button", equipped, unlocked);
+                    : GameText.Format("signal.hud.core_button", equipped, unlocked))
+                    + (offline > 0 ? GameText.Format("signal.hud.core_offline", offline) : string.Empty); // FG4-ECO-11：超控阵列断电时 HUD 上直接看到失效槽数
+                _entry.EnableInClassList("sc-entry-offline", offline > 0);
             }
             RefreshJumpButtons(s);
             if (!IsOpen)
@@ -573,7 +576,7 @@ namespace GameLogic.UI.SignalCore
             }
             int panelKey = HashCode.Combine(SignalCoreService.Revision ^ (PrimitiveInventory.Revision << 12), chips.Length, PrimitiveInventory.BagCount(s), Mathf.FloorToInt(s.Scrap), locked,
                 (int)GameText.Language, GameSettings.Revision, HashCode.Combine(_uiSerial, _selectedSlot, _selectedPartId, s.SignalCore?.Presets?.Length ?? 0,
-                    FirmwareKinds.Revision, SignalCoreService.OverrideArrayTier(s), _capacity));
+                    FirmwareKinds.Revision, SignalCoreService.OverrideArrayTier(s), _capacity, OverrideArrayService.StateKey(s)));
             if (panelKey == _panelKey)
             {
                 return;
@@ -611,20 +614,21 @@ namespace GameLogic.UI.SignalCore
                     body = FirmwareKinds.KindLabel(kind) + " " + (FirmwareKinds.DisplayName(content) ?? content)
                            + (raw ? "  " + GameText.Get("signal.core.raw_tag") : string.Empty);
                     b.EnableInClassList("sc-item-raw", raw);
-                    if (!open)
+                    if (!SignalCoreService.IsSlotActive(s, i))
                     {
-                        body += "\n" + GameText.Format("signal.core.slot_locked", SignalCoreService.TierForSlot(i));
+                        body += "\n" + SlotShortLine(s, i); // FG4-ECO-11：失效（断电等）/ 未解锁的槽里固件保留、不生效
                     }
                     b.EnableInClassList("sc-item-core", kind == FirmwareKind.Core);
                 }
                 else
                 {
-                    body = open ? GameText.Get("signal.core.slot_empty") : GameText.Format("signal.core.slot_locked", SignalCoreService.TierForSlot(i));
+                    body = SignalCoreService.IsSlotActive(s, i) ? GameText.Get("signal.core.slot_empty") : SlotShortLine(s, i);
                     b.EnableInClassList("sc-item-core", false);
                     b.EnableInClassList("sc-item-raw", false);
                 }
                 b.text = GameText.Format("signal.core.slot_index", i + 1) + "  " + body;
                 b.EnableInClassList("sc-item-locked", !open);
+                b.EnableInClassList("sc-item-offline", open && !SignalCoreService.IsSlotActive(s, i));
                 b.EnableInClassList("sc-item-selected", i == _selectedSlot);
             }
             _unequip.text = GameText.Get("signal.core.unequip");
@@ -881,9 +885,9 @@ namespace GameLogic.UI.SignalCore
                 Title = GameText.Format("signal.core.slot_index", index + 1),
                 Body = content.Length > 0
                     ? (FirmwareKinds.DisplayName(content) ?? content) + "\n" + FirmwareKinds.KindTip(kind) + RawTip(s, content) + ReadingTip(content)
-                    : SignalCoreService.IsSlotUnlocked(s, index)
+                    : SignalCoreService.IsSlotActive(s, index)
                         ? GameText.Get("signal.core.hint")
-                        : GameText.Format("signal.core.slot_locked", SignalCoreService.TierForSlot(index)),
+                        : SignalCoreService.SlotStatusLine(s, index), // FG4-ECO-11：失效原因 / 解锁要什么、关键材料从哪里获得
                 CodexEntryId = GameLogic.Progression.MechanicCodex.FirmwareEntryId(content), // FG2-FW-05：悬停按图鉴键跳到固件条目
             };
         }
@@ -920,6 +924,12 @@ namespace GameLogic.UI.SignalCore
                 : string.Empty;
 
         // ── 工具 ─────────────────────────────────────────────────────────────────
+
+        /// <summary>槽位按钮上的短说明：失效写原因（“失效：超控阵列缺电停机——固件保留，不生效”），未解锁写“未解锁：需要超控阵列 T1”（获取途径在悬停里）。</summary>
+        private static string SlotShortLine(CampaignState s, int i) =>
+            SignalCoreService.IsSlotUnlocked(s, i)
+                ? SignalCoreService.SlotStatusLine(s, i)
+                : GameText.Format("signal.core.slot_locked", SignalCoreService.TierForSlot(i));
 
         private static int FirstFreeUnlockedSlot(CampaignState s)
         {

@@ -43,6 +43,8 @@ namespace GameLogic.Campaign.Grid
         public int LockedCount;
         public int UnknownCount;
         public int Cost;
+        /// <summary>FG4-ECO-11：能放下的建筑在废料之外要的材料合计（预览与完成提示写出来，缺货写从哪里获得）。</summary>
+        public readonly Economy.BuildMaterialTally Extras = new Economy.BuildMaterialTally();
         public int Stock;
         public int FirstBad = -1;
         public int Width;
@@ -337,6 +339,7 @@ namespace GameLogic.Campaign.Grid
             plan.Quarter = quarter & 3;
             plan.Absolute = absolute;
             plan.OkCount = 0;
+            plan.Extras.Clear();
             plan.BadCount = 0;
             plan.LockedCount = 0;
             plan.UnknownCount = 0;
@@ -431,6 +434,7 @@ namespace GameLogic.Campaign.Grid
                 {
                     plan.OkCount++;
                     plan.Cost += PlanEntries.CostOf(it.Id);
+                    plan.Extras.Add(Economy.BuildMaterials.NewBuild(it.Id)); // FG4-ECO-11：粘贴造价里的额外材料（物流件没有，返回空）
                 }
                 else
                 {

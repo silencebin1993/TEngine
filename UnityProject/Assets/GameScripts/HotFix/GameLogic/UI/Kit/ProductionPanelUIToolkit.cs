@@ -6,6 +6,7 @@ using GameLogic.Campaign.Economy;
 using GameLogic.Campaign.Grid;
 using GameLogic.Campaign.Logistics;
 using GameLogic.Campaign.Regions;
+using GameLogic.Campaign.Signal;
 using GameLogic.Core;
 using GameLogic.Localization;
 using GameLogic.Progression;
@@ -602,6 +603,8 @@ namespace GameLogic.UI.Kit
                 int scrap = BuildingOps.RebuildScrapFor(b);
                 _repair.text = scrap >= 0 ? GameText.Format("bp.rebuild", scrap) : GameText.Get("bp.repair_cannot");
                 _repair.SetEnabled(scrap >= 0 && active == null);
+                // FG4-ECO-11：被摧毁时已投入的关键材料留在建筑里，重建只收废料（写明，免得玩家以为要再找一件关键材料）。
+                _repair.tooltip = BuildMaterials.InvestedCount(b) > 0 ? GameText.Get("bp.rebuild_keeps_key") : string.Empty;
             }
             else
             {
@@ -621,6 +624,7 @@ namespace GameLogic.UI.Kit
             int cur = BuildingOps.TierOf(b);
             _tier.text = hasTiers
                 ? GameText.Format("bp.tier_line", cur, BuildingOps.MaxTier(b.BuildingTypeId), BuildingOps.TierEffect(b.BuildingTypeId, cur) ?? string.Empty)
+                  + OverrideArrayLines(state, b)
                 : string.Empty;
             _tier.EnableInClassList("bn-hidden", !hasTiers);
             _upgradeCancel.EnableInClassList("bn-hidden", !upgrading);
@@ -640,7 +644,8 @@ namespace GameLogic.UI.Kit
                     ? GameText.Format("bp.upgrade_effect", BuildingOps.TierEffect(b.BuildingTypeId, cur), BuildingOps.TierEffect(toType, toTier))
                     : GameText.Get("bp.upgrade_effect_none");
                 _upgrade.text = GameText.Format("bp.upgrade", toName);
-                _upgradeLine.text = GameText.Format("bp.upgrade_line", toName, diff, seconds.ToString("0.#", CultureInfo.InvariantCulture), effect);
+                _upgradeLine.text = GameText.Format("bp.upgrade_line", toName, diff, seconds.ToString("0.#", CultureInfo.InvariantCulture), effect)
+                                    + UpgradeExtrasLine(state, b.BuildingTypeId, toTier);
                 _upgrade.SetEnabled(true);
                 _upgrade.EnableInClassList("bn-hidden", false);
                 return;
@@ -652,6 +657,45 @@ namespace GameLogic.UI.Kit
             _upgradeLine.text = noRoute ? GameText.Get("bp.tier_none")
                 : why.Code == GridBlockReason.UpgradeLocked ? GameText.Format("bp.upgrade_locked", why.Describe())
                 : GameText.Format("bp.upgrade_refused", why.Describe());
+        }
+
+        /// <summary>
+        /// FG4-ECO-11（DEBT-FG3LOG02-02）：升级差额里废料之外的材料（“另需 熔炉心 ×1（核心保管库 0）”），缺货时逐条写明从哪里获得
+        /// （卡片“关键材料缺失时，面板说明从哪里获得”）。可以照常下单：虚影等材料，取消全额退回。
+        /// </summary>
+        public static string UpgradeExtrasLine(CampaignState state, string typeId, int toTier)
+        {
+            IReadOnlyList<BuildMaterialNeed> extras = BuildMaterials.Upgrade(typeId, toTier);
+            if (extras.Count == 0)
+            {
+                return string.Empty;
+            }
+            string line = "\n" + GameText.Format("bp.upgrade_extra", BuildMaterials.DescribeList(state, extras));
+            string shortfall = BuildMaterials.DescribeShortfall(state, extras);
+            return shortfall != null ? line + "\n" + shortfall + "\n" + GameText.Get("build.cost.can_place") : line;
+        }
+
+        /// <summary>FG4-ECO-11：超控阵列的面板行——信号核已解锁 / 生效的槽数，失效时写原因与办法，下一级要什么（研究节点、关键材料、从哪里获得）。</summary>
+        public static string OverrideArrayLines(CampaignState state, BuildingRecord b)
+        {
+            if (b == null || b.BuildingTypeId != OverrideArrayService.TypeId)
+            {
+                return string.Empty;
+            }
+            string text = "\n" + GameText.Format("override.panel.slots", SignalCoreService.UnlockedSlots(state), SignalCoreService.ActiveSlots(state), SignalCoreService.MaxSlots);
+            int unlocked = SignalCoreService.UnlockedSlots(state);
+            int active = SignalCoreService.ActiveSlots(state);
+            if (active < unlocked)
+            {
+                OverrideOfflineReason r = OverrideArrayService.OfflineReason(state);
+                text += "\n" + GameText.Format("override.panel.offline", OverrideArrayService.SlotsText(active + 1, unlocked), OverrideArrayService.ReasonText(r), OverrideArrayService.FixText(r));
+            }
+            int cur = BuildingOps.TierOf(b);
+            int max = BuildingOps.MaxTier(b.BuildingTypeId);
+            text += "\n" + (cur < max
+                ? GameText.Format("override.panel.next", cur + 1, OverrideArrayService.RequirementText(state, cur + 1))
+                : GameText.Format("override.panel.max", cur));
+            return text;
         }
 
         private void RefreshStore(CampaignState state, BuildingRecord b)
@@ -1057,7 +1101,9 @@ namespace GameLogic.UI.Kit
                 _power.text = string.Empty;
                 return;
             }
-            _power.text = GameText.Format("prod.panel.power", prof.PowerDemand.ToString("0.#", CultureInfo.InvariantCulture), b.PowerPriority,
+            // FG4-ECO-11 审查修复（P2）：耗电按等级读（超控阵列 T1 80 / T2 120 / T3 160），与电网结算、电力面板同一口径。
+            float demand = HomeValleyPowerGrid.DemandOf(b);
+            _power.text = GameText.Format("prod.panel.power", demand.ToString("0.#", CultureInfo.InvariantCulture), b.PowerPriority,
                 GameText.Get(b.PowerState == BuildingPowerState.Powered ? "prod.panel.power_ok" : "prod.panel.power_off"));
         }
 

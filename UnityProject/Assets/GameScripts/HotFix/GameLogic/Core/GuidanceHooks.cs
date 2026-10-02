@@ -191,6 +191,11 @@ namespace GameLogic.Core
         /// <summary>FG4-ECO-05：第一次有建筑受损（耐久下降）——引导内容在 FG15-UX-04：维修件从零件工坊来、面板“维修”。</summary>
         public const string BuildingFirstDamaged = "building.first_damaged";
 
+        /// <summary>FG4-ECO-11：第一次建成超控阵列（信号核第 3 槽解锁）——引导内容在 FG15-UX-04：关键材料从首领来、阵列要持续供电、断电时多出的槽失效；图鉴“超控阵列”随之解锁。</summary>
+        public const string OverrideArrayFirstBuilt = "override_array.first_built";
+        /// <summary>FG4-ECO-11：超控阵列第一次因为断电 / 未接入 / 禁用 / 被摧毁让多出的槽失效。</summary>
+        public const string OverrideArrayFirstOffline = "override_array.first_offline";
+
         /// <summary>FG4-ECO-06：第一次打开常驻规则面板——图鉴“常驻规则”随之解锁。</summary>
         public const string RulesPanelFirstOpen = "rules.panel_first_open";
         /// <summary>FG4-ECO-06（卡片“第一次设置规则时的引导”）：第一次新建一条常驻规则。引导内容在 FG15-UX-04：规则只做你设定的事、优先级与冲突、实体上的“由规则 R3 触发”。</summary>
@@ -265,6 +270,7 @@ namespace GameLogic.Core
             EconomyManufacturingFirstPlaced, EconomyBurnerFirstChip, EconomyAssemblyFirstLineMachine, EconomyFirstCopyToSameType,
             EnergyFirstBuilt, EnergyFirstFuelOut, EnergyFirstStorageEmpty,
             BuildingPanelFirstOpen, BuildingFirstUpgrade, BuildingFirstDamaged,
+            OverrideArrayFirstBuilt, OverrideArrayFirstOffline,
             RulesPanelFirstOpen, RulesFirstCreated, RulesFirstTriggered, RulesFirstConflict,
             RosterPanelFirstOpen, RosterFirstRoleChange, RosterFirstRename,
             StatsProductionFirstOpen, StatsFirstDeficit, StatsFirstPin, PlannerFirstPlan,

@@ -295,6 +295,14 @@ namespace GameLogic.EditorTools
                     case 335: StepEnergyPanelSet(inStep); break;
                     case 336: StepEnergyPanelClosed(inStep); break;
                     case 337: StepUndergroundPipePlaced(inStep); break;
+                    // FG4-ECO-11：建造菜单“信号”页签——选超控阵列，建造栏成本写关键材料与获取途径、研究节点；单击放虚影（等关键材料）；
+                    // 点建成的超控阵列打开通用面板（信号核槽位行）、点“禁用”→ HUD 信号核按钮写“（1 槽失效）”、面板写失效原因 → 点“启用”恢复；Esc 关面板、Esc 退出建造模式。
+                    case 346: StepOverridePicked(inStep); break;
+                    case 347: StepOverridePlaced(inStep); break;
+                    case 348: StepOverridePanel(inStep); break;
+                    case 349: StepOverrideDisabled(inStep); break;
+                    case 350: StepOverrideEnabled(inStep); break;
+                    case 351: StepOverrideClosed(inStep); break;
                     case 129: StepRuinsCombat(inStep); break;
                     case 230: StepRuinsTagHover(inStep); break;
                     case 150: StepSignalOpened(inStep); break;
@@ -4121,6 +4129,17 @@ namespace GameLogic.EditorTools
                 MachineRegistry.ApplyDamage(id, 99999f);
             }
             cs.Scrap = 0;
+            // FG4-ECO-11 冒烟修复：这一段测“真实世界步里”的应急打印，世界必须在运行。前面的步骤（离家报告、电力面板）之后若世界处于暂停
+            // （例如某条默认自动暂停的通知），记下是谁暂停的、写进本段结论，再恢复运行——不改判定口径，只保证世界步在走。
+            string pauseNote = string.Empty;
+            if (GameClock.Paused)
+            {
+                Notifications.NotificationEntry auto = Notifications.NotificationCenter.History.LastOrDefault(n => n.Type != null && n.Type.Id == "auto_paused");
+                pauseNote = "清空前世界处于暂停（" + (auto != null ? auto.Text : "没有自动暂停通知") + "；最近通知：" +
+                            string.Join("、", Notifications.NotificationCenter.History.Reverse().Take(3).Select(n => n.Type?.Id ?? "?")) + "），已恢复运行";
+                GameClock.SetPaused(false);
+            }
+            SessionState.SetString(K + "SoftlockPauseNote", pauseNote);
             Next(345, "测试捷径：清空全部机器与废料，等归还核心应急打印与应急产废料（FG4-ECO-10）");
         }
 
@@ -4137,7 +4156,9 @@ namespace GameLogic.EditorTools
             {
                 if (inStep > 12)
                 {
-                    Check(false, $"清空机器与废料后 12 秒内没有应急打印 / 应急产废料（打印 {st?.PrintCount}，产废料 {st?.CoreScrapActive}）");
+                    Check(false, $"清空机器与废料后 12 秒内没有应急打印 / 应急产废料（打印 {st?.PrintCount}，产废料 {st?.CoreScrapActive}；" +
+                                 $"游戏日 {GameClock.DayOf(GameClock.GameSeconds)} / 上次打印日 {st?.LastPrintDay}，能施工的机器 {Campaign.Economy.SoftlockService.CountHomeMachines()} 台，" +
+                                 $"废料 {cs.Scrap}，回收站在工作 {Campaign.Economy.ProductionService.AnyRecyclerWorking(cs)}，世界暂停 {GameRoot.IsWorldPaused}，核心被毁 {Campaign.Regions.HomeValleySoftlockGuard.IsCoreDestroyed(cs)}）");
                     Campaign.Regions.HomeValleySoftlockGuard.DebugDestroyCore(cs);
                     Next(80, "测试捷径：核心被毁（HomeValleySoftlockGuard.DebugDestroyCore），等失败页出现");
                 }
@@ -4151,8 +4172,10 @@ namespace GameLogic.EditorTools
             string coreLine = core != null ? Campaign.Economy.BuildingStatusService.Line(cs, core) : string.Empty;
             bool notified = Notifications.NotificationCenter.History.Any(e => e.Type?.Id == "emergency_rescue")
                             && Notifications.NotificationCenter.History.Any(e => e.Type?.Id == "core_emergency_scrap");
+            string pauseNote = SessionState.GetString(K + "SoftlockPauseNote", string.Empty);
             Check(printed && scrapping && notified && coreLine.Contains("应急产废料") && !Localization.GameText.ContainsMarker(coreLine),
-                $"清空机器与废料 → 归还核心打印了 {MachineNaming.Short(st.LastPrintLogicId)}、开始应急产废料，两条通知进历史；核心状态“{coreLine}”");
+                $"清空机器与废料 → 归还核心打印了 {MachineNaming.Short(st.LastPrintLogicId)}、开始应急产废料，两条通知进历史；核心状态“{coreLine}”" +
+                (pauseNote.Length > 0 ? "（" + pauseNote + "）" : string.Empty));
             Campaign.Regions.HomeValleySoftlockGuard.DebugDestroyCore(cs);
             Next(80, "测试捷径：核心被毁（HomeValleySoftlockGuard.DebugDestroyCore），等失败页出现");
         }
@@ -7262,6 +7285,232 @@ namespace GameLogic.EditorTools
                 return;
             }
             Check(mode != null && mode.SelectedToolId == null, "右键取消选择");
+            // FG4-ECO-11：建造模式还开着，点“信号”页签选超控阵列，指着核心附近两块空地（4×4，按地形找，B25）。
+            GridCell core = HomeGridService.CorePivot(state);
+            GridCell? ghostAt = null, builtAt = null;
+            for (int r = 8; r <= 26 && builtAt == null; r++)
+            {
+                for (int dy = -r; dy <= r && builtAt == null; dy++)
+                {
+                    for (int dx = -r; dx <= r && builtAt == null; dx++)
+                    {
+                        if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != r)
+                        {
+                            continue;
+                        }
+                        var c = new GridCell(core.X + dx, core.Y + dy);
+                        if (!OnScreen(c))
+                        {
+                            continue;
+                        }
+                        // 虚影按建造模式当前的朝向校验（前一步为地下管线转过朝向，选中新建筑不会重置）；测试捷径登记的那座按朝向 0。
+                        if (ghostAt == null)
+                        {
+                            if (HomeGridService.ValidatePlacement(state, "override_array", c, mode?.GhostRotation ?? 0, checkCost: false).Ok)
+                            {
+                                ghostAt = c;
+                            }
+                        }
+                        else if ((Math.Abs(c.X - ghostAt.Value.X) > 6 || Math.Abs(c.Y - ghostAt.Value.Y) > 6)
+                                 && HomeGridService.ValidatePlacement(state, "override_array", c, 0, checkCost: false).Ok)
+                        {
+                            builtAt = c;
+                        }
+                    }
+                }
+            }
+            SessionState.SetInt(K + "OverrideGhostX", ghostAt?.X ?? 0);
+            SessionState.SetInt(K + "OverrideGhostY", ghostAt?.Y ?? 0);
+            SessionState.SetInt(K + "OverrideBuiltX", builtAt?.X ?? 0);
+            SessionState.SetInt(K + "OverrideBuiltY", builtAt?.Y ?? 0);
+            int tab = Campaign.Grid.GridContent.Categories.ToList().FindIndex(c => c.Id == "signal");
+            bool tabClicked = ClickUitk("[BuildModeHudHost]", "BuildCat" + tab);
+            int idx = HudItemIndex("override_array");
+            bool picked = idx >= 0 && ClickUitk("[BuildModeHudHost]", "BuildItem" + idx) && mode.SelectedTypeId == "override_array";
+            Check(ghostAt.HasValue && builtAt.HasValue && tabClicked && picked,
+                $"FG4-ECO-11：点“信号”页签里的“超控阵列”（第 {idx + 1} 项）：选中（{mode?.SelectedTypeId}）；核心附近找到两块 4×4 空地");
+            if (ghostAt.HasValue)
+            {
+                HoverWorld(new Vector3(ghostAt.Value.X, 0f, ghostAt.Value.Y));
+            }
+            Next(346, "鼠标移到空地上（超控阵列可以放；建造栏成本写关键材料与获取途径）");
+        }
+
+        // ── FG4-ECO-11：超控阵列（建造栏写关键材料从哪里获得、虚影等关键材料、建筑面板的槽位行、禁用 → 失效槽在 HUD 上显示 → 启用恢复）──
+
+        /// <summary>这一格（4×4 占地的四个角）在当前镜头画面里（离边缘留 8%）：鼠标真能指到它。</summary>
+        private static bool OnScreen(GridCell c)
+        {
+            Camera cam = Camera.main;
+            if (cam == null)
+            {
+                return false;
+            }
+            for (int dx = -2; dx <= 3; dx += 5)
+            {
+                for (int dy = -2; dy <= 3; dy += 5)
+                {
+                    Vector3 v = cam.WorldToViewportPoint(new Vector3(c.X + dx, 0f, c.Y + dy));
+                    if (v.z <= 0f || v.x < 0.08f || v.x > 0.92f || v.y < 0.08f || v.y > 0.92f)
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        private static void StepOverridePicked(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            GridPlacementResult pv = mode?.Preview;
+            string cost = BuildModeHudUIToolkit.Instance?.CostLabelText ?? string.Empty;
+            string key = Campaign.Economy.ItemCatalog.NameOf("listening_array_core");
+            Check(pv != null && pv.Ok && cost.Contains(key) && cost.Contains("寂听主脑") && cost.Contains("研究节点"),
+                $"放置预览：超控阵列指着空地可以放；建造栏成本写关键材料与获取途径、研究节点（“{cost.Replace("\n", " / ")}”）");
+            GridCell at = EnergyCell("OverrideGhost");
+            ClickWorld(new Vector3(at.X, 0f, at.Y));
+            Next(347, "单击放下超控阵列");
+        }
+
+        private static void StepOverridePlaced(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            GridCell at = EnergyCell("OverrideGhost");
+            BuildingRecord b = HomeGridService.BuildingAt(state, at);
+            string hoverTitle = null, hoverBody = null;
+            bool ghost = b != null && b.BuildingTypeId == "override_array" && Campaign.Regions.HomeValleyController.IsPlannedGhost(b)
+                         && b.ExtraMaterialIds != null && b.ExtraMaterialIds.Contains("listening_array_core")
+                         && Campaign.Regions.HomeValleyConstruction.TryDescribeSite(state, at, out hoverTitle, out hoverBody);
+            Check(ghost && (hoverBody ?? string.Empty).Contains(Campaign.Economy.ItemCatalog.NameOf("listening_array_core")),
+                $"单击放下超控阵列的虚影：所需材料含监听阵列核（悬停“{(hoverBody ?? string.Empty).Replace("\n", " / ")}”；状态行“{mode?.StatusText}”）");
+            // 测试捷径：取消这座虚影（关键材料从首领来，冒烟里拿不到；新建施工与取料由 FgOverrideArraySelfCheck B 段覆盖），
+            // 另一块空地上直接登记一座建成的 T1 超控阵列 + 一座发电机 2（保证它有电），下一步点它打开通用面板。
+            if (b != null && b.BuildingTypeId == "override_array")
+            {
+                HomeGridService.TryToggleDemolish(state, b.BuildingId);
+            }
+            AddSmokeBuilding(state, "override_array", "override", EnergyCell("OverrideBuilt"));
+            BuildingRecord arr = HomeGridService.FindBuilding(state, Campaign.Regions.HomeValleyLayout.RegionId + ":smoke_power_override");
+            if (arr != null)
+            {
+                arr.Tier = 1;
+            }
+            GridCell? genAt = null;
+            GridCell core = HomeGridService.CorePivot(state);
+            for (int r = 6; r <= 26 && genAt == null; r++)
+            {
+                for (int dx = -r; dx <= r && genAt == null; dx++)
+                {
+                    var c = new GridCell(core.X + dx, core.Y - r);
+                    if (HomeGridService.ValidatePlacement(state, Campaign.Regions.HomeValleyLayout.BuildingTypeGenerator2, c, 0, checkCost: false).Ok)
+                    {
+                        genAt = c;
+                    }
+                }
+            }
+            if (genAt.HasValue)
+            {
+                AddSmokeBuilding(state, Campaign.Regions.HomeValleyLayout.BuildingTypeGenerator2, "override_gen", genAt.Value);
+            }
+            Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+            GridCell built = EnergyCell("OverrideBuilt");
+            RightClickWorld(new Vector3(at.X, 0f, at.Y));
+            SessionState.SetInt(K + "OverridePanelClicked", 0);
+            Next(348, "右键取消选择，再左键点建成的超控阵列（打开通用面板）");
+        }
+
+        private static void StepOverridePanel(double inStep)
+        {
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            GridCell built = EnergyCell("OverrideBuilt");
+            if (inStep < 1.0)
+            {
+                return;
+            }
+            if (SessionState.GetInt(K + "OverridePanelClicked", 0) == 0)
+            {
+                Check(mode != null && mode.IsOpen && mode.SelectedTypeId == null, "右键取消选择（建造模式还开着）");
+                SessionState.SetInt(K + "OverridePanelClicked", 1);
+                ClickWorld(new Vector3(built.X + 1, 0f, built.Y + 1));
+                return;
+            }
+            if (inStep < 1.8)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            string arrId = Campaign.Regions.HomeValleyLayout.RegionId + ":smoke_power_override";
+            ProductionPanelUIToolkit bp = ProductionPanelUIToolkit.Instance;
+            UI.SignalCore.SignalCoreHudUIToolkit hud = UI.SignalCore.SignalCoreHudUIToolkit.Instance;
+            bool open = ProductionPanelUIToolkit.IsOpen && bp != null && bp.PanelVisible && ProductionPanelUIToolkit.BuildingId == arrId;
+            string tier = bp?.TierText ?? string.Empty;
+            Check(open && tier.Contains("已解锁 3，生效 3") && tier.Contains("熔炉心") && Campaign.Signal.SignalCoreService.UnlockedSlots(state) == 3
+                  && hud != null && hud.EntryText.EndsWith("/3", StringComparison.Ordinal) && !hud.EntryText.Contains("失效"),
+                $"点建成的超控阵列打开通用面板：“{bp?.IdentText}”槽位行“{tier.Replace("\n", " / ")}”；HUD 信号核按钮“{hud?.EntryText}”");
+            Check(ClickUitk("[ProductionPanelHost]", "BpEnable"), "通用面板上点“禁用”");
+            Next(349, "禁用超控阵列：第 3 槽失效");
+        }
+
+        private static void StepOverrideDisabled(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            ProductionPanelUIToolkit bp = ProductionPanelUIToolkit.Instance;
+            UI.SignalCore.SignalCoreHudUIToolkit hud = UI.SignalCore.SignalCoreHudUIToolkit.Instance;
+            string tier = bp?.TierText ?? string.Empty;
+            string note = Notifications.NotificationCenter.History.LastOrDefault(n => n.Type != null && n.Type.Id == "override_offline")?.Text ?? string.Empty;
+            Check(Campaign.Signal.SignalCoreService.ActiveSlots(state) == 2 && hud != null && hud.EntryText.Contains("1 槽失效") && tier.Contains("多出的槽失效") && tier.Contains("已禁用")
+                  && note.Contains("第 3 槽"),
+                $"禁用后第 3 槽失效：HUD 信号核按钮“{hud?.EntryText}”；面板“{tier.Replace("\n", " / ")}”；通知“{note}”");
+            Check(ClickUitk("[ProductionPanelHost]", "BpEnable"), "通用面板上点“启用”");
+            Next(350, "启用超控阵列：第 3 槽恢复");
+        }
+
+        private static void StepOverrideEnabled(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            UI.SignalCore.SignalCoreHudUIToolkit hud = UI.SignalCore.SignalCoreHudUIToolkit.Instance;
+            string note = Notifications.NotificationCenter.History.LastOrDefault(n => n.Type != null && n.Type.Id == "override_online")?.Text ?? string.Empty;
+            Check(Campaign.Signal.SignalCoreService.ActiveSlots(state) == 3 && hud != null && !hud.EntryText.Contains("失效") && note.Contains("第 3 槽"),
+                $"启用后自动恢复：HUD 信号核按钮“{hud?.EntryText}”；通知“{note}”");
+            CheckNoTextMarkers("超控阵列面板与信号核按钮");
+            PressKeyKeepMouse(KeyCode.Escape);
+            Next(351, "Esc 关闭通用面板");
+        }
+
+        private static void StepOverrideClosed(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            Check(!ProductionPanelUIToolkit.IsOpen && mode != null && mode.IsOpen, "Esc 先关通用面板（建造模式还开着）");
+            // 测试捷径清理：拿掉冒烟登记的超控阵列与发电机（后面的步骤按 2 槽信号核断言）。
+            string arrId = Campaign.Regions.HomeValleyLayout.RegionId + ":smoke_power_override";
+            string genId = Campaign.Regions.HomeValleyLayout.RegionId + ":smoke_power_override_gen";
+            state.BuildingRecords = state.BuildingRecords.Where(b => b == null || (b.BuildingId != arrId && b.BuildingId != genId)).ToArray();
+            HomeGridService.MapFor(state);
+            Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+            Check(Campaign.Signal.SignalCoreService.UnlockedSlots(state) == 2, "清理冒烟登记的超控阵列后信号核回到 2 槽");
             PressKeyKeepMouse(KeyCode.Escape);
             Next(140, "Esc 退出建造模式；FG0-ARCH-03：家园突袭战斗原型（测试捷径）");
         }

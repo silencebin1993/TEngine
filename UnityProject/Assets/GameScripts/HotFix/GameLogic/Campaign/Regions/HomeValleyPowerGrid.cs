@@ -251,6 +251,8 @@ namespace GameLogic.Campaign.Regions
                 }
             }
 
+            // FG4-ECO-11（FGR-ECO-020 断电时槽位失效、来电后恢复）：超控阵列的生效等级复用这一个结算出口——完工 / 升级 / 拆除 / 启停 / 摧毁 / 电力翻转都走这里，不另起轮询。
+            Signal.OverrideArrayService.OnPowerApplied(state, notify: !_suppressFeedback);
             _suppressFeedback = false;
             string[] brownoutIds = brownout.ToArray();
             string[] unconnectedIds = unconnected.ToArray();
@@ -263,6 +265,40 @@ namespace GameLogic.Campaign.Regions
             Economy.AwayReportService.OnPowerApplied(state, brownoutIds);
             return new GridSummary(totalSupply, totalDemand, Math.Max(0f, totalDemand - totalSupply),
                 brownoutIds, order.ToArray(), unconnectedIds, kernel.SubnetCount);
+        }
+
+        /// <summary>
+        /// FG4-ECO-11（FGR-ECO-020“持续耗电 T1 80，T2 120，T3 160”）：这座建筑现在的耗电——有等级、且这一级在 fg.TbBuildingTier 填了 powerDemand 的按等级，
+        /// 其余按建筑表（fg.TbBuilding.powerDemand）。不用电的建筑返回 0。O(1)（两次字典查找）。
+        /// </summary>
+        public static float DemandOf(BuildingRecord b)
+        {
+            if (b == null || !HomeValleyLayout.PowerProfile.TryGetValue(b.BuildingTypeId, out (float PowerDemand, int PowerPriority) p))
+            {
+                return 0f;
+            }
+            GameConfig.fg.BuildingTier row = Economy.BuildingOps.HasTiers(b.BuildingTypeId)
+                ? Economy.BuildingOps.TierRow(b.BuildingTypeId, Economy.BuildingOps.TierOf(b))
+                : null;
+            return row != null && row.PowerDemand > 0f ? row.PowerDemand : p.PowerDemand;
+        }
+
+        /// <summary>这一类建筑有没有按等级变的耗电（任何一级填了 powerDemand）。</summary>
+        public static bool HasTierDemand(string typeId)
+        {
+            if (typeId == null || !Economy.BuildingOps.HasTiers(typeId))
+            {
+                return false;
+            }
+            for (int t = 1; t <= Economy.BuildingOps.MaxTier(typeId); t++)
+            {
+                GameConfig.fg.BuildingTier row = Economy.BuildingOps.TierRow(typeId, t);
+                if (row != null && row.PowerDemand > 0f)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private static void PostSplit(PowerSplit split)
@@ -324,7 +360,7 @@ namespace GameLogic.Campaign.Regions
                 {
                     continue;
                 }
-                totalDemand += profile.PowerDemand;
+                totalDemand += DemandOf(b);
                 if (b.PowerState == BuildingPowerState.Brownout)
                 {
                     brownout.Add(b.BuildingId);

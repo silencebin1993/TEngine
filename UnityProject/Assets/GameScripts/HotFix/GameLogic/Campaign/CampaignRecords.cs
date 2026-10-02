@@ -287,6 +287,17 @@ namespace GameLogic.Campaign
         /// <summary>FG3-LOG-02：机器已经从仓库运到现场、放进这座虚影的材料（累计）。施工进度不能超过“已到材料 / 所需材料”；
         /// 取消虚影时这部分全额退回（仓库满了就变成地面物，机器之后搬走）；施工中被摧毁时已消耗部分按比例掉落为地面物。</summary>
         public int ConstructionDelivered;
+        /// <summary>FG4-ECO-11（承接 DEBT-FG3LOG02-02 多材料造价）：废料之外这座虚影要的材料——资源类型（= 物品 ID，fg.TbBuildMaterial），与
+        /// <see cref="ExtraRequired"/> / <see cref="ExtraDelivered"/> 下标平行。放置 / 升级时按表写入，机器与废料同一套取料腿逐种取来；进度按每种材料
+        /// “已到 / 所需”里最小的那个封顶；取消全额退回，被摧毁时已消耗部分按比例掉落。建成后清空（投入记在 <see cref="InvestedExtraIds"/>）。
+        /// 旧存档没有这些字段 = 空（只要废料）。唯一写入口 <see cref="Regions.HomeValleyConstruction"/> / <see cref="Regions.HomeValleyWorkOrders"/>。</summary>
+        public string[] ExtraMaterialIds;
+        public int[] ExtraRequired;
+        public int[] ExtraDelivered;
+        /// <summary>FG4-ECO-11：建成 / 升级进这座建筑的非废料材料（例如超控阵列的关键材料），与 <see cref="InvestedExtraAmounts"/> 平行。
+        /// 拆除时全额退回（关键材料回核心保管库）；被摧毁时留在建筑里（关键材料永不消失，FG08），重建只收废料。旧存档没有 = 空。</summary>
+        public string[] InvestedExtraIds;
+        public int[] InvestedExtraAmounts;
         /// <summary>FG4-ECO-05（FGR-ECO-011 改名）：玩家起的名字（null / 空 = 默认名“类型名”）。面板、悬停、通知、施工队列都显示它。
         /// 唯一写入口 <see cref="Economy.BuildingOps.TryRename"/>；搬迁 / 升级完工时跟着建筑走。旧存档没有这个字段 = 默认名。</summary>
         public string CustomName;

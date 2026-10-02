@@ -331,8 +331,9 @@ namespace GameLogic.EditorTools
                     r.CanDisable.ToString(CultureInfo.InvariantCulture), r.RebuildScrap.ToString(CultureInfo.InvariantCulture), R(r.RebuildSeconds))).ToArray();
             string[] rt = ConfigSystem.Instance.Tables.TbBuildingTier.DataList
                 .Select(r => string.Join("\t", "BT2", r.Id, r.TypeId, r.Tier.ToString(CultureInfo.InvariantCulture), r.DiffScrap.ToString(CultureInfo.InvariantCulture), R(r.Seconds),
-                    r.UnlockRule, r.UnlockHintKey, R(r.Value), r.ValueKey)).ToArray();
-            Expect(code == 0 && bs.Length >= 26 && bs.SequenceEqual(rs) && bt.Length == 5 && bt.SequenceEqual(rt),
+                    r.UnlockRule, r.UnlockHintKey, R(r.Value), r.ValueKey, R(r.PowerDemand))).ToArray();
+            // FG4-ECO-11：等级表多了超控阵列 T1～T3 三行与 powerDemand 列（8 行）。
+            Expect(code == 0 && bs.Length >= 27 && bs.SequenceEqual(rs) && bt.Length == 8 && bt.SequenceEqual(rt),
                 $"A1 fg.TbBuildingService（{bs.Length} 行）与 fg.TbBuildingTier（{bt.Length} 行）与源数据 fgdata_buildops 逐字段一致" + (code == 0 ? string.Empty : "：" + FgProductionSelfCheck.Tail(output)));
             var missing = ConfigSystem.Instance.Tables.TbBuilding.DataList.Where(b => BuildingOps.Service(b.TypeId) == null).Select(b => b.TypeId).ToList();
             var badCodex = ConfigSystem.Instance.Tables.TbBuildingService.DataList.Where(r => !ConfigSystem.Instance.Tables.TbCodexEntry.DataList.Any(c => c.Id == r.CodexId)).Select(r => r.TypeId).ToList();

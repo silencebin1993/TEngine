@@ -632,7 +632,7 @@ namespace GameLogic.UI.Kit
                     _sb.Append('\n');
                 }
                 _sb.Append(GameText.Format("power.panel.member_row", label,
-                    HomeValleyLayout.PowerProfile.TryGetValue(b.BuildingTypeId, out (float PowerDemand, int PowerPriority) p) ? HomeValleyPowerGrid.Num(p.PowerDemand) : "0",
+                    HomeValleyLayout.PowerProfile.ContainsKey(b.BuildingTypeId) ? HomeValleyPowerGrid.Num(HomeValleyPowerGrid.DemandOf(b)) : "0",
                     StateText(b)));
             }
             _members.text = _memberRecords.Count == 0 ? GameText.Get("power.panel.no_members") : _sb.ToString();

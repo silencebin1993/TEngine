@@ -146,7 +146,9 @@ namespace GameLogic.Campaign.Grid
             }
             int diff = UpgradeCost(b, toType, toTier, out float seconds);
             string ghostId = b.BuildingId + UpgradeGhostSuffix;
-            HomeValleyWorkOrders.WorkOrderOpResult order = HomeValleyWorkOrders.TryCreateUpgradeAt(state, b, ghostId, toType, diff, seconds, toTier);
+            // FG4-ECO-11：有等级的建筑升到第 N 级时，fg.TbBuildMaterial 的第 N 级行（例如超控阵列 T2 的熔炉心）与废料差额一起记进虚影。
+            HomeValleyWorkOrders.WorkOrderOpResult order = HomeValleyWorkOrders.TryCreateUpgradeAt(state, b, ghostId, toType, diff, seconds, toTier,
+                toTier > 0 ? Economy.BuildMaterials.Upgrade(b.BuildingTypeId, toTier) : null);
             if (!order.Success)
             {
                 return GridOpResult.Fail(GridReason.Of(GridBlockReason.Busy), check);

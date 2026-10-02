@@ -299,7 +299,8 @@ namespace GameLogic.Campaign.Regions
             LastPaste = r;
             _pasteKey = int.MinValue;
             int notPlaced = plan.BadCount + r.Failed;
-            string text = GameText.Format("plan.paste.done", r.PlacedBuildings, r.PlacedPieces, plan.Cost, state.Scrap);
+            string text = GameText.Format("plan.paste.done", r.PlacedBuildings, r.PlacedPieces, plan.Cost, state.Scrap)
+                          + (plan.Extras.Any ? "\n" + plan.Extras.Describe(state) : string.Empty); // FG4-ECO-11
             if (notPlaced > 0)
             {
                 string why = plan.BadCount > 0 ? plan.DescribeFirstBad() : (r.FirstFailureName + "：" + (r.FirstFailure?.Describe() ?? string.Empty));
@@ -404,7 +405,8 @@ namespace GameLogic.Campaign.Regions
             }
             int done = PlanHistory.Upgrade(state, plan, out GridReason? fail);
             LastResult = done > 0 ? new GridOpResult(GridOpResult.Kind.UpgradePlanned, null) : GridOpResult.Fail(fail ?? GridReason.Of(GridBlockReason.NoUpgrade));
-            string text = GameText.Format("plan.upgrade.done_box", done, plan.Cost, state.Scrap);
+            string text = GameText.Format("plan.upgrade.done_box", done, plan.Cost, state.Scrap)
+                          + (plan.Extras.Any ? "\n" + plan.Extras.Describe(state) : string.Empty); // FG4-ECO-11
             if (plan.Refused > 0 && plan.FirstRefusal != null)
             {
                 text += "\n" + GameText.Format("plan.upgrade.some_refused", plan.Refused, plan.FirstRefusal.Value.Describe());

@@ -33,6 +33,8 @@ namespace GameLogic.Campaign.Grid
         public readonly List<string> BuildingTargets = new List<string>();
         public readonly List<UpgradeGroup> Groups = new List<UpgradeGroup>();
         public int Cost;
+        /// <summary>FG4-ECO-11：框里建筑升级差额在废料之外要的材料合计（超控阵列 T2 / T3 的关键材料）。</summary>
+        public readonly Economy.BuildMaterialTally Extras = new Economy.BuildMaterialTally();
         public int Refused;
         public GridReason? FirstRefusal;
 
@@ -67,6 +69,7 @@ namespace GameLogic.Campaign.Grid
             plan.BuildingTargets.Clear();
             plan.Groups.Clear();
             plan.Cost = 0;
+            plan.Extras.Clear();
             plan.Refused = 0;
             plan.FirstRefusal = null;
             int max = GridContent.TuningInt("grid.drag_max_cells");
@@ -105,6 +108,7 @@ namespace GameLogic.Campaign.Grid
                 plan.Buildings.Add(rec.BuildingId);
                 plan.BuildingTargets.Add(to);
                 plan.Cost += HomeGridService.UpgradeCost(rec, to, toTier, out _); // FG4-ECO-05：有等级的建筑（仓库 / 信号塔）按 fg.TbBuildingTier 的差额。
+                plan.Extras.Add(toTier > 0 ? Economy.BuildMaterials.Upgrade(rec.BuildingTypeId, toTier) : null); // FG4-ECO-11：差额里的额外材料
             }
             var upgrading = new HashSet<long>();
             foreach (PlannedBeltRecord p in state.Grid?.PlannedBelts ?? Array.Empty<PlannedBeltRecord>())

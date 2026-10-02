@@ -174,7 +174,7 @@ namespace GameLogic.Campaign.Blueprint
         /// 开销：O(1) 次装配解析，只在接入 / 离开 / 冷却开始与结束时调用（<see cref="NotifyChanged"/>），不按帧、不按开火。</summary>
         public static MachineCombatResolution ResolveForPilot(CampaignState state, int machineLogicId, int seed) =>
             Signal.SignalUplinkService.IsUplinked(state, machineLogicId)
-                ? ResolveForUplink(state, machineLogicId, seed, Signal.SignalCoreService.CurrentContentIds(state))
+                ? ResolveForUplink(state, machineLogicId, seed, Signal.SignalCoreService.ActiveContentIds(state)) // FG4-ECO-11：失效的槽不插入
                 : Resolve(state, machineLogicId, seed);
 
         /// <summary>FG1-SIG-03：这台机器的装配没变、但“谁在开”变了（接入 / 离开 / 核心固件冷却开始或结束）——通知订阅方（战斗内核）只重算这一台。</summary>

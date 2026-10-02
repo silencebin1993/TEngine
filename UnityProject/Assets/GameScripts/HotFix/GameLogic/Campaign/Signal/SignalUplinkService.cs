@@ -1561,7 +1561,7 @@ namespace GameLogic.Campaign.Signal
             {
                 return string.Empty;
             }
-            string[] core = SignalCoreService.CurrentContentIds(s);
+            string[] core = SignalCoreService.ActiveContentIds(s); // FG4-ECO-11：失效的槽不插入
             UplinkInsertionPlan plan = MachineLoadoutRegistry.PlanForUplink(s, logicId, core);
             if (plan == null)
             {

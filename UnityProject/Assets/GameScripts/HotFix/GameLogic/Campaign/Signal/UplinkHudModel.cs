@@ -26,6 +26,8 @@ namespace GameLogic.Campaign.Signal
         NotInserted = 3,
         /// <summary>插进去了，但接入口不在导线上，不生效。</summary>
         Ineffective = 4,
+        /// <summary>FG4-ECO-11：超控阵列解锁的槽暂时失效（阵列断电 / 未接入电网 / 禁用 / 被摧毁 / 已拆除）：固件保留、不插入，<see cref="UplinkHudSlot.Reason"/> 写明原因。</summary>
+        Offline = 5,
     }
 
     public struct UplinkHudSlot
@@ -127,7 +129,7 @@ namespace GameLogic.Campaign.Signal
             }
             into.Label = SignalPresence.MachineLabel(logicId);
             into.ChassisName = MechanicalContentFacade.ResolveChassisLabel(rec.ChassisId) ?? string.Empty;
-            string[] core = SignalCoreService.CurrentContentIds(s);
+            string[] core = SignalCoreService.ActiveContentIds(s); // FG4-ECO-11：失效的槽不插入
             UplinkInsertionPlan plan = MachineLoadoutRegistry.PlanForUplink(s, logicId, core);
             ResolveCount++;
             into.HasPort = plan != null && plan.HasUplink;
@@ -144,10 +146,29 @@ namespace GameLogic.Campaign.Signal
                 offPath = true;
             }
             int unlocked = SignalCoreService.UnlockedSlots(s);
-            for (int i = 0; i < unlocked; i++)
+            int activeSlots = SignalCoreService.ActiveSlots(s);
+            int max = SignalCoreService.MaxSlots;
+            for (int i = 0; i < max; i++)
             {
                 string content = SignalCoreService.SlotContentId(s, i);
+                // FG4-ECO-11：已解锁的槽都列出；超控阵列拆掉后锁回去、但还装着固件的槽也列出（写明不生效），免得玩家以为固件丢了。
+                if (i >= unlocked && content.Length == 0)
+                {
+                    continue;
+                }
                 var slot = new UplinkHudSlot { Index = i, FirmwareId = content, State = UplinkSlotState.Empty, Reason = string.Empty };
+                if (i >= activeSlots)
+                {
+                    // FGR-ECO-020“断电时对应槽位失效……HUD 给出提示”：固件保留、不插入，写明原因（失效 / 未解锁）。
+                    slot.Raw = content.Length > 0 && FirmwareKinds.IsRaw(s, content);
+                    slot.Core = content.Length > 0 && FirmwareKinds.IsCore(content);
+                    slot.State = UplinkSlotState.Offline;
+                    slot.Reason = i < unlocked
+                        ? OverrideArrayService.ReasonText(OverrideArrayService.OfflineReason(s))
+                        : GameText.Format("signal.core.slot_locked", SignalCoreService.TierForSlot(i));
+                    into.Slots.Add(slot);
+                    continue;
+                }
                 if (content.Length > 0)
                 {
                     slot.Raw = FirmwareKinds.IsRaw(s, content);
@@ -224,7 +245,7 @@ namespace GameLogic.Campaign.Signal
 
         /// <summary>槽位部分的变化键：接入状态（含冷却整秒、信号核、固件表、语言）、机器、装配登记。</summary>
         public static int SlotsKey(CampaignState s, int logicId) =>
-            HashCode.Combine(SignalUplinkService.StatusKey(s), logicId, PortRevision, (int)GameText.Language);
+            HashCode.Combine(SignalUplinkService.StatusKey(s), logicId, PortRevision, (int)GameText.Language, OverrideArrayService.StateKey(s));
 
         /// <summary>机体部分的变化键（量化到显示精度：热量 / 电池 / 耐久整数、链路百分比、宽限整秒、暴露一位小数）。</summary>
         public static int VitalsKey(UplinkHudSnapshot v) =>
@@ -432,6 +453,7 @@ namespace GameLogic.Campaign.Signal
                 UplinkSlotState.Active => GameText.Get("uplink.hud.state.active"),
                 UplinkSlotState.Cooling => GameText.Format("uplink.hud.state.cooling", Math.Ceiling(slot.CooldownLeft).ToString("0", CultureInfo.InvariantCulture)),
                 UplinkSlotState.Ineffective => GameText.Format("uplink.hud.state.ineffective", slot.Reason),
+                UplinkSlotState.Offline => GameText.Format("uplink.hud.state.offline", slot.Reason),
                 _ => GameText.Format("uplink.hud.state.not_inserted", slot.Reason),
             };
             return slot.Raw ? state + " · " + GameText.Get("uplink.hud.state.raw") : state;

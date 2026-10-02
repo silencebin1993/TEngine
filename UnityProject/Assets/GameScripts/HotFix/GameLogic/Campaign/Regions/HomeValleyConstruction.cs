@@ -197,7 +197,165 @@ namespace GameLogic.Campaign.Regions
                 return p == null ? 0 : Math.Max(0, UnbuiltCells(p) * p.ScrapPerCell - p.Delivered);
             }
             BuildingRecord b = FindSiteBuilding(state, order.TargetId);
-            return b == null ? 0 : Math.Max(0, b.ConstructionRequired - b.ConstructionDelivered);
+            return b == null ? 0 : Math.Max(0, b.ConstructionRequired - b.ConstructionDelivered) + ExtraStillNeeded(b);
+        }
+
+        // ── FG4-ECO-11（DEBT-FG3LOG02-02 多材料造价）：废料之外的材料 ─────────────────────────────
+
+        /// <summary>这座虚影在废料之外还缺多少件（各种材料合计，不含货舱里那一趟）。</summary>
+        public static int ExtraStillNeeded(BuildingRecord b)
+        {
+            int n = Economy.BuildMaterials.SiteCount(b);
+            int sum = 0;
+            for (int i = 0; i < n; i++)
+            {
+                sum += Math.Max(0, b.ExtraRequired[i] - b.ExtraDelivered[i]);
+            }
+            return sum;
+        }
+
+        /// <summary>这座虚影是否要废料之外的材料。</summary>
+        public static bool HasExtras(BuildingRecord b) => Economy.BuildMaterials.SiteCount(b) > 0;
+
+        /// <summary>家园里这种施工材料的库存（废料 = <see cref="CampaignState.Scrap"/>；其余按物品库存，核心保管库也算）。</summary>
+        public static int StockOf(CampaignState state, string resourceType)
+        {
+            if (state == null || string.IsNullOrEmpty(resourceType))
+            {
+                return 0;
+            }
+            return resourceType == CampaignEconomyLedger.ResourceScrap
+                ? Math.Max(0, Mathf.FloorToInt(state.Scrap))
+                : Math.Max(0, HomeValleyCargo.GetStorageUsed(state, resourceType));
+        }
+
+        /// <summary>这个现场还缺的某一种材料（不含货舱里那一趟）。</summary>
+        public static int NeedOf(CampaignState state, WorkOrderRecord order, string resourceType)
+        {
+            if (order == null || string.IsNullOrEmpty(resourceType))
+            {
+                return 0;
+            }
+            if (IsBeltPlan(order.TargetId))
+            {
+                return resourceType == CampaignEconomyLedger.ResourceScrap ? MaterialsStillNeeded(state, order) : 0;
+            }
+            BuildingRecord b = FindSiteBuilding(state, order.TargetId);
+            if (b == null)
+            {
+                return 0;
+            }
+            if (resourceType == CampaignEconomyLedger.ResourceScrap)
+            {
+                return Math.Max(0, b.ConstructionRequired - b.ConstructionDelivered);
+            }
+            int n = Economy.BuildMaterials.SiteCount(b);
+            int need = 0;
+            for (int i = 0; i < n; i++)
+            {
+                if (string.Equals(b.ExtraMaterialIds[i], resourceType, StringComparison.Ordinal))
+                {
+                    need += Math.Max(0, b.ExtraRequired[i] - b.ExtraDelivered[i]);
+                }
+            }
+            return need;
+        }
+
+        /// <summary>这个现场还缺的材料种类，按取料顺序（废料在前，其余按表顺序）写进 <paramref name="into"/>（资源类型）。O(材料种类)，调用方复用列表。</summary>
+        public static void NeededMaterials(CampaignState state, WorkOrderRecord order, List<string> into)
+        {
+            into.Clear();
+            if (order == null)
+            {
+                return;
+            }
+            if (NeedOf(state, order, CampaignEconomyLedger.ResourceScrap) > 0)
+            {
+                into.Add(CampaignEconomyLedger.ResourceScrap);
+            }
+            if (IsBeltPlan(order.TargetId))
+            {
+                return;
+            }
+            BuildingRecord b = FindSiteBuilding(state, order.TargetId);
+            int n = Economy.BuildMaterials.SiteCount(b);
+            for (int i = 0; i < n; i++)
+            {
+                string rt = b.ExtraMaterialIds[i];
+                if (b.ExtraRequired[i] > b.ExtraDelivered[i] && !into.Contains(rt))
+                {
+                    into.Add(rt);
+                }
+            }
+        }
+
+        private static readonly List<string> NeedScratch = new List<string>(4);
+
+        /// <summary>下一趟该取哪种材料：还缺、且家园里有货的第一种（废料优先）；都没货返回 null。</summary>
+        public static string NextFetchMaterial(CampaignState state, WorkOrderRecord order)
+        {
+            NeededMaterials(state, order, NeedScratch);
+            for (int i = 0; i < NeedScratch.Count; i++)
+            {
+                if (StockOf(state, NeedScratch[i]) > 0)
+                {
+                    return NeedScratch[i];
+                }
+            }
+            return null;
+        }
+
+        /// <summary>还缺的材料里有没有家园里有货的（施工单能不能派机器去取）。</summary>
+        public static bool HasFetchableStock(CampaignState state, WorkOrderRecord order) => NextFetchMaterial(state, order) != null;
+
+        /// <summary>
+        /// 卡住施工的那种材料（等待材料时写进原因码、队列与悬停）：还缺且库存为 0 的第一种；都有货（只是被别的施工单排在前面）时取还缺的第一种。
+        /// 不缺料返回 null。
+        /// </summary>
+        public static string BlockingMaterial(CampaignState state, WorkOrderRecord order, out int need, out int stock)
+        {
+            NeededMaterials(state, order, NeedScratch);
+            string first = null;
+            for (int i = 0; i < NeedScratch.Count; i++)
+            {
+                string rt = NeedScratch[i];
+                first ??= rt;
+                if (StockOf(state, rt) <= 0)
+                {
+                    need = NeedOf(state, order, rt);
+                    stock = 0;
+                    return rt;
+                }
+            }
+            need = first != null ? NeedOf(state, order, first) : 0;
+            stock = first != null ? StockOf(state, first) : 0;
+            return first;
+        }
+
+        /// <summary>“等待材料”的原因码：materials:&lt;还差&gt;:&lt;库存&gt;:&lt;资源类型&gt;（旧存档只有前两段 = 废料）。
+        /// “还差”只算原因码里这一种材料（FG4-ECO-11 审查修复 P2：废料原来用全部材料合计，超控阵列缺 120 废料 + 1 件关键材料时写成“废料 ×121”；
+        /// 其余材料逐种写在悬停 <see cref="ExtraHoverLines"/> 里）。</summary>
+        public static string MaterialsReason(CampaignState state, WorkOrderRecord order)
+        {
+            string rt = BlockingMaterial(state, order, out int need, out int stock) ?? CampaignEconomyLedger.ResourceScrap;
+            if (rt == CampaignEconomyLedger.ResourceScrap)
+            {
+                need = NeedOf(state, order, rt);
+                stock = StockOf(state, rt);
+            }
+            return MaterialsReasonPrefix + need.ToString(CultureInfo.InvariantCulture) + ":" + stock.ToString(CultureInfo.InvariantCulture) + ":" + rt;
+        }
+
+        /// <summary>施工现场的额外材料条目：资源类型、已到、所需（悬停 / 面板逐种列出用）。</summary>
+        public static int ExtraLines(BuildingRecord b, List<(string ResourceType, int Delivered, int Required)> into)
+        {
+            into.Clear();
+            int n = Economy.BuildMaterials.SiteCount(b);
+            for (int i = 0; i < n; i++)
+            {
+                into.Add((b.ExtraMaterialIds[i], Math.Min(b.ExtraDelivered[i], b.ExtraRequired[i]), b.ExtraRequired[i]));
+            }
+            return n;
         }
 
         /// <summary>这个现场一共要多少材料（传送带：没建成的格子；建筑：整座）与已经到了多少（显示用）。</summary>
@@ -277,6 +435,21 @@ namespace GameLogic.Campaign.Regions
             return best;
         }
 
+        /// <summary>
+        /// 施工单取料腿的目的地：按这一趟要取的材料决定（FG4-ECO-11 审查修复 P2）。核心保管库里的物品（关键材料）只存在归还核心，
+        /// 一律走核心；废料与其余固体照旧去离现场最近的仓库或核心（<see cref="StoragePosition"/>）。O(材料种类)。
+        /// </summary>
+        public static Vector2 FetchPosition(CampaignState state, WorkOrderRecord order, Vector2 site)
+        {
+            string material = NextFetchMaterial(state, order);
+            if (material != null && material != CampaignEconomyLedger.ResourceScrap
+                && Economy.ItemCatalog.TryGetByResource(material, out Economy.ItemDef item) && item.Form == Economy.ItemForm.Vault)
+            {
+                return HomeValleyLayout.Core.Position;
+            }
+            return StoragePosition(state, site);
+        }
+
         private static void ConsiderStorage(BuildingRecord b, Vector2 near, ref Vector2 best, ref float bestD)
         {
             if (b == null || b.RegionId != HomeValleyLayout.RegionId)
@@ -309,7 +482,17 @@ namespace GameLogic.Campaign.Regions
             {
                 return 0;
             }
-            int need = MaterialsStillNeeded(state, order);
+            // FG4-ECO-11：多材料——这一趟取还缺、且有货的第一种（废料优先）；一趟只装一种。
+            string material = NextFetchMaterial(state, order);
+            if (material == null)
+            {
+                return 0;
+            }
+            if (material != CampaignEconomyLedger.ResourceScrap)
+            {
+                return TryFetchItem(state, order, machine, material);
+            }
+            int need = NeedOf(state, order, material);
             int stock = Mathf.FloorToInt(state.Scrap);
             int load = Math.Min(need, Math.Min(CarryFor(machine), stock));
             if (load <= 0)
@@ -331,9 +514,67 @@ namespace GameLogic.Campaign.Regions
             return load;
         }
 
-        /// <summary>机器到了现场：货舱里的施工材料放进虚影（建筑第一次收到材料时转为“施工中”）。</summary>
+        /// <summary>FG4-ECO-11：取一趟废料以外的材料（仓库 / 核心保管库直接出库，只是搬运、不计生产统计；建成时才算消耗）。</summary>
+        private static int TryFetchItem(CampaignState state, WorkOrderRecord order, MachineRecord machine, string material)
+        {
+            if (!Economy.ItemCatalog.TryGetByResource(material, out Economy.ItemDef item))
+            {
+                return 0;
+            }
+            int need = NeedOf(state, order, material);
+            int load = Math.Min(need, Math.Min(CarryFor(machine), Economy.HomeInventory.Stock(state, item)));
+            if (load <= 0)
+            {
+                return 0;
+            }
+            int got = Economy.HomeInventory.RemoveUpTo(state, item, load);
+            if (got <= 0)
+            {
+                return 0;
+            }
+            order.FetchCount++;
+            machine.Cargo = new[] { new CargoEntry { ResourceType = material, Amount = got } };
+            Revision++;
+            return got;
+        }
+
+        /// <summary>这种资源算不算施工材料（废料，或家园能存的物品）。</summary>
+        private static bool IsBuildMaterial(string resourceType) =>
+            !string.IsNullOrEmpty(resourceType) && (resourceType == CampaignEconomyLedger.ResourceScrap || HomeValleyCargo.CanStore(resourceType));
+
+        /// <summary>机器货舱里的施工材料合计（废料 + 其余材料；自检与旅程读）。</summary>
+        public static int CargoMaterials(MachineRecord machine)
+        {
+            if (machine?.Cargo == null)
+            {
+                return 0;
+            }
+            int n = 0;
+            foreach (CargoEntry c in machine.Cargo)
+            {
+                if (IsBuildMaterial(c.ResourceType))
+                {
+                    n += c.Amount;
+                }
+            }
+            return n;
+        }
+
+        /// <summary>机器到了现场：货舱里的施工材料放进虚影（建筑第一次收到材料时转为“施工中”）。FG4-ECO-11：废料以外的材料逐种放进对应的位置。</summary>
         internal static void Deposit(CampaignState state, WorkOrderRecord order, MachineRecord machine)
         {
+            if (machine?.Cargo == null || machine.Cargo.Length == 0)
+            {
+                return;
+            }
+            foreach (CargoEntry c in machine.Cargo)
+            {
+                if (c.Amount > 0 && c.ResourceType != CampaignEconomyLedger.ResourceScrap && IsBuildMaterial(c.ResourceType))
+                {
+                    DepositItems(state, order, machine, machine.Cargo);
+                    return;
+                }
+            }
             int amount = CargoScrap(machine);
             if (amount <= 0)
             {
@@ -368,6 +609,49 @@ namespace GameLogic.Campaign.Regions
             Revision++;
         }
 
+        /// <summary>FG4-ECO-11：货舱里有废料以外的施工材料时逐种放进虚影（只有建筑虚影收；放不进 / 现场没了的退回仓库）。</summary>
+        private static void DepositItems(CampaignState state, WorkOrderRecord order, MachineRecord machine, CargoEntry[] cargo)
+        {
+            machine.Cargo = Array.Empty<CargoEntry>();
+            BuildingRecord b = IsBeltPlan(order.TargetId) ? null : FindSiteBuilding(state, order.TargetId);
+            int n = Economy.BuildMaterials.SiteCount(b);
+            for (int k = 0; k < cargo.Length; k++)
+            {
+                CargoEntry c = cargo[k];
+                if (c.Amount <= 0 || !IsBuildMaterial(c.ResourceType))
+                {
+                    continue;
+                }
+                int left = c.Amount;
+                if (b != null && c.ResourceType == CampaignEconomyLedger.ResourceScrap)
+                {
+                    b.ConstructionDelivered += left;
+                    left = 0;
+                }
+                for (int i = 0; i < n && left > 0; i++)
+                {
+                    if (!string.Equals(b.ExtraMaterialIds[i], c.ResourceType, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+                    int put = Math.Min(left, Math.Max(0, b.ExtraRequired[i] - b.ExtraDelivered[i]));
+                    b.ExtraDelivered[i] += put;
+                    left -= put;
+                }
+                if (left > 0)
+                {
+                    ReturnMaterials(state, machine.WorldPosition, c.ResourceType, left,
+                        order.WorkOrderId + ":orphan:" + order.FetchCount.ToString(CultureInfo.InvariantCulture) + ":" + k.ToString(CultureInfo.InvariantCulture));
+                }
+            }
+            if (b != null && b.ConstructionState == BuildingConstructionState.Planned)
+            {
+                b.ConstructionState = BuildingConstructionState.Building;
+                BuildingVisualFeed.Mark(b);
+            }
+            Revision++;
+        }
+
         /// <summary>机器货舱里装着的施工材料（废料）。</summary>
         public static int CargoScrap(MachineRecord machine)
         {
@@ -392,21 +676,31 @@ namespace GameLogic.Campaign.Regions
         /// </summary>
         internal static void ReleaseCargo(CampaignState state, WorkOrderRecord order, MachineRecord machine, bool dropOnly)
         {
-            int amount = CargoScrap(machine);
-            if (amount <= 0)
+            if (CargoMaterials(machine) <= 0)
             {
                 return;
             }
+            CargoEntry[] cargo = machine.Cargo;
             machine.Cargo = Array.Empty<CargoEntry>();
             Vector2 at = MachineRegistry.TryGetLivePosition(machine.LogicId, out Vector2 live) ? live : machine.WorldPosition;
             string dropId = order.WorkOrderId + ":cargo:" + order.FetchCount.ToString(CultureInfo.InvariantCulture) + ":" + order.RetryCount.ToString(CultureInfo.InvariantCulture);
-            if (dropOnly)
+            // FG4-ECO-11：货舱里每一种施工材料按同一规则退回（废料与原来逐字相同：用原标识）。
+            for (int k = 0; k < cargo.Length; k++)
             {
-                DropForHaul(state, at, CampaignEconomyLedger.ResourceScrap, amount, dropId);
-            }
-            else
-            {
-                ReturnMaterials(state, at, CampaignEconomyLedger.ResourceScrap, amount, dropId);
+                CargoEntry c = cargo[k];
+                if (c.Amount <= 0 || !IsBuildMaterial(c.ResourceType))
+                {
+                    continue;
+                }
+                string id = c.ResourceType == CampaignEconomyLedger.ResourceScrap ? dropId : dropId + ":" + c.ResourceType;
+                if (dropOnly)
+                {
+                    DropForHaul(state, at, c.ResourceType, c.Amount, id);
+                }
+                else
+                {
+                    ReturnMaterials(state, at, c.ResourceType, c.Amount, id);
+                }
             }
             Revision++;
         }
@@ -491,8 +785,20 @@ namespace GameLogic.Campaign.Regions
             {
                 int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out stock);
             }
-            return GameText.Format("build.status.waiting_materials", MaterialName(CampaignEconomyLedger.ResourceScrap),
-                need.ToString(CultureInfo.InvariantCulture), stock.ToString(CultureInfo.InvariantCulture));
+            string rt = parts.Length > 2 && parts[2].Length > 0 ? parts[2] : CampaignEconomyLedger.ResourceScrap;
+            return WaitingText(rt, need, stock);
+        }
+
+        /// <summary>“等待材料”的玩家文字：废料沿用原写法；其余材料写明从哪儿来（物品表的来源，关键材料写哪个首领给出，B06）。</summary>
+        public static string WaitingText(string resourceType, int need, int stock)
+        {
+            if (resourceType == CampaignEconomyLedger.ResourceScrap || !Economy.ItemCatalog.TryGetByResource(resourceType, out Economy.ItemDef item))
+            {
+                return GameText.Format("build.status.waiting_materials", MaterialName(CampaignEconomyLedger.ResourceScrap),
+                    need.ToString(CultureInfo.InvariantCulture), stock.ToString(CultureInfo.InvariantCulture));
+            }
+            return GameText.Format("build.status.waiting_item", item.Name, need.ToString(CultureInfo.InvariantCulture), stock.ToString(CultureInfo.InvariantCulture),
+                Economy.BuildMaterials.SourceOf(item));
         }
 
         /// <summary>最近一次返还里入库 / 留在地上的数量（自检与状态行读）。</summary>
@@ -579,17 +885,37 @@ namespace GameLogic.Campaign.Regions
                 return ProgressResult.SiteGone;
             }
             float duration = Mathf.Max(0.01f, order.Duration);
-            float cap = b.ConstructionRequired <= 0 ? duration : duration * Mathf.Clamp01((float)b.ConstructionDelivered / b.ConstructionRequired);
+            // FG4-ECO-11：进度按每种材料“已到 / 所需”里最小的那个封顶（缺哪种都建不完；只要废料的建筑与原来逐字相同）。
+            float cap = duration * DeliveredFraction(b);
             order.Progress = Mathf.Min(order.Progress + dt, cap);
             if (order.Progress >= duration - 1e-4f)
             {
                 return ProgressResult.Complete;
             }
-            if (order.Progress >= cap - 1e-4f && b.ConstructionDelivered < b.ConstructionRequired)
+            if (order.Progress >= cap - 1e-4f && (b.ConstructionDelivered < b.ConstructionRequired || ExtraStillNeeded(b) > 0))
             {
                 return ProgressResult.NeedMaterials;
             }
             return ProgressResult.Working;
+        }
+
+        /// <summary>建筑虚影的材料完成度：废料与每种额外材料“已到 / 所需”的最小值（都不要材料 = 1）。</summary>
+        public static float DeliveredFraction(BuildingRecord b)
+        {
+            if (b == null)
+            {
+                return 0f;
+            }
+            float f = b.ConstructionRequired <= 0 ? 1f : Mathf.Clamp01((float)b.ConstructionDelivered / b.ConstructionRequired);
+            int n = Economy.BuildMaterials.SiteCount(b);
+            for (int i = 0; i < n; i++)
+            {
+                if (b.ExtraRequired[i] > 0)
+                {
+                    f = Mathf.Min(f, Mathf.Clamp01((float)b.ExtraDelivered[i] / b.ExtraRequired[i]));
+                }
+            }
+            return f;
         }
 
         private static ProgressResult TickBeltPlan(CampaignState state, WorkOrderRecord order, float dt)
@@ -929,8 +1255,48 @@ namespace GameLogic.Campaign.Regions
                 building.InvestedScrap = Math.Max(building.InvestedScrap, building.ConstructionRequired);
                 building.ConstructionRequired = 0;
                 building.ConstructionDelivered = 0;
+                InvestExtras(state, building, building);
             }
             Revision++;
+        }
+
+        /// <summary>
+        /// FG4-ECO-11：虚影 <paramref name="site"/> 已到的额外材料真正建进 <paramref name="into"/>（新建 = 同一条记录；升级 = 原建筑）：记为消耗（统计），
+        /// 并进投入账（拆除全额退回）；虚影的额外材料字段清空。
+        /// </summary>
+        internal static void InvestExtras(CampaignState state, BuildingRecord site, BuildingRecord into)
+        {
+            int n = Economy.BuildMaterials.SiteCount(site);
+            for (int i = 0; i < n; i++)
+            {
+                int amount = site.ExtraDelivered[i];
+                if (amount <= 0)
+                {
+                    continue;
+                }
+                if (Economy.ItemCatalog.TryGetByResource(site.ExtraMaterialIds[i], out Economy.ItemDef item))
+                {
+                    Economy.ProductionStats.RecordUnits(state, item, amount, produced: false);
+                }
+                Economy.BuildMaterials.AddInvested(into, site.ExtraMaterialIds[i], amount);
+            }
+            site.ExtraMaterialIds = null;
+            site.ExtraRequired = null;
+            site.ExtraDelivered = null;
+        }
+
+        /// <summary>FG4-ECO-11：虚影已到的额外材料全额退回（取消 / 原建筑没了），已到清零。</summary>
+        internal static void RefundExtras(CampaignState state, BuildingRecord site, Vector2 at, string dropId)
+        {
+            int n = Economy.BuildMaterials.SiteCount(site);
+            for (int i = 0; i < n; i++)
+            {
+                if (site.ExtraDelivered[i] > 0)
+                {
+                    ReturnMaterials(state, at, site.ExtraMaterialIds[i], site.ExtraDelivered[i], dropId + ":" + site.ExtraMaterialIds[i]);
+                    site.ExtraDelivered[i] = 0;
+                }
+            }
         }
 
         // ── 取消与摧毁 ───────────────────────────────────────────────────────────
@@ -972,6 +1338,10 @@ namespace GameLogic.Campaign.Regions
                 ReturnMaterials(state, b.Position, CampaignEconomyLedger.ResourceScrap, b.ConstructionDelivered, order.WorkOrderId + ":refund");
                 b.ConstructionDelivered = 0;
             }
+            if (b != null)
+            {
+                RefundExtras(state, b, b.Position, order.WorkOrderId + ":refund"); // FG4-ECO-11：额外材料（关键材料回核心保管库）同样全额退回。
+            }
             Revision++;
         }
 
@@ -1002,10 +1372,25 @@ namespace GameLogic.Campaign.Regions
                 DropForHaul(state, b.Position, CampaignEconomyLedger.ResourceScrap, consumed, dropId);
             }
             b.ConstructionDelivered -= consumed;
-            b.ConstructionState = b.ConstructionDelivered > 0 ? BuildingConstructionState.Building : BuildingConstructionState.Planned;
+            // FG4-ECO-11：额外材料同一比例——已消耗的掉落为地面物（机器之后搬回；关键材料不会消失），没消耗的留在现场。
+            int extraKept = 0;
+            int en = Economy.BuildMaterials.SiteCount(b);
+            for (int i = 0; i < en; i++)
+            {
+                int used = Math.Min(b.ExtraDelivered[i], Mathf.FloorToInt(b.ExtraRequired[i] * fraction));
+                if (used > 0)
+                {
+                    DropForHaul(state, b.Position, b.ExtraMaterialIds[i], used,
+                        buildingId + ":wreck:" + (order?.WorkOrderId ?? "none") + ":" + (order?.FetchCount ?? 0).ToString(CultureInfo.InvariantCulture) + ":" + b.ExtraMaterialIds[i]);
+                    b.ExtraDelivered[i] -= used;
+                    consumed += used;
+                }
+                extraKept += b.ExtraDelivered[i];
+            }
+            b.ConstructionState = b.ConstructionDelivered > 0 || extraKept > 0 ? BuildingConstructionState.Building : BuildingConstructionState.Planned;
             BuildingVisualFeed.Mark(b);
             LastDestroyedDropped = consumed;
-            LastDestroyedKept = b.ConstructionDelivered;
+            LastDestroyedKept = b.ConstructionDelivered + extraKept;
             if (order != null)
             {
                 HomeValleyWorkOrders.ResetForRebuild(state, order);
@@ -1397,9 +1782,12 @@ namespace GameLogic.Campaign.Regions
         internal static void NotifyWaitingMaterials(CampaignState state, WorkOrderRecord order, int need)
         {
             Vector2 at = SitePosition(state, order);
+            // FG4-ECO-11：通知写卡住的那种材料（废料以外的写它的名字）。
+            string blocking = BlockingMaterial(state, order, out int blockNeed, out _) ?? CampaignEconomyLedger.ResourceScrap;
+            int shown = blocking == CampaignEconomyLedger.ResourceScrap ? need : blockNeed;
             GameLogic.Notifications.NotificationCenter.Post("construction_waiting",
                 GameText.Format("build.notify.waiting", HomeValleyWorkOrders.DescribeTarget(state, order),
-                    MaterialName(CampaignEconomyLedger.ResourceScrap), need.ToString(CultureInfo.InvariantCulture)),
+                    MaterialName(blocking), shown.ToString(CultureInfo.InvariantCulture)),
                 new Vector3(at.x, 0f, at.y));
             Core.GuidanceHooks.Raise(Core.GuidanceHooks.BuildFirstWaitingMaterials);
             Revision++;
@@ -1676,7 +2064,21 @@ namespace GameLogic.Campaign.Regions
             string reason = order.FailureReason;
             if (order.State == WorkOrderState.Waiting && reason != null && reason.StartsWith(MaterialsReasonPrefix, StringComparison.Ordinal))
             {
-                int need = MaterialsStillNeeded(state, order);
+                // FG4-ECO-11：卡住的是废料以外的材料（例如关键材料）时写明是哪种、从哪儿来。
+                string blocking = BlockingMaterial(state, order, out int itemNeed, out int itemStock);
+                if (blocking != null && blocking != CampaignEconomyLedger.ResourceScrap)
+                {
+                    // 审查修复（P1 关联）：库存为 0 但有一份正被系统搬回（例如取料的机器阵亡、货舱里的关键材料掉在地上）——写“机器正在搬回”，不写“去哪里获得”。
+                    int returning = itemStock <= 0 ? HomeValleyWorkOrders.ReturningAmount(state, blocking) : 0;
+                    if (returning > 0 && Economy.ItemCatalog.TryGetByResource(blocking, out Economy.ItemDef rItem))
+                    {
+                        return GameText.Format("build.status.waiting_item_returning", rItem.Name, itemNeed.ToString(CultureInfo.InvariantCulture),
+                            returning.ToString(CultureInfo.InvariantCulture));
+                    }
+                    return WaitingText(blocking, itemNeed, itemStock);
+                }
+                // FG4-ECO-11 审查修复（P2）：只写废料自己的缺口（额外材料逐种在悬停里列出），不与关键材料件数相加。
+                int need = NeedOf(state, order, CampaignEconomyLedger.ResourceScrap);
                 // FG3-E2E-01：仓库输出口把库存推上了传送带（在途不算库存）——写明在带上的件数与办法（端口面板“停止输出”），B06。
                 if (onBeltsCache < 0)
                 {
@@ -1895,8 +2297,37 @@ namespace GameLogic.Campaign.Regions
                    + GameText.Format("build.hover.materials", MaterialName(CampaignEconomyLedger.ResourceScrap),
                        delivered.ToString(CultureInfo.InvariantCulture), required.ToString(CultureInfo.InvariantCulture),
                        Mathf.RoundToInt(Fraction(state, order) * 100f).ToString(CultureInfo.InvariantCulture)) + "\n"
+                   + ExtraHoverLines(state, order)
                    + GameText.Format("build.hover.priority", PriorityName(order.Priority));
             return true;
+        }
+
+        private static readonly List<(string ResourceType, int Delivered, int Required)> ExtraLineScratch = new List<(string, int, int)>(4);
+
+        /// <summary>FG4-ECO-11：悬停 / 队列里逐种列出废料以外的材料（“监听阵列核 已到 0 / 1”），缺货的写明获取途径；没有额外材料返回空串。</summary>
+        public static string ExtraHoverLines(CampaignState state, WorkOrderRecord order)
+        {
+            if (order == null || IsBeltPlan(order.TargetId))
+            {
+                return string.Empty;
+            }
+            BuildingRecord b = FindSiteBuilding(state, order.TargetId);
+            if (ExtraLines(b, ExtraLineScratch) == 0)
+            {
+                return string.Empty;
+            }
+            var sb = new System.Text.StringBuilder();
+            foreach ((string rt, int delivered, int required) in ExtraLineScratch)
+            {
+                sb.Append(GameText.Format("build.hover.materials_extra", MaterialName(rt), delivered.ToString(CultureInfo.InvariantCulture),
+                    required.ToString(CultureInfo.InvariantCulture))).Append('\n');
+                if (delivered < required && StockOf(state, rt) <= 0 && Economy.ItemCatalog.TryGetByResource(rt, out Economy.ItemDef item))
+                {
+                    sb.Append(GameText.Format("build.cost.extra_short", item.Name, (required - delivered).ToString(CultureInfo.InvariantCulture),
+                        Economy.BuildMaterials.SourceOf(item))).Append('\n');
+                }
+            }
+            return sb.ToString();
         }
     }
 }

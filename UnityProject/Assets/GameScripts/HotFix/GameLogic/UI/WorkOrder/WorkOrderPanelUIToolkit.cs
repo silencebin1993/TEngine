@@ -465,11 +465,9 @@ namespace GameLogic.UI.WorkOrder
             }
             if (reason.StartsWith(HomeValleyConstruction.MaterialsReasonPrefix, System.StringComparison.Ordinal))
             {
-                // FG3-LOG-02：施工等待材料（materials:还差:库存），与施工队列同一文本键。
-                string[] parts = reason.Split(':');
-                return GameLogic.Localization.GameText.Format("build.status.waiting_materials",
-                    HomeValleyConstruction.MaterialName(CampaignEconomyLedger.ResourceScrap),
-                    parts.Length > 1 ? parts[1] : "?", parts.Length > 2 ? parts[2] : "?");
+                // FG3-LOG-02：施工等待材料（materials:还差:库存[:资源类型]），与施工队列同一写法；
+                // FG4-ECO-11 审查修复：卡住的是关键材料时写明是哪种、从哪里获得（原来一律写成“废料”）。
+                return HomeValleyConstruction.DescribeMaterialsReason(reason);
             }
             if (reason == HomeValleyConstruction.ReturnWaitReason || reason.StartsWith("storage-full", System.StringComparison.Ordinal))
             {

@@ -459,6 +459,9 @@ namespace GameLogic.Campaign
         /// <summary>FG4-ECO-01（FGR-ECO-001“数字资源：技术数据、研究点”）：研究点余额（数字资源，不占物理空间、不走传送带）。
         /// 产出与消耗由 FG5-RND-01（仿真实验室、研发树）写入；物资面板与图鉴从这里读。</summary>
         public int Points;
+        /// <summary>FG4-ECO-11（研究门槛接口）：已完成的研究节点 ID（研发树在 FG5-RND-01 写入；超控阵列等建筑的 unlockRule = research:&lt;节点&gt; 读这里，
+        /// 见 <see cref="Economy.ResearchGate"/>）。旧存档没有 = 空。</summary>
+        public string[] CompletedNodes = Array.Empty<string>();
     }
 
     /// <summary>
@@ -996,6 +999,13 @@ namespace GameLogic.Campaign
         /// <summary>信号进入当前这台机器的统一时钟步（<c>GameClock.Ticks</c>）；信号在归还核心时无意义。离开时这一段并进那台机器的
         /// <see cref="MachineRecord.SignalUplinkTicks"/>。唯一写入口 <c>SignalUplinkService.SetUplink</c>。</summary>
         public long UplinkSinceTick;
+
+        // ── FG4-ECO-11（FGR-ECO-020 超控阵列）── 只加字段、不升域版本：旧档读成 0 = 上次看到的超控阵列等级为 0（没有阵列）。
+
+        /// <summary>上一次电网结算后看到的“已建成的超控阵列等级”与“生效的等级”（<c>OverrideArrayService.OnPowerApplied</c> 唯一写入）。
+        /// 只用来判断“这一次是不是真的变了”——失效 / 恢复的通知与引导钩子只在真正翻转时发，读档后不重复提醒。</summary>
+        public int OverrideBuiltTierSeen;
+        public int OverrideActiveTierSeen;
     }
 
     /// <summary>FG1-SIG-04：一台处于安全模式的机器（只运行本地常规固件，接入口为空，继续执行最后一条命令或 AI 教义）。</summary>

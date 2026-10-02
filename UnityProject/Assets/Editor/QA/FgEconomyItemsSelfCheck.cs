@@ -753,14 +753,20 @@ namespace GameLogic.EditorTools
             // 腾出合金仓位后恢复。
             var before = new int[1024];
             BeltNetworkService.Kernel.CountItemsByType(-1, before);
+            // FG4-ECO-11 审查修复：仓满时被退回落地的合金（系统返还搬运单）在腾出仓位后也会被机器搬回入库（原来返还搬运只认废料，永远停在“等空间”）。
+            string alloyRes = BeltItems.ResourceOf(alloy.BeltId);
+            int groundBefore = (s.GroundItems ?? Array.Empty<GroundItemRecord>()).Where(g => g.ResourceType == alloyRes).Sum(g => g.Amount);
             HomeInventory.RemoveUpTo(s, alloy, 200);
             int stockAfterRemove = HomeInventory.Stock(s, alloy);
             WorldSimulation.StepMany(GameClock.StepHz * 30);
             var after = new int[1024];
             BeltNetworkService.Kernel.CountItemsByType(-1, after);
             BeltNetworkService.Kernel.TryGetPortCounts(inP.PortId, out _, out int bufferedAfter, out _);
-            Expect(!BeltPortService.StoreFull(s, inP.PortId, out _) && after[alloy.BeltId] == 0 && bufferedAfter == 0 && HomeInventory.Stock(s, alloy) == stockAfterRemove + before[alloy.BeltId] + buffered,
-                $"E6 腾出合金仓位后输入口自动恢复：带上的 {before[alloy.BeltId]} 件与缓存的 {buffered} 件合金全部入库，带清空、缓存清空");
+            int groundAfter = (s.GroundItems ?? Array.Empty<GroundItemRecord>()).Where(g => g.ResourceType == alloyRes).Sum(g => g.Amount);
+            Expect(!BeltPortService.StoreFull(s, inP.PortId, out _) && after[alloy.BeltId] == 0 && bufferedAfter == 0 && groundAfter == 0
+                   && HomeInventory.Stock(s, alloy) == stockAfterRemove + before[alloy.BeltId] + buffered + groundBefore,
+                $"E6 腾出合金仓位后输入口自动恢复：带上的 {before[alloy.BeltId]} 件、缓存的 {buffered} 件与仓满时退回落地的 {groundBefore} 件合金全部入库（库存 {stockAfterRemove} → {HomeInventory.Stock(s, alloy)}），" +
+                $"带清空、缓存清空、地上不剩（{groundAfter}）");
         }
 
         private static void CheckLegacySinkMigration()

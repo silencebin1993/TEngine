@@ -114,6 +114,17 @@ namespace GameLogic.Campaign.Economy
             return GameText.Format("bs.reason.ghost", HomeValleyConstruction.DescribeStatus(state, order));
         }
 
+        /// <summary>FG4-ECO-11：超控阵列缺电时在原因后面补一行“信号核第 3～4 槽失效（固件保留，不生效）”；别的建筑为空串。</summary>
+        private static string OverrideOfflineSuffix(BuildingRecord b)
+        {
+            if (b == null || b.BuildingTypeId != Signal.OverrideArrayService.TypeId)
+            {
+                return string.Empty;
+            }
+            int initial = Signal.SignalCoreService.InitialSlots;
+            return "\n" + GameText.Format("bs.reason.override_offline", Signal.OverrideArrayService.SlotsText(initial + 1, initial + BuildingOps.TierOf(b)));
+        }
+
         /// <summary>功能状态（建成且没禁用时）。</summary>
         private static BuildingStatus Functional(CampaignState state, BuildingRecord b)
         {
@@ -132,12 +143,12 @@ namespace GameLogic.Campaign.Economy
                 if (b.PowerState == BuildingPowerState.Unpowered)
                 {
                     return new BuildingStatus(BuildingStatusKind.NoPower, "power.unconnected",
-                        GameText.Format("prod.reason.no_power", GameText.Get("prod.reason.power_unconnected")));
+                        GameText.Format("prod.reason.no_power", GameText.Get("prod.reason.power_unconnected")) + OverrideOfflineSuffix(b));
                 }
                 if (b.PowerState == BuildingPowerState.Brownout)
                 {
                     return new BuildingStatus(BuildingStatusKind.NoPower, "power.brownout",
-                        GameText.Format("prod.reason.no_power", GameText.Format("prod.reason.power_brownout", b.PowerPriority)));
+                        GameText.Format("prod.reason.no_power", GameText.Format("prod.reason.power_brownout", b.PowerPriority)) + OverrideOfflineSuffix(b));
                 }
             }
             if (type == HomeValleyLayout.BuildingTypeCore)
@@ -164,6 +175,14 @@ namespace GameLogic.Campaign.Economy
             {
                 float r = BuildingOps.TierOf(b) >= 2 ? Signal.SignalCoverageService.TowerT2Radius : Signal.SignalCoverageService.TowerRadius;
                 return new BuildingStatus(BuildingStatusKind.Working, "signal", GameText.Format("bs.reason.working_signal", Mathf.RoundToInt(r)));
+            }
+            if (type == Signal.OverrideArrayService.TypeId)
+            {
+                // FG4-ECO-11：超控阵列运转中——写明解锁了信号核哪几个槽、耗电多少（按等级）。
+                int initial = Signal.SignalCoreService.InitialSlots;
+                return new BuildingStatus(BuildingStatusKind.Working, "override",
+                    GameText.Format("bs.reason.working_override", Signal.OverrideArrayService.SlotsText(initial + 1, initial + BuildingOps.TierOf(b)),
+                        HomeValleyPowerGrid.Num(HomeValleyPowerGrid.DemandOf(b))));
             }
             if (type == HomeValleyLayout.BuildingTypeSignalRelay)
             {

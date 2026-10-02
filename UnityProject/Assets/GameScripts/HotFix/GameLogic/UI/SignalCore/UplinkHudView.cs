@@ -224,7 +224,7 @@ namespace GameLogic.UI.SignalCore
                     : GameText.Format("uplink.hud.slot", head, UplinkHudModel.SlotStateText(slot));
                 l.EnableInClassList("uh-slot-active", slot.State == UplinkSlotState.Active);
                 l.EnableInClassList("uh-slot-cooling", slot.State == UplinkSlotState.Cooling);
-                l.EnableInClassList("uh-slot-off", slot.State == UplinkSlotState.NotInserted || slot.State == UplinkSlotState.Ineffective);
+                l.EnableInClassList("uh-slot-off", slot.State == UplinkSlotState.NotInserted || slot.State == UplinkSlotState.Ineffective || slot.State == UplinkSlotState.Offline);
                 l.EnableInClassList("uh-slot-empty", slot.State == UplinkSlotState.Empty);
                 l.EnableInClassList("uh-slot-raw", slot.Raw);
             }

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using BinGames.Sim.Logistics;
 using GameConfig.fg;
 using GameLogic.Campaign;
+using GameLogic.Campaign.Economy;
 using GameLogic.Campaign.Grid;
 using GameLogic.Campaign.Logistics;
 using GameLogic.Campaign.Regions;
@@ -695,6 +696,26 @@ namespace GameLogic.UI.Kit
             int stock = state.Scrap;
             bool short_ = stock < cost;
             _cost.text = short_ ? GameText.Format("ui.build.cost_short", cost, stock, cost - stock) : GameText.Format("ui.build.cost_line", cost, stock);
+            // FG4-ECO-11（DEBT-FG3LOG02-02）：废料之外的材料（超控阵列的监听阵列核）——列出库存，缺货时逐条写明从哪里获得；研究节点也写出来。
+            if (mode.SelectedTypeId != null)
+            {
+                IReadOnlyList<BuildMaterialNeed> extras = BuildMaterials.NewBuild(mode.SelectedTypeId);
+                if (extras.Count > 0)
+                {
+                    _cost.text += "\n" + GameText.Format("build.cost.extra", BuildMaterials.DescribeList(state, extras));
+                    string shortfall = BuildMaterials.DescribeShortfall(state, extras);
+                    if (shortfall != null)
+                    {
+                        _cost.text += "\n" + shortfall + "\n" + GameText.Get("build.cost.can_place");
+                        short_ = true;
+                    }
+                }
+                string research = GridContent.TryGetBuilding(mode.SelectedTypeId, out BuildingGrid g) ? ResearchGate.Describe(state, g.UnlockRule) : string.Empty;
+                if (research.Length > 0)
+                {
+                    _cost.text += "\n" + research;
+                }
+            }
             _cost.EnableInClassList("bm-cost-short", short_);
         }
 
@@ -759,6 +780,7 @@ namespace GameLogic.UI.Kit
                 SetVisible(_dragInfo, true);
                 UpgradeBoxPlan up = mode.UpgradePreview;
                 _dragInfo.text = GameText.Format("plan.upgrade.box", up.Max.X - up.Min.X + 1, up.Max.Y - up.Min.Y + 1, up.Count, up.Cost, CampaignSession.Current?.Scrap ?? 0)
+                                 + (up.Extras.Any ? "\n" + up.Extras.Describe(CampaignSession.Current) : string.Empty)
                                  + (up.Refused > 0 && up.FirstRefusal != null ? "\n" + GameText.Format("plan.upgrade.some_refused", up.Refused, up.FirstRefusal.Value.Describe()) : string.Empty);
             }
             else if (mode.PasteMode && mode.PastePreview != null)
@@ -767,6 +789,10 @@ namespace GameLogic.UI.Kit
                 SetVisible(_dragInfo, true);
                 PastePlan pp = mode.PastePreview;
                 string text = GameText.Format("plan.paste.preview", pp.OkCount, pp.BadCount, pp.Cost, pp.Stock);
+                if (pp.Extras.Any)
+                {
+                    text += "\n" + pp.Extras.Describe(CampaignSession.Current); // FG4-ECO-11：粘贴造价里的额外材料
+                }
                 if (pp.BadCount > 0)
                 {
                     text += "\n" + pp.DescribeFirstBad();
@@ -982,6 +1008,11 @@ namespace GameLogic.UI.Kit
                     string cost = HomeValleyLayout.BuildProfile.TryGetValue(e.Id, out (int ScrapCost, float Seconds) p)
                         ? GameText.Format("ui.build.cost", p.ScrapCost, Mathf.RoundToInt(p.Seconds))
                         : string.Empty;
+                    IReadOnlyList<BuildMaterialNeed> extras = BuildMaterials.NewBuild(e.Id);
+                    if (extras.Count > 0)
+                    {
+                        cost += " " + GameText.Format("build.cost.extra", BuildMaterials.DescribeList(state, extras)); // FG4-ECO-11：关键材料与库存
+                    }
                     int count = HomeGridService.CountOfType(state, e.Id);
                     string countText = e.Building.MaxCount > 0 ? GameText.Format("ui.build.count_limited", count, e.Building.MaxCount) : GameText.Format("ui.build.count_unlimited", count);
                     line2 = cost + "  " + countText;

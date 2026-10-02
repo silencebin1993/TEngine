@@ -354,6 +354,8 @@ namespace GameLogic.Campaign.Regions
             public float Supply;
             public bool HasDemand;
             public float Demand;
+            /// <summary>FG4-ECO-11：这类建筑的耗电按等级变（fg.TbBuildingTier.powerDemand，超控阵列 80 / 120 / 160）；只有它才逐座查等级。</summary>
+            public bool TierDemand;
             // FG4-ECO-04：发电类别（曲线分类、太阳能系数、燃油按负荷）。
             public byte SourceClass;
             public PowerSourceKind SourceKind;
@@ -379,6 +381,7 @@ namespace GameLogic.Campaign.Regions
                 t.HasSupply = HomeValleyLayout.PowerSupplyProfile.TryGetValue(typeId, out t.Supply);
                 t.HasDemand = HomeValleyLayout.PowerProfile.TryGetValue(typeId, out (float PowerDemand, int PowerPriority) prof);
                 t.Demand = prof.PowerDemand;
+                t.TierDemand = t.HasDemand && HasTierDemand(typeId);
                 if (t.HasSupply || typeId == HomeValleyLayout.BuildingTypeCore)
                 {
                     PowerSourceDef src = SourceOf(typeId);
@@ -642,7 +645,7 @@ namespace GameLogic.Campaign.Regions
                 }
                 if (operational && ti.HasDemand)
                 {
-                    e.Demand = ti.Demand;
+                    e.Demand = ti.TierDemand ? DemandOf(b) : ti.Demand;
                     e.DemandOn = true;
                 }
                 if (def.StorageCapacity > 0f && def.StorageRate > 0f)

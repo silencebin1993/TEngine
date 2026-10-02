@@ -309,6 +309,23 @@ namespace GameLogic.Campaign
                 Regions.HomeValleyConstruction.ReturnMaterials(state, b.Position, CampaignEconomyLedger.ResourceScrap, material, "content-removed:" + b.BuildingId);
                 refunded += material;
             }
+            // FG4-ECO-11：废料以外的材料——已建成的退投入（关键材料回核心保管库），虚影退已到现场的。
+            if (built)
+            {
+                int kinds = Economy.BuildMaterials.InvestedCount(b);
+                for (int i = 0; i < kinds; i++)
+                {
+                    if (b.InvestedExtraAmounts[i] > 0)
+                    {
+                        Regions.HomeValleyConstruction.ReturnMaterials(state, b.Position, b.InvestedExtraIds[i], b.InvestedExtraAmounts[i],
+                            "content-removed:" + b.BuildingId + ":" + b.InvestedExtraIds[i]);
+                    }
+                }
+            }
+            else
+            {
+                Regions.HomeValleyConstruction.RefundExtras(state, b, b.Position, "content-removed:" + b.BuildingId);
+            }
             foreach (CargoEntry c in b.Inventory ?? Array.Empty<CargoEntry>())
             {
                 if (c.Amount <= 0 || string.IsNullOrEmpty(c.ResourceType))

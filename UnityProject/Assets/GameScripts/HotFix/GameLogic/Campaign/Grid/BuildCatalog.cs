@@ -109,7 +109,9 @@ namespace GameLogic.Campaign.Grid
             {
                 case "always": return true;
                 case "beacon": return state != null && HomeValleyBeacon.IsUnlocked(state);
-                default: return false;
+                default:
+                    // FG4-ECO-11：research:<节点> = 研究完成后解锁（研发树开放前视为已满足，见 ResearchGate）。
+                    return Economy.ResearchGate.IsResearchRule(rule) && Economy.ResearchGate.IsCompleted(state, Economy.ResearchGate.NodeOf(rule));
             }
         }
 

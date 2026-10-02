@@ -147,7 +147,7 @@ namespace GameLogic.UI.CircuitBoard
                 if (_coreLine != null) _coreLine.text = string.Empty;
                 return null;
             }
-            string[] core = state != null ? SignalCoreService.CurrentContentIds(state) : System.Array.Empty<string>();
+            string[] core = state != null ? SignalCoreService.ActiveContentIds(state) : System.Array.Empty<string>(); // FG4-ECO-11：预览只按生效的槽
             UplinkDualPreview dual = UplinkCompiler.CompileDual(board, core);
             Last = dual;
             if (_coreLine != null)

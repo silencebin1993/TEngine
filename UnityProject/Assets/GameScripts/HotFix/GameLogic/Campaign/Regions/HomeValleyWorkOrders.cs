@@ -118,6 +118,39 @@ namespace GameLogic.Campaign.Regions
             return state.WorkOrders?.LastOrDefault(o => o.Kind == kind && o.TargetId == targetId && !IsTerminal(o.State));
         }
 
+        /// <summary>
+        /// FG4-ECO-11 审查修复：正在由系统返还搬运单搬回家园的某种物品数量（地上等搬的 + 已装进搬运机器货舱的）。
+        /// 施工“等待材料”时用它区分“家园里真的没有”与“掉在地上、机器正在搬回”（后者不该提示玩家再去打首领）。O(工作单数)，只在显示缺料文字时调用。
+        /// </summary>
+        public static int ReturningAmount(CampaignState state, string resourceType)
+        {
+            if (state?.WorkOrders == null || string.IsNullOrEmpty(resourceType))
+            {
+                return 0;
+            }
+            int n = 0;
+            foreach (WorkOrderRecord o in state.WorkOrders)
+            {
+                if (o == null || o.Kind != WorkOrderKind.Haul || o.IssuerId != "return" || IsTerminal(o.State))
+                {
+                    continue;
+                }
+                GroundItemRecord item = HomeValleyCargo.FindGroundItem(state, o.SourceId);
+                if (item != null)
+                {
+                    n += item.ResourceType == resourceType ? item.Amount : 0;
+                }
+                else if (o.AssignedMachineLogicId > 0 && MachineRegistry.TryGetRecord(o.AssignedMachineLogicId, out MachineRecord m) && m.Cargo != null)
+                {
+                    foreach (CargoEntry c in m.Cargo)
+                    {
+                        n += c.ResourceType == resourceType ? c.Amount : 0;
+                    }
+                }
+            }
+            return n;
+        }
+
         public static WorkOrderRecord FindActiveOrderForMachine(CampaignState state, int machineLogicId)
         {
             if (machineLogicId <= 0)
@@ -587,7 +620,8 @@ namespace GameLogic.Campaign.Regions
                 Rotation = Grid.GridMath.NormalizeRotation(rotation),
                 GridX = pivot.X,
                 GridY = pivot.Y,
-                Health = 100f,
+                // FG4-ECO-11 修复：新建完工 = 满耐久（按 fg.TbBuildingService；原来写死 100，耐久上限不是 100 的建筑一建成就显示“受损”）。
+                Health = Economy.BuildingOps.MaxDurability(buildingTypeId),
                 ConstructionState = BuildingConstructionState.Planned,
                 // ER7-BEACON-01：按 PowerProfile 默认优先级接入电网仲裁，查不到则退化 1。
                 PowerPriority = HomeValleyLayout.PowerProfile.TryGetValue(buildingTypeId, out (float, int) profileEntry)
@@ -600,11 +634,13 @@ namespace GameLogic.Campaign.Regions
                 ConstructionRequired = Math.Max(0, profile.ScrapCost),
                 ConstructionDelivered = 0,
             };
+            // FG4-ECO-11（DEBT-FG3LOG02-02）：废料之外的材料（fg.TbBuildMaterial 的新建行，例如超控阵列的监听阵列核）一起记进虚影。
+            Economy.BuildMaterials.ApplyToSite(planned, Economy.BuildMaterials.NewBuild(buildingTypeId));
             state.BuildingRecords = (state.BuildingRecords ?? Array.Empty<BuildingRecord>()).Append(planned).ToArray();
 
             var order = NewOrder(state, workOrderId, WorkOrderKind.Build, buildingId, machineLogicId,
                 resourceTransactionId: null, duration: profile.Seconds);
-            order.Leg = planned.ConstructionRequired > 0 ? 1 : 0;
+            order.Leg = planned.ConstructionRequired > 0 || HomeValleyConstruction.HasExtras(planned) ? 1 : 0;
             if (machineLogicId == 0)
             {
                 order.State = WorkOrderState.Ready; // 待分配池：空闲机器 0.5 秒内领取（ERD-WRK-002）。
@@ -739,7 +775,8 @@ namespace GameLogic.Campaign.Regions
         /// 施工要的材料 = 新旧造价的差额（<paramref name="diff"/>），机器从仓库取料送到现场（与普通虚影同一套取料腿）；完工时原建筑换成新类型，
         /// 保留 ID、生命、运行状态、库存、队列、电力优先级，投入 = 原投入 + 差额（拆除时全额返还）。取消 = 已到的差额材料全额退回，原建筑不受影响。
         /// </summary>
-        public static WorkOrderOpResult TryCreateUpgradeAt(CampaignState state, BuildingRecord source, string ghostId, string toTypeId, int diff, float seconds, int toTier = 0)
+        public static WorkOrderOpResult TryCreateUpgradeAt(CampaignState state, BuildingRecord source, string ghostId, string toTypeId, int diff, float seconds, int toTier = 0,
+            IReadOnlyList<Economy.BuildMaterialNeed> extras = null)
         {
             if (source == null)
             {
@@ -772,10 +809,12 @@ namespace GameLogic.Campaign.Regions
                 Tier = toTier,
                 CustomName = source.CustomName,
             };
+            // FG4-ECO-11：升级差额里废料之外的材料（超控阵列 T2 熔炉心 / T3 超算残核），与废料同一套取料腿。
+            Economy.BuildMaterials.ApplyToSite(ghost, extras);
             state.BuildingRecords = (state.BuildingRecords ?? Array.Empty<BuildingRecord>()).Append(ghost).ToArray();
             string workOrderId = ghostId + ":build:" + Guid.NewGuid().ToString("N").Substring(0, 8);
             var order = NewOrder(state, workOrderId, WorkOrderKind.Build, ghostId, 0, resourceTransactionId: null, duration: Mathf.Max(0.1f, seconds));
-            order.Leg = ghost.ConstructionRequired > 0 ? 1 : 0;
+            order.Leg = ghost.ConstructionRequired > 0 || HomeValleyConstruction.HasExtras(ghost) ? 1 : 0;
             order.State = WorkOrderState.Ready;
             Append(state, order);
             MarkAssignmentDirty();
@@ -1227,8 +1266,8 @@ namespace GameLogic.Campaign.Regions
             bool first = WaitingNotified.Add(order.WorkOrderId);
             order.State = WorkOrderState.Waiting;
             order.Leg = 1;
-            order.FailureReason = HomeValleyConstruction.MaterialsReasonPrefix + need.ToString(System.Globalization.CultureInfo.InvariantCulture)
-                                  + ":" + Mathf.FloorToInt(state.Scrap).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            // FG4-ECO-11：原因码带上卡住的那种材料（materials:还差:库存:资源类型），队列 / 悬停据此写明缺什么、从哪儿来。
+            order.FailureReason = HomeValleyConstruction.MaterialsReason(state, order);
             order.AssignedMachineLogicId = 0;
             MarkAssignmentDirty();
             if (first)
@@ -1412,11 +1451,10 @@ namespace GameLogic.Campaign.Regions
                 return WorkOrderOpResult.Fail($"order-already-active:{order.State}");
             }
             int need = HomeValleyConstruction.MaterialsStillNeeded(state, order);
-            int stock = Mathf.FloorToInt(state.Scrap);
-            if (need > 0 && stock <= 0)
+            // FG4-ECO-11：还缺的材料里有一种有货就能去取（废料以外的材料同样算）；都没货才拒绝，原因写卡住的那种。
+            if (need > 0 && !HomeValleyConstruction.HasFetchableStock(state, order))
             {
-                return WorkOrderOpResult.Fail(HomeValleyConstruction.MaterialsReasonPrefix + need.ToString(System.Globalization.CultureInfo.InvariantCulture)
-                                              + ":" + stock.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                return WorkOrderOpResult.Fail(HomeValleyConstruction.MaterialsReason(state, order));
             }
             PathWatch.Remove(order.WorkOrderId);
             WaitingWatch.Remove(order.WorkOrderId);
@@ -1475,7 +1513,7 @@ namespace GameLogic.Campaign.Regions
                     {
                         // FG3-LOG-02：取料腿的施工单在库存为 0 时不派机器（派过去也是空跑），转为等待材料；
                         // 返还物的搬运单在仓库放不下时同样等待，不让机器扛着货在核心门口干等。
-                        if (order.Kind == WorkOrderKind.Build && order.Leg == 1 && Mathf.FloorToInt(state.Scrap) <= 0
+                        if (order.Kind == WorkOrderKind.Build && order.Leg == 1 && !HomeValleyConstruction.HasFetchableStock(state, order)
                             && HomeValleyConstruction.MaterialsStillNeeded(state, order) > 0)
                         {
                             EnterWaitingMaterials(state, order);
@@ -1541,7 +1579,8 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
-            int stock = Mathf.FloorToInt(state.Scrap);
+            // FG4-ECO-11：库存键 = 废料 + 物品库存版本（多材料：任何一种材料的库存变了都重新分配）。
+            int stock = HashCode.Combine(Mathf.FloorToInt(state.Scrap), Economy.HomeInventory.Revision);
             _fetchTimer += dt;
             if (!_fetchDirty && stock == _fetchLastStock && _fetchTimer < AssignIntervalSeconds)
             {
@@ -1552,7 +1591,7 @@ namespace GameLogic.Campaign.Regions
             _fetchLastStock = stock;
 
             FetchCandidates.Clear();
-            int committed = 0;
+            FetchBudget.Clear();
             for (int i = 0; i < orders.Length; i++)
             {
                 WorkOrderRecord o = orders[i];
@@ -1571,8 +1610,10 @@ namespace GameLogic.Campaign.Regions
                 }
                 if (o.State == WorkOrderState.Reserved && o.AssignedMachineLogicId > 0)
                 {
+                    // 正在去仓库取料的那一趟按它会取的那种材料预先扣掉（多材料：每种材料各自一份预算）。
                     MachineRegistry.TryGetRecord(o.AssignedMachineLogicId, out MachineRecord carrier);
-                    committed += Math.Min(HomeValleyConstruction.CarryFor(carrier), HomeValleyConstruction.MaterialsStillNeeded(state, o));
+                    string m = HomeValleyConstruction.NextFetchMaterial(state, o) ?? CampaignEconomyLedger.ResourceScrap;
+                    FetchBudget[m] = BudgetOf(state, m) - Math.Min(HomeValleyConstruction.CarryFor(carrier), HomeValleyConstruction.NeedOf(state, o, m));
                 }
                 else if (o.State == WorkOrderState.Ready && o.AssignedMachineLogicId == 0)
                 {
@@ -1596,7 +1637,6 @@ namespace GameLogic.Campaign.Regions
                 FetchCandidates[j + 1] = cur;
             }
 
-            int budget = stock - committed;
             bool changed = false;
             foreach (WorkOrderRecord o in FetchCandidates)
             {
@@ -1613,9 +1653,19 @@ namespace GameLogic.Campaign.Regions
                     }
                     continue;
                 }
-                if (budget > 0)
+                // 还缺的材料里，按取料顺序找第一种还有预算的（废料优先）：分到了就去取，一种都分不到就等。
+                string pick = null;
+                HomeValleyConstruction.NeededMaterials(state, o, FetchNeedScratch);
+                for (int k = 0; k < FetchNeedScratch.Count && pick == null; k++)
                 {
-                    budget -= Math.Min(HomeValleyConstruction.CarryPerTrip, need);
+                    if (BudgetOf(state, FetchNeedScratch[k]) > 0)
+                    {
+                        pick = FetchNeedScratch[k];
+                    }
+                }
+                if (pick != null)
+                {
+                    FetchBudget[pick] = BudgetOf(state, pick) - Math.Min(HomeValleyConstruction.CarryPerTrip, HomeValleyConstruction.NeedOf(state, o, pick));
                     if (waiting)
                     {
                         o.Leg = 1;
@@ -1639,11 +1689,27 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        /// <summary>返还物搬运单：地面物还在、仓库放得下它（废料以外的物品家园仓库存不了，一直等）。</summary>
+        /// <summary>FG4-ECO-11：取料分配里每种材料的剩余预算（库存 − 已经承诺给别的施工单的量）；一次分配内有效。</summary>
+        private static readonly Dictionary<string, int> FetchBudget = new Dictionary<string, int>(StringComparer.Ordinal);
+        private static readonly List<string> FetchNeedScratch = new List<string>(4);
+
+        private static int BudgetOf(CampaignState state, string material)
+        {
+            if (!FetchBudget.TryGetValue(material, out int b))
+            {
+                b = HomeValleyConstruction.StockOf(state, material);
+                FetchBudget[material] = b;
+            }
+            return b;
+        }
+
+        /// <summary>返还物搬运单：地面物还在、家园放得下它（家园能存的一切物品：废料、仓库固体、核心保管库物品；
+        /// 与 <see cref="HomeValleyCargo.CommitHaul"/> 的拒收条件同源）。家园存不了的（流体等）一直等。
+        /// FG4-ECO-11 审查修复（P1）：原来只认废料，关键材料（保管库物品）施工途中机器阵亡落地后，返还搬运单永远停在等空间。</summary>
         private static bool ReturnHaulHasSpace(CampaignState state, WorkOrderRecord order)
         {
             GroundItemRecord item = HomeValleyCargo.FindGroundItem(state, order.SourceId);
-            return item != null && item.ResourceType == CampaignEconomyLedger.ResourceScrap
+            return item != null && HomeValleyCargo.CanStore(item.ResourceType)
                    && HomeValleyCargo.GetAvailableSpace(state, item.ResourceType) >= item.Amount;
         }
 
@@ -2513,7 +2579,8 @@ namespace GameLogic.Campaign.Regions
                     // 信标与自由放置的建筑会让机器走错地方。
                     // FG3-LOG-02：取料腿先去离现场最近的仓库（归还核心 / 运转中的仓库）；传送带规划的现场 = 下一格还没建成的格子。
                     Vector2 site = HomeValleyConstruction.SitePosition(state, order);
-                    return order.Leg == 1 ? HomeValleyConstruction.StoragePosition(state, site) : site;
+                    // FG4-ECO-11 审查修复：关键材料（核心保管库物品）的取料点是归还核心，不是最近的仓库。
+                    return order.Leg == 1 ? HomeValleyConstruction.FetchPosition(state, order, site) : site;
                 case WorkOrderKind.Salvage:
                     if (order.TargetId == HomeValleyLayout.Wreckage1NodeId)
                     {
@@ -2684,7 +2751,7 @@ namespace GameLogic.Campaign.Regions
             }
             BuildingRecord relocation = HomeValleyConstruction.FindBuildingFast(state, order.TargetId); // FG3-LOG-09：每步每张施工单，O(1)
             // FG3-LOG-07：升级虚影要材料（新旧差额），走下面的取料 / 施工进度；搬迁不花材料，按工期施工。
-            if (relocation != null && !string.IsNullOrEmpty(relocation.RelocateFromId) && relocation.ConstructionRequired <= 0)
+            if (relocation != null && !string.IsNullOrEmpty(relocation.RelocateFromId) && relocation.ConstructionRequired <= 0 && !HomeValleyConstruction.HasExtras(relocation))
             {
                 order.Progress += dt; // 搬迁不花材料（材料就是原建筑本身），按工期施工。
                 if (order.Progress >= order.Duration)
@@ -2713,9 +2780,9 @@ namespace GameLogic.Campaign.Regions
                     break;
                 case HomeValleyConstruction.ProgressResult.NeedMaterials:
                     order.Leg = 1;
-                    if (Mathf.FloorToInt(state.Scrap) > 0 && order.AssignedMachineLogicId > 0)
+                    if (HomeValleyConstruction.HasFetchableStock(state, order) && order.AssignedMachineLogicId > 0)
                     {
-                        order.State = WorkOrderState.Reserved; // 同一台机器回仓库再取一趟（下一次 Tick 发起移动）。
+                        order.State = WorkOrderState.Reserved; // 同一台机器回仓库再取一趟（下一次 Tick 发起移动；FG4-ECO-11：任何一种还缺的材料有货都算）。
                         QueueNextLeg(order);
                     }
                     else
@@ -2872,6 +2939,7 @@ namespace GameLogic.Campaign.Regions
                         order.WorkOrderId + ":refund");
                     ghost.ConstructionDelivered = 0;
                 }
+                HomeValleyConstruction.RefundExtras(state, ghost, ghost.Position, order.WorkOrderId + ":refund"); // FG4-ECO-11：额外材料同样全额退回。
                 state.BuildingRecords = records.Where(b => b.BuildingId != ghost.BuildingId).ToArray();
                 order.State = WorkOrderState.Failed;
                 order.FailureReason = "relocate-source-gone";
@@ -2916,7 +2984,11 @@ namespace GameLogic.Campaign.Regions
                 CustomName = source.CustomName,
                 StoreFilter = source.StoreFilter,
                 Tier = upgrade && ghost.Tier > 0 ? ghost.Tier : source.Tier,
+                // FG4-ECO-11：非废料投入（关键材料）跟着建筑走；升级把差额里的额外材料并进来（下面 InvestExtras）。
+                InvestedExtraIds = source.InvestedExtraIds != null ? (string[])source.InvestedExtraIds.Clone() : null,
+                InvestedExtraAmounts = source.InvestedExtraAmounts != null ? (int[])source.InvestedExtraAmounts.Clone() : null,
             };
+            HomeValleyConstruction.InvestExtras(state, ghost, moved);
             var next = new List<BuildingRecord>(records.Length);
             for (int i = 0; i < records.Length; i++)
             {
@@ -3003,6 +3075,8 @@ namespace GameLogic.Campaign.Regions
         /// <summary>最近一次拆除返还的建筑材料与内部缓存数量（自检读）。</summary>
         public static int LastDemolishRefund { get; private set; }
         public static int LastDemolishCacheReturned { get; private set; }
+        /// <summary>FG4-ECO-11：最近一次拆除退回的非废料投入件数（自检读）。</summary>
+        public static int LastDemolishExtraRefund { get; private set; }
 
         private static void CompleteDemolish(CampaignState state, WorkOrderRecord order)
         {
@@ -3031,6 +3105,23 @@ namespace GameLogic.Campaign.Regions
             HomeValleyConstruction.ReturnMaterials(state, building.Position, CampaignEconomyLedger.ResourceScrap, building.InvestedScrap, dropId);
             HomeValleyConstruction.RecordDemolishRefund(state, building.InvestedScrap); // FG4-ECO-08：拆回的造价 = 产出（建成时计过消耗）
             LastDemolishRefund = building.InvestedScrap;
+            // FG4-ECO-11：非废料投入（超控阵列的关键材料）全额退回——关键材料回核心保管库（放不下就落地等机器搬，不会消失）。
+            LastDemolishExtraRefund = 0;
+            int investedKinds = Economy.BuildMaterials.InvestedCount(building);
+            for (int i = 0; i < investedKinds; i++)
+            {
+                int amount = building.InvestedExtraAmounts[i];
+                if (amount <= 0)
+                {
+                    continue;
+                }
+                HomeValleyConstruction.ReturnMaterials(state, building.Position, building.InvestedExtraIds[i], amount, dropId + ":" + building.InvestedExtraIds[i]);
+                if (Economy.ItemCatalog.TryGetByResource(building.InvestedExtraIds[i], out Economy.ItemDef refundItem))
+                {
+                    Economy.ProductionStats.RecordUnits(state, refundItem, amount, produced: true);
+                }
+                LastDemolishExtraRefund += amount;
+            }
             LastDemolishCacheReturned = productionReturned;
             if (building.Inventory != null)
             {
