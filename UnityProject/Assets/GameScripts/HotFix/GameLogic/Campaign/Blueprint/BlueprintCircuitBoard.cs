@@ -984,7 +984,8 @@ namespace GameLogic.Campaign.Blueprint
         public static float ComputeHeatBudget(string primaryId, IEnumerable<string> firmwareIds)
         {
             bool hasCannon = primaryId == ComponentCatalog.CompCannonId;
-            List<string> ids = firmwareIds?.Where(id => !string.IsNullOrEmpty(id)).ToList() ?? new List<string>();
+            // FG5-RND-04：混合固件按两条父固件计（熔穿过载时由反应取代的是父固件“过载”那一项）。
+            List<string> ids = FirmwareKinds.ExpandMixed(firmwareIds?.Where(id => !string.IsNullOrEmpty(id)));
             bool melt = hasCannon && ids.Contains(FirmwareCatalog.FwOverloadId);
             float heat = ComputeFirmwareHeat(primaryId, ids);
             if (hasCannon)
@@ -1008,7 +1009,7 @@ namespace GameLogic.Campaign.Blueprint
             }
             bool hasCannon = primaryId == ComponentCatalog.CompCannonId;
             float heat = 0f;
-            foreach (string id in firmwareIds)
+            foreach (string id in FirmwareKinds.ExpandMixed(firmwareIds)) // FG5-RND-04：混合固件 = 两条父固件的积热之和（与表 heat 列同数）
             {
                 if (string.IsNullOrEmpty(id) || (hasCannon && id == FirmwareCatalog.FwOverloadId))
                 {

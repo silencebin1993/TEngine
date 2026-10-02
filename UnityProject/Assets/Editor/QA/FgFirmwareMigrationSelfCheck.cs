@@ -199,8 +199,9 @@ namespace GameLogic.EditorTools
                     }
                 }
             }
-            Expect(code == 0 && fk.Count == FirmwareCatalog.ExpectedCount && rows.Count == FirmwareCatalog.ExpectedCount && diffs.Count == 0,
-                $"fg.TbFirmwareKind {rows.Count} 行 × 26 列与源 {fk.Count} 行逐字段一致{Detail(diffs)}");
+            // FG5-RND-04：表里另有 30 条混合固件（熔合产物，FgFusionSelfCheck 核对规则）；名表正式固件仍是 44 条。
+            Expect(code == 0 && fk.Count == rows.Count && FirmwareKinds.BaseRows.Count == FirmwareCatalog.ExpectedCount && diffs.Count == 0,
+                $"fg.TbFirmwareKind {rows.Count} 行（名表 {FirmwareKinds.BaseRows.Count} 条 + 混合固件 {rows.Count - FirmwareKinds.BaseRows.Count} 条）× 29 列与源 {fk.Count} 行逐字段一致{Detail(diffs)}");
 
             IReadOnlyList<StatusTag> tags = StatusTagCatalog.Rows;
             var tdiff = st.Where(f => f.Length < 7 || tags.All(t => !(t.Id == f[1] && t.NameKey == f[2] && t.AliasOf == f[3] && t.Shape == f[4] && t.Color == f[5] && t.Kind == f[6])))
@@ -216,6 +217,7 @@ namespace GameLogic.EditorTools
             r.ReadProjectileKey, r.ReadMeleeKey, r.ReadSummonKey, r.ReadAuraKey, r.ReadFieldKey,
             r.Tags, r.Morph, r.Icon, r.Source, r.AcquireKey, r.Cracked ? "True" : "False", r.Scrap.ToString(CultureInfo.InvariantCulture),
             r.ReadFields, // FG2-FW-02：读法字段
+            r.MixA, r.MixB, r.Category2, // FG5-RND-04：混合固件的父固件与第二类别（正式固件 none）
         };
 
         private static string F(float v) => v.ToString("0.0###", CultureInfo.InvariantCulture);
@@ -252,8 +254,8 @@ namespace GameLogic.EditorTools
                 string legacy = c[0];
                 string name = c[1].Replace("**(已定)**", string.Empty).Trim();
                 FwRow row = legacy.StartsWith("gene_", StringComparison.Ordinal)
-                    ? FirmwareKinds.Rows.FirstOrDefault(r => r.LegacyId == legacy)
-                    : FirmwareKinds.Rows.FirstOrDefault(r => r.LegacyId == "none" && GameText.Get(r.NameKey, GameLanguage.ZhCn) == name);
+                    ? FirmwareKinds.BaseRows.FirstOrDefault(r => r.LegacyId == legacy)
+                    : FirmwareKinds.BaseRows.FirstOrDefault(r => r.LegacyId == "none" && GameText.Get(r.NameKey, GameLanguage.ZhCn) == name);
                 if (row == null)
                 {
                     problems.Add($"设计案的 {legacy} {name} 在表里没有对应行");
@@ -269,20 +271,20 @@ namespace GameLogic.EditorTools
             Expect(design != null && table.Count == FirmwareCatalog.ExpectedCount && seenIds.Count == FirmwareCatalog.ExpectedCount && problems.Count == 0,
                 $"设计案 5.4 名表 {table.Count} 行与 fg.TbFirmwareKind 逐行一致（名称走文本键）{Detail(problems)}");
 
-            var legacySet = new HashSet<string>(FirmwareKinds.Rows.Where(r => r.LegacyId != "none").Select(r => r.LegacyId), StringComparer.Ordinal);
+            var legacySet = new HashSet<string>(FirmwareKinds.BaseRows.Where(r => r.LegacyId != "none").Select(r => r.LegacyId), StringComparer.Ordinal);
             var geneSet = new HashSet<string>(GeneCatalog.AllModuleIds, StringComparer.Ordinal);
-            var newBuilt = FirmwareKinds.Rows.Where(r => r.LegacyId == "none").Select(r => r.Id).OrderBy(x => x, StringComparer.Ordinal).ToList();
+            var newBuilt = FirmwareKinds.BaseRows.Where(r => r.LegacyId == "none").Select(r => r.Id).OrderBy(x => x, StringComparer.Ordinal).ToList();
             Expect(legacySet.SetEquals(geneSet) && legacySet.Count == 42 && !GeneCatalog.AllIds.Any()
                    && newBuilt.SequenceEqual(new[] { FirmwareCatalog.FwArmorPierceId, FirmwareCatalog.FwMarkTagId }),
                 $"旧 ID 列 = 旧引擎全部 {geneSet.Count} 条基因（一条不漏、一条不重）；只有设计案标“新建”的装甲击穿、标记跳转没有旧 ID" +
                 Detail(geneSet.Except(legacySet).Select(g => "漏迁 " + g).Concat(legacySet.Except(geneSet).Select(g => "表里多了 " + g)).ToList()));
 
-            var counts = FirmwareKinds.Rows.GroupBy(r => r.Category).ToDictionary(g => g.Key, g => g.Count());
-            var coreIds = FirmwareKinds.Rows.Where(r => r.Kind == "core").Select(r => r.Id).OrderBy(x => x, StringComparer.Ordinal).ToList();
+            var counts = FirmwareKinds.BaseRows.GroupBy(r => r.Category).ToDictionary(g => g.Key, g => g.Count());
+            var coreIds = FirmwareKinds.BaseRows.Where(r => r.Kind == "core").Select(r => r.Id).OrderBy(x => x, StringComparer.Ordinal).ToList();
             Expect(counts.TryGetValue("fuse", out int a) && a == 17 && counts.TryGetValue("limiter", out int b) && b == 10
                    && counts.TryGetValue("fluid", out int c2) && c2 == 9 && counts.TryGetValue("em", out int d) && d == 8
                    && coreIds.SequenceEqual(new[] { "fw_amplify", "fw_capacitor", "fw_execute", "fw_marktag", "fw_overload", "fw_swarm" })
-                   && FirmwareKinds.Rows.Where(r => r.Kind == "core").All(r => r.Category == "limiter" && r.Rarity == "epic"),
+                   && FirmwareKinds.BaseRows.Where(r => r.Kind == "core").All(r => r.Category == "limiter" && r.Rarity == "epic"),
                 "类别条数 引信 17 / 限制器 10 / 流体 9 / 电磁 8；核心 6 条（过载、电容蓄力、标记跳转、集群协议、反应增幅、处决），全在限制器类、精良（FGR-FW-003）");
         }
 
@@ -310,8 +312,9 @@ namespace GameLogic.EditorTools
                           && d.ValuesSummary.Contains(r.Heat.ToString("0.#", CultureInfo.InvariantCulture)) && !d.ValuesSummary.Contains("耗电");
                 if (!ok) problems.Add(r.Id);
             }
-            Expect(FirmwareCatalog.All.Count == FirmwareCatalog.ExpectedCount && problems.Count == 0
-                   && MechanicalContentFacade.CountByCategory(MechanicalContentCategory.Firmware) == FirmwareCatalog.ExpectedCount,
+            // FG5-RND-04：目录 = 名表 44 条 + 30 条混合固件（逐字段同样来自表）；聚合目录里的固件条数与目录一致。
+            Expect(FirmwareCatalog.BaseCount == FirmwareCatalog.ExpectedCount && problems.Count == 0
+                   && MechanicalContentFacade.CountByCategory(MechanicalContentCategory.Firmware) == FirmwareCatalog.All.Count,
                 $"目录 {FirmwareCatalog.All.Count} 条 = 聚合目录里的固件 {MechanicalContentFacade.CountByCategory(MechanicalContentCategory.Firmware)} 条，逐字段来自表（名称 / 描述 / 负载 / 废料 / 图标 / 等价实现 / AI 许可 / 来源 / 获取途径）{Detail(problems)}");
 
             CampaignState s = NewState(8801);
@@ -325,7 +328,7 @@ namespace GameLogic.EditorTools
                 bool splitOk = FirmwareCatalog.TryGet(FirmwareCatalog.FwSplitId, out MechanicalContentDef split) && split.DisplayName == "分叉" && split.Load == 3 && split.ScrapCost == 99
                                && MechanicalContentFacade.TryGet(FirmwareCatalog.FwSplitId, out MechanicalContentDef fsplit) && fsplit.Load == 3;
                 int scrapAfter = gunSplit.ComputeScrapCost();
-                Expect(splitOk && FirmwareCatalog.All.Count == 43 && !FirmwareCatalog.TryGet("fw_bridge", out _) && FirmwareKinds.KindOf("fw_bridge") == FirmwareKind.NotFirmware
+                Expect(splitOk && FirmwareCatalog.BaseCount == 43 && !FirmwareCatalog.TryGet("fw_bridge", out _) && FirmwareKinds.KindOf("fw_bridge") == FirmwareKind.NotFirmware
                        && !MechanicalContentFacade.TryGet("fw_bridge", out _) && scrapAfter == scrapBefore - 8 + 99
                        && FirmwareKinds.DisplayName(FirmwareCatalog.FwSplitId) == "分叉",
                     $"注入改过的表（分裂改名键 / 负载 3 / 废料 99，删掉桥接）：目录 {FirmwareCatalog.All.Count} 条、聚合目录与蓝图废料成本 {scrapBefore}→{scrapAfter} 都跟着表变，桥接不再是固件");
@@ -334,8 +337,8 @@ namespace GameLogic.EditorTools
             {
                 FirmwareKinds.ResetForTests();
             }
-            Expect(FirmwareCatalog.All.Count == FirmwareCatalog.ExpectedCount && FirmwareCatalog.TryGet("fw_bridge", out _),
-                "恢复正式表后目录回到 44 条");
+            Expect(FirmwareCatalog.BaseCount == FirmwareCatalog.ExpectedCount && FirmwareCatalog.TryGet("fw_bridge", out _),
+                "恢复正式表后目录回到 44 条（另有混合固件）");
 
             GameSettings.SetLanguage(GameLanguage.En);
             string en = FirmwareCatalog.TryGet(FirmwareCatalog.FwSplitId, out MechanicalContentDef enDef) ? enDef.DisplayName : null;
@@ -367,6 +370,7 @@ namespace GameLogic.EditorTools
             "salvage" => MechanicalContentSource.RegionSalvage,
             "elite" => MechanicalContentSource.EliteDrop,
             "boss" => MechanicalContentSource.FactionBoss,
+            "fusion" => MechanicalContentSource.Fusion, // FG5-RND-04：混合固件（熔合产物）
             _ => (MechanicalContentSource)(-1),
         };
 
@@ -379,7 +383,7 @@ namespace GameLogic.EditorTools
             var coreBad = new List<string>();
             var regularBad = new List<string>();
             int installed = 0;
-            foreach (FwRow r in FirmwareKinds.Rows)
+            foreach (FwRow r in FirmwareKinds.BaseRows) // 名表 44 条（混合固件的装配由 FgFusionSelfCheck 核对）
             {
                 BlueprintCircuitBoard b = GunBoard(null);
                 CircuitOpResult set = b.TrySetFirmware(s, 0, r.Id);
@@ -451,7 +455,7 @@ namespace GameLogic.EditorTools
             }
             Expect(up.Success && basePaths > 0 && bad.Count == 0,
                 $"44 条逐条插进 2 号格接入口：都生效，路径数都保持 {basePaths}（UplinkCompiler.PathCountAfter 与真实编译一致）{Detail(bad)}");
-            int em = FirmwareKinds.Rows.Count(r => r.Morph == "em");
+            int em = FirmwareKinds.BaseRows.Count(r => r.Morph == "em");
             Expect(morphBad.Count == 0 && em == 8,
                 $"机身形变 = 表的形变列：引信 17 条常态、限制器 10 条形变态、流体 9 条喷口态、电磁 {em} 条线圈态（正式电磁固件替代了 FG1-VFX-01 的注入）{Detail(morphBad)}");
         }
@@ -463,7 +467,7 @@ namespace GameLogic.EditorTools
             Line("  · F. 热量与能耗（FGR-FW-001）：预览 = 蓝图版本 = 表；Demo 数字不变；重炮内核每发积热 = 热量预算（IC-REQ-010）；FG4-ECO-04 起双态预览只比热量（能耗只在数据层）");
             CampaignState s = NewState(8805, unlockAll: true);
             var bad = new List<string>();
-            foreach (FwRow r in FirmwareKinds.Rows.Where(x => x.Kind != "core" && x.Id != FirmwareCatalog.FwArmorPierceId))
+            foreach (FwRow r in FirmwareKinds.BaseRows.Where(x => x.Kind != "core" && x.Id != FirmwareCatalog.FwArmorPierceId))
             {
                 BlueprintCircuitBoard b = GunBoard(null);
                 b.TrySetFirmware(s, 0, r.Id);
@@ -594,7 +598,7 @@ namespace GameLogic.EditorTools
 
             var probeBad = new List<string>();
             int probed = 0;
-            foreach (FwRow r in FirmwareKinds.Rows.Where(x => x.LegacyId != "none"))
+            foreach (FwRow r in FirmwareKinds.BaseRows.Where(x => x.LegacyId != "none"))
             {
                 string[] actual = FirmwareCatalog.ProbeModuleTags(r.Id);
                 string[] declared = FirmwareKinds.TagsOf(r.Id).OrderBy(x => x, StringComparer.Ordinal).ToArray();
@@ -739,7 +743,8 @@ namespace GameLogic.EditorTools
             }
             var zhNames = FirmwareCatalog.All.Keys.Select(id => GameText.Get(FirmwareKinds.Rows.First(r => r.Id == id).NameKey, GameLanguage.ZhCn)).ToList();
             var enNames = FirmwareCatalog.All.Keys.Select(id => GameText.Get(FirmwareKinds.Rows.First(r => r.Id == id).NameKey, GameLanguage.En)).ToList();
-            Expect(fwBad.Count == 0 && zhNames.Distinct().Count() == 44 && enNames.Distinct().Count() == 44,
+            // FG5-RND-04：名表 44 条 + 混合固件 30 条，名字全部互不重复（混合固件的名字来自配方表的文本键，不自动拼）。
+            Expect(fwBad.Count == 0 && FirmwareCatalog.BaseCount == 44 && zhNames.Distinct().Count() == FirmwareCatalog.All.Count && enNames.Distinct().Count() == FirmwareCatalog.All.Count,
                 $"44 条固件：中英名称各不重复；目录玩家字段 + 5 种载体读法（中英各 5 句、互不相同）零缺失标记、零禁用词、零内部 ID{Detail(fwBad)}");
 
             // 扫描器自己要能抓到违规（否则上面的“零”没有意义）。
@@ -853,7 +858,7 @@ namespace GameLogic.EditorTools
             sw.Stop();
             double compileMs = sw.Elapsed.TotalMilliseconds / ids.Length;
             PerfLines.Add($"目录冷构建 {n} 条 {buildMs:F2} ms；查询（种类 + 热量 + 能耗 + 名称）{perLookupUs:F3} µs/次（{iterations} 次，校验和 {sink:F0}）；接入编译 {compileMs:F3} ms/条（{ids.Length} 条）");
-            ExpectPerf(n == 44 && noRebuild,
+            ExpectPerf(FirmwareCatalog.BaseCount == 44 && n == FirmwareCatalog.All.Count && noRebuild,
                 $"目录冷构建 {buildMs:F2} ms（< 50）、查询 {perLookupUs:F3} µs/次（< 5）、接入编译 {compileMs:F3} ms/条（< 20，只在保存 / 接入 / 预览时发生，不按帧）；连续访问 1000 次不重建目录",
                 PerfGate.Lt(buildMs, 50.0, "目录冷构建 ms"), PerfGate.Lt(perLookupUs, 5.0, "查询 µs"), PerfGate.Lt(compileMs, 20.0, "接入编译 ms/条"));
         }
@@ -971,6 +976,9 @@ namespace GameLogic.EditorTools
                 buf.WriteBool(r.Cracked);
                 buf.WriteInt(scrap ?? r.Scrap);
                 buf.WriteString(r.ReadFields); // FG2-FW-02：读法字段
+                buf.WriteString(r.MixA); // FG5-RND-04
+                buf.WriteString(r.MixB);
+                buf.WriteString(r.Category2);
             }
             return new TbFirmwareKind(buf);
         }

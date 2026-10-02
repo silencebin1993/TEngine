@@ -144,5 +144,7 @@
         OpenStats = 118,
         /// <summary>FG4-ECO-09（FGU-30 离家报告，FGR-ECO-060“随时可以查看最近 3 份报告”）：打开 / 关闭离家报告（全部上下文，默认 Alt+H）。</summary>
         OpenAwayReport = 119,
+        /// <summary>FG5-RND-04（FGU-21 配方书，FG05 第 4 节）：打开 / 关闭配方书（已发现的配方、线索、各类别还剩几个未发现；全部上下文，默认 Alt+F）。</summary>
+        OpenRecipeBook = 120,
     }
 }

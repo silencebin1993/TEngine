@@ -480,7 +480,7 @@ namespace GameLogic.Campaign.Signal
                 {
                     foreach (GameConfig.fg.FirmwareKind row in _table.DataList)
                     {
-                        if (row != null && row.Kind == "core")
+                        if (row != null && row.Kind == "core" && !IsMixedRow(row)) // FG5-RND-04：名表的 6 条（含核心父固件的混合固件也是核心，但不在名单里）
                         {
                             ids.Add(row.Id);
                         }
@@ -534,6 +534,91 @@ namespace GameLogic.Campaign.Signal
             FirmwareKind.Regular => "signal.core.kind.regular_tip",
             _ => "signal.core.kind.chip_tip",
         });
+
+        // ── FG5-RND-04（FGR-FW-050）：混合固件（熔合产物）────────────────────────────────
+
+        /// <summary>设计案 5.4 名表的 44 条正式固件（表里去掉混合固件的行，按表顺序）。只在目录 / 自检 / 面板刷新时用，不按帧。</summary>
+        public static List<GameConfig.fg.FirmwareKind> BaseRows
+        {
+            get
+            {
+                var list = new List<GameConfig.fg.FirmwareKind>(48);
+                foreach (GameConfig.fg.FirmwareKind row in Rows)
+                {
+                    if (row != null && !IsMixedRow(row))
+                    {
+                        list.Add(row);
+                    }
+                }
+                return list;
+            }
+        }
+
+        /// <summary>这条固件是不是混合固件（表 mixA 列不为 none）。不是固件时 false。O(1)。</summary>
+        public static bool IsMixed(string contentId) =>
+            TryGetFirmwareRow(contentId, out GameConfig.fg.FirmwareKind row) && IsMixedRow(row);
+
+        /// <summary>表里的一行是不是混合固件（目录 / 图鉴构建用，不经过目录查找）。</summary>
+        public static bool IsMixedRow(GameConfig.fg.FirmwareKind row) =>
+            row != null && !string.IsNullOrEmpty(row.MixA) && row.MixA != "none";
+
+        /// <summary>混合固件的两条父固件（表 mixA / mixB）。不是混合固件时 false。</summary>
+        public static bool TryGetParents(string contentId, out string parentA, out string parentB)
+        {
+            parentA = null;
+            parentB = null;
+            if (!TryGetFirmwareRow(contentId, out GameConfig.fg.FirmwareKind row) || !IsMixedRow(row))
+            {
+                return false;
+            }
+            parentA = row.MixA;
+            parentB = row.MixB;
+            return true;
+        }
+
+        /// <summary>混合固件的第二个类别（“类别显示两个图标”）。不是混合固件时 <see cref="FirmwareCategory.Unknown"/>。</summary>
+        public static FirmwareCategory Category2Of(string contentId)
+        {
+            if (!TryGetFirmwareRow(contentId, out GameConfig.fg.FirmwareKind row) || !IsMixedRow(row))
+            {
+                return FirmwareCategory.Unknown;
+            }
+            switch (row.Category2)
+            {
+                case "fuse": return FirmwareCategory.Fuse;
+                case "limiter": return FirmwareCategory.Limiter;
+                case "fluid": return FirmwareCategory.Fluid;
+                case "em": return FirmwareCategory.Electromagnetic;
+                default: return FirmwareCategory.Unknown;
+            }
+        }
+
+        /// <summary>
+        /// 编译 / 反应判定用的“等价固件列表”：混合固件展开成两条父固件（同时具有两者的读法——旧引擎模块、装配反应识别都按父固件算），
+        /// 其余原样。读法字段（<see cref="Content.CarrierReadings.FieldsOf"/>）不走这里：混合固件的读法字段已按 fg.TbFusionMerge 的上限合并在表里。
+        /// 只在装配结算时调用（不按帧）。
+        /// </summary>
+        public static List<string> ExpandMixed(IEnumerable<string> firmwareIds)
+        {
+            var list = new List<string>();
+            if (firmwareIds == null)
+            {
+                return list;
+            }
+            foreach (string id in firmwareIds)
+            {
+                if (TryGetParents(id, out string a, out string b))
+                {
+                    list.Add(a);
+                    list.Add(b);
+                }
+                else
+                {
+                    list.Add(id);
+                }
+            }
+            return list;
+        }
 
         public static void Reload()
         {

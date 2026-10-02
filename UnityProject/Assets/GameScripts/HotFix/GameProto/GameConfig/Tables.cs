@@ -171,6 +171,14 @@ public partial class Tables
     /// </summary>
     public fg.TbFluid TbFluid {get; }
     /// <summary>
+    /// 熔合合并上限
+    /// </summary>
+    public fg.TbFusionMerge TbFusionMerge {get; }
+    /// <summary>
+    /// 熔合配方
+    /// </summary>
+    public fg.TbFusionRecipe TbFusionRecipe {get; }
+    /// <summary>
     /// 地形类型
     /// </summary>
     public fg.TbGridTerrain TbGridTerrain {get; }
@@ -373,6 +381,8 @@ public partial class Tables
         TbEcoItem = new fg.TbEcoItem(loader("fg_tbecoitem"));
         TbFirmwareKind = new fg.TbFirmwareKind(loader("fg_tbfirmwarekind"));
         TbFluid = new fg.TbFluid(loader("fg_tbfluid"));
+        TbFusionMerge = new fg.TbFusionMerge(loader("fg_tbfusionmerge"));
+        TbFusionRecipe = new fg.TbFusionRecipe(loader("fg_tbfusionrecipe"));
         TbGridTerrain = new fg.TbGridTerrain(loader("fg_tbgridterrain"));
         TbHomeTuning = new fg.TbHomeTuning(loader("fg_tbhometuning"));
         TbInputAction = new fg.TbInputAction(loader("fg_tbinputaction"));
@@ -458,6 +468,8 @@ public partial class Tables
         TbEcoItem.ResolveRef(this);
         TbFirmwareKind.ResolveRef(this);
         TbFluid.ResolveRef(this);
+        TbFusionMerge.ResolveRef(this);
+        TbFusionRecipe.ResolveRef(this);
         TbGridTerrain.ResolveRef(this);
         TbHomeTuning.ResolveRef(this);
         TbInputAction.ResolveRef(this);

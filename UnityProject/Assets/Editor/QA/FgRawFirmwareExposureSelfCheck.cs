@@ -212,7 +212,7 @@ namespace GameLogic.EditorTools
             // Demo 的两条敌方固件（标记跳转 = 静默、装甲击穿 = 铸造）不变。
             var enemy = FirmwareCatalog.All.Keys.Where(FirmwareKinds.IsEnemyProtocol).OrderBy(x => x, StringComparer.Ordinal).ToList();
             var enemyRows = FirmwareKinds.Rows.Where(r => r.Protocol == "enemy").Select(r => r.Id).OrderBy(x => x, StringComparer.Ordinal).ToList();
-            var own = FirmwareKinds.Rows.Where(r => r.Protocol == "own").Select(r => r.Id).OrderBy(x => x, StringComparer.Ordinal).ToList();
+            var own = FirmwareKinds.BaseRows.Where(r => r.Protocol == "own").Select(r => r.Id).OrderBy(x => x, StringComparer.Ordinal).ToList();
             Expect(enemy.SequenceEqual(enemyRows) && enemy.Contains(FirmwareCatalog.FwArmorPierceId) && enemy.Contains(FirmwareCatalog.FwMarkTagId)
                    && FirmwareKinds.FactionOf(FirmwareCatalog.FwMarkTagId) == "silent" && FirmwareKinds.FactionOf(FirmwareCatalog.FwArmorPierceId) == "foundry"
                    && FirmwareKinds.FactionOf(FirmwareCatalog.FwOverloadId) == "reclaim"

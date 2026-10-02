@@ -538,6 +538,11 @@ namespace GameLogic.Campaign.Signal
                 return SignalCoreResult.Fail(CodePrintUnknown, GameText.Format("signal.reason.print_unknown", firmwareId ?? string.Empty));
             }
             string name = FirmwareKinds.DisplayName(firmwareId) ?? firmwareId;
+            if (FirmwareKinds.IsMixed(firmwareId))
+            {
+                // FG5-RND-04（FGR-RND-042）：混合固件只在固件刻录台量产（芯片基板 ×3），信号核不刻。
+                return SignalCoreResult.Fail(CodePrintLocked, GameText.Format("signal.reason.print_mixed", name, Economy.FusionCatalog.BurnSubstrate));
+            }
             int cost = FirmwareChipPrintScrap;
             CircuitOpResult r = PrimitiveInventory.TryPrintFirmwareChip(s, firmwareId, true,
                 MechanicalContentUnlock.IsUnlocked(s, firmwareId), cost, out string partId);
@@ -560,11 +565,19 @@ namespace GameLogic.Campaign.Signal
         }
 
         /// <summary>可以刻印的固件（已解锁），按固件目录顺序。</summary>
-        public static List<string> PrintableFirmware(CampaignState s)
+        public static List<string> PrintableFirmware(CampaignState s) => PrintableFirmware(s, includeMixed: false);
+
+        /// <summary>FG5-RND-04：<paramref name="includeMixed"/> = 固件刻录台的目标清单（已发现配方的混合固件也能刻，芯片基板 ×3）；
+        /// 信号核“刻印”过渡渠道不刻混合固件（FGR-RND-042“之后在刻录台量产”，不能绕开刻录台的成本）。</summary>
+        public static List<string> PrintableFirmware(CampaignState s, bool includeMixed)
         {
             var list = new List<string>();
             foreach (string id in FirmwareCatalog.All.Keys.OrderBy(k => k, StringComparer.Ordinal))
             {
+                if (!includeMixed && FirmwareKinds.IsMixed(id))
+                {
+                    continue;
+                }
                 if (MechanicalContentUnlock.IsUnlocked(s, id))
                 {
                     list.Add(id);

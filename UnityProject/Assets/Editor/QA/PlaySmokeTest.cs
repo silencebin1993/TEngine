@@ -315,6 +315,14 @@ namespace GameLogic.EditorTools
                     case 363: StepRangeOpened(inStep); break;
                     case 364: StepRangeRunning(inStep); break;
                     case 365: StepRangeClosed(inStep); break;
+                    // FG5-RND-04：放一座建成的电路合成台 → 左键点它打开通用面板 → 点“熔合…”打开合成台面板（FGU-21）→ 两个下拉选燃迹 / 漏油、点“模拟熔合”（有配方）→
+                    // 点“正式熔合…”弹确认框、点“确认”入队 → 放开约一秒：熔合进行中 → 队列行“取消”全部退回 → 配方书键（默认 Alt+F）关掉 / 再打开配方书 → Esc 关闭。
+                    case 366: StepFusionPlaced(inStep); break;
+                    case 367: StepFusionBuildingPanel(inStep); break;
+                    case 368: StepFusionOpened(inStep); break;
+                    case 369: StepFusionSimulated(inStep); break;
+                    case 370: StepFusionRunning(inStep); break;
+                    case 371: StepFusionBook(inStep); break;
                     case 346: StepOverridePicked(inStep); break;
                     case 347: StepOverridePlaced(inStep); break;
                     case 348: StepOverridePanel(inStep); break;
@@ -2452,7 +2460,7 @@ namespace GameLogic.EditorTools
                 string locked = circuitRoot?.Q<Label>("LockedContentHintLabel")?.text ?? string.Empty;
                 int lockedFw = Campaign.Content.FirmwareCatalog.All.Keys.Count(id => !Campaign.Content.MechanicalContentUnlock.IsUnlocked(CampaignSession.Current, id));
                 string coolant = Localization.GameText.Get("firmware.fw_coolant.name");
-                Check(Campaign.Content.FirmwareCatalog.All.Count == Campaign.Content.FirmwareCatalog.ExpectedCount && lockedFw > 0
+                Check(Campaign.Content.FirmwareCatalog.BaseCount == Campaign.Content.FirmwareCatalog.ExpectedCount && lockedFw > 0
                       && locked.Contains(Localization.GameText.Format("circuit.locked_firmware_count", lockedFw)) && !locked.Contains(coolant)
                       && !Localization.GameText.ContainsMarker(locked) && !FgFirmwareMigrationSelfCheck.InternalContentId.IsMatch(locked),
                     $"电路面板“未解锁”行：{lockedFw} 条没拿到的固件只计数（“{locked}”），不列内部 ID");
@@ -5974,6 +5982,217 @@ namespace GameLogic.EditorTools
             Check(!TestRangePanelUIToolkit.IsOpen && Campaign.Regions.HomeValleyBuildMode.Current != null && Campaign.Regions.HomeValleyBuildMode.Current.IsOpen,
                 "Esc 关闭靶场面板（建造模式还开着）");
             SessionState.SetInt(K + "RangeSub", 0);
+            Next(366, "FG5-RND-04：放一座建成的电路合成台，左键点它");
+        }
+
+        // ── FG5-RND-04：电路合成台（建筑面板“熔合…”、模拟熔合、正式熔合（确认框）、熔合进行中、取消退回、配方书键、Esc 关闭）──
+
+        private const string SmokeSynthId = Campaign.Regions.HomeValleyLayout.RegionId + ":smoke_power_synth";
+
+        private static void StepFusionPlaced(double inStep)
+        {
+            if (inStep < 0.3)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            GameClock.SetPaused(true);
+            // 核心附近按地形找一块能放、接得上电网的空地，登记一座建成的电路合成台（测试捷径：机器施工由 FG3-LOG-02 覆盖），不写死坐标（B25）。
+            GridCell core = HomeGridService.CorePivot(state);
+            string builtId = null;
+            for (int r = 6; r <= 26 && builtId == null; r++)
+            {
+                for (int dy = -r; dy <= r && builtId == null; dy++)
+                {
+                    for (int dx = -r; dx <= r && builtId == null; dx++)
+                    {
+                        if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != r)
+                        {
+                            continue;
+                        }
+                        var c = new GridCell(core.X + dx, core.Y + dy);
+                        if (!HomeGridService.ValidatePlacement(state, "circuit_synth", c, 0, checkCost: false).Ok)
+                        {
+                            continue;
+                        }
+                        AddSmokeBuilding(state, "circuit_synth", "synth", c);
+                        Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+                        BuildingRecord b = HomeGridService.FindBuilding(state, SmokeSynthId);
+                        if (b != null && b.PowerState == BuildingPowerState.Powered)
+                        {
+                            b.Health = Campaign.Economy.BuildingOps.MaxDurability("circuit_synth");
+                            builtId = SmokeSynthId;
+                            continue;
+                        }
+                        state.BuildingRecords = state.BuildingRecords.Where(x => x.BuildingId != SmokeSynthId).ToArray();
+                        HomeGridService.MapFor(state);
+                        Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+                    }
+                }
+            }
+            // 测试捷径：固件库里各两枚燃迹 / 漏油（已破解）、仓库补芯片基板与技术数据（取得这些的正式流程由各自的自检覆盖）。
+            state.UnlockedContentIds = (state.UnlockedContentIds ?? Array.Empty<string>()).Concat(new[] { "fw_burntrail", "fw_oilleak" }).Distinct().ToArray();
+            for (int i = 0; i < 2; i++)
+            {
+                Campaign.Primitive.PrimitiveInventory.GrantCrafted(state, "fw_burntrail");
+                Campaign.Primitive.PrimitiveInventory.GrantCrafted(state, "fw_oilleak");
+            }
+            Campaign.Economy.HomeInventory.Add(state, "chip_substrate", 4, clampToSpace: false); // 与维修件同一种测试捷径（此刻仓库的固体余量随前面各步变化）
+            state.TechData += 60;
+            BuildingRecord built = HomeGridService.FindBuilding(state, SmokeSynthId);
+            Check(builtId != null, $"接得上电网的建成电路合成台 {builtId}；固件库里有燃迹 / 漏油，仓库有芯片基板与技术数据");
+            if (built != null)
+            {
+                ClickWorld(new Vector3(built.Position.x, 0f, built.Position.y));
+            }
+            Next(367, "左键点电路合成台打开通用面板，点“熔合…”");
+        }
+
+        private static void StepFusionBuildingPanel(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            ProductionPanelUIToolkit bp = ProductionPanelUIToolkit.Instance;
+            bool bpOpen = ProductionPanelUIToolkit.IsOpen && bp != null && ProductionPanelUIToolkit.BuildingId == SmokeSynthId && bp.FusionButton != null
+                          && ProductionPanelUIToolkit.Visible(bp.FusionButton) && bp.ReasonText.Contains("空闲");
+            Check(bpOpen, $"左键点建成的电路合成台打开它的通用面板：状态“{bp?.ReasonText}”，有“熔合…”按钮");
+            Check(ClickUitk("[ProductionPanelHost]", "PrFusion"), "通用面板上点“熔合…”");
+            Next(368, "合成台面板打开：选燃迹 / 漏油，点“模拟熔合”");
+        }
+
+        private static void StepFusionOpened(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            FusionPanelUIToolkit panel = FusionPanelUIToolkit.Instance;
+            bool open = FusionPanelUIToolkit.IsOpen && panel != null && panel.PanelVisible && FusionPanelUIToolkit.BuildingId == SmokeSynthId
+                        && LabelText("[FusionPanelHost]", "FusionTitle").Contains(Localization.GameText.Get("building.circuit_synth.name"))
+                        && panel.RemainingText.Contains("还有") && panel.QueueEmptyText.Length > 0;
+            Check(open, $"合成台面板打开：“{panel?.TitleText}”；固件下拉 {panel?.ParentChoices.Count} 条；“{FirstLine(panel?.RemainingText)}”");
+            CheckNoTextMarkers("电路合成台面板");
+            // UI Toolkit 红线 8：下拉框选中即生效（玩家点选项 = value 赋值 → ChangeEvent）；先确认下拉框此刻真能点。
+            DropdownField a = panel?.ParentField(true);
+            DropdownField b = panel?.ParentField(false);
+            bool clickable = a != null && b != null && a.panel != null && a.enabledInHierarchy && a.worldBound.width > 0f && b.worldBound.width > 0f;
+            Check(clickable, $"固件 A / B 下拉框可见可用（{a?.worldBound}）");
+            if (clickable)
+            {
+                int ia = panel.ParentIndexOf("fw_burntrail");
+                int ib = panel.ParentIndexOf("fw_oilleak");
+                if (ia >= 0 && ib >= 0)
+                {
+                    a.value = a.choices[ia];
+                    b.value = b.choices[ib];
+                }
+            }
+            SessionState.SetInt(K + "FusionTech0", state.TechData);
+            Check(ClickUitk("[FusionPanelHost]", "FusionSimulate"), "点“模拟熔合”");
+            Next(369, "模拟出配方：点“正式熔合…”并确认");
+        }
+
+        private static string FirstLine(string s) => (s ?? string.Empty).Split('\n')[0];
+
+        private static int SubstrateTotal(CampaignState state)
+        {
+            Campaign.Economy.ItemDistribution.Invalidate();
+            return (int)Campaign.Economy.ItemDistribution.Get(state, Campaign.Economy.ItemCatalog.Find("chip_substrate")).Total;
+        }
+
+        private static void StepFusionSimulated(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            FusionPanelUIToolkit panel = FusionPanelUIToolkit.Instance;
+            int sub = SessionState.GetInt(K + "FusionSub", 0);
+            if (sub == 0)
+            {
+                if (inStep < 0.5)
+                {
+                    return;
+                }
+                panel?.Refresh(force: true);
+                bool hit = panel != null && panel.SelectedA == "fw_burntrail" && panel.SelectedB == "fw_oilleak" && panel.ResultText.Contains("有配方")
+                           && state.TechData == SessionState.GetInt(K + "FusionTech0", -1) - Campaign.Economy.FusionCatalog.SimTech
+                           && panel.FormalButton.enabledSelf;
+                Check(hit, $"模拟熔合：结果“{FirstLine(panel?.ResultText)}”，技术数据 -{Campaign.Economy.FusionCatalog.SimTech}，固件不消耗；“正式熔合…”可以点了");
+                Check(ClickUitk("[FusionPanelHost]", "FusionFormal"), "点“正式熔合…”");
+                SessionState.SetInt(K + "FusionSub", 1);
+                return;
+            }
+            if (inStep < 1.0)
+            {
+                return;
+            }
+            bool asked = UiConfirmDialog.IsOpen && UiConfirmDialog.Current.Title == Localization.GameText.Get("fusion.confirm.title");
+            bool confirmed = ClickUitk("[UiKitOverlayHost]", "ConfirmOk") && !UiConfirmDialog.IsOpen;
+            Check(asked && confirmed, "正式熔合先弹确认框（熔合消耗，B04），点“确认”");
+            SessionState.SetInt(K + "FusionSub", 0);
+            GameClock.SetPaused(false); // 放开约一秒真实帧：熔合进行中
+            Next(370, "熔合进行中：队列行“取消”全部退回");
+        }
+
+        private static void StepFusionRunning(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            GameClock.SetPaused(true);
+            CampaignState state = CampaignSession.Current;
+            FusionPanelUIToolkit panel = FusionPanelUIToolkit.Instance;
+            panel?.Refresh(force: true);
+            FusionJobRecord job = Campaign.Economy.FusionService.JobsOf(state, SmokeSynthId).FirstOrDefault();
+            bool running = job != null && Campaign.Economy.FusionService.IsActive(job) && job.Progress > 0f && panel != null && panel.QueueRowCount == 1
+                           && panel.QueueRowText(0).Contains("熔合中") && state.PrimitiveChips.Count(c => c.ReservedByTransactionId == job.JobId) == 2;
+            Check(running, $"熔合进行中：队列行“{panel?.QueueRowText(0)}”，两枚父固件被预留（{job?.Progress:F1} 秒）");
+            int sub0 = SubstrateTotal(state); // 物资分布总量（仓库 / 地面 / 熔合在办……）：取消前后不变才算全部退回
+            Check(ClickUitk("[FusionPanelHost]", "FqCancel"), "点队列行的“取消”");
+            panel?.Refresh(force: true);
+            bool refunded = job != null && job.State == FusionJobState.Cancelled && SubstrateTotal(state) == sub0 && job.Substrate == 0
+                            && state.PrimitiveChips.All(c => c.ReservedByTransactionId != job.JobId) && panel != null && panel.MessageText.Contains("全部退回");
+            Check(refunded, $"取消：“{panel?.MessageText}”");
+            PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameActionId.OpenRecipeBook));
+            Next(371, "配方书键关掉面板、再打开配方书，Esc 关闭");
+        }
+
+        private static void StepFusionBook(double inStep)
+        {
+            int sub = SessionState.GetInt(K + "FusionSub", 0);
+            if (sub == 0)
+            {
+                if (inStep < 0.6)
+                {
+                    return;
+                }
+                Check(!FusionPanelUIToolkit.IsOpen, "面板开着时按配方书键（默认 Alt+F）关掉");
+                SessionState.SetInt(K + "FusionSub", 1);
+                PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameActionId.OpenRecipeBook));
+                return;
+            }
+            if (sub == 1)
+            {
+                if (inStep < 1.2)
+                {
+                    return;
+                }
+                FusionPanelUIToolkit panel = FusionPanelUIToolkit.Instance;
+                Check(FusionPanelUIToolkit.IsOpen && panel != null && panel.PanelVisible && panel.RemainingText.Contains("还有"),
+                    $"再按配方书键打开配方书：“{FirstLine(panel?.RemainingText)}”");
+                SessionState.SetInt(K + "FusionSub", 2);
+                PressKeyKeepMouse(KeyCode.Escape);
+                return;
+            }
+            if (inStep < 1.8)
+            {
+                return;
+            }
+            Check(!FusionPanelUIToolkit.IsOpen && Campaign.Regions.HomeValleyBuildMode.Current != null && Campaign.Regions.HomeValleyBuildMode.Current.IsOpen,
+                "Esc 关闭配方书（建造模式还开着）");
+            SessionState.SetInt(K + "FusionSub", 0);
             GameClock.SetPaused(SessionState.GetInt(K + "RangeWasPaused", 0) == 1);
             Next(264, "FG3-LOG-04：建造模式里放分流器与地下传送带");
         }

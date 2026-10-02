@@ -484,6 +484,115 @@ namespace GameLogic.Campaign
         public AnalysisBenchState Analysis = new AnalysisBenchState();
         /// <summary>FG5-RND-03：靶场（击败过的敌人类型、靶子布置与预设、已结束的测试结果）。投影与进行中的测试不存档。旧存档没有 = 空状态。</summary>
         public TestRangeState Range = new TestRangeState();
+        /// <summary>FG5-RND-04：熔合（配方书、线索、模拟记录、正式熔合队列、待分析的战斗记录、统计）。旧存档没有 = 空状态。</summary>
+        public FusionState Fusion = new FusionState();
+    }
+
+    /// <summary>FG5-RND-04（FG05 FGR-RND-040～045）：熔合的存档域。唯一写入口 <see cref="Economy.FusionService"/>。</summary>
+    [Serializable]
+    public sealed class FusionState
+    {
+        /// <summary>任务 / 线索 / 模拟记录的序号（确定性：观察 / 不观察、存读档前后同一结果）。</summary>
+        public int NextSerial = 1;
+        /// <summary>FGR-RND-042 / 045：已发现的配方（fg.TbFusionRecipe.id，按发现先后）。</summary>
+        public string[] Discovered = Array.Empty<string>();
+        /// <summary>FGR-RND-041：正式熔合队列（含已结束的最近几项，面板显示结果）。</summary>
+        public FusionJobRecord[] Jobs = Array.Empty<FusionJobRecord>();
+        /// <summary>FGR-RND-044：线索（部分 / 完整），按序号。</summary>
+        public FusionClueRecord[] Clues = Array.Empty<FusionClueRecord>();
+        /// <summary>FGR-RND-040：模拟熔合记录（这一对模拟过：有配方 / 无反应）。</summary>
+        public FusionSimRecord[] SimLog = Array.Empty<FusionSimRecord>();
+        /// <summary>没有可用的仿真实验室时先存着的战斗记录（有实验室了再分析）。</summary>
+        public FusionPendingRecord[] Pending = Array.Empty<FusionPendingRecord>();
+        /// <summary>已经分析过的战斗场次 ID（同一场不重复给线索；只保留最近若干个）。</summary>
+        public string[] AnalyzedSessions = Array.Empty<string>();
+        /// <summary>玩家在配方书里看过的最大线索序号（大于它的线索标“新”）。</summary>
+        public int SeenClueSerial;
+        /// <summary>“第一次拿到线索”的引导钩子已对这个存档扫过（钩子本身按玩家只广播一次）。</summary>
+        public bool FirstClueSeen;
+        /// <summary>统计：模拟次数 / 无反应次数 / 正式熔合完成次数 / 回滚次数 / 花在熔合上的技术数据。</summary>
+        public int Simulations;
+        public int SimulationMisses;
+        public int Fused;
+        public int RolledBack;
+        public long TechSpent;
+    }
+
+    /// <summary>FG5-RND-04：正式熔合的状态（存档里存整数）。</summary>
+    public enum FusionJobState
+    {
+        Queued = 0,
+        Running = 1,
+        Done = 2,
+        Cancelled = 3,
+        RolledBack = 4,
+    }
+
+    /// <summary>FG5-RND-04：一项正式熔合。两枚父固件芯片在固件库里被本项预留（<see cref="PrimitiveChipRecord.ReservedByTransactionId"/> = <see cref="JobId"/>），
+    /// 芯片基板与技术数据入队时已从仓库取走、记在本项上（取消 / 回滚按记录退回，完成时消耗）。</summary>
+    [Serializable]
+    public sealed class FusionJobRecord
+    {
+        public string JobId = string.Empty;
+        public int Serial;
+        public string BuildingId = string.Empty;
+        public string RecipeId = string.Empty;
+        public string PartA = string.Empty;
+        public string PartB = string.Empty;
+        public int Substrate;
+        public int Tech;
+        public float Progress;
+        public float Duration;
+        public FusionJobState State;
+        /// <summary>等待 / 结束原因码（no_power / disabled / destroyed / removed / chip_missing）。</summary>
+        public string Reason = string.Empty;
+        /// <summary>完成时产出的混合固件芯片实例 ID。</summary>
+        public string OutputPartId = string.Empty;
+        /// <summary>合成台的位置（入队时记下）：合成台被拆除后回滚，仓库放不下的芯片基板落在这里由机器搬回。</summary>
+        public float PosX;
+        public float PosY;
+    }
+
+    /// <summary>FG5-RND-04（FGR-RND-044）：一条线索。部分线索只知道 <see cref="KnownParent"/>；完整线索两条父固件都知道（显示时从配方表取）。</summary>
+    [Serializable]
+    public sealed class FusionClueRecord
+    {
+        public int Serial;
+        public string RecipeId = string.Empty;
+        public bool Full;
+        public string KnownParent = string.Empty;
+        /// <summary>线索来自哪条反应（标签 A + B 同时出现）与这一场出现了几次。</summary>
+        public string ReactionId = string.Empty;
+        public int Count;
+        /// <summary>来源场次（expedition / raid / sim = 模拟熔合确认）、地点与第几次出击（标题按当前语言现拼）。</summary>
+        public string SessionKind = string.Empty;
+        public string SiteId = string.Empty;
+        public int Ordinal;
+        public long Tick;
+    }
+
+    /// <summary>FG5-RND-04（FGR-RND-040）：一次模拟熔合的结果（同一对只记最新一次）。</summary>
+    [Serializable]
+    public sealed class FusionSimRecord
+    {
+        public int Serial;
+        /// <summary>两条固件 ID 按序号拼成的键（<see cref="Economy.FusionCatalog.PairKey"/>）。</summary>
+        public string PairKey = string.Empty;
+        /// <summary>有配方 = 配方 ID；无反应 = 空。</summary>
+        public string RecipeId = string.Empty;
+    }
+
+    /// <summary>FG5-RND-04：一场等仿真实验室分析的战斗记录（反应 ID 与这一场的触发次数，按反应 ID 排序）。</summary>
+    [Serializable]
+    public sealed class FusionPendingRecord
+    {
+        public string SessionId = string.Empty;
+        public string Kind = string.Empty;
+        public string SiteId = string.Empty;
+        public int Ordinal;
+        public long EndTick;
+        public string[] Reactions = Array.Empty<string>();
+        public int[] Counts = Array.Empty<int>();
     }
 
     /// <summary>FG5-RND-01：一个节点已投入的研究点（取消 / 移出队列后保留）。</summary>
@@ -1537,6 +1646,7 @@ namespace GameLogic.Campaign
                 s.Research.Analysis.NextSerial = 1;
             }
             Economy.TestRangeService.EnsureState(s); // FG5-RND-03：靶场域补成空域；旧档按已击毁的敌人记录补“击败过的敌人类型”。
+            Economy.FusionService.EnsureState(s); // FG5-RND-04：熔合域补成空域（旧档没有 = 没发现配方、没有线索）。
             if (s.Research.DomainVersion < ResearchState.CurrentVersion)
             {
                 Economy.ResearchService.MigrateFromV1(s); // FG5-RND-01：旧档迁移（研发树开放前就能建造的内容记为已研究）

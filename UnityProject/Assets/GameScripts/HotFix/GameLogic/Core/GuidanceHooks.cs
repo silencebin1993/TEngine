@@ -265,6 +265,18 @@ namespace GameLogic.Core
         public const string RangeFirstSend = "range.first_send";
         /// <summary>FG5-RND-03：击败敌人第一次解锁新的阵营靶子。</summary>
         public const string RangeFirstTargetUnlocked = "range.first_target_unlocked";
+        /// <summary>FG5-RND-04：第一座电路合成台建成（引导内容在 FG15-UX-04：模拟熔合、正式熔合；图鉴“电路合成台与熔合”随之解锁）。</summary>
+        public const string FusionFirstBuilt = "fusion.first_built";
+        /// <summary>FG5-RND-04：第一次打开电路合成台面板。</summary>
+        public const string FusionFirstOpen = "fusion.first_open";
+        /// <summary>FG5-RND-04：第一次模拟熔合。</summary>
+        public const string FusionFirstSimulate = "fusion.first_simulate";
+        /// <summary>FG5-RND-04：第一次发现熔合配方（引导：去固件刻录台量产）。</summary>
+        public const string FusionFirstDiscovery = "fusion.first_discovery";
+        /// <summary>FG5-RND-04（FG05 第 4 节“第一次拿到线索时，引导他去合成台”；FG13 引导清单“第一次拿到熔合线索：合成台、模拟熔合”）。</summary>
+        public const string FusionFirstClue = "fusion.first_clue";
+        /// <summary>FG5-RND-04：第一次打开配方书。</summary>
+        public const string FusionFirstRecipeBook = "fusion.first_recipe_book";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -307,6 +319,7 @@ namespace GameLogic.Core
             ResearchTreeFirstOpen, ResearchLabFirstBuilt, ResearchFirstQueued, ResearchFirstCompleted, ResearchFirstStalled,
             AnalysisFirstEnemyItem,
             RangeFirstBuilt, RangeFirstOpen, RangeFirstTest, RangeFirstUplink, RangeFirstCompare, RangeFirstSend, RangeFirstTargetUnlocked,
+            FusionFirstBuilt, FusionFirstOpen, FusionFirstSimulate, FusionFirstDiscovery, FusionFirstClue, FusionFirstRecipeBook,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

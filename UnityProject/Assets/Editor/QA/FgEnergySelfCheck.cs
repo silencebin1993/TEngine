@@ -1368,7 +1368,7 @@ namespace GameLogic.EditorTools
                 "-c \"import sys;sys.path.insert(0,'tools/cell_tables');import fgdata_firmware as f;print('\\n'.join('RAW\\t%s\\t%d\\t%r' % (r[0], r[9], r[10]) for r in f._F))\"");
             var raw = output.Replace("\r", string.Empty).Split('\n').Where(l => l.StartsWith("RAW\t", StringComparison.Ordinal)).Select(l => l.Split('\t'))
                 .ToDictionary(f => f[1], f => (power: int.Parse(f[2], CultureInfo.InvariantCulture), heat: float.Parse(f[3], CultureInfo.InvariantCulture)));
-            var rows = FirmwareKinds.Rows;
+            var rows = FirmwareKinds.BaseRows; // 名表 44 条（混合固件的积热 = 两条父固件之和，FgFusionSelfCheck 核对）
             var bad = new List<string>();
             int converted = 0;
             foreach (GameConfig.fg.FirmwareKind r in rows)

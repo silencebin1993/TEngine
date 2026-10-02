@@ -184,6 +184,11 @@ namespace GameLogic.Campaign.Economy
                     GameText.Format("bs.reason.working_override", Signal.OverrideArrayService.SlotsText(initial + 1, initial + BuildingOps.TierOf(b)),
                         HomeValleyPowerGrid.Num(HomeValleyPowerGrid.DemandOf(b))));
             }
+            if (type == FusionCatalog.TypeId)
+            {
+                // FG5-RND-04：电路合成台——熔合中（产物、进度）/ 空闲（怎么开始）。缺电 / 禁用 / 被毁由上面的通用状态先报。
+                return FusionService.StatusOf(state, b);
+            }
             if (type == TestRangeCatalog.TypeId)
             {
                 // FG5-RND-03：靶场——测试中（投影数、时长、每秒伤害）/ 空闲（怎么开始）。

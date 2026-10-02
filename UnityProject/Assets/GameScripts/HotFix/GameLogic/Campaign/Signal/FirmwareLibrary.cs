@@ -550,7 +550,16 @@ namespace GameLogic.Campaign.Signal
                 sb.AppendLine(def.Description);
             }
             sb.AppendLine(GameText.Format("fwlib.detail.kind", FirmwareKinds.KindLabel(FirmwareKinds.KindOf(firmwareId))));
-            sb.AppendLine(GameText.Format("fwlib.detail.category", GameText.Get("firmware.category." + row.Category)));
+            if (FirmwareKinds.TryGetParents(firmwareId, out string mixA, out string mixB))
+            {
+                // FG5-RND-04（FGR-FW-050）：混合固件——写明两条父固件，类别显示两个（形状角标 + 文字，不只靠颜色）。
+                sb.AppendLine(GameText.Format("firmware.mixed.parents", FirmwareKinds.DisplayName(mixA) ?? mixA, FirmwareKinds.DisplayName(mixB) ?? mixB));
+                sb.AppendLine(GameText.Format("firmware.mixed.categories", GameText.Get("firmware.category." + row.Category), GameText.Get("firmware.category." + row.Category2)));
+            }
+            else
+            {
+                sb.AppendLine(GameText.Format("fwlib.detail.category", GameText.Get("firmware.category." + row.Category)));
+            }
             string protocol = GameText.Get("firmware.protocol." + row.Protocol);
             if (s != null && FirmwareKinds.IsRaw(s, firmwareId))
             {

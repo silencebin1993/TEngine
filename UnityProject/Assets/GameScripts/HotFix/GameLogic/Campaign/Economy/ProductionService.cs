@@ -1074,8 +1074,9 @@ namespace GameLogic.Campaign.Economy
                     {
                         if (l.Role == RecipeRole.In)
                         {
-                            stock.Remove(l.Item, l.Amount);
-                            ProductionStats.RecordUnits(state, l.Item, l.Amount, produced: false); // FG4-ECO-08：开工扣料 = 消耗
+                            int take = InAmount(p, l); // FG5-RND-04：刻混合固件时芯片基板按熔合服务的量扣
+                            stock.Remove(l.Item, take);
+                            ProductionStats.RecordUnits(state, l.Item, take, produced: false); // FG4-ECO-08：开工扣料 = 消耗
                         }
                     }
                     r.Running = true;
@@ -1455,6 +1456,21 @@ namespace GameLogic.Campaign.Economy
             && (Content.MechanicalContentUnlock.IsUnlocked(state, firmwareId) || Primitive.FusionHooks.IsBurnableFusion(state, firmwareId)); // 熔合配方的量产入口留给 FG5-RND-04
 
         /// <summary>
+        /// FG5-RND-04（FGR-RND-042“之后在刻录台量产，不再消耗父固件，但成本更高”）：配方输入行这一周期实际要的件数——
+        /// 刻录台刻混合固件时，固体输入（芯片基板）按熔合服务的量（fusion.burn_substrate，初值 3），其余照配方。
+        /// 开工扣料、等料原因、输入缓存容量、换目标 / 拆除退回都按它算（同一周期扣多少退多少；换目标时先按旧目标退回再改目标）。
+        /// </summary>
+        public static int InAmount(Producer p, RecipeLine l)
+        {
+            if (p != null && p.IsBurner && l.Role == RecipeRole.In && l.Item != null && l.Item.Form != ItemForm.Fluid
+                && Primitive.FusionHooks.Service != null && p.Rec != null && Signal.FirmwareKinds.IsMixed(p.Rec.BurnTarget))
+            {
+                return Math.Max(l.Amount, Primitive.FusionHooks.Service.BurnSubstrateCost(p.Rec.BurnTarget));
+            }
+            return l.Amount;
+        }
+
+        /// <summary>
         /// 选刻录目标（<paramref name="firmwareId"/> 为空 = 取消、待机）。正在刻的那份作废、已扣的芯片基板退回输入缓存（不丢料）；记进“上一次的设置”。
         /// </summary>
         public static bool TrySetBurnTarget(CampaignState state, string buildingId, string firmwareId, out string message)
@@ -1514,7 +1530,7 @@ namespace GameLogic.Campaign.Economy
                     }
                     else
                     {
-                        Add(ref r.In, l.Item.Id, l.Amount);
+                        Add(ref r.In, l.Item.Id, InAmount(p, l));
                     }
                 }
             }
@@ -1758,11 +1774,12 @@ namespace GameLogic.Campaign.Economy
                     continue;
                 }
                 long have = stock.Get(l.Item);
-                if (have < l.Amount)
+                int need = InAmount(p, l);
+                if (have < need)
                 {
                     bool fluid = l.Item.Form == ItemForm.Fluid;
                     Set(p, fluid ? ProdState.MissingFluid : ProdState.MissingInput, fluid ? ProdReason.MissingFluid : ProdReason.MissingItem, l.Item,
-                        fluid ? FluidPortIndex(p, l.Item, false) : -1, l.Amount, have);
+                        fluid ? FluidPortIndex(p, l.Item, false) : -1, need, have);
                     return false;
                 }
             }
@@ -2029,7 +2046,7 @@ namespace GameLogic.Campaign.Economy
             {
                 if (l.Role == RecipeRole.In && ReferenceEquals(l.Item, item))
                 {
-                    return Math.Max(1, l.Amount * Math.Max(1, p.Def.InBatches));
+                    return Math.Max(1, InAmount(p, l) * Math.Max(1, p.Def.InBatches));
                 }
             }
             return 0;
@@ -2719,7 +2736,7 @@ namespace GameLogic.Campaign.Economy
                 {
                     if (l.Role == RecipeRole.In && l.Item.Form != ItemForm.Fluid)
                     {
-                        Add(ref rec.In, l.Item.Id, l.Amount);
+                        Add(ref rec.In, l.Item.Id, InAmount(p, l));
                     }
                 }
                 rec.Running = false;

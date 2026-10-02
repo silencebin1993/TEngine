@@ -45,6 +45,9 @@ public sealed partial class FirmwareKind : Luban.BeanBase
         Cracked = _buf.ReadBool();
         Scrap = _buf.ReadInt();
         ReadFields = _buf.ReadString();
+        MixA = _buf.ReadString();
+        MixB = _buf.ReadString();
+        Category2 = _buf.ReadString();
     }
 
     public static FirmwareKind DeserializeFirmwareKind(ByteBuf _buf)
@@ -156,6 +159,18 @@ public sealed partial class FirmwareKind : Luban.BeanBase
     /// 读法字段(FG2-FW-02):字段:幅度;…,字段见 fgdata_reading.READING_FIELDS;内核按 载体 &#215; 字段 查 fg.TbCarrierReading
     /// </summary>
     public readonly string ReadFields;
+    /// <summary>
+    /// 混合固件的父固件A(fg.TbFusionRecipe;正式固件填 none)
+    /// </summary>
+    public readonly string MixA;
+    /// <summary>
+    /// 混合固件的父固件B(正式固件填 none)
+    /// </summary>
+    public readonly string MixB;
+    /// <summary>
+    /// 混合固件的第二个类别(类别显示两个图标,FGR-FW-050;正式固件填 none)
+    /// </summary>
+    public readonly string Category2;
    
     public const int __ID__ = -1131444196;
     public override int GetTypeId() => __ID__;
@@ -193,6 +208,9 @@ public sealed partial class FirmwareKind : Luban.BeanBase
         + "cracked:" + Cracked + ","
         + "scrap:" + Scrap + ","
         + "readFields:" + ReadFields + ","
+        + "mixA:" + MixA + ","
+        + "mixB:" + MixB + ","
+        + "category2:" + Category2 + ","
         + "}";
     }
 }

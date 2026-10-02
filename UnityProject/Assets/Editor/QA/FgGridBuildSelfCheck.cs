@@ -240,7 +240,7 @@ namespace GameLogic.EditorTools
 
         private static void CheckData()
         {
-            Expect(GridContent.LoadError == null && GridContent.Buildings.Count == 29 && GridContent.StartLayout.Count == 17
+            Expect(GridContent.LoadError == null && GridContent.Buildings.Count == 30 && GridContent.StartLayout.Count == 17 // FG5-RND-04：+ 电路合成台（29 → 30）
                    && GridContent.Terrains.Count == 7, $"五张格网表已加载：建筑格网属性 {GridContent.Buildings.Count}、开局布局 {GridContent.StartLayout.Count}、地形 {GridContent.Terrains.Count}");
             var missing = FgContentTables.Buildings.Where(b => !GridContent.TryGetBuilding(b.TypeId, out _)).Select(b => b.TypeId).ToList();
             Expect(missing.Count == 0, $"fg.TbBuilding 的每座建筑都有占地（缺：{string.Join(",", missing)}）");
@@ -1213,8 +1213,8 @@ namespace GameLogic.EditorTools
                 Object.DestroyImmediate(go);
                 Expect(generatorItem.Contains("60 废料") && generatorItem.Contains("40 秒") && generatorItem.Contains("已有") && inScroll && energyCount == 6, // FG3-LOG-06：能源页签 = 发电机 2 + 电塔 T1 / T2；FG4-ECO-04：+ 燃油发电机、太阳能阵列、储能站
                     $"建造栏条目写明成本、工期与已有数量：“{generatorItem.Replace("\n", " ")}”；条目在可滚动列表里（数量可变，UI Toolkit 红线 5）");
-                Expect(panelOk && placeableBuildings == 22 && relayListed && status.Contains("不能放置") && status.Contains("通道") && beaconItem.Contains("尚未解锁"),
-                    $"建造栏：22 种可放置建筑（FG3-LOG-06 加两级电塔、FG4-ECO-02 加七座采集 / 加工建筑、FG4-ECO-03 加四座制造建筑、FG4-ECO-04 加三座能源建筑、FG4-ECO-11 加超控阵列、FG5-RND-01 加仿真实验室、FG5-RND-03 加靶场）分在能源 / 终局 / 信号 / 采集 / 加工 / 制造分类（信标未解锁时写明条件：“{beaconItem.Replace("\n", " ")}”），状态行“{status.Replace("\n", " ")}”");
+                Expect(panelOk && placeableBuildings == 23 && relayListed && status.Contains("不能放置") && status.Contains("通道") && beaconItem.Contains("尚未解锁"),
+                    $"建造栏：23 种可放置建筑（FG5-RND-04 加电路合成台、FG3-LOG-06 加两级电塔、FG4-ECO-02 加七座采集 / 加工建筑、FG4-ECO-03 加四座制造建筑、FG4-ECO-04 加三座能源建筑、FG4-ECO-11 加超控阵列、FG5-RND-01 加仿真实验室、FG5-RND-03 加靶场）分在能源 / 终局 / 信号 / 采集 / 加工 / 制造分类（信标未解锁时写明条件：“{beaconItem.Replace("\n", " ")}”），状态行“{status.Replace("\n", " ")}”");
 
                 // 布局探针：中英文、UI 缩放极值、四种分辨率（面板默认隐藏，探针会移除隐藏类）。
                 foreach (GameLanguage lang in new[] { GameLanguage.ZhCn, GameLanguage.En })

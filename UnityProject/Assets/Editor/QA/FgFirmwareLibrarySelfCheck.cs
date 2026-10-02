@@ -168,7 +168,9 @@ namespace GameLogic.EditorTools
             var rxEntries = MechanicCodex.Entries.Where(e => e.Kind == MechanicCodexKind.Reaction).ToList();
             int reactions = NamedReactionCatalog.Rows.Count(r => r != null);
             var missing = fw.Where(id => MechanicCodex.Find(MechanicCodex.FirmwareEntryId(id)) == null).ToList();
-            Expect(fw.Count == 44 && fwEntries.Count == 44 && missing.Count == 0 && MechanicCodex.CountIn(MechanicCodex.TabFirmware) == 44,
+            // FG5-RND-04：名表 44 条 + 30 条混合固件（熔合产物）都有图鉴条目（FG05 第 4 节“所有配方都有图鉴条目”）。
+            int nFw = FirmwareCatalog.All.Count;
+            Expect(FirmwareCatalog.BaseCount == 44 && fw.Count == nFw && fwEntries.Count == nFw && missing.Count == 0 && MechanicCodex.CountIn(MechanicCodex.TabFirmware) == nFw,
                 $"固件目录 {fw.Count} 条，图鉴固件页签 {fwEntries.Count} 条，一一对应{(missing.Count > 0 ? "；缺：" + string.Join("、", missing) : "")}");
             Expect(rxEntries.Count == reactions && reactions >= 18 && MechanicCodex.CountIn(MechanicCodex.TabReaction) == reactions,
                 $"具名反应 {reactions} 条，图鉴反应页签 {rxEntries.Count} 条");
@@ -300,8 +302,9 @@ namespace GameLogic.EditorTools
             var rows = new List<FirmwareLibraryRow>();
             int total = FirmwareLibrary.Query(s, new FirmwareLibraryFilter(), rows);
             int nonFirmware = s.PrimitiveChips.Count(p => !FirmwareKinds.IsFirmware(p.CardDefId));
-            Expect(total == 44 && rows.Count == 44 && nonFirmware >= 1 && rows.All(r => FirmwareKinds.IsFirmware(r.FirmwareId)),
-                $"不筛选：44 枚固件芯片全部列出（另有 {nonFirmware} 枚基元芯片不属于固件库）");
+            int nAll = FirmwareCatalog.All.Count; // FG5-RND-04：名表 44 条 + 混合固件，每种一枚
+            Expect(total == nAll && rows.Count == nAll && nonFirmware >= 1 && rows.All(r => FirmwareKinds.IsFirmware(r.FirmwareId)),
+                $"不筛选：{nAll} 枚固件芯片（名表 44 + 混合固件 {nAll - 44}）全部列出（另有 {nonFirmware} 枚基元芯片不属于固件库）");
 
             var all = s.PrimitiveChips.Where(p => FirmwareKinds.IsFirmware(p.CardDefId)).ToList();
             var failures = new List<string>();
@@ -321,8 +324,8 @@ namespace GameLogic.EditorTools
                 string key = FirmwareLibraryPanelUIToolkit.CategoryKey(c);
                 Verify("类别 " + key, new FirmwareLibraryFilter { Category = c }, id => Row(id).Category == key);
             }
-            Verify("种类 常规", new FirmwareLibraryFilter { Kind = FirmwareKind.Regular }, id => !FirmwareKinds.CoreRosterIds.Contains(id));
-            Verify("种类 核心", new FirmwareLibraryFilter { Kind = FirmwareKind.Core }, id => FirmwareKinds.CoreRosterIds.Contains(id));
+            Verify("种类 常规", new FirmwareLibraryFilter { Kind = FirmwareKind.Regular }, id => !IsCoreRow(id)); // FG5-RND-04：含核心父固件的混合固件也是核心（按表 kind 列）
+            Verify("种类 核心", new FirmwareLibraryFilter { Kind = FirmwareKind.Core }, id => IsCoreRow(id));
             Verify("协议 敌方", new FirmwareLibraryFilter { EnemyProtocol = true }, id => Row(id).Protocol == "enemy");
             Verify("协议 己方 / 中立", new FirmwareLibraryFilter { EnemyProtocol = false }, id => Row(id).Protocol != "enemy");
             Verify("未破解", new FirmwareLibraryFilter { Cracked = false }, id => FirmwareKinds.IsRaw(s, id));
@@ -330,7 +333,7 @@ namespace GameLogic.EditorTools
             foreach (FirmwareCarrier c in CarrierReadings.AllCarriers)
             {
                 Verify("兼容 " + c, new FirmwareLibraryFilter { Carrier = c },
-                    id => !FirmwareKinds.CoreRosterIds.Contains(id) && !string.IsNullOrEmpty(FirmwareKinds.Reading(id, c)));
+                    id => !IsCoreRow(id) && !string.IsNullOrEmpty(FirmwareKinds.Reading(id, c)));
             }
             foreach (string r in new[] { "common", "rare", "epic" })
             {
@@ -587,9 +590,10 @@ namespace GameLogic.EditorTools
                                    && !panel.EntryBodyText.Contains(lockedName) && panel.EntryIconSilhouette && !panel.EntryIconHidden
                                    && panel.EntryIconId == MechanicCodex.IconOf(MechanicCodex.Find(MechanicCodex.FirmwareEntryId(locked))) && panel.RelatedCount == 0;
                 int lockedItems = Enumerable.Range(0, panel.ItemCount).Count(i => panel.ItemText(i) == GameText.Get("codex.panel.locked_title"));
-                bool counts = panel.ItemCount == 44 && lockedItems == 44 - MechanicCodex.UnlockedCountIn(MechanicCodex.TabFirmware)
-                              && panel.CountText == GameText.Format("codex.panel.list_title", MechanicCodex.UnlockedCountIn(MechanicCodex.TabFirmware), 44)
-                              && panel.TabText(1).Contains("/44");
+                int nTab = FirmwareCatalog.All.Count; // FG5-RND-04：含 30 条混合固件
+                bool counts = panel.ItemCount == nTab && lockedItems == nTab - MechanicCodex.UnlockedCountIn(MechanicCodex.TabFirmware)
+                              && panel.CountText == GameText.Format("codex.panel.list_title", MechanicCodex.UnlockedCountIn(MechanicCodex.TabFirmware), nTab)
+                              && panel.TabText(1).Contains("/" + nTab);
                 Expect(lockedShown && counts,
                     $"未获得的“{lockedName}”：标题“？？？”、正文只有获取途径（不剧透名字）、图标是同一张着黑的剪影、不列相关条目；固件页签 {panel.ItemCount} 条、剪影 {lockedItems} 条、计数“{panel.CountText}”、页签“{panel.TabText(1)}”");
 
@@ -1198,6 +1202,9 @@ namespace GameLogic.EditorTools
         private static string RegularFirmware() =>
             FirmwareKinds.Rows.Where(r => r != null && FirmwareCatalog.TryGet(r.Id, out _) && FirmwareKinds.KindOf(r.Id) == FirmwareKind.Regular
                                           && CarrierReadings.AllCarriers.All(c => !string.IsNullOrEmpty(FirmwareKinds.Reading(r.Id, c)))).Select(r => r.Id).First();
+
+        /// <summary>按表的 kind 列独立判定核心（不经过被测的种类判定）：名表 6 条 + 含核心父固件的混合固件。</summary>
+        private static bool IsCoreRow(string id) => FirmwareKinds.TryGetRow(id, out GameConfig.fg.FirmwareKind row) && row.Kind == "core";
 
         private static CampaignState NewState(int seed, bool unlockAll)
         {

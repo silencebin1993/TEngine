@@ -155,6 +155,7 @@ namespace GameLogic.Campaign.WorldSim
             Economy.SoftlockService.ResetSessionState(); // FG4-ECO-10
             Economy.ResearchService.ResetSessionState(); // FG5-RND-01：实验室索引、效果缓存、阵营分支缓存按新战役重建
             Economy.TestRangeService.ResetSessionState(); // FG5-RND-03：仿真投影是运行时状态（不存档），换战役 / 读档时清掉
+            Economy.FusionService.ResetSessionState(); // FG5-RND-04：界面反馈与“第一座合成台建成”钩子标记按新会话重来；绑定刻录台的熔合接口
             HomeValleyAlarms.ResetSessionState();
             HomeValleyCombatTargets.ResetSessionState();
             HomeValleyFactory.ResetSessionState(); // FG4-ECO-03：装配站等料指纹与输入口堵塞提示按新会话重算

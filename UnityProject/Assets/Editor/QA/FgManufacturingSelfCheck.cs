@@ -514,8 +514,10 @@ namespace GameLogic.EditorTools
             bool codex = MechanicCodex.Find("codex.economy.manufacturing") != null && MechanicCodex.Find("codex.economy.assembly") != null
                          && GuidanceHooks.Known.Contains(GuidanceHooks.EconomyManufacturingFirstPlaced) && GuidanceHooks.Known.Contains(GuidanceHooks.EconomyBurnerFirstChip)
                          && GuidanceHooks.Known.Contains(GuidanceHooks.EconomyAssemblyFirstLineMachine) && GuidanceHooks.Known.Contains(GuidanceHooks.EconomyFirstCopyToSameType);
-            Expect(texts && codex && !FusionHooks.Available,
-                "A5 文本中英两套；图鉴“制造建筑”“装配站”两条系统说明；4 个引导钩子登记；熔合接口占位存在但未接（电路合成台保留 Demo 闭环，熔合在 FG-M5）");
+            // FG5-RND-04：熔合接口已由 FusionService 实现并接上（未发现的混合固件刻录台不能刻，见 FgFusionSelfCheck E 段）。
+            FusionService.Bind();
+            Expect(texts && codex && FusionHooks.Available && !FusionHooks.IsBurnableFusion(CampaignSession.Current, "fw_mix_napalm") && FusionHooks.Service.BurnSubstrateCost("fw_mix_napalm") == 3,
+                "A5 文本中英两套；图鉴“制造建筑”“装配站”两条系统说明；4 个引导钩子登记；熔合接口已接上（FG5-RND-04：未发现的混合固件不能量产，发现后每枚芯片基板 3）");
         }
 
         // ── B 零件工坊 ─────────────────────────────────────────────────────────────

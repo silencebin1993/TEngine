@@ -338,6 +338,7 @@ namespace GameLogic.Campaign.Regions
             HomeValleyFactory.Tick(state, dt); // ER4-FAC-01：装配站生产队列。
             PrimitiveCraftStation.Tick(state, dt); // ER4-PRIM-04：合成台升级/拆解队列。
             HomeValleyAnalysis.Tick(state, dt); // ER6-ANA-01：解析台队列。
+            Economy.FusionService.Tick(state, dt); // FG5-RND-04：电路合成台的正式熔合队列（被毁回滚）与待分析的战斗记录（线索）。
             HomeValleyCombatTargets.Tick(state, dt); // ER4-PRIM-05：低威胁残骸靶被动再生。
             // ER4-PRIM-05：AI 同出口自动交战——射程 / 间隔判定在内核（AutoEngage 行为），结算走 HomeValleyCombatRules.OnEngageRequest。
             HomeValleySignal.RecomputeUnlock(state); // ER5-SIG-01：破碎都市解锁判定。

@@ -17,6 +17,8 @@ namespace GameLogic.Campaign.Content
     /// - 表不可用（安装或热更包损坏）时目录为空并记 Error（<see cref="LoadError"/>）；读档对账遇到这种情况不会把固件芯片当成“已移除内容”
     ///   转成废料（<see cref="SaveContentReconciler"/>）。
     /// 装配顺序 / 负载上限校验在 <see cref="Blueprint.BlueprintCircuitBoard"/>；种类 / 协议 / 读法等规则在 <see cref="FirmwareKinds"/>。
+    /// FG5-RND-04（FGR-FW-050）：表里另有 30 条混合固件（熔合产物，mixA / mixB 不为 none），同样在目录里（可装配、进固件库、进图鉴）；
+    /// <see cref="ExpectedCount"/> 只数设计案 5.4 名表的 44 条正式固件（<see cref="BaseCount"/>）。
     /// </summary>
     public static class FirmwareCatalog
     {
@@ -32,8 +34,42 @@ namespace GameLogic.Campaign.Content
         public const string FwAmplifyId = "fw_amplify";
         public const string FwExecuteId = "fw_execute";
 
-        /// <summary>设计案 5.4 的全量条数（FGR-FW-002）。</summary>
+        /// <summary>设计案 5.4 的全量条数（FGR-FW-002；不含熔合产物）。</summary>
         public const int ExpectedCount = 44;
+
+        /// <summary>名表 44 条正式固件的 ID（目录里去掉混合固件；按目录顺序）。</summary>
+        public static List<string> BaseIds
+        {
+            get
+            {
+                var list = new List<string>(48);
+                foreach (string id in All.Keys)
+                {
+                    if (!FirmwareKinds.IsMixed(id))
+                    {
+                        list.Add(id);
+                    }
+                }
+                return list;
+            }
+        }
+
+        /// <summary>目录里正式固件（不是混合固件）的条数——与 <see cref="ExpectedCount"/> 比对用。</summary>
+        public static int BaseCount
+        {
+            get
+            {
+                int n = 0;
+                foreach (string id in All.Keys)
+                {
+                    if (!FirmwareKinds.IsMixed(id))
+                    {
+                        n++;
+                    }
+                }
+                return n;
+            }
+        }
 
         /// <summary>Demo 6 条的调试层字段（真实代码入口、DEBT 号、剪影说明）：只给审计与调试看，不进玩家可见文本。
         /// 其余 38 条的这些字段按表统一生成。</summary>
@@ -210,6 +246,7 @@ namespace GameLogic.Campaign.Content
                 case "salvage": return MechanicalContentSource.RegionSalvage;
                 case "elite": return MechanicalContentSource.EliteDrop;
                 case "boss": return MechanicalContentSource.FactionBoss;
+                case "fusion": return MechanicalContentSource.Fusion; // FG5-RND-04：混合固件
                 default:
                     Log.Error($"[FirmwareCatalog] 未知的获取途径 {source}（check_luban R24 应已拦下），按区域掉落处理。");
                     return MechanicalContentSource.RegionSalvage;

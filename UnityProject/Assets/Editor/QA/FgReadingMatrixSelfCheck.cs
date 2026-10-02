@@ -223,7 +223,7 @@ namespace GameLogic.EditorTools
             var fwFields = FirmwareKinds.Rows.SelectMany(r => CarrierReadings.ParseFields(r.ReadFields).Select(x => x.Field)).Distinct().ToList();
             var undeclared = fwFields.Where(f => !fields.Contains(f)).ToList();
             var noFields = FirmwareKinds.Rows.Where(r => CarrierReadings.ParseFields(r.ReadFields).Count == 0).Select(r => r.Id).ToList();
-            Expect(fields.Count == 27 && missing.Count == 0 && undeclared.Count == 0 && noFields.Count == 0 && FirmwareKinds.Rows.Count == FirmwareCatalog.ExpectedCount,
+            Expect(fields.Count == 27 && missing.Count == 0 && undeclared.Count == 0 && noFields.Count == 0 && FirmwareKinds.BaseRows.Count == FirmwareCatalog.ExpectedCount,
                 $"{fields.Count} 个读法字段在 5 种载体上都有行；44 条固件都声明了读法字段、字段都在表里{Detail(missing.Concat(undeclared).Concat(noFields).ToList())}");
             var carriersWithMain = comps.Where(c => c.Slot == "main").Select(c => c.Carrier).Distinct().ToList();
             Expect(CarrierReadings.AllCarriers.All(c => carriersWithMain.Contains(CarrierReadings.CarrierKey(c))),
@@ -235,12 +235,12 @@ namespace GameLogic.EditorTools
         private static void CheckLegacyMatrix()
         {
             Line("  · B1. 旧引擎读法层：扩展 ChassisPrimitiveMatrixSmokeReport 到固件表——42 条带旧基因的固件 × 5 种载体器官真起 SimWorld 零死对 + 命名实证（跃击 / 击退 / 修复 / 增殖 / 连网 / 回波）");
-            string[] legacy = FirmwareKinds.Rows.Where(r => r.LegacyId != "none").Select(r => r.LegacyId).ToArray();
+            string[] legacy = FirmwareKinds.BaseRows.Where(r => r.LegacyId != "none").Select(r => r.LegacyId).ToArray();
             var sw = Stopwatch.StartNew();
             (bool pass, string reason) = ChassisPrimitiveMatrixSmokeReport.Run(legacy);
             sw.Stop();
             Expect(legacy.Length == 42 && pass, $"旧引擎 {legacy.Length} 条 × 5 载体：{reason}（{sw.ElapsedMilliseconds} 毫秒）");
-            string[] native = FirmwareKinds.Rows.Where(r => r.LegacyId == "none").Select(r => r.Id).OrderBy(x => x).ToArray();
+            string[] native = FirmwareKinds.BaseRows.Where(r => r.LegacyId == "none").Select(r => r.Id).OrderBy(x => x).ToArray();
             Expect(native.SequenceEqual(new[] { FirmwareCatalog.FwArmorPierceId, FirmwareCatalog.FwMarkTagId }),
                 $"没有旧基因的 {native.Length} 条（装甲击穿、标记跳转）只有原生读法字段，它们的零死对由 C 段正式内核矩阵证明");
         }
@@ -329,7 +329,7 @@ namespace GameLogic.EditorTools
             foreach ((FirmwareCarrier carrier, string comp) in CarrierComponents)
             {
                 CombatWeapon plain = WeaponFor(comp, HomeValleyLayout.Erc003ChassisId);
-                foreach (FwRow r in FirmwareKinds.Rows)
+                foreach (FwRow r in FirmwareKinds.BaseRows) // 名表 44 条（混合固件 = 父固件读法的合并，FgFusionSelfCheck 核对）
                 {
                     combos++;
                     CombatWeapon with = WeaponFor(comp, HomeValleyLayout.Erc003ChassisId, r.Id);

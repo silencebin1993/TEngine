@@ -242,6 +242,12 @@ namespace GameLogic.UI.Kit
             {
                 ResearchTreePanelUIToolkit.Toggle();
             }
+            // FG5-RND-04：配方书键（默认 Alt+F，全部上下文，可重绑）：开着再按一次关闭；更高层的面板盖在上面时不起作用（同研发树键）。
+            if (InputRouter.ConsumeContextAction(GameActionId.OpenRecipeBook)
+                && !MechanicCodexPanelUIToolkit.IsOpen && !UiKitPanelHost.AnyModalAbove(FusionPanelUIToolkit.Order))
+            {
+                FusionPanelUIToolkit.ToggleBook();
+            }
             // FG4-ECO-08：统计键（默认 Alt+T，全部上下文）：开着再按一次关闭；更高层的面板盖在上面时不起作用（同物资键）。
             if (InputRouter.ConsumeContextAction(GameActionId.OpenStats)
                 && !MechanicCodexPanelUIToolkit.IsOpen && !UiKitPanelHost.AnyModalAbove(StatsPanelUIToolkit.Order))

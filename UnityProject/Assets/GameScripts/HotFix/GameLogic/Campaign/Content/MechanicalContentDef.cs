@@ -46,6 +46,8 @@ namespace GameLogic.Campaign.Content
         FactionBoss,
         /// <summary>FG2-FW-02：炮塔（固定底盘）——家园防御开放（FG6-DEF-01）后写入解锁记录才可用；之前不在基础蓝图库里。</summary>
         TurretProgram,
+        /// <summary>FG5-RND-04（FGR-RND-042 / FGR-FW-050）：熔合产物（混合固件）——第一次正式熔合成功（配方记进配方书）时写入解锁记录，之后才能装配、在刻录台量产。</summary>
+        Fusion,
     }
 
     /// <summary>谁可以真正使用/装配/触发这条内容（对照验收卡"AI 权限"列）。</summary>

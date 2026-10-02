@@ -110,6 +110,8 @@ namespace GameLogic.UI.Kit
         /// <summary>FG5-RND-03：靶场的“靶场…”按钮（只在靶场上显示）。</summary>
         private Button _range;
         public Button RangeButton => _range;
+        private Button _fusion;
+        public Button FusionButton => _fusion;
         private Button _diagnose;
         private Button _clear;
         private Label _message;
@@ -318,6 +320,7 @@ namespace GameLogic.UI.Kit
             _ports = root.Q<Button>("PrPorts");
             _grid = root.Q<Button>("BpGrid");
             _range = root.Q<Button>("PrRange");
+            _fusion = root.Q<Button>("PrFusion");
             _diagnose = root.Q<Button>("PrDiagnose");
             _clear = root.Q<Button>("BpClear");
             _message = root.Q<Label>("PrMessage");
@@ -328,6 +331,7 @@ namespace GameLogic.UI.Kit
             _ports.clicked += OpenPorts;
             _grid.clicked += OpenGrid;
             _range.clicked += OpenRange;
+            _fusion.clicked += OpenFusion;
             _diagnose.clicked += OpenDiagnosis;
             _clear.clicked += () => ClearBuffers();
             _copy.clicked += AskCopySettings;
@@ -487,6 +491,7 @@ namespace GameLogic.UI.Kit
             _ports.SetEnabled(GridContent.PortsOf(b.BuildingTypeId).Count > 0);
             _grid.EnableInClassList("bn-hidden", !HomeValleyPowerGrid.IsPowerRelevantType(b.BuildingTypeId));
             _range.EnableInClassList("bn-hidden", !TestRangeService.IsRange(b));
+            _fusion.EnableInClassList("bn-hidden", !FusionService.IsSynth(b));
             _clear.SetEnabled(BuildingOps.BufferedCount(state, b) > 0);
         }
 
@@ -497,6 +502,7 @@ namespace GameLogic.UI.Kit
             _ports.text = GameText.Get("prod.panel.ports");
             _grid.text = GameText.Get("bp.open_grid");
             _range.text = GameText.Get("range.panel.open");
+            _fusion.text = GameText.Get("fusion.panel.open");
             _diagnose.text = GameText.Get("prod.panel.diagnose");
             _clear.text = GameText.Get("bp.clear");
             _hint.text = GameText.Get("prod.panel.hint");
@@ -827,7 +833,7 @@ namespace GameLogic.UI.Kit
                 _burnLabel.text = GameText.Get("prod.panel.burn_target");
                 _burnChoices.Clear();
                 var names = new List<string>(16) { GameText.Get("prod.panel.burn_none") };
-                foreach (string id in Campaign.Signal.SignalCoreService.PrintableFirmware(state))
+                foreach (string id in Campaign.Signal.SignalCoreService.PrintableFirmware(state, includeMixed: true)) // FG5-RND-04：已发现配方的混合固件也能刻
                 {
                     _burnChoices.Add(id);
                     names.Add(Campaign.Signal.FirmwareKinds.DisplayName(id) ?? id);
@@ -844,6 +850,12 @@ namespace GameLogic.UI.Kit
                 _burn.SetValueWithoutNotify(_burn.choices[Mathf.Clamp(sel, 0, _burn.choices.Count - 1)]);
                 string target = string.IsNullOrEmpty(cur) ? GameText.Get("prod.panel.setting_none") : Campaign.Signal.FirmwareKinds.DisplayName(cur) ?? cur;
                 _recipeLine.text = GameText.Format("prod.panel.burn_line", target, p.Def.FixedRecipe.Seconds.ToString("0.#", CultureInfo.InvariantCulture));
+                if (!string.IsNullOrEmpty(cur) && Campaign.Signal.FirmwareKinds.IsMixed(cur))
+                {
+                    // FG5-RND-04（FGR-RND-042）：混合固件每枚芯片基板 ×3（不再消耗父固件）。
+                    _recipeLine.text = GameText.Format("prod.panel.burn_line_mixed", target, FusionCatalog.BurnSubstrate,
+                        p.Def.FixedRecipe.Seconds.ToString("0.#", CultureInfo.InvariantCulture));
+                }
             }
             bool copyable = ProductionService.HasCopyableSettings(p);
             string typeName = HomeGridService.DisplayName(p.Building.BuildingTypeId);
@@ -1359,6 +1371,14 @@ namespace GameLogic.UI.Kit
             string id = BuildingId;
             SetOpen(false);
             PowerPanelUIToolkit.OpenFor(id);
+        }
+
+        /// <summary>FG5-RND-04：电路合成台 → 打开熔合面板 / 配方书（FGU-21）。</summary>
+        public void OpenFusion()
+        {
+            string id = BuildingId;
+            SetOpen(false);
+            FusionPanelUIToolkit.Open(id);
         }
 
         /// <summary>FG5-RND-03：靶场 → 打开靶场面板（投影、靶子、读数、对比，FGU-24）。</summary>

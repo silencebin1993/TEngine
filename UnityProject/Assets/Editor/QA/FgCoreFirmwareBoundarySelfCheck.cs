@@ -216,7 +216,8 @@ namespace GameLogic.EditorTools
             Expect(roster.Count == 6 && new HashSet<string>(roster).SetEquals(expected.Keys) && namesOk,
                 $"核心固件恰好 6 条（FGR-FW-003）：{string.Join("、", roster.Select(id => GameText.Get(FirmwareKinds.Rows.First(r => r.Id == id).NameKey)))}；中英文名都有");
 
-            var catalogCore = FirmwareCatalog.All.Keys.Where(FirmwareKinds.IsCore).OrderBy(x => x, StringComparer.Ordinal).ToList();
+            // FG5-RND-04：名表 44 条里的核心固件（含核心父固件的混合固件同样是核心、仅玩家，由 FgFusionSelfCheck 核对）。
+            var catalogCore = FirmwareCatalog.BaseIds.Where(FirmwareKinds.IsCore).OrderBy(x => x, StringComparer.Ordinal).ToList();
             bool aiPermission = FirmwareCatalog.All.All(kv => FirmwareKinds.IsCore(kv.Key)
                 ? kv.Value.AiPermission == MechanicalContentAiPermission.PlayerOnly
                 : kv.Value.AiPermission != MechanicalContentAiPermission.PlayerOnly);

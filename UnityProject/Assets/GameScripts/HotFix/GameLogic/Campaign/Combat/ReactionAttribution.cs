@@ -98,6 +98,7 @@ namespace GameLogic.Campaign.Combat
                 if (r != null && r.EndTick < 0 && r.Kind == KindExpedition && r.SiteId == siteId)
                 {
                     r.EndTick = GameClock.Ticks;
+                    Economy.FusionService.OnSessionClosed(state, r); // FG5-RND-04：场次结束 → 仿真实验室分析战斗记录（线索）
                 }
             }
             return Add(stats, KindExpedition, siteId, ordinal, string.Empty);
@@ -178,6 +179,7 @@ namespace GameLogic.Campaign.Combat
             }
             open.EndTick = GameClock.Ticks;
             Revision++;
+            Economy.FusionService.OnSessionClosed(state, open); // FG5-RND-04：突袭结束 → 线索
             return true;
         }
 
@@ -195,6 +197,7 @@ namespace GameLogic.Campaign.Combat
                 {
                     r.EndTick = GameClock.Ticks;
                     Revision++;
+                    Economy.FusionService.OnSessionClosed(state, r); // FG5-RND-04：远征撤离 / 放弃 → 线索
                 }
             }
         }

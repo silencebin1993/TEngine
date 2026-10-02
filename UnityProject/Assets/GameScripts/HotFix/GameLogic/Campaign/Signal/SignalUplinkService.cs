@@ -400,7 +400,8 @@ namespace GameLogic.Campaign.Signal
         public static bool IsCoreGatedReaction(string reactionId, string[] uplinkFirmwareIds)
         {
             string fw = MechanicalReactionCatalog.TriggerFirmwareOf(reactionId);
-            return fw != null && uplinkFirmwareIds != null && Array.IndexOf(uplinkFirmwareIds, fw) >= 0
+            // FG5-RND-04：接入口里的核心混合固件按父固件算（含“过载”的混合固件同样受过载的冷却门控）。
+            return fw != null && uplinkFirmwareIds != null && FirmwareKinds.ExpandMixed(uplinkFirmwareIds).Contains(fw)
                    && FirmwareKinds.IsCore(fw) && FirmwareKinds.CoreCooldownSeconds(fw) > 0f;
         }
 
@@ -1316,7 +1317,7 @@ namespace GameLogic.Campaign.Signal
             {
                 return;
             }
-            if (!gatedAtFire && (!IsUplinked(s, logicId) || Array.IndexOf(EffectiveInserted(s, logicId), fw) < 0))
+            if (!gatedAtFire && (!IsUplinked(s, logicId) || !FirmwareKinds.ExpandMixed(EffectiveInserted(s, logicId)).Contains(fw)))
             {
                 return;
             }

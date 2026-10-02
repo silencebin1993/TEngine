@@ -188,7 +188,7 @@ namespace GameLogic.EditorTools
             CampaignState s = NewState(2001, bench: true, powered: true, techData: 0);
             List<string> expect = ExpectedRestorable();
             List<string> got = FirmwareRestoreService.Candidates(s).OrderBy(x => x, StringComparer.Ordinal).ToList();
-            int total = FirmwareCatalog.All.Count;
+            int total = FirmwareCatalog.BaseCount; // FG5-RND-04：名表 44 条（混合固件只能熔合得到，不走数据复原）
             string[] kept = { FirmwareCatalog.FwMarkTagId, FirmwareCatalog.FwArmorPierceId };
             bool keptOut = kept.All(k => !got.Contains(k) && !FirmwareRestoreService.IsRestorable(k));
             int baseCount = FirmwareCatalog.All.Keys.Count(id => FirmwareKinds.SourceOf(id) == "base");
@@ -323,7 +323,7 @@ namespace GameLogic.EditorTools
             int viaDemo = 0;
             int machineOk = 0;
             int regular = 0;
-            foreach (string id in FirmwareCatalog.All.Keys.OrderBy(x => x, StringComparer.Ordinal))
+            foreach (string id in FirmwareCatalog.BaseIds.OrderBy(x => x, StringComparer.Ordinal)) // FG5-RND-04：名表 44 条（混合固件由 FgFusionSelfCheck 覆盖）
             {
                 string src = FirmwareKinds.SourceOf(id);
                 if (src == "base")
@@ -383,9 +383,9 @@ namespace GameLogic.EditorTools
             CombatWeapon split = WeaponFor("fw_split");
             CombatWeapon coolant = WeaponFor("fw_coolant");
             CombatWeapon bare = WeaponFor();
-            var fuseIds = FirmwareCatalog.All.Keys.Where(id => FirmwareKinds.CategoryOf(id) == FirmwareCategory.Fuse).ToList();
+            var fuseIds = FirmwareCatalog.BaseIds.Where(id => FirmwareKinds.CategoryOf(id) == FirmwareCategory.Fuse).ToList(); // 名表 44 条
             bool table = fuseIds.All(id => CombatSite.FuseTraceOf(new BlueprintCircuitPreview { FirmwareIds = new[] { id } }) == 1)
-                         && FirmwareCatalog.All.Keys.Where(id => FirmwareKinds.CategoryOf(id) != FirmwareCategory.Fuse)
+                         && FirmwareCatalog.BaseIds.Where(id => FirmwareKinds.CategoryOf(id) != FirmwareCategory.Fuse)
                              .All(id => CombatSite.FuseTraceOf(new BlueprintCircuitPreview { FirmwareIds = new[] { id } }) == 0);
             Expect(homing.FuseTrace == 1 && split.FuseTrace == 1 && coolant.FuseTrace == 0 && bare.FuseTrace == 0 && table && fuseIds.Count == 17,
                 $"接入口插寻的 / 分裂（引信）→ 有标记；冷却液（流体）/ 空 → 没有；17 条引信类逐条有、其余 27 条逐条没有");

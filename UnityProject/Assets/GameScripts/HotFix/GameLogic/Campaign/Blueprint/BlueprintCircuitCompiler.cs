@@ -281,7 +281,8 @@ namespace GameLogic.Campaign.Blueprint
             var contracts = new List<IContract>();
             var moduleGeneFactories = new List<Func<IModule>>();
 
-            foreach (string firmwareId in firmwareIds)
+            // FG5-RND-04（FGR-FW-050）：混合固件展开成两条父固件的旧引擎等价模块（同时具有两者的读法）。
+            foreach (string firmwareId in FirmwareKinds.ExpandMixed(firmwareIds))
             {
                 if (string.IsNullOrEmpty(firmwareId))
                 {
@@ -325,7 +326,8 @@ namespace GameLogic.Campaign.Blueprint
         {
             var mainComponentIds = new[] { primaryId }.Where(id => !string.IsNullOrEmpty(id)).ToList();
             var functionComponentIds = new[] { utilityId }.Where(id => !string.IsNullOrEmpty(id)).ToList();
-            var firmwareIds = (firmwareIdsIn ?? Array.Empty<string>()).Where(id => !string.IsNullOrEmpty(id)).ToList();
+            // FG5-RND-04（FGR-FW-050）：混合固件同时具有两条父固件的读法——装配反应按父固件识别（熔穿过载 / 标记跳转）。
+            var firmwareIds = FirmwareKinds.ExpandMixed((firmwareIdsIn ?? Array.Empty<string>()).Where(id => !string.IsNullOrEmpty(id)));
 
             if (MechanicalReactionCatalog.DetectMarkJump(mainComponentIds, functionComponentIds, firmwareIds))
             {

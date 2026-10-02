@@ -463,6 +463,7 @@ namespace GameLogic.EditorTools
             // 靶子（按击败的敌人解锁、旧档补记、重甲 / 护盾减伤、高速摆动、集群）、读数（反应 / 标签覆盖 / 热量 / 能耗）、对比、反应日志的名字（FG-GAP-061）、预设、暂停与倍速、观察一致、
             // 快捷入口（蓝图编辑器 / 固件库）、面板（真 UXML、布局探针、建筑面板“靶场…”）、性能。
             Seg("FgTestRangeSelfCheck", FgTestRangeSelfCheck.Run);
+            Seg("FgFusionSelfCheck", FgFusionSelfCheck.Run); // FG5-RND-04：熔合、配方书与线索
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>
