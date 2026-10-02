@@ -44,6 +44,9 @@ namespace GameLogic.Campaign.Economy
         /// <summary>FG4-ECO-02：生产建筑缓存里的物品（件 / 升）。</summary>
         private static readonly Dictionary<string, long> Production = new Dictionary<string, long>(StringComparer.Ordinal);
         private static readonly Dictionary<int, long> PipeLiters = new Dictionary<int, long>();
+        /// <summary>FG5-RND-02（DEBT-FG4ECO01-04）：解析台里的敌方物品（队列在办 / 残骸缓存）与 Demo 区域任务物（已带回待解析）。</summary>
+        private static readonly Dictionary<string, long> InBench = new Dictionary<string, long>(StringComparer.Ordinal);
+        private static readonly Dictionary<string, long> Quest = new Dictionary<string, long>(StringComparer.Ordinal);
         private static double _builtAt = double.NegativeInfinity;
         private static int _key;
 
@@ -102,6 +105,9 @@ namespace GameLogic.Campaign.Economy
             Cargo.Clear();
             PipeLiters.Clear();
             Production.Clear();
+            InBench.Clear();
+            Quest.Clear();
+            HomeValleyAnalysis.CollectDistribution(state, InBench, Quest);
             // FG4-ECO-02：生产建筑自己的输入 / 输出缓存与流体口里的流体（在途，不算库存）。
             ProductionService.CollectBuffers(state, Production);
             if (state != null && BeltNetworkService.IsRunning && ReferenceEquals(BeltNetworkService.BoundState, state))
@@ -211,6 +217,8 @@ namespace GameLogic.Campaign.Economy
                 Add(v, "item.dist.production", Production.TryGetValue(item.Id, out long pb) ? pb : 0);
                 Add(v, "item.dist.ground", Ground.TryGetValue(item.Id, out long g) ? g : 0);
                 Add(v, "item.dist.cargo", Cargo.TryGetValue(item.Id, out long c) ? c : 0);
+                Add(v, "item.dist.analysis", InBench.TryGetValue(item.Id, out long ab) ? ab : 0);
+                Add(v, "item.dist.quest", Quest.TryGetValue(item.Id, out long qi) ? qi : 0);
                 Views[item.Id] = v;
             }
             BuildCount++;

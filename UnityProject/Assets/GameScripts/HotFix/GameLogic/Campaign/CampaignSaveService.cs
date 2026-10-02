@@ -674,6 +674,12 @@ namespace GameLogic.Campaign
             try
             {
                 notices = SaveContentReconciler.Reconcile(state, envelope.ContentVersion, CurrentContentVersion);
+                // FG5-RND-02（DEBT-FG0SAVE01-07 解析类）：解析台里引用的已移除内容。
+                SaveNoticeRecord[] analysisNotices = SaveContentReconciler.ReconcileAnalysis(state, envelope.ContentVersion, CurrentContentVersion);
+                if (analysisNotices.Length > 0)
+                {
+                    notices = notices.Concat(analysisNotices).ToArray();
+                }
             }
             catch (Exception e)
             {

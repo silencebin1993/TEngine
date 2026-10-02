@@ -480,6 +480,8 @@ namespace GameLogic.Campaign
         public long PointsInvested;
         /// <summary>上一次发出“研究暂停”通知的原因码（同一原因只告一次；研究恢复后清空）。</summary>
         public string StallNotified = string.Empty;
+        /// <summary>FG5-RND-02：解析台 2.0（敌方物品身份清单、残骸缓存与进度、读过的资料、统计）。旧存档没有 = 空状态。</summary>
+        public AnalysisBenchState Analysis = new AnalysisBenchState();
     }
 
     /// <summary>FG5-RND-01：一个节点已投入的研究点（取消 / 移出队列后保留）。</summary>
@@ -1525,6 +1527,13 @@ namespace GameLogic.Campaign
             s.Research.Labs ??= Array.Empty<LabRecord>();
             s.Research.NewEntries ??= Array.Empty<string>();
             s.Research.StallNotified ??= string.Empty;
+            s.Research.Analysis ??= new AnalysisBenchState();
+            s.Research.Analysis.Tags ??= Array.Empty<EnemyItemTagRecord>();
+            s.Research.Analysis.LoreRead ??= Array.Empty<string>();
+            if (s.Research.Analysis.NextSerial < 1)
+            {
+                s.Research.Analysis.NextSerial = 1;
+            }
             if (s.Research.DomainVersion < ResearchState.CurrentVersion)
             {
                 Economy.ResearchService.MigrateFromV1(s); // FG5-RND-01：旧档迁移（研发树开放前就能建造的内容记为已研究）

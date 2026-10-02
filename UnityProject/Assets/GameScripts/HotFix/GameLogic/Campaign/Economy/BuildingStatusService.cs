@@ -229,15 +229,7 @@ namespace GameLogic.Campaign.Economy
             }
             if (type == HomeValleyLayout.BuildingTypeAnalysisBench)
             {
-                foreach (AnalysisQueueItemRecord q in state?.AnalysisQueues ?? Array.Empty<AnalysisQueueItemRecord>())
-                {
-                    if (q != null && q.State == AnalysisQueueState.Running)
-                    {
-                        int pct = q.Duration > 0f ? Mathf.RoundToInt(Mathf.Clamp01(q.Progress / q.Duration) * 100f) : 0;
-                        return new BuildingStatus(BuildingStatusKind.Working, "analysis", GameText.Format("bs.reason.working_analysis", pct));
-                    }
-                }
-                return new BuildingStatus(BuildingStatusKind.Idle, "analysis.idle", GameText.Get("bs.reason.idle_analysis"));
+                return HomeValleyAnalysis.Status(state, b); // FG5-RND-02：解析中 / 处理残骸 / 缺电（进度保留）/ 空闲“没有待解析的物品”
             }
             if (type == HomeValleyLayout.BuildingTypeRepairBay)
             {

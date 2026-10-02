@@ -91,6 +91,14 @@ public partial class Tables
     /// </summary>
     public cell.TbStructuralTriggerHookParams TbStructuralTriggerHookParams {get; }
     /// <summary>
+    /// 解析种类
+    /// </summary>
+    public fg.TbAnalysisKind TbAnalysisKind {get; }
+    /// <summary>
+    /// 背景资料
+    /// </summary>
+    public fg.TbAnalysisLore TbAnalysisLore {get; }
+    /// <summary>
     /// 机器材料
     /// </summary>
     public fg.TbAssemblyMaterial TbAssemblyMaterial {get; }
@@ -341,6 +349,8 @@ public partial class Tables
         TbStatusEffect = new cell.TbStatusEffect(loader("cell_tbstatuseffect"));
         TbStructuralEffectParams = new cell.TbStructuralEffectParams(loader("cell_tbstructuraleffectparams"));
         TbStructuralTriggerHookParams = new cell.TbStructuralTriggerHookParams(loader("cell_tbstructuraltriggerhookparams"));
+        TbAnalysisKind = new fg.TbAnalysisKind(loader("fg_tbanalysiskind"));
+        TbAnalysisLore = new fg.TbAnalysisLore(loader("fg_tbanalysislore"));
         TbAssemblyMaterial = new fg.TbAssemblyMaterial(loader("fg_tbassemblymaterial"));
         TbBeltFilterPreset = new fg.TbBeltFilterPreset(loader("fg_tbbeltfilterpreset"));
         TbBuildCategory = new fg.TbBuildCategory(loader("fg_tbbuildcategory"));
@@ -423,6 +433,8 @@ public partial class Tables
         TbStatusEffect.ResolveRef(this);
         TbStructuralEffectParams.ResolveRef(this);
         TbStructuralTriggerHookParams.ResolveRef(this);
+        TbAnalysisKind.ResolveRef(this);
+        TbAnalysisLore.ResolveRef(this);
         TbAssemblyMaterial.ResolveRef(this);
         TbBeltFilterPreset.ResolveRef(this);
         TbBuildCategory.ResolveRef(this);

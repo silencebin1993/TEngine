@@ -194,6 +194,7 @@ namespace GameLogic.Campaign.Signal
                 if (notify)
                 {
                     GuidanceHooks.Raise(GuidanceHooks.SignalFirstEncryptedFirmware);
+                    HomeValleyAnalysis.NoteEnemyItemSeen(s); // FG5-RND-02：第一次拿到敌方物品
                     string name = FirmwareKinds.DisplayName(fw) ?? fw;
                     Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Pickup,
                         GameText.Format(pending ? "signal.raw.granted_pending" : "signal.raw.granted", name));

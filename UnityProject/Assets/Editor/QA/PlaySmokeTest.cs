@@ -2692,6 +2692,15 @@ namespace GameLogic.EditorTools
                   && panel.RestoreDetailText.Length > 0,
                 $"点解析台打开解析面板：“数据复原”栏列出 {panel?.RestoreChoiceIds.Count} 条可复原固件（= 服务层候选 {expect.Count} 条）；说明“{panel?.RestoreDetailText.Replace("\n", " / ")}”");
             CheckNoTextMarkers("解析台数据复原");
+            // FG5-RND-02（FGU-23）：解析台 2.0——状态行（空闲时“解析台空闲：没有待解析的物品”）、待解析的敌方物品（与服务层清单同一份）、队列 n/8、残骸栏、资料栏。
+            var heldExpect = new System.Collections.Generic.List<Campaign.Regions.HomeValleyAnalysis.HeldEntry>();
+            Campaign.Regions.HomeValleyAnalysis.CollectHeld(st, heldExpect);
+            string statusExpect = Campaign.Regions.HomeValleyAnalysis.StatusLine(st);
+            Check(open && panel.StatusText == statusExpect && statusExpect.Length > 0 && panel.HeldChoices.Count == heldExpect.Count
+                  && panel.QueueTitleText.Contains("/" + Campaign.Economy.AnalysisCatalog.QueueCapacity) && panel.WreckText.Length > 0 && panel.LoreText.Length > 0
+                  && LabelText("[HomeValleyAnalysisHost]", "Title") == Localization.GameText.Get("analysis.panel.title"),
+                $"解析台 2.0 面板：状态“{panel?.StatusText}”、待解析 {panel?.HeldChoices.Count} 行（= 服务层 {heldExpect.Count} 行）、“{panel?.QueueTitleText}”、残骸栏“{panel?.WreckText}”");
+            CheckNoTextMarkers("解析台 2.0");
             GameObject host = GameObject.Find("[HomeValleyAnalysisHost]");
             DropdownField dd = host?.GetComponent<UIDocument>()?.rootVisualElement?.Q<DropdownField>("RestoreDropdown");
             int idx = panel != null ? panel.RestoreChoiceIds.ToList().IndexOf("fw_coolant") : -1;

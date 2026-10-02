@@ -759,6 +759,62 @@ namespace GameLogic.Campaign
         public AnalysisQueueState State;
         public string BlockedReason;
         public long CreatedTick;
+
+        // ── FG5-RND-02（解析台 2.0）：三类敌方物品 ──────────────────────────────────────────
+        /// <summary>来源：空 = Demo 区域任务物（<see cref="SalvageInstanceId"/> 指向 <see cref="RegionQuestItemRecord"/>，按 YieldTable 结算）；
+        /// <see cref="Regions.HomeValleyAnalysis.SourceItem"/> = 家园里的一件敌方物品（仓库 / 传送带送进来，入队时已从库存取走）；
+        /// <see cref="Regions.HomeValleyAnalysis.SourceChip"/> = 固件库里那枚未破解的固件芯片（引用，不取走、不消耗）。</summary>
+        public string Source;
+        /// <summary>物品种类（fg.TbEcoItem.id：unparsed_module / encrypted_firmware / data_core）。Demo 区域任务物为空。</summary>
+        public string ItemId;
+        /// <summary>物品身份：未解析模块 = 解锁的组件 / 模块 ID；加密固件 = 固件 ID；数据核心 = 资料 ID（fg.TbAnalysisLore）。空 = 身份不明（按重复解析）。</summary>
+        public string TargetId;
+        /// <summary>入队时取用的身份标签（取消时原样放回身份清单）。</summary>
+        public string TagId;
+        public string TagOrigin;
+        public long TagAcquiredTick;
+        /// <summary>来源 = 固件芯片时，被引用的芯片实例（<see cref="PrimitiveChipRecord.PartId"/>）。</summary>
+        public string ChipPartId;
+        /// <summary>完成时写入：这次是不是首次解析、给了多少技术数据（面板“最近结束”一栏与离家报告用）。</summary>
+        public bool FirstTime;
+        public int TechGained;
+    }
+
+    /// <summary>
+    /// FG5-RND-02：家园里一件敌方物品的“身份”。物品本身在仓库 / 传送带 / 地面上是可互换的计数（fg.TbEcoItem），身份单独记在这份清单里：
+    /// 哪一件被送进解析台，就按先来先用取走同种类最早的一条身份（面板里点名送的取点名的那条）；取消时放回。
+    /// 掉落体系（FG8-LOOT-01～03）用 <see cref="Regions.HomeValleyAnalysis.Acquire"/> 发放物品时一并登记。
+    /// </summary>
+    [Serializable]
+    public sealed class EnemyItemTagRecord
+    {
+        public string TagId;
+        public string ItemId;
+        public string TargetId;
+        public string Origin;
+        public long AcquiredTick;
+    }
+
+    /// <summary>FG5-RND-02：解析台 2.0 的家园侧状态（在 <see cref="ResearchState.Analysis"/>）。唯一写入口 <see cref="Regions.HomeValleyAnalysis"/>。</summary>
+    [Serializable]
+    public sealed class AnalysisBenchState
+    {
+        /// <summary>家园里敌方物品的身份清单（按取得先后）。</summary>
+        public EnemyItemTagRecord[] Tags = Array.Empty<EnemyItemTagRecord>();
+        public int NextSerial = 1;
+        /// <summary>FGR-RND-024：送进解析台、等着空闲时处理的残骸件数。</summary>
+        public int WreckBuffer;
+        /// <summary>当前这件残骸已处理的游戏秒（缺电 / 队列有活时停住，不清零）。</summary>
+        public float WreckProgress;
+        /// <summary>数据核心首次解析读到的资料（fg.TbAnalysisLore.id，按读到的先后）。</summary>
+        public string[] LoreRead = Array.Empty<string>();
+        /// <summary>统计：处理过的残骸、解析与残骸各产出的技术数据、完成的解析项数。</summary>
+        public long WrecksProcessed;
+        public long TechFromAnalysis;
+        public long TechFromWrecks;
+        public long Completed;
+        /// <summary>“第一次拿到敌方物品”的引导钩子已经为这个存档触发过（钩子本身按玩家只广播一次，这里只防同一存档每次读档重复扫描）。</summary>
+        public bool FirstItemSeen;
     }
 
     /// <summary>DEMO-CONTENT-LOCK.md：逐目标持久化 ObjectiveRecord，字段与该文档"必须作为可存档

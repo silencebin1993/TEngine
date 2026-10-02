@@ -49,6 +49,12 @@ namespace BinGames.Sim.Logistics
         /// <summary>FG4-ECO-03：只收“收货集合”（<see cref="BeltConfig.AcceptSetMask"/>，物品编号 1～63 的位掩码）里的物品，缓存里同一时刻只有一种（与 <see cref="AcceptAnyOneKind"/> 同一记法）；
         /// 不在集合里的物品让带停下（原因 <see cref="BeltBlock.SinkRejects"/>）。装配站的输入口用它只收机器材料。集合由热更层在建内核时写进配置（内容决定，不进存档）。</summary>
         public const ushort AcceptSet = 0xFFFD;
+        /// <summary>FG5-RND-02：第二个收货集合（<see cref="BeltConfig.AcceptSet2Mask"/>），语义与 <see cref="AcceptSet"/> 相同（一次一种、不在集合里的让带停下）。
+        /// 解析台的输入口用它只收敌方物品与残骸。集合同样由热更层在建内核时写进配置（内容决定，不进存档）。</summary>
+        public const ushort AcceptSet2 = 0xFFFC;
+
+        /// <summary>这种收法是不是“收货集合”（缓存里一次一种）。</summary>
+        public static bool IsSetAccept(ushort accept) => accept == AcceptSet || accept == AcceptSet2;
 
         /// <summary>FG3-LOG-03（FGR-LOG-028）：露天传送带减速的上限（百分比）。</summary>
         public const int MaxSlowPercent = 90;
@@ -194,6 +200,8 @@ namespace BinGames.Sim.Logistics
         public int BucketSteps;
         /// <summary>FG4-ECO-03：<see cref="BeltConst.AcceptSet"/> 收法的收货集合（位 i = 物品编号 i；只支持 1～63）。0 = 空集合（这种口什么都不收）。</summary>
         public ulong AcceptSetMask;
+        /// <summary>FG5-RND-02：<see cref="BeltConst.AcceptSet2"/> 收法的收货集合（位 i = 物品编号 i；只支持 1～63）。0 = 空集合。</summary>
+        public ulong AcceptSet2Mask;
 
         public static BeltConfig Default => new BeltConfig
         {

@@ -646,6 +646,10 @@ namespace GameLogic.Campaign.Regions
                 {
                     item.State = RegionQuestItemState.Recovered;
                     Log.Info($"[FracturedCityRegion] {item.ContentId}（{item.SalvageInstanceId}）撤离成功，已 Recovered。");
+                    if (HomeValleyAnalysis.YieldTable.ContainsKey(item.ContentId ?? string.Empty))
+                    {
+                        HomeValleyAnalysis.NoteEnemyItemSeen(state); // FG5-RND-02：第一次拿到敌方物品的引导钩子
+                    }
                 }
                 else
                 {

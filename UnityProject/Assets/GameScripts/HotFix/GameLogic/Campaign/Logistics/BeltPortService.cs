@@ -508,7 +508,7 @@ namespace GameLogic.Campaign.Logistics
             ushort item = 0;
             if (BeltNetworkService.Kernel.TryGetPortInfo(bind.PortId, out BeltPortInfo info))
             {
-                item = bind.IsOutput || info.Accept == BeltConst.AcceptAnyOneKind || info.Accept == BeltConst.AcceptSet
+                item = bind.IsOutput || info.Accept == BeltConst.AcceptAnyOneKind || BeltConst.IsSetAccept(info.Accept)
                     ? info.ItemType
                     : (info.Accept != BeltConst.AcceptAny && info.Accept != BeltConst.AcceptNone ? info.Accept : BeltItems.ScrapId);
                 if (item == 0)
@@ -670,7 +670,9 @@ namespace GameLogic.Campaign.Logistics
             for (int step = 0; step < n; step++)
             {
                 Economy.ItemDef d = items[(start + step) % n];
-                if (Economy.HomeInventory.IsBeltStorable(d) && Economy.HomeInventory.Stock(state, d) > keep)
+                // FG5-RND-02（ADR-RND-002）：敌方物品与残骸不进“全部可存物品”的轮转——它们只该去解析台 / 回收站，混进普通产线会堵带；
+                // 玩家要用传送带把它们送出去时，把输出口过滤设成那一种（照常推）。
+                if (Economy.HomeInventory.IsBeltStorable(d) && Economy.HomeInventory.Stock(state, d) > keep && !Economy.AnalysisCatalog.TryGetKind(d.Id, out _))
                 {
                     return d.BeltId;
                 }
@@ -744,6 +746,12 @@ namespace GameLogic.Campaign.Logistics
                          && k.TryGetPortInfo(bind.PortId, out BeltPortInfo ai) && ai.Accept != BeltConst.AcceptSet)
                 {
                     k.SetSinkAccept(bind.PortId, BeltConst.AcceptSet);
+                }
+                // FG5-RND-02 读档迁移：FG3-LOG-03 起的存档里解析台输入口“什么都不收”，改成收敌方物品与残骸（第二个收货集合）。
+                else if (bind.Prod && !bind.IsOutput && bind.PortId >= 0 && HomeValleyAnalysis.IsBenchPort(bind.PortKey)
+                         && k.TryGetPortInfo(bind.PortId, out BeltPortInfo bi) && bi.Accept != BeltConst.AcceptSet2)
+                {
+                    k.SetSinkAccept(bind.PortId, BeltConst.AcceptSet2);
                 }
             }
         }
@@ -869,7 +877,7 @@ namespace GameLogic.Campaign.Logistics
                 {
                     // FG4-ECO-02：生产建筑只收一种物品的输入口，内核不记种类：就是当前配方要的那种固体。
                     item = Economy.ProductionService.SinkAcceptFor(state, HomeGridService.FindBuilding(state, b.BuildingId), b.PortKey);
-                    if (item == BeltConst.AcceptNone || item == BeltConst.AcceptAnyOneKind || item == BeltConst.AcceptSet)
+                    if (item == BeltConst.AcceptNone || item == BeltConst.AcceptAnyOneKind || BeltConst.IsSetAccept(item))
                     {
                         item = 0;
                     }

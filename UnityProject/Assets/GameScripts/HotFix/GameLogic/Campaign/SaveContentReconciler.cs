@@ -34,6 +34,8 @@ namespace GameLogic.Campaign
         public const string KindPrimitiveChip = "primitive_chip";
         /// <summary>FG3-LOG-09（DEBT-FG0SAVE01-07）：建筑类型（ID = BuildingRecord.BuildingTypeId）。</summary>
         public const string KindBuilding = "building";
+        /// <summary>FG5-RND-02（DEBT-FG0SAVE01-07 解析类）：解析台里引用的内容（解析队列项 / 敌方物品身份清单的 TargetId）。</summary>
+        public const string KindAnalysis = "analysis";
         public const string LedgerOwner = "save-migration";
 
         private static TbRemovedContent _table;
@@ -278,6 +280,102 @@ namespace GameLogic.Campaign
             history.Notices = history.Notices.Concat(fresh).ToArray();
             return fresh;
         }
+
+        /// <summary>
+        /// FG5-RND-02（DEBT-FG0SAVE01-07 解析类；FGR-SYS-004）：解析台里引用的内容已从游戏移除——
+        /// 在办的队列项（敌方物品 / 固件芯片）作废：被移除的只是“身份”，物品种类还在——敌方物品按“身份不明”原样退回家园（回仓库，放不下落在解析台旁由机器搬回），
+        /// 不转废料、不丢失；固件芯片本身由基元对账处理；身份清单里引用它的身份去掉（物品本身还在，按身份不明处理）。两边处理一致。按内容 ID 各通知一次。
+        /// Demo 区域任务物（任务物类，FG8-QST-01）不在这里处理。
+        /// </summary>
+        public static SaveNoticeRecord[] ReconcileAnalysis(CampaignState state, int fromContentVersion, int toContentVersion)
+        {
+            if (state == null)
+            {
+                return Array.Empty<SaveNoticeRecord>();
+            }
+            CampaignFgStateDomains.EnsureAll(state);
+            AnalysisBenchState bench = state.Research.Analysis;
+            var deadIds = new SortedSet<string>(StringComparer.Ordinal);
+            foreach (AnalysisQueueItemRecord q in state.AnalysisQueues ?? Array.Empty<AnalysisQueueItemRecord>())
+            {
+                if (q != null && !Regions.HomeValleyAnalysis.IsQuestEntry(q) && Regions.HomeValleyAnalysis.IsActiveEntry(q) && !IsLiveAnalysisTarget(q.ItemId, q.TargetId))
+                {
+                    deadIds.Add(q.TargetId);
+                }
+            }
+            foreach (EnemyItemTagRecord t in bench.Tags)
+            {
+                if (t != null && !IsLiveAnalysisTarget(t.ItemId, t.TargetId))
+                {
+                    deadIds.Add(t.TargetId);
+                }
+            }
+            if (deadIds.Count == 0)
+            {
+                return Array.Empty<SaveNoticeRecord>();
+            }
+            string now = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
+            var notices = new List<SaveNoticeRecord>();
+            foreach (string id in deadIds)
+            {
+                int entries = 0;
+                int returned = 0;
+                string firstKey = null;
+                foreach (AnalysisQueueItemRecord q in state.AnalysisQueues ?? Array.Empty<AnalysisQueueItemRecord>())
+                {
+                    if (q == null || Regions.HomeValleyAnalysis.IsQuestEntry(q) || !Regions.HomeValleyAnalysis.IsActiveEntry(q) || q.TargetId != id)
+                    {
+                        continue;
+                    }
+                    firstKey ??= q.QueueItemId;
+                    q.State = AnalysisQueueState.Failed;
+                    q.BlockedReason = "content-removed";
+                    entries++;
+                    if (Regions.HomeValleyAnalysis.ReturnUnidentified(state, q, "content-removed"))
+                    {
+                        returned++;
+                    }
+                }
+                int tagsBefore = bench.Tags.Length;
+                bench.Tags = bench.Tags.Where(t => t != null && t.TargetId != id).ToArray();
+                entries += tagsBefore - bench.Tags.Length;
+                notices.Add(NewNotice($"content-removed:analysis:{id}:{firstKey ?? "tags"}", "save.notice.analysis_removed",
+                    new[] { NameKeyOf(id), entries.ToString(CultureInfo.InvariantCulture), returned.ToString(CultureInfo.InvariantCulture) },
+                    fromContentVersion, toContentVersion, now));
+            }
+            SaveHistoryState history = state.SaveHistory;
+            var existing = new HashSet<string>(history.Notices.Select(n => n.NoticeId), StringComparer.Ordinal);
+            SaveNoticeRecord[] fresh = notices.Where(n => existing.Add(n.NoticeId)).ToArray();
+            history.Notices = history.Notices.Concat(fresh).ToArray();
+            return fresh;
+        }
+
+        /// <summary>解析身份在当前游戏里还在不在：空身份（身份不明）算在；未解析模块 = 内容目录里有；加密固件 = 固件表里有；数据核心 = 资料表里有。</summary>
+        public static bool IsLiveAnalysisTarget(string itemId, string targetId)
+        {
+            if (string.IsNullOrEmpty(targetId))
+            {
+                return true;
+            }
+            if (_isLiveAnalysisOverride != null)
+            {
+                return _isLiveAnalysisOverride(targetId);
+            }
+            if (itemId == Economy.AnalysisCatalog.DataCoreId)
+            {
+                return Economy.AnalysisCatalog.TryGetLore(targetId, out _);
+            }
+            if (itemId == Economy.AnalysisCatalog.EncryptedFirmwareId)
+            {
+                return Signal.FirmwareKinds.IsFirmware(targetId);
+            }
+            return Content.MechanicalContentFacade.TryGet(targetId, out _);
+        }
+
+        private static Func<string, bool> _isLiveAnalysisOverride;
+
+        /// <summary>自检注入：解析身份是否还在（null = 恢复真实判定）。</summary>
+        public static void OverrideAnalysisLiveForTests(Func<string, bool> isLive) => _isLiveAnalysisOverride = isLive;
 
         /// <summary>拆掉一座已移除类型的建筑，返回退还的废料数（含已到现场 / 货舱里的施工材料与内部缓存）。</summary>
         private static int RemoveDeadBuilding(CampaignState state, BuildingRecord b, int perItem)

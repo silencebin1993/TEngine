@@ -145,6 +145,8 @@ namespace GameLogic.Campaign.Logistics
                 BucketSteps = TuningInt("logistics.stats_bucket_steps", 300),
                 // FG4-ECO-03：装配站输入口的收货集合 = 机器材料（内容决定，建内核时写进配置，不进存档：读档前后同一个集合）。
                 AcceptSetMask = Economy.AssemblyMaterials.BeltMask,
+                // FG5-RND-02：解析台输入口的收货集合 = 三类敌方物品 + 残骸（fg.TbAnalysisKind）。
+                AcceptSet2Mask = Economy.AnalysisCatalog.BeltMask,
             };
             if (!c.IsValid(out string why))
             {
@@ -1008,12 +1010,23 @@ namespace GameLogic.Campaign.Logistics
                         return GameText.Format("logistics.block.store_full", owner, st.Scrap,
                             Regions.HomeValleyCargo.GetStorageCapacity(st, CampaignEconomyLedger.ResourceScrap));
                     }
+                    // FG5-RND-02（FG05 第 5 节“解析队列满：拒绝新物品，物品留在原处（传送带上会堵塞），给出原因”）。
+                    if (st != null && BeltPortService.TryGetBinding(info.SinkPortId, out BeltPortService.Binding ab) && Regions.HomeValleyAnalysis.IsBenchPort(ab.PortKey)
+                        && Regions.HomeValleyAnalysis.QueueFull(st))
+                    {
+                        return GameText.Format("analysis.block.with_owner", owner, GameText.Format("analysis.status.full", Economy.AnalysisCatalog.QueueCapacity));
+                    }
                     return GameText.Format("logistics.block.sink_full", owner);
                 }
                 case BeltBlock.SinkRejects:
                 {
                     string owner = SinkOwnerName(info.SinkPortId);
                     ushort accept = kernel != null && kernel.TryGetPortInfo(info.SinkPortId, out BeltPortInfo pi) ? pi.Accept : BeltConst.AcceptNone;
+                    if (accept == BeltConst.AcceptSet2)
+                    {
+                        // FG5-RND-02：解析台只收敌方物品与残骸。
+                        return GameText.Format("analysis.block.with_owner", owner, GameText.Get("analysis.reason.not_enemy_item"));
+                    }
                     if (accept == BeltConst.AcceptSet)
                     {
                         // FG4-ECO-03：装配站只收机器材料。

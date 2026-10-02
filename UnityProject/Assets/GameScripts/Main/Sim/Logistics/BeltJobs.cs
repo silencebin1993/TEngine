@@ -715,6 +715,8 @@ namespace BinGames.Sim.Logistics
         public int SlotsPerCell;
         /// <summary>FG4-ECO-03：<see cref="BeltConst.AcceptSet"/> 收法的收货集合（配置里来，不进存档）。</summary>
         public ulong AcceptSetMask;
+        /// <summary>FG5-RND-02：<see cref="BeltConst.AcceptSet2"/> 收法的收货集合。</summary>
+        public ulong AcceptSet2Mask;
 
         [ReadOnly] public NativeArray<int> X;
         [ReadOnly] public NativeArray<int> Y;
@@ -1039,11 +1041,13 @@ namespace BinGames.Sim.Logistics
                 // FG3-LOG-03：只收指定物品的输入端口遇到别的物品就不收（带停下、物品不消失，原因写“X 不收 Y”）。
                 ushort head = Item[b];
                 // FG4-ECO-01：AcceptAnyOneKind = 任何物品都收，但缓存里同一时刻只有一种（建筑 / 仓库按种类取料）——缓存里是别的种类时先等它被取走（原因“下游已满”）。
-                bool oneKind = port.Accept == BeltConst.AcceptAnyOneKind || port.Accept == BeltConst.AcceptSet;
-                // FG4-ECO-03：AcceptSet = 只收收货集合里的物品（一次一种）。
-                bool inSet = port.Accept == BeltConst.AcceptSet && head > 0 && head < 64 && ((AcceptSetMask >> head) & 1UL) != 0UL;
+                bool isSet = port.Accept == BeltConst.AcceptSet || port.Accept == BeltConst.AcceptSet2;
+                bool oneKind = port.Accept == BeltConst.AcceptAnyOneKind || isSet;
+                // FG4-ECO-03：AcceptSet = 只收收货集合里的物品（一次一种）；FG5-RND-02：AcceptSet2 = 第二个收货集合（解析台）。
+                ulong mask = port.Accept == BeltConst.AcceptSet2 ? AcceptSet2Mask : AcceptSetMask;
+                bool inSet = isSet && head > 0 && head < 64 && ((mask >> head) & 1UL) != 0UL;
                 bool itemOk = port.Accept == BeltConst.AcceptAny || port.Accept == BeltConst.AcceptAnyOneKind || inSet
-                              || (port.Accept != BeltConst.AcceptNone && port.Accept != BeltConst.AcceptSet && port.Accept == head);
+                              || (port.Accept != BeltConst.AcceptNone && !isSet && port.Accept == head);
                 bool room = (port.Cap < 0 || port.Buffered < port.Cap) && (!oneKind || port.Buffered <= 0 || port.Item == head);
                 limit = itemOk && room ? CL + CL : CL - 1;
                 reason = itemOk ? (byte)BeltBlock.SinkFull : (byte)BeltBlock.SinkRejects;
@@ -1107,7 +1111,7 @@ namespace BinGames.Sim.Logistics
                     if (port.Cap >= 0)
                     {
                         port.Buffered++;
-                        if (port.Accept == BeltConst.AcceptAnyOneKind || port.Accept == BeltConst.AcceptSet)
+                        if (port.Accept == BeltConst.AcceptAnyOneKind || port.Accept == BeltConst.AcceptSet || port.Accept == BeltConst.AcceptSet2)
                         {
                             port.Item = it; // 缓存里现在是这一种（输入端口的 Item 只在这种收法下有意义，存档照常保存）
                         }

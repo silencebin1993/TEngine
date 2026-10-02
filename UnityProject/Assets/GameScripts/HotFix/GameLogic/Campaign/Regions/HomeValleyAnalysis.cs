@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using GameLogic.Campaign.Content;
+using GameLogic.Campaign.Economy;
+using GameLogic.Localization;
 using TEngine;
 
 namespace GameLogic.Campaign.Regions
@@ -36,8 +38,13 @@ namespace GameLogic.Campaign.Regions
     /// 本类因此走与 <see cref="Primitive.PrimitiveCraftStation"/>"材料送站台"同一precedent（该 Story
     /// 同样不经 WorkOrder，已验收 Completed）：<see cref="TryEnqueue"/> 是本类自己的正式排队事务，
     /// FIFO/单工位/断电暂停/建筑被毁全部按 WorkOrder 同等纪律实现，只是不共用 <c>WorkOrderRecord</c>
-    /// 这个具体类型——五态要求的"搬运中"由 <see cref="AnalysisQueueState.Queued"/> 承载（见上）。</summary>
-    public static class HomeValleyAnalysis
+    /// 这个具体类型——五态要求的"搬运中"由 <see cref="AnalysisQueueState.Queued"/> 承载（见上）。
+    ///
+    /// ── FG5-RND-02 解析台 2.0（FG05 FGR-RND-020～024）──
+    /// 同一条队列（上限 <see cref="AnalysisCatalog.QueueCapacity"/> = 8）现在收三种来源：Demo 区域任务物（<see cref="AnalysisQueueItemRecord.Source"/> 为空，
+    /// 原样按 <see cref="YieldTable"/>）、家园里的敌方物品（<see cref="SourceItem"/>：未解析模块 / 加密固件 / 数据核心，入队时从库存取走，取消时原样退回）、
+    /// 固件库里未破解的固件芯片（<see cref="SourceChip"/>：只引用，不取走、不消耗）。队列空闲时处理残骸。见 HomeValleyAnalysis.Items.cs。</summary>
+    public static partial class HomeValleyAnalysis
     {
         public readonly struct YieldInfo
         {
@@ -49,15 +56,18 @@ namespace GameLogic.Campaign.Regions
             /// <see cref="TechDataYield"/> 相同（关键物两条旧表项没有"重复"语义，不受影响）。</summary>
             public readonly int RepeatTechDataYield;
             public readonly float Duration;
-            public readonly string DisplayName;
+            /// <summary>名字的文本键（FG5-RND-02：原硬编码中文改走文本键，中英两套）。</summary>
+            public readonly string NameKey;
+            /// <summary>当前语言下的名字（面板队列行 / 待解析清单 / 完成字幕）。</summary>
+            public string DisplayName => string.IsNullOrEmpty(NameKey) ? string.Empty : GameText.Get(NameKey);
 
-            public YieldInfo(string unlockContentId, int techDataYield, float duration, string displayName, int? repeatTechDataYield = null)
+            public YieldInfo(string unlockContentId, int techDataYield, float duration, string nameKey, int? repeatTechDataYield = null)
             {
                 UnlockContentId = unlockContentId;
                 TechDataYield = techDataYield;
                 RepeatTechDataYield = repeatTechDataYield ?? techDataYield;
                 Duration = duration;
-                DisplayName = displayName;
+                NameKey = nameKey;
             }
         }
 
@@ -69,26 +79,33 @@ namespace GameLogic.Campaign.Regions
         {
             // DEMO-CONTENT-LOCK.md §2.5："解析静默标记器 +8"。
             [FracturedCityLayout.MarkerModuleContentId] =
-                new YieldInfo(ComponentCatalog.FuncMarkerId, 8, 10f, "静默标记器"),
+                new YieldInfo(ComponentCatalog.FuncMarkerId, 8, 10f, "analysis.quest_name.marker_module"),
             // DEMO-CONTENT-LOCK.md §2.5："解析标记跳转协议数据盒 +12"。
             [FracturedCityLayout.ProtocolDataboxContentId] =
-                new YieldInfo(FirmwareCatalog.FwMarkTagId, 12, 15f, "标记跳转固件"),
+                new YieldInfo(FirmwareCatalog.FwMarkTagId, 12, 15f, "analysis.quest_name.protocol_databox"),
             // DEMO-CONTENT-LOCK.md §2.5："解析铸造重炮 +15"。
             [FoundryOutpostLayout.CannonModuleContentId] =
-                new YieldInfo(ComponentCatalog.CompCannonId, 15, 20f, "铸造重炮模块"),
+                new YieldInfo(ComponentCatalog.CompCannonId, 15, 20f, "analysis.quest_name.cannon_module"),
             // DEMO-CONTENT-LOCK.md §2.5："首次解析三种可选铸造模块每种+5，重复模块只转为+2"。
             [FoundryOutpostLayout.ArmorCacheContentId] =
-                new YieldInfo(ComponentCatalog.StructArmorId, 5, 8f, "重甲技术缓存", repeatTechDataYield: 2),
+                new YieldInfo(ComponentCatalog.StructArmorId, 5, 8f, "analysis.quest_name.armor_cache", repeatTechDataYield: 2),
             [FoundryOutpostLayout.HeatSinkCacheContentId] =
-                new YieldInfo(ComponentCatalog.StructFinId, 5, 8f, "散热鳍技术缓存", repeatTechDataYield: 2),
+                new YieldInfo(ComponentCatalog.StructFinId, 5, 8f, "analysis.quest_name.heatsink_cache", repeatTechDataYield: 2),
             [FoundryOutpostLayout.ArmorPierceCacheContentId] =
-                new YieldInfo(FirmwareCatalog.FwArmorPierceId, 5, 8f, "装甲击穿技术缓存", repeatTechDataYield: 2),
+                new YieldInfo(FirmwareCatalog.FwArmorPierceId, 5, 8f, "analysis.quest_name.armorpierce_cache", repeatTechDataYield: 2),
         };
 
         /// <summary>Demo 关键物+可选模块总数个位数（2 件关键物 + ER6-FOUNDRY-01 追加的重炮关键物与
         /// 三种可选技术缓存共 4 件，合计 6 种 contentId），队列上限给一点余量即可，不需要
         /// <see cref="Primitive.PrimitiveCraftStation.MaxActiveQueueItems"/> 那种量级。</summary>
         public const int MaxActiveQueueItems = 8;
+
+        /// <summary>FG5-RND-02：队列项来源——家园里的一件敌方物品（已从库存取走）。</summary>
+        public const string SourceItem = "item";
+        /// <summary>FG5-RND-02：队列项来源——固件库里那枚未破解的固件芯片（只引用，不消耗）。</summary>
+        public const string SourceChip = "chip";
+
+        public static bool IsQuestEntry(AnalysisQueueItemRecord q) => q != null && string.IsNullOrEmpty(q.Source);
 
         public readonly struct AnalysisOpResult
         {
@@ -115,14 +132,31 @@ namespace GameLogic.Campaign.Regions
         private static bool IsActive(AnalysisQueueState s) => Array.IndexOf(ActiveStates, s) >= 0;
         private static bool IsHeadCandidate(AnalysisQueueState s) => IsActive(s);
 
-        public static AnalysisQueueItemRecord Find(CampaignState state, string queueItemId) =>
-            state?.AnalysisQueues?.FirstOrDefault(q => q.QueueItemId == queueItemId);
+        public static AnalysisQueueItemRecord Find(CampaignState state, string queueItemId)
+        {
+            AnalysisQueueItemRecord[] queue = state?.AnalysisQueues;
+            if (queue == null || string.IsNullOrEmpty(queueItemId))
+            {
+                return null;
+            }
+            foreach (AnalysisQueueItemRecord q in queue)
+            {
+                if (q != null && q.QueueItemId == queueItemId)
+                {
+                    return q;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>这一项是否还在办（排队 / 解析中 / 断电暂停）。</summary>
+        public static bool IsActiveEntry(AnalysisQueueItemRecord q) => q != null && IsActive(q.State);
 
         /// <summary>某个已 Recovered 的关键物当前是否已经"在办"（搬运中/解析台/已完成）——供仓库列表
         /// 过滤（只显示还没送去解析的），也供 <see cref="TryEnqueue"/> 拒绝重复入队。</summary>
         public static bool HasActiveOrCompletedQueueItem(CampaignState state, string salvageInstanceId) =>
-            state?.AnalysisQueues != null && state.AnalysisQueues.Any(q =>
-                q.SalvageInstanceId == salvageInstanceId &&
+            state?.AnalysisQueues != null && !string.IsNullOrEmpty(salvageInstanceId) && state.AnalysisQueues.Any(q =>
+                q != null && IsQuestEntry(q) && q.SalvageInstanceId == salvageInstanceId &&
                 (IsActive(q.State) || q.State == AnalysisQueueState.Completed));
 
         /// <summary>"仓库"态：已 Recovered、有产出表项、且当前没有非终态/已完成队列项引用——玩家可选送
@@ -171,8 +205,22 @@ namespace GameLogic.Campaign.Regions
             return tick;
         }
 
-        private static int ActiveCount(CampaignState state) =>
-            state.AnalysisQueues?.Count(q => IsActive(q.State)) ?? 0;
+        /// <summary>在办的项数（排队 / 解析中 / 断电暂停）。O(队列长度)；队列长度有上限（容量 + 保留的最近结束记录 + Demo 任务物完成记录）。</summary>
+        public static int ActiveCount(CampaignState state)
+        {
+            int n = 0;
+            foreach (AnalysisQueueItemRecord q in state?.AnalysisQueues ?? Array.Empty<AnalysisQueueItemRecord>())
+            {
+                if (q != null && IsActive(q.State))
+                {
+                    n++;
+                }
+            }
+            return n;
+        }
+
+        /// <summary>FGR-RND-020：队列满了（拒绝新物品；传送带送来的留在入口，带停下）。</summary>
+        public static bool QueueFull(CampaignState state) => ActiveCount(state) >= AnalysisCatalog.QueueCapacity;
 
         // ── 入队 ─────────────────────────────────────────────────────────────────
 
@@ -199,12 +247,12 @@ namespace GameLogic.Campaign.Regions
             {
                 return AnalysisOpResult.Fail("already-queued-or-analyzed");
             }
-            if (ActiveCount(state) >= MaxActiveQueueItems)
+            if (QueueFull(state))
             {
                 return AnalysisOpResult.Fail("queue-full");
             }
 
-            string queueItemId = "analysis:" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            string queueItemId = NewQueueItemId(state);
             var queueItem = new AnalysisQueueItemRecord
             {
                 QueueItemId = queueItemId,
@@ -237,6 +285,12 @@ namespace GameLogic.Campaign.Regions
             }
             item.State = AnalysisQueueState.Cancelled;
             item.BlockedReason = null;
+            // FG5-RND-02（FGR-RND-023）：取消 = 物品原样退回（敌方物品回仓库、身份放回清单；芯片本来就没取走；Demo 任务物本来就留在仓库）。
+            if (item.Source == SourceItem)
+            {
+                ReturnItem(state, item, "cancel");
+            }
+            PruneFinished(state);
             return AnalysisOpResult.Ok(queueItemId);
         }
 
@@ -246,32 +300,41 @@ namespace GameLogic.Campaign.Regions
         /// 同 <see cref="Primitive.PrimitiveCraftStation.Tick"/> 性能纪律）。</summary>
         public static void Tick(CampaignState state, float dt)
         {
-            if (state == null || state.AnalysisQueues == null || state.AnalysisQueues.Length == 0)
+            if (state == null)
             {
                 return;
             }
+            AnalysisBenchState bs = state.Research?.Analysis;
+            if ((bs == null || bs.WreckBuffer <= 0) && ActiveCount(state) == 0)
+            {
+                return; // 没活：O(队列长度) 早退（队列长度有上限）。
+            }
 
-            BuildingRecord bench = state.BuildingRecords?.FirstOrDefault(b =>
-                b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId == HomeValleyLayout.BuildingTypeAnalysisBench);
-            bool benchDestroyed = bench == null || bench.ConstructionState == BuildingConstructionState.Destroyed;
-            if (benchDestroyed)
+            BuildingRecord bench = FindBench(state);
+            if (BenchDestroyed(bench))
             {
                 bool anyFailed = false;
-                foreach (AnalysisQueueItemRecord it in state.AnalysisQueues)
+                foreach (AnalysisQueueItemRecord it in state.AnalysisQueues ?? Array.Empty<AnalysisQueueItemRecord>())
                 {
-                    if (!IsActive(it.State))
+                    if (it == null || !IsActive(it.State))
                     {
                         continue;
                     }
                     it.State = AnalysisQueueState.Failed;
                     it.BlockedReason = "analysis-bench-destroyed";
                     anyFailed = true;
+                    // FG5-RND-02：送进来的敌方物品不随解析台消失——放回家园（仓库放不下落地，机器搬走），身份放回清单。
+                    if (it.Source == SourceItem)
+                    {
+                        ReturnItem(state, it, "bench-destroyed");
+                    }
                 }
+                ReturnWrecks(state, bench);
                 if (anyFailed)
                 {
                     // ER8-CONTENT-01 AC-AUD-001 失败：只在真的有进行中的解析被中止时出声。
                     Feedback.FeedbackCues.RaiseLocatedIfKnown(Feedback.FeedbackCueId.Failure,
-                        Feedback.FeedbackCues.BuildingPositionOfType(state, HomeValleyLayout.BuildingTypeAnalysisBench), "解析台被毁，进行中的解析已中止");
+                        Feedback.FeedbackCues.BuildingPositionOfType(state, HomeValleyLayout.BuildingTypeAnalysisBench), GameText.Get("analysis.feedback.bench_destroyed"));
                 }
                 return;
             }
@@ -280,15 +343,65 @@ namespace GameLogic.Campaign.Regions
             if (head != null)
             {
                 TickHead(state, head, dt, bench);
+                return; // 队列优先：残骸的进度停住、不清零（FGR-RND-024“队列为空时”）。
             }
+            TickWreck(state, bs, dt, bench);
+        }
+
+        /// <summary>
+        /// 解析台能不能干活：运转中且有电。耐久没满（建筑状态“受损”，<see cref="BuildingStatusKind.Damaged"/>）的解析台仍是
+        /// <see cref="BuildingConstructionState.Operational"/>，照常工作（FG4-ECO-05）；禁用 / 缺电 / 施工中 / 已摧毁都不行。
+        /// 注意 <see cref="BuildingConstructionState.Damaged"/> 是“已摧毁、只剩可重建的虚影”（<see cref="BuildingStatusService"/>），不是“受损”。
+        /// </summary>
+        public static bool BenchWorking(BuildingRecord bench) =>
+            bench != null
+            && bench.ConstructionState == BuildingConstructionState.Operational
+            && bench.PowerState == BuildingPowerState.Powered;
+
+        /// <summary>
+        /// 解析台已被摧毁（或不存在）：<see cref="BuildingConstructionState.Damaged"/>（正式摧毁入口
+        /// <see cref="BuildingOps.ApplyDamage"/> → <see cref="HomeValleyPowerGrid.ApplyBuildingDestroyed"/> 写的“可重建虚影”）与
+        /// <see cref="BuildingConstructionState.Destroyed"/> 都算。此时在办的项中止、物品退回，送入被拒（ADR-RND-002 第 5 节）；重建完成后恢复收货。
+        /// </summary>
+        public static bool BenchDestroyed(BuildingRecord bench) =>
+            bench == null
+            || bench.ConstructionState == BuildingConstructionState.Destroyed
+            || bench.ConstructionState == BuildingConstructionState.Damaged;
+
+        private static BuildingRecord[] _benchSource;
+        private static BuildingRecord _benchCached;
+
+        /// <summary>家园解析台（开局建筑，至多一座）。按建筑数组的引用缓存（数组整体替换时才重查），每步 O(1)。</summary>
+        public static BuildingRecord FindBench(CampaignState state)
+        {
+            BuildingRecord[] all = state?.BuildingRecords;
+            if (all == null)
+            {
+                return null;
+            }
+            if (ReferenceEquals(all, _benchSource))
+            {
+                return _benchCached;
+            }
+            _benchSource = all;
+            _benchCached = null;
+            foreach (BuildingRecord b in all)
+            {
+                if (b != null && b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId == HomeValleyLayout.BuildingTypeAnalysisBench)
+                {
+                    _benchCached = b;
+                    break;
+                }
+            }
+            return _benchCached;
         }
 
         private static AnalysisQueueItemRecord FindHead(CampaignState state)
         {
             AnalysisQueueItemRecord head = null;
-            foreach (AnalysisQueueItemRecord it in state.AnalysisQueues)
+            foreach (AnalysisQueueItemRecord it in state.AnalysisQueues ?? Array.Empty<AnalysisQueueItemRecord>())
             {
-                if (!IsHeadCandidate(it.State))
+                if (it == null || !IsHeadCandidate(it.State))
                 {
                     continue;
                 }
@@ -303,15 +416,15 @@ namespace GameLogic.Campaign.Regions
 
         private static void TickHead(CampaignState state, AnalysisQueueItemRecord item, float dt, BuildingRecord bench)
         {
-            bool powered = bench.ConstructionState == BuildingConstructionState.Operational
-                && bench.PowerState == BuildingPowerState.Powered;
+            bool powered = BenchWorking(bench);
+            string blocked = bench.ConstructionState == BuildingConstructionState.Disabled ? "analysis-bench-disabled" : "analysis-bench-unpowered";
 
             if (item.State == AnalysisQueueState.Running)
             {
                 if (!powered)
                 {
                     item.State = AnalysisQueueState.WaitingPower;
-                    item.BlockedReason = "analysis-bench-unpowered";
+                    item.BlockedReason = blocked;
                     return; // 断电：Progress 原样保留，不倒退（AC-ECO-003"断电暂停而不倒退"）。
                 }
                 item.Progress += dt;
@@ -326,7 +439,7 @@ namespace GameLogic.Campaign.Regions
             if (!powered)
             {
                 item.State = AnalysisQueueState.WaitingPower;
-                item.BlockedReason = "analysis-bench-unpowered";
+                item.BlockedReason = blocked;
                 return;
             }
             item.State = AnalysisQueueState.Running;
@@ -341,6 +454,12 @@ namespace GameLogic.Campaign.Regions
         private static void Complete(CampaignState state, AnalysisQueueItemRecord item)
         {
             item.Progress = item.Duration;
+            if (!IsQuestEntry(item))
+            {
+                CompleteFormal(state, item); // FG5-RND-02：三类敌方物品 / 固件芯片（HomeValleyAnalysis.Items.cs）。
+                PruneFinished(state);
+                return;
+            }
 
             RegionQuestItemRecord questItem = state.RegionQuestItems?.FirstOrDefault(q => q.SalvageInstanceId == item.SalvageInstanceId);
             if (questItem == null || questItem.State != RegionQuestItemState.Recovered
@@ -349,7 +468,7 @@ namespace GameLogic.Campaign.Regions
                 item.State = AnalysisQueueState.Failed;
                 item.BlockedReason = "quest-item-missing";
                 Feedback.FeedbackCues.RaiseLocatedIfKnown(Feedback.FeedbackCueId.Failure,
-                    Feedback.FeedbackCues.BuildingPositionOfType(state, HomeValleyLayout.BuildingTypeAnalysisBench), "解析失败：待解析的模块已不在仓库");
+                    Feedback.FeedbackCues.BuildingPositionOfType(state, HomeValleyLayout.BuildingTypeAnalysisBench), GameText.Get("analysis.feedback.quest_missing"));
                 return;
             }
 
@@ -384,8 +503,9 @@ namespace GameLogic.Campaign.Regions
             string unlockedName = Feedback.FeedbackCues.ContentName(info.UnlockContentId);
             Feedback.FeedbackCues.RaiseLocatedIfKnown(Feedback.FeedbackCueId.AnalysisComplete,
                 Feedback.FeedbackCues.BuildingPositionOfType(state, HomeValleyLayout.BuildingTypeAnalysisBench),
-                (alreadyUnlocked || string.IsNullOrEmpty(unlockedName) ? info.DisplayName : $"{info.DisplayName}，解锁 {unlockedName}")
-                + $"，技术数据 +{techYield}",
+                alreadyUnlocked || string.IsNullOrEmpty(unlockedName)
+                    ? GameText.Format("analysis.result.quest_repeat", info.DisplayName, techYield)
+                    : GameText.Format("analysis.result.quest_first", info.DisplayName, unlockedName, techYield),
                 Feedback.FeedbackCues.BuildingTypeSfx(HomeValleyLayout.BuildingTypeAnalysisBench));
 
             // FG1-SIG-06（FGR-SIG-062）：破解敌方加密固件——同一种固件的所有实例去掉“未破解”标记（按内容记），

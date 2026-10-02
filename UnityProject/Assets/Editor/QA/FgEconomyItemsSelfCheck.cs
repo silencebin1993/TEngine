@@ -274,7 +274,7 @@ namespace GameLogic.EditorTools
         private static void CheckData()
         {
             IReadOnlyList<ItemDef> items = ItemCatalog.Items;
-            Expect(ItemCatalog.LoadError == null && ItemCatalog.Problems.Count == 0 && ItemCatalog.RejectedRecipes.Count == 0 && items.Count == 30 && ItemCatalog.Recipes.Count == 15,
+            Expect(ItemCatalog.LoadError == null && ItemCatalog.Problems.Count == 0 && ItemCatalog.RejectedRecipes.Count == 0 && items.Count == 31 && ItemCatalog.Recipes.Count == 15,
                 $"A1 物品表 fg.TbEcoItem {items.Count} 种、配方 fg.TbRecipe {ItemCatalog.Recipes.Count} 条全部通过载入检查（问题 {ItemCatalog.Problems.Count} 条）" +
                 (ItemCatalog.Problems.Count > 0 ? "：" + string.Join("；", ItemCatalog.Problems.Take(4)) : string.Empty));
 
@@ -285,7 +285,7 @@ namespace GameLogic.EditorTools
                 ("intermediate", new[] { "alloy", "part", "structural", "electronic", "precision_part", "chip_substrate", "repair_kit" }),
                 ("product", new[] { "combat_component", "structure_module", "firmware_chip", "machine" }),
                 ("endgame", new[] { "megastructure_part" }),
-                ("expedition", new[] { "unparsed_module", "encrypted_firmware", "data_core", "human_legacy" }),
+                ("expedition", new[] { "unparsed_module", "encrypted_firmware", "data_core", "enemy_wreck", "human_legacy" }), // FG5-RND-02：敌方残骸
                 ("key", new[] { "listening_array_core", "furnace_heart", "reactor_core", "supercomputer_core" }),
                 ("fluid", new[] { "water", "crude", "coolant", "fuel", "acid" }),
                 ("digital", new[] { "tech_data", "research_points" }),
@@ -311,7 +311,7 @@ namespace GameLogic.EditorTools
             bool solidsOnBelt = items.Where(d => d.Form == ItemForm.Solid).All(d => d.BeltId != 0) && items.Where(d => d.BeltId != 0).Select(d => d.BeltId).Distinct().Count() == items.Count(d => d.BeltId != 0)
                                 && Def("scrap").BeltId == BeltItems.ScrapId;
             Expect(missing.Count == 0 && digital && vault && fluidMap && solidsOnBelt,
-                $"A2 FGR-ECO-001 全部入表（30 种，按层级）：数字资源（技术数据、研究点）不占物理空间、不上传送带；关键材料 4 种与人类遗产在核心保管库、不上传送带；" +
+                $"A2 FGR-ECO-001 全部入表（31 种，按层级；FG5-RND-02 加敌方残骸）：数字资源（技术数据、研究点）不占物理空间、不上传送带；关键材料 4 种与人类遗产在核心保管库、不上传送带；" +
                 $"5 种流体与 fg.TbFluid 一一对应；固体都有唯一的传送带编号、废料 = logistics.item.scrap_id（{BeltItems.ScrapId}）" +
                 (missing.Count > 0 ? "；缺 / 层级不对：" + string.Join("、", missing) : string.Empty));
 
@@ -1190,7 +1190,7 @@ namespace GameLogic.EditorTools
             int itemEntries = MechanicCodex.CountIn(MechanicCodex.TabItem);
             int recipeEntries = MechanicCodex.CountIn(MechanicCodex.TabRecipe);
             bool links = alloyEntry.Links.Contains(MechanicCodex.RecipeEntryId("alloy_ore")) && alloyEntry.Links.Contains(MechanicCodex.RecipeEntryId("part"));
-            Expect(itemEntries == 30 && recipeEntries == 15 && alloyBody.Contains("从哪来") && alloyBody.Contains("精炼炉") && alloyBody.Contains("拿去干什么") && alloyBody.Contains("零件工坊")
+            Expect(itemEntries == 31 && recipeEntries == 15 /* FG5-RND-02：+敌方残骸 */ && alloyBody.Contains("从哪来") && alloyBody.Contains("精炼炉") && alloyBody.Contains("拿去干什么") && alloyBody.Contains("零件工坊")
                    && alloyBody.Contains("现有：14") && fuelBody.Contains("副产品：酸液 20 升") && fuelBody.Contains("以现在的家园库存") && machineBody.Contains("按蓝图") && machineBody.Contains("初值")
                    && links && coreLocked && MechanicCodex.IsUnlocked(MechanicCodex.ItemEntryId("alloy")) && MechanicCodex.IsUnlocked(MechanicCodex.ItemEntryId("furnace_heart")),
                 $"H4 图鉴：物品 {itemEntries} 条、配方 {recipeEntries} 条（卡片“每种物品和配方都有图鉴条目”）；合金写明从哪来（精炼炉）、拿去干什么（零件工坊……）与现有数量；" +

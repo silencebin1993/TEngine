@@ -248,6 +248,9 @@ namespace GameLogic.Core
         public const string ResearchFirstCompleted = "research.first_completed";
         /// <summary>FG5-RND-01：研究第一次因为技术数据耗尽 / 缺电 / 等关键材料暂停（引导：从哪里拿技术数据）。</summary>
         public const string ResearchFirstStalled = "research.first_stalled";
+        /// <summary>FG5-RND-02（FG05 第 4 节）：第一次拿到敌方物品（未解析模块 / 加密固件 / 数据核心 / 残骸）——引导内容在 FG15-UX-04：把它送进解析台；
+        /// 图鉴“解析台与敌方物品”随之解锁。</summary>
+        public const string AnalysisFirstEnemyItem = "analysis.first_enemy_item";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -288,6 +291,7 @@ namespace GameLogic.Core
             AwayReportFirstOpen, AwayFirstAutoOpen, AlarmFirstFactoryJam, AlarmFirstMachineWounded,
             SoftlockFirstPrint, SoftlockFirstCoreScrap, SoftlockFirstLoopStall, SoftlockFirstUnreachable,
             ResearchTreeFirstOpen, ResearchLabFirstBuilt, ResearchFirstQueued, ResearchFirstCompleted, ResearchFirstStalled,
+            AnalysisFirstEnemyItem,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

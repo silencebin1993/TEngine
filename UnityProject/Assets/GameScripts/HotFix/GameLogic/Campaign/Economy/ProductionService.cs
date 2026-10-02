@@ -2068,6 +2068,10 @@ namespace GameLogic.Campaign.Economy
             {
                 return BeltConst.AcceptSet;
             }
+            if (b != null && b.BuildingTypeId == HomeValleyLayout.BuildingTypeAnalysisBench)
+            {
+                return BeltConst.AcceptSet2; // FG5-RND-02：解析台只收敌方物品与残骸（第二个收货集合）。
+            }
             if (!TryGet(state, b?.BuildingId, out Producer p))
             {
                 return BeltConst.AcceptNone;
@@ -2146,6 +2150,10 @@ namespace GameLogic.Campaign.Economy
             {
                 return AssemblyMaterials.PortAcceptLine(output);
             }
+            if (b != null && b.BuildingTypeId == HomeValleyLayout.BuildingTypeAnalysisBench)
+            {
+                return output ? null : HomeValleyAnalysis.PortAcceptLine(state); // FG5-RND-02
+            }
             if (!TryGet(state, b?.BuildingId, out Producer p))
             {
                 return null;
@@ -2206,6 +2214,11 @@ namespace GameLogic.Campaign.Economy
                 if (!bind.IsOutput && bind.PortKey != null && bind.PortKey.StartsWith(HomeValleyLayout.BuildingTypeAssemblyStation + ".", StringComparison.Ordinal))
                 {
                     AssemblyMaterials.PumpPort(state, bind, k, buffered, kind);
+                }
+                // FG5-RND-02（FGR-RND-020 / 024）：解析台的输入口：敌方物品排进解析队列（满了就留在端口，带停下）、残骸进残骸缓存。
+                else if (!bind.IsOutput && HomeValleyAnalysis.IsBenchPort(bind.PortKey))
+                {
+                    HomeValleyAnalysis.PumpPort(state, bind, k, buffered, kind);
                 }
                 return;
             }
