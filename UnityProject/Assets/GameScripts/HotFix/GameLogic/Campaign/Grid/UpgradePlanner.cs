@@ -20,7 +20,7 @@ namespace GameLogic.Campaign.Grid
         public readonly List<GridCell> Cells = new List<GridCell>(16);
         public readonly List<int> Dirs = new List<int>(16);
 
-        public int Pieces => Kind == PlanEntryKind.Underground ? Cells.Count / 2 : Cells.Count;
+        public int Pieces => Kind == PlanEntryKind.Underground || Kind == PlanEntryKind.PipeUnderground ? Cells.Count / 2 : Cells.Count;
         public int Cost => DiffPerUnit * Cells.Count;
     }
 
@@ -54,7 +54,7 @@ namespace GameLogic.Campaign.Grid
 
     /// <summary>
     /// FG3-LOG-07（FG03 FGR-LOG-010“框选区域，把传送带、管线和建筑升级到已解锁的更高等级；原地升级，保留设置；生成施工任务，按新旧材料的差额收费”）。
-    /// 升级路线在 fg.TbBuildUpgrade（数据驱动）：传送带 T1 → T2 → T3、地下传送带 T1 → T2 → T3、管线 T1 → T2、电塔 T1 → T2。一次只升一级。
+    /// 升级路线在 fg.TbBuildUpgrade（数据驱动）：传送带 T1 → T2 → T3、地下传送带 T1 → T2 → T3、管线 T1 → T2、地下管线 T1 → T2（FG4-ECO-10，一对一起升）、电塔 T1 → T2。一次只升一级。
     /// 分流器 / 合流器 / 泵 / 储罐 / 阀门只有一种，不参与。只升级已建成的件（虚影还没建：直接选高一级的工具重放即可）。
     /// </summary>
     public static class UpgradePlanner
@@ -122,6 +122,7 @@ namespace GameLogic.Campaign.Grid
                 }
             }
             var byKey = new Dictionary<int, UpgradeGroup>();
+            var pairsSeen = new HashSet<long>();
             for (int y = min.Y; y <= mx.Y; y++)
             {
                 for (int x = min.X; x <= mx.X; x++)
@@ -142,9 +143,24 @@ namespace GameLogic.Campaign.Grid
                     }
                     ushort pipe = map.GetPipe(c);
                     if (pipe != 0 && !HomeValleyConstruction.IsPlannedMarker(pipe) && PipeNetworkService.IsRunning
-                        && PipeNetworkService.TryGetPiece(c, out PipePieceKind pk, out int pt) && pk == PipePieceKind.Pipe)
+                        && PipeNetworkService.TryGetPiece(c, out PipePieceKind pk, out int pt))
                     {
-                        AddPiece(state, plan, byKey, upgrading, PlanEntryKind.Pipe, "pipe", pt, c, default, 0);
+                        if (pk == PipePieceKind.Pipe)
+                        {
+                            AddPiece(state, plan, byKey, upgrading, PlanEntryKind.Pipe, "pipe", pt, c, default, 0);
+                        }
+                        else if (pk == PipePieceKind.Underground)
+                        {
+                            // FG4-ECO-10（DEBT-FG4ECO04-05）：地下管线一对一起升（框住哪一口都行，一对只算一次）；没配对的口不升（跨度变大后可能和别的口配上、接错流体）。
+                            if (!PipeNetworkService.Kernel.TryGetCellInfo(c.X, c.Y, out PipeCellInfo ui) || !ui.UndergroundLinked)
+                            {
+                                Refuse(plan, new GridReason(GridBlockReason.NoUpgrade, "plan.reason.pipe_underground_unpaired"));
+                            }
+                            else if (pairsSeen.Add(PairKey(c, new GridCell(ui.PartnerX, ui.PartnerY))))
+                            {
+                                AddPiece(state, plan, byKey, upgrading, PlanEntryKind.PipeUnderground, "pipe_underground", pt, c, new GridCell(ui.PartnerX, ui.PartnerY), 0);
+                            }
+                        }
                     }
                 }
             }
@@ -155,6 +171,15 @@ namespace GameLogic.Campaign.Grid
             BeltNetworkService.Kernel.TryGetCellInfo(c.X, c.Y, out BeltCellInfo info) ? (int)info.Dir : 0;
 
         private static long Key(int x, int y) => ((long)x << 32) ^ (uint)y;
+
+        /// <summary>一对地下管线口的键（与先框到哪一口无关）。</summary>
+        private static long PairKey(GridCell a, GridCell b)
+        {
+            bool aFirst = a.X < b.X || (a.X == b.X && a.Y <= b.Y);
+            GridCell lo = aFirst ? a : b;
+            GridCell hi = aFirst ? b : a;
+            return Key(lo.X, lo.Y) * 1000003L ^ Key(hi.X, hi.Y);
+        }
 
         private static void AddPiece(CampaignState state, UpgradeBoxPlan plan, Dictionary<int, UpgradeGroup> byKey, HashSet<long> upgrading,
             PlanEntryKind kind, string toolKind, int tier, GridCell cell, GridCell exit, int dir)
@@ -178,7 +203,7 @@ namespace GameLogic.Campaign.Grid
             }
             int diff = Math.Max(0, toTool.ScrapPerCell - fromTool.ScrapPerCell);
             UpgradeGroup g;
-            if (kind == PlanEntryKind.Underground)
+            if (kind == PlanEntryKind.Underground || kind == PlanEntryKind.PipeUnderground)
             {
                 g = new UpgradeGroup { Kind = kind, FromId = from, ToId = to, FromTier = tier, ToTier = toTool.Tier, DiffPerUnit = diff };
                 g.Cells.Add(cell);
@@ -199,7 +224,7 @@ namespace GameLogic.Campaign.Grid
                 g.Cells.Add(cell);
                 g.Dirs.Add(dir);
             }
-            plan.Cost += kind == PlanEntryKind.Underground ? diff * 2 : diff;
+            plan.Cost += kind == PlanEntryKind.Underground || kind == PlanEntryKind.PipeUnderground ? diff * 2 : diff;
         }
 
         private static void Refuse(UpgradeBoxPlan plan, GridReason why)
@@ -211,6 +236,7 @@ namespace GameLogic.Campaign.Grid
         /// <summary>一组物流件的升级规划（HomeValleyConstruction.PlanUpgrade）。返回规划 ID。</summary>
         public static string PlanGroup(CampaignState state, UpgradeGroup g) =>
             HomeValleyConstruction.PlanUpgrade(state, g.Cells, g.Dirs, g.Kind == PlanEntryKind.Underground ? BeltNodeKind.UndergroundIn : BeltNodeKind.Belt,
-                g.Kind == PlanEntryKind.Pipe, g.FromTier, g.ToTier, g.DiffPerUnit);
+                g.Kind == PlanEntryKind.Pipe || g.Kind == PlanEntryKind.PipeUnderground, g.FromTier, g.ToTier, g.DiffPerUnit,
+                g.Kind == PlanEntryKind.PipeUnderground ? PipePieceKind.Underground : PipePieceKind.Pipe);
     }
 }

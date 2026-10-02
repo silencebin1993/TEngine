@@ -80,6 +80,46 @@ namespace GameLogic.Campaign.Logistics
         private static int _fluidTableRevision = -1;
 
         public static PipeKernel Kernel => _kernel;
+
+        private static long _stockStep = -1;
+        private static int _stockRev = -1;
+        private static PipeKernel _stockKernel;
+        private static readonly Dictionary<int, long> StockMl = new Dictionary<int, long>();
+        private static readonly Dictionary<int, int> StockNets = new Dictionary<int, int>();
+
+        /// <summary>
+        /// FG4-ECO-10（关闭 DEBT-FG4ECO08-03“资源顶栏上流体的库存写‘管线’，没有储罐存量合计”）：某种流体在全部储罐里的存量合计（毫升），
+        /// <paramref name="networks"/> = 装着它的网络数。按内核步 / 拓扑版本缓存：同一步里多次查询只汇总一次（O(网络数)），顶栏按节流刷新调用，不按帧。
+        /// 管线服务没运行时返回 -1。
+        /// </summary>
+        public static long FluidStockMl(int fluidId, out int networks)
+        {
+            networks = 0;
+            if (_kernel == null)
+            {
+                return -1;
+            }
+            if (!ReferenceEquals(_stockKernel, _kernel) || _stockStep != _kernel.StepIndex || _stockRev != _kernel.Revision)
+            {
+                StockMl.Clear();
+                StockNets.Clear();
+                int n = _kernel.NetworkCount;
+                for (int i = 0; i < n; i++)
+                {
+                    if (!_kernel.TryGetNetworkInfo(i, out PipeNetInfo info) || info.Fluid <= 0 || info.Tanks <= 0)
+                    {
+                        continue;
+                    }
+                    StockMl[info.Fluid] = (StockMl.TryGetValue(info.Fluid, out long ml) ? ml : 0L) + info.StoredMl;
+                    StockNets[info.Fluid] = (StockNets.TryGetValue(info.Fluid, out int c) ? c : 0) + 1;
+                }
+                _stockKernel = _kernel;
+                _stockStep = _kernel.StepIndex;
+                _stockRev = _kernel.Revision;
+            }
+            networks = StockNets.TryGetValue(fluidId, out int nets) ? nets : 0;
+            return StockMl.TryGetValue(fluidId, out long total) ? total : 0L;
+        }
         public static bool IsRunning => _kernel != null;
         public static CampaignState BoundState => _state;
         public static PipeRenderer Renderer => _renderer;
@@ -653,6 +693,24 @@ namespace GameLogic.Campaign.Logistics
             if (r == PipeResult.Ok)
             {
                 HomeGridService.MapFor(state).SetPipe(cell, LayerValue(PipePieceKind.Pipe, tier));
+            }
+            return PipeOpResult.Kernel(r);
+        }
+
+        /// <summary>FG4-ECO-10（DEBT-FG4ECO04-05）：一对已配对的地下管线口一起改等级（升级规划建成那一刻调用），两口的格网管线层随之换成新等级。</summary>
+        public static PipeOpResult TrySetUndergroundTier(CampaignState state, GridCell cell, int tier)
+        {
+            if (!CanEdit(state, out PipeOpResult refuse))
+            {
+                return refuse;
+            }
+            bool paired = _kernel.TryGetCellInfo(cell.X, cell.Y, out PipeCellInfo info) && info.Kind == PipePieceKind.Underground && info.UndergroundLinked;
+            PipeResult r = _kernel.SetUndergroundPairTier(cell.X, cell.Y, tier);
+            if (r == PipeResult.Ok && paired)
+            {
+                HomeGridMap map = HomeGridService.MapFor(state);
+                map.SetPipe(cell, LayerValue(PipePieceKind.Underground, tier));
+                map.SetPipe(new GridCell(info.PartnerX, info.PartnerY), LayerValue(PipePieceKind.Underground, tier));
             }
             return PipeOpResult.Kernel(r);
         }

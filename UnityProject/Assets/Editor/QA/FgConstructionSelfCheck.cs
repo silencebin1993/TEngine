@@ -455,6 +455,20 @@ namespace GameLogic.EditorTools
 
         private static void CheckCancelRefund()
         {
+            // FG4-ECO-10：这一段逐件核对“库存 0 时”的取料 / 退回守恒，关掉核心应急产废料（库存为 0 且没有回收站时每分钟 1 件，由 FgSoftlockSelfCheck 覆盖）。
+            GameLogic.Campaign.Economy.SoftlockService.CoreScrapSuppressedForTests = true;
+            try
+            {
+                CheckCancelRefundCore();
+            }
+            finally
+            {
+                GameLogic.Campaign.Economy.SoftlockService.CoreScrapSuppressedForTests = false;
+            }
+        }
+
+        private static void CheckCancelRefundCore()
+        {
             // 已到现场的材料：机器运来 30、施工推进到 30/60 处等材料 → 取消 → 30 回到仓库。
             CampaignState s = NewWorld(5201, scrap: 30);
             GridCell spot = GenSpot(s);

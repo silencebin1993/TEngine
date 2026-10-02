@@ -389,9 +389,10 @@ namespace GameLogic.EditorTools
             string[] src = output.Replace("\r", string.Empty).Split('\n').Where(l => l.StartsWith("BU\t", StringComparison.Ordinal)).ToArray();
             string[] rt = ConfigSystem.Instance.Tables.TbBuildUpgrade.DataList.Select(r => string.Join("\t", "BU", r.FromId, r.ToId, r.Note)).ToArray();
             bool routes = GridContent.TryGetUpgrade("belt_t1", out string b2) && b2 == "belt_t2" && GridContent.TryGetUpgrade("power_pole", out string p2) && p2 == "power_pole_t2"
-                          && !GridContent.TryGetUpgrade("belt_t3", out _) && !GridContent.TryGetUpgrade("splitter", out _);
-            Expect(code == 0 && src.Length == 6 && src.SequenceEqual(rt) && routes,
-                $"D1 升级路线表 fg.TbBuildUpgrade 与源数据 fgdata_plan.BUILD_UPGRADES 逐字段一致（{src.Length} 行：传送带 T1→T2→T3、地下 T1→T2→T3、管线 T1→T2、电塔 T1→T2；T3 / 分流器没有路线）" + (code == 0 ? string.Empty : "：" + Tail(output)));
+                          && !GridContent.TryGetUpgrade("belt_t3", out _) && !GridContent.TryGetUpgrade("splitter", out _)
+                          && GridContent.TryGetUpgrade("pipe_underground_t1", out string u2) && u2 == "pipe_underground_t2"; // FG4-ECO-10（DEBT-FG4ECO04-05）
+            Expect(code == 0 && src.Length == 7 && src.SequenceEqual(rt) && routes,
+                $"D1 升级路线表 fg.TbBuildUpgrade 与源数据 fgdata_plan.BUILD_UPGRADES 逐字段一致（{src.Length} 行：传送带 T1→T2→T3、地下 T1→T2→T3、管线 T1→T2、地下管线 T1→T2、电塔 T1→T2；T3 / 分流器没有路线）" + (code == 0 ? string.Empty : "：" + Tail(output)));
             bool tuning = PlanHistory.Depth == 50 && PlanningService.MaxEntries == 1024 && LayoutLibrary.Max == 64
                           && GridContent.TuningInt("plan.preview_max_tiles") == 1024 && GridContent.TuningInt("plan.thumbnail_px") == 64;
             Expect(tuning, "D1 调参入表：撤销栈 50 步（FGR-LOG-009 初值）、一次复制 / 一个布局最多 1024 件、布局库 64 个、粘贴预览最多画 1024 格、缩略图 64 像素");

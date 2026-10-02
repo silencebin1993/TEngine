@@ -766,6 +766,47 @@ namespace BinGames.Sim.Logistics
             return PipeResult.Ok;
         }
 
+        /// <summary>
+        /// FG4-ECO-10（关闭 DEBT-FG4ECO04-05“地下管线不能用升级规划从 T1 原地换成 T2”）：已配对的一对地下管线口一起改等级（两口同一步改，流体、配对都不动）。
+        /// 只认已配对的口（没配对的口改等级可能让跨度变大后和另一口配上、把两种流体接在一起，拒绝 = <see cref="PipeResult.InvalidArgument"/>）；
+        /// 新等级的跨度装不下现在两口之间的距离也拒绝（升级只会变大，不会走到这里）。配对规则是“沿方向第一件、互为第一件”，跨度变大不会换配对。
+        /// </summary>
+        public PipeResult SetUndergroundPairTier(int x, int y, int tier)
+        {
+            if (tier < 0 || tier >= PipeConst.TierCount)
+            {
+                return PipeResult.InvalidTier;
+            }
+            int i = Find(x, y);
+            if (i < 0)
+            {
+                return PipeResult.NotFound;
+            }
+            if (_kind[i] != (byte)PipePieceKind.Underground)
+            {
+                return PipeResult.WrongKind;
+            }
+            Rebuild();
+            int j = _partner[i];
+            if (j < 0)
+            {
+                return PipeResult.InvalidArgument;
+            }
+            int dist = Math.Abs(_x[j] - _x[i]) + Math.Abs(_y[j] - _y[i]);
+            if (dist > _config.UndergroundSpan(tier) + 1)
+            {
+                return PipeResult.InvalidArgument;
+            }
+            if (_tier[i] == tier && _tier[j] == tier)
+            {
+                return PipeResult.Ok;
+            }
+            _tier[i] = (byte)tier;
+            _tier[j] = (byte)tier;
+            MarkDirty();
+            return PipeResult.Ok;
+        }
+
         /// <summary>FGR-LOG-043：储罐模式（双向 / 只进 / 只出）。</summary>
         public PipeResult SetTankMode(int x, int y, PipeTankMode mode)
         {

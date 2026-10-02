@@ -1186,8 +1186,19 @@ namespace GameLogic.Campaign.Regions
         /// 调用前已经播种好，见 <see cref="Enter"/> 调用顺序调整）。</summary>
         private static void EnsureMachinesSeeded(CampaignState state)
         {
+            // FG4-ECO-10（FG00 B10 / B11）：开局两台只在战役第一次进家园时播种一次。此前每次进家园（含读档）发现 ERC-001 / 搬运机阵亡就免费补一台——
+            // 存读档就能刷机器，也绕过了“每个游戏日最多一台”的应急打印。之后补机器只走 SoftlockService 的每日应急打印。
+            SoftlockState softlock = Economy.SoftlockService.StateOf(state);
+            if (softlock != null && softlock.StartMachinesSeeded)
+            {
+                return;
+            }
             SpawnIfMissing(HomeValleyLayout.Erc001Spawn, HomeValleyLayout.BlueprintErc001Id);
             SpawnIfMissing(HomeValleyLayout.Erc002Spawn, HomeValleyLayout.BlueprintHaulerId);
+            if (softlock != null)
+            {
+                softlock.StartMachinesSeeded = true;
+            }
 
             void SpawnIfMissing(HomeValleyLayout.Anchor spawn, string blueprintId)
             {

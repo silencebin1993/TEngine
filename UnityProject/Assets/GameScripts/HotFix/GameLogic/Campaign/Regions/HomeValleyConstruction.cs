@@ -794,6 +794,21 @@ namespace GameLogic.Campaign.Regions
             var cell = new GridCell(p.Xs[i], p.Ys[i]);
             if (p.PipePiece > 0)
             {
+                if (IsPipeUndergroundPlan(p))
+                {
+                    // FG4-ECO-10（DEBT-FG4ECO04-05）：地下管线一对一份（[这一口, 配对的那一口]），在第一口一起改等级；配对已经变了（另一口被拆 / 换了）就建不成。
+                    if (i != 0 || p.Xs.Length < 2 || !PipeNetworkService.TryGetPiece(cell, out PipePieceKind uk, out int ut) || uk != PipePieceKind.Underground || ut != p.FromTier
+                        || !PipeNetworkService.Kernel.TryGetCellInfo(cell.X, cell.Y, out PipeCellInfo ui) || !ui.UndergroundLinked
+                        || ui.PartnerX != p.Xs[1] || ui.PartnerY != p.Ys[1]
+                        || !PipeNetworkService.TrySetUndergroundTier(state, cell, p.Tier).Ok)
+                    {
+                        return false;
+                    }
+                    p.CellState[0] = 1;
+                    p.CellState[1] = 1;
+                    Revision++;
+                    return true;
+                }
                 if (!PipeNetworkService.TryGetPiece(cell, out PipePieceKind pk, out int pt) || pk != PipePieceKind.Pipe || pt != p.FromTier
                     || !PipeNetworkService.TrySetTier(state, cell, p.Tier).Ok)
                 {
@@ -848,6 +863,9 @@ namespace GameLogic.Campaign.Regions
 
         /// <summary>FG3-LOG-04：这份规划是不是地下传送带（两端一起建、一起取消）。</summary>
         public static bool IsUnderground(PlannedBeltRecord p) => p != null && p.NodeKind == (int)BeltNodeKind.UndergroundIn;
+
+        /// <summary>FG4-ECO-10：一对地下管线口的升级规划（施工单按两口算时长）。</summary>
+        public static bool IsPipeUndergroundPlan(PlannedBeltRecord p) => p != null && p.PipePiece == (int)PipePieceKind.Underground + 1;
 
         /// <summary>FG3-LOG-04：把规划里记的节点设置写进刚建成的分流器 / 合流器（0 = 默认）。</summary>
         private static void ApplyNodeSettings(CampaignState state, PlannedBeltRecord p, GridCell cell)
@@ -1125,7 +1143,7 @@ namespace GameLogic.Campaign.Regions
         /// 地下传送带一条一份（<paramref name="cells"/> = [入口, 出口]，<paramref name="diffPerUnit"/> 是每端差额）。调用方已经保证每一格都是建成的、还是旧等级。
         /// </summary>
         public static string PlanUpgrade(CampaignState state, IReadOnlyList<GridCell> cells, IReadOnlyList<int> dirs, BeltNodeKind nodeKind, bool pipe,
-            int fromTier, int toTier, int diffPerUnit)
+            int fromTier, int toTier, int diffPerUnit, PipePieceKind pipeKind = PipePieceKind.Pipe)
         {
             GridState grid = state.Grid;
             string planId = "b" + grid.NextBeltPlanSerial.ToString(CultureInfo.InvariantCulture);
@@ -1145,7 +1163,7 @@ namespace GameLogic.Campaign.Regions
                 NodeKind = pipe ? 0 : (int)nodeKind,
                 RatioL = 1,
                 RatioR = 1,
-                PipePiece = pipe ? (int)PipePieceKind.Pipe + 1 : 0,
+                PipePiece = pipe ? (int)pipeKind + 1 : 0,
             };
             for (int i = 0; i < n; i++)
             {

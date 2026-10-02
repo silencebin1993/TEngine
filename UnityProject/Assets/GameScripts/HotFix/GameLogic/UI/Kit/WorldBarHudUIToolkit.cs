@@ -272,13 +272,16 @@ namespace GameLogic.UI.Kit
                     continue;
                 }
                 string id = v.Item.Id;
-                string stock = v.Stock >= 0 ? v.Stock.ToString(CultureInfo.InvariantCulture) : GameText.Get("topbar.fluid");
+                // FG4-ECO-10（DEBT-FG4ECO08-03）：流体显示储罐存量合计（升），管线服务没运行时照旧写“管线”。
+                string stock = v.Stock >= 0 ? v.Stock.ToString(CultureInfo.InvariantCulture)
+                    : v.FluidLiters >= 0 ? GameText.Format("topbar.fluid_stock", v.FluidLiters.ToString("N0", CultureInfo.InvariantCulture)) : GameText.Get("topbar.fluid");
                 string rate = ProductionStats.Rate(v.Item, v.ProducedPerMinute);
                 string text = v.HasTarget
                     ? GameText.Format(v.Reached ? "topbar.pin_target_ok" : "topbar.pin_target_miss", v.Item.Name, stock, rate, ProductionStats.Rate(v.Item, v.Target))
                     : GameText.Format("topbar.pin", v.Item.Name, stock, rate);
                 string body = GameText.Format("topbar.pin_tip", v.Item.Name, stock, rate, ProductionStats.Rate(v.Item, v.NetPerMinute),
                                   ProductionStats.WindowName(ResourcePins.RateWindow))
+                              + (v.FluidLiters >= 0 ? "\n" + GameText.Format("topbar.fluid_stock_tip", v.Item.Name, v.FluidLiters.ToString("N0", CultureInfo.InvariantCulture), v.FluidNetworks) : string.Empty)
                               + (v.HasTarget ? "\n" + GameText.Format(v.Reached ? "topbar.target_ok_tip" : "topbar.target_miss_tip", ProductionStats.Rate(v.Item, v.Target)) : string.Empty)
                               + "\n" + GameText.Format("topbar.pin_hint", InputDisplay.ForAction(GameActionId.OpenStats));
                 Chip(n++, text, v.Item.Name, body, "wb-res-pin", v.HasTarget ? (v.Reached ? "wb-res-reached" : "wb-res-missed") : null,

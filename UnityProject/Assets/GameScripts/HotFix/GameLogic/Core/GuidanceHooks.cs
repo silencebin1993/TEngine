@@ -224,6 +224,14 @@ namespace GameLogic.Core
         public const string AlarmFirstFactoryJam = "alarm.first_factory_jam";
         /// <summary>FG4-ECO-09：第一次出现“机器重伤”告警。引导内容在 FG15-UX-04：送修、维修台。</summary>
         public const string AlarmFirstMachineWounded = "alarm.first_machine_wounded";
+        /// <summary>FG4-ECO-10（FGR-ECO-070）：归还核心第一次应急打印搬运机——引导内容在 FG15-UX-04：让它去造回收站；图鉴“保底与死锁检测”随之解锁。</summary>
+        public const string SoftlockFirstPrint = "economy.softlock.first_print";
+        /// <summary>FG4-ECO-10（FGR-ECO-070）：第一次进入核心应急产废料（废料为 0 且没有能工作的回收站）。</summary>
+        public const string SoftlockFirstCoreScrap = "economy.softlock.first_core_scrap";
+        /// <summary>FG4-ECO-10（FGR-ECO-072）：第一次检测到传送带闭环卡死。</summary>
+        public const string SoftlockFirstLoopStall = "economy.softlock.first_loop_stall";
+        /// <summary>FG4-ECO-10（FGR-ECO-072）：第一次检测到施工 / 维修目标机器到不了。</summary>
+        public const string SoftlockFirstUnreachable = "economy.softlock.first_unreachable";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -261,6 +269,7 @@ namespace GameLogic.Core
             RosterPanelFirstOpen, RosterFirstRoleChange, RosterFirstRename,
             StatsProductionFirstOpen, StatsFirstDeficit, StatsFirstPin, PlannerFirstPlan,
             AwayReportFirstOpen, AwayFirstAutoOpen, AlarmFirstFactoryJam, AlarmFirstMachineWounded,
+            SoftlockFirstPrint, SoftlockFirstCoreScrap, SoftlockFirstLoopStall, SoftlockFirstUnreachable,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

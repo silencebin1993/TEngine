@@ -117,6 +117,9 @@ namespace GameLogic.Campaign.Economy
             public float ProducedPerMinute;
             public float NetPerMinute;
             public float Target;
+            /// <summary>FG4-ECO-10：流体在储罐里的存量合计（升；-1 = 管线服务没运行）与装着它的网络数。固体为 -1 / 0。</summary>
+            public long FluidLiters;
+            public int FluidNetworks;
             public bool HasTarget => Target > 0f;
             public bool Reached => Target > 0f && ProducedPerMinute >= Target * (1f - TargetTolerance);
         }
@@ -130,7 +133,7 @@ namespace GameLogic.Campaign.Economy
         public static PinView View(CampaignState state, PinnedItemRecord pin)
         {
             ItemCatalog.TryGet(pin?.ItemId, out ItemDef item);
-            var v = new PinView { Item = item, Stock = -1, Target = pin?.TargetPerMinute ?? 0f };
+            var v = new PinView { Item = item, Stock = -1, FluidLiters = -1, Target = pin?.TargetPerMinute ?? 0f };
             if (item == null)
             {
                 return v;
@@ -138,6 +141,13 @@ namespace GameLogic.Campaign.Economy
             if (item.Form != ItemForm.Fluid)
             {
                 v.Stock = HomeInventory.Stock(state, item);
+            }
+            else
+            {
+                // FG4-ECO-10（DEBT-FG4ECO08-03）：流体的存量 = 全部储罐里这种流体的合计（升；管线服务没运行时 -1，顶栏照旧写“管线”）。
+                long ml = Logistics.PipeNetworkService.FluidStockMl(item.FluidId, out int nets);
+                v.FluidLiters = ml < 0 ? -1L : ml / 1000L;
+                v.FluidNetworks = nets;
             }
             ProductionStats.ItemRate r = ProductionStats.RateOf(state, RateWindow, item);
             v.ProducedPerMinute = r.ProducedPerMinute;

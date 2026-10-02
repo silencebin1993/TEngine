@@ -563,6 +563,102 @@ namespace GameLogic.Campaign.Nav
             return ReachResult[0] ? BuildingReach.Connected : BuildingReach.Disconnected;
         }
 
+        private static readonly List<int2> SiteSources = new List<int2>(128);
+        private static readonly List<int2> SiteProbes = new List<int2>(256);
+        private static readonly List<int> SiteOwner = new List<int>(256);
+        private static readonly List<int2> SiteRing = new List<int2>(64);
+
+        /// <summary>
+        /// FG4-ECO-10（FG04 FGR-ECO-072“某座建筑机器无法到达，施工或维修永远无法完成”）：一批施工 / 维修目标能不能被机器走到。
+        /// 从归还核心外一圈与 <paramref name="machineCells"/>（家园机器此刻所在的格）出发做一次泛洪（玩家机器的通行类别，与放置预览同一个 Burst 泛洪），
+        /// 每座目标外一圈只要有一格被泛洪到就是能到。四周一圈都走不了的目标 <paramref name="enclosed"/> = true，挡住它的建筑名 / 地形写进 <paramref name="blockers"/>。
+        /// 区域 = 核心与全部目标的外接矩形 + nav.preview_margin_cells（机器格不在区域里的不当出发点）。返回 false = 寻路镜像没绑定，无法判断（调用方不改任何状态）。
+        /// 只在检查间隔到了、且有施工 / 维修工单时调用（O(区域格数)，Burst），不按帧。
+        /// </summary>
+        public static bool SitesReachable(CampaignState state, IReadOnlyList<BuildingRecord> sites, IReadOnlyList<GridCell> machineCells,
+            bool[] reached, bool[] enclosed, List<string>[] blockers, string terrainLabel)
+        {
+            if (!IsBound || state == null || !ReferenceEquals(state, BoundState) || sites == null || sites.Count == 0)
+            {
+                return false;
+            }
+            SyncGridChanges();
+            if (!HomeGridService.TryGetCoreBounds(state, out GridCell coreMin, out GridCell coreMax))
+            {
+                return false;
+            }
+            SiteSources.Clear();
+            SiteProbes.Clear();
+            SiteOwner.Clear();
+            int minX = coreMin.X, minY = coreMin.Y, maxX = coreMax.X, maxY = coreMax.Y;
+            for (int i = 0; i < sites.Count; i++)
+            {
+                reached[i] = false;
+                enclosed[i] = false;
+                blockers?[i]?.Clear();
+                BuildingRecord b = sites[i];
+                if (b == null || !GridContent.TryGetBuilding(b.BuildingTypeId, out BuildingGrid g))
+                {
+                    reached[i] = true; // 不在格网里的目标：无法判断，当作能到（不误报）。
+                    continue;
+                }
+                GridMath.FootprintBounds(new GridCell(b.GridX, b.GridY), g.FootprintW, g.FootprintH, GridMath.NormalizeRotation(b.Rotation), out GridCell bmin, out GridCell bmax);
+                SiteRing.Clear();
+                PassableRing(state, b, bmin, bmax, SiteRing, null, blockers?[i], terrainLabel);
+                if (SiteRing.Count == 0)
+                {
+                    enclosed[i] = true;
+                    continue;
+                }
+                foreach (int2 c in SiteRing)
+                {
+                    SiteProbes.Add(c);
+                    SiteOwner.Add(i);
+                }
+                minX = Math.Min(minX, bmin.X);
+                minY = Math.Min(minY, bmin.Y);
+                maxX = Math.Max(maxX, bmax.X);
+                maxY = Math.Max(maxY, bmax.Y);
+            }
+            if (SiteProbes.Count == 0)
+            {
+                return true;
+            }
+            int margin = Math.Max(2, (int)Math.Round(Tuning("nav.preview_margin_cells", 16f)));
+            var min = new int2(minX - margin, minY - margin);
+            var max = new int2(maxX + margin, maxY + margin);
+            for (int x = coreMin.X - 1; x <= coreMax.X + 1; x++)
+            {
+                SiteSources.Add(new int2(x, coreMin.Y - 1));
+                SiteSources.Add(new int2(x, coreMax.Y + 1));
+            }
+            for (int y = coreMin.Y; y <= coreMax.Y; y++)
+            {
+                SiteSources.Add(new int2(coreMin.X - 1, y));
+                SiteSources.Add(new int2(coreMax.X + 1, y));
+            }
+            if (machineCells != null)
+            {
+                foreach (GridCell c in machineCells)
+                {
+                    if (c.X >= min.x && c.X <= max.x && c.Y >= min.y && c.Y <= max.y)
+                    {
+                        SiteSources.Add(new int2(c.X, c.Y));
+                    }
+                }
+            }
+            var result = new bool[sites.Count];
+            Kernel.Reachability(NavConst.ClassPlayer, min, max, SiteSources, null, SiteProbes, SiteOwner, result);
+            for (int i = 0; i < sites.Count; i++)
+            {
+                if (!reached[i] && !enclosed[i])
+                {
+                    reached[i] = result[i];
+                }
+            }
+            return true;
+        }
+
         /// <summary>建筑外一圈：可走的格进 <paramref name="into"/>；走不了的格上压着的建筑名（不含自己）或“地形”进 <paramref name="blockers"/>。</summary>
         private static void PassableRing(CampaignState state, BuildingRecord self, GridCell bmin, GridCell bmax, List<int2> into, List<int> owner, List<string> blockers, string terrainLabel)
         {

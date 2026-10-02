@@ -222,6 +222,9 @@ namespace GameLogic.EditorTools
                 Building(HomeValleyLayout.BuildingTypeGenerator, BuildingConstructionState.Damaged, BuildingPowerState.NotApplicable),
             };
             s.Scrap = 0;
+            // FG4-ECO-10：今天的应急打印已经用掉（SoftlockService 先打印正式搬运机；用掉之后又全灭，才轮到 Demo 紧急救援机）。
+            CampaignFgStateDomains.EnsureAll(s);
+            s.Economy.Softlock.LastPrintDay = GameLogic.Core.GameClock.DayOf(GameLogic.Core.GameClock.GameSeconds);
             int worker = MachineRegistry.SpawnMachine(HomeValleyLayout.Erc001ChassisId, HomeValleyLayout.BlueprintErc001Id,
                 HomeValleyLayout.RegionId, Vector2.zero, 100f, 100f).LogicId;
             HomeValleySoftlockGuard.Tick(s, 0.6f, null);

@@ -294,6 +294,7 @@ namespace GameLogic.Campaign.Regions
             CollectFactory(state, result);
             CollectMachines(state, result);
             CollectWork(state, result);
+            CollectSoftlock(state, result);
             result.Sort((a, b) => a.Severity != b.Severity
                 ? a.Severity.CompareTo(b.Severity)
                 : string.CompareOrdinal(a.Key, b.Key));
@@ -535,6 +536,52 @@ namespace GameLogic.Campaign.Regions
             foreach (int id in _woundedScratch)
             {
                 Wounded.Remove(id);
+            }
+        }
+
+        /// <summary>
+        /// FG4-ECO-10（FGR-ECO-072）：死锁检测已经告过警的那几处——传送带闭环卡死（归“工厂堵塞”级）、施工 / 维修目标机器到不了（归“工作受阻”级）。
+        /// 只读存档里的检测结果（<see cref="SoftlockService"/> 按间隔检测），O(告警条数)；恢复后检测结果清掉，这里随之消失。
+        /// </summary>
+        private static void CollectSoftlock(CampaignState state, List<AlertRecord> into)
+        {
+            SoftlockState st = state.Economy?.Softlock;
+            if (st == null)
+            {
+                return;
+            }
+            foreach (LoopWatchRecord w in st.Loops ?? Array.Empty<LoopWatchRecord>())
+            {
+                if (w == null || !w.Alerted)
+                {
+                    continue;
+                }
+                int items = 0;
+                if (Logistics.BeltNetworkService.IsRunning)
+                {
+                    int net = Logistics.BeltNetworkService.Kernel.NetworkOf(w.X, w.Y);
+                    if (net >= 0 && Logistics.BeltNetworkService.Kernel.TryGetNetworkStats(net, out BinGames.Sim.Logistics.BeltNetworkStats ns))
+                    {
+                        items = ns.Items;
+                    }
+                }
+                into.Add(new AlertRecord("loop:" + w.X.ToString(CultureInfo.InvariantCulture) + "," + w.Y.ToString(CultureInfo.InvariantCulture), Severity.FactoryJammed,
+                    GameText.Format("softlock.loop.alarm", w.X, w.Y, items), 0, null, new Vector3(w.X, 0f, w.Y)));
+            }
+            foreach (ReachWatchRecord w in st.Sites ?? Array.Empty<ReachWatchRecord>())
+            {
+                if (w == null || !w.Alerted)
+                {
+                    continue;
+                }
+                BuildingRecord b = HomeGridService.FindBuilding(state, w.BuildingId);
+                if (b == null)
+                {
+                    continue;
+                }
+                into.Add(new AlertRecord("reach:" + w.BuildingId, Severity.WorkBlocked,
+                    GameText.Format("softlock.reach.alarm", BuildingOps.NameOf(b), SoftlockService.SiteKindText(state, w.BuildingId)), 0, w.BuildingId,
+                    new Vector3(b.Position.x, 0f, b.Position.y)));
             }
         }
 

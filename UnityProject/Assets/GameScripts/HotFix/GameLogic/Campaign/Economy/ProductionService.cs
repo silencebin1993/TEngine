@@ -634,6 +634,24 @@ namespace GameLogic.Campaign.Economy
         public static bool IsActive(BuildingRecord b) =>
             b != null && b.RegionId == HomeValleyLayout.RegionId && b.ConstructionState == BuildingConstructionState.Operational && !HomeGridService.IsRelocationGhost(b);
 
+        /// <summary>
+        /// FG4-ECO-10（FGR-ECO-070“没有能工作的回收站”）：有没有一座回收站此刻能产出废料——建成、有电、这一周期在做（拆废墟或分解送来的固体）或上一步在工作。
+        /// 缺料（废墟拆完、没东西送来）、输出堵塞（废料送不出去）、缺电、受损、施工中的都不算。O(生产建筑数)，只在家园废料为 0 时由软锁检查按间隔调用。
+        /// </summary>
+        public static bool AnyRecyclerWorking(CampaignState state)
+        {
+            EnsureIndex(state);
+            foreach (Producer p in Ordered)
+            {
+                if (p.Def.Mode == ProducerMode.Recycler && IsActive(p.Building) && Powered(p.Building)
+                    && (p.Rec.Running || p.State == ProdState.Working))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         private static void SyncFluids(Producer p)
         {
             PipeKernel k = PipeNetworkService.Kernel;
@@ -1108,7 +1126,9 @@ namespace GameLogic.Campaign.Economy
             {
                 // 物品表里没有的编号（表删掉了某种物品）：当作 1 件废料分解，不卡住输入口。
                 int yield = ItemCatalog.TryGet(first.ItemId, out ItemDef item) ? Math.Max(1, item.RecycleScrap) : 1;
-                if (have + yield > cap)
+                // FG4-ECO-10（FGR-ECO-071“任何固体都可以送进回收站”）：一件分解出的废料比输出缓存还多（巨构构件 39 > 10）时，输出缓存空了就照样开工
+                // （这一份临时超出缓存，输出口照常往外推）——此前它永远“输出堵塞”，卡在输入缓存里还把后面送来的东西全堵住。
+                if (have > 0 && have + yield > cap)
                 {
                     Set(p, ProdState.OutputBlocked, ProdReason.NoRoom, scrap, -1, yield, Math.Max(0, cap - have));
                     return false;
@@ -3027,7 +3047,9 @@ namespace GameLogic.Campaign.Economy
                 case ProdReason.ByproductNoRoom:
                 {
                     bool by = p.Reason == ProdReason.ByproductNoRoom;
-                    string head = GameText.Format(by ? "eco.reason.byproduct_no_room" : "eco.reason.no_room", p.ReasonItem?.Name ?? string.Empty,
+                    // FG4-ECO-10（FGR-ECO-071）：固体副产品的去处是回收站（任何固体都能分解），流体副产品的去处是废液池。
+                    string byKey = p.ReasonItem != null && p.ReasonItem.Form != ItemForm.Fluid ? "eco.reason.byproduct_no_room_solid" : "eco.reason.byproduct_no_room";
+                    string head = GameText.Format(by ? byKey : "eco.reason.no_room", p.ReasonItem?.Name ?? string.Empty,
                         RecipeBook.Amount(p.ReasonItem, p.ReasonNeed), RecipeBook.Amount(p.ReasonItem, Math.Max(0, p.ReasonHave)));
                     string hint = p.ReasonPort >= 0 ? FluidPortHint(p, p.ReasonPort) : OutPortHint(p);
                     return Join(head, hint);

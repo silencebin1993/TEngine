@@ -179,6 +179,7 @@ namespace GameLogic.EditorTools
                     case 9: StepBackHome(inStep); break;
                     case 343: StepAwayTripOut(inStep); break; // FG4-ECO-09：离家报告正式路径
                     case 344: StepAwayTripBack(inStep); break;
+                    case 345: StepSoftlockPrint(inStep); break; // FG4-ECO-10：软锁保底（应急打印 + 应急产废料）
                     case 130: StepBeltsLaid(inStep); break;
                     case 131: StepBeltsFar(inStep); break;
                     case 132: StepBeltsNear(inStep); break;
@@ -4111,7 +4112,48 @@ namespace GameLogic.EditorTools
             UI.Kit.AwayReportPanelUIToolkit.Close();
             Check(autoOpen && clicked,
                 $"正式撤离后离家报告自动打开：第 {arp?.ShownSerial} 份（{arp?.VisibleRowCount} 行，“{arp?.SummaryText}”）；点“{rowText}”→ 面板收起并{arp?.LastClicked?.Action}（{autoOpen}/{clicked}）");
-            Campaign.Regions.HomeValleySoftlockGuard.DebugDestroyCore(CampaignSession.Current);
+            // FG4-ECO-10（FGR-ECO-070 / FGT-ECO-005）：家园机器与废料清空后，归还核心在真实世界步里应急打印搬运机、开始应急产废料（测试捷径：直接清空，判定与恢复走正式路径）。
+            CampaignState cs = CampaignSession.Current;
+            _softlockPrintsBefore = Campaign.Economy.SoftlockService.StateOf(cs)?.PrintCount ?? 0;
+            Campaign.Economy.SoftlockService.StateOf(cs).LastPrintDay = 0; // 让今天的应急打印可用（冒烟前面的步骤里机器一直够，本来就没打印过）
+            foreach (int id in MachineRegistry.AllRecords.Where(m => m != null && m.IsAlive).Select(m => m.LogicId).ToArray())
+            {
+                MachineRegistry.ApplyDamage(id, 99999f);
+            }
+            cs.Scrap = 0;
+            Next(345, "测试捷径：清空全部机器与废料，等归还核心应急打印与应急产废料（FG4-ECO-10）");
+        }
+
+        private static int _softlockPrintsBefore;
+
+        private static void StepSoftlockPrint(double inStep)
+        {
+            CampaignState cs = CampaignSession.Current;
+            Campaign.SoftlockState st = Campaign.Economy.SoftlockService.StateOf(cs);
+            bool printed = st != null && st.PrintCount > _softlockPrintsBefore && MachineRegistry.TryGetRecord(st.LastPrintLogicId, out MachineRecord m) && m.IsAlive
+                           && m.ChassisId == Campaign.Regions.HomeValleyLayout.Erc002ChassisId;
+            bool scrapping = st != null && st.CoreScrapActive;
+            if (!(printed && scrapping))
+            {
+                if (inStep > 12)
+                {
+                    Check(false, $"清空机器与废料后 12 秒内没有应急打印 / 应急产废料（打印 {st?.PrintCount}，产废料 {st?.CoreScrapActive}）");
+                    Campaign.Regions.HomeValleySoftlockGuard.DebugDestroyCore(cs);
+                    Next(80, "测试捷径：核心被毁（HomeValleySoftlockGuard.DebugDestroyCore），等失败页出现");
+                }
+                return;
+            }
+            if (inStep < 1)
+            {
+                return;
+            }
+            BuildingRecord core = cs.BuildingRecords.FirstOrDefault(b => b != null && b.BuildingTypeId == Campaign.Regions.HomeValleyLayout.BuildingTypeCore);
+            string coreLine = core != null ? Campaign.Economy.BuildingStatusService.Line(cs, core) : string.Empty;
+            bool notified = Notifications.NotificationCenter.History.Any(e => e.Type?.Id == "emergency_rescue")
+                            && Notifications.NotificationCenter.History.Any(e => e.Type?.Id == "core_emergency_scrap");
+            Check(printed && scrapping && notified && coreLine.Contains("应急产废料") && !Localization.GameText.ContainsMarker(coreLine),
+                $"清空机器与废料 → 归还核心打印了 {MachineNaming.Short(st.LastPrintLogicId)}、开始应急产废料，两条通知进历史；核心状态“{coreLine}”");
+            Campaign.Regions.HomeValleySoftlockGuard.DebugDestroyCore(cs);
             Next(80, "测试捷径：核心被毁（HomeValleySoftlockGuard.DebugDestroyCore），等失败页出现");
         }
 

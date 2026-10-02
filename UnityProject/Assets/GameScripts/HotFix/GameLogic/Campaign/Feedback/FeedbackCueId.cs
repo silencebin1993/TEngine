@@ -71,6 +71,8 @@ namespace GameLogic.Campaign.Feedback
         ReadingDrone,
         // ── FG2-VFX-02：尖刺外装反伤（被近身攻击时把伤害反弹给攻击者） ──
         ReadingThorns,
+        // ── FG4-ECO-10（FGR-ECO-070）：家园机器少于 2 台时归还核心免费打印一台搬运机（沿用 ER3-SOFTLOCK-01 的“核心应急”通知类型） ──
+        EmergencyPrint,
 
         Max,
     }

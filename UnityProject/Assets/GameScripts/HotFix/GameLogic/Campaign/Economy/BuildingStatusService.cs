@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.Linq;
 using GameLogic.Campaign.Grid;
 using GameLogic.Campaign.Regions;
 using GameLogic.Localization;
@@ -142,7 +143,16 @@ namespace GameLogic.Campaign.Economy
             if (type == HomeValleyLayout.BuildingTypeCore)
             {
                 float baseSupply = HomeValleyLayout.BaseCoreSupply;
-                return new BuildingStatus(BuildingStatusKind.Working, "core", GameText.Format("bs.reason.working_core", HomeValleyPowerGrid.Num(baseSupply)));
+                string coreReason = GameText.Format("bs.reason.working_core", HomeValleyPowerGrid.Num(baseSupply));
+                // FG4-ECO-10（FGR-ECO-070；B05）：核心正在应急产废料 / 今天的应急打印已用掉时写在核心状态里（进度、下一件 / 下一台什么时候来）。
+                string scrapLine = SoftlockService.CoreScrapStatus(state);
+                string printLine = SoftlockService.PrintStatus(state);
+                if (scrapLine != null || printLine != null)
+                {
+                    string extra = string.Join("\n", new[] { scrapLine, printLine }.Where(x => x != null));
+                    return new BuildingStatus(BuildingStatusKind.Working, scrapLine != null ? "core.emergency_scrap" : "core.print_wait", coreReason + "\n" + extra);
+                }
+                return new BuildingStatus(BuildingStatusKind.Working, "core", coreReason);
             }
             if (BuildingOps.IsWarehouse(b))
             {

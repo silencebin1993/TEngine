@@ -152,6 +152,7 @@ namespace GameLogic.Campaign.WorldSim
             Economy.ProductionStats.ResetSessionState(); // FG4-ECO-08：统计的会话计数（存档里的桶不动）
             Economy.ItemDistribution.Invalidate();
             HomeValleySoftlockGuard.ResetSessionState();
+            Economy.SoftlockService.ResetSessionState(); // FG4-ECO-10
             HomeValleyAlarms.ResetSessionState();
             HomeValleyCombatTargets.ResetSessionState();
             HomeValleyFactory.ResetSessionState(); // FG4-ECO-03：装配站等料指纹与输入口堵塞提示按新会话重算

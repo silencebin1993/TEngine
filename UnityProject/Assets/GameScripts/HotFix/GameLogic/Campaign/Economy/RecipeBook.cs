@@ -112,7 +112,7 @@ namespace GameLogic.Campaign.Economy
                 {
                     bool by = l.Role == RecipeRole.Byproduct;
                     return new RecipeVerdict(by ? RecipeCheck.ByproductNoRoom : RecipeCheck.NoRoom, l.Item, need, space,
-                        GameText.Format(by ? "eco.reason.byproduct_no_room" : "eco.reason.no_room", l.Item.Name, Amount(l.Item, need), Amount(l.Item, Math.Max(0, space))));
+                        GameText.Format(by ? (l.Item.Form == ItemForm.Fluid ? "eco.reason.byproduct_no_room" : "eco.reason.byproduct_no_room_solid") : "eco.reason.no_room", l.Item.Name, Amount(l.Item, need), Amount(l.Item, Math.Max(0, space))));
                 }
             }
             return new RecipeVerdict(RecipeCheck.Ok, null, 0, 0, null);

@@ -493,6 +493,59 @@ namespace GameLogic.Campaign
         public RecipeMemoryRecord[] RecipeMemory = Array.Empty<RecipeMemoryRecord>();
         /// <summary>FG4-ECO-03：装配站用产线材料（没有废料代付）造出的机器累计台数（图鉴“装配站”与引导钩子）。</summary>
         public long MachinesFromLine;
+        /// <summary>FG4-ECO-10：软锁保底（应急打印、核心应急产废料）与死锁检测（传送带闭环、施工 / 维修目标到不了）的计时与已告警标记。
+        /// 唯一写入口 <see cref="Economy.SoftlockService"/>。旧存档没有 = 空（从读档那一刻开始计；开局机器视为已经播种过）。</summary>
+        public SoftlockState Softlock = new SoftlockState();
+    }
+
+    /// <summary>FG4-ECO-10（FG04 FGR-ECO-070～072）：软锁保底与死锁检测的存档状态。全部按世界步序号计时（暂停不走、倍速一帧多走几步、与观察无关）。</summary>
+    [Serializable]
+    public sealed class SoftlockState
+    {
+        /// <summary>开局的两台机器（ERC-001 / 搬运机）已经播种过：之后读档 / 重进家园不再补发（补机器只走每日应急打印，B10 不复制实体）。</summary>
+        public bool StartMachinesSeeded;
+        /// <summary>最近一次应急打印是第几个游戏日（0 = 从没打印过；每个游戏日最多一台）。</summary>
+        public int LastPrintDay;
+        /// <summary>应急打印累计台数 / 最近一台的机器 LogicId。</summary>
+        public int PrintCount;
+        public int LastPrintLogicId;
+        /// <summary>核心应急产废料是否在进行（废料为 0 且没有能工作的回收站时进入；攒够造一座回收站或有回收站开始工作时结束）。</summary>
+        public bool CoreScrapActive;
+        /// <summary>应急产废料这一段已经累计的世界步（满一分钟产一次，零头留到下一次）。</summary>
+        public long CoreScrapTicks;
+        /// <summary>应急产废料累计产出的件数（统计 / 图鉴 / 自检读数）。</summary>
+        public long CoreScrapProduced;
+        /// <summary>正在被盯着的传送带闭环（按环上最小的格排序；网络重建后按代表格接回原来的计时）。</summary>
+        public LoopWatchRecord[] Loops = Array.Empty<LoopWatchRecord>();
+        /// <summary>正在被盯着的施工 / 维修目标（机器到不了的那一段；按建筑 ID 排序）。</summary>
+        public ReachWatchRecord[] Sites = Array.Empty<ReachWatchRecord>();
+    }
+
+    /// <summary>FG4-ECO-10：一条传送带闭环的卡死计时。</summary>
+    [Serializable]
+    public sealed class LoopWatchRecord
+    {
+        /// <summary>代表格（第一次盯上时这个网络里 (y, x) 最小的格；之后网络变化但这一格还在网络里就沿用，计时与已告警标记不丢）。</summary>
+        public int X;
+        public int Y;
+        /// <summary>这一段开始的世界步。</summary>
+        public long SinceTick;
+        /// <summary>上一次检查时环上的物品数（这一次比它少 = 有物品被拿走 = 有进展，重新计时；增加不算进展）。</summary>
+        public int LastItems;
+        /// <summary>这一段已经告过警（读档后不重复通知，静默恢复进告警栏）。</summary>
+        public bool Alerted;
+    }
+
+    /// <summary>FG4-ECO-10：一座施工 / 维修目标建筑“机器到不了”的计时。</summary>
+    [Serializable]
+    public sealed class ReachWatchRecord
+    {
+        public string BuildingId;
+        public long SinceTick;
+        public bool Alerted;
+        /// <summary>到不了的原因（文本键 + 参数，界面按当前语言重组）。</summary>
+        public bool Enclosed;
+        public string Blockers = string.Empty;
     }
 
     /// <summary>FG4-ECO-03：一类生产建筑“上一次的设置”（新建的同类建筑沿用）。</summary>
@@ -1447,6 +1500,24 @@ namespace GameLogic.Campaign
                     r.FluidHeld ??= Array.Empty<long>();
                     r.BurnTarget ??= string.Empty;
                     r.AwayStarve ??= Array.Empty<ItemStackRecord>(); // FG4-ECO-09
+                }
+            }
+            // FG4-ECO-10：软锁保底与死锁检测（旧存档没有 = 空；开局机器视为已经播种过——那时早就有机器记录了）。
+            // 审查修复 P2：JsonUtility 读旧档时字段保留初始化器生成的空对象（不是 null），所以按内容判：还没标播种、从没打印过、但存档里已经有机器记录
+            // （机器记录只在开局播种之后才会同步进存档）= 旧存档，开局机器早就播种过了。新战役第一次进家园前存档里没有机器记录，不受影响。
+            s.Economy.Softlock ??= new SoftlockState();
+            SoftlockState sl = s.Economy.Softlock;
+            if (!sl.StartMachinesSeeded && sl.LastPrintDay == 0 && sl.PrintCount == 0 && (s.MachineRecords?.Length ?? 0) > 0)
+            {
+                sl.StartMachinesSeeded = true;
+            }
+            s.Economy.Softlock.Loops ??= Array.Empty<LoopWatchRecord>();
+            s.Economy.Softlock.Sites ??= Array.Empty<ReachWatchRecord>();
+            foreach (ReachWatchRecord w in s.Economy.Softlock.Sites)
+            {
+                if (w != null)
+                {
+                    w.Blockers ??= string.Empty;
                 }
             }
             // FG4-ECO-03：装配站材料缓存、废料代付开关、配方记忆（旧存档没有 = 空 / 未设置）。

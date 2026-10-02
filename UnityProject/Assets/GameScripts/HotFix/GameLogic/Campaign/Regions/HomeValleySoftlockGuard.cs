@@ -41,6 +41,9 @@ namespace GameLogic.Campaign.Regions
         /// 不直接持有 <c>HomeValleyMachineMarker</c>。</summary>
         public static void Tick(CampaignState state, float dt, Action<WorkOrderRecord> beginMovement)
         {
+            // FG4-ECO-10（FGR-ECO-070～072）：正式版的保底与死锁检测——每个游戏日的应急打印、核心应急产废料、传送带闭环卡死、施工 / 维修目标到不了。
+            // 按世界步序号判断要不要做（与观察无关）；在下面 Demo 紧急救援机之前：机器不够时先打印一台正式搬运机，今天已经打印过、又全灭时才轮到紧急救援机。
+            Economy.SoftlockService.Step(state);
             _timer += dt;
             if (_timer < CheckIntervalSeconds)
             {
@@ -94,6 +97,13 @@ namespace GameLogic.Campaign.Regions
             {
                 // AC-ECO-011"废料≥35/装配站可用：提示正常再生产"——生产队列本体是 ER4-FAC-01 的范围，
                 // 这里只保证不误触发紧急机；提示文案挂在哪个 UI 上是那个 Story 的事。
+                return;
+            }
+
+            if (Economy.SoftlockService.PrintPending(state))
+            {
+                // FG4-ECO-10：今天的应急打印马上会发生——由 SoftlockService 打印一台正式搬运机（下一次检查），不再同时派紧急救援机。
+                // 只在“真的会打印”时让路；今天已打印、或能施工的机器够数但都不在家时照旧派救援机（审查修复 P1）。
                 return;
             }
 
