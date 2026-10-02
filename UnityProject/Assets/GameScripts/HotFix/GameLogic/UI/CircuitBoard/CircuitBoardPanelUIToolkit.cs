@@ -119,6 +119,9 @@ namespace GameLogic.UI.CircuitBoard
         private Label _lastCombatResultLabel;
 
         private Button _saveButton;
+        /// <summary>FG5-RND-03（FGR-RND-033）：“送到靶场测试”（投影已保存的版本，不消耗资源）。</summary>
+        private Button _rangeSendButton;
+        public Button RangeSendButton => _rangeSendButton;
         private Button _closeButton;
         private Label _saveResultLabel;
         private VisualElement _pendingRow;
@@ -266,6 +269,7 @@ namespace GameLogic.UI.CircuitBoard
             _lastCombatResultLabel = _root.Q<Label>("LastCombatResultLabel");
 
             _saveButton = _root.Q<Button>("SaveButton");
+            _rangeSendButton = _root.Q<Button>("RangeSendButton");
             _closeButton = _root.Q<Button>("CloseButton");
             _saveResultLabel = _root.Q<Label>("SaveResultLabel");
 
@@ -317,6 +321,12 @@ namespace GameLogic.UI.CircuitBoard
             _duplicateBlueprintButton.clicked += OnDuplicateBlueprintClicked;
             _saveAsButton.clicked += () => DoSave(saveAsNewRecord: true);
             _saveButton.clicked += () => DoSave(saveAsNewRecord: false);
+            if (_rangeSendButton != null)
+            {
+                _rangeSendButton.text = GameText.Get("range.send");
+                _rangeSendButton.clicked += SendToRange;
+                UiTooltip.Attach(_rangeSendButton, () => new TooltipContent { Title = _rangeSendButton.text, Body = GameText.Get("range.send_tip") });
+            }
             _archiveButton.clicked += OnArchiveClicked;
             _cancelDraftButton.clicked += OnCancelDraftClicked;
             _restoreDraftButton.clicked += OnRestoreDraftClicked;
@@ -498,6 +508,32 @@ namespace GameLogic.UI.CircuitBoard
             _saveResultLabel.text = $"已复制为“{record.DisplayName}”（独立新记录，未装的基元芯片实例需重新装配）。";
             SelectBlueprint(record.BlueprintId);
         }
+
+        /// <summary>FG5-RND-03（FGR-RND-033）：把当前打开的蓝图（已保存的那一版）送到靶场投影，成功后收起编辑器、打开靶场面板；失败写明原因（B06）。</summary>
+        public void SendToRange()
+        {
+            CampaignState state = CampaignSession.Current;
+            if (string.IsNullOrEmpty(_selectedBlueprintId))
+            {
+                _saveResultLabel.text = GameText.Get("range.reason.no_blueprint");
+                return;
+            }
+            Campaign.Economy.RangeOpResult r = Campaign.Economy.TestRangeService.SendBlueprint(state, _selectedBlueprintId);
+            if (!r.Success)
+            {
+                Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.Denied);
+                _saveResultLabel.text = r.Text;
+                return;
+            }
+            _saveResultLabel.text = r.Text;
+            SetPanelOpen(false);
+            Kit.TestRangePanelUIToolkit.Open(r.BuildingId);
+        }
+
+        /// <summary>自检：选中一张蓝图（与点蓝图列表同一入口之前的状态）。</summary>
+        public void SelectBlueprintForTests(string blueprintId) => _selectedBlueprintId = blueprintId;
+
+        public string SaveResultText => _saveResultLabel?.text ?? string.Empty;
 
         private void OnArchiveClicked()
         {

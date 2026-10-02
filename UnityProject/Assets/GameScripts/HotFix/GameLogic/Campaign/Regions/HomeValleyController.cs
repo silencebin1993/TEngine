@@ -233,6 +233,7 @@ namespace GameLogic.Campaign.Regions
                 DestroyVisuals();
                 SquadCommands.ReleaseVisuals();
                 _combat?.ReleaseRender();
+                Economy.TestRangeService.ReleaseRender(); // FG5-RND-03：靶场全息画面同样只在观察时占 GPU 资源。
                 return;
             }
             if (_root == null && state != null)
@@ -308,6 +309,8 @@ namespace GameLogic.Campaign.Regions
             }
             // FG0-ARCH-03：机器表现对象按内核位置插值 + 突袭者 / 炮塔 / 弹体实例化绘制（常数次调用，与单位数无关）。
             _combat?.FrameRender(_camera, GameClock.StepAlpha);
+            // FG5-RND-03（FGR-RND-031）：靶场的仿真投影 / 投影靶 / 弹体按全息画（每座常数次绘制）。
+            Economy.TestRangeService.FrameRender(_camera, GameClock.StepAlpha);
         }
 
         /// <summary>FG0-ARCH-01：一个固定模拟步（dt = 1 / clock.sim_step_hz 游戏秒）。由 <see cref="WorldSimulation"/> 调用——
@@ -1417,6 +1420,11 @@ namespace GameLogic.Campaign.Regions
             bool ghost = IsPlannedGhost(building);
             // FG3-LOG-02：虚影随施工进度从扁平长到接近完工高度（进度可见，不只靠文字）。
             float height = ghost ? Mathf.Lerp(0.5f, 1.8f, Mathf.Clamp01(ghostFraction)) : 2f;
+            // FG5-RND-03：靶场是一块平场地（全息投影与投影靶在上面走动，方块会把它们挡住）。
+            if (!ghost && building.BuildingTypeId == Economy.TestRangeCatalog.TypeId)
+            {
+                height = 0.15f;
+            }
             t.position = new Vector3(building.Position.x, height * 0.5f, building.Position.y);
             t.rotation = Quaternion.Euler(0f, GridMath.NormalizeRotation(building.Rotation), 0f);
             t.localScale = new Vector3(Mathf.Max(0.5f, size.x - 0.2f), height, Mathf.Max(0.5f, size.y - 0.2f));

@@ -1530,6 +1530,11 @@ namespace GameLogic.Campaign.Signal
             {
                 return _feedback;
             }
+            if (id == 0 && Economy.TestRangeService.TryGetUplinkedProjection(out _, out _, out string projection))
+            {
+                // FG5-RND-03：信号在靶场的仿真投影里（不在真实机器里）——信号位置 HUD 写明，不让玩家以为信号还在核心。
+                return GameText.Format("range.signal.in_projection", projection);
+            }
             return id == 0 ? string.Empty : SteadyStatus(s, id);
         }
 
@@ -1551,7 +1556,7 @@ namespace GameLogic.Campaign.Signal
             bool feedbackActive = _feedback.Length > 0 && Now < _feedbackUntil;
             int jumpKey = (int)Math.Ceiling(JumpCooldownRemaining(s));
             return HashCode.Combine(HashCode.Combine(Revision, CurrentMachine(s), cooldownKey, feedbackActive, SignalCoreService.Revision, FirmwareKinds.Revision, (int)GameText.Language),
-                SignalLinkService.WarningRevision, jumpKey);
+                SignalLinkService.WarningRevision, jumpKey, Economy.TestRangeService.Revision);
         }
 
         /// <summary>接入中的常驻状态：插了什么（冷却中的标出剩余秒数）、没插入的逐条原因、没有接入口 / 信号核为空 / 接入口没接通。</summary>

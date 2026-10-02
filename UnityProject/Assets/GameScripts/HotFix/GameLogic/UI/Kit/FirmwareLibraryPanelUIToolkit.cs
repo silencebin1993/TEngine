@@ -71,6 +71,8 @@ namespace GameLogic.UI.Kit
         private Button _claim;
         private Button _codex;
         private Button _compareA;
+        /// <summary>FG5-RND-03：“送到靶场测试”。</summary>
+        private Button _range;
         private Button _compareB;
         private Label _compareTitle;
         private Button _compareClear;
@@ -246,6 +248,7 @@ namespace GameLogic.UI.Kit
             _codex = root.Q<Button>("FwLibCodex");
             _compareA = root.Q<Button>("FwLibCompareA");
             _compareB = root.Q<Button>("FwLibCompareB");
+            _range = root.Q<Button>("FwLibRange");
             _compareTitle = root.Q<Label>("FwLibCompareTitle");
             _compareClear = root.Q<Button>("FwLibCompareClear");
             _compareEmpty = root.Q<Label>("FwLibCompareEmpty");
@@ -289,6 +292,8 @@ namespace GameLogic.UI.Kit
             _codex.clicked += OpenCodexForSelected;
             _compareA.clicked += () => SetCompare(true);
             _compareB.clicked += () => SetCompare(false);
+            _range.clicked += SendSelectedToRange;
+            UiTooltip.Attach(_range, () => new TooltipContent { Title = _range.text, Body = GameText.Get("range.send_tip") });
             _compareClear.clicked += ClearCompare;
             UiTooltip.Attach(_disassemble, () => new TooltipContent
             {
@@ -619,6 +624,28 @@ namespace GameLogic.UI.Kit
             }
         }
 
+        /// <summary>FG5-RND-03（FGR-RND-033；FG-GAP-058）：固件详情“送到靶场测试”——在靶场投影一台带这枚固件的试验台（不消耗资源），然后打开靶场面板；
+        /// 没有能用的靶场 / 固件未破解时写明原因，固件库不关。</summary>
+        public void SendSelectedToRange()
+        {
+            PrimitiveChipRecord chip = PrimitiveInventory.Find(CampaignSession.Current, _selectedPartId);
+            if (chip == null)
+            {
+                return;
+            }
+            Campaign.Economy.RangeOpResult r = Campaign.Economy.TestRangeService.SendFirmware(CampaignSession.Current, chip.CardDefId);
+            if (!r.Success)
+            {
+                Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.Denied);
+                SetFeedback(r.Text);
+                return;
+            }
+            SetOpen(false);
+            TestRangePanelUIToolkit.Open(r.BuildingId);
+        }
+
+        public Button RangeButton => _range;
+
         public void SetCompare(bool slotA)
         {
             PrimitiveChipRecord chip = PrimitiveInventory.Find(CampaignSession.Current, _selectedPartId);
@@ -745,6 +772,7 @@ namespace GameLogic.UI.Kit
             _codex.text = GameText.Get("fwlib.codex");
             _compareA.text = GameText.Get("fwlib.compare_a");
             _compareB.text = GameText.Get("fwlib.compare_b");
+            _range.text = GameText.Get("range.send");
             _compareTitle.text = GameText.Get("fwlib.compare.title");
             _compareClear.text = GameText.Get("fwlib.compare.clear");
             _claim.text = GameText.Get("fwlib.claim");

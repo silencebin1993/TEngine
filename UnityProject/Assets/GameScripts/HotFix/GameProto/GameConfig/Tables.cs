@@ -211,6 +211,10 @@ public partial class Tables
     /// </summary>
     public fg.TbProducer TbProducer {get; }
     /// <summary>
+    /// 靶子类型
+    /// </summary>
+    public fg.TbRangeTarget TbRangeTarget {get; }
+    /// <summary>
     /// 具名反应
     /// </summary>
     public fg.TbReaction TbReaction {get; }
@@ -379,6 +383,7 @@ public partial class Tables
         TbPowerNode = new fg.TbPowerNode(loader("fg_tbpowernode"));
         TbPowerSource = new fg.TbPowerSource(loader("fg_tbpowersource"));
         TbProducer = new fg.TbProducer(loader("fg_tbproducer"));
+        TbRangeTarget = new fg.TbRangeTarget(loader("fg_tbrangetarget"));
         TbReaction = new fg.TbReaction(loader("fg_tbreaction"));
         TbRecipe = new fg.TbRecipe(loader("fg_tbrecipe"));
         TbRecipeIo = new fg.TbRecipeIo(loader("fg_tbrecipeio"));
@@ -463,6 +468,7 @@ public partial class Tables
         TbPowerNode.ResolveRef(this);
         TbPowerSource.ResolveRef(this);
         TbProducer.ResolveRef(this);
+        TbRangeTarget.ResolveRef(this);
         TbReaction.ResolveRef(this);
         TbRecipe.ResolveRef(this);
         TbRecipeIo.ResolveRef(this);

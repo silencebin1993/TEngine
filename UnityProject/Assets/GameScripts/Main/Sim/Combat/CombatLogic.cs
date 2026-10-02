@@ -104,6 +104,12 @@ namespace BinGames.Sim.Combat
             // 5b. FG2-FW-02：读法生成的无人机、区域、回波与状态标签（统一时钟，暂停不走、倍速按游戏时间）。
             StepReadings(ref d, dt);
 
+            // 5c. FG5-RND-03：场地边界（靶场）。放在全部位移（移动、击退、牵引、无人机）之后，一处钳住所有来源。
+            if (d.Scalars[0].ArenaOn != 0)
+            {
+                ClampToArena(ref d);
+            }
+
             // 6. 兴趣点
             StepPois(ref d);
 
@@ -113,6 +119,61 @@ namespace BinGames.Sim.Combat
             CombatCounters c = d.Counters[0];
             c.Steps++;
             d.Counters[0] = c;
+        }
+
+        /// <summary>FG5-RND-03：把单位（按半径）与无人机钳进场地矩形；弹体出了矩形就作废（记“过期”）。O(单位 + 弹体 + 无人机)。</summary>
+        internal static void ClampToArena(ref CombatData d)
+        {
+            CombatScalars s = d.Scalars[0];
+            double2 lo = s.ArenaMin;
+            double2 hi = s.ArenaMax;
+            int n = d.Count;
+            for (int i = 0; i < n; i++)
+            {
+                if (!d.IsAlive(i))
+                {
+                    continue;
+                }
+                d.Pos[i] = ClampInto(d.Pos[i], lo, hi, d.Radius[i]);
+            }
+            for (int k = 0; k < d.Drones.Length; k++)
+            {
+                CombatDrone dr = d.Drones[k];
+                double2 c = ClampInto(dr.Pos, lo, hi, 0.0);
+                if (c.x != dr.Pos.x || c.y != dr.Pos.y)
+                {
+                    dr.Pos = c;
+                    d.Drones[k] = dr;
+                }
+            }
+            int m = d.Projectiles.Length;
+            int write = 0;
+            long expired = 0;
+            for (int p = 0; p < m; p++)
+            {
+                CombatProjectile pr = d.Projectiles[p];
+                if (pr.Pos.x < lo.x || pr.Pos.x > hi.x || pr.Pos.y < lo.y || pr.Pos.y > hi.y)
+                {
+                    expired++;
+                    continue;
+                }
+                d.Projectiles[write++] = pr;
+            }
+            if (expired > 0)
+            {
+                d.Projectiles.ResizeUninitialized(write);
+                CombatCounters c = d.Counters[0];
+                c.ProjectilesExpired += expired;
+                d.Counters[0] = c;
+            }
+        }
+
+        private static double2 ClampInto(double2 p, double2 lo, double2 hi, double radius)
+        {
+            // 半径比半宽还大时退到中线（不让上下界交叉）。
+            double rx = math.min(radius, (hi.x - lo.x) * 0.5);
+            double ry = math.min(radius, (hi.y - lo.y) * 0.5);
+            return new double2(math.clamp(p.x, lo.x + rx, hi.x - rx), math.clamp(p.y, lo.y + ry, hi.y - ry));
         }
 
         // ─────────────────────────────── 己方 ───────────────────────────────

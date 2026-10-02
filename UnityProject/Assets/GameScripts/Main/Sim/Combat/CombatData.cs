@@ -67,6 +67,11 @@ namespace BinGames.Sim.Combat
         public int NextNavSerial;
         /// <summary>FG0-ARCH-06：路线池里已作废的路点数（过半时整理）。</summary>
         public int RouteGarbage;
+        /// <summary>FG5-RND-03：场地边界（1 = 开）。开着时每步末尾把全部单位与无人机钳进矩形、飞出矩形的弹体作废（靶场投影“不出靶场”，FGR-RND-031）。
+        /// 只在运行时设置、不进存档（靶场地点本身不存档）。</summary>
+        public byte ArenaOn;
+        public double2 ArenaMin;
+        public double2 ArenaMax;
     }
 
     /// <summary>

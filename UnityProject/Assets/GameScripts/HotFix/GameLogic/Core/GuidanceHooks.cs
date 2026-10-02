@@ -251,6 +251,20 @@ namespace GameLogic.Core
         /// <summary>FG5-RND-02（FG05 第 4 节）：第一次拿到敌方物品（未解析模块 / 加密固件 / 数据核心 / 残骸）——引导内容在 FG15-UX-04：把它送进解析台；
         /// 图鉴“解析台与敌方物品”随之解锁。</summary>
         public const string AnalysisFirstEnemyItem = "analysis.first_enemy_item";
+        /// <summary>FG5-RND-03：第一座靶场建成（引导内容在 FG15-UX-04：投影、靶子、读数；图鉴“靶场与仿真投影”随之解锁）。</summary>
+        public const string RangeFirstBuilt = "range.first_built";
+        /// <summary>FG5-RND-03：第一次打开靶场面板。</summary>
+        public const string RangeFirstOpen = "range.first_open";
+        /// <summary>FG5-RND-03：第一次投影（测试开始）。</summary>
+        public const string RangeFirstTest = "range.first_test";
+        /// <summary>FG5-RND-03：第一次接入投影（引导：核心固件的接入态效果、静默夜断链）。</summary>
+        public const string RangeFirstUplink = "range.first_uplink";
+        /// <summary>FG5-RND-03：第一次手动选择两次测试对比。</summary>
+        public const string RangeFirstCompare = "range.first_compare";
+        /// <summary>FG5-RND-03：第一次从蓝图编辑器 / 固件库“送到靶场测试”。</summary>
+        public const string RangeFirstSend = "range.first_send";
+        /// <summary>FG5-RND-03：击败敌人第一次解锁新的阵营靶子。</summary>
+        public const string RangeFirstTargetUnlocked = "range.first_target_unlocked";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -292,6 +306,7 @@ namespace GameLogic.Core
             SoftlockFirstPrint, SoftlockFirstCoreScrap, SoftlockFirstLoopStall, SoftlockFirstUnreachable,
             ResearchTreeFirstOpen, ResearchLabFirstBuilt, ResearchFirstQueued, ResearchFirstCompleted, ResearchFirstStalled,
             AnalysisFirstEnemyItem,
+            RangeFirstBuilt, RangeFirstOpen, RangeFirstTest, RangeFirstUplink, RangeFirstCompare, RangeFirstSend, RangeFirstTargetUnlocked,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

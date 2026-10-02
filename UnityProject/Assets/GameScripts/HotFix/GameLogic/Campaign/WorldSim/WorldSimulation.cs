@@ -154,6 +154,7 @@ namespace GameLogic.Campaign.WorldSim
             HomeValleySoftlockGuard.ResetSessionState();
             Economy.SoftlockService.ResetSessionState(); // FG4-ECO-10
             Economy.ResearchService.ResetSessionState(); // FG5-RND-01：实验室索引、效果缓存、阵营分支缓存按新战役重建
+            Economy.TestRangeService.ResetSessionState(); // FG5-RND-03：仿真投影是运行时状态（不存档），换战役 / 读档时清掉
             HomeValleyAlarms.ResetSessionState();
             HomeValleyCombatTargets.ResetSessionState();
             HomeValleyFactory.ResetSessionState(); // FG4-ECO-03：装配站等料指纹与输入口堵塞提示按新会话重算
@@ -243,6 +244,7 @@ namespace GameLogic.Campaign.WorldSim
         {
             FracturedCity?.Exit(evacuateSuccess: false);
             FoundryOutpost?.Exit(evacuateSuccess: false);
+            Economy.TestRangeService.ResetSessionState(); // FG5-RND-03：靶场的仿真地点随世界卸载释放（投影不存档，不记结果）。
             Home?.Exit();
             BeltNetworkService.Unload();
             PipeNetworkService.Unload();
@@ -270,6 +272,8 @@ namespace GameLogic.Campaign.WorldSim
         /// <summary>存档前把每个已载入地点的实时状态（机器位置、血量）写回记录——不卸载。</summary>
         public static void SyncAllForSave()
         {
+            // FG5-RND-03（FGR-RND-031 / FG05 第 5 章“靶场测试中存档”）：投影不进存档——存档前正在进行的测试直接结束，读数记进测试记录，读档后靶场空闲。
+            Economy.TestRangeService.EndAllForSave(CampaignSession.Current);
             foreach (IWorldSite site in LoadedSites.ToArray())
             {
                 site.SyncLiveStateForSave();
@@ -472,6 +476,10 @@ namespace GameLogic.Campaign.WorldSim
                     Economy.ProductionService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                     // FG5-RND-01：仿真实验室（技术数据 → 研究点）与研究队列，与生产建筑同一节拍；只看步序号，与观察无关，O(实验室数 + 队列长度)。
                     Economy.ResearchService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
+                    // FG5-RND-03：靶场的仿真投影（各自独立的战斗内核实例，与家园同一时钟；只看步序号，与观察无关）。
+                    CurrentSiteId = Home.SiteId;
+                    Economy.TestRangeService.WorldStep(state, dt);
+                    CurrentSiteId = HomeValleyLayout.RegionId;
                 }
                 // FG4-ECO-01：物品库存采样（净速率），每 eco.flow.sample_seconds 游戏秒一次、只看步序号，与观察无关，O(物品种类)。
                 Economy.ItemFlowStats.WorldStep(state, GameClock.Ticks, GameClock.StepHz);

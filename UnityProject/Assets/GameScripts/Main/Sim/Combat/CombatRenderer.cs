@@ -22,6 +22,11 @@ namespace BinGames.Sim.Combat
         private static readonly int AlphaId = Shader.PropertyToID("_Alpha");
         private static readonly int HeightId = Shader.PropertyToID("_Height");
         private static readonly int GameTimeId = Shader.PropertyToID("_GameTime");
+        private static readonly int HoloId = Shader.PropertyToID("_Holo");
+
+        /// <summary>FG5-RND-03（FGR-RND-031“投影在视觉上有明显的全息效果，不会被误认为真实机器”）：全息画法——单位与弹体按全息配色、
+        /// 带随游戏时间滚动的扫描线镂空（形状为主、颜色为辅，B15）。靶场的地点打开它；美术占位（B22，正式外观随美术批次替换）。</summary>
+        public bool Hologram { get; set; }
 
         /// <summary>区域 / 无人机着色器动画的时钟 = 内核（游戏）时间，按一小时取模防浮点精度损失：战略暂停时画面静止、倍速时同步加快（B09）。</summary>
         private float _gameTime;
@@ -198,6 +203,7 @@ namespace BinGames.Sim.Combat
             props.SetFloat(AlphaId, alpha);
             props.SetFloat(HeightId, height);
             props.SetFloat(GameTimeId, _gameTime);
+            props.SetFloat(HoloId, Hologram ? 1f : 0f);
             var rp = new RenderParams(_material)
             {
                 worldBounds = bounds,

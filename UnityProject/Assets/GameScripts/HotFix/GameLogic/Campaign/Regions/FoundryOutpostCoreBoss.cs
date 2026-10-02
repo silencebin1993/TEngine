@@ -199,6 +199,7 @@ namespace GameLogic.Campaign.Regions
                 else if (s == CoreBossState.Phase2 && target.Health <= 0f && target.IsAlive)
                 {
                     target.IsAlive = false;
+                    Economy.TestRangeService.NoteEnemyDefeated(state, Content.EnemyCatalog.CoreBossId); // FG5-RND-03：击败主核心解锁护盾靶。
                     TryTransition(state, region, CoreBossState.Destroyed);
                     DropCoreDataOnce(state, region);
                 }

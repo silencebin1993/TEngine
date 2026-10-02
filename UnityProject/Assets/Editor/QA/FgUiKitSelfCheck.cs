@@ -1455,7 +1455,8 @@ namespace GameLogic.EditorTools
             // FG4-ECO-07 新增 RosterPanel.uxml（机器名册）与 RosterRow.uxml（名册行模板），共 33 份。
             // FG4-ECO-09 新增 AwayReportPanel.uxml（离家报告）与 AwayReportRow.uxml（报告行模板），共 35 份。
             // FG5-RND-01 新增 ResearchTreePanel.uxml（研发树）、ResearchNode.uxml（节点模板）与 ResearchQueueRow.uxml（队列行模板），共 38 份。
-            Expect(uxmlCount == 38 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
+            // FG5-RND-03 新增 TestRangePanel.uxml（靶场）、TestRangeProjRow.uxml（投影行模板）与 TestRangeSlotRow.uxml（靶位行模板），共 41 份。
+            Expect(uxmlCount == 41 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
 
             string[] codeDirs =
             {

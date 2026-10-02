@@ -105,6 +105,10 @@ namespace GameLogic.Campaign.Combat
             {
                 return GameText.Get("combat.site.foundry_outpost");
             }
+            if (Economy.TestRangeService.IsRangeSite(siteId))
+            {
+                return GameText.Get("combat.site.test_range"); // FG5-RND-03：靶场的仿真地点（反应图鉴“首次触发”的地点）
+            }
             return siteId;
         }
 

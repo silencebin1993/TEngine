@@ -184,6 +184,17 @@ namespace GameLogic.Campaign.Economy
                     GameText.Format("bs.reason.working_override", Signal.OverrideArrayService.SlotsText(initial + 1, initial + BuildingOps.TierOf(b)),
                         HomeValleyPowerGrid.Num(HomeValleyPowerGrid.DemandOf(b))));
             }
+            if (type == TestRangeCatalog.TypeId)
+            {
+                // FG5-RND-03：靶场——测试中（投影数、时长、每秒伤害）/ 空闲（怎么开始）。
+                if (TestRangeService.IsRunning(b.BuildingId))
+                {
+                    RangeResultRecord live = TestRangeService.LiveReadings(b.BuildingId);
+                    return new BuildingStatus(BuildingStatusKind.Working, "range.running", GameText.Format("bs.reason.range_running",
+                        TestRangeService.ProjectionsOf(b.BuildingId).Count, Mathf.RoundToInt(live?.Seconds ?? 0f), TestRangeService.Num(live?.Dps ?? 0f)));
+                }
+                return new BuildingStatus(BuildingStatusKind.Idle, "range.idle", GameText.Get("bs.reason.range_idle"));
+            }
             if (type == HomeValleyLayout.BuildingTypeSignalRelay)
             {
                 return new BuildingStatus(BuildingStatusKind.Working, "relay",

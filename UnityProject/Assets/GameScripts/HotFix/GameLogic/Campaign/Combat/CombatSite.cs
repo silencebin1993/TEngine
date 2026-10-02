@@ -86,6 +86,49 @@ namespace GameLogic.Campaign.Combat
         public CombatTransformSync Sync { get; private set; }
         public CombatRenderer Renderer { get; private set; }
 
+        /// <summary>FG5-RND-03：全息画法（靶场的仿真投影与投影靶，FGR-RND-031）。在第一次绘制前设置；渲染器按它画扫描线全息。</summary>
+        public bool HologramRender { get; set; }
+
+        /// <summary>FG5-RND-03：本地点自己的事件旁听者（靶场读数：开火、过热、阵亡、装配反应）。在 <see cref="ProcessEvents"/> 里逐条先于结算调用，
+        /// O(本步事件数)；不改变结算本身。普通地点为空。</summary>
+        public Action<CombatSite, CombatEvent> EventObserver { get; set; }
+
+        // FG5-RND-03（FG-GAP-061）：不登记成机器 / 敌人的内核单位（训练靶、靶场投影与投影靶）在反应日志里的名字（文本键 + 参数）与参与的固件。
+        private readonly Dictionary<int, (string Key, string Arg, bool ArgIsKey, string[] Firmware)> _unitLabels = new Dictionary<int, (string, string, bool, string[])>();
+
+        /// <summary>FG5-RND-03（FG-GAP-061）：给一个内核单位起日志里的名字（例如“训练靶”“投影靶·重甲靶”“投影·突击型”）；<paramref name="firmware"/> = 它生效的固件（反应日志“参与的固件”）。</summary>
+        /// <paramref name="argIsTextKey"/> = true 时参数本身也是文本键（例如靶子名），日志显示时再翻译，切语言后旧日志跟着换。
+        public void SetUnitLabel(int unitId, string textKey, string arg = null, string[] firmware = null, bool argIsTextKey = false)
+        {
+            if (unitId <= 0 || string.IsNullOrEmpty(textKey))
+            {
+                return;
+            }
+            _unitLabels[unitId] = (textKey, arg, argIsTextKey, firmware);
+        }
+
+        public void ClearUnitLabel(int unitId) => _unitLabels.Remove(unitId);
+
+        public bool TryGetUnitLabel(int unitId, out string textKey, out string arg, out string[] firmware) =>
+            TryGetUnitLabel(unitId, out textKey, out arg, out _, out firmware);
+
+        public bool TryGetUnitLabel(int unitId, out string textKey, out string arg, out bool argIsTextKey, out string[] firmware)
+        {
+            if (_unitLabels.TryGetValue(unitId, out (string Key, string Arg, bool ArgIsKey, string[] Firmware) v))
+            {
+                textKey = v.Key;
+                arg = v.Arg;
+                argIsTextKey = v.ArgIsKey;
+                firmware = v.Firmware;
+                return true;
+            }
+            textKey = null;
+            arg = null;
+            argIsTextKey = false;
+            firmware = null;
+            return false;
+        }
+
         /// <summary>玩家机器记录的阵营标识（MachineRecord.FactionId；Demo 敌人命中机器入口的阵营校验）。</summary>
         public const string MachinePlayerFaction = "Player";
 
@@ -180,6 +223,8 @@ namespace GameLogic.Campaign.Combat
             _markerByUnit.Clear();
             _enemyIndex.Clear();
             _enemyIndexArray = null;
+            _unitLabels.Clear();
+            EventObserver = null;
         }
 
         // ─────────────────────────────── 配置 ───────────────────────────────
@@ -991,10 +1036,12 @@ namespace GameLogic.Campaign.Combat
                 _merge.Sort(BySeq);
             }
             CampaignState state = CampaignSession.Current;
+            Action<CombatSite, CombatEvent> observer = EventObserver;
             for (int i = 0; i < _merge.Count; i++)
             {
                 try
                 {
+                    observer?.Invoke(this, _merge[i]);
                     Handle(state, _merge[i]);
                 }
                 catch (Exception e)
@@ -1597,6 +1644,7 @@ namespace GameLogic.Campaign.Combat
             if (Renderer == null)
             {
                 Renderer = new CombatRenderer();
+                Renderer.Hologram = HologramRender;
                 // FG2-FW-03（FGR-FW-031）：头顶状态标签图标的形状 / 颜色来自 fg.TbStatusTag。
                 Renderer.SetStatusVisuals(NamedReactionCatalog.BuildStatusVisuals());
             }
@@ -1689,6 +1737,7 @@ namespace GameLogic.Campaign.Combat
             _enemyUnit.Clear();
             _unitEnemy.Clear();
             _markerByUnit.Clear();
+            _unitLabels.Clear();
             _weaponIndex.Clear();
             for (int w = 0; w < Kernel.WeaponCount; w++)
             {

@@ -817,6 +817,95 @@ namespace GameLogic.Campaign
         public bool FirstItemSeen;
     }
 
+    /// <summary>
+    /// FG5-RND-03：靶场的存档部分（在 <see cref="ResearchState.Range"/>）。唯一写入口 <see cref="Economy.TestRangeService"/>。
+    /// **仿真投影与正在进行的测试不在这里**（FGR-RND-031“投影不会进入存档”）：存档前正在进行的测试直接结束、结果记进 <see cref="History"/>，
+    /// 读档后每座靶场都是空闲状态。这里只存玩家的设置与已经结束的测试结果。
+    /// </summary>
+    [Serializable]
+    public sealed class TestRangeState
+    {
+        public int DomainVersion = 1;
+        /// <summary>FGR-RND-030：击败过的敌人类型（fg.TbMechEnemy.id，按 ID 排序）——对应的阵营靶子据此解锁。</summary>
+        public string[] DefeatedEnemyTypes = Array.Empty<string>();
+        /// <summary>每座靶场的靶子布置（按建筑 ID 排序）；建筑没了随之清掉。</summary>
+        public RangeLayoutRecord[] Layouts = Array.Empty<RangeLayoutRecord>();
+        /// <summary>卡片“靶子布置的预设”（FG05 第 4 节）：跨靶场共用，至多 range.presets.max 个。</summary>
+        public RangePresetRecord[] Presets = Array.Empty<RangePresetRecord>();
+        public int NextPresetSerial = 1;
+        /// <summary>FGR-RND-032：已经结束的测试结果（新的在后，至多 range.history.keep 条），两次结果可以并排对比。</summary>
+        public RangeResultRecord[] History = Array.Empty<RangeResultRecord>();
+        public int NextResultSerial = 1;
+        /// <summary>玩家已经看过的靶子类型（面板里新解锁的靶子标“新”，打开过一次就清掉）。</summary>
+        public string[] SeenTargets = Array.Empty<string>();
+        /// <summary>对比栏选中的两条结果序号（0 = 自动：最近两条）。</summary>
+        public int CompareA;
+        public int CompareB;
+        /// <summary>统计：做过的测试次数、接入投影的次数。</summary>
+        public long TestsRun;
+        public long UplinksRun;
+    }
+
+    /// <summary>FG5-RND-03：一座靶场的靶子布置——每个靶位放什么（fg.TbRangeTarget.id；空串 = 空位）。</summary>
+    [Serializable]
+    public sealed class RangeLayoutRecord
+    {
+        public string BuildingId;
+        public string[] Slots = Array.Empty<string>();
+    }
+
+    /// <summary>FG5-RND-03：靶子布置预设（名字 + 每个靶位放什么）。</summary>
+    [Serializable]
+    public sealed class RangePresetRecord
+    {
+        public string PresetId;
+        public string Name = string.Empty;
+        public string[] Slots = Array.Empty<string>();
+    }
+
+    /// <summary>FG5-RND-03（FGR-RND-032）：一条反应 / 一个标签的计数（反应 = 触发次数；标签 = 覆盖率千分比）。</summary>
+    [Serializable]
+    public sealed class RangeCountRecord
+    {
+        public string Id;
+        public int Value;
+    }
+
+    /// <summary>FG5-RND-03（FGR-RND-032）：一次测试的读数。</summary>
+    [Serializable]
+    public sealed class RangeResultRecord
+    {
+        public int Serial;
+        public string BuildingId;
+        public long StartTick;
+        public long EndTick;
+        /// <summary>测试时长（游戏秒）。</summary>
+        public float Seconds;
+        /// <summary>参加测试的投影（显示名，按加入先后；“·接入”= 测试中被接入过）。</summary>
+        public string[] Projections = Array.Empty<string>();
+        /// <summary>测试时的靶子布置（每个靶位的 fg.TbRangeTarget.id，空串 = 空位）。</summary>
+        public string[] Targets = Array.Empty<string>();
+        /// <summary>对投影靶造成的总伤害（内核精确值）与每秒伤害。</summary>
+        public float Damage;
+        public float Dps;
+        public int Kills;
+        public int Shots;
+        /// <summary>能耗：生效固件每发耗电（表 power 列）× 发数的合计。</summary>
+        public float Energy;
+        public float PeakHeat;
+        public int Overheats;
+        /// <summary>各反应的触发次数（反应 ID，按次数从多到少）。</summary>
+        public RangeCountRecord[] Reactions = Array.Empty<RangeCountRecord>();
+        /// <summary>各状态标签的覆盖率（标签 ID → 千分比：采样时刻挂着这个标签的投影靶占比的平均）。</summary>
+        public RangeCountRecord[] Coverage = Array.Empty<RangeCountRecord>();
+        /// <summary>热量曲线：按采样间隔记的投影最高热量（至多 range.curve.points 个点，超出时等距抽样）。</summary>
+        public float[] HeatCurve = Array.Empty<float>();
+        public float CurveStepSeconds;
+        /// <summary>结束原因（<see cref="Economy.RangeEndReason"/>）。</summary>
+        public int EndReason;
+        public bool Uplinked;
+    }
+
     /// <summary>DEMO-CONTENT-LOCK.md：逐目标持久化 ObjectiveRecord，字段与该文档"必须作为可存档
     /// ObjectiveRecord 实现"一段一致（objectiveId/state/startedAtPlaySeconds/completedAtPlaySeconds/eventId）。
     /// 不在 ERD-DAT-001 的 CampaignState 必须字段表里，但 STORY-EXECUTION-CARDS.md #ER1-SAVE-01

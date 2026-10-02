@@ -253,6 +253,7 @@ namespace GameLogic.Campaign.Regions
 
             // FG4-ECO-11（FGR-ECO-020 断电时槽位失效、来电后恢复）：超控阵列的生效等级复用这一个结算出口——完工 / 升级 / 拆除 / 启停 / 摧毁 / 电力翻转都走这里，不另起轮询。
             Signal.OverrideArrayService.OnPowerApplied(state, notify: !_suppressFeedback);
+            Economy.TestRangeService.OnPowerApplied(state, notify: !_suppressFeedback); // FG5-RND-03：第一座靶场建成的引导钩子（完工 / 启停都走电网结算）。
             _suppressFeedback = false;
             string[] brownoutIds = brownout.ToArray();
             string[] unconnectedIds = unconnected.ToArray();

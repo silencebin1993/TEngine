@@ -58,6 +58,8 @@ namespace GameLogic.Campaign.Combat
         /// <summary>镜头正在观察这个地点（严格：观察地点未知时视为不观察——不在世界里的测试地点不会慢放 / 推镜头 / 弹字）。</summary>
         public static bool IsObserved(string siteId)
         {
+            // FG5-RND-03：靶场的仿真地点在家园里——镜头看着家园时，靶场里的反应照样弹字 / 慢放。
+            siteId = Economy.TestRangeService.HostSiteOf(siteId);
             string observed = FeedbackCues.ObservedSiteProvider?.Invoke();
             return !string.IsNullOrEmpty(siteId) && observed == siteId;
         }
@@ -217,8 +219,7 @@ namespace GameLogic.Campaign.Combat
                 Count = 1,
                 Source = source,
                 Target = Party(site, state, targetUnit),
-                FirmwareIds = source.Kind == CombatUnitKind.Machine && site.TryGetMachineWeapon(source.LogicId, out MachineWeaponInfo info) && info.FirmwareIds != null
-                    ? AssemblyFirmware(info.FirmwareIds) : Array.Empty<string>(),
+                FirmwareIds = FirmwareOf(site, source) is string[] fwOfSource ? AssemblyFirmware(fwOfSource) : Array.Empty<string>(),
                 Position = ground,
             });
             Revision++;
@@ -352,6 +353,17 @@ namespace GameLogic.Campaign.Combat
             {
                 return p;
             }
+            // FG5-RND-03（FG-GAP-061）：地点起过名字的单位（训练靶、靶场投影与投影靶）按名字记，不按“敌方单位 / 机器”通用名。
+            if (site.TryGetUnitLabel(unitId, out string labelKey, out string labelArg, out bool labelArgIsKey, out _))
+            {
+                p.Known = true;
+                p.Kind = site.Kernel.TryGetUnit(unitId, out CombatUnitView lv) ? lv.Kind : CombatUnitKind.Structure;
+                p.LabelKey = labelKey;
+                p.LabelArg = labelArg;
+                p.LabelArgIsKey = labelArgIsKey;
+                p.UnitId = unitId;
+                return p;
+            }
             if (site.TryGetMachineOfUnit(unitId, out int logicId))
             {
                 p.Known = true;
@@ -377,13 +389,13 @@ namespace GameLogic.Campaign.Combat
         /// <summary>触发者（机器）这组参数里生效的固件中，产生的标签属于这条反应配料的那些（“参与的固件”）。</summary>
         private static string[] ParticipatingFirmware(CombatSite site, in ReactionLogParty source, uint pair)
         {
-            if (source.Kind != CombatUnitKind.Machine || source.LogicId <= 0 || pair == 0u
-                || !site.TryGetMachineWeapon(source.LogicId, out MachineWeaponInfo info) || info.FirmwareIds == null)
+            string[] firmware = FirmwareOf(site, source);
+            if (pair == 0u || firmware == null)
             {
                 return Array.Empty<string>();
             }
             List<string> hits = null;
-            foreach (string fw in info.FirmwareIds)
+            foreach (string fw in firmware)
             {
                 string[] tags = FirmwareKinds.TagsOf(fw);
                 if (tags == null)
@@ -400,6 +412,20 @@ namespace GameLogic.Campaign.Combat
                 }
             }
             return hits != null ? hits.ToArray() : Array.Empty<string>();
+        }
+
+        /// <summary>触发者生效的固件：登记的机器读武器参数；靶场投影读地点给它记下的固件（FG5-RND-03）。其余为 null。</summary>
+        private static string[] FirmwareOf(CombatSite site, in ReactionLogParty source)
+        {
+            if (source.UnitId > 0 && site.TryGetUnitLabel(source.UnitId, out _, out _, out string[] labelled))
+            {
+                return labelled;
+            }
+            if (source.Kind == CombatUnitKind.Machine && source.LogicId > 0 && site.TryGetMachineWeapon(source.LogicId, out MachineWeaponInfo info))
+            {
+                return info.FirmwareIds;
+            }
+            return null;
         }
 
         public static void ResetForTests()

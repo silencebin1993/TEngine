@@ -482,6 +482,8 @@ namespace GameLogic.Campaign
         public string StallNotified = string.Empty;
         /// <summary>FG5-RND-02：解析台 2.0（敌方物品身份清单、残骸缓存与进度、读过的资料、统计）。旧存档没有 = 空状态。</summary>
         public AnalysisBenchState Analysis = new AnalysisBenchState();
+        /// <summary>FG5-RND-03：靶场（击败过的敌人类型、靶子布置与预设、已结束的测试结果）。投影与进行中的测试不存档。旧存档没有 = 空状态。</summary>
+        public TestRangeState Range = new TestRangeState();
     }
 
     /// <summary>FG5-RND-01：一个节点已投入的研究点（取消 / 移出队列后保留）。</summary>
@@ -1534,6 +1536,7 @@ namespace GameLogic.Campaign
             {
                 s.Research.Analysis.NextSerial = 1;
             }
+            Economy.TestRangeService.EnsureState(s); // FG5-RND-03：靶场域补成空域；旧档按已击毁的敌人记录补“击败过的敌人类型”。
             if (s.Research.DomainVersion < ResearchState.CurrentVersion)
             {
                 Economy.ResearchService.MigrateFromV1(s); // FG5-RND-01：旧档迁移（研发树开放前就能建造的内容记为已研究）

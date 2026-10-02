@@ -308,6 +308,13 @@ namespace GameLogic.EditorTools
                     case 358: StepResearchLabPlaced(inStep); break;
                     case 359: StepResearchDone(inStep); break;
                     case 360: StepResearchNewMark(inStep); break;
+                    // FG5-RND-03：建造菜单“研发”页签选靶场、单击放虚影 → 右键取消选择 → 左键点建成的靶场打开它的通用面板 → 点“靶场…”打开靶场面板（FGU-24）→
+                    // 蓝图下拉选一张、点“投影”（不消耗资源，测试开始，读数实时刷新）→ 点“结束测试”（读数进测试记录）→ Esc 关闭靶场面板。
+                    case 361: StepRangePicked(inStep); break;
+                    case 362: StepRangePlaced(inStep); break;
+                    case 363: StepRangeOpened(inStep); break;
+                    case 364: StepRangeRunning(inStep); break;
+                    case 365: StepRangeClosed(inStep); break;
                     case 346: StepOverridePicked(inStep); break;
                     case 347: StepOverridePlaced(inStep); break;
                     case 348: StepOverridePanel(inStep); break;
@@ -5752,6 +5759,222 @@ namespace GameLogic.EditorTools
             var unlockNodes = Campaign.Economy.ResearchCatalog.Nodes.Where(n => n.IsReady && n.Unlocks.Length > 0).Select(n => n.Id).ToArray();
             Campaign.Economy.ResearchService.CompleteForTests(state, unlockNodes);
             GameClock.SetPaused(SessionState.GetInt(K + "ResearchWasPaused", 0) == 1); // 恢复进研发这一段之前的暂停状态
+            Next(361, "FG5-RND-03：建造菜单“研发”页签选靶场");
+        }
+
+        // ── FG5-RND-03：靶场（建造菜单放置、建筑面板“靶场…”、投影一张蓝图、实时读数、结束测试、Esc 关闭）──
+
+        private static GridCell RangeCell(string key) => new GridCell(SessionState.GetInt(K + key + "X", 0), SessionState.GetInt(K + key + "Y", 0));
+
+        private static void StepRangePicked(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            SessionState.SetInt(K + "RangeWasPaused", GameClock.Paused ? 1 : 0);
+            GameClock.SetPaused(true);
+            // 核心附近按地形找一块放靶场虚影的空地（玩家放置校验）；再登记一座接得上电网的建成靶场（测试捷径：机器施工由 FG3-LOG-02 覆盖），不写死坐标（B25）。
+            GridCell core = HomeGridService.CorePivot(state);
+            GridCell? ghostAt = null;
+            string builtId = null;
+            for (int r = 6; r <= 24 && (ghostAt == null || builtId == null); r++)
+            {
+                for (int dy = -r; dy <= r && (ghostAt == null || builtId == null); dy++)
+                {
+                    for (int dx = -r; dx <= r && (ghostAt == null || builtId == null); dx++)
+                    {
+                        if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != r)
+                        {
+                            continue;
+                        }
+                        var c = new GridCell(core.X + dx, core.Y + dy);
+                        if (ghostAt == null)
+                        {
+                            if (HomeGridService.ValidatePlacement(state, "test_range", c, 0, checkCost: false).Ok)
+                            {
+                                ghostAt = c;
+                            }
+                            continue;
+                        }
+                        if (Math.Abs(c.X - ghostAt.Value.X) < 10 && Math.Abs(c.Y - ghostAt.Value.Y) < 10
+                            || !HomeGridService.ValidatePlacement(state, "test_range", c, 0, checkCost: false).Ok)
+                        {
+                            continue;
+                        }
+                        AddSmokeBuilding(state, "test_range", "range", c);
+                        Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+                        string id = Campaign.Regions.HomeValleyLayout.RegionId + ":smoke_power_range";
+                        BuildingRecord b = HomeGridService.FindBuilding(state, id);
+                        if (b != null && b.PowerState == BuildingPowerState.Powered)
+                        {
+                            b.Health = Campaign.Economy.BuildingOps.MaxDurability("test_range");
+                            builtId = id;
+                            SessionState.SetInt(K + "RangeBuiltX", c.X);
+                            SessionState.SetInt(K + "RangeBuiltY", c.Y);
+                            continue;
+                        }
+                        state.BuildingRecords = state.BuildingRecords.Where(x => x.BuildingId != id).ToArray();
+                        HomeGridService.MapFor(state);
+                        Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+                    }
+                }
+            }
+            SessionState.SetInt(K + "RangeGhostX", ghostAt?.X ?? 0);
+            SessionState.SetInt(K + "RangeGhostY", ghostAt?.Y ?? 0);
+            int tab = Campaign.Grid.GridContent.Categories.ToList().FindIndex(c => c.Id == "research");
+            bool tabClicked = ClickUitk("[BuildModeHudHost]", "BuildCat" + tab);
+            int idx = HudItemIndex("test_range");
+            bool picked = idx >= 0 && ClickUitk("[BuildModeHudHost]", "BuildItem" + idx) && mode != null && mode.SelectedTypeId == "test_range";
+            Check(ghostAt.HasValue && builtId != null && tabClicked && picked, $"点建造菜单“研发”页签里的“靶场”（第 {idx + 1} 项）：选中（{mode?.SelectedTypeId}）；接得上电网的建成靶场 {builtId}");
+            if (ghostAt.HasValue)
+            {
+                HoverWorld(new Vector3(ghostAt.Value.X, 0f, ghostAt.Value.Y));
+            }
+            SessionState.SetInt(K + "RangeSub", 0);
+            Next(362, "鼠标移到空地上，单击放下靶场的虚影");
+        }
+
+        private static void StepRangePlaced(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            GridCell ghostAt = RangeCell("RangeGhost");
+            GridCell builtAt = RangeCell("RangeBuilt");
+            string builtId = Campaign.Regions.HomeValleyLayout.RegionId + ":smoke_power_range";
+            BuildingRecord built = HomeGridService.FindBuilding(state, builtId);
+            int sub = SessionState.GetInt(K + "RangeSub", 0);
+            if (sub == 0)
+            {
+                if (inStep < 0.5)
+                {
+                    return;
+                }
+                SessionState.SetInt(K + "RangeSub", 1);
+                ClickWorld(new Vector3(ghostAt.X, 0f, ghostAt.Y));
+                return;
+            }
+            if (sub == 1)
+            {
+                if (inStep < 1.2)
+                {
+                    return;
+                }
+                BuildingRecord ghost = HomeGridService.BuildingAt(state, ghostAt);
+                Check(ghost != null && ghost.BuildingTypeId == "test_range" && Campaign.Regions.HomeValleyController.IsPlannedGhost(ghost),
+                    $"单击放下靶场的虚影（8×8；状态行“{Campaign.Regions.HomeValleyBuildMode.Current?.StatusText}”）");
+                SessionState.SetInt(K + "RangeSub", 2);
+                RightClickWorld(new Vector3(ghostAt.X, 0f, ghostAt.Y));
+                return;
+            }
+            if (sub == 2)
+            {
+                if (inStep < 1.9)
+                {
+                    return;
+                }
+                Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+                Check(mode != null && mode.IsOpen && mode.SelectedTypeId == null, "右键取消选择（建造模式还开着）");
+                SessionState.SetInt(K + "RangeSub", 3);
+                ClickWorld(built != null ? new Vector3(built.Position.x, 0f, built.Position.y) : new Vector3(builtAt.X, 0f, builtAt.Y));
+                return;
+            }
+            if (inStep < 2.6)
+            {
+                return;
+            }
+            ProductionPanelUIToolkit bp = ProductionPanelUIToolkit.Instance;
+            bool bpOpen = ProductionPanelUIToolkit.IsOpen && bp != null && ProductionPanelUIToolkit.BuildingId == builtId && bp.RangeButton != null
+                          && ProductionPanelUIToolkit.Visible(bp.RangeButton) && bp.ReasonText.Contains("空闲");
+            Check(bpOpen, $"左键点建成的靶场打开它的通用面板：状态“{bp?.ReasonText}”，有“靶场…”按钮");
+            Check(ClickUitk("[ProductionPanelHost]", "PrRange"), "通用面板上点“靶场…”");
+            SessionState.SetInt(K + "RangeSub", 0);
+            Next(363, "靶场面板打开：选蓝图、点“投影”");
+        }
+
+        private static void StepRangeOpened(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            TestRangePanelUIToolkit panel = TestRangePanelUIToolkit.Instance;
+            string builtId = Campaign.Regions.HomeValleyLayout.RegionId + ":smoke_power_range";
+            bool open = TestRangePanelUIToolkit.IsOpen && panel != null && panel.PanelVisible && TestRangePanelUIToolkit.BuildingId == builtId && panel.SlotRowCount == 8
+                        && panel.SlotValue(0) == Localization.GameText.Get("range.target.basic.name") && panel.BlueprintChoices.Count > 0
+                        && panel.ProjectionsEmptyText.Length > 0 && LabelText("[TestRangeHost]", "TestRangeTitle").Contains(Localization.GameText.Get("building.test_range.name"));
+            Check(open, $"靶场面板打开：“{panel?.TitleText}”，8 个靶位（前排标准靶）、蓝图 {panel?.BlueprintChoices.Count} 张、空状态“{panel?.ProjectionsEmptyText}”");
+            CheckNoTextMarkers("靶场面板");
+            // UI Toolkit 红线 8：下拉框选中即生效（玩家点选项 = value 赋值 → ChangeEvent）；先确认下拉框此刻真能点。
+            DropdownField dd = panel?.BlueprintField;
+            bool clickable = dd != null && dd.panel != null && dd.enabledInHierarchy && dd.resolvedStyle.display != DisplayStyle.None && dd.worldBound.width > 0f;
+            Check(clickable, $"蓝图下拉框可见可用（{dd?.worldBound}）");
+            if (clickable)
+            {
+                dd.value = dd.choices[0];
+            }
+            SessionState.SetInt(K + "RangeHist0", state.Research.Range.History.Length);
+            string before = $"{state.Scrap}|{state.TechData}|{state.MachineRecords?.Length ?? 0}";
+            SessionState.SetString(K + "RangeRes0", before);
+            Check(ClickUitk("[TestRangeHost]", "TestRangeProject"), "点“投影”");
+            GameClock.SetPaused(false); // 放开约一秒真实帧：投影打靶、读数刷新
+            Next(364, "测试进行中：投影行与实时读数");
+        }
+
+        private static void StepRangeRunning(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            GameClock.SetPaused(true);
+            CampaignState state = CampaignSession.Current;
+            TestRangePanelUIToolkit panel = TestRangePanelUIToolkit.Instance;
+            string builtId = Campaign.Regions.HomeValleyLayout.RegionId + ":smoke_power_range";
+            panel?.Refresh(force: true);
+            bool running = Campaign.Economy.TestRangeService.IsRunning(builtId) && panel != null && panel.ProjectionRowCount == 1
+                           && panel.RunStateText.Contains("测试中") && panel.ReadingsText.Contains("每秒伤害")
+                           && Campaign.Economy.TestRangeService.SiteOf(builtId) != null && CombatSitesHasNoRange(builtId);
+            string after = $"{state.Scrap}|{state.TechData}|{state.MachineRecords?.Length ?? 0}";
+            Check(running && after == SessionState.GetString(K + "RangeRes0", string.Empty),
+                $"投影出现在靶场里（第 1 行“{panel?.ProjectionRowText(0)}”），测试进行中、读数实时刷新；废料 / 技术数据 / 机器数不变（{after}）；投影不登记进战斗地点表");
+            Check(ClickUitk("[TestRangeHost]", "TestRangeEnd"), "点“结束测试”");
+            Next(365, "测试结束：读数进测试记录，Esc 关闭靶场面板");
+        }
+
+        private static bool CombatSitesHasNoRange(string buildingId) =>
+            Campaign.Combat.CombatSites.Get(Campaign.Economy.TestRangeService.SitePrefix + buildingId) == null;
+
+        private static void StepRangeClosed(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            string builtId = Campaign.Regions.HomeValleyLayout.RegionId + ":smoke_power_range";
+            if (SessionState.GetInt(K + "RangeSub", 0) == 0)
+            {
+                if (inStep < 0.5)
+                {
+                    return;
+                }
+                TestRangePanelUIToolkit panel = TestRangePanelUIToolkit.Instance;
+                panel?.Refresh(force: true);
+                RangeResultRecord last = state.Research.Range.History.LastOrDefault();
+                Check(!Campaign.Economy.TestRangeService.IsRunning(builtId) && state.Research.Range.History.Length == SessionState.GetInt(K + "RangeHist0", 0) + 1
+                      && last != null && last.EndReason == (int)Campaign.Economy.RangeEndReason.Player && panel != null && panel.RunStateText.Contains("没有在测试"),
+                    $"测试结束：读数进测试记录（{last?.Seconds:F1} 秒、每秒伤害 {last?.Dps:F1}、结束原因“{(last != null ? Campaign.Economy.TestRangeService.EndReasonText(last.EndReason) : "无")}”）");
+                SessionState.SetInt(K + "RangeSub", 1);
+                PressKeyKeepMouse(KeyCode.Escape);
+                return;
+            }
+            if (inStep < 1.0)
+            {
+                return;
+            }
+            Check(!TestRangePanelUIToolkit.IsOpen && Campaign.Regions.HomeValleyBuildMode.Current != null && Campaign.Regions.HomeValleyBuildMode.Current.IsOpen,
+                "Esc 关闭靶场面板（建造模式还开着）");
+            SessionState.SetInt(K + "RangeSub", 0);
+            GameClock.SetPaused(SessionState.GetInt(K + "RangeWasPaused", 0) == 1);
             Next(264, "FG3-LOG-04：建造模式里放分流器与地下传送带");
         }
 

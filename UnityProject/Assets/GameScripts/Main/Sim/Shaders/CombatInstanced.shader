@@ -9,6 +9,8 @@
 //            种类 20 液池（外移的波纹）/ 21 冲击波（随时间外扩的冲击环）/ 22 减速网（网格）/ 23 反应残留（斑点）；外圈一道 = 剩余时间。
 //            24 伴飞无人机（X 形机臂 + 四个旋翼环）/ 25 定点哨戒桩（三脚架 + 闪烁信标 + 六边形底座）。颜色 = 区域挂的状态标签色（火 / 酸 / 电……）或阵营色。
 //            仍是程序化的占位外观（正式粒子 / 贴图归美术批次），但不再是和单位一样的圆片。
+// FG5-RND-03（FGR-RND-031）：_Holo = 1 时（靶场的仿真投影与投影靶）单位与弹体改画全息：己方投影青白、投影靶淡紫，
+//            按游戏时间向上滚动的扫描线把圆片镂空成横条（形状差异，不只靠颜色，B15），外圈血量环照画。美术占位（B22）。
 Shader "BinGames/CombatInstanced"
 {
     Properties
@@ -44,6 +46,8 @@ Shader "BinGames/CombatInstanced"
             float _Height;
             // FG2-VFX-02 修复轮：区域 / 无人机动画用游戏时钟（战略暂停时静止、倍速时同步加快），由 CombatRenderer 每帧传入内核时间。
             float _GameTime;
+            // FG5-RND-03：全息画法开关（CombatRenderer.Hologram）。
+            float _Holo;
 
             struct appdata
             {
@@ -312,6 +316,10 @@ Shader "BinGames/CombatInstanced"
                     }
                     return fixed4(lerp(float3(1, 0.95, 0.8), float3(1, 0.82, 0.48), edgeT), 1);
                 }
+                if (_Holo > 0.5)
+                {
+                    col = faction < 0.5 ? float3(0.55, 0.95, 1.0) : float3(0.82, 0.62, 1.0);
+                }
                 if (_Kind > 0.5)
                 {
                     float edge = abs(i.uv.x - 0.5) * 2.0;
@@ -333,6 +341,21 @@ Shader "BinGames/CombatInstanced"
                     // 血量环：从正上方顺时针，缺血部分变暗。
                     float ang = atan2(q.x, q.y) / 6.2831853 + 0.5;
                     return fixed4(ang <= hp ? float3(0.35, 0.95, 0.35) : float3(0.18, 0.18, 0.18), 1);
+                }
+                if (_Holo > 0.5)
+                {
+                    // 全息：扫描线横条镂空（随游戏时间上移；暂停时静止），中心亮核，边缘一圈细亮线。
+                    float scan = frac(i.uv.y * 7.0 - _GameTime * 0.8);
+                    if (scan < 0.38 && r > 0.22 && r < 0.7)
+                    {
+                        discard;
+                    }
+                    float3 rim = faction < 0.5 ? float3(0.85, 1.0, 1.0) : float3(0.95, 0.85, 1.0);
+                    if (faction > 0.5 && frac((i.uv.x + i.uv.y) * 4.0) >= 0.5)
+                    {
+                        col *= 0.72; // 投影靶保留斜纹（与己方投影的形状差异）
+                    }
+                    return fixed4(r > 0.7 ? rim : lerp(rim, col, saturate(r * 1.6)), 1);
                 }
                 if (faction > 0.5)
                 {

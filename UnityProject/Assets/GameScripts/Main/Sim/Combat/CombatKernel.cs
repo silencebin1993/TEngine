@@ -354,6 +354,32 @@ namespace BinGames.Sim.Combat
             _d.Scalars[0] = s;
         }
 
+        /// <summary>FG5-RND-03：场地边界（世界 XZ 轴对齐矩形）。开着时每步末尾：单位与无人机按自身半径钳进矩形（击退、牵引、追击、
+        /// 巡逻都出不去），飞出矩形的弹体作废。O(单位 + 弹体 + 无人机)，只在 AOT 内核里。运行时设置，不进存档。</summary>
+        public void SetArena(double2 min, double2 max)
+        {
+            CombatScalars s = _d.Scalars[0];
+            s.ArenaOn = 1;
+            s.ArenaMin = math.min(min, max);
+            s.ArenaMax = math.max(min, max);
+            _d.Scalars[0] = s;
+        }
+
+        public void ClearArena()
+        {
+            CombatScalars s = _d.Scalars[0];
+            s.ArenaOn = 0;
+            _d.Scalars[0] = s;
+        }
+
+        public bool TryGetArena(out double2 min, out double2 max)
+        {
+            CombatScalars s = _d.Scalars[0];
+            min = s.ArenaMin;
+            max = s.ArenaMax;
+            return s.ArenaOn != 0;
+        }
+
         // ─────────────────────────────── 单位 ───────────────────────────────
 
         public int Spawn(in CombatSpawn spawn)
@@ -766,6 +792,34 @@ namespace BinGames.Sim.Combat
             return n;
         }
 
+        /// <summary>FG5-RND-03（FGR-RND-032“各标签的覆盖率”）：指定阵营的存活、可选中单位里，身上挂着每个状态位的各有几个（<paramref name="perBit"/> 长度 ≥ 32，先清零）。
+        /// 返回参与统计的单位数。逐单位扫描只在内核（AOT）里做，热更层按采样间隔调用一次。</summary>
+        public int CountStatusBits(CombatFaction faction, int[] perBit)
+        {
+            if (perBit == null || perBit.Length < 32)
+            {
+                return 0;
+            }
+            System.Array.Clear(perBit, 0, 32);
+            int n = 0;
+            for (int i = 0; i < _d.Count; i++)
+            {
+                if (!_d.IsAlive(i) || _d.Faction[i] != (byte)faction || !_d.Has(i, CombatUnitFlags.Targetable))
+                {
+                    continue;
+                }
+                n++;
+                uint m = _d.Status[i];
+                while (m != 0u)
+                {
+                    int b = math.tzcnt(m);
+                    m &= m - 1u;
+                    perBit[b]++;
+                }
+            }
+            return n;
+        }
+
         public int CountAlive(CombatFaction faction, CombatUnitKind kind)
         {
             int n = 0;
@@ -977,6 +1031,18 @@ namespace BinGames.Sim.Combat
                 return false;
             }
             drone = _d.Drones[index];
+            return true;
+        }
+
+        /// <summary>FG5-RND-03：只读取一发在飞弹体（自检核对场地边界）。</summary>
+        public bool TryGetProjectile(int index, out CombatProjectile projectile)
+        {
+            if (index < 0 || index >= _d.Projectiles.Length)
+            {
+                projectile = default;
+                return false;
+            }
+            projectile = _d.Projectiles[index];
             return true;
         }
 

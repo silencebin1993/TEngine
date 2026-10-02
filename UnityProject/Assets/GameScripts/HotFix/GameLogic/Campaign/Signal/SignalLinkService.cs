@@ -396,10 +396,12 @@ namespace GameLogic.Campaign.Signal
         {
             SignalUplinkService.CancelPendingForLink(GameText.Get("signal.uplink.reason.silent_night"));
             CampaignState s = CampaignSession.Current;
+            // FG5-RND-03（FG05 第 5 章）：信号在靶场的投影里 → 断链、弹回核心、投影消失。
+            bool brokeProjection = Economy.TestRangeService.OnSilentNightStarted();
             int id = SignalUplinkService.CurrentMachine(s);
             if (id == 0)
             {
-                return false;
+                return brokeProjection;
             }
             RegionControlSystem control = RegionControlSystem.ForRegion(s.SignalCore.UplinkSiteId);
             return control != null && control.ForceBreak(RegionControlChangeReason.SilentNight);

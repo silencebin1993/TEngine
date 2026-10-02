@@ -47,6 +47,8 @@ namespace GameLogic.Campaign.Regions
         public const float AimHalfAngleDeg = 60f;
         /// <summary>命中后到自动满血复位的冷却秒数。</summary>
         public const float RegenSeconds = 6f;
+        /// <summary>FG5-RND-03（FG-GAP-061）：反应日志里训练靶的名字（文本键）。</summary>
+        public const string TrainingTargetLabelKey = "reaction.log.training_target";
 
         /// <summary>一次命中/未命中结果，供 UI/日志/测试读取——STORY-EXECUTION-CARDS.md
         /// "UI/VFX/SFX/日志与同一事件匹配"要求 UI 与日志展示的是同一份数据，不是各自另算。</summary>
@@ -159,6 +161,7 @@ namespace GameLogic.Campaign.Regions
             }
             if (site.TryGetEnemyUnit(LowThreatTargetId, out int existing))
             {
+                site.SetUnitLabel(existing, TrainingTargetLabelKey); // FG-GAP-061：读档重建后同样按“训练靶”记日志。
                 return existing;
             }
             var rec = new RegionEnemyRecord
@@ -186,6 +189,8 @@ namespace GameLogic.Campaign.Regions
                 Home = new Unity.Mathematics.double2(t.Position.x, t.Position.y),
             });
             site.SetEngage(unit, EngageRange, 5f);
+            // FG5-RND-03（FG-GAP-061）：训练靶是中立的练习目标，反应日志 / 弹字的目标写“训练靶”，不写“敌方单位”。
+            site.SetUnitLabel(unit, TrainingTargetLabelKey);
             return unit;
         }
 

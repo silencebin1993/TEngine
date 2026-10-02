@@ -107,6 +107,9 @@ namespace GameLogic.UI.Kit
         private Label _power;
         private Button _ports;
         private Button _grid;
+        /// <summary>FG5-RND-03：靶场的“靶场…”按钮（只在靶场上显示）。</summary>
+        private Button _range;
+        public Button RangeButton => _range;
         private Button _diagnose;
         private Button _clear;
         private Label _message;
@@ -314,6 +317,7 @@ namespace GameLogic.UI.Kit
             _power = root.Q<Label>("PrPower");
             _ports = root.Q<Button>("PrPorts");
             _grid = root.Q<Button>("BpGrid");
+            _range = root.Q<Button>("PrRange");
             _diagnose = root.Q<Button>("PrDiagnose");
             _clear = root.Q<Button>("BpClear");
             _message = root.Q<Label>("PrMessage");
@@ -323,6 +327,7 @@ namespace GameLogic.UI.Kit
             _help.clicked += OpenCodex;
             _ports.clicked += OpenPorts;
             _grid.clicked += OpenGrid;
+            _range.clicked += OpenRange;
             _diagnose.clicked += OpenDiagnosis;
             _clear.clicked += () => ClearBuffers();
             _copy.clicked += AskCopySettings;
@@ -481,6 +486,7 @@ namespace GameLogic.UI.Kit
             RefreshPower(b);
             _ports.SetEnabled(GridContent.PortsOf(b.BuildingTypeId).Count > 0);
             _grid.EnableInClassList("bn-hidden", !HomeValleyPowerGrid.IsPowerRelevantType(b.BuildingTypeId));
+            _range.EnableInClassList("bn-hidden", !TestRangeService.IsRange(b));
             _clear.SetEnabled(BuildingOps.BufferedCount(state, b) > 0);
         }
 
@@ -490,6 +496,7 @@ namespace GameLogic.UI.Kit
             _help.text = GameText.Get("prod.panel.help");
             _ports.text = GameText.Get("prod.panel.ports");
             _grid.text = GameText.Get("bp.open_grid");
+            _range.text = GameText.Get("range.panel.open");
             _diagnose.text = GameText.Get("prod.panel.diagnose");
             _clear.text = GameText.Get("bp.clear");
             _hint.text = GameText.Get("prod.panel.hint");
@@ -1352,6 +1359,14 @@ namespace GameLogic.UI.Kit
             string id = BuildingId;
             SetOpen(false);
             PowerPanelUIToolkit.OpenFor(id);
+        }
+
+        /// <summary>FG5-RND-03：靶场 → 打开靶场面板（投影、靶子、读数、对比，FGU-24）。</summary>
+        public void OpenRange()
+        {
+            string id = BuildingId;
+            SetOpen(false);
+            TestRangePanelUIToolkit.Open(id);
         }
 
         public void OpenDiagnosis()

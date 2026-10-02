@@ -325,6 +325,7 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
+            Economy.TestRangeService.NoteEnemyDefeated(state, enemy.EnemyTypeId); // FG5-RND-03（FGR-RND-030）：击败的敌人类型解锁对应的阵营靶子。
             MarkDestroyed(state, enemy.EnemyInstanceId);
             SpawnEnemyLoot(state, enemy);
             Log.Info($"[FoundryOutpostRegion] 敌人 {enemy.EnemyInstanceId} 已阵亡。");

@@ -17,8 +17,15 @@ namespace GameLogic.Campaign.Combat
         public bool Known;
         /// <summary>机器的 LogicId（其余为 0）。</summary>
         public int LogicId;
+        /// <summary>FG5-RND-03：内核单位 ID（只在地点起过名字的单位上填，用来取它生效的固件；显示不用）。</summary>
+        public int UnitId;
         /// <summary>敌人的类型内容 ID（其余为空）。</summary>
         public string ContentId;
+        /// <summary>FG5-RND-03（FG-GAP-061）：地点给这个单位起的名字（文本键 + 参数；训练靶、靶场投影与投影靶）。非空时优先于按种类的通用名。</summary>
+        public string LabelKey;
+        public string LabelArg;
+        /// <summary>FG5-RND-03：<see cref="LabelArg"/> 本身是文本键（靶子名等），显示时再翻译；false = 原样（玩家起的蓝图名）。</summary>
+        public bool LabelArgIsKey;
     }
 
     /// <summary>反应日志的一条：同一步里同一条反应合并成一条（次数 = 这一步触发了几次，触发者 / 目标 = 这一步最后一次的）。</summary>
@@ -124,6 +131,10 @@ namespace GameLogic.Campaign.Combat
             if (!p.Known)
             {
                 return GameText.Get("reaction.log.unknown");
+            }
+            if (!string.IsNullOrEmpty(p.LabelKey))
+            {
+                return string.IsNullOrEmpty(p.LabelArg) ? GameText.Get(p.LabelKey) : GameText.Format(p.LabelKey, p.LabelArgIsKey ? GameText.Get(p.LabelArg) : p.LabelArg);
             }
             switch (p.Kind)
             {
