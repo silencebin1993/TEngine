@@ -49,6 +49,9 @@ namespace GameLogic.Settings
         /// <summary>FG3-LOG-01：建造模式叠加层的格线开关（默认开；旧设置 JSON 没有这个字段时按默认补齐）。</summary>
         public bool BuildGridLinesEnabled = true;
 
+        /// <summary>FG4-ECO-09（FGR-ECO-060“远征回来时自动打开（可以在设置里关闭）”）：远征回来时自动打开离家报告（默认开；旧设置 JSON 没有这个字段时按默认补齐）。</summary>
+        public bool AwayReportAutoOpen = true;
+
         /// <summary>FG0-DATA-01（FGR-ARC-006）：界面语言代码，见 <see cref="GameLogic.Localization.GameLanguageCodes"/>。
         /// 存语言代码而不是枚举整数——以后加语言、调整枚举顺序都不会把老玩家的设置读成别的语言；
         /// 读不懂的代码回落简体中文（<see cref="GameSettings.Language"/>）。旧设置 JSON 没有这个字段时按默认值补齐。</summary>
@@ -369,6 +372,19 @@ namespace GameLogic.Settings
 
         /// <summary>FG3-LOG-01（FG03 第 4 节“可以开关格线显示”）：建造模式叠加层画不画格线。本机偏好，跨战役保留。</summary>
         public static bool BuildGridLinesEnabled => Data.BuildGridLinesEnabled;
+
+        /// <summary>FG4-ECO-09：远征回来时是否自动打开离家报告。本机偏好，跨战役保留；关掉后报告照常生成，只发一条通知。</summary>
+        public static bool AwayReportAutoOpen => Data.AwayReportAutoOpen;
+
+        public static void SetAwayReportAutoOpen(bool enabled)
+        {
+            if (Data.AwayReportAutoOpen == enabled)
+            {
+                return;
+            }
+            Data.AwayReportAutoOpen = enabled;
+            Save();
+        }
 
         public static void SetBuildGridLinesEnabled(bool enabled)
         {

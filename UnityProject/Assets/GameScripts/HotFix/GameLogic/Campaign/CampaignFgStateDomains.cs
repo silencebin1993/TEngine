@@ -557,6 +557,14 @@ namespace GameLogic.Campaign
         /// 进存档（审查修复）：读档后接着同一基准对账，读档到第一次对账之间的销毁量不丢（内核的累计量本身也进存档）。-1 = 还没对过账。</summary>
         public int WasteSeenHandle = -1;
         public long WasteSeenMl;
+        /// <summary>FG4-ECO-09（FGR-ECO-080“持续缺料 / 输出持续堵塞”）：当前卡住的种类（0 = 没卡，1 = 缺料，2 = 输出堵塞）、从哪一世界步开始、这一段是否已经告过警。
+        /// 随生产步 O(1) 更新（不每帧遍历）；进存档：读档后接着同一段计时，不会因为读档重新告警或晚告警。</summary>
+        public int JamKind;
+        public long JamSinceTick;
+        public bool JamAlerted;
+        /// <summary>FG4-ECO-09（离家报告的瓶颈）：这座建筑在第 <see cref="AwaySerial"/> 份离家报告期间缺每种物品的世界步数（随生产步 O(1) 累加，结算时汇总）。</summary>
+        public int AwaySerial;
+        public ItemStackRecord[] AwayStarve = Array.Empty<ItemStackRecord>();
     }
 
     /// <summary>FG4-ECO-05：生产统计的一桶（游戏时钟的第 <see cref="Index"/> 桶）。</summary>
@@ -997,6 +1005,160 @@ namespace GameLogic.Campaign
         /// <summary>FG4-ECO-08（FGR-ECO-050 / 051；FG04 第 6 节“统计（按时间窗口聚合保存）”）：生产统计（四个时间窗口的产量 / 消耗桶、持续赤字）与资源顶栏的固定物品。
         /// 唯一写入口 <see cref="Economy.ProductionStats"/> / <see cref="Economy.ResourcePins"/>。旧存档没有 = 空（读档时补空域，从读档那一刻开始统计）。</summary>
         public ProductionStatsState Production = new ProductionStatsState();
+        /// <summary>FG4-ECO-09（FGR-ECO-060 离家报告；FG04 第 6 节“离家报告（最近 3 份）”）：正在进行的那份（远征出发成功时开、撤离 / 放弃结算时关）与最近几份已结算的报告。
+        /// 唯一写入口 <see cref="Economy.AwayReportService"/>。旧存档没有 = 空（没有报告；读档时正在远征的旧档从读档那一刻开一份，不伪造之前的记录）。</summary>
+        public AwayReportState AwayReports = new AwayReportState();
+    }
+
+    /// <summary>FG4-ECO-09：离家报告域。</summary>
+    [Serializable]
+    public sealed class AwayReportState
+    {
+        /// <summary>有一份正在记的报告（远征在外）。JsonUtility 不存 null，所以用标志位 + 常驻对象。</summary>
+        public bool HasOpen;
+        public AwayReportRecord Open = new AwayReportRecord();
+        /// <summary>已结算的报告，旧的在前、最新的在最后（只保留 away.reports_keep 份）。</summary>
+        public AwayReportRecord[] Reports = Array.Empty<AwayReportRecord>();
+        /// <summary>下一份报告的序号（确定性，读档后接着编）。</summary>
+        public int NextSerial = 1;
+    }
+
+    /// <summary>FG4-ECO-09：一份离家报告。所有数量都在事情发生的那一刻累加（与观察无关，FGR-BASE-021），结算时一次性补上“开始 / 结束差额”类的读数。</summary>
+    [Serializable]
+    public sealed class AwayReportRecord
+    {
+        public int Serial;
+        /// <summary>远征的目标地点（区域 ID）。</summary>
+        public string RegionId = string.Empty;
+        public long StartTick;
+        /// <summary>结算的世界步（-1 = 还在进行）。</summary>
+        public long EndTick = -1;
+        /// <summary>0 = 进行中，1 = 撤离回家，2 = 全灭放弃，3 = 其它方式结束（如读档时远征已不在）。</summary>
+        public int Outcome;
+        /// <summary>出发时的远征队（机器 LogicId）。</summary>
+        public int[] Members = Array.Empty<int>();
+        /// <summary>FG4-ECO-09 修复轮：结算时固化的远征队结局（已结算的报告是历史记录，之后名单里的机器再阵亡也不改写它）。
+        /// TeamSettled = 已固化；MembersLost = 结算那一刻名单里已阵亡的台数。旧档没有这两项 = 未固化，显示时按此刻的机器状态现算。</summary>
+        public bool TeamSettled;
+        public int MembersLost;
+        /// <summary>生产：离家期间的产出 / 消耗（与统计面板同一记账口径；固体按件，流体按毫升）。</summary>
+        public ItemAmountRecord[] Produced = Array.Empty<ItemAmountRecord>();
+        public ItemAmountRecord[] Consumed = Array.Empty<ItemAmountRecord>();
+        /// <summary>瓶颈：结算时从各生产建筑的离家缺料计数汇总（物品 + 建筑 + 世界步数，缺得最久的在前）。</summary>
+        public AwayStarveRecord[] Starve = Array.Empty<AwayStarveRecord>();
+        /// <summary>电力：停电段（有建筑因缺电停机的连续时间）。</summary>
+        public AwayOutageRecord[] Outages = Array.Empty<AwayOutageRecord>();
+        public int OutagesDropped;
+        /// <summary>超出条数上限的那一段停电还没恢复（只计数、不逐条记时用它判断“同一段”）。</summary>
+        public bool OutageOverflowOpen;
+        /// <summary>结算时最后一段停电还没恢复（显示“到结算时还没恢复”）。</summary>
+        public bool OutageOngoingAtEnd;
+        /// <summary>电力：离家期间每游戏秒累加的发电 / 需要 / 实际供上（电 × 秒）、缺电秒数、记了多少秒、各发电类别（电 × 秒）、储能充入 / 放出（电 × 秒）。</summary>
+        public long PowerSeconds;
+        public double SupplySum;
+        public double DemandSum;
+        public double DeliveredSum;
+        public long ShortSeconds;
+        public double[] ClassSum = Array.Empty<double>();
+        public double ChargedSum;
+        public double DischargedSum;
+        /// <summary>出发时的累计读数（结算时求差）：燃油累计（毫升）、燃油耗尽次数、管线四项累计（毫升）、清带送回 / 丢弃、分流器累计分出。</summary>
+        public long BaseFuelMl;
+        public long BaseFuelOuts;
+        public long BasePumpedMl;
+        public long BaseDeliveredMl;
+        public long BaseFlushedMl;
+        public long BaseRemovedMl;
+        public long BaseCleared;
+        public long BaseDiscarded;
+        public long BaseSplit;
+        /// <summary>传送带各端口累计收下（送达建筑）/ 推出（推上传送带）之和。</summary>
+        public long BaseBeltIn;
+        public long BaseBeltOut;
+        /// <summary>结算时求出的差额（进行中的报告显示时现算）。</summary>
+        public long FuelMl;
+        public long FuelOuts;
+        public long PumpedMl;
+        public long DeliveredMl;
+        public long FlushedMl;
+        public long RemovedMl;
+        public long Cleared;
+        public long Discarded;
+        public long Split;
+        public long BeltIn;
+        public long BeltOut;
+        /// <summary>机器变化：离家期间受伤 / 阵亡的机器（家园与远征队）。</summary>
+        public AwayMachineRecord[] Machines = Array.Empty<AwayMachineRecord>();
+        public int MachinesDropped;
+        /// <summary>事件：离家期间发生、按 fg.TbNotifyType.awaySection 记进报告的通知（突袭、天气、事件、研究、建筑受损、电力事件…）。</summary>
+        public AwayEntryRecord[] Entries = Array.Empty<AwayEntryRecord>();
+        public int EntriesDropped;
+        /// <summary>常驻规则：离家期间的规则动作（与规则触发日志同一条记录；FG-GAP-098）。</summary>
+        public RuleLogRecord[] Rules = Array.Empty<RuleLogRecord>();
+        public int RulesTotal;
+        /// <summary>远征的反应伤害归因场次（FG2-FW-04；GAP-055 远征段）。空 = 没有。</summary>
+        public string ReactionSessionId = string.Empty;
+    }
+
+    /// <summary>FG4-ECO-09：一座建筑在离家期间缺一种物品的累计步数。</summary>
+    [Serializable]
+    public sealed class AwayStarveRecord
+    {
+        public string ItemId;
+        public string BuildingId;
+        public long Ticks;
+        public float X;
+        public float Y;
+    }
+
+    /// <summary>FG4-ECO-09：一段停电。</summary>
+    [Serializable]
+    public sealed class AwayOutageRecord
+    {
+        public long StartTick;
+        /// <summary>-1 = 还没恢复。</summary>
+        public long EndTick = -1;
+        /// <summary>同时缺电停机的建筑最多几座。</summary>
+        public int Peak;
+        /// <summary>第一座停机的建筑与位置（定位用）。</summary>
+        public string BuildingId = string.Empty;
+        public float X;
+        public float Y;
+    }
+
+    /// <summary>FG4-ECO-09：一台机器在离家期间的变化。</summary>
+    [Serializable]
+    public sealed class AwayMachineRecord
+    {
+        public int LogicId;
+        /// <summary>出事时在远征队里（否则在家园 / 别处）。</summary>
+        public bool Expedition;
+        public float MinHealth;
+        public float MaxHealth;
+        public bool Died;
+        public long DiedTick;
+        public string RegionId = string.Empty;
+        public float X;
+        public float Y;
+        /// <summary>FG4-ECO-09 修复轮：结算时固化的耐久（受伤未阵亡的机器；已结算的报告不随之后的维修 / 再受伤变化）。旧档没有 = 显示时取此刻的耐久。</summary>
+        public bool HasEndHealth;
+        public float EndHealth;
+        public float EndMaxHealth;
+    }
+
+    /// <summary>FG4-ECO-09：一条从通知转来的报告条目（细节是文本或文本键，显示时按当前语言解析）。</summary>
+    [Serializable]
+    public sealed class AwayEntryRecord
+    {
+        public string Section = string.Empty;
+        public string TypeId = string.Empty;
+        public string Detail = string.Empty;
+        public long Tick;
+        public bool HasLocation;
+        public string RegionId = string.Empty;
+        public float X;
+        public float Y;
+        public float Z;
     }
 
     /// <summary>FG4-ECO-08：生产统计与资源顶栏。</summary>
@@ -1284,6 +1446,7 @@ namespace GameLogic.Campaign
                     r.FluidOut ??= Array.Empty<bool>();
                     r.FluidHeld ??= Array.Empty<long>();
                     r.BurnTarget ??= string.Empty;
+                    r.AwayStarve ??= Array.Empty<ItemStackRecord>(); // FG4-ECO-09
                 }
             }
             // FG4-ECO-03：装配站材料缓存、废料代付开关、配方记忆（旧存档没有 = 空 / 未设置）。
@@ -1419,6 +1582,20 @@ namespace GameLogic.Campaign
             }
             ps.Deficits ??= Array.Empty<DeficitRecord>();
             ps.Pins ??= Array.Empty<PinnedItemRecord>();
+            // FG4-ECO-09：离家报告（旧存档没有 = 空域）。
+            s.Stats.AwayReports ??= new AwayReportState();
+            AwayReportState ar = s.Stats.AwayReports;
+            ar.Open ??= new AwayReportRecord();
+            ar.Reports ??= Array.Empty<AwayReportRecord>();
+            if (ar.NextSerial < 1)
+            {
+                ar.NextSerial = 1;
+            }
+            EnsureAwayReport(ar.Open);
+            foreach (AwayReportRecord r in ar.Reports)
+            {
+                EnsureAwayReport(r);
+            }
             s.SaveHistory ??= new SaveHistoryState();
             s.SaveHistory.Notices ??= Array.Empty<SaveNoticeRecord>();
             s.Notifications ??= new NotificationHistoryState();
@@ -1431,6 +1608,35 @@ namespace GameLogic.Campaign
                     r.Members ??= Array.Empty<NotificationMemberRecord>();
                     r.SourceKey ??= string.Empty;
                     r.SourceArg ??= string.Empty;
+                }
+            }
+        }
+
+        /// <summary>FG4-ECO-09：一份离家报告补空数组。</summary>
+        public static void EnsureAwayReport(AwayReportRecord r)
+        {
+            if (r == null)
+            {
+                return;
+            }
+            r.RegionId ??= string.Empty;
+            r.Members ??= Array.Empty<int>();
+            r.Produced ??= Array.Empty<ItemAmountRecord>();
+            r.Consumed ??= Array.Empty<ItemAmountRecord>();
+            r.Starve ??= Array.Empty<AwayStarveRecord>();
+            r.Outages ??= Array.Empty<AwayOutageRecord>();
+            r.ClassSum ??= Array.Empty<double>();
+            r.Machines ??= Array.Empty<AwayMachineRecord>();
+            r.Entries ??= Array.Empty<AwayEntryRecord>();
+            r.Rules ??= Array.Empty<RuleLogRecord>();
+            r.ReactionSessionId ??= string.Empty;
+            foreach (RuleLogRecord e in r.Rules)
+            {
+                if (e != null)
+                {
+                    e.Args ??= Array.Empty<string>();
+                    e.Key ??= string.Empty;
+                    e.EntityId ??= string.Empty;
                 }
             }
         }

@@ -29,6 +29,7 @@ public sealed partial class NotifyType : Luban.BeanBase
         AggregateWindowSeconds = _buf.ReadFloat();
         KeepInHistory = _buf.ReadInt();
         SortOrder = _buf.ReadInt();
+        AwaySection = _buf.ReadString();
     }
 
     public static NotifyType DeserializeNotifyType(ByteBuf _buf)
@@ -76,6 +77,10 @@ public sealed partial class NotifyType : Luban.BeanBase
     /// 筛选下拉里的排序
     /// </summary>
     public readonly int SortOrder;
+    /// <summary>
+    /// FG4-ECO-09:离家期间发生时记进离家报告的哪一段(production/bottleneck/power/weather/machines/raid/event/research/buildings;none=不记);对照在 fgdata_away.py
+    /// </summary>
+    public readonly string AwaySection;
    
     public const int __ID__ = 321448336;
     public override int GetTypeId() => __ID__;
@@ -97,6 +102,7 @@ public sealed partial class NotifyType : Luban.BeanBase
         + "aggregateWindowSeconds:" + AggregateWindowSeconds + ","
         + "keepInHistory:" + KeepInHistory + ","
         + "sortOrder:" + SortOrder + ","
+        + "awaySection:" + AwaySection + ","
         + "}";
     }
 }

@@ -33,6 +33,7 @@ namespace GameLogic.UI.Kit
             Create<ItemsPanelUIToolkit>("[ItemsPanelHost]");
             Create<RulesPanelUIToolkit>("[RulesPanelHost]"); // FG4-ECO-06：常驻规则（30073，固件库之上、物资与图鉴之下：“?”打开的图鉴盖在它上面）。 // FG4-ECO-01：物资面板（30074，暂停菜单与固件库之上、图鉴之下：点图标打开的图鉴盖在它上面）。
             Create<RosterPanelUIToolkit>("[RosterPanelHost]"); // FG4-ECO-07：机器名册（30071，暂停菜单之上、固件库之下：“?”打开的图鉴盖在它上面）。
+            Create<AwayReportPanelUIToolkit>("[AwayReportHost]"); // FG4-ECO-09：离家报告（30078，统计 / 反应记录之上、按键面板之下）。
             Create<StatsPanelUIToolkit>("[StatsPanelHost]"); // FG2-FW-04：统计面板（战斗 · 反应伤害归因；FG4-ECO-08 加生产段，30076，暂停菜单之上）。
             Create<ReactionLogPanelUIToolkit>("[ReactionLogHost]"); // FG2-FW-04：反应记录（日志 / 伤害归因 / 反应图鉴，30077，暂停菜单之上）。
             Create<KeyBindingsPanelUIToolkit>("[KeyBindingsHost]");
@@ -72,6 +73,7 @@ namespace GameLogic.UI.Kit
             ItemsPanelUIToolkit.Close();
             RulesPanelUIToolkit.Close();
             RosterPanelUIToolkit.Close();
+            AwayReportPanelUIToolkit.Close();
             ConstructionQueuePanelUIToolkit.Close();
             BeltPortPanelUIToolkit.Close();
             BeltNodePanelUIToolkit.Close();

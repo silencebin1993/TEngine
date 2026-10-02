@@ -216,6 +216,15 @@ namespace GameLogic.Core
         /// <summary>FG4-ECO-08：第一次用产线规划助手算出结果。引导内容在 FG15-UX-04：只计算不建造、一键固定为目标。</summary>
         public const string PlannerFirstPlan = "planner.first_plan";
 
+        /// <summary>FG4-ECO-09：第一次打开离家报告（手动或自动）——图鉴“离家报告与家园告警”随之解锁。</summary>
+        public const string AwayReportFirstOpen = "away.report_first_open";
+        /// <summary>FG4-ECO-09：第一次在远征回来时自动打开离家报告。引导内容在 FG15-UX-04：点条目定位、可在设置里关掉自动打开。</summary>
+        public const string AwayFirstAutoOpen = "away.first_auto_open";
+        /// <summary>FG4-ECO-09：第一次出现“持续缺料 / 输出持续堵塞”告警。引导内容在 FG15-UX-04：看瓶颈、用分流器 / 回收站 / 废液池。</summary>
+        public const string AlarmFirstFactoryJam = "alarm.first_factory_jam";
+        /// <summary>FG4-ECO-09：第一次出现“机器重伤”告警。引导内容在 FG15-UX-04：送修、维修台。</summary>
+        public const string AlarmFirstMachineWounded = "alarm.first_machine_wounded";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -251,6 +260,7 @@ namespace GameLogic.Core
             RulesPanelFirstOpen, RulesFirstCreated, RulesFirstTriggered, RulesFirstConflict,
             RosterPanelFirstOpen, RosterFirstRoleChange, RosterFirstRename,
             StatsProductionFirstOpen, StatsFirstDeficit, StatsFirstPin, PlannerFirstPlan,
+            AwayReportFirstOpen, AwayFirstAutoOpen, AlarmFirstFactoryJam, AlarmFirstMachineWounded,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

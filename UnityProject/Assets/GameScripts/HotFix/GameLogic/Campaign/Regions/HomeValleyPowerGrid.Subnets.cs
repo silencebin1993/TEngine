@@ -725,6 +725,8 @@ namespace GameLogic.Campaign.Regions
             {
                 CheckStorageEmpty();
             }
+            // FG4-ECO-09：远征在外时每游戏秒累加离家报告的发电（按类别）/ 需要 / 实际供上 / 储能充放与缺电秒数（O(电网 × 类别)）。
+            Economy.AwayReportService.OnPowerSecond(state, _kernel);
             long every = Math.Max(1L, (long)Math.Round(SampleSeconds));
             if (second % every == 0)
             {

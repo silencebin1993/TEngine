@@ -259,6 +259,8 @@ namespace GameLogic.Campaign.Regions
                 brownoutIds, null, unconnectedIds, kernel.SubnetCount);
             _summaryValid = true;
             SummaryVersion++;
+            // FG4-ECO-09：远征在外时按“此刻缺电停机的建筑”开 / 关离家报告里的一段停电（O(1)；结算结果只在这里变）。
+            Economy.AwayReportService.OnPowerApplied(state, brownoutIds);
             return new GridSummary(totalSupply, totalDemand, Math.Max(0f, totalDemand - totalSupply),
                 brownoutIds, order.ToArray(), unconnectedIds, kernel.SubnetCount);
         }

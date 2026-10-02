@@ -150,6 +150,8 @@ namespace GameLogic.Campaign.Economy
             public long TheoryCycle;
             /// <summary>FG4-ECO-03：原因里的固件（刻录台的刻录目标）。</summary>
             public string ReasonTarget;
+            /// <summary>FG4-ECO-09：这座建筑已登记在告警的“工厂堵塞”集合里（运行时量；生产步里用它代替集合查找，保持 O(1) 且不比较字符串）。</summary>
+            public bool JamListed;
             /// <summary>FG4-ECO-03：这座建筑是固件刻录台（唯一配方的种类是 firmware：产出是固件芯片，进固件库）。</summary>
             public bool IsBurner => Def.FixedRecipe != null && Def.FixedRecipe.Kind == RecipeKindFirmware;
             public string Id => Building?.BuildingId;
@@ -880,7 +882,9 @@ namespace GameLogic.Campaign.Economy
             foreach (Producer p in Ordered)
             {
                 StepOne(state, p, ticks, worldHz);
-                RecordStarve(p, ticks);
+                RecordStarve(state, p, ticks);
+                // FG4-ECO-09（FGR-ECO-080“持续缺料 / 输出持续堵塞”）：卡住计时与一次性告警，O(1)，随生产步。
+                Regions.HomeValleyAlarms.TrackProducer(state, p);
                 if (p.WorkedThisStep && p.Def.VibrationPerMinute > 0f)
                 {
                     vibrationRate += p.Def.VibrationPerMinute;
@@ -2505,16 +2509,22 @@ namespace GameLogic.Campaign.Economy
         /// FG4-ECO-08（瓶颈查找）：这一步缺料 / 缺流体（缺的是某种具体物品）时，把步数记进这座建筑当前桶的“缺 X”。O(1)，随生产步（不每帧）。
         /// 脚下废墟拆完（回收站没有可拆的）与废液池空闲不算缺料——那不是产线缺某种输入。
         /// </summary>
-        private static void RecordStarve(Producer p, int ticks)
+        private static void RecordStarve(CampaignState state, Producer p, int ticks)
         {
-            if ((p.State != ProdState.MissingInput && p.State != ProdState.MissingFluid) || p.ReasonItem == null
-                || p.Reason == ProdReason.RuinDepleted || p.Reason == ProdReason.WasteIdle)
+            if (!IsStarvedOnItem(p))
             {
                 return;
             }
             ProducerStatBucket b = Bucket(p.Rec, _statWorldHz);
             Add(ref b.Starve, p.ReasonItem.Id, ticks);
+            // FG4-ECO-09：远征在外时同时记进离家报告的瓶颈（记在建筑自己身上，O(1)）。
+            AwayReportService.OnStarve(state, p.Rec, p.ReasonItem.Id, ticks);
         }
+
+        /// <summary>这一步缺料 / 缺流体、且缺的是某种具体物品（瓶颈、离家报告与“持续缺料”告警同一判定）。脚下废墟拆完、废液池空闲不算。</summary>
+        public static bool IsStarvedOnItem(Producer p) =>
+            p != null && (p.State == ProdState.MissingInput || p.State == ProdState.MissingFluid) && p.ReasonItem != null
+            && p.Reason != ProdReason.RuinDepleted && p.Reason != ProdReason.WasteIdle;
 
         /// <summary>完成一份：份数与产出记进当前桶。</summary>
         private static void RecordCompletion(Producer p)

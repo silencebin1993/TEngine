@@ -75,6 +75,8 @@ namespace GameLogic.UI.Kit
             // FG4-ECO-06（FGU-15）：常驻规则面板盖在暂停菜单上面，关掉回到暂停菜单。
             RulesButton = Bind(root, "PauseRules", "pause.rules", RulesPanelUIToolkit.Open);
             RosterButton = Bind(root, "PauseRoster", "pause.roster", RosterPanelUIToolkit.Open); // FG4-ECO-07
+            // FG4-ECO-09（FGR-ECO-060“随时可以查看最近 3 份报告”）：离家报告盖在暂停菜单上面，关掉回到暂停菜单。
+            AwayReportButton = Bind(root, "PauseAwayReport", "pause.away_report", AwayReportPanelUIToolkit.Open);
             Bind(root, "PauseSaveQuit", "ui.pause.save_and_quit", AskSaveAndQuit);
             BindCamera(root);
             BindReactionFeedback(root);
@@ -178,6 +180,11 @@ namespace GameLogic.UI.Kit
 
         // ── FG2-FW-04：战斗反馈（FGR-FW-043“慢放和镜头推动都可以在设置里关闭”；卡片“慢放、镜头推动、弹字三个设置开关”；FGR-SYS-020 游戏性）──
         private Toggle _reactionPopups;
+        private Toggle _awayAutoOpen;
+
+        /// <summary>FG4-ECO-09：暂停菜单“离家报告”按钮与“远征回来时自动打开离家报告”开关（FGR-ECO-060“可以在设置里关闭”）。</summary>
+        public Button AwayReportButton { get; private set; }
+        public Toggle AwayAutoOpenToggle => _awayAutoOpen;
         private Toggle _reactionSlowMotion;
         private Toggle _reactionNudge;
 
@@ -206,6 +213,8 @@ namespace GameLogic.UI.Kit
                 SyncReactionToggles();
             });
             ReactionLogButton = Bind(root, "PauseReactionLog", "pause.reaction_log", ReactionLogPanelUIToolkit.Open);
+            _awayAutoOpen = BindToggle(root, "PauseAwayAutoOpen", "pause.away_auto", Settings.GameSettings.SetAwayReportAutoOpen,
+                () => InputDisplay.ExpandActionTokens(GameText.Get("away.panel.auto_open_tip")));
             SyncReactionToggles();
         }
 
@@ -226,6 +235,7 @@ namespace GameLogic.UI.Kit
         public void SyncReactionToggles()
         {
             _reactionPopups?.SetValueWithoutNotify(Settings.GameSettings.ReactionPopupsEnabled);
+            _awayAutoOpen?.SetValueWithoutNotify(Settings.GameSettings.AwayReportAutoOpen);
             _reactionSlowMotion?.SetValueWithoutNotify(Settings.GameSettings.ReactionSlowMotionEnabled);
             _reactionNudge?.SetValueWithoutNotify(Settings.GameSettings.ReactionCameraNudgeEnabled);
         }

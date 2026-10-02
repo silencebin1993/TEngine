@@ -675,6 +675,10 @@ namespace GameLogic.Campaign.Regions
                     CampaignExposureLedger.GrantAlienTechForExpedition(state, manifest, regionAfter.RegionId, regionAfter.ExpeditionCount);
                 }
 
+                // ── FG4-ECO-09：离家报告从出发成功的这一刻开始记（下面的出发后存档把它存进去）──────────────
+                Economy.AwayReportService.Begin(state,
+                    regionAfter?.RegionId ?? (target == ExpeditionTarget.FoundryOutpost ? FoundryOutpostLayout.RegionId : FracturedCityLayout.RegionId), manifest);
+
                 // ── 控制恢复：新区域固定以战略视角开场、无遗留直控目标（见
                 // FracturedCityController/FoundryOutpostController.SetupCameraDirector 的
                 // startInStrategy:true），本步骤无需额外动作，这里只显式记一条日志确认该不变量，

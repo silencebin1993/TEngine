@@ -115,6 +115,39 @@ namespace GameLogic.Notifications
 
         public static LocateDelegate LocateHandler;
 
+        /// <summary>
+        /// FG4-ECO-09 修复轮（审查 P2）：按通知类型登记的“打开去处”执行者——没有世界位置、但有对应面板的通知（离家报告）点击后打开那个面板。
+        /// 界面层登记（同一类型后登记的覆盖先登记的），返回是否打开成功。
+        /// </summary>
+        private static readonly Dictionary<string, Func<NotificationEntry, bool>> OpenHandlers = new Dictionary<string, Func<NotificationEntry, bool>>(StringComparer.Ordinal);
+
+        public static void RegisterOpenHandler(string typeId, Func<NotificationEntry, bool> handler)
+        {
+            if (string.IsNullOrEmpty(typeId))
+            {
+                return;
+            }
+            if (handler == null)
+            {
+                OpenHandlers.Remove(typeId);
+                return;
+            }
+            OpenHandlers[typeId] = handler;
+        }
+
+        /// <summary>这条通知有没有“打开去处”的执行者（通知中心据此把行按钮显示成“打开”）。</summary>
+        public static bool HasOpenHandler(NotificationEntry entry) => entry?.Type?.Id != null && OpenHandlers.ContainsKey(entry.Type.Id);
+
+        /// <summary>打开这条通知的去处（没有登记执行者或打开失败时返回 false）。</summary>
+        public static bool TryOpen(NotificationEntry entry)
+        {
+            if (entry?.Type?.Id == null || !OpenHandlers.TryGetValue(entry.Type.Id, out Func<NotificationEntry, bool> handler))
+            {
+                return false;
+            }
+            return handler(entry);
+        }
+
         /// <summary>当前区域 ID（通知产生时记录在成员上，定位时与当前区域比对）。GameRoot 注入。</summary>
         public static Func<string> RegionProvider;
 
@@ -217,6 +250,8 @@ namespace GameLogic.Notifications
                 }
             }
             entry.LastRealtime = now;
+            // FG4-ECO-09：离家期间发生、登记了离家报告分段的通知，逐条记进正在进行的离家报告（不受聚合影响；O(1)）。
+            Campaign.Economy.AwayReportService.OnNotification(_bound, def, member);
             WriteThrough(entry);
             ShowToast(entry, now);
             if (entry.Level == NotifyLevel.Urgent)

@@ -2180,6 +2180,8 @@ namespace GameLogic.Campaign.Economy
             list.Add(e);
             d.Log = list.ToArray();
             Revision++;
+            // FG4-ECO-09（FG-GAP-098）：远征在外时规则做的事同时记进离家报告（日志只留最近 100 条，报告单独留离家期间的）。
+            AwayReportService.OnRuleLog(state, e);
         }
 
         /// <summary>实体在世界里的位置（建筑 / 机器；工单 = 它的目标）。没有返回 null。</summary>

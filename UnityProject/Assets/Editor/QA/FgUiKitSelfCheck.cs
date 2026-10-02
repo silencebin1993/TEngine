@@ -186,7 +186,7 @@ namespace GameLogic.EditorTools
             var enumMembers = ((GameActionId[])Enum.GetValues(typeof(GameActionId))).Distinct().ToList();
             var missing = enumMembers.Where(a => !InputActionCatalog.TryGet(a, out _)).ToList();
             var extra = InputActionCatalog.All.Where(d => !enumMembers.Contains(d.Action)).ToList();
-            Expect(missing.Count == 0 && extra.Count == 0 && InputActionCatalog.All.Count == enumMembers.Count && enumMembers.Count == 109, // FG4-ECO-08 新增“统计”（108 → 109）；FG4-ECO-06 新增“常驻规则”（107 → 108）；FG4-ECO-01 新增“物资面板”（106 → 107）；FG3-LOG-08 新增“叠加层选择器”“为什么不工作”与 8 种叠加层直达（96 → 106）；FG3-LOG-07 新增“复制设置”“粘贴设置”（94 → 96）；FG3-LOG-06 新增“电网面板”（93 → 94）；FG0-ARCH-01 新增“切换关注点”（85 → 86）；FG1-SIG-01 新增“信号核”（86 → 87）；FG1-SIG-06 新增“暴露面板”（87 → 88）；FG3-LOG-01 新增“格线开关”“搬迁”（88 → 90）；FG3-LOG-02 新增“施工队列”“优先建造这一片”（90 → 92）；FG3-LOG-03 新增“清带”（92 → 93）
+            Expect(missing.Count == 0 && extra.Count == 0 && InputActionCatalog.All.Count == enumMembers.Count && enumMembers.Count == 110, // FG4-ECO-09 新增“离家报告”（109 → 110）；FG4-ECO-08 新增“统计”（108 → 109）；FG4-ECO-06 新增“常驻规则”（107 → 108）；FG4-ECO-01 新增“物资面板”（106 → 107）；FG3-LOG-08 新增“叠加层选择器”“为什么不工作”与 8 种叠加层直达（96 → 106）；FG3-LOG-07 新增“复制设置”“粘贴设置”（94 → 96）；FG3-LOG-06 新增“电网面板”（93 → 94）；FG0-ARCH-01 新增“切换关注点”（85 → 86）；FG1-SIG-01 新增“信号核”（86 → 87）；FG1-SIG-06 新增“暴露面板”（87 → 88）；FG3-LOG-01 新增“格线开关”“搬迁”（88 → 90）；FG3-LOG-02 新增“施工队列”“优先建造这一片”（90 → 92）；FG3-LOG-03 新增“清带”（92 → 93）
                 $"GameActionId 的 {enumMembers.Count} 个成员与表里 {InputActionCatalog.All.Count} 行一一对应（缺：{string.Join(",", missing)}；多：{string.Join(",", extra.Select(d => d.Action))}）");
 
             InputBindingSet defaults = InputBindingSet.CreateDefault();
@@ -1452,7 +1452,8 @@ namespace GameLogic.EditorTools
             // FG4-ECO-01 新增 ItemsPanel.uxml（物资面板），共 28 份。FG4-ECO-02 新增 ProductionPanel.uxml（生产建筑通用面板），共 29 份。
             // FG4-ECO-06 新增 RulesPanel.uxml（常驻规则）与 RulesRow.uxml（规则行模板），共 31 份。
             // FG4-ECO-07 新增 RosterPanel.uxml（机器名册）与 RosterRow.uxml（名册行模板），共 33 份。
-            Expect(uxmlCount == 33 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
+            // FG4-ECO-09 新增 AwayReportPanel.uxml（离家报告）与 AwayReportRow.uxml（报告行模板），共 35 份。
+            Expect(uxmlCount == 35 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
 
             string[] codeDirs =
             {

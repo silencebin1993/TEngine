@@ -564,6 +564,9 @@ namespace GameLogic.Campaign
             record.IsAlive = false;
             record.IsDeployed = false;
             RosterRevision++;
+            // FG4-ECO-09：离家报告“机器变化”（远征在外时记阵亡的时刻与地点）与告警“机器重伤”级（阵亡的不再算重伤）。
+            Economy.AwayReportService.OnMachineDied(CampaignSession.Current, record, deathPosition);
+            Regions.HomeValleyAlarms.OnMachineChanged(record, 0f);
             if (_logicToEntity.TryGetValue(logicId, out SimEntityId entity))
             {
                 _entityToLogic.Remove(entity.Value);
@@ -603,11 +606,15 @@ namespace GameLogic.Campaign
                 return MachineOpResult.Ok(logicId, "目标已阵亡，忽略重复伤害。");
             }
 
+            float healthBefore = record.Health;
             record.Health = Mathf.Max(0f, record.Health - Mathf.Max(0f, damage));
             if (record.Health <= 0f)
             {
                 return MarkDeadByLogicId(logicId);
             }
+            // FG4-ECO-09：离家报告“机器变化”（远征在外时记伤势）与告警“机器重伤”（跌破 alarm.machine_wounded_fraction 的那一下发一次警告）。
+            Economy.AwayReportService.OnMachineDamaged(CampaignSession.Current, record);
+            Regions.HomeValleyAlarms.OnMachineChanged(record, healthBefore);
             // ER8-CONTENT-01：受损音按时刻节流（每台机器被连续攻击也不会刷屏）；字幕仅在“字幕”开启时出。
             Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.MachineDamaged,
                 GameLogic.Localization.GameText.Format("machine.feedback.damaged", MachineNaming.Short(record), record.Health.ToString("F0", System.Globalization.CultureInfo.InvariantCulture),

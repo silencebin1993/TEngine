@@ -1464,8 +1464,20 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 return StepOutcome.Fail($"撤离后：没回家园的机器 [{string.Join("、", bad)}]；镜头在家园且信号在核心 {homeView}");
             }
+            // FG4-ECO-09（FGR-ECO-060）：撤离后离家报告按设置自动打开（模态）——读一下它显示的是这次的报告，再点“关闭”（真实按钮），不挡后面的步骤。
+            string away = string.Empty;
+            if (GameLogic.UI.Kit.AwayReportPanelUIToolkit.IsOpen)
+            {
+                GameLogic.UI.Kit.AwayReportPanelUIToolkit p = GameLogic.UI.Kit.AwayReportPanelUIToolkit.Instance;
+                away = $"离家报告自动打开（第 {p?.ShownSerial} 份，{p?.VisibleRowCount} 行，“{p?.SummaryText}”）后点关闭；";
+                ClickUi(c, "[AwayReportHost]", "AwayReportClose");
+                if (GameLogic.UI.Kit.AwayReportPanelUIToolkit.IsOpen)
+                {
+                    return c.StepElapsed > 6 ? StepOutcome.Retry("离家报告关不掉（" + UiFail(c) + "）") : StepOutcome.Wait;
+                }
+            }
             MachineRegistry.TryGetRecord(c.GetInt("other"), out MachineRecord br);
-            return StepOutcome.Done($"远征队 {roster.Count} 台全部返回家园；信号在归还核心、镜头回家园；{Label(c.GetInt("other"))} 的机器经历：" +
+            return StepOutcome.Done($"远征队 {roster.Count} 台全部返回家园；信号在归还核心、镜头回家园；{away}{Label(c.GetInt("other"))} 的机器经历：" +
                                     $"{MachineSignalExperience.Describe(St, br)}；{FrameReport()}");
         }
 

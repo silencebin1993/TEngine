@@ -348,6 +348,12 @@ namespace GameLogic.UI.Kit
                 NotificationCenter.DismissToast(e);
                 return;
             }
+            // FG4-ECO-09 修复轮：没有位置、但登记了去处的通知（离家报告）点击后直接打开那个面板。
+            if (!e.HasAnyLocation && NotificationCenter.TryOpen(e))
+            {
+                NotificationCenter.DismissToast(e);
+                return;
+            }
             SetCenterOpen(true);
             Select(e);
         }
@@ -414,9 +420,10 @@ namespace GameLogic.UI.Kit
             row.Q<Label>("RowTime").text = NotificationCenter.TimeText(e.Latest);
             row.Q<Label>("RowText").text = string.IsNullOrEmpty(e.SourceText) ? e.Text : e.Text + " · " + e.SourceText;
             var locate = row.Q<Button>("RowLocate");
-            locate.text = GameText.Get("ui.notify.locate");
+            bool opens = !e.HasAnyLocation && NotificationCenter.HasOpenHandler(e);
+            locate.text = GameText.Get(opens ? "ui.notify.open" : "ui.notify.locate");
             locate.userData = e;
-            locate.SetEnabled(e.HasAnyLocation);
+            locate.SetEnabled(e.HasAnyLocation || opens);
             var expand = row.Q<Button>("RowExpand");
             expand.text = e == _selected
                 ? GameText.Get("ui.notify.collapse")
@@ -468,6 +475,13 @@ namespace GameLogic.UI.Kit
         {
             if (e == null)
             {
+                return;
+            }
+            if (!e.HasAnyLocation && NotificationCenter.TryOpen(e))
+            {
+                // 修复轮：离家报告这类没有位置的通知，行按钮是“打开”（打开对应面板）。
+                _statusOverride = null;
+                RenderCenter();
                 return;
             }
             _statusOverride = NotificationCenter.Locate(e, member, out string failureKey) ? null : GameText.Get(failureKey);

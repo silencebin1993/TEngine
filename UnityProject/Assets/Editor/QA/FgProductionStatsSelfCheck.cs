@@ -591,7 +591,8 @@ namespace GameLogic.EditorTools
             List<NotificationEntry> notes = Notes("eco_deficit");
             string text = notes.FirstOrDefault()?.Text ?? string.Empty;
             bool notified = notes.Sum(e => e.Count) == notesBefore + 1 && text.Contains("废料") && text.Contains("分钟") && GameSettings.HasSeenGuidanceHook(GuidanceHooks.StatsFirstDeficit)
-                            && !GameText.ContainsMarker(text);
+                            && !GameText.ContainsMarker(text)
+                            && notes.FirstOrDefault()?.HasAnyLocation == false; // FG4-ECO-09：没有建筑缺废料（只是消耗大于产出）时如实不带位置
             Run(3f * 60f, () => Drain(s, f));
             bool once = ProductionStats.DeficitWarnings == warnBefore + 1;
             P(s, f).Rec.In = Array.Empty<ItemStackRecord>();

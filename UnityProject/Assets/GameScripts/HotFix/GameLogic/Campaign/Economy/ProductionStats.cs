@@ -132,6 +132,8 @@ namespace GameLogic.Campaign.Economy
             }
             RecordCount++;
             RecordMs += (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            // FG4-ECO-09：远征在外时同一笔也记进离家报告（同一记账口径，FGT-ECO-007 报告产量 = 统计窗口的产量）。
+            AwayReportService.OnRecord(state, itemId, amount, produced);
         }
 
         /// <summary>统计域（旧存档补空、开始时刻定为现在）。</summary>
@@ -545,8 +547,48 @@ namespace GameLogic.Campaign.Economy
         private static void PostDeficit(CampaignState state, DeficitRecord d, long p, long c)
         {
             ItemCatalog.TryGet(d.ItemId, out ItemDef item);
-            NotificationCenter.Post("eco_deficit", DeficitText(state, d, item, p, c));
+            // FG4-ECO-09（DEBT-FG4ECO08-02）：定位到最近窗口里缺这种物品最久的建筑；没有建筑缺它（只是消耗大于产出）时如实不带位置。
+            BuildingRecord at = MostStarvedFor(d.ItemId);
+            NotificationCenter.Post("eco_deficit", DeficitText(state, d, item, p, c),
+                at != null ? new UnityEngine.Vector3(at.Position.x, 0f, at.Position.y) : (UnityEngine.Vector3?)null);
             GuidanceHooks.Raise(GuidanceHooks.StatsFirstDeficit);
+        }
+
+        /// <summary>赤字警告的定位次数（每次警告扫一次生产建筑的缺料桶；自检读）。</summary>
+        public static int DeficitLocateScans { get; private set; }
+
+        /// <summary>最近 building.stats.window_minutes 里缺 <paramref name="itemId"/> 最久的生产建筑（没有 = null）。O(生产建筑 × 桶数)，只在发持续赤字警告时调用一次。</summary>
+        public static BuildingRecord MostStarvedFor(string itemId)
+        {
+            DeficitLocateScans++;
+            int n = ProductionService.StatBuckets;
+            long now = GameClock.Ticks / ProductionService.StatBucketTicks(GameClock.StepHz);
+            BuildingRecord best = null;
+            long bestTicks = 0;
+            foreach (ProductionService.Producer p in ProductionService.All)
+            {
+                long sum = 0;
+                foreach (ProducerStatBucket b in p?.Rec?.Stats ?? Array.Empty<ProducerStatBucket>())
+                {
+                    if (b?.Starve == null || b.Index < 0 || b.Index <= now - n || b.Index > now)
+                    {
+                        continue;
+                    }
+                    foreach (ItemStackRecord s in b.Starve)
+                    {
+                        if (s != null && s.ItemId == itemId)
+                        {
+                            sum += s.Amount;
+                        }
+                    }
+                }
+                if (sum > bestTicks)
+                {
+                    bestTicks = sum;
+                    best = p.Building;
+                }
+            }
+            return bestTicks > 0 ? best : null;
         }
 
         /// <summary>“合金：消耗大于产出已 12 分钟（最近 2 分钟消耗 40 / 产出 20）；按当前速度库存约 8 分钟后耗尽”。</summary>

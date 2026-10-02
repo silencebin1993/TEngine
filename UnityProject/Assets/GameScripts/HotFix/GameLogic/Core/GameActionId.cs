@@ -142,5 +142,7 @@
         OpenRules = 117,
         /// <summary>FG4-ECO-08（FGU-13 / 14）：打开 / 关闭统计面板（生产统计、建筑效率、瓶颈、规划助手、战斗归因；全部上下文，默认 Alt+T）。</summary>
         OpenStats = 118,
+        /// <summary>FG4-ECO-09（FGU-30 离家报告，FGR-ECO-060“随时可以查看最近 3 份报告”）：打开 / 关闭离家报告（全部上下文，默认 Alt+H）。</summary>
+        OpenAwayReport = 119,
     }
 }

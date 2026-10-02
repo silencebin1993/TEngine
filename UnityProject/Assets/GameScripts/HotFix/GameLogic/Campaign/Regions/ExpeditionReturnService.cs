@@ -252,6 +252,8 @@ namespace GameLogic.Campaign.Regions
                     FoundryOutpostCoreBoss.ResetToPreBossState(state, FoundryOutpostRegion.Find(state));
                 }
                 GameRoot.ResumeHomeValley();
+                // FG4-ECO-09（FGR-ECO-060）：离家报告在撤离事务提交、回到家园时结算（下面的结算后存档把它存进去；界面按设置自动打开）。
+                Economy.AwayReportService.End(state, Economy.AwayReportService.OutcomeEvacuated);
 
                 SaveResult saveResult = CampaignAutoSaveService.SaveAuto(SaveReason.ExpeditionResolutionComplete);
                 if (!saveResult.Success)
@@ -305,6 +307,8 @@ namespace GameLogic.Campaign.Regions
                     FoundryOutpostCoreBoss.ResetToPreBossState(state, FoundryOutpostRegion.Find(state));
                 }
                 GameRoot.ResumeHomeValley();
+                // FG4-ECO-09：全灭放弃同样结算离家报告（远征队全部损失写进“机器变化”）。
+                Economy.AwayReportService.End(state, Economy.AwayReportService.OutcomeWiped);
 
                 SaveResult saveResult = CampaignAutoSaveService.SaveAuto(SaveReason.ExpeditionResolutionComplete);
                 if (!saveResult.Success)

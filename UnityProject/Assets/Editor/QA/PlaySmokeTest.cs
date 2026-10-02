@@ -177,6 +177,8 @@ namespace GameLogic.EditorTools
                     case 128: StepWorldShuttle(inStep); break;
                     case 8: StepFoundry(inStep); break;
                     case 9: StepBackHome(inStep); break;
+                    case 343: StepAwayTripOut(inStep); break; // FG4-ECO-09：离家报告正式路径
+                    case 344: StepAwayTripBack(inStep); break;
                     case 130: StepBeltsLaid(inStep); break;
                     case 131: StepBeltsFar(inStep); break;
                     case 132: StepBeltsNear(inStep); break;
@@ -1288,6 +1290,27 @@ namespace GameLogic.EditorTools
             Check(rosterClicked && rosterOpen && roleIdle && roleBack && detailOpen && emptyName && renamed && nameReset && backToList && rosterClosed,
                 $"暂停菜单点“机器名册”：名册打开（{rop?.CountText}，首行“{rop?.RowText(0, "RoName")}”），行内改岗位闲置 / 劳动、详情页空名字给原因、改名后接入 HUD 标识同步、恢复默认名、返回列表、点关闭回到暂停菜单" +
                 $"（{rosterClicked}/{rosterOpen}/{roleIdle}/{roleBack}/{detailOpen}/{emptyName}/{renamed}/{nameReset}/{backToList}/{rosterClosed}）");
+            // FG4-ECO-09（FGU-30；FGR-ECO-060“随时可以查看最近 3 份报告”“自动打开可以在设置里关闭”）：暂停菜单“离家报告”→ 报告面板（有报告时显示最新一份，没有时写明去处）；
+            // 暂停菜单里“远征回来时自动打开离家报告”开关关掉再打开（设置立即生效）；点关闭回到暂停菜单。
+            bool awayClicked = ClickUitk("[PauseMenuHost]", "PauseAwayReport");
+            UI.Kit.AwayReportPanelUIToolkit arp = UI.Kit.AwayReportPanelUIToolkit.Instance;
+            arp?.Refresh();
+            bool awayOpen = arp != null && UI.Kit.AwayReportPanelUIToolkit.IsOpen && arp.PanelVisible
+                            && (arp.VisibleRowCount > 0 || arp.EmptyText.Contains("还没有离家报告"))
+                            && !Localization.GameText.ContainsMarker(arp.SummaryText + arp.EmptyText + (arp.VisibleRowCount > 0 ? arp.RowText(0) : string.Empty));
+            bool awayClosed = ClickUitk("[AwayReportHost]", "AwayReportClose") && !UI.Kit.AwayReportPanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen;
+            UnityEngine.UIElements.Toggle autoToggle = pm?.AwayAutoOpenToggle;
+            bool toggled = false;
+            if (autoToggle != null)
+            {
+                autoToggle.value = false;
+                bool off = !Settings.GameSettings.AwayReportAutoOpen;
+                autoToggle.value = true;
+                toggled = off && Settings.GameSettings.AwayReportAutoOpen;
+            }
+            Check(awayClicked && awayOpen && awayClosed && toggled,
+                $"暂停菜单点“离家报告”：报告面板打开（{(arp == null ? "无" : arp.VisibleRowCount > 0 ? $"第 {arp.ShownSerial} 份，{arp.VisibleRowCount} 行" : arp.EmptyText)}），点关闭回到暂停菜单；" +
+                $"“远征回来时自动打开离家报告”开关关 / 开立即生效（{awayClicked}/{awayOpen}/{awayClosed}/{toggled}）");
             Check(pm != null && pm.CameraZoomLabelText.Length > 0 && pm.CameraFollowLabelText.Length > 0
                   && !Localization.GameText.ContainsMarker(pm.CameraZoomLabelText + pm.CameraFollowLabelText),
                 $"暂停菜单显示接入镜头设置：“{pm?.CameraZoomLabelText}”“{pm?.CameraFollowLabelText}”");
@@ -4026,6 +4049,68 @@ namespace GameLogic.EditorTools
                 Next(19, "按回家园键，镜头回到归还核心");
                 return;
             }
+            BeginAwayTrip();
+        }
+
+        // ── FG4-ECO-09：离家报告的正式路径（派遣 → 离家期间家园照常运转 → 正式撤离事务 → 回到家园自动打开 → 点一条定位）──
+
+        /// <summary>按出征同样的调用顺序派遣（测试捷径同第 7 步），之后用正式撤离事务回来。</summary>
+        private static void BeginAwayTrip()
+        {
+            int[] roster = HomeMachines();
+            UnlockLikeDeparture(Campaign.Regions.FracturedCityRegion.Find(CampaignSession.Current),
+                Campaign.Regions.ExpeditionDepartureService.ExpeditionTarget.SilentRuins);
+            GameRoot.StartFracturedCity(roster);
+            Next(343, $"测试捷径：再派一次远征（{roster.Length} 台机器，家园照常运转），等它在外面待一会儿");
+        }
+
+        private static void StepAwayTripOut(double inStep)
+        {
+            if (inStep < 4)
+            {
+                return;
+            }
+            bool away = GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsLoaded && Campaign.Economy.AwayReportService.IsOpen(CampaignSession.Current);
+            Check(away, "远征在外：离家报告在记（进行中）");
+            Campaign.Regions.ExpeditionReturnService.ReturnResult evac = Campaign.Regions.ExpeditionReturnService.TryConfirmEvacuation();
+            Check(evac.Success, $"正式撤离事务：远征队回到家园（{evac.FailureReason ?? "成功"}）");
+            Next(344, "正式撤离事务：回到归还谷地，等离家报告自动打开");
+        }
+
+        private static void StepAwayTripBack(double inStep)
+        {
+            if (inStep < 2)
+            {
+                return;
+            }
+            // FG4-ECO-09（FGR-ECO-060“远征回来时自动打开”；FG04 第 4 节“离家报告里的每一条都可以点击定位”）：自动打开显示这次的报告；
+            // 点一条可定位 / 可打开面板的条目（真实按钮回调）→ 面板收起；再把打开的面板收起，不挡后面的步骤。
+            UI.Kit.AwayReportPanelUIToolkit arp = UI.Kit.AwayReportPanelUIToolkit.Instance;
+            Campaign.AwayReportRecord latest = Campaign.Economy.AwayReportService.Recent(CampaignSession.Current).FirstOrDefault();
+            arp?.Refresh();
+            bool autoOpen = arp != null && UI.Kit.AwayReportPanelUIToolkit.IsOpen && latest != null && arp.ShownSerial == latest.Serial && arp.VisibleRowCount > 0
+                            && arp.SummaryText.Contains("撤离回家") && !Localization.GameText.ContainsMarker(arp.SummaryText + arp.RowText(0));
+            int row = -1;
+            for (int i = 0; arp != null && i < arp.VisibleRowCount; i++)
+            {
+                Campaign.Economy.AwayLine l = arp.Line(i);
+                if (l.IsEntry && (l.Action == Campaign.Economy.AwayLineAction.Locate || l.Action == Campaign.Economy.AwayLineAction.Building
+                                  || l.Action == Campaign.Economy.AwayLineAction.StatsItem || l.Action == Campaign.Economy.AwayLineAction.PowerPanel))
+                {
+                    row = i;
+                    break;
+                }
+            }
+            string rowText = row >= 0 ? arp.RowText(row) : "（没有可点的条目）";
+            bool clicked = row >= 0 && InvokeClickable(arp.RowButton(row)) && !UI.Kit.AwayReportPanelUIToolkit.IsOpen && arp.LastClicked != null;
+            UI.Kit.StatsPanelUIToolkit.Close();
+            UI.Kit.ProductionPanelUIToolkit.Close();
+            UI.Kit.PowerPanelUIToolkit.Close();
+            UI.Kit.RosterPanelUIToolkit.Close();
+            UI.Kit.RulesPanelUIToolkit.Close();
+            UI.Kit.AwayReportPanelUIToolkit.Close();
+            Check(autoOpen && clicked,
+                $"正式撤离后离家报告自动打开：第 {arp?.ShownSerial} 份（{arp?.VisibleRowCount} 行，“{arp?.SummaryText}”）；点“{rowText}”→ 面板收起并{arp?.LastClicked?.Action}（{autoOpen}/{clicked}）");
             Campaign.Regions.HomeValleySoftlockGuard.DebugDestroyCore(CampaignSession.Current);
             Next(80, "测试捷径：核心被毁（HomeValleySoftlockGuard.DebugDestroyCore），等失败页出现");
         }
@@ -4044,8 +4129,7 @@ namespace GameLogic.EditorTools
             {
                 return;
             }
-            Campaign.Regions.HomeValleySoftlockGuard.DebugDestroyCore(CampaignSession.Current);
-            Next(80, "测试捷径：核心被毁（HomeValleySoftlockGuard.DebugDestroyCore），等失败页出现");
+            BeginAwayTrip();
         }
 
         private static void StepSignalPrepPanel(double inStep)
@@ -7423,8 +7507,7 @@ namespace GameLogic.EditorTools
             {
                 Check(Campaign.Signal.SignalPresence.AtCore && !Campaign.Signal.SignalUplinkService.IsPending,
                     "存档时信号在归还核心：读档后仍在归还核心");
-                Campaign.Regions.HomeValleySoftlockGuard.DebugDestroyCore(st);
-                Next(80, "测试捷径：核心被毁（HomeValleySoftlockGuard.DebugDestroyCore），等失败页出现");
+                BeginAwayTrip(); // FG4-ECO-09：核心被毁之前先走一遍离家报告的正式路径
                 return;
             }
             UI.SignalCore.SignalCoreHudUIToolkit sigHud = UI.SignalCore.SignalCoreHudUIToolkit.Instance;

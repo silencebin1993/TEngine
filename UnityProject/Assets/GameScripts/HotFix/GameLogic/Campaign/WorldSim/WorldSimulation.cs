@@ -479,6 +479,8 @@ namespace GameLogic.Campaign.WorldSim
                     HomeValleyPowerGrid.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                     // FG4-ECO-06：常驻规则——排队事件每步处理（O(事件数)），条件按 rules.check_seconds 定时检查（不每帧遍历建筑）；只看步序号，与观察无关。
                     Economy.StandingRuleService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
+                    // FG4-ECO-09：离家报告与远征状态对齐（O(1)）：旧档读档时正在远征却没有报告 → 从此刻开一份；报告开着但远征已不在 → 按“其它方式结束”结算。
+                    Economy.AwayReportService.Reconcile(state, ActiveExpedition?.SiteId);
                 }
                 // FG1-SIG-03：核心固件冷却（信号侧，按游戏时间）到期——与观察无关，O(信号核槽位数)。
                 Signal.SignalUplinkService.SimStep(state);

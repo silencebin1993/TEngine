@@ -242,6 +242,12 @@ namespace GameLogic.UI.Kit
             {
                 StatsPanelUIToolkit.Toggle();
             }
+            // FG4-ECO-09：离家报告键（默认 Alt+H，全部上下文）：开着再按一次关闭；更高层的面板盖在上面时不起作用（同统计键）。
+            if (InputRouter.ConsumeContextAction(GameActionId.OpenAwayReport)
+                && !MechanicCodexPanelUIToolkit.IsOpen && !UiKitPanelHost.AnyModalAbove(AwayReportPanelUIToolkit.Order))
+            {
+                AwayReportPanelUIToolkit.Toggle();
+            }
             if (InputRouter.ConsumeContextAction(GameActionId.OpenCodex)
                 && !UiKitPanelHost.AnyModalAbove(MechanicCodexPanelUIToolkit.Order) && !CodexHoverLink.TryJump())
             {

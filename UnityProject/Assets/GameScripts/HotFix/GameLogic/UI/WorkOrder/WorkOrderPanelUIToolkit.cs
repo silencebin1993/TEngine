@@ -3,6 +3,7 @@ using Cysharp.Threading.Tasks;
 using GameLogic.Campaign;
 using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Regions;
+using GameLogic.Localization;
 using GameLogic.Stage;
 using TEngine;
 using UnityEngine;
@@ -23,7 +24,8 @@ namespace GameLogic.UI.WorkOrder
     public sealed class WorkOrderPanelUIToolkit : MonoBehaviour
     {
         private const int MaxRows = 12;
-        private const int MaxAlertRows = 5;
+        /// <summary>FG4-ECO-09 修复轮：告警栏行数 = 告警等级数（六级同时存在时每级都能露出一条）。</summary>
+        private const int MaxAlertRows = HomeValleyAlarms.DisplayRows;
         /// <summary>AC-PER-006"更新降频"：200 工作单场景下不必每帧重建整个面板的文本/查询，
         /// 5 次/秒足够肉眼感知为实时，同时把字符串分配/VisualElement 查询降到之前的 1/12。</summary>
         private const float RefreshIntervalSeconds = 0.2f;
@@ -46,6 +48,11 @@ namespace GameLogic.UI.WorkOrder
         private readonly List<TemplateContainer> _rowPool = new List<TemplateContainer>(MaxRows);
 
         private ScrollView _alertList;
+        /// <summary>FG4-ECO-09 修复轮：告警栏下方一行——“另有 N 条告警”或点告警定位失败的原因（B06 不静默）。</summary>
+        private Label _alertStatus;
+        private string _alertFailureText;
+        private float _alertFailureUntil;
+        private const float AlertFailureSeconds = 4f;
         private readonly List<TemplateContainer> _alertRowPool = new List<TemplateContainer>(MaxAlertRows);
 
         private Label _priorityEmptyLabel;
@@ -101,6 +108,7 @@ namespace GameLogic.UI.WorkOrder
             _list = _root.Q<ScrollView>("OrderList");
             _emptyLabel = _root.Q<Label>("EmptyLabel");
             _alertList = _root.Q<ScrollView>("AlertList");
+            _alertStatus = _root.Q<Label>("AlertStatus");
             _priorityEmptyLabel = _root.Q<Label>("PriorityEmptyLabel");
             _priorityRows = _root.Q<VisualElement>("PriorityRows");
             _machineDetailEmptyLabel = _root.Q<Label>("MachineDetailEmptyLabel");
@@ -307,7 +315,9 @@ namespace GameLogic.UI.WorkOrder
 
         private void RefreshAlertList(CampaignState state)
         {
-            _alertsCache = HomeValleyAlarms.Collect(state);
+            // 修复轮（审查 P2）：超过 5 行时每个等级至少露出一条，其余写“另有 N 条”（不再被同一等级挤掉、也不静默丢弃）。
+            _alertsCache = HomeValleyAlarms.PickForDisplay(HomeValleyAlarms.Collect(state), MaxAlertRows, out int hidden);
+            RefreshAlertStatus(hidden);
             for (int i = 0; i < MaxAlertRows; i++)
             {
                 TemplateContainer row = _alertRowPool[i];
@@ -317,7 +327,8 @@ namespace GameLogic.UI.WorkOrder
                     continue;
                 }
                 row.style.display = DisplayStyle.Flex;
-                row.Q<Label>("Message").text = _alertsCache[i].Message;
+                // FG4-ECO-09：等级写成文字（“[电力] …”，不只靠颜色）；点击定位到告警的位置（FG00 B08）。
+                row.Q<Label>("Message").text = _alertsCache[i].RowText;
             }
         }
 
@@ -327,11 +338,48 @@ namespace GameLogic.UI.WorkOrder
             {
                 return;
             }
-            int machineLogicId = _alertsCache[rowIndex].MachineLogicId;
-            if (machineLogicId > 0)
+            HomeValleyAlarms.AlertRecord alert = _alertsCache[rowIndex];
+            // FG4-ECO-09（FGR-ECO-080“告警可以定位”）：镜头飞到建筑 / 机器 / 突袭队伍的位置；涉及机器时同时选中它（原有行为）。
+            bool located = HomeValleyAlarms.Locate(alert, out string failureKey);
+            if (alert.MachineLogicId > 0)
             {
-                GameRoot.HomeValley.TrySelectMachine(machineLogicId);
+                GameRoot.HomeValley.TrySelectMachine(alert.MachineLogicId);
             }
+            // 修复轮（审查 P2，FG00 B06）：定位失败时写出原因（与通知中心 / 离家报告同一套文本键），不静默（选中了机器但镜头没动，也说明原因）。
+            ShowAlertLocateResult(located, failureKey);
+        }
+
+        /// <summary>点告警的结果：失败时在告警栏下方显示原因几秒（自检也经这里断言）。</summary>
+        public void ShowAlertLocateResult(bool located, string failureKey)
+        {
+            _alertFailureText = located ? null : GameText.Get(string.IsNullOrEmpty(failureKey) ? "ui.notify.no_location" : failureKey);
+            _alertFailureUntil = Time.unscaledTime + AlertFailureSeconds;
+            RefreshAlertStatus(_lastAlertHidden);
+        }
+
+        private int _lastAlertHidden;
+
+        /// <summary>告警栏下方那一行此刻的文字（空 = 不显示）。</summary>
+        public string AlertStatusText => _alertStatus != null && !_alertStatus.ClassListContains("wop-alert-status--hidden") ? _alertStatus.text : string.Empty;
+
+        private void RefreshAlertStatus(int hidden)
+        {
+            _lastAlertHidden = hidden;
+            if (_alertStatus == null)
+            {
+                return;
+            }
+            string text = null;
+            if (!string.IsNullOrEmpty(_alertFailureText) && Time.unscaledTime < _alertFailureUntil)
+            {
+                text = GameText.Format("away.panel.locate_failed", _alertFailureText);
+            }
+            else if (hidden > 0)
+            {
+                text = GameText.Format("alarm.list.more", hidden);
+            }
+            _alertStatus.text = text ?? string.Empty;
+            _alertStatus.EnableInClassList("wop-alert-status--hidden", string.IsNullOrEmpty(text));
         }
 
         /// <summary>没有选中机器时隐藏五个按钮、只显示提示；有选中时显示该机器当前每一类的优先级

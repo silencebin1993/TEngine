@@ -38,6 +38,8 @@ namespace GameLogic.Notifications
         public float AggregateWindowSeconds;
         public bool KeepInHistory;
         public int SortOrder;
+        /// <summary>FG4-ECO-09：离家期间发生时记进离家报告的哪一段（none = 不记；对照在 tools/cell_tables/fgdata_away.py）。</summary>
+        public string AwaySection = "none";
     }
 
     /// <summary>
@@ -248,6 +250,7 @@ namespace GameLogic.Notifications
                             AggregateWindowSeconds = row.AggregateWindowSeconds,
                             KeepInHistory = row.KeepInHistory == 1,
                             SortOrder = row.SortOrder,
+                            AwaySection = string.IsNullOrEmpty(row.AwaySection) ? "none" : row.AwaySection,
                         });
                     }
                     Ordered.Sort((a, b) => a.SortOrder.CompareTo(b.SortOrder));
