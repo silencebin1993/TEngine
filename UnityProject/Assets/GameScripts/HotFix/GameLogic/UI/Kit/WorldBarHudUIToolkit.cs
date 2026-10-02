@@ -328,8 +328,10 @@ namespace GameLogic.UI.Kit
             }
             Chip(n++, GameText.Format("topbar.tech", state.TechData), ItemCatalog.NameOf(ItemCatalog.TechDataId), GameText.Get("topbar.tech_tip"), null, null,
                 ItemsPanelUIToolkit.Open, null);
-            Chip(n++, GameText.Format("topbar.research", state.Research?.Points ?? 0), ItemCatalog.NameOf("research_points"), GameText.Get("topbar.research_tip"), null, null,
-                ItemsPanelUIToolkit.Open, null);
+            // FG5-RND-01：研究点芯片写研究在做什么（为什么停了），点一下打开研发树。
+            Chip(n++, GameText.Format("topbar.research", state.Research?.Points ?? 0), ItemCatalog.NameOf("research_points"),
+                GameText.Format("research.topbar.tip", ResearchService.StatusText(state), InputDisplay.ForAction(GameActionId.OpenResearch)), null, null,
+                ResearchTreePanelUIToolkit.Open, null);
             Chip(n++, GameText.Format("topbar.exposure", Mathf.RoundToInt(state.SignalExposure), Mathf.RoundToInt(CampaignExposureLedger.MaxExposure)),
                 GameText.Get("topbar.exposure_title"), GameText.Format("topbar.exposure_tip", InputDisplay.ForAction(GameActionId.OpenExposure)), null, null,
                 SignalCore.SignalCoreHudUIToolkit.OpenExposure, null);

@@ -451,17 +451,54 @@ namespace GameLogic.Campaign
         public int[] StorageReserve = Array.Empty<int>();
     }
 
-    /// <summary>研究（FG05）。</summary>
+    /// <summary>研究（FG05）。FG5-RND-01：域版本 2——研发树开放（研究门槛生效）。读到版本 1 的旧档时由 <see cref="Economy.ResearchService.MigrateFromV1"/>
+    /// 把“开放前就能建造的内容”对应的解锁节点记为已完成（旧档里已经在用的东西不会突然造不了），效率 / 容量节点不送。唯一写入口 <see cref="Economy.ResearchService"/>。</summary>
     [Serializable]
     public sealed class ResearchState
     {
-        public int DomainVersion = 1;
+        public const int CurrentVersion = 2;
+        public int DomainVersion = CurrentVersion;
         /// <summary>FG4-ECO-01（FGR-ECO-001“数字资源：技术数据、研究点”）：研究点余额（数字资源，不占物理空间、不走传送带）。
         /// 产出与消耗由 FG5-RND-01（仿真实验室、研发树）写入；物资面板与图鉴从这里读。</summary>
         public int Points;
         /// <summary>FG4-ECO-11（研究门槛接口）：已完成的研究节点 ID（研发树在 FG5-RND-01 写入；超控阵列等建筑的 unlockRule = research:&lt;节点&gt; 读这里，
         /// 见 <see cref="Economy.ResearchGate"/>）。旧存档没有 = 空。</summary>
         public string[] CompletedNodes = Array.Empty<string>();
+        /// <summary>FG5-RND-01：研究点的零头（千分之一点；实验室按周期产出 0.5 点这类小数，满 1000 进 <see cref="Points"/>，不丢）。</summary>
+        public int PointsMilli;
+        /// <summary>FG5-RND-01（FGR-RND-002“已投入的进度保留在节点上”）：投入过但还没完成的节点与已投入的研究点（按节点 ID 升序）。</summary>
+        public ResearchProgressRecord[] Progress = Array.Empty<ResearchProgressRecord>();
+        /// <summary>FG5-RND-01（FGR-RND-013）：研究队列（最多 research.queue.max 项，按顺序投入）。</summary>
+        public string[] Queue = Array.Empty<string>();
+        /// <summary>FG5-RND-01（FGR-RND-001）：每座仿真实验室的周期进度（按建筑 ID 升序）；建筑没了随之清掉。</summary>
+        public LabRecord[] Labs = Array.Empty<LabRecord>();
+        /// <summary>FG5-RND-01（FGR-RND-013“新解锁的建筑在建造菜单上显示‘新’，直到玩家看过一次”）：还没看过的建造菜单条目 ID。</summary>
+        public string[] NewEntries = Array.Empty<string>();
+        /// <summary>统计：实验室累计消耗的技术数据、累计产出 / 投入的研究点、完成的节点数。</summary>
+        public long TechConsumed;
+        public long PointsProduced;
+        public long PointsInvested;
+        /// <summary>上一次发出“研究暂停”通知的原因码（同一原因只告一次；研究恢复后清空）。</summary>
+        public string StallNotified = string.Empty;
+    }
+
+    /// <summary>FG5-RND-01：一个节点已投入的研究点（取消 / 移出队列后保留）。</summary>
+    [Serializable]
+    public sealed class ResearchProgressRecord
+    {
+        public string NodeId;
+        public int Invested;
+    }
+
+    /// <summary>FG5-RND-01：一座仿真实验室的周期（周期开始时取 1 件技术数据 = Loaded，满一个周期按转换效率记研究点）。</summary>
+    [Serializable]
+    public sealed class LabRecord
+    {
+        public string BuildingId;
+        /// <summary>本周期已推进的世界步（缺电 / 禁用时停住，不清零）。</summary>
+        public long ProgressTicks;
+        /// <summary>本周期的技术数据已经取了（拆除时退回）。</summary>
+        public bool Loaded;
     }
 
     /// <summary>
@@ -1482,6 +1519,16 @@ namespace GameLogic.Campaign
             s.Power.StorageNoDischarge ??= Array.Empty<bool>();
             s.Power.StorageReserve ??= Array.Empty<int>();
             s.Research ??= new ResearchState();
+            s.Research.CompletedNodes ??= Array.Empty<string>();
+            s.Research.Progress ??= Array.Empty<ResearchProgressRecord>();
+            s.Research.Queue ??= Array.Empty<string>();
+            s.Research.Labs ??= Array.Empty<LabRecord>();
+            s.Research.NewEntries ??= Array.Empty<string>();
+            s.Research.StallNotified ??= string.Empty;
+            if (s.Research.DomainVersion < ResearchState.CurrentVersion)
+            {
+                Economy.ResearchService.MigrateFromV1(s); // FG5-RND-01：旧档迁移（研发树开放前就能建造的内容记为已研究）
+            }
             s.Economy ??= new EconomyState();
             s.Economy.Items ??= Array.Empty<ItemStackRecord>();
             s.Economy.Vault ??= Array.Empty<ItemStackRecord>();

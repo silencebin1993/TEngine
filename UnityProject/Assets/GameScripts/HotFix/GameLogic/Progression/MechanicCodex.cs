@@ -27,6 +27,8 @@ namespace GameLogic.Progression
         Item = 3,
         /// <summary>FG4-ECO-01：配方（fg.TbRecipe 生成）。</summary>
         Recipe = 4,
+        /// <summary>FG5-RND-01：研究节点（fg.TbResearchNode 生成）。</summary>
+        Research = 5,
     }
 
     /// <summary>一条机制图鉴条目（fg.TbCodexEntry 的运行时视图；links / hooks 已拆好）。FG2-FW-05：固件 / 反应条目由各自的表生成，
@@ -70,14 +72,19 @@ namespace GameLogic.Progression
         public const string TabReaction = "reaction";
         public const string TabItem = "item";
         public const string TabRecipe = "recipe";
+        public const string TabResearch = "research";
 
         /// <summary>页签顺序（界面按这个顺序画标签）。</summary>
-        public static readonly string[] Tabs = { TabSystem, TabFirmware, TabReaction, TabItem, TabRecipe };
+        public static readonly string[] Tabs = { TabSystem, TabFirmware, TabReaction, TabItem, TabRecipe, TabResearch };
 
         public const string FirmwarePrefix = "fw:";
         public const string ReactionPrefix = "reaction:";
         public const string ItemPrefix = "item:";
         public const string RecipePrefix = "recipe:";
+        public const string ResearchPrefix = "research:";
+
+        /// <summary>FG5-RND-01（FG05 第 4 节“所有研究节点都有图鉴条目”）：研究节点条目 ID（“research:” + 节点 ID）。</summary>
+        public static string ResearchEntryId(string nodeId) => string.IsNullOrEmpty(nodeId) ? null : ResearchPrefix + nodeId;
 
         /// <summary>FG4-ECO-01：物品条目 ID（“item:” + 物品 ID）。</summary>
         public static string ItemEntryId(string itemId) => string.IsNullOrEmpty(itemId) ? null : ItemPrefix + itemId;
@@ -224,6 +231,8 @@ namespace GameLogic.Progression
                     return Campaign.Economy.EconomyCodex.ItemBody(e.ContentId, state);
                 case MechanicCodexKind.Recipe:
                     return Campaign.Economy.EconomyCodex.RecipeBody(e.ContentId, state);
+                case MechanicCodexKind.Research:
+                    return Campaign.Economy.ResearchText.Detail(state, Campaign.Economy.ResearchCatalog.Find(e.ContentId));
                 default:
                     return GameLogic.Localization.GameText.Get(e.BodyKey);
             }
@@ -254,6 +263,10 @@ namespace GameLogic.Progression
                         return GameLogic.Localization.GameText.Format("reaction.codex.closed", GameLogic.Localization.GameText.Get("reaction.batch." + row.Batch));
                     }
                     return GameLogic.Localization.GameText.Get("reaction.codex.locked");
+                case MechanicCodexKind.Research:
+                    Campaign.Economy.ResearchNodeDef rn = Campaign.Economy.ResearchCatalog.Find(e.ContentId);
+                    return GameLogic.Localization.GameText.Format("codex.research.node.locked",
+                        rn != null ? GameLogic.Localization.GameText.Format("research.branch.closed", rn.Branch.Name) : string.Empty);
                 case MechanicCodexKind.Item:
                     // 没拿到的物品不剧透名字与用途，只写获取途径（表里的来源文字）。
                     return GameLogic.Localization.GameText.Format("codex.item.locked_hint", GameLogic.Localization.GameText.Get(e.HintKey));
@@ -415,7 +428,8 @@ namespace GameLogic.Progression
         {
             // 读表失败（配置还没载入 / 表缺失）时不缓存失败结果：下一次访问再试，配置载入后自动恢复。
             // FG2-FW-05：固件 / 反应表重载（或测试注入）后重建派生条目。
-            int derivedKey = HashCode.Combine(Campaign.Content.FirmwareCatalog.Revision, Campaign.Content.NamedReactionCatalog.Revision, Campaign.Economy.ItemCatalog.Revision);
+            int derivedKey = HashCode.Combine(Campaign.Content.FirmwareCatalog.Revision, Campaign.Content.NamedReactionCatalog.Revision, Campaign.Economy.ItemCatalog.Revision,
+                Campaign.Economy.ResearchCatalog.Revision);
             if (_entries != null && _loadError == null && derivedKey == _derivedKey)
             {
                 return;
@@ -542,7 +556,8 @@ namespace GameLogic.Progression
         {
             // 读的是 ItemCatalog 自己的 Revision 之后的内容；访问 Items 会触发载入（第一次时 Revision 前进），这里再取一次让派生键对上。
             IReadOnlyList<Campaign.Economy.ItemDef> items = Campaign.Economy.ItemCatalog.Items;
-            _derivedKey = HashCode.Combine(Campaign.Content.FirmwareCatalog.Revision, Campaign.Content.NamedReactionCatalog.Revision, Campaign.Economy.ItemCatalog.Revision);
+            _derivedKey = HashCode.Combine(Campaign.Content.FirmwareCatalog.Revision, Campaign.Content.NamedReactionCatalog.Revision, Campaign.Economy.ItemCatalog.Revision,
+                Campaign.Economy.ResearchCatalog.Revision);
             int order = 300000;
             foreach (Campaign.Economy.ItemDef item in items)
             {
@@ -609,6 +624,47 @@ namespace GameLogic.Progression
                     SortOrder = order + r.SortOrder,
                     Links = links.ToArray(),
                     AlwaysOpen = true,
+                };
+                _entries.Add(e);
+                _byId[e.Id] = e;
+            }
+            AddResearchEntries();
+        }
+
+        /// <summary>
+        /// FG5-RND-01（FG05 第 4 节“所有研究节点都有图鉴条目”）：按研发节点表生成“研究”页签的条目，节点 ↔ 前置互链。
+        /// 通用分支的节点一开始就能看（研发树上本来就看得到，规划要用）；阵营分支的节点在分支开放（破解该阵营第一件技术）后由研发树面板解锁。
+        /// </summary>
+        private static void AddResearchEntries()
+        {
+            IReadOnlyList<Campaign.Economy.ResearchNodeDef> nodes = Campaign.Economy.ResearchCatalog.Nodes;
+            _derivedKey = HashCode.Combine(Campaign.Content.FirmwareCatalog.Revision, Campaign.Content.NamedReactionCatalog.Revision, Campaign.Economy.ItemCatalog.Revision,
+                Campaign.Economy.ResearchCatalog.Revision);
+            int order = 500000;
+            foreach (Campaign.Economy.ResearchNodeDef n in nodes)
+            {
+                string id = ResearchEntryId(n.Id);
+                if (_byId.ContainsKey(id))
+                {
+                    continue;
+                }
+                var links = new string[n.Prereqs.Length];
+                for (int i = 0; i < n.Prereqs.Length; i++)
+                {
+                    links[i] = ResearchEntryId(n.Prereqs[i]);
+                }
+                var e = new MechanicCodexEntry
+                {
+                    Kind = MechanicCodexKind.Research,
+                    ContentId = n.Id,
+                    Id = id,
+                    Tab = TabResearch,
+                    TitleKey = n.NameKey,
+                    BodyKey = n.DescKey,
+                    HintKey = n.DescKey,
+                    SortOrder = order + n.Branch.Index * 1000 + n.Order,
+                    Links = links,
+                    AlwaysOpen = !n.Branch.IsFaction,
                 };
                 _entries.Add(e);
                 _byId[e.Id] = e;

@@ -796,7 +796,7 @@ namespace GameLogic.Campaign.Economy
                     sum += WarehouseTierCapacity(wh);
                 }
             }
-            return sum;
+            return ResearchService.ScaleCapacity(state, "warehouse", sum); // FG5-RND-01：研发“货架优化”容量加成
         }
 
         /// <summary>“只存”的说明文字。</summary>

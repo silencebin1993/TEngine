@@ -223,6 +223,10 @@ namespace GameLogic.Campaign.Economy
             {
                 return AssemblyStatus(state, b);
             }
+            if (type == ResearchService.TypeId)
+            {
+                return ResearchService.LabStatus(state, b); // FG5-RND-01：仿真实验室（转换中 / 技术数据不足 / 缺电 / 禁用）
+            }
             if (type == HomeValleyLayout.BuildingTypeAnalysisBench)
             {
                 foreach (AnalysisQueueItemRecord q in state?.AnalysisQueues ?? Array.Empty<AnalysisQueueItemRecord>())

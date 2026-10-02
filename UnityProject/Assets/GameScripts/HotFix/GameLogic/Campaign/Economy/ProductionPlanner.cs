@@ -181,7 +181,7 @@ namespace GameLogic.Campaign.Economy
                 }
                 perMinuteEach = want == ProducerMode.Pump
                     ? d.FluidLpm
-                    : Math.Max(1, d.CycleAmount) * 60.0 / Math.Max(0.01, d.CycleSeconds);
+                    : Math.Max(1, d.CycleAmount) * 60.0 / Math.Max(0.01, d.CycleSeconds) * ResearchService.SpeedFactor(CampaignSession.Current, d.TypeId);
                 powerEach = PowerOf(d.TypeId);
                 return perMinuteEach > 0 ? d.TypeId : null;
             }
@@ -190,6 +190,24 @@ namespace GameLogic.Campaign.Economy
 
         public static float PowerOf(string typeId) =>
             typeId != null && HomeValleyLayout.PowerProfile.TryGetValue(typeId, out (float PowerDemand, int PowerPriority) p) ? Math.Max(0f, p.PowerDemand) : 0f;
+
+        /// <summary>
+        /// FG5-RND-01（复审 P2；B06）：方案里的建筑还没研究、现在造不了时，规划行后缀“ · 需要先研究：工业 · 电子组装台（◆ 可研究 · 6 研究点）”；
+        /// 已解锁、不在建造菜单里或不是研究门槛时返回空串。规划本身照常算（玩家可以先看方案再决定研究什么）。
+        /// </summary>
+        public static string ResearchNote(CampaignState state, string typeId)
+        {
+            if (typeId == null || !BuildCatalog.TryGet(typeId, out BuildEntry e) || BuildCatalog.IsUnlocked(state, e))
+            {
+                return string.Empty;
+            }
+            string node = ResearchGate.NodeOf(e.UnlockRule);
+            if (node == null || !ResearchCatalog.TryGet(node, out ResearchNodeDef n))
+            {
+                return string.Empty;
+            }
+            return GameText.Format("planner.needs_research", ResearchGate.NodeName(node), ResearchService.StateText(state, n));
+        }
 
         // ── 计算 ─────────────────────────────────────────────────────────────
 
@@ -226,7 +244,7 @@ namespace GameLogic.Campaign.Economy
 
             foreach (RecipeRow r in order)
             {
-                r.Buildings = r.CyclesPerMinute * r.Recipe.Seconds / 60.0;
+                r.Buildings = r.CyclesPerMinute * r.Recipe.Seconds / 60.0 / ResearchService.SpeedFactor(CampaignSession.Current, r.BuildingType); // FG5-RND-01：研发效率加成
                 r.BuildingsToBuild = (int)Math.Ceiling(r.Buildings - 1e-6);
                 r.PowerEach = PowerOf(r.BuildingType);
                 res.Power += r.Buildings * r.PowerEach;
@@ -252,7 +270,7 @@ namespace GameLogic.Campaign.Economy
             if (res.Rows.Count > 0 && res.Rows[0].ForItem == target)
             {
                 RecipeRow top = res.Rows[0];
-                res.TargetCapacityPerMinute = top.BuildingsToBuild * 60.0 / top.Recipe.Seconds * OutAmount(top.Recipe, target.Id);
+                res.TargetCapacityPerMinute = top.BuildingsToBuild * 60.0 / top.Recipe.Seconds * OutAmount(top.Recipe, target.Id) * ResearchService.SpeedFactor(CampaignSession.Current, top.BuildingType);
             }
             else if (res.Raws.Count > 0 && res.Raws[0].Item == target)
             {

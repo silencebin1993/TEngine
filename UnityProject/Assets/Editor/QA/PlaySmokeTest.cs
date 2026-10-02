@@ -297,6 +297,17 @@ namespace GameLogic.EditorTools
                     case 337: StepUndergroundPipePlaced(inStep); break;
                     // FG4-ECO-11：建造菜单“信号”页签——选超控阵列，建造栏成本写关键材料与获取途径、研究节点；单击放虚影（等关键材料）；
                     // 点建成的超控阵列打开通用面板（信号核槽位行）、点“禁用”→ HUD 信号核按钮写“（1 槽失效）”、面板写失效原因 → 点“启用”恢复；Esc 关面板、Esc 退出建造模式。
+                    // FG5-RND-01：按 K 打开研发树（模态）→ 搜索“分流”→ 点“物流”筛选 → 滚轮缩放、悬停节点看解锁预览 → 左键加入队列（没有实验室：状态写明）→ K 关闭 →
+                    // 建造菜单“研发”页签选仿真实验室、单击放虚影 → 实验室把技术数据转成研究点 → 研究完成（通知、门槛放开）→ 建造菜单“物流”页签与分流器标“新”，换页后消失。
+                    case 352: StepResearchOpened(inStep); break;
+                    case 353: StepResearchSearched(inStep); break;
+                    case 354: StepResearchFiltered(inStep); break;
+                    case 355: StepResearchHovered(inStep); break;
+                    case 356: StepResearchQueued(inStep); break;
+                    case 357: StepResearchLabPicked(inStep); break;
+                    case 358: StepResearchLabPlaced(inStep); break;
+                    case 359: StepResearchDone(inStep); break;
+                    case 360: StepResearchNewMark(inStep); break;
                     case 346: StepOverridePicked(inStep); break;
                     case 347: StepOverridePlaced(inStep); break;
                     case 348: StepOverridePanel(inStep); break;
@@ -1067,9 +1078,9 @@ namespace GameLogic.EditorTools
                 return;
             }
             Check(!NotificationHudUIToolkit.CenterOpen, "再按一次关闭通知中心");
-            // FG2-FW-05 起图鉴键已接通（打开图鉴），“尚未开放”提示改用研发树键（FG5-RND-01 承接）。
-            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.OpenResearch));
-            Next(32, "按研发树键（研发树由 FG5-RND-01 承接，尚未开放）");
+            // FG2-FW-05 起图鉴键、FG5-RND-01 起研发树键已接通，“尚未开放”提示改用情报键（FG5-RND-05 承接）。
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.OpenIntel));
+            Next(32, "按情报键（情报由 FG5-RND-05 承接，尚未开放）");
         }
 
         private static void StepReservedKeyHint(double inStep)
@@ -1081,7 +1092,7 @@ namespace GameLogic.EditorTools
             var toast = Notifications.NotificationCenter.Toasts.FirstOrDefault(e => e.Type.Id == "feature_locked");
             string shown = string.Join("／", (NotificationHudUIToolkit.Instance?.Root?.Q<VisualElement>("ToastList")?.Query<Label>().ToList()
                 ?? new System.Collections.Generic.List<Label>()).Where(l => l.resolvedStyle.display == DisplayStyle.Flex && !string.IsNullOrEmpty(l.text)).Select(l => l.text));
-            Check(toast != null && shown.Contains(Localization.GameText.Get("input.action.open_research.name")),
+            Check(toast != null && shown.Contains(Localization.GameText.Get("input.action.open_intel.name")),
                 $"按尚未开放的键给出提示，不静默：弹出条“{shown}”");
             PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
             Next(33, "按 Esc（没有打开的面板 → 暂停菜单）");
@@ -2519,8 +2530,8 @@ namespace GameLogic.EditorTools
             }
             SessionState.SetInt(K + "TypeSub", 0);
             Check(!GameRoot.IsWorldPaused, "在命名框里按 Space（暂停键）不会暂停世界");
-            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.OpenResearch));
-            Next(62, "在命名框里按研发树键（尚未开放的动作）");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.OpenIntel));
+            Next(62, "在命名框里按情报键（尚未开放的动作）");
         }
 
         private static void StepTypingReserved(double inStep)
@@ -5441,6 +5452,297 @@ namespace GameLogic.EditorTools
             {
                 PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.OpenBuildMenu)); // 建造模式没开时按建造菜单键打开
             }
+            // FG5-RND-01：分流器、地下传送带等要先研究——先走研发树（真实按键），研究完成后再放分流器。
+            SessionState.SetInt(K + "ResearchKeySent", 0);
+            Next(352, "FG5-RND-01：按 K（研发树键）打开研发树");
+        }
+
+        // ── FG5-RND-01：研发树（K 键、搜索、按分支筛选、滚轮缩放、悬停预览、加入队列）、仿真实验室（建造菜单“研发”页签）、研究完成与建造菜单“新”标记 ──
+
+        private static ResearchTreePanelUIToolkit ResearchPanel()
+        {
+            ResearchTreePanelUIToolkit p = ResearchTreePanelUIToolkit.Instance;
+            p?.Refresh();
+            return p;
+        }
+
+        private static VisualElement ResearchRoot() =>
+            GameObject.Find("[ResearchTreeHost]")?.GetComponent<UIDocument>()?.rootVisualElement;
+
+        private static void StepResearchOpened(double inStep)
+        {
+            if (SessionState.GetInt(K + "ResearchKeySent", 0) == 0)
+            {
+                if (inStep < 0.6)
+                {
+                    return; // 等建造模式打开（上一步可能刚按了建造菜单键）
+                }
+                SessionState.SetInt(K + "ResearchKeySent", 1);
+                SessionState.SetFloat(K + "StepStart", (float)EditorApplication.timeSinceStartup);
+                // 测试捷径：研发这一段在战略暂停里走（只在实验室工作时放开约半秒），不推迟后面按游戏时间排的步骤（真实突袭到达会自动暂停，见 FG0-ARCH-03 那一步）。
+                SessionState.SetInt(K + "ResearchWasPaused", GameClock.Paused ? 1 : 0);
+                GameClock.SetPaused(true);
+                PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.OpenResearch));
+                return;
+            }
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            ResearchTreePanelUIToolkit p = ResearchPanel();
+            int nodes = Campaign.Economy.ResearchCatalog.Nodes.Count;
+            Check(ResearchTreePanelUIToolkit.IsOpen && p != null && p.PanelVisible && InputRouter.IsModalOwner(p) && p.NodeViewCount == nodes && nodes >= 60
+                  && p.StatusText.Length > 0 && !Localization.GameText.ContainsMarker(p.SummaryText + p.StatusText + p.FooterText + p.QueueTitleText + p.QueueEmptyText),
+                $"按 K 打开研发树：{p?.NodeViewCount} 个节点、{p?.FilterButtonCount} 个筛选按钮；“{p?.SummaryText}”；状态“{p?.StatusText}”；页脚“{p?.FooterText}”");
+            CheckNoTextMarkers("研发树");
+            // 在搜索框里打“分流”（与键盘输入同一个值变化回调）。
+            TextField search = ResearchRoot()?.Q<TextField>("ResearchSearch");
+            if (search != null)
+            {
+                search.value = "分流";
+            }
+            Next(353, "在研发树搜索框里输入“分流”");
+        }
+
+        private static void StepResearchSearched(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            ResearchTreePanelUIToolkit p = ResearchPanel();
+            Check(p != null && p.MatchCount >= 1 && p.FirstMatchId == "logistics.splitter" && p.NodeHasClass("logistics.splitter", "rt-node-match")
+                  && p.NodeHasClass("industry.lab_t2", "rt-node-dim") && p.SearchCountText.Length > 0,
+                $"搜索“分流”：找到 {p?.MatchCount} 个（“{p?.SearchCountText}”），第一个是“物流 · 分流与过滤”，其余节点变暗");
+            TextField search = ResearchRoot()?.Q<TextField>("ResearchSearch");
+            if (search != null)
+            {
+                search.value = string.Empty;
+            }
+            int idx = -1;
+            for (int i = 0; p != null && i < p.FilterButtonCount; i++)
+            {
+                if (p.FilterId(i) == "logistics")
+                {
+                    idx = i;
+                }
+            }
+            Check(idx > 0 && ClickUitk("[ResearchTreeHost]", "ResearchFilter" + idx), "点“物流”分支筛选按钮");
+            Next(354, "只看物流分支");
+        }
+
+        private static void StepResearchFiltered(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            ResearchTreePanelUIToolkit p = ResearchPanel();
+            Check(p != null && p.Filter == "logistics" && p.NodeVisible("logistics.splitter") && !p.NodeVisible("industry.lab_t2"),
+                $"按分支筛选：只显示物流分支（{p?.VisibleNodeCount} 个节点）");
+            // 鼠标滚轮在画布上滚一下（放大），再把指针移到“分流与过滤”节点上。
+            VisualElement viewport = ResearchRoot()?.Q<VisualElement>("ResearchViewport");
+            SessionState.SetFloat(K + "ResearchZoom0", p?.Zoom ?? 1f);
+            if (viewport != null)
+            {
+                using (WheelEvent we = WheelEvent.GetPooled(new Event { type = EventType.ScrollWheel, delta = new Vector2(0f, -3f), mousePosition = viewport.worldBound.center }))
+                {
+                    we.target = viewport;
+                    viewport.SendEvent(we);
+                }
+            }
+            VisualElement node = p?.NodeButton("logistics.splitter");
+            if (node != null)
+            {
+                using (PointerEnterEvent enter = PointerEnterEvent.GetPooled())
+                {
+                    enter.target = node;
+                    node.SendEvent(enter);
+                }
+            }
+            Next(355, "滚轮放大；鼠标悬停“分流与过滤”");
+        }
+
+        private static void StepResearchHovered(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            ResearchTreePanelUIToolkit p = ResearchPanel();
+            float z0 = SessionState.GetFloat(K + "ResearchZoom0", 1f);
+            Check(p != null && p.Zoom > z0 && p.DetailNodeId == "logistics.splitter" && p.DetailBody.Contains("分流器") && p.DetailBody.Contains("合流器")
+                  && p.DetailNote.Contains("占位图标"),
+                $"滚轮放大（{z0} → {p?.Zoom}）；悬停节点右侧写它会解锁什么（“{p?.DetailBody.Replace("\n", " / ")}”）");
+            Check(ClickUitk("[ResearchTreeHost]", "RtNode_logistics.splitter"), "左键点“分流与过滤”加入研究队列");
+            Next(356, "加入研究队列");
+        }
+
+        private static void StepResearchQueued(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            ResearchTreePanelUIToolkit p = ResearchPanel();
+            CampaignState state = CampaignSession.Current;
+            bool noLab = Campaign.Economy.ResearchService.BuiltLabCount(state) == 0;
+            Check(Campaign.Economy.ResearchService.QueueIndex(state, "logistics.splitter") == 0 && p != null && p.QueueRowVisibleCount == 1 && p.QueueRowText(0).Contains("分流与过滤")
+                  && (!noLab || p.StatusText.Contains("还没有仿真实验室")),
+                $"队列第 1 项“{p?.QueueRowText(0)}”；状态“{p?.StatusText}”（没有实验室时写明要建一座）");
+            PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.OpenResearch));
+            Next(357, "再按 K 关闭研发树，去建造菜单“研发”页签放仿真实验室");
+        }
+
+        private static void StepResearchLabPicked(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            Check(!ResearchTreePanelUIToolkit.IsOpen && mode != null && mode.IsOpen, "研发树关闭（建造模式还开着）");
+            // 核心附近按地形找两块能放仿真实验室的空地（一块放虚影，一块登记建成的测试实验室），不写死坐标（B25）。
+            GridCell core = HomeGridService.CorePivot(state);
+            GridCell? ghostAt = null, builtAt = null;
+            for (int r = 6; r <= 20 && builtAt == null; r++)
+            {
+                for (int dy = -r; dy <= r && builtAt == null; dy++)
+                {
+                    for (int dx = -r; dx <= r && builtAt == null; dx++)
+                    {
+                        if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != r)
+                        {
+                            continue;
+                        }
+                        var c = new GridCell(core.X + dx, core.Y + dy);
+                        if (!HomeGridService.ValidatePlacement(state, "sim_lab", c, 0, checkCost: false).Ok)
+                        {
+                            continue;
+                        }
+                        if (ghostAt == null)
+                        {
+                            ghostAt = c;
+                        }
+                        else if (Math.Abs(c.X - ghostAt.Value.X) > 4 || Math.Abs(c.Y - ghostAt.Value.Y) > 4)
+                        {
+                            builtAt = c;
+                        }
+                    }
+                }
+            }
+            SessionState.SetInt(K + "LabGhostX", ghostAt?.X ?? 0);
+            SessionState.SetInt(K + "LabGhostY", ghostAt?.Y ?? 0);
+            SessionState.SetInt(K + "LabBuiltX", builtAt?.X ?? 0);
+            SessionState.SetInt(K + "LabBuiltY", builtAt?.Y ?? 0);
+            int tab = Campaign.Grid.GridContent.Categories.ToList().FindIndex(c => c.Id == "research");
+            bool tabClicked = ClickUitk("[BuildModeHudHost]", "BuildCat" + tab);
+            int idx = HudItemIndex("sim_lab");
+            bool picked = idx >= 0 && ClickUitk("[BuildModeHudHost]", "BuildItem" + idx) && mode.SelectedTypeId == "sim_lab";
+            Check(ghostAt.HasValue && builtAt.HasValue && tabClicked && picked, $"点建造菜单“研发”页签里的“仿真实验室”（第 {idx + 1} 项）：选中（{mode?.SelectedTypeId}）");
+            if (ghostAt.HasValue)
+            {
+                HoverWorld(new Vector3(ghostAt.Value.X, 0f, ghostAt.Value.Y));
+            }
+            Next(358, "鼠标移到空地上，单击放下仿真实验室");
+        }
+
+        private static void StepResearchLabPlaced(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            var ghostAt = new GridCell(SessionState.GetInt(K + "LabGhostX", 0), SessionState.GetInt(K + "LabGhostY", 0));
+            var builtAt = new GridCell(SessionState.GetInt(K + "LabBuiltX", 0), SessionState.GetInt(K + "LabBuiltY", 0));
+            if (SessionState.GetInt(K + "LabClicked", 0) == 0)
+            {
+                if (inStep < 0.5)
+                {
+                    return;
+                }
+                SessionState.SetInt(K + "LabClicked", 1);
+                ClickWorld(new Vector3(ghostAt.X, 0f, ghostAt.Y));
+                return;
+            }
+            if (SessionState.GetInt(K + "LabClicked", 0) == 1)
+            {
+                if (inStep < 1.2)
+                {
+                    return;
+                }
+                BuildingRecord ghost = HomeGridService.BuildingAt(state, ghostAt);
+                Check(ghost != null && ghost.BuildingTypeId == "sim_lab" && Campaign.Regions.HomeValleyController.IsPlannedGhost(ghost),
+                    $"单击放下仿真实验室的虚影（状态行“{Campaign.Regions.HomeValleyBuildMode.Current?.StatusText}”）");
+                // 测试捷径：另一块空地上直接登记一座建成的实验室（机器施工由 FG3-LOG-02 覆盖）；技术数据 +6（技术数据的正式来源——解析 / 残骸 / 黑匣子——在 FG5-RND-02 / 06、FG8）。
+                AddSmokeBuilding(state, "sim_lab", "lab", builtAt);
+                Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+                Campaign.Economy.HomeInventory.Add(state, Campaign.Economy.ItemCatalog.TechDataId, 6, clampToSpace: false);
+                // 测试捷径：研究点 +5（实验室 1 点 / 分钟，等满 5 分钟太久；产出速率由 FgResearchSelfCheck B 段在真实世界里断言）。
+                Campaign.Economy.HomeInventory.Add(state, Campaign.Economy.ItemCatalog.ResearchPointsId, 5, clampToSpace: false);
+                SessionState.SetInt(K + "LabTech0", state.TechData);
+                SessionState.SetInt(K + "ResearchNotes0", Notifications.NotificationCenter.History.Where(e => e.Type?.Id == "research_done").Sum(e => e.Count));
+                SessionState.SetInt(K + "LabClicked", 2);
+                SessionState.SetFloat(K + "StepStart", (float)EditorApplication.timeSinceStartup);
+                GameClock.SetPaused(false); // 放开约半秒真实帧：实验室取技术数据开始转换，攒着的研究点投进队列
+                return;
+            }
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            GameClock.SetPaused(true);
+            BuildingRecord lab = HomeGridService.BuildingAt(state, builtAt);
+            Campaign.Economy.BuildingStatus st = lab != null ? Campaign.Economy.BuildingStatusService.Evaluate(state, lab) : default;
+            bool working = st.ReasonCode == "lab.working";
+            int tech0 = SessionState.GetInt(K + "LabTech0", 0);
+            Check(lab != null && st.Reason.Length > 0 && (working ? state.TechData < tech0 : st.Kind == Campaign.Economy.BuildingStatusKind.NoPower),
+                $"仿真实验室状态“{st.Reason}”（工作中时技术数据 {tech0} → {state.TechData}；缺电时写明原因）");
+            SessionState.SetInt(K + "LabClicked", 0);
+            Next(359, "研究点投进队列、研究完成");
+        }
+
+        private static void StepResearchDone(double inStep)
+        {
+            if (inStep < 1.0)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            int notes = Notifications.NotificationCenter.History.Where(e => e.Type?.Id == "research_done").Sum(e => e.Count);
+            string text = Notifications.NotificationCenter.History.LastOrDefault(e => e.Type?.Id == "research_done")?.Text ?? string.Empty;
+            Check(Campaign.Economy.ResearchService.IsCompleted(state, "logistics.splitter") && notes == SessionState.GetInt(K + "ResearchNotes0", 0) + 1
+                  && text.Contains("分流器") && Campaign.Grid.BuildCatalog.IsUnlocked(state, "research:logistics.splitter")
+                  && Campaign.Economy.ResearchService.IsNew(state, "splitter"),
+                $"研究完成：通知“{text}”；分流器 / 合流器解锁并标“新”");
+            int tab = Campaign.Grid.GridContent.Categories.ToList().FindIndex(c => c.Id == "logistics");
+            Check(ClickUitk("[BuildModeHudHost]", "BuildCat" + tab), "点建造菜单“物流”页签");
+            Next(360, "建造菜单“物流”页签：分流器标“新”");
+        }
+
+        private static void StepResearchNewMark(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            BuildModeHudUIToolkit hud = BuildModeHudUIToolkit.Instance;
+            int idx = HudItemIndex("splitter");
+            string item = hud?.Root?.Q<UnityEngine.UIElements.Button>("BuildItem" + idx)?.text ?? string.Empty;
+            int tab = Campaign.Grid.GridContent.Categories.ToList().FindIndex(c => c.Id == "logistics");
+            string tabText = hud?.Root?.Q<UnityEngine.UIElements.Button>("BuildCat" + tab)?.text ?? string.Empty;
+            bool marked = item.StartsWith(Localization.GameText.Get("research.build.new"), StringComparison.Ordinal) && tabText.Contains("新");
+            // 换到“能源”页签再回来：看过的“新”标记消失。
+            int energy = Campaign.Grid.GridContent.Categories.ToList().FindIndex(c => c.Id == "energy");
+            ClickUitk("[BuildModeHudHost]", "BuildCat" + energy);
+            ClickUitk("[BuildModeHudHost]", "BuildCat" + tab);
+            hud?.Refresh();
+            string after = hud?.Root?.Q<UnityEngine.UIElements.Button>("BuildItem" + HudItemIndex("splitter"))?.text ?? string.Empty;
+            Check(marked && !Campaign.Economy.ResearchService.IsNew(state, "splitter") && !after.StartsWith(Localization.GameText.Get("research.build.new"), StringComparison.Ordinal),
+                $"新解锁的分流器写“{item.Split('\n')[0]}”、页签“{tabText}”；换页看过一次后“新”标记消失（“{after.Split('\n')[0]}”）");
+            // 测试捷径：后面各步要放的已研究内容（地下传送带、T2 传送带、地下管线、储能站、电子组装台、超控阵列……）直接记为已研究——研究流程本身已在上面与 FgResearchSelfCheck 覆盖。
+            var unlockNodes = Campaign.Economy.ResearchCatalog.Nodes.Where(n => n.IsReady && n.Unlocks.Length > 0).Select(n => n.Id).ToArray();
+            Campaign.Economy.ResearchService.CompleteForTests(state, unlockNodes);
+            GameClock.SetPaused(SessionState.GetInt(K + "ResearchWasPaused", 0) == 1); // 恢复进研发这一段之前的暂停状态
             Next(264, "FG3-LOG-04：建造模式里放分流器与地下传送带");
         }
 
@@ -7581,6 +7883,7 @@ namespace GameLogic.EditorTools
                 $"真实 Play 帧里家园战斗内核跑着 {raiders} 个突袭者、{turrets} 座炮塔、峰值 {maxProj} 枚弹体（≥ 1,500），实例化缓冲与内核一致");
             CheckNoTextMarkers("家园突袭原型");
             int removed = Campaign.Combat.CombatBench.ClearPrototypeUnits(home);
+            SessionState.SetString(K + "RaidClearTicks", GameClock.Ticks.ToString());
             Next(142, $"清场：移除 {removed} 个原型单位，剩下的弹体飞完即消失");
         }
 
@@ -7595,7 +7898,8 @@ namespace GameLogic.EditorTools
             Check(home != null && home.Kernel.CountAlive(BinGames.Sim.Combat.CombatFaction.Hostile) == 0 && home.Kernel.ProjectileCount == 0
                   && home.Kernel.CountAlive(BinGames.Sim.Combat.CombatFaction.Player, BinGames.Sim.Combat.CombatUnitKind.Turret) == 0
                   && GameRoot.HomeValley?.LiveMachineCount == machinesBefore,
-                $"原型单位清场后弹体飞完消失（剩 {home?.Kernel.ProjectileCount} 枚），家园机器数不变（{machinesBefore} → {GameRoot.HomeValley?.LiveMachineCount} 台；此时远征队仍在外）");
+                $"原型单位清场后弹体飞完消失（剩 {home?.Kernel.ProjectileCount} 枚），家园机器数不变（{machinesBefore} → {GameRoot.HomeValley?.LiveMachineCount} 台；此时远征队仍在外）" +
+                $"（清场后世界走了 {GameClock.Ticks - long.Parse(SessionState.GetString(K + "RaidClearTicks", "0"))} 步，暂停 {GameRoot.IsWorldPaused}，模态 {InputRouter.PanelModalOpen}，最近通知 {Notifications.NotificationCenter.History.LastOrDefault()?.Type?.Id}）");
             Next(177, "FG1-SIG-03：存档前先接入一台家园机器");
         }
 

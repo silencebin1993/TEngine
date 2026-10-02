@@ -7,20 +7,25 @@ namespace GameLogic.Campaign.Economy
     /// FG4-ECO-11（FGR-ECO-020“需要研究节点”；FG05 FGR-RND-011“槽位：超控阵列的各级”）：研究门槛的唯一判定入口。
     /// 建筑 / 等级的解锁规则写 <c>research:&lt;节点ID&gt;</c>（fg.TbBuildingGrid / fg.TbBuildingTier.unlockRule），<see cref="Grid.BuildCatalog.IsUnlocked(CampaignState, string)"/> 转到这里。
     ///
-    /// 研发树（研究点、实验室、节点、队列）在 FG5-RND-01：它落地前 <see cref="TreeAvailable"/> = false，门槛视为已满足——与 ADR-LOG-001
-    /// “研发树之前不显示永远解不开的条目”同一决定；界面照样写出“研究节点：信号 · 超控阵列 T1（研发树在后续版本开放，现在不需要研究）”，
-    /// 让玩家知道以后要研究（DEBT-FG4ECO11-01）。FG5-RND-01 落地时把 <see cref="TreeAvailable"/> 接到研发树，并写 <see cref="ResearchState.CompletedNodes"/>。
+    /// FG5-RND-01：研发树已开放（<see cref="TreeAvailable"/> = true），门槛按 <see cref="ResearchState.CompletedNodes"/> 判定（由 <see cref="ResearchService"/> 写入）；
+    /// 哪个条目要哪个节点由 fg.TbResearchNode.unlocks 决定（改表脚本回写到各条目的 unlockRule）。
+    /// 自检里“研发树开放前写成的旧段”用 <see cref="LegacyGatesOpenForTests"/> 按开放前的规则跑（门槛视为已满足，见 ADR-RND-001）；
+    /// 研究门槛本身由 FgResearchSelfCheck 与各段的门槛断言在开放状态下覆盖。
     /// 没有逐帧逻辑；判定 O(已完成节点数)，只在建造菜单 / 面板刷新与放置时调用。
     /// </summary>
     public static class ResearchGate
     {
         public const string RulePrefix = "research:";
 
-        /// <summary>自检注入“研发树已经开放”（真门槛）；为 null 时按真实状态（FG5-RND-01 之前 = false）。</summary>
+        /// <summary>自检注入“研发树是否开放”；为 null 时按真实状态（FG5-RND-01 起开放，除非 <see cref="LegacyGatesOpenForTests"/>）。</summary>
         public static Func<bool> TreeAvailableOverrideForTests;
 
-        /// <summary>研发树是否已经开放（FG5-RND-01 之前恒 false）。</summary>
-        public static bool TreeAvailable => TreeAvailableOverrideForTests?.Invoke() ?? false;
+        /// <summary>全量自检里研发树开放前写成的旧段：按开放前的规则（门槛视为已满足）跑。由 CellFrameworkValidate 在整轮开始时打开、结束时关闭；
+        /// 不受 <see cref="ResetForTests"/> 影响。真实游戏恒为 false。</summary>
+        public static bool LegacyGatesOpenForTests;
+
+        /// <summary>研发树是否已经开放（FG5-RND-01 起 = true）。</summary>
+        public static bool TreeAvailable => TreeAvailableOverrideForTests?.Invoke() ?? !LegacyGatesOpenForTests;
 
         public static bool IsResearchRule(string rule) =>
             rule != null && rule.StartsWith(RulePrefix, StringComparison.Ordinal) && rule.Length > RulePrefix.Length;

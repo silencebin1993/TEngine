@@ -153,6 +153,7 @@ namespace GameLogic.Campaign.WorldSim
             Economy.ItemDistribution.Invalidate();
             HomeValleySoftlockGuard.ResetSessionState();
             Economy.SoftlockService.ResetSessionState(); // FG4-ECO-10
+            Economy.ResearchService.ResetSessionState(); // FG5-RND-01：实验室索引、效果缓存、阵营分支缓存按新战役重建
             HomeValleyAlarms.ResetSessionState();
             HomeValleyCombatTargets.ResetSessionState();
             HomeValleyFactory.ResetSessionState(); // FG4-ECO-03：装配站等料指纹与输入口堵塞提示按新会话重算
@@ -469,6 +470,8 @@ namespace GameLogic.Campaign.WorldSim
                 if (Home != null && Home.IsLoaded)
                 {
                     Economy.ProductionService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
+                    // FG5-RND-01：仿真实验室（技术数据 → 研究点）与研究队列，与生产建筑同一节拍；只看步序号，与观察无关，O(实验室数 + 队列长度)。
+                    Economy.ResearchService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                 }
                 // FG4-ECO-01：物品库存采样（净速率），每 eco.flow.sample_seconds 游戏秒一次、只看步序号，与观察无关，O(物品种类)。
                 Economy.ItemFlowStats.WorldStep(state, GameClock.Ticks, GameClock.StepHz);

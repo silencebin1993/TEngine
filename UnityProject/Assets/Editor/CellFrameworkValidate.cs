@@ -114,6 +114,9 @@ namespace GameLogic.EditorTools
             PerfGate.ResetRun();
             QaPython.ClearShared();
             _only = only;
+            // FG5-RND-01（ADR-RND-001）：研发树开放前写成的旧段按开放前的规则跑（研究门槛视为已满足）；研究门槛本身由 FgResearchSelfCheck
+            // 与各段新加的门槛断言显式打开研发树覆盖。整轮结束时关闭，真实游戏与冒烟不受影响。
+            GameLogic.Campaign.Economy.ResearchGate.LegacyGatesOpenForTests = true;
             // FG-TOOL-01：--profile 时剖析每段里最慢的行（写到单独的文件，不进报告）。
             _profileOut = Environment.GetEnvironmentVariable("BINGAMES_VALIDATE_PROFILE_OUT");
             if (string.IsNullOrEmpty(_profileOut))
@@ -145,6 +148,7 @@ namespace GameLogic.EditorTools
             {
                 _only = null;
                 QaPython.EndShared();
+                GameLogic.Campaign.Economy.ResearchGate.LegacyGatesOpenForTests = false;
             }
 
             Line("======================================");
@@ -445,6 +449,11 @@ namespace GameLogic.EditorTools
             // 夹具只在登记的夹具方法里）；产线 / 小产线 / 精炼塔规划在种子测试集上都找得到且逐件过放置校验（B25）；缺口清零门禁；FG-M4 试玩包；FGT-ECO-001～010 的自检映射与旅程步骤；
             // 装配站面板生产按钮不被压扁 / 盖住（四种分辨率）与布局探针；工单面板原因接线（DEBT-FG4ECO11-06）。
             Seg("FgMilestoneM4SelfCheck", FgMilestoneM4SelfCheck.Run);
+            // FG5-RND-01：研究点、仿真实验室与研发树——数据（两张新表与源数据、11 个分支 / 66 个节点、门槛回写、实验室三级、文本中英、钩子、通知）、FGT-RND-001（实验室产出、多座相加、
+            // 队列投入、完成、移出保留进度、重新排队接着做）、FGT-RND-002（未研究被拒并写节点名、研究后可建、升级门槛、前置、关键材料、阵营分支、内容未开放、队列已满、排序）、
+            // 负向（技术数据耗尽、缺电、禁用、没有实验室、拆除退回、被摧毁停住）、效果（工作速度、仓库 / 储能容量、实验室效率、规划助手）、真文件存读档与旧档迁移、暂停与倍速、观察一致、
+            // 面板（真 UXML：K 键、搜索、筛选、缩放、平移、悬停预览、加入 / 移出、拖动排序、布局探针）、通知 / 离家报告 / 图鉴 / “新”标记、性能。研发树在本段显式开放（真门槛）。
+            Seg("FgResearchSelfCheck", FgResearchSelfCheck.Run);
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>

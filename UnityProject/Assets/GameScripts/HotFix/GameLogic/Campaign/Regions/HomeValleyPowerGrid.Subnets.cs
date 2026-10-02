@@ -650,7 +650,7 @@ namespace GameLogic.Campaign.Regions
                 }
                 if (def.StorageCapacity > 0f && def.StorageRate > 0f)
                 {
-                    e.StorageCapacity = def.StorageCapacity * 60.0;
+                    e.StorageCapacity = def.StorageCapacity * 60.0 * Economy.ResearchService.CapacityFactor(state, "energy_storage"); // FG5-RND-01：研发“电芯扩容”
                     e.StorageRate = def.StorageRate;
                     e.StorageOn = operational;
                     if (StorageScratch.TryGetValue(b.BuildingId, out StorageSettings ss))

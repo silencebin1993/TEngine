@@ -238,6 +238,17 @@ namespace GameLogic.Core
         /// <summary>FG4-ECO-10（FGR-ECO-072）：第一次检测到施工 / 维修目标机器到不了。</summary>
         public const string SoftlockFirstUnreachable = "economy.softlock.first_unreachable";
 
+        /// <summary>FG5-RND-01：第一次打开研发树（引导内容在 FG15-UX-04：分支、队列、悬停预览）。</summary>
+        public const string ResearchTreeFirstOpen = "research.tree_first_open";
+        /// <summary>FG5-RND-01：第一座仿真实验室建成（引导：技术数据 → 研究点；图鉴“仿真实验室与研究点”随之解锁）。</summary>
+        public const string ResearchLabFirstBuilt = "research.lab_first_built";
+        /// <summary>FG5-RND-01：第一次把节点加入研究队列。</summary>
+        public const string ResearchFirstQueued = "research.first_queued";
+        /// <summary>FG5-RND-01：第一次研究完成（引导：建造菜单里的“新”标记）。</summary>
+        public const string ResearchFirstCompleted = "research.first_completed";
+        /// <summary>FG5-RND-01：研究第一次因为技术数据耗尽 / 缺电 / 等关键材料暂停（引导：从哪里拿技术数据）。</summary>
+        public const string ResearchFirstStalled = "research.first_stalled";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -276,6 +287,7 @@ namespace GameLogic.Core
             StatsProductionFirstOpen, StatsFirstDeficit, StatsFirstPin, PlannerFirstPlan,
             AwayReportFirstOpen, AwayFirstAutoOpen, AlarmFirstFactoryJam, AlarmFirstMachineWounded,
             SoftlockFirstPrint, SoftlockFirstCoreScrap, SoftlockFirstLoopStall, SoftlockFirstUnreachable,
+            ResearchTreeFirstOpen, ResearchLabFirstBuilt, ResearchFirstQueued, ResearchFirstCompleted, ResearchFirstStalled,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

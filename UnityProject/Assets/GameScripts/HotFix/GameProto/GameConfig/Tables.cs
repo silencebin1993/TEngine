@@ -219,6 +219,14 @@ public partial class Tables
     /// </summary>
     public fg.TbRemovedContent TbRemovedContent {get; }
     /// <summary>
+    /// 研发分支
+    /// </summary>
+    public fg.TbResearchBranch TbResearchBranch {get; }
+    /// <summary>
+    /// 研发节点
+    /// </summary>
+    public fg.TbResearchNode TbResearchNode {get; }
+    /// <summary>
     /// 机器岗位
     /// </summary>
     public fg.TbRosterRole TbRosterRole {get; }
@@ -365,6 +373,8 @@ public partial class Tables
         TbRecipe = new fg.TbRecipe(loader("fg_tbrecipe"));
         TbRecipeIo = new fg.TbRecipeIo(loader("fg_tbrecipeio"));
         TbRemovedContent = new fg.TbRemovedContent(loader("fg_tbremovedcontent"));
+        TbResearchBranch = new fg.TbResearchBranch(loader("fg_tbresearchbranch"));
+        TbResearchNode = new fg.TbResearchNode(loader("fg_tbresearchnode"));
         TbRosterRole = new fg.TbRosterRole(loader("fg_tbrosterrole"));
         TbRuleKind = new fg.TbRuleKind(loader("fg_tbrulekind"));
         TbRulePreset = new fg.TbRulePreset(loader("fg_tbrulepreset"));
@@ -445,6 +455,8 @@ public partial class Tables
         TbRecipe.ResolveRef(this);
         TbRecipeIo.ResolveRef(this);
         TbRemovedContent.ResolveRef(this);
+        TbResearchBranch.ResolveRef(this);
+        TbResearchNode.ResolveRef(this);
         TbRosterRole.ResolveRef(this);
         TbRuleKind.ResolveRef(this);
         TbRulePreset.ResolveRef(this);

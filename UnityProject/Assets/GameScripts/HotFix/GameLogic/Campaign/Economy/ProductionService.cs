@@ -962,7 +962,7 @@ namespace GameLogic.Campaign.Economy
         {
             p.WorkedThisStep = false;
             BuildingRecord b = p.Building;
-            AccrueTheory(p, ticks, worldHz);
+            AccrueTheory(state, p, ticks, worldHz);
             switch (b.ConstructionState)
             {
                 case BuildingConstructionState.Operational:
@@ -1080,7 +1080,7 @@ namespace GameLogic.Campaign.Economy
                     }
                     r.Running = true;
                     r.Progress = 0;
-                    r.Duration = recipe.DurationTicks(worldHz);
+                    r.Duration = ResearchService.ScaleTicks(state, p.Building.BuildingTypeId, recipe.DurationTicks(worldHz)); // FG5-RND-01：研发效率加成
                     r.PendingItem = string.Empty;
                     r.PendingAmount = 0;
                     return true;
@@ -1102,7 +1102,7 @@ namespace GameLogic.Campaign.Economy
                     }
                     r.Running = true;
                     r.Progress = 0;
-                    r.Duration = Math.Max(1, (long)Math.Round(p.Def.CycleSeconds * Math.Max(1, worldHz)));
+                    r.Duration = ResearchService.ScaleTicks(state, p.Building.BuildingTypeId, Math.Max(1, (long)Math.Round(p.Def.CycleSeconds * Math.Max(1, worldHz))));
                     r.PendingItem = p.VeinOre.Id;
                     r.PendingAmount = amount;
                     r.PendingRuin = false;
@@ -1137,7 +1137,7 @@ namespace GameLogic.Campaign.Economy
                 ProductionStats.RecordUnits(state, item, 1, produced: false); // FG4-ECO-08：分解一件 = 消耗（表里没有的编号不计）
                 r.Running = true;
                 r.Progress = 0;
-                r.Duration = Math.Max(1, (long)Math.Round(p.Def.ItemSeconds * Math.Max(1, worldHz)));
+                r.Duration = ResearchService.ScaleTicks(state, p.Building.BuildingTypeId, Math.Max(1, (long)Math.Round(p.Def.ItemSeconds * Math.Max(1, worldHz))));
                 // PendingItem = 正在分解的那件（界面显示 / 拆除时原样退回）；完成时产出的是 PendingAmount 件废料。
                 r.PendingItem = first.ItemId;
                 r.PendingAmount = yield;
@@ -1166,7 +1166,7 @@ namespace GameLogic.Campaign.Economy
                 }
                 r.Running = true;
                 r.Progress = 0;
-                r.Duration = Math.Max(1, (long)Math.Round(p.Def.CycleSeconds * Math.Max(1, worldHz)));
+                r.Duration = ResearchService.ScaleTicks(state, p.Building.BuildingTypeId, Math.Max(1, (long)Math.Round(p.Def.CycleSeconds * Math.Max(1, worldHz))));
                 r.PendingItem = ItemCatalog.ScrapId;
                 r.PendingAmount = take;
                 r.PendingRuin = true;
@@ -2437,15 +2437,17 @@ namespace GameLogic.Campaign.Economy
         /// <summary>满速一份要几步（没选配方 = 0：不计理论份数）。
         /// 回收站一份的时长看它在做什么（审查 P1）：分解送来的物品按 ItemSeconds、拆脚下废墟按 CycleSeconds——正在做的那一份按它实际的时长，
         /// 空闲时按“下一份会做什么”（输入口有物品 = 分解，否则 = 拆废墟）。</summary>
-        private static long CycleTicks(Producer p, int worldHz)
+        private static long CycleTicks(CampaignState state, Producer p, int worldHz)
         {
+            // FG5-RND-01：理论份数按研发效率加成后的满速算（效率 = 实际 ÷ 理论，加成不会让效率超过 100%）。
+            string type = p.Building.BuildingTypeId;
             switch (p.Def.Mode)
             {
                 case ProducerMode.Recipe:
                     RecipeDef r = p.Recipe ?? p.Def.FixedRecipe;
-                    return r == null || (p.IsBurner && string.IsNullOrEmpty(p.Rec.BurnTarget)) ? 0 : Math.Max(1, r.DurationTicks(worldHz));
+                    return r == null || (p.IsBurner && string.IsNullOrEmpty(p.Rec.BurnTarget)) ? 0 : ResearchService.ScaleTicks(state, type, Math.Max(1, r.DurationTicks(worldHz)));
                 case ProducerMode.Drill:
-                    return Math.Max(1, (long)Math.Round(p.Def.CycleSeconds * Math.Max(1, worldHz)));
+                    return ResearchService.ScaleTicks(state, type, Math.Max(1, (long)Math.Round(p.Def.CycleSeconds * Math.Max(1, worldHz))));
                 case ProducerMode.Recycler:
                     ProducerRecord rec = p.Rec;
                     if (rec.Running && rec.Duration > 0)
@@ -2453,7 +2455,7 @@ namespace GameLogic.Campaign.Economy
                         return rec.Duration;
                     }
                     float sec = FirstNonEmpty(rec.In) != null ? p.Def.ItemSeconds : p.Def.CycleSeconds;
-                    return Math.Max(1, (long)Math.Round(sec * Math.Max(1, worldHz)));
+                    return ResearchService.ScaleTicks(state, type, Math.Max(1, (long)Math.Round(sec * Math.Max(1, worldHz))));
                 default:
                     return 0;
             }
@@ -2498,7 +2500,7 @@ namespace GameLogic.Campaign.Economy
         }
 
         /// <summary>推进时累加“理论份数”：建成了（运转 / 禁用 / 缺电……都算停工，拉低效率）就按满速计；施工中、已摧毁不计。</summary>
-        private static void AccrueTheory(Producer p, int ticks, int worldHz)
+        private static void AccrueTheory(CampaignState state, Producer p, int ticks, int worldHz)
         {
             if (!HasEfficiency(p))
             {
@@ -2509,7 +2511,7 @@ namespace GameLogic.Campaign.Economy
             {
                 return;
             }
-            long cycle = CycleTicks(p, Math.Max(1, worldHz));
+            long cycle = CycleTicks(state, p, Math.Max(1, worldHz));
             if (cycle <= 0)
             {
                 return;

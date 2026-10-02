@@ -86,6 +86,8 @@ namespace GameLogic.UI.Kit
         private string _lastKey;
         private string _category;
         private string _searchText = string.Empty;
+        /// <summary>FG5-RND-01：这一页正显示着的“新”条目——离开这一页（换分类 / 搜索 / 退出建造模式）时记为看过，“新”标记消失。</summary>
+        private readonly HashSet<string> _newShown = new HashSet<string>(StringComparer.Ordinal);
         private int _viewRevision;
         private string _dragEntryId;
         private int _dropSlot = -1;
@@ -266,6 +268,7 @@ namespace GameLogic.UI.Kit
             _search = new UiSearchBox(root.Q<TextField>("BuildSearch"), root.Q<Label>("BuildSearchPlaceholder"), root.Q<Button>("BuildSearchClear"),
                 "ui.build.search_placeholder", text =>
                 {
+                    FlushNewSeen(CampaignSession.Current);
                     _searchText = text ?? string.Empty;
                     _viewRevision++;
                     _lastKey = null;
@@ -329,6 +332,7 @@ namespace GameLogic.UI.Kit
         /// <summary>点分类页签（清掉搜索，回到分类浏览）。</summary>
         public void SelectCategory(string categoryId)
         {
+            FlushNewSeen(CampaignSession.Current);
             _category = categoryId;
             if (!string.IsNullOrEmpty(_searchText))
             {
@@ -343,6 +347,7 @@ namespace GameLogic.UI.Kit
         /// <summary>搜索框输入（与在框里打字同一回调）。</summary>
         public void SetSearch(string text)
         {
+            FlushNewSeen(CampaignSession.Current);
             if (_search != null)
             {
                 _search.SetText(text ?? string.Empty);
@@ -477,6 +482,10 @@ namespace GameLogic.UI.Kit
             SetVisible(_entry, available && !open);
             SetVisible(_panel, open);
             SetVisible(_hotbar, (available || open) && _slots.Count > 0);
+            if (!open && _newShown.Count > 0)
+            {
+                FlushNewSeen(state); // 退出建造模式：这一页显示过的“新”条目记为看过。
+            }
             if (mode == null || state == null)
             {
                 _lastKey = null;
@@ -489,7 +498,9 @@ namespace GameLogic.UI.Kit
                 // FG3-LOG-02：施工状态（虚影进度、缺料）变化时也刷新；每 0.25 秒一档，状态行的“施工中 N%”跟得上。
                 "|", HomeValleyConstruction.Revision.ToString(), "|", open ? Mathf.FloorToInt(Time.unscaledTime * 4f).ToString() : "0",
                 // FG3-LOG-07：撤销栈 / 布局库变化时也刷新（撤销按钮写下一步是什么）。
-                "|", PlanHistory.Revision.ToString(), "|", LayoutLibrary.Revision.ToString());
+                "|", PlanHistory.Revision.ToString(), "|", LayoutLibrary.Revision.ToString(),
+                // FG5-RND-01：研究完成（门槛放开、“新”标记）时也刷新。
+                "|", ResearchService.Revision.ToString());
             if (key == _lastKey)
             {
                 return;
@@ -950,6 +961,10 @@ namespace GameLogic.UI.Kit
                 SetVisible(b, true);
                 int n = BuildCatalog.CountInCategory(c.Id);
                 b.text = GameText.Format("build.category.tab", GameText.Get(c.NameKey), n);
+                if (ResearchService.AnyNewInCategory(CampaignSession.Current, c.Id))
+                {
+                    b.text = GameText.Format("research.build.new_tab", b.text); // FG5-RND-01：这个分类里有新解锁、还没看过的条目
+                }
                 b.EnableInClassList("bm-cat-selected", !searching && c.Id == _category);
                 b.EnableInClassList("bm-cat-empty", n == 0);
             }
@@ -1017,7 +1032,13 @@ namespace GameLogic.UI.Kit
                     string countText = e.Building.MaxCount > 0 ? GameText.Format("ui.build.count_limited", count, e.Building.MaxCount) : GameText.Format("ui.build.count_unlimited", count);
                     line2 = cost + "  " + countText;
                 }
-                b.text = e.Name + "\n" + line2;
+                bool fresh = unlocked && ResearchService.IsNew(state, e.Id);
+                if (fresh)
+                {
+                    _newShown.Add(e.Id);
+                }
+                b.text = (fresh ? GameText.Get("research.build.new") : string.Empty) + e.Name + "\n" + line2;
+                b.EnableInClassList("bm-item-new", fresh);
                 b.EnableInClassList("bm-item-locked", !unlocked);
                 b.EnableInClassList("bm-item-selected", mode.SelectedEntryId == e.Id);
             }
@@ -1061,6 +1082,11 @@ namespace GameLogic.UI.Kit
             if (state != null && !BuildCatalog.IsUnlocked(state, e))
             {
                 body += "\n" + GameText.Format("ui.build.locked_tip", GameText.Get(e.UnlockHintKey));
+                string gate = ResearchService.GateStatusLine(state, e.UnlockRule); // FG5-RND-01：研究节点在树上的状态（可研究 / 研究中 n/m / 前置未完成）
+                if (gate.Length > 0)
+                {
+                    body += "\n" + gate;
+                }
             }
             if (!e.IsTool)
             {
@@ -1071,6 +1097,20 @@ namespace GameLogic.UI.Kit
             body += "\n" + GameText.Get("ui.build.item_tip_hotbar");
             return new TooltipContent { Title = e.Name, Body = body, Shortcut = GameActionId.Rotate };
         }
+
+        /// <summary>FG5-RND-01：把这一页显示过的“新”条目记为看过（离开这一页时调用）。</summary>
+        private void FlushNewSeen(CampaignState state)
+        {
+            if (_newShown.Count == 0)
+            {
+                return;
+            }
+            ResearchService.MarkSeen(state, _newShown);
+            _newShown.Clear();
+        }
+
+        /// <summary>自检：这一页正显示着的“新”条目。</summary>
+        public IReadOnlyCollection<string> NewShown => _newShown;
 
         private static void SetVisible(VisualElement e, bool visible)
         {

@@ -236,6 +236,12 @@ namespace GameLogic.UI.Kit
             {
                 RosterPanelUIToolkit.Toggle();
             }
+            // FG5-RND-01：研发树键（默认 K，全部上下文，可重绑）：开着再按一次关闭；更高层的面板盖在上面时不起作用（同物资键）。
+            if (InputRouter.ConsumeContextAction(GameActionId.OpenResearch)
+                && !MechanicCodexPanelUIToolkit.IsOpen && !UiKitPanelHost.AnyModalAbove(ResearchTreePanelUIToolkit.Order))
+            {
+                ResearchTreePanelUIToolkit.Toggle();
+            }
             // FG4-ECO-08：统计键（默认 Alt+T，全部上下文）：开着再按一次关闭；更高层的面板盖在上面时不起作用（同物资键）。
             if (InputRouter.ConsumeContextAction(GameActionId.OpenStats)
                 && !MechanicCodexPanelUIToolkit.IsOpen && !UiKitPanelHost.AnyModalAbove(StatsPanelUIToolkit.Order))

@@ -1003,11 +1003,13 @@ namespace GameLogic.UI.Kit
             foreach (ProductionPlanner.RecipeRow row in r.Rows)
             {
                 string forId = row.ForItem.Id;
+                string needs = ProductionPlanner.ResearchNote(state, row.BuildingType);
                 _specs.Add(new RowSpec
                 {
                     Text = GameText.Format("planner.row", HomeGridService.DisplayName(row.BuildingType), Num(row.Buildings), row.BuildingsToBuild, row.Recipe.Name,
                         ProductionStats.Rate(row.ForItem, (float)row.ForItemPerMinute), Mathf.RoundToInt((float)row.Utilization * 100f),
-                        ProductionPlanner.PowerOf(row.BuildingType) > 0f ? GameText.Format("planner.row_power", Num(row.BuildingsToBuild * row.PowerEach)) : string.Empty),
+                        ProductionPlanner.PowerOf(row.BuildingType) > 0f ? GameText.Format("planner.row_power", Num(row.BuildingsToBuild * row.PowerEach)) : string.Empty) + needs,
+                    Cls = needs.Length > 0 ? "st-row-warn" : null,
                     B1Text = row.Alternatives.Count > 0 ? GameText.Get("planner.cycle_recipe") : null,
                     B1 = row.Alternatives.Count > 0 ? () => CycleRecipe(forId) : (Action)null,
                 });
@@ -1020,6 +1022,7 @@ namespace GameLogic.UI.Kit
             {
                 string ex = raw.ExtractorType != null
                     ? GameText.Format("planner.raw_extract", Num(raw.Extractors), raw.ExtractorsToBuild, HomeGridService.DisplayName(raw.ExtractorType))
+                      + ProductionPlanner.ResearchNote(state, raw.ExtractorType)
                     : string.Empty;
                 _specs.Add(new RowSpec
                 {
