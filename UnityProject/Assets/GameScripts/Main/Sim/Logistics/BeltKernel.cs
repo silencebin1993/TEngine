@@ -1704,6 +1704,20 @@ namespace BinGames.Sim.Logistics
             }
         }
 
+        /// <summary>FG4-ECO-08（统计面板“分流器分出量”，DEBT-FG3LOG04-04）：全部活着的分流器所在格，按 (x, y) 升序。O(节点数)，只在面板刷新时调用。</summary>
+        public void CollectSplitters(List<int2> into)
+        {
+            into.Clear();
+            for (int n = 0; n < _nodes.Length; n++)
+            {
+                if (_nodes[n].Alive != 0 && _nodes[n].Kind == (byte)BeltNodeKind.Splitter)
+                {
+                    into.Add(new int2(_nodes[n].X, _nodes[n].Y));
+                }
+            }
+            into.Sort((a, b) => a.x != b.x ? a.x.CompareTo(b.x) : a.y.CompareTo(b.y));
+        }
+
         public void CollectPortIds(List<int> into)
         {
             into.Clear();

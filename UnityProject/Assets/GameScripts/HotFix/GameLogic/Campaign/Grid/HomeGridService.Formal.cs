@@ -1093,6 +1093,7 @@ namespace GameLogic.Campaign.Grid
             if (refund > 0)
             {
                 HomeValleyConstruction.ReturnMaterials(state, at, CampaignEconomyLedger.ResourceScrap, refund, "belt-refund:" + stamp);
+                HomeValleyConstruction.RecordDemolishRefund(state, refund); // FG4-ECO-08：拆回的造价 = 产出（每格建成时计过消耗）
             }
             foreach (KeyValuePair<ushort, int> kv in itemCounts)
             {

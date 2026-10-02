@@ -323,7 +323,8 @@ namespace GameLogic.Campaign.Regions
                 CampaignEconomyLedger.Cancel(state, tx);
                 return 0;
             }
-            CampaignEconomyLedger.Commit(state, tx);
+            // FG4-ECO-08 审查修复：装上货舱只是搬运（不计入生产统计）；材料在建成时才算消耗（见 RecordBuilt）。
+            CampaignEconomyLedger.CommitTransfer(state, tx);
             order.FetchCount++;
             machine.Cargo = new[] { new CargoEntry { ResourceType = CampaignEconomyLedger.ResourceScrap, Amount = load } };
             Revision++;
@@ -635,6 +636,7 @@ namespace GameLogic.Campaign.Regions
                 else
                 {
                     p.Delivered -= unitCost;
+                    RecordBuilt(state, unitCost);
                     builtOne = true;
                 }
                 next = NextUnbuilt(p);
@@ -863,6 +865,28 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
+        /// <summary>
+        /// FG4-ECO-08 审查修复（FGR-ECO-050“统计只计创造与销毁”）：施工材料真正变成建筑 / 传送带格 / 管线件的那一刻记为消耗。
+        /// 取料、运到现场、取消 / 撤销 / 现场被毁时退回都只是搬运，不计。O(1)，与建筑数无关。
+        /// </summary>
+        public static void RecordBuilt(CampaignState state, int scrapUsed)
+        {
+            if (scrapUsed > 0)
+            {
+                Economy.ProductionStats.RecordResource(state, CampaignEconomyLedger.ResourceScrap, scrapUsed, produced: false);
+            }
+        }
+
+        /// <summary>FG4-ECO-08 审查修复：拆除全额返还的造价记为产出（与 <see cref="RecordBuilt"/> 对称：建成算消耗、拆回算产出）。
+        /// 建筑内部缓存的物品退回仓库只是搬运，不走这里。</summary>
+        public static void RecordDemolishRefund(CampaignState state, int scrapRefunded)
+        {
+            if (scrapRefunded > 0)
+            {
+                Economy.ProductionStats.RecordResource(state, CampaignEconomyLedger.ResourceScrap, scrapRefunded, produced: true);
+            }
+        }
+
         /// <summary>现场建完：建筑记下投入并清掉施工字段；传送带规划从存档移除。</summary>
         internal static void OnSiteCompleted(CampaignState state, WorkOrderRecord order, BuildingRecord building)
         {
@@ -883,6 +907,7 @@ namespace GameLogic.Campaign.Regions
             }
             if (building != null)
             {
+                RecordBuilt(state, building.ConstructionDelivered);
                 building.InvestedScrap = Math.Max(building.InvestedScrap, building.ConstructionRequired);
                 building.ConstructionRequired = 0;
                 building.ConstructionDelivered = 0;
@@ -1274,7 +1299,7 @@ namespace GameLogic.Campaign.Regions
                 && (tx.State == ResourceTransactionState.Reserved || tx.State == ResourceTransactionState.Running))
             {
                 int reserved = Mathf.RoundToInt(tx.Reserved);
-                CampaignEconomyLedger.Commit(state, order.ResourceTransactionId);
+                CampaignEconomyLedger.CommitTransfer(state, order.ResourceTransactionId); // 预留转为现场材料：只是搬运，建成时才计消耗
                 int required = HomeValleyLayout.BuildProfile.TryGetValue(b.BuildingTypeId, out (int ScrapCost, float Seconds) p) ? p.ScrapCost : reserved;
                 b.ConstructionRequired = Math.Max(required, reserved);
                 b.ConstructionDelivered = reserved;

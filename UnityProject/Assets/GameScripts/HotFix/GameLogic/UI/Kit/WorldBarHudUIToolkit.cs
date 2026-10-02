@@ -1,7 +1,11 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
+using System;
+using BinGames.Sim.Logistics;
 using GameLogic.Campaign;
+using GameLogic.Campaign.Economy;
+using GameLogic.Campaign.Regions;
 using GameLogic.Campaign.WorldSim;
 using GameLogic.Core;
 using GameLogic.Localization;
@@ -52,6 +56,44 @@ namespace GameLogic.UI.Kit
         public Button LaborButton => _labor;
         public string LaborText => _labor?.text ?? string.Empty;
 
+        // ── FG4-ECO-08 资源顶栏（自检读点）──
+        public int ResourceChipCount { get; private set; }
+        public Button ResourceChip(int i) => i >= 0 && i < ResourceChipCount ? _resChips[i] : null;
+        public string ResourceChipText(int i) => ResourceChip(i)?.text ?? string.Empty;
+        public string ResourceChipTip(int i) => i >= 0 && i < ResourceChipCount ? _resTipBody[i] : string.Empty;
+        public int FindResourceChip(string contains)
+        {
+            for (int i = 0; i < ResourceChipCount; i++)
+            {
+                if (_resChips[i].text.Contains(contains))
+                {
+                    return i;
+                }
+            }
+            return -1;
+        }
+        /// <summary>自检：模拟右键点格子（固定物品 = 取消固定）。</summary>
+        public void RightClickResourceChip(int i)
+        {
+            if (i >= 0 && i < ResourceChipCount)
+            {
+                _resRight[i]?.Invoke();
+            }
+        }
+        /// <summary>资源顶栏真正重建的次数（自检：节流内不重建、不每帧分配）。</summary>
+        public int ResourceRebuilds { get; private set; }
+        public static Func<double> ResourceClock = () => Time.realtimeSinceStartupAsDouble;
+
+        private VisualElement _resRow;
+        private readonly List<Button> _resChips = new List<Button>(12);
+        private readonly List<Action> _resLeft = new List<Action>(12);
+        private readonly List<Action> _resRight = new List<Action>(12);
+        private readonly List<string> _resTipTitle = new List<string>(12);
+        private readonly List<string> _resTipBody = new List<string>(12);
+        private readonly List<int> _subnets = new List<int>(4);
+        private double _resNext;
+        private int _resKey;
+
         private void Awake()
         {
             Instance = this;
@@ -71,6 +113,9 @@ namespace GameLogic.UI.Kit
             _focusTitle = root.Q<Label>("WorldFocusTitle");
             _focusList = root.Q<ScrollView>("WorldFocusList");
             _labor = root.Q<Button>("WorldLabor");
+            _resRow = root.Q<VisualElement>("WorldResourceRow");
+            _resKey = 0;
+            _resNext = 0;
             if (_labor != null)
             {
                 // FG4-ECO-07（FGR-ECO-042）：顶栏劳动力，点一下打开机器名册。
@@ -157,6 +202,8 @@ namespace GameLogic.UI.Kit
 
             // FG4-ECO-07：劳动力读数（MachineRoster.Labor 自带节流：名册 / 岗位变化立刻重算，否则最多每 roster.labor_refresh_seconds 真实秒一次）。
             RefreshLabor(state);
+            // FG4-ECO-08：资源顶栏（固定 / 语言变化立刻重建，否则每 eco.topbar.refresh_seconds 真实秒一次；O(固定物品 + 电网数)）。
+            RefreshResources(state);
 
             IReadOnlyList<WorldView.FocusTarget> targets = WorldView.FocusTargets(state);
             _keyBuilder.Clear();
@@ -197,6 +244,134 @@ namespace GameLogic.UI.Kit
 
             _focusTitle.text = GameText.Get("ui.world.focus.title");
             RebuildFocus(targets);
+        }
+
+        /// <summary>FG4-ECO-08：重建资源顶栏（自检可直接调用：<paramref name="force"/> = 忽略节流）。</summary>
+        public void RefreshResources(CampaignState state, bool force = false)
+        {
+            if (_resRow == null || state == null)
+            {
+                return;
+            }
+            // 电网汇总版本号在有储能时每步都变，不进键（否则每帧重建）：电力读数随节流刷新。
+            int key = HashCode.Combine(ResourcePins.Revision, (int)GameText.Language, state.GetHashCode());
+            double now = ResourceClock();
+            if (!force && key == _resKey && now < _resNext)
+            {
+                return;
+            }
+            _resKey = key;
+            _resNext = now + Math.Max(0.1f, Campaign.Grid.GridContent.Tuning("eco.topbar.refresh_seconds"));
+            ResourceRebuilds++;
+            int n = 0;
+            foreach (PinnedItemRecord pin in ResourcePins.Pins(state))
+            {
+                ResourcePins.PinView v = ResourcePins.View(state, pin);
+                if (v.Item == null)
+                {
+                    continue;
+                }
+                string id = v.Item.Id;
+                string stock = v.Stock >= 0 ? v.Stock.ToString(CultureInfo.InvariantCulture) : GameText.Get("topbar.fluid");
+                string rate = ProductionStats.Rate(v.Item, v.ProducedPerMinute);
+                string text = v.HasTarget
+                    ? GameText.Format(v.Reached ? "topbar.pin_target_ok" : "topbar.pin_target_miss", v.Item.Name, stock, rate, ProductionStats.Rate(v.Item, v.Target))
+                    : GameText.Format("topbar.pin", v.Item.Name, stock, rate);
+                string body = GameText.Format("topbar.pin_tip", v.Item.Name, stock, rate, ProductionStats.Rate(v.Item, v.NetPerMinute),
+                                  ProductionStats.WindowName(ResourcePins.RateWindow))
+                              + (v.HasTarget ? "\n" + GameText.Format(v.Reached ? "topbar.target_ok_tip" : "topbar.target_miss_tip", ProductionStats.Rate(v.Item, v.Target)) : string.Empty)
+                              + "\n" + GameText.Format("topbar.pin_hint", InputDisplay.ForAction(GameActionId.OpenStats));
+                Chip(n++, text, v.Item.Name, body, "wb-res-pin", v.HasTarget ? (v.Reached ? "wb-res-reached" : "wb-res-missed") : null,
+                    () => StatsPanelUIToolkit.OpenTab(StatsTab.Production, id), () => ResourcePins.TryUnpin(CampaignSession.Current, id, out _));
+            }
+            if (ResourcePins.Pins(state).Count < ResourcePins.MaxPins)
+            {
+                Chip(n++, GameText.Get("topbar.add"), GameText.Get("topbar.add"), GameText.Format("topbar.add_tip", InputDisplay.ForAction(GameActionId.OpenStats)),
+                    "wb-res-add", null, StatsPanelUIToolkit.OpenAllItems, null);
+            }
+            // 电力（各电网）：每个电网“电网 1 发电 / 需要”，供不上时写明“缺电”（不只靠颜色）。
+            _subnets.Clear();
+            if (ReferenceEquals(HomeValleyPowerGrid.BoundState, state))
+            {
+                HomeValleyPowerGrid.SubnetsBySerial(_subnets);
+            }
+            int maxNets = Math.Max(1, Campaign.Grid.GridContent.TuningInt("eco.topbar.max_subnets"));
+            int shown = 0;
+            foreach (int sIdx in _subnets)
+            {
+                if (shown >= maxNets)
+                {
+                    break;
+                }
+                if (!HomeValleyPowerGrid.TryGetSubnetInfo(state, sIdx, out PowerSubnetInfo info))
+                {
+                    continue;
+                }
+                shown++;
+                bool lacking = info.Delivered + 0.5f < info.Demand;
+                string name = HomeValleyPowerGrid.SubnetName(info.Serial);
+                string text = GameText.Format(lacking ? "topbar.power_short" : "topbar.power", name, HomeValleyPowerGrid.Num(info.Supply), HomeValleyPowerGrid.Num(info.Demand));
+                Chip(n++, text, name, HomeValleyPowerGrid.DescribeSubnetLine(sIdx) + "\n" + GameText.Get("topbar.power_tip"), null, lacking ? "wb-res-missed" : null,
+                    PowerPanelUIToolkit.Open, null);
+            }
+            if (_subnets.Count > shown)
+            {
+                Chip(n++, GameText.Format("topbar.power_more", _subnets.Count - shown), GameText.Get("topbar.power_title"), GameText.Get("topbar.power_tip"), null, null,
+                    PowerPanelUIToolkit.Open, null);
+            }
+            else if (_subnets.Count == 0)
+            {
+                Chip(n++, GameText.Get("topbar.power_none"), GameText.Get("topbar.power_title"), GameText.Get("topbar.power_none_tip"), null, null, PowerPanelUIToolkit.Open, null);
+            }
+            Chip(n++, GameText.Format("topbar.tech", state.TechData), ItemCatalog.NameOf(ItemCatalog.TechDataId), GameText.Get("topbar.tech_tip"), null, null,
+                ItemsPanelUIToolkit.Open, null);
+            Chip(n++, GameText.Format("topbar.research", state.Research?.Points ?? 0), ItemCatalog.NameOf("research_points"), GameText.Get("topbar.research_tip"), null, null,
+                ItemsPanelUIToolkit.Open, null);
+            Chip(n++, GameText.Format("topbar.exposure", Mathf.RoundToInt(state.SignalExposure), Mathf.RoundToInt(CampaignExposureLedger.MaxExposure)),
+                GameText.Get("topbar.exposure_title"), GameText.Format("topbar.exposure_tip", InputDisplay.ForAction(GameActionId.OpenExposure)), null, null,
+                SignalCore.SignalCoreHudUIToolkit.OpenExposure, null);
+            for (int i = n; i < _resChips.Count; i++)
+            {
+                SetVisible(_resChips[i], false);
+            }
+            ResourceChipCount = n;
+        }
+
+        private void Chip(int i, string text, string title, string body, string cls, string stateCls, Action left, Action right)
+        {
+            while (_resChips.Count <= i)
+            {
+                var b = new Button { name = "WorldRes" + _resChips.Count };
+                b.AddToClassList("mw-btn");
+                b.AddToClassList("wb-res-chip");
+                int index = _resChips.Count;
+                b.clicked += () => _resLeft[index]?.Invoke();
+                b.RegisterCallback<PointerDownEvent>(evt =>
+                {
+                    if (evt.button == 1)
+                    {
+                        _resRight[index]?.Invoke();
+                    }
+                });
+                UiTooltip.Attach(b, () => new TooltipContent { Title = _resTipTitle[index], Body = _resTipBody[index] });
+                _resChips.Add(b);
+                _resLeft.Add(null);
+                _resRight.Add(null);
+                _resTipTitle.Add(string.Empty);
+                _resTipBody.Add(string.Empty);
+                _resRow.Add(b);
+            }
+            Button c = _resChips[i];
+            SetVisible(c, true);
+            c.text = text;
+            c.EnableInClassList("wb-res-pin", cls == "wb-res-pin");
+            c.EnableInClassList("wb-res-add", cls == "wb-res-add");
+            c.EnableInClassList("wb-res-reached", stateCls == "wb-res-reached");
+            c.EnableInClassList("wb-res-missed", stateCls == "wb-res-missed");
+            _resLeft[i] = left;
+            _resRight[i] = right;
+            _resTipTitle[i] = title ?? string.Empty;
+            _resTipBody[i] = body ?? string.Empty;
         }
 
         private void RefreshLabor(CampaignState state)

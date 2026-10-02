@@ -2756,6 +2756,8 @@ namespace GameLogic.Campaign.Regions
                         GameLogic.Localization.GameText.Format("bp.repair_failed_destroyed", Economy.BuildingOps.NameOf(building), back));
                     return;
                 }
+                // FG4-ECO-08：维修件在完工时真正消耗（取消 / 失败全额退回的不计）。
+                Economy.ProductionStats.RecordUnits(state, Economy.ItemCatalog.Find(order.ReservedItemId), order.ReservedItemAmount, produced: false);
                 order.ReservedItemAmount = 0;
                 building.Health = Economy.BuildingOps.MaxDurability(building.BuildingTypeId);
                 BuildingVisualFeed.Mark(building);
@@ -2881,6 +2883,10 @@ namespace GameLogic.Campaign.Regions
             BuildingRecord source = records[sourceIndex];
             bool upgrade = Grid.HomeGridService.IsUpgradeGhost(ghost);
             string fromType = source.BuildingTypeId;
+            // FG4-ECO-08 复审修复（FGR-ECO-050）：升级差额材料在这一刻真正建进建筑，记为消耗；与下面 InvestedScrap 累加的差额同口径，
+            // 之后拆除全额返还（RecordDemolishRefund）时“建成 + 升级 + 拆除”净值为 0。纯搬迁不花材料（Delivered = 0），不记。
+            HomeValleyConstruction.RecordBuilt(state, ghost.ConstructionDelivered);
+            ghost.ConstructionDelivered = 0;
             var moved = new BuildingRecord
             {
                 BuildingId = source.BuildingId,
@@ -3023,6 +3029,7 @@ namespace GameLogic.Campaign.Regions
             // 地面物按 salvage ID 去重：带上工单 ID，同一建筑 ID 被重建再拆时，第二份返还不会被旧的地面物吞掉。
             string dropId = DemolishDropId(order);
             HomeValleyConstruction.ReturnMaterials(state, building.Position, CampaignEconomyLedger.ResourceScrap, building.InvestedScrap, dropId);
+            HomeValleyConstruction.RecordDemolishRefund(state, building.InvestedScrap); // FG4-ECO-08：拆回的造价 = 产出（建成时计过消耗）
             LastDemolishRefund = building.InvestedScrap;
             LastDemolishCacheReturned = productionReturned;
             if (building.Inventory != null)

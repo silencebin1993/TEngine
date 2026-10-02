@@ -811,6 +811,7 @@ namespace GameLogic.Campaign.Regions
             }
 
             CommitLedger(state, item);
+            Economy.AssemblyMaterials.RecordConsumed(state, item); // FG4-ECO-08
             item.State = FactoryQueueState.Completed;
             item.BlockedReason = null;
 
@@ -905,6 +906,7 @@ namespace GameLogic.Campaign.Regions
 
             bool fromLine = item.MaterialMode && item.SubstituteScrap <= 0;
             CommitLedger(state, item);
+            Economy.AssemblyMaterials.RecordConsumed(state, item); // FG4-ECO-08
             item.TargetMachineLogicId = spawn.LogicId;
             item.State = FactoryQueueState.Completed;
             item.BlockedReason = null;

@@ -296,7 +296,16 @@ namespace GameLogic.Campaign
         /// Reserve 扣过，这里只做终态确认（Consumed=Reserved，Refundable 清零）。生产型
         /// （Requested &lt; 0）：资源池在这一刻才真正加上 |Requested|。已 Committed 视为幂等成功
         /// （AC-ECO-001："最多产物一次"——不会重复发放）。</summary>
-        public static LedgerResult Commit(CampaignState state, string transactionId)
+        public static LedgerResult Commit(CampaignState state, string transactionId) => CommitCore(state, transactionId, recordStats: true);
+
+        /// <summary>
+        /// FG4-ECO-08 审查修复（FGR-ECO-050）：只是“搬运”的消费型事务（施工取料装上货舱、旧存档施工预留转为现场材料）的确认——
+        /// 与 <see cref="Commit"/> 完全相同，只是<b>不</b>记入生产统计：材料此刻只是离开仓库、还没被用掉；
+        /// 真正变成建筑 / 传送带格时由施工流程记消耗，取消 / 撤销 / 现场被毁时退回仓库也就无需冲回（统计只计创造与销毁，搬运不计）。
+        /// </summary>
+        public static LedgerResult CommitTransfer(CampaignState state, string transactionId) => CommitCore(state, transactionId, recordStats: false);
+
+        private static LedgerResult CommitCore(CampaignState state, string transactionId, bool recordStats)
         {
             ResourceTransactionRecord record = Find(state, transactionId);
             if (record == null)
@@ -322,12 +331,23 @@ namespace GameLogic.Campaign
                 TrySetPool(state, record.ResourceType, available - record.Requested); // Requested 为负，等价于 +|Requested|
                 record.Consumed = record.Requested;
                 record.Refundable = 0f;
+                // FG4-ECO-08：账本收入（拆解回收、搬运入库……）在发放时记为产出。
+                if (recordStats)
+                {
+                    Economy.ProductionStats.RecordResource(state, record.ResourceType, (long)Math.Round(-record.Requested), produced: true);
+                }
             }
             else
             {
                 // 消费型：钱早扣了，这里只确认终态。
                 record.Consumed = record.Reserved;
                 record.Refundable = 0f;
+                // FG4-ECO-08：账本支出（重建、维修、制造……）在确认终态时记为消耗（取消 / 失败全额退回的不计）。
+                // 施工取料只是搬运，走 CommitTransfer 不在这里计；施工材料在建成时计（HomeValleyConstruction.RecordBuilt）。
+                if (recordStats)
+                {
+                    Economy.ProductionStats.RecordResource(state, record.ResourceType, (long)Math.Round(record.Reserved), produced: false);
+                }
             }
 
             record.State = ResourceTransactionState.Committed;

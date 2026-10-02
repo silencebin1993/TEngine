@@ -553,6 +553,10 @@ namespace GameLogic.Campaign
         /// <summary>FG4-ECO-05（FGR-ECO-011 效率与最近 10 分钟产出）：按 building.stats.bucket_seconds 一桶的环形统计（桶数 = 窗口 ÷ 桶长）。
         /// 完成一份时累加产出与份数，推进时累加“理论份数”（这段时间满速能做几份）；不每帧遍历。读档后接着同一桶。</summary>
         public ProducerStatBucket[] Stats = Array.Empty<ProducerStatBucket>();
+        /// <summary>FG4-ECO-08 废液池：上次对账时内核消费口的累计送达量（毫升）与口编号——统计按差额记销毁量。
+        /// 进存档（审查修复）：读档后接着同一基准对账，读档到第一次对账之间的销毁量不丢（内核的累计量本身也进存档）。-1 = 还没对过账。</summary>
+        public int WasteSeenHandle = -1;
+        public long WasteSeenMl;
     }
 
     /// <summary>FG4-ECO-05：生产统计的一桶（游戏时钟的第 <see cref="Index"/> 桶）。</summary>
@@ -567,6 +571,8 @@ namespace GameLogic.Campaign
         public long TheoryMilli;
         /// <summary>这一桶的产出（固体按件，流体按升）。</summary>
         public ItemStackRecord[] Out = Array.Empty<ItemStackRecord>();
+        /// <summary>FG4-ECO-08（FGR-ECO-050“瓶颈查找：列出最常缺的物品，以及缺它的建筑”）：这一桶里缺每种物品的世界步数（缺料 / 缺流体；随生产步累加，不每帧遍历）。</summary>
+        public ItemStackRecord[] Starve = Array.Empty<ItemStackRecord>();
     }
 
     /// <summary>FG4-ECO-02：拆到一半的废墟格。</summary>
@@ -988,6 +994,72 @@ namespace GameLogic.Campaign
         public ReactionSessionRecord[] ReactionSessions = Array.Empty<ReactionSessionRecord>();
         /// <summary>下一场归因的序号（场次 ID = "rs-" + 序号，确定性、读档后接着编）。</summary>
         public int NextReactionSessionSerial = 1;
+        /// <summary>FG4-ECO-08（FGR-ECO-050 / 051；FG04 第 6 节“统计（按时间窗口聚合保存）”）：生产统计（四个时间窗口的产量 / 消耗桶、持续赤字）与资源顶栏的固定物品。
+        /// 唯一写入口 <see cref="Economy.ProductionStats"/> / <see cref="Economy.ResourcePins"/>。旧存档没有 = 空（读档时补空域，从读档那一刻开始统计）。</summary>
+        public ProductionStatsState Production = new ProductionStatsState();
+    }
+
+    /// <summary>FG4-ECO-08：生产统计与资源顶栏。</summary>
+    [Serializable]
+    public sealed class ProductionStatsState
+    {
+        /// <summary>开始统计的世界步（新游戏 = 0；旧存档 = 读档那一步）。窗口还没满时速率按已统计的时长算（不把没统计的时间当作 0 产量）。-1 = 还没开始。</summary>
+        public long StartTick = -1;
+        /// <summary>四个时间窗口（1 分钟 / 10 分钟 / 1 小时 / 10 小时）各自的环形桶（桶长与桶数见 eco.stats.*；调参变了整档重建）。</summary>
+        public ProdStatTierRecord[] Tiers = Array.Empty<ProdStatTierRecord>();
+        /// <summary>正在赤字（消耗大于产出）的物品与开始时刻；超过 eco.stats.deficit_minutes 发警告一次（<see cref="DeficitRecord.Warned"/>），恢复后删掉。</summary>
+        public DeficitRecord[] Deficits = Array.Empty<DeficitRecord>();
+        /// <summary>资源顶栏上固定的物品（顺序 = 顶栏顺序），可带目标产量（产线规划助手“一键固定为目标”）。</summary>
+        public PinnedItemRecord[] Pins = Array.Empty<PinnedItemRecord>();
+        /// <summary>顶栏默认固定已经放过（新游戏默认固定废料；玩家全部取消后保持为空，不再自动补回）。</summary>
+        public bool PinsInitialized;
+        /// <summary>燃油发电机燃油耗尽的累计次数（统计面板“物流与能源”；DEBT-FG4ECO04-03）。</summary>
+        public long FuelOuts;
+    }
+
+    /// <summary>FG4-ECO-08：一个时间窗口的环形桶。</summary>
+    [Serializable]
+    public sealed class ProdStatTierRecord
+    {
+        public int BucketSeconds;
+        public ProdStatBucketRecord[] Buckets = Array.Empty<ProdStatBucketRecord>();
+    }
+
+    /// <summary>FG4-ECO-08：一桶（世界步 ÷ 每桶步数 = <see cref="Index"/>）里每种物品的产量与消耗（固体按件，流体按毫升）。</summary>
+    [Serializable]
+    public sealed class ProdStatBucketRecord
+    {
+        public long Index = -1;
+        public ItemAmountRecord[] Produced = Array.Empty<ItemAmountRecord>();
+        public ItemAmountRecord[] Consumed = Array.Empty<ItemAmountRecord>();
+    }
+
+    /// <summary>FG4-ECO-08：一种物品的数量（long：流体按毫升累计）。</summary>
+    [Serializable]
+    public sealed class ItemAmountRecord
+    {
+        public string ItemId;
+        public long Amount;
+    }
+
+    /// <summary>FG4-ECO-08：一种物品正在持续赤字。</summary>
+    [Serializable]
+    public sealed class DeficitRecord
+    {
+        public string ItemId;
+        /// <summary>赤字从哪一世界步开始（检测到时往前推一个检测窗口）。</summary>
+        public long SinceTick;
+        /// <summary>这一段赤字已经发过警告（同一段只发一次）。</summary>
+        public bool Warned;
+    }
+
+    /// <summary>FG4-ECO-08：顶栏上固定的一种物品。</summary>
+    [Serializable]
+    public sealed class PinnedItemRecord
+    {
+        public string ItemId;
+        /// <summary>目标产量（件或升 / 游戏分钟；0 = 没有目标，只看库存与速率）。</summary>
+        public float TargetPerMinute;
     }
 
     /// <summary>FG2-FW-04：一场远征或一次突袭的反应伤害归因。</summary>
@@ -1325,6 +1397,28 @@ namespace GameLogic.Campaign
             {
                 s.Stats.NextReactionSessionSerial = 1;
             }
+            // FG4-ECO-08：生产统计与资源顶栏（旧存档没有 = 空域）。
+            s.Stats.Production ??= new ProductionStatsState();
+            ProductionStatsState ps = s.Stats.Production;
+            ps.Tiers ??= Array.Empty<ProdStatTierRecord>();
+            foreach (ProdStatTierRecord t in ps.Tiers)
+            {
+                if (t == null)
+                {
+                    continue;
+                }
+                t.Buckets ??= Array.Empty<ProdStatBucketRecord>();
+                foreach (ProdStatBucketRecord b in t.Buckets)
+                {
+                    if (b != null)
+                    {
+                        b.Produced ??= Array.Empty<ItemAmountRecord>();
+                        b.Consumed ??= Array.Empty<ItemAmountRecord>();
+                    }
+                }
+            }
+            ps.Deficits ??= Array.Empty<DeficitRecord>();
+            ps.Pins ??= Array.Empty<PinnedItemRecord>();
             s.SaveHistory ??= new SaveHistoryState();
             s.SaveHistory.Notices ??= Array.Empty<SaveNoticeRecord>();
             s.Notifications ??= new NotificationHistoryState();

@@ -207,6 +207,15 @@ namespace GameLogic.Core
         /// <summary>FG4-ECO-07：第一次给机器改名。</summary>
         public const string RosterFirstRename = "roster.first_rename";
 
+        /// <summary>FG4-ECO-08：第一次打开统计面板的生产页签——图鉴“生产统计与规划助手”随之解锁。</summary>
+        public const string StatsProductionFirstOpen = "stats.production_first_open";
+        /// <summary>FG4-ECO-08：第一次出现持续赤字警告（某物品消耗大于产出超过 eco.stats.deficit_minutes）。引导内容在 FG15-UX-04：看瓶颈、加上游建筑。</summary>
+        public const string StatsFirstDeficit = "stats.first_deficit";
+        /// <summary>FG4-ECO-08：第一次把物品固定到资源顶栏。</summary>
+        public const string StatsFirstPin = "stats.first_pin";
+        /// <summary>FG4-ECO-08：第一次用产线规划助手算出结果。引导内容在 FG15-UX-04：只计算不建造、一键固定为目标。</summary>
+        public const string PlannerFirstPlan = "planner.first_plan";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -241,6 +250,7 @@ namespace GameLogic.Core
             BuildingPanelFirstOpen, BuildingFirstUpgrade, BuildingFirstDamaged,
             RulesPanelFirstOpen, RulesFirstCreated, RulesFirstTriggered, RulesFirstConflict,
             RosterPanelFirstOpen, RosterFirstRoleChange, RosterFirstRename,
+            StatsProductionFirstOpen, StatsFirstDeficit, StatsFirstPin, PlannerFirstPlan,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

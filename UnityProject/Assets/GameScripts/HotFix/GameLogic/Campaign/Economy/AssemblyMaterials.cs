@@ -682,6 +682,22 @@ namespace GameLogic.Campaign.Economy
         }
 
         /// <summary>退回取走的材料与代付的废料（取消 / 装配站被毁 / 出厂失败）：材料进仓库（放不下落地 + 搬运单），废料事务取消退款。返回退回的件数。</summary>
+        /// <summary>FG4-ECO-08：装配完工时把实际取走的产线材料记为消耗（取消 / 失败全额退回的不计；废料代付走经济账本，由账本提交时记）。</summary>
+        public static void RecordConsumed(CampaignState state, FactoryQueueItemRecord item)
+        {
+            if (item == null || !item.MaterialMode || !item.MaterialsTaken || item.Taken == null)
+            {
+                return;
+            }
+            foreach (ItemStackRecord t in item.Taken)
+            {
+                if (t != null && t.Amount > 0)
+                {
+                    ProductionStats.RecordUnits(state, ItemCatalog.Find(t.ItemId), t.Amount, produced: false);
+                }
+            }
+        }
+
         public static int Refund(CampaignState state, FactoryQueueItemRecord item, string why)
         {
             int n = 0;

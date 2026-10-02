@@ -149,6 +149,7 @@ namespace GameLogic.Campaign.WorldSim
             HomeValleyWorkOrders.ResetSessionState();
             Economy.HomeInventory.ResetSessionState(); // FG4-ECO-01：物资索引按新战役重建
             Economy.ItemFlowStats.ResetSessionState();
+            Economy.ProductionStats.ResetSessionState(); // FG4-ECO-08：统计的会话计数（存档里的桶不动）
             Economy.ItemDistribution.Invalidate();
             HomeValleySoftlockGuard.ResetSessionState();
             HomeValleyAlarms.ResetSessionState();
@@ -470,6 +471,8 @@ namespace GameLogic.Campaign.WorldSim
                 }
                 // FG4-ECO-01：物品库存采样（净速率），每 eco.flow.sample_seconds 游戏秒一次、只看步序号，与观察无关，O(物品种类)。
                 Economy.ItemFlowStats.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
+                // FG4-ECO-08：持续赤字检查，每 eco.stats.deficit_check_seconds 游戏秒一次、只看步序号，与观察无关，O(检测窗口桶数 × 物品种类)；产量 / 消耗在发生时记账（不每帧遍历）。
+                Economy.ProductionStats.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                 // FG3-LOG-06：电网按游戏秒积分储能（没有储能时不做事）、按 power.sample_seconds 记曲线——只看步序号，与观察无关，O(电网数)。
                 if (Home != null && Home.IsLoaded)
                 {

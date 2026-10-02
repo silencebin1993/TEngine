@@ -140,5 +140,7 @@
         OpenItems = 116,
         /// <summary>FG4-ECO-06（FGU-15）：打开 / 关闭常驻规则面板（列表、编辑、冲突、触发日志；全部上下文，默认 Alt+R）。</summary>
         OpenRules = 117,
+        /// <summary>FG4-ECO-08（FGU-13 / 14）：打开 / 关闭统计面板（生产统计、建筑效率、瓶颈、规划助手、战斗归因；全部上下文，默认 Alt+T）。</summary>
+        OpenStats = 118,
     }
 }

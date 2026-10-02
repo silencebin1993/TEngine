@@ -781,6 +781,19 @@ namespace GameLogic.Campaign.Regions
         /// <summary>第 i 个内核实体对应的建筑记录（虚拟配电中心为 null）。</summary>
         public static BuildingRecord RecordAt(int entity) => entity >= 0 && entity < _entityCount ? _recordAt[entity] : null;
 
+        /// <summary>FG4-ECO-08（资源顶栏“电力（各子网）”）：电网 s 上一次结算的读数（编号、发电、需要、实际供上、储能）。O(1)；
+        /// <paramref name="state"/> 不是当前绑定的战役或下标越界时返回 false。</summary>
+        public static bool TryGetSubnetInfo(CampaignState state, int s, out PowerSubnetInfo info)
+        {
+            info = default;
+            if (_kernel == null || !ReferenceEquals(state, _state) || s < 0 || s >= _kernel.SubnetCount)
+            {
+                return false;
+            }
+            info = _kernel.Subnet(s);
+            return true;
+        }
+
         /// <summary>电网 s 的第一行读数（名字、发电、实际用电 / 需要）。</summary>
         public static string DescribeSubnetLine(int s)
         {

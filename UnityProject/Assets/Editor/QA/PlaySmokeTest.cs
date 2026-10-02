@@ -1149,7 +1149,56 @@ namespace GameLogic.EditorTools
             // FG2-FW-04（卡片“伤害归因进入统计面板”）：暂停菜单“统计”→ 统计面板（战斗 · 反应伤害归因）打开，有累计 / 明细或空状态说明；筛选可切；点关闭回到暂停菜单。
             bool statsClicked = ClickUitk("[PauseMenuHost]", "PauseStats");
             UI.Kit.StatsPanelUIToolkit stats = UI.Kit.StatsPanelUIToolkit.Instance;
-            bool statsOpen = stats != null && UI.Kit.StatsPanelUIToolkit.IsOpen && stats.PanelVisible && stats.SectionText.Length > 0
+            // FG4-ECO-08（FGU-13 / 14）：统计面板默认在“生产”页（有产线时列出物品收支，没有时是空状态说明）；“规划助手”页选目标算出建筑需求、
+            // “固定到顶栏作为目标”后资源顶栏出现这一格；再点“战斗”页签看反应伤害归因（下面原有的检查）。
+            bool prodTab = stats != null && UI.Kit.StatsPanelUIToolkit.IsOpen && stats.CurrentTab == UI.Kit.StatsTab.Production
+                           && (stats.VisibleRowCount > 0 ? stats.RowText(0).Length > 0 : stats.EmptyText.Length > 0)
+                           && !Localization.GameText.ContainsMarker(stats.SectionText + stats.FooterText + stats.CountText + stats.RowText(0) + stats.EmptyText);
+            string prodFirst = stats == null ? string.Empty : stats.VisibleRowCount > 0 ? stats.RowText(0) : stats.EmptyText;
+            bool effTab = ClickUitk("[StatsPanelHost]", "StatsTabBuildings") && stats.CurrentTab == UI.Kit.StatsTab.Buildings
+                          && !Localization.GameText.ContainsMarker(stats.SectionText + stats.RowText(0) + stats.EmptyText);
+            bool bnTab = ClickUitk("[StatsPanelHost]", "StatsTabBottleneck") && stats.CurrentTab == UI.Kit.StatsTab.Bottlenecks
+                         && !Localization.GameText.ContainsMarker(stats.SectionText + stats.RowText(0) + stats.EmptyText);
+            bool flowTab = ClickUitk("[StatsPanelHost]", "StatsTabFlow") && stats.CurrentTab == UI.Kit.StatsTab.Flow && stats.VisibleRowCount >= 3
+                           && !Localization.GameText.ContainsMarker(stats.SectionText + stats.RowText(0) + stats.RowText(1));
+            bool planTab = ClickUitk("[StatsPanelHost]", "StatsTabPlanner") && stats.CurrentTab == UI.Kit.StatsTab.Planner && stats.LastPlan != null && stats.LastPlan.Ok;
+            stats?.SetPlannerTarget("precision_part"); // 目标下拉框的选中回调（同一入口）：精密零件有多级配方
+            planTab &= stats != null && stats.LastPlan.Ok && stats.LastPlan.Target.Id == "precision_part" && stats.LastPlan.Rows.Count >= 3 && stats.LastPlan.Raws.Count > 0
+                       && !Localization.GameText.ContainsMarker(stats.SectionText + stats.RowText(0) + stats.RowText(1) + stats.RowText(2));
+            string planTarget = stats?.LastPlan?.Target?.Id;
+            bool planPinned = ClickUitk("[StatsPanelHost]", "PlannerPin") && planTarget != null
+                              && Campaign.Economy.ResourcePins.Find(Campaign.CampaignSession.Current, planTarget)?.TargetPerMinute > 0f;
+            UI.Kit.WorldBarHudUIToolkit wbar = UI.Kit.WorldBarHudUIToolkit.Instance;
+            wbar?.RefreshResources(Campaign.CampaignSession.Current, force: true);
+            bool barChip = wbar != null && planTarget != null && wbar.FindResourceChip(Campaign.Economy.ItemCatalog.NameOf(planTarget)) >= 0
+                           && wbar.FindResourceChip(Localization.GameText.Format("topbar.exposure", 0, 0).Split(' ')[0]) >= 0;
+            // FG4-ECO-08 审查修复（FGR-ECO-051“任意物品”）：顶栏“+ 固定物品”→ 统计面板“全部物品”→ 搜索一个不能生产的物品 → 行内“固定”→ 顶栏出现这一格。
+            int addChip = wbar == null ? -1 : wbar.FindResourceChip(Localization.GameText.Get("topbar.add"));
+            bool addClicked = addChip >= 0 && InvokeClickable(wbar.ResourceChip(addChip));
+            bool allList = addClicked && stats != null && UI.Kit.StatsPanelUIToolkit.IsOpen && stats.CurrentTab == UI.Kit.StatsTab.Production && stats.ShowAllItems && stats.ItemSearchVisible
+                           && stats.VisibleRowCount == Campaign.Economy.ItemCatalog.Items.Count + 1;
+            List<Campaign.Economy.ItemDef> plannable = Campaign.Economy.ProductionPlanner.Targets();
+            Campaign.Economy.ItemDef anyItem = Campaign.Economy.ItemCatalog.Items.FirstOrDefault(d => !plannable.Contains(d)
+                && !Campaign.Economy.ResourcePins.IsPinned(Campaign.CampaignSession.Current, d.Id));
+            if (stats != null && anyItem != null)
+            {
+                stats.ItemSearchField.value = anyItem.Name;
+            }
+            int anyRow = stats == null || anyItem == null ? -1 : stats.FindRow(anyItem.Name + "：");
+            bool anyPinned = anyRow >= 0 && InvokeClickable(stats.RowButton(anyRow, 0)) && Campaign.Economy.ResourcePins.IsPinned(Campaign.CampaignSession.Current, anyItem.Id);
+            wbar?.RefreshResources(Campaign.CampaignSession.Current, force: true);
+            bool anyChip = anyPinned && wbar.FindResourceChip(anyItem.Name) >= 0;
+            if (stats != null)
+            {
+                stats.ItemSearchField.value = string.Empty;
+            }
+            bool allBack = ClickUitk("[StatsPanelHost]", "StatsAllItems") && stats != null && !stats.ShowAllItems;
+            Check(statsClicked && prodTab && effTab && bnTab && flowTab && planTab && planPinned && barChip && allList && anyChip && allBack,
+                $"FG4-ECO-08：暂停菜单点“统计”默认打开“生产”页（首行“{prodFirst}”），建筑效率 / 瓶颈 / 物流与能源页可切，规划助手算出 {stats?.LastPlan?.Rows.Count} 条配方的建筑需求，" +
+                $"“固定到顶栏作为目标”后资源顶栏出现“{planTarget}”这一格；顶栏“+ 固定物品”打开“全部物品”，搜索并固定不能生产的“{anyItem?.Name}”后顶栏出现该格（共 {wbar?.ResourceChipCount} 格）" +
+                $"（{allList}/{anyChip}/{allBack}）");
+            bool combatTab = ClickUitk("[StatsPanelHost]", "StatsTabCombat") && stats != null && stats.CurrentTab == UI.Kit.StatsTab.Combat;
+            bool statsOpen = combatTab && stats != null && UI.Kit.StatsPanelUIToolkit.IsOpen && stats.PanelVisible && stats.SectionText.Length > 0
                              && (stats.VisibleRowCount > 0 ? stats.RowText(0).Length > 0 : stats.EmptyText.Length > 0)
                              && !Localization.GameText.ContainsMarker(stats.SectionText + stats.FooterText + stats.CountText + stats.RowText(0) + stats.EmptyText);
             string statsFirst = stats == null ? string.Empty : stats.VisibleRowCount > 0 ? stats.RowText(0) : stats.EmptyText;
@@ -4195,6 +4244,7 @@ namespace GameLogic.EditorTools
             // 卡片“伤害归因进入统计面板”：同一份数据在统计面板里出现（累计段 + 这一场的明细），“远征”筛选下仍在；点关闭收起。
             UI.Kit.StatsPanelUIToolkit.Open();
             UI.Kit.StatsPanelUIToolkit sp = UI.Kit.StatsPanelUIToolkit.Instance;
+            ClickUitk("[StatsPanelHost]", "StatsTabCombat"); // FG4-ECO-08：战斗归因在“战斗”页签（真实点击）
             string sessTitle = Campaign.Combat.ReactionAttribution.Title(sess);
             System.Func<bool> hasSession = () =>
             {

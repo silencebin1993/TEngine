@@ -880,6 +880,7 @@ namespace GameLogic.Campaign.Economy
             foreach (Producer p in Ordered)
             {
                 StepOne(state, p, ticks, worldHz);
+                RecordStarve(p, ticks);
                 if (p.WorkedThisStep && p.Def.VibrationPerMinute > 0f)
                 {
                     vibrationRate += p.Def.VibrationPerMinute;
@@ -1052,6 +1053,7 @@ namespace GameLogic.Campaign.Economy
                         if (l.Role == RecipeRole.In)
                         {
                             stock.Remove(l.Item, l.Amount);
+                            ProductionStats.RecordUnits(state, l.Item, l.Amount, produced: false); // FG4-ECO-08：开工扣料 = 消耗
                         }
                     }
                     r.Running = true;
@@ -1108,6 +1110,7 @@ namespace GameLogic.Campaign.Economy
                     return false;
                 }
                 first.Amount--;
+                ProductionStats.RecordUnits(state, item, 1, produced: false); // FG4-ECO-08：分解一件 = 消耗（表里没有的编号不计）
                 r.Running = true;
                 r.Progress = 0;
                 r.Duration = Math.Max(1, (long)Math.Round(p.Def.ItemSeconds * Math.Max(1, worldHz)));
@@ -1168,6 +1171,7 @@ namespace GameLogic.Campaign.Economy
                         {
                             Primitive.PrimitiveInventory.AddBurnedChip(state, r.BurnTarget);
                         }
+                        ProductionStats.RecordUnits(state, l.Item, Math.Max(1, l.Amount), produced: true);
                         _fwStorageKnown = false;
                         if (r.Completed == 0)
                         {
@@ -1178,12 +1182,15 @@ namespace GameLogic.Campaign.Economy
                         continue;
                     }
                     stock.Add(l.Item, l.Amount);
+                    ProductionStats.RecordUnits(state, l.Item, l.Amount, produced: true); // FG4-ECO-08：完成一份 = 产出（副产品也算产出）
                 }
             }
             else if (!string.IsNullOrEmpty(r.PendingItem) && r.PendingAmount > 0)
             {
                 // 回收站不管拆废墟还是分解物品，产出都是废料（分解时 PendingItem 是被分解的那件，不是产出）；提取钻产出 = 矿。
-                Add(ref r.Out, p.Def.Mode == ProducerMode.Recycler ? ItemCatalog.ScrapId : r.PendingItem, r.PendingAmount);
+                string outId = p.Def.Mode == ProducerMode.Recycler ? ItemCatalog.ScrapId : r.PendingItem;
+                Add(ref r.Out, outId, r.PendingAmount);
+                ProductionStats.RecordUnits(state, ItemCatalog.Find(outId), r.PendingAmount, produced: true);
                 if (p.Def.Mode == ProducerMode.Recycler)
                 {
                     if (r.PendingRuin)
@@ -1245,6 +1252,7 @@ namespace GameLogic.Campaign.Economy
             // 全放进去了：零头留到下一步；放不下：这一步没抽完的部分留在地下，零头也不攒（不在堵着的时候积压“欠抽”的量）。
             p.Rec.Progress = put == want ? num - want * denom : 0;
             p.Rec.PumpedMl += put;
+            ProductionStats.RecordFluidMl(_state, p.SourceFluid, put, produced: true); // FG4-ECO-08：抽出 = 产出（毫升精确累计）
             if (put > 0 || want == 0)
             {
                 p.WorkedThisStep = put > 0;
@@ -1312,6 +1320,7 @@ namespace GameLogic.Campaign.Economy
                 long want = num / denom;
                 long took = want > 0 && h >= 0 && k != null ? k.TakeConsumerBuffer(h, want) : 0;
                 p.Rec.FuelBurnedMl += took;
+                ProductionStats.RecordFluidMl(state, fuel, took, produced: false); // FG4-ECO-08：烧油 = 消耗
                 if (took < want)
                 {
                     // 烧空：停机，电网立即重新结算；警告一次（可定位），钩子。
@@ -1322,6 +1331,7 @@ namespace GameLogic.Campaign.Economy
                         new Vector3(p.Building.Position.x, 0f, p.Building.Position.y));
                     GuidanceHooks.Raise(GuidanceHooks.EnergyFirstFuelOut);
                     FuelOutCount++;
+                    ProductionStats.NoteFuelOut(state); // FG4-ECO-08：耗尽次数进存档（统计面板“物流与能源”）
                 }
                 else
                 {
@@ -1363,6 +1373,14 @@ namespace GameLogic.Campaign.Economy
             int lpm = ConsumerLpm(p, p.Fluids[0].Def);
             if (h >= 0 && k.TryGetConsumer(h, out PipeConsumerInfo ci))
             {
+                // FG4-ECO-08：废液池收到的流体（销毁）= 消耗；按内核累计送达量的差额记（基准存在 ProducerRecord 里随存档：读档后接着对账；第一次见到这个口只记基准，口重登记后累计量变小也只重设基准）。
+                if (p.Rec.WasteSeenHandle == h && ci.TotalDeliveredMl > p.Rec.WasteSeenMl && ci.Network >= 0 && k.TryGetNetworkInfo(ci.Network, out PipeNetInfo wn)
+                    && ItemCatalog.TryGetByFluid(wn.Fluid, out ItemDef wasted))
+                {
+                    ProductionStats.RecordFluidMl(_state, wasted, ci.TotalDeliveredMl - p.Rec.WasteSeenMl, produced: false);
+                }
+                p.Rec.WasteSeenHandle = h;
+                p.Rec.WasteSeenMl = ci.TotalDeliveredMl;
                 if (ci.LitersPerMinute != lpm)
                 {
                     k.SetConsumer(h, lpm, ci.Priority);
@@ -2450,6 +2468,7 @@ namespace GameLogic.Campaign.Economy
                 b.Done = 0;
                 b.TheoryMilli = 0;
                 b.Out = Array.Empty<ItemStackRecord>();
+                b.Starve = Array.Empty<ItemStackRecord>();
             }
             return b;
         }
@@ -2480,6 +2499,21 @@ namespace GameLogic.Campaign.Economy
             long num = ticks * 1000L + p.TheoryRem;
             p.TheoryRem = num % cycle;
             Bucket(p.Rec, worldHz).TheoryMilli += num / cycle;
+        }
+
+        /// <summary>
+        /// FG4-ECO-08（瓶颈查找）：这一步缺料 / 缺流体（缺的是某种具体物品）时，把步数记进这座建筑当前桶的“缺 X”。O(1)，随生产步（不每帧）。
+        /// 脚下废墟拆完（回收站没有可拆的）与废液池空闲不算缺料——那不是产线缺某种输入。
+        /// </summary>
+        private static void RecordStarve(Producer p, int ticks)
+        {
+            if ((p.State != ProdState.MissingInput && p.State != ProdState.MissingFluid) || p.ReasonItem == null
+                || p.Reason == ProdReason.RuinDepleted || p.Reason == ProdReason.WasteIdle)
+            {
+                return;
+            }
+            ProducerStatBucket b = Bucket(p.Rec, _statWorldHz);
+            Add(ref b.Starve, p.ReasonItem.Id, ticks);
         }
 
         /// <summary>完成一份：份数与产出记进当前桶。</summary>

@@ -948,6 +948,7 @@ namespace GameLogic.EditorTools
                 StatsPanelUIToolkit sp = sgo.AddComponent<StatsPanelUIToolkit>();
                 sp.BindView(statsRoot);
                 StatsPanelUIToolkit.Open(); // 暂停菜单“统计”按钮调的同一个入口
+                Click(sp.TabButton(StatsTab.Combat)); // FG4-ECO-08：统计面板默认在“生产”页，战斗归因在“战斗”页签
                 string all = Rows(sp.VisibleRowCount, sp.RowText);
                 // 累计：敌方共 100 + 50 = 150，反应 25 + 10 = 35（23.3%）；短路 25 / 150 = 16.7%，热震 10 / 150 = 6.7%；明细最新在前（突袭先于远征）。
                 bool totals = StatsPanelUIToolkit.IsOpen && sp.PanelVisible && sp.SectionText == "战斗 · 反应伤害归因" && sp.RowText(0) == "累计（2 场）"
