@@ -961,6 +961,10 @@ namespace GameLogic.EditorTools
             bool dropped = !carrier.IsAlive && Stock(s, KeyT1) == 0 && ghost.ExtraDelivered[0] == 0 && returning == 1;
             // 观察等待期间的状态文字：关键材料正被搬回时，不能写“去打首领”。
             var seen = new List<string>();
+            // FG4-E2E-01（DEBT-FG4ECO11-06）：工单面板的原因行、右键被拒的说明与施工队列 / 悬停同一口径（同一时刻逐字相同，也写“搬回”）。
+            var panelSeen = new List<string>();
+            int panelSame = 0;
+            int panelChecks = 0;
             bool back = StepUntil(() =>
             {
                 WorkOrderRecord o = Build(s, ghost.BuildingId);
@@ -971,10 +975,27 @@ namespace GameLogic.EditorTools
                     {
                         seen.Add(st);
                     }
+                    if (!string.IsNullOrEmpty(o.FailureReason) && o.FailureReason.StartsWith(HomeValleyConstruction.MaterialsReasonPrefix, StringComparison.Ordinal))
+                    {
+                        string panel = GameLogic.UI.WorkOrder.WorkOrderPanelUIToolkit.ReasonText(s, o);
+                        string cmd = HomeValleyConstruction.DescribeMaterialsReason(s, o.FailureReason);
+                        panelChecks++;
+                        panelSame += panel == st ? 1 : 0;
+                        foreach (string t in new[] { panel, cmd })
+                        {
+                            if (!panelSeen.Contains(t))
+                            {
+                                panelSeen.Add(t);
+                            }
+                        }
+                    }
                 }
                 return ghost.ConstructionState == BuildingConstructionState.Operational;
             }, 400);
             bool honest = seen.All(t => t.Contains("搬回") && !t.Contains("寂听主脑"));
+            bool panelHonest = panelChecks > 0 && panelSame == panelChecks && panelSeen.All(t => t.Contains("搬回") && !t.Contains("寂听主脑"));
+            Expect(panelHonest,
+                $"E8b DEBT-FG4ECO11-06：关键材料正被搬回时，工单面板原因行与施工队列逐字相同（{panelSame}/{panelChecks} 次），工单面板 / 右键被拒说明都写“搬回”、不提示去打首领（“{string.Join(" | ", panelSeen)}”）");
             int groundAfter = (s.GroundItems ?? Array.Empty<GroundItemRecord>()).Where(g => g.ResourceType == KeyT1).Sum(g => g.Amount);
             bool stuck = (s.WorkOrders ?? Array.Empty<WorkOrderRecord>()).Any(o => o.Kind == WorkOrderKind.Haul && o.IssuerId == "return" && o.FailureReason == HomeValleyConstruction.ReturnWaitReason);
             bool coreFetch = (fetchAt - HomeValleyLayout.Core.Position).sqrMagnitude < 0.01f;

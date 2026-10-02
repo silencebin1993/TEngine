@@ -285,7 +285,7 @@ namespace GameLogic.UI.WorkOrder
 
                 Label reasonLabel = row.Q<Label>("Reason");
                 bool hasReason = !string.IsNullOrEmpty(order.FailureReason);
-                reasonLabel.text = hasReason ? ReasonText(order.FailureReason) : string.Empty;
+                reasonLabel.text = hasReason ? ReasonText(ruleState, order) : string.Empty;
                 if (hasReason)
                 {
                     reasonLabel.AddToClassList("wop-row-reason-visible");
@@ -454,6 +454,25 @@ namespace GameLogic.UI.WorkOrder
                 case WorkOrderState.Failed: return "失败";
                 default: return string.Empty;
             }
+        }
+
+        /// <summary>
+        /// FG4-E2E-01（DEBT-FG4ECO11-06）：一张工单的原因文字。施工单在等材料时与施工队列、悬停走同一个描述（<see cref="HomeValleyConstruction.DescribeStatus(CampaignState, WorkOrderRecord)"/>：
+        /// 写明缺哪种、从哪儿来、在途件数；关键材料正被搬回时写“机器正在搬回”，不再提示去打首领）；其余原因码照旧。
+        /// </summary>
+        public static string ReasonText(CampaignState state, WorkOrderRecord order)
+        {
+            string reason = order?.FailureReason;
+            if (string.IsNullOrEmpty(reason))
+            {
+                return string.Empty;
+            }
+            if (state != null && reason.StartsWith(HomeValleyConstruction.MaterialsReasonPrefix, System.StringComparison.Ordinal))
+            {
+                string status = order.Kind == WorkOrderKind.Build ? HomeValleyConstruction.DescribeStatus(state, order) : null;
+                return !string.IsNullOrEmpty(status) ? status : HomeValleyConstruction.DescribeMaterialsReason(state, reason);
+            }
+            return ReasonText(reason);
         }
 
         /// <summary>工单原因码 → 玩家文字。原因码仍原样留在记录里供逻辑与日志使用。</summary>

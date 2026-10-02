@@ -35,6 +35,14 @@ namespace GameLogic.EditorTools.JourneyBots
         /// <summary>旅程变量里不随断点恢复的键：本次运行自己的临时存档目录。</summary>
         public static readonly string[] NotRestoredVars = { "saves" };
 
+        /// <summary>
+        /// FG4-E2E-01：步骤作用域的键（<see cref="FgjM3Common.SK"/>：s&lt;步序&gt;.&lt;第几次尝试&gt;.&lt;名字&gt;）只属于写断点前已经做完的步骤。
+        /// 续跑的旅程步序与完整跑不同（前面换成了放回断点的几步），恢复它们会让同一序号的新步骤误以为“已经点过”、一直等到超时重试，不恢复。
+        /// </summary>
+        private static readonly System.Text.RegularExpressions.Regex StepScopedVar = new System.Text.RegularExpressions.Regex(@"^s\d+\.\d+\.");
+
+        public static bool IsRestoredVar(string key) => !string.IsNullOrEmpty(key) && !NotRestoredVars.Contains(key) && !StepScopedVar.IsMatch(key);
+
         // ── 元数据 ─────────────────────────────────────────────────────────────
 
         [Serializable]
@@ -408,7 +416,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 int restored = 0;
                 foreach (Var v in meta.vars)
                 {
-                    if (v == null || string.IsNullOrEmpty(v.k) || NotRestoredVars.Contains(v.k))
+                    if (v == null || !IsRestoredVar(v.k))
                     {
                         continue;
                     }

@@ -1421,9 +1421,12 @@ namespace GameLogic.EditorTools.JourneyBots
 
         // ── 远征一次 ────────────────────────────────────────────────────────────────
 
-        private static StepOutcome TickDriveOut(JourneyContext c)
+        private static StepOutcome TickDriveOut(JourneyContext c) => TickDriveOutOf(c, "m3");
+
+        /// <summary>右键新机旁边的空地（移动命令，不是工作）：新机驶出装配站出口、让出出口。FGJ-M4 的搬运机 / ERC-003 也用。</summary>
+        internal static StepOutcome TickDriveOutOf(JourneyContext c, string key)
         {
-            int id = c.GetInt("m3");
+            int id = c.GetInt(key);
             if (!FgjM2Common.HomePos(id, out Vector2 at))
             {
                 return StepOutcome.Fail("找不到新机的位置");

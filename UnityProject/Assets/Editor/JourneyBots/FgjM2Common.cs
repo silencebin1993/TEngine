@@ -1300,6 +1300,17 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 return StepOutcome.Retry("点“统计”后统计面板没有打开：" + FgjM1Journey.UiFail(c));
             }
+            // FG4-E2E-01（M4 出口回归）：FG4-ECO-08 起统计面板默认停在“生产”页签（ADR-ECO-008），反应伤害归因在“战斗”页签——像玩家一样先点“战斗”。
+            if (p.CurrentTab != StatsTab.Combat)
+            {
+                if (c.GetInt("statsTabClicks") >= 3)
+                {
+                    return StepOutcome.Fail($"点了 3 次“战斗”页签仍停在 {p.CurrentTab}：{JourneyInput.LastUiFailure}");
+                }
+                c.SetInt("statsTabClicks", c.GetInt("statsTabClicks") + 1);
+                JourneyInput.ClickUitk("[StatsPanelHost]", "StatsTabCombat");
+                return StepOutcome.Wait;
+            }
             var rows = new List<string>();
             for (int i = 0; i < p.VisibleRowCount; i++)
             {

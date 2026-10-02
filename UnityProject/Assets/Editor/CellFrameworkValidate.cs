@@ -441,6 +441,10 @@ namespace GameLogic.EditorTools
             // 升 T2 / T3（研究门槛、关键材料、耗电 120 / 160）；负向（被摧毁时固件保留不生效、重建只收废料；拆除退回关键材料、槽锁回；取消虚影 / 升级退回；唯一一座；施工中被摧毁不丢）；
             // 面板（真 UXML）、真文件存读档、暂停与倍速、观察一致、性能。
             Seg("FgOverrideArraySelfCheck", FgOverrideArraySelfCheck.Run);
+            // FG4-E2E-01：M4 出口——FGJ-M4 / FGJ-M4R 登记覆盖出口旅程原文、DEBT-FG3E2E01-01 的回补与 IC-REQ-022 六类、两条都登记断点；旅程源码只走输入通道（扫描业务方法调用、
+            // 夹具只在登记的夹具方法里）；产线 / 小产线 / 精炼塔规划在种子测试集上都找得到且逐件过放置校验（B25）；缺口清零门禁；FG-M4 试玩包；FGT-ECO-001～010 的自检映射与旅程步骤；
+            // 装配站面板生产按钮不被压扁 / 盖住（四种分辨率）与布局探针；工单面板原因接线（DEBT-FG4ECO11-06）。
+            Seg("FgMilestoneM4SelfCheck", FgMilestoneM4SelfCheck.Run);
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>

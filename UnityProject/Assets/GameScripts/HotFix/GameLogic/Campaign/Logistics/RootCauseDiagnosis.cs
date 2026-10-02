@@ -767,6 +767,9 @@ namespace GameLogic.Campaign.Logistics
                 return; // 没接传送带：原因（第一步）已经写明要在哪里铺。
             }
             int net = k.NetworkOf(inBind.BeltCell.X, inBind.BeltCell.Y);
+            // FG4-E2E-01（FGJ-M4 诊断抓到）：分流器是它那条带的终点（ADR-LOG-004），分流器出口接出的带是另一个网络——只看输入口这一个网络，
+            // 经分流器供料的建筑会被写成“输入带上没有能供应的建筑”。这里把“往这个网络里分出东西的分流器”的输入网络一层层并进来（上游网络集合）。
+            HashSet<int> nets = UpstreamNetworks(k, net);
             // 生产建筑按它输出口外那一格找（关停 / 受损 / 没电的建筑端口已经撤掉，不能只看端口绑定）。
             foreach (Economy.ProductionService.Producer up in Economy.ProductionService.All)
             {
@@ -781,7 +784,7 @@ namespace GameLogic.Campaign.Logistics
                     if (pp.IsOutput)
                     {
                         Vector2Int v = GridMath.DirVector(pp.Dir);
-                        onNet |= k.NetworkOf(pp.Cell.X + v.x, pp.Cell.Y + v.y) == net;
+                        onNet |= nets.Contains(k.NetworkOf(pp.Cell.X + v.x, pp.Cell.Y + v.y));
                     }
                 }
                 if (onNet)
@@ -804,7 +807,7 @@ namespace GameLogic.Campaign.Logistics
             foreach (BeltPortService.Binding s in BeltPortService.All)
             {
                 if (s.IsOutput && s.Store && s.PortId >= 0 && s.Record != null && (s.Record.Filter == BeltPortService.FilterAll || s.Record.Filter == want.BeltId)
-                    && k.NetworkOf(s.BeltCell.X, s.BeltCell.Y) == net)
+                    && nets.Contains(k.NetworkOf(s.BeltCell.X, s.BeltCell.Y)))
                 {
                     store = s;
                     break;
@@ -823,10 +826,132 @@ namespace GameLogic.Campaign.Logistics
                     sb?.GridX ?? store.PortCell.X, sb?.GridY ?? store.PortCell.Y, want.Name), sb?.Position ?? CellPos(store.PortCell), store.BuildingId);
                 return;
             }
+            // FG4-E2E-01（FGJ-M4 抓到）：上游其实接着供货建筑，只是输入带中途有一格转反了、和它前面那格顶住——带被截成两段，输入口这一段
+            // “没有供应者”只是表象。往回走到这一段的起点，起点旁边有一格背离它、又和自己正前方那格顶住时，点名那一格（与传送带悬停同一句）。
+            if (FindReversedLink(k, inBind.BeltCell, out int bx, out int by, out int bdir))
+            {
+                int fx = bx + BeltDirs.Dx(bdir);
+                int fy = by + BeltDirs.Dy(bdir);
+                string why = GameText.Format("logistics.block.head_on_self", fx, fy, GameText.Get(GridMath.DirTextKey((GridDir)bdir)),
+                    InputDisplay.ForAction(GameActionId.OpenBuildMenu), InputDisplay.ForAction(GameActionId.Rotate));
+                Step(c, DiagCode.BeltTerminal, GameText.Format("diag.step.belt_terminal", bx, by, why), CellPos(new GridCell(bx, by)), null);
+                return;
+            }
             Step(c, DiagCode.ProdNoSupplier, GameText.Format("diag.step.prod_no_supplier", want.Name), CellPos(inBind.BeltCell), null);
         }
 
+        private static readonly Queue<Unity.Mathematics.int2> WalkQueue = new Queue<Unity.Mathematics.int2>(64);
+        private static readonly HashSet<long> WalkSeen = new HashSet<long>();
+
+        private static long WalkKey(int x, int y) => ((long)x << 32) ^ (uint)y;
+
+        /// <summary>
+        /// FG4-E2E-01：从输入口外那一格沿上游往回走（经过汇入、分流器出口），找到这段带没有上游的起点；起点的后方 / 侧边若有一格普通传送带
+        /// 正背离它（朝外走），而那一格的正前方又是一格朝着它的传送带（两格顶住）——那一格就是转反了、把带截断的那一格。
+        /// 只在诊断描述“缺料”时按需调用（不在每帧），往回最多走 512 格。
+        /// </summary>
+        private static bool FindReversedLink(BeltKernel k, GridCell start, out int bx, out int by, out int bdir)
+        {
+            bx = by = bdir = 0;
+            WalkQueue.Clear();
+            WalkSeen.Clear();
+            WalkQueue.Enqueue(new Unity.Mathematics.int2(start.X, start.Y));
+            WalkSeen.Add(WalkKey(start.X, start.Y));
+            for (int guard = 0; WalkQueue.Count > 0 && guard < 512; guard++)
+            {
+                Unity.Mathematics.int2 cur = WalkQueue.Dequeue();
+                if (!k.TryGetCellInfo(cur.x, cur.y, out BeltCellInfo ci))
+                {
+                    continue;
+                }
+                bool fed = false;
+                for (int d = 0; d < 4; d++)
+                {
+                    int nx = cur.x + BeltDirs.Dx(d);
+                    int ny = cur.y + BeltDirs.Dy(d);
+                    if (!k.TryGetCellInfo(nx, ny, out BeltCellInfo ni))
+                    {
+                        continue;
+                    }
+                    bool feeds = ni.HasNext && !ni.NextUnderground && ni.NextX == cur.x && ni.NextY == cur.y;
+                    if (!feeds && ni.Kind == BeltNodeKind.Splitter && k.TryGetNodeInfo(nx, ny, out BeltNodeInfo node))
+                    {
+                        feeds = (node.OutLConnected && node.OutLX == cur.x && node.OutLY == cur.y) || (node.OutRConnected && node.OutRX == cur.x && node.OutRY == cur.y);
+                    }
+                    if (feeds)
+                    {
+                        fed = true;
+                        if (WalkSeen.Add(WalkKey(nx, ny)))
+                        {
+                            WalkQueue.Enqueue(new Unity.Mathematics.int2(nx, ny));
+                        }
+                    }
+                }
+                // 只看普通传送带与分流器（分流器只看后方入口那一侧：左右两侧本来就是朝外的出口）。
+                if (fed || (ci.Kind != BeltNodeKind.Belt && ci.Kind != BeltNodeKind.Splitter))
+                {
+                    continue;
+                }
+                int front = (int)ci.Dir;
+                for (int d = 0; d < 4; d++)
+                {
+                    if (d == front || (ci.Kind == BeltNodeKind.Splitter && d != BeltDirs.Opposite(front)))
+                    {
+                        continue;
+                    }
+                    int nx = cur.x + BeltDirs.Dx(d);
+                    int ny = cur.y + BeltDirs.Dy(d);
+                    if (!k.TryGetCellInfo(nx, ny, out BeltCellInfo ni) || ni.Kind != BeltNodeKind.Belt || (int)ni.Dir != d)
+                    {
+                        continue; // 那一格不是背离起点的普通传送带
+                    }
+                    int fx = nx + BeltDirs.Dx(d);
+                    int fy = ny + BeltDirs.Dy(d);
+                    if (k.TryGetCellInfo(fx, fy, out BeltCellInfo fi) && fi.Kind == BeltNodeKind.Belt && (int)fi.Dir == BeltDirs.Opposite(d))
+                    {
+                        bx = nx;
+                        by = ny;
+                        bdir = d;
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
         private static readonly List<PortPlacement> PortPlacements = new List<PortPlacement>(4);
+
+        private static readonly List<Unity.Mathematics.int2> SplitterCells = new List<Unity.Mathematics.int2>(16);
+        private static readonly HashSet<int> UpNets = new HashSet<int>();
+
+        /// <summary>
+        /// FG4-E2E-01：<paramref name="net"/> 与它的上游网络——某个分流器的左 / 右出口接在集合里的网络上时，这个分流器所在（= 它的输入带）的网络也是上游，一层层并进来。
+        /// 只在诊断描述“缺料”时调用（按需、不在每帧），O(分流器数 × 层数)，层数封顶 32。
+        /// </summary>
+        private static HashSet<int> UpstreamNetworks(BeltKernel k, int net)
+        {
+            UpNets.Clear();
+            UpNets.Add(net);
+            k.CollectSplitters(SplitterCells);
+            bool grew = true;
+            for (int guard = 0; grew && guard < 32; guard++)
+            {
+                grew = false;
+                foreach (Unity.Mathematics.int2 c in SplitterCells)
+                {
+                    if (!k.TryGetNodeInfo(c.x, c.y, out BeltNodeInfo ni))
+                    {
+                        continue;
+                    }
+                    bool feeds = (ni.OutLConnected && UpNets.Contains(k.NetworkOf(ni.OutLX, ni.OutLY))) || (ni.OutRConnected && UpNets.Contains(k.NetworkOf(ni.OutRX, ni.OutRY)));
+                    if (feeds && UpNets.Add(k.NetworkOf(c.x, c.y)))
+                    {
+                        grew = true;
+                    }
+                }
+            }
+            return UpNets;
+        }
 
         private static bool Produces(Economy.ProductionService.Producer up, Economy.ItemDef want)
         {

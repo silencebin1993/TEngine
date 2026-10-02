@@ -1009,8 +1009,10 @@ namespace GameLogic.EditorTools.JourneyBots
                 return StepOutcome.Wait;
             }
             // FG4-ECO-05（FGU-09）：点建筑先打开它的通用面板，再点面板里的“端口…”进端口面板（玩家的真实路径）。
+            // FG4-E2E-01（M4 出口回归）：FG4-ECO-07 / 08 / 11 往通用面板加了名字、效率、槽位等几行后，“端口…”按钮落到面板滚动区的可见区下面——
+            // 像玩家一样先在面板主体上滚滚轮把它滚进可见区再点（不滚就点不到，原来这里会一直等到超时）。
             if (!BeltPortPanelUIToolkit.IsOpen && ProductionPanelUIToolkit.IsOpen && ProductionPanelUIToolkit.BuildingId == b.BuildingId
-                && !Once(c, "ports", () => JourneyInput.ClickUitk(BuildingPanelHost, "PrPorts")))
+                && !Once(c, "ports", () => ClickPanelBodyButton(BuildingPanelHost, "ProductionPanelBody", "PrPorts")))
             {
                 return StepOutcome.Wait;
             }
@@ -1022,6 +1024,25 @@ namespace GameLogic.EditorTools.JourneyBots
             return BeltPortPanelUIToolkit.IsOpen && panel != null && panel.PanelVisible && BeltPortPanelUIToolkit.BuildingId == b.BuildingId && panel.VisibleRowCount >= 1
                 ? StepOutcome.Done($"左键点{HomeGridService.DisplayName(typeId)}：端口面板打开（“{panel.TitleText}”，{panel.VisibleRowCount} 个端口；“{panel.StoreText}”）")
                 : StepOutcome.Retry($"点{HomeGridService.DisplayName(typeId)}后端口面板没打开（状态行“{Mode?.StatusText}”）");
+        }
+
+        /// <summary>本会话里为了点到面板滚动区里的按钮而先滚滚轮的次数（报告里计数）。</summary>
+        internal static int PanelBodyScrolls { get; set; }
+
+        /// <summary>
+        /// 点面板滚动区里的一个按钮：按钮不在滚动区可见区里时像玩家一样在滚动区上滚一下滚轮（这次不点，返回 false，下一次再试）；
+        /// 在可见区里就向面板派发真实指针事件（<see cref="JourneyInput.ClickElement"/>）。
+        /// </summary>
+        internal static bool ClickPanelBodyButton(string host, string scrollName, string buttonName)
+        {
+            VisualElement btn = JourneyInput.FindUitk<VisualElement>(host, buttonName);
+            ScrollView body = JourneyInput.FindUitk<ScrollView>(host, scrollName);
+            if (btn != null && body != null && body.Contains(btn) && !JourneyInput.ScrollIntoView(body, btn))
+            {
+                PanelBodyScrolls++;
+                return false;
+            }
+            return JourneyInput.ClickElement(btn);
         }
 
         /// <summary>端口面板里某个输出口那一行的过滤下拉框选 <paramref name="filter"/>（下拉框确认能点、没被挡住后设值——与在弹出菜单里点那一项同一个值变化回调）。</summary>

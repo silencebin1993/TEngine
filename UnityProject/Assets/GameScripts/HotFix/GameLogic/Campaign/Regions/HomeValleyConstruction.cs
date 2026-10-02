@@ -789,6 +789,37 @@ namespace GameLogic.Campaign.Regions
             return WaitingText(rt, need, stock);
         }
 
+        /// <summary>
+        /// FG4-E2E-01（DEBT-FG4ECO11-06）：带状态的版本。卡住的是废料以外的材料、库存为 0、但有一份正被系统返还搬运单搬回家园时
+        /// （例如取着关键材料的机器途中阵亡、货掉在地上），写“机器正在搬回”（与 <see cref="DescribeStatus(CampaignState, WorkOrderRecord)"/> 同一文本键），
+        /// 不再提示“去打首领”。工单面板、右键被拒的说明都走这里，与施工队列、悬停同一口径。O(工作单数)，只在显示原因时调用。
+        /// </summary>
+        public static string DescribeMaterialsReason(CampaignState state, string reason)
+        {
+            int need = 0;
+            int stock = 0;
+            string[] parts = reason != null && reason.StartsWith(MaterialsReasonPrefix, StringComparison.Ordinal) ? reason.Substring(MaterialsReasonPrefix.Length).Split(':') : Array.Empty<string>();
+            if (parts.Length > 0)
+            {
+                int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out need);
+            }
+            if (parts.Length > 1)
+            {
+                int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out stock);
+            }
+            string rt = parts.Length > 2 && parts[2].Length > 0 ? parts[2] : CampaignEconomyLedger.ResourceScrap;
+            if (state != null && stock <= 0 && rt != CampaignEconomyLedger.ResourceScrap)
+            {
+                int returning = HomeValleyWorkOrders.ReturningAmount(state, rt);
+                if (returning > 0 && Economy.ItemCatalog.TryGetByResource(rt, out Economy.ItemDef item))
+                {
+                    return GameText.Format("build.status.waiting_item_returning", item.Name, need.ToString(CultureInfo.InvariantCulture),
+                        returning.ToString(CultureInfo.InvariantCulture));
+                }
+            }
+            return WaitingText(rt, need, stock);
+        }
+
         /// <summary>“等待材料”的玩家文字：废料沿用原写法；其余材料写明从哪儿来（物品表的来源，关键材料写哪个首领给出，B06）。</summary>
         public static string WaitingText(string resourceType, int need, int stock)
         {

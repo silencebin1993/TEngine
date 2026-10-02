@@ -219,7 +219,8 @@ namespace GameLogic.Campaign.Regions
                 return $"这台机器不能{KindVerb(kind)}，换一台搬运机试试";
             }
             if (reason.StartsWith(GridFailurePrefix, StringComparison.Ordinal)) return reason.Substring(GridFailurePrefix.Length);
-            if (reason.StartsWith(HomeValleyConstruction.MaterialsReasonPrefix, StringComparison.Ordinal)) return HomeValleyConstruction.DescribeMaterialsReason(reason);
+            // FG4-E2E-01（DEBT-FG4ECO11-06）：带当前战役状态描述——关键材料正被搬回时写“机器正在搬回”，与施工队列 / 悬停同一口径。
+            if (reason.StartsWith(HomeValleyConstruction.MaterialsReasonPrefix, StringComparison.Ordinal)) return HomeValleyConstruction.DescribeMaterialsReason(CampaignSession.Current, reason);
             if (reason.StartsWith(UnsupportedResourcePrefix, StringComparison.Ordinal))
             {
                 return Localization.GameText.Format("build.return.cannot_store", HomeValleyConstruction.MaterialName(reason.Substring(UnsupportedResourcePrefix.Length)));

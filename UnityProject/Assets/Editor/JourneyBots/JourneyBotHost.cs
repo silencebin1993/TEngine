@@ -22,6 +22,8 @@ namespace GameLogic.EditorTools.JourneyBots
             { FgjGenExtremeJourney.Id, FgjGenExtremeJourney.Build }, // FG3-GEN-01：FGT-GEN-009 极端世界设置下的第一幕旅程
             { FgjM3Journey.Id, FgjM3Journey.Build },
             { FgjM3ReverseJourney.Id, FgjM3ReverseJourney.Build },
+            { FgjM4Journey.Id, FgjM4Journey.Build }, // FG4-E2E-01：M4 出口旅程
+            { FgjM4ReverseJourney.Id, FgjM4ReverseJourney.Build }, // FG4-E2E-01：M4 反向旅程（IC-REQ-022 六类）
         };
 
         public static IEnumerable<string> Ids => Builders.Keys;
