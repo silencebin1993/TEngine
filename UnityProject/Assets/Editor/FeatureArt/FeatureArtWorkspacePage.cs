@@ -26,6 +26,10 @@ namespace BinGames.EditorTools.FeatureArt
         List<FeatureArtNode> _children, _archived;
         List<string> _sourceList;
         string _sourceText;
+        int _sourceRevision = -1;
+        int _documentsRevision = -1, _documentsStructureRevision = -1;
+        string[] _effectiveSources;
+        bool _showDocuments;
         static readonly string[] BindKinds = { "InstancedMesh", "PooledPrefab", "MaterialOverride", "Image", "Texture", "AnimationClip", "AudioClip", "AssetReference" };
         static readonly string[] BindLabels = { "模型 / 网格 / 预制体", "池化特效预制体", "材质", "图标 / 图片", "贴图 / VAT", "动画片段", "音频", "其他资源" };
 
@@ -72,6 +76,8 @@ namespace BinGames.EditorTools.FeatureArt
                     _window.Log("已补入 " + count + " 个绑定槽；已有结构和说明保留。");
                 }
                 if (GUILayout.Button("打开源文件库")) _window.JumpToSourceLibrary();
+                if (GUILayout.Button("设计文档与最新原文")) _window.JumpToDocuments();
+                if (GUILayout.Button("可调整的出图顺序")) _window.JumpToProduction();
                 if (GUILayout.Button("健康检查")) _window.RunHealthCheck();
             }
 
@@ -134,8 +140,12 @@ namespace BinGames.EditorTools.FeatureArt
             _node.faction = FeatureArtGui.Field("阵营", _node.faction);
             _node.requirementStatus = FeatureArtGui.Field("需求状态", _node.requirementStatus);
             _node.notes = TextArea("制作说明", _node.notes);
-            if (!ReferenceEquals(_sourceList, _node.designSources))
-            { _sourceList = _node.designSources; _sourceText = string.Join("\n", _sourceList); }
+            if (!ReferenceEquals(_sourceList, _node.designSources) || _sourceRevision != _window.Workspace.ContentRevision)
+            {
+                _sourceRevision = _window.Workspace.ContentRevision;
+                _sourceList = _node.designSources;
+                _sourceText = string.Join("\n", _sourceList);
+            }
             var sourceText = TextArea("设计出处（每行一项）", _sourceText);
             if (sourceText != _sourceText)
             {
@@ -143,6 +153,13 @@ namespace BinGames.EditorTools.FeatureArt
                 _sourceList = _node.designSources = sourceText.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()).ToList();
             }
             if (EditorGUI.EndChangeCheck()) Changed(false);
+            DrawDocuments();
+            if (FeatureArtGui.Button("加入 / 查看出图顺序"))
+            {
+                FeatureArtProduction.Add(_window.Workspace, _node.id, _node.kind);
+                _window.MarkWorkspaceDirty();
+                _window.JumpToProduction(_node.id);
+            }
             EditorGUILayout.LabelField("依赖资源", EditorStyles.boldLabel);
             for (var i = 0; i < _node.dependencyIds.Count; i++)
                 using (new EditorGUILayout.HorizontalScope())
@@ -198,6 +215,23 @@ namespace BinGames.EditorTools.FeatureArt
                 _node.parentId = _parentIds[next];
                 Changed(true);
             }
+        }
+
+        void DrawDocuments()
+        {
+            var workspace = _window.Workspace;
+            if (_documentsRevision != workspace.ContentRevision || _documentsStructureRevision != workspace.StructureRevision)
+            {
+                _documentsRevision = workspace.ContentRevision;
+                _documentsStructureRevision = workspace.StructureRevision;
+                _effectiveSources = FeatureArtDocuments.EffectiveSources(workspace, _node);
+            }
+            _showDocuments = EditorGUILayout.Foldout(_showDocuments, "有效文档依据（含全局规范与上级出处） · " + _effectiveSources.Length, true);
+            if (!_showDocuments) return;
+            foreach (var source in _effectiveSources)
+                if (FeatureArtGui.Button(source))
+                    try { FeatureArtDocuments.Open(source); }
+                    catch (Exception e) { _window.LogError(e.Message); }
         }
 
         void DrawSource()

@@ -35,6 +35,9 @@ namespace BinGames.EditorTools.FeatureArt
         public string outputFolder = "Assets/GameRes/Raw/Actor/Machine";
         public string designVersion = "";
         public List<string> designDocuments = new List<string>();
+        public List<string> documentRoots = new List<string> { "production/design/art-rules" };
+        public List<FeatureArtDocumentLink> documentLinks = new List<FeatureArtDocumentLink>();
+        public List<FeatureArtImageTask> imageTasks = new List<FeatureArtImageTask>();
         public bool autoRepairPackages;
         public List<FeatureArtNode> nodes = new List<FeatureArtNode>();
 
@@ -45,6 +48,9 @@ namespace BinGames.EditorTools.FeatureArt
         [NonSerialized] List<FeatureArtNode> _indexedNodes;
         [NonSerialized] int _indexedCount;
         [NonSerialized] int _revision;
+        [NonSerialized] int _contentRevision;
+        public int ContentRevision => _contentRevision;
+        public void MarkContentChanged() => _contentRevision++;
 
         public int StructureRevision { get { EnsureIndex(); return _revision; } }
 
@@ -146,6 +152,10 @@ namespace BinGames.EditorTools.FeatureArt
         {
             if (version != 1) throw new InvalidDataException("资源树版本不受支持，未覆盖原配置。");
             nodes ??= new List<FeatureArtNode>();
+            designDocuments ??= new List<string>();
+            documentRoots ??= new List<string> { "production/design/art-rules" };
+            documentLinks ??= new List<FeatureArtDocumentLink>();
+            imageTasks ??= new List<FeatureArtImageTask>();
             if (nodes.Any(n => n == null || string.IsNullOrEmpty(n.id)) ||
                 nodes.Select(n => n.id).Distinct(StringComparer.Ordinal).Count() != nodes.Count)
                 throw new InvalidDataException("资源树存在空节点或重复 id，未覆盖原配置。");
@@ -160,6 +170,18 @@ namespace BinGames.EditorTools.FeatureArt
             }
             sourceRoot = ValidateFolder(sourceRoot, "Assets/GameRes/Art");
             outputFolder = ValidateFolder(outputFolder, "Assets/GameRes/Raw");
+            if (imageTasks.Any(t => t == null || Find(t.nodeId) == null || t.state < 0 || t.state > 3) ||
+                imageTasks.Select(t => t.nodeId).Distinct().Count() != imageTasks.Count)
+                throw new InvalidDataException("出图顺序存在重复、缺失节点或无效状态。");
+            foreach (var task in imageTasks)
+                if (!string.IsNullOrEmpty(task.referenceNodeId) && (task.referenceNodeId == task.nodeId || Find(task.referenceNodeId) == null))
+                    throw new InvalidDataException("出图参考节点不存在或指向自身：" + task.nodeId);
+            foreach (var root in documentRoots) FeatureArtDocuments.Resolve(root);
+            foreach (var link in documentLinks)
+                if (link == null || string.IsNullOrWhiteSpace(link.path)) throw new InvalidDataException("文档关联缺少路径。");
+                else FeatureArtDocuments.Resolve(link.path);
+            if (documentLinks.Select(l => l.path).Distinct(StringComparer.OrdinalIgnoreCase).Count() != documentLinks.Count)
+                throw new InvalidDataException("文档关联路径重复。");
         }
 
         public static string ValidateFolder(string path, string root)
@@ -222,6 +244,9 @@ namespace BinGames.EditorTools.FeatureArt
                 .Select(n => n.slotId).Distinct().ToList();
             nodes.RemoveAll(n => removed.Contains(n.id));
             foreach (var node in nodes) node.dependencyIds.RemoveAll(removed.Contains);
+            imageTasks.RemoveAll(t => removed.Contains(t.nodeId));
+            foreach (var task in imageTasks) if (removed.Contains(task.referenceNodeId)) task.referenceNodeId = "";
+            MarkContentChanged();
             InvalidateStructure();
             return slots.Where(slot => !nodes.Any(n => n.slotId == slot)).ToList();
         }

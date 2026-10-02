@@ -207,6 +207,8 @@ namespace BinGames.EditorTools.FeatureArt
         readonly Dictionary<string, OdinMenuItem> _workspaceMenuItems = new Dictionary<string, OdinMenuItem>();
         readonly Dictionary<string, bool> _expandedNodes = new Dictionary<string, bool>();
         FeatureArtWorkspace _pageWorkspace;
+        FeatureArtDocumentsPage _documentsPage;
+        FeatureArtProductionPage _productionPage;
         FeatureArtWorkspacePage _activeWorkspacePage;
         Dictionary<string, FeatureArtSlot> _slotIndex;
         List<FeatureArtSlot> _indexedSlots;
@@ -239,6 +241,8 @@ namespace BinGames.EditorTools.FeatureArt
         public FeatureArtCatalogData Data => _data;
         public List<HealthIssue> HealthIssues => _healthIssues;
         public bool IsRegistryDirty => _registryDirty;
+        public bool IsWorkspaceDirty => _workspaceDirty;
+        public bool IsCatalogDirty => _dirty;
 
         public static void Open()
         {
@@ -270,6 +274,8 @@ namespace BinGames.EditorTools.FeatureArt
             {
                 _pageWorkspace = Workspace;
                 _workspacePages.Clear();
+                _documentsPage = null;
+                _productionPage = null;
             }
             var currentIds = new HashSet<string>(Workspace.nodes.Select(n => n.id)) { "" };
             foreach (var id in _workspacePages.Keys.ToArray()) if (!currentIds.Contains(id)) _workspacePages.Remove(id);
@@ -292,6 +298,8 @@ namespace BinGames.EditorTools.FeatureArt
             tree.Add("使用说明", new GuidePage());
             tree.Add("混元生3D", new FeatureArtHunyuanSettingsPage());
             tree.Add("健康检查", new HealthCheckPage(this));
+            tree.Add("设计文档", _documentsPage ??= new FeatureArtDocumentsPage(this));
+            tree.Add("出图顺序", _productionPage ??= new FeatureArtProductionPage(this));
             _sourceLibraryPage ??= new FeatureArtSourceLibraryPage(this);
             tree.Add(FeatureArtSourceLibraryPage.MenuPath, _sourceLibraryPage);
             tree.Add("资源树", WorkspacePage(null));
@@ -673,7 +681,15 @@ namespace BinGames.EditorTools.FeatureArt
 
         public void MarkDirty() { _dirty = true; _slotIndex = null; _catalogRevision++; }
 
-        public void MarkWorkspaceDirty() => _workspaceDirty = true;
+        public void MarkWorkspaceDirty() { _workspaceDirty = true; Workspace.MarkContentChanged(); }
+
+        public void JumpToDocuments() => SelectPage("设计文档");
+        public void JumpToProduction(string nodeId = null)
+        {
+            if (nodeId != null) _productionPage?.Select(nodeId);
+            SelectPage("出图顺序");
+        }
+        void SelectPage(string path) { MenuTree.EnumerateTree(false).FirstOrDefault(i => i.GetFullPath() == path)?.Select(false); Repaint(); }
 
         public void RebuildWorkspaceTree()
         {

@@ -16,7 +16,3725 @@
     "TEngine/UnityProject/DesignDocs/fullgame/FG02_Firmware_Reactions_Morph.md",
     "TEngine/UnityProject/DesignDocs/fullgame/FG04_Home_Economy_Automation.md",
     "TEngine/UnityProject/DesignDocs/fullgame/FG09_Factions_Enemies_Leaders.md",
-    "tools/cell_tables/fgdata_firmware.py"
+    "tools/cell_tables/fgdata_firmware.py",
+    "production/design/art-rules/01-画风总纲.md",
+    "production/design/art-rules/03-阵营视觉语言.md",
+    "production/design/art-rules/10-视觉方向探索与AI工具评测.md",
+    "production/design/art-rules/11-AI出图直接复制版.md",
+    "production/design/art-rules/README.md",
+    "production/design/art-rules/asset-cards/mch_player_legged_base.md",
+    "production/design/art-rules/asset-cards/mch_player_tracked_base.md"
+  ],
+  "documentRoots": [
+    "production/design/art-rules"
+  ],
+  "documentLinks": [
+    {
+      "path": "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md",
+      "role": "设计依据",
+      "enabled": true,
+      "applyToAll": false
+    },
+    {
+      "path": "TEngine/UnityProject/DesignDocs/fullgame/FG02_Firmware_Reactions_Morph.md",
+      "role": "设计依据",
+      "enabled": true,
+      "applyToAll": false
+    },
+    {
+      "path": "TEngine/UnityProject/DesignDocs/fullgame/FG04_Home_Economy_Automation.md",
+      "role": "设计依据",
+      "enabled": true,
+      "applyToAll": false
+    },
+    {
+      "path": "TEngine/UnityProject/DesignDocs/fullgame/FG09_Factions_Enemies_Leaders.md",
+      "role": "设计依据",
+      "enabled": true,
+      "applyToAll": false
+    },
+    {
+      "path": "production/design/art-rules/01-画风总纲.md",
+      "role": "规范",
+      "enabled": true,
+      "applyToAll": true
+    },
+    {
+      "path": "production/design/art-rules/02-规格限制.md",
+      "role": "规范",
+      "enabled": true,
+      "applyToAll": true
+    },
+    {
+      "path": "production/design/art-rules/03-阵营视觉语言.md",
+      "role": "规范",
+      "enabled": true,
+      "applyToAll": true
+    },
+    {
+      "path": "production/design/art-rules/04-提示词通用锁.md",
+      "role": "规范",
+      "enabled": true,
+      "applyToAll": true
+    },
+    {
+      "path": "production/design/art-rules/05-提示词-机器与角色.md",
+      "role": "设计",
+      "enabled": true,
+      "applyToAll": false
+    },
+    {
+      "path": "production/design/art-rules/06-提示词-环境与地形.md",
+      "role": "设计",
+      "enabled": true,
+      "applyToAll": false
+    },
+    {
+      "path": "production/design/art-rules/07-提示词-建筑与物流.md",
+      "role": "设计",
+      "enabled": true,
+      "applyToAll": false
+    },
+    {
+      "path": "production/design/art-rules/08-提示词-特效与图标.md",
+      "role": "设计",
+      "enabled": true,
+      "applyToAll": false
+    },
+    {
+      "path": "production/design/art-rules/09-资产交付卡模板.md",
+      "role": "交付规范",
+      "enabled": true,
+      "applyToAll": true
+    },
+    {
+      "path": "production/design/art-rules/10-视觉方向探索与AI工具评测.md",
+      "role": "探索",
+      "enabled": true,
+      "applyToAll": false
+    },
+    {
+      "path": "production/design/art-rules/11-AI出图直接复制版.md",
+      "role": "探索",
+      "enabled": true,
+      "applyToAll": false
+    },
+    {
+      "path": "production/design/art-rules/README.md",
+      "role": "索引",
+      "enabled": true,
+      "applyToAll": false
+    },
+    {
+      "path": "production/design/art-rules/asset-cards/mch_player_legged_base.md",
+      "role": "资产卡",
+      "enabled": true,
+      "applyToAll": false
+    },
+    {
+      "path": "production/design/art-rules/asset-cards/mch_player_tracked_base.md",
+      "role": "资产卡",
+      "enabled": true,
+      "applyToAll": false
+    },
+    {
+      "path": "production/design/earth-reclamation/TERM-MIGRATION.md",
+      "role": "设计依据",
+      "enabled": true,
+      "applyToAll": false
+    },
+    {
+      "path": "tools/cell_tables/fgdata_firmware.py",
+      "role": "设计依据",
+      "enabled": true,
+      "applyToAll": false
+    }
+  ],
+  "imageTasks": [
+    {
+      "nodeId": "master_01_player_tracked",
+      "stage": "母版",
+      "enabled": true,
+      "state": 2,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "master_02_home_corner",
+      "stage": "母版",
+      "enabled": true,
+      "state": 2,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "master_03_silent_scout",
+      "stage": "母版",
+      "enabled": true,
+      "state": 2,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "mch_player_wheeled",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_tracked",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_hover",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "tur_player_light",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "tur_player_heavy",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_legged",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_drop_pod",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_repeater",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_cutting_beam",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_heavy_cannon",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_repair_beam",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_dash_ram",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_marker",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_hydraulic_hammer",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_dozer",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_blade_ring",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_dismantling_clamp",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_spiked_armor",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_drone_bay",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_sentry_stake",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_corona_field",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_sprayer",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_shock_pulse",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_module_heavy_armor",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_module_cooling_fin",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_module_cargo",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_module_signal_relay",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "circuit_power_core",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "circuit_generic_node",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "circuit_damping_node",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "circuit_conductive_node",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "circuit_uplink_port",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "circuit_signal_core",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "enm_silent_scout",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_03_silent_scout"
+    },
+    {
+      "nodeId": "enm_silent_jammer",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_03_silent_scout"
+    },
+    {
+      "nodeId": "enm_silent_listening_node",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_03_silent_scout"
+    },
+    {
+      "nodeId": "enm_silent_storm_prism",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_03_silent_scout"
+    },
+    {
+      "nodeId": "enm_silent_echo_hunter",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_03_silent_scout"
+    },
+    {
+      "nodeId": "enm_silent_decoy_relay",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_03_silent_scout"
+    },
+    {
+      "nodeId": "enm_silent_listener_elite",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_03_silent_scout"
+    },
+    {
+      "nodeId": "enm_foundry_step_cannon",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_foundry_armor_machine",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_foundry_repair_machine",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_foundry_airburst_turret",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_foundry_mine_layer",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_foundry_antiair",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_foundry_loader",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_foundry_siege_elite",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_pristine_sprayer",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_pristine_oil_crawler",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_pristine_nitrogen_pump",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_pristine_sterilizer_drone",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_pristine_corrosion_swarm",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_pristine_settling_tank_elite",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_overclocked_hound",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_overclocked_compute_node",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_overclocked_fuse",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_overclocked_overheated_turret",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_overclocked_mirror",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_overclocked_runaway_compute_elite",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_whitetide_cleaner_drone",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_whitetide_purge_walker",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_whitetide_strike_beacon",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_whitetide_shield_tower",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_whitetide_landing_pod",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_whitetide_guard_drone_elite",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "bos_silent_overmind",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "master_03_silent_scout"
+    },
+    {
+      "nodeId": "bos_foundry_core",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "bos_pristine_baptistery",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "bos_overclocked_mainframe",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "bos_whitetide_homecoming",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_neutral_boring_worm",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_neutral_orbital_debris",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_neutral_caravan",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "enm_neutral_decoy_terminal",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "bld_player_reclamation_core",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_basic_generator",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_fuel_generator",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_solar_array",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_battery_station",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_power_pylon",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_reclaimer",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_extractor",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_fluid_pump",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_smelter",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_refinery",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_mixer",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_waste_pool",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_parts_workshop",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_electronics",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_component_workshop",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_assembly",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_firmware_writer",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_circuit_fusion",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_megastructure_factory",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_warehouse",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_tank",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_analyzer",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_simulation_lab",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_firing_range",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_blackbox_museum",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_listening_station",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_signal_tower",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_override_array",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_signal_relay",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_drop_station",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_repair_bay",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_repair_drone_station",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_purification_tower",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_roof",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_damping_base",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_barrier",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_gate",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_shield_generator",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "bld_player_trap_emitter",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "lgs_player_belt",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "lgs_player_corner",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "lgs_player_sorters",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "lgs_player_underground",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "lgs_player_block_marker",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "lgs_player_pipe",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "lgs_player_pump_valve",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "lgs_player_frozen",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "lgs_player_leak",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "itm_player_scrap",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "itm_player_metal_ore",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "itm_player_rare_earth_ore",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "itm_player_alloy",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "itm_player_parts",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "itm_player_structure",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "itm_player_repair_parts",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "itm_player_electronics",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "itm_player_precision_parts",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "itm_player_chip_substrate",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "itm_player_firmware_chip",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "itm_player_mega_component",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "itm_player_unparsed_module",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "itm_player_encrypted_firmware",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "itm_player_data_core",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "itm_player_human_legacy",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "itm_player_listening_core",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "itm_player_furnace_heart",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "itm_player_reaction_core",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "itm_player_compute_remnant",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "itm_player_blackbox",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_01_player_tracked"
+    },
+    {
+      "nodeId": "bld_player_megastructure",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "env_region_return_valley",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "env_region_shattered_city",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "env_region_foundry_outpost",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "env_region_sediment_lake",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "env_region_heatdeath_datacity",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "env_region_whitetide_beachhead",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "env_region_outer_wilds",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "env_interior_relay_hall",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_03_silent_scout"
+    },
+    {
+      "nodeId": "env_interior_data_center",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "env_prop_ruin_wall",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "env_prop_slab_steel",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "env_prop_wreck_vehicle",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "env_prop_dead_tree",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "env_prop_rock",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "env_prop_ruin_cluster",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "env_prop_relic",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "env_prop_data_terminal",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "env_prop_resource_cache",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "env_prop_scout_nest",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "env_prop_outpost",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "env_prop_cooling_tower",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "env_prop_antiair_site",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 1,
+      "requiresReference": true,
+      "referenceNodeId": "master_02_home_corner"
+    },
+    {
+      "nodeId": "mch_player_swarm_drone",
+      "stage": "概念图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_drone_bay"
+    },
+    {
+      "nodeId": "mch_player_wheeled_part_hull",
+      "stage": "部件图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_wheeled"
+    },
+    {
+      "nodeId": "mch_player_wheeled_part_wheel",
+      "stage": "部件图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_wheeled"
+    },
+    {
+      "nodeId": "mch_player_wheeled_part_core",
+      "stage": "部件图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_wheeled"
+    },
+    {
+      "nodeId": "mch_player_wheeled_part_port",
+      "stage": "部件图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_wheeled"
+    },
+    {
+      "nodeId": "mch_player_tracked_part_hull",
+      "stage": "部件图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_tracked_part_track",
+      "stage": "部件图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_tracked_part_fin",
+      "stage": "部件图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_tracked_part_core",
+      "stage": "部件图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_tracked_part_port",
+      "stage": "部件图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_tracked"
+    },
+    {
+      "nodeId": "mch_player_hover_part_disc",
+      "stage": "部件图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_hover"
+    },
+    {
+      "nodeId": "mch_player_hover_part_thruster",
+      "stage": "部件图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_hover"
+    },
+    {
+      "nodeId": "mch_player_hover_part_arm",
+      "stage": "部件图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_hover"
+    },
+    {
+      "nodeId": "mch_player_hover_part_rack",
+      "stage": "部件图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_hover"
+    },
+    {
+      "nodeId": "mch_player_hover_part_core",
+      "stage": "部件图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_hover"
+    },
+    {
+      "nodeId": "mch_player_hover_part_port",
+      "stage": "部件图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_hover"
+    },
+    {
+      "nodeId": "tur_player_light_part_foundation",
+      "stage": "部件图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "tur_player_light"
+    },
+    {
+      "nodeId": "tur_player_light_part_turntable",
+      "stage": "部件图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "tur_player_light"
+    },
+    {
+      "nodeId": "tur_player_light_part_port",
+      "stage": "部件图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "tur_player_light"
+    },
+    {
+      "nodeId": "tur_player_heavy_part_foundation",
+      "stage": "部件图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "tur_player_heavy"
+    },
+    {
+      "nodeId": "tur_player_heavy_part_turntable",
+      "stage": "部件图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "tur_player_heavy"
+    },
+    {
+      "nodeId": "tur_player_heavy_part_port",
+      "stage": "部件图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "tur_player_heavy"
+    },
+    {
+      "nodeId": "mch_player_legged_part_platform",
+      "stage": "部件图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_legged"
+    },
+    {
+      "nodeId": "mch_player_legged_part_leg",
+      "stage": "部件图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_legged"
+    },
+    {
+      "nodeId": "mch_player_legged_part_core",
+      "stage": "部件图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_legged"
+    },
+    {
+      "nodeId": "mch_player_legged_part_port",
+      "stage": "部件图",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_legged"
+    },
+    {
+      "nodeId": "icn_mch_player_wheeled",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_wheeled"
+    },
+    {
+      "nodeId": "icn_mch_player_tracked",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_tracked"
+    },
+    {
+      "nodeId": "icn_mch_player_hover",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_hover"
+    },
+    {
+      "nodeId": "icn_tur_player_light",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "tur_player_light"
+    },
+    {
+      "nodeId": "icn_tur_player_heavy",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "tur_player_heavy"
+    },
+    {
+      "nodeId": "icn_mch_player_legged",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_legged"
+    },
+    {
+      "nodeId": "icn_mch_player_drop_pod",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_drop_pod"
+    },
+    {
+      "nodeId": "icn_mch_player_repeater",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_repeater"
+    },
+    {
+      "nodeId": "icn_mch_player_cutting_beam",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_cutting_beam"
+    },
+    {
+      "nodeId": "icn_mch_player_heavy_cannon",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_heavy_cannon"
+    },
+    {
+      "nodeId": "icn_mch_player_repair_beam",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_repair_beam"
+    },
+    {
+      "nodeId": "icn_mch_player_dash_ram",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_dash_ram"
+    },
+    {
+      "nodeId": "icn_mch_player_marker",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_marker"
+    },
+    {
+      "nodeId": "icn_mch_player_hydraulic_hammer",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_hydraulic_hammer"
+    },
+    {
+      "nodeId": "icn_mch_player_dozer",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_dozer"
+    },
+    {
+      "nodeId": "icn_mch_player_blade_ring",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_blade_ring"
+    },
+    {
+      "nodeId": "icn_mch_player_dismantling_clamp",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_dismantling_clamp"
+    },
+    {
+      "nodeId": "icn_mch_player_spiked_armor",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_spiked_armor"
+    },
+    {
+      "nodeId": "icn_mch_player_drone_bay",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_drone_bay"
+    },
+    {
+      "nodeId": "icn_mch_player_sentry_stake",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_sentry_stake"
+    },
+    {
+      "nodeId": "icn_mch_player_corona_field",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_corona_field"
+    },
+    {
+      "nodeId": "icn_mch_player_sprayer",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_sprayer"
+    },
+    {
+      "nodeId": "icn_mch_player_shock_pulse",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_shock_pulse"
+    },
+    {
+      "nodeId": "icn_mch_player_module_heavy_armor",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_module_heavy_armor"
+    },
+    {
+      "nodeId": "icn_mch_player_module_cooling_fin",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_module_cooling_fin"
+    },
+    {
+      "nodeId": "icn_mch_player_module_cargo",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_module_cargo"
+    },
+    {
+      "nodeId": "icn_mch_player_module_signal_relay",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_module_signal_relay"
+    },
+    {
+      "nodeId": "icn_circuit_power_core",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "circuit_power_core"
+    },
+    {
+      "nodeId": "icn_circuit_generic_node",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "circuit_generic_node"
+    },
+    {
+      "nodeId": "icn_circuit_damping_node",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "circuit_damping_node"
+    },
+    {
+      "nodeId": "icn_circuit_conductive_node",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "circuit_conductive_node"
+    },
+    {
+      "nodeId": "icn_circuit_uplink_port",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "circuit_uplink_port"
+    },
+    {
+      "nodeId": "icn_circuit_signal_core",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "circuit_signal_core"
+    },
+    {
+      "nodeId": "icn_circuit_wire",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_circuit_conflict",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_circuit_active",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_homing",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_lock_cache",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_spread_shot",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_fork",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_split",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_delay_fuse",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_cluster_round",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_pierce",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_corrosive_head",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_echo",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_arc",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_widen",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_wide_angle",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_turbulence",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_ricochet",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_wall_impact",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_armor_pierce",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_overload",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_capacitor_charge",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_marked_hop",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_swarm_protocol",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_reaction_gain",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_execute",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_clock_pulse",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_harmonic",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_followup_shot",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_reclaim_repair",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_coolant",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_oil_leak",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_liquid_nitrogen",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_acid",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_adhesive",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_fire_trail",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_drag_trail",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_spread",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_bridge",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_pull",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_converge",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_vortex",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_arc_chain",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_return",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_orbit",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_deflect",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_firmware_shockwave",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_enm_silent_scout",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_silent_scout"
+    },
+    {
+      "nodeId": "icn_enm_silent_jammer",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_silent_jammer"
+    },
+    {
+      "nodeId": "icn_enm_silent_listening_node",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_silent_listening_node"
+    },
+    {
+      "nodeId": "icn_enm_silent_storm_prism",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_silent_storm_prism"
+    },
+    {
+      "nodeId": "icn_enm_silent_echo_hunter",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_silent_echo_hunter"
+    },
+    {
+      "nodeId": "icn_enm_silent_decoy_relay",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_silent_decoy_relay"
+    },
+    {
+      "nodeId": "icn_enm_silent_listener_elite",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_silent_listener_elite"
+    },
+    {
+      "nodeId": "icn_enm_foundry_step_cannon",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_foundry_step_cannon"
+    },
+    {
+      "nodeId": "icn_enm_foundry_armor_machine",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_foundry_armor_machine"
+    },
+    {
+      "nodeId": "icn_enm_foundry_repair_machine",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_foundry_repair_machine"
+    },
+    {
+      "nodeId": "icn_enm_foundry_airburst_turret",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_foundry_airburst_turret"
+    },
+    {
+      "nodeId": "icn_enm_foundry_mine_layer",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_foundry_mine_layer"
+    },
+    {
+      "nodeId": "icn_enm_foundry_antiair",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_foundry_antiair"
+    },
+    {
+      "nodeId": "icn_enm_foundry_loader",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_foundry_loader"
+    },
+    {
+      "nodeId": "icn_enm_foundry_siege_elite",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_foundry_siege_elite"
+    },
+    {
+      "nodeId": "icn_enm_pristine_sprayer",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_pristine_sprayer"
+    },
+    {
+      "nodeId": "icn_enm_pristine_oil_crawler",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_pristine_oil_crawler"
+    },
+    {
+      "nodeId": "icn_enm_pristine_nitrogen_pump",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_pristine_nitrogen_pump"
+    },
+    {
+      "nodeId": "icn_enm_pristine_sterilizer_drone",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_pristine_sterilizer_drone"
+    },
+    {
+      "nodeId": "icn_enm_pristine_corrosion_swarm",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_pristine_corrosion_swarm"
+    },
+    {
+      "nodeId": "icn_enm_pristine_settling_tank_elite",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_pristine_settling_tank_elite"
+    },
+    {
+      "nodeId": "icn_enm_overclocked_hound",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_overclocked_hound"
+    },
+    {
+      "nodeId": "icn_enm_overclocked_compute_node",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_overclocked_compute_node"
+    },
+    {
+      "nodeId": "icn_enm_overclocked_fuse",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_overclocked_fuse"
+    },
+    {
+      "nodeId": "icn_enm_overclocked_overheated_turret",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_overclocked_overheated_turret"
+    },
+    {
+      "nodeId": "icn_enm_overclocked_mirror",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_overclocked_mirror"
+    },
+    {
+      "nodeId": "icn_enm_overclocked_runaway_compute_elite",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_overclocked_runaway_compute_elite"
+    },
+    {
+      "nodeId": "icn_enm_whitetide_cleaner_drone",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_whitetide_cleaner_drone"
+    },
+    {
+      "nodeId": "icn_enm_whitetide_purge_walker",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_whitetide_purge_walker"
+    },
+    {
+      "nodeId": "icn_enm_whitetide_strike_beacon",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_whitetide_strike_beacon"
+    },
+    {
+      "nodeId": "icn_enm_whitetide_shield_tower",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_whitetide_shield_tower"
+    },
+    {
+      "nodeId": "icn_enm_whitetide_landing_pod",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_whitetide_landing_pod"
+    },
+    {
+      "nodeId": "icn_enm_whitetide_guard_drone_elite",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_whitetide_guard_drone_elite"
+    },
+    {
+      "nodeId": "icn_enm_neutral_boring_worm",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_neutral_boring_worm"
+    },
+    {
+      "nodeId": "icn_enm_neutral_orbital_debris",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_neutral_orbital_debris"
+    },
+    {
+      "nodeId": "icn_enm_neutral_caravan",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_neutral_caravan"
+    },
+    {
+      "nodeId": "icn_enm_neutral_decoy_terminal",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "enm_neutral_decoy_terminal"
+    },
+    {
+      "nodeId": "icn_bld_player_reclamation_core",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_reclamation_core"
+    },
+    {
+      "nodeId": "icn_bld_player_basic_generator",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_basic_generator"
+    },
+    {
+      "nodeId": "icn_bld_player_fuel_generator",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_fuel_generator"
+    },
+    {
+      "nodeId": "icn_bld_player_solar_array",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_solar_array"
+    },
+    {
+      "nodeId": "icn_bld_player_battery_station",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_battery_station"
+    },
+    {
+      "nodeId": "icn_bld_player_power_pylon",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_power_pylon"
+    },
+    {
+      "nodeId": "icn_bld_player_reclaimer",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_reclaimer"
+    },
+    {
+      "nodeId": "icn_bld_player_extractor",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_extractor"
+    },
+    {
+      "nodeId": "icn_bld_player_fluid_pump",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_fluid_pump"
+    },
+    {
+      "nodeId": "icn_bld_player_smelter",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_smelter"
+    },
+    {
+      "nodeId": "icn_bld_player_refinery",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_refinery"
+    },
+    {
+      "nodeId": "icn_bld_player_mixer",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_mixer"
+    },
+    {
+      "nodeId": "icn_bld_player_waste_pool",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_waste_pool"
+    },
+    {
+      "nodeId": "icn_bld_player_parts_workshop",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_parts_workshop"
+    },
+    {
+      "nodeId": "icn_bld_player_electronics",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_electronics"
+    },
+    {
+      "nodeId": "icn_bld_player_component_workshop",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_component_workshop"
+    },
+    {
+      "nodeId": "icn_bld_player_assembly",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_assembly"
+    },
+    {
+      "nodeId": "icn_bld_player_firmware_writer",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_firmware_writer"
+    },
+    {
+      "nodeId": "icn_bld_player_circuit_fusion",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_circuit_fusion"
+    },
+    {
+      "nodeId": "icn_bld_player_megastructure_factory",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_megastructure_factory"
+    },
+    {
+      "nodeId": "icn_bld_player_warehouse",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_warehouse"
+    },
+    {
+      "nodeId": "icn_bld_player_tank",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_tank"
+    },
+    {
+      "nodeId": "icn_bld_player_analyzer",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_analyzer"
+    },
+    {
+      "nodeId": "icn_bld_player_simulation_lab",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_simulation_lab"
+    },
+    {
+      "nodeId": "icn_bld_player_firing_range",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_firing_range"
+    },
+    {
+      "nodeId": "icn_bld_player_blackbox_museum",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_blackbox_museum"
+    },
+    {
+      "nodeId": "icn_bld_player_listening_station",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_listening_station"
+    },
+    {
+      "nodeId": "icn_bld_player_signal_tower",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_signal_tower"
+    },
+    {
+      "nodeId": "icn_bld_player_override_array",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_override_array"
+    },
+    {
+      "nodeId": "icn_bld_player_signal_relay",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_signal_relay"
+    },
+    {
+      "nodeId": "icn_bld_player_drop_station",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_drop_station"
+    },
+    {
+      "nodeId": "icn_bld_player_repair_bay",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_repair_bay"
+    },
+    {
+      "nodeId": "icn_bld_player_repair_drone_station",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_repair_drone_station"
+    },
+    {
+      "nodeId": "icn_bld_player_purification_tower",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_purification_tower"
+    },
+    {
+      "nodeId": "icn_bld_player_roof",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_roof"
+    },
+    {
+      "nodeId": "icn_bld_player_damping_base",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_damping_base"
+    },
+    {
+      "nodeId": "icn_bld_player_barrier",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_barrier"
+    },
+    {
+      "nodeId": "icn_bld_player_gate",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_gate"
+    },
+    {
+      "nodeId": "icn_bld_player_shield_generator",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_shield_generator"
+    },
+    {
+      "nodeId": "icn_bld_player_trap_emitter",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "bld_player_trap_emitter"
+    },
+    {
+      "nodeId": "icn_itm_player_scrap",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "itm_player_scrap"
+    },
+    {
+      "nodeId": "icn_itm_player_metal_ore",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "itm_player_metal_ore"
+    },
+    {
+      "nodeId": "icn_itm_player_rare_earth_ore",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "itm_player_rare_earth_ore"
+    },
+    {
+      "nodeId": "icn_itm_player_alloy",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "itm_player_alloy"
+    },
+    {
+      "nodeId": "icn_itm_player_parts",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "itm_player_parts"
+    },
+    {
+      "nodeId": "icn_itm_player_structure",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "itm_player_structure"
+    },
+    {
+      "nodeId": "icn_itm_player_repair_parts",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "itm_player_repair_parts"
+    },
+    {
+      "nodeId": "icn_itm_player_electronics",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "itm_player_electronics"
+    },
+    {
+      "nodeId": "icn_itm_player_precision_parts",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "itm_player_precision_parts"
+    },
+    {
+      "nodeId": "icn_itm_player_chip_substrate",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "itm_player_chip_substrate"
+    },
+    {
+      "nodeId": "icn_itm_player_firmware_chip",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "itm_player_firmware_chip"
+    },
+    {
+      "nodeId": "icn_itm_player_mega_component",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "itm_player_mega_component"
+    },
+    {
+      "nodeId": "icn_itm_player_unparsed_module",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "itm_player_unparsed_module"
+    },
+    {
+      "nodeId": "icn_itm_player_encrypted_firmware",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "itm_player_encrypted_firmware"
+    },
+    {
+      "nodeId": "icn_itm_player_data_core",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "itm_player_data_core"
+    },
+    {
+      "nodeId": "icn_itm_player_human_legacy",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "itm_player_human_legacy"
+    },
+    {
+      "nodeId": "icn_itm_player_listening_core",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "itm_player_listening_core"
+    },
+    {
+      "nodeId": "icn_itm_player_furnace_heart",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "itm_player_furnace_heart"
+    },
+    {
+      "nodeId": "icn_itm_player_reaction_core",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "itm_player_reaction_core"
+    },
+    {
+      "nodeId": "icn_itm_player_compute_remnant",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "itm_player_compute_remnant"
+    },
+    {
+      "nodeId": "icn_itm_player_blackbox",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "itm_player_blackbox"
+    },
+    {
+      "nodeId": "icn_fluid_water",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_fluid_oil",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_fluid_coolant",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_fluid_fuel",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_fluid_acid",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_burning",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_oiled",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_wet",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_frozen",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_shocked",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_slow",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_acid",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_charged",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_magnetized",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_reclaim",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_execute",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_deflect",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_dust",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_pollution",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_adhesive",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_seep",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_haste",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_drift",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_wall_hit",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_lock",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_cooperate",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_marked",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_kinetic",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_shield",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_displace",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_status_amplify",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "vfx_warning_raid_direction",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_roles_scout",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_roles_jammer",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_roles_support",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_roles_control",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_roles_assassin",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_roles_artillery",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_roles_front",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_roles_antiswarm",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_roles_antiair",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_roles_suicide",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_roles_assault",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_roles_swarm",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_roles_sabotage",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_roles_mimic",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_roles_marker",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_roles_antisignal",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_roles_drop",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_roles_elite",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_roles_boss",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_categories_fuse",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_categories_limiter",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_categories_fluid",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_categories_electromagnetic",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_resources_power",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_resources_scrap",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_resources_data",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_resources_research",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_resources_coverage",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_resources_exposure",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_resources_reclaimed_area",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_factions_silent",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_factions_foundry",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_factions_pristine",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_factions_overclocked",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_factions_whitetide",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_ui_panel",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_ui_border",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_ui_urgent",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_ui_warning",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_ui_information",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": false,
+      "referenceNodeId": ""
+    },
+    {
+      "nodeId": "icn_mch_player_swarm_drone",
+      "stage": "图标",
+      "enabled": true,
+      "state": 0,
+      "requiresReference": true,
+      "referenceNodeId": "mch_player_swarm_drone"
+    }
   ],
   "autoRepairPackages": false,
   "nodes": [
@@ -242,7 +3960,9 @@
       "faction": "",
       "requirementStatus": "规范",
       "designSources": [
-        "production/design/art-rules/04-提示词通用锁.md:14"
+        "production/design/art-rules/04-提示词通用锁.md:14",
+        "production/design/art-rules/01-画风总纲.md",
+        "production/design/art-rules/03-阵营视觉语言.md"
       ],
       "dependencyIds": [],
       "archived": false
@@ -536,7 +4256,8 @@
       "requirementStatus": "待制作",
       "designSources": [
         "production/design/art-rules/05-提示词-机器与角色.md:14",
-        "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207"
+        "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207",
+        "production/design/art-rules/asset-cards/mch_player_tracked_base.md"
       ],
       "dependencyIds": [],
       "archived": false
@@ -554,7 +4275,8 @@
       "requirementStatus": "待制作",
       "designSources": [
         "production/design/art-rules/05-提示词-机器与角色.md:14",
-        "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207"
+        "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207",
+        "production/design/art-rules/asset-cards/mch_player_tracked_base.md"
       ],
       "dependencyIds": [],
       "archived": false
@@ -1313,7 +5035,8 @@
       "requirementStatus": "待制作",
       "designSources": [
         "production/design/art-rules/05-提示词-机器与角色.md:18",
-        "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207"
+        "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207",
+        "production/design/art-rules/asset-cards/mch_player_legged_base.md"
       ],
       "dependencyIds": [],
       "archived": false
@@ -1331,7 +5054,8 @@
       "requirementStatus": "待制作",
       "designSources": [
         "production/design/art-rules/05-提示词-机器与角色.md:18",
-        "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207"
+        "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207",
+        "production/design/art-rules/asset-cards/mch_player_legged_base.md"
       ],
       "dependencyIds": [],
       "archived": false
