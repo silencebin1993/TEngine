@@ -171,6 +171,19 @@ MonoBehaviour:
         FilterRuleName: CollectAll
         AssetTags: 
         UserData: 
+    - GroupName: Terrain
+      GroupDesc: 正式 PCG 地貌
+      AssetTags:
+      ActiveRuleName: EnableGroup
+      Collectors:
+      - CollectPath: Assets/GameRes/Raw/Terrain/TerrainCampaignProfile.asset
+        CollectorGUID: 87c6090b0ed04d19a11c2b3f465d7e8a
+        CollectorType: 0
+        AddressRuleName: AddressByFileName
+        PackRuleName: PackSeparately
+        FilterRuleName: CollectAll
+        AssetTags:
+        UserData:
   - PackageName: OtherPackage
     PackageDesc: 
     EnableAddressable: 1

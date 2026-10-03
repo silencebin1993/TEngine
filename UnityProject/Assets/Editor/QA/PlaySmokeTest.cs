@@ -1024,6 +1024,8 @@ namespace GameLogic.EditorTools
             Check(shown && mini.Model.Items.Any(i => i.Kind == WorldMapItemKind.Home) && WorldPlanetView.Terrain != null && WorldPlanetView.Terrain.IsRelief
                   && WorldPlanetView.Terrain.ReliefTileCount > 0,
                 $"小地图显示（右下角，{mini?.VisibleIconCount} 个图标）；普通视角地貌是起伏网格（{WorldPlanetView.Terrain?.ReliefTileCount}/{WorldPlanetView.Terrain?.TileCount} 块）");
+            Check(WorldPlanetView.PcgReady && WorldPlanetView.Terrain.GroundMaterial.shader.name == "BinGames/Terrain/ContinuousGround",
+                "从主菜单新建的正式战役已加载 PCG 地貌配置，普通视角使用 PCG 连续地表材质");
             if (!shown)
             {
                 Finish("小地图没有显示");

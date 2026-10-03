@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using BinGames.Sim.WorldGen;
+using BinGames.TerrainVisual;
 using GameConfig.fg;
 using GameLogic.Campaign.Grid;
 using GameLogic.Campaign.WorldGen;
@@ -48,10 +49,14 @@ namespace GameLogic.Campaign.Regions
             public bool ReliefBuilt;
             public float ReliefMin;
             public float ReliefMax;
+            public CampaignTerrainChunk Pcg;
+            public int PcgContent = int.MinValue, PcgExplored = int.MinValue, PcgRelief = int.MinValue;
         }
 
         private readonly Transform _parent;
-        private readonly Material _material;
+        private Material _material;
+        private TerrainProfile _pcgProfile;
+        private int _appearanceRevision;
         private readonly Texture2D _placeholder;
         private readonly MaterialPropertyBlock _mpb = new MaterialPropertyBlock();
         private readonly Dictionary<long, Tile> _tiles = new Dictionary<long, Tile>();
@@ -157,6 +162,41 @@ namespace GameLogic.Campaign.Regions
         }
 
         public bool IsRelief => _relief;
+        public bool PcgEnabled => _pcgProfile != null;
+        public Material GroundMaterial => _material;
+
+        public bool TryGetPcgCounts(int cx, int cy, out int water, out int rocks)
+        {
+            water = rocks = 0;
+            if (!_tiles.TryGetValue(HomeGridMap.Key(cx, cy), out Tile tile) || tile.Pcg == null) return false;
+            water = tile.Pcg.WaterCellCount;
+            rocks = tile.Pcg.RockCount;
+            return true;
+        }
+
+        /// <summary>FG3-GEN-01：复用试验场材质与素材；地形、迷雾和区块生命周期仍由正式世界驱动。</summary>
+        public void SetPcgProfile(TerrainProfile profile)
+        {
+            if (_disposed || !_relief || profile == null) return;
+            if (!profile.GroundMaterial || !profile.GroundMaterial.HasProperty("_CampaignMode"))
+                throw new ArgumentException("PCG 地貌配置缺少正式世界材质。");
+            _pcgProfile = profile;
+            _appearanceRevision++;
+            Material old = _material;
+            _material = new Material(profile.GroundMaterial) { name = "CampaignPcgGround" };
+            _material.SetFloat("_CampaignMode", 1);
+            _material.SetFloat("_UseOrbis", 0);
+            foreach (Tile t in _tiles.Values)
+            {
+                t.Renderer.sharedMaterial = _material;
+                t.Pcg?.Dispose();
+                t.Pcg = null;
+                t.PcgContent = int.MinValue;
+            }
+            foreach (Tile t in _pool) t.Renderer.sharedMaterial = _material;
+            SafeDestroy(old);
+            _paletteRevision = -1;
+        }
 
         /// <summary>本叠加层每格几个像素（建造模式 <see cref="PixelsPerCell"/>，普通视角 1）。</summary>
         public int CellPixels => _ppc;
@@ -266,7 +306,8 @@ namespace GameLogic.Campaign.Regions
                     continue;
                 }
                 // 迷雾用区块自己的遮罩版本（FG3-LOG-01）：追加一个探索圆只重画被圆碰到的区块，不整窗重画。
-                int stamp = unchecked(((chunk.ContentRevision * 397) ^ chunk.ExploredMaskRevision) * 397 ^ reserveHash ^ (_paletteRevision << 20) ^ (GridLines ? 0x5A5A : 0) ^ (PollutionView ? 0x3C3C0000 : 0));
+                int stamp = unchecked(((chunk.ContentRevision * 397) ^ chunk.ExploredMaskRevision) * 397 ^ reserveHash ^ (_paletteRevision << 20)
+                    ^ (_appearanceRevision * 16127) ^ (GridLines ? 0x5A5A : 0) ^ (PollutionView ? 0x3C3C0000 : 0));
                 if (t.Job != null)
                 {
                     if (completeNow)
@@ -312,6 +353,7 @@ namespace GameLogic.Campaign.Regions
             if (_relief)
             {
                 scheduled += UpdateRelief(map, completeNow);
+                UpdatePcg(map, completeNow);
             }
             if (scheduled > 0 && !completeNow)
             {
@@ -321,6 +363,28 @@ namespace GameLogic.Campaign.Regions
             {
                 PendingCount = pending;
                 Revision++;
+            }
+        }
+
+        /// <summary>正式起伏网格完成后刷新 PCG 素材，普通更新每帧最多重建两个区块。</summary>
+        private void UpdatePcg(HomeGridMap map, bool completeNow)
+        {
+            if (_pcgProfile == null) return;
+            int built = 0;
+            foreach (Tile t in _tiles.Values)
+            {
+                HomeGridMap.Chunk chunk = map.TryGetLoaded(t.ChunkX, t.ChunkY);
+                if (chunk == null || t.Placeholder || !t.ReliefBuilt || t.ReliefJob != null) continue;
+                if (t.Pcg != null && t.PcgContent == chunk.ContentRevision && t.PcgExplored == chunk.ExploredMaskRevision
+                    && t.PcgRelief == t.ReliefStamp) continue;
+                if (!completeNow && built >= 2) break;
+                if (t.Pcg == null) t.Pcg = new CampaignTerrainChunk(t.Go.transform);
+                t.Pcg.Rebuild(_pcgProfile, t.Mesh, _reliefSeed, t.ChunkX * _chunkSize, t.ChunkY * _chunkSize, _chunkSize,
+                    chunk.Terrain, chunk.Explored, chunk.Pollution, GridContent.TerrainCode("cliff"), GridContent.TerrainCode("water"));
+                t.PcgContent = chunk.ContentRevision;
+                t.PcgExplored = chunk.ExploredMaskRevision;
+                t.PcgRelief = t.ReliefStamp;
+                built++;
             }
         }
 
@@ -499,6 +563,8 @@ namespace GameLogic.Campaign.Regions
 
         private void ShowPlaceholder(Tile t)
         {
+            t.Pcg?.Dispose();
+            t.Pcg = null;
             if (!t.Placeholder || t.Stamp != int.MinValue)
             {
                 t.Placeholder = true;
@@ -600,6 +666,8 @@ namespace GameLogic.Campaign.Regions
 
         private void Recycle(Tile t)
         {
+            t.Pcg?.Dispose();
+            t.Pcg = null;
             if (t.Job != null)
             {
                 if (t.Job.IsCompleted)
@@ -686,6 +754,13 @@ namespace GameLogic.Campaign.Regions
                     _palette[t.Code] = c;
                 }
                 _patterns[t.Code] = PatternCode(t.Pattern);
+            }
+            if (_pcgProfile != null)
+            {
+                _palette[GridContent.TerrainCode("buildable")] = _pcgProfile.Soil;
+                _palette[GridContent.TerrainCode("cliff")] = _pcgProfile.Rock;
+                _palette[GridContent.TerrainCode("water")] = _pcgProfile.Water;
+                _palette[GridContent.TerrainCode("ruin")] = Color.Lerp(_pcgProfile.Soil, _pcgProfile.Sand, .5f);
             }
             _paletteRevision = GridContent.Revision;
             foreach (Tile tile in _tiles.Values)
@@ -811,6 +886,8 @@ namespace GameLogic.Campaign.Regions
 
         private static void DestroyTile(Tile t)
         {
+            t.Pcg?.Dispose();
+            t.Pcg = null;
             t.Job?.Release();
             t.Job = null;
             t.ReliefJob?.Release();

@@ -127,6 +127,7 @@ namespace GameLogic.EditorTools
                 Step(CheckNewGamePanel);
                 Step(CheckStrategicMapAndMinimap);
                 Step(CheckRelief);
+                Step(CheckPcg);
                 Step(CheckPerformanceAndClock);
                 Step(CheckV2Frozen);
                 Step(CheckLayoutProbes);
@@ -1673,6 +1674,137 @@ namespace GameLogic.EditorTools
             {
                 overlay.Dispose();
                 Object.DestroyImmediate(parent);
+                WorldGenKernel.ReleaseAll();
+            }
+        }
+
+        private static void CheckPcg()
+        {
+            var profile = AssetDatabase.LoadAssetAtPath<BinGames.TerrainVisual.TerrainProfile>("Assets/GameRes/Raw/Terrain/TerrainCampaignProfile.asset");
+            Expect(profile != null && profile.GroundMaterial && profile.WaterMaterial && profile.PropMaterial
+                && profile.RockMesh && profile.RockVariantMesh, "正式 PCG 配置与地貌 / 水面 / 岩石资源齐全");
+            if (profile == null) return;
+            Expect(profile.Library == null && profile.DetailKit == null, "正式 PCG 配置不引用试玩中的固定工厂 / 核心 / 聚落库");
+            Expect(!ShaderUtil.ShaderHasError(profile.GroundMaterial.shader) && !ShaderUtil.ShaderHasError(profile.WaterMaterial.shader),
+                "正式 PCG 地貌与水面 Shader 编译无错误");
+            CampaignState s = NewCampaign(42);
+            HomeGridMap map = HomeGridService.MapFor(s);
+            byte cliff = GridContent.TerrainCode("cliff"), water = GridContent.TerrainCode("water");
+            for (int z = 0; z < 32; z++)
+                for (int x = 0; x < 32; x++) map.SetTerrain(new GridCell(96 + x, 96 + z), x < 16 ? cliff : water);
+            map.SetPollution(new GridCell(100, 100), 0);
+            HomeGridMap.Chunk chunk = map.TryGetLoaded(3, 3);
+            byte[] before = (byte[])chunk.Terrain.Clone();
+            byte[] pollution = (byte[])chunk.Pollution.Clone();
+            var parent = new GameObject("__fg_pcg_integration") { hideFlags = HideFlags.HideAndDontSave };
+            var overlay = new WorldTerrainOverlay(parent.transform, terrainView: true);
+            try
+            {
+                overlay.SetReliefSeed(((WorldTerrainSource)map.TerrainSource).Params.SurfaceSeed);
+                map.SetExplored(Array.Empty<ExploredAreaRecord>());
+                var focus = new GridCell(112, 112);
+                overlay.Update(s, focus); // 模拟正式异步加载完成前已经排队的旧色板绘图任务。
+                overlay.SetPcgProfile(profile);
+                overlay.Update(s, focus, completeNow: true);
+                overlay.Update(s, focus, completeNow: true);
+                Expect(overlay.PcgEnabled && overlay.GroundMaterial != profile.GroundMaterial
+                    && overlay.GroundMaterial.shader == profile.GroundMaterial.shader && overlay.GroundMaterial.GetFloat("_CampaignMode") == 1
+                    && profile.GroundMaterial.GetFloat("_CampaignMode") == 0,
+                    "正式地貌使用 PCG 材质实例，保持原试验场材质不变");
+                Expect(overlay.TryGetPcgCounts(3, 3, out int hiddenWater, out int hiddenRocks) && hiddenWater == 0 && hiddenRocks == 0,
+                    "迷雾外不泄露 PCG 水面与岩石");
+                map.SetExplored(new[] { new ExploredAreaRecord { CenterX = 112, CenterY = 112, Radius = 64 } });
+                overlay.Update(s, focus, completeNow: true);
+                overlay.Update(s, focus, completeNow: true);
+                Expect(overlay.TryGetPcgCounts(3, 3, out int visibleWater, out int visibleRocks) && visibleWater == 512 && visibleRocks > 0 && visibleRocks <= 32,
+                    $"探索后生成真实水域水面与悬崖岩石（水域 {visibleWater} 格、岩石 {visibleRocks}），按区块合并");
+                Expect(overlay.TryGetPixel(new GridCell(100, 100), 0, 0, out Color32 pcgColor) && pcgColor.Equals((Color32)profile.Rock),
+                    "异步资源接入时先前排队的旧绘图任务不会覆盖 PCG 色板");
+                Expect(chunk.Terrain.SequenceEqual(before) && chunk.Pollution.SequenceEqual(pollution)
+                    && parent.GetComponentsInChildren<Collider>().Length == 0,
+                    "PCG 表现不改变正式地形 / 污染 / 资源，没有新增移动或拾取碰撞体");
+                map.SetTerrain(new GridCell(112, 100), GridContent.TerrainCode("buildable"));
+                overlay.Update(s, focus, completeNow: true);
+                overlay.Update(s, focus, completeNow: true);
+                Expect(overlay.TryGetPcgCounts(3, 3, out int changedWater, out _) && changedWater == 511,
+                    "正式地形修改后 PCG 水域同步刷新（512 → 511 格）");
+                map.SetExplored(Array.Empty<ExploredAreaRecord>());
+                overlay.Update(s, focus, completeNow: true);
+                overlay.Update(s, focus, completeNow: true);
+                Expect(overlay.TryGetPcgCounts(3, 3, out int clearedWater, out int clearedRocks) && clearedWater == 0 && clearedRocks == 0,
+                    "探索遮罩重置后 PCG 素材全部隐藏并释放");
+                overlay.Update(s, new GridCell(1024, 1024), completeNow: true);
+                Expect(!overlay.TryGetPcgCounts(3, 3, out _, out _), "镜头移出窗口后旧区块的 PCG 素材回收");
+            }
+            finally
+            {
+                overlay.Dispose();
+                Object.DestroyImmediate(parent);
+                WorldGenKernel.ReleaseAll();
+            }
+        }
+
+        [MenuItem("BinGames/QA/截图/正式 PCG 地貌")]
+        public static void RunPcgVisualFromMenu()
+        {
+            const string output = "F:/Project/BinGames/production/qa/evidence/pcg-formal-render.png";
+            ConfigSystem.Instance.Load();
+            GridContent.Reload();
+            WorldGenContent.Reload();
+            var state = NewCampaign(42);
+            var map = HomeGridService.MapFor(state);
+            map.SetExplored(new[] { new ExploredAreaRecord { CenterX = 48, CenterY = -16, Radius = 160 } });
+            var profile = AssetDatabase.LoadAssetAtPath<BinGames.TerrainVisual.TerrainProfile>("Assets/GameRes/Raw/Terrain/TerrainCampaignProfile.asset");
+            var root = new GameObject("__pcg_visual_probe");
+            var overlay = new WorldTerrainOverlay(root.transform, terrainView: true);
+            var target = new RenderTexture(1024, 768, 24);
+            var pixels = new Texture2D(1024, 768, TextureFormat.RGB24, false);
+            RenderTexture originalTarget = RenderTexture.active;
+            Color originalAmbient = RenderSettings.ambientLight;
+            try
+            {
+                overlay.SetReliefSeed(((WorldTerrainSource)map.TerrainSource).Params.SurfaceSeed);
+                overlay.SetPcgProfile(profile);
+                overlay.Update(state, new GridCell(48, -16), completeNow: true);
+                overlay.Update(state, new GridCell(48, -16), completeNow: true);
+                foreach (Transform child in root.GetComponentsInChildren<Transform>()) child.gameObject.layer = 30;
+                var cameraObject = new GameObject("验收镜头");
+                cameraObject.transform.SetParent(root.transform);
+                var camera = cameraObject.AddComponent<Camera>();
+                camera.cullingMask = 1 << 30;
+                camera.clearFlags = CameraClearFlags.SolidColor;
+                camera.backgroundColor = new Color(.16f, .18f, .19f);
+                camera.fieldOfView = 48;
+                camera.transform.position = new Vector3(48, 82, -82);
+                camera.transform.LookAt(new Vector3(48, 0, -16));
+                camera.targetTexture = target;
+                var lightObject = new GameObject("验收日光");
+                lightObject.transform.SetParent(root.transform);
+                lightObject.transform.rotation = Quaternion.Euler(45, -30, 0);
+                var light = lightObject.AddComponent<Light>();
+                light.type = LightType.Directional;
+                light.cullingMask = 1 << 30;
+                light.intensity = 1.1f;
+                RenderSettings.ambientLight = new Color(.4f, .42f, .44f);
+                camera.Render();
+                RenderTexture.active = target;
+                pixels.ReadPixels(new Rect(0, 0, 1024, 768), 0, 0);
+                pixels.Apply();
+                if (ShaderUtil.ShaderHasError(profile.GroundMaterial.shader) || ShaderUtil.ShaderHasError(profile.WaterMaterial.shader))
+                    throw new InvalidOperationException("PCG Shader 实际渲染编译失败。");
+                File.WriteAllBytes(output, pixels.EncodeToPNG());
+                Debug.Log("正式 PCG 地貌实际渲染截图：" + output);
+            }
+            finally
+            {
+                RenderTexture.active = originalTarget;
+                RenderSettings.ambientLight = originalAmbient;
+                overlay.Dispose();
+                Object.DestroyImmediate(root);
+                Object.DestroyImmediate(pixels);
+                target.Release();
+                Object.DestroyImmediate(target);
+                HomeGridService.Invalidate();
                 WorldGenKernel.ReleaseAll();
             }
         }

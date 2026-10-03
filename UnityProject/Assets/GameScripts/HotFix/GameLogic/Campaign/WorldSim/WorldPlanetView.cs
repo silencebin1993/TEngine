@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using BinGames.TerrainVisual;
+using Cysharp.Threading.Tasks;
 using GameLogic.Campaign.Grid;
 using GameLogic.Campaign.Logistics;
 using GameLogic.Campaign.Regions;
@@ -36,12 +38,15 @@ namespace GameLogic.Campaign.WorldSim
         private static Material _patrolMaterial;
         private static Material _relicMaterial;
         private static bool _placeholderLogged;
+        private static TerrainProfile _pcgProfile;
+        private static int _pcgLoadEpoch;
 
         /// <summary>FG0-ARCH-06：当前画出来的据点 / 巡逻标记数（自检：迷雾外不画、休眠的也按“此刻”位置画）。</summary>
         public static int VisibleOutpostMarkerCount { get; private set; }
 
         public static bool Visible => _root != null && _root.activeSelf;
         public static WorldTerrainOverlay Terrain => _terrain;
+        public static bool PcgReady => _pcgProfile != null && _terrain != null && _terrain.PcgEnabled;
         public static bool TerrainShown => _terrainRoot != null && _terrainRoot.activeInHierarchy;
         public static int MarkerCount => Markers.Count;
         public static int VisibleMarkerCount
@@ -372,6 +377,7 @@ namespace GameLogic.Campaign.WorldSim
             _terrainRoot = new GameObject("Terrain");
             _terrainRoot.transform.SetParent(_root.transform, false);
             _terrain = new WorldTerrainOverlay(_terrainRoot.transform, alpha: 0.4f, height: -0.05f, terrainView: true);
+            if (Application.isPlaying) LoadPcgProfileAsync(++_pcgLoadEpoch).Forget();
             Shader shader = Shader.Find("Standard");
             _raidMaterial = new Material(shader) { color = new Color(0.85f, 0.18f, 0.12f) };
             _arrivedMaterial = new Material(shader) { color = new Color(1f, 0.55f, 0.1f) };
@@ -380,11 +386,40 @@ namespace GameLogic.Campaign.WorldSim
             _relicMaterial = new Material(shader) { color = new Color(0.86f, 0.78f, 0.45f) };
         }
 
+        private static async UniTask LoadPcgProfileAsync(int epoch)
+        {
+            TerrainProfile profile = null;
+            try
+            {
+                profile = await GameModule.Resource.LoadAssetAsync<TerrainProfile>("TerrainCampaignProfile");
+                if (epoch != _pcgLoadEpoch || _terrain == null) return;
+                if (profile == null) throw new InvalidOperationException("PCG 地貌配置加载失败。");
+                _terrain.SetPcgProfile(profile);
+                _pcgProfile = profile;
+                profile = null; // 所有权转交到 Shutdown，素材使用期间保持资源引用。
+            }
+            catch (Exception e)
+            {
+                if (epoch == _pcgLoadEpoch) TEngine.Log.Error("正式 PCG 地貌加载失败：" + e);
+            }
+            finally
+            {
+                // 离开战役后的晚到结果也必须释放，不能串到下一局。
+                if (profile != null) GameModule.Resource.UnloadAsset(profile);
+            }
+        }
+
         /// <summary>离开世界：销毁全部表现对象与材质、释放贴图任务（成对释放）。</summary>
         public static void Shutdown()
         {
+            _pcgLoadEpoch++;
             _terrain?.Dispose();
             _terrain = null;
+            if (_pcgProfile != null)
+            {
+                GameModule.Resource.UnloadAsset(_pcgProfile);
+                _pcgProfile = null;
+            }
             _terrainRoot = null;
             Markers.Clear();
             if (_root != null)

@@ -36,7 +36,9 @@ WASD 移动，右键转动镜头，滚轮前后，Q/E 升降，Shift 加速，�
 ## 主线接入说明
 
 预览使用可调的连续地貌演示源，不替换战役的 `WorldGenMath`、种子、资源分布、寻路或存档。
-生产接入由现有世界生成器输出不可变、线程安全的采样快照，实现 `ITerrainField`，再调用 `TerrainStream.SetField(snapshot, seed)`。演示用的废墟选址只在演示地貌源上启用；生产剧情锚点和废墟选址留给主线提供。
+正式游戏已经接入这套地貌素材：`WorldPlanetView` 在进入星球视图时通过 YooAsset 异步加载正式配置 `TerrainCampaignProfile`，`WorldTerrainOverlay` 将 PCG 连续地表材质用于正式世界的 Burst 起伏网格，并继续使用正式地形、污染和迷雾贴图。`CampaignTerrainChunk` 只在已探索的真实水域 / 悬崖上生成合并水面与岩石网格，随区块内容、探索遮罩更新，离开窗口时回收。退出战役后释放配置资源，晚到的加载结果不串入下一局。
+
+目前可行走地面仍保持正式玩法的 0 高度；完整缓坡与全实体贴地另见 `DEBT-FG3GEN01-01`。试玩中的固定核心、仓库、道路与 WFC 聚落不会生成到正式地图，剧情锚点和可交互废墟仍由正式世界提供。`ITerrainField` / `TerrainStream.SetField(snapshot, seed)` 保留给独立高度场或后续统一高度接入。
 当前主线可走/可建地的高度为 0；视觉接入必须保留这一契约，不能把预览丘陵直接用于现有机器和建筑。
 预览完整交付不等于 FG8-GEN-02 领地、室内和剧情锚点已完成。
 
