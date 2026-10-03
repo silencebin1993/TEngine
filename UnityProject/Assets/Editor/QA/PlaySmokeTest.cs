@@ -323,6 +323,14 @@ namespace GameLogic.EditorTools
                     case 369: StepFusionSimulated(inStep); break;
                     case 370: StepFusionRunning(inStep); break;
                     case 371: StepFusionBook(inStep); break;
+                    // FG5-RND-05：放一座建成的监听站、派一支突袭（测试捷径：突袭导演在 FG6-DEF-04）→ 左键点监听站打开通用面板（破译中）→ 点“情报…”打开情报面板（还没有情报：空状态）
+                    // → Esc → 3x 放开：突袭预报出来（通知）→ 按情报键（默认 Y）打开 → 突袭预报行“在地图上查看”→ 战略地图上有来袭方向箭头 → Esc → 清理测试突袭与监听站。
+                    case 372: StepIntelPlaced(inStep); break;
+                    case 373: StepIntelBuildingPanel(inStep); break;
+                    case 374: StepIntelOpenedEmpty(inStep); break;
+                    case 375: StepIntelForecast(inStep); break;
+                    case 376: StepIntelPanelRows(inStep); break;
+                    case 377: StepIntelMap(inStep); break;
                     case 346: StepOverridePicked(inStep); break;
                     case 347: StepOverridePlaced(inStep); break;
                     case 348: StepOverridePanel(inStep); break;
@@ -1093,9 +1101,9 @@ namespace GameLogic.EditorTools
                 return;
             }
             Check(!NotificationHudUIToolkit.CenterOpen, "再按一次关闭通知中心");
-            // FG2-FW-05 起图鉴键、FG5-RND-01 起研发树键已接通，“尚未开放”提示改用情报键（FG5-RND-05 承接）。
-            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.OpenIntel));
-            Next(32, "按情报键（情报由 FG5-RND-05 承接，尚未开放）");
+            // FG2-FW-05 起图鉴键、FG5-RND-01 起研发树键、FG5-RND-05 起情报键已接通，“尚未开放”提示改用快速存档键 Ctrl+F5（FG15-SYS-01 承接）。
+            PressChord(GameSettings.KeyBindings.GetChord(GameActionId.QuickSave));
+            Next(32, "按快速存档键 Ctrl+F5（FG15-SYS-01 承接，尚未开放）");
         }
 
         private static void StepReservedKeyHint(double inStep)
@@ -1107,7 +1115,7 @@ namespace GameLogic.EditorTools
             var toast = Notifications.NotificationCenter.Toasts.FirstOrDefault(e => e.Type.Id == "feature_locked");
             string shown = string.Join("／", (NotificationHudUIToolkit.Instance?.Root?.Q<VisualElement>("ToastList")?.Query<Label>().ToList()
                 ?? new System.Collections.Generic.List<Label>()).Where(l => l.resolvedStyle.display == DisplayStyle.Flex && !string.IsNullOrEmpty(l.text)).Select(l => l.text));
-            Check(toast != null && shown.Contains(Localization.GameText.Get("input.action.open_intel.name")),
+            Check(toast != null && shown.Contains(Localization.GameText.Get("input.action.quick_save.name")),
                 $"按尚未开放的键给出提示，不静默：弹出条“{shown}”");
             PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
             Next(33, "按 Esc（没有打开的面板 → 暂停菜单）");
@@ -2545,8 +2553,8 @@ namespace GameLogic.EditorTools
             }
             SessionState.SetInt(K + "TypeSub", 0);
             Check(!GameRoot.IsWorldPaused, "在命名框里按 Space（暂停键）不会暂停世界");
-            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.OpenIntel));
-            Next(62, "在命名框里按情报键（尚未开放的动作）");
+            PressChord(GameSettings.KeyBindings.GetChord(GameActionId.QuickSave));
+            Next(62, "在命名框里按快速存档键 Ctrl+F5（尚未开放的动作）");
         }
 
         private static void StepTypingReserved(double inStep)
@@ -6194,6 +6202,158 @@ namespace GameLogic.EditorTools
                 "Esc 关闭配方书（建造模式还开着）");
             SessionState.SetInt(K + "FusionSub", 0);
             GameClock.SetPaused(SessionState.GetInt(K + "RangeWasPaused", 0) == 1);
+            Next(372, "FG5-RND-05：放一座建成的监听站、派一支突袭，左键点监听站");
+        }
+
+        // ── FG5-RND-05：监听站与情报（建筑面板“情报…”、空状态、突袭预报通知、情报键、在地图上查看、地图箭头）──
+
+        private const string SmokePostId = Campaign.Regions.HomeValleyLayout.RegionId + ":smoke_power_post";
+
+        private static void StepIntelPlaced(double inStep)
+        {
+            if (inStep < 0.3)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            SessionState.SetInt(K + "IntelWasPaused", GameClock.Paused ? 1 : 0);
+            GameClock.SetPaused(true);
+            // 核心附近按地形找一块能放、接得上电网的空地，登记一座建成的监听站（测试捷径：研究门槛与机器施工由各自的自检覆盖），不写死坐标（B25）。
+            GridCell core = HomeGridService.CorePivot(state);
+            string builtId = null;
+            for (int r = 6; r <= 30 && builtId == null; r++)
+            {
+                for (int dy = -r; dy <= r && builtId == null; dy++)
+                {
+                    for (int dx = -r; dx <= r && builtId == null; dx++)
+                    {
+                        if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != r)
+                        {
+                            continue;
+                        }
+                        var c = new GridCell(core.X + dx, core.Y + dy);
+                        if (!HomeGridService.ValidatePlacement(state, "listening_post", c, 0, checkCost: false).Ok)
+                        {
+                            continue;
+                        }
+                        AddSmokeBuilding(state, "listening_post", "post", c);
+                        Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+                        BuildingRecord b = HomeGridService.FindBuilding(state, SmokePostId);
+                        if (b != null && b.PowerState == BuildingPowerState.Powered)
+                        {
+                            b.Health = Campaign.Economy.BuildingOps.MaxDurability("listening_post");
+                            builtId = SmokePostId;
+                            continue;
+                        }
+                        state.BuildingRecords = state.BuildingRecords.Where(x => x.BuildingId != SmokePostId).ToArray();
+                        HomeGridService.MapFor(state);
+                        Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+                    }
+                }
+            }
+            // 测试捷径：突袭部队由测试直接派出（正式的突袭导演在 FG6-DEF-04；派出之后的沿地形行进、破译、预报全是正式流程）。
+            Campaign.WorldGen.WorldPlan plan = Campaign.WorldGen.WorldGenService.PlanFor(state);
+            string territory = plan?.Territories.FirstOrDefault(t => t.IsFaction && t.Act == 1)?.Id ?? "silent";
+            TransitGroupRecord raid = WorldTransitSystem.DispatchRaidFromTerritory(state, territory, 3, out string fail);
+            SessionState.SetString(K + "IntelRaid", raid?.GroupId ?? string.Empty);
+            BuildingRecord built = HomeGridService.FindBuilding(state, SmokePostId);
+            Check(builtId != null && raid != null, $"接得上电网的建成监听站 {builtId}；一支突袭部队从 {territory} 出发（{raid?.GroupId ?? fail}）");
+            if (built != null)
+            {
+                ClickWorld(new Vector3(built.Position.x, 0f, built.Position.y));
+            }
+            Next(373, "左键点监听站打开通用面板，点“情报…”");
+        }
+
+        private static void StepIntelBuildingPanel(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            ProductionPanelUIToolkit bp = ProductionPanelUIToolkit.Instance;
+            bool bpOpen = ProductionPanelUIToolkit.IsOpen && bp != null && ProductionPanelUIToolkit.BuildingId == SmokePostId && bp.IntelButton != null
+                          && ProductionPanelUIToolkit.Visible(bp.IntelButton) && bp.ReasonText.Contains("破译中") && bp.ReasonText.Contains("突袭预报");
+            Check(bpOpen, $"左键点建成的监听站打开它的通用面板：状态“{bp?.ReasonText}”，有“情报…”按钮");
+            Check(ClickUitk("[ProductionPanelHost]", "PrIntel"), "通用面板上点“情报…”");
+            Next(374, "情报面板打开：还没有情报（空状态），破译中");
+        }
+
+        private static void StepIntelOpenedEmpty(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            IntelPanelUIToolkit panel = IntelPanelUIToolkit.Instance;
+            bool open = IntelPanelUIToolkit.IsOpen && panel != null && panel.PanelVisible && LabelText("[IntelPanelHost]", "IntelTitle") == Localization.GameText.Get("intel.panel.title")
+                        && panel.EmptyText.Length > 0 && panel.RowCount == 0 && panel.StatusText.Contains("1 座监听站工作中") && panel.StatusText.Contains("突袭预报");
+            Check(open, $"情报面板打开：空状态“{FirstLine(panel?.EmptyText)}”；状态“{FirstLine(panel?.StatusText)}”");
+            CheckNoTextMarkers("情报面板");
+            PressKeyKeepMouse(KeyCode.Escape);
+            SessionState.SetFloat(K + "IntelSpeed", GameClock.Speed);
+            GameClock.SetSpeed(3f);
+            GameClock.SetPaused(false);
+            Next(375, "Esc 关闭；3x 放开等突袭预报");
+        }
+
+        private static void StepIntelForecast(double inStep)
+        {
+            Campaign.IntelRecord f = Campaign.Economy.IntelService.LastProduced;
+            bool got = f != null && f.Kind == Campaign.Economy.IntelCatalog.KindRaid && f.Subject == SessionState.GetString(K + "IntelRaid", string.Empty);
+            if (!got && inStep < 40)
+            {
+                return;
+            }
+            Check(!IntelPanelUIToolkit.IsOpen, "Esc 关闭情报面板");
+            bool notified = Notifications.NotificationCenter.History.Any(e => e.Type.Id == "intel_raid");
+            Check(got && notified, $"监听站破译出突袭预报并发通知（{(got ? Campaign.Economy.IntelService.Summary(CampaignSession.Current, f, GameClock.Ticks) : "超时")}）");
+            GameClock.SetPaused(true);
+            PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.OpenIntel));
+            Next(376, "按情报键（默认 Y）打开情报面板");
+        }
+
+        private static void StepIntelPanelRows(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            IntelPanelUIToolkit panel = IntelPanelUIToolkit.Instance;
+            panel?.Refresh(force: true);
+            int row = -1;
+            for (int i = 0; panel != null && i < panel.RowCount; i++)
+            {
+                if (panel.RowText(i).Contains("突袭预报") && panel.RowMapVisible(i))
+                {
+                    row = i;
+                }
+            }
+            Check(IntelPanelUIToolkit.IsOpen && row >= 0 && panel.RowText(row).Contains("来自"), $"按情报键打开情报面板：突袭预报行“{FirstLine(row >= 0 ? panel.RowText(row) : null)}”有“在地图上查看”");
+            Check(row >= 0 && InvokeClickable(panel.RowMapButton(row)), "点突袭预报行的“在地图上查看”");
+            Next(377, "战略地图打开，对准来袭方向的箭头");
+        }
+
+        private static void StepIntelMap(double inStep)
+        {
+            if (inStep < 1.0)
+            {
+                return;
+            }
+            StrategicMapUIToolkit map = StrategicMapUIToolkit.Instance;
+            bool arrow = StrategicMapUIToolkit.IsOpen && !IntelPanelUIToolkit.IsOpen && map != null && map.Model.Items.Any(i => i.Kind == WorldMapItemKind.RaidForecast)
+                         && map.Model.Lines.Any(l => l.Forecast);
+            Check(arrow, "战略地图打开（情报面板已关），地图上有突袭预报的来袭方向箭头与标签");
+            StrategicMapUIToolkit.Close();
+            // 清理测试捷径：撤走测试突袭部队与监听站（到达会触发紧急通知 / 自动暂停，影响后面的步骤），恢复倍速与暂停状态。
+            CampaignState state = CampaignSession.Current;
+            string raidId = SessionState.GetString(K + "IntelRaid", string.Empty);
+            state.Raids.InTransit = state.Raids.InTransit.Where(g => g.GroupId != raidId).ToArray();
+            state.BuildingRecords = state.BuildingRecords.Where(x => x.BuildingId != SmokePostId).ToArray();
+            HomeGridService.MapFor(state);
+            Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+            GameClock.SetSpeed(SessionState.GetFloat(K + "IntelSpeed", 1f));
+            GameClock.SetPaused(SessionState.GetInt(K + "IntelWasPaused", 0) == 1);
             Next(264, "FG3-LOG-04：建造模式里放分流器与地下传送带");
         }
 

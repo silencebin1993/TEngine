@@ -131,6 +131,10 @@ public partial class Tables
     /// </summary>
     public fg.TbBuildingService TbBuildingService {get; }
     /// <summary>
+    /// 多座建筑叠加
+    /// </summary>
+    public fg.TbBuildingStack TbBuildingStack {get; }
+    /// <summary>
     /// 建筑等级
     /// </summary>
     public fg.TbBuildingTier TbBuildingTier {get; }
@@ -190,6 +194,18 @@ public partial class Tables
     /// 输入动作
     /// </summary>
     public fg.TbInputAction TbInputAction {get; }
+    /// <summary>
+    /// 首领弱点情报
+    /// </summary>
+    public fg.TbIntelBoss TbIntelBoss {get; }
+    /// <summary>
+    /// 舰队信号片段
+    /// </summary>
+    public fg.TbIntelFragment TbIntelFragment {get; }
+    /// <summary>
+    /// 情报类型
+    /// </summary>
+    public fg.TbIntelKind TbIntelKind {get; }
     /// <summary>
     /// 本地化文本
     /// </summary>
@@ -371,6 +387,7 @@ public partial class Tables
         TbBuildingGrid = new fg.TbBuildingGrid(loader("fg_tbbuildinggrid"));
         TbBuildingPort = new fg.TbBuildingPort(loader("fg_tbbuildingport"));
         TbBuildingService = new fg.TbBuildingService(loader("fg_tbbuildingservice"));
+        TbBuildingStack = new fg.TbBuildingStack(loader("fg_tbbuildingstack"));
         TbBuildingTier = new fg.TbBuildingTier(loader("fg_tbbuildingtier"));
         TbBuildMaterial = new fg.TbBuildMaterial(loader("fg_tbbuildmaterial"));
         TbBuildTool = new fg.TbBuildTool(loader("fg_tbbuildtool"));
@@ -386,6 +403,9 @@ public partial class Tables
         TbGridTerrain = new fg.TbGridTerrain(loader("fg_tbgridterrain"));
         TbHomeTuning = new fg.TbHomeTuning(loader("fg_tbhometuning"));
         TbInputAction = new fg.TbInputAction(loader("fg_tbinputaction"));
+        TbIntelBoss = new fg.TbIntelBoss(loader("fg_tbintelboss"));
+        TbIntelFragment = new fg.TbIntelFragment(loader("fg_tbintelfragment"));
+        TbIntelKind = new fg.TbIntelKind(loader("fg_tbintelkind"));
         TbLocText = new fg.TbLocText(loader("fg_tbloctext"));
         TbMechEnemy = new fg.TbMechEnemy(loader("fg_tbmechenemy"));
         TbNotifyTier = new fg.TbNotifyTier(loader("fg_tbnotifytier"));
@@ -458,6 +478,7 @@ public partial class Tables
         TbBuildingGrid.ResolveRef(this);
         TbBuildingPort.ResolveRef(this);
         TbBuildingService.ResolveRef(this);
+        TbBuildingStack.ResolveRef(this);
         TbBuildingTier.ResolveRef(this);
         TbBuildMaterial.ResolveRef(this);
         TbBuildTool.ResolveRef(this);
@@ -473,6 +494,9 @@ public partial class Tables
         TbGridTerrain.ResolveRef(this);
         TbHomeTuning.ResolveRef(this);
         TbInputAction.ResolveRef(this);
+        TbIntelBoss.ResolveRef(this);
+        TbIntelFragment.ResolveRef(this);
+        TbIntelKind.ResolveRef(this);
         TbLocText.ResolveRef(this);
         TbMechEnemy.ResolveRef(this);
         TbNotifyTier.ResolveRef(this);

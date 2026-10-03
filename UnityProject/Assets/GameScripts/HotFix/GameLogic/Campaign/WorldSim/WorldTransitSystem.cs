@@ -463,6 +463,70 @@ namespace GameLogic.Campaign.WorldSim
             return sum;
         }
 
+        /// <summary>
+        /// FG5-RND-05（FGT-RND-008 突袭预报的方向）：队伍预计在哪一点进入到达半径——拿到路线后沿路线找第一次进入半径的那一点（与 <see cref="DistanceUntilArrival"/>、
+        /// 逐步推进同一套几何）；还在等路线 / 路线走完都进不去时按“当前位置 → 目标”的直线取半径上的那一点。纯查询，O(剩余路点数)。
+        /// </summary>
+        public static void PredictArrival(TransitGroupRecord g, out double x, out double y)
+        {
+            x = g?.TargetX ?? 0;
+            y = g?.TargetY ?? 0;
+            if (g == null)
+            {
+                return;
+            }
+            double arrival = Math.Max(0.0, GameClock.TuningOr("transit.arrival_radius_cells", 12f));
+            double r2 = arrival * arrival;
+            double px = g.PosX;
+            double py = g.PosY;
+            if ((px - g.TargetX) * (px - g.TargetX) + (py - g.TargetY) * (py - g.TargetY) <= r2)
+            {
+                x = px;
+                y = py;
+                return;
+            }
+            if (g.RouteState == RouteFollowing)
+            {
+                for (int k = g.RouteIndex; k < (g.RouteX?.Length ?? 0); k++)
+                {
+                    double qx = g.RouteX[k];
+                    double qy = g.RouteY[k];
+                    double dx = qx - px;
+                    double dy = qy - py;
+                    double a = dx * dx + dy * dy;
+                    if (a > 1e-12)
+                    {
+                        double fx = px - g.TargetX;
+                        double fy = py - g.TargetY;
+                        double b = 2 * (fx * dx + fy * dy);
+                        double c = fx * fx + fy * fy - r2;
+                        double disc = b * b - 4 * a * c;
+                        if (disc >= 0)
+                        {
+                            double t = (-b - Math.Sqrt(disc)) / (2 * a);
+                            if (t >= 0 && t <= 1)
+                            {
+                                x = px + t * dx;
+                                y = py + t * dy;
+                                return;
+                            }
+                        }
+                    }
+                    px = qx;
+                    py = qy;
+                }
+            }
+            // 直线：从（路线末端或当前位置）朝目标，取到达半径上的那一点。
+            double ex = px - g.TargetX;
+            double ey = py - g.TargetY;
+            double len = Math.Sqrt(ex * ex + ey * ey);
+            if (len > 1e-9)
+            {
+                x = g.TargetX + ex / len * Math.Min(arrival, len);
+                y = g.TargetY + ey / len * Math.Min(arrival, len);
+            }
+        }
+
         public static Vector2 Position(TransitGroupRecord g) => g == null ? Vector2.zero : new Vector2((float)g.PosX, (float)g.PosY);
 
         public static TransitGroupRecord Find(CampaignState state, string groupId)

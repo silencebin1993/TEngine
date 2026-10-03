@@ -467,11 +467,18 @@ namespace GameLogic.EditorTools
             HomeValleyAnalysis.Acquire(s, AnalysisCatalog.DataCoreId, lore, "test", 2);
             int techC0 = s.TechData;
             HomeValleyAnalysis.AnalysisOpResult d1 = HomeValleyAnalysis.TryEnqueueItem(s, AnalysisCatalog.DataCoreId, null);
+            int intel0 = s.Research.Intel?.Records?.Length ?? 0;
             bool dd1 = d1.Success && RunToEnd(s, d1.QueueItemId) && s.Research.Analysis.LoreRead.Contains(lore) && s.TechData == techC0 + kc.TechFirst;
+            // FG5-RND-05（FGR-RND-021 情报部分，DEBT-FG5RND02-03）：首次解读数据核心附带一条情报（来源写“数据核心”）；重复解读不再给。
+            IntelRecord coreIntel = s.Research.Intel?.Records?.LastOrDefault();
+            bool intelFirst = dd1 && (s.Research.Intel?.Records?.Length ?? 0) == intel0 + 1 && coreIntel != null && coreIntel.Source == IntelService.SourceDataCore;
             HomeValleyAnalysis.AnalysisOpResult d2 = HomeValleyAnalysis.TryEnqueueItem(s, AnalysisCatalog.DataCoreId, null);
             bool dd2 = d2.Success && RunToEnd(s, d2.QueueItemId) && s.Research.Analysis.LoreRead.Length == 1 && s.TechData == techC0 + kc.TechFirst + kc.TechRepeat;
+            int intelAfter = s.Research.Intel?.Records?.Length ?? 0;
             Expect(dd1 && dd2 && Stock(s, AnalysisCatalog.DataCoreId) == 0 && HomeValleyAnalysis.LoreLine(s).Contains(AnalysisCatalog.Lore[0].Title),
                 $"B4 数据核心（{lore}）：首次技术数据 +{kc.TechFirst} 并解读一份资料（资料栏写出标题）；重复只给技术数据 +{kc.TechRepeat}；两件都被消耗");
+            Expect(intelFirst && intelAfter == intel0 + 1,
+                $"B4b FG5-RND-05（FGR-RND-021 情报部分）：首次解读数据核心附带一条情报（{IntelCatalog.KindName(coreIntel?.Kind)}，来源“数据核心”），重复解读不再给（情报 {intel0} → {intelAfter}）");
 
             // 身份不明
             HomeInventory.Add(s, Def(AnalysisCatalog.UnparsedModuleId), 1);

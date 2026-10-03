@@ -112,6 +112,8 @@ namespace GameLogic.UI.Kit
         public Button RangeButton => _range;
         private Button _fusion;
         public Button FusionButton => _fusion;
+        private Button _intel;
+        public Button IntelButton => _intel;
         private Button _diagnose;
         private Button _clear;
         private Label _message;
@@ -321,6 +323,7 @@ namespace GameLogic.UI.Kit
             _grid = root.Q<Button>("BpGrid");
             _range = root.Q<Button>("PrRange");
             _fusion = root.Q<Button>("PrFusion");
+            _intel = root.Q<Button>("PrIntel");
             _diagnose = root.Q<Button>("PrDiagnose");
             _clear = root.Q<Button>("BpClear");
             _message = root.Q<Label>("PrMessage");
@@ -332,6 +335,7 @@ namespace GameLogic.UI.Kit
             _grid.clicked += OpenGrid;
             _range.clicked += OpenRange;
             _fusion.clicked += OpenFusion;
+            _intel.clicked += OpenIntel;
             _diagnose.clicked += OpenDiagnosis;
             _clear.clicked += () => ClearBuffers();
             _copy.clicked += AskCopySettings;
@@ -492,6 +496,7 @@ namespace GameLogic.UI.Kit
             _grid.EnableInClassList("bn-hidden", !HomeValleyPowerGrid.IsPowerRelevantType(b.BuildingTypeId));
             _range.EnableInClassList("bn-hidden", !TestRangeService.IsRange(b));
             _fusion.EnableInClassList("bn-hidden", !FusionService.IsSynth(b));
+            _intel.EnableInClassList("bn-hidden", !IntelService.IsPost(b));
             _clear.SetEnabled(BuildingOps.BufferedCount(state, b) > 0);
         }
 
@@ -503,6 +508,7 @@ namespace GameLogic.UI.Kit
             _grid.text = GameText.Get("bp.open_grid");
             _range.text = GameText.Get("range.panel.open");
             _fusion.text = GameText.Get("fusion.panel.open");
+            _intel.text = GameText.Get("intel.panel.open");
             _diagnose.text = GameText.Get("prod.panel.diagnose");
             _clear.text = GameText.Get("bp.clear");
             _hint.text = GameText.Get("prod.panel.hint");
@@ -1379,6 +1385,13 @@ namespace GameLogic.UI.Kit
             string id = BuildingId;
             SetOpen(false);
             FusionPanelUIToolkit.Open(id);
+        }
+
+        /// <summary>FG5-RND-05：监听站 → 打开情报面板（FGU-25）。</summary>
+        public void OpenIntel()
+        {
+            SetOpen(false);
+            IntelPanelUIToolkit.Open(null);
         }
 
         /// <summary>FG5-RND-03：靶场 → 打开靶场面板（投影、靶子、读数、对比，FGU-24）。</summary>

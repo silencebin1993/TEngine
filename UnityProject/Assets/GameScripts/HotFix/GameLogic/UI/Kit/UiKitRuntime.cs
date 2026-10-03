@@ -34,6 +34,7 @@ namespace GameLogic.UI.Kit
             Create<RulesPanelUIToolkit>("[RulesPanelHost]"); // FG4-ECO-06：常驻规则（30073，固件库之上、物资与图鉴之下：“?”打开的图鉴盖在它上面）。 // FG4-ECO-01：物资面板（30074，暂停菜单与固件库之上、图鉴之下：点图标打开的图鉴盖在它上面）。
             Create<RosterPanelUIToolkit>("[RosterPanelHost]"); // FG4-ECO-07：机器名册（30071，暂停菜单之上、固件库之下：“?”打开的图鉴盖在它上面）。
             Create<TestRangePanelUIToolkit>("[TestRangeHost]"); // FG5-RND-03：靶场（30068，暂停菜单之下：从靶场“?”打开的图鉴盖在它上面）。
+            Create<IntelPanelUIToolkit>("[IntelPanelHost]"); // FG5-RND-05：情报面板（30066，合成台之下、暂停菜单之下：“?”打开的图鉴盖在它上面）。
             Create<FusionPanelUIToolkit>("[FusionPanelHost]"); // FG5-RND-04：电路合成台 / 配方书（30067，靶场之下、暂停菜单之下：“?”打开的图鉴盖在它上面）。
             Create<ResearchTreePanelUIToolkit>("[ResearchTreeHost]"); // FG5-RND-01：研发树（30069，暂停菜单之下：从研发树“?”打开的图鉴盖在它上面）。
             Create<AwayReportPanelUIToolkit>("[AwayReportHost]"); // FG4-ECO-09：离家报告（30078，统计 / 反应记录之上、按键面板之下）。
@@ -80,6 +81,7 @@ namespace GameLogic.UI.Kit
             ResearchTreePanelUIToolkit.Close();
             TestRangePanelUIToolkit.Close();
             FusionPanelUIToolkit.Close();
+            IntelPanelUIToolkit.Close();
             ConstructionQueuePanelUIToolkit.Close();
             BeltPortPanelUIToolkit.Close();
             BeltNodePanelUIToolkit.Close();

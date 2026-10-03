@@ -486,6 +486,8 @@ namespace GameLogic.Campaign
         public TestRangeState Range = new TestRangeState();
         /// <summary>FG5-RND-04：熔合（配方书、线索、模拟记录、正式熔合队列、待分析的战斗记录、统计）。旧存档没有 = 空状态。</summary>
         public FusionState Fusion = new FusionState();
+        /// <summary>FG5-RND-05：监听站与情报（情报列表与有效期、已过时标记、各类破译进度、截获过的片段、统计）。旧存档没有 = 空状态。</summary>
+        public IntelState Intel = new IntelState();
     }
 
     /// <summary>FG5-RND-04（FG05 FGR-RND-040～045）：熔合的存档域。唯一写入口 <see cref="Economy.FusionService"/>。</summary>
@@ -593,6 +595,77 @@ namespace GameLogic.Campaign
         public long EndTick;
         public string[] Reactions = Array.Empty<string>();
         public int[] Counts = Array.Empty<int>();
+    }
+
+    /// <summary>
+    /// FG5-RND-05（FG05 FGR-RND-050～052、第 6 节“情报列表与有效期”）：情报的存档域。唯一写入口 <see cref="Economy.IntelService"/>。
+    /// 进度与时间一律存整数（统一时钟的步数、千分之一倍率 × 步数），存读档往返逐字段一致。
+    /// </summary>
+    [Serializable]
+    public sealed class IntelState
+    {
+        /// <summary>情报序号（确定性：观察 / 不观察、存读档前后同一结果）。</summary>
+        public int NextSerial = 1;
+        /// <summary>情报列表（有效的与已过时的；已过时的不删除，直到同一目标的新情报替代它，或超过每类保留上限时去掉最旧的已过时条目）。</summary>
+        public IntelRecord[] Records = Array.Empty<IntelRecord>();
+        /// <summary>每类情报的破译进度（被更紧急的一类插队、监听站全部失效时保留）。</summary>
+        public IntelProgressRecord[] Progress = Array.Empty<IntelProgressRecord>();
+        /// <summary>上一个世界步正在破译的那一类（面板与建筑状态显示；空 = 没有）。</summary>
+        public string CurrentKind = string.Empty;
+        /// <summary>“破译中断”已经通知过（监听站全部失效时只告一次；恢复后清空）。</summary>
+        public bool InterruptNotified;
+        /// <summary>已截获的舰队信号片段（fg.TbIntelFragment.id，按截获先后；情报条目被替换 / 裁掉也不会重复截获）。</summary>
+        public string[] FragmentsHeard = Array.Empty<string>();
+        /// <summary>玩家在情报面板看过的最大序号（大于它的标“新”）。</summary>
+        public int SeenSerial;
+        /// <summary>统计：累计产出的情报条数（含数据核心给的）。</summary>
+        public long Produced;
+    }
+
+    /// <summary>FG5-RND-05：一条情报。<see cref="Outdated"/> 是存档里的显式状态（不是界面按时间隐藏）。</summary>
+    [Serializable]
+    public sealed class IntelRecord
+    {
+        public int Serial;
+        /// <summary>fg.TbIntelKind.id。</summary>
+        public string Kind = string.Empty;
+        /// <summary>针对的目标：突袭预报 = 行进队伍 ID；反制预览 = expedition；首领弱点 = 首领 ID；舰队片段 = 片段 ID。同一类同一目标的新情报替代旧的。</summary>
+        public string Subject = string.Empty;
+        /// <summary>来源：post = 监听站破译；data_core = 解析台解读数据核心。</summary>
+        public string Source = string.Empty;
+        public long ProducedTick;
+        /// <summary>到这一步过期（含）。</summary>
+        public long ExpiresTick;
+        /// <summary>已过时（过了有效期 / 突袭已到达 / 目标已不在）。</summary>
+        public bool Outdated;
+        public long OutdatedTick;
+        /// <summary>expired / arrived / gone。</summary>
+        public string OutdatedReason = string.Empty;
+        // ── 突袭预报 ──
+        /// <summary>出发地（领地 ID）。</summary>
+        public string Faction = string.Empty;
+        public int Units;
+        /// <summary>从归还核心指向来袭方向的单位向量（格网 X / Y）。</summary>
+        public float DirX;
+        public float DirY;
+        /// <summary>预计进入到达半径的那一点（格）。</summary>
+        public float ArriveX;
+        public float ArriveY;
+        /// <summary>抵达时间窗口（统一时钟步数）。</summary>
+        public long WindowFromTick;
+        public long WindowToTick;
+        // ── 敌方反制预览 ──
+        public string[] Regions = Array.Empty<string>();
+        public string[] Adaptations = Array.Empty<string>();
+    }
+
+    /// <summary>FG5-RND-05：一类情报的破译进度（千分之一倍率 × 统一时钟步数；一座监听站一步 = 1000）与累计产出。</summary>
+    [Serializable]
+    public sealed class IntelProgressRecord
+    {
+        public string Kind = string.Empty;
+        public long Work;
+        public int Produced;
     }
 
     /// <summary>FG5-RND-01：一个节点已投入的研究点（取消 / 移出队列后保留）。</summary>
@@ -1647,6 +1720,7 @@ namespace GameLogic.Campaign
             }
             Economy.TestRangeService.EnsureState(s); // FG5-RND-03：靶场域补成空域；旧档按已击毁的敌人记录补“击败过的敌人类型”。
             Economy.FusionService.EnsureState(s); // FG5-RND-04：熔合域补成空域（旧档没有 = 没发现配方、没有线索）。
+            Economy.IntelService.EnsureState(s); // FG5-RND-05：情报域补成空域（旧档没有 = 没有情报、没有进度）。
             if (s.Research.DomainVersion < ResearchState.CurrentVersion)
             {
                 Economy.ResearchService.MigrateFromV1(s); // FG5-RND-01：旧档迁移（研发树开放前就能建造的内容记为已研究）

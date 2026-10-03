@@ -140,9 +140,51 @@ namespace GameLogic.UI.Kit
             Instance.SetOpen(true);
         }
 
+        private static bool _hasPendingCenter;
+        private static double _pendingCenterX;
+        private static double _pendingCenterY;
+
+        /// <summary>FG5-RND-05（情报面板“在地图上查看”）：打开地图并以 (<paramref name="x"/>, <paramref name="y"/>)（格）为中心；已开着就移过去。
+        /// 视野至少放得下 <paramref name="minHalfWidth"/> 格（突袭预报箭头整支都看得到）。</summary>
+        public static void OpenCentered(double x, double y, double minHalfWidth)
+        {
+            _hasPendingCenter = true;
+            _pendingCenterX = x;
+            _pendingCenterY = y;
+            _pendingMinHalf = minHalfWidth;
+            if (IsOpen && Instance != null)
+            {
+                Instance.ApplyPendingCenter();
+                return;
+            }
+            Open();
+        }
+
+        private static double _pendingMinHalf;
+
+        private void ApplyPendingCenter()
+        {
+            if (!_hasPendingCenter)
+            {
+                return;
+            }
+            _hasPendingCenter = false;
+            _view.CenterX = _pendingCenterX;
+            _view.CenterY = _pendingCenterY;
+            _view.HalfWidth = Math.Max(_view.HalfWidth, _pendingMinHalf);
+            ClampZoom();
+            _modelKey = 0;
+        }
+
+        /// <summary>自检读点：当前视图中心与半宽（格）。</summary>
+        public double ViewCenterX => _view.CenterX;
+        public double ViewCenterY => _view.CenterY;
+        public double ViewHalfWidth => _view.HalfWidth;
+
         public static void Close()
         {
             _pendingOpen = false;
+            _hasPendingCenter = false;
             Instance?.SetOpen(false);
         }
 
@@ -237,6 +279,7 @@ namespace GameLogic.UI.Kit
                 _selectedMarker = null;
                 _feedback.text = string.Empty;
                 CenterOnCamera();
+                ApplyPendingCenter();
                 _modelKey = 0;
                 _nextModel = 0f;
                 RefreshTexts();
@@ -406,7 +449,7 @@ namespace GameLogic.UI.Kit
             PlaceTexture();
             float now = Time.realtimeSinceStartup;
             int key = HashCode.Combine(Math.Round(_view.CenterX, 1), Math.Round(_view.CenterY, 1), Math.Round(_view.HalfWidth, 1), _view.CanvasWidth, _view.CanvasHeight,
-                WorldMapFilters.Revision, WorldMapMarkers.Revision, (int)GameText.Language);
+                WorldMapFilters.Revision, HashCode.Combine(WorldMapMarkers.Revision, (int)GameText.Language, Campaign.Economy.IntelService.Revision));
             if (force || key != _modelKey || now >= _nextModel)
             {
                 _modelKey = key;

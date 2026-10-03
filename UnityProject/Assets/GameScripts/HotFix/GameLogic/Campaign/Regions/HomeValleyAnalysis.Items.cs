@@ -613,6 +613,15 @@ namespace GameLogic.Campaign.Regions
                 }
                 tech = def == null ? 0 : first ? def.TechFirst : def.TechRepeat;
                 text = first ? GameText.Format("analysis.result.core_first", lore.Title, tech) : GameText.Format("analysis.result.core_repeat", tech);
+                if (first)
+                {
+                    // FG5-RND-05（FGR-RND-021 情报部分，DEBT-FG5RND02-03）：第一次解读这份数据核心时附带一条情报（按优先级挑现在最需要的一类）。
+                    IntelRecord intel = Economy.IntelService.GrantFromDataCore(state);
+                    if (intel != null)
+                    {
+                        text += GameText.Format("analysis.result.core_intel", Economy.IntelCatalog.KindName(intel.Kind));
+                    }
+                }
             }
             else
             {

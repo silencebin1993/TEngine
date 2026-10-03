@@ -277,6 +277,18 @@ namespace GameLogic.Core
         public const string FusionFirstClue = "fusion.first_clue";
         /// <summary>FG5-RND-04：第一次打开配方书。</summary>
         public const string FusionFirstRecipeBook = "fusion.first_recipe_book";
+        /// <summary>FG5-RND-05：第一座监听站建成（引导内容在 FG15-UX-04：情报面板、多座递减；图鉴“监听站与情报”随之解锁）。</summary>
+        public const string IntelFirstBuilt = "intel.first_built";
+        /// <summary>FG5-RND-05：第一次打开情报面板。</summary>
+        public const string IntelFirstOpen = "intel.first_open";
+        /// <summary>FG5-RND-05：第一次拿到情报（监听站破译或数据核心）。</summary>
+        public const string IntelFirstIntel = "intel.first_intel";
+        /// <summary>FG5-RND-05：第一次拿到突袭预报（引导：地图上的来袭方向箭头、时间窗口）。</summary>
+        public const string IntelFirstRaidForecast = "intel.first_raid_forecast";
+        /// <summary>FG5-RND-05：第一次有情报过时（引导：“已过时”是什么意思、何时会被替代）。</summary>
+        public const string IntelFirstOutdated = "intel.first_outdated";
+        /// <summary>FG5-RND-05：第一次因监听站全部失效而破译中断。</summary>
+        public const string IntelFirstInterrupted = "intel.first_interrupted";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -320,6 +332,7 @@ namespace GameLogic.Core
             AnalysisFirstEnemyItem,
             RangeFirstBuilt, RangeFirstOpen, RangeFirstTest, RangeFirstUplink, RangeFirstCompare, RangeFirstSend, RangeFirstTargetUnlocked,
             FusionFirstBuilt, FusionFirstOpen, FusionFirstSimulate, FusionFirstDiscovery, FusionFirstClue, FusionFirstRecipeBook,
+            IntelFirstBuilt, IntelFirstOpen, IntelFirstIntel, IntelFirstRaidForecast, IntelFirstOutdated, IntelFirstInterrupted,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

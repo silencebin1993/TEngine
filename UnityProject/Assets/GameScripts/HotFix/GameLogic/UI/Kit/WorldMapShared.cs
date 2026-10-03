@@ -90,6 +90,8 @@ namespace GameLogic.UI.Kit
         Territory,
         /// <summary>己方建筑群 / 前哨站（归还核心所在的那一群由 <see cref="Home"/> 代表）。</summary>
         OwnCluster,
+        /// <summary>FG5-RND-05：突袭预报（箭尾在来袭方向上，标签写阵营与规模；箭身由矢量层画，指向归还核心）。</summary>
+        RaidForecast,
     }
 
     /// <summary>地图上的一个图标。</summary>
@@ -122,6 +124,8 @@ namespace GameLogic.UI.Kit
         public double Y0;
         public double X1;
         public double Y1;
+        /// <summary>FG5-RND-05：突袭预报箭头（红色粗线，终点画箭头），不是队伍路线。</summary>
+        public bool Forecast;
     }
 
     /// <summary>地图视图：中心（格）+ 横向半宽（格）+ 画布像素尺寸。格 ↔ 画布像素（画布 y 向下，格 +Y = 北 = 向上）。</summary>
@@ -168,6 +172,7 @@ namespace GameLogic.UI.Kit
         public readonly List<WorldMapCircle> Circles = new List<WorldMapCircle>(16);
         public readonly List<WorldMapLine> Lines = new List<WorldMapLine>(8);
         private readonly List<WorldFeature> _features = new List<WorldFeature>(32);
+        private readonly List<IntelRecord> _forecasts = new List<IntelRecord>(4);
 
         public void Collect(CampaignState state, in WorldMapView view, int maxIcons)
         {
@@ -246,6 +251,20 @@ namespace GameLogic.UI.Kit
                     if (view.Contains(g.PosX, g.PosY, margin))
                     {
                         Add(WorldMapItemKind.Group, WorldMapLayer.Groups, g.GroupId, g.PosX, g.PosY, GameText.Get("ui.map.raid"));
+                    }
+                }
+                // FG5-RND-05（FGR-RND-051“突袭预报会在地图上标出来袭方向”）：有效的突袭预报画一支从来袭方向指向归还核心的箭头——
+                // 部队还在迷雾里也画（这正是情报的价值），只画方向、不画部队位置。O(有效预报数)。
+                Campaign.Economy.IntelService.CollectArrows(state, _forecasts);
+                foreach (IntelRecord r in _forecasts)
+                {
+                    Vector2 tail = Campaign.Economy.IntelService.ArrowTail(state, r);
+                    Vector2 head = Campaign.Economy.IntelService.ArrowHead(state, r);
+                    Lines.Add(new WorldMapLine { X0 = tail.x, Y0 = tail.y, X1 = head.x, Y1 = head.y, Forecast = true });
+                    if (view.Contains(tail.x, tail.y, margin))
+                    {
+                        Add(WorldMapItemKind.RaidForecast, WorldMapLayer.Groups, "forecast:" + r.Serial, tail.x, tail.y,
+                            GameText.Format("ui.map.raid_forecast", WorldTransitSystem.OriginName(r.Faction), r.Units));
                     }
                 }
             }
@@ -718,14 +737,27 @@ namespace GameLogic.UI.Kit
                     Circle(p, center, r);
                 }
             }
-            p.lineWidth = 2f;
-            p.strokeColor = new Color(0.95f, 0.55f, 0.25f, 0.9f);
             foreach (WorldMapLine l in model.Lines)
             {
+                Vector2 a = view.ToCanvas(l.X0, l.Y0);
+                Vector2 b = view.ToCanvas(l.X1, l.Y1);
+                p.lineWidth = l.Forecast ? 3f : 2f;
+                p.strokeColor = l.Forecast ? new Color(0.95f, 0.25f, 0.2f, 0.95f) : new Color(0.95f, 0.55f, 0.25f, 0.9f);
                 p.BeginPath();
-                p.MoveTo(view.ToCanvas(l.X0, l.Y0));
-                p.LineTo(view.ToCanvas(l.X1, l.Y1));
+                p.MoveTo(a);
+                p.LineTo(b);
                 p.Stroke();
+                if (l.Forecast && (b - a).sqrMagnitude > 4f)
+                {
+                    // 箭头：终点两侧各一笔（形状 + 颜色，色盲也能分辨方向，B15）。
+                    Vector2 d = (b - a).normalized;
+                    Vector2 n = new Vector2(-d.y, d.x);
+                    p.BeginPath();
+                    p.MoveTo(b - d * 10f + n * 6f);
+                    p.LineTo(b);
+                    p.LineTo(b - d * 10f - n * 6f);
+                    p.Stroke();
+                }
             }
             if (cameraQuad != null && cameraQuad.Length == 4)
             {
@@ -823,12 +855,14 @@ namespace GameLogic.UI.Kit
                 e.EnableInClassList("wg-icon-marker", item.Kind == WorldMapItemKind.Marker);
                 e.EnableInClassList("wg-icon-marker-selected", item.Kind == WorldMapItemKind.Marker && item.Id == selectedMarkerId);
                 e.EnableInClassList("wg-icon-territory", item.Kind == WorldMapItemKind.Territory);
+                e.EnableInClassList("wg-icon-forecast", item.Kind == WorldMapItemKind.RaidForecast);
                 e.EnableInClassList("uk-hidden", false);
                 e.style.left = at.x;
                 e.style.top = at.y;
                 Label t = _texts[n];
                 bool showLabel = _labels && (item.Kind == WorldMapItemKind.Home || item.Kind == WorldMapItemKind.OwnCluster || item.Kind == WorldMapItemKind.Marker || item.Kind == WorldMapItemKind.Outpost
-                                            || item.Kind == WorldMapItemKind.Resource || item.Kind == WorldMapItemKind.Relic || item.Kind == WorldMapItemKind.Territory);
+                                            || item.Kind == WorldMapItemKind.Resource || item.Kind == WorldMapItemKind.Relic || item.Kind == WorldMapItemKind.Territory
+                                            || item.Kind == WorldMapItemKind.RaidForecast);
                 t.EnableInClassList("uk-hidden", !showLabel);
                 if (showLabel)
                 {
