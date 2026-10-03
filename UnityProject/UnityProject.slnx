@@ -67,6 +67,7 @@
   <Project Path="Unity.Burst.Editor.csproj" />
   <Project Path="glTFast.Newtonsoft.csproj" />
   <Project Path="glTFast.Documentation.Examples.csproj" />
+  <Project Path="BinGames.TerrainVisual.csproj" />
   <Project Path="Unity.AI.Generators.Redux.csproj" />
   <Project Path="Unity.AI.Toolkit.Accounts.csproj" />
   <Project Path="Unity.AI.Generators.UI.csproj" />
@@ -111,6 +112,7 @@
   <Project Path="Unity.Splines.csproj" />
   <Project Path="Unity.AI.Navigation.csproj" />
   <Project Path="Unity.Mathematics.Editor.csproj" />
+  <Project Path="BinGames.TerrainVisual.Editor.csproj" />
   <Project Path="HybridCLR.Runtime.csproj" />
   <Project Path="Unity.Core.Editor.csproj" />
   <Project Path="Unity.Mathematics.Extensions.csproj" />

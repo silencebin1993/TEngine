@@ -1,0 +1,22 @@
+Library/
+Temp/
+Logs/
+obj/
+UserSettings/
+Builds/
+TerrainLabBuild.request
+TerrainLabBootstrap.request
+*.csproj
+*.sln
+*.slnx
+Assets/TerrainVisual/
+Assets/TerrainEditor/
+Assets/GameRes/
+
+# Licensed Orbis sources are backed up in the local GameRes content repository.
+Assets/Orbis/Orbis_Terrains/
+Assets/Orbis/Orbis_Terrains.meta
+
+# Unity recovery scenes are local editor state.
+Assets/_Recovery/
+Assets/_Recovery.meta
