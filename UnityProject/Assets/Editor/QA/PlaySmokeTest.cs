@@ -6299,14 +6299,26 @@ namespace GameLogic.EditorTools
 
         private static void StepIntelForecast(double inStep)
         {
-            Campaign.IntelRecord f = Campaign.Economy.IntelService.LastProduced;
-            bool got = f != null && f.Kind == Campaign.Economy.IntelCatalog.KindRaid && f.Subject == SessionState.GetString(K + "IntelRaid", string.Empty);
-            if (!got && inStep < 40)
+            string raidId = SessionState.GetString(K + "IntelRaid", string.Empty);
+            // 后续情报会覆盖 LastProduced；按本次突袭的持久记录验收。
+            Campaign.IntelRecord f = Campaign.Economy.IntelService.StateOf(CampaignSession.Current)?.Records
+                ?.FirstOrDefault(r => r.Kind == Campaign.Economy.IntelCatalog.KindRaid && r.Subject == raidId);
+            bool got = f != null;
+            bool notified = Notifications.NotificationCenter.History.Any(e => e.Type.Id == "intel_raid");
+            if (!got && GameClock.Paused && inStep < 40)
+            {
+                Write("  - 情报等待期间恢复世界推进（通知自动暂停次数 " + Notifications.NotificationCenter.AutoPauseCount + "）");
+                GameClock.SetPaused(false);
+            }
+            if (!(got && notified) && inStep < 40)
             {
                 return;
             }
             Check(!IntelPanelUIToolkit.IsOpen, "Esc 关闭情报面板");
-            bool notified = Notifications.NotificationCenter.History.Any(e => e.Type.Id == "intel_raid");
+            if (!(got && notified))
+            {
+                Write($"  - 情报超时诊断：世界步 {GameClock.Ticks}、暂停 {GameClock.Paused}、倍速 {GameClock.Speed}、工作监听站 {Campaign.Economy.IntelService.WorkingCount(CampaignSession.Current)}、突袭破译进度 {Campaign.Economy.IntelService.ProgressPercent(CampaignSession.Current, Campaign.Economy.IntelCatalog.KindRaid)}%");
+            }
             Check(got && notified, $"监听站破译出突袭预报并发通知（{(got ? Campaign.Economy.IntelService.Summary(CampaignSession.Current, f, GameClock.Ticks) : "超时")}）");
             GameClock.SetPaused(true);
             PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.OpenIntel));
@@ -6346,6 +6358,8 @@ namespace GameLogic.EditorTools
             Check(arrow, "战略地图打开（情报面板已关），地图上有突袭预报的来袭方向箭头与标签");
             StrategicMapUIToolkit.Close();
             // 清理测试捷径：撤走测试突袭部队与监听站（到达会触发紧急通知 / 自动暂停，影响后面的步骤），恢复倍速与暂停状态。
+            IntelPanelUIToolkit.Close();
+            ProductionPanelUIToolkit.Close();
             CampaignState state = CampaignSession.Current;
             string raidId = SessionState.GetString(K + "IntelRaid", string.Empty);
             state.Raids.InTransit = state.Raids.InTransit.Where(g => g.GroupId != raidId).ToArray();
