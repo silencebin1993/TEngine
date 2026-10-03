@@ -201,7 +201,7 @@ namespace GameLogic.UI.PrimitiveCraft
             }
 
             bool regionActive = GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive;
-            _entryToggleButton.parent.EnableInClassList("craft-hidden", !regionActive);
+            _entryToggleButton.parent.EnableInClassList("craft-hidden", !regionActive || HomeValleyBuildMode.Current?.IsOpen == true || Kit.UiEscapeStack.CurrentPage != null);
             if (!regionActive)
             {
                 _panel.EnableInClassList("craft-hidden", true);

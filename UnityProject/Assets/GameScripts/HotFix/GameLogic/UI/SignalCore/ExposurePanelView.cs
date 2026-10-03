@@ -100,6 +100,7 @@ namespace GameLogic.UI.SignalCore
             {
                 return;
             }
+            UiEscapeStack.RegisterPage(_owner, _panel);
             _entry.clicked += toggle;
             _close.clicked += () => SetOpen(false);
             UiTooltip.Attach(_entry, () => new TooltipContent
@@ -275,6 +276,7 @@ namespace GameLogic.UI.SignalCore
                 UiEscapeStack.Remove(_owner);
                 IsOpen = false;
             }
+            UiEscapeStack.UnregisterPage(_owner);
         }
 
         private static void SetHidden(VisualElement e, bool hidden) => e?.EnableInClassList("uk-hidden", hidden);

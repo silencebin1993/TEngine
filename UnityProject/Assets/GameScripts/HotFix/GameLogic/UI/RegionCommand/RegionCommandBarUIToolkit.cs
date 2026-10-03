@@ -278,8 +278,9 @@ namespace GameLogic.UI.RegionCommand
             }
 
             RegionSquadCommandSystem cmd = ActiveSquadCommands();
-            _panel.style.display = cmd != null ? DisplayStyle.Flex : DisplayStyle.None;
-            if (cmd == null)
+            bool shown = cmd != null && HomeValleyBuildMode.Current?.IsOpen != true && !InputRouter.PanelModalOpen;
+            _panel.style.display = shown ? DisplayStyle.Flex : DisplayStyle.None;
+            if (!shown)
             {
                 return;
             }
@@ -322,17 +323,22 @@ namespace GameLogic.UI.RegionCommand
             _guardButton.SetEnabled(hasSelection);
             _retreatButton.SetEnabled(hasSelection);
             _stopButton.SetEnabled(hasSelection);
+            _moveButton.parent.style.display = hasSelection ? DisplayStyle.Flex : DisplayStyle.None;
 
             IReadOnlyList<string> events = cmd.RecentEvents;
             int total = events.Count;
+            _eventLog.style.display = total > 0 ? DisplayStyle.Flex : DisplayStyle.None;
             for (int i = 0; i < MaxEventLines; i++)
             {
                 int sourceIndex = total - MaxEventLines + i;
                 _eventLabels[i].text = sourceIndex >= 0 ? events[sourceIndex] : string.Empty;
+                _eventLabels[i].style.display = sourceIndex >= 0 ? DisplayStyle.Flex : DisplayStyle.None;
             }
 
             RefreshControlHud();
             RefreshInteractHud();
+            _interactPromptLabel.parent.style.display = string.IsNullOrEmpty(_interactPromptLabel.text)
+                && string.IsNullOrEmpty(_interactSubtitleLabel.text) ? DisplayStyle.None : DisplayStyle.Flex;
         }
 
         /// <summary>ER5-CTL-01：受控机 编号/蓝图 显示 + 失联宽限（Suspended）提示 + Tab 候选条。</summary>

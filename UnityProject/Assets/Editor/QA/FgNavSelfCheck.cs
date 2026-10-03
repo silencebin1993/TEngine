@@ -121,6 +121,7 @@ namespace GameLogic.EditorTools
                 Step(CheckRouteClearAfterExit);
                 Step(CheckPendingSnapshot);
                 Step(CheckCombatFollow);
+                Step(CheckCombatRetarget);
                 Step(CheckCombatRouteCutAndSnapshot);
                 Step(CheckSeparation);
                 Step(CheckHomeDetourAndCut);
@@ -997,6 +998,167 @@ namespace GameLogic.EditorTools
             pipe2.K.TryGetPosition(d, out double2 slideTo);
             Expect(maxX < 31.5 && slideTo.y > slideFrom.y + 3 && slideTo.x < 31.5,
                 $"直控：顶着悬崖走不过去（x 最大 {maxX:F2} < 31.5），斜着顶墙时贴墙滑动（y {slideFrom.y:F1} → {slideTo.y:F1}）");
+        }
+
+        private static void CheckCombatRetarget()
+        {
+            foreach (CombatCommandKind kind in new[] { CombatCommandKind.Move, CombatCommandKind.WorkMove, CombatCommandKind.Retreat, CombatCommandKind.Guard })
+            {
+                using NavKernel nav = Synth(2, 1, (x, y) => false);
+                using var pipe = new Pipe(nav, 0f);
+                int m = Machine(pipe.K, new double2(10, 10));
+                pipe.K.IssueCommand(m, kind, new double2(50, 10), 0, 1.2f, 0f, 0f, false);
+                pipe.Step();
+                pipe.K.TryGetPosition(m, out double2 initial);
+                bool initialWait = initial.Equals(new double2(10, 10));
+                for (int i = 0; i < 29; i++)
+                {
+                    pipe.Step();
+                }
+                pipe.K.TryGetNavState(m, out CombatNavState before, out _);
+                var target = new double2(50, 24);
+                pipe.K.IssueCommand(m, kind, target, 0, 1.2f, 0f, 0f, false);
+                int waitingSteps = 0;
+                double minMove = double.MaxValue;
+                bool clear = true;
+                for (int i = 0; i < 30; i++)
+                {
+                    pipe.K.TryGetPosition(m, out double2 prev);
+                    pipe.Step();
+                    pipe.K.TryGetPosition(m, out double2 now);
+                    clear &= UnitCellOk(nav, pipe.K, m, NavConst.ClassPlayer);
+                    pipe.K.TryGetNavState(m, out CombatNavState st, out _);
+                    if (st != CombatNavState.Awaiting)
+                    {
+                        break;
+                    }
+                    waitingSteps++;
+                    minMove = Math.Min(minMove, math.distance(prev, now));
+                }
+                for (int i = 0; i < 600; i++)
+                {
+                    pipe.Step();
+                    clear &= UnitCellOk(nav, pipe.K, m, NavConst.ClassPlayer);
+                }
+                pipe.K.TryGetPosition(m, out double2 end);
+                Expect(initialWait && before == CombatNavState.Following && waitingSteps >= nav.Config.LatencySteps
+                       && minMove > 0.09 && clear && math.distance(end, target) <= 1.2,
+                    $"移动中切换目的地（{kind}）：首次寻路仍原地等；换点等待 {waitingSteps} 步，每步最小位移 {minMove:F3} 米，无停顿且最终到达新目标");
+            }
+
+            using NavKernel navA = Synth(2, 1, (x, y) => false);
+            using var a = new Pipe(navA, 0f);
+            int unit = Machine(a.K, new double2(10, 10));
+            a.K.IssueCommand(unit, CombatCommandKind.WorkMove, new double2(50, 10), 0, 1.2f, 0f, 0f, false);
+            for (int i = 0; i < 30; i++)
+            {
+                a.Step();
+            }
+            double rapidMin = double.MaxValue;
+            var lastGoal = new double2(45, 26);
+            for (int i = 0; i < 3; i++)
+            {
+                a.K.TryGetPosition(unit, out double2 prev);
+                a.K.IssueCommand(unit, CombatCommandKind.WorkMove, i == 2 ? lastGoal : new double2(40, 18 + i * 3), 0, 1.2f, 0f, 0f, false);
+                a.Step();
+                a.K.TryGetPosition(unit, out double2 now);
+                rapidMin = Math.Min(rapidMin, math.distance(prev, now));
+            }
+            a.K.TryGetNavState(unit, out CombatNavState awaiting, out _);
+            byte[] combatSnap = a.K.Serialize();
+            byte[] navSnap = navA.SerializePending();
+            using NavKernel navB = Synth(2, 1, (x, y) => false);
+            NavLoadResult navLoad = navB.LoadPending(navSnap);
+            using var b = new Pipe(navB, 0f);
+            CombatLoadResult combatLoad = b.K.Load(combatSnap);
+            b.Tick = a.Tick;
+            b.T = a.T;
+            bool same = a.K.StateHash() == b.K.StateHash();
+            for (int i = 0; i < 600; i++)
+            {
+                a.Step();
+                b.Step();
+                same &= a.K.StateHash() == b.K.StateHash();
+            }
+            a.K.TryGetPosition(unit, out double2 final);
+            Expect(rapidMin > 0.09 && awaiting == CombatNavState.Awaiting && final.Equals(lastGoal),
+                $"连续三次换点：每次当步都移动（最小 {rapidMin:F3} 米），过期结果不覆盖最后目标，最终对齐最后目标");
+            Expect(navLoad == NavLoadResult.Ok && combatLoad == CombatLoadResult.Ok && same,
+                "换点等待期间保留旧路线的存档：读回后连续 600 步与不存档逐步哈希一致，无需更改存档格式");
+
+            a.K.IssueCommand(unit, CombatCommandKind.Move, new double2(10, 10), 0, 1.2f, 0f, 0f, false);
+            for (int i = 0; i < 30; i++)
+            {
+                a.Step();
+            }
+            a.K.TryGetPosition(unit, out double2 held);
+            a.K.IssueCommand(unit, CombatCommandKind.Guard, new double2(double.NaN, double.NaN), 0, 1.2f, 0f, 0f, false);
+            a.Step();
+            a.K.IssueCommand(unit, CombatCommandKind.Move, new double2(20, 20), 0, 1.2f, 0f, 0f, false);
+            a.Step();
+            a.K.TryGetPosition(unit, out double2 afterHold);
+            Expect(held.Equals(afterHold), "移动中改为原地守备：立即停住并释放旧路线，后续新移动不会沿守备前的路线空跑");
+            for (int i = 0; i < 30; i++)
+            {
+                a.Step();
+            }
+            a.K.IssueCommand(unit, CombatCommandKind.Move, new double2(25, 15), 0, 1.2f, 0f, 0f, false);
+            a.Step();
+            a.K.ClearCommand(unit);
+            a.K.TryGetPosition(unit, out double2 cancelled);
+            for (int i = 0; i < 30; i++)
+            {
+                a.Step();
+            }
+            a.K.TryGetPosition(unit, out double2 afterCancel);
+            Expect(cancelled.Equals(afterCancel) && !a.K.TryGetCommand(unit, out _),
+                "换点等待期间取消：立即停止，后续旧批次结果不恢复移动");
+
+            a.K.IssueCommand(unit, CombatCommandKind.WorkMove, new double2(10, 10), 0, 1.2f, 0f, 0f, false);
+            for (int i = 0; i < 30; i++)
+            {
+                a.Step();
+            }
+            var teleportGoal = new double2(15, 15);
+            a.K.IssueCommand(unit, CombatCommandKind.WorkMove, teleportGoal, 0, 1.2f, 0f, 0f, false);
+            a.Step();
+            var teleport = new double2(5, 5);
+            a.K.SetPosition(unit, teleport);
+            a.Step();
+            a.K.TryGetPosition(unit, out double2 afterTeleport);
+            for (int i = 0; i < 600; i++)
+            {
+                a.Step();
+            }
+            a.K.TryGetPosition(unit, out double2 teleportEnd);
+            Expect(afterTeleport.Equals(teleport) && teleportEnd.Equals(teleportGoal),
+                "换点等待期间传送：丢弃旧路线与过期结果，从新位置规划并到达最后目标");
+
+            using NavKernel cutNav = Synth(2, 1, (x, y) => false);
+            using var cut = new Pipe(cutNav, 0f);
+            int cm = Machine(cut.K, new double2(10, 10));
+            cut.K.IssueCommand(cm, CombatCommandKind.WorkMove, new double2(50, 10), 0, 1.2f, 0f, 0f, false);
+            for (int i = 0; i < 30; i++)
+            {
+                cut.Step();
+            }
+            var cutTarget = new double2(8, 24);
+            cut.K.IssueCommand(cm, CombatCommandKind.WorkMove, cutTarget, 0, 1.2f, 0f, 0f, false);
+            cut.Step();
+            PushSynth(cutNav, 2, 1, (x, y) => x == 16, asChange: true);
+            cut.K.TryGetPosition(cm, out double2 beforeCut);
+            cut.Step();
+            cut.K.TryGetPosition(cm, out double2 afterCut);
+            cut.K.TryGetNavState(cm, out CombatNavState cutState, out _);
+            bool passable = UnitCellOk(cutNav, cut.K, cm, NavConst.ClassPlayer);
+            for (int i = 0; i < 300; i++)
+            {
+                cut.Step();
+                passable &= UnitCellOk(cutNav, cut.K, cm, NavConst.ClassPlayer);
+            }
+            cut.K.TryGetPosition(cm, out double2 cutEnd);
+            Expect(beforeCut.Equals(afterCut) && cutState == CombatNavState.Awaiting && passable && cutEnd.Equals(cutTarget),
+                "换点等待时旧路线被新障碍截断：丢弃旧路线但保留新请求，全程不穿墙且到达新目标");
         }
 
         private static void CheckCombatRouteCutAndSnapshot()

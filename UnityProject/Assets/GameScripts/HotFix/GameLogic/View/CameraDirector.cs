@@ -89,6 +89,7 @@ namespace GameLogic.View
         private Camera _camera;
         private DirectAnchorProvider _anchorProvider;
         private Vector3 _followOffset;
+        private float _perspectiveDistance;
         private float _arenaHalfExtent = 40f;
         private float _directOrthographicSize = 16f;
         /// <summary>FG1-HUD-01：接入视野的基准正交半高（绑定时给定）；实际 = 基准 × 设置“接入时镜头距离”（<see cref="DirectTargetSize"/>）。</summary>
@@ -170,6 +171,16 @@ namespace GameLogic.View
             _anchorProvider = anchorProvider;
             _appliedShake = Vector3.zero; // 新绑定的相机上没有本类叠过的偏移。
             _followOffset = followOffset;
+            _perspectiveDistance = 0f;
+            if (_camera != null && !_camera.orthographic)
+            {
+                // 保持弱透视：最远视野使用绑定时的视角，拉近只收窄视角，焦点与平移坐标不变。
+                float halfView = math.max(MaxOrthographicSize, _camera.orthographicSize);
+                _perspectiveDistance = math.max(followOffset.magnitude,
+                    halfView / Mathf.Tan(_camera.fieldOfView * 0.5f * Mathf.Deg2Rad));
+                _followOffset = -_camera.transform.forward * _perspectiveDistance;
+                _camera.farClipPlane = math.max(_camera.farClipPlane, _perspectiveDistance + halfView * 2f);
+            }
             _arenaHalfExtent = math.max(1f, arenaHalfExtent);
             _hasRectBounds = false;
             if (_camera != null)
@@ -191,7 +202,7 @@ namespace GameLogic.View
                 _strategyOrthographicSize = math.clamp(_camera.orthographicSize, MinOrthographicSize, MaxOrthographicSize);
                 ClampStrategyFocus();
                 _camera.transform.position = StrategyCameraPosition();
-                _camera.orthographicSize = _strategyOrthographicSize;
+                ApplyViewSize(_strategyOrthographicSize);
             }
             InputRouter.SetScope(_mode == ViewMode.Strategy ? InputScope.Strategy : InputScope.Direct);
         }
@@ -234,7 +245,7 @@ namespace GameLogic.View
             if (_camera != null && _mode == ViewMode.Strategy)
             {
                 _camera.transform.position = StrategyCameraPosition();
-                _camera.orthographicSize = _strategyOrthographicSize;
+                ApplyViewSize(_strategyOrthographicSize);
             }
         }
 
@@ -451,7 +462,7 @@ namespace GameLogic.View
             }
 
             _camera.transform.position = Vector3.Lerp(_transitionFrom, _transitionTo, eased);
-            _camera.orthographicSize = Mathf.Lerp(_transitionFromSize, _transitionToSize, eased);
+            ApplyViewSize(Mathf.Lerp(_transitionFromSize, _transitionToSize, eased));
 
             if (_transitionRemaining > 0f)
             {
@@ -464,7 +475,7 @@ namespace GameLogic.View
                 _pendingMode = ViewMode.Strategy;
                 _strategyOrthographicSize = math.clamp(
                     _strategyOrthographicSize, MinOrthographicSize, MaxOrthographicSize);
-                _camera.orthographicSize = _strategyOrthographicSize;
+                ApplyViewSize(_strategyOrthographicSize);
             }
 
             _mode = _pendingMode;
@@ -486,7 +497,7 @@ namespace GameLogic.View
             // FG1-HUD-01：跟随力度 = 原平滑系数 × 设置“接入时跟随力度”；视野向“基准 × 接入时镜头距离”靠拢（设置改了立即生效，同一套平滑）。
             float k = paused ? 1f : 1f - math.exp(-DirectFollowLambda * GameSettings.UplinkFollowStrength * dt);
             _camera.transform.position = paused ? want : Vector3.Lerp(_camera.transform.position, want, k);
-            _camera.orthographicSize = Mathf.Lerp(_camera.orthographicSize, DirectTargetSize, k);
+            ApplyViewSize(Mathf.Lerp(_camera.orthographicSize, DirectTargetSize, k));
             _directOrthographicSize = _camera.orthographicSize;
         }
 
@@ -600,7 +611,7 @@ namespace GameLogic.View
             }
 
             _camera.transform.position = StrategyCameraPosition();
-            _camera.orthographicSize = _strategyOrthographicSize;
+            ApplyViewSize(_strategyOrthographicSize);
         }
 
         private float2 ReadPanInput(out bool fromEdge)
@@ -660,6 +671,16 @@ namespace GameLogic.View
         private Vector3 CameraPositionFor(float2 focus)
         {
             return new Vector3(focus.x + _followOffset.x, _followOffset.y, focus.y + _followOffset.z);
+        }
+
+        private void ApplyViewSize(float halfView)
+        {
+            // 半高继续作为缩放、地点记忆与震屏的统一尺度；透视相机同步换算实际视角。
+            _camera.orthographicSize = halfView;
+            if (!_camera.orthographic && _perspectiveDistance > 0f)
+            {
+                _camera.fieldOfView = 2f * Mathf.Atan(halfView / _perspectiveDistance) * Mathf.Rad2Deg;
+            }
         }
 
         /// <summary>直控跟随目标。只认"确实有受控实体"，回退锚点不算——那是战略视角的活。</summary>

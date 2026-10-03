@@ -43,6 +43,9 @@ namespace GameLogic.UI.WorkOrder
 
         private VisualElement _root;
         private VisualElement _panel;
+        private Button _details;
+        private VisualElement _body;
+        private bool _detailsOpen;
         private ScrollView _list;
         private Label _emptyLabel;
         private readonly List<TemplateContainer> _rowPool = new List<TemplateContainer>(MaxRows);
@@ -105,6 +108,9 @@ namespace GameLogic.UI.WorkOrder
             }
 
             _panel = _root.Q<VisualElement>("WorkOrderPanelRoot");
+            _details = _root.Q<Button>("WorkOrderDetails");
+            _body = _root.Q<VisualElement>("PanelBody");
+            if (_details != null) _details.clicked += () => SetDetailsOpen(!_detailsOpen);
             _list = _root.Q<ScrollView>("OrderList");
             _emptyLabel = _root.Q<Label>("EmptyLabel");
             _alertList = _root.Q<ScrollView>("AlertList");
@@ -151,6 +157,16 @@ namespace GameLogic.UI.WorkOrder
         private List<WorkOrderRecord> _liveOrdersCache = new List<WorkOrderRecord>(MaxRows);
         private List<HomeValleyAlarms.AlertRecord> _alertsCache = new List<HomeValleyAlarms.AlertRecord>(MaxAlertRows);
 
+        public void SetDetailsOpen(bool open)
+        {
+            if (_body == null || open == _detailsOpen) return;
+            _detailsOpen = open;
+            _body.EnableInClassList("wop-hidden", !open);
+            if (open) Kit.UiEscapeStack.Push(this, () => SetDetailsOpen(false));
+            else Kit.UiEscapeStack.Remove(this);
+            _refreshTimer = 0f;
+        }
+
         private void Update()
         {
             if (_panel == null)
@@ -159,9 +175,11 @@ namespace GameLogic.UI.WorkOrder
             }
 
             bool active = GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive;
+            if (HomeValleyBuildMode.Current?.IsOpen == true) SetDetailsOpen(false);
             _panel.style.display = active ? DisplayStyle.Flex : DisplayStyle.None;
             if (!active)
             {
+                SetDetailsOpen(false);
                 return;
             }
 
@@ -177,6 +195,8 @@ namespace GameLogic.UI.WorkOrder
             RefreshAlertList(state);
             RefreshPriorityRows();
             RefreshMachineDetail();
+            if (_details != null)
+                _details.text = $"工作单 {_liveOrdersCache.Count} · 警报 {_alertsCache.Count} · {(_detailsOpen ? "收起详情" : "展开详情")}";
         }
 
         /// <summary>ER4-MCH-01：选中机器时展示编号/底盘/装配/HP/电池/状态/经历/统计——与
@@ -523,6 +543,7 @@ namespace GameLogic.UI.WorkOrder
 
         private void OnDestroy()
         {
+            Kit.UiEscapeStack.Remove(this);
             if (_visualTree != null)
             {
                 GameModule.Resource.UnloadAsset(_visualTree);

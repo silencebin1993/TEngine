@@ -146,13 +146,16 @@ namespace BinGames.Sim.Combat
         /// <summary>待交给寻路内核的请求数（本步新发出）。</summary>
         public int NavPendingCount => _d.NavOut.Length;
 
-        private void ResetNav(int i)
+        private void ResetNav(int i, bool keepRoute = false)
         {
-            CombatScalars s = _d.Scalars[0];
-            s.RouteGarbage += _d.RouteLen[i];
-            _d.Scalars[0] = s;
-            _d.RouteLen[i] = 0;
-            _d.RouteIdx[i] = 0;
+            if (!keepRoute)
+            {
+                CombatScalars s = _d.Scalars[0];
+                s.RouteGarbage += _d.RouteLen[i];
+                _d.Scalars[0] = s;
+                _d.RouteLen[i] = 0;
+                _d.RouteIdx[i] = 0;
+            }
             _d.NavSt[i] = (byte)CombatNavState.None;
             _d.NavFail[i] = 0;
         }
@@ -503,7 +506,7 @@ namespace BinGames.Sim.Combat
             {
                 _d.Prev[i] = pos;
             }
-            if (_d.NavSt[i] == (byte)CombatNavState.Following)
+            if (_d.NavSt[i] == (byte)CombatNavState.Following || _d.NavSt[i] == (byte)CombatNavState.Awaiting || _d.RouteLen[i] > 0)
             {
                 // 传送后原路线不再从脚下开始：下一次推进时从新位置重新要路线。
                 ResetNav(i);
@@ -670,6 +673,9 @@ namespace BinGames.Sim.Combat
             {
                 pos = _d.Pos[i];
             }
+            // 移动中改目的地：新请求仍按固定步采纳，等待时沿旧路线继续走。
+            bool keepRoute = _d.Config.NavEnabled != 0 && _d.RouteLen[i] > 0
+                && IsNavMove(_d.Cmd[i].Kind) && IsNavMove(kind);
             _d.Cmd[i] = new CombatCommand
             {
                 Kind = kind,
@@ -684,9 +690,12 @@ namespace BinGames.Sim.Combat
                 Stuck = 0,
             };
             _d.Set(i, CombatUnitFlags.PendingCommand, pending);
-            ResetNav(i);
+            ResetNav(i, keepRoute);
             return true;
         }
+
+        private static bool IsNavMove(CombatCommandKind kind) => kind == CombatCommandKind.Move
+            || kind == CombatCommandKind.WorkMove || kind == CombatCommandKind.Retreat || kind == CombatCommandKind.Guard;
 
         public bool ClearCommand(int id)
         {

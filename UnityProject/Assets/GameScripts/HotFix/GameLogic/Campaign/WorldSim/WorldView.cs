@@ -83,6 +83,11 @@ namespace GameLogic.Campaign.WorldSim
                     return new GridCell(0, 0);
                 }
                 Vector3 p = _camera.transform.position;
+                Vector3 forward = _camera.transform.forward;
+                if (Mathf.Abs(forward.y) > 0.001f)
+                {
+                    p -= forward * (p.y / forward.y);
+                }
                 return GridCell.FromWorld(new Vector2(p.x, p.z));
             }
         }
@@ -129,12 +134,14 @@ namespace GameLogic.Campaign.WorldSim
 
             WorldCameraProfile profile = next.CameraProfile ?? new WorldCameraProfile();
             Camera cam = EnsureCamera();
-            cam.orthographic = true;
+            cam.orthographic = false;
+            cam.fieldOfView = 35f;
             cam.clearFlags = CameraClearFlags.SolidColor;
             cam.backgroundColor = profile.Background;
             cam.nearClipPlane = 0.1f;
             cam.farClipPlane = 200f;
-            cam.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+            // 仅偏离垂直俯视 12°，露出模型侧面，同时保留俯视操作的可读性。
+            cam.transform.rotation = Quaternion.Euler(78f, 0f, 0f);
             bool remembered = Memory.TryGetValue(siteId, out CameraMemory mem);
             cam.orthographicSize = remembered ? mem.Ortho : profile.InitialStrategyOrthographicSize;
             DirectorInstance.Bind(cam, profile.DirectAnchor, profile.FollowOffset, profile.ArenaHalfExtent,

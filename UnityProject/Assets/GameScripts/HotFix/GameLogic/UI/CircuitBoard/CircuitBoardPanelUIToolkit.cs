@@ -828,7 +828,7 @@ namespace GameLogic.UI.CircuitBoard
             }
 
             bool regionActive = GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive;
-            _entryToggleButton.parent.EnableInClassList("cb-hidden", !regionActive);
+            _entryToggleButton.parent.EnableInClassList("cb-hidden", !regionActive || HomeValleyBuildMode.Current?.IsOpen == true || Kit.UiEscapeStack.CurrentPage != null);
             if (!regionActive)
             {
                 _panel.EnableInClassList("cb-hidden", true);

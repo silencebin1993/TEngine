@@ -479,7 +479,7 @@ namespace BinGames.Sim.Combat
         None = 0,
         /// <summary>需要一条路线：下一次推进移动时发出请求。</summary>
         NeedRoute = 1,
-        /// <summary>请求已发出，等寻路内核按固定延迟交回结果（这期间原地等待，不走直线）。</summary>
+        /// <summary>请求已发出，等寻路内核按固定延迟交回结果；有旧路线时继续沿它移动，否则原地等待。</summary>
         Awaiting = 2,
         /// <summary>沿路线走。</summary>
         Following = 3,

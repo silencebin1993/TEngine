@@ -50,6 +50,9 @@ public partial class GameApp
         // 开发与发行标准都是最低 120 帧：冷启动就关垂直同步并应用目标帧率（默认 120），不等进入玩法后的设置面板。
         GameLogic.Settings.FramePacing.ApplyStored();
 
+        // 正式界面默认不叠放开发 FPS 窗口，避免遮住资源 HUD。
+        if (Debugger.Instance != null) Debugger.Instance.enabled = false;
+
         FixUiRootReferenceResolution();
 
         // ER2-BOOT-01：冷启动第一屏必须是《地球归还》正式主菜单（新建/继续/读取/设置/退出），

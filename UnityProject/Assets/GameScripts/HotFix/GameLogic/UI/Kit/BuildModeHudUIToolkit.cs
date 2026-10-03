@@ -76,6 +76,12 @@ namespace GameLogic.UI.Kit
         private Label _undoHint;
         private Label _generating;
         private VisualElement _hotbar;
+        private VisualElement _catalogue;
+        private VisualElement _tools;
+        private Button _catalogueToggle;
+        private bool _catalogueExpanded = true;
+        private bool _wasOpen;
+        private string _lastPlacementChoice;
         private UiSearchBox _search;
         private readonly List<Button> _items = new List<Button>();
         private readonly List<string> _itemIds = new List<string>();
@@ -174,6 +180,15 @@ namespace GameLogic.UI.Kit
             _undoHint = root.Q<Label>("BuildUndoHint");
             _generating = root.Q<Label>("BuildGenerating");
             _hotbar = root.Q<VisualElement>("BuildHotbar");
+            _catalogue = root.Q<VisualElement>("BuildCatalogue");
+            _tools = root.Q<VisualElement>("BuildTools");
+            _catalogueToggle = root.Q<Button>("BuildCatalogueToggle");
+            _catalogueToggle.clicked += () =>
+            {
+                _catalogueExpanded = !_catalogueExpanded;
+                _lastKey = null;
+                Refresh();
+            };
             _items.Clear();
             _itemIds.Clear();
             _catButtons.Clear();
@@ -474,14 +489,29 @@ namespace GameLogic.UI.Kit
             bool homeObserved = Stage.GameRoot.HomeValley != null && Stage.GameRoot.HomeValley.IsActive;
             bool available = mode != null && state != null && homeObserved && InputRouter.Scope == InputScope.Strategy && !InputRouter.ModalUiOpen;
             bool open = mode != null && mode.IsOpen;
+            if (open && !_wasOpen) _catalogueExpanded = true;
+            string placementChoice = open ? mode.SelectedEntryId ?? mode.SelectedToolId
+                ?? (mode.DemolishMode ? "demolish" : mode.RelocateMode ? "relocate" : mode.PrioritizeMode ? "prioritize"
+                    : mode.ClearMode ? "clear" : mode.CopyMode ? "copy" : mode.PasteMode ? "paste"
+                    : mode.UpgradeMode ? "upgrade" : mode.SettingsMode ? "settings" : null) : null;
+            if (placementChoice != null && placementChoice != _lastPlacementChoice) _catalogueExpanded = false;
+            _lastPlacementChoice = placementChoice;
+            _wasOpen = open;
+            SetVisible(_catalogue, _catalogueExpanded);
+            SetVisible(_tools, _catalogueExpanded);
+            SetVisible(_undoHint, _catalogueExpanded);
+            SetVisible(_placeholder, _catalogueExpanded);
+            _panel.EnableInClassList("bm-panel-compact", !_catalogueExpanded);
+            _catalogueToggle.text = GameText.Get("ui.build.title") + (_catalogueExpanded ? " [-]" : " [+]");
             int layer = LayerFor(open);
             if (Document != null && Document.sortingOrder != layer)
             {
                 Document.sortingOrder = layer;
             }
-            SetVisible(_entry, available && !open);
-            SetVisible(_panel, open);
-            SetVisible(_hotbar, (available || open) && _slots.Count > 0);
+            SetVisible(_entry, available && !open && UiEscapeStack.CurrentPage == null);
+            bool unobstructed = !InputRouter.PanelModalOpen && UiEscapeStack.CurrentPage == null;
+            SetVisible(_panel, open && unobstructed);
+            SetVisible(_hotbar, (available || open) && unobstructed && _slots.Count > 0);
             if (!open && _newShown.Count > 0)
             {
                 FlushNewSeen(state); // 退出建造模式：这一页显示过的“新”条目记为看过。

@@ -33,6 +33,9 @@ namespace GameLogic.UI.Common
         private PanelSettings _panelSettings;
         private VisualElement _root;
         private VisualElement _panel;
+        private ScrollView _details;
+        private Button _detailsButton;
+        private bool _detailsOpen;
         private Label _titleLabel;
         private Label _availableLabel;
         private Label _reservedLabel;
@@ -99,18 +102,29 @@ namespace GameLogic.UI.Common
             _panel.style.display = DisplayStyle.None; // 默认隐藏，Update() 按当前是否在归还谷地决定。
             _root.Add(_panel);
 
+            _detailsButton = new Button(() => SetDetailsOpen(!_detailsOpen)) { text = "资源账本 · 展开详情" };
+            _detailsButton.style.color = Color.white;
+            _detailsButton.style.backgroundColor = new Color(0.11f, 0.18f, 0.22f, 0.9f);
+            _detailsButton.style.fontSize = 14;
+            _detailsButton.style.minHeight = 28;
+            _panel.Add(_detailsButton);
+            _details = new ScrollView();
+            _details.style.maxHeight = 180;
+            _details.style.display = DisplayStyle.None;
+            _panel.Add(_details);
+
             _titleLabel = new Label("废料账本");
             _titleLabel.style.color = Color.white;
             _titleLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
-            _panel.Add(_titleLabel);
+            _details.Add(_titleLabel);
 
             _availableLabel = new Label();
             _availableLabel.style.color = Color.white;
-            _panel.Add(_availableLabel);
+            _details.Add(_availableLabel);
 
             _reservedLabel = new Label();
             _reservedLabel.style.color = new Color(0.85f, 0.85f, 0.6f);
-            _panel.Add(_reservedLabel);
+            _details.Add(_reservedLabel);
 
             for (int i = 0; i < RecentCount; i++)
             {
@@ -119,31 +133,31 @@ namespace GameLogic.UI.Common
                 label.style.fontSize = 11;
                 label.style.display = DisplayStyle.None;
                 _recentLabels[i] = label;
-                _panel.Add(label);
+                _details.Add(label);
             }
 
             _powerLabel = new Label();
             _powerLabel.style.color = Color.white;
             _powerLabel.style.marginTop = 4;
-            _panel.Add(_powerLabel);
+            _details.Add(_powerLabel);
 
             _brownoutLabel = new Label();
             _brownoutLabel.style.color = new Color(0.95f, 0.4f, 0.35f);
             _brownoutLabel.style.fontSize = 11;
             _brownoutLabel.style.display = DisplayStyle.None;
-            _panel.Add(_brownoutLabel);
+            _details.Add(_brownoutLabel);
 
             // ER5-SIG-01：信号带宽此前只有数据（HomeValleyPowerGrid.Recompute 正确计算），
             // 从未在任何 HUD 展示——"塔停电时带宽回落"缺一个真实可见的地方。
             _signalLabel = new Label();
             _signalLabel.style.color = Color.white;
             _signalLabel.style.marginTop = 4;
-            _panel.Add(_signalLabel);
+            _details.Add(_signalLabel);
 
             _storageLabel = new Label();
             _storageLabel.style.color = Color.white;
             _storageLabel.style.marginTop = 4;
-            _panel.Add(_storageLabel);
+            _details.Add(_storageLabel);
 
             // FG0-UX-01（FGR-UX-030 / FG-GAP-003）：电力与信号带宽是复合数值，悬停展开来源（与电网仲裁同一份数据）。
             Kit.UiTooltip.Attach(_powerLabel, () => HomeValueBreakdown.Power(CampaignSession.Current));
@@ -155,7 +169,17 @@ namespace GameLogic.UI.Common
             _groundItemsLabel.style.color = new Color(0.95f, 0.75f, 0.35f);
             _groundItemsLabel.style.fontSize = 11;
             _groundItemsLabel.style.display = DisplayStyle.None;
-            _panel.Add(_groundItemsLabel);
+            _details.Add(_groundItemsLabel);
+        }
+
+        public void SetDetailsOpen(bool open)
+        {
+            if (_details == null || open == _detailsOpen) return;
+            _detailsOpen = open;
+            _details.style.display = open ? DisplayStyle.Flex : DisplayStyle.None;
+            _detailsButton.text = open ? "资源账本 · 收起详情" : "资源账本 · 展开详情";
+            if (open) Kit.UiEscapeStack.Push(this, () => SetDetailsOpen(false));
+            else Kit.UiEscapeStack.Remove(this);
         }
 
         private void Update()
@@ -167,6 +191,7 @@ namespace GameLogic.UI.Common
 
             bool active = GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive;
             _panel.style.display = active ? DisplayStyle.Flex : DisplayStyle.None;
+            if (!active || HomeValleyBuildMode.Current?.IsOpen == true) SetDetailsOpen(false);
             if (!active)
             {
                 return;
@@ -273,6 +298,7 @@ namespace GameLogic.UI.Common
 
         private void OnDestroy()
         {
+            Kit.UiEscapeStack.Remove(this);
             if (_panelSettings != null)
             {
                 GameModule.Resource.UnloadAsset(_panelSettings);

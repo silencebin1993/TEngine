@@ -61,7 +61,6 @@ namespace GameLogic.UI.Kit
             Bind(root, "PauseKeyBindings", "ui.pause.keybinds", KeyBindingsPanelUIToolkit.Open);
             Bind(root, "PauseNotifications", "ui.pause.notifications", () =>
             {
-                SetOpen(false);
                 NotificationHudUIToolkit.OpenCenter();
             });
             // FG1-HUD-01（FGU-05）：图鉴入口——机制图鉴盖在暂停菜单上面，关掉回到暂停菜单。
@@ -262,7 +261,7 @@ namespace GameLogic.UI.Kit
 
         private static string Percent(float v) => UnityEngine.Mathf.RoundToInt(v * 100f).ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-        private static Button Bind(VisualElement root, string name, string textKey, System.Action onClick)
+        private Button Bind(VisualElement root, string name, string textKey, System.Action onClick)
         {
             Button b = root.Q<Button>(name);
             if (b == null)
@@ -270,7 +269,7 @@ namespace GameLogic.UI.Kit
                 return null;
             }
             b.text = GameText.Get(textKey);
-            b.clicked += onClick;
+            b.clicked += () => UiEscapeStack.OpenChild(this, onClick);
             return b;
         }
 

@@ -74,7 +74,8 @@ namespace GameLogic.UI.Common
         /// </summary>
         private static bool IsPointerOverRegisteredWindow()
         {
-            Vector2 screenTopLeft = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
+            Vector3 pointer = InputRouter.Reader.MousePosition;
+            Vector2 screenTopLeft = new Vector2(pointer.x, Screen.height - pointer.y);
             for (int i = RegisteredWindows.Count - 1; i >= 0; i--)
             {
                 VisualElement window = RegisteredWindows[i];
@@ -192,7 +193,7 @@ namespace GameLogic.UI.Common
         {
             for (VisualElement current = element; current != null; current = current.parent)
             {
-                if (current.resolvedStyle.display == DisplayStyle.None)
+                if (current.resolvedStyle.display == DisplayStyle.None || current.resolvedStyle.visibility == Visibility.Hidden)
                 {
                     return false;
                 }

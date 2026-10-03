@@ -1520,13 +1520,12 @@ namespace BinGames.Sim.Combat
             d.RouteIdx[i] = 0;
         }
 
-        /// <summary>发出一条寻路请求（序号递增；单位转为“等路线”，原地等待固定延迟后的结果）。</summary>
+        /// <summary>发出一条寻路请求（序号递增；等固定延迟后的结果，有旧路线时继续沿它移动）。</summary>
         private static void EmitNavRequest(ref CombatData d, int i, int2 goal, byte flags)
         {
             CombatScalars s = d.Scalars[0];
             s.NextNavSerial++;
             d.Scalars[0] = s;
-            DropRoute(ref d, i);
             d.NavSerial[i] = s.NextNavSerial;
             d.NavSt[i] = (byte)CombatNavState.Awaiting;
             d.NavFail[i] = 0;
@@ -1610,7 +1609,7 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>
-        /// 寻路地点的移动命令（移动 / 守备 / 撤退 / 工作赶路）：需要路线时发请求并原地等；拿到路线沿路点走；失败以“无法到达”结束。
+        /// 寻路地点的移动命令（移动 / 守备 / 撤退 / 工作赶路）：需要路线时发请求，有旧路线则继续走；拿到新路线替换；失败以“无法到达”结束。
         /// 到达判定与 Demo 一致（进入到达半径；工作赶路对齐到目标点），但只在最后一段（直线可见终点）上判，不会隔着墙“到达”。
         /// </summary>
         private static bool TickNavMove(ref CombatData d, int i, ref CombatCommand cmd, float dt, out CombatEndReason reason)
@@ -1625,6 +1624,7 @@ namespace BinGames.Sim.Combat
                 {
                     if (cmd.Kind == CombatCommandKind.Guard)
                     {
+                        DropRoute(ref d, i);
                         return false;
                     }
                     if (cmd.Kind == CombatCommandKind.WorkMove)
@@ -1635,10 +1635,15 @@ namespace BinGames.Sim.Combat
                     return true;
                 }
                 EmitNavRequest(ref d, i, CellOf(cmd.Pos), 0);
-                return false;
+                st = CombatNavState.Awaiting;
             }
             if (st == CombatNavState.Awaiting)
             {
+                if (d.RouteLen[i] > 0)
+                {
+                    // 不以旧终点判定新命令完成，也不把寻路延迟计入停滞看门狗。
+                    FollowRoute(ref d, i, d.Speed[i], dt);
+                }
                 return false;
             }
             if (st == CombatNavState.Failed)
@@ -1824,13 +1829,14 @@ namespace BinGames.Sim.Combat
             d.Scalars[0] = s;
         }
 
-        /// <summary>地形变化后：沿路线走的单位，剩余路线上出现了走不了的格子就重新要路线（从当前位置）。返回失效的单位数。</summary>
+        /// <summary>地形变化后：剩余路线被挡时丢弃；正在等新路线的请求保留，其余重新要路线。返回失效的单位数。</summary>
         public static int InvalidateBlockedRoutes(ref CombatData d)
         {
             int n = 0;
             for (int i = 0; i < d.Count; i++)
             {
-                if (!d.IsAlive(i) || d.NavSt[i] != (byte)CombatNavState.Following)
+                var st = (CombatNavState)d.NavSt[i];
+                if (!d.IsAlive(i) || d.RouteLen[i] == 0 || (st != CombatNavState.Following && st != CombatNavState.Awaiting))
                 {
                     continue;
                 }
@@ -1854,7 +1860,10 @@ namespace BinGames.Sim.Combat
                     continue;
                 }
                 DropRoute(ref d, i);
-                d.NavSt[i] = (byte)CombatNavState.NeedRoute;
+                if (st != CombatNavState.Awaiting)
+                {
+                    d.NavSt[i] = (byte)CombatNavState.NeedRoute;
+                }
                 n++;
             }
             return n;

@@ -52,6 +52,7 @@
   <Project Path="Unity.AppUI.Navigation.Editor.csproj" />
   <Project Path="Unity.Serialization.csproj" />
   <Project Path="Assembly-CSharp-Editor.csproj" />
+  <Project Path="BinGames.TerrainVisual.csproj" />
   <Project Path="Unity.AI.Image.csproj" />
   <Project Path="Unity.Rider.Editor.csproj" />
   <Project Path="Unity.AI.Generators.IO.csproj" />
@@ -67,7 +68,6 @@
   <Project Path="Unity.Burst.Editor.csproj" />
   <Project Path="glTFast.Newtonsoft.csproj" />
   <Project Path="glTFast.Documentation.Examples.csproj" />
-  <Project Path="BinGames.TerrainVisual.csproj" />
   <Project Path="Unity.AI.Generators.Redux.csproj" />
   <Project Path="Unity.AI.Toolkit.Accounts.csproj" />
   <Project Path="Unity.AI.Generators.UI.csproj" />

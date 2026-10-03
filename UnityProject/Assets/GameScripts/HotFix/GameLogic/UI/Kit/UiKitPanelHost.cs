@@ -35,7 +35,7 @@ namespace GameLogic.UI.Kit
         {
             foreach (object owner in GameLogic.Core.InputRouter.ModalOwnerList)
             {
-                if (owner is UiKitPanelHost host && host != null && host.Layer > order)
+                if (owner is UiKitPanelHost host && host != null && !UiEscapeStack.IsPageSuspended(host) && host.Layer > order)
                 {
                     return true;
                 }
@@ -73,6 +73,7 @@ namespace GameLogic.UI.Kit
             Root = _document.rootVisualElement;
             Root.pickingMode = PickingMode.Ignore;
             UiTextFocusProbe.Register(Root);
+            UiEscapeStack.RegisterPage(this, Root);
             OnReady(Root);
         }
 
@@ -81,6 +82,7 @@ namespace GameLogic.UI.Kit
 
         protected virtual void OnDestroy()
         {
+            UiEscapeStack.UnregisterPage(this);
             if (_visualTree != null)
             {
                 GameModule.Resource.UnloadAsset(_visualTree);

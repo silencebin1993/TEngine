@@ -686,7 +686,7 @@ namespace GameLogic.Campaign.Regions
         /// 独立于机器选中/移动指令——面板是管理界面，不要求玩家先选一台机器才能打开。</summary>
         private bool _factoryPanelOpen;
         public bool IsFactoryPanelOpen => _factoryPanelOpen;
-        public void SetFactoryPanelOpen(bool open) => _factoryPanelOpen = open;
+        public void SetFactoryPanelOpen(bool open) => SetHomePanelOpen(ref _factoryPanelOpen, open);
 
         /// <summary>ER5-EXP-01：远征准备面板开关状态。点击已修复（Operational）的信号塔切换（见
         /// <see cref="HandleSelectionClick"/>）——同一栋建筑 Damaged 时点击仍走既有"修复"下令路径，
@@ -696,34 +696,44 @@ namespace GameLogic.Campaign.Regions
         /// 专属"远征闸门"建筑物，避免内容锁定表再加一条无预算的新建筑。</summary>
         private bool _expeditionPrepPanelOpen;
         public bool IsExpeditionPrepPanelOpen => _expeditionPrepPanelOpen;
-        public void SetExpeditionPrepPanelOpen(bool open) => _expeditionPrepPanelOpen = open;
+        public void SetExpeditionPrepPanelOpen(bool open) => SetHomePanelOpen(ref _expeditionPrepPanelOpen, open);
 
         /// <summary>ER7-BEACON-01：信标启动确认面板开关状态——同 <see cref="IsExpeditionPrepPanelOpen"/>
         /// 先例，E 交互 `Complete` 只负责打开面板（"二次确认"的第一次确认已经是"按住E"本身，面板里的
         /// 确认按钮才是第二次），真正调用 <see cref="HomeValleyBeacon.TryStartLaunch"/> 的是面板按钮。</summary>
         private bool _beaconLaunchPanelOpen;
         public bool IsBeaconLaunchPanelOpen => _beaconLaunchPanelOpen;
-        public void SetBeaconLaunchPanelOpen(bool open) => _beaconLaunchPanelOpen = open;
+        public void SetBeaconLaunchPanelOpen(bool open) => SetHomePanelOpen(ref _beaconLaunchPanelOpen, open);
 
         /// <summary>ER4-PRIM-02：电路板面板开关状态，由 <c>CircuitBoardPanelUIToolkit</c> 自身的常驻
         /// 切换按钮驱动（不占用建筑点选路由——正式"家园蓝图"容器入口留 ER4-BLP-01，本 Story 先提供一个
         /// 独立可达的入口，不强求等那个容器落地才能测试/使用电路板）。</summary>
         private bool _circuitBoardPanelOpen;
         public bool IsCircuitBoardPanelOpen => _circuitBoardPanelOpen;
-        public void SetCircuitBoardPanelOpen(bool open) => _circuitBoardPanelOpen = open;
+        public void SetCircuitBoardPanelOpen(bool open) => SetHomePanelOpen(ref _circuitBoardPanelOpen, open);
 
         /// <summary>ER4-PRIM-04：合成台面板开关状态，同 <see cref="IsCircuitBoardPanelOpen"/> 先例——
         /// 自带常驻切换按钮，不占用建筑点选路由。</summary>
         private bool _craftStationPanelOpen;
         public bool IsCraftStationPanelOpen => _craftStationPanelOpen;
-        public void SetCraftStationPanelOpen(bool open) => _craftStationPanelOpen = open;
+        public void SetCraftStationPanelOpen(bool open) => SetHomePanelOpen(ref _craftStationPanelOpen, open);
 
         /// <summary>ER6-ANA-01：解析台面板开关状态——同 <see cref="IsExpeditionPrepPanelOpen"/> 先例，
         /// 点击已修复（Operational）的解析台建筑切换（专属建筑，不像装配站要身兼三职，不需要常驻
         /// 切换按钮那一套）。</summary>
         private bool _analysisPanelOpen;
         public bool IsAnalysisPanelOpen => _analysisPanelOpen;
-        public void SetAnalysisPanelOpen(bool open) => _analysisPanelOpen = open;
+        public void SetAnalysisPanelOpen(bool open) => SetHomePanelOpen(ref _analysisPanelOpen, open);
+
+        private void SetHomePanelOpen(ref bool panel, bool open)
+        {
+            if (open)
+            {
+                _factoryPanelOpen = _expeditionPrepPanelOpen = _beaconLaunchPanelOpen = false;
+                _circuitBoardPanelOpen = _craftStationPanelOpen = _analysisPanelOpen = false;
+            }
+            panel = open;
+        }
 
         /// <summary>供工作单面板"点击定位"（AC-UI-003）调用：把选中切到该订单当前指派的机器并高亮，
         /// 与鼠标直接点机器同一套视觉反馈。订单尚未指派机器（Ready/Waiting）时无具体对象可定位，
@@ -2265,21 +2275,21 @@ namespace GameLogic.Campaign.Regions
             string earlyBuildingTypeId = BuildingTypeIdFromHit(hit);
             if (earlyBuildingTypeId == HomeValleyLayout.BuildingTypeAssemblyStation)
             {
-                _factoryPanelOpen = !_factoryPanelOpen;
+                SetFactoryPanelOpen(!_factoryPanelOpen);
                 return;
             }
 
             // ER5-EXP-01：信号塔已修复（Operational）时点击切换远征准备面板。
             if (earlyBuildingTypeId == HomeValleyLayout.BuildingTypeSignalTower && IsOperational(HomeValleyLayout.BuildingTypeSignalTower))
             {
-                _expeditionPrepPanelOpen = !_expeditionPrepPanelOpen;
+                SetExpeditionPrepPanelOpen(!_expeditionPrepPanelOpen);
                 return;
             }
 
             // ER6-ANA-01：解析台已修复（Operational）时点击切换解析面板。
             if (earlyBuildingTypeId == HomeValleyLayout.BuildingTypeAnalysisBench && IsOperational(HomeValleyLayout.BuildingTypeAnalysisBench))
             {
-                _analysisPanelOpen = !_analysisPanelOpen;
+                SetAnalysisPanelOpen(!_analysisPanelOpen);
                 return;
             }
 

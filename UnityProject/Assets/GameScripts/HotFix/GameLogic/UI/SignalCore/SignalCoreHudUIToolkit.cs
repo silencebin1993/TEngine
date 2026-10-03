@@ -46,6 +46,7 @@ namespace GameLogic.UI.SignalCore
         private static bool _openRequested;
 
         private VisualElement _hudBar;
+        private VisualElement _hudStack;
         private Label _location;
         private Label _uplinkStatus;
         private int _uplinkKey;
@@ -256,6 +257,7 @@ namespace GameLogic.UI.SignalCore
         public void BindView(VisualElement root)
         {
             _hudBar = root.Q<VisualElement>("SignalHudBar");
+            _hudStack = root.Q<VisualElement>("SignalHudStack");
             _location = root.Q<Label>("SignalLocation");
             _uplinkStatus = root.Q<Label>("SignalUplinkStatus");
             _entry = root.Q<Button>("SignalCoreEntry");
@@ -534,6 +536,8 @@ namespace GameLogic.UI.SignalCore
                 SetOpen(false);
             }
             SetVisible(_hudBar, s != null && (inWorld || IsOpen));
+            SetVisible(_hudStack, inWorld && UiEscapeStack.CurrentPage == null && !InputRouter.PanelModalOpen
+                && GameLogic.Campaign.Regions.HomeValleyBuildMode.Current?.IsOpen != true);
             SetVisible(_jumpBar, s != null && inWorld);
             RefreshUplinkStatus(s, inWorld);
             _uplinkHud.Refresh(s, inWorld);

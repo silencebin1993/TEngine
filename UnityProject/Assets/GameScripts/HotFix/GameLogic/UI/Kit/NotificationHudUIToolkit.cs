@@ -35,6 +35,7 @@ namespace GameLogic.UI.Kit
         private readonly List<string> _typeIds = new List<string>();
 
         private VisualElement _column;
+        private VisualElement _objectiveHud;
         private VisualElement _toastList;
         private Button _entryButton;
         private VisualElement _center;
@@ -262,6 +263,18 @@ namespace GameLogic.UI.Kit
             }
         }
 
+        private void LateUpdate()
+        {
+            if (_column == null || Root?.panel == null) return;
+            if (_objectiveHud == null || _objectiveHud.panel != Root.panel)
+                _objectiveHud = Root.panel.visualTree.Q<VisualElement>("ObjectiveHudRoot");
+            bool belowObjective = _objectiveHud != null && _objectiveHud.resolvedStyle.display != DisplayStyle.None
+                && _objectiveHud.worldBound.height > 0f;
+            _column.style.top = belowObjective
+                ? new StyleLength(_objectiveHud.worldBound.yMax - Root.worldBound.yMin + 12f)
+                : new StyleLength(StyleKeyword.Null);
+        }
+
         // ── 弹出条 ───────────────────────────────────────────────────────
 
         private void RenderEntryButton()
@@ -277,6 +290,7 @@ namespace GameLogic.UI.Kit
         public void RenderToasts()
         {
             IReadOnlyList<NotificationEntry> toasts = NotificationCenter.Toasts;
+            _toastList.EnableInClassList("uk-hidden", toasts.Count == 0);
             while (_toastPool.Count < toasts.Count)
             {
                 _toastPool.Add(MakeToast());

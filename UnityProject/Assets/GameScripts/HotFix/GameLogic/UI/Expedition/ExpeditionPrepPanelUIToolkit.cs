@@ -116,7 +116,8 @@ namespace GameLogic.UI.Expedition
             _signalCoreSummaryLabel = _root.Q<Label>("SignalCoreSummaryLabel");
             _signalCoreEditButton = _root.Q<Button>("SignalCoreEditButton");
             _signalCoreReminderLabel = _root.Q<Label>("SignalCoreReminderLabel");
-            _signalCoreEditButton.clicked += GameLogic.Campaign.Signal.SignalCoreService.RequestPanelOpen;
+            _signalCoreEditButton.clicked += () => Kit.UiEscapeStack.OpenChild(this,
+                GameLogic.Campaign.Signal.SignalCoreService.RequestPanelOpen);
 
             for (int i = 0; i < MaxRows; i++)
             {

@@ -89,6 +89,9 @@ namespace GameLogic.UI.Kit
         public static bool IsEditableText(VisualElement element)
         {
             for (VisualElement e = element; e != null; e = e.parent)
+                if (!e.enabledInHierarchy || e.resolvedStyle.display == DisplayStyle.None
+                    || e.resolvedStyle.visibility == Visibility.Hidden) return false;
+            for (VisualElement e = element; e != null; e = e.parent)
             {
                 if (e is TextField textField)
                 {
