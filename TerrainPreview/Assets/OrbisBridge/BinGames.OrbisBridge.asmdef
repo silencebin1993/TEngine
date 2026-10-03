@@ -1,0 +1,5 @@
+{
+  "name":"BinGames.OrbisBridge",
+  "references":["BinGames.TerrainVisual","NewAssembly","Unity.Entities","Unity.Transforms","Unity.Collections","Unity.Mathematics","Unity.Core"],
+  "autoReferenced":true
+}

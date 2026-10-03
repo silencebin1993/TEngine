@@ -1,0 +1,5 @@
+{
+  "name": "BinGames.TerrainVisual.Editor",
+  "references": ["BinGames.TerrainVisual"],
+  "includePlatforms": ["Editor"]
+}
