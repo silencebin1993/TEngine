@@ -4,7 +4,7 @@ $terrainLinks = @{
     "Assets/TerrainVisual" = "UnityProject/Assets/GameScripts/Main/TerrainVisual"
     "Assets/TerrainEditor" = "UnityProject/Assets/Editor/TerrainVisual"
     "Assets/GameRes/Raw/TerrainLab" = "UnityProject/Assets/GameRes/Raw/TerrainLab"
-    "Assets/Orbis/Orbis_Terrains" = "UnityProject/Assets/GameRes/Art/Terrain/ThirdParty/Orbis_Terrains"
+    "Assets/Orbis/Orbis_Terrains" = "UnityProject/Assets/GameRes/Art/Terrain/.ThirdParty/Orbis_Terrains"
 }
 foreach ($terrainRelativePath in $terrainLinks.Keys) {
     $terrainLinkPath = Join-Path $PSScriptRoot $terrainRelativePath

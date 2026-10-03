@@ -49,7 +49,7 @@ WASD 移动，右键转动镜头，滚轮前后，Q/E 升降，Shift 加速，�
 
 此预览工程的代码、地形素材和 Orbis 依赖连接到同 worktree 的正式源代码与 GameRes，避免维护两份实现。
 如果重新检出工程，先初始化 `UnityProject/Assets/GameRes` 内容子模块，再执行 `PreparePreview.ps1`；它只创建缺失链接和对应的元数据，不覆盖已有目录。
-Orbis 原始资源备份于本地内容仓的 `Art/Terrain/ThirdParty/Orbis_Terrains`，按用户已取得的授权使用；GitHub 代码仓不收录该库源码、演示素材、Unity 恢复场景或试玩构建产物。
+Orbis 原始资源备份于本地内容仓的 `Art/Terrain/.ThirdParty/Orbis_Terrains`，按用户已取得的授权使用；隐藏备份目录不参与主工程导入，仅通过预览工程链接使用。GitHub 代码仓不收录该库源码、演示素材、Unity 恢复场景或试玩构建产物。
 通过「地球归还 → 地形 → 建立测试场景」重新建立场景和运行验收；通过「生成独立试玩版」重建 Windows 试玩包。
 Blender 中运行 `TerrainKitSource.py` 可更新基础 11 个部件；运行 `TerrainDetailSource.py` 可更新新增 19 个建筑与环境部件。
 两份脚本仅修改本工具拥有的对象，分别导出 FBX；完成后保存当前源文件。
