@@ -959,8 +959,9 @@ namespace GameLogic.Campaign.Regions
             _selectionRings.Clear();
         }
 
-        /// <summary>选择集里每台正在执行命令的机器各画一条路线（寻路地点沿内核路点折线，Demo 表面为直线）和一个终点标记。
-        /// 开销 O(选择集 × 路点)，只在被观察时；选择集超过 <see cref="MaxRingVisuals"/> 时只画前面这些。</summary>
+        /// <summary>选择集里每台正在执行命令的机器各画一条目的地连线和一个终点标记。
+        /// 点击即确定目标，异步寻路回传不改变线形；实际绕障路线仍由内核执行。
+        /// 开销 O(选择集)，只在被观察时；选择集超过 <see cref="MaxRingVisuals"/> 时只画前面这些。</summary>
         private void UpdateDestinationVisual()
         {
             if (_ctx?.VisualRoot == null)
@@ -1005,10 +1006,6 @@ namespace GameLogic.Campaign.Regions
         }
 
         private readonly List<int> _removeScratch = new List<int>(32);
-        private readonly List<Unity.Mathematics.double2> _routeScratch = new List<Unity.Mathematics.double2>(32);
-        private readonly List<Vector3> _pointScratch = new List<Vector3>(34);
-        /// <summary>一条路线最多画几个路点（超出的只画前面这些，终点标记照常）。</summary>
-        private const int MaxRoutePoints = 32;
         private const float RouteHeight = 0.06f;
 
         private void DrawRoute(int id, HomeValleyMachineMarker marker, RegionCommandKind kind, Vector2 target)
@@ -1030,28 +1027,10 @@ namespace GameLogic.Campaign.Regions
             }
             line.sharedMaterial = ViewMaterials.Get("Sprites/Default", new Color(color.r, color.g, color.b, 0.85f));
 
-            _routeScratch.Clear();
-            if (_ctx.Site != null && _ctx.Site.NavEnabled)
-            {
-                _ctx.Site.CopyRoute(marker.UnitId, _routeScratch);
-            }
-            if (_routeScratch.Count == 0)
-            {
-                _routeScratch.Add(new Unity.Mathematics.double2(target.x, target.y));
-            }
-            _pointScratch.Clear();
             Vector3 from = marker.Position3;
-            _pointScratch.Add(new Vector3(from.x, RouteHeight, from.z));
-            int n = Mathf.Min(_routeScratch.Count, MaxRoutePoints);
-            for (int k = 0; k < n; k++)
-            {
-                _pointScratch.Add(new Vector3((float)_routeScratch[k].x, RouteHeight, (float)_routeScratch[k].y));
-            }
-            line.positionCount = _pointScratch.Count;
-            for (int k = 0; k < _pointScratch.Count; k++)
-            {
-                line.SetPosition(k, _pointScratch[k]);
-            }
+            line.positionCount = 2;
+            line.SetPosition(0, new Vector3(from.x, RouteHeight, from.z));
+            line.SetPosition(1, new Vector3(target.x, RouteHeight, target.y));
 
             if (!_routeEnds.TryGetValue(id, out GameObject end) || end == null)
             {
@@ -1063,8 +1042,7 @@ namespace GameLogic.Campaign.Regions
                 _routeEnds[id] = end;
             }
             end.GetComponent<Renderer>().sharedMaterial = ViewMaterials.Standard(color);
-            Vector3 last = _pointScratch[_pointScratch.Count - 1];
-            end.transform.position = new Vector3(last.x, 0.04f, last.z);
+            end.transform.position = new Vector3(target.x, 0.04f, target.y);
         }
 
         private void ReleaseRoute(int id)

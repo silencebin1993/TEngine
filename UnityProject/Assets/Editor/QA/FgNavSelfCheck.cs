@@ -125,6 +125,7 @@ namespace GameLogic.EditorTools
                 Step(CheckCombatRouteCutAndSnapshot);
                 Step(CheckSeparation);
                 Step(CheckHomeDetourAndCut);
+                Step(CheckCommandDestinationVisual);
                 Step(CheckWorkOrderUnreachable);
                 Step(CheckSquadUnreachableAndFog);
                 Step(CheckSquadCommandNotHijacked);
@@ -1578,6 +1579,99 @@ namespace GameLogic.EditorTools
             Expect(placed.Success && arrived && neverBlocked && NavService.Kernel.Invalidated > invalidBefore,
                 $"赶路途中前方新放了一座建筑（{placed.Outcome}）：路线被截断 → 重新规划（失效 {NavService.Kernel.Invalidated - invalidBefore} 次），第 {steps} 步绕过去到达，不穿过新建筑" +
                 Why((placed.Success, "放置失败：" + placed.Describe()), (arrived, "没到达"), (neverBlocked, "踏进了不可通行格"), (NavService.Kernel.Invalidated > invalidBefore, "路线没失效重算")));
+        }
+
+        private static void CheckCommandDestinationVisual()
+        {
+            CampaignState s = NewCampaign(8801);
+            HomeValleyController home = WorldSimulation.LoadHome(resume: false);
+            GridCell core = HomeGridService.CorePivot(s);
+            HomeGridService.TryGetCoreBounds(s, out GridCell cmin, out GridCell cmax);
+            var start = new Vector2(cmin.X - 3, core.Y);
+            var target = new Vector2(cmax.X + 3, core.Y);
+            int id = SpawnHomeMachine(s, start);
+            if (!home.Combat.TryGetMachineMarker(id, out HomeValleyMachineMarker marker))
+            {
+                Fail("目的地指示线测试机器未进入战斗内核");
+                return;
+            }
+
+            home.SetObserved(true);
+            InputRouter.SetScope(InputScope.Strategy);
+            InputRouter.DebugSetReader(new SilentReader());
+            try
+            {
+                home.SquadCommands.SelectSingle(id);
+                long clickedAt = GameClock.Ticks;
+                home.SquadCommands.IssueMoveTo(target, paused: false);
+                home.FrameUpdate(0f, 0f);
+                LineRenderer line = GameObject.Find($"SquadCommandPath_{id}")?.GetComponent<LineRenderer>();
+                GameObject end = GameObject.Find($"SquadCommandDestination_{id}");
+                bool Matches(Vector2 destination)
+                {
+                    if (line == null || end == null || line.positionCount != 2)
+                    {
+                        return false;
+                    }
+                    Vector3 from = line.GetPosition(0);
+                    Vector3 to = line.GetPosition(1);
+                    Vector3 pin = end.transform.position;
+                    return Vector2.Distance(new Vector2(from.x, from.z), marker.Position) < 0.001f
+                        && Vector2.Distance(new Vector2(to.x, to.z), destination) < 0.001f
+                        && Vector2.Distance(new Vector2(pin.x, pin.z), destination) < 0.001f;
+                }
+                Expect(GameClock.Ticks == clickedAt && Matches(target),
+                    "目的地指示线：命令当帧、尚未推进寻路模拟步时，连线和终点已落在点击目标");
+
+                bool stable = true;
+                bool neverBlocked = true;
+                int maxWaypoints = 0;
+                var route = new List<double2>();
+                for (int step = 0; step < 30; step++)
+                {
+                    WorldSimulation.StepMany(1);
+                    home.FrameUpdate(0f, 0f);
+                    stable &= Matches(target);
+                    neverBlocked &= TryUnitPos(marker, out double2 p) && Passable(CellOf(p));
+                    home.Combat.CopyRoute(marker.UnitId, route);
+                    maxWaypoints = Math.Max(maxWaypoints, route.Count);
+                }
+                Expect(stable && neverBlocked && maxWaypoints >= 2 && Vector2.Distance(marker.Position, start) > 0.1f,
+                    $"目的地指示线：后台生成绕核心路线（最多 {maxWaypoints} 路点）后线形不二次刷新，起点随机器移动，实际移动未踏入障碍");
+
+                clickedAt = GameClock.Ticks;
+                home.SquadCommands.IssueMoveTo(start, paused: false);
+                home.FrameUpdate(0f, 0f);
+                bool retargeted = GameClock.Ticks == clickedAt && Matches(start);
+                for (int step = 0; step < 20; step++)
+                {
+                    WorldSimulation.StepMany(1);
+                    home.FrameUpdate(0f, 0f);
+                    retargeted &= Matches(start);
+                }
+                Expect(retargeted,
+                    "目的地指示线：移动中换点当帧更新终点，新寻路结果回传后保持新目标，不闪回旧路线");
+
+                home.SquadCommands.CancelCommandFor(id);
+                home.FrameUpdate(0f, 0f);
+                bool cancelled = home.SquadCommands.VisibleRouteCount == 0 && line == null && end == null;
+                home.SquadCommands.IssueMoveTo(target, paused: false);
+                home.FrameUpdate(0f, 0f);
+                home.SquadCommands.ClearSelection();
+                home.FrameUpdate(0f, 0f);
+                bool deselected = home.SquadCommands.VisibleRouteCount == 0;
+                home.SquadCommands.SelectSingle(id);
+                home.FrameUpdate(0f, 0f);
+                bool restored = home.SquadCommands.VisibleRouteCount == 1;
+                home.SquadCommands.ReleaseVisuals();
+                Expect(cancelled && deselected && restored && home.SquadCommands.VisibleRouteCount == 0,
+                    "目的地指示线：取消命令、取消选择与释放观察表现均清除指示；重选能恢复当前目标");
+            }
+            finally
+            {
+                InputRouter.DebugSetReader(null);
+                InputRouter.Reset();
+            }
         }
 
         private static void CheckWorkOrderUnreachable()
