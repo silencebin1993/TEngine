@@ -563,6 +563,10 @@ namespace GameLogic.Campaign
             Vector2 deathPosition = TryGetLivePosition(logicId, out Vector2 live) ? live : record.WorldPosition;
             record.IsAlive = false;
             record.IsDeployed = false;
+            // FG5-RND-06（纪念墙“阵亡地点”、按时间 / 地点排序）：阵亡那一刻的时刻与地点。
+            record.DeathTick = Math.Max(1L, GameLogic.Core.GameClock.Ticks);
+            record.DeathRegionId = record.RegionId ?? string.Empty;
+            record.DeathPosition = deathPosition;
             RosterRevision++;
             // FG4-ECO-09：离家报告“机器变化”（远征在外时记阵亡的时刻与地点）与告警“机器重伤”级（阵亡的不再算重伤）。
             Economy.AwayReportService.OnMachineDied(CampaignSession.Current, record, deathPosition);
@@ -575,7 +579,13 @@ namespace GameLogic.Campaign
 
             // ER8-CONTENT-01：存活→阵亡的唯一翻转点（重复标记在上面已早退，不会重复出声）。
             // 记录里的 WorldPosition 只在存档前同步，平时可能是旧值——不按距离衰减。
-            Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.MachineDestroyed, deathPosition, GameLogic.Localization.GameText.Format("machine.feedback.destroyed", MachineNaming.Short(record))); // FG4-ECO-07：名字同源
+            // FG5-RND-06：黑匣子（家园阵亡直接回收进陈列馆队列；远征阵亡掉在阵亡处；这台机器携带的别人的黑匣子也掉在原地），
+            // 阵亡通知（反馈时刻 MachineDestroyed → 通知 machine_destroyed）正文里附黑匣子的去向。
+            string blackBox = Economy.BlackBoxService.OnMachineDied(CampaignSession.Current, record, deathPosition);
+            string caption = string.IsNullOrEmpty(blackBox)
+                ? GameLogic.Localization.GameText.Format("machine.feedback.destroyed", MachineNaming.Short(record))
+                : GameLogic.Localization.GameText.Format("machine.feedback.destroyed_bb", MachineNaming.Short(record), blackBox);
+            Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.MachineDestroyed, deathPosition, caption); // FG4-ECO-07：名字同源
             // FG0-ARCH-03：机器所在地点的战斗内核据此把单位标为阵亡（O(1)，不需要每步对账）。
             MachineDied?.Invoke(logicId);
             return MachineOpResult.Ok(logicId);
@@ -833,6 +843,10 @@ namespace GameLogic.Campaign
                 CustomName = MachineNaming.Sanitize(src.CustomName),
                 RolePointId = string.IsNullOrEmpty(src.RolePointId) ? null : src.RolePointId,
                 RoleOrderId = string.IsNullOrEmpty(src.RoleOrderId) ? null : src.RoleOrderId,
+                // FG5-RND-06：阵亡的时刻与地点（纪念墙）。旧档缺字段 = 0 / 空（未记录）。
+                DeathTick = Math.Max(0L, src.DeathTick),
+                DeathRegionId = string.IsNullOrEmpty(src.DeathRegionId) ? null : src.DeathRegionId,
+                DeathPosition = src.DeathPosition,
                 IsAlive = src.IsAlive,
                 IsInFactory = src.IsInFactory,
                 IsDeployed = src.IsDeployed,

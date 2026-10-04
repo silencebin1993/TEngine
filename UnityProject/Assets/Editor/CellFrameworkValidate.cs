@@ -465,6 +465,7 @@ namespace GameLogic.EditorTools
             Seg("FgTestRangeSelfCheck", FgTestRangeSelfCheck.Run);
             Seg("FgFusionSelfCheck", FgFusionSelfCheck.Run); // FG5-RND-04：熔合、配方书与线索
             Seg("FgIntelSelfCheck", FgIntelSelfCheck.Run); // FG5-RND-05：监听站与情报
+            Seg("FgBlackBoxSelfCheck", FgBlackBoxSelfCheck.Run); // FG5-RND-06：黑匣子陈列馆与纪念墙
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>

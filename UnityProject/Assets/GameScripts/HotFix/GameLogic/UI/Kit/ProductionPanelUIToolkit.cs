@@ -114,6 +114,9 @@ namespace GameLogic.UI.Kit
         public Button FusionButton => _fusion;
         private Button _intel;
         public Button IntelButton => _intel;
+        /// <summary>FG5-RND-06：黑匣子陈列馆的“陈列馆…”按钮（只在陈列馆上显示）。</summary>
+        private Button _blackBox;
+        public Button BlackBoxButton => _blackBox;
         private Button _diagnose;
         private Button _clear;
         private Label _message;
@@ -324,6 +327,7 @@ namespace GameLogic.UI.Kit
             _range = root.Q<Button>("PrRange");
             _fusion = root.Q<Button>("PrFusion");
             _intel = root.Q<Button>("PrIntel");
+            _blackBox = root.Q<Button>("PrBlackBox");
             _diagnose = root.Q<Button>("PrDiagnose");
             _clear = root.Q<Button>("BpClear");
             _message = root.Q<Label>("PrMessage");
@@ -336,6 +340,7 @@ namespace GameLogic.UI.Kit
             _range.clicked += OpenRange;
             _fusion.clicked += OpenFusion;
             _intel.clicked += OpenIntel;
+            _blackBox.clicked += OpenBlackBox;
             _diagnose.clicked += OpenDiagnosis;
             _clear.clicked += () => ClearBuffers();
             _copy.clicked += AskCopySettings;
@@ -497,6 +502,7 @@ namespace GameLogic.UI.Kit
             _range.EnableInClassList("bn-hidden", !TestRangeService.IsRange(b));
             _fusion.EnableInClassList("bn-hidden", !FusionService.IsSynth(b));
             _intel.EnableInClassList("bn-hidden", !IntelService.IsPost(b));
+            _blackBox.EnableInClassList("bn-hidden", !BlackBoxService.IsGallery(b));
             _clear.SetEnabled(BuildingOps.BufferedCount(state, b) > 0);
         }
 
@@ -509,6 +515,7 @@ namespace GameLogic.UI.Kit
             _range.text = GameText.Get("range.panel.open");
             _fusion.text = GameText.Get("fusion.panel.open");
             _intel.text = GameText.Get("intel.panel.open");
+            _blackBox.text = GameText.Get("blackbox.panel.open");
             _diagnose.text = GameText.Get("prod.panel.diagnose");
             _clear.text = GameText.Get("bp.clear");
             _hint.text = GameText.Get("prod.panel.hint");
@@ -1392,6 +1399,13 @@ namespace GameLogic.UI.Kit
         {
             SetOpen(false);
             IntelPanelUIToolkit.Open(null);
+        }
+
+        /// <summary>FG5-RND-06：黑匣子陈列馆 → 打开陈列馆面板（黑匣子页；纪念墙在同一面板，FGU-40）。</summary>
+        public void OpenBlackBox()
+        {
+            SetOpen(false);
+            BlackBoxPanelUIToolkit.Open(BlackBoxPanelUIToolkit.TabBoxes);
         }
 
         /// <summary>FG5-RND-03：靶场 → 打开靶场面板（投影、靶子、读数、对比，FGU-24）。</summary>

@@ -488,6 +488,36 @@ namespace GameLogic.Campaign
         public FusionState Fusion = new FusionState();
         /// <summary>FG5-RND-05：监听站与情报（情报列表与有效期、已过时标记、各类破译进度、截获过的片段、统计）。旧存档没有 = 空状态。</summary>
         public IntelState Intel = new IntelState();
+        /// <summary>FG5-RND-06：黑匣子陈列馆（已回收黑匣子的分析队列与进度、已入账的技术数据、统计）。黑匣子在区域里的位置 / 携带者沿用远征关键物
+        /// （<see cref="CampaignState.RegionQuestItems"/>），纪念墙名单就是机器登记表里的阵亡记录。旧存档没有 = 空状态（读档时按已回收的黑匣子补队列）。</summary>
+        public BlackBoxState BlackBoxes = new BlackBoxState();
+    }
+
+    /// <summary>FG5-RND-06（FG05 FGR-RND-060）：黑匣子陈列馆的存档域。唯一写入口 <see cref="Economy.BlackBoxService"/>。</summary>
+    [Serializable]
+    public sealed class BlackBoxState
+    {
+        /// <summary>已回收（送进陈列馆）的黑匣子，按回收先后排列（同一步回收的按机器 LogicId）；分析完的留着（陈列馆的陈列 / 纪念墙读“技术数据 +N”）。</summary>
+        public BlackBoxRecord[] Boxes = Array.Empty<BlackBoxRecord>();
+        /// <summary>统计：黑匣子累计入账的技术数据、分析完的个数。</summary>
+        public long PointsProduced;
+        public int Analyzed;
+    }
+
+    /// <summary>FG5-RND-06：一个已回收的黑匣子（身份 = 阵亡机器的 LogicId，一台机器只有一个）。</summary>
+    [Serializable]
+    public sealed class BlackBoxRecord
+    {
+        public int MachineLogicId;
+        /// <summary>回收的世界步（家园阵亡 = 阵亡那一步；远征 = 撤离结算那一步）。</summary>
+        public long RecoveredTick;
+        /// <summary>已分析的世界步数（满 = 分析完；陈列馆停工时不动）。</summary>
+        public long Work;
+        /// <summary>已入账的技术数据（按进度逐点入账，满 = blackbox.points_per_box）。</summary>
+        public int PointsGranted;
+        public bool Done;
+        /// <summary>分析完的世界步（未完成 = 0）。</summary>
+        public long DoneTick;
     }
 
     /// <summary>FG5-RND-04（FG05 FGR-RND-040～045）：熔合的存档域。唯一写入口 <see cref="Economy.FusionService"/>。</summary>
@@ -1726,6 +1756,7 @@ namespace GameLogic.Campaign
             Economy.TestRangeService.EnsureState(s); // FG5-RND-03：靶场域补成空域；旧档按已击毁的敌人记录补“击败过的敌人类型”。
             Economy.FusionService.EnsureState(s); // FG5-RND-04：熔合域补成空域（旧档没有 = 没发现配方、没有线索）。
             Economy.IntelService.EnsureState(s); // FG5-RND-05：情报域补成空域（旧档没有 = 没有情报、没有进度）。
+            Economy.BlackBoxService.EnsureState(s); // FG5-RND-06：黑匣子域补成空域；已回收却不在队列里的黑匣子补进队列（只加不删）。
             if (s.Research.DomainVersion < ResearchState.CurrentVersion)
             {
                 Economy.ResearchService.MigrateFromV1(s); // FG5-RND-01：旧档迁移（研发树开放前就能建造的内容记为已研究）

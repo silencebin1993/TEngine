@@ -331,6 +331,17 @@ namespace GameLogic.EditorTools
                     case 375: StepIntelForecast(inStep); break;
                     case 376: StepIntelPanelRows(inStep); break;
                     case 377: StepIntelMap(inStep); break;
+                    // FG5-RND-06：放一座建成的黑匣子陈列馆、家园一台测试机器阵亡（伤害夹具：正式突袭在 FG6-DEF-04）→ 阵亡通知附黑匣子去向 →
+                    // 左键点陈列馆打开通用面板（分析中）→ 点“陈列馆…”打开陈列馆面板（黑匣子页：分析中）→ 点“纪念墙”页签（名字 · 编号 · 经历 · 阵亡地点）→ 点“按地点”→ Esc → 清理测试陈列馆。
+                    case 378: StepBlackBoxPlaced(inStep); break;
+                    case 379: StepBlackBoxBuildingPanel(inStep); break;
+                    case 380: StepBlackBoxOpened(inStep); break;
+                    case 381: StepBlackBoxMemorial(inStep); break;
+                    case 382: StepBlackBoxClosed(inStep); break;
+                    // 审查 P2：机器名册的“纪念墙…”入口（FGU-40 点名入口）：按 N 打开名册 → 点“纪念墙…”→ 陈列馆面板直接在纪念墙页 → Esc。
+                    case 383: StepBlackBoxRosterOpened(inStep); break;
+                    case 384: StepBlackBoxRosterMemorial(inStep); break;
+                    case 385: StepBlackBoxRosterClosed(inStep); break;
                     case 346: StepOverridePicked(inStep); break;
                     case 347: StepOverridePlaced(inStep); break;
                     case 348: StepOverridePanel(inStep); break;
@@ -6371,6 +6382,210 @@ namespace GameLogic.EditorTools
             Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
             GameClock.SetSpeed(SessionState.GetFloat(K + "IntelSpeed", 1f));
             GameClock.SetPaused(SessionState.GetInt(K + "IntelWasPaused", 0) == 1);
+            Next(378, "FG5-RND-06：放一座建成的黑匣子陈列馆，家园一台机器阵亡（伤害夹具），左键点陈列馆");
+        }
+
+        // ── FG5-RND-06：黑匣子陈列馆与纪念墙（阵亡通知附黑匣子去向、建筑面板“陈列馆…”、黑匣子页、纪念墙页与按地点排序）──
+
+        private const string SmokeGalleryId = Campaign.Regions.HomeValleyLayout.RegionId + ":smoke_power_gallery";
+
+        private static void StepBlackBoxPlaced(double inStep)
+        {
+            if (inStep < 0.3)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            SessionState.SetInt(K + "BbWasPaused", GameClock.Paused ? 1 : 0);
+            GameClock.SetPaused(true);
+            // 核心附近按地形找一块能放、接得上电网的空地，登记一座建成的陈列馆（测试捷径：机器施工由施工自检覆盖），不写死坐标（B25）。
+            GridCell core = HomeGridService.CorePivot(state);
+            string builtId = null;
+            for (int r = 6; r <= 30 && builtId == null; r++)
+            {
+                for (int dy = -r; dy <= r && builtId == null; dy++)
+                {
+                    for (int dx = -r; dx <= r && builtId == null; dx++)
+                    {
+                        if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != r)
+                        {
+                            continue;
+                        }
+                        var c = new GridCell(core.X + dx, core.Y + dy);
+                        if (!HomeGridService.ValidatePlacement(state, Campaign.Economy.BlackBoxService.TypeId, c, 0, checkCost: false).Ok)
+                        {
+                            continue;
+                        }
+                        AddSmokeBuilding(state, Campaign.Economy.BlackBoxService.TypeId, "gallery", c);
+                        Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+                        BuildingRecord b = HomeGridService.FindBuilding(state, SmokeGalleryId);
+                        if (b != null && b.PowerState == BuildingPowerState.Powered)
+                        {
+                            b.Health = Campaign.Economy.BuildingOps.MaxDurability(Campaign.Economy.BlackBoxService.TypeId);
+                            builtId = SmokeGalleryId;
+                            continue;
+                        }
+                        state.BuildingRecords = state.BuildingRecords.Where(x => x.BuildingId != SmokeGalleryId).ToArray();
+                        HomeGridService.MapFor(state);
+                        Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+                    }
+                }
+            }
+            // 伤害夹具：家园还没有正式突袭（FG6-DEF-04），在核心旁登记一台测试机器，伤害走生产代码的唯一伤害入口（归零即阵亡）。
+            Vector2 at = Campaign.Regions.HomeValleyLayout.Core.Position + new Vector2(3f, -6f);
+            MachineOpResult spawned = MachineRegistry.SpawnMachine(Campaign.Regions.HomeValleyLayout.Erc001ChassisId, Campaign.Regions.HomeValleyLayout.BlueprintErc001Id,
+                Campaign.Regions.HomeValleyLayout.RegionId, at, 100f, 100f);
+            int victim = spawned.Success ? spawned.LogicId : 0;
+            if (victim > 0)
+            {
+                MachineNaming.TryRename(victim, "Smoke纪念", out _);
+                MachineRegistry.ApplyDamage(victim, 1e6f);
+            }
+            SessionState.SetInt(K + "BbVictim", victim);
+            string who = victim > 0 ? MachineNaming.Short(victim) : "?";
+            string note = Notifications.NotificationCenter.History.Where(e => e.Type.Id == "machine_destroyed")
+                .SelectMany(e => e.Members).Select(m => m.DetailText).LastOrDefault(t => t.StartsWith(who + " ", StringComparison.Ordinal)) ?? string.Empty;
+            Check(builtId != null && victim > 0 && note.Contains("黑匣子已回收，送往黑匣子陈列馆分析"),
+                $"接得上电网的建成陈列馆 {builtId}；家园机器 {who} 阵亡（伤害夹具）→ 阵亡通知附黑匣子去向“{note}”");
+            // 放开 2 游戏秒让陈列馆开始分析（世界照常推进），再点陈列馆。
+            GameClock.SetPaused(false);
+            BuildingRecord built = HomeGridService.FindBuilding(state, SmokeGalleryId);
+            if (built != null)
+            {
+                ClickWorld(new Vector3(built.Position.x, 0f, built.Position.y));
+            }
+            Next(379, "左键点陈列馆打开通用面板，点“陈列馆…”");
+        }
+
+        private static void StepBlackBoxBuildingPanel(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            GameClock.SetPaused(true);
+            ProductionPanelUIToolkit bp = ProductionPanelUIToolkit.Instance;
+            bool bpOpen = ProductionPanelUIToolkit.IsOpen && bp != null && ProductionPanelUIToolkit.BuildingId == SmokeGalleryId && bp.BlackBoxButton != null
+                          && ProductionPanelUIToolkit.Visible(bp.BlackBoxButton) && bp.ReasonText.Contains("分析中") && bp.ReasonText.Contains("Smoke纪念");
+            Check(bpOpen, $"左键点建成的陈列馆打开它的通用面板：状态“{bp?.ReasonText}”，有“陈列馆…”按钮");
+            Check(ClickUitk("[ProductionPanelHost]", "PrBlackBox"), "通用面板上点“陈列馆…”");
+            Next(380, "陈列馆面板打开（黑匣子页：分析中），点“纪念墙”页签");
+        }
+
+        private static void StepBlackBoxOpened(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            BlackBoxPanelUIToolkit panel = BlackBoxPanelUIToolkit.Instance;
+            panel?.Refresh(force: true);
+            int victim = SessionState.GetInt(K + "BbVictim", 0);
+            int row = -1;
+            for (int i = 0; panel != null && i < panel.RowCount; i++)
+            {
+                if (panel.RowLogicId(i) == victim)
+                {
+                    row = i;
+                }
+            }
+            bool open = BlackBoxPanelUIToolkit.IsOpen && panel != null && panel.PanelVisible && panel.CurrentTab == BlackBoxPanelUIToolkit.TabBoxes
+                        && LabelText("[BlackBoxPanelHost]", "BlackBoxTitle") == Localization.GameText.Get("blackbox.panel.title")
+                        && row >= 0 && panel.RowText(row).Contains("分析中") && panel.StatusText.Contains("座陈列馆工作中");
+            Check(open, $"陈列馆面板打开（黑匣子页）：“{FirstLine(row >= 0 ? panel.RowText(row) : null)}”；状态“{FirstLine(panel?.StatusText)}”");
+            CheckNoTextMarkers("陈列馆面板（黑匣子页）");
+            Check(ClickUitk("[BlackBoxPanelHost]", "BlackBoxTabMemorial"), "点“纪念墙”页签");
+            Next(381, "纪念墙：阵亡机器的名字、编号、经历、阵亡地点；点“按地点”");
+        }
+
+        private static void StepBlackBoxMemorial(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            BlackBoxPanelUIToolkit panel = BlackBoxPanelUIToolkit.Instance;
+            panel?.Refresh(force: true);
+            int victim = SessionState.GetInt(K + "BbVictim", 0);
+            string text = null;
+            for (int i = 0; panel != null && i < panel.RowCount; i++)
+            {
+                if (panel.RowLogicId(i) == victim)
+                {
+                    text = panel.RowText(i);
+                }
+            }
+            bool wall = BlackBoxPanelUIToolkit.IsOpen && panel.CurrentTab == BlackBoxPanelUIToolkit.TabMemorial && panel.SortBarVisible && text != null
+                        && text.StartsWith("Smoke纪念 · 编号 #", StringComparison.Ordinal) && text.Contains("阵亡：") && text.Contains("经历：") && text.Contains("黑匣子：");
+            Check(wall, $"纪念墙页：“{FirstLine(text)}”（名字 · 编号 · 型号、阵亡地点与时间、经历、黑匣子去向）");
+            Check(ClickUitk("[BlackBoxPanelHost]", "BlackBoxSortPlace") && panel.SortByPlace, "点“按地点”排序");
+            CheckNoTextMarkers("陈列馆面板（纪念墙页）");
+            PressKeyKeepMouse(KeyCode.Escape);
+            Next(382, "Esc 关闭陈列馆面板；清理测试陈列馆");
+        }
+
+        private static void StepBlackBoxClosed(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(!BlackBoxPanelUIToolkit.IsOpen, "Esc 关闭陈列馆面板");
+            PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.OpenRoster));
+            Next(383, "按 N 打开机器名册，点“纪念墙…”");
+        }
+
+        private static void StepBlackBoxRosterOpened(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            UI.Kit.RosterPanelUIToolkit rop = UI.Kit.RosterPanelUIToolkit.Instance;
+            rop?.Refresh();
+            bool open = UI.Kit.RosterPanelUIToolkit.IsOpen && rop != null && rop.PanelVisible && rop.MemorialButton != null
+                        && rop.MemorialButton.text == Localization.GameText.Get("blackbox.panel.memorial_open");
+            Check(open, $"按 N 打开机器名册，有“{rop?.MemorialButton?.text}”按钮");
+            Check(ClickUitk("[RosterPanelHost]", "RosterMemorial"), "机器名册上点“纪念墙…”");
+            Next(384, "陈列馆面板直接打开在纪念墙页；Esc 关闭");
+        }
+
+        private static void StepBlackBoxRosterMemorial(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            BlackBoxPanelUIToolkit panel = BlackBoxPanelUIToolkit.Instance;
+            panel?.Refresh(force: true);
+            int victim = SessionState.GetInt(K + "BbVictim", 0);
+            bool listed = false;
+            for (int i = 0; panel != null && i < panel.RowCount; i++)
+            {
+                listed |= panel.RowLogicId(i) == victim && panel.RowText(i).StartsWith("Smoke纪念 · 编号 #", StringComparison.Ordinal);
+            }
+            bool wall = BlackBoxPanelUIToolkit.IsOpen && panel != null && panel.PanelVisible && panel.CurrentTab == BlackBoxPanelUIToolkit.TabMemorial
+                        && !UI.Kit.RosterPanelUIToolkit.IsOpen && listed;
+            Check(wall, $"从机器名册点“纪念墙…”：名册关闭、陈列馆面板打开在纪念墙页，阵亡的测试机器在名单上（{listed}）");
+            CheckNoTextMarkers("陈列馆面板（名册入口的纪念墙页）");
+            PressKeyKeepMouse(KeyCode.Escape);
+            Next(385, "Esc 关闭纪念墙；清理测试陈列馆");
+        }
+
+        private static void StepBlackBoxRosterClosed(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(!BlackBoxPanelUIToolkit.IsOpen && !UI.Kit.RosterPanelUIToolkit.IsOpen, "Esc 关闭纪念墙（名册入口）");
+            // 清理测试捷径：撤走测试陈列馆（阵亡的测试机器留在纪念墙上，黑匣子在队列里暂停），恢复暂停状态。
+            ProductionPanelUIToolkit.Close();
+            CampaignState state = CampaignSession.Current;
+            state.BuildingRecords = state.BuildingRecords.Where(x => x.BuildingId != SmokeGalleryId).ToArray();
+            HomeGridService.MapFor(state);
+            Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+            GameClock.SetPaused(SessionState.GetInt(K + "BbWasPaused", 0) == 1);
             Next(264, "FG3-LOG-04：建造模式里放分流器与地下传送带");
         }
 

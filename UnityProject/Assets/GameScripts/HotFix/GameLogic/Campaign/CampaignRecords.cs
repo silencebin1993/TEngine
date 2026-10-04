@@ -138,6 +138,18 @@ namespace GameLogic.Campaign
         /// <summary>名册为这台机器开的最近一张驻防 / 送修工单（岗位维持器据此判断“玩家接管过就不再拉回去”）。</summary>
         public string RoleOrderId;
 
+        // ── FG5-RND-06（FG05 FGR-RND-060 纪念墙“阵亡地点”；FG13 FGU-40 按时间 / 地点排序）：阵亡那一刻记下的时刻与地点。
+        // 唯一写入口 MachineRegistry.MarkDeadByLogicId（存活 → 阵亡的唯一翻转点）。只加字段、不升存档版本：旧档缺字段读成 0 / 空 = “时间 / 地点未记录”。
+
+        /// <summary>阵亡的世界步（<c>GameClock.Ticks</c>；0 = 没有记录，例如 FG5-RND-06 之前的旧档）。</summary>
+        public long DeathTick;
+
+        /// <summary>阵亡时所在的地点（区域 ID；与 <see cref="RegionId"/> 分开记，之后的结算改不到它）。空 = 没有记录。</summary>
+        public string DeathRegionId;
+
+        /// <summary>阵亡位置（该地点的平面坐标，米）。</summary>
+        public Vector2 DeathPosition;
+
         public bool IsAlive;
         public bool IsInFactory;
         public bool IsDeployed;

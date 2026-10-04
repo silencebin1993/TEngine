@@ -689,6 +689,11 @@ namespace GameLogic.Campaign.Regions
                     {
                         HomeValleyAnalysis.NoteEnemyItemSeen(state); // FG5-RND-02：第一次拿到敌方物品的引导钩子
                     }
+                    Economy.BlackBoxService.OnRecovered(state, item); // FG5-RND-06：带回的黑匣子送进陈列馆队列（不是黑匣子时不做事）
+                }
+                else if (Economy.BlackBoxService.DropFromCarrier(state, item))
+                {
+                    // FG5-RND-06（FG08“黑匣子掉在原地”）：携带黑匣子的机器没能撤离 → 掉在它最后的位置、留在区域里下次还能捡，不标 Lost。
                 }
                 else
                 {

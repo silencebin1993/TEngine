@@ -268,6 +268,10 @@ namespace GameLogic.Campaign.Feedback
             {
                 return "核心数据";
             }
+            if (contentId == Economy.BlackBoxService.ContentId)
+            {
+                return GameLogic.Localization.GameText.Get("blackbox.item_name"); // FG5-RND-06：阵亡机器的黑匣子（拾取字幕 / 任务日志）
+            }
             return !string.IsNullOrEmpty(contentId)
                    && Regions.HomeValleyAnalysis.YieldTable.TryGetValue(contentId, out Regions.HomeValleyAnalysis.YieldInfo info)
                    && !string.IsNullOrEmpty(info.DisplayName)

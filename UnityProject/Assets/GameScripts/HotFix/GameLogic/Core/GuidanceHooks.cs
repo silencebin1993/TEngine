@@ -289,6 +289,16 @@ namespace GameLogic.Core
         public const string IntelFirstOutdated = "intel.first_outdated";
         /// <summary>FG5-RND-05：第一次因监听站全部失效而破译中断。</summary>
         public const string IntelFirstInterrupted = "intel.first_interrupted";
+        /// <summary>FG5-RND-06：第一次回收黑匣子（家园阵亡直接回收 / 远征带回；引导内容在 FG15-UX-04：陈列馆、纪念墙）。</summary>
+        public const string BlackBoxFirstRecovered = "blackbox.first_recovered";
+        /// <summary>FG5-RND-06：第一次有黑匣子留在远征区域里（引导：派机器捡起、撤离带回；没带回下次还能再取）。</summary>
+        public const string BlackBoxFirstLeftBehind = "blackbox.first_left_behind";
+        /// <summary>FG5-RND-06：第一座黑匣子陈列馆建成。</summary>
+        public const string BlackBoxFirstBuilt = "blackbox.first_built";
+        /// <summary>FG5-RND-06：第一次打开陈列馆 / 纪念墙。</summary>
+        public const string BlackBoxFirstOpen = "blackbox.first_open";
+        /// <summary>FG5-RND-06：第一个黑匣子分析完成（技术数据入账）。</summary>
+        public const string BlackBoxFirstAnalyzed = "blackbox.first_analyzed";
 
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
@@ -333,6 +343,7 @@ namespace GameLogic.Core
             RangeFirstBuilt, RangeFirstOpen, RangeFirstTest, RangeFirstUplink, RangeFirstCompare, RangeFirstSend, RangeFirstTargetUnlocked,
             FusionFirstBuilt, FusionFirstOpen, FusionFirstSimulate, FusionFirstDiscovery, FusionFirstClue, FusionFirstRecipeBook,
             IntelFirstBuilt, IntelFirstOpen, IntelFirstIntel, IntelFirstRaidForecast, IntelFirstOutdated, IntelFirstInterrupted,
+            BlackBoxFirstRecovered, BlackBoxFirstLeftBehind, BlackBoxFirstBuilt, BlackBoxFirstOpen, BlackBoxFirstAnalyzed,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

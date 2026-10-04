@@ -156,6 +156,7 @@ namespace GameLogic.Campaign.WorldSim
             Economy.ResearchService.ResetSessionState(); // FG5-RND-01：实验室索引、效果缓存、阵营分支缓存按新战役重建
             Economy.TestRangeService.ResetSessionState(); // FG5-RND-03：仿真投影是运行时状态（不存档），换战役 / 读档时清掉
             Economy.FusionService.ResetSessionState();
+            Economy.BlackBoxService.ResetSessionState(); // FG5-RND-06：陈列馆索引、“第一座陈列馆建成”钩子标记按新会话重来
             Economy.IntelService.ResetSessionState(); // FG5-RND-05：监听站索引、“第一座监听站建成”钩子标记按新会话重来 // FG5-RND-04：界面反馈与“第一座合成台建成”钩子标记按新会话重来；绑定刻录台的熔合接口
             HomeValleyAlarms.ResetSessionState();
             HomeValleyCombatTargets.ResetSessionState();
@@ -480,6 +481,8 @@ namespace GameLogic.Campaign.WorldSim
                     Economy.ResearchService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                     // FG5-RND-05：监听站破译与情报有效期（与生产建筑同一节拍；只看步序号，与观察无关，O(监听站数 + 情报条数 + 行进队伍数)）。
                     Economy.IntelService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
+                    // FG5-RND-06：黑匣子陈列馆分析（与生产建筑同一节拍；只看步序号，与观察无关，O(陈列馆数 + 已回收黑匣子数)）。
+                    Economy.BlackBoxService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                     // FG5-RND-03：靶场的仿真投影（各自独立的战斗内核实例，与家园同一时钟；只看步序号，与观察无关）。
                     CurrentSiteId = Home.SiteId;
                     Economy.TestRangeService.WorldStep(state, dt);

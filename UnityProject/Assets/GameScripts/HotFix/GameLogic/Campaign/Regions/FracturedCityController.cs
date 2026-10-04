@@ -352,11 +352,13 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
+            int carriedLost = Economy.BlackBoxService.CarriedNonBoxItems(state); // FG5-RND-06：结算前数一下会遗失的关键物（黑匣子不算，它掉在原地）
             FracturedCityRegion.ResolveExtraction(state, Array.Empty<int>());
             _wipeResolved = true;
-            Log.Info("[FracturedCityController] 全灭：区域内所有机器阵亡，已结算携带中的关键物为 Lost。");
+            Log.Info("[FracturedCityController] 全灭：区域内所有机器阵亡，已结算携带中的关键物为 Lost（黑匣子掉在原地）。");
             // ER8-CONTENT-01 AC-AUD-001 失败：全灭结算的唯一一次性边沿（_wipeResolved）。
-            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.ExpeditionWiped, "携带中的关键物已遗失");
+            // FG5-RND-06：字幕区分“携带中的关键物遗失”与“黑匣子留在原地、下次远征可以再取”（文本键，两样都没有时只显示默认正文）。
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.ExpeditionWiped, Economy.BlackBoxService.WipeDetail(state, FracturedCityLayout.RegionId, carriedLost));
         }
 
         /// <summary>撤离结算：把当前存活于本区域的机器货物按 Recovered 处理并送回归还谷地。

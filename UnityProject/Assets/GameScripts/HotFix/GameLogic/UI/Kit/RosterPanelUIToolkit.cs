@@ -121,6 +121,9 @@ namespace GameLogic.UI.Kit
         public Button SortDirButton => _sortDir;
         public Button SelectAllButton => _selectAll;
         public Button SelectNoneButton => _selectNone;
+        /// <summary>FG5-RND-06（FGU-40）：“纪念墙…”——关掉名册、打开陈列馆面板的纪念墙页（不需要先建陈列馆）。</summary>
+        public Button MemorialButton => _memorial;
+        private Button _memorial;
         public Button DetailBackButton => _detailBack;
         public Button DetailJumpButton => _detailJump;
         public Button CloseButton => _close;
@@ -251,6 +254,7 @@ namespace GameLogic.UI.Kit
             _filterStatus = root.Q<DropdownField>("RosterFilterStatus");
             _selectAll = root.Q<Button>("RosterSelectAll");
             _selectNone = root.Q<Button>("RosterSelectNone");
+            _memorial = root.Q<Button>("RosterMemorial");
             _batchLabel = root.Q<Label>("RosterBatchLabel");
             _batchRole = root.Q<DropdownField>("RosterBatchRole");
             _message = root.Q<Label>("RosterMessage");
@@ -276,6 +280,7 @@ namespace GameLogic.UI.Kit
             _sortDir.clicked += ToggleSortDirection;
             _selectAll.clicked += SelectAllShown;
             _selectNone.clicked += SelectNone;
+            _memorial.clicked += OpenMemorial;
             _detailBack.clicked += () => ShowDetail(0);
             _detailJump.clicked += () => JumpTo(DetailLogicId);
             _rename.clicked += () => Rename(_nameField.value);
@@ -439,6 +444,7 @@ namespace GameLogic.UI.Kit
             _sortDir.text = GameText.Get(Descending ? "roster.panel.desc" : "roster.panel.asc");
             _selectAll.text = GameText.Get("roster.panel.select_all");
             _selectNone.text = GameText.Get("roster.panel.select_none");
+            _memorial.text = GameText.Get("blackbox.panel.memorial_open");
             _batchLabel.text = GameText.Format("roster.panel.batch_label", _selected.Count);
 
             var sorts = new List<string>();
@@ -807,6 +813,13 @@ namespace GameLogic.UI.Kit
             _selected.Clear();
             _lastKey = null;
             Refresh();
+        }
+
+        /// <summary>FG5-RND-06（FGU-40）：关掉名册，打开陈列馆面板的纪念墙页（阵亡机器的名字、编号、经历、阵亡地点；按时间 / 地点排序）。</summary>
+        public void OpenMemorial()
+        {
+            SetOpen(false);
+            BlackBoxPanelUIToolkit.Open(BlackBoxPanelUIToolkit.TabMemorial);
         }
 
         private void OnRowRolePicked(int index, string label)

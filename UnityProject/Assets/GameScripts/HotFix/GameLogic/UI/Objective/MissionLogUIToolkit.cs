@@ -317,7 +317,8 @@ namespace GameLogic.UI.Objective
                 return string.Empty;
             }
             IEnumerable<string> names = state.RegionQuestItems
-                .Where(q => q != null && q.RegionId == regionId && q.State == RegionQuestItemState.Recovered)
+                .Where(q => q != null && q.RegionId == regionId && q.State == RegionQuestItemState.Recovered
+                            && !Campaign.Economy.BlackBoxService.IsBlackBox(q)) // FG5-RND-06：黑匣子不是区域任务物（在陈列馆面板里看）
                 .Select(q => Campaign.Feedback.FeedbackCues.QuestItemName(q.ContentId))
                 .Distinct();
             return string.Join("、", names);

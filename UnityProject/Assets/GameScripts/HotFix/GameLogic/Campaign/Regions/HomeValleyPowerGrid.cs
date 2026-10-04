@@ -255,6 +255,7 @@ namespace GameLogic.Campaign.Regions
             Signal.OverrideArrayService.OnPowerApplied(state, notify: !_suppressFeedback);
             Economy.FusionService.OnPowerApplied(state, notify: !_suppressFeedback);
             Economy.IntelService.OnPowerApplied(state, notify: !_suppressFeedback); // FG5-RND-05：第一座监听站建成的引导钩子；破译速度随电网结算变化（界面刷新）。 // FG5-RND-04：第一座电路合成台建成的引导钩子。
+            Economy.BlackBoxService.OnPowerApplied(state, notify: !_suppressFeedback); // FG5-RND-06：第一座黑匣子陈列馆建成的引导钩子；分析随电网结算启停（界面刷新）。
             Economy.TestRangeService.OnPowerApplied(state, notify: !_suppressFeedback); // FG5-RND-03：第一座靶场建成的引导钩子（完工 / 启停都走电网结算）。
             _suppressFeedback = false;
             string[] brownoutIds = brownout.ToArray();
