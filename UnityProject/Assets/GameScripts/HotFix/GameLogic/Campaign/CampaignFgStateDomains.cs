@@ -666,6 +666,11 @@ namespace GameLogic.Campaign
         public string Kind = string.Empty;
         public long Work;
         public int Produced;
+        /// <summary>
+        /// 进度在破译哪个目标（突袭预报 = 行进队伍 ID、首领弱点 = 首领 ID；其它类为空）。目标换了进度清零，不把旧目标的进度算到新目标上；
+        /// 旧档没有此字段（空）= 沿用现有进度。只加字段不升版本（ADR FG0-SAVE-01）。
+        /// </summary>
+        public string Subject = string.Empty;
     }
 
     /// <summary>FG5-RND-01：一个节点已投入的研究点（取消 / 移出队列后保留）。</summary>

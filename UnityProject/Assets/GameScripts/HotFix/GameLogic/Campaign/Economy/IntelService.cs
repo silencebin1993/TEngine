@@ -93,6 +93,13 @@ namespace GameLogic.Campaign.Economy
                     r.OutdatedReason ??= string.Empty;
                 }
             }
+            foreach (IntelProgressRecord p in f.Progress)
+            {
+                if (p != null)
+                {
+                    p.Subject ??= string.Empty; // 旧档没有这个字段：空 = 沿用现有进度（第一次推进时记下当前目标）
+                }
+            }
             if (IntelCatalog.All.Count > 0)
             {
                 f.Records = Array.FindAll(f.Records, r => r != null && IntelCatalog.TryGet(r.Kind, out _));
@@ -104,7 +111,11 @@ namespace GameLogic.Campaign.Economy
 
         public static bool IsPost(BuildingRecord b) => b != null && b.BuildingTypeId == TypeId;
 
-        /// <summary>家园里的监听站（含缺电 / 禁用 / 被毁；不含搬迁虚影、规划虚影；按建筑 ID 排序 = “第几座”的顺序）。建筑数组换了才重建，平时 O(1)。</summary>
+        /// <summary>
+        /// 家园里的监听站（含规划 / 施工中的虚影与缺电 / 禁用 / 被毁；不含搬迁虚影；按建筑 ID 排序）。建筑数组换了才重建，平时 O(1)。
+        /// 不能按施工状态过滤：放下虚影会换数组，但之后的施工推进、完工、电网结算都是原地改状态、不换数组——
+        /// 若在放下时把虚影排除，完工后它也进不了列表（审查 P0）。是否在工作由 <see cref="IsWorking"/> 实时读，虚影本来就不算速度。
+        /// </summary>
         public static IReadOnlyList<BuildingRecord> PostsOf(CampaignState s)
         {
             BuildingRecord[] records = s?.BuildingRecords;
@@ -114,7 +125,7 @@ namespace GameLogic.Campaign.Economy
                 PostList.Clear();
                 foreach (BuildingRecord b in records ?? Array.Empty<BuildingRecord>())
                 {
-                    if (IsPost(b) && b.RegionId == HomeValleyLayout.RegionId && !HomeGridService.IsRelocationGhost(b) && !HomeValleyController.IsPlannedGhost(b))
+                    if (IsPost(b) && b.RegionId == HomeValleyLayout.RegionId && !HomeGridService.IsRelocationGhost(b))
                     {
                         PostList.Add(b);
                     }
@@ -227,7 +238,7 @@ namespace GameLogic.Campaign.Economy
         /// <summary>破译一条这类情报要的进度量（一座监听站一步 = 1000）。</summary>
         public static long NeedWork(IntelKindDef kind) => Math.Max(1L, GameClock.TicksFor(kind.DecipherSeconds)) * 1000L;
 
-        /// <summary>这类情报已破译的百分比（0～99）。</summary>
+        /// <summary>这类情报已破译的百分比（0～99；进度记着的目标已经换了 = 0）。</summary>
         public static int ProgressPercent(CampaignState s, string kind)
         {
             IntelState f = StateOf(s);
@@ -236,7 +247,7 @@ namespace GameLogic.Campaign.Economy
             {
                 return 0;
             }
-            return (int)Math.Min(99, p.Work * 100 / NeedWork(def));
+            return (int)Math.Min(99, WorkFor(s, p, def, GameClock.Ticks) * 100 / NeedWork(def));
         }
 
         /// <summary>按当前速度这一类还要多少统一时钟步（速度为 0 = -1）。</summary>
@@ -248,8 +259,79 @@ namespace GameLogic.Campaign.Economy
                 return -1;
             }
             IntelState f = StateOf(s);
-            long done = f == null ? 0 : ProgressOf(f, kind, false)?.Work ?? 0;
+            long done = f == null ? 0 : WorkFor(s, ProgressOf(f, kind, false), def, GameClock.Ticks);
             return Math.Max(0, (NeedWork(def) - done + rate - 1) / rate);
+        }
+
+        /// <summary>这类情报此刻针对的目标：突袭预报 = 下一支要预报的部队、首领弱点 = 下一个首领；其它类不分目标（null）。</summary>
+        private static string TargetSubject(CampaignState s, IntelKindDef k, long now)
+        {
+            switch (k?.ConditionKind)
+            {
+                case "raid":
+                    return NextRaid(s, now)?.GroupId;
+                case "boss":
+                    return NextBoss(s, now)?.Id;
+                default:
+                    return null;
+            }
+        }
+
+        /// <summary>
+        /// 这类情报对当前目标已破译的进度。进度按类记、并记下在破译哪个目标（<see cref="IntelProgressRecord.Subject"/>）：
+        /// 目标换了（例如上一支突袭部队没破译完就到了）= 0，旧目标的进度不算到新目标上；被别的类插队时同一目标的进度照常保留。
+        /// </summary>
+        private static long WorkFor(CampaignState s, IntelProgressRecord p, IntelKindDef k, long now)
+        {
+            if (p == null || p.Work <= 0)
+            {
+                return 0;
+            }
+            return string.IsNullOrEmpty(p.Subject) ? p.Work : WorkOn(p, TargetSubject(s, k, now));
+        }
+
+        /// <summary>同上，目标已知（<paramref name="subject"/> 为 null = 这一类不分目标）。</summary>
+        private static long WorkOn(IntelProgressRecord p, string subject)
+        {
+            if (p == null || p.Work <= 0)
+            {
+                return 0;
+            }
+            return string.IsNullOrEmpty(p.Subject) || subject == null || subject == p.Subject ? p.Work : 0;
+        }
+
+        /// <summary>
+        /// 监听站全部失效时要提醒 / 面板写“暂停”的那一类：按优先级第一类“现在需要、对当前目标已经破译了一部分”的。
+        /// 不只看当前目标——失效的同一时刻冒出更紧急的一类（例如新的突袭部队，进度 0）时，原来那类的进度同样要提醒（审查 P2）。
+        /// </summary>
+        private static IntelKindDef PausedKind(CampaignState s, long now)
+        {
+            IntelState f = StateOf(s);
+            if (f == null)
+            {
+                return null;
+            }
+            foreach (IntelKindDef k in IntelCatalog.All)
+            {
+                IntelProgressRecord p = ProgressOf(f, k.Id, false);
+                if (p != null && p.Work > 0 && Check(s, k, now, false, out _, out string subject) && WorkOn(p, subject) > 0)
+                {
+                    return k;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>情报域缺了才补（读档 / 新档 / 存档前已由 <see cref="CampaignFgStateDomains.EnsureAll"/> 统一补过）：每步不再整套补域、不分配。</summary>
+        private static IntelState EnsureIntel(CampaignState s)
+        {
+            IntelState f = StateOf(s);
+            if (f?.Records == null || f.Progress == null || f.FragmentsHeard == null)
+            {
+                CampaignFgStateDomains.EnsureAll(s);
+                f = StateOf(s);
+            }
+            return f;
         }
 
         // ─────────────────────────────── 每个世界步 ───────────────────────────────
@@ -277,11 +359,14 @@ namespace GameLogic.Campaign.Economy
                 return;
             }
             long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
-            CampaignFgStateDomains.EnsureAll(s);
-            IntelState f = StateOf(s);
+            IntelState f = EnsureIntel(s);
+            if (f == null)
+            {
+                return;
+            }
             long now = GameClock.Ticks;
             UpdateOutdated(s, f, now);
-            IntelKindDef target = PickTarget(s, now);
+            IntelKindDef target = PickTarget(s, now, out string subject);
             string current = target?.Id ?? string.Empty;
             if (f.CurrentKind != current)
             {
@@ -291,14 +376,14 @@ namespace GameLogic.Campaign.Economy
             if (target != null)
             {
                 int rate = RateMilli(s);
-                IntelProgressRecord p = ProgressOf(f, target.Id, rate > 0);
                 if (rate <= 0)
                 {
-                    // 一座工作中的监听站都没有：暂停、进度保留；这一类已经破译了一部分时告一次（FG05 负向）。
-                    if (p != null && p.Work > 0 && !f.InterruptNotified)
+                    // 一座工作中的监听站都没有：暂停、各类进度保留；有任何一类（现在需要的）已经破译了一部分时告一次（FG05 负向）。
+                    IntelKindDef paused = f.InterruptNotified ? null : PausedKind(s, now);
+                    if (paused != null)
                     {
                         f.InterruptNotified = true;
-                        string text = GameText.Format("intel.notify.interrupted", IntelCatalog.KindName(target.Id), ProgressPercent(s, target.Id));
+                        string text = GameText.Format("intel.notify.interrupted", paused.Name, ProgressPercent(s, paused.Id));
                         NotificationCenter.Post("intel_interrupted", text);
                         GuidanceHooks.Raise(GuidanceHooks.IntelFirstInterrupted);
                         Revision++;
@@ -307,6 +392,15 @@ namespace GameLogic.Campaign.Economy
                 else
                 {
                     f.InterruptNotified = false;
+                    IntelProgressRecord p = ProgressOf(f, target.Id, true);
+                    if (subject != null && p.Subject != subject)
+                    {
+                        if (!string.IsNullOrEmpty(p.Subject))
+                        {
+                            p.Work = 0; // 换了目标（上一支部队没破译完就到了 / 首领已被击败）：旧目标的进度不算到新目标上
+                        }
+                        p.Subject = subject;
+                    }
                     p.Work += (long)ticks * rate;
                     if (p.Work >= NeedWork(target))
                     {
@@ -354,7 +448,9 @@ namespace GameLogic.Campaign.Economy
                     continue;
                 }
                 r.Outdated = true;
-                r.OutdatedTick = now;
+                // 过期的时刻就是有效期的终点（与面板按 IsValid 显示“已过时”的那一刻一致）：标记最多晚一个推进周期写进记录，
+                // 期间存档、读档后再标，记下的时刻也不变；部队到达 / 目标已不在按发现的那一步记。
+                r.OutdatedTick = reason == ReasonExpired ? Math.Min(now, r.ExpiresTick) : now;
                 r.OutdatedReason = reason;
                 GuidanceHooks.Raise(GuidanceHooks.IntelFirstOutdated);
                 Revision++;
@@ -369,74 +465,95 @@ namespace GameLogic.Campaign.Economy
         // ─────────────────────────────── 需要破译什么 ───────────────────────────────
 
         /// <summary>按优先级第一类“现在需要破译”的情报；都不需要 = null。</summary>
-        public static IntelKindDef PickTarget(CampaignState s, long now)
+        public static IntelKindDef PickTarget(CampaignState s, long now) => PickTarget(s, now, out _);
+
+        /// <summary>同上，并给出这一类此刻针对的目标（突袭预报 = 部队 ID、首领弱点 = 首领 ID，其它类 null）。每步挑目标走这里：不拼原因文字、不分配。</summary>
+        private static IntelKindDef PickTarget(CampaignState s, long now, out string subject)
         {
             foreach (IntelKindDef k in IntelCatalog.All)
             {
-                if (Needed(s, k, now, out _))
+                if (Check(s, k, now, false, out _, out subject))
                 {
                     return k;
                 }
             }
+            subject = null;
             return null;
         }
 
         /// <summary>这一类现在需不需要破译；不需要时 <paramref name="why"/> = 面板上那句原因（B06）。</summary>
-        public static bool Needed(CampaignState s, IntelKindDef k, long now, out string why)
+        public static bool Needed(CampaignState s, IntelKindDef k, long now, out string why) => Check(s, k, now, true, out why, out _);
+
+        /// <summary>
+        /// <see cref="Needed"/> 的实现：<paramref name="wantWhy"/> = false 时不拼原因文字（每步挑目标用，不分配）；
+        /// 需要时 <paramref name="subject"/> = 这一类此刻针对的目标（突袭预报 = 下一支要预报的部队、首领弱点 = 下一个首领；其它类 null，不分目标）。
+        /// </summary>
+        private static bool Check(CampaignState s, IntelKindDef k, long now, bool wantWhy, out string why, out string subject)
         {
             why = null;
+            subject = null;
             if (k == null || s == null)
             {
                 return false;
             }
             if (!k.IsReady)
             {
-                why = GameText.Get("intel.kind_state.later");
+                why = wantWhy ? GameText.Get("intel.kind_state.later") : null;
                 return false;
             }
             switch (k.ConditionKind)
             {
                 case "raid":
-                    if (NextRaid(s, now) != null)
+                    TransitGroupRecord g = NextRaid(s, now);
+                    if (g != null)
                     {
+                        subject = g.GroupId;
                         return true;
                     }
-                    why = HasValid(s, k.Id, null, now, out long left) ? Covered(left) : GameText.Get("intel.kind_state.no_raid");
+                    if (wantWhy)
+                    {
+                        why = HasValid(s, k.Id, null, now, out long left) ? Covered(left) : GameText.Get("intel.kind_state.no_raid");
+                    }
                     return false;
                 case "expedition":
                     if (!HasValid(s, k.Id, SubjectExpedition, now, out long cl))
                     {
                         return true;
                     }
-                    why = Covered(cl);
+                    why = wantWhy ? Covered(cl) : null;
                     return false;
                 case "boss":
-                    if (NextBoss(s, now) != null)
+                    IntelBossDef boss = NextBoss(s, now);
+                    if (boss != null)
                     {
+                        subject = boss.Id;
                         return true;
                     }
-                    why = HasValid(s, k.Id, null, now, out long bl) ? Covered(bl) : GameText.Get("intel.kind_state.no_boss");
+                    if (wantWhy)
+                    {
+                        why = HasValid(s, k.Id, null, now, out long bl) ? Covered(bl) : GameText.Get("intel.kind_state.no_boss");
+                    }
                     return false;
                 case "tier":
                     // 数据来源就绪时（天气系统，FG7-ENV-03）才会走到这里：要求工作中的监听站等级。
                     if (WorkingTier(s) < k.ConditionArg)
                     {
-                        why = GameText.Format("intel.kind_state.need_tier", k.ConditionArg);
+                        why = wantWhy ? GameText.Format("intel.kind_state.need_tier", k.ConditionArg) : null;
                         return false;
                     }
-                    why = GameText.Get("intel.kind_state.later");
+                    why = wantWhy ? GameText.Get("intel.kind_state.later") : null;
                     return false;
                 case "act":
                     if ((s.Progress?.Act ?? 1) < k.ConditionArg)
                     {
-                        why = GameText.Format("intel.kind_state.need_act", k.ConditionArg);
+                        why = wantWhy ? GameText.Format("intel.kind_state.need_act", k.ConditionArg) : null;
                         return false;
                     }
                     if (NextFragment(s) != null)
                     {
                         return true;
                     }
-                    why = GameText.Get("intel.kind_state.fragments_done");
+                    why = wantWhy ? GameText.Get("intel.kind_state.fragments_done") : null;
                     return false;
                 default:
                     return false;
@@ -525,9 +642,13 @@ namespace GameLogic.Campaign.Economy
             {
                 return null;
             }
-            CampaignFgStateDomains.EnsureAll(s);
+            IntelState f = EnsureIntel(s);
+            if (f == null)
+            {
+                return null;
+            }
             long now = GameClock.Ticks;
-            UpdateOutdated(s, StateOf(s), now);
+            UpdateOutdated(s, f, now);
             IntelKindDef k = PickTarget(s, now);
             if (k == null && !IntelCatalog.TryGet(IntelCatalog.KindCounter, out k))
             {
@@ -724,7 +845,7 @@ namespace GameLogic.Campaign.Economy
                         Content.AdaptationCatalog.AdaptationInfo info = Content.AdaptationCatalog.Describe(id);
                         parts.Add(GameText.Format("intel.counter.region", site, info.DisplayName, info.CounterHintText));
                     }
-                    return string.Join("；", parts);
+                    return string.Join(GameText.Get("intel.list_sep"), parts);
                 }
                 case IntelCatalog.KindBoss:
                 {
@@ -783,15 +904,17 @@ namespace GameLogic.Campaign.Economy
         public static string StatusText(CampaignState s, long now)
         {
             int working = WorkingCount(s);
-            IntelKindDef target = PickTarget(s, now);
             if (working <= 0)
             {
-                if (target != null && ProgressPercent(s, target.Id) > 0)
+                // 与“破译中断”通知同一口径：按优先级第一类现在需要、已经破译了一部分的（不只看当前目标）。
+                IntelKindDef paused = PickTarget(s, now) != null ? PausedKind(s, now) : null;
+                if (paused != null && ProgressPercent(s, paused.Id) > 0)
                 {
-                    return GameText.Format("intel.panel.status.paused", target.Name, ProgressPercent(s, target.Id)) + "\n" + GameText.Get("intel.panel.status.no_post");
+                    return GameText.Format("intel.panel.status.paused", paused.Name, ProgressPercent(s, paused.Id)) + "\n" + GameText.Get("intel.panel.status.no_post");
                 }
                 return GameText.Get("intel.panel.status.no_post");
             }
+            IntelKindDef target = PickTarget(s, now);
             int rate = RateMilli(s);
             string head = GameText.Format("intel.panel.status.posts", working, RateText(rate), RateBreakdown(working));
             if (target == null)
@@ -931,7 +1054,7 @@ namespace GameLogic.Campaign.Economy
                 .Append(" seen=").Append(f.SeenSerial).Append(" prod=").Append(f.Produced).Append(" heard=").Append(string.Join(",", f.FragmentsHeard)).Append(" prog=");
             foreach (IntelProgressRecord p in f.Progress)
             {
-                sb.Append(p.Kind).Append(':').Append(p.Work).Append(':').Append(p.Produced).Append(';');
+                sb.Append(p.Kind).Append(':').Append(p.Work).Append(':').Append(p.Produced).Append(':').Append(p.Subject).Append(';');
             }
             sb.Append(" rec=");
             foreach (IntelRecord r in f.Records)

@@ -21,7 +21,8 @@ namespace GameLogic.UI.Kit
     /// - 破译：几座监听站在工作、速度构成（第 1 座 100% + 第 2 座 +50% …，B13）、正在破译哪一类与进度 / 暂停 / 空闲；五类情报各一行写明状态或为什么不破译（B06）。
     /// - 列表：类型筛选（全部 + 五类）；每条一行——标记字 + 类名 + “有效，还剩多久”/“已过时（原因）”+ 来源，换行接内容；新情报前缀“（新）”；
     ///   突袭预报行有“在地图上查看”（打开战略地图并对准来袭方向的箭头）。空列表有空状态说明（B12）。
-    /// 入口：情报键（默认 Y，可重绑）、监听站建筑面板“情报…”、新情报 / 突袭预报 / 破译中断通知（点击打开）。模态；Esc / 关闭 / 点遮罩关闭。
+    /// 入口：情报键（默认 Y，可重绑）、监听站建筑面板“情报…”、新情报 / 破译中断通知（点击打开）、突袭预报通知（带预计抵达点：点弹出条 / 通知中心行定位镜头；
+    ///   通知 HUD 对带位置的通知只做定位、定位失败时打开通知中心，不调登记的执行者——突袭预报的执行者只在别处直接调用 NotificationCenter.TryOpen 时用到，打开并筛到突袭预报）。模态；Esc / 关闭 / 点遮罩关闭。
     /// 刷新：情报版本、筛选、语言变化或游戏时间每过 1 秒（倒计时）才重建；O(情报条数)，不按帧分配。
     /// </summary>
     public sealed class IntelPanelUIToolkit : UiKitPanelHost
@@ -81,6 +82,16 @@ namespace GameLogic.UI.Kit
         private void Awake()
         {
             Instance = this;
+            Listen();
+        }
+
+        /// <summary>
+        /// 登记“点通知打开情报面板”的执行者（Awake 与 BindView 都会调；编辑模式下 AddComponent 不跑 Awake，自检经 BindView 接上，与离家报告面板同一做法）。
+        /// 新情报 / 破译中断没有位置，点弹出条 / 通知中心行直接打开面板；突袭预报带预计抵达点，点击定位镜头、定位失败打开通知中心（HUD 不会走到执行者；
+    /// 执行者仍登记，只供直接调用 NotificationCenter.TryOpen 时筛到突袭预报）。
+        /// </summary>
+        private static void Listen()
+        {
             NotificationCenter.RegisterOpenHandler("intel_new", OpenFromNotification);
             NotificationCenter.RegisterOpenHandler("intel_raid", OpenFromNotification);
             NotificationCenter.RegisterOpenHandler("intel_interrupted", OpenFromNotification);
@@ -208,6 +219,7 @@ namespace GameLogic.UI.Kit
         public void BindView(VisualElement root)
         {
             Instance = this;
+            Listen();
             _root = root.Q<VisualElement>("IntelRoot");
             _title = root.Q<Label>("IntelTitle");
             _help = root.Q<Button>("IntelHelp");

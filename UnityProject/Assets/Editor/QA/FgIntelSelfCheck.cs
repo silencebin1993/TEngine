@@ -35,7 +35,8 @@ namespace GameLogic.EditorTools
     /// FG5-RND-05 监听站与情报的自动验收（FG05 FGR-RND-050～052；FG13 FGU-25；FGT-RND-008；负向“监听站被摧毁时正在破译的情报”“情报过期”“没有任何情报时的空状态”）。
     /// 全部起真实系统：真实家园（世界模拟、电网、监听站建筑、行进中的突袭部队沿地形寻路）、真文件存读档、真 UXML 面板与战略地图。
     /// A 数据（四张新表与源数据逐字段、初值、研究门槛与关键材料、文本中英、钩子、图鉴、快捷键、通知类型）；
-    /// B FGR-RND-052 多座递减（1 座 / 4 座实测出情报的时间；第 4 座不提速；缺电 / 禁用的不算）；
+    /// B FGR-RND-052 多座递减（1 座 / 4 座实测出情报的时间；第 4 座不提速；缺电 / 禁用的不算）；B2 玩家正式路径（建造模式放虚影 → 机器施工完工 → 计入速度、钩子、出情报；第 2 座 ×1.5）；
+    /// C3 破译进度跟着目标（换了突袭部队从 0 开始）；F1b 被插队的同一时刻失效照样告“破译中断”；
     /// C FGR-RND-050 五类情报（反制预览 = 出发锁定同一算法；首领弱点要先遭遇、击败后不再破译且旧的标“目标已不在”；天气后续版本开放；舰队片段第二幕起按顺序、只截获一次；
     ///   优先级插队时原进度保留）；D 有效期与“已过时”（存档里的显式状态、不删除、同一目标的新情报替代、每类保留上限）；
     /// E FGT-RND-008 突袭预报与实际到来的突袭一致（阵营、规模、方向、时间窗口；两个种子、两个出发领地，B25）+ 地图箭头；
@@ -126,7 +127,9 @@ namespace GameLogic.EditorTools
                      $"Burst {(Unity.Burst.BurstCompiler.IsEnabled ? "开" : "关")}；破译 / 有效期 / 面板在热更层（Editor 下 Mono JIT，真机 HybridCLR 解释执行），突袭部队寻路在 AOT 内核；真机另测（FG15-SYS-02）");
                 Step(CheckData);
                 Step(CheckStacking);
+                Step(CheckFormalConstruction);
                 Step(CheckKinds);
+                Step(CheckProgressPerTarget);
                 Step(CheckOutdated);
                 Step(CheckRaidForecast);
                 Step(CheckInterrupted);
@@ -363,7 +366,7 @@ namespace GameLogic.EditorTools
                 "intel.panel.status.posts", "intel.panel.status.target", "intel.panel.row_valid", "intel.panel.row_outdated", "intel.panel.map", "intel.panel.footer",
                 "intel.raid.line", "intel.counter.region", "intel.boss.line", "intel.boss.foundry_core.phases", "intel.fragment.line", "intel.outdated.expired",
                 "intel.outdated.arrived", "intel.outdated.gone", "intel.notify.interrupted", "bs.reason.intel_working", "bs.reason.intel_idle", "ui.map.raid_forecast",
-                "analysis.result.core_intel", "codex.intel.listening_post.title", "codex.intel.listening_post.body", "input.action.open_intel.name",
+                "analysis.result.core_intel", "intel.list_sep", "codex.intel.listening_post.title", "codex.intel.listening_post.body", "input.action.open_intel.name",
             };
             var missing = keysText.Concat(IntelCatalog.All.SelectMany(k => new[] { k.NameKey, k.DescKey })).Concat(IntelCatalog.Fragments.Select(f => f.TextKey))
                 .Where(k => !GameText.TryGet(k, GameLanguage.ZhCn, out string z) || string.IsNullOrWhiteSpace(z) || !GameText.TryGet(k, GameLanguage.En, out string e) || string.IsNullOrWhiteSpace(e)).ToList();
@@ -417,6 +420,111 @@ namespace GameLogic.EditorTools
                    && breakdown.Contains("+50%") && breakdown.Contains("+25%") && breakdown.Contains("第 4 座起不再提速"),
                 $"B FGR-RND-052 多座递减（真实世界逐步实测）：1 座破译一条反制预览用 {one} 步（应 {need1}）；4 座速度 ×{rate4 / 1000.0:0.##}（第 4 座不提速），舰队片段用 {four} 步" +
                 $"（应约 {Math.Ceiling(need2 * 1000.0 / 1750.0)}）；禁用第 4 座仍 ×{rateDisabled1 / 1000.0:0.##}、再禁用 1 座 ×{rateDisabled2 / 1000.0:0.##}；缺电的不算（×{rateUnpowered / 1000.0:0.##}）；速度构成“{breakdown}”");
+        }
+
+        // ── B2 玩家正式施工路径（审查 P0：施工推进与完工是原地改状态、不换建筑数组）──────────────────
+
+        /// <summary>核心附近一块玩家能放监听站的空地（与建造模式同一校验：解锁、迷雾、地形、占格、费用预览；按种子地形找，不写死坐标，B25）。</summary>
+        private static GridCell? FindPlayerSpot(CampaignState s)
+        {
+            GridCell core = HomeGridService.CorePivot(s);
+            for (int a = 0; a < 72; a++)
+            {
+                float ang = a * 5f * Mathf.Deg2Rad;
+                for (float d = 6f; d <= 40f; d += 1f)
+                {
+                    var c = new GridCell(core.X + Mathf.RoundToInt(Mathf.Cos(ang) * d), core.Y + Mathf.RoundToInt(Mathf.Sin(ang) * d));
+                    if (HomeGridService.ValidatePlacement(s, Post, c, 0).Ok)
+                    {
+                        return c;
+                    }
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// B2 研究完成 → 建造模式放下监听站虚影（<see cref="HomeGridService.TryPlace"/>，与建造菜单同一入口）→ 机器取料施工到完工 → 电网结算 → 开始破译。
+        /// 放下虚影后先让情报步跑过（监听站索引在虚影阶段建好），复现审查 P0 的时序：完工前不算速度，完工后算 1 座、引导钩子触发（图鉴解锁）、
+        /// 按破译时长出第一条情报；第 2 座同样走正式施工，完工后速度 ×1.5。
+        /// </summary>
+        private static void CheckFormalConstruction()
+        {
+            IntelKindDef counter = IntelCatalog.All.First(k => k.Id == IntelCatalog.KindCounter);
+            long need = GameClock.TicksFor(counter.DecipherSeconds);
+            CampaignState s = NewWorld(5521, 0);
+            HomeInventory.Add(s, "listening_array_core", 1, clampToSpace: false);
+            ResearchService.CompleteForTests(s, "signal.listening_post");
+            // 从“没见过任何引导钩子、图鉴为空”开始（图鉴会按见过的钩子补解锁）；Run 收尾恢复原设置。
+            PlayerPrefs.DeleteKey(SettingsPrefsKey);
+            GameSettings.Load();
+            GameSettings.SetLanguage(GameLanguage.ZhCn);
+            try
+            {
+                File.Delete(Path.Combine(_dir, "codex.json"));
+            }
+            catch
+            {
+                // 文件不存在 = 本来就是空图鉴。
+            }
+            MechanicCodex.Reload();
+            bool codexBefore = MechanicCodex.IsUnlocked("codex.intel.listening_post") || GameSettings.HasSeenGuidanceHook(GuidanceHooks.IntelFirstBuilt);
+
+            GridCell? at1 = FindPlayerSpot(s);
+            GridOpResult p1 = at1.HasValue ? HomeGridService.TryPlace(s, Post, at1.Value, 0) : default;
+            BuildingRecord g1 = p1.Success ? HomeGridService.FindBuilding(s, p1.BuildingId) : null;
+            WorldSimulation.StepMany(6);
+            bool ghostPhase = g1 != null && HomeValleyController.IsPlannedGhost(g1) && IntelService.WorkingCount(s) == 0 && IntelService.RateMilli(s) == 0 && ProducedOf(s) == 0;
+            BuildingRecord[] arrayAtGhost = s.BuildingRecords;
+            bool built1 = g1 != null && F.StepUntil(() => g1.ConstructionState == BuildingConstructionState.Operational, 600);
+            WorldSimulation.StepMany(6);
+            bool sameArray = ReferenceEquals(arrayAtGhost, s.BuildingRecords);
+            int working1 = IntelService.WorkingCount(s);
+            int rate1 = IntelService.RateMilli(s);
+            bool codexAfter = MechanicCodex.IsUnlocked("codex.intel.listening_post") && GameSettings.HasSeenGuidanceHook(GuidanceHooks.IntelFirstBuilt);
+            long first = TicksUntilProduced(s, (int)counter.DecipherSeconds + 30);
+            bool firstOk = first > 0 && first <= need + 6 && first >= need - 15 && IntelService.LastProduced?.Kind == IntelCatalog.KindCounter
+                           && IntelService.LastProduced?.Source == IntelService.SourcePost;
+
+            GridCell? at2 = FindPlayerSpot(s);
+            GridOpResult p2 = at2.HasValue ? HomeGridService.TryPlace(s, Post, at2.Value, 0) : default;
+            BuildingRecord g2 = p2.Success ? HomeGridService.FindBuilding(s, p2.BuildingId) : null;
+            WorldSimulation.StepMany(6);
+            int rateGhost2 = IntelService.RateMilli(s);
+            bool built2 = g2 != null && F.StepUntil(() => g2.ConstructionState == BuildingConstructionState.Operational, 600);
+            WorldSimulation.StepMany(6);
+            int working2 = IntelService.WorkingCount(s);
+            int rate2 = IntelService.RateMilli(s);
+            Expect(p1.Success && ghostPhase && built1 && working1 == 1 && rate1 == 1000 && !codexBefore && codexAfter && firstOk
+                   && p2.Success && rateGhost2 == 1000 && built2 && working2 == 2 && rate2 == 1500,
+                $"B2 玩家正式路径（研究 → 建造模式放虚影 → 机器取料施工 → 完工）：虚影阶段不算速度（{ghostPhase}）；第 1 座完工后工作中 {working1} 座、速度 ×{rate1 / 1000.0:0.##}" +
+                $"（完工时建筑数组{(sameArray ? "没换" : "换过")}）、“第一座监听站建成”钩子触发、图鉴解锁（{codexBefore}→{codexAfter}）、{first} 步出第一条情报（应约 {need}）；" +
+                $"第 2 座虚影阶段仍 ×{rateGhost2 / 1000.0:0.##}，完工后 {working2} 座 ×{rate2 / 1000.0:0.##}" +
+                (p1.Success && p2.Success ? string.Empty : $"；放置失败：{(at1.HasValue ? p1.Describe() : "找不到空地")} / {(at2.HasValue ? p2.Describe() : "找不到空地")}"));
+        }
+
+        /// <summary>C3 破译进度跟着目标：突袭部队 A 没破译完就到了，换成部队 B 时从 0 开始（B 的预报不会比破译时长更早出现，审查 P2）；被别的类插队时同一目标的进度照常保留（C 段）。</summary>
+        private static void CheckProgressPerTarget()
+        {
+            IntelKindDef raidKind = IntelCatalog.All.First(k => k.Id == IntelCatalog.KindRaid);
+            long need = GameClock.TicksFor(raidKind.DecipherSeconds);
+            CampaignState s = NewWorld(5522, 1);
+            TransitGroupRecord a = WorldTransitSystem.DispatchRaidFromTerritory(s, "silent", 2, out string failA);
+            WorldSimulation.StepMany((int)(need / 2));
+            int pctA = IntelService.ProgressPercent(s, IntelCatalog.KindRaid);
+            bool noForecastA = Latest(s, IntelCatalog.KindRaid) == null;
+            if (a != null)
+            {
+                a.State = TransitGroupState.Arrived; // 测试捷径：A 提前“到达”（行进本身由 E 段真实跑完）
+                a.ArrivedAtTick = GameClock.Ticks;
+            }
+            TransitGroupRecord b = WorldTransitSystem.DispatchRaidFromTerritory(s, "silent", 3, out string failB);
+            int pctB0 = IntelService.ProgressPercent(s, IntelCatalog.KindRaid);
+            long tb = TicksUntilProduced(s, (int)raidKind.DecipherSeconds + 30);
+            IntelRecord fb = Latest(s, IntelCatalog.KindRaid);
+            bool ok = a != null && b != null && pctA >= 40 && noForecastA && pctB0 == 0 && fb != null && fb.Subject == b.GroupId && tb > 0 && Math.Abs(tb - need) <= 6;
+            Expect(ok, $"C3 破译进度跟着目标：突袭部队 A 破译到 {pctA}% 时提前到达，换成部队 B 后进度从 0 开始（{pctB0}%），B 的预报用 {tb} 步（应 {need}，不吃 A 的进度）" +
+                       (a == null || b == null ? $"；派不出突袭（{failA} {failB}）" : string.Empty));
         }
 
         // ── C 五类情报（FGR-RND-050）─────────────────────────────────────────────
@@ -501,7 +609,8 @@ namespace GameLogic.EditorTools
             {
                 WorldSimulation.StepMany(Math.Max(3, (int)Math.Min(600, expires + 6 - GameClock.Ticks)));
             }
-            bool marked = first.Outdated && first.OutdatedReason == IntelService.ReasonExpired && first.OutdatedTick >= expires && first.OutdatedTick <= expires + 6
+            // 记下的时刻 = 有效期终点（与面板按 IsValid 显示“已过时”同一刻；标记晚一个推进周期写进记录也不改时刻）
+            bool marked = first.Outdated && first.OutdatedReason == IntelService.ReasonExpired && first.OutdatedTick == expires
                           && I(s).Records.Contains(first) && GameSettings.HasSeenGuidanceHook(GuidanceHooks.IntelFirstOutdated);
             string row = IntelService.RowText(s, first, GameClock.Ticks);
             // 过期 → 又需要破译 → 新的反制预览替代旧的（同一目标），旧的从列表里去掉
@@ -620,6 +729,27 @@ namespace GameLogic.EditorTools
                 $"F1 负向“监听站被摧毁时正在破译的情报”：破译到 {pct}% 时两座监听站都被毁 → 破译暂停、进度原样保留（30 秒后仍 {pctAfter}%）、只发一次“破译中断”（{notified} 次）、" +
                 $"面板写“{Short(status.Split('\n')[0])}”；修好后接着破译，{rest} 步出情报（不从零开始，约 {expectRest}）");
 
+            // F1b 被插队的同一时刻失效：反制预览破译到一部分，监听站被毁的同一时刻出现突袭部队（目标换成进度为 0 的突袭预报）
+            // → 照样只告一次“破译中断”，写的是反制预览和它保留的进度；面板“暂停”句同一口径（审查 P2）。
+            CampaignState q = NewWorld(5511, 1);
+            WorldSimulation.StepMany(GameClock.StepHz * 30);
+            int qPct = IntelService.ProgressPercent(q, IntelCatalog.KindCounter);
+            int qBefore = NotificationCenter.History.Where(e => e.Type?.Id == "intel_interrupted").Sum(e => e.Members.Count);
+            BuildingOps.ApplyDamage(q, PostIds[0], BuildingOps.MaxDurability(Post) + 1f);
+            TransitGroupRecord qRaid = WorldTransitSystem.DispatchRaidFromTerritory(q, "silent", 2, out string qFail);
+            WorldSimulation.StepMany(GameClock.StepHz * 5);
+            NotificationEntry qNote = NotificationCenter.History.Where(e => e.Type?.Id == "intel_interrupted").OrderByDescending(e => e.Id).FirstOrDefault();
+            int qNotified = NotificationCenter.History.Where(e => e.Type?.Id == "intel_interrupted").Sum(e => e.Members.Count) - qBefore;
+            string qText = qNote?.Latest?.DetailText ?? string.Empty;
+            string qStatus = IntelService.StatusText(q, GameClock.Ticks);
+            string counterName = IntelCatalog.KindName(IntelCatalog.KindCounter);
+            bool preempted = qRaid != null && qPct > 0 && I(q).CurrentKind == IntelCatalog.KindRaid && qNotified == 1 && I(q).InterruptNotified
+                             && qText.Contains(counterName) && qText.Contains(qPct + "%") && qStatus.Contains(counterName) && qStatus.Contains(qPct + "%")
+                             && IntelService.ProgressPercent(q, IntelCatalog.KindCounter) == qPct;
+            Expect(preempted,
+                $"F1b 被插队的同一时刻失效：反制预览破译到 {qPct}% 时监听站被毁、同一时刻出现突袭部队（当前目标 {I(q).CurrentKind}）→ 照样只告一次（{qNotified} 次）“{Short(qText)}”，" +
+                $"面板写“{Short(qStatus.Split('\n')[0])}”，反制预览进度保留" + (qRaid == null ? $"；派不出突袭（{qFail}）" : string.Empty));
+
             // 没有监听站：不产出；数据核心照样给一条情报（DEBT-FG5RND02-03，来源写数据核心）
             CampaignState n = NewWorld(5510, 0);
             WorldSimulation.StepMany(GameClock.StepHz * 200);
@@ -682,6 +812,194 @@ namespace GameLogic.EditorTools
                 "G 真文件存读档：情报列表（有效期、已过时标记、突袭预报的窗口 / 方向）、各类破译进度、当前目标、已截获片段、统计写进存档，读档后逐字段一致；读档后接着跑 60 秒与不存档连续跑逐字段一致（两次读档同一结果）"
                 + (loaded1 == before ? string.Empty : $"\n存前：{before}\n读后：{loaded1}") + (first == continuous ? string.Empty : $"\n连续：{continuous}\n读档：{first}")
                 + (content && hasOutdatedField && save.Success ? string.Empty : $"\n快照：{before}（存档 {save.Success}）"));
+
+            CheckOutdatedSurvivesSave();
+            CheckLegacySave();
+        }
+
+        [Serializable]
+        private sealed class TestEnvelope
+        {
+            public int SchemaVersion;
+            public int ContentVersion;
+            public string Checksum;
+            public string WrittenAtUtc;
+            public string ProductVersion;
+            public string CardJson;
+            public string PayloadJson;
+        }
+
+        /// <summary>按主菜单“继续”的顺序从 <see cref="Slot"/> 恢复（真文件），失败返回 null。</summary>
+        private static CampaignState RestoreSlot(out string fail)
+        {
+            WorldSimulation.UnloadAll();
+            GameClock.ResetSession();
+            HomeValleyPowerGrid.ResetForTests();
+            ProductionService.ResetForTests();
+            BuildingOps.ResetForTests();
+            ResearchService.ResetForTests();
+            IntelService.ResetSessionState();
+            RestoreResult rr = CampaignRestoreOrchestrator.Restore(Slot);
+            if (!rr.Success)
+            {
+                fail = rr.Message;
+                return null;
+            }
+            fail = null;
+            CampaignSession.Set(Slot, rr.State);
+            HomeValleyController home = WorldSimulation.LoadHome(resume: true);
+            WorldView.Observe(home.SiteId);
+            return rr.State;
+        }
+
+        /// <summary>存档正文里 <c>"Intel":{…}</c> 这一段的起止（按括号配对，跳过字符串）；找不到或不唯一返回 false。</summary>
+        private static bool IntelSpan(string payload, out int start, out int end)
+        {
+            const string key = "\"Intel\":{";
+            start = payload.IndexOf(key, StringComparison.Ordinal);
+            end = -1;
+            if (start < 0 || payload.IndexOf(key, start + key.Length, StringComparison.Ordinal) >= 0)
+            {
+                return false;
+            }
+            int depth = 0;
+            bool inString = false;
+            for (int i = start + key.Length - 1; i < payload.Length; i++)
+            {
+                char c = payload[i];
+                if (inString)
+                {
+                    if (c == '\\')
+                    {
+                        i++;
+                    }
+                    else if (c == '"')
+                    {
+                        inString = false;
+                    }
+                    continue;
+                }
+                if (c == '"')
+                {
+                    inString = true;
+                }
+                else if (c == '{')
+                {
+                    depth++;
+                }
+                else if (c == '}' && --depth == 0)
+                {
+                    end = i + 1;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static void RewriteSlot(Func<string, string> payloadEdit)
+        {
+            string path = CampaignSaveService.SlotPath(Slot);
+            TestEnvelope env = JsonUtility.FromJson<TestEnvelope>(File.ReadAllText(path));
+            env.PayloadJson = payloadEdit(env.PayloadJson);
+            env.Checksum = CampaignSaveService.ComputeChecksum(env.PayloadJson, env.CardJson);
+            File.WriteAllText(path, JsonUtility.ToJson(env));
+        }
+
+        /// <summary>
+        /// G2 已过时情报经真文件存读档后仍是“已过时”（FG05 负向“情报过期 → 标为已过时，不删除”；第 6 节“情报列表与有效期”）：
+        /// 反制预览按游戏时间真实到期 → 存档文件正文里就是 Outdated=true + 原因 → 读档后同一条仍在列表里、仍已过时（原因 / 时刻不变，不是界面按时间重新算的）→ 接着跑 30 秒仍在、直到新情报替代。
+        /// </summary>
+        private static void CheckOutdatedSurvivesSave()
+        {
+            CampaignState o = NewWorld(9817, 1);
+            TicksUntilProduced(o, 200);
+            IntelRecord c = Latest(o, IntelCatalog.KindCounter);
+            if (c == null)
+            {
+                Fail("G2 没破译出反制预览，无法验证已过时存读档");
+                return;
+            }
+            long expires = c.ExpiresTick;
+            while (GameClock.Ticks < expires + 6)
+            {
+                WorldSimulation.StepMany(Math.Max(3, (int)Math.Min(600, expires + 6 - GameClock.Ticks)));
+            }
+            bool marked = c.Outdated && c.OutdatedReason == IntelService.ReasonExpired;
+            string before = IntelService.Snapshot(o);
+            WorldSimulation.SyncAllForSave();
+            SaveResult save = CampaignAutoSaveService.SaveWithExport(Slot, SaveReason.Manual);
+            string payload = save.Success ? JsonUtility.FromJson<TestEnvelope>(File.ReadAllText(CampaignSaveService.SlotPath(Slot))).PayloadJson : string.Empty;
+            bool inFile = IntelSpan(payload, out int a, out int b) && payload.Substring(a, b - a).Contains("\"Serial\":" + c.Serial + ",")
+                          && payload.Substring(a, b - a).Contains("\"Outdated\":true") && payload.Substring(a, b - a).Contains("\"OutdatedReason\":\"expired\"");
+            CampaignState l = RestoreSlot(out string fail);
+            long now = GameClock.Ticks;
+            IntelRecord lc = l == null ? null : IntelService.Find(l, c.Serial);
+            string row = lc == null ? string.Empty : IntelService.RowText(l, lc, now);
+            bool kept = lc != null && lc.Outdated && lc.OutdatedReason == IntelService.ReasonExpired && lc.OutdatedTick == c.OutdatedTick && !IntelService.IsValid(lc, now)
+                        && IntelService.Snapshot(l) == before && row.Contains("已过时") && IntelService.List(l, IntelCatalog.KindCounter, now).Contains(lc);
+            if (l != null)
+            {
+                WorldSimulation.StepMany(GameClock.StepHz * 30);
+            }
+            IntelRecord later = l == null ? null : IntelService.Find(l, c.Serial);
+            bool still = later != null && later.Outdated && I(l).Records.Count(x => x.Kind == IntelCatalog.KindCounter) == 1;
+            Expect(save.Success && marked && inFile && kept && still,
+                $"G2 已过时情报的真文件存读档：反制预览真实到期后存档文件正文里就是 Outdated=true / 原因 expired（{inFile}）；读档后同一条（#{c.Serial}）仍在列表里、仍已过时、原因与时刻不变，" +
+                $"行写“{Short(row.Split('\n')[0])}”；接着跑 30 秒仍在（{still}），不删除、直到新情报替代" + (fail != null ? "；读档失败：" + fail : string.Empty));
+        }
+
+        /// <summary>
+        /// G3 旧档兼容（B10）：FG5-RND-05 之前的存档正文里没有情报域 → 读档补成空域（序号从 1 起、不报错），已建的监听站照常破译出第 1 条情报；
+        /// 存档里有表里已删掉的情报类型 → 读档时去掉那类的情报与进度，其余照常。
+        /// </summary>
+        private static void CheckLegacySave()
+        {
+            // 用 G2 刚写的真存档（1 座监听站、1 条已过时的反制预览）改成旧格式
+            bool stripped = false;
+            RewriteSlot(p =>
+            {
+                if (!IntelSpan(p, out int a, out int b))
+                {
+                    return p;
+                }
+                stripped = true;
+                int from = a > 0 && p[a - 1] == ',' ? a - 1 : a;
+                int to = from == a && b < p.Length && p[b] == ',' ? b + 1 : b;
+                return p.Remove(from, to - from);
+            });
+            CampaignState l = RestoreSlot(out string fail);
+            IntelState f = l == null ? null : I(l);
+            bool empty = f != null && f.Records.Length == 0 && f.Progress.Length == 0 && f.NextSerial == 1 && f.FragmentsHeard.Length == 0 && f.Produced == 0
+                         && IntelService.PostsOf(l).Count == 1;
+            long t = l == null ? -1 : TicksUntilProduced(l, 200);
+            IntelRecord first = l == null ? null : Latest(l, IntelCatalog.KindCounter);
+            bool works = t > 0 && first != null && first.Serial == 1 && !first.Outdated;
+            Expect(stripped && empty && works,
+                $"G3a 旧档（正文里没有情报域）：读档补成空域、不报错（{empty}）；已建的监听站照常破译，{t} 步出第 1 条情报（序号 {first?.Serial}）" + (fail != null ? "；读档失败：" + fail : string.Empty));
+
+            // 存档里有表里已删掉的情报类型：把反制预览改名成不存在的类型 → 读档去掉那类情报与进度
+            WorldSimulation.SyncAllForSave();
+            SaveResult save = CampaignAutoSaveService.SaveWithExport(Slot, SaveReason.Manual);
+            bool renamed = false;
+            RewriteSlot(p =>
+            {
+                if (!IntelSpan(p, out int a, out int b))
+                {
+                    return p;
+                }
+                string intel = p.Substring(a, b - a);
+                string edited = intel.Replace("\"Kind\":\"" + IntelCatalog.KindCounter + "\"", "\"Kind\":\"legacy_removed_kind\"");
+                renamed = edited != intel;
+                return p.Substring(0, a) + edited + p.Substring(b);
+            });
+            CampaignState l2 = RestoreSlot(out string fail2);
+            IntelState f2 = l2 == null ? null : I(l2);
+            bool dropped = f2 != null && f2.Records.All(r => r.Kind != "legacy_removed_kind") && f2.Progress.All(p => p.Kind != "legacy_removed_kind")
+                           && f2.Records.All(r => r.Kind != IntelCatalog.KindCounter) && f2.NextSerial >= 2;
+            long t2 = l2 == null ? -1 : TicksUntilProduced(l2, 200);
+            bool works2 = t2 > 0 && Latest(l2, IntelCatalog.KindCounter) is IntelRecord again && again.Serial >= 2;
+            Expect(save.Success && renamed && dropped && works2,
+                $"G3b 存档里有表里已删掉的情报类型：读档时去掉那类的情报与进度、序号不回退（{dropped}），之后照常破译（{t2} 步出新情报）" + (fail2 != null ? "；读档失败：" + fail2 : string.Empty));
         }
 
         // ── H / I 暂停、倍速、观察 ───────────────────────────────────────────────
@@ -824,6 +1142,8 @@ namespace GameLogic.EditorTools
                     $"J2 再按 Y 关闭；建好两座监听站后列表两行（“{Short(panel.RowText(0).Split('\n')[0])}”，新情报带“（新）”，只有突袭预报有“在地图上查看”）；" +
                     $"状态写几座在工作与速度 ×1.5；筛选“突袭预报”后只剩 1 行");
 
+                CheckNotificationClicks(s, panel);
+
                 // 在地图上查看：关面板、打开战略地图并对准箭头
                 VisualElement mapRoot = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(MapUxml).CloneTree();
                 StrategicMapUIToolkit map = mgo.AddComponent<StrategicMapUIToolkit>();
@@ -847,6 +1167,8 @@ namespace GameLogic.EditorTools
                                 && !panel.RowText(0).StartsWith("（新）");
                 Expect(outdated, $"J4 已过时的预报留在列表里：样式变暗、写“{Short(panel.RowText(0).Split('\n')[0])}”、没有“在地图上查看”；再次打开不再标“新”");
 
+                CheckEnglishPanel(s, panel);
+
                 string probe = UiToolkitLayoutProbe.Probe(PanelUxml, "IntelRoot", stressFill: true, prepare: rr =>
                 {
                     rr.panel.visualTree.Q<VisualElement>("IntelRoot")?.RemoveFromClassList("uk-hidden");
@@ -863,6 +1185,159 @@ namespace GameLogic.EditorTools
                 InputRouter.Reset();
                 Object.DestroyImmediate(go);
                 Object.DestroyImmediate(mgo);
+            }
+        }
+
+        /// <summary>
+        /// J2b 通知点击（FG05 第 4 节“获得新情报时都有通知，点击可以定位”；FGR-RND-051“新情报发通知”）：走真实通知 HUD 的弹出条点击路径。
+        /// 新情报（没有位置）→ 直接打开情报面板（全部）；突袭预报（带预计抵达点）→ 镜头飞到预报的抵达点；破译中断（监听站全部停用，真实世界步产生）→ 打开情报面板。
+        /// </summary>
+        private static void CheckNotificationClicks(CampaignState s, IntelPanelUIToolkit panel)
+        {
+            IntelPanelUIToolkit.Close();
+            NotificationEntry newNote = NotificationCenter.History.Where(e => e.Type?.Id == "intel_new").OrderByDescending(e => e.Id).FirstOrDefault();
+            NotificationEntry raidNote = NotificationCenter.History.Where(e => e.Type?.Id == "intel_raid").OrderByDescending(e => e.Id).FirstOrDefault();
+            IntelRecord forecast = Latest(s, IntelCatalog.KindRaid);
+            VisualElement hroot = F.MountUxml(UiKitFolder + "NotificationHud.uxml", out GameObject hgo);
+            NotificationCenter.LocateDelegate locateBefore = NotificationCenter.LocateHandler;
+            bool newOpens = false, raidLocates = false, raidHandler = false, intOpens = false, resumed = false;
+            Vector3 flown = new Vector3(float.NaN, 0f, float.NaN);
+            string intText = string.Empty;
+            try
+            {
+                var hud = hgo.AddComponent<NotificationHudUIToolkit>();
+                hud.BindView(hroot);
+                hud.OnToastClicked(newNote);
+                newOpens = newNote != null && !newNote.HasAnyLocation && NotificationCenter.HasOpenHandler(newNote) && IntelPanelUIToolkit.IsOpen && panel.CurrentFilter == 0
+                           && !NotificationHudUIToolkit.CenterOpen;
+                IntelPanelUIToolkit.Close();
+
+                NotificationCenter.LocateHandler = (string region, Vector3 pos, out string key) =>
+                {
+                    key = null;
+                    flown = pos;
+                    return true;
+                };
+                hud.OnToastClicked(raidNote);
+                raidLocates = raidNote != null && raidNote.HasAnyLocation && forecast != null && Mathf.Abs(flown.x - forecast.ArriveX) < 0.01f && Mathf.Abs(flown.z - forecast.ArriveY) < 0.01f
+                              && !IntelPanelUIToolkit.IsOpen;
+                raidHandler = NotificationCenter.TryOpen(raidNote) && IntelPanelUIToolkit.IsOpen && panel.CurrentFilter == FilterIndex(IntelCatalog.KindRaid);
+                IntelPanelUIToolkit.Close();
+
+                // 破译中断：遭遇首领后开始破译首领弱点（已有进度）→ 两座都停用 → 真实世界步发出“破译中断”→ 点它打开情报面板；恢复后接着破译
+                EncounterFoundryBoss(s);
+                WorldSimulation.StepMany(GameClock.StepHz * 5);
+                int intBefore = NotificationCenter.History.Where(e => e.Type?.Id == "intel_interrupted").Sum(e => e.Members.Count);
+                foreach (string id in PostIds)
+                {
+                    BuildingOps.TrySetEnabled(s, id, false, out _);
+                }
+                HomeValleyPowerGrid.Recompute(s);
+                WorldSimulation.StepMany(6);
+                NotificationEntry intNote = NotificationCenter.History.Where(e => e.Type?.Id == "intel_interrupted").OrderByDescending(e => e.Id).FirstOrDefault();
+                int intAfter = NotificationCenter.History.Where(e => e.Type?.Id == "intel_interrupted").Sum(e => e.Members.Count);
+                intText = intNote?.Latest?.DetailText ?? string.Empty;
+                hud.OnToastClicked(intNote);
+                intOpens = intNote != null && intAfter == intBefore + 1 && !intNote.HasAnyLocation && IntelPanelUIToolkit.IsOpen && panel.CurrentFilter == 0;
+                IntelPanelUIToolkit.Close();
+                hud.SetCenterOpen(false);
+                foreach (string id in PostIds)
+                {
+                    BuildingOps.TrySetEnabled(s, id, true, out _);
+                }
+                HomeValleyPowerGrid.Recompute(s);
+                F.Resync(s);
+                WorldSimulation.StepMany(6);
+                resumed = !I(s).InterruptNotified && IntelService.WorkingCount(s) == 2 && I(s).CurrentKind == IntelCatalog.KindBoss;
+            }
+            finally
+            {
+                NotificationCenter.LocateHandler = locateBefore;
+                Object.DestroyImmediate(hgo);
+            }
+            Expect(newOpens && raidLocates && raidHandler && intOpens && resumed,
+                $"J2b 通知点击（真实通知 HUD 弹出条）：新情报通知（无位置）直接打开情报面板（{newOpens}）；突袭预报通知镜头飞到预报的预计抵达点（{flown.x:F1},{flown.z:F1}，{raidLocates}），" +
+                $"突袭预报登记的执行者（只供直接调用 NotificationCenter.TryOpen；HUD 对带位置的通知只定位、不走这条）打开并筛到突袭预报（{raidHandler}）；两座监听站停用后真实发出“破译中断”（“{Short(intText)}”），点它打开情报面板（{intOpens}）；恢复后接着工作（{resumed}）");
+        }
+
+        private static int FilterIndex(string kind)
+        {
+            for (int i = 0; i < IntelCatalog.All.Count; i++)
+            {
+                if (IntelCatalog.All[i].Id == kind)
+                {
+                    return i + 1;
+                }
+            }
+            return 0;
+        }
+
+        private static bool HasCjk(string text) =>
+            !string.IsNullOrEmpty(text) && text.Any(c => (c >= 0x4E00 && c <= 0x9FFF) || (c >= 0x3000 && c <= 0x303F) || (c >= 0xFF00 && c <= 0xFFEF));
+
+        /// <summary>J6 英文界面（B16 本地化）：切到英文后面板标题 / 状态 / 五类状态 / 筛选 / 列表行（有效与已过时）/ 页脚 / 空状态、情报内容、建筑状态、通知文本里没有中文与缺键标记。</summary>
+        private static void CheckEnglishPanel(CampaignState s, IntelPanelUIToolkit panel)
+        {
+            var texts = new List<string>();
+            var bad = new List<string>();
+            try
+            {
+                GameSettings.SetLanguage(GameLanguage.En);
+                panel.SelectFilter(0);
+                panel.Refresh(force: true);
+                texts.Add(panel.TitleText);
+                texts.Add(panel.StatusText);
+                texts.Add(panel.KindsText);
+                texts.Add(panel.SectionText);
+                texts.Add(panel.FooterText);
+                for (int i = 0; i < 6; i++)
+                {
+                    Button b = panel.FilterButton(i);
+                    if (b != null && !b.ClassListContains("uk-hidden"))
+                    {
+                        texts.Add(b.text);
+                    }
+                }
+                for (int i = 0; i < panel.RowCount; i++)
+                {
+                    texts.Add(panel.RowText(i));
+                }
+                bool hasOutdatedRow = Enumerable.Range(0, panel.RowCount).Any(panel.RowOutdated);
+                foreach (IntelRecord r in I(s).Records)
+                {
+                    texts.Add(IntelService.Summary(s, r, GameClock.Ticks));
+                }
+                texts.Add(IntelService.RateBreakdown(3));
+                texts.Add(BuildingStatusService.Evaluate(s, HomeGridService.FindBuilding(s, PostIds[0])).Reason);
+                // 空状态（筛到一类没有情报的：天气）
+                panel.SelectFilter(FilterIndex(IntelCatalog.KindWeather));
+                panel.Refresh(force: true);
+                string emptyText = panel.EmptyText;
+                texts.Add(emptyText);
+                // 行首方括号里的标记字是占位图标（fg.TbIntelKind.glyph，与研发树分支标记字同一做法，美术批次换成图标，DEBT-FG5RND05-01），不算界面文字。
+                string[] glyphTokens = IntelCatalog.All.Select(k => "[" + k.Glyph + "]").ToArray();
+                foreach (string raw in texts)
+                {
+                    string t = raw ?? string.Empty;
+                    foreach (string g in glyphTokens)
+                    {
+                        t = t.Replace(g, "[#]");
+                    }
+                    if (string.IsNullOrWhiteSpace(t) || HasCjk(t) || GameText.ContainsMarker(t))
+                    {
+                        bad.Add("“" + Short(t) + "”");
+                    }
+                }
+                bool title = panel.TitleText == GameText.Get("intel.panel.title") && GameText.TryGet("intel.panel.title", GameLanguage.ZhCn, out string zh) && panel.TitleText != zh;
+                Expect(bad.Count == 0 && title && panel.RowCount == 0 && hasOutdatedRow && emptyText.Length > 0,
+                    $"J6 英文界面：标题“{panel.TitleText}”、状态、五类状态、筛选按钮、列表行（含已过时）、情报内容、速度构成、建筑状态、空状态共 {texts.Count} 段文字没有中文与缺键标记（行首方括号里的占位标记字除外，DEBT-FG5RND05-01）；列表分隔符走文本键 intel.list_sep"
+                    + (bad.Count > 0 ? "；有问题：" + string.Join("、", bad) : string.Empty));
+            }
+            finally
+            {
+                GameSettings.SetLanguage(GameLanguage.ZhCn);
+                panel.SelectFilter(FilterIndex(IntelCatalog.KindRaid));
+                panel.Refresh(force: true);
             }
         }
 
