@@ -491,6 +491,20 @@ namespace GameLogic.Campaign
         /// <summary>FG5-RND-06：黑匣子陈列馆（已回收黑匣子的分析队列与进度、已入账的技术数据、统计）。黑匣子在区域里的位置 / 携带者沿用远征关键物
         /// （<see cref="CampaignState.RegionQuestItems"/>），纪念墙名单就是机器登记表里的阵亡记录。旧存档没有 = 空状态（读档时按已回收的黑匣子补队列）。</summary>
         public BlackBoxState BlackBoxes = new BlackBoxState();
+        /// <summary>FG5-E2E-01（FGR-RND-070“统计面板里可以看到技术数据的收入和支出”；DEBT-FG5RND06-04）：技术数据按来源 / 去处的累计收支。
+        /// 唯一写入口 <see cref="Economy.TechDataFlow"/>。旧存档没有 = 空（从读档那一刻起累计）。只加字段不升版本（ADR FG0-SAVE-01）。</summary>
+        public TechFlowRecord[] TechFlow = Array.Empty<TechFlowRecord>();
+        /// <summary>FG5-E2E-01（DEBT-FG5RND01-08）：新战役开局带来的技术数据（research.start_tech_data，过渡初值，见 ADR-QA-022）。旧档 = 0。统计面板对账用。</summary>
+        public int TechStart;
+    }
+
+    /// <summary>FG5-E2E-01：技术数据的一类来源 / 去处的累计（<see cref="Economy.TechDataFlow"/> 的键）。退回的支出从 <see cref="Expense"/> 里扣回，不算收入。</summary>
+    [Serializable]
+    public sealed class TechFlowRecord
+    {
+        public string Key = string.Empty;
+        public long Income;
+        public long Expense;
     }
 
     /// <summary>FG5-RND-06（FG05 FGR-RND-060）：黑匣子陈列馆的存档域。唯一写入口 <see cref="Economy.BlackBoxService"/>。</summary>
@@ -650,6 +664,8 @@ namespace GameLogic.Campaign
         public int SeenSerial;
         /// <summary>统计：累计产出的情报条数（含数据核心给的）。</summary>
         public long Produced;
+        /// <summary>FG5-E2E-01（DEBT-FG5RND05-06）：统计——“破译中断”发生的次数（每次中断只记一次，与通知同一时刻）。旧档没有 = 0。</summary>
+        public int Interruptions;
     }
 
     /// <summary>FG5-RND-05：一条情报。<see cref="Outdated"/> 是存档里的显式状态（不是界面按时间隐藏）。</summary>

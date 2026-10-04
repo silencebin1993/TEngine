@@ -604,9 +604,9 @@ namespace GameLogic.EditorTools
             Expect(Wellformed(m2r) && missingR.Count == 0 && m2r.Seed != m2.Seed && m2r.Steps.Any(x => x.Id == "r1_cancel"),
                 $"FGJ-M2R：{m2r?.Steps.Count} 步；六类反向场景齐全{(missingR.Count == 0 ? string.Empty : "，缺：" + string.Join("、", missingR))}（另有确认框取消）；种子 {m2r?.Seed} ≠ {m2?.Seed}（B25）");
             string src = ReadRepo("TEngine/UnityProject/Assets/Editor/JourneyBots/FgjM2Common.cs") + ReadRepo("TEngine/UnityProject/Assets/Editor/JourneyBots/FgjM2Journey.cs");
-            bool rts = src.Contains("button: 1") && src.Contains("JourneyInput.Drag(") && src.Contains("ShiftClickWorld") && !src.Contains("IssueAttack(") && !src.Contains("DebugSelectMany(")
+            bool rts = src.Contains("button: 1") && src.Contains("JourneyInput.Drag(") && (src.Contains("ShiftClickWorld") || src.Contains("ShiftClickScreen")) && !src.Contains("IssueAttack(") && !src.Contains("DebugSelectMany(")
                        && !src.Contains("TryRestore(");
-            Expect(rts, "旅程走 RTS 正式输入：右键下令（button: 1）、拖框选、Shift 加选；源码里不直接调编队命令 / 选择集 / 复原服务");
+            Expect(rts, "旅程走 RTS 正式输入：右键下令（button: 1）、拖框选、Shift 加选（FG5-E2E-01 起点机器露出来的部分：ShiftClickScreen）；源码里不直接调编队命令 / 选择集 / 复原服务");
         }
 
         // ── D. 缺口清零 ────────────────────────────────────────────────────────────

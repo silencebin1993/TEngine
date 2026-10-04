@@ -51,6 +51,8 @@ namespace GameLogic.UI.Kit
         private Label _state;
         private Label _reason;
         private Label _ruleLine;
+        /// <summary>FG5-E2E-01（DEBT-FG5RND01-07）：研发加成的数值来源行。</summary>
+        private Label _researchLine;
         private Label _nameLabel;
         private TextField _name;
         private Button _rename;
@@ -265,6 +267,7 @@ namespace GameLogic.UI.Kit
             _state = root.Q<Label>("PrState");
             _reason = root.Q<Label>("PrReason");
             _ruleLine = root.Q<Label>("BpRuleLine");
+            _researchLine = root.Q<Label>("BpResearchLine");
             _nameLabel = root.Q<Label>("BpNameLabel");
             _name = root.Q<TextField>("BpName");
             _rename = root.Q<Button>("BpRename");
@@ -551,10 +554,21 @@ namespace GameLogic.UI.Kit
                 _ruleLine.EnableInClassList("uk-hidden", rule == null);
             }
             RuleLineText = rule ?? string.Empty;
+            // FG5-E2E-01（B13，DEBT-FG5RND01-07）：研发加成的数值来源（“研发加成：工作速度 +10%（采集优化 I +10%；同类上限 +30%）”），与真实生效的倍率同一读口。
+            string bonus = ResearchService.BonusLine(state, b.BuildingTypeId);
+            if (_researchLine != null)
+            {
+                _researchLine.text = bonus ?? string.Empty;
+                _researchLine.EnableInClassList("uk-hidden", bonus == null);
+            }
+            ResearchLineText = bonus ?? string.Empty;
         }
 
         /// <summary>自检：面板上的规则追溯行（没有 = 空）。</summary>
         public string RuleLineText { get; private set; } = string.Empty;
+
+        /// <summary>自检：面板上的研发加成来源行（没有加成 = 空）。</summary>
+        public string ResearchLineText { get; private set; } = string.Empty;
 
         private void RefreshControls(CampaignState state, BuildingRecord b)
         {

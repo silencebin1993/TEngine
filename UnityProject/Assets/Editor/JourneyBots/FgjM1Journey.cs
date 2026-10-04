@@ -130,7 +130,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 // ── 第 6 步：被干扰机断链，进入安全模式 ──
                 S("drive_jam", "开着机器（WASD）驶入监听节点的干扰场：宽限后断链，机器进入安全模式", 60, null, TickDriveIntoJam),
                 S("select_safe", "战略视角左键点安全模式的机器", 15, c => ClickFcMachine(c, c.GetInt("other")), c => TickFcSelected(c, c.GetInt("other")), retries: 2),
-                S("cmd_out", "右键撤离点附近的地面：安全模式的机器照常接令，驶出干扰场后自动退出安全模式", 60, c => RightClickFcGround(EvacPoint + new Vector2(0f, 1f)), TickSafeModeRecovered),
+                S("cmd_out", "右键撤离点附近的地面：安全模式的机器照常接令，驶出干扰场后自动退出安全模式", 60, null, TickSafeModeRecovered),
 
                 // ── 第 7、8 步：跳回家园 → 再跳回远征队 ──
                 S("jump_home", "按跳回家园键（默认 H）", 10, c => JourneyInput.PressAction(GameActionId.JumpHome), TickJumpedHome, retries: 1),
@@ -279,47 +279,67 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 if (!JourneyCommon.PanToward(m.Position, 0.08f))
                 {
-                    c.Set("flyFirst", "1"); // 不在画面里：先按方向键把镜头平移过去（玩家的做法），下一次再点。
+                    // 不在画面里：先按方向键把镜头平移过去（玩家的做法）；修复轮：平移结束后在同一次尝试里补点（TickSelected 的 WorldClickSettled），不再用掉一次重试。
+                    JourneyInput.DeferWorldClick(() => ClickMachine(c, key));
                     return;
                 }
-                JourneyInput.ClickWorld(m.View.transform.position);
+                // FG5-E2E-01：机器模型被界面（左下角区域指挥栏等）挡住时点它露出来的那一部分；整台都被挡住就先平移镜头。
+                if (JourneyInput.TryVisiblePointOf(m.View.transform, out Vector3 screen, out _))
+                {
+                    JourneyInput.ClickScreen(screen);
+                    return;
+                }
+                JourneyInput.DeferWorldClick(() => ClickMachine(c, key));
+                FgjM3Common.PanTo(m.Position);
             }
         }
 
         internal static StepOutcome TickSelected(JourneyContext c, string key)
         {
-            if (c.StepElapsed < 0.6)
+            if (!JourneyInput.WorldClickSettled(c.StepElapsed, 0.6))
             {
                 return StepOutcome.Wait;
             }
             int id = c.GetInt(key);
-            if (c.Get("flyFirst") == "1")
-            {
-                c.Set("flyFirst", string.Empty);
-                return StepOutcome.Retry("机器不在画面里，先按方向键把镜头平移过去再点");
-            }
             return GameRoot.HomeValley.SelectedMachineLogicId == id
                 ? StepOutcome.Done($"左键选中 {Label(id)}")
                 : StepOutcome.Retry($"左键后选中的是 {GameRoot.HomeValley.SelectedMachineLogicId}");
         }
 
-        internal static void RightClickBuilding(string typeId)
-        {
-            Transform t = FindNamed("Building_" + typeId);
-            if (t != null)
-            {
-                JourneyInput.ClickWorld(t.position, button: 1);
-            }
-        }
+        internal static void RightClickBuilding(string typeId) => ClickBuildingVisible(typeId, 1);
 
         internal static void ClickBuildingIf(string typeId, bool condition)
         {
-            Transform t = FindNamed("Building_" + typeId);
-            if (condition && t != null)
+            if (condition)
             {
-                JourneyInput.ClickWorld(t.position);
+                ClickBuildingVisible(typeId, 0);
             }
         }
+
+        /// <summary>
+        /// FG5-E2E-01：点开局建筑时点它露出来、没被界面挡住的那一部分（镜头改成倾斜透视后，建筑中心常落在左下角的区域指挥栏下面——
+        /// 原来隔着指挥栏点中心，点击被界面拦下，M1～M4 旅程都卡在“点装配站后生产面板没有打开”）。整座都点不到时先平移镜头，这次不点。
+        /// 修复轮：平移结束后由步骤的 <see cref="JourneyInput.WorldClickSettled"/> 在同一次尝试里补点（原来要用掉一次重试，日志看起来像“点了没开”）。
+        /// </summary>
+        internal static void ClickBuildingVisible(string typeId, int button)
+        {
+            Transform t = FindNamed("Building_" + typeId);
+            if (t == null)
+            {
+                return;
+            }
+            if (JourneyInput.TryVisiblePointOf(t, out Vector3 screen, out string why))
+            {
+                JourneyInput.ClickScreen(screen, button);
+                return;
+            }
+            LastPanNote = $"{typeId} {why}，先平移镜头再点";
+            JourneyInput.DeferWorldClick(() => ClickBuildingVisible(typeId, button));
+            FgjM3Common.PanTo(new Vector2(t.position.x, t.position.z));
+        }
+
+        /// <summary>最近一次“建筑整座点不到、先平移镜头”的原因（诊断用）。</summary>
+        internal static string LastPanNote { get; private set; } = string.Empty;
 
         internal static WorkOrderRecord RepairOrder(string typeId) =>
             St?.WorkOrders?.LastOrDefault(o => o != null && o.Kind == WorkOrderKind.Repair && o.TargetId == HomeValleyLayout.RegionId + ":" + typeId
@@ -330,7 +350,7 @@ namespace GameLogic.EditorTools.JourneyBots
 
         internal static StepOutcome TickRepairOrdered(JourneyContext c, string typeId)
         {
-            if (c.StepElapsed < 0.8)
+            if (!JourneyInput.WorldClickSettled(c.StepElapsed, 0.8))
             {
                 return StepOutcome.Wait;
             }
@@ -636,11 +656,54 @@ namespace GameLogic.EditorTools.JourneyBots
 
         internal static StepOutcome TickFactoryOpen(JourneyContext c)
         {
-            if (c.StepElapsed < 0.6)
+            if (!JourneyInput.WorldClickSettled(c.StepElapsed, 0.6))
             {
                 return StepOutcome.Wait;
             }
-            return GameRoot.HomeValley.IsFactoryPanelOpen ? StepOutcome.Done("生产面板打开") : StepOutcome.Retry("点装配站后生产面板没有打开");
+            return GameRoot.HomeValley.IsFactoryPanelOpen ? StepOutcome.Done("生产面板打开") : StepOutcome.Retry("点装配站后生产面板没有打开（" + ClickProbe(HomeValleyLayout.BuildingTypeAssemblyStation) + "）");
+        }
+
+        /// <summary>点建筑没反应时的诊断（只读）：从镜头沿点击位置的射线最先打到的是什么（建筑 / 机器 / 别的碰撞体），点击是否被界面挡住。</summary>
+        internal static string ClickProbe(string typeId)
+        {
+            Transform t = FindNamed("Building_" + typeId);
+            Camera cam = JourneyInput.Cam;
+            if (t == null || cam == null)
+            {
+                return "场景里找不到建筑或镜头";
+            }
+            Vector3 screen = JourneyInput.ScreenOfWorld(t.position);
+            string cover = JourneyInput.UiCoverAt(screen);
+            Ray ray = cam.ScreenPointToRay(screen);
+            string hit = Physics.Raycast(ray, out RaycastHit h, 500f) ? $"{h.collider.name}（{h.collider.GetType().Name}，距离 {h.distance:F1}）" : "什么都没打到";
+            return $"屏幕点 ({screen.x:F0},{screen.y:F0})，射线先打到 {hit}，界面遮挡 {cover ?? "无"}{(cover != null ? "：" + CoverChain(screen) : string.Empty)}，建筑位置 {t.position}；" +
+                   $"选点：{JourneyInput.LastVisiblePointNote}；点击那两帧：{JourneyInput.LastWorldClickTrace}";
+        }
+
+        /// <summary>挡住世界点击的那个界面元素的祖先链（名字 / 类型 / display / visible / 尺寸），诊断用。</summary>
+        private static string CoverChain(Vector3 screen)
+        {
+            var topLeft = new Vector2(screen.x, Screen.height - screen.y);
+            foreach (UIDocument d in Object.FindObjectsByType<UIDocument>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            {
+                IPanel p = d != null ? d.rootVisualElement?.panel : null;
+                if (p == null)
+                {
+                    continue;
+                }
+                Vector2 pp = RuntimePanelUtils.ScreenToPanel(p, topLeft);
+                if (!GameLogic.UI.Common.UiWindowFocus.BlocksWorldPointerAt(p, pp))
+                {
+                    continue;
+                }
+                var parts = new List<string>();
+                for (VisualElement e = p.Pick(pp); e != null && parts.Count < 12; e = e.parent)
+                {
+                    parts.Add($"{(string.IsNullOrEmpty(e.name) ? e.GetType().Name : e.name)}[{e.GetType().Name},{e.resolvedStyle.display},vis={e.visible},{string.Join(".", e.GetClasses())},{e.worldBound.width:F0}x{e.worldBound.height:F0}]");
+                }
+                return d.gameObject.name + " 排序 " + d.sortingOrder + "：" + string.Join(" ← ", parts);
+            }
+            return "（复查时没有遮挡）";
         }
 
         private static void ClickProduce(JourneyContext c)
@@ -664,7 +727,7 @@ namespace GameLogic.EditorTools.JourneyBots
 
         internal static StepOutcome TickFactoryClosed(JourneyContext c)
         {
-            if (c.StepElapsed < 0.6)
+            if (!JourneyInput.WorldClickSettled(c.StepElapsed, 0.6))
             {
                 return StepOutcome.Wait;
             }
@@ -736,13 +799,13 @@ namespace GameLogic.EditorTools.JourneyBots
         internal static StepOutcome TickPrepOpen(JourneyContext c)
         {
             JourneyCommon.ResumeIfAutoPaused(c);
-            if (c.StepElapsed < 0.8)
+            if (!JourneyInput.WorldClickSettled(c.StepElapsed, 0.8))
             {
                 return StepOutcome.Wait;
             }
             if (!GameRoot.HomeValley.IsExpeditionPrepPanelOpen)
             {
-                return StepOutcome.Retry("点信号塔后远征准备面板没有打开");
+                return StepOutcome.Retry("点信号塔后远征准备面板没有打开（选点：" + JourneyInput.LastVisiblePointNote + "；点击那两帧：" + JourneyInput.LastWorldClickTrace + "）");
             }
             ExpeditionDepartureService.PrepSnapshot snap = ExpeditionDepartureService.BuildPrepSnapshot(St);
             return snap.Target == ExpeditionDepartureService.ExpeditionTarget.SilentRuins
@@ -1331,7 +1394,15 @@ namespace GameLogic.EditorTools.JourneyBots
         {
             if (FcMarker(logicId, out HomeValleyMachineMarker m) && m.View != null)
             {
-                JourneyInput.ClickWorld(m.View.transform.position);
+                // FG5-E2E-01：被界面挡住时点它露出来的那一部分（找不到就照旧点中心，由步骤重试兜底）。
+                if (JourneyInput.TryVisiblePointOf(m.View.transform, out Vector3 screen, out _))
+                {
+                    JourneyInput.ClickScreen(screen);
+                }
+                else
+                {
+                    JourneyInput.ClickWorld(m.View.transform.position);
+                }
             }
         }
 
@@ -1345,13 +1416,16 @@ namespace GameLogic.EditorTools.JourneyBots
             return sel.Contains(logicId) ? StepOutcome.Done($"左键选中 {Label(logicId)}（安全模式中）") : StepOutcome.Retry($"左键后选中 [{string.Join(",", sel)}]");
         }
 
-        private static void RightClickFcGround(Vector2 at) => JourneyInput.Click(at, button: 1);
-
         private static StepOutcome TickSafeModeRecovered(JourneyContext c)
         {
             SampleFrame();
             int b = c.GetInt("other");
-            if (c.StepElapsed < 0.8)
+            // FG5-E2E-01：倾斜透视镜头下撤离点附近的地面可能在画面外或被界面挡住——像玩家一样先平移镜头再右键（右键地面 = 移动）。
+            if (!FgjM3Common.Once(c, "rc", () => FgjM3Common.TryClick(EvacPoint + new Vector2(0f, 1f), 1)))
+            {
+                return StepOutcome.Wait;
+            }
+            if (FgjM3Common.SinceMs(c, "rc") < 800)
             {
                 return StepOutcome.Wait;
             }

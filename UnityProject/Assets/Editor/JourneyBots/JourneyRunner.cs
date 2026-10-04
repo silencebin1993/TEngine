@@ -229,7 +229,7 @@ namespace GameLogic.EditorTools.JourneyBots
         /// <summary>开始（清掉上一次的状态，包括上一趟步骤写下的全部变量）。</summary>
         public void Start()
         {
-            foreach (string k in new[] { "result", "failStep", "failReason", "durations", "retries", "entered", "checkpoints" })
+            foreach (string k in new[] { "result", "failStep", "failReason", "durations", "retries", "transient", "entered", "checkpoints" })
             {
                 Store.SetString(k, string.Empty);
             }
@@ -244,6 +244,8 @@ namespace GameLogic.EditorTools.JourneyBots
             SetInt("step", 0);
             SetInt("attempt", 0);
             SetInt("errors", 0);
+            SetInt("freeAttempts", 0); // 修复轮：上一趟停在半路留下的免计重试次数 / 等待时刻不带进新的一趟
+            SetDouble("holdUntil", 0);
             SetDouble("start", _clock.Now);
             SetDouble("stepStart", _clock.Now);
             Store.SetString("active", "1");
@@ -305,8 +307,13 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 if (Store.GetString("entered", string.Empty) != StepKey())
                 {
+                    if (_clock.Now < GetDouble("holdUntil", 0))
+                    {
+                        return true; // 暂时的 UI 失败（通知弹出条 / 悬停提示正在收起）：等一会儿再进这一步
+                    }
                     Store.SetString("entered", StepKey());
                     SetDouble("stepStart", _clock.Now);
+                    JourneyInput.BeginStepAttempt(); // 暂时失败只认这一次尝试里发生的
                     Write($"[{StepIndex + 1}/{Journey.Steps.Count}] {step.Id} {step.Title}{(Attempt > 0 ? $"（第 {Attempt + 1} 次尝试）" : string.Empty)}");
                     step.OnEnter?.Invoke(_ctx);
                 }
@@ -325,6 +332,7 @@ namespace GameLogic.EditorTools.JourneyBots
                     TryWriteCheckpoint(step);
                     SetInt("step", StepIndex + 1);
                     SetInt("attempt", 0);
+                    SetInt("freeAttempts", 0);
                     // 完成一步后不在同一次驱动里连着跑下一步：给引擎一帧处理刚发出的输入。
                     return true;
                 case JourneyStepStatus.Fail:
@@ -375,9 +383,34 @@ namespace GameLogic.EditorTools.JourneyBots
 
         private bool RetryOrFail(JourneyStep step, string why)
         {
-            if (Attempt < step.MaxRetries)
+            // FG5-E2E-01：这一步失败的原因是暂时的 UI 遮挡（点击被正在收起的通知弹出条 / 悬停提示挡住）：等 1 秒再做这一步，不算重试（每步最多 12 次）。
+            // 修复轮（审查 P2）：只认“这一次尝试里”的那次点击失败，并且步骤报的失败原因就是那次点击失败的原因（JourneyInput.LastUiFailure）——
+            // 同一步里与点击无关的失败（状态断言等）照常算一次重试；重来之前同样先执行 OnRetry 收拾（与普通重试一致，只是不计数）。
+            int free = GetInt("freeAttempts", 0);
+            string uiFailure = JourneyInput.LastUiFailure;
+            bool transient = !why.StartsWith("超时", StringComparison.Ordinal) && JourneyInput.LastUiTransient
+                             && !string.IsNullOrEmpty(uiFailure) && why.Contains(uiFailure) && free < 12;
+            if (transient)
             {
-                Write($"  ↻ {why}，重试（{Attempt + 1}/{step.MaxRetries}）");
+                Write($"  ⏳ {why}——暂时的遮挡，1 秒后再做这一步（不算重试）");
+                AppendList("transient", $"{step.Id}:{why}");
+                try
+                {
+                    step.OnRetry?.Invoke(_ctx);
+                }
+                catch (Exception e)
+                {
+                    Finish(false, step.Id, $"重试前收拾抛异常：{e.GetType().Name}: {e.Message}");
+                    return false;
+                }
+                SetInt("freeAttempts", free + 1);
+                SetDouble("holdUntil", _clock.Now + 1.0);
+                SetInt("attempt", Attempt + 1);
+                return true;
+            }
+            if (Attempt - free < step.MaxRetries)
+            {
+                Write($"  ↻ {why}，重试（{Attempt - free + 1}/{step.MaxRetries}）");
                 AppendList("retries", $"{step.Id}:{why}");
                 try
                 {

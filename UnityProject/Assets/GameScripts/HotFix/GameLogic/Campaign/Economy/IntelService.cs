@@ -383,6 +383,7 @@ namespace GameLogic.Campaign.Economy
                     if (paused != null)
                     {
                         f.InterruptNotified = true;
+                        f.Interruptions++; // FG5-E2E-01：统计面板“破译中断 n 次”（DEBT-FG5RND05-06）
                         string text = GameText.Format("intel.notify.interrupted", paused.Name, ProgressPercent(s, paused.Id));
                         NotificationCenter.Post("intel_interrupted", text);
                         GuidanceHooks.Raise(GuidanceHooks.IntelFirstInterrupted);
@@ -810,6 +811,36 @@ namespace GameLogic.Campaign.Economy
 
         public static string DirectionName(float dx, float dy) => GameText.Get(DirKeys[Octant(dx, dy)]);
 
+        /// <summary>
+        /// 突袭预报时间窗口的上下限文字（游戏时间，“{下限}～{上限}”）。FG5-E2E-01 修复轮（审查 P1）：原来两端各自四舍五入到分钟，
+        /// 窗口不到一分钟时会写成“3 分钟～3 分钟”，窗口退化成一个点。改为下限向下取整、上限向上取整（不到一分钟的那一端写秒）：
+        /// 写出的窗口一定包住真实窗口（FGT-RND-008“时间窗口与实际到来一致”），两端也不会相同。
+        /// </summary>
+        public static void RaidWindowText(long fromTicks, long toTicks, out string from, out string to)
+        {
+            double hz = Math.Max(1, GameClock.StepHz);
+            double fromSec = Math.Max(0, fromTicks) / hz;
+            double toSec = Math.Max(fromSec, Math.Max(0, toTicks) / hz);
+            bool fromInSeconds = fromSec < 60;
+            bool toInSeconds = toSec < 60;
+            int lo = fromInSeconds ? (int)Math.Floor(fromSec) : (int)Math.Floor(fromSec / 60.0);
+            int hi = toInSeconds ? (int)Math.Ceiling(toSec) : (int)Math.Ceiling(toSec / 60.0);
+            if (fromInSeconds == toInSeconds && hi <= lo)
+            {
+                hi = lo + 1; // 两端恰好落在同一个整数上（零宽窗口）：上限多给一个单位，仍包住真实窗口
+            }
+            from = fromInSeconds ? SecondsText(lo) : MinutesText(lo);
+            to = toInSeconds ? SecondsText(hi) : MinutesText(hi);
+        }
+
+        private static string SecondsText(int seconds) =>
+            GameText.Format("away.duration.seconds", seconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+        private static string MinutesText(int minutes) =>
+            minutes < 60
+                ? GameText.Format("away.duration.minutes", minutes.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                : GameText.Format("away.duration.hours", minutes / 60, minutes % 60);
+
         /// <summary>一条情报的内容（一行；面板、通知、离家报告共用）。</summary>
         public static string Summary(CampaignState s, IntelRecord r, long now)
         {
@@ -827,8 +858,8 @@ namespace GameLogic.Campaign.Economy
                     {
                         return GameText.Format("intel.raid.line_past", origin, r.Units, dir);
                     }
-                    return GameText.Format("intel.raid.line", origin, r.Units, dir,
-                        AwayReportService.Duration(Math.Max(0, r.WindowFromTick - now)), AwayReportService.Duration(Math.Max(0, r.WindowToTick - now)));
+                    RaidWindowText(r.WindowFromTick - now, r.WindowToTick - now, out string from, out string to);
+                    return GameText.Format("intel.raid.line", origin, r.Units, dir, from, to);
                 }
                 case IntelCatalog.KindCounter:
                 {

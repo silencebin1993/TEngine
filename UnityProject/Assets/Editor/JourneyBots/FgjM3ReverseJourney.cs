@@ -57,6 +57,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("new_game", "进入归还谷地", 120, null, JourneyCommon.TickNewGame),
                 S("seed", "生成结果与该种子的基准一致", 30, null, c => JourneyCommon.TickSeed(c, TestSeed)),
                 S("workers", "记下开局两台工程机", 10, null, FgjM3Common.TickWorkers),
+                S("research_fixture", "进度夹具：研发树开放前开局就能建的内容记为已研究（DEBT-FG5RND01-05；研究本身在 FGJ-M5 / M5R 走正式入口）", 10, FgjM5Common.ApplyLegacyResearchFixture, FgjM5Common.TickLegacyResearchFixture),
                 S("speed3", "按 3 倍速键", 10, c => FgjM1Journey.PressIf(GameActionId.SpeedTriple, !Mathf.Approximately(GameClock.Speed, 3f)), FgjM1Journey.TickSpeed3, retries: 1),
                 S("sel_a", "左键点一台工程机", 20, c => FgjM1Journey.ClickMachine(c, "workerA"), c => FgjM1Journey.TickSelected(c, "workerA"), retries: 4),
                 S("repair_wh", "右键点受损的仓库", 15, c => FgjM1Journey.RightClickBuilding(HomeValleyLayout.BuildingTypeWarehouse),

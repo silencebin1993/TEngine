@@ -1059,6 +1059,8 @@ namespace GameLogic
             CampaignState state = CampaignState.CreateNew(campaignId, "Standard", seed);
             // FG3-GEN-01：世界设置与生成器版本（导入旧版本短码时 = 短码里的版本，保证世界相同）。
             Campaign.WorldGen.WorldGenService.ApplyNewGameWorld(state, seed, settings);
+            // FG5-E2E-01（DEBT-FG5RND01-08）：新档开局带来的技术数据（过渡初值，够研究研发树开放前开局就能建造的内容；ADR-QA-022）。
+            Campaign.Economy.ResearchService.ApplyNewGameStart(state);
 
             SaveResult result = CampaignSaveService.Save(slotIndex, state, SaveReason.NewCampaign);
             if (!result.Success)

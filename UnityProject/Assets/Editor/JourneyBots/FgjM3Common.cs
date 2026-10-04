@@ -56,6 +56,7 @@ namespace GameLogic.EditorTools.JourneyBots
         {
             FrameMs.Clear();
             _lastFrame = -1;
+            CatalogueExpands = 0;
         }
 
         /// <summary>产线运行 / 等施工 / 离家这些“世界在跑、玩家在看”的步骤里每帧采一次（同一帧只采一次）。</summary>
@@ -283,6 +284,35 @@ namespace GameLogic.EditorTools.JourneyBots
         /// 在建造栏里选一个条目：先点它所在的分类页签，再在条目列表里按条目 ID 找到序号（不写死序号）；条目在列表可见区外时像玩家一样在列表上滚一下滚轮
         /// （返回 false、<paramref name="scrolling"/> = true，下一帧布局更新后再点）。
         /// </summary>
+        /// <summary>本次会话里为了换建筑而点“建造 [+]”展开建造目录的次数。</summary>
+        internal static int CatalogueExpands;
+
+        /// <summary>
+        /// 建造目录是展开的（选中一个建筑 / 工具后目录会收起成一行“建造 [+]”，玩家换建筑要先点它展开）。收起时点一下“建造 [+]”并返回 false（why = null：下一帧再看）；
+        /// 点不到返回 false 与原因。
+        /// </summary>
+        internal static bool CatalogueExpanded(out string why)
+        {
+            why = null;
+            VisualElement catalogue = JourneyInput.FindUitk<VisualElement>(BuildHost, "BuildCatalogue");
+            if (catalogue == null)
+            {
+                return true;
+            }
+            JourneyInput.SyncLayout(catalogue);
+            if (catalogue.resolvedStyle.display != DisplayStyle.None)
+            {
+                return true;
+            }
+            if (!JourneyInput.ClickUitk(BuildHost, "BuildCatalogueToggle"))
+            {
+                why = "点不到“建造 [+]”展开建造目录：" + JourneyInput.LastUiFailure;
+                return false;
+            }
+            CatalogueExpands++;
+            return false;
+        }
+
         internal static bool PickEntry(string entryId, out string why, out bool scrolling)
         {
             BuildModeHudUIToolkit hud = BuildModeHudUIToolkit.Instance;
@@ -296,6 +326,11 @@ namespace GameLogic.EditorTools.JourneyBots
             if (!BuildCatalog.TryGet(entryId, out BuildEntry e))
             {
                 why = "建造目录里没有 " + entryId;
+                return false;
+            }
+            if (!CatalogueExpanded(out why))
+            {
+                scrolling = why == null; // 刚点了“建造 [+]”：目录下一帧才排好版
                 return false;
             }
             if (hud.SelectedCategoryId != e.CategoryId)

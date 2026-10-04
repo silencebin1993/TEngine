@@ -358,6 +358,7 @@ namespace GameLogic.Campaign.Economy
             }
             state.Research.TechConsumed++;
             ProductionStats.RecordUnits(state, tech, 1, produced: false);
+            TechDataFlow.Spend(state, TechDataFlow.Lab, 1); // FG5-E2E-01：统计面板“技术数据支出 · 实验室”
             return true;
         }
 
@@ -400,6 +401,7 @@ namespace GameLogic.Campaign.Economy
             {
                 HomeInventory.Add(state, tech, 1, clampToSpace: false);
                 state.Research.TechConsumed = Math.Max(0, state.Research.TechConsumed - 1);
+                TechDataFlow.Unspend(state, TechDataFlow.Lab, 1);
             }
         }
 
@@ -1168,6 +1170,23 @@ namespace GameLogic.Campaign.Economy
             Revision++;
         }
 
+        /// <summary>
+        /// 旧档迁移（<see cref="MigrateFromV1"/>）会记为已完成的节点：研发树开放前就能建造的内容（建筑 / 工具、升级、超控阵列各级——要关键材料的照样算，
+        /// 关键材料是另一道施工门槛）。FG5-E2E-01：研发树开放前写成的旧旅程按同一口径登记“已研究”进度夹具。
+        /// </summary>
+        public static List<ResearchNodeDef> MigratedNodes()
+        {
+            var list = new List<ResearchNodeDef>(24);
+            foreach (ResearchNodeDef n in ResearchCatalog.Nodes)
+            {
+                if (n.IsReady && n.Unlocks.Length > 0 && !UnlocksResearchOnlyContent(n))
+                {
+                    list.Add(n);
+                }
+            }
+            return list;
+        }
+
         /// <summary>节点解锁的东西是不是研发树自己带来的新内容（仿真实验室本身与它的等级）：旧档里根本没有，迁移不送。</summary>
         private static bool UnlocksResearchOnlyContent(ResearchNodeDef n)
         {
@@ -1179,6 +1198,120 @@ namespace GameLogic.Campaign.Economy
                 }
             }
             return false;
+        }
+
+        // ── FG5-E2E-01：新档的技术数据供给（DEBT-FG5RND01-08）与研发加成的数值来源行（DEBT-FG5RND01-07）──────────────
+
+        /// <summary>新战役开局带来的技术数据（research.start_tech_data，过渡初值，见 ADR-QA-022）。</summary>
+        public static int StartTechData => Math.Max(0, GridContent.TuningInt("research.start_tech_data"));
+
+        /// <summary>
+        /// 研发树开放前（FG-M3 / M4）开局就能建造、现在要先研究的内容对应的节点：已就绪、有解锁、不是研发树自己带来的新建筑（仿真实验室与它的等级）、
+        /// 不需要关键材料（超控阵列 / 监听站要首领给的关键材料，开放前也造不出来）。与旧档迁移（<see cref="MigrateFromV1"/>）同一口径，只多排除关键材料节点。
+        /// </summary>
+        public static List<ResearchNodeDef> LegacyOpenNodes()
+        {
+            var list = new List<ResearchNodeDef>(20);
+            foreach (ResearchNodeDef n in ResearchCatalog.Nodes)
+            {
+                if (n.IsReady && n.Unlocks.Length > 0 && !UnlocksResearchOnlyContent(n) && n.KeyItems.Count == 0)
+                {
+                    list.Add(n);
+                }
+            }
+            return list;
+        }
+
+        /// <summary>研究完 <see cref="LegacyOpenNodes"/> 要的研究点合计。</summary>
+        public static int LegacyOpenPoints()
+        {
+            int sum = 0;
+            foreach (ResearchNodeDef n in LegacyOpenNodes())
+            {
+                sum += n.Cost;
+            }
+            return sum;
+        }
+
+        /// <summary>用 T1 实验室（不算研发加成）把 <see cref="LegacyOpenPoints"/> 研究出来要的技术数据（研究点 × 每分钟技术数据 ÷ 每分钟研究点，向上取整）。</summary>
+        public static int LegacyOpenTechCost() =>
+            PointsPerMinute <= 0 ? int.MaxValue : (int)Math.Ceiling(LegacyOpenPoints() * TechPerMinute / PointsPerMinute - 1e-9);
+
+        /// <summary>
+        /// 新战役开局：把 research.start_tech_data 记进技术数据，并记在 <see cref="ResearchState.TechStart"/>（统计面板对账）。只在主菜单“新建”创建战役时调一次；
+        /// 旧档、自检用的空白战役不经过这里。初值放开局，而不是放进任何持续来源：研究成本、实验室转换率、黑匣子 / 解析台产出都保持 FG05 初值（ADR-QA-022）。
+        /// </summary>
+        public static void ApplyNewGameStart(CampaignState state)
+        {
+            if (state == null)
+            {
+                return;
+            }
+            CampaignFgStateDomains.EnsureAll(state);
+            int n = StartTechData;
+            state.TechData += n;
+            state.Research.TechStart = n;
+            Revision++;
+        }
+
+        /// <summary>
+        /// 研发加成的数值来源行（B13：复合数值能展开来源；DEBT-FG5RND01-07）：这类建筑此刻吃到的研发加成与来自哪些已完成的节点，没有加成返回 null。
+        /// 生产建筑 = 工作速度（按建造菜单分类）；仿真实验室 = 转换效率；仓库 / 储能站 = 容量。建筑面板、悬停按这一行写，与真实生效的倍率同一读口（<see cref="EffectTotal"/>）。
+        /// 只在面板刷新时调（O(已完成节点数)）。
+        /// </summary>
+        public static string BonusLine(CampaignState state, string typeId)
+        {
+            if (state == null || string.IsNullOrEmpty(typeId))
+            {
+                return null;
+            }
+            if (typeId == TypeId)
+            {
+                return BonusText(state, ResearchCatalog.EffectLab, TypeId, "research.bonus.lab", capped: true);
+            }
+            if (typeId == HomeValleyLayout.BuildingTypeWarehouse)
+            {
+                return BonusText(state, ResearchCatalog.EffectCapacity, HomeValleyLayout.BuildingTypeWarehouse, "research.bonus.capacity", capped: false);
+            }
+            if (typeId == "energy_storage")
+            {
+                return BonusText(state, ResearchCatalog.EffectCapacity, "energy_storage", "research.bonus.capacity", capped: false);
+            }
+            BuildingGrid g = GridContent.Building(typeId);
+            return g == null || !ProducerCatalog.TryGet(typeId, out _) ? null
+                : BonusText(state, ResearchCatalog.EffectSpeed, g.Category, "research.bonus.speed", capped: true);
+        }
+
+        /// <summary>物品悬停里的研发加成行：固体 / 保管库物品吃仓库容量加成时写一行，否则 null（DEBT-FG5RND01-07“物资悬停的数值来源展开”）。</summary>
+        public static string ItemBonusLine(CampaignState state, ItemDef item)
+        {
+            if (state == null || item == null || item.Form != ItemForm.Solid)
+            {
+                return null;
+            }
+            return BonusText(state, ResearchCatalog.EffectCapacity, HomeValleyLayout.BuildingTypeWarehouse, "research.bonus.item_capacity", capped: false);
+        }
+
+        private static string BonusText(CampaignState state, string kind, string target, string key, bool capped)
+        {
+            double total = EffectTotal(state, kind, target);
+            if (total <= 1e-9)
+            {
+                return null;
+            }
+            var names = new List<string>(4);
+            foreach (string id in state.Research?.CompletedNodes ?? Array.Empty<string>())
+            {
+                if (ResearchCatalog.TryGet(id, out ResearchNodeDef n) && n.EffectKind == kind && n.EffectTarget == target && n.EffectValue > 0f)
+                {
+                    names.Add(GameText.Format("research.bonus.node", n.Name, Mathf.RoundToInt(n.EffectValue * 100f)));
+                }
+            }
+            string pct = Mathf.RoundToInt((float)(total * 100.0)).ToString(CultureInfo.InvariantCulture);
+            string list = string.Join(GameText.Get("stats.list_sep"), names);
+            return capped
+                ? GameText.Format(key, pct, list, Mathf.RoundToInt((float)(EfficiencyCap * 100.0)).ToString(CultureInfo.InvariantCulture))
+                : GameText.Format(key, pct, list);
         }
 
         /// <summary>测试夹具：直接把这些节点记为已完成（不发通知、不标“新”）。只给自检 / 冒烟跳过与被测系统无关的研究过程用。</summary>

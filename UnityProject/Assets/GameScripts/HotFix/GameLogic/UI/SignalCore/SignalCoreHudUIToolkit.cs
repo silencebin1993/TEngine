@@ -552,8 +552,8 @@ namespace GameLogic.UI.SignalCore
             int equipped = SignalCoreService.EquippedCount(s);
             int unlocked = SignalCoreService.UnlockedSlots(s);
             int offline = unlocked - SignalCoreService.ActiveSlots(s);
-            int hudKey = HashCode.Combine(SignalPresence.CurrentMachineLogicId, equipped, unlocked, locked,
-                (int)GameText.Language, GameSettings.Revision, SignalCoreService.Revision, offline);
+            int hudKey = HashCode.Combine(HashCode.Combine(SignalPresence.CurrentMachineLogicId, equipped, unlocked, locked,
+                (int)GameText.Language, GameSettings.Revision, SignalCoreService.Revision, offline), Campaign.Economy.TestRangeService.Revision);
             if (hudKey != _hudKey)
             {
                 _hudKey = hudKey;

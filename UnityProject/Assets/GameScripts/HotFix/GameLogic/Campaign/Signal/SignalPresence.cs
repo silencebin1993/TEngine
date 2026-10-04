@@ -36,10 +36,15 @@ namespace GameLogic.Campaign.Signal
         /// <summary>机器的玩家可见标识：起了名 = “名字 #编号”，没起名 = 型号 + 编号（“ERC-003 #5”）。FG4-ECO-07 起与名册同源（<see cref="MachineNaming.Long(int)"/>）。</summary>
         public static string MachineLabel(int logicId) => MachineNaming.Long(logicId);
 
-        /// <summary>HUD 文字：“信号：归还核心” / “信号：ERC-003 #5”。</summary>
+        /// <summary>HUD 文字：“信号：归还核心” / “信号：ERC-003 #5” / “信号：#1 战斗履带 ERC-003”（接入了靶场投影，下面一行写明是仿真投影）。</summary>
         public static string LocationText()
         {
             int id = CurrentMachineLogicId;
+            if (id == 0 && Economy.TestRangeService.TryGetUplinkedProjection(out _, out _, out string projection))
+            {
+                // FG5-E2E-01（FGJ-M5 抓到）：信号进了靶场投影时，这一行原来仍写“信号：归还核心”，与下面“信号在靶场投影里”自相矛盾。
+                return GameText.Format("signal.hud.in_machine", projection);
+            }
             return id == 0 ? GameText.Get("signal.hud.at_core") : GameText.Format("signal.hud.in_machine", MachineLabel(id));
         }
 

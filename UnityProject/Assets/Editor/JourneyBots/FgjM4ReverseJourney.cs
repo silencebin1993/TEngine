@@ -58,6 +58,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("new_game", "存档槽 → 新游戏设置（种子 = 测试种子 1）→ 点“开始” → 进入归还谷地", 150, null, JourneyCommon.TickNewGame),
                 S("seed", "种子进了存档；生成结果与该种子的基准一致；起始区四级保证满足", 30, null, c => JourneyCommon.TickSeed(c, TestSeed)),
                 S("workers", "记下开局两台机器", 10, null, FgjM3Common.TickWorkers),
+                S("research_fixture", "进度夹具：研发树开放前开局就能建的内容记为已研究（DEBT-FG5RND01-05；研究本身在 FGJ-M5 / M5R 走正式入口）", 10, FgjM5Common.ApplyLegacyResearchFixture, FgjM5Common.TickLegacyResearchFixture),
                 S("speed3", "按 3 倍速键", 10, c => FgjM1Journey.PressIf(GameActionId.SpeedTriple, !Mathf.Approximately(GameClock.Speed, 3f)), FgjM1Journey.TickSpeed3, retries: 1),
                 S("sel_a", "左键点一台机器", 20, c => FgjM1Journey.ClickMachine(c, "workerA"), c => FgjM1Journey.TickSelected(c, "workerA"), retries: 4),
                 S("repair_wh", "右键点受损的仓库（情境命令：修复）", 15, c => FgjM1Journey.RightClickBuilding(HomeValleyLayout.BuildingTypeWarehouse),
@@ -872,7 +873,9 @@ namespace GameLogic.EditorTools.JourneyBots
                           && (dTicks > 0 || stable == c.Get("preStable"));
                 // 读档后世界立刻开跑：完成次数可能多出一两次（按步数核对），配方 / 阵列 / 槽位 / 队列必须完全一致。
                 string pre = c.Get("preStable");
-                string Strip(string d) => string.Join("｜", d.Split('｜').Select(x => x.Contains(':') && x.Split(':').Length >= 5 ? string.Join(":", x.Split(':').Take(2)) : x));
+                // 合金库存也随生产走（FG5-E2E-01 回归抓到：读档后走了 4 步正好出一件合金，62 → 63）；已走步数 > 0 时只比形状。
+                string Strip(string d) => string.Join("｜", d.Split('｜').Select(x => x.Contains(':') && x.Split(':').Length >= 5 ? string.Join(":", x.Split(':').Take(2))
+                    : dTicks > 0 && x.StartsWith("合金:", StringComparison.Ordinal) ? "合金" : x));
                 bool sameShape = Strip(stable) == Strip(pre);
                 if (!ok || !sameShape)
                 {
@@ -891,7 +894,7 @@ namespace GameLogic.EditorTools.JourneyBots
         private static void Cleanup(JourneyContext c, bool pass)
         {
             c.Log(JourneyCommon.UiStats());
-            c.Log($"方向键平移镜头 {JourneyCommon.PanPresses} 次；面板滚动区先滚滚轮再点 {FgjM3Common.PanelBodyScrolls} 次");
+            c.Log($"方向键平移镜头 {JourneyCommon.PanPresses} 次；面板滚动区先滚滚轮再点 {FgjM3Common.PanelBodyScrolls} 次；换建筑前点“建造 [+]”展开收起的建造目录 {FgjM3Common.CatalogueExpands} 次");
             c.Log(FgjM3Common.FrameReport("小产线施工 / 运转段"));
             FgjM2Common.ResetSampling();
             FgjM3Common.ResetSampling();

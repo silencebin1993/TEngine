@@ -46,6 +46,10 @@ namespace GameLogic.EditorTools.JourneyBots
             UguiPickedClicks = 0;
             UitkClicks = 0;
             TooltipRetreats = 0;
+            AlternatePointClicks = 0;
+            UitkDrags = 0;
+            ToastWaits = 0;
+            DeferredPanClicks = 0;
             LastUiFailure = string.Empty;
         }
 
@@ -198,6 +202,11 @@ namespace GameLogic.EditorTools.JourneyBots
 
         public static void ClickScreen(Vector3 m, int button = 0)
         {
+            ClickTrace.Clear();
+            _clickTraceFrame = -1;
+            _hostWatchFrame = -1;
+            _lastWorldClickAt = Time.realtimeSinceStartup;
+            ClickTrace.Add($"发出（帧 {Time.frameCount}）：光标 ({m.x:F0},{m.y:F0})、镜头 {CamPose()}");
             InputRouter.DebugSetReader(new ScriptReader
             {
                 MouseA = m,
@@ -205,13 +214,147 @@ namespace GameLogic.EditorTools.JourneyBots
                 MouseButton = button,
                 DownFrame = Time.frameCount + 1,
                 UpFrame = Time.frameCount + 2,
+                Trace = true,
             });
         }
 
-        /// <summary>FG2-E2E-01：按住 Shift 左键点世界里一点（加选 / 减选：Shift 从按下那一帧起按住 0.4 真实秒，覆盖按下与抬起两帧）。</summary>
-        public static void ShiftClickWorld(Vector3 world)
+        // ── FG5-E2E-01 修复轮：世界点击 / 按键诊断（只读）────────────────────────────
+
+        /// <summary>
+        /// 最近一次脚本鼠标点击（<see cref="ClickScreen"/>）在按下 / 抬起那一帧，世界层读到鼠标时看到的输入状态：战略域有没有输入所有权、
+        /// 界面拦截（<see cref="InputRouter.IsUiPointerBlocked"/>，与世界点选同一判据）与拦下它的元素、射线最先打到什么、建造模式与武装命令。
+        /// 点建筑没开面板时写进失败说明，用来区分“产品把这次点击拦下了”与“注入时序”（审查 P1：首次点击不开面板）。
+        /// </summary>
+        public static string LastWorldClickTrace => ClickTrace.Count == 0 ? "这一次尝试里没有发出鼠标点击（目标整座被界面挡住 / 不在画面里时先平移镜头）" : string.Join("；", ClickTrace);
+
+        // ── 修复轮（审查 P1“左键点装配站第一次常不开面板”）：先平移镜头、平移完在同一次尝试里补点 ──────────────
+        // 诊断轨迹（上面的 LastWorldClickTrace）证实：那一次根本没有发出点击——建筑整座被左下角的区域指挥栏挡住，ClickBuildingVisible 按设计先平移镜头、
+        // 不点；原来要等步骤判“面板没开”用掉一次重试，下一次尝试才点（日志看起来像“点了没开”）。玩家也是先挪镜头再点：平移结束后在同一次尝试里补点。
+
+        private static System.Action _deferredWorldClick;
+        private static int _deferredPans;
+        private static float _lastWorldClickAt = -100f;
+
+        /// <summary>这次没点、先平移了镜头：平移结束后由 <see cref="WorldClickSettled"/> 补点（再调一次 <paramref name="retry"/>）。</summary>
+        public static void DeferWorldClick(System.Action retry)
         {
-            Vector3 m = ScreenOfWorld(world);
+            _deferredWorldClick = retry;
+            _deferredPans++;
+            DeferredPanClicks++;
+        }
+
+        /// <summary>本次会话里“目标被界面挡住 / 不在画面里，先平移镜头再在同一次尝试里补点”的次数（报告里写出）。</summary>
+        public static int DeferredPanClicks { get; private set; }
+
+        /// <summary>
+        /// 步骤看结果之前调：先平移了镜头的，等平移结束补点；点击发出后至少过 <paramref name="settle"/> 真实秒才返回 true。
+        /// 平移 6 次还点不到就不再补点、返回 true，交给步骤判失败（照常算一次重试）。
+        /// </summary>
+        public static bool WorldClickSettled(double stepElapsed, double settle)
+        {
+            if (stepElapsed < settle)
+            {
+                return false;
+            }
+            if (_deferredWorldClick != null)
+            {
+                if (Holding)
+                {
+                    return false;
+                }
+                System.Action retry = _deferredWorldClick;
+                _deferredWorldClick = null;
+                if (_deferredPans > 6)
+                {
+                    return true;
+                }
+                retry();
+                return false;
+            }
+            return Time.realtimeSinceStartup - _lastWorldClickAt >= settle;
+        }
+
+        private static readonly List<string> ClickTrace = new List<string>(2);
+        private static int _clickTraceFrame = -1;
+
+        /// <summary>最近一次脚本按键（<see cref="PressChord"/>）在按下那一帧被读到时的输入上下文（只读诊断）。</summary>
+        public static string LastKeyTrace { get; private set; } = "还没按过键";
+
+        private static int _keyTraceFrame = -1;
+
+        private static void TraceWorldClick(string phase, Vector3 mouse)
+        {
+            if (_clickTraceFrame == Time.frameCount)
+            {
+                return;
+            }
+            _clickTraceFrame = Time.frameCount; // 先占位：下面的判定会再读鼠标位置，不能重入
+            bool owns = InputRouter.Owns(InputScope.Strategy);
+            bool blocked = InputRouter.IsUiPointerBlocked();
+            string cover = blocked ? UiCoverAt(mouse) ?? "全面板拾取没有命中：可拖动窗口的边界或界面捕获了指针" : null;
+            Camera cam = Cam;
+            string hit = cam == null ? "（没有镜头）"
+                : Physics.Raycast(cam.ScreenPointToRay(mouse), out RaycastHit h, 500f) ? $"{h.collider.name}#{h.collider.GetInstanceID()}（{h.point:F1}）" : "什么都没打到";
+            var home = GameLogic.Stage.GameRoot.HomeValley;
+            string extra = home != null
+                ? $"、建造模式{(home.BuildMode != null && home.BuildMode.IsOpen ? "开" : "关")}、武装命令 {(home.SquadCommands?.ArmedKind?.ToString() ?? "无")}"
+                : string.Empty;
+            ClickTrace.Add($"{phase}帧 {Time.frameCount}：战略输入{(owns ? "有" : $"无（域 {InputRouter.Scope}、模态 {InputRouter.ModalUiOpen}、键盘让位 {InputRouter.KeyboardSuppressed}）")}、" +
+                           $"界面拦截{(blocked ? "是：" + cover : "否")}、射线先打到 {hit}{extra}、光标 ({mouse.x:F0},{mouse.y:F0})、镜头 {CamPose()}");
+        }
+
+        private static int _hostWatchFrame = -1;
+
+        /// <summary>
+        /// 旅程宿主每次驱动调用（与游戏读输入的时机无关）：脚本点击的按下 / 抬起帧里，从宿主这一侧再记一次输入状态——
+        /// 游戏在抬起帧根本没读鼠标时（战略域没有所有权、镜头在过渡），只有这一条能说明原因。
+        /// </summary>
+        public static void WatchClickFrames()
+        {
+            // 按键同理：按下那一帧游戏没读这个键（输入上下文不收，例如镜头在飞的过渡期 = None）时，宿主这一侧记下当时的上下文。
+            if (InputRouter.Reader is ScriptReader kr && kr.Key != KeyCode.None && Time.frameCount == kr.KeyFrame && _keyTraceFrame != Time.frameCount)
+            {
+                LastKeyTrace = $"{kr.Key} 按下帧 {Time.frameCount}（宿主看，游戏这一帧还没读到它）：输入上下文 {InputRouter.ActiveContext}（域 {InputRouter.Scope}、模态 {InputRouter.ModalUiOpen}、" +
+                               $"键盘让位 {InputRouter.KeyboardSuppressed}）";
+            }
+            if (!(InputRouter.Reader is ScriptReader r) || !r.Trace || _hostWatchFrame == Time.frameCount
+                || Time.frameCount < r.DownFrame || Time.frameCount > r.UpFrame + 1 || ClickTrace.Count > 12)
+            {
+                return;
+            }
+            _hostWatchFrame = Time.frameCount;
+            ClickTrace.Add($"宿主看帧 {Time.frameCount}：战略输入{(InputRouter.Owns(InputScope.Strategy) ? "有" : "无")}（域 {InputRouter.Scope}、模态 {InputRouter.ModalUiOpen}、" +
+                           $"键盘让位 {InputRouter.KeyboardSuppressed}、上下文 {InputRouter.ActiveContext}）、镜头 {CamPose()}");
+        }
+
+        private static string CamPose()
+        {
+            Camera cam = Cam;
+            if (cam == null)
+            {
+                return "（没有镜头）";
+            }
+            Vector3 p = cam.transform.position;
+            Vector3 e = cam.transform.eulerAngles;
+            return $"({p.x:F2},{p.y:F2},{p.z:F2}) 俯仰 {e.x:F1} 偏航 {e.y:F1} 视野 {cam.fieldOfView:F1}";
+        }
+
+        private static void TraceKey(KeyCode key)
+        {
+            if (_keyTraceFrame == Time.frameCount)
+            {
+                return;
+            }
+            _keyTraceFrame = Time.frameCount;
+            LastKeyTrace = $"{key} 按下帧 {Time.frameCount}：输入上下文 {InputRouter.ActiveContext}（域 {InputRouter.Scope}、模态 {InputRouter.ModalUiOpen}、键盘让位 {InputRouter.KeyboardSuppressed}）";
+        }
+
+        /// <summary>FG2-E2E-01：按住 Shift 左键点世界里一点（加选 / 减选：Shift 从按下那一帧起按住 0.4 真实秒，覆盖按下与抬起两帧）。</summary>
+        public static void ShiftClickWorld(Vector3 world) => ShiftClickScreen(ScreenOfWorld(world));
+
+        /// <summary>FG5-E2E-01：按住 Shift 左键点屏幕一点（物体上看得见的那一处，见 <see cref="TryVisiblePointOf"/>）。</summary>
+        public static void ShiftClickScreen(Vector3 m)
+        {
             var r = new ScriptReader
             {
                 MouseA = m,
@@ -333,14 +476,18 @@ namespace GameLogic.EditorTools.JourneyBots
         /// <summary>向控件所在面板派发一次左键按下 + 抬起（控件中心）。失败返回 false，原因在 <see cref="LastUiFailure"/>。</summary>
         public static bool ClickElement(VisualElement e)
         {
+            LastUiTransient = false;
             if (e == null)
             {
                 LastUiFailure = "控件不存在";
                 return false;
             }
+            // FG5-E2E-01：batchmode 不渲染，面板的样式 / 排版不一定每帧刷新——同一帧里刚改过位置（研发树按分支筛选后节点换了位置）时，
+            // 拾取看到的是旧排版、派发指针事件时面板才重新排版，点到的是另一个节点。玩家点的永远是渲染出来的那一帧，这里先把排版刷到最新再拾取。
+            SyncLayout(e);
             if (!IsClickable(e))
             {
-                LastUiFailure = $"控件 {e.name} 被禁用、隐藏或不在面板上";
+                LastUiFailure = $"控件 {e.name} 被禁用、隐藏或不在面板上（{WhyNotClickable(e)}）";
                 return false;
             }
             IPanel panel = e.panel;
@@ -353,7 +500,16 @@ namespace GameLogic.EditorTools.JourneyBots
                     // FG3-E2E-01：挡住它的是世界悬停提示——脚本光标还停在上一步点过的地面上（玩家去点按钮时光标就在按钮上，世界悬停提示不会出现）。
                     // 把脚本光标移离世界、面板指针移离提示框，提示按离开宽限收起；这次不点，调用方下一次再点（步骤重试）。
                     RetreatFromTooltip(panel);
+                    MarkTransient();
                     LastUiFailure = $"控件 {e.name} 被世界悬停提示挡着：光标移离世界，下一帧再点（{TooltipState()}）";
+                    return false;
+                }
+                if (IsToast(top))
+                {
+                    // FG5-E2E-01：通知弹出条（右侧一列，约 4 秒后收起）正好盖在面板的按钮上——玩家会等它收起再点，算暂时的。
+                    MarkTransient();
+                    ToastWaits++;
+                    LastUiFailure = $"控件 {e.name} 被通知弹出条挡着（{(top as VisualElement)?.Q<Label>("ToastText")?.text ?? Describe(top)}），等它收起再点";
                     return false;
                 }
                 LastUiFailure = $"控件 {e.name} 被同一面板上的 {Describe(top)} 挡住（面板点 {center}）";
@@ -365,12 +521,122 @@ namespace GameLogic.EditorTools.JourneyBots
                 LastUiFailure = $"控件 {e.name} 被排序更高的面板上的 {cover} 挡住";
                 return false;
             }
+            // 玩家点之前光标先移到控件上（悬停）：悬停会改界面的（研发树悬停节点换详情）先在这一帧生效、刷新排版，再确认光标下还是它。
+            SendPointer(panel, center, EventType.MouseMove);
+            SyncLayout(e);
+            VisualElement afterHover = panel.Pick(center);
+            if (afterHover == null || (afterHover != e && !e.Contains(afterHover)))
+            {
+                MarkTransient();
+                LastUiFailure = $"光标移到控件 {e.name} 上之后界面排版变了，光标下变成 {Describe(afterHover)}（控件框 {e.worldBound}）";
+                return false;
+            }
+            Rect before = e.worldBound;
             SendPointer(panel, center, EventType.MouseDown);
+            SyncLayout(e);
             SendPointer(panel, center, EventType.MouseUp);
+            SyncLayout(e);
+            // 点完光标就离开（玩家点完就去点下一个控件）：这个控件的悬停提示按离开宽限收起，不会挡住紧挨着的下一个按钮。
+            SendPointer(panel, new Vector2(-100f, -100f), EventType.MouseMove);
+            LastClickNote = e.panel != null && e.worldBound != before ? $"点击后控件 {e.name} 从 {before} 移到 {e.worldBound}" : string.Empty;
             UitkClicks++;
             LastUiFailure = string.Empty;
             return true;
         }
+
+        /// <summary>本次会话里在 UI Toolkit 面板上按住左键拖动（拖画布平移）的次数。</summary>
+        public static int UitkDrags { get; private set; }
+
+        /// <summary>
+        /// 像玩家一样在 <paramref name="area"/> 里找一处空白（拾取到的是 <paramref name="isEmpty"/> 认可的元素，不是按钮），按住左键拖动 <paramref name="delta"/> 再松开
+        /// （研发树画布：拖空白处平移）。找不到空白或终点出了面板返回 false 与原因。
+        /// </summary>
+        public static bool DragUitk(VisualElement area, Vector2 delta, System.Func<VisualElement, bool> isEmpty, out string why)
+        {
+            why = null;
+            if (area?.panel == null)
+            {
+                why = "拖动区域不在面板上";
+                return false;
+            }
+            SyncLayout(area);
+            IPanel panel = area.panel;
+            Rect r = area.worldBound;
+            for (int iy = 1; iy <= 7; iy++)
+            {
+                for (int ix = 1; ix <= 9; ix++)
+                {
+                    var from = new Vector2(r.xMin + r.width * ix / 10f, r.yMin + r.height * iy / 8f);
+                    VisualElement top = panel.Pick(from);
+                    if (top == null || !isEmpty(top) || CoveredByOtherPanel(panel, from) != null)
+                    {
+                        continue;
+                    }
+                    Vector2 to = from + delta;
+                    SendPointer(panel, from, EventType.MouseMove);
+                    SendPointer(panel, from, EventType.MouseDown);
+                    SendPointer(panel, Vector2.Lerp(from, to, 0.5f), EventType.MouseMove);
+                    SendPointer(panel, to, EventType.MouseMove);
+                    SendPointer(panel, to, EventType.MouseUp);
+                    SyncLayout(area);
+                    UitkDrags++;
+                    return true;
+                }
+            }
+            why = $"{area.name} 里找不到可以按住拖动的空白处";
+            return false;
+        }
+
+        /// <summary>最近一次 UI Toolkit 点击失败是暂时的（悬停提示 / 通知弹出条正在收起、悬停后界面排版刚变）：过一会儿再点就行，不必算一次重试。</summary>
+        public static bool LastUiTransient { get; private set; }
+
+        /// <summary>上一次暂时失败的真实时刻（秒）；旅程框架只把 2 秒内的暂时失败算作“这一步的重试是暂时的”。</summary>
+        public static float LastUiTransientAt { get; private set; } = -100f;
+
+        /// <summary>本次会话里因为通知弹出条盖住按钮而等它收起的次数。</summary>
+        public static int ToastWaits { get; private set; }
+
+        private static void MarkTransient()
+        {
+            LastUiTransient = true;
+            LastUiTransientAt = Time.realtimeSinceStartup;
+        }
+
+        /// <summary>
+        /// FG5-E2E-01 修复轮（审查 P2）：旅程框架在每一步的每次尝试开始时调用——上一步 / 上一次尝试留下的“暂时失败”不算到这一次头上
+        /// （原来只在 <see cref="ClickElement"/> 开头清零，同一两秒内与点击无关的失败也会被当成暂时遮挡免费重试）。
+        /// </summary>
+        public static void BeginStepAttempt()
+        {
+            LastUiTransient = false;
+            LastUiFailure = string.Empty;
+            _deferredWorldClick = null; // 上一步没补完的点击不带进这一步
+            _deferredPans = 0;
+            ClickTrace.Clear();
+        }
+
+        /// <summary>自检用：模拟一次暂时的 UI 失败（通知弹出条挡着之类），不碰任何面板。</summary>
+        internal static void DebugMarkTransient(string failure)
+        {
+            MarkTransient();
+            LastUiFailure = failure ?? string.Empty;
+        }
+
+        /// <summary>元素属于通知弹出条（NotificationHud 的 uk-toast）。</summary>
+        private static bool IsToast(VisualElement e)
+        {
+            for (VisualElement p = e; p != null; p = p.parent)
+            {
+                if (p.ClassListContains("uk-toast") || p.name == "ToastList")
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>最近一次 UI Toolkit 点击之后控件有没有挪位置（诊断用；没挪是空串）。</summary>
+        public static string LastClickNote { get; private set; } = string.Empty;
 
         /// <summary>本次会话里为了让控件进入可见区发出的滚轮次数。</summary>
         public static int WheelScrolls { get; private set; }
@@ -434,6 +700,13 @@ namespace GameLogic.EditorTools.JourneyBots
                 using (PointerDownEvent down = PointerDownEvent.GetPooled(ime))
                 {
                     panel.visualTree.SendEvent(down);
+                }
+            }
+            else if (type == EventType.MouseMove)
+            {
+                using (PointerMoveEvent move = PointerMoveEvent.GetPooled(ime))
+                {
+                    panel.visualTree.SendEvent(move);
                 }
             }
             else
@@ -504,6 +777,100 @@ namespace GameLogic.EditorTools.JourneyBots
             return null;
         }
 
+        /// <summary>本次会话里因为物体中心被界面挡住 / 被别的东西挡住、改点它身上另一处看得见的地方的次数（报告里写出）。</summary>
+        public static int AlternatePointClicks { get; set; }
+
+        /// <summary>最近一次 <see cref="TryVisiblePointOf"/> 选点的说明（中心点为什么点不到、改点了哪里；诊断用）。</summary>
+        public static string LastVisiblePointNote { get; private set; } = string.Empty;
+
+        /// <summary>
+        /// FG5-E2E-01：物体（建筑、机器模型）上一个“玩家此刻点得到”的屏幕点——在画面里（离边缘至少 3%）、没被界面挡住（与世界点击拦截同一判据 <see cref="UiCoverAt"/>）、
+        /// 从镜头沿这一点的射线最先打到的就是它自己（或它的子物体）。按碰撞体包围盒顶面 5×5 采样，从中心往外找。
+        /// 背景：镜头改成倾斜透视（FG3-GEN-01 后续）后，开局建筑的中心常落在左下角的区域指挥栏下面——玩家会点建筑露出来的那一部分，旅程同样如此，而不是隔着界面点。
+        /// 找不到返回 false（<paramref name="why"/> 写原因，调用方先平移镜头再试）。
+        /// </summary>
+        public static bool TryVisiblePointOf(Transform target, out Vector3 screen, out string why)
+        {
+            screen = OffScreen;
+            why = null;
+            Camera cam = Cam;
+            if (target == null || cam == null)
+            {
+                why = "没有目标或镜头";
+                return false;
+            }
+            Collider[] cols = target.GetComponentsInChildren<Collider>();
+            Bounds b = new Bounds(target.position, Vector3.zero);
+            bool any = false;
+            foreach (Collider col in cols)
+            {
+                if (col == null || !col.enabled)
+                {
+                    continue;
+                }
+                if (!any)
+                {
+                    b = col.bounds;
+                    any = true;
+                }
+                else
+                {
+                    b.Encapsulate(col.bounds);
+                }
+            }
+            if (!any)
+            {
+                why = "目标没有碰撞体";
+                return false;
+            }
+            const int n = 5;
+            var samples = new List<(float d, Vector3 p)>(n * n);
+            for (int ix = 0; ix < n; ix++)
+            {
+                for (int iz = 0; iz < n; iz++)
+                {
+                    float fx = (ix + 0.5f) / n;
+                    float fz = (iz + 0.5f) / n;
+                    var p = new Vector3(Mathf.Lerp(b.min.x, b.max.x, fx), b.max.y - 0.01f, Mathf.Lerp(b.min.z, b.max.z, fz));
+                    samples.Add(((fx - 0.5f) * (fx - 0.5f) + (fz - 0.5f) * (fz - 0.5f), p));
+                }
+            }
+            samples.Sort((x, y) => x.d.CompareTo(y.d));
+            string firstWhy = null;
+            foreach ((float _, Vector3 p) in samples)
+            {
+                Vector3 s = ScreenOfWorld(p);
+                if (s.x < Screen.width * 0.03f || s.x > Screen.width * 0.97f || s.y < Screen.height * 0.03f || s.y > Screen.height * 0.97f)
+                {
+                    firstWhy ??= "不在画面里";
+                    continue;
+                }
+                string cover = UiCoverAt(s);
+                if (cover != null)
+                {
+                    firstWhy ??= "被界面挡住（" + cover + "）";
+                    continue;
+                }
+                if (!Physics.Raycast(cam.ScreenPointToRay(s), out RaycastHit hit, 1000f) || hit.collider == null
+                    || (hit.collider.transform != target && !hit.collider.transform.IsChildOf(target)))
+                {
+                    firstWhy ??= "被别的东西挡着（" + (hit.collider != null ? hit.collider.name : "射线没打到") + "）";
+                    continue;
+                }
+                if (samples.Count > 0 && (p - samples[0].p).sqrMagnitude > 1e-4f)
+                {
+                    AlternatePointClicks++;
+                }
+                LastVisiblePointNote = (firstWhy == null ? "中心点就点得到" : "中心点" + firstWhy) + $"，点 ({s.x:F0},{s.y:F0})；目标 {target.name}#{target.GetInstanceID()} 位置 {target.position}、" +
+                                       $"碰撞体 {cols.Length} 个 [{string.Join("、", cols.Where(x => x != null).Take(6).Select(x => x.name + (x.isTrigger ? "(触发)" : string.Empty) + x.bounds.center.ToString("F1")))}]、" +
+                                       $"包围盒中心 {b.center:F1} 尺寸 {b.size:F1}、射线先打到 {hit.collider.name}#{hit.collider.GetInstanceID()}（{hit.point:F1}）";
+                screen = s;
+                return true;
+            }
+            why = firstWhy ?? "没有点得到的地方";
+            return false;
+        }
+
         /// <summary>面板坐标 → 屏幕坐标（左上角原点，与 <see cref="RuntimePanelUtils.ScreenToPanel"/> 的输入同一口径）：按两点反解线性映射。</summary>
         private static bool TryPanelToScreen(IPanel panel, Vector2 panelPoint, out Vector2 screenTopLeft)
         {
@@ -519,7 +886,21 @@ namespace GameLogic.EditorTools.JourneyBots
             return true;
         }
 
-        private static string Describe(VisualElement e) => e == null ? "（无）" : string.IsNullOrEmpty(e.name) ? e.GetType().Name : e.name;
+        /// <summary>挡住控件的元素：自己与上面三层（名字，没名字写类型与第一个样式类），诊断用。</summary>
+        private static string Describe(VisualElement e)
+        {
+            if (e == null)
+            {
+                return "（无）";
+            }
+            var parts = new List<string>(4);
+            for (VisualElement p = e; p != null && parts.Count < 4; p = p.parent)
+            {
+                string cls = p.GetClasses().FirstOrDefault();
+                parts.Add(!string.IsNullOrEmpty(p.name) ? p.name : p.GetType().Name + (cls != null ? "." + cls : string.Empty));
+            }
+            return string.Join(" < ", parts);
+        }
 
         /// <summary>本次会话里因为世界悬停提示挡着、先把光标移离世界再点的次数（报告里写出）。</summary>
         public static int TooltipRetreats { get; private set; }
@@ -568,6 +949,57 @@ namespace GameLogic.EditorTools.JourneyBots
             return false;
         }
 
+        private static System.Reflection.MethodInfo _validateLayout;
+
+        /// <summary>把控件所在面板的样式与排版刷到最新（等同渲染前的那次排版）；batchmode 不渲染时拾取 / 读位置前先调。</summary>
+        public static void SyncLayout(VisualElement e)
+        {
+            IPanel panel = e?.panel;
+            if (panel == null)
+            {
+                return;
+            }
+            if (_validateLayout == null || _validateLayout.DeclaringType == null || !_validateLayout.DeclaringType.IsInstanceOfType(panel))
+            {
+                // 整棵树的更新（样式 → 排版 → 变换与裁剪 → 绑定），等同渲染前那一次；只刷排版（ValidateLayout）时变换缓存可能还是旧的，
+                // 按钮在抬起时判断“光标还在不在我上面”用的是旧变换，点击就丢了（研发树筛选后实测）。
+                const System.Reflection.BindingFlags all = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
+                _validateLayout = panel.GetType().GetMethod("UpdateWithoutRepaint", all, null, System.Type.EmptyTypes, null)
+                                  ?? panel.GetType().GetMethod("ValidateLayout", all, null, System.Type.EmptyTypes, null);
+            }
+            _validateLayout?.Invoke(panel, null);
+        }
+
+        /// <summary>控件为什么点不了：不在面板上 / 哪一层被禁用 / 哪一层隐藏。只用于失败说明。</summary>
+        public static string WhyNotClickable(VisualElement e)
+        {
+            if (e == null)
+            {
+                return "控件不存在";
+            }
+            if (e.panel == null)
+            {
+                return "不在面板上";
+            }
+            for (VisualElement p = e; p != null; p = p.parent)
+            {
+                string who = string.IsNullOrEmpty(p.name) ? p.GetType().Name : p.name;
+                if (!p.enabledSelf)
+                {
+                    return who + " 被禁用";
+                }
+                if (p.resolvedStyle.display == DisplayStyle.None)
+                {
+                    return who + " display:none";
+                }
+                if (p.resolvedStyle.visibility == Visibility.Hidden)
+                {
+                    return who + " visibility:hidden";
+                }
+            }
+            return e.visible ? "原因不明" : "visible=false";
+        }
+
         /// <summary>玩家此刻能不能点到它：在面板上、启用（含祖先）、自己和祖先都没有 display:none / visibility:hidden。</summary>
         public static bool IsClickable(VisualElement e)
         {
@@ -607,10 +1039,42 @@ namespace GameLogic.EditorTools.JourneyBots
                 key != KeyCode.None && ((ChordHeld == key && Time.frameCount == KeyFrame)
                                         || (Held.Contains(key) && Time.frameCount >= HeldDownFrame && Time.realtimeSinceStartup < HoldUntil));
 
-            public bool GetKeyDown(KeyCode key) =>
-                key != KeyCode.None && ((key == Key && Time.frameCount == KeyFrame) || (Held.Contains(key) && Time.frameCount == HeldDownFrame));
-            public bool GetMouseButtonDown(int button) => button == MouseButton && Time.frameCount == DownFrame;
-            public bool GetMouseButtonUp(int button) => button == MouseButton && Time.frameCount == UpFrame;
+            /// <summary>FG5-E2E-01 修复轮：这次点击在按下 / 抬起那一帧记下世界层的输入状态（<see cref="LastWorldClickTrace"/>）。</summary>
+            public bool Trace;
+
+            public bool GetKeyDown(KeyCode key)
+            {
+                if (key == KeyCode.None)
+                {
+                    return false;
+                }
+                if (key == Key && Time.frameCount == KeyFrame)
+                {
+                    TraceKey(key);
+                    return true;
+                }
+                return Held.Contains(key) && Time.frameCount == HeldDownFrame;
+            }
+
+            public bool GetMouseButtonDown(int button)
+            {
+                bool down = button == MouseButton && Time.frameCount == DownFrame;
+                if (down && Trace)
+                {
+                    TraceWorldClick("按下", MousePosition);
+                }
+                return down;
+            }
+
+            public bool GetMouseButtonUp(int button)
+            {
+                bool up = button == MouseButton && Time.frameCount == UpFrame;
+                if (up && Trace)
+                {
+                    TraceWorldClick("抬起", MousePosition);
+                }
+                return up;
+            }
             public Vector3 MousePosition => SwitchFrame >= 0 && Time.frameCount >= SwitchFrame ? MouseB : MouseA;
             public float MouseScrollDelta => 0f;
         }

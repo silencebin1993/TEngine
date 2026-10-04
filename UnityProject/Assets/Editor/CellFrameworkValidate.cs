@@ -466,6 +466,10 @@ namespace GameLogic.EditorTools
             Seg("FgFusionSelfCheck", FgFusionSelfCheck.Run); // FG5-RND-04：熔合、配方书与线索
             Seg("FgIntelSelfCheck", FgIntelSelfCheck.Run); // FG5-RND-05：监听站与情报
             Seg("FgBlackBoxSelfCheck", FgBlackBoxSelfCheck.Run); // FG5-RND-06：黑匣子陈列馆与纪念墙
+            // FG5-E2E-01：M5 出口——FGJ-M5 / FGJ-M5R 登记覆盖出口旅程原文七步、回补与 IC-REQ-022 六类、断点；旅程源码只走输入通道、七处夹具只在登记的夹具方法里；
+            // 旧旅程（FGJ-M3 / M3R / M4 / M4R）的“已研究”夹具（DEBT-FG5RND01-05）；研发建筑规划在种子测试集上都找得到（B25）；缺口清零门禁；FG-M5 试玩包；FGT-RND-001～009 映射；
+            // 技术数据收支按来源分项（账本归类、统计面板“研发”页、真文件存读档）、新档开局技术数据、研发加成来源行；统计 / 建筑面板接线、研发树窗口固定高度、布局探针。
+            Seg("FgMilestoneM5SelfCheck", FgMilestoneM5SelfCheck.Run);
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>

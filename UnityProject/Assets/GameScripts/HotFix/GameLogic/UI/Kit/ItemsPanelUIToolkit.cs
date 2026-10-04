@@ -431,10 +431,12 @@ namespace GameLogic.UI.Kit
         {
             CampaignState state = CampaignSession.Current;
             ItemDistributionView v = ItemDistribution.Get(state, item);
+            // FG5-E2E-01（B13，DEBT-FG5RND01-07）：仓库容量吃到研发加成时，容量这一行后面写明加成与来源节点。
+            string bonus = ItemHover.ResearchLine(state, item);
             var c = new TooltipContent
             {
                 Title = item.Name,
-                Body = ItemHover.TotalLine(state, item, v) + "\n" + ItemHover.RateLine(state, item) + "\n" + RecipeBook.FormText(item),
+                Body = ItemHover.TotalLine(state, item, v) + (bonus != null ? "\n" + bonus : string.Empty) + "\n" + ItemHover.RateLine(state, item) + "\n" + RecipeBook.FormText(item),
                 CodexEntryId = MechanicCodex.ItemEntryId(item.Id),
                 CodexEntry = InputDisplay.ExpandActionTokens(GameText.Get("item.hover.codex")),
             };

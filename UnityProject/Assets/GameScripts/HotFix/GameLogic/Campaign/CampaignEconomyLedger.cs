@@ -335,6 +335,11 @@ namespace GameLogic.Campaign
                 if (recordStats)
                 {
                     Economy.ProductionStats.RecordResource(state, record.ResourceType, (long)Math.Round(-record.Requested), produced: true);
+                    if (record.ResourceType == ResourceTechData)
+                    {
+                        // FG5-E2E-01（FGR-RND-070）：技术数据按来源记累计收入（统计面板“研发”页）。
+                        Economy.TechDataFlow.OnLedgerCommit(state, record.TransactionId, (long)Math.Round(-record.Requested), produced: true);
+                    }
                 }
             }
             else
@@ -347,6 +352,11 @@ namespace GameLogic.Campaign
                 if (recordStats)
                 {
                     Economy.ProductionStats.RecordResource(state, record.ResourceType, (long)Math.Round(record.Reserved), produced: false);
+                    if (record.ResourceType == ResourceTechData)
+                    {
+                        // FG5-E2E-01（FGR-RND-070）：技术数据按去处记累计支出（数据复原、蓝图首次保存……）。
+                        Economy.TechDataFlow.OnLedgerCommit(state, record.TransactionId, (long)Math.Round(record.Reserved), produced: false);
+                    }
                 }
             }
 

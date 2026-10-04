@@ -73,6 +73,17 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 return;
             }
+            // FG5-E2E-01：M5 起主菜单“新建”的战役开局带研发启动用的技术数据（research.start_tech_data，ADR-QA-022）。M2 的旅程测的是研发树开放前的
+            // 技术数据（“技术数据不足”被拒等），先用同一账本的消耗事务把开局那份扣回，再 +12，口径与 M2 出口时一致。
+            if (s.Research != null && s.Research.TechStart > 0 && s.TechData >= s.Research.TechStart)
+            {
+                string back = "journey_fixture_techstart_" + c.Seed.ToString(CultureInfo.InvariantCulture);
+                CampaignEconomyLedger.ProposeConsume(s, back, "journey_fixture", CampaignEconomyLedger.ResourceTechData, s.Research.TechStart);
+                CampaignEconomyLedger.Reserve(s, back);
+                CampaignEconomyLedger.MarkRunning(s, back);
+                CampaignEconomyLedger.Commit(s, back);
+                c.Log($"M5 起新档开局的 {s.Research.TechStart} 技术数据先扣回（本旅程按 M2 的技术数据口径）");
+            }
             c.SetInt("tech0", s.TechData);
             string tx = "journey_fixture_techdata_" + c.Seed.ToString(CultureInfo.InvariantCulture);
             CampaignEconomyLedger.ProposeProduce(s, tx, "journey_fixture", CampaignEconomyLedger.ResourceTechData, TechFixture);
@@ -138,8 +149,15 @@ namespace GameLogic.EditorTools.JourneyBots
                 c.Set("flyFirst", "1");
                 return;
             }
+            // FG5-E2E-01：物件中心被界面挡住时点它露出来的那一部分（倾斜透视镜头下常落在左下角指挥栏下面）；整个都点不到就再平移一次。
+            if (!JourneyInput.TryVisiblePointOf(t, out Vector3 screen, out _))
+            {
+                FgjM3Common.PanTo(ground);
+                c.Set("flyFirst", "1");
+                return;
+            }
             c.Set("flyFirst", string.Empty);
-            JourneyInput.ClickWorld(t.position, button);
+            JourneyInput.ClickScreen(screen, button);
             c.SetLong("clickedAtMs", NowMs());
         }
 
@@ -1137,7 +1155,8 @@ namespace GameLogic.EditorTools.JourneyBots
                 }
                 if (!t.value && !JourneyInput.ClickElement(t))
                 {
-                    return StepOutcome.Fail($"勾选 {Label(roster[idx])} 失败：{JourneyInput.LastUiFailure}");
+                    // 世界悬停提示正在收起（光标刚从点开面板的信号塔上移开）：下一帧再点。
+                    return JourneyInput.LastUiTransient ? StepOutcome.Wait : StepOutcome.Fail($"勾选 {Label(roster[idx])} 失败：{JourneyInput.LastUiFailure}");
                 }
                 c.SetInt("rosterIdx", idx + 1);
                 return StepOutcome.Wait;
@@ -1172,15 +1191,22 @@ namespace GameLogic.EditorTools.JourneyBots
                 c.Set("flyFirst", "1");
                 return;
             }
+            // FG5-E2E-01：机器模型被界面挡住时点它露出来的那一部分；整台都被挡住就再平移一次。
+            if (!JourneyInput.TryVisiblePointOf(m.View.transform, out Vector3 screen, out _))
+            {
+                FgjM3Common.PanTo(m.Position);
+                c.Set("flyFirst", "1");
+                return;
+            }
             c.Set("flyFirst", string.Empty);
             c.SetLong("clickedAtMs", NowMs());
             if (additive)
             {
-                JourneyInput.ShiftClickWorld(m.View.transform.position);
+                JourneyInput.ShiftClickScreen(screen);
             }
             else
             {
-                JourneyInput.ClickWorld(m.View.transform.position);
+                JourneyInput.ClickScreen(screen);
             }
         }
 

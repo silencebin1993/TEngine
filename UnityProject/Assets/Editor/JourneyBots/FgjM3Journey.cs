@@ -65,7 +65,8 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("menu_new", "主菜单点“新建”", 150, null, JourneyCommon.TickMenuNew, retries: 1),
                 S("new_game", "新游戏设置：在种子框输入“42”（提示行更新、分享短码跟着变）→ 点“开始” → 进入归还谷地", 150, null, TickNewGameTyped),
                 S("seed", "输入的种子进了存档；生成结果与该种子的基准一致；起始区四级保证满足", 30, null, c => JourneyCommon.TickSeed(c, TestSeed)),
-                S("workers", "记下开局两台工程机（不加任何进度夹具）", 10, null, FgjM3Common.TickWorkers),
+                S("workers", "记下开局两台工程机", 10, null, FgjM3Common.TickWorkers),
+                S("research_fixture", "进度夹具：研发树开放前开局就能建的内容记为已研究（DEBT-FG5RND01-05；研究本身在 FGJ-M5 / M5R 走正式入口）", 10, FgjM5Common.ApplyLegacyResearchFixture, FgjM5Common.TickLegacyResearchFixture),
                 S("speed3", "按 3 倍速键", 10, c => FgjM1Journey.PressIf(GameActionId.SpeedTriple, !Mathf.Approximately(GameClock.Speed, 3f)), FgjM1Journey.TickSpeed3, retries: 1),
 
                 // ── 家园前置：修仓库（物品线的起点）与发电机（装配站要电），拆残骸拿废料，修信号塔（出征要用），装配站造第三台机器（出征要三台）──

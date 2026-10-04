@@ -39,6 +39,9 @@ namespace GameLogic.Campaign.Economy
             }
         }
 
+        /// <summary>FG5-E2E-01（B13，DEBT-FG5RND01-07）：容量的研发加成来源（固体吃仓库容量加成时一行，否则 null）——与仓库真实容量同一读口。</summary>
+        public static string ResearchLine(CampaignState state, ItemDef item) => ResearchService.ItemBonusLine(state, item);
+
         /// <summary>第二行：净速率（家园库存的首尾差 ÷ 游戏分钟）；还没攒够采样写“测量中”；流体 / 实体写“不统计”。</summary>
         public static string RateLine(CampaignState state, ItemDef item)
         {

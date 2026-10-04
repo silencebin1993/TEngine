@@ -25,6 +25,8 @@ namespace GameLogic.UI.Kit
         Combat = 4,
         /// <summary>物流与能源（电网发电 / 缺电 / 储能 / 燃油、传送带吞吐与清带、分流器分出、管线累计）。</summary>
         Flow = 5,
+        /// <summary>FG5-E2E-01：研发（技术数据按来源 / 去处的收支、研究、熔合、情报、黑匣子的累计）。</summary>
+        Research = 6,
     }
 
     /// <summary>
@@ -82,7 +84,7 @@ namespace GameLogic.UI.Kit
         private Label _count;
         private Label _section;
         private Button _close;
-        private readonly Button[] _tabs = new Button[6];
+        private readonly Button[] _tabs = new Button[7];
         private readonly Button[] _filters = new Button[3];
         private readonly Button[] _windows = new Button[ProductionStats.TierCount];
         private VisualElement _filterBar, _windowBar, _curveBox, _plannerBar;
@@ -310,6 +312,7 @@ namespace GameLogic.UI.Kit
             _tabs[(int)StatsTab.Planner] = root.Q<Button>("StatsTabPlanner");
             _tabs[(int)StatsTab.Combat] = root.Q<Button>("StatsTabCombat");
             _tabs[(int)StatsTab.Flow] = root.Q<Button>("StatsTabFlow");
+            _tabs[(int)StatsTab.Research] = root.Q<Button>("StatsTabResearch");
             _filterBar = root.Q<VisualElement>("StatsFilterBar");
             _filters[(int)ReactionLogFilter.All] = root.Q<Button>("StatsFilterAll");
             _filters[(int)ReactionLogFilter.Expedition] = root.Q<Button>("StatsFilterExpedition");
@@ -587,7 +590,7 @@ namespace GameLogic.UI.Kit
 
             _title.text = GameText.Get("stats.panel.title");
             _close.text = GameText.Get("codex.panel.close");
-            string[] tabKeys = { "stats.tab.production", "stats.tab.buildings", "stats.tab.bottleneck", "stats.tab.planner", "stats.tab.combat", "stats.tab.flow" };
+            string[] tabKeys = { "stats.tab.production", "stats.tab.buildings", "stats.tab.bottleneck", "stats.tab.planner", "stats.tab.combat", "stats.tab.flow", "stats.tab.research" };
             for (int t = 0; t < _tabs.Length; t++)
             {
                 bool cur = t == (int)CurrentTab;
@@ -618,6 +621,9 @@ namespace GameLogic.UI.Kit
                     break;
                 case StatsTab.Flow:
                     empty = BuildFlow(state);
+                    break;
+                case StatsTab.Research:
+                    empty = BuildResearch(state);
                     break;
                 default:
                     empty = BuildCombat(state);
@@ -949,6 +955,22 @@ namespace GameLogic.UI.Kit
                 _specs.Add(new RowSpec { Text = text, Cls = cls });
             }
             return null;
+        }
+
+        private readonly List<(string Text, string Cls)> _researchLines = new List<(string Text, string Cls)>(32);
+
+        /// <summary>FG5-E2E-01：研发页（DEBT-FG5RND06-04 / 04-07 / 05-06）——技术数据按来源 / 去处的收支、研究、熔合、情报、黑匣子的累计（<see cref="ResearchStats"/>）。</summary>
+        private string BuildResearch(CampaignState state)
+        {
+            _section.text = GameText.Get("stats.section.research");
+            _footer.text = Hint("stats.research.footer");
+            ResearchStats.Build(state, _researchLines);
+            _count.text = string.Empty;
+            foreach ((string text, string cls) in _researchLines)
+            {
+                _specs.Add(new RowSpec { Text = text, Cls = cls });
+            }
+            return GameText.Get("stats.research.none");
         }
 
         private string BuildPlanner(CampaignState state)

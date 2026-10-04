@@ -440,6 +440,7 @@ namespace GameLogic.Campaign.Economy
             {
                 HomeInventory.RemoveUpTo(s, TechItem, cost);
                 ProductionStats.RecordUnits(s, TechItem, cost, produced: false);
+                TechDataFlow.Spend(s, TechDataFlow.FusionSim, cost); // FG5-E2E-01：统计面板“技术数据支出 · 模拟熔合”
             }
             FusionState f = StateOf(s);
             f.Simulations++;
@@ -632,6 +633,7 @@ namespace GameLogic.Campaign.Economy
                 return FusionOpResult.Fail(FusionFailure.NoChip, GameText.Format("fusion.reason.no_chip", Name(cb.CardDefId)));
             }
             int tookTech = tech > 0 ? HomeInventory.RemoveUpTo(s, TechItem, tech) : 0;
+            TechDataFlow.Spend(s, TechDataFlow.Fusion, tookTech); // FG5-E2E-01：统计面板“技术数据支出 · 正式熔合”（取消 / 回滚时由 RefundMaterials 扣回）
             int tookSub = sub > 0 ? HomeInventory.RemoveUpTo(s, SubstrateItem, sub) : 0;
             if (tookTech != tech || tookSub != sub)
             {
@@ -765,6 +767,7 @@ namespace GameLogic.Campaign.Economy
             if (tech > 0)
             {
                 HomeInventory.Add(s, TechItem, tech, clampToSpace: false); // 数字资源不限容量
+                TechDataFlow.Unspend(s, TechDataFlow.Fusion, tech);
             }
             if (substrate > 0)
             {

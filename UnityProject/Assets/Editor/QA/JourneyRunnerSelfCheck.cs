@@ -52,6 +52,7 @@ namespace GameLogic.EditorTools
                 CheckExplicitFailAndException();
                 CheckTotalTimeoutAndErrorLog();
                 CheckResumeAfterReload();
+                CheckTransientUiRetry();
                 CheckCatalog();
             }
             catch (Exception e)
@@ -227,6 +228,67 @@ namespace GameLogic.EditorTools
             Drive(resumed, clock);
             Expect(stepBefore == 1 && resumed.Result == JourneyRunner.ResultPass && enters == 1,
                 "域重载后续跑：新实例从同一步接着等（进入动作不重复执行、步骤计时不清零），然后跑完");
+        }
+
+        /// <summary>
+        /// FG5-E2E-01 修复轮（审查 P2）：暂时的 UI 遮挡免计重试只认“这一次尝试里那次点击失败”且步骤报的就是它；
+        /// 同一步里与点击无关的失败、上一步留下的暂时失败都照常计重试；免计重试前同样执行 OnRetry。
+        /// </summary>
+        private static void CheckTransientUiRetry()
+        {
+            const string toast = "控件 X 被通知弹出条挡着（自检），等它收起再点";
+            try
+            {
+                // ① 点击被弹出条挡住、步骤报的就是这次点击失败：不算重试（允许重试 0 次也能过），1 秒后重做这一步，重做前收拾一次。
+                var clock = new FakeClock();
+                int cleaned = 0;
+                JourneyRunner r = NewRunner(clock, new MemoryJourneyStore(),
+                    Step("toast", c =>
+                    {
+                        if (c.Attempt == 0)
+                        {
+                            JourneyInput.DebugMarkTransient(toast);
+                            return StepOutcome.Retry("点“生产”后队列是空的（" + JourneyInput.LastUiFailure + "）");
+                        }
+                        return StepOutcome.Done();
+                    }, onRetry: c => cleaned++));
+                r.Start();
+                Drive(r, clock, 0.25);
+                bool freeOk = r.Result == JourneyRunner.ResultPass && r.List("transient").Count == 1 && r.List("retries").Count == 0 && cleaned == 1;
+
+                // ② 同一次尝试里先有一次暂时遮挡、随后报的是与点击无关的失败：照常算重试（不允许重试就失败）。
+                var clock2 = new FakeClock();
+                JourneyRunner r2 = NewRunner(clock2, new MemoryJourneyStore(),
+                    Step("logic", c =>
+                    {
+                        JourneyInput.DebugMarkTransient(toast);
+                        return StepOutcome.Retry("仓库里的合金数量不对");
+                    }));
+                r2.Start();
+                Drive(r2, clock2, 0.25);
+                bool logicOk = r2.Result == JourneyRunner.ResultFail && r2.FailStepId == "logic" && r2.List("transient").Count == 0;
+
+                // ③ 上一步留下的暂时失败不算到下一步头上（进入一步时清掉）：下一步报同样的文字也照常算重试。
+                var clock3 = new FakeClock();
+                JourneyRunner r3 = NewRunner(clock3, new MemoryJourneyStore(),
+                    Step("before", c =>
+                    {
+                        JourneyInput.DebugMarkTransient(toast);
+                        return StepOutcome.Done();
+                    }),
+                    Step("after", c => StepOutcome.Retry("还是没点上（" + toast + "）")));
+                r3.Start();
+                Drive(r3, clock3, 0.25);
+                bool staleOk = r3.Result == JourneyRunner.ResultFail && r3.FailStepId == "after" && r3.List("transient").Count == 0;
+
+                Expect(freeOk && logicOk && staleOk,
+                    $"暂时遮挡免计重试：报的就是本次点击失败才免计（免计 {r.List("transient").Count}、重试 {r.List("retries").Count}、收拾 {cleaned}）；" +
+                    $"与点击无关的失败照常计重试（{r2.Result}）；上一步留下的暂时失败不带进下一步（{r3.Result}）");
+            }
+            finally
+            {
+                JourneyInput.BeginStepAttempt(); // 不把自检留下的标志带给后面的旅程
+            }
         }
 
         private static void CheckCatalog()

@@ -927,7 +927,7 @@ namespace GameLogic.EditorTools.JourneyBots
         /// 家园电量够不够：现有建筑（开局建筑按修好算）+ 规划的建筑 + <paramref name="extraDemand"/> 的耗电，对比现有发电（燃油发电机不算——它要燃油）。
         /// 不够就在核心配电范围里找空地放发电机 2，放置顺序排在产线之前（没电的回收站拆不出废料，会卡住后面的施工）。
         /// </summary>
-        internal static bool PlanGenerators(CampaignState s, FactoryPlan plan, int extraDemand, out string why)
+        internal static bool PlanGenerators(CampaignState s, FactoryPlan plan, int extraDemand, out string why, double margin = 1.05)
         {
             why = null;
             int demand = extraDemand;
@@ -949,7 +949,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 demand += BuildingDemand(p.Type);
             }
             int per = Math.Max(1, BuildingSupply(HomeValleyLayout.BuildingTypeGenerator2));
-            int need = Math.Max(0, (int)Math.Ceiling((demand * 1.05 - supply) / per));
+            int need = Math.Max(0, (int)Math.Ceiling((demand * margin - supply) / per));
             GridCell core = HomeGridService.CorePivot(s);
             float coreR = HomeValleyPowerGrid.CoverRadiusOf(HomeValleyLayout.BuildingTypeCore);
             HashSet<long> avoid = BaseAvoid(s);
@@ -994,7 +994,7 @@ namespace GameLogic.EditorTools.JourneyBots
                     }
                 }
             }
-            plan.PowerNote = $"耗电 {demand}（含之后的精炼塔 / 废液池 / 复制的精炼炉 {extraDemand}）、现有发电 {supply}，加发电机 2 ×{plan.Generators.Count}（每座 {per}）";
+            plan.PowerNote = $"耗电 {demand}（含调用方给的修正 {extraDemand}：M4 = 之后才放的精炼塔 / 废液池 / 复制的精炼炉，M5R = 没修、不在电网里的建筑）、现有发电 {supply}、余量 ×{margin:0.00}，加发电机 2 ×{plan.Generators.Count}（每座 {per}）";
             if (plan.Generators.Count < need)
             {
                 why = $"电不够（{plan.PowerNote}），核心配电范围里放不下第 {plan.Generators.Count + 1} 座发电机 2";

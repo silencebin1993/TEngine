@@ -691,6 +691,17 @@ namespace GameLogic.EditorTools
             }
             Expect(all, "E FGT-RND-008 突袭预报与实际到来的突袭一致（时间窗口、阵营、规模、方向；部队沿地形寻路走完全程；两个种子、两个出发领地）；地图上画出从来袭方向指向家园的箭头，到达后标已过时、箭头消失：\n    "
                         + string.Join("\n    ", lines));
+
+            // FG5-E2E-01 修复轮（审查 P1）：窗口不到一分钟时两端不能各自取整成同一个数（FGJ-M5 实测“预计 3 分钟～3 分钟”）——下限向下、上限向上取整，写出的窗口包住真实窗口。
+            IntelService.RaidWindowText(GameClock.TicksFor(150), GameClock.TicksFor(204), out string mf, out string mt);
+            IntelService.RaidWindowText(GameClock.TicksFor(20.4), GameClock.TicksFor(44.2), out string sf, out string st);
+            IntelService.RaidWindowText(GameClock.TicksFor(50), GameClock.TicksFor(70), out string xf, out string xt);
+            IntelService.RaidWindowText(GameClock.TicksFor(180), GameClock.TicksFor(180), out string zf, out string zt);
+            bool windowText = mf == AwayReportService.Duration(GameClock.TicksFor(120)) && mt == AwayReportService.Duration(GameClock.TicksFor(240))
+                              && sf == AwayReportService.Duration(GameClock.TicksFor(20)) && st == AwayReportService.Duration(GameClock.TicksFor(45))
+                              && xf == AwayReportService.Duration(GameClock.TicksFor(50)) && xt == AwayReportService.Duration(GameClock.TicksFor(120))
+                              && zf != zt;
+            Expect(windowText, $"E 突袭预报时间窗口文字不退化成一个点：2.5～3.4 分钟写“{mf}～{mt}”，20.4～44.2 秒写“{sf}～{st}”，50～70 秒写“{xf}～{xt}”，零宽窗口写“{zf}～{zt}”（下限向下、上限向上取整，包住真实窗口）");
         }
 
         // ── F 负向：监听站被摧毁时正在破译的情报 / 没有监听站 / 数据核心 ─────────────────────
