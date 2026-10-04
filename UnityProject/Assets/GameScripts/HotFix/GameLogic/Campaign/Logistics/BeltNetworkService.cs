@@ -1418,7 +1418,8 @@ namespace GameLogic.Campaign.Logistics
             // FG3-LOG-03：箭头 / 流动条纹按游戏时钟滚动（暂停停住、倍速变快）。
             _renderer.AnimationTime = (float)((GameClock.Ticks + GameClock.StepAlpha) / Math.Max(1, GameClock.StepHz));
             _renderer.OverlayMode = GameLogic.View.OverlayService.BeltOverlayMode; // FG3-LOG-08：叠加层只改着色器参数（O(1)）。
-            _renderer.Draw(_kernel, camera, camera.orthographic ? camera.orthographicSize : 0f, InterpolationAlpha, _renderSettings);
+            // CameraDirector 在正交与透视视角都用 orthographicSize 保存等效半视野，LOD 跟随同一缩放尺度。
+            _renderer.Draw(_kernel, camera, camera.orthographicSize, InterpolationAlpha, _renderSettings);
             LastRenderMs = (Stopwatch.GetTimestamp() - t0) * 1000.0 / Stopwatch.Frequency;
             RenderCalls++;
         }

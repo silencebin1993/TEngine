@@ -94,6 +94,8 @@ namespace BinGames.EditorTools
                     StressFill(target);
                 }
                 prepare?.Invoke(target);
+                // 数据绑定或关闭回调可能重新收起目标；布局验收始终检查目标的展开状态。
+                RevealHidden(target);
                 ForceLayout(treeRoot);
 
                 Rect panelRect = treeRoot.panel.visualTree.worldBound;

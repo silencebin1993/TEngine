@@ -1875,6 +1875,9 @@ namespace GameLogic.EditorTools
             try
             {
                 UiTextFocusProbe.Register(board);
+                VisualElement window = board.Q<VisualElement>("CircuitBoardPanelRoot");
+                window.RemoveFromClassList("cb-hidden");
+                UiToolkitLayoutProbe.ForceLayout(board);
                 TextField name = board.Q<TextField>("NewBlueprintNameField");
                 InputRouter.SetScope(InputScope.Strategy);
                 StrategyClock.SetSpeed(1f);
@@ -1903,6 +1906,11 @@ namespace GameLogic.EditorTools
                 Line($"    · 探针：命名框 {(name != null ? "找到" : "缺失")}，聚焦元素 {focusedName}，让位={suppressed}，无触发={nothingFired}，失焦后恢复={released}，对照触发={controlFires}");
                 Expect(name != null && baseline && suppressed && nothingFired && released && controlFires,
                     "电路板蓝图命名框（Demo 文本框，没有自己接焦点事件）获得焦点 → 全局探针判定打字中：R / Space / C / 3 / ` 都不触发（不暂停、不改速、不弹“尚未开放”）；失焦后同样的键恢复生效");
+                name?.Focus();
+                window.AddToClassList("cb-hidden");
+                UiToolkitLayoutProbe.ForceLayout(board);
+                Expect(!InputRouter.TextInputFocused && !InputRouter.KeyboardSuppressed,
+                    "命名窗收起后，保留的文本焦点不再压住全局快捷键");
             }
             finally
             {

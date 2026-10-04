@@ -973,11 +973,11 @@ namespace GameLogic.EditorTools
             Camera cam = WorldView.Camera;
             var quad = new Vector2[4];
             float panelWidth = map.Canvas?.panel?.visualTree?.layout.width ?? 0f;
-            if (cam == null || panelWidth < 1f || !WorldMapVectorLayer.CameraGroundQuad(cam, quad))
+            if (cam == null || panelWidth < 1f || !WorldMapVectorLayer.CameraGroundQuad(cam, quad, View.CameraDirector.MaxStrategyOrthographicSize))
             {
                 return 0;
             }
-            double far = Vector2.Distance(quad[0], quad[1]) * (View.CameraDirector.MaxStrategyOrthographicSize / Mathf.Max(0.01f, cam.orthographicSize));
+            double far = Vector2.Distance(quad[0], quad[1]);
             camCpp = far / cam.pixelWidth;
             mapCpp = map.View.CellsPerCanvasPixel * panelWidth / cam.pixelWidth;
             return camCpp > 0 ? mapCpp / camCpp : 0;
@@ -1780,7 +1780,8 @@ namespace GameLogic.EditorTools
                 return;
             }
             Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
-            Check(!ConstructionQueuePanelUIToolkit.IsOpen && mode != null && mode.IsOpen, "Esc 只关掉施工队列，建造模式还开着");
+            Check(!ConstructionQueuePanelUIToolkit.IsOpen && mode != null && mode.IsOpen,
+                $"Esc 只关掉施工队列，建造模式还开着（队列 {ConstructionQueuePanelUIToolkit.IsOpen}，建造 {mode?.IsOpen}，上下文 {InputRouter.ActiveContext}，Esc 栈顶 {UiEscapeStack.Top?.GetType().Name}，模态 {string.Join(",", InputRouter.ModalOwnerList.Select(owner => owner.GetType().Name))}）");
             PressChord(GameSettings.KeyBindings.GetChord(GameActionId.ConstructionQueue));
             Next(117, "再按施工队列键（默认 Alt+B）重新打开施工队列");
         }

@@ -782,17 +782,31 @@ namespace GameLogic.UI.Kit
         }
 
         /// <summary>镜头视野在地面上的四角（格网 XZ）：视口四角的射线与 0 高度平面相交；取不到时返回 false。</summary>
-        public static bool CameraGroundQuad(Camera cam, Vector2[] into)
+        public static bool CameraGroundQuad(Camera cam, Vector2[] into, float viewSize = 0f)
         {
             if (cam == null || into == null || into.Length < 4)
             {
                 return false;
             }
             var plane = new Plane(Vector3.up, Vector3.zero);
+            float scale = viewSize > 0f ? viewSize / Mathf.Max(0.01f, cam.orthographicSize) : 1f;
+            Ray center = cam.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
             Vector2[] vp = { new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, 1), new Vector2(0, 1) };
             for (int i = 0; i < 4; i++)
             {
                 Ray ray = cam.ViewportPointToRay(new Vector3(vp[i].x, vp[i].y, 0f));
+                if (cam.orthographic)
+                {
+                    ray.origin = center.origin + (ray.origin - center.origin) * scale;
+                }
+                else if (viewSize > 0f)
+                {
+                    // 透视缩放改变 tan(FOV/2)。直接构造目标视口射线，避免反投影当前射线再放大其浮点误差。
+                    float halfHeight = Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad) * scale;
+                    Vector3 direction = new Vector3((vp[i].x * 2f - 1f) * halfHeight * cam.aspect,
+                        (vp[i].y * 2f - 1f) * halfHeight, 1f);
+                    ray = new Ray(cam.transform.position, cam.transform.TransformDirection(direction));
+                }
                 if (!plane.Raycast(ray, out float enter))
                 {
                     return false;

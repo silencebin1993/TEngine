@@ -11,6 +11,7 @@ using GameLogic.View;
 using Unity.Mathematics;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.UIElements;
 using Object = UnityEngine.Object;
 
 namespace GameLogic.EditorTools
@@ -156,7 +157,11 @@ namespace GameLogic.EditorTools
                 foreach (float scale in UiScales)
                 {
                     string result = UiToolkitLayoutProbe.Probe(UiRoot + uxml, root, true,
-                        UiToolkitLayoutProbe.DefaultPanelSettingsPath, null, scale);
+                        UiToolkitLayoutProbe.DefaultPanelSettingsPath, panel =>
+                        {
+                            // 工作单默认只显示入口；验收展开后的完整内容，避免检查未布局的折叠子树。
+                            panel.Q<ScrollView>("PanelBody")?.RemoveFromClassList("wop-hidden");
+                        }, scale);
                     if (!result.StartsWith("PASS", StringComparison.Ordinal))
                     {
                         failedScales.Add($"{scale * 100f:0}%");

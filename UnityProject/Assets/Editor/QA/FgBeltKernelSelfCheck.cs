@@ -1472,7 +1472,7 @@ namespace GameLogic.EditorTools
             ulong away = BeltNetworkService.Kernel.ComputeStateHash();
             Expect(observed == headless && headless == away && renders > 100 && noRender && switches >= 2 && farWhole,
                 $"观察不改变结果（FGR-BASE-021 / B24）：同一存档跑 120 游戏秒——A 镜头在家园逐帧绘制（{renders} 次，远近景切换 {switches} 次）、B 无头推进（零次绘制）、" +
-                $"C 3x 且镜头一直在远景（只画流动贴图），三遍传送带状态哈希完全一致");
+                $"C 3x 且镜头一直在远景（只画流动贴图），三遍传送带状态哈希完全一致（{observed:X16}/{headless:X16}/{away:X16}；无头零绘制 {noRender}，C 远景 {farWhole}）");
             WorldSimulation.UnloadAll();
         }
 
@@ -1764,7 +1764,7 @@ namespace GameLogic.EditorTools
             bool backOk = r != null && !r.FarMode && r.LastItemInstances > 0;
             Expect(placed == 28 && nearOk && farOk && backOk,
                 $"真实表现层路径（WorldPlanetView → BeltNetworkService.Render）：近景（正交 {ortho0:F1}）{placed} 格 + {nearItems} 件实例；" +
-                $"滚轮拉远到 {orthoFar:F1} 切远景流动贴图（物品实例 0）；拉回近景恢复逐物品（{r?.LastItemInstances}）");
+                $"滚轮拉远到 {orthoFar:F1} 切远景流动贴图（物品实例 0）；拉回近景恢复逐物品（{r?.LastItemInstances}）；近景 {nearOk} / 远景 {farOk} / 拉回 {backOk}");
             float alphaOk = BeltNetworkService.InterpolationAlpha;
             Expect(alphaOk >= 0f && alphaOk <= 1f && r != null && (r.GpuAvailable || r.GpuUnavailableReason != null),
                 $"插值比例 {alphaOk:F2} ∈ [0,1]（20 Hz 内核在 60 帧画面上按上一步位移插值）；GPU：{(r != null && r.GpuAvailable ? "可用" : r?.GpuUnavailableReason)}");

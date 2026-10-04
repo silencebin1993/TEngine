@@ -686,6 +686,18 @@ namespace GameLogic.EditorTools
             bool unknownRefused = !ProductionService.TrySetBurnTarget(s, r.B.BuildingId, "scrap", out string um) && um.Contains("不是可以刻录的固件");
             Expect(idle && lockedRefused && unknownRefused,
                 $"E1 刻录台没选固件 = “{ProductionService.StateText(p)}”（“{Why(s, p)}”），输入口收芯片基板；选未破解的“{FirmwareKinds.DisplayName(locked)}”被拒（“{lm}”）、选非固件被拒（“{um}”）");
+            // 相同目标的权限只复用当前生产步，解锁 / 撤销后下一步必须重新判断。
+            string[] unlockedBefore = s.UnlockedContentIds;
+            p.Rec.BurnTarget = locked;
+            ProductionService.Step(s, 3, GameClock.StepHz);
+            bool initiallyLocked = p.Reason == ProdReason.BurnTargetLocked;
+            s.UnlockedContentIds = (unlockedBefore ?? Array.Empty<string>()).Append(locked).ToArray();
+            ProductionService.Step(s, 3, GameClock.StepHz);
+            bool unlockRefreshed = p.State == ProdState.MissingInput;
+            s.UnlockedContentIds = unlockedBefore;
+            ProductionService.Step(s, 3, GameClock.StepHz);
+            Expect(initiallyLocked && unlockRefreshed && p.Reason == ProdReason.BurnTargetLocked,
+                "E1b 已选固件的权限在下一生产步立即刷新：未破解 → 已破解缺料 → 撤销后不可刻录");
             string target = burnable[0];
             int chips0 = s.PrimitiveChips?.Length ?? 0;
             bool set = ProductionService.TrySetBurnTarget(s, r.B.BuildingId, target, out string sm);

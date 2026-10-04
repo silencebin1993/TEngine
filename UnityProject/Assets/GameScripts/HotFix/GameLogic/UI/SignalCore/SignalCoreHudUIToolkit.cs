@@ -719,6 +719,7 @@ namespace GameLogic.UI.SignalCore
             {
                 _presetChoice.SetValueWithoutNotify(_presetChoice.choices[presetIndex]);
             }
+            _presetChoice.tooltip = _presetChoice.value;
             bool hasPresets = _presetIds.Count > 0;
             _presetApply.SetEnabled(hasPresets);
             _presetOverwrite.SetEnabled(hasPresets);

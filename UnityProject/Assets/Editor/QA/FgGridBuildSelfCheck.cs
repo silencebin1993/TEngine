@@ -88,6 +88,7 @@ namespace GameLogic.EditorTools
 
                 CheckData();
                 CheckGeometry();
+                CheckCameraCompatibility();
                 CheckStartLayout();
                 CheckPlacementMatrix();
                 CheckRotateAndDemolish();
@@ -338,6 +339,48 @@ namespace GameLogic.EditorTools
         }
 
         // ── B. 几何 ──────────────────────────────────────────────────────────────
+
+        private static void CheckCameraCompatibility()
+        {
+            var go = new GameObject("__GridCameraCompatibility");
+            try
+            {
+                Camera cam = go.AddComponent<Camera>();
+                cam.aspect = 16f / 9f;
+                Vector3 focus = new Vector3(64f, 0f, 32f);
+                cam.transform.rotation = Quaternion.Euler(60f, 0f, 0f);
+                cam.transform.position = focus - cam.transform.forward * 150f;
+                var projected = new Vector2[4];
+                var actual = new Vector2[4];
+                foreach (bool ortho in new[] { true, false })
+                {
+                    cam.orthographic = ortho;
+                    cam.orthographicSize = 20f;
+                    cam.fieldOfView = 2f * Mathf.Atan(20f / 150f) * Mathf.Rad2Deg;
+                    GridCell cell = Campaign.WorldSim.WorldView.CameraFocusCell(cam);
+                    bool virtualFar = WorldMapVectorLayer.CameraGroundQuad(cam, projected, 46f);
+                    cam.orthographicSize = 46f;
+                    cam.fieldOfView = 2f * Mathf.Atan(46f / 150f) * Mathf.Rad2Deg;
+                    bool realFar = WorldMapVectorLayer.CameraGroundQuad(cam, actual);
+                    float error = 0f;
+                    for (int i = 0; i < 4; i++) error = Mathf.Max(error, Vector2.Distance(projected[i], actual[i]));
+                    // Unity 透视反投影有毫米级浮点误差；1 cm 是格宽的 1%，小于最远视野的一个屏幕像素。
+                    Expect(cell.Equals(GridCell.FromWorld(new Vector2(focus.x, focus.z))) && virtualFar && realFar && error < 0.01f,
+                        $"{(ortho ? "正交" : "透视")}倾斜镜头：地形焦点在观察点 (64,32)，20 → 46 的地图投影与实际最远视口一致（四角最大误差 {error:F6} 格）");
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+
+            var parent = new GameObject("__TerrainLifetime");
+            var terrain = new BinGames.TerrainVisual.CampaignTerrainChunk(parent.transform);
+            Object.DestroyImmediate(parent); // 模拟退出 Play 时 Unity 先销毁场景父节点。
+            terrain.Dispose();
+            terrain.Dispose();
+            Expect(terrain.WaterCellCount == 0 && terrain.RockCount == 0, "地形父节点先销毁后仍可释放、重复释放，不访问已销毁对象");
+        }
 
         private static void CheckGeometry()
         {

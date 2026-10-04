@@ -116,7 +116,7 @@ namespace BinGames.TerrainVisual
         private void Clear()
         {
             WaterCellCount = RockCount = 0;
-            for (int i = _root.transform.childCount - 1; i >= 0; i--)
+            for (int i = _root ? _root.transform.childCount - 1 : -1; i >= 0; i--)
             {
                 GameObject child = _root.transform.GetChild(i).gameObject;
                 child.SetActive(false);
@@ -135,6 +135,7 @@ namespace BinGames.TerrainVisual
 
         private static void Release(Object value)
         {
+            if (!value) return;
             if (Application.isPlaying) Object.Destroy(value);
             else Object.DestroyImmediate(value);
         }

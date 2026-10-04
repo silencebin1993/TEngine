@@ -67,6 +67,7 @@ namespace GameLogic.UI.Kit
         private int _modelKey;
         private string _selectedMarker;
         private readonly Vector2[] _cameraQuad = new Vector2[4];
+        private readonly Vector2[] _farCameraQuad = new Vector2[4];
         private bool _hasCameraQuad;
         /// <summary>本次打开时算出的“地图最近”比例（每个画布像素多少格）= 镜头最远缩放时的比例；0 = 没有镜头，用表里的兜底值。</summary>
         private double _minCellsPerCanvasPixel;
@@ -311,14 +312,14 @@ namespace GameLogic.UI.Kit
         }
 
         /// <summary>
-        /// 镜头最远缩放（camera.zoom_max_ortho）时，每个画布像素对应多少格；算不出（编辑模式没有镜头 / 面板还没布局）返回 0。
-        /// 正交镜头地面四边形底边的长度 = 横向视野宽度（与俯仰、朝向无关），与正交半高成正比：当前底边 × (最远半高 / 当前半高) = 最远时的视野宽度，
-        /// 所以按地图键在任意缩放下打开也按“最远”衔接。屏幕像素 → 画布像素按面板根节点宽度换算（UI Toolkit 面板缩放）。
+        /// 镜头最远缩放时每个画布像素对应多少格，正交与透视都按最远视口射线与地面的交点计算。
+        /// 屏幕像素 → 画布像素按面板根节点宽度换算；算不出时返回 0，使用表中兜底值。
         /// </summary>
         private double CameraFarCellsPerCanvasPixel()
         {
             Camera cam = WorldView.Camera;
-            if (!_hasCameraQuad || cam == null || !cam.orthographic || cam.orthographicSize <= 0.01f || cam.pixelWidth < 1)
+            if (!_hasCameraQuad || cam == null || cam.orthographicSize <= 0.01f || cam.pixelWidth < 1
+                || !WorldMapVectorLayer.CameraGroundQuad(cam, _farCameraQuad, CameraDirector.MaxStrategyOrthographicSize))
             {
                 return 0.0;
             }
@@ -327,7 +328,7 @@ namespace GameLogic.UI.Kit
             {
                 return 0.0;
             }
-            double farWidth = Vector2.Distance(_cameraQuad[0], _cameraQuad[1]) * (CameraDirector.MaxStrategyOrthographicSize / cam.orthographicSize);
+            double farWidth = Vector2.Distance(_farCameraQuad[0], _farCameraQuad[1]);
             double cellsPerScreenPixel = farWidth / cam.pixelWidth;
             double screenPixelsPerCanvasPixel = cam.pixelWidth / (double)panelWidth;
             return cellsPerScreenPixel * screenPixelsPerCanvasPixel;

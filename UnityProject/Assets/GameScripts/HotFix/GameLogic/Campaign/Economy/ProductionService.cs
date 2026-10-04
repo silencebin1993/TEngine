@@ -218,6 +218,7 @@ namespace GameLogic.Campaign.Economy
             Ordered.Clear();
             ById.Clear();
             RuinIndex.Clear();
+            BurnableThisStep.Clear();
             _lastSignature = 0;
             _gridRevision = -1;
             Revision++;
@@ -895,6 +896,7 @@ namespace GameLogic.Campaign.Economy
             _statBuckets = StatBuckets;
             _statIndex = GameClock.Ticks / _statBucketTicks;
             _fwStorageKnown = false; // FG4-ECO-03：固件芯片存放的数量 / 容量每个生产步最多数一次（刻录台要用时才数）。
+            BurnableThisStep.Clear(); // 同一生产步内，相同固件的解锁检查只做一次；下一步重新读取权限。
             long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
             double vibrationRate = 0;
             foreach (Producer p in Ordered)
@@ -929,13 +931,14 @@ namespace GameLogic.Campaign.Economy
         private static bool NeedsPower(BuildingRecord b) =>
             HomeValleyLayout.PowerProfile.TryGetValue(b.BuildingTypeId, out (float PowerDemand, int PowerPriority) prof) && prof.PowerDemand > 0f;
 
-        private static bool Powered(BuildingRecord b) => !NeedsPower(b) || b.PowerState == BuildingPowerState.Powered;
+        private static bool Powered(BuildingRecord b) => b.PowerState == BuildingPowerState.Powered || !NeedsPower(b);
 
         private static bool _starvedHooked;
         private static bool _fwStorageKnown;
         private static int _fwStorageHave;
         private static int _fwStorageCap;
         private static bool _byproductHooked;
+        private static readonly Dictionary<string, bool> BurnableThisStep = new Dictionary<string, bool>(StringComparer.Ordinal);
 
         private static void Set(Producer p, ProdState s, ProdReason r, ItemDef item = null, int port = -1, long need = 0, long have = 0)
         {
@@ -1441,7 +1444,12 @@ namespace GameLogic.Campaign.Economy
                 Set(p, ProdState.Idle, ProdReason.NoBurnTarget);
                 return false;
             }
-            if (!IsBurnable(state, t))
+            if (!BurnableThisStep.TryGetValue(t, out bool burnable))
+            {
+                burnable = IsBurnable(state, t);
+                BurnableThisStep[t] = burnable;
+            }
+            if (!burnable)
             {
                 Set(p, ProdState.Idle, ProdReason.BurnTargetLocked);
                 p.ReasonTarget = t;

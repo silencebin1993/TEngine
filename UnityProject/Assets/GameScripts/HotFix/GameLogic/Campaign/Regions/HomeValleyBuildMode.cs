@@ -1338,9 +1338,9 @@ namespace GameLogic.Campaign.Regions
 
             RefreshPreview(state);
             RefreshVisuals(state);
-            // FG0-ARCH-05：地形叠加层跟随镜头（俯视正交镜头，焦点 = 镜头 xz）；没生成好的区块显示占位，从不在这里同步生成。
+            // 与世界流式加载共用地面焦点，倾斜镜头的位置不等于玩家正在观察的位置。
             GridCell focus = camera != null
-                ? GridCell.FromWorld(new Vector2(camera.transform.position.x, camera.transform.position.z))
+                ? WorldSim.WorldView.CameraFocusCell(camera)
                 : HomeGridService.CorePivot(state);
             UpdateTerrainOverlay(state, focus);
         }

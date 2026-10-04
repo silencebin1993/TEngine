@@ -94,6 +94,7 @@ namespace GameLogic.EditorTools
             bool hadCamera = Camera.main != null;
             Func<float> originalDelta = CameraDirector.RealDeltaTime;
             Func<bool> originalAutoPause = NotificationCenter.AutoPauseHandler;
+            Func<bool> originalResearchGate = ResearchGate.TreeAvailableOverrideForTests;
             string originalCodexPath = MechanicCodex.FilePathOverrideForTests;
             _dir = Path.Combine(Path.GetTempPath(), "bingames-fgintel-selfcheck-" + Guid.NewGuid().ToString("N"));
             try
@@ -119,6 +120,7 @@ namespace GameLogic.EditorTools
                 CameraDirector.RealDeltaTime = () => 0.05f;
                 NotificationCenter.AutoPauseHandler = null;
                 GameRoot.BindWorldProviders();
+                ResearchGate.TreeAvailableOverrideForTests = () => true; // 本段覆盖研发树开放后的真实门槛，隔离旧自检的兼容开关。
                 IntelService.ResetSessionState();
                 Line($"  · 环境：Unity {Application.unityVersion}，batchmode={Application.isBatchMode}，处理器 {SystemInfo.processorType.Trim()}（{SystemInfo.processorCount} 线程），" +
                      $"Burst {(Unity.Burst.BurstCompiler.IsEnabled ? "开" : "关")}；破译 / 有效期 / 面板在热更层（Editor 下 Mono JIT，真机 HybridCLR 解释执行），突袭部队寻路在 AOT 内核；真机另测（FG15-SYS-02）");
@@ -169,6 +171,7 @@ namespace GameLogic.EditorTools
                 StrategyClock.Reset();
                 CameraDirector.RealDeltaTime = originalDelta;
                 NotificationCenter.AutoPauseHandler = originalAutoPause;
+                ResearchGate.TreeAvailableOverrideForTests = originalResearchGate;
                 InputRouter.DebugSetReader(null);
                 InputRouter.Reset();
                 GridContent.ResetForTests();
@@ -352,7 +355,7 @@ namespace GameLogic.EditorTools
             bool unlocked = BuildCatalog.IsUnlocked(s, entry) && HomeInventory.Stock(s, ItemCatalog.Find("listening_array_core")) == 1;
             bool t2Later = ResearchCatalog.TryGet("signal.listening_t2", out ResearchNodeDef t2) && !t2.IsReady && t2.OpensIn == "FG7-ENV-03";
             Expect(node && lockedBefore && keys && unlocked && t2Later,
-                "A3 研究门槛：“信号 · 监听站”要求核心保管库里有监听阵列核（研究不消耗它）；完成前建造菜单锁定，完成后放开，关键材料仍在；“监听站 T2”节点在树上、写明后续版本开放（天气系统 FG7-ENV-03）");
+                $"A3 研究门槛：“信号 · 监听站”要求核心保管库里有监听阵列核（研究不消耗它）；完成前建造菜单锁定，完成后放开，关键材料仍在；“监听站 T2”节点在树上、写明后续版本开放（天气系统 FG7-ENV-03）；节点 {node} / 完成前锁定 {lockedBefore} / 材料齐全 {keys} / 完成后解锁 {unlocked} / T2 后续开放 {t2Later}");
 
             string[] keysText =
             {

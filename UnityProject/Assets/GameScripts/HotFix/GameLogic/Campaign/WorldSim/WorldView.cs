@@ -74,22 +74,22 @@ namespace GameLogic.Campaign.WorldSim
         public static int FallbackToHomeCount { get; private set; }
 
         /// <summary>星球镜头焦点所在的格（活跃区块、流式加载、地貌窗口都跟它走）。</summary>
-        public static GridCell PlanetFocusCell
+        public static GridCell PlanetFocusCell => CameraFocusCell(_camera);
+
+        /// <summary>相机中心射线在地面上的焦点，适用于倾斜的正交与透视镜头。</summary>
+        public static GridCell CameraFocusCell(Camera camera)
         {
-            get
+            if (camera == null)
             {
-                if (_camera == null)
-                {
-                    return new GridCell(0, 0);
-                }
-                Vector3 p = _camera.transform.position;
-                Vector3 forward = _camera.transform.forward;
-                if (Mathf.Abs(forward.y) > 0.001f)
-                {
-                    p -= forward * (p.y / forward.y);
-                }
-                return GridCell.FromWorld(new Vector2(p.x, p.z));
+                return new GridCell(0, 0);
             }
+            Vector3 p = camera.transform.position;
+            Vector3 forward = camera.transform.forward;
+            if (Mathf.Abs(forward.y) > 0.001f)
+            {
+                p -= forward * (p.y / forward.y);
+            }
+            return GridCell.FromWorld(new Vector2(p.x, p.z));
         }
 
         public static Camera EnsureCamera()
