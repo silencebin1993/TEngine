@@ -860,6 +860,11 @@ namespace GameLogic.Campaign.Economy
             {
                 return BuildingOps.TierName(typeId, tier);
             }
+            // FG6-DEF-03：rule:auto_rebuild → 常驻规则的类型名（“自动重建”）。
+            if (target != null && target.StartsWith("rule:", StringComparison.Ordinal) && StandingRuleService.KindRow(target.Substring(5)) is GameConfig.fg.RuleKind rk)
+            {
+                return GameText.Format("research.unlock.rule", GameText.Get(rk.NameKey));
+            }
             return target ?? string.Empty;
         }
 
@@ -1197,6 +1202,10 @@ namespace GameLogic.Campaign.Economy
                 {
                     continue;
                 }
+                if (u.StartsWith("rule:", StringComparison.Ordinal))
+                {
+                    return true; // FG6-DEF-03：研发树门控的规则类型（自动重建）从落地起就由研究门控（与表生成的 POST_TREE_NODES 同一口径）
+                }
                 foreach (string type in PostTreeTypes)
                 {
                     if (u == "build:" + type || u.StartsWith("tier:" + type + ".", StringComparison.Ordinal))
@@ -1211,7 +1220,8 @@ namespace GameLogic.Campaign.Economy
         // FG6-DEF-02：屏障 / 闸门 / 护盾 / 陷阱同样是研发树开放之后才落地的内容（从一开始就由研究门控）。
         private static readonly string[] PostTreeTypes = { ResearchCatalog.LabTypeId, Defense.TurretCatalog.LightTypeId, Defense.TurretCatalog.HeavyTypeId,
             Defense.DefenseCatalog.BarrierT1, Defense.DefenseCatalog.BarrierT2, Defense.DefenseCatalog.BarrierT3, Defense.DefenseCatalog.GateTypeId,
-            Defense.DefenseCatalog.ShieldTypeId, Defense.DefenseCatalog.TrapTypeId };
+            Defense.DefenseCatalog.ShieldTypeId, Defense.DefenseCatalog.TrapTypeId,
+            Defense.RepairDroneCatalog.StationTypeId }; // FG6-DEF-03：维修无人机站
 
         // ── FG5-E2E-01：新档的技术数据供给（DEBT-FG5RND01-08）与研发加成的数值来源行（DEBT-FG5RND01-07）──────────────
 

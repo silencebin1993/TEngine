@@ -479,6 +479,7 @@ namespace GameLogic.EditorTools
             // 己方屏障不挡己方炮塔弹道 / 敌方弹体打在墙上（DEBT-FG6DEF01-07）、护盾充能 → 吸收 → 耗电上升 → 过载 20 秒 → 重启（面板与状态行显示护盾值和倒计时）、
             // 陷阱固件负向 / 缺流体三种原因 / 守恒 / 线与区域 / 电磁场只用电、FGT-DEF-002 阵地反应、复制设置、真文件存读档（内核格式 10、格式 9 旧快照）、读档接着跑、暂停与倍速、观察一致、种子集、性能。
             Seg("FgDefenseStructuresSelfCheck", FgDefenseStructuresSelfCheck.Run);
+            Seg("FgRepairDroneSelfCheck", FgRepairDroneSelfCheck.Run); // FG6-DEF-03 维修无人机与自动重建
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>

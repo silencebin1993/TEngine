@@ -315,6 +315,7 @@ namespace GameLogic.Campaign.Regions
             {
                 GameLogic.View.TurretViews.FrameUpdate(state, _combat, _root != null ? _root.transform : null, BuildMode);
                 GameLogic.View.DefenseViews.FrameUpdate(state, _combat, _root != null ? _root.transform : null, BuildMode); // FG6-DEF-02：护盾圈、护盾 / 陷阱放置预览
+            GameLogic.View.RepairDroneViews.FrameUpdate(state, _root != null ? _root.transform : null, BuildMode); // FG6-DEF-03：修理光束、维修站覆盖范围、重建区域边框
             }
             // FG0-ARCH-03：机器表现对象按内核位置插值 + 突袭者 / 炮塔 / 弹体实例化绘制（常数次调用，与单位数无关）。
             _combat?.FrameRender(_camera, GameClock.StepAlpha);
@@ -2734,6 +2735,7 @@ namespace GameLogic.Campaign.Regions
             _combat?.ClearViews();
             GameLogic.View.TurretViews.Clear(); // FG6-DEF-01：炮塔头随 _root 销毁，这里清登记、释放射程圈。
             GameLogic.View.DefenseViews.Clear(); // FG6-DEF-02：护盾圈与预览线随 _root 销毁，这里清登记。
+            GameLogic.View.RepairDroneViews.Clear(); // FG6-DEF-03：光束 / 范围圈 / 区域边框随 _root 销毁，这里清登记。
             _buildingVisuals.Clear();
             _buildingBadges.Clear();
             _visualsRecordsRef = null;

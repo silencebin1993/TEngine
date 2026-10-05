@@ -853,6 +853,42 @@ namespace GameLogic.Campaign.Logistics
             return true;
         }
 
+        /// <summary>
+        /// FG6-DEF-03（承接 DEBT-FG3LOG03-05：维修无人机修传送带）：给一格受损的传送带恢复 <paramref name="amount"/> 点耐久（不超过满值）。
+        /// 返回实际恢复的点数（没有这格传送带 / 没受损 = 0）。只改耐久，不动带上的物品。O(受损格数)（与 <see cref="TryDamage"/> 同一份记录）。
+        /// </summary>
+        public static int TryRepair(CampaignState state, GridCell cell, int amount)
+        {
+            if (state?.Belts == null || amount <= 0 || !IsRunning || !_kernel.TryGetCellInfo(cell.X, cell.Y, out _))
+            {
+                return 0;
+            }
+            int lost = DamageLost.TryGetValue(cell, out int l) ? l : 0;
+            if (lost <= 0)
+            {
+                return 0;
+            }
+            int fix = Math.Min(lost, amount);
+            SetDamage(state, cell, lost - fix);
+            return fix;
+        }
+
+        /// <summary>FG6-DEF-03：这一格传送带掉了多少耐久（没受损 / 没有传送带 = 0）。O(1)。</summary>
+        public static int DamageOf(GridCell cell) => DamageLost.TryGetValue(cell, out int l) ? l : 0;
+
+        /// <summary>FG6-DEF-03：全部受损的传送带格（按存档里的顺序，确定性）。维修无人机找目标用。</summary>
+        public static void DamagedCells(CampaignState state, List<GridCell> into)
+        {
+            into.Clear();
+            foreach (BeltDamageRecord r in state?.Belts?.Damage ?? Array.Empty<BeltDamageRecord>())
+            {
+                if (r != null && r.Lost > 0)
+                {
+                    into.Add(new GridCell(r.X, r.Y));
+                }
+            }
+        }
+
         private static void SetDamage(CampaignState state, GridCell cell, int lost)
         {
             if (lost > 0)
@@ -914,14 +950,11 @@ namespace GameLogic.Campaign.Logistics
                     "belt-wreck:" + cell.X.ToString(System.Globalization.CultureInfo.InvariantCulture) + "," + cell.Y.ToString(System.Globalization.CultureInfo.InvariantCulture)
                     + ":" + kv.Key.ToString(System.Globalization.CultureInfo.InvariantCulture));
             }
-            if (isNode)
-            {
-                Regions.HomeValleyConstruction.AddDestroyedNodeGhost(state, node);
-            }
-            else
-            {
-                Regions.HomeValleyConstruction.AddDestroyedBeltGhost(state, cell, info.Dir, info.Tier);
-            }
+            string ghostId = isNode
+                ? Regions.HomeValleyConstruction.AddDestroyedNodeGhost(state, node)
+                : Regions.HomeValleyConstruction.AddDestroyedBeltGhost(state, cell, info.Dir, info.Tier);
+            // FG6-DEF-03（FGR-DEF-015）：排给常驻规则——开着的自动重建规则覆盖这一格时，下一个模拟步按原设置派施工单（没有玩家开的规则就只留虚影）。
+            Economy.StandingRuleService.OnBeltGhost(state, ghostId);
             LastDestroyedItems = items.Count;
             DestroyedCount++;
             GuidanceHooks.Raise(GuidanceHooks.LogisticsFirstDestroyed);

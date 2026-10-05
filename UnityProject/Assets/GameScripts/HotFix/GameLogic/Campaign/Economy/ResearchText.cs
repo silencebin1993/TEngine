@@ -66,6 +66,11 @@ namespace GameLogic.Campaign.Economy
                     lines.Add(new ResearchUnlockLine(GameText.Format("research.detail.unlock_tier", HomeGridService.DisplayName(typeId), tier,
                         BuildingOps.TierEffect(typeId, tier) ?? string.Empty)));
                 }
+                else if (u.StartsWith("rule:", StringComparison.Ordinal))
+                {
+                    // FG6-DEF-03：解锁一类常驻规则（自动重建）：写明在哪里用。
+                    lines.Add(new ResearchUnlockLine(GameText.Format("research.detail.unlock_rule", ResearchService.TargetName(u))));
+                }
             }
             double capPct = ResearchService.EfficiencyCap * 100.0;
             switch (n.EffectKind)

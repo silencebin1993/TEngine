@@ -540,6 +540,7 @@ namespace GameLogic.Campaign.Economy
             float max = MaxDurability(b.BuildingTypeId);
             float before = Durability(b);
             b.Health = Mathf.Max(0f, before - amount);
+            b.LastHitTick = GameClock.Ticks; // FG6-DEF-03：维修无人机在突袭中先修正在挨打的目标
             Revision++;
             BuildingVisualFeed.Mark(b);
             if (b.Health <= 0f)
@@ -596,6 +597,7 @@ namespace GameLogic.Campaign.Economy
             Revision++;
             HomeInventory.Touch();
             NotificationCenter.Post("building_destroyed", GameText.Format("building.notify.destroyed", NameOf(b)), new Vector3(b.Position.x, 0f, b.Position.y));
+            Defense.RepairDroneService.OnBuildingDestroyed(state, b); // FG6-DEF-03：维修无人机站被摧毁 = 出动中的无人机全部坠毁（当场结算）。
             StandingRuleService.OnBuildingDestroyed(state, b); // FG4-ECO-06：自动重建规则在下一个模拟步处理（没有玩家开的规则就只留虚影）。
         }
 

@@ -229,6 +229,7 @@ namespace GameLogic.Campaign.Combat
             _unitLabels.Clear();
             ClearTurretMaps();
             ClearDefenseMaps();
+            ClearDroneMaps();
             EventObserver = null;
         }
 
@@ -1220,6 +1221,11 @@ namespace GameLogic.Campaign.Combat
             {
                 return;
             }
+            // FG6-DEF-03：维修无人机阵亡 = 被击落，交给维修无人机服务（CombatSite.Drones）。
+            if (TryHandleDroneEvent(e))
+            {
+                return;
+            }
             switch (e.Kind)
             {
                 case CombatEventKind.Killed:
@@ -1878,6 +1884,7 @@ namespace GameLogic.Campaign.Combat
             _weaponIndex.Clear();
             ClearTurretMaps();
             ClearDefenseMaps();
+            ClearDroneMaps();
             for (int w = 0; w < Kernel.WeaponCount; w++)
             {
                 if (Kernel.TryGetWeapon(w, out CombatWeapon cw))
@@ -1905,7 +1912,11 @@ namespace GameLogic.Campaign.Combat
                 }
                 else if (v.Kind == CombatUnitKind.Structure && v.Faction == CombatFaction.Player)
                 {
-                    RestoreDefenseMap(v); // FG6-DEF-02：己方结构单位 = 防御建筑（外部键 = 防御序号）；敌方 / 中立的结构单位照旧按字符串键。
+                    if (!RestoreDroneMap(v)) // FG6-DEF-03：外部键落在无人机区间的是维修无人机
+                    {
+                        RestoreDefenseMap(v);
+                    }
+                    // FG6-DEF-02：己方结构单位 = 防御建筑（外部键 = 防御序号）；敌方 / 中立的结构单位照旧按字符串键。
                 }
                 else if (v.Kind == CombatUnitKind.Enemy || v.Kind == CombatUnitKind.Structure)
                 {

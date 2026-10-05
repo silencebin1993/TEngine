@@ -60,7 +60,14 @@ namespace GameLogic.UI.Kit
         private Label _editTitle;
         private Label _editDesc;
         private Label _editInfo;
-        private VisualElement _rowItem, _rowFactory, _rowRecipe, _rowThreshold, _rowBatch, _rowTargets, _rowMachines, _rowPoint, _rowBoost;
+        private VisualElement _rowItem, _rowFactory, _rowRecipe, _rowThreshold, _rowBatch, _rowTargets, _rowMachines, _rowPoint, _rowBoost, _rowZones;
+        // FG6-DEF-03：自动重建的重建区域（列表、圈一块、开 / 关、删掉、看看在哪）
+        private Label _zonesLabel, _zonesValue;
+        private Button _zoneDraw;
+        private DropdownField _zoneToggle, _zoneRemove, _zoneLocate;
+        private readonly List<int> _zoneToggleIds = new List<int>();
+        private readonly List<int> _zoneRemoveIds = new List<int>();
+        private readonly List<int> _zoneLocateIds = new List<int>();
         private Label _itemLabel, _factoryLabel, _recipeLabel, _thresholdLabel, _batchLabel, _targetsLabel, _machinesLabel, _pointLabel;
         private DropdownField _item, _factory, _recipe, _targetAdd, _targetRemove, _machineAdd, _machineRemove, _point;
         private Label _thValue, _batchValue, _targetsValue, _machinesValue;
@@ -133,6 +140,11 @@ namespace GameLogic.UI.Kit
         public string ThresholdText => _thValue?.text ?? string.Empty;
         public string TargetsText => _targetsValue?.text ?? string.Empty;
         public string MachinesText => _machinesValue?.text ?? string.Empty;
+        public string ZonesText => _zonesValue?.text ?? string.Empty;
+        public Button ZoneDrawButton => _zoneDraw;
+        public DropdownField ZoneToggleField => _zoneToggle;
+        public DropdownField ZoneRemoveField => _zoneRemove;
+        public DropdownField ZoneLocateField => _zoneLocate;
         public int LogLabelCount => _logLabels.Count;
         public string LogLabelText(int i) => i >= 0 && i < _logLabels.Count ? _logLabels[i].text : string.Empty;
         public string LogCountText => _logCount?.text ?? string.Empty;
@@ -266,6 +278,13 @@ namespace GameLogic.UI.Kit
             _rowMachines = root.Q<VisualElement>("RulesRowMachines");
             _rowPoint = root.Q<VisualElement>("RulesRowPoint");
             _rowBoost = root.Q<VisualElement>("RulesRowBoost");
+            _rowZones = root.Q<VisualElement>("RulesRowZones");
+            _zonesLabel = root.Q<Label>("RulesZonesLabel");
+            _zonesValue = root.Q<Label>("RulesZonesValue");
+            _zoneDraw = root.Q<Button>("RulesZoneDraw");
+            _zoneToggle = root.Q<DropdownField>("RulesZoneToggle");
+            _zoneRemove = root.Q<DropdownField>("RulesZoneRemove");
+            _zoneLocate = root.Q<DropdownField>("RulesZoneLocate");
             _itemLabel = root.Q<Label>("RulesItemLabel");
             _factoryLabel = root.Q<Label>("RulesFactoryLabel");
             _recipeLabel = root.Q<Label>("RulesRecipeLabel");
@@ -308,6 +327,10 @@ namespace GameLogic.UI.Kit
             _batchMinus.clicked += () => StepBatch(-1);
             _batchPlus.clicked += () => StepBatch(1);
             _boost.clicked += ToggleBoost;
+            _zoneDraw.clicked += DrawZone;
+            _zoneToggle.RegisterValueChangedCallback(evt => OnPickInt(_zoneToggle, _zoneToggleIds, evt.newValue, id => Do(StandingRuleService.TryToggleZone(Session, SelectedSerial, id, out string m), m)));
+            _zoneRemove.RegisterValueChangedCallback(evt => OnPickInt(_zoneRemove, _zoneRemoveIds, evt.newValue, id => Do(StandingRuleService.TryRemoveZone(Session, SelectedSerial, id, out string m), m)));
+            _zoneLocate.RegisterValueChangedCallback(evt => OnPickInt(_zoneLocate, _zoneLocateIds, evt.newValue, LocateZone));
             _newKind.RegisterValueChangedCallback(evt => OnPick(_newKind, _kindIds, evt.newValue, id => CreateKind(id)));
             _newPreset.RegisterValueChangedCallback(evt => OnPick(_newPreset, _presetIds, evt.newValue, id => CreatePreset(id)));
             _item.RegisterValueChangedCallback(evt => OnPick(_item, _itemIds, evt.newValue, id => Do(StandingRuleService.TrySetItem(Session, SelectedSerial, id, out string m), m)));
@@ -401,7 +424,8 @@ namespace GameLogic.UI.Kit
             string key = string.Concat(StandingRuleService.Revision.ToString(CultureInfo.InvariantCulture), "|", ((int)GameText.Language).ToString(CultureInfo.InvariantCulture), "|",
                 GameSettings.Revision.ToString(CultureInfo.InvariantCulture), "|", SelectedSerial.ToString(CultureInfo.InvariantCulture), "|", ShowingLog ? "L" : "R", "|",
                 _rowTemplate != null ? "1" : "0", "|", _messageText, "|", BuildingOps.Revision.ToString(CultureInfo.InvariantCulture), "|", (state?.BuildingRecords?.Length ?? 0).ToString(CultureInfo.InvariantCulture), "|",
-                MachineRegistry.RosterRevision.ToString(CultureInfo.InvariantCulture), "|", state != null ? state.GetHashCode().ToString(CultureInfo.InvariantCulture) : "0");
+                MachineRegistry.RosterRevision.ToString(CultureInfo.InvariantCulture), "|", state != null ? state.GetHashCode().ToString(CultureInfo.InvariantCulture) : "0", "|",
+                ResearchService.Revision.ToString(CultureInfo.InvariantCulture)); // FG6-DEF-03：研究完成后“（需要研究）”立刻去掉
             if (key == _lastKey && now < _nextReread)
             {
                 return;
@@ -454,7 +478,8 @@ namespace GameLogic.UI.Kit
             foreach (string k in StandingRuleService.AllKinds)
             {
                 _kindIds.Add(k);
-                kinds.Add(StandingRuleService.KindName(k));
+                // FG6-DEF-03：研发树门控的规则类型没研究时标“（需要研究）”，选它写明原因（不静默）。
+                kinds.Add(StandingRuleService.IsKindLocked(Session, k) ? GameText.Format("rules.kind.locked_suffix", StandingRuleService.KindName(k)) : StandingRuleService.KindName(k));
             }
             DropdownChoices.Apply(_newKind, kinds, kinds[0]);
             _newKind.SetValueWithoutNotify(_newKind.choices[0]);
@@ -464,7 +489,9 @@ namespace GameLogic.UI.Kit
             foreach (RulePreset p in StandingRuleService.Presets)
             {
                 _presetIds.Add(p.Id);
-                presets.Add(GameText.Format("rules.preset_option", StandingRuleService.KindName(p.Kind), GameText.Get(p.NameKey)));
+                string option = GameText.Format("rules.preset_option", StandingRuleService.KindName(p.Kind), GameText.Get(p.NameKey));
+                // 复审修复：预设下拉与“新建（按类型）”同样标“（需要研究）”（全部重建 ← 防御 · 自动重建）。
+                presets.Add(StandingRuleService.IsKindLocked(Session, p.Kind) ? GameText.Format("rules.kind.locked_suffix", option) : option);
             }
             DropdownChoices.Apply(_newPreset, presets, presets[0]);
             _newPreset.SetValueWithoutNotify(_newPreset.choices[0]);
@@ -563,7 +590,7 @@ namespace GameLogic.UI.Kit
         {
             StandingRuleRecord r = StandingRuleService.Find(state, SelectedSerial);
             bool has = r != null;
-            foreach (VisualElement v in new[] { _rowItem, _rowFactory, _rowRecipe, _rowThreshold, _rowBatch, _rowTargets, _rowMachines, _rowPoint, _rowBoost })
+            foreach (VisualElement v in new[] { _rowItem, _rowFactory, _rowRecipe, _rowThreshold, _rowBatch, _rowTargets, _rowMachines, _rowPoint, _rowBoost, _rowZones })
             {
                 v.EnableInClassList("uk-hidden", true);
             }
@@ -638,10 +665,72 @@ namespace GameLogic.UI.Kit
                 Show(_rowBoost);
                 _boost.text = GameText.Get(r.BoostRepair ? "rules.edit.boost_on" : "rules.edit.boost_off");
             }
+            if (kind == StandingRuleService.KindRebuild)
+            {
+                Show(_rowZones); // FG6-DEF-03：重建区域
+                FillZones(r);
+            }
             _editInfo.text = InfoLine(state, r);
         }
 
         private static void Show(VisualElement v) => v.EnableInClassList("uk-hidden", false);
+
+        /// <summary>FG6-DEF-03：重建区域行——说明（没有区域 = 整个家园 / 列表 / 全关），“在地图上圈一块”，开 / 关、删掉、看看在哪三个下拉（选中即生效）。</summary>
+        private void FillZones(StandingRuleRecord r)
+        {
+            _zonesLabel.text = GameText.Get("rules.edit.zones");
+            _zonesValue.text = StandingRuleService.ZoneSummary(r);
+            _zoneDraw.text = GameText.Get("rules.zone.draw");
+            FillZoneMenu(_zoneToggle, _zoneToggleIds, r, "rules.zone.toggle");
+            FillZoneMenu(_zoneRemove, _zoneRemoveIds, r, "rules.zone.remove");
+            FillZoneMenu(_zoneLocate, _zoneLocateIds, r, "rules.zone.locate");
+        }
+
+        private static void FillZoneMenu(DropdownField field, List<int> ids, StandingRuleRecord r, string headKey)
+        {
+            var labels = new List<string> { GameText.Get(headKey) };
+            ids.Clear();
+            ids.Add(0);
+            foreach (RebuildZoneRecord z in r.Zones ?? Array.Empty<RebuildZoneRecord>())
+            {
+                ids.Add(z.Serial);
+                labels.Add(StandingRuleService.ZoneLabel(z));
+            }
+            DropdownChoices.Apply(field, labels, labels[0]);
+            field.SetValueWithoutNotify(field.choices[0]);
+            field.SetEnabled(labels.Count > 1);
+        }
+
+        /// <summary>“在地图上圈一块”：关掉面板，建造模式进入这条规则的重建区域模式（拖框圈区域，点区域里面开 / 关，右键退出）。</summary>
+        public void DrawZone()
+        {
+            HomeValleyBuildMode mode = HomeValleyBuildMode.Current;
+            StandingRuleRecord r = StandingRuleService.Find(Session, SelectedSerial);
+            if (r == null || r.Kind != StandingRuleService.KindRebuild)
+            {
+                Say(false, GameText.Get(r == null ? "rules.msg.not_found" : "rules.msg.zone_not_rebuild"));
+                return;
+            }
+            if (mode == null)
+            {
+                Say(false, GameText.Get("rules.msg.zone_need_home")); // 复审修复（B06）：在远征区域打开面板时写对原因
+                return;
+            }
+            SetOpen(false);
+            mode.SetZoneMode(r.Serial);
+        }
+
+        private void LocateZone(int zoneSerial)
+        {
+            RebuildZoneRecord z = StandingRuleService.FindZone(StandingRuleService.Find(Session, SelectedSerial), zoneSerial);
+            if (z == null)
+            {
+                return;
+            }
+            Vector3 at = StandingRuleService.ZoneCenter(z);
+            LastJumpPosition = new Vector2(at.x, at.z);
+            Campaign.WorldSim.WorldView.FlyTo(HomeValleyLayout.RegionId, LastJumpPosition);
+        }
 
         private static string InfoLine(CampaignState state, StandingRuleRecord r)
         {
@@ -736,7 +825,7 @@ namespace GameLogic.UI.Kit
             bool types = r.Kind == StandingRuleService.KindRebuild;
             foreach (string t in r.Targets)
             {
-                string name = types ? HomeGridService.DisplayName(t) : StandingRuleService.BuildingLabel(state, t);
+                string name = types ? (t == StandingRuleService.BeltTarget ? GameText.Get("rules.target.belts") : HomeGridService.DisplayName(t)) : StandingRuleService.BuildingLabel(state, t);
                 current.Add(name);
                 _targetRemoveIds.Add(t);
                 removeLabels.Add(name);
@@ -749,6 +838,11 @@ namespace GameLogic.UI.Kit
             if (types)
             {
                 var seen = new HashSet<string>();
+                if (Array.IndexOf(r.Targets, StandingRuleService.BeltTarget) < 0)
+                {
+                    _targetAddIds.Add(StandingRuleService.BeltTarget); // FG6-DEF-03：传送带与物流节点
+                    addLabels.Add(GameText.Get("rules.target.belts"));
+                }
                 foreach (BuildingService s in ConfigSystem.Instance.Tables.TbBuildingService.DataList)
                 {
                     if (s.TypeId == HomeValleyLayout.BuildingTypeCore || Array.IndexOf(r.Targets, s.TypeId) >= 0 || !seen.Add(s.TypeId))

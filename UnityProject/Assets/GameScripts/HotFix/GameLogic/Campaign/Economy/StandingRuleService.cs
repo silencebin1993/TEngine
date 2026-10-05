@@ -234,6 +234,11 @@ namespace GameLogic.Campaign.Economy
             {
                 ProcessEvents(state, d);
             }
+            if (d.RebuildSweep)
+            {
+                d.RebuildSweep = false;
+                SweepRebuild(state); // FG6-DEF-03：玩家刚改了自动重建（启用 / 范围 / 区域），补排已经被摧毁的东西（O(建筑数 + 虚影数)，只在改动后一次）
+            }
             bool due = ticksBefore >= d.NextCheckTick;
             if (!due && !d.EvaluateNow)
             {
@@ -313,6 +318,11 @@ namespace GameLogic.Campaign.Economy
                 message = GameText.Format("rules.msg.too_many", MaxRules);
                 return false;
             }
+            if (KindLockedMessage(state, kind) is string locked)
+            {
+                message = locked; // FG6-DEF-03：研发节点解锁的规则类型（自动重建 ← 防御 · 自动重建）
+                return false;
+            }
             rule = new StandingRuleRecord
             {
                 Serial = d.NextSerial++,
@@ -324,7 +334,7 @@ namespace GameLogic.Campaign.Economy
             };
             Append(d, rule);
             rule.Enabled = ConfigIssue(state, rule, out _, out _) == null;
-            AfterEdit(state);
+            AfterEdit(state, rule);
             GuidanceHooks.Raise(GuidanceHooks.RulesFirstCreated);
             message = GameText.Format(rule.Enabled ? "rules.msg.created" : "rules.msg.created_off", Label(rule));
             return true;
@@ -367,7 +377,7 @@ namespace GameLogic.Campaign.Economy
             }
             rule.Enabled = ConfigIssue(state, rule, out _, out _) == null;
             message = GameText.Format(rule.Enabled ? "rules.msg.created" : "rules.msg.created_off", Label(rule));
-            AfterEdit(state);
+            AfterEdit(state, rule);
             return true;
         }
 
@@ -408,6 +418,7 @@ namespace GameLogic.Campaign.Economy
                 Machines = (int[])src.Machines.Clone(),
                 PointId = src.PointId,
                 BoostRepair = src.BoostRepair,
+                Zones = CopyZones(d, src.Zones), // FG6-DEF-03：重建区域一起复制（新编号）
             };
             Append(d, copy);
             Normalize(d);
@@ -454,6 +465,11 @@ namespace GameLogic.Campaign.Economy
                 message = GameText.Get("rules.msg.not_found");
                 return false;
             }
+            if (enabled && KindLockedMessage(state, r.Kind) is string locked)
+            {
+                message = locked; // FG6-DEF-03：没研究就不能启用（已经启用着的旧规则照常运转，不替玩家停掉）
+                return false;
+            }
             if (enabled)
             {
                 string issue = ConfigIssue(state, r, out string issueKey, out string issueArg);
@@ -474,7 +490,7 @@ namespace GameLogic.Campaign.Economy
                 r.ConflictEntity = string.Empty;
                 message = GameText.Format("rules.msg.disabled", Label(r));
             }
-            AfterEdit(state);
+            AfterEdit(state, enabled ? r : null);
             return true;
         }
 
@@ -545,9 +561,18 @@ namespace GameLogic.Campaign.Economy
             d.Rules = list.ToArray();
         }
 
-        private static void AfterEdit(CampaignState state)
+        /// <param name="sweepFor">
+        /// FG6-DEF-03 复审修复（P2 补排触发面）：只有玩家启用了自动重建规则、放宽了它的范围（加建筑类型 / 去掉最后一个类型 = 全部）、
+        /// 圈了 / 打开了 / 删掉最后一个重建区域时才传这条规则，下一个模拟步补排已经被摧毁、现在落在范围里的东西。
+        /// 改别的规则（库存阈值、优先级、删除、停用……）不补排，玩家取消过的重建单不会被这些无关操作重新派出。
+        /// </param>
+        private static void AfterEdit(CampaignState state, StandingRuleRecord sweepFor = null)
         {
             RequestEvaluation(state);
+            if (sweepFor != null && sweepFor.Enabled && sweepFor.Kind == KindRebuild)
+            {
+                RequestRebuildSweep(state);
+            }
             Revision++;
         }
 
@@ -667,7 +692,7 @@ namespace GameLogic.Campaign.Economy
             }
             var list = new List<string>(r.Targets) { id };
             r.Targets = list.ToArray();
-            return Edited(state, r, out message);
+            return Edited(state, r, out message, sweep: r.Kind == KindRebuild); // 自动重建：范围放宽 → 补排
         }
 
         public static bool TryRemoveTarget(CampaignState state, int serial, string id, out string message)
@@ -681,7 +706,7 @@ namespace GameLogic.Campaign.Economy
             var list = new List<string>(r.Targets);
             list.Remove(id);
             r.Targets = list.ToArray();
-            return Edited(state, r, out message);
+            return Edited(state, r, out message, sweep: r.Kind == KindRebuild && r.Targets.Length == 0); // 去掉最后一个类型 = 全部建筑（范围放宽）
         }
 
         public static bool TryAddMachine(CampaignState state, int serial, int logicId, out string message)
@@ -770,9 +795,9 @@ namespace GameLogic.Campaign.Economy
             return true;
         }
 
-        private static bool Edited(CampaignState state, StandingRuleRecord r, out string message)
+        private static bool Edited(CampaignState state, StandingRuleRecord r, out string message, bool sweep = false)
         {
-            AfterEdit(state);
+            AfterEdit(state, sweep ? r : null);
             message = GameText.Format("rules.msg.updated", Label(r));
             return true;
         }
@@ -816,7 +841,7 @@ namespace GameLogic.Campaign.Economy
         {
             if (r.Kind == KindRebuild)
             {
-                return GridContent.Building(id) != null ? null : id;
+                return id == BeltTarget || GridContent.Building(id) != null ? null : id; // FG6-DEF-03：“传送带与物流节点”也可以选
             }
             BuildingRecord b = HomeGridService.FindBuilding(state, id);
             if (b == null)
@@ -1876,6 +1901,9 @@ namespace GameLogic.Campaign.Economy
                     case EventExpedition:
                         HandleExpedition(state, e.Machines);
                         break;
+                    case EventBeltGhost:
+                        HandleBeltGhost(state, e.EntityId); // FG6-DEF-03：被摧毁的传送带 / 物流节点
+                        break;
                 }
             }
             if (retry.Count > 0 || d.Pending.Length > 0)
@@ -1909,17 +1937,7 @@ namespace GameLogic.Campaign.Economy
             return false;
         }
 
-        private static StandingRuleRecord RebuildRuleFor(CampaignState state, string typeId)
-        {
-            foreach (StandingRuleRecord r in Ordered(state))
-            {
-                if (r.Enabled && r.Kind == KindRebuild && (r.Targets.Length == 0 || Array.IndexOf(r.Targets, typeId) >= 0))
-                {
-                    return r;
-                }
-            }
-            return null;
-        }
+        // FG6-DEF-03：RebuildRuleFor（类型范围 + 重建区域）在 StandingRuleService.Rebuild.cs。
 
         private static void HandleDestroyed(CampaignState state, string buildingId, List<RuleEventRecord> retry)
         {
@@ -1928,7 +1946,7 @@ namespace GameLogic.Campaign.Economy
             {
                 return;
             }
-            StandingRuleRecord r = RebuildRuleFor(state, b.BuildingTypeId);
+            StandingRuleRecord r = RebuildRuleFor(state, b.BuildingTypeId, CellOf(b));
             if (r == null)
             {
                 return; // 没有玩家开的自动重建：留下虚影，等玩家自己点“重建”（FGR-BASE-020）。
@@ -1941,7 +1959,8 @@ namespace GameLogic.Campaign.Economy
             StandingRuleRecord r = Find(state, e.Rule);
             BuildingRecord b = HomeGridService.FindBuilding(state, e.EntityId);
             if (r == null || !r.Enabled || b == null || b.ConstructionState != BuildingConstructionState.Damaged
-                || HomeValleyWorkOrders.FindActiveRepair(state, b.BuildingId) != null)
+                || HomeValleyWorkOrders.FindActiveRepair(state, b.BuildingId) != null
+                || !Covers(r, b.BuildingTypeId, CellOf(b))) // FG6-DEF-03：等材料期间区域被关掉 / 范围改了 = 不再等
             {
                 // 不用再等了（建筑已被重建 / 拆掉、玩家自己派了单、规则停用）：清掉“等材料”的原因。
                 if (r != null && r.IssueKey == "rules.issue.rebuild_wait" && !HasRetry(state, r.Serial, e.EntityId))
@@ -2212,6 +2231,17 @@ namespace GameLogic.Campaign.Economy
                 {
                     int colon = id.IndexOf(':');
                     return colon >= 0 ? PositionOf(state, "b:" + id.Substring(colon + 1)) : null;
+                }
+                case 'c':
+                {
+                    // FG6-DEF-03：一格（被重建的传送带虚影）“c:x,y”。
+                    int comma = id.IndexOf(',');
+                    if (comma > 0 && int.TryParse(id.Substring(0, comma), NumberStyles.Integer, CultureInfo.InvariantCulture, out int cx)
+                        && int.TryParse(id.Substring(comma + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out int cy))
+                    {
+                        return new Vector3(cx, 0f, cy);
+                    }
+                    return null;
                 }
                 default:
                     return null;

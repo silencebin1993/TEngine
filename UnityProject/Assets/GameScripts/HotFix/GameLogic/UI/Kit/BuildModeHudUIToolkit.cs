@@ -500,7 +500,7 @@ namespace GameLogic.UI.Kit
             string placementChoice = open ? mode.SelectedEntryId ?? mode.SelectedToolId
                 ?? (mode.DemolishMode ? "demolish" : mode.RelocateMode ? "relocate" : mode.PrioritizeMode ? "prioritize"
                     : mode.ClearMode ? "clear" : mode.CopyMode ? "copy" : mode.PasteMode ? "paste"
-                    : mode.UpgradeMode ? "upgrade" : mode.SettingsMode ? "settings" : null) : null;
+                    : mode.UpgradeMode ? "upgrade" : mode.SettingsMode ? "settings" : mode.ZoneMode ? "zone" : null) : null;
             if (placementChoice != null && placementChoice != _lastPlacementChoice) _catalogueExpanded = false;
             _lastPlacementChoice = placementChoice;
             _wasOpen = open;
@@ -561,6 +561,7 @@ namespace GameLogic.UI.Kit
                 : mode.RelocateMode ? GameText.Get("ui.build.relocate_mode")
                 : mode.PrioritizeMode ? GameText.Get("ui.build.prioritize_mode")
                 : mode.ClearMode ? GameText.Format("ui.build.btn_clear", InputDisplay.ForAction(GameActionId.ClearBeltMode))
+                : mode.ZoneMode ? GameText.Format("ui.build.zone_mode", GameText.Format("rules.label", mode.ZoneRuleSerial)) // FG6-DEF-03
                 : string.Empty;
             _close.text = GameText.Get("ui.build.exit");
             _rotate.text = GameText.Format("ui.build.rotate", InputDisplay.ForAction(GameActionId.Rotate));
@@ -663,6 +664,10 @@ namespace GameLogic.UI.Kit
             if (mode.PrioritizeMode)
             {
                 return GameText.Get("ui.build.prioritize_mode");
+            }
+            if (mode.ZoneMode)
+            {
+                return GameText.Format("ui.build.zone_mode", GameText.Format("rules.label", mode.ZoneRuleSerial)); // FG6-DEF-03
             }
             if (mode.ClearMode)
             {
@@ -949,6 +954,11 @@ namespace GameLogic.UI.Kit
                 SetVisible(_dragInfo, true);
                 BeltClearPlan cp = mode.ClearPlan;
                 _dragInfo.text = GameText.Format("ui.build.clear_box", cp.Max.X - cp.Min.X + 1, cp.Max.Y - cp.Min.Y + 1, cp.SurfaceCells, cp.Items);
+            }
+            else if (mode.Drag == HomeValleyBuildMode.DragKind.ZoneBox)
+            {
+                SetVisible(_dragInfo, true); // FG6-DEF-03：正在圈的重建区域
+                _dragInfo.text = GameText.Format("ui.build.zone_box", mode.ZoneBoxMax.X - mode.ZoneBoxMin.X + 1, mode.ZoneBoxMax.Y - mode.ZoneBoxMin.Y + 1);
             }
             else if (mode.Drag == HomeValleyBuildMode.DragKind.PrioritizeBox && mode.PrioritizeBoxCount >= 0)
             {

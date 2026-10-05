@@ -309,6 +309,10 @@ namespace GameLogic.EditorTools
             return r;
         }
 
+        /// <summary>FG6-DEF-03：只数这座建筑的日志（新建自动重建规则会补排开局预置的残骸，规则的总日志数不再只有被测的这一座）。</summary>
+        private static int LogsAt(CampaignState s, string key, int rule, string buildingId) =>
+            StandingRuleService.LogEntries(s).Count(l => l.Key == key && l.Rule == rule && l.EntityId == StandingRuleService.BuildingKey(buildingId));
+
         private static int Logs(CampaignState s, string key, int rule = 0) =>
             StandingRuleService.LogEntries(s).Count(e => e.Key == key && (rule == 0 || e.Rule == rule));
 
@@ -744,7 +748,7 @@ namespace GameLogic.EditorTools
             BuildingOps.ApplyDamage(s, f.BuildingId, 1000f);
             Tick();
             WorkOrderRecord o = HomeValleyWorkOrders.FindActiveRepair(s, f.BuildingId);
-            bool ordered = f.ConstructionState == BuildingConstructionState.Damaged && o != null && o.RuleSerial == r.Serial && Logs(s, "rules.log.rebuild", r.Serial) == 1
+            bool ordered = f.ConstructionState == BuildingConstructionState.Damaged && o != null && o.RuleSerial == r.Serial && LogsAt(s, "rules.log.rebuild", r.Serial, f.BuildingId) == 1
                            && StandingRuleService.DescribeBuilding(s, f.BuildingId).Contains("R" + r.Serial);
             bool rebuilt = StepUntil(() => f.ConstructionState == BuildingConstructionState.Operational, 240);
             // 范围：只重建精炼炉的规则不管零件工坊。
@@ -757,7 +761,7 @@ namespace GameLogic.EditorTools
             s.Scrap = 0;
             BuildingOps.ApplyDamage(s, f.BuildingId, 1000f);
             Tick();
-            bool waiting = HomeValleyWorkOrders.FindActiveRepair(s, f.BuildingId) == null && Logs(s, "rules.log.rebuild_wait", r.Serial) == 1 && r.IssueKey == "rules.issue.rebuild_wait";
+            bool waiting = HomeValleyWorkOrders.FindActiveRepair(s, f.BuildingId) == null && LogsAt(s, "rules.log.rebuild_wait", r.Serial, f.BuildingId) == 1 && r.IssueKey == "rules.issue.rebuild_wait";
             // 等材料期间、没到检查步：排队的重试原样留着，不每个模拟步重建列表 / 数组（审查修复 P2，热更层每步不产生垃圾）。
             RuleEventRecord[] pend0 = s.StandingRules.Pending;
             long room = s.StandingRules.NextCheckTick - GameClock.Ticks;
@@ -765,7 +769,7 @@ namespace GameLogic.EditorTools
             WorldSimulation.StepMany(quietSteps);
             bool noChurn = quietSteps > 0 && pend0.Length == 1 && ReferenceEquals(pend0, s.StandingRules.Pending);
             s.Scrap = 500;
-            bool retried = StepUntil(() => HomeValleyWorkOrders.FindActiveRepair(s, f.BuildingId) != null, 70) && r.IssueKey.Length == 0 && Logs(s, "rules.log.rebuild_wait", r.Serial) == 1;
+            bool retried = StepUntil(() => HomeValleyWorkOrders.FindActiveRepair(s, f.BuildingId) != null, 70) && r.IssueKey.Length == 0 && LogsAt(s, "rules.log.rebuild_wait", r.Serial, f.BuildingId) == 1;
             Expect(on && ordered && rebuilt && scoped && waiting && noChurn && retried,
                 $"D7 自动重建：建筑被摧毁的下一个模拟步派重建单（写“由规则 R{r.Serial} 触发”）并由机器按原样重建；范围只含精炼炉时不管零件工坊；废料为 0 时写明原因不派单，" +
                 $"等材料期间不到检查步不重建排队数组（{quietSteps} 步）；废料够了在下一次检查自动派单（{on}/{ordered}/{rebuilt}/{scoped}/{waiting}/{noChurn}/{retried}）");

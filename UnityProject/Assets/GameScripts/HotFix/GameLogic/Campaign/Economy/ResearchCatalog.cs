@@ -144,7 +144,7 @@ namespace GameLogic.Campaign.Economy
             return !string.IsNullOrEmpty(id) && BranchById.TryGetValue(id, out branch);
         }
 
-        /// <summary>解锁这个目标（build:&lt;条目&gt; / tier:&lt;typeId&gt;.tN）的节点；没有 = null（开局即可）。</summary>
+        /// <summary>解锁这个目标（build:&lt;条目&gt; / tier:&lt;typeId&gt;.tN / rule:&lt;规则类型&gt;）的节点；没有 = null（开局即可）。</summary>
         public static ResearchNodeDef GateOf(string target)
         {
             EnsureLoaded();
@@ -314,6 +314,10 @@ namespace GameLogic.Campaign.Economy
             if (u.StartsWith("tier:", StringComparison.Ordinal))
             {
                 return TryParseTier(u, out string typeId, out int tier) && BuildingOps.TierRow(typeId, tier) != null;
+            }
+            if (u.StartsWith("rule:", StringComparison.Ordinal))
+            {
+                return StandingRuleService.KindRow(u.Substring(5)) != null; // FG6-DEF-03：解锁一类常驻规则（自动重建）
             }
             return false;
         }

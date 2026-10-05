@@ -360,6 +360,13 @@ namespace GameLogic.EditorTools
                     case 395: StepWallDragged(inStep); break;
                     case 396: StepShieldPanel(inStep); break;
                     case 397: StepShieldPanelShown(inStep); break;
+                    // FG6-DEF-03：建造菜单“防御”页签选维修无人机站 → 悬停画出覆盖范围 → 左键放下虚影 → 测试捷径换成建成的站 + 受损的精炼炉 → 无人机出动修满 →
+                    // Alt+R 新建自动重建规则 → “在地图上圈一块” → 拖框圈区域 → 右键退出 → 精炼炉被摧毁 → 规则派出重建单 → 清理。
+                    case 398: StepDronePicked(inStep); break;
+                    case 399: StepDroneGhostPlaced(inStep); break;
+                    case 400: StepDroneRepaired(inStep); break;
+                    case 401: StepRebuildZoneDrawn(inStep); break;
+                    case 402: StepRebuildOrdered(inStep); break;
                     case 346: StepOverridePicked(inStep); break;
                     case 347: StepOverridePlaced(inStep); break;
                     case 348: StepOverridePanel(inStep); break;
@@ -7174,6 +7181,284 @@ namespace GameLogic.EditorTools
                 "清理测试护盾与屏障虚影（防御记录随建筑一起清掉）");
             GameClock.SetPaused(SessionState.GetInt(K + "WallWasPaused", 0) == 1);
             SessionState.SetInt(K + "WallSub", 0);
+            Next(398, "FG6-DEF-03：建造菜单“防御”页签选维修无人机站");
+        }
+
+        // ── FG6-DEF-03：维修无人机站与自动重建区域（真实鼠标 / 按键；放下的是虚影，机器施工与修理细节由 FgRepairDroneSelfCheck 覆盖）──
+
+        private const string SmokeDroneStationId = Campaign.Regions.HomeValleyLayout.RegionId + ":smoke_power_drone_station";
+        private const string SmokeDroneFurnaceId = Campaign.Regions.HomeValleyLayout.RegionId + ":smoke_power_drone_furnace";
+
+        /// <summary>核心附近按地形找一处玩家能放 <paramref name="typeId"/> 的空地（玩家放置校验），不写死坐标（B25）。</summary>
+        private static GridCell? SmokeFreeSpot(CampaignState state, string typeId, int from, int to, Func<GridCell, bool> extra = null)
+        {
+            GridCell core = HomeGridService.CorePivot(state);
+            for (int r = from; r <= to; r++)
+            {
+                for (int a = 0; a < 36; a++)
+                {
+                    float ang = a * 10f * Mathf.Deg2Rad;
+                    var c = new GridCell(core.X + Mathf.RoundToInt(Mathf.Cos(ang) * r), core.Y + Mathf.RoundToInt(Mathf.Sin(ang) * r));
+                    if (HomeGridService.ValidatePlacement(state, typeId, c, 0, checkCost: false).Ok && (extra == null || extra(c)))
+                    {
+                        return c;
+                    }
+                }
+            }
+            return null;
+        }
+
+        private static void StepDronePicked(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            int sub = SessionState.GetInt(K + "DroneSub", 0);
+            if (sub == 0)
+            {
+                if (inStep < 0.5)
+                {
+                    return;
+                }
+                SessionState.SetInt(K + "DroneWasPaused", GameClock.Paused ? 1 : 0);
+                GameClock.SetPaused(true);
+                // 测试捷径：研发树“防御 · 维修无人机站 / 自动重建”记为已研究（研究流程由 FgResearchSelfCheck 覆盖）。
+                Campaign.Economy.ResearchService.CompleteForTests(state, "defense.repair_drone", "defense.auto_rebuild");
+                GridCell? spot = SmokeFreeSpot(state, Campaign.Defense.RepairDroneCatalog.StationTypeId, 8, 24);
+                SessionState.SetInt(K + "DroneX", spot?.X ?? 0);
+                SessionState.SetInt(K + "DroneY", spot?.Y ?? 0);
+                if (mode != null && !mode.IsOpen)
+                {
+                    mode.Open();
+                }
+                int tab = Campaign.Grid.GridContent.Categories.ToList().FindIndex(c => c.Id == "defense");
+                bool tabClicked = ClickUitk("[BuildModeHudHost]", "BuildCat" + tab);
+                int idx = HudItemIndex(Campaign.Defense.RepairDroneCatalog.StationTypeId);
+                bool picked = idx >= 0 && ClickUitk("[BuildModeHudHost]", "BuildItem" + idx) && mode != null && mode.SelectedTypeId == Campaign.Defense.RepairDroneCatalog.StationTypeId;
+                Check(spot.HasValue && tabClicked && picked, $"点建造菜单“防御”页签里的“维修无人机站”（第 {idx + 1} 项）：选中；找到一处可放的空地（{spot}）");
+                if (spot.HasValue)
+                {
+                    HoverWorld(StationCenter(spot.Value));
+                }
+                SessionState.SetInt(K + "DroneSub", 1);
+                return;
+            }
+            if (inStep < 1.2)
+            {
+                return;
+            }
+            GridCell s0 = new GridCell(SessionState.GetInt(K + "DroneX", 0), SessionState.GetInt(K + "DroneY", 0));
+            Check(GameLogic.View.RepairDroneViews.RangeShown && mode != null && mode.Preview != null && mode.Preview.Ok,
+                $"悬停时地面画出维修无人机站的覆盖范围（{Campaign.Defense.RepairDroneCatalog.Range} 米圈），放置预览合法");
+            SessionState.SetInt(K + "DroneCount0", state.BuildingRecords.Count(x => x.BuildingTypeId == Campaign.Defense.RepairDroneCatalog.StationTypeId));
+            ClickWorld(StationCenter(s0));
+            SessionState.SetInt(K + "DroneSub", 0);
+            Next(399, "左键放下维修无人机站虚影");
+        }
+
+        private static Vector3 StationCenter(GridCell pivot)
+        {
+            Vector2 c = Campaign.Grid.GridMath.FootprintCenter(pivot, 3, 3, 0);
+            return new Vector3(c.x, 0f, c.y);
+        }
+
+        private static void StepDroneGhostPlaced(double inStep)
+        {
+            if (inStep < 0.7)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            BuildingRecord[] ghosts = state.BuildingRecords.Where(x => x.BuildingTypeId == Campaign.Defense.RepairDroneCatalog.StationTypeId).ToArray();
+            bool placed = ghosts.Length == SessionState.GetInt(K + "DroneCount0", 0) + 1 && ghosts.Any(Campaign.Regions.HomeValleyController.IsPlannedGhost);
+            Check(placed, $"左键放下维修无人机站虚影（机器取料施工）；状态行“{mode?.StatusText?.Replace("\n", " / ")}”");
+            // 清理虚影，改用测试捷径：一座接得上电网的建成站 + 范围内一座受损的精炼炉 + 仓库里放维修件（机器施工、范围与记账由自检覆盖）。
+            foreach (BuildingRecord g in ghosts.Where(Campaign.Regions.HomeValleyController.IsPlannedGhost).ToArray())
+            {
+                HomeGridService.TryToggleDemolish(state, g.BuildingId);
+            }
+            mode?.ClearSelection();
+            string stationId = null;
+            for (int r = 8; r <= 26 && stationId == null; r++)
+            {
+                GridCell? c = SmokeFreeSpot(state, Campaign.Defense.RepairDroneCatalog.StationTypeId, r, r);
+                if (!c.HasValue)
+                {
+                    continue;
+                }
+                AddSmokeBuilding(state, Campaign.Defense.RepairDroneCatalog.StationTypeId, "drone_station", c.Value);
+                Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+                BuildingRecord b = HomeGridService.FindBuilding(state, SmokeDroneStationId);
+                if (b != null && b.PowerState == BuildingPowerState.Powered)
+                {
+                    b.Health = Campaign.Economy.BuildingOps.MaxDurability(b.BuildingTypeId);
+                    stationId = SmokeDroneStationId;
+                    break;
+                }
+                state.BuildingRecords = state.BuildingRecords.Where(x => x.BuildingId != SmokeDroneStationId).ToArray();
+                HomeGridService.MapFor(state);
+                Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+            }
+            BuildingRecord st = HomeGridService.FindBuilding(state, SmokeDroneStationId);
+            BuildingRecord furnace = null;
+            if (st != null)
+            {
+                for (int d = 6; d <= 12 && furnace == null; d++)
+                {
+                    for (int a = 0; a < 36 && furnace == null; a++)
+                    {
+                        float ang = a * 10f * Mathf.Deg2Rad;
+                        var c = new GridCell(Mathf.RoundToInt(st.Position.x + Mathf.Cos(ang) * d), Mathf.RoundToInt(st.Position.y + Mathf.Sin(ang) * d));
+                        if (HomeGridService.ValidatePlacement(state, "refinery_furnace", c, 0, asPlayerPlacement: false, checkCost: false).Ok)
+                        {
+                            AddSmokeBuilding(state, "refinery_furnace", "drone_furnace", c);
+                            furnace = HomeGridService.FindBuilding(state, SmokeDroneFurnaceId);
+                        }
+                    }
+                }
+            }
+            Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+            if (furnace != null)
+            {
+                furnace.Health = Campaign.Economy.BuildingOps.MaxDurability("refinery_furnace") * 0.5f;
+            }
+            Campaign.Economy.HomeInventory.Add(state, Campaign.Economy.BuildingOps.RepairKitId, 10, clampToSpace: false);
+            Campaign.Defense.RepairDroneService.Sync(state);
+            Check(st != null && furnace != null, $"测试捷径：一座建成、有电的维修无人机站（{stationId}）与 {Campaign.Defense.RepairDroneCatalog.Range} 米内一座受损一半的精炼炉，仓库放 10 件维修件");
+            SessionState.SetInt(K + "DroneSeenOut", 0);
+            GameClock.SetPaused(false);
+            GameClock.SetSpeed(3f);
+            Next(400, "无人机出动（内核里看得见的单位）把精炼炉修满");
+        }
+
+        private static void StepDroneRepaired(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            Campaign.Combat.CombatSite site = Campaign.WorldSim.WorldSimulation.Home?.Combat;
+            if (site != null && site.DroneUnitCount > 0)
+            {
+                SessionState.SetInt(K + "DroneSeenOut", 1);
+            }
+            BuildingRecord furnace = HomeGridService.FindBuilding(state, SmokeDroneFurnaceId);
+            bool full = furnace != null && Campaign.Economy.BuildingOps.Durability(furnace) >= Campaign.Economy.BuildingOps.MaxDurability("refinery_furnace") - 0.05f;
+            if (!full && inStep < 15)
+            {
+                return;
+            }
+            BuildingRecord st = HomeGridService.FindBuilding(state, SmokeDroneStationId);
+            Check(full && SessionState.GetInt(K + "DroneSeenOut", 0) == 1,
+                $"维修无人机出动（战斗内核里的己方单位）把受损的精炼炉修满（{(furnace != null ? Campaign.Economy.BuildingOps.Durability(furnace) : 0):F0}）；站点状态“{(st != null ? Campaign.Economy.BuildingStatusService.Evaluate(state, st).Reason.Replace("\n", " / ") : "无")}”");
+            GameClock.SetSpeed(1f);
+            GameClock.SetPaused(true);
+            Campaign.Regions.HomeValleyBuildMode.Current?.Close();
+            PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameActionId.OpenRules));
+            SessionState.SetInt(K + "DroneSub", 0);
+            Next(401, "Alt+R 新建自动重建规则，“在地图上圈一块”拖框圈区域");
+        }
+
+        private static void StepRebuildZoneDrawn(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            UI.Kit.RulesPanelUIToolkit p = UI.Kit.RulesPanelUIToolkit.Instance;
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            BuildingRecord furnace = HomeGridService.FindBuilding(state, SmokeDroneFurnaceId);
+            int sub = SessionState.GetInt(K + "DroneSub", 0);
+            if (sub == 0)
+            {
+                if (inStep < 0.6)
+                {
+                    return;
+                }
+                p?.Refresh();
+                int kindIndex = p != null ? p.NewKindField.choices.FindIndex(c => c.Contains(Localization.GameText.Get("rules.kind.auto_rebuild.name"))) : -1;
+                bool created = p != null && UI.Kit.RulesPanelUIToolkit.IsOpen && UI.Kit.RulesPanelUIToolkit.PickForTests(p.NewKindField, kindIndex);
+                Campaign.StandingRuleRecord rule = p != null ? Campaign.Economy.StandingRuleService.Find(state, p.SelectedSerial) : null;
+                p?.Select(p.SelectedSerial);
+                bool row = rule != null && rule.Kind == Campaign.Economy.StandingRuleService.KindRebuild && p.EditorRowVisible("RulesRowZones") && p.ZonesText.Length > 0;
+                SessionState.SetInt(K + "DroneRule", rule?.Serial ?? 0);
+                Check(created && row, $"Alt+R 打开常驻规则面板，按类型新建“自动重建”（R{rule?.Serial}）：编辑区显示重建区域行（“{p?.ZonesText}”）");
+                CheckNoTextMarkers("常驻规则面板（重建区域）");
+                bool drawClicked = ClickUitk("[RulesPanelHost]", "RulesZoneDraw");
+                Check(drawClicked, "点“在地图上圈一块”");
+                SessionState.SetInt(K + "DroneSub", 1);
+                return;
+            }
+            if (sub == 1)
+            {
+                if (inStep < 1.2)
+                {
+                    return;
+                }
+                Check(!UI.Kit.RulesPanelUIToolkit.IsOpen && mode != null && mode.IsOpen && mode.ZoneMode && mode.ZoneRuleSerial == SessionState.GetInt(K + "DroneRule", 0),
+                    $"面板关闭、建造模式进入重建区域模式（“{mode?.StatusText}”）");
+                if (furnace != null)
+                {
+                    DragWorld(new Vector3(furnace.Position.x - 3f, 0f, furnace.Position.y - 3f), new Vector3(furnace.Position.x + 3f, 0f, furnace.Position.y + 3f), 0);
+                }
+                SessionState.SetInt(K + "DroneSub", 2);
+                return;
+            }
+            if (sub == 2)
+            {
+                if (inStep < 2.2)
+                {
+                    return;
+                }
+                InputRouter.DebugSetReader(null);
+                Campaign.StandingRuleRecord rule = Campaign.Economy.StandingRuleService.Find(state, SessionState.GetInt(K + "DroneRule", 0));
+                bool zoned = rule != null && rule.Zones.Length == 1 && rule.Zones[0].Enabled && furnace != null
+                             && Campaign.Economy.StandingRuleService.Covers(rule, "refinery_furnace", new GridCell(furnace.GridX, furnace.GridY), new GridCell(furnace.GridX, furnace.GridY))
+                             && GameLogic.View.RepairDroneViews.ZoneCount >= 1;
+                Check(zoned, $"按住左键拖框圈出重建区域（{rule?.Zones.Length} 个，盖住精炼炉），地面画出区域边框；状态行“{mode?.StatusText?.Replace("\n", " / ")}”");
+                SessionState.SetInt(K + "DroneSub", 3);
+                RightClickWorld(new Vector3(furnace?.Position.x ?? 0f, 0f, (furnace?.Position.y ?? 0f) + 6f));
+                return;
+            }
+            if (inStep < 2.8)
+            {
+                return;
+            }
+            Check(mode != null && !mode.ZoneMode, "右键退出重建区域模式");
+            // 精炼炉被摧毁（受损入口与突袭 / 天气同一个），自动重建规则在下一个模拟步派出重建单。
+            if (furnace != null)
+            {
+                Campaign.Economy.BuildingOps.ApplyDamage(state, furnace.BuildingId, 100000f);
+            }
+            GameClock.SetPaused(false);
+            SessionState.SetInt(K + "DroneSub", 0);
+            Next(402, "区域里的精炼炉被摧毁 → 自动重建规则派出重建单");
+        }
+
+        private static void StepRebuildOrdered(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            BuildingRecord furnace = HomeGridService.FindBuilding(state, SmokeDroneFurnaceId);
+            int ruleSerial = SessionState.GetInt(K + "DroneRule", 0);
+            WorkOrderRecord order = furnace != null ? Campaign.Regions.HomeValleyWorkOrders.FindActiveRepair(state, furnace.BuildingId) : null;
+            if (order == null && inStep < 3)
+            {
+                return;
+            }
+            Check(furnace != null && furnace.ConstructionState == BuildingConstructionState.Damaged && order != null && order.RuleSerial == ruleSerial
+                  && Campaign.Economy.StandingRuleService.DescribeBuilding(state, furnace.BuildingId).Contains("R" + ruleSerial),
+                $"被摧毁的精炼炉留下虚影，自动重建规则 R{ruleSerial} 派出重建单（建筑上写“由规则 R{ruleSerial} 触发”）");
+            // 清理：取消重建单（废料全额退回）、删掉规则、撤走测试建筑，恢复暂停与倍速。
+            if (furnace != null)
+            {
+                Campaign.Economy.BuildingOps.TryCancelRepair(state, furnace.BuildingId, out _);
+            }
+            Campaign.Economy.StandingRuleService.TryDelete(state, ruleSerial, out _);
+            state.BuildingRecords = state.BuildingRecords.Where(x => x.BuildingId != SmokeDroneStationId && x.BuildingId != SmokeDroneFurnaceId).ToArray();
+            HomeGridService.MapFor(state);
+            Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+            Campaign.Defense.RepairDroneService.Sync(state);
+            Campaign.Combat.CombatSite site = Campaign.WorldSim.WorldSimulation.Home?.Combat;
+            Check(HomeGridService.FindBuilding(state, SmokeDroneStationId) == null && Campaign.Defense.RepairDroneService.Find(state, SmokeDroneStationId) == null
+                  && (site == null || site.DroneUnitCount == 0),
+                "清理测试维修无人机站、精炼炉与规则（无人机随站回收）");
+            GameClock.SetSpeed(1f);
+            GameClock.SetPaused(SessionState.GetInt(K + "DroneWasPaused", 0) == 1);
+            SessionState.SetInt(K + "DroneSub", 0);
             Next(264, "FG3-LOG-04：建造模式里放分流器与地下传送带");
         }
 

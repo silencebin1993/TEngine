@@ -342,6 +342,21 @@ namespace GameLogic.Core
         /// <summary>FG6-DEF-02：第一次在放置屏障时看到敌方路线预览。</summary>
         public const string DefenseRouteFirstPreview = "defense.route_first_preview";
 
+        /// <summary>FG6-DEF-03：第一座维修无人机站建成。</summary>
+        public const string DefenseRepairDroneFirstBuilt = "defense.repair_drone_first_built";
+
+        /// <summary>FG6-DEF-03：维修无人机第一次修好一处。</summary>
+        public const string DefenseRepairDroneFirstRepair = "defense.repair_drone_first_repair";
+
+        /// <summary>FG6-DEF-03：第一次有维修无人机被击落。</summary>
+        public const string DefenseRepairDroneFirstLost = "defense.repair_drone_first_lost";
+
+        /// <summary>FG6-DEF-03：第一次给自动重建规则圈出重建区域。</summary>
+        public const string RulesRebuildZoneFirstDrawn = "rules.rebuild_zone_first_drawn";
+
+        /// <summary>FG6-DEF-03：自动重建第一次重建传送带 / 物流节点。</summary>
+        public const string RulesRebuildFirstBelt = "rules.rebuild_first_belt";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -389,6 +404,7 @@ namespace GameLogic.Core
             TurretFirstBuilt, TurretFirstOpen, TurretFirstMode, TurretFirstUplink, TurretFirstSupplyShort, TurretFirstKill,
             DefenseBarrierFirstBuilt, DefenseGateFirstBuilt, DefenseShieldFirstBuilt, DefenseShieldFirstOverload, DefenseTrapFirstBuilt, DefenseTrapFirstSupplyShort,
             DefensePanelFirstOpen, DefenseRouteFirstPreview,
+            DefenseRepairDroneFirstBuilt, DefenseRepairDroneFirstRepair, DefenseRepairDroneFirstLost, RulesRebuildZoneFirstDrawn, RulesRebuildFirstBelt,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

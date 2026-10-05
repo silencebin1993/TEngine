@@ -61,6 +61,8 @@ namespace GameLogic.Campaign.Regions
             UpgradeBox,
             /// <summary>FG6-DEF-02：选中屏障 / 闸门后按住左键拖一段墙（全有或全无）。</summary>
             Wall,
+            /// <summary>FG6-DEF-03：重建区域模式下拉框（松开 = 圈一个区域；点区域里面一格 = 开 / 关）。</summary>
+            ZoneBox,
         }
 
         private static readonly GameActionId[] HotbarActions =
@@ -217,6 +219,7 @@ namespace GameLogic.Campaign.Regions
             UpgradeMode = false;
             PasteMode = false;
             SettingsMode = false;
+            ZoneRuleSerial = 0; // FG6-DEF-03：进入别的模式 / 选中条目时退出重建区域模式
             PasteSource = null;
             PastePreview = null;
             _pasteKey = int.MinValue;
@@ -743,6 +746,11 @@ namespace GameLogic.Campaign.Regions
                 ClickCell(state, cell);
                 return;
             }
+            if (ZoneMode)
+            {
+                BeginDrag(DragKind.ZoneBox, cell, state); // FG6-DEF-03：重建区域
+                return;
+            }
             if (SelectedToolId != null)
             {
                 BeginDrag(DragKind.Belt, cell, state);
@@ -849,6 +857,9 @@ namespace GameLogic.Campaign.Regions
                     break;
                 case DragKind.PrioritizeBox:
                     CommitPrioritize(state, start, cell);
+                    break;
+                case DragKind.ZoneBox:
+                    CommitZone(state, start, cell); // FG6-DEF-03
                     break;
                 case DragKind.ClearBox:
                     // 点一格 = 这一格所在的整条带；拖框 = 框里的传送带格。
@@ -1045,6 +1056,10 @@ namespace GameLogic.Campaign.Regions
                 case DragKind.UpgradeBox:
                     UpgradePreview = UpgradePlanner.Plan(state, DragStart, end, _upgradeBuffer);
                     break;
+                case DragKind.ZoneBox:
+                    ZoneBoxMin = new GridCell(Math.Min(DragStart.X, end.X), Math.Min(DragStart.Y, end.Y));
+                    ZoneBoxMax = new GridCell(Math.Max(DragStart.X, end.X), Math.Max(DragStart.Y, end.Y));
+                    break;
                 case DragKind.PrioritizeBox:
                     PrioritizeBoxMin = new GridCell(Math.Min(DragStart.X, end.X), Math.Min(DragStart.Y, end.Y));
                     PrioritizeBoxMax = new GridCell(Math.Max(DragStart.X, end.X), Math.Max(DragStart.Y, end.Y));
@@ -1199,6 +1214,10 @@ namespace GameLogic.Campaign.Regions
                 _previewKey = int.MinValue;
                 Revision++;
             }
+            else if (ZoneMode)
+            {
+                SetZoneMode(0); // FG6-DEF-03：右键退出重建区域模式
+            }
             else if (PasteMode || CopyMode || UpgradeMode || SettingsMode)
             {
                 ExitPlanModes(); // FG3-LOG-07：右键退出粘贴 / 复制 / 升级 / 复制设置
@@ -1280,6 +1299,7 @@ namespace GameLogic.Campaign.Regions
 
             InputRouter.SetBuildMode(true);
             UiEscapeStack.Sync(this, true, _escClose);
+            CheckZoneRule(state); // FG6-DEF-03：圈区域的那条自动重建规则被删掉了 → 退出重建区域模式并写明
 
             if (InputRouter.ConsumeAction(GameActionId.OpenBuildMenu, InputScope.Strategy))
             {
@@ -1931,6 +1951,11 @@ namespace GameLogic.Campaign.Regions
             {
                 showBox = true;
                 PlaceBox(PrioritizeBoxMin, PrioritizeBoxMax);
+            }
+            else if (Drag == DragKind.ZoneBox)
+            {
+                showBox = true;
+                PlaceBox(ZoneBoxMin, ZoneBoxMax); // FG6-DEF-03：正在圈的重建区域
             }
             else if (ClearPlan != null && !ClearPlan.WholeNetwork)
             {

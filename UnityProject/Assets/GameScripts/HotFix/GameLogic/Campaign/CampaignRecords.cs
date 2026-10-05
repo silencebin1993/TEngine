@@ -322,6 +322,10 @@ namespace GameLogic.Campaign
         /// <summary>FG4-ECO-05（FGR-BASE-020“设置保留”）：被摧毁那一刻是不是玩家禁用的状态——重建完工时恢复成禁用，不替玩家重新开机。
         /// 唯一写入口 <see cref="Regions.HomeValleyPowerGrid.ApplyBuildingDestroyed"/>，重建完工时读取并清掉。旧存档没有这个字段 = false（= 重建后运转）。</summary>
         public bool DisabledWhenDestroyed;
+        /// <summary>FG6-DEF-03（FGR-DEF-014“突袭时优先修理正在受攻击的目标”）：最近一次耐久下降的统一时钟步（0 = 没挨过打）。
+        /// 写入口：<see cref="Economy.BuildingOps.ApplyDamage"/>（普通建筑）、防御 / 炮塔对账发现内核耐久下降时（结构单位 / 炮塔单位）。
+        /// 只读者：维修无人机找目标。存档里保留（读档接着跑与不存档一致）；旧存档没有 = 0。</summary>
+        public long LastHitTick;
     }
 
     /// <summary>ER3-STO-01：ERD-ECO-003 地面物——独立于仓库/核心缓存/机器货舱的第三类存放位置。

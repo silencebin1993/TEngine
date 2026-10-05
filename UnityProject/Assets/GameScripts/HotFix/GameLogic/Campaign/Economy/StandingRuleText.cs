@@ -177,7 +177,7 @@ namespace GameLogic.Campaign.Economy
             var names = new List<string>(ids.Length);
             foreach (string id in ids)
             {
-                names.Add(HomeGridService.DisplayName(id));
+                names.Add(id == BeltTarget ? GameText.Get("rules.target.belts") : HomeGridService.DisplayName(id)); // FG6-DEF-03：传送带与物流节点
             }
             return ListOf(names, "rules.all_buildings");
         }
@@ -199,7 +199,8 @@ namespace GameLogic.Campaign.Economy
                 case KindUnload:
                     return GameText.Get("rules.cond.expedition_unload");
                 case KindRebuild:
-                    return GameText.Format("rules.cond.auto_rebuild", TypeList(r.Targets));
+                    // FG6-DEF-03：圈了重建区域时写明“在开着的重建区域里”（区域列表在编辑区）。
+                    return GameText.Format(r.Zones != null && r.Zones.Length > 0 ? "rules.cond.auto_rebuild_zones" : "rules.cond.auto_rebuild", TypeList(r.Targets));
                 default:
                     return r.Kind;
             }

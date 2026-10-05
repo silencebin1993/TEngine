@@ -1139,6 +1139,22 @@ namespace GameLogic.Campaign
         public bool DefaultsSeeded;
         /// <summary>规则派出的工单编号计数（工单 ID 确定性，不用 GUID）。</summary>
         public int NextOrderSerial = 1;
+        /// <summary>FG6-DEF-03：下一个重建区域编号（Z1、Z2……永不复用）。</summary>
+        public int NextZoneSerial = 1;
+        /// <summary>FG6-DEF-03：玩家刚启用自动重建 / 改了范围 / 圈了或打开了区域——下一个模拟步把已经被摧毁、现在落在范围里的东西补排重建（存档里保留）。</summary>
+        public bool RebuildSweep;
+    }
+
+    /// <summary>FG6-DEF-03（FGR-DEF-015“开启自动重建规则的区域”）：自动重建规则的一个重建区域（格网矩形，含两端），可以单独开 / 关。</summary>
+    [Serializable]
+    public sealed class RebuildZoneRecord
+    {
+        public int Serial;
+        public int X0;
+        public int Y0;
+        public int X1;
+        public int Y1;
+        public bool Enabled = true;
     }
 
     /// <summary>一条常驻规则。字段按类型取用（见 <c>StandingRuleService</c> 各类说明）。</summary>
@@ -1176,6 +1192,8 @@ namespace GameLogic.Campaign
         /// <summary>没能执行的原因（文本键 + 参数；空 = 没有问题）。</summary>
         public string IssueKey = string.Empty;
         public string IssueArg = string.Empty;
+        /// <summary>FG6-DEF-03：自动重建的重建区域（空 = 整个家园；有区域 = 只重建开着的区域里的东西）。</summary>
+        public RebuildZoneRecord[] Zones = Array.Empty<RebuildZoneRecord>();
     }
 
     /// <summary>规则正持有的一项改动：恢复原样用的旧值、规则设下的值是否被玩家改掉（被改掉 = 这次不再接管）、对应的工单。</summary>
@@ -1878,6 +1896,7 @@ namespace GameLogic.Campaign
             s.Raids.PendingWakeReasons ??= Array.Empty<string>();
             Defense.TurretService.EnsureState(s); // FG6-DEF-01：炮塔域补成空域（旧档没有 = 没有炮塔）；坏值钳回合法范围。
             Defense.DefenseService.EnsureState(s); // FG6-DEF-02：防御建筑域补成空域（旧档没有 = 没有屏障 / 闸门 / 护盾 / 陷阱）；坏值钳回。
+            Defense.RepairDroneService.EnsureState(s); // FG6-DEF-03：维修无人机站域补成空（旧档没有 = 没有维修无人机站）；坏值钳回、重复序号重编。
             if (s.Raids.NextNavSerial < 1)
             {
                 s.Raids.NextNavSerial = 1;
@@ -2044,6 +2063,7 @@ namespace GameLogic.Campaign
             {
                 r.NextOrderSerial = 1;
             }
+            int maxZone = 0;
             foreach (StandingRuleRecord x in r.Rules)
             {
                 if (x == null)
@@ -2059,6 +2079,61 @@ namespace GameLogic.Campaign
                 x.ConflictEntity ??= string.Empty;
                 x.IssueKey ??= string.Empty;
                 x.IssueArg ??= string.Empty;
+                // FG6-DEF-03：重建区域——去掉空的、两端颠倒的摆正、重复编号的重编（下面按最大编号补齐 NextZoneSerial）。
+                x.Zones ??= Array.Empty<RebuildZoneRecord>();
+                if (x.Zones.Length > 0)
+                {
+                    var keep = new List<RebuildZoneRecord>(x.Zones.Length);
+                    foreach (RebuildZoneRecord z in x.Zones)
+                    {
+                        if (z == null)
+                        {
+                            continue;
+                        }
+                        if (z.X1 < z.X0)
+                        {
+                            (z.X0, z.X1) = (z.X1, z.X0);
+                        }
+                        if (z.Y1 < z.Y0)
+                        {
+                            (z.Y0, z.Y1) = (z.Y1, z.Y0);
+                        }
+                        keep.Add(z);
+                    }
+                    if (keep.Count != x.Zones.Length)
+                    {
+                        x.Zones = keep.ToArray();
+                    }
+                }
+            }
+            var seenZones = new HashSet<int>();
+            foreach (StandingRuleRecord x in r.Rules)
+            {
+                foreach (RebuildZoneRecord z in x?.Zones ?? Array.Empty<RebuildZoneRecord>())
+                {
+                    if (z.Serial <= 0 || !seenZones.Add(z.Serial))
+                    {
+                        z.Serial = 0;
+                    }
+                    else
+                    {
+                        maxZone = Math.Max(maxZone, z.Serial);
+                    }
+                }
+            }
+            if (r.NextZoneSerial <= maxZone)
+            {
+                r.NextZoneSerial = maxZone + 1;
+            }
+            foreach (StandingRuleRecord x in r.Rules)
+            {
+                foreach (RebuildZoneRecord z in x?.Zones ?? Array.Empty<RebuildZoneRecord>())
+                {
+                    if (z.Serial <= 0)
+                    {
+                        z.Serial = r.NextZoneSerial++;
+                    }
+                }
             }
             foreach (RuleHoldRecord h in r.Holds)
             {

@@ -159,6 +159,7 @@ namespace GameLogic.Campaign.WorldSim
             Economy.BlackBoxService.ResetSessionState(); // FG5-RND-06：陈列馆索引、“第一座陈列馆建成”钩子标记按新会话重来
             Economy.IntelService.ResetSessionState(); // FG5-RND-05：监听站索引、“第一座监听站建成”钩子标记按新会话重来 // FG5-RND-04：界面反馈与“第一座合成台建成”钩子标记按新会话重来；绑定刻录台的熔合接口
             Defense.TurretService.ResetSessionState(); // FG6-DEF-01：炮塔的运行时缓存（编译结果、补给原因）按新会话重建；存档里的炮塔记录不动
+            Defense.RepairDroneService.ResetSessionState(); // FG6-DEF-03：维修无人机的运行时缓存（候选目标、占用、首次钩子）按新会话重建
             Defense.DefenseService.ResetSessionState(); // FG6-DEF-02：防御建筑的运行时缓存（耐久推送、缺流体原因、护盾 / 陷阱清单）按新会话重建
             HomeValleyAlarms.ResetSessionState();
             HomeValleyCombatTargets.ResetSessionState();
@@ -292,6 +293,8 @@ namespace GameLogic.Campaign.WorldSim
             Defense.TurretService.WriteTo(CampaignSession.Current);
             // FG6-DEF-02：防御结构单位的耐久写回建筑、护盾值写回记录（护盾随内核快照，陷阱流体随管线快照）。
             Defense.DefenseService.WriteTo(CampaignSession.Current);
+            // FG6-DEF-03：出动中的维修无人机在内核里的耐久写回记录（单位随内核快照）。
+            Defense.RepairDroneService.WriteTo(CampaignSession.Current);
             // FG0-ARCH-03：每个已载入地点的战斗内核快照（单位、编队命令、冷却、热量、标记、飞行中的弹体）写进 CombatState。
             Combat.CombatSites.WriteTo(CampaignSession.Current);
             // FG0-ARCH-06：寻路内核的排队请求、待采纳结果、还没同步的格网变化写进 NavState（读档接着跑与不存档一致）。
@@ -498,6 +501,8 @@ namespace GameLogic.Campaign.WorldSim
                     // FG6-DEF-02：护盾状态机每步推进（O(护盾数)），防御建筑每 defense.sync_seconds 对账、陷阱每 trap.lay_seconds 铺一轮；只看步序号，与观察无关。
                     // 逐弹体的护盾吸收、场地节拍在上面家园内核的一步里。
                     Defense.DefenseService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
+                    // FG6-DEF-03：维修无人机——每 drone.scan_seconds 对账 + 找目标（O(建筑数 + 受损传送带格)），每步推进出动的无人机（O(出动数)）与补充计时；只看步序号，与观察无关。
+                    Defense.RepairDroneService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                     CurrentSiteId = HomeValleyLayout.RegionId;
                 }
                 // FG4-ECO-01：物品库存采样（净速率），每 eco.flow.sample_seconds 游戏秒一次、只看步序号，与观察无关，O(物品种类)。

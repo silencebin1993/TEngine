@@ -621,8 +621,8 @@ namespace GameLogic.EditorTools
             Expect(closed && closedState.Contains("分支未开放") && open && later && foundryClosed && codex,
                 $"D10 阵营分支：没破解静默的技术时“{closedState}”、加入被拒；破解第一件静默固件（{fw}）后静默分支开放（图鉴解锁该分支节点），铸造分支仍关；" +
                 $"节点内容在后续版本（“{laterWhy}”）");
-            bool defLater = !ResearchService.TryEnqueue(s, "defense.repair_drone", out string defWhy) && defWhy.Contains("后续版本"); // FG6-DEF-02 屏障 / 护盾 / 陷阱已开放，改用维修无人机站（FG6-DEF-03）
-            Expect(defLater, $"D11 内容还没做的节点（防御 · 维修无人机站）显示在树上，写明后续版本开放，不能加入（“{defWhy}”）");
+            bool defLater = !ResearchService.TryEnqueue(s, "logistics.heat_trace", out string defWhy) && defWhy.Contains("后续版本"); // FG6-DEF-03 防御分支已全部开放，改用伴热管（FG7-ENV-03）
+            Expect(defLater, $"D11 内容还没做的节点（物流 · 伴热管）显示在树上，写明后续版本开放，不能加入（“{defWhy}”）");
         }
 
         // ── E 负向 ───────────────────────────────────────────────────────────────
@@ -1053,7 +1053,7 @@ namespace GameLogic.EditorTools
                 panel.ClickNode("energy.pole_t2");
                 panel.ClickNode("industry.lab_t2");
                 panel.ClickNode("industry.lab_t3");
-                panel.ClickNode("defense.repair_drone"); // FG6-DEF-02 屏障已开放，“后续版本”改用维修无人机站（FG6-DEF-03）
+                panel.ClickNode("logistics.heat_trace"); // FG6-DEF-03 防御分支已全部开放，“后续版本”改用伴热管（FG7-ENV-03）
                 string refusedMsg = panel.MessageText;
                 panel.Refresh();
                 bool rows = panel.QueueRowVisibleCount == 4 && panel.QueueRowText(0).Contains("物流 · 分流与过滤") && panel.QueueTitleText.Contains("4 / 5");

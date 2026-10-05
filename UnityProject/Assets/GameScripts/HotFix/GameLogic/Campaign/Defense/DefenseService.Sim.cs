@@ -353,6 +353,11 @@ namespace GameLogic.Campaign.Defense
                 }
                 else
                 {
+                    // FG6-DEF-03（FGR-DEF-014“优先修理正在受攻击的目标”）：内核耐久比上次写回的低 = 这段时间挨过打（与建筑记录比，存档前已写回，读档不改变结果）。
+                    if (cur < b.Health - 0.01f)
+                    {
+                        b.LastHitTick = GameClock.Ticks;
+                    }
                     b.Health = cur;
                     rt.LastPushedHp = cur;
                 }

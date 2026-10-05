@@ -17,6 +17,55 @@ namespace GameLogic.Campaign
         /// <summary>统计：护盾累计过载次数、陷阱累计铺设轮数（拆掉的也算）。</summary>
         public int TotalOverloads;
         public long TotalLays;
+
+        // ── FG6-DEF-03：维修无人机站（FGR-DEF-014）。唯一写入口 Defense.RepairDroneService；只加字段、不升域版本（旧档没有 = 没有维修无人机站）──
+        public RepairStationRecord[] Stations = Array.Empty<RepairStationRecord>();
+        /// <summary>下一架无人机的序号（内核单位外部键 = −(1000000 + 序号)，不复用）。</summary>
+        public int NextDroneSerial = 1;
+        /// <summary>统计：维修无人机累计修好的耐久、用掉的维修件、被击落 / 坠毁的架数（拆掉的站也算）。</summary>
+        public double TotalRepaired;
+        public int TotalKitsUsed;
+        public int TotalDronesLost;
+    }
+
+    /// <summary>FG6-DEF-03：一座维修无人机站（身份 = 建筑 ID）。无人机数组 = 现存的无人机（被击落的从数组里拿掉，站点按编制补充）。</summary>
+    [Serializable]
+    public sealed class RepairStationRecord
+    {
+        public string BuildingId = string.Empty;
+        public DroneRecord[] Drones = Array.Empty<DroneRecord>();
+        /// <summary>维修件余额（件，0～1 的零头）：修理按修好的耐久比例记账，不够一次时从共用库存取 1 件补进来——不丢零头、不多扣。</summary>
+        public float KitCredit;
+        /// <summary>正在补充的这一架已经走过的步数（只在站点运转且有电时累加；-1 = 没在补充）。补充开始时已扣废料。</summary>
+        public int RespawnTicks = -1;
+        /// <summary>正在补充的这一架开始时扣的废料（站点在补充中被摧毁 / 拆除时全额退回）。</summary>
+        public int RespawnPaid;
+        /// <summary>站点被摧毁过、出动的无人机都坠毁了：重建完工那一刻按满编恢复（含在重建造价里）。</summary>
+        public bool Wrecked;
+        /// <summary>没有维修件、无人机停工（只在变化时写原因、发一次通知）。</summary>
+        public bool NoKits;
+        /// <summary>上一次“缺维修件 / 被击落”通知的步（同一座站有冷却）。</summary>
+        public long NotifyTick;
+        // 读数（面板）
+        public double Repaired;
+        public int KitsUsed;
+        public int Lost;
+    }
+
+    /// <summary>FG6-DEF-03：一架维修无人机。停在站里时不在战斗内核里；出动后是内核里的己方单位（耐久的真相在内核，存档前写回 <see cref="Hp"/>）。</summary>
+    [Serializable]
+    public sealed class DroneRecord
+    {
+        public int Serial;
+        /// <summary>0 停在站里 / 1 飞往目标 / 2 修理中 / 3 返航。</summary>
+        public int State;
+        public float X;
+        public float Y;
+        public float Hp;
+        /// <summary>目标：b:建筑 ID / c:x,y（一格传送带）；空 = 没有目标。</summary>
+        public string Target = string.Empty;
+        /// <summary>修传送带时还没落到整数点的修理量（传送带耐久按整数记）。</summary>
+        public float Work;
     }
 
     /// <summary>FG6-DEF-02：一座防御建筑（身份 = 建筑 ID；内核结构单位 / 护盾的外部键 = <see cref="Serial"/>）。不用的字段保持默认值。</summary>

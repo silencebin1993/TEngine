@@ -483,10 +483,10 @@ namespace GameLogic.EditorTools
                             && ResearchCatalog.TryGet("defense.turret_t3", out ResearchNodeDef t3) && t3.IsReady && t3.Unlocks.Contains("tier:turret_heavy.t3")
                             && ResearchService.MigratedNodes().All(n => !n.Id.StartsWith("defense.turret", StringComparison.Ordinal))
                             && ResearchService.LegacyOpenNodes().All(n => !n.Id.StartsWith("defense.turret", StringComparison.Ordinal))
-                            && ResearchCatalog.TryGet("defense.repair_drone", out ResearchNodeDef later) && !later.IsReady; // FG6-DEF-02 屏障已开放，“后续版本”改用维修无人机（FG6-DEF-03）
+                            && ResearchCatalog.TryGet("logistics.heat_trace", out ResearchNodeDef later) && !later.IsReady; // FG6-DEF-03 防御分支已全部开放，“后续版本”改用伴热管（FG7-ENV-03）
             Expect(modes && buildings && research && CombatConst.FormatVersion >= 9,
                 $"A2 五种目标模式（code 与内核 CombatTargetMode 一一对应，按 FGR-DEF-003 列举排序）；轻型 2×2 / 重型 3×3 炮塔座（防御页签、耗电 8 / 15、耐久 150 / 260、T1～T3 射程 ×1 / 1.15 / 1.3、减伤 0 / 20% / 35%）；" +
-                $"研发 defense.turret_t2 / t3 已就绪并解锁炮塔座等级（旧档迁移与开局技术数据换算不计，维修无人机仍在后续版本）；战斗内核快照格式 {CombatConst.FormatVersion}（{modes}/{buildings}/{research}）");
+                $"研发 defense.turret_t2 / t3 已就绪并解锁炮塔座等级（旧档迁移与开局技术数据换算不计；“后续版本”的对照改用伴热管）；战斗内核快照格式 {CombatConst.FormatVersion}（{modes}/{buildings}/{research}）");
 
             string[] keys = t.TbLocText.DataList.Select(r => r.Key).Where(k => k.StartsWith("turret.", StringComparison.Ordinal) || k.StartsWith("bs.reason.turret_", StringComparison.Ordinal)
                 || k.StartsWith("roster.turret.", StringComparison.Ordinal) || k.StartsWith("roster.tab.turrets", StringComparison.Ordinal) || k.StartsWith("build.turret.", StringComparison.Ordinal)
