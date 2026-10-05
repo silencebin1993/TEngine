@@ -1045,15 +1045,22 @@ namespace BinGames.Sim.Combat
 
         /// <summary>生成一块区域。<paramref name="faction"/> = 区域属于哪一边（打另一边），由调用方显式给出，不从槽位推断。</summary>
         private static bool SpawnZone(ref CombatData d, int owner, CombatFaction faction, double2 pos, float radius, float seconds, float dps, float growth, float tickScale,
-            uint mask, float statusSeconds, float statusDps, float slow, float vuln)
+            uint mask, float statusSeconds, float statusDps, float slow, float vuln, byte kind = CombatConst.ZoneKindReading)
         {
             if (radius <= 0f || seconds <= 0f)
             {
                 return false;
             }
-            if (d.Zones.Length >= d.ZoneCap)
+            // FG6-DEF-02 复审修复：读法区域与陷阱场地各有自己的上限、分开计数（场地铺满不挤掉炮塔 / 机器的读法区域，反之亦然）。
+            // 总数没到某一种的上限时那一种必然没满（O(1)）；只有接近上限时才数一遍（O(区域数)，区域数 ≤ 两个上限之和）。
+            bool field = kind == CombatConst.ZoneKindField;
+            int cap = field ? d.FieldZoneCap : d.ZoneCap;
+            if (d.Zones.Length >= cap && CountZones(ref d, kind) >= cap)
             {
-                RefuseReading(ref d);
+                if (!field)
+                {
+                    RefuseReading(ref d); // 场地被拒由调用方（陷阱发射器）逐座计数并写进状态行
+                }
                 return false;
             }
             double now = d.Scalars[0].Time;
@@ -1075,10 +1082,38 @@ namespace BinGames.Sim.Combat
                 StatusVuln = vuln,
                 Owner = owner >= 0 && owner < d.Count ? d.Id[owner] : 0,
                 Faction = faction,
+                Kind = kind,
             });
             CombatCounters c = d.Counters[0];
             c.ZonesSpawned++;
             d.Counters[0] = c;
+            return true;
+        }
+
+        /// <summary>某一种区域此刻有几块（只在总数接近上限时调用）。</summary>
+        private static int CountZones(ref CombatData d, byte kind)
+        {
+            int n = 0;
+            for (int z = 0; z < d.Zones.Length; z++)
+            {
+                if (d.Zones[z].Kind == kind)
+                {
+                    n++;
+                }
+            }
+            return n;
+        }
+
+        /// <summary>FG6-DEF-02（FGR-DEF-013 陷阱发射器）：不属于任何单位的场地（陷阱发射器铺的油膜带 / 冷却液带 / 电磁场……），与读法区域同一套结算（节拍伤害、挂标签、触发反应）。
+        /// 容量满时不生成并计数（场地自己的上限 <see cref="CombatData.FieldZoneCap"/>，与读法区域分开，互不挤占）。</summary>
+        internal static bool SpawnFieldZone(ref CombatData d, CombatFaction faction, double2 pos, float radius, float seconds, float dps, uint mask, float statusSeconds,
+            float statusDps, float slow, float vuln, CombatZoneLook look)
+        {
+            if (!SpawnZone(ref d, -1, faction, pos, radius, seconds, dps, 0f, 1f, mask, statusSeconds, statusDps, slow, vuln, CombatConst.ZoneKindField))
+            {
+                return false;
+            }
+            SetLastZoneLook(ref d, look);
             return true;
         }
 

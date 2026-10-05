@@ -284,7 +284,9 @@ namespace GameLogic.Campaign.Regions
             GameConfig.fg.BuildingTier row = Economy.BuildingOps.HasTiers(b.BuildingTypeId)
                 ? Economy.BuildingOps.TierRow(b.BuildingTypeId, Economy.BuildingOps.TierOf(b))
                 : null;
-            return row != null && row.PowerDemand > 0f ? row.PowerDemand : p.PowerDemand;
+            float demand = row != null && row.PowerDemand > 0f ? row.PowerDemand : p.PowerDemand;
+            // FG6-DEF-02（FGR-DEF-012“耗电随承受的伤害上升”）：护盾发生器按状态倍率与最近承受的伤害加耗电（其它建筑原样返回）。
+            return Defense.DefenseService.PowerDemandOf(b, demand);
         }
 
         /// <summary>这一类建筑有没有按等级变的耗电（任何一级填了 powerDemand）。</summary>

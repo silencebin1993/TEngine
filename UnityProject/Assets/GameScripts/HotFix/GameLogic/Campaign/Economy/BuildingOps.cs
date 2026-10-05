@@ -88,6 +88,21 @@ namespace GameLogic.Campaign.Economy
 
         public static float MaxDurability(string typeId) => Math.Max(1f, Service(typeId)?.MaxDurability ?? 100f);
 
+        /// <summary>
+        /// FG6-DEF-02 复审修复（FGR-DEF-010“三个等级，耐久递增”）：升级换了建筑类型（屏障 T1 → T2）时按耐久比例换算——满耐久的 T1 升完是满耐久的 T2，
+        /// 掉了一半的升完仍是一半。两种类型最大耐久相同（同类型的等级升级）时原样。生命 ≤ 0（旧档“满”）原样。
+        /// </summary>
+        public static float HealthAfterTypeChange(float health, string fromType, string toType)
+        {
+            if (health <= 0f || fromType == toType)
+            {
+                return health;
+            }
+            float from = MaxDurability(fromType);
+            float to = MaxDurability(toType);
+            return Math.Abs(from - to) < 0.01f ? health : Math.Min(health, from) / from * to;
+        }
+
         public static bool CanDisableType(string typeId) => typeId != HomeValleyLayout.BuildingTypeCore && (Service(typeId)?.CanDisable ?? 1) == 1;
 
         /// <summary>面板“?”打开的图鉴条目（没有行 = 建筑通用条目）。</summary>

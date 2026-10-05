@@ -132,6 +132,17 @@ namespace GameLogic.Campaign.Grid
 
         private void MarkNavDirty(Chunk c) => _navDirty.Add(Key(c.ChunkX, c.ChunkY));
 
+        /// <summary>FG6-DEF-02：占用没变、但占用者挡不挡路变了（屏障 / 闸门建成、被摧毁）——把这一格所在区块标成要重新推进寻路镜像（下一步开头生效）。
+        /// 只记已载入的区块（没载入的区块推进时本来就按当前状态算）。</summary>
+        public void MarkNavDirtyAt(GridCell cell)
+        {
+            Chunk c = TryGetLoaded(GridMath.Address(cell, ChunkSize).ChunkX, GridMath.Address(cell, ChunkSize).ChunkY);
+            if (c != null)
+            {
+                MarkNavDirty(c);
+            }
+        }
+
         public int ChunkSize { get; }
         public IGridTerrainSource TerrainSource { get; }
         /// <summary>这张格网是哪个表面（fg.TbSurface.id），区块差异按它存。</summary>
@@ -571,6 +582,9 @@ namespace GameLogic.Campaign.Grid
         public string OccupantId(int occupancyValue) => occupancyValue <= 0 || occupancyValue > _occupantIds.Count ? null : _occupantIds[occupancyValue - 1];
 
         public int OccupantCount => _occupantIndex.Count;
+
+        /// <summary>FG6-DEF-02：建筑在占用层里的编号（1 起；没占过格 = 0）。寻路推进时按它给闸门 / 屏障设挡路位。</summary>
+        public int OccupancyValueOf(string buildingId) => buildingId != null && _occupantIndex.TryGetValue(buildingId, out int idx) ? idx : 0;
 
         /// <summary>清空全部占用（区块本身与地形保留）。</summary>
         public void ClearOccupancy()

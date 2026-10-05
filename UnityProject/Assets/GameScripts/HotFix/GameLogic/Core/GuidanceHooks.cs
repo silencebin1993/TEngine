@@ -318,6 +318,30 @@ namespace GameLogic.Core
         /// <summary>FG6-DEF-01：炮塔第一次击毁敌人。</summary>
         public const string TurretFirstKill = "turret.first_kill";
 
+        /// <summary>FG6-DEF-02：第一座屏障建成。</summary>
+        public const string DefenseBarrierFirstBuilt = "defense.barrier_first_built";
+
+        /// <summary>FG6-DEF-02：第一座闸门建成。</summary>
+        public const string DefenseGateFirstBuilt = "defense.gate_first_built";
+
+        /// <summary>FG6-DEF-02：第一座护盾发生器建成。</summary>
+        public const string DefenseShieldFirstBuilt = "defense.shield_first_built";
+
+        /// <summary>FG6-DEF-02：护盾第一次过载。</summary>
+        public const string DefenseShieldFirstOverload = "defense.shield_first_overload";
+
+        /// <summary>FG6-DEF-02：第一座陷阱发射器建成。</summary>
+        public const string DefenseTrapFirstBuilt = "defense.trap_first_built";
+
+        /// <summary>FG6-DEF-02：陷阱发射器第一次因缺流体停止铺设。</summary>
+        public const string DefenseTrapFirstSupplyShort = "defense.trap_first_supply_short";
+
+        /// <summary>FG6-DEF-02：第一次打开防御建筑面板（护盾 / 陷阱）。</summary>
+        public const string DefensePanelFirstOpen = "defense.panel_first_open";
+
+        /// <summary>FG6-DEF-02：第一次在放置屏障时看到敌方路线预览。</summary>
+        public const string DefenseRouteFirstPreview = "defense.route_first_preview";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -363,6 +387,8 @@ namespace GameLogic.Core
             IntelFirstBuilt, IntelFirstOpen, IntelFirstIntel, IntelFirstRaidForecast, IntelFirstOutdated, IntelFirstInterrupted,
             BlackBoxFirstRecovered, BlackBoxFirstLeftBehind, BlackBoxFirstBuilt, BlackBoxFirstOpen, BlackBoxFirstAnalyzed,
             TurretFirstBuilt, TurretFirstOpen, TurretFirstMode, TurretFirstUplink, TurretFirstSupplyShort, TurretFirstKill,
+            DefenseBarrierFirstBuilt, DefenseGateFirstBuilt, DefenseShieldFirstBuilt, DefenseShieldFirstOverload, DefenseTrapFirstBuilt, DefenseTrapFirstSupplyShort,
+            DefensePanelFirstOpen, DefenseRouteFirstPreview,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

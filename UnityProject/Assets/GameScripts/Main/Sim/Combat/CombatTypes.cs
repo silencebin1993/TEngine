@@ -23,8 +23,12 @@ namespace BinGames.Sim.Combat
         /// 7 = FG2-VFX-02：武器读法追加布区落点、无人机定点、反伤（比例 / 固定值 / 触及）；区域追加外观种类；无人机追加定点锚点
         /// （读取仍认 1～6：布区落在命中点、无人机伴飞、没有反伤、区域外观按“液池”、无人机无锚点）。
         /// 8 = FG2-E2E-01（FG-GAP-043）：武器追加“引信弹迹”标记（读取仍认 1～7：没有弹迹）。弹迹本身是表现，不进快照。
-        /// 9 = FG6-DEF-01（FG06 FGR-DEF-002 / 004）：武器追加炮塔转速与每发补给；每个单位追加补给存量（读取仍认 1～8：转速 0 = 瞬间转向、不需要补给、存量 0）。</summary>
-        public const int FormatVersion = 9;
+        /// 9 = FG6-DEF-01（FG06 FGR-DEF-002 / 004）：武器追加炮塔转速与每发补给；每个单位追加补给存量（读取仍认 1～8：转速 0 = 瞬间转向、不需要补给、存量 0）。
+        /// 10 = FG6-DEF-02（FG06 FGR-DEF-012）：追加护盾表（读取仍认 1～9：没有护盾，热更层按记录重新登记）。</summary>
+        public const int FormatVersion = 10;
+
+        /// <summary>FG6-DEF-02：一个地点最多登记几座护盾（存储与逐弹体判定的上限；超出的不登记并由热更层写原因）。</summary>
+        public const int MaxShields = 64;
 
         /// <summary>仍能读取的最老格式版本。</summary>
         public const int MinReadableFormat = 1;
@@ -46,6 +50,13 @@ namespace BinGames.Sim.Combat
         /// <summary>FG2-FW-02：配置里没填（0）时的区域 / 回波 / 无人机容量（超出的不生成并计数，不抛异常）。</summary>
         public const int DefaultZoneCapacity = 512;
         public const int DefaultEchoCapacity = 1024;
+
+        /// <summary>FG6-DEF-02 复审修复：配置里没填（0）时，陷阱发射器场地自己的上限（与读法区域分开计数，互不挤占）。</summary>
+        public const int DefaultFieldZoneCapacity = 512;
+
+        /// <summary>区域种类（<see cref="CombatZone.Kind"/>）。</summary>
+        public const byte ZoneKindReading = 0;
+        public const byte ZoneKindField = 1;
 
         /// <summary>FG2-E2E-01（FG-GAP-043）：同时留在画面上的引信弹迹上限（满了挤掉最老的一条；每条只活零点几游戏秒）。</summary>
         public const int TraceCapacity = 128;
@@ -325,7 +336,9 @@ namespace BinGames.Sim.Combat
         public CombatFaction Faction;
         /// <summary>FG2-VFX-02：画成什么样（只影响画面）。</summary>
         public CombatZoneLook Look;
-        public short Pad1;
+        /// <summary>FG6-DEF-02 复审修复：0 = 读法区域（武器 / 反应留下的），1 = 场地（陷阱发射器铺的）。两种各有自己的上限，场地铺满不挤掉读法区域。随快照（格式 10）。</summary>
+        public byte Kind;
+        public byte Pad1;
     }
 
     /// <summary>FG2-FW-02：一次待结算的回波（残影 / 节拍 / 追射 / 回旋）：到点后对同一目标再结算一次伤害与状态。</summary>
@@ -361,6 +374,30 @@ namespace BinGames.Sim.Combat
         public byte Anchored;
         public short Pad1;
         public double2 Anchor;
+    }
+
+    /// <summary>
+    /// FG6-DEF-02（FG06 FGR-DEF-012 护盾发生器）：一座圆形护盾。展开时（<see cref="Active"/> = 1）从圈外飞进圈内的敌对阵营弹体被吸收（扣护盾值、弹体作废）；
+    /// 起点已在圈内的弹体（圈内开火）不挡。护盾值归零 → 内核当场收起（Active = 0、耗尽次数 +1），过载 / 重启的计时与状态机在热更层（按 fg.TbShieldState）。
+    /// <see cref="RegenPerSec"/> 每步回复（热更层按状态写，没电时写 0）。随快照进存档（格式 10）。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CombatShield
+    {
+        /// <summary>热更层的护盾序号（&gt; 0，不复用）。</summary>
+        public int ExtKey;
+        public CombatFaction Faction;
+        public byte Active;
+        public short Pad;
+        public double2 Pos;
+        public float Radius;
+        public float Hp;
+        public float MaxHp;
+        public float RegenPerSec;
+        /// <summary>累计吸收的伤害 / 弹体数 / 耗尽次数（面板读数、耗电按窗口差分）。</summary>
+        public double Absorbed;
+        public int Hits;
+        public int Depletions;
     }
 
     /// <summary>阵营。己方（玩家）与敌方互为目标；中立单位（训练靶）只接受显式指向它的攻击。</summary>
@@ -598,6 +635,8 @@ namespace BinGames.Sim.Combat
         /// <summary>FG2-FW-03：具名标签反应触发（Unit=挂上标签的单位，Other=被反应的单位 ID，Code=反应规则下标，Value=反应额外伤害（克制类为负），Pos=被反应的单位）。
         /// 反馈用，超出上限可以丢；可靠的计数在 <see cref="CombatData.ReactionCount"/>（进存档）。</summary>
         TagReaction = 42,
+        /// <summary>FG6-DEF-02：护盾吸收了一发弹体（Other=护盾序号，Value=吸收的伤害，Pos=入圈点，Code=1 表示这一发把护盾打空）。</summary>
+        ShieldAbsorb = 43,
     }
 
     /// <summary>一次开火尝试的结果（编队攻击、直控点击都走 <see cref="CombatKernel.FireAt"/>；热更层映射成 Demo 同一套原因文本）。</summary>
@@ -855,6 +894,8 @@ namespace BinGames.Sim.Combat
         public float SeparationFactor;
         /// <summary>FG2-FW-02：同时存在的区域 / 待结算回波 / 无人机上限（0 = 用 <see cref="CombatConst"/> 的默认值；超出的不生成并计数）。</summary>
         public int ZoneCapacity;
+        /// <summary>FG6-DEF-02 复审修复：陷阱发射器场地的上限（0 = <see cref="CombatConst.DefaultFieldZoneCapacity"/>）；与 <see cref="ZoneCapacity"/> 分开计数。</summary>
+        public int FieldZoneCapacity;
         public int EchoCapacity;
         public int DroneCapacity;
         /// <summary>FG2-FW-02：无人机移动速度（米 / 秒）、触及距离（米，另加目标半径）、状态持续伤害节拍与区域节拍（游戏秒）。0 = 内核默认值。</summary>

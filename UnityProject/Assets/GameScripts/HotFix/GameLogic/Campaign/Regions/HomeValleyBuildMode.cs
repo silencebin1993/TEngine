@@ -59,6 +59,8 @@ namespace GameLogic.Campaign.Regions
             CopyBox,
             /// <summary>FG3-LOG-07：升级规划模式下拉框。</summary>
             UpgradeBox,
+            /// <summary>FG6-DEF-02：选中屏障 / 闸门后按住左键拖一段墙（全有或全无）。</summary>
+            Wall,
         }
 
         private static readonly GameActionId[] HotbarActions =
@@ -746,6 +748,11 @@ namespace GameLogic.Campaign.Regions
                 BeginDrag(DragKind.Belt, cell, state);
                 return;
             }
+            if (SelectedIsWall && !PasteMode && !SettingsMode && !DemolishMode && !RelocateMode)
+            {
+                BeginDrag(DragKind.Wall, cell, state); // FG6-DEF-02：屏障 / 闸门按住拖拽成一段（单击 = 一格）
+                return;
+            }
             if (CopyMode)
             {
                 BeginDrag(DragKind.CopyBox, cell, state);
@@ -812,6 +819,7 @@ namespace GameLogic.Campaign.Regions
             string dragBuilding = _dragBuildingId;
             GridCell dragPivot = _dragBuildingPivot;
             int dragRot = _dragBuildingRotation;
+            Defense.WallPlan lastWall = WallPlan; // 松手时复用拖拽中已算好的屏障规划（CancelDrag 会清掉）
             CancelDrag();
             if (state == null)
             {
@@ -821,6 +829,9 @@ namespace GameLogic.Campaign.Regions
             {
                 case DragKind.Belt:
                     Report(PlanHistory.PlaceBeltPath(state, SelectedToolId, start, cell, HomeGridService.BeltDirOf(GhostRotation), PendingS0, PendingS1, PendingS2), state);
+                    break;
+                case DragKind.Wall:
+                    CommitWall(state, start, cell, lastWall);
                     break;
                 case DragKind.CopyBox:
                     CommitCopy(state, start, cell);
@@ -992,12 +1003,13 @@ namespace GameLogic.Campaign.Regions
 
         private void CancelDrag()
         {
-            if (Drag == DragKind.None && BeltPlan == null && BoxPlan == null && PrioritizeBoxCount < 0 && ClearPlan == null && UpgradePreview == null)
+            if (Drag == DragKind.None && BeltPlan == null && BoxPlan == null && PrioritizeBoxCount < 0 && ClearPlan == null && UpgradePreview == null && WallPlan == null)
             {
                 return;
             }
             Drag = DragKind.None;
             BeltPlan = null;
+            WallPlan = null;
             BoxPlan = null;
             ClearPlan = null;
             UpgradePreview = null;
@@ -1016,6 +1028,9 @@ namespace GameLogic.Campaign.Regions
             {
                 case DragKind.Belt:
                     BeltPlan = HomeGridService.PlanBeltPath(state, SelectedToolId, DragStart, end, HomeGridService.BeltDirOf(GhostRotation), _beltBuffer);
+                    break;
+                case DragKind.Wall:
+                    WallPlan = Defense.DefenseService.PlanWall(state, SelectedTypeId, DragStart, end, _wallBuffer);
                     break;
                 case DragKind.DemolishBox:
                     BoxPlan = HomeGridService.PlanDemolishBox(state, DragStart, end, _boxBuffer);
@@ -1416,6 +1431,16 @@ namespace GameLogic.Campaign.Regions
             {
                 return; // 拖着搬迁的预览在 RefreshDrag 里算（跟着拖拽终点）。
             }
+            if (Drag == DragKind.Wall)
+            {
+                if (Preview != null)
+                {
+                    Preview = null; // FG6-DEF-02：拖墙时整段的预览在 RefreshDrag 里算。
+                    _previewKey = int.MinValue;
+                    Revision++;
+                }
+                return;
+            }
             string typeId = SelectedTypeId;
             BuildingRecord carry = null;
             if (typeId == null && CarryBuildingId != null && state != null)
@@ -1462,6 +1487,7 @@ namespace GameLogic.Campaign.Regions
                 // FG3-LOG-06（FGR-LOG-003“超出电力覆盖（只警告，不阻止）”；FG03 第 4 节“放置时预览电力覆盖”）：会接入哪个电网 / 超出覆盖的警告；电塔写会连起哪些电网、覆盖多少座建筑。
                 HomeValleyPowerGrid.AppendPlacementNotes(state, Preview);
             }
+            RefreshHoverRoute(state); // FG6-DEF-02：屏障 / 闸门放下之后敌人会改走哪里（预览线 + 状态栏一句）
             Revision++;
         }
 
@@ -1785,6 +1811,7 @@ namespace GameLogic.Campaign.Regions
             _boxEdges.Clear();
             _marks.Clear();
             _cross = null;
+            ReleaseRouteLines(); // FG6-DEF-02：预览线随 _root 销毁，这里释放材质
             _terrain?.Dispose();
             _terrain = null;
             DestroyAsset(ref _okMaterial);
@@ -1875,6 +1902,10 @@ namespace GameLogic.Campaign.Regions
                     }
                     _cross.transform.position = new Vector3(bad.X, 0.6f, bad.Y);
                 }
+            }
+            else if (WallPlan != null)
+            {
+                tile = PlaceWallTiles(tile, ref showCross); // FG6-DEF-02：拖一段墙
             }
             else if (BoxPlan != null)
             {
@@ -1974,6 +2005,7 @@ namespace GameLogic.Campaign.Regions
             }
             _cross.SetActive(showCross);
             ActiveTileCount = tile;
+            RefreshRouteLines(); // FG6-DEF-02：敌方来路预览线
         }
 
         /// <summary>当前显示的虚影 / 路径格数（自检读取）。</summary>

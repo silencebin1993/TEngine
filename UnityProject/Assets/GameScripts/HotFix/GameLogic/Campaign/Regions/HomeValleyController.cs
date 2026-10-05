@@ -314,6 +314,7 @@ namespace GameLogic.Campaign.Regions
             if (state != null)
             {
                 GameLogic.View.TurretViews.FrameUpdate(state, _combat, _root != null ? _root.transform : null, BuildMode);
+                GameLogic.View.DefenseViews.FrameUpdate(state, _combat, _root != null ? _root.transform : null, BuildMode); // FG6-DEF-02：护盾圈、护盾 / 陷阱放置预览
             }
             // FG0-ARCH-03：机器表现对象按内核位置插值 + 突袭者 / 炮塔 / 弹体实例化绘制（常数次调用，与单位数无关）。
             _combat?.FrameRender(_camera, GameClock.StepAlpha);
@@ -2069,6 +2070,7 @@ namespace GameLogic.Campaign.Regions
             _combat.RefreshAllMachineWeapons(state);
             // FG6-DEF-01 审查修复（P2）：炮塔的接入态不进内核快照——在第一步之前补回（读档接着跑与不存档一路跑一致）。
             Defense.TurretService.RestoreAfterLoad(state, _combat);
+            Defense.DefenseService.RestoreAfterLoad(state, _combat); // FG6-DEF-02：防御结构单位的阵亡事件交给防御服务（单位与护盾随快照恢复）
         }
 
         /// <summary>FG0-ARCH-04：还没建成的格网建筑（规划中 / 已预留材料 / 施工中）。</summary>
@@ -2731,6 +2733,7 @@ namespace GameLogic.Campaign.Regions
             }
             _combat?.ClearViews();
             GameLogic.View.TurretViews.Clear(); // FG6-DEF-01：炮塔头随 _root 销毁，这里清登记、释放射程圈。
+            GameLogic.View.DefenseViews.Clear(); // FG6-DEF-02：护盾圈与预览线随 _root 销毁，这里清登记。
             _buildingVisuals.Clear();
             _buildingBadges.Clear();
             _visualsRecordsRef = null;

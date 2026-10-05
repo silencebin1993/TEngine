@@ -53,6 +53,8 @@ namespace GameLogic.Campaign.Signal
         MachineCircuit = 1,
         /// <summary>炮塔（FG6-DEF-02 做炮塔固件槽时调 <see cref="FirmwareKinds.CanInstall"/>）。</summary>
         Turret = 2,
+        /// <summary>FG6-DEF-02：陷阱发射器（装一枚流体类 / 电磁类常规固件铺场地；判定同炮塔，原因写“不能装进陷阱发射器”）。</summary>
+        Trap = 3,
     }
 
     /// <summary>
@@ -365,12 +367,12 @@ namespace GameLogic.Campaign.Signal
             }
             if (IsCore(contentId))
             {
-                reasonKey = host == FirmwareHost.Turret ? "signal.reason.core_turret" : "signal.reason.core_signal_only";
+                reasonKey = host == FirmwareHost.Turret ? "signal.reason.core_turret" : host == FirmwareHost.Trap ? "signal.reason.core_trap" : "signal.reason.core_signal_only";
                 return false;
             }
             if (IsRaw(state, contentId))
             {
-                reasonKey = host == FirmwareHost.Turret ? "signal.reason.raw_turret" : "signal.reason.raw_signal_only";
+                reasonKey = host == FirmwareHost.Turret ? "signal.reason.raw_turret" : host == FirmwareHost.Trap ? "signal.reason.raw_trap" : "signal.reason.raw_signal_only";
                 return false;
             }
             // FG1-SIG-06 修复轮：机器电路 / 炮塔要能把固件编译成真实效果；没有可编译实现的（装甲击穿，DEBT-FG1SIG06-07 → FG2-FW-01）

@@ -1592,6 +1592,168 @@ namespace BinGames.Sim.Nav
 
         private static bool Open(ref NavGrid g, int cls, int2 min, NativeArray<byte> blocked, int w, int lx, int ly) =>
             blocked[ly * w + lx] == 0 && NavGridOps.Passable(ref g, min.x + lx, min.y + ly, cls);
+
+        // ─────────────────────────────── FG6-DEF-02：放置屏障时预览敌方路线（距离场 + 下坡追踪）───────────────────────────────
+
+        /// <summary>
+        /// FG6-DEF-02（FG06 第 4 节“放置屏障时预览对流场的影响（敌人会改走哪里）”）：在矩形区域内以 <paramref name="goals"/>（核心外一圈）为 0 做多源 Dijkstra
+        /// （8 向、斜走不切角、代价与寻路同一套 StepCost），<paramref name="extraBlocked"/> 视为被挡（假设的新屏障）；再从每个来路起点 <paramref name="entries"/> 沿距离下降追踪到目标。
+        /// 第 i 条路线的格子写进 <paramref name="points"/>，<paramref name="info"/>[i] = (起点下标, 格数, 代价；不可达 = (起点, 0, -1))。
+        /// 确定性：堆并列按格坐标决胜，下坡并列按固定方向顺序。O(区域格数 × log)，只在预览换格 / 换朝向时调用（主线程 Burst）。
+        /// </summary>
+        public static void FlowRoutes(ref NavGrid g, int cls, int2 min, int2 max, NativeArray<int2> goals, int goalCount, NativeArray<int2> extraBlocked, int extraCount,
+            NativeArray<int2> entries, int entryCount, NativeList<int2> points, NativeArray<int3> info)
+        {
+            int w = max.x - min.x + 1;
+            int h = max.y - min.y + 1;
+            for (int i = 0; i < entryCount; i++)
+            {
+                info[i] = new int3(points.Length, 0, -1);
+            }
+            if (w <= 0 || h <= 0)
+            {
+                return;
+            }
+            int n = w * h;
+            var dist = new NativeArray<int>(n, Allocator.Temp);
+            var blocked = new NativeArray<byte>(n, Allocator.Temp);
+            var heap = new NativeList<NavHeapItem>(1024, Allocator.Temp);
+            for (int i = 0; i < n; i++)
+            {
+                dist[i] = NavConst.Infinity;
+            }
+            for (int i = 0; i < extraCount; i++)
+            {
+                int2 c = extraBlocked[i] - min;
+                if (c.x >= 0 && c.y >= 0 && c.x < w && c.y < h)
+                {
+                    blocked[c.y * w + c.x] = 1;
+                }
+            }
+            for (int i = 0; i < goalCount; i++)
+            {
+                int2 c = goals[i] - min;
+                if (c.x < 0 || c.y < 0 || c.x >= w || c.y >= h)
+                {
+                    continue;
+                }
+                int idx = c.y * w + c.x;
+                if (dist[idx] == 0 || !Open(ref g, cls, min, blocked, w, c.x, c.y))
+                {
+                    continue;
+                }
+                dist[idx] = 0;
+                HeapPush(heap, new NavHeapItem { F = 0, TieY = c.y, TieX = c.x, Item = idx });
+            }
+            while (heap.Length > 0)
+            {
+                NavHeapItem it = HeapPop(heap);
+                int idx = it.Item;
+                if (it.F != dist[idx])
+                {
+                    continue;
+                }
+                int x = idx % w;
+                int y = idx / w;
+                byte ca = NavGridOps.CellAt(ref g, min.x + x, min.y + y);
+                for (int k = 0; k < 8; k++)
+                {
+                    int2 d = Dir8(k);
+                    int nx = x + d.x;
+                    int ny = y + d.y;
+                    if (nx < 0 || ny < 0 || nx >= w || ny >= h || !Open(ref g, cls, min, blocked, w, nx, ny))
+                    {
+                        continue;
+                    }
+                    if (k >= 4 && (!Open(ref g, cls, min, blocked, w, nx, y) || !Open(ref g, cls, min, blocked, w, x, ny)))
+                    {
+                        continue;
+                    }
+                    int j = ny * w + nx;
+                    int nd = it.F + StepCost(ca, NavGridOps.CellAt(ref g, min.x + nx, min.y + ny), k >= 4);
+                    if (nd < dist[j])
+                    {
+                        dist[j] = nd;
+                        HeapPush(heap, new NavHeapItem { F = nd, TieY = ny, TieX = nx, Item = j });
+                    }
+                }
+            }
+            for (int e = 0; e < entryCount; e++)
+            {
+                int2 c = entries[e] - min;
+                int start = points.Length;
+                if (c.x < 0 || c.y < 0 || c.x >= w || c.y >= h || dist[c.y * w + c.x] >= NavConst.Infinity)
+                {
+                    info[e] = new int3(start, 0, -1);
+                    continue;
+                }
+                int cx = c.x;
+                int cy = c.y;
+                int cost = dist[cy * w + cx];
+                points.Add(new int2(min.x + cx, min.y + cy));
+                int guard = n;
+                while (dist[cy * w + cx] > 0 && guard-- > 0)
+                {
+                    int best = -1;
+                    int bestD = dist[cy * w + cx];
+                    for (int k = 0; k < 8; k++)
+                    {
+                        int2 d = Dir8(k);
+                        int nx = cx + d.x;
+                        int ny = cy + d.y;
+                        if (nx < 0 || ny < 0 || nx >= w || ny >= h || !Open(ref g, cls, min, blocked, w, nx, ny))
+                        {
+                            continue;
+                        }
+                        if (k >= 4 && (!Open(ref g, cls, min, blocked, w, nx, cy) || !Open(ref g, cls, min, blocked, w, cx, ny)))
+                        {
+                            continue;
+                        }
+                        int dj = dist[ny * w + nx];
+                        if (dj < bestD)
+                        {
+                            bestD = dj;
+                            best = k;
+                        }
+                    }
+                    if (best < 0)
+                    {
+                        break;
+                    }
+                    int2 bd = Dir8(best);
+                    cx += bd.x;
+                    cy += bd.y;
+                    points.Add(new int2(min.x + cx, min.y + cy));
+                }
+                info[e] = new int3(start, points.Length - start, cost);
+            }
+            heap.Dispose();
+            blocked.Dispose();
+            dist.Dispose();
+        }
+    }
+
+    /// <summary>FG6-DEF-02：主线程同步：放置屏障时的敌方路线预览（Burst，Run）。</summary>
+    [BurstCompile(CompileSynchronously = true)]
+    public struct NavFlowRouteJob : IJob
+    {
+        public NavGrid G;
+        public int Class;
+        public int2 Min;
+        public int2 Max;
+        [ReadOnly] public NativeArray<int2> Goals;
+        public int GoalCount;
+        [ReadOnly] public NativeArray<int2> Extra;
+        public int ExtraCount;
+        [ReadOnly] public NativeArray<int2> Entries;
+        public int EntryCount;
+        public NativeList<int2> Points;
+        public NativeArray<int3> Info;
+
+        public void Execute()
+        {
+            NavSearch.FlowRoutes(ref G, Class, Min, Max, Goals, GoalCount, Extra, ExtraCount, Entries, EntryCount, Points, Info);
+        }
     }
 
     /// <summary>一批寻路请求（Burst，工作线程）。</summary>

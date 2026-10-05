@@ -354,6 +354,12 @@ namespace GameLogic.EditorTools
                     case 391: StepTurretAimPaused(inStep); break;
                     case 392: StepTurretAimFired(inStep); break;
                     case 393: StepTurretLeft(inStep); break;
+                    // FG6-DEF-02：建造菜单“防御”页签选屏障 T1 → 悬停时地面画出敌方来路预览线 → 按住左键拖一段墙（6 格虚影，一步）→ 右键取消选择 →
+                    // 点建成的护盾发生器 → 建筑面板“护盾…”→ 防御面板（护盾值、状态、倒计时）→ Esc → 清理测试建筑与虚影。
+                    case 394: StepWallPicked(inStep); break;
+                    case 395: StepWallDragged(inStep); break;
+                    case 396: StepShieldPanel(inStep); break;
+                    case 397: StepShieldPanelShown(inStep); break;
                     case 346: StepOverridePicked(inStep); break;
                     case 347: StepOverridePlaced(inStep); break;
                     case 348: StepOverridePanel(inStep); break;
@@ -6980,6 +6986,194 @@ namespace GameLogic.EditorTools
                 "清理测试炮塔与虚影（炮塔记录随建筑一起清掉）");
             GameClock.SetPaused(SessionState.GetInt(K + "TurretWasPaused", 0) == 1);
             SessionState.SetInt(K + "TurretSub", 0);
+            Next(394, "FG6-DEF-02：建造菜单“防御”页签选屏障 T1；悬停时地面画出敌方来路预览");
+        }
+
+        // ── FG6-DEF-02：屏障拖拽与来路预览、护盾面板（真实鼠标 / 按键；放下的是虚影，机器施工由 FgDefenseStructuresSelfCheck 覆盖）──
+
+        private const string SmokeShieldId = Campaign.Regions.HomeValleyLayout.RegionId + ":smoke_power_shield";
+
+        private static void StepWallPicked(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            SessionState.SetInt(K + "WallWasPaused", GameClock.Paused ? 1 : 0);
+            GameClock.SetPaused(true);
+            // 测试捷径：研发树“防御”三个节点记为已研究（研究流程由 FgResearchSelfCheck 覆盖）。
+            Campaign.Economy.ResearchService.CompleteForTests(state, "defense.barrier", "defense.shield", "defense.trap");
+            // 核心附近按地形找一段 6 格都能放屏障的直线（玩家放置校验），不写死坐标（B25）。
+            GridCell core = HomeGridService.CorePivot(state);
+            GridCell? start = null;
+            for (int r = 7; r <= 22 && start == null; r++)
+            {
+                for (int dy = -r; dy <= r && start == null; dy++)
+                {
+                    for (int dx = -r; dx <= r && start == null; dx++)
+                    {
+                        if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != r)
+                        {
+                            continue;
+                        }
+                        var c = new GridCell(core.X + dx, core.Y + dy);
+                        Campaign.Defense.WallPlan plan = Campaign.Defense.DefenseService.PlanWall(state, Campaign.Defense.DefenseCatalog.BarrierT1, c, new GridCell(c.X + 5, c.Y));
+                        if (plan.Ok)
+                        {
+                            start = c;
+                        }
+                    }
+                }
+            }
+            SessionState.SetInt(K + "WallX", start?.X ?? 0);
+            SessionState.SetInt(K + "WallY", start?.Y ?? 0);
+            int tab = Campaign.Grid.GridContent.Categories.ToList().FindIndex(c => c.Id == "defense");
+            bool tabClicked = ClickUitk("[BuildModeHudHost]", "BuildCat" + tab);
+            int idx = HudItemIndex(Campaign.Defense.DefenseCatalog.BarrierT1);
+            bool picked = idx >= 0 && ClickUitk("[BuildModeHudHost]", "BuildItem" + idx) && mode != null && mode.SelectedTypeId == Campaign.Defense.DefenseCatalog.BarrierT1;
+            Check(start.HasValue && tabClicked && picked, $"点建造菜单“防御”页签里的“屏障 T1”（第 {idx + 1} 项）：选中；找到一段 6 格可放的直线（{start}）");
+            if (start.HasValue)
+            {
+                HoverWorld(new Vector3(start.Value.X, 0f, start.Value.Y));
+            }
+            SessionState.SetInt(K + "WallSub", 0);
+            Next(395, "悬停时敌方来路预览线；按住左键拖一段墙");
+        }
+
+        private static void StepWallDragged(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            var start = new GridCell(SessionState.GetInt(K + "WallX", 0), SessionState.GetInt(K + "WallY", 0));
+            var end = new GridCell(start.X + 5, start.Y);
+            int sub = SessionState.GetInt(K + "WallSub", 0);
+            if (sub == 0)
+            {
+                if (inStep < 0.7)
+                {
+                    return;
+                }
+                Check(mode != null && mode.HoverRoute != null && mode.HoverRoute.HasRoutes && mode.ActiveRouteLineCount > 0,
+                    $"放置屏障时预览对敌方路线的影响：地面画出 {mode?.ActiveRouteLineCount} 条来路预览线，状态行“{mode?.HoverRoute?.Summary()}”");
+                SessionState.SetInt(K + "WallCount0", state.BuildingRecords.Count(x => x.BuildingTypeId == Campaign.Defense.DefenseCatalog.BarrierT1));
+                SessionState.SetInt(K + "WallSub", 1);
+                DragWorld(new Vector3(start.X, 0f, start.Y), new Vector3(end.X, 0f, end.Y), 0);
+                return;
+            }
+            if (sub == 1)
+            {
+                if (inStep < 1.6)
+                {
+                    return;
+                }
+                InputRouter.DebugSetReader(null);
+                int placed = state.BuildingRecords.Count(x => x.BuildingTypeId == Campaign.Defense.DefenseCatalog.BarrierT1) - SessionState.GetInt(K + "WallCount0", 0);
+                Check(placed == 6 && mode != null && mode.StatusText.Contains("6 座"),
+                    $"按住左键拖一段墙：松开放下 {placed} 座屏障虚影（全有或全无、一步撤销）；状态行“{mode?.StatusText?.Replace("\n", " / ")}”");
+                SessionState.SetInt(K + "WallSub", 2);
+                RightClickWorld(new Vector3(end.X, 0f, end.Y + 3));
+                return;
+            }
+            if (inStep < 2.3)
+            {
+                return;
+            }
+            Check(mode != null && mode.IsOpen && mode.SelectedTypeId == null, "右键取消选择（建造模式还开着）");
+            // 测试捷径：放一座接得上电网的建成护盾发生器（机器施工与护盾状态机由自检覆盖），点它打开建筑面板。
+            GridCell core = HomeGridService.CorePivot(state);
+            string builtId = null;
+            for (int r = 8; r <= 24 && builtId == null; r++)
+            {
+                for (int a = 0; a < 36 && builtId == null; a++)
+                {
+                    float ang = a * 10f * Mathf.Deg2Rad;
+                    var c = new GridCell(core.X + Mathf.RoundToInt(Mathf.Cos(ang) * r), core.Y + Mathf.RoundToInt(Mathf.Sin(ang) * r));
+                    if (!HomeGridService.ValidatePlacement(state, Campaign.Defense.DefenseCatalog.ShieldTypeId, c, 0, checkCost: false).Ok)
+                    {
+                        continue;
+                    }
+                    AddSmokeBuilding(state, Campaign.Defense.DefenseCatalog.ShieldTypeId, "shield", c);
+                    Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+                    BuildingRecord b = HomeGridService.FindBuilding(state, SmokeShieldId);
+                    if (b != null && b.PowerState == BuildingPowerState.Powered)
+                    {
+                        b.Health = Campaign.Economy.BuildingOps.MaxDurability(Campaign.Defense.DefenseCatalog.ShieldTypeId);
+                        builtId = SmokeShieldId;
+                        continue;
+                    }
+                    state.BuildingRecords = state.BuildingRecords.Where(x => x.BuildingId != SmokeShieldId).ToArray();
+                    HomeGridService.MapFor(state);
+                    Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+                }
+            }
+            Campaign.Defense.DefenseService.Sync(state);
+            BuildingRecord shield = HomeGridService.FindBuilding(state, SmokeShieldId);
+            Check(shield != null, $"测试捷径：一座接得上电网的建成护盾发生器（{builtId}）");
+            SessionState.SetInt(K + "WallSub", 0);
+            if (shield != null)
+            {
+                ClickWorld(new Vector3(shield.Position.x, 0f, shield.Position.y));
+            }
+            Next(396, "左键点护盾发生器打开建筑面板；点“护盾…”");
+        }
+
+        private static void StepShieldPanel(double inStep)
+        {
+            if (inStep < 0.7)
+            {
+                return;
+            }
+            ProductionPanelUIToolkit bp = ProductionPanelUIToolkit.Instance;
+            bool open = ProductionPanelUIToolkit.IsOpen && bp != null && ProductionPanelUIToolkit.BuildingId == SmokeShieldId && bp.DefenseButton != null
+                        && ProductionPanelUIToolkit.Visible(bp.DefenseButton) && bp.DefenseButton.text == Localization.GameText.Get("defense.panel.open_shield");
+            Check(open, $"左键点护盾发生器打开它的通用面板：状态“{bp?.ReasonText}”，有“{bp?.DefenseButton?.text}”按钮");
+            Check(ClickUitk("[ProductionPanelHost]", "PrDefense"), "通用面板上点“护盾…”");
+            Next(397, "防御面板显示护盾值、状态与倒计时；Esc 关闭并清理");
+        }
+
+        private static void StepShieldPanelShown(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            if (SessionState.GetInt(K + "WallSub", 0) == 0)
+            {
+                if (inStep < 0.7)
+                {
+                    return;
+                }
+                DefensePanelUIToolkit panel = DefensePanelUIToolkit.Instance;
+                panel?.Refresh(force: true);
+                bool shown = DefensePanelUIToolkit.IsOpen && panel != null && panel.PanelVisible && DefensePanelUIToolkit.BuildingId == SmokeShieldId && panel.ShieldSectionVisible
+                             && !panel.TrapSectionVisible && panel.ShieldValueText.Contains("护盾值") && panel.ShieldCountdownText.Length > 0
+                             && LabelText("[DefensePanelHost]", "DefenseTitle").Contains(Localization.GameText.Get("building.shield_gen.name"));
+                Check(shown, $"防御面板：“{panel?.TitleText}”，“{panel?.ShieldValueText}”，“{panel?.ShieldCountdownText}”，耗电“{panel?.ShieldPowerText}”");
+                CheckNoTextMarkers("防御面板");
+                SessionState.SetInt(K + "WallSub", 1);
+                PressKeyKeepMouse(KeyCode.Escape);
+                return;
+            }
+            if (inStep < 1.3)
+            {
+                return;
+            }
+            Check(!DefensePanelUIToolkit.IsOpen, "Esc 关闭防御面板");
+            // 清理测试捷径：撤走测试护盾、取消屏障虚影，恢复暂停状态。
+            ProductionPanelUIToolkit.Close();
+            foreach (BuildingRecord ghost in state.BuildingRecords.Where(x => x.BuildingTypeId == Campaign.Defense.DefenseCatalog.BarrierT1
+                         && Campaign.Regions.HomeValleyController.IsPlannedGhost(x)).ToArray())
+            {
+                HomeGridService.TryToggleDemolish(state, ghost.BuildingId);
+            }
+            state.BuildingRecords = state.BuildingRecords.Where(x => x.BuildingId != SmokeShieldId).ToArray();
+            HomeGridService.MapFor(state);
+            Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+            Campaign.Defense.DefenseService.Sync(state);
+            Check(HomeGridService.FindBuilding(state, SmokeShieldId) == null && !state.BuildingRecords.Any(x => x.BuildingTypeId == Campaign.Defense.DefenseCatalog.BarrierT1)
+                  && Campaign.Defense.DefenseService.Find(state, SmokeShieldId) == null,
+                "清理测试护盾与屏障虚影（防御记录随建筑一起清掉）");
+            GameClock.SetPaused(SessionState.GetInt(K + "WallWasPaused", 0) == 1);
+            SessionState.SetInt(K + "WallSub", 0);
             Next(264, "FG3-LOG-04：建造模式里放分流器与地下传送带");
         }
 

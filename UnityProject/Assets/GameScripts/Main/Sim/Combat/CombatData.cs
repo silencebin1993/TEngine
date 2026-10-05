@@ -163,6 +163,8 @@ namespace BinGames.Sim.Combat
         /// <summary>FG2-E2E-01（FG-GAP-043）：引信弹迹（表现数据，按游戏时间到期；不进快照与哈希）。</summary>
         public NativeList<CombatShotTrace> Traces;
         public NativeList<CombatDrone> Drones;
+        /// <summary>FG6-DEF-02：护盾（随快照进存档，格式 10）。</summary>
+        public NativeList<CombatShield> Shields;
 
         /// <summary>FG2-FW-03：具名标签反应规则（热更层按 fg.TbReaction 在建地点时写入，按 priority 排好序；不进存档——规则是内容，不是状态）。</summary>
         public NativeList<CombatReactionRule> Reactions;
@@ -260,6 +262,7 @@ namespace BinGames.Sim.Combat
                 Echoes = new NativeList<CombatEcho>(16, Allocator.Persistent),
                 Traces = new NativeList<CombatShotTrace>(16, Allocator.Persistent),
                 Drones = new NativeList<CombatDrone>(16, Allocator.Persistent),
+                Shields = new NativeList<CombatShield>(4, Allocator.Persistent),
                 Reactions = new NativeList<CombatReactionRule>(CombatConst.MaxReactions, Allocator.Persistent),
                 StatusFx = new NativeArray<CombatStatusFx>(32, Allocator.Persistent),
                 ReactionCount = new NativeArray<int>(CombatConst.MaxReactions, Allocator.Persistent),
@@ -350,6 +353,7 @@ namespace BinGames.Sim.Combat
             Echoes.Dispose();
             Traces.Dispose();
             Drones.Dispose();
+            Shields.Dispose();
             Reactions.Dispose();
             StatusFx.Dispose();
             ReactionCount.Dispose();
@@ -372,6 +376,7 @@ namespace BinGames.Sim.Combat
         public int Count => Id.Length;
 
         public int ZoneCap => Config.ZoneCapacity > 0 ? Config.ZoneCapacity : CombatConst.DefaultZoneCapacity;
+        public int FieldZoneCap => Config.FieldZoneCapacity > 0 ? Config.FieldZoneCapacity : CombatConst.DefaultFieldZoneCapacity;
         public int EchoCap => Config.EchoCapacity > 0 ? Config.EchoCapacity : CombatConst.DefaultEchoCapacity;
         public int DroneCap => Config.DroneCapacity > 0 ? Config.DroneCapacity : CombatConst.DefaultDroneCapacity;
 
@@ -560,6 +565,7 @@ namespace BinGames.Sim.Combat
             Echoes.Clear();
             Traces.Clear();
             Drones.Clear();
+            Shields.Clear();
             Gameplay.Clear();
             Cues.Clear();
             RoutePts.Clear();

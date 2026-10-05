@@ -114,6 +114,9 @@ namespace GameLogic.UI.Kit
         public Button RangeButton => _range;
         private Button _turret;
         public Button TurretButton => _turret;
+        private Button _defense;
+        /// <summary>FG6-DEF-02：护盾… / 陷阱… / 屏障…（打开防御建筑面板）。</summary>
+        public Button DefenseButton => _defense;
         private Button _fusion;
         public Button FusionButton => _fusion;
         private Button _intel;
@@ -331,6 +334,7 @@ namespace GameLogic.UI.Kit
             _grid = root.Q<Button>("BpGrid");
             _range = root.Q<Button>("PrRange");
             _turret = root.Q<Button>("PrTurret");
+            _defense = root.Q<Button>("PrDefense");
             _fusion = root.Q<Button>("PrFusion");
             _intel = root.Q<Button>("PrIntel");
             _blackBox = root.Q<Button>("PrBlackBox");
@@ -345,6 +349,7 @@ namespace GameLogic.UI.Kit
             _grid.clicked += OpenGrid;
             _range.clicked += OpenRange;
             _turret.clicked += OpenTurret;
+            _defense.clicked += OpenDefense;
             _fusion.clicked += OpenFusion;
             _intel.clicked += OpenIntel;
             _blackBox.clicked += OpenBlackBox;
@@ -508,6 +513,10 @@ namespace GameLogic.UI.Kit
             _grid.EnableInClassList("bn-hidden", !HomeValleyPowerGrid.IsPowerRelevantType(b.BuildingTypeId));
             _range.EnableInClassList("bn-hidden", !TestRangeService.IsRange(b));
             _turret.EnableInClassList("bn-hidden", !Campaign.Defense.TurretCatalog.IsTurretType(b.BuildingTypeId));
+            Campaign.Defense.DefenseKind dk = Campaign.Defense.DefenseCatalog.KindOf(b.BuildingTypeId);
+            _defense.EnableInClassList("bn-hidden", dk == Campaign.Defense.DefenseKind.None);
+            _defense.text = GameText.Get(dk == Campaign.Defense.DefenseKind.Shield ? "defense.panel.open_shield"
+                : dk == Campaign.Defense.DefenseKind.Trap ? "defense.panel.open_trap" : "defense.panel.open_barrier");
             _fusion.EnableInClassList("bn-hidden", !FusionService.IsSynth(b));
             _intel.EnableInClassList("bn-hidden", !IntelService.IsPost(b));
             _blackBox.EnableInClassList("bn-hidden", !BlackBoxService.IsGallery(b));
@@ -1434,6 +1443,14 @@ namespace GameLogic.UI.Kit
             string id = BuildingId;
             SetOpen(false);
             TestRangePanelUIToolkit.Open(id);
+        }
+
+        /// <summary>FG6-DEF-02：防御建筑 → 打开防御面板（护盾值与重启倒计时 / 陷阱固件与铺设方式 / 屏障规则）。</summary>
+        public void OpenDefense()
+        {
+            string id = BuildingId;
+            SetOpen(false);
+            DefensePanelUIToolkit.Open(id);
         }
 
         /// <summary>FG6-DEF-01：炮塔 → 打开炮塔面板（蓝图、目标模式、补给、接入）。</summary>

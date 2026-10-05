@@ -483,10 +483,10 @@ namespace GameLogic.EditorTools
                             && ResearchCatalog.TryGet("defense.turret_t3", out ResearchNodeDef t3) && t3.IsReady && t3.Unlocks.Contains("tier:turret_heavy.t3")
                             && ResearchService.MigratedNodes().All(n => !n.Id.StartsWith("defense.turret", StringComparison.Ordinal))
                             && ResearchService.LegacyOpenNodes().All(n => !n.Id.StartsWith("defense.turret", StringComparison.Ordinal))
-                            && ResearchCatalog.TryGet("defense.barrier", out ResearchNodeDef barrier) && !barrier.IsReady;
-            Expect(modes && buildings && research && CombatConst.FormatVersion == 9,
+                            && ResearchCatalog.TryGet("defense.repair_drone", out ResearchNodeDef later) && !later.IsReady; // FG6-DEF-02 屏障已开放，“后续版本”改用维修无人机（FG6-DEF-03）
+            Expect(modes && buildings && research && CombatConst.FormatVersion >= 9,
                 $"A2 五种目标模式（code 与内核 CombatTargetMode 一一对应，按 FGR-DEF-003 列举排序）；轻型 2×2 / 重型 3×3 炮塔座（防御页签、耗电 8 / 15、耐久 150 / 260、T1～T3 射程 ×1 / 1.15 / 1.3、减伤 0 / 20% / 35%）；" +
-                $"研发 defense.turret_t2 / t3 已就绪并解锁炮塔座等级（旧档迁移与开局技术数据换算不计，屏障仍在后续版本）；战斗内核快照格式 {CombatConst.FormatVersion}（{modes}/{buildings}/{research}）");
+                $"研发 defense.turret_t2 / t3 已就绪并解锁炮塔座等级（旧档迁移与开局技术数据换算不计，维修无人机仍在后续版本）；战斗内核快照格式 {CombatConst.FormatVersion}（{modes}/{buildings}/{research}）");
 
             string[] keys = t.TbLocText.DataList.Select(r => r.Key).Where(k => k.StartsWith("turret.", StringComparison.Ordinal) || k.StartsWith("bs.reason.turret_", StringComparison.Ordinal)
                 || k.StartsWith("roster.turret.", StringComparison.Ordinal) || k.StartsWith("roster.tab.turrets", StringComparison.Ordinal) || k.StartsWith("build.turret.", StringComparison.Ordinal)
@@ -1797,7 +1797,7 @@ namespace GameLogic.EditorTools
                 }
                 Line("    · J3 诊断：" + string.Join("；", diffs));
             }
-            Expect(possessedDropped && f9 == 9 && r9 == CombatLoadResult.Ok && h9 == hash && f8 == 8 && r8 == CombatLoadResult.Ok && turrets8 == 3,
+            Expect(possessedDropped && f9 == CombatConst.FormatVersion && r9 == CombatLoadResult.Ok && h9 == hash && f8 == 8 && r8 == CombatLoadResult.Ok && turrets8 == 3,
                 $"J3 战斗内核快照：格式 {f9} 往返（{r9}）状态哈希一致（含补给与朝向；接入态按设计不进快照、读档清掉 {possessedDropped}）{h9:X16} = {hash:X16}；格式 {f8} 的旧快照照常读（{r8}，炮塔 {turrets8} 座，补给 / 转速补零后由对账补上）");
 
             // 旧档没有炮塔域 / 坏值：补成空域、钳回合法范围、重复记录与序号整理。

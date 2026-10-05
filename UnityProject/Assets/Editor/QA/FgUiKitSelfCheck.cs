@@ -1460,7 +1460,7 @@ namespace GameLogic.EditorTools
             // FG5-RND-04 新增 FusionPanel.uxml（电路合成台 / 配方书）、FusionQueueRow.uxml（队列行模板）与 FusionClueRow.uxml（线索行模板），共 44 份。
             // FG5-RND-05 新增 IntelPanel.uxml（情报面板）与 IntelRow.uxml（情报行模板）；FG5-RND-06 新增 BlackBoxPanel.uxml（黑匣子陈列馆 / 纪念墙）与 BlackBoxRow.uxml（行模板），共 48 份。
             // FG6-DEF-01 新增 TurretPanel.uxml（炮塔面板），共 49 份。
-            Expect(uxmlCount == 49 && hard.Count == 0, $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
+            Expect(uxmlCount == 50 && hard.Count == 0, /* FG6-DEF-02：+ DefensePanel.uxml */ $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
 
             string[] codeDirs =
             {

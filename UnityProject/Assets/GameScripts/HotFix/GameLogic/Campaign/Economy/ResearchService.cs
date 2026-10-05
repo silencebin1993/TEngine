@@ -1208,7 +1208,10 @@ namespace GameLogic.Campaign.Economy
             return false;
         }
 
-        private static readonly string[] PostTreeTypes = { ResearchCatalog.LabTypeId, Defense.TurretCatalog.LightTypeId, Defense.TurretCatalog.HeavyTypeId };
+        // FG6-DEF-02：屏障 / 闸门 / 护盾 / 陷阱同样是研发树开放之后才落地的内容（从一开始就由研究门控）。
+        private static readonly string[] PostTreeTypes = { ResearchCatalog.LabTypeId, Defense.TurretCatalog.LightTypeId, Defense.TurretCatalog.HeavyTypeId,
+            Defense.DefenseCatalog.BarrierT1, Defense.DefenseCatalog.BarrierT2, Defense.DefenseCatalog.BarrierT3, Defense.DefenseCatalog.GateTypeId,
+            Defense.DefenseCatalog.ShieldTypeId, Defense.DefenseCatalog.TrapTypeId };
 
         // ── FG5-E2E-01：新档的技术数据供给（DEBT-FG5RND01-08）与研发加成的数值来源行（DEBT-FG5RND01-07）──────────────
 

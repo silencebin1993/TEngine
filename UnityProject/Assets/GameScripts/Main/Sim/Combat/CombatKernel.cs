@@ -1122,6 +1122,91 @@ namespace BinGames.Sim.Combat
             return true;
         }
 
+        // ─────────────────────────────── FG6-DEF-02 护盾与场地 ───────────────────────────────
+
+        public int ShieldCount => _d.Shields.Length;
+
+        /// <summary>登记或更新一座护盾（按 <paramref name="extKey"/> 找；没有就追加，满了返回 false）。不改累计读数（吸收量 / 次数 / 耗尽次数）。</summary>
+        public bool SetShield(int extKey, CombatFaction faction, double2 pos, float radius, float hp, float maxHp, bool active, float regenPerSec)
+        {
+            if (extKey <= 0 || !IsFinite(pos) || !(radius >= 0f) || float.IsNaN(hp) || !(maxHp > 0f))
+            {
+                return false;
+            }
+            int at = ShieldIndexOf(extKey);
+            CombatShield sh = at >= 0 ? _d.Shields[at] : new CombatShield { ExtKey = extKey };
+            sh.Faction = faction;
+            sh.Pos = pos;
+            sh.Radius = radius;
+            sh.MaxHp = maxHp;
+            sh.Hp = math.clamp(hp, 0f, maxHp);
+            sh.Active = (byte)(active ? 1 : 0);
+            sh.RegenPerSec = math.max(0f, regenPerSec);
+            if (at >= 0)
+            {
+                _d.Shields[at] = sh;
+            }
+            else
+            {
+                if (_d.Shields.Length >= CombatConst.MaxShields)
+                {
+                    return false;
+                }
+                _d.Shields.Add(sh);
+            }
+            Touch();
+            return true;
+        }
+
+        public bool RemoveShield(int extKey)
+        {
+            int at = ShieldIndexOf(extKey);
+            if (at < 0)
+            {
+                return false;
+            }
+            _d.Shields.RemoveAt(at); // 保持其余顺序（确定性）
+            Touch();
+            return true;
+        }
+
+        public bool TryGetShield(int extKey, out CombatShield shield)
+        {
+            int at = ShieldIndexOf(extKey);
+            shield = at >= 0 ? _d.Shields[at] : default;
+            return at >= 0;
+        }
+
+        public CombatShield ShieldAt(int index) => index >= 0 && index < _d.Shields.Length ? _d.Shields[index] : default;
+
+        private int ShieldIndexOf(int extKey)
+        {
+            for (int i = 0; i < _d.Shields.Length; i++)
+            {
+                if (_d.Shields[i].ExtKey == extKey)
+                {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        /// <summary>FG6-DEF-02（FGR-DEF-013）：铺一块不属于任何单位的场地（陷阱发射器）。与读法区域同一套结算与上限。</summary>
+        public bool SpawnFieldZone(CombatFaction faction, double2 pos, float radius, float seconds, float dps, uint statusMask, float statusSeconds,
+            float statusDps, float slow, float vuln, CombatZoneLook look = CombatZoneLook.Pool)
+        {
+            if (!IsFinite(pos))
+            {
+                return false;
+            }
+            bool ok = CombatLogic.SpawnFieldZone(ref _d, faction, pos, radius, seconds, dps, statusMask, statusSeconds, statusDps, slow, vuln, look);
+            if (ok)
+            {
+                Touch();
+            }
+            return ok;
+        }
+
         public bool TryGetEcho(int index, out CombatEcho echo)
         {
             if (index < 0 || index >= _d.Echoes.Length)
@@ -1526,6 +1611,21 @@ namespace BinGames.Sim.Combat
                 Mix(ref h, _d.ReactionCount[i]);
                 Mix(ref h, _d.ReactionDamage[i]);
             }
+            for (int q = 0; q < _d.Shields.Length; q++)
+            {
+                CombatShield sh = _d.Shields[q]; // FG6-DEF-02（格式 10）
+                Mix(ref h, sh.ExtKey);
+                Mix(ref h, sh.Active);
+                Mix(ref h, sh.Pos.x);
+                Mix(ref h, sh.Pos.y);
+                Mix(ref h, sh.Radius);
+                Mix(ref h, sh.Hp);
+                Mix(ref h, sh.MaxHp);
+                Mix(ref h, sh.RegenPerSec);
+                Mix(ref h, sh.Absorbed);
+                Mix(ref h, sh.Hits);
+                Mix(ref h, sh.Depletions);
+            }
             Mix(ref h, _d.Gameplay.Length);
             Mix(ref h, s.NextNavSerial);
             Mix(ref h, _d.NavOut.Length);
@@ -1748,6 +1848,27 @@ namespace BinGames.Sim.Combat
                 w.Write(nr.Class);
                 w.Write(nr.Flags);
             }
+            // FG6-DEF-02（格式 10）：护盾（放在读法表之前：区域 / 回波 / 无人机与反应计数块仍是快照正文的最后两段，旧的篡改 / 截断测试按尾部定位照常成立）。
+            if (format >= 10)
+            {
+                w.Write(_d.Shields.Length);
+                for (int q = 0; q < _d.Shields.Length; q++)
+                {
+                    CombatShield sh = _d.Shields[q];
+                    w.Write(sh.ExtKey);
+                    w.Write((byte)sh.Faction);
+                    w.Write(sh.Active);
+                    w.Write(sh.Pos.x);
+                    w.Write(sh.Pos.y);
+                    w.Write(sh.Radius);
+                    w.Write(sh.Hp);
+                    w.Write(sh.MaxHp);
+                    w.Write(sh.RegenPerSec);
+                    w.Write(sh.Absorbed);
+                    w.Write(sh.Hits);
+                    w.Write(sh.Depletions);
+                }
+            }
             // FG2-FW-02（格式 3）：区域、回波、无人机。
             if (format >= 3)
             {
@@ -1801,6 +1922,10 @@ namespace BinGames.Sim.Combat
                 if (format >= 7)
                 {
                     w.Write((byte)zn.Look);
+                }
+                if (format >= 10)
+                {
+                    w.Write(zn.Kind); // FG6-DEF-02（格式 10）：读法区域 / 陷阱场地（各自的上限）
                 }
             }
             w.Write(_d.Echoes.Length);
@@ -2205,6 +2330,46 @@ namespace BinGames.Sim.Combat
                     });
                 }
             }
+            // FG6-DEF-02（格式 10）：护盾；更老的快照没有（热更层按护盾记录重新登记）。
+            if (format >= 10)
+            {
+                int shn = r.ReadInt32();
+                if (shn < 0 || shn > CombatConst.MaxShields)
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
+                for (int q = 0; q < shn; q++)
+                {
+                    var sh = new CombatShield
+                    {
+                        ExtKey = r.ReadInt32(),
+                        Faction = (CombatFaction)r.ReadByte(),
+                        Active = r.ReadByte(),
+                        Pos = new double2(r.ReadDouble(), r.ReadDouble()),
+                        Radius = r.ReadSingle(),
+                        Hp = r.ReadSingle(),
+                        MaxHp = r.ReadSingle(),
+                        RegenPerSec = r.ReadSingle(),
+                        Absorbed = r.ReadDouble(),
+                        Hits = r.ReadInt32(),
+                        Depletions = r.ReadInt32(),
+                    };
+                    if (sh.ExtKey <= 0 || sh.Active > 1 || (byte)sh.Faction > (byte)CombatFaction.Neutral || !IsFinite(sh.Pos) || !(sh.Radius >= 0f) || float.IsInfinity(sh.Radius)
+                        || !(sh.MaxHp > 0f) || float.IsInfinity(sh.MaxHp) || !(sh.Hp >= 0f) || sh.Hp > sh.MaxHp || !(sh.RegenPerSec >= 0f) || float.IsInfinity(sh.RegenPerSec)
+                        || double.IsNaN(sh.Absorbed) || sh.Absorbed < 0 || sh.Hits < 0 || sh.Depletions < 0)
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                    for (int k = 0; k < staging.Shields.Length; k++)
+                    {
+                        if (staging.Shields[k].ExtKey == sh.ExtKey)
+                        {
+                            return CombatLoadResult.InvalidValue;
+                        }
+                    }
+                    staging.Shields.Add(sh);
+                }
+            }
             if (format >= 3)
             {
                 CombatLoadResult rr = ParseReadings(r, ref staging, wn, format);
@@ -2279,6 +2444,12 @@ namespace BinGames.Sim.Combat
                 // FG2-VFX-02（格式 7）：区域外观（旧格式 = 液池）。
                 zone.Look = format >= 7 ? (CombatZoneLook)r.ReadByte() : CombatZoneLook.Pool;
                 if ((byte)zone.Look > (byte)CombatZoneLook.Residue)
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
+                // FG6-DEF-02（格式 10）：区域种类（更老的快照没有陷阱场地 = 全是读法区域）。
+                zone.Kind = format >= 10 ? r.ReadByte() : CombatConst.ZoneKindReading;
+                if (zone.Kind > CombatConst.ZoneKindField)
                 {
                     return CombatLoadResult.InvalidValue;
                 }

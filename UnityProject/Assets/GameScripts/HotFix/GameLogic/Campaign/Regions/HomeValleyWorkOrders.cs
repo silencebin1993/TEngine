@@ -2911,6 +2911,7 @@ namespace GameLogic.Campaign.Regions
 
             building.ConstructionState = BuildingConstructionState.Operational;
             BuildingVisualFeed.Mark(building); // FG3-LOG-09：完工，画面重画这一座（虚影 → 建筑）
+            Defense.DefenseService.OnConstructionCompleted(state, building); // FG6-DEF-02 复审修复：屏障 / 闸门完工立即开始挡路（不等整拍对账，与读档重建的镜像一致）
             // FG3-LOG-02：投入 = 运到现场、建进去的材料（= 所需材料）；拆除时全额返还这么多。
             HomeValleyConstruction.OnSiteCompleted(state, order, building);
             HomeValleyPowerGrid.Recompute(state);
@@ -2966,7 +2967,8 @@ namespace GameLogic.Campaign.Regions
                 Rotation = ghost.Rotation,
                 GridX = ghost.GridX,
                 GridY = ghost.GridY,
-                Health = source.Health,
+                // FG6-DEF-02 复审修复：升级换了类型（屏障 T1 → T2）时耐久按比例换算到新上限（耐久递增）；纯搬迁原样。
+                Health = upgrade ? Economy.BuildingOps.HealthAfterTypeChange(source.Health, fromType, ghost.BuildingTypeId) : source.Health,
                 // 原样带过原建筑的运行状态（运转 / 玩家关停 / 受损），不替玩家重新启用（FGR-BASE-020）；
                 // 其它状态（搬迁期间不该出现）按运转处理。
                 ConstructionState = source.ConstructionState == BuildingConstructionState.Damaged

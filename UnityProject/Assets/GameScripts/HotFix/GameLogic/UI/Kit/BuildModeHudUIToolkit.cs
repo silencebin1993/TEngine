@@ -888,6 +888,16 @@ namespace GameLogic.UI.Kit
             {
                 SetVisible(_dragInfo, false); // 分流器 / 合流器一次放一座：成本在成本行。
             }
+            else if (mode.WallPlan != null)
+            {
+                // FG6-DEF-02（FGR-DEF-010）：拖一段墙——格数、总造价、敌人的来路怎么变（不合法时写第一处原因）。
+                Campaign.Defense.WallPlan wall = mode.WallPlan;
+                SetVisible(_dragInfo, true);
+                _dragInfo.text = GameText.Format("build.wall.drag", HomeGridService.DisplayName(wall.TypeId), wall.Cells.Count, wall.TotalCost)
+                                 + "\n" + (wall.Ok ? wall.Route.Summary() : GameText.Format("ui.build.invalid", wall.Reason.Value.Describe()))
+                                 + (wall.Ok && wall.CutsOff.Count > 0 ? "\n" + wall.CutsOffWarning() : string.Empty);
+                _dragInfo.EnableInClassList("bm-cost-short", !wall.Ok);
+            }
             else if (box != null)
             {
                 SetVisible(_dragInfo, true);
@@ -977,6 +987,15 @@ namespace GameLogic.UI.Kit
                 if (!belt.Ok)
                 {
                     status = GameText.Format("ui.build.invalid", belt.Describe());
+                    error = true;
+                }
+            }
+            else if (mode.WallPlan != null)
+            {
+                // FG6-DEF-02：拖墙时整段的原因 / 来路在拖拽信息行，状态行只在不合法时写原因。
+                if (!mode.WallPlan.Ok && mode.WallPlan.Reason.HasValue)
+                {
+                    status = GameText.Format("ui.build.invalid", mode.WallPlan.Reason.Value.Describe());
                     error = true;
                 }
             }

@@ -275,6 +275,10 @@ public partial class Tables
     /// </summary>
     public fg.TbRulePreset TbRulePreset {get; }
     /// <summary>
+    /// 护盾状态机
+    /// </summary>
+    public fg.TbShieldState TbShieldState {get; }
+    /// <summary>
     /// 开局布局
     /// </summary>
     public fg.TbStartLayout TbStartLayout {get; }
@@ -290,6 +294,10 @@ public partial class Tables
     /// 领地规划
     /// </summary>
     public fg.TbTerritory TbTerritory {get; }
+    /// <summary>
+    /// 陷阱参数
+    /// </summary>
+    public fg.TbTrapProfile TbTrapProfile {get; }
     /// <summary>
     /// 炮塔流体消耗
     /// </summary>
@@ -435,10 +443,12 @@ public partial class Tables
         TbRosterRole = new fg.TbRosterRole(loader("fg_tbrosterrole"));
         TbRuleKind = new fg.TbRuleKind(loader("fg_tbrulekind"));
         TbRulePreset = new fg.TbRulePreset(loader("fg_tbrulepreset"));
+        TbShieldState = new fg.TbShieldState(loader("fg_tbshieldstate"));
         TbStartLayout = new fg.TbStartLayout(loader("fg_tbstartlayout"));
         TbStatusTag = new fg.TbStatusTag(loader("fg_tbstatustag"));
         TbSurface = new fg.TbSurface(loader("fg_tbsurface"));
         TbTerritory = new fg.TbTerritory(loader("fg_tbterritory"));
+        TbTrapProfile = new fg.TbTrapProfile(loader("fg_tbtrapprofile"));
         TbTurretFluid = new fg.TbTurretFluid(loader("fg_tbturretfluid"));
         TbTurretProfile = new fg.TbTurretProfile(loader("fg_tbturretprofile"));
         TbTurretTargetMode = new fg.TbTurretTargetMode(loader("fg_tbturrettargetmode"));
@@ -529,10 +539,12 @@ public partial class Tables
         TbRosterRole.ResolveRef(this);
         TbRuleKind.ResolveRef(this);
         TbRulePreset.ResolveRef(this);
+        TbShieldState.ResolveRef(this);
         TbStartLayout.ResolveRef(this);
         TbStatusTag.ResolveRef(this);
         TbSurface.ResolveRef(this);
         TbTerritory.ResolveRef(this);
+        TbTrapProfile.ResolveRef(this);
         TbTurretFluid.ResolveRef(this);
         TbTurretProfile.ResolveRef(this);
         TbTurretTargetMode.ResolveRef(this);

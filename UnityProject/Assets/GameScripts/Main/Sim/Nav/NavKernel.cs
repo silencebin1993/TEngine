@@ -319,6 +319,78 @@ namespace BinGames.Sim.Nav
             }
         }
 
+        /// <summary>
+        /// FG6-DEF-02（FG06 第 4 节“放置屏障时预览对流场的影响”）：敌方路线预览（镜像，Burst）。以 <paramref name="goals"/> 为终点、<paramref name="extraBlocked"/> 视为被挡，
+        /// 从每个 <paramref name="entries"/> 起点沿距离下降追踪出一条路线（格子序列，写进 <paramref name="points"/>）。<paramref name="costs"/>[i] = 代价（-1 = 不可达），
+        /// <paramref name="offsets"/> / <paramref name="counts"/> = 第 i 条路线在 points 里的位置。返回可达的条数。
+        /// </summary>
+        public int FlowRoutes(int cls, int2 min, int2 max, IReadOnlyList<int2> goals, IReadOnlyList<int2> extraBlocked, IReadOnlyList<int2> entries,
+            List<int2> points, int[] offsets, int[] counts, int[] costs)
+        {
+            points?.Clear();
+            int ec = entries?.Count ?? 0;
+            var g = ToNative(goals);
+            var extra = ToNative(extraBlocked);
+            var en = ToNative(entries);
+            var pts = new NativeList<int2>(256, Allocator.TempJob);
+            var info = new NativeArray<int3>(math.max(1, ec), Allocator.TempJob);
+            try
+            {
+                new NavFlowRouteJob
+                {
+                    G = _mirror,
+                    Class = cls,
+                    Min = min,
+                    Max = max,
+                    Goals = g,
+                    GoalCount = goals?.Count ?? 0,
+                    Extra = extra,
+                    ExtraCount = extraBlocked?.Count ?? 0,
+                    Entries = en,
+                    EntryCount = ec,
+                    Points = pts,
+                    Info = info,
+                }.Run();
+                int reachable = 0;
+                for (int i = 0; i < ec; i++)
+                {
+                    int3 inf = info[i];
+                    if (offsets != null && i < offsets.Length)
+                    {
+                        offsets[i] = inf.x;
+                    }
+                    if (counts != null && i < counts.Length)
+                    {
+                        counts[i] = inf.y;
+                    }
+                    if (costs != null && i < costs.Length)
+                    {
+                        costs[i] = inf.z;
+                    }
+                    if (inf.z >= 0)
+                    {
+                        reachable++;
+                    }
+                }
+                if (points != null)
+                {
+                    for (int i = 0; i < pts.Length; i++)
+                    {
+                        points.Add(pts[i]);
+                    }
+                }
+                return reachable;
+            }
+            finally
+            {
+                g.Dispose();
+                extra.Dispose();
+                en.Dispose();
+                pts.Dispose();
+                info.Dispose();
+            }
+        }
+
         private static NativeArray<int2> ToNative(IReadOnlyList<int2> list)
         {
             var a = new NativeArray<int2>(math.max(1, list?.Count ?? 0), Allocator.TempJob);

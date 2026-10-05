@@ -970,6 +970,9 @@ namespace GameLogic.Campaign
         /// <summary>FG6-DEF-01（FG06 FGR-DEF-001～005）：炮塔（固定底盘的机器）——每座炮塔装的蓝图、目标模式、击毁数、存着的流体，信号是否在炮塔里。
         /// 唯一写入口 <see cref="Defense.TurretService"/>。只加字段、不升域版本（ADR FG0-SAVE-01）：旧档没有 = 没有炮塔。</summary>
         public TurretState Turrets = new TurretState();
+        /// <summary>FG6-DEF-02（FG06 FGR-DEF-010～013）：屏障 / 闸门 / 护盾发生器 / 陷阱发射器——战斗内核里的结构单位序号、护盾状态机（状态与到期步）、陷阱装的固件 / 铺设方式 / 存着的流体。
+        /// 唯一写入口 <see cref="Defense.DefenseService"/>。只加字段、不升域版本：旧档没有 = 没有这些防御建筑。</summary>
+        public DefenseState Defense = new DefenseState();
     }
 
     /// <summary>
@@ -1874,6 +1877,7 @@ namespace GameLogic.Campaign
             s.Raids.PendingWakeIds ??= Array.Empty<string>();
             s.Raids.PendingWakeReasons ??= Array.Empty<string>();
             Defense.TurretService.EnsureState(s); // FG6-DEF-01：炮塔域补成空域（旧档没有 = 没有炮塔）；坏值钳回合法范围。
+            Defense.DefenseService.EnsureState(s); // FG6-DEF-02：防御建筑域补成空域（旧档没有 = 没有屏障 / 闸门 / 护盾 / 陷阱）；坏值钳回。
             if (s.Raids.NextNavSerial < 1)
             {
                 s.Raids.NextNavSerial = 1;

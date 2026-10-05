@@ -101,6 +101,12 @@ namespace BinGames.Sim.Combat
                 grid2.Dispose();
             }
 
+            // 5a. FG6-DEF-02：护盾回复（热更层按状态机写的每秒回复量；展开与否由内核 / 热更层的状态决定）。
+            if (d.Shields.Length > 0)
+            {
+                StepShields(ref d, dt);
+            }
+
             // 5b. FG2-FW-02：读法生成的无人机、区域、回波与状态标签（统一时钟，暂停不走、倍速按游戏时间）。
             StepReadings(ref d, dt);
 
@@ -1497,6 +1503,12 @@ namespace BinGames.Sim.Combat
                         }
                     }
                 }
+                // FG6-DEF-02（FGR-DEF-012）：从圈外飞进展开的护盾（不同阵营）就被吸收——比任何单位的交点更早时，弹体在入圈点作废、扣护盾值。
+                // 起点已在圈内的（圈内开火）不挡。O(护盾数)，护盾数有上限 CombatConst.MaxShields。
+                if (d.Shields.Length > 0 && TryAbsorbByShield(ref d, ref pr, next, hitT))
+                {
+                    continue;
+                }
                 if (hit >= 0)
                 {
                     int owner = d.SlotOf(pr.Owner);
@@ -1532,6 +1544,66 @@ namespace BinGames.Sim.Combat
                 d.Projectiles[write++] = pr;
             }
             d.Projectiles.ResizeUninitialized(write);
+        }
+
+        /// <summary>FG6-DEF-02：这一步弹体的线段 prev→next 先于单位交点（参数 <paramref name="unitT"/>）进入哪座展开的、不同阵营的护盾；进入了就吸收（返回 true，弹体作废）。</summary>
+        private static bool TryAbsorbByShield(ref CombatData d, ref CombatProjectile pr, double2 next, double unitT)
+        {
+            int best = -1;
+            double bestT = unitT;
+            for (int s = 0; s < d.Shields.Length; s++)
+            {
+                CombatShield sh = d.Shields[s];
+                if (sh.Active == 0 || sh.Faction == pr.Faction || !(sh.Radius > 0f))
+                {
+                    continue;
+                }
+                double r = sh.Radius;
+                if (math.lengthsq(pr.Prev - sh.Pos) <= r * r)
+                {
+                    continue;
+                }
+                double t = SegmentCircleT(pr.Prev, next, sh.Pos, r);
+                if (t >= 0 && (t < bestT || (t == bestT && best < 0)))
+                {
+                    bestT = t;
+                    best = s;
+                }
+            }
+            if (best < 0)
+            {
+                return false;
+            }
+            CombatShield hitShield = d.Shields[best];
+            float dmg = math.max(0f, pr.Damage);
+            hitShield.Hp -= dmg;
+            hitShield.Absorbed += dmg;
+            hitShield.Hits++;
+            byte emptied = 0;
+            if (hitShield.Hp <= 0f)
+            {
+                hitShield.Hp = 0f;
+                hitShield.Active = 0;
+                hitShield.Depletions++;
+                emptied = 1;
+            }
+            d.Shields[best] = hitShield;
+            Cue(ref d, CombatEventKind.ShieldAbsorb, -1, hitShield.ExtKey, dmg, pr.Prev + (next - pr.Prev) * bestT, emptied);
+            return true;
+        }
+
+        /// <summary>FG6-DEF-02：护盾每步回复 RegenPerSec × dt（不超过上限）。展开与否不在这里改（耗尽在吸收时收起，重新展开由热更层状态机写）。</summary>
+        private static void StepShields(ref CombatData d, float dt)
+        {
+            for (int s = 0; s < d.Shields.Length; s++)
+            {
+                CombatShield sh = d.Shields[s];
+                if (sh.RegenPerSec > 0f && sh.Hp < sh.MaxHp)
+                {
+                    sh.Hp = math.min(sh.MaxHp, sh.Hp + sh.RegenPerSec * dt);
+                    d.Shields[s] = sh;
+                }
+            }
         }
 
         /// <summary>线段 a→b 与圆的最早交点参数 t∈[0,1]；不相交返回 -1。起点已在圆内返回 0。</summary>

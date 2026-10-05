@@ -126,6 +126,11 @@ namespace GameLogic.Campaign.Grid
                 Defense.TurretService.SettingsOf(state, b, out s1, out s2);
                 return;
             }
+            // FG6-DEF-02：陷阱发射器的 S1 = 固件稳定编号，S2 = 铺设方式 + 1。
+            if (Defense.DefenseService.SettingsOf(state, b, out s1, out s2))
+            {
+                return;
+            }
             if (Economy.ProductionService.TryGet(state, b.BuildingId, out Economy.ProductionService.Producer p) && Economy.ProductionService.HasCopyableSettings(p))
             {
                 if (p.IsBurner)
@@ -174,6 +179,17 @@ namespace GameLogic.Campaign.Grid
                 if (s1 != 0 || s2 != 0)
                 {
                     recipeApplied = Defense.TurretService.ApplySettings(state, b, s1, s2);
+                    changed |= recipeApplied;
+                }
+                return changed;
+            }
+            if (Defense.DefenseCatalog.KindOf(b.BuildingTypeId) == Defense.DefenseKind.Trap)
+            {
+                // FG6-DEF-02：陷阱发射器（建成的或虚影）：补记录，写固件（能装才写）与铺设方式。
+                Defense.DefenseService.EnsureRecord(state, b);
+                if (s1 != 0 || s2 != 0)
+                {
+                    recipeApplied = Defense.DefenseService.ApplySettings(state, b, s1, s2);
                     changed |= recipeApplied;
                 }
                 return changed;
@@ -248,6 +264,12 @@ namespace GameLogic.Campaign.Grid
                     if (turret != null)
                     {
                         return line + (GameText.Language == GameLanguage.En ? ", " : "，") + turret;
+                    }
+                    // FG6-DEF-02：陷阱设置（固件 + 铺设方式）。
+                    string trap = Defense.DefenseService.DescribeSettings(s1, s2);
+                    if (trap != null)
+                    {
+                        return line + (GameText.Language == GameLanguage.En ? ", " : "，") + trap;
                     }
                     string rid = RecipeIdOf(s1);
                     if (rid != null && Economy.ItemCatalog.TryGetRecipe(rid, out Economy.RecipeDef rd))

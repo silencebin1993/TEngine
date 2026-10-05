@@ -247,8 +247,11 @@ namespace GameLogic.Campaign.Nav
             }
             for (int i = 0; i < oc; i++)
             {
-                _occBlock[i] = NavConst.BlockAll; // 建筑挡住全部移动类别；FG06 的闸门（只挡敌方）在 FG6-DEF-01 按类型区分。
+                _occBlock[i] = NavConst.BlockAll; // 建筑挡住全部移动类别
             }
+            // FG6-DEF-02（FGR-DEF-010 / 011）：屏障 / 闸门按状态改挡路位——建成的闸门只挡敌方类别（己方机器通过，写死的规则）；
+            // 还是虚影 / 已被摧毁的屏障与闸门不挡路（敌人打穿墙就能过去）。O(防御建筑数)，只在推进区块时。
+            Defense.DefenseService.ApplyNavBlockBits(BoundState, _map, _occBlock, oc);
             Kernel.PushChunk(cx, cy, c.Terrain, c.Occupancy, _occBlock, oc, asChange);
             PushedChunks++;
         }
@@ -436,6 +439,23 @@ namespace GameLogic.Campaign.Nav
             {
                 return 0;
             }
+            // FG6-DEF-02 复审修复：闸门只挡敌方（写死的规则），放行机器——不会让任何建筑变得机器到不了。
+            if (Defense.DefenseCatalog.KindOf(typeId) == Defense.DefenseKind.Gate)
+            {
+                return 0;
+            }
+            GridMath.FootprintCells(pivot, g.FootprintW, g.FootprintH, GridMath.NormalizeRotation(rotation), Cells);
+            return PlacementCutsOff(state, Cells, newlyUnreachable);
+        }
+
+        /// <summary>FG6-DEF-02（拖拽一段屏障）：假设把 <paramref name="footprint"/> 这些格子都挡上（己方类别），原来能到、放下后到不了的建筑。同一套 Burst 泛洪，只在拖拽终点换格时调用。</summary>
+        public static int PlacementCutsOff(CampaignState state, IReadOnlyList<GridCell> footprint, List<string> newlyUnreachable)
+        {
+            newlyUnreachable?.Clear();
+            if (!IsBound || state == null || !ReferenceEquals(state, BoundState) || footprint == null || footprint.Count == 0)
+            {
+                return 0;
+            }
             SyncGridChanges();
             if (!HomeGridService.TryGetCoreBounds(state, out GridCell coreMin, out GridCell coreMax))
             {
@@ -467,8 +487,7 @@ namespace GameLogic.Campaign.Nav
             {
                 return 0;
             }
-            GridMath.FootprintCells(pivot, g.FootprintW, g.FootprintH, GridMath.NormalizeRotation(rotation), Cells);
-            foreach (GridCell c in Cells)
+            foreach (GridCell c in footprint)
             {
                 Extra.Add(new int2(c.X, c.Y));
                 minX = Math.Min(minX, c.X);
@@ -504,6 +523,20 @@ namespace GameLogic.Campaign.Nav
             }
             return n;
         }
+
+        /// <summary>
+        /// FG6-DEF-02（FG06 第 4 节“放置屏障时预览对流场的影响”）：敌方来路预览（镜像上的 Burst 距离场 + 下坡追踪，见 <see cref="NavKernel.FlowRoutes"/>）。
+        /// 热更层碰寻路内核只经本服务（DEBT-FG0ARCH06-07）。镜像没绑定时返回 -1。
+        /// </summary>
+        public static int FlowRoutes(int cls, int2 min, int2 max, IReadOnlyList<int2> goals, IReadOnlyList<int2> extraBlocked, IReadOnlyList<int2> entries,
+            List<int2> points, int[] offsets, int[] counts, int[] costs) =>
+            IsBound ? Kernel.FlowRoutes(cls, min, max, goals, extraBlocked, entries, points, offsets, counts, costs) : -1;
+
+        /// <summary>FG6-DEF-02：镜像上这一格对某移动类别能不能走（来路预览找起点用）；镜像没绑定时 false。</summary>
+        public static bool PassableNow(int x, int y, int cls) => IsBound && Kernel.Passable(x, y, cls);
+
+        /// <summary>FG6-DEF-02：镜像实例的身份（换了寻路内核 = 缓存失效）。</summary>
+        public static int MirrorIdentity => IsBound ? System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(Kernel) : 0;
 
         /// <summary>FG2-FW-05：两座建筑之间能不能走通（机器搬运的路线）。</summary>
         public enum BuildingReach : byte

@@ -228,6 +228,7 @@ namespace GameLogic.Campaign.Combat
             _enemyIndexArray = null;
             _unitLabels.Clear();
             ClearTurretMaps();
+            ClearDefenseMaps();
             EventObserver = null;
         }
 
@@ -243,6 +244,8 @@ namespace GameLogic.Campaign.Combat
             c.CompactRatio = Tuning("combat.compact_ratio", c.CompactRatio);
             // FG2-FW-02：读法生成的区域 / 回波 / 无人机容量与节拍（fg.TbHomeTuning reading.*）。
             c.ZoneCapacity = (int)Math.Round(Tuning("reading.capacity.zones", CombatConst.DefaultZoneCapacity));
+            // FG6-DEF-02 复审修复：陷阱场地自己的上限（与读法区域分开计数，互不挤占）。
+            c.FieldZoneCapacity = (int)Math.Round(Tuning("trap.capacity.fields", CombatConst.DefaultFieldZoneCapacity));
             c.EchoCapacity = (int)Math.Round(Tuning("reading.capacity.echoes", CombatConst.DefaultEchoCapacity));
             c.DroneCapacity = (int)Math.Round(Tuning("reading.capacity.drones", CombatConst.DefaultDroneCapacity));
             c.DroneSpeed = Tuning("reading.drone.speed", 9f);
@@ -1212,6 +1215,11 @@ namespace GameLogic.Campaign.Combat
             {
                 return;
             }
+            // FG6-DEF-02：防御建筑（屏障 / 闸门 / 护盾 / 陷阱）的结构单位阵亡 = 建筑被摧毁，交给防御服务（CombatSite.Defense）。
+            if (TryHandleDefenseEvent(e))
+            {
+                return;
+            }
             switch (e.Kind)
             {
                 case CombatEventKind.Killed:
@@ -1451,6 +1459,10 @@ namespace GameLogic.Campaign.Combat
                     return;
                 }
                 case CombatEventKind.ArmorHit:
+                    FeedbackCues.RaiseAt(FeedbackCueId.ArmorHit, at);
+                    return;
+                case CombatEventKind.ShieldAbsorb:
+                    // FG6-DEF-02（B07）：护盾吸收一发弹体——占位沿用“命中装甲”的音效与命中点特效（提示事件有每步上限，B17）；打空那一发的过载通知由防御服务发。
                     FeedbackCues.RaiseAt(FeedbackCueId.ArmorHit, at);
                     return;
                 case CombatEventKind.TagReaction:
@@ -1865,6 +1877,7 @@ namespace GameLogic.Campaign.Combat
             _unitLabels.Clear();
             _weaponIndex.Clear();
             ClearTurretMaps();
+            ClearDefenseMaps();
             for (int w = 0; w < Kernel.WeaponCount; w++)
             {
                 if (Kernel.TryGetWeapon(w, out CombatWeapon cw))
@@ -1889,6 +1902,10 @@ namespace GameLogic.Campaign.Combat
                     {
                         orphans.Add(v.Id); // 记录已不存在的机器：内核单位移除（记录是存在性的真相）。
                     }
+                }
+                else if (v.Kind == CombatUnitKind.Structure && v.Faction == CombatFaction.Player)
+                {
+                    RestoreDefenseMap(v); // FG6-DEF-02：己方结构单位 = 防御建筑（外部键 = 防御序号）；敌方 / 中立的结构单位照旧按字符串键。
                 }
                 else if (v.Kind == CombatUnitKind.Enemy || v.Kind == CombatUnitKind.Structure)
                 {
