@@ -384,6 +384,24 @@ namespace GameLogic.Core
         /// <summary>FG6-DEF-05：第一次全歼一支突袭部队。</summary>
         public const string SiegeFirstDestroyed = "siege.first_destroyed";
 
+        /// <summary>FG6-DEF-06：第一次有突袭部队到达（突袭 HUD 的剩余敌人 / 观战按钮第一次出现；“怎么观战、怎么修理”的引导在 FG15-UX-04）。</summary>
+        public const string RaidHudFirstActive = "raid.hud_first_active";
+
+        /// <summary>FG6-DEF-06：第一次开观战（2x / 3x，镜头跟着战斗）。</summary>
+        public const string RaidFirstSpectate = "raid.first_spectate";
+
+        /// <summary>FG6-DEF-06：第一次因突袭到达自动暂停（默认只对前 3 次突袭；怎么在设置里改的引导在 FG15-UX-04）。</summary>
+        public const string RaidFirstAutoPause = "raid.first_auto_pause";
+
+        /// <summary>FG6-DEF-06：第一次打开防御总览。</summary>
+        public const string DefenseOverviewFirstOpen = "defense.overview_first_open";
+
+        /// <summary>FG6-DEF-06：防御总览第一次找到薄弱点（沿预测路线 / 外围没有火力覆盖的区段）。</summary>
+        public const string DefenseFirstWeakPoint = "defense.first_weak_point";
+
+        /// <summary>FG6-DEF-06（FGR-DEF-043）：第一次给驻防机器设巡逻路线。</summary>
+        public const string RosterFirstPatrol = "roster.first_patrol";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -434,6 +452,7 @@ namespace GameLogic.Core
             DefenseRepairDroneFirstBuilt, DefenseRepairDroneFirstRepair, DefenseRepairDroneFirstLost, RulesRebuildZoneFirstDrawn, RulesRebuildFirstBelt,
             RaidFirstPlanned, RaidFirstWarning, RaidFirstAssembling, RaidFirstWithdrawn, RaidWarningFirstClick,
             SiegeFirstUnfold, SiegeFirstBreach, SiegeFirstRetreat, SiegeFirstDestroyed,
+            RaidHudFirstActive, RaidFirstSpectate, RaidFirstAutoPause, DefenseOverviewFirstOpen, DefenseFirstWeakPoint, RosterFirstPatrol,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

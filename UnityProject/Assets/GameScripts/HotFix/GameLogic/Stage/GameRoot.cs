@@ -167,6 +167,8 @@ namespace GameLogic.Stage
             // FG0-UX-01：通知中心的自动暂停 / 定位 / 区域来源接到当前运行的区域；UI 基础件（浮层、通知、按键面板、
             // 暂停菜单）从主菜单阶段就挂上（主菜单的改键冲突确认、全部按键面板也要用）。
             GameLogic.Notifications.NotificationCenter.AutoPauseHandler = AutoPauseForNotification;
+            // FG6-DEF-06（FGR-DEF-042）：“突袭到达”的自动暂停默认值 = 本存档前 3 次突袭（设置界面从主菜单起就要显示这个默认值）。
+            Campaign.Defense.RaidDirectorService.EnsureArrivalAutoPauseRegistered();
             BindWorldProviders();
             UI.Kit.UiKitRuntime.Mount();
 
@@ -423,6 +425,8 @@ namespace GameLogic.Stage
             // ER8-CONTENT-01：音量设置同步、音效预加载、字幕条过期；UI 缩放设置作用到界面。
             // 主菜单里也要跑（设置面板在那里）。
             Campaign.Feedback.FeedbackCues.Tick();
+            // FG6-DEF-06：预警 / 突袭的音乐层与提示音（只在阶段变化时调音频模块；离开世界时回到平静）。
+            Campaign.Feedback.RaidAudioDirector.Tick(Campaign.CampaignSession.Current, AnyRegionActive, Time.unscaledDeltaTime);
             // FG0-UX-01：通知中心——弹出条过期、跟随战役切换重新绑定历史（主菜单里也要跑：回菜单时清空）。
             GameLogic.Notifications.NotificationCenter.Tick();
             Settings.UiScaleApplier.Tick();

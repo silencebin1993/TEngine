@@ -48,6 +48,12 @@ namespace GameLogic.Campaign
         public int TriggersReceived;
         public int TriggersSkipped;
         public int TriggersMerged;
+
+        // ── FG6-DEF-06（FGR-DEF-042“突袭到达时自动暂停（设置项，默认对前 3 次突袭开启）”）：只加字段、不升域版本 ──
+        /// <summary>本存档已经到达过的突袭波数（同一波分几支先后到达只算一次）。旧档没有 = 从 0 起算（不追溯，旧档之后的前 3 次默认暂停）。</summary>
+        public int ArrivedWaveCount;
+        /// <summary>最近计过数的波次序号（最多 8 个，判断同一波的后到队伍不重复计数）。</summary>
+        public int[] CountedWaves = Array.Empty<int>();
     }
 
     /// <summary>FG6-DEF-04：一次等待处理的触发。</summary>

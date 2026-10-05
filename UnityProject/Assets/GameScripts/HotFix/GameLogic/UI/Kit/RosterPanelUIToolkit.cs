@@ -51,6 +51,18 @@ namespace GameLogic.UI.Kit
         private TextField _nameField;
         private DropdownField _detailRole, _detailPoint;
         private VisualElement _detailPointRow;
+        // FG6-DEF-06（FGR-DEF-043）：巡逻路线
+        private VisualElement _patrolRow;
+        private Label _patrolLabel;
+        private DropdownField _patrolAdd;
+        private Button _patrolClear;
+        private Label _patrolNote;
+        private readonly List<string> _patrolIds = new List<string>();
+        private bool _patrolSuppress;
+        public bool PatrolRowVisible => _patrolRow != null && !_patrolRow.ClassListContains("uk-hidden");
+        public DropdownField PatrolAddField => _patrolAdd;
+        public Button PatrolClearButton => _patrolClear;
+        public string PatrolNoteText => _patrolNote?.text ?? string.Empty;
 
         private VisualTreeAsset _rowTemplate;
         private bool _rowTemplateLoading;
@@ -289,6 +301,16 @@ namespace GameLogic.UI.Kit
             _detailPointRow = root.Q<VisualElement>("RosterDetailPointRow");
             _detailPointLabel = root.Q<Label>("RosterDetailPointLabel");
             _detailPoint = root.Q<DropdownField>("RosterDetailPoint");
+            _patrolRow = root.Q<VisualElement>("RosterDetailPatrolRow");
+            _patrolLabel = root.Q<Label>("RosterDetailPatrolLabel");
+            _patrolAdd = root.Q<DropdownField>("RosterDetailPatrolAdd");
+            _patrolClear = root.Q<Button>("RosterDetailPatrolClear");
+            _patrolNote = root.Q<Label>("RosterDetailPatrolNote");
+            if (_patrolAdd != null)
+            {
+                _patrolAdd.RegisterValueChangedCallback(evt => OnPatrolPicked(evt.newValue));
+                _patrolClear.clicked += ClearPatrol;
+            }
             _detailInfo = root.Q<Label>("RosterDetailInfo");
 
             _close.clicked += () => SetOpen(false);
@@ -763,6 +785,15 @@ namespace GameLogic.UI.Kit
                 _detailPointLabel.text = GameText.Get("roster.detail.point_label");
                 FillPoints(state, m);
             }
+            if (_patrolRow != null)
+            {
+                _patrolRow.EnableInClassList("uk-hidden", !garrison);
+                _patrolNote.EnableInClassList("uk-hidden", !garrison);
+                if (garrison)
+                {
+                    FillPatrol(state, m);
+                }
+            }
             _detailInfo.text = DetailText(state, m);
         }
 
@@ -965,6 +996,68 @@ namespace GameLogic.UI.Kit
                 return;
             }
             bool ok = MachineRoster.TrySetRole(Session, DetailLogicId, _detailRoleIds[at], out string message);
+            SayDetail(ok, message);
+        }
+
+        /// <summary>FG6-DEF-06：巡逻行——说明（当前路线 / 不巡逻）、“加巡逻点”下拉（第一项是提示，选中即加到末尾）、清空巡逻。</summary>
+        private void FillPatrol(CampaignState state, MachineRecord m)
+        {
+            _patrolSuppress = true;
+            try
+            {
+                _patrolLabel.text = GameText.Get("roster.detail.patrol_label");
+                _patrolClear.text = GameText.Get("roster.detail.patrol_clear");
+                _patrolClear.SetEnabled(m.PatrolPoints != null && m.PatrolPoints.Length > 0);
+                _patrolNote.text = MachineRoster.PatrolText(state, m);
+                var labels = new List<string> { GameText.Get("roster.detail.patrol_add") };
+                _patrolIds.Clear();
+                _patrolIds.Add(string.Empty);
+                foreach (BuildingRecord b in state?.BuildingRecords ?? Array.Empty<BuildingRecord>())
+                {
+                    if (b == null || b.RegionId != HomeValleyLayout.RegionId || Campaign.Grid.HomeGridService.IsRelocationGhost(b) || HomeValleyController.IsPlannedGhost(b)
+                        || b.ConstructionState == BuildingConstructionState.Damaged)
+                    {
+                        continue;
+                    }
+                    _patrolIds.Add(b.BuildingId);
+                    labels.Add(StandingRuleService.BuildingLabel(state, b.BuildingId));
+                }
+                DropdownChoices.Apply(_patrolAdd, labels, labels[0]);
+                _patrolAdd.SetValueWithoutNotify(_patrolAdd.choices[0]);
+            }
+            finally
+            {
+                _patrolSuppress = false;
+            }
+        }
+
+        private void OnPatrolPicked(string label)
+        {
+            if (_patrolSuppress)
+            {
+                return;
+            }
+            int at = _patrolAdd.choices.IndexOf(label);
+            if (DetailLogicId == 0 || at <= 0 || at >= _patrolIds.Count)
+            {
+                return;
+            }
+            bool ok = MachineRoster.TryAddPatrolPoint(Session, DetailLogicId, _patrolIds[at], out string message);
+            SayDetail(ok, message);
+        }
+
+        /// <summary>“加巡逻点”下拉选第 <paramref name="index"/> 项（自检用，与玩家点选同一回调）。</summary>
+        public void SelectPatrolPoint(int index)
+        {
+            if (_patrolAdd != null && index > 0 && index < _patrolAdd.choices.Count)
+            {
+                _patrolAdd.index = index;
+            }
+        }
+
+        public void ClearPatrol()
+        {
+            bool ok = MachineRoster.TryClearPatrol(Session, DetailLogicId, out string message);
             SayDetail(ok, message);
         }
 

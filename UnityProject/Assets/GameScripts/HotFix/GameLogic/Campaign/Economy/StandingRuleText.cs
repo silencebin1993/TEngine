@@ -215,7 +215,8 @@ namespace GameLogic.Campaign.Economy
                 case KindSupply:
                     return GameText.Format("rules.act.supply", r.Batch);
                 case KindWar:
-                    return GameText.Format("rules.act.war_plan", GameText.Get(r.BoostRepair ? "rules.act.war_boost" : "rules.act.war_noboost"),
+                    return GameText.Format("rules.act.war_plan", GameText.Get(r.BoostRepair ? "rules.act.war_boost" : "rules.act.war_noboost")
+                            + (r.BoostDefenseSupply ? GameText.Get("rules.act.war_supply") : string.Empty), // FG6-DEF-06
                         BuildingList(state, r.Targets, "rules.nothing"));
                 case KindSilent:
                     return GameText.Format("rules.act.silent_night", MachineList(r.Machines, "rules.nothing"),

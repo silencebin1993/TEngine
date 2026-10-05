@@ -62,6 +62,8 @@ namespace GameLogic.UI.Kit
         private Button _uplink;
         private Label _uplinkHint;
         private Label _footer;
+        private Button _overview;
+        public Button OverviewButton => _overview;
 
         private readonly List<string> _blueprintIds = new List<string>();
         private int _key;
@@ -180,6 +182,17 @@ namespace GameLogic.UI.Kit
             _uplink = root.Q<Button>("TurretUplink");
             _uplinkHint = root.Q<Label>("TurretUplinkHint");
             _footer = root.Q<Label>("TurretFooter");
+            _overview = root.Q<Button>("TurretOverview");
+            if (_overview != null)
+            {
+                _overview.clicked += ClickOverview; // FG6-DEF-06：防御总览入口
+                UiTooltip.Attach(_overview, () => new TooltipContent
+                {
+                    Title = GameText.Get("defov.title"),
+                    Body = GameText.Format("raid.spec.overview_tip", InputDisplay.ForAction(GameActionId.OpenDefense)),
+                    Shortcut = GameActionId.OpenDefense,
+                });
+            }
 
             _close.clicked += () => SetOpen(false);
             _help.clicked += OpenCodex;
@@ -296,6 +309,13 @@ namespace GameLogic.UI.Kit
         }
 
         public void OpenCodex() => MechanicCodex.Open("codex.defense.turret");
+
+        /// <summary>FG6-DEF-06：“防御总览…”——关掉炮塔面板、打开防御总览（总览在炮塔面板之下，不先关会被盖住）。</summary>
+        public void ClickOverview()
+        {
+            SetOpen(false);
+            DefenseOverviewPanelUIToolkit.Open();
+        }
 
         private TooltipContent ModeTooltip(int slot)
         {
@@ -417,6 +437,10 @@ namespace GameLogic.UI.Kit
                 _modeSame.SetEnabled(found && !string.IsNullOrEmpty(ro.BlueprintId));
 
                 // 接入
+                if (_overview != null)
+                {
+                    _overview.text = GameText.Get("defov.open_from_turret");
+                }
                 _uplink.text = GameText.Get(found && ro.Uplinked ? "turret.panel.leave" : "turret.panel.uplink");
                 _uplink.SetEnabled(found && (ro.Uplinked || ro.HasPort));
                 _uplinkHint.text = !found ? string.Empty

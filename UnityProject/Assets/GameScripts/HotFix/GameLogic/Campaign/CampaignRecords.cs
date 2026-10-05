@@ -138,6 +138,25 @@ namespace GameLogic.Campaign
         /// <summary>名册为这台机器开的最近一张驻防 / 送修工单（岗位维持器据此判断“玩家接管过就不再拉回去”）。</summary>
         public string RoleOrderId;
 
+        /// <summary>
+        /// FG6-DEF-06（FGR-DEF-043“按玩家画的巡逻路线巡逻”，承接 DEBT-FG4ECO07-02）：驻防岗的巡逻点（建筑 ID，按顺序；空 / null = 守在驻防点不巡逻）。
+        /// 路线 = 驻防点 → 巡逻点 1 → … → 回到驻防点，循环。唯一写入口 <see cref="MachineRoster.TryAddPatrolPoint"/> / <see cref="MachineRoster.TryClearPatrol"/>。只加字段、不升存档版本。
+        /// </summary>
+        public string[] PatrolPoints;
+
+        /// <summary>巡逻路线上正在去的那个点（0 = 驻防点，1… = 巡逻点）。按步序号推进（与观察无关），存档。</summary>
+        public int PatrolIndex;
+
+        /// <summary>
+        /// FG6-DEF-06 审查修复（P1）：到不了而暂时跳过的巡逻点（建筑 ID）与跳过时的步序号（<see cref="PatrolSkipTicks"/>，一一对应）。
+        /// 跳过期间路线不去这一点（不再反复开单 / 失败），过 roster.patrol_retry_seconds 再试；“到不了”的通知每个点只发一次，直到机器走到过它（那时移出本表）。
+        /// 改巡逻路线 / 清空 / 重设驻防时清空。存档；旧档缺字段 = 没有跳过的点。
+        /// </summary>
+        public string[] PatrolSkipIds;
+
+        /// <summary>与 <see cref="PatrolSkipIds"/> 一一对应：最近一次判定到不了的步序号（GameClock.Ticks）。</summary>
+        public long[] PatrolSkipTicks;
+
         // ── FG5-RND-06（FG05 FGR-RND-060 纪念墙“阵亡地点”；FG13 FGU-40 按时间 / 地点排序）：阵亡那一刻记下的时刻与地点。
         // 唯一写入口 MachineRegistry.MarkDeadByLogicId（存活 → 阵亡的唯一翻转点）。只加字段、不升存档版本：旧档缺字段读成 0 / 空 = “时间 / 地点未记录”。
 

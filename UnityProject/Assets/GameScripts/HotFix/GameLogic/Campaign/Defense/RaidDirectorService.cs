@@ -96,6 +96,12 @@ namespace GameLogic.Campaign.Defense
             d.History ??= Array.Empty<RaidHistoryRecord>();
             d.Pending ??= Array.Empty<RaidTriggerRecord>();
             d.StoriesFired ??= Array.Empty<string>();
+            d.CountedWaves ??= Array.Empty<int>(); // FG6-DEF-06
+            if (d.ArrivedWaveCount < 0)
+            {
+                d.ArrivedWaveCount = 0;
+            }
+            EnsureArrivalAutoPauseRegistered();
             if (d.DestroyedByOctant == null || d.DestroyedByOctant.Length != 8)
             {
                 var a = new int[8];
@@ -199,6 +205,10 @@ namespace GameLogic.Campaign.Defense
             LastComposeMs = 0;
             MaxComposeMs = 0;
             Revision++;
+            _lastArrivalNewWave = false;
+            EnsureArrivalAutoPauseRegistered();
+            RaidSpectateService.ResetSession(); // FG6-DEF-06：新会话不带上一个存档的观战状态（观战只是镜头与速度，不进存档）
+            Feedback.RaidAudioDirector.ResetSession();
         }
 
         // ─────────────────────────────── 时间换算 ───────────────────────────────

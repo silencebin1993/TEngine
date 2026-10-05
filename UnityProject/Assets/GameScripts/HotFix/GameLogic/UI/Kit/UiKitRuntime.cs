@@ -35,6 +35,7 @@ namespace GameLogic.UI.Kit
             Create<RulesPanelUIToolkit>("[RulesPanelHost]"); // FG4-ECO-06：常驻规则（30073，固件库之上、物资与图鉴之下：“?”打开的图鉴盖在它上面）。 // FG4-ECO-01：物资面板（30074，暂停菜单与固件库之上、图鉴之下：点图标打开的图鉴盖在它上面）。
             Create<RosterPanelUIToolkit>("[RosterPanelHost]"); // FG4-ECO-07：机器名册（30071，暂停菜单之上、固件库之下：“?”打开的图鉴盖在它上面）。
             Create<TestRangePanelUIToolkit>("[TestRangeHost]"); // FG5-RND-03：靶场（30068，暂停菜单之下：从靶场“?”打开的图鉴盖在它上面）。
+            Create<DefenseOverviewPanelUIToolkit>("[DefenseOverviewHost]"); // FG6-DEF-06：防御总览（30062，炮塔面板 30063 / 防御面板 30064 之下：从总览点开的面板盖在它上面）。
             Create<TurretPanelUIToolkit>("[TurretPanelHost]");
             Create<DefensePanelUIToolkit>("[DefensePanelHost]"); // FG6-DEF-02：护盾 / 陷阱 / 屏障面板（30064，炮塔面板之上、暂停菜单之下：“?”打开的图鉴盖在它上面）。 // FG6-DEF-01：炮塔（30063，建筑面板 30042 之上、暂停菜单之下：“?”打开的图鉴盖在它上面）。
             Create<BlackBoxPanelUIToolkit>("[BlackBoxPanelHost]"); // FG5-RND-06：黑匣子陈列馆 / 纪念墙（30065，情报之下、暂停菜单之下：“?”打开的图鉴盖在它上面）。
@@ -86,6 +87,8 @@ namespace GameLogic.UI.Kit
             TestRangePanelUIToolkit.Close();
             TurretPanelUIToolkit.Close();
             DefensePanelUIToolkit.Close();
+            DefenseOverviewPanelUIToolkit.Close();
+            GameLogic.Campaign.Defense.RaidSpectateService.ResetSession(); // FG6-DEF-06：离开世界时结束观战（不恢复速度：统一时钟随会话重置）
             FusionPanelUIToolkit.Close();
             IntelPanelUIToolkit.Close();
             BlackBoxPanelUIToolkit.Close();

@@ -843,6 +843,13 @@ namespace GameLogic.Campaign
                 CustomName = MachineNaming.Sanitize(src.CustomName),
                 RolePointId = string.IsNullOrEmpty(src.RolePointId) ? null : src.RolePointId,
                 RoleOrderId = string.IsNullOrEmpty(src.RoleOrderId) ? null : src.RoleOrderId,
+                // FG6-DEF-06：驻防巡逻点与当前巡逻进度（旧档缺字段 = 不巡逻）。
+                PatrolPoints = src.PatrolPoints == null || src.PatrolPoints.Length == 0 ? null : (string[])src.PatrolPoints.Clone(),
+                PatrolIndex = Math.Max(0, src.PatrolIndex),
+                PatrolSkipIds = src.PatrolSkipIds != null && src.PatrolSkipTicks != null && src.PatrolSkipIds.Length > 0 && src.PatrolSkipIds.Length == src.PatrolSkipTicks.Length
+                    ? (string[])src.PatrolSkipIds.Clone() : null,
+                PatrolSkipTicks = src.PatrolSkipIds != null && src.PatrolSkipTicks != null && src.PatrolSkipIds.Length > 0 && src.PatrolSkipIds.Length == src.PatrolSkipTicks.Length
+                    ? (long[])src.PatrolSkipTicks.Clone() : null,
                 // FG5-RND-06：阵亡的时刻与地点（纪念墙）。旧档缺字段 = 0 / 空（未记录）。
                 DeathTick = Math.Max(0L, src.DeathTick),
                 DeathRegionId = string.IsNullOrEmpty(src.DeathRegionId) ? null : src.DeathRegionId,

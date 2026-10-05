@@ -115,6 +115,7 @@ namespace GameLogic.Campaign.Defense
             if (ticksBefore % every == 0)
             {
                 Sync(state);
+                ApplyTrapSupplyPriority(state);
             }
             CombatSite site = HomeSite;
             if (site != null && !site.IsDisposed)
@@ -138,6 +139,26 @@ namespace GameLogic.Campaign.Defense
         public static void RestoreAfterLoad(CampaignState state, CombatSite site)
         {
             CombatSite.DefenseEvent ??= OnKernelEvent;
+        }
+
+        /// <summary>
+        /// FG6-DEF-06（承接 DEBT-FG4ECO06-03）：每次防御对账把陷阱发射器的管线消费者优先级对齐到“补给优先”的状态（战时预案执行中 = 最高，否则 trap.pipe_priority），
+        /// 不等下一轮铺设（突袭一开始就生效、结束就恢复）。O(防御建筑数)。
+        /// </summary>
+        public static void ApplyTrapSupplyPriority(CampaignState state)
+        {
+            if (state == null || !PipeNetworkService.IsRunning)
+            {
+                return;
+            }
+            int prio = StandingRuleService.DefenseSupplyBoostSerial(state) > 0 ? PipeConst.PriorityMin : DefenseCatalog.TrapPipePriority;
+            foreach (DefenseRecord r in All(state))
+            {
+                if (r != null && r.ConsumerId > 0 && PipeNetworkService.Kernel.TryGetConsumer(r.ConsumerId, out PipeConsumerInfo info) && info.Priority != prio)
+                {
+                    PipeNetworkService.Kernel.SetConsumer(r.ConsumerId, info.LitersPerMinute, prio);
+                }
+            }
         }
 
         /// <summary>
@@ -791,10 +812,16 @@ namespace GameLogic.Campaign.Defense
                 ReleaseTrapConsumer(r);
                 alive = false;
             }
+            // FG6-DEF-06（承接 DEBT-FG4ECO06-03）：战时预案“补给优先”执行中 → 最高优先级，否则默认 trap.pipe_priority。
+            int prio = StandingRuleService.DefenseSupplyBoostSerial(state) > 0 ? PipeConst.PriorityMin : DefenseCatalog.TrapPipePriority;
+            if (alive && info.Priority != prio)
+            {
+                PipeNetworkService.Kernel.SetConsumer(r.ConsumerId, info.LitersPerMinute, prio);
+            }
             if (!alive && attach != null && pipes)
             {
                 long held = TakeHeld(r, fluid);
-                int id = PipeNetworkService.Kernel.AddConsumer(attach.Value.X, attach.Value.Y, fluid, DefenseCatalog.TrapSupplyLpm, DefenseCatalog.TrapPipePriority);
+                int id = PipeNetworkService.Kernel.AddConsumer(attach.Value.X, attach.Value.Y, fluid, DefenseCatalog.TrapSupplyLpm, prio);
                 if (id > 0)
                 {
                     PipeNetworkService.Kernel.SetConsumerBuffer(id, capMl, Math.Min(capMl, held));

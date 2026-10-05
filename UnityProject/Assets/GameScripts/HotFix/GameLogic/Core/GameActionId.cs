@@ -146,5 +146,11 @@
         OpenAwayReport = 119,
         /// <summary>FG5-RND-04（FGU-21 配方书，FG05 第 4 节）：打开 / 关闭配方书（已发现的配方、线索、各类别还剩几个未发现；全部上下文，默认 Alt+F）。</summary>
         OpenRecipeBook = 120,
+        /// <summary>FG6-DEF-06（FGU-27 防御总览）：打开 / 关闭防御总览（炮塔列表、覆盖热力图、薄弱点；全部上下文，默认 Alt+E）。</summary>
+        OpenDefense = 121,
+        /// <summary>FG6-DEF-06 审查修复（B02）：开始 / 停止观战（有到达的突袭时；战略上下文，默认 Alt+V）。与观战栏“观战”按钮同一入口。</summary>
+        SpectateRaid = 122,
+        /// <summary>FG6-DEF-06 审查修复（B02）：观战时开 / 关“跟随战斗”（没在观战时 = 开始观战并跟随；战略上下文，默认 Ctrl+F）。与观战栏“跟随战斗”按钮同一入口。</summary>
+        SpectateFollow = 123,
     }
 }

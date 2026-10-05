@@ -624,10 +624,16 @@ namespace GameLogic.Campaign.Defense
                     alive = false;
                     consumer = 0;
                 }
+                int prio = CurrentPipePriority(state);
+                if (alive && info.Priority != prio)
+                {
+                    // FG6-DEF-06（承接 DEBT-FG4ECO06-03）：战时预案打开了“补给优先”且突袭进行中 → 最高优先级；否则回到默认（可追溯：补给一行写明是哪条规则）。
+                    PipeNetworkService.Kernel.SetConsumer(consumer, info.LitersPerMinute, prio);
+                }
                 if (!alive && attach != null)
                 {
                     long held = TakeHeld(r, need.FluidId);
-                    int id = PipeNetworkService.Kernel.AddConsumer(attach.Value.X, attach.Value.Y, need.FluidId, TurretCatalog.SupplyLpm, TurretCatalog.PipePriority);
+                    int id = PipeNetworkService.Kernel.AddConsumer(attach.Value.X, attach.Value.Y, need.FluidId, TurretCatalog.SupplyLpm, prio);
                     if (id > 0)
                     {
                         PipeNetworkService.Kernel.SetConsumerBuffer(id, capMl, Math.Min(capMl, held));
@@ -1006,6 +1012,41 @@ namespace GameLogic.Campaign.Defense
             return min == int.MaxValue ? 0 : min;
         }
 
+        /// <summary>
+        /// FG6-DEF-06（承接 DEBT-FG4ECO06-03）：炮塔 / 陷阱管线消费者此刻应有的优先级——有打开“补给优先”、正在执行（突袭中）的战时预案时为最高（PipeConst.PriorityMin），
+        /// 否则为默认（turret.supply.pipe_priority）。对账时落到内核消费者（模拟步里；消费者优先级随管线快照进存档）。
+        /// </summary>
+        public static int CurrentPipePriority(CampaignState state) =>
+            StandingRuleService.DefenseSupplyBoostSerial(state) > 0 ? BinGames.Sim.Logistics.PipeConst.PriorityMin : TurretCatalog.PipePriority;
+
+        /// <summary>炮塔与陷阱发射器现有的管线补给口（消费者）数（规则日志 / 防御总览）。</summary>
+        public static int SupplyConsumerCount(CampaignState state)
+        {
+            int n = 0;
+            foreach (TurretRecord r in All(state))
+            {
+                foreach (int id in r?.ConsumerIds ?? Array.Empty<int>())
+                {
+                    if (id > 0)
+                    {
+                        n++;
+                    }
+                }
+            }
+            foreach (DefenseRecord d in DefenseService.All(state))
+            {
+                if (d != null && d.ConsumerId > 0)
+                {
+                    n++;
+                }
+            }
+            return n;
+        }
+
+        /// <summary>某个管线消费者此刻的优先级（自检读；不存在 = -1）。</summary>
+        public static int ConsumerPriorityOf(int consumerId) =>
+            consumerId > 0 && PipeNetworkService.Kernel != null && PipeNetworkService.Kernel.TryGetConsumer(consumerId, out PipeConsumerInfo info) ? info.Priority : -1;
+
         /// <summary>补给一行（“燃油 34 升（还能打 17 发，每发 2 升）；冷却液……” / “只用电”）。</summary>
         public static string SupplyLine(CampaignState state, string buildingId)
         {
@@ -1030,7 +1071,9 @@ namespace GameLogic.Campaign.Defense
                 parts.Add(GameText.Format("turret.supply.line", PipeNetworkService.FluidName(n.FluidId), Mathf.RoundToInt(liters), shots,
                     n.LitersPerShot.ToString("0.#", CultureInfo.InvariantCulture)));
             }
-            return string.Join(GameText.Get("turret.supply.sep"), parts);
+            int boost = StandingRuleService.DefenseSupplyBoostSerial(state);
+            string boosted = boost > 0 ? GameText.Format("turret.supply.boosted", StandingRuleService.RuleLabel(state, boost)) : string.Empty; // FG6-DEF-06：写明是哪条规则提的优先级（FGR-BASE-020）
+            return string.Join(GameText.Get("turret.supply.sep"), parts) + boosted;
         }
 
         /// <summary>面板 / 名册 / 自检读的一座炮塔的读数（同一份数据，界面不另算）。</summary>

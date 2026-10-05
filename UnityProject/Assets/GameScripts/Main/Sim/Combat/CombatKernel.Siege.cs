@@ -157,6 +157,39 @@ namespace BinGames.Sim.Combat
             return n;
         }
 
+        /// <summary>
+        /// FG6-DEF-06（FGR-DEF-042 倍速观战）：一支队伍还活着的攻城单位的重心（观战镜头的跟随点）。返回台数；0 台时 x / y = 0。
+        /// 只读查询，不改内核状态（观战只改速度与镜头，不影响模拟）。O(单位数)。
+        /// </summary>
+        public int SiegeGroupCentroid(int group, out double x, out double y)
+        {
+            x = 0;
+            y = 0;
+            int n = 0;
+            double sx = 0, sy = 0;
+            for (int i = 0; i < _d.Count; i++)
+            {
+                if (!_d.IsAlive(i))
+                {
+                    continue;
+                }
+                CombatSiegeUnit su = _d.Siege[i];
+                if (su.Role == 0 || su.Group != group)
+                {
+                    continue;
+                }
+                n++;
+                sx += _d.Pos[i].x;
+                sy += _d.Pos[i].y;
+            }
+            if (n > 0)
+            {
+                x = sx / n;
+                y = sy / n;
+            }
+            return n;
+        }
+
         /// <summary>把一支队伍的全部攻城单位切到 <paramref name="mode"/>（撤退）。返回切换的台数。重选目标立即生效。</summary>
         public int SetSiegeGroupMode(int group, CombatSiegeMode mode)
         {

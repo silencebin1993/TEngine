@@ -288,7 +288,8 @@ namespace GameLogic.Campaign.Defense
             string head;
             if (v.Arrived)
             {
-                head = GameText.Format("raid.warning.row_arrived", wave, target, v.Units);
+                // FG6-DEF-06（FGU-28“剩余敌人”）：到达后同一行改成战况（剩余敌人 / 职能 / 损失 / 撤退时限 / 正在拆的墙），不再显示编成预报。
+                return RaidHudService.ArrivedRowText(s, v, now);
             }
             else if (v.PlannedOnly)
             {

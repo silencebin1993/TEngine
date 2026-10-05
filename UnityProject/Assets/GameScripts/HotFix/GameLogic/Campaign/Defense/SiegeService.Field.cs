@@ -176,6 +176,37 @@ namespace GameLogic.Campaign.Defense
 
         // ─────────────────────────────── 驻防机器守点交战 ───────────────────────────────
 
+        public static long PatrolAdvances { get; private set; }
+
+        /// <summary>
+        /// FG6-DEF-06（FGR-DEF-043“按玩家画的巡逻路线巡逻”，承接 DEBT-FG4ECO07-02）：驻防机器的巡逻。名册的岗位维持器按巡逻路线上正在去的那一点开驻防单
+        /// （驻防点 → 巡逻点 1 → … → 驻防点，循环；<see cref="MachineRoster.PatrolOrderPoint"/>），机器沿地形寻路走过去（工作单移动，与驻防同一套）；
+        /// 到了（驻防单进行中）就在那一点守点交战（内核同一套守点逻辑，FG6-DEF-05）——那一点守点半径里没有敌人、且机器离那一点不到 roster.patrol_arrive_cells 时，
+        /// 结束这张单、进度指向下一个点，维持器下一次评估按新点再派。巡逻点被拆 / 被毁 / 到不了先跳过时跳过。只看步序号与内核位置（与观察无关），进度存档。
+        /// 审查修复（P1）：只在有可用巡逻路线时调用（<see cref="MachineRoster.HasPatrol"/>）；下一个点就是当前这一点（别的点全都不可用）时不结束单，守点不中断。
+        /// </summary>
+        private static void PatrolAdvance(CampaignState state, CombatSite site, MachineRecord m, WorkOrderRecord order, Vector2 post, float radius)
+        {
+            if (MachineRoster.PatrolTarget(state, m, m.PatrolIndex, out _, out _) < 0)
+            {
+                return;
+            }
+            float arrive = Math.Max(0.5f, GridContent.TryGetTuning("roster.patrol_arrive_cells", out float v) ? v : 3f);
+            if (site.FindNearestHostile(post, radius) != 0 || !site.TryGetMachinePosition(m.LogicId, out Vector2 at) || Vector2.Distance(at, post) > arrive + MachineRoster.PatrolArriveSlack)
+            {
+                return; // 有敌人：先在这一点守点交战；还没站稳：等一下
+            }
+            int next = MachineRoster.PatrolTarget(state, m, m.PatrolIndex + 1, out _, out _);
+            if (next < 0 || next == m.PatrolIndex)
+            {
+                return; // 没有别的可去的点：留在这一点守着（不结束、不重派）
+            }
+            m.PatrolIndex = next;
+            PatrolAdvances++;
+            HomeValleyWorkOrders.EndRuleOrder(state, order.WorkOrderId); // 驻防单安静结束（不算接管、不算失败），维持器按新的点再派
+            m.RoleOrderId = null;
+        }
+
         private static void StepGuards(CampaignState state, CombatSite site)
         {
             if (site == null || site.IsDisposed)
@@ -200,6 +231,23 @@ namespace GameLogic.Campaign.Defense
                     {
                         guard = true; // 已在驻防点待命（还在路上 / 被接管暂停 / 玩家正在用 = 不守点，FGR-BASE-020）
                         post = HomeValleyWorkOrders.ResolveWorkPosition(state, o);
+                        if (m.PatrolPoints != null && m.PatrolPoints.Length > 0 && o.IssuerId == HomeValleyWorkOrders.RosterIssuer && o.WorkOrderId == m.RoleOrderId)
+                        {
+                            MachineRoster.NotePatrolReached(m, o.TargetId); // 走到过的巡逻点移出“到不了先跳过”表（表空时 O(1)）
+                            if (MachineRoster.HasPatrol(state, m))
+                            {
+                                PatrolAdvance(state, site, m, o, post, radius);
+                            }
+                            else if (m.PatrolIndex > 0)
+                            {
+                                // 审查修复（P1）：巡逻点全部失效（被拆 / 被毁 / 到不了先跳过）时还守在某个巡逻点上——结束这一张（只这一次），
+                                // 进度回到驻防点，维持器按驻防点再派；之后 HasPatrol = false 不再进这里，不会反复结束 / 重派。
+                                m.PatrolIndex = 0;
+                                HomeValleyWorkOrders.EndRuleOrder(state, o.WorkOrderId);
+                                m.RoleOrderId = null;
+                                guard = false;
+                            }
+                        }
                     }
                 }
                 site.SetMachineGuard(m.LogicId, post, guard ? radius : 0f);

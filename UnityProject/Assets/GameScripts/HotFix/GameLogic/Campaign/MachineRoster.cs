@@ -236,19 +236,18 @@ namespace GameLogic.Campaign
         public static bool GarrisonBlocked(CampaignState s, MachineRecord m) => GarrisonBlocked(s, m, out _);
 
         /// <summary>驻防受阻的玩家可见原因（当前语言）：“驻防暂停：到不了驻防点 X（原因）……”。</summary>
-        public static string GarrisonBlockedText(CampaignState s, MachineRecord m, WorkOrderRecord failed)
+        public static string GarrisonBlockedText(CampaignState s, MachineRecord m, WorkOrderRecord failed) =>
+            GameText.Format("roster.garrison.blocked", GarrisonPointLabel(s, m), TripFailWhy(s, failed));
+
+        /// <summary>驻防 / 巡逻这一趟为什么失败（寻路的原因，或“路径持续受阻”）。</summary>
+        private static string TripFailWhy(CampaignState s, WorkOrderRecord failed)
         {
-            string why;
             if (failed != null && HomeValleyWorkOrders.IsUnreachableReason(failed.FailureReason))
             {
                 Vector2 p = HomeValleyWorkOrders.ResolveWorkPosition(s, failed);
-                why = Nav.NavService.FailText(HomeValleyWorkOrders.ParseUnreachable(failed.FailureReason), Nav.NavService.CellOf(p.x, p.y));
+                return Nav.NavService.FailText(HomeValleyWorkOrders.ParseUnreachable(failed.FailureReason), Nav.NavService.CellOf(p.x, p.y));
             }
-            else
-            {
-                why = GameText.Get("roster.garrison.path_blocked");
-            }
-            return GameText.Format("roster.garrison.blocked", GarrisonPointLabel(s, m), why);
+            return GameText.Get("roster.garrison.path_blocked");
         }
 
         public static bool HasOutpost(CampaignState s) => HasOutpostProvider != null && HasOutpostProvider(s);
@@ -307,6 +306,7 @@ namespace GameLogic.Campaign
             HomeValleyWorkOrders.ReleaseForRoleChange(s, logicId, role);
             m.Role = role;
             m.RoleOrderId = null;
+            ResetPatrolSkips(m); // FG6-DEF-06 审查修复：重设驻防 / 改岗位 = 到不了的巡逻点马上再试
             Revision++;
             HomeValleyWorkOrders.MarkAssignmentDirty();
             GuidanceHooks.Raise(GuidanceHooks.RosterFirstRoleChange);
@@ -399,6 +399,7 @@ namespace GameLogic.Campaign
                 return false;
             }
             m.RolePointId = point;
+            ResetPatrolSkips(m);
             if (GarrisonBlocked(s, m))
             {
                 m.RoleOrderId = null; // 原来的驻防点到不了而暂停：换了点就按新点再试一次（审查 P1）。
@@ -412,6 +413,294 @@ namespace GameLogic.Campaign
             HomeValleyWorkOrders.MarkAssignmentDirty();
             message = GameText.Format("roster.ok.point", MachineNaming.Short(m), GarrisonPointLabel(s, m));
             return true;
+        }
+
+        // ── FG6-DEF-06（FGR-DEF-043“按玩家画的巡逻路线巡逻”，承接 DEBT-FG4ECO07-02）：驻防巡逻路线 ─────────────────────
+
+        /// <summary>“到不了的巡逻点先跳过”的通知条数（自检：每个点只发一次）。</summary>
+        public static int PatrolSkipNotices { get; private set; }
+
+        public static int PatrolMaxPoints => Math.Max(1, (int)Math.Round(Grid.GridContent.TryGetTuning("roster.patrol_max_points", out float v) ? v : 6f));
+
+        /// <summary>巡逻点要是家园里建成的建筑（不是规划虚影 / 搬迁虚影 / 已摧毁的废墟）。</summary>
+        private static bool PatrolPointUsable(CampaignState s, string buildingId)
+        {
+            BuildingRecord b = string.IsNullOrEmpty(buildingId) ? null : Grid.HomeGridService.FindBuilding(s, buildingId);
+            return b != null && b.RegionId == HomeValleyLayout.RegionId && !Grid.HomeGridService.IsRelocationGhost(b) && !HomeValleyController.IsPlannedGhost(b)
+                   && b.ConstructionState != BuildingConstructionState.Damaged;
+        }
+
+        public static float PatrolArriveSlack => Math.Max(0f, Grid.GridContent.TryGetTuning("roster.patrol_arrive_slack", out float v) ? v : 1.5f);
+        public static float PatrolRetrySeconds => Math.Max(1f, Grid.GridContent.TryGetTuning("roster.patrol_retry_seconds", out float v) ? v : 60f);
+
+        /// <summary>
+        /// FG6-DEF-06 审查修复（P1）：这个巡逻点是不是因为到不了而正在跳过（跳过后 roster.patrol_retry_seconds 游戏秒内不去；之后再试一次）。
+        /// 只看步序号（与观察无关）。O(跳过表长度) ≤ 巡逻点上限。
+        /// </summary>
+        public static bool PatrolSkipped(MachineRecord m, string buildingId)
+        {
+            string[] ids = m?.PatrolSkipIds;
+            long[] ticks = m?.PatrolSkipTicks;
+            if (ids == null || ticks == null || string.IsNullOrEmpty(buildingId))
+            {
+                return false;
+            }
+            long window = (long)Math.Round(PatrolRetrySeconds * GameClock.StepHz);
+            for (int i = 0; i < ids.Length && i < ticks.Length; i++)
+            {
+                if (ids[i] == buildingId)
+                {
+                    return GameClock.Ticks - ticks[i] < window;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>记下“到不了，先跳过”。返回 true = 这一点第一次进跳过表（该发通知）；已经在表里（重试又失败）只刷新时间、返回 false（不再通知）。</summary>
+        public static bool MarkPatrolSkipped(MachineRecord m, string buildingId)
+        {
+            if (m == null || string.IsNullOrEmpty(buildingId))
+            {
+                return false;
+            }
+            string[] ids = m.PatrolSkipIds ?? Array.Empty<string>();
+            long[] ticks = m.PatrolSkipTicks != null && m.PatrolSkipTicks.Length == ids.Length ? m.PatrolSkipTicks : new long[ids.Length];
+            for (int i = 0; i < ids.Length; i++)
+            {
+                if (ids[i] == buildingId)
+                {
+                    ticks[i] = GameClock.Ticks;
+                    m.PatrolSkipTicks = ticks;
+                    return false;
+                }
+            }
+            var nids = new string[ids.Length + 1];
+            var nticks = new long[ids.Length + 1];
+            Array.Copy(ids, nids, ids.Length);
+            Array.Copy(ticks, nticks, ids.Length);
+            nids[ids.Length] = buildingId;
+            nticks[ids.Length] = GameClock.Ticks;
+            m.PatrolSkipIds = nids;
+            m.PatrolSkipTicks = nticks;
+            return true;
+        }
+
+        /// <summary>机器走到了这个巡逻点（驻防单进行中）：移出跳过表——以后再到不了会重新通知一次。表空时 O(1)。</summary>
+        public static void NotePatrolReached(MachineRecord m, string buildingId)
+        {
+            string[] ids = m?.PatrolSkipIds;
+            if (ids == null || ids.Length == 0 || string.IsNullOrEmpty(buildingId))
+            {
+                return;
+            }
+            int at = Array.IndexOf(ids, buildingId);
+            if (at < 0)
+            {
+                return;
+            }
+            if (ids.Length == 1)
+            {
+                ResetPatrolSkips(m);
+                return;
+            }
+            var nids = new List<string>(ids);
+            var nticks = new List<long>(m.PatrolSkipTicks ?? new long[ids.Length]);
+            nids.RemoveAt(at);
+            if (at < nticks.Count)
+            {
+                nticks.RemoveAt(at);
+            }
+            m.PatrolSkipIds = nids.ToArray();
+            m.PatrolSkipTicks = nticks.ToArray();
+        }
+
+        public static void ResetPatrolSkips(MachineRecord m)
+        {
+            if (m != null)
+            {
+                m.PatrolSkipIds = null;
+                m.PatrolSkipTicks = null;
+            }
+        }
+
+        /// <summary>这张单是不是名册为巡逻路线上的某个巡逻点（不是驻防点）开的驻防单（失败通知据此改由维持器发巡逻专用的一条，只发一次）。</summary>
+        public static bool IsPatrolLeg(MachineRecord m, WorkOrderRecord o)
+        {
+            return m != null && o != null && o.Kind == WorkOrderKind.Garrison && o.IssuerId == HomeValleyWorkOrders.RosterIssuer && m.PatrolIndex > 0
+                   && m.PatrolPoints != null && m.RoleOrderId == o.WorkOrderId && !string.IsNullOrEmpty(o.TargetId) && Array.IndexOf(m.PatrolPoints, o.TargetId) >= 0;
+        }
+
+        /// <summary>
+        /// 给驻防机器的巡逻路线末尾加一个巡逻点（可逆：可以清空重设，不弹确认，B04）。路线 = 驻防点 → 巡逻点… → 回驻防点循环；
+        /// 敌人进入守点半径（siege.guard_radius_cells，以当前去的点为中心）就地交战，打完接着巡逻（内核守点交战，FG6-DEF-05）。
+        /// </summary>
+        public static bool TryAddPatrolPoint(CampaignState s, int logicId, string buildingId, out string message)
+        {
+            if (!MachineRegistry.TryGetRecord(logicId, out MachineRecord m) || m == null || s == null)
+            {
+                message = GameText.Get("roster.err.unknown");
+                return false;
+            }
+            if (m.Role != MachineRole.Garrison || !IsHome(m) || !m.IsAlive)
+            {
+                message = GameText.Get("roster.err.patrol_not_garrison");
+                return false;
+            }
+            if (!PatrolPointUsable(s, buildingId))
+            {
+                message = GameText.Get("roster.err.patrol_bad_point");
+                return false;
+            }
+            string[] cur = m.PatrolPoints ?? Array.Empty<string>();
+            if (cur.Length >= PatrolMaxPoints)
+            {
+                message = GameText.Format("roster.err.patrol_full", PatrolMaxPoints);
+                return false;
+            }
+            if (cur.Length > 0 && cur[cur.Length - 1] == buildingId)
+            {
+                message = GameText.Format("roster.err.patrol_dup", StandingRuleService.BuildingLabel(s, buildingId));
+                return false;
+            }
+            var next = new string[cur.Length + 1];
+            Array.Copy(cur, next, cur.Length);
+            next[cur.Length] = buildingId;
+            m.PatrolPoints = next;
+            ResetPatrolSkips(m);
+            Revision++;
+            GuidanceHooks.Raise(GuidanceHooks.RosterFirstPatrol);
+            message = GameText.Format("roster.ok.patrol_add", MachineNaming.Short(m), StandingRuleService.BuildingLabel(s, buildingId), next.Length);
+            return true;
+        }
+
+        /// <summary>清空巡逻路线：机器回到守驻防点。</summary>
+        public static bool TryClearPatrol(CampaignState s, int logicId, out string message)
+        {
+            if (!MachineRegistry.TryGetRecord(logicId, out MachineRecord m) || m == null)
+            {
+                message = GameText.Get("roster.err.unknown");
+                return false;
+            }
+            if (m.PatrolPoints == null || m.PatrolPoints.Length == 0)
+            {
+                message = GameText.Get("roster.patrol.none");
+                return false;
+            }
+            bool onLeg = m.PatrolIndex > 0;
+            m.PatrolPoints = null;
+            m.PatrolIndex = 0;
+            ResetPatrolSkips(m);
+            if (onLeg && !string.IsNullOrEmpty(m.RoleOrderId))
+            {
+                // 正走在去巡逻点的路上 / 守在巡逻点：结束这张单，维持器按驻防点再派（回到守点）。
+                WorkOrderRecord o = HomeValleyWorkOrders.Find(s, m.RoleOrderId);
+                if (o != null && o.Kind == WorkOrderKind.Garrison && o.IssuerId == HomeValleyWorkOrders.RosterIssuer)
+                {
+                    HomeValleyWorkOrders.EndRuleOrder(s, o.WorkOrderId);
+                    m.RoleOrderId = null;
+                }
+            }
+            Revision++;
+            HomeValleyWorkOrders.MarkAssignmentDirty();
+            message = GameText.Format("roster.ok.patrol_clear", MachineNaming.Short(m));
+            return true;
+        }
+
+        /// <summary>这台机器有没有可用的巡逻路线（至少一个现在还用得了、没在“到不了先跳过”期间的巡逻点）。全部被拆 / 被毁 / 跳过时 = 守驻防点（不反复结束、重派驻防单）。</summary>
+        public static bool HasPatrol(CampaignState s, MachineRecord m)
+        {
+            if (m?.PatrolPoints == null)
+            {
+                return false;
+            }
+            foreach (string p in m.PatrolPoints)
+            {
+                if (PatrolPointUsable(s, p) && !PatrolSkipped(m, p))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 巡逻路线上第 <paramref name="index"/> 个点的位置（0 = 驻防点；巡逻点被拆 / 被毁 / 到不了先跳过时跳到下一个可用的点）。返回规范化后的序号（-1 = 没有可用路线）。
+        /// </summary>
+        public static int PatrolTarget(CampaignState s, MachineRecord m, int index, out Vector2 position, out string buildingId)
+        {
+            position = Vector2.zero;
+            buildingId = null;
+            string[] pts = m?.PatrolPoints;
+            if (pts == null || pts.Length == 0)
+            {
+                return -1;
+            }
+            int n = pts.Length + 1;
+            for (int k = 0; k < n; k++)
+            {
+                int i = ((index + k) % n + n) % n;
+                string id = i == 0 ? (string.IsNullOrEmpty(m.RolePointId) || Grid.HomeGridService.FindBuilding(s, m.RolePointId) == null ? null : m.RolePointId) : pts[i - 1];
+                if (i == 0 && id == null)
+                {
+                    BuildingRecord core = null;
+                    foreach (BuildingRecord b in s?.BuildingRecords ?? Array.Empty<BuildingRecord>())
+                    {
+                        if (b != null && b.BuildingTypeId == HomeValleyLayout.BuildingTypeCore)
+                        {
+                            core = b;
+                            break;
+                        }
+                    }
+                    if (core != null)
+                    {
+                        position = core.Position;
+                        buildingId = core.BuildingId;
+                        return i;
+                    }
+                    continue;
+                }
+                if (i > 0 && (!PatrolPointUsable(s, id) || PatrolSkipped(m, id)))
+                {
+                    continue; // 被拆 / 被毁 / 到不了先跳过
+                }
+                BuildingRecord t = Grid.HomeGridService.FindBuilding(s, id);
+                if (t == null)
+                {
+                    continue;
+                }
+                position = t.Position;
+                buildingId = t.BuildingId;
+                return i;
+            }
+            return -1;
+        }
+
+        /// <summary>
+        /// 岗位维持器为巡逻路线上正在去的那一点开驻防单用的点（建筑 ID；空 = 归还核心）：第 0 个 = 驻防点（与不巡逻时同一口径），之后 = 巡逻点；被拆的跳过。
+        /// </summary>
+        public static string PatrolOrderPoint(CampaignState s, MachineRecord m)
+        {
+            int i = PatrolTarget(s, m, m?.PatrolIndex ?? 0, out _, out string id);
+            if (i <= 0)
+            {
+                return string.IsNullOrEmpty(m?.RolePointId) || Grid.HomeGridService.FindBuilding(s, m.RolePointId) == null ? string.Empty : m.RolePointId;
+            }
+            return id ?? string.Empty;
+        }
+
+        /// <summary>巡逻路线的文字：“核心 → 仓库 #3 → 炮塔 #2（按顺序循环……）”或“不巡逻：守在驻防点”。</summary>
+        public static string PatrolText(CampaignState s, MachineRecord m)
+        {
+            if (m?.PatrolPoints == null || m.PatrolPoints.Length == 0)
+            {
+                return GameText.Get("roster.patrol.none");
+            }
+            var parts = new List<string>(m.PatrolPoints.Length + 1) { GarrisonPointLabel(s, m) };
+            foreach (string p in m.PatrolPoints)
+            {
+                parts.Add(StandingRuleService.BuildingLabel(s, p));
+            }
+            return GameText.Format("roster.patrol.route", string.Join(GameText.Get("roster.patrol.sep"), parts));
         }
 
         public static string GarrisonPointLabel(CampaignState s, MachineRecord m) =>
@@ -450,6 +739,28 @@ namespace GameLogic.Campaign
                 {
                     continue;
                 }
+                if (m.PatrolPoints != null && m.PatrolPoints.Length > 0 && m.PatrolIndex > 0 && GarrisonBlocked(s, m, out WorkOrderRecord legFailed))
+                {
+                    // FG6-DEF-06：巡逻路线上的某个巡逻点到不了——跳过它去下一个点，不让整条巡逻停在“驻防受阻”。驻防点本身到不了仍按原来的受阻处理。
+                    // 审查修复（P1）：跳过的点记进存档（roster.patrol_retry_seconds 内不再去，免得每绕一圈开单 / 失败一次），通知每个点只发一次（直到走到过它）；
+                    // 判失败时的通用“去不了”通知对巡逻腿不发（HomeValleyWorkOrders.NotifySelfTripFailed），由这里发巡逻专用的一条（不再附驻防的恢复提示）。
+                    string skipped = !string.IsNullOrEmpty(legFailed.TargetId) && Array.IndexOf(m.PatrolPoints, legFailed.TargetId) >= 0 ? legFailed.TargetId : PatrolOrderPoint(s, m);
+                    legFailed.UnreachableNotified = true;
+                    bool first = MarkPatrolSkipped(m, skipped);
+                    m.PatrolIndex = PatrolTarget(s, m, m.PatrolIndex + 1, out _, out _);
+                    m.RoleOrderId = null;
+                    if (first)
+                    {
+                        PatrolSkipNotices++;
+                        Vector2 at = HomeValleyWorkOrders.ResolveWorkPosition(s, legFailed);
+                        GameLogic.Notifications.NotificationCenter.Post("unreachable", GameText.Format("roster.patrol.skipped", MachineNaming.Short(m),
+                            StandingRuleService.BuildingLabel(s, skipped), TripFailWhy(s, legFailed), Mathf.RoundToInt(PatrolRetrySeconds)), new Vector3(at.x, 0f, at.y));
+                    }
+                    if (m.PatrolIndex < 0)
+                    {
+                        m.PatrolIndex = 0;
+                    }
+                }
                 if (GarrisonBlocked(s, m, out WorkOrderRecord failed))
                 {
                     // 审查修复（P1）：上一张驻防单到不了驻防点而失败——不再补派（否则每次评估一张新单、每张一条通知），只通知一次（标记随存档保留）。
@@ -464,7 +775,13 @@ namespace GameLogic.Campaign
                     }
                     continue;
                 }
-                string point = string.IsNullOrEmpty(m.RolePointId) || Grid.HomeGridService.FindBuilding(s, m.RolePointId) == null ? string.Empty : m.RolePointId;
+                bool patrol = HasPatrol(s, m);
+                if (!patrol && m.PatrolIndex != 0)
+                {
+                    m.PatrolIndex = 0; // 巡逻点全部被拆 / 被毁 / 跳过：回到守驻防点，路线恢复后从驻防点重新开始
+                }
+                string point = patrol ? PatrolOrderPoint(s, m) // FG6-DEF-06：巡逻中 = 路线上正在去的那一点
+                    : string.IsNullOrEmpty(m.RolePointId) || Grid.HomeGridService.FindBuilding(s, m.RolePointId) == null ? string.Empty : m.RolePointId;
                 // 基础 ID；同一步里的重名由 HomeValleyWorkOrders.FreshOrderId 追加序号，以返回的 ID 为准（审查 P0）。
                 string id = "roster-garrison-" + m.LogicId.ToString(CultureInfo.InvariantCulture) + "-" + GameClock.Ticks.ToString(CultureInfo.InvariantCulture);
                 HomeValleyWorkOrders.WorkOrderOpResult r = HomeValleyWorkOrders.TryCreateGarrison(s, id, m.LogicId, point, 0, HomeValleyWorkOrders.RosterIssuer);

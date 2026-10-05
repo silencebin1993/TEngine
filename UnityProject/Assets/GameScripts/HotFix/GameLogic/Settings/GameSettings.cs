@@ -239,6 +239,24 @@ namespace GameLogic.Settings
             return tableDefault;
         }
 
+        /// <summary>FG6-DEF-06：玩家改过这一类的“触发时自动暂停”吗（没改过 = 按默认值，突袭到达的默认值随本存档的突袭次数变）。</summary>
+        public static bool HasNotifyAutoPauseChoice(string typeId)
+        {
+            NotifyAutoPauseEntry[] entries = Data.NotifyAutoPause;
+            return entries != null && Array.FindIndex(entries, e => e.TypeId == typeId) >= 0;
+        }
+
+        /// <summary>FG6-DEF-06（FGR-UX-021“设置里可以按通知类型勾选”）：清掉玩家改过的全部“触发时自动暂停”，回到默认（可逆：再勾一次即可，不弹确认，B04）。</summary>
+        public static void ResetNotifyAutoPause()
+        {
+            if (Data.NotifyAutoPause == null || Data.NotifyAutoPause.Length == 0)
+            {
+                return;
+            }
+            Data.NotifyAutoPause = Array.Empty<NotifyAutoPauseEntry>();
+            Save();
+        }
+
         public static bool HasSeenGuidanceHook(string hookId) =>
             Data.SeenGuidanceHooks != null && Array.IndexOf(Data.SeenGuidanceHooks, hookId) >= 0;
 

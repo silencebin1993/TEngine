@@ -278,9 +278,51 @@ namespace GameLogic.Notifications
             }
         }
 
+        // ── FG6-DEF-06（FGR-DEF-042 / FGR-UX-021）：按存档状态决定的“触发时自动暂停”默认值 ─────────────
+
+        private static readonly Dictionary<string, Func<CampaignState, bool>> AutoPauseDefaults = new Dictionary<string, Func<CampaignState, bool>>(StringComparer.Ordinal);
+
+        /// <summary>
+        /// 登记某类通知的“自动暂停默认值”由谁决定（例如突袭到达：本存档前 3 次突袭默认暂停，之后默认不暂停）。玩家在设置里改过的仍以玩家的为准。
+        /// 同一类型后登记的覆盖先登记的；<paramref name="resolver"/> 为 null = 回到表里的常量默认值。幂等，可以重复调用。
+        /// </summary>
+        public static void RegisterAutoPauseDefault(string typeId, Func<CampaignState, bool> resolver)
+        {
+            if (string.IsNullOrEmpty(typeId))
+            {
+                return;
+            }
+            if (resolver == null)
+            {
+                AutoPauseDefaults.Remove(typeId);
+                return;
+            }
+            AutoPauseDefaults[typeId] = resolver;
+        }
+
+        /// <summary>这类通知的默认值是不是按存档状态决定的（设置界面据此写明“默认：前 3 次突袭”）。</summary>
+        public static bool HasDynamicAutoPauseDefault(string typeId) => !string.IsNullOrEmpty(typeId) && AutoPauseDefaults.ContainsKey(typeId);
+
+        /// <summary>这一刻的默认值：登记了决定者的按它（当前存档），否则按 fg.TbNotifyType.autoPauseDefault。</summary>
+        public static bool EffectiveAutoPauseDefault(NotifyTypeDef def)
+        {
+            if (def == null)
+            {
+                return false;
+            }
+            if (AutoPauseDefaults.TryGetValue(def.Id, out Func<CampaignState, bool> f) && f != null)
+            {
+                return f(_bound ?? CampaignSession.Current);
+            }
+            return def.AutoPauseDefault;
+        }
+
+        /// <summary>这类通知现在触发会不会自动暂停（玩家改过的优先，否则按 <see cref="EffectiveAutoPauseDefault"/>）。</summary>
+        public static bool IsAutoPauseEnabled(NotifyTypeDef def) => def != null && GameSettings.IsNotifyAutoPauseEnabled(def.Id, EffectiveAutoPauseDefault(def));
+
         private static void TryAutoPause(NotifyTypeDef def)
         {
-            if (!GameSettings.IsNotifyAutoPauseEnabled(def.Id, def.AutoPauseDefault) || AutoPauseHandler == null)
+            if (!IsAutoPauseEnabled(def) || AutoPauseHandler == null)
             {
                 return;
             }

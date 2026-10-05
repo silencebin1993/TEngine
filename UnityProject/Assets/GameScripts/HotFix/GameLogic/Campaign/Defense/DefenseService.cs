@@ -801,8 +801,11 @@ namespace GameLogic.Campaign.Defense
             }
             float liters = TrapStoredLiters(r, prof.FluidId);
             int lays = Mathf.FloorToInt(liters / Mathf.Max(0.001f, prof.LitersPerLay) + 1e-4f);
+            int boost = StandingRuleService.DefenseSupplyBoostSerial(s);
+            // FG6-DEF-06 审查修复（P2，FGR-BASE-020）：战时预案“补给优先”执行中时写明是哪条规则提的优先级（与炮塔补给一行同一说法）。
+            string boosted = boost > 0 ? GameText.Format("turret.supply.boosted", StandingRuleService.RuleLabel(s, boost)) : string.Empty;
             return GameText.Format("trap.supply.line", PipeNetworkService.FluidName(prof.FluidId), Mathf.RoundToInt(liters), lays,
-                prof.LitersPerLay.ToString("0.#", CultureInfo.InvariantCulture));
+                prof.LitersPerLay.ToString("0.#", CultureInfo.InvariantCulture)) + boosted;
         }
 
         private static string TrapIssueText(Runtime rt, int fluid)

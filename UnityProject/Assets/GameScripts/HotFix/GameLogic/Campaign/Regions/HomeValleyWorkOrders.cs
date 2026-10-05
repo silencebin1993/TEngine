@@ -1840,6 +1840,10 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             order.UnreachableNotified = true;
+            if (MachineRegistry.TryGetRecord(logicId, out MachineRecord patroller) && MachineRoster.IsPatrolLeg(patroller, order))
+            {
+                return; // FG6-DEF-06 审查修复（P1）：巡逻腿到不了 = 跳过这一点，由岗位维持器发巡逻专用的一条（每个点只发一次），不附驻防的恢复提示
+            }
             string hint = order.Kind == WorkOrderKind.Garrison && order.IssuerId == RosterIssuer
                 ? GameLogic.Localization.GameText.Get("roster.garrison.resume_hint")
                 : GameLogic.Localization.GameText.Get("nav.work.self_cancelled");

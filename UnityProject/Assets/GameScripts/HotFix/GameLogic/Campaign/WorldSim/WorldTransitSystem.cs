@@ -614,7 +614,19 @@ namespace GameLogic.Campaign.WorldSim
                 detail += " — " + GameText.Format("nav.transit.blocked",
                     GameText.Get(NavService.FailKey(g.NavReason != 0 ? (NavFailReason)g.NavReason : NavFailReason.Unreachable)));
             }
-            NotificationCenter.Post("raid_arrival", detail, new Vector3((float)g.PosX, 0f, (float)g.PosY));
+            // FG6-DEF-06（FGR-DEF-042）：先记这一波到达（本存档前 3 次突袭默认自动暂停），再在到达标记期间发通知——自动暂停的默认值按这一刻判定。
+            CampaignState state = CampaignSession.Current;
+            Defense.RaidDirectorService.OnGroupArrived(state, g);
+            int pausedBefore = NotificationCenter.AutoPauseCount;
+            using (Defense.RaidDirectorService.ArrivalScope())
+            {
+                NotificationCenter.Post(Defense.RaidDirectorService.ArrivalNotifyType, detail, new Vector3((float)g.PosX, 0f, (float)g.PosY));
+            }
+            if (NotificationCenter.AutoPauseCount > pausedBefore)
+            {
+                GuidanceHooks.Raise(GuidanceHooks.RaidFirstAutoPause);
+            }
+            GuidanceHooks.Raise(GuidanceHooks.RaidHudFirstActive);
         }
 
         /// <summary>寻路服务交回一条结果：队伍还在等这条（序号一致）才采纳。</summary>

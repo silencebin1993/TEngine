@@ -375,6 +375,16 @@ namespace GameLogic.EditorTools
                 case 406: StepSiegeStart(inStep); break;
                 case 407: StepSiegeRunning(inStep); break;
                 case 408: StepSiegeCleared(inStep); break;
+                // FG6-DEF-06：突袭条观战栏（真实鼠标点“观战”→ 2x、镜头跟随）→ Esc 退出观战恢复速度 → Alt+E 防御总览（热力图、薄弱点）→ Esc 关闭 → 清场
+                case 409: StepRaidHudSpectate(inStep); break;
+                case 410: StepRaidHudSpectating(inStep); break;
+                case 411: StepRaidHudSpectateEnded(inStep); break;
+                case 412: StepDefenseOverviewShown(inStep); break;
+                case 413: StepDefenseOverviewClosed(inStep); break;
+                // FG6-DEF-06 审查修复（FG00 B02）：观战的键盘入口——真实按键 Alt+V 开始观战 → Ctrl+F 关跟随 → Alt+V 停止观战（恢复速度）
+                case 414: StepRaidSpectateKeyStarted(inStep); break;
+                case 415: StepRaidSpectateKeyFollow(inStep); break;
+                case 416: StepRaidSpectateKeyStopped(inStep); break;
                     case 346: StepOverridePicked(inStep); break;
                     case 347: StepOverridePlaced(inStep); break;
                     case 348: StepOverridePanel(inStep); break;
@@ -9936,7 +9946,119 @@ namespace GameLogic.EditorTools
             PerfGate.Expect(true, $"攻城真实帧：平均 {avgMs:F2} ms（120 帧预算 8.33 ms，留 1% 抖动余量）",
                 new[] { PerfGate.Le(avgMs, 8.42, "攻城 200 台真实帧平均 ms") }, (ok, msg) => Check(ok, msg), Write);
             CheckNoTextMarkers("攻城中的家园");
-            int removed = home.DespawnSiegeGroup(Campaign.Defense.SiegeService.KeyOf(g));
+            Next(409, "FG6-DEF-06：突袭条观战栏出现（剩余敌人），真实鼠标点“观战”");
+        }
+
+        // ── FG6-DEF-06：突袭 HUD 观战栏（真实鼠标）、Esc 退出观战恢复速度、Alt+E 防御总览（真实按键）──
+
+        private static void StepRaidHudSpectate(double inStep)
+        {
+            if (inStep < 1.2)
+            {
+                return;
+            }
+            RaidWarningHudUIToolkit hud = RaidWarningHudUIToolkit.Instance;
+            hud?.Refresh(force: true);
+            SessionState.SetFloat(K + "SpecSpeed0", GameClock.Speed);
+            SessionState.SetInt(K + "SpecFly0", WorldView.FlyCount);
+            Check(hud != null && hud.PanelVisible && hud.SpecBarVisible && hud.SpecStatusText.Contains("剩余敌人"),
+                $"攻城中左上角突袭条出现观战栏：“{hud?.SpecStatusText}”");
+            Check(ClickUitk("[RaidWarningHost]", "RaidSpecToggle"), "真实鼠标点“观战”");
+            Next(410, "观战：速度切到 2x、镜头飞到战斗处");
+        }
+
+        private static void StepRaidHudSpectating(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            Check(Campaign.Defense.RaidSpectateService.Active && Mathf.Approximately(GameClock.Speed, 2f) && WorldView.FlyCount > SessionState.GetInt(K + "SpecFly0", 0),
+                $"观战中：速度 {GameClock.Speed}x（统一时钟的档位），镜头飞了 {WorldView.FlyCount - SessionState.GetInt(K + "SpecFly0", 0)} 次跟着战斗");
+            CheckNoTextMarkers("观战中的突袭条");
+            PressKeyKeepMouse(KeyCode.Escape);
+            Next(411, "Esc：退出观战（没有面板开着时 Esc 先退出观战，不开暂停菜单）");
+        }
+
+        private static void StepRaidHudSpectateEnded(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            float speed0 = SessionState.GetFloat(K + "SpecSpeed0", 1f);
+            Check(!Campaign.Defense.RaidSpectateService.Active && Mathf.Approximately(GameClock.Speed, speed0) && !PauseMenuUIToolkit.IsOpen,
+                $"Esc 退出观战、速度恢复 {speed0}x，没有打开暂停菜单");
+            PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameActionId.SpectateRaid));
+            Next(414, "真实按键（默认 Alt+V）开始观战");
+        }
+
+        private static void StepRaidSpectateKeyStarted(double inStep)
+        {
+            if (inStep < 1.2)
+            {
+                return;
+            }
+            Check(Campaign.Defense.RaidSpectateService.Active && Campaign.Defense.RaidSpectateService.Following && Mathf.Approximately(GameClock.Speed, 2f),
+                $"真实按键 {InputDisplay.ForAction(GameActionId.SpectateRaid)} 开始观战：速度 {GameClock.Speed}x，镜头跟随（键盘与观战栏按钮同一入口，FG00 B02）");
+            PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameActionId.SpectateFollow));
+            Next(415, "真实按键（默认 Ctrl+F）关掉“跟随战斗”");
+        }
+
+        private static void StepRaidSpectateKeyFollow(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            RaidWarningHudUIToolkit hud = RaidWarningHudUIToolkit.Instance;
+            hud?.Refresh(force: true);
+            Check(Campaign.Defense.RaidSpectateService.Active && !Campaign.Defense.RaidSpectateService.Following
+                  && hud != null && hud.SpecFollowButton.text == GameLogic.Localization.GameText.Get("raid.spec.follow_off"),
+                $"真实按键 {InputDisplay.ForAction(GameActionId.SpectateFollow)} 关掉跟随：观战栏“{hud?.SpecFollowButton.text}”");
+            PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameActionId.SpectateRaid));
+            Next(416, "再按 Alt+V 停止观战、恢复速度");
+        }
+
+        private static void StepRaidSpectateKeyStopped(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            float speed0 = SessionState.GetFloat(K + "SpecSpeed0", 1f);
+            Check(!Campaign.Defense.RaidSpectateService.Active && Mathf.Approximately(GameClock.Speed, speed0) && !PauseMenuUIToolkit.IsOpen,
+                $"再按 {InputDisplay.ForAction(GameActionId.SpectateRaid)} 停止观战、速度恢复 {speed0}x");
+            PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameActionId.OpenDefense));
+            Next(412, "真实按键（默认 Alt+E）打开防御总览");
+        }
+
+        private static void StepDefenseOverviewShown(double inStep)
+        {
+            if (inStep < 1.2)
+            {
+                return;
+            }
+            DefenseOverviewPanelUIToolkit p = DefenseOverviewPanelUIToolkit.Instance;
+            Check(DefenseOverviewPanelUIToolkit.IsOpen && p != null && p.PanelVisible && p.SummaryText.Contains("炮塔") && p.Coverage != null && p.StatsText.Length > 0
+                  && p.LegendText.Contains("占位"),
+                $"防御总览打开：“{p?.SummaryText}”；热力图“{p?.StatsText}”；薄弱点：{p?.WeakHeadText}");
+            CheckNoTextMarkers("防御总览");
+            PressKeyKeepMouse(KeyCode.Escape);
+            Next(413, "Esc 关闭防御总览");
+        }
+
+        private static void StepDefenseOverviewClosed(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            Campaign.Combat.CombatSite home = GameRoot.HomeValley?.Combat;
+            TransitGroupRecord g = WorldTransitSystem.Find(state, SessionState.GetString(K + "SiegeGroup", string.Empty));
+            Check(!DefenseOverviewPanelUIToolkit.IsOpen && !PauseMenuUIToolkit.IsOpen, "Esc 关闭防御总览（不连带打开暂停菜单）");
+            int removed = home != null && g != null ? home.DespawnSiegeGroup(Campaign.Defense.SiegeService.KeyOf(g)) : 0;
             Next(408, $"清场（测试捷径）：移除 {removed} 台攻城单位，下一次对账按“全歼”结算、关剧场");
         }
 

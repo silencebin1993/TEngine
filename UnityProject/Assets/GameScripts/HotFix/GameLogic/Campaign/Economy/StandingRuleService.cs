@@ -421,6 +421,7 @@ namespace GameLogic.Campaign.Economy
                 Machines = (int[])src.Machines.Clone(),
                 PointId = src.PointId,
                 BoostRepair = src.BoostRepair,
+                BoostDefenseSupply = src.BoostDefenseSupply, // FG6-DEF-06
                 Zones = CopyZones(d, src.Zones), // FG6-DEF-03：重建区域一起复制（新编号）
             };
             Append(d, copy);
@@ -782,6 +783,129 @@ namespace GameLogic.Campaign.Economy
             return Edited(state, r, out message);
         }
 
+        // ── FG6-DEF-06（承接 DEBT-FG4ECO06-03）：战时预案的“突袭时炮塔 / 陷阱补给优先” ─────────────────────────────
+
+        /// <summary>开 / 关战时预案的“突袭时炮塔 / 陷阱补给优先”。</summary>
+        public static bool TrySetDefenseSupplyBoost(CampaignState state, int serial, bool boost, out string message)
+        {
+            StandingRuleRecord r = Find(state, serial);
+            if (!Editable(r, out message, KindWar))
+            {
+                return false;
+            }
+            r.BoostDefenseSupply = boost;
+            if (boost && !r.Enabled && ConfigIssue(state, r, out _, out _) == null)
+            {
+                r.Enabled = true; // 只缺动作而停用的预案：补上这一项就能执行（与新建时“设置完整就启用”同一口径）
+            }
+            return Edited(state, r, out message);
+        }
+
+        /// <summary>
+        /// 防御总览的一键开关，与按钮显示的状态（<see cref="DefenseSupplyBoostConfigured"/>）同一口径（审查修复 P2）：
+        /// 显示“开”（有启用且打开了这一项的战时预案）→ 关掉所有启用的战时预案的这一项；显示“关” → 打开第一条（按优先级）启用的战时预案的这一项，
+        /// 没有启用的就用第一条战时预案（原先停用的一并启用，提示里写明），一条都没有就新建一条只开这一项的战时预案（维修优先关、不暂停建筑）。
+        /// 返回切换后的状态。可逆操作，不弹确认（B04）。
+        /// </summary>
+        public static bool ToggleDefenseSupplyBoost(CampaignState state, out bool nowOn, out string message)
+        {
+            nowOn = false;
+            if (DefenseSupplyBoostConfigured(state, out _))
+            {
+                var labels = new List<string>();
+                foreach (StandingRuleRecord r in Ordered(state))
+                {
+                    if (r.Kind == KindWar && r.Enabled && r.BoostDefenseSupply && TrySetDefenseSupplyBoost(state, r.Serial, false, out _))
+                    {
+                        labels.Add(Label(r));
+                    }
+                }
+                nowOn = DefenseSupplyBoostConfigured(state, out _);
+                message = GameText.Format("rules.msg.boost_supply_off_all", labels.Count, string.Join(GameText.Get("rules.sep_list"), labels));
+                return labels.Count > 0;
+            }
+            StandingRuleRecord war = null;
+            foreach (StandingRuleRecord r in Ordered(state))
+            {
+                if (r.Kind == KindWar && r.Enabled)
+                {
+                    war = r;
+                    break;
+                }
+            }
+            if (war == null)
+            {
+                foreach (StandingRuleRecord r in Ordered(state))
+                {
+                    if (r.Kind == KindWar)
+                    {
+                        war = r;
+                        break;
+                    }
+                }
+            }
+            if (war == null)
+            {
+                if (!TryCreate(state, KindWar, out war, out message))
+                {
+                    return false;
+                }
+                war.BoostRepair = false;
+                war.BoostDefenseSupply = true;
+                war.Enabled = ConfigIssue(state, war, out _, out _) == null;
+                AfterEdit(state, war);
+                nowOn = true;
+                message = GameText.Format("rules.msg.boost_supply_created", Label(war));
+                return true;
+            }
+            bool wasDisabled = !war.Enabled;
+            bool ok = TrySetDefenseSupplyBoost(state, war.Serial, true, out message);
+            if (ok && wasDisabled && war.Enabled)
+            {
+                message = GameText.Format("rules.msg.boost_supply_reenabled", message);
+            }
+            nowOn = DefenseSupplyBoostConfigured(state, out _);
+            return ok;
+        }
+
+        /// <summary>
+        /// 现在把炮塔 / 陷阱补给优先级提到最高的战时预案编号（0 = 没有）：启用、正在执行（突袭进行中）、打开了这一项的第一条（按优先级）。
+        /// 炮塔 / 陷阱的对账每轮调用一次（O(规则数) ≤ rules.max_rules）。
+        /// </summary>
+        public static int DefenseSupplyBoostSerial(CampaignState state)
+        {
+            foreach (StandingRuleRecord r in Domain(state)?.Rules ?? Array.Empty<StandingRuleRecord>())
+            {
+                if (r != null && r.Enabled && r.Kind == KindWar && r.Active && r.BoostDefenseSupply)
+                {
+                    return r.Serial;
+                }
+            }
+            return 0;
+        }
+
+        /// <summary>防御总览的开关状态：有没有打开了这一项的战时预案（不管现在有没有突袭）；<paramref name="serial"/> = 那一条。</summary>
+        public static bool DefenseSupplyBoostConfigured(CampaignState state, out int serial)
+        {
+            serial = 0;
+            foreach (StandingRuleRecord r in Ordered(state))
+            {
+                if (r.Kind == KindWar && r.Enabled && r.BoostDefenseSupply)
+                {
+                    serial = r.Serial;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>“规则 R3（战时预案）”这样的来源说明（炮塔补给一行写明是哪条规则提的优先级，FGR-BASE-020）。</summary>
+        public static string RuleLabel(CampaignState state, int serial)
+        {
+            StandingRuleRecord r = Find(state, serial);
+            return r != null ? Label(r) : string.Empty;
+        }
+
         private static bool Editable(StandingRuleRecord r, out string message, params string[] kinds)
         {
             if (r == null)
@@ -923,14 +1047,15 @@ namespace GameLogic.Campaign.Economy
                 }
                 case KindWar:
                 {
-                    if (!r.BoostRepair && r.Targets.Length == 0)
+                    bool hasAction = r.BoostRepair || r.BoostDefenseSupply; // FG6-DEF-06：补给优先也是一项动作
+                    if (!hasAction && r.Targets.Length == 0)
                     {
                         key = "rules.issue.war_empty";
                         break;
                     }
                     // 维修优先本身就是一项动作：打开时目标全没了也照常执行；只暂停建筑的预案目标全没了才不能执行。
                     string missing = FirstMissingTarget(state, r, damagedCounts: false, out bool anyUsable);
-                    if (!r.BoostRepair && !anyUsable)
+                    if (!hasAction && !anyUsable)
                     {
                         key = "rules.issue.target_missing";
                         arg = "@b:" + missing;
@@ -1284,6 +1409,12 @@ namespace GameLogic.Campaign.Economy
             {
                 SetActive(state, r, true, null);
                 Fired(state, r, "rules.log.war_on", null, LabelArg(r.Serial));
+                if (r.BoostDefenseSupply)
+                {
+                    // FG6-DEF-06：补给优先由炮塔 / 陷阱的对账按 DefenseSupplyBoostSerial 落到管线消费者（下一轮对账生效，突袭结束自动恢复）；这里写明提了几个补给口。
+                    AddLog(state, r.Serial, "rules.log.supply_boost", null, LabelArg(r.Serial),
+                        Defense.TurretService.SupplyConsumerCount(state).ToString(CultureInfo.InvariantCulture));
+                }
             }
             else if (!active && r.Active)
             {

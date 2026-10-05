@@ -72,6 +72,8 @@ namespace GameLogic.UI.Kit
         private DropdownField _item, _factory, _recipe, _targetAdd, _targetRemove, _machineAdd, _machineRemove, _point;
         private Label _thValue, _batchValue, _targetsValue, _machinesValue;
         private Button _thMinus10, _thMinus1, _thPlus1, _thPlus10, _batchMinus, _batchPlus, _boost;
+        private Button _boostSupply; // FG6-DEF-06：战时预案“突袭时炮塔 / 陷阱补给优先”
+        public Button BoostSupplyButton => _boostSupply;
         private Label _logCount;
         private Label _logEmpty;
         private ScrollView _logList;
@@ -312,6 +314,7 @@ namespace GameLogic.UI.Kit
             _batchMinus = root.Q<Button>("RulesBatchMinus");
             _batchPlus = root.Q<Button>("RulesBatchPlus");
             _boost = root.Q<Button>("RulesBoost");
+            _boostSupply = root.Q<Button>("RulesBoostSupply");
             _logCount = root.Q<Label>("RulesLogCount");
             _logEmpty = root.Q<Label>("RulesLogEmpty");
             _logList = root.Q<ScrollView>("RulesLogList");
@@ -327,6 +330,12 @@ namespace GameLogic.UI.Kit
             _batchMinus.clicked += () => StepBatch(-1);
             _batchPlus.clicked += () => StepBatch(1);
             _boost.clicked += ToggleBoost;
+            _boostSupply.clicked += ToggleBoostSupply;
+            UiTooltip.Attach(_boostSupply, () => new TooltipContent
+            {
+                Title = GameText.Get("rules.edit.boost_supply_on"),
+                Body = GameText.Format("defov.boost.tip", InputDisplay.ForAction(GameActionId.OpenRules)),
+            });
             _zoneDraw.clicked += DrawZone;
             _zoneToggle.RegisterValueChangedCallback(evt => OnPickInt(_zoneToggle, _zoneToggleIds, evt.newValue, id => Do(StandingRuleService.TryToggleZone(Session, SelectedSerial, id, out string m), m)));
             _zoneRemove.RegisterValueChangedCallback(evt => OnPickInt(_zoneRemove, _zoneRemoveIds, evt.newValue, id => Do(StandingRuleService.TryRemoveZone(Session, SelectedSerial, id, out string m), m)));
@@ -664,6 +673,7 @@ namespace GameLogic.UI.Kit
             {
                 Show(_rowBoost);
                 _boost.text = GameText.Get(r.BoostRepair ? "rules.edit.boost_on" : "rules.edit.boost_off");
+                _boostSupply.text = GameText.Get(r.BoostDefenseSupply ? "rules.edit.boost_supply_on" : "rules.edit.boost_supply_off");
             }
             if (kind == StandingRuleService.KindRebuild)
             {
@@ -1126,6 +1136,18 @@ namespace GameLogic.UI.Kit
                 return;
             }
             bool ok = StandingRuleService.TrySetBoost(Session, r.Serial, !r.BoostRepair, out string message);
+            Say(ok, message);
+        }
+
+        /// <summary>FG6-DEF-06：战时预案的“突袭时炮塔 / 陷阱补给优先”开关。</summary>
+        public void ToggleBoostSupply()
+        {
+            StandingRuleRecord r = StandingRuleService.Find(Session, SelectedSerial);
+            if (r == null)
+            {
+                return;
+            }
+            bool ok = StandingRuleService.TrySetDefenseSupplyBoost(Session, r.Serial, !r.BoostDefenseSupply, out string message);
             Say(ok, message);
         }
 

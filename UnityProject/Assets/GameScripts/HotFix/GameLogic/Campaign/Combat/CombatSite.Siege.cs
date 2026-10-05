@@ -262,6 +262,19 @@ namespace GameLogic.Campaign.Combat
 
         public int CountSiegeGroup(int groupKey, int[] perRole = null) => IsDisposed ? 0 : Kernel.CountSiegeGroup(groupKey, perRole);
 
+        /// <summary>FG6-DEF-06：一支队伍还活着的攻城单位的重心（观战镜头跟随）。返回台数。</summary>
+        public int SiegeGroupCentroid(int groupKey, out Vector2 centroid)
+        {
+            centroid = Vector2.zero;
+            if (IsDisposed)
+            {
+                return 0;
+            }
+            int n = Kernel.SiegeGroupCentroid(groupKey, out double x, out double y);
+            centroid = new Vector2((float)x, (float)y);
+            return n;
+        }
+
         public int SetSiegeGroupRetreat(int groupKey) => IsDisposed ? 0 : Kernel.SetSiegeGroupMode(groupKey, CombatSiegeMode.Retreat);
 
         public int DespawnSiegeGroup(int groupKey) => IsDisposed ? 0 : Kernel.DespawnSiegeGroup(groupKey);

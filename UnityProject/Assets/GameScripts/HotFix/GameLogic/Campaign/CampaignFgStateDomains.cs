@@ -1259,6 +1259,11 @@ namespace GameLogic.Campaign
         public string PointId = string.Empty;
         /// <summary>战时预案：维修工作单提到最高优先级。</summary>
         public bool BoostRepair;
+        /// <summary>
+        /// FG6-DEF-06（承接 DEBT-FG4ECO06-03“阈值补给 / 管线消费者优先级规则”）：战时预案执行期间把全部炮塔 / 陷阱发射器的管线补给优先级提到最高（PipeConst.PriorityMin），
+        /// 突袭结束恢复默认（turret.supply.pipe_priority / trap.pipe_priority）。只加字段：旧档 = 关。
+        /// </summary>
+        public bool BoostDefenseSupply;
         public long LastFiredTick = -1;
         public int FireCount;
         /// <summary>条件现在成立、正在执行（库存维持 / 战时 / 静默夜；用来只在开始与结束时各写一条日志）。</summary>

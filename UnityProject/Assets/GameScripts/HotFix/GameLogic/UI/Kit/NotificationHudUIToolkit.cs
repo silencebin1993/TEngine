@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using GameLogic.Campaign;
@@ -54,7 +55,21 @@ namespace GameLogic.UI.Kit
         private Slider _duration;
         private Label _autoPauseTitle;
         private VisualElement _autoPauseList;
+        private Button _autoPauseReset;
+        private bool _toastPassthrough;
         private NotificationEntry _selected;
+
+        /// <summary>
+        /// FG6-DEF-06（承接 DEBT-FG5E2E01-06）：有别的面板（模态）开着时，弹出条不拦截指针——面板右侧被弹出条盖住的按钮一次点中；
+        /// 要看 / 定位通知时用通知中心（`）。没有面板开着时照旧可以点弹出条定位。自检读。
+        /// </summary>
+        public bool ToastPassthrough => _toastPassthrough;
+
+        /// <summary>自检：编辑模式下没有真实模态宿主时，用它模拟“有面板开着”。</summary>
+        public static Func<bool> ModalOpenOverrideForTests;
+
+        public Button AutoPauseResetButton => _autoPauseReset;
+        public VisualElement AutoPauseList => _autoPauseList;
         private bool _settingsOpen;
         private int _seenRevision = -1;
         private int _seenSettings = -1;
@@ -127,6 +142,16 @@ namespace GameLogic.UI.Kit
             _duration = root.Q<Slider>("NotifyDuration");
             _autoPauseTitle = root.Q<Label>("NotifyAutoPauseTitle");
             _autoPauseList = root.Q<VisualElement>("NotifyAutoPauseList");
+            _autoPauseReset = root.Q<Button>("NotifyAutoPauseReset");
+            if (_autoPauseReset != null)
+            {
+                _autoPauseReset.clicked += ResetAutoPause;
+                UiTooltip.Attach(_autoPauseReset, () => new TooltipContent
+                {
+                    Title = GameText.Get("ui.notify.autopause_reset"),
+                    Body = GameText.Format("ui.notify.autopause_reset_tip", Campaign.Defense.RaidDirectorService.AutoPauseFirstRaids),
+                });
+            }
 
             _entryButton.clicked += ToggleCenter;
             _close.clicked += () => SetCenterOpen(false);
@@ -167,6 +192,10 @@ namespace GameLogic.UI.Kit
                 GameText.Get("ui.notify.filter_all"), GameText.Get("notify.tier.urgent"), GameText.Get("notify.tier.warning"), GameText.Get("notify.tier.info"),
             });
             _autoPauseTitle.text = GameText.Get("ui.notify.auto_pause");
+            if (_autoPauseReset != null)
+            {
+                _autoPauseReset.text = GameText.Get("ui.notify.autopause_reset");
+            }
             RebuildTypeChoices();
             _seenSettings = GameSettings.Revision;
         }
@@ -250,6 +279,7 @@ namespace GameLogic.UI.Kit
                 ApplyTexts();
                 _seenRevision = -1;
             }
+            UpdateToastPassthrough();
             if (_seenRevision == NotificationCenter.Revision)
             {
                 return;
@@ -276,6 +306,51 @@ namespace GameLogic.UI.Kit
         }
 
         // ── 弹出条 ───────────────────────────────────────────────────────
+
+        /// <summary>有没有别的面板（不是本通知中心）以模态开着。O(模态数)，每帧一次。</summary>
+        private bool OtherModalOpen()
+        {
+            if (ModalOpenOverrideForTests != null)
+            {
+                return ModalOpenOverrideForTests();
+            }
+            foreach (object owner in InputRouter.ModalOwnerList)
+            {
+                if (owner != null && !ReferenceEquals(owner, this))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>FG6-DEF-06（DEBT-FG5E2E01-06）：面板开着 → 弹出条不拦截指针（只在变化时改，O(弹出条数)）。</summary>
+        public void UpdateToastPassthrough()
+        {
+            bool pass = OtherModalOpen();
+            if (pass == _toastPassthrough || _toastList == null)
+            {
+                return;
+            }
+            _toastPassthrough = pass;
+            foreach (VisualElement t in _toastPool)
+            {
+                ApplyToastPicking(t);
+            }
+        }
+
+        private void ApplyToastPicking(VisualElement toast)
+        {
+            toast.pickingMode = _toastPassthrough ? PickingMode.Ignore : PickingMode.Position;
+            toast.EnableInClassList("uk-toast-passthrough", _toastPassthrough);
+        }
+
+        /// <summary>“恢复默认”：清掉玩家改过的“触发时自动暂停”（突袭到达回到“前 3 次突袭”）。</summary>
+        public void ResetAutoPause()
+        {
+            GameSettings.ResetNotifyAutoPause();
+            RenderSettings();
+        }
 
         private void RenderEntryButton()
         {
@@ -332,6 +407,7 @@ namespace GameLogic.UI.Kit
             toast.Add(text);
             toast.Add(meta);
             toast.RegisterCallback<ClickEvent>(_ => OnToastClicked(toast.userData as NotificationEntry));
+            ApplyToastPicking(toast);
             UiTooltip.Attach(toast, () =>
             {
                 var e = toast.userData as NotificationEntry;
@@ -529,8 +605,12 @@ namespace GameLogic.UI.Kit
             {
                 if (child is Toggle t && t.userData is NotifyTypeDef d)
                 {
-                    t.label = GameText.Get(d.NameKey);
-                    t.SetValueWithoutNotify(GameSettings.IsNotifyAutoPauseEnabled(d.Id, d.AutoPauseDefault));
+                    // FG6-DEF-06（FGR-DEF-042）：默认值按存档状态决定的类型（突袭到达：前 3 次突袭）写明默认与已到达次数。
+                    t.label = NotificationCenter.HasDynamicAutoPauseDefault(d.Id) && d.Id == Campaign.Defense.RaidDirectorService.ArrivalNotifyType
+                        ? GameText.Format("ui.notify.autopause_dynamic", GameText.Get(d.NameKey), Campaign.Defense.RaidDirectorService.AutoPauseFirstRaids,
+                            Campaign.Defense.RaidDirectorService.ArrivedWaves(Campaign.CampaignSession.Current))
+                        : GameText.Get(d.NameKey);
+                    t.SetValueWithoutNotify(NotificationCenter.IsAutoPauseEnabled(d));
                 }
             }
         }
