@@ -402,6 +402,12 @@ namespace GameLogic.Core
         /// <summary>FG6-DEF-06（FGR-DEF-043）：第一次给驻防机器设巡逻路线。</summary>
         public const string RosterFirstPatrol = "roster.first_patrol";
 
+        /// <summary>FG6-DEF-07（FGR-DEF-041）：第一次在远征中收到家园遇袭的紧急通知（“跳回家园 / 留在远征队”两种选择的引导在 FG15-UX-04）。</summary>
+        public const string RaidAwayFirstAlert = "raid.away_first_alert";
+
+        /// <summary>FG6-DEF-07：第一次在远征中对家园遇袭做出选择（跳回家园或留在远征队）。</summary>
+        public const string RaidAwayFirstChoice = "raid.away_first_choice";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -453,6 +459,7 @@ namespace GameLogic.Core
             RaidFirstPlanned, RaidFirstWarning, RaidFirstAssembling, RaidFirstWithdrawn, RaidWarningFirstClick,
             SiegeFirstUnfold, SiegeFirstBreach, SiegeFirstRetreat, SiegeFirstDestroyed,
             RaidHudFirstActive, RaidFirstSpectate, RaidFirstAutoPause, DefenseOverviewFirstOpen, DefenseFirstWeakPoint, RosterFirstPatrol,
+            RaidAwayFirstAlert, RaidAwayFirstChoice,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

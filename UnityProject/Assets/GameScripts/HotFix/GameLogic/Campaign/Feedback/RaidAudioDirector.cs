@@ -124,6 +124,12 @@ namespace GameLogic.Campaign.Feedback
             }
         }
 
+        /// <summary>
+        /// FG6-DEF-07：远征 HUD 的家园遇袭紧急通知弹出、而音乐阶段没有变化时（例如突袭已经预警，玩家这时才出发远征 / 跳到远征队），补一声预警提示音。
+        /// 阶段变化本身会响提示音，调用方负责不重复。与阶段提示音同一音效通道与计数。
+        /// </summary>
+        public static void AlertSting() => Sting(StingWarning);
+
         private static void Sting(string id)
         {
             LastSting = id;

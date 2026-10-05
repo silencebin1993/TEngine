@@ -144,7 +144,16 @@ namespace GameLogic.UI.Kit
             // FG1-SIG-07（FGR-SIG-051、FG01 第 4 章快捷键）：跳回家园 / 跳回上一台机器（战略与接入上下文），覆盖网络叠加层（战略与建造上下文）。全部可重绑。
             if (InputRouter.ConsumeContextAction(GameActionId.JumpHome))
             {
-                Campaign.Signal.SignalUplinkService.RequestJumpHome();
+                // FG6-DEF-07：远征中家园遇袭的紧急通知 / 小窗显示时，H 与“跳回家园”按钮同一入口（同样记下这一波的选择、写明被拒原因）；
+                // 小窗读数滞后、其实已经没有遇袭时回退到普通的跳回家园（复审 P2）。
+                if (RaidWarningHudUIToolkit.Instance != null && RaidWarningHudUIToolkit.Instance.Away.PanelVisible)
+                {
+                    RaidWarningHudUIToolkit.Instance.Away.PressJumpKey();
+                }
+                else
+                {
+                    Campaign.Signal.SignalUplinkService.RequestJumpHome();
+                }
             }
             if (InputRouter.ConsumeContextAction(GameActionId.JumpPreviousMachine))
             {

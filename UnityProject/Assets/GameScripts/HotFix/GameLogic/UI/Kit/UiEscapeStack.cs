@@ -163,6 +163,30 @@ namespace GameLogic.UI.Kit
             }
         }
 
+        /// <summary>
+        /// FG6-DEF-07（复审 P1）：根浮层（HUD 上自带“Esc = 某个选择”的紧急通知）。与 <see cref="Sync"/> 的区别：不挂在当时最上层的页面下面（Parent 恒为 null），
+        /// 所以页面被关闭、或打开同级页面互斥关掉旧页时，不会把它当成后代连带关闭（连带关闭会调用关闭回调，等于替玩家做了选择）。
+        /// 它在栈里的位置按压入顺序：压入之后才打开的页面在它上面，Esc 先关页面。关闭回调可以用 <see cref="IsCancelClosing"/> 区分“Esc 正好关的是它”。
+        /// </summary>
+        public static void SyncOverlay(object owner, bool open, Action close)
+        {
+            bool has = Contains(owner);
+            if (open && !has && close != null && owner != null)
+            {
+                Layers.Add(new Layer { Owner = owner, Close = close, View = null, Parent = null });
+                RefreshPages();
+            }
+            else if (!open && has)
+            {
+                Remove(owner);
+            }
+        }
+
+        private static object _cancelClosing;
+
+        /// <summary>这一次关闭是不是取消键（<see cref="CloseTop"/>）正好关的 <paramref name="owner"/> 这一层；被父页连带关闭、读档清栈等都返回 false。</summary>
+        public static bool IsCancelClosing(object owner) => owner != null && ReferenceEquals(_cancelClosing, owner);
+
         /// <summary>FG0-UX-01：不能用 Esc 关掉、也不许 Esc 穿透到暂停菜单的整页（核心被毁失败页、胜利页）。
         /// 在它上面的层照常逐层关闭；轮到它时 Esc 被吞掉，什么也不发生——玩家只能用页面上的按钮离开。</summary>
         public static void SyncBlocking(object owner, bool shown)
@@ -224,7 +248,16 @@ namespace GameLogic.UI.Kit
             {
                 return true; // 吞掉这次 Esc：不关页面，也不打开暂停菜单。
             }
-            CloseLayer(top);
+            object previous = _cancelClosing;
+            _cancelClosing = top.Owner;
+            try
+            {
+                CloseLayer(top);
+            }
+            finally
+            {
+                _cancelClosing = previous;
+            }
             return true;
         }
 

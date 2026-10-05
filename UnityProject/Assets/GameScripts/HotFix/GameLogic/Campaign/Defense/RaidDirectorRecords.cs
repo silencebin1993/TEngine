@@ -54,6 +54,27 @@ namespace GameLogic.Campaign
         public int ArrivedWaveCount;
         /// <summary>最近计过数的波次序号（最多 8 个，判断同一波的后到队伍不重复计数）。</summary>
         public int[] CountedWaves = Array.Empty<int>();
+
+        // ── FG6-DEF-07（FGR-DEF-041“远征时家园遇袭：跳回家园 / 让信号留在远征队那边”）：只加字段、不升域版本 ──
+        /// <summary>
+        /// 玩家在远征中对每一波家园遇袭做的选择（最近 raid.away.decision_keep 条；读档后同一波不再弹出紧急通知）。
+        /// 只由玩家点击写入（<see cref="Defense.HomeRaidAlertService"/>），不影响任何模拟。旧档没有 = 空。
+        /// </summary>
+        public RaidAwayDecisionRecord[] AwayDecisions = Array.Empty<RaidAwayDecisionRecord>();
+    }
+
+    /// <summary>FG6-DEF-07：远征中对一波家园遇袭的选择。</summary>
+    [Serializable]
+    public sealed class RaidAwayDecisionRecord
+    {
+        /// <summary>突袭波次序号（RaidPlanRecord.Wave；0 = 没有计划的突袭队伍，调试 / 旧档）。</summary>
+        public int Wave;
+        /// <summary>1 = 跳回家园，2 = 留在远征队（Defense.HomeRaidAlertService.ChoiceJumpHome / ChoiceStay）。</summary>
+        public int Choice;
+        /// <summary>做选择时的世界步。</summary>
+        public long Tick;
+        /// <summary>做选择时玩家所在的远征地点。</summary>
+        public string SiteId = string.Empty;
     }
 
     /// <summary>FG6-DEF-04：一次等待处理的触发。</summary>

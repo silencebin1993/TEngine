@@ -97,6 +97,11 @@ namespace GameLogic.Campaign.Defense
             d.Pending ??= Array.Empty<RaidTriggerRecord>();
             d.StoriesFired ??= Array.Empty<string>();
             d.CountedWaves ??= Array.Empty<int>(); // FG6-DEF-06
+            d.AwayDecisions ??= Array.Empty<RaidAwayDecisionRecord>(); // FG6-DEF-07
+            if (Array.IndexOf(d.AwayDecisions, null) >= 0)
+            {
+                d.AwayDecisions = Array.FindAll(d.AwayDecisions, x => x != null); // 坏档里的空条目去掉（只在有空条目时分配）
+            }
             if (d.ArrivedWaveCount < 0)
             {
                 d.ArrivedWaveCount = 0;

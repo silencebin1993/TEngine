@@ -426,7 +426,7 @@ namespace GameLogic.EditorTools
             (int code, string output) = F.RunPython(F.LocateRepo(), "tools/cell_tables/fgdata.py --dump");
             var py = new HashSet<string>(output.Replace("\r", string.Empty).Split('\n')
                 .Where(l => l.StartsWith("RDT\t") || l.StartsWith("RDL\t") || l.StartsWith("RDD\t") || l.StartsWith("RDU\t") || l.StartsWith("RDC\t") || l.StartsWith("RDS\t")
-                            || (l.StartsWith("CX\tcodex.raid.") && !l.StartsWith("CX\tcodex.raid.siege") && !l.StartsWith("CX\tcodex.raid.hud"))) // 图鉴“攻城行为”归 FgSiegeSelfCheck A1，“突袭 HUD”归 FgUplinkHudSelfCheck 图鉴段比对
+                            || (l.StartsWith("CX\tcodex.raid.") && !l.StartsWith("CX\tcodex.raid.siege") && !l.StartsWith("CX\tcodex.raid.hud") && !l.StartsWith("CX\tcodex.raid.away"))) // 图鉴“攻城行为”归 FgSiegeSelfCheck A1，“突袭 HUD”“远征中家园遇袭”（FG6-DEF-07）归 FgUplinkHudSelfCheck 图鉴段比对
                 .Select(l => string.Join("\t", l.Split('\t').Select(Norm))));
             var rt = new HashSet<string>();
             foreach (GameConfig.fg.RaidTrigger r in t.TbRaidTrigger.DataList)

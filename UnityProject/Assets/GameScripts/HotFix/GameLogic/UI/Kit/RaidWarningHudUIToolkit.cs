@@ -60,6 +60,8 @@ namespace GameLogic.UI.Kit
         private readonly List<string> _rowTips = new List<string>(6);
         private readonly List<Vector2> _rowTargets = new List<Vector2>(6);
         private readonly StringBuilder _keyBuilder = new StringBuilder(96);
+        /// <summary>FG6-DEF-07：远征 HUD 的家园遇袭紧急通知与家园状态小窗（同一个 UXML，排在突袭条最上面）。</summary>
+        private readonly HomeRaidAlertView _away = new HomeRaidAlertView();
         private string _lastKey;
         private float _refreshTimer;
 
@@ -93,6 +95,8 @@ namespace GameLogic.UI.Kit
         public VisualElement CompactElement => _compact;
         public VisualElement ColumnElement { get; private set; }
         public int Rebuilds { get; private set; }
+        /// <summary>FG6-DEF-07：远征中家园遇袭的弹窗与小窗（自检读点）。</summary>
+        public HomeRaidAlertView Away => _away;
 
         private void Awake()
         {
@@ -137,6 +141,7 @@ namespace GameLogic.UI.Kit
             _specFollow.clicked += ClickFollow;
             _specOverview.clicked += ClickOverview;
             _turretLeave.clicked += ClickLeaveTurret;
+            _away.Bind(root);
             UiTooltip.Attach(_specToggle, () => new TooltipContent
             {
                 Title = GameText.Get("raid.spec.start"),
@@ -171,6 +176,11 @@ namespace GameLogic.UI.Kit
                 return;
             }
             RaidSpectateService.Tick(CampaignSession.Current, Time.unscaledDeltaTime);
+            // FG6-DEF-07：远征中家园遇袭的弹窗 / 倒计时按自己的 raid.away.refresh_seconds 节流（与突袭条的 raid.hud.refresh_seconds 分开调）。
+            if (_away.Due(Time.unscaledDeltaTime))
+            {
+                RefreshAway(false);
+            }
             _refreshTimer -= Time.unscaledDeltaTime;
             if (_refreshTimer > 0f)
             {
@@ -178,6 +188,18 @@ namespace GameLogic.UI.Kit
             }
             _refreshTimer = RaidHudService.RefreshSeconds;
             Refresh();
+        }
+
+        /// <summary>FG6-DEF-07：远征中家园遇袭的紧急通知与家园小窗（只在镜头不在家园时显示，与家园的建造模式无关）。</summary>
+        private void RefreshAway(bool force)
+        {
+            if (_panel == null)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            bool inWorld = state != null && (GameRoot.AnyRegionActive || InWorldOverrideForTests);
+            _away.Refresh(state, inWorld, GameClock.Ticks, force);
         }
 
         /// <summary>按突袭导演与战况刷新（自检可直接调用；<paramref name="force"/> = 忽略键比较）。</summary>
@@ -198,6 +220,11 @@ namespace GameLogic.UI.Kit
             SetVisible(_panel, show);
             RefreshCompact(state, inWorld && building, waves, now);
             RefreshTurret(state, inWorld);
+            // FG6-DEF-07：远征中家园遇袭平时由 Update 按 raid.away.refresh_seconds 刷新；强制刷新（自检）时一并立即刷新。
+            if (force)
+            {
+                RefreshAway(true);
+            }
             if (!show)
             {
                 RowCount = 0;
@@ -421,6 +448,7 @@ namespace GameLogic.UI.Kit
 
         protected override void OnDestroy()
         {
+            _away.Release();
             if (Instance == this)
             {
                 Instance = null;

@@ -92,6 +92,9 @@ namespace GameLogic.EditorTools
             SessionState.SetBool(K + "VfxChecked", false);
             SessionState.SetBool(K + "LinkHover", false);
             SessionState.SetInt(K + "FoListPhase", 0);
+            // FG6-DEF-07：远征中家园遇袭的步骤（417～419）是否走过；同一编辑器会话里重跑时必须复位，否则会被静默跳过。
+            SessionState.EraseInt(K + "AwayAlertDone");
+            SessionState.EraseInt(K + "AwaySub");
             SessionState.SetFloat(K + "Start", (float)EditorApplication.timeSinceStartup);
             Next(0, "开始：打开 Assets/Scenes/main.unity 并进入 Play");
             EditorSceneManager.OpenScene("Assets/Scenes/main.unity", OpenSceneMode.Single);
@@ -385,6 +388,11 @@ namespace GameLogic.EditorTools
                 case 414: StepRaidSpectateKeyStarted(inStep); break;
                 case 415: StepRaidSpectateKeyFollow(inStep); break;
                 case 416: StepRaidSpectateKeyStopped(inStep); break;
+                // FG6-DEF-07：远征中家园遇袭——镜头切到在外的远征地点 → 远征 HUD 弹出紧急通知（倒计时）与家园状态小窗 → 真实鼠标点“留在远征队”→ 弹窗收起、小窗留着 →
+                // 真实按键 H“跳回家园”→ 镜头回到家园、小窗收起（插在离家报告路径的“远征在外”之后、正式撤离之前）
+                case 417: StepAwayAlertShown(inStep); break;
+                case 418: StepAwayStayed(inStep); break;
+                case 419: StepAwayJumpedHome(inStep); break;
                     case 346: StepOverridePicked(inStep); break;
                     case 347: StepOverridePlaced(inStep); break;
                     case 348: StepOverridePanel(inStep); break;
@@ -4207,6 +4215,13 @@ namespace GameLogic.EditorTools
             {
                 return;
             }
+            // FG6-DEF-07：远征在外、镜头在远征地点时，先走“远征中家园遇袭”三步（紧急通知 → 留在远征队 → H 跳回家园），回到这里再正式撤离。
+            if (SessionState.GetInt(K + "AwayAlertDone", 0) == 0)
+            {
+                SessionState.SetInt(K + "AwayAlertDone", 1);
+                Next(417, "FG6-DEF-07：远征在外、家园这一波突袭发出预警：远征 HUD 弹出家园遇袭紧急通知（倒计时）与家园状态小窗");
+                return;
+            }
             bool away = GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsLoaded && Campaign.Economy.AwayReportService.IsOpen(CampaignSession.Current);
             Check(away, "远征在外：离家报告在记（进行中）");
             Campaign.Regions.ExpeditionReturnService.ReturnResult evac = Campaign.Regions.ExpeditionReturnService.TryConfirmEvacuation();
@@ -7592,6 +7607,107 @@ namespace GameLogic.EditorTools
                 $"点预警条：镜头飞到预计抵达点（焦点 {CameraFocus()}，抵达点 {target}）");
             PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.OpenMap));
             Next(405, "按地图键打开战略地图：有来袭方向的箭头与“突袭预警”标签");
+        }
+
+        // ── FG6-DEF-07：远征中家园遇袭（远征 HUD 紧急通知 + 家园状态小窗；真实鼠标“留在远征队”、真实按键 H“跳回家园”）──
+
+        private static void StepAwayAlertShown(double inStep)
+        {
+            Campaign.WorldSim.IWorldSite exp = WorldSimulation.ActiveExpedition;
+            if (SessionState.GetInt(K + "AwaySub", 0) == 0)
+            {
+                SessionState.SetInt(K + "AwaySub", 1);
+                SessionState.SetString(K + "AwaySite", exp?.SiteId ?? string.Empty);
+                CampaignState st0 = CampaignSession.Current;
+                // 家园这时没有已预警的突袭就排一波（测试捷径同 FG6-DEF-04 第 403 步：剧情节点触发 → 筹备期 StepMany + SkipForTests 跳过 → 到预警时刻），之后全走正式流程。
+                if (Campaign.Defense.HomeRaidAlertService.HomeThreats(st0, GameClock.Ticks).Count == 0 && !Campaign.Defense.HomeRaidAlertService.UnplannedActive(st0))
+                {
+                    bool wasPaused = GameClock.Paused;
+                    GameClock.SetPaused(true);
+                    Campaign.Defense.RaidDirectorService.RequestStoryRaid(st0, Campaign.Defense.RaidDirectorService.MostStimulatedFaction(st0), 1);
+                    WorldSimulation.StepMany(2);
+                    Campaign.RaidPlanRecord p = null;
+                    for (int i = 0; i < 400; i++)
+                    {
+                        p = Campaign.Defense.RaidDirectorService.Plans(st0)
+                            .Where(x => x != null && x.State >= Campaign.Defense.RaidDirectorService.StateScheduled && x.State < Campaign.Defense.RaidDirectorService.StateEnded)
+                            .OrderBy(x => x.WarnTick).FirstOrDefault();
+                        if (p != null)
+                        {
+                            break;
+                        }
+                        WorldSimulation.StepMany(15);
+                    }
+                    if (p != null && p.State == Campaign.Defense.RaidDirectorService.StateScheduled && p.WarnTick - 2 > GameClock.Ticks)
+                    {
+                        GameClock.SkipForTests(st0, p.WarnTick - 2 - GameClock.Ticks);
+                    }
+                    WorldSimulation.StepMany(3);
+                    GameClock.SetPaused(wasPaused);
+                }
+                Check(exp != null && Campaign.Defense.HomeRaidAlertService.HomeThreats(st0, GameClock.Ticks).Count > 0,
+                      $"远征队在外（{exp?.SiteId}），家园有一波突袭已发预警（{Campaign.Defense.HomeRaidAlertService.HomeThreats(st0, GameClock.Ticks).Count} 波）");
+                if (exp != null && !WorldView.IsObserved(exp.SiteId))
+                {
+                    WorldView.Observe(exp.SiteId); // 镜头不在远征地点时切过去（与 Tab 关注点同一个入口）
+                }
+                return;
+            }
+            if (inStep < 1.2)
+            {
+                return;
+            }
+            SessionState.SetInt(K + "AwaySub", 0);
+            CampaignState state = CampaignSession.Current;
+            RaidWarningHudUIToolkit hud = RaidWarningHudUIToolkit.Instance;
+            hud?.Refresh(force: true);
+            UI.Kit.HomeRaidAlertView v = hud?.Away;
+            bool shown = v != null && v.PanelVisible && v.PopupVisible && (v.CountdownText.Contains("后抵达家园") || v.CountdownText.Contains("正在攻打家园")) && v.CoreText.Contains("归还核心")
+                         && v.KeysText.Contains("关键建筑") && (v.EnemiesText.Contains("来袭敌人") || v.EnemiesText.Contains("剩余敌人")) && v.StayVisible;
+            Check(shown && GameSettings.HasSeenGuidanceHook(GuidanceHooks.RaidAwayFirstAlert),
+                $"镜头在远征地点：远征 HUD 弹出“{v?.AlertTitleText}”——“{v?.CountdownText}”；家园小窗“{v?.CoreText}”/“{v?.KeysText}”/“{v?.EnemiesText}”；第一次弹出发引导钩子");
+            CheckNoTextMarkers("远征中的家园遇袭通知");
+            SessionState.SetInt(K + "AwaySignal", Campaign.Signal.SignalPresence.CurrentMachineLogicId);
+            Check(ClickUitk("[RaidWarningHost]", "RaidAwayStay"), "真实鼠标点“留在远征队”");
+            Next(418, "留在远征队：紧急通知收起，家园状态小窗留着，信号不动");
+        }
+
+        private static void StepAwayStayed(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            RaidWarningHudUIToolkit hud = RaidWarningHudUIToolkit.Instance;
+            hud?.Refresh(force: true);
+            UI.Kit.HomeRaidAlertView v = hud?.Away;
+            string site = SessionState.GetString(K + "AwaySite", string.Empty);
+            bool stayed = v != null && v.PanelVisible && !v.PopupVisible && v.ChosenText.Contains("留在远征队") && WorldView.ObservedSiteId == site
+                          && Campaign.Signal.SignalPresence.CurrentMachineLogicId == SessionState.GetInt(K + "AwaySignal", -1)
+                          && Campaign.Defense.HomeRaidAlertService.StayCount > 0 && GameSettings.HasSeenGuidanceHook(GuidanceHooks.RaidAwayFirstChoice);
+            Check(stayed, $"留在远征队：紧急通知收起，小窗留着（“{v?.ChosenText}”），镜头还在远征地点、信号不动");
+            PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.JumpHome));
+            Next(419, "真实按键 H：跳回家园（小窗显示时与“跳回家园”按钮同一入口）");
+        }
+
+        private static void StepAwayJumpedHome(double inStep)
+        {
+            bool home = WorldView.ObservedSiteId == Campaign.Regions.HomeValleyLayout.RegionId && !Campaign.Signal.SignalUplinkService.IsJumpingHome;
+            if (!home && inStep < 4)
+            {
+                return;
+            }
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            RaidWarningHudUIToolkit hud = RaidWarningHudUIToolkit.Instance;
+            hud?.Refresh(force: true);
+            UI.Kit.HomeRaidAlertView v = hud?.Away;
+            Check(home && Campaign.Signal.SignalPresence.AtCore && v != null && !v.PanelVisible && Campaign.Defense.HomeRaidAlertService.JumpCount > 0 && hud.PanelVisible,
+                $"按 {InputDisplay.ForAction(GameActionId.JumpHome)} 跳回家园：信号在归还核心、镜头回到家园，远征小窗收起，家园的突袭条照常显示（{FirstLine(hud?.RowText(0))}）");
+            Next(343, "回到离家报告的正式路径：远征在外 → 正式撤离事务");
         }
 
         private static void StepRaidDirectorMap(double inStep)
