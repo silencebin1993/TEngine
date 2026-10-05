@@ -556,9 +556,10 @@ namespace GameLogic.EditorTools
             CampaignState fresh = NewState(9104);
             BlueprintCircuitBoard lockedBoard = BlueprintCircuitBoard.CreateDefault(HomeValleyLayout.Erc003ChassisId, ComponentCatalog.CompGunId, null, null, Array.Empty<string>());
             CircuitOpResult locked = lockedBoard.TrySetChassis(fresh, fixedId);
-            Expect(!locked.Success && locked.Code == "chassis_locked" && locked.Message.Contains(GameText.Get("chassis.fixed.locked"))
-                   && !MechanicalContentUnlock.IsUnlocked(fresh, fixedId) && ChassisCatalog.All.ContainsKey(fixedId),
-                $"新开局固定底盘未解锁（炮塔随家园防御 FG6-DEF-01 开放）：换不上，原因“{locked.Message}”");
+            // FG6-DEF-01：炮塔开放——固定底盘进基础蓝图库，新开局就能换上（之前是“随家园防御开放”的解锁记录）。
+            Expect(locked.Success && lockedBoard.ChassisId == fixedId && MechanicalContentUnlock.IsUnlocked(fresh, fixedId) && ChassisCatalog.All.ContainsKey(fixedId)
+                   && ChassisCatalog.All[fixedId].Source == MechanicalContentSource.BaseBlueprint,
+                $"新开局固定底盘已在基础蓝图库（FG6-DEF-01 炮塔开放）：直接换上（{locked.Success}，{locked.Message}）");
 
             // 外层槽的撤销（B03）：换主组件 / 换底盘可以撤销、重做，主组件与底盘一起回来（此前只还原内层）。
             BlueprintCircuitBoard undoBoard = BlueprintCircuitBoard.CreateDefault(HomeValleyLayout.Erc003ChassisId, ComponentCatalog.CompGunId, null, null, Array.Empty<string>());

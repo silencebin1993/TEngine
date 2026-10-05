@@ -1187,18 +1187,28 @@ namespace GameLogic.Campaign.Economy
             return list;
         }
 
-        /// <summary>节点解锁的东西是不是研发树自己带来的新内容（仿真实验室本身与它的等级）：旧档里根本没有，迁移不送。</summary>
+        /// <summary>节点解锁的东西是不是研发树开放时 / 之后才有的新内容（仿真实验室本身与它的等级；FG6-DEF-01 炮塔座的 T2 / T3）：旧档里根本没有，迁移不送，
+        /// 开局技术数据的换算也不计（与表生成的 POST_TREE_NODES 同一口径，DEBT-FG5RND01-08）。</summary>
         private static bool UnlocksResearchOnlyContent(ResearchNodeDef n)
         {
             foreach (string u in n.Unlocks)
             {
-                if (u == "build:" + ResearchCatalog.LabTypeId || (u != null && u.StartsWith("tier:" + ResearchCatalog.LabTypeId + ".", StringComparison.Ordinal)))
+                if (u == null)
                 {
-                    return true;
+                    continue;
+                }
+                foreach (string type in PostTreeTypes)
+                {
+                    if (u == "build:" + type || u.StartsWith("tier:" + type + ".", StringComparison.Ordinal))
+                    {
+                        return true;
+                    }
                 }
             }
             return false;
         }
+
+        private static readonly string[] PostTreeTypes = { ResearchCatalog.LabTypeId, Defense.TurretCatalog.LightTypeId, Defense.TurretCatalog.HeavyTypeId };
 
         // ── FG5-E2E-01：新档的技术数据供给（DEBT-FG5RND01-08）与研发加成的数值来源行（DEBT-FG5RND01-07）──────────────
 

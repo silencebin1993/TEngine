@@ -345,6 +345,12 @@ namespace GameLogic.View
             if (InputRouter.ConsumeGlobalAction(GameActionId.ToggleCameraView,
                     allowDuringModal: InputRouter.StrategicPause && !InputRouter.PanelModalOpen))
             {
+                // FG6-DEF-01（FGR-DEF-005）：信号在炮塔里时，接入 / 退出接入键 = 离开炮塔（炮塔不能移动，镜头留在战略视角）。
+                if (_mode == ViewMode.Strategy && Campaign.Defense.TurretUplink.IsActive)
+                {
+                    Campaign.Defense.TurretUplink.Leave(Campaign.CampaignSession.Current);
+                    return;
+                }
                 if (_mode == ViewMode.Direct)
                 {
                     RequestStrategy();

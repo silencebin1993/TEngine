@@ -70,6 +70,10 @@ namespace GameLogic.UI.Kit
         private Button _redo;
         private Label _hint;
         private Label _cost;
+        private DropdownField _turretBp;
+        private Label _turretRange;
+        private readonly System.Collections.Generic.List<string> _turretBpIds = new System.Collections.Generic.List<string>(4);
+        private bool _turretSuppress;
         private Label _dragInfo;
         private Label _status;
         private Label _placeholder;
@@ -174,6 +178,9 @@ namespace GameLogic.UI.Kit
             _redo = root.Q<Button>("BuildRedo");
             _hint = root.Q<Label>("BuildHint");
             _cost = root.Q<Label>("BuildCost");
+            _turretBp = root.Q<DropdownField>("BuildTurretBlueprint");
+            _turretRange = root.Q<Label>("BuildTurretRange");
+            _turretBp?.RegisterValueChangedCallback(_ => OnTurretBlueprintChanged());
             _dragInfo = root.Q<Label>("BuildDragInfo");
             _status = root.Q<Label>("BuildStatus");
             _placeholder = root.Q<Label>("BuildPlaceholder");
@@ -530,7 +537,9 @@ namespace GameLogic.UI.Kit
                 // FG3-LOG-07：撤销栈 / 布局库变化时也刷新（撤销按钮写下一步是什么）。
                 "|", PlanHistory.Revision.ToString(), "|", LayoutLibrary.Revision.ToString(),
                 // FG5-RND-01：研究完成（门槛放开、“新”标记）时也刷新。
-                "|", ResearchService.Revision.ToString());
+                "|", ResearchService.Revision.ToString(),
+                // FG6-DEF-01：炮塔蓝图选择 / 默认炮塔蓝图补进蓝图库时也刷新。
+                "|", Campaign.Defense.TurretService.Revision.ToString());
             if (key == _lastKey)
             {
                 return;
@@ -585,6 +594,7 @@ namespace GameLogic.UI.Kit
             _empty.text = searching ? GameText.Format("ui.build.search_empty", _searchText.Trim()) : GameText.Format("ui.build.category_empty", categoryName);
 
             _hint.text = HintFor(mode);
+            RefreshTurret(mode, state);
             RefreshCost(mode, state);
             RefreshDrag(mode);
             RefreshStatus(mode, state);
@@ -714,6 +724,81 @@ namespace GameLogic.UI.Kit
                     return GameText.Format("ui.build.tool_cost_under", tool.ScrapPerCell, tool.ScrapPerCell * 2, BeltNetworkService.UndergroundSpan(tool.Tier));
                 default:
                     return GameText.Format("ui.build.tool_cost", tool.ScrapPerCell);
+            }
+        }
+
+        /// <summary>
+        /// FG6-DEF-01（FGR-DEF-001 / 002）：选中炮塔座时，建造栏多一个“炮塔蓝图”下拉（同一种炮塔座能装的固定底盘蓝图；选中即生效，放下的炮塔装它）
+        /// 和一行射程（地面上同时画射程圈，<see cref="View.TurretViews"/>）。没有可用蓝图时下拉写明怎么配一张、放置被拒并给同一原因。
+        /// </summary>
+        private void RefreshTurret(HomeValleyBuildMode mode, CampaignState state)
+        {
+            if (_turretBp == null || _turretRange == null)
+            {
+                return;
+            }
+            bool turret = mode.SelectedTypeId != null && Campaign.Defense.TurretCatalog.IsTurretType(mode.SelectedTypeId);
+            SetVisible(_turretBp, turret);
+            SetVisible(_turretRange, turret);
+            if (!turret)
+            {
+                return;
+            }
+            string size = Campaign.Defense.TurretCatalog.SizeOfType(mode.SelectedTypeId);
+            _turretSuppress = true;
+            try
+            {
+                _turretBp.label = GameText.Get("build.turret.blueprint");
+                Campaign.Defense.TurretService.BlueprintChoices(state, size, _turretBpIds);
+                var names = new System.Collections.Generic.List<string>(_turretBpIds.Count);
+                foreach (string id in _turretBpIds)
+                {
+                    names.Add(Campaign.Defense.TurretService.BlueprintName(state, id));
+                }
+                GameLogic.UI.Common.DropdownChoices.Apply(_turretBp, names, GameText.Format("turret.panel.blueprint_none", Campaign.Defense.TurretCatalog.SizeName(size)));
+                string current = Campaign.Defense.TurretService.DefaultBlueprintFor(state, size);
+                int at = current != null ? _turretBpIds.IndexOf(current) : -1;
+                if (names.Count > 0)
+                {
+                    _turretBp.SetValueWithoutNotify(_turretBp.choices[System.Math.Max(0, at)]);
+                }
+                float range = current != null ? Campaign.Defense.TurretService.RangeOf(state, current) : 0f;
+                _turretRange.text = range > 0f ? GameText.Format("build.turret.range", Mathf.RoundToInt(range)) : string.Empty;
+            }
+            finally
+            {
+                _turretSuppress = false;
+            }
+        }
+
+        /// <summary>建造栏的炮塔蓝图下拉选中（与玩家点选同一回调，自检也调）。</summary>
+        public void SelectTurretBlueprint(int index)
+        {
+            if (_turretBp != null && index >= 0 && index < _turretBp.choices.Count)
+            {
+                _turretBp.index = index;
+            }
+        }
+
+        public System.Collections.Generic.IReadOnlyList<string> TurretBlueprintChoices =>
+            _turretBp?.choices ?? (System.Collections.Generic.IReadOnlyList<string>)System.Array.Empty<string>();
+
+        public bool TurretBlueprintVisible => _turretBp != null && !_turretBp.ClassListContains("uk-hidden");
+
+        public string TurretRangeText => _turretRange != null && !_turretRange.ClassListContains("uk-hidden") ? _turretRange.text : string.Empty;
+
+        private void OnTurretBlueprintChanged()
+        {
+            if (_turretSuppress || _turretBp == null)
+            {
+                return;
+            }
+            int i = _turretBp.index;
+            if (i >= 0 && i < _turretBpIds.Count)
+            {
+                Campaign.Defense.TurretService.SetPlacementBlueprint(CampaignSession.Current, _turretBpIds[i]);
+                HomeValleyBuildMode.Current?.RefreshPreview(CampaignSession.Current);
+                _lastKey = null;
             }
         }
 

@@ -640,13 +640,17 @@ namespace GameLogic.Campaign.Blueprint
             }
             // FG1-SIG-01（FGR-SIG-012）：核心固件放不进机器电路。种类只读 fg.TbFirmwareKind（Signal.FirmwareKinds），不按 ID 写特例。
             // FG1-SIG-05：先判核心——标记跳转这类没有 gene 等价实现的核心固件也给“只能由信号携带”，而不是“无可编译等价实现”。
+            // FG6-DEF-01（FGT-SIG-003“裸跑固件放不进炮塔”、DEBT-FG1SIG06-01）：固定底盘蓝图 = 炮塔的固件槽，宿主按炮塔判定、原因写“不能装进炮塔”。
+            FirmwareHost host = CarrierReadings.IsFixedChassis(ChassisId) ? FirmwareHost.Turret : FirmwareHost.MachineCircuit;
             if (FirmwareKinds.IsCore(firmwareId))
             {
-                return CircuitOpResult.Fail(CoreSignalOnlyCode, GameText.Get("signal.reason.core_signal_only"));
+                return host == FirmwareHost.Turret
+                    ? CircuitOpResult.Fail(CoreSignalOnlyCode, GameText.Format("signal.reason.core_turret", FirmwareKinds.DisplayName(firmwareId) ?? firmwareId))
+                    : CircuitOpResult.Fail(CoreSignalOnlyCode, GameText.Get("signal.reason.core_signal_only"));
             }
             // FG1-SIG-06（FGR-SIG-060、FGT-SIG-003）：未破解的敌方固件、没有机器电路实现的固件放不进机器电路——同一判定 FirmwareKinds.CanInstall
             // （信号核 / 机器 / 炮塔）；原因码按失败原因映射（不是固件 → firmware_unknown，未破解 → raw_signal_only，无机器实现 → firmware_no_machine_impl）。
-            if (!FirmwareKinds.CanInstall(state, firmwareId, FirmwareHost.MachineCircuit, out string reasonKey))
+            if (!FirmwareKinds.CanInstall(state, firmwareId, host, out string reasonKey))
             {
                 return CircuitOpResult.Fail(FirmwareKinds.InstallFailureCode(reasonKey), GameText.Format(reasonKey, FirmwareKinds.DisplayName(firmwareId) ?? firmwareId));
             }
@@ -828,18 +832,20 @@ namespace GameLogic.Campaign.Blueprint
             }
 
             // FG1-SIG-01（FGR-SIG-012）：保存校验兜底——草稿里残留的核心固件（例如种类表改了之后的旧草稿）不能保存进机器电路。
+            // FG6-DEF-01：固定底盘蓝图（炮塔）的原因写“不能装进炮塔”（与固件槽入口同一宿主判定）。
+            bool turretHost = CarrierReadings.IsFixedChassis(ChassisId);
             for (int i = 0; i < FirmwareSlots.Length; i++)
             {
                 if (!string.IsNullOrEmpty(FirmwareSlots[i]) && FirmwareKinds.IsCore(FirmwareSlots[i]))
                 {
                     result.Add(CircuitIssueCode.FirmwareCoreSignalOnly,
-                        GameText.Format("signal.reason.core_in_circuit", FirmwareKinds.DisplayName(FirmwareSlots[i]) ?? FirmwareSlots[i]));
+                        GameText.Format(turretHost ? "signal.reason.core_turret" : "signal.reason.core_in_circuit", FirmwareKinds.DisplayName(FirmwareSlots[i]) ?? FirmwareSlots[i]));
                 }
                 // FG1-SIG-06（FGR-SIG-060）：保存校验兜底——未破解的敌方固件（例如旧草稿）不能保存进机器电路。
                 else if (!string.IsNullOrEmpty(FirmwareSlots[i]) && FirmwareKinds.IsRaw(FirmwareSlots[i]))
                 {
                     result.Add(CircuitIssueCode.FirmwareRawSignalOnly,
-                        GameText.Format("signal.reason.raw_in_circuit", FirmwareKinds.DisplayName(FirmwareSlots[i]) ?? FirmwareSlots[i]));
+                        GameText.Format(turretHost ? "signal.reason.raw_turret" : "signal.reason.raw_in_circuit", FirmwareKinds.DisplayName(FirmwareSlots[i]) ?? FirmwareSlots[i]));
                 }
                 // FG1-SIG-06 修复轮：与固件槽入口同一判定（FirmwareKinds.CanInstall）——没有机器电路实现的固件（旧草稿）也不能保存进机器电路。
                 else if (!string.IsNullOrEmpty(FirmwareSlots[i]) && FirmwareKinds.IsFirmware(FirmwareSlots[i]) && !FirmwareKinds.HasMachineImplementation(FirmwareSlots[i]))

@@ -44,7 +44,7 @@ namespace GameLogic.Campaign.Content
         EliteDrop,
         /// <summary>FG2-FW-01：阵营首领固定掉落（核心固件，敌方加密）。</summary>
         FactionBoss,
-        /// <summary>FG2-FW-02：炮塔（固定底盘）——家园防御开放（FG6-DEF-01）后写入解锁记录才可用；之前不在基础蓝图库里。</summary>
+        /// <summary>FG2-FW-02：炮塔（固定底盘）的旧来源——FG6-DEF-01 起固定底盘改为 BaseBlueprint（开局可用），本值保留只为枚举序号不变，不再有内容使用。</summary>
         TurretProgram,
         /// <summary>FG5-RND-04（FGR-RND-042 / FGR-FW-050）：熔合产物（混合固件）——第一次正式熔合成功（配方记进配方书）时写入解锁记录，之后才能装配、在刻录台量产。</summary>
         Fusion,

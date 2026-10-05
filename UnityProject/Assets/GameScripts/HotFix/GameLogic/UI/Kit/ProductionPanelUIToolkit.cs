@@ -112,6 +112,8 @@ namespace GameLogic.UI.Kit
         /// <summary>FG5-RND-03：靶场的“靶场…”按钮（只在靶场上显示）。</summary>
         private Button _range;
         public Button RangeButton => _range;
+        private Button _turret;
+        public Button TurretButton => _turret;
         private Button _fusion;
         public Button FusionButton => _fusion;
         private Button _intel;
@@ -328,6 +330,7 @@ namespace GameLogic.UI.Kit
             _ports = root.Q<Button>("PrPorts");
             _grid = root.Q<Button>("BpGrid");
             _range = root.Q<Button>("PrRange");
+            _turret = root.Q<Button>("PrTurret");
             _fusion = root.Q<Button>("PrFusion");
             _intel = root.Q<Button>("PrIntel");
             _blackBox = root.Q<Button>("PrBlackBox");
@@ -341,6 +344,7 @@ namespace GameLogic.UI.Kit
             _ports.clicked += OpenPorts;
             _grid.clicked += OpenGrid;
             _range.clicked += OpenRange;
+            _turret.clicked += OpenTurret;
             _fusion.clicked += OpenFusion;
             _intel.clicked += OpenIntel;
             _blackBox.clicked += OpenBlackBox;
@@ -503,6 +507,7 @@ namespace GameLogic.UI.Kit
             _ports.SetEnabled(GridContent.PortsOf(b.BuildingTypeId).Count > 0);
             _grid.EnableInClassList("bn-hidden", !HomeValleyPowerGrid.IsPowerRelevantType(b.BuildingTypeId));
             _range.EnableInClassList("bn-hidden", !TestRangeService.IsRange(b));
+            _turret.EnableInClassList("bn-hidden", !Campaign.Defense.TurretCatalog.IsTurretType(b.BuildingTypeId));
             _fusion.EnableInClassList("bn-hidden", !FusionService.IsSynth(b));
             _intel.EnableInClassList("bn-hidden", !IntelService.IsPost(b));
             _blackBox.EnableInClassList("bn-hidden", !BlackBoxService.IsGallery(b));
@@ -516,6 +521,7 @@ namespace GameLogic.UI.Kit
             _ports.text = GameText.Get("prod.panel.ports");
             _grid.text = GameText.Get("bp.open_grid");
             _range.text = GameText.Get("range.panel.open");
+            _turret.text = GameText.Get("turret.panel.open");
             _fusion.text = GameText.Get("fusion.panel.open");
             _intel.text = GameText.Get("intel.panel.open");
             _blackBox.text = GameText.Get("blackbox.panel.open");
@@ -1428,6 +1434,14 @@ namespace GameLogic.UI.Kit
             string id = BuildingId;
             SetOpen(false);
             TestRangePanelUIToolkit.Open(id);
+        }
+
+        /// <summary>FG6-DEF-01：炮塔 → 打开炮塔面板（蓝图、目标模式、补给、接入）。</summary>
+        public void OpenTurret()
+        {
+            string id = BuildingId;
+            SetOpen(false);
+            TurretPanelUIToolkit.Open(id);
         }
 
         public void OpenDiagnosis()

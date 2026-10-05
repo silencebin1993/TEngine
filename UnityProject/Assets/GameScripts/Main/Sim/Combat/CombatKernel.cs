@@ -478,7 +478,74 @@ namespace BinGames.Sim.Combat
                 CommandPos = cmd.Pos,
                 MarkedUntil = _d.MarkedUntil[i],
                 Weapon = _d.Weapon[i],
+                Ammo = _d.Ammo[i],
+                Facing = _d.Armor[i].zw,
             };
+        }
+
+        // ─────────────────────────────── FG6-DEF-01 炮塔 ───────────────────────────────
+
+        /// <summary>FG6-DEF-01（FGR-DEF-004）：设置单位的补给存量（按发；热更层从管线消费者的缓存装填）。返回 false = 单位不存在或值不合法。</summary>
+        public bool SetAmmo(int id, float ammo)
+        {
+            int i = _d.SlotOf(id);
+            if (i < 0 || !(ammo >= 0f) || float.IsInfinity(ammo))
+            {
+                return false;
+            }
+            _d.Ammo[i] = ammo;
+            Touch();
+            return true;
+        }
+
+        /// <summary>FG6-DEF-01：单位当前补给存量（不存在 = 0）。</summary>
+        public float AmmoOf(int id)
+        {
+            int i = _d.SlotOf(id);
+            return i < 0 ? 0f : _d.Ammo[i];
+        }
+
+        /// <summary>FG6-DEF-01（FGR-DEF-003“最高威胁”）：单位的威胁（与选目标同一个数，面板 / 自检读）。不存在 = 0。</summary>
+        public float ThreatOfUnit(int id)
+        {
+            int i = _d.SlotOf(id);
+            return i < 0 ? 0f : CombatLogic.ThreatOf(ref _d, i);
+        }
+
+        /// <summary>FG6-DEF-01：设置单位的装甲（减伤比例、覆盖半角；炮塔座等级的“更结实”= 半角 180° 的全方位减伤）。朝向不变。</summary>
+        public bool SetArmor(int id, float fraction, float halfAngleDeg)
+        {
+            int i = _d.SlotOf(id);
+            if (i < 0 || !(fraction >= 0f) || fraction >= 1f || !(halfAngleDeg >= 0f))
+            {
+                return false;
+            }
+            float4 a = _d.Armor[i];
+            _d.Armor[i] = new float4(fraction, halfAngleDeg >= 180f ? -2f : math.cos(math.radians(halfAngleDeg)), a.z, a.w);
+            Touch();
+            return true;
+        }
+
+        /// <summary>FG6-DEF-01：单位当前的装甲减伤比例（不存在 = 0）。</summary>
+        public float ArmorOf(int id)
+        {
+            int i = _d.SlotOf(id);
+            return i < 0 ? 0f : _d.Armor[i].x;
+        }
+
+        /// <summary>FG6-DEF-01：设置单位朝向（炮塔建成时的初始炮口朝向；装甲朝向同一个量）。</summary>
+        public bool SetFacing(int id, float2 facing)
+        {
+            int i = _d.SlotOf(id);
+            if (i < 0 || math.lengthsq(facing) < 1e-12f)
+            {
+                return false;
+            }
+            float2 f = math.normalize(facing);
+            float4 a = _d.Armor[i];
+            _d.Armor[i] = new float4(a.x, a.y, f.x, f.y);
+            Touch();
+            return true;
         }
 
         public bool TryGetPosition(int id, out double2 pos)
@@ -1384,6 +1451,9 @@ namespace BinGames.Sim.Combat
                     Mix(ref h, _d.StatusBitUntil[i * CombatConst.StatusBitStride + b]);
                 }
                 Mix(ref h, _d.StatusZoneSlow[i]); // FG2-FW-04 修复（格式 6）
+                Mix(ref h, _d.Ammo[i]); // FG6-DEF-01（格式 9）
+                Mix(ref h, _d.Armor[i].z); // FG6-DEF-01：炮塔朝向（转速转出来的，属于模拟状态）
+                Mix(ref h, _d.Armor[i].w);
                 CombatCommand c = _d.Cmd[i];
                 Mix(ref h, (int)c.Kind);
                 Mix(ref h, c.Target);
@@ -1624,6 +1694,11 @@ namespace BinGames.Sim.Combat
                 if (format >= 6)
                 {
                     w.Write(_d.StatusZoneSlow[i]);
+                }
+                // FG6-DEF-01（格式 9）：补给存量。
+                if (format >= 9)
+                {
+                    w.Write(_d.Ammo[i]);
                 }
             }
 
@@ -1877,6 +1952,12 @@ namespace BinGames.Sim.Combat
                 {
                     return CombatLoadResult.InvalidValue;
                 }
+                // FG6-DEF-01（格式 9）：目标模式只认已定义的五种；转速 / 每发补给不能是负数或不是数。
+                if ((byte)rw.TargetMode > (byte)CombatTargetMode.SiegeFirst || !(rw.TurnRate >= 0f) || float.IsInfinity(rw.TurnRate)
+                    || !(rw.AmmoPerShot >= 0f) || float.IsInfinity(rw.AmmoPerShot))
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
                 staging.Weapons.Add(rw);
             }
             int pn = r.ReadInt32();
@@ -2015,6 +2096,13 @@ namespace BinGames.Sim.Combat
                 {
                     return CombatLoadResult.InvalidValue;
                 }
+                // FG6-DEF-01（格式 9）：补给存量；更老的快照没有 = 0。
+                float ammo = format >= 9 ? r.ReadSingle() : 0f;
+                if (!(ammo >= 0f) || float.IsInfinity(ammo))
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
+                sp.Ammo = ammo;
                 if (id <= 0 || id >= s.NextId || !IsFinite(sp.Position) || !IsFinite(sp.Home) || float.IsNaN(sp.Health)
                     || sp.Weapon >= wn || sp.BehaviorProfile >= pn || staging.SlotOf(id) >= 0)
                 {
@@ -2411,6 +2499,12 @@ namespace BinGames.Sim.Combat
             {
                 w.Write(x.FuseTrace);
             }
+            // FG6-DEF-01（格式 9）：炮塔转速、每发补给。
+            if (format >= 9)
+            {
+                w.Write(x.TurnRate);
+                w.Write(x.AmmoPerShot);
+            }
         }
 
         /// <summary>FG2-FW-02：武器的读法参数（格式 3；逐字段，顺序即格式）。</summary>
@@ -2570,6 +2664,11 @@ namespace BinGames.Sim.Combat
             if (format >= 8)
             {
                 w.FuseTrace = r.ReadByte();
+            }
+            if (format >= 9)
+            {
+                w.TurnRate = r.ReadSingle();
+                w.AmmoPerShot = r.ReadSingle();
             }
             return w;
         }

@@ -1365,12 +1365,13 @@ namespace GameLogic.EditorTools
             WorldSimulation.StepMany(2);
             _ = gunner;
             bool inKernel = home.Combat.TryGetMachineUnit(logic, out _);
-            int before = HomeValleyCombatTargets.RecentEvents.Count(e => e.IsAiSource && e.AttackerLogicId == logic);
+            // FG6-DEF-01（DEBT-FG2FW02-07）：靶子迁进内核后一次攻击可能有多条命中记录（读法：分裂 / 回波），间隔按攻击次数核对。
+            int before = HomeValleyCombatTargets.AttemptCount(logic);
             WorldSimulation.StepMany(60 * 3);
-            int farAttacks = HomeValleyCombatTargets.RecentEvents.Count(e => e.IsAiSource && e.AttackerLogicId == logic) - before;
+            int farAttacks = HomeValleyCombatTargets.AttemptCount(logic) - before;
             Place(home.Combat, logic, HomeValleyLayout.LowThreatTargetPosition + new Vector2(6f, 0f));
             WorldSimulation.StepMany(60 * 11);
-            int nearAttacks = HomeValleyCombatTargets.RecentEvents.Count(e => e.IsAiSource && e.AttackerLogicId == logic) - before - farAttacks;
+            int nearAttacks = HomeValleyCombatTargets.AttemptCount(logic) - before - farAttacks;
             Expect(inKernel && farAttacks == 0 && nearAttacks >= 2 && nearAttacks <= 3,
                 $"家园训练靶自动交战：射程外 3 秒不尝试（{farAttacks}），进入 {HomeValleyCombatTargets.EngageRange} 米后按 5 秒间隔尝试（11 秒 {nearAttacks} 次；打空后等再生），结算走同一出口");
 
@@ -1382,13 +1383,13 @@ namespace GameLogic.EditorTools
             bool holdFlag = home.Combat.UnitHasFlag(unit, CombatUnitFlags.EngageHold);
             HomeValleyCombatTargets.ResetSessionState();
             WorldSimulation.StepMany(60 * 11);
-            int heldAttempts = HomeValleyCombatTargets.RecentEvents.Count(e => e.IsAiSource && e.AttackerLogicId == logic);
+            int heldAttempts = HomeValleyCombatTargets.AttemptCount(logic);
             home.Combat.Kernel.TryGetUnit(unit, out CombatUnitView held);
             HomeValleyFactory.ReleaseFromFactory(logic);
             bool released = !home.Combat.UnitHasFlag(unit, CombatUnitFlags.EngageHold);
             HomeValleyCombatTargets.ResetSessionState();
             WorldSimulation.StepMany(2);
-            int releasedAttempts = HomeValleyCombatTargets.RecentEvents.Count(e => e.IsAiSource && e.AttackerLogicId == logic);
+            int releasedAttempts = HomeValleyCombatTargets.AttemptCount(logic);
             home.Combat.Kernel.TryGetUnit(unit, out CombatUnitView after);
             Expect(holdFlag && heldAttempts == 0 && held.Cycle <= 0f && released && releasedAttempts == 1 && after.Cycle > 4.9f,
                 $"厂内机器不自动交战、不消耗冷却：占用出口 11 秒尝试 {heldAttempts} 次、冷却 {held.Cycle:F2} 秒（未消耗）；驶出工厂后 2 步内尝试 {releasedAttempts} 次、冷却重置为 {after.Cycle:F2} 秒");

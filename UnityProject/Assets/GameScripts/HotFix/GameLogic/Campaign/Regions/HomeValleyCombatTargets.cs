@@ -108,6 +108,70 @@ namespace GameLogic.Campaign.Regions
         public static void ResetSessionState()
         {
             _recentEvents.Clear();
+            _pending = null;
+            _attempts.Clear();
+        }
+
+        /// <summary>FG6-DEF-01：每台机器发起攻击的次数（经 <see cref="TryAttack"/>；不落盘）。靶子迁进内核后一次攻击可能有多条命中记录
+        /// （读法：分裂 / 回波 / 持续伤害），自动交战的“间隔”按攻击次数核对，不按命中记录数。</summary>
+        private static readonly Dictionary<int, int> _attempts = new Dictionary<int, int>();
+
+        public static int AttemptCount(int attackerLogicId) => _attempts.TryGetValue(attackerLogicId, out int n) ? n : 0;
+
+        /// <summary>FG6-DEF-01：<see cref="TryAttack"/> 正在经内核开火时，记下这一次攻击的来源（AI / 玩家）与装配解析，受伤事件按它记结果。</summary>
+        private sealed class PendingAttack
+        {
+            public int Attacker;
+            public bool IsAi;
+            public MachineCombatResolution Resolution;
+            public HitResult? Result;
+        }
+
+        private static PendingAttack _pending;
+
+        /// <summary>
+        /// FG6-DEF-01（DEBT-FG2FW02-07）：家园战斗内核结算了一次打在训练靶上的伤害（HomeValleyCombatRules.OnKeyedTargetDamaged 调）：血量写回记录、打空进入再生冷却、
+        /// 记一条命中结果（与 UI / 日志同一份数据）。来源：经 <see cref="TryAttack"/> 开火的按那次的来源；编队攻击 / 回波 / 持续伤害等按“攻击者是不是正被直控”。
+        /// 直控命中授予 OBJ-03 一次性事件（幂等）。O(1)。
+        /// </summary>
+        public static void OnKernelHit(CampaignState state, string targetId, float damage, float healthAfter, int attackerLogicId, bool killed, bool directControlled)
+        {
+            CombatTargetRecord target = Find(state, targetId);
+            if (target == null)
+            {
+                return;
+            }
+            if (!killed)
+            {
+                target.Health = Mathf.Clamp(healthAfter, 0f, target.MaxHealth);
+            }
+            if (killed || target.Health <= 0f)
+            {
+                target.Health = 0f;
+                if (target.RegenCooldownRemaining <= 0f)
+                {
+                    target.RegenCooldownRemaining = RegenSeconds;
+                }
+            }
+            if (killed)
+            {
+                return; // 打空那一下的伤害已经由“受伤”事件记过一次，这里只补再生冷却。
+            }
+            bool fromPending = _pending != null && _pending.Attacker == attackerLogicId && !_pending.Result.HasValue;
+            bool isAi = fromPending ? _pending.IsAi : !directControlled;
+            MachineCombatResolution res = fromPending ? _pending.Resolution
+                : attackerLogicId > 0 ? MachineLoadoutRegistry.ResolveForAi(state, attackerLogicId, state.RandomSeed) : default;
+            HitResult ok = HitResult.Ok(damage, target.Health, target.MaxHealth, res.Preview?.ReactionHint, res.CompileSignature, isAi, attackerLogicId);
+            if (fromPending)
+            {
+                _pending.Result = ok;
+            }
+            PushEvent(ok);
+            if (!isAi && attackerLogicId > 0)
+            {
+                // ER8 / OBJ-03“建造第一台战斗机并接管”：首次直控命中低威胁靶的一次性事件（幂等）。
+                CampaignEventLedger.TryGrant(state, CampaignObjectiveCatalog.DirectHitEventId, "DirectHit", state.PlaySeconds, targetId);
+            }
         }
 
         private static void PushEvent(HitResult result)
@@ -162,6 +226,9 @@ namespace GameLogic.Campaign.Regions
             if (site.TryGetEnemyUnit(LowThreatTargetId, out int existing))
             {
                 site.SetUnitLabel(existing, TrainingTargetLabelKey); // FG-GAP-061：读档重建后同样按“训练靶”记日志。
+                // FG6-DEF-01（DEBT-FG2FW02-07）：旧档快照里的训练靶血量在热更层（ExternalHealth）——迁成内核扣血 + 逐次报告（读法在靶上生效）。
+                site.SetUnitFlag(existing, BinGames.Sim.Combat.CombatUnitFlags.ExternalHealth, false);
+                site.SetUnitFlag(existing, BinGames.Sim.Combat.CombatUnitFlags.Report, true);
                 return existing;
             }
             var rec = new RegionEnemyRecord
@@ -179,7 +246,9 @@ namespace GameLogic.Campaign.Regions
                 Kind = BinGames.Sim.Combat.CombatUnitKind.Structure,
                 Faction = BinGames.Sim.Combat.CombatFaction.Neutral,
                 Behavior = BinGames.Sim.Combat.CombatBehavior.None,
-                Flags = BinGames.Sim.Combat.CombatUnitFlags.Alive | BinGames.Sim.Combat.CombatUnitFlags.Targetable | BinGames.Sim.Combat.CombatUnitFlags.ExternalHealth,
+                // FG6-DEF-01（DEBT-FG2FW02-07）：血量在内核（不再 ExternalHealth）、逐次报告——攻击走内核开火入口，载体投送与固件读法（状态、伤害倍率、处决……）在靶上生效，
+                // 结算结果经“受伤 / 打空”事件回写记录（OnKernelHit）。
+                Flags = BinGames.Sim.Combat.CombatUnitFlags.Alive | BinGames.Sim.Combat.CombatUnitFlags.Targetable | BinGames.Sim.Combat.CombatUnitFlags.Report,
                 Radius = 1f,
                 Weapon = -1,
                 BehaviorProfile = -1,
@@ -280,6 +349,7 @@ namespace GameLogic.Campaign.Regions
             {
                 return HitResult.Fail("目标当前处于再生冷却中（HP=0），暂不可命中。", isAiSource, attackerLogicId);
             }
+            _attempts[attackerLogicId] = AttemptCount(attackerLogicId) + 1;
 
             MachineCombatResolution resolution = isAiSource
                 ? MachineLoadoutRegistry.ResolveForAi(state, attackerLogicId, seed)
@@ -298,7 +368,41 @@ namespace GameLogic.Campaign.Regions
                 return fail;
             }
 
-            // FG2-FW-02（B13）：每发伤害与内核同源（CombatSite.MachineHitDamage）；低威胁靶的直接结算不经载体 / 固件读法——登记 DEBT-FG2FW02-07。
+            // FG6-DEF-01（DEBT-FG2FW02-07 关闭）：家园载入时，攻击走家园战斗内核的开火入口（与编队攻击 / 直控 / 远征同一个 CombatKernel.FireAt）——
+            // 载体投送与固件读法（伤害倍率、状态标签、处决、破甲……）在靶上生效；伤害由内核结算后经“受伤”事件回写记录（OnKernelHit），本方法返回那一次的结果。
+            Combat.CombatSite site = WorldSim.WorldSimulation.Home != null && WorldSim.WorldSimulation.Home.IsLoaded ? WorldSim.WorldSimulation.Home.Combat : null;
+            if (site != null && !site.IsDisposed && site.TryGetEnemyUnit(targetId, out _) && site.TryGetMachineUnit(attackerLogicId, out _))
+            {
+                var pending = new PendingAttack { Attacker = attackerLogicId, IsAi = isAiSource, Resolution = resolution };
+                _pending = pending;
+                bool fired;
+                BinGames.Sim.Combat.CombatFireResult res;
+                string why;
+                try
+                {
+                    fired = site.TryFireAtEnemy(attackerLogicId, targetId, out res, out why);
+                }
+                finally
+                {
+                    _pending = null;
+                }
+                if (pending.Result.HasValue)
+                {
+                    return pending.Result.Value;
+                }
+                if (fired)
+                {
+                    // 已经开火、但这一刻还没有伤害结算：弹体还在飞 / 重炮在瞄准。命中时内核的“受伤”事件照常记一条结果（OnKernelHit，按攻击者是不是正被直控记来源），
+                    // 这里不另记一条“未命中”——一次攻击只对应一条命中记录。
+                    return HitResult.Fail(Localization.GameText.Get(res == BinGames.Sim.Combat.CombatFireResult.StillAiming ? "combat.dummy.aiming" : "combat.dummy.in_flight"),
+                        isAiSource, attackerLogicId);
+                }
+                var miss = HitResult.Fail(string.IsNullOrEmpty(why) ? res.ToString() : why, isAiSource, attackerLogicId);
+                PushEvent(miss);
+                return miss;
+            }
+
+            // 家园没有载入（只在无头测试里出现：正式流程里攻击训练靶时家园内核一定在）：按与内核同源的每发伤害直接结算（CombatSite.MachineHitDamage）。
             float damage = Combat.CombatSite.MachineHitDamage(resolution.Preview);
             target.Health = Mathf.Max(0f, target.Health - damage);
             if (target.Health <= 0f)

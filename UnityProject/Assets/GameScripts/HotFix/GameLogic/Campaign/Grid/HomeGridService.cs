@@ -594,6 +594,10 @@ namespace GameLogic.Campaign.Grid
                 {
                     r.Add(new GridReason(GridBlockReason.MaxCount, "grid.reason.max_count", g.MaxCount.ToString()));
                 }
+                else if (!Defense.TurretService.HasPlaceableBlueprint(state, typeId, out GridReason turretReason))
+                {
+                    r.Add(turretReason); // FG6-DEF-01：炮塔座要有能装的固定底盘蓝图（主组件决定轻型 / 重型），没有时写明怎么配一张。
+                }
             }
 
             int blockLevel = GridContent.TuningInt("grid.pollution_block_level");

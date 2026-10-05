@@ -447,10 +447,13 @@ namespace GameLogic.EditorTools
             bool energy = list.Any(e => e.Id == "generator_2");
             BuildCatalog.List("signal", null, list);
             bool signal = list.Any(e => e.Id == "signal_relay");
+            // FG6-DEF-01：防御类有了轻型 / 重型炮塔；空分类改用环境（FG7 才有内容）。
             BuildCatalog.List("defense", null, list);
+            bool defense = list.Select(x => x.Id).SequenceEqual(new[] { "turret_light", "turret_heavy" });
+            BuildCatalog.List("environment", null, list);
             bool emptyCat = list.Count == 0;
-            Expect(logistics && energy && signal && emptyCat && BuildCatalog.FirstNonEmptyCategory() == "logistics",
-                $"分类：物流里依次有传送带 T1 / T2 / T3、分流器、合流器、地下传送带 T1 / T2 / T3、管线 T1 / T2、泵、储罐、阀门、地下管线 T1 / T2（实际 {logisticsIds}）、能源里有发电机、信号里有信号中继塔；防御类暂时为空；默认打开第一个有条目的分类");
+            Expect(logistics && energy && signal && defense && emptyCat && BuildCatalog.FirstNonEmptyCategory() == "logistics",
+                $"分类：物流里依次有传送带 T1 / T2 / T3、分流器、合流器、地下传送带 T1 / T2 / T3、管线 T1 / T2、泵、储罐、阀门、地下管线 T1 / T2（实际 {logisticsIds}）、能源里有发电机、信号里有信号中继塔；防御类是轻型 / 重型炮塔（{defense}）；环境类暂时为空；默认打开第一个有条目的分类");
 
             BuildCatalog.List("defense", "中继", list);
             bool byName = list.Count == 1 && list[0].Id == "signal_relay";
@@ -1603,8 +1606,11 @@ namespace GameLogic.EditorTools
                 bool energy = hud.ItemCount == 6 && hud.ItemText(0).Contains("60 废料") && hud.ItemText(0).Contains("40 秒") && hud.ItemText(0).Contains("已有"); // FG3-LOG-06：能源页签 = 发电机 2 + 电塔 T1 / T2；FG4-ECO-04：+ 燃油发电机、太阳能阵列、储能站
                 hud.SelectCategory("endgame");
                 bool locked = hud.ItemCount == 1 && hud.ItemText(0).Contains("尚未解锁");
+                // FG6-DEF-01：防御页签有了轻型 / 重型炮塔；空分类改用环境（FG7 才有内容）。
                 hud.SelectCategory("defense");
-                bool emptyCat = hud.ItemCount == 0 && hud.EmptyText.Contains("暂时没有");
+                bool defense = hud.ItemCount == 2 && hud.ItemText(0).Contains("轻型炮塔") && hud.ItemText(1).Contains("重型炮塔");
+                hud.SelectCategory("environment");
+                bool emptyCat = defense && hud.ItemCount == 0 && hud.EmptyText.Contains("暂时没有");
                 Expect(energy && locked && emptyCat, $"分类切换：能源条目写成本、工期、已有数量；终局的信标写“尚未解锁”；空分类说明“{hud.EmptyText}”");
 
                 hud.SetSearch("中继");

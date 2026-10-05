@@ -17,7 +17,7 @@ namespace GameLogic.Campaign.Content
         public const string ChassisTrackId = "chassis_track";
         public const string ChassisHoverId = "chassis_hover";
         /// <summary>FG2-FW-02（FGR-FW-012、FG06 FGR-DEF-001）：炮塔的固定底盘。兼容表（冲刺器装不上、推铲读作击退铲）从本 Story 起生效；
-        /// 炮塔的放置 / 施工 / 目标模式由 FG6-DEF-01 做——在那之前它不在基础蓝图库里（来源 <see cref="MechanicalContentSource.TurretProgram"/>，需要解锁记录）。</summary>
+        /// FG6-DEF-01 起炮塔开放（放置 / 施工 / 目标模式 / 补给 = <see cref="Defense.TurretService"/>），固定底盘进基础蓝图库（来源 BaseBlueprint，不再要解锁记录）。</summary>
         public const string ChassisFixedId = CarrierReadings.FixedChassisId;
 
         private static readonly Dictionary<string, MechanicalContentDef> _defs = new Dictionary<string, MechanicalContentDef>
@@ -150,7 +150,8 @@ namespace GameLogic.Campaign.Content
                     Category = MechanicalContentCategory.Chassis,
                     DisplayName = GameText.Get("chassis.fixed.name"),
                     Description = GameText.Get("chassis.fixed.desc"),
-                    Source = MechanicalContentSource.TurretProgram,
+                    // FG6-DEF-01：炮塔开放——固定底盘进基础蓝图库（之前是 TurretProgram，要解锁记录）。
+                    Source = MechanicalContentSource.BaseBlueprint,
                     SourceDetail = GameText.Get("chassis.fixed.locked"),
                     Slot = "底盘",
                     ScrapCost = 0,
@@ -159,15 +160,15 @@ namespace GameLogic.Campaign.Content
                     AiPermission = MechanicalContentAiPermission.PlayerAndAllyAi,
                     IconId = "icon_chassis_fixed",
                     ModelId = "primitive:capsule",
-                    ActionId = "CarrierReadings.CanMount（固定底盘兼容表 fg.TbCombatComponent.turret）；炮塔放置与施工 → FG6-DEF-01",
+                    ActionId = "CarrierReadings.CanMount（固定底盘兼容表 fg.TbCombatComponent.turret）；炮塔放置 / 施工 / 目标模式 / 补给 = Defense.TurretService（FG6-DEF-01）",
                     VfxId = "vfx_none_placeholder",
-                    SfxId = "sfx_move_track", // 占位：炮塔转向音随 FG6-DEF-01
+                    SfxId = "sfx_move_track", // 占位：炮塔转向音（美术 / 音频阶段整体替换，DEBT-FG6DEF01-01）
                     PreviewId = "preview_chassis_fixed",
                     SaveCompatible = true,
                     LockedHintText = GameText.Get("chassis.fixed.locked"),
-                    SilhouetteNote = "炮塔基座（FG6-DEF-01 出模型）。",
+                    SilhouetteNote = "炮塔基座（占位：炮塔座方块 + 炮口，美术阶段换正式模型，DEBT-FG6DEF01-01）。",
                     LegacyFacadeId = null,
-                    DebtId = "FG6-DEF-01",
+                    DebtId = "DEBT-FG6DEF01-01",
                 },
             };
             _merged = merged;

@@ -142,8 +142,17 @@ namespace BinGames.Sim.Combat
                 }
                 d.Set(a, CombatUnitFlags.Overheated, false);
             }
+            // FG6-DEF-01（FGR-DEF-004）：每发要消耗补给的武器（流体类固件的流体），存量不够一发时停火（不算开火、不积热、不扣补给）。
+            if (!HasAmmoFor(ref d, a, wp))
+            {
+                return CombatFireResult.NoAmmo;
+            }
             return CombatFireResult.Ok;
         }
+
+        /// <summary>FG6-DEF-01：补给存量够不够打一发（不需要补给的武器恒为 true）。</summary>
+        internal static bool HasAmmoFor(ref CombatData d, int a, in CombatWeapon wp) =>
+            wp.AmmoPerShot <= 0f || d.Ammo[a] + 1e-4f >= wp.AmmoPerShot;
 
         /// <summary>要贴近才出手的载体：格斗、力场，以及落在自己脚下的布区（震荡脉冲器，FG2-VFX-02）。触及 = 区域半径。</summary>
         internal static bool IsContactCarrier(in CombatReading r) =>
@@ -208,9 +217,20 @@ namespace BinGames.Sim.Combat
             }
         }
 
+        /// <summary>FG6-DEF-01（FGR-DEF-004）：一发扣一发的补给（只在门槛通过、真的开火之后）。非重炮在 <see cref="AddShotHeat"/> 里扣，重炮在 <see cref="FireCannon"/> 里扣——同一个口径。</summary>
+        internal static void ConsumeShotAmmo(ref CombatData d, int a, in CombatWeapon wp)
+        {
+            if (wp.AmmoPerShot > 0f)
+            {
+                d.Ammo[a] = math.max(0f, d.Ammo[a] - wp.AmmoPerShot);
+            }
+        }
+
         /// <summary>一发（任何开火方式）的积热（DEBT-FG1SIG06-02：即时命中武器也按固件积热）。重炮在 <see cref="FireCannon"/> 里自己算（含熔穿过载）。</summary>
         internal static void AddShotHeat(ref CombatData d, int a, in CombatWeapon wp)
         {
+            // FG6-DEF-01（FGR-DEF-004）：一发扣一发的补给（与积热同一处：只在门槛通过、真的开火之后）。
+            ConsumeShotAmmo(ref d, a, wp);
             if (wp.HeatPerShot <= 0f)
             {
                 return;

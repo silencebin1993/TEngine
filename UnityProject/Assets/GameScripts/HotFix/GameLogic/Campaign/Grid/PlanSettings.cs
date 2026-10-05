@@ -120,6 +120,12 @@ namespace GameLogic.Campaign.Grid
                 return;
             }
             s0 = FamilyOf(PlanEntryKind.Building, b.BuildingTypeId) == Family.Power ? Math.Max(1, b.PowerPriority) : 0;
+            if (Defense.TurretCatalog.IsTurretType(b.BuildingTypeId))
+            {
+                // FG6-DEF-01（FG06 第 4 节“复制炮塔设置”）：炮塔的 S1 = 蓝图稳定编号，S2 = 目标模式 + 1。
+                Defense.TurretService.SettingsOf(state, b, out s1, out s2);
+                return;
+            }
             if (Economy.ProductionService.TryGet(state, b.BuildingId, out Economy.ProductionService.Producer p) && Economy.ProductionService.HasCopyableSettings(p))
             {
                 if (p.IsBurner)
@@ -160,6 +166,17 @@ namespace GameLogic.Campaign.Grid
                     }
                     changed = true;
                 }
+            }
+            if (Defense.TurretCatalog.IsTurretType(b.BuildingTypeId))
+            {
+                // FG6-DEF-01：炮塔座（建成的或虚影）：补炮塔记录，写蓝图（同一种炮塔座才写）与目标模式。
+                Defense.TurretService.EnsureRecord(state, b);
+                if (s1 != 0 || s2 != 0)
+                {
+                    recipeApplied = Defense.TurretService.ApplySettings(state, b, s1, s2);
+                    changed |= recipeApplied;
+                }
+                return changed;
             }
             if ((s1 != 0 || s2 != 0) && Economy.ProductionService.TryGet(state, b.BuildingId, out Economy.ProductionService.Producer p)
                 && Economy.ProductionService.HasCopyableSettings(p))
@@ -226,6 +243,12 @@ namespace GameLogic.Campaign.Grid
                 case Family.Power:
                 {
                     string line = GameText.Format("plan.settings.power", s0 > 0 ? s0 : 1);
+                    // FG6-DEF-01：炮塔设置（蓝图 + 目标模式）。
+                    string turret = Defense.TurretService.DescribeSettings(CampaignSession.Current, s1, s2);
+                    if (turret != null)
+                    {
+                        return line + (GameText.Language == GameLanguage.En ? ", " : "，") + turret;
+                    }
                     string rid = RecipeIdOf(s1);
                     if (rid != null && Economy.ItemCatalog.TryGetRecipe(rid, out Economy.RecipeDef rd))
                     {

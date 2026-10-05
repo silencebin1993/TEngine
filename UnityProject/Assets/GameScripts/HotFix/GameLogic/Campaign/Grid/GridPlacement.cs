@@ -76,6 +76,9 @@ namespace GameLogic.Campaign.Grid
         Upgrading,
         /// <summary>复制 / 布局：件数超过上限（plan.layout_max_entries）。</summary>
         TooManyEntries,
+        // ── FG6-DEF-01（只追加）──
+        /// <summary>这种炮塔座没有能装的炮塔蓝图（先在蓝图编辑器里用固定底盘配一张，主组件决定轻型 / 重型）。</summary>
+        TurretNoBlueprint,
     }
 
     /// <summary>一条原因：原因码 + 文本键 + 参数（参数本身若是文本键，显示时按当前语言解析）。</summary>
@@ -143,6 +146,8 @@ namespace GameLogic.Campaign.Grid
                 case GridBlockReason.UpgradeLocked: return new GridReason(code, "plan.reason.upgrade_locked_plain");
                 case GridBlockReason.Upgrading: return new GridReason(code, "plan.reason.upgrading");
                 case GridBlockReason.TooManyEntries: return new GridReason(code, "plan.reason.too_many_plain");
+                // FG6-DEF-01：带参数（轻型 / 重型）的由 TurretService.HasPlaceableBlueprint 构造，这里给无参数时的稳定文本。
+                case GridBlockReason.TurretNoBlueprint: return new GridReason(code, "turret.reason.no_blueprint_plain");
                 default: return new GridReason(code, "grid.reason.unknown_type");
             }
         }

@@ -300,6 +300,24 @@ namespace GameLogic.Core
         /// <summary>FG5-RND-06：第一个黑匣子分析完成（技术数据入账）。</summary>
         public const string BlackBoxFirstAnalyzed = "blackbox.first_analyzed";
 
+        /// <summary>FG6-DEF-01：第一座炮塔建成。</summary>
+        public const string TurretFirstBuilt = "turret.first_built";
+
+        /// <summary>FG6-DEF-01：第一次打开炮塔面板。</summary>
+        public const string TurretFirstOpen = "turret.first_open";
+
+        /// <summary>FG6-DEF-01：第一次改目标模式（FG13 第 7 节“第一次建炮塔：目标模式”）。</summary>
+        public const string TurretFirstMode = "turret.first_mode";
+
+        /// <summary>FG6-DEF-01：第一次接入炮塔。</summary>
+        public const string TurretFirstUplink = "turret.first_uplink";
+
+        /// <summary>FG6-DEF-01：第一次有炮塔因缺补给停火。</summary>
+        public const string TurretFirstSupplyShort = "turret.first_supply_short";
+
+        /// <summary>FG6-DEF-01：炮塔第一次击毁敌人。</summary>
+        public const string TurretFirstKill = "turret.first_kill";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -344,6 +362,7 @@ namespace GameLogic.Core
             FusionFirstBuilt, FusionFirstOpen, FusionFirstSimulate, FusionFirstDiscovery, FusionFirstClue, FusionFirstRecipeBook,
             IntelFirstBuilt, IntelFirstOpen, IntelFirstIntel, IntelFirstRaidForecast, IntelFirstOutdated, IntelFirstInterrupted,
             BlackBoxFirstRecovered, BlackBoxFirstLeftBehind, BlackBoxFirstBuilt, BlackBoxFirstOpen, BlackBoxFirstAnalyzed,
+            TurretFirstBuilt, TurretFirstOpen, TurretFirstMode, TurretFirstUplink, TurretFirstSupplyShort, TurretFirstKill,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

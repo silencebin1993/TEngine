@@ -333,7 +333,8 @@ namespace GameLogic.EditorTools
                 .Select(r => string.Join("\t", "BT2", r.Id, r.TypeId, r.Tier.ToString(CultureInfo.InvariantCulture), r.DiffScrap.ToString(CultureInfo.InvariantCulture), R(r.Seconds),
                     r.UnlockRule, r.UnlockHintKey, R(r.Value), r.ValueKey, R(r.PowerDemand))).ToArray();
             // FG4-ECO-11：等级表多了超控阵列 T1～T3 三行与 powerDemand 列（8 行）；FG5-RND-01：再加仿真实验室 T1～T3（11 行），各等级的研究门槛由改表脚本回写。
-            Expect(code == 0 && bs.Length >= 28 && bs.SequenceEqual(rs) && bt.Length == 11 && bt.SequenceEqual(rt),
+            // FG6-DEF-01：再加轻型 / 重型炮塔座 T1～T3（17 行；T2 / T3 的研究门槛同样由改表脚本回写）。
+            Expect(code == 0 && bs.Length >= 28 && bs.SequenceEqual(rs) && bt.Length == 17 && bt.SequenceEqual(rt),
                 $"A1 fg.TbBuildingService（{bs.Length} 行）与 fg.TbBuildingTier（{bt.Length} 行）与源数据 fgdata_buildops 逐字段一致" + (code == 0 ? string.Empty : "：" + FgProductionSelfCheck.Tail(output)));
             var missing = ConfigSystem.Instance.Tables.TbBuilding.DataList.Where(b => BuildingOps.Service(b.TypeId) == null).Select(b => b.TypeId).ToList();
             var badCodex = ConfigSystem.Instance.Tables.TbBuildingService.DataList.Where(r => !ConfigSystem.Instance.Tables.TbCodexEntry.DataList.Any(c => c.Id == r.CodexId)).Select(r => r.TypeId).ToList();
@@ -363,7 +364,8 @@ namespace GameLogic.EditorTools
             Expect(zh && en && hooks && codex && notify && icons, $"A3 新文本中英都有（{keys.Length} 个）；3 个引导钩子；图鉴“建筑”；“建筑受损”（警告）/“建筑被摧毁”（紧急）通知；三张新状态图标（禁用 / 升级中 / 受损）（{zh}/{en}/{hooks}/{codex}/{notify}/{icons}）");
         }
 
-        private static string R(float v) => ((double)v).ToString("R", CultureInfo.InvariantCulture) is string x && !x.Contains(".") && !x.Contains("E") ? x + ".0" : ((double)v).ToString("R", CultureInfo.InvariantCulture);
+        // FG6-DEF-01：按单精度往返写法比（表里存 float；1.15 这类不能精确表示的值按 double 展开会多出尾数，与 Python repr 对不上）。
+        private static string R(float v) => v.ToString("R", CultureInfo.InvariantCulture) is string x && !x.Contains(".") && !x.Contains("E") ? x + ".0" : v.ToString("R", CultureInfo.InvariantCulture);
 
         private static bool ContainsCjk(string s) => s.Any(c => c >= 0x4E00 && c <= 0x9FFF);
 
@@ -502,6 +504,13 @@ namespace GameLogic.EditorTools
                         problems.Add($"{type} 升级被拒：{up.Describe()}");
                     }
                 }
+            }
+            // FG6-DEF-01：逐类矩阵里多了两座炮塔座（耗电 8 + 15、优先级 1，电网吃紧时先保炮塔）——再接一座发电机 2，后面的生产建筑不因电网吃紧报缺电（测的是生产状态，电网分配由 FG4-ECO-04 覆盖）。
+            GridCell? extraGen = FgProductionSelfCheck.FindFree(s, HomeValleyLayout.BuildingTypeGenerator2, 6f, 24f);
+            if (extraGen.HasValue)
+            {
+                FgProductionSelfCheck.Built(s, HomeValleyLayout.BuildingTypeGenerator2, "matrix_gen_def", extraGen.Value);
+                HomeValleyPowerGrid.Recompute(s);
             }
             // 生产建筑的专属状态：待机（没选配方）/ 缺料 / 缺流体 / 输出堵塞（真实推进得到）。
             BuildingRecord furnace = FindOrPlace(s, "refinery_furnace");

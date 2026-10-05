@@ -1331,6 +1331,35 @@ namespace GameLogic.Campaign.Signal
                 NotifyCooldownHolders(s, logicId);
                 return;
             }
+            StartCoreCooldown(s, fw, cd, logicId);
+        }
+
+        /// <summary>
+        /// FG6-DEF-01（FGR-DEF-005 接入炮塔，插入核心固件）：信号在炮塔里、炮塔打出了核心固件的具名反应——按信号上的冷却结算（与机器同一份冷却、同一次暴露计数），
+        /// 冷却中再来的发动不延长、不重复计数。炮塔不是机器（没有 LogicId），冷却开始后由炮塔服务自己重编译。
+        /// </summary>
+        public static void OnHostReactionFired(CampaignState s, string reactionId)
+        {
+            if (s == null)
+            {
+                return;
+            }
+            string fw = MechanicalReactionCatalog.TriggerFirmwareOf(reactionId);
+            if (fw == null || !FirmwareKinds.IsCore(fw))
+            {
+                return;
+            }
+            float cd = FirmwareKinds.CoreCooldownSeconds(fw);
+            if (cd <= 0f || CooldownRemaining(s, fw) > 0)
+            {
+                return;
+            }
+            StartCoreCooldown(s, fw, cd, 0);
+        }
+
+        /// <summary>核心固件冷却开始（机器与炮塔共用）：记冷却到期步、计暴露、发反馈与事件。<paramref name="logicId"/> = 发动的机器（炮塔为 0）。</summary>
+        private static void StartCoreCooldown(CampaignState s, string fw, float cd, int logicId)
+        {
             // 冷却到期存整数步（FG1-E2E-01，DEBT-FG1SIG07-05：游戏秒存浮点读回会差 1 ulp）。
             long readyTick = GameClock.TickAfter(cd);
             double ready = readyTick / (double)GameClock.StepHz;
@@ -1351,7 +1380,10 @@ namespace GameLogic.Campaign.Signal
             // 与冷却同一时刻、同一次冷却只计一次（冷却中的回声在上面已经返回）。
             CampaignExposureLedger.GrantCoreFire(s, fw, FirmwareKinds.IsRaw(s, fw));
             Revision++;
-            NotifyCooldownHolders(s, logicId);
+            if (logicId > 0)
+            {
+                NotifyCooldownHolders(s, logicId);
+            }
             SetFeedback(GameText.Format("signal.uplink.core_fired", UplinkCompiler.FirmwareName(fw), cd.ToString("0.#", CultureInfo.InvariantCulture)));
             GameEvent.Send(CoreFirmwareFiredEvent, new CoreFirmwareFired { LogicId = logicId, FirmwareId = fw, ReadyAtGameSeconds = ready });
         }
@@ -1536,6 +1568,11 @@ namespace GameLogic.Campaign.Signal
                 // FG5-RND-03：信号在靶场的仿真投影里（不在真实机器里）——信号位置 HUD 写明，不让玩家以为信号还在核心。
                 return GameText.Format("range.signal.in_projection", projection);
             }
+            if (id == 0 && Defense.TurretUplink.StatusLine(s) is string turretLine)
+            {
+                // FG6-DEF-01（FGR-DEF-005）：信号在炮塔里——写明在哪座炮塔、怎么退出。
+                return turretLine;
+            }
             return id == 0 ? string.Empty : SteadyStatus(s, id);
         }
 
@@ -1557,7 +1594,7 @@ namespace GameLogic.Campaign.Signal
             bool feedbackActive = _feedback.Length > 0 && Now < _feedbackUntil;
             int jumpKey = (int)Math.Ceiling(JumpCooldownRemaining(s));
             return HashCode.Combine(HashCode.Combine(Revision, CurrentMachine(s), cooldownKey, feedbackActive, SignalCoreService.Revision, FirmwareKinds.Revision, (int)GameText.Language),
-                SignalLinkService.WarningRevision, jumpKey, Economy.TestRangeService.Revision);
+                SignalLinkService.WarningRevision, jumpKey, Economy.TestRangeService.Revision, Defense.TurretUplink.Revision);
         }
 
         /// <summary>接入中的常驻状态：插了什么（冷却中的标出剩余秒数）、没插入的逐条原因、没有接入口 / 信号核为空 / 接入口没接通。</summary>

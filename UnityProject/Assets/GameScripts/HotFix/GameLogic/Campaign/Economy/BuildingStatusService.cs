@@ -151,6 +151,11 @@ namespace GameLogic.Campaign.Economy
                         GameText.Format("prod.reason.no_power", GameText.Format("prod.reason.power_brownout", b.PowerPriority)) + OverrideOfflineSuffix(b));
                 }
             }
+            if (Defense.TurretCatalog.IsTurretType(type))
+            {
+                // FG6-DEF-01：炮塔——开火中 / 待机（目标模式、射程、击毁）/ 没装蓝图 / 过热停火 / 缺补给（缺哪种流体、怎么办）/ 信号接入中。缺电 / 禁用 / 虚影 / 被毁由上面的通用状态先报。
+                return Defense.TurretService.StatusOf(state, b);
+            }
             if (type == HomeValleyLayout.BuildingTypeCore)
             {
                 float baseSupply = HomeValleyLayout.BaseCoreSupply;

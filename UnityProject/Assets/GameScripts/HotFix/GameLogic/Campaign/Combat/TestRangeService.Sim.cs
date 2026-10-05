@@ -397,7 +397,11 @@ namespace GameLogic.Campaign.Economy
             {
                 return RangeOpResult.Fail(RangeFailure.Busy, GameText.Get("range.reason.busy"), buildingId);
             }
-            // 信号只在一处：从别的投影移过来。
+            // 信号只在一处：从别的投影 / 炮塔（FG6-DEF-01）移过来。
+            if (Defense.TurretUplink.IsActive)
+            {
+                Defense.TurretUplink.Leave(s);
+            }
             foreach (Session other in Sessions)
             {
                 foreach (Projection q in other.Projections)

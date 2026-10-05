@@ -22,8 +22,9 @@ namespace BinGames.Sim.Combat
         /// 6 = FG2-FW-04 修复：每个单位追加区域减速位自己的减速值（读取仍认 1～5：有区域减速位时取整组减速值，否则 0）。
         /// 7 = FG2-VFX-02：武器读法追加布区落点、无人机定点、反伤（比例 / 固定值 / 触及）；区域追加外观种类；无人机追加定点锚点
         /// （读取仍认 1～6：布区落在命中点、无人机伴飞、没有反伤、区域外观按“液池”、无人机无锚点）。
-        /// 8 = FG2-E2E-01（FG-GAP-043）：武器追加“引信弹迹”标记（读取仍认 1～7：没有弹迹）。弹迹本身是表现，不进快照。</summary>
-        public const int FormatVersion = 8;
+        /// 8 = FG2-E2E-01（FG-GAP-043）：武器追加“引信弹迹”标记（读取仍认 1～7：没有弹迹）。弹迹本身是表现，不进快照。
+        /// 9 = FG6-DEF-01（FG06 FGR-DEF-002 / 004）：武器追加炮塔转速与每发补给；每个单位追加补给存量（读取仍认 1～8：转速 0 = 瞬间转向、不需要补给、存量 0）。</summary>
+        public const int FormatVersion = 9;
 
         /// <summary>仍能读取的最老格式版本。</summary>
         public const int MinReadableFormat = 1;
@@ -459,6 +460,15 @@ namespace BinGames.Sim.Combat
         /// <summary>FG1-SIG-07（FGR-SIG-053）：这台己方机器在与归还核心连通的信号覆盖之外（收不到远程命令、不能接入）。
         /// 只由 <see cref="CombatKernel.EvaluateCoverage"/> 按热更层下发的覆盖源写（世界模拟步里按游戏时间定期评估，与是否被观察无关），随快照进存档。</summary>
         OutOfCoverage = 1 << 20,
+        /// <summary>FG6-DEF-01（FGR-DEF-003“精英优先”）：精英 / 首领级单位（热更层按敌人表的等级在生成时写）。</summary>
+        Elite = 1 << 21,
+        /// <summary>FG6-DEF-01（FGR-DEF-003“优先攻击正在破坏建筑的敌人”）：这个敌方单位最近一次出手打的是己方建筑（炮塔 / 结构单位）。
+        /// 由内核在敌方单位出手时写（打建筑置位、打别的清掉），随快照进存档。</summary>
+        SiegeAttack = 1 << 22,
+        /// <summary>FG6-DEF-01（必须同时交付“击杀数”）：这个单位打死敌对单位时发不丢的玩法事件 <see cref="CombatEventKind.TurretKill"/>（只有炮塔带）。</summary>
+        CountKills = 1 << 23,
+        /// <summary>FG6-DEF-01：血量在内核、但阵亡要交给热更层结算的单位（炮塔：阵亡 = 建筑被摧毁）。只在阵亡时发 <see cref="CombatEventKind.Killed"/>，受伤不逐次报告。</summary>
+        ReportDeath = 1 << 24,
     }
 
     /// <summary>己方机器的命令。与 Demo RegionSquadCommandSystem / HomeValleyMachineMarker 的语义逐条一致。</summary>
@@ -560,6 +570,9 @@ namespace BinGames.Sim.Combat
         /// <summary>FG1-SIG-06（FGR-SIG-061）：带 <see cref="CombatUnitFlags.RawGated"/> 的单位开火了——信号裸跑的未破解固件“发动”一次（暴露按它结算，走玩法事件，不丢）。
         /// Unit=攻击者，Other=目标。</summary>
         RawFirmwareFired = 17,
+        /// <summary>FG6-DEF-01：带 <see cref="CombatUnitFlags.CountKills"/> 的单位（炮塔）打死了一个敌对单位（击杀数按它记，走玩法事件，不丢）。
+        /// Unit=击杀者，Other=阵亡者，Code=1 表示阵亡者带 <see cref="CombatUnitFlags.Elite"/>。</summary>
+        TurretKill = 18,
 
         // ── 提示事件（有上限，可丢弃）──
         /// <summary>己方普通武器开火（Unit=攻击者，Other=目标）。</summary>
@@ -608,6 +621,8 @@ namespace BinGames.Sim.Combat
         NotHostile = 11,
         /// <summary>目标当前无法被击伤（首领阶段）：开火照常，伤害不落地。</summary>
         Invulnerable = 12,
+        /// <summary>FG6-DEF-01（FGR-DEF-004）：武器每发要消耗补给（流体类固件的流体），单位的补给存量不够一发——停火（原因由热更层按缺哪种流体写明）。</summary>
+        NoAmmo = 13,
     }
 
     /// <summary>武器开火方式。</summary>
@@ -629,11 +644,21 @@ namespace BinGames.Sim.Combat
         MeltOverload = 2,
     }
 
-    /// <summary>炮塔选目标模式（FG06 FGR-DEF-003；本 Story 接入最近与最低耐久两种，其余三种由 FG6-DEF-02 追加）。</summary>
+    /// <summary>
+    /// 炮塔选目标模式（FG06 FGR-DEF-003：最近、最高威胁、精英优先、最低耐久、优先攻击正在破坏建筑的敌人；FG6-DEF-01 补齐后三种）。
+    /// 炮塔只按玩家选的模式选目标：射程内（视线要求照常）按模式的比较规则取最优，并列一律取更近者、再取槽位大者（与“最近”同一套并列规则）。
+    /// - 最高威胁：威胁 = 目标武器每秒能打出的基础伤害（伤害 × 读法伤害倍率 ÷ 实际出手间隔）；没有武器的目标威胁为 0。
+    /// - 精英优先：射程内有带 <see cref="CombatUnitFlags.Elite"/> 的目标就打其中最近的，没有就打最近的。
+    /// - 优先攻击正在破坏建筑的敌人：射程内有带 <see cref="CombatUnitFlags.SiegeAttack"/> 的目标就打其中最近的，没有就打最近的。
+    /// 取值进存档（武器参数里），顺序不能改、只能在末尾追加。
+    /// </summary>
     public enum CombatTargetMode : byte
     {
         Nearest = 0,
         LowestHealth = 1,
+        HighestThreat = 2,
+        EliteFirst = 3,
+        SiegeFirst = 4,
     }
 
     /// <summary>武器参数（一套装配或一种敌人一份）。数值全部由热更层给出（Demo 常量 / Luban 表），内核不读表。</summary>
@@ -676,6 +701,11 @@ namespace BinGames.Sim.Combat
         /// <summary>FG2-E2E-01（FG-GAP-043，设计案 5.3“引信与弹芯类主要体现在弹体特效上，炮口有一下装定闪光”）：
         /// 1 = 这套装配里有生效的引信类固件——每次开火在内核里记一条弹迹（炮口 → 命中点）与炮口装定闪光，渲染缓冲画出来；0 = 没有。只影响表现，不影响结算。</summary>
         public byte FuseTrace;
+        /// <summary>FG6-DEF-01（FGR-DEF-002“默认 360° 旋转，转速由组件决定”）：驻守开火的单位（炮塔）朝目标转动的速度（度 / 游戏秒）；
+        /// 朝向与目标方向的夹角在 <see cref="CombatConfig.TurretAimToleranceDeg"/> 以内才开火。0 = 瞬间转向（机器、敌人、原型炮塔）。朝向存在单位的装甲朝向里。</summary>
+        public float TurnRate;
+        /// <summary>FG6-DEF-01（FGR-DEF-004）：每发要消耗的补给量（流体类固件的流体，按“发”计）。0 = 不需要补给。存量不够一发时开火结果为 <see cref="CombatFireResult.NoAmmo"/>。</summary>
+        public float AmmoPerShot;
     }
 
     /// <summary>FG2-E2E-01（FG-GAP-043）：一条引信弹迹（表现数据：不进快照、不进状态哈希；按游戏时间到期，暂停时不消失）。</summary>
@@ -747,6 +777,8 @@ namespace BinGames.Sim.Combat
         /// <summary>行为周期计时的初值（Demo 记录里的 CycleCooldownRemaining / SecondaryTimer）。</summary>
         public float Cycle;
         public float Secondary;
+        /// <summary>FG6-DEF-01：补给存量的初值（按“发”计；武器不需要补给时无意义）。</summary>
+        public float Ammo;
     }
 
     /// <summary>内核事件（40 字节）。</summary>
@@ -789,6 +821,9 @@ namespace BinGames.Sim.Combat
         public double2 CommandPos;
         public double MarkedUntil;
         public int Weapon;
+        /// <summary>FG6-DEF-01：补给存量（发）与朝向（炮塔的炮口朝向 = 装甲朝向）。</summary>
+        public float Ammo;
+        public float2 Facing;
         public bool Alive => (Flags & CombatUnitFlags.Alive) != 0;
     }
 
@@ -835,6 +870,8 @@ namespace BinGames.Sim.Combat
         public int StatusStackCap;
         /// <summary>FG2-E2E-01（FG-GAP-043）：引信弹迹 / 炮口装定闪光在画面上停留的游戏秒（fg.TbHomeTuning combat.fuse_trace_seconds）。0 = 不记弹迹。</summary>
         public float FuseTraceSeconds;
+        /// <summary>FG6-DEF-01（FGR-DEF-002）：有转速的炮塔，炮口朝向与目标方向夹角在这个度数以内才开火（fg.TbHomeTuning turret.aim_tolerance_deg）。0 = 内核默认 6°。</summary>
+        public float TurretAimToleranceDeg;
 
         public static CombatConfig Default => new CombatConfig
         {

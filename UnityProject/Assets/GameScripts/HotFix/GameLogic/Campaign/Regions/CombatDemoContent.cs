@@ -382,7 +382,11 @@ namespace GameLogic.Campaign.Regions
             HomeValleyCombatTargets.SyncDummy(site, state);
         }
 
-        /// <summary>编队攻击命令打到训练靶：与直控 / 自动交战同一结算出口（<see cref="HomeValleyCombatTargets.TryAttack"/>，isAiSource: false）。</summary>
+        /// <summary>
+        /// 旧档快照里训练靶还是“外部扣血”（ExternalHealth）时排在队列里的扣血请求（读档后 <see cref="HomeValleyCombatTargets.EnsureDummyUnit"/> 已把靶子迁成内核扣血，
+        /// 之后不会再产生）。FG6-DEF-01 审查修复（P0）：伤害内核已经算好，直接按这份伤害记一条命中（与“受伤”事件同一出口 OnKernelHit）——
+        /// 不再经 <see cref="HomeValleyCombatTargets.TryAttack"/> 另开一发（那会在事件处理中重入开火，还多打一发）。
+        /// </summary>
         public override void ApplyExternalDamageByKey(CombatSite site, string key, float damage, int attackerLogicId)
         {
             CampaignState state = CampaignSession.Current;
@@ -390,8 +394,27 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
-            HomeValleyCombatTargets.TryAttack(state, attackerLogicId, key, state.RandomSeed, isAiSource: false);
+            CombatTargetRecord target = HomeValleyCombatTargets.Find(state, key);
+            if (target == null || target.Health <= 0f)
+            {
+                return;
+            }
+            float after = Mathf.Max(0f, target.Health - Mathf.Max(0f, damage));
+            bool direct = IsDirectControlled != null && IsDirectControlled(attackerLogicId);
+            HomeValleyCombatTargets.OnKernelHit(state, key, Mathf.Max(0f, damage), after, attackerLogicId, false, direct);
             HomeValleyCombatTargets.SyncDummy(site, state);
+        }
+
+        /// <summary>FG6-DEF-01（DEBT-FG2FW02-07）：训练靶的血量在家园战斗内核里——编队攻击 / 直控 / 自动交战都经内核开火（读法在靶上生效），结算结果交回记录。</summary>
+        public override void OnKeyedTargetDamaged(CombatSite site, string key, float damage, float healthAfter, int attackerLogicId, bool killed)
+        {
+            CampaignState state = CampaignSession.Current;
+            if (state == null || key != HomeValleyCombatTargets.LowThreatTargetId)
+            {
+                return;
+            }
+            bool direct = attackerLogicId > 0 && IsDirectControlled != null && IsDirectControlled(attackerLogicId);
+            HomeValleyCombatTargets.OnKernelHit(state, key, damage, healthAfter, attackerLogicId, killed, direct);
         }
 
         /// <summary>FG0-ARCH-06：工作地点无法到达——工单转为等待（带原因，30 秒后重试），并发一条可定位的“无法到达”通知。</summary>

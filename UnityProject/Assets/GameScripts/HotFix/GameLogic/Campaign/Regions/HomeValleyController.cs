@@ -285,9 +285,12 @@ namespace GameLogic.Campaign.Regions
             BuildMode.Tick(_camera, state, _cameraDirector != null && _cameraDirector.Mode == ViewMode.Strategy,
                 _cameraDirector != null && _cameraDirector.InTransition && _cameraDirector.TransitionTarget == ViewMode.Strategy); // FG-GAP-071
             bool buildModeOwnsPointer = buildModeWasOpen || BuildMode.IsOpen;
-            SquadCommands.PointerSuppressed = buildModeOwnsPointer;
+            // FG6-DEF-01（FGR-DEF-005）：信号在炮塔里时，左键 = 亲自瞄准开火（不做框选 / 点选 / 下令）。
+            bool turretAim = Defense.TurretUplink.HandleInput(_camera, state,
+                buildModeOwnsPointer || _cameraDirector == null || _cameraDirector.Mode != ViewMode.Strategy);
+            SquadCommands.PointerSuppressed = buildModeOwnsPointer || turretAim;
             SquadCommands.TickInput(paused);
-            if (!buildModeOwnsPointer)
+            if (!buildModeOwnsPointer && !turretAim)
             {
                 HandleSelectionClick();
             }
@@ -306,6 +309,11 @@ namespace GameLogic.Campaign.Regions
                 // FG3-LOG-02：规划中的传送带虚影（规划变化时才重摆）与施工现场悬停读数（建造模式开着时由建造栏状态行显示）。
                 _siteView.SyncPlannedBelts(state, _root != null ? _root.transform : null);
                 _siteView.TickHover(state, _camera, !buildModeOwnsPointer && _cameraDirector != null && _cameraDirector.Mode == ViewMode.Strategy);
+            }
+            // FG6-DEF-01：炮塔头（朝向 + 机身状态部件）与射程圈（放置预览 / 选中炮塔）。纯表现，O(炮塔数)。
+            if (state != null)
+            {
+                GameLogic.View.TurretViews.FrameUpdate(state, _combat, _root != null ? _root.transform : null, BuildMode);
             }
             // FG0-ARCH-03：机器表现对象按内核位置插值 + 突袭者 / 炮塔 / 弹体实例化绘制（常数次调用，与单位数无关）。
             _combat?.FrameRender(_camera, GameClock.StepAlpha);
@@ -2059,6 +2067,8 @@ namespace GameLogic.Campaign.Regions
             _combat.SetEngage(dummy, HomeValleyCombatTargets.EngageRange, AiEngageIntervalSeconds);
             HomeValleyCombatTargets.SyncDummy(_combat, state);
             _combat.RefreshAllMachineWeapons(state);
+            // FG6-DEF-01 审查修复（P2）：炮塔的接入态不进内核快照——在第一步之前补回（读档接着跑与不存档一路跑一致）。
+            Defense.TurretService.RestoreAfterLoad(state, _combat);
         }
 
         /// <summary>FG0-ARCH-04：还没建成的格网建筑（规划中 / 已预留材料 / 施工中）。</summary>
@@ -2720,6 +2730,7 @@ namespace GameLogic.Campaign.Regions
                 marker?.DetachView();
             }
             _combat?.ClearViews();
+            GameLogic.View.TurretViews.Clear(); // FG6-DEF-01：炮塔头随 _root 销毁，这里清登记、释放射程圈。
             _buildingVisuals.Clear();
             _buildingBadges.Clear();
             _visualsRecordsRef = null;

@@ -124,6 +124,8 @@ namespace BinGames.Sim.Combat
         /// <summary>FG2-FW-04 修复（格式 6）：区域减速位（<see cref="CombatConst.StatusBitZoneSlow"/>）自己的减速值。<see cref="StatusSlow"/> 是所有来源取大后的结果；
         /// 减速标签逐位到期后按剩下的位重算时，区域减速从这里取起点，不再沿用混合最大值（否则已到期的减速标签的数值会残留到区域减速位到期）。</summary>
         public NativeList<float> StatusZoneSlow;
+        /// <summary>FG6-DEF-01（格式 9）：补给存量（按发计；只有武器 AmmoPerShot &gt; 0 的单位用它）。</summary>
+        public NativeList<float> Ammo;
         public NativeList<CombatCommand> Cmd;
         public NativeList<float2> Direct;
 
@@ -235,6 +237,7 @@ namespace BinGames.Sim.Combat
                 StatusStacks = new NativeList<ulong>(capacity, Allocator.Persistent),
                 StatusBitUntil = new NativeList<double>(capacity * CombatConst.StatusBitStride, Allocator.Persistent),
                 StatusZoneSlow = new NativeList<float>(capacity, Allocator.Persistent),
+                Ammo = new NativeList<float>(capacity, Allocator.Persistent),
                 Cmd = new NativeList<CombatCommand>(capacity, Allocator.Persistent),
                 Direct = new NativeList<float2>(capacity, Allocator.Persistent),
                 NavSt = new NativeList<byte>(capacity, Allocator.Persistent),
@@ -324,6 +327,7 @@ namespace BinGames.Sim.Combat
             StatusStacks.Dispose();
             StatusBitUntil.Dispose();
             StatusZoneSlow.Dispose();
+            Ammo.Dispose();
             Cmd.Dispose();
             Direct.Dispose();
             NavSt.Dispose();
@@ -406,7 +410,8 @@ namespace BinGames.Sim.Combat
             MaxHp.Add(s.MaxHealth);
             Weapon.Add(s.Weapon);
             BProfile.Add(s.BehaviorProfile);
-            float cosHalf = math.cos(math.radians(s.ArmorHalfAngleDeg));
+            // 半角 ≥ 180° = 全方位（取 -2，避免正对背面时单精度点积略小于 -1 漏判；FG6-DEF-01 炮塔座等级装甲、靶场护盾靶都是全方位）。
+            float cosHalf = s.ArmorHalfAngleDeg >= 180f ? -2f : math.cos(math.radians(s.ArmorHalfAngleDeg));
             float2 facing = math.lengthsq(s.ArmorFacing) > 1e-12f ? math.normalize(s.ArmorFacing) : new float2(0f, -1f);
             Armor.Add(new float4(s.ArmorFraction, cosHalf, facing.x, facing.y));
             BackHit.Add(s.BackHitBonus);
@@ -428,6 +433,7 @@ namespace BinGames.Sim.Combat
                 StatusBitUntil.Add(0);
             }
             StatusZoneSlow.Add(0f);
+            Ammo.Add(math.max(0f, s.Ammo));
             Cmd.Add(default);
             Direct.Add(float2.zero);
             NavSt.Add(0);
@@ -484,6 +490,7 @@ namespace BinGames.Sim.Combat
                 StatusBitUntil[to * CombatConst.StatusBitStride + b] = StatusBitUntil[from * CombatConst.StatusBitStride + b];
             }
             StatusZoneSlow[to] = StatusZoneSlow[from];
+            Ammo[to] = Ammo[from];
             Cmd[to] = Cmd[from];
             Direct[to] = Direct[from];
             NavSt[to] = NavSt[from];
@@ -530,6 +537,7 @@ namespace BinGames.Sim.Combat
             StatusStacks.ResizeUninitialized(length);
             StatusBitUntil.ResizeUninitialized(length * CombatConst.StatusBitStride);
             StatusZoneSlow.ResizeUninitialized(length);
+            Ammo.ResizeUninitialized(length);
             Cmd.ResizeUninitialized(length);
             Direct.ResizeUninitialized(length);
             NavSt.ResizeUninitialized(length);

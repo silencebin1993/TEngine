@@ -342,6 +342,18 @@ namespace GameLogic.EditorTools
                     case 383: StepBlackBoxRosterOpened(inStep); break;
                     case 384: StepBlackBoxRosterMemorial(inStep); break;
                     case 385: StepBlackBoxRosterClosed(inStep); break;
+                    // FG6-DEF-01：建造菜单“防御”页签选轻型炮塔（建造栏炮塔蓝图下拉 + 射程）→ 悬停时地面射程圈 → 单击放下虚影 → 右键取消 → 点建成的炮塔 →
+                    // 建筑面板“炮塔…”→ 炮塔面板（标题、蓝图、五个模式按钮、射程圈）→ 点“最低耐久”立即生效 → Esc → 清理测试炮塔与虚影。
+                    case 386: StepTurretPicked(inStep); break;
+                    case 387: StepTurretPlaced(inStep); break;
+                    case 388: StepTurretPanel(inStep); break;
+                    case 389: StepTurretClosed(inStep); break;
+                    // FG6-DEF-01 审查修复（FGR-DEF-005 接入的正式入口）：测试炮塔换带接入口的蓝图 → 点炮塔面板“接入” → Esc → 建造菜单键关掉建造模式 →
+                    // 战略暂停中左键朝目标开火（被拒、提示）→ 继续后左键开火（命中）→ 按接入键离开炮塔 → 清理、重新打开建造模式。
+                    case 390: StepTurretUplinked(inStep); break;
+                    case 391: StepTurretAimPaused(inStep); break;
+                    case 392: StepTurretAimFired(inStep); break;
+                    case 393: StepTurretLeft(inStep); break;
                     case 346: StepOverridePicked(inStep); break;
                     case 347: StepOverridePlaced(inStep); break;
                     case 348: StepOverridePanel(inStep); break;
@@ -6591,6 +6603,383 @@ namespace GameLogic.EditorTools
             HomeGridService.MapFor(state);
             Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
             GameClock.SetPaused(SessionState.GetInt(K + "BbWasPaused", 0) == 1);
+            Next(386, "FG6-DEF-01：建造菜单“防御”页签选轻型炮塔（建造栏炮塔蓝图下拉与射程）");
+        }
+
+        // ── FG6-DEF-01：炮塔（建造菜单“防御”页签 → 建造栏炮塔蓝图下拉与射程 → 悬停时地面射程圈 → 放下虚影 → 点建成的炮塔 → 建筑面板“炮塔…”→ 炮塔面板点目标模式 → Esc）──
+
+        private const string SmokeTurretId = Campaign.Regions.HomeValleyLayout.RegionId + ":smoke_power_turret";
+
+        private static void StepTurretPicked(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            CampaignState state = CampaignSession.Current;
+            SessionState.SetInt(K + "TurretWasPaused", GameClock.Paused ? 1 : 0);
+            GameClock.SetPaused(true);
+            // 核心附近按地形找一块放炮塔虚影的空地（玩家放置校验，含“有能装的炮塔蓝图”）；再登记一座接得上电网的建成炮塔（测试捷径：机器施工由 FgTurretSelfCheck B 段覆盖），不写死坐标（B25）。
+            GridCell core = HomeGridService.CorePivot(state);
+            GridCell? ghostAt = null;
+            string builtId = null;
+            for (int r = 5; r <= 24 && (ghostAt == null || builtId == null); r++)
+            {
+                for (int dy = -r; dy <= r && (ghostAt == null || builtId == null); dy++)
+                {
+                    for (int dx = -r; dx <= r && (ghostAt == null || builtId == null); dx++)
+                    {
+                        if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != r)
+                        {
+                            continue;
+                        }
+                        var c = new GridCell(core.X + dx, core.Y + dy);
+                        if (ghostAt == null)
+                        {
+                            if (HomeGridService.ValidatePlacement(state, Campaign.Defense.TurretCatalog.LightTypeId, c, 0, checkCost: false).Ok)
+                            {
+                                ghostAt = c;
+                            }
+                            continue;
+                        }
+                        if (Math.Abs(c.X - ghostAt.Value.X) < 5 && Math.Abs(c.Y - ghostAt.Value.Y) < 5
+                            || !HomeGridService.ValidatePlacement(state, Campaign.Defense.TurretCatalog.LightTypeId, c, 0, checkCost: false).Ok)
+                        {
+                            continue;
+                        }
+                        AddSmokeBuilding(state, Campaign.Defense.TurretCatalog.LightTypeId, "turret", c);
+                        Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+                        BuildingRecord b = HomeGridService.FindBuilding(state, SmokeTurretId);
+                        if (b != null && b.PowerState == BuildingPowerState.Powered)
+                        {
+                            b.Health = Campaign.Economy.BuildingOps.MaxDurability(Campaign.Defense.TurretCatalog.LightTypeId);
+                            builtId = SmokeTurretId;
+                            continue;
+                        }
+                        state.BuildingRecords = state.BuildingRecords.Where(x => x.BuildingId != SmokeTurretId).ToArray();
+                        HomeGridService.MapFor(state);
+                        Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+                    }
+                }
+            }
+            SessionState.SetInt(K + "TurretGhostX", ghostAt?.X ?? 0);
+            SessionState.SetInt(K + "TurretGhostY", ghostAt?.Y ?? 0);
+            int tab = Campaign.Grid.GridContent.Categories.ToList().FindIndex(c => c.Id == "defense");
+            bool tabClicked = ClickUitk("[BuildModeHudHost]", "BuildCat" + tab);
+            int idx = HudItemIndex(Campaign.Defense.TurretCatalog.LightTypeId);
+            bool picked = idx >= 0 && ClickUitk("[BuildModeHudHost]", "BuildItem" + idx) && mode != null && mode.SelectedTypeId == Campaign.Defense.TurretCatalog.LightTypeId;
+            BuildModeHudUIToolkit hud = BuildModeHudUIToolkit.Instance;
+            hud?.Refresh();
+            bool bpRow = hud != null && hud.TurretBlueprintVisible && hud.TurretBlueprintChoices.Count >= 1 && hud.TurretRangeText.Contains("18");
+            Check(ghostAt.HasValue && builtId != null && tabClicked && picked && bpRow,
+                $"点建造菜单“防御”页签里的“轻型炮塔”（第 {idx + 1} 项）：选中，建造栏出现炮塔蓝图下拉（{(hud != null ? string.Join(" / ", hud.TurretBlueprintChoices) : string.Empty)}）与“{hud?.TurretRangeText}”；接得上电网的建成炮塔 {builtId}");
+            if (ghostAt.HasValue)
+            {
+                HoverWorld(new Vector3(ghostAt.Value.X, 0f, ghostAt.Value.Y));
+            }
+            SessionState.SetInt(K + "TurretSub", 0);
+            Next(387, "悬停时地面射程圈；单击放下炮塔虚影");
+        }
+
+        private static void StepTurretPlaced(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            var ghostAt = new GridCell(SessionState.GetInt(K + "TurretGhostX", 0), SessionState.GetInt(K + "TurretGhostY", 0));
+            BuildingRecord built = HomeGridService.FindBuilding(state, SmokeTurretId);
+            int sub = SessionState.GetInt(K + "TurretSub", 0);
+            if (sub == 0)
+            {
+                if (inStep < 0.6)
+                {
+                    return;
+                }
+                string bp = Campaign.Defense.TurretService.DefaultBlueprintFor(state, Campaign.Defense.TurretCatalog.SizeLight);
+                float want = bp != null ? Campaign.Defense.TurretService.RangeOf(state, bp) : 0f;
+                Check(View.TurretViews.RingShown && want > 0f && Mathf.Approximately(View.TurretViews.RingRadius, want),
+                    $"放置时预览射程：鼠标悬停在空地上，地面射程圈半径 {View.TurretViews.RingRadius:F1} 米（蓝图射程 {want:F1}）");
+                SessionState.SetInt(K + "TurretSub", 1);
+                ClickWorld(new Vector3(ghostAt.X, 0f, ghostAt.Y));
+                return;
+            }
+            if (sub == 1)
+            {
+                if (inStep < 1.3)
+                {
+                    return;
+                }
+                BuildingRecord ghost = HomeGridService.BuildingAt(state, ghostAt);
+                Check(ghost != null && ghost.BuildingTypeId == Campaign.Defense.TurretCatalog.LightTypeId && Campaign.Regions.HomeValleyController.IsPlannedGhost(ghost),
+                    $"单击放下轻型炮塔的虚影（2×2；状态行“{Campaign.Regions.HomeValleyBuildMode.Current?.StatusText}”）");
+                SessionState.SetString(K + "TurretGhostId", ghost?.BuildingId ?? string.Empty);
+                SessionState.SetInt(K + "TurretSub", 2);
+                RightClickWorld(new Vector3(ghostAt.X, 0f, ghostAt.Y));
+                return;
+            }
+            if (sub == 2)
+            {
+                if (inStep < 2.0)
+                {
+                    return;
+                }
+                Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+                Check(mode != null && mode.IsOpen && mode.SelectedTypeId == null, "右键取消选择（建造模式还开着）");
+                SessionState.SetInt(K + "TurretSub", 3);
+                ClickWorld(built != null ? new Vector3(built.Position.x, 0f, built.Position.y) : Vector3.zero);
+                return;
+            }
+            if (inStep < 2.7)
+            {
+                return;
+            }
+            ProductionPanelUIToolkit bp2 = ProductionPanelUIToolkit.Instance;
+            bool bpOpen = ProductionPanelUIToolkit.IsOpen && bp2 != null && ProductionPanelUIToolkit.BuildingId == SmokeTurretId && bp2.TurretButton != null
+                          && ProductionPanelUIToolkit.Visible(bp2.TurretButton) && !bp2.ReasonText.Contains("没有装炮塔蓝图");
+            Check(bpOpen, $"左键点建成的炮塔打开它的通用面板：状态“{bp2?.ReasonText}”，有“炮塔…”按钮");
+            Check(ClickUitk("[ProductionPanelHost]", "PrTurret"), "通用面板上点“炮塔…”");
+            SessionState.SetInt(K + "TurretSub", 0);
+            Next(388, "炮塔面板打开：点一个目标模式按钮");
+        }
+
+        private static void StepTurretPanel(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            TurretPanelUIToolkit panel = TurretPanelUIToolkit.Instance;
+            panel?.Refresh(force: true);
+            bool open = TurretPanelUIToolkit.IsOpen && panel != null && panel.PanelVisible && TurretPanelUIToolkit.BuildingId == SmokeTurretId && panel.BlueprintChoices.Count > 0
+                        && LabelText("[TurretPanelHost]", "TurretTitle").Contains(Localization.GameText.Get("building.turret_light.name")) && panel.ModeButton(0).text.StartsWith("● ", StringComparison.Ordinal)
+                        && panel.WeaponText.Contains("射程") && panel.KillsText.Length > 0;
+            float range = Campaign.Defense.TurretService.RangeOfTurret(state, SmokeTurretId);
+            bool ring = View.TurretViews.RingShown && Mathf.Approximately(View.TurretViews.RingRadius, range);
+            Check(open && ring, $"炮塔面板打开：“{panel?.TitleText}”，蓝图 {panel?.BlueprintChoices.Count} 张、五个目标模式按钮（“{panel?.ModeButton(0)?.text}”选中）、“{panel?.KillsText}”；地面射程圈 {View.TurretViews.RingRadius:F1} 米");
+            CheckNoTextMarkers("炮塔面板");
+            int slot = -1;
+            for (int i = 0; i < 5 && panel != null; i++)
+            {
+                if (panel.ModeCodeAt(i) == (int)BinGames.Sim.Combat.CombatTargetMode.LowestHealth)
+                {
+                    slot = i;
+                }
+            }
+            SessionState.SetInt(K + "TurretModeSlot", slot);
+            Check(slot >= 0 && ClickUitk("[TurretPanelHost]", "TurretMode" + slot), "点“最低耐久”目标模式按钮");
+            SessionState.SetInt(K + "TurretSub", 0);
+            Next(389, "目标模式立即生效；测试炮塔换带接入口的蓝图、点“接入”");
+        }
+
+        private const string SmokeTurretPortBp = "smoke_turret_port";
+
+        private static void StepTurretClosed(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            TurretPanelUIToolkit panel = TurretPanelUIToolkit.Instance;
+            panel?.Refresh(force: true);
+            TurretRecord r = Campaign.Defense.TurretService.Find(state, SmokeTurretId);
+            int slot = SessionState.GetInt(K + "TurretModeSlot", -1);
+            Check(r != null && r.TargetMode == (int)BinGames.Sim.Combat.CombatTargetMode.LowestHealth && panel != null && slot >= 0
+                  && panel.ModeButton(slot).text.StartsWith("● ", StringComparison.Ordinal) && panel.MessageText.Contains(Campaign.Defense.TurretCatalog.ModeName(1)),
+                $"目标模式立即生效：炮塔记录 = {r?.TargetMode}，按钮“{(panel != null && slot >= 0 ? panel.ModeButton(slot).text : string.Empty)}”，消息“{panel?.MessageText}”");
+            // FG6-DEF-01 审查修复（FGR-DEF-005 接入走正式入口）：测试捷径给测试炮塔装一张带接入口的固定底盘蓝图（电路编辑器里标接入口由 FG1 自检覆盖），
+            // 然后点炮塔面板的“接入”按钮。
+            Campaign.Blueprint.BlueprintCircuitBoard board = Campaign.Blueprint.BlueprintCircuitBoard.CreateDefault(Campaign.Content.CarrierReadings.FixedChassisId,
+                Campaign.Content.ComponentCatalog.CompGunId, null, null, Array.Empty<string>());
+            board.TrySetUplink(2);
+            state.BlueprintRecords = (state.BlueprintRecords ?? Array.Empty<BlueprintRecord>()).Where(x => x.BlueprintId != SmokeTurretPortBp)
+                .Append(new BlueprintRecord { BlueprintId = SmokeTurretPortBp, DisplayName = "冒烟接入炮塔", ActiveVersion = 1, Versions = new[] { board.ToVersion(1, 0f) } }).ToArray();
+            Campaign.Defense.TurretOpResult assigned = Campaign.Defense.TurretService.TryAssignBlueprint(state, SmokeTurretId, SmokeTurretPortBp);
+            panel?.Refresh(force: true);
+            bool enabled = panel != null && panel.UplinkButton != null && panel.UplinkButton.enabledSelf && panel.UplinkButton.text == Localization.GameText.Get("turret.panel.uplink");
+            Check(assigned.Ok && enabled, $"测试炮塔换成带接入口的蓝图（{assigned.Message}）：炮塔面板的“{panel?.UplinkButton?.text}”按钮可点");
+            Check(ClickUitk("[TurretPanelHost]", "TurretUplink"), "点炮塔面板的“接入”按钮");
+            SessionState.SetInt(K + "TurretSub", 0);
+            Next(390, "FG6-DEF-01：信号进入炮塔；Esc 关闭炮塔面板");
+        }
+
+        private static GameLogic.Campaign.Combat.CombatSite SmokeHomeSite =>
+            WorldSimulation.Home != null && WorldSimulation.Home.IsLoaded ? WorldSimulation.Home.Combat : null;
+
+        private static void StepTurretUplinked(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            TurretPanelUIToolkit panel = TurretPanelUIToolkit.Instance;
+            panel?.Refresh(force: true);
+            BuildingRecord b = HomeGridService.FindBuilding(state, SmokeTurretId);
+            string stCode = b != null ? Campaign.Economy.BuildingStatusService.Evaluate(state, b).ReasonCode : string.Empty;
+            string stText = b != null ? Campaign.Economy.BuildingStatusService.Evaluate(state, b).Reason : string.Empty;
+            bool up = Campaign.Defense.TurretUplink.IsUplinkedTo(state, SmokeTurretId) && panel != null
+                      && panel.UplinkButton.text == Localization.GameText.Get("turret.panel.leave") && stCode == "turret.uplinked";
+            Check(up, $"信号进入炮塔：按钮变成“{panel?.UplinkButton?.text}”，状态“{stText}”，HUD“{Campaign.Signal.SignalUplinkService.StatusLine(state)}”");
+            // 测试夹具：炮塔射程内放一个不动、不开火的敌方目标（突袭导演在 FG6-DEF-04），放在炮塔朝屏幕中心的一侧（镜头里、不被界面挡住）。
+            GameLogic.Campaign.Combat.CombatSite site = SmokeHomeSite;
+            Vector2 at = b != null ? b.Position : Vector2.zero;
+            Vector2 dir = Vector2.right;
+            Camera cam = Camera.main;
+            if (cam != null && new Plane(Vector3.up, Vector3.zero).Raycast(cam.ScreenPointToRay(new Vector3(Screen.width * 0.5f, Screen.height * 0.5f, 0f)), out float enter))
+            {
+                Vector3 mid = cam.ScreenPointToRay(new Vector3(Screen.width * 0.5f, Screen.height * 0.5f, 0f)).GetPoint(enter);
+                Vector2 toMid = new Vector2(mid.x, mid.z) - at;
+                if (toMid.sqrMagnitude > 1f)
+                {
+                    dir = toMid.normalized;
+                }
+            }
+            Vector2 ep = at + dir * 5f;
+            int enemy = site != null ? site.Kernel.Spawn(new BinGames.Sim.Combat.CombatSpawn
+            {
+                ExtKey = -1,
+                Kind = BinGames.Sim.Combat.CombatUnitKind.Enemy,
+                Faction = BinGames.Sim.Combat.CombatFaction.Hostile,
+                Behavior = BinGames.Sim.Combat.CombatBehavior.None,
+                Flags = BinGames.Sim.Combat.CombatUnitFlags.Alive | BinGames.Sim.Combat.CombatUnitFlags.Targetable | BinGames.Sim.Combat.CombatUnitFlags.Instanced
+                        | BinGames.Sim.Combat.CombatUnitFlags.RemoveOnDeath,
+                Position = new Unity.Mathematics.double2(ep.x, ep.y),
+                Home = new Unity.Mathematics.double2(ep.x, ep.y),
+                Radius = 0.5f,
+                Health = 5000f,
+                MaxHealth = 5000f,
+                Weapon = -1,
+                BehaviorProfile = -1,
+                Priority = 1,
+            }) : 0;
+            SessionState.SetInt(K + "TurretEnemy", enemy);
+            SessionState.SetFloat(K + "TurretEnemyX", ep.x);
+            SessionState.SetFloat(K + "TurretEnemyY", ep.y);
+            Check(enemy > 0, $"测试夹具：炮塔射程内（5 米）放一个敌方目标（单位 {enemy}）");
+            SessionState.SetInt(K + "TurretSub", 0);
+            PressKeyKeepMouse(KeyCode.Escape);
+            Next(391, "Esc 关闭炮塔面板；按建造菜单键关掉建造模式；战略暂停中左键朝目标开火（被拒）");
+        }
+
+        private static float SmokeEnemyHp()
+        {
+            GameLogic.Campaign.Combat.CombatSite site = SmokeHomeSite;
+            int enemy = SessionState.GetInt(K + "TurretEnemy", 0);
+            return site != null && site.Kernel.TryGetUnit(enemy, out BinGames.Sim.Combat.CombatUnitView v) && v.Alive ? v.Health : 0f;
+        }
+
+        private static Vector3 SmokeEnemyWorld() =>
+            new Vector3(SessionState.GetFloat(K + "TurretEnemyX", 0f), 0f, SessionState.GetFloat(K + "TurretEnemyY", 0f));
+
+        private static void StepTurretAimPaused(double inStep)
+        {
+            int sub = SessionState.GetInt(K + "TurretSub", 0);
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            if (sub == 0)
+            {
+                if (inStep < 0.5)
+                {
+                    return;
+                }
+                Check(!TurretPanelUIToolkit.IsOpen && mode != null && mode.IsOpen, "Esc 关闭炮塔面板（建造模式还开着）");
+                ProductionPanelUIToolkit.Close(); // 通用面板不在本步覆盖范围（清理用测试捷径），免得挡住世界点击
+                SessionState.SetInt(K + "TurretSub", 1);
+                PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.OpenBuildMenu));
+                return;
+            }
+            if (sub == 1)
+            {
+                if (inStep < 1.0)
+                {
+                    return;
+                }
+                Check(mode == null || !mode.IsOpen, "按建造菜单键关掉建造模式（左键不再归建造模式）");
+                SessionState.SetInt(K + "TurretPausedClicks0", Campaign.Defense.TurretUplink.PausedClicks);
+                SessionState.SetInt(K + "TurretInputFires0", Campaign.Defense.TurretUplink.InputFires);
+                SessionState.SetFloat(K + "TurretEnemyHp0", SmokeEnemyHp());
+                SessionState.SetInt(K + "TurretSub", 2);
+                ClickWorld(SmokeEnemyWorld());
+                return;
+            }
+            if (inStep < 1.6)
+            {
+                return;
+            }
+            int paused0 = SessionState.GetInt(K + "TurretPausedClicks0", 0);
+            int fires0 = SessionState.GetInt(K + "TurretInputFires0", 0);
+            float hp0 = SessionState.GetFloat(K + "TurretEnemyHp0", 0f);
+            Check(GameClock.Paused && Campaign.Defense.TurretUplink.PausedClicks == paused0 + 1 && Campaign.Defense.TurretUplink.InputFires == fires0
+                  && Mathf.Approximately(SmokeEnemyHp(), hp0) && Campaign.Defense.TurretService.LastFeedback.Contains("暂停"),
+                $"战略暂停中左键朝目标开火：被吃掉、不开火（目标耐久 {hp0:F0} → {SmokeEnemyHp():F0}），提示“{Campaign.Defense.TurretService.LastFeedback}”");
+            GameClock.SetPaused(false);
+            SessionState.SetFloat(K + "TurretEnemyHp0", SmokeEnemyHp());
+            SessionState.SetInt(K + "TurretSub", 0);
+            ClickWorld(SmokeEnemyWorld());
+            Next(392, "继续游戏后左键朝目标开火（亲自瞄准）");
+        }
+
+        private static void StepTurretAimFired(double inStep)
+        {
+            if (inStep < 1.2)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            int fires0 = SessionState.GetInt(K + "TurretInputFires0", 0);
+            float hp0 = SessionState.GetFloat(K + "TurretEnemyHp0", 0f);
+            Check(Campaign.Defense.TurretUplink.InputFires == fires0 + 1 && Campaign.Defense.TurretUplink.LastFireResult == BinGames.Sim.Combat.CombatFireResult.Ok
+                  && SmokeEnemyHp() < hp0 && Campaign.Defense.TurretUplink.IsUplinkedTo(state, SmokeTurretId),
+                $"左键亲自瞄准开火：开火结果 {Campaign.Defense.TurretUplink.LastFireResult}，目标耐久 {hp0:F0} → {SmokeEnemyHp():F0}（弹体命中）");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.ToggleCameraView));
+            SessionState.SetInt(K + "TurretSub", 0);
+            Next(393, $"按接入键（{GameSettings.KeyBindings.GetKey(GameActionId.ToggleCameraView)}）离开炮塔");
+        }
+
+        private static void StepTurretLeft(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            if (SessionState.GetInt(K + "TurretSub", 0) == 0)
+            {
+                if (inStep < 0.6)
+                {
+                    return;
+                }
+                Check(!Campaign.Defense.TurretUplink.IsActive && Campaign.Defense.TurretService.LastFeedback.Contains("离开炮塔")
+                      && Campaign.Signal.SignalUplinkService.CurrentMachine(state) == 0,
+                    $"按接入键离开炮塔：信号回到归还核心（“{Campaign.Defense.TurretService.LastFeedback}”），镜头留在战略视角");
+                // 清理测试夹具：撤走测试目标；恢复暂停、重新打开建造模式（后面的步骤从建造模式开始）。
+                GameLogic.Campaign.Combat.CombatSite site = SmokeHomeSite;
+                if (site != null)
+                {
+                    GameLogic.Campaign.Combat.CombatBench.ClearPrototypeUnits(site);
+                }
+                GameClock.SetPaused(true);
+                SessionState.SetInt(K + "TurretSub", 1);
+                PressKeyKeepMouse(GameSettings.KeyBindings.GetKey(GameActionId.OpenBuildMenu));
+                return;
+            }
+            if (inStep < 1.2)
+            {
+                return;
+            }
+            Check(Campaign.Regions.HomeValleyBuildMode.Current != null && Campaign.Regions.HomeValleyBuildMode.Current.IsOpen, "按建造菜单键重新打开建造模式");
+            // 清理测试捷径：撤走测试炮塔、取消炮塔虚影（不让后面的步骤里多出一座会开火的炮塔），恢复暂停状态。
+            ProductionPanelUIToolkit.Close();
+            string ghostId = SessionState.GetString(K + "TurretGhostId", string.Empty);
+            if (!string.IsNullOrEmpty(ghostId) && HomeGridService.FindBuilding(state, ghostId) != null)
+            {
+                HomeGridService.TryToggleDemolish(state, ghostId);
+            }
+            state.BuildingRecords = state.BuildingRecords.Where(x => x.BuildingId != SmokeTurretId).ToArray();
+            HomeGridService.MapFor(state);
+            Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+            Campaign.Defense.TurretService.Sync(state);
+            Check(HomeGridService.FindBuilding(state, SmokeTurretId) == null && (string.IsNullOrEmpty(ghostId) || HomeGridService.FindBuilding(state, ghostId) == null)
+                  && Campaign.Defense.TurretService.Find(state, SmokeTurretId) == null,
+                "清理测试炮塔与虚影（炮塔记录随建筑一起清掉）");
+            GameClock.SetPaused(SessionState.GetInt(K + "TurretWasPaused", 0) == 1);
+            SessionState.SetInt(K + "TurretSub", 0);
             Next(264, "FG3-LOG-04：建造模式里放分流器与地下传送带");
         }
 

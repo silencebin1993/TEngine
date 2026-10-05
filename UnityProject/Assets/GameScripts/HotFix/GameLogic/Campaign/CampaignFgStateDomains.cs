@@ -967,6 +967,9 @@ namespace GameLogic.Campaign
         /// <summary>FG0-ARCH-06：排队等唤醒的据点（每步至多 outpost.wakes_per_step 个，分帧进行；存档保留顺序）。</summary>
         public string[] PendingWakeIds = Array.Empty<string>();
         public string[] PendingWakeReasons = Array.Empty<string>();
+        /// <summary>FG6-DEF-01（FG06 FGR-DEF-001～005）：炮塔（固定底盘的机器）——每座炮塔装的蓝图、目标模式、击毁数、存着的流体，信号是否在炮塔里。
+        /// 唯一写入口 <see cref="Defense.TurretService"/>。只加字段、不升域版本（ADR FG0-SAVE-01）：旧档没有 = 没有炮塔。</summary>
+        public TurretState Turrets = new TurretState();
     }
 
     /// <summary>
@@ -1870,6 +1873,7 @@ namespace GameLogic.Campaign
             }
             s.Raids.PendingWakeIds ??= Array.Empty<string>();
             s.Raids.PendingWakeReasons ??= Array.Empty<string>();
+            Defense.TurretService.EnsureState(s); // FG6-DEF-01：炮塔域补成空域（旧档没有 = 没有炮塔）；坏值钳回合法范围。
             if (s.Raids.NextNavSerial < 1)
             {
                 s.Raids.NextNavSerial = 1;

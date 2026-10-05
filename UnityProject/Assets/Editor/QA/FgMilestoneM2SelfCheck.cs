@@ -570,7 +570,7 @@ namespace GameLogic.EditorTools
             using var k3 = new CombatKernel(cfg, 16);
             CombatLoadResult r7 = k3.Load(old7);
             k3.TryGetWeapon(w, out CombatWeapon w7);
-            Expect(CombatConst.FormatVersion == 8 && r8 == CombatLoadResult.Ok && w8.FuseTrace == 1 && r7 == CombatLoadResult.Ok && w7.FuseTrace == 0,
+            Expect(CombatConst.FormatVersion >= 8 && r8 == CombatLoadResult.Ok && w8.FuseTrace == 1 && r7 == CombatLoadResult.Ok && w7.FuseTrace == 0,
                 $"格式 {CombatConst.FormatVersion}：读回标记 = {w8.FuseTrace}；格式 7 的旧快照照常读、标记 = {w7.FuseTrace}（没有弹迹）");
             Expect(k.TraceCount == 1 && k2.TraceCount == 0 && h1 == h2,
                 $"存档前有 {k.TraceCount} 条弹迹、读回后 {k2.TraceCount} 条；状态哈希存前 = 读后（弹迹不进哈希，观察与不观察、存读档结果一致）");

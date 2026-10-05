@@ -291,6 +291,18 @@ public partial class Tables
     /// </summary>
     public fg.TbTerritory TbTerritory {get; }
     /// <summary>
+    /// 炮塔流体消耗
+    /// </summary>
+    public fg.TbTurretFluid TbTurretFluid {get; }
+    /// <summary>
+    /// 炮塔参数
+    /// </summary>
+    public fg.TbTurretProfile TbTurretProfile {get; }
+    /// <summary>
+    /// 炮塔目标模式
+    /// </summary>
+    public fg.TbTurretTargetMode TbTurretTargetMode {get; }
+    /// <summary>
     /// 界面调参
     /// </summary>
     public fg.TbUiTuning TbUiTuning {get; }
@@ -427,6 +439,9 @@ public partial class Tables
         TbStatusTag = new fg.TbStatusTag(loader("fg_tbstatustag"));
         TbSurface = new fg.TbSurface(loader("fg_tbsurface"));
         TbTerritory = new fg.TbTerritory(loader("fg_tbterritory"));
+        TbTurretFluid = new fg.TbTurretFluid(loader("fg_tbturretfluid"));
+        TbTurretProfile = new fg.TbTurretProfile(loader("fg_tbturretprofile"));
+        TbTurretTargetMode = new fg.TbTurretTargetMode(loader("fg_tbturrettargetmode"));
         TbUiTuning = new fg.TbUiTuning(loader("fg_tbuituning"));
         TbWorldGenVersion = new fg.TbWorldGenVersion(loader("fg_tbworldgenversion"));
         TbWorldPreset = new fg.TbWorldPreset(loader("fg_tbworldpreset"));
@@ -518,6 +533,9 @@ public partial class Tables
         TbStatusTag.ResolveRef(this);
         TbSurface.ResolveRef(this);
         TbTerritory.ResolveRef(this);
+        TbTurretFluid.ResolveRef(this);
+        TbTurretProfile.ResolveRef(this);
+        TbTurretTargetMode.ResolveRef(this);
         TbUiTuning.ResolveRef(this);
         TbWorldGenVersion.ResolveRef(this);
         TbWorldPreset.ResolveRef(this);

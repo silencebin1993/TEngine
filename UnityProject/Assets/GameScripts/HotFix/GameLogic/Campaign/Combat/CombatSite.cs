@@ -30,6 +30,9 @@ namespace GameLogic.Campaign.Combat
         public virtual bool ApplyExternalEnemyHeal(CombatSite site, RegionEnemyRecord enemy, float amount) => false;
         /// <summary>血量在热更层、但不是区域敌人记录的目标（家园训练靶）受到编队攻击。<paramref name="attackerLogicId"/> 0 = 不是机器。</summary>
         public virtual void ApplyExternalDamageByKey(CombatSite site, string key, float damage, int attackerLogicId) { }
+        /// <summary>FG6-DEF-01（DEBT-FG2FW02-07）：血量在内核、不是区域敌人记录的具名目标（家园训练靶）受了伤 / 被打空——内核结算完（载体投送与固件读法都生效）交回记录。
+        /// <paramref name="attackerLogicId"/> 0 = 不是机器（持续伤害等没有来源时）。</summary>
+        public virtual void OnKeyedTargetDamaged(CombatSite site, string key, float damage, float healthAfter, int attackerLogicId, bool killed) { }
         public virtual void OnMachineMarked(CombatSite site, int logicId, float seconds, RegionEnemyRecord scout) { }
         public virtual void OnMarkCleared(CombatSite site, int logicId, RegionEnemyRecord jammer) { }
         public virtual void OnMarkMissed(CombatSite site, RegionEnemyRecord scout) { }
@@ -74,7 +77,7 @@ namespace GameLogic.Campaign.Combat
     /// - 存档：<see cref="Snapshot"/> / <see cref="TryRestore"/>（CombatState 域）；另把位置、热量、冷却写回记录（其它系统仍读记录）。
     /// 热更层每步开销 = 常数次内核调用 + 至多 N 条事件（FGR-SYS-042）。
     /// </summary>
-    public sealed class CombatSite : IDisposable
+    public sealed partial class CombatSite : IDisposable
     {
         public string SiteId { get; }
 
@@ -224,6 +227,7 @@ namespace GameLogic.Campaign.Combat
             _enemyIndex.Clear();
             _enemyIndexArray = null;
             _unitLabels.Clear();
+            ClearTurretMaps();
             EventObserver = null;
         }
 
@@ -251,6 +255,8 @@ namespace GameLogic.Campaign.Combat
             c.StatusStackCap = (int)Math.Round(Tuning("status.stack_cap", 3f));
             // FG2-E2E-01（FG-GAP-043）：引信弹迹 / 炮口装定闪光停留的游戏秒。
             c.FuseTraceSeconds = Math.Max(0f, Tuning("combat.fuse_trace_seconds", c.FuseTraceSeconds));
+            // FG6-DEF-01（FGR-DEF-002）：有转速的炮塔对准到这个夹角以内才开火。
+            c.TurretAimToleranceDeg = Math.Max(0.5f, Tuning("turret.aim_tolerance_deg", 6f));
             return c;
         }
 
@@ -1011,13 +1017,102 @@ namespace GameLogic.Campaign.Combat
             return FindEnemyRecord(state, unit)?.EnemyTypeId;
         }
 
-        /// <summary>排空至多 <see cref="MaxEventsPerStep"/> 条玩法事件与本批提示事件，按序号合并后逐条结算。即时开火之后也调用。</summary>
+        /// <summary>
+        /// 排空至多 <see cref="MaxEventsPerStep"/> 条玩法事件与本批提示事件，按序号合并后逐条结算。即时开火之后也调用。
+        /// FG6-DEF-01 审查修复（P0：玩法事件永不丢弃，CombatTypes 玩法事件约定）：事件结算里的规则回调可能再触发一次即时开火 / 伤害
+        /// （<see cref="TryFireAtEnemy"/> / <see cref="TryDamageEnemy"/> / 炮塔开火都会接着调本方法）。重入时不再在这里排空——
+        /// 那会清掉外层正在遍历的同一批（<see cref="_merge"/>），外层后面的事件丢失、内层的事件被处理两次；改为记下“还有新事件”，
+        /// 由外层这一批处理完后再排一遍（至多 <see cref="MaxDrainPasses"/> 遍）。自动交战请求（<see cref="CombatEventKind.EngageRequest"/>）
+        /// 本身要同步开火并当场拿到命中结果，所以延后到这一轮全部处理完、不在遍历中时再交给规则（<see cref="RunDeferredEngage"/>）。
+        /// </summary>
         public void ProcessEvents()
         {
             if (IsDisposed)
             {
                 return;
             }
+            if (_processing)
+            {
+                _drainAgain = true;
+                return;
+            }
+            _processing = true;
+            LastEventsProcessed = 0;
+            LastEventsMs = 0;
+            try
+            {
+                int passes = 0;
+                do
+                {
+                    _drainAgain = false;
+                    ProcessBatch();
+                    passes++;
+                }
+                while (_drainAgain && !IsDisposed && passes < MaxDrainPasses);
+                LastDrainPasses = passes;
+            }
+            finally
+            {
+                _processing = false;
+            }
+            RunDeferredEngage();
+        }
+
+        /// <summary>一次排空里最多再排几遍（重入记下的新事件；超过的留给下一次排空，不丢）。</summary>
+        private const int MaxDrainPasses = 4;
+
+        private bool _processing;
+        private bool _drainAgain;
+        private bool _runningDeferred;
+        private readonly List<int> _deferredEngage = new List<int>(4);
+        private readonly List<int> _engageScratch = new List<int>(4);
+
+        /// <summary>自检读：最近一次排空走了几遍（重入时 &gt; 1）。</summary>
+        public int LastDrainPasses { get; private set; }
+
+        /// <summary>自检读：累计延后结算的自动交战请求数。</summary>
+        public long DeferredEngageCount { get; private set; }
+
+        /// <summary>
+        /// 延后的自动交战请求：这一轮事件全部处理完后逐条交给规则（规则里同步开火 → 本方法外的 <see cref="ProcessEvents"/> 正常排空、拿到命中结果）。
+        /// 结算中又产生的请求（极少）接着处理，至多 <see cref="MaxDrainPasses"/> 轮，剩下的留到下一次排空。O(请求数)。
+        /// </summary>
+        private void RunDeferredEngage()
+        {
+            if (_runningDeferred || _deferredEngage.Count == 0)
+            {
+                return;
+            }
+            _runningDeferred = true;
+            try
+            {
+                int rounds = 0;
+                while (_deferredEngage.Count > 0 && !IsDisposed && rounds++ < MaxDrainPasses)
+                {
+                    _engageScratch.Clear();
+                    _engageScratch.AddRange(_deferredEngage);
+                    _deferredEngage.Clear();
+                    for (int i = 0; i < _engageScratch.Count; i++)
+                    {
+                        try
+                        {
+                            Rules?.OnEngageRequest(this, _engageScratch[i]);
+                        }
+                        catch (Exception e)
+                        {
+                            Log.Error($"[CombatSite] {SiteId} 结算自动交战（机器 {_engageScratch[i]}）异常：{e}");
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                _runningDeferred = false;
+            }
+        }
+
+        private void ProcessBatch()
+        {
             _watch.Restart();
             CombatEvent[] drained = Kernel.DrainGameplay(MaxEventsPerStep, out int count);
             _merge.Clear();
@@ -1049,10 +1144,10 @@ namespace GameLogic.Campaign.Combat
                     Log.Error($"[CombatSite] {SiteId} 处理内核事件 {_merge[i].Kind} 异常：{e}");
                 }
             }
-            LastEventsProcessed = _merge.Count;
+            LastEventsProcessed += _merge.Count;
             TotalEventsProcessed += _merge.Count;
             _watch.Stop();
-            LastEventsMs = _watch.Elapsed.TotalMilliseconds;
+            LastEventsMs += _watch.Elapsed.TotalMilliseconds;
         }
 
         // 敌人实例 ID → 记录数组下标。记录数组整体替换（首领初始化、召唤、读档）时按引用失效重建；
@@ -1112,6 +1207,11 @@ namespace GameLogic.Campaign.Combat
 
         private void Handle(CampaignState state, in CombatEvent e)
         {
+            // FG6-DEF-01：炮塔的阵亡 / 击毁 / 具名反应发动交给炮塔服务（CombatSite.Turrets）。
+            if (TryHandleTurretEvent(e))
+            {
+                return;
+            }
             switch (e.Kind)
             {
                 case CombatEventKind.Killed:
@@ -1122,6 +1222,13 @@ namespace GameLogic.Campaign.Combat
                     }
                     // 记录的 IsAlive = “阵亡是否已结算”（只有这里与未载入时的记录路径会翻它），据此保证每个敌人的阵亡副作用恰好一次。
                     RegionEnemyRecord rec = FindEnemyRecord(state, e.Unit);
+                    if (rec == null && _unitEnemy.TryGetValue(e.Unit, out string killedKey)
+                        && Kernel.TryGetUnit(e.Unit, out CombatUnitView kv) && (kv.Flags & CombatUnitFlags.ExternalHealth) == 0)
+                    {
+                        // FG6-DEF-01（DEBT-FG2FW02-07）：血量在内核的具名目标（家园训练靶）被打空。
+                        Rules?.OnKeyedTargetDamaged(this, killedKey, 0f, 0f, _unitMachine.TryGetValue(e.Other, out int keyedKiller) ? keyedKiller : 0, true);
+                        return;
+                    }
                     if (rec == null || !rec.IsAlive || !Kernel.TryGetUnit(e.Unit, out CombatUnitView v) || (v.Flags & CombatUnitFlags.ExternalHealth) != 0)
                     {
                         return;
@@ -1142,6 +1249,11 @@ namespace GameLogic.Campaign.Combat
                     RegionEnemyRecord rec = FindEnemyRecord(state, e.Unit);
                     if (rec == null)
                     {
+                        if (_unitEnemy.TryGetValue(e.Unit, out string damagedKey))
+                        {
+                            // FG6-DEF-01（DEBT-FG2FW02-07）：血量在内核的具名目标（家园训练靶）受伤——伤害已按载体与读法结算，交回记录。
+                            Rules?.OnKeyedTargetDamaged(this, damagedKey, e.Value, e.Value2, _unitMachine.TryGetValue(e.Other, out int keyedAttacker) ? keyedAttacker : 0, false);
+                        }
                         return;
                     }
                     rec.Health = e.Value2;
@@ -1260,9 +1372,11 @@ namespace GameLogic.Campaign.Combat
                 }
                 case CombatEventKind.EngageRequest:
                 {
-                    if (_unitMachine.TryGetValue(e.Unit, out int logicId))
+                    if (_unitMachine.TryGetValue(e.Unit, out int logicId) && Rules != null)
                     {
-                        Rules?.OnEngageRequest(this, logicId);
+                        // FG6-DEF-01 审查修复（P0）：规则会同步开火（训练靶走内核开火入口）——延后到这一轮事件处理完再结算，不在遍历中重入排空。
+                        _deferredEngage.Add(logicId);
+                        DeferredEngageCount++;
                     }
                     return;
                 }
@@ -1467,6 +1581,8 @@ namespace GameLogic.Campaign.Combat
                     }
                     return GameText.Format("combat.fire.invulnerable", Rules != null && rec != null ? Rules.InvulnerableDetail(rec) : string.Empty);
                 }
+                case CombatFireResult.NoAmmo:
+                    return GameText.Get("turret.fire.no_ammo"); // FG6-DEF-01：每发要补给的武器（炮塔的流体类固件）补给不够一发
                 default:
                     return string.Empty;
             }
@@ -1629,6 +1745,15 @@ namespace GameLogic.Campaign.Combat
             Sync?.Bind(unitId, transform, height);
         }
 
+        /// <summary>FG6-DEF-01 审查修复：绑定一个按内核朝向转动的表现对象（炮塔头：位置 + 炮口朝向都由 <see cref="FrameRender"/> 的 Burst 作业写入）。</summary>
+        public void BindOrientedView(int unitId, Transform transform, float height)
+        {
+            Sync?.Bind(unitId, transform, height, true);
+        }
+
+        /// <summary>画面同步里绑定了几个表现对象（炮塔头据此发现“绑定被整体清掉了”需要重绑；O(1)）。</summary>
+        public int ViewBindingCount => Sync?.Count ?? 0;
+
         public void UnbindView(int unitId) => Sync?.Unbind(unitId);
 
         public void ClearViews() => Sync?.Clear();
@@ -1739,6 +1864,7 @@ namespace GameLogic.Campaign.Combat
             _markerByUnit.Clear();
             _unitLabels.Clear();
             _weaponIndex.Clear();
+            ClearTurretMaps();
             for (int w = 0; w < Kernel.WeaponCount; w++)
             {
                 if (Kernel.TryGetWeapon(w, out CombatWeapon cw))
@@ -1771,6 +1897,10 @@ namespace GameLogic.Campaign.Combat
                         _enemyUnit[_keys[v.ExtKey]] = v.Id;
                         _unitEnemy[v.Id] = _keys[v.ExtKey];
                     }
+                }
+                else if (v.Kind == CombatUnitKind.Turret)
+                {
+                    RestoreTurretMap(v); // FG6-DEF-01：记录在案的炮塔（外部键 > 0）；原型炮塔（-1）照旧是匿名单位。
                 }
             }
             foreach (int id in orphans)

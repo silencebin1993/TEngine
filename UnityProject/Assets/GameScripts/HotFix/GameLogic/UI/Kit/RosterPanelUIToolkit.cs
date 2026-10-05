@@ -87,6 +87,21 @@ namespace GameLogic.UI.Kit
         // ── 自检读点 ──
         public bool PanelVisible => _root != null && !_root.ClassListContains("uk-hidden");
         public bool ShowingDetail => _pageDetail != null && !_pageDetail.ClassListContains("uk-hidden");
+        // FG6-DEF-01：炮塔分类（自检读点）。
+        public bool ShowingTurrets => _pageTurrets != null && !_pageTurrets.ClassListContains("uk-hidden");
+        public Button TurretsButton => _turretsBtn;
+        public int TurretRowCount => _turretRows.Count;
+        public string TurretRowText(int i) => i >= 0 && i < _turretRows.Count ? _turretRows[i].text : string.Empty;
+        public Button TurretRowButton(int i) => i >= 0 && i < _turretRows.Count ? _turretRows[i] : null;
+        public string TurretNoteText => _turretNote?.text ?? string.Empty;
+        public string TurretEmptyText => _turretEmpty != null && !_turretEmpty.ClassListContains("uk-hidden") ? _turretEmpty.text : string.Empty;
+        private VisualElement _pageTurrets;
+        private Button _turretsBtn, _turretsBack;
+        private Label _turretCount, _turretNote, _turretEmpty;
+        private ScrollView _turretList;
+        private readonly List<Button> _turretRows = new List<Button>();
+        private readonly List<string> _turretRowIds = new List<string>();
+        public bool TurretMode { get; private set; }
         public int VisibleRowCount { get; private set; }
         public int RowLogicId(int i) => i >= 0 && i < VisibleRowCount ? _rowIds[i] : 0;
         public string RowText(int i, string name) => i >= 0 && i < VisibleRowCount ? _rows[i].Q<Label>(name)?.text ?? string.Empty : string.Empty;
@@ -281,6 +296,21 @@ namespace GameLogic.UI.Kit
             _selectAll.clicked += SelectAllShown;
             _selectNone.clicked += SelectNone;
             _memorial.clicked += OpenMemorial;
+            _pageTurrets = root.Q<VisualElement>("RosterPageTurrets");
+            _turretsBtn = root.Q<Button>("RosterTurrets");
+            _turretsBack = root.Q<Button>("RosterTurretsBack");
+            _turretCount = root.Q<Label>("RosterTurretCount");
+            _turretNote = root.Q<Label>("RosterTurretNote");
+            _turretEmpty = root.Q<Label>("RosterTurretEmpty");
+            _turretList = root.Q<ScrollView>("RosterTurretList");
+            if (_turretsBtn != null)
+            {
+                _turretsBtn.clicked += () => ShowTurrets(true);
+            }
+            if (_turretsBack != null)
+            {
+                _turretsBack.clicked += () => ShowTurrets(false);
+            }
             _detailBack.clicked += () => ShowDetail(0);
             _detailJump.clicked += () => JumpTo(DetailLogicId);
             _rename.clicked += () => Rename(_nameField.value);
@@ -377,6 +407,8 @@ namespace GameLogic.UI.Kit
             h.Add(_messageText);
             h.Add(_detailMessageText);
             h.Add(state);
+            h.Add(TurretMode);
+            h.Add(Campaign.Defense.TurretService.Revision);
             int key = h.ToHashCode();
             if (key == _lastKey && now < _nextReread)
             {
@@ -395,6 +427,16 @@ namespace GameLogic.UI.Kit
             {
                 DetailLogicId = 0;
             }
+            // FG6-DEF-01：炮塔分类页（固定底盘的机器）。
+            bool turrets = !detail && TurretMode && _pageTurrets != null;
+            _pageTurrets?.EnableInClassList("uk-hidden", !turrets);
+            if (turrets)
+            {
+                _pageList.EnableInClassList("uk-hidden", true);
+                _pageDetail.EnableInClassList("uk-hidden", true);
+                RefreshTurrets(state);
+                return;
+            }
             _pageList.EnableInClassList("uk-hidden", detail);
             _pageDetail.EnableInClassList("uk-hidden", !detail);
             if (detail)
@@ -407,6 +449,70 @@ namespace GameLogic.UI.Kit
             _message.EnableInClassList("ro-message-error", _messageError);
             _message.EnableInClassList("uk-hidden", string.IsNullOrEmpty(_messageText));
             RefreshRows(state);
+        }
+
+        /// <summary>FG6-DEF-01（FGR-DEF-001“出现在机器名册的‘炮塔’分类里，不能参加远征”）：切到 / 离开炮塔分类（与按钮同一路径，自检也调）。</summary>
+        public void ShowTurrets(bool on)
+        {
+            TurretMode = on;
+            DetailLogicId = 0;
+            _lastKey = null;
+            Refresh();
+        }
+
+        /// <summary>炮塔分类：每座炮塔一行（名字 · 状态 · 目标模式 · 击毁），点一行打开那座炮塔的面板。行数随炮塔数（ScrollView；按钮按数量增减，不重建整页）。</summary>
+        private void RefreshTurrets(CampaignState state)
+        {
+            _turretsBack.text = GameText.Get("roster.detail.back");
+            IReadOnlyList<TurretRecord> all = Campaign.Defense.TurretService.All(state);
+            _turretCount.text = GameText.Format("roster.turret.count", all.Count);
+            _turretNote.text = GameText.Get("roster.turret.note");
+            _turretEmpty.text = GameText.Get("roster.turret.empty");
+            _turretEmpty.EnableInClassList("uk-hidden", all.Count > 0);
+            _turretRowIds.Clear();
+            foreach (TurretRecord r in all)
+            {
+                if (r != null)
+                {
+                    _turretRowIds.Add(r.BuildingId);
+                }
+            }
+            while (_turretRows.Count < _turretRowIds.Count)
+            {
+                int index = _turretRows.Count;
+                var b = new Button();
+                b.AddToClassList("mw-btn");
+                b.AddToClassList("ro-turret-row");
+                b.clicked += () => OpenTurretRow(index);
+                _turretList.Add(b);
+                _turretRows.Add(b);
+            }
+            while (_turretRows.Count > _turretRowIds.Count)
+            {
+                Button last = _turretRows[_turretRows.Count - 1];
+                last.RemoveFromHierarchy();
+                _turretRows.RemoveAt(_turretRows.Count - 1);
+            }
+            for (int i = 0; i < _turretRowIds.Count; i++)
+            {
+                if (Campaign.Defense.TurretService.TryGetReadout(state, _turretRowIds[i], out Campaign.Defense.TurretReadout ro))
+                {
+                    _turretRows[i].text = GameText.Format("roster.turret.row", ro.Name, GameText.Get(Campaign.Economy.BuildingOps.UiStatusNameKey(ro.Status.Kind)),
+                        Campaign.Defense.TurretCatalog.ModeName(ro.TargetMode), ro.Kills);
+                }
+            }
+        }
+
+        /// <summary>点炮塔分类的第 <paramref name="index"/> 行：打开那座炮塔的面板（名册关上）。</summary>
+        public void OpenTurretRow(int index)
+        {
+            if (index < 0 || index >= _turretRowIds.Count)
+            {
+                return;
+            }
+            string id = _turretRowIds[index];
+            SetOpen(false);
+            TurretPanelUIToolkit.Open(id);
         }
 
         private void RefreshCount(CampaignState state)
@@ -445,6 +551,10 @@ namespace GameLogic.UI.Kit
             _selectAll.text = GameText.Get("roster.panel.select_all");
             _selectNone.text = GameText.Get("roster.panel.select_none");
             _memorial.text = GameText.Get("blackbox.panel.memorial_open");
+            if (_turretsBtn != null)
+            {
+                _turretsBtn.text = GameText.Format("roster.tab.turrets_count", Campaign.Defense.TurretService.All(Session).Count);
+            }
             _batchLabel.text = GameText.Format("roster.panel.batch_label", _selected.Count);
 
             var sorts = new List<string>();

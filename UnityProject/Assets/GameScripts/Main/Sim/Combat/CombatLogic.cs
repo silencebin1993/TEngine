@@ -517,13 +517,58 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
+            // FG6-DEF-01（FGR-DEF-004）：补给不够一发——不找目标、不重置冷却（补给一到就能开火；停火原因由热更层写明缺哪种流体）。
+            if (!HasAmmoFor(ref d, i, wp))
+            {
+                return;
+            }
             int t = FindTarget(ref d, ref grid, i, EngageRange(ref d, i, wp), d.Has(i, CombatUnitFlags.NeedsLos), wp.TargetMode);
             if (t < 0)
             {
                 return;
             }
+            // FG6-DEF-01（FGR-DEF-002）：有转速的炮塔先转向目标，炮口对准（夹角在容差内）才开火；没对准时冷却保持就绪，下一步接着转（目标按模式重新选）。
+            if (wp.TurnRate > 0f && !TurnToward(ref d, i, d.Pos[t], wp.TurnRate * dt))
+            {
+                return;
+            }
             d.Cycle[i] = EffectiveCooldown(wp);
             UnitAttack(ref d, i, t, wp);
+        }
+
+        /// <summary>
+        /// FG6-DEF-01（FGR-DEF-002“默认 360° 旋转，转速由组件决定”）：把单位的朝向（装甲朝向）朝 <paramref name="target"/> 转至多 <paramref name="maxDeg"/> 度。
+        /// 返回转完后夹角是否在 <see cref="CombatConfig.TurretAimToleranceDeg"/> 以内（对准了）。O(1)，确定性（只用单精度向量旋转）。
+        /// </summary>
+        internal static bool TurnToward(ref CombatData d, int i, double2 target, float maxDeg)
+        {
+            double2 to = target - d.Pos[i];
+            if (math.lengthsq(to) < 1e-12)
+            {
+                return true;
+            }
+            float2 want = math.normalize((float2)to);
+            float4 a = d.Armor[i];
+            float2 f = math.lengthsq(a.zw) > 1e-12f ? math.normalize(a.zw) : want;
+            float cos = math.clamp(math.dot(f, want), -1f, 1f);
+            float angle = math.degrees(math.acos(cos));
+            float tol = d.Config.TurretAimToleranceDeg > 0f ? d.Config.TurretAimToleranceDeg : 6f;
+            if (angle <= maxDeg || angle <= 1e-3f)
+            {
+                f = want;
+                angle = 0f;
+            }
+            else
+            {
+                float side = f.x * want.y - f.y * want.x >= 0f ? 1f : -1f;
+                float r = math.radians(maxDeg) * side;
+                float cr = math.cos(r);
+                float sr = math.sin(r);
+                f = math.normalize(new float2(f.x * cr - f.y * sr, f.x * sr + f.y * cr));
+                angle -= maxDeg;
+            }
+            d.Armor[i] = new float4(a.x, a.y, f.x, f.y);
+            return angle <= tol;
         }
 
         /// <summary>瞄准线两段式（Demo 步进炮）。</summary>
@@ -813,6 +858,13 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
+            if (d.Faction[i] == (byte)CombatFaction.Hostile)
+            {
+                // FG6-DEF-01（FGR-DEF-003“正在破坏建筑的敌人”）：敌方单位这一发打的是己方建筑（炮塔 / 结构单位）就置位，打别的就清掉。
+                byte tk = d.Kind[t];
+                d.Set(i, CombatUnitFlags.SiegeAttack, d.Faction[t] == (byte)CombatFaction.Player
+                                                       && (tk == (byte)CombatUnitKind.Turret || tk == (byte)CombatUnitKind.Structure));
+            }
             CombatCounters c = d.Counters[0];
             c.ShotsFired++;
             d.Counters[0] = c;
@@ -945,6 +997,11 @@ namespace BinGames.Sim.Combat
             d.Counters[0] = c;
             RawFired(ref d, a, t);
             AddShotHeat(ref d, a, wp);
+            if (d.Kind[a] == (byte)CombatUnitKind.Turret)
+            {
+                // FG6-DEF-01（FGR-DEF-005）：被接入的炮塔由玩家亲自瞄准开火——炮口朝向跟着这一发转过去（画面读它）。
+                TurnToward(ref d, a, d.Pos[t], 360f);
+            }
             // FG2-E2E-01（FG-GAP-043）：引信类固件的弹迹与炮口装定闪光（弹体武器只闪光，弹体自己飞）。
             PushTrace(ref d, a, t, wp, wp.Mode == CombatWeaponMode.Projectile);
             if (IsCharged(wp))
@@ -983,6 +1040,13 @@ namespace BinGames.Sim.Combat
             {
                 return CombatFireResult.Cooldown;
             }
+            // FG6-DEF-01 审查修复（FGR-DEF-004 / FGT-DEF-001“补给不足停火”）：每发要补给的重炮（接入的重型炮塔装了流体类固件，保留两段式）
+            // 与非重炮同一道补给门槛——存量不够一发时不瞄准、不开火、不积热（瞄准到一半断供也作废这次瞄准）。机器的重炮每发补给 = 0，不受影响。
+            if (!HasAmmoFor(ref d, a, wp))
+            {
+                d.AimReadyAt[a] = 0;
+                return CombatFireResult.NoAmmo;
+            }
             if (d.AimReadyAt[a] <= 0)
             {
                 d.AimReadyAt[a] = now + wp.AimSeconds;
@@ -1000,6 +1064,7 @@ namespace BinGames.Sim.Combat
             }
             d.AimReadyAt[a] = 0;
             d.NextFireAt[a] = now + EffectiveCooldown(wp);
+            ConsumeShotAmmo(ref d, a, wp); // FG6-DEF-01 审查修复：真的开火这一刻扣一发补给（与 AddShotHeat 同一口径）
             // FG1-SIG-03：门控反应（信号带进来的核心固件）发动过一次后就被压住，直到热更层按冷却重新下发武器参数。
             bool overload = wp.Reaction == CombatReaction.MeltOverload && !d.Has(a, CombatUnitFlags.ReactionSpent);
             float heat = d.Heat[a] + wp.HeatPerShot + (overload ? wp.OverloadExtraHeat : 0f);
@@ -1171,9 +1236,15 @@ namespace BinGames.Sim.Combat
                 c.KillsHostile++;
             }
             d.Counters[0] = c;
-            if (d.Has(t, CombatUnitFlags.Report) || d.Has(t, CombatUnitFlags.ExternalHealth))
+            if (d.Has(t, CombatUnitFlags.Report) || d.Has(t, CombatUnitFlags.ExternalHealth) || d.Has(t, CombatUnitFlags.ReportDeath))
             {
                 Gameplay(ref d, CombatEventKind.Killed, t, killerId, 0f, 0f, d.Pos[t], 0, 0);
+            }
+            // FG6-DEF-01（击杀数）：击杀者带 CountKills（炮塔）、阵亡者与它敌对——记一次击杀（玩法事件，不丢；O(1)）。
+            int ks = d.SlotOf(killerId);
+            if (ks >= 0 && ks != t && d.Has(ks, CombatUnitFlags.CountKills) && d.Faction[ks] != d.Faction[t])
+            {
+                Gameplay(ref d, CombatEventKind.TurretKill, ks, d.Id[t], 0f, 0f, d.Pos[t], d.Has(t, CombatUnitFlags.Elite) ? (byte)1 : (byte)0, 0);
             }
             if (d.Has(t, CombatUnitFlags.RemoveOnDeath))
             {
@@ -1213,6 +1284,7 @@ namespace BinGames.Sim.Combat
         /// <summary>
         /// 找射程内的敌对目标：己方找敌方、敌方找己方（中立单位不会被自动选中）。<paramref name="needsLos"/> 时过滤掉视线被障碍挡住的。
         /// 最近模式：距离最小，并列取槽位大者（与 Demo“按列表顺序扫描、距离 ≤ 当前最佳就替换”一致）；最低耐久模式：血量比例最小，并列取距离近者。
+        /// FG6-DEF-01：最高威胁（<see cref="ThreatOf"/> 最大）、精英优先、优先攻击正在破坏建筑的敌人（带对应标志的先，同类里按最近），并列一律取距离近者、再取槽位大者。
         /// </summary>
         public static int FindTarget(ref CombatData d, ref CombatGrid grid, int i, float range, bool needsLos, CombatTargetMode mode)
         {
@@ -1267,6 +1339,41 @@ namespace BinGames.Sim.Combat
                             bestDist = dist;
                             best = k;
                         }
+                        else if (mode == CombatTargetMode.HighestThreat)
+                        {
+                            // FG6-DEF-01：威胁 = 目标武器每秒基础伤害；越大越优先（bestPct 存“负威胁”，与最低耐久同一套“越小越好”的比较）。
+                            float neg = -ThreatOf(ref d, k);
+                            bool better = best < 0 || neg < bestPct || (neg == bestPct && (dist < bestDist || (dist == bestDist && k > best)));
+                            if (!better)
+                            {
+                                continue;
+                            }
+                            if (needsLos && !LineOfSight(ref d, pos, d.Pos[k]))
+                            {
+                                continue;
+                            }
+                            bestPct = neg;
+                            bestDist = dist;
+                            best = k;
+                        }
+                        else if (mode == CombatTargetMode.EliteFirst || mode == CombatTargetMode.SiegeFirst)
+                        {
+                            // FG6-DEF-01：带标志（精英 / 正在破坏建筑）的目标排在前面；同一类里按“最近”（bestPct 存 0 = 带标志、1 = 不带）。
+                            CombatUnitFlags pref = mode == CombatTargetMode.EliteFirst ? CombatUnitFlags.Elite : CombatUnitFlags.SiegeAttack;
+                            float rank = d.Has(k, pref) ? 0f : 1f;
+                            bool better = best < 0 || rank < bestPct || (rank == bestPct && (dist < bestDist || (dist == bestDist && k > best)));
+                            if (!better)
+                            {
+                                continue;
+                            }
+                            if (needsLos && !LineOfSight(ref d, pos, d.Pos[k]))
+                            {
+                                continue;
+                            }
+                            bestPct = rank;
+                            bestDist = dist;
+                            best = k;
+                        }
                         else
                         {
                             bool better = best < 0 ? dist <= bestDist : (dist < bestDist || (dist == bestDist && k > best));
@@ -1285,6 +1392,23 @@ namespace BinGames.Sim.Combat
                 }
             }
             return best;
+        }
+
+        /// <summary>
+        /// FG6-DEF-01（FGR-DEF-003“最高威胁”）：单位的威胁 = 它的武器每秒能打出的基础伤害（伤害 × 读法伤害倍率 ÷ 实际出手间隔；出手间隔没填按 1 秒）。
+        /// 没有武器 = 0。只读武器参数，O(1)；面板 / 自检用同一个数（<see cref="CombatKernel.ThreatOfUnit"/>）。
+        /// </summary>
+        internal static float ThreatOf(ref CombatData d, int k)
+        {
+            int w = d.Weapon[k];
+            if (w < 0 || w >= d.Weapons.Length)
+            {
+                return 0f;
+            }
+            CombatWeapon wp = d.Weapons[w];
+            float scale = wp.Reading.DamageScale > 0f ? wp.Reading.DamageScale : 1f;
+            float cd = EffectiveCooldown(wp);
+            return math.max(0f, wp.Damage) * scale / (cd > 0.05f ? cd : 1f);
         }
 
         /// <summary>视线（Demo IsLineOfSightClear）：线段与障碍圆相交即被挡；起点、终点自己所在的障碍不算。</summary>
