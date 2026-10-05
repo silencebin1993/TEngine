@@ -92,6 +92,8 @@ namespace GameLogic.UI.Kit
         OwnCluster,
         /// <summary>FG5-RND-05：突袭预报（箭尾在来袭方向上，标签写阵营与规模；箭身由矢量层画，指向归还核心）。</summary>
         RaidForecast,
+        /// <summary>FG6-DEF-04：突袭预警（没有情报时也画：箭尾在来袭方向上，标签写方向与倒计时；FGR-DEF-024 地图上的来袭方向箭头）。</summary>
+        RaidWarning,
     }
 
     /// <summary>地图上的一个图标。</summary>
@@ -243,7 +245,8 @@ namespace GameLogic.UI.Kit
                 {
                     // 与据点 / 遗迹同一条迷雾规则：队伍当前所在格已探索才显示（图标与路线都不泄露迷雾里的行进）。
                     // 行进途中的“发现 / 拦截”状态由 FG6 的突袭 Story 接管后改读正式的发现状态（FG06“行进途中可以被发现、被拦截”）。
-                    if (g == null || !map.IsExploredNoLoad(new GridCell((int)Math.Round(g.PosX), (int)Math.Round(g.PosY))))
+                    // FG6-DEF-04（FGR-DEF-023 行进途中可以被发现）：发现 = 走进已探索区域，或监听站正跟着它（有有效预报）。
+                    if (g == null || !Campaign.Defense.RaidDirectorService.IsDiscovered(state, g, GameLogic.Core.GameClock.Ticks))
                     {
                         continue;
                     }
@@ -267,6 +270,8 @@ namespace GameLogic.UI.Kit
                             GameText.Format("ui.map.raid_forecast", WorldTransitSystem.OriginName(r.Faction), r.Units));
                     }
                 }
+                // FG6-DEF-04（FGR-DEF-024 预警界面：地图上的来袭方向箭头）：已发预警、还没有有效预报的突袭也画一支方向箭头（只画方向，不泄露迷雾里的位置）。
+                CollectWarnings(state, core, view, margin);
             }
             if (WorldMapFilters.IsOn(WorldMapLayer.Outposts))
             {
@@ -341,6 +346,54 @@ namespace GameLogic.UI.Kit
             Items.Add(new WorldMapItem { Kind = kind, Layer = layer, Id = id, X = x, Y = y, Label = label });
         }
 
+        /// <summary>
+        /// FG6-DEF-04：已发预警（集结 / 在路上）、还没有有效预报的每一波突袭画一支方向箭头：箭尾在“目标 → 预计抵达点”方向上离目标 intel.map_arrow_cells 格处，箭头指向目标
+        /// （家园 = 归还核心；前哨站 = 那个建筑群）。方向与标签文字用同一个向量（<see cref="Campaign.Defense.RaidDirectorService.WaveApproachVector"/>，与预警条、预报同一口径，复审 P2）。
+        /// 有有效预报的那一波由预报箭头代表（不重复画）；只有情报的计划中突袭也由预报箭头代表。O(计划数)。
+        /// </summary>
+        private void CollectWarnings(CampaignState state, GridCell core, in WorldMapView view, double margin)
+        {
+            long now = GameLogic.Core.GameClock.Ticks;
+            float len = Campaign.Economy.IntelCatalog.MapArrowCells;
+            foreach (Campaign.Defense.RaidWaveView w in Campaign.Defense.RaidDirectorService.IncomingWaves(state, now))
+            {
+                if (w.IntelKnown || w.PlannedOnly || w.Arrived)
+                {
+                    continue;
+                }
+                double cx = w.Lead.TargetX;
+                double cy = w.Lead.TargetY;
+                Campaign.Defense.RaidDirectorService.WaveApproachVector(w, out double dx, out double dy);
+                double d = Math.Max(1e-6, Math.Sqrt(dx * dx + dy * dy));
+                double tx = cx + dx / d * len;
+                double ty = cy + dy / d * len;
+                double hx = cx + dx / d * len * 0.15;
+                double hy = cy + dy / d * len * 0.15;
+                Lines.Add(new WorldMapLine { X0 = tx, Y0 = ty, X1 = hx, Y1 = hy, Forecast = true });
+                // 地图打开时视野围着家园、可能比箭头短：箭尾在视野外而目标在视野里时，标签放到箭头与视野边缘的交点往里一点，
+                // 打开地图总能看到“从哪个方向、多久后到”。
+                double lx = tx;
+                double ly = ty;
+                if (!view.Contains(lx, ly) && view.Contains(cx, cy))
+                {
+                    double t = 1.0;
+                    if (lx > view.MaxX) t = Math.Min(t, (view.MaxX - cx) / (lx - cx));
+                    if (lx < view.MinX) t = Math.Min(t, (view.MinX - cx) / (lx - cx));
+                    if (ly > view.MaxY) t = Math.Min(t, (view.MaxY - cy) / (ly - cy));
+                    if (ly < view.MinY) t = Math.Min(t, (view.MinY - cy) / (ly - cy));
+                    t = Math.Max(0.0, t) * 0.85;
+                    lx = cx + (tx - cx) * t;
+                    ly = cy + (ty - cy) * t;
+                }
+                if (view.Contains(lx, ly, margin))
+                {
+                    Add(WorldMapItemKind.RaidWarning, WorldMapLayer.Groups, "warning:" + w.Lead.PlanId, lx, ly,
+                        GameText.Format("ui.map.raid_warning", Campaign.Defense.RaidDirectorService.WaveDirectionText(w),
+                            Campaign.Defense.RaidDirectorService.Duration(w.ArrivalTick - now)));
+                }
+            }
+        }
+
         private static (int, int, int, int) ClampToExplored(HomeGridMap map, in WorldMapView view, double margin)
         {
             long minX = long.MaxValue, minY = long.MaxValue, maxX = long.MinValue, maxY = long.MinValue;
@@ -365,149 +418,6 @@ namespace GameLogic.UI.Kit
             int d = (int)Math.Min(maxY, (long)Math.Ceiling(view.MaxY + margin));
             return (a, b, c, d);
         }
-    }
-
-    /// <summary>
-    /// FG3-GEN-01（FGR-GEN-080“己方建筑群与前哨”）：把星球表面上的己方建筑聚成“建筑群”，给战略地图 / 小地图出图标。
-    ///
-    /// - 聚合：按 map.own_cluster_cells 格一个聚合格统计建筑（枢轴格），相邻（八邻接）的非空聚合格连成一群；图标在群里建筑的平均位置，标签带座数。
-    /// - 归还核心所在的那一群由核心图标代表（不重复出图标）；离核心超过 map.own_outpost_distance 格的群标成“前哨站”
-    ///   （FG08 FGR-EXP-017 的初值 300 格；前哨站作为正式实体——改名、仓库、驻守岗位——归 FG8 的前哨站 Story）。
-    /// - 只统计星球表面（家园格网区域）的建筑；规划中的虚影也算（玩家已经下了命令，地图上要看得到它在哪），已摧毁的不算。
-    /// 开销：聚合 O(建筑数)，只在建筑列表换了（放置 / 拆除都会换新数组）、表版本或核心变了时重做；平时每次查询 O(1) 返回缓存。
-    /// </summary>
-    public static class WorldMapOwnClusters
-    {
-        public struct Cluster
-        {
-            public string Id;
-            public double X;
-            public double Y;
-            public int Count;
-            public bool ContainsCore;
-            public bool IsOutpost;
-        }
-
-        private static readonly List<Cluster> Clusters = new List<Cluster>(8);
-        private static readonly Dictionary<long, int> BucketCount = new Dictionary<long, int>();
-        private static readonly Dictionary<long, long> BucketSumX = new Dictionary<long, long>();
-        private static readonly Dictionary<long, long> BucketSumY = new Dictionary<long, long>();
-        private static readonly HashSet<long> Visited = new HashSet<long>();
-        private static readonly Stack<long> Frontier = new Stack<long>();
-        private static readonly List<long> Keys = new List<long>();
-        private static CampaignState _state;
-        private static BuildingRecord[] _records;
-        private static int _gridRevision = -1;
-        private static int _coreX;
-        private static int _coreY;
-
-        /// <summary>重算次数（自检用：证明只在建筑列表变化时重算）。</summary>
-        public static int RebuildCount { get; private set; }
-
-        public static IReadOnlyList<Cluster> For(CampaignState state)
-        {
-            if (state == null)
-            {
-                Clusters.Clear();
-                _state = null;
-                _records = null;
-                return Clusters;
-            }
-            GridCell core = HomeGridService.CorePivot(state);
-            if (ReferenceEquals(state, _state) && ReferenceEquals(state.BuildingRecords, _records) && _gridRevision == GridContent.Revision
-                && _coreX == core.X && _coreY == core.Y)
-            {
-                return Clusters;
-            }
-            _state = state;
-            _records = state.BuildingRecords;
-            _gridRevision = GridContent.Revision;
-            _coreX = core.X;
-            _coreY = core.Y;
-            Rebuild(state, core);
-            return Clusters;
-        }
-
-        private static long Key(long bx, long by) => (bx << 32) ^ (uint)by;
-
-        private static void Rebuild(CampaignState state, GridCell core)
-        {
-            RebuildCount++;
-            Clusters.Clear();
-            BucketCount.Clear();
-            BucketSumX.Clear();
-            BucketSumY.Clear();
-            Visited.Clear();
-            Keys.Clear();
-            int size = Math.Max(4, GridContent.TuningInt("map.own_cluster_cells"));
-            double outpostDistance = GridContent.Tuning("map.own_outpost_distance");
-            foreach (BuildingRecord b in state.BuildingRecords ?? Array.Empty<BuildingRecord>())
-            {
-                if (b == null || b.RegionId != Campaign.Regions.HomeValleyLayout.RegionId || b.ConstructionState == BuildingConstructionState.Destroyed)
-                {
-                    continue;
-                }
-                long k = Key(FloorDiv(b.GridX, size), FloorDiv(b.GridY, size));
-                if (!BucketCount.TryGetValue(k, out int n))
-                {
-                    Keys.Add(k);
-                }
-                BucketCount[k] = n + 1;
-                BucketSumX[k] = (BucketSumX.TryGetValue(k, out long sx) ? sx : 0L) + b.GridX;
-                BucketSumY[k] = (BucketSumY.TryGetValue(k, out long sy) ? sy : 0L) + b.GridY;
-            }
-            long coreKey = Key(FloorDiv(core.X, size), FloorDiv(core.Y, size));
-            // 按建筑列表里第一次出现的顺序遍历聚合格（确定、与字典内部顺序无关）；八邻接连通 = 一群。
-            foreach (long start in Keys)
-            {
-                if (!Visited.Add(start))
-                {
-                    continue;
-                }
-                int count = 0;
-                long sumX = 0, sumY = 0;
-                long minKey = start;
-                bool hasCore = false;
-                Frontier.Clear();
-                Frontier.Push(start);
-                while (Frontier.Count > 0)
-                {
-                    long k = Frontier.Pop();
-                    count += BucketCount[k];
-                    sumX += BucketSumX[k];
-                    sumY += BucketSumY[k];
-                    minKey = Math.Min(minKey, k);
-                    hasCore |= k == coreKey;
-                    long bx = k >> 32;
-                    long by = (int)(uint)k;
-                    for (int dx = -1; dx <= 1; dx++)
-                    {
-                        for (int dy = -1; dy <= 1; dy++)
-                        {
-                            long nk = Key(bx + dx, by + dy);
-                            if ((dx != 0 || dy != 0) && BucketCount.ContainsKey(nk) && Visited.Add(nk))
-                            {
-                                Frontier.Push(nk);
-                            }
-                        }
-                    }
-                }
-                double cx = (double)sumX / count;
-                double cy = (double)sumY / count;
-                double dist = Math.Sqrt((cx - core.X) * (cx - core.X) + (cy - core.Y) * (cy - core.Y));
-                Clusters.Add(new Cluster
-                {
-                    Id = "own:" + minKey.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    X = cx,
-                    Y = cy,
-                    Count = count,
-                    ContainsCore = hasCore,
-                    IsOutpost = !hasCore && dist > outpostDistance,
-                });
-            }
-        }
-
-        private static long FloorDiv(int v, int d) => v >= 0 ? v / d : -((-(long)v + d - 1) / d);
     }
 
     /// <summary>
@@ -869,14 +779,14 @@ namespace GameLogic.UI.Kit
                 e.EnableInClassList("wg-icon-marker", item.Kind == WorldMapItemKind.Marker);
                 e.EnableInClassList("wg-icon-marker-selected", item.Kind == WorldMapItemKind.Marker && item.Id == selectedMarkerId);
                 e.EnableInClassList("wg-icon-territory", item.Kind == WorldMapItemKind.Territory);
-                e.EnableInClassList("wg-icon-forecast", item.Kind == WorldMapItemKind.RaidForecast);
+                e.EnableInClassList("wg-icon-forecast", item.Kind == WorldMapItemKind.RaidForecast || item.Kind == WorldMapItemKind.RaidWarning);
                 e.EnableInClassList("uk-hidden", false);
                 e.style.left = at.x;
                 e.style.top = at.y;
                 Label t = _texts[n];
                 bool showLabel = _labels && (item.Kind == WorldMapItemKind.Home || item.Kind == WorldMapItemKind.OwnCluster || item.Kind == WorldMapItemKind.Marker || item.Kind == WorldMapItemKind.Outpost
                                             || item.Kind == WorldMapItemKind.Resource || item.Kind == WorldMapItemKind.Relic || item.Kind == WorldMapItemKind.Territory
-                                            || item.Kind == WorldMapItemKind.RaidForecast);
+                                            || item.Kind == WorldMapItemKind.RaidForecast || item.Kind == WorldMapItemKind.RaidWarning);
                 t.EnableInClassList("uk-hidden", !showLabel);
                 if (showLabel)
                 {

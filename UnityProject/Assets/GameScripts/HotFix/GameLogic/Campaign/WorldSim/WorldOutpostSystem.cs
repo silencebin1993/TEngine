@@ -230,7 +230,7 @@ namespace GameLogic.Campaign.WorldSim
             {
                 foreach (OutpostRecord o in outposts)
                 {
-                    if (o == null || (o.Dormant && !o.AlwaysSimulate))
+                    if (o == null || o.Destroyed || (o.Dormant && !o.AlwaysSimulate))
                     {
                         continue;
                     }
@@ -263,6 +263,10 @@ namespace GameLogic.Campaign.WorldSim
                         continue;
                     }
                     OutpostRecord o = Find(state, p.OutpostId);
+                    if (o != null && o.Destroyed)
+                    {
+                        continue; // FG6-DEF-04：据点被摧毁，巡逻停在原地（巡逻与己方交战、清剿在 FG8）。
+                    }
                     if (p.RouteState == RouteNeed)
                     {
                         RequestPatrolRoute(state, p, o);
@@ -337,7 +341,7 @@ namespace GameLogic.Campaign.WorldSim
             double sleep = wake + WakeHysteresis;
             foreach (OutpostRecord o in outposts)
             {
-                if (o == null || o.AlwaysSimulate)
+                if (o == null || o.AlwaysSimulate || o.Destroyed)
                 {
                     continue;
                 }
@@ -469,6 +473,29 @@ namespace GameLogic.Campaign.WorldSim
             {
                 MaxWakeMs = LastWakeMs;
             }
+        }
+
+        /// <summary>
+        /// FG6-DEF-04（FGR-GEN-034“摧毁据点会降低这个方向的突袭频率”）：据点被摧毁——不再休眠 / 增援 / 巡逻 / 作为突袭出发地，
+        /// 并告诉突袭导演记下这个方向（从那个方向出发的突袭最短间隔变长）。幂等。交战摧毁、掉落与控制度由 FG8-EXP-03 调用本入口。
+        /// </summary>
+        public static bool MarkDestroyed(CampaignState state, string outpostId)
+        {
+            OutpostRecord o = Find(state, outpostId);
+            if (o == null || o.Destroyed)
+            {
+                return false;
+            }
+            if (o.Dormant)
+            {
+                Wake(state, o, CatchUpTarget(), WakeEvent);
+            }
+            DequeueWake(state, outpostId);
+            o.Destroyed = true;
+            o.DestroyedTick = GameClock.Ticks;
+            o.Garrison = 0;
+            Defense.RaidDirectorService.OnOutpostDestroyed(state, o);
+            return true;
         }
 
         /// <summary>立即唤醒（突袭导演调用、事件触发）：补算到“现在”，从下一次推进起完整模拟。已经醒着的什么也不做。</summary>
@@ -697,7 +724,7 @@ namespace GameLogic.Campaign.WorldSim
                     continue;
                 }
                 OutpostRecord o = Find(state, p.OutpostId);
-                if (o == null || (o.Dormant && !o.AlwaysSimulate))
+                if (o == null || o.Destroyed || (o.Dormant && !o.AlwaysSimulate))
                 {
                     continue;
                 }

@@ -563,22 +563,36 @@ namespace GameLogic.EditorTools
             region.CoreState = CoreBossState.Destroyed.ToString();
             WorldSimulation.StepMany(6);
             bool bossGone = weak != null && weak.Outdated && weak.OutdatedReason == IntelService.ReasonGone && !IntelService.Needed(s, boss, GameClock.Ticks, out _);
-            // 第二幕：舰队片段按顺序，每个只截获一次；全部截获后写“都已截获”
+            // 第二幕：舰队片段按顺序，每个只截获一次；全部截获后写“都已截获”。
+            // 击败主核心会引来铸造报复突袭（FG6-DEF-04 剧情触发），突袭预报优先级最高、会插队先破译：
+            // 每个片段等到真的截获为止（最多再等两轮），插队产出的情报必须是突袭预报。
             s.Progress.Act = 2;
             var heard = new List<string>();
+            var cutIns = new List<string>();
             for (int i = 0; i < IntelCatalog.Fragments.Count; i++)
             {
-                TicksUntilProduced(s, (int)fleet.DecipherSeconds + 30);
+                long fleetSerial = Latest(s, IntelCatalog.KindFleet)?.Serial ?? -1;
+                for (int attempt = 0; attempt < 3; attempt++)
+                {
+                    TicksUntilProduced(s, (int)fleet.DecipherSeconds + 30);
+                    if ((Latest(s, IntelCatalog.KindFleet)?.Serial ?? -1) != fleetSerial)
+                    {
+                        break;
+                    }
+                    IntelRecord newest = (I(s)?.Records ?? Array.Empty<IntelRecord>()).OrderByDescending(r => r.Serial).FirstOrDefault();
+                    cutIns.Add(newest?.Kind ?? "无");
+                }
                 heard.Add(Latest(s, IntelCatalog.KindFleet)?.Subject);
             }
-            bool fleetOk = heard.SequenceEqual(IntelCatalog.Fragments.Select(f => f.Id)) && I(s).FragmentsHeard.SequenceEqual(heard)
+            bool cutInsRaid = cutIns.All(k => k == IntelCatalog.KindRaid);
+            bool fleetOk = cutInsRaid && heard.SequenceEqual(IntelCatalog.Fragments.Select(f => f.Id)) && I(s).FragmentsHeard.SequenceEqual(heard)
                            && !IntelService.Needed(s, fleet, GameClock.Ticks, out string fleetDone) && fleetDone.Contains("都已截获")
                            && Latest(s, IntelCatalog.KindFleet) != null && IntelService.Summary(s, Latest(s, IntelCatalog.KindFleet), GameClock.Ticks).Contains("截获");
             bool noWeather = I(s).Records.All(r => r.Kind != IntelCatalog.KindWeather);
             Expect(reasons && counterOk && bossNeeded && bossOk && bossGone && fleetOk && noWeather,
                 $"C FGR-RND-050 五类情报：第一幕没遭遇首领时只破译反制预览，其余各写原因（首领“{whyBoss}”、天气“{whyWeather}”、片段“{whyFleet}”、突袭“{whyRaid}”）；" +
                 $"反制预览与出发锁定同一算法（铸造前哨 = {expectAdapt}），有效 1 个游戏日；遭遇铸造主核心后破译首领弱点（“{Short(weakText)}”，数值来自首领常量）；" +
-                $"击败后旧情报标“目标已不在”、不再破译；第二幕舰队片段按顺序各截获一次（{string.Join(" → ", heard)}）；天气在 FG7-ENV-03 前不出现");
+                $"击败后旧情报标“目标已不在”、不再破译；第二幕舰队片段按顺序各截获一次（{string.Join(" → ", heard)}；期间插队 {cutIns.Count} 次：{(cutIns.Count == 0 ? "无" : string.Join("、", cutIns))}，只允许突袭预报）；天气在 FG7-ENV-03 前不出现");
 
             // 优先级插队：反制预览破译到一半时来了突袭 → 先破译突袭预报，反制预览进度保留
             CampaignState p = NewWorld(5504, 1);

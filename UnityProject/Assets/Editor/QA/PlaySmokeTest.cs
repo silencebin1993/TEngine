@@ -367,6 +367,10 @@ namespace GameLogic.EditorTools
                     case 400: StepDroneRepaired(inStep); break;
                     case 401: StepRebuildZoneDrawn(inStep); break;
                     case 402: StepRebuildOrdered(inStep); break;
+                // FG6-DEF-04：突袭导演与预警（预警条一行、真实鼠标点一行镜头飞到预计抵达点、地图上的来袭方向箭头）
+                case 403: StepRaidDirectorWarned(inStep); break;
+                case 404: StepRaidDirectorFlown(inStep); break;
+                case 405: StepRaidDirectorMap(inStep); break;
                     case 346: StepOverridePicked(inStep); break;
                     case 347: StepOverridePlaced(inStep); break;
                     case 348: StepOverridePanel(inStep); break;
@@ -7459,7 +7463,164 @@ namespace GameLogic.EditorTools
             GameClock.SetSpeed(1f);
             GameClock.SetPaused(SessionState.GetInt(K + "DroneWasPaused", 0) == 1);
             SessionState.SetInt(K + "DroneSub", 0);
-            Next(264, "FG3-LOG-04：建造模式里放分流器与地下传送带");
+            Next(403, "FG6-DEF-04：排定一波突袭、到预警时刻：左上角预警条出现一行（倒计时、方向、编成未知）");
+        }
+
+        // ── FG6-DEF-04：突袭导演与预警 ──────────────────────────────────────────────
+
+        private static void StepRaidDirectorWarned(double inStep)
+        {
+            if (inStep < 0.3)
+            {
+                return;
+            }
+            // 预警条在建造模式打开时收起（建造栏在同一侧，ADR-DEF-004 决策 13）：像玩家一样先按建造菜单键关掉建造模式，
+            // 记下来，结束时再按一次打开（下一步 FG3-LOG-04 要在建造模式里放分流器）；镜头位置也记下来，结束时飞回。
+            Campaign.Regions.HomeValleyBuildMode buildMode = Campaign.Regions.HomeValleyBuildMode.Current;
+            if (SessionState.GetInt(K + "RaidDirSub", 0) == 0)
+            {
+                SessionState.SetInt(K + "RaidDirSub", 1);
+                SessionState.SetInt(K + "RaidDirBuildWasOpen", buildMode != null && buildMode.IsOpen ? 1 : 0);
+                SessionState.SetFloat(K + "RaidDirCamX", CameraFocus().x);
+                SessionState.SetFloat(K + "RaidDirCamY", CameraFocus().y);
+                if (buildMode != null && buildMode.IsOpen)
+                {
+                    PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.OpenBuildMenu));
+                    SessionState.SetFloat(K + "RaidDirSubAt", (float)inStep);
+                    return;
+                }
+            }
+            if (SessionState.GetInt(K + "RaidDirBuildWasOpen", 0) == 1 && inStep < SessionState.GetFloat(K + "RaidDirSubAt", 0f) + 0.5)
+            {
+                return;
+            }
+            SessionState.SetInt(K + "RaidDirSub", 0);
+            CampaignState state = CampaignSession.Current;
+            SessionState.SetInt(K + "RaidDirWasPaused", GameClock.Paused ? 1 : 0);
+            GameClock.SetPaused(true);
+            // 测试捷径：剧情节点触发一波突袭（正式由“击败首领”的剧情规则触发，FgRaidDirectorSelfCheck F3 覆盖）；筹备期（等路线 → 发预警前）
+            // 用 StepMany + SkipForTests 跳过——中间没有任何导演事件，等于读一个更晚的存档。之后的预警、预警条、点一行、地图全走正式流程。
+            string faction = Campaign.Defense.RaidDirectorService.MostStimulatedFaction(state);
+            Campaign.Defense.RaidDirectorService.RequestStoryRaid(state, faction, 1);
+            WorldSimulation.StepMany(2);
+            Campaign.RaidPlanRecord p = Campaign.Defense.RaidDirectorService.Plans(state).OrderByDescending(x => x.Serial).FirstOrDefault();
+            for (int i = 0; i < 400 && p != null && p.State < Campaign.Defense.RaidDirectorService.StateScheduled; i++)
+            {
+                WorldSimulation.StepMany(15);
+            }
+            if (p != null && p.State == Campaign.Defense.RaidDirectorService.StateScheduled && p.WarnTick - 2 > GameClock.Ticks)
+            {
+                GameClock.SkipForTests(state, p.WarnTick - 2 - GameClock.Ticks);
+            }
+            int warn0 = Notifications.NotificationCenter.History.Count(e => e.Type?.Id == "raid_warning");
+            WorldSimulation.StepMany(3);
+            RaidWarningHudUIToolkit hud = RaidWarningHudUIToolkit.Instance;
+            hud?.Refresh(force: true);
+            string dir = p != null ? Campaign.Defense.RaidDirectorService.DirectionText(p) : "?";
+            bool warned = p != null && p.State >= Campaign.Defense.RaidDirectorService.StateWarned
+                          && Notifications.NotificationCenter.History.Count(e => e.Type?.Id == "raid_warning") > warn0;
+            bool row = hud != null && hud.PanelVisible && hud.RowCount >= 1 && hud.RowText(0).Contains(dir)
+                       && hud.RowText(0).Contains(Localization.GameText.Get("raid.warning.comp_unknown"));
+            Check(warned && row, $"突袭导演排定一波（{faction}，出发地 {p?.OriginKind}:{p?.OriginId}）、到预警时刻发出预警；左上角预警条一行“{FirstLine(hud?.RowText(0))}”（方向 {dir}，编成未知）" +
+                                 (warned && row ? string.Empty : $"（诊断：计划状态 {p?.State}、预警 {warned}、预警条显示 {hud?.PanelVisible} / {hud?.RowCount} 行、建造模式开着 {buildMode?.IsOpen}）"));
+            CheckNoTextMarkers("突袭预警条");
+            SessionState.SetString(K + "RaidDirPlan", p?.PlanId ?? string.Empty);
+            SessionState.SetFloat(K + "RaidDirX", hud != null ? hud.RowTarget(0).x : 0f);
+            SessionState.SetFloat(K + "RaidDirY", hud != null ? hud.RowTarget(0).y : 0f);
+            InputRouter.DebugSetReader(new ScriptedReader { Mouse = OffScreen });
+            Check(ClickUitk("[RaidWarningHost]", "RaidWarnRow0"), "真实鼠标点预警条第一行");
+            // 暂停时地图键与建造菜单键不读（InputRouter.ModalUiOpen 含暂停），后两步要按这两个键：先放开暂停（1x，离出发还有约 25 游戏分钟），
+            // 结束时恢复原来的暂停状态。
+            GameClock.SetPaused(false);
+            Next(404, "镜头飞到这一波的预计抵达点");
+        }
+
+        private static void StepRaidDirectorFlown(double inStep)
+        {
+            if (inStep < 1.2)
+            {
+                return;
+            }
+            var target = new Vector2(SessionState.GetFloat(K + "RaidDirX", 0f), SessionState.GetFloat(K + "RaidDirY", 0f));
+            Check(Vector2.Distance(CameraFocus(), target) < 5f && GameSettings.HasSeenGuidanceHook(GuidanceHooks.RaidWarningFirstClick),
+                $"点预警条：镜头飞到预计抵达点（焦点 {CameraFocus()}，抵达点 {target}）");
+            PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.OpenMap));
+            Next(405, "按地图键打开战略地图：有来袭方向的箭头与“突袭预警”标签");
+        }
+
+        private static void StepRaidDirectorMap(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            // 收尾分几小步（同一时刻只能注入一个按键）：1 关地图 → 2 镜头飞回原处 → 3 按建造菜单键重新打开建造模式 → 核对后进下一步。
+            int sub = SessionState.GetInt(K + "RaidDirSub", 0);
+            float subAt = SessionState.GetFloat(K + "RaidDirSubAt", 0f);
+            var camBack = new Vector2(SessionState.GetFloat(K + "RaidDirCamX", 0f), SessionState.GetFloat(K + "RaidDirCamY", 0f));
+            bool buildWasOpen = SessionState.GetInt(K + "RaidDirBuildWasOpen", 0) == 1;
+            if (sub == 1)
+            {
+                if (inStep < subAt + 0.5)
+                {
+                    return;
+                }
+                WorldView.FlyTo(Campaign.Regions.HomeValleyLayout.RegionId, camBack);
+                SessionState.SetInt(K + "RaidDirSub", 2);
+                SessionState.SetFloat(K + "RaidDirSubAt", (float)inStep);
+                return;
+            }
+            if (sub == 2)
+            {
+                if (inStep < subAt + 1.5)
+                {
+                    return;
+                }
+                if (buildWasOpen)
+                {
+                    PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.OpenBuildMenu));
+                }
+                SessionState.SetInt(K + "RaidDirSub", 3);
+                SessionState.SetFloat(K + "RaidDirSubAt", (float)inStep);
+                return;
+            }
+            if (sub == 3)
+            {
+                if (inStep < subAt + 0.6)
+                {
+                    return;
+                }
+                SessionState.SetInt(K + "RaidDirSub", 0);
+                Campaign.Regions.HomeValleyBuildMode reopened = Campaign.Regions.HomeValleyBuildMode.Current;
+                Check(!StrategicMapUIToolkit.IsOpen && (!buildWasOpen || (reopened != null && reopened.IsOpen)) && Vector2.Distance(CameraFocus(), camBack) < 5f,
+                    $"地图键关掉地图、镜头飞回原处（焦点 {CameraFocus()}，原处 {camBack}）、按建造菜单键重新打开建造模式（原来开着 {buildWasOpen}，现在 {reopened?.IsOpen}）");
+                GameClock.SetPaused(SessionState.GetInt(K + "RaidDirWasPaused", 0) == 1);
+                Next(264, "FG3-LOG-04：建造模式里放分流器与地下传送带");
+                return;
+            }
+            StrategicMapUIToolkit map = StrategicMapUIToolkit.Instance;
+            map?.Tick(force: true);
+            string planId = SessionState.GetString(K + "RaidDirPlan", string.Empty);
+            bool arrow = StrategicMapUIToolkit.IsOpen && map != null && map.Model.Items.Any(i => i.Kind == WorldMapItemKind.RaidWarning && i.Id == "warning:" + planId)
+                         && map.Model.Lines.Any(l => l.Forecast);
+            Check(arrow, "战略地图：没有情报也画出这一波的来袭方向箭头与“突袭预警”标签" +
+                         (arrow ? string.Empty : $"（诊断：地图开着 {StrategicMapUIToolkit.IsOpen}，预警箭头 {map?.Model.Items.Count(i => i.Kind == WorldMapItemKind.RaidWarning)} 个）"));
+            if (StrategicMapUIToolkit.IsOpen)
+            {
+                PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.OpenMap));
+            }
+            // 清理测试捷径：撤掉这一波（计划与可能已派出的队伍）；暂停状态在最后一小步恢复。
+            CampaignState state = CampaignSession.Current;
+            Campaign.RaidDirectorState d = Campaign.Defense.RaidDirectorService.StateOf(state);
+            Campaign.RaidPlanRecord p = Campaign.Defense.RaidDirectorService.FindPlan(state, planId);
+            if (d != null && p != null)
+            {
+                state.Raids.InTransit = state.Raids.InTransit.Where(g => g.PlanId != planId).ToArray();
+                d.Plans = d.Plans.Where(x => x.PlanId != planId).ToArray();
+            }
+            Check(Campaign.Defense.RaidDirectorService.FindPlan(state, planId) == null && !state.Raids.InTransit.Any(g => g.PlanId == planId), "清理测试突袭（计划与队伍）");
+            SessionState.SetInt(K + "RaidDirSub", 1);
+            SessionState.SetFloat(K + "RaidDirSubAt", (float)inStep);
         }
 
         // ── FG3-LOG-04：分流器 / 地下传送带 / 节点面板（真实鼠标 / 按键；放下的是虚影，机器施工由自检覆盖；最后用测试捷径清理，保持 22 格测试带）──

@@ -235,6 +235,30 @@ public partial class Tables
     /// </summary>
     public fg.TbProducer TbProducer {get; }
     /// <summary>
+    /// 突袭反制
+    /// </summary>
+    public fg.TbRaidCounter TbRaidCounter {get; }
+    /// <summary>
+    /// 突袭难度
+    /// </summary>
+    public fg.TbRaidDifficulty TbRaidDifficulty {get; }
+    /// <summary>
+    /// 突袭等级
+    /// </summary>
+    public fg.TbRaidLevel TbRaidLevel {get; }
+    /// <summary>
+    /// 剧情突袭
+    /// </summary>
+    public fg.TbRaidStory TbRaidStory {get; }
+    /// <summary>
+    /// 突袭触发
+    /// </summary>
+    public fg.TbRaidTrigger TbRaidTrigger {get; }
+    /// <summary>
+    /// 突袭编成
+    /// </summary>
+    public fg.TbRaidUnit TbRaidUnit {get; }
+    /// <summary>
     /// 靶子类型
     /// </summary>
     public fg.TbRangeTarget TbRangeTarget {get; }
@@ -433,6 +457,12 @@ public partial class Tables
         TbPowerNode = new fg.TbPowerNode(loader("fg_tbpowernode"));
         TbPowerSource = new fg.TbPowerSource(loader("fg_tbpowersource"));
         TbProducer = new fg.TbProducer(loader("fg_tbproducer"));
+        TbRaidCounter = new fg.TbRaidCounter(loader("fg_tbraidcounter"));
+        TbRaidDifficulty = new fg.TbRaidDifficulty(loader("fg_tbraiddifficulty"));
+        TbRaidLevel = new fg.TbRaidLevel(loader("fg_tbraidlevel"));
+        TbRaidStory = new fg.TbRaidStory(loader("fg_tbraidstory"));
+        TbRaidTrigger = new fg.TbRaidTrigger(loader("fg_tbraidtrigger"));
+        TbRaidUnit = new fg.TbRaidUnit(loader("fg_tbraidunit"));
         TbRangeTarget = new fg.TbRangeTarget(loader("fg_tbrangetarget"));
         TbReaction = new fg.TbReaction(loader("fg_tbreaction"));
         TbRecipe = new fg.TbRecipe(loader("fg_tbrecipe"));
@@ -529,6 +559,12 @@ public partial class Tables
         TbPowerNode.ResolveRef(this);
         TbPowerSource.ResolveRef(this);
         TbProducer.ResolveRef(this);
+        TbRaidCounter.ResolveRef(this);
+        TbRaidDifficulty.ResolveRef(this);
+        TbRaidLevel.ResolveRef(this);
+        TbRaidStory.ResolveRef(this);
+        TbRaidTrigger.ResolveRef(this);
+        TbRaidUnit.ResolveRef(this);
         TbRangeTarget.ResolveRef(this);
         TbReaction.ResolveRef(this);
         TbRecipe.ResolveRef(this);

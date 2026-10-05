@@ -357,6 +357,21 @@ namespace GameLogic.Core
         /// <summary>FG6-DEF-03：自动重建第一次重建传送带 / 物流节点。</summary>
         public const string RulesRebuildFirstBelt = "rules.rebuild_first_belt";
 
+        /// <summary>FG6-DEF-04：突袭导演第一次排定一波突袭。</summary>
+        public const string RaidFirstPlanned = "raid.first_planned";
+
+        /// <summary>FG6-DEF-04：第一次收到突袭预警（“怎么看预警”的引导在 FG15-UX-04）。</summary>
+        public const string RaidFirstWarning = "raid.first_warning";
+
+        /// <summary>FG6-DEF-04：第一次有突袭部队因为路程不够最短预警而在出发地集结。</summary>
+        public const string RaidFirstAssembling = "raid.first_assembling";
+
+        /// <summary>FG6-DEF-04：第一次有突袭部队到时间上限后撤退。</summary>
+        public const string RaidFirstWithdrawn = "raid.first_withdrawn";
+
+        /// <summary>FG6-DEF-04：第一次点预警条（镜头飞到预计抵达点）。</summary>
+        public const string RaidWarningFirstClick = "raid.warning_first_click";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -405,6 +420,7 @@ namespace GameLogic.Core
             DefenseBarrierFirstBuilt, DefenseGateFirstBuilt, DefenseShieldFirstBuilt, DefenseShieldFirstOverload, DefenseTrapFirstBuilt, DefenseTrapFirstSupplyShort,
             DefensePanelFirstOpen, DefenseRouteFirstPreview,
             DefenseRepairDroneFirstBuilt, DefenseRepairDroneFirstRepair, DefenseRepairDroneFirstLost, RulesRebuildZoneFirstDrawn, RulesRebuildFirstBelt,
+            RaidFirstPlanned, RaidFirstWarning, RaidFirstAssembling, RaidFirstWithdrawn, RaidWarningFirstClick,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

@@ -480,6 +480,9 @@ namespace GameLogic.EditorTools
             // 陷阱固件负向 / 缺流体三种原因 / 守恒 / 线与区域 / 电磁场只用电、FGT-DEF-002 阵地反应、复制设置、真文件存读档（内核格式 10、格式 9 旧快照）、读档接着跑、暂停与倍速、观察一致、种子集、性能。
             Seg("FgDefenseStructuresSelfCheck", FgDefenseStructuresSelfCheck.Run);
             Seg("FgRepairDroneSelfCheck", FgRepairDroneSelfCheck.Run); // FG6-DEF-03 维修无人机与自动重建
+            // FG6-DEF-04：突袭导演与预警——六类触发、最短间隔、预算与编成、最受刺激的阵营、阵营内反制、出发地（最近据点 / 改道 / 迷雾外 / 方向频率）、
+            // 预警（路程 = 预警时间、最短 1.5 小时、集结）、监听站出发前预报与实际一致、重叠合并、难度、存读档、倍速、观察一致、预警条 / 地图 / 叠加层 / 暴露面板、预热途经区块、性能。
+            Seg("FgRaidDirectorSelfCheck", FgRaidDirectorSelfCheck.Run);
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>

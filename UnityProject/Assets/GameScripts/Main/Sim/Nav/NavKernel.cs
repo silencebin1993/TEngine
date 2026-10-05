@@ -43,6 +43,31 @@ namespace BinGames.Sim.Nav
         }
     }
 
+    /// <summary>FG6-DEF-04：镜像 → 后台工作副本同步（Burst，主线程 Run）：内容变了 / 新出现的区块复制过去并让相关抽象图失效。返回变了的区块数。</summary>
+    [BurstCompile(CompileSynchronously = true)]
+    public struct NavMirrorSyncJob : IJob
+    {
+        public NavGrid From;
+        public NavWork To;
+        public NativeArray<int> Changed;
+
+        public void Execute()
+        {
+            int n = 0;
+            for (int i = 0; i < From.SlotKeys.Length; i++)
+            {
+                long key = From.SlotKeys[i];
+                if (NavGridOps.CopyChunk(ref From, ref To.Grid, key))
+                {
+                    NavGridOps.Unkey(key, out int cx, out int cy);
+                    NavSearch.InvalidateChunk(ref To, cx, cy);
+                    n++;
+                }
+            }
+            Changed[0] = n;
+        }
+    }
+
     /// <summary>
     /// FG0-ARCH-06（FG14 FGR-ARC-015；FG15 长距离寻路 ≤ 20 毫秒、工作线程）：一张表面的寻路内核。
     ///
@@ -87,6 +112,28 @@ namespace BinGames.Sim.Nav
         private NavCounters _counters;
         private readonly System.Diagnostics.Stopwatch _watch = new System.Diagnostics.Stopwatch();
 
+        // ── FG6-DEF-04（DEBT-FG0ARCH06-09）：后台长路线通道——独立的工作副本，一次一条，调用方在固定的较晚时刻取结果 ──
+        private NavWork _bg;
+        private NativeArray<NavRequest> _bgReq;
+        private NativeList<NavResult> _bgRes;
+        private NativeList<int2> _bgPts;
+        private NativeArray<int> _bgChanged;
+        private JobHandle _bgHandle;
+        private bool _bgActive;
+
+        /// <summary>后台通道正在算一条（还没被取走）。</summary>
+        public bool BackgroundActive => _bgActive;
+        /// <summary>后台通道那一条已经算完（没有在算也算“完”）。只读查询，不改变任何结果。</summary>
+        public bool BackgroundDone => !_bgActive || _bgHandle.IsCompleted;
+        public int BackgroundOwnerTag { get; private set; } = -1;
+        public int BackgroundOwnerKey { get; private set; } = -1;
+        public int BackgroundSerial { get; private set; }
+        /// <summary>后台通道调度过的条数 / 取结果时还没算完、主线程被迫等的次数 / 上一次同步镜像变了的区块数与耗时（性能证据）。</summary>
+        public long BackgroundJobs { get; private set; }
+        public long BackgroundLateCompletes { get; private set; }
+        public int LastBackgroundSyncedChunks { get; private set; }
+        public double LastBackgroundSyncMs { get; private set; }
+
         public static int LiveKernels { get; private set; }
 
         public NavKernel(in NavConfig config, byte[] terrainCell, bool hasGen, in WorldGenParams gen, WorldGenRect[] rects, WorldGenZone[] zones)
@@ -110,6 +157,11 @@ namespace BinGames.Sim.Nav
             _tmpOcc = new NativeArray<int>(n, Allocator.Persistent);
             _tmpOccBlock = new NativeArray<byte>(64, Allocator.Persistent);
             _tmpCells = new NativeArray<byte>(n, Allocator.Persistent);
+            _bg = NavWork.Create(NavGrid.Create(c.ChunkSize, terrainCell, hasGen, gen, rects, zones, c.CoordLimit, 64));
+            _bgReq = new NativeArray<NavRequest>(1, Allocator.Persistent);
+            _bgRes = new NativeList<NavResult>(1, Allocator.Persistent);
+            _bgPts = new NativeList<int2>(256, Allocator.Persistent);
+            _bgChanged = new NativeArray<int>(1, Allocator.Persistent);
             HasGen = hasGen;
             LiveKernels++;
         }
@@ -153,6 +205,13 @@ namespace BinGames.Sim.Nav
                 return;
             }
             _handle.Complete();
+            _bgHandle.Complete();
+            _bgActive = false;
+            _bg.Dispose();
+            _bgReq.Dispose();
+            _bgRes.Dispose();
+            _bgPts.Dispose();
+            _bgChanged.Dispose();
             _mirror.Dispose();
             _work.Dispose();
             _batch.Dispose();
@@ -625,6 +684,87 @@ namespace BinGames.Sim.Nav
             {
                 NavSearch.ResetGraphs(ref _work);
             }
+        }
+
+        // ─────────────────────────────── 后台长路线通道（FG6-DEF-04 / DEBT-FG0ARCH06-09）───────────────────────────────
+
+        /// <summary>
+        /// 后台通道开一条长路线：先把镜像里变过 / 新的区块同步进后台工作副本（相关抽象图失效），再在工作线程上算。与常规批次并行（各用各的工作副本），
+        /// 不占常规批次的名额与延迟——单位的路线照常 6 步采纳。调用方（突袭导演）在自己定的、足够晚的固定时刻 <see cref="CollectBackground"/>：
+        /// 冷启动（途经区块当场按种子生成 + 建抽象图）几百毫秒在那之前早已算完，采纳不硬等；结果只取决于开始那一刻的格网（与工作线程快慢无关），所以是确定的。
+        /// 一次一条：正在算时返回 false（调用方下一步再试）。
+        /// </summary>
+        public bool StartBackground(in NavRequest r)
+        {
+            if (_bgActive)
+            {
+                return false;
+            }
+            _watch.Restart();
+            new NavMirrorSyncJob { From = _mirror, To = _bg, Changed = _bgChanged }.Run();
+            LastBackgroundSyncedChunks = _bgChanged[0];
+            // 失效的区块图留在池里成了垃圾：节点池过大时整体清空（缓存是格网的纯函数，清空不改变任何结果）。
+            if (_bg.Nodes.Length > 400_000 || _bg.Edges.Length > 4_000_000)
+            {
+                NavSearch.ResetGraphs(ref _bg);
+            }
+            _bgReq[0] = r;
+            _bgRes.Clear();
+            _bgPts.Clear();
+            _bgHandle = new NavBatchJob { W = _bg, Requests = _bgReq, Count = 1, Cfg = Config, Results = _bgRes, Points = _bgPts }.Schedule();
+            JobHandle.ScheduleBatchedJobs();
+            _bgActive = true;
+            BackgroundOwnerTag = r.OwnerTag;
+            BackgroundOwnerKey = r.OwnerKey;
+            BackgroundSerial = r.Serial;
+            BackgroundJobs++;
+            _watch.Stop();
+            LastBackgroundSyncMs = _watch.Elapsed.TotalMilliseconds;
+            return true;
+        }
+
+        /// <summary>取回后台通道那一条的结果（路点按顺序放进 <paramref name="into"/>，结果的 PointStart 置 0）。还没算完就等（计入 <see cref="BackgroundLateCompletes"/>）。</summary>
+        public bool CollectBackground(List<int2> into, out NavResult result)
+        {
+            result = default;
+            into?.Clear();
+            if (!_bgActive)
+            {
+                return false;
+            }
+            if (!_bgHandle.IsCompleted)
+            {
+                BackgroundLateCompletes++;
+            }
+            _bgHandle.Complete();
+            _bgHandle = default;
+            _bgActive = false;
+            BackgroundOwnerTag = -1;
+            BackgroundOwnerKey = -1;
+            if (_bgRes.Length == 0)
+            {
+                return false;
+            }
+            result = _bgRes[0];
+            if (into != null)
+            {
+                for (int i = result.PointStart; i < result.PointStart + result.PointCount; i++)
+                {
+                    into.Add(_bgPts[i]);
+                }
+            }
+            result.PointStart = 0;
+            return true;
+        }
+
+        /// <summary>放弃后台通道那一条（调用方不再要了：计划被合并 / 取消、换了战役）。会等它算完再释放。</summary>
+        public void CancelBackground()
+        {
+            _bgHandle.Complete();
+            _bgHandle = default;
+            _bgActive = false;
+            BackgroundOwnerTag = -1;
+            BackgroundOwnerKey = -1;
         }
 
         /// <summary>等在飞的批次完成（不采纳）。存档、放置预览、自检前调用；采纳仍在原定的采纳步。</summary>

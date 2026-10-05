@@ -287,8 +287,20 @@ namespace GameLogic.Campaign.WorldSim
                     string count = g.UnitCount.ToString(CultureInfo.InvariantCulture);
                     string label = g.State == TransitGroupState.Arrived
                         ? GameText.Format("ui.world.focus.raid_arrived", count)
-                        : GameText.Format("ui.world.focus.raid", count, GameClock.FormatGameDuration(WorldTransitSystem.EtaSeconds(g)));
+                        : g.State == TransitGroupState.Retreating
+                            ? GameText.Format("ui.world.focus.raid_retreating", count)
+                            : GameText.Format("ui.world.focus.raid", count, GameClock.FormatGameDuration(WorldTransitSystem.EtaSeconds(g)));
                     TargetsScratch.Add(new FocusTarget(g.GroupId, home.SiteId, WorldTransitSystem.Position(g), label, true));
+                }
+                // FG6-DEF-04：已发预警、还在出发地集结的突袭（Tab 也能切到：镜头飞到预计抵达点）。
+                long now = GameClock.Ticks;
+                foreach (RaidPlanRecord p in Defense.RaidDirectorService.Plans(state))
+                {
+                    if (p != null && p.State == Defense.RaidDirectorService.StateWarned && p.DepartTick > now)
+                    {
+                        string label = GameText.Format("ui.world.focus.raid_assembling", Defense.RaidDirectorService.Duration(p.DepartTick - now));
+                        TargetsScratch.Add(new FocusTarget(p.PlanId, home.SiteId, new Vector2(p.ArriveX, p.ArriveY), label, true));
+                    }
                 }
             }
             return TargetsScratch;

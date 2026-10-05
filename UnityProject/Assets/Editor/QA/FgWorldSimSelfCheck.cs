@@ -520,7 +520,10 @@ namespace GameLogic.EditorTools
 
             // 三件事都真的发生了（不是空转）：家园生产完成 / 工单完成、远征地点里有战斗或推进、突袭到达。
             bool produced = Parse(a, "·machines.home") > homeMachines || !string.Equals(FactoryDigestFrom(a), factoryBefore, StringComparison.Ordinal);
-            bool raidArrived = a.TryGetValue("·raid.state", out string rs) && rs == TransitGroupState.Arrived.ToString();
+            // FG6-DEF-04：到达后到时间上限（FGR-DEF-032，1 游戏小时）沿原路撤回出发地离场——30 分钟里“到达过”看到达通知（终态可能已是撤退中 / 已离场）；
+            // A / B / C / D 逐字段一致照样覆盖撤退与离场。
+            bool raidArrived = (a.TryGetValue("·notify.raid_arrival", out string na) && int.TryParse(na, out int arrivals) && arrivals >= 1)
+                               || (a.TryGetValue("·raid.state", out string rs) && rs == TransitGroupState.Arrived.ToString());
             bool repaired = repair != null && a.TryGetValue("·warehouse.construction", out string wh) && wh == BuildingConstructionState.Operational.ToString();
             Expect(produced && raidArrived && repaired && Parse(a, "·clock.ticks") == ThirtyMinutesTicks,
                 $"30 分钟里三方都在推进：家园机器 {homeMachines}→{Parse(a, "·machines.home")}（装配站出厂）、仓库修复 {a.GetValueOrDefault("·warehouse.construction")}、" +

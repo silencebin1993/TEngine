@@ -516,6 +516,8 @@ namespace GameLogic.EditorTools
                     || f[0] == "TP" || f[0] == "TF" || f[0] == "TM"
                     // FG6-DEF-02 的护盾状态机（SS）、陷阱参数（TR）由 FgDefenseStructuresSelfCheck A1 段逐字段比对。
                     || f[0] == "SS" || f[0] == "TR"
+                    // FG6-DEF-04 的突袭触发（RDT）、等级（RDL）、难度（RDD）、编成（RDU）、反制（RDC）、剧情（RDS）由 FgRaidDirectorSelfCheck A1 段逐字段比对。
+                    || f[0] == "RDT" || f[0] == "RDL" || f[0] == "RDD" || f[0] == "RDU" || f[0] == "RDC" || f[0] == "RDS"
                     || f[0].StartsWith("W", StringComparison.Ordinal))
                 {
                     continue;

@@ -161,6 +161,7 @@ namespace GameLogic.Campaign.WorldSim
             Defense.TurretService.ResetSessionState(); // FG6-DEF-01：炮塔的运行时缓存（编译结果、补给原因）按新会话重建；存档里的炮塔记录不动
             Defense.RepairDroneService.ResetSessionState(); // FG6-DEF-03：维修无人机的运行时缓存（候选目标、占用、首次钩子）按新会话重建
             Defense.DefenseService.ResetSessionState(); // FG6-DEF-02：防御建筑的运行时缓存（耐久推送、缺流体原因、护盾 / 陷阱清单）按新会话重建
+            Defense.RaidDirectorService.ResetSessionState(); // FG6-DEF-04：突袭导演的会话统计清零（存档里的计划与计时不动）
             HomeValleyAlarms.ResetSessionState();
             HomeValleyCombatTargets.ResetSessionState();
             HomeValleyFactory.ResetSessionState(); // FG4-ECO-03：装配站等料指纹与输入口堵塞提示按新会话重算
@@ -193,6 +194,10 @@ namespace GameLogic.Campaign.WorldSim
             NavService.Bind(state);
             Home = new HomeValleyController();
             Home.Enter(resume);
+            // FG6-DEF-04 修复（DEBT-FG3GEN01-05 的出发地前提）：新战役 / 旧档第一次进家园时把家园区侦察巢登记成据点（幂等，按种子）。
+            // 原来只在 InitializeNewGrid 里登记，但寻路服务先建格网（NavService.Bind → MapFor）走了旧档迁移分支、把布局版本写掉了，
+            // InitializeNewGrid 提前返回——主菜单新建的 v2 战役一个侦察巢都没有，突袭只能从迷雾外来。v0 / v1 世界没有点位分布，什么也不做。
+            WorldGen.WorldGenService.SeedHomeZoneOutposts(state);
             NavService.AfterSitesLoaded(state);
             if (Home.IsLoaded)
             {
@@ -297,6 +302,8 @@ namespace GameLogic.Campaign.WorldSim
             Defense.RepairDroneService.WriteTo(CampaignSession.Current);
             // FG0-ARCH-03：每个已载入地点的战斗内核快照（单位、编队命令、冷却、热量、标记、飞行中的弹体）写进 CombatState。
             Combat.CombatSites.WriteTo(CampaignSession.Current);
+            // FG6-DEF-04：突袭导演在后台长路线通道里还没到采纳步的那条路线，取出来存进计划（读档后在同一采纳步交到）。
+            Defense.RaidDirectorService.WriteTo(CampaignSession.Current);
             // FG0-ARCH-06：寻路内核的排队请求、待采纳结果、还没同步的格网变化写进 NavState（读档接着跑与不存档一致）。
             NavService.WriteTo(CampaignSession.Current);
         }
@@ -477,6 +484,8 @@ namespace GameLogic.Campaign.WorldSim
                 WorldTransitSystem.Step(state, dt);
                 // FG0-ARCH-06：敌方据点与巡逻（休眠判定、分帧唤醒、活跃的推进一步）。
                 WorldOutpostSystem.Step(state, GameClock.Ticks);
+                // FG6-DEF-04：突袭导演（触发 → 排定 → 预警 → 出发 → 跟踪），在队伍与据点之后：本步派出的队伍下一步起行进。只看步序号，与观察无关，O(计划数)。
+                Defense.RaidDirectorService.WorldStep(state, GameClock.Ticks);
                 // FG0-ARCH-02：传送带内核（星球表面）按游戏时间累计推进到自己的 20 Hz（只看步序号，与镜头 / 帧率 / 倍速无关）。
                 BeltNetworkService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                 // FG3-LOG-05：管线内核与传送带同一节拍（FGR-LOG-090）。

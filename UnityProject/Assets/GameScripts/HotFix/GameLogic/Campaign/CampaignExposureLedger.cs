@@ -534,6 +534,9 @@ namespace GameLogic.Campaign
         /// <summary>30 可重复（降到阈值下再升高再次触发）；60/90 按“当前区域 + 当次远征”幂等。</summary>
         private static void CheckThresholdCrossing(CampaignState state, float before, float after)
         {
+            // FG6-DEF-04（FGR-SIG-071 前半 / FGR-DEF-020，关闭 DEBT-FG1SIG06-04）：越过 30 / 60 / 90 引来 1 / 2 / 3 级家园突袭，超过 90 后周期性 4 级——
+            // 每一笔实际变化都告诉突袭导演（只排队，下一个模拟步处理）；下面 Demo 的三个阈值事件照旧。
+            Defense.RaidDirectorService.OnExposureChanged(state, before, after);
             if (before < ThresholdScoutTip && after >= ThresholdScoutTip)
             {
                 state.ScoutTipCrossCount++;

@@ -312,7 +312,8 @@ namespace GameLogic.Campaign.Regions
             }
             foreach (TransitGroupRecord g in state.Raids?.InTransit ?? Array.Empty<TransitGroupRecord>())
             {
-                if (g != null && g.Kind == TransitGroupKind.Raid && g.State == TransitGroupState.Arrived)
+                // FG6-DEF-04 复审：打远处前哨站的突袭不算“核心受威胁”（到达通知与预警条如实写前哨站）。
+                if (g != null && g.Kind == TransitGroupKind.Raid && g.State == TransitGroupState.Arrived && g.TargetKind != Campaign.Defense.RaidDirectorService.TargetOutpost)
                 {
                     into.Add(new AlertRecord("raid:" + g.GroupId, Severity.CoreThreatened,
                         GameText.Format("alarm.core.raid", g.UnitCount.ToString(CultureInfo.InvariantCulture)), 0, null, new Vector3((float)g.PosX, 0f, (float)g.PosY)));

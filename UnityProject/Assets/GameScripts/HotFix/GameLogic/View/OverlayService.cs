@@ -546,10 +546,40 @@ namespace GameLogic.View
                     Tone = 2,
                 });
             }
+            // FG6-DEF-04（关闭 DEBT-FG3LOG08-01）：突袭来之前的预测路线——已发预警（集结中）或有有效预报的计划，沿排定的地形路线画橙红细线（出发地 → 目标）。
+            long now = GameLogic.Core.GameClock.Ticks;
+            foreach (Campaign.RaidPlanRecord p in Campaign.Defense.RaidDirectorService.Plans(state))
+            {
+                if (p == null || lines >= MaxMarkers || (p.RouteX?.Length ?? 0) == 0)
+                {
+                    continue;
+                }
+                bool warned = p.State == Campaign.Defense.RaidDirectorService.StateWarned;
+                bool forecast = p.State == Campaign.Defense.RaidDirectorService.StateScheduled && Campaign.Defense.RaidDirectorService.IntelKnown(state, p, now);
+                if (!warned && !forecast)
+                {
+                    continue;
+                }
+                LineRenderer r = LineAt(lines++);
+                Style(r, new Color(1f, 0.42f, 0.2f, 0.75f), 0.6f, false);
+                r.positionCount = 1 + p.RouteX.Length;
+                r.SetPosition(0, new Vector3(p.OriginX, 0.33f, p.OriginY));
+                for (int i = 0; i < p.RouteX.Length; i++)
+                {
+                    r.SetPosition(1 + i, new Vector3(p.RouteX[i], 0.33f, p.RouteY[i]));
+                }
+                r.enabled = true;
+                Candidates.Add(new OverlayLabel
+                {
+                    World = new Vector3(p.OriginX, 1.2f, p.OriginY),
+                    Text = GameText.Format("overlay.label.raid_planned", Campaign.Defense.RaidDirectorService.Duration(p.DepartTick - now)),
+                    Tone = 2,
+                });
+            }
             float radius = RaidOutpostRadius;
             foreach (OutpostRecord o in state.Raids?.Outposts ?? Array.Empty<OutpostRecord>())
             {
-                if (o == null || lines >= MaxMarkers)
+                if (o == null || o.Destroyed || lines >= MaxMarkers)
                 {
                     continue;
                 }

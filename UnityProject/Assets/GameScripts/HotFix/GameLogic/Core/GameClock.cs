@@ -273,6 +273,21 @@ namespace GameLogic.Core
             WriteTo(state);
         }
 
+        /// <summary>
+        /// 自检专用：把统一时钟往后拨 <paramref name="ticks"/> 步，等于“读一个更晚时刻的存档”——不执行中间的模拟步。
+        /// 只在中间没有待发生事件的空档里用（例如突袭导演的筹备期、开局宽限期），正式流程从不调用。
+        /// </summary>
+        public static void SkipForTests(CampaignState state, long ticks)
+        {
+            if (ticks <= 0)
+            {
+                return;
+            }
+            Ticks += ticks;
+            WriteTo(state);
+            Revision++;
+        }
+
         /// <summary>离开世界（回主菜单）或自检之间：时间轴归零，速度 1x、未暂停、不锁。</summary>
         public static void ResetSession()
         {

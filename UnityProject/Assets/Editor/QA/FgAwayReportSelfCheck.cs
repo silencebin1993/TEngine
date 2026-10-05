@@ -1074,6 +1074,11 @@ namespace GameLogic.EditorTools
             // 核心受威胁（核心受损、突袭到达）、电力、仓满、工作受阻——六级同时存在时按威胁排序，每条都能定位。
             BuildingRecord core = s.BuildingRecords.First(b => b.BuildingTypeId == HomeValleyLayout.BuildingTypeCore);
             BuildingOps.ApplyDamage(s, core.BuildingId, 30f);
+            FgProductionSelfCheck.Seconds(1f);
+            P(s, bench).Rec.In = new[] { new ItemStackRecord { ItemId = "alloy", Amount = 2 } };
+            FgProductionSelfCheck.Seconds(jam + 5f);
+            // 突袭到达放在缺料计时之后：到达的部队停留 1 游戏小时后按时间上限撤退（FG6-DEF-04 / FGR-DEF-032），
+            // 要在停留期内收集告警。
             TransitGroupRecord raid = WorldTransitSystem.DispatchRaidFromTerritory(s, "silent", 3, out string raidFail);
             if (raid != null)
             {
@@ -1081,8 +1086,6 @@ namespace GameLogic.EditorTools
                 raid.PosY = raid.TargetY;
             }
             FgProductionSelfCheck.Seconds(1f);
-            P(s, bench).Rec.In = new[] { new ItemStackRecord { ItemId = "alloy", Amount = 2 } };
-            FgProductionSelfCheck.Seconds(jam + 5f);
             BuildingRecord gen2 = s.BuildingRecords.FirstOrDefault(b => b.BuildingTypeId == HomeValleyLayout.BuildingTypeGenerator2);
             BuildingRecord gen1 = s.BuildingRecords.FirstOrDefault(b => b.BuildingTypeId == HomeValleyLayout.BuildingTypeGenerator);
             if (gen2 != null)

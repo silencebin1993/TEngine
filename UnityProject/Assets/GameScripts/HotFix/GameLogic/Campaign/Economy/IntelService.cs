@@ -34,6 +34,8 @@ namespace GameLogic.Campaign.Economy
         public const string ReasonExpired = "expired";
         public const string ReasonArrived = "arrived";
         public const string ReasonGone = "gone";
+        /// <summary>FG6-DEF-04 复审：突袭计划在预报之后变了（升级重新编成 / 合并吸收 / 出发前改道 / 抵达改期）——旧预报作废，监听站重新破译。</summary>
+        public const string ReasonChanged = "changed";
 
         /// <summary>情报列表 / 进度 / 监听站变化时 +1（界面、地图据此刷新）。</summary>
         public static int Revision { get; private set; } = 1;
@@ -91,6 +93,8 @@ namespace GameLogic.Campaign.Economy
                     r.Adaptations ??= Array.Empty<string>();
                     r.Subject ??= string.Empty;
                     r.OutdatedReason ??= string.Empty;
+                    r.Counter ??= string.Empty;
+                    r.TargetKind ??= string.Empty;
                 }
             }
             foreach (IntelProgressRecord p in f.Progress)
@@ -269,7 +273,7 @@ namespace GameLogic.Campaign.Economy
             switch (k?.ConditionKind)
             {
                 case "raid":
-                    return NextRaid(s, now)?.GroupId;
+                    return NextRaidSubject(s, now);
                 case "boss":
                     return NextBoss(s, now)?.Id;
                 default:
@@ -433,8 +437,7 @@ namespace GameLogic.Campaign.Economy
                 string reason = null;
                 if (r.Kind == IntelCatalog.KindRaid)
                 {
-                    TransitGroupRecord g = WorldTransitSystem.Find(s, r.Subject);
-                    reason = g == null ? ReasonGone : g.State != TransitGroupState.Marching ? ReasonArrived : null;
+                    reason = RaidOutdatedReason(s, r);
                 }
                 else if (r.Kind == IntelCatalog.KindBoss && IntelCatalog.TryGetBoss(r.Subject, out IntelBossDef boss) && BossDefeated(s, boss))
                 {
@@ -448,18 +451,50 @@ namespace GameLogic.Campaign.Economy
                 {
                     continue;
                 }
-                r.Outdated = true;
-                // 过期的时刻就是有效期的终点（与面板按 IsValid 显示“已过时”的那一刻一致）：标记最多晚一个推进周期写进记录，
-                // 期间存档、读档后再标，记下的时刻也不变；部队到达 / 目标已不在按发现的那一步记。
-                r.OutdatedTick = reason == ReasonExpired ? Math.Min(now, r.ExpiresTick) : now;
-                r.OutdatedReason = reason;
-                GuidanceHooks.Raise(GuidanceHooks.IntelFirstOutdated);
-                Revision++;
+                MarkOutdated(r, reason, now);
                 trim = trim == null || trim == r.Kind ? r.Kind : "*";
             }
             if (trim != null)
             {
                 f.Records = TrimOutdated(f.Records, trim == "*" ? null : trim);
+            }
+        }
+
+        private static void MarkOutdated(IntelRecord r, string reason, long now)
+        {
+            r.Outdated = true;
+            // 过期的时刻就是有效期的终点（与面板按 IsValid 显示“已过时”的那一刻一致）：标记最多晚一个推进周期写进记录，
+            // 期间存档、读档后再标，记下的时刻也不变；部队到达 / 目标已不在 / 计划有变按发现的那一步记。
+            r.OutdatedTick = reason == ReasonExpired ? Math.Min(now, r.ExpiresTick) : now;
+            r.OutdatedReason = reason;
+            GuidanceHooks.Raise(GuidanceHooks.IntelFirstOutdated);
+            Revision++;
+        }
+
+        /// <summary>
+        /// FG6-DEF-04 复审（FGT-DEF-004“与实际突袭一致”）：突袭导演改了一个计划的预报相关内容（<see cref="RaidPlanRecord.Revision"/> 已 +1）——
+        /// 这条计划的有效预报当场标已过时（计划有变），预警条 / 地图 / 情报面板不再显示旧的规模、方向与时间窗口；监听站随后重新破译。O(情报数)，只在计划变化时调。
+        /// </summary>
+        public static void OnRaidPlanChanged(CampaignState s, RaidPlanRecord p)
+        {
+            IntelState f = StateOf(s);
+            if (f?.Records == null || p == null || string.IsNullOrEmpty(p.PlanId))
+            {
+                return;
+            }
+            long now = GameClock.Ticks;
+            bool any = false;
+            foreach (IntelRecord r in f.Records)
+            {
+                if (r != null && !r.Outdated && r.Kind == IntelCatalog.KindRaid && r.Subject == p.PlanId && r.PlanRevision != p.Revision)
+                {
+                    MarkOutdated(r, ReasonChanged, now);
+                    any = true;
+                }
+            }
+            if (any)
+            {
+                f.Records = TrimOutdated(f.Records, IntelCatalog.KindRaid);
             }
         }
 
@@ -505,10 +540,10 @@ namespace GameLogic.Campaign.Economy
             switch (k.ConditionKind)
             {
                 case "raid":
-                    TransitGroupRecord g = NextRaid(s, now);
-                    if (g != null)
+                    string raid = NextRaidSubject(s, now);
+                    if (raid != null)
                     {
-                        subject = g.GroupId;
+                        subject = raid;
                         return true;
                     }
                     if (wantWhy)
@@ -579,13 +614,16 @@ namespace GameLogic.Campaign.Economy
             return any;
         }
 
+        /// <summary>FG6-DEF-04：一支行进队伍的突袭预报目标——突袭导演派出的 = 计划 ID（出发前的预报出发后沿用同一条，DEBT-FG5RND05-02）；测试 / 调试派出的 = 队伍 ID。</summary>
+        public static string RaidSubjectOf(TransitGroupRecord g) => g == null ? null : string.IsNullOrEmpty(g.PlanId) ? g.GroupId : g.PlanId;
+
         /// <summary>正在逼近家园、还没有有效预报的第一支突袭部队（按队伍序号）。</summary>
         public static TransitGroupRecord NextRaid(CampaignState s, long now)
         {
             TransitGroupRecord best = null;
             foreach (TransitGroupRecord g in WorldTransitSystem.Groups(s))
             {
-                if (g == null || g.Kind != TransitGroupKind.Raid || g.State != TransitGroupState.Marching || HasValid(s, IntelCatalog.KindRaid, g.GroupId, now, out _))
+                if (g == null || g.Kind != TransitGroupKind.Raid || g.State != TransitGroupState.Marching || HasValid(s, IntelCatalog.KindRaid, RaidSubjectOf(g), now, out _))
                 {
                     continue;
                 }
@@ -595,6 +633,74 @@ namespace GameLogic.Campaign.Economy
                 }
             }
             return best;
+        }
+
+        /// <summary>
+        /// FG6-DEF-04（FGR-DEF-024“有监听站时最早提前 1 个游戏日”）：下一个要预报的突袭——先是正在逼近、还没有有效预报的队伍（按队伍序号，沿用 FG5-RND-05 的顺序），
+        /// 再是突袭导演排定、离发预警不超过 raid.intel_lead_days、还没有有效预报的计划（按计划抵达先后）。返回预报的 Subject（计划 ID / 队伍 ID）；没有 = null。
+        /// </summary>
+        public static string NextRaidSubject(CampaignState s, long now)
+        {
+            TransitGroupRecord g = NextRaid(s, now);
+            if (g != null)
+            {
+                return RaidSubjectOf(g);
+            }
+            RaidPlanRecord best = null;
+            foreach (RaidPlanRecord p in Defense.RaidDirectorService.Plans(s))
+            {
+                if (!Defense.RaidDirectorService.Forecastable(p, now) || HasValid(s, IntelCatalog.KindRaid, p.PlanId, now, out _))
+                {
+                    continue;
+                }
+                if (best == null || p.ArrivalTick < best.ArrivalTick || (p.ArrivalTick == best.ArrivalTick && p.Serial < best.Serial))
+                {
+                    best = p;
+                }
+            }
+            return best?.PlanId;
+        }
+
+        /// <summary>
+        /// 突袭预报什么时候过时：计划被合并 / 取消 / 结束 = 目标已不在；计划在预报之后变了（变更序号对不上：升级 / 合并吸收 / 改道 / 抵达改期）= 计划有变；
+        /// 还没出发 = 有效；出发后跟着队伍（到达 = 已到达、离场 = 目标已不在）。
+        /// </summary>
+        private static string RaidOutdatedReason(CampaignState s, IntelRecord r)
+        {
+            string subject = r.Subject;
+            RaidPlanRecord p = Defense.RaidDirectorService.FindPlan(s, subject);
+            TransitGroupRecord g;
+            if (p != null)
+            {
+                if (p.State >= Defense.RaidDirectorService.StateEnded)
+                {
+                    return ReasonGone;
+                }
+                if (r.PlanRevision != p.Revision)
+                {
+                    return ReasonChanged;
+                }
+                if (p.State != Defense.RaidDirectorService.StateDeparted)
+                {
+                    return null;
+                }
+                g = WorldTransitSystem.Find(s, p.GroupId);
+            }
+            else
+            {
+                g = WorldTransitSystem.Find(s, subject);
+                if (g == null)
+                {
+                    foreach (TransitGroupRecord x in WorldTransitSystem.Groups(s))
+                    {
+                        if (x != null && x.PlanId == subject)
+                        {
+                            g = x;
+                        }
+                    }
+                }
+            }
+            return g == null ? ReasonGone : g.State != TransitGroupState.Marching ? ReasonArrived : null;
         }
 
         /// <summary>遭遇过、没击败、还没有有效弱点情报的第一个首领。</summary>
@@ -726,28 +832,67 @@ namespace GameLogic.Campaign.Economy
             TransitGroupRecord g = NextRaid(s, now);
             if (g == null)
             {
-                return false;
+                // FG6-DEF-04：出发前的预报——计划里的阵营、规模、来袭方向与抵达点（沿地形的排定路线）、针对什么；时间窗口 = 计划抵达 ×(1 ± frac)。
+                RaidPlanRecord p = Defense.RaidDirectorService.FindPlan(s, NextRaidSubject(s, now));
+                return p != null && FillRaidFromPlan(s, r, p, now);
             }
-            GridCell core = HomeGridService.CorePivot(s);
+            RaidPlanRecord plan = Defense.RaidDirectorService.FindPlan(s, g.PlanId);
+            if (plan != null)
+            {
+                r.Counter = plan.Counter ?? string.Empty;
+                r.TargetKind = plan.TargetKind ?? string.Empty;
+                r.Level = plan.Level;
+                r.PlanRevision = plan.Revision;
+            }
+            // 来袭方向：从队伍的目标看预计抵达点（与预警条、地图箭头同一口径；测试 / 调试派出的队伍目标就是归还核心）。
             WorldTransitSystem.PredictArrival(g, out double ax, out double ay);
-            double dx = ax - core.X;
-            double dy = ay - core.Y;
+            double dx = ax - g.TargetX;
+            double dy = ay - g.TargetY;
             double len = Math.Sqrt(dx * dx + dy * dy);
             if (len < 1e-6)
             {
-                dx = g.PosX - core.X;
-                dy = g.PosY - core.Y;
+                dx = g.PosX - g.TargetX;
+                dy = g.PosY - g.TargetY;
                 len = Math.Max(1e-6, Math.Sqrt(dx * dx + dy * dy));
             }
             double eta = WorldTransitSystem.EtaSeconds(g);
             double half = Math.Max(eta * IntelCatalog.RaidWindowFrac, IntelCatalog.RaidWindowMinSeconds);
-            r.Subject = g.GroupId;
+            r.Subject = RaidSubjectOf(g);
             r.Faction = g.OriginId ?? string.Empty;
             r.Units = g.UnitCount;
             r.DirX = (float)(dx / len);
             r.DirY = (float)(dy / len);
             r.ArriveX = (float)ax;
             r.ArriveY = (float)ay;
+            r.WindowFromTick = now + GameClock.TicksFor(Math.Max(0, eta - half));
+            r.WindowToTick = now + GameClock.TicksFor(eta + half);
+            r.ExpiresTick = Math.Max(now + 1, r.WindowToTick);
+            return true;
+        }
+
+        /// <summary>FG6-DEF-04：按排定的突袭计划填预报（还没出发：阵营、规模、方向与抵达点按排定路线，时间窗口按计划抵达，附带反制）。</summary>
+        private static bool FillRaidFromPlan(CampaignState s, IntelRecord r, RaidPlanRecord p, long now)
+        {
+            if (p.ArrivalTick < 0)
+            {
+                return false;
+            }
+            // 来袭方向与预警条、地图箭头同一口径：从目标看预计抵达点（复审 P2）。
+            Defense.RaidDirectorService.ApproachVector(p, out double dx, out double dy);
+            double len = Math.Max(1e-6, Math.Sqrt(dx * dx + dy * dy));
+            double eta = Math.Max(0, p.ArrivalTick - now) / (double)Math.Max(1, GameClock.StepHz);
+            double half = Math.Max(eta * IntelCatalog.RaidWindowFrac, IntelCatalog.RaidWindowMinSeconds);
+            r.Subject = p.PlanId;
+            r.Faction = p.Faction ?? string.Empty;
+            r.Units = p.UnitTotal;
+            r.Counter = p.Counter ?? string.Empty;
+            r.TargetKind = p.TargetKind ?? string.Empty;
+            r.Level = p.Level;
+            r.PlanRevision = p.Revision;
+            r.DirX = (float)(dx / len);
+            r.DirY = (float)(dy / len);
+            r.ArriveX = p.ArriveX;
+            r.ArriveY = p.ArriveY;
             r.WindowFromTick = now + GameClock.TicksFor(Math.Max(0, eta - half));
             r.WindowToTick = now + GameClock.TicksFor(eta + half);
             r.ExpiresTick = Math.Max(now + 1, r.WindowToTick);
@@ -859,7 +1004,13 @@ namespace GameLogic.Campaign.Economy
                         return GameText.Format("intel.raid.line_past", origin, r.Units, dir);
                     }
                     RaidWindowText(r.WindowFromTick - now, r.WindowToTick - now, out string from, out string to);
-                    return GameText.Format("intel.raid.line", origin, r.Units, dir, from, to);
+                    string line = GameText.Format("intel.raid.line", origin, r.Units, dir, from, to);
+                    // FG6-DEF-04（FGR-DEF-022“情报面板可以提前看到这次突袭会针对什么”）：附上阵营内反制。
+                    GameConfig.fg.RaidCounter counter = Defense.RaidCatalog.CounterById(r.Counter);
+                    return counter == null
+                        ? line
+                        : GameText.Format("intel.raid.with_counter", line,
+                            GameText.Format("raid.warning.counter", GameText.Get("raid.category." + counter.Category), GameText.Get(counter.NameKey)));
                 }
                 case IntelCatalog.KindCounter:
                 {
@@ -1059,17 +1210,29 @@ namespace GameLogic.Campaign.Economy
         /// <summary>箭尾（格）。</summary>
         public static Vector2 ArrowTail(CampaignState s, IntelRecord r)
         {
-            GridCell core = HomeGridService.CorePivot(s);
+            Vector2 c = ArrowCenter(s, r);
             float len = IntelCatalog.MapArrowCells;
-            return new Vector2(core.X + r.DirX * len, core.Y + r.DirY * len);
+            return new Vector2(c.x + r.DirX * len, c.y + r.DirY * len);
         }
 
-        /// <summary>箭头尖（格）：停在核心外一小段，不盖住核心图标。</summary>
+        /// <summary>箭头尖（格）：停在目标外一小段，不盖住核心 / 建筑群图标。</summary>
         public static Vector2 ArrowHead(CampaignState s, IntelRecord r)
         {
-            GridCell core = HomeGridService.CorePivot(s);
+            Vector2 c = ArrowCenter(s, r);
             float len = IntelCatalog.MapArrowCells * 0.3f;
-            return new Vector2(core.X + r.DirX * len, core.Y + r.DirY * len);
+            return new Vector2(c.x + r.DirX * len, c.y + r.DirY * len);
+        }
+
+        /// <summary>箭头指向的目标（FG6-DEF-04 复审）：突袭导演的计划 = 它的目标（家园 / 前哨站）；测试 / 调试派出的队伍与找不到计划时 = 归还核心。O(计划数)。</summary>
+        private static Vector2 ArrowCenter(CampaignState s, IntelRecord r)
+        {
+            RaidPlanRecord p = Defense.RaidDirectorService.FindPlan(s, r?.Subject);
+            if (p != null)
+            {
+                return new Vector2(p.TargetX, p.TargetY);
+            }
+            GridCell core = HomeGridService.CorePivot(s);
+            return new Vector2(core.X, core.Y);
         }
 
         /// <summary>存读档 / 自检对照用的整份快照（逐字段）。</summary>
@@ -1094,7 +1257,8 @@ namespace GameLogic.Campaign.Economy
                     .Append(r.ExpiresTick).Append('|').Append(r.Outdated).Append('|').Append(r.OutdatedTick).Append('|').Append(r.OutdatedReason).Append('|')
                     .Append(r.Faction).Append('|').Append(r.Units).Append('|').Append(r.DirX.ToString("F4", CultureInfo.InvariantCulture)).Append(',')
                     .Append(r.DirY.ToString("F4", CultureInfo.InvariantCulture)).Append('|').Append(r.WindowFromTick).Append('-').Append(r.WindowToTick).Append('|')
-                    .Append(string.Join(",", r.Regions)).Append('|').Append(string.Join(",", r.Adaptations)).Append(';');
+                    .Append(string.Join(",", r.Regions)).Append('|').Append(string.Join(",", r.Adaptations)).Append('|').Append(r.Counter).Append('|').Append(r.TargetKind)
+                    .Append('|').Append(r.Level).Append('|').Append(r.PlanRevision).Append(';');
             }
             return sb.ToString();
         }

@@ -26,6 +26,7 @@ namespace GameLogic.UI.Kit
             Create<NotificationHudUIToolkit>("[NotificationHudHost]");
             Create<BuildModeHudUIToolkit>("[BuildModeHudHost]"); // FG0-ARCH-04：家园建造模式入口与建造栏（30030，低于通知）。
             Create<WorldBarHudUIToolkit>("[WorldBarHost]"); // FG0-ARCH-01：世界时间条（游戏日、0.5x～3x、暂停、关注点），右上角 HUD 层 3。
+            Create<RaidWarningHudUIToolkit>("[RaidWarningHost]"); // FG6-DEF-04：突袭预警条（倒计时、方向、编成），左上角 HUD 层 3。
             Create<SignalCore.SignalCoreHudUIToolkit>("[SignalCoreHost]"); // FG1-SIG-01：信号位置 HUD（顶部居中）与信号核面板（30035）。
             Create<PauseMenuUIToolkit>("[PauseMenuHost]");
             Create<FirmwareLibraryPanelUIToolkit>("[FirmwareLibraryHost]"); // FG2-FW-05：固件库（30072，暂停菜单之上、图鉴之下）。

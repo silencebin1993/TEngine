@@ -700,6 +700,12 @@ namespace GameLogic.Campaign
         /// <summary>抵达时间窗口（统一时钟步数）。</summary>
         public long WindowFromTick;
         public long WindowToTick;
+        /// <summary>FG6-DEF-04：这次突袭的阵营内反制（fg.TbRaidCounter.id；空 = 没有）、目标种类（home / outpost）、等级。旧档没有 = 空 / 0。</summary>
+        public string Counter = string.Empty;
+        public string TargetKind = string.Empty;
+        public int Level;
+        /// <summary>FG6-DEF-04 复审：产出时突袭计划的变更序号（<see cref="RaidPlanRecord.Revision"/>）。之后计划升级 / 合并 / 改道 / 抵达改期 = 对不上 → 已过时（计划有变），监听站重新破译。旧档 = 0（与旧计划的 0 一致）。</summary>
+        public int PlanRevision;
         // ── 敌方反制预览 ──
         public string[] Regions = Array.Empty<string>();
         public string[] Adaptations = Array.Empty<string>();
@@ -973,6 +979,9 @@ namespace GameLogic.Campaign
         /// <summary>FG6-DEF-02（FG06 FGR-DEF-010～013）：屏障 / 闸门 / 护盾发生器 / 陷阱发射器——战斗内核里的结构单位序号、护盾状态机（状态与到期步）、陷阱装的固件 / 铺设方式 / 存着的流体。
         /// 唯一写入口 <see cref="Defense.DefenseService"/>。只加字段、不升域版本：旧档没有 = 没有这些防御建筑。</summary>
         public DefenseState Defense = new DefenseState();
+        /// <summary>FG6-DEF-04（FG06 FGR-DEF-020～024）：突袭导演——排定的突袭计划、阈值与周期触发的计时、最短间隔、各方向被摧毁的据点、突袭历史。
+        /// 唯一写入口 <see cref="Defense.RaidDirectorService"/>。只加字段、不升域版本：旧档没有 = 导演第一次推进时按当前暴露补好（不追溯触发）。</summary>
+        public RaidDirectorState Director = new RaidDirectorState();
     }
 
     /// <summary>
@@ -1007,6 +1016,10 @@ namespace GameLogic.Campaign
         public string Kind = string.Empty;
         /// <summary>FG3-GEN-01：等级（侦察巢离核心越远越高，FGR-GEN-032）；0 = 未分级。</summary>
         public int Tier;
+        /// <summary>FG6-DEF-04（FGR-GEN-034“摧毁据点会降低这个方向的突袭频率”）：已被摧毁（不再休眠 / 增援 / 作为突袭出发地）。
+        /// 唯一写入口 <see cref="WorldSim.WorldOutpostSystem.MarkDestroyed"/>（交战摧毁由 FG8-EXP-03 调用）。</summary>
+        public bool Destroyed;
+        public long DestroyedTick = -1;
     }
 
     /// <summary>
@@ -1063,6 +1076,8 @@ namespace GameLogic.Campaign
     {
         Marching = 0,
         Arrived = 1,
+        /// <summary>FG6-DEF-04（FGR-DEF-032 时间上限）：沿原路撤回出发地（攻城行为 FG6-DEF-05 之前，到达后在外围停留 raid.time_limit_hours 后撤退）。</summary>
+        Retreating = 2,
     }
 
     /// <summary>FG0-ARCH-01：星球表面上的一支行进中的队伍（聚合体：只存人数与位置，逐单位模拟在 FG0-ARCH-03 的战斗内核）。
@@ -1098,6 +1113,32 @@ namespace GameLogic.Campaign
         public int RouteIndex;
         /// <summary>到达时通往核心的路是完全堵住的（停在最近处；攻城在 FG6-DEF-05）。</summary>
         public bool Blocked;
+        // ── FG6-DEF-04：突袭导演派出的队伍（测试 / 调试派出的队伍这些字段为空）──
+        /// <summary>出发地（双精度格坐标）：撤退时沿原路回到这里。<see cref="HasOrigin"/> = false（FG6-DEF-04 之前的存档）时撤退直接离场。</summary>
+        public bool HasOrigin;
+        public double OriginX;
+        public double OriginY;
+        /// <summary>所属突袭计划（<see cref="RaidPlanRecord.PlanId"/>）与波次。</summary>
+        public string PlanId = string.Empty;
+        public int Wave;
+        /// <summary>阵营键（silent / foundry ……）；<see cref="OriginId"/> 是显示用的出发地（导演派出的 = 阵营领地 ID）。</summary>
+        public string Faction = string.Empty;
+        /// <summary>出发据点 ID（迷雾外来袭为空）与从据点驻军里抽走的人数（撤回时还给据点）。</summary>
+        public string OutpostId = string.Empty;
+        public int GarrisonTaken;
+        /// <summary>编成（fg.TbRaidUnit.id、数量、其中精英）——FG6-DEF-05 到达展开成战斗单位时按它生成（职能、精英标记）。</summary>
+        public string[] UnitIds = Array.Empty<string>();
+        public int[] UnitCounts = Array.Empty<int>();
+        public int[] EliteCounts = Array.Empty<int>();
+        /// <summary>目标种类（home / outpost）。</summary>
+        public string TargetKind = string.Empty;
+        /// <summary>FG6-DEF-05 把到达的队伍展开成战斗单位后置真：撤退由攻城逻辑接管，不再按聚合体的时间上限撤退。</summary>
+        public bool Engaged;
+        /// <summary>开始撤退的步（-1 = 没有撤退）。</summary>
+        public long RetreatTick = -1;
+        /// <summary>FG6-DEF-04 复审：行军途中重新要过路线时，之前已经走过的路点（含重新规划那一刻所在的格）：撤退时接在当前路线已走过的部分后面倒着走回去（真正的“原路”）。</summary>
+        public int[] TrailX = Array.Empty<int>();
+        public int[] TrailY = Array.Empty<int>();
     }
 
     /// <summary>事件导演（FG10）。</summary>
@@ -1873,8 +1914,23 @@ namespace GameLogic.Campaign
                 {
                     g.RouteX ??= Array.Empty<int>();
                     g.RouteY ??= Array.Empty<int>();
+                    g.PlanId ??= string.Empty;
+                    g.Faction ??= string.Empty;
+                    g.OutpostId ??= string.Empty;
+                    g.TargetKind ??= string.Empty;
+                    g.UnitIds ??= Array.Empty<string>();
+                    g.UnitCounts ??= Array.Empty<int>();
+                    g.EliteCounts ??= Array.Empty<int>();
+                    g.TrailX ??= Array.Empty<int>();
+                    g.TrailY ??= Array.Empty<int>();
+                    if (g.TrailX.Length != g.TrailY.Length)
+                    {
+                        g.TrailX = Array.Empty<int>();
+                        g.TrailY = Array.Empty<int>();
+                    }
                 }
             }
+            Defense.RaidDirectorService.EnsureState(s); // FG6-DEF-04：突袭导演域补成空域（旧档没有 = 第一次推进时按当前暴露补好，不追溯触发）。
             s.Raids.Outposts ??= Array.Empty<OutpostRecord>();
             s.Raids.Patrols ??= Array.Empty<PatrolRecord>();
             foreach (OutpostRecord o in s.Raids.Outposts)

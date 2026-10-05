@@ -2447,8 +2447,10 @@ namespace GameLogic.EditorTools
             SaveResult sr = CampaignAutoSaveService.SaveWithExport(Slot, SaveReason.Manual);
             RestoreSave(Slot);
             CampaignState s2 = CampaignSession.Current;
-            od = WorldOutpostSystem.Outposts(s2).First();
-            pd = WorldOutpostSystem.Patrols(s2).First();
+            // 按编号找回同一个据点（新建战役还登记了家园区侦察巢，不能取“第一个”）。
+            string odId = od.OutpostId;
+            od = WorldOutpostSystem.Outposts(s2).First(x => x.OutpostId == odId);
+            pd = WorldOutpostSystem.Patrols(s2).First(x => x.OutpostId == odId);
             bool stillDormant = od.Dormant;
             WorldSimulation.StepMany(dormantSteps - dormantSteps / 2);
             long reinforcePointsCrossed = (GameClock.Ticks - 1 - (simTickFrozen - 1)) / interval;
@@ -2603,7 +2605,7 @@ namespace GameLogic.EditorTools
                 CampaignState s = NewCampaign(seed);
                 WorldSimulation.LoadHome(resume: false);
                 OutpostRecord o = WorldOutpostSystem.SpawnOutpostInTerritory(s, "silent", withPatrol: true);
-                PatrolRecord p = WorldOutpostSystem.Patrols(s).First();
+                PatrolRecord p = WorldOutpostSystem.Patrols(s).First(x => x.OutpostId == o.OutpostId);
                 TransitGroupRecord g = WorldTransitSystem.DispatchRaidFromTerritory(s, "foundry", 3, out _);
                 WorldSimulation.StepMany(60);
                 bool patrolRoute = p.RouteState == WorldOutpostSystem.RouteReady && p.LoopMilli > 0 && p.RouteX.Length >= 2;

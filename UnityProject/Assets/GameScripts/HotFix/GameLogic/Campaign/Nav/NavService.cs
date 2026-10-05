@@ -34,6 +34,8 @@ namespace GameLogic.Campaign.Nav
         public const int OwnerHomeCombat = 1;
         public const int OwnerTransit = 2;
         public const int OwnerPatrol = 3;
+        /// <summary>FG6-DEF-04：突袭导演的计划（排定突袭时沿地形算行进时间 = 预警时间；走后台长路线通道，见 <see cref="StartBackground"/>）。</summary>
+        public const int OwnerRaidPlan = 4;
 
         public static NavKernel Kernel { get; private set; }
         public static CampaignState BoundState { get; private set; }
@@ -213,6 +215,7 @@ namespace GameLogic.Campaign.Nav
             CombatSites.Get(HomeValleyLayout.RegionId)?.ReissueAwaitingRoutes();
             WorldTransitSystem.ReissueAwaiting(state);
             WorldOutpostSystem.ReissueAwaiting(state);
+            Defense.RaidDirectorService.ReissueAwaiting(state);
         }
 
         public static void Unload()
@@ -394,6 +397,51 @@ namespace GameLogic.Campaign.Nav
                 Goal = new int2(goal.X, goal.Y),
                 IssuedTick = GameClock.Ticks,
             });
+        }
+
+        /// <summary>
+        /// FG6-DEF-04（DEBT-FG0ARCH06-09）：后台长路线通道开一条（独立的工作副本，与单位的常规批次并行，不占它们的 6 步延迟）。
+        /// 突袭导演排定突袭时用它、在固定的较晚时刻（raid.route_latency_seconds 之后）<see cref="CollectBackground"/>：冷的长路线几百毫秒早已算完，采纳步不硬等；
+        /// 结果只取决于开始那一刻的格网，确定。一次一条，正在算返回 false。没绑定返回 false。
+        /// </summary>
+        public static bool StartBackground(int ownerTag, int ownerKey, int serial, byte cls, GridCell start, GridCell goal, bool allowPartial)
+        {
+            if (!IsBound)
+            {
+                return false;
+            }
+            SyncGridChanges();
+            return Kernel.StartBackground(new NavRequest
+            {
+                OwnerTag = ownerTag,
+                OwnerKey = ownerKey,
+                Serial = serial,
+                Class = cls,
+                Flags = allowPartial ? NavRequestFlags.AllowPartial : NavRequestFlags.None,
+                Start = new int2(start.X, start.Y),
+                Goal = new int2(goal.X, goal.Y),
+                IssuedTick = GameClock.Ticks,
+            });
+        }
+
+        public static bool BackgroundActive => IsBound && Kernel.BackgroundActive;
+        public static int BackgroundOwnerKey => IsBound ? Kernel.BackgroundOwnerKey : -1;
+        public static int BackgroundOwnerTag => IsBound ? Kernel.BackgroundOwnerTag : -1;
+        public static int BackgroundSerial => IsBound ? Kernel.BackgroundSerial : 0;
+
+        /// <summary>取回后台通道那一条的结果（还没算完就等）。</summary>
+        public static bool CollectBackground(List<int2> into, out NavResult result)
+        {
+            result = default;
+            return IsBound && Kernel.CollectBackground(into, out result);
+        }
+
+        public static void CancelBackground()
+        {
+            if (IsBound)
+            {
+                Kernel.CancelBackground();
+            }
         }
 
         /// <summary>世界坐标 → 格子（与寻路内核、战斗内核同一换算：四舍五入到最近格心）。</summary>

@@ -59,7 +59,10 @@ namespace GameLogic.Campaign.Economy
 
         public static void Touch() => Revision++;
 
-        /// <summary>突袭是否正在进行。FG6-DEF-04（突袭导演与结算）接入前为 null：按“有突袭部队已到达家园、还没结算”判定（<see cref="DefaultRaidActive"/>）。</summary>
+        /// <summary>
+        /// 突袭是否正在进行的替换判定（null = 用 <see cref="DefaultRaidActive"/>：有目标为家园的突袭部队已到达、还没撤退——FG6-DEF-04 起到达 = 突袭开始、开始撤退 = 突袭结束）。
+        /// 突袭结算（FG6-DEF-05 攻城 / FG6-DEF-08 结算）接入后如需更细的判定再赋值。
+        /// </summary>
         public static Func<CampaignState, bool> RaidActiveProvider;
 
         /// <summary>FG7-ENV-02 接入：给出当前或下一个静默夜的时间窗（统一时钟步，开始 / 结束）；没有静默夜返回 (-1, -1)。接入前为 null（静默夜预案不会触发）。</summary>
@@ -1256,12 +1259,15 @@ namespace GameLogic.Campaign.Economy
             return false;
         }
 
-        /// <summary>默认的突袭判定：有突袭部队已经到达家园、还没结算（FG6-DEF-04 接手前）。O(行进中的队伍数)。</summary>
+        /// <summary>
+        /// 默认的突袭判定：有目标为家园的突袭部队已经到达、还没撤退。FG6-DEF-04 复审：突袭导演可以把前哨站当目标——打远处前哨站的突袭不启动家园战时预案
+        /// （目标种类为空 = 测试 / 调试派出或旧档的队伍，目标都是家园）。O(行进中的队伍数)。
+        /// </summary>
         public static bool DefaultRaidActive(CampaignState state)
         {
             foreach (TransitGroupRecord g in state?.Raids?.InTransit ?? Array.Empty<TransitGroupRecord>())
             {
-                if (g != null && g.Kind == TransitGroupKind.Raid && g.State == TransitGroupState.Arrived)
+                if (g != null && g.Kind == TransitGroupKind.Raid && g.State == TransitGroupState.Arrived && g.TargetKind != Defense.RaidDirectorService.TargetOutpost)
                 {
                     return true;
                 }

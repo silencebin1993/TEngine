@@ -172,8 +172,10 @@ namespace GameLogic.UI.SignalCore
             {
                 return;
             }
+            // FG6-DEF-04：“家园突袭”一行带倒计时——导演状态变了或过了一个游戏分钟就重建（不每帧）。
+            long raidMinute = GameLogic.Core.GameClock.Ticks / Math.Max(1, GameLogic.Core.GameClock.TicksFor(GameLogic.Core.GameClock.DaySeconds / 1440.0));
             int panelKey = HashCode.Combine(CampaignExposureLedger.Revision, (int)Math.Round(exposure * 100f), s?.SignalExposureEvents?.Length ?? -1,
-                (int)GameText.Language, GameSettings.Revision, FirmwareKinds.Revision, s != null);
+                (int)GameText.Language, GameSettings.Revision, FirmwareKinds.Revision, s != null, HashCode.Combine(Campaign.Defense.RaidDirectorService.Revision, raidMinute));
             if (panelKey == _panelKey)
             {
                 return;
@@ -221,6 +223,8 @@ namespace GameLogic.UI.SignalCore
                     : e < CampaignExposureLedger.ThresholdCoreReinforcement
                         ? GameText.Format("exposure.panel.next", F0(CampaignExposureLedger.ThresholdCoreReinforcement), GameText.Get("exposure.threshold.reinforce"))
                         : GameText.Get("exposure.panel.all_passed");
+            // FG6-DEF-04：家园突袭的现状（开局宽限 / 已排定 / 正在逼近），与预警条同一口径。
+            _next.text += "\n" + Campaign.Defense.RaidDirectorService.StatusLine(s, GameLogic.Core.GameClock.Ticks);
 
             _recentTitle.text = GameText.Get("exposure.panel.recent_title");
             SignalExposureEventRecord[] recent = CampaignExposureLedger.RecentEvents(s, RecentShown);
@@ -243,10 +247,14 @@ namespace GameLogic.UI.SignalCore
 
             _factionTitle.text = GameText.Get("exposure.panel.faction_title");
             IReadOnlyList<(string Faction, float Added)> factions = CampaignExposureLedger.FactionContributions(s);
+            // FG6-DEF-04（FGR-DEF-021）：“最受刺激”的阵营（下一次突袭由它发动）在它那一行写明——与突袭导演同一个选择口径（本幕已出现、有突袭编成）。
+            string raidFaction = factions.Count > 0 ? Campaign.Defense.RaidDirectorService.MostStimulatedFaction(s) : null;
             foreach ((string faction, float added) in factions)
             {
-                var label = new Label(GameText.Format("exposure.panel.faction_item", CampaignExposureLedger.FactionName(faction), F1(added)));
+                string key = faction == raidFaction ? "exposure.panel.faction_raid" : "exposure.panel.faction_item";
+                var label = new Label(GameText.Format(key, CampaignExposureLedger.FactionName(faction), F1(added)));
                 label.AddToClassList("ex-item");
+                label.EnableInClassList("ex-item-up", faction == raidFaction);
                 _factionList.Add(label);
             }
             // 己方 / 家园活动单列一行，不算进任何阵营（FG6-DEF-04 选突袭阵营只看敌方阵营）。
